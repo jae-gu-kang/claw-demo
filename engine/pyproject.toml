@@ -1,0 +1,22 @@
+[project]
+name = "claw-engine"
+version = "0.1.0"
+description = "비행제어/유도법칙 설계툴 엔진 — MATLAB 없는 CLAW 설계·해석·시뮬레이션"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["claw*"]
+
+[tool.pytest.ini_options]
+testpaths = ["claw/tests"]
