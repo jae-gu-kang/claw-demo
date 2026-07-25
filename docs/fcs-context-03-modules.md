@@ -154,7 +154,7 @@
 | `SimResult` | sim → verify, server | 시계열 로그 + 엔벨로프 플래그·실속 마진 |
 | `ParamSet` | params → 전 모듈 | 파라미터 스냅샷 (단위·범위 메타 포함) |
 | `Block` 프로토콜 | blocks → fcl, nav | `init(dt)` / `step(u)→y` / `reset(state)` / `schema()` |
-| Lineage (파라미터 지문) | params → 전 산출물 계약 | 산출물이 계산된 ParamSet의 fingerprint 문자열 — 무효화·영향성 평가(M15)의 키 |
+| Lineage (파라미터 지문) | params → 전 산출물 계약 | 산출물이 계산된 ParamSet의 fingerprint 문자열 + 입력 데이터(공력 DB·실속 경계 테이블) 해시·버전 — 무효화·영향성 평가(M15)·재현성의 키 |
 
 ## 5. 저장소 구조
 
@@ -186,7 +186,7 @@ CLAW_DEMO/
 | 2 | plant ∥ nav | 물리검증(에너지 보존·수렴 차수), F-16 6DOF 재현 |
 | 3 | trim → analysis ∥ pipeline | F-16 공개 트림·선형화 결과 재현 (verify 층1·2 완성), 산출물 DAG·무효화 동작 |
 | 4 | fcl ∥ guidance → sim | 폐루프 시나리오 완주, 엔벨로프 감시 동작, 자사 기체 SCAS→AP→유도 순 설계, 파라미터 변경 Δ리포트 동작 |
-| 5 | server → web | 사용자 워크플로우(02§7) 1~6단계 전부 웹 수행 |
+| 5 | server → web | 사용자 워크플로우(02§8) 1~6단계 전부 웹 수행 |
 
 - verify(M12)는 Phase 2부터 각 단계에 걸쳐 지속 구축, Simulink 회귀(층3)는 폐쇄망 반입 시
 - 설계 업무 관점 순서(트림→SCAS→AP→유도→비선형 검증, 01§1)는 Phase 3~4 안에서 진행
@@ -208,3 +208,4 @@ CLAW_DEMO/
 - *v0.1 — 최초 작성: 15개 모듈·6계층 분할, 인터페이스 계약, Phase 계획. 언어 전략·멀티콥터 조율 항목 등재*
 - *v0.2 — §7.1(Python 레퍼런스 우선)·§7.2(비행체 프로파일) 채택 확정. 영향성 평가 요구 반영: M15 pipeline 신설, 계약에 Lineage(파라미터 지문) 추가. 포맷 YAML 확정 반영*
 - *v0.3 — TrimResult 계약에 자동 판정 플래그 반영 (도메인 문서 §4.1 — dataclass 필드 추가는 Phase 3 M9 구현 시)*
+- *v0.4 — Lineage 계약에 입력 데이터(공력 DB·실속 경계) 해시 포함 (구현 문서 §2.4). 구현 문서 절 번호 정리 반영(사용자 워크플로우 02§7→02§8)*
