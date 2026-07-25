@@ -149,7 +149,7 @@
 | `NavOutput` | nav → fcl, guidance | VehicleState 동형 + 타임스탬프·유효 플래그 (오차 포함 출력) |
 | `GuidanceCommand` | guidance → fcl | 속도/고도/헤딩 명령 + 축별 활성화 플래그 (모드가 정의) |
 | `SurfaceCommand` | fcl → plant.actuator | 엘레본×4, 러더, 스로틀×2 명령 |
-| `TrimCase` / `TrimResult` | (UI/파일) → trim → analysis | 비행조건 정의 / 트림 상태·입력·수렴 정보 |
+| `TrimCase` / `TrimResult` | (UI/파일) → trim → analysis | 비행조건 정의 / 트림 상태·입력·수렴 정보 + 자동 판정 플래그(도메인 문서 §4.1 — 잔차·포화·α 여유·연속성) |
 | `LinearModel` | trim → analysis | A/B/C/D + 트림점 메타 + 종/횡축 분리 정보 |
 | `SimResult` | sim → verify, server | 시계열 로그 + 엔벨로프 플래그·실속 마진 |
 | `ParamSet` | params → 전 모듈 | 파라미터 스냅샷 (단위·범위 메타 포함) |
@@ -207,3 +207,4 @@ CLAW_DEMO/
 *문서 이력:*
 - *v0.1 — 최초 작성: 15개 모듈·6계층 분할, 인터페이스 계약, Phase 계획. 언어 전략·멀티콥터 조율 항목 등재*
 - *v0.2 — §7.1(Python 레퍼런스 우선)·§7.2(비행체 프로파일) 채택 확정. 영향성 평가 요구 반영: M15 pipeline 신설, 계약에 Lineage(파라미터 지문) 추가. 포맷 YAML 확정 반영*
+- *v0.3 — TrimResult 계약에 자동 판정 플래그 반영 (도메인 문서 §4.1 — dataclass 필드 추가는 Phase 3 M9 구현 시)*
