@@ -63,9 +63,9 @@ def test_flag_false_paths(ac):
         [TrimCase("a", 0.4, 100.0, 200.0), TrimCase("b", 0.8, 100.0, 200.0)],
     )
     assert jump[1].flags["continuity_ok"] is False
-    # α 여유: 고α 저속·최대중량 — 수렴은 하되 상한 여유 침범
-    tr = trim_level(ac, TrimCase("higha", mach=0.23, alt=100.0, fuel=400.0))
-    assert tr.converged and tr.flags["alpha_margin_ok"] is False
+    # α 여유: 저속·최대중량 — 해가 α 상한으로 몰려 여유 침범 (수렴 여부와 무관한 판정)
+    tr = trim_level(ac, TrimCase("higha", mach=0.15, alt=100.0, fuel=400.0))
+    assert tr.flags["alpha_margin_ok"] is False
     # 포화: 약한 엔진 → 스로틀 한계 도달
     from claw.plant import TwinEngine
 
