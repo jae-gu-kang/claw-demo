@@ -6,7 +6,9 @@ Sum/Product/Divide는 구조적 배선 블록(가변 입력 시퀀스)이라 제
 """
 
 from claw.blocks.basic import Gain, Saturation, Switch
+from claw.blocks.controllers import PID
 from claw.blocks.dynamics import Derivative, Integrator, RateLimiter
+from claw.blocks.filters import Lag, LeadLag, LowPass, Notch, Washout
 from claw.blocks.memory import Delay, Memory, UnitDelay
 from claw.params.registry import REGISTRY
 
@@ -20,6 +22,12 @@ REGISTRABLE = (
     Integrator,
     Derivative,
     RateLimiter,
+    Lag,
+    LowPass,
+    Washout,
+    LeadLag,
+    Notch,
+    PID,
 )
 
 
