@@ -131,6 +131,9 @@ def test_actuator_warm_start_and_validation():
     act = SecondOrderActuator(wn=30.0, zeta=0.7).init(DT)
     act.reset((0.2, 0.0))
     assert act.step(0.2) == pytest.approx(0.2, abs=1e-6)  # 평형 웜스타트 → 정지 유지
+    limited = SecondOrderActuator(wn=30.0, zeta=0.7, pos_lo=-0.3, pos_hi=0.3, rate_max=2.0).init(DT)
+    limited.reset((1.0, 100.0))  # 한계 밖 웜스타트 → 한계로 클램프
+    assert limited.step(1.0) <= 0.3 + 1e-12
     with pytest.raises(ValueError):
         SecondOrderActuator(wn=0.0)
     with pytest.raises(ValueError):

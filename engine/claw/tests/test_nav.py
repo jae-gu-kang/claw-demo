@@ -105,6 +105,23 @@ def test_attitude_noise_keeps_unit_quaternion():
     assert not np.allclose(out.q_nb, truth_at(49 * DT).q_nb)
 
 
+def test_noninteger_update_ratio_rejected():
+    """틱 주기의 비정수배 갱신주기는 조용한 양자화 대신 명시적 오류 (40 Hz / 100 Hz 틱)."""
+    with pytest.raises(ValueError):
+        clean_model(update_hz=40.0).init(DT)
+    fast = clean_model(update_hz=1000.0).init(DT)  # 틱보다 빠른 항법 → 틱 주기로 상한
+    assert fast._n_up == 1
+
+
+def test_released_output_is_isolated():
+    """소비자가 출력 배열을 훼손해도 내부 보관 측정치는 오염되지 않는다."""
+    nav = clean_model(update_hz=25.0).init(DT)
+    out0 = nav.step(truth_at(0.0))
+    out0.pos_n[:] = 999.0
+    out1 = nav.step(truth_at(DT))  # 같은 측정의 홀드 출력
+    assert not np.allclose(out1.pos_n, 999.0)
+
+
 def test_registered_as_component():
     """항법 모델은 교체 가능 컴포넌트 — 추후 실제 EKF 코드로 교체 (02 §3.1 인터페이스 개방)."""
     assert "ErrorModel" in REGISTRY.names("nav")

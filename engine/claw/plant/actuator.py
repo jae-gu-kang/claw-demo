@@ -42,12 +42,13 @@ class SecondOrderActuator(Block):
         self.initial = initial
 
     def reset(self, state=None) -> None:
-        """state=(위치, 속도) 웜스타트."""
+        """state=(위치, 속도) 웜스타트 — 위치·속도 한계로 클램프해 수용."""
         if state is None:
             self._x = min(max(self.initial, self.pos_lo), self.pos_hi)
             self._v = 0.0
         else:
-            self._x, self._v = float(state[0]), float(state[1])
+            self._x = min(max(float(state[0]), self.pos_lo), self.pos_hi)
+            self._v = min(max(float(state[1]), -self.rate_max), self.rate_max)
 
     def step(self, u):
         dt, wn, zeta = self.dt, self.wn, self.zeta

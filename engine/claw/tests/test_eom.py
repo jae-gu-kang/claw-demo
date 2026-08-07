@@ -107,6 +107,17 @@ def test_rk4_convergence_order():
     assert 10.0 < e1 / e2 < 24.0  # 이론값 16
 
 
+def test_set_mass_inertia_refreshes_inverse():
+    """연료 소모 준정적 갱신: J 갱신 시 J⁻¹ 캐시도 재계산 — ω̇이 새 관성 기준."""
+    rb = RigidBody(mass=10.0, inertia=np.diag([4.0, 6.0, 9.0]))
+    x = pack(np.zeros(3), np.zeros(3), euler_to_quat(0.0, 0.0, 0.0), np.zeros(3))
+    m_b = np.array([1.0, 2.0, 3.0])
+    wdot1 = rb.deriv(x, np.zeros(3), m_b)[OMEGA]
+    rb.set_mass_inertia(10.0, np.diag([8.0, 12.0, 18.0]))  # 관성 2배
+    wdot2 = rb.deriv(x, np.zeros(3), m_b)[OMEGA]
+    assert wdot2 == pytest.approx(wdot1 / 2.0, rel=1e-12)
+
+
 def test_rigid_body_validation():
     with pytest.raises(ValueError):
         RigidBody(mass=0.0, inertia=np.eye(3))

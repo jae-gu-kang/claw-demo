@@ -11,7 +11,6 @@
 
 import math
 from collections import deque
-from dataclasses import replace
 
 import numpy as np
 
@@ -62,7 +61,16 @@ class NavErrorModel:
         if dt <= 0:
             raise ValueError(f"dt는 양수여야 함: {dt}")
         self.dt = dt
-        self._n_up = max(1, round(1.0 / (self.update_hz * dt)))
+        ratio = 1.0 / (self.update_hz * dt)
+        if ratio < 1.0 - 1e-9:
+            self._n_up = 1  # 항법이 틱보다 빠름 → 틱 주기가 상한 (틱마다 새 측정)
+        else:
+            n = round(ratio)
+            if abs(ratio - n) > 1e-6:
+                raise ValueError(
+                    f"항법 갱신주기는 틱 주기의 정수배여야 함: 1/(update_hz·dt) = {ratio:.4f}"
+                )
+            self._n_up = n
         self.reset()
         return self
 
@@ -98,4 +106,13 @@ class NavErrorModel:
             self._last = self._pending.popleft()
         if self._last is None:
             return NavOutput(t=state.t, valid=False)
-        return replace(self._last, t=state.t)
+        m = self._last  # 배열 복사 릴리스 — 소비자 훼손이 보관 측정치를 오염시키지 않도록
+        return NavOutput(
+            t=state.t,
+            pos_n=m.pos_n.copy(),
+            vel_n=m.vel_n.copy(),
+            q_nb=m.q_nb.copy(),
+            omega_b=m.omega_b.copy(),
+            t_meas=m.t_meas,
+            valid=m.valid,
+        )

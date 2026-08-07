@@ -60,9 +60,14 @@ def rk4_step(f, x, dt):
 
 
 class RigidBody:
-    """질량·관성 고정(준정적) 강체. m·J는 속성으로 갱신 가능 (연료 소모 반영)."""
+    """준정적 질량·관성 강체. 연료 소모 반영 갱신은 반드시 set_mass_inertia()로 —
+    J 속성 직접 대입은 J⁻¹ 캐시를 낡은 값으로 남긴다."""
 
     def __init__(self, mass, inertia):
+        self.set_mass_inertia(mass, inertia)
+
+    def set_mass_inertia(self, mass, inertia) -> None:
+        """질량·관성 갱신 (FuelMass.at 결과 소비) — J⁻¹ 캐시를 함께 재계산한다."""
         J = np.asarray(inertia, dtype=float)
         if mass <= 0:
             raise ValueError(f"질량은 양수여야 함: {mass}")
