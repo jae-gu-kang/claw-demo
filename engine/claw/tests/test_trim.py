@@ -21,7 +21,7 @@ def test_level_trim_converges_and_balances(ac):
     thr = tr.control.throttle[0]
     # 해석 근사 (선형 계수 손계산): α≈0.0302, δe≈-0.004, thr≈0.27
     assert alpha == pytest.approx(0.0302, abs=0.005)
-    assert de == pytest.approx(-0.004, abs=0.01)
+    assert de == pytest.approx(-0.004, abs=0.005)
     assert thr == pytest.approx(0.27, abs=0.05)
     # 잔차 직접 확인: 트림 상태에서 u̇·ẇ·q̇ ≈ 0, ḣ = 0 (구성상)
     xe = np.zeros(12)
@@ -47,11 +47,32 @@ def test_trim_batch_seed_and_continuity(ac):
     ]
     results = trim_batch(ac, cases, fingerprint="abc123")
     assert all(r.converged for r in results)
-    assert all(r.flags["continuity_ok"] for r in results)
+    assert results[0].flags["continuity_ok"] is None  # 첫 케이스 = 미판정 (합격 아님)
+    assert all(r.flags["continuity_ok"] is True for r in results[1:])
     assert all(r.params_fingerprint == "abc123" for r in results)
     # 물리 경향: 같은 고도에서 마하 증가 → 동압 증가 → 트림 α 감소
     alphas = [r.state.euler()[1] for r in results[:5]]
     assert all(a1 > a2 for a1, a2 in zip(alphas, alphas[1:]))
+
+
+def test_flag_false_paths(ac):
+    """판정 플래그의 탐지 방향 고정 — 각 플래그가 실제로 False를 낼 수 있는지."""
+    # 연속성: 물리적으로 인접하지 않은 케이스 점프 → False
+    jump = trim_batch(
+        ac,
+        [TrimCase("a", 0.4, 100.0, 200.0), TrimCase("b", 0.8, 100.0, 200.0)],
+    )
+    assert jump[1].flags["continuity_ok"] is False
+    # α 여유: 고α 저속·최대중량 — 수렴은 하되 상한 여유 침범
+    tr = trim_level(ac, TrimCase("higha", mach=0.23, alt=100.0, fuel=400.0))
+    assert tr.converged and tr.flags["alpha_margin_ok"] is False
+    # 포화: 약한 엔진 → 스로틀 한계 도달
+    from claw.plant import TwinEngine
+
+    ac_weak = make_demo_aircraft()
+    ac_weak.engine = TwinEngine(max_thrust=800.0, y_offset=0.5)
+    tr2 = trim_level(ac_weak, TrimCase("weak", mach=0.7, alt=1000.0, fuel=200.0))
+    assert tr2.flags["saturation_ok"] is False
 
 
 def test_euler_deriv_consistency_with_quaternion_path(ac):

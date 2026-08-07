@@ -13,6 +13,12 @@ import yaml
 from claw.params.param import ParamError
 
 
+def canonical_hash(values: dict) -> str:
+    """정렬 canonical JSON의 SHA-256 앞 16자리 — 지문 규격의 단일 구현 (M15도 공유)."""
+    canon = json.dumps(values, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()[:16]
+
+
 def _flatten(d, prefix=""):
     out = {}
     for k, v in d.items():
@@ -68,8 +74,7 @@ class ParamSet:
 
     def fingerprint(self):
         """값 스냅샷의 결정적 지문 (SHA-256 앞 16자리 hex)."""
-        canon = json.dumps(self._values, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        return hashlib.sha256(canon.encode("utf-8")).hexdigest()[:16]
+        return canonical_hash(self._values)
 
     def diff(self, other):
         """다른 스냅샷과의 값 차이: {이름: (self 값, other 값)} — Δ리포트의 입력."""

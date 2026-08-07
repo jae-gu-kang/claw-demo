@@ -11,7 +11,7 @@
 import numpy as np
 
 from claw.common.contracts import LinearModel
-from claw.plant.aircraft import XE_NAMES
+from claw.plant.aircraft import XE_H, XE_NAMES
 
 U_NAMES = ("de", "da", "dr", "thr")
 LON_STATES = ("u", "w", "q", "theta")
@@ -25,6 +25,7 @@ def _controls(u):
 
 
 def _trim_point(tr):
+    # 수평 대칭 트림 전제 (δa=0, 엘레본 collective) — 정상선회 트림 도입 시 확장 필요
     xe0 = np.zeros(12)
     xe0[0] = tr.state.vel_b[0]
     xe0[1] = tr.state.vel_b[1]
@@ -32,7 +33,7 @@ def _trim_point(tr):
     xe0[3:6] = tr.state.omega_b
     phi, theta, psi = tr.state.euler()
     xe0[6:9] = (phi, theta, psi)
-    xe0[11] = tr.case.alt
+    xe0[XE_H] = tr.case.alt
     u0 = np.array([tr.control.elevon[0], 0.0, tr.control.rudder, tr.control.throttle[0]])
     return xe0, u0
 

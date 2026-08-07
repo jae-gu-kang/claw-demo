@@ -54,6 +54,16 @@ def test_subset_fingerprint():
     assert subset_fingerprint(ps, ()) == ps.fingerprint()  # 빈 접두사 = 전체 지문
 
 
+def test_uses_declaration_enforced():
+    """uses 선언 밖 파라미터 접근은 즉시 실패 — 조용한 낡은 캐시 방지."""
+    from claw.params.param import ParamError
+
+    pipe = Pipeline()
+    pipe.add("bad", lambda ps: ps["veh.mass"], uses=("gain.",))
+    with pytest.raises(ParamError):
+        pipe.run("bad", ParamSet(DEFS))
+
+
 def test_unknown_node_and_missing_dep():
     pipe = Pipeline()
     with pytest.raises(KeyError):

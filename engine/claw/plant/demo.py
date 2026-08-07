@@ -37,8 +37,9 @@ def make_demo_aircraft() -> Aircraft:
         fuel_max=400.0,
         J_empty=np.diag([300.0, 900.0, 1100.0]),
         J_full=np.diag([350.0, 1100.0, 1350.0]),
-        cg_empty=np.array([0.05, 0.0, 0.0]),
-        cg_full=np.array([-0.05, 0.0, 0.0]),
+        # CG 이동은 모멘트 기준점 이전 [TBD] 구현 전까지 동역학에 무효 — 오해 방지 위해 0
+        cg_empty=np.zeros(3),
+        cg_full=np.zeros(3),
     )
     engine = TwinEngine(max_thrust=4000.0, y_offset=0.5)
     return Aircraft(fuel_mass, aero, engine)

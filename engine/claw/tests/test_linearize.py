@@ -9,8 +9,10 @@ from claw.plant import (
     XE_P,
     XE_PHI,
     XE_Q,
+    XE_R,
     XE_THETA,
     XE_U,
+    XE_V,
     XE_W,
     make_demo_aircraft,
     rk4_step,
@@ -51,7 +53,7 @@ def test_split_axes_and_decoupling(setup):
     assert lat.A.shape == (4, 4) and lat.B.shape == (4, 2)
     assert lon.case is tr.case and lon.params_fingerprint == "fp1"
     lon_idx = [XE_U, XE_W, XE_Q, XE_THETA]
-    lat_idx = [1, XE_P, 5, XE_PHI]  # v, p, r, phi
+    lat_idx = [XE_V, XE_P, XE_R, XE_PHI]
     assert np.max(np.abs(lm.A[np.ix_(lat_idx, lon_idx)])) < 1e-6
     assert np.max(np.abs(lm.A[np.ix_(lon_idx, lat_idx)])) < 1e-6
 

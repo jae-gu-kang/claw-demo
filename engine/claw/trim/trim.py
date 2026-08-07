@@ -6,9 +6,10 @@
 
 자동 판정 플래그 (01 §4.1 [기본값], TrimResult.flags):
 - residual_ok    : |u̇|,|ẇ| < RESID_TOL, |q̇| < RESID_TOL
-- saturation_ok  : δe·스로틀이 한계의 SAT_FRAC 이내
+- saturation_ok  : δe·스로틀이 한계의 SAT_FRAC 이내 (스로틀 하한 여유 THR_MARGIN 포함)
 - alpha_margin_ok: α가 상한 대비 ALPHA_MARGIN 이상 여유 (실속 경계 [TBD] 확보 전 대용)
-- continuity_ok  : 배치에서 인접 케이스 해와의 급변 없음
+- continuity_ok  : 배치에서 인접 케이스 해와의 급변 없음. **None = 미판정**
+  (첫 케이스·비교 기준 부재) — 미판정을 합격으로 오인하지 않도록 3-상태
 """
 
 import numpy as np
@@ -17,13 +18,14 @@ from scipy.optimize import minimize
 from claw.common.attitude import euler_to_quat
 from claw.common.contracts import SurfaceCommand, TrimResult, VehicleState
 from claw.env import isa_atmosphere
-from claw.plant.aircraft import XE_Q, XE_THETA, XE_U, XE_W
+from claw.plant.aircraft import XE_H, XE_Q, XE_THETA, XE_U, XE_W
 
 ALPHA_BOUNDS = (-0.10, 0.35)  # [rad]
 DE_BOUNDS = (-0.35, 0.35)  # [rad]
 THR_BOUNDS = (0.0, 1.0)
 RESID_TOL = 1e-4  # [m/s², rad/s²]
 SAT_FRAC = 0.95
+THR_MARGIN = 0.02  # 스로틀 하한 여유 — 아이들 포화 해 검출
 ALPHA_MARGIN = 0.035  # [rad] ≈ 2° — 실속 경계 테이블 확보 전 대용 [기본값]
 CONTINUITY_STEP = np.array([0.05, 0.05, 0.15])  # 인접 케이스 허용 Δ[α, δe, thr]
 
@@ -39,7 +41,7 @@ def _xe(z, v_true, alt):
     xe[XE_U] = v_true * np.cos(z[0])
     xe[XE_W] = v_true * np.sin(z[0])
     xe[XE_THETA] = z[0]  # θ = α → γ = 0
-    xe[11] = alt
+    xe[XE_H] = alt
     return xe
 
 
@@ -66,14 +68,15 @@ def trim_level(aircraft, case, z0=None, fingerprint=""):
 
     residual_ok = bool(np.all(np.abs(r) < RESID_TOL))
     saturation_ok = bool(
-        abs(de) < SAT_FRAC * DE_BOUNDS[1] and THR_BOUNDS[0] < thr < SAT_FRAC * THR_BOUNDS[1]
+        abs(de) < SAT_FRAC * DE_BOUNDS[1]
+        and THR_BOUNDS[0] + THR_MARGIN < thr < SAT_FRAC * THR_BOUNDS[1]
     )
     alpha_margin_ok = bool(alpha < ALPHA_BOUNDS[1] - ALPHA_MARGIN)
     flags = {
         "residual_ok": residual_ok,
         "saturation_ok": saturation_ok,
         "alpha_margin_ok": alpha_margin_ok,
-        "continuity_ok": True,  # 배치(trim_batch)에서 갱신
+        "continuity_ok": None,  # 미판정 — 배치(trim_batch)가 비교 기준 확보 시 판정
     }
     state = VehicleState(
         t=0.0,

@@ -20,7 +20,12 @@ def make_siso(lm, x_out, u_in):
 def loop_margins(loop):
     """개루프 → {gm_db, pm_deg, wcg, wcp}. 이득여유 무한대는 inf, 해당 교차 없으면 nan."""
     gm, pm, wcg, wcp = control.margin(loop)
-    gm_db = 20.0 * np.log10(gm) if np.isfinite(gm) else np.inf
+    if np.isnan(gm):
+        gm_db = np.nan  # 판정 불가를 무한 여유로 오인하지 않도록 nan 유지
+    elif np.isinf(gm):
+        gm_db = np.inf
+    else:
+        gm_db = 20.0 * np.log10(gm) if gm > 0 else -np.inf
     return {"gm_db": float(gm_db), "pm_deg": float(pm), "wcg": float(wcg), "wcp": float(wcp)}
 
 
