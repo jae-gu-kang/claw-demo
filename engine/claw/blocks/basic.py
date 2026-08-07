@@ -28,7 +28,7 @@ class Sum(Block):
         self.signs = tuple(signs)
 
     def step(self, u):
-        return sum(s * x for s, x in zip(self.signs, u))
+        return sum(s * x for s, x in zip(self.signs, u, strict=True))
 
 
 class Product(Block):

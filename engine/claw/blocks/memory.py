@@ -16,6 +16,8 @@ class Delay(Block):
     )
 
     def __init__(self, n: int = 1, initial: float = 0.0):
+        if int(n) != n or n < 1:
+            raise ValueError(f"n은 1 이상의 정수여야 함: {n}")
         self.n = int(n)
         self.initial = initial
 
@@ -23,10 +25,10 @@ class Delay(Block):
         if state is None:
             self._buf = deque([self.initial] * self.n, maxlen=self.n)
             return
-        buf = deque(state, maxlen=self.n)
+        buf = list(state)  # deque(maxlen)은 초과분을 조용히 버리므로 길이 검사를 먼저
         if len(buf) != self.n:
             raise ValueError(f"웜스타트 버퍼 길이 불일치: {len(buf)} != {self.n}")
-        self._buf = buf
+        self._buf = deque(buf, maxlen=self.n)
 
     def step(self, u):
         y = self._buf.popleft()

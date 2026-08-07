@@ -131,7 +131,21 @@ def test_delay_warm_start_and_bad_state():
     d.reset([7.0, 8.0])
     assert d.step(1.0) == 7.0
     with pytest.raises(ValueError):
-        d.reset([1.0])  # 길이 불일치
+        d.reset([1.0])  # 짧은 버퍼
+    with pytest.raises(ValueError):
+        d.reset([1.0, 2.0, 3.0])  # 긴 버퍼 — 조용한 절단 금지
+
+
+def test_delay_invalid_n():
+    with pytest.raises(ValueError):
+        Delay(0)
+    with pytest.raises(ValueError):
+        Delay(1.7)  # 소수 절단 금지
+
+
+def test_sum_rejects_length_mismatch():
+    with pytest.raises(ValueError):
+        Sum((1.0, -1.0)).init(DT).step((5.0, 2.0, 100.0))  # 배선 실수의 조용한 절단 금지
 
 
 @pytest.mark.parametrize(

@@ -38,6 +38,8 @@ class Integrator(Block):
         self.ki, self.lo, self.hi, self.initial, self.method = ki, lo, hi, initial, method
 
     def reset(self, state=None) -> None:
+        """state는 적분값 웜스타트. 직전 입력 이력은 0으로 초기화 —
+        forward/tustin은 전환 직후 첫 스텝 1회의 과도가 있음 (M7 전환 설계 시 유의)."""
         self.y = self.initial if state is None else float(state)
         self._u_prev = 0.0
 
