@@ -14,6 +14,7 @@ from claw.blocks.basic import Divide, Gain, Product, Saturation, Sum, Switch
 from claw.blocks.controllers import PID
 from claw.blocks.dynamics import Derivative, Integrator, RateLimiter
 from claw.blocks.filters import Lag, LeadLag, LowPass, Notch, Washout
+from claw.blocks.lookup import LookupBlock
 from claw.blocks.memory import Delay, Memory, UnitDelay
 from claw.blocks.registry import REGISTRABLE, register_all
 
@@ -40,6 +41,7 @@ __all__ = [
     "LeadLag",
     "Notch",
     "PID",
+    "LookupBlock",
     "REGISTRABLE",
     "register_all",
 ]
