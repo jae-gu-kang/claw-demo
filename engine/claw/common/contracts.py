@@ -81,13 +81,14 @@ class TrimCase:
 
 @dataclass
 class TrimResult:
-    """트림 해 (M9 생산)."""
+    """트림 해 (M9 생산). flags: 자동 판정 (도메인 문서 §4.1 — 잔차·포화·α 여유·연속성)."""
 
     case: TrimCase
     state: VehicleState
     control: SurfaceCommand
     converged: bool
     cost: float
+    flags: dict = field(default_factory=dict)
     params_fingerprint: str = ""
 
 

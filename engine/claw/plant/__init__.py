@@ -9,6 +9,23 @@ CFD DB 축 규격 확정 시 aero coef_fn ← M3 Table 결선.
 from claw.params.registry import REGISTRY
 from claw.plant.actuator import SecondOrderActuator
 from claw.plant.aero import AeroModel, wind_to_body_coeffs
+from claw.plant.aircraft import (
+    XE_H,
+    XE_NAMES,
+    XE_P,
+    XE_PE,
+    XE_PHI,
+    XE_PN,
+    XE_PSI,
+    XE_Q,
+    XE_R,
+    XE_THETA,
+    XE_U,
+    XE_V,
+    XE_W,
+    Aircraft,
+)
+from claw.plant.demo import make_demo_aircraft
 from claw.plant.eom import (
     N_STATES,
     OMEGA,
@@ -42,4 +59,19 @@ __all__ = [
     "SecondOrderActuator",
     "AeroModel",
     "wind_to_body_coeffs",
+    "Aircraft",
+    "make_demo_aircraft",
+    "XE_NAMES",
+    "XE_U",
+    "XE_V",
+    "XE_W",
+    "XE_P",
+    "XE_Q",
+    "XE_R",
+    "XE_PHI",
+    "XE_THETA",
+    "XE_PSI",
+    "XE_PN",
+    "XE_PE",
+    "XE_H",
 ]
