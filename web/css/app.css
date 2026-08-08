@@ -1,0 +1,116 @@
+/* CLAW 설계툴 — 도구 UI 기본 스타일 (no-build, 의존 0) */
+
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --line: #d8dce2;
+  --text: #1c2430;
+  --muted: #66707e;
+  --accent: #1a6feb;
+  --ok: #157f3d;
+  --bad: #c22f2f;
+  --warn: #b57908;
+  --mono: "SF Mono", "Consolas", "D2Coding", monospace;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 14px/1.5 -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+header h1 { font-size: 17px; margin: 0; }
+header h1 .sub { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 8px; }
+nav { display: flex; gap: 4px; flex: 1; }
+nav a {
+  padding: 6px 14px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--text);
+}
+nav a.active { background: var(--accent); color: #fff; }
+nav a:hover:not(.active) { background: var(--bg); }
+.health { font-size: 12px; color: var(--muted); }
+.health.ok { color: var(--ok); }
+.health.bad { color: var(--bad); }
+
+main { padding: 20px; max-width: 1280px; margin: 0 auto; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.panel h2 { font-size: 15px; margin: 0 0 12px; }
+.row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
+.grow { flex: 1; }
+
+label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+input, select, textarea {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+}
+input:invalid { border-color: var(--bad); }
+input.num { width: 90px; font-family: var(--mono); }
+
+button {
+  font: inherit;
+  padding: 7px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  cursor: pointer;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { color: var(--bad); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: right; }
+th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+td:first-child, th:first-child { text-align: left; }
+td.num { font-family: var(--mono); }
+tr:hover td { background: #fafbfd; }
+
+.flag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+.flag.ok { background: #e0f2e5; color: var(--ok); }
+.flag.bad { background: #fbe2e2; color: var(--bad); }
+.flag.na { background: #eceef1; color: var(--muted); }
+
+.progress { height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; flex: 1; }
+.progress > div { height: 100%; background: var(--accent); width: 0%; transition: width .2s; }
+.progress-line { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+.progress-label { font-size: 12px; color: var(--muted); font-family: var(--mono); min-width: 220px; }
+
+.error-box {
+  background: #fbe2e2;
+  color: var(--bad);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.hint { font-size: 12px; color: var(--muted); }
+.placeholder { color: var(--muted); padding: 40px; text-align: center; }
+
+canvas.plot { background: #fff; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+.legend .chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }

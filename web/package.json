@@ -1,0 +1,10 @@
+{
+  "name": "claw-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CLAW 설계툴 M14 프론트엔드 — no-build ESM, 의존 0 (폐쇄망 반입: 이 디렉터리 파일이 전부)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"js/**/*.test.js\""
+  }
+}

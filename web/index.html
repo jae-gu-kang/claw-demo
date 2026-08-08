@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CLAW 설계툴</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header>
+    <h1>CLAW <span class="sub">비행제어법칙 설계·해석·시뮬레이션</span></h1>
+    <nav id="nav">
+      <a href="#trim" data-view="trim">트림</a>
+      <a href="#margins" data-view="margins">마진 맵</a>
+      <a href="#gains" data-view="gains">게인</a>
+      <a href="#sim" data-view="sim">시뮬레이션</a>
+      <a href="#results" data-view="results">결과</a>
+    </nav>
+    <span id="health" class="health">…</span>
+  </header>
+  <main id="view"></main>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
