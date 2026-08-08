@@ -54,6 +54,9 @@ class Simulator:
             raise ValueError(f"제어 주기는 dt_plant의 정수배여야 함: 비율 {ratio:.4f}")
         if fuel_flow < 0:
             raise ValueError(f"fuel_flow는 음수 불가: {fuel_flow}")
+        bad_vars = set(db_ranges or {}) - {"alpha", "beta", "mach"}
+        if bad_vars:
+            raise ValueError(f"db_ranges 미지원 변수 {sorted(bad_vars)} (허용: alpha·beta·mach)")
         self.aircraft = aircraft
         self.fcl = fcl
         self.guidance = guidance
@@ -118,6 +121,8 @@ class Simulator:
         flags = {k: np.zeros(n_steps, dtype=bool) for k in self.db_ranges}
 
         sc = None
+        aborted = None
+        n_done = n_steps
         for k in range(n_steps):
             t = k * self.dt_plant
             pos, vel_b, q_nb, omega = x[POS], x[VEL], x[QUAT], x[OMEGA]
@@ -178,6 +183,13 @@ class Simulator:
                 val = {"alpha": alpha, "beta": beta, "mach": mach}[var]
                 flags[var][k] = (val < lo) or (val > hi)
 
+            # 발산 런 조기 종료 — ISA 범위 이탈 직전 절단해 부분 결과·엔벨로프를
+            # 보존한다 (RK4 부단계에서 isa_atmosphere 예외로 전체 손실 방지)
+            if not (ISA_MIN_ALT + 10.0 < h < ISA_STRATO1_TOP_ALT - 10.0):
+                aborted = "alt_out_of_range"
+                n_done = k + 1
+                break
+
             # 플랜트 적분 — 준정적 질량·관성 갱신 후 RK4 (ZOH 제어)
             m, _cg, J = self.aircraft.fuel_mass.at(fuel)
             rb.set_mass_inertia(m, J)
@@ -193,8 +205,13 @@ class Simulator:
                 burn = self.fuel_flow * float(np.mean(sc.throttle)) * self.dt_plant
                 fuel = max(fuel - burn, 0.0)
 
+        if n_done < n_steps:
+            sig = {k2: v[:n_done] for k2, v in sig.items()}
+            modes = modes[:n_done]
+            stall_margin = stall_margin[:n_done]
+            flags = {k2: v[:n_done] for k2, v in flags.items()}
         sig["mode"] = modes
-        t_arr = np.arange(n_steps) * self.dt_plant
+        t_arr = np.arange(n_done) * self.dt_plant
         envelope = self._envelope(t_arr, stall_margin, flags)
         return SimResult(
             t=t_arr,
@@ -208,12 +225,17 @@ class Simulator:
                 "nav": type(self.nav_model).__name__ if self.nav_model else "ideal",
                 "actuators": self.actuator_params is not None,
                 "case": tr.case.name,
+                "aborted": aborted,
             },
         )
 
     def _envelope(self, t_arr, stall_margin, flags) -> dict:
-        """엔벨로프 요약 (02 §6.1) — 최악 실속 마진 + DB 이탈 플래그."""
-        env = {"alpha_margin": stall_margin, "flags": flags}
+        """엔벨로프 요약 (02 §6.1) — 최악 실속 마진 + DB 이탈 플래그.
+
+        stall_margin = α_stall(mach) − α (참값 기준, 보호마진 미차감) —
+        signals["alpha_margin"](리미터 내부값: 항법 추정 α·마진 차감)과 구분.
+        """
+        env = {"stall_margin": stall_margin, "flags": flags}
         if self.stall_table is not None and len(t_arr):
             i = int(np.nanargmin(stall_margin))
             env["worst_margin"] = float(stall_margin[i])

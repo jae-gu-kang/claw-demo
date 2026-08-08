@@ -130,9 +130,52 @@ def test_envelope_flag_fires_and_reports_first_time(trim_design):
 
 
 def test_actuator_bank_in_the_loop(trim_design):
-    """2차계 작동기(01 §2.4 [기본값]) 포함 폐루프 — 트림 웜스타트로 유지 성능 보전."""
+    """2차계 작동기(01 §2.4 [기본값]) 포함 폐루프 — 트림 웜스타트로 유지 성능 보전.
+
+    rate_max=10 rad/s [기본값] — 데모 폐루프 스터디에서 3 rad/s는 항법
+    지연·잡음과 결합해 피치·롤 리밋사이클 유발 (작동기 요구 사양 도출).
+    """
     ac, tr = trim_design
-    act = {"wn": 30.0, "zeta": 0.7, "rate_max": 3.0}
+    act = {"wn": 30.0, "zeta": 0.7, "rate_max": 10.0}
     res = make_sim(ac, tr, actuator_params=act).run(tr, t_end=10.0)
     assert np.max(np.abs(res.signals["h"] - 1000.0)) < 5.0
     assert np.max(np.abs(res.signals["phi"])) < 0.01
+
+
+def test_actuator_rate_limit_observable(trim_design):
+    """작동기가 실제 루프에 있는지 핀 — 낮은 rate 한계에서 타면 기울기 제한."""
+    ac, tr = trim_design
+    V0 = float(np.linalg.norm(tr.state.vel_b))
+    act = {"wn": 30.0, "zeta": 0.7, "rate_max": 0.05}
+    res = make_sim(ac, tr, modes=hold_modes(V0, 1050.0), actuator_params=act).run(
+        tr, t_end=2.0
+    )
+    d_de = np.diff(res.signals["de"])
+    assert np.max(np.abs(d_de)) <= 0.05 * 0.01 + 1e-12  # rate_max·dt 상한
+    assert np.max(np.abs(d_de)) > 0.0  # 실제로 움직이는 중
+
+
+def test_fuel_burn_quasi_static(trim_design):
+    """연료 소모 fuel_flow·평균 스로틀 — 로그 스로틀 적분과 일치."""
+    ac, tr = trim_design
+    sim = make_sim(ac, tr)
+    sim.fuel_flow = 0.5
+    res = sim.run(tr, t_end=10.0)
+    thr_mean = 0.5 * (res.signals["thr_l"] + res.signals["thr_r"])
+    expected = 200.0 - 0.5 * 0.01 * float(np.sum(thr_mean[:-1]))
+    assert res.signals["fuel"][-1] == pytest.approx(expected, abs=1e-9)
+    assert res.signals["fuel"][-1] < 200.0
+
+
+def test_out_of_band_run_truncates_with_partial_result(trim_design):
+    """ISA 범위 이탈 런은 직전 절단 — 부분 시계열·엔벨로프 보존 (리뷰 반영).
+
+    해면 아래로 다이브 명령(지형 미모델) → h가 ISA 하한 접근 시 조기 종료.
+    """
+    ac, tr = trim_design
+    V0 = float(np.linalg.norm(tr.state.vel_b))
+    res = make_sim(ac, tr, modes=hold_modes(V0, -5500.0)).run(tr, t_end=600.0)
+    assert res.meta["aborted"] == "alt_out_of_range"
+    assert len(res.t) < int(600.0 / 0.01)
+    assert len(res.signals["h"]) == len(res.t) == len(res.signals["mode"])
+    assert res.signals["h"][-1] < -4900.0
