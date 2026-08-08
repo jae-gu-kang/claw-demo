@@ -1,0 +1,24 @@
+[project]
+name = "claw-server"
+version = "0.1.0"
+description = "CLAW 설계툴 M13 백엔드 — FastAPI REST·웹소켓 진행률 (엔진 API 소비자, 도메인 로직 없음)"
+requires-python = ">=3.10"
+# claw-engine(로컬 모노레포 패키지)은 의도적으로 미기재 — 동명 PyPI 패키지 오설치 방지.
+# 설치 순서: pip install -e engine && pip install -e server (README 참조)
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["claw_server*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
