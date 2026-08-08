@@ -5,7 +5,12 @@ import json
 import numpy as np
 import pytest
 
-from claw_server.serialize import sim_result_dict, to_jsonable, trim_result_dict
+from claw_server.serialize import (
+    sim_result_dict,
+    table_dict,
+    to_jsonable,
+    trim_result_dict,
+)
 
 
 def test_to_jsonable_nonfinite_policy():
@@ -56,6 +61,23 @@ def test_trim_result_dict_fields():
     assert len(d["euler"]) == 3 and len(d["vel_b"]) == 3
     assert len(d["control"]["elevon"]) == 4 and len(d["control"]["throttle"]) == 2
     assert d["params_fingerprint"] == "fp1"
+    json.dumps(d, allow_nan=False)
+
+
+def test_table_dict_roundtrip():
+    """Table → JSON 표현 — 같은 규격으로 엔진 Table을 재구성 가능 (게인 편집 왕복)."""
+    from claw.tables import Table
+
+    t = Table({"mach": (0.2, 0.5, 0.8)}, (1.0, 2.0, 3.0), name="pitch.kp",
+              extrapolate="clip")
+    d = table_dict(t)
+    assert d == {
+        "axes": {"mach": [0.2, 0.5, 0.8]},
+        "data": [1.0, 2.0, 3.0],
+        "extrapolate": "clip",
+    }
+    t2 = Table(d["axes"], d["data"], name="pitch.kp", extrapolate=d["extrapolate"])
+    assert t2.interp(mach=0.35) == t.interp(mach=0.35)
     json.dumps(d, allow_nan=False)
 
 

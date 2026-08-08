@@ -12,6 +12,7 @@ import claw.guidance  # noqa: F401 — "guidance" 카테고리 등록
 import claw.plant  # noqa: F401 — "actuator" 카테고리 등록
 from claw_server.jobs import JobManager
 from claw_server.routes import analysis as analysis_routes
+from claw_server.routes import gains as gains_routes
 from claw_server.routes import jobs as jobs_routes
 from claw_server.routes import results as results_routes
 from claw_server.routes import sim as sim_routes
@@ -57,6 +58,7 @@ def create_app(data_dir=None) -> FastAPI:
         trim_routes.router,
         analysis_routes.router,
         sim_routes.router,
+        gains_routes.router,
     ):
         app.include_router(router, prefix="/api")
     return app

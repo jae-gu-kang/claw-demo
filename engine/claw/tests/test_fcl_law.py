@@ -260,3 +260,30 @@ def test_fcl_alpha_limiter_prevents_stall_closed_loop():
     a_on, engaged = alpha_max_closed_loop(True)
     assert a_off > 0.34  # 리미터 없으면 실속 경계(0.35) 급접근
     assert a_on <= 0.31 and engaged  # α_max=0.30 + 소량 오버슈트 허용
+
+
+def test_make_demo_fcl_gain_tables_injection():
+    """게인 테이블 주입 (M13 게인 편집 경로) — 동일 테이블 주입 = 기본 조립과 동일."""
+    from claw.fcl.demo import make_demo_gain_tables
+
+    fcl_default = make_demo_fcl().init(0.01)
+    fcl_injected = make_demo_fcl(gain_tables=make_demo_gain_tables()).init(0.01)
+    g1 = fcl_default.schedule.step(0.3, 1000.0, 200.0)
+    g2 = fcl_injected.schedule.step(0.3, 1000.0, 200.0)
+    assert g1 == g2
+    # 편집된 테이블이 실제 반영되는지 — 피치 kp 2배 테이블 → 스케줄 값 2배
+    doubled = dict(make_demo_gain_tables())
+    t = doubled["pitch.kp"]
+    doubled["pitch.kp"] = Table(
+        {"mach": t.axes[0]}, t.data * 2.0, name="pitch.kp", extrapolate="clip"
+    )
+    fcl2 = make_demo_fcl(gain_tables=doubled).init(0.01)
+    g3 = fcl2.schedule.step(0.3, 1000.0, 200.0)
+    assert g3["pitch"]["kp"] == pytest.approx(2.0 * g2["pitch"]["kp"])
+    # 미정의 그룹 이름은 FCL 조립 검증이 거부
+    bad = {"pitchX.kp": Table({"mach": (0.2, 0.8)}, (1.0, 1.0), extrapolate="clip")}
+    with pytest.raises(ValueError):
+        make_demo_fcl(gain_tables=bad)
+    # 스케줄 비활성 조립에 테이블 주입은 구성 오류
+    with pytest.raises(ValueError):
+        make_demo_fcl(with_schedule=False, gain_tables=make_demo_gain_tables())

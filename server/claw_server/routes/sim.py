@@ -13,11 +13,12 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from claw.fcl import make_demo_fcl
+from claw.fcl import Autopilot, make_demo_fcl
 from claw.guidance import Guidance, LosPath, ModeSpec
 from claw.nav import NavErrorModel
 from claw.plant import make_demo_aircraft, make_demo_db_ranges, make_demo_stall_table
 from claw.sim import Simulator
+from claw.tables import Table
 from claw.trim import trim_level
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
 from claw_server.serialize import sim_result_dict
@@ -42,6 +43,29 @@ class ModeIn(BaseModel):
         return self
 
 
+class TableIn(BaseModel):
+    """Table JSON 규격 (serialize.table_dict와 왕복) — 형상·축 검증은 엔진 Table."""
+
+    axes: dict[str, list[FiniteFloat]] = Field(min_length=1)
+    data: list = Field(min_length=1)  # 중첩 리스트 허용 — 형상은 엔진이 검증
+    extrapolate: str = "clip"
+
+    @field_validator("data")
+    @classmethod
+    def _numeric_finite_data(cls, v):
+        def walk(x):
+            if isinstance(x, list):
+                for item in x:
+                    walk(item)
+            elif isinstance(x, bool) or not isinstance(x, (int, float)):
+                raise ValueError(f"게인 테이블 데이터는 수치만 허용: {x!r}")
+            elif isinstance(x, float) and not math.isfinite(x):
+                raise ValueError(f"비유한값 게인: {x}")
+
+        walk(v)
+        return v
+
+
 class SimRunIn(BaseModel):
     aircraft: Literal["demo"] = "demo"
     fingerprint: str = ""
@@ -58,8 +82,10 @@ class SimRunIn(BaseModel):
     fuel_flow: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
     with_schedule: bool = True  # 데모 FCL 게인 스케줄 장착 여부
     with_limiter: bool = True  # α 리미터 장착 여부
+    autopilot: dict | None = None  # Autopilot kwargs — 게인 이름은 엔진이 정본
+    gain_tables: dict[str, TableIn] | None = None  # "그룹.게인" → 편집 테이블 (4단계)
 
-    @field_validator("nav", "actuators")
+    @field_validator("nav", "actuators", "autopilot")
     @classmethod
     def _finite_numeric_values(cls, v):
         """kwargs 통과 dict도 비유한값은 경계에서 차단 (키 검증은 엔진 소관)."""
@@ -91,9 +117,21 @@ def _build(req: SimRunIn):
     ]
     guidance = Guidance(modes, path=path, initial=req.initial_mode)
     nav_model = NavErrorModel(**req.nav) if req.nav else None
+    gain_tables = None
+    if req.gain_tables is not None:
+        gain_tables = {
+            name: Table(spec.axes, spec.data, name=name, extrapolate=spec.extrapolate)
+            for name, spec in req.gain_tables.items()
+        }
+    fcl = make_demo_fcl(
+        with_schedule=req.with_schedule,
+        with_limiter=req.with_limiter,
+        autopilot=Autopilot(**req.autopilot) if req.autopilot else None,
+        gain_tables=gain_tables,
+    )
     sim = Simulator(
         aircraft=ac,
-        fcl=make_demo_fcl(with_schedule=req.with_schedule, with_limiter=req.with_limiter),
+        fcl=fcl,
         guidance=guidance,
         nav_model=nav_model,
         stall_table=make_demo_stall_table(),

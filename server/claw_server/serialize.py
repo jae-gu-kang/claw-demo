@@ -49,6 +49,16 @@ def to_jsonable(x):
     return x
 
 
+def table_dict(t) -> dict:
+    """Table → JSON 표현 — 축·데이터·외삽 정책. 같은 규격으로 엔진 Table 재구성
+    가능 (게인 스케줄 편집 왕복, 02 §8 4단계)."""
+    return to_jsonable({
+        "axes": {name: ax for name, ax in zip(t.axis_names, t.axes)},
+        "data": t.data,
+        "extrapolate": t.extrapolate,
+    })
+
+
 def trim_result_dict(tr) -> dict:
     """TrimResult → JSON 표현 — 케이스·수렴·판정 플래그·트림 상태/입력.
 

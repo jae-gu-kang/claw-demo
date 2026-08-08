@@ -52,15 +52,27 @@ def make_demo_fcl(
     with_schedule: bool = True,
     with_limiter: bool = True,
     autopilot: Autopilot | None = None,
+    gain_tables: dict | None = None,
 ) -> FlightControlLaw:
     """데모 기체 FCL 조립 — init(dt) 후 reset(트림 웜스타트)으로 사용.
 
     autopilot 주입은 파라미터 스터디용 (예: 파이프라인 Δ리포트에서 AP 게인을
     ParamSet으로 흔들 때) — None이면 설계 기본값.
+    gain_tables 주입은 게인 스케줄 편집 경로 (M13/M14, 02 §8 4단계) — None이면
+    설계 테이블. 그룹·게인 이름 검증은 FlightControlLaw 조립이 수행.
     """
+    if gain_tables is not None and not with_schedule:
+        raise ValueError("gain_tables 주입은 with_schedule=True에서만 유효")
     scas = Scas(ScasAxis(**DEMO_PITCH), ScasAxis(**DEMO_ROLL), ScasAxis(**DEMO_YAW))
     ap = autopilot if autopilot is not None else Autopilot()  # 기본값 = 증분 B 설계값
     mixer = Mixer(k_diff_thr=0.1)  # 차동추력 러더 보조 (Cn_dr<0 프로파일 기준 +)
-    schedule = GainSchedule(make_demo_gain_tables(), filter_tau=0.5) if with_schedule else None
+    schedule = (
+        GainSchedule(
+            gain_tables if gain_tables is not None else make_demo_gain_tables(),
+            filter_tau=0.5,
+        )
+        if with_schedule
+        else None
+    )
     limiter = AlphaLimiter(make_demo_stall_table(), margin=0.05) if with_limiter else None
     return FlightControlLaw(scas, ap, mixer, schedule=schedule, alpha_limiter=limiter)
