@@ -30,18 +30,23 @@ class TrimBatchIn(BaseModel):
     cases: list[TrimCaseIn] = Field(min_length=1)
 
 
-@router.post("/trim/batch", status_code=202)
-def submit_trim_batch(req: TrimBatchIn, request: Request) -> dict:
-    ac = make_demo_aircraft()
-    cases = [
+def build_cases(case_inputs: list[TrimCaseIn]) -> list[TrimCase]:
+    """요청 케이스 → 엔진 TrimCase — 빈 이름 자동 생성 (analysis 라우트와 공유)."""
+    return [
         TrimCase(
             c.name or f"M{c.mach:.2f}_h{c.alt:.0f}_f{c.fuel:.0f}",
             mach=c.mach,
             alt=c.alt,
             fuel=c.fuel,
         )
-        for c in req.cases
+        for c in case_inputs
     ]
+
+
+@router.post("/trim/batch", status_code=202)
+def submit_trim_batch(req: TrimBatchIn, request: Request) -> dict:
+    ac = make_demo_aircraft()
+    cases = build_cases(req.cases)
     store = request.app.state.store
 
     def work(job):

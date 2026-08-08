@@ -23,6 +23,20 @@ def test_to_jsonable_2d_array():
     assert to_jsonable(np.eye(2)) == [[1.0, 0.0], [0.0, 1.0]]
 
 
+def test_to_jsonable_complex_policy():
+    """복소수 → [re, im] (고유치 전송 — JSON에 복소 타입 없음)."""
+    assert to_jsonable(complex(-1.0, 2.0)) == [-1.0, 2.0]
+    assert to_jsonable(np.complex128(-1.0 + 2.0j)) == [-1.0, 2.0]
+    # 엔진 damp() 산출 형태 그대로 통과 가능해야 함
+    from claw.analysis import damp
+
+    modes = to_jsonable(damp(np.array([[0.0, 1.0], [-4.0, -2.0]])))
+    assert modes[0]["eig"][0] == pytest.approx(-1.0)
+    assert abs(modes[0]["eig"][1]) == pytest.approx(np.sqrt(3.0))  # 켤레쌍 순서 무관
+    assert modes[0]["zeta"] == pytest.approx(0.5)
+    json.dumps(modes, allow_nan=False)
+
+
 def test_trim_result_dict_fields():
     from claw.common.contracts import TrimCase
     from claw.plant import make_demo_aircraft

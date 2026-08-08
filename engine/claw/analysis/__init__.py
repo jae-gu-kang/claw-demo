@@ -6,7 +6,15 @@ make_siso / loop_margins / margin_map (python-control 기반).
 낙관적, Padé 차수 등 [TBD] 백로그), 보드선도 데이터 API, 100 vs 50 Hz 이산화 영향 비교.
 """
 
-from claw.analysis.margins import loop_margins, make_siso, margin_map
+from claw.analysis.margins import loop_margins, make_siso, margin_map, pi_loop
 from claw.analysis.modes import classify_lat, classify_lon, damp
 
-__all__ = ["damp", "classify_lon", "classify_lat", "make_siso", "loop_margins", "margin_map"]
+__all__ = [
+    "damp",
+    "classify_lon",
+    "classify_lat",
+    "make_siso",
+    "pi_loop",
+    "loop_margins",
+    "margin_map",
+]

@@ -17,6 +17,17 @@ def make_siso(lm, x_out, u_in):
     return control.ss(lm.A, lm.B[:, [ui]], C, [[0.0]])
 
 
+def pi_loop(lm, x_out, u_in, kp, ki=0.0, sign=-1.0):
+    """PI(kp+ki/s)와 SISO 플랜트(u_in→x_out)를 결합한 개루프 — 마진 맵 표준 루프.
+
+    sign 기본 −1: 데모 부호 관례(δe + → 기수 하방, Cmde<0)에서 음피드백
+    개루프가 양의 DC 이득을 갖도록 반전 — 부호는 설계값이 보유 (conventions).
+    """
+    s = control.tf("s")
+    pi = kp + ki / s if ki != 0.0 else control.tf([kp], [1.0])
+    return sign * pi * make_siso(lm, x_out, u_in)
+
+
 def loop_margins(loop):
     """개루프 → {gm_db, pm_deg, wcg, wcp}. 이득여유 무한대는 inf, 해당 교차 없으면 nan."""
     gm, pm, wcg, wcp = control.margin(loop)

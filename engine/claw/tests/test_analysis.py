@@ -67,3 +67,18 @@ def test_margin_map_over_cases(lon_lat):
     for name, m in mm.items():
         assert m["pm_deg"] > 20.0, f"{name}: PM {m['pm_deg']}"
         assert np.isfinite(m["wcp"])
+
+
+def test_pi_loop_matches_manual_composition(lon_lat):
+    """pi_loop 헬퍼 == 수동 조립(−PI·G) — M13 마진 맵 API가 쓰는 공식 경로."""
+    from claw.analysis import pi_loop
+
+    lon, _ = lon_lat[1]
+    s = control.tf("s")
+    manual = loop_margins(-(0.5 + 0.8 / s) * make_siso(lon, x_out="q", u_in="de"))
+    helper = loop_margins(pi_loop(lon, x_out="q", u_in="de", kp=0.5, ki=0.8))
+    assert helper["pm_deg"] == pytest.approx(manual["pm_deg"], rel=1e-9)
+    assert helper["wcp"] == pytest.approx(manual["wcp"], rel=1e-9)
+    # P 단독(ki=0)·부호 지정 경로
+    p_only = pi_loop(lon, x_out="q", u_in="de", kp=0.5, ki=0.0, sign=-1.0)
+    assert np.isfinite(loop_margins(p_only)["pm_deg"])

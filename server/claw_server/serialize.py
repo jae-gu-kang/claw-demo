@@ -4,6 +4,7 @@
 NaN·Infinity가 없어 브라우저 파서와 호환되도록 저장 전에 정리한다 —
 ResultStore가 allow_nan=False로 직렬화해 이 정책 위반을 저장 시점에 잡는다.
 소비자(M14)는 마진 무한대("inf")를 문자열로 식별한다.
+복소수(고유치) → [re, im] 2원소 배열.
 """
 
 import numpy as np
@@ -33,8 +34,10 @@ def to_jsonable(x):
         return _array(x)
     if isinstance(x, np.bool_):
         return bool(x)
-    if isinstance(x, (np.floating, np.integer)):
+    if isinstance(x, (np.floating, np.integer, np.complexfloating)):
         return to_jsonable(x.item())
+    if isinstance(x, complex):
+        return [_clean_float(x.real), _clean_float(x.imag)]
     if isinstance(x, float):
         return _clean_float(x)
     if isinstance(x, dict):

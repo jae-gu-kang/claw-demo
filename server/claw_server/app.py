@@ -8,6 +8,7 @@ import claw.blocks  # noqa: F401 — import 부수효과: 전역 REGISTRY "block
 import claw.guidance  # noqa: F401 — "guidance" 카테고리 등록
 import claw.plant  # noqa: F401 — "actuator" 카테고리 등록
 from claw_server.jobs import JobManager
+from claw_server.routes import analysis as analysis_routes
 from claw_server.routes import jobs as jobs_routes
 from claw_server.routes import results as results_routes
 from claw_server.routes import system as system_routes
@@ -29,6 +30,7 @@ def create_app(data_dir=None) -> FastAPI:
         jobs_routes.router,
         results_routes.router,
         trim_routes.router,
+        analysis_routes.router,
     ):
         app.include_router(router, prefix="/api")
     return app
