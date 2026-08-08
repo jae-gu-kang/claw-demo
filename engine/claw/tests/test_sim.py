@@ -178,10 +178,22 @@ def test_sim_progress_callback_monotonic(trim_design):
 
     res = make_sim(ac, tr).run(tr, t_end=2.0, on_progress=on_progress)
     assert len(res.t) == 200  # 취소 없음 — 완주
-    assert calls, "콜백이 호출되어야 함"
+    assert len(calls) == 100  # ~1% 주기 (n=200, stride=2)
     assert all(t == 200 for _, t in calls)
     dones = [d for d, _ in calls]
     assert dones == sorted(dones) and dones[-1] == 200
+    assert res.meta["aborted"] is None
+
+
+def test_sim_progress_final_call_when_stride_not_divisible(trim_design):
+    """스트라이드가 n_steps를 나누지 못해도 완주 시 done==total 최종 콜백 보장."""
+    ac, tr = trim_design
+    calls = []
+    res = make_sim(ac, tr).run(
+        tr, t_end=2.01, on_progress=lambda d, t: calls.append((d, t)) and False
+    )
+    assert len(res.t) == 201  # n_steps=201, stride=2 — 나눠떨어지지 않음
+    assert calls[-1] == (201, 201)
     assert res.meta["aborted"] is None
 
 
@@ -192,7 +204,9 @@ def test_sim_progress_cancel_truncates(trim_design):
         tr, t_end=2.0, on_progress=lambda done, total: done >= total // 2
     )
     assert res.meta["aborted"] == "cancelled"
-    assert 100 <= len(res.t) < 120  # 취소 지연은 콜백 주기(스트라이드) 이내
+    # 취소 조건 충족 직후 콜백(done=100)에서 절단 — 느슨한 상한은 스트라이드
+    # 회귀(예: 말미 단일 호출)를 잡기 위한 여유
+    assert 100 <= len(res.t) < 120
     assert len(res.signals["h"]) == len(res.t) == len(res.signals["mode"])
 
 

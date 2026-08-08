@@ -104,8 +104,11 @@ def trim_batch(aircraft, cases, fingerprint="", on_progress=None):
     """케이스 목록 순서대로 트림 — 직전 수렴해를 다음 초기값으로 시드, 연속성 판정 포함.
 
     on_progress(done, total, tr): 케이스마다 호출 (M13 서버 진행률 경로).
-    truthy 반환 = 협조적 취소 — 지금까지의 부분 결과를 반환한다.
+    truthy 반환 = 협조적 취소 — 지금까지의 부분 결과를 반환한다. 콜백 예외는
+    전파된다 (부분 결과 소실) — 취소는 반드시 truthy 반환으로.
     """
+    cases = list(cases)
+    total = len(cases)
     results = []
     z_prev = None
     for case in cases:
@@ -116,6 +119,6 @@ def trim_batch(aircraft, cases, fingerprint="", on_progress=None):
         if tr.converged:
             z_prev = z
         results.append(tr)
-        if on_progress is not None and on_progress(len(results), len(cases), tr):
+        if on_progress is not None and on_progress(len(results), total, tr):
             break
     return results

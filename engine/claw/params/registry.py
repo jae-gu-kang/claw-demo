@@ -22,6 +22,9 @@ class ComponentRegistry:
             raise RegistryError(f"이미 등록됨: {category}/{name}")
         cat[name] = (factory, tuple(param_defs))
 
+    def categories(self):
+        return sorted(self._entries)
+
     def names(self, category):
         return sorted(self._entries.get(category, {}))
 

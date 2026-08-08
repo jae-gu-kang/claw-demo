@@ -89,7 +89,9 @@ class Simulator:
 
         on_progress(done, total): 스텝 수 기준 ~1% 주기로 호출 (M13 서버 진행률
         경로). truthy 반환 = 협조적 취소 — ISA 이탈과 같은 절단 경로로 부분
-        결과를 보존하고 meta["aborted"]="cancelled"로 표시한다.
+        결과를 보존하고 meta["aborted"]="cancelled"로 표시한다. 완주 시 마지막
+        호출은 done==total 보장. 콜백 예외는 전파되며 부분 결과가 소실된다 —
+        취소는 반드시 truthy 반환으로.
         """
         if not tr.converged:
             raise ValueError(f"미수렴 트림해로는 시뮬 불가: {tr.case.name}")
@@ -220,6 +222,11 @@ class Simulator:
             if self.fuel_flow > 0.0:
                 burn = self.fuel_flow * float(np.mean(sc.throttle)) * self.dt_plant
                 fuel = max(fuel - burn, 0.0)
+
+        # 완주 시 done==total 최종 콜백 보장 (스트라이드가 n_steps를 나누지
+        # 못하는 경우 보충 — 반환값은 무의미하므로 무시)
+        if aborted is None and on_progress is not None and n_steps % progress_stride != 0:
+            on_progress(n_steps, n_steps)
 
         if n_done < n_steps:
             sig = {k2: v[:n_done] for k2, v in sig.items()}

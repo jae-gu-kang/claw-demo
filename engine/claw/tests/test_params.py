@@ -99,6 +99,7 @@ def test_registry():
     defs = [ParamDef("lookahead", 500.0, "m", "선견 거리", lo=1.0)]
     reg.register("path_following", "los", lambda ps: ("los", ps.as_dict()), defs)
 
+    assert reg.categories() == ["path_following"]
     assert reg.names("path_following") == ["los"]
     kind, params = reg.create("path_following", "los", {"lookahead": 800.0})
     assert kind == "los" and params["lookahead"] == 800.0
