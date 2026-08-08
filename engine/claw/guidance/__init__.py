@@ -6,7 +6,7 @@ M7과 상호 의존 없음 (03 §4 계약 연결).
 """
 
 from claw.guidance.guidance import Guidance
-from claw.guidance.modes import ModeSequencer, ModeSpec, eval_condition
+from claw.guidance.modes import ModeSequencer, ModeSpec, eval_condition, validate_condition
 from claw.guidance.path import LosPath
 from claw.params.registry import REGISTRY
 
@@ -17,5 +17,6 @@ __all__ = [
     "ModeSequencer",
     "ModeSpec",
     "eval_condition",
+    "validate_condition",
     "LosPath",
 ]

@@ -32,10 +32,14 @@ class LosPath(Block):
 
     def reset(self, state=None) -> None:
         self._idx = 0
-        self._last_hdg = 0.0
+        self._last_hdg = None  # 헤딩 미계산 상태 — 소진 시 현재 침로로 시드
 
     def step(self, nav):
-        """NavOutput → (heading_cmd [rad], done). done 후엔 마지막 헤딩 유지."""
+        """NavOutput → (heading_cmd [rad], done). done 후엔 마지막 헤딩 유지.
+
+        헤딩을 한 번도 계산하기 전에 소진되면(빈 리스트, 반경 내 시작 등)
+        정북(0)이 아니라 현재 침로를 명령한다 — 조용한 급선회 방지.
+        """
         n, e = float(nav.pos_n[0]), float(nav.pos_n[1])
         while self._idx < len(self._wps):
             wn, we = self._wps[self._idx]
@@ -45,4 +49,6 @@ class LosPath(Block):
                 continue
             self._last_hdg = math.atan2(de, dn)
             return self._last_hdg, False
+        if self._last_hdg is None:
+            self._last_hdg = math.atan2(float(nav.vel_n[1]), float(nav.vel_n[0]))
         return self._last_hdg, True

@@ -45,6 +45,18 @@ def test_condition_primitives():
         eval_condition(("unknown_cond",), nav, ctx)
 
 
+def test_condition_arity_and_type_validated_at_construction():
+    """인자 누락·비수치 임계값은 구성 시 거부 — 배치 시뮬 도중 예외 방지 (리뷰 Must fix)."""
+    from claw.guidance import ModeSequencer
+
+    with pytest.raises(ValueError):
+        ModeSequencer([ModeSpec(name="a", exit_when=("time_ge",))])  # 임계값 누락
+    with pytest.raises(ValueError):
+        ModeSequencer([ModeSpec(name="a", exit_when=("alt_ge", "500"))])  # 문자열
+    with pytest.raises(ValueError):
+        ModeSequencer([ModeSpec(name="a", exit_when=("always", 1.0))])  # 잉여 인자
+
+
 # ---------- 모드 → GuidanceCommand ----------
 
 
@@ -78,6 +90,33 @@ def test_mode_heading_path_uses_los():
 def test_mode_heading_path_without_follower_raises():
     with pytest.raises(ValueError):
         Guidance([_hold_forever(name="wpnav", heading="path")])
+
+
+def test_path_done_condition_without_follower_raises():
+    """path 없으면 path_done 영원히 False → 조용한 미이탈 — 구성 시 거부 (리뷰 반영)."""
+    modes = [
+        ModeSpec(name="a", alt=100.0, exit_when=("path_done",), next="b"),
+        _hold_forever(name="b", alt=50.0),
+    ]
+    with pytest.raises(ValueError):
+        Guidance(modes)
+
+
+def test_guidance_invalid_nav_freezes_transitions_and_holds_command():
+    """nav.valid=False → 전환 동결 + 마지막 명령 유지 (첫 유효 이전엔 전 축 비활성)."""
+    modes = [
+        ModeSpec(name="lo", alt=500.0, exit_when=("alt_ge", 2000.0), next="hi"),
+        _hold_forever(name="hi", alt=3000.0),
+    ]
+    g = Guidance(modes).init(DT)
+    first = g.step(NavOutput(valid=False))
+    assert first.mode == "lo" and not (first.alt_on or first.speed_on or first.heading_on)
+    valid_cmd = g.step(_nav(t=1.0, h=1000.0))
+    assert valid_cmd.mode == "lo" and valid_cmd.alt_on
+    # invalid인데 고도값은 전환 조건 충족 — 평가되면 안 됨
+    frozen = g.step(NavOutput(t=2.0, pos_n=np.array([0.0, 0.0, -2500.0]), valid=False))
+    assert frozen.mode == "lo" and frozen.alt == valid_cmd.alt and frozen.alt_on
+    assert g.step(_nav(t=3.0, h=1000.0)).mode == "lo"  # 유효 복귀 후에도 전환 없음
 
 
 # ---------- 실행기 (전환) ----------
@@ -124,6 +163,21 @@ def test_los_heading_switching_and_done():
     hdg, done = path.step(_nav(n=1000.0, e=980.0))  # wp2 반경 내 → 소진
     assert done
     assert hdg == pytest.approx(math.atan2(1000.0, 10.0))  # 마지막 헤딩 유지
+
+
+def test_los_chained_skip_within_radius():
+    """반경 내 웨이포인트 여러 개를 한 스텝에 연쇄 스킵 (docstring 계약 핀)."""
+    path = LosPath(waypoints=((10.0, 0.0), (20.0, 20.0), (1000.0, 1000.0)),
+                   accept_radius=50.0).init(DT)
+    hdg, done = path.step(_nav(n=0.0, e=0.0))
+    assert hdg == pytest.approx(math.atan2(1000.0, 1000.0)) and not done
+
+
+def test_los_exhausted_before_first_heading_uses_current_course():
+    """빈 리스트/반경 내 시작 — 정북(0) 급선회 대신 현재 침로 유지 (리뷰 반영)."""
+    path = LosPath(waypoints=()).init(DT)
+    hdg, done = path.step(_nav(psi=math.pi / 2))  # 동쪽 비행 중
+    assert done and hdg == pytest.approx(math.pi / 2)
 
 
 def test_los_registry_swappable():

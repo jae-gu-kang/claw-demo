@@ -16,6 +16,33 @@ from dataclasses import dataclass
 
 import numpy as np
 
+# kind → 인자 개수 — 구성 시 검증과 평가가 같은 테이블 공유 (드리프트 방지)
+_COND_ARITY = {
+    "always": 0,
+    "time_ge": 1,
+    "alt_ge": 1,
+    "alt_le": 1,
+    "speed_ge": 1,
+    "speed_le": 1,
+    "path_done": 0,
+}
+
+
+def validate_condition(cond) -> None:
+    """조건 튜플의 kind·인자 개수·인자 타입 검증 — 웹 편집 입력의 방어선.
+
+    구성 시 호출 — 잘못된 조건이 배치 시뮬 도중 IndexError/TypeError로
+    터지지 않도록 여기서 시끄럽게 거부한다.
+    """
+    if not cond or cond[0] not in _COND_ARITY:
+        raise ValueError(f"미정의 조건: {cond!r} (허용: {sorted(_COND_ARITY)})")
+    n = _COND_ARITY[cond[0]]
+    if len(cond) != n + 1:
+        raise ValueError(f"조건 {cond[0]!r}: 인자 {n}개 필요, {len(cond) - 1}개 받음")
+    for v in cond[1:]:
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError(f"조건 {cond[0]!r}: 수치 인자 필요, {v!r} 받음")
+
 
 def eval_condition(cond, nav, ctx) -> bool:
     """조건 튜플 평가. nav: NavOutput, ctx: {"t_mode": s, "path_done": bool}."""
@@ -62,10 +89,7 @@ class ModeSequencer:
         for m in modes:
             if m.next is not None and m.next not in self._modes:
                 raise ValueError(f"모드 {m.name!r}의 next {m.next!r} 미정의")
-            if m.exit_when[0] not in (
-                "always", "time_ge", "alt_ge", "alt_le", "speed_ge", "speed_le", "path_done"
-            ):
-                raise ValueError(f"모드 {m.name!r}: 미정의 이탈조건 {m.exit_when!r}")
+            validate_condition(m.exit_when)
         self._initial = initial if initial is not None else modes[0].name
         if self._initial not in self._modes:
             raise ValueError(f"초기 모드 {self._initial!r} 미정의")
