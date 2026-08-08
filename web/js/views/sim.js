@@ -50,6 +50,7 @@ export function render() {
     rate: el("input", { class: "num", value: "10" }),
     fuelFlow: el("input", { class: "num", value: "0.3" }),
     useGains: el("input", { type: "checkbox" }),
+    useAp: el("input", { type: "checkbox" }),
     fp: el("input", { value: "web-sim-v1" }),
   };
 
@@ -118,6 +119,9 @@ export function render() {
       if (f.useGains.checked && store.get("gainTables")) {
         req.gain_tables = store.get("gainTables");
       }
+      if (f.useAp.checked && store.get("autopilotParams")) {
+        req.autopilot = store.get("autopilotParams"); // 구조도 AP 블록 편집값 (전체 kwargs)
+      }
       const submitted = await api.post("/sim/run", req);
       runningJobId = submitted.id;
       runningSnapshot = snapshot;
@@ -161,7 +165,8 @@ export function render() {
           el("div", { class: "row-inner" },
             el("label", { class: "field" }, "도달반경 [m]", f.accept),
             el("label", { class: "field" }, "연료유량 [kg/s]", f.fuelFlow),
-            el("label", { class: "field check" }, f.useGains, "편집 게인"))),
+            el("label", { class: "field check" }, f.useGains, "편집 게인"),
+            el("label", { class: "field check" }, f.useAp, "편집 AP"))),
         el("div", { class: "opt-group" },
           el("div", { class: "g-title" }, "계보"),
           el("div", { class: "row-inner" },
@@ -170,7 +175,8 @@ export function render() {
       el("div", { class: "row", style: "margin-top: 12px" },
         el("button", { class: "primary", onclick: run }, "시뮬 실행"),
         el("span", { class: "hint" },
-          "작동기 rate ≥ 10 rad/s 요구 [도출 사양] (01 v0.13) · 편집 게인은 게인 탭에서 '시뮬에 적용' 후 사용")),
+          "작동기 rate ≥ 10 rad/s 요구 [도출 사양] (01 v0.13) · 편집 게인은 게인 탭, ",
+          "편집 AP는 구조도 탭 오토파일럿 블록에서 '시뮬에 적용' 후 사용")),
       progressBox, errBox,
     ),
     el("div", { class: "panel" }, el("h2", {}, "재생 + 엔벨로프 감시"), replayBox),

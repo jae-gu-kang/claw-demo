@@ -16,21 +16,26 @@ uvicorn --factory claw_server:create_app --port 8000
 ## 구조
 
 ```
-index.html            # 탭 네비 (트림/마진 맵/게인/시뮬레이션/결과)
+index.html            # 탭 네비 (구조도/트림/마진 맵/엔벨로프/게인/시뮬레이션/결과)
 css/app.css
 js/
-├── main.js           # 해시 라우팅 + 헬스 폴링
+├── main.js           # 해시 라우팅 (기본 = 구조도 허브) + 헬스 폴링
 ├── api.js            # REST 래퍼·ApiError·watchJob(WS 우선, 폴링 폴백)
 ├── dom.js            # el() 조립·fmt(비유한값 정책)·flagBadge(3-상태)
-├── store.js          # 탭 간 공유 상태 (게인 편집본 전달 등)
+├── store.js          # 탭 간 공유 상태 (게인·AP 편집본 전달 등)
 ├── lib/              # 순수 로직 (공존 *.test.js로 테스트)
+│   ├── blocks.js     #   블록 다이어그램 데이터·히트테스트·편집 경로 (허브 계약)
+│   ├── schemaform.js #   레지스트리 JSON 스키마 → 폼 필드·입력 검증
 │   ├── grid.js       #   트림 격자 — 서펜타인 순서 (인접 시드 전제 01 §4.1)
 │   ├── plot.js       #   스케일·눈금·마진 상태색·격자 피벗
 │   ├── mission.js    #   편집 행 → 미션 스펙 (조건 인자수 = 엔진 _COND_ARITY)
 │   └── replay.js     #   stride 산정·모드 구간·극값
 └── views/            # DOM 조립 전용 (얇게 유지)
+    ├── blocks.js     #   구조도 허브: 블록 클릭 → 스키마 폼/편집 화면 (02 §4)
+    ├── diagram.js    #   신호흐름 다이어그램 캔버스 (고정 구조, lib/blocks 기하)
     ├── trim.js       #   2단계: 케이스 매트릭스 → 배치 → 판정 플래그 결과표
     ├── margins.js    #   3단계: PM/GM 히트맵·고유치 맵·감쇠비 테이블
+    ├── envelope.js   #   V-n 선도 (01 §3.6 — 구조 한계는 데모 자리표시)
     ├── gains.js      #   4단계: 게인 테이블 편집 → 시뮬 주입 (전체 교체)
     ├── sim.js        #   5단계: 모드 테이블·웨이포인트 편집 → 재생+엔벨로프
     ├── results.js    #   6단계 열람: 산출물 목록·계보 지문

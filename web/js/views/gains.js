@@ -7,7 +7,6 @@
 import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import { store } from "../store.js";
-import { clawDiagramCanvas } from "./diagram.js";
 
 let tables = null; // {name: {axes: {mach: [...]}, data: [...], extrapolate}}
 
@@ -28,14 +27,9 @@ export function render() {
 
   const root = el("div", {},
     el("div", { class: "panel" },
-      el("h2", {}, "제어법칙 신호흐름 (고정 구조 — Simulink 다이어그램 대체 표시)"),
-      el("div", { class: "scroll-x" }, clawDiagramCanvas()),
-      el("p", { class: "hint" },
-        "이 구조는 코드(M7 FlightControlLaw 조립)와 1:1 — 배선은 고정이며, ",
-        "설계 변경은 아래 게인·파라미터·모드 테이블로 한다 [확정 02 §4]."),
-    ),
-    el("div", { class: "panel" },
       el("h2", {}, "게인 스케줄 테이블 (동압 스케일 1D mach — 설계점 M0.6)"),
+      el("p", { class: "hint" },
+        "신호흐름 구조는 구조도 탭 — SCAS·게인 스케줄 블록에서 여기로 진입한다."),
       el("div", { class: "row" },
         el("button", { onclick: load }, "설계값 다시 불러오기"),
         el("button", {
