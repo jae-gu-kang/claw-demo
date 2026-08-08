@@ -18,7 +18,7 @@
 from claw.blocks.base import UNBOUNDED, Block
 from claw.blocks.controllers import PID
 from claw.blocks.filters import Washout
-from claw.common.attitude import quat_to_euler
+from claw.common.attitude import quat_to_euler, wrap_pi
 from claw.fcl.airdata import airdata_from_nav
 from claw.params.param import ParamDef
 
@@ -47,6 +47,8 @@ class ScasAxis(Block):
             raise ValueError(f"out_lo({out_lo}) > out_hi({out_hi})")
         if washout_tau < 0:
             raise ValueError(f"washout_tau는 음수 불가: {washout_tau}")
+        # kp·ki의 정본은 내부 PID(step에서 None 전달 시 PID 값 사용) — 생성 후
+        # 게인 변경은 스텝 인자 덮어쓰기(게인 스케줄 경로)로만 한다
         self.kp, self.ki, self.k_rate = kp, ki, k_rate
         self.washout_tau = washout_tau
         self.out_lo, self.out_hi = out_lo, out_hi
@@ -58,11 +60,15 @@ class ScasAxis(Block):
         if self._wo is not None:
             self._wo.init(dt)
 
-    def reset(self, state=None) -> None:
-        """state는 적분기 웜스타트 값 (범프리스 전환 계약). 워시아웃은 초기화."""
+    def reset(self, state=None, rate=None) -> None:
+        """state=적분기 웜스타트, rate=현재 각속도로 워시아웃 시드 (범프리스 전환 계약).
+
+        정상 선회(r≠0) 중 SCAS 재관여 시 rate를 주면 워시아웃 출력이 0에서
+        시작해 k_rate·r 킥이 발생하지 않는다.
+        """
         self._pid.reset(state)
         if self._wo is not None:
-            self._wo.reset()
+            self._wo.reset(rate)
 
     def step(self, att_err, rate, kp=None, ki=None, k_rate=None):
         r = self._wo.step(rate) if self._wo is not None else rate
@@ -94,11 +100,13 @@ class Scas:
             ax.reset()
 
     def step(self, theta_cmd, phi_cmd, nav, gains=None):
+        # nav.valid 처리는 상위 조립(FlightControlLaw)의 소관 — 여기서는 항상 계산
         phi, theta, _psi = quat_to_euler(nav.q_nb)
         p, q, r = nav.omega_b
         _V, _alpha, beta = airdata_from_nav(nav)
         g = gains or {}
         de = self.pitch.step(theta_cmd - theta, q, **g.get("pitch", {}))
-        da = self.roll.step(phi_cmd - phi, p, **g.get("roll", {}))
+        # 롤 오차는 ±π 경계(배면 통과)에서 2π 점프하지 않도록 wrap (θ는 구조상 |θ|≤π/2)
+        da = self.roll.step(wrap_pi(phi_cmd - phi), p, **g.get("roll", {}))
         dr = self.yaw.step(-beta, r, **g.get("yaw", {}))
         return de, da, dr

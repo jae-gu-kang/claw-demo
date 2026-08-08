@@ -76,6 +76,27 @@ def test_axis_reset_warm_start_bumpless():
     assert ax.step(0.0, 0.0) == pytest.approx(0.05)
 
 
+def test_axis_rate_term_pushes_past_clamp():
+    """PI가 한계 내여도 rate 항이 더해지면 축 외곽 클램프가 최종 제한 — 리뷰 지적 반영."""
+    ax = ScasAxis(kp=1.0, k_rate=1.0, out_lo=-0.1, out_hi=0.1).init(DT)
+    assert ax.step(0.05, 0.5) == 0.1  # PI=0.05(한계 내) + rate=0.5 → 클램프
+    assert ax.step(-0.05, -0.5) == -0.1
+
+
+def test_axis_reset_rate_seed_no_washout_kick():
+    """정상 선회 중 재관여: reset(rate=r)이면 워시아웃 기여 0에서 시작 (킥 없음)."""
+    ax = ScasAxis(k_rate=0.8, washout_tau=2.0).init(DT)
+    ax.reset(rate=0.1)
+    assert ax.step(0.0, 0.1) == pytest.approx(0.0, abs=1e-15)
+
+
+def test_axis_gain_override_not_persistent():
+    """스텝 인자 게인 덮어쓰기는 그 스텝에만 적용 — 저장 게인 오염 금지."""
+    ax = ScasAxis(kp=1.0).init(DT)
+    ax.step(0.1, 0.0, kp=5.0)
+    assert ax.step(0.1, 0.0) == pytest.approx(0.1)  # 원래 kp=1.0 복원
+
+
 # ---------- 선형모델 폐루프 (설계점, 이산 100 Hz) ----------
 
 
@@ -179,6 +200,14 @@ def test_scas_gain_override_dict():
     scas.reset()
     doubled = scas.step(0.05, 0.0, _nav(), gains={"pitch": {"kp": -4.0}})[0]
     assert doubled == pytest.approx(2.0 * base)
+
+
+def test_scas_roll_error_wraps_at_pi():
+    """±π 경계(배면 부근) 롤 오차 — 2π 점프 없이 최단 경로 방향."""
+    scas = make_scas()
+    de, da, dr = scas.step(0.0, -3.1, _nav(phi=3.1))
+    # wrap(−3.1 − 3.1) = +0.083 → 우롤(da>0), 크기는 kp·0.083 수준 (2π 점프 아님)
+    assert 0.0 < da < 0.2
 
 
 def test_airdata_from_nav_roundtrip():
