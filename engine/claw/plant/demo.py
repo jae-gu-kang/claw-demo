@@ -46,6 +46,14 @@ def make_demo_aircraft() -> Aircraft:
     return Aircraft(fuel_mass, aero, engine)
 
 
+def make_demo_db_ranges() -> dict:
+    """데모 프로파일 공력 DB 유효범위 — 엔벨로프 감시(M11) db_ranges 입력.
+
+    합성 선형 계수의 대역 상정값 — CFD DB 반입 시 DB 축 범위로 교체.
+    """
+    return {"alpha": (-0.2, 0.45), "beta": (-0.3, 0.3), "mach": (0.1, 0.9)}
+
+
 def make_demo_stall_table() -> Table:
     """데모 실속 경계 α_stall = f(Mach) — 공력팀 정본 대역 (01 §2.3).
 

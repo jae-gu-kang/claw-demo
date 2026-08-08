@@ -11,11 +11,11 @@ from claw.common.contracts import TrimCase
 from claw.fcl import make_demo_fcl
 from claw.guidance import Guidance, ModeSpec
 from claw.nav import NavErrorModel
-from claw.plant import make_demo_aircraft, make_demo_stall_table
+from claw.plant import make_demo_aircraft, make_demo_db_ranges, make_demo_stall_table
 from claw.sim import Simulator
 from claw.trim import trim_level
 
-DB_RANGES = {"alpha": (-0.2, 0.45), "beta": (-0.3, 0.3), "mach": (0.1, 0.9)}
+DB_RANGES = make_demo_db_ranges()
 
 
 @pytest.fixture(scope="module")

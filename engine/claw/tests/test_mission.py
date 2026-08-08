@@ -17,11 +17,11 @@ from claw.nav import NavErrorModel
 from claw.params.param import ParamDef
 from claw.params.paramset import ParamSet
 from claw.pipeline import Pipeline, delta_report
-from claw.plant import make_demo_aircraft, make_demo_stall_table
+from claw.plant import make_demo_aircraft, make_demo_db_ranges, make_demo_stall_table
 from claw.sim import Simulator
 from claw.trim import trim_level
 
-DB_RANGES = {"alpha": (-0.2, 0.45), "beta": (-0.3, 0.3), "mach": (0.1, 0.9)}
+DB_RANGES = make_demo_db_ranges()
 
 
 @pytest.fixture(scope="module")
@@ -116,6 +116,6 @@ def test_delta_report_ap_gain_on_closed_loop_metric(trim_design):
         },
     )
     assert rep["param_diff"] == {"ap.kp_alt": (0.002, 0.004)}
+    # 엄격 부등호는 캐시 무효화 핀 겸용 — uses 미포함이면 delta가 정확히 0.0
     assert rep["delta"]["err_end"] < 0.0  # 게인 상향 → 캡처 잔여 오차 감소
-    assert rep["b"]["err_end"] < rep["a"]["err_end"]
     assert rep["a"]["worst_margin"] > 0.1 and rep["b"]["worst_margin"] > 0.1
