@@ -69,6 +69,22 @@ def test_margin_map_infeasible_case_reported_not_fatal(client, wait_job):
     assert bad["lon"] is None and bad["margins"] == {}  # 불가 케이스는 해석 생략
 
 
+def test_vn_envelope_endpoint(client):
+    """V-n 보호 경계 (01 §3.6) — 실속선·α 리미터 보호선, 구조 한계는 [TBD] null."""
+    r = client.get("/api/analysis/vn-envelope", params={"alt": 1000.0, "fuel": 200.0})
+    assert r.status_code == 200
+    b = r.json()
+    n = len(b["V"])
+    assert n > 10 and len(b["n_stall"]) == len(b["n_prot"]) == len(b["mach"]) == n
+    assert all(x < y for x, y in zip(b["n_stall"], b["n_stall"][1:]))  # 동압 V² 성장
+    assert all(p < s for p, s in zip(b["n_prot"], b["n_stall"]))  # 보호선이 안쪽
+    assert b["alpha_margin"] == 0.05  # α 리미터 [기본값]과 동일
+    assert b["structural"] is None  # [TBD] — 서버가 값을 지어내지 않음
+    # ISA 범위 밖 고도 → 엔진 ValueError → 422
+    bad = client.get("/api/analysis/vn-envelope", params={"alt": 99999.0, "fuel": 200.0})
+    assert bad.status_code == 422
+
+
 def test_margin_map_loop_spec_validation_422(client):
     base = _margin_map_request()
     bad_x = dict(base, loops=[dict(base["loops"][0], x_out="psi")])  # 종축에 없는 상태

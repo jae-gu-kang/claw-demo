@@ -2,13 +2,14 @@
 
 import { api } from "./api.js";
 import { clear } from "./dom.js";
+import * as envelope from "./views/envelope.js";
 import * as gains from "./views/gains.js";
 import * as margins from "./views/margins.js";
 import * as results from "./views/results.js";
 import * as sim from "./views/sim.js";
 import * as trim from "./views/trim.js";
 
-const VIEWS = { trim, margins, gains, sim, results };
+const VIEWS = { trim, margins, envelope, gains, sim, results };
 
 function route() {
   const name = location.hash.slice(1) || "trim";

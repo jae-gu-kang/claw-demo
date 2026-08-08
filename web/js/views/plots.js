@@ -55,8 +55,9 @@ export function heatmapCanvas(pivot, cellOf, { title = "", width = 560 } = {}) {
 
 const MODE_BAND_COLORS = ["#e8f1fe", "#e6f6ea", "#fdf6df", "#fdeaea", "#efe9fb", "#e7f6f6"];
 
-/** 시계열 차트 — series: [{label, data, color}], bands: modeSpans 결과 (배경 밴드). */
-export function lineChartCanvas(t, series, { title = "", width = 620, height = 190, bands = [] } = {}) {
+/** 선 차트 — series: [{label, data, color}], bands: modeSpans 결과 (배경 밴드).
+ * x축은 t 배열 (기본 시각 [s] — xUnit으로 변경 가능, 예: V-n 선도의 "m/s"). */
+export function lineChartCanvas(t, series, { title = "", width = 620, height = 190, bands = [], xUnit = "s" } = {}) {
   const { canvas, ctx } = makeCanvas(width, height);
   const mL = 56, mT = 22, mR = 10, mB = 24;
   const t0 = t[0] ?? 0;
@@ -91,7 +92,7 @@ export function lineChartCanvas(t, series, { title = "", width = 620, height = 1
   }
   for (const tk of niceTicks(t0, t1, 7)) {
     ctx.fillStyle = "#66707e";
-    ctx.fillText(`${fmtTick(tk)}s`, px(tk) - 8, height - 8);
+    ctx.fillText(`${fmtTick(tk)}${xUnit}`, px(tk) - 8, height - 8);
   }
   ctx.stroke();
   series.forEach((s, si) => {

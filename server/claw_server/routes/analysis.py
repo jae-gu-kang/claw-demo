@@ -8,11 +8,19 @@ pi_loop+loop_margins. 루프 정의(축·입출력·PI 게인·부호)는 요청
 
 from typing import Literal
 
-from fastapi import APIRouter, Request, Response
+import numpy as np
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
-from claw.analysis import classify_lat, classify_lon, damp, loop_margins, pi_loop
-from claw.plant import make_demo_aircraft
+from claw.analysis import (
+    classify_lat,
+    classify_lon,
+    damp,
+    loop_margins,
+    pi_loop,
+    vn_stall_boundary,
+)
+from claw.plant import make_demo_aircraft, make_demo_stall_table
 from claw.trim import (
     LAT_INPUTS,
     LAT_STATES,
@@ -89,6 +97,39 @@ def _trim_only_entry(tr) -> dict:
         "lat": None,
         "margins": {},
         "note": None,
+    }
+
+
+@router.get("/analysis/vn-envelope")
+def vn_envelope(
+    alt: float = Query(...),
+    fuel: float = Query(ge=0.0),
+    alpha_margin: float = Query(default=0.05, ge=0.0),  # α 리미터 [기본값]과 동일
+) -> dict:
+    """V-n 보호 경계 (01 §3.6) — 실속 경계 + α 리미터 보호 경계 (동기 계산).
+
+    구조 한계(±n)·급강하 한계속도는 [TBD] — 데이터 확보 전까지 null (서버가
+    수치를 지어내지 않음, 표기는 웹 소관).
+    """
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    machs = np.linspace(float(st.axes[0][0]), float(st.axes[0][-1]), 81)
+    try:
+        stall = vn_stall_boundary(ac, st, alt=alt, fuel=fuel, machs=machs)
+        prot = vn_stall_boundary(
+            ac, st, alt=alt, fuel=fuel, machs=machs, alpha_margin=alpha_margin
+        )
+    except (ValueError, TypeError) as e:  # ISA 범위 밖 고도 등 — 엔진 검증
+        raise HTTPException(status_code=422, detail=str(e))
+    return {
+        "mach": stall["mach"],
+        "V": stall["V"],
+        "n_stall": stall["n"],
+        "n_prot": prot["n"],
+        "alt": alt,
+        "fuel": fuel,
+        "alpha_margin": alpha_margin,
+        "structural": None,  # [TBD] 구조하중 데이터 확보 시
     }
 
 

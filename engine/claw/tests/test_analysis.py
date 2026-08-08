@@ -6,7 +6,7 @@ import pytest
 
 from claw.analysis import classify_lat, classify_lon, damp, loop_margins, make_siso, margin_map
 from claw.common.contracts import TrimCase
-from claw.plant import make_demo_aircraft
+from claw.plant import make_demo_aircraft, make_demo_stall_table
 from claw.trim import linearize, split_axes, trim_batch
 
 
@@ -82,3 +82,25 @@ def test_pi_loop_matches_manual_composition(lon_lat):
     # P 단독(ki=0)·부호 지정 경로
     p_only = pi_loop(lon, x_out="q", u_in="de", kp=0.5, ki=0.0, sign=-1.0)
     assert np.isfinite(loop_margins(p_only)["pm_deg"])
+
+
+def test_vn_stall_boundary_analytic():
+    """V-n 실속 경계 해석 대조 — 데모 CL(α, δe=0)=3.5α → n = q̄·S·CL/W 정확."""
+    from claw.analysis import vn_stall_boundary
+    from claw.common.constants import G0
+    from claw.env import isa_atmosphere
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    machs = (0.3, 0.5, 0.7)
+    vn = vn_stall_boundary(ac, st, alt=1000.0, fuel=200.0, machs=machs)
+    atm = isa_atmosphere(1000.0)
+    m = ac.fuel_mass.at(200.0)[0]
+    for M, V, n in zip(vn["mach"], vn["V"], vn["n"]):
+        a_s = float(st.interp(mach=M))
+        n_expect = 0.5 * atm.rho * V**2 * 3.0 * (3.5 * a_s) / (m * G0)  # S=3.0
+        assert n == pytest.approx(n_expect, rel=1e-9)
+    assert vn["n"][0] < vn["n"][1] < vn["n"][2]  # 동압 V² 성장
+    # α 리미터 보호 마진 적용 → 경계 하향 (보호선이 실속선 안쪽)
+    vp = vn_stall_boundary(ac, st, 1000.0, 200.0, machs, alpha_margin=0.05)
+    assert all(p < s for s, p in zip(vn["n"], vp["n"]))
