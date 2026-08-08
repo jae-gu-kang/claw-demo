@@ -56,5 +56,7 @@ async def job_progress_ws(websocket: WebSocket, job_id: str) -> None:
                 break
             await asyncio.sleep(_WS_POLL_S)
         await websocket.close()
-    except WebSocketDisconnect:
-        return  # 클라이언트 이탈 — 작업은 계속 진행
+    except (WebSocketDisconnect, RuntimeError):
+        # 클라이언트 이탈 — 작업은 계속 진행. RuntimeError: 이탈 후 send 시도
+        # (starlette가 close 이후 send에 던짐 — 로그 소음 방지)
+        return
