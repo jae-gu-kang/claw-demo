@@ -116,11 +116,20 @@ export function render() {
         req.actuators = { wn: Number(f.wn.value), zeta: Number(f.zeta.value),
                           rate_max: Number(f.rate.value) };
       }
-      if (f.useGains.checked && store.get("gainTables")) {
-        req.gain_tables = store.get("gainTables");
+      // 편집본 체크됐는데 적용본이 없으면 기본값 실행을 조용히 하지 않고 알림 (리뷰 Nit3)
+      const missing = [];
+      if (f.useGains.checked) {
+        if (store.get("gainTables")) req.gain_tables = store.get("gainTables");
+        else missing.push("편집 게인 (게인 탭 '시뮬에 적용' 필요)");
       }
-      if (f.useAp.checked && store.get("autopilotParams")) {
-        req.autopilot = store.get("autopilotParams"); // 구조도 AP 블록 편집값 (전체 kwargs)
+      if (f.useAp.checked) {
+        // 구조도 AP 블록 편집값 (전체 kwargs)
+        if (store.get("autopilotParams")) req.autopilot = store.get("autopilotParams");
+        else missing.push("편집 AP (구조도 탭 오토파일럿 블록 '시뮬에 적용' 필요)");
+      }
+      if (missing.length) {
+        errBox.append(el("div", { class: "error-box" },
+          `적용된 편집값 없음 — 기본값으로 실행됨: ${missing.join(", ")}`));
       }
       const submitted = await api.post("/sim/run", req);
       runningJobId = submitted.id;

@@ -49,13 +49,14 @@ function renderDetail(box, block) {
   }
   const d = block.detail;
   const schemaBox = el("div");
-  clear(box).append(
+  // el() 래핑 필수 — 네이티브 append(null)은 "null" 텍스트 노드가 됨 (리뷰 M1)
+  clear(box).append(el("div", {},
     el("h2", {}, `${block.title} — 파라미터`),
     el("p", { class: "hint" }, d.desc),
     d.edit && el("div", { class: "row", style: "margin-bottom: 10px" },
       el("button", { onclick: () => { location.hash = d.edit.hash; } }, `→ ${d.edit.label}`)),
     schemaBox,
-  );
+  ));
   if (d.schema) loadSchema(schemaBox, block);
 }
 
@@ -126,6 +127,9 @@ function renderForm(schemaBox, block, fields) {
       `${f.name}${unit}`, inputs[f.name]);
   };
 
+  // 주입 계약: 서버 SimIn validator(routes/sim.py)는 nav·actuators·autopilot에
+  // 유한 수치만 허용 — boolean/enum 파라미터를 가진 컴포넌트를 editable로 만들
+  // 때는 서버 검증기 확장이 선행돼야 함 (리뷰 S2. 현 editable=AP는 전부 수치)
   const collect = () => {
     const values = {};
     const errors = [];

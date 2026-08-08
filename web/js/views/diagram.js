@@ -68,11 +68,21 @@ const CHAIN = [
 export function clawDiagramCanvas({ selectedId = null, onBlockClick = null } = {}) {
   const { canvas, ctx } = makeCanvas(DIAGRAM_W, DIAGRAM_H);
 
-  // 게인 스케줄 (상단) → AP·SCAS 주입
+  // 게인 스케줄 (상단) → AP·SCAS 주입 — 목적 블록 상단 중앙으로 (리뷰 S1:
+  // 고정 x가 α 리미터 위에 꽂혀 잘못된 구조 인상을 주던 결함 수정)
   const sched = B.schedule;
   box(ctx, sched, selectedId === "schedule");
-  arrow(ctx, 400, sched.y + sched.h, 400, B.autopilot.y, "");
-  arrow(ctx, 540, sched.y + sched.h, 540, B.scas.y, "");
+  const apx = B.autopilot.x + B.autopilot.w / 2;
+  ctx.strokeStyle = "#66707e";
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(sched.x + 20, sched.y + sched.h);
+  ctx.lineTo(sched.x + 20, 86);
+  ctx.lineTo(apx, 86);
+  ctx.stroke();
+  arrow(ctx, apx, 86, apx, B.autopilot.y, "");
+  const scx = B.scas.x + B.scas.w / 2;
+  arrow(ctx, scx, sched.y + sched.h, scx, B.scas.y, "");
 
   // 주 신호 경로 (좌→우)
   for (let i = 0; i < CHAIN.length; i += 1) {
@@ -87,7 +97,7 @@ export function clawDiagramCanvas({ selectedId = null, onBlockClick = null } = {
   // 항법 피드백 (하단) — 법칙은 NavOutput만 소비 (참값 차단 계약)
   const nav = B.nav;
   box(ctx, nav, selectedId === "nav");
-  arrow(ctx, right(B.plant) - 52, B.plant.y + B.plant.h, right(nav), cy(nav) + 4,
+  arrow(ctx, B.plant.x + B.plant.w / 2, B.plant.y + B.plant.h, right(nav), cy(nav) + 4,
     "VehicleState (참값)", 12);
   ctx.strokeStyle = "#66707e";
   ctx.beginPath();

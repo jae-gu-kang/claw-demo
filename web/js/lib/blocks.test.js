@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 
 import { BLOCKS, DIAGRAM_H, DIAGRAM_W, hitBlock } from "./blocks.js";
 
+// main.js VIEWS의 수동 사본 — main.js가 DOM 의존이라 직접 import 불가. 보호는
+// 단방향(blocks.js 오타만 검출): main.js에서 뷰 개명 시 이 목록도 갱신할 것
 const VIEW_HASHES = new Set(["blocks", "trim", "margins", "envelope", "gains", "sim", "results"]);
 // 엔진 레지스트리에 실존하는 카테고리/이름 (test_fcl_law·test_system이 핀)
 const REGISTRY_REFS = new Set([
