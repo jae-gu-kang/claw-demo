@@ -6,7 +6,7 @@ import { extent } from "../lib/replay.js";
 
 const FONT = "11px -apple-system, 'Segoe UI', sans-serif";
 
-function makeCanvas(width, height) {
+export function makeCanvas(width, height) {
   const dpr = window.devicePixelRatio || 1;
   const canvas = el("canvas", { class: "plot", width: width * dpr, height: height * dpr });
   canvas.style.width = `${width}px`;
