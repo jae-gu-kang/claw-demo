@@ -93,17 +93,27 @@ class JobManager:
         return job
 
     def _run(self, job: Job, fn) -> None:
-        job.status = "running"
+        # 종단 상태는 항상 마지막에 기록 — 폴링 스냅샷이 status=error인데
+        # error 본문/finished가 비어 보이는 순서 역전 방지 (리뷰 S1)
         job.started = time.time()
+        if job.cancel_requested:  # 실행 전 취소 fast-path — 계산 자체를 생략
+            job.finished = time.time()
+            job.status = "cancelled"
+            return
+        job.status = "running"
         try:
             fn(job)
         except Exception:
-            job.status = "error"
             job.error = traceback.format_exc(limit=8)
-        else:
-            job.status = "cancelled" if job.cancel_requested else "done"
-        finally:
             job.finished = time.time()
+            job.status = "error"
+        else:
+            # 완주(done==total) 직후 도착한 취소는 결과를 강등하지 않음 (리뷰 S3)
+            completed = job.total > 0 and job.done == job.total
+            job.finished = time.time()
+            job.status = (
+                "cancelled" if (job.cancel_requested and not completed) else "done"
+            )
 
     def get(self, job_id: str):
         with self._lock:

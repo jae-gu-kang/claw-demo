@@ -4,9 +4,9 @@
 서버는 요청 검증·이름 자동 생성·직렬화·저장만 담당한다.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 
 from claw.common.contracts import TrimCase
@@ -16,12 +16,16 @@ from claw_server.serialize import trim_result_dict
 
 router = APIRouter(tags=["trim"])
 
+# JSON은 Infinity/NaN 리터럴을 파서가 허용하므로 경계에서 유한성을 강제 —
+# 202 수락 후 저장 시점(allow_nan=False)에 배치 전체가 죽는 것을 방지
+FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
+
 
 class TrimCaseIn(BaseModel):
     name: str = ""  # 빈 이름 → "M{mach}_h{alt}_f{fuel}" 자동 생성
-    mach: float = Field(gt=0.0)
-    alt: float
-    fuel: float = Field(ge=0.0)
+    mach: float = Field(gt=0.0, allow_inf_nan=False)
+    alt: float = Field(allow_inf_nan=False)
+    fuel: float = Field(ge=0.0, allow_inf_nan=False)
 
 
 class TrimBatchIn(BaseModel):
@@ -44,7 +48,7 @@ def build_cases(case_inputs: list[TrimCaseIn]) -> list[TrimCase]:
 
 
 @router.post("/trim/batch", status_code=202)
-def submit_trim_batch(req: TrimBatchIn, request: Request) -> dict:
+def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) -> dict:
     ac = make_demo_aircraft()
     cases = build_cases(req.cases)
     store = request.app.state.store
@@ -70,4 +74,6 @@ def submit_trim_batch(req: TrimBatchIn, request: Request) -> dict:
         )
         job.result_id = job.id
 
-    return request.app.state.jobs.submit("trim_batch", work).to_dict()
+    job = request.app.state.jobs.submit("trim_batch", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()

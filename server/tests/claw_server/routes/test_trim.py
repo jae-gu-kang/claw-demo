@@ -80,3 +80,30 @@ def test_trim_batch_validation_422(client):
     assert client.post("/api/trim/batch", json=bad).status_code == 422
     unknown_ac = {"aircraft": "f16", "cases": [{"mach": 0.5, "alt": 0.0, "fuel": 0.0}]}
     assert client.post("/api/trim/batch", json=unknown_ac).status_code == 422
+
+
+def test_trim_batch_nonfinite_rejected_422(client):
+    """JSON Infinity/NaN 리터럴은 제출 시점 422 — 202 수락 후 저장 시점 배치
+    전멸(allow_nan=False ValueError → job error)을 막는 경계 검증 (리뷰 M1).
+
+    파이썬 json.loads는 비표준 Infinity/NaN 리터럴을 허용하므로 raw body로 전송
+    (httpx의 json=은 자체적으로 거부해 실제 위협 경로를 재현하지 못함)."""
+    for body in (
+        '{"cases": [{"mach": Infinity, "alt": 1000.0, "fuel": 200.0}]}',
+        '{"cases": [{"mach": 0.6, "alt": NaN, "fuel": 200.0}]}',
+        '{"cases": [{"mach": 0.6, "alt": 1000.0, "fuel": Infinity}]}',
+    ):
+        r = client.post(
+            "/api/trim/batch",
+            content=body,
+            headers={"content-type": "application/json"},
+        )
+        assert r.status_code == 422, body
+
+
+def test_trim_batch_location_header(client):
+    r = client.post(
+        "/api/trim/batch",
+        json={"cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}]},
+    )
+    assert r.headers["location"] == f"/api/jobs/{r.json()['id']}"

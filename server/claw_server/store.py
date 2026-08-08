@@ -11,7 +11,7 @@ import json
 import re
 from pathlib import Path
 
-_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")  # fullmatch 사용 — '$'는 후행 개행 허용
 
 
 class ResultStore:
@@ -38,16 +38,18 @@ class ResultStore:
         return (self.root / f"{result_id}.json").exists()
 
     def list(self) -> list:
-        """저장 결과 메타 목록 — 최신(created 내림차순) 우선."""
-        metas = [
-            json.loads(p.read_text(encoding="utf-8"))
-            for p in self.root.glob("*.meta.json")
-        ]
+        """저장 결과 메타 목록 — 최신(created 내림차순) 우선. 손상 메타는 건너뜀."""
+        metas = []
+        for p in self.root.glob("*.meta.json"):
+            try:
+                metas.append(json.loads(p.read_text(encoding="utf-8")))
+            except (json.JSONDecodeError, OSError):
+                continue  # 손상 파일 하나가 목록 전체를 죽이지 않도록
         return sorted(metas, key=lambda m: m.get("created", 0.0), reverse=True)
 
     @staticmethod
     def _check_id(result_id: str) -> None:
-        if not _ID_RE.match(result_id):  # 경로 조작 차단 ('.' '/' 등 불허)
+        if not _ID_RE.fullmatch(result_id):  # 경로 조작 차단 ('.' '/' 개행 등 불허)
             raise ValueError(f"잘못된 결과 id: {result_id!r}")
 
     @staticmethod

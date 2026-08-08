@@ -8,7 +8,7 @@ pi_loop+loop_margins. 루프 정의(축·입출력·PI 게인·부호)는 요청
 
 from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
 from claw.analysis import classify_lat, classify_lon, damp, loop_margins, pi_loop
@@ -22,7 +22,7 @@ from claw.trim import (
     split_axes,
     trim_batch,
 )
-from claw_server.routes.trim import TrimCaseIn, build_cases
+from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
 from claw_server.serialize import to_jsonable, trim_result_dict
 
 router = APIRouter(tags=["analysis"])
@@ -40,9 +40,9 @@ class LoopIn(BaseModel):
     axis: Literal["lon", "lat"] = "lon"
     x_out: str = "q"
     u_in: str = "de"
-    kp: float
-    ki: float = 0.0
-    sign: float = -1.0
+    kp: FiniteFloat
+    ki: FiniteFloat = 0.0
+    sign: FiniteFloat = -1.0
 
     @model_validator(mode="after")
     def _check_axis_names(self):
@@ -81,7 +81,7 @@ def _axis_block(model, classify_fn) -> dict:
 
 
 @router.post("/analysis/margin-map", status_code=202)
-def submit_margin_map(req: MarginMapIn, request: Request) -> dict:
+def submit_margin_map(req: MarginMapIn, request: Request, response: Response) -> dict:
     ac = make_demo_aircraft()
     cases = build_cases(req.cases)
     store = request.app.state.store
@@ -129,4 +129,6 @@ def submit_margin_map(req: MarginMapIn, request: Request) -> dict:
         )
         job.result_id = job.id
 
-    return request.app.state.jobs.submit("margin_map", work).to_dict()
+    job = request.app.state.jobs.submit("margin_map", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()

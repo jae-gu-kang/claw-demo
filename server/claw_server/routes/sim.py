@@ -7,10 +7,11 @@
 결과는 전 해상도로 저장, 재생은 stride 다운샘플 조회.
 """
 
+import math
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, Field, model_validator
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from claw.fcl import make_demo_fcl
 from claw.guidance import Guidance, LosPath, ModeSpec
@@ -18,7 +19,7 @@ from claw.nav import NavErrorModel
 from claw.plant import make_demo_aircraft, make_demo_db_ranges, make_demo_stall_table
 from claw.sim import Simulator
 from claw.trim import trim_level
-from claw_server.routes.trim import TrimCaseIn, build_cases
+from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
 from claw_server.serialize import sim_result_dict
 
 router = APIRouter(tags=["sim"])
@@ -28,9 +29,9 @@ class ModeIn(BaseModel):
     """비행모드 한 행 — 01 §3.1 선언적 모드 테이블의 JSON 표현."""
 
     name: str = Field(min_length=1)
-    speed: float | None = None  # null = 축 off
-    alt: float | None = None
-    heading: float | str | None = None  # 숫자 | "path"(LOS) | null
+    speed: FiniteFloat | None = None  # null = 축 off
+    alt: FiniteFloat | None = None
+    heading: FiniteFloat | str | None = None  # 숫자 | "path"(LOS) | null
     exit: list = Field(min_length=1)  # 조건 DSL ["kind", 인자...] — 엔진이 검증
     next: str | None = None
 
@@ -47,16 +48,26 @@ class SimRunIn(BaseModel):
     trim: TrimCaseIn  # 시작 트림점 (웜스타트 기준)
     modes: list[ModeIn] = Field(min_length=1)
     initial_mode: str | None = None
-    waypoints: list[tuple[float, float]] | None = None  # (N, E) [m]
-    accept_radius: float = Field(default=200.0, gt=0.0)
+    waypoints: list[tuple[FiniteFloat, FiniteFloat]] | None = None  # (N, E) [m]
+    accept_radius: float = Field(default=200.0, gt=0.0, allow_inf_nan=False)
     t_end: float = Field(gt=0.0, le=3600.0)  # 상한 = 메모리 가드 [기본값]
-    dt_plant: float = Field(default=0.01, gt=0.0)
-    control_hz: float = Field(default=100.0, gt=0.0)
+    dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
+    control_hz: float = Field(default=100.0, gt=0.0, allow_inf_nan=False)
     nav: dict | None = None  # NavErrorModel kwargs — 파라미터 정의는 엔진이 정본
     actuators: dict | None = None  # SecondOrderActuator kwargs (wn·zeta·rate_max 등)
-    fuel_flow: float = Field(default=0.0, ge=0.0)
+    fuel_flow: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
     with_schedule: bool = True  # 데모 FCL 게인 스케줄 장착 여부
     with_limiter: bool = True  # α 리미터 장착 여부
+
+    @field_validator("nav", "actuators")
+    @classmethod
+    def _finite_numeric_values(cls, v):
+        """kwargs 통과 dict도 비유한값은 경계에서 차단 (키 검증은 엔진 소관)."""
+        if v is not None:
+            for key, val in v.items():
+                if isinstance(val, float) and not math.isfinite(val):
+                    raise ValueError(f"비유한값 파라미터: {key}={val}")
+        return v
 
 
 def _build(req: SimRunIn):
@@ -96,7 +107,7 @@ def _build(req: SimRunIn):
 
 
 @router.post("/sim/run", status_code=202)
-def submit_sim_run(req: SimRunIn, request: Request) -> dict:
+def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
     try:
         sim, tr = _build(req)
     except (ValueError, TypeError) as e:  # 엔진 구성 검증 → 제출 시점 422
@@ -122,7 +133,9 @@ def submit_sim_run(req: SimRunIn, request: Request) -> dict:
         )
         job.result_id = job.id
 
-    return request.app.state.jobs.submit("sim", work).to_dict()
+    job = request.app.state.jobs.submit("sim", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()
 
 
 @router.get("/sim/{result_id}/replay")

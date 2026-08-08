@@ -21,13 +21,21 @@ def test_roundtrip_and_list(tmp_path):
 
 def test_bad_id_rejected(tmp_path):
     st = ResultStore(tmp_path)
-    for bad in ("", "a/b", "../x", "a.b", "한글"):
+    for bad in ("", "a/b", "../x", "a.b", "한글", "abc\n"):  # 후행 개행 포함 (리뷰 S2)
         with pytest.raises(ValueError):
             st.save(bad, {})
         with pytest.raises(ValueError):
             st.load(bad)
     with pytest.raises(KeyError):
         st.load("missing")
+
+
+def test_list_skips_corrupt_meta(tmp_path):
+    """손상 메타 파일 하나가 목록 전체를 죽이지 않음 (리뷰 N3)."""
+    st = ResultStore(tmp_path)
+    st.save("ok1", {"v": 1}, meta={"created": 1.0})
+    (st.root / "bad.meta.json").write_text("{손상", encoding="utf-8")
+    assert [m["id"] for m in st.list()] == ["ok1"]
 
 
 def test_nan_rejected_at_save(tmp_path):

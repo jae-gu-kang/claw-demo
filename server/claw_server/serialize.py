@@ -22,6 +22,8 @@ def _clean_float(v: float):
 
 def _array(a: np.ndarray):
     if a.dtype.kind == "f" and not np.all(np.isfinite(a)):
+        if a.ndim == 0:
+            return _clean_float(float(a))
         if a.ndim == 1:
             return [_clean_float(float(v)) for v in a]
         return [_array(row) for row in a]
@@ -48,9 +50,13 @@ def to_jsonable(x):
 
 
 def trim_result_dict(tr) -> dict:
-    """TrimResult → JSON 표현 — 케이스·수렴·판정 플래그·트림 상태/입력."""
+    """TrimResult → JSON 표현 — 케이스·수렴·판정 플래그·트림 상태/입력.
+
+    전체를 to_jsonable로 마감 — 발산 해의 NaN/inf도 비유한값 정책을 우회하지
+    않는다 (개별 필드의 원시 float 통과 금지).
+    """
     phi, theta, psi = (float(v) for v in tr.state.euler())
-    return {
+    return to_jsonable({
         "case": {
             "name": tr.case.name,
             "mach": tr.case.mach,
@@ -59,17 +65,17 @@ def trim_result_dict(tr) -> dict:
             "condition": tr.case.condition,
         },
         "converged": bool(tr.converged),
-        "cost": to_jsonable(float(tr.cost)),
+        "cost": float(tr.cost),
         "flags": dict(tr.flags),  # continuity_ok는 3-상태 (None = 미판정)
         "euler": [phi, theta, psi],
-        "vel_b": to_jsonable(tr.state.vel_b),
+        "vel_b": tr.state.vel_b,
         "control": {
-            "elevon": to_jsonable(tr.control.elevon),
+            "elevon": tr.control.elevon,
             "rudder": float(tr.control.rudder),
-            "throttle": to_jsonable(tr.control.throttle),
+            "throttle": tr.control.throttle,
         },
         "params_fingerprint": tr.params_fingerprint,
-    }
+    })
 
 
 def sim_result_dict(res, stride: int = 1) -> dict:

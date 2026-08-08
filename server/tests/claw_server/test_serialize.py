@@ -59,6 +59,24 @@ def test_trim_result_dict_fields():
     json.dumps(d, allow_nan=False)
 
 
+def test_trim_result_dict_applies_nonfinite_policy():
+    """발산 트림해의 NaN/inf도 정책 적용 — 저장(allow_nan=False)에서 죽지 않음 (리뷰 M1)."""
+    import numpy as np
+
+    from claw.common.contracts import SurfaceCommand, TrimCase, TrimResult, VehicleState
+
+    tr = TrimResult(
+        case=TrimCase("bad", mach=0.6, alt=1000.0, fuel=200.0),
+        state=VehicleState(vel_b=np.array([np.nan, 0.0, 0.0])),
+        control=SurfaceCommand(),
+        converged=False,
+        cost=float("inf"),
+    )
+    d = trim_result_dict(tr)
+    assert d["cost"] == "inf" and d["vel_b"][0] is None
+    json.dumps(d, allow_nan=False)
+
+
 def test_sim_result_dict_stride():
     from claw.common.contracts import SimResult
 

@@ -46,6 +46,44 @@ def test_job_cooperative_cancel():
     assert stopped, "작업이 취소 신호를 감지하고 정상 반환해야 함"
 
 
+def test_late_cancel_after_full_completion_stays_done():
+    """완주(done==total) 직후 도착한 취소는 결과를 '취소'로 강등하지 않음 (리뷰 S3)."""
+    mgr = JobManager()
+
+    def work(job):
+        job.report(3, 3)
+        job.request_cancel()  # 마지막 보고 후·상태 확정 전 도착한 취소를 재현
+
+    job = mgr.submit("demo", work)
+    assert job.wait(10.0)
+    assert job.status == "done"
+
+
+def test_partial_then_cancel_is_cancelled():
+    """부분 진행(done<total) 상태의 취소는 cancelled — 완주 보정과의 경계."""
+    mgr = JobManager()
+
+    def work(job):
+        job.report(1, 3)
+        job.request_cancel()
+
+    job = mgr.submit("demo", work)
+    assert job.wait(10.0)
+    assert job.status == "cancelled"
+
+
+def test_error_snapshot_consistent():
+    """error 종단 스냅샷 일관성 — status가 error면 error 본문·finished 존재 (리뷰 S1)."""
+
+    def boom(job):
+        raise RuntimeError("실패 데모")
+
+    job = JobManager().submit("demo", boom)
+    assert job.wait(10.0)
+    d = job.to_dict()
+    assert d["status"] == "error" and d["error"] and d["finished"] is not None
+
+
 def test_job_error_captured():
     def boom(job):
         raise RuntimeError("실패 데모")
