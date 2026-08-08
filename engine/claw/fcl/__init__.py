@@ -15,6 +15,13 @@ from claw.fcl.limiter import AlphaLimiter
 from claw.fcl.mixer import Mixer
 from claw.fcl.scas import Scas, ScasAxis
 from claw.fcl.schedule import SCHED_VARS, GainSchedule, max_adjacent_jump
+from claw.params.registry import REGISTRY
+
+# 파라미터 보유 법칙 컴포넌트 등록 (02 §2.3) — 웹 블록 파라미터 폼의 스키마 원천.
+# α 리미터는 실속 테이블(공력 정본) 의존이라 파라미터 폼 대상 아님 — 미등록.
+Autopilot.register(REGISTRY, category="fcl")
+ScasAxis.register(REGISTRY, category="fcl")
+Mixer.register(REGISTRY, category="fcl")
 
 __all__ = [
     "airdata_from_nav",

@@ -295,3 +295,18 @@ def test_make_demo_fcl_gain_tables_injection():
     # 스케줄 비활성 조립에 테이블 주입은 구성 오류
     with pytest.raises(ValueError):
         make_demo_fcl(with_schedule=False, gain_tables=make_demo_gain_tables())
+
+
+def test_fcl_components_registered_with_schema():
+    """claw.fcl import 시 전역 REGISTRY "fcl" 카테고리에 자동 등록 —
+    웹 블록 파라미터 폼(02 §2.3 폼 자동 생성)의 원천."""
+    from claw.params.registry import REGISTRY
+
+    names = REGISTRY.names("fcl")
+    assert {"Autopilot", "ScasAxis", "Mixer"} <= set(names)
+    schema = REGISTRY.schema("fcl", "Autopilot")
+    assert schema["title"] == "fcl/Autopilot"
+    assert schema["properties"]["phi_max"]["maximum"] == 1.5  # 단위·범위 메타 포함
+    # 스키마 키 == 생성자 kwargs — create()가 그대로 인스턴스화
+    ap = REGISTRY.create("fcl", "Autopilot", {"phi_max": 0.5})
+    assert ap.phi_max == 0.5
