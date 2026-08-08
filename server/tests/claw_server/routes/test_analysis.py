@@ -70,7 +70,8 @@ def test_margin_map_infeasible_case_reported_not_fatal(client, wait_job):
 
 
 def test_vn_envelope_endpoint(client):
-    """V-n 보호 경계 (01 §3.6) — 실속선·α 리미터 보호선, 구조 한계는 [TBD] null."""
+    """V-n 선도 (01 §3.6) — 실속·보호 곡선 + 구조 한계선(프로파일 자리표시) +
+    특성 속도. 한계값 출처는 데모 자리표시임을 응답이 자기서술."""
     r = client.get("/api/analysis/vn-envelope", params={"alt": 1000.0, "fuel": 200.0})
     assert r.status_code == 200
     b = r.json()
@@ -79,7 +80,12 @@ def test_vn_envelope_endpoint(client):
     assert all(x < y for x, y in zip(b["n_stall"], b["n_stall"][1:]))  # 동압 V² 성장
     assert all(p < s for p, s in zip(b["n_prot"], b["n_stall"]))  # 보호선이 안쪽
     assert b["alpha_margin"] == 0.05  # α 리미터 [기본값]과 동일
-    assert b["structural"] is None  # [TBD] — 서버가 값을 지어내지 않음
+    lim = b["limits"]
+    assert lim["n_ultimate_pos"] == lim["n_limit_pos"] * lim["safety_factor"]
+    assert 0.0 < lim["v_no"] < lim["v_d"]
+    sp = b["speeds"]
+    assert 0.0 < sp["v_s"] < sp["v_a"] < lim["v_d"]  # V_S < V_A < V_D
+    assert b["limits_source"] == "demo-placeholder"  # 실기체 값 아님 자기서술
     # ISA 범위 밖 고도 → 엔진 ValueError → 422
     bad = client.get("/api/analysis/vn-envelope", params={"alt": 99999.0, "fuel": 200.0})
     assert bad.status_code == 422

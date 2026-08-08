@@ -25,7 +25,12 @@ from claw.plant.aircraft import (
     XE_W,
     Aircraft,
 )
-from claw.plant.demo import make_demo_aircraft, make_demo_db_ranges, make_demo_stall_table
+from claw.plant.demo import (
+    make_demo_aircraft,
+    make_demo_db_ranges,
+    make_demo_stall_table,
+    make_demo_structural_limits,
+)
 from claw.plant.eom import (
     N_STATES,
     OMEGA,
@@ -63,6 +68,7 @@ __all__ = [
     "make_demo_aircraft",
     "make_demo_db_ranges",
     "make_demo_stall_table",
+    "make_demo_structural_limits",
     "XE_NAMES",
     "XE_U",
     "XE_V",

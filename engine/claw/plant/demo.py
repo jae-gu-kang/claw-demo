@@ -54,6 +54,22 @@ def make_demo_db_ranges() -> dict:
     return {"alpha": (-0.2, 0.45), "beta": (-0.3, 0.3), "mach": (0.1, 0.9)}
 
 
+def make_demo_structural_limits() -> dict:
+    """데모 구조 한계 [기본값] — V-n 선도 표시용 자리표시 (실기체 값 아님).
+
+    구조팀 정본 확보 시 교체 (01 §3.6 — Nz 제한 [TBD]와 한 세트).
+    제한하중배수(운용 허용) ±, 극한 = 제한 × 안전계수 1.5 [관례],
+    mach_no = 최대 구조 순항 마하(V_NO 상당), mach_d = 급강하 한계 마하(V_D).
+    """
+    return {
+        "n_limit_pos": 6.0,
+        "n_limit_neg": -3.0,
+        "safety_factor": 1.5,
+        "mach_no": 0.75,
+        "mach_d": 0.9,
+    }
+
+
 def make_demo_stall_table() -> Table:
     """데모 실속 경계 α_stall = f(Mach) — 공력팀 정본 대역 (01 §2.3).
 

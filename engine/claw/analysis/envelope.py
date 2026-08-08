@@ -5,8 +5,10 @@ alpha_margin=0이면 실속 경계, α 리미터 마진(0.05 [기본값])을 주
 가정: δe=0·β=0·각속도 0(준정적)·ISA. 양력은 동체축 공력힘의 풍축 투영
 L = −F_z·cosα + F_x·sinα — 계수 부호 가정 없이 프로파일 DB를 그대로 소비.
 
-구조 한계(±n)·급강하 한계속도 V_D는 [TBD] — 구조하중 데이터 확보 시
-이 모듈이 함께 반환하도록 확장 (Nz 제한 기능 여부도 01 §3.6 [TBD]).
+구조 한계(±n·안전계수·M_NO·M_D)는 비행체 프로파일 데이터로 주입받아
+(데모: plant.make_demo_structural_limits [기본값] 자리표시 — 실기체 값 아님)
+vn_envelope가 한계선·특성 속도(V_S·V_A)까지 산출한다. Nz 제한 "기능" 채택
+여부는 01 §3.6 [TBD] 유지.
 """
 
 import math
@@ -15,6 +17,52 @@ import numpy as np
 
 from claw.common.constants import G0
 from claw.env import isa_atmosphere
+
+
+def vn_envelope(aircraft, stall_table, limits, alt, fuel, n_points=81, alpha_margin=0.0):
+    """V-n 선도 일습 — 실속·보호 곡선 + 구조 한계선 + 특성 속도.
+
+    limits: 프로파일 구조 한계 dict (n_limit_pos/neg, safety_factor,
+    mach_no, mach_d). 특성 속도는 실속 곡선 보간 역산: V_S(n=1)·V_A(n=제한하중)
+    — 마하 격자 범위 밖이면 None. 음의 실속 곡선은 데이터 부재로 미산출.
+    """
+    atm = isa_atmosphere(alt)
+    m0 = float(stall_table.axes[0][0])
+    m1 = max(float(stall_table.axes[0][-1]), float(limits["mach_d"]))
+    machs = np.linspace(m0, m1, int(n_points))
+    stall = vn_stall_boundary(aircraft, stall_table, alt, fuel, machs)
+    prot = vn_stall_boundary(
+        aircraft, stall_table, alt, fuel, machs, alpha_margin=alpha_margin
+    )
+    v_arr = np.array(stall["V"])
+    n_arr = np.array(stall["n"])  # 동압 V² 지배 — 단조 증가 (보간 역산 전제)
+    n_lim = float(limits["n_limit_pos"])
+    sf = float(limits["safety_factor"])
+
+    def crossing(n_target):
+        if n_arr[0] <= n_target <= n_arr[-1]:
+            return float(np.interp(n_target, n_arr, v_arr))
+        return None
+
+    out_limits = {
+        "n_limit_pos": n_lim,
+        "n_limit_neg": float(limits["n_limit_neg"]),
+        "safety_factor": sf,
+        "n_ultimate_pos": n_lim * sf,
+        "n_ultimate_neg": float(limits["n_limit_neg"]) * sf,
+        "mach_no": float(limits["mach_no"]),
+        "mach_d": float(limits["mach_d"]),
+        "v_no": float(limits["mach_no"]) * atm.a,
+        "v_d": float(limits["mach_d"]) * atm.a,
+    }
+    return {
+        "mach": stall["mach"],
+        "V": stall["V"],
+        "n_stall": stall["n"],
+        "n_prot": prot["n"],
+        "limits": out_limits,
+        "speeds": {"v_s": crossing(1.0), "v_a": crossing(n_lim)},
+    }
 
 
 def vn_stall_boundary(aircraft, stall_table, alt, fuel, machs, alpha_margin=0.0):

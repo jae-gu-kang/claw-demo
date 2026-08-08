@@ -104,3 +104,29 @@ def test_vn_stall_boundary_analytic():
     # α 리미터 보호 마진 적용 → 경계 하향 (보호선이 실속선 안쪽)
     vp = vn_stall_boundary(ac, st, 1000.0, 200.0, machs, alpha_margin=0.05)
     assert all(p < s for s, p in zip(vn["n"], vp["n"]))
+
+
+def test_vn_envelope_full_diagram_data():
+    """V-n 선도 일습 — 구조 한계선·특성 속도(V_S·V_A) 정합 (01 §3.6 [기본값])."""
+    from claw.analysis import vn_envelope
+    from claw.plant import make_demo_structural_limits
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    lim = make_demo_structural_limits()
+    env = vn_envelope(ac, st, lim, alt=1000.0, fuel=200.0, alpha_margin=0.05)
+    V = np.array(env["V"])
+    n = np.array(env["n_stall"])
+    # 특성 속도: V_S에서 n_stall≈1, V_A에서 n_stall≈제한하중 (곡선 보간 역산)
+    assert env["speeds"]["v_s"] is not None and env["speeds"]["v_a"] is not None
+    assert np.interp(env["speeds"]["v_s"], V, n) == pytest.approx(1.0, rel=1e-6)
+    assert np.interp(env["speeds"]["v_a"], V, n) == pytest.approx(
+        lim["n_limit_pos"], rel=1e-6)
+    assert env["speeds"]["v_s"] < env["speeds"]["v_a"]  # 실속속도 < 기동속도
+    # 구조 한계: 극한 = 제한 × 안전계수, V_NO < V_D
+    L = env["limits"]
+    assert L["n_ultimate_pos"] == pytest.approx(6.0 * 1.5)
+    assert L["n_ultimate_neg"] == pytest.approx(-3.0 * 1.5)
+    assert 0.0 < L["v_no"] < L["v_d"]
+    # 보호 곡선은 실속 곡선 안쪽
+    assert all(p < s for p, s in zip(env["n_prot"], env["n_stall"]))

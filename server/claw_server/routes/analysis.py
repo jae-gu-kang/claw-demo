@@ -18,9 +18,13 @@ from claw.analysis import (
     damp,
     loop_margins,
     pi_loop,
-    vn_stall_boundary,
+    vn_envelope,
 )
-from claw.plant import make_demo_aircraft, make_demo_stall_table
+from claw.plant import (
+    make_demo_aircraft,
+    make_demo_stall_table,
+    make_demo_structural_limits,
+)
 from claw.trim import (
     LAT_INPUTS,
     LAT_STATES,
@@ -101,36 +105,33 @@ def _trim_only_entry(tr) -> dict:
 
 
 @router.get("/analysis/vn-envelope")
-def vn_envelope(
+def vn_envelope_endpoint(
     alt: float = Query(...),
     fuel: float = Query(ge=0.0),
     alpha_margin: float = Query(default=0.05, ge=0.0),  # α 리미터 [기본값]과 동일
 ) -> dict:
-    """V-n 보호 경계 (01 §3.6) — 실속 경계 + α 리미터 보호 경계 (동기 계산).
+    """V-n 선도 (01 §3.6) — 실속·보호 곡선 + 구조 한계선 + 특성 속도 (동기 계산).
 
-    구조 한계(±n)·급강하 한계속도는 [TBD] — 데이터 확보 전까지 null (서버가
-    수치를 지어내지 않음, 표기는 웹 소관).
+    구조 한계는 비행체 프로파일의 자리표시 [기본값](실기체 값 아님) — 정본
+    확보 시 프로파일 교체. 표기는 웹 소관.
     """
     ac = make_demo_aircraft()
-    st = make_demo_stall_table()
-    machs = np.linspace(float(st.axes[0][0]), float(st.axes[0][-1]), 81)
     try:
-        stall = vn_stall_boundary(ac, st, alt=alt, fuel=fuel, machs=machs)
-        prot = vn_stall_boundary(
-            ac, st, alt=alt, fuel=fuel, machs=machs, alpha_margin=alpha_margin
+        env = vn_envelope(
+            ac,
+            make_demo_stall_table(),
+            make_demo_structural_limits(),
+            alt=alt,
+            fuel=fuel,
+            alpha_margin=alpha_margin,
         )
     except (ValueError, TypeError) as e:  # ISA 범위 밖 고도 등 — 엔진 검증
         raise HTTPException(status_code=422, detail=str(e))
-    return {
-        "mach": stall["mach"],
-        "V": stall["V"],
-        "n_stall": stall["n"],
-        "n_prot": prot["n"],
-        "alt": alt,
-        "fuel": fuel,
-        "alpha_margin": alpha_margin,
-        "structural": None,  # [TBD] 구조하중 데이터 확보 시
-    }
+    env["alt"] = alt
+    env["fuel"] = fuel
+    env["alpha_margin"] = alpha_margin
+    env["limits_source"] = "demo-placeholder"  # 실기체 값 아님 — 웹이 명기 표시
+    return env
 
 
 @router.post("/analysis/margin-map", status_code=202)
