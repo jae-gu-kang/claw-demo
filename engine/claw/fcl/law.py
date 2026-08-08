@@ -13,15 +13,13 @@
   limiter_active — 엔벨로프 감시(02 §6.1)가 소비
 """
 
-import numpy as np
-
 from claw.common.contracts import SurfaceCommand
 from claw.env import isa_atmosphere
+from claw.env.constants import ISA_MIN_ALT, ISA_STRATO1_TOP_ALT
 from claw.fcl.airdata import airdata_from_nav
 
 _SCAS_GROUPS = ("pitch", "roll", "yaw")
 _AP_GROUPS = ("speed", "alt", "heading")
-_H_VALID = (-5000.0, 20000.0)  # ISA 유효범위 (env.constants) — mach 산출용 클램프
 
 
 class FlightControlLaw:
@@ -31,6 +29,13 @@ class FlightControlLaw:
         self.mixer = mixer
         self.schedule = schedule
         self.alpha_limiter = alpha_limiter
+        if schedule is not None:
+            # 그룹 이름 오타는 아래 분배 필터에서 '조용히' 버려진다 — 여기서 시끄럽게
+            known = set(_SCAS_GROUPS) | set(_AP_GROUPS)
+            groups = {name.split(".", 1)[0] for name in schedule.tables}
+            bad = groups - known
+            if bad:
+                raise ValueError(f"미정의 게인 그룹 {sorted(bad)} (허용: {sorted(known)})")
         self.alpha_margin = None
         self.limiter_active = False
 
@@ -74,7 +79,7 @@ class FlightControlLaw:
 
         V, _alpha, _beta = airdata_from_nav(nav)
         h = -float(nav.pos_n[2])
-        h_isa = min(max(h, _H_VALID[0]), _H_VALID[1])
+        h_isa = min(max(h, ISA_MIN_ALT), ISA_STRATO1_TOP_ALT)
         mach = V / isa_atmosphere(h_isa).a
 
         gains = None

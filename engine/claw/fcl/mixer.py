@@ -45,10 +45,13 @@ class Mixer(Block):
         """(피치·롤·요 축 명령, 집합 스로틀) → SurfaceCommand. 무상태(순수) 블록."""
         left = min(max(de + da, self.elevon_lo), self.elevon_hi)
         right = min(max(de - da, self.elevon_lo), self.elevon_hi)
-        d = self.k_diff_thr * dr
+        rudder = min(max(dr, self.rudder_lo), self.rudder_hi)
+        # 차동추력은 클램프된 실 러더 기준 — 러더가 내지 못하는 명령에 추력이
+        # 반응하지 않도록 (포화 시 추력 인계는 별도 설계 항목)
+        d = self.k_diff_thr * rudder
         return SurfaceCommand(
             elevon=np.array([left, left, right, right]),
-            rudder=min(max(dr, self.rudder_lo), self.rudder_hi),
+            rudder=rudder,
             throttle=np.array(
                 [min(max(thr - d, 0.0), 1.0), min(max(thr + d, 0.0), 1.0)]
             ),

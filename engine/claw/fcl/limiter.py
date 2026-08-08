@@ -19,8 +19,17 @@ from claw.tables import Table
 
 class AlphaLimiter:
     def __init__(self, stall_table: Table, margin: float = 0.05):
-        if "mach" not in stall_table.axis_names:
-            raise ValueError(f"실속 경계 테이블에 mach 축 필요: {stall_table.axis_names}")
+        # 1차 구현은 1D α_stall(mach)만 — 다축 정본(예: mach·alt)이 오면 조용히
+        # 잘못된 축값(0)으로 조회하는 대신 여기서 시끄럽게 거부한다
+        if stall_table.axis_names != ("mach",):
+            raise ValueError(
+                f"실속 경계 테이블은 1D (mach,)만 지원: {stall_table.axis_names}"
+            )
+        if stall_table.extrapolate != "clip":
+            raise ValueError(
+                f"실속 경계는 extrapolate='clip' 필요(비행 중 예외 방지): "
+                f"{stall_table.extrapolate!r}"
+            )
         if margin < 0:
             raise ValueError(f"margin은 음수 불가: {margin}")
         self.stall_table = stall_table
@@ -28,8 +37,7 @@ class AlphaLimiter:
 
     def alpha_max(self, mach) -> float:
         """제한 받음각 = α_stall(mach) − 보호마진."""
-        point = {ax: mach if ax == "mach" else 0.0 for ax in self.stall_table.axis_names}
-        return float(self.stall_table.interp(**point)) - self.margin
+        return float(self.stall_table.interp(mach=mach)) - self.margin
 
     def step(self, theta_cmd, nav, mach):
         """→ (제한된 θ_cmd, 리미터 작동 여부, 실속 마진 α_max−α)."""

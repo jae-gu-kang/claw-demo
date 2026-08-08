@@ -91,6 +91,27 @@ def test_max_adjacent_jump_detects_discontinuity():
 # ---------- α 리미터 ----------
 
 
+def test_schedule_group_typo_rejected_at_assembly():
+    """그룹 이름 오타는 분배 필터에서 조용히 버려짐 — 조립 시 시끄럽게 거부 (리뷰 Must fix)."""
+    tab = Table({"mach": (0.4, 0.8)}, (-3.0, -1.5), extrapolate="clip")
+    sched = GainSchedule({"ptich.kp": tab})  # 오타
+    with pytest.raises(ValueError):
+        FlightControlLaw(
+            Scas(ScasAxis(), ScasAxis(), ScasAxis()), Autopilot(), Mixer(), schedule=sched
+        )
+
+
+def test_alpha_limiter_rejects_multiaxis_and_error_policy():
+    """다축 실속 테이블·error 외삽 정책은 조용한 오조회/비행 중 예외 — 생성 시 거부 (리뷰 Must fix)."""
+    two_d = Table({"mach": (0.2, 0.8), "alt": (0.0, 5000.0)},
+                  [[0.35, 0.35], [0.30, 0.30]], extrapolate="clip")
+    with pytest.raises(ValueError):
+        AlphaLimiter(two_d)
+    err_tab = Table({"mach": (0.2, 0.8)}, (0.35, 0.30), extrapolate="error")
+    with pytest.raises(ValueError):
+        AlphaLimiter(err_tab)
+
+
 def test_alpha_limiter_caps_pitch_command():
     lim = AlphaLimiter(make_demo_stall_table(), margin=0.05)
     assert lim.alpha_max(0.3) == pytest.approx(0.30)  # 데모 α_stall(0.3)=0.35 − 0.05
@@ -118,12 +139,15 @@ def test_mixer_reconstruction_identity():
 
 
 def test_mixer_differential_thrust_compensation():
-    """차동추력 보상 (01 §3.2): dr → 좌우 스로틀 분배, [0,1] 클램프."""
+    """차동추력 보상 (01 §3.2): 클램프된 실 러더 기준 분배 — 러더가 내지 못하는
+    명령에 추력이 반응하지 않음 (리뷰 반영)."""
     mx = Mixer(k_diff_thr=0.1).init(DT)
     sc = mx.step(0.0, 0.0, 0.2, 0.5)
     assert sc.throttle[0] == pytest.approx(0.48) and sc.throttle[1] == pytest.approx(0.52)
-    sc2 = mx.step(0.0, 0.0, 5.0, 0.9)
-    assert sc2.throttle[0] == pytest.approx(0.4) and sc2.throttle[1] == 1.0
+    sc2 = mx.step(0.0, 0.0, 5.0, 0.9)  # dr 클램프 0.35 → d=0.035
+    assert sc2.rudder == pytest.approx(0.35)
+    assert sc2.throttle[0] == pytest.approx(0.865)
+    assert sc2.throttle[1] == pytest.approx(0.935)
 
 
 def test_mixer_per_surface_saturation():
