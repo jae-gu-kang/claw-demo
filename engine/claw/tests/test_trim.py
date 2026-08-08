@@ -75,6 +75,29 @@ def test_flag_false_paths(ac):
     assert tr2.flags["saturation_ok"] is False
 
 
+def test_trim_batch_progress_callback(ac):
+    """진행 콜백 (M13 서버 진행률 경로) — 케이스마다 (done, total, 결과) 호출."""
+    cases = [TrimCase(f"m{m:.1f}", mach=m, alt=1000.0, fuel=200.0) for m in (0.5, 0.6, 0.7)]
+    calls = []
+
+    def on_progress(done, total, tr):
+        calls.append((done, total, tr.case.name))
+        return False
+
+    results = trim_batch(ac, cases, on_progress=on_progress)
+    assert len(results) == 3
+    assert [(d, t) for d, t, _ in calls] == [(1, 3), (2, 3), (3, 3)]
+    assert [name for _, _, name in calls] == [c.name for c in cases]
+
+
+def test_trim_batch_progress_cancel(ac):
+    """콜백 truthy 반환 = 협조적 취소 — 부분 결과 반환 (M13 작업 취소 경로)."""
+    cases = [TrimCase(f"m{m:.1f}", mach=m, alt=1000.0, fuel=200.0) for m in (0.5, 0.6, 0.7)]
+    results = trim_batch(ac, cases, on_progress=lambda done, total, tr: done >= 2)
+    assert len(results) == 2
+    assert all(r.converged for r in results)
+
+
 def test_euler_deriv_consistency_with_quaternion_path(ac):
     """euler 표현 deriv와 쿼터니언 경로(RigidBody용 fm)의 힘 일관성 — u̇ 성분 대조."""
     xe = np.zeros(12)

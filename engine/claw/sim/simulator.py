@@ -84,8 +84,13 @@ class Simulator:
         ).init(self.dt_plant)
         return elev, rud
 
-    def run(self, tr, t_end: float, fingerprint: str = "") -> SimResult:
-        """트림해에서 출발하는 폐루프 실행 → SimResult (계보 지문 포함)."""
+    def run(self, tr, t_end: float, fingerprint: str = "", on_progress=None) -> SimResult:
+        """트림해에서 출발하는 폐루프 실행 → SimResult (계보 지문 포함).
+
+        on_progress(done, total): 스텝 수 기준 ~1% 주기로 호출 (M13 서버 진행률
+        경로). truthy 반환 = 협조적 취소 — ISA 이탈과 같은 절단 경로로 부분
+        결과를 보존하고 meta["aborted"]="cancelled"로 표시한다.
+        """
         if not tr.converged:
             raise ValueError(f"미수렴 트림해로는 시뮬 불가: {tr.case.name}")
         th0 = tr.state.euler()[1]
@@ -110,6 +115,7 @@ class Simulator:
         rb = RigidBody(m0, J0)
 
         n_steps = int(round(t_end / self.dt_plant))
+        progress_stride = max(1, n_steps // 100)
         sig = {k: np.empty(n_steps) for k in (
             "pn", "pe", "h", "u", "v", "w", "p", "q", "r", "phi", "theta", "psi",
             "V", "alpha", "beta", "mach", "fuel",
@@ -187,6 +193,16 @@ class Simulator:
             # 보존한다 (RK4 부단계에서 isa_atmosphere 예외로 전체 손실 방지)
             if not (ISA_MIN_ALT + 10.0 < h < ISA_STRATO1_TOP_ALT - 10.0):
                 aborted = "alt_out_of_range"
+                n_done = k + 1
+                break
+
+            # 진행률·협조적 취소 (M13) — 절단 경로 재사용으로 부분 결과 보존
+            if (
+                on_progress is not None
+                and (k + 1) % progress_stride == 0
+                and on_progress(k + 1, n_steps)
+            ):
+                aborted = "cancelled"
                 n_done = k + 1
                 break
 

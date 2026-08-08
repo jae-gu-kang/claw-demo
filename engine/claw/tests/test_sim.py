@@ -167,6 +167,35 @@ def test_fuel_burn_quasi_static(trim_design):
     assert res.signals["fuel"][-1] < 200.0
 
 
+def test_sim_progress_callback_monotonic(trim_design):
+    """진행 콜백 (M13 서버 진행률 경로) — (done, total) 단조 증가, 완료 시 done=total."""
+    ac, tr = trim_design
+    calls = []
+
+    def on_progress(done, total):
+        calls.append((done, total))
+        return False
+
+    res = make_sim(ac, tr).run(tr, t_end=2.0, on_progress=on_progress)
+    assert len(res.t) == 200  # 취소 없음 — 완주
+    assert calls, "콜백이 호출되어야 함"
+    assert all(t == 200 for _, t in calls)
+    dones = [d for d, _ in calls]
+    assert dones == sorted(dones) and dones[-1] == 200
+    assert res.meta["aborted"] is None
+
+
+def test_sim_progress_cancel_truncates(trim_design):
+    """콜백 truthy 반환 = 협조적 취소 — 절단 경로 재사용 (부분 결과·정합 길이)."""
+    ac, tr = trim_design
+    res = make_sim(ac, tr).run(
+        tr, t_end=2.0, on_progress=lambda done, total: done >= total // 2
+    )
+    assert res.meta["aborted"] == "cancelled"
+    assert 100 <= len(res.t) < 120  # 취소 지연은 콜백 주기(스트라이드) 이내
+    assert len(res.signals["h"]) == len(res.t) == len(res.signals["mode"])
+
+
 def test_out_of_band_run_truncates_with_partial_result(trim_design):
     """ISA 범위 이탈 런은 직전 절단 — 부분 시계열·엔벨로프 보존 (리뷰 반영).
 
