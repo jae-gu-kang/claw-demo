@@ -164,9 +164,12 @@ export function trackCanvas(pn, pe, waypoints, acceptRadius, { markerIdx = null,
   ctx.strokeStyle = "#1a6feb";
   ctx.lineWidth = 1.6;
   ctx.beginPath();
+  let started = false;
   pn.forEach((n, i) => {
-    if (i === 0) ctx.moveTo(px(pe[0]), py(n));
-    else ctx.lineTo(px(pe[i]), py(n));
+    const e = pe[i];
+    if (typeof n !== "number" || typeof e !== "number") { started = false; return; }
+    if (!started) { ctx.moveTo(px(e), py(n)); started = true; }
+    else ctx.lineTo(px(e), py(n));
   });
   ctx.stroke();
   ctx.fillStyle = "#157f3d";

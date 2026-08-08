@@ -3,7 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- eval-free 방침의 실효화 — 동일 출처 외 전부 차단 (스타일 속성만 허용).
+       WS는 동일 출처('self')로 허용되며, 차단 환경에선 watchJob이 폴링 폴백 -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
   <title>CLAW 설계툴</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>

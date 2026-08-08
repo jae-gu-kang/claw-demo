@@ -37,6 +37,19 @@ test("buildModes: 이름 없음·비수치 거부", () => {
     exitKind: "alt_ge", exitValue: "높게", next: "" }]));
 });
 
+test("buildModes: 필수 인자 빈 문자열은 0이 아니라 거부 (리뷰 S1 — Number('')===0 함정)", () => {
+  // 이탈 조건 값을 비우면 ["alt_ge", 0]이 되어 즉시 이탈하는 무증상 붕괴 — 차단
+  assert.throws(() => buildModes([{ name: "x", speed: "", alt: "", heading: "",
+    exitKind: "alt_ge", exitValue: "", next: "" }]));
+  assert.throws(() => buildModes([{ name: "x", speed: "", alt: "", heading: "",
+    exitKind: "alt_ge", exitValue: "   ", next: "" }]));
+});
+
+test("buildWaypoints: 좌표 빈 문자열 거부 (0 조용 주입 금지)", () => {
+  assert.throws(() => buildWaypoints([{ n: "", e: "100" }]));
+  assert.throws(() => buildWaypoints([{ n: "100", e: " " }]));
+});
+
 test("COND_KINDS: 인자수 테이블 (0-인자 = always·path_done)", () => {
   assert.equal(COND_KINDS.always, 0);
   assert.equal(COND_KINDS.path_done, 0);

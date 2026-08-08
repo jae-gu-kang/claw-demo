@@ -3,14 +3,17 @@
 DOM 조립 전용 (얇게) — 격자 로직은 lib/grid.js, 수치·판정은 전부 서버(엔진) 산출.
 */
 
-import { api, cancelJob, errorText, watchJob } from "../api.js";
+import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { store } from "../store.js";
+import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
-// 모듈 상태 — 탭 재진입 시 유지
+// 모듈 상태 — 탭 재진입 시 유지 (실행 중 작업 재부착 포함, 리뷰 S4)
 let cases = [];
 let lastBody = null;
+let runningJobId = null;
+let runningFp = "";
 
 const FLAG_COLS = [
   ["residual_ok", "잔차"],
@@ -69,11 +72,11 @@ export function render() {
     el("div", { class: "panel" }, el("h2", {}, "결과"), resultBox),
   );
 
-  renderCases(caseBox, progressBox, errBox, resultBox);
-  if (lastBody) renderResults(resultBox, lastBody);
-
   // 실행 클로저에 지문 접근을 넘기기 위해 보관
   caseBox._fp = fFp;
+  renderCases(caseBox, progressBox, errBox, resultBox);
+  if (lastBody) renderResults(resultBox, lastBody);
+  if (runningJobId) watchTrim(caseBox, progressBox, errBox, resultBox); // 재부착
   return root;
 }
 
@@ -110,38 +113,52 @@ function renderCases(caseBox, progressBox, errBox, resultBox) {
     }, "행 추가"),
     el("button", {
       class: "primary",
-      disabled: !cases.length,
+      disabled: !cases.length || !!runningJobId, // 이중 제출 방지 (리뷰 S4)
       onclick: () => runBatch(caseBox, progressBox, errBox, resultBox),
-    }, `배치 실행 (${cases.length}케이스)`),
+    }, runningJobId ? "실행 중…" : `배치 실행 (${cases.length}케이스)`),
   ));
 }
 
 async function runBatch(caseBox, progressBox, errBox, resultBox) {
+  if (runningJobId) return;
   clear(errBox);
   clear(resultBox);
-  const fingerprint = caseBox._fp ? caseBox._fp.value : "";
+  runningFp = caseBox._fp ? caseBox._fp.value : "";
   try {
-    const submitted = await api.post("/trim/batch", { cases, fingerprint });
-    const bar = el("div");
-    const label = el("span", { class: "progress-label" }, "제출됨…");
-    clear(progressBox).append(el("div", { class: "progress-line" },
-      el("div", { class: "progress" }, bar), label,
-      el("button", { onclick: () => cancelJob(submitted.id) }, "취소"),
-    ));
-    const job = await watchJob(submitted.id, (j) => {
-      bar.style.width = `${Math.round(100 * j.progress)}%`;
-      label.textContent = `${j.status} ${j.done}/${j.total} ${j.message}`;
-    });
-    clear(progressBox);
-    if (job.status === "error") throw new Error(job.error);
-    const body = await api.get(`/results/${job.result_id}`);
-    lastBody = body;
-    store.set("trimResult", { id: job.result_id, fingerprint, cases: [...cases] });
-    renderResults(resultBox, body);
+    const submitted = await api.post("/trim/batch", { cases, fingerprint: runningFp });
+    runningJobId = submitted.id;
+    renderCases(caseBox, progressBox, errBox, resultBox); // 버튼 비활성 반영
+    watchTrim(caseBox, progressBox, errBox, resultBox);
   } catch (e) {
-    clear(progressBox);
     showError(errBox, e);
   }
+}
+
+function watchTrim(caseBox, progressBox, errBox, resultBox) {
+  attachProgress(progressBox, runningJobId, {
+    onDone: async (job) => {
+      runningJobId = null;
+      renderCases(caseBox, progressBox, errBox, resultBox);
+      try {
+        if (job.status === "error") throw new Error(job.error);
+        if (cancelledWithoutResult(job)) {
+          showError(errBox, new Error("취소됨 — 저장된 결과 없음 (실행 전 취소)"));
+          return;
+        }
+        const body = await api.get(`/results/${job.result_id}`);
+        lastBody = body;
+        store.set("trimResult", { id: job.result_id, fingerprint: runningFp, cases: [...cases] });
+        renderResults(resultBox, body);
+      } catch (e) {
+        showError(errBox, e);
+      }
+    },
+    onError: (e) => {
+      runningJobId = null;
+      renderCases(caseBox, progressBox, errBox, resultBox);
+      showError(errBox, e);
+    },
+  });
 }
 
 function renderResults(resultBox, body) {

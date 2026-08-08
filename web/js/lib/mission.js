@@ -15,7 +15,10 @@ export const COND_KINDS = {
 };
 
 function num(text, what) {
-  const v = Number(text);
+  const s = String(text).trim();
+  // Number("") === 0 함정 — 빈 필수 인자가 조용히 0으로 주입되는 것 차단 (리뷰 S1)
+  if (s === "") throw new Error(`${what}: 값이 비어 있음`);
+  const v = Number(s);
   if (!Number.isFinite(v)) throw new Error(`${what}: 수치가 아님 — ${JSON.stringify(text)}`);
   return v;
 }

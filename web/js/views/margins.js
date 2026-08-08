@@ -4,14 +4,16 @@
 트림 가능/불가·판정 색상 맵은 트림 플래그 재사용 (02 §4).
 */
 
-import { api, cancelJob, errorText, watchJob } from "../api.js";
+import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { fuelsOf, marginColor, pivotCases } from "../lib/plot.js";
 import { store } from "../store.js";
 import { heatmapCanvas, scatterCanvas } from "./plots.js";
+import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
 let lastBody = null;
+let runningJobId = null;
 
 export function render() {
   const errBox = el("div");
@@ -27,7 +29,33 @@ export function render() {
   const fKi = el("input", { class: "num", value: "0.8" });
   const fFp = el("input", { value: "web-margin-v1" });
 
+  const showErr = (e) =>
+    clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
+
+  const watch = () => attachProgress(progressBox, runningJobId, {
+    onDone: async (job) => {
+      runningJobId = null;
+      try {
+        if (job.status === "error") throw new Error(job.error);
+        if (cancelledWithoutResult(job)) {
+          showErr(new Error("취소됨 — 저장된 결과 없음 (실행 전 취소)"));
+          return;
+        }
+        lastBody = await api.get(`/results/${job.result_id}`);
+        store.set("marginMap", { id: job.result_id });
+        renderResults(resultBox, lastBody);
+      } catch (e) {
+        showErr(e);
+      }
+    },
+    onError: (e) => {
+      runningJobId = null;
+      showErr(e);
+    },
+  });
+
   const run = async () => {
+    if (runningJobId) return; // 이중 제출 방지 (리뷰 S4)
     try {
       clear(errBox);
       clear(resultBox);
@@ -45,23 +73,10 @@ export function render() {
         fingerprint: fFp.value,
       };
       const submitted = await api.post("/analysis/margin-map", req);
-      const bar = el("div");
-      const label = el("span", { class: "progress-label" }, "제출됨…");
-      clear(progressBox).append(el("div", { class: "progress-line" },
-        el("div", { class: "progress" }, bar), label,
-        el("button", { onclick: () => cancelJob(submitted.id) }, "취소")));
-      const job = await watchJob(submitted.id, (j) => {
-        bar.style.width = `${Math.round(100 * j.progress)}%`;
-        label.textContent = `${j.status} ${j.done}/${j.total} ${j.message}`;
-      });
-      clear(progressBox);
-      if (job.status === "error") throw new Error(job.error);
-      lastBody = await api.get(`/results/${job.result_id}`);
-      store.set("marginMap", { id: job.result_id });
-      renderResults(resultBox, lastBody);
+      runningJobId = submitted.id;
+      watch();
     } catch (e) {
-      clear(progressBox);
-      clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
+      showErr(e);
     }
   };
 
@@ -87,13 +102,15 @@ export function render() {
     el("div", { class: "panel" }, el("h2", {}, "대시보드"), resultBox),
   );
   if (lastBody) renderResults(resultBox, lastBody);
+  if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
   return root;
 }
 
 function renderResults(resultBox, body) {
   const entries = body.cases;
   const fuels = fuelsOf(entries);
-  const fuelSel = el("select", {}, fuels.map((f) => el("option", { value: f }, `연료 ${f} kg`)));
+  const fuelSel = el("select", { "aria-label": "연료 선택" },
+    fuels.map((f) => el("option", { value: f }, `연료 ${f} kg`)));
   const plotBox = el("div");
   const draw = () => {
     const fuel = Number(fuelSel.value);

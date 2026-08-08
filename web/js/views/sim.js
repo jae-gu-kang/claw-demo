@@ -4,12 +4,13 @@
 서버(엔진) 소관 — 구성 오류는 422 텍스트로 표시.
 */
 
-import { api, cancelJob, errorText, watchJob } from "../api.js";
+import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { buildModes, buildWaypoints, COND_KINDS } from "../lib/mission.js";
 import { modeSpans, strideFor } from "../lib/replay.js";
 import { store } from "../store.js";
 import { lineChartCanvas, trackCanvas } from "./plots.js";
+import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
 // 기본 미션 = Phase 4 완주 회귀 미션 (test_mission — 상승→선회 항법→디센트→씨스키밍)
 let modeRows = [
@@ -24,6 +25,9 @@ let modeRows = [
 ];
 let wpRows = [{ n: "8000", e: "0" }, { n: "8000", e: "8000" }];
 let lastReplay = null; // {body, waypoints, acceptRadius}
+let runningJobId = null;
+// 제출 시점 스냅샷 — 실행 중 편집이 재생 오버레이를 오염시키지 않도록 (리뷰 S3)
+let runningSnapshot = { waypoints: [], acceptRadius: 0 };
 
 export function render() {
   const errBox = el("div");
@@ -49,7 +53,39 @@ export function render() {
     fp: el("input", { value: "web-sim-v1" }),
   };
 
+  const showErr = (e) =>
+    clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
+
+  const watch = () => attachProgress(progressBox, runningJobId, {
+    onDone: async (job) => {
+      runningJobId = null;
+      try {
+        if (job.status === "error") throw new Error(job.error);
+        if (cancelledWithoutResult(job)) {
+          showErr(new Error("취소됨 — 저장된 결과 없음 (실행 전 취소)"));
+          return;
+        }
+        const stride = strideFor(job.total || 1);
+        const body = await api.get(`/sim/${job.result_id}/replay?stride=${stride}`);
+        lastReplay = {
+          body,
+          waypoints: runningSnapshot.waypoints,
+          acceptRadius: runningSnapshot.acceptRadius,
+        };
+        store.set("simResult", { id: job.result_id });
+        renderReplay(replayBox);
+      } catch (e) {
+        showErr(e);
+      }
+    },
+    onError: (e) => {
+      runningJobId = null;
+      showErr(e);
+    },
+  });
+
   const run = async () => {
+    if (runningJobId) return; // 이중 제출 방지 (리뷰 S4)
     try {
       clear(errBox);
       clear(replayBox);
@@ -65,6 +101,10 @@ export function render() {
         fuel_flow: Number(f.fuelFlow.value),
         fingerprint: f.fp.value,
       };
+      const snapshot = { // 제출 시점 캡처 (리뷰 S3)
+        waypoints: req.waypoints ?? [],
+        acceptRadius: req.accept_radius,
+      };
       if (req.waypoints === null) delete req.waypoints;
       if (f.navOn.checked) {
         req.nav = { pos_std: 1.0, vel_std: 0.1, att_std: 0.001, psi_std: 0.002,
@@ -79,29 +119,11 @@ export function render() {
         req.gain_tables = store.get("gainTables");
       }
       const submitted = await api.post("/sim/run", req);
-      const bar = el("div");
-      const label = el("span", { class: "progress-label" }, "제출됨…");
-      clear(progressBox).append(el("div", { class: "progress-line" },
-        el("div", { class: "progress" }, bar), label,
-        el("button", { onclick: () => cancelJob(submitted.id) }, "취소")));
-      const job = await watchJob(submitted.id, (j) => {
-        bar.style.width = `${Math.round(100 * j.progress)}%`;
-        label.textContent = `${j.status} ${j.done}/${j.total} 스텝`;
-      });
-      clear(progressBox);
-      if (job.status === "error") throw new Error(job.error);
-      const stride = strideFor(job.total || 1);
-      const body = await api.get(`/sim/${job.result_id}/replay?stride=${stride}`);
-      lastReplay = {
-        body,
-        waypoints: (buildWaypoints(wpRows) ?? []),
-        acceptRadius: Number(f.accept.value),
-      };
-      store.set("simResult", { id: job.result_id });
-      renderReplay(replayBox);
+      runningJobId = submitted.id;
+      runningSnapshot = snapshot;
+      watch();
     } catch (e) {
-      clear(progressBox);
-      clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
+      showErr(e);
     }
   };
 
@@ -144,6 +166,7 @@ export function render() {
   renderModeTable(modeBox);
   renderWpTable(wpBox);
   if (lastReplay) renderReplay(replayBox);
+  if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
   return root;
 }
 
@@ -220,7 +243,7 @@ function renderReplay(replayBox) {
   const readout = el("span", { class: "progress-label" });
   const slider = el("input", {
     type: "range", min: "0", max: String(body.t.length - 1), value: "0",
-    style: "width: 340px",
+    style: "width: 340px", "aria-label": "재생 시각 커서",
   });
   const updateCursor = () => {
     const i = Number(slider.value);

@@ -9,7 +9,6 @@ import { clear, el, fmt } from "../dom.js";
 import { store } from "../store.js";
 
 let tables = null; // {name: {axes: {mach: [...]}, data: [...], extrapolate}}
-let dirty = false;
 
 export function render() {
   const box = el("div");
@@ -20,7 +19,6 @@ export function render() {
     try {
       clear(errBox);
       tables = await api.get("/gains/demo");
-      dirty = false;
       renderTables(box, statusLine);
     } catch (e) {
       clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -72,12 +70,17 @@ function renderTables(box, statusLine) {
               step: "any",
               value: String(tables[name].data[i]),
               onchange: (ev) => {
-                const num = Number(ev.target.value);
-                if (Number.isFinite(num)) {
-                  tables[name].data[i] = num;
-                  dirty = true;
-                  statusLine.textContent = "편집됨 (미적용) — '시뮬에 적용'을 누르세요.";
+                // badInput(오타)이면 value가 ""가 되어 Number("")===0으로 제로
+                // 게인이 조용히 주입됨 — 원복 + 경고 (리뷰 S2)
+                const raw = ev.target.value.trim();
+                const num = Number(raw);
+                if (raw === "" || ev.target.validity.badInput || !Number.isFinite(num)) {
+                  ev.target.value = String(tables[name].data[i]);
+                  statusLine.textContent = `잘못된 수치 — M${m} ${name} 원복됨.`;
+                  return;
                 }
+                tables[name].data[i] = num;
+                statusLine.textContent = "편집됨 (미적용) — '시뮬에 적용'을 누르세요.";
               },
             }))),
         ))),
