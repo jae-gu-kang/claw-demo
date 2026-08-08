@@ -62,6 +62,19 @@ def test_command_filter_off_tracks_measurement():
     assert f.step(60.0, 0.0) == pytest.approx(55.0 + (1.0 - math.exp(-DT / 2.0)) * 5.0)
 
 
+def test_command_filter_tau_zero_passthrough():
+    """tau=0 = 필터 통과 (즉시 명령) — 문서화된 분기 핀."""
+    f = CommandFilter(tau=0.0).init(DT)
+    assert f.step(123.0, 0.0) == 123.0
+    assert f.step(-7.0, 0.0) == -7.0
+
+
+def test_phi_max_guard_quarter_pi():
+    """phi_max ≥ π/2는 선회 FF 부호 반전 — 생성자 가드 (리뷰 반영)."""
+    with pytest.raises(ValueError):
+        Autopilot(phi_max=1.6)
+
+
 # ---------- 축별 방향·유지 거동 (단위) ----------
 
 
@@ -129,6 +142,31 @@ def test_turn_pitch_feedforward():
     assert th_turn - th_level == pytest.approx(
         ap1.k_pitch_turn * (1.0 / math.cos(phi_c) - 1.0), rel=1e-9
     )
+
+
+def test_alt_reengage_bumpless_after_drift():
+    """관여→해제→고도 드리프트→재관여: 필터 재시드로 첫 스텝이 홀드값 근방 (슬램 없음)."""
+    ap = make_ap()
+    on = GuidanceCommand(alt=1000.0, alt_on=True)
+    off = GuidanceCommand()
+    ap.step(on, _nav(h=1000.0))
+    for _ in range(10):
+        ap.step(off, _nav(h=900.0))  # 해제 중 100 m 드리프트 — 필터가 측정 추적
+    th_c, _, _ = ap.step(on, _nav(h=900.0))
+    # 재시드 없으면 100 m 오차 슬램(θ→상한). 재시드 시 (1−p)·100 m 오차만 반영
+    assert abs(th_c - 0.04) < 2e-3
+
+
+def test_heading_reengage_no_integrator_kick():
+    """ki_hdg≠0 포화 선회 후 해제→정침 재관여 — 적분기 잔존 뱅크 킥 없음 (리뷰 Must fix)."""
+    ap = make_ap(ki_hdg=0.5, tau_hdg=1e-9)
+    on = GuidanceCommand(heading=0.5, heading_on=True)
+    for _ in range(200):
+        ap.step(on, _nav(psi=0.0))  # 대오차 지속 → 적분기 와인드업
+    for _ in range(5):
+        ap.step(GuidanceCommand(), _nav(psi=0.5))  # 해제
+    _, phi_c, _ = ap.step(GuidanceCommand(heading=0.5, heading_on=True), _nav(psi=0.5))
+    assert abs(phi_c) < 1e-6  # 오차 0 재관여 → 뱅크 명령 0
 
 
 # ---------- 비선형 폐루프 캡처 (AP 기본 게인 = 설계값) ----------

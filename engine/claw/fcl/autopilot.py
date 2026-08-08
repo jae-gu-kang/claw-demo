@@ -82,7 +82,7 @@ class Autopilot(Block):
         ParamDef("tau_hdg", 1.0, "s", "헤딩 명령필터 시정수", lo=0.0),
         ParamDef("theta_lo", -0.3, "rad", "피치 명령 하한"),
         ParamDef("theta_hi", 0.3, "rad", "피치 명령 상한"),
-        ParamDef("phi_max", 0.7, "rad", "뱅크 명령 한계", lo=0.0),
+        ParamDef("phi_max", 0.7, "rad", "뱅크 명령 한계 (π/2 미만 — 선회 FF 부호 보전)", lo=0.0, hi=1.5),
         ParamDef("k_pitch_turn", 0.05, "rad", "선회 피치 FF 계수 (1/cosφ−1 배)"),
         ParamDef("k_thr_turn", 0.0, "-", "선회 스로틀 FF 계수 (1/cos²φ−1 배)"),
     )
@@ -107,8 +107,9 @@ class Autopilot(Block):
     ):
         if theta_lo > theta_hi:
             raise ValueError(f"theta_lo({theta_lo}) > theta_hi({theta_hi})")
-        if phi_max < 0:
-            raise ValueError(f"phi_max는 음수 불가: {phi_max}")
+        if not 0.0 <= phi_max < math.pi / 2:
+            # π/2 이상이면 1/cosφ 선회 FF 부호가 반전 — 설계 스캔 실수 방지 가드
+            raise ValueError(f"phi_max는 [0, π/2) 필요: {phi_max}")
         self.theta_lo, self.theta_hi, self.phi_max = theta_lo, theta_hi, phi_max
         self.k_pitch_turn, self.k_thr_turn = k_pitch_turn, k_thr_turn
         self._spd = ScasAxis(kp=kp_spd, ki=ki_spd, out_lo=0.0, out_hi=1.0)
@@ -148,6 +149,7 @@ class Autopilot(Block):
             phi_cmd = self._hdg.step(float(wrap_pi(psi_ref - psi)), 0.0, **g.get("heading", {}))
         else:
             self._fpsi.reset_to(psi)
+            self._hdg.reset()  # 적분기 소거 — 재관여 시 잔존 뱅크 킥 방지 (ki_hdg≠0 대비)
             phi_cmd = 0.0
 
         if cmd.alt_on:
