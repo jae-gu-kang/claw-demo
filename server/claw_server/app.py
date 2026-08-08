@@ -11,6 +11,7 @@ from claw_server.jobs import JobManager
 from claw_server.routes import analysis as analysis_routes
 from claw_server.routes import jobs as jobs_routes
 from claw_server.routes import results as results_routes
+from claw_server.routes import sim as sim_routes
 from claw_server.routes import system as system_routes
 from claw_server.routes import trim as trim_routes
 from claw_server.store import ResultStore
@@ -31,6 +32,7 @@ def create_app(data_dir=None) -> FastAPI:
         results_routes.router,
         trim_routes.router,
         analysis_routes.router,
+        sim_routes.router,
     ):
         app.include_router(router, prefix="/api")
     return app
