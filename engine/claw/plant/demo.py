@@ -11,6 +11,7 @@ from claw.plant.aero import AeroModel, wind_to_body_coeffs
 from claw.plant.aircraft import Aircraft
 from claw.plant.mass import FuelMass
 from claw.plant.prop import TwinEngine
+from claw.tables import Table
 
 
 def make_demo_aircraft() -> Aircraft:
@@ -43,3 +44,17 @@ def make_demo_aircraft() -> Aircraft:
     )
     engine = TwinEngine(max_thrust=4000.0, y_offset=0.5)
     return Aircraft(fuel_mass, aero, engine)
+
+
+def make_demo_stall_table() -> Table:
+    """데모 실속 경계 α_stall = f(Mach) — 공력팀 정본 대역 (01 §2.3).
+
+    소비자: α 리미터(M7), 엔벨로프 감시(M11). 외삽 금지(clip).
+    수치는 데모 프로파일용 라운드 값 — 델타윙 고α 특성 상정, 실기체 값 아님.
+    """
+    return Table(
+        {"mach": (0.1, 0.3, 0.5, 0.7, 0.9)},
+        (0.40, 0.35, 0.33, 0.30, 0.27),
+        name="alpha_stall",
+        extrapolate="clip",
+    )

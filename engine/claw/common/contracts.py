@@ -34,6 +34,8 @@ class NavOutput:
     """항법 출력 (M6 생산) — 법칙(M7·M8)이 소비하는 유일한 상태 정보.
 
     VehicleState 동형 + 유효성. t_meas는 지연이 반영된 측정 시각.
+    fuel은 연료 게이지 참값 통과(항법 오차 모델 대상 아님) — 게인 스케줄
+    변수(01 §3.4)의 소비처.
     """
 
     t: float = 0.0
@@ -43,6 +45,7 @@ class NavOutput:
     omega_b: np.ndarray = field(default_factory=lambda: np.zeros(3))
     t_meas: float = 0.0
     valid: bool = True
+    fuel: float = 0.0  # 잔여 연료 [kg] (참값 통과)
 
 
 @dataclass

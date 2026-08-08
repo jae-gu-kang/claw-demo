@@ -45,6 +45,14 @@ def test_zero_error_passthrough():
     assert out.omega_b == pytest.approx(s.omega_b, abs=1e-12)
 
 
+def test_fuel_passthrough():
+    """연료 게이지 참값 통과 — 오차 모델 대상 아님 (게인 스케줄 변수 소비처)."""
+    nav = clean_model().init(DT)
+    s = truth_at(0.0)
+    s.fuel = 123.5
+    assert nav.step(s).fuel == 123.5
+
+
 def test_delay_shifts_measurement():
     nav = clean_model(delay_s=0.05).init(DT)
     outs = [nav.step(truth_at(k * DT)) for k in range(12)]

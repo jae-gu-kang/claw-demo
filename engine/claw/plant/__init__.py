@@ -25,7 +25,7 @@ from claw.plant.aircraft import (
     XE_W,
     Aircraft,
 )
-from claw.plant.demo import make_demo_aircraft
+from claw.plant.demo import make_demo_aircraft, make_demo_stall_table
 from claw.plant.eom import (
     N_STATES,
     OMEGA,
@@ -61,6 +61,7 @@ __all__ = [
     "wind_to_body_coeffs",
     "Aircraft",
     "make_demo_aircraft",
+    "make_demo_stall_table",
     "XE_NAMES",
     "XE_U",
     "XE_V",

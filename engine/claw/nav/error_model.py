@@ -94,7 +94,8 @@ class NavErrorModel:
         q = quat_normalize(quat_multiply(state.q_nb, dq))
         omega = state.omega_b + self.rate_std * rng.standard_normal(3)
         return NavOutput(
-            t=state.t, pos_n=pos, vel_n=vel, q_nb=q, omega_b=omega, t_meas=state.t, valid=True
+            t=state.t, pos_n=pos, vel_n=vel, q_nb=q, omega_b=omega,
+            t_meas=state.t, valid=True, fuel=state.fuel,  # 연료 게이지 참값 통과
         )
 
     def step(self, state):
@@ -115,4 +116,5 @@ class NavErrorModel:
             omega_b=m.omega_b.copy(),
             t_meas=m.t_meas,
             valid=m.valid,
+            fuel=m.fuel,
         )
