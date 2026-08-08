@@ -149,7 +149,7 @@ export function render() {
 
 function renderModeTable(modeBox) {
   clear(modeBox).append(
-    el("table", {},
+    el("div", { class: "scroll-x" }, el("table", {},
       el("thead", {}, el("tr", {},
         el("th", {}, "모드"), el("th", {}, "속도 [m/s]"), el("th", {}, "고도 [m]"),
         el("th", {}, 'heading (수치 | "path" | 빈=off)'),
@@ -176,7 +176,7 @@ function renderModeTable(modeBox) {
           renderModeTable(modeBox);
         } }, "삭제")),
       ))),
-    ),
+    )),
     el("button", { onclick: () => {
       modeRows.push({ name: `mode${modeRows.length + 1}`, speed: "", alt: "",
                       heading: "", exitKind: "time_ge", exitValue: "1e9", next: "" });

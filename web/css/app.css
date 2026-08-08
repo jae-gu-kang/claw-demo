@@ -82,6 +82,8 @@ button.danger { color: var(--bad); }
 button:disabled { opacity: 0.5; cursor: default; }
 
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.scroll-x { overflow-x: auto; }  /* 넓은 편집 표 — 패널 밖 넘침 방지 */
+input.num-sm { width: 72px; font-family: var(--mono); }
 th, td { padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: right; }
 th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 td:first-child, th:first-child { text-align: left; }

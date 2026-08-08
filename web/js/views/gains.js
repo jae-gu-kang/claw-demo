@@ -55,32 +55,36 @@ export function render() {
 function renderTables(box, statusLine) {
   const names = Object.keys(tables);
   const machs = tables[names[0]].axes.mach;
+  // 전치 배열: 행 = 마하(비행조건), 열 = 게인 6개 — 폭이 패널에 들어오고
+  // 한 비행조건의 게인 세트를 한 줄에서 편집
   clear(box).append(
-    el("table", {},
-      el("thead", {}, el("tr", {},
-        el("th", {}, "게인 \\ 마하"),
-        machs.map((m) => el("th", {}, `M${m}`)))),
-      el("tbody", {}, names.map((name) => el("tr", {},
-        el("td", {}, name),
-        tables[name].data.map((v, i) => el("td", {},
-          el("input", {
-            class: "num",
-            type: "number",
-            step: "any",
-            value: String(v),
-            onchange: (ev) => {
-              const num = Number(ev.target.value);
-              if (Number.isFinite(num)) {
-                tables[name].data[i] = num;
-                dirty = true;
-                statusLine.textContent = "편집됨 (미적용) — '시뮬에 적용'을 누르세요.";
-              }
-            },
-          }))),
-      ))),
+    el("div", { class: "scroll-x" },
+      el("table", {},
+        el("thead", {}, el("tr", {},
+          el("th", {}, "마하 \\ 게인"),
+          names.map((name) => el("th", {}, name)))),
+        el("tbody", {}, machs.map((m, i) => el("tr", {},
+          el("td", {}, `M${m}`),
+          names.map((name) => el("td", {},
+            el("input", {
+              class: "num-sm",
+              type: "number",
+              step: "any",
+              value: String(tables[name].data[i]),
+              onchange: (ev) => {
+                const num = Number(ev.target.value);
+                if (Number.isFinite(num)) {
+                  tables[name].data[i] = num;
+                  dirty = true;
+                  statusLine.textContent = "편집됨 (미적용) — '시뮬에 적용'을 누르세요.";
+                }
+              },
+            }))),
+        ))),
+      ),
     ),
     el("p", { class: "hint" },
-      "행 = \"그룹.게인\" (ScasAxis.step 덮어쓰기 인자), 열 = 스케줄 변수 마하. ",
+      "열 = \"그룹.게인\" (ScasAxis.step 덮어쓰기 인자), 행 = 스케줄 변수 마하. ",
       "외삽 clip 고정 — 그룹·키·형상 검증은 제출 시 엔진이 수행."),
   );
 }
