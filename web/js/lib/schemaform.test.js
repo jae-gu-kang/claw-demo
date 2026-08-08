@@ -118,3 +118,27 @@ test("FIELD_GROUPS 키는 전부 블록 스키마 참조에 실존 (오타 → �
     assert.equal(new Set(names).size, names.length, `${key} 그룹 간 이름 중복`);
   }
 });
+
+// 엔진 PARAM_DEFS 이름 스냅샷 — 엔진 rename 시 여기도 갱신할 것. 한계: 엔진과
+// 스냅샷이 함께 낡으면 못 잡음(그 경우 해당 필드는 '기타' 강등 — 유실은 없음).
+// FIELD_GROUPS 쪽 오타·독자 드리프트는 즉시 잡는다 (리뷰 S1).
+const SCHEMA_NAMES = {
+  "fcl/Autopilot": ["kp_spd", "ki_spd", "tau_spd", "kp_alt", "ki_alt", "k_hdot",
+    "tau_alt", "kp_hdg", "ki_hdg", "tau_hdg", "theta_lo", "theta_hi",
+    "phi_max", "k_pitch_turn", "k_thr_turn"],
+  "fcl/ScasAxis": ["kp", "ki", "k_rate", "washout_tau", "out_lo", "out_hi"],
+  "fcl/Mixer": ["elevon_lo", "elevon_hi", "rudder_lo", "rudder_hi", "k_diff_thr"],
+  "actuator/SecondOrderActuator": ["wn", "zeta", "rate_max", "pos_lo", "pos_hi", "initial"],
+  "nav/ErrorModel": ["pos_std", "vel_std", "att_std", "psi_std", "rate_std",
+    "bias_std", "bias_tau", "delay_s", "update_hz", "seed"],
+};
+
+test("FIELD_GROUPS 필드명은 엔진 스키마 이름 스냅샷에 실존 (오타 → '기타' 강등 방지)", () => {
+  for (const [key, spec] of Object.entries(FIELD_GROUPS)) {
+    const known = new Set(SCHEMA_NAMES[key] ?? []);
+    assert.ok(known.size, `SCHEMA_NAMES에 ${key} 스냅샷 없음`);
+    for (const n of spec.flatMap(([, ns]) => ns)) {
+      assert.ok(known.has(n), `${key}: 스키마에 없는 필드명 ${n}`);
+    }
+  }
+});

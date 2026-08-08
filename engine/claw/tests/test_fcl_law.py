@@ -322,3 +322,7 @@ def test_fcl_registered_param_defaults_match_ctor():
         ctor = {k: p.default for k, p in sig.parameters.items() if k != "self"}
         defs = {d.name: d.default for d in cls.PARAM_DEFS}
         assert defs == ctor, f"{cls.NAME}: ParamDef·생성자 기본값 불일치"
+        # 타입까지 — 0 vs 0.0은 ==로 안 잡히지만 스키마 type(integer/number)과
+        # 정규화 동작을 바꾼다 (리뷰 S2)
+        assert all(type(defs[k]) is type(ctor[k]) for k in defs), \
+            f"{cls.NAME}: ParamDef·생성자 기본값 타입 불일치"
