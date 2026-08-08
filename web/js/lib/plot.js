@@ -32,6 +32,24 @@ export function marginColor(pm) {
   return "#157f3d";
 }
 
+/** 트림 판정 → 비행 엔벨로프 셀 (01 §4.1 자동 판정 플래그 기반 근사).
+
+우선순위: 불가(미수렴/잔차) > 실속 근접(α 여유) > 포화(추력·타면) > 가능.
+실속 경계 테이블 기반 정밀 경계선은 공력 정본 확정 후 [백로그].
+*/
+export function trimEnvelopeCell(r) {
+  if (!r.converged || r.flags.residual_ok === false) {
+    return { kind: "infeasible", color: "#9aa3ad", text: "불가" };
+  }
+  if (r.flags.alpha_margin_ok === false) {
+    return { kind: "stall", color: "#c22f2f", text: "실속≈" };
+  }
+  if (r.flags.saturation_ok === false) {
+    return { kind: "saturated", color: "#b57908", text: "포화" };
+  }
+  return { kind: "ok", color: "#157f3d", text: "가능" };
+}
+
 /** margin-map entries → 연료 고정 (mach×alt) 격자 조회. */
 export function pivotCases(entries, fuel) {
   const sel = entries.filter((e) => e.trim.case.fuel === fuel);

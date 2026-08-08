@@ -6,7 +6,9 @@ DOM 조립 전용 (얇게) — 격자 로직은 lib/grid.js, 수치·판정은 �
 import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
+import { fuelsOf, pivotCases, trimEnvelopeCell } from "../lib/plot.js";
 import { store } from "../store.js";
+import { heatmapCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
 // 모듈 상태 — 탭 재진입 시 유지 (실행 중 작업 재부착 포함, 리뷰 S4)
@@ -167,12 +169,27 @@ function renderResults(resultBox, body) {
   const nBad = rows.filter(
     (r) => !Object.values(r.flags).every((v) => v !== false),
   ).length;
+  // 비행 엔벨로프 맵 — 트림 판정 기반 (mach×alt, 연료별)
+  const entries = rows.map((r) => ({ trim: r }));
+  const envelopeMaps = fuelsOf(entries).map((fuel) =>
+    heatmapCanvas(
+      pivotCases(entries, fuel),
+      (e) => trimEnvelopeCell(e.trim),
+      { title: `비행 엔벨로프 — 연료 ${fuel} kg (트림 판정 기반 근사)` },
+    ));
   clear(resultBox).append(
     el("p", {},
       `수렴 ${nOk}/${rows.length} · 판정 플래그 위반 ${nBad}건`,
       nBad === 0 && nOk === rows.length
         ? el("span", { class: "flag ok", style: "margin-left:8px" }, "전체 정상")
         : el("span", { class: "flag bad", style: "margin-left:8px" }, "확인 필요")),
+    el("div", { class: "row" }, envelopeMaps),
+    el("div", { class: "legend" },
+      el("span", {}, el("span", { class: "chip", style: "background:#157f3d" }), "가능"),
+      el("span", {}, el("span", { class: "chip", style: "background:#c22f2f" }), "실속 근접 (α 여유 위반)"),
+      el("span", {}, el("span", { class: "chip", style: "background:#b57908" }), "포화 (추력·타면 한계)"),
+      el("span", {}, el("span", { class: "chip", style: "background:#9aa3ad" }), "트림 불가"),
+      el("span", { class: "hint" }, "— 격자를 조밀하게(마하 간격 0.05, 고도 추가) 돌릴수록 경계가 정확해집니다")),
     el("table", {},
       el("thead", {}, el("tr", {},
         el("th", {}, "케이스"), el("th", {}, "수렴"),
