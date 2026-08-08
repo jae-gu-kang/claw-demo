@@ -1,7 +1,8 @@
-/** 캔버스 렌더러 (DOM 전용 — 수치는 lib/plot.js) — 마진 맵 히트맵, 고유치 산점도. */
+/** 캔버스 렌더러 (DOM 전용 — 수치는 lib/plot.js·lib/replay.js) — 히트맵·산점도·시계열·궤적. */
 
 import { el } from "../dom.js";
 import { linScale, niceTicks } from "../lib/plot.js";
+import { extent } from "../lib/replay.js";
 
 const FONT = "11px -apple-system, 'Segoe UI', sans-serif";
 
@@ -49,6 +50,135 @@ export function heatmapCanvas(pivot, cellOf, { title = "", width = 560 } = {}) {
     ctx.fillStyle = "#66707e";
     ctx.fillText(`M${mach}`, mL + i * cw + 6, mT + ch * alts.length + 16);
   });
+  return canvas;
+}
+
+const MODE_BAND_COLORS = ["#e8f1fe", "#e6f6ea", "#fdf6df", "#fdeaea", "#efe9fb", "#e7f6f6"];
+
+/** 시계열 차트 — series: [{label, data, color}], bands: modeSpans 결과 (배경 밴드). */
+export function lineChartCanvas(t, series, { title = "", width = 620, height = 190, bands = [] } = {}) {
+  const { canvas, ctx } = makeCanvas(width, height);
+  const mL = 56, mT = 22, mR = 10, mB = 24;
+  const t0 = t[0] ?? 0;
+  const t1 = t[t.length - 1] ?? 1;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const s of series) {
+    const [a, b] = extent(s.data);
+    lo = Math.min(lo, a);
+    hi = Math.max(hi, b);
+  }
+  if (!(lo < hi)) { lo -= 1; hi += 1; }
+  const pad = 0.06 * (hi - lo);
+  const px = linScale(t0, t1, mL, width - mR);
+  const py = linScale(lo - pad, hi + pad, height - mB, mT);
+
+  bands.forEach((b, k) => {
+    const xa = px(t[b.i0]);
+    const xb = px(t[Math.min(b.i1, t.length - 1)]);
+    ctx.fillStyle = MODE_BAND_COLORS[k % MODE_BAND_COLORS.length];
+    ctx.fillRect(xa, mT, xb - xa, height - mT - mB);
+    ctx.fillStyle = "#66707e";
+    if (b.mode) ctx.fillText(b.mode, xa + 3, mT + 11);
+  });
+  ctx.strokeStyle = "#d8dce2";
+  ctx.beginPath();
+  for (const tk of niceTicks(lo, hi, 4)) {
+    ctx.moveTo(mL, py(tk));
+    ctx.lineTo(width - mR, py(tk));
+    ctx.fillStyle = "#66707e";
+    ctx.fillText(fmtTick(tk), 4, py(tk) + 3);
+  }
+  for (const tk of niceTicks(t0, t1, 7)) {
+    ctx.fillStyle = "#66707e";
+    ctx.fillText(`${fmtTick(tk)}s`, px(tk) - 8, height - 8);
+  }
+  ctx.stroke();
+  series.forEach((s, si) => {
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    let started = false;
+    s.data.forEach((v, i) => {
+      if (typeof v !== "number") { started = false; return; } // null(NaN) 구간 끊기
+      if (!started) { ctx.moveTo(px(t[i]), py(v)); started = true; }
+      else ctx.lineTo(px(t[i]), py(v));
+    });
+    ctx.stroke();
+    ctx.fillStyle = s.color;
+    ctx.fillText(s.label, mL + 70 * si, 14);
+  });
+  ctx.fillStyle = "#1c2430";
+  ctx.fillText(title, width - mR - 7 * title.length, 14);
+  return canvas;
+}
+
+function fmtTick(v) {
+  return Math.abs(v) >= 1000 ? String(Math.round(v)) : String(Math.round(v * 1000) / 1000);
+}
+
+/** 지상 궤적 (NED 평면, 북쪽 위) — 웨이포인트 원(도달 반경)·시각 마커. */
+export function trackCanvas(pn, pe, waypoints, acceptRadius, { markerIdx = null, width = 380, height = 380 } = {}) {
+  const { canvas, ctx } = makeCanvas(width, height);
+  const m = 42;
+  const wpN = waypoints.map((w) => w[0]);
+  const wpE = waypoints.map((w) => w[1]);
+  const [n0, n1] = extent([...pn, ...wpN]);
+  const [e0, e1] = extent([...pe, ...wpE]);
+  // 등축 스케일 — 왜곡 없는 기하 (선회반경 판단용)
+  const span = Math.max(n1 - n0, e1 - e0, 1) * 1.15;
+  const cN = (n0 + n1) / 2;
+  const cE = (e0 + e1) / 2;
+  const px = linScale(cE - span / 2, cE + span / 2, m, width - m);
+  const py = linScale(cN - span / 2, cN + span / 2, height - m, m);
+  const kScale = (width - 2 * m) / span; // m → px
+
+  ctx.strokeStyle = "#d8dce2";
+  ctx.beginPath();
+  for (const tk of niceTicks(cE - span / 2, cE + span / 2, 5)) {
+    ctx.moveTo(px(tk), m);
+    ctx.lineTo(px(tk), height - m);
+    ctx.fillStyle = "#66707e";
+    ctx.fillText(`${Math.round(tk)}`, px(tk) - 10, height - m + 14);
+  }
+  for (const tk of niceTicks(cN - span / 2, cN + span / 2, 5)) {
+    ctx.moveTo(m, py(tk));
+    ctx.lineTo(width - m, py(tk));
+    ctx.fillStyle = "#66707e";
+    ctx.fillText(`${Math.round(tk)}`, 2, py(tk) + 3);
+  }
+  ctx.stroke();
+  ctx.fillStyle = "#66707e";
+  ctx.fillText("E [m] →  (북쪽 위)", width / 2 - 40, height - 6);
+
+  for (const [n, e] of waypoints) {
+    ctx.strokeStyle = "#b57908";
+    ctx.beginPath();
+    ctx.arc(px(e), py(n), Math.max(3, acceptRadius * kScale), 0, 2 * Math.PI);
+    ctx.stroke();
+    ctx.fillStyle = "#b57908";
+    ctx.beginPath();
+    ctx.arc(px(e), py(n), 3, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  ctx.strokeStyle = "#1a6feb";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  pn.forEach((n, i) => {
+    if (i === 0) ctx.moveTo(px(pe[0]), py(n));
+    else ctx.lineTo(px(pe[i]), py(n));
+  });
+  ctx.stroke();
+  ctx.fillStyle = "#157f3d";
+  ctx.beginPath();
+  ctx.arc(px(pe[0]), py(pn[0]), 4, 0, 2 * Math.PI); // 시작점
+  ctx.fill();
+  if (markerIdx != null && markerIdx < pn.length) {
+    ctx.fillStyle = "#c22f2f";
+    ctx.beginPath();
+    ctx.arc(px(pe[markerIdx]), py(pn[markerIdx]), 5, 0, 2 * Math.PI);
+    ctx.fill();
+  }
   return canvas;
 }
 
