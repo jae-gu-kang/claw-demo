@@ -67,7 +67,21 @@ class Simulator:
         self.control_hz = control_hz
         self.n_ctrl = int(n)
         self.dt_ctrl = self.n_ctrl * dt_plant
-        self.actuator_params = dict(actuator_params) if actuator_params else None
+        # 빈 dict = 기본 파라미터로 장착 (None만 미장착)
+        self.actuator_params = (
+            dict(actuator_params) if actuator_params is not None else None
+        )
+        if self.actuator_params is not None:
+            reserved = {"pos_lo", "pos_hi", "initial"} & set(self.actuator_params)
+            if reserved:
+                raise ValueError(
+                    f"actuator_params 예약 키 사용 불가: {sorted(reserved)} "
+                    "(위치 한계는 믹서, 초기값은 트림 웜스타트가 결정)"
+                )
+            # 프로브 생성 — 파라미터 오류를 run()이 아닌 구성 시점에 검출
+            SecondOrderActuator(
+                pos_lo=-1.0, pos_hi=1.0, initial=0.0, **self.actuator_params
+            )
         self.fuel_flow = fuel_flow
 
     def _make_actuators(self, de0):
@@ -111,7 +125,7 @@ class Simulator:
         self.guidance.init(self.dt_ctrl)
         if self.nav_model is not None:
             self.nav_model.init(self.dt_plant)
-        actuators = self._make_actuators(de0) if self.actuator_params else None
+        actuators = self._make_actuators(de0) if self.actuator_params is not None else None
 
         m0, _cg, J0 = self.aircraft.fuel_mass.at(fuel)
         rb = RigidBody(m0, J0)

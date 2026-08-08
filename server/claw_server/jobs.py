@@ -108,8 +108,10 @@ class JobManager:
             job.finished = time.time()
             job.status = "error"
         else:
-            # 완주(done==total) 직후 도착한 취소는 결과를 강등하지 않음 (리뷰 S3)
-            completed = job.total > 0 and job.done == job.total
+            # 완주 직후 도착한 취소는 결과를 강등하지 않음 (리뷰 S3).
+            # done==total은 보고 없는 초단기 작업(0==0)도 완주로 본다 — fn이
+            # 정상 반환했다면 작업 본문은 전부 수행된 것 (리뷰 Nit)
+            completed = job.done == job.total
             job.finished = time.time()
             job.status = (
                 "cancelled" if (job.cancel_requested and not completed) else "done"

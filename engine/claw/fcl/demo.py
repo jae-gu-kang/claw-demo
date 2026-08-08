@@ -59,7 +59,8 @@ def make_demo_fcl(
     autopilot 주입은 파라미터 스터디용 (예: 파이프라인 Δ리포트에서 AP 게인을
     ParamSet으로 흔들 때) — None이면 설계 기본값.
     gain_tables 주입은 게인 스케줄 편집 경로 (M13/M14, 02 §8 4단계) — None이면
-    설계 테이블. 그룹·게인 이름 검증은 FlightControlLaw 조립이 수행.
+    설계 테이블. 주입은 **전체 교체**(설계 테이블과 병합 아님 — 일부만 주입하면
+    나머지 게인은 스케줄 없이 설계점 고정값). 그룹·키 검증은 FCL 조립이 수행.
     """
     if gain_tables is not None and not with_schedule:
         raise ValueError("gain_tables 주입은 with_schedule=True에서만 유효")

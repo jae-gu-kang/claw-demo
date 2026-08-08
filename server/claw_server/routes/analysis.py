@@ -51,6 +51,8 @@ class LoopIn(BaseModel):
             raise ValueError(f"{self.axis}축에 없는 상태: {self.x_out} (허용: {states})")
         if self.u_in not in inputs:
             raise ValueError(f"{self.axis}축에 없는 입력: {self.u_in} (허용: {inputs})")
+        if self.sign == 0.0 or (self.kp == 0.0 and self.ki == 0.0):
+            raise ValueError("무의미 루프 (제로 개루프): sign=0 또는 kp=ki=0")
         return self
 
 
@@ -80,6 +82,16 @@ def _axis_block(model, classify_fn) -> dict:
     return block
 
 
+def _trim_only_entry(tr) -> dict:
+    return {
+        "trim": trim_result_dict(tr),
+        "lon": None,
+        "lat": None,
+        "margins": {},
+        "note": None,
+    }
+
+
 @router.post("/analysis/margin-map", status_code=202)
 def submit_margin_map(req: MarginMapIn, request: Request, response: Response) -> dict:
     ac = make_demo_aircraft()
@@ -93,25 +105,34 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
             ac,
             cases,
             fingerprint=req.fingerprint,
-            on_progress=lambda done, _t, tr: job.report(done, total, message=tr.case.name),
+            on_progress=lambda done, _t, tr: job.report(
+                done, total, message=f"트림: {tr.case.name}"
+            ),
         )
         entries = []
         for i, tr in enumerate(trs):
-            entry = {"trim": trim_result_dict(tr), "lon": None, "lat": None, "margins": {}}
+            if job.cancel_requested:
+                # 취소 — 계산 완료된 나머지 트림 결과를 해석 생략 entry로
+                # 전량 보존 (리뷰 S1: 유실 금지)
+                entries.extend(_trim_only_entry(t) for t in trs[i:])
+                break
+            entry = _trim_only_entry(tr)
             if tr.converged:
-                lon, lat = split_axes(linearize(ac, tr))
-                entry["lon"] = _axis_block(lon, classify_lon)
-                entry["lat"] = _axis_block(lat, classify_lat)
-                for spec in req.loops:
-                    model = lon if spec.axis == "lon" else lat
-                    loop = pi_loop(
-                        model, x_out=spec.x_out, u_in=spec.u_in,
-                        kp=spec.kp, ki=spec.ki, sign=spec.sign,
-                    )
-                    entry["margins"][spec.name] = to_jsonable(loop_margins(loop))
+                try:
+                    lon, lat = split_axes(linearize(ac, tr))
+                    entry["lon"] = _axis_block(lon, classify_lon)
+                    entry["lat"] = _axis_block(lat, classify_lat)
+                    for spec in req.loops:
+                        model = lon if spec.axis == "lon" else lat
+                        loop = pi_loop(
+                            model, x_out=spec.x_out, u_in=spec.u_in,
+                            kp=spec.kp, ki=spec.ki, sign=spec.sign,
+                        )
+                        entry["margins"][spec.name] = to_jsonable(loop_margins(loop))
+                except ValueError as e:  # 케이스별 해석 실패 — 전량 소실 대신 데이터로
+                    entry["note"] = str(e)
             entries.append(entry)
-            if job.report(n + i + 1, total, message=tr.case.name):
-                break  # 협조적 취소 — 진행분까지 저장
+            job.report(n + i + 1, total, message=f"해석: {tr.case.name}")
         store.save(
             job.id,
             {

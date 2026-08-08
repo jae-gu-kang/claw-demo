@@ -284,6 +284,14 @@ def test_make_demo_fcl_gain_tables_injection():
     bad = {"pitchX.kp": Table({"mach": (0.2, 0.8)}, (1.0, 1.0), extrapolate="clip")}
     with pytest.raises(ValueError):
         make_demo_fcl(gain_tables=bad)
+    # 미정의 게인 "키"도 조립 시 거부 — 실행 시점 TypeError 지연 금지 (리뷰 M1)
+    bad_key = {"pitch.kpX": Table({"mach": (0.2, 0.8)}, (1.0, 1.0), extrapolate="clip")}
+    with pytest.raises(ValueError):
+        make_demo_fcl(gain_tables=bad_key)
+    # 생성자 파라미터지만 스텝 덮어쓰기 불가 키 (washout_tau)도 거부
+    bad_tau = {"yaw.washout_tau": Table({"mach": (0.2, 0.8)}, (2.0, 2.0), extrapolate="clip")}
+    with pytest.raises(ValueError):
+        make_demo_fcl(gain_tables=bad_tau)
     # 스케줄 비활성 조립에 테이블 주입은 구성 오류
     with pytest.raises(ValueError):
         make_demo_fcl(with_schedule=False, gain_tables=make_demo_gain_tables())

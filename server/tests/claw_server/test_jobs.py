@@ -72,6 +72,18 @@ def test_partial_then_cancel_is_cancelled():
     assert job.status == "cancelled"
 
 
+def test_late_cancel_with_no_reports_stays_done():
+    """진행 보고 없는 초단기 작업 — 본문 완료 후 도착한 취소로 강등 금지 (리뷰 Nit)."""
+    mgr = JobManager()
+
+    def work(job):
+        job.request_cancel()  # 본문 완료 직후·상태 확정 전 취소 도착 재현
+
+    job = mgr.submit("demo", work)
+    assert job.wait(10.0)
+    assert job.status == "done"
+
+
 def test_error_snapshot_consistent():
     """error 종단 스냅샷 일관성 — status가 error면 error 본문·finished 존재 (리뷰 S1)."""
 

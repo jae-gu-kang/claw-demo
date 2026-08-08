@@ -64,6 +64,13 @@ def test_trim_result_dict_fields():
     json.dumps(d, allow_nan=False)
 
 
+def test_to_jsonable_complex_ndarray():
+    """복소 dtype 배열도 [re, im] 정책 적용 — tolist 원시 복소 누출 금지 (리뷰 Nit)."""
+    a = np.array([1.0 + 2.0j, 3.0 - 1.0j])
+    assert to_jsonable(a) == [[1.0, 2.0], [3.0, -1.0]]
+    json.dumps(to_jsonable(np.array([[1.0j]])), allow_nan=False)
+
+
 def test_table_dict_roundtrip():
     """Table → JSON 표현 — 같은 규격으로 엔진 Table을 재구성 가능 (게인 편집 왕복)."""
     from claw.tables import Table

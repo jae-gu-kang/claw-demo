@@ -21,6 +21,8 @@ def _clean_float(v: float):
 
 
 def _array(a: np.ndarray):
+    if a.dtype.kind == "c":
+        return to_jsonable(a.tolist())  # 복소 배열 → [re, im] 재귀 (고유치 배열 대비)
     if a.dtype.kind == "f" and not np.all(np.isfinite(a)):
         if a.ndim == 0:
             return _clean_float(float(a))

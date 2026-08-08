@@ -20,6 +20,8 @@ from claw.fcl.airdata import airdata_from_nav
 
 _SCAS_GROUPS = ("pitch", "roll", "yaw")
 _AP_GROUPS = ("speed", "alt", "heading")
+# 스케줄 덮어쓰기 허용 키 — 전 그룹이 ScasAxis.step(kp·ki·k_rate)로만 소비
+_GAIN_KEYS = ("kp", "ki", "k_rate")
 
 
 class FlightControlLaw:
@@ -30,12 +32,19 @@ class FlightControlLaw:
         self.schedule = schedule
         self.alpha_limiter = alpha_limiter
         if schedule is not None:
-            # 그룹 이름 오타는 아래 분배 필터에서 '조용히' 버려진다 — 여기서 시끄럽게
+            # 그룹·키 오타는 분배 필터/스텝 kwargs에서 '조용히' 또는 '실행 시점에'
+            # 터진다 — 여기(조립 시점)서 시끄럽게 (리뷰: 키도 검증)
             known = set(_SCAS_GROUPS) | set(_AP_GROUPS)
-            groups = {name.split(".", 1)[0] for name in schedule.tables}
-            bad = groups - known
-            if bad:
-                raise ValueError(f"미정의 게인 그룹 {sorted(bad)} (허용: {sorted(known)})")
+            for name in schedule.tables:
+                group, _, key = name.partition(".")
+                if group not in known:
+                    raise ValueError(
+                        f"미정의 게인 그룹 {group!r} ({name!r}) — 허용: {sorted(known)}"
+                    )
+                if key not in _GAIN_KEYS:
+                    raise ValueError(
+                        f"미정의 게인 키 {name!r} — 허용 키: {list(_GAIN_KEYS)}"
+                    )
         self.alpha_margin = None
         self.limiter_active = False
 

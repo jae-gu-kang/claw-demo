@@ -229,3 +229,13 @@ def test_heading_capture_nonlinear(design_point):
     assert np.max(log["psi"]) < 0.5 * 1.02  # 오버슈트 사실상 없음 (설계 −0.02%)
     assert abs(wrap_pi(log["psi"][-1] - 0.5)) < 0.01
     assert 1000.0 - np.min(log["h"]) < 3.0  # 선회 고도손실 FF 보상 (설계 1.1 m)
+
+
+def test_phi_max_guard_matches_paramdef_hi():
+    """생성자 가드 == ParamDef hi(1.5) — 스키마가 노출하는 범위와 실제 수용 범위
+    일치 (리뷰: 1.5 < phi_max < π/2 구간이 조용히 통과하던 불일치 봉쇄)."""
+    Autopilot(phi_max=1.5)  # 경계 수용
+    with pytest.raises(ValueError):
+        Autopilot(phi_max=1.55)  # ParamDef hi 초과 (기존 가드 π/2보다는 작음)
+    with pytest.raises(ValueError):
+        Autopilot(phi_max=-0.1)

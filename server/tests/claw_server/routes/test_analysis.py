@@ -79,3 +79,47 @@ def test_margin_map_loop_spec_validation_422(client):
     assert client.post("/api/analysis/margin-map", json=dup).status_code == 422
     bad_axis = dict(base, loops=[dict(base["loops"][0], axis="full")])
     assert client.post("/api/analysis/margin-map", json=bad_axis).status_code == 422
+    # 무의미 루프 (제로 개루프) — 무의미 "inf" 마진 행 방지 (리뷰 Nit)
+    zero_pi = dict(base, loops=[dict(base["loops"][0], kp=0.0, ki=0.0)])
+    assert client.post("/api/analysis/margin-map", json=zero_pi).status_code == 422
+    zero_sign = dict(base, loops=[dict(base["loops"][0], sign=0.0)])
+    assert client.post("/api/analysis/margin-map", json=zero_sign).status_code == 422
+
+
+def test_margin_map_cancel_preserves_trim_results(client, wait_job, monkeypatch):
+    """취소 시 트림 완료분은 트림 전용 entry로 전량 보존 — 유실 금지 (리뷰 S1).
+
+    트림 진행 콜백을 취소 대기 게이트로 감싸 결정론화 (트림 라우트 취소
+    테스트와 동일 기법)."""
+    import time as _time
+
+    import claw_server.routes.analysis as analysis_route
+
+    real_batch = analysis_route.trim_batch
+
+    def gated_batch(ac, cases, fingerprint="", on_progress=None):
+        deadline = _time.time() + 10.0
+
+        def gated(done, total, tr):
+            cancelled = on_progress(done, total, tr)
+            while not cancelled and _time.time() < deadline:
+                _time.sleep(0.005)
+                cancelled = on_progress(done, total, tr)
+            return cancelled
+
+        return real_batch(ac, cases, fingerprint=fingerprint, on_progress=gated)
+
+    monkeypatch.setattr(analysis_route, "trim_batch", gated_batch)
+    cases = [{"mach": 0.5 + 0.05 * i, "alt": 1000.0, "fuel": 200.0} for i in range(4)]
+    jid = client.post(
+        "/api/analysis/margin-map", json={"cases": cases, "loops": []}
+    ).json()["id"]
+    assert client.post(f"/api/jobs/{jid}/cancel").status_code == 200
+    j = wait_job(jid)
+    assert j["status"] == "cancelled"
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    # 첫 케이스 트림 완료 후 취소 감지 — 해당 트림 결과가 해석 생략 entry로 보존
+    assert len(body["cases"]) == 1
+    entry = body["cases"][0]
+    assert entry["trim"]["converged"] is True
+    assert entry["lon"] is None and entry["margins"] == {}

@@ -5,8 +5,8 @@
 """
 
 
-def _hold_mission(t_end=20.0, alt=1000.0):
-    return {
+def _hold_mission(t_end=20.0, alt=1000.0, **over):
+    base = {
         "trim": {"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0},
         "modes": [
             {"name": "hold", "speed": 199.0, "alt": alt, "heading": 0.0,
@@ -15,6 +15,8 @@ def _hold_mission(t_end=20.0, alt=1000.0):
         "t_end": t_end,
         "fingerprint": "fp-sim-web",
     }
+    base.update(over)
+    return base
 
 
 def test_sim_run_end_to_end_with_mode_chain(client, wait_job):
@@ -111,3 +113,43 @@ def test_sim_run_validation_422(client):
     assert client.post("/api/sim/run", json=bad_nav).status_code == 422
     # t_end 상한 (메모리 가드)
     assert client.post("/api/sim/run", json=dict(base, t_end=7200.0)).status_code == 422
+
+
+def test_sim_actuator_params_validation_422(client):
+    """작동기 파라미터 오류는 제출 시점 422 — job error로 지연 금지 (리뷰 M1)."""
+    base = _hold_mission()
+    for act in ({"unknown_key": 3.0}, {"wn": -5.0}, {"pos_lo": -1.0}):
+        r = client.post("/api/sim/run", json=dict(base, actuators=act))
+        assert r.status_code == 422, act
+
+
+def test_sim_exit_condition_nonfinite_422(client):
+    """exit 조건 인자의 NaN은 경계 차단 — 영원히 참이 안 되는 무증상 모드 방지 (리뷰 S2)."""
+    import json as _json
+
+    mission = _hold_mission()
+    mission["modes"][0]["exit"] = ["time_ge", float("nan")]
+    raw = _json.dumps(mission)  # NaN 리터럴 포함 (httpx json=은 자체 거부)
+    r = client.post(
+        "/api/sim/run", content=raw, headers={"content-type": "application/json"}
+    )
+    assert r.status_code == 422
+    bad_type = _hold_mission()
+    bad_type["modes"][0]["exit"] = ["time_ge", [1.0]]
+    assert client.post("/api/sim/run", json=bad_type).status_code == 422
+
+
+def test_sim_empty_waypoints_rejected_422(client):
+    assert client.post(
+        "/api/sim/run", json=_hold_mission(waypoints=[])
+    ).status_code == 422
+
+
+def test_sim_nav_empty_dict_attaches_default_model(client, wait_job):
+    """nav={} = 기본 파라미터의 오차 모델 장착 (조용한 미장착 금지 — 리뷰 Nit)."""
+    r = client.post("/api/sim/run", json=_hold_mission(t_end=2.0, nav={}))
+    assert r.status_code == 202
+    j = wait_job(r.json()["id"], timeout=120.0)
+    assert j["status"] == "done"
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    assert body["meta"]["nav"] == "NavErrorModel"

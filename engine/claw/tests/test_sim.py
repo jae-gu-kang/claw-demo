@@ -142,6 +142,34 @@ def test_actuator_bank_in_the_loop(trim_design):
     assert np.max(np.abs(res.signals["phi"])) < 0.01
 
 
+def test_actuator_params_validated_at_construction(trim_design):
+    """작동기 파라미터 오류는 Simulator 생성 시점에 검출 — run()까지 지연 금지
+    (M13 제출 시점 422 계약, 리뷰 M1)."""
+    ac, tr = trim_design
+    with pytest.raises(TypeError):
+        make_sim(ac, tr, actuator_params={"unknown_key": 3.0})
+    with pytest.raises(ValueError):
+        make_sim(ac, tr, actuator_params={"wn": -5.0})
+    with pytest.raises(ValueError):  # 예약 키 — 믹서 한계·트림 웜스타트가 결정
+        make_sim(ac, tr, actuator_params={"pos_lo": -1.0})
+
+
+def test_actuator_params_empty_dict_means_defaults(trim_design, monkeypatch):
+    """빈 dict = 기본 파라미터로 실제 장착 (조용한 미장착 금지 — 리뷰 Nit)."""
+    ac, tr = trim_design
+    built = []
+    orig = Simulator._make_actuators
+
+    def spy(self, de0):
+        built.append(de0)
+        return orig(self, de0)
+
+    monkeypatch.setattr(Simulator, "_make_actuators", spy)
+    res = make_sim(ac, tr, actuator_params={}).run(tr, t_end=0.1)
+    assert built, "작동기 뱅크가 실제로 조립되어야 함"
+    assert res.meta["actuators"] is True
+
+
 def test_actuator_rate_limit_observable(trim_design):
     """작동기가 실제 루프에 있는지 핀 — 낮은 rate 한계에서 타면 기울기 제한."""
     ac, tr = trim_design

@@ -62,6 +62,16 @@ def test_gain_tables_validation_422(client):
     assert client.post(
         "/api/sim/run", json=_hold_mission(gain_tables=bad_group)
     ).status_code == 422
+    # 미정의 게인 "키" — 실행 시점 TypeError로 지연 금지 (리뷰 M1)
+    bad_key = dict(tables)
+    bad_key["pitch.kpX"] = bad_key.pop("pitch.kp")
+    assert client.post(
+        "/api/sim/run", json=_hold_mission(gain_tables=bad_key)
+    ).status_code == 422
+    # 빈 dict — 조용한 무스케줄 방지 (리뷰 S2)
+    assert client.post(
+        "/api/sim/run", json=_hold_mission(gain_tables={})
+    ).status_code == 422
     # 데이터 형상 불일치 (Table 검증)
     bad_shape = {k: dict(v) for k, v in tables.items()}
     bad_shape["pitch.kp"]["data"] = bad_shape["pitch.kp"]["data"][:-1]

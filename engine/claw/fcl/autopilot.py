@@ -107,9 +107,9 @@ class Autopilot(Block):
     ):
         if theta_lo > theta_hi:
             raise ValueError(f"theta_lo({theta_lo}) > theta_hi({theta_hi})")
-        if not 0.0 <= phi_max < math.pi / 2:
+        if not 0.0 <= phi_max <= 1.5:  # ParamDef hi와 일치 (π/2 미만 — 선회 FF 부호 보전)
             # π/2 이상이면 1/cosφ 선회 FF 부호가 반전 — 설계 스캔 실수 방지 가드
-            raise ValueError(f"phi_max는 [0, π/2) 필요: {phi_max}")
+            raise ValueError(f"phi_max는 [0, 1.5] 필요 (ParamDef hi): {phi_max}")
         self.theta_lo, self.theta_hi, self.phi_max = theta_lo, theta_hi, phi_max
         self.k_pitch_turn, self.k_thr_turn = k_pitch_turn, k_thr_turn
         self._spd = ScasAxis(kp=kp_spd, ki=ki_spd, out_lo=0.0, out_hi=1.0)

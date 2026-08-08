@@ -42,6 +42,18 @@ class ModeIn(BaseModel):
             raise ValueError(f'heading 문자열은 "path"만 허용: {self.heading!r}')
         return self
 
+    @field_validator("exit")
+    @classmethod
+    def _exit_args_finite(cls, v):
+        """조건 인자 비유한값 차단 — NaN 비교는 항상 False라 영원히 이탈하지
+        않는 무증상 모드가 됨 (리뷰 S2)."""
+        for item in v:
+            if isinstance(item, bool) or not isinstance(item, (str, int, float)):
+                raise ValueError(f"조건 인자는 문자열/수치만 허용: {item!r}")
+            if isinstance(item, float) and not math.isfinite(item):
+                raise ValueError(f"비유한값 조건 인자: {item}")
+        return v
+
 
 class TableIn(BaseModel):
     """Table JSON 규격 (serialize.table_dict와 왕복) — 형상·축 검증은 엔진 Table."""
@@ -72,7 +84,9 @@ class SimRunIn(BaseModel):
     trim: TrimCaseIn  # 시작 트림점 (웜스타트 기준)
     modes: list[ModeIn] = Field(min_length=1)
     initial_mode: str | None = None
-    waypoints: list[tuple[FiniteFloat, FiniteFloat]] | None = None  # (N, E) [m]
+    waypoints: list[tuple[FiniteFloat, FiniteFloat]] | None = Field(
+        default=None, min_length=1
+    )  # (N, E) [m] — 빈 리스트는 무의미 구성이라 거부
     accept_radius: float = Field(default=200.0, gt=0.0, allow_inf_nan=False)
     t_end: float = Field(gt=0.0, le=3600.0)  # 상한 = 메모리 가드 [기본값]
     dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
@@ -88,11 +102,22 @@ class SimRunIn(BaseModel):
     @field_validator("nav", "actuators", "autopilot")
     @classmethod
     def _finite_numeric_values(cls, v):
-        """kwargs 통과 dict도 비유한값은 경계에서 차단 (키 검증은 엔진 소관)."""
+        """kwargs 통과 dict의 값 타입·유한성 검사 — 비수치·bool·NaN이 실행
+        시점 TypeError로 새는 것 방지 (리뷰 S1; 키 검증은 엔진 소관)."""
         if v is not None:
             for key, val in v.items():
+                if isinstance(val, bool) or not isinstance(val, (int, float)):
+                    raise ValueError(f"파라미터 값은 수치만 허용: {key}={val!r}")
                 if isinstance(val, float) and not math.isfinite(val):
                     raise ValueError(f"비유한값 파라미터: {key}={val}")
+        return v
+
+    @field_validator("gain_tables")
+    @classmethod
+    def _tables_not_empty(cls, v):
+        # 빈 dict는 "스케줄 없음"과 동치가 되어버림 — 편집 없음이면 필드 생략 (리뷰 S2)
+        if v is not None and not v:
+            raise ValueError("gain_tables가 빈 dict — 편집 없음이면 필드를 생략하세요")
         return v
 
 
@@ -116,7 +141,8 @@ def _build(req: SimRunIn):
         for m in req.modes
     ]
     guidance = Guidance(modes, path=path, initial=req.initial_mode)
-    nav_model = NavErrorModel(**req.nav) if req.nav else None
+    # 빈 dict = 기본 파라미터 오차 모델 장착 (조용한 미장착 금지 — None만 이상 항법)
+    nav_model = NavErrorModel(**req.nav) if req.nav is not None else None
     gain_tables = None
     if req.gain_tables is not None:
         gain_tables = {

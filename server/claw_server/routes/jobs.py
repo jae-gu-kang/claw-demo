@@ -54,9 +54,16 @@ async def job_progress_ws(websocket: WebSocket, job_id: str) -> None:
                 last = d
             if d["status"] in TERMINAL_STATES:
                 break
-            await asyncio.sleep(_WS_POLL_S)
+            # 폴링 대기를 receive와 겸용 — 클라이언트 이탈을 즉시 감지해
+            # 이탈 후에도 작업 종단까지 코루틴이 잔류하는 것 방지 (리뷰 S3)
+            try:
+                msg = await asyncio.wait_for(websocket.receive(), timeout=_WS_POLL_S)
+                if msg.get("type") == "websocket.disconnect":
+                    return
+            except asyncio.TimeoutError:
+                pass
         await websocket.close()
-    except (WebSocketDisconnect, RuntimeError):
-        # 클라이언트 이탈 — 작업은 계속 진행. RuntimeError: 이탈 후 send 시도
-        # (starlette가 close 이후 send에 던짐 — 로그 소음 방지)
+    except (WebSocketDisconnect, RuntimeError, OSError):
+        # 클라이언트 이탈 계열 — 작업은 계속 진행 (send/receive가 이탈 후
+        # RuntimeError 또는 OSError(ClientDisconnected)를 던질 수 있음)
         return
