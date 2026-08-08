@@ -153,3 +153,41 @@ def test_sim_nav_empty_dict_attaches_default_model(client, wait_job):
     assert j["status"] == "done"
     body = client.get(f"/api/results/{j['result_id']}").json()
     assert body["meta"]["nav"] == "NavErrorModel"
+
+
+def test_sim_autopilot_injection_registry_validated(client, wait_job):
+    """AP 주입 검증은 레지스트리 ParamDef 경유 (02 §5.5) — 타입·범위·키를
+    제출 시점 422로 판정. 부분 kwargs는 ParamDef 기본값 보충(생성자와 동일
+    의미 — 엔진 defaults-match 테스트가 드리프트 가드)."""
+    ok = _hold_mission(t_end=2.0, autopilot={"phi_max": 0.5, "kp_spd": 0.2})
+    r = client.post("/api/sim/run", json=ok)
+    assert r.status_code == 202
+    j = wait_job(r.json()["id"], timeout=120.0)
+    assert j["status"] == "done"
+    # 미정의 파라미터 이름 — ParamError 메시지로 판정 주체를 핀
+    r = client.post("/api/sim/run", json=_hold_mission(autopilot={"kp_spdX": 0.2}))
+    assert r.status_code == 422 and "정의되지 않은 파라미터" in r.text
+    # 오타입(문자열·bool) — pydantic 통과 후 ParamDef가 제출 시점 판정
+    # (실행 스레드 TypeError로 지연 금지)
+    r = client.post("/api/sim/run", json=_hold_mission(autopilot={"kp_spd": "abc"}))
+    assert r.status_code == 422 and "수치 필요" in r.text
+    r = client.post("/api/sim/run", json=_hold_mission(autopilot={"kp_spd": True}))
+    assert r.status_code == 422 and "수치 필요" in r.text
+    # 범위 위반 — ParamDef hi
+    assert client.post(
+        "/api/sim/run", json=_hold_mission(autopilot={"phi_max": 2.0})
+    ).status_code == 422
+
+
+def test_sim_autopilot_nonfinite_422(client):
+    """AP dict의 Infinity/NaN 리터럴은 경계 차단 유지 — ParamDef 범위 비교는
+    NaN을 통과시키므로 유한성만은 서버 몫 (02 v0.11 직렬화 정책 보호)."""
+    import json as _json
+
+    for bad in (float("inf"), float("nan")):
+        mission = _hold_mission(autopilot={"kp_spd": bad})
+        raw = _json.dumps(mission)  # 비유한 리터럴 포함 (httpx json=은 자체 거부)
+        r = client.post(
+            "/api/sim/run", content=raw, headers={"content-type": "application/json"}
+        )
+        assert r.status_code == 422, bad

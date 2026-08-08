@@ -9,7 +9,7 @@
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
 import { BLOCKS } from "../lib/blocks.js";
-import { parseFieldValue, schemaFields } from "../lib/schemaform.js";
+import { groupFields, parseFieldValue, schemaFields } from "../lib/schemaform.js";
 import { store } from "../store.js";
 import { clawDiagramCanvas } from "./diagram.js";
 
@@ -70,7 +70,7 @@ async function loadSchema(schemaBox, block) {
     return;
   }
   const fields = schemaFields(schemaCache[key]);
-  if (block.detail.editable) renderForm(schemaBox, block, fields);
+  if (block.detail.editable) renderForm(schemaBox, block, key, fields);
   else renderReadonlyTable(schemaBox, key, fields);
 }
 
@@ -80,12 +80,16 @@ function renderReadonlyTable(schemaBox, key, fields) {
       el("thead", {}, el("tr", {},
         el("th", {}, "파라미터"), el("th", {}, "기본값"), el("th", {}, "단위"),
         el("th", {}, "범위"), el("th", {}, "설명"))),
-      el("tbody", {}, fields.map((f) => el("tr", {},
-        el("td", { class: "num" }, f.name),
-        el("td", { class: "num" }, defaultText(f.default)),
-        el("td", {}, f.unit),
-        el("td", { class: "num" }, rangeText(f)),
-        el("td", { style: "text-align: left" }, f.desc)))))),
+      el("tbody", {}, groupFields(key, fields).flatMap((g) => [
+        g.title && el("tr", {},
+          el("th", { colspan: "5", style: "text-align: left; padding-top: 10px" }, g.title)),
+        g.fields.map((f) => el("tr", {},
+          el("td", { class: "num" }, f.name),
+          el("td", { class: "num" }, defaultText(f.default)),
+          el("td", {}, f.unit),
+          el("td", { class: "num" }, rangeText(f)),
+          el("td", { style: "text-align: left" }, f.desc))),
+      ])))),
     el("p", { class: "hint" }, `스키마: ${key} (엔진 레지스트리 — 02 §2.3)`),
   );
 }
@@ -102,7 +106,7 @@ function defaultText(v) {
   return String(v);
 }
 
-function renderForm(schemaBox, block, fields) {
+function renderForm(schemaBox, block, key, fields) {
   const injectKey = block.detail.injectKey;
   const applied = store.get(injectKey); // 이전 적용값 (전체 kwargs) 또는 undefined
   const statusLine = el("p", { class: "hint" },
@@ -127,9 +131,9 @@ function renderForm(schemaBox, block, fields) {
       `${f.name}${unit}`, inputs[f.name]);
   };
 
-  // 주입 계약: 서버 SimIn validator(routes/sim.py)는 nav·actuators·autopilot에
-  // 유한 수치만 허용 — boolean/enum 파라미터를 가진 컴포넌트를 editable로 만들
-  // 때는 서버 검증기 확장이 선행돼야 함 (리뷰 S2. 현 editable=AP는 전부 수치)
+  // 주입 계약: autopilot은 서버가 레지스트리 ParamDef로 판정(타입·범위·choices —
+  // bool/enum 컴포넌트도 수용). nav·actuators는 여전히 수치 한정 validator —
+  // 그쪽을 editable로 확장하려면 서버의 레지스트리 판정 승격이 선행 (리뷰 S2 갱신)
   const collect = () => {
     const values = {};
     const errors = [];
@@ -146,7 +150,10 @@ function renderForm(schemaBox, block, fields) {
   };
 
   clear(schemaBox).append(
-    el("div", { class: "field-grid" }, fields.map(fieldEl)),
+    el("div", { class: "field-grid" }, groupFields(key, fields).map((g) =>
+      el("div", { class: "opt-group" },
+        g.title && el("div", { class: "g-title" }, g.title),
+        el("div", { class: "row-inner" }, g.fields.map(fieldEl))))),
     el("div", { class: "row", style: "margin-top: 12px" },
       el("button", {
         class: "primary",

@@ -13,9 +13,10 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from claw.fcl import Autopilot, make_demo_fcl
+from claw.fcl import make_demo_fcl
 from claw.guidance import Guidance, LosPath, ModeSpec
 from claw.nav import NavErrorModel
+from claw.params.registry import REGISTRY
 from claw.plant import make_demo_aircraft, make_demo_db_ranges, make_demo_stall_table
 from claw.sim import Simulator
 from claw.tables import Table
@@ -99,17 +100,34 @@ class SimRunIn(BaseModel):
     autopilot: dict | None = None  # Autopilot kwargs — 게인 이름은 엔진이 정본
     gain_tables: dict[str, TableIn] | None = None  # "그룹.게인" → 편집 테이블 (4단계)
 
-    @field_validator("nav", "actuators", "autopilot")
+    @field_validator("nav", "actuators")
     @classmethod
     def _finite_numeric_values(cls, v):
         """kwargs 통과 dict의 값 타입·유한성 검사 — 비수치·bool·NaN이 실행
-        시점 TypeError로 새는 것 방지 (리뷰 S1; 키 검증은 엔진 소관)."""
+        시점 TypeError로 새는 것 방지 (리뷰 S1; 키 검증은 엔진 소관).
+        nav·actuators는 엔진 생성자/프로브 직결이라 수치 한정이 계약 —
+        editable 확장 시 autopilot처럼 레지스트리 ParamDef 판정으로 승격할 것."""
         if v is not None:
             for key, val in v.items():
                 if isinstance(val, bool) or not isinstance(val, (int, float)):
                     raise ValueError(f"파라미터 값은 수치만 허용: {key}={val!r}")
                 if isinstance(val, float) and not math.isfinite(val):
                     raise ValueError(f"비유한값 파라미터: {key}={val}")
+        return v
+
+    @field_validator("autopilot")
+    @classmethod
+    def _finite_leaves_only(cls, v):
+        """AP는 타입·범위·키를 레지스트리 ParamDef가 판정(_build의 REGISTRY.create)
+        — bool·enum 파라미터 컴포넌트도 수용 가능. 서버는 경계 유한성만: NaN은
+        ParamDef 범위 비교(v<lo 등)를 조용히 통과하므로 여기서 차단해야 저장
+        시점 직렬화(allow_nan=False) 전멸을 막는다 (02 v0.11 정책)."""
+        if v is not None:
+            for key, val in v.items():
+                leaves = val if isinstance(val, (list, tuple)) else (val,)
+                for x in leaves:
+                    if isinstance(x, float) and not math.isfinite(x):
+                        raise ValueError(f"비유한값 파라미터: {key}={val!r}")
         return v
 
     @field_validator("gain_tables")
@@ -152,7 +170,10 @@ def _build(req: SimRunIn):
     fcl = make_demo_fcl(
         with_schedule=req.with_schedule,
         with_limiter=req.with_limiter,
-        autopilot=Autopilot(**req.autopilot) if req.autopilot else None,
+        # 레지스트리 경유 = ParamDef 판정(미정의 키·타입·범위·choices → ParamError
+        # ⊂ ValueError → 422). 부분 지정은 ParamDef 기본값 보충 — 생성자 기본값과
+        # 동일함은 엔진 defaults-match 테스트가 보증
+        autopilot=REGISTRY.create("fcl", "Autopilot", req.autopilot) if req.autopilot else None,
         gain_tables=gain_tables,
     )
     sim = Simulator(

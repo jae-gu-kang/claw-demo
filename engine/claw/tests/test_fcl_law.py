@@ -310,3 +310,15 @@ def test_fcl_components_registered_with_schema():
     # 스키마 키 == 생성자 kwargs — create()가 그대로 인스턴스화
     ap = REGISTRY.create("fcl", "Autopilot", {"phi_max": 0.5})
     assert ap.phi_max == 0.5
+
+
+def test_fcl_registered_param_defaults_match_ctor():
+    """ParamDef 기본값 == 생성자 기본값 — 레지스트리 create(부분 지정)가 직접
+    생성과 동일 의미여야 서버 주입 경로(부분 kwargs)가 의미 보존한다."""
+    import inspect
+
+    for cls in (Autopilot, ScasAxis, Mixer):
+        sig = inspect.signature(cls.__init__)
+        ctor = {k: p.default for k, p in sig.parameters.items() if k != "self"}
+        defs = {d.name: d.default for d in cls.PARAM_DEFS}
+        assert defs == ctor, f"{cls.NAME}: ParamDef·생성자 기본값 불일치"

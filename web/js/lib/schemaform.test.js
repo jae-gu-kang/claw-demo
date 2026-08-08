@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { parseFieldValue, schemaFields } from "./schemaform.js";
+import { BLOCKS } from "./blocks.js";
+import { FIELD_GROUPS, groupFields, parseFieldValue, schemaFields } from "./schemaform.js";
 
 // ParamSet.to_json_schema 출력 형태 그대로 (엔진 paramset.py가 정본)
 const SCHEMA = {
@@ -69,4 +70,51 @@ test("parseFieldValue: enum은 허용값만", () => {
   const kind = { name: "kind", type: "enum", choices: ["a", "b"] };
   assert.equal(parseFieldValue(kind, "b").value, "b");
   assert.ok(parseFieldValue(kind, "c").error);
+});
+
+// ── 필드 그룹핑 (서버 스키마는 알파벳 정렬 출력 — 기능 단위로 재배열) ──
+
+const mkFields = (...names) => names.map((name) => ({ name }));
+
+test("groupFields: 스펙 순서로 재배열 + 전 필드 정확히 1회 커버", () => {
+  // 서버 정렬 출력 시뮬레이션 — 알파벳 순 입력
+  const names = FIELD_GROUPS["fcl/Autopilot"].flatMap(([, ns]) => ns);
+  const fields = mkFields(...[...names].sort());
+  const groups = groupFields("fcl/Autopilot", fields);
+  const out = groups.flatMap((g) => g.fields.map((f) => f.name));
+  assert.deepEqual([...out].sort(), [...names].sort()); // 전 필드 보존
+  assert.equal(new Set(out).size, out.length); // 중복 없음
+  // 첫 그룹이 속도 루프 — kp_spd·ki_spd·tau_spd가 붙어서 나옴
+  assert.equal(groups[0].title, "속도 루프");
+  assert.deepEqual(groups[0].fields.map((f) => f.name), ["kp_spd", "ki_spd", "tau_spd"]);
+});
+
+test("groupFields: 스펙 밖 필드는 '기타'로 (엔진이 파라미터 추가해도 유실 없음)", () => {
+  const fields = mkFields("kp", "ki", "k_rate", "washout_tau", "out_lo", "out_hi", "brand_new");
+  const groups = groupFields("fcl/ScasAxis", fields);
+  const last = groups[groups.length - 1];
+  assert.equal(last.title, "기타");
+  assert.deepEqual(last.fields.map((f) => f.name), ["brand_new"]);
+});
+
+test("groupFields: 스키마에 없는 스펙 이름은 무시, 미지 컴포넌트는 원 순서 단일 그룹", () => {
+  // 엔진이 파라미터를 제거해도 폼이 깨지지 않음
+  const groups = groupFields("fcl/ScasAxis", mkFields("kp", "ki"));
+  assert.deepEqual(groups.map((g) => g.fields.map((f) => f.name)).flat(), ["kp", "ki"]);
+  // 그룹 스펙 없는 컴포넌트 — 서버 출력 순서 그대로
+  const plain = groupFields("guidance/LOS", mkFields("accept_radius"));
+  assert.deepEqual(plain, [{ title: "", fields: [{ name: "accept_radius" }] }]);
+});
+
+test("FIELD_GROUPS 키는 전부 블록 스키마 참조에 실존 (오타 → 조용한 폴백 방지)", () => {
+  const refs = new Set(BLOCKS.filter((b) => b.detail.schema)
+    .map((b) => `${b.detail.schema.category}/${b.detail.schema.name}`));
+  for (const key of Object.keys(FIELD_GROUPS)) {
+    assert.ok(refs.has(key), `FIELD_GROUPS 고아 키: ${key}`);
+  }
+  // 그룹 내 이름 중복 금지 (한 필드가 두 그룹에 들어가면 중복 렌더)
+  for (const [key, spec] of Object.entries(FIELD_GROUPS)) {
+    const names = spec.flatMap(([, ns]) => ns);
+    assert.equal(new Set(names).size, names.length, `${key} 그룹 간 이름 중복`);
+  }
 });
