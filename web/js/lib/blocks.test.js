@@ -4,6 +4,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { BLOCKS, CHAIN } from "./blocks.js";
+// 뷰 모듈이지만 모듈 스코프에서 DOM을 안 건드려 node import 가능 — 배선 드리프트 가드
+import { DESIGN_ORDER, TOP_SVG } from "../views/diagram.js";
+import { CHIP_LABEL, SUBSYSTEMS } from "../views/subsystems.js";
 
 // main.js VIEWS의 수동 사본 — main.js가 DOM 의존이라 직접 import 불가. 보호는
 // 단방향(blocks.js 오타만 검출): main.js에서 뷰 개명 시 이 목록도 갱신할 것
@@ -19,6 +22,8 @@ test("블록: id 유일 + 상세 스펙 완결", () => {
   assert.equal(new Set(ids).size, ids.length);
   for (const b of BLOCKS) {
     assert.ok(b.title, `${b.id} title 없음`);
+    // title/sub는 TOP_SVG 템플릿에 무이스케이프 보간됨 — 마크업 특수문자 금지 (리뷰 S2)
+    assert.ok(!/[&<>]/.test(b.title + (b.sub ?? "")), `${b.id} title/sub에 &<> 금지`);
     const d = b.detail;
     assert.ok(d && typeof d.desc === "string" && d.desc.length > 0, `${b.id} desc 없음`);
     // 이동 대상 해시는 실제 뷰만 (라우터 폴백으로 무효 링크 은폐 방지)
@@ -46,6 +51,29 @@ test("주 신호 경로 CHAIN = M7 조립 순서, 전 항목이 실존 블록", 
   // 주 경로 밖 블록 = 입력(미션플래너)·공통(게인 스케줄)·피드백(항법)뿐
   const offChain = [...ids].filter((id) => !CHAIN.includes(id)).sort();
   assert.deepEqual(offChain, ["nav", "planner", "schedule"]);
+});
+
+test("최상위 SVG 배선 ↔ 페이지 데이터 드리프트 가드 (리뷰 S1)", () => {
+  // 오타 id는 currentPage()가 조용히 홈으로 폴백해 무반응이 됨 — 여기서 잡는다
+  const refs = [...TOP_SVG.matchAll(/data-(?:block|page)="([^"]+)"/g)].map((m) => m[1]);
+  for (const id of refs) assert.ok(SUBSYSTEMS[id], `SVG 배선이 미실존 페이지 참조: ${id}`);
+  for (const s of DESIGN_ORDER) assert.ok(SUBSYSTEMS[s.page], `배너가 미실존 페이지 참조: ${s.page}`);
+  // 모든 블록은 그림에 정확히 1회 등장 + 하위 페이지 보유 (클릭 무반응 방지)
+  const blockRefs = [...TOP_SVG.matchAll(/data-block="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual([...blockRefs].sort(), BLOCKS.map((b) => b.id).sort());
+  for (const b of BLOCKS) assert.ok(SUBSYSTEMS[b.id], `${b.id} 서브시스템 페이지 없음`);
+  // 주 경로 블록의 그림 등장 순서 = CHAIN (M7 조립 순서) — 그림·데이터 어긋남 불가
+  assert.deepEqual(blockRefs.filter((id) => CHAIN.includes(id)), CHAIN);
+});
+
+test("서브시스템 페이지 스펙 완결 (pagehead 메타·칩·이동 해시)", () => {
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    for (const k of ["tag", "tagBg", "title", "eng", "svg", "notes"]) {
+      assert.ok(s[k], `${id}.${k} 없음`);
+    }
+    for (const c of s.chips) assert.ok(CHIP_LABEL[c], `${id} 미정의 칩 ${c}`);
+    for (const e of s.edits ?? []) assert.ok(VIEW_HASHES.has(e.hash), `${id} 무효 해시 ${e.hash}`);
+  }
 });
 
 test("허브 계약: AP는 편집 가능, 나머지는 정본 편집처로 이동", () => {

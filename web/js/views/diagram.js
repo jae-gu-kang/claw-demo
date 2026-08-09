@@ -29,7 +29,9 @@ export const DESIGN_ORDER = [
   { page: "verify", label: "⑤ 비선형 시뮬 검증", color: "#64748b" },
 ];
 
-const TOP_SVG = `
+/** 최상위 블록도 마크업 — export는 테스트의 배선 드리프트 가드용 (data-block/
+data-page id ↔ SUBSYSTEMS 키·CHAIN 순서 대조, lib/blocks.test.js). */
+export const TOP_SVG = `
 <svg viewBox="0 0 1660 692" xmlns="http://www.w3.org/2000/svg" role="img"
      aria-label="제어법칙 블록도 최상위 (시뮬링크 스타일)">
   <defs>

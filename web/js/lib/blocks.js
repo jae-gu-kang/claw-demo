@@ -10,7 +10,8 @@
 배선 그림)는 views/diagram.js·subsystems.js 수작성 — 여기는 계약 데이터만.
 */
 
-/** 주 신호 경로 (좌→우) — M7 FlightControlLaw 조립 순서. 다이어그램·테스트 공유. */
+/** 주 신호 경로 (좌→우) — M7 FlightControlLaw 조립 순서의 정본. 테스트가
+최상위 SVG(views/diagram.js TOP_SVG)의 블록 등장 순서와 대조한다. */
 export const CHAIN = ["guidance", "autopilot", "limiter", "scas", "mixer", "actuator", "plant"];
 
 export const BLOCKS = [
