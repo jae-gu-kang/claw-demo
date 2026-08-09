@@ -167,8 +167,10 @@ function renderLoopEditor(loopBox) {
     el("div", { class: "row", style: "margin-top: 8px" },
       el("button", {
         onclick: () => {
+          let i = loopRows.length + 1; // 삭제 후 추가해도 유일 이름 (리뷰 사소)
+          while (loopRows.some((r) => r.name === `loop_${i}`)) i += 1;
           loopRows.push({
-            name: `loop_${loopRows.length + 1}`, axis: "lon", x_out: "q", u_in: "de",
+            name: `loop_${i}`, axis: "lon", x_out: "q", u_in: "de",
             kp: "0.5", ki: "0", sign: "-1",
           });
           renderLoopEditor(loopBox);
@@ -235,7 +237,8 @@ function renderResults(resultBox, body) {
       for (const m of e.lat.modes) points.push({ x: m.eig[0], y: m.eig[1], color: "#b57908" });
     }
     clear(plotBox).append(
-      loopPlots,
+      // el() 래핑 필수 — 네이티브 append는 배열을 문자열화 (리뷰 Must: 상습 함정군)
+      el("div", {}, loopPlots),
       scatterCanvas(points, { title: "고유치 맵 (파랑=종축, 주황=횡축) — 허수축 좌측이 안정" }),
       el("div", { class: "legend" },
         el("span", {}, el("span", { class: "chip", style: "background:#157f3d" }), "양호"),
