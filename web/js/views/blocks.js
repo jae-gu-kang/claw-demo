@@ -92,14 +92,15 @@ function renderSubPage(root, page) {
 /** 파라미터 패널 — 스키마 열람/편집 + 정본 편집처 이동 (lib/blocks.js 계약). */
 function renderParams(box, sub, block) {
   const edits = block?.detail.edit ? [block.detail.edit] : (sub.edits ?? []);
-  box.append(
+  // el() 래핑 필수 — 네이티브 append(null/false)는 "null" 텍스트 노드가 됨 (리뷰 M1)
+  box.append(el("div", {},
     el("h4", {}, "파라미터 · 편집 경로"),
     block && el("p", { class: "hint" }, block.detail.desc),
     edits.length > 0 && el("div", { class: "row", style: "margin: 6px 0 10px" },
       edits.map((e) => el("button", {
         onclick: () => { location.hash = e.hash; },
       }, `→ ${e.label}`))),
-  );
+  ));
   if (!block?.detail.schema) {
     if (!block) return; // verify — 이동 버튼만
     box.append(el("p", { class: "hint" },
