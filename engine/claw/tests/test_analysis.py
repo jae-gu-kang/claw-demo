@@ -84,6 +84,104 @@ def test_pi_loop_matches_manual_composition(lon_lat):
     assert np.isfinite(loop_margins(p_only)["pm_deg"])
 
 
+def test_pi_loop_actuator_cascade_matches_manual(lon_lat):
+    """actuator_wn/zeta 지정 시 = 수동으로 2차계 wn²/(s²+2ζωn s+wn²)를 곱한 것과 동일
+    (01 §4.2 [기본값] — 작동기 동특성 포함 마진)."""
+    from claw.analysis import pi_loop
+
+    lon, _ = lon_lat[1]  # M0.6
+    s = control.tf("s")
+    wn, zeta = 30.0, 0.7
+    act = wn**2 / (s**2 + 2 * zeta * wn * s + wn**2)
+    manual = loop_margins(-(0.5 + 0.8 / s) * act * make_siso(lon, x_out="q", u_in="de"))
+    helper = loop_margins(pi_loop(
+        lon, x_out="q", u_in="de", kp=0.5, ki=0.8, actuator_wn=wn, actuator_zeta=zeta))
+    assert helper["pm_deg"] == pytest.approx(manual["pm_deg"], rel=1e-9)
+    assert helper["wcp"] == pytest.approx(manual["wcp"], rel=1e-9)
+
+
+def test_pi_loop_actuator_requires_both_params(lon_lat):
+    """wn·zeta는 함께 지정 — 한쪽만 주면 조용히 무시하지 않고 즉시 거부."""
+    from claw.analysis import pi_loop
+
+    lon, _ = lon_lat[1]
+    with pytest.raises(ValueError, match="actuator_wn.*actuator_zeta"):
+        pi_loop(lon, x_out="q", u_in="de", kp=0.5, actuator_wn=30.0)
+    with pytest.raises(ValueError, match="actuator_wn.*actuator_zeta"):
+        pi_loop(lon, x_out="q", u_in="de", kp=0.5, actuator_zeta=0.7)
+
+
+def test_pi_loop_delay_cascade_matches_manual_pade(lon_lat):
+    """delay_s 지정 시 = 수동 control.pade(delay_s, pade_order) 캐스케이드와 동일
+    (01 §4.2 [TBD]→해소 — Padé 차수 [기본값] 2)."""
+    from claw.analysis import pi_loop
+
+    lon, _ = lon_lat[1]
+    s = control.tf("s")
+    num, den = control.pade(0.035, 2)
+    delay_tf = control.tf(num, den)
+    manual = loop_margins(-(0.5 + 0.8 / s) * delay_tf * make_siso(lon, x_out="q", u_in="de"))
+    helper = loop_margins(pi_loop(
+        lon, x_out="q", u_in="de", kp=0.5, ki=0.8, delay_s=0.035))
+    assert helper["pm_deg"] == pytest.approx(manual["pm_deg"], rel=1e-9)
+    assert helper["wcp"] == pytest.approx(manual["wcp"], rel=1e-9)
+    # 차수를 바꾸면 다른(더 부정확한) 근사 — 기본 2차와 달라야 함 (인자가 실제로 쓰임)
+    order1 = loop_margins(pi_loop(
+        lon, x_out="q", u_in="de", kp=0.5, ki=0.8, delay_s=0.035, pade_order=1))
+    assert order1["pm_deg"] != pytest.approx(helper["pm_deg"], rel=1e-6)
+
+
+def test_pi_loop_delay_zero_is_noop(lon_lat):
+    """delay_s=0.0(기본) — 캐스케이드 없음, 기존 호출과 완전히 동일 (하위호환)."""
+    from claw.analysis import pi_loop
+
+    lon, _ = lon_lat[1]
+    base = loop_margins(pi_loop(lon, x_out="q", u_in="de", kp=0.5, ki=0.8))
+    explicit = loop_margins(pi_loop(lon, x_out="q", u_in="de", kp=0.5, ki=0.8, delay_s=0.0))
+    for k in base:  # nan != nan이라 dict == 대신 항목별 비교 (wcg가 nan일 수 있음)
+        assert explicit[k] == base[k] or (np.isnan(explicit[k]) and np.isnan(base[k])), k
+
+
+def test_pi_loop_invalid_delay_or_pade_order(lon_lat):
+    from claw.analysis import pi_loop
+
+    lon, _ = lon_lat[1]
+    with pytest.raises(ValueError, match="delay_s"):
+        pi_loop(lon, x_out="q", u_in="de", kp=0.5, delay_s=-0.01)
+    with pytest.raises(ValueError, match="pade_order"):
+        pi_loop(lon, x_out="q", u_in="de", kp=0.5, delay_s=0.03, pade_order=0)
+
+
+def test_pi_loop_actuator_and_delay_reduce_margins(lon_lat):
+    """작동기·지연 포함 마진 ≤ 미포함 마진 — 01 §4.2 '제외 마진은 낙관적' 회귀 고정.
+
+    실측(피치 M0.6 kp=0.5·ki=0.8): 기준 PM 91.0° → 작동기 포함 PM −8.4°(불안정
+    전환! 크로스오버 52 rad/s가 작동기 대역폭 30 rad/s를 넘어섬) → 지연 포함
+    −12.9° → 둘 다 포함 −76.3°(각각보다 더 나쁨, 위상지연 누적)."""
+    from claw.analysis import pi_loop
+
+    lon, lat = lon_lat[1]
+    wn, zeta, delay_s = 30.0, 0.7, 0.035
+    cases = [
+        (lon, "q", "de", 0.5, 0.8),
+        (lat, "p", "da", -0.2, 0.0),
+        (lat, "r", "dr", 0.8, 0.0),
+    ]
+    for model, x_out, u_in, kp, ki in cases:
+        base = loop_margins(pi_loop(model, x_out=x_out, u_in=u_in, kp=kp, ki=ki))
+        with_act = loop_margins(pi_loop(
+            model, x_out=x_out, u_in=u_in, kp=kp, ki=ki, actuator_wn=wn, actuator_zeta=zeta))
+        with_delay = loop_margins(pi_loop(
+            model, x_out=x_out, u_in=u_in, kp=kp, ki=ki, delay_s=delay_s))
+        with_both = loop_margins(pi_loop(
+            model, x_out=x_out, u_in=u_in, kp=kp, ki=ki,
+            actuator_wn=wn, actuator_zeta=zeta, delay_s=delay_s))
+        assert with_act["pm_deg"] < base["pm_deg"], f"{x_out}: 작동기 포함이 PM 개선"
+        assert with_delay["pm_deg"] < base["pm_deg"], f"{x_out}: 지연 포함이 PM 개선"
+        assert with_both["pm_deg"] < with_act["pm_deg"], f"{x_out}: 병용이 작동기 단독보다 양호"
+        assert with_both["pm_deg"] < with_delay["pm_deg"], f"{x_out}: 병용이 지연 단독보다 양호"
+
+
 def test_vn_stall_boundary_analytic():
     """V-n 실속 경계 해석 대조 — 데모 CL(α, δe=0)=3.5α → n = q̄·S·CL/W 정확."""
     from claw.analysis import vn_stall_boundary

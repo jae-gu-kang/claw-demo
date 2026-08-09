@@ -9,7 +9,7 @@
 import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
-import { AXIS_NAMES, DEFAULT_LOOPS, validateLoops } from "../lib/loops.js";
+import { AXIS_NAMES, DEFAULT_LOOPS, validateActuatorDelay, validateLoops } from "../lib/loops.js";
 import { fuelsOf, marginColor, pivotCases } from "../lib/plot.js";
 import { store } from "../store.js";
 import { heatmapCanvas, scatterCanvas } from "./plots.js";
@@ -32,6 +32,13 @@ export function render() {
   const fAlts = el("input", { value: "100, 1000, 3000" });
   const fFuels = el("input", { class: "num", value: "200" });
   const fFp = el("input", { value: "web-margin-v1" });
+  // 작동기·지연 포함 — [기본값 01 §4.2] 체크 ON으로 시작, 꺼서 영향 분리 비교 가능
+  const fUseAct = el("input", { type: "checkbox", checked: true });
+  const fWn = el("input", { class: "num-sm", value: "30" });
+  const fZeta = el("input", { class: "num-sm", value: "0.7" });
+  const fUseDelay = el("input", { type: "checkbox", checked: true });
+  const fDelay = el("input", { class: "num-sm", value: "0.035" });
+  const fPade = el("input", { class: "num-sm", value: "2" });
 
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -63,8 +70,13 @@ export function render() {
     try {
       clear(errBox);
       const v = validateLoops(loopRows);
-      if (v.errors) {
-        clear(errBox).append(el("div", { class: "error-box" }, v.errors.join("\n")));
+      const ad = validateActuatorDelay({
+        useActuator: fUseAct.checked, wn: fWn.value, zeta: fZeta.value,
+        useDelay: fUseDelay.checked, delaySeconds: fDelay.value, padeOrder: fPade.value,
+      });
+      const errs = [...(v.errors ?? []), ...(ad.errors ?? [])];
+      if (errs.length) {
+        clear(errBox).append(el("div", { class: "error-box" }, errs.join("\n")));
         return;
       }
       clear(resultBox);
@@ -73,7 +85,10 @@ export function render() {
         parseNumberList(fAlts.value),
         parseNumberList(fFuels.value),
       );
-      const req = { cases, loops: v.loops, fingerprint: fFp.value };
+      const req = {
+        cases, loops: v.loops, fingerprint: fFp.value,
+        actuator: ad.actuator, delay_s: ad.delay_s, pade_order: ad.pade_order,
+      };
       const submitted = await api.post("/analysis/margin-map", req);
       runningJobId = submitted.id;
       watch();
@@ -96,10 +111,25 @@ export function render() {
         el("button", { class: "primary", onclick: run }, "실행"),
       ),
       loopBox,
+      el("div", { class: "field-grid", style: "margin-top: 10px" },
+        el("div", { class: "opt-group" },
+          el("div", { class: "g-title" }, "작동기 포함 (2차계 — plant.actuator와 동일 모델)"),
+          el("div", { class: "row-inner" },
+            el("label", { class: "field check" }, fUseAct, "포함"),
+            el("label", { class: "field" }, "wn [rad/s]", fWn),
+            el("label", { class: "field" }, "ζ", fZeta))),
+        el("div", { class: "opt-group" },
+          el("div", { class: "g-title" }, "지연 포함 (항법 출력 + 제어주기 — Padé 근사)"),
+          el("div", { class: "row-inner" },
+            el("label", { class: "field check" }, fUseDelay, "포함"),
+            el("label", { class: "field" }, "총 지연 [s]", fDelay),
+            el("label", { class: "field" }, "Padé 차수", fPade))),
+      ),
       el("p", { class: "hint" },
         "트림 → 선형화 → 모드 분류 → 루프별 sign·PI·G(x_out←u_in) 마진 (엔진 M9·M10). ",
-        "루프를 전부 지우면 고유치·감쇠비만 계산. 선형모델은 현재 플랜트 단독 — ",
-        "작동기·지연 미포함 마진은 낙관적 (01 §4.2), 최종 확인은 시뮬 검증으로. ",
+        "루프를 전부 지우면 고유치·감쇠비만 계산. 작동기·지연 미포함 마진은 낙관적 ",
+        "(01 §4.2) — 기본은 포함, 체크 해제로 영향 분리 비교. 지연 기본값 0.035 s = ",
+        "항법 출력 지연 0.03 s [기본값] + 제어주기(100 Hz) 등가지연 0.005 s. ",
         "상태색 [기본값]: PM ≥45° 양호 · 30~45° 주의 · <30° 부족 · GM ≥10 dB 양호 · ",
         "6~10 주의 · <6 부족 · 회색 = 트림 불가/판정 불가."),
       progressBox, errBox,
@@ -202,6 +232,18 @@ function loopsOf(body) {
   return Object.keys(withMargins?.margins ?? {}).map((name) => ({ name }));
 }
 
+/** 저장 결과의 작동기·지연 적용값 요약 — 재열람 시 현재 폼 상태와 무관하게
+그 결과가 실제로 무엇을 포함해 계산됐는지 확인 (구형 결과는 필드 자체가 없음). */
+function appliedSummary(body) {
+  const act = body.actuator
+    ? `작동기 포함 (wn=${body.actuator.wn} rad/s, ζ=${body.actuator.zeta})`
+    : "작동기 미포함";
+  const delay = body.delay_s > 0
+    ? `지연 포함 (${body.delay_s} s, Padé ${body.pade_order}차)`
+    : "지연 미포함";
+  return `${act} · ${delay}`;
+}
+
 function renderResults(resultBox, body) {
   const entries = body.cases;
   const loops = loopsOf(body);
@@ -249,7 +291,9 @@ function renderResults(resultBox, body) {
     );
   };
   fuelSel.addEventListener("change", draw);
-  clear(resultBox).append(el("div", { class: "row" }, fuelSel), plotBox);
+  clear(resultBox).append(
+    el("p", { class: "hint" }, appliedSummary(body)),
+    el("div", { class: "row" }, fuelSel), plotBox);
   draw();
 }
 

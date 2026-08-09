@@ -57,3 +57,34 @@ export function validateLoops(rows) {
   }
   return errors.length ? { errors } : { loops };
 }
+
+const POS = (name) => ({ name, type: "number", lo: Number.MIN_VALUE, hi: null }); // >0 (gt)
+const NONNEG = (name) => ({ name, type: "number", lo: 0, hi: null }); // ≥0 (ge)
+const INT_POS = (name) => ({ name, type: "integer", lo: 1, hi: null }); // ≥1 (ge)
+
+/** 작동기·지연 포함 옵션(체크박스+수치 문자열) → 서버 MarginMapIn.actuator/delay_s/
+pade_order 미러. 꺼진 그룹의 필드는 검증하지 않음(빈 값이어도 통과) — 서버 필드
+자체가 안 보내지므로 무의미. row: {useActuator, wn, zeta, useDelay, delaySeconds,
+padeOrder}. */
+export function validateActuatorDelay(row) {
+  const errors = [];
+  let actuator = null;
+  if (row.useActuator) {
+    const wn = parseFieldValue(POS("wn"), row.wn);
+    const zeta = parseFieldValue(POS("zeta"), row.zeta);
+    if (wn.error) errors.push(wn.error);
+    if (zeta.error) errors.push(zeta.error);
+    if (!wn.error && !zeta.error) actuator = { wn: wn.value, zeta: zeta.value };
+  }
+  let delay_s = 0;
+  let pade_order = 2;
+  if (row.useDelay) {
+    const d = parseFieldValue(NONNEG("delay_s"), row.delaySeconds);
+    const p = parseFieldValue(INT_POS("pade_order"), row.padeOrder);
+    if (d.error) errors.push(d.error);
+    else delay_s = d.value;
+    if (p.error) errors.push(p.error);
+    else pade_order = p.value;
+  }
+  return errors.length ? { errors } : { actuator, delay_s, pade_order };
+}

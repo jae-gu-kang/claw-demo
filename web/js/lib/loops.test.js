@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { AXIS_NAMES, DEFAULT_LOOPS, validateLoops } from "./loops.js";
+import { AXIS_NAMES, DEFAULT_LOOPS, validateActuatorDelay, validateLoops } from "./loops.js";
 
 test("AXIS_NAMES ↔ 엔진 linearize.py 자구 대조 (교차 파일 드리프트 가드, 리뷰 S2)", () => {
   // 정본(engine/claw/trim/linearize.py)을 직접 읽어 대조 — 엔진 rename 시
@@ -71,4 +71,57 @@ test("validateLoops: 수치 파싱 함정 — 빈 문자열·비수치·비유�
   // 오류에 어느 루프인지 표시 (여러 행일 때 위치 특정)
   const r = validateLoops([row(), row({ name: "roll_p", kp: "x" })]);
   assert.ok(r.errors.some((e) => e.includes("roll_p")));
+});
+
+// ── 작동기·지연 포함 옵션 (서버 MarginMapIn.actuator/delay_s/pade_order 미러) ──
+
+const adRow = (over = {}) => ({
+  useActuator: true, wn: "30", zeta: "0.7",
+  useDelay: true, delaySeconds: "0.035", padeOrder: "2", ...over,
+});
+
+test("validateActuatorDelay: 둘 다 꺼짐 — actuator null·delay_s 0 (서버 기본값과 동일)", () => {
+  const r = validateActuatorDelay(adRow({ useActuator: false, useDelay: false }));
+  assert.ok(!("errors" in r)); // validateLoops와 동일 관례: 성공 시 errors 키 자체가 없음
+  assert.deepEqual(r, { actuator: null, delay_s: 0, pade_order: 2 });
+});
+
+test("validateActuatorDelay: 작동기만 켜짐 — wn·zeta 파싱, delay_s는 0", () => {
+  const r = validateActuatorDelay(adRow({ useDelay: false }));
+  assert.ok(!r.errors);
+  assert.deepEqual(r.actuator, { wn: 30, zeta: 0.7 });
+  assert.equal(r.delay_s, 0);
+});
+
+test("validateActuatorDelay: 지연만 켜짐 — actuator는 null, delay_s·pade_order 파싱", () => {
+  const r = validateActuatorDelay(adRow({ useActuator: false }));
+  assert.ok(!r.errors);
+  assert.equal(r.actuator, null);
+  assert.equal(r.delay_s, 0.035);
+  assert.equal(r.pade_order, 2);
+});
+
+test("validateActuatorDelay: 둘 다 켜짐 — 전부 파싱 (실서버 대조 기본값 30/0.7/0.035/2)", () => {
+  const r = validateActuatorDelay(adRow());
+  assert.ok(!("errors" in r));
+  assert.deepEqual(r, { actuator: { wn: 30, zeta: 0.7 }, delay_s: 0.035, pade_order: 2 });
+});
+
+test("validateActuatorDelay: 서버 제약 미러 — wn·zeta는 양수, delay_s는 비음수, pade_order는 1 이상 정수", () => {
+  assert.ok(validateActuatorDelay(adRow({ wn: "0" })).errors);
+  assert.ok(validateActuatorDelay(adRow({ zeta: "-0.1" })).errors);
+  assert.ok(validateActuatorDelay(adRow({ delaySeconds: "-0.01" })).errors);
+  assert.ok(validateActuatorDelay(adRow({ padeOrder: "0" })).errors);
+  assert.ok(validateActuatorDelay(adRow({ padeOrder: "1.5" })).errors); // 정수 아님
+});
+
+test("validateActuatorDelay: 꺼진 그룹의 필드는 검증 생략 (빈 값이어도 통과)", () => {
+  const r = validateActuatorDelay(adRow({ useActuator: false, wn: "", zeta: "abc" }));
+  assert.ok(!r.errors);
+  assert.equal(r.actuator, null);
+});
+
+test("validateActuatorDelay: 수치 파싱 함정 — 빈 문자열·비유한 거부 (켜진 상태에서)", () => {
+  assert.ok(validateActuatorDelay(adRow({ wn: "" })).errors);
+  assert.ok(validateActuatorDelay(adRow({ delaySeconds: "1e999" })).errors);
 });

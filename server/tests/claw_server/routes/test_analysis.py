@@ -108,6 +108,42 @@ def test_margin_map_loop_spec_validation_422(client):
     assert client.post("/api/analysis/margin-map", json=zero_sign).status_code == 422
 
 
+def test_margin_map_actuator_and_delay_included_reduce_margins(client, wait_job):
+    """actuator·delay_s 지정 시 엔진 pi_loop로 전달되어 마진이 낮아짐 (01 §4.2
+    [기본값] — 제외 마진은 낙관적). 결과에 적용값이 echo되어 열람 시 재확인 가능."""
+    base = _margin_map_request(machs=(0.6,))
+    j0 = wait_job(client.post("/api/analysis/margin-map", json=base).json()["id"])
+    base_pm = client.get(f"/api/results/{j0['result_id']}").json()["cases"][0]["margins"]["pitch_q"]["pm_deg"]
+
+    req = dict(base, actuator={"wn": 30.0, "zeta": 0.7}, delay_s=0.035, pade_order=2)
+    j1 = wait_job(client.post("/api/analysis/margin-map", json=req).json()["id"])
+    body = client.get(f"/api/results/{j1['result_id']}").json()
+    assert body["actuator"] == {"wn": 30.0, "zeta": 0.7}
+    assert body["delay_s"] == 0.035 and body["pade_order"] == 2
+    with_both_pm = body["cases"][0]["margins"]["pitch_q"]["pm_deg"]
+    assert with_both_pm < base_pm  # 실측: 91.0° → -76.3° (M0.6 kp=0.5·ki=0.8, 엔진 테스트와 동일 기체)
+
+
+def test_margin_map_default_actuator_delay_absent_matches_prior_behavior(client, wait_job):
+    """actuator·delay_s 미지정 — 결과에 actuator=null·delay_s=0.0 echo, 마진은
+    플랜트 단독 (하위호환 — 기존 계약 불변)."""
+    j = wait_job(client.post("/api/analysis/margin-map", json=_margin_map_request()).json()["id"])
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    assert body["actuator"] is None
+    assert body["delay_s"] == 0.0 and body["pade_order"] == 2
+
+
+def test_margin_map_actuator_delay_validation_422(client):
+    base = _margin_map_request()
+    for bad in (
+        dict(base, actuator={"wn": 0.0, "zeta": 0.7}),   # wn 비양수
+        dict(base, actuator={"wn": 30.0, "zeta": -0.1}),  # zeta 비양수
+        dict(base, delay_s=-0.01),                        # 음수 지연
+        dict(base, pade_order=0),                         # 1 미만 차수
+    ):
+        assert client.post("/api/analysis/margin-map", json=bad).status_code == 422, bad
+
+
 def test_margin_map_cancel_preserves_trim_results(client, wait_job, monkeypatch):
     """취소 시 트림 완료분은 트림 전용 entry로 전량 보존 — 유실 금지 (리뷰 S1).
 

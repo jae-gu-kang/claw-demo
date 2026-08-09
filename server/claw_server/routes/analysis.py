@@ -68,11 +68,24 @@ class LoopIn(BaseModel):
         return self
 
 
+class ActuatorIn(BaseModel):
+    """마진 계산용 작동기 동특성 (01 §4.2 [기본값] — plant.actuator.SecondOrderActuator와
+    동일 2차계 wn²/(s²+2ζωn·s+wn²) 재사용, 레이트/위치 한계는 소신호 해석 제외)."""
+
+    wn: FiniteFloat = Field(gt=0.0)
+    zeta: FiniteFloat = Field(gt=0.0)
+
+
 class MarginMapIn(BaseModel):
     aircraft: Literal["demo"] = "demo"
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1)
     loops: list[LoopIn] = []
+    # 작동기·지연 포함은 [기본값] 미포함(하위호환) — 포함이 01 §4.2 문서 기본값이지만
+    # 그건 웹 폼 초기 상태의 몫이고 서버 계약은 중립 유지 (엔진 pi_loop과 동일 원칙)
+    actuator: ActuatorIn | None = None
+    delay_s: FiniteFloat = Field(default=0.0, ge=0.0)
+    pade_order: int = Field(default=2, ge=1)
 
     @model_validator(mode="after")
     def _unique_loop_names(self):
@@ -169,6 +182,9 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                         loop = pi_loop(
                             model, x_out=spec.x_out, u_in=spec.u_in,
                             kp=spec.kp, ki=spec.ki, sign=spec.sign,
+                            actuator_wn=req.actuator.wn if req.actuator else None,
+                            actuator_zeta=req.actuator.zeta if req.actuator else None,
+                            delay_s=req.delay_s, pade_order=req.pade_order,
                         )
                         entry["margins"][spec.name] = to_jsonable(loop_margins(loop))
                 except ValueError as e:  # 케이스별 해석 실패 — 전량 소실 대신 데이터로
@@ -181,6 +197,9 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                 "kind": "margin_map",
                 "cases": entries,
                 "loops": [lp.model_dump() for lp in req.loops],
+                "actuator": req.actuator.model_dump() if req.actuator else None,
+                "delay_s": req.delay_s,
+                "pade_order": req.pade_order,
                 "n_requested": n,
             },
             meta={
