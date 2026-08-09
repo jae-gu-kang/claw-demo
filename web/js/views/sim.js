@@ -200,11 +200,13 @@ export function render() {
 
 function renderModeTable(modeBox) {
   clear(modeBox).append(
-    el("div", { class: "scroll-x" }, el("table", {},
+    el("div", { class: "scroll-x" }, el("table", { class: "edit" },
       el("thead", {}, el("tr", {},
-        el("th", {}, "모드"), el("th", {}, "속도 [m/s]"), el("th", {}, "고도 [m]"),
-        el("th", {}, 'heading (수치 | "path" | 빈=off)'),
-        el("th", {}, "이탈 조건"), el("th", {}, "값"), el("th", {}, "다음"), el("th", {}, ""))),
+        el("th", { class: "c-md" }, "모드"),
+        el("th", { class: "c-sm" }, "속도 [m/s]"), el("th", { class: "c-sm" }, "고도 [m]"),
+        el("th", { class: "c-md" }, "헤딩"),
+        el("th", { class: "c-md" }, "이탈 조건"), el("th", { class: "c-sm" }, "값"),
+        el("th", { class: "c-md" }, "다음"), el("th", {}, ""))),
       el("tbody", {}, modeRows.map((r, i) => el("tr", {},
         el("td", {}, el("input", { value: r.name,
           onchange: (ev) => { r.name = ev.target.value; } })),
@@ -228,19 +230,23 @@ function renderModeTable(modeBox) {
         } }, "삭제")),
       ))),
     )),
-    el("button", { onclick: () => {
-      modeRows.push({ name: `mode${modeRows.length + 1}`, speed: "", alt: "",
-                      heading: "", exitKind: "time_ge", exitValue: "1e9", next: "" });
-      renderModeTable(modeBox);
-    } }, "모드 추가"),
+    el("div", { class: "row", style: "margin-top: 8px" },
+      el("button", { onclick: () => {
+        modeRows.push({ name: `mode${modeRows.length + 1}`, speed: "", alt: "",
+                        heading: "", exitKind: "time_ge", exitValue: "1e9", next: "" });
+        renderModeTable(modeBox);
+      } }, "모드 추가"),
+      el("span", { class: "hint" },
+        '헤딩: 수치 | "path"(경로 추종) | 빈=유지 안 함 · 속도/고도도 빈 칸이면 해당 루프 off')),
   );
 }
 
 function renderWpTable(wpBox) {
   clear(wpBox).append(
-    el("table", {},
+    el("table", { class: "edit" },
       el("thead", {}, el("tr", {},
-        el("th", {}, "#"), el("th", {}, "N [m]"), el("th", {}, "E [m]"), el("th", {}, ""))),
+        el("th", {}, "#"), el("th", { class: "c-md" }, "N [m]"),
+        el("th", { class: "c-md" }, "E [m]"), el("th", {}, ""))),
       el("tbody", {}, wpRows.map((r, i) => el("tr", {},
         el("td", {}, i + 1),
         el("td", {}, el("input", { value: r.n,
