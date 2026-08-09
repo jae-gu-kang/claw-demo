@@ -222,20 +222,19 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="487" y="240" width="36" height="24" rx="12"/><text class="pnum" x="505" y="256">2</text></g>
   <text class="pname" x="585" y="256">항법 (위치 · 속도)</text>
   <path class="wire" d="M505 240 V138" marker-end="url(#aw-guid)"/>
-  <text class="canvas-note" x="120" y="180">모드 시퀀스: 부스트 → 천이 → 상승 → (순항·고도유지·디센트·씨스키밍·웨이포인트 항법) → 팝업 → 종말 다이브</text>
+  <text class="canvas-note" x="120" y="180">모드 시퀀스: 이륙 → 상승 → (순항·고도유지·디센트·임무수행·웨이포인트 항법) → 착륙</text>
   <text class="canvas-note" x="120" y="200">활성 명령 셋(속도/고도/헤딩 유지 방식)은 모드 테이블이 결정 · Stateflow 미사용 [확정]</text>
 </svg>`,
     notes: `
 <h4>비행모드 실행기 — 선언적 모드 테이블 + Sequencer <span class="chip ok">확정</span></h4>
 <div class="chain">
-  <span class="ctl">부스트</span><span class="arr">→</span><span class="ctl">천이</span><span class="arr">→</span><span class="ctl">상승</span><span class="arr">→</span>
-  <span class="sig">순항 · 고도유지 · 디센트 · 씨스키밍 · 웨이포인트 항법</span><span class="arr">→</span>
-  <span class="ctl">팝업</span><span class="arr">→</span><span class="ctl">종말 다이브</span>
+  <span class="ctl">이륙</span><span class="arr">→</span><span class="ctl">상승</span><span class="arr">→</span>
+  <span class="sig">순항 · 고도유지 · 디센트 · 임무수행 · 웨이포인트 항법</span><span class="arr">→</span>
+  <span class="ctl">착륙</span>
 </div>
 <ul>
   <li>각 모드 = { 진입조건, 활성 명령, 이탈조건 } — 전환 조건·우선순위·비상 처리 <span class="chip tbd">TBD</span></li>
-  <li>천이 단계(부스터 분리·날개 전개)는 형상·질량·추진 급변 → 트림점·게인 별도 취급 <span class="chip note">설계 유의</span></li>
-  <li>씨스키밍 고도 기준: 해수면 0 ft (MSL) <span class="chip ok">확정</span></li>
+  <li>저고도 임무 기준 고도: 해수면 0 ft (MSL) <span class="chip ok">확정</span></li>
 </ul>
 <h4>경로 추종</h4>
 <ul>
@@ -514,7 +513,6 @@ export const SUBSYSTEMS = {
   <li>스케줄 검증 요구: 설계점 사이 <b>보간 구간</b>에서 마진 재계산(마진 맵 재사용) · 테이블 불연속 검출 <span class="chip ok">확정</span></li>
   <li>유효범위 밖 외삽 금지(경계값 고정) · 스케줄 변수 입력 필터링으로 게인 채터링 방지 <span class="chip dft">기본값</span></li>
   <li>설계점 격자 · 보간 · 전환 시 범프리스 처리 <span class="chip tbd">TBD</span> — 트림 결과 확보 후</li>
-  <li>천이 단계(부스터 분리·날개 전개)는 트림점·게인 스케줄 별도 취급 <span class="chip note">설계 유의</span></li>
 </ul>`,
   },
 
@@ -533,7 +531,7 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="390" y="94">경로 프로파일 생성</text><text class="ttl2" x="390" y="114">속도 · 고도 계획 포함</text></g>
   <path class="wire" d="M480 100 H536" marker-end="url(#aw-mp)"/>
   <g class="sblk"><rect class="body" x="540" y="66" width="180" height="68" rx="3"/>
-    <text class="ttl" x="630" y="94">모드 시퀀스 부여</text><text class="ttl2" x="630" y="114">비행단계별 (부스트→종말)</text></g>
+    <text class="ttl" x="630" y="94">모드 시퀀스 부여</text><text class="ttl2" x="630" y="114">비행단계별 (이륙→착륙)</text></g>
   <path class="wire" d="M720 100 H786" marker-end="url(#aw-mp)"/>
   <g class="sblk"><rect class="body" x="790" y="88" width="36" height="24" rx="12"/><text class="pnum" x="808" y="104">1</text></g>
   <text class="pname" x="808" y="128">임무프로파일</text>
@@ -543,7 +541,7 @@ export const SUBSYSTEMS = {
 <ul>
   <li>웨이포인트 열(列)로부터 <b>임무프로파일</b>(경로 + 비행모드 시퀀스) 생성</li>
   <li>편집처: 시뮬레이션 탭 미션 그룹(모드 테이블·웨이포인트·도달반경) — 지도 위 편집(오프라인 타일 폴백)은 백로그</li>
-  <li>종말 유도 상세 알고리즘(표적 교전 로직)은 별도 설계 범위 <span class="chip ok">확정 01 §3.3.1</span></li>
+  <li>임무수행 단계의 상세 임무 로직은 별도 설계 범위 <span class="chip ok">확정 01 §3.3.1</span></li>
 </ul>`,
   },
 

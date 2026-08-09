@@ -12,15 +12,15 @@ import { store } from "../store.js";
 import { lineChartCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
-// 기본 미션 = Phase 4 완주 회귀 미션 (test_mission — 상승→선회 항법→디센트→씨스키밍)
+// 기본 미션 = Phase 4 완주 회귀 미션 (test_mission — 상승→선회 항법→디센트→임무수행)
 let modeRows = [
   { name: "climb", speed: "202", alt: "1300", heading: "0",
     exitKind: "alt_ge", exitValue: "1280", next: "wpnav" },
   { name: "wpnav", speed: "140", alt: "1300", heading: "path",
     exitKind: "path_done", exitValue: "", next: "descent" },
   { name: "descent", speed: "140", alt: "100", heading: "",
-    exitKind: "alt_le", exitValue: "130", next: "seaskim" },
-  { name: "seaskim", speed: "140", alt: "30", heading: "",
+    exitKind: "alt_le", exitValue: "130", next: "mission" },
+  { name: "mission", speed: "140", alt: "30", heading: "",
     exitKind: "time_ge", exitValue: "1e9", next: "" },
 ];
 let wpRows = [{ n: "8000", e: "0" }, { n: "8000", e: "8000" }];

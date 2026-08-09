@@ -1,6 +1,6 @@
 """Phase 4 완료 기준 검증 (03 §6) — 폐루프 시나리오 완주 + 파라미터 Δ리포트.
 
-미션: 상승→웨이포인트 항법(90° 선회)→디센트→씨스키밍 — 실전 조건
+미션: 상승→웨이포인트 항법(90° 선회)→디센트→임무수행 — 실전 조건
 (항법 오차 모델 + 작동기 + 연료 소모)에서 모드 체인 완주와 엔벨로프
 청정(무플래그·실속 여유)을 회귀 고정한다.
 Δ리포트: 오토파일럿 게인(ap.kp_alt)을 파라미터 계층으로 흔들어 상승 캡처
@@ -33,10 +33,10 @@ def trim_design():
 
 
 def test_full_mission_closed_loop(trim_design):
-    """상승→선회 항법→디센트→씨스키밍 완주 — Phase 4 완료 기준의 본체.
+    """상승→선회 항법→디센트→임무수행 완주 — Phase 4 완료 기준의 본체.
 
     실측 타임라인(회귀 기준): climb→wpnav 15.7 s, wpnav→descent 92.3 s
-    (90° 선회 + 202→140 m/s 감속), descent→seaskim 138 s, 최종 h≈30 m.
+    (90° 선회 + 202→140 m/s 감속), descent→mission 138 s, 최종 h≈30 m.
     웨이포인트 기하는 선회반경(V²/(g·tanφ_max) — 140 m/s에서 ≈2.4 km)을
     고려해 다리 8 km·도달반경 1.5 km. 작동기 rate 10 rad/s [기본값] —
     3 rad/s는 항법 지연·잡음과 결합해 리밋사이클 (요구 사양 도출 스터디).
@@ -50,9 +50,9 @@ def test_full_mission_closed_loop(trim_design):
         ModeSpec(name="wpnav", speed=140.0, alt=1300.0, heading="path",
                  exit_when=("path_done",), next="descent"),
         ModeSpec(name="descent", speed=140.0, alt=100.0,
-                 exit_when=("alt_le", 130.0), next="seaskim"),
-        ModeSpec(name="seaskim", speed=140.0, alt=30.0, heading=None,
-                 exit_when=("time_ge", 1e9)),  # 씨스키밍 (MSL 기준, 01 §2.5)
+                 exit_when=("alt_le", 130.0), next="mission"),
+        ModeSpec(name="mission", speed=140.0, alt=30.0, heading=None,
+                 exit_when=("time_ge", 1e9)),  # 임무수행 저고도 (MSL 기준, 01 §2.5)
     ]
     nav = NavErrorModel(pos_std=1.0, vel_std=0.1, att_std=0.001, psi_std=0.002,
                         rate_std=0.0005, bias_std=0.5, bias_tau=60.0,
@@ -74,9 +74,9 @@ def test_full_mission_closed_loop(trim_design):
     # 모드 체인 완주 (순서 고정)
     seq = [m for i, m in enumerate(res.signals["mode"])
            if i == 0 or m != res.signals["mode"][i - 1]]
-    assert seq == ["climb", "wpnav", "descent", "seaskim"]
+    assert seq == ["climb", "wpnav", "descent", "mission"]
     assert res.meta["aborted"] is None
-    # 씨스키밍 정착
+    # 임무수행 고도 정착
     assert abs(res.signals["h"][-1] - 30.0) < 10.0
     # 선회 실행 (wp2는 동쪽 — ψ가 π/2 부근까지 감)
     assert np.max(res.signals["psi"]) > 1.2

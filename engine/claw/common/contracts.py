@@ -53,7 +53,7 @@ class GuidanceCommand:
     """유도→오토파일럿 명령 (M8→M7). 축별 활성화 플래그는 비행모드 테이블이 정의."""
 
     speed: float = 0.0  # [m/s]
-    alt: float = 0.0  # [m], MSL 기준 (씨스키밍 0 ft = MSL, 도메인 문서 §2.5)
+    alt: float = 0.0  # [m], MSL 기준 (저고도 임무 0 ft = MSL, 도메인 문서 §2.5)
     heading: float = 0.0  # [rad]
     speed_on: bool = False
     alt_on: bool = False

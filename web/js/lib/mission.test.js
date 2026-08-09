@@ -11,8 +11,8 @@ test("buildModes: 빈 값 → null(축 off), heading path/숫자, next 연결", 
     { name: "wpnav", speed: "140", alt: "1300", heading: "path",
       exitKind: "path_done", exitValue: "", next: "descent" },
     { name: "descent", speed: "140", alt: "100", heading: "",
-      exitKind: "alt_le", exitValue: "130", next: "seaskim" },
-    { name: "seaskim", speed: "140", alt: "30", heading: "",
+      exitKind: "alt_le", exitValue: "130", next: "mission" },
+    { name: "mission", speed: "140", alt: "30", heading: "",
       exitKind: "time_ge", exitValue: "1e9", next: "" },
   ];
   const modes = buildModes(rows);
