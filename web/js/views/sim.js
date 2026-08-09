@@ -259,10 +259,11 @@ function renderWpTable(wpBox) {
         } }, "삭제")),
       ))),
     ),
-    el("button", { onclick: () => {
-      wpRows.push({ n: "0", e: "0" });
-      renderWpTable(wpBox);
-    } }, "웨이포인트 추가"),
+    el("div", { class: "row", style: "margin-top: 8px" },
+      el("button", { onclick: () => {
+        wpRows.push({ n: "0", e: "0" });
+        renderWpTable(wpBox);
+      } }, "웨이포인트 추가")),
   );
 }
 
