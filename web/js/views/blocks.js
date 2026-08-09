@@ -1,5 +1,8 @@
-/** 구조도 뷰 — 블록 다이어그램 허브 (02 §4). 시뮬링크의 "다이어그램에서 시작"
-대응: 블록 클릭 → 파라미터 대화상자(레지스트리 스키마 폼) 또는 정본 편집 화면 이동.
+/** 구조도 뷰 — 시뮬링크 스타일 블록 다이어그램 허브 (02 §4).
+
+최상위 블록도(설계 순서 점선 프레임 포함)에서 블록 클릭 → 서브시스템 하위
+페이지(#blocks/<id>)로 진입 — 브레드크럼·내부 블록도·설계 노트·파라미터 패널.
+해시가 페이지 상태를 들고 있어 브라우저 뒤로가기로 상위 복귀 가능.
 
 - 파라미터 스키마는 서버 /registry/{cat}/{name}/schema (엔진 ParamSet이 정본)
 - 편집 가능 블록(오토파일럿)만 폼 편집 → store 주입 (시뮬 탭 '편집 AP'로 사용)
@@ -11,53 +14,101 @@ import { clear, el } from "../dom.js";
 import { BLOCKS } from "../lib/blocks.js";
 import { groupFields, parseFieldValue, schemaFields } from "../lib/schemaform.js";
 import { store } from "../store.js";
-import { clawDiagramCanvas } from "./diagram.js";
+import { DESIGN_ORDER, fromMarkup, topDiagramSvg } from "./diagram.js";
+import { CHIP_LABEL, SUBSYSTEMS } from "./subsystems.js";
 
-let selectedId = null; // 탭 재진입에도 선택 유지
 const schemaCache = {}; // "cat/name" → schema
+const blockById = Object.fromEntries(BLOCKS.map((b) => [b.id, b]));
+
+const navigate = (id) => { location.hash = id ? `blocks/${id}` : "blocks"; };
+
+/** #blocks/<id> → 페이지 id (미실존이면 홈). 해시가 페이지 상태의 정본. */
+function currentPage() {
+  const seg = location.hash.slice(1).split("/")[1];
+  return seg && SUBSYSTEMS[seg] ? seg : null;
+}
 
 export function render() {
-  const diagramBox = el("div", { class: "scroll-x" });
-  const detailBox = el("div");
-
-  const select = (block) => {
-    selectedId = block?.id ?? null;
-    clear(diagramBox).append(
-      clawDiagramCanvas({ selectedId, onBlockClick: select }));
-    renderDetail(detailBox, block);
-  };
-
-  const root = el("div", {},
-    el("div", { class: "panel" },
-      el("h2", {}, "제어법칙 구조도 — 블록을 클릭하세요"),
-      diagramBox,
-      el("p", { class: "hint" },
-        "구조는 코드(M7 FlightControlLaw 조립)와 1:1 고정 — 자유 배선 없음 [확정 02 §4]. ",
-        "블록 클릭 = 파라미터 대화상자(스키마 폼) 열람·편집, 캠페인 작업(트림 격자·마진 맵·미션)은 상단 탭."),
-    ),
-    el("div", { class: "panel" }, detailBox),
-  );
-  select(BLOCKS.find((b) => b.id === selectedId) ?? null);
+  const page = currentPage();
+  const root = el("div", { class: "bd" });
+  if (page) renderSubPage(root, page);
+  else renderHome(root);
   return root;
 }
 
-function renderDetail(box, block) {
-  if (!block) {
-    clear(box).append(el("p", { class: "placeholder" },
-      "블록을 클릭하면 해당 블록의 파라미터(단위·범위·기본값)와 편집 경로가 표시됩니다."));
+// ── 최상위 (홈) ────────────────────────────────────────────────────────
+
+function renderHome(root) {
+  root.append(
+    el("div", { class: "order" },
+      el("span", { class: "cap" }, "설계 순서"),
+      DESIGN_ORDER.flatMap((s, i) => [
+        el("button", {
+          class: "pill", style: `background:${s.color}`,
+          onclick: () => navigate(s.page),
+        }, s.label),
+        i < DESIGN_ORDER.length - 1 && el("span", { class: "arr" }, "→"),
+      ]),
+      el("span", { class: "note-line" },
+        "명령은 바깥(유도)에서 안(SCAS)으로 내려가지만, 설계는 플랜트 해석 후 ",
+        el("b", {}, "가장 안쪽 루프부터"), " 닫아 나갑니다. 프레임 라벨을 클릭해도 이동합니다."),
+    ),
+    el("div", { class: "canvas-wrap top" }, topDiagramSvg(navigate)),
+    el("p", { class: "hint-row" },
+      "💡 블록(게인 스케줄링·항법 포함)이나 점선 프레임 라벨(①~⑤)을 클릭하면 서브시스템 ",
+      "내부 블록도가 열립니다 — 시뮬링크의 서브시스템 더블클릭 대응. 브라우저 뒤로가기로 복귀. ",
+      "구조는 코드(M7 조립)와 1:1 고정 — 자유 배선 없음 [확정 02 §4]."),
+  );
+}
+
+// ── 서브시스템 하위 페이지 ─────────────────────────────────────────────
+
+function renderSubPage(root, page) {
+  const sub = SUBSYSTEMS[page];
+  const block = blockById[page] ?? null; // verify는 블록 아님 (설계 단계 페이지)
+  const paramBox = el("div");
+
+  root.append(
+    el("div", { class: "pagehead" },
+      el("span", { class: "step-tag", style: `background:${sub.tagBg}` }, sub.tag),
+      el("h2", {}, sub.title),
+      el("span", { class: "eng" }, sub.eng),
+      el("span", { class: "chips" },
+        sub.chips.map((k) => el("span", { class: `chip ${k}` }, CHIP_LABEL[k]))),
+    ),
+    el("div", { class: "crumbbar" },
+      el("button", { class: "home-btn", onclick: () => navigate(null) }, "⌂ 제어법칙 (Top)"),
+      el("span", { class: "sep" }, "▸"),
+      el("span", { class: "cur" }, block?.title ?? sub.title),
+      el("button", { class: "up-btn", onclick: () => navigate(null) }, "↑ 상위로"),
+    ),
+    el("div", { class: "canvas-wrap sub" }, fromMarkup(sub.svg)),
+    fromMarkup(`<div class="notes">${sub.notes}</div>`),
+    el("div", { class: "notes" }, paramBox),
+  );
+  renderParams(paramBox, sub, block);
+}
+
+/** 파라미터 패널 — 스키마 열람/편집 + 정본 편집처 이동 (lib/blocks.js 계약). */
+function renderParams(box, sub, block) {
+  const edits = block?.detail.edit ? [block.detail.edit] : (sub.edits ?? []);
+  box.append(
+    el("h4", {}, "파라미터 · 편집 경로"),
+    block && el("p", { class: "hint" }, block.detail.desc),
+    edits.length > 0 && el("div", { class: "row", style: "margin: 6px 0 10px" },
+      edits.map((e) => el("button", {
+        onclick: () => { location.hash = e.hash; },
+      }, `→ ${e.label}`))),
+  );
+  if (!block?.detail.schema) {
+    if (!block) return; // verify — 이동 버튼만
+    box.append(el("p", { class: "hint" },
+      "레지스트리 파라미터 폼 없음 — 정본은 위 편집처 참조."));
     return;
   }
-  const d = block.detail;
   const schemaBox = el("div");
-  // el() 래핑 필수 — 네이티브 append(null)은 "null" 텍스트 노드가 됨 (리뷰 M1)
-  clear(box).append(el("div", {},
-    el("h2", {}, `${block.title} — 파라미터`),
-    el("p", { class: "hint" }, d.desc),
-    d.edit && el("div", { class: "row", style: "margin-bottom: 10px" },
-      el("button", { onclick: () => { location.hash = d.edit.hash; } }, `→ ${d.edit.label}`)),
-    schemaBox,
-  ));
-  if (d.schema) loadSchema(schemaBox, block);
+  box.append(schemaBox);
+  loadSchema(schemaBox, block);
 }
 
 async function loadSchema(schemaBox, block) {

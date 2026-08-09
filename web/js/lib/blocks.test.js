@@ -1,8 +1,9 @@
-// 블록 다이어그램 데이터·히트테스트 검증 — 허브 UI(블록 클릭 → 편집 경로)의 계약
+// 블록 다이어그램 데이터 검증 — 드릴다운 허브(블록 클릭 → 서브시스템 페이지)의 계약.
+// 기하(SVG 좌표)는 views/diagram.js·subsystems.js 수작성 — 여기선 데이터 계약만 판다.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { BLOCKS, DIAGRAM_H, DIAGRAM_W, hitBlock } from "./blocks.js";
+import { BLOCKS, CHAIN } from "./blocks.js";
 
 // main.js VIEWS의 수동 사본 — main.js가 DOM 의존이라 직접 import 불가. 보호는
 // 단방향(blocks.js 오타만 검출): main.js에서 뷰 개명 시 이 목록도 갱신할 것
@@ -13,12 +14,10 @@ const REGISTRY_REFS = new Set([
   "actuator/SecondOrderActuator", "guidance/LOS", "nav/ErrorModel",
 ]);
 
-test("블록: id 유일 + 캔버스 안 + 상세 스펙 완결", () => {
+test("블록: id 유일 + 상세 스펙 완결", () => {
   const ids = BLOCKS.map((b) => b.id);
   assert.equal(new Set(ids).size, ids.length);
   for (const b of BLOCKS) {
-    assert.ok(b.x >= 0 && b.y >= 0 && b.x + b.w <= DIAGRAM_W && b.y + b.h <= DIAGRAM_H,
-      `${b.id} 캔버스 밖`);
     assert.ok(b.title, `${b.id} title 없음`);
     const d = b.detail;
     assert.ok(d && typeof d.desc === "string" && d.desc.length > 0, `${b.id} desc 없음`);
@@ -39,33 +38,17 @@ test("블록: id 유일 + 캔버스 안 + 상세 스펙 완결", () => {
   }
 });
 
-test("블록: 서로 겹치지 않음 (히트테스트 유일성)", () => {
-  for (let i = 0; i < BLOCKS.length; i += 1) {
-    for (let j = i + 1; j < BLOCKS.length; j += 1) {
-      const a = BLOCKS[i];
-      const b = BLOCKS[j];
-      const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-      assert.ok(!overlap, `${a.id} ↔ ${b.id} 겹침`);
-    }
-  }
+test("주 신호 경로 CHAIN = M7 조립 순서, 전 항목이 실존 블록", () => {
+  assert.deepEqual(CHAIN,
+    ["guidance", "autopilot", "limiter", "scas", "mixer", "actuator", "plant"]);
+  const ids = new Set(BLOCKS.map((b) => b.id));
+  for (const id of CHAIN) assert.ok(ids.has(id), `CHAIN에 미실존 블록 ${id}`);
+  // 주 경로 밖 블록 = 입력(미션플래너)·공통(게인 스케줄)·피드백(항법)뿐
+  const offChain = [...ids].filter((id) => !CHAIN.includes(id)).sort();
+  assert.deepEqual(offChain, ["nav", "planner", "schedule"]);
 });
 
-test("hitBlock: 중심점 명중·경계 포함·빈 영역 null", () => {
-  for (const b of BLOCKS) {
-    assert.equal(hitBlock(b.x + b.w / 2, b.y + b.h / 2)?.id, b.id);
-    assert.equal(hitBlock(b.x, b.y)?.id, b.id); // 좌상 모서리 포함
-  }
-  assert.equal(hitBlock(-5, -5), null);
-  assert.equal(hitBlock(DIAGRAM_W - 1, DIAGRAM_H - 1), null); // 우하단 여백
-});
-
-test("주 신호 경로 조립 순서 = M7 (유도→AP→리미터→SCAS→믹서→작동기→플랜트)", () => {
-  const order = ["guidance", "autopilot", "limiter", "scas", "mixer", "actuator", "plant"];
-  const xs = order.map((id) => BLOCKS.find((b) => b.id === id).x);
-  assert.deepEqual([...xs].sort((p, q) => p - q), xs); // 좌→우 단조
-});
-
-test("허브 계약: AP는 편집 가능, 스케줄·SCAS는 게인 탭으로 이동", () => {
+test("허브 계약: AP는 편집 가능, 나머지는 정본 편집처로 이동", () => {
   const byId = Object.fromEntries(BLOCKS.map((b) => [b.id, b.detail]));
   assert.equal(byId.autopilot.editable, true);
   assert.equal(byId.autopilot.injectKey, "autopilotParams");
@@ -74,4 +57,6 @@ test("허브 계약: AP는 편집 가능, 스케줄·SCAS는 게인 탭으로 �
   assert.equal(byId.limiter.edit.hash, "envelope");
   assert.equal(byId.actuator.edit.hash, "sim");
   assert.equal(byId.nav.edit.hash, "sim");
+  assert.equal(byId.planner.edit.hash, "sim"); // 미션(모드·웨이포인트)은 시뮬 탭이 편집처
+  assert.equal(byId.plant.edit.hash, "trim");
 });

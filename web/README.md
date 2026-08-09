@@ -24,15 +24,16 @@ js/
 ├── dom.js            # el() 조립·fmt(비유한값 정책)·flagBadge(3-상태)
 ├── store.js          # 탭 간 공유 상태 (게인·AP 편집본 전달 등)
 ├── lib/              # 순수 로직 (공존 *.test.js로 테스트)
-│   ├── blocks.js     #   블록 다이어그램 데이터·히트테스트·편집 경로 (허브 계약)
+│   ├── blocks.js     #   블록 계약 데이터 — 주 경로 CHAIN·스키마·편집 경로 (허브 계약)
 │   ├── schemaform.js #   레지스트리 JSON 스키마 → 폼 필드·입력 검증
 │   ├── grid.js       #   트림 격자 — 서펜타인 순서 (인접 시드 전제 01 §4.1)
 │   ├── plot.js       #   스케일·눈금·마진 상태색·격자 피벗
 │   ├── mission.js    #   편집 행 → 미션 스펙 (조건 인자수 = 엔진 _COND_ARITY)
 │   └── replay.js     #   stride 산정·모드 구간·극값
 └── views/            # DOM 조립 전용 (얇게 유지)
-    ├── blocks.js     #   구조도 허브: 블록 클릭 → 스키마 폼/편집 화면 (02 §4)
-    ├── diagram.js    #   신호흐름 다이어그램 캔버스 (고정 구조, lib/blocks 기하)
+    ├── blocks.js     #   구조도 허브: 블록 클릭 → 서브시스템 페이지 #blocks/<id> (02 §4)
+    ├── diagram.js    #   최상위 SVG 블록도 (설계순서 프레임·피드백 — 시뮬링크 스타일)
+    ├── subsystems.js #   서브시스템 내부 블록도 SVG·설계 노트 (엔진 구현과 1:1)
     ├── trim.js       #   2단계: 케이스 매트릭스 → 배치 → 판정 플래그 결과표
     ├── margins.js    #   3단계: PM/GM 히트맵·고유치 맵·감쇠비 테이블
     ├── envelope.js   #   V-n 선도 (01 §3.6 — 구조 한계는 데모 자리표시)

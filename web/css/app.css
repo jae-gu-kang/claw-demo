@@ -127,3 +127,87 @@ tr:hover td { background: #fafbfd; }
 canvas.plot { background: #fff; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
 .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
 .legend .chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+
+/* ── 구조도(블록 다이어그램 허브) — 시뮬링크 스타일, .bd 스코프 ───────────
+   레퍼런스 디자인(control_law_block_diagram)을 이식 — 다른 뷰와 충돌 방지 */
+.bd { --bd-ink-soft: #5a6b7d; --bd-edge: #d6dde6; }
+
+/* 상태 칩 — fcs-context 태그([확정]/[기본값]/[TBD]/[설계 유의])와 동일 의미 */
+.bd .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.bd .chip.ok { background: #e3f4ea; color: #1a7f4b; }
+.bd .chip.dft { background: #fdf2d7; color: #946200; }
+.bd .chip.tbd { background: #fdeae8; color: #b3352b; }
+.bd .chip.note { background: #f1ecfe; color: #8a5cf6; }
+
+/* 설계 순서 배너 */
+.bd .order { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; background: var(--panel); border: 1px solid var(--bd-edge); border-radius: 10px; margin-bottom: 14px; }
+.bd .order .cap { font-size: 12px; font-weight: 800; margin-right: 6px; }
+.bd .order .pill { font-size: 12.5px; font-weight: 800; color: #fff; border: none; border-radius: 8px; padding: 4px 11px; white-space: nowrap; cursor: pointer; }
+.bd .order .pill:hover { filter: brightness(1.12); }
+.bd .order .arr { color: var(--bd-ink-soft); font-weight: 800; }
+.bd .order .note-line { flex-basis: 100%; font-size: 12px; color: var(--bd-ink-soft); margin-top: 2px; }
+
+/* 브레드크럼 (시뮬링크 주소창) */
+.bd .crumbbar { display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid #c9d2dc; border-bottom: none; border-radius: 8px 8px 0 0; padding: 8px 12px; font-size: 13px; }
+.bd .crumbbar .home-btn { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--accent); padding: 2px 6px; border-radius: 6px; }
+.bd .crumbbar .home-btn:hover { background: #e8f1fa; }
+.bd .crumbbar .sep { color: #9aa7b4; }
+.bd .crumbbar .cur { font-weight: 800; }
+.bd .crumbbar .up-btn { margin-left: auto; border: 1px solid var(--bd-edge); background: var(--panel); border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; font-weight: 600; }
+.bd .crumbbar .up-btn:hover { background: #eef2f7; }
+
+/* 캔버스 — 모눈 배경 (시뮬링크 캔버스 감) */
+.bd .canvas-wrap { background: #fff; border: 1px solid #c9d2dc; border-radius: 8px; overflow-x: auto; box-shadow: 0 1px 4px rgba(20, 35, 50, .07); background-image: radial-gradient(#e4e9ef 1px, transparent 1px); background-size: 18px 18px; }
+.bd .canvas-wrap.sub { border-radius: 0 0 8px 8px; }
+.bd .canvas-wrap svg { display: block; width: 100%; height: auto; }
+.bd .canvas-wrap.top svg { min-width: 1150px; }
+.bd .canvas-wrap.sub svg { min-width: 720px; max-width: 1020px; margin: 0 auto; }
+.bd .hint-row { margin-top: 10px; font-size: 12px; color: var(--bd-ink-soft); }
+
+/* SVG 블록·배선 */
+.bd .blk .body, .bd .sblk .body { fill: #fff; stroke: #4a4a4a; stroke-width: 1.6; }
+.bd .blk { cursor: pointer; }
+.bd .blk:hover .body, .bd .blk:focus .body { fill: #f2f7fd; stroke: var(--accent); }
+.bd .blk:focus { outline: none; }
+.bd .blk .ttl { font-size: 15px; font-weight: 700; fill: #111; text-anchor: middle; }
+.bd .blk .ttl2 { font-size: 12px; fill: #333; text-anchor: middle; }
+.bd .sblk .ttl { font-size: 13.5px; font-weight: 700; fill: #111; text-anchor: middle; }
+.bd .sblk .ttl2 { font-size: 11px; fill: #444; text-anchor: middle; }
+.bd .bname { font-size: 11.5px; fill: #333; text-anchor: middle; }
+.bd .pnum { font-size: 11px; font-weight: 700; fill: #111; text-anchor: middle; }
+.bd .pname { font-size: 11px; fill: #333; text-anchor: middle; }
+.bd .wire { stroke: #3b3b3b; stroke-width: 1.7; fill: none; }
+.bd .wire.gs { stroke: #8a5cf6; stroke-dasharray: 6 4; }
+.bd .wire.soft { stroke: #8a97a5; stroke-dasharray: 6 4; }
+.bd .wire.ff { stroke: #b45309; stroke-dasharray: 6 4; }
+.bd .siglabel { font-size: 11.5px; font-style: italic; fill: #444; text-anchor: middle; }
+.bd .branch { fill: #3b3b3b; }
+.bd .ring { fill: none; stroke-width: 1.6; stroke-dasharray: 8 5; }
+.bd .ringlabel { font-size: 12.5px; font-weight: 800; cursor: pointer; }
+.bd .ringlabel:hover, .bd .ringlabel:focus { text-decoration: underline; outline: none; }
+.bd .canvas-note { font-size: 11px; fill: #8a97a5; }
+.bd .sumsign { font-size: 12px; font-weight: 800; fill: #111; text-anchor: middle; }
+.bd .annot { font-size: 11.5px; fill: #6d28d9; }
+
+/* 하위 페이지 헤더 */
+.bd .pagehead { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; flex-wrap: wrap; }
+.bd .pagehead .step-tag { font-size: 11.5px; font-weight: 800; color: #fff; border-radius: 6px; padding: 2px 9px; white-space: nowrap; }
+.bd .pagehead h2 { font-size: 16px; font-weight: 800; margin: 0; }
+.bd .pagehead .eng { color: var(--bd-ink-soft); font-size: 12px; }
+.bd .pagehead .chips { margin-left: auto; display: flex; gap: 5px; }
+
+/* 설계 노트 */
+.bd .notes { background: var(--panel); border: 1px solid var(--bd-edge); border-radius: 10px; margin-top: 12px; padding: 14px 18px 16px; font-size: 13px; }
+.bd .notes h4 { font-size: 12px; color: var(--bd-ink-soft); text-transform: uppercase; letter-spacing: .04em; margin: 11px 0 6px; }
+.bd .notes h4:first-child { margin-top: 0; }
+.bd .notes ul { list-style: none; margin: 0; padding: 0; }
+.bd .notes li { padding: 2.5px 0 2.5px 14px; position: relative; }
+.bd .notes li::before { content: ""; position: absolute; left: 0; top: .72em; width: 6px; height: 6px; border-radius: 2px; background: #b8c4d0; }
+.bd .notes .chip { margin-left: 4px; vertical-align: 1px; }
+.bd .mono { font-family: var(--mono); font-size: .9em; background: #eef2f7; padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
+
+/* 모드 시퀀스 체인 (유도 페이지) */
+.bd .chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 8px; padding: 9px 10px; background: #f6f8fb; border-radius: 8px; }
+.bd .chain .sig { font-family: var(--mono); font-size: 11.5px; background: #fff; border: 1px solid var(--bd-edge); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
+.bd .chain .ctl { font-size: 11.5px; font-weight: 700; background: var(--text); color: #fff; border-radius: 6px; padding: 3px 8px; white-space: nowrap; }
+.bd .chain .arr { color: var(--bd-ink-soft); font-size: 12px; }
