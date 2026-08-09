@@ -26,6 +26,14 @@ def test_static_web_served(tmp_path):
         js = client.get("/js/main.js")
         assert js.status_code == 200
         assert client.get("/api/health").status_code == 200  # API 라우트 우선 유지
+        # 정적 파일은 항상 재검증(no-cache) — 헤더 부재 시 브라우저 휴리스틱 캐시가
+        # 일반 새로고침에서 구버전 ES 모듈을 재사용 ("수정했는데 안 바뀜" 함정).
+        # ETag 재검증이라 미변경 파일은 304로 비용 없음. index.html 포함 전 응답.
+        for resp in (r, js):
+            assert resp.headers["cache-control"] == "no-cache"
+        # 조건부 요청은 304로 응답 (재검증 경로가 실제로 동작하는지)
+        etag = js.headers["etag"]
+        assert client.get("/js/main.js", headers={"if-none-match": etag}).status_code == 304
 
 
 def test_validation_422_ctx_types_preserved(tmp_path):

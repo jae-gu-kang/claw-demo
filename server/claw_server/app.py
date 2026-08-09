@@ -23,6 +23,20 @@ from claw_server.routes import trim as trim_routes
 from claw_server.store import ResultStore
 
 
+class NoCacheStaticFiles(StaticFiles):
+    """정적 파일에 Cache-Control: no-cache — 항상 재검증 강제.
+
+    헤더 부재 시 브라우저 휴리스틱 캐시가 일반 새로고침(⌘R)에서 구버전 ES 모듈을
+    재사용해 "파일을 고쳤는데 화면이 안 바뀌는" 함정이 생긴다 (02 §4 no-build 전제:
+    정적 파일은 새로고침만으로 반영). no-cache는 미사용 금지가 아니라 ETag 재검증
+    조건부 요청이므로 미변경 파일은 304로 비용이 거의 없다."""
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 async def _validation_error_handler(request, exc: RequestValidationError):
     """422 응답 소독 — 위반 입력값(inf/NaN 등)이 응답 인코딩(allow_nan=False)을
     죽이지 않도록 비유한값 정책 적용 + ctx 예외 객체 문자열화."""
@@ -84,5 +98,5 @@ def create_app(data_dir=None, web_dir=None) -> FastAPI:
         else os.environ.get("CLAW_WEB_DIR", _default_web_dir())
     )
     if (wd / "index.html").is_file():
-        app.mount("/", StaticFiles(directory=wd, html=True), name="web")
+        app.mount("/", NoCacheStaticFiles(directory=wd, html=True), name="web")
     return app
