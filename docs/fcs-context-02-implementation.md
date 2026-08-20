@@ -96,7 +96,7 @@
 
 | 모듈 | 담당 | 주요 요소 |
 |---|---|---|
-| 1. Flight Control | SCAS, 오토파일럿, 게인 스케줄링, 제어면 혼합 | PID, State-Space, 필터, 게인 테이블 |
+| 1. Flight Control | SCAS, 오토파일럿, 게인 스케줄링, 엘레본 믹싱(제어 할당) | PID, State-Space, 필터, 게인 테이블 |
 | 2. Guidance | 경로 생성·추종, 비행모드 실행기 | 경로추종 알고리즘, 웨이포인트 로직, 모드 테이블 |
 | 3. Navigation | 항법 상태 추정 출력 제공 | **등가 오차 모델** (§3.1) — EKF 미구현 |
 | 4. Actuator | 작동기 동특성 | Transfer Function/State-Space, Rate Limiter, Dead Zone, Backlash |

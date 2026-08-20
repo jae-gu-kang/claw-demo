@@ -81,9 +81,10 @@ export const BLOCKS = [
   },
   {
     id: "mixer",
-    title: "제어면 혼합", sub: "+ 차동추력 보상",
+    title: "엘레본 믹싱", sub: "제어 할당 · 차동추력",
     detail: {
-      desc: "엘레본4 고정 믹싱(내/외측 1:1) + 러더 + 차동추력 보상 [기본값 01 §2.2]. "
+      desc: "엘레본4 고정 믹싱(내/외측 1:1) + 러더 + 차동추력 보상 [기본값 01 §2.2] — "
+        + "여유자유도 최적 배분(제어 할당)으로의 확장은 추후. "
         + "웹 주입 경로 없음 — 믹싱 비율·4면 배치는 기체 데이터 확인 시 [TBD].",
       schema: { category: "fcl", name: "Mixer" }, editable: false, injectKey: null,
       edit: null,

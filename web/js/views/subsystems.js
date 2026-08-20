@@ -300,48 +300,84 @@ export const SUBSYSTEMS = {
 </ul>`,
   },
 
-  // ── 제어면 혼합 ──────────────────────────────────────────────────────
+  // ── 엘레본 믹싱 (제어 할당) ──────────────────────────────────────────
   mixer: {
     tag: "배분", tagBg: "#8a97a5",
-    title: "제어면 혼합 + 차동추력 보상", eng: "Control Allocation / Mixing",
+    title: "엘레본 믹싱 (제어 할당)", eng: "Elevon Mixing / Control Allocation — 차동추력 보상 포함",
     chips: ["dft", "tbd"],
     svg: `
-<svg viewBox="0 0 900 380" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 940 516" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-mix" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="40" y="58" width="36" height="24" rx="12"/><text class="pnum" x="58" y="74">1</text></g>
-  <text class="pname" x="58" y="104">피치 명령</text>
-  <path class="wire" d="M76 70 H336" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="40" y="128" width="36" height="24" rx="12"/><text class="pnum" x="58" y="144">2</text></g>
-  <text class="pname" x="58" y="174">롤 명령</text>
-  <path class="wire" d="M76 140 H336" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="40" y="198" width="36" height="24" rx="12"/><text class="pnum" x="58" y="214">3</text></g>
-  <text class="pname" x="58" y="244">요 명령</text>
-  <path class="wire" d="M76 210 H336" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="40" y="268" width="36" height="24" rx="12"/><text class="pnum" x="58" y="284">4</text></g>
-  <text class="pname" x="58" y="314">δt_cmd</text>
-  <path class="wire" d="M76 280 H336" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="340" y="46" width="220" height="260" rx="3"/>
-    <text class="ttl" x="450" y="150">믹싱 행렬</text>
-    <text class="ttl2" x="450" y="172">내/외측 쌍 1:1 고정 (기본값)</text>
-    <text class="ttl2" x="450" y="192">피치 = 동시 · 롤 = 차동</text>
-    <text class="ttl2" x="450" y="212">요 = 러더 + 차동추력(k_diff_thr)</text></g>
-  <path class="wire" d="M560 76 H646" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="650" y="64" width="42" height="24" rx="12"/><text class="pnum" x="671" y="80">1–4</text></g>
-  <text class="pname" x="768" y="80">엘레본 ×4 (내/외측 쌍)</text>
-  <path class="wire" d="M560 176 H646" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="650" y="164" width="36" height="24" rx="12"/><text class="pnum" x="668" y="180">5</text></g>
-  <text class="pname" x="730" y="180">러더 ×1</text>
-  <path class="wire" d="M560 276 H646" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="650" y="264" width="42" height="24" rx="12"/><text class="pnum" x="671" y="280">6–7</text></g>
-  <text class="pname" x="778" y="280">스로틀 ×2 (차동추력 보상)</text>
-  <text class="canvas-note" x="340" y="340">δe(내측/외측) = 피치(동시 성분) ± 롤(차동 성분) — 4면 여유자유도, 최적화 기반 할당은 추후 확장</text>
+  <!-- 엘레본 좌/우 — 교차 결합 (X자 1회 교차는 믹싱의 본질) -->
+  <g class="sblk"><rect class="body" x="30" y="66" width="36" height="24" rx="12"/><text class="pnum" x="48" y="82">1</text></g>
+  <text class="pname" x="48" y="112">피치 δe</text>
+  <path class="wire" d="M66 78 H246" marker-end="url(#aw-mix)"/>
+  <circle class="branch" cx="150" cy="78" r="3.2"/>
+  <path class="wire" d="M150 78 V170 H246" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="30" y="182" width="36" height="24" rx="12"/><text class="pnum" x="48" y="198">2</text></g>
+  <text class="pname" x="48" y="232">롤 δa</text>
+  <path class="wire" d="M66 194 H246" marker-end="url(#aw-mix)"/>
+  <circle class="branch" cx="110" cy="194" r="3.2"/>
+  <path class="wire" d="M110 194 V102 H246" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="250" y="64" width="150" height="52" rx="3"/>
+    <text class="ttl" x="325" y="86" style="font-size:13px">좌측 = δe + δa</text>
+    <text class="ttl2" x="325" y="104">내좌 = 외좌 (1:1 고정)</text></g>
+  <g class="sblk"><rect class="body" x="250" y="156" width="150" height="52" rx="3"/>
+    <text class="ttl" x="325" y="178" style="font-size:13px">우측 = δe − δa</text>
+    <text class="ttl2" x="325" y="196">내우 = 외우 (1:1 고정)</text></g>
+  <path class="wire" d="M400 90 H426" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="430" y="64" width="110" height="52" rx="3"/>
+    <path d="M442 106 H458 L512 74 H528" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="485" y="134">elevon_lo~hi</text>
+  <path class="wire" d="M540 90 H796" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="800" y="78" width="42" height="24" rx="12"/><text class="pnum" x="821" y="94">1·2</text></g>
+  <text class="pname" x="821" y="122">좌측 엘레본 (내·외)</text>
+  <path class="wire" d="M400 182 H426" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="430" y="156" width="110" height="52" rx="3"/>
+    <path d="M442 198 H458 L512 166 H528" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="485" y="226">elevon_lo~hi</text>
+  <path class="wire" d="M540 182 H796" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="800" y="170" width="42" height="24" rx="12"/><text class="pnum" x="821" y="186">3·4</text></g>
+  <text class="pname" x="821" y="214">우측 엘레본 (내·외)</text>
+  <!-- 러더 + 차동추력 (클램프된 실 러더 기준) -->
+  <g class="sblk"><rect class="body" x="30" y="270" width="36" height="24" rx="12"/><text class="pnum" x="48" y="286">3</text></g>
+  <text class="pname" x="48" y="316">요 δr</text>
+  <path class="wire" d="M66 282 H246" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="250" y="256" width="110" height="52" rx="3"/>
+    <path d="M262 298 H278 L332 266 H348" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="305" y="326">rudder_lo~hi</text>
+  <path class="wire" d="M360 282 H796" marker-end="url(#aw-mix)"/>
+  <circle class="branch" cx="470" cy="282" r="3.2"/>
+  <g class="sblk"><rect class="body" x="800" y="270" width="36" height="24" rx="12"/><text class="pnum" x="818" y="286">5</text></g>
+  <text class="pname" x="818" y="314">러더</text>
+  <path class="wire" d="M470 282 V326" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="410" y="330" width="120" height="46" rx="3"/>
+    <text class="ttl" x="470" y="349" style="font-size:13px">× k_diff_thr</text>
+    <text class="ttl2" x="470" y="366">클램프된 실 러더 기준</text></g>
+  <path class="wire" d="M530 353 H620 V384" marker-end="url(#aw-mix)"/>
+  <text class="siglabel" x="575" y="345">d</text>
+  <g class="sblk"><rect class="body" x="30" y="408" width="36" height="24" rx="12"/><text class="pnum" x="48" y="424">4</text></g>
+  <text class="pname" x="48" y="454">집합 스로틀 δt</text>
+  <path class="wire" d="M66 420 H556" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="560" y="388" width="160" height="64" rx="3"/>
+    <text class="ttl" x="640" y="408" style="font-size:13px">차동 분배</text>
+    <text class="ttl2" x="640" y="426">좌 = δt − d · 우 = δt + d</text>
+    <text class="ttl2" x="640" y="442">출력 0~1 클립</text></g>
+  <path class="wire" d="M720 406 H796" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="800" y="394" width="36" height="24" rx="12"/><text class="pnum" x="818" y="410">6</text></g>
+  <path class="wire" d="M720 434 H796" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="800" y="422" width="36" height="24" rx="12"/><text class="pnum" x="818" y="438">7</text></g>
+  <text class="pname" x="818" y="470">스로틀 ×2 (좌·우)</text>
+  <text class="canvas-note" x="24" y="502">※ 재구성 항등: 평균 = δe · (좌−우)/2 = δa — 믹싱이 정보를 잃지 않음 · rate 한계는 작동기(M5) 소관 · SurfaceCommand 순서 [내좌, 외좌, 내우, 외우]</text>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
 <ul>
-  <li>면 4개 → 여유자유도 존재. 내측/외측 쌍 <b>고정 믹싱 행렬</b>(1:1)로 시작 <span class="chip dft">기본값 01 §2.2</span> · 최적화 기반 할당은 추후 확장</li>
-  <li>요축: 러더 명령 + <b>차동 추력</b> 보조 (k_diff_thr) · 타면각 한계 elevon/rudder lo~hi 클립</li>
-  <li>4면 배치(내/외측 쌍 여부) · 믹싱 비율 · 타면각/rate 한계 <span class="chip tbd">TBD</span> — 기체 데이터 확인 시</li>
+  <li>용어: 현 구현은 고정 행렬 <b>엘레본 믹싱</b> — 여유자유도 <b>최적 배분(제어 할당, control allocation)</b>으로의 승격은 추후 확장 <span class="chip dft">기본값 01 §2.2</span></li>
+  <li>좌측(내·외) = δe + δa, 우측(내·외) = δe − δa — 내/외측 쌍 1:1 고정, 면별 elevon_lo~hi 클립 <span class="chip dft">기본값</span></li>
+  <li>요축: 러더(rudder_lo~hi 클립) + <b>차동추력</b> d = k_diff_thr × <b>클램프된 실 러더</b> — 러더가 내지 못하는 명령에 추력이 반응하지 않음 · 포화 시 추력 인계는 별도 설계 <span class="chip tbd">TBD</span></li>
+  <li>스로틀 좌/우 = δt ∓ d (0~1 클립) — 데모 프로파일 부호 기준 k&gt;0가 러더 보조 방향</li>
+  <li>4면 배치(내/외측 쌍 여부) · 믹싱 비율 · 타면각 한계 실값 <span class="chip tbd">TBD</span> — 기체 데이터 확인 시 · rate 한계는 작동기 모델(M5) 소관</li>
 </ul>`,
   },
 

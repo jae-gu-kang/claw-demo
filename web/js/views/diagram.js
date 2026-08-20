@@ -136,7 +136,7 @@ export const TOP_SVG = `
     <text class="ttl" x="1105" y="233">${B.mixer.title}</text>
     <text class="ttl2" x="1105" y="252">${B.mixer.sub}</text>
   </g>
-  <text class="bname" x="1105" y="286">엘레본 4면 믹싱</text>
+  <text class="bname" x="1105" y="286">고정 믹싱 행렬 (내/외 1:1)</text>
   <path class="wire" d="M1180 218 H1236" marker-end="url(#arrw)"/>
   <text class="siglabel" x="1209" y="207">δ 명령</text>
 
