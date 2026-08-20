@@ -22,87 +22,105 @@ export const SUBSYSTEMS = {
     title: "SCAS — 내측 루프 (자세 안정화)", eng: "축 공통 구조: PI(자세오차) + k_rate·각속도 — LQR 제외",
     chips: ["ok", "dft"],
     svg: `
-<svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 960 610" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-scas" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <!-- 피치축 -->
-  <g class="sblk"><rect class="body" x="30" y="68" width="36" height="24" rx="12"/><text class="pnum" x="48" y="84">1</text></g>
-  <text class="pname" x="48" y="108">θ_cmd</text>
-  <path class="wire" d="M66 80 H152" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="170" cy="80" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="161" y="84">+</text><text class="sumsign" x="170" y="93">−</text>
-  <path class="wire" d="M184 80 H216" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="220" y="53" width="120" height="54" rx="3"/><text class="ttl" x="280" y="81">PI</text><text class="ttl2" x="280" y="99">kp · ki (클램프 AW)</text></g>
-  <path class="wire" d="M340 80 H416" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="434" cy="80" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="425" y="84">+</text><text class="sumsign" x="434" y="93">+</text>
-  <path class="wire" d="M448 80 H494" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="498" y="50" width="110" height="60" rx="3"/>
-    <path d="M510 96 H528 L578 64 H596" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="553" y="128">출력 클립 (out_lo~hi)</text>
-  <path class="wire" d="M608 80 H674" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="678" y="68" width="36" height="24" rx="12"/><text class="pnum" x="696" y="84">1</text></g>
-  <text class="pname" x="696" y="108">피치 명령</text>
-  <g class="sblk"><rect class="body" x="152" y="140" width="36" height="24" rx="12"/><text class="pnum" x="170" y="156">4</text></g>
-  <text class="pname" x="204" y="156">θ</text>
-  <path class="wire" d="M170 140 V98" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="416" y="140" width="36" height="24" rx="12"/><text class="pnum" x="434" y="156">5</text></g>
-  <text class="pname" x="474" y="156">q × k_rate</text>
-  <path class="wire" d="M434 140 V98" marker-end="url(#aw-scas)"/>
-  <!-- 롤축 -->
-  <g class="sblk"><rect class="body" x="30" y="208" width="36" height="24" rx="12"/><text class="pnum" x="48" y="224">2</text></g>
-  <text class="pname" x="48" y="248">φ_cmd</text>
-  <path class="wire" d="M66 220 H152" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="170" cy="220" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="161" y="224">+</text><text class="sumsign" x="170" y="233">−</text>
-  <path class="wire" d="M184 220 H216" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="220" y="193" width="120" height="54" rx="3"/><text class="ttl" x="280" y="221">PI</text><text class="ttl2" x="280" y="239">kp · ki</text></g>
-  <path class="wire" d="M340 220 H416" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="434" cy="220" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="425" y="224">+</text><text class="sumsign" x="434" y="233">+</text>
-  <path class="wire" d="M448 220 H494" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="498" y="190" width="110" height="60" rx="3"/>
-    <path d="M510 236 H528 L578 204 H596" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="553" y="268">출력 클립</text>
-  <path class="wire" d="M608 220 H674" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="678" y="208" width="36" height="24" rx="12"/><text class="pnum" x="696" y="224">2</text></g>
-  <text class="pname" x="696" y="248">롤 명령</text>
-  <g class="sblk"><rect class="body" x="152" y="280" width="36" height="24" rx="12"/><text class="pnum" x="170" y="296">6</text></g>
-  <text class="pname" x="204" y="296">φ</text>
-  <path class="wire" d="M170 280 V238" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="416" y="280" width="36" height="24" rx="12"/><text class="pnum" x="434" y="296">7</text></g>
-  <text class="pname" x="474" y="296">p × k_rate</text>
-  <path class="wire" d="M434 280 V238" marker-end="url(#aw-scas)"/>
-  <!-- 요축 (β 유지 + 워시아웃 요레이트) -->
-  <g class="sblk"><rect class="body" x="30" y="348" width="36" height="24" rx="12"/><text class="pnum" x="48" y="364">3</text></g>
-  <text class="pname" x="48" y="388">β_cmd = 0</text>
-  <path class="wire" d="M66 360 H152" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="170" cy="360" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="161" y="364">+</text><text class="sumsign" x="170" y="373">−</text>
-  <path class="wire" d="M184 360 H216" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="220" y="333" width="120" height="54" rx="3"/><text class="ttl" x="280" y="361">PI</text><text class="ttl2" x="280" y="379">kβ</text></g>
-  <path class="wire" d="M340 360 H416" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="434" cy="360" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="425" y="364">+</text><text class="sumsign" x="434" y="373">+</text>
-  <path class="wire" d="M448 360 H494" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="498" y="330" width="110" height="60" rx="3"/>
-    <path d="M510 376 H528 L578 344 H596" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="553" y="408">출력 클립</text>
-  <path class="wire" d="M608 360 H674" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="678" y="348" width="36" height="24" rx="12"/><text class="pnum" x="696" y="364">3</text></g>
-  <text class="pname" x="696" y="388">요 명령</text>
-  <g class="sblk"><rect class="body" x="80" y="416" width="36" height="24" rx="12"/><text class="pnum" x="98" y="432">8</text></g>
-  <text class="pname" x="130" y="432">β</text>
-  <path class="wire" d="M116 428 H170 V378" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="200" y="416" width="36" height="24" rx="12"/><text class="pnum" x="218" y="432">9</text></g>
-  <text class="pname" x="248" y="432">r</text>
-  <path class="wire" d="M236 428 H266" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="270" y="404" width="130" height="48" rx="3"/>
-    <text class="ttl2" x="335" y="424" style="font-weight:700">워시아웃 × kr</text><text class="ttl2" x="335" y="441">s / (s + 1/τ) · τ = 2 s</text></g>
-  <path class="wire" d="M400 428 H434 V378" marker-end="url(#aw-scas)"/>
-  <!-- 게인 스케줄 주석 -->
-  <rect x="660" y="410" width="220" height="50" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
-  <text class="annot" x="770" y="431" text-anchor="middle">게인 스케줄링 적용</text>
-  <text class="annot" x="770" y="449" text-anchor="middle">kp·ki·k_rate = f(비행조건)</text>
+  <!-- 게인 스케줄 주입 (공통) -->
+  <rect x="660" y="26" width="272" height="60" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="annot" x="796" y="50" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
+  <text class="annot" x="796" y="70" text-anchor="middle">스텝별 덮어쓰기 (정본 = 게인 탭 테이블)</text>
+  <!-- 피치축: δe = clip( PI(θ_cmd−θ) + k_rate·q ) -->
+  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <text class="pname" x="60" y="132">θ_cmd ← α 리미터</text>
+  <path class="wire" d="M66 100 H122" marker-end="url(#aw-scas)"/>
+  <circle class="body" cx="140" cy="100" r="14"/>
+  <text class="sumsign" x="131" y="104">+</text><text class="sumsign" x="140" y="113">−</text>
+  <path class="wire" d="M154 100 H186" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="190" y="74" width="150" height="52" rx="3"/>
+    <text class="ttl" x="265" y="96" style="font-size:13px">PI — 클램프 AW</text>
+    <text class="ttl2" x="265" y="114">적분 한계 = out_lo~hi</text></g>
+  <path class="wire" d="M340 100 H372" marker-end="url(#aw-scas)"/>
+  <circle class="body" cx="390" cy="100" r="14"/>
+  <text class="sumsign" x="381" y="104">+</text><text class="sumsign" x="390" y="113">+</text>
+  <path class="wire" d="M404 100 H436" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="440" y="74" width="110" height="52" rx="3"/>
+    <path d="M452 116 H468 L522 84 H538" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="495" y="144">최종 클립 out_lo~hi</text>
+  <path class="wire" d="M550 100 H806" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <text class="pname" x="890" y="104">δe 피치</text>
+  <g class="sblk"><rect class="body" x="122" y="158" width="36" height="24" rx="12"/><text class="pnum" x="140" y="174">3</text></g>
+  <text class="pname" x="140" y="206">θ</text>
+  <path class="wire" d="M140 158 V118" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="350" y="140" width="80" height="36" rx="3"/>
+    <text class="ttl2" x="390" y="162" style="font-weight:700">× k_rate</text></g>
+  <g class="sblk"><rect class="body" x="372" y="188" width="36" height="24" rx="12"/><text class="pnum" x="390" y="204">4</text></g>
+  <text class="pname" x="430" y="204">q</text>
+  <path class="wire" d="M390 188 V180" marker-end="url(#aw-scas)"/>
+  <path class="wire" d="M390 140 V118" marker-end="url(#aw-scas)"/>
+  <!-- 롤축: δa = clip( PI(wrap(φ_cmd−φ)) + k_rate·p ) -->
+  <g class="sblk"><rect class="body" x="30" y="248" width="36" height="24" rx="12"/><text class="pnum" x="48" y="264">2</text></g>
+  <text class="pname" x="52" y="292">φ_cmd ← AP</text>
+  <path class="wire" d="M66 260 H122" marker-end="url(#aw-scas)"/>
+  <circle class="body" cx="140" cy="260" r="14"/>
+  <text class="sumsign" x="131" y="264">+</text><text class="sumsign" x="140" y="273">−</text>
+  <text class="siglabel" x="140" y="232">wrap ±π</text>
+  <path class="wire" d="M154 260 H186" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="190" y="234" width="150" height="52" rx="3"/>
+    <text class="ttl" x="265" y="256" style="font-size:13px">PI — 클램프 AW</text>
+    <text class="ttl2" x="265" y="274">적분 한계 = out_lo~hi</text></g>
+  <path class="wire" d="M340 260 H372" marker-end="url(#aw-scas)"/>
+  <circle class="body" cx="390" cy="260" r="14"/>
+  <text class="sumsign" x="381" y="264">+</text><text class="sumsign" x="390" y="273">+</text>
+  <path class="wire" d="M404 260 H436" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="440" y="234" width="110" height="52" rx="3"/>
+    <path d="M452 276 H468 L522 244 H538" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="495" y="304">최종 클립 out_lo~hi</text>
+  <path class="wire" d="M550 260 H806" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="810" y="248" width="36" height="24" rx="12"/><text class="pnum" x="828" y="264">2</text></g>
+  <text class="pname" x="888" y="264">δa 롤</text>
+  <g class="sblk"><rect class="body" x="122" y="318" width="36" height="24" rx="12"/><text class="pnum" x="140" y="334">5</text></g>
+  <text class="pname" x="140" y="366">φ</text>
+  <path class="wire" d="M140 318 V278" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="350" y="300" width="80" height="36" rx="3"/>
+    <text class="ttl2" x="390" y="322" style="font-weight:700">× k_rate</text></g>
+  <g class="sblk"><rect class="body" x="372" y="348" width="36" height="24" rx="12"/><text class="pnum" x="390" y="364">6</text></g>
+  <text class="pname" x="430" y="364">p</text>
+  <path class="wire" d="M390 348 V340" marker-end="url(#aw-scas)"/>
+  <path class="wire" d="M390 300 V278" marker-end="url(#aw-scas)"/>
+  <!-- 요축: δr = clip( PI(−β) + k_rate·washout(r) ) — 자세 명령 없음 (선회조화) -->
+  <g class="sblk"><rect class="body" x="30" y="418" width="36" height="24" rx="12"/><text class="pnum" x="48" y="434">7</text></g>
+  <text class="pname" x="62" y="462">β (사이드슬립)</text>
+  <path class="wire" d="M66 430 H96" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="100" y="404" width="80" height="52" rx="3"/>
+    <text class="ttl" x="140" y="426" style="font-size:13px">× −1</text>
+    <text class="ttl2" x="140" y="444">명령 없음</text></g>
+  <path class="wire" d="M180 430 H186" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="190" y="404" width="150" height="52" rx="3"/>
+    <text class="ttl" x="265" y="426" style="font-size:13px">PI — 클램프 AW</text>
+    <text class="ttl2" x="265" y="444">적분 한계 = out_lo~hi</text></g>
+  <path class="wire" d="M340 430 H372" marker-end="url(#aw-scas)"/>
+  <circle class="body" cx="390" cy="430" r="14"/>
+  <text class="sumsign" x="381" y="434">+</text><text class="sumsign" x="390" y="443">+</text>
+  <path class="wire" d="M404 430 H436" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="440" y="404" width="110" height="52" rx="3"/>
+    <path d="M452 446 H468 L522 414 H538" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="495" y="474">최종 클립 out_lo~hi</text>
+  <path class="wire" d="M550 430 H806" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="810" y="418" width="36" height="24" rx="12"/><text class="pnum" x="828" y="434">3</text></g>
+  <text class="pname" x="888" y="434">δr 요</text>
+  <g class="sblk"><rect class="body" x="30" y="500" width="36" height="24" rx="12"/><text class="pnum" x="48" y="516">8</text></g>
+  <text class="pname" x="48" y="548">r</text>
+  <path class="wire" d="M66 512 H146" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="150" y="486" width="150" height="52" rx="3"/>
+    <text class="ttl" x="225" y="508" style="font-size:13px">워시아웃 τs/(τs+1)</text>
+    <text class="ttl2" x="225" y="526">정상 r 제거 — 선회 유지</text></g>
+  <path class="wire" d="M300 512 H326" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="330" y="486" width="120" height="52" rx="3"/>
+    <text class="ttl" x="390" y="508" style="font-size:13px">× k_rate</text>
+    <text class="ttl2" x="390" y="526">τ=0이면 워시아웃 생략</text></g>
+  <path class="wire" d="M390 486 V448" marker-end="url(#aw-scas)"/>
+  <text class="canvas-note" x="24" y="576">※ θ·φ·p·q·r·β는 NavOutput에서 추출 (quat→euler · airdata) — 참값 차단 계약 · rate 항은 PI 클램프 밖에서 합산 — 최종 클립이 한 번 더 제한</text>
+  <text class="canvas-note" x="24" y="596">※ 재관여(reset) 시 적분기 웜스타트 + 워시아웃 rate 시드 — k_rate·r 킥 방지 [범프리스 계약] · 게인 부호는 설계값(게인 테이블) 소관 — 코드는 공력 부호 무가정</text>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
@@ -112,6 +130,8 @@ export const SUBSYSTEMS = {
   <li>안티와인드업: 적분항 클램프 <span class="chip dft">기본값 M7</span> — 실데이터 튜닝 시 재검토</li>
   <li>이산화: 제어주기 <b>100 Hz</b> 시작 → 50 Hz 하향 영향성 비교 예정 · 계수는 주기로부터 자동 계산 <span class="chip ok">확정</span></li>
   <li>항법 갱신주기 ≤ 제어주기 가능 → <b>멀티레이트 입력</b> 전제 설계 <span class="chip note">설계 유의</span></li>
+  <li>요축 오차 입력은 <b>−β</b> (자세 명령이 아닌 선회조화 — β 억제) · 롤 오차는 <b>wrap ±π</b> (배면 통과 시 2π 점프 방지)</li>
+  <li>rate 항은 PI 클램프 <b>밖</b>에서 합산 → 축 출력은 최종 클립이 한 번 더 제한 · 재관여 시 적분 웜스타트 + 워시아웃 rate 시드 <span class="chip ok">범프리스 계약</span></li>
   <li>데모 설계점(M0.6·h1000·fuel200): 피치 kp −2.0 / ki −0.5 / k_rate 0.4 · 롤 1.0 / 0.1 / −0.2 · 요 kβ 0.5 / kr 0.8</li>
 </ul>`,
   },
@@ -139,7 +159,7 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="306" y="53" width="130" height="54" rx="3"/><text class="ttl" x="371" y="74">고도 PI</text><text class="ttl2" x="371" y="90">kp <tspan data-p="kp_alt">0.004</tspan> · ki <tspan data-p="ki_alt">0.0004</tspan></text><text class="ttl2" x="371" y="103">k_hdot <tspan data-p="k_hdot">−0.008</tspan> 승강률</text></g>
   <path class="wire" d="M436 80 H448" marker-end="url(#aw-ap)"/>
   <circle class="body" cx="466" cy="80" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="457" y="84">+</text><text class="sumsign" x="466" y="71">+</text>
+  <text class="sumsign" x="457" y="84">+</text><text class="sumsign" x="466" y="75">+</text>
   <path class="wire" d="M480 80 H492" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="496" y="50" width="100" height="60" rx="3"/>
     <path d="M506 96 H522 L570 64 H586" stroke="#111" stroke-width="2" fill="none"/></g>
