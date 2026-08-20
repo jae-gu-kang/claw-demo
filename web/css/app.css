@@ -109,6 +109,13 @@ table.edit td button { white-space: nowrap; }
 table.edit .c-sm { width: 84px; }   /* 짧은 수치 칸 */
 table.edit .c-md { width: 130px; }  /* 이름·헤딩·선택 칸 */
 
+/* 근사식 표(게인 뷰) — 칸마다 줄 수가 다름(구간 수 vs 구간-1 점프 수).
+   세로 중앙정렬(기본값)이면 짧은 칸 내용이 긴 칸 옆에서 붕 떠 보임 → 상단
+   고정. 여러 줄 서술형 칸은 좌측 정렬 + 고정폭 폰트로 줄 시작·수치를 정렬 */
+.fit-table td, .fit-table th { vertical-align: top; }
+.fit-table td.col-lines { text-align: left; font-family: var(--mono); font-size: 12px; }
+.fit-table td.col-lines > div { white-space: nowrap; line-height: 1.6; }
+
 .flag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
 .flag.ok { background: #e0f2e5; color: var(--ok); }
 .flag.bad { background: #fbe2e2; color: var(--bad); }

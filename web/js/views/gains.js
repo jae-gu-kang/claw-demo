@@ -100,17 +100,17 @@ function fitDetails(rows) {
   },
     el("summary", {}, "근사식 계수·잔차·경계 연속성"),
     el("div", { class: "scroll-x" },
-      el("table", {},
+      el("table", { class: "fit-table" },
         el("thead", {}, el("tr", {},
           ["게인", "구간별 근사식 p(M)", "최대|잔차|", "RMS", "경계 점프 (값 / 기울기)"]
             .map((h) => el("th", {}, h)))),
         el("tbody", {}, rows.map(({ name, pw }) => el("tr", {},
           el("td", {}, name),
-          el("td", {}, pw.segments.map((s) =>
-            el("div", {}, `[M${fmt(s.x0, 3)}–M${fmt(s.x1, 3)}]  `, formulaText(s.fit)))),
-          el("td", {}, fmt(pw.maxResidual, 3)),
-          el("td", {}, fmt(pw.rms, 3)),
-          el("td", {}, pw.joints.length
+          el("td", { class: "col-lines" }, pw.segments.map((s) =>
+            el("div", {}, `[M${fmt(s.x0, 3)}–M${fmt(s.x1, 3)}]  ${formulaText(s.fit)}`))),
+          el("td", { class: "num" }, fmt(pw.maxResidual, 3)),
+          el("td", { class: "num" }, fmt(pw.rms, 3)),
+          el("td", { class: "col-lines" }, pw.joints.length
             ? pw.joints.map((j) => el("div", {},
                 `M${fmt(j.x, 3)}: ${fmt(j.valueJump, 3)} / ${fmt(j.slopeJump, 3)}`))
             : "—"),
