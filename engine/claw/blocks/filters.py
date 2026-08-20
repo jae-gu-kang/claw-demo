@@ -10,6 +10,7 @@
 """
 
 import math
+from collections import deque
 
 from claw.blocks.base import Block
 from claw.params.param import ParamDef
@@ -143,4 +144,69 @@ class Notch(Block):
         y = b0 * u + self._z1
         self._z1 = b1 * u - a1 * y + self._z2
         self._z2 = b2 * u - a2 * y
+        return y
+
+
+class MovingAverage(Block):
+    """이동평균 — 최근 n 샘플의 산술평균 (초기 버퍼는 0으로 채움)."""
+
+    NAME = "MovingAverage"
+    PARAM_DEFS = (ParamDef("n", 5, "-", "윈도우 길이(샘플수)", lo=1, hi=100000),)
+
+    def __init__(self, n: int = 5):
+        if int(n) != n or n < 1:
+            raise ValueError(f"n은 1 이상의 정수여야 함: {n}")
+        self.n = int(n)
+
+    def reset(self, state=None) -> None:
+        if state is None:
+            self._buf = deque([0.0] * self.n, maxlen=self.n)
+            return
+        buf = [float(v) for v in state]  # deque(maxlen)은 초과분을 조용히 버리므로 길이 검사 먼저
+        if len(buf) != self.n:
+            raise ValueError(f"웜스타트 버퍼 길이 불일치: {len(buf)} != {self.n}")
+        self._buf = deque(buf, maxlen=self.n)
+
+    def step(self, u):
+        self._buf.append(u)
+        return sum(self._buf) / self.n
+
+
+class IIRFilter(Block):
+    """일반 이산 필터 y = (b0 + b1·z⁻¹ + …)/(1 + a1·z⁻¹ + …) — FIR/IIR/Discrete Filter 포괄.
+
+    이산 계수 (b, a)를 직접 지정 — 연속 설계의 이산화가 아니라 계수 자체가 규격인
+    경우(비행SW 이식 필터 등)를 위한 블록. FIR은 a=(1,)인 특수 사례. a[0]으로 정규화.
+    Direct Form II Transposed 임의 차수 — Notch와 동일한 구조로 C++ 이식 대응.
+    """
+
+    NAME = "IIRFilter"
+
+    def __init__(self, b=(1.0,), a=(1.0,)):
+        b, a = tuple(float(v) for v in b), tuple(float(v) for v in a)
+        if not b or not a:
+            raise ValueError("b, a는 비어 있을 수 없음")
+        if a[0] == 0.0:
+            raise ValueError("a[0]은 0일 수 없음 (정규화 기준 계수)")
+        norder = max(len(b), len(a)) - 1
+        self.b = tuple(v / a[0] for v in b) + (0.0,) * (norder + 1 - len(b))
+        self.a = tuple(v / a[0] for v in a) + (0.0,) * (norder + 1 - len(a))
+        self.norder = norder
+
+    def reset(self, state=None) -> None:
+        if state is None:
+            self._z = [0.0] * self.norder
+            return
+        z = [float(v) for v in state]
+        if len(z) != self.norder:
+            raise ValueError(f"웜스타트 상태 길이 불일치: {len(z)} != {self.norder}")
+        self._z = z
+
+    def step(self, u):
+        if self.norder == 0:
+            return self.b[0] * u
+        y = self.b[0] * u + self._z[0]
+        for i in range(self.norder - 1):
+            self._z[i] = self.b[i + 1] * u + self._z[i + 1] - self.a[i + 1] * y
+        self._z[self.norder - 1] = self.b[self.norder] * u - self.a[self.norder] * y
         return y

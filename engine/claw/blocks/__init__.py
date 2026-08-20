@@ -5,17 +5,19 @@
 
 구현됨: 기본 연산(Gain/Sum/Product/Divide/Switch/Saturation),
 신호 저장(Delay/UnitDelay/Memory), 적분/미분/레이트(Integrator/Derivative/RateLimiter),
-선형 필터(Lag/LowPass/Washout/LeadLag/Notch), PID.
-Phase 1 잔여 백로그: FIR/IIR·MovingAverage, StateSpace/TF, DeadZone/Backlash/Hysteresis, Fader.
+선형 필터(Lag/LowPass/Washout/LeadLag/Notch/MovingAverage/IIRFilter),
+제어기(PID/StateSpace/TransferFunction), 비선형(DeadZone/Backlash/Hysteresis), Fader.
 """
 
 from claw.blocks.base import UNBOUNDED, Block
 from claw.blocks.basic import Divide, Gain, Product, Saturation, Sum, Switch
-from claw.blocks.controllers import PID
+from claw.blocks.controllers import PID, StateSpace, TransferFunction
 from claw.blocks.dynamics import Derivative, Integrator, RateLimiter
-from claw.blocks.filters import Lag, LeadLag, LowPass, Notch, Washout
+from claw.blocks.extras import Fader
+from claw.blocks.filters import IIRFilter, Lag, LeadLag, LowPass, MovingAverage, Notch, Washout
 from claw.blocks.lookup import LookupBlock
 from claw.blocks.memory import Delay, Memory, UnitDelay
+from claw.blocks.nonlinear import Backlash, DeadZone, Hysteresis
 from claw.blocks.registry import REGISTRABLE, register_all
 
 register_all()  # 전역 REGISTRY에 1회 자동 등록 (import는 프로세스당 1회)
@@ -40,7 +42,15 @@ __all__ = [
     "Washout",
     "LeadLag",
     "Notch",
+    "MovingAverage",
+    "IIRFilter",
     "PID",
+    "StateSpace",
+    "TransferFunction",
+    "DeadZone",
+    "Backlash",
+    "Hysteresis",
+    "Fader",
     "LookupBlock",
     "REGISTRABLE",
     "register_all",
