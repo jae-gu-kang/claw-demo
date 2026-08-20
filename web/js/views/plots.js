@@ -58,7 +58,10 @@ const MODE_BAND_COLORS = ["#e8f1fe", "#e6f6ea", "#fdf6df", "#fdeaea", "#efe9fb",
 /** 선 차트 — series: [{label, data, color}], bands: modeSpans 결과 (배경 밴드).
  * x축은 t 배열 (기본 시각 [s] — xUnit으로 변경 가능, 예: V-n 선도의 "m/s").
  * markers=true면 각 데이터점에 원 마커 — 격자점(브레이크포인트)이 유의미한
- * 테이블 플롯용 (선 = 구간 선형 보간임을 드러냄). */
+ * 테이블 플롯용 (선 = 구간 선형 보간임을 드러냄).
+ * 시리즈별 옵션(오버레이용): x = 개별 x 배열(t와 다른 표본점 — 범위는 t 안,
+ * 축 스케일은 t 기준 유지), dash = 점선 패턴, markers: false = 마커 제외,
+ * label "" = 범례 생략. */
 export function lineChartCanvas(t, series, { title = "", width = 620, height = 190, bands = [], xUnit = "s", markers = false } = {}) {
   const { canvas, ctx } = makeCanvas(width, height);
   const mL = 56, mT = 22, mR = 10, mB = 24;
@@ -98,27 +101,32 @@ export function lineChartCanvas(t, series, { title = "", width = 620, height = 1
   }
   ctx.stroke();
   series.forEach((s, si) => {
+    const xs = s.x ?? t;
     ctx.strokeStyle = s.color;
-    ctx.lineWidth = 1.4;
+    ctx.lineWidth = s.dash ? 1.2 : 1.4;
+    if (s.dash) ctx.setLineDash(s.dash);
     ctx.beginPath();
     let started = false;
     s.data.forEach((v, i) => {
       if (typeof v !== "number") { started = false; return; } // null(NaN) 구간 끊기
-      if (!started) { ctx.moveTo(px(t[i]), py(v)); started = true; }
-      else ctx.lineTo(px(t[i]), py(v));
+      if (!started) { ctx.moveTo(px(xs[i]), py(v)); started = true; }
+      else ctx.lineTo(px(xs[i]), py(v));
     });
     ctx.stroke();
-    if (markers) {
+    ctx.setLineDash([]);
+    if (markers && s.markers !== false) {
       ctx.fillStyle = s.color;
       s.data.forEach((v, i) => {
         if (typeof v !== "number") return;
         ctx.beginPath();
-        ctx.arc(px(t[i]), py(v), 2.6, 0, 2 * Math.PI);
+        ctx.arc(px(xs[i]), py(v), 2.6, 0, 2 * Math.PI);
         ctx.fill();
       });
     }
-    ctx.fillStyle = s.color;
-    ctx.fillText(s.label, mL + 70 * si, 14);
+    if (s.label) {
+      ctx.fillStyle = s.color;
+      ctx.fillText(s.label, mL + 70 * si, 14);
+    }
   });
   ctx.fillStyle = "#1c2430";
   ctx.fillText(title, width - mR - 7 * title.length, 14);
