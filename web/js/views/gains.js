@@ -56,7 +56,8 @@ export function render() {
 
 function drawCharts(chartBox) {
   const { groups, skipped } = gainPlotGroups(tables);
-  clear(chartBox).append(
+  // 네이티브 append에 null·배열 직접 전달 금지 (문자열화 함정) — el 래핑으로 조립
+  clear(chartBox).append(el("div", {},
     el("div", { class: "row" },
       groups.map(({ group, mach, series }) =>
         lineChartCanvas(mach, series, {
@@ -69,7 +70,7 @@ function drawCharts(chartBox) {
       ? el("p", { class: "hint" },
           `차트 제외: ${skipped.map((s) => `${s.name} — ${s.reason}`).join(" · ")}`)
       : null,
-  );
+  ));
 }
 
 function renderTables(box, statusLine) {
