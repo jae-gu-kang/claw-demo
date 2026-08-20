@@ -184,7 +184,26 @@ canvas.plot { background: #fff; border: 1px solid #d2d2d7; border-radius: 12px; 
 .bd .canvas-wrap.sub { border-radius: 0 0 18px 18px; }
 .bd .canvas-wrap svg { display: block; width: 100%; height: auto; }
 .bd .canvas-wrap.top svg { min-width: 1280px; }
-.bd .canvas-wrap.sub svg { min-width: 720px; max-width: 1020px; margin: 0 auto; }
+.bd .canvas-wrap.sub svg { min-width: 720px; max-width: 900px; margin: 0 auto; }
+
+/* 최상위↔서브페이지 실표시 크기 통일 — 최상위는 viewBox(1920)가 커서 ≈0.65×로
+축소 렌더되므로 텍스트·선굵기를 ≈1.5× 보정 (서브는 viewBox 900~1000 ≈1×).
+화살촉은 markerUnits=strokeWidth 기본이라 선굵기 보정에 자동 비례. */
+.bd .canvas-wrap.top .ttl { font-size: 18px; }
+.bd .canvas-wrap.top .ttl2 { font-size: 14px; }
+.bd .canvas-wrap.top .bname { font-size: 15px; }
+.bd .canvas-wrap.top .siglabel { font-size: 13px; }
+.bd .canvas-wrap.top .bustag { font-size: 15px; }
+.bd .canvas-wrap.top .canvas-note { font-size: 15px; }
+.bd .canvas-wrap.top .leg-cap { font-size: 17px; }
+.bd .canvas-wrap.top .leglabel { font-size: 18px; }
+.bd .canvas-wrap.top .leg-note { font-size: 15px; }
+.bd .canvas-wrap.top .wire { stroke-width: 2.6; stroke-dasharray: 13 9; animation-name: bd-flow-lg; }
+.bd .canvas-wrap.top .wire.soft { animation-name: none; }
+.bd .canvas-wrap.top .ring { stroke-width: 2; stroke-dasharray: 10 7; }
+.bd .canvas-wrap.top .branch { r: 5px; }
+.bd .canvas-wrap.top .body { stroke-width: 1.8; }
+@keyframes bd-flow-lg { to { stroke-dashoffset: -22; } }
 .bd .hint-row { margin-top: 10px; font-size: 12px; color: var(--bd-ink-soft); }
 
 /* SVG 블록·배선 — 애플 스타일: 백색 카드·헤어라인·절제된 그림자·시스템 팔레트.
@@ -235,6 +254,8 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd marker path[fill="#b45309"] { fill: #ff9500; }
 .bd .canvas-wrap path[stroke="#111"] { stroke: #48484a; }
 .bd .siglabel { font-size: 11.5px; font-style: italic; fill: #6e6e73; text-anchor: middle; }
+/* 버스 태그 — 피드백 버스 위 소비처 표기 (시작 정렬, 분기점 우측 배치 규약) */
+.bd .bustag { font-size: 11.5px; font-style: italic; fill: #6e6e73; }
 .bd .branch { fill: #0071e3; }
 .bd .ring { fill: none; stroke-width: 1.4; stroke-dasharray: 7 5; stroke-opacity: .75; rx: 14px; }
 /* 우상단 범례 — 프레임 설명 전용 (다이어그램과 비겹침) */
@@ -311,7 +332,7 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd.holo .blk .ttl, .bd.holo .sblk .ttl, .bd.holo .sumsign { fill: #e4efff; }
 .bd.holo .blk .ttl2, .bd.holo .sblk .ttl2, .bd.holo .bname, .bd.holo .pname { fill: #9db8dc; }
 .bd.holo .pnum { fill: #7dd3fc; }
-.bd.holo .siglabel { fill: #8fb0d8; }
+.bd.holo .siglabel, .bd.holo .bustag { fill: #8fb0d8; }
 .bd.holo .canvas-note { fill: #5d7699; }
 .bd.holo .wire {
   stroke: #38bdf8;

@@ -33,7 +33,7 @@ export const DESIGN_ORDER = [
 /** 최상위 블록도 마크업 — export는 테스트의 배선 드리프트 가드용 (data-block/
 data-page id ↔ SUBSYSTEMS 키·CHAIN 순서 대조, lib/blocks.test.js). */
 export const TOP_SVG = `
-<svg viewBox="0 0 1920 692" xmlns="http://www.w3.org/2000/svg" role="img"
+<svg viewBox="0 0 1920 716" xmlns="http://www.w3.org/2000/svg" role="img"
      aria-label="제어법칙 블록도 최상위 (시뮬링크 스타일)">
   <defs>
     <marker id="arrw" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto">
@@ -83,7 +83,7 @@ export const TOP_SVG = `
        90° 수직 교차만 (평행 근접 금지) -->
   <g class="blk" data-block="schedule" tabindex="0">
     <rect class="body gs-body" x="620" y="36" width="220" height="52" rx="10"/>
-    <text class="ttl gs-ink" x="730" y="58" style="font-size:13.5px">${B.schedule.title}</text>
+    <text class="ttl gs-ink" x="730" y="58">${B.schedule.title}</text>
     <text class="ttl2 gs-ink2" x="730" y="76">${B.schedule.sub}</text>
   </g>
   <path class="wire gs" d="M690 88 V172 H555 V194" marker-end="url(#arrgs)"/>
@@ -133,7 +133,7 @@ export const TOP_SVG = `
 
   <g class="blk" data-block="mixer" tabindex="0">
     <rect class="body" x="1030" y="200" width="150" height="68" rx="3"/>
-    <text class="ttl" x="1105" y="233" style="font-size:14px">${B.mixer.title}</text>
+    <text class="ttl" x="1105" y="233">${B.mixer.title}</text>
     <text class="ttl2" x="1105" y="252">${B.mixer.sub}</text>
   </g>
   <text class="bname" x="1105" y="286">엘레본 4면 믹싱</text>
@@ -142,7 +142,7 @@ export const TOP_SVG = `
 
   <g class="blk" data-block="actuator" tabindex="0">
     <rect class="body" x="1240" y="200" width="100" height="68" rx="3"/>
-    <text class="ttl" x="1290" y="240" style="font-size:14px">${B.actuator.title}</text>
+    <text class="ttl" x="1290" y="240">${B.actuator.title}</text>
   </g>
   <text class="bname" x="1290" y="286">${B.actuator.sub}</text>
   <path class="wire" d="M1340 218 H1386" marker-end="url(#arrw)"/>
@@ -150,10 +150,10 @@ export const TOP_SVG = `
 
   <g class="blk" data-block="plant" tabindex="0">
     <rect class="body" x="1390" y="200" width="150" height="68" rx="3"/>
-    <text class="ttl" x="1465" y="233" style="font-size:14px">${B.plant.title}</text>
+    <text class="ttl" x="1465" y="233">${B.plant.title}</text>
     <text class="ttl2" x="1465" y="252">${B.plant.sub}</text>
   </g>
-  <text class="bname" x="1465" y="286" style="font-size:10.5px">델타윙 · 쌍발 · 엘레본×4 · 러더</text>
+  <text class="bname" x="1465" y="286" style="font-size:14px">델타윙 · 쌍발 · 엘레본×4 · 러더</text>
 
   <!-- 피드백 (참값 → 항법 → NavOutput만 소비: 참값 차단 계약 03 §4).
        리턴 리서(세로선)는 프레임·블록 엣지와 평행 근접 금지 — 간격 채널 중앙 배치.
@@ -161,23 +161,25 @@ export const TOP_SVG = `
   <path class="wire" d="M1540 218 H1570 V512 H1334" marker-end="url(#arrw)"/>
   <g class="blk" data-block="nav" tabindex="0">
     <rect class="body" x="1150" y="480" width="180" height="64" rx="3"/>
-    <text class="ttl" x="1240" y="506" style="font-size:14px">${B.nav.title}</text>
+    <text class="ttl" x="1240" y="506">${B.nav.title}</text>
     <text class="ttl2" x="1240" y="526">${B.nav.sub}</text>
   </g>
   <text class="bname" x="1240" y="562">참값 + 잡음 + 바이어스 + 지연</text>
 
   <path class="wire" d="M1150 512 H236 V252 H246" marker-end="url(#arrw)"/>
-  <text class="siglabel" x="690" y="530">항법 출력 (위치 · 속도 · 자세 · 각속도) — 법칙·유도·스케줄은 이것만 소비</text>
   <circle class="branch" cx="818" cy="512" r="3.4"/>
   <path class="wire" d="M818 512 V252 H826" marker-end="url(#arrw)"/>
-  <text class="siglabel" x="862" y="500">θ φ q p r</text>
   <circle class="branch" cx="466" cy="512" r="3.4"/>
   <path class="wire" d="M466 512 V252 H476" marker-end="url(#arrw)"/>
-  <text class="siglabel" x="512" y="500">V h ψ</text>
-  <text class="siglabel" x="300" y="500">위치 · 속도</text>
+  <!-- 버스 태그 — 전부 버스 위 한 줄(y498)·시작 정렬·분기점 우측 (배치 규칙 통일) -->
+  <text class="bustag" x="250" y="498">위치 · 속도 → 유도</text>
+  <text class="bustag" x="480" y="498">V h ψ → AP</text>
+  <text class="bustag" x="832" y="498">θ φ q p r → SCAS</text>
+  <text class="bustag" x="1024" y="498">NavOutput</text>
 
-  <text class="canvas-note" x="24" y="656">※ 스로틀 명령(δt)은 오토파일럿 속도 루프에서 생성되어 차동추력 보상과 합쳐져 스로틀×2로 출력 · 블록 클릭 시 서브시스템으로 진입</text>
-  <text class="canvas-note" x="24" y="674">제어 100 Hz (틱 사이 ZOH) · 플랜트 dt 10 ms RK4 · 항법 자체 갱신주기/지연 — 멀티레이트 [확정 02 §6] · 자유 배선 없음 [확정 02 §4]</text>
+  <text class="canvas-note" x="24" y="660">※ 항법 출력(NavOutput: 위치·속도·자세·각속도) — 법칙·유도·스케줄은 이것만 소비, plant 참값 직접 참조 금지 [확정 03 §4 참값 차단 계약]</text>
+  <text class="canvas-note" x="24" y="682">※ 스로틀 명령(δt)은 오토파일럿 속도 루프에서 생성되어 차동추력 보상과 합쳐져 스로틀×2로 출력 · 블록 클릭 시 서브시스템으로 진입</text>
+  <text class="canvas-note" x="24" y="704">제어 100 Hz (틱 사이 ZOH) · 플랜트 dt 10 ms RK4 · 항법 자체 갱신주기/지연 — 멀티레이트 [확정 02 §6] · 자유 배선 없음 [확정 02 §4]</text>
 </svg>`;
 
 /** 최상위 블록도 SVG. onNavigate(pageId) — 블록·프레임 라벨 클릭 시 호출. */

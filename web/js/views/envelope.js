@@ -1,9 +1,11 @@
 /** 엔벨로프 뷰 — 교과서형 V-n 선도 (01 §3.6). 수치는 전부 엔진 vn_envelope.
 
-영역: 정상 운용(녹) / 실속 영역(회) / 주의 V_NO~V_D(황) / 구조 손상
+영역: 정상 운용(녹) / 실속 영역(회, 상·하) / 주의 V_NO~V_D(황) / 구조 손상
 제한~극한(주황) / 구조 파괴 극한 밖·V_D 밖(적). 특성 속도 V_S·V_A·V_NO·V_D
 수직선. 구조 한계는 프로파일 자리표시 [기본값] — 실기체 값 아님을 명기 표시.
-음의 실속 곡선은 데이터 부재로 하한을 구조 한계만으로 표시.
+음의 실속 곡선은 공력 데이터 부재로 엔진 자리표시(−ratio×α_stall [기본값]) —
+실데이터 아님을 명기 표시. 실속·보호선은 제한하중 교차 이후 점선(엔벨로프
+밖 참고 정보). 격자는 저마하(포물선 뿌리)부터 — 교과서형 벌어지는 모양.
 */
 
 import { api, errorText } from "../api.js";
@@ -72,23 +74,27 @@ function vnDiagramCanvas(body) {
   const V = body.V;
   const nS = body.n_stall;
   const nP = body.n_prot;
+  const nN = body.n_stall_neg ?? null; // 구버전 응답(재시작 전 캐시) 방어
 
   const vMax = L.v_d * 1.08;
-  const nTop = L.n_ultimate_pos * 1.35;
-  const nBot = L.n_ultimate_neg * 1.5;
+  // 극한하중 살짝 위까지만 — 실속 포물선의 세로 기울기 강조 (교과서형)
+  const nTop = L.n_ultimate_pos * 1.1;
+  const nBot = L.n_ultimate_neg * 1.15;
   const px = linScale(V[0], vMax, mL, W - mR);
   const py = linScale(nBot, nTop, H - mB, mT);
-  const stallAt = (v) => {
-    let n = null;
+  const interpAt = (arr) => (v) => {
     for (let i = 1; i < V.length; i += 1) {
       if (V[i] >= v) {
         const t = (v - V[i - 1]) / (V[i] - V[i - 1]);
-        n = nS[i - 1] + t * (nS[i] - nS[i - 1]);
-        break;
+        return arr[i - 1] + t * (arr[i] - arr[i - 1]);
       }
     }
-    return n ?? nS[nS.length - 1];
+    return arr[arr.length - 1];
   };
+  const stallAt = interpAt(nS);
+  const negAt = nN ? interpAt(nN) : null;
+  // 정상 운용 하한 — 음의 실속 자리표시가 있으면 max(음실속, −제한), 없으면 −제한
+  const lowAt = (v) => (nN ? Math.max(negAt(v), L.n_limit_neg) : L.n_limit_neg);
 
   // ── 배경 영역 (뒤→앞) ──
   ctx.fillStyle = C.failure; // 기본 = 구조 파괴 (극한 밖·V_D 밖)
@@ -98,19 +104,24 @@ function vnDiagramCanvas(body) {
   ctx.fillRect(mL, py(L.n_limit_neg), px(L.v_d) - mL, py(L.n_ultimate_neg) - py(L.n_limit_neg));
   ctx.fillStyle = C.caution; // 주의: V_NO~V_D, 제한하중 이내
   ctx.fillRect(px(L.v_no), py(L.n_limit_pos), px(L.v_d) - px(L.v_no), py(L.n_limit_neg) - py(L.n_limit_pos));
-  // 정상 운용: V ≤ V_NO, 위 = min(실속, +제한), 아래 = −제한 (음의 실속 데이터 없음)
+  // 정상 운용: V ≤ V_NO, 위 = min(실속, +제한), 아래 = max(음실속 자리표시, −제한)
   ctx.fillStyle = C.ok;
   ctx.beginPath();
-  ctx.moveTo(px(V[0]), py(L.n_limit_neg));
+  ctx.moveTo(px(V[0]), py(lowAt(V[0])));
   ctx.lineTo(px(V[0]), py(Math.min(stallAt(V[0]), L.n_limit_pos)));
   for (let i = 0; i < V.length && V[i] <= L.v_no; i += 1) {
     ctx.lineTo(px(V[i]), py(Math.min(nS[i], L.n_limit_pos)));
   }
   ctx.lineTo(px(L.v_no), py(Math.min(stallAt(L.v_no), L.n_limit_pos)));
-  ctx.lineTo(px(L.v_no), py(L.n_limit_neg));
+  ctx.lineTo(px(L.v_no), py(lowAt(L.v_no)));
+  if (nN) {
+    for (let i = V.length - 1; i >= 0; i -= 1) {
+      if (V[i] <= L.v_no) ctx.lineTo(px(V[i]), py(Math.max(nN[i], L.n_limit_neg)));
+    }
+  }
   ctx.closePath();
   ctx.fill();
-  // 실속 영역 (공력 도달 불가): 실속 곡선 위, +제한 아래, V ≤ V_A쪽
+  // 실속 영역 상부 (공력 도달 불가): 실속 곡선 위, +제한 아래, V ≤ V_A쪽
   ctx.fillStyle = C.stallZone;
   ctx.beginPath();
   ctx.moveTo(px(V[0]), py(Math.min(stallAt(V[0]), L.n_limit_pos)));
@@ -122,23 +133,53 @@ function vnDiagramCanvas(body) {
   ctx.lineTo(px(V[0]), py(L.n_limit_pos));
   ctx.closePath();
   ctx.fill();
+  // 실속 영역 하부 — 음의 실속 자리표시 곡선 아래, −제한 위 (벌어지는 입 모양)
+  if (nN) {
+    ctx.fillStyle = C.stallZone;
+    ctx.beginPath();
+    ctx.moveTo(px(V[0]), py(Math.max(nN[0], L.n_limit_neg)));
+    for (let i = 0; i < V.length && nN[i] >= L.n_limit_neg; i += 1) {
+      ctx.lineTo(px(V[i]), py(nN[i]));
+    }
+    const k = nN.findIndex((n) => n < L.n_limit_neg); // −제한 교차(음의 기동속도 상당)
+    const vAneg = k > 0
+      ? V[k - 1] + ((V[k] - V[k - 1]) * (L.n_limit_neg - nN[k - 1])) / (nN[k] - nN[k - 1])
+      : L.v_d;
+    ctx.lineTo(px(vAneg), py(L.n_limit_neg));
+    ctx.lineTo(px(V[0]), py(L.n_limit_neg));
+    ctx.closePath();
+    ctx.fill();
+  }
 
   // ── 곡선·한계선 (플롯 영역 클리핑) ──
   ctx.save();
   ctx.beginPath();
   ctx.rect(mL, mT, W - mL - mR, H - mT - mB);
   ctx.clip();
-  const curve = (data, color, width = 2) => {
+  const curve = (data, color, { width = 2, i0 = 0, i1 = data.length - 1, dash = null } = {}) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    if (dash) ctx.setLineDash(dash);
     ctx.beginPath();
-    data.forEach((n, i) => (i === 0 ? ctx.moveTo(px(V[i]), py(n)) : ctx.lineTo(px(V[i]), py(n))));
+    for (let i = i0; i <= i1; i += 1) {
+      if (i === i0) ctx.moveTo(px(V[i]), py(data[i]));
+      else ctx.lineTo(px(V[i]), py(data[i]));
+    }
     ctx.stroke();
+    ctx.setLineDash([]);
   };
-  curve(nS, C.stallLine);
-  curve(nP, C.protLine);
+  // 제한하중 교차 전 실선(엔벨로프 경계), 이후 점선(엔벨로프 밖 참고 정보)
+  const splitCurve = (data, color, limit, below) => {
+    let k = data.findIndex((n) => (below ? n < limit : n > limit));
+    if (k < 0) k = data.length;
+    curve(data, color, { i1: Math.min(k, data.length - 1) });
+    if (k < data.length) curve(data, color, { i0: Math.max(0, k - 1), dash: [5, 4], width: 1.3 });
+  };
+  splitCurve(nS, C.stallLine, L.n_limit_pos, false);
+  splitCurve(nP, C.protLine, L.n_limit_pos, false);
+  if (nN) splitCurve(nN, C.stallLine, L.n_limit_neg, true); // 음의 실속 자리표시
   const hline = (n, color, dash, label) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.2;
@@ -185,6 +226,7 @@ function vnDiagramCanvas(body) {
   ctx.fillStyle = C.sub;
   ctx.fillText("정상 운용", px(L.v_no * 0.62), py(L.n_limit_pos * 0.45));
   ctx.fillText("실속 영역", px(V[0]) + 14, py(L.n_limit_pos) + 26);
+  if (nN) ctx.fillText("실속 영역", px(V[0]) + 14, py(L.n_limit_neg) - 10);
   ctx.fillText("주의", (px(L.v_no) + px(L.v_d)) / 2 - 12, py(0.2));
   ctx.fillText("구조 손상", px(L.v_d * 0.45), (py(L.n_limit_pos) + py(L.n_ultimate_pos)) / 2 + 4);
   ctx.fillText("구조 파괴", px(L.v_d * 0.45), py(L.n_ultimate_pos) - 8);
@@ -215,14 +257,15 @@ function renderPlot(plotBox, body) {
       el("span", {}, el("span", { class: "chip", style: `background:${C.caution}` }), "주의 (V_NO~V_D)"),
       el("span", {}, el("span", { class: "chip", style: `background:${C.damage}` }), "구조 손상 (제한~극한)"),
       el("span", {}, el("span", { class: "chip", style: `background:${C.failure}` }), "구조 파괴 (극한 밖·V_D 밖)"),
-      el("span", {}, el("span", { class: "chip", style: `background:${C.stallLine}` }), "실속 경계"),
+      el("span", {}, el("span", { class: "chip", style: `background:${C.stallLine}` }), "실속 경계 (±)"),
       el("span", {}, el("span", { class: "chip", style: `background:${C.protLine}` }), "α 리미터 보호 경계")),
     el("p", { class: "hint" },
       "V_S 실속속도(n=1) · V_A 기동속도(실속선∩제한하중) · V_NO 최대 구조 순항속도 · ",
-      "V_D 급강하 한계속도. 보호선(녹)이 법칙이 명령을 자르는 선 — 실속선 안쪽."),
+      "V_D 급강하 한계속도. 보호선(녹)이 법칙이 명령을 자르는 선 — 실속선 안쪽. ",
+      "실속·보호선은 제한하중 교차 이후 점선(엔벨로프 밖 참고)."),
     el("p", { class: "hint" },
       "⚠ 구조 한계(±제한/극한·V_NO·V_D)는 데모 프로파일 자리표시 [기본값 — 실기체 값 아님, ",
-      "01 §3.6]: 구조팀 정본 확보 시 프로파일 교체. 음의 실속 곡선은 데이터 부재로 미표시 ",
-      "(하한은 구조 한계만)."),
+      "01 §3.6]: 구조팀 정본 확보 시 프로파일 교체. 음의 실속 곡선도 자리표시 ",
+      `(−${fmt(body.neg_alpha_ratio ?? 0.6, 3)}×α_stall 가정 [기본값]) — 공력 정본 확보 시 교체.`),
   );
 }
