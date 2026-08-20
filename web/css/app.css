@@ -273,6 +273,10 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd .gs-ink { fill: #af52de; }
 .bd .gs-ink2 { fill: #86868b; }
 .bd marker path[fill="#8a5cf6"] { fill: #af52de; }
+/* 선회 피드포워드 블록 — 앰버 액센트 카드 (FF 배선 .ff와 동색 계열) */
+.bd .ff-body { stroke: #ff9500; }
+.bd .ff-ink { fill: #ff9500; }
+.bd .ff-ink2 { fill: #86868b; }
 
 /* 하위 페이지 헤더 */
 .bd .pagehead { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; flex-wrap: wrap; }
@@ -358,5 +362,8 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd.holo .gs-body { stroke: rgba(196, 181, 253, .9); fill: rgba(139, 92, 246, .16); }
 .bd.holo .gs-ink { fill: #c4b5fd; }
 .bd.holo .gs-ink2 { fill: #9db8dc; }
+.bd.holo .ff-body { stroke: rgba(252, 211, 77, .9); fill: rgba(245, 158, 11, .16); }
+.bd.holo .ff-ink { fill: #fcd34d; }
+.bd.holo .ff-ink2 { fill: #9db8dc; }
 .bd.holo marker path[fill="#8a5cf6"] { fill: #a78bfa; }
 .bd.holo svg [data-p] { fill: #5eead4; }

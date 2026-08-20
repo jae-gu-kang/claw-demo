@@ -137,11 +137,14 @@ export const SUBSYSTEMS = {
   <text class="sumsign" x="247" y="84">+</text><text class="sumsign" x="256" y="93">−</text>
   <path class="wire" d="M270 80 H302" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="306" y="53" width="130" height="54" rx="3"/><text class="ttl" x="371" y="74">고도 PI</text><text class="ttl2" x="371" y="90">kp <tspan data-p="kp_alt">0.004</tspan> · ki <tspan data-p="ki_alt">0.0004</tspan></text><text class="ttl2" x="371" y="103">k_hdot <tspan data-p="k_hdot">−0.008</tspan> 승강률</text></g>
-  <path class="wire" d="M436 80 H478" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="482" y="50" width="100" height="60" rx="3"/>
-    <path d="M492 96 H508 L556 64 H572" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="532" y="128">θ 한계 <tspan data-p="theta_lo">−0.3</tspan> ~ <tspan data-p="theta_hi">0.3</tspan> rad</text>
-  <path class="wire" d="M582 80 H644" marker-end="url(#aw-ap)"/>
+  <path class="wire" d="M436 80 H448" marker-end="url(#aw-ap)"/>
+  <circle class="body" cx="466" cy="80" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
+  <text class="sumsign" x="457" y="84">+</text><text class="sumsign" x="466" y="71">+</text>
+  <path class="wire" d="M480 80 H492" marker-end="url(#aw-ap)"/>
+  <g class="sblk"><rect class="body" x="496" y="50" width="100" height="60" rx="3"/>
+    <path d="M506 96 H522 L570 64 H586" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="546" y="128">θ 한계 <tspan data-p="theta_lo">−0.3</tspan> ~ <tspan data-p="theta_hi">0.3</tspan> rad</text>
+  <path class="wire" d="M596 80 H644" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="648" y="68" width="36" height="24" rx="12"/><text class="pnum" x="666" y="84">1</text></g>
   <text class="pname" x="678" y="108">θ_cmd → α 리미터</text>
   <g class="sblk"><rect class="body" x="238" y="140" width="36" height="24" rx="12"/><text class="pnum" x="256" y="156">4</text></g>
@@ -159,7 +162,7 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="306" y="193" width="130" height="54" rx="3"/><text class="ttl" x="371" y="217">속도 PI</text><text class="ttl2" x="371" y="237">kp <tspan data-p="kp_spd">0.15</tspan> · ki <tspan data-p="ki_spd">0.03</tspan></text></g>
   <path class="wire" d="M436 220 H494" marker-end="url(#aw-ap)"/>
   <circle class="body" cx="512" cy="220" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="503" y="224">+</text><text class="sumsign" x="512" y="211">+</text>
+  <text class="sumsign" x="503" y="224">+</text><text class="sumsign" x="512" y="233">+</text>
   <path class="wire" d="M526 220 H584" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="588" y="208" width="36" height="24" rx="12"/><text class="pnum" x="606" y="224">2</text></g>
   <text class="pname" x="620" y="248">δt_cmd (스로틀)</text>
@@ -176,22 +179,25 @@ export const SUBSYSTEMS = {
   <text class="sumsign" x="247" y="364">+</text><text class="sumsign" x="256" y="373">−</text>
   <path class="wire" d="M270 360 H302" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="306" y="333" width="130" height="54" rx="3"/><text class="ttl" x="371" y="357">헤딩 PI</text><text class="ttl2" x="371" y="377">kp <tspan data-p="kp_hdg">4</tspan> · ki <tspan data-p="ki_hdg">0</tspan> · wrap</text></g>
-  <path class="wire" d="M436 360 H478" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="482" y="330" width="100" height="60" rx="3"/>
-    <path d="M492 376 H508 L556 344 H572" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="532" y="408">φ 한계 ±<tspan data-p="phi_max">0.7</tspan> rad</text>
-  <path class="wire" d="M582 360 H644" marker-end="url(#aw-ap)"/>
+  <path class="wire" d="M436 360 H492" marker-end="url(#aw-ap)"/>
+  <g class="sblk"><rect class="body" x="496" y="330" width="100" height="60" rx="3"/>
+    <path d="M506 376 H522 L570 344 H586" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="546" y="408">φ 한계 ±<tspan data-p="phi_max">0.7</tspan> rad</text>
+  <path class="wire" d="M596 360 H644" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="648" y="348" width="36" height="24" rx="12"/><text class="pnum" x="666" y="364">3</text></g>
   <text class="pname" x="666" y="388">φ_cmd</text>
   <g class="sblk"><rect class="body" x="238" y="416" width="36" height="24" rx="12"/><text class="pnum" x="256" y="432">6</text></g>
   <text class="pname" x="290" y="432">ψ</text>
   <path class="wire" d="M256 416 V378" marker-end="url(#aw-ap)"/>
-  <!-- 선회 피드포워드 -->
-  <rect x="618" y="270" width="252" height="70" rx="8" fill="#fdf2d7" stroke="#b45309" stroke-width="1.4" stroke-dasharray="6 4"/>
-  <text x="744" y="298" text-anchor="middle" style="font-size:12.5px;font-weight:800" fill="#b45309">선회 피드포워드 보상</text>
-  <text x="744" y="317" text-anchor="middle" style="font-size:11px" fill="#b45309">|φ_cmd| 기반 — 피치 <tspan data-p="k_pitch_turn">0.05</tspan> · 스로틀 <tspan data-p="k_thr_turn">0</tspan></text>
-  <path class="wire ff" d="M660 270 V220 H530" marker-end="url(#af-ap)"/>
-  <path class="wire ff" d="M720 270 V115 H371 V111" marker-end="url(#af-ap)"/>
+  <!-- 선회 피드포워드 — φ_cmd 분기 입력, 출력은 코드 순서대로 θ 합점(한계 전)·δt 합점.
+       피치 배선은 상단 여백(y34)으로 우회 — 채널 배선과 평행 중첩 금지 -->
+  <g class="sblk"><rect class="body ff-body" x="560" y="258" width="250" height="56" rx="3"/>
+    <text class="ttl ff-ink" x="685" y="281">선회 피드포워드 보상</text>
+    <text class="ttl2 ff-ink2" x="685" y="301">|φ_cmd| 기반 — 피치 <tspan data-p="k_pitch_turn">0.05</tspan> · 스로틀 <tspan data-p="k_thr_turn">0</tspan></text></g>
+  <circle class="branch" cx="612" cy="360" r="3.2"/>
+  <path class="wire ff" d="M612 360 V318" marker-end="url(#af-ap)"/>
+  <path class="wire ff" d="M560 286 H512 V238" marker-end="url(#af-ap)"/>
+  <path class="wire ff" d="M785 258 V34 H466 V62" marker-end="url(#af-ap)"/>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
@@ -211,24 +217,64 @@ export const SUBSYSTEMS = {
     title: "유도 — 모드별 유도 + 경로 추종", eng: "Guidance (M8)",
     chips: ["ok", "dft", "tbd"],
     svg: `
-<svg viewBox="0 0 900 330" xmlns="http://www.w3.org/2000/svg">
-  <defs><marker id="aw-guid" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
-  <text class="pname" x="48" y="128">임무프로파일</text>
-  <path class="wire" d="M66 100 H136" marker-end="url(#aw-guid)"/>
-  <g class="sblk"><rect class="body" x="140" y="66" width="200" height="68" rx="3"/>
-    <text class="ttl" x="240" y="94">모드 테이블 + 시퀀서</text><text class="ttl2" x="240" y="114">{진입, 활성 명령, 이탈}</text></g>
-  <path class="wire" d="M340 100 H406" marker-end="url(#aw-guid)"/>
-  <g class="sblk"><rect class="body" x="410" y="66" width="190" height="68" rx="3"/>
-    <text class="ttl" x="505" y="94">경로 추종 — LOS</text><text class="ttl2" x="505" y="114">웨이포인트 열 · 도달반경</text></g>
-  <path class="wire" d="M600 100 H666" marker-end="url(#aw-guid)"/>
-  <g class="sblk"><rect class="body" x="670" y="88" width="36" height="24" rx="12"/><text class="pnum" x="688" y="104">1</text></g>
-  <text class="pname" x="688" y="128">V·h·ψ_cmd</text>
-  <g class="sblk"><rect class="body" x="487" y="240" width="36" height="24" rx="12"/><text class="pnum" x="505" y="256">2</text></g>
-  <text class="pname" x="585" y="256">항법 (위치 · 속도)</text>
-  <path class="wire" d="M505 240 V138" marker-end="url(#aw-guid)"/>
-  <text class="canvas-note" x="120" y="180">모드 시퀀스: 이륙 → 상승 → (순항·고도유지·디센트·임무수행·웨이포인트 항법) → 착륙</text>
-  <text class="canvas-note" x="120" y="200">활성 명령 셋(속도/고도/헤딩 유지 방식)은 모드 테이블이 결정 · Stateflow 미사용 [확정]</text>
+<svg viewBox="0 0 940 490" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aw-guid" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+  <marker id="as-guid" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker></defs>
+  <!-- 구성 입력 (점선) — 모드 테이블·웨이포인트는 임무프로파일이 정의 -->
+  <g class="sblk"><rect class="body" x="30" y="48" width="36" height="24" rx="12"/><text class="pnum" x="48" y="64">1</text></g>
+  <text class="pname" x="48" y="92">임무프로파일</text>
+  <path class="wire soft" d="M66 60 H430 V146" marker-end="url(#as-guid)"/>
+  <circle class="branch" cx="110" cy="60" r="3.2"/>
+  <path class="wire soft" d="M110 60 V316 H356" marker-end="url(#as-guid)"/>
+  <text class="siglabel" x="260" y="48">웨이포인트 열 · 모드 테이블 (편집: 시뮬 탭)</text>
+  <!-- 항법 입력 → 유효성 게이트 -->
+  <g class="sblk"><rect class="body" x="30" y="268" width="36" height="24" rx="12"/><text class="pnum" x="48" y="284">2</text></g>
+  <text class="pname" x="48" y="312">NavOutput</text>
+  <path class="wire" d="M66 280 H136" marker-end="url(#aw-guid)"/>
+  <g class="sblk"><rect class="body" x="140" y="254" width="160" height="52" rx="3"/>
+    <text class="ttl" x="220" y="276" style="font-size:13px">유효성 게이트</text>
+    <text class="ttl2" x="220" y="294">invalid → 동결 · 명령 유지</text></g>
+  <path class="wire" d="M300 280 H326"/>
+  <circle class="branch" cx="330" cy="280" r="3.2"/>
+  <path class="wire" d="M330 280 V190 H356" marker-end="url(#aw-guid)"/>
+  <path class="wire" d="M330 280 V350 H356" marker-end="url(#aw-guid)"/>
+  <!-- 경로추종 (레지스트리 교체 가능) -->
+  <g class="sblk"><rect class="body" x="360" y="150" width="200" height="80" rx="3"/>
+    <text class="ttl" x="460" y="172" style="font-size:13px">경로추종 — LOS [기본값]</text>
+    <text class="ttl2" x="460" y="190">현위치→활성 WP 방위각</text>
+    <text class="ttl2" x="460" y="204">도달반경 진입 → 다음 WP (연쇄 스킵)</text>
+    <text class="ttl2" x="460" y="218">소진 → done · 마지막 헤딩 유지</text></g>
+  <path class="wire" d="M560 175 H636" marker-end="url(#aw-guid)"/>
+  <text class="siglabel" x="598" y="163">ψ_wp</text>
+  <path class="wire" d="M560 215 H590 V270 H480 V296" marker-end="url(#aw-guid)"/>
+  <text class="siglabel" x="540" y="262">path_done</text>
+  <!-- 모드 시퀀서 -->
+  <g class="sblk"><rect class="body" x="360" y="300" width="200" height="100" rx="3"/>
+    <text class="ttl" x="460" y="324" style="font-size:13px">모드 시퀀서</text>
+    <text class="ttl2" x="460" y="344">선언 테이블 {명령·이탈·next}</text>
+    <text class="ttl2" x="460" y="360">이탈: time·alt·speed·path_done</text>
+    <text class="ttl2" x="460" y="376">순차 체인 · 전환 스텝당 1회</text></g>
+  <path class="wire" d="M560 350 H636" marker-end="url(#aw-guid)"/>
+  <text class="siglabel" x="598" y="338">활성 모드</text>
+  <circle class="branch" cx="610" cy="350" r="3.2"/>
+  <path class="wire" d="M610 350 V240 H690 V214" marker-end="url(#aw-guid)"/>
+  <!-- heading 선택 · 명령 구성 -->
+  <g class="sblk"><rect class="body" x="640" y="150" width="130" height="60" rx="3"/>
+    <text class="ttl" x="705" y="170" style="font-size:13px">heading 선택</text>
+    <text class="ttl2" x="705" y="186">"path" → ψ_wp</text>
+    <text class="ttl2" x="705" y="200">그 외 → 모드값</text></g>
+  <path class="wire" d="M770 180 H786 V296" marker-end="url(#aw-guid)"/>
+  <text class="siglabel" x="810" y="176">ψ_cmd</text>
+  <g class="sblk"><rect class="body" x="640" y="300" width="160" height="90" rx="3"/>
+    <text class="ttl" x="720" y="322" style="font-size:13px">GuidanceCommand</text>
+    <text class="ttl2" x="720" y="342">speed · alt · heading 구성</text>
+    <text class="ttl2" x="720" y="358">None → 축 비활성 플래그</text>
+    <text class="ttl2" x="720" y="374">mode 이름 포함</text></g>
+  <path class="wire" d="M800 345 H866" marker-end="url(#aw-guid)"/>
+  <g class="sblk"><rect class="body" x="870" y="333" width="36" height="24" rx="12"/><text class="pnum" x="888" y="349">1</text></g>
+  <text class="pname" x="886" y="377">→ AP</text>
+  <text class="canvas-note" x="24" y="440">※ 모드 전환 순간의 명령 점프는 오토파일럿 명령필터가 완충 [기본값] — Fader 페이딩은 백로그 · 경로추종은 헤딩만 담당 (고도·속도는 모드 테이블 소관)</text>
+  <text class="canvas-note" x="24" y="462">모드 시퀀스 예: 이륙 → 상승 → (순항 · 고도유지 · 디센트 · 임무수행 · 웨이포인트 항법) → 착륙 · Stateflow 미사용 [확정]</text>
 </svg>`,
     notes: `
 <h4>비행모드 실행기 — 선언적 모드 테이블 + Sequencer <span class="chip ok">확정</span></h4>
@@ -245,6 +291,7 @@ export const SUBSYSTEMS = {
 <ul>
   <li>웨이포인트 열 → 경로 추종 <span class="chip ok">확정</span> · M8 1차는 <b>LOS</b> <span class="chip dft">기본값</span> — L1/벡터필드 선정은 <span class="chip tbd">TBD</span></li>
   <li>모드·게인 전환 시 범프리스 처리 (적분기 초기화 · 명령 페이딩 — Fader) <span class="chip tbd">TBD</span></li>
+  <li>항법 무효(valid=False) 시 전환·경로 갱신 <b>동결 + 마지막 명령 유지</b> <span class="chip dft">기본값</span> — 첫 유효 이전엔 전 축 비활성 (M7 웜스타트 홀드와 결합)</li>
 </ul>`,
   },
 
@@ -329,16 +376,26 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="430" y="64" width="110" height="52" rx="3"/>
     <path d="M442 106 H458 L512 74 H528" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="485" y="134">elevon_lo~hi</text>
-  <path class="wire" d="M540 90 H796" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="800" y="78" width="42" height="24" rx="12"/><text class="pnum" x="821" y="94">1·2</text></g>
-  <text class="pname" x="821" y="122">좌측 엘레본 (내·외)</text>
+  <path class="wire" d="M540 90 H610"/>
+  <circle class="branch" cx="614" cy="90" r="3.2"/>
+  <path class="wire" d="M614 90 V78 H796" marker-end="url(#aw-mix)"/>
+  <path class="wire" d="M614 90 V106 H796" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="800" y="66" width="36" height="24" rx="12"/><text class="pnum" x="818" y="82">1</text></g>
+  <text class="pname" x="864" y="82">내좌</text>
+  <g class="sblk"><rect class="body" x="800" y="94" width="36" height="24" rx="12"/><text class="pnum" x="818" y="110">2</text></g>
+  <text class="pname" x="864" y="110">외좌</text>
   <path class="wire" d="M400 182 H426" marker-end="url(#aw-mix)"/>
   <g class="sblk"><rect class="body" x="430" y="156" width="110" height="52" rx="3"/>
     <path d="M442 198 H458 L512 166 H528" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="485" y="226">elevon_lo~hi</text>
-  <path class="wire" d="M540 182 H796" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="800" y="170" width="42" height="24" rx="12"/><text class="pnum" x="821" y="186">3·4</text></g>
-  <text class="pname" x="821" y="214">우측 엘레본 (내·외)</text>
+  <path class="wire" d="M540 182 H610"/>
+  <circle class="branch" cx="614" cy="182" r="3.2"/>
+  <path class="wire" d="M614 182 V170 H796" marker-end="url(#aw-mix)"/>
+  <path class="wire" d="M614 182 V198 H796" marker-end="url(#aw-mix)"/>
+  <g class="sblk"><rect class="body" x="800" y="158" width="36" height="24" rx="12"/><text class="pnum" x="818" y="174">3</text></g>
+  <text class="pname" x="864" y="174">내우</text>
+  <g class="sblk"><rect class="body" x="800" y="186" width="36" height="24" rx="12"/><text class="pnum" x="818" y="202">4</text></g>
+  <text class="pname" x="864" y="202">외우</text>
   <!-- 러더 + 차동추력 (클램프된 실 러더 기준) -->
   <g class="sblk"><rect class="body" x="30" y="270" width="36" height="24" rx="12"/><text class="pnum" x="48" y="286">3</text></g>
   <text class="pname" x="48" y="316">요 δr</text>
