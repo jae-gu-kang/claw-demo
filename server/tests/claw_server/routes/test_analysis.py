@@ -4,6 +4,8 @@
 엔진 값 통과(고유치·감쇠비·마진)와 요청 검증(축 이름·중복 루프)을 핀한다.
 """
 
+import pytest
+
 
 def _margin_map_request(machs=(0.5, 0.6, 0.7)):
     return {
@@ -92,6 +94,13 @@ def test_vn_envelope_endpoint(client):
     assert b["neg_alpha_ratio"] == 0.6
     # 포물선 뿌리 — 격자 시작이 저마하(첫 n_stall ≈ 0 부근)
     assert b["n_stall"][0] < 0.05
+    # 비기본 ratio가 엔진까지 전달되는 배선 고정 — 기본값 echo만으론 라우트의
+    # neg_alpha_ratio= 전달 누락 회귀를 못 잡음 (리뷰 Should fix)
+    r2 = client.get("/api/analysis/vn-envelope",
+                    params={"alt": 1000.0, "fuel": 200.0, "neg_alpha_ratio": 0.4})
+    b2 = r2.json()
+    assert b2["neg_alpha_ratio"] == 0.4
+    assert b2["n_stall_neg"][20] == pytest.approx(-0.4 * b2["n_stall"][20], rel=1e-9)
     # ISA 범위 밖 고도 → 엔진 ValueError → 422
     bad = client.get("/api/analysis/vn-envelope", params={"alt": 99999.0, "fuel": 200.0})
     assert bad.status_code == 422

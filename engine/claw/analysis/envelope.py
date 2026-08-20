@@ -36,6 +36,9 @@ def vn_envelope(
     −neg_alpha_ratio×α_stall(M)로 가정해 n_stall_neg 산출 (델타윙 음의 α
     실속각이 양보다 작은 일반 경향 반영, 실데이터 아님 — 공력 정본 확보 시
     교체). ratio는 출력에 echo — 소비자(웹)가 자리표시임을 명기 표시.
+    주의: −ratio×α_stall이 공력 DB α 유효범위 밖일 수 있음(데모 −0.24 <
+    하한 −0.2) — 해석식 데모 계수라 무해하나, 테이블 DB(clip) 교체 시 이
+    자리표시도 실데이터로 함께 교체하는 전제.
     """
     atm = isa_atmosphere(alt)
     if not 0.0 < neg_alpha_ratio <= 1.0:
