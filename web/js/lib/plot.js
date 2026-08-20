@@ -78,14 +78,14 @@ export function gainPlotGroups(tables, colors = SERIES_COLORS) {
       g = { group: grp, mach: t.axes.mach, series: [] };
       byGroup.set(grp, g);
       groups.push(g);
-    }
-    if (g.mach.length !== t.axes.mach.length || g.mach.some((v, i) => v !== t.axes.mach[i])) {
+    } else if (g.mach.length !== t.axes.mach.length || g.mach.some((v, i) => v !== t.axes.mach[i])) {
       skipped.push({ name, reason: "그룹 내 mach 축 불일치 (차트가 x축 공유)" });
       continue;
     }
     g.series.push({ label, data: t.data, color: colors[g.series.length % colors.length] });
   }
-  return { groups: groups.filter((g) => g.series.length > 0), skipped };
+  // 그룹은 생성한 테이블이 첫 시리즈로 반드시 들어감 — 빈 그룹 없음
+  return { groups, skipped };
 }
 
 /** margin-map entries → 연료 고정 (mach×alt) 격자 조회. */

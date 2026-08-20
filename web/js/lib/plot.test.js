@@ -108,13 +108,14 @@ test("gainPlotGroups: 그룹 내 mach 축 불일치는 제외 (차트가 x축 �
   assert.equal(skipped[0].name, "pitch.ki");
 });
 
-test("gainPlotGroups: 시리즈가 전부 제외된 그룹은 결과에서 제거", () => {
-  const { groups, skipped } = gainPlotGroups({
-    "yaw.k2d": { axes: { mach: [0.2], alt: [0] }, data: [[1]] },
+test("gainPlotGroups: 생성된 그룹은 시리즈 ≥ 1 보장 (첫 테이블이 그룹을 만들며 진입)", () => {
+  const { groups } = gainPlotGroups({
+    "yaw.k2d": { axes: { mach: [0.2], alt: [0] }, data: [[1]] }, // 그룹 미생성 (2D)
     "pitch.kp": gainTable([0.2, 0.6], [-4, -2]),
+    "pitch.ki": gainTable([0.2, 0.5], [-1, -0.5]), // 축 불일치 — 그룹은 남고 시리즈만 제외
   });
+  assert.ok(groups.every((g) => g.series.length >= 1));
   assert.deepEqual(groups.map((g) => g.group), ["pitch"]);
-  assert.equal(skipped.length, 1);
 });
 
 test("pivotCases: 연료 필터 + 축 정렬 + 조회", () => {
