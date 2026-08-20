@@ -228,3 +228,31 @@ def test_vn_envelope_full_diagram_data():
     assert 0.0 < L["v_no"] < L["v_d"]
     # 보호 곡선은 실속 곡선 안쪽
     assert all(p < s for p, s in zip(env["n_prot"], env["n_stall"]))
+    # 마하 격자는 저속(포물선 뿌리)부터 — 첫 점 n_stall ≈ 0 부근
+    assert env["mach"][0] == pytest.approx(0.02)
+    assert 0.0 < n[0] < 0.05
+    # V_S·V_A는 뿌리 확장과 무관 (곡선 자체가 동일 물리)
+    assert env["speeds"]["v_s"] == pytest.approx(66.9, rel=0.01)
+
+
+def test_vn_envelope_negative_stall_placeholder():
+    """음의 실속 자리표시 (01 §3.6 [기본값]) — 데이터 부재 대역: −ratio×α_stall.
+
+    데모 CL(α)=3.5α 선형이라 n_neg = −ratio × n_stall 정확 성립 — 해석 대조.
+    ratio는 출력에 echo (자리표시 출처 명기, 웹 표기 근거).
+    """
+    from claw.analysis import vn_envelope
+    from claw.plant import make_demo_structural_limits
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    lim = make_demo_structural_limits()
+    env = vn_envelope(ac, st, lim, alt=1000.0, fuel=200.0, alpha_margin=0.05)
+    assert env["neg_alpha_ratio"] == pytest.approx(0.6)
+    assert len(env["n_stall_neg"]) == len(env["n_stall"])
+    for s, ng in zip(env["n_stall"], env["n_stall_neg"]):
+        assert ng == pytest.approx(-0.6 * s, rel=1e-9)  # CL 선형 → 정확 비례
+        assert ng < 0.0
+    # ratio 조정 반영
+    env2 = vn_envelope(ac, st, lim, alt=1000.0, fuel=200.0, neg_alpha_ratio=0.4)
+    assert env2["n_stall_neg"][10] == pytest.approx(-0.4 * env2["n_stall"][10], rel=1e-9)

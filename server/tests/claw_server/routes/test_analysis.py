@@ -86,9 +86,19 @@ def test_vn_envelope_endpoint(client):
     sp = b["speeds"]
     assert 0.0 < sp["v_s"] < sp["v_a"] < lim["v_d"]  # V_S < V_A < V_D
     assert b["limits_source"] == "demo-placeholder"  # 실기체 값 아님 자기서술
+    # 음의 실속 자리표시 — 전부 음수, ratio echo (웹 명기 표시 근거)
+    assert len(b["n_stall_neg"]) == n
+    assert all(v < 0.0 for v in b["n_stall_neg"])
+    assert b["neg_alpha_ratio"] == 0.6
+    # 포물선 뿌리 — 격자 시작이 저마하(첫 n_stall ≈ 0 부근)
+    assert b["n_stall"][0] < 0.05
     # ISA 범위 밖 고도 → 엔진 ValueError → 422
     bad = client.get("/api/analysis/vn-envelope", params={"alt": 99999.0, "fuel": 200.0})
     assert bad.status_code == 422
+    # ratio 범위 위반 → 422 (경계 검증)
+    bad2 = client.get("/api/analysis/vn-envelope",
+                      params={"alt": 1000.0, "fuel": 200.0, "neg_alpha_ratio": 0.0})
+    assert bad2.status_code == 422
 
 
 def test_margin_map_loop_spec_validation_422(client):

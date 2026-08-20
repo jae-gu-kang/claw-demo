@@ -122,11 +122,13 @@ def vn_envelope_endpoint(
     alt: float = Query(...),
     fuel: float = Query(ge=0.0),
     alpha_margin: float = Query(default=0.05, ge=0.0),  # α 리미터 [기본값]과 동일
+    neg_alpha_ratio: float = Query(default=0.6, gt=0.0, le=1.0),  # 음의 실속 자리표시 비율
 ) -> dict:
     """V-n 선도 (01 §3.6) — 실속·보호 곡선 + 구조 한계선 + 특성 속도 (동기 계산).
 
     구조 한계는 비행체 프로파일의 자리표시 [기본값](실기체 값 아님) — 정본
-    확보 시 프로파일 교체. 표기는 웹 소관.
+    확보 시 프로파일 교체. 음의 실속 곡선도 자리표시(−ratio×α_stall, 엔진이
+    ratio echo). 표기는 웹 소관.
     """
     ac = make_demo_aircraft()
     try:
@@ -137,6 +139,7 @@ def vn_envelope_endpoint(
             alt=alt,
             fuel=fuel,
             alpha_margin=alpha_margin,
+            neg_alpha_ratio=neg_alpha_ratio,
         )
     except (ValueError, TypeError) as e:  # ISA 범위 밖 고도 등 — 엔진 검증
         raise HTTPException(status_code=422, detail=str(e))
