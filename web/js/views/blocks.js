@@ -30,7 +30,7 @@ const SKIN_KEY = "claw.diagramSkin";
 const getSkin = () => (localStorage.getItem(SKIN_KEY) === "holo" ? "holo" : "glass");
 
 function skinToggle(root) {
-  const label = () => (getSkin() === "holo" ? "☀️ 글래스 스킨" : "🌌 홀로그램 스킨");
+  const label = () => (getSkin() === "holo" ? "⚪ 애플 스킨" : "🌌 홀로그램 스킨");
   const btn = el("button", {
     title: "구조도 스킨 전환 (디자인 안 비교)",
     onclick: () => {
@@ -76,7 +76,7 @@ function renderHome(root) {
     ),
     el("div", { class: "canvas-wrap top" }, topDiagramSvg(navigate)),
     el("p", { class: "hint-row" },
-      "💡 블록(게인 스케줄링·항법 포함)이나 점선 프레임 라벨(①~⑤)을 클릭하면 서브시스템 ",
+      "💡 블록(게인 스케줄링·항법 포함)이나 우상단 범례(①~⑤ 프레임 설명)를 클릭하면 서브시스템 ",
       "내부 블록도가 열립니다 — 시뮬링크의 서브시스템 더블클릭 대응. 브라우저 뒤로가기로 복귀. ",
       "구조는 코드(M7 조립)와 1:1 고정 — 자유 배선 없음 [확정 02 §4]."),
   );

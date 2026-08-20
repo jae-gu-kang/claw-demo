@@ -164,80 +164,81 @@ canvas.plot { background: #fff; border: 1px solid var(--line); border-radius: 6p
 .bd .crumbbar .up-btn { margin-left: auto; border: 1px solid var(--bd-edge); background: var(--panel); border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; font-weight: 600; }
 .bd .crumbbar .up-btn:hover { background: #eef2f7; }
 
-/* 캔버스 — 글래스·글로우 씬 (은빛 스튜디오 그라데이션 + 옅은 바닥 모눈) */
+/* 캔버스 — 애플 스타일 라이트 씬 (거의-백색, 헤어라인, 절제된 그림자) */
 .bd .canvas-wrap {
-  background:
-    radial-gradient(#dbe3ec 1px, transparent 1px) 0 0 / 22px 22px,
-    radial-gradient(1100px 460px at 72% -12%, rgba(45, 212, 191, .16) 0%, transparent 62%),
-    radial-gradient(900px 420px at 8% 112%, rgba(59, 130, 246, .10) 0%, transparent 58%),
-    linear-gradient(158deg, #f4f6f9 0%, #e7ecf2 46%, #dce3ec 100%);
-  border: 1px solid #c4cedb;
-  border-radius: 14px;
+  background: #fbfbfd;
+  border: 1px solid #d2d2d7;
+  border-radius: 18px;
   overflow-x: auto;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 10px 26px rgba(23, 42, 62, .10);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .05);
+  padding: 10px 0 16px;
 }
-.bd .canvas-wrap.sub { border-radius: 0 0 14px 14px; }
-.bd .canvas-wrap { padding: 8px 0 16px; }
+.bd .canvas-wrap.sub { border-radius: 0 0 18px 18px; }
 .bd .canvas-wrap svg { display: block; width: 100%; height: auto; }
-.bd .canvas-wrap.top svg { min-width: 1150px; }
+.bd .canvas-wrap.top svg { min-width: 1280px; }
 .bd .canvas-wrap.sub svg { min-width: 720px; max-width: 1020px; margin: 0 auto; }
 .bd .hint-row { margin-top: 10px; font-size: 12px; color: var(--bd-ink-soft); }
 
-/* SVG 블록·배선 — 프로스티드 글라스 카드 + 글로우 배선 (참고 시안 언어).
+/* SVG 블록·배선 — 애플 스타일: 백색 카드·헤어라인·절제된 그림자·시스템 팔레트.
 기하(SVG 좌표)는 그대로 — 스타일 계층만으로 전 다이어그램에 일괄 적용.
 rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx로 폴백). */
 .bd .blk .body, .bd .sblk .body {
-  fill: rgba(255, 255, 255, .60);
-  stroke: rgba(255, 255, 255, .95);
-  stroke-width: 1.4;
-  rx: 10px;
-  /* 하드 오프셋 섀도 2겹 = 측면 두께(압출감), 마지막 소프트 섀도 = 바닥 그림자 */
-  filter:
-    drop-shadow(0 1px 0 rgba(255, 255, 255, .9))
-    drop-shadow(0 3px 0 rgba(141, 157, 178, .55))
-    drop-shadow(0 5px 0 rgba(120, 136, 158, .30))
-    drop-shadow(0 12px 14px rgba(25, 46, 68, .15));
+  fill: #ffffff;
+  stroke: #d2d2d7;
+  stroke-width: 1.2;
+  rx: 12px;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .07));
 }
-.bd circle.body { /* 합산점(Σ) — 블록 그룹 밖 단독 원도 동일한 유리·두께 처리 */
-  fill: rgba(255, 255, 255, .72);
-  stroke: rgba(148, 163, 184, .8);
-  stroke-width: 1.4;
-  filter:
-    drop-shadow(0 2px 0 rgba(141, 157, 178, .5))
-    drop-shadow(0 6px 8px rgba(25, 46, 68, .14));
+.bd circle.body { /* 합산점(Σ) — 블록 그룹 밖 단독 원도 동일 처리 */
+  fill: #ffffff;
+  stroke: #d2d2d7;
+  stroke-width: 1.2;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, .08));
 }
 .bd .blk { cursor: pointer; }
-.bd .blk:hover .body, .bd .blk:focus .body { fill: rgba(222, 248, 242, .78); stroke: #2dd4bf; }
+.bd .blk:hover .body, .bd .blk:focus .body {
+  stroke: #0071e3;
+  filter: drop-shadow(0 4px 12px rgba(0, 113, 227, .22));
+}
 .bd .blk:focus { outline: none; }
-.bd .blk .ttl { font-size: 15px; font-weight: 700; fill: #14202e; text-anchor: middle; }
-.bd .blk .ttl2 { font-size: 12px; fill: #44546a; text-anchor: middle; }
-.bd .sblk .ttl { font-size: 13.5px; font-weight: 700; fill: #14202e; text-anchor: middle; }
-.bd .sblk .ttl2 { font-size: 11px; fill: #44546a; text-anchor: middle; }
-.bd .bname { font-size: 11.5px; fill: #44546a; text-anchor: middle; }
-.bd .pnum { font-size: 11px; font-weight: 700; fill: #0f766e; text-anchor: middle; }
-.bd .pname { font-size: 11px; fill: #44546a; text-anchor: middle; }
+.bd .blk .ttl { font-size: 15px; font-weight: 700; fill: #1d1d1f; text-anchor: middle; }
+.bd .blk .ttl2 { font-size: 12px; fill: #6e6e73; text-anchor: middle; }
+.bd .sblk .ttl { font-size: 13.5px; font-weight: 700; fill: #1d1d1f; text-anchor: middle; }
+.bd .sblk .ttl2 { font-size: 11px; fill: #6e6e73; text-anchor: middle; }
+.bd .bname { font-size: 11.5px; fill: #6e6e73; text-anchor: middle; }
+.bd .pnum { font-size: 11px; font-weight: 700; fill: #0071e3; text-anchor: middle; }
+.bd .pname { font-size: 11px; fill: #6e6e73; text-anchor: middle; }
+/* 배선 — 신호 흐름이 보이도록 대시가 진행 방향으로 흐른다 (전 스킨 공통) */
 .bd .wire {
-  stroke: #14b8a6;
-  stroke-width: 2;
+  stroke: #0071e3;
+  stroke-width: 1.8;
   stroke-linecap: round;
   fill: none;
-  filter: drop-shadow(0 0 3px rgba(45, 212, 191, .55));
+  stroke-dasharray: 9 6;
+  animation: bd-flow 1.9s linear infinite;
 }
-.bd .wire.gs { stroke: #8a5cf6; stroke-dasharray: 6 4; filter: drop-shadow(0 0 3px rgba(138, 92, 246, .4)); }
-.bd .wire.soft { stroke: #94a3b8; stroke-dasharray: 6 4; filter: none; }
-.bd .wire.ff { stroke: #ec9006; stroke-dasharray: 6 4; filter: drop-shadow(0 0 3px rgba(236, 144, 6, .4)); }
+.bd .wire.gs { stroke: #af52de; }
+.bd .wire.soft { stroke: #aeaeb2; animation: none; stroke-dasharray: 6 4; }
+.bd .wire.ff { stroke: #ff9500; }
+@keyframes bd-flow { to { stroke-dashoffset: -15; } }
+@media (prefers-reduced-motion: reduce) { .bd .wire { animation: none; } }
 /* 화살촉·내부 소자 곡선 — 마크업의 프레젠테이션 속성을 CSS로 재도색 (인라인 style 아님) */
-.bd marker path[fill="#3b3b3b"] { fill: #14b8a6; }
-.bd marker path[fill="#b45309"] { fill: #ec9006; }
-.bd .canvas-wrap path[stroke="#111"] { stroke: #29394e; }
-.bd .siglabel { font-size: 11.5px; font-style: italic; fill: #526074; text-anchor: middle; }
-.bd .branch { fill: #14b8a6; }
-.bd .ring { fill: none; stroke-width: 1.6; stroke-dasharray: 8 5; stroke-opacity: .6; rx: 14px; }
-.bd .ringlabel { font-size: 12.5px; font-weight: 800; cursor: pointer; }
-.bd .ringlabel:hover, .bd .ringlabel:focus { text-decoration: underline; outline: none; }
-.bd .canvas-note { font-size: 11px; fill: #8195aa; }
-.bd .sumsign { font-size: 12px; font-weight: 800; fill: #14202e; text-anchor: middle; }
-.bd .annot { font-size: 11.5px; fill: #6d28d9; }
+.bd marker path[fill="#3b3b3b"] { fill: #0071e3; }
+.bd marker path[fill="#b45309"] { fill: #ff9500; }
+.bd .canvas-wrap path[stroke="#111"] { stroke: #48484a; }
+.bd .siglabel { font-size: 11.5px; font-style: italic; fill: #6e6e73; text-anchor: middle; }
+.bd .branch { fill: #0071e3; }
+.bd .ring { fill: none; stroke-width: 1.4; stroke-dasharray: 7 5; stroke-opacity: .75; rx: 14px; }
+/* 우상단 범례 — 프레임 설명 전용 (다이어그램과 비겹침) */
+.bd .leg-cap { font-size: 12px; font-weight: 800; fill: #6e6e73; }
+.bd .legend-item { cursor: pointer; }
+.bd .leglabel { font-size: 12.5px; font-weight: 600; fill: #1d1d1f; }
+.bd .legend-item:hover .leglabel, .bd .legend-item:focus .leglabel { text-decoration: underline; fill: #0071e3; }
+.bd .legend-item:focus { outline: none; }
+.bd .leg-note { font-size: 11px; fill: #86868b; }
+.bd .canvas-note { font-size: 11px; fill: #86868b; }
+.bd .sumsign { font-size: 12px; font-weight: 800; fill: #1d1d1f; text-anchor: middle; }
+.bd .annot { font-size: 11.5px; fill: #af52de; }
 
 /* 하위 페이지 헤더 */
 .bd .pagehead { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; flex-wrap: wrap; }
@@ -264,7 +265,7 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 
 /* 블록도 내 파라미터 연동 수치 (data-p) — 스키마 기본값+적용 편집값으로 채워지고
    편집 폼 입력과 실시간 동기 (views/blocks.js bindSvgParams) */
-.bd svg [data-p] { font-weight: 800; fill: #0d9488; }
+.bd svg [data-p] { font-weight: 800; fill: #0071e3; }
 
 /* ── 구조도 다크 홀로그램 스킨 (.bd.holo — 디자인 안 2) ─────────────────
 심야 네이비 씬 + 홀로그램 유리 블록(내부 발광) + 네온 회로 배선(흐름 애니메이션).
@@ -316,5 +317,8 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd.holo .canvas-wrap path[stroke="#8a97a5"] { stroke: #7dd3fc; }
 .bd.holo .canvas-wrap line[stroke="#b8c4d0"] { stroke: rgba(147, 197, 253, .35); }
 /* 설계 순서 프레임·인라인 색 텍스트 — 고유 색상 유지한 채 다크 배경 대비만 상향 */
-.bd.holo .ring, .bd.holo .ringlabel, .bd.holo .annot { filter: brightness(1.75) saturate(1.15); }
+.bd.holo .ring, .bd.holo .annot { filter: brightness(1.5) saturate(1.1); }
+.bd.holo .leg-cap, .bd.holo .leg-note { fill: #8fb0d8; }
+.bd.holo .leglabel { fill: #e4efff; }
+.bd.holo .legend-item:hover .leglabel, .bd.holo .legend-item:focus .leglabel { fill: #7dd3fc; }
 .bd.holo svg [data-p] { fill: #5eead4; }

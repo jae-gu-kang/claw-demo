@@ -5,8 +5,9 @@
 표시한다. 블록 id·편집 경로 계약은 lib/blocks.js가 정본 (하위 페이지와 공유),
 SVG 기하는 여기 수작성 — data-block 속성이 lib 블록 id와 1:1.
 
-설계 순서 점선 프레임(①~⑤)은 "안쪽 루프부터 닫는" 설계 흐름(01 §1)을 표시하며
-프레임 라벨 클릭 시 해당 서브시스템 페이지로 이동한다.
+설계 순서 점선 프레임(①~⑤)은 "안쪽 루프부터 닫는" 설계 흐름(01 §1)을 표시한다.
+프레임 설명은 다이어그램과 겹치지 않도록 우상단 범례로 분리 — 범례 항목 클릭 시
+해당 서브시스템 페이지로 이동 (색 = 프레임 색, 애플 팔레트).
 */
 
 import { BLOCKS } from "../lib/blocks.js";
@@ -20,19 +21,19 @@ export function fromMarkup(markup) {
   return box.firstElementChild;
 }
 
-/** 설계 순서 배너 (①~⑤) — page id로 이동. */
+/** 설계 순서 배너 (①~⑤) — page id로 이동. 색은 SVG 링·우상단 범례와 공유 (애플 팔레트). */
 export const DESIGN_ORDER = [
-  { page: "plant", label: "① 트림 · 선형해석", color: "#7c3aed" },
-  { page: "scas", label: "② SCAS (내측 루프)", color: "#1a6fb5" },
-  { page: "autopilot", label: "③ 오토파일럿", color: "#1a7f4b" },
-  { page: "guidance", label: "④ 유도", color: "#b45309" },
-  { page: "verify", label: "⑤ 비선형 시뮬 검증", color: "#64748b" },
+  { page: "plant", label: "① 트림 · 선형해석", color: "#af52de" },
+  { page: "scas", label: "② SCAS (내측 루프)", color: "#007aff" },
+  { page: "autopilot", label: "③ 오토파일럿", color: "#34c759" },
+  { page: "guidance", label: "④ 유도", color: "#ff9500" },
+  { page: "verify", label: "⑤ 비선형 시뮬 검증", color: "#8e8e93" },
 ];
 
 /** 최상위 블록도 마크업 — export는 테스트의 배선 드리프트 가드용 (data-block/
 data-page id ↔ SUBSYSTEMS 키·CHAIN 순서 대조, lib/blocks.test.js). */
 export const TOP_SVG = `
-<svg viewBox="0 0 1660 692" xmlns="http://www.w3.org/2000/svg" role="img"
+<svg viewBox="0 0 1920 692" xmlns="http://www.w3.org/2000/svg" role="img"
      aria-label="제어법칙 블록도 최상위 (시뮬링크 스타일)">
   <defs>
     <marker id="arrw" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto">
@@ -43,21 +44,39 @@ export const TOP_SVG = `
     </marker>
   </defs>
 
-  <!-- 설계 순서 중첩 프레임 (안쪽 루프부터 바깥으로) -->
-  <rect class="ring" x="10" y="70" width="1638" height="572" rx="10" stroke="#64748b"/>
-  <text class="ringlabel" data-page="verify" x="24" y="92" fill="#64748b" tabindex="0">⑤ 비선형 시뮬레이션 검증 — 전 계통 폐루프 (엔벨로프 감시 · Simulink 대조)</text>
+  <!-- 설계 순서 중첩 프레임 (안쪽 루프부터 바깥으로) — 라벨은 우상단 범례로 분리
+       (프레임 선·블록·텍스트 비겹침 원칙). ⑤ 상단은 게인 스케줄 블록 위(y30)까지 -->
+  <rect class="ring" x="10" y="30" width="1638" height="612" rx="10" stroke="#8e8e93"/>
+  <rect class="ring" x="218" y="96" width="1412" height="528" rx="10" stroke="#ff9500"/>
+  <rect class="ring" x="455" y="122" width="1155" height="484" rx="10" stroke="#34c759"/>
+  <rect class="ring" x="800" y="150" width="790" height="438" rx="10" stroke="#007aff"/>
+  <rect class="ring" x="1376" y="186" width="178" height="130" rx="10" stroke="#af52de"/>
 
-  <rect class="ring" x="218" y="96" width="1412" height="528" rx="10" stroke="#b45309"/>
-  <text class="ringlabel" data-page="guidance" x="232" y="118" fill="#b45309" tabindex="0">④ 유도 설계 — 경로 추종 · 모드 실행</text>
-
-  <rect class="ring" x="455" y="122" width="1155" height="484" rx="10" stroke="#1a7f4b"/>
-  <text class="ringlabel" data-page="autopilot" x="469" y="144" fill="#1a7f4b" tabindex="0">③ 오토파일럿 설계 — 속도 · 고도 · 헤딩</text>
-
-  <rect class="ring" x="800" y="150" width="790" height="438" rx="10" stroke="#1a6fb5"/>
-  <text class="ringlabel" data-page="scas" x="814" y="172" fill="#1a6fb5" tabindex="0">② SCAS 설계 — 내측 루프 (자세 안정화)</text>
-
-  <rect class="ring" x="1376" y="186" width="178" height="130" rx="10" stroke="#7c3aed"/>
-  <text class="ringlabel" data-page="plant" x="1384" y="308" fill="#7c3aed" tabindex="0">① 트림 · 선형해석</text>
+  <!-- 우상단 범례 — 프레임(설계 순서) 설명 전용 공간 (프레임 밖 x1670~, 겹침 없음) -->
+  <g class="legend">
+    <text class="leg-cap" x="1672" y="52">설계 순서 (프레임)</text>
+    <g class="legend-item" data-page="plant" tabindex="0">
+      <rect x="1672" y="70" width="14" height="14" rx="4" fill="#af52de"/>
+      <text class="leglabel" x="1694" y="82">① 트림 · 선형해석</text>
+    </g>
+    <g class="legend-item" data-page="scas" tabindex="0">
+      <rect x="1672" y="102" width="14" height="14" rx="4" fill="#007aff"/>
+      <text class="leglabel" x="1694" y="114">② SCAS — 내측 루프</text>
+    </g>
+    <g class="legend-item" data-page="autopilot" tabindex="0">
+      <rect x="1672" y="134" width="14" height="14" rx="4" fill="#34c759"/>
+      <text class="leglabel" x="1694" y="146">③ 오토파일럿</text>
+    </g>
+    <g class="legend-item" data-page="guidance" tabindex="0">
+      <rect x="1672" y="166" width="14" height="14" rx="4" fill="#ff9500"/>
+      <text class="leglabel" x="1694" y="178">④ 유도 — 경로 · 모드</text>
+    </g>
+    <g class="legend-item" data-page="verify" tabindex="0">
+      <rect x="1672" y="198" width="14" height="14" rx="4" fill="#8e8e93"/>
+      <text class="leglabel" x="1694" y="210">⑤ 비선형 시뮬 검증</text>
+    </g>
+    <text class="leg-note" x="1672" y="238">항목 클릭 → 해당 설계 화면</text>
+  </g>
 
   <!-- 게인 스케줄링 (공통 — AP·SCAS 게인 주입) -->
   <g class="blk" data-block="schedule" tabindex="0">
