@@ -51,12 +51,17 @@ export function render() {
   return root;
 }
 
+// 애플 시스템 팔레트 — 존은 옅은 틴트, 경계선은 시스템 컬러 (구조도와 동일 언어)
 const C = {
-  ok: "#dcefe2", stallZone: "#e6e9ee", caution: "#fbf3cf",
-  damage: "#fde3c8", failure: "#f9dcdc",
-  stallLine: "#c22f2f", protLine: "#157f3d", limitLine: "#8a5b00",
-  ultLine: "#a01f1f", speedLine: "#4a5568", text: "#1c2430", sub: "#66707e",
+  ok: "#e4f8ea", stallZone: "#f2f2f7", caution: "#fdf7e0",
+  damage: "#ffefdd", failure: "#fdeaea",
+  stallLine: "#ff3b30", protLine: "#34c759", limitLine: "#c93400",
+  ultLine: "#d70015", speedLine: "#8e8e93", text: "#1d1d1f", sub: "#86868b",
+  frame: "#d2d2d7",
 };
+const FONT_BASE = "11px -apple-system, 'Segoe UI', sans-serif";
+const FONT_LABEL = "600 11px -apple-system, 'Segoe UI', sans-serif";
+const FONT_TITLE = "600 12px -apple-system, 'Segoe UI', sans-serif";
 
 function vnDiagramCanvas(body) {
   const W = 780;
@@ -123,9 +128,11 @@ function vnDiagramCanvas(body) {
   ctx.beginPath();
   ctx.rect(mL, mT, W - mL - mR, H - mT - mB);
   ctx.clip();
-  const curve = (data, color, width = 1.8) => {
+  const curve = (data, color, width = 2) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
     data.forEach((n, i) => (i === 0 ? ctx.moveTo(px(V[i]), py(n)) : ctx.lineTo(px(V[i]), py(n))));
     ctx.stroke();
@@ -148,7 +155,7 @@ function vnDiagramCanvas(body) {
   hline(L.n_limit_neg, C.limitLine, [6, 4], `−제한하중 ${fmt(L.n_limit_neg, 3)} g`);
   hline(L.n_ultimate_pos, C.ultLine, [3, 3], `+극한하중 ${fmt(L.n_ultimate_pos, 3)} g (제한×${L.safety_factor})`);
   hline(L.n_ultimate_neg, C.ultLine, [3, 3], `−극한하중 ${fmt(L.n_ultimate_neg, 3)} g`);
-  hline(1.0, "#9aa3ad", [2, 4], "n=1 수평비행");
+  hline(1.0, "#aeaeb2", [2, 4], "n=1 수평비행");
   const vline = (v, label) => {
     if (v == null) return;
     ctx.strokeStyle = C.speedLine;
@@ -168,7 +175,13 @@ function vnDiagramCanvas(body) {
   vline(L.v_d, `V_D ${fmt(L.v_d, 4)}`);
   ctx.restore();
 
-  // 영역 라벨
+  // 플롯 영역 헤어라인 프레임 (존 색면 가장자리 정리)
+  ctx.strokeStyle = C.frame;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(mL, mT, W - mL - mR, H - mT - mB);
+
+  // 영역 라벨 (세미볼드)
+  ctx.font = FONT_LABEL;
   ctx.fillStyle = C.sub;
   ctx.fillText("정상 운용", px(L.v_no * 0.62), py(L.n_limit_pos * 0.45));
   ctx.fillText("실속 영역", px(V[0]) + 14, py(L.n_limit_pos) + 26);
@@ -177,6 +190,7 @@ function vnDiagramCanvas(body) {
   ctx.fillText("구조 파괴", px(L.v_d * 0.45), py(L.n_ultimate_pos) - 8);
 
   // 축
+  ctx.font = FONT_BASE;
   ctx.fillStyle = C.sub;
   for (const t of niceTicks(V[0], vMax, 7)) {
     ctx.fillText(`${Math.round(t)}`, px(t) - 10, H - mB + 16);
@@ -185,8 +199,10 @@ function vnDiagramCanvas(body) {
     ctx.fillText(`${Math.round(t * 10) / 10}`, 8, py(t) + 3);
   }
   ctx.fillText("V (TAS) [m/s]", W / 2 - 30, H - 8);
+  ctx.font = FONT_TITLE;
   ctx.fillStyle = C.text;
   ctx.fillText(`n [g] — h ${fmt(body.alt, 4)} m · 연료 ${fmt(body.fuel, 4)} kg`, mL, 18);
+  ctx.font = FONT_BASE;
   return canvas;
 }
 
@@ -194,13 +210,13 @@ function renderPlot(plotBox, body) {
   clear(plotBox).append(
     el("div", { class: "scroll-x" }, vnDiagramCanvas(body)),
     el("div", { class: "legend" },
-      el("span", {}, el("span", { class: "chip", style: "background:#dcefe2" }), "정상 운용"),
-      el("span", {}, el("span", { class: "chip", style: "background:#e6e9ee" }), "실속 영역 (공력 도달 불가)"),
-      el("span", {}, el("span", { class: "chip", style: "background:#fbf3cf" }), "주의 (V_NO~V_D)"),
-      el("span", {}, el("span", { class: "chip", style: "background:#fde3c8" }), "구조 손상 (제한~극한)"),
-      el("span", {}, el("span", { class: "chip", style: "background:#f9dcdc" }), "구조 파괴 (극한 밖·V_D 밖)"),
-      el("span", {}, el("span", { class: "chip", style: "background:#c22f2f" }), "실속 경계"),
-      el("span", {}, el("span", { class: "chip", style: "background:#157f3d" }), "α 리미터 보호 경계")),
+      el("span", {}, el("span", { class: "chip", style: `background:${C.ok}` }), "정상 운용"),
+      el("span", {}, el("span", { class: "chip", style: `background:${C.stallZone}` }), "실속 영역 (공력 도달 불가)"),
+      el("span", {}, el("span", { class: "chip", style: `background:${C.caution}` }), "주의 (V_NO~V_D)"),
+      el("span", {}, el("span", { class: "chip", style: `background:${C.damage}` }), "구조 손상 (제한~극한)"),
+      el("span", {}, el("span", { class: "chip", style: `background:${C.failure}` }), "구조 파괴 (극한 밖·V_D 밖)"),
+      el("span", {}, el("span", { class: "chip", style: `background:${C.stallLine}` }), "실속 경계"),
+      el("span", {}, el("span", { class: "chip", style: `background:${C.protLine}` }), "α 리미터 보호 경계")),
     el("p", { class: "hint" },
       "V_S 실속속도(n=1) · V_A 기동속도(실속선∩제한하중) · V_NO 최대 구조 순항속도 · ",
       "V_D 급강하 한계속도. 보호선(녹)이 법칙이 명령을 자르는 선 — 실속선 안쪽."),

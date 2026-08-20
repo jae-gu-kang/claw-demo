@@ -139,7 +139,8 @@ table.edit .c-md { width: 130px; }  /* 이름·헤딩·선택 칸 */
 .hint { font-size: 12px; color: var(--muted); }
 .placeholder { color: var(--muted); padding: 40px; text-align: center; }
 
-canvas.plot { background: #fff; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
+/* 플롯 캔버스 — 애플 스타일 카드 (V-n·마진 히트맵·시뮬 차트 공통) */
+canvas.plot { background: #fff; border: 1px solid #d2d2d7; border-radius: 12px; box-shadow: 0 1px 4px rgba(0, 0, 0, .04); max-width: 100%; }
 .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
 .legend .chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
 
