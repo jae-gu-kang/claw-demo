@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 
 import {
   SERIES_COLORS,
+  STATUS,
   fuelsOf,
   gainPlotGroups,
   linScale,
@@ -28,11 +29,11 @@ test("niceTicks: 1-2-5 스텝, 범위 포함", () => {
 });
 
 test("marginColor: 여유 구간 상태색 + 비유한값 정책", () => {
-  assert.equal(marginColor(60), "#157f3d"); // 양호 (≥45°)
-  assert.equal(marginColor(35), "#b57908"); // 주의 (30~45°)
-  assert.equal(marginColor(10), "#c22f2f"); // 부족 (<30°)
-  assert.equal(marginColor("inf"), "#157f3d"); // 무한 여유
-  assert.equal(marginColor(null), "#9aa3ad"); // 판정 불가 (NaN 직렬화)
+  assert.equal(marginColor(60), STATUS.ok); // 양호 (≥45°)
+  assert.equal(marginColor(35), STATUS.warn); // 주의 (30~45°)
+  assert.equal(marginColor(10), STATUS.bad); // 부족 (<30°)
+  assert.equal(marginColor("inf"), STATUS.ok); // 무한 여유
+  assert.equal(marginColor(null), STATUS.na); // 판정 불가 (NaN 직렬화)
 });
 
 test("trimEnvelopeCell: 판정 우선순위 — 불가 > 실속 근접 > 포화 > 가능", () => {

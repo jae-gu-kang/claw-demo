@@ -19,6 +19,7 @@ export function makeCanvas(width, height) {
 
 /**
  * (mach×alt) 격자 히트맵 — cellOf(entry)가 {color, text} 반환, null 셀은 빗금 없이 회색.
+ * 애플 스타일: 라운드 셀(3px 갭), 세미볼드 타이틀·셀 텍스트, 라이트 그레이 축 라벨.
  */
 export function heatmapCanvas(pivot, cellOf, { title = "", width = 560 } = {}) {
   const { machs, alts } = pivot;
@@ -28,27 +29,38 @@ export function heatmapCanvas(pivot, cellOf, { title = "", width = 560 } = {}) {
   const height = mT + ch * alts.length + mB;
   const { canvas, ctx } = makeCanvas(width, height);
 
-  ctx.fillStyle = "#1c2430";
+  const cellRect = (x, y, w, h) => {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, 6);
+    else ctx.rect(x, y, w, h);
+    ctx.fill();
+  };
+
+  ctx.font = "600 12px -apple-system, 'Segoe UI', sans-serif";
+  ctx.fillStyle = "#1d1d1f";
   ctx.fillText(title, mL, 16);
+  ctx.font = FONT;
   alts.forEach((alt, j) => {
     const y = mT + (alts.length - 1 - j) * ch; // 고도는 위로 증가
     machs.forEach((mach, i) => {
       const x = mL + i * cw;
       const entry = pivot.at(mach, alt);
       const cell = entry ? cellOf(entry) : null;
-      ctx.fillStyle = cell ? cell.color : "#eceef1";
-      ctx.fillRect(x, y, cw - 2, ch - 2);
+      ctx.fillStyle = cell ? cell.color : "#f2f2f7";
+      cellRect(x, y, cw - 3, ch - 3);
       if (cell && cell.text != null) {
+        ctx.font = "600 11px -apple-system, 'Segoe UI', sans-serif";
         ctx.fillStyle = "#ffffff";
-        ctx.fillText(String(cell.text), x + 6, y + ch / 2 + 3);
+        ctx.fillText(String(cell.text), x + 7, y + ch / 2 + 3);
+        ctx.font = FONT;
       }
     });
-    ctx.fillStyle = "#66707e";
+    ctx.fillStyle = "#86868b";
     ctx.fillText(`${alt} m`, 6, y + ch / 2 + 3);
   });
   machs.forEach((mach, i) => {
-    ctx.fillStyle = "#66707e";
-    ctx.fillText(`M${mach}`, mL + i * cw + 6, mT + ch * alts.length + 16);
+    ctx.fillStyle = "#86868b";
+    ctx.fillText(`M${mach}`, mL + i * cw + 7, mT + ch * alts.length + 16);
   });
   return canvas;
 }
@@ -84,19 +96,19 @@ export function lineChartCanvas(t, series, { title = "", width = 620, height = 1
     const xb = px(t[Math.min(b.i1, t.length - 1)]);
     ctx.fillStyle = MODE_BAND_COLORS[k % MODE_BAND_COLORS.length];
     ctx.fillRect(xa, mT, xb - xa, height - mT - mB);
-    ctx.fillStyle = "#66707e";
+    ctx.fillStyle = "#86868b";
     if (b.mode) ctx.fillText(b.mode, xa + 3, mT + 11);
   });
-  ctx.strokeStyle = "#d8dce2";
+  ctx.strokeStyle = "#e5e5ea";
   ctx.beginPath();
   for (const tk of niceTicks(lo, hi, 4)) {
     ctx.moveTo(mL, py(tk));
     ctx.lineTo(width - mR, py(tk));
-    ctx.fillStyle = "#66707e";
+    ctx.fillStyle = "#86868b";
     ctx.fillText(fmtTick(tk), 4, py(tk) + 3);
   }
   for (const tk of niceTicks(t0, t1, 7)) {
-    ctx.fillStyle = "#66707e";
+    ctx.fillStyle = "#86868b";
     ctx.fillText(`${fmtTick(tk)}${xUnit}`, px(tk) - 8, height - 8);
   }
   ctx.stroke();
@@ -128,7 +140,7 @@ export function lineChartCanvas(t, series, { title = "", width = 620, height = 1
       ctx.fillText(s.label, mL + 70 * si, 14);
     }
   });
-  ctx.fillStyle = "#1c2430";
+  ctx.fillStyle = "#1d1d1f";
   ctx.fillText(title, width - mR - 7 * title.length, 14);
   return canvas;
 }
@@ -153,35 +165,35 @@ export function trackCanvas(pn, pe, waypoints, acceptRadius, { markerIdx = null,
   const py = linScale(cN - span / 2, cN + span / 2, height - m, m);
   const kScale = (width - 2 * m) / span; // m → px
 
-  ctx.strokeStyle = "#d8dce2";
+  ctx.strokeStyle = "#e5e5ea";
   ctx.beginPath();
   for (const tk of niceTicks(cE - span / 2, cE + span / 2, 5)) {
     ctx.moveTo(px(tk), m);
     ctx.lineTo(px(tk), height - m);
-    ctx.fillStyle = "#66707e";
+    ctx.fillStyle = "#86868b";
     ctx.fillText(`${Math.round(tk)}`, px(tk) - 10, height - m + 14);
   }
   for (const tk of niceTicks(cN - span / 2, cN + span / 2, 5)) {
     ctx.moveTo(m, py(tk));
     ctx.lineTo(width - m, py(tk));
-    ctx.fillStyle = "#66707e";
+    ctx.fillStyle = "#86868b";
     ctx.fillText(`${Math.round(tk)}`, 2, py(tk) + 3);
   }
   ctx.stroke();
-  ctx.fillStyle = "#66707e";
+  ctx.fillStyle = "#86868b";
   ctx.fillText("E [m] →  (북쪽 위)", width / 2 - 40, height - 6);
 
   for (const [n, e] of waypoints) {
-    ctx.strokeStyle = "#b57908";
+    ctx.strokeStyle = "#ff9500";
     ctx.beginPath();
     ctx.arc(px(e), py(n), Math.max(3, acceptRadius * kScale), 0, 2 * Math.PI);
     ctx.stroke();
-    ctx.fillStyle = "#b57908";
+    ctx.fillStyle = "#ff9500";
     ctx.beginPath();
     ctx.arc(px(e), py(n), 3, 0, 2 * Math.PI);
     ctx.fill();
   }
-  ctx.strokeStyle = "#1a6feb";
+  ctx.strokeStyle = "#007aff";
   ctx.lineWidth = 1.6;
   ctx.beginPath();
   let started = false;
@@ -192,12 +204,12 @@ export function trackCanvas(pn, pe, waypoints, acceptRadius, { markerIdx = null,
     else ctx.lineTo(px(e), py(n));
   });
   ctx.stroke();
-  ctx.fillStyle = "#157f3d";
+  ctx.fillStyle = "#34c759";
   ctx.beginPath();
   ctx.arc(px(pe[0]), py(pn[0]), 4, 0, 2 * Math.PI); // 시작점
   ctx.fill();
   if (markerIdx != null && markerIdx < pn.length) {
-    ctx.fillStyle = "#c22f2f";
+    ctx.fillStyle = "#ff3b30";
     ctx.beginPath();
     ctx.arc(px(pe[markerIdx]), py(pn[markerIdx]), 5, 0, 2 * Math.PI);
     ctx.fill();
@@ -217,25 +229,25 @@ export function scatterCanvas(points, { title = "", width = 420, height = 300 } 
   const sx = linScale(x0, x1, mL, width - mR);
   const sy = linScale(y0, y1, height - mB, mT);
 
-  ctx.fillStyle = "#1c2430";
+  ctx.fillStyle = "#1d1d1f";
   ctx.fillText(title, mL, 15);
-  ctx.strokeStyle = "#d8dce2";
+  ctx.strokeStyle = "#e5e5ea";
   ctx.beginPath();
   for (const t of niceTicks(x0, x1, 6)) {
     ctx.moveTo(sx(t), mT);
     ctx.lineTo(sx(t), height - mB);
-    ctx.fillStyle = "#66707e";
+    ctx.fillStyle = "#86868b";
     ctx.fillText(String(t), sx(t) - 8, height - mB + 14);
   }
   for (const t of niceTicks(y0, y1, 5)) {
     ctx.moveTo(mL, sy(t));
     ctx.lineTo(width - mR, sy(t));
-    ctx.fillStyle = "#66707e";
+    ctx.fillStyle = "#86868b";
     ctx.fillText(String(t), 4, sy(t) + 3);
   }
   ctx.stroke();
   // 허수축(Re=0) — 안정 경계 강조
-  ctx.strokeStyle = "#66707e";
+  ctx.strokeStyle = "#86868b";
   ctx.beginPath();
   ctx.moveTo(sx(0), mT);
   ctx.lineTo(sx(0), height - mB);

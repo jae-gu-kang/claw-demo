@@ -10,7 +10,7 @@ import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { AXIS_NAMES, DEFAULT_LOOPS, validateActuatorDelay, validateLoops } from "../lib/loops.js";
-import { fuelsOf, marginColor, pivotCases } from "../lib/plot.js";
+import { STATUS, fuelsOf, marginColor, pivotCases } from "../lib/plot.js";
 import { store } from "../store.js";
 import { heatmapCanvas, scatterCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
@@ -225,9 +225,9 @@ function renderLoopEditor(loopBox) {
 // ── 결과 대시보드 ──────────────────────────────────────────────────────
 
 function gmColor(gm) {
-  if (gm === "inf") return "#157f3d";
-  if (typeof gm !== "number") return "#9aa3ad";
-  return gm < 6 ? "#c22f2f" : gm < 10 ? "#b57908" : "#157f3d";
+  if (gm === "inf") return STATUS.ok;
+  if (typeof gm !== "number") return STATUS.na;
+  return gm < 6 ? STATUS.bad : gm < 10 ? STATUS.warn : STATUS.ok;
 }
 
 /** 결과에 포함된 루프 스펙 — 저장 결과의 loops가 정본 (재열람 시 폼 상태와 무관).
@@ -267,12 +267,12 @@ function renderResults(resultBox, body) {
       return [
         el("h3", { style: "font-size: 13px; margin: 14px 0 4px" }, label),
         heatmapCanvas(pivot, (e) => {
-          if (!e.trim.converged) return { color: "#9aa3ad", text: "트림×" };
+          if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
           const pm = e.margins[lp.name] ? e.margins[lp.name].pm_deg : null;
           return { color: marginColor(pm), text: `${fmt(pm, 3)}°` };
         }, { title: `위상여유 PM [deg] — ${lp.name}` }),
         heatmapCanvas(pivot, (e) => {
-          if (!e.trim.converged) return { color: "#9aa3ad", text: "트림×" };
+          if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
           const gm = e.margins[lp.name] ? e.margins[lp.name].gm_db : null;
           return { color: gmColor(gm), text: gm === "inf" ? "∞ dB" : `${fmt(gm, 3)} dB` };
         }, { title: `이득여유 GM [dB] — ${lp.name} (≥6 dB [기본값])` }),
@@ -281,18 +281,18 @@ function renderResults(resultBox, body) {
     const points = [];
     for (const e of entries) {
       if (e.trim.case.fuel !== fuel || !e.lon) continue;
-      for (const m of e.lon.modes) points.push({ x: m.eig[0], y: m.eig[1], color: "#1a6feb" });
-      for (const m of e.lat.modes) points.push({ x: m.eig[0], y: m.eig[1], color: "#b57908" });
+      for (const m of e.lon.modes) points.push({ x: m.eig[0], y: m.eig[1], color: "#007aff" });
+      for (const m of e.lat.modes) points.push({ x: m.eig[0], y: m.eig[1], color: "#ff9500" });
     }
     clear(plotBox).append(
       // el() 래핑 필수 — 네이티브 append는 배열을 문자열화 (리뷰 Must: 상습 함정군)
       el("div", {}, loopPlots),
       scatterCanvas(points, { title: "고유치 맵 (파랑=종축, 주황=횡축) — 허수축 좌측이 안정" }),
       el("div", { class: "legend" },
-        el("span", {}, el("span", { class: "chip", style: "background:#157f3d" }), "양호"),
-        el("span", {}, el("span", { class: "chip", style: "background:#b57908" }), "주의"),
-        el("span", {}, el("span", { class: "chip", style: "background:#c22f2f" }), "부족"),
-        el("span", {}, el("span", { class: "chip", style: "background:#9aa3ad" }), "트림 불가/판정 불가")),
+        el("span", {}, el("span", { class: "chip", style: `background:${STATUS.ok}` }), "양호"),
+        el("span", {}, el("span", { class: "chip", style: `background:${STATUS.warn}` }), "주의"),
+        el("span", {}, el("span", { class: "chip", style: `background:${STATUS.bad}` }), "부족"),
+        el("span", {}, el("span", { class: "chip", style: `background:${STATUS.na}` }), "트림 불가/판정 불가")),
       dampingTable(entries.filter((e) => e.trim.case.fuel === fuel)),
     );
   };

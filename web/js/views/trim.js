@@ -6,7 +6,7 @@ DOM 조립 전용 (얇게) — 격자 로직은 lib/grid.js, 수치·판정은 �
 import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
-import { fuelsOf, pivotCases, trimEnvelopeCell } from "../lib/plot.js";
+import { STATUS, fuelsOf, pivotCases, trimEnvelopeCell } from "../lib/plot.js";
 import { store } from "../store.js";
 import { heatmapCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
@@ -185,10 +185,10 @@ function renderResults(resultBox, body) {
         : el("span", { class: "flag bad", style: "margin-left:8px" }, "확인 필요")),
     el("div", { class: "row" }, envelopeMaps),
     el("div", { class: "legend" },
-      el("span", {}, el("span", { class: "chip", style: "background:#157f3d" }), "가능"),
-      el("span", {}, el("span", { class: "chip", style: "background:#c22f2f" }), "실속 근접 (α 여유 위반)"),
-      el("span", {}, el("span", { class: "chip", style: "background:#b57908" }), "포화 (추력·타면 한계)"),
-      el("span", {}, el("span", { class: "chip", style: "background:#9aa3ad" }), "트림 불가"),
+      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.ok}` }), "가능"),
+      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.bad}` }), "실속 근접 (α 여유 위반)"),
+      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.warn}` }), "포화 (추력·타면 한계)"),
+      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.na}` }), "트림 불가"),
       el("span", { class: "hint" }, "— 격자를 조밀하게(마하 간격 0.05, 고도 추가) 돌릴수록 경계가 정확해집니다")),
     el("table", {},
       el("thead", {}, el("tr", {},

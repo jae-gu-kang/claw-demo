@@ -22,14 +22,22 @@ export function niceTicks(min, max, n = 5) {
   return out;
 }
 
+/** 판정 상태색 팔레트 — 애플 시스템 컬러 (히트맵 셀·범례·엔벨로프 맵이 공유). */
+export const STATUS = {
+  ok: "#34c759", // 양호
+  warn: "#ff9500", // 주의
+  bad: "#ff3b30", // 부족·위반
+  na: "#aeaeb2", // 판정 불가·트림 불가
+};
+
 /** PM[deg] → 상태색 — 관례 여유 기준 [기본값]: ≥45° 양호, 30~45° 주의, <30° 부족.
  * 합격기준 수치는 파라미터 관리 계층 확정 시 그쪽이 정본 (02 §5.5). */
 export function marginColor(pm) {
-  if (pm === "inf") return "#157f3d";
-  if (typeof pm !== "number") return "#9aa3ad"; // null(NaN)·문자열 — 판정 불가
-  if (pm < 30) return "#c22f2f";
-  if (pm < 45) return "#b57908";
-  return "#157f3d";
+  if (pm === "inf") return STATUS.ok;
+  if (typeof pm !== "number") return STATUS.na; // null(NaN)·문자열 — 판정 불가
+  if (pm < 30) return STATUS.bad;
+  if (pm < 45) return STATUS.warn;
+  return STATUS.ok;
 }
 
 /** 트림 판정 → 비행 엔벨로프 셀 (01 §4.1 자동 판정 플래그 기반 근사).
@@ -39,19 +47,19 @@ export function marginColor(pm) {
 */
 export function trimEnvelopeCell(r) {
   if (!r.converged || r.flags.residual_ok === false) {
-    return { kind: "infeasible", color: "#9aa3ad", text: "불가" };
+    return { kind: "infeasible", color: STATUS.na, text: "불가" };
   }
   if (r.flags.alpha_margin_ok === false) {
-    return { kind: "stall", color: "#c22f2f", text: "실속≈" };
+    return { kind: "stall", color: STATUS.bad, text: "실속≈" };
   }
   if (r.flags.saturation_ok === false) {
-    return { kind: "saturated", color: "#b57908", text: "포화" };
+    return { kind: "saturated", color: STATUS.warn, text: "포화" };
   }
-  return { kind: "ok", color: "#157f3d", text: "가능" };
+  return { kind: "ok", color: STATUS.ok, text: "가능" };
 }
 
-/** 시리즈 색 순환 팔레트 — 그룹 내 순번으로 배정 (앱 공통 상태색과 동일 계열). */
-export const SERIES_COLORS = ["#1a6feb", "#b57908", "#c22f2f", "#157f3d", "#7a4fc9", "#0e7c86"];
+/** 시리즈 색 순환 팔레트 — 그룹 내 순번으로 배정 (애플 시스템 팔레트, 상태색과 동일 계열). */
+export const SERIES_COLORS = ["#007aff", "#ff9500", "#ff3b30", "#34c759", "#af52de", "#5ac8fa"];
 
 /** 게인 테이블 dict {"그룹.게인": {axes, data}} → 그룹별 차트 시리즈.
 
