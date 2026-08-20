@@ -9,7 +9,8 @@
 소관 (max_adjacent_jump와 동일 원칙). 근사식의 스케줄 실주입은 범위 밖.
 */
 
-/** 대칭 양정치 소계(n ≤ 7) 가우스 소거 — 부분 피벗. */
+/** 대칭 양정치 소계(n ≤ 7) 가우스 소거 — 부분 피벗. 특이(피벗≈0)면 null
+ * (예: 격자점 중복으로 x가 실질 한 점뿐인 구간 — 호출부가 유한성으로 검출). */
 function solve(A, b) {
   const n = b.length;
   const M = A.map((row, i) => [...row, b[i]]);
@@ -17,6 +18,7 @@ function solve(A, b) {
     let p = k;
     for (let i = k + 1; i < n; i++) if (Math.abs(M[i][k]) > Math.abs(M[p][k])) p = i;
     [M[k], M[p]] = [M[p], M[k]];
+    if (Math.abs(M[k][k]) < 1e-12) return null;
     for (let i = k + 1; i < n; i++) {
       const f = M[i][k] / M[k][k];
       for (let j = k; j <= n; j++) M[i][j] -= f * M[k][j];
@@ -32,7 +34,8 @@ function solve(A, b) {
 }
 
 /** 최소제곱 다항식 적합 — 반환 {coeffs(u-영역 오름차수), c, h, degree}.
- * 요청 차수는 점 개수-1로 클램프 (점 2개에 3차 요청 → 직선). */
+ * 요청 차수는 점 개수-1로 클램프 (점 2개에 3차 요청 → 직선).
+ * 특이계(예: x 실질 중복)면 coeffs=null — 호출부가 검사해야 함. */
 export function polyfit(xs, ys, degree) {
   const n = xs.length;
   const d = Math.min(degree, n - 1);
@@ -99,6 +102,9 @@ export function piecewisePolyfit(xs, ys, boundaries, degree) {
     return { error: `차수는 1~6 정수: ${degree}` };
   }
   if (xs.length < 2) return { error: "격자점 2개 이상 필요" };
+  for (let p = 1; p < xs.length; p++) {
+    if (xs[p] < xs[p - 1]) return { error: `xs는 오름차순이어야 함 (위반: ${xs[p - 1]} → ${xs[p]})` };
+  }
   const xmin = xs[0];
   const xmax = xs[xs.length - 1];
   const bs = [...boundaries].sort((a, b) => a - b);
@@ -121,6 +127,9 @@ export function piecewisePolyfit(xs, ys, boundaries, degree) {
       return { error: `구간 [${edges[i]}, ${edges[i + 1]}]에 격자점 없음 — 경계 조정 필요` };
     }
     const fit = polyfit(idx.map((p) => xs[p]), idx.map((p) => ys[p]), degree);
+    if (fit.coeffs === null) {
+      return { error: `구간 [${edges[i]}, ${edges[i + 1]}] 적합 실패 (특이계 — 격자점 중복 등)` };
+    }
     segments.push({ x0: edges[i], x1: edges[i + 1], fit, n: idx.length, idx });
   }
   let maxResidual = 0;

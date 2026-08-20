@@ -33,6 +33,19 @@ test("polyfit: 차수 클램프 — 점 2개에 3차 요청 → 직선", () => {
   close(evalFit(fit, 2), 12); // 중간 = 선형
 });
 
+test("polyfit: 단일점 구간(h=0 방어) — 상수 적합, 기울기 0", () => {
+  const fit = polyfit([5], [42], 2);
+  assert.equal(fit.degree, 0);
+  close(evalFit(fit, 5), 42);
+  close(evalFit(fit, 100), 42); // 상수이므로 x 무관
+  close(evalFitSlope(fit, 5), 0);
+});
+
+test("polyfit: 격자점 실질 중복(x 전부 동일) → 특이계로 coeffs=null", () => {
+  const fit = polyfit([2, 2, 2], [1, 3, 5], 1);
+  assert.equal(fit.coeffs, null);
+});
+
 test("polyfit: 평행이동 영역 컨디셔닝 — x∈[10,20] 3차", () => {
   const xs = [10, 12, 14, 16, 18, 20];
   const f = (x) => 1 + 0.2 * x - 0.03 * x * x + 0.004 * x ** 3;
@@ -73,8 +86,16 @@ test("piecewisePolyfit: 입력 검증 — 차수·경계 범위·빈 구간·중
   assert.ok(piecewisePolyfit(xs, ys, [0.4, 0.6], 1).error); // [0.4,0.6) 빈 구간
   assert.ok(piecewisePolyfit(xs, ys, [1, 1], 1).error); // 중복
   assert.ok(piecewisePolyfit([0], [1], [], 1).error); // 격자점 부족
+  assert.ok(piecewisePolyfit([2, 0, 1], [0, 0, 0], [], 1).error); // xs 비정렬
   // 경계 없음(단일 구간)은 유효
   assert.equal(piecewisePolyfit(xs, ys, [], 1).error, undefined);
+});
+
+test("piecewisePolyfit: 구간 내 격자점 실질 중복(특이계) → error, 잔차 은폐 없음", () => {
+  // 리뷰 S1: solve가 특이계에서 NaN을 내면 |NaN|>maxResidual이 false라
+  // 잔차가 조용히 0으로 보고됨 — 특이계는 반드시 error로 표면화해야 함
+  const pw = piecewisePolyfit([0, 1, 1, 1, 4], [0, 5, 5, 5, 5], [0.5], 2);
+  assert.ok(pw.error);
 });
 
 test("sampleFit: 구간 사이 null 구분자 + 곡선값 일치", () => {
