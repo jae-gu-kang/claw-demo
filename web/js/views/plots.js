@@ -56,8 +56,10 @@ export function heatmapCanvas(pivot, cellOf, { title = "", width = 560 } = {}) {
 const MODE_BAND_COLORS = ["#e8f1fe", "#e6f6ea", "#fdf6df", "#fdeaea", "#efe9fb", "#e7f6f6"];
 
 /** 선 차트 — series: [{label, data, color}], bands: modeSpans 결과 (배경 밴드).
- * x축은 t 배열 (기본 시각 [s] — xUnit으로 변경 가능, 예: V-n 선도의 "m/s"). */
-export function lineChartCanvas(t, series, { title = "", width = 620, height = 190, bands = [], xUnit = "s" } = {}) {
+ * x축은 t 배열 (기본 시각 [s] — xUnit으로 변경 가능, 예: V-n 선도의 "m/s").
+ * markers=true면 각 데이터점에 원 마커 — 격자점(브레이크포인트)이 유의미한
+ * 테이블 플롯용 (선 = 구간 선형 보간임을 드러냄). */
+export function lineChartCanvas(t, series, { title = "", width = 620, height = 190, bands = [], xUnit = "s", markers = false } = {}) {
   const { canvas, ctx } = makeCanvas(width, height);
   const mL = 56, mT = 22, mR = 10, mB = 24;
   const t0 = t[0] ?? 0;
@@ -106,6 +108,15 @@ export function lineChartCanvas(t, series, { title = "", width = 620, height = 1
       else ctx.lineTo(px(t[i]), py(v));
     });
     ctx.stroke();
+    if (markers) {
+      ctx.fillStyle = s.color;
+      s.data.forEach((v, i) => {
+        if (typeof v !== "number") return;
+        ctx.beginPath();
+        ctx.arc(px(t[i]), py(v), 2.6, 0, 2 * Math.PI);
+        ctx.fill();
+      });
+    }
     ctx.fillStyle = s.color;
     ctx.fillText(s.label, mL + 70 * si, 14);
   });

@@ -6,7 +6,9 @@
 
 import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
+import { gainPlotGroups } from "../lib/plot.js";
 import { store } from "../store.js";
+import { lineChartCanvas } from "./plots.js";
 
 let tables = null; // {name: {axes: {mach: [...]}, data: [...], extrapolate}}
 
@@ -52,12 +54,33 @@ export function render() {
   return root;
 }
 
+function drawCharts(chartBox) {
+  const { groups, skipped } = gainPlotGroups(tables);
+  clear(chartBox).append(
+    el("div", { class: "row" },
+      groups.map(({ group, mach, series }) =>
+        lineChartCanvas(mach, series, {
+          title: `${group} 게인`, width: 420, height: 200, xUnit: "M", markers: true,
+        }))),
+    el("p", { class: "hint" },
+      "점 = 테이블 격자점(브레이크포인트), 선 = 현재 조회 규칙(구간 선형 보간, 외삽 clip). ",
+      "셀 편집 시 즉시 갱신. 구간별 다항식 회귀 근사식 피팅·오버레이는 [백로그] (01 §3.4)."),
+    skipped.length
+      ? el("p", { class: "hint" },
+          `차트 제외: ${skipped.map((s) => `${s.name} — ${s.reason}`).join(" · ")}`)
+      : null,
+  );
+}
+
 function renderTables(box, statusLine) {
   const names = Object.keys(tables);
   const machs = tables[names[0]].axes.mach;
+  const chartBox = el("div");
+  drawCharts(chartBox);
   // 전치 배열: 행 = 마하(비행조건), 열 = 게인 6개 — 폭이 패널에 들어오고
   // 한 비행조건의 게인 세트를 한 줄에서 편집
   clear(box).append(
+    chartBox,
     el("div", { class: "scroll-x" },
       el("table", {},
         el("thead", {}, el("tr", {},
@@ -82,6 +105,7 @@ function renderTables(box, statusLine) {
                   return;
                 }
                 tables[name].data[i] = num;
+                drawCharts(chartBox); // 편집값 즉시 반영 (data 참조 공유)
                 statusLine.textContent = "편집됨 (미적용) — '시뮬에 적용'을 누르세요.";
               },
             }))),

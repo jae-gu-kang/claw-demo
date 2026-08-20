@@ -89,7 +89,11 @@ export function render() {
   });
 
   const run = async () => {
-    if (runningJobId) return; // 이중 제출 방지 (리뷰 S4)
+    if (runningJobId) { // 이중 제출 방지 (리뷰 S4) — 무반응 대신 안내 (조용한 무시 금지)
+      clear(errBox).append(el("div", { class: "error-box" },
+        "이미 실행 중입니다 — 진행률 표시를 확인하세요."));
+      return;
+    }
     try {
       clear(errBox);
       clear(replayBox);

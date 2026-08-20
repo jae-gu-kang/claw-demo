@@ -3,7 +3,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  SERIES_COLORS,
   fuelsOf,
+  gainPlotGroups,
   linScale,
   marginColor,
   niceTicks,
@@ -60,6 +62,60 @@ function entry(mach, alt, fuel, pm) {
     margins: { pitch_q: { pm_deg: pm } },
   };
 }
+
+function gainTable(machs, data) {
+  return { axes: { mach: machs }, data, extrapolate: "clip" };
+}
+
+test("gainPlotGroups: '그룹.게인' 접두부 묶기 + 등장 순서 + 색 배정", () => {
+  const machs = [0.2, 0.4, 0.6];
+  const { groups, skipped } = gainPlotGroups({
+    "pitch.kp": gainTable(machs, [-4, -3, -2]),
+    "pitch.ki": gainTable(machs, [-1, -0.7, -0.5]),
+    "roll.kp": gainTable(machs, [2, 1.5, 1]),
+  });
+  assert.equal(skipped.length, 0);
+  assert.deepEqual(groups.map((g) => g.group), ["pitch", "roll"]);
+  const pitch = groups[0];
+  assert.deepEqual(pitch.mach, machs);
+  assert.deepEqual(pitch.series.map((s) => s.label), ["kp", "ki"]);
+  assert.deepEqual(pitch.series[0].data, [-4, -3, -2]);
+  // 그룹 내 시리즈 순번으로 색 배정 — 그룹이 달라지면 순번 리셋
+  assert.equal(pitch.series[0].color, SERIES_COLORS[0]);
+  assert.equal(pitch.series[1].color, SERIES_COLORS[1]);
+  assert.equal(groups[1].series[0].color, SERIES_COLORS[0]);
+});
+
+test("gainPlotGroups: 1D mach 아닌 테이블은 사유와 함께 제외", () => {
+  const { groups, skipped } = gainPlotGroups({
+    "pitch.kp": gainTable([0.2, 0.6], [-4, -2]),
+    "pitch.k2d": { axes: { mach: [0.2, 0.6], alt: [0, 1000] }, data: [[1, 2], [3, 4]] },
+    "yaw.k_alpha": { axes: { alpha: [0, 0.1] }, data: [1, 2] },
+  });
+  assert.deepEqual(groups.map((g) => g.group), ["pitch"]);
+  assert.equal(groups[0].series.length, 1);
+  assert.deepEqual(skipped.map((s) => s.name), ["pitch.k2d", "yaw.k_alpha"]);
+  assert.ok(skipped.every((s) => s.reason.length > 0));
+});
+
+test("gainPlotGroups: 그룹 내 mach 축 불일치는 제외 (차트가 x축 공유)", () => {
+  const { groups, skipped } = gainPlotGroups({
+    "pitch.kp": gainTable([0.2, 0.4, 0.6], [-4, -3, -2]),
+    "pitch.ki": gainTable([0.2, 0.5, 0.6], [-1, -0.7, -0.5]), // 축 다름
+  });
+  assert.equal(groups[0].series.length, 1);
+  assert.equal(skipped.length, 1);
+  assert.equal(skipped[0].name, "pitch.ki");
+});
+
+test("gainPlotGroups: 시리즈가 전부 제외된 그룹은 결과에서 제거", () => {
+  const { groups, skipped } = gainPlotGroups({
+    "yaw.k2d": { axes: { mach: [0.2], alt: [0] }, data: [[1]] },
+    "pitch.kp": gainTable([0.2, 0.6], [-4, -2]),
+  });
+  assert.deepEqual(groups.map((g) => g.group), ["pitch"]);
+  assert.equal(skipped.length, 1);
+});
 
 test("pivotCases: 연료 필터 + 축 정렬 + 조회", () => {
   const entries = [

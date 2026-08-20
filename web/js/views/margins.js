@@ -55,6 +55,8 @@ export function render() {
         lastBody = await api.get(`/results/${job.result_id}`);
         store.set("marginMap", { id: job.result_id });
         renderResults(resultBox, lastBody);
+        // 결과는 아래 대시보드 패널에 그려짐 — 폼이 길어 뷰포트 밖일 수 있으니 이동
+        resultBox.scrollIntoView?.({ behavior: "smooth", block: "start" });
       } catch (e) {
         showErr(e);
       }
@@ -66,7 +68,11 @@ export function render() {
   });
 
   const run = async () => {
-    if (runningJobId) return; // 이중 제출 방지 (리뷰 S4)
+    if (runningJobId) { // 이중 제출 방지 (리뷰 S4) — 무반응 대신 안내 (조용한 무시 금지)
+      clear(errBox).append(el("div", { class: "error-box" },
+        "이미 실행 중입니다 — 진행률 표시를 확인하세요."));
+      return;
+    }
     try {
       clear(errBox);
       const v = validateLoops(loopRows);
@@ -292,6 +298,7 @@ function renderResults(resultBox, body) {
   };
   fuelSel.addEventListener("change", draw);
   clear(resultBox).append(
+    el("p", {}, el("b", {}, `계산 완료 — 케이스 ${entries.length}건 · 루프 ${loops.length}개`)),
     el("p", { class: "hint" }, appliedSummary(body)),
     el("div", { class: "row" }, fuelSel), plotBox);
   draw();

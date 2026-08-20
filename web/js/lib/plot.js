@@ -50,6 +50,44 @@ export function trimEnvelopeCell(r) {
   return { kind: "ok", color: "#157f3d", text: "가능" };
 }
 
+/** 시리즈 색 순환 팔레트 — 그룹 내 순번으로 배정 (앱 공통 상태색과 동일 계열). */
+export const SERIES_COLORS = ["#1a6feb", "#b57908", "#c22f2f", "#157f3d", "#7a4fc9", "#0e7c86"];
+
+/** 게인 테이블 dict {"그룹.게인": {axes, data}} → 그룹별 차트 시리즈.
+
+1D mach 테이블만 대상 (현 데모 스케줄 규격) — 다차원·비mach 테이블과 그룹 내
+mach 축이 다른 테이블은 skipped에 사유와 함께 보고. 그룹 = 이름의 점 앞
+접두부, 등장 순서 유지. 반환 {groups: [{group, mach, series}], skipped}.
+시리즈 data는 입력 배열 참조 — 편집 후 재호출로 최신값 반영.
+*/
+export function gainPlotGroups(tables, colors = SERIES_COLORS) {
+  const groups = [];
+  const byGroup = new Map();
+  const skipped = [];
+  for (const [name, t] of Object.entries(tables)) {
+    const axes = Object.keys(t.axes ?? {});
+    if (axes.length !== 1 || axes[0] !== "mach") {
+      skipped.push({ name, reason: `1D mach 테이블 아님 (축: ${axes.join("×") || "없음"})` });
+      continue;
+    }
+    const dot = name.indexOf(".");
+    const grp = dot >= 0 ? name.slice(0, dot) : name;
+    const label = dot >= 0 ? name.slice(dot + 1) : name;
+    let g = byGroup.get(grp);
+    if (!g) {
+      g = { group: grp, mach: t.axes.mach, series: [] };
+      byGroup.set(grp, g);
+      groups.push(g);
+    }
+    if (g.mach.length !== t.axes.mach.length || g.mach.some((v, i) => v !== t.axes.mach[i])) {
+      skipped.push({ name, reason: "그룹 내 mach 축 불일치 (차트가 x축 공유)" });
+      continue;
+    }
+    g.series.push({ label, data: t.data, color: colors[g.series.length % colors.length] });
+  }
+  return { groups: groups.filter((g) => g.series.length > 0), skipped };
+}
+
 /** margin-map entries → 연료 고정 (mach×alt) 격자 조회. */
 export function pivotCases(entries, fuel) {
   const sel = entries.filter((e) => e.trim.case.fuel === fuel);

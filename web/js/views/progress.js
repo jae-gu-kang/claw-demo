@@ -19,7 +19,9 @@ export function attachProgress(progressBox, jobId, { onDone, onError }) {
     bar.style.width = `${Math.round(100 * j.progress)}%`;
     label.textContent = `${j.status} ${j.done}/${j.total} ${j.message ?? ""}`;
   }).then((job) => {
-    clear(progressBox);
+    // 빠른 작업은 진행바가 스치듯 사라져 "무반응"으로 보임 — 종료 흔적을 남긴다
+    clear(progressBox).append(el("p", { class: "hint" },
+      `작업 종료 — ${job.status} (${job.done}/${job.total})`));
     onDone(job);
   }).catch((e) => {
     clear(progressBox);
