@@ -3,8 +3,11 @@
 시뮬링크 "블록 클릭 → 서브시스템 하위 페이지"의 대응물 (02 §4):
 - schema: 레지스트리 {category, name} — 파라미터 폼의 원천 (서버 /registry 스키마)
 - editable: 폼 편집 가능 여부 — 시뮬 요청에 주입 경로가 있는 블록만 true
-  (진실이 두 곳이 되는 것 방지 — 작동기·항법은 시뮬 탭 실행 조건이 편집처)
+  (AP=req.autopilot, 작동기=req.actuators, 항법=req.nav — 시뮬 탭은 적용값을
+  프리필·병합해 소비하므로 진실은 store 한 곳)
 - injectKey: 편집값을 담는 store 키 (editable=true일 때만)
+- omit: 폼·주입에서 제외할 스키마 파라미터명 — 주입 경로의 예약 키
+  (예: 작동기 pos_lo·pos_hi·initial은 Simulator가 믹서 한계·트림 웜스타트로 결정)
 - edit: {hash, label} — 정본 편집 화면으로 이동
 배선은 고정 [확정 02 §4] — 이 데이터에 배선 편집 개념은 없다. SVG 기하(좌표·
 배선 그림)는 views/diagram.js·subsystems.js 수작성 — 여기는 계약 데이터만.
@@ -91,9 +94,12 @@ export const BLOCKS = [
     title: "작동기", sub: "2차계 (기본값)",
     detail: {
       desc: "2차계 작동기 (wn·ζ·rate 한계) — rate ≥ 10 rad/s 요구 [도출 사양 01 v0.13]. "
-        + "실행값은 시뮬 탭 '작동기' 그룹이 편집처.",
-      schema: { category: "actuator", name: "SecondOrderActuator" }, editable: false, injectKey: null,
-      edit: { hash: "sim", label: "시뮬 탭 — 실행 조건 '작동기' 편집" },
+        + "여기서 '시뮬에 적용'한 값이 시뮬 탭 '작동기' 그룹에 프리필·병합된다. "
+        + "위치 한계·초기값은 믹서 타면 한계·트림 웜스타트가 결정 (편집 대상 아님).",
+      schema: { category: "actuator", name: "SecondOrderActuator" }, editable: true,
+      injectKey: "actuatorParams",
+      omit: ["pos_lo", "pos_hi", "initial"], // Simulator actuator_params 예약 키 (test_sim 핀)
+      edit: { hash: "sim", label: "시뮬 탭 — 실행 조건 '작동기'에서 최종 확인" },
     },
   },
   {
@@ -112,9 +118,9 @@ export const BLOCKS = [
     detail: {
       desc: "등가 오차 모델(참값 + 잡음 + 바이어스 + 지연) — 법칙·유도·스케줄은 "
         + "NavOutput만 소비 (참값 차단 계약 03 §4). "
-        + "실행값(시드 등)은 시뮬 탭 '항법 오차 모델' 그룹이 편집처.",
-      schema: { category: "nav", name: "ErrorModel" }, editable: false, injectKey: null,
-      edit: { hash: "sim", label: "시뮬 탭 — 실행 조건 '항법' 편집" },
+        + "여기서 '시뮬에 적용'한 값이 시뮬 실행의 항법 파라미터가 된다 (시드는 시뮬 탭 우선).",
+      schema: { category: "nav", name: "ErrorModel" }, editable: true, injectKey: "navParams",
+      edit: { hash: "sim", label: "시뮬 탭 — 실행 조건 '항법'에서 최종 확인" },
     },
   },
 ];

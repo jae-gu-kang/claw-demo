@@ -219,3 +219,7 @@ canvas.plot { background: #fff; border: 1px solid var(--line); border-radius: 6p
 .bd .chain .sig { font-family: var(--mono); font-size: 11.5px; background: #fff; border: 1px solid var(--bd-edge); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
 .bd .chain .ctl { font-size: 11.5px; font-weight: 700; background: var(--text); color: #fff; border-radius: 6px; padding: 3px 8px; white-space: nowrap; }
 .bd .chain .arr { color: var(--bd-ink-soft); font-size: 12px; }
+
+/* 블록도 내 파라미터 연동 수치 (data-p) — 스키마 기본값+적용 편집값으로 채워지고
+   편집 폼 입력과 실시간 동기 (views/blocks.js bindSvgParams) */
+.bd svg [data-p] { font-weight: 800; fill: #0e7c86; }

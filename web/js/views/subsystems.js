@@ -4,6 +4,11 @@
 SVG·노트는 수작성 정적 마크업 (fromMarkup으로 DOM화 — 사용자 데이터 삽입 금지).
 내부 구조는 엔진 구현(M6~M8)과 1:1 — 코드에 없는 구조를 그리지 않는다.
 페이지 id는 lib/blocks.js 블록 id + "verify"(설계 ⑤ — 블록 아닌 설계 단계 페이지).
+
+SVG 안의 <tspan data-p="이름">은 파라미터 연동 표시값 — views/blocks.js가 렌더 시
+스키마 기본값(+적용된 편집값)으로 채우고, 편집 폼 입력과 실시간 동기화한다.
+초기 텍스트는 참고용 폴백일 뿐 정본이 아님 (정본 = 엔진 레지스트리 스키마).
+data-p 이름은 해당 블록 스키마의 파라미터명만 허용 (lib/blocks.test.js 가드).
 */
 
 // 상태 칩 종류 → 라벨 (fcs-context 문서 태그와 동일 의미)
@@ -126,16 +131,16 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="30" y="68" width="36" height="24" rx="12"/><text class="pnum" x="48" y="84">1</text></g>
   <text class="pname" x="48" y="108">h_cmd</text>
   <path class="wire" d="M66 80 H96" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="100" y="56" width="96" height="48" rx="3"/><text class="ttl2" x="148" y="76" style="font-weight:700">명령필터</text><text class="ttl2" x="148" y="93">τ = 5 s</text></g>
+  <g class="sblk"><rect class="body" x="100" y="56" width="96" height="48" rx="3"/><text class="ttl2" x="148" y="76" style="font-weight:700">명령필터</text><text class="ttl2" x="148" y="93">τ = <tspan data-p="tau_alt">5</tspan> s</text></g>
   <path class="wire" d="M196 80 H238" marker-end="url(#aw-ap)"/>
   <circle class="body" cx="256" cy="80" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
   <text class="sumsign" x="247" y="84">+</text><text class="sumsign" x="256" y="93">−</text>
   <path class="wire" d="M270 80 H302" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="306" y="53" width="130" height="54" rx="3"/><text class="ttl" x="371" y="81">고도 PI</text><text class="ttl2" x="371" y="99">+ k_hdot 승강률</text></g>
+  <g class="sblk"><rect class="body" x="306" y="53" width="130" height="54" rx="3"/><text class="ttl" x="371" y="74">고도 PI</text><text class="ttl2" x="371" y="90">kp <tspan data-p="kp_alt">0.004</tspan> · ki <tspan data-p="ki_alt">0.0004</tspan></text><text class="ttl2" x="371" y="103">k_hdot <tspan data-p="k_hdot">−0.008</tspan> 승강률</text></g>
   <path class="wire" d="M436 80 H478" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="482" y="50" width="100" height="60" rx="3"/>
     <path d="M492 96 H508 L556 64 H572" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="532" y="128">θ 한계 (theta_lo~hi)</text>
+  <text class="bname" x="532" y="128">θ 한계 <tspan data-p="theta_lo">−0.3</tspan> ~ <tspan data-p="theta_hi">0.3</tspan> rad</text>
   <path class="wire" d="M582 80 H644" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="648" y="68" width="36" height="24" rx="12"/><text class="pnum" x="666" y="84">1</text></g>
   <text class="pname" x="678" y="108">θ_cmd → α 리미터</text>
@@ -146,12 +151,12 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="30" y="208" width="36" height="24" rx="12"/><text class="pnum" x="48" y="224">2</text></g>
   <text class="pname" x="48" y="248">V_cmd</text>
   <path class="wire" d="M66 220 H96" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="100" y="196" width="96" height="48" rx="3"/><text class="ttl2" x="148" y="216" style="font-weight:700">명령필터</text><text class="ttl2" x="148" y="233">τ = 2 s</text></g>
+  <g class="sblk"><rect class="body" x="100" y="196" width="96" height="48" rx="3"/><text class="ttl2" x="148" y="216" style="font-weight:700">명령필터</text><text class="ttl2" x="148" y="233">τ = <tspan data-p="tau_spd">2</tspan> s</text></g>
   <path class="wire" d="M196 220 H238" marker-end="url(#aw-ap)"/>
   <circle class="body" cx="256" cy="220" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
   <text class="sumsign" x="247" y="224">+</text><text class="sumsign" x="256" y="233">−</text>
   <path class="wire" d="M270 220 H302" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="306" y="193" width="130" height="54" rx="3"/><text class="ttl" x="371" y="226">속도 PI</text></g>
+  <g class="sblk"><rect class="body" x="306" y="193" width="130" height="54" rx="3"/><text class="ttl" x="371" y="217">속도 PI</text><text class="ttl2" x="371" y="237">kp <tspan data-p="kp_spd">0.15</tspan> · ki <tspan data-p="ki_spd">0.03</tspan></text></g>
   <path class="wire" d="M436 220 H494" marker-end="url(#aw-ap)"/>
   <circle class="body" cx="512" cy="220" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
   <text class="sumsign" x="503" y="224">+</text><text class="sumsign" x="512" y="211">+</text>
@@ -165,16 +170,16 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="30" y="348" width="36" height="24" rx="12"/><text class="pnum" x="48" y="364">3</text></g>
   <text class="pname" x="48" y="388">ψ_cmd</text>
   <path class="wire" d="M66 360 H96" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="100" y="336" width="96" height="48" rx="3"/><text class="ttl2" x="148" y="356" style="font-weight:700">명령필터</text><text class="ttl2" x="148" y="373">τ = 1 s</text></g>
+  <g class="sblk"><rect class="body" x="100" y="336" width="96" height="48" rx="3"/><text class="ttl2" x="148" y="356" style="font-weight:700">명령필터</text><text class="ttl2" x="148" y="373">τ = <tspan data-p="tau_hdg">1</tspan> s</text></g>
   <path class="wire" d="M196 360 H238" marker-end="url(#aw-ap)"/>
   <circle class="body" cx="256" cy="360" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
   <text class="sumsign" x="247" y="364">+</text><text class="sumsign" x="256" y="373">−</text>
   <path class="wire" d="M270 360 H302" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="306" y="333" width="130" height="54" rx="3"/><text class="ttl" x="371" y="361">헤딩 PI</text><text class="ttl2" x="371" y="379">각도 wrap 처리</text></g>
+  <g class="sblk"><rect class="body" x="306" y="333" width="130" height="54" rx="3"/><text class="ttl" x="371" y="357">헤딩 PI</text><text class="ttl2" x="371" y="377">kp <tspan data-p="kp_hdg">4</tspan> · ki <tspan data-p="ki_hdg">0</tspan> · wrap</text></g>
   <path class="wire" d="M436 360 H478" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="482" y="330" width="100" height="60" rx="3"/>
     <path d="M492 376 H508 L556 344 H572" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="532" y="408">φ 한계 (±phi_max)</text>
+  <text class="bname" x="532" y="408">φ 한계 ±<tspan data-p="phi_max">0.7</tspan> rad</text>
   <path class="wire" d="M582 360 H644" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="648" y="348" width="36" height="24" rx="12"/><text class="pnum" x="666" y="364">3</text></g>
   <text class="pname" x="666" y="388">φ_cmd</text>
@@ -184,7 +189,7 @@ export const SUBSYSTEMS = {
   <!-- 선회 피드포워드 -->
   <rect x="618" y="270" width="252" height="70" rx="8" fill="#fdf2d7" stroke="#b45309" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text x="744" y="298" text-anchor="middle" style="font-size:12.5px;font-weight:800" fill="#b45309">선회 피드포워드 보상</text>
-  <text x="744" y="317" text-anchor="middle" style="font-size:11px" fill="#b45309">|φ_cmd| 기반 — k_pitch_turn · k_thr_turn</text>
+  <text x="744" y="317" text-anchor="middle" style="font-size:11px" fill="#b45309">|φ_cmd| 기반 — 피치 <tspan data-p="k_pitch_turn">0.05</tspan> · 스로틀 <tspan data-p="k_thr_turn">0</tspan></text>
   <path class="wire ff" d="M660 270 V220 H530" marker-end="url(#af-ap)"/>
   <path class="wire ff" d="M720 270 V115 H371 V111" marker-end="url(#af-ap)"/>
 </svg>`,
@@ -355,15 +360,15 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="235" y="90" style="font-size:13px">ωn²</text>
     <line x1="170" y1="98" x2="300" y2="98" stroke="#111" stroke-width="1.4"/>
     <text class="ttl2" x="235" y="118" style="font-size:12px">s² + 2ζωn·s + ωn²</text></g>
-  <text class="bname" x="235" y="156">2차계 (wn 30 · ζ 0.7 기본값)</text>
+  <text class="bname" x="235" y="156">2차계 — wn <tspan data-p="wn">30</tspan> rad/s · ζ <tspan data-p="zeta">0.7</tspan></text>
   <path class="wire" d="M330 100 H396" marker-end="url(#aw-act)"/>
   <g class="sblk"><rect class="body" x="400" y="70" width="100" height="60" rx="3"/>
     <path d="M412 118 L438 82 L488 82" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="450" y="150">rate_max (≥ 10 rad/s)</text>
+  <text class="bname" x="450" y="150">rate_max <tspan data-p="rate_max">10</tspan> rad/s (≥ 10 요구)</text>
   <path class="wire" d="M500 100 H566" marker-end="url(#aw-act)"/>
   <g class="sblk"><rect class="body" x="570" y="70" width="100" height="60" rx="3"/>
     <path d="M580 116 H598 L642 84 H660" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="620" y="150">pos_lo ~ pos_hi</text>
+  <text class="bname" x="620" y="150">위치 한계 = 믹서 타면 한계</text>
   <path class="wire" d="M670 100 H736" marker-end="url(#aw-act)"/>
   <g class="sblk"><rect class="body" x="740" y="88" width="36" height="24" rx="12"/><text class="pnum" x="758" y="104">1</text></g>
   <text class="pname" x="758" y="128">δ (타면 변위)</text>
@@ -454,17 +459,17 @@ export const SUBSYSTEMS = {
   <circle class="body" cx="400" cy="160" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
   <text class="sumsign" x="391" y="164">+</text><text class="sumsign" x="400" y="152">+</text><text class="sumsign" x="400" y="174">+</text>
   <g class="sblk"><rect class="body" x="200" y="33" width="140" height="54" rx="3"/>
-    <text class="ttl" x="270" y="56" style="font-size:13px">백색잡음</text><text class="ttl2" x="270" y="75">상태별 σ (pos·vel·att·rate)</text></g>
+    <text class="ttl" x="270" y="56" style="font-size:13px">백색잡음</text><text class="ttl2" x="270" y="75">σ pos <tspan data-p="pos_std">3</tspan> m · vel <tspan data-p="vel_std">0.3</tspan></text></g>
   <path class="wire" d="M340 60 H400 V142" marker-end="url(#aw-nav)"/>
   <g class="sblk"><rect class="body" x="180" y="233" width="180" height="54" rx="3"/>
-    <text class="ttl" x="270" y="256" style="font-size:13px">바이어스</text><text class="ttl2" x="270" y="275">1차 마르코프 (bias_tau)</text></g>
+    <text class="ttl" x="270" y="256" style="font-size:13px">바이어스</text><text class="ttl2" x="270" y="275">σ <tspan data-p="bias_std">1</tspan> m · τ <tspan data-p="bias_tau">60</tspan> s</text></g>
   <path class="wire" d="M360 260 H400 V178" marker-end="url(#aw-nav)"/>
   <path class="wire" d="M414 160 H466" marker-end="url(#aw-nav)"/>
   <g class="sblk"><rect class="body" x="470" y="133" width="140" height="54" rx="3"/>
-    <text class="ttl" x="540" y="156" style="font-size:13px">지연</text><text class="ttl2" x="540" y="175">delay_s (수십 ms)</text></g>
+    <text class="ttl" x="540" y="156" style="font-size:13px">지연</text><text class="ttl2" x="540" y="175"><tspan data-p="delay_s">0.03</tspan> s</text></g>
   <path class="wire" d="M610 160 H656" marker-end="url(#aw-nav)"/>
   <g class="sblk"><rect class="body" x="660" y="133" width="140" height="54" rx="3"/>
-    <text class="ttl" x="730" y="156" style="font-size:13px">갱신주기</text><text class="ttl2" x="730" y="175">update_hz · ZOH</text></g>
+    <text class="ttl" x="730" y="156" style="font-size:13px">갱신주기</text><text class="ttl2" x="730" y="175"><tspan data-p="update_hz">100</tspan> Hz · ZOH</text></g>
   <path class="wire" d="M800 160 H866" marker-end="url(#aw-nav)"/>
   <g class="sblk"><rect class="body" x="870" y="148" width="36" height="24" rx="12"/><text class="pnum" x="888" y="164">1</text></g>
   <text class="pname" x="888" y="188">NavOutput</text>

@@ -76,15 +76,52 @@ test("서브시스템 페이지 스펙 완결 (pagehead 메타·칩·이동 해�
   }
 });
 
-test("허브 계약: AP는 편집 가능, 나머지는 정본 편집처로 이동", () => {
+test("허브 계약: 시뮬 주입 경로 보유 블록(AP·작동기·항법)만 편집 가능", () => {
   const byId = Object.fromEntries(BLOCKS.map((b) => [b.id, b.detail]));
   assert.equal(byId.autopilot.editable, true);
-  assert.equal(byId.autopilot.injectKey, "autopilotParams");
+  assert.equal(byId.autopilot.injectKey, "autopilotParams"); // req.autopilot
+  assert.equal(byId.actuator.editable, true);
+  assert.equal(byId.actuator.injectKey, "actuatorParams"); // req.actuators
+  // Simulator actuator_params 예약 키 — 폼·주입 제외 (engine test_sim이 핀)
+  assert.deepEqual(byId.actuator.omit, ["pos_lo", "pos_hi", "initial"]);
+  assert.equal(byId.nav.editable, true);
+  assert.equal(byId.nav.injectKey, "navParams"); // req.nav
   assert.equal(byId.schedule.edit.hash, "gains");
   assert.equal(byId.scas.edit.hash, "gains"); // 게인 정본은 스케줄 — 폼은 열람 전용
+  assert.equal(byId.scas.editable, false);
   assert.equal(byId.limiter.edit.hash, "envelope");
-  assert.equal(byId.actuator.edit.hash, "sim");
+  assert.equal(byId.actuator.edit.hash, "sim"); // 최종 확인처 — 시뮬 탭 필드가 프리필·최종
   assert.equal(byId.nav.edit.hash, "sim");
   assert.equal(byId.planner.edit.hash, "sim"); // 미션(모드·웨이포인트)은 시뮬 탭이 편집처
   assert.equal(byId.plant.edit.hash, "trim");
+});
+
+// 편집 가능 블록 스키마의 파라미터명 사본 — 정본은 엔진 레지스트리
+// (engine claw/fcl·plant·nav 생성자 kwargs). 이름 변경 시 이 목록도 갱신할 것.
+const SVG_PARAM_NAMES = {
+  autopilot: new Set([
+    "kp_spd", "ki_spd", "tau_spd", "kp_alt", "ki_alt", "k_hdot", "tau_alt",
+    "kp_hdg", "ki_hdg", "tau_hdg", "theta_lo", "theta_hi",
+    "phi_max", "k_pitch_turn", "k_thr_turn",
+  ]),
+  // pos_lo·pos_hi·initial은 omit(주입 예약 키) — SVG에서도 바인딩 금지 (아무도 안 채움)
+  actuator: new Set(["wn", "zeta", "rate_max"]),
+  nav: new Set([
+    "pos_std", "vel_std", "att_std", "psi_std", "rate_std",
+    "bias_std", "bias_tau", "delay_s", "update_hz", "seed",
+  ]),
+};
+
+test("서브시스템 SVG data-p는 해당 블록 스키마 파라미터명만 (오타 = 영구 미갱신 수치)", () => {
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    const names = [...s.svg.matchAll(/data-p="([^"]+)"/g)].map((m) => m[1]);
+    const allowed = SVG_PARAM_NAMES[id];
+    if (!allowed) {
+      // 스키마 폼 없는 페이지의 data-p는 아무도 채우지 않음 — 도입 시 이 목록에 등록
+      assert.equal(names.length, 0, `${id}: 바인딩 소스 없는 페이지에 data-p ${names}`);
+      continue;
+    }
+    for (const n of names) assert.ok(allowed.has(n), `${id}: 스키마에 없는 data-p "${n}"`);
+    assert.ok(names.length > 0, `${id}: 편집 가능 페이지인데 연동 수치 없음`);
+  }
 });

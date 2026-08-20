@@ -5,8 +5,10 @@
 해시가 페이지 상태를 들고 있어 브라우저 뒤로가기로 상위 복귀 가능.
 
 - 파라미터 스키마는 서버 /registry/{cat}/{name}/schema (엔진 ParamSet이 정본)
-- 편집 가능 블록(오토파일럿)만 폼 편집 → store 주입 (시뮬 탭 '편집 AP'로 사용)
+- 편집 가능 블록(AP·작동기·항법 — 시뮬 주입 경로 보유)은 폼 편집 → store 주입
 - 그 외 블록은 스키마 열람 + 편집처로 이동 — 진실 이원화 방지 (lib/blocks.js 계약)
+- SVG 내 <tspan data-p="이름">은 파라미터 연동 표시값 — 스키마 기본값(+적용 편집값)
+  으로 채우고, 폼 입력마다 실시간 재동기화 (subsystems.js 규약)
 */
 
 import { api, errorText } from "../api.js";
@@ -67,6 +69,7 @@ function renderSubPage(root, page) {
   const sub = SUBSYSTEMS[page];
   const block = blockById[page] ?? null; // verify는 블록 아님 (설계 단계 페이지)
   const paramBox = el("div");
+  const svgWrap = el("div", { class: "canvas-wrap sub" }, fromMarkup(sub.svg));
 
   root.append(
     el("div", { class: "pagehead" },
@@ -82,15 +85,33 @@ function renderSubPage(root, page) {
       el("span", { class: "cur" }, block?.title ?? sub.title),
       el("button", { class: "up-btn", onclick: () => navigate(null) }, "↑ 상위로"),
     ),
-    el("div", { class: "canvas-wrap sub" }, fromMarkup(sub.svg)),
+    svgWrap,
     fromMarkup(`<div class="notes">${sub.notes}</div>`),
     el("div", { class: "notes" }, paramBox),
   );
-  renderParams(paramBox, sub, block);
+  renderParams(paramBox, sub, block, svgWrap);
+}
+
+/** SVG 내 data-p 표시값 갱신 — 블록도 수치를 파라미터 값과 동기화.
+values에 없는 이름은 초기(폴백) 텍스트 유지. textContent만 교체 (마크업 삽입 없음). */
+function bindSvgParams(svgWrap, values) {
+  for (const node of svgWrap.querySelectorAll("[data-p]")) {
+    const v = values[node.dataset.p];
+    if (v !== undefined) node.textContent = displayVal(v);
+  }
+}
+
+/** 표시용 값 포맷 — UNBOUNDED(±1e30)는 ±∞, 수치는 유효 6자리로 정리. */
+function displayVal(v) {
+  if (typeof v === "number") {
+    if (Math.abs(v) >= 1e30) return v > 0 ? "∞" : "−∞";
+    return String(Number(v.toPrecision(6)));
+  }
+  return String(v);
 }
 
 /** 파라미터 패널 — 스키마 열람/편집 + 정본 편집처 이동 (lib/blocks.js 계약). */
-function renderParams(box, sub, block) {
+function renderParams(box, sub, block, svgWrap) {
   const edits = block?.detail.edit ? [block.detail.edit] : (sub.edits ?? []);
   // el() 래핑 필수 — 네이티브 append(null/false)는 "null" 텍스트 노드가 됨 (리뷰 M1)
   box.append(el("div", {},
@@ -109,10 +130,10 @@ function renderParams(box, sub, block) {
   }
   const schemaBox = el("div");
   box.append(schemaBox);
-  loadSchema(schemaBox, block);
+  loadSchema(schemaBox, block, svgWrap);
 }
 
-async function loadSchema(schemaBox, block) {
+async function loadSchema(schemaBox, block, svgWrap) {
   const { category, name } = block.detail.schema;
   const key = `${category}/${name}`;
   try {
@@ -121,8 +142,14 @@ async function loadSchema(schemaBox, block) {
     clear(schemaBox).append(el("div", { class: "error-box" }, errorText(e)));
     return;
   }
-  const fields = schemaFields(schemaCache[key]);
-  if (block.detail.editable) renderForm(schemaBox, block, key, fields);
+  // omit = 주입 경로 예약 키 (lib/blocks.js 계약) — 폼·주입·SVG 연동에서 제외
+  const omit = new Set(block.detail.omit ?? []);
+  const fields = schemaFields(schemaCache[key]).filter((f) => !omit.has(f.name));
+  // 블록도 수치 ← 스키마 기본값 + 적용된 편집값 (정본 = 엔진 스키마, SVG 초기 텍스트는 폴백)
+  const defaults = Object.fromEntries(fields.map((f) => [f.name, f.default]));
+  const applied = block.detail.injectKey ? store.get(block.detail.injectKey) : null;
+  bindSvgParams(svgWrap, { ...defaults, ...(applied ?? {}) });
+  if (block.detail.editable) renderForm(schemaBox, block, key, fields, svgWrap, defaults);
   else renderReadonlyTable(schemaBox, key, fields);
 }
 
@@ -158,26 +185,37 @@ function defaultText(v) {
   return String(v);
 }
 
-function renderForm(schemaBox, block, key, fields) {
+function renderForm(schemaBox, block, key, fields, svgWrap, defaults) {
   const injectKey = block.detail.injectKey;
   const applied = store.get(injectKey); // 이전 적용값 (전체 kwargs) 또는 undefined
   const statusLine = el("p", { class: "hint" },
-    applied ? "적용된 편집값이 있습니다 — 시뮬 탭 '편집 AP'가 이 값을 주입합니다." : "");
+    applied ? "적용된 편집값이 있습니다 — 시뮬 실행이 이 값을 주입합니다." : "");
   const errBox = el("div");
   const inputs = {}; // name → input 요소
+
+  // 폼 입력 → 블록도 수치 실시간 동기화 (파싱 실패 필드는 마지막 유효값 유지)
+  const liveSync = () => {
+    const vals = { ...defaults };
+    for (const f of fields) {
+      if (f.type === "boolean") { vals[f.name] = inputs[f.name].checked; continue; }
+      const r = parseFieldValue(f, inputs[f.name].value);
+      if (!r.error) vals[f.name] = r.value;
+    }
+    bindSvgParams(svgWrap, vals);
+  };
 
   const fieldEl = (f) => {
     const cur = applied?.[f.name] ?? f.default;
     if (f.type === "boolean") {
-      inputs[f.name] = el("input", { type: "checkbox", checked: cur === true });
+      inputs[f.name] = el("input", { type: "checkbox", checked: cur === true, onchange: liveSync });
       return el("label", { class: "field check", title: f.desc }, inputs[f.name], f.name);
     }
     if (f.type === "enum") {
-      inputs[f.name] = el("select", {},
+      inputs[f.name] = el("select", { onchange: liveSync },
         f.choices.map((c) => el("option", { value: c, selected: c === cur }, c)));
       return el("label", { class: "field", title: f.desc }, f.name, inputs[f.name]);
     }
-    inputs[f.name] = el("input", { class: "num", value: String(cur) });
+    inputs[f.name] = el("input", { class: "num", value: String(cur), oninput: liveSync });
     const unit = f.unit && f.unit !== "-" ? ` [${f.unit}]` : "";
     return el("label", { class: "field", title: `${f.desc}${rangeHint(f)}` },
       `${f.name}${unit}`, inputs[f.name]);
@@ -217,8 +255,9 @@ function renderForm(schemaBox, block, key, fields) {
             return;
           }
           store.set(injectKey, values);
+          liveSync();
           statusLine.textContent =
-            "적용됨 (전체 kwargs 교체) — 시뮬레이션 탭에서 '편집 AP'를 켜면 주입됩니다.";
+            "적용됨 (전체 kwargs 교체) — 시뮬레이션 탭 실행이 이 값을 주입합니다.";
         },
       }, "시뮬에 적용"),
       el("button", {
@@ -230,12 +269,14 @@ function renderForm(schemaBox, block, key, fields) {
             else if (f.type === "enum") inputs[f.name].value = String(f.default);
             else inputs[f.name].value = String(f.default);
           }
-          statusLine.textContent = "적용 해제 — 시뮬은 엔진 기본 AP로 돌아갑니다.";
+          liveSync();
+          statusLine.textContent = "적용 해제 — 시뮬은 엔진 기본값으로 돌아갑니다.";
         },
       }, "기본값·적용 해제"),
     ),
     statusLine, errBox,
     el("p", { class: "hint" },
+      "폼 값을 바꾸면 위 블록도 수치가 즉시 연동됩니다 (강조 표시). ",
       "값 검증(범위·유한성)은 여기서 1차, 교차 조건(theta_lo ≤ theta_hi 등)은 제출 시 ",
       "엔진이 최종 판정 (422로 표시). 마우스를 올리면 파라미터 설명이 보입니다."),
   );

@@ -36,6 +36,9 @@ export function render() {
   const modeBox = el("div");
   const wpBox = el("div");
 
+  // 구조도 탭 '시뮬에 적용' 값 — 작동기는 필드에 프리필(최종 편집권은 여기),
+  // 항법은 제출 시 기본 dict 대체 (시드만 이 탭이 우선)
+  const actApplied = store.get("actuatorParams");
   const f = {
     mach: el("input", { class: "num", value: "0.6" }),
     alt: el("input", { class: "num", value: "1000" }),
@@ -45,9 +48,9 @@ export function render() {
     navOn: el("input", { type: "checkbox", checked: true }),
     seed: el("input", { class: "num", value: "11" }),
     actOn: el("input", { type: "checkbox", checked: true }),
-    wn: el("input", { class: "num", value: "30" }),
-    zeta: el("input", { class: "num", value: "0.7" }),
-    rate: el("input", { class: "num", value: "10" }),
+    wn: el("input", { class: "num", value: String(actApplied?.wn ?? 30) }),
+    zeta: el("input", { class: "num", value: String(actApplied?.zeta ?? 0.7) }),
+    rate: el("input", { class: "num", value: String(actApplied?.rate_max ?? 10) }),
     fuelFlow: el("input", { class: "num", value: "0.3" }),
     useGains: el("input", { type: "checkbox" }),
     useAp: el("input", { type: "checkbox" }),
@@ -108,12 +111,17 @@ export function render() {
       };
       if (req.waypoints === null) delete req.waypoints;
       if (f.navOn.checked) {
-        req.nav = { pos_std: 1.0, vel_std: 0.1, att_std: 0.001, psi_std: 0.002,
-                    rate_std: 0.0005, bias_std: 0.5, bias_tau: 60.0,
-                    delay_s: 0.02, update_hz: 50.0, seed: Number(f.seed.value) };
+        // 구조도 항법 블록 적용값이 있으면 그것이 기본 dict를 대체 — 시드만 이 탭 우선
+        const navBase = store.get("navParams")
+          ?? { pos_std: 1.0, vel_std: 0.1, att_std: 0.001, psi_std: 0.002,
+               rate_std: 0.0005, bias_std: 0.5, bias_tau: 60.0,
+               delay_s: 0.02, update_hz: 50.0 };
+        req.nav = { ...navBase, seed: Number(f.seed.value) };
       }
       if (f.actOn.checked) {
-        req.actuators = { wn: Number(f.wn.value), zeta: Number(f.zeta.value),
+        // 구조도 작동기 블록 적용값(pos 한계·initial 포함) 위에 이 탭 필드가 최종 덮어씀
+        req.actuators = { ...(store.get("actuatorParams") ?? {}),
+                          wn: Number(f.wn.value), zeta: Number(f.zeta.value),
                           rate_max: Number(f.rate.value) };
       }
       // 편집본 체크됐는데 적용본이 없으면 기본값 실행을 조용히 하지 않고 알림 (리뷰 Nit3)
@@ -161,14 +169,18 @@ export function render() {
           el("div", { class: "g-title" }, "항법 오차 모델"),
           el("div", { class: "row-inner" },
             el("label", { class: "field check" }, f.navOn, "사용"),
-            el("label", { class: "field" }, "시드", f.seed))),
+            el("label", { class: "field" }, "시드", f.seed)),
+          store.get("navParams") && el("p", { class: "hint" },
+            "구조도 항법 블록 적용값 사용 중 (시드만 여기서 우선)")),
         el("div", { class: "opt-group" },
           el("div", { class: "g-title" }, "작동기 (2차계)"),
           el("div", { class: "row-inner" },
             el("label", { class: "field check" }, f.actOn, "사용"),
             el("label", { class: "field" }, "wn [rad/s]", f.wn),
             el("label", { class: "field" }, "ζ", f.zeta),
-            el("label", { class: "field" }, "rate [rad/s]", f.rate))),
+            el("label", { class: "field" }, "rate [rad/s]", f.rate)),
+          actApplied && el("p", { class: "hint" },
+            "구조도 작동기 블록 적용값 프리필됨 — 여기 값이 최종")),
         el("div", { class: "opt-group" },
           el("div", { class: "g-title" }, "유도 · 연료 · 게인"),
           el("div", { class: "row-inner" },
