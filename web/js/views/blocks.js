@@ -24,6 +24,24 @@ const blockById = Object.fromEntries(BLOCKS.map((b) => [b.id, b]));
 
 const navigate = (id) => { location.hash = id ? `blocks/${id}` : "blocks"; };
 
+// 다이어그램 스킨 — "glass"(라이트 글래스, 기본) | "holo"(다크 홀로그램, 디자인 안 2).
+// 정본 스타일 결정 전 비교용 토글 · localStorage로 페이지 이동에도 유지.
+const SKIN_KEY = "claw.diagramSkin";
+const getSkin = () => (localStorage.getItem(SKIN_KEY) === "holo" ? "holo" : "glass");
+
+function skinToggle(root) {
+  const label = () => (getSkin() === "holo" ? "☀️ 글래스 스킨" : "🌌 홀로그램 스킨");
+  const btn = el("button", {
+    title: "구조도 스킨 전환 (디자인 안 비교)",
+    onclick: () => {
+      localStorage.setItem(SKIN_KEY, getSkin() === "holo" ? "glass" : "holo");
+      root.classList.toggle("holo", getSkin() === "holo");
+      btn.textContent = label();
+    },
+  }, label());
+  return btn;
+}
+
 /** #blocks/<id> → 페이지 id (미실존이면 홈). 해시가 페이지 상태의 정본. */
 function currentPage() {
   const seg = location.hash.slice(1).split("/")[1];
@@ -32,7 +50,7 @@ function currentPage() {
 
 export function render() {
   const page = currentPage();
-  const root = el("div", { class: "bd" });
+  const root = el("div", { class: getSkin() === "holo" ? "bd holo" : "bd" });
   if (page) renderSubPage(root, page);
   else renderHome(root);
   return root;
@@ -51,6 +69,7 @@ function renderHome(root) {
         }, s.label),
         i < DESIGN_ORDER.length - 1 && el("span", { class: "arr" }, "→"),
       ]),
+      skinToggle(root),
       el("span", { class: "note-line" },
         "명령은 바깥(유도)에서 안(SCAS)으로 내려가지만, 설계는 플랜트 해석 후 ",
         el("b", {}, "가장 안쪽 루프부터"), " 닫아 나갑니다. 프레임 라벨을 클릭해도 이동합니다."),
@@ -83,7 +102,8 @@ function renderSubPage(root, page) {
       el("button", { class: "home-btn", onclick: () => navigate(null) }, "⌂ 제어법칙 (Top)"),
       el("span", { class: "sep" }, "▸"),
       el("span", { class: "cur" }, block?.title ?? sub.title),
-      el("button", { class: "up-btn", onclick: () => navigate(null) }, "↑ 상위로"),
+      el("span", { style: "margin-left: auto" }, skinToggle(root)),
+      el("button", { class: "up-btn", style: "margin-left: 8px", onclick: () => navigate(null) }, "↑ 상위로"),
     ),
     svgWrap,
     fromMarkup(`<div class="notes">${sub.notes}</div>`),

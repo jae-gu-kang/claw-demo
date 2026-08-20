@@ -271,3 +271,56 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 /* 블록도 내 파라미터 연동 수치 (data-p) — 스키마 기본값+적용 편집값으로 채워지고
    편집 폼 입력과 실시간 동기 (views/blocks.js bindSvgParams) */
 .bd svg [data-p] { font-weight: 800; fill: #0d9488; }
+
+/* ── 구조도 다크 홀로그램 스킨 (.bd.holo — 디자인 안 2) ─────────────────
+심야 네이비 씬 + 홀로그램 유리 블록(내부 발광) + 네온 회로 배선(흐름 애니메이션).
+구조도 탭의 스킨 토글로 전환 — 정본 스타일 결정 전 비교용 (views/blocks.js). */
+.bd.holo .canvas-wrap {
+  background:
+    radial-gradient(rgba(96, 165, 250, .10) 1px, transparent 1px) 0 0 / 26px 26px,
+    radial-gradient(1100px 480px at 70% -10%, rgba(59, 130, 246, .28) 0%, transparent 60%),
+    radial-gradient(800px 420px at 6% 112%, rgba(139, 92, 246, .22) 0%, transparent 58%),
+    linear-gradient(160deg, #0d1526 0%, #0a1020 52%, #070c18 100%);
+  border-color: #1e3a5f;
+  box-shadow: inset 0 1px 0 rgba(120, 170, 255, .18), 0 12px 30px rgba(2, 8, 20, .55);
+}
+.bd.holo .blk .body, .bd.holo .sblk .body {
+  fill: rgba(56, 130, 246, .13);
+  stroke: rgba(125, 190, 255, .85);
+  stroke-width: 1.2;
+  filter:
+    drop-shadow(0 3px 0 rgba(2, 10, 26, .85))
+    drop-shadow(0 5px 0 rgba(2, 10, 26, .5))
+    drop-shadow(0 0 9px rgba(59, 130, 246, .5))
+    drop-shadow(0 14px 18px rgba(2, 8, 20, .5));
+}
+.bd.holo .blk:hover .body, .bd.holo .blk:focus .body { fill: rgba(94, 234, 212, .16); stroke: #5eead4; }
+.bd.holo circle.body {
+  fill: rgba(56, 130, 246, .16);
+  stroke: rgba(125, 190, 255, .8);
+  filter: drop-shadow(0 2px 0 rgba(2, 10, 26, .8)) drop-shadow(0 0 7px rgba(59, 130, 246, .5));
+}
+.bd.holo .blk .ttl, .bd.holo .sblk .ttl, .bd.holo .sumsign { fill: #e4efff; }
+.bd.holo .blk .ttl2, .bd.holo .sblk .ttl2, .bd.holo .bname, .bd.holo .pname { fill: #9db8dc; }
+.bd.holo .pnum { fill: #7dd3fc; }
+.bd.holo .siglabel { fill: #8fb0d8; }
+.bd.holo .canvas-note { fill: #5d7699; }
+.bd.holo .wire {
+  stroke: #38bdf8;
+  filter: drop-shadow(0 0 4px rgba(56, 189, 248, .8));
+  stroke-dasharray: 11 7;
+  animation: bd-flow 2.6s linear infinite;
+}
+.bd.holo .wire.gs { stroke: #a78bfa; filter: drop-shadow(0 0 4px rgba(167, 139, 250, .7)); }
+.bd.holo .wire.soft { stroke: #64748b; filter: none; animation: none; }
+.bd.holo .wire.ff { stroke: #fbbf24; filter: drop-shadow(0 0 4px rgba(251, 191, 36, .6)); }
+@keyframes bd-flow { to { stroke-dashoffset: -18; } }
+.bd.holo .branch { fill: #38bdf8; }
+.bd.holo marker path[fill="#3b3b3b"] { fill: #38bdf8; }
+.bd.holo marker path[fill="#b45309"] { fill: #fbbf24; }
+.bd.holo .canvas-wrap path[stroke="#111"] { stroke: #bcd7f7; }
+.bd.holo .canvas-wrap path[stroke="#8a97a5"] { stroke: #7dd3fc; }
+.bd.holo .canvas-wrap line[stroke="#b8c4d0"] { stroke: rgba(147, 197, 253, .35); }
+/* 설계 순서 프레임·인라인 색 텍스트 — 고유 색상 유지한 채 다크 배경 대비만 상향 */
+.bd.holo .ring, .bd.holo .ringlabel, .bd.holo .annot { filter: brightness(1.75) saturate(1.15); }
+.bd.holo svg [data-p] { fill: #5eead4; }
