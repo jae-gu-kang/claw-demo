@@ -239,6 +239,11 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd .canvas-note { font-size: 11px; fill: #86868b; }
 .bd .sumsign { font-size: 12px; font-weight: 800; fill: #1d1d1f; text-anchor: middle; }
 .bd .annot { font-size: 11.5px; fill: #af52de; }
+/* 게인 스케줄링 블록 — 퍼플 액센트 카드 (주입 배선 .gs와 동색 계열) */
+.bd .gs-body { stroke: #af52de; }
+.bd .gs-ink { fill: #af52de; }
+.bd .gs-ink2 { fill: #86868b; }
+.bd marker path[fill="#8a5cf6"] { fill: #af52de; }
 
 /* 하위 페이지 헤더 */
 .bd .pagehead { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; flex-wrap: wrap; }
@@ -321,4 +326,8 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd.holo .leg-cap, .bd.holo .leg-note { fill: #8fb0d8; }
 .bd.holo .leglabel { fill: #e4efff; }
 .bd.holo .legend-item:hover .leglabel, .bd.holo .legend-item:focus .leglabel { fill: #7dd3fc; }
+.bd.holo .gs-body { stroke: rgba(196, 181, 253, .9); fill: rgba(139, 92, 246, .16); }
+.bd.holo .gs-ink { fill: #c4b5fd; }
+.bd.holo .gs-ink2 { fill: #9db8dc; }
+.bd.holo marker path[fill="#8a5cf6"] { fill: #a78bfa; }
 .bd.holo svg [data-p] { fill: #5eead4; }

@@ -78,14 +78,16 @@ export const TOP_SVG = `
     <text class="leg-note" x="1672" y="238">항목 클릭 → 해당 설계 화면</text>
   </g>
 
-  <!-- 게인 스케줄링 (공통 — AP·SCAS 게인 주입) -->
+  <!-- 게인 스케줄링 (공통 — AP·SCAS 게인 주입). 주입 배선의 가로 구간은 프레임
+       상단선들 사이 좁은 띠(122~150)를 피해 빈 공간(y172)으로 — 프레임과는
+       90° 수직 교차만 (평행 근접 금지) -->
   <g class="blk" data-block="schedule" tabindex="0">
-    <rect class="body" x="620" y="40" width="220" height="54" rx="3" style="stroke-dasharray:6 4;stroke:#8a5cf6"/>
-    <text class="ttl" x="730" y="62" style="font-size:13.5px;fill:#6d28d9">${B.schedule.title}</text>
-    <text class="ttl2" x="730" y="80" style="fill:#7c5cd6">${B.schedule.sub}</text>
+    <rect class="body gs-body" x="620" y="36" width="220" height="52" rx="10"/>
+    <text class="ttl gs-ink" x="730" y="58" style="font-size:13.5px">${B.schedule.title}</text>
+    <text class="ttl2 gs-ink2" x="730" y="76">${B.schedule.sub}</text>
   </g>
-  <path class="wire gs" d="M690 94 V132 H555 V196" marker-end="url(#arrgs)"/>
-  <path class="wire gs" d="M770 94 V132 H900 V196" marker-end="url(#arrgs)"/>
+  <path class="wire gs" d="M690 88 V172 H555 V194" marker-end="url(#arrgs)"/>
+  <path class="wire gs" d="M770 88 V172 H900 V194" marker-end="url(#arrgs)"/>
 
   <!-- 주 신호 흐름 (좌 → 우) -->
   <g class="blk" data-block="planner" tabindex="0">
