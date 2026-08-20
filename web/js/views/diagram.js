@@ -155,7 +155,9 @@ export const TOP_SVG = `
   </g>
   <text class="bname" x="1465" y="286" style="font-size:10.5px">델타윙 · 쌍발 · 엘레본×4 · 러더</text>
 
-  <!-- 피드백 (참값 → 항법 → NavOutput만 소비: 참값 차단 계약 03 §4) -->
+  <!-- 피드백 (참값 → 항법 → NavOutput만 소비: 참값 차단 계약 03 §4).
+       리턴 리서(세로선)는 프레임·블록 엣지와 평행 근접 금지 — 간격 채널 중앙 배치.
+       소비 신호 라벨은 회전 텍스트 대신 버스(y512) 위 가로 텍스트 — 각 분기점 옆 -->
   <path class="wire" d="M1540 218 H1570 V512 H1334" marker-end="url(#arrw)"/>
   <g class="blk" data-block="nav" tabindex="0">
     <rect class="body" x="1150" y="480" width="180" height="64" rx="3"/>
@@ -168,11 +170,11 @@ export const TOP_SVG = `
   <text class="siglabel" x="690" y="530">항법 출력 (위치 · 속도 · 자세 · 각속도) — 법칙·유도·스케줄은 이것만 소비</text>
   <circle class="branch" cx="818" cy="512" r="3.4"/>
   <path class="wire" d="M818 512 V252 H826" marker-end="url(#arrw)"/>
-  <text class="siglabel" x="806" y="388" transform="rotate(-90 806 388)">θ φ q p r</text>
-  <circle class="branch" cx="472" cy="512" r="3.4"/>
-  <path class="wire" d="M472 512 V252 H476" marker-end="url(#arrw)"/>
-  <text class="siglabel" x="460" y="388" transform="rotate(-90 460 388)">V h ψ</text>
-  <text class="siglabel" x="224" y="388" transform="rotate(-90 224 388)">위치 · 속도</text>
+  <text class="siglabel" x="862" y="500">θ φ q p r</text>
+  <circle class="branch" cx="466" cy="512" r="3.4"/>
+  <path class="wire" d="M466 512 V252 H476" marker-end="url(#arrw)"/>
+  <text class="siglabel" x="512" y="500">V h ψ</text>
+  <text class="siglabel" x="300" y="500">위치 · 속도</text>
 
   <text class="canvas-note" x="24" y="656">※ 스로틀 명령(δt)은 오토파일럿 속도 루프에서 생성되어 차동추력 보상과 합쳐져 스로틀×2로 출력 · 블록 클릭 시 서브시스템으로 진입</text>
   <text class="canvas-note" x="24" y="674">제어 100 Hz (틱 사이 ZOH) · 플랜트 dt 10 ms RK4 · 항법 자체 갱신주기/지연 — 멀티레이트 [확정 02 §6] · 자유 배선 없음 [확정 02 §4]</text>
