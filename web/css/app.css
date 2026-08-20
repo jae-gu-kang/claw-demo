@@ -177,14 +177,8 @@ canvas.plot { background: #fff; border: 1px solid var(--line); border-radius: 6p
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), 0 10px 26px rgba(23, 42, 62, .10);
 }
 .bd .canvas-wrap.sub { border-radius: 0 0 14px 14px; }
-/* 씬 전체 원근 기울기 — 블록별 회전은 배선이 어긋나므로 씬 단위로만.
-상단이 살짝 뒤로 눕는 테이블탑 뷰. 기울기·두께는 여기 한 곳에서 조절. */
 .bd .canvas-wrap { padding: 8px 0 16px; }
-.bd .canvas-wrap svg {
-  display: block; width: 100%; height: auto;
-  transform: perspective(1500px) rotateX(5.5deg);
-  transform-origin: 50% 12%;
-}
+.bd .canvas-wrap svg { display: block; width: 100%; height: auto; }
 .bd .canvas-wrap.top svg { min-width: 1150px; }
 .bd .canvas-wrap.sub svg { min-width: 720px; max-width: 1020px; margin: 0 auto; }
 .bd .hint-row { margin-top: 10px; font-size: 12px; color: var(--bd-ink-soft); }
