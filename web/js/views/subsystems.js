@@ -568,21 +568,21 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M330 280 V190 H356" marker-end="url(#aw-guid)"/>
   <path class="wire" d="M330 280 V350 H356" marker-end="url(#aw-guid)"/>
   <!-- 경로추종 (레지스트리 교체 가능) -->
-  <g class="sblk"><rect class="body" x="360" y="150" width="200" height="80" rx="3"/>
+  <g class="blk" data-child="path" tabindex="0"><rect class="body" x="360" y="150" width="200" height="80" rx="3"/>
     <text class="ttl" x="460" y="172" style="font-size:13px">경로추종 — LOS [기본값]</text>
     <text class="ttl2" x="460" y="190">현위치→활성 WP 방위각</text>
     <text class="ttl2" x="460" y="204">도달반경 진입 → 다음 WP (연쇄 스킵)</text>
-    <text class="ttl2" x="460" y="218">소진 → done · 마지막 헤딩 유지</text></g>
+    <text class="ttl2" x="460" y="218">소진 → done · 유지 · 클릭 → 내부</text></g>
   <path class="wire" d="M560 175 H636" marker-end="url(#aw-guid)"/>
   <text class="siglabel" x="598" y="163">ψ_wp</text>
   <path class="wire" d="M560 215 H590 V270 H480 V296" marker-end="url(#aw-guid)"/>
   <text class="siglabel" x="540" y="262">path_done</text>
   <!-- 모드 시퀀서 -->
-  <g class="sblk"><rect class="body" x="360" y="300" width="200" height="100" rx="3"/>
+  <g class="blk" data-child="modes" tabindex="0"><rect class="body" x="360" y="300" width="200" height="100" rx="3"/>
     <text class="ttl" x="460" y="324" style="font-size:13px">모드 시퀀서</text>
     <text class="ttl2" x="460" y="344">선언 테이블 {명령·이탈·next}</text>
     <text class="ttl2" x="460" y="360">이탈: time·alt·speed·path_done</text>
-    <text class="ttl2" x="460" y="376">순차 체인 · 전환 스텝당 1회</text></g>
+    <text class="ttl2" x="460" y="376">순차 체인 · 스텝당 1회 · 클릭 → 내부</text></g>
   <path class="wire" d="M560 350 H636" marker-end="url(#aw-guid)"/>
   <text class="siglabel" x="598" y="338">활성 모드</text>
   <circle class="branch" cx="610" cy="350" r="3.2"/>
@@ -621,7 +621,119 @@ export const SUBSYSTEMS = {
   <li>웨이포인트 열 → 경로 추종 <span class="chip ok">확정</span> · M8 1차는 <b>LOS</b> <span class="chip dft">기본값</span> — L1/벡터필드 선정은 <span class="chip tbd">TBD</span></li>
   <li>모드·게인 전환 시 범프리스 처리 (적분기 초기화 · 명령 페이딩 — Fader) <span class="chip tbd">TBD</span></li>
   <li>항법 무효(valid=False) 시 전환·경로 갱신 <b>동결 + 마지막 명령 유지</b> <span class="chip dft">기본값</span> — 첫 유효 이전엔 전 축 비활성 (M7 웜스타트 홀드와 결합)</li>
+  <li>경로추종·모드 시퀀서 내부는 블록 클릭 — 층3</li>
 </ul>`,
+
+    children: {
+      path: {
+        crumb: "경로추종",
+        title: "경로추종 — LOS", eng: "LosPath — step(nav) → (heading, done) · 레지스트리 교체 가능 컴포넌트",
+        chips: ["ok", "dft", "tbd"],
+        svg: `
+<svg viewBox="0 0 960 380" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aw-gpath" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
+  <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
+  <text class="pname" x="52" y="140">NavOutput</text>
+  <path class="wire" d="M66 108 H96" marker-end="url(#aw-gpath)"/>
+  <g class="sblk"><rect class="body" x="100" y="82" width="170" height="52" rx="3"/>
+    <text class="ttl" x="185" y="101" style="font-size:13px">위치 추출</text>
+    <text class="ttl2" x="185" y="119">(n, e) = pos_n 수평면</text></g>
+  <path class="wire" d="M270 108 H316" marker-end="url(#aw-gpath)"/>
+  <g class="sblk"><rect class="body" x="320" y="72" width="260" height="72" rx="3"/>
+    <text class="ttl" x="450" y="94" style="font-size:13px">도달 판정 — 연쇄 스킵 (while)</text>
+    <text class="ttl2" x="450" y="112">dn·de = 활성 WP − (n, e)</text>
+    <text class="ttl2" x="450" y="130">√(dn²+de²) ≤ 도달반경 → 다음 WP</text></g>
+  <path class="wire" d="M580 108 H636" marker-end="url(#aw-gpath)"/>
+  <text class="siglabel" x="608" y="96">미도달</text>
+  <g class="sblk"><rect class="body" x="640" y="82" width="180" height="52" rx="3"/>
+    <text class="ttl" x="730" y="101" style="font-size:13px">LOS 방위각</text>
+    <text class="ttl2" x="730" y="119">ψ_wp = atan2(de, dn)</text></g>
+  <path class="wire" d="M820 108 H866" marker-end="url(#aw-gpath)"/>
+  <g class="sblk"><rect class="body" x="870" y="96" width="36" height="24" rx="12"/><text class="pnum" x="888" y="112">1</text></g>
+  <text class="pname" x="884" y="140">ψ_wp → heading 선택</text>
+  <path class="wire" d="M450 144 V196" marker-end="url(#aw-gpath)"/>
+  <text class="siglabel" x="540" y="176">잔여 WP 없음 (소진)</text>
+  <g class="sblk"><rect class="body" x="340" y="200" width="220" height="72" rx="3"/>
+    <text class="ttl" x="450" y="222" style="font-size:13px">웨이포인트 소진</text>
+    <text class="ttl2" x="450" y="242">done=True · 마지막 헤딩 유지</text>
+    <text class="ttl2" x="450" y="260">미계산 소진 → 현재 침로 시드</text></g>
+  <path class="wire" d="M560 236 H700" marker-end="url(#aw-gpath)"/>
+  <g class="sblk"><rect class="body" x="704" y="224" width="36" height="24" rx="12"/><text class="pnum" x="722" y="240">2</text></g>
+  <text class="pname" x="726" y="268">done → 모드 시퀀서</text>
+  <text class="canvas-note" x="24" y="320">※ 반경 내 연쇄 스킵 — 붙은 웨이포인트 여러 개를 한 스텝에 통과 · done 후에도 heading 출력은 마지막 값 유지 — 출력 계약은 (heading, done) 상시 쌍</text>
+  <text class="canvas-note" x="24" y="340">※ 소진 안전: 첫 헤딩 계산 전 소진(빈 목록·반경 내 시작)이면 정북(0) 아닌 현재 침로 명령 — 조용한 급선회 방지 · 도달반경 200 m [기본값] — 편집: 시뮬 탭</text>
+  <text class="canvas-note" x="24" y="360">※ 경로는 헤딩만 담당 — 고도·속도는 모드 테이블 소관 (M8 분업) · L1·벡터필드 대안은 같은 step(nav)→(heading, done) 계약으로 등록 [TBD 01 §3.3]</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li>교체 계약: <span class="mono">step(nav) → (heading_cmd, done)</span> — L1·벡터필드 등 대안 알고리즘 선정 <span class="chip tbd">TBD 01 §3.3</span> · M8 1차는 <b>LOS</b> <span class="chip dft">기본값</span></li>
+  <li>도달 반경 진입 시 다음 웨이포인트 — <b>반경 내 연쇄 스킵</b> 허용 (while) · 도달반경 accept_radius 200 m <span class="chip dft">기본값</span>, 편집은 시뮬 탭 미션 그룹</li>
+  <li>소진 안전: 헤딩을 한 번도 계산하기 전 소진(빈 목록·반경 내 시작)이면 정북(0)이 아닌 <b>현재 침로</b>를 명령 — 조용한 급선회 방지 <span class="chip ok">확정</span></li>
+  <li>웨이포인트는 NED 수평면 (n, e)[m] 열 — 고도·속도는 모드 테이블 소관 (M8 분업: 경로는 헤딩만) <span class="chip ok">확정</span></li>
+</ul>`,
+      },
+      modes: {
+        crumb: "모드 시퀀서",
+        title: "모드 시퀀서 — 선언 테이블 실행기", eng: "ModeSequencer + ModeSpec · 이탈조건 DSL · 전환 스텝당 1회",
+        chips: ["ok", "dft", "tbd"],
+        svg: `
+<svg viewBox="0 0 960 430" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="aw-gmod" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+    <marker id="as-gmod" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
+  </defs>
+  <rect x="30" y="48" width="300" height="84" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="annot" x="180" y="72" text-anchor="middle">이탈조건 DSL — 직렬화 튜플 (웹 편집 대상)</text>
+  <text class="annot" x="180" y="92" text-anchor="middle">(always) (time_ge s) (alt_ge m) (alt_le m)</text>
+  <text class="annot" x="180" y="112" text-anchor="middle">(speed_ge) (speed_le) (path_done)</text>
+  <g class="sblk"><rect class="body" x="370" y="36" width="330" height="80" rx="3"/>
+    <text class="ttl" x="535" y="58" style="font-size:13px">모드 테이블 {name → ModeSpec}</text>
+    <text class="ttl2" x="535" y="78">speed·alt·heading — None = 축 비활성</text>
+    <text class="ttl2" x="535" y="94">heading: 숫자 | "path" | None</text>
+    <text class="ttl2" x="535" y="110">구성 검증: 이름 중복·next 참조·조건 arity</text></g>
+  <path class="wire soft" d="M535 116 V166" marker-end="url(#as-gmod)"/>
+  <g class="sblk"><rect class="body" x="210" y="150" width="150" height="52" rx="3"/>
+    <text class="ttl" x="285" y="169" style="font-size:13px">활성 모드 name</text>
+    <text class="ttl2" x="285" y="187">t_entry 보관</text></g>
+  <path class="wire" d="M360 176 H396" marker-end="url(#aw-gmod)"/>
+  <g class="sblk"><rect class="body" x="400" y="170" width="270" height="110" rx="3"/>
+    <text class="ttl" x="535" y="194" style="font-size:13px">이탈 판정 — 스텝당 1회</text>
+    <text class="ttl2" x="535" y="214">next 없으면 종단 — 평가 생략·유지</text>
+    <text class="ttl2" x="535" y="232">eval_condition(exit_when, nav, ctx)</text>
+    <text class="ttl2" x="535" y="250">ctx: t_mode = t − t_entry · path_done</text>
+    <text class="ttl2" x="535" y="268">충족 → 전환 · 미충족 → 현행 유지</text></g>
+  <path class="wire" d="M670 200 H726" marker-end="url(#aw-gmod)"/>
+  <text class="siglabel" x="698" y="192">충족</text>
+  <g class="sblk"><rect class="body" x="730" y="170" width="190" height="64" rx="3"/>
+    <text class="ttl" x="825" y="192" style="font-size:13px">전환</text>
+    <text class="ttl2" x="825" y="212">name ← next</text>
+    <text class="ttl2" x="825" y="228">t_entry ← t (체류 리셋)</text></g>
+  <path class="wire" d="M820 234 V330 H285 V206" marker-end="url(#aw-gmod)"/>
+  <g class="sblk"><rect class="body" x="30" y="218" width="36" height="24" rx="12"/><text class="pnum" x="48" y="234">1</text></g>
+  <text class="pname" x="52" y="262">NavOutput</text>
+  <path class="wire" d="M66 230 H396" marker-end="url(#aw-gmod)"/>
+  <g class="sblk"><rect class="body" x="30" y="288" width="36" height="24" rx="12"/><text class="pnum" x="48" y="304">2</text></g>
+  <text class="pname" x="95" y="332">path_done ← 경로추종</text>
+  <path class="wire" d="M66 300 H370 V262 H396" marker-end="url(#aw-gmod)"/>
+  <path class="wire" d="M535 280 V360 H866" marker-end="url(#aw-gmod)"/>
+  <text class="siglabel" x="620" y="352">cur — 전환 반영 후</text>
+  <g class="sblk"><rect class="body" x="870" y="348" width="36" height="24" rx="12"/><text class="pnum" x="888" y="364">1</text></g>
+  <text class="pname" x="870" y="392">활성 ModeSpec</text>
+  <text class="pname" x="860" y="410">→ GuidanceCommand 구성</text>
+  <text class="canvas-note" x="24" y="424">※ Stateflow 미사용 [확정 01 §3.3.1] — 순차 체인: 진입 = 이전 모드의 이탈 → next [기본값] · 초기 모드 진입 시각 = 첫 스텝 t · 항법 무효 시 상류 유효성 게이트가 동결</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li>선언적 모드 테이블 + 실행기 — Stateflow식 상태머신 없음 <span class="chip ok">확정 01 §3.3.1</span> · 진입조건은 순차 체인(이전 모드의 이탈 → next)으로 대체 <span class="chip dft">기본값</span> — 진입·이탈 상세 <span class="chip tbd">TBD</span></li>
+  <li>이탈조건 DSL 7종 — <span class="mono">always · time_ge · alt_ge · alt_le · speed_ge · speed_le · path_done</span> · validate_condition이 구성 시점에 kind·인자 개수·수치 타입을 시끄럽게 거부 (배치 시뮬 도중 오류 방지)</li>
+  <li>time_ge는 모드 <b>체류 시간</b> 기준 (진입 시각부터) · path_done은 경로추종 웨이포인트 소진</li>
+  <li>next=None은 종단 모드 — 이탈 평가 자체를 건너뛰고 유지 · 전환은 스텝당 1회 <span class="chip dft">기본값</span> (100 Hz에서 충분)</li>
+  <li>명령 None = 해당 축 비활성 (오토파일럿 트림 홀드와 결합) · 전환 순간의 명령 점프는 AP 명령필터가 완충 — Fader 페이딩은 백로그</li>
+</ul>`,
+      },
+    },
   },
 
   // ── α 리미터 (보호) ──────────────────────────────────────────────────
@@ -838,19 +950,19 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
   <text class="pname" x="48" y="140">타면 변위</text>
   <path class="wire" d="M66 108 H146" marker-end="url(#aw-pl)"/>
-  <g class="sblk"><rect class="body" x="150" y="60" width="290" height="96" rx="3"/>
+  <g class="blk" data-child="aero" tabindex="0"><rect class="body" x="150" y="60" width="290" height="96" rx="3"/>
     <text class="ttl" x="295" y="82" style="font-size:13px">공력 — AeroModel</text>
     <text class="ttl2" x="295" y="100">DB 계수 → 동체축 {CX·CY·CZ·Cl·Cm·Cn}</text>
     <text class="ttl2" x="295" y="116">무차원 p̂·q̂·r̂ = pb/2V · qc̄/2V · rb/2V</text>
     <text class="ttl2" x="295" y="132">F = q̄S·C · M = q̄S·[b·Cl, c̄·Cm, b·Cn]</text>
-    <text class="ttl2" x="295" y="148">ρ·a ← ISA(h) — q̄=½ρV² · mach=V/a</text></g>
+    <text class="ttl2" x="295" y="148">ρ·a ← ISA(h) — q̄=½ρV² · 클릭 → 내부</text></g>
   <g class="sblk"><rect class="body" x="30" y="208" width="36" height="24" rx="12"/><text class="pnum" x="48" y="224">2</text></g>
   <text class="pname" x="48" y="252">스로틀 ×2</text>
   <path class="wire" d="M66 220 H146" marker-end="url(#aw-pl)"/>
-  <g class="sblk"><rect class="body" x="150" y="184" width="290" height="72" rx="3"/>
+  <g class="blk" data-child="prop" tabindex="0"><rect class="body" x="150" y="184" width="290" height="72" rx="3"/>
     <text class="ttl" x="295" y="206" style="font-size:13px">추진 — TwinEngine</text>
     <text class="ttl2" x="295" y="226">추력 맵 [기본 max_thrust·δt] · 0~1 클립</text>
-    <text class="ttl2" x="295" y="244">M = r_L×F_L + r_R×F_R — 좌 우세 → +N</text></g>
+    <text class="ttl2" x="295" y="244">M = r_L×F_L + r_R×F_R · 클릭 → 내부</text></g>
   <g class="sblk"><rect class="body" x="150" y="286" width="290" height="64" rx="3"/>
     <text class="ttl" x="295" y="308" style="font-size:13px">환경 — ISA 대기 · 중력</text>
     <text class="ttl2" x="295" y="328">f_grav = C_bn·[0, 0, m·g] (동체축)</text>
@@ -862,12 +974,12 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="545" y="192">Σ F_b</text>
     <text class="ttl" x="545" y="214">· M_b</text></g>
   <path class="wire" d="M600 200 H656" marker-end="url(#aw-pl)"/>
-  <g class="sblk"><rect class="body" x="660" y="96" width="270" height="140" rx="3"/>
+  <g class="blk" data-child="eom" tabindex="0"><rect class="body" x="660" y="96" width="270" height="140" rx="3"/>
     <text class="ttl" x="795" y="120" style="font-size:13px">6DOF 강체 — RigidBody · RK4</text>
     <text class="ttl2" x="795" y="142">x(13) = [p_n · v_b · q_nb · ω_b]</text>
     <text class="ttl2" x="795" y="160">ṗ = C_nb·v · v̇ = F/m − ω×v</text>
     <text class="ttl2" x="795" y="178">q̇ = ½ q⊗(0,ω) · ω̇ = J⁻¹(M − ω×Jω)</text>
-    <text class="ttl2" x="795" y="196">RK4 dt 10 ms · 스텝마다 q 재정규화</text></g>
+    <text class="ttl2" x="795" y="196">RK4 dt 10 ms · q 재정규화 · 클릭 → 내부</text></g>
   <path class="wire" d="M930 166 H948" marker-end="url(#aw-pl)"/>
   <g class="sblk"><rect class="body" x="952" y="154" width="36" height="24" rx="12"/><text class="pnum" x="970" y="170">1</text></g>
   <text class="pname" x="952" y="202">참값 상태</text>
@@ -875,10 +987,10 @@ export const SUBSYSTEMS = {
   <circle class="branch" cx="938" cy="166" r="3.2"/>
   <path class="wire soft" d="M938 166 V36 H295 V56" marker-end="url(#as-pl)"/>
   <text class="siglabel" x="610" y="28">상태 피드백 (참값): v_b · ω_b · q_nb · h</text>
-  <g class="sblk"><rect class="body" x="660" y="340" width="280" height="72" rx="3"/>
+  <g class="blk" data-child="mass" tabindex="0"><rect class="body" x="660" y="340" width="280" height="72" rx="3"/>
     <text class="ttl" x="800" y="362" style="font-size:13px">질량특성 — FuelMass.at(fuel)</text>
     <text class="ttl2" x="800" y="382">m · cg · J — 잔여 연료 선형 보간</text>
-    <text class="ttl2" x="800" y="400">스텝 사이 갱신 [준정적] · fuel ← 소모 적분</text></g>
+    <text class="ttl2" x="800" y="400">스텝 사이 갱신 [준정적] · 클릭 → 내부</text></g>
   <path class="wire soft" d="M800 340 V240" marker-end="url(#as-pl)"/>
   <text class="siglabel" x="836" y="300">m · J</text>
   <path class="wire soft" d="M660 376 H470 V318 H444" marker-end="url(#as-pl)"/>
@@ -896,6 +1008,7 @@ export const SUBSYSTEMS = {
   <li>공력: CFD 기반 DB — 축: <span class="mono">Mach, α, β, 타면각, 고도</span> (정미 + 동미계수) <span class="chip ok">확정</span> · 현재는 데모 프로파일 (CFD DB 결선 대기) · 보간/외삽 정책 <span class="chip tbd">TBD</span></li>
   <li>실속: <b>명시적 실속 경계 테이블</b> <span class="mono">α_stall = f(Mach, 형상조건)</span> — 공력팀 정본 <span class="chip ok">확정</span></li>
   <li>환경: WGS-84, ISA <span class="chip ok">확정</span> (바람/난류 Dryden은 추후 확장) · RK4 dt 10 ms <span class="chip ok">확정 02 §6</span></li>
+  <li>공력·추진·6DOF·질량특성 내부는 블록 클릭 — 층3</li>
 </ul>
 <h4>설계 1단계 — 트림 · 선형해석</h4>
 <ul>
@@ -904,6 +1017,185 @@ export const SUBSYSTEMS = {
   <li>선형화: 트림점별 구간 선형화(수치섭동) · 종축 / 횡·방향축 분리 <span class="chip ok">확정</span> · 작동기·지연 포함이 기본(제외 마진은 낙관적) <span class="chip dft">기본값 01 §4.2</span></li>
   <li>평가: 고유치·감쇠비(단주기·장주기·더치롤·롤·스파이럴) · 이득·위상여유 <span class="chip dft">기본값</span> · <b>마진 맵</b>(Mach-고도-연료 격자) <span class="chip ok">확정</span></li>
 </ul>`,
+
+    children: {
+      aero: {
+        crumb: "공력",
+        title: "공력 — AeroModel", eng: "공력 DB 계수 함수 소비 · 무차원화·차원화 담당 (M5.aero)",
+        chips: ["ok", "tbd"],
+        svg: `
+<svg viewBox="0 0 960 440" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="aw-paero" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+    <marker id="as-paero" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
+  </defs>
+  <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
+  <text class="pname" x="48" y="140">v_b · ω_b</text>
+  <path class="wire" d="M66 108 H106" marker-end="url(#aw-paero)"/>
+  <g class="sblk"><rect class="body" x="110" y="72" width="200" height="72" rx="3"/>
+    <text class="ttl" x="210" y="94" style="font-size:13px">바람각 — wind_angles</text>
+    <text class="ttl2" x="210" y="114">V · α · β 산출 (바람 0: v_air = v_b)</text>
+    <text class="ttl2" x="210" y="132">V = 0 → 힘·모멘트 0 (가드)</text></g>
+  <path class="wire" d="M310 108 H336" marker-end="url(#aw-paero)"/>
+  <g class="sblk"><rect class="body" x="340" y="72" width="220" height="72" rx="3"/>
+    <text class="ttl" x="450" y="94" style="font-size:13px">무차원 각속도</text>
+    <text class="ttl2" x="450" y="114">p̂ = pb/2V · q̂ = qc̄/2V</text>
+    <text class="ttl2" x="450" y="132">r̂ = rb/2V</text></g>
+  <path class="wire" d="M560 108 H606" marker-end="url(#aw-paero)"/>
+  <g class="sblk"><rect class="body" x="610" y="60" width="270" height="96" rx="3"/>
+    <text class="ttl" x="745" y="82" style="font-size:13px">coef_fn — 공력 DB 조회</text>
+    <text class="ttl2" x="745" y="102">입력 α·β·V·mach·p̂·q̂·r̂ + 타면각</text>
+    <text class="ttl2" x="745" y="120">출력 동체축 {CX·CY·CZ·Cl·Cm·Cn}</text>
+    <text class="ttl2" x="745" y="138">부호·기준점은 DB 정의 — 코드 무가정</text></g>
+  <path class="wire" d="M745 156 V196" marker-end="url(#aw-paero)"/>
+  <g class="sblk"><rect class="body" x="610" y="200" width="270" height="76" rx="3"/>
+    <text class="ttl" x="745" y="222" style="font-size:13px">차원화 — q̄ = ½ρV²</text>
+    <text class="ttl2" x="745" y="242">F_b = q̄S·[CX, CY, CZ]</text>
+    <text class="ttl2" x="745" y="258">M_b = q̄S·[b·Cl, c̄·Cm, b·Cn]</text></g>
+  <path class="wire" d="M745 276 V316" marker-end="url(#aw-paero)"/>
+  <g class="sblk"><rect class="body" x="727" y="320" width="36" height="24" rx="12"/><text class="pnum" x="745" y="336">1</text></g>
+  <text class="pname" x="745" y="364">F_b · M_b → Σ</text>
+  <g class="sblk"><rect class="body" x="30" y="196" width="36" height="24" rx="12"/><text class="pnum" x="48" y="212">2</text></g>
+  <text class="pname" x="95" y="240">타면각 (작동기 후)</text>
+  <path class="wire" d="M66 208 H590 V102 H606" marker-end="url(#aw-paero)"/>
+  <g class="sblk"><rect class="body" x="110" y="290" width="200" height="52" rx="3"/>
+    <text class="ttl2" x="210" y="312" style="font-weight:700">ISA(h) — ρ · mach</text>
+    <text class="ttl2" x="210" y="330">플랜트 조립(fm)이 주입</text></g>
+  <path class="wire soft" d="M310 316 H560 V240 H606" marker-end="url(#as-paero)"/>
+  <text class="canvas-note" x="24" y="408">※ 풍축 DB(CL·CD) 헬퍼 wind_to_body_coeffs [기본값 변환]: CX = CL·sinα − CD·cosα·cosβ · CY = −CD·sinβ · CZ = −CL·cosα − CD·sinα·cosβ</text>
+  <text class="canvas-note" x="24" y="428">※ 기준값 S·c̄·b 양수 검증 (생성 거부) · 현재 데모 프로파일 — CFD DB 규격 확정 시 M3 Table 조회를 이 인터페이스로 래핑 [TBD 02 §5.1]</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li>규약 원칙: 계수·모멘트 부호는 <b>공력 DB가 정의</b> — 코드는 가정하지 않음 → coef_fn은 동체축 계수 {CX·CY·CZ·Cl·Cm·Cn}를 직접 반환 <span class="chip ok">확정 conventions.md</span></li>
+  <li>풍축(양력·항력) 형태 DB를 위한 <span class="mono">wind_to_body_coeffs</span> 헬퍼 제공 <span class="chip dft">기본값 변환식</span></li>
+  <li>무차원 각속도 p̂=pb/2V · q̂=qc̄/2V · r̂=rb/2V — 동미계수 축 · V=0이면 출력 0 (0 나눗셈 가드)</li>
+  <li>실제 CFD DB 축 규격 <span class="chip tbd">TBD 02 §5.1</span> — 확정 시 M3 Table 조회를 이 인터페이스로 감쌈 · 모멘트 기준점 CG 이전은 플랜트 조립 지점에서 <span class="chip tbd">TBD</span></li>
+</ul>`,
+      },
+      prop: {
+        crumb: "추진",
+        title: "추진 — TwinEngine", eng: "스로틀-추력 맵 + 엔진 배치 모멘트 (차동추력 부호 기준)",
+        chips: ["ok", "dft", "tbd"],
+        svg: `
+<svg viewBox="0 0 960 250" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aw-pprop" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
+  <g class="sblk"><rect class="body" x="30" y="92" width="36" height="24" rx="12"/><text class="pnum" x="48" y="108">1</text></g>
+  <text class="pname" x="48" y="136">스로틀 [좌, 우]</text>
+  <path class="wire" d="M66 104 H106" marker-end="url(#aw-pprop)"/>
+  <g class="sblk"><rect class="body" x="110" y="78" width="140" height="52" rx="3"/>
+    <text class="ttl" x="180" y="97" style="font-size:13px">0~1 클립</text>
+    <text class="ttl2" x="180" y="115">좌·우 각각 (규약)</text></g>
+  <path class="wire" d="M250 104 H286" marker-end="url(#aw-pprop)"/>
+  <g class="sblk"><rect class="body" x="290" y="78" width="220" height="52" rx="3"/>
+    <text class="ttl" x="400" y="97" style="font-size:13px">추력 맵 thrust_map(δt)</text>
+    <text class="ttl2" x="400" y="115">기본 max_thrust·δt 선형 [기본값]</text></g>
+  <path class="wire" d="M510 104 H546" marker-end="url(#aw-pprop)"/>
+  <g class="sblk"><rect class="body" x="550" y="66" width="260" height="88" rx="3"/>
+    <text class="ttl" x="680" y="88" style="font-size:13px">엔진 배치 모멘트</text>
+    <text class="ttl2" x="680" y="108">r_L = (x, −y, z) · r_R = (x, +y, z)</text>
+    <text class="ttl2" x="680" y="126">M = r_L×F_L + r_R×F_R</text>
+    <text class="ttl2" x="680" y="142">좌 추력 우세 → +N (기수 우측)</text></g>
+  <path class="wire" d="M810 104 H846" marker-end="url(#aw-pprop)"/>
+  <g class="sblk"><rect class="body" x="850" y="92" width="36" height="24" rx="12"/><text class="pnum" x="868" y="108">1</text></g>
+  <text class="pname" x="868" y="136">F_b · M_b → Σ</text>
+  <text class="canvas-note" x="24" y="204">※ 요축 보조 차동추력의 부호 기준 [확정 01 §2.4] — 믹서의 d = k_diff_thr·러더 배분이 이 모멘트를 소비 · 추력은 동체 +X 정렬</text>
+  <text class="canvas-note" x="24" y="224">※ thrust_map 콜러블 주입 가능 — 실기체 추력 맵 데이터 [TBD] 대비 · y_offset 음수는 생성 거부</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li>쌍발 — 요축 보조 <b>차동추력</b>의 부호 기준: 좌 추력 우세 → +N(기수 우측) <span class="chip ok">확정 01 §2.4</span> · 믹서의 차동 배분(d = k_diff_thr·러더)이 이 모멘트를 소비</li>
+  <li>스로틀-추력: <span class="mono">thrust_map(δt)</span> 콜러블 주입 가능 — 실기체 추력 맵 데이터 <span class="chip tbd">TBD</span> 대비 · 기본은 max_thrust·δt 선형 <span class="chip dft">기본값</span></li>
+  <li>엔진 위치 r_L·r_R는 CG 기준 동체축 — CG 이동 반영은 모멘트 기준점 이전과 같은 조립 지점에서 <span class="chip tbd">TBD</span></li>
+  <li>입력은 SurfaceCommand 규약 [좌, 우] 0~1 — 범위 밖은 클립</li>
+</ul>`,
+      },
+      eom: {
+        crumb: "6DOF",
+        title: "6DOF 강체 — RigidBody · RK4", eng: "13-상태 쿼터니언 운동방정식 · 고정스텝 RK4 (M5.eom)",
+        chips: ["ok", "dft"],
+        svg: `
+<svg viewBox="0 0 960 350" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="aw-peom" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+    <marker id="as-peom" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
+  </defs>
+  <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
+  <text class="pname" x="48" y="140">F_b · M_b ← Σ</text>
+  <path class="wire" d="M66 108 H106" marker-end="url(#aw-peom)"/>
+  <g class="sblk"><rect class="body" x="110" y="52" width="290" height="112" rx="3"/>
+    <text class="ttl" x="255" y="76" style="font-size:13px">상태미분 — RigidBody.deriv</text>
+    <text class="ttl2" x="255" y="96">ṗ_n = C_nb·v_b</text>
+    <text class="ttl2" x="255" y="112">v̇_b = F_b/m − ω×v_b</text>
+    <text class="ttl2" x="255" y="128">q̇ = ½ q ⊗ (0, ω)</text>
+    <text class="ttl2" x="255" y="144">ω̇ = J⁻¹(M_b − ω×Jω)</text></g>
+  <path class="wire" d="M400 108 H436" marker-end="url(#aw-peom)"/>
+  <g class="sblk"><rect class="body" x="440" y="64" width="250" height="88" rx="3"/>
+    <text class="ttl" x="565" y="86" style="font-size:13px">RK4 고정스텝 — dt 10 ms</text>
+    <text class="ttl2" x="565" y="106">k1~k4 — fm(x) 부단계마다 재평가</text>
+    <text class="ttl2" x="565" y="124">x⁺ = x + dt/6·(k1+2k2+2k3+k4)</text>
+    <text class="ttl2" x="565" y="140">[확정 02 §6]</text></g>
+  <path class="wire" d="M690 108 H726" marker-end="url(#aw-peom)"/>
+  <g class="sblk"><rect class="body" x="730" y="72" width="180" height="64" rx="3"/>
+    <text class="ttl" x="820" y="94" style="font-size:13px">쿼터니언 재정규화</text>
+    <text class="ttl2" x="820" y="114">스텝마다 — 드리프트 방지</text></g>
+  <path class="wire" d="M910 104 H912" marker-end="url(#aw-peom)"/>
+  <g class="sblk"><rect class="body" x="916" y="92" width="36" height="24" rx="12"/><text class="pnum" x="934" y="108">1</text></g>
+  <text class="pname" x="916" y="136">상태 x(13)</text>
+  <g class="sblk"><rect class="body" x="110" y="220" width="330" height="72" rx="3"/>
+    <text class="ttl" x="275" y="242" style="font-size:13px">준정적 질량 — set_mass_inertia</text>
+    <text class="ttl2" x="275" y="262">FuelMass.at(fuel) 결과 소비 · J⁻¹ 캐시 재계산</text>
+    <text class="ttl2" x="275" y="280">스텝 사이 갱신 — J 직접 대입 금지</text></g>
+  <path class="wire soft" d="M275 220 V168" marker-end="url(#as-peom)"/>
+  <text class="canvas-note" x="24" y="320">※ 상태 x(13) = [p_n(3) · v_b(3) · q_nb(4) · ω_b(3)] — NED · 동체 FRD · scalar-first Hamilton [conventions.md] · 중력 포함 여부는 조립자 몫 (플랜트 fm이 포함)</text>
+  <text class="canvas-note" x="24" y="340">※ 질량 양수 · J 3×3 대칭 · 주대각 양수 아니면 생성 거부 · 오일러 12-상태 미분(deriv_euler)은 트림·수치섭동 선형화 전용 — θ=±π/2 특이점 근방 금지</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li>상태 벡터 x(13) = [pos_n, vel_b, q_nb, omega_b] — NED · 동체 FRD · 쿼터니언 scalar-first Hamilton <span class="chip ok">확정 conventions.md</span></li>
+  <li>고정스텝 <b>RK4 dt 10 ms</b> <span class="chip ok">확정 02 §6</span> — 상태 의존 힘·모멘트 fm(x)를 부단계(k1~k4)마다 재평가 · 스텝마다 쿼터니언 재정규화</li>
+  <li>연료 질량·관성 변화는 준정적 — 조립자가 스텝 사이에 <span class="mono">set_mass_inertia</span>로 갱신 (J 직접 대입은 J⁻¹ 캐시를 낡은 값으로 남김 — 금지)</li>
+  <li>중력 포함 여부는 조립자 몫 — 플랜트 fm이 gravity_body(C_bn·[0,0,mg])를 합산 <span class="chip dft">기본값</span></li>
+</ul>`,
+      },
+      mass: {
+        crumb: "질량특성",
+        title: "질량특성 — FuelMass", eng: "잔여 연료 선형 보간 [기본값] — m · cg · J 준정적 (02 §5.5)",
+        chips: ["dft", "tbd"],
+        svg: `
+<svg viewBox="0 0 960 230" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aw-pmass" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
+  <g class="sblk"><rect class="body" x="30" y="92" width="36" height="24" rx="12"/><text class="pnum" x="48" y="108">1</text></g>
+  <text class="pname" x="52" y="136">fuel [kg]</text>
+  <path class="wire" d="M66 104 H106" marker-end="url(#aw-pmass)"/>
+  <g class="sblk"><rect class="body" x="110" y="78" width="170" height="52" rx="3"/>
+    <text class="ttl" x="195" y="97" style="font-size:13px">범위 클립</text>
+    <text class="ttl2" x="195" y="115">0 ~ fuel_max</text></g>
+  <path class="wire" d="M280 104 H316" marker-end="url(#aw-pmass)"/>
+  <g class="sblk"><rect class="body" x="320" y="60" width="300" height="96" rx="3"/>
+    <text class="ttl" x="470" y="84" style="font-size:13px">선형 보간 [기본값]</text>
+    <text class="ttl2" x="470" y="104">r = f / fuel_max · m = m_empty + f</text>
+    <text class="ttl2" x="470" y="122">cg = cg_e + r·(cg_f − cg_e)</text>
+    <text class="ttl2" x="470" y="140">J = J_e + r·(J_f − J_e)</text></g>
+  <path class="wire" d="M620 104 H846" marker-end="url(#aw-pmass)"/>
+  <g class="sblk"><rect class="body" x="850" y="92" width="36" height="24" rx="12"/><text class="pnum" x="868" y="108">1</text></g>
+  <text class="pname" x="868" y="136">m · cg · J</text>
+  <text class="pname" x="850" y="154">→ RigidBody · 중력</text>
+  <text class="canvas-note" x="24" y="200">※ 준정적(quasi-static) 취급 [확정 02 §5.5] — 시뮬 루프가 스텝 사이에 at(fuel) 조회 → RigidBody.set_mass_inertia 갱신 (운동방정식 내 ṁ 항 없음)</text>
+  <text class="canvas-note" x="24" y="220">※ cg는 모멘트 기준점 CG 이전에서 소비 예정 [TBD — DB 규격 확정 시] · m_empty 양수·fuel_max 음수는 생성 거부 · fuel ← 시뮬 소모 적분</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li>잔여 연료 <b>선형 보간</b> — m = m_empty + f · cg·J는 공허↔만재 사이 비율 보간 <span class="chip dft">기본값 02 §5.5</span> · 범위 밖 fuel은 클립</li>
+  <li>준정적 취급: 시뮬 루프가 스텝 사이에 at(fuel) 조회 → RigidBody 질량·관성 갱신 — 운동방정식에 ṁ 항 없음 <span class="chip ok">확정</span></li>
+  <li>cg는 모멘트 기준점 CG 이전(aero 조립 지점)에서 소비 예정 <span class="chip tbd">TBD — DB 규격 확정 시</span></li>
+</ul>`,
+      },
+    },
   },
 
   // ── 항법 (피드백) ────────────────────────────────────────────────────

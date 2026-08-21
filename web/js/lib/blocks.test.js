@@ -126,7 +126,7 @@ test("resolvePath: 트리 하강·절단 폴백 (해시 → 드릴다운 경로 
   assert.deepEqual(resolvePath(["scas", "constructor"], s), ["scas"]);
 });
 
-test("드릴다운 1차 범위 스냅샷: SCAS 3축 + 공유 PI(층4) · AP 3채널", () => {
+test("드릴다운 범위 스냅샷: SCAS 3축+공유 PI(층4) · AP 3채널 · 유도 2 · 플랜트 4", () => {
   const s = SUBSYSTEMS.scas;
   assert.deepEqual(Object.keys(s.children), ["pitch", "roll", "yaw"]);
   for (const axis of Object.values(s.children)) {
@@ -136,6 +136,9 @@ test("드릴다운 1차 범위 스냅샷: SCAS 3축 + 공유 PI(층4) · AP 3채
   assert.equal(s.children.pitch.children.pi, s.children.roll.children.pi);
   assert.equal(s.children.pitch.children.pi, s.children.yaw.children.pi);
   assert.deepEqual(Object.keys(SUBSYSTEMS.autopilot.children), ["hdg", "alt", "spd"]);
+  // 유도·플랜트 층3 — 엔진 모듈 단위와 1:1 (path.py·modes.py / aero·prop·eom·mass.py)
+  assert.deepEqual(Object.keys(SUBSYSTEMS.guidance.children), ["path", "modes"]);
+  assert.deepEqual(Object.keys(SUBSYSTEMS.plant.children), ["aero", "prop", "eom", "mass"]);
 });
 
 test("허브 계약: 시뮬 주입 경로 보유 블록(AP·작동기·항법)만 편집 가능", () => {
