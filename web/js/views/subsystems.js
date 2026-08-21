@@ -1334,7 +1334,7 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="155" y="84" style="font-size:13px">미션 편집 — 시뮬 탭</text>
     <text class="ttl2" x="155" y="104">모드 테이블 {명령 · 이탈 · next}</text>
     <text class="ttl2" x="155" y="120">웨이포인트 (N,E) · 도달반경</text>
-    <text class="ttl2" x="155" y="136">지도 편집은 백로그</text></g>
+    <text class="ttl2" x="155" y="136">NED 평면 지도 편집 (클릭·드래그·줌)</text></g>
   <path class="wire" d="M270 104 H306" marker-end="url(#aw-mp)"/>
   <g class="sblk"><rect class="body" x="310" y="60" width="250" height="88" rx="3"/>
     <text class="ttl" x="435" y="84" style="font-size:13px">검증 — 서버 · 엔진</text>
@@ -1357,7 +1357,7 @@ export const SUBSYSTEMS = {
 <h4>설계 노트</h4>
 <ul>
   <li>웨이포인트 열 + 선언적 모드 테이블 = <b>임무프로파일</b> — 엔진에 별도 플래너 모듈 없음 (시뮬 요청 → 서버 검증 → Guidance 조립)</li>
-  <li>편집처: 시뮬레이션 탭 미션 그룹(모드 테이블·웨이포인트·도달반경) — 지도 위 편집(오프라인 타일 폴백)은 백로그</li>
+  <li>편집처: 시뮬레이션 탭 미션 그룹(모드 테이블·웨이포인트·도달반경) — NED 평면 캔버스 지도 편집 구현 (실지도 타일은 폐쇄망 반입 검토 시)</li>
   <li>임무수행 단계의 상세 임무 로직은 별도 설계 범위 <span class="chip ok">확정 01 §3.3.1</span></li>
 </ul>`,
   },

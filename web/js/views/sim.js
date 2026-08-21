@@ -8,9 +8,11 @@ import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { buildModes, buildWaypoints, COND_KINDS } from "../lib/mission.js";
 import { modeSpans, strideFor } from "../lib/replay.js";
+import { moveWaypoint } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { lineChartCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
+import { createWpMap } from "./wpmap.js";
 
 // 기본 미션 = Phase 4 완주 회귀 미션 (test_mission — 상승→선회 항법→디센트→임무수행)
 let modeRows = [
@@ -28,6 +30,8 @@ let lastReplay = null; // {body, waypoints, acceptRadius}
 let runningJobId = null;
 // 제출 시점 스냅샷 — 실행 중 편집이 재생 오버레이를 오염시키지 않도록 (리뷰 S3)
 let runningSnapshot = { waypoints: [], acceptRadius: 0 };
+// 지도 줌/팬 상태 — 탭 재진입 시 유지 (wpRows·lastReplay와 동렬)
+let wpMapView = { view: null };
 
 export function render() {
   const errBox = el("div");
@@ -60,6 +64,17 @@ export function render() {
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
 
+  // NED 평면 지도 편집기 — 표와 양방향 동기 (단일 소스 = wpRows)
+  const wpMap = createWpMap({
+    getRows: () => wpRows,
+    getAcceptRadius: () => Number(f.accept.value) || 0,
+    getTrack: () => lastReplay &&
+      { pn: lastReplay.body.signals.pn, pe: lastReplay.body.signals.pe },
+    onRowsChanged: () => renderWpTable(wpBox, wpMap),
+    viewRef: wpMapView,
+  });
+  f.accept.addEventListener("input", () => wpMap.refresh()); // 도달반경 원 즉시 갱신
+
   const watch = () => attachProgress(progressBox, runningJobId, {
     onDone: async (job) => {
       runningJobId = null;
@@ -78,6 +93,7 @@ export function render() {
         };
         store.set("simResult", { id: job.result_id });
         renderReplay(replayBox);
+        wpMap.refresh(); // 지도 궤적 오버레이 갱신
       } catch (e) {
         showErr(e);
       }
@@ -157,7 +173,7 @@ export function render() {
       el("h2", {}, "미션 정의 (선언적 모드 테이블 — 01 §3.1)"),
       modeBox,
       el("h2", {}, "웨이포인트 (N, E) [m]"),
-      wpBox,
+      el("div", { class: "row" }, wpBox, wpMap.root),
     ),
     el("div", { class: "panel" },
       el("h2", {}, "실행 조건"),
@@ -208,7 +224,7 @@ export function render() {
   );
 
   renderModeTable(modeBox);
-  renderWpTable(wpBox);
+  renderWpTable(wpBox, wpMap);
   if (lastReplay) renderReplay(replayBox);
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
   return root;
@@ -257,29 +273,43 @@ function renderModeTable(modeBox) {
   );
 }
 
-function renderWpTable(wpBox) {
+function renderWpTable(wpBox, wpMap) {
+  // 표·지도 양방향 동기 — 단일 소스는 wpRows, 지도는 refresh()로 재그리기만
+  const sync = () => {
+    renderWpTable(wpBox, wpMap);
+    wpMap?.refresh();
+  };
   clear(wpBox).append(
     el("table", { class: "edit" },
       el("thead", {}, el("tr", {},
         el("th", {}, "#"), el("th", { class: "c-md" }, "N [m]"),
-        el("th", { class: "c-md" }, "E [m]"), el("th", {}, ""))),
+        el("th", { class: "c-md" }, "E [m]"),
+        el("th", {}, "순서"), el("th", {}, ""))),
       el("tbody", {}, wpRows.map((r, i) => el("tr", {},
         el("td", {}, i + 1),
         el("td", {}, el("input", { value: r.n,
-          onchange: (ev) => { r.n = ev.target.value; } })),
+          onchange: (ev) => { r.n = ev.target.value; wpMap?.refresh(); } })),
         el("td", {}, el("input", { value: r.e,
-          onchange: (ev) => { r.e = ev.target.value; } })),
+          onchange: (ev) => { r.e = ev.target.value; wpMap?.refresh(); } })),
+        el("td", {},
+          el("button", { title: "위로", onclick: () => {
+            if (moveWaypoint(wpRows, i, i - 1)) sync();
+          } }, "▲"),
+          el("button", { title: "아래로", onclick: () => {
+            if (moveWaypoint(wpRows, i, i + 1)) sync();
+          } }, "▼")),
         el("td", {}, el("button", { class: "danger", onclick: () => {
           wpRows.splice(i, 1);
-          renderWpTable(wpBox);
+          sync();
         } }, "삭제")),
       ))),
     ),
     el("div", { class: "row", style: "margin-top: 8px" },
       el("button", { onclick: () => {
         wpRows.push({ n: "0", e: "0" });
-        renderWpTable(wpBox);
-      } }, "웨이포인트 추가")),
+        sync();
+      } }, "웨이포인트 추가"),
+      el("span", { class: "hint" }, "지도에서 클릭 추가 · 드래그 이동 · 우클릭 삭제 가능")),
   );
 }
 
