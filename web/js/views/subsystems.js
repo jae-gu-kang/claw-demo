@@ -480,7 +480,7 @@ export const SUBSYSTEMS = {
 <h4>설계 노트</h4>
 <ul>
   <li><span class="mono">θ_cmd = 재클립( clip(PI(h_ref−h) + k_hdot·ḣ, θ한계) + FF, θ한계 )</span> — FF 가산 후 <b>재클립</b>으로 이중 제한 <span class="chip ok">확정 M7</span></li>
-  <li>승강률 댐핑 k_hdot·ḣ — PI 내부 클립 <b>안</b>에서 합산 (SCAS의 k_rate 자리 재사용) · θ_cmd는 α 리미터를 거쳐 SCAS로</li>
+  <li>승강률 댐핑 k_hdot·ḣ — PI 클램프 <b>밖</b>·θ 클립 <b>안</b>(FF 가산 전)에서 합산 (SCAS의 k_rate 자리 재사용) · θ_cmd는 α 리미터를 거쳐 SCAS로</li>
   <li>데모 설계값: kp 0.004 · ki 0.0004 · k_hdot −0.008 · τ 5 s <span class="chip dft">기본값</span> · 고도 +100 m 오버슈트 8.3% (설계점 폐루프 스캔)</li>
 </ul>`,
       },

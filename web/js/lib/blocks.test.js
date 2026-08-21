@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { BLOCKS, CHAIN } from "./blocks.js";
+import { BLOCKS, CHAIN, resolvePath } from "./blocks.js";
 // 뷰 모듈이지만 모듈 스코프에서 DOM을 안 건드려 node import 가능 — 배선 드리프트 가드
 import { DESIGN_ORDER, TOP_SVG } from "../views/diagram.js";
 import { CHIP_LABEL, SUBSYSTEMS } from "../views/subsystems.js";
@@ -104,8 +104,26 @@ test("드릴다운: SVG data-child ↔ children 키 양방향 정합 (오타 = �
       for (const cid of Object.keys(node.children ?? {})) {
         assert.ok(refs.includes(cid), `${p} 자식 ${cid}의 진입 블록(data-child) 없음`);
       }
+      // 진입 블록은 키보드 도달 필수 — tabindex="0" (리뷰 사소 4)
+      for (const m of node.svg.matchAll(/<g[^>]*data-child="([^"]+)"[^>]*>/g)) {
+        assert.ok(/tabindex="0"/.test(m[0]), `${p} data-child=${m[1]} 블록에 tabindex="0" 없음`);
+      }
     }
   }
+});
+
+test("resolvePath: 트리 하강·절단 폴백 (해시 → 드릴다운 경로 — 라우팅 정본)", () => {
+  const s = SUBSYSTEMS;
+  assert.deepEqual(resolvePath([], s), []); // 홈
+  assert.deepEqual(resolvePath(["scas"], s), ["scas"]);
+  assert.deepEqual(resolvePath(["scas", "pitch", "pi"], s), ["scas", "pitch", "pi"]); // 층4
+  assert.deepEqual(resolvePath(["scas", "", "pitch"], s), ["scas"]); // 빈 세그먼트 절단
+  assert.deepEqual(resolvePath(["scas", "PITCH"], s), ["scas"]); // 대소문자 불일치 절단
+  assert.deepEqual(resolvePath(["verify", "anything"], s), ["verify"]); // children 없는 노드
+  assert.deepEqual(resolvePath(["nope", "scas"], s), []); // 첫 세그먼트 미실존 → 홈
+  // 프로토타입 상속 키는 페이지가 아님 — 렌더 크래시 방지 (hasOwn 가드)
+  assert.deepEqual(resolvePath(["constructor"], s), []);
+  assert.deepEqual(resolvePath(["scas", "constructor"], s), ["scas"]);
 });
 
 test("드릴다운 1차 범위 스냅샷: SCAS 3축 + 공유 PI(층4) · AP 3채널", () => {

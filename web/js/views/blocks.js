@@ -18,7 +18,7 @@ SUBSYSTEMS[id].children 재귀 (subsystems.js 규약). 브레드크럼 중간 �
 
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
-import { BLOCKS } from "../lib/blocks.js";
+import { BLOCKS, resolvePath } from "../lib/blocks.js";
 import { groupFields, parseFieldValue, schemaFields } from "../lib/schemaform.js";
 import { store } from "../store.js";
 import { DESIGN_ORDER, fromMarkup, topDiagramSvg } from "./diagram.js";
@@ -52,17 +52,9 @@ function skinToggle(root) {
 }
 
 /** #blocks/<a>/<b>/… → 트리 경로 배열 (해시가 페이지 상태의 정본).
-SUBSYSTEMS children을 따라 하강하며 미실존 세그먼트에서 절단 — 빈 배열 = 홈. */
+하강·절단 규칙은 lib/blocks.js resolvePath — 미실존 세그먼트에서 절단, 빈 배열 = 홈. */
 function currentPath() {
-  const segs = location.hash.slice(1).split("/").slice(1);
-  const path = [];
-  let nodes = SUBSYSTEMS;
-  for (const seg of segs) {
-    if (!nodes || !nodes[seg]) break;
-    path.push(seg);
-    nodes = nodes[seg].children;
-  }
-  return path;
+  return resolvePath(location.hash.slice(1).split("/").slice(1), SUBSYSTEMS);
 }
 
 /** 경로 → 트리 노드 (경로는 currentPath가 검증한 실존 경로 전제). */
@@ -78,6 +70,13 @@ function nodeAt(path) {
 
 export function render() {
   const path = currentPath();
+  // 절단 폴백 가시화 — 무효 해시(#blocks/scas/PITCH 등)를 실제 렌더 경로로
+  // 정규화 (replace: 히스토리 오염 없음, 정규화 후엔 동일 해시라 재발화 안정).
+  // blocks 계열 해시만 — 미등록 뷰 해시의 blocks 폴백 표시(#foo)는 기존대로 둔다.
+  const canonical = path.length ? `#blocks/${path.join("/")}` : "#blocks";
+  if (location.hash !== canonical && location.hash.slice(1).split("/")[0] === "blocks") {
+    location.replace(canonical);
+  }
   const root = el("div", { class: getSkin() === "holo" ? "bd holo" : "bd" });
   if (path.length) renderSubPage(root, path);
   else renderHome(root);

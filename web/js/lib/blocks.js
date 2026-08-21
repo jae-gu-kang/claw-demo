@@ -17,6 +17,23 @@
 최상위 SVG(views/diagram.js TOP_SVG)의 블록 등장 순서와 대조한다. */
 export const CHAIN = ["guidance", "autopilot", "limiter", "scas", "mixer", "actuator", "plant"];
 
+/** 해시 세그먼트 → 드릴다운 트리 경로 (views/subsystems.js children 규약).
+
+미실존 세그먼트에서 절단 — 빈 배열 = 홈. 하강 규칙의 정본은 이 순수 함수
+(단위 테스트 대상), 뷰(views/blocks.js)는 해시 파싱·DOM만 담당.
+hasOwn 검사: "constructor" 같은 프로토타입 상속 키가 실존 페이지로 오인되어
+렌더 크래시하는 것을 방지 (손입력 해시 방어). */
+export function resolvePath(segs, tree) {
+  const path = [];
+  let nodes = tree;
+  for (const seg of segs) {
+    if (!nodes || !Object.hasOwn(nodes, seg) || !nodes[seg]) break;
+    path.push(seg);
+    nodes = nodes[seg].children;
+  }
+  return path;
+}
+
 export const BLOCKS = [
   {
     id: "planner",
