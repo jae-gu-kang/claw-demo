@@ -5,6 +5,13 @@
 ③ 위치 클램프(한계 도달 시 밀어붙이는 방향 속도 0) 순으로 제한 적용 —
 ②가 있어야 스텝당 이동량이 rate 한계를 엄밀히 넘지 않는다.
 Block 프로토콜 준수. 레지스트리 카테고리 "actuator"로 등록 (plant/__init__).
+
+기본값 세트는 데모 기체 가정값 wn 30 rad/s·ζ 0.7·rate 10 rad/s [기본값 01 §7].
+rate_max만은 무제한이 아니라 이 가정값을 기본으로 둔다 — 미지정 시 무제한
+작동기가 되면 해석이 조용히 낙관적이 되고(01 §4.2 경고), M11 폐루프 스터디가
+rate 3 rad/s에서 리밋사이클을 실증해 "≥ 10 rad/s" 요구 사양을 도출한 근거가
+결과에 반영되지 않는다. 위치 한계(pos_lo·pos_hi)는 믹서 타면 한계가, 초기값은
+트림 웜스타트가 결정하므로 그쪽은 무제한 기본값이 맞다.
 """
 
 from claw.blocks.base import UNBOUNDED, Block
@@ -18,7 +25,9 @@ class SecondOrderActuator(Block):
         ParamDef("zeta", 0.7, "-", "감쇠비", lo=1e-9),
         ParamDef("pos_lo", -UNBOUNDED, "rad", "위치 하한"),
         ParamDef("pos_hi", UNBOUNDED, "rad", "위치 상한"),
-        ParamDef("rate_max", UNBOUNDED, "rad/s", "속도 한계(크기)", lo=1e-9),
+        # lo는 1e-9 유지 — "≥ 10"은 실기체 선정 요구 사양이지 파라미터 제약이 아니다
+        # (rate 3 rad/s 리밋사이클 재현 같은 민감도 스터디를 막으면 안 됨)
+        ParamDef("rate_max", 10.0, "rad/s", "속도 한계(크기) — 요구사양 ≥ 10 (01 v0.13)", lo=1e-9),
         ParamDef("initial", 0.0, "rad", "초기 위치"),
     )
 
@@ -28,7 +37,7 @@ class SecondOrderActuator(Block):
         zeta: float = 0.7,
         pos_lo: float = -UNBOUNDED,
         pos_hi: float = UNBOUNDED,
-        rate_max: float = UNBOUNDED,
+        rate_max: float = 10.0,
         initial: float = 0.0,
     ):
         if wn <= 0 or zeta <= 0:

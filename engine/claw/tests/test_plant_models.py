@@ -5,6 +5,7 @@ import math
 import numpy as np
 import pytest
 
+from claw.blocks.base import UNBOUNDED
 from claw.params.registry import REGISTRY
 from claw.plant import FuelMass, SecondOrderActuator, TwinEngine
 
@@ -115,6 +116,24 @@ def test_actuator_rate_limit():
         prev = y
     assert max_step <= 2.0 * DT + 1e-12  # 스텝당 변화량 상한 = rate_max·dt
     assert y == pytest.approx(5.0, abs=1e-3)
+
+
+def test_actuator_default_rate_is_the_documented_assumption():
+    """rate_max 기본값 = 데모 가정값 10 rad/s [기본값 01 §7] — 무제한 기본값은
+    미지정 시 조용히 낙관적인 해석을 만든다(01 §4.2). 위치 한계·초기값은 믹서·
+    트림이 결정하므로 그쪽만 무제한 기본값 유지."""
+    act = SecondOrderActuator()
+    assert act.rate_max == 10.0
+    assert act.pos_lo == -UNBOUNDED and act.pos_hi == UNBOUNDED
+
+    # 기본 구성만으로도 rate 한계가 실제 작동해야 한다 (기본값이 장식이 아님)
+    a = SecondOrderActuator(wn=200.0).init(DT)
+    prev, max_step = 0.0, 0.0
+    for _ in range(300):
+        y = a.step(5.0)
+        max_step = max(max_step, abs(y - prev))
+        prev = y
+    assert max_step <= 10.0 * DT + 1e-12
 
 
 def test_actuator_position_limit_and_recovery():
