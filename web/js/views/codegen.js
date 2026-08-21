@@ -1,0 +1,164 @@
+/** 코드 생성 패널 — 생성 코드(Python·C) + 검토·설명 (구조도 탭에서 호출).
+
+수치·문자열 생성은 lib/codegen.js — 여기는 DOM 조립과 표시 상태만.
+생성 텍스트는 반드시 textContent 경로로만 넣는다(fromMarkup은 정적 마크업 전용 계약).
+스타일은 인라인 — app.css는 병행 세션 작업 중이라 건드리지 않는다 (커밋 오염 방지).
+*/
+
+import { clear, el, fmt } from "../dom.js";
+import {
+  diffParams, genCHeader, genPython, genSnapshotC, genSnapshotPython, numDisplay,
+  paramWarnings, traceRows,
+} from "../lib/codegen.js";
+
+// 뷰는 라우팅마다 재생성되므로 표시 상태는 모듈 스코프 (views/gains.js fitCfg 관행)
+const cfg = { lang: "python", verbose: false, traceOpen: false };
+
+const PRE_STYLE = "font-family: var(--mono); font-size: 12px; line-height: 1.5;"
+  + " white-space: pre; background: #f7f8fa; border: 1px solid var(--line);"
+  + " border-radius: 6px; padding: 10px 12px; margin: 8px 0; max-height: 420px;"
+  + " overflow: auto; -webkit-user-select: text; user-select: text;";
+
+/** 코드 패널 렌더 — host를 비우고 다시 채운다.
+specs: lib/codegen 스펙 배열 (1개면 단일 블록, 여러 개면 전체 형상 스냅샷)
+meta: {generatedAt, server, engine} · validation: [{key, ok, detail}] · gainTables: store 값 */
+export function renderCodePanel(host, { specs, meta, validation = [], gainTables = null }) {
+  const snapshot = specs.length > 1 || gainTables != null;
+  const pre = el("pre", { style: PRE_STYLE });
+  const copyNote = el("span", { class: "hint" });
+
+  const build = () => {
+    const opts = { verbose: cfg.verbose, meta };
+    if (cfg.lang === "c") {
+      return snapshot ? genSnapshotC(specs, gainTables, opts) : genCHeader(specs[0], opts);
+    }
+    return snapshot ? genSnapshotPython(specs, gainTables, opts) : genPython(specs[0], opts);
+  };
+
+  let current = build();
+  const paint = () => {
+    current = build();
+    pre.textContent = current.code; // 마크업 삽입 없음
+    clear(copyNote);
+    langBtns.forEach((b) => b.classList.toggle("primary", b.dataset.lang === cfg.lang));
+    // 검토도 다시 — float32 정밀도 지적은 C 탭에서만 성립한다
+    clear(reviewHost).append(reviewBox(specs, validation, snapshot));
+    clear(traceBox).append(traceTable(specs, current.lineOf, snapshot));
+  };
+
+  const langBtns = [["python", "Python"], ["c", "C 헤더"]].map(([id, label]) =>
+    el("button", {
+      "data-lang": id,
+      onclick: () => { cfg.lang = id; paint(); },
+    }, label));
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(current.code);
+      copyNote.textContent = "복사됨.";
+    } catch {
+      // 클립보드 차단(비보안 컨텍스트·권한 거부·API 부재) — 선택 상태로 만들고 단축키 안내.
+      // 선택마저 실패해도 코드는 화면에 그대로 있으므로 안내만 바꾸고 넘어간다.
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(pre);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        copyNote.textContent = "클립보드 권한 없음 — 선택해 두었습니다. ⌘C(Ctrl+C)로 복사하세요.";
+      } catch {
+        copyNote.textContent = "클립보드를 쓸 수 없습니다 — 위 코드를 직접 선택해 복사하세요.";
+      }
+    }
+  };
+
+  const reviewHost = el("div");
+  const traceBox = el("div");
+  clear(host).append(
+    el("div", { class: "row", style: "margin-top: 12px" },
+      ...langBtns,
+      el("button", { onclick: copy }, "복사"),
+      el("label", { class: "field check", title: "설명·단위·허용범위를 코드 주석에 포함" },
+        el("input", {
+          type: "checkbox", checked: cfg.verbose,
+          onchange: (ev) => { cfg.verbose = ev.target.checked; paint(); },
+        }), "상세 주석"),
+      copyNote,
+    ),
+    pre,
+    reviewHost,
+    traceBox,
+    el("p", { class: "hint" },
+      "탑재 비행코드가 아니라 현재 설계 형상의 코드 표현입니다 (02 §1) — 로직이 아니라 ",
+      "파라미터만 생성합니다. Python 탭 코드는 엔진에 그대로 붙여 실행할 수 있고, ",
+      "조립(결선)은 서버 routes/sim.py::_build 가 정본입니다."),
+  );
+  paint();
+}
+
+/** 검토 패널 — 엔진 검증 결과 → 변경 Δ → 경고. */
+function reviewBox(specs, validation, snapshot) {
+  const changes = specs.flatMap((s) =>
+    diffParams(s.fields, s.values).map((d) => ({ ...d, key: s.key })));
+  const warns = specs.flatMap((s) =>
+    paramWarnings(s.fields, s.values, { lang: cfg.lang }).map((w) => ({ ...w, key: s.key })));
+
+  return el("div", {},
+    el("h4", { style: "margin: 14px 0 6px" }, "검토"),
+    ...validation.map((v) => v.ok
+      ? el("p", { class: "hint" },
+          `엔진 검증 통과 — ${v.key}: 범위·타입에 더해 생성자 교차 조건까지 실제 엔진이 판정했습니다.`)
+      : el("div", { class: "error-box" },
+          `엔진 검증 실패 — ${v.key}: ${v.detail}\n`
+          + "(코드는 입력한 값 그대로 생성했습니다 — 시뮬 실행 시 같은 사유로 422가 납니다.)")),
+    el("h5", { style: "margin: 12px 0 4px" }, "기본값 대비 변경"),
+    changes.length === 0
+      ? el("p", { class: "hint" }, "엔진 기본값과 동일 — 변경된 파라미터가 없습니다.")
+      : el("div", { class: "scroll-x" }, el("table", {},
+          el("thead", {}, el("tr", {},
+            snapshot && el("th", {}, "컴포넌트"),
+            el("th", {}, "파라미터"), el("th", {}, "엔진 기본값"), el("th", {}, "현재값"),
+            el("th", {}, "Δ"), el("th", {}, "단위"))),
+          el("tbody", {}, changes.map((d) => el("tr", {},
+            snapshot && el("td", {}, d.key),
+            el("td", { class: "num" }, d.name),
+            el("td", { class: "num" }, numDisplay(d.from)),
+            el("td", { class: "num" }, numDisplay(d.to)),
+            el("td", { class: "num" }, d.deltaPct == null ? "—" : `${fmt(d.deltaPct, 1)} %`),
+            el("td", {}, d.unit && d.unit !== "-" ? d.unit : ""),
+          ))))),
+    el("h5", { style: "margin: 12px 0 4px" }, "주의"),
+    warns.length === 0
+      ? el("p", { class: "hint" }, "한계 근접·정밀도 관련 지적 사항 없음.")
+      : el("ul", { class: "hint", style: "margin: 4px 0 0 18px" }, warns.map((w) =>
+          el("li", {}, `${w.level === "warn" ? "⚠ " : "· "}${w.name}: ${w.text}`))),
+  );
+}
+
+/** 추적성 표 — 요구·파라미터·코드 라인 대응 (SDD 등 산출물에 그대로 옮기는 표). */
+function traceTable(specs, lineOf, snapshot) {
+  const rows = traceRows(specs, lineOf, { prefixed: snapshot });
+  return el("details", {
+    open: cfg.traceOpen,
+    ontoggle: (ev) => { cfg.traceOpen = ev.target.open; },
+    style: "margin-top: 12px",
+  },
+    el("summary", {}, `추적성 체크리스트 (${rows.length}개 파라미터 → 코드 라인)`),
+    el("div", { class: "scroll-x" }, el("table", {},
+      el("thead", {}, el("tr", {},
+        ["파라미터", "값", "단위", "허용범위", "출처 스키마 @ 엔진 심볼", "코드 줄", "설명"]
+          .map((h) => el("th", {}, h)))),
+      el("tbody", {}, rows.map((r) => el("tr", {},
+        el("td", { class: "num" }, r.param),
+        el("td", { class: "num" }, r.value),
+        el("td", {}, r.unit),
+        el("td", { class: "num" }, r.range),
+        el("td", { class: "num" }, r.source),
+        el("td", { class: "num" }, r.line == null ? "—" : `L${r.line}`),
+        el("td", { style: "text-align: left" }, r.desc),
+      ))))),
+    el("p", { class: "hint" },
+      "출처 스키마는 엔진 레지스트리(02 §2.3), 엔진 심볼은 서버가 실제 인스턴스에서 회신한 ",
+      "값입니다 — 클래스명을 추측하지 않으므로 엔진 개명 시에도 이 표가 어긋나지 않습니다."),
+  );
+}

@@ -43,6 +43,33 @@ test("블록: id 유일 + 상세 스펙 완결", () => {
   }
 });
 
+test("코드 생성 계약: editable 블록만 보유하고 접두사·변수명이 서로 겹치지 않음", () => {
+  // 스냅샷은 세 블록을 한 파일에 담는다 — cPrefix가 겹치면 C 매크로가, varName이
+  // 겹치면 Python 변수가 조용히 덮어써진다 (생성물만 보면 알아채기 어려움)
+  const prefixes = new Set();
+  const varNames = new Set();
+  for (const b of BLOCKS) {
+    const cg = b.detail.codegen;
+    if (!b.detail.editable) {
+      assert.equal(cg, undefined, `${b.id} 편집 불가인데 codegen 계약 있음`);
+      continue;
+    }
+    assert.ok(cg, `${b.id} editable인데 codegen 계약 없음`);
+    assert.match(cg.cPrefix, /^[A-Z][A-Z0-9_]*$/, `${b.id} cPrefix 형식`);
+    assert.match(cg.varName, /^[a-z_][a-z0-9_]*$/, `${b.id} varName은 파이썬 식별자`);
+    assert.ok(["object", "dict"].includes(cg.kind), `${b.id} kind`);
+    assert.ok(!prefixes.has(cg.cPrefix), `cPrefix 중복 ${cg.cPrefix}`);
+    assert.ok(!varNames.has(cg.varName), `varName 중복 ${cg.varName}`);
+    prefixes.add(cg.cPrefix);
+    varNames.add(cg.varName);
+  }
+  // 클래스·임포트 경로는 여기 두지 않는다 — 서버 validate가 엔진에서 얻어 주므로
+  // (하드코딩하면 엔진 개명 시 생성 코드가 조용히 틀려진다)
+  for (const b of BLOCKS) {
+    assert.equal(b.detail.codegen?.pyClass, undefined, `${b.id} 클래스명 하드코딩`);
+  }
+});
+
 test("주 신호 경로 CHAIN = M7 조립 순서, 전 항목이 실존 블록", () => {
   assert.deepEqual(CHAIN,
     ["guidance", "autopilot", "limiter", "scas", "mixer", "actuator", "plant"]);

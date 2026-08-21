@@ -9,6 +9,10 @@
 - omit: 폼·주입에서 제외할 스키마 파라미터명 — 주입 경로의 예약 키
   (예: 작동기 pos_lo·pos_hi·initial은 Simulator가 믹서 한계·트림 웜스타트로 결정)
 - edit: {hash, label} — 정본 편집 화면으로 이동
+- codegen: 코드 생성의 표시 계약 {varName, cPrefix, kind, hint} (editable일 때만).
+  kind="dict"는 주입 경로가 객체가 아니라 kwargs dict인 경우(작동기).
+  파이썬 클래스·임포트 경로는 여기 두지 않는다 — 서버 /registry/…/validate가
+  엔진 인스턴스에서 얻어 주므로 이름 드리프트가 생길 수 없다
 배선은 고정 [확정 02 §4] — 이 데이터에 배선 편집 개념은 없다. SVG 기하(좌표·
 배선 그림)는 views/diagram.js·subsystems.js 수작성 — 여기는 계약 데이터만.
 */
@@ -73,6 +77,7 @@ export const BLOCKS = [
         + "여기서 편집한 값은 '시뮬에 적용' 후 시뮬 탭 '편집 AP'로 주입 (전체 kwargs).",
       schema: { category: "fcl", name: "Autopilot" }, editable: true, injectKey: "autopilotParams",
       edit: null,
+      codegen: { varName: "ap", cPrefix: "AP", kind: "object" },
     },
   },
   {
@@ -118,6 +123,11 @@ export const BLOCKS = [
       injectKey: "actuatorParams",
       omit: ["pos_lo", "pos_hi", "initial"], // Simulator actuator_params 예약 키 (test_sim 핀)
       edit: { hash: "sim", label: "시뮬 탭 — 실행 조건 '작동기'에서 최종 확인" },
+      codegen: {
+        varName: "actuator_params", cPrefix: "ACT", kind: "dict",
+        hint: "Simulator(actuator_params=…)로 전달 — 위치 한계·초기값은 믹서 타면 한계와 "
+          + "트림 웜스타트가 결정하므로 생성 코드에도 넣지 않는다.",
+      },
     },
   },
   {
@@ -139,6 +149,10 @@ export const BLOCKS = [
         + "여기서 '시뮬에 적용'한 값이 시뮬 실행의 항법 파라미터가 된다 (시드는 시뮬 탭 우선).",
       schema: { category: "nav", name: "ErrorModel" }, editable: true, injectKey: "navParams",
       edit: { hash: "sim", label: "시뮬 탭 — 실행 조건 '항법'에서 최종 확인" },
+      codegen: {
+        varName: "nav", cPrefix: "NAV", kind: "object",
+        hint: "시뮬 실행 시 seed만 시뮬 탭 값이 최종 — 나머지는 이 형상 그대로 주입된다.",
+      },
     },
   },
 ];

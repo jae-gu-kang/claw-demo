@@ -21,6 +21,7 @@ import { clear, el } from "../dom.js";
 import { BLOCKS, resolvePath } from "../lib/blocks.js";
 import { groupFields, parseFieldValue, schemaFields } from "../lib/schemaform.js";
 import { store } from "../store.js";
+import { renderCodePanel } from "./codegen.js";
 import { DESIGN_ORDER, fromMarkup, topDiagramSvg } from "./diagram.js";
 import { CHIP_LABEL, SUBSYSTEMS } from "./subsystems.js";
 
@@ -86,6 +87,7 @@ export function render() {
 // ── 최상위 (홈) ────────────────────────────────────────────────────────
 
 function renderHome(root) {
+  const snapshotBox = el("div");
   root.append(
     el("div", { class: "order" },
       el("span", { class: "cap" }, "설계 순서"),
@@ -97,6 +99,10 @@ function renderHome(root) {
         i < DESIGN_ORDER.length - 1 && el("span", { class: "arr" }, "→"),
       ]),
       skinToggle(root),
+      el("button", {
+        title: "적용된 파라미터·게인 스케줄을 한 파일의 코드로 — 검토·추적성 표 포함",
+        onclick: () => showSnapshotCode(snapshotBox),
+      }, "🧾 전체 형상 코드"),
       el("span", { class: "note-line" },
         "명령은 바깥(유도)에서 안(SCAS)으로 내려가지만, 설계는 플랜트 해석 후 ",
         el("b", {}, "가장 안쪽 루프부터"), " 닫아 나갑니다. 프레임 라벨을 클릭해도 이동합니다."),
@@ -106,6 +112,7 @@ function renderHome(root) {
       "💡 블록(게인 스케줄링·항법 포함)이나 우상단 범례(①~⑤ 프레임 설명)를 클릭하면 서브시스템 ",
       "내부 블록도가 열립니다 — 시뮬링크의 서브시스템 더블클릭 대응. 브라우저 뒤로가기로 복귀. ",
       "구조는 코드(M7 조립)와 1:1 고정 — 자유 배선 없음 [확정 02 §4]."),
+    snapshotBox, // 비어 있다가 [전체 형상 코드]에서 채워짐
   );
 }
 
@@ -206,17 +213,14 @@ function renderParams(box, sub, block, svgWrap) {
 }
 
 async function loadSchema(schemaBox, block, svgWrap) {
-  const { category, name } = block.detail.schema;
-  const key = `${category}/${name}`;
+  // omit(주입 경로 예약 키)까지 적용된 필드 목록 — 폼·코드 생성이 같은 원천을 쓴다
+  let key, fields;
   try {
-    schemaCache[key] ??= await api.get(`/registry/${category}/${name}/schema`);
+    ({ key, fields } = await fetchFields(block));
   } catch (e) {
     clear(schemaBox).append(el("div", { class: "error-box" }, errorText(e)));
     return;
   }
-  // omit = 주입 경로 예약 키 (lib/blocks.js 계약) — 폼·주입·SVG 연동에서 제외
-  const omit = new Set(block.detail.omit ?? []);
-  const fields = schemaFields(schemaCache[key]).filter((f) => !omit.has(f.name));
   // 블록도 수치 ← 스키마 기본값 + 적용된 편집값 (정본 = 엔진 스키마, SVG 초기 텍스트는 폴백)
   const defaults = Object.fromEntries(fields.map((f) => [f.name, f.default]));
   const applied = block.detail.injectKey ? store.get(block.detail.injectKey) : null;
@@ -263,6 +267,7 @@ function renderForm(schemaBox, block, key, fields, svgWrap, defaults) {
   const statusLine = el("p", { class: "hint" },
     applied ? "적용된 편집값이 있습니다 — 시뮬 실행이 이 값을 주입합니다." : "");
   const errBox = el("div");
+  const codeBox = el("div"); // 코드 생성 결과 (버튼을 누르기 전엔 비어 있음)
   const inputs = {}; // name → input 요소
 
   // 폼 입력 → 블록도 수치 실시간 동기화 (파싱 실패 필드는 마지막 유효값 유지)
@@ -345,8 +350,20 @@ function renderForm(schemaBox, block, key, fields, svgWrap, defaults) {
           statusLine.textContent = "적용 해제 — 시뮬은 엔진 기본값으로 돌아갑니다.";
         },
       }, "기본값·적용 해제"),
+      el("button", {
+        title: "현재 폼 값을 반영한 코드 + 변경 Δ·주의·추적성 표",
+        onclick: () => {
+          clear(errBox);
+          const { values, errors } = collect();
+          if (errors.length) {
+            errBox.append(el("div", { class: "error-box" }, errors.join("\n")));
+            return;
+          }
+          showBlockCode(codeBox, block, values);
+        },
+      }, "코드 생성"),
     ),
-    statusLine, errBox,
+    statusLine, errBox, codeBox,
     el("p", { class: "hint" },
       "폼 값을 바꾸면 위 블록도 수치가 즉시 연동됩니다 (강조 표시). ",
       "값 검증(범위·유한성)은 여기서 1차, 교차 조건(theta_lo ≤ theta_hi 등)은 제출 시 ",
@@ -357,4 +374,102 @@ function renderForm(schemaBox, block, key, fields, svgWrap, defaults) {
 function rangeHint(f) {
   if (f.lo == null && f.hi == null) return "";
   return ` (${f.lo ?? "−∞"} ~ ${f.hi ?? "∞"})`;
+}
+
+// ── 코드 생성 (설계 형상 → 코드 표현) ──────────────────────────────────
+// 파이썬 클래스·임포트 경로는 서버 validate가 엔진 인스턴스에서 얻어 준 값만 쓴다
+// — 이름을 추측하면 엔진 개명 시 조용히 틀린 코드가 나온다 (lib/codegen.js 주석).
+
+let versionCache = null; // {version, engine} — 생성 코드의 추적성 메타
+
+async function codegenMeta() {
+  if (!versionCache) {
+    try {
+      versionCache = await api.get("/health");
+    } catch {
+      versionCache = {}; // 버전 줄만 빠지고 코드 생성은 계속
+    }
+  }
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return {
+    generatedAt: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} `
+      + `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+    server: versionCache.version,
+    engine: versionCache.engine,
+  };
+}
+
+/** 스키마 → 폼·코드가 공유하는 필드 목록 (omit 적용). */
+async function fetchFields(block) {
+  const { category, name } = block.detail.schema;
+  const key = `${category}/${name}`;
+  schemaCache[key] ??= await api.get(`/registry/${category}/${name}/schema`);
+  const omit = new Set(block.detail.omit ?? []);
+  return { key, fields: schemaFields(schemaCache[key]).filter((f) => !omit.has(f.name)) };
+}
+
+/** 블록 + 값 → {spec, validation}. values=null이면 엔진 기본값 형상. */
+async function buildSpec(block, values) {
+  const { key, fields } = await fetchFields(block);
+  const applied = values != null;
+  const vals = values ?? Object.fromEntries(fields.map((f) => [f.name, f.default]));
+  const { category, name } = block.detail.schema;
+  const url = `/registry/${category}/${name}/validate`;
+  let sym = {};
+  let validation = { key, ok: true, detail: "" };
+  try {
+    sym = await api.post(url, { values: vals });
+  } catch (e) {
+    validation = { key, ok: false, detail: errorText(e) };
+    // 값이 거부돼도 심볼은 필요하다 — 기본값으로 재조회 (등록 컴포넌트면 항상 성립)
+    try {
+      sym = await api.post(url, { values: {} });
+    } catch { /* 서버 이탈 — 아래 폴백 표기로 코드는 생성 */ }
+  }
+  const cg = block.detail.codegen;
+  return {
+    validation,
+    spec: {
+      key, fields, values: vals, applied,
+      pyImport: sym.py_import ?? "claw", pyClass: sym.py_class ?? block.detail.schema.name,
+      varName: cg.varName, cPrefix: cg.cPrefix, kind: cg.kind, hint: cg.hint ?? "",
+      desc: block.detail.desc, notes: SUBSYSTEMS[block.id]?.notes ?? "",
+    },
+  };
+}
+
+const busy = (box, text) => clear(box).append(el("p", { class: "hint" }, text));
+
+/** 블록 1개 — 폼의 현재 값으로 생성 (적용 여부와 무관하게 지금 보이는 형상). */
+async function showBlockCode(box, block, values) {
+  busy(box, "코드 생성 중…");
+  try {
+    const [{ spec, validation }, meta] = await Promise.all([
+      buildSpec(block, values), codegenMeta(),
+    ]);
+    renderCodePanel(box, { specs: [spec], meta, validation: [validation] });
+  } catch (e) {
+    clear(box).append(el("div", { class: "error-box" }, errorText(e)));
+  }
+}
+
+/** 전체 형상 — 편집 3블록의 적용값(없으면 엔진 기본값) + 게인 스케줄 테이블. */
+async function showSnapshotCode(box) {
+  busy(box, "전체 형상 코드 생성 중…");
+  try {
+    const blocks = BLOCKS.filter((b) => b.detail.editable && b.detail.codegen);
+    const [built, meta] = await Promise.all([
+      Promise.all(blocks.map((b) => buildSpec(b, store.get(b.detail.injectKey) ?? null))),
+      codegenMeta(),
+    ]);
+    renderCodePanel(box, {
+      specs: built.map((r) => r.spec),
+      validation: built.map((r) => r.validation),
+      gainTables: store.get("gainTables") ?? null,
+      meta,
+    });
+  } catch (e) {
+    clear(box).append(el("div", { class: "error-box" }, errorText(e)));
+  }
 }
