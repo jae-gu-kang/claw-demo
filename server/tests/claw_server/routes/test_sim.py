@@ -109,7 +109,7 @@ def test_sim_run_validation_422(client):
     bad_rate = dict(base, dt_plant=0.004, control_hz=150.0)
     assert client.post("/api/sim/run", json=bad_rate).status_code == 422
     # 항법 모델 미지원 파라미터
-    bad_nav = dict(base, nav={"pos_std": 1.0, "unknown_key": 3.0})
+    bad_nav = dict(base, nav={"pos_std_h": 1.0, "unknown_key": 3.0})
     assert client.post("/api/sim/run", json=bad_nav).status_code == 422
     # t_end 상한 (메모리 가드)
     assert client.post("/api/sim/run", json=dict(base, t_end=7200.0)).status_code == 422

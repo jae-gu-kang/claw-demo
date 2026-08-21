@@ -5,8 +5,16 @@
     자세 오차는 소각 오차 쿼터니언 δq를 동체측에 곱해 반영 (단위 노름 유지)
     갱신주기(update_hz)마다 새 측정 생성, 사이에는 홀드 (멀티레이트 전제, 01 §2.5)
     지연(delay_s)만큼 릴리스를 늦춤 — t_meas는 측정 시각, t는 출력 시각
+
+**위치·속도 오차는 수평(N·E)과 수직(D)을 분리한다.** GNSS는 수신기 아래쪽
+위성이 없어 수직 기하가 나쁘고(VDOP > HDOP), 기압고도 보정도 별도 드리프트원을
+갖는다. 등방(3축 동일) 가정은 수직 채널을 실제보다 후하게 모사해 저고도 임무의
+고도 마진을 낙관적으로 보이게 한다 — 오토파일럿 고도 루프가 nav.pos_n[2]와
+nav.vel_n[2]를 직접 소비하므로(fcl.autopilot) 그 오차가 곧 고도 오차다.
+
 초기값은 GPS/INS 일반 수준 자리표시자 [기본값] — 항법팀 자료 확보 시 대체 [TBD].
-난수는 seed 고정 결정적 (몬테카를로 재현성).
+수직 기본값은 수평 × 1.5 (VDOP/HDOP 통상비)로 둔 파생 자리표시자이며, 실측
+자료가 아니다. 난수는 seed 고정 결정적 (몬테카를로 재현성).
 """
 
 import math
@@ -22,12 +30,15 @@ from claw.params.param import ParamDef
 class NavErrorModel:
     NAME = "ErrorModel"
     PARAM_DEFS = (
-        ParamDef("pos_std", 3.0, "m", "위치 백색잡음 표준편차", lo=0.0),
-        ParamDef("vel_std", 0.3, "m/s", "속도 백색잡음 표준편차", lo=0.0),
+        ParamDef("pos_std_h", 3.0, "m", "수평 위치 백색잡음 표준편차", lo=0.0),
+        ParamDef("pos_std_v", 4.5, "m", "수직 위치 백색잡음 표준편차(수평보다 큼)", lo=0.0),
+        ParamDef("vel_std_h", 0.3, "m/s", "수평 속도 백색잡음 표준편차", lo=0.0),
+        ParamDef("vel_std_v", 0.45, "m/s", "수직 속도 백색잡음 표준편차(수평보다 큼)", lo=0.0),
         ParamDef("att_std", 0.002, "rad", "롤·피치 백색잡음 표준편차", lo=0.0),
         ParamDef("psi_std", 0.005, "rad", "방위 백색잡음 표준편차(롤·피치보다 큼)", lo=0.0),
         ParamDef("rate_std", 0.001, "rad/s", "각속도 백색잡음 표준편차", lo=0.0),
-        ParamDef("bias_std", 1.0, "m", "위치 마르코프 바이어스 정상 표준편차", lo=0.0),
+        ParamDef("bias_std_h", 1.0, "m", "수평 위치 마르코프 바이어스 정상 표준편차", lo=0.0),
+        ParamDef("bias_std_v", 1.5, "m", "수직 위치 마르코프 바이어스 정상 표준편차", lo=0.0),
         ParamDef("bias_tau", 60.0, "s", "바이어스 상관시간", lo=1e-9),
         ParamDef("delay_s", 0.03, "s", "항법 출력 지연", lo=0.0),
         ParamDef("update_hz", 100.0, "Hz", "항법해 갱신주기", lo=1e-9),
@@ -36,24 +47,34 @@ class NavErrorModel:
 
     def __init__(
         self,
-        pos_std: float = 3.0,
-        vel_std: float = 0.3,
+        pos_std_h: float = 3.0,
+        pos_std_v: float = 4.5,
+        vel_std_h: float = 0.3,
+        vel_std_v: float = 0.45,
         att_std: float = 0.002,
         psi_std: float = 0.005,
         rate_std: float = 0.001,
-        bias_std: float = 1.0,
+        bias_std_h: float = 1.0,
+        bias_std_v: float = 1.5,
         bias_tau: float = 60.0,
         delay_s: float = 0.03,
         update_hz: float = 100.0,
         seed: int = 0,
     ):
-        if min(pos_std, vel_std, att_std, psi_std, rate_std, bias_std, delay_s) < 0:
+        if min(pos_std_h, pos_std_v, vel_std_h, vel_std_v, att_std, psi_std,
+               rate_std, bias_std_h, bias_std_v, delay_s) < 0:
             raise ValueError("오차 표준편차·지연은 음수 불가")
         if bias_tau <= 0 or update_hz <= 0:
             raise ValueError(f"bias_tau({bias_tau})·update_hz({update_hz})는 양수여야 함")
-        self.pos_std, self.vel_std = pos_std, vel_std
+        self.pos_std_h, self.pos_std_v = pos_std_h, pos_std_v
+        self.vel_std_h, self.vel_std_v = vel_std_h, vel_std_v
         self.att_std, self.psi_std, self.rate_std = att_std, psi_std, rate_std
-        self.bias_std, self.bias_tau = bias_std, bias_tau
+        self.bias_std_h, self.bias_std_v = bias_std_h, bias_std_v
+        self.bias_tau = bias_tau
+        # NED 축별 σ — 수평 2축(N·E) + 수직 1축(D). 갱신마다 재구성하지 않도록 선계산
+        self._sigma_pos = np.array([pos_std_h, pos_std_h, pos_std_v])
+        self._sigma_vel = np.array([vel_std_h, vel_std_h, vel_std_v])
+        self._sigma_bias = np.array([bias_std_h, bias_std_h, bias_std_v])
         self.delay_s, self.update_hz, self.seed = delay_s, update_hz, int(seed)
 
     def init(self, dt: float) -> "NavErrorModel":
@@ -82,13 +103,13 @@ class NavErrorModel:
         self._tick = 0
         t_up = self._n_up * self.dt
         self._p_bias = math.exp(-t_up / self.bias_tau)
-        self._q_bias = self.bias_std * math.sqrt(1.0 - self._p_bias**2)
+        self._q_bias = self._sigma_bias * math.sqrt(1.0 - self._p_bias**2)
 
     def _measure(self, state):
         rng = self._rng
         self._bias = self._p_bias * self._bias + self._q_bias * rng.standard_normal(3)
-        pos = state.pos_n + self._bias + self.pos_std * rng.standard_normal(3)
-        vel = state.vel_n() + self.vel_std * rng.standard_normal(3)
+        pos = state.pos_n + self._bias + self._sigma_pos * rng.standard_normal(3)
+        vel = state.vel_n() + self._sigma_vel * rng.standard_normal(3)
         eps = np.array([self.att_std, self.att_std, self.psi_std]) * rng.standard_normal(3)
         dq = quat_normalize(np.array([1.0, 0.5 * eps[0], 0.5 * eps[1], 0.5 * eps[2]]))
         q = quat_normalize(quat_multiply(state.q_nb, dq))

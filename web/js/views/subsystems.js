@@ -1217,13 +1217,14 @@ export const SUBSYSTEMS = {
   <text class="sumsign" x="371" y="144">+</text><text class="sumsign" x="380" y="131">+</text><text class="sumsign" x="380" y="153">+</text>
   <g class="sblk"><rect class="body" x="250" y="16" width="260" height="70" rx="3"/>
     <text class="ttl" x="380" y="38" style="font-size:13px">1차 마르코프 바이어스 — 위치축</text>
-    <text class="ttl2" x="380" y="56">σ <tspan data-p="bias_std">1</tspan> m · τ <tspan data-p="bias_tau">60</tspan> s</text>
+    <text class="ttl2" x="380" y="56">σ 수평 <tspan data-p="bias_std_h">1</tspan> · 수직 <tspan data-p="bias_std_v">1.5</tspan> m · τ <tspan data-p="bias_tau">60</tspan> s</text>
     <text class="ttl2" x="380" y="74">b ← p·b + σ√(1−p²)·w · p=e^(−T/τ)</text></g>
   <path class="wire" d="M380 86 V122" marker-end="url(#aw-nav)"/>
   <g class="sblk"><rect class="body" x="250" y="196" width="260" height="70" rx="3"/>
-    <text class="ttl" x="380" y="218" style="font-size:13px">백색잡음 (상태별 σ)</text>
-    <text class="ttl2" x="380" y="236">pos <tspan data-p="pos_std">3</tspan> m · vel <tspan data-p="vel_std">0.3</tspan> m/s</text>
-    <text class="ttl2" x="380" y="254">각속도 <tspan data-p="rate_std">0.001</tspan> rad/s</text></g>
+    <text class="ttl" x="380" y="212" style="font-size:13px">백색잡음 (상태별 σ · 수평↔수직 분리)</text>
+    <text class="ttl2" x="380" y="230">pos 수평 <tspan data-p="pos_std_h">3</tspan> · 수직 <tspan data-p="pos_std_v">4.5</tspan> m</text>
+    <text class="ttl2" x="380" y="246">vel 수평 <tspan data-p="vel_std_h">0.3</tspan> · 수직 <tspan data-p="vel_std_v">0.45</tspan> m/s</text>
+    <text class="ttl2" x="380" y="262">각속도 <tspan data-p="rate_std">0.001</tspan> rad/s</text></g>
   <path class="wire" d="M380 196 V158" marker-end="url(#aw-nav)"/>
   <path class="wire" d="M394 140 H426" marker-end="url(#aw-nav)"/>
   <g class="sblk"><rect class="body" x="430" y="104" width="260" height="72" rx="3"/>
@@ -1254,6 +1255,7 @@ export const SUBSYSTEMS = {
   <li>법칙·유도·스케줄은 <b>NavOutput만 소비</b> — 참값 차단 계약 (03 §4)</li>
   <li>파라미터: 상태별 잡음 σ · 바이어스(초기+상관시간) · transport delay · 갱신주기 · 시드</li>
   <li>초기 수치는 GPS/INS 통합항법 일반 수준 <span class="chip dft">기본값</span> — 항법팀 자료 확보 시 대체</li>
+  <li>위치·속도 오차는 <b>수평(N·E)과 수직(D) 분리</b> — GNSS는 수신기 아래 위성이 없어 수직 기하가 나쁘다(VDOP &gt; HDOP). 등방 가정은 수직 채널을 후하게 모사해 <b>저고도 임무 고도 마진을 낙관적으로</b> 보이게 한다 (고도 루프가 pos_n[2]·vel_n[2] 직접 소비). 수직 기본값 = 수평 × 1.5 <span class="chip dft">기본값</span></li>
   <li>갱신주기가 제어주기(100 Hz)보다 낮을 수 있음 → 제어법칙은 <b>멀티레이트</b> 전제 <span class="chip note">설계 유의</span></li>
 </ul>`,
   },

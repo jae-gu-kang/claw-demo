@@ -129,8 +129,9 @@ const SCHEMA_NAMES = {
   "fcl/ScasAxis": ["kp", "ki", "k_rate", "washout_tau", "out_lo", "out_hi"],
   "fcl/Mixer": ["elevon_lo", "elevon_hi", "rudder_lo", "rudder_hi", "k_diff_thr"],
   "actuator/SecondOrderActuator": ["wn", "zeta", "rate_max", "pos_lo", "pos_hi", "initial"],
-  "nav/ErrorModel": ["pos_std", "vel_std", "att_std", "psi_std", "rate_std",
-    "bias_std", "bias_tau", "delay_s", "update_hz", "seed"],
+  "nav/ErrorModel": ["pos_std_h", "pos_std_v", "vel_std_h", "vel_std_v",
+    "att_std", "psi_std", "rate_std",
+    "bias_std_h", "bias_std_v", "bias_tau", "delay_s", "update_hz", "seed"],
 };
 
 test("FIELD_GROUPS 필드명은 엔진 스키마 이름 스냅샷에 실존 (오타 → '기타' 강등 방지)", () => {

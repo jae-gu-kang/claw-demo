@@ -54,8 +54,9 @@ def test_full_mission_closed_loop(trim_design):
         ModeSpec(name="mission", speed=140.0, alt=30.0, heading=None,
                  exit_when=("time_ge", 1e9)),  # 임무수행 저고도 (MSL 기준, 01 §2.5)
     ]
-    nav = NavErrorModel(pos_std=1.0, vel_std=0.1, att_std=0.001, psi_std=0.002,
-                        rate_std=0.0005, bias_std=0.5, bias_tau=60.0,
+    nav = NavErrorModel(pos_std_h=1.0, pos_std_v=1.0, vel_std_h=0.1, vel_std_v=0.1,
+                        att_std=0.001, psi_std=0.002,
+                        rate_std=0.0005, bias_std_h=0.5, bias_std_v=0.5, bias_tau=60.0,
                         delay_s=0.02, update_hz=50.0, seed=11)
     sim = Simulator(
         aircraft=ac,

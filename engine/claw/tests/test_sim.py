@@ -85,8 +85,9 @@ def test_control_zoh_between_control_ticks(trim_design):
 def test_nav_error_model_closed_loop_multirate(trim_design):
     """항법 50 Hz·지연 30 ms·잡음 — 폐루프 유지 + 지연 구간 홀드 (valid=False)."""
     ac, tr = trim_design
-    nav = NavErrorModel(pos_std=1.0, vel_std=0.1, att_std=0.001, psi_std=0.002,
-                        rate_std=0.0005, bias_std=0.5, bias_tau=60.0,
+    nav = NavErrorModel(pos_std_h=1.0, pos_std_v=1.0, vel_std_h=0.1, vel_std_v=0.1,
+                        att_std=0.001, psi_std=0.002,
+                        rate_std=0.0005, bias_std_h=0.5, bias_std_v=0.5, bias_tau=60.0,
                         delay_s=0.03, update_hz=50.0, seed=7)
     res = make_sim(ac, tr, nav_model=nav, dt_plant=0.01).run(tr, t_end=30.0)
     de0 = float(tr.control.elevon[0])

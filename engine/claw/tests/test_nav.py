@@ -14,8 +14,8 @@ DT = 0.01
 def clean_model(**over):
     """모든 오차원을 끈 기본 모델 — 개별 테스트가 필요한 항만 켠다."""
     kw = dict(
-        pos_std=0.0, vel_std=0.0, att_std=0.0, psi_std=0.0, rate_std=0.0,
-        bias_std=0.0, bias_tau=60.0, delay_s=0.0, update_hz=100.0, seed=0,
+        pos_std_h=0.0, pos_std_v=0.0, vel_std_h=0.0, vel_std_v=0.0,
+        att_std=0.0, psi_std=0.0, rate_std=0.0, bias_std_h=0.0, bias_std_v=0.0, bias_tau=60.0, delay_s=0.0, update_hz=100.0, seed=0,
     )
     kw.update(over)
     return NavErrorModel(**kw)
@@ -76,9 +76,9 @@ def test_update_rate_hold():
 
 
 def test_seed_reproducibility():
-    a = clean_model(pos_std=2.0, seed=7).init(DT)
-    b = clean_model(pos_std=2.0, seed=7).init(DT)
-    c = clean_model(pos_std=2.0, seed=8).init(DT)
+    a = clean_model(pos_std_h=2.0, pos_std_v=2.0, seed=7).init(DT)
+    b = clean_model(pos_std_h=2.0, pos_std_v=2.0, seed=7).init(DT)
+    c = clean_model(pos_std_h=2.0, pos_std_v=2.0, seed=8).init(DT)
     pa = [a.step(truth_at(k * DT)).pos_n.copy() for k in range(20)]
     pb = [b.step(truth_at(k * DT)).pos_n.copy() for k in range(20)]
     pc = [c.step(truth_at(k * DT)).pos_n.copy() for k in range(20)]
@@ -86,9 +86,47 @@ def test_seed_reproducibility():
     assert not np.allclose(pa, pc)
 
 
+def test_vertical_error_channel_is_independent_of_horizontal():
+    """위치·속도·바이어스 모두 수평(N·E)과 수직(D)이 따로 적용되는지 — 등방 가정으로
+    되돌아가면 수직 채널이 실제보다 후해져 저고도 임무의 고도 마진이 낙관적으로 나온다
+    (오토파일럿 고도 루프는 nav.pos_n[2]·vel_n[2]를 직접 소비)."""
+    nav = clean_model(pos_std_h=1.0, pos_std_v=5.0,
+                      vel_std_h=0.1, vel_std_v=0.7, seed=5).init(DT)
+    dp, dv = [], []
+    for k in range(20000):
+        tr = truth_at(k * DT)
+        out = nav.step(tr)
+        dp.append(out.pos_n - tr.pos_n)
+        dv.append(out.vel_n - tr.vel_n())
+    dp, dv = np.array(dp), np.array(dv)
+    assert dp.std(axis=0)[:2] == pytest.approx([1.0, 1.0], rel=0.05)
+    assert dp.std(axis=0)[2] == pytest.approx(5.0, rel=0.05)
+    assert dv.std(axis=0)[:2] == pytest.approx([0.1, 0.1], rel=0.05)
+    assert dv.std(axis=0)[2] == pytest.approx(0.7, rel=0.05)
+
+
+def test_vertical_bias_channel_is_independent_of_horizontal():
+    """마르코프 바이어스도 축 분리 — 임무 구간(수십 초)에서 바이어스는 상관시간
+    때문에 상수처럼 남아 그대로 고도 오프셋이 되므로 수직 값이 특히 중요하다."""
+    nav = clean_model(bias_std_h=0.5, bias_std_v=3.0, bias_tau=1.0, seed=6).init(DT)
+    err = np.array([(nav.step(truth_at(k * DT)).pos_n - truth_at(k * DT).pos_n)
+                    for k in range(20000)])
+    assert err.std(axis=0)[0] == pytest.approx(0.5, rel=0.2)
+    assert err.std(axis=0)[2] == pytest.approx(3.0, rel=0.2)
+
+
+def test_default_vertical_error_exceeds_horizontal():
+    """기본값 자체가 수직 > 수평이어야 한다 — GNSS는 수신기 아래 위성이 없어
+    수직 기하가 나쁘다(VDOP > HDOP). 값은 [기본값] 자리표시자이고 대소관계가 계약."""
+    d = {p.name: p.default for p in NavErrorModel.PARAM_DEFS}
+    assert d["pos_std_v"] > d["pos_std_h"] > 0
+    assert d["vel_std_v"] > d["vel_std_h"] > 0
+    assert d["bias_std_v"] > d["bias_std_h"] > 0
+
+
 def test_white_noise_statistics():
     sigma = 2.0
-    nav = clean_model(pos_std=sigma, seed=1).init(DT)
+    nav = clean_model(pos_std_h=sigma, pos_std_v=sigma, seed=1).init(DT)
     errs = np.array([nav.step(truth_at(k * DT)).pos_n - truth_at(k * DT).pos_n for k in range(20000)])
     assert np.mean(errs) == pytest.approx(0.0, abs=0.05)
     assert np.std(errs) == pytest.approx(sigma, rel=0.05)
@@ -97,7 +135,7 @@ def test_white_noise_statistics():
 def test_markov_bias_correlation():
     """1차 마르코프 바이어스: 측정 간 lag-1 자기상관 ≈ exp(-T_up/tau)."""
     tau = 1.0
-    nav = clean_model(bias_std=1.0, bias_tau=tau, seed=2).init(DT)
+    nav = clean_model(bias_std_h=1.0, bias_std_v=1.0, bias_tau=tau, seed=2).init(DT)
     b = np.array([(nav.step(truth_at(k * DT)).pos_n - truth_at(k * DT).pos_n)[0] for k in range(20000)])
     p_expected = np.exp(-DT / tau)
     r1 = np.corrcoef(b[:-1], b[1:])[0, 1]
@@ -133,6 +171,6 @@ def test_released_output_is_isolated():
 def test_registered_as_component():
     """항법 모델은 교체 가능 컴포넌트 — 추후 실제 EKF 코드로 교체 (02 §3.1 인터페이스 개방)."""
     assert "ErrorModel" in REGISTRY.names("nav")
-    nav = REGISTRY.create("nav", "ErrorModel", {"pos_std": 1.0, "delay_s": 0.0}).init(DT)
+    nav = REGISTRY.create("nav", "ErrorModel", {"pos_std_h": 1.0, "delay_s": 0.0}).init(DT)
     out = nav.step(truth_at(0.0))
     assert out.valid

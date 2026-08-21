@@ -199,8 +199,9 @@ const SVG_PARAM_NAMES = {
   // pos_lo·pos_hi·initial은 omit(주입 예약 키) — SVG에서도 바인딩 금지 (아무도 안 채움)
   actuator: new Set(["wn", "zeta", "rate_max"]),
   nav: new Set([
-    "pos_std", "vel_std", "att_std", "psi_std", "rate_std",
-    "bias_std", "bias_tau", "delay_s", "update_hz", "seed",
+    "pos_std_h", "pos_std_v", "vel_std_h", "vel_std_v",
+    "att_std", "psi_std", "rate_std",
+    "bias_std_h", "bias_std_v", "bias_tau", "delay_s", "update_hz", "seed",
   ]),
 };
 

@@ -50,8 +50,10 @@ export const FIELD_GROUPS = {
     ["위치·초기", ["pos_lo", "pos_hi", "initial"]],
   ],
   "nav/ErrorModel": [
-    ["측정 잡음 σ", ["pos_std", "vel_std", "att_std", "psi_std", "rate_std"]],
-    ["바이어스", ["bias_std", "bias_tau"]],
+    ["측정 잡음 σ — 수평", ["pos_std_h", "vel_std_h"]],
+    ["측정 잡음 σ — 수직", ["pos_std_v", "vel_std_v"]],
+    ["측정 잡음 σ — 자세·각속도", ["att_std", "psi_std", "rate_std"]],
+    ["바이어스", ["bias_std_h", "bias_std_v", "bias_tau"]],
     ["시간 특성", ["delay_s", "update_hz"]],
     ["난수", ["seed"]],
   ],
