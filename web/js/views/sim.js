@@ -41,7 +41,7 @@ export function render() {
   const wpBox = el("div");
 
   // 구조도 탭 '시뮬에 적용' 값 — 작동기는 필드에 프리필(최종 편집권은 여기),
-  // 항법은 제출 시 기본 dict 대체 (시드만 이 탭이 우선)
+  // 항법은 제출 시 병합 (시드만 이 탭이 우선, 나머지 미지정분은 엔진 기본값)
   const actApplied = store.get("actuatorParams");
   const f = {
     mach: el("input", { class: "num", value: "0.6" }),
@@ -60,6 +60,19 @@ export function render() {
     useAp: el("input", { type: "checkbox" }),
     fp: el("input", { value: "web-sim-v1" }),
   };
+
+  // 작동기 프리필 폴백(위 30·0.7·10)은 엔진 기본값의 사본 — 폼이 즉시 유효해야 해서
+  // 남기되, 스키마가 도착하면 사용자가 손대지 않은 값만 갱신해 스스로 어긋남을 고친다.
+  // (항법 기본값이 7개나 어긋난 채 돌던 전례 — 01 v0.19. 실패는 무시: 폴백으로 동작)
+  if (!actApplied) {
+    api.get("/registry/actuator/SecondOrderActuator/schema").then((s) => {
+      for (const [key, name, fallback] of
+        [["wn", "wn", 30], ["zeta", "zeta", 0.7], ["rate", "rate_max", 10]]) {
+        const d = s.properties?.[name]?.default;
+        if (d !== undefined && f[key].value === String(fallback)) f[key].value = String(d);
+      }
+    }).catch(() => {});
+  }
 
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -131,12 +144,11 @@ export function render() {
       };
       if (req.waypoints === null) delete req.waypoints;
       if (f.navOn.checked) {
-        // 구조도 항법 블록 적용값이 있으면 그것이 기본 dict를 대체 — 시드만 이 탭 우선
-        const navBase = store.get("navParams")
-          ?? { pos_std: 1.0, vel_std: 0.1, att_std: 0.001, psi_std: 0.002,
-               rate_std: 0.0005, bias_std: 0.5, bias_tau: 60.0,
-               delay_s: 0.02, update_hz: 50.0 };
-        req.nav = { ...navBase, seed: Number(f.seed.value) };
+        // 미지정 파라미터는 엔진 ParamDef 기본값이 채운다 — 여기서 기본값을 다시 적으면
+        // 엔진과 조용히 어긋난다 (실제로 7개가 어긋난 채 돌고 있었다: pos_std·att_std·
+        // psi_std·rate_std·bias_std·delay_s·update_hz). 빈 dict도 오차 모델은 장착 —
+        // 미장착은 nav 필드 자체를 생략하는 경우뿐 (routes/sim.py::_build)
+        req.nav = { ...(store.get("navParams") ?? {}), seed: Number(f.seed.value) };
       }
       if (f.actOn.checked) {
         // 구조도 작동기 블록 적용값(pos 한계·initial 포함) 위에 이 탭 필드가 최종 덮어씀
@@ -190,8 +202,9 @@ export function render() {
           el("div", { class: "row-inner" },
             el("label", { class: "field check" }, f.navOn, "사용"),
             el("label", { class: "field" }, "시드", f.seed)),
-          store.get("navParams") && el("p", { class: "hint" },
-            "구조도 항법 블록 적용값 사용 중 (시드만 여기서 우선)")),
+          el("p", { class: "hint" }, store.get("navParams")
+            ? "구조도 항법 블록 적용값 사용 중 (시드만 여기서 우선)"
+            : "잡음·바이어스·지연·갱신주기는 엔진 기본값 — 편집은 구조도 탭 항법 블록")),
         el("div", { class: "opt-group" },
           el("div", { class: "g-title" }, "작동기 (2차계)"),
           el("div", { class: "row-inner" },
