@@ -7,7 +7,7 @@
 import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { buildModes, buildWaypoints, COND_KINDS } from "../lib/mission.js";
-import { modeSpans, strideFor } from "../lib/replay.js";
+import { flaggedNames, modeSpans, strideFor } from "../lib/replay.js";
 import { moveWaypoint } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { lineChartCanvas, trackCanvas } from "./plots.js";
@@ -356,8 +356,12 @@ function renderReplay(replayBox) {
   clear(replayBox).append(
     el("p", {},
       `모드 체인: ${seq} · 절단: ${body.meta.aborted ?? "없음"} · `,
-      "엔벨로프: ", flagBadge(!env.any_flag, "DB 이탈 없음", "DB 이탈 발생"),
+      // 플래그는 DB 유효범위(α·β·M) + 기준면 여유(고도) 통합 요약 — 어느 항목이
+      // 떴는지 이름으로 밝힌다 (뭉뚱그리면 고도 이탈이 DB 이탈로 오독됨)
+      "엔벨로프: ", flagBadge(!env.any_flag, "이탈 없음", `이탈: ${flaggedNames(env)}`),
       ` 최악 실속마진 ${fmt(env.worst_margin, 3)} rad @ ${fmt(env.worst_margin_t, 4)}s`,
+      env.min_alt != null
+        ? ` · 최저 고도 ${fmt(env.min_alt, 4)} m @ ${fmt(env.min_alt_t, 4)}s` : "",
       env.first_flag_t != null ? ` · 최초 플래그 ${fmt(env.first_flag_t, 4)}s` : "",
       ` · 최종 h ${fmt(sig.h[sig.h.length - 1], 4)} m · 잔여 연료 ${fmt(sig.fuel[sig.fuel.length - 1], 4)} kg`),
     el("div", { class: "row" }, slider, readout),

@@ -32,7 +32,7 @@ def hold_modes(V0, alt=1000.0):
 
 
 def make_sim(ac, tr, *, modes=None, nav_model=None, dt_plant=0.01, control_hz=100.0,
-             actuator_params=None):
+             actuator_params=None, min_altitude=0.0):
     V0 = float(np.linalg.norm(tr.state.vel_b))
     g = Guidance(modes if modes is not None else hold_modes(V0, tr.case.alt))
     return Simulator(
@@ -45,6 +45,7 @@ def make_sim(ac, tr, *, modes=None, nav_model=None, dt_plant=0.01, control_hz=10
         dt_plant=dt_plant,
         control_hz=control_hz,
         actuator_params=actuator_params,
+        min_altitude=min_altitude,
     )
 
 
@@ -251,3 +252,31 @@ def test_out_of_band_run_truncates_with_partial_result(trim_design):
     assert len(res.t) < int(600.0 / 0.01)
     assert len(res.signals["h"]) == len(res.t) == len(res.signals["mode"])
     assert res.signals["h"][-1] < -4900.0
+
+
+def test_min_altitude_flag_marks_excursion_without_stopping(trim_design):
+    """기준면(기본 0 m MSL) 아래는 플래그로 표시하되 런은 계속된다.
+
+    이 가드가 없던 동안 저고도 임무가 해수면 아래 수십 m를 날면서도 any_flag=False로
+    정상 완주 기록됐다 — ISA 하한(−4,990 m)이 유일한 바닥이었기 때문(대기 모델
+    유효성 가드이지 지면이 아님). 지형·파고 미모델이라 "충돌 판정"이 아니라 특이
+    상황 표시이므로 중단하지 않는다 (02 §6.1 엔벨로프 감시 항상 장착).
+    """
+    ac, tr = trim_design
+    V0 = float(np.linalg.norm(tr.state.vel_b))
+    res = make_sim(ac, tr, modes=hold_modes(V0, -50.0)).run(tr, t_end=60.0)
+    assert res.meta["aborted"] is None  # 플래그일 뿐 — 절단 아님
+    assert res.envelope["flags"]["altitude"].any()
+    assert res.envelope["any_flag"]  # 단일 요약에 반영 — 무증상 통과 방지
+    assert res.envelope["min_alt"] < 0.0
+    assert 0.0 <= res.envelope["min_alt_t"] <= 60.0
+
+    # 순항 런은 플래그가 뜨지 않고, 최저 고도는 감시 여부와 무관하게 보고된다
+    clean = make_sim(ac, tr).run(tr, t_end=20.0)
+    assert not clean.envelope["flags"]["altitude"].any()
+    assert clean.envelope["min_alt"] > 0.0
+
+    # 감시 끄기 — 플래그 키 자체가 사라지고 최저 고도 보고는 유지
+    off = make_sim(ac, tr, modes=hold_modes(V0, -50.0), min_altitude=None).run(tr, t_end=60.0)
+    assert "altitude" not in off.envelope["flags"]
+    assert off.envelope["min_alt"] < 0.0

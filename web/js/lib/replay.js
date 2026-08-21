@@ -4,6 +4,20 @@ export function strideFor(nTotal, target = 1500) {
   return Math.max(1, Math.ceil(nTotal / target));
 }
 
+/** 엔벨로프 플래그 이름(한국어) — 엔진 flags 키와 1:1 (simulator._envelope). */
+export const FLAG_LABEL = {
+  alpha: "α", beta: "β", mach: "마하", altitude: "고도",
+};
+
+/** 실제로 뜬 플래그 이름만 나열 — any_flag 하나로 뭉뚱그리면 기준면 이탈(고도)이
+DB 유효범위 이탈로 오독된다. 미정의 키는 원래 이름으로 통과(엔진 확장에 안전). */
+export function flaggedNames(env) {
+  const hit = Object.entries(env?.flags ?? {})
+    .filter(([, arr]) => Array.isArray(arr) && arr.some(Boolean))
+    .map(([k]) => FLAG_LABEL[k] ?? k);
+  return hit.length ? hit.join("·") : "—";
+}
+
 /** 모드 문자열 시계열 → 연속 구간 [{mode, i0, i1}] (i1 배타) — 배경 밴드용. */
 export function modeSpans(modes) {
   const spans = [];

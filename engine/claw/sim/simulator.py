@@ -18,6 +18,8 @@ fcl — 전부 03 §4 계약(VehicleState→NavOutput→GuidanceCommand→Surfac
 분산 대상·소모 모델은 02 §6 몬테카를로 TBD와 함께 확정].
 """
 
+import math
+
 import numpy as np
 
 from claw.common.contracts import NavOutput, SimResult, VehicleState
@@ -40,6 +42,7 @@ class Simulator:
         control_hz: float = 100.0,
         actuator_params=None,
         fuel_flow: float = 0.0,
+        min_altitude: float | None = 0.0,
     ):
         if dt_plant <= 0 or control_hz <= 0:
             raise ValueError(f"dt_plant({dt_plant})·control_hz({control_hz})는 양수여야 함")
@@ -54,6 +57,8 @@ class Simulator:
             raise ValueError(f"제어 주기는 dt_plant의 정수배여야 함: 비율 {ratio:.4f}")
         if fuel_flow < 0:
             raise ValueError(f"fuel_flow는 음수 불가: {fuel_flow}")
+        if min_altitude is not None and not math.isfinite(min_altitude):
+            raise ValueError(f"min_altitude는 유한값이어야 함: {min_altitude}")
         bad_vars = set(db_ranges or {}) - {"alpha", "beta", "mach"}
         if bad_vars:
             raise ValueError(f"db_ranges 미지원 변수 {sorted(bad_vars)} (허용: alpha·beta·mach)")
@@ -63,6 +68,10 @@ class Simulator:
         self.nav_model = nav_model
         self.stall_table = stall_table
         self.db_ranges = dict(db_ranges) if db_ranges else {}
+        # 기준면 여유 감시 [기본값 0 m = 해수면 MSL, 01 §2.5]. 지형·파고는 미모델이라
+        # 이건 "지면 충돌 판정"이 아니라 특이 상황 표시 — 시뮬은 중단하지 않고 플래그만
+        # 남긴다(엔벨로프 감시 항상 장착, 02 §6.1). None이면 감시 끔.
+        self.min_altitude = float(min_altitude) if min_altitude is not None else None
         self.dt_plant = dt_plant
         self.control_hz = control_hz
         self.n_ctrl = int(n)
@@ -140,7 +149,10 @@ class Simulator:
         sig["limiter_active"] = np.zeros(n_steps, dtype=bool)
         modes = []
         stall_margin = np.full(n_steps, np.nan)
-        flags = {k: np.zeros(n_steps, dtype=bool) for k in self.db_ranges}
+        flag_keys = list(self.db_ranges)
+        if self.min_altitude is not None:
+            flag_keys.append("altitude")  # db_ranges와 구분 — DB 유효범위가 아니라 기준면 여유
+        flags = {k: np.zeros(n_steps, dtype=bool) for k in flag_keys}
 
         sc = None
         aborted = None
@@ -204,6 +216,8 @@ class Simulator:
             for var, (lo, hi) in self.db_ranges.items():
                 val = {"alpha": alpha, "beta": beta, "mach": mach}[var]
                 flags[var][k] = (val < lo) or (val > hi)
+            if self.min_altitude is not None:
+                flags["altitude"][k] = h < self.min_altitude
 
             # 발산 런 조기 종료 — ISA 범위 이탈 직전 절단해 부분 결과·엔벨로프를
             # 보존한다 (RK4 부단계에서 isa_atmosphere 예외로 전체 손실 방지)
@@ -249,7 +263,7 @@ class Simulator:
             flags = {k2: v[:n_done] for k2, v in flags.items()}
         sig["mode"] = modes
         t_arr = np.arange(n_done) * self.dt_plant
-        envelope = self._envelope(t_arr, stall_margin, flags)
+        envelope = self._envelope(t_arr, stall_margin, flags, sig["h"])
         return SimResult(
             t=t_arr,
             signals=sig,
@@ -266,17 +280,24 @@ class Simulator:
             },
         )
 
-    def _envelope(self, t_arr, stall_margin, flags) -> dict:
-        """엔벨로프 요약 (02 §6.1) — 최악 실속 마진 + DB 이탈 플래그.
+    def _envelope(self, t_arr, stall_margin, flags, h_arr) -> dict:
+        """엔벨로프 요약 (02 §6.1) — 최악 실속 마진 + 최저 고도 + 이탈 플래그.
 
         stall_margin = α_stall(mach) − α (참값 기준, 보호마진 미차감) —
         signals["alpha_margin"](리미터 내부값: 항법 추정 α·마진 차감)과 구분.
+        flags는 DB 유효범위(alpha·beta·mach)와 기준면 여유(altitude)를 함께 담는다
+        — any_flag는 "이 런에 볼 것이 있었는가"의 단일 요약이다.
         """
         env = {"stall_margin": stall_margin, "flags": flags}
         if self.stall_table is not None and len(t_arr):
             i = int(np.nanargmin(stall_margin))
             env["worst_margin"] = float(stall_margin[i])
             env["worst_margin_t"] = float(t_arr[i])
+        # 최저 고도는 감시 여부와 무관하게 보고 — 플래그가 안 떠도 여유가 얼마였는지
+        if len(t_arr):
+            j = int(np.argmin(h_arr))
+            env["min_alt"] = float(h_arr[j])
+            env["min_alt_t"] = float(t_arr[j])
         any_arr = None
         for arr in flags.values():
             any_arr = arr if any_arr is None else (any_arr | arr)
