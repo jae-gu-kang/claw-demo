@@ -66,14 +66,58 @@ test("최상위 SVG 배선 ↔ 페이지 데이터 드리프트 가드 (리뷰 S
   assert.deepEqual(blockRefs.filter((id) => CHAIN.includes(id)), CHAIN);
 });
 
-test("서브시스템 페이지 스펙 완결 (pagehead 메타·칩·이동 해시)", () => {
-  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
-    for (const k of ["tag", "tagBg", "title", "eng", "svg", "notes"]) {
-      assert.ok(s[k], `${id}.${k} 없음`);
-    }
-    for (const c of s.chips) assert.ok(CHIP_LABEL[c], `${id} 미정의 칩 ${c}`);
-    for (const e of s.edits ?? []) assert.ok(VIEW_HASHES.has(e.hash), `${id} 무효 해시 ${e.hash}`);
+/** 드릴다운 트리 순회 — 루트 + children 재귀 (경로 라벨 포함). */
+function* walk(id, node, path = [id]) {
+  yield { node, path };
+  for (const [cid, child] of Object.entries(node.children ?? {})) {
+    yield* walk(cid, child, [...path, cid]);
   }
+}
+
+test("서브시스템 페이지 스펙 완결 (pagehead 메타·칩·이동 해시 — children 재귀)", () => {
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    for (const { node, path } of walk(id, s)) {
+      const p = path.join("/");
+      for (const k of ["title", "eng", "svg", "notes"]) {
+        assert.ok(node[k], `${p}.${k} 없음`);
+      }
+      // 루트는 단계 태그 필수, 자식은 crumb(브레드크럼 짧은 라벨) 필수 — 태그는 루트 상속
+      if (path.length === 1) {
+        for (const k of ["tag", "tagBg"]) assert.ok(node[k], `${p}.${k} 없음`);
+      } else {
+        assert.ok(node.crumb, `${p}.crumb 없음`);
+      }
+      for (const c of node.chips) assert.ok(CHIP_LABEL[c], `${p} 미정의 칩 ${c}`);
+      for (const e of node.edits ?? []) assert.ok(VIEW_HASHES.has(e.hash), `${p} 무효 해시 ${e.hash}`);
+    }
+  }
+});
+
+test("드릴다운: SVG data-child ↔ children 키 양방향 정합 (오타 = 클릭 무반응/도달 불가)", () => {
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    for (const { node, path } of walk(id, s)) {
+      const p = path.join("/");
+      const refs = [...node.svg.matchAll(/data-child="([^"]+)"/g)].map((m) => m[1]);
+      // SVG 참조 → children 실존 (미실존이면 라우터가 조용히 절단 폴백해 무반응)
+      for (const r of refs) assert.ok(node.children?.[r], `${p} SVG가 미실존 자식 참조: ${r}`);
+      // children → SVG 진입 블록 실존 (없으면 해시 직접 입력 말고는 도달 불가)
+      for (const cid of Object.keys(node.children ?? {})) {
+        assert.ok(refs.includes(cid), `${p} 자식 ${cid}의 진입 블록(data-child) 없음`);
+      }
+    }
+  }
+});
+
+test("드릴다운 1차 범위 스냅샷: SCAS 3축 + 공유 PI(층4) · AP 3채널", () => {
+  const s = SUBSYSTEMS.scas;
+  assert.deepEqual(Object.keys(s.children), ["pitch", "roll", "yaw"]);
+  for (const axis of Object.values(s.children)) {
+    assert.deepEqual(Object.keys(axis.children), ["pi"]);
+  }
+  // PI 층4는 공유 정의 — 세 축이 동일 객체 (축별 드리프트 방지)
+  assert.equal(s.children.pitch.children.pi, s.children.roll.children.pi);
+  assert.equal(s.children.pitch.children.pi, s.children.yaw.children.pi);
+  assert.deepEqual(Object.keys(SUBSYSTEMS.autopilot.children), ["hdg", "alt", "spd"]);
 });
 
 test("허브 계약: 시뮬 주입 경로 보유 블록(AP·작동기·항법)만 편집 가능", () => {
@@ -112,16 +156,23 @@ const SVG_PARAM_NAMES = {
   ]),
 };
 
-test("서브시스템 SVG data-p는 해당 블록 스키마 파라미터명만 (오타 = 영구 미갱신 수치)", () => {
+test("서브시스템 SVG data-p는 루트 블록 스키마 파라미터명만 (children 포함 — 오타 = 영구 미갱신 수치)", () => {
   for (const [id, s] of Object.entries(SUBSYSTEMS)) {
-    const names = [...s.svg.matchAll(/data-p="([^"]+)"/g)].map((m) => m[1]);
+    // 바인딩 소스는 루트 블록 스키마 — children도 같은 스키마로 채워짐 (views/blocks.js)
     const allowed = SVG_PARAM_NAMES[id];
-    if (!allowed) {
-      // 스키마 폼 없는 페이지의 data-p는 아무도 채우지 않음 — 도입 시 이 목록에 등록
-      assert.equal(names.length, 0, `${id}: 바인딩 소스 없는 페이지에 data-p ${names}`);
-      continue;
+    for (const { node, path } of walk(id, s)) {
+      const p = path.join("/");
+      const names = [...node.svg.matchAll(/data-p="([^"]+)"/g)].map((m) => m[1]);
+      if (!allowed) {
+        // 스키마 폼 없는 루트 아래의 data-p는 아무도 채우지 않음 — 도입 시 목록 등록
+        assert.equal(names.length, 0, `${p}: 바인딩 소스 없는 페이지에 data-p ${names}`);
+        continue;
+      }
+      for (const n of names) assert.ok(allowed.has(n), `${p}: 스키마에 없는 data-p "${n}"`);
     }
-    for (const n of names) assert.ok(allowed.has(n), `${id}: 스키마에 없는 data-p "${n}"`);
-    assert.ok(names.length > 0, `${id}: 편집 가능 페이지인데 연동 수치 없음`);
+    if (allowed) {
+      const rootNames = [...s.svg.matchAll(/data-p="([^"]+)"/g)].map((m) => m[1]);
+      assert.ok(rootNames.length > 0, `${id}: 편집 가능 페이지인데 연동 수치 없음`);
+    }
   }
 });

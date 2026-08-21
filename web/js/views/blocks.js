@@ -4,6 +4,11 @@
 페이지(#blocks/<id>)로 진입 — 브레드크럼·내부 블록도·설계 노트·파라미터 패널.
 해시가 페이지 상태를 들고 있어 브라우저 뒤로가기로 상위 복귀 가능.
 
+드릴다운은 깊이 무제한(시뮬링크 더블클릭 대응): 하위 페이지 SVG 안의
+data-child 블록 클릭 → 해시 세그먼트 추가(#blocks/scas/pitch/pi) — 트리는
+SUBSYSTEMS[id].children 재귀 (subsystems.js 규약). 브레드크럼 중간 클릭으로
+임의 조상 이동, "↑ 상위로"는 한 단계.
+
 - 파라미터 스키마는 서버 /registry/{cat}/{name}/schema (엔진 ParamSet이 정본)
 - 편집 가능 블록(AP·작동기·항법 — 시뮬 주입 경로 보유)은 폼 편집 → store 주입
 - 그 외 블록은 스키마 열람 + 편집처로 이동 — 진실 이원화 방지 (lib/blocks.js 계약)
@@ -22,7 +27,11 @@ import { CHIP_LABEL, SUBSYSTEMS } from "./subsystems.js";
 const schemaCache = {}; // "cat/name" → schema
 const blockById = Object.fromEntries(BLOCKS.map((b) => [b.id, b]));
 
-const navigate = (id) => { location.hash = id ? `blocks/${id}` : "blocks"; };
+/** 이동 — 문자열(층2 진입)·경로 배열(하위 층)·null(홈) 모두 수용. */
+const navigate = (p) => {
+  const segs = p == null ? [] : Array.isArray(p) ? p : [p];
+  location.hash = segs.length ? `blocks/${segs.join("/")}` : "blocks";
+};
 
 // 다이어그램 스킨 — "glass"(라이트 글래스, 기본) | "holo"(다크 홀로그램, 디자인 안 2).
 // 정본 스타일 결정 전 비교용 토글 · localStorage로 페이지 이동에도 유지.
@@ -42,16 +51,35 @@ function skinToggle(root) {
   return btn;
 }
 
-/** #blocks/<id> → 페이지 id (미실존이면 홈). 해시가 페이지 상태의 정본. */
-function currentPage() {
-  const seg = location.hash.slice(1).split("/")[1];
-  return seg && SUBSYSTEMS[seg] ? seg : null;
+/** #blocks/<a>/<b>/… → 트리 경로 배열 (해시가 페이지 상태의 정본).
+SUBSYSTEMS children을 따라 하강하며 미실존 세그먼트에서 절단 — 빈 배열 = 홈. */
+function currentPath() {
+  const segs = location.hash.slice(1).split("/").slice(1);
+  const path = [];
+  let nodes = SUBSYSTEMS;
+  for (const seg of segs) {
+    if (!nodes || !nodes[seg]) break;
+    path.push(seg);
+    nodes = nodes[seg].children;
+  }
+  return path;
+}
+
+/** 경로 → 트리 노드 (경로는 currentPath가 검증한 실존 경로 전제). */
+function nodeAt(path) {
+  let node = null;
+  let nodes = SUBSYSTEMS;
+  for (const seg of path) {
+    node = nodes[seg];
+    nodes = node.children ?? {};
+  }
+  return node;
 }
 
 export function render() {
-  const page = currentPage();
+  const path = currentPath();
   const root = el("div", { class: getSkin() === "holo" ? "bd holo" : "bd" });
-  if (page) renderSubPage(root, page);
+  if (path.length) renderSubPage(root, path);
   else renderHome(root);
   return root;
 }
@@ -84,15 +112,28 @@ function renderHome(root) {
 
 // ── 서브시스템 하위 페이지 ─────────────────────────────────────────────
 
-function renderSubPage(root, page) {
-  const sub = SUBSYSTEMS[page];
-  const block = blockById[page] ?? null; // verify는 블록 아님 (설계 단계 페이지)
+function renderSubPage(root, path) {
+  const rootSub = SUBSYSTEMS[path[0]];
+  const sub = nodeAt(path); // 리프 노드 (children 재귀)
+  const block = blockById[path[0]] ?? null; // verify는 블록 아님 (설계 단계 페이지)
   const paramBox = el("div");
   const svgWrap = el("div", { class: "canvas-wrap sub" }, fromMarkup(sub.svg));
+  // 하위 진입 배선 — data-child (최상위 data-block과 동일 패턴, 깊이 무제한)
+  for (const node of svgWrap.querySelectorAll("[data-child]")) {
+    const go = () => navigate([...path, node.dataset.child]);
+    node.addEventListener("click", go);
+    node.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+    });
+  }
 
+  const crumbLabel = (seg, i, n) =>
+    i === 0 ? (blockById[seg]?.title ?? n.title) : (n.crumb ?? n.title);
   root.append(
     el("div", { class: "pagehead" },
-      el("span", { class: "step-tag", style: `background:${sub.tagBg}` }, sub.tag),
+      // 단계 태그는 루트 상속 (하위 층은 같은 설계 단계 소속)
+      el("span", { class: "step-tag", style: `background:${sub.tagBg ?? rootSub.tagBg}` },
+        sub.tag ?? rootSub.tag),
       el("h2", {}, sub.title),
       el("span", { class: "eng" }, sub.eng),
       el("span", { class: "chips" },
@@ -100,10 +141,22 @@ function renderSubPage(root, page) {
     ),
     el("div", { class: "crumbbar" },
       el("button", { class: "home-btn", onclick: () => navigate(null) }, "⌂ 제어법칙 (Top)"),
-      el("span", { class: "sep" }, "▸"),
-      el("span", { class: "cur" }, block?.title ?? sub.title),
+      path.map((seg, i) => {
+        const n = nodeAt(path.slice(0, i + 1));
+        return [
+          el("span", { class: "sep" }, "▸"),
+          i === path.length - 1
+            ? el("span", { class: "cur" }, crumbLabel(seg, i, n))
+            : el("button", {
+                class: "home-btn", onclick: () => navigate(path.slice(0, i + 1)),
+              }, crumbLabel(seg, i, n)),
+        ];
+      }),
       el("span", { style: "margin-left: auto" }, skinToggle(root)),
-      el("button", { class: "up-btn", style: "margin-left: 8px", onclick: () => navigate(null) }, "↑ 상위로"),
+      el("button", {
+        class: "up-btn", style: "margin-left: 8px",
+        onclick: () => navigate(path.length > 1 ? path.slice(0, -1) : null),
+      }, "↑ 상위로"),
     ),
     svgWrap,
     fromMarkup(`<div class="notes">${sub.notes}</div>`),

@@ -5,136 +5,297 @@ SVG·노트는 수작성 정적 마크업 (fromMarkup으로 DOM화 — 사용자
 내부 구조는 엔진 구현(M6~M8)과 1:1 — 코드에 없는 구조를 그리지 않는다.
 페이지 id는 lib/blocks.js 블록 id + "verify"(설계 ⑤ — 블록 아닌 설계 단계 페이지).
 
+드릴다운 트리(깊이 무제한): 페이지의 children = { childId: {crumb, title, eng,
+chips, svg, notes, children?} } — tag/tagBg는 루트 상속. 페이지 SVG 안의
+<g class="blk" data-child="childId" tabindex="0"> 블록 클릭 → 한 층 하강
+(#blocks/scas/pitch/pi — views/blocks.js 라우팅). data-child 참조는 그 페이지
+children 키만 허용 (lib/blocks.test.js 가드 — 오타 = 클릭 무반응).
+
 SVG 안의 <tspan data-p="이름">은 파라미터 연동 표시값 — views/blocks.js가 렌더 시
 스키마 기본값(+적용된 편집값)으로 채우고, 편집 폼 입력과 실시간 동기화한다.
 초기 텍스트는 참고용 폴백일 뿐 정본이 아님 (정본 = 엔진 레지스트리 스키마).
-data-p 이름은 해당 블록 스키마의 파라미터명만 허용 (lib/blocks.test.js 가드).
+data-p 이름은 **루트 블록** 스키마의 파라미터명만 허용 — children 포함
+(lib/blocks.test.js 가드). 스키마 폼 없는 루트(scas 등) 아래에서는 사용 금지.
 */
 
 // 상태 칩 종류 → 라벨 (fcs-context 문서 태그와 동일 의미)
 export const CHIP_LABEL = { ok: "확정", dft: "기본값", tbd: "TBD", note: "설계 유의" };
 
+// SCAS 축 공용 층4 — 엔진 blocks/controllers.py PID(kd=0)와 1:1.
+// 세 축이 동일 구조라 정의 하나를 공유 (게인 값만 축별 상이 — 정본은 게인 탭).
+const SCAS_PI_PAGE = {
+  crumb: "PI",
+  title: "PI — 클램프 안티와인드업", eng: "blocks.PID (kd=0) · y = clip(kp·e + I) · I ← clip(I + dt·ki·e)",
+  chips: ["ok", "dft"],
+  svg: `
+<svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aw-pi" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
+  <g class="sblk"><rect class="body" x="30" y="138" width="36" height="24" rx="12"/><text class="pnum" x="48" y="154">1</text></g>
+  <text class="pname" x="48" y="182">e (자세 오차)</text>
+  <path class="wire" d="M66 150 H146"/>
+  <circle class="branch" cx="150" cy="150" r="3.2"/>
+  <path class="wire" d="M150 150 V86 H196" marker-end="url(#aw-pi)"/>
+  <g class="sblk"><rect class="body" x="200" y="60" width="150" height="52" rx="3"/>
+    <text class="ttl" x="275" y="82" style="font-size:13px">× kp</text>
+    <text class="ttl2" x="275" y="100">비례항</text></g>
+  <path class="wire" d="M350 86 H480 V132" marker-end="url(#aw-pi)"/>
+  <path class="wire" d="M150 150 V222 H196" marker-end="url(#aw-pi)"/>
+  <g class="sblk"><rect class="body" x="200" y="190" width="250" height="64" rx="3"/>
+    <text class="ttl" x="325" y="214" style="font-size:13px">적분기 (클램프 AW)</text>
+    <text class="ttl2" x="325" y="236">I ← clip(I + dt·ki·e, out_lo~hi)</text></g>
+  <path class="wire" d="M450 222 H480 V168" marker-end="url(#aw-pi)"/>
+  <circle class="body" cx="480" cy="150" r="14"/>
+  <text class="sumsign" x="480" y="143">+</text><text class="sumsign" x="480" y="163">+</text>
+  <path class="wire" d="M494 150 H526" marker-end="url(#aw-pi)"/>
+  <g class="sblk"><rect class="body" x="530" y="124" width="110" height="52" rx="3"/>
+    <path d="M542 166 H558 L612 134 H628" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="585" y="194">출력 클립 out_lo~hi</text>
+  <path class="wire" d="M640 150 H726" marker-end="url(#aw-pi)"/>
+  <g class="sblk"><rect class="body" x="730" y="138" width="36" height="24" rx="12"/><text class="pnum" x="748" y="154">1</text></g>
+  <text class="pname" x="748" y="182">u_PI → k_rate 합산</text>
+  <text class="canvas-note" x="24" y="290">※ 안티와인드업 = 적분 '상태' 자체를 out_lo~hi로 클램프 — 포화 해제 시 즉시 복귀 · 이산화: 전진 오일러, dt는 제어주기에서 자동 [확정 §3.5]</text>
+  <text class="canvas-note" x="24" y="308">※ kp·ki는 게인 스케줄이 스텝 인자로 덮어씀 (생성 후 게인 변경은 이 경로만) · 재관여 시 reset(state) 적분 웜스타트 [범프리스 계약]</text>
+</svg>`,
+  notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li>안티와인드업: <b>적분 상태 자체를 클램프</b> — 출력 클립과 같은 한계(out_lo~hi) 사용 <span class="chip dft">기본값 M7</span>. 포화 중 적분이 한계 밖으로 누적되지 않아 해제 시 즉시 응답</li>
+  <li>이산화: 전진 오일러 — 계수는 제어주기(100 Hz)로부터 자동 계산 <span class="chip ok">확정 §3.5</span>, 미분항은 SCAS에서 미사용(kd=0)</li>
+  <li>게인 kp·ki의 정본은 게인 탭 테이블 — 스케줄이 <b>스텝별 인자 덮어쓰기</b>로 주입 (생성자 게인은 스케줄 미사용 시 폴백)</li>
+  <li>재관여(reset) 시 적분기 <b>웜스타트</b>(state 인자) — 모드 전환 킥 방지 <span class="chip ok">범프리스 계약</span></li>
+</ul>`,
+};
+
 export const SUBSYSTEMS = {
 
   // ── SCAS — 내측 루프 (설계 ②) ─────────────────────────────────────────
+  // 층2 = 축 서브시스템 블록 개요 (시뮬링크식) — 축 상세는 children (층3),
+  // PI 내부는 층4 (SCAS_PI_PAGE 공유)
   scas: {
     tag: "설계 ②", tagBg: "#1a6fb5",
     title: "SCAS — 내측 루프 (자세 안정화)", eng: "축 공통 구조: PI(자세오차) + k_rate·각속도 — LQR 제외",
     chips: ["ok", "dft"],
     svg: `
-<svg viewBox="0 0 960 610" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 960 470" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-scas" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <!-- 게인 스케줄 주입 (공통) -->
-  <rect x="660" y="26" width="272" height="60" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
-  <text class="annot" x="796" y="50" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
-  <text class="annot" x="796" y="70" text-anchor="middle">스텝별 덮어쓰기 (정본 = 게인 탭 테이블)</text>
-  <!-- 피치축: δe = clip( PI(θ_cmd−θ) + k_rate·q ) -->
-  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
-  <text class="pname" x="60" y="132">θ_cmd ← α 리미터</text>
-  <path class="wire" d="M66 100 H122" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="140" cy="100" r="14"/>
-  <text class="sumsign" x="131" y="104">+</text><text class="sumsign" x="140" y="113">−</text>
-  <path class="wire" d="M154 100 H186" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="190" y="74" width="150" height="52" rx="3"/>
-    <text class="ttl" x="265" y="96" style="font-size:13px">PI — 클램프 AW</text>
-    <text class="ttl2" x="265" y="114">적분 한계 = out_lo~hi</text></g>
-  <path class="wire" d="M340 100 H372" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="390" cy="100" r="14"/>
-  <text class="sumsign" x="381" y="104">+</text><text class="sumsign" x="390" y="113">+</text>
-  <path class="wire" d="M404 100 H436" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="440" y="74" width="110" height="52" rx="3"/>
-    <path d="M452 116 H468 L522 84 H538" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="495" y="144">최종 클립 out_lo~hi</text>
-  <path class="wire" d="M550 100 H806" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
-  <text class="pname" x="890" y="104">δe 피치</text>
-  <g class="sblk"><rect class="body" x="122" y="158" width="36" height="24" rx="12"/><text class="pnum" x="140" y="174">3</text></g>
-  <text class="pname" x="140" y="206">θ</text>
-  <path class="wire" d="M140 158 V118" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="350" y="140" width="80" height="36" rx="3"/>
-    <text class="ttl2" x="390" y="162" style="font-weight:700">× k_rate</text></g>
-  <g class="sblk"><rect class="body" x="372" y="188" width="36" height="24" rx="12"/><text class="pnum" x="390" y="204">4</text></g>
-  <text class="pname" x="430" y="204">q</text>
-  <path class="wire" d="M390 188 V180" marker-end="url(#aw-scas)"/>
-  <path class="wire" d="M390 140 V118" marker-end="url(#aw-scas)"/>
-  <!-- 롤축: δa = clip( PI(wrap(φ_cmd−φ)) + k_rate·p ) -->
-  <g class="sblk"><rect class="body" x="30" y="248" width="36" height="24" rx="12"/><text class="pnum" x="48" y="264">2</text></g>
-  <text class="pname" x="52" y="292">φ_cmd ← AP</text>
-  <path class="wire" d="M66 260 H122" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="140" cy="260" r="14"/>
-  <text class="sumsign" x="131" y="264">+</text><text class="sumsign" x="140" y="273">−</text>
-  <text class="siglabel" x="140" y="232">wrap ±π</text>
-  <path class="wire" d="M154 260 H186" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="190" y="234" width="150" height="52" rx="3"/>
-    <text class="ttl" x="265" y="256" style="font-size:13px">PI — 클램프 AW</text>
-    <text class="ttl2" x="265" y="274">적분 한계 = out_lo~hi</text></g>
-  <path class="wire" d="M340 260 H372" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="390" cy="260" r="14"/>
-  <text class="sumsign" x="381" y="264">+</text><text class="sumsign" x="390" y="273">+</text>
-  <path class="wire" d="M404 260 H436" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="440" y="234" width="110" height="52" rx="3"/>
-    <path d="M452 276 H468 L522 244 H538" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="495" y="304">최종 클립 out_lo~hi</text>
-  <path class="wire" d="M550 260 H806" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="810" y="248" width="36" height="24" rx="12"/><text class="pnum" x="828" y="264">2</text></g>
-  <text class="pname" x="888" y="264">δa 롤</text>
-  <g class="sblk"><rect class="body" x="122" y="318" width="36" height="24" rx="12"/><text class="pnum" x="140" y="334">5</text></g>
-  <text class="pname" x="140" y="366">φ</text>
-  <path class="wire" d="M140 318 V278" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="350" y="300" width="80" height="36" rx="3"/>
-    <text class="ttl2" x="390" y="322" style="font-weight:700">× k_rate</text></g>
-  <g class="sblk"><rect class="body" x="372" y="348" width="36" height="24" rx="12"/><text class="pnum" x="390" y="364">6</text></g>
-  <text class="pname" x="430" y="364">p</text>
-  <path class="wire" d="M390 348 V340" marker-end="url(#aw-scas)"/>
-  <path class="wire" d="M390 300 V278" marker-end="url(#aw-scas)"/>
-  <!-- 요축: δr = clip( PI(−β) + k_rate·washout(r) ) — 자세 명령 없음 (선회조화) -->
-  <g class="sblk"><rect class="body" x="30" y="418" width="36" height="24" rx="12"/><text class="pnum" x="48" y="434">7</text></g>
-  <text class="pname" x="62" y="462">β (사이드슬립)</text>
-  <path class="wire" d="M66 430 H96" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="100" y="404" width="80" height="52" rx="3"/>
-    <text class="ttl" x="140" y="426" style="font-size:13px">× −1</text>
-    <text class="ttl2" x="140" y="444">명령 없음</text></g>
-  <path class="wire" d="M180 430 H186" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="190" y="404" width="150" height="52" rx="3"/>
-    <text class="ttl" x="265" y="426" style="font-size:13px">PI — 클램프 AW</text>
-    <text class="ttl2" x="265" y="444">적분 한계 = out_lo~hi</text></g>
-  <path class="wire" d="M340 430 H372" marker-end="url(#aw-scas)"/>
-  <circle class="body" cx="390" cy="430" r="14"/>
-  <text class="sumsign" x="381" y="434">+</text><text class="sumsign" x="390" y="443">+</text>
-  <path class="wire" d="M404 430 H436" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="440" y="404" width="110" height="52" rx="3"/>
-    <path d="M452 446 H468 L522 414 H538" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="495" y="474">최종 클립 out_lo~hi</text>
-  <path class="wire" d="M550 430 H806" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="810" y="418" width="36" height="24" rx="12"/><text class="pnum" x="828" y="434">3</text></g>
-  <text class="pname" x="888" y="434">δr 요</text>
-  <g class="sblk"><rect class="body" x="30" y="500" width="36" height="24" rx="12"/><text class="pnum" x="48" y="516">8</text></g>
-  <text class="pname" x="48" y="548">r</text>
-  <path class="wire" d="M66 512 H146" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="150" y="486" width="150" height="52" rx="3"/>
-    <text class="ttl" x="225" y="508" style="font-size:13px">워시아웃 τs/(τs+1)</text>
-    <text class="ttl2" x="225" y="526">정상 r 제거 — 선회 유지</text></g>
-  <path class="wire" d="M300 512 H326" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="330" y="486" width="120" height="52" rx="3"/>
-    <text class="ttl" x="390" y="508" style="font-size:13px">× k_rate</text>
-    <text class="ttl2" x="390" y="526">τ=0이면 워시아웃 생략</text></g>
-  <path class="wire" d="M390 486 V448" marker-end="url(#aw-scas)"/>
-  <text class="canvas-note" x="24" y="576">※ θ·φ·p·q·r·β는 NavOutput에서 추출 (quat→euler · airdata) — 참값 차단 계약 · rate 항은 PI 클램프 밖에서 합산 — 최종 클립이 한 번 더 제한</text>
-  <text class="canvas-note" x="24" y="596">※ 재관여(reset) 시 적분기 웜스타트 + 워시아웃 rate 시드 — k_rate·r 킥 방지 [범프리스 계약] · 게인 부호는 설계값(게인 테이블) 소관 — 코드는 공력 부호 무가정</text>
+  <!-- 게인 스케줄 주입 (공통) — 주석 프레임 -->
+  <rect x="640" y="18" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="annot" x="786" y="42" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
+  <text class="annot" x="786" y="62" text-anchor="middle">스텝별 덮어쓰기 (정본 = 게인 탭 테이블)</text>
+  <!-- 입력 포트 -->
+  <g class="sblk"><rect class="body" x="30" y="110" width="36" height="24" rx="12"/><text class="pnum" x="48" y="126">1</text></g>
+  <text class="pname" x="48" y="154">θ_cmd ← α 리미터</text>
+  <path class="wire" d="M66 122 H326" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="30" y="220" width="36" height="24" rx="12"/><text class="pnum" x="48" y="236">2</text></g>
+  <text class="pname" x="48" y="264">φ_cmd ← AP</text>
+  <path class="wire" d="M66 232 H326" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="30" y="392" width="36" height="24" rx="12"/><text class="pnum" x="48" y="408">3</text></g>
+  <text class="pname" x="48" y="444">NavOutput (θ·φ·β · p·q·r)</text>
+  <path class="wire" d="M66 404 H120 V146 H326" marker-end="url(#aw-scas)"/>
+  <circle class="branch" cx="120" cy="366" r="3.2"/>
+  <path class="wire" d="M120 366 H326" marker-end="url(#aw-scas)"/>
+  <circle class="branch" cx="120" cy="256" r="3.2"/>
+  <path class="wire" d="M120 256 H326" marker-end="url(#aw-scas)"/>
+  <text class="siglabel" x="296" y="140">θ·q</text>
+  <text class="siglabel" x="296" y="250">φ·p</text>
+  <text class="siglabel" x="296" y="360">β·r</text>
+  <!-- 축 서브시스템 블록 (클릭 → 층3) -->
+  <g class="blk" data-child="pitch" tabindex="0">
+    <rect class="body" x="330" y="84" width="300" height="76" rx="3"/>
+    <text class="ttl" x="480" y="116">피치축 (ScasAxis)</text>
+    <text class="ttl2" x="480" y="140">PI + k_rate·q → δe · 클릭 → 내부</text>
+  </g>
+  <g class="blk" data-child="roll" tabindex="0">
+    <rect class="body" x="330" y="194" width="300" height="76" rx="3"/>
+    <text class="ttl" x="480" y="226">롤축 (ScasAxis)</text>
+    <text class="ttl2" x="480" y="250">wrap ±π 오차 PI + k_rate·p → δa · 클릭 → 내부</text>
+  </g>
+  <g class="blk" data-child="yaw" tabindex="0">
+    <rect class="body" x="330" y="304" width="300" height="76" rx="3"/>
+    <text class="ttl" x="480" y="336">요축 (ScasAxis + 워시아웃)</text>
+    <text class="ttl2" x="480" y="360">−β PI + k_rate·washout(r) → δr · 클릭 → 내부</text>
+  </g>
+  <!-- 출력 포트 -->
+  <path class="wire" d="M630 122 H806" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="810" y="110" width="36" height="24" rx="12"/><text class="pnum" x="828" y="126">1</text></g>
+  <text class="pname" x="856" y="126">δe → 믹서</text>
+  <path class="wire" d="M630 232 H806" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="810" y="220" width="36" height="24" rx="12"/><text class="pnum" x="828" y="236">2</text></g>
+  <text class="pname" x="856" y="236">δa → 믹서</text>
+  <path class="wire" d="M630 342 H806" marker-end="url(#aw-scas)"/>
+  <g class="sblk"><rect class="body" x="810" y="330" width="36" height="24" rx="12"/><text class="pnum" x="828" y="346">3</text></g>
+  <text class="pname" x="856" y="346">δr → 믹서</text>
+  <text class="canvas-note" x="24" y="462">※ 축 블록 클릭 → 내부 진입 (시뮬링크 더블클릭 대응) · 축 공통 평탄형 구조 [확정 M7] — 캐스케이드 아님 · θ·φ·β·p·q·r는 NavOutput 추출 — 참값 차단 계약</text>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
 <ul>
-  <li>축 공통 구조: <b>PI(자세오차) + k_rate·각속도</b>, 출력 클립 — 캐스케이드(자세→레이트 2단) 아닌 평탄형 <span class="chip ok">확정 M7</span></li>
-  <li>요축: β 유지(kβ) + <b>워시아웃</b> 요레이트(kr) — 지속 선회 시 정상분 제거로 선회 유지 <span class="chip ok">확정</span> · τ = 2 s <span class="chip dft">기본값</span></li>
-  <li>안티와인드업: 적분항 클램프 <span class="chip dft">기본값 M7</span> — 실데이터 튜닝 시 재검토</li>
-  <li>이산화: 제어주기 <b>100 Hz</b> 시작 → 50 Hz 하향 영향성 비교 예정 · 계수는 주기로부터 자동 계산 <span class="chip ok">확정</span></li>
-  <li>항법 갱신주기 ≤ 제어주기 가능 → <b>멀티레이트 입력</b> 전제 설계 <span class="chip note">설계 유의</span></li>
-  <li>요축 오차 입력은 <b>−β</b> (자세 명령이 아닌 선회조화 — β 억제) · 롤 오차는 <b>wrap ±π</b> (배면 통과 시 2π 점프 방지)</li>
+  <li>축 공통 구조: <b>PI(자세오차) + k_rate·각속도</b>, 출력 클립 — 캐스케이드(자세→레이트 2단) 아닌 평탄형 <span class="chip ok">확정 M7</span> · 축 내부·PI 내부는 블록 클릭으로 진입</li>
+  <li>안티와인드업: 적분항 클램프 <span class="chip dft">기본값 M7</span> · 이산화: 제어주기 100 Hz 시작(50 Hz 비교 예정), 계수 자동 계산 <span class="chip ok">확정</span> · 멀티레이트 입력 전제 <span class="chip note">설계 유의</span></li>
   <li>rate 항은 PI 클램프 <b>밖</b>에서 합산 → 축 출력은 최종 클립이 한 번 더 제한 · 재관여 시 적분 웜스타트 + 워시아웃 rate 시드 <span class="chip ok">범프리스 계약</span></li>
-  <li>데모 설계점(M0.6·h1000·fuel200): 피치 kp −2.0 / ki −0.5 / k_rate 0.4 · 롤 1.0 / 0.1 / −0.2 · 요 kβ 0.5 / kr 0.8</li>
+  <li>데모 설계점(M0.6·h1000·fuel200): 피치 kp −2.0 / ki −0.5 / k_rate 0.4 · 롤 1.0 / 0.1 / −0.2 · 요 kβ 0.5 / kr 0.8 · 게인 부호는 설계값(게인 테이블) 소관 — 코드는 공력 부호 무가정</li>
 </ul>`,
+    children: {
+      pitch: {
+        crumb: "피치축",
+        title: "피치축 — ScasAxis", eng: "δe = clip( PI(θ_cmd − θ) + k_rate·q, out_lo~hi )",
+        chips: ["ok", "dft"],
+        svg: `
+<svg viewBox="0 0 960 320" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aw-scp" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
+  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <text class="pname" x="48" y="132">θ_cmd ← α 리미터</text>
+  <path class="wire" d="M66 100 H122" marker-end="url(#aw-scp)"/>
+  <circle class="body" cx="140" cy="100" r="14"/>
+  <text class="sumsign" x="131" y="104">+</text><text class="sumsign" x="140" y="113">−</text>
+  <path class="wire" d="M154 100 H186" marker-end="url(#aw-scp)"/>
+  <g class="blk" data-child="pi" tabindex="0">
+    <rect class="body" x="190" y="64" width="190" height="72" rx="3"/>
+    <text class="ttl" x="285" y="94" style="font-size:14px">PI — 클램프 AW</text>
+    <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
+  </g>
+  <path class="wire" d="M380 100 H412" marker-end="url(#aw-scp)"/>
+  <circle class="body" cx="430" cy="100" r="14"/>
+  <text class="sumsign" x="421" y="104">+</text><text class="sumsign" x="430" y="113">+</text>
+  <path class="wire" d="M444 100 H476" marker-end="url(#aw-scp)"/>
+  <g class="sblk"><rect class="body" x="480" y="74" width="110" height="52" rx="3"/>
+    <path d="M492 116 H508 L562 84 H578" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="535" y="144">최종 클립 out_lo~hi</text>
+  <path class="wire" d="M590 100 H806" marker-end="url(#aw-scp)"/>
+  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <text class="pname" x="828" y="132">δe → 믹서</text>
+  <g class="sblk"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
+  <text class="pname" x="164" y="186">θ (NavOutput)</text>
+  <path class="wire" d="M140 170 V118" marker-end="url(#aw-scp)"/>
+  <g class="sblk"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
+    <text class="ttl2" x="430" y="178" style="font-weight:700">× k_rate</text></g>
+  <path class="wire" d="M430 156 V118" marker-end="url(#aw-scp)"/>
+  <g class="sblk"><rect class="body" x="412" y="212" width="36" height="24" rx="12"/><text class="pnum" x="430" y="228">3</text></g>
+  <text class="pname" x="454" y="228">q (NavOutput)</text>
+  <path class="wire" d="M430 212 V192" marker-end="url(#aw-scp)"/>
+  <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="annot" x="786" y="204" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
+  <text class="annot" x="786" y="224" text-anchor="middle">스텝별 덮어쓰기 (정본 = 게인 탭)</text>
+  <text class="canvas-note" x="24" y="296">※ rate 항은 PI 클램프 밖 합산 — 최종 클립이 한 번 더 제한 · 재관여 시 적분 웜스타트 [범프리스 계약] · PI 블록 클릭 → 내부 (층4)</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li><span class="mono">δe = clip( PI(θ_cmd − θ) + k_rate·q, out_lo~hi )</span> — 명령은 α 리미터를 거친 θ_cmd <span class="chip ok">확정 M7</span></li>
+  <li>데모 설계값: kp −2.0 · ki −0.5 · k_rate 0.4 (설계점 M0.6·h1000·fuel200) — 동압 스케일 1D mach 스케줄 적용 <span class="chip dft">기본값</span></li>
+  <li>PI 내부(비례·적분기 클램프 AW·출력 클립)는 PI 블록 클릭 — 층4</li>
+</ul>`,
+        children: { pi: SCAS_PI_PAGE },
+      },
+      roll: {
+        crumb: "롤축",
+        title: "롤축 — ScasAxis", eng: "δa = clip( PI(wrap(φ_cmd − φ)) + k_rate·p, out_lo~hi )",
+        chips: ["ok", "dft"],
+        svg: `
+<svg viewBox="0 0 960 320" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aw-scr" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
+  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <text class="pname" x="48" y="132">φ_cmd ← AP</text>
+  <path class="wire" d="M66 100 H122" marker-end="url(#aw-scr)"/>
+  <circle class="body" cx="140" cy="100" r="14"/>
+  <text class="sumsign" x="131" y="104">+</text><text class="sumsign" x="140" y="113">−</text>
+  <text class="siglabel" x="140" y="72">wrap ±π</text>
+  <path class="wire" d="M154 100 H186" marker-end="url(#aw-scr)"/>
+  <g class="blk" data-child="pi" tabindex="0">
+    <rect class="body" x="190" y="64" width="190" height="72" rx="3"/>
+    <text class="ttl" x="285" y="94" style="font-size:14px">PI — 클램프 AW</text>
+    <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
+  </g>
+  <path class="wire" d="M380 100 H412" marker-end="url(#aw-scr)"/>
+  <circle class="body" cx="430" cy="100" r="14"/>
+  <text class="sumsign" x="421" y="104">+</text><text class="sumsign" x="430" y="113">+</text>
+  <path class="wire" d="M444 100 H476" marker-end="url(#aw-scr)"/>
+  <g class="sblk"><rect class="body" x="480" y="74" width="110" height="52" rx="3"/>
+    <path d="M492 116 H508 L562 84 H578" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="535" y="144">최종 클립 out_lo~hi</text>
+  <path class="wire" d="M590 100 H806" marker-end="url(#aw-scr)"/>
+  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <text class="pname" x="828" y="132">δa → 믹서</text>
+  <g class="sblk"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
+  <text class="pname" x="164" y="186">φ (NavOutput)</text>
+  <path class="wire" d="M140 170 V118" marker-end="url(#aw-scr)"/>
+  <g class="sblk"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
+    <text class="ttl2" x="430" y="178" style="font-weight:700">× k_rate</text></g>
+  <path class="wire" d="M430 156 V118" marker-end="url(#aw-scr)"/>
+  <g class="sblk"><rect class="body" x="412" y="212" width="36" height="24" rx="12"/><text class="pnum" x="430" y="228">3</text></g>
+  <text class="pname" x="454" y="228">p (NavOutput)</text>
+  <path class="wire" d="M430 212 V192" marker-end="url(#aw-scr)"/>
+  <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="annot" x="786" y="204" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
+  <text class="annot" x="786" y="224" text-anchor="middle">스텝별 덮어쓰기 (정본 = 게인 탭)</text>
+  <text class="canvas-note" x="24" y="296">※ 롤 오차는 wrap ±π — 배면 통과 시 2π 점프 방지 · rate 항은 PI 클램프 밖 합산 · 재관여 시 적분 웜스타트 [범프리스 계약]</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li><span class="mono">δa = clip( PI(wrap(φ_cmd − φ)) + k_rate·p, out_lo~hi )</span> — 오차 <b>wrap ±π</b>로 배면 통과 시 2π 점프 방지 <span class="chip ok">확정 M7</span></li>
+  <li>데모 설계값: kp 1.0 · ki 0.1 · k_rate −0.2 (δa 부호 관례상 음수가 정상 판독) <span class="chip dft">기본값</span></li>
+  <li>PI 내부는 PI 블록 클릭 — 층4</li>
+</ul>`,
+        children: { pi: SCAS_PI_PAGE },
+      },
+      yaw: {
+        crumb: "요축",
+        title: "요축 — ScasAxis + 워시아웃", eng: "δr = clip( PI(−β) + k_rate·washout(r), out_lo~hi ) — 선회조화",
+        chips: ["ok", "dft"],
+        svg: `
+<svg viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aw-scy" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
+  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <text class="pname" x="48" y="132">β (사이드슬립)</text>
+  <path class="wire" d="M66 100 H96" marker-end="url(#aw-scy)"/>
+  <g class="sblk"><rect class="body" x="100" y="74" width="70" height="52" rx="3"/>
+    <text class="ttl" x="135" y="96" style="font-size:13px">× −1</text>
+    <text class="ttl2" x="135" y="114">명령 없음</text></g>
+  <path class="wire" d="M170 100 H186" marker-end="url(#aw-scy)"/>
+  <g class="blk" data-child="pi" tabindex="0">
+    <rect class="body" x="190" y="64" width="190" height="72" rx="3"/>
+    <text class="ttl" x="285" y="94" style="font-size:14px">PI — 클램프 AW</text>
+    <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
+  </g>
+  <path class="wire" d="M380 100 H412" marker-end="url(#aw-scy)"/>
+  <circle class="body" cx="430" cy="100" r="14"/>
+  <text class="sumsign" x="421" y="104">+</text><text class="sumsign" x="430" y="113">+</text>
+  <path class="wire" d="M444 100 H476" marker-end="url(#aw-scy)"/>
+  <g class="sblk"><rect class="body" x="480" y="74" width="110" height="52" rx="3"/>
+    <path d="M492 116 H508 L562 84 H578" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="535" y="144">최종 클립 out_lo~hi</text>
+  <path class="wire" d="M590 100 H806" marker-end="url(#aw-scy)"/>
+  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <text class="pname" x="828" y="132">δr → 믹서</text>
+  <g class="sblk"><rect class="body" x="30" y="196" width="36" height="24" rx="12"/><text class="pnum" x="48" y="212">2</text></g>
+  <text class="pname" x="48" y="240">r (NavOutput)</text>
+  <path class="wire" d="M66 208 H96" marker-end="url(#aw-scy)"/>
+  <g class="sblk"><rect class="body" x="100" y="182" width="170" height="52" rx="3"/>
+    <text class="ttl" x="185" y="204" style="font-size:13px">워시아웃 τs/(τs+1)</text>
+    <text class="ttl2" x="185" y="222">정상 r 제거 — 선회 유지</text></g>
+  <path class="wire" d="M270 208 H294" marker-end="url(#aw-scy)"/>
+  <g class="sblk"><rect class="body" x="298" y="190" width="84" height="36" rx="3"/>
+    <text class="ttl2" x="340" y="212" style="font-weight:700">× k_rate</text></g>
+  <path class="wire" d="M382 208 H430 V118" marker-end="url(#aw-scy)"/>
+  <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="annot" x="786" y="204" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
+  <text class="annot" x="786" y="224" text-anchor="middle">스텝별 덮어쓰기 (정본 = 게인 탭)</text>
+  <text class="canvas-note" x="24" y="336">※ 요축은 자세 명령 없음 — 선회조화(β 억제) · 워시아웃이 지속 선회의 정상 r 제거 → 선회 유지 · 재관여 시 워시아웃 rate 시드 — k_rate·r 킥 방지 [범프리스]</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li><span class="mono">δr = clip( PI(−β) + k_rate·washout(r), out_lo~hi )</span> — 자세 명령 없음, β 억제(선회조화) <span class="chip ok">확정 M7</span></li>
+  <li><b>워시아웃</b> τs/(τs+1)이 지속 선회의 정상 요레이트를 제거 — 선회 유지 <span class="chip ok">확정</span> · τ = 2 s <span class="chip dft">기본값</span> (washout_tau=0이면 생략)</li>
+  <li>데모 설계값: kβ 0.5 · kr 0.8 · 러더는 믹서에서 차동추력 보상과 결합</li>
+  <li>PI 내부는 PI 블록 클릭 — 층4</li>
+</ul>`,
+        children: { pi: SCAS_PI_PAGE },
+      },
+    },
   },
+
 
   // ── 오토파일럿 — 외측 루프 (설계 ③) ──────────────────────────────────
   autopilot: {
@@ -142,93 +303,241 @@ export const SUBSYSTEMS = {
     title: "오토파일럿 — 외측 루프", eng: "Autopilot / Outer Loop — 채널별 PI + 명령필터",
     chips: ["ok", "dft"],
     svg: `
-<svg viewBox="0 0 900 480" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="aw-ap" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
-    <marker id="af-ap" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b45309"/></marker>
-  </defs>
-  <!-- 고도 채널 -->
-  <g class="sblk"><rect class="body" x="30" y="68" width="36" height="24" rx="12"/><text class="pnum" x="48" y="84">1</text></g>
-  <text class="pname" x="48" y="108">h_cmd</text>
-  <path class="wire" d="M66 80 H96" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="100" y="56" width="96" height="48" rx="3"/><text class="ttl2" x="148" y="76" style="font-weight:700">명령필터</text><text class="ttl2" x="148" y="93">τ = <tspan data-p="tau_alt">5</tspan> s</text></g>
-  <path class="wire" d="M196 80 H238" marker-end="url(#aw-ap)"/>
-  <circle class="body" cx="256" cy="80" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="247" y="84">+</text><text class="sumsign" x="256" y="93">−</text>
-  <path class="wire" d="M270 80 H302" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="306" y="53" width="130" height="54" rx="3"/><text class="ttl" x="371" y="74">고도 PI</text><text class="ttl2" x="371" y="90">kp <tspan data-p="kp_alt">0.004</tspan> · ki <tspan data-p="ki_alt">0.0004</tspan></text><text class="ttl2" x="371" y="103">k_hdot <tspan data-p="k_hdot">−0.008</tspan> 승강률</text></g>
-  <path class="wire" d="M436 80 H448" marker-end="url(#aw-ap)"/>
-  <circle class="body" cx="466" cy="80" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="457" y="84">+</text><text class="sumsign" x="466" y="75">+</text>
-  <path class="wire" d="M480 80 H492" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="496" y="50" width="100" height="60" rx="3"/>
-    <path d="M506 96 H522 L570 64 H586" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="546" y="128">θ 한계 <tspan data-p="theta_lo">−0.3</tspan> ~ <tspan data-p="theta_hi">0.3</tspan> rad</text>
-  <path class="wire" d="M596 80 H644" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="648" y="68" width="36" height="24" rx="12"/><text class="pnum" x="666" y="84">1</text></g>
-  <text class="pname" x="678" y="108">θ_cmd → α 리미터</text>
-  <g class="sblk"><rect class="body" x="238" y="140" width="36" height="24" rx="12"/><text class="pnum" x="256" y="156">4</text></g>
-  <text class="pname" x="290" y="156">h</text>
-  <path class="wire" d="M256 140 V98" marker-end="url(#aw-ap)"/>
-  <!-- 속도 채널 -->
-  <g class="sblk"><rect class="body" x="30" y="208" width="36" height="24" rx="12"/><text class="pnum" x="48" y="224">2</text></g>
-  <text class="pname" x="48" y="248">V_cmd</text>
-  <path class="wire" d="M66 220 H96" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="100" y="196" width="96" height="48" rx="3"/><text class="ttl2" x="148" y="216" style="font-weight:700">명령필터</text><text class="ttl2" x="148" y="233">τ = <tspan data-p="tau_spd">2</tspan> s</text></g>
-  <path class="wire" d="M196 220 H238" marker-end="url(#aw-ap)"/>
-  <circle class="body" cx="256" cy="220" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="247" y="224">+</text><text class="sumsign" x="256" y="233">−</text>
-  <path class="wire" d="M270 220 H302" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="306" y="193" width="130" height="54" rx="3"/><text class="ttl" x="371" y="217">속도 PI</text><text class="ttl2" x="371" y="237">kp <tspan data-p="kp_spd">0.15</tspan> · ki <tspan data-p="ki_spd">0.03</tspan></text></g>
-  <path class="wire" d="M436 220 H494" marker-end="url(#aw-ap)"/>
-  <circle class="body" cx="512" cy="220" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="503" y="224">+</text><text class="sumsign" x="512" y="233">+</text>
-  <path class="wire" d="M526 220 H584" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="588" y="208" width="36" height="24" rx="12"/><text class="pnum" x="606" y="224">2</text></g>
-  <text class="pname" x="620" y="248">δt_cmd (스로틀)</text>
-  <g class="sblk"><rect class="body" x="238" y="276" width="36" height="24" rx="12"/><text class="pnum" x="256" y="292">5</text></g>
-  <text class="pname" x="290" y="292">V</text>
-  <path class="wire" d="M256 276 V238" marker-end="url(#aw-ap)"/>
-  <!-- 헤딩 채널 -->
-  <g class="sblk"><rect class="body" x="30" y="348" width="36" height="24" rx="12"/><text class="pnum" x="48" y="364">3</text></g>
-  <text class="pname" x="48" y="388">ψ_cmd</text>
-  <path class="wire" d="M66 360 H96" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="100" y="336" width="96" height="48" rx="3"/><text class="ttl2" x="148" y="356" style="font-weight:700">명령필터</text><text class="ttl2" x="148" y="373">τ = <tspan data-p="tau_hdg">1</tspan> s</text></g>
-  <path class="wire" d="M196 360 H238" marker-end="url(#aw-ap)"/>
-  <circle class="body" cx="256" cy="360" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="247" y="364">+</text><text class="sumsign" x="256" y="373">−</text>
-  <path class="wire" d="M270 360 H302" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="306" y="333" width="130" height="54" rx="3"/><text class="ttl" x="371" y="357">헤딩 PI</text><text class="ttl2" x="371" y="377">kp <tspan data-p="kp_hdg">4</tspan> · ki <tspan data-p="ki_hdg">0</tspan> · wrap</text></g>
-  <path class="wire" d="M436 360 H492" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="496" y="330" width="100" height="60" rx="3"/>
-    <path d="M506 376 H522 L570 344 H586" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="546" y="408">φ 한계 ±<tspan data-p="phi_max">0.7</tspan> rad</text>
-  <path class="wire" d="M596 360 H644" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="648" y="348" width="36" height="24" rx="12"/><text class="pnum" x="666" y="364">3</text></g>
-  <text class="pname" x="666" y="388">φ_cmd</text>
-  <g class="sblk"><rect class="body" x="238" y="416" width="36" height="24" rx="12"/><text class="pnum" x="256" y="432">6</text></g>
-  <text class="pname" x="290" y="432">ψ</text>
-  <path class="wire" d="M256 416 V378" marker-end="url(#aw-ap)"/>
-  <!-- 선회 피드포워드 — φ_cmd 분기 입력, 출력은 코드 순서대로 θ 합점(한계 전)·δt 합점.
-       피치 배선은 상단 여백(y34)으로 우회 — 채널 배선과 평행 중첩 금지 -->
-  <g class="sblk"><rect class="body ff-body" x="560" y="258" width="250" height="56" rx="3"/>
-    <text class="ttl ff-ink" x="685" y="281">선회 피드포워드 보상</text>
-    <text class="ttl2 ff-ink2" x="685" y="301">|φ_cmd| 기반 — 피치 <tspan data-p="k_pitch_turn">0.05</tspan> · 스로틀 <tspan data-p="k_thr_turn">0</tspan></text></g>
-  <circle class="branch" cx="612" cy="360" r="3.2"/>
-  <path class="wire ff" d="M612 360 V318" marker-end="url(#af-ap)"/>
-  <path class="wire ff" d="M560 286 H512 V238" marker-end="url(#af-ap)"/>
-  <path class="wire ff" d="M785 258 V34 H466 V62" marker-end="url(#af-ap)"/>
+<svg viewBox="0 0 960 480" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aw-ap" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
+  <!-- 게인 스케줄 주입 (공통) — 주석 프레임 -->
+  <rect x="620" y="16" width="312" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="annot" x="776" y="38" text-anchor="middle">게인 스케줄링 주입 — speed·alt·heading 그룹</text>
+  <text class="annot" x="776" y="58" text-anchor="middle">kp·ki 스텝별 덮어쓰기 (정본 = 게인 탭)</text>
+  <!-- 입력 포트 (헤딩이 위 — φ_cmd를 선회 FF가 소비) -->
+  <g class="sblk"><rect class="body" x="30" y="110" width="36" height="24" rx="12"/><text class="pnum" x="48" y="126">3</text></g>
+  <text class="pname" x="48" y="154">ψ_cmd ← 유도</text>
+  <path class="wire" d="M66 122 H326" marker-end="url(#aw-ap)"/>
+  <g class="sblk"><rect class="body" x="30" y="220" width="36" height="24" rx="12"/><text class="pnum" x="48" y="236">2</text></g>
+  <text class="pname" x="48" y="264">h_cmd ← 유도</text>
+  <path class="wire" d="M66 232 H326" marker-end="url(#aw-ap)"/>
+  <g class="sblk"><rect class="body" x="30" y="330" width="36" height="24" rx="12"/><text class="pnum" x="48" y="346">1</text></g>
+  <text class="pname" x="48" y="374">V_cmd ← 유도</text>
+  <path class="wire" d="M66 342 H326" marker-end="url(#aw-ap)"/>
+  <g class="sblk"><rect class="body" x="30" y="398" width="36" height="24" rx="12"/><text class="pnum" x="48" y="414">4</text></g>
+  <text class="pname" x="48" y="446">NavOutput (ψ · h·ḣ · V)</text>
+  <path class="wire" d="M66 410 H120 V146 H326" marker-end="url(#aw-ap)"/>
+  <circle class="branch" cx="120" cy="366" r="3.2"/>
+  <path class="wire" d="M120 366 H326" marker-end="url(#aw-ap)"/>
+  <circle class="branch" cx="120" cy="256" r="3.2"/>
+  <path class="wire" d="M120 256 H326" marker-end="url(#aw-ap)"/>
+  <text class="siglabel" x="302" y="140">ψ</text>
+  <text class="siglabel" x="302" y="250">h·ḣ</text>
+  <text class="siglabel" x="302" y="360">V</text>
+  <!-- 채널 서브시스템 블록 (클릭 → 층3) -->
+  <g class="blk" data-child="hdg" tabindex="0">
+    <rect class="body" x="330" y="84" width="300" height="76" rx="3"/>
+    <text class="ttl" x="480" y="116">헤딩 채널</text>
+    <text class="ttl2" x="480" y="140">필터 wrap τ <tspan data-p="tau_hdg">1</tspan> s · PI · 클립 ±phi_max · 클릭 → 내부</text>
+  </g>
+  <g class="blk" data-child="alt" tabindex="0">
+    <rect class="body" x="330" y="194" width="300" height="76" rx="3"/>
+    <text class="ttl" x="480" y="226">고도 채널</text>
+    <text class="ttl2" x="480" y="250">필터 τ <tspan data-p="tau_alt">5</tspan> s · PI + k_hdot·ḣ · θ 클립 · 클릭 → 내부</text>
+  </g>
+  <g class="blk" data-child="spd" tabindex="0">
+    <rect class="body" x="330" y="304" width="300" height="76" rx="3"/>
+    <text class="ttl" x="480" y="336">속도 채널</text>
+    <text class="ttl2" x="480" y="360">필터 τ <tspan data-p="tau_spd">2</tspan> s · PI · 0~1 클립 · 클릭 → 내부</text>
+  </g>
+  <!-- 출력 포트 -->
+  <path class="wire" d="M630 122 H806" marker-end="url(#aw-ap)"/>
+  <g class="sblk"><rect class="body" x="810" y="110" width="36" height="24" rx="12"/><text class="pnum" x="828" y="126">2</text></g>
+  <text class="pname" x="856" y="126">φ_cmd → SCAS 롤</text>
+  <path class="wire" d="M630 232 H806" marker-end="url(#aw-ap)"/>
+  <g class="sblk"><rect class="body" x="810" y="220" width="36" height="24" rx="12"/><text class="pnum" x="828" y="236">1</text></g>
+  <text class="pname" x="856" y="236">θ_cmd → α 리미터</text>
+  <path class="wire" d="M630 342 H806" marker-end="url(#aw-ap)"/>
+  <g class="sblk"><rect class="body" x="810" y="330" width="36" height="24" rx="12"/><text class="pnum" x="828" y="346">3</text></g>
+  <text class="pname" x="856" y="346">δt_cmd (0~1)</text>
+  <!-- 선회 FF — 주석 프레임 (실 배선·재클립은 채널 내부, 층3) -->
+  <rect x="330" y="400" width="600" height="44" rx="8" fill="none" stroke="#b45309" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="annot" x="630" y="427" text-anchor="middle" fill="#b45309">선회 피드포워드 — |φ_cmd| 분기 → 고도(θ)·속도(δt) 채널 내부 가산 · 상세는 채널 클릭</text>
+  <text class="canvas-note" x="24" y="470">※ 채널 블록 클릭 → 내부 진입 (시뮬링크 더블클릭 대응) · 전 채널이 SCAS와 동일한 ScasAxis 재사용 (PI 클램프 AW) · V·h·ḣ·ψ는 NavOutput 추출 — 참값 차단 계약</text>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
 <ul>
-  <li>속도 / 고도 / 헤딩 <b>독립 PI 채널</b> — 고도→θ_cmd, 속도→δt_cmd, 헤딩→φ_cmd <span class="chip ok">확정</span></li>
-  <li>명령 경로 <b>1차 명령필터</b> — 급격한 명령의 타면 포화·과도 하중 방지 <span class="chip dft">기본값</span> · 시정수 속도 2 · 고도 5 · 헤딩 1 s <span class="chip dft">기본값 M7</span></li>
-  <li>선회 시 <b>피드포워드 보상</b>(피치·스로틀) — 델타윙 유도항력의 속도·고도 손실 방지 <span class="chip note">설계 유의</span> · 데모 튜닝: 피치 FF 0.05, 스로틀 FF 0(역효과) <span class="chip dft">기본값</span></li>
-  <li>피치 명령은 θ 한계(theta_lo~hi) 클립 후 <b>α 리미터</b>를 거쳐 SCAS로 · 뱅크는 ±phi_max(π/2 미만 — 선회 FF 부호 보전)</li>
-  <li>요축 별도 출력 없음 — 요 안정화는 SCAS(β·r), 차동추력 보상은 제어면 혼합에서</li>
-  <li>게인은 게인 스케줄링(Mach·고도·연료) 적용 대상 · 이 페이지 폼에서 편집 → 시뮬 주입 가능</li>
+  <li>속도 / 고도 / 헤딩 <b>독립 PI 채널</b> — 고도→θ_cmd, 속도→δt_cmd, 헤딩→φ_cmd <span class="chip ok">확정</span> · 전 채널이 SCAS와 동일한 <b>ScasAxis</b>(PI 클램프 AW + 출력 클립) 재사용</li>
+  <li>명령 경로 <b>1차 명령필터</b> — 급명령의 타면 포화·과도 하중 방지 · 첫 스텝 현재 측정 시드(캡처) · 헤딩 필터는 wrap 최단경로 보간 · τ 속도 2 · 고도 5 · 헤딩 1 s <span class="chip dft">기본값 M7</span></li>
+  <li>비활성 축: 필터는 측정 추적(reset_to) — 활성화 순간 현재값부터 램프 · 오차 0 적분 → <b>트림 홀드</b> · 헤딩 off는 적분 소거 + φ_cmd=0 (재관여 시 잔존 뱅크 킥 방지)</li>
+  <li>선회 <b>피드포워드 보상</b>(델타윙 유도항력) — θ += k_pitch_turn·(1/cosφ−1), δt += k_thr_turn·(1/cos²φ−1) · 축 클립 후 합산 → 재클립 (이중 제한) · 데모 튜닝: 피치 0.05, 스로틀 0(역효과) <span class="chip dft">기본값</span></li>
+  <li>피치 명령은 θ 한계 클립 후 <b>α 리미터</b>를 거쳐 SCAS로 · 뱅크는 ±phi_max — π/2 미만 강제 (선회 FF 부호 보전 가드) · 요축 별도 출력 없음 (요 안정화는 SCAS, 차동추력은 믹서)</li>
+  <li>트림 웜스타트: 속도 적분기 = 트림 스로틀 · 고도 적분기 = 트림 θ <span class="chip ok">범프리스 계약</span> · 게인은 게인 스케줄링 적용 대상 · 이 페이지 폼 편집 → 시뮬 주입 가능</li>
+  <li>데모 설계점 성능 (M0.6 h1000 fuel200 폐루프 스캔): 고도 +100 m 오버슈트 8.3% · 속도 +10 m/s 3.7% · 헤딩 0.5 rad 무오버슈트·고도 강하 1.1 m <span class="chip dft">기본값</span></li>
+  <li>채널 내부(필터·PI·클립·FF 합류)는 채널 블록 클릭 — 층3 <span class="chip ok">확정</span></li>
 </ul>`,
+    children: {
+      hdg: {
+        crumb: "헤딩 채널",
+        title: "헤딩 채널", eng: "φ_cmd = clip( PI(wrap(ψ_ref − ψ)), ±phi_max ) — ScasAxis 재사용",
+        chips: ["ok", "dft"],
+        svg: `
+<svg viewBox="0 0 960 300" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="aw-aph" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+    <marker id="af-aph" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b45309"/></marker>
+  </defs>
+  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <text class="pname" x="48" y="132">ψ_cmd ← 유도</text>
+  <path class="wire" d="M66 100 H96" marker-end="url(#aw-aph)"/>
+  <g class="sblk"><rect class="body" x="100" y="74" width="118" height="52" rx="3"/>
+    <text class="ttl" x="159" y="93" style="font-size:13px">명령필터 wrap</text>
+    <text class="ttl2" x="159" y="111">τ <tspan data-p="tau_hdg">1</tspan> s · 최단경로</text></g>
+  <text class="siglabel" x="159" y="144">off: ψ 추적 · 적분 소거 · φ_cmd=0</text>
+  <path class="wire" d="M218 100 H240" marker-end="url(#aw-aph)"/>
+  <circle class="body" cx="258" cy="100" r="14"/>
+  <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
+  <text class="siglabel" x="258" y="70">wrap ±π</text>
+  <path class="wire" d="M272 100 H296" marker-end="url(#aw-aph)"/>
+  <g class="sblk"><rect class="body" x="300" y="74" width="150" height="52" rx="3"/>
+    <text class="ttl" x="375" y="93" style="font-size:13px">헤딩 PI — 클램프 AW</text>
+    <text class="ttl2" x="375" y="111">kp <tspan data-p="kp_hdg">4</tspan> · ki <tspan data-p="ki_hdg">0</tspan></text></g>
+  <path class="wire" d="M450 100 H478" marker-end="url(#aw-aph)"/>
+  <g class="sblk"><rect class="body" x="482" y="74" width="96" height="52" rx="3"/>
+    <path d="M492 116 H506 L554 84 H568" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="530" y="144">클립 ±<tspan data-p="phi_max">0.7</tspan> rad</text>
+  <path class="wire" d="M578 100 H806" marker-end="url(#aw-aph)"/>
+  <circle class="branch" cx="640" cy="100" r="3.2"/>
+  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <text class="pname" x="828" y="132">φ_cmd → SCAS 롤</text>
+  <g class="sblk"><rect class="body" x="240" y="158" width="36" height="24" rx="12"/><text class="pnum" x="258" y="174">2</text></g>
+  <text class="pname" x="282" y="174">ψ (NavOutput)</text>
+  <path class="wire" d="M258 158 V118" marker-end="url(#aw-aph)"/>
+  <path class="wire ff" d="M640 100 V180" marker-end="url(#af-aph)"/>
+  <text class="siglabel" x="640" y="200">→ 선회 FF (고도·속도 채널 가산)</text>
+  <text class="canvas-note" x="24" y="272">※ 비활성(off) 시 필터는 ψ 추적 + 적분 소거 + φ_cmd=0 — 재관여 시 잔존 뱅크 킥 방지 · ±phi_max는 π/2 미만 강제 (선회 FF 부호 보전 가드)</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li><span class="mono">φ_cmd = clip( PI(wrap(ψ_ref − ψ)), ±phi_max )</span> — 오차·명령필터 모두 wrap 최단경로 <span class="chip ok">확정 M7</span></li>
+  <li>φ_cmd 분기가 <b>선회 피드포워드</b> 입력 — 고도(θ)·속도(δt) 채널 내부에서 가산 <span class="chip note">설계 유의</span></li>
+  <li>데모 설계값: kp 4 · ki 0 · τ 1 s · phi_max 0.7 rad <span class="chip dft">기본값</span> · 헤딩 0.5 rad 스텝 무오버슈트 (설계점 폐루프 스캔)</li>
+</ul>`,
+      },
+      alt: {
+        crumb: "고도 채널",
+        title: "고도 채널", eng: "θ_cmd = 재클립( clip(PI(h_ref−h) + k_hdot·ḣ) + 선회 FF )",
+        chips: ["ok", "dft"],
+        svg: `
+<svg viewBox="0 0 960 330" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="aw-apa" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+    <marker id="af-apa" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b45309"/></marker>
+  </defs>
+  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <text class="pname" x="48" y="132">h_cmd ← 유도</text>
+  <path class="wire" d="M66 100 H96" marker-end="url(#aw-apa)"/>
+  <g class="sblk"><rect class="body" x="100" y="74" width="118" height="52" rx="3"/>
+    <text class="ttl" x="159" y="93" style="font-size:13px">명령필터</text>
+    <text class="ttl2" x="159" y="111">τ <tspan data-p="tau_alt">5</tspan> s</text></g>
+  <text class="siglabel" x="159" y="144">off: h 추적 — 활성화 시 램프</text>
+  <path class="wire" d="M218 100 H240" marker-end="url(#aw-apa)"/>
+  <circle class="body" cx="258" cy="100" r="14"/>
+  <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
+  <path class="wire" d="M272 100 H296" marker-end="url(#aw-apa)"/>
+  <g class="sblk"><rect class="body" x="300" y="74" width="140" height="52" rx="3"/>
+    <text class="ttl" x="370" y="93" style="font-size:13px">고도 PI — 클램프 AW</text>
+    <text class="ttl2" x="370" y="111">kp <tspan data-p="kp_alt">0.004</tspan> · ki <tspan data-p="ki_alt">0.0004</tspan></text></g>
+  <path class="wire" d="M440 100 H446" marker-end="url(#aw-apa)"/>
+  <circle class="body" cx="464" cy="100" r="14"/>
+  <text class="sumsign" x="455" y="104">+</text><text class="sumsign" x="464" y="113">+</text>
+  <path class="wire" d="M478 100 H492" marker-end="url(#aw-apa)"/>
+  <g class="sblk"><rect class="body" x="496" y="74" width="90" height="52" rx="3"/>
+    <path d="M506 116 H518 L564 84 H576" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="541" y="64">클립 <tspan data-p="theta_lo">−0.3</tspan>~<tspan data-p="theta_hi">0.3</tspan> rad</text>
+  <path class="wire" d="M586 100 H612" marker-end="url(#aw-apa)"/>
+  <circle class="body" cx="630" cy="100" r="14"/>
+  <text class="sumsign" x="621" y="104">+</text><text class="sumsign" x="630" y="93">+</text>
+  <path class="wire" d="M644 100 H700" marker-end="url(#aw-apa)"/>
+  <g class="sblk"><rect class="body" x="704" y="74" width="82" height="52" rx="3"/>
+    <path d="M712 116 H724 L766 84 H778" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="745" y="64">재클립 θ 한계</text>
+  <path class="wire" d="M786 100 H806" marker-end="url(#aw-apa)"/>
+  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <text class="pname" x="828" y="136">θ_cmd → α 리미터</text>
+  <g class="sblk"><rect class="body" x="240" y="162" width="36" height="24" rx="12"/><text class="pnum" x="258" y="178">2</text></g>
+  <text class="pname" x="282" y="178">h = −z_n</text>
+  <path class="wire" d="M258 162 V118" marker-end="url(#aw-apa)"/>
+  <g class="sblk"><rect class="body" x="414" y="148" width="100" height="38" rx="3"/>
+    <text class="ttl2" x="464" y="164" style="font-weight:700">× k_hdot</text>
+    <text class="ttl2" x="464" y="180"><tspan data-p="k_hdot">−0.008</tspan> 승강률 댐핑</text></g>
+  <path class="wire" d="M464 148 V118" marker-end="url(#aw-apa)"/>
+  <g class="sblk"><rect class="body" x="446" y="210" width="36" height="24" rx="12"/><text class="pnum" x="464" y="226">3</text></g>
+  <text class="pname" x="490" y="226">ḣ = −v_z</text>
+  <path class="wire" d="M464 210 V186" marker-end="url(#aw-apa)"/>
+  <path class="wire ff" d="M630 190 V118" marker-end="url(#af-apa)"/>
+  <text class="siglabel" x="630" y="210">선회 FF 피치 — <tspan data-p="k_pitch_turn">0.05</tspan>·(1/cosφ−1)</text>
+  <text class="canvas-note" x="24" y="300">※ 선회 FF는 축 클립 후 가산 → 재클립 (이중 제한) · 트림 웜스타트: 고도 적분기 = 트림 θ [범프리스] · 비활성 시 필터가 h 추적 — 활성화 순간 현재값부터 램프</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li><span class="mono">θ_cmd = 재클립( clip(PI(h_ref−h) + k_hdot·ḣ, θ한계) + FF, θ한계 )</span> — FF 가산 후 <b>재클립</b>으로 이중 제한 <span class="chip ok">확정 M7</span></li>
+  <li>승강률 댐핑 k_hdot·ḣ — PI 내부 클립 <b>안</b>에서 합산 (SCAS의 k_rate 자리 재사용) · θ_cmd는 α 리미터를 거쳐 SCAS로</li>
+  <li>데모 설계값: kp 0.004 · ki 0.0004 · k_hdot −0.008 · τ 5 s <span class="chip dft">기본값</span> · 고도 +100 m 오버슈트 8.3% (설계점 폐루프 스캔)</li>
+</ul>`,
+      },
+      spd: {
+        crumb: "속도 채널",
+        title: "속도 채널", eng: "δt_cmd = 재클립( clip(PI(V_ref−V), 0~1) + 선회 FF, 0~1 )",
+        chips: ["ok", "dft"],
+        svg: `
+<svg viewBox="0 0 960 300" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="aw-aps" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+    <marker id="af-aps" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b45309"/></marker>
+  </defs>
+  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <text class="pname" x="48" y="132">V_cmd ← 유도</text>
+  <path class="wire" d="M66 100 H96" marker-end="url(#aw-aps)"/>
+  <g class="sblk"><rect class="body" x="100" y="74" width="118" height="52" rx="3"/>
+    <text class="ttl" x="159" y="93" style="font-size:13px">명령필터</text>
+    <text class="ttl2" x="159" y="111">τ <tspan data-p="tau_spd">2</tspan> s</text></g>
+  <text class="siglabel" x="159" y="144">off: V 추적 · 트림 스로틀 홀드</text>
+  <path class="wire" d="M218 100 H240" marker-end="url(#aw-aps)"/>
+  <circle class="body" cx="258" cy="100" r="14"/>
+  <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
+  <path class="wire" d="M272 100 H296" marker-end="url(#aw-aps)"/>
+  <g class="sblk"><rect class="body" x="300" y="74" width="140" height="52" rx="3"/>
+    <text class="ttl" x="370" y="93" style="font-size:13px">속도 PI — 클램프 AW</text>
+    <text class="ttl2" x="370" y="111">kp <tspan data-p="kp_spd">0.15</tspan> · ki <tspan data-p="ki_spd">0.03</tspan></text></g>
+  <path class="wire" d="M440 100 H492" marker-end="url(#aw-aps)"/>
+  <g class="sblk"><rect class="body" x="496" y="74" width="90" height="52" rx="3"/>
+    <path d="M506 116 H518 L564 84 H576" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="541" y="144">클립 0~1</text>
+  <path class="wire" d="M586 100 H612" marker-end="url(#aw-aps)"/>
+  <circle class="body" cx="630" cy="100" r="14"/>
+  <text class="sumsign" x="621" y="104">+</text><text class="sumsign" x="630" y="93">+</text>
+  <path class="wire" d="M644 100 H700" marker-end="url(#aw-aps)"/>
+  <g class="sblk"><rect class="body" x="704" y="74" width="82" height="52" rx="3"/>
+    <path d="M712 116 H724 L766 84 H778" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="745" y="144">재클립 0~1</text>
+  <path class="wire" d="M786 100 H806" marker-end="url(#aw-aps)"/>
+  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <text class="pname" x="828" y="132">δt_cmd (0~1)</text>
+  <g class="sblk"><rect class="body" x="240" y="162" width="36" height="24" rx="12"/><text class="pnum" x="258" y="178">2</text></g>
+  <text class="pname" x="282" y="178">V = |v_n| — 바람 0</text>
+  <path class="wire" d="M258 162 V118" marker-end="url(#aw-aps)"/>
+  <path class="wire ff" d="M630 190 V118" marker-end="url(#af-aps)"/>
+  <text class="siglabel" x="560" y="210">선회 FF 스로틀 — <tspan data-p="k_thr_turn">0</tspan>·(1/cos²φ−1)</text>
+  <text class="canvas-note" x="24" y="272">※ 선회 FF는 클립 후 가산 → 재클립 (이중 제한) · 트림 웜스타트: 속도 적분기 = 트림 스로틀 [범프리스] · δt_cmd는 믹서에서 차동추력 보상과 결합</text>
+</svg>`,
+        notes: `
+<h4>설계 노트</h4>
+<ul>
+  <li><span class="mono">δt_cmd = 재클립( clip(PI(V_ref−V), 0~1) + FF, 0~1 )</span> — FF 가산 후 <b>재클립</b> <span class="chip ok">확정 M7</span></li>
+  <li>비활성 시 필터는 V 추적 + 오차 0 적분 → <b>트림 스로틀 홀드</b> · 스로틀 FF는 데모에서 0 (역효과 확인) <span class="chip dft">기본값</span></li>
+  <li>데모 설계값: kp 0.15 · ki 0.03 · τ 2 s <span class="chip dft">기본값</span> · 속도 +10 m/s 오버슈트 3.7% (설계점 폐루프 스캔)</li>
+</ul>`,
+      },
+    },
   },
 
   // ── 유도 (설계 ④) ────────────────────────────────────────────────────
@@ -321,39 +630,58 @@ export const SUBSYSTEMS = {
     title: "α 리미터 — 엔벨로프 보호", eng: "피치축 명령 경로 · 동적 상한 하드 클램프",
     chips: ["ok", "dft", "tbd"],
     svg: `
-<svg viewBox="0 0 900 330" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-lim" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="78" width="36" height="24" rx="12"/><text class="pnum" x="48" y="94">1</text></g>
-  <text class="pname" x="48" y="118">θ_cmd</text>
-  <path class="wire" d="M66 90 H436" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="440" y="60" width="110" height="60" rx="3"/>
-    <line x1="452" y1="90" x2="538" y2="90" stroke="#b8c4d0" stroke-width="1"/>
-    <line x1="495" y1="66" x2="495" y2="114" stroke="#b8c4d0" stroke-width="1"/>
-    <path d="M452 106 H470 L520 74 H538" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="495" y="140">하드 클램프 θ_cmd ≤ 상한</text>
-  <path class="wire" d="M550 90 H616" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="620" y="78" width="36" height="24" rx="12"/><text class="pnum" x="638" y="94">1</text></g>
-  <text class="pname" x="638" y="118">θ_cmd′ → SCAS</text>
-  <!-- 동적 상한 경로 -->
-  <g class="sblk"><rect class="body" x="30" y="208" width="36" height="24" rx="12"/><text class="pnum" x="48" y="224">2</text></g>
-  <text class="pname" x="48" y="248">Mach</text>
-  <path class="wire" d="M66 220 H106" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="110" y="192" width="170" height="56" rx="3"/>
-    <path d="M122 236 L140 236 L156 214 L174 226 L190 208" stroke="#8a97a5" stroke-width="1.6" fill="none"/>
-    <text class="ttl2" x="230" y="215" style="font-weight:700">실속 경계 테이블</text>
-    <text class="ttl2" x="230" y="233">α_stall = f(·) — 공력 정본</text></g>
-  <path class="wire" d="M280 220 H316" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="320" y="192" width="130" height="56" rx="3"/>
-    <text class="ttl" x="385" y="215" style="font-size:13px">− 보호마진</text><text class="ttl2" x="385" y="233">0.05 rad (기본값)</text></g>
-  <path class="wire" d="M450 220 H486" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="490" y="192" width="180" height="56" rx="3"/>
-    <text class="ttl2" x="580" y="215" style="font-weight:700">상한 = θ + (α_max − α)</text>
-    <text class="ttl2" x="580" y="233">θ = γ + α 근사</text></g>
-  <path class="wire" d="M670 220 H690 V123" marker-end="url(#aw-lim)"/>
-  <text class="siglabel" x="722" y="170">동적 상한</text>
-  <g class="sblk"><rect class="body" x="562" y="288" width="36" height="24" rx="12"/><text class="pnum" x="580" y="304">3</text></g>
-  <text class="pname" x="650" y="304">θ · α (항법 출력)</text>
-  <path class="wire" d="M580 288 V252" marker-end="url(#aw-lim)"/>
+  <!-- 피치 명령 경로 — 상한 단방향 클램프 -->
+  <g class="sblk"><rect class="body" x="30" y="68" width="36" height="24" rx="12"/><text class="pnum" x="48" y="84">1</text></g>
+  <text class="pname" x="56" y="112">θ_cmd ← AP</text>
+  <path class="wire" d="M66 80 H556" marker-end="url(#aw-lim)"/>
+  <g class="sblk"><rect class="body" x="560" y="50" width="120" height="60" rx="3"/>
+    <path d="M572 96 L620 66 H648" stroke="#111" stroke-width="2" fill="none"/></g>
+  <text class="bname" x="620" y="134">min(θ_cmd, cap) — 상한만</text>
+  <path class="wire" d="M680 80 H746" marker-end="url(#aw-lim)"/>
+  <g class="sblk"><rect class="body" x="750" y="68" width="36" height="24" rx="12"/><text class="pnum" x="768" y="84">1</text></g>
+  <text class="pname" x="768" y="112">θ_cmd′ → SCAS</text>
+  <!-- 동적 상한: cap = θ + (α_stall(mach) − margin − α) -->
+  <g class="sblk"><rect class="body" x="30" y="218" width="36" height="24" rx="12"/><text class="pnum" x="48" y="234">2</text></g>
+  <text class="pname" x="48" y="262">Mach</text>
+  <path class="wire" d="M66 230 H96" marker-end="url(#aw-lim)"/>
+  <g class="sblk"><rect class="body" x="100" y="200" width="190" height="60" rx="3"/>
+    <path d="M112 246 L128 246 L142 224 L158 236 L172 218" stroke="#8a97a5" stroke-width="1.6" fill="none"/>
+    <text class="ttl" x="234" y="224" style="font-size:13px">α_stall(mach)</text>
+    <text class="ttl2" x="234" y="242">1D · 외삽 clip 강제</text></g>
+  <path class="wire" d="M290 230 H316" marker-end="url(#aw-lim)"/>
+  <g class="sblk"><rect class="body" x="320" y="200" width="130" height="60" rx="3"/>
+    <text class="ttl" x="385" y="224" style="font-size:13px">− 보호마진</text>
+    <text class="ttl2" x="385" y="242">0.05 rad ≈ 2.9°</text></g>
+  <path class="wire" d="M450 230 H476" marker-end="url(#aw-lim)"/>
+  <text class="siglabel" x="460" y="212">α_max</text>
+  <circle class="body" cx="494" cy="230" r="14"/>
+  <text class="sumsign" x="485" y="234">+</text><text class="sumsign" x="494" y="243">−</text>
+  <path class="wire" d="M508 230 H602" marker-end="url(#aw-lim)"/>
+  <text class="siglabel" x="554" y="212">Δα 실속 마진</text>
+  <circle class="branch" cx="560" cy="230" r="3.2"/>
+  <circle class="body" cx="620" cy="230" r="14"/>
+  <text class="sumsign" x="611" y="234">+</text><text class="sumsign" x="629" y="234">+</text>
+  <path class="wire" d="M620 216 V114" marker-end="url(#aw-lim)"/>
+  <text class="siglabel" x="556" y="170">cap = θ + Δα</text>
+  <!-- 실속 마진 출력 — 엔벨로프 감시 -->
+  <path class="wire" d="M560 230 V380 H700" marker-end="url(#aw-lim)"/>
+  <g class="sblk"><rect class="body" x="704" y="368" width="36" height="24" rx="12"/><text class="pnum" x="722" y="384">2</text></g>
+  <text class="pname" x="722" y="412">실속 마진 Δα → 엔벨로프 감시</text>
+  <!-- NavOutput 추출 -->
+  <g class="sblk"><rect class="body" x="30" y="298" width="36" height="24" rx="12"/><text class="pnum" x="48" y="314">3</text></g>
+  <text class="pname" x="52" y="342">NavOutput</text>
+  <path class="wire" d="M66 310 H136" marker-end="url(#aw-lim)"/>
+  <g class="sblk"><rect class="body" x="140" y="282" width="220" height="56" rx="3"/>
+    <text class="ttl" x="250" y="304" style="font-size:13px">airdata · quat→euler</text>
+    <text class="ttl2" x="250" y="324">α · θ 추출 — NavOutput만 소비</text></g>
+  <path class="wire" d="M360 298 H450 V244" marker-end="url(#aw-lim)"/>
+  <text class="siglabel" x="436" y="268">α</text>
+  <path class="wire" d="M360 322 H680 V244 H634" marker-end="url(#aw-lim)"/>
+  <text class="siglabel" x="666" y="268">θ</text>
+  <text class="canvas-note" x="24" y="442">※ 반환 = (제한 θ_cmd′ · 작동 플래그 · 실속 마진 Δα) — 플래그·마진은 law 로깅 속성 → 엔벨로프 감시(02 §6.1) 소비 · mach는 law가 항법 고도의 ISA 음속으로 산출</text>
+  <text class="canvas-note" x="24" y="462">※ 상한만 개입 — 하한 없음 · 근거: θ = γ + α 근사 (θ 증분 = α 증분 · γ 변화는 여유 회복 방향) · 1D (mach,) 외 테이블·clip 외 외삽은 생성 시 거부</text>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
@@ -502,44 +830,64 @@ export const SUBSYSTEMS = {
     title: "기체 동역학 (6DOF) — 트림 · 선형해석의 기반", eng: "Aircraft Dynamics · 델타윙 쌍발",
     chips: ["ok", "dft"],
     svg: `
-<svg viewBox="0 0 1000 430" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <marker id="aw-pl" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
     <marker id="as-pl" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
   </defs>
-  <g class="sblk"><rect class="body" x="30" y="78" width="36" height="24" rx="12"/><text class="pnum" x="48" y="94">1</text></g>
-  <text class="pname" x="48" y="118">타면 변위</text>
-  <path class="wire" d="M66 90 H176" marker-end="url(#aw-pl)"/>
-  <g class="sblk"><rect class="body" x="180" y="60" width="200" height="70" rx="3"/>
-    <text class="ttl" x="280" y="88">공력 DB (CFD)</text>
-    <text class="ttl2" x="280" y="110">축: Mach, α, β, δ, h</text></g>
-  <g class="sblk"><rect class="body" x="30" y="158" width="36" height="24" rx="12"/><text class="pnum" x="48" y="174">2</text></g>
-  <text class="pname" x="48" y="198">스로틀 ×2</text>
-  <path class="wire" d="M66 170 H176" marker-end="url(#aw-pl)"/>
-  <g class="sblk"><rect class="body" x="180" y="145" width="150" height="52" rx="3"/>
-    <text class="ttl" x="255" y="168" style="font-size:13px">추진 모델</text>
-    <text class="ttl2" x="255" y="186">스로틀-추력 맵</text></g>
-  <g class="sblk"><rect class="body" x="180" y="228" width="180" height="56" rx="3"/>
-    <text class="ttl" x="270" y="251" style="font-size:13px">대기 · 중력 · 지구</text>
-    <text class="ttl2" x="270" y="271">ISA · WGS-84</text></g>
-  <path class="wire" d="M380 95 H430 V130 H462" marker-end="url(#aw-pl)"/>
-  <path class="wire" d="M330 171 H462" marker-end="url(#aw-pl)"/>
-  <path class="wire" d="M360 256 H430 V186 H462" marker-end="url(#aw-pl)"/>
-  <g class="sblk"><rect class="body" x="466" y="105" width="110" height="100" rx="3"/>
-    <text class="ttl" x="521" y="150">Σ 힘 ·</text><text class="ttl" x="521" y="172">모멘트</text></g>
-  <path class="wire" d="M576 155 H636" marker-end="url(#aw-pl)"/>
-  <g class="sblk"><rect class="body" x="640" y="112" width="180" height="86" rx="3"/>
-    <text class="ttl" x="730" y="148">6DOF 운동방정식</text>
-    <text class="ttl2" x="730" y="170">쿼터니언 · RK4 dt 10 ms</text></g>
-  <path class="wire" d="M820 155 H886" marker-end="url(#aw-pl)"/>
-  <g class="sblk"><rect class="body" x="890" y="143" width="36" height="24" rx="12"/><text class="pnum" x="908" y="159">1</text></g>
-  <text class="pname" x="908" y="183">상태 (참값)</text>
-  <circle class="branch" cx="850" cy="155" r="3.2"/>
-  <path class="wire soft" d="M850 155 V36 H280 V56" marker-end="url(#as-pl)"/>
-  <text class="siglabel" x="560" y="28" fill="#8a97a5">상태 피드백: Mach, α, β, q̄ …</text>
-  <rect x="466" y="330" width="460" height="72" rx="8" fill="none" stroke="#7c3aed" stroke-width="1.4" stroke-dasharray="6 4"/>
-  <text class="annot" x="696" y="358" text-anchor="middle" fill="#7c3aed">① 이 플랜트를 기반으로 설계 1단계 수행:</text>
-  <text class="annot" x="696" y="380" text-anchor="middle" fill="#7c3aed">트림 (100+ 케이스 배치) → 구간 선형화 → 고유치·감쇠비 · 마진 맵</text>
+  <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
+  <text class="pname" x="48" y="140">타면 변위</text>
+  <path class="wire" d="M66 108 H146" marker-end="url(#aw-pl)"/>
+  <g class="sblk"><rect class="body" x="150" y="60" width="290" height="96" rx="3"/>
+    <text class="ttl" x="295" y="82" style="font-size:13px">공력 — AeroModel</text>
+    <text class="ttl2" x="295" y="100">DB 계수 → 동체축 {CX·CY·CZ·Cl·Cm·Cn}</text>
+    <text class="ttl2" x="295" y="116">무차원 p̂·q̂·r̂ = pb/2V · qc̄/2V · rb/2V</text>
+    <text class="ttl2" x="295" y="132">F = q̄S·C · M = q̄S·[b·Cl, c̄·Cm, b·Cn]</text>
+    <text class="ttl2" x="295" y="148">ρ·a ← ISA(h) — q̄=½ρV² · mach=V/a</text></g>
+  <g class="sblk"><rect class="body" x="30" y="208" width="36" height="24" rx="12"/><text class="pnum" x="48" y="224">2</text></g>
+  <text class="pname" x="48" y="252">스로틀 ×2</text>
+  <path class="wire" d="M66 220 H146" marker-end="url(#aw-pl)"/>
+  <g class="sblk"><rect class="body" x="150" y="184" width="290" height="72" rx="3"/>
+    <text class="ttl" x="295" y="206" style="font-size:13px">추진 — TwinEngine</text>
+    <text class="ttl2" x="295" y="226">추력 맵 [기본 max_thrust·δt] · 0~1 클립</text>
+    <text class="ttl2" x="295" y="244">M = r_L×F_L + r_R×F_R — 좌 우세 → +N</text></g>
+  <g class="sblk"><rect class="body" x="150" y="286" width="290" height="64" rx="3"/>
+    <text class="ttl" x="295" y="308" style="font-size:13px">환경 — ISA 대기 · 중력</text>
+    <text class="ttl2" x="295" y="328">f_grav = C_bn·[0, 0, m·g] (동체축)</text>
+    <text class="ttl2" x="295" y="344">ρ · 음속 a — 고도 h로 조회 (공력 소비)</text></g>
+  <path class="wire" d="M440 108 H460 V150 H486" marker-end="url(#aw-pl)"/>
+  <path class="wire" d="M440 220 H486" marker-end="url(#aw-pl)"/>
+  <path class="wire" d="M440 318 H460 V250 H486" marker-end="url(#aw-pl)"/>
+  <g class="sblk"><rect class="body" x="490" y="120" width="110" height="160" rx="3"/>
+    <text class="ttl" x="545" y="192">Σ F_b</text>
+    <text class="ttl" x="545" y="214">· M_b</text></g>
+  <path class="wire" d="M600 200 H656" marker-end="url(#aw-pl)"/>
+  <g class="sblk"><rect class="body" x="660" y="96" width="270" height="140" rx="3"/>
+    <text class="ttl" x="795" y="120" style="font-size:13px">6DOF 강체 — RigidBody · RK4</text>
+    <text class="ttl2" x="795" y="142">x(13) = [p_n · v_b · q_nb · ω_b]</text>
+    <text class="ttl2" x="795" y="160">ṗ = C_nb·v · v̇ = F/m − ω×v</text>
+    <text class="ttl2" x="795" y="178">q̇ = ½ q⊗(0,ω) · ω̇ = J⁻¹(M − ω×Jω)</text>
+    <text class="ttl2" x="795" y="196">RK4 dt 10 ms · 스텝마다 q 재정규화</text></g>
+  <path class="wire" d="M930 166 H948" marker-end="url(#aw-pl)"/>
+  <g class="sblk"><rect class="body" x="952" y="154" width="36" height="24" rx="12"/><text class="pnum" x="970" y="170">1</text></g>
+  <text class="pname" x="952" y="202">참값 상태</text>
+  <text class="pname" x="925" y="220">→ 항법만 (참값 차단)</text>
+  <circle class="branch" cx="938" cy="166" r="3.2"/>
+  <path class="wire soft" d="M938 166 V36 H295 V56" marker-end="url(#as-pl)"/>
+  <text class="siglabel" x="610" y="28">상태 피드백 (참값): v_b · ω_b · q_nb · h</text>
+  <g class="sblk"><rect class="body" x="660" y="340" width="280" height="72" rx="3"/>
+    <text class="ttl" x="800" y="362" style="font-size:13px">질량특성 — FuelMass.at(fuel)</text>
+    <text class="ttl2" x="800" y="382">m · cg · J — 잔여 연료 선형 보간</text>
+    <text class="ttl2" x="800" y="400">스텝 사이 갱신 [준정적] · fuel ← 소모 적분</text></g>
+  <path class="wire soft" d="M800 340 V240" marker-end="url(#as-pl)"/>
+  <text class="siglabel" x="836" y="300">m · J</text>
+  <path class="wire soft" d="M660 376 H470 V318 H444" marker-end="url(#as-pl)"/>
+  <text class="siglabel" x="556" y="368">m (중력)</text>
+  <rect x="150" y="470" width="520" height="56" rx="8" fill="none" stroke="#7c3aed" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="annot" x="410" y="494" text-anchor="middle" fill="#7c3aed">① 이 플랜트 기반 설계 1단계 — 트림 (100+ 케이스 배치)</text>
+  <text class="annot" x="410" y="514" text-anchor="middle" fill="#7c3aed">→ 구간 선형화 → 고유치·감쇠비 · 이득·위상여유 마진 맵</text>
+  <text class="canvas-note" x="24" y="560">※ 바람 0 가정 (v_air = v_b) — 바람·난류(Dryden)는 확장 항목 · 공력 부호·기준점은 DB가 정의 — 코드 무가정 (풍축 CL·CD는 변환 헬퍼)</text>
+  <text class="canvas-note" x="24" y="580">※ 모멘트 CG 기준점 이전은 DB 규격 확정 시 조립 지점에서 [TBD] · 오일러 12-상태 미분도 제공 — 트림·수치섭동 선형화(M9) 전용</text>
 </svg>`,
     notes: `
 <h4>플랜트</h4>
@@ -564,28 +912,48 @@ export const SUBSYSTEMS = {
     title: "항법 — 등가 오차 모델", eng: "Navigation (M6 · EKF 미구현 — 인터페이스 개방)",
     chips: ["ok", "dft"],
     svg: `
-<svg viewBox="0 0 1000 320" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 1000 470" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-nav" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="148" width="36" height="24" rx="12"/><text class="pnum" x="48" y="164">1</text></g>
-  <text class="pname" x="48" y="188">참값 상태 (6DOF)</text>
-  <path class="wire" d="M66 160 H382" marker-end="url(#aw-nav)"/>
-  <circle class="body" cx="400" cy="160" r="14" fill="#fff" stroke="#4a4a4a" stroke-width="1.6"/>
-  <text class="sumsign" x="391" y="164">+</text><text class="sumsign" x="400" y="152">+</text><text class="sumsign" x="400" y="174">+</text>
-  <g class="sblk"><rect class="body" x="200" y="33" width="140" height="54" rx="3"/>
-    <text class="ttl" x="270" y="56" style="font-size:13px">백색잡음</text><text class="ttl2" x="270" y="75">σ pos <tspan data-p="pos_std">3</tspan> m · vel <tspan data-p="vel_std">0.3</tspan></text></g>
-  <path class="wire" d="M340 60 H400 V142" marker-end="url(#aw-nav)"/>
-  <g class="sblk"><rect class="body" x="180" y="233" width="180" height="54" rx="3"/>
-    <text class="ttl" x="270" y="256" style="font-size:13px">바이어스</text><text class="ttl2" x="270" y="275">σ <tspan data-p="bias_std">1</tspan> m · τ <tspan data-p="bias_tau">60</tspan> s</text></g>
-  <path class="wire" d="M360 260 H400 V178" marker-end="url(#aw-nav)"/>
-  <path class="wire" d="M414 160 H466" marker-end="url(#aw-nav)"/>
-  <g class="sblk"><rect class="body" x="470" y="133" width="140" height="54" rx="3"/>
-    <text class="ttl" x="540" y="156" style="font-size:13px">지연</text><text class="ttl2" x="540" y="175"><tspan data-p="delay_s">0.03</tspan> s</text></g>
-  <path class="wire" d="M610 160 H656" marker-end="url(#aw-nav)"/>
-  <g class="sblk"><rect class="body" x="660" y="133" width="140" height="54" rx="3"/>
-    <text class="ttl" x="730" y="156" style="font-size:13px">갱신주기</text><text class="ttl2" x="730" y="175"><tspan data-p="update_hz">100</tspan> Hz · ZOH</text></g>
-  <path class="wire" d="M800 160 H866" marker-end="url(#aw-nav)"/>
-  <g class="sblk"><rect class="body" x="870" y="148" width="36" height="24" rx="12"/><text class="pnum" x="888" y="164">1</text></g>
-  <text class="pname" x="888" y="188">NavOutput</text>
+  <g class="sblk"><rect class="body" x="30" y="128" width="36" height="24" rx="12"/><text class="pnum" x="48" y="144">1</text></g>
+  <text class="pname" x="85" y="176">참값 VehicleState</text>
+  <path class="wire" d="M66 140 H126" marker-end="url(#aw-nav)"/>
+  <g class="sblk"><rect class="body" x="130" y="112" width="180" height="56" rx="3"/>
+    <text class="ttl" x="220" y="134" style="font-size:13px">갱신 데시메이션</text>
+    <text class="ttl2" x="220" y="152"><tspan data-p="update_hz">100</tspan> Hz · 틱 정수배 강제</text></g>
+  <path class="wire" d="M310 140 H362" marker-end="url(#aw-nav)"/>
+  <circle class="body" cx="380" cy="140" r="14"/>
+  <text class="sumsign" x="371" y="144">+</text><text class="sumsign" x="380" y="131">+</text><text class="sumsign" x="380" y="153">+</text>
+  <g class="sblk"><rect class="body" x="250" y="16" width="260" height="70" rx="3"/>
+    <text class="ttl" x="380" y="38" style="font-size:13px">1차 마르코프 바이어스 — 위치축</text>
+    <text class="ttl2" x="380" y="56">σ <tspan data-p="bias_std">1</tspan> m · τ <tspan data-p="bias_tau">60</tspan> s</text>
+    <text class="ttl2" x="380" y="74">b ← p·b + σ√(1−p²)·w · p=e^(−T/τ)</text></g>
+  <path class="wire" d="M380 86 V122" marker-end="url(#aw-nav)"/>
+  <g class="sblk"><rect class="body" x="250" y="196" width="260" height="70" rx="3"/>
+    <text class="ttl" x="380" y="218" style="font-size:13px">백색잡음 (상태별 σ)</text>
+    <text class="ttl2" x="380" y="236">pos <tspan data-p="pos_std">3</tspan> m · vel <tspan data-p="vel_std">0.3</tspan> m/s</text>
+    <text class="ttl2" x="380" y="254">각속도 <tspan data-p="rate_std">0.001</tspan> rad/s</text></g>
+  <path class="wire" d="M380 196 V158" marker-end="url(#aw-nav)"/>
+  <path class="wire" d="M394 140 H426" marker-end="url(#aw-nav)"/>
+  <g class="sblk"><rect class="body" x="430" y="104" width="260" height="72" rx="3"/>
+    <text class="ttl" x="560" y="126" style="font-size:13px">자세 — q_nb ⊗ δq (노름 유지)</text>
+    <text class="ttl2" x="560" y="146">δq = (1, ½ε) 소각 오차</text>
+    <text class="ttl2" x="560" y="164">ε: 롤·피치 <tspan data-p="att_std">0.002</tspan> · 방위 <tspan data-p="psi_std">0.005</tspan> rad</text></g>
+  <path class="wire" d="M690 140 H716" marker-end="url(#aw-nav)"/>
+  <g class="sblk"><rect class="body" x="720" y="104" width="200" height="72" rx="3"/>
+    <text class="ttl" x="820" y="126" style="font-size:13px">지연 큐 (deque)</text>
+    <text class="ttl2" x="820" y="146">릴리스 지연 <tspan data-p="delay_s">0.03</tspan> s</text>
+    <text class="ttl2" x="820" y="164">t_meas ≤ t − 지연 → 릴리스</text></g>
+  <path class="wire" d="M820 176 V246" marker-end="url(#aw-nav)"/>
+  <g class="sblk"><rect class="body" x="720" y="250" width="200" height="72" rx="3"/>
+    <text class="ttl" x="820" y="272" style="font-size:13px">홀드 · valid 게이트</text>
+    <text class="ttl2" x="820" y="292">다음 릴리스까지 유지 (ZOH)</text>
+    <text class="ttl2" x="820" y="310">첫 릴리스 전 valid=False</text></g>
+  <path class="wire" d="M920 286 H926" marker-end="url(#aw-nav)"/>
+  <g class="sblk"><rect class="body" x="930" y="274" width="36" height="24" rx="12"/><text class="pnum" x="948" y="290">1</text></g>
+  <text class="pname" x="948" y="322">NavOutput</text>
+  <text class="canvas-note" x="24" y="404">※ 측정 = 참값 + 바이어스(위치) + 백색잡음 · 바이어스·잡음 갱신은 측정 틱마다 (T = 갱신주기) · fuel은 참값 통과 (연료 게이지) · 자세는 동체측 δq 곱 — 단위 노름 유지</text>
+  <text class="canvas-note" x="24" y="426">※ 갱신주기가 틱 주기의 정수배 아니면 조립 시점 거부 · 항법이 틱보다 빠르면 틱마다 새 측정 · 릴리스는 배열 복사 — 소비자 훼손이 보관 측정을 오염시키지 않음</text>
+  <text class="canvas-note" x="24" y="448">※ 난수 seed <tspan data-p="seed">0</tspan> 고정 결정적 (몬테카를로 재현성) · 법칙·유도·스케줄은 NavOutput만 소비 [참값 차단 계약 03 §4]</text>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
@@ -604,25 +972,53 @@ export const SUBSYSTEMS = {
     title: "게인 스케줄링", eng: "오토파일럿 · SCAS 게인에 적용",
     chips: ["ok", "dft", "tbd"],
     svg: `
-<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">
-  <defs><marker id="aw-gs2" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="40" y="58" width="36" height="24" rx="12"/><text class="pnum" x="58" y="74">1</text></g>
-  <text class="pname" x="110" y="74">Mach</text>
-  <path class="wire" d="M76 70 H246" marker-end="url(#aw-gs2)"/>
-  <g class="sblk"><rect class="body" x="40" y="138" width="36" height="24" rx="12"/><text class="pnum" x="58" y="154">2</text></g>
-  <text class="pname" x="110" y="154">고도</text>
-  <path class="wire" d="M76 150 H246" marker-end="url(#aw-gs2)"/>
-  <g class="sblk"><rect class="body" x="40" y="218" width="36" height="24" rx="12"/><text class="pnum" x="58" y="234">3</text></g>
-  <text class="pname" x="110" y="234">연료량</text>
-  <path class="wire" d="M76 230 H246" marker-end="url(#aw-gs2)"/>
-  <g class="sblk"><rect class="body" x="250" y="46" width="230" height="208" rx="3"/>
-    <path d="M275 120 L300 120 L320 90 L345 105 L365 78" stroke="#8a97a5" stroke-width="1.8" fill="none"/>
-    <text class="ttl" x="365" y="160">게인 테이블</text>
-    <text class="ttl2" x="365" y="182">트림점 기반 설계 · 보간</text>
-    <text class="ttl2" x="365" y="202">데모: 동압 스케일 1D mach</text></g>
-  <path class="wire" d="M480 150 H546" marker-end="url(#aw-gs2)"/>
-  <g class="sblk"><rect class="body" x="550" y="138" width="36" height="24" rx="12"/><text class="pnum" x="568" y="154">1</text></g>
-  <text class="pname" x="700" y="154">kp·ki·k_rate → AP · SCAS 전체 PI</text>
+<svg viewBox="0 0 900 440" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="aw-gs2" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+    <marker id="as-gs2" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
+  </defs>
+  <g class="sblk"><rect class="body" x="30" y="78" width="36" height="24" rx="12"/><text class="pnum" x="48" y="94">1</text></g>
+  <text class="pname" x="48" y="122">Mach</text>
+  <text class="siglabel" x="52" y="138">V / a(h_ISA)</text>
+  <path class="wire" d="M66 90 H126" marker-end="url(#aw-gs2)"/>
+  <g class="sblk"><rect class="body" x="30" y="158" width="36" height="24" rx="12"/><text class="pnum" x="48" y="174">2</text></g>
+  <text class="pname" x="48" y="202">고도 h</text>
+  <text class="siglabel" x="48" y="218">−z_n</text>
+  <path class="wire" d="M66 170 H126" marker-end="url(#aw-gs2)"/>
+  <g class="sblk"><rect class="body" x="30" y="238" width="36" height="24" rx="12"/><text class="pnum" x="48" y="254">3</text></g>
+  <text class="pname" x="48" y="282">연료 fuel</text>
+  <text class="siglabel" x="52" y="298">항법 게이지</text>
+  <path class="wire" d="M66 250 H126" marker-end="url(#aw-gs2)"/>
+  <g class="sblk"><rect class="body" x="130" y="64" width="180" height="212" rx="3"/>
+    <text class="ttl" x="220" y="150" style="font-size:13px">1차 필터 ×3</text>
+    <text class="ttl2" x="220" y="170">τ 0.5 s — 채터링 방지</text>
+    <text class="ttl2" x="220" y="188">첫 스텝 측정 시드 · τ=0 통과</text></g>
+  <path class="wire" d="M310 90 H396" marker-end="url(#aw-gs2)"/>
+  <path class="wire" d="M310 170 H396" marker-end="url(#aw-gs2)"/>
+  <path class="wire" d="M310 250 H396" marker-end="url(#aw-gs2)"/>
+  <g class="sblk"><rect class="body" x="400" y="64" width="240" height="212" rx="3"/>
+    <path d="M418 140 L436 140 L452 112 L470 126 L486 100" stroke="#8a97a5" stroke-width="1.8" fill="none"/>
+    <text class="ttl" x="520" y="170" style="font-size:13px">게인 테이블 (M3 Table)</text>
+    <text class="ttl2" x="520" y="190">축 ⊆ {mach·alt·fuel} · 1D~3D 보간</text>
+    <text class="ttl2" x="520" y="208">외삽 clip 강제 [생성 시 검증]</text>
+    <text class="ttl2" x="520" y="226">데모: 동압 스케일 1D mach</text></g>
+  <path class="wire" d="M640 170 H666" marker-end="url(#aw-gs2)"/>
+  <g class="sblk"><rect class="body" x="670" y="112" width="170" height="116" rx="3"/>
+    <text class="ttl" x="755" y="136" style="font-size:13px">그룹.게인 분배</text>
+    <text class="ttl2" x="755" y="156">"pitch.kp" → {pitch:{kp}}</text>
+    <text class="ttl2" x="755" y="174">그룹: 피치·롤·요 ·</text>
+    <text class="ttl2" x="755" y="190">속도·고도·헤딩</text>
+    <text class="ttl2" x="755" y="208">키: kp·ki·k_rate (조립 검증)</text></g>
+  <path class="wire" d="M840 170 H854" marker-end="url(#aw-gs2)"/>
+  <g class="sblk"><rect class="body" x="858" y="158" width="36" height="24" rx="12"/><text class="pnum" x="876" y="174">1</text></g>
+  <text class="pname" x="838" y="210">→ AP · SCAS</text>
+  <text class="pname" x="838" y="228">스텝별 게인 덮어쓰기</text>
+  <rect x="400" y="320" width="240" height="64" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="annot" x="520" y="344" text-anchor="middle">설계 점검 — max_adjacent_jump</text>
+  <text class="annot" x="520" y="364" text-anchor="middle">축별 인접 격자 최대 |Δ게인| (불연속 검출)</text>
+  <path class="wire soft" d="M520 276 V316" marker-end="url(#as-gs2)"/>
+  <text class="canvas-note" x="24" y="410">※ 스케줄 변수 mach·h·fuel은 law가 NavOutput에서 산출 (mach = V/음속(h_ISA)) — 참값 차단 · law 조립 시 그룹·키 오타는 시끄럽게 거부</text>
+  <text class="canvas-note" x="24" y="430">※ 정본 = 게인 탭 테이블 (이 페이지는 구조 열람) · 보간 구간 마진 재계산은 마진 맵 재사용 · 필터가 게인 점프 완충 [확정 01 §3.4]</text>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
@@ -640,24 +1036,35 @@ export const SUBSYSTEMS = {
     title: "미션플래너", eng: "Mission Planner",
     chips: ["ok"],
     svg: `
-<svg viewBox="0 0 900 220" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-mp" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="50" y="66" width="190" height="68" rx="3"/>
-    <text class="ttl" x="145" y="94">웨이포인트 편집</text><text class="ttl2" x="145" y="114">시뮬 탭 · 지도는 백로그</text></g>
-  <path class="wire" d="M240 100 H296" marker-end="url(#aw-mp)"/>
-  <g class="sblk"><rect class="body" x="300" y="66" width="180" height="68" rx="3"/>
-    <text class="ttl" x="390" y="94">경로 프로파일 생성</text><text class="ttl2" x="390" y="114">속도 · 고도 계획 포함</text></g>
-  <path class="wire" d="M480 100 H536" marker-end="url(#aw-mp)"/>
-  <g class="sblk"><rect class="body" x="540" y="66" width="180" height="68" rx="3"/>
-    <text class="ttl" x="630" y="94">모드 시퀀스 부여</text><text class="ttl2" x="630" y="114">비행단계별 (이륙→착륙)</text></g>
-  <path class="wire" d="M720 100 H786" marker-end="url(#aw-mp)"/>
-  <g class="sblk"><rect class="body" x="790" y="88" width="36" height="24" rx="12"/><text class="pnum" x="808" y="104">1</text></g>
-  <text class="pname" x="808" y="128">임무프로파일</text>
+  <g class="sblk"><rect class="body" x="40" y="60" width="230" height="88" rx="3"/>
+    <text class="ttl" x="155" y="84" style="font-size:13px">미션 편집 — 시뮬 탭</text>
+    <text class="ttl2" x="155" y="104">모드 테이블 {명령 · 이탈 · next}</text>
+    <text class="ttl2" x="155" y="120">웨이포인트 (N,E) · 도달반경</text>
+    <text class="ttl2" x="155" y="136">지도 편집은 백로그</text></g>
+  <path class="wire" d="M270 104 H306" marker-end="url(#aw-mp)"/>
+  <g class="sblk"><rect class="body" x="310" y="60" width="250" height="88" rx="3"/>
+    <text class="ttl" x="435" y="84" style="font-size:13px">검증 — 서버 · 엔진</text>
+    <text class="ttl2" x="435" y="104">이탈 DSL: time · alt · speed · path_done</text>
+    <text class="ttl2" x="435" y="120">heading: 숫자 | "path" | 없음(null)</text>
+    <text class="ttl2" x="435" y="136">next 참조 · 초기 모드 존재 검사</text></g>
+  <path class="wire" d="M560 104 H596" marker-end="url(#aw-mp)"/>
+  <g class="sblk"><rect class="body" x="600" y="60" width="230" height="88" rx="3"/>
+    <text class="ttl" x="715" y="84" style="font-size:13px">임무프로파일 조립</text>
+    <text class="ttl2" x="715" y="104">ModeSpec 목록 (모드 시퀀스)</text>
+    <text class="ttl2" x="715" y="120">+ LosPath (웨이포인트 · 반경)</text>
+    <text class="ttl2" x="715" y="136">→ Guidance(modes, path, initial)</text></g>
+  <path class="wire" d="M830 104 H846" marker-end="url(#aw-mp)"/>
+  <g class="sblk"><rect class="body" x="848" y="92" width="36" height="24" rx="12"/><text class="pnum" x="866" y="108">1</text></g>
+  <text class="pname" x="864" y="148">→ 유도</text>
+  <text class="canvas-note" x="24" y="204">※ 속도·고도 '경로 프로파일' 생성 없음 — 명령은 모드 테이블이 직접 보유 (경로추종은 헤딩만 담당) · 엔진에 별도 플래너 모듈 없음 — 시뮬 요청이 조립</text>
+  <text class="canvas-note" x="24" y="226">※ 상세 임무 로직은 별도 설계 범위 [확정 01 §3.3.1] · 미션 편집처는 시뮬레이션 탭 미션 그룹</text>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
 <ul>
-  <li>웨이포인트 열(列)로부터 <b>임무프로파일</b>(경로 + 비행모드 시퀀스) 생성</li>
+  <li>웨이포인트 열 + 선언적 모드 테이블 = <b>임무프로파일</b> — 엔진에 별도 플래너 모듈 없음 (시뮬 요청 → 서버 검증 → Guidance 조립)</li>
   <li>편집처: 시뮬레이션 탭 미션 그룹(모드 테이블·웨이포인트·도달반경) — 지도 위 편집(오프라인 타일 폴백)은 백로그</li>
   <li>임무수행 단계의 상세 임무 로직은 별도 설계 범위 <span class="chip ok">확정 01 §3.3.1</span></li>
 </ul>`,
