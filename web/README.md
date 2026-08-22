@@ -9,7 +9,7 @@
 빌드 없음 — 서버(M13)가 정적 서빙한다:
 
 ```bash
-uvicorn --factory claw_server:create_app --port 8000
+scripts/run.sh          # 모노레포 루트에서 (설치까지 겸함)
 # → http://127.0.0.1:8000/
 ```
 
@@ -46,7 +46,7 @@ js/
 ## 테스트 (개발 환경 전용 — 반입물 아님)
 
 ```bash
-node --test "js/**/*.test.js"   # node 내장 러너, npm 의존 0
+node --test "js/**/*.test.js"   # web/ 에서 — node 내장 러너, npm 의존 0
 ```
 
 ## 알려진 표시 한계

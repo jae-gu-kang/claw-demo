@@ -3,25 +3,23 @@
 FastAPI 기반 REST API + 웹소켓 진행률. 엔진(`engine/claw`)의 Python API만 호출하며 도메인 로직을 갖지 않는다.
 단독 사용자·로컬 서버 (구현 문서 §4).
 
-## 설치 (모노레포 루트에서)
+## 설치·기동
+
+`scripts/setup.sh`(설치)와 `scripts/run.sh`(기동)가 정본이다 — 절차는 최상위
+README 참조. 아래는 스크립트가 실제로 하는 일이다(직접 실행할 일은 드물다).
 
 ```bash
 pip install -e engine        # claw-engine 먼저 (claw-server가 PyPI에서 찾지 않도록 의도적 미기재)
-pip install -e "server[dev]" # fastapi·uvicorn (+pytest·httpx)
+pip install -e "server[dev]" # fastapi·uvicorn[standard] (+pytest·httpx)
+uvicorn --factory claw_server:create_app --port 8000   # 모노레포 루트에서
 ```
 
-## 기동
-
-```bash
-uvicorn --factory claw_server:create_app --port 8000
-```
-
-결과 저장 루트: `$CLAW_SERVER_DATA` (기본 `./server_data`).
+결과 저장 루트: `$CLAW_SERVER_DATA` (기본 `./server_data` — **기동 시 CWD 기준**).
 
 ## 테스트
 
 ```bash
-cd server && python -m pytest -q
+.venv/bin/python -m pytest server   # 모노레포 루트에서
 ```
 
 ## API 개요 (02 §8 워크플로우 단계 대응)

@@ -5,9 +5,13 @@ description = "CLAW 설계툴 M13 백엔드 — FastAPI REST·웹소켓 진행�
 requires-python = ">=3.10"
 # claw-engine(로컬 모노레포 패키지)은 의도적으로 미기재 — 동명 PyPI 패키지 오설치 방지.
 # 설치 순서: pip install -e engine && pip install -e server (README 참조)
+# uvicorn은 [standard] 필수 — plain uvicorn의 Requires-Dist는 click·h11뿐이고
+# websockets는 extra == 'standard'에만 걸려 있다. plain으로 깔면 WS /api/ws/jobs/{id}
+# 업그레이드가 "Unsupported upgrade request"로 거절되어 진행률이 폴링으로 degrade한다
+# (web/js/api.js의 onclose 폴백 때문에 UI는 살아 있어 발견이 늦다).
 dependencies = [
     "fastapi>=0.110",
-    "uvicorn>=0.29",
+    "uvicorn[standard]>=0.29",
 ]
 
 [project.optional-dependencies]
