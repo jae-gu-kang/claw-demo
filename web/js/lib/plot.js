@@ -96,6 +96,28 @@ export function gainPlotGroups(tables, colors = SERIES_COLORS) {
   return { groups, skipped };
 }
 
+/** 시뮬 궤적 → 3면도 뷰 정의 (평면도·측면도·정면도).
+
+좌표 규약은 NED (conventions §6): x=N, y=E, z=D(하방 양). 연직축은 D 대신
+고도 h = −D 를 위로 그린다 — 같은 평면을 부호만 뒤집어 본 것이고, 프로파일을
+거꾸로 읽는 오독이 D 표기보다 훨씬 잦기 때문. 라벨에 (h = −D)를 명시한다.
+
+equal(등축)은 수평면만 true — 선회반경을 왜곡 없이 읽어야 하므로. 연직 단면은
+수평 이동이 고도 변화보다 통상 한 자릿수 이상 커서 등축이면 직선으로 뭉개진다.
+wpIdx: 웨이포인트 [n, e] 중 그 뷰의 가로축에 해당하는 성분 (수평면은 원으로
+직접 그리므로 null). 배열은 입력 참조 — 복사하지 않는다.
+*/
+export function planeViews(sig) {
+  return [
+    { key: "xy", title: "XY 평면 — 평면도 (N–E)", equal: true, wpIdx: null,
+      xs: sig.pe, ys: sig.pn, xLabel: "E [m]", yLabel: "N [m]" },
+    { key: "zx", title: "ZX 평면 — 측면도 (N–h)", equal: false, wpIdx: 0,
+      xs: sig.pn, ys: sig.h, xLabel: "N [m]", yLabel: "h [m] (= −D)" },
+    { key: "yz", title: "YZ 평면 — 정면도 (E–h)", equal: false, wpIdx: 1,
+      xs: sig.pe, ys: sig.h, xLabel: "E [m]", yLabel: "h [m] (= −D)" },
+  ];
+}
+
 /** margin-map entries → 연료 고정 (mach×alt) 격자 조회. */
 export function pivotCases(entries, fuel) {
   const sel = entries.filter((e) => e.trim.case.fuel === fuel);

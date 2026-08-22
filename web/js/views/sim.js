@@ -7,10 +7,11 @@
 import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { buildModes, buildWaypoints, COND_KINDS } from "../lib/mission.js";
+import { planeViews } from "../lib/plot.js";
 import { flaggedNames, modeSpans, strideFor } from "../lib/replay.js";
 import { moveWaypoint } from "../lib/wpmap.js";
 import { store } from "../store.js";
-import { lineChartCanvas, trackCanvas } from "./plots.js";
+import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createWpMap } from "./wpmap.js";
 
@@ -32,6 +33,47 @@ let runningJobId = null;
 let runningSnapshot = { waypoints: [], acceptRadius: 0 };
 // 지도 줌/팬 상태 — 탭 재진입 시 유지 (wpRows·lastReplay와 동렬)
 let wpMapView = { view: null };
+
+/* 실행 조건 폼 정렬 — 캡션 1줄(14px) + 컨트롤 1줄(30px) 고정.
+
+app.css의 label.field는 컨트롤 높이가 제각각이라(체크박스 ~16px vs 입력 ~30px)
+.field.check가 padding-bottom 7px 보정값으로 줄을 맞추고 있었다 — 폰트·패딩이
+조금만 바뀌어도 어긋나고, 캡션 있는 필드와 없는 필드가 섞이면 바로 틀어진다.
+두 줄 높이를 고정하면 모든 필드가 같은 박스가 되어 보정값 없이 정렬된다.
+
+스타일을 app.css가 아니라 여기서 주는 이유: app.css는 병행 세션의 미커밋 변경이
+올라가 있어 손대면 그 작업을 밟는다 (wpmap 선례 4dfaaeb와 동일한 회피). */
+const CAPTION_ST = "height:14px; line-height:14px; font-size:11px; color:var(--muted);"
+  + " white-space:nowrap; overflow:hidden; text-overflow:ellipsis;";
+// 35px = 입력 실제 높이 (본문 14px/1.5 → 21px + 패딩 12 + 테두리 2). height가 아니라
+// min-height — 브라우저별로 더 커지면 넘치는 대신 줄이 함께 자라 정렬이 유지된다.
+const CONTROL_ST = "min-height:35px; display:flex; align-items:center; gap:6px;";
+const GROUP_ST = "display:flex; flex-direction:column;";
+const GRID_ST = "display:grid; grid-template-columns:repeat(auto-fit, minmax(232px, 1fr));"
+  + " gap:12px 16px; align-items:stretch;";
+const INNER_ST = "display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-start;";
+// 힌트를 그룹 바닥에 붙여 — 힌트 유무로 그룹 높이가 들쭉날쭉해지는 것 방지
+const HINT_ST = "margin:8px 0 0; padding-top:2px;";
+
+/** 캡션+컨트롤 2줄 고정 필드. caption "" 이면 자리만 차지 (체크박스 줄맞춤용). */
+function field(caption, ...control) {
+  return el("label", { class: "field", style: "gap:4px; min-width:0;" },
+    el("span", { style: CAPTION_ST }, caption),
+    el("div", { style: CONTROL_ST }, ...control));
+}
+
+/** 체크박스 필드 — 캡션 줄은 비우고 컨트롤 줄에 [✓] 라벨 (입력과 바닥 정렬). */
+function checkField(input, label) {
+  return field("", input, el("span", { style: "font-size:12px;" }, label));
+}
+
+/** 남는 폭을 채우는 필드 — 자유 텍스트 입력용 (고정폭 .num과 달리 칸을 다 씀). */
+function wideField(caption, control) {
+  const node = field(caption, control);
+  node.style.flex = "1";
+  node.style.minWidth = "160px";
+  return node;
+}
 
 export function render() {
   const errBox = el("div");
@@ -58,7 +100,7 @@ export function render() {
     fuelFlow: el("input", { class: "num", value: "0.3" }),
     useGains: el("input", { type: "checkbox" }),
     useAp: el("input", { type: "checkbox" }),
-    fp: el("input", { value: "web-sim-v1" }),
+    fp: el("input", { value: "web-sim-v1", style: "width:100%; box-sizing:border-box;" }),
   };
 
   // 작동기 프리필 폴백(위 30·0.7·10)은 엔진 기본값의 사본 — 폼이 즉시 유효해야 해서
@@ -189,42 +231,43 @@ export function render() {
     ),
     el("div", { class: "panel" },
       el("h2", {}, "실행 조건"),
-      el("div", { class: "field-grid" },
-        el("div", { class: "opt-group" },
+      el("div", { class: "field-grid", style: GRID_ST },
+        el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "시작 트림점 · 시간"),
-          el("div", { class: "row-inner" },
-            el("label", { class: "field" }, "마하", f.mach),
-            el("label", { class: "field" }, "고도 [m]", f.alt),
-            el("label", { class: "field" }, "연료 [kg]", f.fuel),
-            el("label", { class: "field" }, "t_end [s]", f.tEnd))),
-        el("div", { class: "opt-group" },
+          el("div", { class: "row-inner", style: INNER_ST },
+            field("마하", f.mach),
+            field("고도 [m]", f.alt),
+            field("연료 [kg]", f.fuel),
+            field("t_end [s]", f.tEnd))),
+        el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "항법 오차 모델"),
-          el("div", { class: "row-inner" },
-            el("label", { class: "field check" }, f.navOn, "사용"),
-            el("label", { class: "field" }, "시드", f.seed)),
-          el("p", { class: "hint" }, store.get("navParams")
+          el("div", { class: "row-inner", style: INNER_ST },
+            checkField(f.navOn, "사용"),
+            field("시드", f.seed)),
+          el("p", { class: "hint", style: HINT_ST }, store.get("navParams")
             ? "구조도 항법 블록 적용값 사용 중 (시드만 여기서 우선)"
             : "잡음·바이어스·지연·갱신주기는 엔진 기본값 — 편집은 구조도 탭 항법 블록")),
-        el("div", { class: "opt-group" },
+        el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "작동기 (2차계)"),
-          el("div", { class: "row-inner" },
-            el("label", { class: "field check" }, f.actOn, "사용"),
-            el("label", { class: "field" }, "wn [rad/s]", f.wn),
-            el("label", { class: "field" }, "ζ", f.zeta),
-            el("label", { class: "field" }, "rate [rad/s]", f.rate)),
-          actApplied && el("p", { class: "hint" },
-            "구조도 작동기 블록 적용값 프리필됨 — 여기 값이 최종")),
-        el("div", { class: "opt-group" },
+          el("div", { class: "row-inner", style: INNER_ST },
+            checkField(f.actOn, "사용"),
+            field("wn [rad/s]", f.wn),
+            field("ζ", f.zeta),
+            field("rate [rad/s]", f.rate)),
+          el("p", { class: "hint", style: HINT_ST }, actApplied
+            ? "구조도 작동기 블록 적용값 프리필됨 — 여기 값이 최종"
+            : "구조도 탭 작동기 블록에서 '시뮬에 적용'하면 이 값이 프리필된다")),
+        el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "유도 · 연료 · 게인"),
-          el("div", { class: "row-inner" },
-            el("label", { class: "field" }, "도달반경 [m]", f.accept),
-            el("label", { class: "field" }, "연료유량 [kg/s]", f.fuelFlow),
-            el("label", { class: "field check" }, f.useGains, "편집 게인"),
-            el("label", { class: "field check" }, f.useAp, "편집 AP"))),
-        el("div", { class: "opt-group" },
+          el("div", { class: "row-inner", style: INNER_ST },
+            field("도달반경 [m]", f.accept),
+            field("연료유량 [kg/s]", f.fuelFlow),
+            checkField(f.useGains, "편집 게인"),
+            checkField(f.useAp, "편집 AP"))),
+        el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "계보"),
-          el("div", { class: "row-inner" },
-            el("label", { class: "field" }, "지문", f.fp))),
+          el("div", { class: "row-inner", style: INNER_ST },
+            wideField("지문", f.fp))),
       ),
       el("div", { class: "row", style: "margin-top: 12px" },
         el("button", { class: "primary", onclick: run }, "시뮬 실행"),
@@ -333,7 +376,9 @@ function renderReplay(replayBox) {
   const spans = modeSpans(sig.mode);
   const seq = spans.map((s) => s.mode).join(" → ");
 
-  const trackBox = el("div");
+  // 3면도 (평면도·측면도·정면도) — 축 배정·등축 여부는 lib/plot.js planeViews가 정본
+  const views = planeViews(sig);
+  const planeBoxes = views.map(() => el("div"));
   const readout = el("span", { class: "progress-label" });
   const slider = el("input", {
     type: "range", min: "0", max: String(body.t.length - 1), value: "0",
@@ -345,8 +390,17 @@ function renderReplay(replayBox) {
       `t=${fmt(body.t[i], 4)}s ${sig.mode[i]} | h=${fmt(sig.h[i], 4)} m ` +
       `V=${fmt(sig.V[i], 4)} m/s α=${fmt(sig.alpha[i], 3)} rad ` +
       `실속마진=${fmt(env.stall_margin[i], 3)}`;
-    clear(trackBox).append(trackCanvas(sig.pn, sig.pe, waypoints, acceptRadius,
-      { markerIdx: i }));
+    // 시각 커서는 세 평면 모두에서 같은 시점을 가리켜야 한다 — 한 곳만 갱신하면
+    // 나머지가 이전 커서를 들고 있어 서로 다른 시점처럼 읽힌다
+    views.forEach((v, k) => {
+      clear(planeBoxes[k]).append(v.equal
+        ? trackCanvas(sig.pn, sig.pe, waypoints, acceptRadius,
+          { markerIdx: i, title: v.title })
+        : profileCanvas(v.xs, v.ys, {
+          title: v.title, xLabel: v.xLabel, yLabel: v.yLabel, markerIdx: i,
+          wpXs: waypoints.map((w) => w[v.wpIdx]),
+        }));
+    });
   };
   slider.addEventListener("input", updateCursor);
 
@@ -376,7 +430,13 @@ function renderReplay(replayBox) {
           { label: "α", data: sig.alpha, color: "#ff3b30" },
           { label: "α_stall−α", data: env.stall_margin, color: "#34c759" }]),
       ),
-      trackBox,
+      el("div", { style: "display:flex; flex-direction:column; gap:6px;" },
+        el("div", { class: "hint" },
+          "궤적 3면도 — 평면도만 등축(선회반경 판독용), 측면·정면도는 비등축이라 ",
+          "경사각을 눈으로 재면 안 됨. 주황 세로선은 웨이포인트의 수평좌표"),
+        planeBoxes[0],
+        planeBoxes[1],
+        planeBoxes[2]),
     ),
   );
   updateCursor();
