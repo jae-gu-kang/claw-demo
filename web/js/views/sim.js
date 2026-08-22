@@ -48,9 +48,11 @@ const CAPTION_ST = "height:14px; line-height:14px; font-size:11px; color:var(--m
 // 35px = 입력 실제 높이 (본문 14px/1.5 → 21px + 패딩 12 + 테두리 2). height가 아니라
 // min-height — 브라우저별로 더 커지면 넘치는 대신 줄이 함께 자라 정렬이 유지된다.
 const CONTROL_ST = "min-height:35px; display:flex; align-items:center; gap:6px;";
-const GROUP_ST = "display:flex; flex-direction:column;";
-const GRID_ST = "display:grid; grid-template-columns:repeat(auto-fit, minmax(232px, 1fr));"
-  + " gap:12px 16px; align-items:stretch;";
+// 그룹은 같은 고정폭 박스 — 왼쪽부터 조밀하게 채우고 남는 폭으로 늘어나지 않는다.
+// (격자 1fr로 늘리면 입력이 고정 90px이라 늘어난 만큼 빈 칸이 되어 패널만 휑해진다.
+// 바깥 배치는 app.css .field-grid의 flex-wrap + align-items:stretch 그대로 사용.)
+// shrink 1 — 좁은 화면에서는 줄었다가 wrap.
+const GROUP_ST = "display:flex; flex-direction:column; flex:0 1 280px; min-width:0;";
 const INNER_ST = "display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-start;";
 // 힌트를 그룹 바닥에 붙여 — 힌트 유무로 그룹 높이가 들쭉날쭉해지는 것 방지
 const HINT_ST = "margin:8px 0 0; padding-top:2px;";
@@ -231,7 +233,7 @@ export function render() {
     ),
     el("div", { class: "panel" },
       el("h2", {}, "실행 조건"),
-      el("div", { class: "field-grid", style: GRID_ST },
+      el("div", { class: "field-grid" },
         el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "시작 트림점 · 시간"),
           el("div", { class: "row-inner", style: INNER_ST },
@@ -245,8 +247,8 @@ export function render() {
             checkField(f.navOn, "사용"),
             field("시드", f.seed)),
           el("p", { class: "hint", style: HINT_ST }, store.get("navParams")
-            ? "구조도 항법 블록 적용값 사용 중 (시드만 여기서 우선)"
-            : "잡음·바이어스·지연·갱신주기는 엔진 기본값 — 편집은 구조도 탭 항법 블록")),
+            ? "구조도 적용값 사용 중 (시드만 여기서 우선)"
+            : "미지정 항목은 엔진 기본값 — 편집은 구조도 탭 항법 블록")),
         el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "작동기 (2차계)"),
           el("div", { class: "row-inner", style: INNER_ST },
@@ -255,8 +257,8 @@ export function render() {
             field("ζ", f.zeta),
             field("rate [rad/s]", f.rate)),
           el("p", { class: "hint", style: HINT_ST }, actApplied
-            ? "구조도 작동기 블록 적용값 프리필됨 — 여기 값이 최종"
-            : "구조도 탭 작동기 블록에서 '시뮬에 적용'하면 이 값이 프리필된다")),
+            ? "구조도 적용값 프리필됨 — 여기 값이 최종"
+            : "구조도 탭에서 '시뮬에 적용' 시 프리필")),
         el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "유도 · 연료 · 게인"),
           el("div", { class: "row-inner", style: INNER_ST },
