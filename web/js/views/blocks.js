@@ -23,6 +23,7 @@ import { groupFields, parseFieldValue, schemaFields } from "../lib/schemaform.js
 import { store } from "../store.js";
 import { renderCodePanel } from "./codegen.js";
 import { DESIGN_ORDER, fromMarkup, topDiagramSvg } from "./diagram.js";
+import { createTopReplay } from "./replayoverlay.js";
 import { CHIP_LABEL, SUBSYSTEMS } from "./subsystems.js";
 
 const schemaCache = {}; // "cat/name" → schema
@@ -33,24 +34,6 @@ const navigate = (p) => {
   const segs = p == null ? [] : Array.isArray(p) ? p : [p];
   location.hash = segs.length ? `blocks/${segs.join("/")}` : "blocks";
 };
-
-// 다이어그램 스킨 — "glass"(라이트 글래스, 기본) | "holo"(다크 홀로그램, 디자인 안 2).
-// 정본 스타일 결정 전 비교용 토글 · localStorage로 페이지 이동에도 유지.
-const SKIN_KEY = "claw.diagramSkin";
-const getSkin = () => (localStorage.getItem(SKIN_KEY) === "holo" ? "holo" : "glass");
-
-function skinToggle(root) {
-  const label = () => (getSkin() === "holo" ? "⚪ 애플 스킨" : "🌌 홀로그램 스킨");
-  const btn = el("button", {
-    title: "구조도 스킨 전환 (디자인 안 비교)",
-    onclick: () => {
-      localStorage.setItem(SKIN_KEY, getSkin() === "holo" ? "glass" : "holo");
-      root.classList.toggle("holo", getSkin() === "holo");
-      btn.textContent = label();
-    },
-  }, label());
-  return btn;
-}
 
 /** #blocks/<a>/<b>/… → 트리 경로 배열 (해시가 페이지 상태의 정본).
 하강·절단 규칙은 lib/blocks.js resolvePath — 미실존 세그먼트에서 절단, 빈 배열 = 홈. */
@@ -69,7 +52,12 @@ function nodeAt(path) {
   return node;
 }
 
+// 재생 오버레이 핸들 — 재렌더·탭 전환 시 이전 타이머를 확실히 끈다 (버려진 SVG를
+// 계속 갱신하는 타이머가 남지 않게)
+let topReplay = null;
+
 export function render() {
+  if (topReplay) { topReplay.dispose(); topReplay = null; }
   const path = currentPath();
   // 절단 폴백 가시화 — 무효 해시(#blocks/scas/PITCH 등)를 실제 렌더 경로로
   // 정규화 (replace: 히스토리 오염 없음, 정규화 후엔 동일 해시라 재발화 안정).
@@ -78,7 +66,7 @@ export function render() {
   if (location.hash !== canonical && location.hash.slice(1).split("/")[0] === "blocks") {
     location.replace(canonical);
   }
-  const root = el("div", { class: getSkin() === "holo" ? "bd holo" : "bd" });
+  const root = el("div", { class: "bd" });
   if (path.length) renderSubPage(root, path);
   else renderHome(root);
   return root;
@@ -88,6 +76,8 @@ export function render() {
 
 function renderHome(root) {
   const snapshotBox = el("div");
+  const svg = topDiagramSvg(navigate);
+  topReplay = createTopReplay({ svgRoot: svg }); // 블록 값 표시·리미터 점멸
   root.append(
     el("div", { class: "order" },
       el("span", { class: "cap" }, "설계 순서"),
@@ -98,7 +88,6 @@ function renderHome(root) {
         }, s.label),
         i < DESIGN_ORDER.length - 1 && el("span", { class: "arr" }, "→"),
       ]),
-      skinToggle(root),
       el("button", {
         title: "적용된 파라미터·게인 스케줄을 한 파일의 코드로 — 검토·추적성 표 포함",
         onclick: () => showSnapshotCode(snapshotBox),
@@ -107,7 +96,8 @@ function renderHome(root) {
         "명령은 바깥(유도)에서 안(SCAS)으로 내려가지만, 설계는 플랜트 해석 후 ",
         el("b", {}, "가장 안쪽 루프부터"), " 닫아 나갑니다. 프레임 라벨을 클릭해도 이동합니다."),
     ),
-    el("div", { class: "canvas-wrap top" }, topDiagramSvg(navigate)),
+    topReplay.root,
+    el("div", { class: "canvas-wrap top" }, svg),
     el("p", { class: "hint-row" },
       "💡 블록(게인 스케줄링·항법 포함)이나 우상단 범례(①~⑤ 프레임 설명)를 클릭하면 서브시스템 ",
       "내부 블록도가 열립니다 — 시뮬링크의 서브시스템 더블클릭 대응. 브라우저 뒤로가기로 복귀. ",
@@ -158,9 +148,8 @@ function renderSubPage(root, path) {
               }, crumbLabel(seg, i, n)),
         ];
       }),
-      el("span", { style: "margin-left: auto" }, skinToggle(root)),
       el("button", {
-        class: "up-btn", style: "margin-left: 8px",
+        class: "up-btn",
         onclick: () => navigate(path.length > 1 ? path.slice(0, -1) : null),
       }, "↑ 상위로"),
     ),

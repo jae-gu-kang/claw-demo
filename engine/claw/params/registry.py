@@ -36,6 +36,15 @@ class ComponentRegistry:
         _, defs = self._lookup(category, name)
         return ParamSet(defs).to_json_schema(title=f"{category}/{name}")
 
+    def param_defs(self, category, name):
+        """등록된 ParamDef 튜플 — 단위·설명·범위를 JSON 스키마로 굽기 전 형태로.
+
+        schema()는 desc와 unit을 "설명 [단위]" 한 문자열로 합쳐 놓는다. 그걸 다시
+        갈라 쓰는 소비자(M15 영향성 해석)가 생겨서, 되파싱 대신 원본을 낸다.
+        """
+        _, defs = self._lookup(category, name)
+        return defs
+
     def _lookup(self, category, name):
         try:
             return self._entries[category][name]
