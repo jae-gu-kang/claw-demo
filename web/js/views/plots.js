@@ -150,7 +150,7 @@ function fmtTick(v) {
 }
 
 /** 지상 궤적 (NED 평면, 북쪽 위) — 웨이포인트 원(도달 반경)·시각 마커. */
-export function trackCanvas(pn, pe, waypoints, acceptRadius, { markerIdx = null, title = "", width = 380, height = 380 } = {}) {
+export function trackCanvas(pn, pe, waypoints, acceptRadius, { markerIdx = null, width = 380, height = 380 } = {}) {
   const { canvas, ctx } = makeCanvas(width, height);
   const m = 42;
   const wpN = waypoints.map((w) => w[0]);
@@ -182,10 +182,6 @@ export function trackCanvas(pn, pe, waypoints, acceptRadius, { markerIdx = null,
   ctx.stroke();
   ctx.fillStyle = "#86868b";
   ctx.fillText("E [m] →  (북쪽 위)", width / 2 - 40, height - 6);
-  if (title) {
-    ctx.fillStyle = "#1d1d1f";
-    ctx.fillText(title, m - 6, 14);
-  }
 
   for (const [n, e] of waypoints) {
     ctx.strokeStyle = "#ff9500";
@@ -230,11 +226,12 @@ wpXs: 웨이포인트의 가로축 성분. 웨이포인트에는 고도가 없�
 테이블 소관) 점이 아니라 세로 안내선으로만 그린다 — 없는 정보를 그리지 않기 위해.
 */
 export function profileCanvas(xs, ys, {
-  title = "", xLabel = "", yLabel = "", wpXs = [], markerIdx = null,
+  xLabel = "", yLabel = "", wpXs = [], markerIdx = null,
   width = 380, height = 185,
 } = {}) {
   const { canvas, ctx } = makeCanvas(width, height);
-  const mL = 52, mT = 24, mR = 12, mB = 28;
+  // mT는 세로축 라벨 한 줄 몫만 — 평면 이름은 축 라벨로 충분해 제목을 그리지 않는다
+  const mL = 52, mT = 18, mR = 12, mB = 28;
   const [x0r, x1r] = extent([...xs, ...wpXs]);
   const [y0r, y1r] = extent(ys);
   // 퇴화 구간(정고도 순항 등) 0-span 나눗셈 금지 — lineChartCanvas와 같은 정책
@@ -244,9 +241,6 @@ export function profileCanvas(xs, ys, {
   const [y0, y1] = padOf(y0r, y1r);
   const px = linScale(x0, x1, mL, width - mR);
   const py = linScale(y0, y1, height - mB, mT);
-
-  ctx.fillStyle = "#1d1d1f";
-  ctx.fillText(title, mL - 6, 14);
 
   ctx.strokeStyle = "#e5e5ea";
   ctx.beginPath();

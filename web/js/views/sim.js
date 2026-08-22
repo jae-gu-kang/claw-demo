@@ -33,6 +33,10 @@ let runningJobId = null;
 let runningSnapshot = { waypoints: [], acceptRadius: 0 };
 // 지도 줌/팬 상태 — 탭 재진입 시 유지 (wpRows·lastReplay와 동렬)
 let wpMapView = { view: null };
+// 자동 재생 타이머 — 모듈 스코프에 두어야 재렌더·탭 전환에서 확실히 끌 수 있다.
+// (뷰 안에만 두면 떨어져 나간 DOM을 향해 계속 도는 타이머가 남는다)
+let playTimer = null;
+const PLAY_FRAME_MS = 40; // 25 fps — 캔버스 3장 재그리기에 무리 없는 간격
 
 /* 실행 조건 폼 정렬 — 캡션 1줄(14px) + 컨트롤 1줄(30px) 고정.
 
@@ -52,14 +56,17 @@ const CONTROL_ST = "min-height:35px; display:flex; align-items:center; gap:6px;"
 // (격자 1fr로 늘리면 입력이 고정 90px이라 늘어난 만큼 빈 칸이 되어 패널만 휑해진다.
 // 바깥 배치는 app.css .field-grid의 flex-wrap + align-items:stretch 그대로 사용.)
 // shrink 1 — 좁은 화면에서는 줄었다가 wrap.
-const GROUP_ST = "display:flex; flex-direction:column; flex:0 1 240px; min-width:0;";
-// 그룹 안은 2열 고정 격자 — flex-wrap이면 필드 폭이 내용마다 달라 둘째 줄이
-// 첫 줄 아래로 안 떨어진다(열이 어긋나 보이는 원인). 1fr 두 칸이면 어느 그룹이든
-// 같은 자리에 열이 선다. minmax(0,1fr) — 내용이 칸보다 커도 밀어내지 않게.
-const INNER_ST = "display:grid; grid-template-columns:repeat(2, minmax(0, 1fr));"
-  + " gap:10px 12px; align-items:start;";
+// 그룹은 내용 폭 그대로 (한 줄 배치라 필드 수만큼만 넓다). 힌트가 있는 그룹이
+// 지나치게 좁아 힌트만 여러 줄로 늘어나지 않게 min-width만 받쳐 준다.
+const GROUP_ST = "display:flex; flex-direction:column; flex:0 0 auto; min-width:200px;";
+// 그룹 안은 한 줄 — 최대 5칸이라 접을 이유가 없다. 필드 폭을 고정해 두면
+// 줄바꿈 없이도 칸 간격이 일정하다 (flex-wrap은 아주 좁은 화면의 안전망).
+const INNER_ST = "display:flex; flex-wrap:wrap; gap:10px 12px; align-items:flex-start;";
+const FIELD_W = "96px"; // 수치 입력 한 칸 — 최장 캡션 '연료유량 [kg/s]'이 들어가는 폭
 // 입력은 칸 폭을 채운다 — .num의 고정 90px을 두면 칸마다 남는 여백이 제각각
 const FILL_ST = "width:100%; box-sizing:border-box;";
+// 소제목 줄 — 사용 토글을 여기 붙여 필드 칸은 수치 입력만 쓰게 한다
+const TITLE_ST = "display:flex; align-items:center; gap:8px;";
 // margin-top:auto — 힌트를 그룹 바닥에 붙인다. .field-grid의 align-items:stretch가
 // 같은 줄 박스 높이를 맞춰 주므로, 바닥 정렬이면 힌트 줄도 나란히 선다
 const HINT_ST = "margin:auto 0 0; padding-top:8px;";
@@ -68,7 +75,7 @@ const PLANE_PX = 320;
 
 /** 캡션+컨트롤 2줄 고정 필드. caption "" 이면 자리만 차지 (체크박스 줄맞춤용). */
 function field(caption, ...control) {
-  return el("label", { class: "field", style: "gap:4px; min-width:0;" },
+  return el("label", { class: "field", style: `gap:4px; width:${FIELD_W}; flex:0 0 auto;` },
     el("span", { style: CAPTION_ST }, caption),
     el("div", { style: CONTROL_ST }, ...control));
 }
@@ -78,19 +85,29 @@ function checkField(input, label) {
   return field("", input, el("span", { style: "font-size:12px;" }, label));
 }
 
-/** 수치 입력 — 2열 격자 칸을 채우는 폭 (mono 글꼴은 .num이 준다). */
+/** 수치 입력 — 칸 폭을 채운다 (mono 글꼴은 .num이 준다). */
 function numInput(value) {
   return el("input", { class: "num", style: FILL_ST, value });
 }
 
-/** 2열을 다 쓰는 필드 — 자유 텍스트처럼 반 칸이면 좁은 입력용. */
+/** 자유 텍스트용 넓은 필드 — 수치 한 칸(96px)으로는 좁은 입력. */
 function wideField(caption, control) {
   const node = field(caption, control);
-  node.style.gridColumn = "1 / -1";
+  node.style.width = "200px";
   return node;
 }
 
+/** 소제목 + 사용 토글 — 토글을 여기 두면 필드 칸이 수치 입력 몫으로 온전히 남는다. */
+function groupTitle(text, toggle) {
+  return el("div", { class: "g-title", style: TITLE_ST },
+    el("span", {}, text),
+    toggle && el("label", { style: "display:flex; align-items:center; gap:4px; cursor:pointer;" },
+      toggle, "사용"));
+}
+
 export function render() {
+  // 탭을 떠났다 돌아오면 이전 DOM은 버려진다 — 그쪽을 밀던 타이머도 같이 정리
+  if (playTimer) { clearInterval(playTimer); playTimer = null; }
   const errBox = el("div");
   const progressBox = el("div");
   const replayBox = el("div");
@@ -255,17 +272,15 @@ export function render() {
             field("연료 [kg]", f.fuel),
             field("t_end [s]", f.tEnd))),
         el("div", { class: "opt-group", style: GROUP_ST },
-          el("div", { class: "g-title" }, "항법 오차 모델"),
+          groupTitle("항법 오차 모델", f.navOn),
           el("div", { class: "row-inner", style: INNER_ST },
-            checkField(f.navOn, "사용"),
             field("시드", f.seed)),
           el("p", { class: "hint", style: HINT_ST }, store.get("navParams")
             ? "구조도 적용값 사용 중 (시드만 여기서 우선)"
             : "미지정 항목은 엔진 기본값 — 편집은 구조도 탭 항법 블록")),
         el("div", { class: "opt-group", style: GROUP_ST },
-          el("div", { class: "g-title" }, "작동기 (2차계)"),
+          groupTitle("작동기 (2차계)", f.actOn),
           el("div", { class: "row-inner", style: INNER_ST },
-            checkField(f.actOn, "사용"),
             field("wn [rad/s]", f.wn),
             field("ζ", f.zeta),
             field("rate [rad/s]", f.rate)),
@@ -385,6 +400,8 @@ function renderWpTable(wpBox, wpMap) {
 }
 
 function renderReplay(replayBox) {
+  // 이전 렌더의 타이머가 살아 있으면 떨어져 나간 슬라이더를 계속 민다 — 먼저 정리
+  if (playTimer) { clearInterval(playTimer); playTimer = null; }
   const { body, waypoints, acceptRadius } = lastReplay;
   const sig = body.signals;
   const env = body.envelope;
@@ -410,17 +427,60 @@ function renderReplay(replayBox) {
     // 시각 커서는 세 평면 모두에서 같은 시점을 가리켜야 한다 — 한 곳만 갱신하면
     // 나머지가 이전 커서를 들고 있어 서로 다른 시점처럼 읽힌다
     views.forEach((v, k) => {
-      clear(planeBoxes[k]).append(v.equal
+      const cv = v.equal
         ? trackCanvas(sig.pn, sig.pe, waypoints, acceptRadius,
-          { markerIdx: i, title: v.title, width: PLANE_PX, height: PLANE_PX })
+          { markerIdx: i, width: PLANE_PX, height: PLANE_PX })
         : profileCanvas(v.xs, v.ys, {
-          title: v.title, xLabel: v.xLabel, yLabel: v.yLabel, markerIdx: i,
+          xLabel: v.xLabel, yLabel: v.yLabel, markerIdx: i,
           wpXs: waypoints.map((w) => w[v.wpIdx]),
           width: PLANE_PX, height: PLANE_PX,
-        }));
+        });
+      // 평면 이름은 축 라벨로 읽히므로 그리지 않는다 — 대신 보조기술용으로 남긴다
+      cv.setAttribute("aria-label", `궤적 ${v.title}`);
+      clear(planeBoxes[k]).append(cv);
     });
   };
-  slider.addEventListener("input", updateCursor);
+  // 자동 재생 — 손으로 슬라이더를 끄는 것 외에 시간을 흘려보낼 방법이 없었다.
+  // 샘플 간격(stride 적용 후)을 기준으로 배속을 곱해 진행하므로, 표시 시각은
+  // 실제 시뮬 시간과 배속의 곱으로 흐른다 (프레임을 세는 게 아니라).
+  const dtSample = body.t.length > 1 ? body.t[1] - body.t[0] : 0;
+  const playable = body.t.length > 1 && dtSample > 0;
+  const playBtn = el("button", { disabled: !playable },
+    playable ? "▶ 재생" : "▶ 재생 (샘플 부족)");
+  const speedSel = el("select", { "aria-label": "재생 배속" },
+    ...[1, 2, 5, 10, 20].map((x) =>
+      el("option", { value: String(x), selected: x === 5 }, `${x}×`)));
+  const atEnd = () => Number(slider.value) >= body.t.length - 1;
+
+  // 진행은 프레임당 고정 샘플이 아니라 **경과 벽시계 시간**으로 센다. 프레임당
+  // 샘플로 세면 stride가 큰 결과(dtSample이 큰)에서 저속 배속의 몫이 1샘플 미만이
+  // 되어 최소 1로 잘리고, 그만큼 요청 배속보다 빨리 재생된다 (1×가 1×가 아니게 됨).
+  let fromIdx = 0;
+  let fromWall = 0;
+  const stopPlay = () => {
+    if (playTimer) clearInterval(playTimer);
+    playTimer = null;
+    playBtn.textContent = "▶ 재생";
+  };
+  const anchor = () => { fromIdx = Number(slider.value); fromWall = performance.now(); };
+  const startPlay = () => {
+    if (atEnd()) { slider.value = "0"; updateCursor(); } // 끝에서 누르면 처음부터
+    anchor();
+    playTimer = setInterval(() => {
+      const simElapsed = (performance.now() - fromWall) / 1000 * Number(speedSel.value);
+      const next = Math.min(fromIdx + Math.round(simElapsed / dtSample), body.t.length - 1);
+      if (next !== Number(slider.value)) { slider.value = String(next); updateCursor(); }
+      if (next >= body.t.length - 1) stopPlay(); // 끝에 닿으면 자동 정지
+    }, PLAY_FRAME_MS);
+    playBtn.textContent = "⏸ 일시정지";
+  };
+  // 배속을 바꾸면 기준점을 다시 잡는다 — 안 하면 지난 경과분까지 새 배속으로 곱해져 튄다
+  speedSel.addEventListener("change", () => { if (playTimer) anchor(); });
+  playBtn.addEventListener("click", () => (playTimer ? stopPlay() : startPlay()));
+  slider.addEventListener("input", () => {
+    if (playTimer) stopPlay(); // 손으로 잡으면 재생 중단 — 커서를 둘이 끌지 않게
+    updateCursor();
+  });
 
   const chart = (title, series) =>
     lineChartCanvas(body.t, series, { title, bands: spans });
@@ -436,7 +496,7 @@ function renderReplay(replayBox) {
         ? ` · 최저 고도 ${fmt(env.min_alt, 4)} m @ ${fmt(env.min_alt_t, 4)}s` : "",
       env.first_flag_t != null ? ` · 최초 플래그 ${fmt(env.first_flag_t, 4)}s` : "",
       ` · 최종 h ${fmt(sig.h[sig.h.length - 1], 4)} m · 잔여 연료 ${fmt(sig.fuel[sig.fuel.length - 1], 4)} kg`),
-    el("div", { class: "row" }, slider, readout),
+    el("div", { class: "row" }, playBtn, speedSel, slider, readout),
     // 3면도 — 세 평면을 가로로 잇대 한 줄로 (좁으면 wrap). 시계열 위에 두어
     // 커서 조작(바로 위 슬라이더)과 그 반응이 눈에 같이 들어오게 한다
     el("div", { style: "display:flex; flex-direction:column; gap:6px; margin-bottom:12px;" },
