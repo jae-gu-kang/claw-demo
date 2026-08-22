@@ -49,7 +49,9 @@ app.css의 label.field는 컨트롤 높이가 제각각이라(체크박스 ~16px
 두 줄 높이를 고정하면 모든 필드가 같은 박스가 되어 보정값 없이 정렬된다.
 
 스타일을 app.css가 아니라 여기서 주는 이유: app.css는 병행 세션의 미커밋 변경이
-올라가 있어 손대면 그 작업을 밟는다 (wpmap 선례 4dfaaeb와 동일한 회피). */
+올라가 있어 손대면 그 작업을 밟는다 (wpmap 선례 4dfaaeb와 동일한 회피).
+예외는 미디어 쿼리가 필요한 레이아웃 원시 — 인라인으로 표현할 수 없으므로
+app.css에 둔다 (.triview). 그 경우 헝크 단위로 골라 담을 것. */
 const CAPTION_ST = "height:14px; line-height:14px; font-size:11px; color:var(--muted);"
   + " white-space:nowrap; overflow:hidden; text-overflow:ellipsis;";
 // 35px = 입력 실제 높이 (본문 14px/1.5 → 21px + 패딩 12 + 테두리 2). height가 아니라
@@ -73,7 +75,10 @@ const TITLE_ST = "display:flex; align-items:center; gap:8px;";
 // margin-top:auto — 힌트를 그룹 바닥에 붙인다. .field-grid의 align-items:stretch가
 // 같은 줄 박스 높이를 맞춰 주므로, 바닥 정렬이면 힌트 줄도 나란히 선다
 const HINT_ST = "margin:auto 0 0; padding-top:8px;";
-// 3면도 한 변 [px] — 셋을 가로로 이어 붙였을 때 3×320 + 여백이 패널에 들어가는 크기
+// 궤적 뷰 한 변 [px] — 2열일 때 2×320 + 여백이 패널에 들어가는 크기.
+// .triview에 --plane-px로 넘겨 열 상한이 된다. 이 값을 키우면 app.css의 2열 전환
+// 폭(760px)도 같이 올리는 게 좋다 — 안 올리면 깨지지는 않고, 좁은 구간에서 캔버스가
+// 균일 축소되어 흐려질 뿐이다 (축척은 .triview canvas.plot 규칙이 지킨다)
 const PLANE_PX = 320;
 
 /** 캡션+컨트롤 2줄 고정 필드. caption "" 이면 자리만 차지 (체크박스 줄맞춤용). */
@@ -412,7 +417,7 @@ function renderReplay(replayBox) {
   const seq = spans.map((s) => s.mode).join(" → ");
 
   // 3면도 (평면도·측면도·정면도) — 축 배정·등축 여부는 lib/plot.js planeViews가 정본.
-  // 셋을 가로로 잇대므로 정사각 — N–E 평면이 등축이려면 폭=높이여야 한다
+  // 정사각이어야 한다 — N–E 평면이 등축이려면 폭=높이여야 한다
   // (trackCanvas는 같은 span을 폭·높이에 각각 사상하므로 직사각이면 축척이 어긋난다)
   const views = planeViews(sig);
   const planeBoxes = views.map(() => el("div"));
@@ -509,14 +514,17 @@ function renderReplay(replayBox) {
       env.first_flag_t != null ? ` · 최초 플래그 ${fmt(env.first_flag_t, 4)}s` : "",
       ` · 최종 h ${fmt(sig.h[sig.h.length - 1], 4)} m · 잔여 연료 ${fmt(sig.fuel[sig.fuel.length - 1], 4)} kg`),
     el("div", { class: "row" }, playBtn, speedSel, slider, readout),
-    // 3면도 — 세 평면을 가로로 잇대 한 줄로 (좁으면 wrap). 시계열 위에 두어
-    // 커서 조작(바로 위 슬라이더)과 그 반응이 눈에 같이 들어오게 한다
+    // 궤적 뷰 — 입체·평면·측면·정면 순. 배치는 .triview가 폭에 따라 1열/2열로
+    // 고르며, 열 수를 4의 약수로만 두어 마지막 줄에 외톨이가 남지 않게 한다.
+    // 시계열 위에 두어 커서 조작(바로 위 슬라이더)과 그 반응이 눈에 같이 들어오게 한다
     el("div", { style: "display:flex; flex-direction:column; gap:6px; margin-bottom:12px;" },
       el("div", { class: "hint" },
-        "궤적 3면도 + 3D (NED) — N–E 평면만 등축(선회반경 판독용), 연직 평면과 3D는 ",
+        "궤적 3D + 3면도 (NED) — N–E 평면만 등축(선회반경 판독용), 연직 평면과 3D는 ",
         "비등축이라 경사각을 눈으로 재면 안 됨. 주황 세로선·점은 웨이포인트의 수평좌표"),
-      el("div", { style: "display:flex; flex-wrap:wrap; gap:8px; align-items:flex-start;" },
-        planeBoxes[0], planeBoxes[1], planeBoxes[2], track3d.root)),
+      // --plane-px로 열 상한을 넘겨 PLANE_PX를 단일 정본으로 유지한다 (CSS에 320을
+      // 또 박지 않기 위함). 2열 전환 폭만은 미디어 쿼리라 app.css와 수동 동기.
+      el("div", { class: "triview", style: `--plane-px: ${PLANE_PX}px` },
+        track3d.root, planeBoxes[0], planeBoxes[1], planeBoxes[2])),
     el("div", { class: "row" },
       el("div", {},
         chart("고도 h [m]", [{ label: "h", data: sig.h, color: "#007aff" }]),

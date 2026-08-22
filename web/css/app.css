@@ -144,6 +144,40 @@ canvas.plot { background: #fff; border: 1px solid #d2d2d7; border-radius: 12px; 
 .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
 .legend .chip { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
 
+/* 시뮬 재생 궤적 뷰 — 입체·평면·측면·정면 4장.
+   열 수를 4의 약수로만 둔다(1 또는 2). flex-wrap이나 auto-fit이면 폭에 따라 3+1로
+   갈라져 마지막 줄에 외톨이가 남는다 — 가상의 걱정이 아니라, 최대폭(컨테이너 1206)에서
+   3열(320×3+16=976)이 실제로 들어간다.
+   열 상한을 --plane-px(sim.js의 PLANE_PX가 주입)로 묶는 이유: 3D 뷰는 캔버스 아래
+   캡션(.hint)을 달고 있고 폭 제약이 없어 그 max-content가 열 폭을 지배한다. 캡션은
+   드래그 중 방위·고각 자릿수가 계속 바뀌므로, 상한을 안 묶으면 회전할 때마다 열 폭이
+   흔들려 오른쪽 열 캔버스가 가로로 밀린다. 넓은 폭에서 죽은 거터가 생기는 것도 막는다.
+   minmax의 min이 0인 것은 좁은 폭에서 열이 캔버스보다 작아질 수 있게 허용하기
+   위함(넘침 방지) — 그때 축척은 아래 canvas 규칙이 지킨다. */
+.triview {
+  display: grid;
+  gap: 8px;
+  align-items: start;
+  justify-content: start;
+  grid-template-columns: minmax(0, var(--plane-px, 320px));
+}
+@media (min-width: 760px) {
+  /* 2열 하한. 불변식 = main과 재생 패널 사이에 가로 패딩·테두리를 더하는 요소가
+     없다(중간 래퍼는 있으나 무스타일). 그래서 가용폭 = 뷰포트 − 74px
+     (main padding 20×2 + panel padding 16×2 + border 1×2).
+     뷰포트 760 → 760 − 17(세로 스크롤바) − 74 = 669 > 필요 648(=320×2+gap 8).
+     미디어 쿼리는 스크롤바를 포함한 뷰포트로 평가되므로 스크롤바를 빼는 게 맞다.
+     패널을 컬럼 레이아웃 등 가로 여백이 있는 것으로 감싸면 이 산수를 다시 볼 것. */
+  .triview { grid-template-columns: repeat(2, minmax(0, var(--plane-px, 320px))); }
+}
+/* 열이 캔버스보다 좁아지면(1열 구간의 좁은 폭) canvas.plot의 max-width가 폭만 줄이는데,
+   makeCanvas가 인라인으로 박은 height는 그대로 남아 직사각이 된다 — N–E 평면이 타원으로
+   그려져 선회반경을 잘못 읽게 된다. height를 고유비(width/height 속성)에 맡겨 균일
+   축소시킨다. 즉 열이 좁아져도 축척은 보존되고, 해상도만 떨어진다.
+   !important는 인라인 스타일을 이기기 위한 것 — 특이도로는 불가능하다.
+   측정: 뷰포트 380에서 306×320(직사각) → 306×306(정사각). */
+.triview canvas.plot { height: auto !important; }
+
 /* ── 구조도(블록 다이어그램 허브) — 시뮬링크 스타일, .bd 스코프 ───────────
    레퍼런스 디자인(control_law_block_diagram)을 이식 — 다른 뷰와 충돌 방지 */
 .bd { --bd-ink-soft: #5a6b7d; --bd-edge: #d6dde6; }
