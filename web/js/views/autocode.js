@@ -127,7 +127,10 @@ async function load(panel) {
     renderCodePanel(panel, {
       specs: built.map((r) => r.spec),
       validation: built.map((r) => r.validation),
+      // 게인 스케줄은 형상 전체의 것이라 대상이 통합일 때만 싣는다. 전부 끈 상태는
+      // 빈 dict로 표현할 수 없어 별도 신호로 간다 (lib/gainsched.js storePayload)
       gainTables: all ? (store.get("gainTables") ?? null) : null,
+      scheduleOff: all ? (store.get("gainScheduleOff") ?? false) : false,
       meta,
       langs: shape ? ["python", "c"] : ["flight"],
       flightMerged: state.merged,

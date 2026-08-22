@@ -50,6 +50,25 @@ test("빈 테이블 dict는 생략한다 — 서버에서 '스케줄 없음'과 
   assert.ok(!("gain_tables" in req));
 });
 
+test("스케줄 자리를 전부 끄면 '스케줄 없는 형상'을 요청한다", () => {
+  // 필드 생략(=설계 기본 6자리)과 다른 형상이다 — 여기선 sched 파일이 통째로 없어진다
+  const req = flightRequest([AP_SPEC], null, { scheduleOff: true });
+  assert.equal(req.with_schedule, false);
+  assert.ok(!("gain_tables" in req));
+  assert.deepEqual(req.autopilot, AP_SPEC.values);  // AP 편집값은 그대로 실린다
+});
+
+test("전부 끔이면 테이블이 남아 있어도 안 보낸다 — 엔진이 구성 오류로 거부한다", () => {
+  const req = flightRequest([], TABLES, { scheduleOff: true });
+  assert.equal(req.with_schedule, false);
+  assert.ok(!("gain_tables" in req));
+});
+
+test("전부 끔이 아니면 with_schedule을 건드리지 않는다 — 서버 기본이 참이다", () => {
+  assert.ok(!("with_schedule" in flightRequest([], TABLES)));
+  assert.ok(!("with_schedule" in flightRequest([], null)));
+});
+
 test("제어 주기를 바꾸면 요청에 반영된다 — dt는 형상의 일부다", () => {
   assert.equal(flightRequest([], null, { controlHz: 200 }).control_hz, 200);
 });

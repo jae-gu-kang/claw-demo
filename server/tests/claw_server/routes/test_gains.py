@@ -89,3 +89,79 @@ def test_gain_tables_validation_422(client):
     assert client.post(
         "/api/sim/run", json=_hold_mission(gain_tables=bad_nan)
     ).status_code == 422
+
+
+# ---------- 스케줄 자리 (어떤 게인에 테이블을 붙일지) ----------
+
+
+def test_gain_slot_catalog(client):
+    """자리 목록은 18칸 격자로 오되 켤 수 있는 곳은 16이다 — 속도·헤딩의 k_rate는
+    rate 경로가 없어 구조상 불가. 빈칸으로 두면 왜 없는지 알 수 없어 사유를 함께 준다."""
+    d = client.get("/api/gains/catalog").json()
+    assert d["axis"] == "mach"
+    slots = {s["name"]: s for s in d["slots"]}
+    assert len(slots) == 18
+    assert sum(1 for s in slots.values() if s["available"]) == 16
+    for name in ("speed.k_rate", "heading.k_rate"):
+        assert slots[name]["available"] is False
+        assert "rate" in slots[name]["reason"]
+    # 기본 스케줄 6자리만 켜져 있다 — 나머지는 켤 수 있으나 지금은 설계점 고정
+    on = {n for n, s in slots.items() if s.get("scheduled")}
+    assert on == set(d["default"]) == {
+        "pitch.kp", "pitch.ki", "pitch.k_rate", "roll.kp", "roll.ki", "roll.k_rate"}
+    # AP 축은 설계 파라미터 이름이 다르다 — 웹이 "무엇이 고정되는지" 보여 줄 수 있어야
+    assert slots["alt.k_rate"]["param"] == "k_hdot"
+    assert slots["alt.k_rate"]["design"] == -0.008
+    assert slots["alt.k_rate"]["unit"]
+
+
+def test_catalog_design_value_matches_demo_tables(client):
+    """끄면 굳는 값(design)과 켜져 있을 때의 설계점 값이 같아야 한다 — 자리를 켜고
+    끄는 것만으로 설계점 거동이 달라지면 비교 자체가 불가능해진다."""
+    d = client.get("/api/gains/catalog").json()
+    demo = client.get("/api/gains/demo").json()
+    for s in d["slots"]:
+        if not s["available"]:
+            continue
+        machs, data = s["table"]["axes"]["mach"], s["table"]["data"]
+        assert data[machs.index(0.6)] == s["design"], s["name"]
+        if s["name"] in demo:  # 이미 켜진 자리는 설계 테이블과 동일해야 한다
+            assert s["table"] == demo[s["name"]]
+
+
+def test_catalog_slot_subset_runs_and_changes_flight_code(client):
+    """자리 선택은 표시 설정이 아니라 형상이다 — 탑재 C의 룩업 수와 지문이 바뀐다."""
+    cat = {s["name"]: s for s in client.get("/api/gains/catalog").json()["slots"]}
+    base = client.post("/api/codegen/flight", json={}).json()
+    subset = {n: cat[n]["table"] for n in ("pitch.kp", "roll.kp", "yaw.k_rate")}
+    r = client.post("/api/codegen/flight", json={"gain_tables": subset})
+    assert r.status_code == 200
+    got = r.json()
+
+    def sched(body):
+        return next(f["text"] for f in body["files"] if f["name"] == "fcl_sched.c")
+
+    assert sched(base).count("claw_lookup1d") == 6
+    assert sched(got).count("claw_lookup1d") == 3
+    assert got["fingerprint"] != base["fingerprint"]
+    # 요축 레이트 게인이 상수에서 신호가 된다
+    scas = next(f["text"] for f in got["files"] if f["name"] == "fcl_scas.c")
+    assert "sched_yaw_k_rate" in scas
+
+
+def test_schedule_off_drops_the_whole_subsystem(client):
+    """'전부 끔' = with_schedule=False — 룩업도 필터 상태도 남지 않는다."""
+    off = client.post("/api/codegen/flight", json={"with_schedule": False}).json()
+    names = {f["name"] for f in off["files"]}
+    assert "fcl_sched.c" not in names and "fcl_sched.h" not in names
+    assert off["fingerprint"] != client.post("/api/codegen/flight", json={}).json()[
+        "fingerprint"]
+
+
+def test_structurally_impossible_slot_rejected(client):
+    """카탈로그가 불가라고 한 자리를 우겨 넣으면 422 — 목록과 검증이 같은 표를 본다."""
+    cat = {s["name"]: s for s in client.get("/api/gains/catalog").json()["slots"]}
+    tab = cat["pitch.kp"]["table"]
+    for name in ("speed.k_rate", "heading.k_rate"):
+        r = client.post("/api/codegen/flight", json={"gain_tables": {name: tab}})
+        assert r.status_code == 422, name

@@ -25,14 +25,25 @@ export const ENTRY = (artifact = "fcl") => `${artifact}.h`;
 /** 코드 패널 스펙 + 적용된 게인 테이블 → POST /codegen/flight 요청 본문.
  *
  * 게인 스케줄이 있으면 함께 넘긴다 — 스케줄 유무가 **구조**를 바꾸므로(파일 하나가
- * 통째로 생기고 사라진다) 빼먹으면 실제와 다른 형상을 보여 주게 된다. */
-export function flightRequest(specs, gainTables, { controlHz = 100 } = {}) {
+ * 통째로 생기고 사라진다) 빼먹으면 실제와 다른 형상을 보여 주게 된다.
+ *
+ * 게인 쪽은 3-상태다. 셋을 뭉뚱그리면 조용히 다른 형상이 나온다:
+ *   테이블 있음    → gain_tables (키 집합이 곧 스케줄 대상)
+ *   scheduleOff    → with_schedule:false — 스케줄이 **없는** 형상
+ *   둘 다 아님     → 아무것도 안 보냄 — 서버의 설계 기본(6자리)
+ * 빈 dict를 보내는 선택지는 없다. 서버가 422로 막는다(조용한 무스케줄 방지). */
+export function flightRequest(
+  specs, gainTables, { controlHz = 100, scheduleOff = false } = {},
+) {
   const req = { control_hz: controlHz };
   const ap = (specs ?? []).find((s) => s.key === AP_KEY);
   if (ap && ap.values && Object.keys(ap.values).length > 0) {
     req.autopilot = { ...ap.values };
   }
-  if (gainTables && Object.keys(gainTables).length > 0) {
+  if (scheduleOff) {
+    // 테이블과 함께 보내면 엔진이 구성 오류로 거부한다 (demo.py make_demo_fcl)
+    req.with_schedule = false;
+  } else if (gainTables && Object.keys(gainTables).length > 0) {
     req.gain_tables = gainTables;
   }
   return req;

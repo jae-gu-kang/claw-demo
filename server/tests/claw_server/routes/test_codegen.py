@@ -116,7 +116,9 @@ def test_미정의_게인_키는_422(client):
         "pitch.nope": {"axes": {"mach": [0.2, 0.8]}, "data": [1.0, 2.0]},
     })
     assert r.status_code == 422
-    assert "게인 키" in str(r.json()["detail"])
+    # 무엇이 허용인지까지 말해 준다 — 자리 정본은 엔진 SCHEDULABLE이다
+    detail = str(r.json()["detail"])
+    assert "스케줄 불가 게인" in detail and "k_rate" in detail
 
 
 def test_범위를_벗어난_ap_파라미터는_422(client):

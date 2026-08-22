@@ -34,6 +34,20 @@ _SCHEDULABLE = ("kp", "ki", "k_rate")
 _SCAS_GROUPS = ("pitch", "roll", "yaw")
 _AP_GROUPS = ("speed", "alt", "heading")
 
+# 게인 스케줄을 붙일 수 있는 **자리** — 그룹 → 키. 6그룹 × 3키 = 18이 아니라 16이다:
+# 속도·헤딩 축은 rate 입력이 상수 0이라 rate 경로 자체가 없어(scas_axis_nodes 참조)
+# 그 자리의 k_rate 스케줄은 아무 효과가 없다.
+#
+# **이 표가 스케줄 자리의 정본이다.** autopilot_nodes의 거부도, law.py의 조립 검증도,
+# 서버의 자리 목록(/gains/catalog)도 전부 여기를 읽는다 — 규칙이 여러 군데 적히면
+# 반드시 어긋나고, 어긋나는 순간 웹이 "켤 수 있다"고 보여 준 자리가 실행 시점에
+# 터진다.
+SCHEDULABLE = {
+    "pitch": _SCHEDULABLE, "roll": _SCHEDULABLE, "yaw": _SCHEDULABLE,
+    "alt": _SCHEDULABLE,  # k_rate는 승강률 댐핑 k_hdot 자리다 (autopilot_nodes)
+    "speed": ("kp", "ki"), "heading": ("kp", "ki"),
+}
+
 
 def _pre(prefix, suffix):
     return f"{prefix}_{suffix}" if prefix else suffix
@@ -265,6 +279,17 @@ def autopilot_nodes(
     """
     ports = gain_ports or {}
 
+    # 스케줄 불가 자리는 조용히 무시하지 않고 **여기서** 거부한다 — 축을 조립하다
+    # 걸리면 "rate 경로가 있는데 rate_src가 없다" 같은 내부 사정으로 터져서, 무엇을
+    # 잘못 골랐는지가 안 보인다. 허용 자리는 SCHEDULABLE이 정본이다.
+    for group in _AP_GROUPS:
+        bad = sorted(set(ports.get(group) or ()) - set(SCHEDULABLE[group]))
+        if bad:
+            raise ValueError(
+                f"{prefix or 'autopilot'}: {group} 축에 스케줄 불가 게인 {bad} — "
+                f"허용 {list(SCHEDULABLE[group])} (rate 입력이 없는 축이다)"
+            )
+
     def nm(s):
         return _pre(prefix, s)
 
@@ -287,14 +312,6 @@ def autopilot_nodes(
         pid_on_disable={"i": 0.0},  # 재관여 시 잔존 뱅크 킥 방지 (autopilot.py:152)
     )
     nodes += hdg_nodes
-
-    # 속도·헤딩 축은 rate 입력이 상수 0이라 rate 경로 자체가 없다 —
-    # 그 축에 k_rate를 스케줄하면 아무 효과가 없으므로 조용히 무시하지 않고 거부한다
-    for group in ("speed", "heading"):
-        if "k_rate" in (ports.get(group) or {}):
-            raise ValueError(
-                f"{prefix or 'autopilot'}: {group} 축에는 rate 경로가 없어 k_rate 스케줄이 무의미하다"
-            )
 
     # ── 고도: 필터·오차·댐핑만 영역 안, PI는 밖(적분기 유지 = 트림 θ 홀드) ──
     alt_en = {"enable": srcs["alt_on"]}

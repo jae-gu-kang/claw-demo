@@ -13,10 +13,36 @@
 """
 
 from claw.codegen.ir_exec import GraphRunner
-from claw.fcl.graphs import gain_schedule_graph
+from claw.fcl.graphs import SCHEDULABLE, gain_schedule_graph
 from claw.tables import Table
 
 SCHED_VARS = ("mach", "alt", "fuel")
+
+# AP 축의 설계 게인은 **이름이 다르다** — 그래프 조립(fcl/graphs.py autopilot_nodes)이
+# kp=kp_alt, ki=ki_alt, k_rate=k_hdot으로 넘기는 그 대응이다. 특히 alt.k_rate는
+# 승강률 댐핑 k_hdot 자리다. 이 표가 낡으면 웹이 엉뚱한 "고정값"을 보여 주므로
+# test_fcl_schedule이 그래프가 실제로 방출한 상수와 대조해 핀한다.
+AP_GAIN_FIELD = {
+    ("speed", "kp"): "kp_spd", ("speed", "ki"): "ki_spd",
+    ("alt", "kp"): "kp_alt", ("alt", "ki"): "ki_alt", ("alt", "k_rate"): "k_hdot",
+    ("heading", "kp"): "kp_hdg", ("heading", "ki"): "ki_hdg",
+}
+
+
+def design_gains(scas_cfg: dict, ap_cfg: dict) -> dict:
+    """스케줄 가능한 자리 → 설계점 상수 ("그룹.게인" → float).
+
+    스케줄을 **끄면** 그 자리가 이 값으로 굳는다 — 생성 C에서 룩업이 사라지고
+    상수로 접힌다. 그래서 "이 게인을 스케줄에서 빼면 뭐가 되나"의 답이 이 값이다.
+    자리 목록은 `fcl/graphs.py` SCHEDULABLE이 정본 (선언 순서 유지).
+    """
+    out = {}
+    for group, keys in SCHEDULABLE.items():
+        for key in keys:
+            out[f"{group}.{key}"] = float(
+                scas_cfg[group][key] if group in scas_cfg else ap_cfg[AP_GAIN_FIELD[group, key]]
+            )
+    return out
 
 
 class GainSchedule:

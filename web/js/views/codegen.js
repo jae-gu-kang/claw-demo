@@ -37,7 +37,7 @@ const PRE_STYLE = "font-family: var(--mono); font-size: 12px; line-height: 1.5;"
 specs: lib/codegen 스펙 배열 (1개면 단일 블록, 여러 개면 전체 형상 스냅샷)
 meta: {generatedAt, server, engine} · validation: [{key, ok, detail}] · gainTables: store 값 */
 export function renderCodePanel(host, {
-  specs, meta, validation = [], gainTables = null,
+  specs, meta, validation = [], gainTables = null, scheduleOff = null,
   langs = LANGS.map((l) => l[0]), flightMerged = false,
 }) {
   // 어떤 형식 탭을 노출할지는 부르는 쪽이 정한다 — Autocode 탭은 종류(형상/탑재)를
@@ -55,6 +55,9 @@ export function renderCodePanel(host, {
   // 스케줄 유무가 구조를 바꾸므로 빼면 실제와 다른 코드를 보여 주게 된다.
   const flight = { data: null, error: null, loading: false };
   const flightTables = () => gainTables ?? store.get("gainTables") ?? null;
+  // 스케줄 자리를 전부 끈 상태는 테이블 dict로 표현할 수 없다 (lib/gainsched.js) —
+  // 빈 dict는 서버가 막고, 생략하면 설계 기본으로 되돌아간다. 별도 신호로 읽는다
+  const flightOff = () => scheduleOff ?? store.get("gainScheduleOff") ?? false;
 
   const build = () => {
     const opts = { verbose: cfg.verbose, meta };
@@ -77,7 +80,7 @@ export function renderCodePanel(host, {
   const loadFlight = async () => {
     // 통합↔모듈별 전환은 표시만 바뀌는 일이다 — 같은 형상이면 서버를 다시 부르지
     // 않는다. 요청 본문이 곧 형상이므로 그걸 키로 쓴다(값을 고치면 자동으로 무효화)
-    const req = flightRequest(specs, flightTables());
+    const req = flightRequest(specs, flightTables(), { scheduleOff: flightOff() });
     const key = JSON.stringify(req);
     if (flightCache.key === key && flightCache.data) {
       flight.data = flightCache.data;
@@ -114,7 +117,8 @@ export function renderCodePanel(host, {
     // 추적성 표는 파라미터→코드 라인 대응이라 탑재 C에는 다른 대응이 필요하다
     clear(traceBox);
     if (current.lineOf) traceBox.append(traceTable(specs, current.lineOf, snapshot));
-    clear(footHost).append(footNote(flight, specs));
+    clear(footHost).append(
+      footNote(flight, specs, { tables: flightTables(), off: flightOff() }));
   };
 
   const langBtns = allow.map(([id, label, title]) => el("button", {
@@ -195,8 +199,27 @@ function fileTabs(flight, selected, onPick, merged) {
   ];
 }
 
+/** 지금 어떤 게인 스케줄 형상으로 생성했는지 — 게인 탭의 적용값이 말없이 실리면
+ * "게인 탭에서 적용을 눌렀더니 코드가 바뀌었다"가 원인 불명이 된다. */
+function schedNote(tables, off) {
+  if (off) {
+    return el("p", { class: "hint" },
+      "게인 스케줄 없음으로 생성됨 (게인 탭 적용값) — 전 게인이 설계점 상수이고 ",
+      "스케줄 서브시스템이 코드에 없습니다.");
+  }
+  const names = tables ? Object.keys(tables) : [];
+  if (names.length === 0) {
+    return el("p", { class: "hint" },
+      "게인 스케줄은 설계 기본 형상입니다 — 게인 탭에서 자리를 바꾸거나 값을 고쳐 ",
+      "적용하면 여기 코드에 바로 반영됩니다.");
+  }
+  return el("p", { class: "hint" },
+    `게인 탭 적용값으로 생성됨 — 스케줄 ${names.length}자리: ${names.join(" · ")}. `,
+    "나머지 게인은 설계점 상수로 코드에 박힙니다.");
+}
+
 /** 탭별 안내 — 두 탭이 내는 물건이 근본적으로 다르므로 같은 문구를 쓸 수 없다. */
-function footNote(flight, specs) {
+function footNote(flight, specs, sched) {
   if (cfg.lang !== "flight") {
     return el("p", { class: "hint" },
       "현재 설계 형상의 코드 표현입니다 — 로직이 아니라 파라미터만 생성합니다. ",
@@ -212,6 +235,7 @@ function footNote(flight, specs) {
       "파라미터가 전부 들어 있고, 구조 정본인 IR에서 엔진이 생성합니다. ",
       d ? `형상 지문 ${d.fingerprint} · 제어주기 ${d.dt} s.` : "",
       " 커밋된 산출물 정본은 flight/gen/ 이며, 같은 형상이면 여기 코드와 바이트 단위로 같습니다."),
+    schedNote(sched.tables, sched.off),
     excluded.length > 0 && el("p", { class: "hint" },
       "이 화면의 블록 중 탑재 C에 없는 것: ",
       excluded.map((x) => `${x.key} (${x.why})`).join(", "),

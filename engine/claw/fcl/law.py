@@ -21,12 +21,8 @@ from claw.common.contracts import SurfaceCommand
 from claw.env import isa_atmosphere
 from claw.env.constants import ISA_MIN_ALT, ISA_STRATO1_TOP_ALT
 from claw.fcl.airdata import airdata_from_nav
-from claw.fcl.graphs import fcl_graph
+from claw.fcl.graphs import SCHEDULABLE, fcl_graph
 
-_SCAS_GROUPS = ("pitch", "roll", "yaw")
-_AP_GROUPS = ("speed", "alt", "heading")
-# 스케줄 덮어쓰기 허용 키 — 전 그룹이 ScasAxis.step(kp·ki·k_rate)로만 소비
-_GAIN_KEYS = ("kp", "ki", "k_rate")
 
 # 계측 프로브 — 논리 이름 → 그래프 노드 id (fcl/graphs.py 조립이 붙이는 접두사_이름).
 # 명령 사슬 중간값은 그래프 **출력이 아니다** — 출력은 생성 C의 인터페이스라 여기에
@@ -52,17 +48,19 @@ class FlightControlLaw:
         self.alpha_limiter = alpha_limiter
         if schedule is not None:
             # 그룹·키 오타는 분배 필터/스텝 kwargs에서 '조용히' 또는 '실행 시점에'
-            # 터진다 — 여기(조립 시점)서 시끄럽게 (리뷰: 키도 검증)
-            known = set(_SCAS_GROUPS) | set(_AP_GROUPS)
+            # 터진다 — 여기(조립 시점)서 시끄럽게 (리뷰: 키도 검증).
+            # 허용 자리는 fcl/graphs.py SCHEDULABLE이 정본이다 — 속도·헤딩 축의
+            # k_rate처럼 **구조상 불가능한** 자리도 그래서 여기서 함께 걸린다
             for name in schedule.tables:
                 group, _, key = name.partition(".")
-                if group not in known:
+                if group not in SCHEDULABLE:
                     raise ValueError(
-                        f"미정의 게인 그룹 {group!r} ({name!r}) — 허용: {sorted(known)}"
+                        f"미정의 게인 그룹 {group!r} ({name!r}) — 허용: {sorted(SCHEDULABLE)}"
                     )
-                if key not in _GAIN_KEYS:
+                if key not in SCHEDULABLE[group]:
                     raise ValueError(
-                        f"미정의 게인 키 {name!r} — 허용 키: {list(_GAIN_KEYS)}"
+                        f"스케줄 불가 게인 {name!r} — {group} 축 허용 키: "
+                        f"{list(SCHEDULABLE[group])}"
                     )
         self.alpha_margin = None
         self.limiter_active = False
