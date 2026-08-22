@@ -7,6 +7,10 @@
 #ifndef CLAW_FCL_TYPES_H
 #define CLAW_FCL_TYPES_H
 
+/* 이 주기로 이산 계수가 구워져 있다 — 주기를 바꾸려면 재생성해야 한다.
+ * 이 값만 고치면 필터 계수가 조용히 틀린다. */
+#define FCL_DT 0.01
+
 /* 파라미터 (MATLAB rtP 대응) — 실제로 참조되는 것만 있다:
  * 게인 스케줄로 신호가 된 값은 여기 남지 않는다. */
 typedef struct {

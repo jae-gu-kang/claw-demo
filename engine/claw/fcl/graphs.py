@@ -15,9 +15,11 @@
 계층(우리 쪽 Python)에 남는다.
 
 각 부분은 `*_nodes(prefix, ...)`로 노드 목록을 내고 `*_graph(...)`가 단독 그래프로
-감싼다. 최상위 `fcl_graph`는 이들을 **평탄하게 인라인**한다 — Embedded Coder가
-모델 전체를 하나의 `_step()`으로 펼치는 것과 같은 형태이고, 서브그래프 호출 규약을
-만들지 않아도 되며, 무엇보다 사람이 한 화면에서 흐름을 따라 읽을 수 있다.
+감싼다. 최상위 `fcl_graph`는 이들을 **평탄하게 인라인**하되 묶음마다 `grouped()`로
+기능축 이름표를 찍는다. IR은 평탄한 채로 남으므로(선언 순서 = 실행 순서) 서브그래프
+호출 규약이 생기지 않고 Python 실행에는 아무 영향이 없다. 반면 탑재 C는 그 이름표
+경계에서 `fcl_ap.c`·`fcl_scas.c`처럼 서브시스템별로 쪼개져 나온다 — Embedded Coder의
+`Function packaging: Nonreusable function`에 해당한다.
 """
 
 from claw.blocks.basic import Gain, Product, Saturation, Sum
@@ -25,7 +27,7 @@ from claw.blocks.controllers import PID
 from claw.blocks.filters import CommandFilter, Washout
 from claw.blocks.lookup import LookupBlock
 from claw.blocks.base import Block
-from claw.codegen.ir import Graph, Node, Op
+from claw.codegen.ir import Graph, Node, Op, grouped
 from claw.codegen.ir_exec import GraphRunner
 
 _SCHEDULABLE = ("kp", "ki", "k_rate")
@@ -544,7 +546,7 @@ def fcl_graph(
             "sched", tables=gain_tables, filter_tau=filter_tau,
             srcs={"mach": "mach", "alt": "h", "fuel": "fuel"},
         )
-        nodes += sched_nodes
+        nodes += grouped(sched_nodes, "sched")
         ap_ports = {g: v for g, v in gains.items() if g in _AP_GROUPS}
         scas_ports = {g: v for g, v in gains.items() if g in _SCAS_GROUPS}
         unknown = set(gains) - set(_AP_GROUPS) - set(_SCAS_GROUPS)
@@ -552,7 +554,7 @@ def fcl_graph(
             raise ValueError(f"{name}: 미정의 게인 그룹 {sorted(unknown)}")
 
     ap_nodes, ap_out = autopilot_nodes("ap", srcs=src, gain_ports=ap_ports, **autopilot)
-    nodes += ap_nodes
+    nodes += grouped(ap_nodes, "ap")
 
     theta_cmd = ap_out["theta_cmd"]
     if stall_table is not None:
@@ -560,7 +562,7 @@ def fcl_graph(
             "lim", stall_table=stall_table, margin=alpha_margin,
             srcs={"theta_cmd": theta_cmd, "theta": "theta", "alpha": "alpha", "mach": "mach"},
         )
-        nodes += lim_nodes
+        nodes += grouped(lim_nodes, "lim")
         theta_cmd = lim_out["theta_cmd"]
 
     scas_nodes, scas_out = scas3_nodes(
@@ -569,7 +571,7 @@ def fcl_graph(
         gain_ports=scas_ports,
         **scas_axes,
     )
-    nodes += scas_nodes
+    nodes += grouped(scas_nodes, "scas")
 
     mix_nodes, mix_out = mixer_nodes(
         "mix",
@@ -577,7 +579,7 @@ def fcl_graph(
               "dr": scas_out["yaw"], "thr": ap_out["throttle"]},
         **mixer,
     )
-    nodes += mix_nodes
+    nodes += grouped(mix_nodes, "mix")
 
     outputs = dict(mix_out)
     if stall_table is not None:

@@ -1,11 +1,7 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (알고리즘, MATLAB _step 대응). */
 #include "scas_yaw.h"
 
-static double claw_clip(double x, double lo, double hi)
-{
-    const double y = (x < lo) ? lo : x;
-    return (y > hi) ? hi : y;
-}
+#include "claw_rt.h"
 
 void scas_yaw_reset(scas_yaw_state_t *sta)
 {

@@ -18,7 +18,7 @@
 import sys
 from pathlib import Path
 
-from claw.codegen import GraphRunner, emit_c
+from claw.codegen import GraphRunner, emit_c, emit_runtime
 from claw.fcl.graphs import fcl_graph, scas_axis_graph
 from claw.fcl.autopilot import Autopilot
 from claw.fcl.demo import DEMO_PITCH, DEMO_ROLL, DEMO_YAW, make_demo_gain_tables
@@ -57,13 +57,36 @@ def scas_yaw_graph():
 ARTIFACTS = {"fcl": fcl_demo_graph, "scas_yaw": scas_yaw_graph}
 
 
+def _emit_all():
+    """(파일, 산출물별 컴파일 단위) — 공용 런타임은 **헬퍼 합집합으로 한 번** 만든다.
+
+    산출물마다 claw_rt를 따로 내면 나중에 나온 쪽(헬퍼가 적은 scas_yaw)이 덮어써
+    fcl 링크가 조용히 깨진다. 합집합이 아니면 안 되는 자리다.
+    """
+    files, sources, helpers = {}, {}, set()
+    for name, build_graph in ARTIFACTS.items():
+        graph = build_graph()
+        module = emit_c(graph, GraphRunner(graph, DT))
+        files.update(module.files)
+        helpers |= module.helpers
+        sources[name] = sorted(f for f in module.files if f.endswith(".c"))
+    runtime = emit_runtime(helpers)
+    files.update(runtime)
+    shared = sorted(f for f in runtime if f.endswith(".c"))
+    return files, {n: srcs + shared for n, srcs in sources.items()}
+
+
 def build() -> dict:
     """{파일명: 내용} — 디스크를 건드리지 않는다 (테스트가 커밋본과 대조할 때 쓴다)."""
-    files = {}
-    for build_graph in ARTIFACTS.values():
-        graph = build_graph()
-        files.update(emit_c(graph, GraphRunner(graph, DT)))
-    return files
+    return _emit_all()[0]
+
+
+def manifest() -> dict:
+    """{산출물: 컴파일할 .c 목록} — 대조 하네스 빌드가 쓴다.
+
+    기능축 분할로 파일이 늘어나므로 목록을 손으로 적으면 새 파티션이 조용히 빠진다.
+    """
+    return _emit_all()[1]
 
 
 def main() -> int:

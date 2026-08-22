@@ -1,7 +1,19 @@
 """IR의 C 백엔드 — FCC에 통합되어 그대로 실릴 제어법칙 코드를 생성한다 (02 §1·§2.2).
 
-파일 구성은 MATLAB Embedded Coder를 따른다: 알고리즘(`.c`) / 파라미터 데이터
-(`_data.c`, rtP 대응) / 상태·출력 구조체(`_types.h`, rtDW·rtY 대응) / 진입점(`.h`).
+파일 구성은 MATLAB Embedded Coder를 따라 **두 축**으로 나눈다.
+
+역할축: 알고리즘(`.c`) / 파라미터 데이터(`_data.c`, rtP 대응) / 상태·출력 구조체
+(`_types.h`, rtDW·rtY 대응) / 진입점(`.h`).
+
+기능축: IR 노드에 `grouped()`로 이름표가 붙어 있으면 서브시스템마다 `{base}_{group}.c`
+와 `.h`가 떨어져 나오고 `{base}.c`에는 조립부만 남는다 — Embedded Coder의
+`Function packaging: Nonreusable function` + `File name options: Use subsystem name`에
+해당한다. 경계를 넘는 신호는 함수 인자가 되며 **이름이 그대로 유지된다**(정의부
+지역변수도 `ap_theta_out_y`, 호출부 지역변수도 `ap_theta_out_y`). 파라미터·상태
+구조체는 쪼개지 않는다 — `{base}_reset`과 범프리스 웜스타트 계약이 그대로 남아야 한다.
+
+공용 헬퍼(`claw_clip` 등)는 산출물마다 복제하지 않고 `claw_rt.c/.h` 하나로 낸다
+(`emit_runtime`) — MATLAB의 `slprj/ert/_sharedutils/` 자리다.
 
 **생성 코드는 사람이 읽는다** — FCC팀이 읽고 신뢰성 시험을 돌리고 일부 수정한다.
 그래서 블록 id와 신호 이름을 그대로 살린다(`rtb_Sum_p_idx_1` 류를 만들지 않는다).
@@ -23,6 +35,7 @@
 
 import math
 import re
+from collections import namedtuple
 
 import claw
 from claw.blocks.basic import Gain, Product, Saturation, Sum
@@ -33,6 +46,9 @@ from claw.params.paramset import canonical_hash
 
 _EMITTERS = {}
 _DISABLERS = {}
+
+# 파일만 돌려주면 공용 런타임을 합집합으로 만들 수 없다 — 쓴 헬퍼를 함께 낸다
+CModule = namedtuple("CModule", "files helpers")
 
 
 def _emitter(cls):
@@ -101,6 +117,10 @@ class _Ctx:
 
     파라미터와 상태 필드는 **실제로 참조될 때만** 등록된다. 스케줄되는 게인처럼
     신호로 들어오는 값은 파라미터 구조체에 남지 않는다 (dead data 방지).
+
+    기능축으로 쪼개도 `params`·`arrays`·`state`는 **그래프 전체로 공유**한다 —
+    구조체는 여전히 `{base}_params_t`·`{base}_state_t` 하나이고 파티션 함수들이
+    그 포인터를 함께 받는다. 본문·헬퍼·hoisted만 파티션별로 갈린다.
     """
 
     def __init__(self):
@@ -111,7 +131,15 @@ class _Ctx:
         self.helpers = set()
         self.hoisted = set()  # enable 영역 안에서 대입되는(미리 선언된) 출력 변수
         self.indent = 1
+        self.parts = []  # 떼어 낸 파티션들 — (group, 본문 줄, 헬퍼)
         self._seen_param = {}
+
+    def flush_part(self, group):
+        """지금까지 쌓인 본문을 파티션 하나로 떼어 낸다 (파라미터·상태는 그대로 둔다)."""
+        while self.body and not self.body[0].strip():
+            self.body.pop(0)
+        self.parts.append((group, list(self.body), set(self.helpers)))
+        self.body, self.helpers, self.hoisted = [], set(), set()
 
     # ── 등록 ──
     def param(self, node_id, field, value, comment=""):
@@ -307,36 +335,87 @@ _OP_C = {
     "sec2_minus_1": lambda a: (f"1.0 / pow(cos({a}), 2.0) - 1.0", ("math",)),
 }
 
+# 공용 런타임 — 산출물마다 복제하지 않고 claw_rt.c/.h 한 벌로 낸다 (emit_runtime).
+# "math"는 진짜 헬퍼가 아니라 <math.h>가 필요하다는 표시다. wrap_pi의 fmod 의존은
+# claw_rt.c 안에서 끝나므로, wrap_pi를 **부르는** 파티션은 math.h가 필요 없다.
 _HELPER_ORDER = ("claw_clip", "claw_wrap_pi", "claw_lookup1d")
-_HELPER_SRC = {
-    "claw_clip": (
-        "static double claw_clip(double x, double lo, double hi)\n"
-        "{\n"
-        "    const double y = (x < lo) ? lo : x;\n"
-        "    return (y > hi) ? hi : y;\n"
-        "}"
-    ),
-    "claw_wrap_pi": (
-        "/* (-π, π] 래핑 — Python `%`는 나머지가 제수 부호를 따르므로 fmod 뒤 보정한다 */\n"
-        "static double claw_wrap_pi(double a)\n"
-        "{\n"
-        "    double r = fmod(-a + CLAW_PI, 2.0 * CLAW_PI);\n"
-        "    if (r < 0.0) { r += 2.0 * CLAW_PI; }\n"
-        "    return -(r - CLAW_PI);\n"
-        "}"
-    ),
+_HELPER_SIG = {
+    "claw_clip": "double claw_clip(double x, double lo, double hi)",
+    "claw_wrap_pi": "double claw_wrap_pi(double a)",
     "claw_lookup1d": (
-        "/* 1D 다중선형 보간, 외삽 clip — tables/table.py:54 interp()와 같은 구간 선택 */\n"
-        "static double claw_lookup1d(const double *bp, const double *val, int n, double x)\n"
-        "{\n"
-        "    int i = 0;\n"
-        "    while (i < n - 2 && x >= bp[i + 1]) { i++; }\n"
-        "    const double t = claw_clip((x - bp[i]) / (bp[i + 1] - bp[i]), 0.0, 1.0);\n"
-        "    return (1.0 - t) * val[i] + t * val[i + 1];\n"
-        "}"
+        "double claw_lookup1d(const double *bp, const double *val, int n, double x)"
     ),
 }
+_HELPER_DOC = {
+    "claw_clip": "[lo, hi] 클램프",
+    "claw_wrap_pi": "(-π, π] 래핑 — Python `%`는 나머지가 제수 부호를 따르므로 fmod 뒤 보정한다",
+    "claw_lookup1d": "1D 선형 보간, 외삽 clip — tables/table.py:54 interp()와 같은 구간 선택",
+}
+_HELPER_BODY = {
+    "claw_clip": [
+        "    const double y = (x < lo) ? lo : x;",
+        "    return (y > hi) ? hi : y;",
+    ],
+    "claw_wrap_pi": [
+        "    double r = fmod(-a + CLAW_PI, 2.0 * CLAW_PI);",
+        "    if (r < 0.0) { r += 2.0 * CLAW_PI; }",
+        "    return -(r - CLAW_PI);",
+    ],
+    "claw_lookup1d": [
+        "    int i = 0;",
+        "    while (i < n - 2 && x >= bp[i + 1]) { i++; }",
+        "    const double t = claw_clip((x - bp[i]) / (bp[i + 1] - bp[i]), 0.0, 1.0);",
+        "    return (1.0 - t) * val[i] + t * val[i + 1];",
+    ],
+}
 _HELPER_NEEDS = {"claw_lookup1d": ("claw_clip",), "claw_wrap_pi": ("math",)}
+
+
+def _text(lines):
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines) + "\n"
+
+
+def emit_runtime(helpers):
+    """공용 헬퍼 → {claw_rt.h, claw_rt.c}. MATLAB의 `slprj/ert/_sharedutils/` 자리다.
+
+    산출물이 여럿이면 **헬퍼 합집합으로 한 번** 불러야 한다 — 산출물마다 따로 내면
+    헬퍼가 적은 쪽이 덮어써 링크가 조용히 깨진다 (`flight/generate.py::build`).
+
+    필요한 것만 낸다. 안 쓰는 헬퍼를 탑재 코드에 두지 않는 것은 IR이 도달 불가
+    노드를 막는 것과 같은 이유다(dead code — DO-178C 논점). 제어법칙 형상과
+    무관하므로 지문을 갖지 않는다.
+    """
+    need = {h for h in helpers if h in _HELPER_SIG}
+    for name in _HELPER_ORDER:
+        if name in need:
+            need.update(d for d in _HELPER_NEEDS.get(name, ()) if d in _HELPER_SIG)
+    names = [n for n in _HELPER_ORDER if n in need]
+    if not names:
+        return {}
+
+    head = [
+        "/* CLAW 생성 코드 — 손으로 고치지 말 것.",
+        " * 산출물 공용 런타임 (MATLAB _sharedutils 대응). 제어법칙 형상과 무관하므로",
+        " * 지문을 갖지 않는다 — 산출물이 여럿이어도 이 한 벌을 함께 쓴다.",
+        " */",
+    ]
+    h = head + ["#ifndef CLAW_RT_H", "#define CLAW_RT_H", ""]
+    if "claw_wrap_pi" in names:
+        h += ["#define CLAW_PI 3.141592653589793", ""]
+    for name in names:
+        h += [f"/* {_HELPER_DOC[name]} */", f"{_HELPER_SIG[name]};", ""]
+    h += ["#endif /* CLAW_RT_H */"]
+
+    c = head + ['#include "claw_rt.h"', ""]
+    if any("math" in _HELPER_NEEDS.get(n, ()) for n in names):
+        c += ["#include <math.h>", ""]
+    for name in names:
+        c += [f"/* {_HELPER_DOC[name]} */", _HELPER_SIG[name], "{"]
+        c += _HELPER_BODY[name] + ["}", ""]
+
+    return {"claw_rt.h": _text(h), "claw_rt.c": _text(c)}
 
 
 def _fingerprint(graph, runner, ctx):
@@ -410,8 +489,71 @@ def _emit_region(ctx, nodes, enable, runner, env, dt_macro):
     ctx.line("}")
 
 
+def _emit_nodes(ctx, nodes, runner, env, dt_macro):
+    """노드 목록 → 본문. 같은 enable을 가진 연속 노드는 if/else 한 덩이로 묶는다."""
+    nodes = list(nodes)
+    i = 0
+    while i < len(nodes):
+        enable = nodes[i].enable
+        if enable is None:
+            _emit_one(ctx, nodes[i], runner, env, dt_macro)
+            i += 1
+            continue
+        j = i
+        while j < len(nodes) and nodes[j].enable == enable:
+            j += 1
+        ctx.line()
+        ctx.line(f"/* ── {enable} 영역 ({j - i}개 노드) ── */")
+        _emit_region(ctx, nodes[i:j], enable, runner, env, dt_macro)
+        i = j
+
+
+def _interfaces(graph):
+    """파티션별 인터페이스 — 방출된 텍스트가 아니라 IR에서 계산한다.
+
+    imports: 이 파티션이 읽는 것 중 밖에서 온 것 (그래프 입력 또는 앞 파티션 산출)
+    exports: 이 파티션이 만든 것 중 밖에서 읽는 것 (뒤 파티션 또는 그래프 출력)
+
+    순서는 그래프 입력 순 → 정의 선언 순으로 못박는다. 인자 순서가 흔들리면 생성이
+    결정적이지 않게 되고, 커밋된 산출물의 diff가 "실제 설계 변경"이라는 의미를 잃는다.
+    """
+    order = {n.id: k for k, n in enumerate(graph.nodes)}
+    ins = list(graph.inputs)
+    parts = []
+    for group, nodes in graph.partitions:
+        mine = {n.id for n in nodes}
+        ext = {r for n in nodes for r in n.refs} - mine
+        imports = [u for u in ins if u in ext]
+        imports += sorted((r for r in ext if r not in set(ins)), key=order.__getitem__)
+        parts.append({"group": group, "nodes": nodes, "imports": imports})
+    for k, part in enumerate(parts):
+        needed = set(graph.outputs.values())
+        for later in parts[k + 1:]:
+            needed.update(later["imports"])
+        part["exports"] = [n.id for n in part["nodes"] if n.id in needed]
+    return parts
+
+
+def _unit_includes(helpers):
+    """한 번역 단위가 필요로 하는 포함 — wrap_pi를 **부르는** 쪽은 math.h가 필요 없다."""
+    lines = []
+    if "math" in helpers:
+        lines.append("#include <math.h>")
+    if any(h in helpers for h in _HELPER_ORDER):
+        lines.append('#include "claw_rt.h"')
+    return lines + [""] if lines else []
+
+
 def emit_c(graph, runner):
-    """IR + 초기화된 실행기 → {파일명: 내용}. 생성은 결정적(시각 미포함)."""
+    """IR + 초기화된 실행기 → `CModule(파일, 이 그래프가 쓴 공용 헬퍼)`.
+
+    헬퍼를 따로 돌려주는 이유: 공용 런타임(`claw_rt`)은 산출물 **전체의 합집합**으로
+    한 번 만들어야 해서 그래프 하나만 보고는 낼 수 없다 (`emit_runtime`).
+
+    노드에 `grouped()` 이름표가 붙어 있으면 서브시스템별 `.c/.h`가 함께 나오고
+    `{base}.c`에는 조립부만 남는다. 이름표가 없으면 예전처럼 파일 하나다.
+    생성은 결정적이다 (시각 미포함).
+    """
     if runner.graph is not graph:
         raise ValueError("runner가 다른 그래프로 만들어졌다")
     base = graph.name
@@ -420,33 +562,22 @@ def emit_c(graph, runner):
     ctx = _Ctx()
     single = len(graph.outputs) == 1
 
-    env = {u: u for u in graph.inputs}  # 그래프 입력은 C 함수 인자 이름 그대로
-    nodes = list(graph.nodes)
-    i = 0
-    while i < len(nodes):
-        enable = getattr(nodes[i], "enable", None)
-        if enable is None:
-            _emit_one(ctx, nodes[i], runner, env, dt_macro)
-            i += 1
-            continue
-        j = i
-        while j < len(nodes) and getattr(nodes[j], "enable", None) == enable:
-            j += 1
-        ctx.line()
-        ctx.line(f"/* ── {enable} 영역 ({j - i}개 노드) ── */")
-        _emit_region(ctx, nodes[i:j], enable, runner, env, dt_macro)
-        i = j
-
-    while ctx.body and not ctx.body[0].strip():
-        ctx.body.pop(0)
+    parts = _interfaces(graph) or [
+        # 이름표 없음 — 그래프 하나가 파일 하나. 그래프 입력이 곧 함수 인자다
+        {"group": None, "nodes": graph.nodes, "imports": list(graph.inputs), "exports": []}
+    ]
+    for part in parts:
+        # 경계를 넘어온 신호는 정의부와 **같은 이름**의 인자로 받는다
+        env = {u: u for u in part["imports"] if u in set(graph.inputs)}
+        env.update({r: f"{r}_y" for r in part["imports"] if r not in env})
+        _emit_nodes(ctx, part["nodes"], runner, env, dt_macro)
+        part["env"] = env
+        ctx.flush_part(part["group"])
 
     fp = _fingerprint(graph, runner, ctx)
     # 그래프 enable은 본문이 아니라 함수 진입부에서 쓰이므로 미사용이 아니다
-    body_text = "\n".join(ctx.body)
-    unused = [
-        u for u in graph.inputs
-        if u != graph.enable and not re.search(rf"\b{u}\b", body_text)
-    ]
+    read = {r for n in graph.nodes for r in n.refs}
+    unused = [u for u in graph.inputs if u != graph.enable and u not in read]
 
     head = f"{'double' if single else 'void'} {base}_step("
     pad = " " * len(head)
@@ -455,12 +586,32 @@ def emit_c(graph, runner):
         first += f" {base}_out_t *out,"
     sig = head + first + _wrap_args([f"double {u}" for u in graph.inputs], pad)
 
-    return {
-        f"{base}_types.h": _types_h(base, guard, ctx, graph, fp, single),
-        f"{base}.h": _header_h(base, guard, dt_macro, runner, sig, fp, graph, single),
+    files = {
+        f"{base}_types.h": _types_h(base, guard, ctx, graph, fp, single, dt_macro, runner),
+        f"{base}.h": _header_h(base, guard, sig, fp, graph),
         f"{base}_data.c": _data_c(base, ctx, fp),
-        f"{base}.c": _impl_c(base, ctx, sig, graph, env, unused, single),
     }
+    helpers = set()
+    for _group, _body, used in ctx.parts:
+        helpers |= used
+
+    if graph.partitions:
+        top_env = {u: u for u in graph.inputs}
+        for part in parts:
+            top_env.update({e: f"{e}_y" for e in part["exports"]})
+        for (group, body, used), part in zip(ctx.parts, parts):
+            name = f"{base}_{group}"
+            files[f"{name}.h"] = _part_h(base, name, fp, part)
+            files[f"{name}.c"] = _part_c(base, name, fp, part, body, used)
+        includes = [f'#include "{base}_{p["group"]}.h"' for p in parts] + [""]
+        body = _assembly(base, parts, top_env)
+    else:
+        top_env = parts[0]["env"]
+        includes = _unit_includes(helpers)
+        body = ctx.parts[0][1]
+
+    files[f"{base}.c"] = _impl_c(base, ctx, sig, graph, top_env, unused, single, includes, body)
+    return CModule(files, helpers)
 
 
 def _banner(base, fp, extra=()):
@@ -508,9 +659,17 @@ def _wrap_array(name, literals, indent="        "):
     return out
 
 
-def _types_h(base, guard, ctx, graph, fp, single):
+def _types_h(base, guard, ctx, graph, fp, single, dt_macro, runner):
     lines = _banner(base, fp, ["자료형 (MATLAB _types.h 대응)"])
     lines += [f"#ifndef CLAW_{guard}_TYPES_H", f"#define CLAW_{guard}_TYPES_H", ""]
+    # dt는 진입점이 아니라 여기 둔다 — 기능축 파티션 헤더가 이 파일만 의존하면 되고,
+    # 포함 관계가 DAG로 남는다 (파티션 → _types.h ← 진입점 .h)
+    lines += [
+        "/* 이 주기로 이산 계수가 구워져 있다 — 주기를 바꾸려면 재생성해야 한다.",
+        " * 이 값만 고치면 필터 계수가 조용히 틀린다. */",
+        f"#define {dt_macro} {_cnum(runner.dt)}",
+        "",
+    ]
     lines.append("/* 파라미터 (MATLAB rtP 대응) — 실제로 참조되는 것만 있다:")
     lines.append(" * 게인 스케줄로 신호가 된 값은 여기 남지 않는다. */")
     lines.append("typedef struct {")
@@ -538,7 +697,7 @@ def _types_h(base, guard, ctx, graph, fp, single):
     return "\n".join(lines) + "\n"
 
 
-def _header_h(base, guard, dt_macro, runner, sig, fp, graph, single):
+def _header_h(base, guard, sig, fp, graph):
     lines = _banner(base, fp)
     lines += [
         f"#ifndef CLAW_{guard}_H",
@@ -552,10 +711,6 @@ def _header_h(base, guard, dt_macro, runner, sig, fp, graph, single):
         " * 측정: contract=fast로 빌드하면 곱셈-덧셈이 FMA로 합쳐져 중간 반올림이",
         " * 사라지고, 같은 입력에서 최대 2.8e-16 어긋난다 (clang 14, -O2).",
         " * 타깃 컴파일러·최적화 옵션 차이는 별도 확인(PIL)이 필요하다. */",
-        "",
-        "/* 이 주기로 이산 계수가 구워져 있다 — 주기를 바꾸려면 재생성해야 한다.",
-        " * 이 값만 고치면 필터 계수가 조용히 틀린다. */",
-        f"#define {dt_macro} {_cnum(runner.dt)}",
         "",
         f"extern const {base}_params_t {base}_params;",
         "",
@@ -591,21 +746,103 @@ def _data_c(base, ctx, fp):
     return "\n".join(lines) + "\n"
 
 
-def _impl_c(base, ctx, sig, graph, env, unused, single):
+def _void_unused(body, holds_output):
+    """안 쓰는 인자를 -Wunused-parameter(-Wextra)로부터 막는다.
+
+    ctx의 파라미터·상태 유무로 판정하면 기능축으로 쪼갠 뒤 틀린다 — 조립부는
+    파라미터를 하나도 **읽지** 않지만 파티션에 그대로 넘기므로 prm을 쓴다.
+    그래서 방출된 본문에 실제로 나오는지로 판정한다.
+    """
+    text = "\n".join(body)
+    out = []
+    if not re.search(r"\bprm\b", text):
+        out.append("    (void)prm;  /* 파라미터를 참조하지 않는다 */")
+    if not holds_output and not re.search(r"\bsta\b", text):
+        out.append("    (void)sta;  /* 상태가 없다 */")
+    return out
+
+
+def _part_sig(base, name, part):
+    """파티션 함수 시그니처 — 출력이 1개면 값을 반환한다 (그래프 단위 규칙과 같다)."""
+    exports = part["exports"]
+    head = f"{'double' if len(exports) == 1 else 'void'} {name}_step("
+    pad = " " * len(head)
+    # 인자 이름은 env가 정한다 — 그래프 입력은 그대로, 경계를 넘어온 신호는 `<id>_y`.
+    # 본문이 쓰는 이름과 어긋나면 컴파일이 깨진다
+    rest = [f"double {part['env'][u]}" for u in part["imports"]]
+    if len(exports) != 1:
+        # 이름을 그대로 살린다 — 호출부 지역변수도 정의부 지역변수도 `<id>_y`다
+        rest += [f"double *out_{e}" for e in exports]
+    first = f"const {base}_params_t *prm, {base}_state_t *sta,"
+    if not rest:
+        return head + first[:-1] + ")"
+    return head + first + _wrap_args(rest, pad)
+
+
+def _part_h(base, name, fp, part):
+    guard = name.upper()
+    lines = _banner(base, fp, [f"{part['group']} — 기능축 분할, {len(part['nodes'])}개 블록"])
+    lines += [
+        f"#ifndef CLAW_{guard}_H",
+        f"#define CLAW_{guard}_H",
+        "",
+        f'#include "{base}_types.h"',
+        "",
+        f"/* {base}_step이 선언 순서대로 호출한다. 파라미터·상태 구조체는 {base} 전체와",
+        " * 공유하므로 리셋·범프리스 웜스타트는 진입점 쪽 계약 그대로다. */",
+        f"{_part_sig(base, name, part)};",
+        "",
+        f"#endif /* CLAW_{guard}_H */",
+    ]
+    return _text(lines)
+
+
+def _part_c(base, name, fp, part, body, helpers):
+    lines = _banner(base, fp, [f"{part['group']} — 기능축 분할, {len(part['nodes'])}개 블록"])
+    lines += [f'#include "{name}.h"', ""]
+    lines += _unit_includes(helpers)
+    lines.append(_part_sig(base, name, part))
+    lines.append("{")
+    lines += _void_unused(body, False)
+    lines += body
+    lines.append("")
+    exports = part["exports"]
+    if len(exports) == 1:
+        lines.append(f"    return {part['env'][exports[0]]};")
+    else:
+        for out_name in exports:
+            lines.append(f"    *out_{out_name} = {part['env'][out_name]};")
+    lines.append("}")
+    return _text(lines)
+
+
+def _assembly(base, parts, top_env):
+    """조립부 — 파티션을 선언 순서대로 호출한다. 신호 이름이 경계를 넘어 유지된다."""
+    lines = []
+    for part in parts:
+        name = f"{base}_{part['group']}"
+        exports = part["exports"]
+        lines.append("")
+        lines.append(f"    /* ── {part['group']} — {len(part['nodes'])}개 블록 ── */")
+        args = ["prm", "sta"] + [top_env[u] for u in part["imports"]]
+        if len(exports) == 1:
+            call = f"const double {exports[0]}_y = {name}_step({', '.join(args)});"
+        else:
+            for out_name in exports:
+                lines.append(f"    double {out_name}_y;")
+            args += [f"&{e}_y" for e in exports]
+            call = f"{name}_step({', '.join(args)});"
+        lines += _wrap_stmt("    " + call)
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    return lines
+
+
+def _impl_c(base, ctx, sig, graph, env, unused, single, includes, body):
+    """진입점 — 기능축으로 쪼개면 여기 남는 것은 홀드 분기와 파티션 호출뿐이다."""
     lines = ["/* CLAW 생성 코드 — 손으로 고치지 말 것 (알고리즘, MATLAB _step 대응). */"]
     lines += [f'#include "{base}.h"', ""]
-    if "math" in ctx.helpers or any(
-        h in ctx.helpers for h in ("claw_wrap_pi",)
-    ):
-        lines += ["#include <math.h>", "", "#define CLAW_PI 3.141592653589793", ""]
-    for name in _HELPER_ORDER:
-        if name in ctx.helpers:
-            for need in _HELPER_NEEDS.get(name, ()):
-                if need != "math":
-                    ctx.helpers.add(need)
-    for name in _HELPER_ORDER:
-        if name in ctx.helpers:
-            lines += [_HELPER_SRC[name], ""]
+    lines += includes
 
     lines.append(f"void {base}_reset({base}_state_t *sta)")
     lines.append("{")
@@ -626,10 +863,7 @@ def _impl_c(base, ctx, sig, graph, env, unused, single):
     lines.append("{")
     for u in unused:
         lines.append(f"    (void){u};  /* 이 형상에서는 쓰이지 않음 */")
-    if not ctx.params and not ctx.arrays:
-        lines.append("    (void)prm;")
-    if not ctx.state and graph.enable is None:
-        lines.append("    (void)sta;  /* 상태 없는 그래프 */")
+    lines += _void_unused(body, graph.enable is not None)
     if graph.enable is not None:
         lines.append(f"    if ({graph.enable} == 0.0) {{  /* 직전 출력 유지, 상태 동결 */")
         lines.append("        " + ("return sta->hold;" if single else "*out = sta->hold;"))
@@ -637,7 +871,7 @@ def _impl_c(base, ctx, sig, graph, env, unused, single):
             lines.append("        return;")
         lines.append("    }")
         lines.append("")
-    lines += ctx.body
+    lines += body
     lines.append("")
     if single:
         expr = env[next(iter(graph.outputs.values()))]

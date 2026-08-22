@@ -19,7 +19,7 @@ from claw.blocks.basic import Gain, Product, Saturation
 from claw.blocks.controllers import PID
 from claw.blocks.dynamics import Integrator
 from claw.blocks.filters import CommandFilter, Washout
-from claw.codegen import GraphRunner, emit_c
+from claw.codegen import GraphRunner, emit_c, emit_runtime, grouped
 from claw.codegen.ir import Graph, Node, Op
 from claw.fcl.demo import DEMO_PITCH, DEMO_YAW
 from claw.fcl.graphs import (
@@ -159,9 +159,13 @@ def test_입력_이름이_틀리면_시끄럽게_실패한다():
 # ── C 생성 ────────────────────────────────────────────────────────────────
 
 
+def _emit_module(graph):
+    return emit_c(graph, GraphRunner(graph, DT))
+
+
 def _emit(graph):
     runner = GraphRunner(graph, DT)
-    return emit_c(graph, runner), runner
+    return emit_c(graph, runner).files, runner
 
 
 def test_이산계수는_엔진이_계산한_값을_그대로_굽는다():
@@ -197,10 +201,16 @@ def test_생성_코드가_블록_id와_신호_이름을_보존한다():
 
 
 def test_dt는_런타임_파라미터가_아니라_매크로다():
-    """계수가 그 dt로 구워졌으므로 dt만 바꾸면 조용히 틀린다."""
+    """계수가 그 dt로 구워졌으므로 dt만 바꾸면 조용히 틀린다.
+
+    매크로는 `_types.h`에 둔다 — 기능축 파티션 헤더가 진입점(`.h`)이 아니라 이
+    파일만 의존하면 되고, 포함 관계가 DAG로 남는다.
+    """
     files, _ = _emit(scas_axis_graph("ax", **DEMO_YAW))
-    assert "#define AX_DT 0.01" in files["ax.h"]
+    assert "#define AX_DT 0.01" in files["ax_types.h"]
     assert "double dt;" not in files["ax_types.h"], "dt가 튜닝 가능한 파라미터로 새어나갔다"
+    # 진입점을 포함하면 dt도 따라온다 (harness.c가 그렇게 쓴다)
+    assert '#include "ax_types.h"' in files["ax.h"]
 
 
 def test_빌드_요구가_생성_헤더에_박힌다():
@@ -256,8 +266,12 @@ def test_연산_노드는_Python과_C_양쪽에_난다():
     runner.reset()
     assert runner.step(a=3.0 * math.pi) == pytest.approx(math.pi)
     assert "claw_wrap_pi" in files["wrap_demo.c"]
-    assert "fmod" in files["wrap_demo.c"]
     assert "char _unused;" in files["wrap_demo_types.h"]  # 상태·파라미터 없는 그래프
+    # 보정 구현은 공용 런타임에 한 벌만 있다 — 부르는 쪽은 fmod도 math.h도 모른다
+    rt = emit_runtime(_emit_module(graph).helpers)
+    assert "fmod" in rt["claw_rt.c"]
+    assert "fmod" not in files["wrap_demo.c"]
+    assert "#include <math.h>" not in files["wrap_demo.c"]
 
 
 def test_안티와인드업_클램프가_생성_코드에_남아_있다():
@@ -497,3 +511,114 @@ def test_오토파일럿_어댑터가_모드_전환을_포함해_같은_답을_�
         for i, name in enumerate(("theta_cmd", "phi_cmd", "throttle")):
             assert ref[i] == got[name], f"스텝 {k} ({name}) 모드={on}"
     assert len(seen) >= 4, f"모드 조합을 충분히 밟지 않음: {seen}"
+
+
+# ── 증분 D′: 기능축 분할 ──────────────────────────────────────────────────
+#
+# 이름표(`grouped`)는 **실행에 영향이 없어야 한다** — IR은 평탄한 채로 남고
+# 에미터만 경계에서 자른다. 그래서 여기서 지키는 것은 두 가지다:
+# ① 쪼갤 수 없는 배치를 IR이 거부하는가  ② 쪼개도 같은 제어법칙인가(지문·비트).
+# 비트 일치 자체는 flight/tests/test_parity.py가 실제 미션으로 본다.
+
+
+def _split_nodes():
+    """두 덩이로 쪼갤 수 있는 최소 그래프의 노드 — 호출할 때마다 새로 만든다
+    (`grouped`가 제자리에서 이름표를 찍으므로 재사용하면 앞 시험이 샌다)."""
+    return [
+        Node("a_k", Gain, inputs=("u",), params={"k": 2.0}),
+        Node("b_s", Saturation, inputs=("a_k",), params={"lo": -1.0, "hi": 1.0}),
+    ]
+
+
+def _split_graph(tag=True):
+    nodes = _split_nodes()
+    if tag:
+        nodes = grouped(nodes[:1], "first") + grouped(nodes[1:], "second")
+    return Graph("sp", inputs=("u",), nodes=nodes, outputs={"y": "b_s"})
+
+
+def test_group이_끊기면_거부한다():
+    """같은 이름의 함수가 두 번 생길 배치 — 쪼갤 수 없다."""
+    n = _split_nodes()
+    n.append(Node("c_k", Gain, inputs=("b_s",), params={"k": 1.0}))
+    nodes = grouped(n[:1], "one") + grouped(n[1:2], "two") + grouped(n[2:], "one")
+    with pytest.raises(ValueError, match="group 'one' 영역이 끊겼다"):
+        Graph("sp", inputs=("u",), nodes=nodes, outputs={"y": "c_k"})
+
+
+def test_group_태그가_섞이면_거부한다():
+    """일부만 쪼갠 코드는 '나머지는 어디 있나'를 읽는 사람에게 떠넘긴다."""
+    nodes = _split_nodes()
+    grouped(nodes[:1], "first")  # 뒤 노드는 이름표 없음
+    with pytest.raises(ValueError, match="일부 노드에만 붙었다"):
+        Graph("sp", inputs=("u",), nodes=nodes, outputs={"y": "b_s"})
+
+
+def test_enable_영역이_group을_가로지르면_거부한다():
+    """if 한 덩이가 두 함수에 걸칠 수 없다 — 모드 분기가 파일 경계에서 잘린다."""
+    nodes = [
+        Node("a_k", Gain, inputs=("u",), params={"k": 2.0}, enable="on"),
+        Node("b_s", Saturation, inputs=("a_k",), params={"lo": -1.0, "hi": 1.0}, enable="on"),
+    ]
+    grouped(nodes[:1], "first")
+    grouped(nodes[1:], "second")
+    with pytest.raises(ValueError, match="영역이 group .* 경계를 가로지른다"):
+        Graph("sp", inputs=("u", "on"), nodes=nodes, outputs={"y": "b_s"})
+
+
+def test_group_이름이_신호와_충돌하면_거부한다():
+    """`{base}_{group}`이 파일명·함수명이 된다 — 신호 이름과 겹치면 읽기가 무너진다."""
+    nodes = _split_nodes()
+    grouped(nodes[:1], "u")  # 그래프 입력과 같은 이름
+    grouped(nodes[1:], "second")
+    with pytest.raises(ValueError, match="노드 id·그래프 입력과 충돌"):
+        Graph("sp", inputs=("u",), nodes=nodes, outputs={"y": "b_s"})
+
+
+def test_이름표가_없으면_예전처럼_파일_하나다():
+    files, _ = _emit(_split_graph(tag=False))
+    assert sorted(files) == ["sp.c", "sp.h", "sp_data.c", "sp_types.h"]
+
+
+def test_이름표가_붙으면_서브시스템별로_떨어진다():
+    files, _ = _emit(_split_graph())
+    assert sorted(files) == [
+        "sp.c", "sp.h", "sp_data.c", "sp_first.c", "sp_first.h",
+        "sp_second.c", "sp_second.h", "sp_types.h",
+    ]
+    # 조립부에는 계산이 없고 호출만 있다
+    top = files["sp.c"]
+    assert "sp_first_step(" in top and "sp_second_step(" in top
+    assert "prm->" not in top, "조립부에 블록 계산이 남았다"
+    # 출력 1개인 파티션은 값을 반환한다 (그래프 단위 규칙과 같다)
+    assert "const double a_k_y = sp_first_step(prm, sta, u);" in top
+    assert "const double b_s_y = sp_second_step(prm, sta, a_k_y);" in top
+    # 경계를 넘어도 신호 이름이 그대로다 — 정의부·인자·호출부가 모두 a_k_y
+    assert "double a_k_y" in files["sp_second.h"]
+    assert "const double b_s_y = claw_clip(a_k_y" in files["sp_second.c"]
+
+
+def test_분할은_지문을_바꾸지_않는다():
+    """지문은 형상(파라미터·dt·구조)의 신원이다 — 파일을 어떻게 쪼개든 같은 법칙이다.
+
+    배치가 바뀐 것은 파일 diff로 보이면 되고, 지문까지 흔들리면 "형상이 바뀌었나"를
+    구별할 수 없게 된다.
+    """
+    def fp(files):
+        line = next(ln for ln in files["sp.h"].splitlines() if "지문" in ln)
+        return line.split(":")[1].strip()
+
+    flat, _ = _emit(_split_graph(tag=False))
+    split, _ = _emit(_split_graph())
+    assert fp(flat) == fp(split)
+
+
+def test_공용_런타임은_쓰는_것만_낸다():
+    """안 쓰는 헬퍼를 탑재 코드에 두지 않는다 — IR이 dead code를 막는 것과 같은 이유."""
+    only_clip = emit_runtime({"claw_clip"})
+    assert "claw_lookup1d" not in only_clip["claw_rt.c"]
+    assert "#include <math.h>" not in only_clip["claw_rt.c"]
+    # lookup1d는 clip을 부른다 — 의존을 알아서 끌고 온다
+    with_lut = emit_runtime({"claw_lookup1d"})
+    assert "double claw_clip(" in with_lut["claw_rt.c"]
+    assert emit_runtime(set()) == {}

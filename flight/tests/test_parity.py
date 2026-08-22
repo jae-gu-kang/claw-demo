@@ -17,7 +17,7 @@ import subprocess
 
 import mission_trace
 import pytest
-from generate import DT, GEN_DIR, build, fcl_demo_graph, scas_yaw_graph
+from generate import DT, GEN_DIR, build, fcl_demo_graph, manifest, scas_yaw_graph
 
 from claw.codegen import GraphRunner
 from claw.fcl.demo import DEMO_YAW
@@ -42,11 +42,12 @@ def trace():
 
 
 def _build(name, macro, tmp_path):
+    # 컴파일 단위는 생성기가 낸다 — 기능축 파티션이 늘어도 목록이 새지 않는다
     exe = tmp_path / f"harness_{name}"
     cmd = [
         CC, *CFLAGS, f"-I{GEN_DIR}", f"-D{macro}",
         str(GEN_DIR.parent / "tests" / "harness.c"),
-        str(GEN_DIR / f"{name}.c"), str(GEN_DIR / f"{name}_data.c"),
+        *(str(GEN_DIR / src) for src in manifest()[name]),
         "-lm", "-o", str(exe),
     ]
     res = subprocess.run(cmd, capture_output=True, text=True)
@@ -198,3 +199,57 @@ def test_committed_artifacts_match_generator():
 
 def test_generation_is_deterministic():
     assert build() == build()
+
+
+# ── 기능축 분할 (증분 D′) ─────────────────────────────────────────────────
+#
+# 비트 일치는 위에서 이미 봤다. 여기서 보는 것은 **분할이 실제로 됐는가**다 —
+# FCC팀이 서브시스템 하나만 떼어 읽고 검증할 수 있어야 분할한 값을 한다.
+
+GROUPS = ("sched", "ap", "lim", "scas", "mix")
+
+
+def _gen(name):
+    return (GEN_DIR / name).read_text(encoding="utf-8")
+
+
+def test_진입점에는_조립부만_남는다():
+    # 상태 구조체는 쪼개지 않으므로 fcl_reset은 그대로 여기 남는다 — step 본문만 본다
+    step = _gen("fcl.c").split("void fcl_step(", 1)[1]
+    for group in GROUPS:
+        assert f"fcl_{group}_step(" in step, f"{group} 호출이 없다"
+    for token in ("claw_lookup1d", "claw_clip", "claw_wrap_pi", "prm->", "sta->ap_"):
+        assert token not in step, f"조립부에 블록 계산이 남았다: {token}"
+    assert len(_gen("fcl.c").splitlines()) < 120, "조립부가 다시 부풀었다"
+
+
+def test_신호_이름이_파티션_경계를_넘어_유지된다():
+    """`rtb_Sum_p_idx_1` 류를 만들지 않는다는 요구가 경계에서도 지켜지는지."""
+    top, scas = _gen("fcl.c"), _gen("fcl_scas.c")
+    for signal in ("ap_hdg_sat_y", "lim_theta_lim_y", "sched_pitch_kp_y"):
+        assert signal in top, f"{signal}이 조립부에 없다"
+        assert signal in scas, f"{signal}이 SCAS 인자에서 이름을 잃었다"
+
+
+def test_공용_헬퍼는_한_벌만_있다():
+    """산출물마다 static으로 복제되면 같은 코드를 산출물 수만큼 검증하게 된다."""
+    assert "double claw_clip(" in _gen("claw_rt.c")
+    for name in ("fcl", "fcl_ap", "fcl_lim", "fcl_scas", "fcl_sched", "fcl_mix", "scas_yaw"):
+        assert "double claw_clip(" not in _gen(f"{name}.c"), f"{name}.c에 헬퍼가 복제됐다"
+
+
+def test_파티션은_types_h만_의존한다():
+    """파티션 헤더가 진입점을 물면 포함 관계가 순환처럼 읽힌다 — DAG로 남긴다."""
+    for group in GROUPS:
+        text = _gen(f"fcl_{group}.h")
+        assert '#include "fcl_types.h"' in text
+        assert '#include "fcl.h"' not in text
+
+
+def test_분할해도_지문은_그대로다():
+    """지문은 형상의 신원이다 — 파일 배치가 아니라 제어법칙이 바뀔 때만 움직인다."""
+    fps = set()
+    for name in ("fcl.h", "fcl_types.h", "fcl_data.c", *(f"fcl_{g}.h" for g in GROUPS)):
+        line = next(ln for ln in _gen(name).splitlines() if "지문" in ln)
+        fps.add(line.split(":")[1].strip())
+    assert fps == {"c0f9af6f848059c4"}, f"형상 지문이 움직였다: {fps}"

@@ -21,6 +21,13 @@ dead code를 만들지 않는다 — DO-178C 논점). "Python으로는 되는데
 의미론을 노드 단위로 둔다 — 같은 enable을 가진 연속 노드가 한 영역이고, 비활성
 스텝에는 노드가 실행되지 않는 대신 `on_disable`로 상태를 대입한다.
 
+**기능축 분할은 계층이 아니라 이름표(`group`)다.** 생성 C를 서브시스템별 파일로
+쪼개고 싶다고 IR을 계층화하면 호출 규약이 IR로 올라오고, 선언순서·도달성·enable
+검사가 전부 계층을 인지해야 한다 — 이 IR의 강점(선언 순서 = 실행 순서 = 생성 C
+문장 순서)을 잃는다. 대신 연속 노드 묶음에 이름표만 붙이고(`grouped`), 경계를
+넘는 신호를 함수 인자로 만드는 일은 **에미터에게 맡긴다**. 그래서 Python 실행기는
+이름표를 아예 보지 않고, 분할해도 실행 결과가 달라질 수 없다.
+
 블록 로직 자체는 여기 없다 — 노드는 엔진 블록 클래스(M2 `claw.blocks`)를 가리키기만
 한다. 실행은 그 블록 인스턴스가, C 생성은 블록별 에미터가 맡는다.
 """
@@ -64,6 +71,19 @@ def _check_ident(name, what):
         raise ValueError(f"{what}가 C 예약어와 충돌: {name!r}")
 
 
+def grouped(nodes, name):
+    """연속 노드 묶음에 서브시스템 이름표를 찍고 그대로 돌려준다 (제자리 변경).
+
+    조립부에서 `nodes += grouped(ap_nodes, "ap")`로 읽히도록 목록을 그대로 낸다.
+    이름표는 생성 C의 파일명·함수명이 되고(`fcl_ap.c` / `fcl_ap_step`), 붙이지
+    않으면 예전처럼 그래프 하나가 파일 하나로 나온다.
+    """
+    _check_ident(name, "group 이름")
+    for node in nodes:
+        node.group = name
+    return nodes
+
+
 class Node:
     """블록 노드 — 엔진 블록 클래스 + 생성자 인자 + 입력 연결.
 
@@ -76,9 +96,12 @@ class Node:
     on_disable: {상태 필드: 값 또는 소스 참조} — 비활성 스텝의 상태 대입.
             숫자는 상수, 문자열은 신호 참조 (예: 비활성 축 필터가 측정을 추적)
     disabled_output: 비활성 스텝의 이 노드 출력값 [기본 0.0]
+    group: 기능축 이름표 — `grouped()`가 찍는다. 생성 C의 분할 단위이고 실행에는
+            영향이 없다 (Python 실행기는 읽지 않는다)
     """
 
     kind = "block"
+    group = None
 
     def __init__(
         self,
@@ -122,6 +145,7 @@ class Op:
     """상태 없는 순수 연산 노드 — 블록으로 두기엔 과한 것(wrap_pi·min2 등)."""
 
     kind = "op"
+    group = None
     params = {}
     gains = {}
     on_disable = {}
@@ -162,6 +186,9 @@ class Graph:
     enable:  그래프 전체의 활성 신호(그래프 입력명). 0이면 **아무것도 실행하지 않고
              직전 출력을 그대로 낸다** — 항법 무효 시 마지막 유효 명령 유지
              (`law.py:86`)가 이 형태다. 상태도 함께 동결된다
+
+    노드에 `grouped()`로 이름표가 붙어 있으면 `partitions`가 기능축 분할 단위를
+    낸다 — 생성 C가 서브시스템별 파일로 쪼개진다. 실행에는 영향이 없다.
     """
 
     def __init__(self, name, inputs, nodes, outputs, enable=None):
@@ -208,7 +235,8 @@ class Graph:
             if node_id not in node_ids:
                 raise ValueError(f"{name}: 출력 {out_name!r}의 {node_id!r}가 노드 id가 아님")
 
-        self._check_enable_regions()
+        self._check_contiguous(lambda n: n.enable, "enable")
+        self._check_groups(node_ids)
 
         dead = sorted(node_ids - self._reachable())
         if dead:
@@ -216,22 +244,68 @@ class Graph:
                 f"{name}: 출력에 도달하지 않는 노드 {dead} — 생성 C에 dead code가 된다"
             )
 
-    def _check_enable_regions(self):
-        """같은 enable을 가진 노드는 연속이어야 한다 — 생성 C가 if/else 한 덩이가 되고,
-        읽는 사람이 "이 구간은 이 모드일 때만 돈다"를 눈으로 잡을 수 있다."""
+    def _check_contiguous(self, key, what):
+        """같은 값을 가진 노드는 연속이어야 한다 — 생성 C에서 한 덩이가 되기 때문.
+
+        enable이면 if/else 한 덩이(읽는 사람이 "이 구간은 이 모드일 때만 돈다"를
+        눈으로 잡는다), group이면 함수 하나다. 끊긴 것을 허용하면 같은 이름의
+        덩이가 여러 개 생겨 그 성질이 깨진다.
+        """
         seen = set()
         prev = None
         for node in self.nodes:
-            en = getattr(node, "enable", None)
-            if en != prev:
-                if en is not None and en in seen:
+            val = key(node)
+            if val != prev:
+                if val is not None and val in seen:
                     raise ValueError(
-                        f"{self.name}.{node.id}: enable {en!r} 영역이 끊겼다 — "
-                        "같은 enable 노드는 연속 선언해야 한다"
+                        f"{self.name}.{node.id}: {what} {val!r} 영역이 끊겼다 — "
+                        f"같은 {what} 노드는 연속 선언해야 한다"
                     )
-                if en is not None:
-                    seen.add(en)
-                prev = en
+                if val is not None:
+                    seen.add(val)
+                prev = val
+
+    def _check_groups(self, node_ids):
+        """기능축 이름표 — 붙일 거면 전부, 연속으로, enable 영역을 자르지 않게."""
+        tagged = [n.group is not None for n in self.nodes]
+        if any(tagged) and not all(tagged):
+            bare = [n.id for n in self.nodes if n.group is None]
+            raise ValueError(
+                f"{self.name}: group이 일부 노드에만 붙었다 {bare[:5]} — "
+                "전부 붙이거나 전부 떼야 한다 (일부만 쪼갠 코드는 읽는 사람을 속인다)"
+            )
+        if not any(tagged):
+            return
+        self._check_contiguous(lambda n: n.group, "group")
+        taken = set(self.inputs) | node_ids
+        for name in sorted({n.group for n in self.nodes}):
+            _check_ident(name, "group 이름")
+            if name in taken:
+                raise ValueError(
+                    f"{self.name}: group {name!r}이 노드 id·그래프 입력과 충돌한다 "
+                    "— 생성 C의 파일명·함수명이 된다"
+                )
+        for node, nxt in zip(self.nodes, self.nodes[1:]):
+            if node.enable is not None and node.enable == nxt.enable and node.group != nxt.group:
+                raise ValueError(
+                    f"{self.name}.{nxt.id}: enable {node.enable!r} 영역이 group "
+                    f"{node.group!r}→{nxt.group!r} 경계를 가로지른다 — "
+                    "if 한 덩이가 두 함수에 걸칠 수 없다"
+                )
+
+    @property
+    def partitions(self):
+        """((group, 노드들), …) 선언 순서. 이름표가 없으면 () — 그래프 하나가 파일 하나."""
+        if self.nodes[0].group is None:
+            return ()
+        parts, cur, name = [], [], self.nodes[0].group
+        for node in self.nodes:
+            if node.group != name:
+                parts.append((name, tuple(cur)))
+                cur, name = [], node.group
+            cur.append(node)
+        parts.append((name, tuple(cur)))
+        return tuple(parts)
 
     def _reachable(self):
         """출력에서 역방향으로 도달 가능한 노드 id (선언 순서가 위상 순서라 1회 역주행)."""

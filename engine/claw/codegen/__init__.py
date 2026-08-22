@@ -10,8 +10,8 @@
 codegen을 의존한다 — 계층 규칙(03 §1)대로 위에서 아래로.
 """
 
-from claw.codegen.emit_c import emit_c
-from claw.codegen.ir import Graph, Node, Op
+from claw.codegen.emit_c import emit_c, emit_runtime
+from claw.codegen.ir import Graph, Node, Op, grouped
 from claw.codegen.ir_exec import GraphRunner
 
-__all__ = ["Graph", "GraphRunner", "Node", "Op", "emit_c"]
+__all__ = ["Graph", "GraphRunner", "Node", "Op", "emit_c", "emit_runtime", "grouped"]
