@@ -49,6 +49,7 @@ class GraphRunner:
             if n.kind == "block"
         }
         self._hold = dict.fromkeys(graph.outputs, 0.0)
+        self.last_env = {}  # 직전 스텝 중간 노드 값 (계측 전용 — step_all이 채운다)
 
     def reset(self, states=None, hold=None) -> None:
         """states={node_id: 웜스타트 값} — 미지정 노드는 파라미터 초기상태 (범프리스 계약).
@@ -115,5 +116,10 @@ class GraphRunner:
                 u = tuple(args) if type(inst) in SEQ_INPUT else args[0]
                 env[node.id] = inst.step(u, **gains)
 
+        # 중간 노드 값 공개 — 계측 전용 창구 (읽기만 할 것). 그래프 출력(=생성 C의
+        # 인터페이스)은 그대로이므로 코드 생성에 영향이 없다. 법칙 경로는 읽지 않는다.
+        # enable=0 스텝은 위에서 조기 반환하므로 직전 env가 남는다 — 출력 홀드와
+        # 같은 규약이다 (실행되지 않은 스텝이 0으로 보이면 계측이 거짓말을 한다).
+        self.last_env = env
         self._hold = {name: env[nid] for name, nid in self.graph.outputs.items()}
         return dict(self._hold)

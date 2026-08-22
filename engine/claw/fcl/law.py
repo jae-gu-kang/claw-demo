@@ -28,6 +28,20 @@ _AP_GROUPS = ("speed", "alt", "heading")
 # 스케줄 덮어쓰기 허용 키 — 전 그룹이 ScasAxis.step(kp·ki·k_rate)로만 소비
 _GAIN_KEYS = ("kp", "ki", "k_rate")
 
+# 계측 프로브 — 논리 이름 → 그래프 노드 id (fcl/graphs.py 조립이 붙이는 접두사_이름).
+# 명령 사슬 중간값은 그래프 **출력이 아니다** — 출력은 생성 C의 인터페이스라 여기에
+# 계측을 섞으면 탑재 코드가 달라진다. 그래서 러너의 계측 창구(last_env)에서 꺼낸다.
+# 노드 id는 그래프 조립 규약에 매여 있어 이름이 바뀌면 값이 조용히 사라진다 —
+# test_fcl_law가 데모 형상에서 프로브가 전부 해석되는지 핀한다.
+INSTRUMENT_NODES = {
+    "theta_cmd": "ap_theta_out",  # AP 피치 명령 (선회 FF·포화 후) → α 리미터
+    "phi_cmd": "ap_hdg_sat",  # AP 롤 명령 (헤딩축 출력) → SCAS
+    "theta_lim": "lim_theta_lim",  # 리미터 통과 θ — 보호가 물리면 theta_cmd와 갈라진다
+    "pitch": "scas_pitch_sat",  # SCAS 축 출력 → 믹서
+    "roll": "scas_roll_sat",
+    "yaw": "scas_yaw_sat",
+}
+
 
 class FlightControlLaw:
     def __init__(self, scas, autopilot, mixer, schedule=None, alpha_limiter=None):
@@ -52,6 +66,7 @@ class FlightControlLaw:
                     )
         self.alpha_margin = None
         self.limiter_active = False
+        self.last_signals = {}  # 직전 스텝 그래프 출력 (계측 전용 — 법칙 경로 미사용)
 
     def init(self, dt: float) -> "FlightControlLaw":
         """전 법칙을 **하나의 평탄한 그래프**로 조립한다 (fcl/graphs.py fcl_graph).
@@ -114,6 +129,7 @@ class FlightControlLaw:
         )
         self.alpha_margin = None
         self.limiter_active = False
+        self.last_signals = {}  # 직전 스텝 그래프 출력 (계측 전용 — 법칙 경로 미사용)
 
     def step(self, cmd, nav) -> SurfaceCommand:
         """법칙 구조는 fcl/graphs.py가 정본 — 여기서는 원시 항법 상태를 그래프가
@@ -135,9 +151,18 @@ class FlightControlLaw:
             heading_on=float(bool(cmd.heading_on)),
         )
         # 항법 무효 스텝은 아무것도 실행되지 않았다 — 로깅 속성도 직전 값을 유지한다
-        if nav.valid and "alpha_margin" in o:
-            self.alpha_margin = o["alpha_margin"]
-            self.limiter_active = bool(o["limiter_active"])
+        if nav.valid:
+            env = self._runner.last_env
+            # 명령 사슬 중간값을 논리 이름으로 공개 — 소비처는 관측자뿐(Simulator
+            # 로깅·구조도 재생 오버레이). 법칙 경로는 읽지 않는다: 읽는 순간
+            # "그래프가 구조의 정본"이라는 계약이 깨진다.
+            self.last_signals = {
+                name: float(env[nid])
+                for name, nid in INSTRUMENT_NODES.items() if nid in env
+            }
+            if "alpha_margin" in o:
+                self.alpha_margin = o["alpha_margin"]
+                self.limiter_active = bool(o["limiter_active"])
         return SurfaceCommand(
             elevon=np.array([o["elevon_l"], o["elevon_l"], o["elevon_r"], o["elevon_r"]]),
             rudder=o["rudder"],

@@ -280,3 +280,64 @@ def test_min_altitude_flag_marks_excursion_without_stopping(trim_design):
     off = make_sim(ac, tr, modes=hold_modes(V0, -50.0), min_altitude=None).run(tr, t_end=60.0)
     assert "altitude" not in off.envelope["flags"]
     assert off.envelope["min_alt"] < 0.0
+
+
+# ---------- 명령 사슬 계측 (구조도 재생 오버레이) ----------
+# 최종 타면(de/da/dr)과 피드백만 로깅되던 시절엔 유도→AP→리미터→SCAS 구간이
+# 시계열에 없어, 오버레이가 그릴 값이 없었다. _CHAIN_SIGNALS가 그 구간을 채운다.
+
+
+def test_명령_사슬_신호가_전부_로깅된다(trim_design):
+    """길이·유한성 — 하나라도 빠지면 오버레이 배선이 값 없이 남는다."""
+    from claw.sim.simulator import _CHAIN_SIGNALS
+
+    ac, tr = trim_design
+    res = make_sim(ac, tr).run(tr, t_end=5.0)
+    for name in _CHAIN_SIGNALS:
+        assert name in res.signals, f"{name} 미로깅"
+        assert len(res.signals[name]) == len(res.t)
+        assert np.isfinite(res.signals[name]).all(), f"{name}에 비유한값"
+
+
+def test_유도_명령이_모드_전환에서_실제로_바뀐다(trim_design):
+    """cmd_* 는 유도 출력을 그대로 실은 것 — 모드가 바뀌면 값도 바뀌어야 한다.
+    (상수로 굳어 있으면 배선에 숫자는 뜨지만 아무것도 말해 주지 않는다.)"""
+    ac, tr = trim_design
+    V0 = float(np.linalg.norm(tr.state.vel_b))
+    modes = [
+        ModeSpec(name="climb", speed=V0, alt=1300.0, heading=0.0,
+                 exit_when=("alt_ge", 1280.0), next="cruise"),
+        ModeSpec(name="cruise", speed=V0 - 40.0, alt=1300.0, heading=0.0,
+                 exit_when=("time_ge", 1e9)),
+    ]
+    res = make_sim(ac, tr, modes=modes).run(tr, t_end=90.0)
+    spd = res.signals["cmd_speed"]
+    assert spd.max() - spd.min() > 30.0, "모드가 바뀌었는데 속도 명령이 그대로다"
+    assert res.signals["cmd_alt"].max() == pytest.approx(1300.0)
+
+
+def test_계측되지_않은_신호는_0이_아니라_NaN(trim_design):
+    """리미터 미장착 형상에서 theta_lim은 '값이 0'이 아니라 '계측 안 됨'이다 —
+    0으로 채우면 화면에서 '명령이 0으로 떨어졌다'와 구분되지 않는다."""
+    ac, tr = trim_design
+    V0 = float(np.linalg.norm(tr.state.vel_b))
+    sim = Simulator(
+        aircraft=ac, fcl=make_demo_fcl(with_limiter=False),
+        guidance=Guidance(hold_modes(V0, tr.case.alt)),
+        stall_table=make_demo_stall_table(), db_ranges=DB_RANGES,
+        dt_plant=0.01, control_hz=100.0,
+    )
+    res = sim.run(tr, t_end=3.0)
+    assert np.isnan(res.signals["theta_lim"]).all()
+    assert np.isfinite(res.signals["theta_cmd"]).all()  # 나머지 사슬은 살아 있다
+
+
+def test_제어주기_사이_스텝은_직전_명령을_유지한다(trim_design):
+    """계측도 de/da/dr과 같은 ZOH 규약 — 제어 틱 사이에 0으로 떨어지면 안 된다."""
+    ac, tr = trim_design
+    # 플랜트 5 ms · 제어 100 Hz → 제어 틱 사이 스텝이 1개씩 낀다
+    res = make_sim(ac, tr, dt_plant=0.005, control_hz=100.0).run(tr, t_end=2.0)
+    th = res.signals["theta_cmd"]
+    assert np.isfinite(th).all()
+    # 홀드 구간이면 인접 쌍이 정확히 같은 값이어야 한다 (ZOH)
+    assert np.array_equal(th[0::2], th[1::2])

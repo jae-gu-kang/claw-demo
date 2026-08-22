@@ -326,3 +326,84 @@ def test_fcl_registered_param_defaults_match_ctor():
         # 정규화 동작을 바꾼다 (리뷰 S2)
         assert all(type(defs[k]) is type(ctor[k]) for k in defs), \
             f"{cls.NAME}: ParamDef·생성자 기본값 타입 불일치"
+
+
+# ---------- 명령 사슬 계측 (구조도 재생 오버레이의 원천) ----------
+# 그래프 출력은 최종 타면·리미터 상태뿐이라, 중간 명령(θ_cmd·θ_lim·SCAS 축 출력)은
+# 매 스텝 계산되고도 버려졌다. INSTRUMENT_NODES가 그 값을 논리 이름으로 꺼내 온다.
+# 여기서 지키는 것: ① 노드 id가 드리프트하면 조용히 사라지지 않고 터진다
+# ② 보호가 물린 순간이 계측에 실제로 드러난다 ③ 미장착 형상이 0으로 위장되지 않는다
+
+
+def test_계측_프로브가_데모_형상에서_전부_해석된다():
+    """노드 id는 fcl/graphs.py 조립 규약에 매여 있다 — 이름이 바뀌면 last_signals에서
+    그 항목이 조용히 빠지고 오버레이 배선만 비게 된다. 여기서 시끄럽게 잡는다."""
+    from claw.fcl.law import INSTRUMENT_NODES
+
+    fcl = make_demo_fcl(with_limiter=True).init(DT)
+    fcl.reset()
+    fcl.step(GuidanceCommand(alt=1000.0, alt_on=True), _nav())
+    missing = set(INSTRUMENT_NODES) - set(fcl.last_signals)
+    assert not missing, f"프로브 미해석 (노드 id 드리프트): {sorted(missing)}"
+    assert all(isinstance(v, float) for v in fcl.last_signals.values())
+
+
+def test_리미터_미장착이면_theta_lim은_계측되지_않는다():
+    """없는 신호를 0으로 채우면 화면에서 '명령이 0'과 구분되지 않는다 — 키 자체가 없어야."""
+    fcl = make_demo_fcl(with_limiter=False).init(DT)
+    fcl.reset()
+    fcl.step(GuidanceCommand(alt=1000.0, alt_on=True), _nav())
+    assert "theta_lim" not in fcl.last_signals
+    assert "theta_cmd" in fcl.last_signals  # 나머지 사슬은 그대로 계측된다
+
+
+def test_계측이_보호_작동_순간을_잡는다():
+    """리미터가 물리면 θ_cmd와 θ_lim이 갈라져야 한다 — 오버레이의 점멸 근거.
+    미작동 구간에서는 둘이 정확히 같아야 한다 (min2 통과)."""
+    ac = make_demo_aircraft()
+    tr = trim_level(ac, TrimCase("slow", mach=0.3, alt=500.0, fuel=300.0))
+    assert tr.converged
+    th0 = tr.state.euler()[1]
+    scas = Scas(ScasAxis(**DEMO_PITCH), ScasAxis(**DEMO_ROLL), ScasAxis(**DEMO_YAW))
+    ap = Autopilot(theta_hi=0.45, tau_alt=0.0, kp_alt=0.01, ki_alt=0.0005, k_hdot=-0.01)
+    lim = AlphaLimiter(make_demo_stall_table(), margin=0.05)
+    fcl = FlightControlLaw(scas, ap, Mixer(), alpha_limiter=lim).init(DT)
+    fcl.reset(state={"theta": th0, "throttle": float(tr.control.throttle[0]),
+                     "de": float(tr.control.elevon[0])})
+    cmd = GuidanceCommand(alt=1300.0, alt_on=True)
+    xe = np.zeros(12)
+    xe[XE_U], xe[XE_W] = tr.state.vel_b[0], tr.state.vel_b[2]
+    xe[XE_THETA], xe[XE_H] = th0, 500.0
+
+    gaps_on, gaps_off = [], []
+    for _ in range(int(15.0 / DT)):
+        phi, th, psi = xe[6], xe[7], xe[8]
+        nav = NavOutput(pos_n=np.array([0.0, 0.0, -xe[XE_H]]),
+                        vel_n=euler_to_dcm(phi, th, psi).T @ xe[:3],
+                        q_nb=euler_to_quat(phi, th, psi), omega_b=xe[3:6].copy(),
+                        fuel=300.0)
+        sc = fcl.step(cmd, nav)
+        gap = fcl.last_signals["theta_cmd"] - fcl.last_signals["theta_lim"]
+        (gaps_on if fcl.limiter_active else gaps_off).append(gap)
+        ctrl = {"de": float(np.mean(sc.elevon)),
+                "da": float((sc.elevon[0] - sc.elevon[2]) / 2.0),
+                "dr": sc.rudder, "throttle": tuple(sc.throttle)}
+        xe = rk4_step(lambda s: ac.deriv_euler(s, ctrl, 300.0), xe, DT)
+
+    assert gaps_on, "이 시나리오에서 리미터가 물리지 않았다 (테스트 전제 붕괴)"
+    assert max(gaps_on) > 1e-3, "보호가 물렸는데 θ_cmd와 θ_lim이 갈라지지 않았다"
+    assert all(g >= 0.0 for g in gaps_on), "리미터는 상한 클램프 — θ_lim이 더 클 수 없다"
+    assert max(abs(g) for g in gaps_off) == 0.0, "미작동 구간인데 두 값이 다르다"
+
+
+def test_항법_무효_스텝은_직전_계측값을_유지한다():
+    """실행되지 않은 스텝이 0으로 보이면 오버레이가 '명령이 0으로 떨어졌다'고 거짓말한다."""
+    fcl = make_demo_fcl(with_limiter=True).init(DT)
+    fcl.reset()
+    cmd = GuidanceCommand(alt=1000.0, alt_on=True)
+    fcl.step(cmd, _nav())
+    held = dict(fcl.last_signals)
+    bad = _nav(h=9999.0)
+    bad.valid = False
+    fcl.step(cmd, bad)
+    assert fcl.last_signals == held

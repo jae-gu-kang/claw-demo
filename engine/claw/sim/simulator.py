@@ -28,6 +28,18 @@ from claw.env import isa_atmosphere
 from claw.env.constants import ISA_MIN_ALT, ISA_STRATO1_TOP_ALT
 from claw.plant import OMEGA, POS, QUAT, VEL, RigidBody, SecondOrderActuator, pack
 
+# 명령 사슬 계측 — 유도→AP→리미터→SCAS 각 단의 중간 신호. FCL 그래프가 매 제어
+# 스텝에 이미 계산해 두는 값(law.py last_signals)을 꺼내 쓸 뿐, 새로 계산하지 않는다.
+# 소비처: 구조도 재생 오버레이(배선마다 그 시각의 실제 값) — 이게 없으면 최종
+# 타면과 피드백만 계측되어 명령 사슬 배선이 값 없이 남는다.
+# 주의: 제어주기(n_ctrl)마다만 갱신되므로 사이 스텝은 직전 값을 유지한다 (de/da/dr 규약).
+_CHAIN_SIGNALS = (
+    "cmd_speed", "cmd_alt", "cmd_heading",  # 유도 → AP
+    "theta_cmd", "phi_cmd",  # AP → α 리미터
+    "theta_lim",  # 리미터 → SCAS (보호가 물리면 theta_cmd와 갈라진다)
+    "pitch", "roll", "yaw",  # SCAS → 믹서
+)
+
 
 class Simulator:
     def __init__(
@@ -145,6 +157,7 @@ class Simulator:
             "pn", "pe", "h", "u", "v", "w", "p", "q", "r", "phi", "theta", "psi",
             "V", "alpha", "beta", "mach", "fuel",
             "de", "da", "dr", "thr_l", "thr_r", "alpha_margin",
+            *_CHAIN_SIGNALS,
         )}
         sig["limiter_active"] = np.zeros(n_steps, dtype=bool)
         modes = []
@@ -210,6 +223,17 @@ class Simulator:
                 np.nan if self.fcl.alpha_margin is None else self.fcl.alpha_margin
             )
             sig["limiter_active"][k] = self.fcl.limiter_active
+            # 명령 사슬 계측 — 유도 명령은 cmd에서, 법칙 내부는 그래프 계측 창구에서.
+            # 둘 다 제어주기(n_ctrl)마다만 갱신되므로 사이 스텝은 직전 값이 유지된다
+            # (de/da/dr과 같은 규약 — 제로홀드가 아니라 실제로 그 값이 유지된 것).
+            # 프로브가 없는 형상(리미터 미장착 등)은 0이 아니라 NaN — 계측되지 않은
+            # 것과 값이 0인 것을 화면에서 구분해야 한다.
+            law_sig = self.fcl.last_signals
+            for name in _CHAIN_SIGNALS:
+                if name.startswith("cmd_"):
+                    sig[name][k] = getattr(cmd, name[4:])
+                else:
+                    sig[name][k] = law_sig.get(name, np.nan)
             modes.append(cmd.mode)
             if self.stall_table is not None:
                 stall_margin[k] = float(self.stall_table.interp(mach=mach)) - alpha
