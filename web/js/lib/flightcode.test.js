@@ -3,7 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  AP_KEY, ENTRY, excludedSpecs, flightRequest, pickFile, summarize,
+  AP_KEY, ENTRY, excludedSpecs, flightRequest, groupByRole, mergeFiles, pickFile,
+  summarize,
 } from "./flightcode.js";
 
 const AP_SPEC = { key: AP_KEY, values: { kp_alt: 0.004, ki_alt: 0.0008 } };
@@ -82,4 +83,54 @@ test("진입점조차 없으면 첫 파일 — 산출물 이름이 달라도 빈
 test("요약은 파일 수와 총 줄 수", () => {
   assert.deepEqual(summarize(FILES), { count: 4, lines: 303 });
   assert.deepEqual(summarize(null), { count: 0, lines: 0 });
+});
+
+// ── 계층 표시: 역할 묶음 · 통합 열람본 ────────────────────────────────────
+
+const FULL = {
+  artifact: "fcl", dt: 0.01, fingerprint: "c0f9af6f848059c4",
+  files: [
+    { name: "fcl.h", role: "진입점", lines: 34, text: "H\n" },
+    { name: "fcl_types.h", role: "자료형", lines: 118, text: "T\n" },
+    { name: "fcl_sched.h", role: "서브시스템", lines: 19, text: "SH\n" },
+    { name: "fcl_sched.c", role: "서브시스템", lines: 54, text: "SC\n\n\n" },
+    { name: "claw_rt.c", role: "공용 런타임", lines: 31, text: "RT\n" },
+  ],
+};
+
+test("역할이 같은 연속 파일은 한 묶음 — 서버가 준 순서 유지", () => {
+  const g = groupByRole(FULL.files);
+  assert.deepEqual(g.map((x) => x.role),
+    ["진입점", "자료형", "서브시스템", "공용 런타임"]);
+  assert.deepEqual(g[2].files.map((f) => f.name), ["fcl_sched.h", "fcl_sched.c"]);
+  assert.deepEqual(groupByRole([]), []);
+  assert.deepEqual(groupByRole(null), []);
+});
+
+test("통합 열람본 — 전 파일이 순서대로, 파일마다 이름·역할·줄수", () => {
+  const text = mergeFiles(FULL);
+  for (const f of FULL.files) {
+    assert.ok(text.includes(f.name), `${f.name} 누락`);
+    assert.ok(text.includes(f.text.trim()), `${f.name} 본문 누락`);
+  }
+  // 순서가 곧 읽는 순서다
+  assert.ok(text.indexOf("fcl.h") < text.indexOf("claw_rt.c"));
+  assert.ok(text.includes("c0f9af6f848059c4"), "형상 지문");
+  assert.ok(text.includes("파일 5개 · 256줄"), "요약");
+});
+
+test("통합 열람본은 빌드 단위가 아님을 머리에 박는다", () => {
+  // 안 적어 두면 이걸 그대로 컴파일하려 드는 사람이 반드시 나온다
+  assert.match(mergeFiles(FULL), /빌드 단위가 아니다/);
+});
+
+test("통합 열람본이 C 주석을 깨지 않는다", () => {
+  const text = mergeFiles(FULL);
+  // 머리말·구분선은 전부 /* */ 안이어야 한다 — 열다 만 주석이 남으면 뒤가 통째로 죽는다
+  assert.equal((text.match(/\/\*/g) ?? []).length, (text.match(/\*\//g) ?? []).length);
+});
+
+test("빈 응답이면 빈 문자열 — 화면이 터지지 않는다", () => {
+  assert.equal(mergeFiles(null), "");
+  assert.equal(mergeFiles({ files: [] }), "");
 });

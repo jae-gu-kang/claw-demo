@@ -56,6 +56,50 @@ export function pickFile(files, wanted, artifact = "fcl") {
   );
 }
 
+/** 역할별로 묶은 파일 — [{role, files}]. 서버가 준 읽는 순서를 그대로 유지한다.
+ *
+ * 파일 16개를 한 줄에 늘어놓으면 무엇이 무엇인지 안 보인다 — 진입점·자료형·
+ * 조립부·서브시스템·데이터·런타임이라는 역할이 곧 읽는 단위다. */
+export function groupByRole(files) {
+  const out = [];
+  for (const f of files ?? []) {
+    const last = out[out.length - 1];
+    if (last && last.role === f.role) last.files.push(f);
+    else out.push({ role: f.role, files: [f] });
+  }
+  return out;
+}
+
+/** 전 파일을 읽기용 한 문서로 이어붙인다.
+ *
+ * **빌드 단위가 아니다** — 실제 산출물은 파일 여럿이고 이건 통째로 읽거나
+ * 넘길 때 쓰는 열람본이다. 그 사실을 문서 머리에 박아 두지 않으면 이걸
+ * 컴파일하려 드는 사람이 반드시 나온다. */
+export function mergeFiles(data) {
+  if (!data || !data.files || data.files.length === 0) return "";
+  const { count, lines } = summarize(data.files);
+  const bar = "═".repeat(70);
+  const head = [
+    `/* ${bar}`,
+    `   CLAW 탑재 제어법칙 C — 통합 열람본 (${data.artifact})`,
+    `   형상 지문 ${data.fingerprint} · 제어주기 ${data.dt} s`,
+    `   파일 ${count}개 · ${lines}줄`,
+    "",
+    "   실제 산출물은 아래 파일들이고, 이 문서는 읽기 편하도록 이어붙인",
+    "   열람본이다 — 그대로 컴파일하는 빌드 단위가 아니다.",
+    "   순서: 진입점 → 자료형 → 조립부 → 서브시스템(실행 순서)",
+    "         → 파라미터 데이터 → 공용 런타임",
+    `   ${bar} */`,
+  ];
+  const body = data.files.flatMap((f) => [
+    "",
+    `/* ${"─".repeat(24)} ${f.name} · ${f.role} · ${f.lines}줄 ${"─".repeat(24)} */`,
+    "",
+    f.text.replace(/\n+$/, ""),
+  ]);
+  return head.concat(body).join("\n") + "\n";
+}
+
 /** 파일 목록 요약 — "12개 파일 · 693줄" 같은 한 줄. */
 export function summarize(files) {
   const list = files ?? [];

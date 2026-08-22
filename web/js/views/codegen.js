@@ -12,12 +12,21 @@ import {
   paramWarnings, traceRows,
 } from "../lib/codegen.js";
 import {
-  excludedSpecs, flightRequest, pickFile, summarize,
+  excludedSpecs, flightRequest, groupByRole, mergeFiles, pickFile, summarize,
 } from "../lib/flightcode.js";
 import { store } from "../store.js";
 
 // 뷰는 라우팅마다 재생성되므로 표시 상태는 모듈 스코프 (views/gains.js fitCfg 관행)
 const cfg = { lang: "python", verbose: false, traceOpen: false, file: null };
+
+// 생성 응답 캐시 — 패널은 선택마다 다시 조립되지만 형상이 같으면 코드도 같다
+const flightCache = { key: null, data: null };
+
+const LANGS = [
+  ["python", "Python", "설계 형상의 코드 표현 — 엔진에 그대로 붙여 실행 가능"],
+  ["c", "C 헤더", "설계 형상의 코드 표현 — 파라미터 매크로"],
+  ["flight", "탑재 코드", "FCC에 통합되어 그대로 실릴 제어법칙 코드 — 구조·로직·파라미터 전부"],
+];
 
 const PRE_STYLE = "font-family: var(--mono); font-size: 12px; line-height: 1.5;"
   + " white-space: pre; background: #f7f8fa; border: 1px solid var(--line);"
@@ -27,12 +36,15 @@ const PRE_STYLE = "font-family: var(--mono); font-size: 12px; line-height: 1.5;"
 /** 코드 패널 렌더 — host를 비우고 다시 채운다.
 specs: lib/codegen 스펙 배열 (1개면 단일 블록, 여러 개면 전체 형상 스냅샷)
 meta: {generatedAt, server, engine} · validation: [{key, ok, detail}] · gainTables: store 값 */
-export function renderCodePanel(
-  host, { specs, meta, validation = [], gainTables = null, lang = null },
-) {
-  // lang은 진입 시 한 번 정하는 기본값 — AUTO CODE 탭이 탑재 C로 열기 위해 쓴다.
-  // 이후 사용자가 고른 탭은 모듈 스코프 cfg에 남아 화면을 옮겨도 유지된다
-  if (lang) cfg.lang = lang;
+export function renderCodePanel(host, {
+  specs, meta, validation = [], gainTables = null,
+  langs = LANGS.map((l) => l[0]), flightMerged = false,
+}) {
+  // 어떤 형식 탭을 노출할지는 부르는 쪽이 정한다 — Autocode 탭은 종류(형상/탑재)를
+  // 이미 위에서 고르게 하므로 여기서 다시 세 개를 늘어놓으면 선택지가 흩어진다.
+  // 구조도의 블록별 패널은 인자를 안 주므로 예전처럼 셋 다 나온다
+  const allow = LANGS.filter((l) => langs.includes(l[0]));
+  if (!langs.includes(cfg.lang)) cfg.lang = allow[0][0];
   const snapshot = specs.length > 1 || gainTables != null;
   const pre = el("pre", { style: PRE_STYLE });
   const copyNote = el("span", { class: "hint" });
@@ -54,20 +66,31 @@ export function renderCodePanel(
   };
 
   const flightView = () => {
-    if (flight.loading) return { code: "탑재 C 생성 중…", lineOf: null };
+    if (flight.loading) return { code: "탑재 코드 생성 중…", lineOf: null };
     if (flight.error) return { code: `생성 실패 — ${flight.error}`, lineOf: null };
-    const file = pickFile(flight.data?.files, cfg.file, flight.data?.artifact);
+    if (!flight.data) return { code: "", lineOf: null };
+    if (flightMerged) return { code: mergeFiles(flight.data), lineOf: null, file: null };
+    const file = pickFile(flight.data.files, cfg.file, flight.data.artifact);
     return { code: file ? file.text : "생성된 파일이 없습니다.", lineOf: null, file };
   };
 
   const loadFlight = async () => {
+    // 통합↔모듈별 전환은 표시만 바뀌는 일이다 — 같은 형상이면 서버를 다시 부르지
+    // 않는다. 요청 본문이 곧 형상이므로 그걸 키로 쓴다(값을 고치면 자동으로 무효화)
+    const req = flightRequest(specs, flightTables());
+    const key = JSON.stringify(req);
+    if (flightCache.key === key && flightCache.data) {
+      flight.data = flightCache.data;
+      paint();
+      return;
+    }
     flight.loading = true;
     flight.error = null;
     paint();
     try {
-      flight.data = await api.post(
-        "/codegen/flight", flightRequest(specs, flightTables()),
-      );
+      flight.data = await api.post("/codegen/flight", req);
+      flightCache.key = key;
+      flightCache.data = flight.data;
     } catch (e) {
       flight.error = e && e.message ? e.message : String(e);
     } finally {
@@ -85,7 +108,7 @@ export function renderCodePanel(
     clear(fileBar).append(...fileTabs(flight, current.file, (name) => {
       cfg.file = name;
       paint();
-    }));
+    }, flightMerged));
     // 검토도 다시 — float32 정밀도 지적은 C 탭에서만 성립한다
     clear(reviewHost).append(reviewBox(specs, validation, snapshot));
     // 추적성 표는 파라미터→코드 라인 대응이라 탑재 C에는 다른 대응이 필요하다
@@ -94,19 +117,16 @@ export function renderCodePanel(
     clear(footHost).append(footNote(flight, specs));
   };
 
-  const langBtns = [["python", "Python"], ["c", "C 헤더"], ["flight", "탑재 C"]].map(
-    ([id, label]) => el("button", {
-      "data-lang": id,
-      title: id === "flight"
-        ? "FCC에 통합되어 그대로 실릴 제어법칙 코드 — 구조·블록 로직·파라미터 전부"
-        : "현재 설계 형상의 코드 표현 (파라미터)",
-      onclick: () => {
-        cfg.lang = id;
-        // 응답을 받아 둔 뒤에는 다시 부르지 않는다 — 값이 바뀌면 패널을 다시 연다
-        if (id === "flight" && !flight.data && !flight.loading) loadFlight();
-        else paint();
-      },
-    }, label));
+  const langBtns = allow.map(([id, label, title]) => el("button", {
+    "data-lang": id,
+    title,
+    onclick: () => {
+      cfg.lang = id;
+      // 응답을 받아 둔 뒤에는 다시 부르지 않는다 — 값이 바뀌면 패널을 다시 연다
+      if (id === "flight" && !flight.data && !flight.loading) loadFlight();
+      else paint();
+    },
+  }, label));
 
   const copy = async () => {
     try {
@@ -133,7 +153,8 @@ export function renderCodePanel(
   const footHost = el("div");
   clear(host).append(
     el("div", { class: "row", style: "margin-top: 12px" },
-      ...langBtns,
+      // 형식 선택지가 하나뿐이면 줄을 만들지 않는다 — 고를 게 없는 버튼은 잡음이다
+      ...(langBtns.length > 1 ? [el("span", { class: "hint" }, "형식"), ...langBtns] : []),
       el("button", { onclick: copy }, "복사"),
       el("label", { class: "field check", title: "설명·단위·허용범위를 코드 주석에 포함" },
         el("input", {
@@ -153,18 +174,23 @@ export function renderCodePanel(
 }
 
 /** 탑재 C 파일 탭 — 서버가 정한 읽는 순서 그대로 (진입점 → 자료형 → 조립부 → …). */
-function fileTabs(flight, selected, onPick) {
+function fileTabs(flight, selected, onPick, merged) {
   // 다른 탭으로 옮겨도 받아 둔 응답은 남는다 — 파일 탭까지 따라가면 안 된다
-  if (cfg.lang !== "flight" || !flight.data || flight.error) return [];
+  if (cfg.lang !== "flight" || merged || !flight.data || flight.error) return [];
   const { count, lines } = summarize(flight.data.files);
-  return [
-    ...flight.data.files.map((f) => el("button", {
+  // 파일 16개를 한 줄에 늘어놓으면 무엇이 무엇인지 안 보인다 — 역할이 읽는 단위다
+  const groups = groupByRole(flight.data.files).flatMap(({ role, files }) => [
+    el("span", { class: "hint", style: "margin: 0 2px 0 10px" }, role),
+    ...files.map((f) => el("button", {
       class: f.name === selected?.name ? "primary" : "",
       title: `${f.role} · ${f.lines}줄`,
       onclick: () => onPick(f.name),
     }, f.name)),
-    el("span", { class: "hint", style: "margin-left: 8px" },
-      selected ? `${selected.role} · ${selected.lines}줄 — 전체 ${count}개 파일 ${lines}줄`
+  ]);
+  return [
+    ...groups,
+    el("span", { class: "hint", style: "margin-left: 10px" },
+      selected ? `— ${selected.lines}줄 / 전체 ${count}개 ${lines}줄`
         : `${count}개 파일 ${lines}줄`),
   ];
 }
@@ -174,8 +200,8 @@ function footNote(flight, specs) {
   if (cfg.lang !== "flight") {
     return el("p", { class: "hint" },
       "현재 설계 형상의 코드 표현입니다 — 로직이 아니라 파라미터만 생성합니다. ",
-      "구조·블록 로직까지 담긴 탑재 코드는 [탑재 C] 탭입니다. ",
-      "Python 탭 코드는 엔진에 그대로 붙여 실행할 수 있고, ",
+      "구조·블록 로직까지 담긴 것은 탑재 코드 쪽입니다. ",
+      "Python 코드는 엔진에 그대로 붙여 실행할 수 있고, ",
       "조립(결선)은 서버 routes/sim.py::_build 가 정본입니다.");
   }
   const excluded = excludedSpecs(specs);
