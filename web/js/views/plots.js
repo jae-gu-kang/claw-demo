@@ -303,6 +303,151 @@ export function profileCanvas(xs, ys, {
   return canvas;
 }
 
+/** 시간 가중 히스토그램 — bars: [{x0, x1, time, frac}] (lib/duty.js histBars).
+
+x축 범위는 **막대 경계 그대로**다. 엔진이 한계를 알면 경계를 한계 전 구간으로
+잡으므로, 빈 칸으로 남는 구간이 곧 "쓰지 않은 조종권"이다 — 데이터 범위로 다시
+맞추면 어떤 런이든 양끝이 차 보여 여유가 사라진다.
+markers: [{x, color, label, dash}] — 평균(트림 편향) 같은 세로 기준선.
+*/
+export function histogramCanvas(bars, {
+  title = "", xLabel = "", yLabel = "체류 시간 [s]", markers = [],
+  color = "#007aff", width = 380, height = 190,
+} = {}) {
+  const { canvas, ctx } = makeCanvas(width, height);
+  const mL = 46, mT = 20, mR = 12, mB = 30;
+  if (!bars.length) {
+    ctx.fillStyle = "#86868b";
+    ctx.fillText("표본 없음", mL, height / 2);
+    return canvas;
+  }
+  const x0 = bars[0].x0;
+  const x1 = bars[bars.length - 1].x1;
+  const yMax = Math.max(...bars.map((b) => b.time), 1e-9);
+  const px = linScale(x0, x1, mL, width - mR);
+  const py = linScale(0, yMax * 1.08, height - mB, mT);
+
+  ctx.strokeStyle = "#e5e5ea";
+  ctx.beginPath();
+  for (const tk of niceTicks(0, yMax, 4)) {
+    ctx.moveTo(mL, py(tk));
+    ctx.lineTo(width - mR, py(tk));
+    ctx.fillStyle = "#86868b";
+    ctx.fillText(fmtTick(tk), 4, py(tk) + 3);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = color;
+  for (const b of bars) {
+    const w = Math.max(1, px(b.x1) - px(b.x0) - 1);
+    const h = py(0) - py(b.time);
+    if (h > 0) ctx.fillRect(px(b.x0), py(b.time), w, h);
+  }
+
+  for (const m of markers) {
+    if (typeof m.x !== "number" || !Number.isFinite(m.x)) continue;
+    ctx.strokeStyle = m.color ?? "#ff3b30";
+    ctx.setLineDash(m.dash ?? [4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(px(m.x), mT);
+    ctx.lineTo(px(m.x), height - mB);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (m.label) {
+      ctx.fillStyle = m.color ?? "#ff3b30";
+      ctx.fillText(m.label, Math.min(px(m.x) + 3, width - mR - 40), mT + 10);
+    }
+  }
+
+  ctx.fillStyle = "#86868b";
+  for (const tk of niceTicks(x0, x1, 5)) {
+    ctx.fillText(fmtTick(tk), px(tk) - 10, height - mB + 14);
+  }
+  ctx.fillText(xLabel, width - mR - 7 * xLabel.length, height - 4);
+  ctx.fillText(yLabel, 4, mT - 6);
+  ctx.fillStyle = "#1d1d1f";
+  ctx.fillText(title, mL, 12);
+  return canvas;
+}
+
+/** 타각–타율 체류시간 밀도 + 작동기 능력 상자.
+
+view: {xEdges, yEdges, time[[…]]} (lib/duty.js densityView), box: capabilityBox 결과.
+셀 색은 **√(시간) 비례**다: 듀티 분포는 트림점 한 칸에 시간이 몰려 선형 척도로
+칠하면 나머지가 전부 배경색이 되어 "거기밖에 안 갔다"로 오독된다.
+능력 상자(위치 한계 세로선·±rate_max 가로선)는 아는 변만 그린다 — 모르는 한계를
+임의값으로 그리면 없는 정보를 그리는 것이다.
+*/
+export function densityCanvas(view, {
+  box = {}, title = "", xLabel = "", yLabel = "", width = 380, height = 190,
+} = {}) {
+  const { canvas, ctx } = makeCanvas(width, height);
+  const mL = 52, mT = 20, mR = 12, mB = 30;
+  const xe = view?.xEdges ?? [];
+  const ye = view?.yEdges ?? [];
+  const cells = view?.time ?? [];
+  if (xe.length < 2 || ye.length < 2) {
+    ctx.fillStyle = "#86868b";
+    ctx.fillText("표본 없음", mL, height / 2);
+    return canvas;
+  }
+  const px = linScale(xe[0], xe[xe.length - 1], mL, width - mR);
+  const py = linScale(ye[0], ye[ye.length - 1], height - mB, mT);
+  let peak = 0;
+  for (const row of cells) for (const v of row) if (v > peak) peak = v;
+
+  for (let i = 0; i < cells.length; i += 1) {
+    for (let j = 0; j < cells[i].length; j += 1) {
+      const v = cells[i][j];
+      if (!(v > 0)) continue; // 빈 셀은 칠하지 않는다 — "안 간 곳"이 보여야 한다
+      const k = Math.sqrt(v / peak);
+      ctx.fillStyle = `rgba(0, 113, 227, ${0.12 + 0.88 * k})`;
+      const xa = px(xe[i]);
+      const xb = px(xe[i + 1]);
+      const ya = py(ye[j + 1]);
+      const yb = py(ye[j]);
+      ctx.fillRect(xa, ya, Math.max(1, xb - xa), Math.max(1, yb - ya));
+    }
+  }
+
+  ctx.strokeStyle = "#e5e5ea";
+  ctx.beginPath();
+  for (const tk of niceTicks(ye[0], ye[ye.length - 1], 4)) {
+    ctx.moveTo(mL, py(tk));
+    ctx.lineTo(width - mR, py(tk));
+    ctx.fillStyle = "#86868b";
+    ctx.fillText(fmtTick(tk), 4, py(tk) + 3);
+  }
+  ctx.stroke();
+
+  // 능력 상자 — 아는 변만 (null은 그리지 않는다)
+  ctx.strokeStyle = "#ff3b30";
+  ctx.setLineDash([5, 3]);
+  ctx.beginPath();
+  for (const x of [box.xLo, box.xHi]) {
+    if (typeof x !== "number" || !Number.isFinite(x)) continue;
+    ctx.moveTo(px(x), mT);
+    ctx.lineTo(px(x), height - mB);
+  }
+  for (const y of [box.yLo, box.yHi]) {
+    if (typeof y !== "number" || !Number.isFinite(y)) continue;
+    ctx.moveTo(mL, py(y));
+    ctx.lineTo(width - mR, py(y));
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = "#86868b";
+  for (const tk of niceTicks(xe[0], xe[xe.length - 1], 5)) {
+    ctx.fillText(fmtTick(tk), px(tk) - 10, height - mB + 14);
+  }
+  ctx.fillText(xLabel, width - mR - 7 * xLabel.length, height - 4);
+  ctx.fillText(yLabel, 4, mT - 6);
+  ctx.fillStyle = "#1d1d1f";
+  ctx.fillText(title, mL, 12);
+  return canvas;
+}
+
 /** 복소평면 산점도 — points: [{x, y, color, label?}]. 축 십자선 + 눈금. */
 export function scatterCanvas(points, { title = "", width = 420, height = 300 } = {}) {
   const { canvas, ctx } = makeCanvas(width, height);
