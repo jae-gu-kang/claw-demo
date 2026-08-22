@@ -95,6 +95,7 @@ export const TOP_SVG = `
     <text class="ttl" x="110" y="240">${B.planner.title}</text>
   </g>
   <text class="bname" x="110" y="286">${B.planner.sub}</text>
+  <text class="sigval" data-sig="w_plan" x="110" y="302"></text>
   <path class="wire" d="M180 218 H246" marker-end="url(#arrw)"/>
   <text class="siglabel" x="215" y="207">임무프로파일</text>
 
@@ -103,6 +104,7 @@ export const TOP_SVG = `
     <text class="ttl" x="325" y="240">유도</text>
   </g>
   <text class="bname" x="325" y="286">${B.guidance.sub}</text>
+  <text class="sigval" data-sig="w_gui" x="325" y="302"></text>
   <path class="wire" d="M400 218 H476" marker-end="url(#arrw)"/>
   <text class="siglabel" x="440" y="207">V·h·ψ_cmd</text>
 
@@ -111,6 +113,7 @@ export const TOP_SVG = `
     <text class="ttl" x="555" y="240">${B.autopilot.title}</text>
   </g>
   <text class="bname" x="555" y="286">${B.autopilot.sub}</text>
+  <text class="sigval" data-sig="w_ap" x="555" y="302"></text>
   <path class="wire" d="M630 218 H686" marker-end="url(#arrw)"/>
   <text class="siglabel" x="659" y="207">θ·φ_cmd</text>
 
@@ -121,6 +124,7 @@ export const TOP_SVG = `
     <path d="M700 252 H716 L748 216 H764" stroke="#111" stroke-width="2" fill="none"/>
   </g>
   <text class="bname" x="732" y="286">${B.limiter.title}</text>
+  <text class="sigval" data-sig="w_lim" x="732" y="302"></text>
   <path class="wire" d="M774 218 H826" marker-end="url(#arrw)"/>
 
   <g class="blk" data-block="scas" tabindex="0">
@@ -128,6 +132,7 @@ export const TOP_SVG = `
     <text class="ttl" x="900" y="240">${B.scas.title}</text>
   </g>
   <text class="bname" x="900" y="286">${B.scas.sub}</text>
+  <text class="sigval" data-sig="w_scas" x="900" y="302"></text>
   <path class="wire" d="M970 218 H1026" marker-end="url(#arrw)"/>
   <text class="siglabel" x="1000" y="207">피치·롤·요</text>
 
@@ -145,6 +150,7 @@ export const TOP_SVG = `
     <text class="ttl" x="1290" y="240">${B.actuator.title}</text>
   </g>
   <text class="bname" x="1290" y="286">${B.actuator.sub}</text>
+  <text class="sigval" data-sig="w_act" x="1290" y="302"></text>
   <path class="wire" d="M1340 218 H1386" marker-end="url(#arrw)"/>
   <text class="siglabel" x="1363" y="207">타면·추력</text>
 
@@ -154,6 +160,7 @@ export const TOP_SVG = `
     <text class="ttl2" x="1465" y="252">${B.plant.sub}</text>
   </g>
   <text class="bname" x="1465" y="286" style="font-size:14px">델타윙 · 쌍발 · 엘레본×4 · 러더</text>
+  <text class="sigval" data-sig="w_plant" x="1465" y="302"></text>
 
   <!-- 피드백 (참값 → 항법 → NavOutput만 소비: 참값 차단 계약 03 §4).
        리턴 리서(세로선)는 프레임·블록 엣지와 평행 근접 금지 — 간격 채널 중앙 배치.
@@ -165,6 +172,7 @@ export const TOP_SVG = `
     <text class="ttl2" x="1240" y="526">${B.nav.sub}</text>
   </g>
   <text class="bname" x="1240" y="562">참값 + 잡음 + 바이어스 + 지연</text>
+  <text class="sigval" data-sig="w_nav" x="1240" y="578"></text>
 
   <path class="wire" d="M1150 512 H236 V252 H246" marker-end="url(#arrw)"/>
   <circle class="branch" cx="818" cy="512" r="3.4"/>
