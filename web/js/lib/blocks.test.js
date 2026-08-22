@@ -3,14 +3,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { readFileSync } from "node:fs";
+
 import { BLOCKS, CHAIN, resolvePath } from "./blocks.js";
 // 뷰 모듈이지만 모듈 스코프에서 DOM을 안 건드려 node import 가능 — 배선 드리프트 가드
 import { DESIGN_ORDER, TOP_SVG } from "../views/diagram.js";
 import { CHIP_LABEL, SUBSYSTEMS } from "../views/subsystems.js";
 
-// main.js VIEWS의 수동 사본 — main.js가 DOM 의존이라 직접 import 불가. 보호는
-// 단방향(blocks.js 오타만 검출): main.js에서 뷰 개명 시 이 목록도 갱신할 것
-const VIEW_HASHES = new Set(["blocks", "trim", "margins", "envelope", "gains", "sim", "results"]);
+// main.js는 모듈 스코프에서 DOM을 건드려 import할 수 없다 — 대신 **원문에서 읽는다**.
+// 수동 사본을 두면 뷰가 늘 때 조용히 낡아 무효 링크·죽은 탭을 못 잡는다
+const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
+const VIEW_HASHES = new Set(
+  read("../main.js").match(/const VIEWS = \{([^}]*)\}/)[1]
+    .split(",").map((s) => s.trim()).filter(Boolean),
+);
+const NAV_HASHES = [...read("../../index.html").matchAll(/data-view="([\w-]+)"/g)]
+  .map((m) => m[1]);
 // 엔진 레지스트리에 실존하는 카테고리/이름 (test_fcl_law·test_system이 핀)
 const REGISTRY_REFS = new Set([
   "fcl/Autopilot", "fcl/ScasAxis", "fcl/Mixer",
@@ -224,4 +232,12 @@ test("서브시스템 SVG data-p는 루트 블록 스키마 파라미터명만 (
       assert.ok(rootNames.length > 0, `${id}: 편집 가능 페이지인데 연동 수치 없음`);
     }
   }
+});
+
+test("헤더 탭이 전부 실제 라우트다 — 죽은 탭 금지", () => {
+  assert.ok(NAV_HASHES.length >= 8, `nav 링크 ${NAV_HASHES.length}개 — 파싱 실패?`);
+  for (const h of NAV_HASHES) {
+    assert.ok(VIEW_HASHES.has(h), `#${h} 탭이 main.js VIEWS에 없다 (누르면 구조도로 폴백)`);
+  }
+  assert.ok(VIEW_HASHES.has("autocode"), "AUTO CODE 라우트 누락");
 });

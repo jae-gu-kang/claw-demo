@@ -27,7 +27,12 @@ const PRE_STYLE = "font-family: var(--mono); font-size: 12px; line-height: 1.5;"
 /** 코드 패널 렌더 — host를 비우고 다시 채운다.
 specs: lib/codegen 스펙 배열 (1개면 단일 블록, 여러 개면 전체 형상 스냅샷)
 meta: {generatedAt, server, engine} · validation: [{key, ok, detail}] · gainTables: store 값 */
-export function renderCodePanel(host, { specs, meta, validation = [], gainTables = null }) {
+export function renderCodePanel(
+  host, { specs, meta, validation = [], gainTables = null, lang = null },
+) {
+  // lang은 진입 시 한 번 정하는 기본값 — AUTO CODE 탭이 탑재 C로 열기 위해 쓴다.
+  // 이후 사용자가 고른 탭은 모듈 스코프 cfg에 남아 화면을 옮겨도 유지된다
+  if (lang) cfg.lang = lang;
   const snapshot = specs.length > 1 || gainTables != null;
   const pre = el("pre", { style: PRE_STYLE });
   const copyNote = el("span", { class: "hint" });

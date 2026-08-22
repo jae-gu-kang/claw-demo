@@ -2,6 +2,7 @@
 
 import { api } from "./api.js";
 import { clear } from "./dom.js";
+import * as autocode from "./views/autocode.js";
 import * as blocks from "./views/blocks.js";
 import * as envelope from "./views/envelope.js";
 import * as gains from "./views/gains.js";
@@ -11,7 +12,7 @@ import * as sim from "./views/sim.js";
 import * as trim from "./views/trim.js";
 
 // 구조도(블록 다이어그램 허브)가 진입점 — 블록 클릭으로 각 편집 화면 진입 (02 §4)
-const VIEWS = { blocks, trim, margins, envelope, gains, sim, results };
+const VIEWS = { blocks, trim, margins, envelope, gains, sim, results, autocode };
 
 function route() {
   const name = location.hash.slice(1) || "blocks";
