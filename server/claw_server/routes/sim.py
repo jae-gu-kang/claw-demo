@@ -13,6 +13,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from claw.analysis.duty import duty_report
 from claw.fcl import make_demo_fcl
 from claw.guidance import Guidance, LosPath, ModeSpec
 from claw.nav import NavErrorModel
@@ -22,7 +23,7 @@ from claw.sim import Simulator
 from claw.tables import Table
 from claw.trim import trim_level
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
-from claw_server.serialize import sim_result_dict
+from claw_server.serialize import sim_result_dict, to_jsonable
 
 router = APIRouter(tags=["sim"])
 
@@ -223,17 +224,23 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
     return job.to_dict()
 
 
-@router.get("/sim/{result_id}/replay")
-def sim_replay(
-    result_id: str, request: Request, stride: int = Query(default=1, ge=1)
-) -> dict:
-    """저장된 시뮬 결과의 stride 다운샘플 뷰 — 재생·플롯용 (요약 스칼라는 원본 유지)."""
+def _load_sim(request: Request, result_id: str) -> dict:
+    """저장된 sim 결과 본문 — 없으면 404, 다른 종류면 409 (조회 경로 공통 규약)."""
     try:
         payload = request.app.state.store.load(result_id)
     except (KeyError, ValueError):
         raise HTTPException(status_code=404, detail=f"결과 없음: {result_id}")
     if payload.get("kind") != "sim":
         raise HTTPException(status_code=409, detail=f"sim 결과가 아님: {result_id}")
+    return payload
+
+
+@router.get("/sim/{result_id}/replay")
+def sim_replay(
+    result_id: str, request: Request, stride: int = Query(default=1, ge=1)
+) -> dict:
+    """저장된 시뮬 결과의 stride 다운샘플 뷰 — 재생·플롯용 (요약 스칼라는 원본 유지)."""
+    payload = _load_sim(request, result_id)
     if stride == 1:
         return payload
     sl = slice(None, None, stride)
@@ -248,3 +255,26 @@ def sim_replay(
     out["envelope"] = envelope
     out["stride"] = stride
     return out
+
+
+@router.get("/sim/{result_id}/duty")
+def sim_duty(
+    result_id: str,
+    request: Request,
+    bins: int = Query(default=32, ge=4, le=256),
+    rate_bins: int = Query(default=24, ge=4, le=128),
+) -> dict:
+    """타면 사용 통계 — 타각 범위별 체류 시간·포화·타율 (엔진 analysis.duty).
+
+    **stride를 받지 않는다.** 다운샘플본으로 집계하면 최대 타율과 짧은 포화
+    구간이 통째로 사라져 조용히 낙관적인 수치가 나온다 — 재생(/replay)과 달리
+    여기서는 저장된 전 해상도가 유일하게 옳은 입력이다. 그래서 원본을 쥔 서버가
+    집계까지 끝내 웹에 요약만 보낸다 (표본 수와 무관하게 응답 크기 유계).
+    """
+    payload = _load_sim(request, result_id)
+    report = duty_report(
+        payload["t"], payload["signals"], payload.get("meta") or {},
+        bins=bins, rate_bins=rate_bins,
+    )
+    report["result_id"] = result_id
+    return to_jsonable(report)

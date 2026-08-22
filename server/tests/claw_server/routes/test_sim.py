@@ -71,6 +71,54 @@ def test_sim_replay_downsampled(client, wait_job):
     assert client.get("/api/sim/nope/replay").status_code == 404
 
 
+def test_sim_duty_report(client, wait_job):
+    """타면 사용 통계 — 저장된 전 해상도에서 집계, 응답은 요약(표본 수 무관 유계)."""
+    j = wait_job(client.post("/api/sim/run", json=_hold_mission(
+        alt=1030.0, actuators={"rate_max": 6.0})).json()["id"], timeout=120.0)
+    r = client.get(f"/api/sim/{j['result_id']}/duty", params={"bins": 16})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["result_id"] == j["result_id"]
+    assert [c["key"] for c in body["channels"]] == ["elevon_l", "elevon_r", "rudder"]
+    assert body["n"] == 2000 and body["t_total"] == 20.0
+    assert body["actuators"] is True and body["rate_is_command_slew"] is False
+
+    ch = body["channels"][0]
+    assert len(ch["hist"]["edges"]) == 17 and len(ch["hist"]["time"]) == 16
+    assert sum(ch["hist"]["time"]) == 20.0
+    # 판정 기준선이 결과 meta를 타고 넘어와야 포화가 판정된다
+    assert ch["rate_max"] == 6.0 and ch["pos_hi"] == 0.35
+    assert ch["pos_sat"] is not None and ch["rate_sat"] is not None
+    assert ch["exceedance"]["time"][0] == 20.0  # level 0 = 전체 시간
+    assert len(ch["density"]["time"]) == 16  # bins × rate_bins 격자
+
+
+def test_sim_duty_stride_free_and_bounds(client, wait_job):
+    """duty는 stride를 받지 않는다 — 다운샘플본은 최대 타율·짧은 포화를 지운다.
+
+    (알 수 없는 쿼리는 FastAPI가 무시하므로 stride를 붙여도 전 해상도 결과가
+    나오는지로 확인한다.)
+    """
+    j = wait_job(client.post("/api/sim/run", json=_hold_mission()).json()["id"],
+                 timeout=120.0)
+    rid = j["result_id"]
+    a = client.get(f"/api/sim/{rid}/duty").json()
+    b = client.get(f"/api/sim/{rid}/duty", params={"stride": 50}).json()
+    assert a["n"] == b["n"] == 2000
+    assert a["channels"][0]["stats"]["max_rate_abs"] == b["channels"][0]["stats"]["max_rate_abs"]
+    # 작동기 미장착 = 명령 직결 — 타율은 요구 slew이고 rate 포화는 판정 불가
+    assert a["rate_is_command_slew"] is True
+    assert a["channels"][0]["rate_sat"] is None
+    assert any("작동기 미장착" in w for w in a["warnings"])
+
+    assert client.get(f"/api/sim/{rid}/duty", params={"bins": 3}).status_code == 422
+    assert client.get(f"/api/sim/{rid}/duty", params={"bins": 999}).status_code == 422
+    tj = wait_job(client.post("/api/trim/batch", json={
+        "cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}]}).json()["id"])
+    assert client.get(f"/api/sim/{tj['result_id']}/duty").status_code == 409
+    assert client.get("/api/sim/nope/duty").status_code == 404
+
+
 def test_sim_cancel_preserves_partial_result(client, wait_job):
     import time
 
