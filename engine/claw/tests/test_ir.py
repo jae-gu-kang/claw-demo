@@ -1,7 +1,14 @@
 """M16 codegen — IR 제약·실행·C 생성 (구현 문서 §2.2).
 
-IR의 가치는 "구조를 데이터로 옮겼다"가 아니라 **옮긴 것이 원본과 같다**는 데 있다.
-그래서 여기서 가장 무거운 단정은 손으로 쓴 제어법칙과의 비트 일치다.
+**손으로 쓴 오라클은 없다.** 증분 C에서 `fcl/`이 IR 백엔드로 이관되면서 구조가
+한 곳으로 합쳐졌고, 비교할 두 번째 구현이 사라졌다. 이관이 옳았다는 증거는 그때
+기존 회귀 전부(폐루프 미션 핀 포함)가 그대로 통과했다는 사실이고, 그 시점은 git
+이력에 남아 있다.
+
+그래서 지금 이 파일이 지키는 것은 셋이다:
+  ① IR이 C 생성 가능 제약을 강제하는가 (대수 루프·dead code·예약 이름)
+  ② 생성 C가 IR과 같은가 — 이건 여전히 **두 구현의 대조**다 (flight/tests가 본체)
+  ③ 클래스 API가 그래프를 옳게 태우는가 (어댑터 배선 — 입출력 마샬링)
 """
 
 import math
@@ -11,18 +18,16 @@ import pytest
 from claw.blocks.basic import Gain, Product, Saturation
 from claw.blocks.controllers import PID
 from claw.blocks.dynamics import Integrator
-from claw.blocks.filters import Washout
-from claw.codegen import (
-    GraphRunner,
+from claw.blocks.filters import CommandFilter, Washout
+from claw.codegen import GraphRunner, emit_c
+from claw.codegen.ir import Graph, Node, Op
+from claw.fcl.demo import DEMO_PITCH, DEMO_YAW
+from claw.fcl.graphs import (
     alpha_limiter_graph,
-    emit_c,
+    gain_schedule_nodes,
     mixer_graph,
     scas_axis_graph,
 )
-from claw.codegen.graphs import gain_schedule_nodes
-from claw.codegen.ir import Graph, Node, Op
-from claw.fcl.autopilot import CommandFilter
-from claw.fcl.demo import DEMO_PITCH, DEMO_YAW
 from claw.fcl.scas import ScasAxis
 
 DT = 0.01
@@ -93,7 +98,10 @@ def test_연산_노드의_입력_개수는_검증된다():
         Op("w", "없는연산", ("a",))
 
 
-# ── IR ≡ 손으로 쓴 제어법칙 ───────────────────────────────────────────────
+# ── 어댑터 배선 ───────────────────────────────────────────────────────────
+# 클래스의 step()은 이제 그래프를 태우는 얇은 층이다. 여기서 잡는 것은 구조가
+# 아니라 **마샬링** — 항법 상태에서 어떤 공학량을 뽑아 어느 입력에 넣고, 결과를
+# 어떤 계약으로 되돌리는가. 구조 자체는 fcl/graphs.py 한 곳뿐이라 대조 대상이 없다.
 
 
 @pytest.mark.parametrize(
@@ -105,7 +113,8 @@ def test_연산_노드의_입력_개수는_검증된다():
         (DEMO_YAW, ("kp", "ki")),  # 일부만 스케줄
     ],
 )
-def test_IR_실행이_ScasAxis와_비트_일치(cfg, scheduled):
+def test_ScasAxis_어댑터가_축_그래프와_같은_답을_낸다(cfg, scheduled):
+    """클래스가 게인 덮어쓰기를 포트로 옳게 흘려보내는가 (기본값 복원 포함)."""
     oracle = ScasAxis(**cfg).init(DT)
     oracle.reset()
     runner = GraphRunner(scas_axis_graph("ax", scheduled=scheduled, **cfg), DT)
@@ -377,7 +386,7 @@ def test_외삽_금지가_아닌_테이블은_탑재_코드로_나가지_않는�
         _emit(alpha_limiter_graph(stall_table=linear, margin=0.05))
 
 
-def test_믹서가_손으로_쓴_것과_비트_일치():
+def test_믹서_어댑터가_4면_배열로_옳게_되돌린다():
     from claw.fcl.mixer import Mixer
 
     cfg = dict(elevon_lo=-0.35, elevon_hi=0.35, rudder_lo=-0.35, rudder_hi=0.35,
@@ -397,7 +406,7 @@ def test_믹서가_손으로_쓴_것과_비트_일치():
         assert float(ref.throttle[1]) == got["throttle_r"]
 
 
-def test_리미터가_손으로_쓴_것과_비트_일치():
+def test_리미터_어댑터가_항법에서_공학량을_옳게_뽑는다():
     import numpy as np
 
     from claw.common.attitude import euler_to_quat, quat_to_euler
@@ -445,14 +454,15 @@ def test_스케줄은_실제로_쓰이는_축의_필터만_만든다():
     assert set(outs) == {"pitch", "roll"}
 
 
-def test_오토파일럿이_모드_전환을_포함해_비트_일치():
+def test_오토파일럿_어댑터가_모드_전환을_포함해_같은_답을_낸다():
     """모드 on/off 경계가 이 구조의 급소다 — 필터 추적·적분기 소거·홀드가 얽혀 있다."""
     import numpy as np
 
     from claw.common.attitude import euler_to_quat, quat_to_euler
     from claw.common.contracts import GuidanceCommand, NavOutput
-    from claw.codegen.graphs import autopilot_graph
+    from claw.fcl.airdata import airdata_from_nav
     from claw.fcl.autopilot import Autopilot
+    from claw.fcl.graphs import autopilot_graph
 
     cfg = {d.name: d.default for d in Autopilot.PARAM_DEFS}
     oracle = Autopilot(**cfg).init(DT)
@@ -480,7 +490,7 @@ def test_오토파일럿이_모드_전환을_포함해_비트_일치():
         # 통합 계층이 넘길 값 그대로 (원시 상태 → 공학량 변환은 그래프 밖)
         got = runner.step(
             psi=float(quat_to_euler(nav.q_nb)[2]), h=-float(nav.pos_n[2]),
-            hdot=-float(nav.vel_n[2]), V=float(np.linalg.norm(nav.vel_n)),
+            hdot=-float(nav.vel_n[2]), V=float(airdata_from_nav(nav)[0]),
             cmd_heading=cmd.heading, cmd_alt=cmd.alt, cmd_speed=cmd.speed,
             heading_on=float(on[0]), alt_on=float(on[1]), speed_on=float(on[2]),
         )

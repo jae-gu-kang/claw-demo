@@ -12,7 +12,8 @@
   마진 맵 재사용 (분석 측)
 """
 
-from claw.fcl.autopilot import CommandFilter
+from claw.codegen.ir_exec import GraphRunner
+from claw.fcl.graphs import gain_schedule_graph
 from claw.tables import Table
 
 SCHED_VARS = ("mach", "alt", "fuel")
@@ -36,28 +37,30 @@ class GainSchedule:
                 )
         self.tables = dict(tables)
         self.filter_tau = filter_tau
-        self._filters = {v: CommandFilter(filter_tau) for v in SCHED_VARS}
+        # 실제로 쓰이는 스케줄 변수만 필터를 갖는다 — 구조는 fcl/graphs.py가 정본
+        self.used_vars = tuple(
+            v for v in SCHED_VARS if any(v in t.axis_names for t in self.tables.values())
+        )
 
     def init(self, dt: float) -> "GainSchedule":
         self.dt = dt
-        for f in self._filters.values():
-            f.init(dt)
+        self._runner = GraphRunner(
+            gain_schedule_graph(tables=self.tables, filter_tau=self.filter_tau), dt
+        )
+        self.reset()
         return self
 
     def reset(self) -> None:
-        for f in self._filters.values():
-            f.reset()
+        self._runner.reset()
 
     def step(self, mach, alt, fuel) -> dict:
         """필터링된 스케줄 변수로 전 테이블 조회 → 중첩 게인 dict."""
         raw = {"mach": mach, "alt": alt, "fuel": fuel}
-        vals = {v: self._filters[v].step(raw[v], raw[v]) for v in SCHED_VARS}
+        flat = self._runner.step_all(**{v: float(raw[v]) for v in self.used_vars})
         out: dict = {}
-        for name, tab in self.tables.items():
-            grp, key = name.split(".", 1)
-            out.setdefault(grp, {})[key] = tab.interp(
-                **{ax: vals[ax] for ax in tab.axis_names}
-            )
+        for name in self.tables:
+            grp, _, key = name.partition(".")
+            out.setdefault(grp, {})[key] = flat[f"{grp}_{key}"]
         return out
 
 

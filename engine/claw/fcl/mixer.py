@@ -14,6 +14,7 @@ import numpy as np
 
 from claw.blocks.base import Block
 from claw.common.contracts import SurfaceCommand
+from claw.fcl.graphs import mixer_graph, stateless_runner
 from claw.params.param import ParamDef
 
 
@@ -40,19 +41,24 @@ class Mixer(Block):
         self.elevon_lo, self.elevon_hi = elevon_lo, elevon_hi
         self.rudder_lo, self.rudder_hi = rudder_lo, rudder_hi
         self.k_diff_thr = k_diff_thr
+        self.cfg = {
+            "elevon_lo": elevon_lo, "elevon_hi": elevon_hi,
+            "rudder_lo": rudder_lo, "rudder_hi": rudder_hi,
+            "k_diff_thr": k_diff_thr,
+        }
+        self._runner = stateless_runner(mixer_graph(**self.cfg))
 
     def step(self, de, da, dr, thr) -> SurfaceCommand:
-        """(피치·롤·요 축 명령, 집합 스로틀) → SurfaceCommand. 무상태(순수) 블록."""
-        left = min(max(de + da, self.elevon_lo), self.elevon_hi)
-        right = min(max(de - da, self.elevon_lo), self.elevon_hi)
-        rudder = min(max(dr, self.rudder_lo), self.rudder_hi)
-        # 차동추력은 클램프된 실 러더 기준 — 러더가 내지 못하는 명령에 추력이
-        # 반응하지 않도록 (포화 시 추력 인계는 별도 설계 항목)
-        d = self.k_diff_thr * rudder
+        """(피치·롤·요 축 명령, 집합 스로틀) → SurfaceCommand. 무상태(순수) 블록.
+
+        믹싱 구조는 `fcl/graphs.py mixer_nodes`가 정본 — 여기서는 실행하고
+        SurfaceCommand 계약으로 포장만 한다. 내/외측 1:1 고정 믹싱이라 좌·우
+        두 값이 4면을 재구성한다.
+        """
+        o = self._runner.step(de=de, da=da, dr=dr, thr=thr)
+        left, right = o["elevon_l"], o["elevon_r"]
         return SurfaceCommand(
             elevon=np.array([left, left, right, right]),
-            rudder=rudder,
-            throttle=np.array(
-                [min(max(thr - d, 0.0), 1.0), min(max(thr + d, 0.0), 1.0)]
-            ),
+            rudder=o["rudder"],
+            throttle=np.array([o["throttle_l"], o["throttle_r"]]),
         )

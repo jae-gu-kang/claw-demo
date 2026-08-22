@@ -1,7 +1,8 @@
-"""탑재 C 산출물 3자 대조 — 손으로 쓴 제어법칙(oracle) ↔ IR 실행 ↔ 생성 C.
+"""탑재 C 산출물 대조 — 설계 실행(Python 백엔드) ↔ 생성 C.
 
-셋을 모두 비교하는 이유는 어긋났을 때 **어느 단계에서 깨졌는지** 바로 나오기
-때문이다: oracle ≠ IR이면 구조를 잘못 옮긴 것이고, IR ≠ C면 에미터가 틀린 것이다.
+증분 C에서 `fcl/`이 IR 백엔드로 이관되면서 손으로 쓴 두 번째 구현은 사라졌다.
+그래서 여기 남은 대조는 **같은 IR의 두 백엔드**다 — 이것이 이 저장소에서 유일하게
+남은 진짜 이중 구현이고, 탑재 코드가 설계와 같은 답을 내는지의 근거다.
 
 전부 배정밀도이고 연산 순서를 문자 그대로 맞췄으므로 목표는 근사가 아니라
 **비트 일치**다. 허용오차를 두면 진짜 어긋남이 그 아래 숨는다.
@@ -78,14 +79,18 @@ def _ir_runner(warm):
     return runner
 
 
-def test_ir_matches_handwritten_law(trace):
-    """IR 실행이 손으로 쓴 FlightControlLaw와 비트 일치 — 구조를 옳게 옮겼는가."""
+def test_law_replays_deterministically(trace):
+    """같은 입력·같은 웜스타트면 법칙이 같은 답을 낸다 — C 대조의 기준선.
+
+    미션 중 기록한 출력과, 그 입력을 따로 세운 러너에 다시 흘린 출력이 같아야
+    한다. 어댑터(항법→공학량)와 웜스타트 주입이 재현 가능한지를 여기서 잡는다.
+    """
     inputs, refs, warm = trace
     runner = _ir_runner(warm)
     got = [runner.step(**row) for row in inputs]
     for i, name in enumerate(mission_trace.OUTPUT_ORDER):
         diff = _first_diff([r[i] for r in refs], [g[name] for g in got], name)
-        assert diff is None, f"oracle ≠ IR — {diff}"
+        assert diff is None, f"재생이 재현되지 않음 — {diff}"
 
 
 def test_trace_exercises_the_hard_paths(trace):
@@ -120,10 +125,10 @@ def test_generated_fcl_matches_ir(trace, tmp_path):
     for i, name in enumerate(mission_trace.OUTPUT_ORDER):
         c_vals = [row[i] for row in rows]
         assert _first_diff([r[i] for r in refs], c_vals, name) is None, (
-            f"oracle ≠ 생성 C — {_first_diff([r[i] for r in refs], c_vals, name)}"
+            f"설계 실행 ≠ 생성 C — {_first_diff([r[i] for r in refs], c_vals, name)}"
         )
         assert _first_diff([g[name] for g in ir], c_vals, name) is None, (
-            f"IR ≠ 생성 C — {_first_diff([g[name] for g in ir], c_vals, name)}"
+            f"러너 ≠ 생성 C — {_first_diff([g[name] for g in ir], c_vals, name)}"
         )
 
 
@@ -157,7 +162,7 @@ def _yaw_reference():
     return ref, ir, "\n".join(lines) + "\n"
 
 
-def test_yaw_axis_ir_matches_handwritten():
+def test_yaw_axis_adapter_matches_graph():
     ref, ir, _ = _yaw_reference()
     assert _first_diff(ref, ir, "u") is None
     assert any(abs(v) >= DEMO_YAW["out_hi"] for v in ref), "포화를 한 번도 밟지 않음"

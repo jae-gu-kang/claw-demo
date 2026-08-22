@@ -17,54 +17,17 @@
 오버슈트 없음·고도 강하 1.1 m. 실기체 게인은 파라미터 계층(02 §5.5)에서 관리.
 """
 
-import math
-
-import numpy as np
-
 from claw.blocks.base import Block
-from claw.common.attitude import quat_to_euler, wrap_pi
-from claw.fcl.scas import ScasAxis
+from claw.blocks.filters import CommandFilter
+from claw.codegen.ir_exec import GraphRunner
+from claw.common.attitude import quat_to_euler
+from claw.fcl.airdata import airdata_from_nav
+from claw.fcl.graphs import AP_PARAM, AP_PORTS, autopilot_graph
 from claw.params.param import ParamDef
 
-
-class CommandFilter(Block):
-    """1차 명령필터 — step(cmd, current): 미시드 상태면 current에서 시작.
-
-    angle=True면 wrap 보간(최단 경로)으로 ±π 경계를 안전하게 통과한다.
-    tau=0은 필터 통과(즉시 명령).
-    """
-
-    NAME = "CommandFilter"
-    PARAM_DEFS = (
-        ParamDef("tau", 1.0, "s", "시정수 (0=통과)", lo=0.0),
-        ParamDef("angle", False, "-", "각도(wrap) 모드"),
-    )
-
-    def __init__(self, tau: float = 1.0, angle: bool = False):
-        if tau < 0:
-            raise ValueError(f"tau는 음수 불가: {tau}")
-        self.tau = tau
-        self.angle = angle
-
-    def _discretize(self, dt: float) -> None:
-        self._p = math.exp(-dt / self.tau) if self.tau > 0 else 0.0
-
-    def reset(self, state=None) -> None:
-        """state=필터 상태 웜스타트. None이면 미시드 — 첫 step의 current로 시드."""
-        self._x = None if state is None else float(state)
-
-    def reset_to(self, value) -> None:
-        """현재 측정으로 재시드 — 비활성 축 추적용."""
-        self._x = float(value)
-
-    def step(self, cmd, current):
-        if self._x is None:
-            self._x = float(current)
-        d = wrap_pi(cmd - self._x) if self.angle else (cmd - self._x)
-        self._x = self._x + (1.0 - self._p) * float(d)
-        if self.angle:
-            self._x = float(wrap_pi(self._x))
-        return self._x
+# CommandFilter는 원시 블록(M2)으로 옮겼다 — codegen이 fcl을 거치지 않고 쓰려면
+# 계층이 아래여야 한다(03 §1). 기존 import 경로는 유지한다.
+__all__ = ["Autopilot", "CommandFilter"]
 
 
 class Autopilot(Block):
@@ -112,26 +75,28 @@ class Autopilot(Block):
             raise ValueError(f"phi_max는 [0, 1.5] 필요 (ParamDef hi): {phi_max}")
         self.theta_lo, self.theta_hi, self.phi_max = theta_lo, theta_hi, phi_max
         self.k_pitch_turn, self.k_thr_turn = k_pitch_turn, k_thr_turn
-        self._spd = ScasAxis(kp=kp_spd, ki=ki_spd, out_lo=0.0, out_hi=1.0)
-        self._alt = ScasAxis(kp=kp_alt, ki=ki_alt, k_rate=k_hdot, out_lo=theta_lo, out_hi=theta_hi)
-        self._hdg = ScasAxis(kp=kp_hdg, ki=ki_hdg, out_lo=-phi_max, out_hi=phi_max)
-        self._fv = CommandFilter(tau_spd)
-        self._fh = CommandFilter(tau_alt)
-        self._fpsi = CommandFilter(tau_hdg, angle=True)
+        # 구조는 fcl/graphs.py autopilot_nodes가 정본 — 여기는 파라미터만 보유한다
+        self.cfg = {
+            "kp_spd": kp_spd, "ki_spd": ki_spd, "tau_spd": tau_spd,
+            "kp_alt": kp_alt, "ki_alt": ki_alt, "k_hdot": k_hdot, "tau_alt": tau_alt,
+            "kp_hdg": kp_hdg, "ki_hdg": ki_hdg, "tau_hdg": tau_hdg,
+            "theta_lo": theta_lo, "theta_hi": theta_hi, "phi_max": phi_max,
+            "k_pitch_turn": k_pitch_turn, "k_thr_turn": k_thr_turn,
+        }
 
     def _discretize(self, dt: float) -> None:
-        for child in (self._spd, self._alt, self._hdg, self._fv, self._fh, self._fpsi):
-            child.init(dt)
+        # 단독 실행은 게인을 포트로 — step(gains=…)이 임의 조합을 덮어쓸 수 있다
+        self._runner = GraphRunner(autopilot_graph(ports=True, **self.cfg), dt)
 
     def reset(self, state=None) -> None:
         """state={"throttle": thr0, "theta": θ0} — 트림 웜스타트 (캡처 시 범프리스)."""
-        for child in (self._spd, self._alt, self._hdg, self._fv, self._fh, self._fpsi):
-            child.reset()
-        if state:
-            if "throttle" in state:
-                self._spd.reset(float(state["throttle"]))
-            if "theta" in state:
-                self._alt.reset(float(state["theta"]))
+        st = state or {}
+        warm = {}
+        if "throttle" in st:
+            warm["spd_pid"] = float(st["throttle"])
+        if "theta" in st:
+            warm["alt_pid"] = float(st["theta"])
+        self._runner.reset(warm)
 
     def step(self, cmd, nav, gains=None):
         """(GuidanceCommand, NavOutput) → (θ_cmd, φ_cmd, thr 집합 0~1).
@@ -139,33 +104,22 @@ class Autopilot(Block):
         gains={"speed": {...}, "alt": {...}, "heading": {...}} 스텝별 덮어쓰기
         — 게인 스케줄(01 §3.4) 주입 경로. 차동추력 배분은 믹서 소관.
         """
-        V = float(np.linalg.norm(nav.vel_n))  # 바람 0 가정: 대기속도 = 관성속도
-        h, hdot = -float(nav.pos_n[2]), -float(nav.vel_n[2])
+        # 대기속도는 airdata_from_nav 하나만 쓴다 — 예전엔 여기서 norm(nav.vel_n)로
+        # 따로 구했는데(수학적으로는 같다) 반올림이 달라 법칙 안에 대기속도가 두 벌
+        # 있었다(실측 2.8e-14). 바람 모델이 들어오면 고칠 곳도 airdata 한 곳이어야 한다
+        V = float(airdata_from_nav(nav)[0])
         _phi, _theta, psi = quat_to_euler(nav.q_nb)
         g = gains or {}
-
-        if cmd.heading_on:
-            psi_ref = self._fpsi.step(cmd.heading, psi)
-            phi_cmd = self._hdg.step(float(wrap_pi(psi_ref - psi)), 0.0, **g.get("heading", {}))
-        else:
-            self._fpsi.reset_to(psi)
-            self._hdg.reset()  # 적분기 소거 — 재관여 시 잔존 뱅크 킥 방지 (ki_hdg≠0 대비)
-            phi_cmd = 0.0
-
-        if cmd.alt_on:
-            h_ref = self._fh.step(cmd.alt, h)
-            theta_cmd = self._alt.step(h_ref - h, hdot, **g.get("alt", {}))
-        else:
-            self._fh.reset_to(h)
-            theta_cmd = self._alt.step(0.0, 0.0)  # 적분기 유지 = 트림 θ 홀드
-        theta_cmd = theta_cmd + self.k_pitch_turn * (1.0 / math.cos(phi_cmd) - 1.0)
-        theta_cmd = min(max(theta_cmd, self.theta_lo), self.theta_hi)
-
-        if cmd.speed_on:
-            v_ref = self._fv.step(cmd.speed, V)
-            thr = self._spd.step(v_ref - V, 0.0, **g.get("speed", {}))
-        else:
-            self._fv.reset_to(V)
-            thr = self._spd.step(0.0, 0.0)  # 적분기 유지 = 트림 스로틀 홀드
-        thr = thr + self.k_thr_turn * (1.0 / math.cos(phi_cmd) ** 2 - 1.0)
-        return theta_cmd, phi_cmd, min(max(thr, 0.0), 1.0)
+        ports = {
+            f"g_{grp}_{key}": g.get(grp, {}).get(key, self.cfg[AP_PARAM[(grp, key)]])
+            for grp, keys in AP_PORTS.items()
+            for key in keys
+        }
+        o = self._runner.step(
+            psi=float(psi), h=-float(nav.pos_n[2]), hdot=-float(nav.vel_n[2]), V=V,
+            cmd_heading=float(cmd.heading), cmd_alt=float(cmd.alt),
+            cmd_speed=float(cmd.speed),
+            heading_on=float(bool(cmd.heading_on)), alt_on=float(bool(cmd.alt_on)),
+            speed_on=float(bool(cmd.speed_on)), **ports,
+        )
+        return o["theta_cmd"], o["phi_cmd"], o["throttle"]

@@ -14,6 +14,7 @@
 
 from claw.common.attitude import quat_to_euler
 from claw.fcl.airdata import airdata_from_nav
+from claw.fcl.graphs import alpha_limiter_graph, stateless_runner
 from claw.tables import Table
 
 
@@ -34,17 +35,22 @@ class AlphaLimiter:
             raise ValueError(f"margin은 음수 불가: {margin}")
         self.stall_table = stall_table
         self.margin = margin
+        self.cfg = {"stall_table": stall_table, "margin": margin}
+        self._runner = stateless_runner(alpha_limiter_graph(**self.cfg))
 
     def alpha_max(self, mach) -> float:
-        """제한 받음각 = α_stall(mach) − 보호마진."""
+        """제한 받음각 = α_stall(mach) − 보호마진. (설계 검토용 조회 — 법칙 경로는 그래프)"""
         return float(self.stall_table.interp(mach=mach)) - self.margin
 
     def step(self, theta_cmd, nav, mach):
-        """→ (제한된 θ_cmd, 리미터 작동 여부, 실속 마진 α_max−α)."""
+        """→ (제한된 θ_cmd, 리미터 작동 여부, 실속 마진 α_max−α).
+
+        보호 로직은 `fcl/graphs.py alpha_limiter_nodes`가 정본 — 여기서는 항법
+        상태에서 공학량(α·θ)을 뽑아 넘기고 결과를 계약 형태로 되돌린다.
+        """
         _V, alpha, _beta = airdata_from_nav(nav)
         _phi, theta, _psi = quat_to_euler(nav.q_nb)
-        a_margin = self.alpha_max(mach) - alpha
-        cap = theta + a_margin
-        if theta_cmd > cap:
-            return cap, True, a_margin
-        return theta_cmd, False, a_margin
+        o = self._runner.step(
+            theta_cmd=theta_cmd, theta=float(theta), alpha=float(alpha), mach=mach
+        )
+        return o["theta_cmd"], bool(o["active"]), o["alpha_margin"]

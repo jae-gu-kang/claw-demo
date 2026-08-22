@@ -27,9 +27,8 @@ import re
 import claw
 from claw.blocks.basic import Gain, Product, Saturation, Sum
 from claw.blocks.controllers import PID
-from claw.blocks.filters import Washout
+from claw.blocks.filters import CommandFilter, Washout
 from claw.blocks.lookup import LookupBlock
-from claw.fcl.autopilot import CommandFilter
 from claw.params.paramset import canonical_hash
 
 _EMITTERS = {}

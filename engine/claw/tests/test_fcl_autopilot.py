@@ -177,7 +177,9 @@ def _closed_loop(ac, tr, cmd: GuidanceCommand, t_end=60.0):
     ap = Autopilot().init(DT)
     ap.reset(state={"throttle": float(tr.control.throttle[0]), "theta": th0})
     scas = Scas(ScasAxis(**PITCH), ScasAxis(**ROLL), ScasAxis(**YAW)).init(DT)
-    scas.pitch.reset(float(tr.control.elevon[0]))
+    # 웜스타트는 조립(Scas)에 넣는다 — 축 인스턴스는 파라미터 보유자이고 상태는
+    # 조립의 러너 한 곳에만 있다 (거기 넣지 않으면 조용히 무시되는 대신 터진다)
+    scas.reset(states={"pitch": float(tr.control.elevon[0])})
     xe = np.zeros(12)
     xe[XE_U], xe[XE_W] = tr.state.vel_b[0], tr.state.vel_b[2]
     xe[XE_THETA], xe[XE_H] = th0, 1000.0

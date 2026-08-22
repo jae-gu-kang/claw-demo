@@ -8,7 +8,7 @@
 """
 
 from claw.blocks.basic import Divide, Product, Sum, Switch
-from claw.fcl.autopilot import CommandFilter
+from claw.blocks.filters import CommandFilter
 
 # step(u) 계약을 따르지 않는 블록. CommandFilter는 step(cmd, current)이라
 # 입력 두 개를 시퀀스가 아니라 위치 인자로 받는다 (autopilot.py:60)

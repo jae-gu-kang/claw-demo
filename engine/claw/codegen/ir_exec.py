@@ -73,6 +73,11 @@ class GraphRunner:
         return next(iter(values.values())) if len(values) == 1 else dict(values)
 
     def step(self, **inputs):
+        """출력이 하나면 값을, 여럿이면 {출력명: 값}을 낸다 — 생성 C의 규약과 같다."""
+        return self._result(self.step_all(**inputs))
+
+    def step_all(self, **inputs) -> dict:
+        """항상 {출력명: 값}. 출력 개수에 따라 반환형이 달라지면 곤란한 호출자용."""
         missing = set(self.graph.inputs) - set(inputs)
         extra = set(inputs) - set(self.graph.inputs)
         if missing or extra:
@@ -81,7 +86,7 @@ class GraphRunner:
             )
         # 그래프 enable 0 = 아무것도 실행하지 않고 직전 출력 유지 (상태도 동결)
         if self.graph.enable is not None and not inputs[self.graph.enable]:
-            return self._result(self._hold)
+            return dict(self._hold)
 
         env = dict(inputs)
         for node in self.graph.nodes:
@@ -111,4 +116,4 @@ class GraphRunner:
                 env[node.id] = inst.step(u, **gains)
 
         self._hold = {name: env[nid] for name, nid in self.graph.outputs.items()}
-        return self._result(self._hold)
+        return dict(self._hold)

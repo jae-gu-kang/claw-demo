@@ -57,10 +57,6 @@ def run(t_end=180.0):
 
     def spy(cmd, nav):
         V, alpha, beta = airdata_from_nav(nav)
-        # 오토파일럿은 같은 대기속도를 norm(vel_n)으로 **따로** 계산한다
-        # (autopilot.py:142) — 수학적으로 같지만 반올림이 달라 값이 어긋난다.
-        # 생성 코드는 대기속도 입력이 하나이므로 오토파일럿이 쓰는 쪽을 넘긴다.
-        V_ap = float(np.linalg.norm(nav.vel_n))
         phi, theta, psi = quat_to_euler(nav.q_nb)
         h = -float(nav.pos_n[2])
         h_isa = min(max(h, ISA_MIN_ALT), ISA_STRATO1_TOP_ALT)
@@ -69,7 +65,7 @@ def run(t_end=180.0):
         inputs.append({
             "nav_valid": float(bool(nav.valid)),
             "theta": float(theta), "phi": float(phi), "psi": float(psi),
-            "p": p, "q": q, "r": r, "V": V_ap,
+            "p": p, "q": q, "r": r, "V": float(V),
             "alpha": float(alpha), "beta": float(beta),
             "h": h, "hdot": -float(nav.vel_n[2]),
             "mach": float(V / isa_atmosphere(h_isa).a),

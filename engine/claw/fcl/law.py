@@ -13,10 +13,15 @@
   limiter_active — 엔벨로프 감시(02 §6.1)가 소비
 """
 
+import numpy as np
+
+from claw.codegen.ir_exec import GraphRunner
+from claw.common.attitude import quat_to_euler
 from claw.common.contracts import SurfaceCommand
 from claw.env import isa_atmosphere
 from claw.env.constants import ISA_MIN_ALT, ISA_STRATO1_TOP_ALT
 from claw.fcl.airdata import airdata_from_nav
+from claw.fcl.graphs import fcl_graph
 
 _SCAS_GROUPS = ("pitch", "roll", "yaw")
 _AP_GROUPS = ("speed", "alt", "heading")
@@ -49,11 +54,28 @@ class FlightControlLaw:
         self.limiter_active = False
 
     def init(self, dt: float) -> "FlightControlLaw":
+        """전 법칙을 **하나의 평탄한 그래프**로 조립한다 (fcl/graphs.py fcl_graph).
+
+        자식 컴포넌트는 여기서 파라미터 보유자다 — 상태는 이 러너 한 곳에만 둔다.
+        자식마다 러너를 또 만들면 웜스타트를 어디에 넣었는지에 따라 결과가 달라진다.
+        """
         self.dt = dt
-        self.scas.init(dt)
-        self.autopilot.init(dt)
-        self.mixer.init(dt)
+        lim = self.alpha_limiter
+        self._runner = GraphRunner(
+            fcl_graph(
+                autopilot=self.autopilot.cfg,
+                scas_axes=self.scas.cfg,
+                mixer=self.mixer.cfg,
+                stall_table=lim.stall_table if lim is not None else None,
+                alpha_margin=lim.margin if lim is not None else 0.05,
+                gain_tables=self.schedule.tables if self.schedule is not None else None,
+                filter_tau=self.schedule.filter_tau if self.schedule is not None else 0.5,
+            ),
+            dt,
+        )
         if self.schedule is not None:
+            # 스케줄은 단독 조회 경로로도 쓰인다(편집한 테이블이 반영됐는지 확인 등).
+            # 그 러너의 상태는 법칙 실행과 **무관하다** — 법칙은 위 그래프 하나로만 돈다
             self.schedule.init(dt)
         self.reset()
         return self
@@ -67,47 +89,48 @@ class FlightControlLaw:
         st = state or {}
         de0 = float(st.get("de", 0.0))
         thr0 = float(st.get("throttle", 0.0))
-        self.scas.reset()
-        self.scas.pitch.reset(de0)
-        self.autopilot.reset(state=st)
-        if self.schedule is not None:
-            self.schedule.reset()
+        hold = self.mixer.step(de0, 0.0, 0.0, thr0)  # 믹서는 무상태 — 같은 그래프다
+        self._runner.reset(
+            states={
+                "scas_pitch_pid": de0,
+                "ap_alt_pid": float(st.get("theta", 0.0)),
+                "ap_spd_pid": thr0,
+            },
+            hold={
+                "elevon_l": float(hold.elevon[0]), "elevon_r": float(hold.elevon[2]),
+                "rudder": float(hold.rudder),
+                "throttle_l": float(hold.throttle[0]),
+                "throttle_r": float(hold.throttle[1]),
+            },
+        )
         self.alpha_margin = None
         self.limiter_active = False
-        self._hold = self.mixer.step(de0, 0.0, 0.0, thr0)
-
-    def _hold_copy(self) -> SurfaceCommand:
-        h = self._hold
-        return SurfaceCommand(
-            elevon=h.elevon.copy(), rudder=h.rudder, throttle=h.throttle.copy()
-        )
 
     def step(self, cmd, nav) -> SurfaceCommand:
-        if not nav.valid:
-            return self._hold_copy()
-
-        V, _alpha, _beta = airdata_from_nav(nav)
+        """법칙 구조는 fcl/graphs.py가 정본 — 여기서는 원시 항법 상태를 그래프가
+        받는 공학량으로 바꾸고(실기에선 항법·ADC 몫) 결과를 계약으로 포장한다."""
+        V, alpha, beta = airdata_from_nav(nav)
+        phi, theta, psi = quat_to_euler(nav.q_nb)
         h = -float(nav.pos_n[2])
         h_isa = min(max(h, ISA_MIN_ALT), ISA_STRATO1_TOP_ALT)
-        mach = V / isa_atmosphere(h_isa).a
-
-        gains = None
-        if self.schedule is not None:
-            gains = self.schedule.step(mach, h, nav.fuel)
-
-        ap_gains = {k: gains[k] for k in _AP_GROUPS if k in gains} if gains else None
-        theta_cmd, phi_cmd, thr = self.autopilot.step(cmd, nav, gains=ap_gains)
-
-        if self.alpha_limiter is not None:
-            theta_cmd, self.limiter_active, self.alpha_margin = self.alpha_limiter.step(
-                theta_cmd, nav, mach
-            )
-
-        scas_gains = {k: gains[k] for k in _SCAS_GROUPS if k in gains} if gains else None
-        de, da, dr = self.scas.step(theta_cmd, phi_cmd, nav, gains=scas_gains)
-
-        sc = self.mixer.step(de, da, dr, thr)
-        self._hold = sc
+        p, q, r = nav.omega_b
+        o = self._runner.step(
+            nav_valid=float(bool(nav.valid)),
+            theta=float(theta), phi=float(phi), psi=float(psi),
+            p=float(p), q=float(q), r=float(r),
+            V=float(V), alpha=float(alpha), beta=float(beta),
+            h=h, hdot=-float(nav.vel_n[2]), mach=float(V / isa_atmosphere(h_isa).a),
+            cmd_speed=float(cmd.speed), cmd_alt=float(cmd.alt),
+            cmd_heading=float(cmd.heading),
+            speed_on=float(bool(cmd.speed_on)), alt_on=float(bool(cmd.alt_on)),
+            heading_on=float(bool(cmd.heading_on)),
+        )
+        # 항법 무효 스텝은 아무것도 실행되지 않았다 — 로깅 속성도 직전 값을 유지한다
+        if nav.valid and "alpha_margin" in o:
+            self.alpha_margin = o["alpha_margin"]
+            self.limiter_active = bool(o["limiter_active"])
         return SurfaceCommand(
-            elevon=sc.elevon.copy(), rudder=sc.rudder, throttle=sc.throttle.copy()
+            elevon=np.array([o["elevon_l"], o["elevon_l"], o["elevon_r"], o["elevon_r"]]),
+            rudder=o["rudder"],
+            throttle=np.array([o["throttle_l"], o["throttle_r"]]),
         )

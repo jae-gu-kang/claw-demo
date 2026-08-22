@@ -1,4 +1,5 @@
-"""선형 필터 블록 — Lag, LowPass, Washout, LeadLag(ZOH-정확), Notch(Tustin+프리워핑).
+"""선형 필터 블록 — Lag, LowPass, Washout, LeadLag(ZOH-정확), Notch(Tustin+프리워핑),
+CommandFilter(명령 램프).
 
 1차 블록은 스텝 불변(ZOH-정확) 이산화: p = e^(-dt/tau). ZOH 입력 가정에서 표본점
 출력이 연속 해석해와 기계정밀도로 일치 — 해석해 대조 완료 기준을 허용오차 없이
@@ -13,6 +14,7 @@ import math
 from collections import deque
 
 from claw.blocks.base import Block
+from claw.common.attitude import wrap_pi
 from claw.params.param import ParamDef
 
 
@@ -210,3 +212,43 @@ class IIRFilter(Block):
             self._z[i] = self.b[i + 1] * u + self._z[i + 1] - self.a[i + 1] * y
         self._z[self.norder - 1] = self.b[self.norder] * u - self.a[self.norder] * y
         return y
+
+
+class CommandFilter(Block):
+    """1차 명령필터 — step(cmd, current): 미시드 상태면 current에서 시작.
+
+    angle=True면 wrap 보간(최단 경로)으로 ±π 경계를 안전하게 통과한다.
+    tau=0은 필터 통과(즉시 명령).
+    """
+
+    NAME = "CommandFilter"
+    PARAM_DEFS = (
+        ParamDef("tau", 1.0, "s", "시정수 (0=통과)", lo=0.0),
+        ParamDef("angle", False, "-", "각도(wrap) 모드"),
+    )
+
+    def __init__(self, tau: float = 1.0, angle: bool = False):
+        if tau < 0:
+            raise ValueError(f"tau는 음수 불가: {tau}")
+        self.tau = tau
+        self.angle = angle
+
+    def _discretize(self, dt: float) -> None:
+        self._p = math.exp(-dt / self.tau) if self.tau > 0 else 0.0
+
+    def reset(self, state=None) -> None:
+        """state=필터 상태 웜스타트. None이면 미시드 — 첫 step의 current로 시드."""
+        self._x = None if state is None else float(state)
+
+    def reset_to(self, value) -> None:
+        """현재 측정으로 재시드 — 비활성 축 추적용."""
+        self._x = float(value)
+
+    def step(self, cmd, current):
+        if self._x is None:
+            self._x = float(current)
+        d = wrap_pi(cmd - self._x) if self.angle else (cmd - self._x)
+        self._x = self._x + (1.0 - self._p) * float(d)
+        if self.angle:
+            self._x = float(wrap_pi(self._x))
+        return self._x

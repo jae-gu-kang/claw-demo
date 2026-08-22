@@ -1,10 +1,12 @@
-"""제어법칙 구조의 IR 선언 — 손으로 쓴 `fcl/`과 1:1로 대응하는 그래프들.
+"""**제어법칙 구조의 정본** — 이 파일이 제어법칙의 구조 그 자체다 (02 §2.2).
 
-기존 코드를 **대체하지 않고 옆에 세워** 같은 답을 내는지 대조한다 — IR이 제어법칙
-전부를 표현할 수 있다고 확인된 뒤에야 정본을 옮긴다(플랜 증분 C).
+같은 패키지의 클래스들(`Autopilot`·`Scas`·`Mixer`…)은 파라미터를 들고 여기서
+그래프를 만들어 실행할 뿐, 구조를 따로 갖지 않는다. 탑재 C도 같은 그래프에서
+나온다. 그래서 Python과 C가 어긋날 수 없고, "둘 다 운용할지"는 나중에 정해도
+되는 **백엔드 선택**으로 남는다.
 
 여기 있는 것은 구조뿐이고 계산은 없다. 블록 로직은 M2 `claw.blocks`가, 실행은
-`ir_exec`가, C 생성은 `emit_c`가 맡는다.
+`codegen.ir_exec`가, C 생성은 `codegen.emit_c`가 맡는다.
 
 **입력 경계** — 그래프는 쿼터니언·항법속도 같은 원시 상태가 아니라 **이미 계산된
 공학량**(θ·φ·ψ·p·q·r·V·α·β·h·ḣ·mach)을 받는다. 실기 FCC에서 오일러각과
@@ -20,10 +22,11 @@
 
 from claw.blocks.basic import Gain, Product, Saturation, Sum
 from claw.blocks.controllers import PID
-from claw.blocks.filters import Washout
+from claw.blocks.filters import CommandFilter, Washout
 from claw.blocks.lookup import LookupBlock
+from claw.blocks.base import Block
 from claw.codegen.ir import Graph, Node, Op
-from claw.fcl.autopilot import CommandFilter
+from claw.codegen.ir_exec import GraphRunner
 
 _SCHEDULABLE = ("kp", "ki", "k_rate")
 _SCAS_GROUPS = ("pitch", "roll", "yaw")
@@ -32,6 +35,22 @@ _AP_GROUPS = ("speed", "alt", "heading")
 
 def _pre(prefix, suffix):
     return f"{prefix}_{suffix}" if prefix else suffix
+
+
+def stateless_runner(graph):
+    """이산화가 필요 없는 그래프의 러너 — dt를 받지 않는 컴포넌트(α 리미터)용.
+
+    dt가 쓰이지 않는다는 것을 **검증한다**. 나중에 필터라도 하나 끼면 여기서
+    시끄럽게 터지고, 조용히 잘못된 주기로 이산화되는 일이 없다.
+    """
+    runner = GraphRunner(graph, 1.0)
+    for node_id, inst in runner.instances.items():
+        if type(inst)._discretize is not Block._discretize:
+            raise AssertionError(
+                f"{graph.name}.{node_id}: 이산화가 필요한 블록 — 이 그래프는 dt를 받아야 한다"
+            )
+    runner.reset()
+    return runner
 
 
 # ── SCAS 한 축 ────────────────────────────────────────────────────────────
@@ -267,14 +286,28 @@ def autopilot_nodes(
     )
     nodes += hdg_nodes
 
+    # 속도·헤딩 축은 rate 입력이 상수 0이라 rate 경로 자체가 없다 —
+    # 그 축에 k_rate를 스케줄하면 아무 효과가 없으므로 조용히 무시하지 않고 거부한다
+    for group in ("speed", "heading"):
+        if "k_rate" in (ports.get(group) or {}):
+            raise ValueError(
+                f"{prefix or 'autopilot'}: {group} 축에는 rate 경로가 없어 k_rate 스케줄이 무의미하다"
+            )
+
     # ── 고도: 필터·오차·댐핑만 영역 안, PI는 밖(적분기 유지 = 트림 θ 홀드) ──
     alt_en = {"enable": srcs["alt_on"]}
+    alt_kr = (ports.get("alt") or {}).get("k_rate")
     nodes += [
         Node(nm("fh"), CommandFilter, inputs=(srcs["cmd_alt"], srcs["h"]),
              params={"tau": tau_alt}, on_disable={"x": srcs["h"]}, **alt_en),
         Node(nm("alt_err"), Sum, inputs=(nm("fh"), srcs["h"]),
              params={"signs": (1.0, -1.0)}, **alt_en),
-        Node(nm("alt_damp"), Gain, inputs=(srcs["hdot"],), params={"k": k_hdot}, **alt_en),
+        # 승강률 댐핑은 모드 영역 안에 있어야 한다 — 축이 꺼지면 rate 항이 0이어야
+        # 적분기 홀드가 성립한다(autopilot.py:160의 `_alt.step(0.0, 0.0)`)
+        Node(nm("alt_damp"), Product, inputs=(alt_kr, srcs["hdot"]), **alt_en)
+        if alt_kr
+        else Node(nm("alt_damp"), Gain, inputs=(srcs["hdot"],),
+                  params={"k": k_hdot}, **alt_en),
     ]
     alt_nodes, theta_axis = scas_axis_nodes(
         nm("alt"), kp=kp_alt, ki=ki_alt, k_rate=k_hdot, out_lo=theta_lo, out_hi=theta_hi,
@@ -326,10 +359,69 @@ def autopilot_nodes(
 AP_INPUTS = ("psi", "h", "hdot", "V", "cmd_heading", "cmd_alt", "cmd_speed",
              "heading_on", "alt_on", "speed_on")
 
+# 단독 실행 그래프가 게인 포트를 갖는 이유: `Autopilot.step(gains=…)`이 스텝마다
+# 임의 조합을 덮어쓸 수 있어서다. 조합마다 그래프를 새로 만들 수는 없으므로 전부
+# 포트로 두고, 덮어쓰기가 없으면 인스턴스 값을 그대로 흘려보낸다 — 값이 같으므로
+# 결과도 같다. 반면 **최상위 조립**은 스케줄 테이블이 실제로 있는 게인만 포트로
+# 두므로(그 외는 상수) 탑재 코드에 죽은 신호가 생기지 않는다.
+AP_PORTS = {"speed": ("kp", "ki"), "alt": ("kp", "ki", "k_rate"), "heading": ("kp", "ki")}
+# 그룹·게인 → Autopilot 파라미터 이름 (속도 축의 kp는 kp_spd)
+AP_PARAM = {
+    ("speed", "kp"): "kp_spd", ("speed", "ki"): "ki_spd",
+    ("alt", "kp"): "kp_alt", ("alt", "ki"): "ki_alt", ("alt", "k_rate"): "k_hdot",
+    ("heading", "kp"): "kp_hdg", ("heading", "ki"): "ki_hdg",
+}
 
-def autopilot_graph(name="autopilot", **params):
-    nodes, outs = autopilot_nodes("", srcs={u: u for u in AP_INPUTS}, **params)
-    return Graph(name, inputs=AP_INPUTS, nodes=nodes, outputs=outs)
+
+def ap_port_inputs():
+    return tuple(f"g_{g}_{k}" for g, keys in AP_PORTS.items() for k in keys)
+
+
+def autopilot_graph(name="autopilot", *, ports=False, **params):
+    """오토파일럿 단독 그래프. ports=True면 게인이 신호(스텝별 덮어쓰기 가능)."""
+    inputs = AP_INPUTS + (ap_port_inputs() if ports else ())
+    gain_ports = (
+        {g: {k: f"g_{g}_{k}" for k in keys} for g, keys in AP_PORTS.items()}
+        if ports
+        else None
+    )
+    nodes, outs = autopilot_nodes(
+        "", srcs={u: u for u in inputs}, gain_ports=gain_ports, **params
+    )
+    return Graph(name, inputs=inputs, nodes=nodes, outputs=outs)
+
+
+SCAS3_INPUTS = ("theta_cmd", "phi_cmd", "theta", "phi", "beta", "p", "q", "r")
+
+
+def scas3_port_inputs():
+    return tuple(f"g_{g}_{k}" for g in _SCAS_GROUPS for k in _SCHEDULABLE)
+
+
+def scas3_graph(name="scas", *, pitch, roll, yaw, ports=False):
+    """SCAS 3축 단독 그래프 — 게인 포트 이유는 `autopilot_graph`와 같다."""
+    inputs = SCAS3_INPUTS + (scas3_port_inputs() if ports else ())
+    gain_ports = (
+        {g: {k: f"g_{g}_{k}" for k in _SCHEDULABLE} for g in _SCAS_GROUPS}
+        if ports
+        else None
+    )
+    nodes, outs = scas3_nodes(
+        "", pitch=pitch, roll=roll, yaw=yaw,
+        srcs={u: u for u in inputs}, gain_ports=gain_ports,
+    )
+    return Graph(name, inputs=inputs, nodes=nodes,
+                 outputs={"de": outs["pitch"], "da": outs["roll"], "dr": outs["yaw"]})
+
+
+def gain_schedule_graph(name="gain_schedule", *, tables, filter_tau):
+    """게인 스케줄 단독 그래프 — 실제로 쓰이는 스케줄 변수만 입력이 된다."""
+    used = sorted({ax for tab in tables.values() for ax in tab.axis_names})
+    nodes, groups = gain_schedule_nodes(
+        "", tables=tables, filter_tau=filter_tau, srcs={ax: ax for ax in used}
+    )
+    outputs = {f"{g}_{k}": nid for g, keys in groups.items() for k, nid in keys.items()}
+    return Graph(name, inputs=tuple(used), nodes=nodes, outputs=outputs)
 
 
 # ── α 리미터 ──────────────────────────────────────────────────────────────

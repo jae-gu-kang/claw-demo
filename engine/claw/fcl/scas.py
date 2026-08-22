@@ -16,10 +16,10 @@
 """
 
 from claw.blocks.base import UNBOUNDED, Block
-from claw.blocks.controllers import PID
-from claw.blocks.filters import Washout
-from claw.common.attitude import quat_to_euler, wrap_pi
+from claw.codegen.ir_exec import GraphRunner
+from claw.common.attitude import quat_to_euler
 from claw.fcl.airdata import airdata_from_nav
+from claw.fcl.graphs import _SCHEDULABLE, scas3_graph, scas_axis_graph
 from claw.params.param import ParamDef
 
 
@@ -47,18 +47,21 @@ class ScasAxis(Block):
             raise ValueError(f"out_lo({out_lo}) > out_hi({out_hi})")
         if washout_tau < 0:
             raise ValueError(f"washout_tau는 음수 불가: {washout_tau}")
-        # kp·ki의 정본은 내부 PID(step에서 None 전달 시 PID 값 사용) — 생성 후
-        # 게인 변경은 스텝 인자 덮어쓰기(게인 스케줄 경로)로만 한다
+        # 게인의 정본은 이 인스턴스이고, 스텝 인자 덮어쓰기(게인 스케줄 경로)가
+        # 있으면 그 값이 우선한다. **구조**는 fcl/graphs.py scas_axis_nodes가 정본
         self.kp, self.ki, self.k_rate = kp, ki, k_rate
         self.washout_tau = washout_tau
         self.out_lo, self.out_hi = out_lo, out_hi
-        self._pid = PID(kp, ki, 0.0, out_lo, out_hi)
-        self._wo = Washout(washout_tau) if washout_tau > 0 else None
+        self.cfg = {
+            "kp": kp, "ki": ki, "k_rate": k_rate,
+            "washout_tau": washout_tau, "out_lo": out_lo, "out_hi": out_hi,
+        }
 
     def _discretize(self, dt: float) -> None:
-        self._pid.init(dt)
-        if self._wo is not None:
-            self._wo.init(dt)
+        # 단독 실행은 게인 셋을 모두 포트로 — step()이 임의 조합을 덮어쓸 수 있다
+        self._runner = GraphRunner(
+            scas_axis_graph("scas_axis", scheduled=_SCHEDULABLE, **self.cfg), dt
+        )
 
     def reset(self, state=None, rate=None) -> None:
         """state=적분기 웜스타트, rate=현재 각속도로 워시아웃 시드 (범프리스 전환 계약).
@@ -66,15 +69,18 @@ class ScasAxis(Block):
         정상 선회(r≠0) 중 SCAS 재관여 시 rate를 주면 워시아웃 출력이 0에서
         시작해 k_rate·r 킥이 발생하지 않는다.
         """
-        self._pid.reset(state)
-        if self._wo is not None:
-            self._wo.reset(rate)
+        states = {"pid": state}
+        if self.washout_tau > 0:
+            states["wo"] = rate
+        self._runner.reset(states)
 
     def step(self, att_err, rate, kp=None, ki=None, k_rate=None):
-        r = self._wo.step(rate) if self._wo is not None else rate
-        kr = self.k_rate if k_rate is None else k_rate
-        y = self._pid.step(att_err, kp=kp, ki=ki) + kr * r
-        return min(max(y, self.out_lo), self.out_hi)
+        return self._runner.step(
+            att_err=att_err, rate=rate,
+            kp=self.kp if kp is None else kp,
+            ki=self.ki if ki is None else ki,
+            k_rate=self.k_rate if k_rate is None else k_rate,
+        )
 
 
 class Scas:
@@ -88,25 +94,36 @@ class Scas:
 
     def __init__(self, pitch: ScasAxis, roll: ScasAxis, yaw: ScasAxis):
         self.pitch, self.roll, self.yaw = pitch, roll, yaw
+        self.cfg = {"pitch": pitch.cfg, "roll": roll.cfg, "yaw": yaw.cfg}
 
     def init(self, dt: float) -> "Scas":
+        # 축 인스턴스는 여기서 **파라미터 보유자**다 — 상태는 이 조립의 러너 한 곳에만
+        # 둔다. 축마다 러너를 또 만들면 웜스타트를 어디에 넣었는지에 따라 결과가
+        # 달라진다 (실제로 겪었다: 트림 웜스타트가 축 러너로 가서 사라졌다)
         self.dt = dt
-        for ax in (self.pitch, self.roll, self.yaw):
-            ax.init(dt)
+        self._runner = GraphRunner(scas3_graph(ports=True, **self.cfg), dt)
+        self.reset()
         return self
 
-    def reset(self) -> None:
-        for ax in (self.pitch, self.roll, self.yaw):
-            ax.reset()
+    def reset(self, states=None) -> None:
+        """states={"pitch": 적분기 웜스타트, …} — 트림 웜스타트 주입 경로."""
+        self._runner.reset({f"{g}_pid": v for g, v in (states or {}).items()})
 
     def step(self, theta_cmd, phi_cmd, nav, gains=None):
-        # nav.valid 처리는 상위 조립(FlightControlLaw)의 소관 — 여기서는 항상 계산
+        """구조는 fcl/graphs.py scas3_nodes가 정본 — 여기서는 항법 상태에서
+        공학량(θ·φ·β·p·q·r)을 뽑아 넘긴다. nav.valid 처리는 상위 조립 소관."""
         phi, theta, _psi = quat_to_euler(nav.q_nb)
         p, q, r = nav.omega_b
         _V, _alpha, beta = airdata_from_nav(nav)
         g = gains or {}
-        de = self.pitch.step(theta_cmd - theta, q, **g.get("pitch", {}))
-        # 롤 오차는 ±π 경계(배면 통과)에서 2π 점프하지 않도록 wrap (θ는 구조상 |θ|≤π/2)
-        da = self.roll.step(wrap_pi(phi_cmd - phi), p, **g.get("roll", {}))
-        dr = self.yaw.step(-beta, r, **g.get("yaw", {}))
-        return de, da, dr
+        ports = {
+            f"g_{grp}_{key}": g.get(grp, {}).get(key, ax.cfg[key])
+            for grp, ax in (("pitch", self.pitch), ("roll", self.roll), ("yaw", self.yaw))
+            for key in _SCHEDULABLE
+        }
+        o = self._runner.step(
+            theta_cmd=theta_cmd, phi_cmd=phi_cmd,
+            theta=float(theta), phi=float(phi), beta=float(beta),
+            p=float(p), q=float(q), r=float(r), **ports,
+        )
+        return o["de"], o["da"], o["dr"]

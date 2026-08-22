@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 from claw.codegen import GraphRunner, emit_c
-from claw.codegen.graphs import fcl_graph, scas_axis_graph
+from claw.fcl.graphs import fcl_graph, scas_axis_graph
 from claw.fcl.autopilot import Autopilot
 from claw.fcl.demo import DEMO_PITCH, DEMO_ROLL, DEMO_YAW, make_demo_gain_tables
 from claw.plant import make_demo_stall_table
