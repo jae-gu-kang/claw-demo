@@ -5,14 +5,19 @@
 스타일은 인라인 — app.css는 병행 세션 작업 중이라 건드리지 않는다 (커밋 오염 방지).
 */
 
+import { api } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
   diffParams, genCHeader, genPython, genSnapshotC, genSnapshotPython, numDisplay,
   paramWarnings, traceRows,
 } from "../lib/codegen.js";
+import {
+  excludedSpecs, flightRequest, pickFile, summarize,
+} from "../lib/flightcode.js";
+import { store } from "../store.js";
 
 // 뷰는 라우팅마다 재생성되므로 표시 상태는 모듈 스코프 (views/gains.js fitCfg 관행)
-const cfg = { lang: "python", verbose: false, traceOpen: false };
+const cfg = { lang: "python", verbose: false, traceOpen: false, file: null };
 
 const PRE_STYLE = "font-family: var(--mono); font-size: 12px; line-height: 1.5;"
   + " white-space: pre; background: #f7f8fa; border: 1px solid var(--line);"
@@ -26,13 +31,44 @@ export function renderCodePanel(host, { specs, meta, validation = [], gainTables
   const snapshot = specs.length > 1 || gainTables != null;
   const pre = el("pre", { style: PRE_STYLE });
   const copyNote = el("span", { class: "hint" });
+  const fileBar = el("div", { class: "row", style: "margin: 8px 0 0; flex-wrap: wrap" });
+
+  // 탑재 C는 엔진이 생성한다(웹이 C를 조립하지 않는다) — 받아 둔 응답과 그 상태.
+  // 게인 스케줄은 형상 전체의 것이라 스냅샷이 아니어도 적용값을 읽는다:
+  // 스케줄 유무가 구조를 바꾸므로 빼면 실제와 다른 코드를 보여 주게 된다.
+  const flight = { data: null, error: null, loading: false };
+  const flightTables = () => gainTables ?? store.get("gainTables") ?? null;
 
   const build = () => {
     const opts = { verbose: cfg.verbose, meta };
+    if (cfg.lang === "flight") return flightView();
     if (cfg.lang === "c") {
       return snapshot ? genSnapshotC(specs, gainTables, opts) : genCHeader(specs[0], opts);
     }
     return snapshot ? genSnapshotPython(specs, gainTables, opts) : genPython(specs[0], opts);
+  };
+
+  const flightView = () => {
+    if (flight.loading) return { code: "탑재 C 생성 중…", lineOf: null };
+    if (flight.error) return { code: `생성 실패 — ${flight.error}`, lineOf: null };
+    const file = pickFile(flight.data?.files, cfg.file, flight.data?.artifact);
+    return { code: file ? file.text : "생성된 파일이 없습니다.", lineOf: null, file };
+  };
+
+  const loadFlight = async () => {
+    flight.loading = true;
+    flight.error = null;
+    paint();
+    try {
+      flight.data = await api.post(
+        "/codegen/flight", flightRequest(specs, flightTables()),
+      );
+    } catch (e) {
+      flight.error = e && e.message ? e.message : String(e);
+    } finally {
+      flight.loading = false;
+      paint();
+    }
   };
 
   let current = build();
@@ -41,15 +77,30 @@ export function renderCodePanel(host, { specs, meta, validation = [], gainTables
     pre.textContent = current.code; // 마크업 삽입 없음
     clear(copyNote);
     langBtns.forEach((b) => b.classList.toggle("primary", b.dataset.lang === cfg.lang));
+    clear(fileBar).append(...fileTabs(flight, current.file, (name) => {
+      cfg.file = name;
+      paint();
+    }));
     // 검토도 다시 — float32 정밀도 지적은 C 탭에서만 성립한다
     clear(reviewHost).append(reviewBox(specs, validation, snapshot));
-    clear(traceBox).append(traceTable(specs, current.lineOf, snapshot));
+    // 추적성 표는 파라미터→코드 라인 대응이라 탑재 C에는 다른 대응이 필요하다
+    clear(traceBox);
+    if (current.lineOf) traceBox.append(traceTable(specs, current.lineOf, snapshot));
+    clear(footHost).append(footNote(flight, specs));
   };
 
-  const langBtns = [["python", "Python"], ["c", "C 헤더"]].map(([id, label]) =>
-    el("button", {
+  const langBtns = [["python", "Python"], ["c", "C 헤더"], ["flight", "탑재 C"]].map(
+    ([id, label]) => el("button", {
       "data-lang": id,
-      onclick: () => { cfg.lang = id; paint(); },
+      title: id === "flight"
+        ? "FCC에 통합되어 그대로 실릴 제어법칙 코드 — 구조·블록 로직·파라미터 전부"
+        : "현재 설계 형상의 코드 표현 (파라미터)",
+      onclick: () => {
+        cfg.lang = id;
+        // 응답을 받아 둔 뒤에는 다시 부르지 않는다 — 값이 바뀌면 패널을 다시 연다
+        if (id === "flight" && !flight.data && !flight.loading) loadFlight();
+        else paint();
+      },
     }, label));
 
   const copy = async () => {
@@ -74,6 +125,7 @@ export function renderCodePanel(host, { specs, meta, validation = [], gainTables
 
   const reviewHost = el("div");
   const traceBox = el("div");
+  const footHost = el("div");
   clear(host).append(
     el("div", { class: "row", style: "margin-top: 12px" },
       ...langBtns,
@@ -85,15 +137,58 @@ export function renderCodePanel(host, { specs, meta, validation = [], gainTables
         }), "상세 주석"),
       copyNote,
     ),
+    fileBar,
     pre,
     reviewHost,
     traceBox,
-    el("p", { class: "hint" },
-      "탑재 비행코드가 아니라 현재 설계 형상의 코드 표현입니다 (02 §1) — 로직이 아니라 ",
-      "파라미터만 생성합니다. Python 탭 코드는 엔진에 그대로 붙여 실행할 수 있고, ",
-      "조립(결선)은 서버 routes/sim.py::_build 가 정본입니다."),
+    footHost,
   );
-  paint();
+  if (cfg.lang === "flight" && !flight.data && !flight.loading) loadFlight();
+  else paint();
+}
+
+/** 탑재 C 파일 탭 — 서버가 정한 읽는 순서 그대로 (진입점 → 자료형 → 조립부 → …). */
+function fileTabs(flight, selected, onPick) {
+  // 다른 탭으로 옮겨도 받아 둔 응답은 남는다 — 파일 탭까지 따라가면 안 된다
+  if (cfg.lang !== "flight" || !flight.data || flight.error) return [];
+  const { count, lines } = summarize(flight.data.files);
+  return [
+    ...flight.data.files.map((f) => el("button", {
+      class: f.name === selected?.name ? "primary" : "",
+      title: `${f.role} · ${f.lines}줄`,
+      onclick: () => onPick(f.name),
+    }, f.name)),
+    el("span", { class: "hint", style: "margin-left: 8px" },
+      selected ? `${selected.role} · ${selected.lines}줄 — 전체 ${count}개 파일 ${lines}줄`
+        : `${count}개 파일 ${lines}줄`),
+  ];
+}
+
+/** 탭별 안내 — 두 탭이 내는 물건이 근본적으로 다르므로 같은 문구를 쓸 수 없다. */
+function footNote(flight, specs) {
+  if (cfg.lang !== "flight") {
+    return el("p", { class: "hint" },
+      "현재 설계 형상의 코드 표현입니다 — 로직이 아니라 파라미터만 생성합니다. ",
+      "구조·블록 로직까지 담긴 탑재 코드는 [탑재 C] 탭입니다. ",
+      "Python 탭 코드는 엔진에 그대로 붙여 실행할 수 있고, ",
+      "조립(결선)은 서버 routes/sim.py::_build 가 정본입니다.");
+  }
+  const excluded = excludedSpecs(specs);
+  const d = flight.data;
+  return el("div", {},
+    el("p", { class: "hint" },
+      "FCC에 통합되어 그대로 실릴 제어법칙 코드입니다 (02 §1) — 구조·블록 로직·",
+      "파라미터가 전부 들어 있고, 구조 정본인 IR에서 엔진이 생성합니다. ",
+      d ? `형상 지문 ${d.fingerprint} · 제어주기 ${d.dt} s.` : "",
+      " 커밋된 산출물 정본은 flight/gen/ 이며, 같은 형상이면 여기 코드와 바이트 단위로 같습니다."),
+    excluded.length > 0 && el("p", { class: "hint" },
+      "이 화면의 블록 중 탑재 C에 없는 것: ",
+      excluded.map((x) => `${x.key} (${x.why})`).join(", "),
+      ". 우리가 내는 것은 제어법칙 한 덩이이고 FCC 전체가 아닙니다."),
+    el("p", { class: "hint" },
+      "비트 일치는 부동소수 축약(FMA) 금지 등 빌드 조건에서만 성립합니다 — ",
+      "조건은 진입점 헤더에 적혀 있고, 타깃에서의 확인(PIL)은 FCC팀 몫입니다."),
+  );
 }
 
 /** 검토 패널 — 엔진 검증 결과 → 변경 Δ → 경고. */

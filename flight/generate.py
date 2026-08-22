@@ -19,10 +19,8 @@ import sys
 from pathlib import Path
 
 from claw.codegen import GraphRunner, emit_c, emit_runtime
-from claw.fcl.graphs import fcl_graph, scas_axis_graph
-from claw.fcl.autopilot import Autopilot
-from claw.fcl.demo import DEMO_PITCH, DEMO_ROLL, DEMO_YAW, make_demo_gain_tables
-from claw.plant import make_demo_stall_table
+from claw.fcl.demo import DEMO_YAW, make_demo_fcl
+from claw.fcl.graphs import scas_axis_graph
 
 GEN_DIR = Path(__file__).resolve().parent / "gen"
 
@@ -30,31 +28,22 @@ GEN_DIR = Path(__file__).resolve().parent / "gen"
 # 이산 계수가 이 주기로 구워지므로 dt는 형상의 일부다 (지문에 포함).
 DT = 0.01
 
-# 데모 믹서 — make_demo_fcl(demo.py:70)의 Mixer(k_diff_thr=0.1) + 타면 한계 기본값
-DEMO_MIXER = dict(
-    elevon_lo=-0.35, elevon_hi=0.35, rudder_lo=-0.35, rudder_hi=0.35, k_diff_thr=0.1
-)
-ALPHA_MARGIN = 0.05  # limiter.py — 실속 보호마진 [기본값] 01 §3.6
+
+def fcl_demo_runner():
+    """데모 기체 형상의 제어법칙 전체 — **조립은 `make_demo_fcl`이 정본**이다.
+
+    여기서 `fcl_graph(...)`를 다시 부르면 게인·타면 한계·마진이 두 곳에 적히고,
+    한쪽만 고치면 산출물이 조용히 설계와 달라진다 (02 §5.5 중복 정의 금지).
+    서버의 탑재 C 응답도 같은 이유로 이 경로를 쓴다.
+    """
+    return make_demo_fcl().init(DT).runner
 
 
-def fcl_demo_graph():
-    """데모 기체 형상의 제어법칙 전체 — `fcl/demo.py:52 make_demo_fcl()`과 1:1."""
-    return fcl_graph(
-        autopilot={d.name: d.default for d in Autopilot.PARAM_DEFS},
-        scas_axes={"pitch": dict(DEMO_PITCH), "roll": dict(DEMO_ROLL), "yaw": dict(DEMO_YAW)},
-        mixer=DEMO_MIXER,
-        stall_table=make_demo_stall_table(),
-        alpha_margin=ALPHA_MARGIN,
-        gain_tables=make_demo_gain_tables(),
-        filter_tau=0.5,
-    )
+def scas_yaw_runner():
+    return GraphRunner(scas_axis_graph("scas_yaw", **DEMO_YAW), DT)
 
 
-def scas_yaw_graph():
-    return scas_axis_graph("scas_yaw", **DEMO_YAW)
-
-
-ARTIFACTS = {"fcl": fcl_demo_graph, "scas_yaw": scas_yaw_graph}
+ARTIFACTS = {"fcl": fcl_demo_runner, "scas_yaw": scas_yaw_runner}
 
 
 def _emit_all():
@@ -64,9 +53,9 @@ def _emit_all():
     fcl 링크가 조용히 깨진다. 합집합이 아니면 안 되는 자리다.
     """
     files, sources, helpers = {}, {}, set()
-    for name, build_graph in ARTIFACTS.items():
-        graph = build_graph()
-        module = emit_c(graph, GraphRunner(graph, DT))
+    for name, build_runner in ARTIFACTS.items():
+        runner = build_runner()
+        module = emit_c(runner.graph, runner)
         files.update(module.files)
         helpers |= module.helpers
         sources[name] = sorted(f for f in module.files if f.endswith(".c"))

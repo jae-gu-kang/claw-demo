@@ -80,6 +80,15 @@ class FlightControlLaw:
         self.reset()
         return self
 
+    @property
+    def runner(self):
+        """조립된 그래프 실행기 — 탑재 C 생성(`codegen.emit_c`)이 이 그래프를 읽는다.
+
+        생성기가 조립을 따로 재현하면 정본이 둘이 된다(02 §5.5). 산출물 생성
+        (`flight/generate.py`)과 서버의 탑재 C 응답이 모두 이 경로를 쓴다.
+        """
+        return self._runner
+
     def reset(self, state=None) -> None:
         """state={"theta": θ0, "throttle": thr0, "de": de0} — 트림 웜스타트.
 

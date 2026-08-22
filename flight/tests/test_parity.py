@@ -17,9 +17,8 @@ import subprocess
 
 import mission_trace
 import pytest
-from generate import DT, GEN_DIR, build, fcl_demo_graph, manifest, scas_yaw_graph
+from generate import DT, GEN_DIR, build, fcl_demo_runner, manifest, scas_yaw_runner
 
-from claw.codegen import GraphRunner
 from claw.fcl.demo import DEMO_YAW
 from claw.fcl.scas import ScasAxis
 
@@ -68,8 +67,7 @@ def _first_diff(a, b, label):
 
 
 def _ir_runner(warm):
-    graph = fcl_demo_graph()
-    runner = GraphRunner(graph, DT)
+    runner = fcl_demo_runner()
     de0, th0, thr0 = warm
     # 손으로 쓴 법칙과 같은 트림 웜스타트 (law.py:61, autopilot.py:126, simulator.py:132)
     runner.reset(
@@ -153,7 +151,7 @@ def _yaw_sequence(n=1200):
 def _yaw_reference():
     oracle = ScasAxis(**DEMO_YAW).init(DT)
     oracle.reset()
-    runner = GraphRunner(scas_yaw_graph(), DT)
+    runner = scas_yaw_runner()
     runner.reset()
     ref, ir, lines = [], [], []
     for att_err, rate in _yaw_sequence():

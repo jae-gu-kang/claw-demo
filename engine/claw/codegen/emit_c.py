@@ -47,8 +47,9 @@ from claw.params.paramset import canonical_hash
 _EMITTERS = {}
 _DISABLERS = {}
 
-# 파일만 돌려주면 공용 런타임을 합집합으로 만들 수 없다 — 쓴 헬퍼를 함께 낸다
-CModule = namedtuple("CModule", "files helpers")
+# 파일만 돌려주면 공용 런타임을 합집합으로 만들 수 없다 — 쓴 헬퍼를 함께 낸다.
+# 지문은 배너 텍스트에도 있지만, 읽는 쪽이 주석을 파싱하게 두지 않는다
+CModule = namedtuple("CModule", "files helpers fingerprint")
 
 
 def _emitter(cls):
@@ -611,7 +612,7 @@ def emit_c(graph, runner):
         body = ctx.parts[0][1]
 
     files[f"{base}.c"] = _impl_c(base, ctx, sig, graph, top_env, unused, single, includes, body)
-    return CModule(files, helpers)
+    return CModule(files, helpers, fp)
 
 
 def _banner(base, fp, extra=()):
