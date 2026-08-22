@@ -172,6 +172,31 @@ def test_actuator_params_empty_dict_means_defaults(trim_design, monkeypatch):
     assert res.meta["actuators"] is True
 
 
+def test_meta_carries_effector_limits(trim_design):
+    """판정 기준선(타면 위치 한계·작동기 rate)이 결과와 함께 다닌다.
+
+    타각 듀티(analysis/duty.py)는 "얼마나 움직였나"뿐 아니라 "한계에 얼마나
+    붙어 있었나"를 세는데, 한계값이 결과에 없으면 소비자가 파라미터를 따로
+    들고 와 맞춰야 하고 어긋나면 조용히 틀린 포화율이 나온다.
+    """
+    ac, tr = trim_design
+    res = make_sim(ac, tr, actuator_params={"rate_max": 4.0}).run(tr, t_end=0.1)
+    lim = res.meta["limits"]
+    mixer = make_demo_fcl().mixer
+    assert lim["elevon_lo"] == pytest.approx(mixer.elevon_lo)
+    assert lim["elevon_hi"] == pytest.approx(mixer.elevon_hi)
+    assert lim["rudder_lo"] == pytest.approx(mixer.rudder_lo)
+    assert lim["rate_max"] == pytest.approx(4.0)
+
+
+def test_meta_rate_limit_is_none_without_actuators(trim_design):
+    """미장착은 "rate 한계 무제한"이 아니라 "rate 한계 부재" — 0이 아닌 None."""
+    ac, tr = trim_design
+    res = make_sim(ac, tr, actuator_params=None).run(tr, t_end=0.1)
+    assert res.meta["limits"]["rate_max"] is None
+    assert res.meta["limits"]["elevon_hi"] is not None  # 위치 한계는 믹서 소관 — 남는다
+
+
 def test_actuator_rate_limit_observable(trim_design):
     """작동기가 실제 루프에 있는지 핀 — 낮은 rate 한계에서 타면 기울기 제한."""
     ac, tr = trim_design

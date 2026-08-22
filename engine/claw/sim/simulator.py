@@ -301,8 +301,29 @@ class Simulator:
                 "actuators": self.actuator_params is not None,
                 "case": tr.case.name,
                 "aborted": aborted,
+                "limits": self._effector_limits(actuators),
             },
         )
+
+    def _effector_limits(self, actuators) -> dict:
+        """이 런의 판정 기준선 — 타면 위치 한계와 작동기 rate 한계.
+
+        신호가 아니라 **기준선**이다. 타각 듀티(analysis/duty.py)는 "얼마나
+        움직였나"뿐 아니라 "한계에 얼마나 붙어 있었나"를 세는데, 그러려면 한계값이
+        결과와 함께 다녀야 한다 — 저장된 결과만 보고도 포화 판정이 되도록.
+        (없으면 소비자가 파라미터를 따로 들고 와 맞춰야 하고, 어긋나면 조용히
+        틀린 포화율이 나온다.)
+
+        미장착·미상은 0이 아니라 None — "한계가 0"과 "한계를 모른다"는 다르다.
+        """
+        mixer = getattr(self.fcl, "mixer", None)
+        out = {}
+        for name in ("elevon_lo", "elevon_hi", "rudder_lo", "rudder_hi"):
+            v = getattr(mixer, name, None)
+            out[name] = None if v is None else float(v)
+        # 작동기 미장착이면 명령 직결 — rate 한계라는 것이 없다 (무제한이 아니라 부재)
+        out["rate_max"] = float(actuators[0][0].rate_max) if actuators else None
+        return out
 
     def _envelope(self, t_arr, stall_margin, flags, h_arr) -> dict:
         """엔벨로프 요약 (02 §6.1) — 최악 실속 마진 + 최저 고도 + 이탈 플래그.
