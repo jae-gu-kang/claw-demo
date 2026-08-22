@@ -12,8 +12,16 @@ from claw.blocks.basic import Gain, Product, Saturation
 from claw.blocks.controllers import PID
 from claw.blocks.dynamics import Integrator
 from claw.blocks.filters import Washout
-from claw.codegen import GraphRunner, emit_c, scas_axis_graph
+from claw.codegen import (
+    GraphRunner,
+    alpha_limiter_graph,
+    emit_c,
+    mixer_graph,
+    scas_axis_graph,
+)
+from claw.codegen.graphs import gain_schedule_nodes
 from claw.codegen.ir import Graph, Node, Op
+from claw.fcl.autopilot import CommandFilter
 from claw.fcl.demo import DEMO_PITCH, DEMO_YAW
 from claw.fcl.scas import ScasAxis
 
@@ -21,7 +29,7 @@ DT = 0.01
 
 
 def _gain_graph(name="g1"):
-    return Graph(name, inputs=("u",), nodes=[Node("k", Gain, inputs=("u",))], output="k")
+    return Graph(name, inputs=("u",), nodes=[Node("k", Gain, inputs=("u",))], outputs={"y": "k"})
 
 
 # ── C 생성 가능 제약 ──────────────────────────────────────────────────────
@@ -38,13 +46,13 @@ def test_전방_참조는_대수_루프로_거부된다():
                 Node("a", Gain, inputs=("b",)),  # 아직 없는 b를 참조
                 Node("b", Gain, inputs=("u",)),
             ],
-            output="a",
+            outputs={"y": "a"},
         )
 
 
 def test_미정의_참조는_거부된다():
     with pytest.raises(ValueError, match="미정의 참조"):
-        Graph("g", inputs=("u",), nodes=[Node("a", Gain, inputs=("nope",))], output="a")
+        Graph("g", inputs=("u",), nodes=[Node("a", Gain, inputs=("nope",))], outputs={"y": "a"})
 
 
 def test_출력에_도달하지_않는_노드는_거부된다():
@@ -57,25 +65,25 @@ def test_출력에_도달하지_않는_노드는_거부된다():
                 Node("used", Gain, inputs=("u",)),
                 Node("orphan", Gain, inputs=("u",)),  # 아무도 안 쓴다
             ],
-            output="used",
+            outputs={"y": "used"},
         )
 
 
 def test_노드_id가_그래프_입력과_충돌하면_거부된다():
     with pytest.raises(ValueError, match="이름 충돌"):
-        Graph("g", inputs=("u",), nodes=[Node("u", Gain, inputs=("u",))], output="u")
+        Graph("g", inputs=("u",), nodes=[Node("u", Gain, inputs=("u",))], outputs={"y": "u"})
 
 
 def test_C_예약어와_비식별자는_이름으로_쓸_수_없다():
     with pytest.raises(ValueError, match="예약어"):
         Node("double", Gain, inputs=("u",))
     with pytest.raises(ValueError, match="C 식별자"):
-        Graph("g", inputs=("u-1",), nodes=[Node("k", Gain, inputs=("u-1",))], output="k")
+        Graph("g", inputs=("u-1",), nodes=[Node("k", Gain, inputs=("u-1",))], outputs={"y": "k"})
 
 
 def test_출력이_노드가_아니면_거부된다():
     with pytest.raises(ValueError, match="출력"):
-        Graph("g", inputs=("u",), nodes=[Node("k", Gain, inputs=("u",))], output="u")
+        Graph("g", inputs=("u",), nodes=[Node("k", Gain, inputs=("u",))], outputs={"y": "u"})
 
 
 def test_연산_노드의_입력_개수는_검증된다():
@@ -215,7 +223,7 @@ def test_생성은_결정적이다():
 
 def test_에미터_없는_블록은_조용히_넘어가지_않는다():
     graph = Graph(
-        "g", inputs=("u",), nodes=[Node("i", Integrator, inputs=("u",))], output="i"
+        "g", inputs=("u",), nodes=[Node("i", Integrator, inputs=("u",))], outputs={"y": "i"}
     )
     with pytest.raises(NotImplementedError, match="C 에미터 미구현"):
         _emit(graph)
@@ -226,7 +234,7 @@ def test_비유한_파라미터는_탑재_코드로_나가지_않는다():
         "g",
         inputs=("u",),
         nodes=[Node("s", Saturation, inputs=("u",), params={"lo": -1.0, "hi": math.inf})],
-        output="s",
+        outputs={"y": "s"},
     )
     with pytest.raises(ValueError, match="비유한"):
         _emit(graph)
@@ -234,7 +242,7 @@ def test_비유한_파라미터는_탑재_코드로_나가지_않는다():
 
 def test_연산_노드는_Python과_C_양쪽에_난다():
     """wrap_pi는 Python `%`와 C `fmod`의 나머지 부호가 달라 보정이 필요하다."""
-    graph = Graph("wrap_demo", inputs=("a",), nodes=[Op("w", "wrap_pi", ("a",))], output="w")
+    graph = Graph("wrap_demo", inputs=("a",), nodes=[Op("w", "wrap_pi", ("a",))], outputs={"y": "w"})
     files, runner = _emit(graph)
     runner.reset()
     assert runner.step(a=3.0 * math.pi) == pytest.approx(math.pi)
@@ -248,3 +256,234 @@ def test_안티와인드업_클램프가_생성_코드에_남아_있다():
     files, _ = _emit(scas_axis_graph("ax", **DEMO_PITCH))
     step_body = files["ax.c"].split("_step(")[-1]
     assert step_body.count("claw_clip") >= 3  # PID 출력 + 적분기 + 최종 포화
+
+
+# ── 증분 B: 다중 출력·모드 분기·테이블 ────────────────────────────────────
+
+
+def test_enable_영역은_연속이어야_한다():
+    """생성 C가 if/else 한 덩이가 되어야 "이 구간은 이 모드일 때만 돈다"가 눈에 잡힌다."""
+    with pytest.raises(ValueError, match="영역이 끊겼다"):
+        Graph(
+            "g",
+            inputs=("u", "en"),
+            nodes=[
+                Node("a", Gain, inputs=("u",), enable="en"),
+                Node("b", Gain, inputs=("a",)),  # 영역 밖
+                Node("c", Gain, inputs=("b",), enable="en"),  # 다시 같은 enable — 끊겼다
+            ],
+            outputs={"y": "c"},
+        )
+
+
+def test_on_disable은_enable_없이_쓸_수_없다():
+    with pytest.raises(ValueError, match="on_disable은 enable과 함께"):
+        Node("a", Gain, inputs=("u",), on_disable={"x": 0.0})
+
+
+def test_예약된_함수_인자명은_그래프_입력이_될_수_없다():
+    """실제로 겪은 사고 — 롤 각속도 입력 `p`가 파라미터 포인터를 가려 컴파일이 깨졌다."""
+    for reserved in ("prm", "sta", "out"):
+        with pytest.raises(ValueError, match="함수 인자 이름과 충돌"):
+            Graph("g", inputs=(reserved,),
+                  nodes=[Node("k", Gain, inputs=(reserved,))], outputs={"y": "k"})
+
+
+def test_상수를_갖는_연산은_value가_강제된다():
+    with pytest.raises(ValueError, match="상수 value가 필요"):
+        Op("a", "add_const", inputs=("u",))
+    with pytest.raises(ValueError, match="상수 value를 받지 않음"):
+        Op("a", "wrap_pi", inputs=("u",), value=1.0)
+
+
+def test_출력_개수가_C_시그니처를_가른다():
+    """1개면 값을 반환하고 여럿이면 출력 구조체를 채운다 — 읽기 쉬운 쪽을 고른다."""
+    single, _ = _emit(_gain_graph("one"))
+    assert "double one_step(" in single["one.c"]
+    assert "one_out_t" not in single["one_types.h"]
+
+    two = Graph("two", inputs=("u",),
+                nodes=[Node("a", Gain, inputs=("u",)), Node("b", Gain, inputs=("a",))],
+                outputs={"first": "a", "second": "b"})
+    files, _ = _emit(two)
+    assert "void two_step(" in files["two.c"]
+    assert "out->first" in files["two.c"] and "out->second" in files["two.c"]
+
+
+def test_그래프_enable은_직전_출력을_유지하고_상태를_동결한다():
+    """항법 무효 시 마지막 유효 명령 유지 (law.py:86) — 상태도 함께 멈춘다."""
+    graph = Graph(
+        "held",
+        inputs=("en", "u"),
+        nodes=[Node("pid", PID, inputs=("u",), params={"kp": 1.0, "ki": 1.0})],
+        outputs={"y": "pid"},
+        enable="en",
+    )
+    runner = GraphRunner(graph, DT)
+    runner.reset(hold={"y": 7.0})
+    assert runner.step(en=0.0, u=99.0) == 7.0, "비활성인데 계산했다"
+    assert runner.instances["pid"]._i == 0.0, "비활성인데 상태가 움직였다"
+    live = runner.step(en=1.0, u=1.0)
+    assert runner.step(en=0.0, u=99.0) == live, "직전 출력을 유지하지 않았다"
+
+    files, _ = _emit(graph)
+    assert "if (en == 0.0)" in files["held.c"]
+    assert "*out = sta->hold;" in files["held.c"] or "return sta->hold;" in files["held.c"]
+
+
+def test_비활성_영역은_실행_대신_상태를_대입한다():
+    """비활성 축의 명령필터가 측정을 추적해야 재관여가 범프리스다 (autopilot.py:151)."""
+    graph = Graph(
+        "track",
+        inputs=("en", "cmd", "meas"),
+        nodes=[
+            Node("f", CommandFilter, inputs=("cmd", "meas"), params={"tau": 1.0},
+                 enable="en", on_disable={"x": "meas"}),
+        ],
+        outputs={"y": "f"},
+    )
+    runner = GraphRunner(graph, DT)
+    runner.reset()
+    assert runner.step(en=0.0, cmd=100.0, meas=5.0) == 0.0  # disabled_output
+    assert runner.instances["f"]._x == 5.0, "측정을 추적하지 않았다"
+    # 추적된 값에서 출발하므로 첫 활성 스텝이 5.0 근처에서 시작한다 (킥 없음)
+    assert 5.0 < runner.step(en=1.0, cmd=100.0, meas=5.0) < 6.0
+
+    files, _ = _emit(graph)
+    body = files["track.c"]
+    assert "} else {" in body
+    assert "sta->f_x = meas;" in body and "sta->f_seeded = 1;" in body
+
+
+def test_테이블은_격자점과_값이_함께_구워진다():
+    from claw.plant import make_demo_stall_table
+
+    table = make_demo_stall_table()
+    graph = alpha_limiter_graph(stall_table=table, margin=0.05)
+    files, runner = _emit(graph)
+    assert f"double stall_bp[{len(table.axes[0])}]" in files["alpha_limiter_types.h"]
+    assert "claw_lookup1d" in files["alpha_limiter.c"]
+    runner.reset()
+    for mach in (0.1, 0.35, 0.6, 0.95, 2.0):  # 경계 밖 포함 (외삽 clip)
+        got = runner.step(theta_cmd=0.0, theta=0.0, alpha=0.0, mach=mach)
+        assert got["alpha_margin"] == float(table.interp(mach=mach)) - 0.05
+
+
+def test_외삽_금지가_아닌_테이블은_탑재_코드로_나가지_않는다():
+    from claw.tables import Table
+
+    linear = Table({"mach": [0.2, 0.9]}, [0.3, 0.2], name="t", extrapolate="linear")
+    with pytest.raises(NotImplementedError, match="extrapolate='clip'만"):
+        _emit(alpha_limiter_graph(stall_table=linear, margin=0.05))
+
+
+def test_믹서가_손으로_쓴_것과_비트_일치():
+    from claw.fcl.mixer import Mixer
+
+    cfg = dict(elevon_lo=-0.35, elevon_hi=0.35, rudder_lo=-0.35, rudder_hi=0.35,
+               k_diff_thr=0.1)
+    oracle = Mixer(**cfg).init(DT)
+    runner = GraphRunner(mixer_graph(**cfg), DT)
+    runner.reset()
+    for k in range(400):
+        t = k * DT
+        de, da = 0.5 * math.sin(t), 0.4 * math.cos(2.0 * t)
+        dr, thr = 0.3 * math.sin(3.0 * t), 0.5 + 0.6 * math.sin(t)
+        ref, got = oracle.step(de, da, dr, thr), runner.step(de=de, da=da, dr=dr, thr=thr)
+        assert float(ref.elevon[0]) == got["elevon_l"]
+        assert float(ref.elevon[2]) == got["elevon_r"]
+        assert float(ref.rudder) == got["rudder"]
+        assert float(ref.throttle[0]) == got["throttle_l"]
+        assert float(ref.throttle[1]) == got["throttle_r"]
+
+
+def test_리미터가_손으로_쓴_것과_비트_일치():
+    import numpy as np
+
+    from claw.common.attitude import euler_to_quat, quat_to_euler
+    from claw.common.contracts import NavOutput
+    from claw.fcl.airdata import airdata_from_nav
+    from claw.fcl.limiter import AlphaLimiter
+    from claw.plant import make_demo_stall_table
+
+    table = make_demo_stall_table()
+    oracle = AlphaLimiter(table, margin=0.05)
+    runner = GraphRunner(alpha_limiter_graph(stall_table=table, margin=0.05), DT)
+    runner.reset()
+    hit = 0
+    for k in range(400):
+        t = k * DT
+        theta_set, alpha_set = 0.1 * math.sin(t), 0.15 + 0.18 * math.sin(2.0 * t)
+        mach, theta_cmd = 0.3 + 0.3 * math.sin(0.5 * t), 0.28 * math.sin(3.0 * t)
+        u = math.sqrt(max(1.0 - math.sin(alpha_set) ** 2, 0.0))
+        nav = NavOutput(q_nb=euler_to_quat(0.0, theta_set, 0.0),
+                        vel_n=np.array([u, 0.0, math.sin(alpha_set)]))
+        # 그래프 경계는 "이미 계산된 공학량"이다 — 통합 계층이 넘길 값을 그대로 넘긴다
+        # (역구성한 값을 넣으면 쿼터니언·에어데이터 왕복 반올림이 차이로 나타난다)
+        alpha = float(airdata_from_nav(nav)[1])
+        theta = float(quat_to_euler(nav.q_nb)[1])
+        ref_theta, ref_active, ref_margin = oracle.step(theta_cmd, nav, mach)
+        got = runner.step(theta_cmd=theta_cmd, theta=theta, alpha=alpha, mach=mach)
+        assert ref_margin == got["alpha_margin"], f"스텝 {k}"
+        assert ref_theta == got["theta_cmd"], f"스텝 {k}"
+        assert float(ref_active) == got["active"], f"스텝 {k}"
+        hit += int(ref_active)
+    assert hit > 0, "리미터가 한 번도 작동하지 않아 제한 경로가 검증되지 않았다"
+
+
+def test_스케줄은_실제로_쓰이는_축의_필터만_만든다():
+    """손으로 쓴 코드는 mach·alt·fuel 필터를 항상 셋 다 돌린다 — 출력은 같지만
+    아무도 읽지 않는 상태를 탑재 코드에 둘 이유가 없다."""
+    from claw.fcl.demo import make_demo_gain_tables
+
+    nodes, outs = gain_schedule_nodes(
+        "s", tables=make_demo_gain_tables(), filter_tau=0.5,
+        srcs={"mach": "mach", "alt": "h", "fuel": "fuel"},
+    )
+    filters = [n.id for n in nodes if n.block is CommandFilter]
+    assert filters == ["s_f_mach"], f"쓰이지 않는 스케줄 필터가 생겼다: {filters}"
+    assert set(outs) == {"pitch", "roll"}
+
+
+def test_오토파일럿이_모드_전환을_포함해_비트_일치():
+    """모드 on/off 경계가 이 구조의 급소다 — 필터 추적·적분기 소거·홀드가 얽혀 있다."""
+    import numpy as np
+
+    from claw.common.attitude import euler_to_quat, quat_to_euler
+    from claw.common.contracts import GuidanceCommand, NavOutput
+    from claw.codegen.graphs import autopilot_graph
+    from claw.fcl.autopilot import Autopilot
+
+    cfg = {d.name: d.default for d in Autopilot.PARAM_DEFS}
+    oracle = Autopilot(**cfg).init(DT)
+    oracle.reset()
+    runner = GraphRunner(autopilot_graph(**cfg), DT)
+    runner.reset()
+
+    seen = set()
+    for k in range(1500):
+        t = k * DT
+        on = (t < 4.0 or t >= 8.0, not (3.0 <= t < 6.0), t >= 1.0)  # heading, alt, speed
+        seen.add(on)
+        psi_set, h, hdot = 0.3 * math.sin(0.5 * t), 100.0 + 20.0 * math.sin(0.3 * t), 6.0
+        V_set = 60.0 + 5.0 * math.sin(0.4 * t)
+        vd = -hdot
+        nav = NavOutput(
+            q_nb=euler_to_quat(0.0, 0.0, psi_set), pos_n=np.array([0.0, 0.0, -h]),
+            vel_n=np.array([math.sqrt(max(V_set**2 - vd**2, 0.0)), 0.0, vd]),
+        )
+        cmd = GuidanceCommand(
+            speed=65.0, alt=120.0, heading=0.8 * math.sin(0.2 * t),
+            heading_on=on[0], alt_on=on[1], speed_on=on[2],
+        )
+        ref = oracle.step(cmd, nav)
+        # 통합 계층이 넘길 값 그대로 (원시 상태 → 공학량 변환은 그래프 밖)
+        got = runner.step(
+            psi=float(quat_to_euler(nav.q_nb)[2]), h=-float(nav.pos_n[2]),
+            hdot=-float(nav.vel_n[2]), V=float(np.linalg.norm(nav.vel_n)),
+            cmd_heading=cmd.heading, cmd_alt=cmd.alt, cmd_speed=cmd.speed,
+            heading_on=float(on[0]), alt_on=float(on[1]), speed_on=float(on[2]),
+        )
+        for i, name in enumerate(("theta_cmd", "phi_cmd", "throttle")):
+            assert ref[i] == got[name], f"스텝 {k} ({name}) 모드={on}"
+    assert len(seen) >= 4, f"모드 조합을 충분히 밟지 않음: {seen}"

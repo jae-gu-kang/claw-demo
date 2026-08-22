@@ -7,15 +7,22 @@
 때문이다. 생성은 결정적이라(시각 미포함) 변경이 없으면 바이트 단위로 동일하다 —
 `tests/test_parity.py`가 커밋본과 즉석 생성본이 같은지 검사한다.
 
-증분 A 범위: SCAS 두 축만. 나머지 제어법칙(오토파일럿·리미터·믹서·스케줄·최상위
-조립)은 IR로 표현한 뒤 여기 추가된다 (플랜 증분 B).
+산출물 둘:
+  fcl       데모 형상의 **제어법칙 전체** — 게인 스케줄·오토파일럿·α 리미터·SCAS
+            3축·엘레본 믹싱. 항법 무효 시 직전 출력 유지까지 포함한다. 이것이
+            FCC에 넘어가는 물건이다
+  scas_yaw  SCAS 요축 하나 — 단일 출력 반환 경로와 워시아웃을 덮는 최소 단위.
+            fcl이 다중 출력·구조체 경로만 쓰므로 두 경로 모두 대조되도록 남긴다
 """
 
 import sys
 from pathlib import Path
 
-from claw.codegen import GraphRunner, emit_c, scas_axis_graph
-from claw.fcl.demo import DEMO_PITCH, DEMO_YAW
+from claw.codegen import GraphRunner, emit_c
+from claw.codegen.graphs import fcl_graph, scas_axis_graph
+from claw.fcl.autopilot import Autopilot
+from claw.fcl.demo import DEMO_PITCH, DEMO_ROLL, DEMO_YAW, make_demo_gain_tables
+from claw.plant import make_demo_stall_table
 
 GEN_DIR = Path(__file__).resolve().parent / "gen"
 
@@ -23,22 +30,39 @@ GEN_DIR = Path(__file__).resolve().parent / "gen"
 # 이산 계수가 이 주기로 구워지므로 dt는 형상의 일부다 (지문에 포함).
 DT = 0.01
 
-# 데모 게인 스케줄이 실제로 덮어쓰는 게인만 신호(포트)가 된다.
-# make_demo_gain_tables()는 pitch.kp·ki·k_rate와 roll.*만 낸다 — 요축은 없다
-# (demo.py:36). 그래서 피치는 게인이 포트, 요는 상수 파라미터가 된다.
-ARTIFACTS = (
-    ("scas_pitch", DEMO_PITCH, ("kp", "ki", "k_rate")),
-    ("scas_yaw", DEMO_YAW, ()),
+# 데모 믹서 — make_demo_fcl(demo.py:70)의 Mixer(k_diff_thr=0.1) + 타면 한계 기본값
+DEMO_MIXER = dict(
+    elevon_lo=-0.35, elevon_hi=0.35, rudder_lo=-0.35, rudder_hi=0.35, k_diff_thr=0.1
 )
+ALPHA_MARGIN = 0.05  # limiter.py — 실속 보호마진 [기본값] 01 §3.6
+
+
+def fcl_demo_graph():
+    """데모 기체 형상의 제어법칙 전체 — `fcl/demo.py:52 make_demo_fcl()`과 1:1."""
+    return fcl_graph(
+        autopilot={d.name: d.default for d in Autopilot.PARAM_DEFS},
+        scas_axes={"pitch": dict(DEMO_PITCH), "roll": dict(DEMO_ROLL), "yaw": dict(DEMO_YAW)},
+        mixer=DEMO_MIXER,
+        stall_table=make_demo_stall_table(),
+        alpha_margin=ALPHA_MARGIN,
+        gain_tables=make_demo_gain_tables(),
+        filter_tau=0.5,
+    )
+
+
+def scas_yaw_graph():
+    return scas_axis_graph("scas_yaw", **DEMO_YAW)
+
+
+ARTIFACTS = {"fcl": fcl_demo_graph, "scas_yaw": scas_yaw_graph}
 
 
 def build() -> dict:
     """{파일명: 내용} — 디스크를 건드리지 않는다 (테스트가 커밋본과 대조할 때 쓴다)."""
     files = {}
-    for name, cfg, scheduled in ARTIFACTS:
-        graph = scas_axis_graph(name, scheduled=scheduled, **cfg)
-        runner = GraphRunner(graph, DT)
-        files.update(emit_c(graph, runner))
+    for build_graph in ARTIFACTS.values():
+        graph = build_graph()
+        files.update(emit_c(graph, GraphRunner(graph, DT)))
     return files
 
 
