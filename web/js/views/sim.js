@@ -11,6 +11,7 @@ import { planeViews } from "../lib/plot.js";
 import { flaggedNames, modeSpans, strideFor } from "../lib/replay.js";
 import { moveWaypoint } from "../lib/wpmap.js";
 import { store } from "../store.js";
+import { createTrack3d } from "./plot3d.js";
 import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createWpMap } from "./wpmap.js";
@@ -33,6 +34,8 @@ let runningJobId = null;
 let runningSnapshot = { waypoints: [], acceptRadius: 0 };
 // 지도 줌/팬 상태 — 탭 재진입 시 유지 (wpRows·lastReplay와 동렬)
 let wpMapView = { view: null };
+// 3D 시점(방위·고각) — 재렌더·탭 전환에도 돌려놓은 각도를 잃지 않게
+let view3dRef = { view: null };
 // 자동 재생 타이머 — 모듈 스코프에 두어야 재렌더·탭 전환에서 확실히 끌 수 있다.
 // (뷰 안에만 두면 떨어져 나간 DOM을 향해 계속 도는 타이머가 남는다)
 let playTimer = null;
@@ -413,6 +416,14 @@ function renderReplay(replayBox) {
   // (trackCanvas는 같은 span을 폭·높이에 각각 사상하므로 직사각이면 축척이 어긋난다)
   const views = planeViews(sig);
   const planeBoxes = views.map(() => el("div"));
+  // 3D는 캔버스를 유지하는 컴포넌트 — 포인터 캡처가 요소에 붙어 있어 매 프레임
+  // 새로 만들면 회전 드래그가 끊긴다 (wpmap과 같은 이유)
+  const track3d = createTrack3d({
+    getSignals: () => sig,
+    getWaypoints: () => waypoints,
+    viewRef: view3dRef,
+    size: PLANE_PX,
+  });
   const readout = el("span", { class: "progress-label" });
   const slider = el("input", {
     type: "range", min: "0", max: String(body.t.length - 1), value: "0",
@@ -439,6 +450,7 @@ function renderReplay(replayBox) {
       cv.setAttribute("aria-label", `궤적 ${v.title}`);
       clear(planeBoxes[k]).append(cv);
     });
+    track3d.refresh(i);
   };
   // 자동 재생 — 손으로 슬라이더를 끄는 것 외에 시간을 흘려보낼 방법이 없었다.
   // 샘플 간격(stride 적용 후)을 기준으로 배속을 곱해 진행하므로, 표시 시각은
@@ -501,10 +513,10 @@ function renderReplay(replayBox) {
     // 커서 조작(바로 위 슬라이더)과 그 반응이 눈에 같이 들어오게 한다
     el("div", { style: "display:flex; flex-direction:column; gap:6px; margin-bottom:12px;" },
       el("div", { class: "hint" },
-        "궤적 3면도 (NED) — N–E 평면만 등축(선회반경 판독용), 연직 평면은 비등축이라 ",
-        "경사각을 눈으로 재면 안 됨. 주황 세로선은 웨이포인트의 수평좌표"),
+        "궤적 3면도 + 3D (NED) — N–E 평면만 등축(선회반경 판독용), 연직 평면과 3D는 ",
+        "비등축이라 경사각을 눈으로 재면 안 됨. 주황 세로선·점은 웨이포인트의 수평좌표"),
       el("div", { style: "display:flex; flex-wrap:wrap; gap:8px; align-items:flex-start;" },
-        planeBoxes[0], planeBoxes[1], planeBoxes[2])),
+        planeBoxes[0], planeBoxes[1], planeBoxes[2], track3d.root)),
     el("div", { class: "row" },
       el("div", {},
         chart("고도 h [m]", [{ label: "h", data: sig.h, color: "#007aff" }]),
