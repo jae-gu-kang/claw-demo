@@ -52,10 +52,17 @@ const CONTROL_ST = "min-height:35px; display:flex; align-items:center; gap:6px;"
 // (격자 1fr로 늘리면 입력이 고정 90px이라 늘어난 만큼 빈 칸이 되어 패널만 휑해진다.
 // 바깥 배치는 app.css .field-grid의 flex-wrap + align-items:stretch 그대로 사용.)
 // shrink 1 — 좁은 화면에서는 줄었다가 wrap.
-const GROUP_ST = "display:flex; flex-direction:column; flex:0 1 280px; min-width:0;";
-const INNER_ST = "display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-start;";
-// 힌트를 그룹 바닥에 붙여 — 힌트 유무로 그룹 높이가 들쭉날쭉해지는 것 방지
-const HINT_ST = "margin:8px 0 0; padding-top:2px;";
+const GROUP_ST = "display:flex; flex-direction:column; flex:0 1 240px; min-width:0;";
+// 그룹 안은 2열 고정 격자 — flex-wrap이면 필드 폭이 내용마다 달라 둘째 줄이
+// 첫 줄 아래로 안 떨어진다(열이 어긋나 보이는 원인). 1fr 두 칸이면 어느 그룹이든
+// 같은 자리에 열이 선다. minmax(0,1fr) — 내용이 칸보다 커도 밀어내지 않게.
+const INNER_ST = "display:grid; grid-template-columns:repeat(2, minmax(0, 1fr));"
+  + " gap:10px 12px; align-items:start;";
+// 입력은 칸 폭을 채운다 — .num의 고정 90px을 두면 칸마다 남는 여백이 제각각
+const FILL_ST = "width:100%; box-sizing:border-box;";
+// margin-top:auto — 힌트를 그룹 바닥에 붙인다. .field-grid의 align-items:stretch가
+// 같은 줄 박스 높이를 맞춰 주므로, 바닥 정렬이면 힌트 줄도 나란히 선다
+const HINT_ST = "margin:auto 0 0; padding-top:8px;";
 // 3면도 한 변 [px] — 셋을 가로로 이어 붙였을 때 3×320 + 여백이 패널에 들어가는 크기
 const PLANE_PX = 320;
 
@@ -71,11 +78,15 @@ function checkField(input, label) {
   return field("", input, el("span", { style: "font-size:12px;" }, label));
 }
 
-/** 남는 폭을 채우는 필드 — 자유 텍스트 입력용 (고정폭 .num과 달리 칸을 다 씀). */
+/** 수치 입력 — 2열 격자 칸을 채우는 폭 (mono 글꼴은 .num이 준다). */
+function numInput(value) {
+  return el("input", { class: "num", style: FILL_ST, value });
+}
+
+/** 2열을 다 쓰는 필드 — 자유 텍스트처럼 반 칸이면 좁은 입력용. */
 function wideField(caption, control) {
   const node = field(caption, control);
-  node.style.flex = "1";
-  node.style.minWidth = "160px";
+  node.style.gridColumn = "1 / -1";
   return node;
 }
 
@@ -90,21 +101,21 @@ export function render() {
   // 항법은 제출 시 병합 (시드만 이 탭이 우선, 나머지 미지정분은 엔진 기본값)
   const actApplied = store.get("actuatorParams");
   const f = {
-    mach: el("input", { class: "num", value: "0.6" }),
-    alt: el("input", { class: "num", value: "1000" }),
-    fuel: el("input", { class: "num", value: "300" }),
-    tEnd: el("input", { class: "num", value: "180" }),
-    accept: el("input", { class: "num", value: "1500" }),
+    mach: numInput("0.6"),
+    alt: numInput("1000"),
+    fuel: numInput("300"),
+    tEnd: numInput("180"),
+    accept: numInput("1500"),
     navOn: el("input", { type: "checkbox", checked: true }),
-    seed: el("input", { class: "num", value: "11" }),
+    seed: numInput("11"),
     actOn: el("input", { type: "checkbox", checked: true }),
-    wn: el("input", { class: "num", value: String(actApplied?.wn ?? 30) }),
-    zeta: el("input", { class: "num", value: String(actApplied?.zeta ?? 0.7) }),
-    rate: el("input", { class: "num", value: String(actApplied?.rate_max ?? 10) }),
-    fuelFlow: el("input", { class: "num", value: "0.3" }),
+    wn: numInput(String(actApplied?.wn ?? 30)),
+    zeta: numInput(String(actApplied?.zeta ?? 0.7)),
+    rate: numInput(String(actApplied?.rate_max ?? 10)),
+    fuelFlow: numInput("0.3"),
     useGains: el("input", { type: "checkbox" }),
     useAp: el("input", { type: "checkbox" }),
-    fp: el("input", { value: "web-sim-v1", style: "width:100%; box-sizing:border-box;" }),
+    fp: el("input", { value: "web-sim-v1", style: FILL_ST }),
   };
 
   // 작동기 프리필 폴백(위 30·0.7·10)은 엔진 기본값의 사본 — 폼이 즉시 유효해야 해서
