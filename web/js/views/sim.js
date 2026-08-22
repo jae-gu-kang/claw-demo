@@ -56,6 +56,8 @@ const GROUP_ST = "display:flex; flex-direction:column; flex:0 1 280px; min-width
 const INNER_ST = "display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-start;";
 // 힌트를 그룹 바닥에 붙여 — 힌트 유무로 그룹 높이가 들쭉날쭉해지는 것 방지
 const HINT_ST = "margin:8px 0 0; padding-top:2px;";
+// 3면도 한 변 [px] — 셋을 가로로 이어 붙였을 때 3×320 + 여백이 패널에 들어가는 크기
+const PLANE_PX = 320;
 
 /** 캡션+컨트롤 2줄 고정 필드. caption "" 이면 자리만 차지 (체크박스 줄맞춤용). */
 function field(caption, ...control) {
@@ -378,7 +380,9 @@ function renderReplay(replayBox) {
   const spans = modeSpans(sig.mode);
   const seq = spans.map((s) => s.mode).join(" → ");
 
-  // 3면도 (평면도·측면도·정면도) — 축 배정·등축 여부는 lib/plot.js planeViews가 정본
+  // 3면도 (평면도·측면도·정면도) — 축 배정·등축 여부는 lib/plot.js planeViews가 정본.
+  // 셋을 가로로 잇대므로 정사각 — N–E 평면이 등축이려면 폭=높이여야 한다
+  // (trackCanvas는 같은 span을 폭·높이에 각각 사상하므로 직사각이면 축척이 어긋난다)
   const views = planeViews(sig);
   const planeBoxes = views.map(() => el("div"));
   const readout = el("span", { class: "progress-label" });
@@ -397,10 +401,11 @@ function renderReplay(replayBox) {
     views.forEach((v, k) => {
       clear(planeBoxes[k]).append(v.equal
         ? trackCanvas(sig.pn, sig.pe, waypoints, acceptRadius,
-          { markerIdx: i, title: v.title })
+          { markerIdx: i, title: v.title, width: PLANE_PX, height: PLANE_PX })
         : profileCanvas(v.xs, v.ys, {
           title: v.title, xLabel: v.xLabel, yLabel: v.yLabel, markerIdx: i,
           wpXs: waypoints.map((w) => w[v.wpIdx]),
+          width: PLANE_PX, height: PLANE_PX,
         }));
     });
   };
@@ -421,6 +426,14 @@ function renderReplay(replayBox) {
       env.first_flag_t != null ? ` · 최초 플래그 ${fmt(env.first_flag_t, 4)}s` : "",
       ` · 최종 h ${fmt(sig.h[sig.h.length - 1], 4)} m · 잔여 연료 ${fmt(sig.fuel[sig.fuel.length - 1], 4)} kg`),
     el("div", { class: "row" }, slider, readout),
+    // 3면도 — 세 평면을 가로로 잇대 한 줄로 (좁으면 wrap). 시계열 위에 두어
+    // 커서 조작(바로 위 슬라이더)과 그 반응이 눈에 같이 들어오게 한다
+    el("div", { style: "display:flex; flex-direction:column; gap:6px; margin-bottom:12px;" },
+      el("div", { class: "hint" },
+        "궤적 3면도 (NED) — N–E 평면만 등축(선회반경 판독용), 연직 평면은 비등축이라 ",
+        "경사각을 눈으로 재면 안 됨. 주황 세로선은 웨이포인트의 수평좌표"),
+      el("div", { style: "display:flex; flex-wrap:wrap; gap:8px; align-items:flex-start;" },
+        planeBoxes[0], planeBoxes[1], planeBoxes[2])),
     el("div", { class: "row" },
       el("div", {},
         chart("고도 h [m]", [{ label: "h", data: sig.h, color: "#007aff" }]),
@@ -432,13 +445,6 @@ function renderReplay(replayBox) {
           { label: "α", data: sig.alpha, color: "#ff3b30" },
           { label: "α_stall−α", data: env.stall_margin, color: "#34c759" }]),
       ),
-      el("div", { style: "display:flex; flex-direction:column; gap:6px;" },
-        el("div", { class: "hint" },
-          "궤적 3면도 — 평면도만 등축(선회반경 판독용), 측면·정면도는 비등축이라 ",
-          "경사각을 눈으로 재면 안 됨. 주황 세로선은 웨이포인트의 수평좌표"),
-        planeBoxes[0],
-        planeBoxes[1],
-        planeBoxes[2]),
     ),
   );
   updateCursor();

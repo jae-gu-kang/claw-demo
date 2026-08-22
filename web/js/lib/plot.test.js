@@ -136,15 +136,22 @@ test("pivotCases: 연료 필터 + 축 정렬 + 조회", () => {
 
 const SIG = { pn: [0, 100, 200], pe: [0, 10, 20], h: [1000, 1010, 1020] };
 
-test("planeViews: 3면도 축 배정 — 수평면만 등축", () => {
+test("planeViews: 3면도 축 배정 — N–E 평면만 등축", () => {
   const views = planeViews(SIG);
-  assert.deepEqual(views.map((v) => v.key), ["xy", "zx", "yz"]);
-  // 축 배정: 수평면은 E(가로)×N(세로), 연직 단면은 수평좌표(가로)×고도(세로)
+  assert.deepEqual(views.map((v) => v.key), ["ne", "nd", "ed"]);
+  // 축 배정: N–E는 E(가로)×N(세로), 연직 평면은 수평좌표(가로)×고도(세로)
   assert.deepEqual(views.map((v) => [v.xs, v.ys]), [
     [SIG.pe, SIG.pn], [SIG.pn, SIG.h], [SIG.pe, SIG.h],
   ]);
-  // 등축은 수평면만 — 연직 단면까지 등축이면 고도 변화가 직선으로 뭉개진다
+  // 등축은 N–E만 — 연직 평면까지 등축이면 고도 변화가 직선으로 뭉개진다
   assert.deepEqual(views.map((v) => v.equal), [true, false, false]);
+});
+
+test("planeViews: 평면 이름은 NED 축 (XY/YZ/ZX 표기 금지 — 내부 좌표가 NED)", () => {
+  for (const v of planeViews(SIG)) {
+    assert.match(v.title, /^[NE]–[ED] 평면/);
+    assert.doesNotMatch(v.title, /XY|YZ|ZX/);
+  }
 });
 
 test("planeViews: 배열은 복사 없이 참조 — 재렌더가 최신 신호를 본다", () => {
@@ -154,16 +161,16 @@ test("planeViews: 배열은 복사 없이 참조 — 재렌더가 최신 신호�
 });
 
 test("planeViews: wpIdx는 가로축 성분 — 웨이포인트 [n, e] 색인", () => {
-  const [xy, zx, yz] = planeViews(SIG);
-  assert.equal(xy.wpIdx, null); // 수평면은 도달반경 원으로 직접 그림
-  assert.equal(zx.wpIdx, 0); // 가로축 N → wp[0]
-  assert.equal(yz.wpIdx, 1); // 가로축 E → wp[1]
+  const [ne, nd, ed] = planeViews(SIG);
+  assert.equal(ne.wpIdx, null); // N–E는 도달반경 원으로 직접 그림
+  assert.equal(nd.wpIdx, 0); // 가로축 N → wp[0]
+  assert.equal(ed.wpIdx, 1); // 가로축 E → wp[1]
   // 색인이 가로축 라벨과 어긋나면 안내선이 엉뚱한 곳에 선다
-  for (const v of [zx, yz]) assert.ok(v.xLabel.startsWith(["N", "E"][v.wpIdx]));
+  for (const v of [nd, ed]) assert.ok(v.xLabel.startsWith(["N", "E"][v.wpIdx]));
 });
 
 test("planeViews: 연직축 라벨에 부호 규약 명시 (D 하방 양 → h = −D)", () => {
   const views = planeViews(SIG);
   for (const v of views.slice(1)) assert.match(v.yLabel, /−D/);
-  assert.equal(views[0].yLabel, "N [m]"); // 수평면에는 붙지 않음
+  assert.equal(views[0].yLabel, "N [m]"); // N–E 평면에는 붙지 않음
 });
