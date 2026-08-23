@@ -17,15 +17,23 @@
 예산이 그것만으로 사라진다. 절반 해상도 레이어에 굵게 한 번 그리고 `filter: blur()` +
 `lighter`로 **한 번만** 합성한다. 교차점이 밝아지는 것이 홀로그램의 핵심 신호다.
 
+**순차 재생이 이 캔버스의 주된 표현이다.** 파라미터를 고르면 전체가 어두워지고
+원뿔이 층을 타고 **한 줄씩 자라며** 연결된다 — 원뿔을 통째로 켜면 "얼마나 넓게
+번지나"는 보여도 "무엇이 무엇을 먼저 건드리나"가 화면에서 사라진다. 시각은
+`lib/influenceplay.js`가 정하고 여기서는 받은 진행도대로 긋기만 한다.
+
 애니메이션은 setInterval 40 ms(25 fps) + 벽시계 기준 — 이 리포에 rAF는 한 군데도 없다.
 */
 
-import { SKIN, BAND_COLOR, STATE_COLOR, coneOf, logScale, radiusOf } from "../lib/influence.js";
-import { hitTestNodes, pointAtArc, wavefrontSchedule } from "../lib/influencelayout.js";
+import { SKIN, BAND_COLOR, STATE_COLOR, logScale, radiusOf } from "../lib/influence.js";
+import { arcPrefix, hitTestNodes, pointAtArc } from "../lib/influencelayout.js";
+import { PLAY, captionAt, cycleAt } from "../lib/influenceplay.js";
 
 const FRAME_MS = 40; // 25 fps — views/sim.js·replayoverlay.js와 같은 예산
-const WAVE_MS = 420; // 파급 링 수명
-const WAVE_RANK_MS = 90;
+const RING_MS = 320; // 도착 펄스 수명 — 선 끝이 노드에 닿는 순간에 묶여 있다
+const HOT_MS = 520; // 도착 직후 노드 헤일로가 커져 있는 시간
+const NODE_FADE_MS = 120; // 노드 점등 램프 — 인접 층이 겹치는 대가를 여기서 덮는다
+const DIM_ALPHA = 0.16; // 원뿔이 있을 때 나머지 구조를 깔아 두는 밝기 ("모두 어두워지고")
 const MAX_PARTICLES = 240;
 const GLOW_SCALE = 0.5; // 발광 레이어 해상도 — 흐릴 것이므로 절반이면 충분
 const TWINKLE_MS = 1400; // 입자 반짝임 주기 — 흐름(2600 ms)과 어긋나게 둬야 맥놀이가 산다
@@ -35,14 +43,26 @@ const FONT = '600 11px -apple-system, "SF Pro Text", "Helvetica Neue", "Malgun G
 const reduceMotion = () =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function makeLayer(w, h, scale = 1) {
+/** 오프스크린 레이어 — **크기·해상도가 같으면 캔버스를 재사용한다.**
+ *
+ * 매번 새로 만들면 dpr 2에서 장당 ~12 MB를 할당한다. 선택이 바뀔 때마다 다시 굽던
+ * 시절에는 클릭 한 번에 두 장이 새로 생겼다. 이제 재굽기는 **레이아웃이 바뀔 때만**이고,
+ * 그마저도 같은 크기면 지우고 다시 쓴다.
+ */
+function ensureLayer(prev, w, h, scale = 1) {
   const dpr = (window.devicePixelRatio || 1) * scale;
-  const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.round(w * dpr));
-  c.height = Math.max(1, Math.round(h * dpr));
-  const ctx = c.getContext("2d");
-  ctx.scale(dpr, dpr); // 이후 전부 논리 픽셀 좌표 — 여기를 빼먹으면 '흐릿하지만 그럴듯한' 그림이 된다
-  return { c, ctx, w, h };
+  const cw = Math.max(1, Math.round(w * dpr));
+  const ch = Math.max(1, Math.round(h * dpr));
+  const l = prev && prev.c.width === cw && prev.c.height === ch
+    ? prev
+    : { c: Object.assign(document.createElement("canvas"), { width: cw, height: ch }), ctx: null };
+  if (!l.ctx) l.ctx = l.c.getContext("2d");
+  l.ctx.setTransform(1, 0, 0, 1, 0, 0);
+  l.ctx.clearRect(0, 0, cw, ch);
+  l.ctx.scale(dpr, dpr); // 이후 전부 논리 픽셀 좌표 — 빼먹으면 '흐릿하지만 그럴듯한' 그림이 된다
+  l.w = w;
+  l.h = h;
+  return l;
 }
 
 /** 결정적 위상 — Math.random을 쓰면 다시 그릴 때마다 입자가 튄다. */
@@ -76,7 +96,10 @@ function nodePath(g, kind, x, y, r) {
 }
 
 export function createInfluenceCanvas(opts = {}) {
-  const { getModel, getLayout, getSelection, getHeat, onSelect, onHover } = opts;
+  const {
+    getModel, getLayout, getSelection, getCone, getPlay, getLoop, getHeat,
+    onSelect, onHover, onCaption,
+  } = opts;
   let width = opts.width ?? 1180;
   let height = opts.height ?? 620;
 
@@ -101,11 +124,13 @@ export function createInfluenceCanvas(opts = {}) {
   let struct = null;
   let glow = null;
   let timer = null;
-  let t0 = 0;
-  let waveAt = 0;
-  let wave = null;
+  let t0 = 0; // 입자 흐름의 원점 — 재생과 **무관한 별개 시계**다(유지 구간에 흐르는 것이 이것)
+  let playAt = 0; // 재생 t=0의 벽시계 앵커 (sim.js·replayoverlay.js의 anchor()와 같은 규약)
   let hover = null;
   let lastSel = null;
+  let lastLayout = null;
+  let structFor = null; // struct를 구울 때의 레이아웃 신원 — 선택이 바뀌어도 다시 굽지 않는다
+  let lastCaption = "";
   let mounted = false;
   let activeCache = { key: null, layout: null, list: [] };
 
@@ -120,14 +145,15 @@ export function createInfluenceCanvas(opts = {}) {
     ctx.scale(dpr, dpr);
     bg = null;
     struct = null;
-    glow = makeLayer(width, height, GLOW_SCALE);
+    structFor = null;
+    glow = ensureLayer(glow, width, height, GLOW_SCALE);
   }
 
   // ── 배경: 중립 흑회색 + 아주 흐린 광원 둘 + 비네트 ─────────────────────
   // 점 격자는 뺐다 — 26 px 도트는 '테크 배경' 상투구이고, 성긴 IR 위에 깔리면 노드보다
   // 격자가 먼저 눈에 들어온다. 깊이는 광원과 비네트가 낸다
   function paintBg() {
-    const l = makeLayer(width, height);
+    const l = ensureLayer(bg, width, height);
     const g = l.ctx;
     const lin = g.createLinearGradient(0, 0, width * 0.35, height);
     lin.addColorStop(0, SKIN.bg2);
@@ -155,12 +181,12 @@ export function createInfluenceCanvas(opts = {}) {
     return l;
   }
 
-  // ── 정적 구조: 간선 + 노드 (선택이 바뀔 때만 다시 굽는다) ──────────────
-  function paintStruct(model, layout, cone) {
-    const l = makeLayer(width, height);
+  // ── 정적 구조: 쉬고 있는 **전체** 그래프 (레이아웃이 바뀔 때만 다시 굽는다) ──
+  // 선택과 무관하다. 원뿔은 이 위에 매 프레임 진행도대로 그려지고, 선택이 있으면
+  // 이 레이어를 통째로 흐리게 깔아 "모두 어두워진" 바탕을 만든다
+  function paintStruct(model, layout) {
+    const l = ensureLayer(struct, width, height);
     const g = l.ctx;
-    const dim = cone ? 0.1 : 0.34;
-    const tint = coneTint(model);
     g.lineCap = "round";
     g.lineJoin = "round";
 
@@ -174,22 +200,18 @@ export function createInfluenceCanvas(opts = {}) {
       g.stroke();
     }
 
-    layout.edges.forEach((e, i) => {
-      const inCone = cone?.edges.has(i);
-      if (cone && !inCone) return; // 원뿔 밖은 흐린 층에 한 번에 그린다 (아래)
-      g.strokeStyle = edgeColor(e, model, inCone ? 0.6 : dim, inCone ? tint : null);
-      g.lineWidth = e.kind === "ghost" ? 1 : inCone ? 1.2 : 1;
+    for (const e of layout.edges) {
+      g.strokeStyle = edgeColor(e, model, 0.34, null);
+      g.lineWidth = 1;
       if (e.kind === "ghost" || e.kind === "declared") g.setLineDash([4, 4]);
       else if (e.kind === "offgraph") g.setLineDash([2, 5]);
       strokeEdge(g, e);
       g.setLineDash([]);
-    });
+    }
 
     for (const n of model.nodes) {
       const p = layout.pos.get(n.id);
-      if (!p) continue;
-      const on = !cone || cone.nodes.has(n.id);
-      drawNode(g, n, p, on ? 1 : 0.14);
+      if (p) drawNode(g, n, p, 1);
     }
     return l;
   }
@@ -202,11 +224,71 @@ export function createInfluenceCanvas(opts = {}) {
     g.stroke();
   }
 
+  /** 호길이 0..s만 긋는다 — 원뿔 간선은 **자라는 중이든 완성이든 항상 이쪽**이다.
+   *  완성 순간에 베지어로 갈아타면 표본 오차만큼 선이 튄다. 전환 자체를 없앤다. */
+  function strokeEdgeTo(g, e, s) {
+    const { n, last } = arcPrefix(e.flat, s);
+    if (n < 1) return;
+    const pts = e.flat.pts;
+    g.beginPath();
+    g.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < n; i += 1) g.lineTo(pts[i].x, pts[i].y);
+    if (last) g.lineTo(last.x, last.y);
+    g.stroke();
+  }
+
+  /** 간선 진행도 — 원뿔 밖이면 null. 재생이 없으면(빈 원뿔) 완성으로 본다. */
+  function edgeProgress(play, idx, t) {
+    const v = play?.edges.get(idx);
+    if (!v) return null;
+    const span = v.t1 - v.t0;
+    return span > 0 ? Math.max(0, Math.min(1, (t - v.t0) / span)) : 1;
+  }
+
+  /** 노드 점등 0..1 — 도착 직전부터 밝아지는 램프.
+   *
+   * 인접 층이 겹치므로(층 150 ms vs 성장 180 ms) 나가는 선이 출발할 때 소스 노드는
+   * 아직 도착 30 ms 전이다. 램프가 없으면 **어두운 노드에서 선이 나가는** 장면이 된다.
+   * 도착 순간 정확히 1.0이므로 "선이 닿아야 켜진다"는 규칙 자체는 지켜진다.
+   */
+  function nodeOn(play, id, t) {
+    const v = play?.nodes.get(id);
+    if (!v) return 0;
+    if (v.at <= 0) return 1;
+    return Math.max(0, Math.min(1, (t - v.at + NODE_FADE_MS) / NODE_FADE_MS));
+  }
+
+  // ── 원뿔: 매 프레임 메인 ctx에 진행도대로 ────────────────────────────
+  function paintCone(g, model, layout, cone, play, t, fade, tint) {
+    g.save();
+    g.lineCap = "round";
+    g.lineJoin = "round";
+    for (const e of layout.edges) {
+      if (!cone.edges.has(e.idx)) continue;
+      const s = edgeProgress(play, e.idx, t);
+      if (s === null || s <= 0) continue;
+      g.strokeStyle = edgeColor(e, model, 0.62 * fade, tint);
+      g.lineWidth = e.kind === "ghost" ? 1 : 1.3;
+      if (e.kind === "ghost" || e.kind === "declared") g.setLineDash([4, 4]);
+      else if (e.kind === "offgraph") g.setLineDash([2, 5]);
+      strokeEdgeTo(g, e, s);
+      g.setLineDash([]);
+    }
+    for (const n of model.nodes) {
+      if (!cone.nodes.has(n.id)) continue;
+      const on = nodeOn(play, n.id, t);
+      if (on <= 0) continue;
+      const p = layout.pos.get(n.id);
+      if (p) drawNode(g, n, p, on * fade);
+    }
+    g.restore();
+  }
+
   /** 선택된 파라미터의 상태 색 — 원뿔 전체가 그 색으로 켜진다.
    *  「덮임」을 골랐는데 원뿔이 파랗게 켜지면 상태와 그림이 서로 다른 말을 한다. */
-  function coneTint(model) {
-    if (!lastSel) return null;
-    return STATE_COLOR[model.byId.get(lastSel)?.state] ?? SKIN.blue;
+  function coneTint(model, sel) {
+    if (!sel) return null;
+    return STATE_COLOR[model.byId.get(sel)?.state] ?? SKIN.blue;
   }
 
   function edgeColor(e, model, alpha, tint) {
@@ -288,31 +370,42 @@ export function createInfluenceCanvas(opts = {}) {
     const layout = getLayout?.();
     if (!model || !layout) return;
     const sel = getSelection?.() ?? null;
-    if (sel !== lastSel) {
+    const cone = getCone?.() ?? null;
+    const play = getPlay?.() ?? null;
+
+    // 선택이 바뀌거나 **배치가 바뀌면** 처음부터 다시 튼다. 배치를 A→C로 바꾸면
+    // 좌표가 전부 새것이라 재생 도중의 진행도를 이어받는 것이 의미가 없다
+    if (sel !== lastSel || layout !== lastLayout) {
       lastSel = sel;
-      struct = null;
-      waveAt = performance.now();
-      wave = sel
-        ? wavefrontSchedule(model.nodes, model.edges, layout.ranks,
-            [sel, ...(model.byId.get(sel)?.seeds ?? [])], { msPerRank: WAVE_RANK_MS })
-        : null;
+      lastLayout = layout;
+      playAt = performance.now();
     }
-    const cone = sel ? coneOf(model, sel) : null;
+    if (!struct || structFor !== layout) {
+      struct = paintStruct(model, layout);
+      structFor = layout;
+    }
     if (!bg) bg = paintBg();
-    if (!struct) struct = paintStruct(model, layout, cone);
+
+    const now = performance.now();
+    // 재생 위치를 정하는 자리는 **여기 한 곳뿐**이다. 동작 축소에서는 타이머가 아예
+    // 없어 진행시킬 틱이 없으므로 완료 상태(t = playMs)로 착지시킨다 — 그러면
+    // 간선 s=1 · 노드 on=1 · 링과 hot은 수명 초과로 꺼짐 · 자막은 요약이 전부 따라온다
+    const still = !timer;
+    const { t, u, fade } = still || !play
+      ? { t: play?.playMs ?? 0, u: Infinity, fade: 1 }
+      : cycleAt(now - playAt, { playMs: play.playMs, holdMs: PLAY.holdMs, loop: getLoop?.() !== false });
 
     ctx.clearRect(0, 0, width, height);
     ctx.drawImage(bg.c, 0, 0, width, height);
-
-    // 원뿔이 있으면 나머지 구조를 아주 흐리게 깔아 맥락을 남긴다.
-    // `struct`에는 원뿔 밖 간선이 없으므로(paintStruct가 건너뛴다) 그 역할은
-    // drawContext 하나가 맡는다 — struct를 먼저 흐리게 겹쳐 깔면 원뿔을 자기
-    // 자신 위에 한 번 더 합성해 노드 알파만 몰래 밀어 올린다
-    if (cone) drawContext(ctx, model, layout, cone);
+    // 원뿔이 있으면 나머지 구조를 통째로 흐리게 깐다 — "모두 다 어두워지고"
+    ctx.globalAlpha = cone ? DIM_ALPHA : 1;
     ctx.drawImage(struct.c, 0, 0, width, height);
+    ctx.globalAlpha = 1;
 
-    const now = performance.now();
-    paintGlow(model, layout, cone, now);
+    const tint = coneTint(model, sel);
+    if (cone) paintCone(ctx, model, layout, cone, play, t, fade, tint);
+
+    paintGlow(model, layout, cone, play, t, u, fade, tint, now);
     ctx.save();
     if (typeof ctx.filter === "string") ctx.filter = "blur(7px)";
     ctx.globalCompositeOperation = "lighter";
@@ -328,116 +421,143 @@ export function createInfluenceCanvas(opts = {}) {
     }
     ctx.restore();
 
-    drawLabels(ctx, model, layout, cone, sel);
+    drawLabels(ctx, model, layout, cone, play, t, sel);
+
+    // 자막은 **문자열이 바뀔 때만** 내보낸다 — 25 fps로 DOM을 만지지 않는다(층당 1회)
+    if (onCaption) {
+      const text = cone ? captionAt(play, t, (id) => model.byId.get(id)?.label ?? id) : "";
+      if (text !== lastCaption) {
+        lastCaption = text;
+        onCaption(text);
+      }
+    }
   }
 
-  function drawContext(g, model, layout, cone) {
-    g.save();
-    g.globalAlpha = 0.5;
-    layout.edges.forEach((e, i) => {
-      if (cone.edges.has(i)) return;
-      g.strokeStyle = `rgba(${WIRE}, .055)`;
-      g.lineWidth = 1;
-      strokeEdge(g, e);
-    });
-    g.restore();
-  }
-
-  function paintGlow(model, layout, cone, now) {
+  function paintGlow(model, layout, cone, play, t, u, fade, tint, now) {
     const g = glow.ctx;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, glow.c.width, glow.c.height);
     const dpr = (window.devicePixelRatio || 1) * GLOW_SCALE;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.lineCap = "round";
 
     const heat = getHeat?.() ?? null;
-    // 프레임마다 간선 수만큼 쌍 배열을 새로 만들지 않는다 — 선택이 바뀔 때만 다시 만든다
-    // 키에 **레이아웃 신원**도 넣는다 — 후보를 A→B로 바꾸면 선택은 그대로인데 간선
-    // 객체(좌표·곡선)가 전부 새것이다. 선택만 보면 옛 좌표에 입자를 뿌리게 된다
+    // 프레임마다 간선 수만큼 배열을 새로 만들지 않는다 — 선택이 바뀔 때만 다시 만든다.
+    // 키에 **레이아웃 신원**도 넣는다: 후보를 A→B로 바꾸면 선택은 그대로인데 간선
+    // 객체(좌표·곡선)가 전부 새것이라, 선택만 보면 옛 좌표에 입자를 뿌리게 된다
     const key = cone ? lastSel : "__all__";
     if (activeCache.key !== key || activeCache.layout !== layout) {
       const pick = [];
-      layout.edges.forEach((e, i) => {
-        if (cone ? cone.edges.has(i) : e.kind === "ir") pick.push([e, i]);
-      });
+      for (const e of layout.edges) {
+        if (cone ? cone.edges.has(e.idx) : e.kind === "ir") pick.push(e);
+      }
       activeCache = { key, layout, list: pick };
     }
     const active = activeCache.list;
-    const tint = coneTint(model);
-    g.lineCap = "round";
 
-    // 굵은 밑칠 — 이게 흐려져서 발광이 된다
-    for (const [e] of active) {
+    // 굵은 밑칠 — 이게 흐려져서 발광이 된다. **선과 같은 진행도로 잘라야 한다**:
+    // 안 자르면 발광이 선보다 먼저 원뿔 전체를 드러내 순차 재생이 무의미해진다
+    for (const e of active) {
+      const s = cone ? edgeProgress(play, e.idx, t) : 1;
+      if (s === null || s <= 0) continue;
       const w = heat ? 1 + 4 * logScale(heat.get(e.dst)?.rel) : 2;
-      g.strokeStyle = edgeColor(e, model, cone ? 0.5 : 0.16, tint);
+      g.strokeStyle = edgeColor(e, model, (cone ? 0.5 : 0.16) * fade, tint);
       g.lineWidth = w * 2.1;
-      strokeEdge(g, e);
+      if (s >= 1) strokeEdge(g, e);
+      else strokeEdgeTo(g, e, s);
     }
 
-    const still = reduceMotion();
+    const still = !timer;
     // 상한은 **총 입자 수**여야 한다. per를 반올림으로 구하면 간선이 많을 때
     // per=2가 되어 총량이 상한을 넘고(실측: 간선 141개 원뿔에서 282개), 상한이
     // 아니라 장식이 된다. per를 내림으로 잡고 예산으로 한 번 더 막는다
     const per = Math.max(1, Math.floor(MAX_PARTICLES / Math.max(1, active.length)));
     let budget = MAX_PARTICLES;
     for (let k = 0; k < active.length && budget > 0; k += 1) {
-      const [e, i] = active[k];
+      const e = active[k];
       if (!e.flat.len) continue;
+      // **다 자란 간선에만** 입자를 뿌린다 — 절반만 자란 선에 뿌리면 선 끝을 넘어 날아간다
+      if (cone && !(edgeProgress(play, e.idx, t) >= 1)) continue;
+      const i = e.idx;
       for (let j = 0; j < per && budget > 0; j += 1) {
         budget -= 1;
-        const s = still
+        // `u`로 두면 paintGlow의 매개변수 u(주기 내 위치, ms)를 가린다 — 여기는
+        // 호길이 비율 0..1이라 단위부터 다르다. 나중에 "유지 구간에만 입자를"
+        // 같은 걸 이 루프에 넣으면 ms 대신 비율을 읽어 조용히 항상 참이 된다
+        const along = still
           ? (0.5 + j / per) % 1
           : ((now - t0) / 2600 + phaseOf(i) + j / per) % 1;
-        const p = pointAtArc(e.flat, s);
+        const p = pointAtArc(e.flat, along);
         // 반짝임 — 흐름 주기(2600 ms)와 어긋난 주기로 밝기·크기를 같이 흔든다.
-        // 위상은 간선·입자마다 결정적으로 달라서 전체가 한꺼번에 깜빡이지 않는다
-        // 정지 프레임은 **평균**이어야 한다. 1로 굳히면 크기·밝기가 동시에 최대가 되고
-        // lighter 합성이라 교차부가 흰색으로 포화한다 — 움직이는 화면보다 더 밝아진다
+        // 위상은 간선·입자마다 결정적으로 달라서 전체가 한꺼번에 깜빡이지 않는다.
+        // 정지 프레임은 **평균**이어야 한다: 1로 굳히면 크기·밝기가 동시에 최대가 되고
+        // lighter 합성이라 교차부가 흰색으로 포화한다
         const tw = still
           ? 0.5
           : 0.5 + 0.5 * Math.sin((now / TWINKLE_MS + phaseOf(i * 37 + j)) * Math.PI * 2);
-        const p2 = 1.35 + 0.95 * tw;
         g.beginPath();
-        g.arc(p.x, p.y, p2, 0, Math.PI * 2);
-        g.fillStyle = edgeColor(e, model, 0.5 + 0.5 * tw, tint);
+        g.arc(p.x, p.y, 1.35 + 0.95 * tw, 0, Math.PI * 2);
+        g.fillStyle = edgeColor(e, model, (0.5 + 0.5 * tw) * fade, tint);
         g.fill();
       }
     }
 
-    // 파급 링 — 랭크에 묶여 있으므로 곧 IR 실행 순서다
-    if (wave) {
-      const age0 = now - waveAt;
-      for (const [id, t] of wave) {
-        if (t === null) continue;
-        const age = still ? WAVE_MS * 0.8 : age0 - t;
-        if (age < 0 || age > WAVE_MS) continue;
+    // 수명이 있는 표현(도착 펄스·hot)은 **클램프하지 않은 `u`**로 잰다.
+    //
+    // `t`로 재면 둘 중 하나가 깨진다: `t <= playMs`를 그대로 쓰면 t가 유지 구간 내내
+    // playMs에 고정돼 마지막 도착 노드(age≈0)의 링·hot이 3.8 s 동안 박히고(동작
+    // 축소에서는 영구 정지 프레임), `t < playMs`로 끊으면 **playMs가 곧 마지막 도착
+    // 시각**이라 마지막 층(지표 8개 + 기체 — 재생의 클라이맥스)의 펄스가 아예 안 뜬다.
+    // `u`는 완료 뒤에도 계속 자라므로 펄스가 제 수명만큼 감쇠하고 저절로 사라진다
+    const arriveAge = (at) => u - at;
+
+    // 도착 펄스 — 선 끝이 노드에 닿는 **그 프레임**에 터진다.
+    // 링의 진행도는 `k`다: 바깥의 `u`(주기 내 위치)를 가리면, 다음 사람이 arriveAge를
+    // `u - v.at`로 인라인하는 순간 같은 블록의 TDZ ReferenceError가 된다
+    if (cone && play) {
+      for (const [id, v] of play.nodes) {
+        if (v === null) continue;
+        const age = arriveAge(v.at);
+        if (age < 0 || age > RING_MS) continue;
         const p = layout.pos.get(id);
         if (!p) continue;
-        const u = age / WAVE_MS;
+        const k = age / RING_MS;
         g.beginPath();
-        g.arc(p.x, p.y, p.r + 3 + 26 * u, 0, Math.PI * 2);
-        g.strokeStyle = withAlpha(tint ?? SKIN.blue, (1 - u) * 0.8);
+        g.arc(p.x, p.y, p.r + 3 + 26 * k, 0, Math.PI * 2);
+        g.strokeStyle = withAlpha(tint ?? SKIN.blue, (1 - k) * 0.8 * fade);
         g.lineWidth = 2.2;
         g.stroke();
       }
     }
 
+    // 노드 헤일로 — **선택이 없어도 돈다.** 여기 위에 early return을 두면 탭에 처음
+    // 들어와 아무것도 안 고른 상태(사용자가 가장 먼저 보는 화면)에서 노드 165개의
+    // 코어 발광이 통째로 사라져 홀로그램이 평평해진다
     for (const nd of model.nodes) {
       if (cone && !cone.nodes.has(nd.id)) continue;
+      const v = cone ? play?.nodes.get(nd.id) : null;
+      if (cone && !v) continue;
+      const on = cone ? nodeOn(play, nd.id, t) : 1;
+      if (on <= 0) continue;
+      const age = v ? arriveAge(v.at) : Infinity;
+      // 도착 직후의 뜨거움은 **램프로 식힌다.** 불리언으로 두면 age가 HOT_MS를 넘는
+      // 프레임에 반지름과 알파가 한 번에 튀는데, 마지막 층 간선들은 시차가 spread
+      // (≤120 ms) 안에 몰려 있어 지표 8개 + 기체의 만료가 3프레임 창에 겹친다 —
+      // 유지 구간에 막 들어서서 입자 말고는 화면이 정지한 때라 그 계단이 그대로 보인다.
+      // 양끝 값은 종전과 같다(age=0 → 2.4r·0.55, age≥HOT_MS → 1.5r·0.2)
+      // 이름이 `heat`가 아닌 이유: 이 함수 위쪽(paintGlow 머리)의 `heat`는 개루프 Δ
+      // 히트맵이다. 가려 두면 나중에 노드 굵기를 Δ로 물들일 때 조용히 엉뚱한 값을 쓴다
+      const flare = age >= 0 ? Math.max(0, 1 - age / HOT_MS) : 0;  // Infinity·미도착이면 0
       const p = layout.pos.get(nd.id);
       if (!p) continue;
-      const t = wave?.get(nd.id);
-      // still이면 hot을 끈다 — 그 경우 waveAt이 바로 이 프레임에서 잡히므로
-      // 조건이 파급 노드 **전부**에서 참이 되어 화면 전체가 정점으로 굳는다
-      const hot = !still && t !== null && t !== undefined && now - waveAt - t < WAVE_MS * 1.6;
       g.beginPath();
-      g.arc(p.x, p.y, p.r * (hot ? 2.4 : 1.5), 0, Math.PI * 2);
-      g.fillStyle = withAlpha(nodeColor(nd), hot ? 0.55 : 0.2);
+      g.arc(p.x, p.y, p.r * (1.5 + 0.9 * flare), 0, Math.PI * 2);
+      g.fillStyle = withAlpha(nodeColor(nd), (0.2 + 0.35 * flare) * on * fade);
       g.fill();
     }
   }
 
-  function drawLabels(g, model, layout, cone, sel) {
+  function drawLabels(g, model, layout, cone, play, t, sel) {
     g.font = FONT;
     // SF는 기본 자간이 넓다 — 11 px 캡슐에서는 살짝 조여야 애플 UI처럼 읽힌다.
     // measureText도 같은 자간을 쓰므로 칩 폭은 저절로 맞는다
@@ -480,7 +600,10 @@ export function createInfluenceCanvas(opts = {}) {
       g.strokeStyle = SKIN.hairline;
       g.lineWidth = 1;
       g.stroke();
-      g.fillStyle = cone && !cone.nodes.has(id) ? SKIN.inkFaint : SKIN.ink;
+      // 원뿔 밖은 물론, **아직 선이 닿지 않은** 노드의 이름도 흐리게 — 라벨만 먼저
+      // 또렷하면 "이미 도달했다"로 읽혀 재생이 말하는 순서와 어긋난다
+      const lit = !cone || (cone.nodes.has(id) && nodeOn(play, id, t) > 0.5);
+      g.fillStyle = lit ? SKIN.ink : SKIN.inkFaint;
       g.fillText(text, x, y);
     }
   }
@@ -528,14 +651,22 @@ export function createInfluenceCanvas(opts = {}) {
 
   resize(width, height);
   t0 = performance.now();
+  playAt = t0;
   if (!reduceMotion()) timer = setInterval(frame, FRAME_MS);
   frame();
 
   return {
     root: view,
+    /** 선택이 바뀌었다 — 레이어는 그대로 두고 다시 그리기만. 동작 축소에서 필수.
+     *  (타이머가 없으면 frame()을 부르는 유일한 경로다) */
     redraw() {
+      frame();
+    },
+    /** 모델이 통째로 바뀌었다 — 구운 레이어를 버린다. */
+    invalidate() {
       bg = null;
       struct = null;
+      structFor = null;
       frame();
     },
     setSize(w, h) {

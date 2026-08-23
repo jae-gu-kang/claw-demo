@@ -16,6 +16,7 @@ import {
   BAND_COLOR, SKIN, STATE_COLOR, STATE_INK, STATE_LABEL, STATE_NOTE, WARN_INK,
   coneOf, normalizeGraph, radiusOf, structuralRequest,
 } from "../lib/influence.js";
+import { conePlayback, graphDepth, summaryOf } from "../lib/influenceplay.js";
 import { cascadeLayout, layeredLayout, radialLayout } from "../lib/influencelayout.js";
 import { createInfluenceCanvas } from "./influencecanvas.js";
 import { store } from "../store.js";
@@ -25,16 +26,26 @@ const CANVAS_H = 660;
 const ROW_GAP = 19;
 
 // 뷰 재생성마다 처음으로 돌아가지 않도록 모듈 스코프 (autocode.js·sim.js와 같은 패턴)
-const state = { variant: "layered", selection: null, model: null, layout: null };
+const state = {
+  variant: "layered", selection: null, model: null, layout: null,
+  cone: null, play: null, depth: 0,
+};
 let canvas = null;
 
+// 층 수는 **데이터에서 온다**. 문구에 박아 두면(전에는 "16층"이었다) 엔진이 노드를
+// 하나 늘리는 순간 자막의 층 수와 어긋나 화면이 조용히 거짓말한다 (02 §5.5)
+// d가 0인 경우가 **영구히 남을 수 있다**: rebuild()는 모델이 없으면 즉시 반환하므로
+// 첫 로드가 실패하면 층 수가 영영 안 채워진다. 그때 「0층」을 내보이면 하드코딩을
+// 걷어낸 자리에 더 틀린 수를 넣는 꼴이라, 수가 없으면 수를 말하지 않는다
 const VARIANTS = [
   ["layered", "A · 레이어 활성망",
-   "좌→우 16층 — 층 번호가 곧 IR 실행 순서이자 생성 C의 문장 순서다. 경로 추적이 쉽다"],
+   (d) => `좌→우 ${d > 0 ? `${d}층` : "층 구조"}(파라미터·입력 → IR → 출력·기체·지표) — `
+     + "IR 구간의 층 번호가 곧 실행 순서이자 생성 C의 문장 순서다. 경로 추적이 쉽다"],
   ["radial", "B · 영향 성운",
-   "동심원 4겹 + 묶음 허브로 다발 묶기 — 바깥이 파라미터, 중심이 지표. 얽힘의 규모가 한눈에"],
+   () => "동심원 4겹 + 묶음 허브로 다발 묶기 — 바깥이 파라미터, 중심이 지표. 얽힘의 규모가 한눈에"],
   ["cascade", "C · 전파 폭포",
-   "16층을 모듈 밴드로 접어 굵은 흐름으로 — 어느 모듈을 지나는지가 덩어리로 읽힌다"],
+   (d) => `${d > 0 ? `${d}층을` : "층 구조를"} 모듈 밴드로 접어 굵은 흐름으로 — `
+     + "어느 모듈을 지나는지가 덩어리로 읽힌다"],
 ];
 const LAYOUT_FN = { layered: layeredLayout, radial: radialLayout, cascade: cascadeLayout };
 
@@ -52,23 +63,39 @@ export function render() {
   const variantNote = el("div", { style: "margin-top:4px" });
   const tableBox = el("div");
   const detailBox = el("div");
+  // 재생 상태 줄 — 캔버스가 시계를 쥐고 있으므로 캔버스가 문자열을 밀어 준다.
+  // `aria-live`는 쓰지 않는다: 이 캔버스는 보조 표면이고 정본은 아래 표인데,
+  // 무한 반복이라 6초마다 층 문구 십수 개를 영구히 읽어 정본을 덮는다.
+  // 지속되는 사실은 상세 패널에 정적 텍스트로 남는다(스크린리더가 요청할 때 읽는다)
+  const playLine = el("p", {
+    class: "hint", "aria-hidden": "true",
+    style: `margin:8px 0 0;color:${SKIN.inkDim};white-space:nowrap;`
+      + "overflow:hidden;text-overflow:ellipsis;min-height:20px",
+  });
   const canvasBox = el("div", {
     style: "position:relative;border-radius:16px;overflow:hidden;background:#000",
   });
 
   const variantRow = el("div", { class: "row", style: "gap:6px" });
+  // 버튼은 한 번만 만들고 **제자리에서 고친다.** 행을 다시 만들면 방금 누른 버튼이 DOM에서
+  // 들려 나가 키보드 포커스가 <body>로 떨어지고, aria-pressed가 바뀌어도 낭독되지 않는다
+  const variantBtns = VARIANTS.map(([key, label]) =>
+    el("button", {
+      onclick: () => {
+        state.variant = key;
+        renderVariants();  // 눌린 버튼이 안 바뀌면 지금 무엇을 보고 있는지 알 수 없다
+        rebuild();
+      },
+    }, label));
+  variantRow.append(...variantBtns);
   function renderVariants() {
-    clear(variantRow).append(...VARIANTS.map(([key, label, note]) =>
-      el("button", {
-        class: key === state.variant ? "primary" : "",
-        title: note,
-        "aria-pressed": key === state.variant ? "true" : "false",
-        onclick: () => {
-          state.variant = key;
-          renderVariants();  // 눌린 버튼이 안 바뀌면 지금 무엇을 보고 있는지 알 수 없다
-          rebuild();
-        },
-      }, label)));
+    VARIANTS.forEach(([key, , note], i) => {
+      const on = key === state.variant;
+      const b = variantBtns[i];
+      b.className = on ? "primary" : "";
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      b.title = note(state.depth ?? 0);
+    });
   }
   renderVariants();
 
@@ -93,15 +120,34 @@ export function render() {
       : Math.max(360, probe.bounds.maxRows * (state.variant === "cascade" ? 18 : ROW_GAP) + 96);
     state.layout = fn(graph, { ...opts, height });
     if (canvas) canvas.setSize(CANVAS_W, height);
+    renderVariants();  // 툴팁도 층 수를 쓴다 — 생성 시점의 state.depth는 아직 0이다
     renderTable();
     renderDetail();
     renderVariantNote();
+  }
+
+  // 원뿔과 재생 일정은 (모델, 선택)에만 의존한다 — **배치와 무관**하므로 배치를
+  // 바꿔도 다시 만들지 않는다. 매 프레임 돌던 coneOf(간선 264개 스캔)도 여기로 모인다
+  function recompute() {
+    // 모델이 없을 수 있다: 첫 응답 전이거나 /influence/structural가 실패한 뒤.
+    // 캔버스의 Escape 핸들러는 pointermove·click과 달리 layout 가드가 없어
+    // 그 상태에서도 select(null)이 들어온다 — 여기서 막지 않으면 TypeError다
+    if (!state.model) {
+      state.cone = null;
+      state.play = null;
+      return;
+    }
+    state.depth = graphDepth(state.model);
+    state.cone = state.selection ? coneOf(state.model, state.selection) : null;
+    state.play = state.cone ? conePlayback(state.model, state.cone) : null;
   }
 
   function select(id) {
     const n = id ? state.model?.byId.get(id) : null;
     // 노드를 눌러도 파라미터가 아니면 선택을 바꾸지 않는다 — 원뿔의 주어는 파라미터다
     state.selection = n?.kind === "param" ? id : id === null ? null : state.selection;
+    recompute();
+    if (!state.cone) playLine.textContent = "";
     renderDetail();
     renderTable();
     // 동작 축소 설정에서는 타이머가 아예 없다 — frame()이 선택을 읽는 유일한 자리이므로
@@ -113,7 +159,7 @@ export function render() {
   function renderVariantNote() {
     clear(variantNote);
     const [, , note] = VARIANTS.find(([k]) => k === state.variant) ?? [];
-    variantNote.append(el("span", { class: "hint" }, note ?? ""));
+    variantNote.append(el("span", { class: "hint" }, note ? note(state.depth ?? 0) : ""));
     if (state.layout?.meta?.conserved === false) {
       // 리본 폭을 유량으로 읽으면 "상류 = 하류 합"이라는 없는 성질을 믿게 된다
       variantNote.append(el("span", {
@@ -151,6 +197,13 @@ export function render() {
         stat("탐침", sel.probe_to == null ? "—"
           : `${fmtNum(sel.value)} → ${fmtNum(sel.probe_to)} (유한 차분, 미분 아님)`),
       ),
+      // 재생이 보여 주는 순서를 **글로도** 남긴다 — 캔버스만 아는 사실을 만들지 않는다.
+      // 캔버스 아래 줄은 재생 중 흘러가지만 이쪽은 선택마다 한 번 갱신되는 정적 사실이라
+      // 스크린리더가 요청할 때 읽는다(그래서 저쪽이 aria-hidden이어도 손실이 없다)
+      state.play
+        ? el("p", { class: "hint", style: "margin:6px 0 0" },
+            summaryOf(state.play, (id) => m.byId.get(id)?.label ?? id))
+        : el("span"),
       sel.added?.length
         ? el("p", { style: `margin:6px 0 0;color:${WARN_INK};font-size:12px` },
             `이 값을 올리면 생기는 노드: ${sel.added.join(", ")} — 탑재 C도 달라진다`)
@@ -243,9 +296,10 @@ export function render() {
           style: `margin:4px 0;font-size:12px;color:${WARN_INK}`,
         }, `⚠ ${w}`));
       }
+      recompute();
       renderLegend(m);
       rebuild();
-      canvas.redraw();
+      canvas.invalidate();
     } catch (e) {
       statusLine.textContent = "불러오지 못했습니다";
       clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -258,7 +312,10 @@ export function render() {
     getModel: () => state.model,
     getLayout: () => state.layout,
     getSelection: () => state.selection,
+    getCone: () => state.cone,
+    getPlay: () => state.play,
     onSelect: select,
+    onCaption: (text) => { playLine.textContent = text; },
   });
   canvasBox.append(canvas.root);
 
@@ -282,6 +339,7 @@ export function render() {
       style: `background:${SKIN.raised};border-color:${SKIN.hairline};border-radius:14px`,
     },
       canvasBox,
+      playLine,
       el("div", { style: "margin-top:10px" }, legendBox),
     ),
     el("div", { class: "panel" }, detailBox),

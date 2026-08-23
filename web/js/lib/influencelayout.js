@@ -310,8 +310,13 @@ export function edgeBezier(p0, p1, { rankSpan = 1, tension = 0.42, bowAway = 0 }
   };
 }
 
-/** 베지어 → 폴리라인 + 누적 호길이. 입자가 곡선에서 느려지지 않게 하는 근거. */
-export function flattenBezier(b, samples = 16) {
+/** 베지어 → 폴리라인 + 누적 호길이. 입자가 곡선에서 느려지지 않게 하는 근거.
+ *
+ * 표본 24: 원뿔 간선은 **자라는 중이든 완성이든 이 폴리라인으로만** 그린다
+ * (`arcPrefix`). 즉 현눈금 오차가 곧 화면의 곡선 오차다 — 이 화면에서 가장 심한
+ * 곡선(길이 ~400 px·곡률반경 ~200 px)에서 16이면 0.39 px, 24면 0.17 px.
+ */
+export function flattenBezier(b, samples = 24) {
   const pts = [];
   for (let i = 0; i <= samples; i += 1) {
     const t = i / samples;
@@ -346,6 +351,27 @@ export function pointAtArc(flat, s) {
   };
 }
 
+/** 호길이 0..s 구간의 폴리라인 — **끝점만 보간한다**.
+ *
+ * `{ n, last }`: `flat.pts[0 .. n-1]`을 잇고, `last`가 있으면 거기까지 한 번 더 긋는다.
+ * 배열을 새로 만들지 않는 이유: 순차 재생에서 간선 141개 × 25 fps로 불린다.
+ *
+ * 끝점을 자체 보간하지 않고 `pointAtArc`를 재사용하는 이유는 "호길이 s의 점이 어디인가"를
+ * 두 곳에서 정의하지 않기 위해서다 — 어긋나면 입자와 선 끝이 다른 자리에 놓인다.
+ */
+export function arcPrefix(flat, s) {
+  const pts = flat.pts;
+  if (!(s > 0)) return { n: 0, last: null };
+  // len이 정확히 0인 경우만 걸린다. 제자리 간선의 실제 len은 1.5e-14쯤이라 아래
+  // 일반 경로로 가는데, pointAtArc가 `seg || 1`로 0-나눗셈을 막고 있어 제자리 점이 나온다
+  if (s >= 1 || !(flat.len > 0)) return { n: pts.length, last: null };
+  const target = s * flat.len;
+  const cum = flat.cum;
+  let i = 0;
+  while (i < cum.length - 1 && cum[i + 1] <= target) i += 1;
+  return { n: i + 1, last: pointAtArc(flat, s) };
+}
+
 /** 가장 가까운 노드 — 반경 안, 동률이면 작은 노드 우선 (겹칠 때 위에 있는 쪽). */
 export function hitTestNodes(pos, x, y, { radius = 10 } = {}) {
   let best = null;
@@ -361,29 +387,6 @@ export function hitTestNodes(pos, x, y, { radius = 10 } = {}) {
   return best;
 }
 
-/** 파급 일정 — 씨앗에서 층을 타고 번지는 시각(ms). 도달 불가는 **null**(0도 ∞도 아니다).
- *
- * 랭크에 묶여 있으므로 이 애니메이션은 곧 IR 실행 순서 = 생성 C 문장 순서를 보여 준다.
- */
-export function wavefrontSchedule(nodes, edges, ranks, seeds, { msPerRank = 90 } = {}) {
-  const reach = new Map(nodes.map((n) => [n.id, null]));
-  const seedSet = new Set(seeds);
-  const adj = new Map(nodes.map((n) => [n.id, []]));
-  for (const e of edges) if (adj.has(e.src)) adj.get(e.src).push(e.dst);
-  const base = Math.min(...[...seedSet].map((s) => ranks.rank.get(s) ?? 0), Infinity);
-  const stack = [...seedSet];
-  for (const s of seedSet) if (reach.has(s)) reach.set(s, 0);
-  while (stack.length) {
-    const id = stack.pop();
-    for (const d of adj.get(id) ?? []) {
-      if (!reach.has(d) || reach.get(d) !== null) continue;
-      reach.set(d, Math.max(0, (ranks.rank.get(d) ?? 0) - base) * msPerRank);
-      stack.push(d);
-    }
-  }
-  return reach;
-}
-
 /** 후보 A — 레이어 활성망. 파라미터 열은 세 줄로 접는다. */
 export function layeredLayout(graph, opts = {}) {
   const { nodes, edges } = graph;
@@ -394,14 +397,17 @@ export function layeredLayout(graph, opts = {}) {
     ...opts,
     cols: { 0: paramCols, ...(opts.cols ?? {}) },
   });
-  const eout = edges.map((e) => {
+  // `idx`는 **입력 배열에서의 자리**다. 아래 filter가 좌표 없는 간선을 떨구므로
+  // 출력 배열의 위치는 모델 간선 인덱스와 어긋날 수 있는데, 소비처(원뿔 판정·재생
+  // 일정)는 모델 인덱스로 말한다 — 자리로 맞추면 **엉뚱한 선이 켜진다**
+  const eout = edges.map((e, i) => {
     const p0 = coords.pos.get(e.src);
     const p1 = coords.pos.get(e.dst);
     if (!p0 || !p1) return null;
     const span = Math.abs((ranks.rank.get(e.dst) ?? 0) - (ranks.rank.get(e.src) ?? 0));
     const bow = (p0.y + p1.y) / 2 < coords.bounds.h / 2 ? -1 : 1;
     const bez = edgeBezier(p0, p1, { rankSpan: span, bowAway: bow });
-    return { ...e, rankSpan: span, bez, flat: flattenBezier(bez) };
+    return { ...e, idx: i, rankSpan: span, bez, flat: flattenBezier(bez) };
   }).filter(Boolean);
   return {
     variant: "layered", nodes, edges: eout, pos: coords.pos, ranks,
@@ -492,7 +498,7 @@ export function radialLayout(graph, opts = {}) {
   }
 
   const lerp = (p, q, t) => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
-  const eout = edges.map((e) => {
+  const eout = edges.map((e, i) => {
     const p0 = pos.get(e.src);
     const p1 = pos.get(e.dst);
     if (!p0 || !p1) return null;
@@ -502,7 +508,8 @@ export function radialLayout(graph, opts = {}) {
     const c1 = lerp(p0, h0, beta * 0.55);
     const c2 = lerp(p1, h1, beta * 0.55);
     const bez = { x0: p0.x, y0: p0.y, c1x: c1.x, c1y: c1.y, c2x: c2.x, c2y: c2.y, x1: p1.x, y1: p1.y };
-    return { ...e, rankSpan: Math.abs((ranks.rank.get(e.dst) ?? 0) - (ranks.rank.get(e.src) ?? 0)),
+    return { ...e, idx: i,
+      rankSpan: Math.abs((ranks.rank.get(e.dst) ?? 0) - (ranks.rank.get(e.src) ?? 0)),
       bez, flat: flattenBezier(bez) };
   }).filter(Boolean);
 
@@ -570,13 +577,13 @@ export function cascadeLayout(graph, opts = {}) {
   });
 
   const colIdx = new Map(nodes.map((n) => [n.id, colOf(n)]));
-  const eout = edges.map((e) => {
+  const eout = edges.map((e, i) => {
     const p0 = pos.get(e.src);
     const p1 = pos.get(e.dst);
     if (!p0 || !p1) return null;
     const span = Math.abs((colIdx.get(e.dst) ?? 0) - (colIdx.get(e.src) ?? 0));
     const bez = edgeBezier(p0, p1, { rankSpan: Math.max(1, span), tension: 0.5 });
-    return { ...e, rankSpan: span, bez, flat: flattenBezier(bez) };
+    return { ...e, idx: i, rankSpan: span, bez, flat: flattenBezier(bez) };
   }).filter(Boolean);
 
   return {

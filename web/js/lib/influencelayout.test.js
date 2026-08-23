@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
   assignCoords,
   assignRanks,
+  arcPrefix,
   crossingCount,
   edgeBezier,
   flattenBezier,
@@ -13,7 +14,6 @@ import {
   orderWithinRanks,
   pointAtArc,
   topoOrder,
-  wavefrontSchedule,
 } from "./influencelayout.js";
 
 const N = (id, kind, band = "x") => ({ id, kind, band });
@@ -173,26 +173,8 @@ test("히트테스트는 반경 밖이면 null", () => {
   assert.equal(hitTestNodes(pos, 35, 10), null);
 });
 
-test("파급: 씨앗은 0, 도달 불가는 null(0이 아니다)", () => {
-  const nodes = [N("i", "input", "io"), N("a", "ir"), N("b", "ir"), N("z", "ir")];
-  const edges = [{ src: "i", dst: "a" }, { src: "a", dst: "b" }, { src: "i", dst: "z" }];
-  const ranks = assignRanks(nodes, edges);
-  const t = wavefrontSchedule(nodes, edges, ranks, ["a"], { msPerRank: 100 });
-  assert.equal(t.get("a"), 0);
-  assert.equal(t.get("b"), 100);
-  assert.equal(t.get("z"), null, "도달 못 하면 null — 0이면 '동시에 켜졌다'로 읽힌다");
-});
-
-test("파급 시각은 간선 방향으로 단조 증가", () => {
-  const ranks = assignRanks(diamond.nodes, diamond.edges);
-  const t = wavefrontSchedule(diamond.nodes, diamond.edges, ranks, ["a"]);
-  for (const e of diamond.edges) {
-    if (t.get(e.src) !== null && t.get(e.dst) !== null) {
-      assert.ok(t.get(e.dst) >= t.get(e.src), JSON.stringify(e));
-    }
-  }
-});
-
+// 파급 일정 테스트 2건(씨앗=0 · 미도달=null · 간선 방향 단조)은 후계인
+// `influenceplay.js`의 conePlayback으로 이관됐다 — 세 성질 모두 그쪽이 승계한다.
 test("각도 평균은 단위벡터로 — 170°와 −170°의 평균은 180°지 0°가 아니다", async () => {
   const { meanAngle } = await import("./influencelayout.js");
   const d = Math.PI / 180;
@@ -250,4 +232,74 @@ test("이미 충분히 벌어져 있으면 건드리지 않는다 — 바리센�
   const a = new Map([["x", 0], ["y", 1], ["z", 2]]);
   spreadAngles(["x", "y", "z"], a, 0.2);
   assert.deepEqual([a.get("x"), a.get("y"), a.get("z")], [0, 1, 2]);
+});
+
+// ── 부분 스트로크 (순차 재생이 간선을 0..s로 자를 때 쓴다) ────────────────
+
+test("arcPrefix: s=0은 아무것도, s=1은 전 표본 — 완성 프레임이 흔들리지 않는다", () => {
+  const flat = flattenBezier(edgeBezier({ x: 0, y: 0 }, { x: 200, y: 120 }, { rankSpan: 4 }));
+  assert.deepEqual(arcPrefix(flat, 0), { n: 0, last: null });
+  assert.deepEqual(arcPrefix(flat, -1), { n: 0, last: null });
+  // s=1에서 last가 남으면 마지막 프레임에만 점이 하나 더 찍혀 선 끝이 떤다
+  assert.deepEqual(arcPrefix(flat, 1), { n: flat.pts.length, last: null });
+  assert.deepEqual(arcPrefix(flat, 2), { n: flat.pts.length, last: null });
+});
+
+test("arcPrefix: 끝점은 pointAtArc와 같은 자리 — 선 끝과 입자가 어긋나지 않는다", () => {
+  const flat = flattenBezier(edgeBezier({ x: 0, y: 0 }, { x: 300, y: -80 }, { rankSpan: 3 }));
+  for (const s of [0.13, 0.5, 0.87]) {
+    const { last } = arcPrefix(flat, s);
+    const p = pointAtArc(flat, s);
+    assert.ok(Math.hypot(last.x - p.x, last.y - p.y) < 1e-9, `s=${s}`);
+  }
+});
+
+test("arcPrefix: 그려지는 길이가 s에 비례한다 — 등속으로 자란다", () => {
+  const flat = flattenBezier(edgeBezier({ x: 0, y: 0 }, { x: 400, y: 200 }, { rankSpan: 4 }));
+  const drawn = (s) => {
+    const { n, last } = arcPrefix(flat, s);
+    let L = 0;
+    for (let i = 1; i < n; i += 1) {
+      L += Math.hypot(flat.pts[i].x - flat.pts[i - 1].x, flat.pts[i].y - flat.pts[i - 1].y);
+    }
+    if (last && n > 0) L += Math.hypot(last.x - flat.pts[n - 1].x, last.y - flat.pts[n - 1].y);
+    return L;
+  };
+  // cum을 잘못 읽으면(한 칸 밀림 등) 여기서 계단이 생긴다
+  // **첫 마디 안(s ≲ 0.065)을 반드시 밟는다.** 여기를 안 보면 `n = i + 1`을 `n = i`로
+  // 바꾸는 오프바이원(= 모든 간선의 성장 첫 65 ms 동안 선이 아예 안 그려진다)이
+  // 통과한다 — 다른 s에서는 오차가 0.04 px에 그쳐 허용오차 안에 숨는다
+  for (const s of [0.01, 0.04, 0.1, 0.25, 0.4, 0.6, 0.75, 0.9]) {
+    assert.ok(Math.abs(drawn(s) - s * flat.len) < 0.5, `s=${s}: ${drawn(s)} vs ${s * flat.len}`);
+  }
+});
+
+test("arcPrefix: 제자리 간선에서 NaN도 예외도 없다", () => {
+  // 주의: 이 곡선의 len은 **정확히 0이 아니라 1.5e-14**다 (3차식 평가의 부동소수 잡음).
+  // 그래서 `len > 0` 가드에 안 걸리고 일반 경로를 탄다 — 계약은 "0을 특례로 잡는다"가
+  // 아니라 "어느 경로로 가든 유한한 점을 내고 끝점을 벗어나지 않는다"여야 한다
+  const flat = flattenBezier(edgeBezier({ x: 5, y: 5 }, { x: 5, y: 5 }, { rankSpan: 1 }));
+  assert.deepEqual(arcPrefix(flat, 0), { n: 0, last: null });
+  const r = arcPrefix(flat, 0.5);
+  assert.ok(Number.isFinite(r.n) && r.n >= 0 && r.n <= flat.pts.length);
+  assert.ok(Number.isFinite(r.last.x) && Number.isFinite(r.last.y));
+  assert.ok(Math.hypot(r.last.x - 5, r.last.y - 5) < 1e-9, "제자리 간선은 제자리에 머문다");
+});
+
+test("간선의 idx는 **모델 간선 인덱스** — 좌표 없는 간선이 빠져도 안 어긋난다", async () => {
+  const { radialLayout, cascadeLayout } = await import("./influencelayout.js");
+  // 두 번째 간선의 목적지를 배치에 없는 노드로 둔다 → filter(Boolean)에 떨어진다
+  const g = {
+    nodes: diamond.nodes,
+    edges: [diamond.edges[0], { src: "a", dst: "유령" }, ...diamond.edges.slice(1)],
+  };
+  for (const fn of [layeredLayout, radialLayout, cascadeLayout]) {
+    const L = fn(g, { width: 600, height: 400 });
+    assert.ok(L.edges.length < g.edges.length, "떨어진 간선이 있어야 이 테스트가 의미 있다");
+    for (const e of L.edges) {
+      // 자리(위치)로 맞추면 여기서 어긋난다 — 원뿔 판정·재생 일정이 엉뚱한 선을 켠다
+      assert.equal(e.src, g.edges[e.idx].src, `${L.variant} idx=${e.idx}`);
+      assert.equal(e.dst, g.edges[e.idx].dst, `${L.variant} idx=${e.idx}`);
+    }
+  }
 });
