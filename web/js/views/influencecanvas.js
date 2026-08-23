@@ -512,8 +512,11 @@ export function createInfluenceCanvas(opts = {}) {
     const arriveAge = (at) => u - at;
 
     // 도착 펄스 — 선 끝이 노드에 닿는 **그 프레임**에 터진다.
-    // 링의 진행도는 `k`다: 바깥의 `u`(주기 내 위치)를 가리면, 다음 사람이 arriveAge를
-    // `u - v.at`로 인라인하는 순간 같은 블록의 TDZ ReferenceError가 된다
+    // 진행도 이름은 이 함수 안 어느 것도 가리지 않게 고른다: `u`는 주기 내 위치(ms),
+    // `k`는 위쪽 입자 루프의 active 인덱스다. 갈림은 이름이 아니라 **읽는 위치**다:
+    // `u`의 유일한 참조(arriveAge)가 이 블록 **위**에 있어 인라인이 항상 선언 앞에
+    // 떨어지므로 같은 블록의 TDZ ReferenceError로 **터지고**,
+    // `k`로 두면 형제 스코프라 안 터지는 대신 블록을 합칠 때 조용히 엉뚱한 값을 읽는다
     if (cone && play) {
       for (const [id, v] of play.nodes) {
         if (v === null) continue;
@@ -521,10 +524,10 @@ export function createInfluenceCanvas(opts = {}) {
         if (age < 0 || age > RING_MS) continue;
         const p = layout.pos.get(id);
         if (!p) continue;
-        const k = age / RING_MS;
+        const grow = age / RING_MS;
         g.beginPath();
-        g.arc(p.x, p.y, p.r + 3 + 26 * k, 0, Math.PI * 2);
-        g.strokeStyle = withAlpha(tint ?? SKIN.blue, (1 - k) * 0.8 * fade);
+        g.arc(p.x, p.y, p.r + 3 + 26 * grow, 0, Math.PI * 2);
+        g.strokeStyle = withAlpha(tint ?? SKIN.blue, (1 - grow) * 0.8 * fade);
         g.lineWidth = 2.2;
         g.stroke();
       }
