@@ -6,3 +6,8 @@ __pycache__/
 .DS_Store
 .claude/
 server_data/
+# scripts/bundle.sh 산출물 (반입 꾸러미). 무시하지 않으면 bundle.sh의
+# "미커밋 변경 없음" 검사가 자기 산출물에 걸려 두 번째 실행부터 막힌다.
+# dist-code/ 는 --code-only 모드의 출력 — 전체 꾸러미와 섞이지 않게 따로 쓴다.
+dist/
+dist-code/

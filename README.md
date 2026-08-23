@@ -42,6 +42,11 @@ scripts/run.sh --reload        # 나머지 인자는 uvicorn으로 전달
 위 배지를 누르면 컨테이너가 뜨고 의존성이 자동 설치된다. 터미널에서
 `scripts/run.sh` 를 실행하면 8000 포트 포워딩 알림이 뜨고, 그 링크가 웹 UI다.
 
+알림을 놓쳤으면 하단 **PORTS** 패널의 8000번 행에서 열 수 있다. 주소를 직접
+만들려면 `echo "https://$CODESPACE_NAME-8000.$GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN"`.
+터미널에 찍히는 `http://127.0.0.1:8000/` 은 컨테이너 안쪽 주소라 눌러도 안 열린다.
+포워딩이 잡히지 않으면 `HOST=0.0.0.0 scripts/run.sh` 로 다시 띄운다.
+
 포워딩된 포트는 기본 private이라 본인만 접근할 수 있다. 남에게 보여주려면
 Ports 패널에서 해당 포트를 Public으로 바꾸면 되는데, 위의 인증 부재 경고가
 그대로 적용된다 — 링크를 아는 사람은 누구나 조작할 수 있다.
@@ -92,7 +97,7 @@ uvicorn --factory claw_server:create_app --port 8000   # 리포 루트에서
 | `flight/` | 탑재 SW용 C 코드 생성기와 생성물, 파이썬↔C 패리티 테스트 |
 | `docs/` | 설계 확정 문서 (제어법칙·구현·모듈) |
 | `data/` | 예제·검증 데이터 (F-16 공개 공력테이블 등 — 반입 예정) |
-| `scripts/` | 설치·기동 스크립트 |
+| `scripts/` | 설치·기동 스크립트 + 폐쇄망 반입 꾸러미 생성·리허설 |
 
 일부 디렉터리(`server/`, `web/`, `data/`)에는 자체 README가 있다.
 
@@ -114,16 +119,18 @@ cd web && node --test "js/**/*.test.js"   # 웹 (node 내장 러너, npm 의존 
 - **editable 설치가 전제다.** 웹 UI 정적 파일 경로를 `__file__` 기준으로 찾기
   때문에, `-e` 없이 site-packages에 설치하면 `/`가 404가 되고 API만 동작한다.
   그 경우 `CLAW_WEB_DIR`로 `web/` 경로를 직접 지정해야 한다.
-- **원격 접속엔 `--host 0.0.0.0`이 필요하다.** 기본은 uvicorn 기본값인
-  127.0.0.1 바인딩이다. Codespaces는 포워딩 에이전트가 컨테이너 안에서 돌아
-  기본값 그대로도 동작한다.
+- **원격 접속엔 `--host 0.0.0.0`이 필요하다.** 기본은 127.0.0.1 바인딩이다.
+  Codespaces에서도 포워딩이 안 잡히면 이걸로 다시 띄운다.
+- **uvicorn 워커를 늘리면 안 된다.** 작업 관리자가 프로세스 메모리에 있어
+  (`server/claw_server/jobs.py`) `--workers 2` 이상이면 워커 A가 만든 작업을
+  B가 못 찾아 진행률 조회가 조용히 404가 된다. 단일 프로세스가 전제다.
 - **`flight` 패리티 테스트 2건은 C 컴파일러를 요구한다.** `cc`/`gcc`/`clang`이
   없으면 자동으로 skip된다. 웹 UI·엔진·서버 구동에는 컴파일러가 필요 없다.
 - **시뮬 재생은 다운샘플 뷰다.** 모드 밴드 경계가 최대 `stride×dt` 이동할 수
   있다. 수치 판정의 정본은 항상 서버에 저장된 전 해상도 원본이다.
-- **폐쇄망 반입은 별도 준비가 필요하다.** 위 절차는 모두 PyPI 접속을 전제한다.
-  오프라인 설치에는 `pip download`로 타겟 플랫폼·파이썬 버전에 맞는 휠을 미리
-  받아 두고 `pip install --no-index --find-links=...` 로 설치해야 한다.
+- **폐쇄망 반입은 별도 절차다.** 위 설치 절차는 모두 PyPI 접속을 전제한다.
+  오프라인 설치는 `scripts/bundle.sh`로 꾸러미를 만들고 `scripts/setup.sh
+  --offline`으로 설치한다 — 절차와 주의사항은 [docs/deploy-airgap.md](docs/deploy-airgap.md).
 
 ## 문서
 
@@ -131,3 +138,4 @@ cd web && node --test "js/**/*.test.js"   # 웹 (node 내장 러너, npm 의존 
 - `docs/fcs-context-02-implementation.md` — 구현 확정 사항
 - `docs/fcs-context-03-modules.md` — 모듈 구성
 - `docs/conventions.md` — 코드 규약
+- `docs/deploy-airgap.md` — 폐쇄망 반입·운영 절차

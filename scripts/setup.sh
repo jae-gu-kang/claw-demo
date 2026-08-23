@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# CLAW_DEMO 설치 — 로컬·devcontainer 공용 단일 소스.
+# CLAW_DEMO 설치 — 로컬·devcontainer·폐쇄망 공용 단일 소스.
 # .devcontainer/devcontainer.json의 postCreateCommand가 이 파일을 그대로 호출하므로
 # 설치 절차를 여기 말고 다른 데 복제하지 말 것.
+#
+#   scripts/setup.sh                        # PyPI에서 설치 (일반망)
+#   scripts/setup.sh --offline dist/wheelhouse   # 미리 받아둔 휠로만 설치 (폐쇄망)
 #
 # 멱등: 이미 설치된 상태에서 다시 돌려도 안전하다.
 set -euo pipefail
@@ -11,6 +14,59 @@ cd "$ROOT"
 
 PY="${PYTHON:-python3}"
 VENV="$ROOT/.venv"
+
+# --- 0. 인자 --------------------------------------------------------------
+# --offline은 pip에 --no-index --find-links를 붙일 뿐, 아래 설치 절차 자체는
+# 온라인과 완전히 같은 경로를 탄다. 폐쇄망용 설치 스크립트를 따로 만들면
+# 절차가 둘로 갈라져 "일반망에서만 되는" 상태가 다시 생긴다.
+OFFLINE_DIR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --offline)
+      [ $# -ge 2 ] || { echo "오류: --offline 뒤에 wheelhouse 경로가 필요합니다." >&2; exit 2; }
+      OFFLINE_DIR="$2"
+      shift 2
+      ;;
+    --offline=*)
+      OFFLINE_DIR="${1#--offline=}"
+      # 빈 값(`--offline=`)을 그냥 두면 아래 전 분기가 [ -n "$OFFLINE_DIR" ] 로
+      # 갈리므로 **말없이 온라인 설치로 떨어진다** — 폐쇄망에서 그건 실패가 아니라
+      # 잘못된 성공이라 더 나쁘다.
+      [ -n "$OFFLINE_DIR" ] || { echo "오류: --offline= 에 wheelhouse 경로가 비었습니다." >&2; exit 2; }
+      shift
+      ;;
+    -h|--help)
+      # 헤더 주석을 sed로 잘라 쓰면 주석 한 줄만 늘어도 어긋난다. 여기 직접 적는다.
+      cat <<'USAGE'
+CLAW_DEMO 설치
+
+  scripts/setup.sh                             # PyPI에서 설치 (일반망)
+  scripts/setup.sh --offline dist/wheelhouse   # 미리 받아둔 휠로만 설치 (폐쇄망)
+
+멱등: 이미 설치된 상태에서 다시 돌려도 안전하다.
+폐쇄망 절차 전체는 docs/deploy-airgap.md 참조.
+USAGE
+      exit 0
+      ;;
+    *)
+      echo "오류: 알 수 없는 인자 '$1' (사용법은 --help)." >&2
+      exit 2
+      ;;
+  esac
+done
+
+PIP_ARGS=()
+if [ -n "$OFFLINE_DIR" ]; then
+  # 상대경로로 받아도 되게 절대경로화 — 아래에서 cd 하지는 않지만, 오류 메시지와
+  # pip 인자가 호출 위치에 따라 달라지면 진단이 어렵다.
+  case "$OFFLINE_DIR" in /*) ;; *) OFFLINE_DIR="$ROOT/$OFFLINE_DIR" ;; esac
+  if [ ! -d "$OFFLINE_DIR" ]; then
+    echo "오류: wheelhouse 디렉터리가 없습니다 — $OFFLINE_DIR" >&2
+    exit 1
+  fi
+  PIP_ARGS=(--no-index --find-links "$OFFLINE_DIR")
+  echo "[0/4] 오프라인 설치 — $OFFLINE_DIR ($(ls -1 "$OFFLINE_DIR" | wc -l | tr -d ' ')개 파일)"
+fi
 
 # --- 1. 파이썬 버전 ---------------------------------------------------------
 if ! command -v "$PY" >/dev/null 2>&1; then
@@ -68,7 +124,47 @@ else
 fi
 
 VPY="$VENV/bin/python"
-"$VPY" -m pip install --upgrade --quiet pip
+
+# 오프라인일 땐 PyPI에 못 나가므로 wheelhouse에 pip 휠이 있을 때만 갱신한다.
+# 없어도 설치는 진행 — 실패해도 무해하도록 || true.
+if [ -n "$OFFLINE_DIR" ]; then
+  "$VPY" -m pip install --upgrade --quiet --no-index --find-links "$OFFLINE_DIR" pip 2>/dev/null || true
+else
+  "$VPY" -m pip install --upgrade --quiet pip
+fi
+
+# 락파일이 있으면 제약으로 건다 — 상한 핀이 없는 pyproject(numpy>=1.24 등)만으로는
+# 설치 시점마다 다른 조합이 나와, 반입 번들이 "테스트한 적 없는 버전 조합"이 된다.
+# -c는 설치 목록을 늘리지 않고 고를 수 있는 버전만 좁히므로, 락파일이 없던
+# 예전 동작과 호환된다.
+LOCK_ARGS=()
+if [ -f "$ROOT/requirements.lock" ]; then
+  LOCK_ARGS=(-c "$ROOT/requirements.lock")
+
+  # 오프라인이면 이 환경이 휠을 만든 환경과 같은지 **여기서** 확인한다.
+  # 안 하면 증상이 "Could not find a version that satisfies..." 로 나오는데, 그건
+  # 의존성이 바뀐 것과 구분이 안 된다. 담당자는 66MB 전체 재반입(며칠)을 하고
+  # 돌아와 똑같이 실패한다 — 진단을 여기서 이름 대어 끝낸다.
+  #
+  # 파이썬 마이너 버전이 다르면 cp3XX 휠이 전부 후보에서 탈락하고, 플랫폼이
+  # 다르면 애초에 다른 바이너리다. 둘 다 치명적이라 경고가 아니라 중단.
+  if [ -n "$OFFLINE_DIR" ]; then
+    LOCK_PLATFORM="$(sed -n 's/^# platform: //p' "$ROOT/requirements.lock" | head -1)"
+    LOCK_PYVER="$(sed -n 's/^# python: //p' "$ROOT/requirements.lock" | head -1)"
+    HERE_PLATFORM="$("$VPY" -c 'import sysconfig; print(sysconfig.get_platform())')"
+    HERE_PYVER="$("$VPY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+    if [ -n "$LOCK_PLATFORM" ] && { [ "$LOCK_PLATFORM" != "$HERE_PLATFORM" ] || [ "$LOCK_PYVER" != "$HERE_PYVER" ]; }; then
+      echo "오류: 이 꾸러미는 다른 환경에서 만들어졌습니다 — 휠이 맞지 않습니다." >&2
+      echo "  꾸러미: $LOCK_PLATFORM · Python $LOCK_PYVER" >&2
+      echo "  이 장비: $HERE_PLATFORM · Python $HERE_PYVER" >&2
+      echo >&2
+      echo "  의존성이 바뀐 게 아닙니다 — 다시 반입해도 같은 실패가 납니다." >&2
+      echo "  이 장비에 Python $LOCK_PYVER 를 두거나(PYTHON=python$LOCK_PYVER 로 지정)," >&2
+      echo "  일반망에서 이 장비와 같은 환경으로 꾸러미를 다시 만드세요." >&2
+      exit 1
+    fi
+  fi
+fi
 
 # --- 3. 패키지 (설치 순서가 중요) -------------------------------------------
 # claw-engine은 server/pyproject.toml에 의도적으로 미기재다 — 동명 PyPI 패키지
@@ -78,9 +174,16 @@ VPY="$VENV/bin/python"
 # editable(-e) 유지도 필수다. claw_server/app.py의 _default_web_dir()가
 # __file__ 기준 parents[2]/web 으로 정적 파일을 찾기 때문에, 비-editable로
 # site-packages에 깔면 경로가 어긋나 웹 UI가 404가 된다(API만 동작).
+#
+# 오프라인에서 -e 설치는 빌드 격리 때문에 setuptools·wheel을 **새로 받으려 한다**.
+# wheelhouse에 그 둘이 없으면 여기서 네트워크로 나가 실패하므로 scripts/bundle.sh가
+# 반드시 함께 담는다 (가장 놓치기 쉬운 함정).
+#
+# 배열 확장에 ${X+"${X[@]}"} 를 쓰는 이유: macOS 기본 bash 3.2는 set -u 아래서
+# 빈 배열의 "${X[@]}" 를 unbound variable로 본다 (scripts/run.sh의 EXTRA와 같은 이유).
 echo "[3/4] 의존성 설치 — numpy·scipy 등으로 처음엔 몇 분 걸립니다"
-"$VPY" -m pip install -e engine
-"$VPY" -m pip install -e "server[dev]"
+"$VPY" -m pip install ${PIP_ARGS+"${PIP_ARGS[@]}"} ${LOCK_ARGS+"${LOCK_ARGS[@]}"} -e engine
+"$VPY" -m pip install ${PIP_ARGS+"${PIP_ARGS[@]}"} ${LOCK_ARGS+"${LOCK_ARGS[@]}"} -e "server[dev]"
 
 # --- 4. 자기검증 -----------------------------------------------------------
 echo "[4/4] 설치 검증"
@@ -91,6 +194,15 @@ for mod in ("claw", "claw_server", "fastapi", "uvicorn", "websockets"):
     importlib.import_module(mod)
 print("  import OK — claw, claw_server, fastapi, uvicorn, websockets")
 EOF
+
+# wheelhouse 경로를 venv 옆에 남긴다 — scripts/run.sh가 환경이 깨졌을 때 자동
+# 복구를 시도하는데, 이 표식이 없으면 **PyPI로 나가려 한다**. 폐쇄망에서 그건
+# systemd Restart=on-failure 아래 무한 재시도 루프가 된다.
+if [ -n "$OFFLINE_DIR" ]; then
+  printf '%s\n' "$OFFLINE_DIR" > "$VENV/.claw-offline-wheelhouse"
+else
+  rm -f "$VENV/.claw-offline-wheelhouse"
+fi
 
 cat <<EOF
 

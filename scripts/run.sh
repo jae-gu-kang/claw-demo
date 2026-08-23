@@ -19,8 +19,25 @@ VPY="$ROOT/.venv/bin/python"
 # 이미 갖춰졌으면 설치를 건너뛴다 (매 기동마다 pip를 돌리지 않기 위함).
 # websockets까지 확인하는 이유: plain uvicorn만 깔린 구 환경을 자동으로 치유한다.
 if ! "$VPY" -c 'import claw_server, websockets' >/dev/null 2>&1; then
-  echo "환경이 준비되지 않았습니다 — scripts/setup.sh 를 먼저 실행합니다."
-  bash "$ROOT/scripts/setup.sh"   # 실행 권한(+x) 유실에 견디도록 bash로 호출
+  # 폐쇄망 설치였다면 setup.sh가 wheelhouse 경로를 남겨 둔다. 그걸 무시하고
+  # 그냥 setup.sh를 부르면 PyPI로 나가려 하고, systemd Restart=on-failure 아래서는
+  # 그게 무한 재시도 루프가 된다 — 표식이 있으면 반드시 오프라인으로 복구한다.
+  MARK="$ROOT/.venv/.claw-offline-wheelhouse"
+  if [ -f "$MARK" ]; then
+    WH="$(cat "$MARK")"
+    if [ ! -d "$WH" ]; then
+      echo "오류: 환경이 깨졌는데 wheelhouse를 찾을 수 없습니다 — $WH" >&2
+      echo "  이 장비는 폐쇄망 설치본입니다. 네트워크 설치를 시도하지 않습니다." >&2
+      echo "  반입한 wheelhouse를 위 경로에 두거나, 직접:" >&2
+      echo "    scripts/setup.sh --offline <wheelhouse 경로>" >&2
+      exit 1
+    fi
+    echo "환경이 준비되지 않았습니다 — 오프라인으로 재설치합니다 ($WH)."
+    bash "$ROOT/scripts/setup.sh" --offline "$WH"
+  else
+    echo "환경이 준비되지 않았습니다 — scripts/setup.sh 를 먼저 실행합니다."
+    bash "$ROOT/scripts/setup.sh"   # 실행 권한(+x) 유실에 견디도록 bash로 호출
+  fi
 fi
 
 HOST="${HOST:-127.0.0.1}"
