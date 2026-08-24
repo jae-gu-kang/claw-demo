@@ -6,7 +6,7 @@ MATLAB 없이 고정익 항공기의 제어법칙을 설계·해석·검증하�
 
 파이썬 엔진 + FastAPI 백엔드 + 빌드 없는 웹 UI로 구성된 모노레포다.
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/jae-gu-kang/claw-demo)
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://github.com/codespaces/new?repo=1311729012&ref=main)
 
 ## 빠른 시작
 
@@ -42,6 +42,11 @@ scripts/run.sh --reload        # 나머지 인자는 uvicorn으로 전달
 위 배지를 누르면 컨테이너가 뜨고 의존성이 자동 설치된다. 터미널에서
 `scripts/run.sh` 를 실행하면 8000 포트 포워딩 알림이 뜨고, 그 링크가 웹 UI다.
 
+> **배지가 안 열린다면** 사내 정책이 `codespaces.new` 도메인을 막고 있을 수 있다.
+> 그럴 땐 저장소 화면에서 직접 만들면 된다 — 초록색 **Code** 버튼 → **Codespaces**
+> 탭 → **Create codespace on main**. `github.com`만 열리면 되므로 도메인 차단을
+> 타지 않는다. (배지 링크도 `github.com/codespaces/new` 를 가리키도록 해 뒀다)
+
 알림을 놓쳤으면 하단 **PORTS** 패널의 8000번 행에서 열 수 있다. 주소를 직접
 만들려면 `echo "https://$CODESPACE_NAME-8000.$GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN"`.
 터미널에 찍히는 `http://127.0.0.1:8000/` 은 컨테이너 안쪽 주소라 눌러도 안 열린다.
@@ -60,9 +65,11 @@ Ports 패널에서 해당 포트를 Public으로 바꾸면 되는데, 위의 인
 배지를 누르거나 클론하면 엔진·서버·웹이 그 사람 환경에서 함께 뜬다. 별도
 데이터베이스도 쓰지 않는다(결과는 `server_data/`에 JSON 파일로 쌓인다).
 
-- **파이썬 환경이 없거나 설치가 번거로운 상대** — Codespaces 배지. 다만 그
-  컨테이너는 **상대 GitHub 계정의 무료 한도**를 쓴다(월 120 core-hour = 2코어
-  기준 60시간). 둘러보는 데는 충분하고, 다 보면 codespace를 지우면 된다.
+- **파이썬 환경이 없거나 설치가 번거로운 상대** — Codespaces 배지, 또는 저장소
+  화면의 **Code → Codespaces → Create codespace on main**(사내망에서 배지가
+  막히는 경우가 있다 — 위 참조). 다만 그 컨테이너는 **상대 GitHub 계정의 무료
+  한도**를 쓴다(월 120 core-hour = 2코어 기준 60시간). 둘러보는 데는 충분하고,
+  다 보면 codespace를 지우면 된다.
 - **직접 돌려볼 상대** — 클론 후 `scripts/run.sh`. Python 3.10+ 만 있으면 된다.
 
 어느 쪽이든 상대는 자기 인스턴스를 쓰므로 서로의 결과가 섞이지 않는다.
