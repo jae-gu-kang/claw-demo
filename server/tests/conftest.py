@@ -10,6 +10,14 @@ from claw_server import create_app
 TERMINAL = ("done", "error", "cancelled")
 
 
+@pytest.fixture(autouse=True)
+def _no_deploy_env(monkeypatch):
+    """개발자 셸의 배포용 환경변수 오염 차단 — 테스트는 명시 주입만 쓴다."""
+    for var in ("CLAW_ACCESS_PASSWORD", "CLAW_RESULT_LIMIT",
+                "CLAW_WEB_DIR", "CLAW_SERVER_DATA"):
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.fixture()
 def client(tmp_path):
     app = create_app(data_dir=tmp_path / "store")

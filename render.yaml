@@ -1,0 +1,23 @@
+# Render Blueprint — 공개 데모 인스턴스 (README "공개 데모" 절 참조).
+# 설치 절차의 원본은 scripts/setup.sh — 여기서는 배포에 필요한 최소만 재기술.
+services:
+  - type: web
+    name: claw-demo
+    runtime: python
+    plan: free # 512MB RAM, 15분 유휴 시 슬립(콜드스타트 ~1분), 디스크 휘발
+    autoDeploy: true # main push마다 자동 재배포
+    # engine 먼저 — claw-engine은 PyPI 동명 패키지 회피로 server 의존성에서 의도적 누락.
+    # editable(-e) 필수: 정적 웹 경로가 __file__ 기준 모노레포 web/ 을 가리킨다.
+    # [dev] extra(pytest·httpx)는 배포에 불필요.
+    buildCommand: pip install --upgrade pip && pip install -e engine && pip install -e server
+    # --workers 1 명시 — uvicorn이 $WEB_CONCURRENCY로 워커를 늘리면 프로세스 메모리의
+    # JobManager가 갈라져 진행률 조회가 조용히 404가 된다 (README 알려진 제약).
+    startCommand: uvicorn --factory claw_server:create_app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /api/health # Basic Auth 면제 경로와 일치 (auth.py)
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.4 # devcontainer(3.13)와 맞춤 — 상한 핀 없는 의존성 조합 고정
+      - key: CLAW_ACCESS_PASSWORD
+        sync: false # 대시보드에서 입력 — 커밋 금지. 빈 값이면 무인증(공개)
+      - key: CLAW_RESULT_LIMIT
+        value: "20" # 결과 1건 ≈ 14MB → 최근 20건 ≈ 280MB 상한 (휘발성 디스크 보호)

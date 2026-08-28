@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 import claw.blocks  # noqa: F401 — import 부수효과: 전역 REGISTRY "blocks" 등록
 import claw.guidance  # noqa: F401 — "guidance" 카테고리 등록
 import claw.plant  # noqa: F401 — "actuator" 카테고리 등록
+from claw_server.auth import BasicAuthProtect
 from claw_server.jobs import JobManager
 from claw_server.routes import analysis as analysis_routes
 from claw_server.routes import codegen as codegen_routes
@@ -66,10 +67,18 @@ def _default_web_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "web"  # 모노레포 루트/web (03 §5)
 
 
-def create_app(data_dir=None, web_dir=None) -> FastAPI:
+def create_app(data_dir=None, web_dir=None, access_password=None) -> FastAPI:
     """앱 생성 — data_dir: 결과 저장 루트 (기본 $CLAW_SERVER_DATA 또는 ./server_data),
-    web_dir: M14 정적 파일 루트 (기본 $CLAW_WEB_DIR 또는 모노레포 web/ — 없으면 API만)."""
+    web_dir: M14 정적 파일 루트 (기본 $CLAW_WEB_DIR 또는 모노레포 web/ — 없으면 API만),
+    access_password: 공용 비밀번호 (기본 $CLAW_ACCESS_PASSWORD — 빈 값이면 무인증)."""
     app = FastAPI(title="CLAW server", version="0.1.0")
+    pw = (
+        access_password
+        if access_password is not None
+        else os.environ.get("CLAW_ACCESS_PASSWORD", "")
+    )
+    if pw:  # add_middleware는 앞에 insert — 뒤의 CORS가 최외곽이라 프리플라이트는 인증 밖
+        app.add_middleware(BasicAuthProtect, password=pw)
     # 단독 사용자 로컬 서버 (02 §4) — M14 dev 서버(다른 포트) 접속 허용 [기본값]
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
@@ -79,7 +88,9 @@ def create_app(data_dir=None, web_dir=None) -> FastAPI:
     app.state.store = ResultStore(
         data_dir
         if data_dir is not None
-        else os.environ.get("CLAW_SERVER_DATA", "server_data")
+        else os.environ.get("CLAW_SERVER_DATA", "server_data"),
+        # "" 포함 미설정·0 = 무제한 — 빈 값이 int()에서 기동 크래시 내지 않게
+        limit=int(os.environ.get("CLAW_RESULT_LIMIT") or 0) or None,
     )
     for router in (
         system_routes.router,
