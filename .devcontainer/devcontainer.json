@@ -14,6 +14,12 @@
   // bash로 호출하는 건 실행 권한(+x)이 유실된 체크아웃에서도 돌게 하기 위함.
   "postCreateCommand": "bash scripts/setup.sh",
 
+  // 생성 시 1회가 아니라 **컨테이너가 켜질 때마다** 돈다 — Codespace는 30분
+  // 무활동이면 자동 정지하고 그때 서버 프로세스도 죽으므로, 재개 후 포워딩
+  // 주소가 그대로 열리려면 여기서 다시 띄워야 한다. 반드시 즉시 반환해야 하며
+  // (블로킹하면 컨테이너 시작이 안 끝난다) 그 처리는 autostart.sh 안에 있다.
+  "postStartCommand": "bash scripts/autostart.sh",
+
   "forwardPorts": [8000],
   "portsAttributes": {
     "8000": {
