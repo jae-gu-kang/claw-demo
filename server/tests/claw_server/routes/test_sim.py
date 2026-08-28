@@ -51,6 +51,26 @@ def test_sim_run_end_to_end_with_mode_chain(client, wait_job):
     assert meta["kind"] == "sim" and meta["aborted"] is None
 
 
+def test_sim_meta에_웨이포인트가_동봉된다(client, wait_job):
+    """경로오차 지표(xtrack_rms)·진단은 저장된 결과만으로 계산돼야 한다 —
+    웨이포인트가 결과 meta에 함께 다니지 않으면 소비자가 미션 스펙을 따로
+    들고 와 맞춰야 하고, 어긋나면 조용히 틀린 경로오차가 나온다."""
+    wps = [[0.0, 0.0], [5000.0, 0.0]]
+    j = wait_job(
+        client.post("/api/sim/run", json=_hold_mission(t_end=2.0, waypoints=wps))
+        .json()["id"],
+        timeout=120.0,
+    )
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    assert body["meta"]["waypoints"] == wps
+    # 웨이포인트 없는 미션은 None — "빈 경로"가 아니라 "경로 없음"
+    j2 = wait_job(
+        client.post("/api/sim/run", json=_hold_mission(t_end=2.0)).json()["id"],
+        timeout=120.0,
+    )
+    assert client.get(f"/api/results/{j2['result_id']}").json()["meta"]["waypoints"] is None
+
+
 def test_sim_replay_downsampled(client, wait_job):
     j = wait_job(client.post("/api/sim/run", json=_hold_mission()).json()["id"],
                  timeout=120.0)

@@ -205,6 +205,13 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
                       on_progress=job.report)
         payload = sim_result_dict(res)  # 전 해상도 저장 — 재생이 stride 조회
         payload["kind"] = "sim"
+        # 웨이포인트 동봉 — 경로오차 지표(pipeline.metrics xtrack_rms)·진단이
+        # 저장된 결과만으로 계산되도록 (meta["limits"]·["clamps"]와 같은
+        # "기준선은 결과와 함께 다닌다" 규약). 없으면 None — 경로 없는 미션이다
+        payload["meta"]["waypoints"] = (
+            None if req.waypoints is None
+            else [[float(n), float(e)] for n, e in req.waypoints]
+        )
         store.save(
             job.id,
             payload,

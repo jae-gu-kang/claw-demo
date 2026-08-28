@@ -27,3 +27,12 @@ def set_state(inst, field, value) -> None:
     그 처리는 emit_c의 CommandFilter 에미터가 맡는다.
     """
     setattr(inst, f"_{field}", float(value))
+
+
+def get_state(inst, field) -> float:
+    """상태 읽기 — `set_state`의 read 대칭 (계측 전용, 법칙 경로 미사용).
+
+    상태는 그래프 노드의 출력이 아니라 인스턴스 속성이라 `last_env`에 없다 —
+    적분기 값(안티와인드업 진단의 근거)을 보려면 이 창구가 필요하다.
+    """
+    return float(getattr(inst, f"_{field}"))

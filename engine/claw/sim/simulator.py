@@ -30,14 +30,27 @@ from claw.plant import OMEGA, POS, QUAT, VEL, RigidBody, SecondOrderActuator, pa
 
 # 명령 사슬 계측 — 유도→AP→리미터→SCAS 각 단의 중간 신호. FCL 그래프가 매 제어
 # 스텝에 이미 계산해 두는 값(law.py last_signals)을 꺼내 쓸 뿐, 새로 계산하지 않는다.
-# 소비처: 구조도 재생 오버레이(배선마다 그 시각의 실제 값) — 이게 없으면 최종
-# 타면과 피드백만 계측되어 명령 사슬 배선이 값 없이 남는다.
+# 소비처: 구조도 재생 오버레이(배선마다 그 시각의 실제 값)와 진단(pipeline/diagnose —
+# 오차 분해·기여항 분해·와인드업·리미터 귀속) — 이게 없으면 최종 타면과 피드백만
+# 계측되어 명령 사슬 배선이 값 없이 남는다.
 # 주의: 제어주기(n_ctrl)마다만 갱신되므로 사이 스텝은 직전 값을 유지한다 (de/da/dr 규약).
+# 형상 의존 채널(law.py INSTRUMENT_NODES 참조)은 0이 아니라 NaN — 부재 집합은
+# test_sim이 못박는다.
 _CHAIN_SIGNALS = (
     "cmd_speed", "cmd_alt", "cmd_heading",  # 유도 → AP
+    "speed_on", "alt_on", "heading_on",  # 축 활성 — 진단의 활성 구간 게이팅 근거
+    "alt_cmd_filt", "spd_cmd_filt", "hdg_cmd_filt",  # 명령필터 통과 (오차 분해)
     "theta_cmd", "phi_cmd",  # AP → α 리미터
+    "ap_alt_pi", "ap_alt_damp", "ap_alt_raw",  # AP 고도축 기여항 (포화 전)
+    "ap_spd_pi", "ap_hdg_pi",
+    "ap_pitch_ff", "ap_thr_ff", "ap_theta_raw",  # 선회 FF·재클램프 전 θ
     "theta_lim",  # 리미터 → SCAS (보호가 물리면 theta_cmd와 갈라진다)
+    "lim_cap",  # 리미터 θ 상한 — 귀속(감쇠 vs margin)의 근거
     "pitch", "roll", "yaw",  # SCAS → 믹서
+    "pitch_pi", "pitch_damp", "pitch_raw",  # SCAS 축 기여항 (포화 전)
+    "roll_pi", "roll_damp", "roll_raw",
+    "yaw_pi", "yaw_damp", "yaw_raw", "yaw_wo",
+    "i_pitch", "i_roll", "i_yaw", "i_alt", "i_spd", "i_hdg",  # 적분기 (와인드업)
 )
 
 
@@ -232,6 +245,9 @@ class Simulator:
             for name in _CHAIN_SIGNALS:
                 if name.startswith("cmd_"):
                     sig[name][k] = getattr(cmd, name[4:])
+                elif name.endswith("_on"):
+                    # 축 활성 플래그 — 유도 명령의 것 그대로 (법칙 그래프 입력과 동일)
+                    sig[name][k] = float(bool(getattr(cmd, name)))
                 else:
                     sig[name][k] = law_sig.get(name, np.nan)
             modes.append(cmd.mode)
@@ -302,6 +318,7 @@ class Simulator:
                 "case": tr.case.name,
                 "aborted": aborted,
                 "limits": self._effector_limits(actuators),
+                "clamps": self._command_clamps(),
             },
         )
 
@@ -323,6 +340,34 @@ class Simulator:
             out[name] = None if v is None else float(v)
         # 작동기 미장착이면 명령 직결 — rate 한계라는 것이 없다 (무제한이 아니라 부재)
         out["rate_max"] = float(actuators[0][0].rate_max) if actuators else None
+        return out
+
+    def _command_clamps(self) -> dict:
+        """법칙 축 출력·적분기 클램프 기준선 — `_effector_limits`와 같은 이유로 동봉.
+
+        진단(pipeline/diagnose)이 "적분기가 클램프에 주차했는가"(와인드업)·"AP 축
+        명령이 한계에 붙었는가"를 저장된 결과만으로 판정하려면 클램프 값이 결과와
+        함께 다녀야 한다. 적분기 클램프 = 축 출력 한계(PID 내부 안티와인드업,
+        fcl/scas.py). 속도축 [0,1]·헤딩축 ±phi_max는 그래프 조립 상수다
+        (fcl/graphs.py autopilot_nodes). 미상은 None — "한계가 없다"가 아니다.
+        """
+        scas = getattr(self.fcl, "scas", None)
+        ap = getattr(self.fcl, "autopilot", None)
+        out = {}
+        scas_cfg = getattr(scas, "cfg", {}) or {}
+        for axis in ("pitch", "roll", "yaw"):
+            cfg = scas_cfg.get(axis)
+            out[axis] = (
+                None if cfg is None
+                else {"lo": float(cfg["out_lo"]), "hi": float(cfg["out_hi"])}
+            )
+        cfg = getattr(ap, "cfg", None)
+        if cfg is None:
+            out["alt"] = out["spd"] = out["hdg"] = None
+        else:
+            out["alt"] = {"lo": float(cfg["theta_lo"]), "hi": float(cfg["theta_hi"])}
+            out["spd"] = {"lo": 0.0, "hi": 1.0}
+            out["hdg"] = {"lo": -float(cfg["phi_max"]), "hi": float(cfg["phi_max"])}
         return out
 
     def _envelope(self, t_arr, stall_margin, flags, h_arr) -> dict:

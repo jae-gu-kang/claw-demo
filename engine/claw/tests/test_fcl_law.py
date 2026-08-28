@@ -335,17 +335,55 @@ def test_fcl_registered_param_defaults_match_ctor():
 # ② 보호가 물린 순간이 계측에 실제로 드러난다 ③ 미장착 형상이 0으로 위장되지 않는다
 
 
-def test_계측_프로브가_데모_형상에서_전부_해석된다():
+def test_계측_프로브가_전장착_형상에서_전부_해석된다():
     """노드 id는 fcl/graphs.py 조립 규약에 매여 있다 — 이름이 바뀌면 last_signals에서
-    그 항목이 조용히 빠지고 오버레이 배선만 비게 된다. 여기서 시끄럽게 잡는다."""
-    from claw.fcl.law import INSTRUMENT_NODES
+    그 항목이 조용히 빠지고 오버레이 배선만 비게 된다. 여기서 시끄럽게 잡는다.
+
+    전 프로브가 해석되려면 옵션 경로가 다 켜져 있어야 한다: 데모 기본은
+    k_thr_turn=0이라 선회 스로틀 FF 노드(ap_ff_t)가 애초에 조립되지 않는다 —
+    죽은 항을 탑재 코드에 내지 않는 것이 맞고, 프로브는 형상 가드로 생략된다.
+    """
+    from claw.fcl.law import INSTRUMENT_NODES, INSTRUMENT_STATES
+
+    fcl = make_demo_fcl(
+        with_limiter=True, autopilot=Autopilot(k_thr_turn=0.01)
+    ).init(DT)
+    fcl.reset()
+    fcl.step(GuidanceCommand(alt=1000.0, alt_on=True), _nav())
+    probes = set(INSTRUMENT_NODES) | set(INSTRUMENT_STATES)
+    missing = probes - set(fcl.last_signals)
+    assert not missing, f"프로브 미해석 (노드 id 드리프트): {sorted(missing)}"
+    assert all(isinstance(v, float) for v in fcl.last_signals.values())
+
+
+def test_데모_기본_형상은_스로틀_FF_프로브만_비운다():
+    """옵션 프로브의 부재 집합을 못박는다 — 여기 없는 이름이 빠지기 시작하면
+    노드 id 드리프트다 (조용한 소실 방지, 프로브 핀 테스트의 여집합)."""
+    from claw.fcl.law import INSTRUMENT_NODES, INSTRUMENT_STATES
 
     fcl = make_demo_fcl(with_limiter=True).init(DT)
     fcl.reset()
     fcl.step(GuidanceCommand(alt=1000.0, alt_on=True), _nav())
-    missing = set(INSTRUMENT_NODES) - set(fcl.last_signals)
-    assert not missing, f"프로브 미해석 (노드 id 드리프트): {sorted(missing)}"
-    assert all(isinstance(v, float) for v in fcl.last_signals.values())
+    probes = set(INSTRUMENT_NODES) | set(INSTRUMENT_STATES)
+    assert probes - set(fcl.last_signals) == {"ap_thr_ff"}
+
+
+def test_적분기_계측이_웜스타트와_클램프를_따른다():
+    """INSTRUMENT_STATES는 그래프 노드가 아니라 인스턴스 상태(_i)를 읽는다 —
+    트림 웜스타트 직후 첫 스텝의 적분기가 웜스타트 근방이어야 하고(범프리스),
+    항상 축 클램프 안에 있어야 한다 (PID 내부 안티와인드업)."""
+    fcl = make_demo_fcl(with_limiter=True).init(DT)
+    th0, thr0, de0 = 0.05, 0.6, -0.02
+    fcl.reset(state={"theta": th0, "throttle": thr0, "de": de0})
+    fcl.step(GuidanceCommand(alt=1000.0, alt_on=True), _nav(theta=th0))
+    s = fcl.last_signals
+    # 오차가 작은 첫 스텝 — 적분기는 웜스타트 값에서 거의 안 움직였어야 한다
+    assert s["i_alt"] == pytest.approx(th0, abs=1e-3)
+    assert s["i_spd"] == pytest.approx(thr0, abs=1e-3)
+    assert s["i_pitch"] == pytest.approx(de0, abs=1e-3)
+    ap = Autopilot()
+    assert ap.cfg["theta_lo"] <= s["i_alt"] <= ap.cfg["theta_hi"]
+    assert DEMO_PITCH["out_lo"] <= s["i_pitch"] <= DEMO_PITCH["out_hi"]
 
 
 def test_리미터_미장착이면_theta_lim은_계측되지_않는다():

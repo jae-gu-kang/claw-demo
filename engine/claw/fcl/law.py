@@ -15,6 +15,7 @@
 
 import numpy as np
 
+from claw.codegen.blockspec import get_state
 from claw.codegen.ir_exec import GraphRunner
 from claw.common.attitude import quat_to_euler
 from claw.common.contracts import SurfaceCommand
@@ -28,7 +29,12 @@ from claw.fcl.graphs import SCHEDULABLE, fcl_graph
 # 명령 사슬 중간값은 그래프 **출력이 아니다** — 출력은 생성 C의 인터페이스라 여기에
 # 계측을 섞으면 탑재 코드가 달라진다. 그래서 러너의 계측 창구(last_env)에서 꺼낸다.
 # 노드 id는 그래프 조립 규약에 매여 있어 이름이 바뀌면 값이 조용히 사라진다 —
-# test_fcl_law가 데모 형상에서 프로브가 전부 해석되는지 핀한다.
+# test_fcl_law가 전장착 형상에서 프로브가 전부 해석되는지 핀한다.
+#
+# 형상 의존 프로브: 옵션 경로가 꺼진 형상에서는 노드 자체가 조립되지 않아
+# (죽은 항을 탑재 코드에 내지 않는다) `if nid in env` 가드로 생략된다 —
+# 리미터 미장착의 theta_lim·lim_cap, k_pitch_turn=0의 ap_pitch_ff·ap_theta_raw,
+# k_thr_turn=0의 ap_thr_ff, rate 경로 없는 축의 *_damp·*_raw가 그렇다.
 INSTRUMENT_NODES = {
     "theta_cmd": "ap_theta_out",  # AP 피치 명령 (선회 FF·포화 후) → α 리미터
     "phi_cmd": "ap_hdg_sat",  # AP 롤 명령 (헤딩축 출력) → SCAS
@@ -36,6 +42,43 @@ INSTRUMENT_NODES = {
     "pitch": "scas_pitch_sat",  # SCAS 축 출력 → 믹서
     "roll": "scas_roll_sat",
     "yaw": "scas_yaw_sat",
+    # ── 명령필터 통과 명령 (오차 분해: 원본−필터 vs 필터−응답, 진단 규칙 1) ──
+    "alt_cmd_filt": "ap_fh",
+    "spd_cmd_filt": "ap_fv",
+    "hdg_cmd_filt": "ap_fpsi",
+    # ── 기여항 분해 (포화 틱에서 어느 게인 그룹이 주도했나, 진단 규칙 2) ──
+    "ap_alt_pi": "ap_alt_pid",  # AP 고도축 PI항 (클램프 내)
+    "ap_alt_damp": "ap_alt_damp",  # 승강률 댐핑항 k_hdot·ḣ
+    "ap_alt_raw": "ap_alt_sum",  # 고도축 포화 전 합 (pi + damp)
+    "ap_spd_pi": "ap_spd_pid",
+    "ap_hdg_pi": "ap_hdg_pid",
+    "ap_pitch_ff": "ap_ff_p",  # 선회 피치 FF항 (k_pitch_turn≠0일 때만 존재)
+    "ap_thr_ff": "ap_ff_t",  # 선회 스로틀 FF항 (k_thr_turn≠0일 때만 존재)
+    "ap_theta_raw": "ap_theta_ff",  # FF 합산 후·재클램프 전 θ
+    "pitch_pi": "scas_pitch_pid",
+    "pitch_damp": "scas_pitch_damp",
+    "pitch_raw": "scas_pitch_sum",  # 포화 전 합 — |raw−sat|>0이 곧 축 포화 틱
+    "roll_pi": "scas_roll_pid",
+    "roll_damp": "scas_roll_damp",
+    "roll_raw": "scas_roll_sum",
+    "yaw_pi": "scas_yaw_pid",
+    "yaw_damp": "scas_yaw_damp",
+    "yaw_raw": "scas_yaw_sum",
+    "yaw_wo": "scas_yaw_wo",  # 워시아웃 통과 r — 지속 선회의 정상 r 제거 확인
+    # ── 리미터 (귀속: 감쇠 문제 vs margin 문제, 진단 규칙 5) ──
+    "lim_cap": "lim_cap",  # θ 상한 = θ + (α_max − α) — theta_cmd−cap 지속이 margin 문제 신호
+}
+
+# 계측 상태 — 논리 이름 → (노드 id, 논리 필드). 상태는 그래프 노드 출력이 아니라
+# 인스턴스 속성이라 last_env에 없다 — blockspec.get_state(set_state의 read 대칭)로
+# 꺼낸다. 적분기가 클램프에 주차하는가(안티와인드업 진단, 규칙 3)의 유일한 근거.
+INSTRUMENT_STATES = {
+    "i_pitch": ("scas_pitch_pid", "i"),
+    "i_roll": ("scas_roll_pid", "i"),
+    "i_yaw": ("scas_yaw_pid", "i"),
+    "i_alt": ("ap_alt_pid", "i"),
+    "i_spd": ("ap_spd_pid", "i"),
+    "i_hdg": ("ap_hdg_pid", "i"),
 }
 
 
@@ -158,6 +201,12 @@ class FlightControlLaw:
                 name: float(env[nid])
                 for name, nid in INSTRUMENT_NODES.items() if nid in env
             }
+            # 적분기 상태 합류 — 노드가 아니라 인스턴스 속성이라 env에 없다.
+            # 스텝 후 값(_i 갱신 완료)이다. 노드 부재 형상은 프로브와 같은 규약으로 생략
+            for name, (nid, field) in INSTRUMENT_STATES.items():
+                inst = self._runner.instances.get(nid)
+                if inst is not None:
+                    self.last_signals[name] = get_state(inst, field)
             if "alpha_margin" in o:
                 self.alpha_margin = o["alpha_margin"]
                 self.limiter_active = bool(o["limiter_active"])

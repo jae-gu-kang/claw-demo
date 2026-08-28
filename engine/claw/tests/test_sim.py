@@ -313,15 +313,72 @@ def test_min_altitude_flag_marks_excursion_without_stopping(trim_design):
 
 
 def test_명령_사슬_신호가_전부_로깅된다(trim_design):
-    """길이·유한성 — 하나라도 빠지면 오버레이 배선이 값 없이 남는다."""
+    """길이·유한성 — 하나라도 빠지면 오버레이 배선이 값 없이 남는다.
+
+    형상 의존 프로브는 예외다: 데모 기본은 k_thr_turn=0이라 선회 스로틀 FF 노드가
+    조립되지 않고 그 채널은 전부 NaN이어야 한다 (0으로 채우면 "FF가 0을 냈다"로
+    위장된다). 그 부재 집합을 여기서 못박는다 — 다른 채널이 NaN이 되기 시작하면
+    노드 id 드리프트다.
+    """
     from claw.sim.simulator import _CHAIN_SIGNALS
 
     ac, tr = trim_design
     res = make_sim(ac, tr).run(tr, t_end=5.0)
+    absent = set()
     for name in _CHAIN_SIGNALS:
         assert name in res.signals, f"{name} 미로깅"
         assert len(res.signals[name]) == len(res.t)
-        assert np.isfinite(res.signals[name]).all(), f"{name}에 비유한값"
+        arr = np.asarray(res.signals[name])
+        if np.isnan(arr).all():
+            absent.add(name)
+        else:
+            assert np.isfinite(arr).all(), f"{name}에 비유한값"
+    assert absent == {"ap_thr_ff"}, f"형상 의존 프로브 부재 집합 드리프트: {sorted(absent)}"
+
+
+def test_기여항_분해가_합산_항등을_만족한다(trim_design):
+    """SCAS 축: pid + damp == sum(포화 전) — 기여 분해(진단 규칙 2)의 근거 항등.
+    AP 고도 축도 같은 구조다. 어긋나면 프로브가 서로 다른 시각의 값을 섞은 것."""
+    ac, tr = trim_design
+    res = make_sim(ac, tr).run(tr, t_end=5.0)
+    s = res.signals
+    for pi, damp, raw in (
+        ("pitch_pi", "pitch_damp", "pitch_raw"),
+        ("roll_pi", "roll_damp", "roll_raw"),
+        ("yaw_pi", "yaw_damp", "yaw_raw"),
+        ("ap_alt_pi", "ap_alt_damp", "ap_alt_raw"),
+    ):
+        np.testing.assert_allclose(
+            s[pi] + s[damp], s[raw], atol=1e-12,
+            err_msg=f"{pi}+{damp} != {raw}",
+        )
+
+
+def test_적분기와_클램프_기준선이_함께_저장된다(trim_design):
+    """meta["clamps"]는 신호가 아니라 기준선 — 저장된 결과만으로 "적분기가
+    클램프에 주차했는가"를 판정하려면 한계값이 결과와 함께 다녀야 한다
+    (duty의 meta["limits"]와 같은 이유). 적분기 계측은 항상 클램프 안이다."""
+    ac, tr = trim_design
+    res = make_sim(ac, tr).run(tr, t_end=5.0)
+    clamps = res.meta["clamps"]
+    for axis in ("pitch", "roll", "yaw", "alt", "spd", "hdg"):
+        assert clamps[axis] is not None and clamps[axis]["lo"] < clamps[axis]["hi"]
+    for name, axis in (("i_pitch", "pitch"), ("i_alt", "alt"), ("i_spd", "spd")):
+        arr = res.signals[name]
+        lo, hi = clamps[axis]["lo"], clamps[axis]["hi"]
+        assert ((arr >= lo - 1e-9) & (arr <= hi + 1e-9)).all(), f"{name}이 클램프 밖"
+
+
+def test_축_활성_플래그가_로깅된다(trim_design):
+    """진단(오차 분해)은 활성 구간 게이팅이 필수다 — 비활성 스텝의 필터 노드는
+    0(disabled_output)이라 게이팅 없이는 오차 분해가 거짓말을 한다."""
+    ac, tr = trim_design
+    res = make_sim(ac, tr).run(tr, t_end=5.0)
+    for name in ("speed_on", "alt_on", "heading_on"):
+        assert name in res.signals
+        assert len(res.signals[name]) == len(res.t)
+    # hold 미션은 세 축 모두 켠다 (hold_modes: speed·alt·heading 전부 지정)
+    assert res.signals["alt_on"].all() and res.signals["speed_on"].all()
 
 
 def test_유도_명령이_모드_전환에서_실제로_바뀐다(trim_design):
