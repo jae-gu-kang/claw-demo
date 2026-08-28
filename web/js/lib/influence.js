@@ -196,6 +196,63 @@ export function rampColor(t, alpha = 1) {
   return `rgba(${mix(r0, r1)}, ${mix(g0, g1)}, ${mix(b0, b1)}, ${alpha})`;
 }
 
+/** 처방 클래스 — 진단(pipeline/diagnose.py knob_class)과 1:1. 잉크는 밝은 패널
+ *  기준 접근성 변형(STATE_INK와 같은 이유 — 다크 시스템 색은 흰 바탕에서 3:1
+ *  아래로 떨어진다). influence.test.js가 엔진 자구와 대조한다. */
+export const KNOB_CLASS = {
+  filter: { label: "명령필터", ink: "#0040dd" },
+  loop_gain: { label: "루프 게인", ink: "#b25000" },
+  rate_gain: { label: "레이트 게인", ink: "#0c817b" },
+  clamp: { label: "클램프", ink: "#6c6c70" },
+  limiter: { label: "리미터", ink: "#d70015" },
+  schedule: { label: "스케줄", ink: "#8944ab" },
+};
+
+export const DIRECTION_LABEL = {
+  increase: "↑ 키운다 (|값| 기준)",
+  decrease: "↓ 줄인다 (|값| 기준)",
+};
+
+/** 형상 + 저장된 sim 결과 → /influence/diagnose 본문 — 형상 필드는
+ *  structuralRequest에 위임한다 (같은 필드를 두 번 적으면 갈라진다). */
+export function diagnoseRequest(state, resultId) {
+  return { ...structuralRequest(state), result_id: resultId };
+}
+
+/** 처방 카드 → /influence/sweep 본문 — knobs·pairs는 카드에서 그대로 온다
+ *  (전 게인 공간이 아니라 처방 부분공간만 흔드는 것이 3단의 비용 구조). */
+export function sweepRequest(state, { cases, knobs, pairs = [], span,
+                                      tSettle, tStep, fingerprint } = {}) {
+  const body = { ...structuralRequest(state), cases, knobs, pairs };
+  if (span?.length) body.span = span;
+  if (tSettle != null) body.t_settle = tSettle;
+  if (tStep != null) body.t_step = tStep;
+  if (fingerprint) body.fingerprint = fingerprint;
+  return body;
+}
+
+/** 카드의 동시 수정 후보 → 스윕 쌍 기본값: (대표 knob, 동반 knob). */
+export function pairsFor(card) {
+  const a = card.knobs?.[0];
+  if (!a) return [];
+  return (card.joint_with ?? []).map((j) => [a, j]);
+}
+
+/** /influence/diagnose 응답 → 화면 모델 — 서버 판정을 다시 계산하지 않는다. */
+export function normalizeDiagnosis(payload) {
+  const findings = payload.findings ?? [];
+  return {
+    resultId: payload.result_id,
+    fingerprint: payload.fingerprint,
+    metrics: payload.metrics ?? {},
+    thresholds: payload.thresholds ?? {},
+    warnings: payload.warnings ?? [],
+    findings,
+    prescriptions: (payload.prescriptions ?? []).map((p, i) => ({ ...p, index: i })),
+    hasWarn: findings.some((f) => f.severity === "warn"),
+  };
+}
+
 /** 형상 → /influence/structural 요청 본문. 사용자가 정한 것만 싣는다 (02 §5.5). */
 export function structuralRequest(state = {}) {
   const body = {};

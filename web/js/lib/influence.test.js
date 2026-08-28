@@ -1,10 +1,12 @@
 // 화면 모델 계약 — 특히 "없음"과 "0"을 섞지 않는지.
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  coneOf, fmtDelta, logScale, normalizeGraph, paramState, radiusOf,
-  rampColor, structuralRequest,
+  KNOB_CLASS, coneOf, diagnoseRequest, fmtDelta, logScale, normalizeDiagnosis,
+  normalizeGraph, pairsFor, paramState, radiusOf, rampColor, structuralRequest,
+  sweepRequest,
 } from "./influence.js";
 
 const payload = {
@@ -132,4 +134,73 @@ test("출력에 도달하지 못하는 파라미터는 기체까지 가지 않�
   };
   const c = coneOf(normalizeGraph(dead), "param:D");
   assert.ok(!c.nodes.has("sys:plant"), "그래프에 없는 상수는 아무 데도 못 간다");
+});
+
+// ── 진단 → 처방 → 스윕 (2·3단) — 요청 빌더와 처방 카드 정규화의 계약 ──────
+
+test("diagnoseRequest: 형상 위임 + result_id — 형상 필드를 재기술하지 않는다", () => {
+  const body = diagnoseRequest(
+    { withSchedule: false, autopilot: { kp_alt: 0.005 } }, "res-1");
+  assert.equal(body.result_id, "res-1");
+  assert.equal(body.with_schedule, false);
+  assert.deepEqual(body.autopilot, { kp_alt: 0.005 });
+  assert.ok(!("cases" in body)); // 진단은 저장된 런이 대상 — 케이스가 없다
+});
+
+test("sweepRequest: 처방 knobs·pairs가 그대로 실린다 (부분공간 한정)", () => {
+  const body = sweepRequest({}, {
+    cases: [{ mach: 0.6, alt: 1000, fuel: 200 }],
+    knobs: ["table.pitch.kp"],
+    pairs: [["table.pitch.kp", "table.pitch.k_rate"]],
+    tSettle: 2, tStep: 4,
+    fingerprint: "fp-x",
+  });
+  assert.deepEqual(body.knobs, ["table.pitch.kp"]);
+  assert.deepEqual(body.pairs, [["table.pitch.kp", "table.pitch.k_rate"]]);
+  assert.equal(body.t_settle, 2);
+  assert.equal(body.t_step, 4);
+  assert.equal(body.fingerprint, "fp-x");
+  assert.equal(body.cases.length, 1);
+});
+
+test("pairsFor: 카드의 joint_with → (대표 knob, 동반 knob) 쌍", () => {
+  assert.deepEqual(
+    pairsFor({ knobs: ["a"], joint_with: ["b", "c"] }),
+    [["a", "b"], ["a", "c"]]);
+  assert.deepEqual(pairsFor({ knobs: ["a"] }), []);
+  assert.deepEqual(pairsFor({ knobs: [], joint_with: ["b"] }), []); // 대표가 없으면 쌍도 없다
+});
+
+test("normalizeDiagnosis: 카드 인덱스 부여 + warn 유무 요약", () => {
+  const d = normalizeDiagnosis({
+    result_id: "r", fingerprint: "fp",
+    metrics: { alt_rms: 1.0 }, thresholds: { sat_frac: 0.05 },
+    findings: [
+      { rule: "error_split", axis: "alt", severity: "info", verdict: "", evidence: {} },
+      { rule: "windup", axis: "alt", severity: "warn", verdict: "", evidence: {} },
+    ],
+    prescriptions: [{ knobs: ["k"], knob_class: "filter", direction: "decrease",
+                      findings: [1], joint_with: [], recheck: [], notes: [] }],
+  });
+  assert.equal(d.resultId, "r");
+  assert.equal(d.prescriptions[0].index, 0);
+  assert.equal(d.hasWarn, true);
+  const quiet = normalizeDiagnosis({ findings: [], prescriptions: [] });
+  assert.equal(quiet.hasWarn, false);
+  assert.deepEqual(quiet.warnings, []);
+});
+
+test("KNOB_CLASS: 진단 엔진의 처방 클래스 전부에 라벨·잉크가 있다 (드리프트 가드)", () => {
+  // 정본(engine/claw/pipeline/diagnose.py)의 클래스 주석 행을 직접 대조 —
+  // 엔진이 클래스를 더하면 이 테스트가 즉시 깨진다 (loops.test.js와 같은 규약)
+  const src = readFileSync(
+    new URL("../../../engine/claw/pipeline/diagnose.py", import.meta.url), "utf8");
+  const m = src.match(/knob_class: str  # (.+)/);
+  assert.ok(m, "엔진에서 knob_class 주석을 못 찾음");
+  const classes = [...m[1].matchAll(/'(\w+)'/g)].map((g) => g[1]);
+  assert.ok(classes.length >= 6);
+  for (const c of classes) {
+    assert.ok(KNOB_CLASS[c]?.label, `KNOB_CLASS에 ${c} 라벨 없음`);
+    assert.match(KNOB_CLASS[c].ink, /^#[0-9a-f]{6}$/i);
+  }
 });

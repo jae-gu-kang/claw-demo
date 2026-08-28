@@ -1,7 +1,9 @@
 /** 영향성 탭 — 파라미터 하나가 전체 시스템에 어떻게 번지는지 (02 §2.4, M15).
 
 이 화면의 주 질문은 "이 값을 바꾸면 무엇이 얼마나 달라지나"이고, 답을 세 단으로 낸다:
-구조 도달성(즉시) · 개루프 Δ(초) · 폐루프 스윕(작업). 지금은 1단이 붙어 있다.
+구조 도달성(즉시) · 개루프 Δ(잡) · 폐루프 스윕(잡). 세 단이 다 붙어 있고, 2·3단
+앞에는 진단이 선다 — "얼마나"를 재기 전에 "무엇을 만질지"(필터/게인/클램프/리미터/
+스케줄, 단독/동시)를 저장된 런에서 귀속하고, 처방 카드의 손잡이만 스윕한다.
 
 **표가 정본 표면이고 캔버스는 보조다.** 캔버스는 보조기술에 불투명하므로, 화면이
 말하는 모든 사실(상태·도달 개수·도달 출력)은 아래 표에도 반드시 있다 — wpmap.js가
@@ -10,11 +12,13 @@
 스타일은 인라인이다: app.css는 병행 세션 작업 중이라 건드리지 않는다.
 */
 
-import { api, errorText } from "../api.js";
+import { api, errorText, watchJob } from "../api.js";
 import { clear, el } from "../dom.js";
 import {
-  BAND_COLOR, SKIN, STATE_COLOR, STATE_INK, STATE_LABEL, STATE_NOTE, WARN_INK,
-  coneOf, normalizeGraph, radiusOf, structuralRequest,
+  BAND_COLOR, DIRECTION_LABEL, KNOB_CLASS, SKIN, STATE_COLOR, STATE_INK,
+  STATE_LABEL, STATE_NOTE, WARN_INK,
+  coneOf, diagnoseRequest, fmtDelta, fmtPercent, normalizeDiagnosis,
+  normalizeGraph, pairsFor, radiusOf, structuralRequest, sweepRequest,
 } from "../lib/influence.js";
 import { conePlayback, graphDepth, summaryOf } from "../lib/influenceplay.js";
 import { cascadeLayout, layeredLayout, radialLayout } from "../lib/influencelayout.js";
@@ -29,6 +33,8 @@ const ROW_GAP = 19;
 const state = {
   variant: "layered", selection: null, model: null, layout: null,
   cone: null, play: null, depth: 0,
+  // 진단(2단 앞의 "무엇을") · 스윕(3단 "얼마나") — 탭을 떠났다 와도 결과 유지
+  diag: null, sweep: null,
 };
 let canvas = null;
 
@@ -268,20 +274,24 @@ export function render() {
     );
   }
 
+  // 게인 탭이 자리를 전부 끄면 `{gainTables: null, gainScheduleOff: true}`를 쓴다 —
+  // 빈 dict로는 "껐다"를 표현할 수 없어서 짝으로 두는 키다(lib/gainsched.js).
+  // 이걸 안 읽으면 사용자가 끈 스케줄을 켜진 것으로 해석해, 있지도 않은
+  // 「스케줄에 덮임」 경고를 띄우고 지문도 Autocode 탭과 어긋난다.
+  // 진단·스윕 요청도 **같은 형상**을 실어야 한다 — 여기서 갈라지면 승격 판정이
+  // 실제 런 형상과 어긋난다 (그래서 한 함수다)
+  const shapeState = () => ({
+    autopilot: store.get("autopilotParams"),
+    nav: store.get("navParams"),
+    actuators: store.get("actuatorParams"),
+    gainTables: store.get("gainTables"),
+    withSchedule: store.get("gainScheduleOff") ? false : undefined,
+  });
+
   async function load() {
     try {
       clear(errBox);
-      // 게인 탭이 자리를 전부 끄면 `{gainTables: null, gainScheduleOff: true}`를 쓴다 —
-      // 빈 dict로는 "껐다"를 표현할 수 없어서 짝으로 두는 키다(lib/gainsched.js).
-      // 이걸 안 읽으면 사용자가 끈 스케줄을 켜진 것으로 해석해, 있지도 않은
-      // 「스케줄에 덮임」 경고를 띄우고 지문도 Autocode 탭과 어긋난다
-      const body = structuralRequest({
-        autopilot: store.get("autopilotParams"),
-        nav: store.get("navParams"),
-        actuators: store.get("actuatorParams"),
-        gainTables: store.get("gainTables"),
-        withSchedule: store.get("gainScheduleOff") ? false : undefined,
-      });
+      const body = structuralRequest(shapeState());
       const payload = await api.post("/influence/structural", body);
       const m = normalizeGraph(payload);
       state.model = m;
@@ -306,6 +316,291 @@ export function render() {
     }
   }
 
+  // ── 진단 → 처방 → 스윕 (2·3단 표면 — 표가 정본, 캔버스 연동은 보조) ──────
+
+  const diagStatus = el("span", { class: "hint" },
+    "시뮬레이션 탭의 최근 런을 진단한다 — 런이 없으면 먼저 하나 만든다.");
+  const diagBox = el("div");
+  const sweepStatusLine = el("p", { class: "hint", style: "margin:6px 0 0" });
+  const sweepBox = el("div");
+  const resultInput = el("input", {
+    type: "text", placeholder: "sim 결과 id",
+    value: store.get("simResult")?.id ?? "",
+    style: `${mono()};width:230px`,
+  });
+  const numIn = (val, width = 70) =>
+    el("input", { type: "number", value: val, step: "any", style: `width:${width}px` });
+  const machIn = numIn(0.6);
+  const altIn = numIn(1000);
+  const fuelIn = numIn(200);
+  const stepIn = numIn(15);
+
+  const metricLabel = (key) =>
+    (state.model?.metrics ?? []).find((m) => m.key === key)?.label ?? key;
+
+  async function runDiagnose() {
+    const rid = resultInput.value.trim() || store.get("simResult")?.id;
+    if (!rid) {
+      diagStatus.textContent = "진단할 런이 없다 — 시뮬레이션 탭에서 런을 만들거나 결과 id를 입력";
+      return;
+    }
+    diagStatus.textContent = "진단 중…";
+    clear(diagBox);
+    try {
+      state.diag = normalizeDiagnosis(
+        await api.post("/influence/diagnose", diagnoseRequest(shapeState(), rid)));
+      diagStatus.textContent =
+        `결과 ${state.diag.resultId} · 형상 지문 ${state.diag.fingerprint} · ` +
+        `처방 ${state.diag.prescriptions.length}건`;
+      renderDiag();
+    } catch (e) {
+      diagStatus.textContent = "진단 실패";
+      clear(diagBox).append(el("div", { class: "error-box" }, errorText(e)));
+    }
+  }
+
+  function renderDiag() {
+    clear(diagBox);
+    const d = state.diag;
+    if (!d) return;
+    // 지표 줄 — 진단의 입력이자 스윕 Δ의 기준
+    diagBox.append(
+      el("div", { class: "row", style: "gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12px" },
+        Object.entries(d.metrics).map(([k, v]) =>
+          stat(metricLabel(k), k.endsWith("_frac") ? fmtPercent(v) : fmtDelta(v)))),
+    );
+    for (const w of d.warnings) {
+      diagBox.append(el("p", { style: `margin:4px 0;font-size:12px;color:${WARN_INK}` }, `⚠ ${w}`));
+    }
+    // 판정 표 — 처방이 없어도 "왜 없는지"(evidence)가 남아야 한다
+    diagBox.append(
+      el("div", { class: "scroll-x", style: "margin-top:8px" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            ["규칙", "축", "판정", "근거"].map((h) => el("th", {}, h)))),
+          el("tbody", {}, d.findings.map((f) =>
+            el("tr", {},
+              el("td", {}, el("code", { style: mono() }, f.rule)),
+              el("td", {}, f.axis),
+              el("td", {}, el("span", {
+                class: "flag",
+                style: f.severity === "warn"
+                  ? `background:${WARN_INK}1a;color:${WARN_INK};font-weight:600`
+                  : "",
+              }, f.severity === "warn" ? "처방" : "정상")),
+              el("td", { style: "max-width:520px" },
+                f.verdict,
+                el("span", { class: "hint", style: "margin-left:8px;font-size:11px" },
+                  Object.entries(f.evidence)
+                    .filter(([, v]) => typeof v === "number")
+                    .map(([k, v]) => `${k}=${fmtDelta(v)}`).join(" · ")),
+              ),
+            ))),
+        )),
+    );
+    if (!d.prescriptions.length) {
+      diagBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
+        "처방 없음 — 모든 지표가 문턱 안이다. 문턱은 서버 응답(thresholds)이 들고 있다."));
+      return;
+    }
+    // 처방 카드 — knobs가 곧 3단 스윕의 입력이다
+    diagBox.append(el("div", { class: "row", style: "gap:12px;flex-wrap:wrap;margin-top:10px" },
+      d.prescriptions.map((p) => {
+        const cls = KNOB_CLASS[p.knob_class] ?? { label: p.knob_class, ink: "#6c6c70" };
+        return el("div", {
+          style: "border:1px solid var(--border,#d0d0d5);border-radius:12px;" +
+            "padding:10px 12px;min-width:280px;max-width:420px;flex:1",
+        },
+          el("div", { class: "row", style: "gap:8px;align-items:center" },
+            el("span", {
+              class: "flag",
+              style: `background:${cls.ink}1a;color:${cls.ink};font-weight:600`,
+            }, cls.label),
+            el("span", { style: "font-size:12px" }, DIRECTION_LABEL[p.direction] ?? ""),
+          ),
+          el("p", { style: "margin:6px 0 0" },
+            p.knobs.map((k) => el("code", { style: `${mono()};margin-right:6px` }, k))),
+          p.joint_with.length
+            ? el("p", { class: "hint", style: "margin:4px 0 0;font-size:12px" },
+                "동시 수정 후보: ", p.joint_with.map((k) =>
+                  el("code", { style: `${mono()};margin-right:6px` }, k)))
+            : null,
+          p.recheck.length
+            ? el("p", { class: "hint", style: "margin:4px 0 0;font-size:12px" },
+                `움직인 뒤 재확인: ${p.recheck.map(metricLabel).join(", ")}`)
+            : null,
+          p.notes.map((n) =>
+            el("p", { style: `margin:4px 0 0;font-size:12px;color:${WARN_INK}` }, n)),
+          el("p", { class: "hint", style: "margin:4px 0 0;font-size:11px" },
+            `근거: ${p.findings.map((i) => d.findings[i]?.rule ?? i).join(", ")}`),
+          el("div", { class: "row", style: "gap:8px;margin-top:8px" },
+            el("button", { onclick: () => runOpenloop(p) }, "개루프 근거 (2단)"),
+            el("button", {
+              class: "primary", onclick: () => runSweep(p),
+            }, "이 부분공간 스윕 (3단)"),
+          ),
+        );
+      })));
+  }
+
+  const olStatusLine = el("p", { class: "hint", style: "margin:6px 0 0" });
+  const olBox = el("div");
+
+  async function runOpenloop(card) {
+    const cases = [{
+      name: "sweep",
+      mach: Number(machIn.value), alt: Number(altIn.value), fuel: Number(fuelIn.value),
+    }];
+    olStatusLine.textContent = "개루프 Δ 계산 중…";
+    clear(olBox);
+    try {
+      const job = await api.post("/influence/openloop", {
+        ...structuralRequest(shapeState()),
+        cases, params: card.knobs, fingerprint: state.diag?.fingerprint,
+      });
+      const done = await watchJob(job.id, (j) => {
+        olStatusLine.textContent =
+          `개루프 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`;
+      });
+      if (done.status !== "done" || !done.result_id) {
+        olStatusLine.textContent = `개루프 ${done.status}`;
+        return;
+      }
+      const res = await api.get(`/results/${done.result_id}`);
+      olStatusLine.textContent = "";
+      renderOpenloop(card, res);
+    } catch (e) {
+      olStatusLine.textContent = "개루프 실패";
+      clear(olBox).append(el("div", { class: "error-box" }, errorText(e)));
+    }
+  }
+
+  function renderOpenloop(card, res) {
+    clear(olBox);
+    const rows = [];
+    for (const pid of card.knobs) {
+      const p = res.params?.[pid];
+      if (!p) continue;
+      if (p.status !== "ok") {
+        rows.push([pid, "—", "—", "—", "—", p.reason ?? p.status]);
+        continue;
+      }
+      for (const [loopName, byCase] of Object.entries(p.loops ?? {})) {
+        for (const [caseName, e] of Object.entries(byCase)) {
+          rows.push([pid, loopName, caseName,
+            e?.base ? `${fmtDelta(e.base.pm_deg)}° / ${fmtDelta(e.base.gm_db)} dB` : "—",
+            e?.delta ? `${fmtDelta(e.delta.pm_deg)}° / ${fmtDelta(e.delta.gm_db)} dB` : "—",
+            e?.note ?? ""]);
+        }
+      }
+    }
+    olBox.append(
+      el("h3", { style: "margin:12px 0 4px;font-size:14px" },
+        `개루프 마진 근거 (2단) — 섭동 ${fmtPercent(res.probe_rel)}`),
+      el("div", { class: "scroll-x" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            ["손잡이", "루프", "케이스", "기준 PM/GM", "Δ PM/GM", "비고"].map((h) =>
+              el("th", {}, h)))),
+          el("tbody", {}, rows.map((r) =>
+            el("tr", {}, r.map((c, i) =>
+              el("td", i < 2 ? {} : { class: "num" },
+                i < 2 ? el("code", { style: mono() }, c) : c))))),
+        )),
+      el("p", { class: "hint", style: "margin:6px 0 0" },
+        "개루프는 피드백이 얼어 있는 근사다 — 스케줄이 덮는 자리·루프 선언이 없는 " +
+        "자리는 Δ=0으로 위장하지 않고 사유로 남는다. 폐루프 확증은 스윕(3단) 몫이다."),
+    );
+  }
+
+  async function runSweep(card) {
+    const cases = [{
+      name: "sweep",
+      mach: Number(machIn.value), alt: Number(altIn.value), fuel: Number(fuelIn.value),
+    }];
+    state.sweep = { card, status: "제출 중…", result: null, error: null };
+    renderSweep();
+    try {
+      const body = sweepRequest(shapeState(), {
+        cases, knobs: card.knobs, pairs: pairsFor(card),
+        tSettle: 5, tStep: Number(stepIn.value) || 15,
+        fingerprint: state.diag?.fingerprint,
+      });
+      const job = await api.post("/influence/sweep", body);
+      const done = await watchJob(job.id, (j) => {
+        state.sweep.status =
+          `스윕 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`;
+        sweepStatusLine.textContent = state.sweep.status;
+      });
+      if (done.status !== "done") {
+        state.sweep.status = `스윕 ${done.status} — 완료 런은 보존된다`;
+      } else {
+        state.sweep.status = "완료";
+      }
+      if (done.result_id) state.sweep.result = await api.get(`/results/${done.result_id}`);
+      renderSweep();
+    } catch (e) {
+      state.sweep.status = "실패";
+      state.sweep.error = errorText(e);
+      renderSweep();
+    }
+  }
+
+  function renderSweep() {
+    clear(sweepBox);
+    const s = state.sweep;
+    sweepStatusLine.textContent = s?.status ?? "";
+    if (!s) return;
+    if (s.error) {
+      sweepBox.append(el("div", { class: "error-box" }, s.error));
+      return;
+    }
+    const res = s.result;
+    if (!res) return;
+    const keys = [...new Set(res.rows.flatMap((r) => Object.keys(r.metrics ?? {})))];
+    sweepBox.append(
+      el("div", { class: "scroll-x", style: "margin-top:8px" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            [el("th", {}, "런"), el("th", {}, "케이스"),
+             keys.map((k) => el("th", {}, `Δ ${metricLabel(k)}`))])),
+          el("tbody", {}, res.rows.map((r) =>
+            el("tr", {},
+              el("td", {}, el("code", { style: mono() }, r.label)),
+              el("td", {}, r.case),
+              keys.map((k) => el("td", { class: "num" },
+                r.label === "base"
+                  ? `기준 ${fmtDelta(r.metrics?.[k])}`
+                  : fmtDelta(r.delta?.[k]))),
+            ))),
+        )),
+      el("p", { class: "hint", style: "margin:6px 0 0" },
+        "Δ는 base 런 대비다 — 행마다 형상 지문이 계보로 저장되어 있다."),
+    );
+    if (res.nonadditivity?.length) {
+      sweepBox.append(
+        el("h3", { style: "margin:12px 0 4px;font-size:14px" }, "쌍별 비가산성 dAB − (dA+dB)"),
+        el("div", { class: "scroll-x" },
+          el("table", {},
+            el("thead", {}, el("tr", {},
+              [el("th", {}, "쌍"), keys.map((k) => el("th", {}, metricLabel(k)))])),
+            el("tbody", {}, res.nonadditivity.map((na) =>
+              el("tr", {},
+                el("td", {}, na.knobs.map((k) =>
+                  el("code", { style: `${mono()};margin-right:6px` }, k))),
+                keys.map((k) => el("td", { class: "num" }, fmtDelta(na.values?.[k]))),
+              ))),
+          )),
+        el("p", { class: "hint", style: "margin:6px 0 0" },
+          "0에 가까우면 두 손잡이는 독립(따로 튜닝 가능), 크면 상호작용(같이 움직여야 한다). " +
+          "판정 불가는 0이 아니라 —다."),
+      );
+    }
+    for (const w of [...(res.warnings ?? []), ...(res.notes ?? [])]) {
+      sweepBox.append(el("p", { style: `margin:4px 0;font-size:12px;color:${WARN_INK}` }, `⚠ ${w}`));
+    }
+  }
+
   canvas = createInfluenceCanvas({
     width: CANVAS_W,
     height: CANVAS_H,
@@ -320,6 +615,9 @@ export function render() {
   canvasBox.append(canvas.root);
 
   load();
+  // 탭을 떠났다 와도 진단·스윕 결과는 다시 그린다 (모듈 스코프 state 유지 규약)
+  if (state.diag) renderDiag();
+  if (state.sweep) renderSweep();
 
   return el("div", {},
     el("div", { class: "panel" },
@@ -346,6 +644,30 @@ export function render() {
     el("div", { class: "panel" },
       el("h2", {}, "파라미터"),
       tableBox,
+    ),
+    el("div", { class: "panel" },
+      el("h2", {}, "진단 → 처방 → 스윕 — 무엇을 만질지, 그다음 얼마나 (2·3단)"),
+      el("p", { class: "hint", style: "margin:0 0 8px" },
+        "저장된 폐루프 런에서 결함을 귀속한다: 필터 병목인지 게인 미달인지, " +
+        "포화를 어느 항이 주도하는지, 적분기가 클램프에 주차했는지. 처방 카드의 " +
+        "손잡이(스케줄이 덮는 자리는 table.* 배율로 자동 승격)가 그대로 3단 스윕의 " +
+        "입력이 된다 — 전 게인 공간이 아니라 처방 부분공간만 흔든다."),
+      el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
+        resultInput,
+        el("button", { class: "primary", onclick: runDiagnose }, "진단 실행"),
+        el("span", { class: "grow" }),
+        el("span", { class: "hint" }, "스윕 케이스"),
+        el("label", { class: "hint" }, "mach ", machIn),
+        el("label", { class: "hint" }, "alt ", altIn),
+        el("label", { class: "hint" }, "fuel ", fuelIn),
+        el("label", { class: "hint" }, "스텝 s ", stepIn),
+      ),
+      el("div", { class: "row", style: "margin-top:6px" }, diagStatus),
+      diagBox,
+      olStatusLine,
+      olBox,
+      sweepStatusLine,
+      sweepBox,
     ),
   );
 }
