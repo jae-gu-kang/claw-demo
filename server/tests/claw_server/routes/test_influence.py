@@ -88,3 +88,143 @@ def test_probe_rel_is_bounded(client):
 def test_elapsed_is_reported(client):
     """동기 유지의 근거를 응답이 들고 있어야 나중에 판단이 가능하다."""
     assert _post(client)["elapsed_ms"] > 0
+
+
+# ---------- 진단 (처방 카드) ----------
+
+
+def _run_sim(client, wait_job, **over):
+    body = {
+        "trim": {"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0},
+        "modes": [{"name": "hold", "speed": 199.0, "alt": 1000.0, "heading": 0.0,
+                   "exit": ["time_ge", 1e9]}],
+        "t_end": 2.0,
+    }
+    body.update(over)
+    j = wait_job(client.post("/api/sim/run", json=body).json()["id"], timeout=120.0)
+    assert j["status"] == "done"
+    return j["result_id"]
+
+
+def test_diagnose_round_trip(client, wait_job):
+    """저장된 sim 결과 → 진단 응답 — 지표·판정·처방·문턱이 한 덩이로 온다."""
+    rid = _run_sim(client, wait_job)
+    r = client.post("/api/influence/diagnose", json={"result_id": rid})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["result_id"] == rid
+    assert set(body["metrics"]) >= {"alt_rms", "surf_sat_frac", "limiter_frac"}
+    assert body["metrics"]["alt_rms"] is not None
+    assert isinstance(body["findings"], list) and isinstance(body["prescriptions"], list)
+    assert body["thresholds"]["sat_frac"] > 0
+    json.dumps(body, allow_nan=False)  # NaN을 흘리면 브라우저 파싱이 터진다
+
+
+def test_diagnose_missing_and_wrong_kind(client, wait_job):
+    assert client.post("/api/influence/diagnose",
+                       json={"result_id": "nope"}).status_code == 404
+    tj = wait_job(client.post("/api/trim/batch", json={
+        "cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}]}).json()["id"])
+    assert client.post("/api/influence/diagnose",
+                       json={"result_id": tj["result_id"]}).status_code == 409
+
+
+# ---------- 2단 개루프 (openloop_delta) ----------
+
+
+def test_openloop_job_round_trip(client, wait_job):
+    """게인 Δ → 케이스별 마진 변화 — 잡 기반 202, 스케줄 상수는 분리 보고."""
+    r = client.post("/api/influence/openloop", json={
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "params": ["table.pitch.k_rate", "fcl/ScasAxis.pitch.kp"],
+        "fingerprint": "fp-ol",
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=120.0)
+    assert j["status"] == "done"
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    assert res["kind"] == "influence_openloop"
+    assert res["cases"] == ["design"]
+    assert res["params"]["fcl/ScasAxis.pitch.kp"]["status"] == "overridden"
+    entry = res["params"]["table.pitch.k_rate"]["loops"]["pitch_rate"]["design"]
+    assert entry["delta"]["pm_deg"] is not None
+    json.dumps(res, allow_nan=False)  # inf 마진은 null로 직렬화돼야 한다
+
+
+def test_openloop_unknown_param_is_422(client):
+    r = client.post("/api/influence/openloop", json={
+        "cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "params": ["없는.자리"],
+    })
+    assert r.status_code == 422
+
+
+# ---------- 3단 폐루프 스윕 (closedloop_sweep) ----------
+
+
+def test_sweep_job_round_trip(client, wait_job):
+    """처방 부분공간 스윕 — base + 처방 런의 지표와 Δ가 행으로 온다."""
+    r = client.post("/api/influence/sweep", json={
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "knobs": ["table.pitch.kp"],
+        "span": [0.1],
+        "t_settle": 2.0, "t_step": 4.0,
+        "fingerprint": "fp-sweep",
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    assert res["kind"] == "influence_sweep"
+    labels = [row["label"] for row in res["rows"]]
+    assert labels == ["base", "table.pitch.kp@+0.1"]
+    base, run = res["rows"]
+    assert base["delta"] is None  # 기준런 — Δ의 기준이지 Δ가 아니다
+    assert run["metrics"]["alt_rms"] is not None
+    assert run["delta"]["alt_rms"] is not None
+    assert base["fingerprint"] != run["fingerprint"]
+    json.dumps(res, allow_nan=False)
+
+
+def test_sweep_pair_nonadditivity(client, wait_job):
+    """쌍 (A, B, A+B) 3점 — 비가산성이 "동시에 바꿔야 하는가"의 정량 답이다."""
+    r = client.post("/api/influence/sweep", json={
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "knobs": [],
+        "pairs": [["table.pitch.kp", "table.pitch.k_rate"]],
+        "t_settle": 2.0, "t_step": 4.0,
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    assert len(res["rows"]) == 4  # base + A + B + AB
+    na = res["nonadditivity"]
+    assert len(na) == 1 and na[0]["case"] == "design"
+    assert na[0]["knobs"] == ["table.pitch.kp", "table.pitch.k_rate"]
+    assert na[0]["values"]["alt_rms"] is not None
+
+
+def test_sweep_validation(client):
+    # 오타 knob은 제출 시점 422 — 잡이 돌고 나서 실패하면 트림 비용을 지불한다
+    assert client.post("/api/influence/sweep", json={
+        "cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "knobs": ["없는.자리"],
+    }).status_code == 422
+    # 흔들 것이 없는 스윕은 무의미 구성
+    assert client.post("/api/influence/sweep", json={
+        "cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "knobs": [],
+    }).status_code == 422
+
+
+def test_diagnose_fingerprint_mismatch_warns(client, wait_job):
+    """계보 불일치는 오류가 아니라 경고다 — 결과는 내되 승격 판정이 실제 런 형상과
+    다를 수 있음을 화면이 알아야 한다."""
+    rid = _run_sim(client, wait_job, fingerprint="fp-sim-web")
+    body = client.post("/api/influence/diagnose", json={"result_id": rid}).json()
+    assert any("계보 불일치" in w for w in body["warnings"])
+    # 지문 없이 저장된 결과는 경고 없음 (비교할 계보가 없다)
+    rid2 = _run_sim(client, wait_job)
+    body2 = client.post("/api/influence/diagnose", json={"result_id": rid2}).json()
+    assert not any("계보 불일치" in w for w in body2["warnings"])
