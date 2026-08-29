@@ -28,7 +28,7 @@ import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
 import { BLOCKS, codegenTargets, resolvePath } from "../lib/blocks.js";
 import {
-  designPointValue, lockedParams, scasKwargs, selectedSlots, slotIndex,
+  designCoord, designValue, lockedParams, scasKwargs, selectedSlots, slotIndex,
 } from "../lib/gainsync.js";
 import { groupFields, parseFieldValue, schemaFields } from "../lib/schemaform.js";
 import { store } from "../store.js";
@@ -47,6 +47,9 @@ async function loadGainsCatalog() {
   if (gainsCatalog === null) {
     try {
       gainsCatalog = await api.get("/gains/catalog");
+      // 설계점 **좌표**를 제안 표 기준으로 굳혀 둔다 — 이후 값 조회는 격자가 아니라
+      // 비행조건으로 읽는다 (lib/gainsync designCoord·designValue)
+      gainsCatalog.design_coord = designCoord(gainsCatalog);
     } catch {
       gainsCatalog = false; // 재시도하지 않는다 — 페이지 이동마다 두드리지 않으려고
     }
@@ -331,8 +334,10 @@ function scheduleLocks(catalog, access) {
     const slot = slots.get(name);
     const table = tables?.[name] ?? slot?.table;
     out.set(param, {
+      // 좌표로 읽는다 — 자동 설계 확정본은 격자가 서버 제안과 달라(자리마다 다르기도
+      // 하다) 인덱스로 읽으면 엉뚱한 비행조건의 값이 설계점 배지에 뜬다
       slot: name,
-      value: designPointValue(table, catalog.design_index),
+      value: designValue(catalog, table),
       label: designPointLabel(catalog, slot),
     });
   }

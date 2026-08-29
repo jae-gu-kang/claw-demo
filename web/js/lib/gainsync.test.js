@@ -3,8 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  constantOf, designPointValue, foldToConstant, fullConstants,
-  lockedParams, scasKwargs, seedTable, selectedSlots, slotIndex, withConstant,
+  constantOf, designCoord, designPointValue, designValue, foldToConstant, fullConstants,
+  lockedParams, scasKwargs, seedTable, selectedSlots, slotIndex, valueAt, withConstant,
 } from "./gainsync.js";
 
 // 설계점 = 인덱스 1 (스케일 1). 인덱스 0은 저마하 스케일 4배 자리.
@@ -143,4 +143,50 @@ test("켜기 → 끄기 왕복이 상수를 보존한다", () => {
   const s = S("alt.k_rate");
   const seeded = seedTable(CAT, s, -0.02);
   assert.equal(foldToConstant(CAT, s, { "alt.k_rate": seeded }), -0.02);
+});
+
+// ── 설계점을 **좌표**로 읽기 (자동 설계 확정본은 축 격자가 서버 제안과 다르다) ──
+
+test("설계점 좌표는 제안 표의 design_index 위치 축 값", () => {
+  assert.equal(designCoord(CAT), 0.6);
+  assert.equal(designCoord(null), null);
+  assert.equal(designCoord({ axis: "mach", slots: [] }), null);
+});
+
+test("valueAt은 구간 선형 보간 + 외삽 clip (엔진 Table과 같은 규칙)", () => {
+  const t = { axes: { mach: [0.2, 0.6, 1.0] }, data: [4, 2, 0], extrapolate: "clip" };
+  assert.equal(valueAt(t, "mach", 0.2), 4);
+  assert.equal(valueAt(t, "mach", 0.6), 2);
+  assert.equal(valueAt(t, "mach", 0.4), 3); // 구간 중점
+  assert.equal(valueAt(t, "mach", 0.05), 4); // 하한 밖 — clip
+  assert.equal(valueAt(t, "mach", 9.9), 0); // 상한 밖 — clip
+  assert.equal(valueAt({ axes: {}, data: [] }, "mach", 0.5), null);
+});
+
+test("설계점 값은 축 격자가 달라도 같은 좌표에서 읽힌다", () => {
+  // 자동 설계 확정본 — 축이 4점이고 서버 제안(2점)과 완전히 다르다.
+  // 인덱스(design_index=1)로 읽으면 M0.4 칸(=3)이 설계점으로 둔갑한다
+  const auto = { axes: { mach: [0.2, 0.4, 0.6, 0.8] }, data: [4, 3, 2, 1], extrapolate: "clip" };
+  assert.equal(designValue(CAT, auto), 2); // M0.6의 값
+  assert.equal(designPointValue(auto, CAT.design_index), 3); // 옛 인덱스 방식은 틀린다
+  // 서버 제안 표(축 2점)에서는 둘이 같은 답을 낸다 — 회귀 없음
+  const proposed = S("pitch.kp").table;
+  assert.equal(designValue(CAT, proposed), designPointValue(proposed, CAT.design_index));
+});
+
+test("끄기는 축이 다른 확정본에서도 설계점 좌표 값으로 굳는다", () => {
+  const auto = {
+    "yaw.kp": { axes: { mach: [0.3, 0.6, 0.9] }, data: [9, 1.25, 0.5], extrapolate: "clip" },
+  };
+  assert.equal(foldToConstant(CAT, S("yaw.kp"), auto), 1.25);
+});
+
+test("설계점 좌표는 한 번 굳히면 표가 갈려도 흔들리지 않는다", () => {
+  // 게인 탭이 확정본을 되읽으면 slot.table이 갈린다 — 그 뒤에도 기준은 그대로여야 한다
+  const swapped = {
+    ...CAT,
+    slots: [{ ...CAT.slots[0], table: { axes: { mach: [0.9, 1.2] }, data: [1, 2] } }],
+  };
+  assert.equal(designCoord({ ...swapped, design_coord: 0.6 }), 0.6);
+  assert.equal(designCoord(swapped), 1.2, "굳히지 않으면 갈아낀 표를 읽는다");
 });

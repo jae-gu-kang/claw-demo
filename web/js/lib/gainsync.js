@@ -138,14 +138,17 @@ export function seedTable(catalog, slot, constant) {
   const t = slot.table;
   // 비율의 기준은 **그 표의 설계점 값**이다 (설계 상수가 아니라). 켰다 껐다를
   // 반복해도 형상이 누적 스케일되지 않는다 — 이미 맞는 표를 다시 심으면 그대로다
-  const base = designPointValue(t, catalog?.design_index) ?? slot.design;
+  const base = designValue(catalog, t) ?? slot.design;
   const data = base
     ? t.data.map((v) => (v / base) * constant)
     : t.data.map(() => constant);
   return { axes: { ...t.axes }, data, extrapolate: t.extrapolate };
 }
 
-/** 설계점 한 칸 — 잠긴 폼 필드 배지("스케줄 중 M0.6: X")와 되접기가 함께 쓴다. */
+/** 설계점 한 칸 — **서버 제안 표 전용**(격자가 카탈로그와 같을 때만 뜻이 있다).
+ *
+ * 축 격자가 다른 표(자동 설계 확정본)에는 쓰면 안 된다 — 인덱스가 가리키는 칸이
+ * 설계점이 아니게 된다. 그 경우는 `designValue`(좌표 기반)를 쓴다. */
 export function designPointValue(table, designIndex) {
   const data = table?.data ?? [];
   if (!data.length) return null;
@@ -155,12 +158,57 @@ export function designPointValue(table, designIndex) {
   return data[i];
 }
 
+/** 설계점의 **축 좌표**(예: mach 0.6) — 제안 표의 design_index 위치 값.
+ *
+ * 설계점은 인덱스가 아니라 비행조건이다. 격자가 달라져도 좌표는 그대로이므로,
+ * 자동 설계 확정본처럼 breakpoint가 재배치된 표에서도 이 좌표로 읽어야 한다. */
+export function designCoord(catalog) {
+  // 로드 시점에 굳혀 둔 값이 있으면 그것 — 게인 탭은 적용해 둔 형상을 되읽으며
+  // slot.table을 확정본으로 갈아끼우므로, 그 뒤에 제안 표에서 다시 뽑으면 설계점이
+  // 확정본 격자를 따라 움직인다 (기준이 흔들리면 되접기·시드가 함께 틀어진다)
+  if (typeof catalog?.design_coord === "number") return catalog.design_coord;
+  const axis = catalog?.axis;
+  const i = catalog?.design_index;
+  if (!axis || !Number.isInteger(i) || i < 0) return null;
+  for (const s of catalog?.slots ?? []) {
+    const grid = s?.table?.axes?.[axis];
+    if (Array.isArray(grid) && i < grid.length) return grid[i];
+  }
+  return null;
+}
+
+/** 축 좌표에서의 표 값 — 구간 선형 보간, 외삽 clip (엔진 Table.interp와 같은 규칙). */
+export function valueAt(table, axis, coord) {
+  const grid = table?.axes?.[axis];
+  const data = table?.data ?? [];
+  if (!Array.isArray(grid) || !grid.length || grid.length !== data.length) return null;
+  if (!(coord > grid[0])) return data[0];
+  const last = grid.length - 1;
+  if (coord >= grid[last]) return data[last];
+  let i = 0;
+  while (i < last - 1 && coord >= grid[i + 1]) i += 1;
+  const span = grid[i + 1] - grid[i];
+  const t = span ? (coord - grid[i]) / span : 0;
+  return (1 - t) * data[i] + t * data[i + 1];
+}
+
+/** 설계점 값 — **좌표로** 읽는다 (격자 무관). 좌표를 못 구하면 인덱스 폴백. */
+export function designValue(catalog, table) {
+  const axis = catalog?.axis;
+  const coord = designCoord(catalog);
+  if (axis && coord != null) {
+    const v = valueAt(table, axis, coord);
+    if (typeof v === "number") return v;
+  }
+  return designPointValue(table, catalog?.design_index);
+}
+
 /** 자리를 끌 때 굳힐 상수 = 편집된 표의 설계점 값.
  *
  * 카탈로그의 원래 설계 상수로 되돌리면, 표를 고쳐 놓고 스케줄만 끈 사용자에게
  * "끄면 이 값으로 굳는다"는 화면 설명이 거짓말이 된다. */
 export function foldToConstant(catalog, slot, tables) {
   const t = tables?.[slot.name];
-  const v = t ? designPointValue(t, catalog?.design_index) : null;
+  const v = t ? designValue(catalog, t) : null;
   return typeof v === "number" ? v : slot.design;
 }

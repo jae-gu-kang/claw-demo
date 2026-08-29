@@ -19,11 +19,12 @@ lib/gainsched.js. 검증(그룹·키·형상·유한성)은 제출 시 서버/�
 import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
-  GAIN_KEYS, appliedTables, defaultSelection, schedSummary, slotRows,
+  GAIN_KEYS, alignTables, appliedTables, defaultSelection, schedSummary, slotRows,
   storePayload, toggleSlot, zeroTables,
 } from "../lib/gainsched.js";
 import {
-  constantOf, foldToConstant, seedTable, withConstant,
+  constantOf, designCoord, foldToConstant, seedTable, selectedSlots, slotIndex,
+  withConstant,
 } from "../lib/gainsync.js";
 import { gainPlotGroups } from "../lib/plot.js";
 import { piecewisePolyfit, rawCoeffs, sampleFit } from "../lib/polyfit.js";
@@ -33,6 +34,12 @@ import { lineChartCanvas } from "./plots.js";
 let catalog = null; // GET /gains/catalog — 자리 목록·설계 상수·제안 테이블
 let selected = []; // 켠 자리 이름 (카탈로그 기본 = 서버가 지금 스케줄하는 6자리)
 let tables = null; // 켠 자리만 추린 {name: {axes:{mach}, data, extrapolate}} — 편집 대상
+let adopted = null; // 되읽은 형상 요약 {source, slots, aligned, points, unknown} | null
+// 이 탭이 마지막으로 보거나 적용한 스토어 값 — **밖에서 바뀌었는지**만 판정한다.
+// 매 재진입마다 되읽으면 미적용 편집 드래프트가 날아가고, 아예 안 읽으면 자동
+// 설계가 확정한 형상이 이 화면에만 안 보인다
+let seenTables;
+let seenOff;
 // 끈 자리의 상수 드래프트 {scas, autopilot} — 구조도 폼과 같은 스토어를 쓰는 값이라
 // 테이블과 함께 '적용'에서 커밋한다 (여기만 즉시 반영되면 적용 전후가 갈린다)
 let constants = null;
@@ -57,13 +64,21 @@ export function render() {
     };
   };
 
-  const load = async () => {
+  const load = async ({ fresh = false } = {}) => {
     try {
       clear(errBox);
       catalog = await api.get("/gains/catalog");
+      // 설계점 **좌표**를 제안 표 기준으로 굳힌다 — 되읽기가 slot.table을 확정본으로
+      // 갈아끼운 뒤에도 기준이 흔들리지 않게 (lib/gainsync designCoord)
+      catalog.design_coord = designCoord(catalog);
       selected = defaultSelection(catalog);
+      adopted = fresh ? null : adoptStored();
+      if (fresh) markSeen();
       syncFromStore();
       renderTables(box, statusLine);
+      statusLine.textContent = fresh
+        ? "서버 설계 제안으로 되돌렸습니다 (미적용) — '시뮬·코드에 적용'을 눌러야 형상이 바뀝니다."
+        : adoptedText(adopted);
     } catch (e) {
       clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
     }
@@ -72,8 +87,12 @@ export function render() {
   const apply = () => {
     if (!catalog) return;
     const { tables: applied, scheduleOff } = storePayload(catalog, selected);
-    store.set("gainTables", applied && JSON.parse(JSON.stringify(applied)));
+    const payload = applied && JSON.parse(JSON.stringify(applied));
+    store.set("gainTables", payload);
     store.set("gainScheduleOff", scheduleOff);
+    store.set("gainTablesSource", { kind: "gains" });
+    markSeen();
+    adopted = null; // 이제 이 화면이 곧 적용된 형상이다 — 되읽기 배너를 내린다
     // 끈 자리의 상수 — 구조도 폼이 읽는 바로 그 스토어. 여기서 고친 값이 저기 보인다
     if (constants?.scas) store.set("scasParams", constants.scas);
     if (constants?.autopilot) store.set("autopilotParams", constants.autopilot);
@@ -92,7 +111,10 @@ export function render() {
         "신호흐름 구조는 구조도 탭 — SCAS·게인 스케줄 블록에서 여기로 진입한다. ",
         "스케줄 대상은 형상의 일부다 — 바꾸면 탑재 코드 구조와 형상 지문이 함께 바뀐다."),
       el("div", { class: "row" },
-        el("button", { onclick: load }, "설계값 다시 불러오기"),
+        el("button", {
+          onclick: () => load({ fresh: true }),
+          title: "적용해 둔 형상을 버리고 서버 설계 제안(동압 스케일)으로 되돌린다",
+        }, "설계값 다시 불러오기"),
         el("button", { class: "primary", onclick: apply }, "시뮬·코드에 적용"),
       ),
       statusLine, errBox,
@@ -101,7 +123,15 @@ export function render() {
   );
 
   if (catalog) {
-    syncFromStore(); // 재진입 — 카탈로그는 캐시지만 상수는 그 사이 바뀌었을 수 있다
+    // 재진입 — 카탈로그는 캐시지만 상수도, **적용된 형상도** 그 사이 바뀌었을 수 있다
+    // (자동 설계 탭의 '게인 확정'이 그 경로다). 밖에서 바뀐 경우에만 되읽어
+    // 미적용 편집 드래프트를 지키면서 확정본을 놓치지 않는다
+    if (storeChanged()) {
+      selected = defaultSelection(catalog);
+      adopted = adoptStored();
+      statusLine.textContent = adoptedText(adopted);
+    }
+    syncFromStore();
     renderTables(box, statusLine);
   } else {
     load();
@@ -109,11 +139,77 @@ export function render() {
   return root;
 }
 
-/** "M0.6" — 설계점 표기. 축 이름·격자·인덱스는 전부 서버 카탈로그가 정본이다. */
+/** "M0.6" — 설계점 표기. 좌표는 로드 시점에 굳혀 둔 값(lib/gainsync designCoord). */
 function axisLabel() {
-  const slot = (catalog?.slots ?? []).find((x) => x.available && x.table);
-  const at = slot?.table?.axes?.[catalog.axis]?.[catalog.design_index];
-  return at == null ? "설계점" : `${String(catalog.axis).toUpperCase()[0]}${at}`;
+  const at = designCoord(catalog);
+  return at == null ? "설계점" : `${String(catalog?.axis).toUpperCase()[0]}${at}`;
+}
+
+/** 이 탭이 마지막으로 보거나 적용한 스토어 값으로 표시 — 이후 변경 감지의 기준. */
+function markSeen() {
+  seenTables = store.get("gainTables");
+  seenOff = store.get("gainScheduleOff") === true;
+}
+
+function storeChanged() {
+  return store.get("gainTables") !== seenTables
+    || (store.get("gainScheduleOff") === true) !== seenOff;
+}
+
+/** 적용해 둔 형상(스토어)을 편집 상태로 **되읽는다** — 자동 설계 확정본 포함.
+ *
+ * 이 탭은 지금까지 스토어에 쓰기만 했다: 자동 설계가 확정한 스케줄이 시뮬·Autocode
+ * ·구조도에는 걸려 있는데 정작 게인 화면만 서버 제안을 보여 줬다. 적용된 형상과
+ * 보이는 형상이 다르면 "지금 형상"이라는 말이 성립하지 않는다.
+ *
+ * 확정본은 자리마다 breakpoint가 다르므로(적합이 자리별 독립) 합집합 축으로 정렬해
+ * 한 표에 담는다 — 조회 함수는 보존된다(lib/gainsched alignTables).
+ * 반환 null = 아직 아무것도 적용한 적 없음(서버 기본 형상이 그대로 돈다). */
+function adoptStored() {
+  const stored = store.get("gainTables");
+  const off = store.get("gainScheduleOff") === true;
+  markSeen();
+  if (!stored && !off) return null;
+  const source = store.get("gainTablesSource") ?? null;
+  selected = selectedSlots(catalog, stored, off);
+  if (!stored) return { source, slots: 0, unknown: [], aligned: false };
+
+  const idx = slotIndex(catalog);
+  const unknown = Object.keys(stored).filter((n) => !idx.has(n));
+  const known = {};
+  for (const [name, t] of Object.entries(stored)) {
+    if (idx.has(name)) known[name] = t;
+  }
+  const al = alignTables(known, catalog.axis);
+  if (!al) {
+    selected = defaultSelection(catalog);
+    return { source, error: `축 '${catalog.axis}'가 없는 표가 있어 되읽지 못했다`, unknown };
+  }
+  // 스토어 객체를 그대로 심으면 셀 편집이 '적용' 전에 다른 탭으로 새어 나간다
+  for (const [name, t] of Object.entries(al.tables)) {
+    idx.get(name).table = JSON.parse(JSON.stringify(t));
+  }
+  selected = Object.keys(al.tables);
+  return {
+    source, unknown, aligned: al.aligned,
+    points: al.axis.length, slots: selected.length,
+  };
+}
+
+function adoptedText(a) {
+  if (!a) return "";
+  const src = a.source?.kind === "autodesign"
+    ? `자동 설계 확정본${a.source.resultId ? ` (${a.source.resultId})` : ""}`
+    : "적용해 둔 형상";
+  if (a.error) return `${src}을 되읽지 못했습니다 — ${a.error}. 서버 제안을 표시합니다.`;
+  if (!a.slots) return `${src} — 스케줄 없는 형상이 적용돼 있습니다 (전 자리 설계점 고정).`;
+  let out = `${src}을 되읽었습니다 — ${a.slots}자리`;
+  if (a.aligned) {
+    out += ` · 자리마다 다른 breakpoint를 합집합 ${a.points}점으로 정렬해 표시`
+      + " (구간 선형 보간 결과는 그대로)";
+  }
+  if (a.unknown.length) out += ` · 이 카탈로그에 없는 자리는 제외: ${a.unknown.join(", ")}`;
+  return `${out}. 편집 후 '시뮬·코드에 적용'을 눌러야 반영됩니다.`;
 }
 
 /** 스케줄 자리 격자 — 켜고/끄기 + **끈 자리의 상수 편집**.

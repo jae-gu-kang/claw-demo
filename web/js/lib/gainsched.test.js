@@ -3,9 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  appliedTables, defaultSelection, fixedGains, schedSummary, slotRows,
+  alignTables, appliedTables, defaultSelection, fixedGains, schedSummary, slotRows,
   storePayload, toggleSlot, zeroTables,
 } from "./gainsched.js";
+import { valueAt } from "./gainsync.js";
 
 const tab = (v) => ({ axes: { mach: [0.2, 0.6] }, data: [v * 2, v], extrapolate: "clip" });
 
@@ -103,4 +104,41 @@ test("전부 끔은 '편집 없음'과 다른 신호다", () => {
   // 불가 자리만 골라도 결과는 '전부 끔'이다 — 빈 dict가 새어 나가면 안 된다
   assert.deepEqual(storePayload(CAT, ["speed.k_rate"]),
     { tables: null, scheduleOff: true });
+});
+
+// ── 축 정렬 (자동 설계 확정본은 자리마다 breakpoint가 다르다) ──
+
+test("합집합 축 정렬은 조회 함수를 보존한다 — 표시를 위해 값이 왜곡되지 않는다", () => {
+  const tables = {
+    a: { axes: { mach: [0.2, 0.6] }, data: [4, 2], extrapolate: "clip" },
+    b: { axes: { mach: [0.2, 0.4, 0.6] }, data: [1, 5, 3], extrapolate: "clip" },
+  };
+  const out = alignTables(tables, "mach");
+  assert.equal(out.aligned, true);
+  assert.deepEqual(out.axis, [0.2, 0.4, 0.6]);
+  // a는 0.4가 새로 생기지만 그 값은 원래 구간의 보간값이라 함수가 그대로다
+  assert.deepEqual(out.tables.a.data, [4, 3, 2]);
+  assert.deepEqual(out.tables.b.data, [1, 5, 3]); // b는 이미 합집합과 같다
+  for (const name of ["a", "b"]) {
+    for (const m of [0.2, 0.3, 0.4, 0.5, 0.6, 0.05, 9.9]) {
+      assert.equal(valueAt(out.tables[name], "mach", m),
+        valueAt(tables[name], "mach", m), `${name} @M${m}`);
+    }
+  }
+});
+
+test("이미 축이 같으면 그대로 둔다 (원본 참조 유지 — 셀 편집 경로가 끊기지 않는다)", () => {
+  const tables = {
+    a: { axes: { mach: [0.2, 0.6] }, data: [4, 2], extrapolate: "clip" },
+    b: { axes: { mach: [0.2, 0.6] }, data: [1, 3], extrapolate: "clip" },
+  };
+  const out = alignTables(tables, "mach");
+  assert.equal(out.aligned, false);
+  assert.equal(out.tables, tables);
+  assert.deepEqual(out.axis, [0.2, 0.6]);
+});
+
+test("축이 없는 표가 섞이면 null — 호출자가 사유를 보고한다", () => {
+  assert.equal(alignTables({ a: { axes: { alt: [0, 1] }, data: [1, 2] } }, "mach"), null);
+  assert.deepEqual(alignTables({}, "mach"), { tables: {}, axis: [], aligned: false });
 });

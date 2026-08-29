@@ -10,6 +10,8 @@
 계약으로 옮기는 것뿐이다.
 */
 
+import { valueAt } from "./gainsync.js";
+
 /** 격자의 열 — 불가 자리도 칸은 있어야 축마다 열이 어긋나지 않는다. */
 export const GAIN_KEYS = ["kp", "ki", "k_rate"];
 
@@ -87,6 +89,41 @@ export function schedSummary(catalog, selected) {
   const on = slots.filter((s) => want.has(s.name)).length;
   if (on === 0) return `스케줄 없음 — ${slots.length}자리 전부 설계점 고정`;
   return `${slots.length}자리 중 ${on}개 스케줄 · ${slots.length - on}개 설계점 고정`;
+}
+
+/** 자리마다 다른 축을 **합집합 축**으로 정렬 — 조회 함수는 그대로 보존된다.
+ *
+ * 자동 설계 확정본(M17)은 자리마다 breakpoint가 다르다 — 적합이 자리별로 독립
+ * 실행되기 때문이다(pitch.kp 6점, roll.kp 15점처럼). 반면 이 탭의 표는 행=축
+ * 격자·열=자리라 **공통 축**이 필요하다.
+ *
+ * 합집합에는 원래 격자점이 전부 남으므로, 새로 생긴 점은 그 구간의 보간값이고
+ * 구간 선형 보간 결과가 정확히 같다(범위 밖은 양쪽 다 clip). 즉 보여 주려고
+ * 값을 왜곡하지 않는다 — 정렬 전후의 스케줄이 같은 형상이다.
+ *
+ * 반환 {tables, axis, aligned} — 이미 축이 같으면 원본 참조를 그대로 돌려준다
+ * (셀 편집이 slot.table 참조를 공유하는 경로를 끊지 않기 위해).
+ * 축이 없는 표가 섞이면 null (호출자가 사유를 표시한다). */
+export function alignTables(tables, axis) {
+  const names = Object.keys(tables ?? {});
+  if (!names.length) return { tables: {}, axis: [], aligned: false };
+  const grids = names.map((n) => tables[n]?.axes?.[axis]);
+  if (grids.some((g) => !Array.isArray(g) || !g.length)) return null;
+  const union = [...new Set(grids.flat())].sort((a, b) => a - b);
+  const same = grids.every(
+    (g) => g.length === union.length && g.every((v, i) => v === union[i]),
+  );
+  if (same) return { tables, axis: union, aligned: false };
+  const out = {};
+  for (const name of names) {
+    const t = tables[name];
+    out[name] = {
+      axes: { ...t.axes, [axis]: [...union] },
+      data: union.map((c) => valueAt(t, axis, c)),
+      extrapolate: t.extrapolate ?? "clip",
+    };
+  }
+  return { tables: out, axis: union, aligned: true };
 }
 
 /** 스토어에 넣을 값 — {tables, scheduleOff}.

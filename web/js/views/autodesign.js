@@ -6,10 +6,9 @@
 
 수치의 정본은 서버 /design/defaults(← 엔진 AutoDesignConfig) — 폼은 채운 칸만
 config 덮어쓰기로 보낸다. "게인 확정"은 결과의 호환 반출(재샘플 테이블)을 기존
-스토어 계약(`gainTables`)으로 주입한다 — **읽는 쪽**은 시뮬·Autocode·구조도·영향성이다.
-게인 탭은 그 스토어를 읽지 않고(자기 카탈로그 편집 상태를 따로 들고 있다) 쓰기만
-하므로, 확정이 게인 탭 화면에 비치지 않고 거기서 [시뮬·코드에 적용]을 누르면
-이 확정을 덮어쓴다 — 그 사실을 확정 메시지가 말해 준다(조용한 덮어쓰기 금지).
+스토어 계약(`gainTables` + 출처 `gainTablesSource`)으로 주입한다 — 시뮬·Autocode·
+구조도·영향성이 그대로 소비하고, 게인 탭은 그것을 **되읽어** 표·차트로 보여 준다
+(자리마다 다른 breakpoint는 합집합 축으로 정렬 — lib/gainsched alignTables).
 
 스타일은 app.css 비접촉 — 심각도 색은 값으로 지정 (duty.js 선례).
 */
@@ -221,11 +220,13 @@ function renderResult(box, body, resultId, ctx) {
     const payload = adoptStorePayload(body);
     store.set("gainTables", payload.tables && JSON.parse(JSON.stringify(payload.tables)));
     store.set("gainScheduleOff", payload.scheduleOff);
+    // 출처 — 게인 탭이 되읽을 때 "무엇이 걸려 있는지"를 이름으로 말해 준다
+    store.set("gainTablesSource", { kind: "autodesign", resultId });
     clear(adoptMsg).append(el("span", { class: "hint" },
-      " 확정됨 — 시뮬레이션·Autocode·구조도·영향성이 이 스케줄을 소비한다"
+      " 확정됨 — 게인 탭·시뮬레이션·Autocode·구조도·영향성이 이 스케줄을 소비한다"
       + " (Autocode 형상 지문이 바뀌는 것으로 확인된다)."
-      + " 게인 탭은 자기 편집 상태를 따로 들고 있어 이 확정이 그 화면에는 비치지 않으며,"
-      + " 거기서 [시뮬·코드에 적용]을 누르면 이 확정을 덮어쓴다."
+      + " 게인 탭은 자리마다 다른 breakpoint를 합집합 축으로 정렬해 보여 주며,"
+      + " 거기서 편집한 뒤 [시뮬·코드에 적용]을 누르면 이 확정을 덮어쓴다."
       + " 다항 정본은 결과 JSON의 gain_export.tables — API 직접 주입용."));
   };
   const adoptMsg = el("span");
