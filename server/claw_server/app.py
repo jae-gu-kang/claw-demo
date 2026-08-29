@@ -16,6 +16,7 @@ from claw_server.auth import BasicAuthProtect
 from claw_server.jobs import JobManager
 from claw_server.routes import analysis as analysis_routes
 from claw_server.routes import codegen as codegen_routes
+from claw_server.routes import design as design_routes
 from claw_server.routes import gains as gains_routes
 from claw_server.routes import influence as influence_routes
 from claw_server.routes import jobs as jobs_routes
@@ -102,6 +103,7 @@ def create_app(data_dir=None, web_dir=None, access_password=None) -> FastAPI:
         gains_routes.router,
         codegen_routes.router,
         influence_routes.router,
+        design_routes.router,
     ):
         app.include_router(router, prefix="/api")
 

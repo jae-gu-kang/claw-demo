@@ -83,6 +83,34 @@ def test_편집한_게인이_생성_코드에_박힌다(client):
     assert top(edited) == top(base)
 
 
+def test_편집한_scas가_생성_코드에_박힌다(client):
+    """SCAS도 AP와 같은 계약 — 스케줄이 안 붙은 자리(요축)와 스케줄 대상이 아닌
+    파라미터(washout_tau)가 탑재 C까지 내려가야 웹의 편집이 의미를 갖는다."""
+    axes = {
+        "pitch": {"kp": -2.0, "ki": -0.5, "k_rate": 0.4, "out_lo": -0.35, "out_hi": 0.35},
+        "roll": {"kp": 1.0, "ki": 0.1, "k_rate": -0.2, "out_lo": -0.35, "out_hi": 0.35},
+        "yaw": {"kp": 0.7, "ki": 0.0, "k_rate": 0.8, "washout_tau": 3.0,
+                "out_lo": -0.35, "out_hi": 0.35},
+    }
+    base = _post(client).json()
+    edited = _post(client, scas=axes).json()
+    assert edited["fingerprint"] != base["fingerprint"], "값이 바뀌었는데 지문이 같다"
+
+    def data_c(body):
+        return next(f["text"] for f in body["files"] if f["name"] == "fcl_data.c")
+
+    assert re.search(r"\.scas_yaw_pid_kp\s+= 0\.7,", data_c(edited))
+    # 워시아웃 시정수는 상수가 아니라 dt로 구운 계수로 박힌다 (tau=3.0 주석이 근거)
+    assert "tau=3.0 s" in data_c(edited)
+    assert "tau=3.0 s" not in data_c(base)
+
+
+def test_scas_부분_주입은_422(client):
+    """세 축 전부가 계약 — sim 라우트와 같은 사유로 막힌다 (build_scas 공유)."""
+    r = _post(client, scas={"pitch": {"kp": -2.0}})
+    assert r.status_code == 422 and "세 축 전부 필요" in r.text
+
+
 def test_스케줄을_끄면_구조가_바뀐다(client):
     """게인 스케줄 유무가 구조에 드러난다 — 파일 하나가 통째로 사라진다."""
     off = _post(client, with_schedule=False).json()
@@ -135,3 +163,40 @@ def test_비유한값은_서버가_막는다(client):
         headers={"content-type": "application/json"},
     )
     assert r.status_code == 422
+
+
+def test_다항_게인_스케줄이_생성_코드에_박힌다(client):
+    """kind='poly' 태그 페이로드(01 §3.4 다항 런타임) — claw_polyeval1d 경로 방출."""
+    poly = {
+        "kind": "poly",
+        "axis": "mach",
+        "segments": [
+            {"x0": 0.15, "x1": 0.3, "coeffs": [-8.0, 0.0], "c": 0.225, "h": 0.075},
+            {"x0": 0.3, "x1": 0.95, "coeffs": [-3.0, 2.0, -0.5], "c": 0.625, "h": 0.325},
+        ],
+    }
+    r = _post(client, gain_tables={"pitch.kp": poly})
+    assert r.status_code == 200, r.text
+    files = {f["name"]: f["text"] for f in r.json()["files"]}
+    assert "claw_polyeval1d" in files["fcl_sched.c"], "다항 평가 호출이 없다"
+    assert "claw_polyeval1d" in files["claw_rt.c"], "공용 런타임에 다항 헬퍼가 없다"
+    assert "sched_pitch_kp_kn" in files["fcl_data.c"], "구간 경계 배열이 없다"
+    # 기존 테이블 페이로드(kind 없음)와 혼재 가능 — 태그드 유니언 하위호환
+    table = {"axes": {"mach": [0.15, 0.95]}, "data": [1.0, 0.5]}
+    r2 = _post(client, gain_tables={"pitch.kp": poly, "roll.kp": table})
+    assert r2.status_code == 200, r2.text
+    sched2 = next(f["text"] for f in r2.json()["files"] if f["name"] == "fcl_sched.c")
+    assert "claw_polyeval1d" in sched2 and "claw_lookup1d" in sched2
+
+
+def test_다항_구간_불연속은_422(client):
+    poly = {
+        "kind": "poly", "axis": "mach",
+        "segments": [
+            {"x0": 0.15, "x1": 0.3, "coeffs": [1.0], "c": 0.2, "h": 0.1},
+            {"x0": 0.4, "x1": 0.95, "coeffs": [1.0], "c": 0.6, "h": 0.3},  # 0.3→0.4 갭
+        ],
+    }
+    r = _post(client, gain_tables={"pitch.kp": poly})
+    assert r.status_code == 422
+    assert "불연속" in r.text

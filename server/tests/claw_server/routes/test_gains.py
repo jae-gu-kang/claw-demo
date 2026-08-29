@@ -113,6 +113,9 @@ def test_gain_slot_catalog(client):
     assert slots["alt.k_rate"]["param"] == "k_hdot"
     assert slots["alt.k_rate"]["design"] == -0.008
     assert slots["alt.k_rate"]["unit"]
+    # 상수가 어느 컴포넌트에 사는가 — 웹이 축 이름으로 추측하지 않도록 서버가 말한다
+    assert slots["alt.k_rate"]["block"] == "autopilot"
+    assert slots["yaw.kp"]["block"] == "scas"
 
 
 def test_catalog_design_value_matches_demo_tables(client):
@@ -127,6 +130,45 @@ def test_catalog_design_value_matches_demo_tables(client):
         assert data[machs.index(0.6)] == s["design"], s["name"]
         if s["name"] in demo:  # 이미 켜진 자리는 설계 테이블과 동일해야 한다
             assert s["table"] == demo[s["name"]]
+
+
+def test_catalog_carries_scas_design_kwargs(client):
+    """구조도 SCAS 축 폼의 초기값 — 레지스트리 스키마로는 대신할 수 없다.
+
+    ScasAxis는 범용 축 컴포넌트라 ParamDef 기본값이 전부 0이다. 그걸 폼 기본값으로
+    쓰면 "기본값으로 되돌리기"가 게인을 0으로 만든다. 데모 기체의 설계 kwargs는
+    조립(make_demo_fcl)만 알고 있으므로 여기서 내려 준다 — 스케줄 자리가 아닌
+    washout_tau·클램프까지 포함해야 세 축 전부를 보내는 req.scas를 만들 수 있다.
+    """
+    d = client.get("/api/gains/catalog").json()
+    design = d["scas_design"]
+    assert set(design) == {"pitch", "roll", "yaw"}
+    assert design["pitch"]["kp"] == -2.0
+    assert design["yaw"]["washout_tau"] == 2.0  # 스케줄 자리가 아닌 값도 온다
+    # 게인 자리는 slot design과 같은 값이어야 한다 — 두 곳이 갈리면 폼과 격자가 어긋난다
+    slots = {s["name"]: s for s in d["slots"] if s["available"]}
+    for name, s in slots.items():
+        if s["block"] == "scas":
+            assert design[s["group"]][s["param"]] == s["design"], name
+    # 그대로 시뮬에 실을 수 있는 형상이어야 한다 (세 축 전부 = req.scas 계약)
+    r = client.post("/api/sim/run", json=_hold_mission(t_end=2.0, scas=design))
+    assert r.status_code == 202
+
+
+def test_catalog_design_index_points_at_the_design_mach(client):
+    """설계점 인덱스 — 웹이 상수↔테이블을 오갈 때의 기준점.
+
+    이게 있어야 웹이 스케줄 스케일 규칙(데모는 동압 역비)을 다시 적지 않고도
+    "켜면 이 상수에서 출발", "끄면 이 값으로 굳음"을 계산할 수 있다.
+    """
+    d = client.get("/api/gains/catalog").json()
+    i = d["design_index"]
+    for s in d["slots"]:
+        if not s["available"]:
+            continue
+        machs, data = s["table"]["axes"]["mach"], s["table"]["data"]
+        assert machs[i] == 0.6, "설계점 마하가 아니다"
+        assert data[i] == s["design"], s["name"]
 
 
 def test_catalog_slot_subset_runs_and_changes_flight_code(client):

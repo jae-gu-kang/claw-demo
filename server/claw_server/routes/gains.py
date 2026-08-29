@@ -36,13 +36,36 @@ _AP_DEF = {p.name: p for p in Autopilot.PARAM_DEFS}
 
 
 def _meta(group: str, key: str) -> dict:
-    """자리의 단위·설명·설계 파라미터 이름 — AP 축은 이름이 다르다(alt.k_rate=k_hdot)."""
+    """자리의 단위·설명·설계 파라미터 이름 — AP 축은 이름이 다르다(alt.k_rate=k_hdot).
+
+    `block`은 그 자리의 **상수가 어느 컴포넌트에 사는지**다 (scas의 축 kwargs인가,
+    autopilot의 kwargs인가). 스케줄을 끈 자리의 값을 웹이 구조도 폼과 같은 곳에서
+    읽고 쓰려면 이 대응이 필요한데, 웹이 축 이름으로 추측하면 그룹이 늘 때 조용히
+    어긋난다 — 정본(AP_GAIN_FIELD)을 아는 여기서 말해 준다.
+    """
     field = AP_GAIN_FIELD.get((group, key))
     if field is None:
         d = _SCAS_DEF[key]
-        return {"unit": d.unit, "desc": d.desc, "param": key}
+        return {"unit": d.unit, "desc": d.desc, "param": key, "block": "scas"}
     d = _AP_DEF[field]
-    return {"unit": d.unit, "desc": d.desc, "param": field}
+    return {"unit": d.unit, "desc": d.desc, "param": field, "block": "autopilot"}
+
+
+def _design_index(tables: dict, design: dict) -> int:
+    """제안 테이블이 설계 상수와 같아지는 격자점 = **설계점**(스케일 1) 인덱스.
+
+    웹이 자리를 켤 때 상수에서 테이블을 시드하고, 끌 때 테이블에서 상수로 되접는
+    기준점이다. 스케일 규칙(데모는 동압 역비)을 웹에 다시 적지 않으려고 지점만
+    알려 준다 — 규칙이 바뀌거나 비행체 프로파일이 교체돼도 웹은 그대로다.
+
+    설계값이 0인 자리(요축 ki 등)는 표가 전부 0이라 비율을 못 재므로 건너뛴다.
+    """
+    for name, t in tables.items():
+        d = design[name]
+        if d:
+            data = t["data"]
+            return min(range(len(data)), key=lambda i: abs(data[i] / d - 1.0))
+    return 0
 
 
 @router.get("/gains/demo")
@@ -75,11 +98,19 @@ def gain_slot_catalog() -> dict:
                 "scheduled": name in DEFAULT_SCHEDULED,
                 "design": design[name], "table": tables[name], **_meta(group, key),
             })
-    # 축·필터 시정수는 엔진 조립에서 읽는다 — 여기에 0.5를 또 적으면 데모 형상이
-    # 바뀌었을 때 웹만 옛 값을 보여 준다 (init(dt) 없이 파라미터만 보유한 상태)
+    # 축·필터 시정수·SCAS 설계 kwargs는 엔진 조립에서 읽는다 — 여기에 0.5를 또 적으면
+    # 데모 형상이 바뀌었을 때 웹만 옛 값을 보여 준다 (init(dt) 없이 파라미터만 보유한 상태)
+    law = make_demo_fcl()
     return {
         "axis": next(iter(tables[DEFAULT_SCHEDULED[0]]["axes"])),
-        "filter_tau": make_demo_fcl().schedule.filter_tau,
+        "filter_tau": law.schedule.filter_tau,
+        # 데모 기체의 SCAS 축 kwargs 전량 — 구조도 축 폼의 초기값이자, 한 축만 고쳐도
+        # 세 축을 함께 보내야 하는(req.scas 계약) 나머지 축을 채우는 값이다.
+        # ScasAxis의 레지스트리 기본값은 0이라(범용 축 컴포넌트) 스키마로는 대신할 수
+        # 없다 — AP는 PARAM_DEFS 기본값이 곧 데모 설계값이라 이 문제가 없었다.
+        # 게인 자리(kp·ki·k_rate) 밖의 washout_tau·클램프도 여기에 들어 있다.
+        "scas_design": {g: dict(cfg) for g, cfg in law.scas.cfg.items()},
         "default": list(DEFAULT_SCHEDULED),
+        "design_index": _design_index(tables, design),
         "slots": slots,
     }

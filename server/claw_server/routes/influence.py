@@ -37,8 +37,15 @@ MAX_CASES = 200
 class InfluenceIn(FlightCodeIn):
     """형상(FlightCodeIn) + 법칙 밖 컴포넌트 + 탐침 설정.
 
-    `scas`·`mixer`·`alpha_margin`은 `FlightCodeIn`에 없다 — 탑재 C 생성은 조립된
-    형상만 있으면 되지만, 영향성은 **그 형상을 흔들어야** 하기 때문이다.
+    `mixer`·`alpha_margin`은 `FlightCodeIn`에 없다 — 탑재 C 생성은 조립된 형상만
+    있으면 되지만, 영향성은 **그 형상을 흔들어야** 하기 때문이다.
+
+    `scas`는 이제 부모(`FlightCodeIn`)에도 있지만 **계약이 다르다.** 여기는
+    설계 기본 위 덮어쓰기라 `{"pitch": {"kp": …}}` 같은 부분 지정이 통과하고
+    (`pipeline/influence.py` _SCAS_BASE 병합 — 파라미터를 흔드는 자리의 자연스러운
+    의미다), 시뮬·탑재 C는 "보낸 것이 곧 형상"이라 세 축 전부를 요구한다
+    (`routes/sim.py` build_scas). 그래서 여기서 필드를 다시 선언해 부모의 유한성
+    검사만 물려받고 조립은 엔진 Shape 경로로 보낸다.
     """
 
     scas: dict | None = None  # {'pitch': {'kp': …}, …}

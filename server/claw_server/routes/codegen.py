@@ -19,8 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 from claw.codegen import emit_c, emit_runtime
 from claw.fcl.demo import make_demo_fcl
 from claw.params.registry import REGISTRY
-from claw.tables import Table
-from claw_server.routes.sim import TableIn
+from claw_server.routes.sim import PolyTableIn, TableIn, build_gain_tables, build_scas
 
 router = APIRouter(tags=["codegen"])
 
@@ -41,7 +40,22 @@ class FlightCodeIn(BaseModel):
     with_schedule: bool = True
     with_limiter: bool = True
     autopilot: dict | None = None
-    gain_tables: dict[str, TableIn] | None = None
+    scas: dict | None = None  # {'pitch': ScasAxis kwargs, …} — SimRunIn과 같은 계약
+    # 편집 테이블 또는 다항 스케줄 (kind='poly' 태그) — SimRunIn과 같은 계약
+    gain_tables: dict[str, TableIn | PolyTableIn] | None = None
+
+    @field_validator("scas")
+    @classmethod
+    def _axes_finite_leaves(cls, v):
+        """축 dict 한 겹 아래의 유한성만 — 키·타입·범위는 build_scas의 ParamDef 몫."""
+        if v is not None:
+            for axis, kwargs in v.items():
+                if not isinstance(kwargs, dict):
+                    raise ValueError(f"scas.{axis}는 파라미터 dict여야 함: {kwargs!r}")
+                for key, val in kwargs.items():
+                    if isinstance(val, float) and not math.isfinite(val):
+                        raise ValueError(f"비유한값 파라미터: scas.{axis}.{key}={val}")
+        return v
 
     @field_validator("autopilot")
     @classmethod
@@ -100,19 +114,15 @@ def flight_code(req: FlightCodeIn) -> dict:
     구성 오류(미정의 게인 키·범위 이탈 등)는 엔진이 ValueError로 내고 422가 된다.
     """
     dt = 1.0 / req.control_hz
-    gain_tables = None
-    if req.gain_tables is not None:
-        gain_tables = {
-            name: Table(spec.axes, spec.data, name=name, extrapolate=spec.extrapolate)
-            for name, spec in req.gain_tables.items()
-        }
     try:
+        gain_tables = build_gain_tables(req.gain_tables)  # 구간 검증도 엔진 → 422
         law = make_demo_fcl(
             with_schedule=req.with_schedule,
             with_limiter=req.with_limiter,
             autopilot=(
                 REGISTRY.create("fcl", "Autopilot", req.autopilot) if req.autopilot else None
             ),
+            scas=build_scas(req.scas),
             gain_tables=gain_tables,
         ).init(dt)
     except (ValueError, TypeError) as e:  # 엔진 구성 검증 → 422 (sim.py와 같은 정책)

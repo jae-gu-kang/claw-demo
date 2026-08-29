@@ -247,6 +247,57 @@ def test_sim_autopilot_injection_registry_validated(client, wait_job):
     ).status_code == 422
 
 
+def test_sim_scas_injection_all_axes_registry_validated(client, wait_job):
+    """SCAS 주입은 **세 축 전부**가 계약 — 부분 주입은 제출 시점 422.
+
+    한 축만 보내면 나머지가 조용히 데모 설계값으로 남아 "보낸 형상"과 다른 것이
+    돈다. 축 안의 kwargs 판정은 AP와 같은 레지스트리 ParamDef 경유다.
+    주의: 축 kwargs도 **전체**를 보내야 한다 — ScasAxis의 ParamDef 기본값은
+    0이라 일부만 보내면 나머지 게인이 설계값이 아니라 0으로 채워진다.
+    """
+    axes = {
+        "pitch": {"kp": -2.0, "ki": -0.5, "k_rate": 0.4, "out_lo": -0.35, "out_hi": 0.35},
+        "roll": {"kp": 1.0, "ki": 0.1, "k_rate": -0.2, "out_lo": -0.35, "out_hi": 0.35},
+        "yaw": {"kp": 0.7, "ki": 0.0, "k_rate": 0.8, "washout_tau": 3.0,
+                "out_lo": -0.35, "out_hi": 0.35},
+    }
+    r = client.post("/api/sim/run", json=_hold_mission(t_end=2.0, scas=axes))
+    assert r.status_code == 202
+    assert wait_job(r.json()["id"], timeout=120.0)["status"] == "done"
+
+    # 부분 주입 (요축 누락) — 조용한 설계값 잔류 금지
+    partial = {k: v for k, v in axes.items() if k != "yaw"}
+    r = client.post("/api/sim/run", json=_hold_mission(scas=partial))
+    assert r.status_code == 422 and "세 축 전부 필요" in r.text
+    # 미정의 축 이름
+    r = client.post("/api/sim/run", json=_hold_mission(scas={**axes, "zzz": {}}))
+    assert r.status_code == 422 and "미정의 SCAS 축" in r.text
+    # 축 안의 미정의 키·오타입 — ParamDef가 판정 (AP와 같은 주체)
+    bad = {**axes, "pitch": {**axes["pitch"], "kpX": 1.0}}
+    r = client.post("/api/sim/run", json=_hold_mission(scas=bad))
+    assert r.status_code == 422 and "정의되지 않은 파라미터" in r.text
+    bad = {**axes, "pitch": {**axes["pitch"], "kp": "abc"}}
+    r = client.post("/api/sim/run", json=_hold_mission(scas=bad))
+    assert r.status_code == 422 and "수치 필요" in r.text
+    # 축 자리에 dict가 아닌 값
+    r = client.post("/api/sim/run", json=_hold_mission(scas={**axes, "yaw": 3.0}))
+    assert r.status_code == 422
+
+
+def test_sim_scas_nonfinite_422(client):
+    """축 dict 한 겹 아래의 NaN/Inf도 경계 차단 — AP와 같은 정책 (02 v0.11)."""
+    import json as _json
+
+    axes = {
+        "pitch": {"kp": -2.0}, "roll": {"kp": 1.0}, "yaw": {"kp": float("nan")},
+    }
+    raw = _json.dumps(_hold_mission(scas=axes))
+    r = client.post(
+        "/api/sim/run", content=raw, headers={"content-type": "application/json"}
+    )
+    assert r.status_code == 422
+
+
 def test_sim_autopilot_nonfinite_422(client):
     """AP dict의 Infinity/NaN 리터럴은 경계 차단 유지 — ParamDef 범위 비교는
     NaN을 통과시키므로 유한성만은 서버 몫 (02 v0.11 직렬화 정책 보호)."""
