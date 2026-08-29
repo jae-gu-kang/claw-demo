@@ -9,6 +9,7 @@ VERIFY → CLASSIFY 스테이지가 순환한다 (orchestrator).
 아래로 내려가지 않아 이터레이션 종료가 보장된다 (points.PointSet.promote).
 """
 
+from claw.design.classify import VERDICTS, classify_failures, classify_margin_deficit
 from claw.design.criteria import MarginCriteria
 from claw.design.linmodels import LinearModelSet, model_distance
 from claw.design.points import (
@@ -60,4 +61,7 @@ __all__ = [
     "fit_slots",
     "select_axes",
     "resample_to_table",
+    "VERDICTS",
+    "classify_margin_deficit",
+    "classify_failures",
 ]
