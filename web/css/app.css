@@ -335,3 +335,52 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 /* 블록도 내 파라미터 연동 수치 (data-p) — 스키마 기본값+적용 편집값으로 채워지고
    편집 폼 입력과 실시간 동기 (views/blocks.js bindSvgParams) */
 .bd svg [data-p] { font-weight: 800; fill: #0071e3; }
+
+/* ── 영향성 탭 — 전면 다크 스킨 (.inf-dark 스코프) ─────────────────────────
+   검은 캔버스가 이 화면의 중심이라 패널만 밝으면 경계마다 스킨이 끊긴다 — 탭
+   전체를 Apple 다크 팔레트(js/lib/influence.js SKIN과 동일 값)로 통일한다.
+   스코프는 뷰 루트의 클래스 하나: 다른 탭·헤더는 불변이고, 페이지 배경은 :has로
+   이 뷰가 마운트된 동안만 어둡다(라우터가 뷰를 떼면 셀렉터도 함께 풀린다).
+   color-scheme: dark — 네이티브 위젯(스핀버튼·스크롤바·자동완성)까지 다크로. */
+body:has(.inf-dark) { background: #0b0b0d; color-scheme: dark; } /* color-scheme: 문서 스크롤바는 body 소유 */
+.inf-dark { color: rgba(255, 255, 255, .92); color-scheme: dark; }
+.inf-dark .panel { background: #1c1c1e; border-color: rgba(255, 255, 255, .09); }
+.inf-dark .hint, .inf-dark .legend, .inf-dark th { color: rgba(235, 235, 245, .6); }
+.inf-dark th, .inf-dark td { border-bottom-color: rgba(255, 255, 255, .08); }
+.inf-dark tr:hover td { background: rgba(255, 255, 255, .045); }
+.inf-dark input, .inf-dark select, .inf-dark button {
+  background: #2c2c2e;
+  color: rgba(255, 255, 255, .92);
+  border-color: rgba(255, 255, 255, .16);
+}
+.inf-dark input::placeholder { color: rgba(235, 235, 245, .3); }
+/* 위의 .inf-dark input(0-1-1)이 전역 input:invalid와 동특이도·후순위라 이겨 버린다 —
+   위반 표시(빨강)를 스코프 안에서 복원 (다크 systemRed) */
+.inf-dark input:invalid { border-color: #ff453a; }
+.inf-dark button.primary { background: #0a84ff; border-color: #0a84ff; color: #fff; }
+.inf-dark .error-box { background: rgba(255, 69, 58, .16); color: #ff6961; }
+
+/* 게인 칩(code) — 손잡이 id·런 라벨의 시각 단위. max-width로 컨테이너 폭을 절대
+   못 넘고, 폭이 잠긴 곳(처방 카드 등)에서는 anywhere가 id 중간에서라도 꺾는다 —
+   쌍 스윕 런 라벨(a@+0.10+b@+0.10)이 박스 밖으로 밀려 나가던 자리 */
+.inf-dark code {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  background: rgba(255, 255, 255, .07);
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+
+/* 처방 카드("게인 박스") — min()으로 좁은 컨테이너에서는 카드가 먼저 줄어든다
+   (280px 고정 하한이면 카드가 패널 밖으로 나간다). 내용은 위 code 규칙이 가둔다 */
+.inf-dark .knob-card {
+  flex: 1;
+  min-width: min(280px, 100%);
+  max-width: 420px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 12px;
+}

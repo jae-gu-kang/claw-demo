@@ -9,7 +9,9 @@
 말하는 모든 사실(상태·도달 개수·도달 출력)은 아래 표에도 반드시 있다 — wpmap.js가
 웨이포인트 표에 접근성을 맡긴 것과 같은 규약.
 
-스타일은 인라인이다: app.css는 병행 세션 작업 중이라 건드리지 않는다.
+이 탭은 **전면 다크**다: 검은 캔버스가 화면의 중심이라 패널만 밝으면 경계마다
+스킨이 끊긴다. DOM 쪽 다크는 app.css의 `.inf-dark` 스코프가 담당하고(루트에
+클래스 하나 — 다른 탭 불변), JS가 그리는 색(캔버스·배지·경고)만 인라인이다.
 */
 
 import { api, errorText, watchJob } from "../api.js";
@@ -235,7 +237,8 @@ export function render() {
               el("th", {}, h)))),
           el("tbody", {}, rows.map((p) =>
             el("tr", {
-              style: `cursor:pointer${p.id === state.selection ? ";background:rgba(10,132,255,.09)" : ""}`,
+              // 선택 강조 .25 — 라이트 시절의 .09는 #1c1c1e 위에서 식별 불가
+              style: `cursor:pointer${p.id === state.selection ? ";background:rgba(10,132,255,.25)" : ""}`,
               onclick: () => select(p.id),
             },
               el("td", {}, el("code", { style: mono() }, p.param_id)),
@@ -256,17 +259,15 @@ export function render() {
 
   function renderLegend(m) {
     clear(legendBox);
-    // 색은 `.legend` div **자신**에 건다 — 부모(어두운 패널)에 인라인으로 걸어 봐야
-    // app.css의 `.legend { color: var(--muted) }`가 이긴다(상속은 캐스케이드에서 가장 약하다).
-    // 라이트 테마 muted가 #1c1c1e 위에 그려져 3.4:1로 떨어지던 자리
-    const inkStyle = `color:${SKIN.inkDim}`;
+    // 잉크는 app.css `.inf-dark .legend`가 준다 — 라이트 muted가 #1c1c1e 위에서
+    // 3.4:1로 떨어지던 자리를 스코프 규칙(특이도 2)이 `.legend`(1)를 이겨서 덮는다
     legendBox.append(
-      el("div", { class: "legend", style: inkStyle },
+      el("div", { class: "legend" },
         Object.entries(STATE_LABEL).map(([k, label]) =>
           el("span", {},
             el("span", { class: "chip", style: `background:${STATE_COLOR[k]}` }),
             label))),
-      el("div", { class: "legend", style: `${inkStyle};margin-top:2px` },
+      el("div", { class: "legend", style: "margin-top:2px" },
         Object.entries(m.bands ?? {}).map(([k, b]) =>
           el("span", {},
             el("span", { class: "chip", style: `background:${BAND_COLOR[k] ?? SKIN.gray}` }),
@@ -385,7 +386,7 @@ export function render() {
               el("td", {}, el("span", {
                 class: "flag",
                 style: f.severity === "warn"
-                  ? `background:${WARN_INK}1a;color:${WARN_INK};font-weight:600`
+                  ? `background:${WARN_INK}26;color:${WARN_INK};font-weight:600`
                   : "",
               }, f.severity === "warn" ? "처방" : "정상")),
               el("td", { style: "max-width:520px" },
@@ -403,18 +404,18 @@ export function render() {
         "처방 없음 — 모든 지표가 문턱 안이다. 문턱은 서버 응답(thresholds)이 들고 있다."));
       return;
     }
-    // 처방 카드 — knobs가 곧 3단 스윕의 입력이다
-    diagBox.append(el("div", { class: "row", style: "gap:12px;flex-wrap:wrap;margin-top:10px" },
+    // 처방 카드 — knobs가 곧 3단 스윕의 입력이다.
+    // stretch: .row 기본(align-items:end)은 카드 아래를 맞춰 위가 들쭉날쭉해진다
+    diagBox.append(el("div", {
+      class: "row", style: "gap:12px;flex-wrap:wrap;margin-top:10px;align-items:stretch",
+    },
       d.prescriptions.map((p) => {
-        const cls = KNOB_CLASS[p.knob_class] ?? { label: p.knob_class, ink: "#6c6c70" };
-        return el("div", {
-          style: "border:1px solid var(--border,#d0d0d5);border-radius:12px;" +
-            "padding:10px 12px;min-width:280px;max-width:420px;flex:1",
-        },
+        const cls = KNOB_CLASS[p.knob_class] ?? { label: p.knob_class, ink: "#98989d" };
+        return el("div", { class: "knob-card" },
           el("div", { class: "row", style: "gap:8px;align-items:center" },
             el("span", {
               class: "flag",
-              style: `background:${cls.ink}1a;color:${cls.ink};font-weight:600`,
+              style: `background:${cls.ink}26;color:${cls.ink};font-weight:600`,
             }, cls.label),
             el("span", { style: "font-size:12px" }, DIRECTION_LABEL[p.direction] ?? ""),
           ),
@@ -619,7 +620,7 @@ export function render() {
   if (state.diag) renderDiag();
   if (state.sweep) renderSweep();
 
-  return el("div", {},
+  return el("div", { class: "inf-dark" },
     el("div", { class: "panel" },
       el("h2", {}, "영향성 — 설계값 연계·정량 영향성 평가 (02 §2.4)"),
       el("div", { class: "row", style: "gap:14px;align-items:center" },
@@ -632,10 +633,7 @@ export function render() {
       warnBox,
       errBox,
     ),
-    el("div", {
-      class: "panel",
-      style: `background:${SKIN.raised};border-color:${SKIN.hairline};border-radius:14px`,
-    },
+    el("div", { class: "panel" },  // 다크 표면은 .inf-dark 스코프가 준다 — 인라인 중복 금지
       canvasBox,
       playLine,
       el("div", { style: "margin-top:10px" }, legendBox),
@@ -673,9 +671,10 @@ export function render() {
 }
 
 function badge(stateKey) {
+  // 바탕 알파 26(15%) — 다크 표면에서 1a(10%)는 칩 윤곽이 사라진다
   return el("span", {
     class: "flag",
-    style: `background:${STATE_INK[stateKey]}1a;color:${STATE_INK[stateKey]};` +
+    style: `background:${STATE_INK[stateKey]}26;color:${STATE_INK[stateKey]};` +
       "font-weight:600;white-space:nowrap",
   }, STATE_LABEL[stateKey] ?? stateKey);
 }

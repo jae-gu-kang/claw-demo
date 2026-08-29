@@ -1,8 +1,8 @@
 /** 영향성 화면의 데이터 계층 — 서버 응답을 화면 모델로, 그리고 팔레트.
 
 판단은 전부 여기 있고 views/는 조립·그리기만 한다. 팔레트가 여기 있는 이유는
-`app.css`를 건드리지 않기로 했기 때문이다(병행 세션 작업 중) — 이 화면의 스킨은
-캔버스 안에서 색으로 존재하므로 **상수가 곧 스킨**이다.
+캔버스가 색을 JS로 그리기 때문이다 — **상수가 곧 스킨**이고, DOM 쪽 다크 스킨
+(app.css의 `.inf-dark` 스코프)도 같은 값에서 갈라진다.
 
 색은 Apple 다크모드 시스템 팔레트다. 두 가지가 이 스킨의 규칙이다:
 
@@ -12,8 +12,9 @@
 ② **색은 광원이지 도료가 아니다** — 넓은 면은 무채색으로 두고, 채도는 노드 코어·
    활성 간선처럼 좁고 밝은 곳에만 쓴다. 그래야 발광이 장식이 아니라 신호로 읽힌다.
 
-밝은 패널 위(배지·상태 주석·경고)에는 다크모드 색을 그대로 쓸 수 없다 — 흰 바탕에서
-대비가 3:1 밑으로 떨어진다. 같은 이유로 Apple이 내놓은 접근성 변형이 STATE_INK다.
+패널도 캔버스와 같은 다크 표면이다(뷰 루트가 `.inf-dark`) — 배지·상태 주석·경고
+잉크는 Apple **다크 접근성 변형**을 쓴다. 순수 시스템 색을 그대로 쓰면 #0a84ff가
+#1c1c1e 위 소형 텍스트 기준(4.5:1)에 아슬하게 걸린다. 그 변형이 STATE_INK다.
 */
 
 export const TIER = { STRUCT: "struct", OPEN: "open", CLOSED: "closed" };
@@ -76,17 +77,17 @@ export const STATE_COLOR = {
   inert: SKIN.gray2, offgraph: SKIN.gray, error: SKIN.red,
 };
 
-/** 밝은 패널(배지·주석)용 — Apple이 흰 바탕 대비를 맞추려고 내놓은 접근성 변형.
- *  다크 색을 그대로 흰 위에 쓰면 #0a84ff가 3.4:1까지 떨어져 본문 대비에 못 미친다. */
+/** 다크 패널(배지·주석)용 — Apple이 어두운 바탕 대비를 맞추려고 내놓은 접근성 변형.
+ *  캔버스용 STATE_COLOR를 그대로 배지 텍스트에 쓰면 그레이 계열이 #1c1c1e 위
+ *  3:1 밑으로 떨어진다(캔버스 노드는 면이라 되지만 12px 텍스트는 안 된다). */
 export const STATE_INK = {
-  live: "#0040dd", structural: "#b25000", overridden: "#d30f45",
-  // 무채색 둘도 흰 바탕 기준으로 잡는다 — 다크 시스템 그레이(#8e8e93)를 그대로 쓰면
-  // 배지가 2.96:1이 되어 이 파일이 위에 적어 둔 기준 아래로 떨어진다.
-  // 「법칙 밖」이 더 진한 이유: 설명이 가장 필요한 상태라 문장으로도 읽혀야 한다
-  inert: "#6c6c70", offgraph: "#636366", error: "#d70015",
+  live: "#409cff", structural: "#ffb340", overridden: "#ff6482",
+  // 무채색 둘도 다크 바탕 기준으로 잡는다 — 캔버스용 #636366은 배지에서 2:1대다.
+  // 「법칙 밖」이 더 밝은 이유: 설명이 가장 필요한 상태라 문장으로도 읽혀야 한다
+  inert: "#98989d", offgraph: "#aeaeb2", error: "#ff6961",
 };
 
-export const WARN_INK = "#b25000"; // systemYellow (accessible, light)
+export const WARN_INK = "#ffb340"; // systemOrange (accessible, dark)
 
 /** 서버 payload → 화면 모델. 서버가 준 필드를 다시 계산하지 않는다. */
 export function normalizeGraph(payload) {
@@ -196,16 +197,16 @@ export function rampColor(t, alpha = 1) {
   return `rgba(${mix(r0, r1)}, ${mix(g0, g1)}, ${mix(b0, b1)}, ${alpha})`;
 }
 
-/** 처방 클래스 — 진단(pipeline/diagnose.py knob_class)과 1:1. 잉크는 밝은 패널
- *  기준 접근성 변형(STATE_INK와 같은 이유 — 다크 시스템 색은 흰 바탕에서 3:1
- *  아래로 떨어진다). influence.test.js가 엔진 자구와 대조한다. */
+/** 처방 클래스 — 진단(pipeline/diagnose.py knob_class)과 1:1. 잉크는 다크 패널
+ *  기준 접근성 변형(STATE_INK와 같은 이유). influence.test.js가 엔진 자구와
+ *  대조한다. */
 export const KNOB_CLASS = {
-  filter: { label: "명령필터", ink: "#0040dd" },
-  loop_gain: { label: "루프 게인", ink: "#b25000" },
-  rate_gain: { label: "레이트 게인", ink: "#0c817b" },
-  clamp: { label: "클램프", ink: "#6c6c70" },
-  limiter: { label: "리미터", ink: "#d70015" },
-  schedule: { label: "스케줄", ink: "#8944ab" },
+  filter: { label: "명령필터", ink: "#409cff" },
+  loop_gain: { label: "루프 게인", ink: "#ffb340" },
+  rate_gain: { label: "레이트 게인", ink: "#66d4cf" },
+  clamp: { label: "클램프", ink: "#98989d" },
+  limiter: { label: "리미터", ink: "#ff6961" },
+  schedule: { label: "스케줄", ink: "#da8fff" },
 };
 
 export const DIRECTION_LABEL = {
