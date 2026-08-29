@@ -19,6 +19,8 @@ from claw.design.points import (
     PointSet,
     case_name,
 )
+from claw.design.grid import coarse_grid
+from claw.design.refine import refine_trim_points
 from claw.design.schedmap import (
     midpoint_validation_points,
     scheduled_gains,
@@ -40,4 +42,6 @@ __all__ = [
     "scheduled_margin_point",
     "scheduled_margin_map",
     "midpoint_validation_points",
+    "coarse_grid",
+    "refine_trim_points",
 ]
