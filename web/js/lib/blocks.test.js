@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 import { readFileSync } from "node:fs";
 
-import { BLOCKS, CHAIN, resolvePath } from "./blocks.js";
+import { BLOCKS, CHAIN, codegenTargets, resolvePath } from "./blocks.js";
 // 뷰 모듈이지만 모듈 스코프에서 DOM을 안 건드려 node import 가능 — 배선 드리프트 가드
 import { DESIGN_ORDER, TOP_SVG } from "../views/diagram.js";
 import { CHIP_LABEL, SUBSYSTEMS } from "../views/subsystems.js";
@@ -47,6 +47,10 @@ test("블록: id 유일 + 상세 스펙 완결", () => {
       assert.ok(typeof d.injectKey === "string" && d.injectKey, `${b.id} injectKey 없음`);
     } else {
       assert.equal(d.injectKey, null, `${b.id} 편집 불가인데 injectKey 있음`);
+      assert.ok(!d.axes, `${b.id} 편집 불가인데 axes 있음`);
+    }
+    for (const [id, ax] of Object.entries(d.axes ?? {})) {
+      assert.ok(ax.group && ax.varName && ax.cPrefix, `${b.id}/${id} 축 계약 불완전`);
     }
   }
 });
@@ -176,7 +180,39 @@ test("드릴다운 범위 스냅샷: SCAS 3축+공유 PI(층4) · AP 3채널 · 
   assert.deepEqual(Object.keys(SUBSYSTEMS.plant.children), ["aero", "prop", "eom", "mass"]);
 });
 
-test("허브 계약: 시뮬 주입 경로 보유 블록(AP·작동기·항법)만 편집 가능", () => {
+test("코드 표현 대상: 축 블록은 축마다 한 줄 — 값을 모르는 축은 빼고 편집 여부는 따로", () => {
+  const scas = BLOCKS.find((b) => b.id === "scas");
+  const ap = BLOCKS.find((b) => b.id === "autopilot");
+  const design = {
+    pitch: { kp: -2.0 }, roll: { kp: 1.0 }, yaw: { kp: 0.5, washout_tau: 2.0 },
+  };
+
+  // 편집 없음 — 설계값으로 채우되 "편집값"은 아니다 (안 고쳤는데 Δ가 뜨면 안 된다)
+  const base = codegenTargets(scas, null, design);
+  assert.deepEqual(base.map((t) => t.cg.group), ["pitch", "roll", "yaw"]);
+  assert.deepEqual(base.map((t) => t.applied), [false, false, false]);
+  assert.equal(base[2].values.washout_tau, 2.0);
+  assert.deepEqual(base.map((t) => t.cg.varName),
+    ["scas_pitch", "scas_roll", "scas_yaw"]);
+
+  // 한 축만 편집 — 그 축만 applied, 나머지는 설계값
+  const one = codegenTargets(scas, { yaw: { kp: 0.9 } }, design);
+  assert.deepEqual(one.map((t) => t.applied), [false, false, true]);
+  assert.equal(one[2].values.kp, 0.9);
+
+  // 설계값을 모르면(카탈로그 실패) 대상에서 뺀다 — 스키마 기본값 0이 "형상"으로
+  // 나가면 게인이 죽은 탑재 C를 지금 형상이라고 보여 주게 된다
+  assert.deepEqual(codegenTargets(scas, null, null), []);
+  assert.deepEqual(codegenTargets(scas, { yaw: { kp: 0.9 } }, null).map((t) => t.cg.group),
+    ["yaw"]);
+
+  // 축이 없는 블록은 한 줄, cg는 블록 것 그대로
+  assert.deepEqual(codegenTargets(ap, null), [{ values: null, applied: false, cg: ap.detail.codegen }]);
+  assert.deepEqual(codegenTargets(ap, { kp_alt: 1 }),
+    [{ values: { kp_alt: 1 }, applied: true, cg: ap.detail.codegen }]);
+});
+
+test("허브 계약: 시뮬 주입 경로 보유 블록(AP·SCAS·작동기·항법)만 편집 가능", () => {
   const byId = Object.fromEntries(BLOCKS.map((b) => [b.id, b.detail]));
   assert.equal(byId.autopilot.editable, true);
   assert.equal(byId.autopilot.injectKey, "autopilotParams"); // req.autopilot
@@ -186,9 +222,17 @@ test("허브 계약: 시뮬 주입 경로 보유 블록(AP·작동기·항법)�
   assert.deepEqual(byId.actuator.omit, ["pos_lo", "pos_hi", "initial"]);
   assert.equal(byId.nav.editable, true);
   assert.equal(byId.nav.injectKey, "navParams"); // req.nav
+  // SCAS는 축이 셋이라 폼이 축 페이지에 붙는다 — store는 {축: kwargs} 한 벌(req.scas)
+  assert.equal(byId.scas.editable, true);
+  assert.equal(byId.scas.injectKey, "scasParams");
+  assert.deepEqual(Object.keys(byId.scas.axes), ["pitch", "roll", "yaw"]);
+  // 축 id ↔ 드릴다운 페이지가 어긋나면 폼이 안 붙는다 (views/blocks renderParams)
+  assert.deepEqual(Object.keys(byId.scas.axes), Object.keys(SUBSYSTEMS.scas.children));
   assert.equal(byId.schedule.edit.hash, "gains");
-  assert.equal(byId.scas.edit.hash, "gains"); // 게인 정본은 스케줄 — 폼은 열람 전용
-  assert.equal(byId.scas.editable, false);
+  assert.equal(byId.scas.edit.hash, "gains"); // 스케줄 자리·표의 정본은 게인 탭
+  // 믹서만 편집처가 없다 — 타면 한계·믹싱 비율은 값이 아니라 형상 결정 [TBD 01 §2.2]
+  assert.equal(byId.mixer.editable, false);
+  assert.equal(byId.mixer.edit, null);
   assert.equal(byId.limiter.edit.hash, "envelope");
   assert.equal(byId.actuator.edit.hash, "sim"); // 최종 확인처 — 시뮬 탭 필드가 프리필·최종
   assert.equal(byId.nav.edit.hash, "sim");

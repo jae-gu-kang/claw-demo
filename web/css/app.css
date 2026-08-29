@@ -60,6 +60,11 @@ main { padding: 20px; max-width: 1280px; margin: 0 auto; }
 label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 label.field.check { flex-direction: row; align-items: center; gap: 6px; padding-bottom: 7px; }
 label.field.check input { width: auto; }
+/* 스케줄이 덮고 있는 자리 — 값의 정본은 게인 탭 표다 (views/blocks.js scheduleLocks).
+   비활성이라 못 고친다는 것만으로는 "왜"가 안 보여서 자물쇠 줄을 함께 단다 */
+label.field.locked { opacity: 0.75; }
+label.field.locked input { background: #f2f2f7; color: var(--muted); cursor: not-allowed; }
+.lock-note { font-size: 10px; color: #8a5cf6; letter-spacing: -0.2px; }
 
 /* 폼 정렬 — 필드 그리드·옵션 그룹 박스 (시뮬 탭 등 조밀 폼) */
 .field-grid { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: stretch; }

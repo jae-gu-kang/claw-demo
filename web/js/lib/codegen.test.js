@@ -198,6 +198,23 @@ test("genSnapshotC: 1D 게인만 배열로, 다차원은 건너뛰되 침묵하�
   assert.ok(code.includes("roll.kp: 2차원 테이블"));
 });
 
+test("traceRows: 같은 스키마가 여러 줄이면 축마다 다른 코드 줄을 가리킨다", () => {
+  // SCAS 3축은 key가 셋 다 fcl/ScasAxis다 — key로 줄을 기억하면 서로 덮어써서
+  // 세 축이 전부 마지막 축의 줄을 가리킨다 (산출물에 그대로 옮기는 표라 치명적)
+  const axis = (varName) => spec(BASE, {
+    key: "fcl/ScasAxis", pyClass: "ScasAxis", varName, cPrefix: varName.toUpperCase(),
+  });
+  const specs = ["scas_pitch", "scas_roll", "scas_yaw"].map(axis);
+  const { lineOf } = genSnapshotPython(specs, null);
+  const rows = traceRows(specs, lineOf, { prefixed: true })
+    .filter((r) => r.param === "phi_max");
+  assert.equal(rows.length, 3);
+  assert.equal(new Set(rows.map((r) => r.line)).size, 3, "세 축이 같은 줄을 가리킨다");
+  assert.ok(rows.every((r) => r.line != null), "줄 번호가 비었다");
+  // 출처 열도 축마다 달라야 표를 읽을 수 있다
+  assert.equal(new Set(rows.map((r) => r.source)).size, 3);
+});
+
 test("traceRows: 파라미터 → 출처 스키마 → 코드 라인 대응 (산출물 기재용)", () => {
   const s = spec(BASE);
   const { lineOf } = genPython(s);

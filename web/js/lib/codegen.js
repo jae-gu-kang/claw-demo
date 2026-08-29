@@ -16,6 +16,15 @@ DOM·네트워크 없음. 뷰(views/codegen.js)는 이 결과를 표시만 한�
   fields = schemaform.schemaFields() 결과에서 omit 적용 후, values = 폼 현재값
 */
 
+/** 스펙 하나를 가리키는 이름 — **key로는 모자란다.** 한 스키마를 여러 번 싣는
+블록이 있다(SCAS 3축은 셋 다 fcl/ScasAxis다). key를 식별자로 쓰면 lineOf가
+서로를 덮어써서 추적성 표의 세 축이 전부 마지막 축의 줄을 가리킨다 — 그 표는
+산출물에 그대로 옮기는 물건이라 틀린 줄이 문서로 나간다.
+varName은 스냅샷 안에서 유일하다 (lib/blocks.js 계약 테스트가 핀한다). */
+export function specLabel(spec) {
+  return spec.varName ?? spec.key;
+}
+
 /** 엔진 무제한 센티널 (blocks/base UNBOUNDED) — inf가 아니므로 코드에도 1e+30으로 낸다. */
 export const UNBOUNDED = 1e30;
 
@@ -173,7 +182,7 @@ function headerLines(specs, meta, lang) {
   lines.push(PURPOSE);
   lines.push("");
   lines.push("[적용 상태]");
-  for (const s of specs) lines.push(`- ${s.key}: ${originLabel(s)}`);
+  for (const s of specs) lines.push(`- ${specLabel(s)} (${s.key}): ${originLabel(s)}`);
   const notes = [];
   for (const s of specs) {
     // 근거(설계 노트·주입 계약)와 지적(한계 근접 등)을 컴포넌트 라벨 아래로 묶는다 —
@@ -266,7 +275,7 @@ export function genSnapshotPython(specs, gainTables, { verbose = false, meta = n
   if (gainTables) imports.add("from claw.tables import Table");
   lines.push(...[...imports].sort(), "");
   for (const s of specs) {
-    pyBody(s, verbose, lines, lineOf, `${s.key}.`);
+    pyBody(s, verbose, lines, lineOf, `${specLabel(s)}.`);
     lines.push("");
   }
   if (gainTables) {
@@ -353,7 +362,7 @@ export function genSnapshotC(specs, gainTables, { verbose = false, meta = null }
   lines.push("/* CLAW 설계 형상 스냅샷", ...headerLines(specs, meta, "c").map((s) => `   ${s}`),
     "*/", `#ifndef ${guard}`, `#define ${guard}`, "");
   for (const s of specs) {
-    cBlock(s, verbose, lines, lineOf, `${s.key}.`);
+    cBlock(s, verbose, lines, lineOf, `${specLabel(s)}.`);
     lines.push("");
   }
   for (const [name, t] of Object.entries(gainTables ?? {})) {
@@ -390,8 +399,11 @@ export function traceRows(specs, lineOf, { prefixed = false } = {}) {
         range: f.choices ? f.choices.join(" | ")
           : (f.lo == null && f.hi == null ? "—"
             : `${numDisplay(f.lo ?? -Infinity)} ~ ${numDisplay(f.hi ?? Infinity)}`),
-        source: `${s.key} @ ${s.pyImport}.${s.pyClass}`,
-        line: lineOf[`${prefixed ? `${s.key}.` : ""}${f.name}`] ?? null,
+        // 스냅샷에서만 변수명을 앞에 단다 — 한 스키마가 여러 줄일 때(SCAS 3축)
+        // 스키마 이름만으로는 어느 줄의 kp인지 구분이 안 된다. 단일 블록 패널은
+        // 스펙이 하나뿐이라 붙일 이유가 없다
+        source: `${prefixed ? `${specLabel(s)} · ` : ""}${s.key} @ ${s.pyImport}.${s.pyClass}`,
+        line: lineOf[`${prefixed ? `${specLabel(s)}.` : ""}${f.name}`] ?? null,
         desc: f.desc,
       });
     }

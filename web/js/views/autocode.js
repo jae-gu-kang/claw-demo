@@ -19,7 +19,7 @@
 
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
-import { BLOCKS } from "../lib/blocks.js";
+import { BLOCKS, codegenTargets } from "../lib/blocks.js";
 import { schemaFields } from "../lib/schemaform.js";
 import { makeMetaSource, makeSpecBuilder } from "../lib/specs.js";
 import { store } from "../store.js";
@@ -32,6 +32,19 @@ const FLIGHT = "flight";
 // 뷰 재생성마다 처음으로 되돌아가지 않도록 모듈 스코프 (views/gains.js fitCfg 관행)
 const state = { kind: FLIGHT, target: ALL, merged: true };
 const buildSpec = makeSpecBuilder(api);
+
+let catalogCache = null; // /gains/catalog — SCAS 축 설계 kwargs의 원천
+/** 실패해도 코드 패널은 뜬다 (SCAS만 스키마 기본값으로 떨어진다). */
+async function gainsCatalog() {
+  if (catalogCache === null) {
+    try {
+      catalogCache = await api.get("/gains/catalog");
+    } catch {
+      catalogCache = false;
+    }
+  }
+  return catalogCache || null;
+}
 const codegenMeta = makeMetaSource(api);
 
 const targets = () => BLOCKS.filter((b) => b.detail.editable && b.detail.codegen);
@@ -119,9 +132,15 @@ async function load(panel) {
     // 탑재코드는 형상 전체가 대상이다 — 블록 하나만 골라 실을 수는 없다
     const all = !shape || state.target === ALL;
     const blocks = all ? targets() : targets().filter((b) => b.id === state.target);
+    // SCAS는 축마다 한 줄로 편다. 편집이 없어도 카탈로그 설계 kwargs로 채운다 —
+    // ScasAxis의 스키마 기본값은 0이라 그대로 내면 게인 없는 형상이 나온다
+    const catalog = await gainsCatalog();
+    const specTargets = blocks.flatMap((b) =>
+      codegenTargets(b, store.get(b.detail.injectKey), catalog?.scas_design)
+        .map((t) => ({ block: b, ...t })));
     const [built, meta] = await Promise.all([
-      Promise.all(blocks.map((b) =>
-        buildSpec(b, store.get(b.detail.injectKey) ?? null, schemaFields))),
+      Promise.all(specTargets.map((t) =>
+        buildSpec(t.block, t.values, schemaFields, t.cg, t.applied))),
       codegenMeta(),
     ]);
     renderCodePanel(panel, {

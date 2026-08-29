@@ -19,10 +19,14 @@ export function makeSpecBuilder(io, { cache = {} } = {}) {
     return { key, fields: schemaFields(cache[key]).filter((f) => !omit.has(f.name)) };
   };
 
-  /** 블록 + 값 → {spec, validation}. values=null이면 엔진 기본값 형상. */
-  return async function buildSpec(block, values, schemaFields) {
+  /** 블록 + 값 → {spec, validation}. values=null이면 엔진 기본값 형상.
+   * cgOverride는 축이 여럿인 블록의 축별 varName·cPrefix·group (lib/blocks codegenTargets). */
+  return async function buildSpec(
+    block, values, schemaFields, cgOverride = null, appliedOverride = null,
+  ) {
     const { key, fields: flds } = await fields(block, schemaFields);
-    const applied = values != null;
+    // 설계값으로 채운 줄은 값이 있어도 "편집값"이 아니다 (lib/blocks codegenTargets)
+    const applied = appliedOverride ?? values != null;
     const vals = values ?? Object.fromEntries(flds.map((f) => [f.name, f.default]));
     const { category, name } = block.detail.schema;
     const url = `/registry/${category}/${name}/validate`;
@@ -37,13 +41,14 @@ export function makeSpecBuilder(io, { cache = {} } = {}) {
         sym = await io.post(url, { values: {} });
       } catch { /* 서버 이탈 — 폴백 표기로 코드는 생성 */ }
     }
-    const cg = block.detail.codegen;
+    const cg = cgOverride ?? block.detail.codegen;
     return {
       validation,
       spec: {
         key, fields: flds, values: vals, applied,
         pyImport: sym.py_import, pyClass: sym.py_class,
         varName: cg.varName, cPrefix: cg.cPrefix, kind: cg.kind, hint: cg.hint ?? "",
+        group: cg.group ?? null, // 축이 여럿인 블록의 축 이름 (탑재 C 요청 조립용)
         desc: block.detail.desc, notes: block.detail.notes ?? "",
       },
     };

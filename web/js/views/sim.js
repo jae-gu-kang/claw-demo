@@ -140,6 +140,7 @@ export function render() {
     fuelFlow: numInput("0.3"),
     useGains: el("input", { type: "checkbox" }),
     useAp: el("input", { type: "checkbox" }),
+    useScas: el("input", { type: "checkbox" }),
     fp: el("input", { value: "web-sim-v1", style: FILL_ST }),
   };
 
@@ -249,6 +250,11 @@ export function render() {
         if (store.get("autopilotParams")) req.autopilot = store.get("autopilotParams");
         else missing.push("편집 AP (구조도 탭 오토파일럿 블록 '시뮬에 적용' 필요)");
       }
+      if (f.useScas.checked) {
+        // 구조도 SCAS 축 편집값 — 세 축이 한 벌이다 (서버가 부분 주입을 거부한다)
+        if (store.get("scasParams")) req.scas = store.get("scasParams");
+        else missing.push("편집 SCAS (구조도 탭 SCAS 축 페이지 '시뮬에 적용' 필요)");
+      }
       if (missing.length) {
         errBox.append(el("div", { class: "error-box" },
           `적용된 편집값 없음 — 기본값으로 실행됨: ${missing.join(", ")}`));
@@ -301,7 +307,8 @@ export function render() {
             field("도달반경 [m]", f.accept),
             field("연료유량 [kg/s]", f.fuelFlow),
             checkField(f.useGains, "편집 게인"),
-            checkField(f.useAp, "편집 AP"))),
+            checkField(f.useAp, "편집 AP"),
+            checkField(f.useScas, "편집 SCAS"))),
         el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "계보"),
           el("div", { class: "row-inner", style: INNER_ST },

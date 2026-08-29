@@ -3,13 +3,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  AP_KEY, ENTRY, excludedSpecs, flightRequest, groupByRole, mergeFiles, pickFile,
-  summarize,
+  AP_KEY, ENTRY, SCAS_GROUPS, SCAS_KEY, excludedSpecs, flightRequest, groupByRole,
+  mergeFiles, pickFile, summarize,
 } from "./flightcode.js";
 
 const AP_SPEC = { key: AP_KEY, values: { kp_alt: 0.004, ki_alt: 0.0008 } };
 const ACT_SPEC = { key: "actuator/SecondOrderActuator", values: { wn: 30.0 } };
 const NAV_SPEC = { key: "nav/ErrorModel", values: { seed: 0 } };
+const scasSpec = (group, kp) => ({ key: SCAS_KEY, group, values: { kp, ki: 0.0 } });
+const SCAS_SPECS = SCAS_GROUPS.map((g, i) => scasSpec(g, i + 1));
 
 const TABLES = {
   "pitch.kp": { axes: { mach: [0.2, 0.8] }, data: [-2.0, -1.0], extrapolate: "clip" },
@@ -27,6 +29,21 @@ test("오토파일럿 편집값이 요청에 실린다", () => {
   assert.equal(req.control_hz, 100);
   assert.deepEqual(req.autopilot, { kp_alt: 0.004, ki_alt: 0.0008 });
   assert.ok(!("gain_tables" in req));
+});
+
+test("SCAS는 세 축이 다 있을 때만 실린다 — 부분 주입은 서버가 422다", () => {
+  const full = flightRequest(SCAS_SPECS, null);
+  assert.deepEqual(Object.keys(full.scas).sort(), [...SCAS_GROUPS].sort());
+  assert.deepEqual(full.scas.pitch, { kp: 1, ki: 0.0 });
+  // 축 하나짜리 패널(구조도 축 페이지 [코드 생성])은 설계 기본 형상을 보여 준다
+  assert.ok(!("scas" in flightRequest([scasSpec("pitch", 1)], null)));
+  assert.ok(!("scas" in flightRequest([AP_SPEC], null)));
+});
+
+test("SCAS도 사본을 넘긴다 — 요청을 고쳐도 폼 값이 흔들리지 않는다", () => {
+  const req = flightRequest(SCAS_SPECS, null);
+  req.scas.pitch.kp = 999;
+  assert.equal(SCAS_SPECS[0].values.kp, 1);
 });
 
 test("스펙 사본을 넘긴다 — 요청을 고쳐도 폼 값이 흔들리지 않는다", () => {

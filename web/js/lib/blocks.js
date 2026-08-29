@@ -3,9 +3,15 @@
 시뮬링크 "블록 클릭 → 서브시스템 하위 페이지"의 대응물 (02 §4):
 - schema: 레지스트리 {category, name} — 파라미터 폼의 원천 (서버 /registry 스키마)
 - editable: 폼 편집 가능 여부 — 시뮬 요청에 주입 경로가 있는 블록만 true
-  (AP=req.autopilot, 작동기=req.actuators, 항법=req.nav — 시뮬 탭은 적용값을
-  프리필·병합해 소비하므로 진실은 store 한 곳)
+  (AP=req.autopilot, SCAS=req.scas, 작동기=req.actuators, 항법=req.nav — 시뮬 탭은
+  적용값을 프리필·병합해 소비하므로 진실은 store 한 곳)
 - injectKey: 편집값을 담는 store 키 (editable=true일 때만)
+- axes: 축이 여럿인 블록(SCAS)의 하위 페이지 id → {group, varName, cPrefix}.
+  폼은 블록이 아니라 **축 페이지**에 붙고 store 값은 {축: kwargs} 한 벌이다
+  (서버 req.scas 계약 — 세 축 전부가 한 요청)
+- **스케줄이 덮는 자리는 폼에서 잠긴다** (editable과 별개 층): 게인 탭이 그 자리에
+  테이블을 붙여 두면 실행 시점에 룩업이 상수를 이기므로(fcl/graphs.py), 상수 입력을
+  열어 두면 값이 둘인 척하게 된다. 판정은 lib/gainsync.js lockedParams
 - omit: 폼·주입에서 제외할 스키마 파라미터명 — 주입 경로의 예약 키
   (예: 작동기 pos_lo·pos_hi·initial은 Simulator가 믹서 한계·트림 웜스타트로 결정)
 - edit: {hash, label} — 정본 편집 화면으로 이동
@@ -36,6 +42,37 @@ export function resolvePath(segs, tree) {
     nodes = nodes[seg].children;
   }
   return path;
+}
+
+/** 코드 표현 대상 — 축이 여럿인 블록(SCAS)은 **축마다 한 줄**이다.
+ *
+ * lib/codegen.js의 spec은 변수 하나를 그리는 물건이라 `scas = ScasAxis(...)` 한 줄로는
+ * 세 축을 표현할 수 없다. varName·cPrefix만 축 것으로 갈아 끼우면 kind는 그대로
+ * "object"라 코드 생성 계층은 손댈 것이 없다.
+ *
+ * stored = 그 블록의 store 값 (SCAS는 {축: kwargs}), design = 축별 설계 kwargs
+ * (/gains/catalog scas_design). **설계값을 모르는 축은 대상에서 뺀다** — ScasAxis의
+ * 스키마 기본값은 전부 0이라, 카탈로그를 못 받은 채 내보내면 게인이 죽은 형상을
+ * "지금 형상"이라고 보여 주게 된다. 구조도 축 폼이 같은 이유로 편집을 안 여는 것과
+ * 같은 규칙이다 (views/blocks.js loadSchema).
+ *
+ * applied는 values와 따로다: 설계값으로 채운 줄은 값이 있어도 "편집값"이 아니다
+ * — 그렇게 표시하면 아무것도 안 고친 사용자에게 "기본값 대비 5개 변경"이 뜬다. */
+export function codegenTargets(block, stored, design = null) {
+  const { axes, codegen } = block.detail;
+  if (!axes) return [{ values: stored ?? null, applied: stored != null, cg: codegen }];
+  const out = [];
+  for (const ax of Object.values(axes)) {
+    const edited = stored?.[ax.group] ?? null;
+    const values = edited ?? design?.[ax.group] ?? null;
+    if (!values) continue; // 편집값도 설계값도 없다 = 값을 모른다
+    out.push({
+      values,
+      applied: edited != null,
+      cg: { ...codegen, varName: ax.varName, cPrefix: ax.cPrefix, group: ax.group },
+    });
+  }
+  return out;
 }
 
 export const BLOCKS = [
@@ -96,9 +133,17 @@ export const BLOCKS = [
     title: "SCAS", sub: "자세 안정화 (PI)",
     detail: {
       desc: "축 공통 구조: PI(자세오차) + k_rate·washout(각속도), 출력 클립. "
-        + "kp·ki·k_rate의 정본은 게인 스케줄 — 편집은 게인 탭에서 (여긴 구조·범위 열람).",
-      schema: { category: "fcl", name: "ScasAxis" }, editable: false, injectKey: null,
-      edit: { hash: "gains", label: "게인 탭 — kp·ki·k_rate 스케줄 편집" },
+        + "축 페이지(피치·롤·요)에서 편집하고 '시뮬에 적용' — 세 축이 한 벌로 주입된다. "
+        + "스케줄이 붙은 자리는 테이블이 정본이라 잠기고, 게인 탭이 편집처다.",
+      schema: { category: "fcl", name: "ScasAxis" }, editable: true,
+      injectKey: "scasParams",
+      axes: {
+        pitch: { group: "pitch", varName: "scas_pitch", cPrefix: "SCAS_PITCH" },
+        roll: { group: "roll", varName: "scas_roll", cPrefix: "SCAS_ROLL" },
+        yaw: { group: "yaw", varName: "scas_yaw", cPrefix: "SCAS_YAW" },
+      },
+      edit: { hash: "gains", label: "게인 탭 — 스케줄 자리·테이블 편집" },
+      codegen: { varName: "scas", cPrefix: "SCAS", kind: "object" },
     },
   },
   {
@@ -107,7 +152,9 @@ export const BLOCKS = [
     detail: {
       desc: "엘레본4 고정 믹싱(내/외측 1:1) + 러더 + 차동추력 보상 [기본값 01 §2.2] — "
         + "여유자유도 최적 배분(제어 할당)으로의 확장은 추후. "
-        + "웹 주입 경로 없음 — 믹싱 비율·4면 배치는 기체 데이터 확인 시 [TBD].",
+        + "여기만 폼이 없는 이유: 타면 한계·믹싱 비율은 값 튜닝이 아니라 **형상 결정**이라 "
+        + "기체 데이터 확인 시 정해진다 [TBD 01 §2.2]. 같은 블록의 k_diff_thr는 성격이 "
+        + "다른 튜닝 파라미터지만, 파라미터 단위로 여는 계약이 아직 없어 함께 잠겨 있다.",
       schema: { category: "fcl", name: "Mixer" }, editable: false, injectKey: null,
       edit: null,
     },

@@ -9,7 +9,7 @@ import { api } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
   diffParams, genCHeader, genPython, genSnapshotC, genSnapshotPython, numDisplay,
-  paramWarnings, traceRows,
+  paramWarnings, specLabel, traceRows,
 } from "../lib/codegen.js";
 import {
   excludedSpecs, flightRequest, groupByRole, mergeFiles, pickFile, summarize,
@@ -248,10 +248,11 @@ function footNote(flight, specs, sched) {
 
 /** 검토 패널 — 엔진 검증 결과 → 변경 Δ → 경고. */
 function reviewBox(specs, validation, snapshot) {
+  // 라벨은 specLabel — SCAS 3축처럼 같은 스키마가 여러 줄이면 key로는 구분이 안 된다
   const changes = specs.flatMap((s) =>
-    diffParams(s.fields, s.values).map((d) => ({ ...d, key: s.key })));
+    diffParams(s.fields, s.values).map((d) => ({ ...d, key: specLabel(s) })));
   const warns = specs.flatMap((s) =>
-    paramWarnings(s.fields, s.values, { lang: cfg.lang }).map((w) => ({ ...w, key: s.key })));
+    paramWarnings(s.fields, s.values, { lang: cfg.lang }).map((w) => ({ ...w, key: specLabel(s) })));
 
   return el("div", {},
     el("h4", { style: "margin: 14px 0 6px" }, "검토"),

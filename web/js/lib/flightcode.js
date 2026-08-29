@@ -18,6 +18,14 @@ export const NOT_IN_LAW = {
 };
 
 export const AP_KEY = "fcl/Autopilot";
+export const SCAS_KEY = "fcl/ScasAxis";
+
+/** SCAS 축 — 서버 req.scas가 **세 축 전부**를 요구한다(부분 주입은 422). 그래서
+ * 한 축만 띄운 패널(구조도 축 페이지의 [코드 생성])은 scas를 아예 안 보내고 설계
+ * 기본 형상을 보여 준다 — 422를 띄우는 것보다 낫고, 그 패널이 말할 수 있는 것도
+ * 그 축 하나뿐이다. 축 이름의 정본은 엔진(fcl/graphs.py SCHEDULABLE)이고 서버가
+ * 최종 판정한다 — 여기 목록이 낡으면 스냅샷이 조용히 scas를 빼먹는다. */
+export const SCAS_GROUPS = ["pitch", "roll", "yaw"];
 
 /** 진입점 — 목록이 바뀌어도 여기로 떨어지면 항상 읽을 게 있다. */
 export const ENTRY = (artifact = "fcl") => `${artifact}.h`;
@@ -31,7 +39,9 @@ export const ENTRY = (artifact = "fcl") => `${artifact}.h`;
  *   테이블 있음    → gain_tables (키 집합이 곧 스케줄 대상)
  *   scheduleOff    → with_schedule:false — 스케줄이 **없는** 형상
  *   둘 다 아님     → 아무것도 안 보냄 — 서버의 설계 기본(6자리)
- * 빈 dict를 보내는 선택지는 없다. 서버가 422로 막는다(조용한 무스케줄 방지). */
+ * 빈 dict를 보내는 선택지는 없다. 서버가 422로 막는다(조용한 무스케줄 방지).
+ *
+ * SCAS는 축 스펙 셋이 모두 있을 때만 싣는다 (SCAS_GROUPS 주석 참조). */
 export function flightRequest(
   specs, gainTables, { controlHz = 100, scheduleOff = false } = {},
 ) {
@@ -40,6 +50,11 @@ export function flightRequest(
   if (ap && ap.values && Object.keys(ap.values).length > 0) {
     req.autopilot = { ...ap.values };
   }
+  const scas = {};
+  for (const s of specs ?? []) {
+    if (s.key === SCAS_KEY && s.group && s.values) scas[s.group] = { ...s.values };
+  }
+  if (SCAS_GROUPS.every((g) => scas[g])) req.scas = scas;
   if (scheduleOff) {
     // 테이블과 함께 보내면 엔진이 구성 오류로 거부한다 (demo.py make_demo_fcl)
     req.with_schedule = false;

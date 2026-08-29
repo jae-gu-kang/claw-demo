@@ -8,6 +8,12 @@
 편집본은 store("gainTables")로 시뮬레이션 탭에 전달하며, 전부 끈 경우만 빈 dict로
 표현할 수 없어(서버가 422) store("gainScheduleOff")를 함께 쓴다 — 판단은
 lib/gainsched.js. 검증(그룹·키·형상·유한성)은 제출 시 서버/엔진이 수행.
+
+**끈 자리의 상수도 여기서 고친다.** 그 값은 구조도 폼과 같은 스토어
+(scasParams·autopilotParams)에 살고, 어느 쪽에서 고쳐도 다른 쪽에 그대로 보여야
+한다 — 같은 게인이 화면마다 다르면 "지금 형상"이라는 말이 성립하지 않는다.
+켜고 끌 때도 값이 이어진다: 켜면 그 상수에서 출발하는 표가 서고, 끄면 그 표의
+설계점 값으로 굳는다 (lib/gainsync.js — 스케일 규칙은 서버 제안 표에서 온다).
 */
 
 import { api, errorText } from "../api.js";
@@ -16,6 +22,9 @@ import {
   GAIN_KEYS, appliedTables, defaultSelection, schedSummary, slotRows,
   storePayload, toggleSlot, zeroTables,
 } from "../lib/gainsched.js";
+import {
+  constantOf, foldToConstant, seedTable, withConstant,
+} from "../lib/gainsync.js";
 import { gainPlotGroups } from "../lib/plot.js";
 import { piecewisePolyfit, rawCoeffs, sampleFit } from "../lib/polyfit.js";
 import { store } from "../store.js";
@@ -24,6 +33,9 @@ import { lineChartCanvas } from "./plots.js";
 let catalog = null; // GET /gains/catalog — 자리 목록·설계 상수·제안 테이블
 let selected = []; // 켠 자리 이름 (카탈로그 기본 = 서버가 지금 스케줄하는 6자리)
 let tables = null; // 켠 자리만 추린 {name: {axes:{mach}, data, extrapolate}} — 편집 대상
+// 끈 자리의 상수 드래프트 {scas, autopilot} — 구조도 폼과 같은 스토어를 쓰는 값이라
+// 테이블과 함께 '적용'에서 커밋한다 (여기만 즉시 반영되면 적용 전후가 갈린다)
+let constants = null;
 
 // 근사 곡선 설정 — 탭 이탈·재로드에도 유지 (경계 "0.3"은 데모 동압 스케일의
 // 상한 클립 경계와 일치하는 시연 기본값, 검증은 piecewisePolyfit이 수행)
@@ -34,11 +46,23 @@ export function render() {
   const errBox = el("div");
   const statusLine = el("p", { class: "hint" });
 
+  // 드래프트는 **탭에 들어올 때마다** 스토어에서 다시 뜬다. 모듈 스코프 상태는
+  // 탭을 나가도 살아 있는데(뷰는 pull 방식이고 store.subscribe를 쓰지 않는다),
+  // 그 사이 구조도에서 고친 값을 안 읽으면 여기서 '적용'하는 순간 옛 드래프트가
+  // 그 편집을 조용히 되돌린다 — 없애려던 이중 정본이 드래프트 층에서 되살아난다
+  const syncFromStore = () => {
+    constants = {
+      scas: store.get("scasParams") ?? null,
+      autopilot: store.get("autopilotParams") ?? null,
+    };
+  };
+
   const load = async () => {
     try {
       clear(errBox);
       catalog = await api.get("/gains/catalog");
       selected = defaultSelection(catalog);
+      syncFromStore();
       renderTables(box, statusLine);
     } catch (e) {
       clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -50,6 +74,9 @@ export function render() {
     const { tables: applied, scheduleOff } = storePayload(catalog, selected);
     store.set("gainTables", applied && JSON.parse(JSON.stringify(applied)));
     store.set("gainScheduleOff", scheduleOff);
+    // 끈 자리의 상수 — 구조도 폼이 읽는 바로 그 스토어. 여기서 고친 값이 저기 보인다
+    if (constants?.scas) store.set("scasParams", constants.scas);
+    if (constants?.autopilot) store.set("autopilotParams", constants.autopilot);
     statusLine.textContent = scheduleOff
       // 시뮬 탭은 아직 이 신호를 안 읽는다 — 조용히 다른 형상을 돌리지 않도록 명시한다
       ? "스케줄 없는 형상으로 적용됨 — Autocode 탑재코드에 반영됩니다. "
@@ -73,36 +100,80 @@ export function render() {
     el("div", { class: "panel" }, box),
   );
 
-  if (catalog) renderTables(box, statusLine);
-  else load();
+  if (catalog) {
+    syncFromStore(); // 재진입 — 카탈로그는 캐시지만 상수는 그 사이 바뀌었을 수 있다
+    renderTables(box, statusLine);
+  } else {
+    load();
+  }
   return root;
 }
 
-/** 스케줄 자리 격자 — 켜고/끄기. 칸에 설계 상수를 함께 적어 "끄면 무엇이 되는지"가
- * 보이게 한다. 불가 자리는 빈칸이 아니라 사유를 단 "—"다 (빈칸은 버그로 읽힌다). */
+/** "M0.6" — 설계점 표기. 축 이름·격자·인덱스는 전부 서버 카탈로그가 정본이다. */
+function axisLabel() {
+  const slot = (catalog?.slots ?? []).find((x) => x.available && x.table);
+  const at = slot?.table?.axes?.[catalog.axis]?.[catalog.design_index];
+  return at == null ? "설계점" : `${String(catalog.axis).toUpperCase()[0]}${at}`;
+}
+
+/** 스케줄 자리 격자 — 켜고/끄기 + **끈 자리의 상수 편집**.
+ *
+ * 끈 자리의 숫자는 표시가 아니라 값이다 — 구조도 폼과 같은 스토어에 살고, 여기서
+ * 고치면 저기 보인다. 켠 자리는 아래 표가 정본이라 설계점 값만 읽기로 보여 준다
+ * (여기서도 고칠 수 있으면 한 게인에 편집처가 둘이 된다).
+ * 불가 자리는 빈칸이 아니라 사유를 단 "—"다 (빈칸은 버그로 읽힌다). */
 function slotGrid(box, statusLine) {
   const rows = slotRows(catalog);
   const zeros = zeroTables(catalog, selected);
+  const draft = "스케줄 대상 변경됨 (미적용) — '시뮬·코드에 적용'을 누르세요.";
+
   const cell = (slot) => {
     if (!slot) return el("span", { class: "hint" }, "—");
     if (!slot.available) {
       return el("span", { class: "hint", title: slot.reason }, "— 불가");
     }
     const on = selected.includes(slot.name);
-    return el("label", {
-      title: `${slot.param} = ${slot.design} ${slot.unit ?? ""} · ${slot.desc ?? ""}\n`
-        + (on ? "끄면 이 설계점 상수로 굳는다" : "켜면 이 값에서 시작하는 표가 생긴다"),
-    },
+    // 켠 자리의 값은 표의 설계점, 끈 자리의 값은 스토어 상수 — 정본이 다르다
+    const cur = on ? foldToConstant(catalog, slot, tables) : constantOf(slot, constants);
+    const toggle = el("input", {
+      type: "checkbox", checked: on,
+      onchange: () => {
+        if (on) {
+          // 끄기 — 편집한 표의 설계점 값으로 굳는다 (옛 설계 상수로 되돌리지 않는다)
+          constants = withConstant(catalog, slot, foldToConstant(catalog, slot, tables), constants);
+        } else {
+          // 켜기 — 지금 상수에서 출발하는 표를 심는다 (설계점에서는 상수 그대로).
+          // 상수는 여기서 다시 읽는다 — 렌더 때 잡아 둔 값은 방금 친 입력을 모른다
+          slot.table = seedTable(catalog, slot, constantOf(slot, constants));
+        }
+        selected = toggleSlot(catalog, selected, slot.name);
+        renderTables(box, statusLine);
+        statusLine.textContent = draft;
+      },
+    });
+    const title = `${slot.param} = ${fmt(cur, 6)} ${slot.unit ?? ""} · ${slot.desc ?? ""}`;
+    if (on) {
+      return el("label", { title: `${title}\n켠 자리 — 표가 정본. 끄면 표의 설계점 값으로 굳는다` },
+        toggle, el("span", { class: "hint" }, ` ${fmt(cur, 3)} ▸표`));
+    }
+    return el("label", { title: `${title}\n끈 자리 — 이 상수가 값이다 (구조도 폼과 같은 값)` },
+      toggle,
       el("input", {
-        type: "checkbox", checked: on,
-        onchange: () => {
-          selected = toggleSlot(catalog, selected, slot.name);
-          renderTables(box, statusLine);
-          statusLine.textContent = "스케줄 대상 변경됨 (미적용) — '시뮬·코드에 적용'을 누르세요.";
+        class: "num-sm", type: "text", value: String(cur),
+        onchange: (ev) => {
+          // 빈 값은 Number("")===0으로 통과한다 — 비우고 나가면 그 게인이 조용히
+          // 0이 된다. 아래 표 셀 핸들러가 같은 함정을 막고 있는 그 가드다 (리뷰 S2)
+          const raw = ev.target.value.trim();
+          const v = Number(raw);
+          if (raw === "" || !Number.isFinite(v)) {
+            ev.target.value = String(constantOf(slot, constants));
+            statusLine.textContent = `잘못된 수치 — ${slot.name} 원복됨.`;
+            return;
+          }
+          constants = withConstant(catalog, slot, v, constants);
+          statusLine.textContent = draft; // 재그리기 없음 — 입력 포커스를 잃지 않는다
         },
-      }),
-      ` ${fmt(slot.design, 3)}`,
-    );
+      }));
   };
   return el("div", {},
     el("div", { class: "scroll-x" },
@@ -115,9 +186,10 @@ function slotGrid(box, statusLine) {
           r.cells.map((c) => el("td", {}, cell(c))),
         ))))),
     el("p", { class: "hint" },
-      `${schedSummary(catalog, selected)}. 칸의 수치는 설계점(M0.6) 상수 — `,
-      "체크를 끄면 그 값으로 굳고 탑재 코드에서 룩업이 사라진다. ",
-      "속도·헤딩의 k_rate는 그 축에 rate 입력이 없어 구조상 불가."),
+      `${schedSummary(catalog, selected)}. 칸의 수치는 설계점(${axisLabel()}) 값이다 — `,
+      "끈 자리는 입력칸이고 그 값이 곧 상수다 — 구조도 폼과 같은 값이다. ",
+      "켠 자리는 아래 표가 정본이라 읽기 전용 — 끄면 표의 설계점 값으로 굳고 ",
+      "탑재 코드에서 룩업이 사라진다. 속도·헤딩의 k_rate는 그 축에 rate 입력이 없어 구조상 불가."),
     zeros.length
       ? el("p", { class: "hint" },
           `설계값이 0이라 표가 전부 0인 자리: ${zeros.join(" · ")} — 셀을 편집하기 전엔 `

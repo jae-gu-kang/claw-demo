@@ -445,6 +445,7 @@ export function render() {
   // 실제 런 형상과 어긋난다 (그래서 한 함수다)
   const shapeState = () => ({
     autopilot: store.get("autopilotParams"),
+    scas: store.get("scasParams"),
     nav: store.get("navParams"),
     actuators: store.get("actuatorParams"),
     gainTables: store.get("gainTables"),
