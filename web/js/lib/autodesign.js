@@ -20,6 +20,7 @@ export const VERDICT_LABEL = {
   plant_variation: "플랜트 급변 — 트림/선형화점 승격",
   gain_interp_valley: "게인 보간 valley — breakpoint 승격 + 재튜닝",
   structural_limit: "구조 한계 — 상위 설계 변경 검토 (보고 전용)",
+  gain_sign_flip: "게인 부호 뒤집힘 — 부호 보존 재적합 (승격으로는 안 풀린다)",
 };
 
 const _STATUS_RANK = { ok: 0, na: 1, warn: 2, fail: 3 };

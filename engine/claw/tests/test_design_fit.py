@@ -129,3 +129,47 @@ def test_greedy_terminates_when_nothing_splittable():
     ys = np.array([0.0, 5.0])
     out = fit_gain_surface(xs, ys, tol_fit=1e-12, max_degree=1, max_segments=4)
     assert out["n_segments"] == 1
+
+
+def test_fit_preserves_design_sign():
+    """0 근처 값에 고차를 씌우면 곡선이 0을 가로질러 부호가 뒤집힌다.
+
+    데모에서 실제로 겪었다 — roll.ki 설계 +0.1인데 적합 4차가 M0.4346에서
+    −0.00022를 냈고, oriented_margins가 방향을 보정해 PM 116°로 보고했다
+    (실제로는 양의 되먹임). 허용치는 슬롯 전체 스케일 기준이라 이걸 못 막는다.
+    """
+    ps = _points_1d(MACHS)
+    # 0 근처에서 진동하는 양수 샘플 — 고차 적합이 0을 넘기 쉬운 형상
+    vals = 0.002 + 0.0018 * np.sin(np.linspace(0, 3.2 * np.pi, len(MACHS)))
+    samples = {case_name(m, 1000.0, 200.0): float(v) for m, v in zip(MACHS, vals)}
+    out = fit_slot("roll.ki", samples, ps, tol_fit=0.02, max_degree=4)
+    guard = (out.get("report") or out).get("sign_guard")
+    assert guard is not None and guard["want"] == 1.0
+    if out["kind"] == "poly":
+        xs = np.linspace(0.15, 0.95, 401)
+        v = out["table"].interp(mach=xs)
+        assert np.all(v >= 0.0), f"부호가 뒤집혔다: min={v.min():.6g}"
+    else:  # 어떤 차수로도 못 지키면 상수 폴백 — 그 값도 부호를 지킨다
+        assert out["value"] > 0.0
+        assert guard["fallback"] == "constant"
+
+
+def test_sign_guard_lowers_degree_only_when_needed():
+    """부호를 지키는 적합에는 손대지 않는다 — 필요할 때만 차수를 낮춘다."""
+    ps = _points_1d(MACHS)
+    samples = {case_name(m, 1000.0, 200.0): float(-2.0 * f) for m, f in zip(MACHS, DP)}
+    out = fit_slot("pitch.kp", samples, ps, tol_fit=0.02, max_degree=4)
+    assert out["kind"] == "poly"
+    guard = out["report"]["sign_guard"]
+    assert guard["want"] == -1.0
+    assert guard["lowered"] is False, "멀쩡한 적합의 차수를 낮췄다"
+
+
+def test_mixed_sign_samples_are_unconstrained():
+    """샘플 자체가 부호를 넘나들면 제약할 부호가 없다 — 가드가 끼어들지 않는다."""
+    ps = _points_1d(MACHS)
+    samples = {case_name(m, 1000.0, 200.0): float(m - 0.5) for m in MACHS}
+    out = fit_slot("pitch.ki", samples, ps, tol_fit=0.02, max_degree=4)
+    guard = (out.get("report") or out)["sign_guard"]
+    assert guard["want"] == 0.0
+    assert guard["lowered"] is False

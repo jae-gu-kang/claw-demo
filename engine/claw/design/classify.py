@@ -28,7 +28,8 @@ from claw.design.points import ROLE_ANCHOR, ROLE_BREAKPOINT, ROLE_RANK
 from claw.design.schedmap import scheduled_gains
 from claw.design.tune import TuneTargets, tune_point
 
-VERDICTS = ("simple_deficit", "plant_variation", "gain_interp_valley", "structural_limit")
+VERDICTS = ("simple_deficit", "plant_variation", "gain_interp_valley", "structural_limit",
+            "gain_sign_flip")
 
 # 자리(루프) → 관련 게인 슬롯 — valley 괴리·breakpoint 승격 값의 대상
 LOOP_SLOTS = {
@@ -69,6 +70,33 @@ def classify_margin_deficit(
     entry = margin_cases[v_name]["loops"][loop_name]
     evidence: dict = {"current": {k: entry.get(k) for k in
                                   ("pm_deg", "gm_db", "zeta", "wc_att", "status")}}
+
+    # 0) 부호 뒤집힘 — 원인이 이미 확정된 경우다. 격자도 보간 valley도 아니고
+    #    **적합이 설계 부호를 넘긴 것**이라, 앵커를 늘려도 다항이 다시 0을 가로지른다
+    #    (실제로 겪었다: roll.ki 승격 처방을 반영해도 실패가 그대로였다).
+    #    적합 단계의 부호 가드(fit._fit_preserving_sign)가 먼저 막지만, 상수 폴백까지
+    #    실패했거나 API로 직접 주입된 다항이면 여기로 온다
+    if entry.get("sign_flip"):
+        tune_out = tune_point(
+            lm, design, targets=targets,
+            actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
+            delay_s=delay_s, pade_order=pade_order,
+        )
+        slots = LOOP_SLOTS.get(loop_name, ())
+        evidence["sign_flip"] = {
+            "slots": entry["sign_flip"],
+            "effective": {s: eff for s, eff in (entry.get("gains") or {}).items()},
+            "design": {s: design.get(s) for s in slots},
+        }
+        return {
+            "verdict": "gain_sign_flip",
+            "action": {
+                "type": "refit_at", "point": v_name,
+                "gains": {s: tune_out["gains"][s] for s in slots if s in tune_out["gains"]},
+                "note": "부호를 지키도록 그 점을 고정해 재적합 — 승격으로는 해결되지 않는다",
+            },
+            "evidence": evidence,
+        }
 
     # 1) 자유 게인 국소 최적 — structural_limit 판별의 근거
     tune_out = tune_point(

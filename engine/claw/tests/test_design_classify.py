@@ -166,3 +166,27 @@ def test_valley_on_anchor_prescribes_refit_not_promotion():
     assert out["verdict"] == "gain_interp_valley"
     assert out["action"]["type"] == "refit_at", "anchor에 승격 처방을 내면 래칫이 터진다"
     assert out["action"]["gains"]["pitch.kp"] == pytest.approx(opt["pitch.kp"])
+
+
+def test_sign_flip_gets_its_own_verdict_not_promotion():
+    """부호 뒤집힘은 격자 문제가 아니다 — 승격을 처방하면 재개해도 그대로다.
+
+    실제로 겪었다: plant_variation으로 분류돼 앵커 승격을 반영했는데 다항이 다시
+    0을 가로질러 실패가 유지됐다.
+    """
+    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    design = demo_design_gains()
+    cases = _fail_cases(v, lo, hi)
+    # 검증이 부호 뒤집힘을 표시한 상태 (schedmap._apply_sign_check가 하는 일)
+    cases[v]["loops"]["pitch_att"].update({
+        "sign_flip": ["pitch.ki"],
+        "gains": {"kp": -2.0, "ki": +0.5},  # ki가 설계(-0.5)와 반대
+    })
+    out = classify_margin_deficit(
+        ac, v, "pitch_att", points, lms, trims, {}, design, cases,
+        criteria=MarginCriteria(), tol_plant=0.001, **ACT,  # plant도 걸리게 낮춘다
+    )
+    assert out["verdict"] == "gain_sign_flip", "부호 뒤집힘이 다른 원인으로 분류됐다"
+    assert out["action"]["type"] == "refit_at"
+    assert out["evidence"]["sign_flip"]["slots"] == ["pitch.ki"]

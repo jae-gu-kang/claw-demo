@@ -213,16 +213,83 @@ def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
     ys_u = np.array([np.mean(uniq[x]) for x in xs_u])
     cross = float(max((max(v) - min(v) for v in uniq.values()), default=0.0))
 
-    surface = fit_gain_surface(
-        xs_u, ys_u, tol_fit=tol_fit, max_degree=max_degree, max_segments=max_segments
+    surface, poly, guard = _fit_preserving_sign(
+        xs_u, ys_u, axis, slot,
+        tol_fit=tol_fit, max_degree=max_degree, max_segments=max_segments,
     )
-    poly = PolyTable(axis, surface["segments"], name=slot)
-    report = {k: v for k, v in surface.items() if k != "_poly"}
+    if poly is None:  # 어떤 차수로도 부호를 못 지켰다 — 상수로 굳힌다
+        mean = float(np.mean(ys_u))
+        return {
+            "kind": "constant", "slot": slot, "value": mean,
+            "max_residual": float(np.max(np.abs(ys_u - mean))),
+            "sign_guard": guard,
+        }
+    report = dict(surface)
     report.update({
         "kind": "poly", "slot": slot, "axes_detected": axes, "axis": axis,
-        "cross_axis_residual": cross,
+        "cross_axis_residual": cross, "sign_guard": guard,
     })
     return {"kind": "poly", "slot": slot, "table": poly, "report": report}
+
+
+def _constant_sign(ys) -> float:
+    """샘플 전체가 한 부호면 그 부호(±1), 아니면 0(제약 없음).
+
+    부호는 설계값이 보유한다(conventions·fcl/demo) — 튜닝은 크기만 정하므로
+    샘플 부호가 곧 그 자리의 설계 부호다. 0이 섞여 있어도 나머지가 한 부호면
+    그 부호로 본다(0은 어느 쪽도 위반하지 않는다).
+    """
+    nz = [s for s in np.sign(np.asarray(ys, dtype=float)) if s != 0.0]
+    if not nz or any(s != nz[0] for s in nz):
+        return 0.0
+    return float(nz[0])
+
+
+def _sign_violation(poly, axis, want, n=257) -> float:
+    """조밀 샘플에서 부호를 넘긴 최대 크기 — 0이면 위반 없음.
+
+    격자점 사이의 극값을 보려는 것이므로 knot보다 촘촘히 훑는다. 도함수 근을
+    정확히 풀지 않는 근사지만, 부호를 넘기는 다항은 구간 안에서 넉넉한 폭으로
+    넘어가므로(0 근처 값에 고차를 씌운 결과다) 이 해상도로 잡힌다.
+    """
+    if want == 0.0:
+        return 0.0
+    xs = np.linspace(float(poly.knots[0]), float(poly.knots[-1]), n)
+    vals = np.array([poly.interp(**{axis: float(x)}) for x in xs])
+    bad = -vals * want  # 부호가 반대인 지점에서 양수
+    return float(max(bad.max(), 0.0))
+
+
+def _fit_preserving_sign(xs, ys, axis, slot, *, tol_fit, max_degree, max_segments):
+    """적합하되 **설계 부호를 넘지 않게** — (surface, poly|None, guard 리포트).
+
+    0 근처 값을 갖는 자리(요축 ki·롤 ki 등)에 고차 다항을 씌우면 구간 사이에서
+    곡선이 0을 가로질러 **부호가 뒤집힌다**. 잔차는 슬롯 전체 스케일 기준이라
+    작게 보이지만, 그 점의 실효 게인은 양의 되먹임이 된다 — 데모 형상에서 실제로
+    roll.ki가 설계 +0.1인데 M0.4346에서 −0.00022로 나왔다.
+
+    허용치를 만족하는 **가장 높은 차수부터** 낮춰 가며 부호를 지키는 첫 적합을
+    택한다. 1차까지 내려도 안 되면 호출자가 상수로 굳힌다(부호는 확실히 지켜진다).
+    """
+    want = _constant_sign(ys)
+    attempts = []
+    for degree in range(max_degree, 0, -1):
+        surface = fit_gain_surface(
+            xs, ys, tol_fit=tol_fit, max_degree=degree, max_segments=max_segments
+        )
+        poly = PolyTable(axis, surface["segments"], name=slot)
+        viol = _sign_violation(poly, axis, want)
+        attempts.append({"degree": degree, "violation": viol})
+        if viol <= 0.0:
+            return surface, poly, {
+                "want": want, "degree_used": surface["max_degree_used"],
+                "lowered": degree < max_degree, "attempts": attempts,
+            }
+    return None, None, {
+        "want": want, "degree_used": None, "lowered": True, "attempts": attempts,
+        "fallback": "constant",
+        "note": "1차까지 낮춰도 부호를 지키지 못해 상수로 굳혔다",
+    }
 
 
 def fit_slots(gain_samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,

@@ -335,6 +335,12 @@ function evidenceLine(a) {
   const ev = a.evidence ?? {};
   const bits = [];
   const cur = ev.current ?? {};
+  // 부호 뒤집힘은 **가장 먼저** 말해야 한다 — 마진 수치는 방향 보정 후 값이라
+  // PM 116°처럼 건강해 보이고, 그러면 왜 fail인지 화면만 봐서는 알 수 없다
+  if (ev.sign_flip) {
+    const slots = (ev.sign_flip.slots ?? []).join(", ");
+    bits.push(`부호 반대: ${slots} (설계와 반대 방향 — 양의 되먹임)`);
+  }
   if (cur.pm_deg != null) bits.push(`현재 PM ${fmt(cur.pm_deg)}° / GM ${fmt(cur.gm_db)} dB`);
   if (cur.zeta != null) bits.push(`현재 ζ ${fmt(cur.zeta)}`);
   if (ev.interp_gap?.max != null) {
