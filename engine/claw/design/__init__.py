@@ -19,6 +19,12 @@ from claw.design.points import (
     PointSet,
     case_name,
 )
+from claw.design.schedmap import (
+    midpoint_validation_points,
+    scheduled_gains,
+    scheduled_margin_map,
+    scheduled_margin_point,
+)
 
 __all__ = [
     "ROLE_ANCHOR",
@@ -30,4 +36,8 @@ __all__ = [
     "LinearModelSet",
     "model_distance",
     "MarginCriteria",
+    "scheduled_gains",
+    "scheduled_margin_point",
+    "scheduled_margin_map",
+    "midpoint_validation_points",
 ]
