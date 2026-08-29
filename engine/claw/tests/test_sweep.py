@@ -68,6 +68,15 @@ def test_sweep_plan은_기준런과_스팬과_쌍_3점을_만든다():
     assert len(plan["runs"]) == 1 + 4 + 1 + 1  # base + 단독 4 + B단독 + AB
 
 
+def test_sweep_plan_빈_knobs는_기준런_하나다():
+    """knobs·pairs가 비면 계획은 base 런 1개 — 전 케이스 base 스캔(3단 A,
+    /influence/scan)이 run_sweep을 그대로 재사용하는 계약이다."""
+    plan = sweep_plan(Shape(), [], ())
+    assert [r.label for r in plan["runs"]] == ["base"]
+    assert plan["runs"][0].overrides == {}
+    assert plan["pairs"] == [] and plan["notes"] == []
+
+
 def test_sweep_plan_기준값_0은_절대_스텝으로():
     """상대 스팬은 0에서 성립하지 않는다 (probe_value와 같은 이유) — zero_step
     절대 스텝을 쓴다. 0을 0으로 곱해 '스윕했는데 아무 일 없음'을 만들지 않는다."""

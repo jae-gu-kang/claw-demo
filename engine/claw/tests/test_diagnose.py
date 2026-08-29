@@ -220,3 +220,26 @@ def test_규칙4_국소성_판정():
     global_ = diagnose_grid([case(0.2 + 0.1 * i, i < 8) for i in range(9)])
     assert global_["metrics"]["alt_rms"]["verdict"] == "global"
     assert global_["metrics"]["alt_rms"]["knob_class"] == "loop_gain"
+
+
+def test_규칙4_잘린_런은_판정에서_빠진다():
+    """발산으로 중단된 런의 지표는 잘린 구간만의 값 — 문턱 안으로 보여도 근거가
+    아니다. 세면 판정 불가가 '정상'으로 위장된다."""
+    def case(m, *, rms, aborted=False):
+        return {"case": {"mach": m, "alt": 1000.0, "fuel": 200.0},
+                "metrics": {"alt_rms": rms}, "aborted": aborted}
+
+    # 정상 2 + 결함 2 + 잘린 4. 잰 것만 세면 2/4 = 0.5 > 1/3 → 전역(게인 수준),
+    # 잘린 4건까지 세면 2/8 = 0.25 ≤ 1/3 → 국소(스케줄 셀)로 뒤집힌다
+    out = diagnose_grid([
+        case(0.3, rms=2.0), case(0.4, rms=2.0),
+        case(0.5, rms=30.0), case(0.6, rms=30.0),
+        *(case(0.7 + 0.1 * i, rms=2.0, aborted=True) for i in range(4)),
+    ])
+    g = out["metrics"]["alt_rms"]
+    assert g["n_cases"] == 4 and g["n_bad"] == 2
+    assert g["bad_frac"] == 0.5  # 2/4 — 이진수로 정확한 값이라 근사 비교가 필요 없다
+    assert g["verdict"] == "global" and g["knob_class"] == "loop_gain"
+
+    # 전부 잘리면 잰 케이스가 없다 — 지표 자체가 판정에서 빠진다 (ok가 아니다)
+    assert diagnose_grid([case(0.4, rms=2.0, aborted=True)])["metrics"] == {}

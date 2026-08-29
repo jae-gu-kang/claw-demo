@@ -31,6 +31,22 @@ export function serpentineCases(machs, alts, fuels) {
   return cases;
 }
 
+/** 케이스에 정본 이름 부여 — 이름이 케이스 매핑 키다 (영향성 스캔의 bad_cases ↔
+3단 B 케이스 객체 복원). 반올림하지 않고 격자 값 그대로 문자열화한다 — 정밀 격자
+(예: mach 간격 0.005)에서 반올림 이름은 겹치고, 겹친 이름은 Δ의 base 귀속을
+조용히 다른 케이스로 바꾼다. 중복은 던진다 (조용한 오귀속 금지). */
+export function nameCases(cases) {
+  const seen = new Set();
+  return cases.map((c) => {
+    const name = `M${c.mach}_h${c.alt}_f${c.fuel}`;
+    if (seen.has(name)) {
+      throw new Error(`케이스 이름 중복: ${name} — 격자 목록에 같은 값이 두 번 있다`);
+    }
+    seen.add(name);
+    return { ...c, name }; // 입력의 name이 검증한 이름을 덮지 않도록 뒤에 둔다
+  });
+}
+
 export function parseNumberList(text) {
   const vals = String(text).split(/[\s,]+/).filter(Boolean).map(Number);
   if (!vals.length || vals.some((v) => !Number.isFinite(v))) {

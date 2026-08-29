@@ -503,21 +503,26 @@ _GRID_CHECKS = {
 def diagnose_grid(per_case, thresholds=None) -> dict:
     """규칙 4 — 케이스 격자별 지표의 국소성 판정.
 
-    per_case: [{"case": {...}, "metrics": {...}}]. 결함이 격자 일부에 몰리면
-    스케줄(테이블 형상 — 그 구간 셀), 전반이면 설계점 게인 수준이 처방 클래스다.
-    구체 knobs는 정하지 않는다 — 어느 자리가 얼마나인지는 3단 스윕이 정량으로
-    답한다. 단일런 진단(diagnose_run)과 의존이 없다 — 격자 런이 생기면 소급
-    활성화되는 별도 입력이다.
+    per_case: [{"case": {...}, "metrics": {...}, "aborted": ...}]. 결함이 격자
+    일부에 몰리면 스케줄(테이블 형상 — 그 구간 셀), 전반이면 설계점 게인 수준이
+    처방 클래스다. 구체 knobs는 정하지 않는다 — 어느 자리가 얼마나인지는 3단
+    스윕이 정량으로 답한다. 단일런 진단(diagnose_run)과 의존이 없다 — 격자 런이
+    생기면 소급 활성화되는 별도 입력이다.
+
+    **잘린 런(aborted)은 통째로 뺀다** — 발산으로 중단된 런의 지표는 잘린 구간
+    만의 값이라 문턱 안으로 보일 수 있고, 그러면 판정 불가가 "정상"으로 위장된다.
+    n_cases는 실제로 잰 케이스 수다.
     """
     checks = dict(_GRID_CHECKS)
     if thresholds:
         for k, v in thresholds.items():
             if k in checks:
                 checks[k] = (float(v), checks[k][1])
+    usable = [pc for pc in per_case if not pc.get("aborted")]
     out = {}
     for key, (thresh, above_is_bad) in checks.items():
         rows = [(pc.get("case") or {}, (pc.get("metrics") or {}).get(key))
-                for pc in per_case]
+                for pc in usable]
         known = [(c, v) for c, v in rows if v is not None]
         if not known:
             continue

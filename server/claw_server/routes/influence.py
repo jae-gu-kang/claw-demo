@@ -15,7 +15,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import Field, field_validator
 
-from claw.pipeline.diagnose import diagnose_run
+from claw.pipeline.diagnose import diagnose_grid, diagnose_run
 from claw.pipeline.influence import Shape, param_universe, structural_payload
 from claw.pipeline.openloop import openloop_delta
 from claw.pipeline.sweep import nonadditivity, run_sweep, sweep_plan
@@ -28,6 +28,10 @@ from claw_server.routes.trim import TrimCaseIn, build_cases
 from claw_server.serialize import to_jsonable
 
 router = APIRouter(tags=["influence"])
+
+# 케이스 격자 상한 — 2·3단은 케이스마다 트림·시뮬 비용이 붙는 잡이라, 오타 격자
+# (예: 간격 0.001) 하나가 단일 워커를 시간 단위로 점유하는 것을 제출 시점에 막는다
+MAX_CASES = 200
 
 
 class InfluenceIn(FlightCodeIn):
@@ -149,7 +153,7 @@ class OpenloopIn(InfluenceIn):
     """2단 요청 — 형상 + 케이스 격자 + 볼 파라미터 (None = 루프 선언이 있는 전 자리)."""
 
     fingerprint: str = ""
-    cases: list[TrimCaseIn] = Field(min_length=1)
+    cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
     params: list[str] | None = None
 
 
@@ -211,7 +215,7 @@ class SweepIn(InfluenceIn):
     """
 
     fingerprint: str = ""
-    cases: list[TrimCaseIn] = Field(min_length=1)
+    cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
     knobs: list[str] = []
     pairs: list[tuple[str, str]] = []
     span: list[float] | None = None
@@ -307,5 +311,77 @@ def submit_sweep(req: SweepIn, request: Request, response: Response) -> dict:
         job.result_id = job.id
 
     job = request.app.state.jobs.submit("influence_sweep", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()
+
+
+class ScanIn(InfluenceIn):
+    """3단 A 요청 — 형상 + 케이스 격자만. knobs·pairs가 없는 것이 정의다:
+
+    케이스마다 base 런 하나로 현 형상의 지표를 재고, diagnose_grid(규칙 4)가
+    결함의 국소성(스케줄 vs 게인 수준)을 판정한다 — 풀 스윕은 여기서 좁혀진
+    케이스에만 간다 (케이스 × 런 비용은 곱이므로).
+    """
+
+    fingerprint: str = ""
+    cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
+    t_settle: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
+    t_step: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
+    dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
+
+
+@router.post("/influence/scan", status_code=202)
+def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
+    """3단 A — 전 케이스 base 스캔 + 국소성 판정 (잡 기반 202).
+
+    sweep_plan(shape, [], ())은 base 런 1개짜리 계획이라 run_sweep을 그대로
+    재사용한다 — sweep.py 머리말의 "기준런이 diagnose_grid의 입력" 계약의
+    소급 활성화다. 취소 시 완료 케이스의 행은 보존되고, 판정은 남은 케이스로만
+    낸다 (n_cases가 계보다).
+    """
+    ac = make_demo_aircraft()
+    cases = build_cases(req.cases)
+    try:
+        shape = to_shape(req)
+        plan = sweep_plan(shape, [], ())
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    store = request.app.state.store
+    n = len(cases)
+    total = n + n  # 트림 패스 + 케이스당 base 런 1개
+
+    def work(job):
+        trs = trim_batch(
+            ac, cases, fingerprint=req.fingerprint,
+            on_progress=lambda done, _t, tr: job.report(
+                done, total, message=f"트림: {tr.case.name}"
+            ),
+        )
+        out = run_sweep(
+            ac, trs, shape, plan,
+            dt_plant=req.dt_plant, t_settle=req.t_settle, t_step=req.t_step,
+            on_progress=lambda done, run_total: job.report(
+                n + done, n + run_total, message=f"스캔: {done}/{run_total}"
+            ),
+        )
+        # 잘린 런을 판정에서 뺄지는 엔진 판단이다 — 행을 그대로 넘긴다
+        per_case = [{"case": r["case"], "metrics": r["metrics"],
+                     "aborted": r["aborted"]}
+                    for r in out["rows"]]
+        n_aborted = sum(1 for r in out["rows"] if r["aborted"])
+        if n_aborted:
+            out["warnings"].append(
+                f"발산으로 잘린 케이스 {n_aborted}건 — 국소성 판정에서 제외")
+        payload = to_jsonable(out)
+        payload["kind"] = "influence_scan"
+        payload["grid"] = to_jsonable(diagnose_grid(per_case))
+        store.save(
+            job.id, payload,
+            meta={"kind": "influence_scan", "created": job.created,
+                  "n": len(out["rows"]), "fingerprint": req.fingerprint},
+        )
+        job.result_id = job.id
+
+    job = request.app.state.jobs.submit("influence_scan", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"
     return job.to_dict()

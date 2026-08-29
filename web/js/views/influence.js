@@ -20,9 +20,11 @@ import {
   BAND_COLOR, DIRECTION_LABEL, KNOB_CLASS, SKIN, STATE_COLOR, STATE_INK,
   STATE_LABEL, STATE_NOTE, WARN_INK,
   coneOf, diagnoseRequest, edgeVia, fmtDelta, fmtPercent, nodeDetail,
-  normalizeDiagnosis, normalizeGraph, pairsFor, radiusOf, structuralRequest,
-  sweepRequest,
+  normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor, radiusOf,
+  scanRequest, scanSummary, structuralRequest, sweepCases, sweepRequest,
+  worstDeltas,
 } from "../lib/influence.js";
+import { machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { conePlayback, summaryOf } from "../lib/influenceplay.js";
 import { cascadeLayout, layeredLayout } from "../lib/influencelayout.js";
 import { createInfluenceCanvas } from "./influencecanvas.js";
@@ -36,8 +38,13 @@ const ROW_GAP = 19;
 const state = {
   variant: "cascade", selection: null, model: null, layout: null,
   cone: null, play: null,
-  // 진단(2단 앞의 "무엇을") · 스윕(3단 "얼마나") — 탭을 떠났다 와도 결과 유지
-  diag: null, sweep: null,
+  // 진단(2단 앞의 "무엇을") · 스캔(3단 A "어느 케이스가") · 스윕(3단 B "얼마나")
+  // — 탭을 떠났다 와도 결과 유지
+  diag: null, scan: null, sweep: null,
+  // 케이스 격자 입력 — 결과(scan.selected)와 수명이 같아야 한다. 입력만 기본값으로
+  // 되돌아가면 재진입 직후 3단 B가 "격자가 바뀌었다"고 거절한다(사용자는 안 건드렸다)
+  gridForm: { machFrom: "0.4", machTo: "0.8", machStep: "0.1",
+    alts: "100, 1000, 3000", fuels: "200", tStep: "15" },
 };
 let canvas = null;
 
@@ -45,6 +52,13 @@ let canvas = null;
 // 랭크이므로(influenceplay.js) 「프로세스 뷰」(레이어 활성망)로 전환해도 같은 재생·
 // 같은 경로 패널을 공유한다 — 배치만 바꿔 같은 파라미터의 전파를 비교할 수 있다
 const LAYOUT_FN = { layered: layeredLayout, cascade: cascadeLayout };
+
+// 스캔(3단 A) 판정 칩 — local/global은 그 판정이 함의하는 처방 클래스의 잉크와
+// 정렬한다 (국소 → 스케줄 셀, 전역 → 루프 게인 수준). ok만 별도 초록.
+const VERDICT_LABEL = { ok: "정상", local: "국소", global: "전역" };
+const VERDICT_INK = {
+  ok: "#32d74b", local: KNOB_CLASS.schedule.ink, global: KNOB_CLASS.loop_gain.ink,
+};
 
 export function render() {
   // 탭을 떠났다 돌아오면 이전 DOM은 버려진다 — 그쪽을 밀던 타이머도 같이 정리
@@ -471,6 +485,8 @@ export function render() {
   const diagStatus = el("span", { class: "hint" },
     "시뮬레이션 탭의 최근 런을 진단한다 — 런이 없으면 먼저 하나 만든다.");
   const diagBox = el("div");
+  const scanStatusLine = el("p", { class: "hint", style: "margin:6px 0 0" });
+  const scanBox = el("div");
   const sweepStatusLine = el("p", { class: "hint", style: "margin:6px 0 0" });
   const sweepBox = el("div");
   const resultInput = el("input", {
@@ -480,10 +496,46 @@ export function render() {
   });
   const numIn = (val, width = 70) =>
     el("input", { type: "number", value: val, step: "any", style: `width:${width}px` });
-  const machIn = numIn(0.6);
-  const altIn = numIn(1000);
-  const fuelIn = numIn(200);
-  const stepIn = numIn(15);
+  // 케이스 격자 — margins 탭과 같은 기본값(15케이스). 2단은 케이스당 ~10 ms라
+  // 격자 전체가 공짜지만, 3단은 케이스 × 런 곱이라 A(전 케이스 base 스캔)로
+  // 결함 케이스를 좁힌 뒤 B(부분 풀 스윕)로 간다.
+  const g = state.gridForm;
+  const machFromIn = numIn(g.machFrom, 55);
+  const machToIn = numIn(g.machTo, 55);
+  const machStepIn = numIn(g.machStep, 55);
+  const altsIn = el("input", { type: "text", value: g.alts, style: "width:120px" });
+  const fuelsIn = el("input", { type: "text", value: g.fuels, style: "width:60px" });
+  const stepIn = numIn(g.tStep, 55);
+  const caseCountHint = el("span", { class: "hint" });
+
+  // 이름은 클라이언트가 명시 부여한다(lib/grid.js nameCases — 유일성 보장) —
+  // 스캔 결과의 bad_cases(이름 문자열)를 3단 B의 케이스 객체로 되돌리는 매핑이
+  // 서버 자동 명명 형식에 묶이지 않게
+  function gridCases() {
+    return nameCases(serpentineCases(
+      machRange(Number(machFromIn.value), Number(machToIn.value),
+        Number(machStepIn.value)),
+      parseNumberList(altsIn.value),
+      parseNumberList(fuelsIn.value),
+    ));
+  }
+  function renderCaseCount() {
+    try {
+      caseCountHint.textContent = `케이스 ${gridCases().length}건`;
+    } catch {
+      caseCountHint.textContent = "격자 입력 오류";
+    }
+  }
+  for (const [key, inp] of Object.entries({
+    machFrom: machFromIn, machTo: machToIn, machStep: machStepIn,
+    alts: altsIn, fuels: fuelsIn, tStep: stepIn,
+  })) {
+    inp.addEventListener("input", () => {
+      state.gridForm[key] = inp.value;  // 재진입 때 되살릴 값
+      renderCaseCount();
+    });
+  }
+  renderCaseCount();
 
   const metricLabel = (key) =>
     (state.model?.metrics ?? []).find((m) => m.key === key)?.label ?? key;
@@ -587,7 +639,7 @@ export function render() {
             el("button", { onclick: () => runOpenloop(p) }, "개루프 근거 (2단)"),
             el("button", {
               class: "primary", onclick: () => runSweep(p),
-            }, "이 부분공간 스윕 (3단)"),
+            }, "이 부분공간 스윕 (3단 B)"),
           ),
         );
       })));
@@ -597,11 +649,15 @@ export function render() {
   const olBox = el("div");
 
   async function runOpenloop(card) {
-    const cases = [{
-      name: "sweep",
-      mach: Number(machIn.value), alt: Number(altIn.value), fuel: Number(fuelIn.value),
-    }];
-    olStatusLine.textContent = "개루프 Δ 계산 중…";
+    let cases;
+    try {
+      cases = gridCases();
+    } catch (e) {
+      olStatusLine.textContent = "격자 입력 오류";
+      clear(olBox).append(el("div", { class: "error-box" }, errorText(e)));
+      return;
+    }
+    olStatusLine.textContent = `개루프 Δ 계산 중 — 케이스 ${cases.length}건…`;
     clear(olBox);
     try {
       const job = await api.post("/influence/openloop", {
@@ -644,31 +700,243 @@ export function render() {
         }
       }
     }
+    // 요약이 정본 표면이다 — 케이스 격자에서 답할 질문은 "최악이 어디서 얼마나"이고,
+    // 케이스별 전체 표는 접힌 근거로 남는다 (전 행을 펼치면 15케이스 × 루프 수가 된다)
+    const worst = openloopWorst(res.params, card.knobs);
     olBox.append(
       el("h3", { style: "margin:12px 0 4px;font-size:14px" },
-        `개루프 마진 근거 (2단) — 섭동 ${fmtPercent(res.probe_rel)}`),
-      el("div", { class: "scroll-x" },
-        el("table", {},
-          el("thead", {}, el("tr", {},
-            ["손잡이", "루프", "케이스", "기준 PM/GM", "Δ PM/GM", "비고"].map((h) =>
-              el("th", {}, h)))),
-          el("tbody", {}, rows.map((r) =>
-            el("tr", {}, r.map((c, i) =>
-              el("td", i < 2 ? {} : { class: "num" },
-                i < 2 ? el("code", { style: mono() }, c) : c))))),
-        )),
+        `개루프 마진 근거 (2단) — 섭동 ${fmtPercent(res.probe_rel)} · ` +
+        "케이스 전체에서 최악 Δ"),
+      // 요약 대상이 없으면 표 대신 사유 — 빈 표는 버그로 읽힌다
+      !worst.length
+        ? el("p", { class: "hint", style: "margin:4px 0 0" },
+            "요약 없음 — 이 손잡이에는 선언된 루프의 유효한 Δ가 없다 " +
+            "(스케줄이 덮거나 루프 미선언). 사유는 케이스별 전체 표에 있다.")
+        : el("div", { class: "scroll-x" },
+            el("table", {},
+              el("thead", {}, el("tr", {},
+                ["손잡이", "루프", "케이스 수", "최악 ΔPM (케이스)", "최악 ΔGM (케이스)"]
+                  .map((h) => el("th", {}, h)))),
+              el("tbody", {}, worst.map((w) =>
+                el("tr", {},
+                  el("td", {}, el("code", { style: `${mono()};white-space:nowrap` }, w.param)),
+                  el("td", {}, el("code", { style: mono() }, w.loop)),
+                  el("td", { class: "num" }, String(w.nCases)),
+                  el("td", { class: "num", style: "white-space:nowrap" },
+                    w.pm ? `${fmtDelta(w.pm.value)}° @ ${w.pm.case}` : "—"),
+                  el("td", { class: "num", style: "white-space:nowrap" },
+                    w.gm ? `${fmtDelta(w.gm.value)} dB @ ${w.gm.case}` : "—"),
+                ))),
+            )),
+      el("details", { style: "margin-top:8px" },
+        el("summary", { class: "hint", style: "cursor:pointer" },
+          `케이스별 전체 표 (${rows.length}행)`),
+        el("div", { class: "scroll-x", style: "margin-top:6px" },
+          el("table", {},
+            el("thead", {}, el("tr", {},
+              ["손잡이", "루프", "케이스", "기준 PM/GM", "Δ PM/GM", "비고"].map((h) =>
+                el("th", {}, h)))),
+            el("tbody", {}, rows.map((r) =>
+              el("tr", {}, r.map((c, i) =>
+                el("td", i < 2 ? {} : { class: "num" },
+                  i < 2 ? el("code", { style: mono() }, c) : c))))),
+          ))),
       el("p", { class: "hint", style: "margin:6px 0 0" },
         "개루프는 피드백이 얼어 있는 근사다 — 스케줄이 덮는 자리·루프 선언이 없는 " +
         "자리는 Δ=0으로 위장하지 않고 사유로 남는다. 폐루프 확증은 스윕(3단) 몫이다."),
     );
   }
 
+  async function runScan() {
+    let cases;
+    try {
+      cases = gridCases();
+    } catch (e) {
+      state.scan = { status: "격자 입력 오류", result: null,
+        error: errorText(e), selected: null };
+      renderScan();
+      return;
+    }
+    state.scan = { status: `전 케이스 스캔 제출 — 케이스 ${cases.length}건`,
+      result: null, error: null, selected: null };
+    renderScan();
+    try {
+      const job = await api.post("/influence/scan", scanRequest(shapeState(), {
+        cases, tSettle: 5, tStep: Number(stepIn.value) || 15,
+        fingerprint: state.diag?.fingerprint,
+      }));
+      const done = await watchJob(job.id, (j) => {
+        state.scan.status =
+          `스캔 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`;
+        scanStatusLine.textContent = state.scan.status;
+      });
+      state.scan.status = done.status === "done"
+        ? "완료" : `스캔 ${done.status} — 완료 케이스는 보존된다`;
+      if (done.result_id) {
+        state.scan.result = await api.get(`/results/${done.result_id}`);
+        // 결함 케이스 전부가 기본 선택 — 체크박스로 3단 B 대상을 조정한다
+        state.scan.selected = new Set(scanSummary(state.scan.result).badCaseNames);
+      }
+      renderScan();
+    } catch (e) {
+      state.scan.status = "실패";
+      state.scan.error = errorText(e);
+      renderScan();
+    }
+  }
+
+  // 결함 케이스 선택 — 판정이 난 경우와 전부 잘려 판정이 없는 경우 양쪽에서 쓴다
+  // (잘린 케이스도 B 대상이라 선택 자리가 없으면 손으로 넣을 방법이 사라진다)
+  function appendCaseSelect(sum, s) {
+    if (!sum.badCaseNames.length) {
+      // 고를 것이 없는 이유가 두 가지다 — 잰 결과가 전부 문턱 안(정상)인 것과
+      // 아예 잰 것이 없는 것. 후자를 "정상"이라 쓰면 한 번도 안 잰 격자를
+      // 정상으로 위장하게 된다 (판정 0건 ≠ 전 케이스 정상)
+      scanBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
+        sum.verdicts.length
+          ? "전 케이스 정상 — 부분 스윕으로 좁힐 결함 케이스가 없다. " +
+            "3단 B는 격자 전체로 제출된다."
+          : "고를 결함 케이스가 없다 — 판정이 없어 좁힐 근거도 없다. " +
+            "3단 B는 격자 전체로 제출된다."));
+      return;
+    }
+    const aborted = new Set(sum.abortedCases);
+    scanBox.append(
+      el("p", { class: "hint", style: "margin:8px 0 0" },
+        "결함 케이스 — 체크된 케이스만 3단 B(부분 풀 스윕)에 들어간다" +
+        (aborted.size ? " (발산으로 잘린 케이스 포함 — 판정은 못 냈지만 확인 대상이다)" : "") +
+        ":"),
+      el("div", { class: "row", style: "gap:12px;flex-wrap:wrap;margin-top:4px" },
+        sum.badCaseNames.map((name) => {
+          const cb = el("input", {
+            type: "checkbox",
+            onchange: () => {
+              if (cb.checked) s.selected.add(name);
+              else s.selected.delete(name);
+            },
+          });
+          // result가 실린 스캔은 selected(Set)도 함께 실린다(runScan 불변식) —
+          // 위 onchange의 s.selected.add와 같은 전제로 읽는다
+          cb.checked = s.selected.has(name);
+          return el("label", {
+            class: "hint", style: "display:flex;gap:4px;align-items:center",
+          }, cb, el("code", { style: mono() }, name),
+            aborted.has(name)
+              ? el("span", { style: `color:${WARN_INK};font-size:11px` }, "발산")
+              : null);
+        })),
+    );
+  }
+
+  function renderScan() {
+    clear(scanBox);
+    const s = state.scan;
+    scanStatusLine.textContent = s?.status ?? "";
+    if (!s) return;
+    if (s.error) {
+      scanBox.append(el("div", { class: "error-box" }, s.error));
+      return;
+    }
+    const res = s.result;
+    if (!res) return;
+    const sum = scanSummary(res);
+    const fmtVal = (k, v) => (k.endsWith("_frac") ? fmtPercent(v) : fmtDelta(v));
+    const appendWarnings = () => {
+      for (const w of res.warnings ?? []) {
+        scanBox.append(
+          el("p", { style: `margin:4px 0;font-size:12px;color:${WARN_INK}` }, `⚠ ${w}`));
+      }
+    };
+    // 판정 0건 ≠ 전 케이스 정상 — 잰 케이스가 없거나 전부 잘렸으면 판정 불가다.
+    // 사유는 갈라진다: 취소로 안 돈 것과 다 돌았지만 전부 발산한 것은 다른 사실이다
+    if (!sum.verdicts.length) {
+      scanBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
+        sum.abortedCases.length
+          ? `판정 없음 — 잰 케이스가 전부 발산으로 잘렸다 (${sum.abortedCases.length}건). ` +
+            "지표가 잘린 구간만의 값이라 국소성을 낼 수 없다 — 아래 케이스를 3단 B로 확인한다."
+          : "판정 없음 — 완료된 케이스가 없다 (스캔이 케이스 완료 전에 취소·실패). " +
+            "다시 스캔해야 3단 B 대상을 좁힐 수 있다."));
+      appendCaseSelect(sum, s);
+      appendWarnings();
+      return;
+    }
+    // ① 지표별 국소성 판정 — 서버 diagnose_grid 판정을 그대로 그린다 (재계산 금지)
+    scanBox.append(
+      el("h3", { style: "margin:12px 0 4px;font-size:14px" },
+        `전 케이스 스캔 (3단 A) — base 지표 케이스 ${res.rows?.length ?? 0}건 · ` +
+        "국소성 판정"),
+      el("div", { class: "scroll-x" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            ["지표", "판정", "처방 클래스", "결함 케이스", "문턱"].map((h) =>
+              el("th", {}, h)))),
+          el("tbody", {}, sum.verdicts.map((v) => {
+            const ink = VERDICT_INK[v.verdict] ?? "#98989d";
+            const cls = v.knobClass
+              ? (KNOB_CLASS[v.knobClass]?.label ?? v.knobClass) : "—";
+            return el("tr", {},
+              el("td", {}, metricLabel(v.metric)),
+              el("td", {}, el("span", {
+                class: "flag",
+                style: `background:${ink}26;color:${ink};font-weight:600`,
+              }, VERDICT_LABEL[v.verdict] ?? v.verdict)),
+              el("td", {}, cls),
+              el("td", { class: "num" },
+                `${v.nBad}/${v.nCases} (${fmtPercent(v.badFrac)})`),
+              el("td", { class: "num" }, fmtVal(v.metric, v.threshold)),
+            );
+          })),
+        )),
+      el("p", { class: "hint", style: "margin:6px 0 0" },
+        `국소(결함 ≤ ${fmtPercent(sum.localFrac)})면 스케줄 셀이, 전역이면 설계점 ` +
+        "게인 수준이 처방 클래스다 — 어느 자리를 얼마나는 3단 B가 정량으로 답한다."),
+    );
+    // ② 케이스 × 지표 표 — 결함 셀 강조 (판정 소속은 서버 bad_cases가 정본)
+    const keys = sum.verdicts.map((v) => v.metric);
+    const badBy = new Map(sum.verdicts.map((v) => [v.metric, new Set(v.badCases)]));
+    scanBox.append(
+      el("div", { class: "scroll-x", style: "margin-top:8px" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            [el("th", {}, "케이스"), keys.map((k) => el("th", {}, metricLabel(k)))])),
+          el("tbody", {}, (res.rows ?? []).map((r) =>
+            el("tr", {},
+              el("td", { style: "white-space:nowrap" }, r.case,
+                // 발산으로 잘린 런의 지표는 잘린 구간만의 값 — 판정에서도 제외된다
+                r.aborted
+                  ? el("span", { style: `color:${WARN_INK}` }, " · 발산 중단")
+                  : null),
+              keys.map((k) =>
+                el("td", {
+                  class: "num",
+                  style: badBy.get(k)?.has(r.case)
+                    ? `color:${WARN_INK};font-weight:600` : "",
+                }, fmtVal(k, r.metrics?.[k]))),
+            ))),
+        )),
+    );
+    // ③ 결함 케이스 선택 — 3단 B의 입력
+    appendCaseSelect(sum, s);
+    appendWarnings();
+  }
+
   async function runSweep(card) {
-    const cases = [{
-      name: "sweep",
-      mach: Number(machIn.value), alt: Number(altIn.value), fuel: Number(fuelIn.value),
-    }];
-    state.sweep = { card, status: "제출 중…", result: null, error: null };
+    let cases;
+    try {
+      // 대상 결정은 순수 로직 — lib이 쥔다 (격자·스캔·선택 → 케이스 목록)
+      cases = sweepCases(gridCases(), state.scan);
+    } catch (e) {
+      state.sweep = { card, status: "제출 불가", result: null,
+        error: errorText(e) };
+      renderSweep();
+      return;
+    }
+    // 런 수 추정: base + knob당 스팬 4점 + 쌍당 (동반 단독 + AB) 2점 — 실수로
+    // 격자 전체를 제출해도 규모가 먼저 보이게 한다 (정확한 수는 sweep_plan 몫)
+    const nRuns = 1 + card.knobs.length * 4 + pairsFor(card).length * 2;
+    state.sweep = { card,
+      status: `제출 중 — 케이스 ${cases.length}건 × 런 ~${nRuns}`,
+      result: null, error: null };
     renderSweep();
     try {
       const body = sweepRequest(shapeState(), {
@@ -708,24 +976,55 @@ export function render() {
     const res = s.result;
     if (!res) return;
     const keys = [...new Set(res.rows.flatMap((r) => Object.keys(r.metrics ?? {})))];
+    const caseNames = [...new Set(res.rows.map((r) => r.case))];
+    const fullTable = el("div", { class: "scroll-x", style: "margin-top:8px" },
+      el("table", {},
+        el("thead", {}, el("tr", {},
+          [el("th", {}, "런"), el("th", {}, "케이스"),
+           keys.map((k) => el("th", {}, `Δ ${metricLabel(k)}`))])),
+        el("tbody", {}, res.rows.map((r) =>
+          el("tr", {},
+            el("td", {},
+              el("code", { style: `${mono()};white-space:nowrap` }, r.label)),
+            el("td", { style: "white-space:nowrap" }, r.case),
+            keys.map((k) => el("td", { class: "num" },
+              r.label === "base"
+                ? `기준 ${fmtDelta(r.metrics?.[k])}`
+                : fmtDelta(r.delta?.[k]))),
+          ))),
+      ));
+    if (caseNames.length > 1) {
+      // 다중 케이스 — 런별 최악 Δ 요약이 정본 표면, 케이스×런 전체 표는 접힌 근거
+      const worst = worstDeltas(res.rows);
+      sweepBox.append(
+        el("h3", { style: "margin:12px 0 4px;font-size:14px" },
+          `폐루프 스윕 (3단 B) — 케이스 ${caseNames.length}건 · 런별 최악 Δ (@케이스)`),
+        el("div", { class: "scroll-x" },
+          el("table", {},
+            el("thead", {}, el("tr", {},
+              [el("th", {}, "런"),
+               keys.map((k) => el("th", {}, `Δ ${metricLabel(k)}`))])),
+            el("tbody", {}, Object.entries(worst).map(([label, m]) =>
+              el("tr", {},
+                // nowrap — 좁은 셀에서 라벨·"Δ @ 케이스"가 세로로 꺾이면 행이
+                // 비대해진다. 넘침은 scroll-x 컨테이너가 받는다
+                el("td", {},
+                  el("code", { style: `${mono()};white-space:nowrap` }, label)),
+                keys.map((k) => el("td", { class: "num", style: "white-space:nowrap" },
+                  m[k] ? `${fmtDelta(m[k].delta)} @ ${m[k].case}` : "—")),
+              ))),
+          )),
+        el("details", { style: "margin-top:8px" },
+          el("summary", { class: "hint", style: "cursor:pointer" },
+            `케이스×런 전체 표 (${res.rows.length}행)`),
+          fullTable),
+      );
+    } else {
+      sweepBox.append(fullTable);
+    }
     sweepBox.append(
-      el("div", { class: "scroll-x", style: "margin-top:8px" },
-        el("table", {},
-          el("thead", {}, el("tr", {},
-            [el("th", {}, "런"), el("th", {}, "케이스"),
-             keys.map((k) => el("th", {}, `Δ ${metricLabel(k)}`))])),
-          el("tbody", {}, res.rows.map((r) =>
-            el("tr", {},
-              el("td", {}, el("code", { style: mono() }, r.label)),
-              el("td", {}, r.case),
-              keys.map((k) => el("td", { class: "num" },
-                r.label === "base"
-                  ? `기준 ${fmtDelta(r.metrics?.[k])}`
-                  : fmtDelta(r.delta?.[k]))),
-            ))),
-        )),
       el("p", { class: "hint", style: "margin:6px 0 0" },
-        "Δ는 base 런 대비다 — 행마다 형상 지문이 계보로 저장되어 있다."),
+        "Δ는 같은 케이스의 base 런 대비다 — 행마다 형상 지문이 계보로 저장되어 있다."),
     );
     if (res.nonadditivity?.length) {
       sweepBox.append(
@@ -733,11 +1032,13 @@ export function render() {
         el("div", { class: "scroll-x" },
           el("table", {},
             el("thead", {}, el("tr", {},
-              [el("th", {}, "쌍"), keys.map((k) => el("th", {}, metricLabel(k)))])),
+              [el("th", {}, "쌍"), el("th", {}, "케이스"),
+               keys.map((k) => el("th", {}, metricLabel(k)))])),
             el("tbody", {}, res.nonadditivity.map((na) =>
               el("tr", {},
                 el("td", {}, na.knobs.map((k) =>
                   el("code", { style: `${mono()};margin-right:6px` }, k))),
+                el("td", {}, na.case),
                 keys.map((k) => el("td", { class: "num" }, fmtDelta(na.values?.[k]))),
               ))),
           )),
@@ -766,8 +1067,9 @@ export function render() {
   canvasBox.append(canvas.root);
 
   load();
-  // 탭을 떠났다 와도 진단·스윕 결과는 다시 그린다 (모듈 스코프 state 유지 규약)
+  // 탭을 떠났다 와도 진단·스캔·스윕 결과는 다시 그린다 (모듈 스코프 state 유지 규약)
   if (state.diag) renderDiag();
+  if (state.scan) renderScan();
   if (state.sweep) renderSweep();
 
   return el("div", { class: "inf-dark" },
@@ -804,17 +1106,26 @@ export function render() {
       el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
         resultInput,
         el("button", { class: "primary", onclick: runDiagnose }, "진단 실행"),
-        el("span", { class: "grow" }),
-        el("span", { class: "hint" }, "스윕 케이스"),
-        el("label", { class: "hint" }, "mach ", machIn),
-        el("label", { class: "hint" }, "alt ", altIn),
-        el("label", { class: "hint" }, "fuel ", fuelIn),
+      ),
+      el("div", {
+        class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px",
+      },
+        el("span", { class: "hint" }, "케이스 격자"),
+        el("label", { class: "hint" }, "mach ", machFromIn, " ~ ", machToIn),
+        el("label", { class: "hint" }, "간격 ", machStepIn),
+        el("label", { class: "hint" }, "alt[m] ", altsIn),
+        el("label", { class: "hint" }, "fuel[kg] ", fuelsIn),
         el("label", { class: "hint" }, "스텝 s ", stepIn),
+        caseCountHint,
+        el("span", { class: "grow" }),
+        el("button", { onclick: runScan }, "전 케이스 스캔 (3단 A)"),
       ),
       el("div", { class: "row", style: "margin-top:6px" }, diagStatus),
       diagBox,
       olStatusLine,
       olBox,
+      scanStatusLine,
+      scanBox,
       sweepStatusLine,
       sweepBox,
     ),

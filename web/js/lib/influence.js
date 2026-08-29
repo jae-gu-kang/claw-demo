@@ -288,6 +288,118 @@ export function sweepRequest(state, { cases, knobs, pairs = [], span,
   return body;
 }
 
+/** 형상 + 케이스 격자 → /influence/scan 본문 (3단 A) — sweepRequest에서
+ *  knobs·pairs·span을 뺀 형태다: base 스캔은 흔들 것이 없는 것이 정의다. */
+export function scanRequest(state, { cases, tSettle, tStep, fingerprint } = {}) {
+  const body = { ...structuralRequest(state), cases };
+  if (tSettle != null) body.t_settle = tSettle;
+  if (tStep != null) body.t_step = tStep;
+  if (fingerprint) body.fingerprint = fingerprint;
+  return body;
+}
+
+// 판정의 표시 순서 — 나쁜 것부터. 모르는 판정은 맨 뒤(조용히 숨기지 않는다).
+const VERDICT_RANK = { global: 0, local: 1, ok: 2 };
+
+/** /influence/scan 결과 → 화면 모델 — 서버 판정(diagnose_grid)을 다시 계산하지
+ *  않는다. badCaseNames는 전 지표 bad_cases에 **발산으로 잘린 케이스를 합친**
+ *  것으로(격자 순서 무관, 중복 제거), 3단 B(부분 풀 스윕)의 기본 케이스 선택이
+ *  된다. 잘린 케이스는 판정에서 빠지지만(지표가 잘린 구간만의 값이라 근거가
+ *  못 된다) 그건 "볼 필요 없음"이 아니라 재확인이 가장 급한 자리다 — 빼면
+ *  판정 불가가 B 대상 선정에서 정상으로 위장된다. */
+export function scanSummary(payload) {
+  const metrics = payload?.grid?.metrics ?? {};
+  const verdicts = Object.entries(metrics).map(([metric, g]) => ({
+    metric,
+    verdict: g.verdict,
+    knobClass: g.knob_class ?? null,
+    threshold: g.threshold,
+    nBad: g.n_bad,
+    nCases: g.n_cases,
+    badFrac: g.bad_frac,
+    badCases: g.bad_cases ?? [],
+  })).sort((a, b) =>
+    (VERDICT_RANK[a.verdict] ?? 9) - (VERDICT_RANK[b.verdict] ?? 9)
+    || b.badFrac - a.badFrac);
+  const abortedCases = [...new Set((payload?.rows ?? [])
+    .filter((r) => r.aborted).map((r) => r.case))];
+  const badCaseNames = [...new Set(
+    [...verdicts.flatMap((v) => v.badCases), ...abortedCases])];
+  return { verdicts, badCaseNames, abortedCases,
+    localFrac: payload?.grid?.local_frac ?? null };
+}
+
+/** 3단 B 대상 케이스 결정 — 스캔이 결함 케이스를 골랐으면 **체크된 것만**,
+ *  결함이 없었거나 스캔 전이면 격자 전체. 선택이 격자와 어긋나면 남은 것만 조용히
+ *  돌리지 않고 던진다: 화면이 "체크된 케이스만 들어간다"라고 말한 이상, 빠진 채
+ *  도는 스윕은 "확인했다"는 오독을 만든다. 이름은 값 그대로라(grid.js nameCases)
+ *  이름 일치가 곧 값 일치다. */
+export function sweepCases(grid, scan) {
+  if (!scan?.result) return grid;
+  const bad = scanSummary(scan.result).badCaseNames;
+  if (!bad.length) return grid;
+  const sel = scan.selected ?? new Set();
+  if (!sel.size) {
+    throw new Error("결함 케이스 체크가 전부 해제됨 — 3단 B 대상이 없다. " +
+      "체크를 되돌리거나, 격자 전체로 돌리려면 다시 스캔한다.");
+  }
+  const names = new Set(grid.map((c) => c.name));
+  const missing = [...sel].filter((n) => !names.has(n));
+  if (missing.length) {
+    throw new Error(
+      `스캔 뒤 격자가 바뀌어 선택 케이스 ${missing.length}건이 지금 격자에 없다: ` +
+      `${missing.join(", ")} — 격자를 되돌리거나 다시 스캔한다.`);
+  }
+  return grid.filter((c) => sel.has(c.name));
+}
+
+/** 다중 케이스 스윕 요약 — base 제외 런 label별로, 지표마다 |Δ| 최대와 그 케이스.
+ *  케이스 하나뿐이어도 형태는 같다 (요약 표가 곧 그 케이스). */
+export function worstDeltas(rows) {
+  const out = {};
+  for (const r of rows ?? []) {
+    if (r.label === "base" || !r.delta) continue;
+    const entry = (out[r.label] ??= {});
+    for (const [k, v] of Object.entries(r.delta)) {
+      if (v == null) continue;
+      if (!entry[k] || Math.abs(v) > Math.abs(entry[k].delta)) {
+        entry[k] = { delta: v, case: r.case };
+      }
+    }
+  }
+  return out;
+}
+
+/** 2단 다중 케이스 요약 — (knob, 루프)별로 케이스 전체에서 |ΔPM|·|ΔGM|가 가장
+ *  큰 값과 그 케이스. delta가 없는 항목(no_loop·overridden 등)은 세지 않는다 —
+ *  판정 불가를 0으로 위장하지 않는 renderOpenloop 규약과 같다. */
+export function openloopWorst(params, knobs) {
+  const rows = [];
+  for (const pid of knobs ?? []) {
+    const p = params?.[pid];
+    if (!p || p.status !== "ok") continue;
+    for (const [loop, byCase] of Object.entries(p.loops ?? {})) {
+      let pm = null;
+      let gm = null;
+      let n = 0;
+      for (const [caseName, e] of Object.entries(byCase ?? {})) {
+        if (!e?.delta) continue;
+        n += 1;
+        const dpm = e.delta.pm_deg;
+        const dgm = e.delta.gm_db;
+        if (dpm != null && (!pm || Math.abs(dpm) > Math.abs(pm.value))) {
+          pm = { value: dpm, case: caseName };
+        }
+        if (dgm != null && (!gm || Math.abs(dgm) > Math.abs(gm.value))) {
+          gm = { value: dgm, case: caseName };
+        }
+      }
+      if (n) rows.push({ param: pid, loop, nCases: n, pm, gm });
+    }
+  }
+  return rows;
+}
+
 /** 카드의 동시 수정 후보 → 스윕 쌍 기본값: (대표 knob, 동반 knob). */
 export function pairsFor(card) {
   const a = card.knobs?.[0];

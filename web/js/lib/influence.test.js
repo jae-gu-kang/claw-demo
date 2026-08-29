@@ -5,8 +5,9 @@ import assert from "node:assert/strict";
 
 import {
   KNOB_CLASS, coneOf, diagnoseRequest, edgeVia, fmtDelta, logScale, nodeDetail,
-  normalizeDiagnosis, normalizeGraph, pairsFor, paramState, radiusOf, rampColor,
-  structuralRequest, sweepRequest,
+  normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor, paramState,
+  radiusOf, rampColor, scanRequest, scanSummary, structuralRequest,
+  sweepCases, sweepRequest, worstDeltas,
 } from "./influence.js";
 
 const payload = {
@@ -161,6 +162,118 @@ test("sweepRequest: 처방 knobs·pairs가 그대로 실린다 (부분공간 한
   assert.equal(body.t_step, 4);
   assert.equal(body.fingerprint, "fp-x");
   assert.equal(body.cases.length, 1);
+});
+
+test("scanRequest: 케이스 격자만 — knobs·pairs가 없는 것이 3단 A의 정의다", () => {
+  const body = scanRequest({ withSchedule: false }, {
+    cases: [{ name: "c1", mach: 0.5, alt: 1000, fuel: 200 }],
+    tSettle: 2, tStep: 4, fingerprint: "fp-a",
+  });
+  assert.equal(body.cases.length, 1);
+  assert.equal(body.t_settle, 2);
+  assert.equal(body.t_step, 4);
+  assert.equal(body.fingerprint, "fp-a");
+  assert.equal(body.with_schedule, false); // 형상은 structuralRequest 위임
+  assert.ok(!("knobs" in body) && !("pairs" in body));
+});
+
+test("scanSummary: 판정 나쁜 순 정렬 + 결함 케이스 합집합", () => {
+  const sum = scanSummary({
+    grid: {
+      local_frac: 1 / 3,
+      metrics: {
+        alt_rms: { verdict: "ok", knob_class: null, threshold: 2, n_bad: 0,
+          n_cases: 3, bad_frac: 0, bad_cases: [] },
+        hdg_rms: { verdict: "global", knob_class: "loop_gain", threshold: 0.05,
+          n_bad: 2, n_cases: 3, bad_frac: 2 / 3, bad_cases: ["c1", "c2"] },
+        spd_rms: { verdict: "local", knob_class: "schedule", threshold: 1.5,
+          n_bad: 1, n_cases: 3, bad_frac: 1 / 3, bad_cases: ["c2"] },
+      },
+    },
+  });
+  assert.deepEqual(sum.verdicts.map((v) => v.metric),
+    ["hdg_rms", "spd_rms", "alt_rms"]);
+  assert.deepEqual(sum.badCaseNames, ["c1", "c2"]); // 합집합 — 중복 없음
+  assert.equal(sum.localFrac, 1 / 3);
+  assert.equal(sum.verdicts[0].knobClass, "loop_gain");
+});
+
+test("scanSummary: 발산으로 잘린 케이스도 3단 B 대상 — 판정 제외가 곧 면제는 아니다", () => {
+  const sum = scanSummary({
+    rows: [{ case: "c1" }, { case: "c2", aborted: "diverged" },
+           { case: "c3", aborted: null }],
+    grid: { local_frac: 1 / 3, metrics: { alt_rms: {
+      verdict: "local", knob_class: "schedule", threshold: 2, n_bad: 1,
+      n_cases: 2, bad_frac: 0.5, bad_cases: ["c1"] } } },
+  });
+  assert.deepEqual(sum.abortedCases, ["c2"]);
+  assert.deepEqual(sum.badCaseNames, ["c1", "c2"]); // 잘린 c2가 빠지면 안 된다
+  // 판정이 하나도 없어도(전부 발산) 잘린 케이스는 대상으로 남는다
+  const allAborted = scanSummary({
+    rows: [{ case: "c1", aborted: "diverged" }], grid: { metrics: {} },
+  });
+  assert.deepEqual(allAborted.badCaseNames, ["c1"]);
+  assert.deepEqual(allAborted.verdicts, []);
+});
+
+test("sweepCases: 스캔 전·결함 없음은 격자 전체, 결함 있으면 체크된 것만", () => {
+  const grid = [{ name: "c1" }, { name: "c2" }, { name: "c3" }];
+  const withBad = (bad) => ({
+    grid: { local_frac: 1 / 3, metrics: { alt_rms: {
+      verdict: bad.length ? "global" : "ok", knob_class: null, threshold: 1,
+      n_bad: bad.length, n_cases: 3, bad_frac: bad.length / 3, bad_cases: bad } } },
+  });
+  assert.deepEqual(sweepCases(grid, null), grid);               // 스캔 전
+  assert.deepEqual(sweepCases(grid, { result: withBad([]) }), grid); // 전 케이스 정상
+  assert.deepEqual(
+    sweepCases(grid, { result: withBad(["c1", "c3"]), selected: new Set(["c1"]) }),
+    [{ name: "c1" }]);
+});
+
+test("sweepCases: 전부 해제·격자 어긋남은 던진다 — 조용히 일부만 돌지 않는다", () => {
+  const grid = [{ name: "c1" }, { name: "c2" }];
+  const scan = (sel) => ({
+    result: { grid: { local_frac: 1 / 3, metrics: { alt_rms: {
+      verdict: "global", knob_class: "loop_gain", threshold: 1, n_bad: 2,
+      n_cases: 2, bad_frac: 1, bad_cases: ["c1", "c2"] } } } },
+    selected: sel,
+  });
+  assert.throws(() => sweepCases(grid, scan(new Set())), /전부 해제/);
+  // 선택 2건 중 1건만 현 격자에 남은 경우 — 남은 것만 조용히 돌리면 안 된다
+  assert.throws(
+    () => sweepCases(grid, scan(new Set(["c1", "c9"]))),
+    /c9/);
+});
+
+test("worstDeltas: 런별 |Δ| 최대와 그 케이스 — base와 null은 세지 않는다", () => {
+  const w = worstDeltas([
+    { label: "base", case: "c1", metrics: { a: 1 }, delta: null },
+    { label: "k@+0.1", case: "c1", delta: { a: -0.5, b: null } },
+    { label: "k@+0.1", case: "c2", delta: { a: 0.2, b: 3 } },
+  ]);
+  assert.deepEqual(w["k@+0.1"].a, { delta: -0.5, case: "c1" }); // |−0.5| > |0.2|
+  assert.deepEqual(w["k@+0.1"].b, { delta: 3, case: "c2" });    // null은 후보가 아니다
+  assert.ok(!("base" in w));
+});
+
+test("openloopWorst: (knob, 루프)별 |ΔPM|·|ΔGM| 최악 — delta 없는 항목 제외", () => {
+  const rows = openloopWorst({
+    k1: {
+      status: "ok",
+      loops: {
+        pitch_rate: {
+          c1: { delta: { pm_deg: -2, gm_db: 0.5 } },
+          c2: { delta: { pm_deg: 1, gm_db: -3 } },
+          c3: { note: "no_loop" }, // delta 없음 — 케이스 수에 안 들어간다
+        },
+      },
+    },
+    k2: { status: "overridden" }, // ok가 아니면 요약에 없다 (상세 표가 사유를 든다)
+  }, ["k1", "k2"]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].nCases, 2);
+  assert.deepEqual(rows[0].pm, { value: -2, case: "c1" });
+  assert.deepEqual(rows[0].gm, { value: -3, case: "c2" });
 });
 
 test("pairsFor: 카드의 joint_with → (대표 knob, 동반 knob) 쌍", () => {

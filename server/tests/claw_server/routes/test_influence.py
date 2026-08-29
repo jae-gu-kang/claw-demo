@@ -218,6 +218,44 @@ def test_sweep_validation(client):
     }).status_code == 422
 
 
+# ---------- 3단 A 전 케이스 스캔 (base 런 + diagnose_grid) ----------
+
+
+def test_scan_job_round_trip(client, wait_job):
+    """전 케이스 base 스캔 — 케이스마다 base 런 1개 + 국소성 판정(grid)이 온다."""
+    r = client.post("/api/influence/scan", json={
+        "cases": [{"name": "c1", "mach": 0.5, "alt": 1000.0, "fuel": 200.0},
+                  {"name": "c2", "mach": 0.7, "alt": 1000.0, "fuel": 200.0}],
+        "t_settle": 2.0, "t_step": 4.0,
+        "fingerprint": "fp-scan",
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    assert res["kind"] == "influence_scan"
+    assert [row["label"] for row in res["rows"]] == ["base", "base"]
+    assert [row["case"] for row in res["rows"]] == ["c1", "c2"]
+    g = res["grid"]["metrics"]["alt_rms"]
+    assert g["n_cases"] == 2
+    assert g["verdict"] in {"ok", "local", "global"}
+    assert isinstance(g["bad_cases"], list)
+    assert res["grid"]["local_frac"] > 0
+    json.dumps(res, allow_nan=False)
+
+
+def test_cases_cap_is_422(client):
+    """격자 상한 — 오타 격자(간격 0.001 등)가 단일 워커를 시간 단위로 점유하지 않게."""
+    cases = [{"mach": 0.5 + i * 1e-4, "alt": 1000.0, "fuel": 200.0}
+             for i in range(201)]
+    assert client.post("/api/influence/scan",
+                       json={"cases": cases}).status_code == 422
+    assert client.post("/api/influence/openloop",
+                       json={"cases": cases}).status_code == 422
+    assert client.post("/api/influence/sweep", json={
+        "cases": cases, "knobs": ["table.pitch.kp"]}).status_code == 422
+
+
 def test_diagnose_fingerprint_mismatch_warns(client, wait_job):
     """계보 불일치는 오류가 아니라 경고다 — 결과는 내되 승격 판정이 실제 런 형상과
     다를 수 있음을 화면이 알아야 한다."""
