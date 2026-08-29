@@ -25,7 +25,7 @@
 from claw.blocks.basic import Gain, Product, Saturation, Sum
 from claw.blocks.controllers import PID
 from claw.blocks.filters import CommandFilter, Washout
-from claw.blocks.lookup import LookupBlock
+from claw.blocks.lookup import LookupBlock, PolyBlock
 from claw.blocks.base import Block
 from claw.codegen.ir import Graph, Node, Op, grouped
 from claw.codegen.ir_exec import GraphRunner
@@ -244,8 +244,12 @@ def gain_schedule_nodes(prefix, *, tables, filter_tau, srcs):
     for name, tab in sorted(tables.items()):
         group, _, key = name.partition(".")
         node_id = nm(f"{group}_{key}")
+        # 다항 테이블(PolyTable, kind='poly')은 구간 다항 평가 블록으로 — 격자
+        # 보간과 C 헬퍼가 다르다 (claw_lookup1d vs claw_polyeval1d). 같은 자리에
+        # 어느 표현이든 올 수 있고, 선택이 곧 형상이다 (01 §3.4 다항 채택).
+        block = PolyBlock if getattr(tab, "kind", None) == "poly" else LookupBlock
         nodes.append(
-            Node(node_id, LookupBlock, inputs=(filt[tab.axis_names[0]],),
+            Node(node_id, block, inputs=(filt[tab.axis_names[0]],),
                  params={"table": tab})
         )
         outs.setdefault(group, {})[key] = node_id

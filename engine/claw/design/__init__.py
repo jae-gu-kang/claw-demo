@@ -19,6 +19,13 @@ from claw.design.points import (
     PointSet,
     case_name,
 )
+from claw.design.fit import (
+    fit_gain_surface,
+    fit_slot,
+    fit_slots,
+    resample_to_table,
+    select_axes,
+)
 from claw.design.grid import coarse_grid
 from claw.design.refine import refine_trim_points
 from claw.design.tune import TuneTargets, tune_point, tune_points
@@ -48,4 +55,9 @@ __all__ = [
     "TuneTargets",
     "tune_point",
     "tune_points",
+    "fit_gain_surface",
+    "fit_slot",
+    "fit_slots",
+    "select_axes",
+    "resample_to_table",
 ]

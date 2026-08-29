@@ -14,7 +14,7 @@
 
 from claw.codegen.ir_exec import GraphRunner
 from claw.fcl.graphs import SCHEDULABLE, gain_schedule_graph
-from claw.tables import Table
+from claw.tables import PolyTable, Table
 
 SCHED_VARS = ("mach", "alt", "fuel")
 
@@ -52,8 +52,10 @@ class GainSchedule:
         for name, tab in tables.items():
             if "." not in name:
                 raise ValueError(f"게인 이름은 '그룹.게인' 형식 필요: {name!r}")
-            if not isinstance(tab, Table):
-                raise ValueError(f"{name}: Table 필요, {type(tab).__name__} 받음")
+            # PolyTable(구간별 다항, 01 §3.4 다항 런타임 채택)도 같은 자리의 유효
+            # 표현이다 — 소비 계약(axis_names+interp)과 clip 의미가 동일
+            if not isinstance(tab, (Table, PolyTable)):
+                raise ValueError(f"{name}: Table/PolyTable 필요, {type(tab).__name__} 받음")
             extra = set(tab.axis_names) - set(SCHED_VARS)
             if extra:
                 raise ValueError(f"{name}: 스케줄 변수 아님 {sorted(extra)} (허용: {SCHED_VARS})")

@@ -41,7 +41,7 @@ import claw
 from claw.blocks.basic import Gain, Product, Saturation, Sum
 from claw.blocks.controllers import PID
 from claw.blocks.filters import CommandFilter, Washout
-from claw.blocks.lookup import LookupBlock
+from claw.blocks.lookup import LookupBlock, PolyBlock
 from claw.params.paramset import canonical_hash
 
 _EMITTERS = {}
@@ -318,6 +318,35 @@ def _emit_lookup(ctx, node, inst, ins, gains, dt_macro):
     return ctx.declare(f"{nid}_y", f"{lut}({bp}, {val}, {n}, {ins[0]})")
 
 
+@_emitter(PolyBlock)
+def _emit_poly(ctx, node, inst, ins, gains, dt_macro):
+    """구간별 다항 게인 스케줄 (01 §3.4 다항 런타임) — knot·계수 배열을 구워 낸다.
+
+    계수는 tables/poly.py와 같은 u-영역 오름차수이고, 구간별로 최고 차수(stride)에
+    맞춰 0을 덧대 평평한 배열로 낸다 — 호너가 0 계수를 지나도 결과 비트가 같다
+    (0.0·u + 0.0 = 0.0). 외삽은 clip 고정 (비행 중 예외 금지 원칙, Lookup과 동일).
+    """
+    pt = inst.table
+    if pt.extrapolate != "clip":
+        raise NotImplementedError(
+            f"{node.id}: extrapolate='clip'만 지원 — 받음 {pt.extrapolate!r}"
+        )
+    nid, axis = node.id, inst.axis_order[0]
+    nseg = len(pt.segments)
+    stride = max(len(s["coeffs"]) for s in pt.segments)
+    flat = []
+    for s in pt.segments:
+        flat.extend(list(s["coeffs"]) + [0.0] * (stride - len(s["coeffs"])))
+    kn = ctx.array(nid, "kn", pt.knots, f"{axis} 구간 경계 (n_seg+1)")
+    coef = ctx.array(nid, "coef", flat, f"{pt.name or nid} u-영역 계수 (오름차수, 0 패딩)")
+    cs = ctx.array(nid, "c", [s["c"] for s in pt.segments], "구간 센터")
+    hs = ctx.array(nid, "h", [s["h"] for s in pt.segments], "구간 스케일")
+    fn = ctx.helper("claw_polyeval1d")
+    return ctx.declare(
+        f"{nid}_y", f"{fn}({kn}, {nseg}, {coef}, {stride}, {cs}, {hs}, {ins[0]})"
+    )
+
+
 # 순수 연산 — ir_exec._OP_FN의 C 짝. 인라인 식이면 (템플릿, 필요 헬퍼) 형태.
 # Python `%`는 나머지 부호가 제수를 따르고 C `fmod`는 피제수를 따르므로 wrap_pi에
 # 보정이 필요하다. min2는 CPython min(a,b)의 `b if b < a else a`를 그대로 옮긴다.
@@ -339,18 +368,25 @@ _OP_C = {
 # 공용 런타임 — 산출물마다 복제하지 않고 claw_rt.c/.h 한 벌로 낸다 (emit_runtime).
 # "math"는 진짜 헬퍼가 아니라 <math.h>가 필요하다는 표시다. wrap_pi의 fmod 의존은
 # claw_rt.c 안에서 끝나므로, wrap_pi를 **부르는** 파티션은 math.h가 필요 없다.
-_HELPER_ORDER = ("claw_clip", "claw_wrap_pi", "claw_lookup1d")
+_HELPER_ORDER = ("claw_clip", "claw_wrap_pi", "claw_lookup1d", "claw_polyeval1d")
 _HELPER_SIG = {
     "claw_clip": "double claw_clip(double x, double lo, double hi)",
     "claw_wrap_pi": "double claw_wrap_pi(double a)",
     "claw_lookup1d": (
         "double claw_lookup1d(const double *bp, const double *val, int n, double x)"
     ),
+    "claw_polyeval1d": (
+        "double claw_polyeval1d(const double *kn, int nseg, const double *coef,\n"
+        "                       int stride, const double *cs, const double *hs, double x)"
+    ),
 }
 _HELPER_DOC = {
     "claw_clip": "[lo, hi] 클램프",
     "claw_wrap_pi": "(-π, π] 래핑 — Python `%`는 나머지가 제수 부호를 따르므로 fmod 뒤 보정한다",
     "claw_lookup1d": "1D 선형 보간, 외삽 clip — tables/table.py:54 interp()와 같은 구간 선택",
+    "claw_polyeval1d": (
+        "구간별 다항 u-영역 호너, 외삽 clip — tables/poly.py interp()와 같은 구간 선택"
+    ),
 }
 _HELPER_BODY = {
     "claw_clip": [
@@ -368,8 +404,24 @@ _HELPER_BODY = {
         "    const double t = claw_clip((x - bp[i]) / (bp[i + 1] - bp[i]), 0.0, 1.0);",
         "    return (1.0 - t) * val[i] + t * val[i + 1];",
     ],
+    "claw_polyeval1d": [
+        "    int i = 0;",
+        "    int k;",
+        "    double v = 0.0;",
+        "    const double xc = claw_clip(x, kn[0], kn[nseg]);",
+        "    while (i < nseg - 1 && xc >= kn[i + 1]) { i++; }",
+        "    {",
+        "        const double u = (xc - cs[i]) / hs[i];",
+        "        for (k = stride - 1; k >= 0; k--) { v = v * u + coef[i * stride + k]; }",
+        "    }",
+        "    return v;",
+    ],
 }
-_HELPER_NEEDS = {"claw_lookup1d": ("claw_clip",), "claw_wrap_pi": ("math",)}
+_HELPER_NEEDS = {
+    "claw_lookup1d": ("claw_clip",),
+    "claw_wrap_pi": ("math",),
+    "claw_polyeval1d": ("claw_clip",),
+}
 
 
 def _text(lines):
