@@ -39,6 +39,9 @@ const GLOW_SCALE = 0.5; // 발광 레이어 해상도 — 흐릴 것이므로 �
 const TWINKLE_MS = 1400; // 입자 반짝임 주기 — 흐름(2600 ms)과 어긋나게 둬야 맥놀이가 산다
 const WIRE = "235, 235, 245"; // 쉬는 배선·안내선의 중립 회백 — 세 군데가 같은 값을 써야 한다
 const FONT = '600 11px -apple-system, "SF Pro Text", "Helvetica Neue", "Malgun Gothic", sans-serif';
+// 원뿔 노드의 점등 라벨 — 상시 라벨(캡슐 칩)보다 한 급 가볍게. 원뿔 하나에 노드가
+// 60개까지 켜지므로 칩을 다 두르면 배선이 라벨에 묻힌다
+const FONT_SMALL = '500 10px -apple-system, "SF Pro Text", "Helvetica Neue", "Malgun Gothic", sans-serif';
 
 const reduceMotion = () =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -429,7 +432,7 @@ export function createInfluenceCanvas(opts = {}) {
     }
     ctx.restore();
 
-    drawLabels(ctx, model, layout, cone, play, t, sel);
+    drawLabels(ctx, model, layout, cone, play, t, sel, fade);
 
     // 자막은 **문자열이 바뀔 때만** 내보낸다 — 25 fps로 DOM을 만지지 않는다(층당 1회)
     if (onCaption) {
@@ -578,7 +581,7 @@ export function createInfluenceCanvas(opts = {}) {
     }
   }
 
-  function drawLabels(g, model, layout, cone, play, t, sel) {
+  function drawLabels(g, model, layout, cone, play, t, sel, fade = 1) {
     g.font = FONT;
     // SF는 기본 자간이 넓다 — 11 px 캡슐에서는 살짝 조여야 애플 UI처럼 읽힌다.
     // measureText도 같은 자간을 쓰므로 칩 폭은 저절로 맞는다
@@ -622,6 +625,39 @@ export function createInfluenceCanvas(opts = {}) {
       const lit = !cone || (cone.nodes.has(id) && nodeOn(play, id, t) > 0.5);
       g.fillStyle = lit ? SKIN.ink : SKIN.inkFaint;
       g.fillText(text, x, y);
+    }
+
+    // 원뿔 노드는 **켜지는 순간 이름이 함께 나타난다** — 어느 노드가 지금 활성화됐는지
+    // 캔버스만 보고도 읽게 한다. 알파를 점등 램프(nodeOn)에 묶어 선이 닿을 때 글자도
+    // 같이 떠오른다. 상시 라벨(출력·기체·지표·선택·hover)이 이미 있는 노드는 제외.
+    // 캡슐 칩 대신 작은 글자 + 어두운 밑판 — 원뿔 하나에 60개까지 켜지는 라벨이라
+    // 칩으로 두르면 배선이 라벨에 묻힌다
+    if (cone) {
+      g.font = FONT_SMALL;
+      for (const nd of model.nodes) {
+        if (!cone.nodes.has(nd.id) || show.has(nd.id)) continue;
+        const on = nodeOn(play, nd.id, t);
+        if (on <= 0) continue;
+        const p = layout.pos.get(nd.id);
+        if (!p) continue;
+        const text = nd.label ?? nd.id;
+        const w = g.measureText(text).width;
+        // 오른쪽에 붙이되 캔버스를 넘치면 왼쪽으로 — 상시 라벨과 같은 자기교정
+        const right = p.x + p.r + 5 + w + 4 <= width - 2;
+        const x = right ? p.x + p.r + 5 : p.x - p.r - 5 - w;
+        // fade를 같이 곱는다 — 주기 끝 페이드아웃에서 원뿔은 꺼지는데 라벨만
+        // 불투명하게 떠 있으면 되감기 이음새에서 글자 60개가 툭 사라진다
+        g.globalAlpha = on * fade;
+        g.beginPath();
+        roundRect(g, x - 3, p.y - 7, w + 6, 14, 7);
+        g.fillStyle = "rgba(0,0,0,.55)";
+        g.fill();
+        g.textAlign = "left";
+        g.fillStyle = SKIN.ink;
+        g.fillText(text, x, p.y);
+        g.globalAlpha = 1;
+      }
+      g.font = FONT;  // 되돌린다 — 상시 라벨의 measureText가 이 상태를 이어받는다
     }
   }
 

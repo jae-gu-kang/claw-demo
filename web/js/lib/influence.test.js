@@ -4,9 +4,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  KNOB_CLASS, coneOf, diagnoseRequest, fmtDelta, logScale, normalizeDiagnosis,
-  normalizeGraph, pairsFor, paramState, radiusOf, rampColor, structuralRequest,
-  sweepRequest,
+  KNOB_CLASS, coneOf, diagnoseRequest, edgeVia, fmtDelta, logScale, nodeDetail,
+  normalizeDiagnosis, normalizeGraph, pairsFor, paramState, radiusOf, rampColor,
+  structuralRequest, sweepRequest,
 } from "./influence.js";
 
 const payload = {
@@ -203,4 +203,44 @@ test("KNOB_CLASS: 진단 엔진의 처방 클래스 전부에 라벨·잉크가 
     assert.ok(KNOB_CLASS[c]?.label, `KNOB_CLASS에 ${c} 라벨 없음`);
     assert.match(KNOB_CLASS[c].ink, /^#[0-9a-f]{6}$/i);
   }
+});
+
+test("edgeVia: 포트·효과·종류를 사람 말로 — 모르는 값은 삼키지 않고 원문", () => {
+  assert.equal(edgeVia({ port: "input" }), "입력");
+  assert.equal(edgeVia({ port: "gain:kp" }), "게인 kp");
+  assert.equal(edgeVia({ port: "enable" }), "인에이블");
+  assert.equal(edgeVia({ port: "on_disable:out" }), "비활성 폴백 out");
+  assert.equal(edgeVia({ port: "output" }), "출력");
+  assert.equal(edgeVia({ kind: "param", effect: "changed" }), "값 주입");
+  assert.equal(edgeVia({ kind: "param", effect: "added" }), "노드 생성");
+  assert.equal(edgeVia({ kind: "param", effect: "removed" }), "노드 제거");
+  assert.equal(edgeVia({ kind: "param", effect: "overridden" }), "덮인 값");
+  assert.equal(edgeVia({ kind: "param" }), "값 주입", "effect 누락은 기본 갈래");
+  assert.equal(edgeVia({ kind: "param", effect: "미래효과" }), "미래효과",
+    "모르는 효과를 「값 주입」으로 뭉개면 틀린 말이 된다");
+  assert.equal(edgeVia({ kind: "boundary" }), "법칙 경계");
+  assert.equal(edgeVia({ kind: "declared" }), "폐루프 선언");
+  assert.equal(edgeVia({ kind: "offgraph" }), "법칙 밖 직행");
+  assert.equal(edgeVia({ kind: "ghost" }), "구조 변경 시");
+  assert.equal(edgeVia({ port: "미래포트" }), "미래포트", "새 포트가 조용히 사라지면 안 된다");
+  assert.equal(edgeVia(null), "");
+});
+
+test("nodeDetail: 서버가 실어 준 것부터 — 블록 파라미터 값이 한 줄에 나온다", () => {
+  const bands = { ap: { label: "오토파일럿" } };
+  assert.equal(nodeDetail({ kind: "metric", desc: "α 여유" }), "α 여유");
+  assert.equal(nodeDetail({ kind: "plant", note: "폐루프는 밖" }), "폐루프는 밖");
+  assert.equal(
+    nodeDetail({ kind: "ir", band: "ap", block: "Saturation",
+      params: { lo: -0.35, hi: 0.35 } }, bands),
+    "오토파일럿 · 블록 Saturation — lo=-0.350 hi=0.350");
+  // 4개째부터는 접는다 — 한 줄 설명이 표가 되면 안 된다
+  assert.match(nodeDetail({ kind: "ir", block: "B", params: { a: 1, b: 2, c: 3, d: 4 } }), / …$/);
+  // 배열·객체 값은 한 줄에 넣지 않는다
+  assert.equal(nodeDetail({ kind: "ir", block: "B", params: { arr: [1, 2] } }), "블록 B");
+  // 묶음 라벨이 없으면(IR 그룹) 엔진 그룹 이름 원문
+  assert.equal(nodeDetail({ kind: "ir", band: "x", group: "mix", op: "add" }, {}), "mix · 연산 add");
+  assert.match(nodeDetail({ kind: "output" }), /법칙 출력/);
+  assert.equal(nodeDetail({ kind: "input" }), "법칙 입력");
+  assert.equal(nodeDetail(null), "");
 });

@@ -19,8 +19,9 @@ import { clear, el } from "../dom.js";
 import {
   BAND_COLOR, DIRECTION_LABEL, KNOB_CLASS, SKIN, STATE_COLOR, STATE_INK,
   STATE_LABEL, STATE_NOTE, WARN_INK,
-  coneOf, diagnoseRequest, fmtDelta, fmtPercent, normalizeDiagnosis,
-  normalizeGraph, pairsFor, radiusOf, structuralRequest, sweepRequest,
+  coneOf, diagnoseRequest, edgeVia, fmtDelta, fmtPercent, nodeDetail,
+  normalizeDiagnosis, normalizeGraph, pairsFor, radiusOf, structuralRequest,
+  sweepRequest,
 } from "../lib/influence.js";
 import { conePlayback, graphDepth, summaryOf } from "../lib/influenceplay.js";
 import { cascadeLayout, layeredLayout } from "../lib/influencelayout.js";
@@ -189,17 +190,39 @@ export function render() {
   }
 
   // ── 전파 경로 — 층 칩 + 활성 층의 경로·설명 (A·B 배치가 같은 일정을 공유한다) ──
+  // 층 하나가 150 ms에 지나가므로 재생만으로는 상세를 읽을 수 없다 — 칩을 누르면
+  // 그 층의 상세가 **고정**된다(다시 누르면 해제). 고정 중에도 점등 동기화는 계속 돈다
 
-  const pathChip = (text) => el("span", {
+  let pinnedChip = null;  // null = 재생을 따라감, 0 = 시작(파라미터) 칩, 1.. = 층 칩
+
+  // "-"는 엔진의 무단위 센티널 — 시작 칩과 고정 상세가 같은 문자열을 내야 한다
+  const unitOf = (n) => (n.unit && n.unit !== "-" ? ` ${n.unit}` : "");
+
+  const pathChip = (text, i) => el("button", {
+    // 인라인이 app.css의 .inf-dark button을 덮는다 — 칩은 버튼이되 버튼처럼 크면 안 된다
     style: "padding:2px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.14);" +
       "background:rgba(255,255,255,.04);color:rgba(235,235,245,.45);" +
-      "font-size:11px;line-height:16px;white-space:nowrap",
+      "font-size:11px;line-height:16px;white-space:nowrap;cursor:pointer",
+    "aria-pressed": "false",
+    onclick: () => {
+      pinnedChip = pinnedChip === i ? null : i;
+      pathChips.forEach((c, j) => {
+        c.setAttribute("aria-pressed", pinnedChip === j ? "true" : "false");
+        c.style.outline = pinnedChip === j ? `2px solid ${pathInk}` : "none";
+        c.style.outlineOffset = "1px";
+      });
+      // 고정 = 정적·사용자가 요청한 내용 — 그때만 보조기술에 연다. 재생 추종
+      // 중에는 6초 주기로 계속 바뀌므로 숨긴 채 둔다(playLine과 같은 이유)
+      pathInfo?.setAttribute("aria-hidden", pinnedChip == null ? "true" : "false");
+      showPathInfo();
+    },
   }, text);
 
   function renderPath() {
     clear(pathBox);
     pathChips = [];
     pathInfo = null;
+    pinnedChip = null;  // 고정은 선택에 속한다 — 다른 파라미터의 층 번호로 이월하지 않는다
     const m = state.model;
     const play = state.play;
     const sel = state.selection ? m?.byId.get(state.selection) : null;
@@ -215,26 +238,30 @@ export function render() {
       class: "row", style: "gap:4px 2px;flex-wrap:wrap;align-items:center;margin-top:10px",
     });
     // 시작 칩 — 파라미터는 층 1(랭크 0)에 고정이고, 값이 있는 유일한 종류다
-    const unit = sel.unit && sel.unit !== "-" ? ` ${sel.unit}` : "";
-    pathChips.push(pathChip(`층 1 · ${sel.label} = ${fmtNum(sel.value)}${unit}`));
+    pathChips.push(pathChip(`층 1 · ${sel.label} = ${fmtNum(sel.value)}${unitOf(sel)}`, 0));
+    pathChips[0].title = sel.desc ?? "";
     row.append(pathChips[0]);
-    for (const L of play.layers) {
+    play.layers.forEach((L, i) => {
       row.append(el("span", {
         style: "color:rgba(235,235,245,.3);font-size:11px;margin:0 2px",
       }, "→"));
-      // 대표 노드(headline)만 칩에 세운다 — 나머지는 +n으로 접고 활성 층 줄이 푼다.
+      // 대표 노드(headline)만 칩에 세운다 — 나머지는 +n으로 접고 상세 줄이 푼다.
       // headline 부재는 captionAt과 같은 폴백 — 가드 없이 찍으면 「층 X · null」이 된다
       const name = L.headline ? labelOf(L.headline) : `노드 ${L.arrive.length}개`;
       const extra = L.headline && L.arrive.length > 1 ? ` +${L.arrive.length - 1}` : "";
-      const c = pathChip(`층 ${L.rank + 1} · ${name}${extra}`);
+      const c = pathChip(`층 ${L.rank + 1} · ${name}${extra}`, i + 1);
+      c.title = nodeDetail(m.byId.get(L.headline), m.bands);  // 데스크톱 훑기용 툴팁
       pathChips.push(c);
       row.append(c);
-    }
+    });
     pathInfo = el("div", {
       "aria-hidden": "true",  // 6초 주기로 계속 바뀐다 — 정적 사실은 상세 패널이 든다
       style: "margin-top:6px;font-size:12px;min-height:36px",
     });
-    pathBox.append(row, pathInfo);
+    pathBox.append(row,
+      el("p", { class: "hint", style: "margin:4px 0 0;font-size:11px" },
+        "칩을 누르면 그 층의 노드·경로·설명이 고정된다 — 다시 누르면 재생을 따라간다."),
+      pathInfo);
     // 재생성 직후(탭 복귀 등) 캔버스는 층이 **바뀔 때만** 알린다 — 마지막으로 알린
     // 층을 되입히지 않으면 다음 층 변화까지 칩이 전부 꺼진 채 남는다
     if (curLayer != null) setActiveLayer(curLayer);
@@ -253,50 +280,87 @@ export function render() {
       c.style.background = i === active ? `${pathInk}26` : "rgba(255,255,255,.04)";
       c.style.fontWeight = i === active ? "600" : "400";
     });
-    renderPathInfo(k, done);
+    // 고정 중에는 상세를 다시 그리지 않는다 — 내용이 (모델·선택·고정 칩)에만 걸려
+    // 있어 바뀔 것이 없고, 층마다 clear/재구축하면 사용자가 잡은 텍스트 선택이
+    // 초당 몇 번씩 무너져 "고정"의 이유(읽고 베끼기)가 사라진다
+    if (pinnedChip == null) showPathInfo();
   }
 
-  function renderPathInfo(k, done) {
+  /** 상세 줄이 보여 줄 것을 한 자리에서 고른다 — 고정 칩이 있으면 그쪽, 없으면 재생. */
+  function showPathInfo() {
+    if (!pathInfo) return;
+    if (pinnedChip === 0) return renderStartInfo();
+    if (pinnedChip != null) return renderLayerInfo(pinnedChip - 1, true);
+    const nLayers = pathChips.length - 1;
+    if (curLayer == null) return;
+    if (curLayer >= nLayers) return renderSummaryInfo();
+    renderLayerInfo(curLayer, false);
+  }
+
+  function renderSummaryInfo() {
+    clear(pathInfo);
+    const m = state.model;
+    if (!m || !state.play) return;
+    pathInfo.append(el("span", { class: "hint" },
+      summaryOf(state.play, (id) => m.byId.get(id)?.label ?? id)));
+  }
+
+  /** 시작 칩 고정 — 파라미터 자신: 값·설명과 씨앗 간선(값이 **어떻게** 들어가는지). */
+  function renderStartInfo() {
+    clear(pathInfo);
+    const m = state.model;
+    const sel = state.selection ? m?.byId.get(state.selection) : null;
+    if (!m || !sel) return;
+    const seeds = [];
+    m.edges.forEach((e, i) => {
+      if (e.src === sel.id && state.cone?.edges.has(i)) {
+        seeds.push(`${m.byId.get(e.dst)?.label ?? e.dst} (${edgeVia(e)})`);
+      }
+    });
+    pathInfo.append(
+      el("div", {},
+        el("strong", { style: `color:${pathInk}` }, "층 1"),
+        el("span", {}, ` — ${sel.label} = ${fmtNum(sel.value)}${unitOf(sel)}`),
+        el("span", { class: "hint" }, `  ${m.bands?.[sel.band]?.label ?? ""}`),
+      ),
+      sel.desc ? el("div", { class: "hint", style: "margin-top:2px" }, sel.desc) : "",
+      seeds.length
+        ? el("div", { class: "hint", style: "margin-top:2px" }, `건드리는 노드: ${seeds.join(" · ")}`)
+        : "",
+    );
+  }
+
+  /** 층 상세 — 그 층에 도달하는 **모든** 노드를 한 줄씩: 들어온 간선(출발지·포트)과
+   *  노드 설명(블록·파라미터 값·연산·지표 정의). 대표만 말하면 "함께 도달 3개"가
+   *  영영 이름 없는 노드로 남는다. */
+  function renderLayerInfo(k, pinned) {
     clear(pathInfo);
     const m = state.model;
     const play = state.play;
-    if (!m || !play) return;
+    const L = play?.layers[k];
+    if (!m || !L) return;
     const labelOf = (id) => m.byId.get(id)?.label ?? id;
-    if (done) {
-      pathInfo.append(el("span", { class: "hint" }, summaryOf(play, labelOf)));
-      return;
+    pathInfo.append(el("div", {},
+      el("strong", { style: `color:${pathInk}` }, `층 ${L.rank + 1}/${play.maxRank + 1}`),
+      el("span", { class: "hint" }, ` · 노드 ${L.arrive.length}개 도달${pinned ? " · 고정됨" : ""}`)));
+    const MAX_ROWS = 5;
+    for (const id of L.arrive.slice(0, MAX_ROWS)) {
+      // 이 층에서 이 노드로 들어온 간선 — 출발지와 포트가 곧 경로의 문법이다:
+      // 같은 화살표라도 입력·게인·인에이블·비활성 폴백은 서로 다른 이야기다
+      const inc = L.edges
+        .filter((i) => m.edges[i]?.dst === id)
+        .map((i) => `${labelOf(m.edges[i].src)} (${edgeVia(m.edges[i])})`);
+      const shown = inc.slice(0, 3).join(" · ") + (inc.length > 3 ? ` 외 ${inc.length - 3}` : "");
+      const det = nodeDetail(m.byId.get(id), m.bands);
+      pathInfo.append(el("div", { style: "margin-top:2px" },
+        el("strong", {}, labelOf(id)),
+        shown ? el("span", { class: "hint" }, ` ← ${shown}`) : "",
+        det ? el("div", { class: "hint", style: "margin-left:12px" }, det) : ""));
     }
-    const L = play.layers[k];
-    if (!L) return;
-    if (!L.headline) {
-      // captionAt의 「노드 N개」 폴백과 같은 갈래 — 대표가 없어도 층 사실은 남긴다
-      pathInfo.append(el("div", {},
-        el("strong", { style: `color:${pathInk}` }, `층 ${L.rank + 1}/${play.maxRank + 1}`),
-        el("span", {}, ` — 노드 ${L.arrive.length}개 도달`)));
-      return;
+    if (L.arrive.length > MAX_ROWS) {
+      pathInfo.append(el("div", { class: "hint", style: "margin-top:2px" },
+        `… 외 ${L.arrive.length - MAX_ROWS}개: ${L.arrive.slice(MAX_ROWS).map(labelOf).join(", ")}`));
     }
-    const head = m.byId.get(L.headline);
-    // 이 층에서 대표 노드로 들어오는 간선의 출발지 — "무엇이 무엇을 건드렸나"가 경로다
-    const srcs = [...new Set(L.edges
-      .filter((i) => m.edges[i]?.dst === L.headline)
-      .map((i) => labelOf(m.edges[i].src)))];
-    const others = L.arrive.filter((id) => id !== L.headline).map(labelOf);
-    const desc = head?.desc
-      ?? (head?.block
-        ? `${KIND_NOTE[head.kind] ?? ""} · 블록 ${head.block}`
-        : KIND_NOTE[head?.kind] ?? "");
-    pathInfo.append(
-      el("div", {},
-        el("strong", { style: `color:${pathInk}` }, `층 ${L.rank + 1}/${play.maxRank + 1}`),
-        el("span", {}, ` — ${srcs.length ? `${srcs.join(" · ")} → ` : ""}${labelOf(L.headline)}`),
-        others.length
-          ? el("span", { class: "hint" },
-              ` · 함께 도달 ${others.slice(0, 4).join(", ")}` +
-              (others.length > 4 ? ` 외 ${others.length - 4}개` : ""))
-          : "",
-      ),
-      desc ? el("div", { class: "hint", style: "margin-top:2px" }, desc) : "",
-    );
   }
 
   function renderDetail() {
@@ -795,17 +859,6 @@ export function render() {
     ),
   );
 }
-
-// 노드 종류 설명 — desc가 없는 노드(IR 연산 등)가 경로 패널에서 침묵하지 않게.
-// 파라미터는 여기 없다: 간선의 목적지가 될 수 없어 도달 층에 서지 않는다
-const KIND_NOTE = {
-  input: "법칙 입력",
-  ir: "IR 연산 노드 — 층 번호가 곧 실행 순서다",
-  ghost: "구조 변경 시 생기는 노드 — 지금 형상에는 없다",
-  output: "법칙 출력 — 여기까지가 생성 C의 범위다",
-  plant: "기체·작동기·항법 (법칙 밖)",
-  metric: "설계 지표 (법칙 밖) — 「얼마나」는 폐루프 스윕에서만 나온다",
-};
 
 function badge(stateKey) {
   // 바탕 알파 26(15%) — 다크 표면에서 1a(10%)는 칩 윤곽이 사라진다

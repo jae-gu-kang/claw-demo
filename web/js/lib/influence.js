@@ -214,6 +214,62 @@ export const DIRECTION_LABEL = {
   decrease: "↓ 줄인다 (|값| 기준)",
 };
 
+/** 간선이 목적지에 **어떻게** 들어가는지 — 서버가 준 port/effect/kind를 사람 말로.
+ *
+ * 경로 설명의 절반이 이 정보다: 같은 화살표라도 입력·게인·인에이블·비활성 폴백은
+ * 서로 다른 이야기다(게인 간선은 신호가 아니라 계수를 바꾼다). port 어휘는 엔진
+ * pipeline/influence.py가 내는 그대로("input"·"gain:kp"·"enable"·"on_disable:x"·
+ * "output") — 모르는 값은 삼키지 않고 원문을 그대로 내보인다.
+ */
+export function edgeVia(e) {
+  if (!e) return "";
+  if (e.port === "input") return "입력";
+  if (e.port === "output") return "출력";
+  if (e.port === "enable") return "인에이블";
+  if (e.port?.startsWith("gain:")) return `게인 ${e.port.slice(5)}`;
+  if (e.port?.startsWith("on_disable:")) return `비활성 폴백 ${e.port.slice(11)}`;
+  if (e.kind === "param") {
+    // effect는 파라미터 간선에만 실린다 — 값을 바꾸는 것과 구조를 바꾸는 것은 다르다.
+    // **없으면** 기본 갈래(값 주입), **모르는 값이면** 원문 그대로 — 미래 effect를
+    // "값 주입"으로 뭉개면 맞는 말 대신 틀린 말을 내보내는 것이다(포트와 같은 규약)
+    if (e.effect == null) return "값 주입";
+    return { changed: "값 주입", added: "노드 생성", removed: "노드 제거",
+      overridden: "덮인 값" }[e.effect] ?? e.effect;
+  }
+  if (e.kind === "boundary") return "법칙 경계";
+  if (e.kind === "declared") return "폐루프 선언";
+  if (e.kind === "offgraph") return "법칙 밖 직행";
+  if (e.kind === "ghost") return "구조 변경 시";
+  return e.port ?? "";
+}
+
+/** 노드 한 줄 설명 — 서버가 노드에 실어 준 것부터 쓴다(desc·note·블록·파라미터 값·연산).
+ *
+ * IR 블록 노드는 desc가 없지만 `params`(블록 상수 값)와 `block`(클래스 이름)이 있다 —
+ * "블록 Saturation — lo=-0.35 hi=0.35"가 "IR 연산 노드"보다 훨씬 많은 것을 말한다.
+ * 값은 앞 3개만: 다 늘어놓으면 한 줄 설명이 표가 된다. 묶음 라벨은 bands에서 찾고,
+ * 없으면(IR 그룹은 파라미터 묶음과 키가 다르다) 엔진이 준 그룹 이름 원문을 쓴다.
+ */
+export function nodeDetail(n, bands = {}) {
+  if (!n) return "";
+  if (n.kind === "param" || n.kind === "metric") return n.desc ?? "";
+  if (n.kind === "plant" || n.kind === "ghost") return n.note ?? "";
+  if (n.kind === "output") return "법칙 출력 — 생성 C가 내보내는 신호. 여기부터는 폐루프 선언이다";
+  if (n.kind === "input") return "법칙 입력";
+  const band = bands?.[n.band]?.label ?? n.group ?? "";
+  const where = band ? `${band} · ` : "";
+  if (n.block) {
+    const ps = Object.entries(n.params ?? {}).filter(([, v]) =>
+      typeof v === "number" || typeof v === "boolean" || typeof v === "string");
+    const brief = ps.slice(0, 3)
+      .map(([key, v]) => `${key}=${typeof v === "number" ? fmtDelta(v) : String(v)}`)
+      .join(" ");
+    return `${where}블록 ${n.block}${brief ? ` — ${brief}${ps.length > 3 ? " …" : ""}` : ""}`;
+  }
+  if (n.op) return `${where}연산 ${n.op}`;
+  return `${where}IR 연산 노드`;
+}
+
 /** 형상 + 저장된 sim 결과 → /influence/diagnose 본문 — 형상 필드는
  *  structuralRequest에 위임한다 (같은 필드를 두 번 적으면 갈라진다). */
 export function diagnoseRequest(state, resultId) {
