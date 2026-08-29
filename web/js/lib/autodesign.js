@@ -5,9 +5,13 @@
 
 게인 채택은 기존 스토어 계약(gains 탭 storePayload — {tables, scheduleOff})으로
 낸다. v1은 **재샘플 테이블**(gain_export.tables_resampled)을 주입한다 — 다항
-정본(kind='poly')은 서버 sim/codegen이 직접 받지만, 웹 스토어 소비자(게인 셀
-편집·influence·웹 코드 미리보기)가 테이블 형상을 전제하므로 스토어 경유는
+정본(kind='poly')은 서버 sim/codegen이 직접 받지만, 웹 스토어 소비자(구조도
+표시·influence·웹 코드 미리보기)가 테이블 형상을 전제하므로 스토어 경유는
 호환 반출을 쓴다 (다항 스토어 채택은 [백로그] — docs -01 §3.4).
+
+주의: `gainTables`를 **읽는** 화면은 시뮬·Autocode·구조도·영향성이고, 게인 탭은
+쓰기 전용(자기 카탈로그 편집 상태가 따로 있다)이다 — 확정 메시지가 그 비대칭을
+그대로 말해야 사용자가 "게인 탭에 안 보이는데 적용된 건가"를 묻지 않는다.
 */
 
 import { parseNumberList } from "./grid.js";

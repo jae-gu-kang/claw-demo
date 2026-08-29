@@ -6,7 +6,10 @@
 
 수치의 정본은 서버 /design/defaults(← 엔진 AutoDesignConfig) — 폼은 채운 칸만
 config 덮어쓰기로 보낸다. "게인 확정"은 결과의 호환 반출(재샘플 테이블)을 기존
-스토어 계약으로 주입한다 — 게인 탭·시뮬·코드젠이 즉시 소비한다.
+스토어 계약(`gainTables`)으로 주입한다 — **읽는 쪽**은 시뮬·Autocode·구조도·영향성이다.
+게인 탭은 그 스토어를 읽지 않고(자기 카탈로그 편집 상태를 따로 들고 있다) 쓰기만
+하므로, 확정이 게인 탭 화면에 비치지 않고 거기서 [시뮬·코드에 적용]을 누르면
+이 확정을 덮어쓴다 — 그 사실을 확정 메시지가 말해 준다(조용한 덮어쓰기 금지).
 
 스타일은 app.css 비접촉 — 심각도 색은 값으로 지정 (duty.js 선례).
 */
@@ -219,8 +222,11 @@ function renderResult(box, body, resultId, ctx) {
     store.set("gainTables", payload.tables && JSON.parse(JSON.stringify(payload.tables)));
     store.set("gainScheduleOff", payload.scheduleOff);
     clear(adoptMsg).append(el("span", { class: "hint" },
-      " 확정됨 — 게인 탭·시뮬레이션·Autocode가 이 스케줄을 소비한다 "
-      + "(다항 정본은 결과 JSON의 gain_export.tables — API 직접 주입용)."));
+      " 확정됨 — 시뮬레이션·Autocode·구조도·영향성이 이 스케줄을 소비한다"
+      + " (Autocode 형상 지문이 바뀌는 것으로 확인된다)."
+      + " 게인 탭은 자기 편집 상태를 따로 들고 있어 이 확정이 그 화면에는 비치지 않으며,"
+      + " 거기서 [시뮬·코드에 적용]을 누르면 이 확정을 덮어쓴다."
+      + " 다항 정본은 결과 JSON의 gain_export.tables — API 직접 주입용."));
   };
   const adoptMsg = el("span");
 
