@@ -27,12 +27,31 @@ class MarginCriteria:
     gm_min_db: float = 6.0  # 이득여유 합격선 [dB]
     pm_bad_deg: float = 30.0  # 표시용 심각선 [deg] (30~45 주의 음영)
     gm_good_db: float = 10.0  # 표시용 양호선 [dB] (6~10 주의 음영)
+    zeta_min: float = 0.30  # 레이트 댐퍼 폐쇄 모드 감쇠 합격선 (MIL-8785류 Level 관례 대역)
+    zeta_good: float = 0.50  # 감쇠 양호선 — 합격이되 이 미만은 warn
 
     def __post_init__(self):
         if not self.pm_bad_deg <= self.pm_min_deg:
             raise ValueError(f"pm_bad_deg({self.pm_bad_deg}) ≤ pm_min_deg({self.pm_min_deg}) 필요")
         if not self.gm_min_db <= self.gm_good_db:
             raise ValueError(f"gm_min_db({self.gm_min_db}) ≤ gm_good_db({self.gm_good_db}) 필요")
+        if not 0.0 < self.zeta_min <= self.zeta_good:
+            raise ValueError(f"0 < zeta_min({self.zeta_min}) ≤ zeta_good({self.zeta_good}) 필요")
+
+    def judge_damping(self, zeta: float) -> str:
+        """폐쇄 모드 감쇠비 → 'ok' | 'warn' | 'fail' — 레이트 댐퍼 자리의 판정.
+
+        순수 P 레이트 루프는 SISO 마진이 병리적(DC 0·장주기 교차 아티팩트)이라
+        고전 판정 기준인 모드 감쇠로 본다 (closure.py 머리말).
+        """
+        z = float(zeta)
+        if math.isnan(z):
+            return "na"
+        if z < self.zeta_min:
+            return "fail"
+        if z < self.zeta_good:
+            return "warn"
+        return "ok"
 
     def judge(self, margins: dict) -> str:
         """{pm_deg, gm_db} → 'ok' | 'warn' | 'fail' | 'na'.

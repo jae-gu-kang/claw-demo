@@ -57,8 +57,8 @@ def test_midpoint_gain_is_interpolated(setup):
     assert eff["pitch.kp"] != pytest.approx(design["pitch.kp"])
 
 
-def test_margin_point_matches_direct_pi_loop(setup):
-    """scheduled_margin_point == 실효 게인으로 직접 조성한 pi_loop (actuator+delay 포함)."""
+def test_margin_point_matches_direct_composition(setup):
+    """scheduled_margin_point == 실효 게인으로 직접 조성한 successive closure 마진/지표."""
     ac, tables, design = setup
     case = _case(0.6)
     tr = trim_level(ac, case)
@@ -68,20 +68,42 @@ def test_margin_point_matches_direct_pi_loop(setup):
         lm, tables, design, case,
         actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
     )
+    from claw.design.closure import att_margin_loop, axis_metrics, oriented_margins
     from claw.trim import split_axes
 
-    lon, _ = split_axes(lm)
+    lon, lat = split_axes(lm)
     eff = scheduled_gains(tables, design, case)
-    ref = loop_margins(pi_loop(
-        lon, x_out="q", u_in="de", kp=eff["pitch.k_rate"], ki=0.0, sign=-1.0,
+    ref_m, ref_orient = oriented_margins(att_margin_loop(
+        lon, {"pitch.k_rate": eff["pitch.k_rate"]}, eff["pitch.kp"], eff["pitch.ki"],
         actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
     ))
-    assert out["pitch_rate"]["pm_deg"] == pytest.approx(ref["pm_deg"])
-    assert out["pitch_rate"]["gm_db"] == pytest.approx(ref["gm_db"], nan_ok=True)
+    assert out["pitch_att"]["pm_deg"] == pytest.approx(ref_m["pm_deg"])
+    assert out["pitch_att"]["orientation"] == ref_orient
+    ref_zeta = axis_metrics(lon, {"pitch.k_rate": eff["pitch.k_rate"]})["zeta_sp"]
+    assert out["pitch_rate"]["zeta"] == pytest.approx(ref_zeta)
+    # 횡축은 요·롤 댐퍼를 함께 닫은 지표 — 요 자리가 ζ_dr, 롤 자리가 λ_roll
+    assert out["yaw_rate"]["kind"] == "damping" and "zeta" in out["yaw_rate"]
+    assert out["roll_rate"]["kind"] == "bandwidth" and out["roll_rate"]["roll_lambda"] > 0
+
+
+def test_design_point_composition_is_sane(setup):
+    """설계점(M0.6)에서 설계 게인의 조성 판정이 정상 범위 — 자세 마진 PM>0, 댐퍼 감쇠 개선.
+
+    평탄 SISO 선언(GROUP_LOOPS)으로 절대 판정하면 설계점조차 PM 12°/−168°가 나온다
+    (closure.py 머리말) — successive closure 조성이 그 병리를 벗어났는지 핀한다.
+    """
+    ac, tables, design = setup
+    case = _case(0.6)
+    tr = trim_level(ac, case)
+    lm = linearize(ac, tr)
+    out = scheduled_margin_point(lm, tables, design, case)
+    assert out["pitch_att"]["pm_deg"] > 30.0  # 레이트 폐쇄 후에는 설계점 자세 마진이 정상
+    assert out["pitch_rate"]["zeta"] > 0.5  # 개루프 ζ_sp 0.19 → 댐퍼가 올린다
+    assert out["yaw_rate"]["zeta"] > 0.3  # 개루프 ζ_dr 0.05 → 요 댐퍼가 올린다
 
 
 def test_scheduled_differs_from_constant_gain_map(setup):
-    """저마하에서 스케줄 실효 게인(동압 스케일 ×배)의 마진은 설계 상수 마진과 유의미하게 다르다.
+    """저마하에서 스케줄 실효 게인(동압 스케일 ×배)의 판정은 설계 상수와 유의미하게 다르다.
 
     기존 마진맵(상수 게인) 경로가 §3.4 검증 요구를 대신할 수 없다는 실증.
     """
@@ -90,17 +112,14 @@ def test_scheduled_differs_from_constant_gain_map(setup):
     tr = trim_level(ac, case)
     assert tr.converged
     lm = linearize(ac, tr)
-    sched = scheduled_margin_point(lm, tables, design, case)["pitch_rate"]
-    from claw.trim import split_axes
-
-    lon, _ = split_axes(lm)
-    const = loop_margins(pi_loop(
-        lon, x_out="q", u_in="de", kp=design["pitch.k_rate"], ki=0.0, sign=-1.0
-    ))
-    assert sched["gains"]["kp"] == pytest.approx(design["pitch.k_rate"] * 4.0)
-    assert abs(sched["gm_db"] - const["gm_db"]) > 1.0 or abs(
-        sched["pm_deg"] - const["pm_deg"]
-    ) > 5.0
+    sched = scheduled_margin_point(lm, tables, design, case)
+    const = scheduled_margin_point(lm, {}, design, case)  # 스케줄 없음 = 설계 상수
+    assert sched["pitch_rate"]["gains"]["k_rate"] == pytest.approx(
+        design["pitch.k_rate"] * 4.0
+    )
+    # 실효 게인 4배 → 레이트 루프 교차 주파수가 뚜렷이 다르다 (동압 보상의 실체)
+    assert sched["pitch_rate"]["wc"] > 2.0 * const["pitch_rate"]["wc"]
+    assert abs(sched["pitch_att"]["pm_deg"] - const["pitch_att"]["pm_deg"]) > 1.0
 
 
 def test_midpoint_validation_points():

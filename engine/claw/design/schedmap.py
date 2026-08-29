@@ -1,15 +1,20 @@
-"""스케줄 인지 마진맵 — 보간(또는 다항 평가) **실효 게인**으로 마진 재계산 (01 §3.4 [확정]).
+"""스케줄 인지 마진맵 — 보간(또는 다항 평가) **실효 게인**으로 검증 재계산 (01 §3.4 [확정]).
 
 기존 마진맵(routes/analysis.py)은 요청 상수 kp/ki를 전 케이스에 동일 적용한다 —
-게인 스케줄이 있는 형상에서 "보간 구간 검증점" 마진은 그 경로로 성립하지 않는다.
+게인 스케줄이 있는 형상에서 "보간 구간 검증점" 검증은 그 경로로 성립하지 않는다.
 케이스별 실효 게인은 pipeline/openloop.py `_effective_gain`이 이미 뽑지만
-(테이블@케이스 보간) 작동기·지연을 포함하지 않는다. 여기는 그 둘을 결합한다:
-실효 게인 × pi_loop 전체 조성(actuator 2차계 + Padé 지연).
+(테이블@케이스 보간) 작동기·지연을 포함하지 않고, 평탄 SISO 선언(GROUP_LOOPS)은
+절대 판정에 병리가 있다(closure.py 머리말 — 레이트 루프 DC 0 아티팩트, 자세
+루프의 레이트 피드백 누락). 여기는 셋을 결합한다: 실효 게인 × successive
+closure 조성(closure.py) × pi_loop 전체 조성(작동기 2차계 + Padé 지연).
 
-루프 선언은 openloop.GROUP_LOOPS **재사용** (재선언 금지 — 웹 DEFAULT_LOOPS와의
-정합을 test_openloop이 핀한다). 스케줄 항목은 Table이든 다항(PolySchedule의
-구간별 다항 spec)이든 `axis_names` + `interp(**좌표)` 덕 타이핑으로 소비한다 —
-LookupBlock이 Table을 소비하는 방식과 같은 원칙(blocks/lookup.py)이다.
+판정 (criteria.py):
+- 레이트 자리: 폐쇄 모드 감쇠 — pitch_rate는 ζ_sp, yaw_rate는 ζ_dr(judge_damping).
+  roll_rate는 롤 수렴 모드 대역폭 λ_roll — 안정성 아닌 성능 지표라 정보 보고만
+- 자세 자리: PI 개루프 마진(레이트 폐쇄 후) — judge(PM/GM), 방향 자동 결정
+
+스케줄 항목은 Table이든 다항(PolySchedule spec)이든 `axis_names` + `interp(**좌표)`
+덕 타이핑으로 소비한다 (blocks/lookup.py의 Table 소비와 같은 원칙).
 
 검증점 생성 기본값(01 §3.4 [TBD] "보간 구간 검증점 밀도"의 확정): breakpoint 이상
 역할 점의 축정렬 인접쌍마다 중점 1개. anchor는 breakpoint 역할을 겸하므로
@@ -18,10 +23,15 @@ LookupBlock이 Table을 소비하는 방식과 같은 원칙(blocks/lookup.py)�
 
 import numpy as np
 
-from claw.analysis import loop_margins, pi_loop
 from claw.common.contracts import TrimCase
+from claw.design.closure import (
+    AXIS_SPECS,
+    att_margin_loop,
+    axis_metrics,
+    oriented_margins,
+    rate_loop_crossover,
+)
 from claw.design.points import ROLE_BREAKPOINT, ROLE_VALIDATION, OperatingPoint, case_name
-from claw.pipeline.openloop import GROUP_LOOPS
 from claw.trim import split_axes
 from claw.trim.trim import trim_batch
 
@@ -44,39 +54,58 @@ def scheduled_gains(tables: dict, design: dict, case) -> dict:
 
 
 def scheduled_margin_point(
-    lm_full, tables, design, case, *,
-    loops=GROUP_LOOPS, criteria=None,
+    lm_full, tables, design, case, *, criteria=None,
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
 ) -> dict:
-    """한 운영점의 스케줄 인지 마진 — {루프명: {gm_db, pm_deg, wcg, wcp, gains, status}}.
+    """한 운영점의 스케줄 인지 검증 — {자리명: 지표+판정}.
 
-    openloop._effective_gain과 달리 actuator/delay를 pi_loop 전체 인자로 통과시킨다.
-    실효 게인이 전부 0인 루프는 계산하지 않고 note로 분리 보고한다 (0 위장 금지).
+    반환 자리: pitch_rate(ζ_sp)·pitch_att(마진)·yaw_rate(ζ_dr)·roll_rate(λ_roll,
+    정보)·roll_att(마진). 자세 마진은 실효 게인 전부 0이면 note로 분리 보고한다
+    (0 위장 금지 — openloop의 제로 개루프 관례).
     """
     lon, lat = split_axes(lm_full)
-    models = {"lon": lon, "lat": lat}
     eff = scheduled_gains(tables, design, case)
+    act_kw = dict(
+        actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
+        delay_s=delay_s, pade_order=pade_order,
+    )
     out = {}
-    for group, specs in loops.items():
-        for sp in specs:
-            gains = {port: eff[f"{group}.{key}"] for port, key in sp["gains"].items()}
-            if all(v == 0.0 for v in gains.values()):
-                out[sp["name"]] = {
-                    "note": "제로 개루프 — 이 케이스 실효 게인이 전부 0",
-                    "gains": gains, "status": "na",
-                }
-                continue
-            loop = pi_loop(
-                models[sp["axis"]], x_out=sp["x_out"], u_in=sp["u_in"],
-                kp=gains.get("kp", 0.0), ki=gains.get("ki", 0.0), sign=sp["sign"],
-                actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
-                delay_s=delay_s, pade_order=pade_order,
-            )
-            entry = loop_margins(loop)
-            entry["gains"] = gains
-            if criteria is not None:
-                entry["status"] = criteria.judge(entry)
-            out[sp["name"]] = entry
+    for lm_axis in (lon, lat):
+        spec = AXIS_SPECS[lm_axis.axis]
+        rate_gains = {
+            f"{g}.k_rate": eff.get(f"{g}.k_rate", 0.0) for g, _, _ in spec["rates"]
+        }
+        metrics = axis_metrics(lm_axis, rate_gains)
+        for group, x_rate, u_in in spec["rates"]:
+            k = rate_gains[f"{group}.k_rate"]
+            wc = rate_loop_crossover(lm_axis, group, x_rate, u_in, k, **act_kw)
+            entry = {"gains": {"k_rate": k}, "wc": wc}
+            if group == "roll":
+                entry["kind"] = "bandwidth"
+                entry["roll_lambda"] = metrics["roll_lambda"]
+                entry["status"] = "ok"  # 성능 지표 — 안정성 판정은 ζ_dr·자세 마진 소관
+            else:
+                zeta = metrics["zeta_sp"] if lm_axis.axis == "lon" else metrics["zeta_dr"]
+                entry["kind"] = "damping"
+                entry["zeta"] = zeta
+                if criteria is not None:
+                    entry["status"] = criteria.judge_damping(zeta)
+            out[f"{group}_rate"] = entry
+
+        group, _x_out, _u_in = spec["att"]
+        kp, ki = eff[f"{group}.kp"], eff[f"{group}.ki"]
+        if kp == 0.0 and ki == 0.0:
+            out[f"{group}_att"] = {
+                "kind": "margin", "note": "제로 개루프 — 이 케이스 실효 게인이 전부 0",
+                "gains": {"kp": kp, "ki": ki}, "status": "na",
+            }
+            continue
+        loop = att_margin_loop(lm_axis, rate_gains, kp, ki, **act_kw)
+        m, orient = oriented_margins(loop)
+        entry = {"kind": "margin", **m, "orientation": orient, "gains": {"kp": kp, "ki": ki}}
+        if criteria is not None:
+            entry["status"] = criteria.judge(m)
+        out[f"{group}_att"] = entry
     return out
 
 
@@ -109,7 +138,7 @@ def scheduled_margin_map(
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
     on_progress=None,
 ) -> dict:
-    """전 역할 점(anchor+breakpoint+validation)의 스케줄 인지 마진 + 판정.
+    """전 역할 점(anchor+breakpoint+validation)의 스케줄 인지 검증 + 판정.
 
     trims: {이름: TrimResult} — 있는 것은 재사용, 없는 점은 서펜타인 순서로
     trim_batch(인접 시드) 후 병합한다 (호출자 dict를 제자리 갱신).
@@ -159,27 +188,33 @@ def scheduled_margin_map(
             aborted = "cancelled"
             break
 
-    worst = _worst_failures(cases)
     return {
         "cases": cases,
         "aborted": aborted,
         "criteria": criteria.to_dict(),
         "criteria_fingerprint": criteria.fingerprint(),
-        "failures": worst,
+        "failures": _worst_failures(cases),
     }
 
 
+def _severity(entry: dict) -> float:
+    """fail 항목의 처리 순서 키 — 작을수록 심각. 마진 자리는 PM, 감쇠 자리는 ζ×90
+    (0.3 합격선 ≈ 27 '도 상당' — 자리 종류가 섞여도 한 줄로 세우기 위한 근사 축)."""
+    if "pm_deg" in entry:
+        pm = entry["pm_deg"]
+        return pm if np.isfinite(pm) else -np.inf
+    return entry.get("zeta", 0.0) * 90.0
+
+
 def _worst_failures(cases: dict) -> list:
-    """fail 판정 (점, 루프) 목록 — PM 부족량 큰 순. 분류기(classify)의 작업 목록."""
+    """fail 판정 (점, 자리) 목록 — 심각 순. 분류기(classify)의 작업 목록."""
     out = []
     for name, entry in cases.items():
         for loop_name, m in entry["loops"].items():
             if m.get("status") == "fail":
-                pm = m.get("pm_deg")
                 out.append({
-                    "case": name, "loop": loop_name,
-                    "pm_deg": pm, "gm_db": m.get("gm_db"),
+                    "case": name, "loop": loop_name, "kind": m.get("kind"),
+                    "pm_deg": m.get("pm_deg"), "gm_db": m.get("gm_db"),
+                    "zeta": m.get("zeta"), "severity": _severity(m),
                 })
-    return sorted(
-        out, key=lambda f: f["pm_deg"] if np.isfinite(f["pm_deg"]) else -np.inf
-    )
+    return sorted(out, key=lambda f: f["severity"])

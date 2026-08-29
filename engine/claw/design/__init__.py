@@ -21,6 +21,7 @@ from claw.design.points import (
 )
 from claw.design.grid import coarse_grid
 from claw.design.refine import refine_trim_points
+from claw.design.tune import TuneTargets, tune_point, tune_points
 from claw.design.schedmap import (
     midpoint_validation_points,
     scheduled_gains,
@@ -44,4 +45,7 @@ __all__ = [
     "midpoint_validation_points",
     "coarse_grid",
     "refine_trim_points",
+    "TuneTargets",
+    "tune_point",
+    "tune_points",
 ]
