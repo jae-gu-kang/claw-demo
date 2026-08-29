@@ -166,3 +166,30 @@ def test_targets_reject_nonterminating_backoff():
     with pytest.raises(ValueError, match="감쇠 목표"):
         TuneTargets(zeta_sp=0.0)
     TuneTargets()  # 기본값은 유효해야 한다
+
+
+def test_cap_reports_no_stable_gain_separately(setup):
+    """안정한 댐퍼 게인이 없는 경우와 경계까지 줄인 경우를 구분해 보고한다.
+
+    lo가 0인 채 끝나면 "경계를 찾았다"가 아니라 댐퍼를 끈 것이다 — 한 플래그로
+    뭉개면 로그가 "캡 적용"이라 말하면서 아무 댐핑도 없는 형상을 내놓는다.
+    """
+    import numpy as np
+
+    from claw.common.contracts import LinearModel
+    from claw.design.tune import _cap_by_stability
+    from claw.trim import split_axes
+
+    _, _design, _, lm = setup
+    lon, _lat = split_axes(lm)
+    # 개루프가 크게 불안정한 합성 종축 — 어떤 |k|도 안정화하지 못한다
+    A = lon.A.copy()
+    A[2, 2] += 40.0  # q̇/q 를 크게 양수로
+    unstable = LinearModel(A=A, B=lon.B, C=lon.C, D=lon.D, x_names=lon.x_names,
+                           u_names=lon.u_names, axis="lon")
+    k, reason = _cap_by_stability(unstable, "q", "de", 0.4, ACT)
+    assert reason == "no_stable_gain"
+    assert k == 0.0
+    # 정상 축에서는 캡이 아예 안 걸리거나(None) 경계까지 줄인다('capped')
+    k2, reason2 = _cap_by_stability(lon, "q", "de", 0.4, ACT)
+    assert reason2 in (None, "capped")

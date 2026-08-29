@@ -54,6 +54,44 @@ def test_refine_terminates_and_reports_remaining():
     assert report["max_d_remaining"] >= 0.0
 
 
+def test_max_depth_actually_limits_subdivision():
+    """깊이 상한이 종료 3겹의 한 겹이라면 값이 결과를 바꿔야 한다.
+
+    종전 테스트는 `aborted in (None, 'budget_points')`와 `max_d_remaining >= 0`만
+    봤는데 둘 다 무조건 참이라, max_depth를 2에서 999로 바꿔도 통과했다.
+    """
+    shallow = refine_trim_points(*_setup((0.25, 0.45, 0.65)), tol=0.25,
+                                 max_points=60, max_depth=1)
+    deep = refine_trim_points(*_setup((0.25, 0.45, 0.65)), tol=0.25,
+                              max_points=60, max_depth=4)
+    assert len(shallow["inserted"]) < len(deep["inserted"]), (
+        f"깊이 상한이 삽입 수를 제한하지 못한다: {len(shallow['inserted'])} vs "
+        f"{len(deep['inserted'])}"
+    )
+    # 깊이 d는 초기 쌍마다 이분 트리 depth d까지 — 상한이 그 산술을 넘지 않는다
+    assert len(shallow["inserted"]) <= shallow["pairs_initial"] * (2 ** 2 - 1)
+
+
+def test_budget_counts_all_points_not_just_anchors():
+    """예산 단위는 **전체 점 수** — orchestrator·서버 상한과 같은 단위여야 한다.
+
+    anchor만 세면 검증점이 쌓인 뒤 앵커를 상한까지 채워 총점이 상한을 넘는다.
+    """
+    from claw.common.contracts import TrimCase
+    from claw.design import ROLE_VALIDATION, OperatingPoint, case_name
+
+    ac, points, lms, trims = _setup((0.25, 0.45, 0.65))
+    # 검증점 3개를 미리 얹어 둔다 (이터 2 상황)
+    for m in (0.3, 0.5, 0.6):
+        points.add(OperatingPoint(
+            case=TrimCase(name=case_name(m, 1000.0, 200.0), mach=m, alt=1000.0, fuel=200.0),
+            role=ROLE_VALIDATION, origin="test",
+        ))
+    before = len(points)
+    refine_trim_points(ac, points, lms, trims, tol=0.25, max_points=before + 2)
+    assert len(points) <= before + 2
+
+
 def test_budget_is_anytime():
     """max_points에 걸려 끊겨도 삽입된 것은 가장 필요한 곳(최악 쌍)부터다."""
     full_report = refine_trim_points(*_setup((0.25, 0.45, 0.65)), tol=0.25, max_points=40)

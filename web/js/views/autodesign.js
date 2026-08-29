@@ -203,7 +203,8 @@ function renderResult(box, body, resultId, ctx) {
   const resume = async () => {
     const approved = [...approveBoxes.entries()]
       .filter(([, cb]) => cb.checked).map(([id]) => id);
-    if (!approved.length) {
+    // 취소 재개는 승인할 것이 없는 것이 정상이다 — 승인 대기일 때만 최소 1건을 요구한다
+    if (!approved.length && report.status !== "cancelled") {
       clear(ctx.errBox).append(el("div", { class: "error-box" },
         "승인한 처방이 없다 — 최소 1개를 선택하거나 세션을 종료 상태로 두세요."));
       return;
@@ -296,6 +297,17 @@ function renderResult(box, body, resultId, ctx) {
       el("h4", {}, "처방 카드 (승인 후 재개)"),
       ...cards.approvable.map(cardEl),
       el("button", { onclick: resume }, "승인 반영 재개"),
+    );
+  } else if (report.status === "cancelled") {
+    // 취소된 세션은 승인할 처방이 없다 — 그렇다고 막다른 길이면 안 된다.
+    // 서버는 남은 스테이지부터 이어 돌 수 있고(design.py), 트림·선형모델·튜닝
+    // 결과가 세션에 그대로 남아 있어 재계산이 아니라 **이어붙이기**다
+    sections.push(
+      el("h4", {}, "중단된 세션"),
+      el("p", { class: "hint" },
+        "스테이지 도중에 취소되어 승인할 처방이 없습니다 — 완료된 트림·선형모델·"
+        + "튜닝 결과는 그대로 남아 있어 남은 스테이지부터 이어서 돌 수 있습니다."),
+      el("button", { onclick: resume }, "남은 스테이지 이어서 실행"),
     );
   }
   if (cards.escalations.length) {

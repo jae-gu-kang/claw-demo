@@ -34,13 +34,18 @@ const state = { kind: FLIGHT, target: ALL, merged: true };
 const buildSpec = makeSpecBuilder(api);
 
 let catalogCache = null; // /gains/catalog — SCAS 축 설계 kwargs의 원천
-/** 실패해도 코드 패널은 뜬다 (SCAS만 스키마 기본값으로 떨어진다). */
+/** 실패해도 코드 패널은 뜬다 (SCAS만 스키마 기본값으로 떨어진다).
+ *
+ * **성공만 캐시한다.** 실패를 캐시하면 첫 요청 한 번이 실패한 뒤로 페이지를 새로
+ * 고치기 전까지 영영 축 설계값 없이 돈다 — 무료 플랜의 15분 유휴 슬립·1분 콜드
+ * 스타트에서 그 첫 요청이 실패하는 것은 드문 일이 아니다. 재시도 비용은 요청 하나다.
+ */
 async function gainsCatalog() {
   if (catalogCache === null) {
     try {
       catalogCache = await api.get("/gains/catalog");
     } catch {
-      catalogCache = false;
+      return null;  // 캐시하지 않는다 — 다음 진입에서 다시 시도한다
     }
   }
   return catalogCache || null;

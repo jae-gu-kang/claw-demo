@@ -20,6 +20,7 @@ from claw.design import (
 )
 from claw.fcl.demo import demo_design_gains, make_demo_gain_tables
 from claw.plant import make_demo_aircraft
+from claw.tables import Table
 from claw.trim import linearize, trim_level
 
 
@@ -170,3 +171,27 @@ def test_margin_map_end_to_end_and_cancel(setup):
     )
     assert cancelled["aborted"] == "cancelled"
     assert len(cancelled["cases"]) == 1
+
+
+def test_sign_flip_fails_even_with_healthy_margin(setup):
+    """실효 게인 부호가 설계와 반대면 마진이 좋아 보여도 fail.
+
+    oriented_margins가 PM>0 방향을 골라 주기 때문에, 부호가 뒤집힌 게인도 화면에는
+    멀쩡한 PM으로 뜬다 — 실제 기체에서는 양의 되먹임이다.
+    """
+    ac, tables, design = setup
+    case = _case(0.6)
+    tr = trim_level(ac, case)
+    lm = linearize(ac, tr)
+    flipped = {
+        "pitch.kp": Table({"mach": (0.2, 0.9)},
+                          (-design["pitch.kp"],) * 2, extrapolate="clip"),
+    }
+    out = scheduled_margin_point(lm, flipped, design, case, criteria=MarginCriteria())
+    entry = out["pitch_att"]
+    assert entry["status"] == "fail"
+    assert entry["sign_flip"] == ["pitch.kp"]
+    assert "부호" in entry["note"]
+    # 부호가 맞으면 그대로 통과 — 검사가 무조건 fail을 내는 것이 아니다
+    ok = scheduled_margin_point(lm, {}, design, case, criteria=MarginCriteria())
+    assert "sign_flip" not in ok["pitch_att"]

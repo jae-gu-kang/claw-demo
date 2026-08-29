@@ -21,6 +21,8 @@ closure 조성(closure.py) × pi_loop 전체 조성(작동기 2차계 + Padé �
 (points.at_least 서열) 트림 앵커 인접 구간의 중점도 함께 나온다.
 """
 
+import math
+
 import numpy as np
 
 from claw.common.contracts import TrimCase
@@ -90,6 +92,7 @@ def scheduled_margin_point(
                 entry["zeta"] = zeta
                 if criteria is not None:
                     entry["status"] = criteria.judge_damping(zeta)
+            _apply_sign_check(entry, eff, design, [f"{group}.k_rate"])
             out[f"{group}_rate"] = entry
 
         group, _x_out, _u_in = spec["att"]
@@ -105,8 +108,33 @@ def scheduled_margin_point(
         entry = {"kind": "margin", **m, "orientation": orient, "gains": {"kp": kp, "ki": ki}}
         if criteria is not None:
             entry["status"] = criteria.judge(m)
+        _apply_sign_check(entry, eff, design, [f"{group}.kp", f"{group}.ki"])
         out[f"{group}_att"] = entry
     return out
+
+
+def _apply_sign_check(entry: dict, eff: dict, design: dict, slots) -> None:
+    """실효 게인이 **설계 부호와 반대**면 판정을 fail로 내린다.
+
+    `oriented_margins`는 PM>0이 되는 방향을 골라 준다 — 자리마다 설계 부호가 달라
+    (피치 kp<0·롤 kp>0) 고정 sign으로는 절반이 음의 DC 루프가 되기 때문이다.
+    그런데 그 되뒤집기가 **부호가 뒤집힌 게인까지 건강해 보이게 만든다**: 적합이
+    링잉을 내 breakpoint 사이에서 kp가 설계와 반대로 나오면, 실제 기체에서는 양의
+    되먹임인데 화면에는 멀쩡한 PM이 뜬다. 부호는 설계값이 보유한다는 전제
+    (conventions·fcl/demo)가 깨진 것이므로 마진 수치와 무관하게 결함이다.
+    """
+    flips = [
+        slot for slot in slots
+        if design.get(slot, 0.0) and eff.get(slot, 0.0)
+        and math.copysign(1.0, design[slot]) != math.copysign(1.0, eff[slot])
+    ]
+    if flips:
+        entry["sign_flip"] = flips
+        entry["status"] = "fail"
+        entry["note"] = (
+            f"실효 게인 부호가 설계와 반대: {', '.join(flips)} — 양의 되먹임이다"
+            " (마진 수치는 방향 보정 후 값이라 건강해 보일 수 있다)"
+        )
 
 
 def midpoint_validation_points(points) -> list:

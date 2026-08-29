@@ -10,6 +10,7 @@
 수치를 재기술하지 않는다 (합격기준 하드코딩 이관, 01 §5).
 """
 
+import math
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -38,8 +39,29 @@ class AutoDesignIn(BaseModel):
 
 
 class ResumeIn(BaseModel):
-    approved: list[str] = Field(min_length=1)  # 전부 기각이면 재개할 것이 없다 — 422
+    # 취소된 세션은 승인할 처방이 없다(스테이지 도중에 멈춘 것) — 빈 목록을 허용하고,
+    # 승인 대기 상태에서만 최소 1건을 요구한다(그때는 빈 목록이 곧 무의미한 재개다)
+    approved: list[str] = Field(default_factory=list)
     fingerprint: str = ""
+
+
+def _check_number(where: str, v) -> None:
+    """수치 + 유한성 — 범위 판정은 엔진 몫이고 서버는 이 경계만 진다.
+
+    NaN은 엔진의 범위 비교(`v < lo`)를 조용히 통과한다. 통과한 NaN은 작동기·
+    기준값을 오염시켜 마진이 전부 NaN이 되고, 문턱 비교가 모조리 False라
+    **계산한 적 없는 판정이 합격으로 보고된다** — 202 잡이라 화면에는 정상으로
+    보인다. sim·codegen·influence가 같은 이유로 같은 경계를 지킨다.
+    """
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise ValueError(f"수치여야 함 — {where}: {v!r}")
+    # float일 때만 본다 — int에 걸면 double 범위를 넘는 정수에서 OverflowError가
+    # 나고, 그건 라우트의 except (ValueError, TypeError)에 안 잡혀 500이 된다
+    # (엔진 범위 검사는 큰 int도 멀쩡히 비교해 422를 낸다). 형제 라우트가 전부
+    # `isinstance(x, float) and not isfinite(x)`인 이유다. JSON의 NaN·Infinity는
+    # json.loads가 전부 float으로 만들므로 차단력은 그대로다
+    if isinstance(v, float) and not math.isfinite(v):
+        raise ValueError(f"비유한값 config — {where}: {v!r}")
 
 
 def _build_config(overrides: dict) -> AutoDesignConfig:
@@ -64,16 +86,13 @@ def _build_config(overrides: dict) -> AutoDesignConfig:
     for key, value in merged.items():
         if key in ("mode", "alts", "fuels", "criteria", "targets"):
             continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"{key}는 수치여야 함: {value!r}")
+        _check_number(key, value)
     for key in ("alts", "fuels"):
         for v in merged[key] or ():
-            if isinstance(v, bool) or not isinstance(v, (int, float)):
-                raise ValueError(f"{key} 항목은 수치여야 함: {v!r}")
+            _check_number(f"{key} 항목", v)
     for nested in ("criteria", "targets"):
         for k, v in merged[nested].items():
-            if isinstance(v, bool) or not isinstance(v, (int, float)):
-                raise ValueError(f"{nested}.{k}는 수치여야 함: {v!r}")
+            _check_number(f"{nested}.{k}", v)
     cfg = AutoDesignConfig.from_dict(merged)
     if cfg.budget_points > MAX_POINTS:
         raise ValueError(f"budget_points 상한 {MAX_POINTS} 초과: {cfg.budget_points}")
@@ -178,14 +197,24 @@ def resume_auto_design(result_id: str, req: ResumeIn, request: Request,
     try:
         payload = store.load(result_id)
     except (KeyError, ValueError):
-        raise HTTPException(status_code=404, detail=f"결과 없음: {result_id}")
+        # 승인 대기 세션은 **저장소 보존 상한에 밀려 사라질 수 있다** — 그 경우와
+        # 오타를 구별해 주지 않으면 사용자가 없는 id를 계속 찾는다
+        limit = getattr(store, "limit", None)
+        hint = (f" (보존 상한 {limit}건 — 이후 저장이 그만큼 쌓였다면 밀려났을 수 있다)"
+                if limit else "")
+        raise HTTPException(status_code=404, detail=f"결과 없음: {result_id}{hint}")
     if payload.get("kind") != "auto_design":
         raise HTTPException(status_code=409, detail=f"auto_design 결과가 아님: {result_id}")
     session = DesignSession.from_dict(payload)
     if session.status == "awaiting_approval":
+        if not req.approved:
+            raise HTTPException(
+                status_code=422,
+                detail="승인한 처방이 없다 — 최소 1건을 승인하거나 세션을 그대로 두세요",
+            )
         session.apply_actions(req.approved)
     elif session.status == "cancelled":
-        pass  # 취소 재개 — 남은 스테이지부터 (승인 목록은 무시된다)
+        pass  # 취소 재개 — 남은 스테이지부터 (승인 목록은 비어 있는 것이 정상)
     else:
         raise HTTPException(
             status_code=409,

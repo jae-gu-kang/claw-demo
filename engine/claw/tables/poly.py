@@ -65,12 +65,21 @@ class PolyTable:
         ok = (v >= self.knots[0]) & (v <= self.knots[-1])
         return bool(ok) if np.ndim(ok) == 0 else ok
 
-    def _eval_one(self, x: float) -> float:
-        x = min(max(x, float(self.knots[0])), float(self.knots[-1]))  # clip
-        i = int(np.clip(np.searchsorted(self.knots, x, side="right") - 1,
+    def _locate(self, x: float) -> tuple:
+        """좌표 → (구간, u) — **클램프와 구간 선택의 유일한 구현**.
+
+        이 네 줄이 탑재 C `claw_polyeval1d`(codegen/emit_c.py)와 비트 단위로 맞아야
+        하는 부분이다. 평가와 기울기가 각자 복사본을 들고 있으면 C를 따라 규약을
+        고칠 때 한쪽만 바뀌어도 테스트가 안 잡는다 — 한 곳에 둔다.
+        """
+        xc = min(max(x, float(self.knots[0])), float(self.knots[-1]))  # clip
+        i = int(np.clip(np.searchsorted(self.knots, xc, side="right") - 1,
                         0, len(self.segments) - 1))
         s = self.segments[i]
-        u = (x - s["c"]) / s["h"]
+        return s, (xc - s["c"]) / s["h"]
+
+    def _eval_one(self, x: float) -> float:
+        s, u = self._locate(x)
         v = 0.0
         for a in reversed(s["coeffs"]):  # u-영역 호너 (polyfit.js evalFit과 동일)
             v = v * u + a
@@ -85,12 +94,12 @@ class PolyTable:
     __call__ = interp
 
     def slope(self, x: float) -> float:
-        """dp/dx — 경계 기울기 점프 보고용 (u-영역 도함수 호너 / h)."""
-        x = min(max(float(x), float(self.knots[0])), float(self.knots[-1]))
-        i = int(np.clip(np.searchsorted(self.knots, x, side="right") - 1,
-                        0, len(self.segments) - 1))
-        s = self.segments[i]
-        u = (x - s["c"]) / s["h"]
+        """dp/dx — 경계 기울기 점프 보고용 (u-영역 도함수 호너 / h).
+
+        구간 선택은 `_locate`와 공유한다 — 평가와 다른 구간을 고르면 joints 리포트가
+        런타임이 쓰지 않는 분할을 설명하게 된다.
+        """
+        s, u = self._locate(float(x))
         v = 0.0
         for k in range(len(s["coeffs"]) - 1, 0, -1):
             v = v * u + k * s["coeffs"][k]

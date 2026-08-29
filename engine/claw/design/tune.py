@@ -160,9 +160,17 @@ def _damper_loop_stable(lm_axis, x_rate, u_in, k, act_kw, zeta_act_min=0.10) -> 
 
 
 def _cap_by_stability(lm_axis, x_rate, u_in, k, act_kw):
-    """댐퍼 폐루프가 불안정해지면 |k|를 이분 축소해 안정 경계 아래로 — (k', 캡 여부)."""
+    """댐퍼 폐루프가 불안정해지면 |k|를 이분 축소 — (k', 사유) 사유 ∈ {None,'capped','no_stable_gain'}.
+
+    이분의 lo는 **안정으로 확인된 경우에만** 올라간다. 개루프가 이미 불안정한
+    플랜트(후방 CG·완화 정안정)나 안정 구간이 [k_lo>0, k_hi]인 조건부 안정에서는
+    lo가 0인 채 끝난다 — 그건 "안정 경계를 찾았다"가 아니라 **댐퍼를 꺼 버린 것**이다.
+    두 경우를 한 플래그로 뭉개면 로그가 "캡 적용"이라 말하면서 실제로는 아무 댐핑도
+    없는 형상을 내놓는다. 판정은 뒤에서 ζ<0 → fail로 정직하게 흐르지만, 사유는
+    구분해서 남긴다.
+    """
     if k == 0.0 or _damper_loop_stable(lm_axis, x_rate, u_in, k, act_kw):
-        return k, False
+        return k, None
     lo, hi = 0.0, abs(k)
     sign = math.copysign(1.0, k)
     for _ in range(_BISECT_N):
@@ -171,7 +179,9 @@ def _cap_by_stability(lm_axis, x_rate, u_in, k, act_kw):
             lo = mid
         else:
             hi = mid
-    return sign * lo, True
+    if lo == 0.0:
+        return 0.0, "no_stable_gain"
+    return sign * lo, "capped"
 
 
 def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
@@ -214,8 +224,15 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
         }
         if not reached:
             notes.append(f"{slot}: 브래킷(±4×설계값) 내 목표 {target} 미달 — 최선 달성값 채택")
-        if capped:
+        if capped == "capped":
             notes.append(f"{slot}: 댐퍼 안정 캡 적용 — 작동기·지연 포함 폐루프 안정 경계 아래로 축소")
+        elif capped == "no_stable_gain":
+            # 경계를 찾은 게 아니라 댐퍼를 끈 것이다 — 로그가 그렇게 말해야 한다
+            notes.append(
+                f"{slot}: **안정한 댐퍼 게인이 없다** — 어떤 |k|도 작동기·지연 포함 폐루프를"
+                " 안정화하지 못해 0으로 두었다 (개루프 불안정 플랜트이거나 조건부 안정 구간)."
+                " 이 축의 판정은 감쇠 미달로 흐르고 structural_limit 후보가 된다"
+            )
     return gains, achieved, notes
 
 

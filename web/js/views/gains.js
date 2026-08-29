@@ -40,6 +40,9 @@ let adopted = null; // 되읽은 형상 요약 {source, slots, aligned, points, 
 // 설계가 확정한 형상이 이 화면에만 안 보인다
 let seenTables;
 let seenOff;
+// 상수 드래프트의 '밖에서 바뀌었나' 판정 기준 (테이블과 같은 규약)
+let seenScas;
+let seenAp;
 // 끈 자리의 상수 드래프트 {scas, autopilot} — 구조도 폼과 같은 스토어를 쓰는 값이라
 // 테이블과 함께 '적용'에서 커밋한다 (여기만 즉시 반영되면 적용 전후가 갈린다)
 let constants = null;
@@ -53,15 +56,22 @@ export function render() {
   const errBox = el("div");
   const statusLine = el("p", { class: "hint" });
 
-  // 드래프트는 **탭에 들어올 때마다** 스토어에서 다시 뜬다. 모듈 스코프 상태는
-  // 탭을 나가도 살아 있는데(뷰는 pull 방식이고 store.subscribe를 쓰지 않는다),
-  // 그 사이 구조도에서 고친 값을 안 읽으면 여기서 '적용'하는 순간 옛 드래프트가
-  // 그 편집을 조용히 되돌린다 — 없애려던 이중 정본이 드래프트 층에서 되살아난다
-  const syncFromStore = () => {
-    constants = {
-      scas: store.get("scasParams") ?? null,
-      autopilot: store.get("autopilotParams") ?? null,
-    };
+  // 상수 드래프트를 **밖에서 바뀐 경우에만** 다시 읽는다 (테이블 드래프트와 같은 규약).
+  //
+  // 그 사이 구조도에서 고친 값을 안 읽으면 여기서 '적용'하는 순간 옛 드래프트가 그
+  // 편집을 조용히 되돌린다 — 없애려던 이중 정본이 드래프트 층에서 되살아난다. 반대로
+  // 매번 무조건 덮으면 여기서 고친 끈 자리 상수가 탭을 한 번 나갔다 오는 것만으로
+  // 사라진다. 셀 편집은 살아남는데 상수만 되돌아가는 그 비대칭이 특히 혼란스럽다
+  const syncFromStore = ({ force = false } = {}) => {
+    const scas = store.get("scasParams") ?? null;
+    const ap = store.get("autopilotParams") ?? null;
+    if (force || constants === null || scas !== seenScas || ap !== seenAp) {
+      constants = { scas, autopilot: ap };
+      seenScas = scas;
+      seenAp = ap;
+      return true;
+    }
+    return false;
   };
 
   const load = async ({ fresh = false } = {}) => {
@@ -74,7 +84,7 @@ export function render() {
       selected = defaultSelection(catalog);
       adopted = fresh ? null : adoptStored();
       if (fresh) markSeen();
-      syncFromStore();
+      syncFromStore({ force: fresh });
       renderTables(box, statusLine);
       statusLine.textContent = fresh
         ? "서버 설계 제안으로 되돌렸습니다 (미적용) — '시뮬·코드에 적용'을 눌러야 형상이 바뀝니다."

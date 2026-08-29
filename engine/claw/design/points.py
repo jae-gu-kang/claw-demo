@@ -29,8 +29,14 @@ AXES = ("mach", "alt", "fuel")  # fcl/schedule.py SCHED_VARS와 같은 축 — �
 
 
 def case_name(mach: float, alt: float, fuel: float) -> str:
-    """격자 값 그대로의 정본 이름 — 반올림하지 않는다 (web grid.js nameCases 원칙)."""
-    return f"M{mach:g}_h{alt:g}_f{fuel:g}"
+    """격자 값 그대로의 정본 이름 — 반올림하지 않는다 (web grid.js nameCases 원칙).
+
+    유효숫자 12자리 — 기본 `%g`(6자리)는 축 크기에 따라 refine의 중점 좌표
+    반올림(소수점 6자리, refine._ROUND)보다 거칠어진다: 고도 1007.8125와
+    1007.81255가 둘 다 'h1007.81'이 되어 **서로 다른 운영점이 같은 이름을 갖는다**.
+    이름이 케이스 매핑 키라 겹치면 트림·마진이 조용히 다른 점에 귀속된다.
+    """
+    return f"M{mach:.12g}_h{alt:.12g}_f{fuel:.12g}"
 
 
 @dataclass

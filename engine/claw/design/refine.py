@@ -90,7 +90,10 @@ def refine_trim_points(
     inserted, gaps = [], []
     aborted = None
     while heap:
-        if len(points.by_role(ROLE_ANCHOR)) >= max_points:
+        # 예산은 **전체 점 수**로 센다 — orchestrator·서버 상한(MAX_POINTS)이 같은
+        # 단위를 쓴다. anchor만 세면 이터 2에서 검증점이 쌓인 채로 앵커를 상한까지
+        # 채워 총점이 상한의 두 배가 되고, "단일 워커 점유 상한"이 실효를 잃는다
+        if len(points) >= max_points:
             aborted = "budget_points"
             break
         neg_d, _, name_a, name_b, axis, depth = heapq.heappop(heap)

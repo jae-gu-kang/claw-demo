@@ -51,7 +51,10 @@ async function loadGainsCatalog() {
       // 비행조건으로 읽는다 (lib/gainsync designCoord·designValue)
       gainsCatalog.design_coord = designCoord(gainsCatalog);
     } catch {
-      gainsCatalog = false; // 재시도하지 않는다 — 페이지 이동마다 두드리지 않으려고
+      // **실패는 캐시하지 않는다.** 캐시하면 첫 요청 한 번이 실패한 뒤로 새로고침
+      // 전까지 SCAS 축 폼이 읽기 전용으로 굳는다 — 무료 플랜 콜드 스타트(~1분)에서
+      // 그 첫 요청이 실패하는 것은 흔하고, 재시도 비용은 요청 하나다
+      return null;
     }
   }
   return gainsCatalog || null;

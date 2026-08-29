@@ -37,6 +37,8 @@ def test_auto_mode_reaches_terminal(env):
     report = s.run(ac, stall, limits, db, design, fingerprint="fp")
     assert s.stage == "DONE"
     assert report["status"] in ("converged", "escalated", "budget_exhausted")
+    # "실패 0"이 통과인지 미검증인지 — 판정 수가 갈라 준다 (vacuous pass 배제)
+    assert report["judged"] > 0, "판정이 한 건도 없는데 종결됐다"
     assert report["points"]["anchor"] >= 3
     assert s.sched_tables or s.sched_constants  # 게인 산출물이 존재
     assert s.margin_out["cases"]  # 스케줄 인지 검증이 돌았다

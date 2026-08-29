@@ -105,3 +105,14 @@ def test_roundtrip_serialization():
     assert ps2.to_dict() == d
     assert ps2.get("M0.5_h1000_f200").trimmable is False
     assert ps2.get("M0.5_h1000_f200").role == ROLE_BREAKPOINT
+
+
+def test_case_name_precision_survives_refine_midpoints():
+    """중점 반올림(refine._ROUND, 소수점 6자리)보다 이름이 거칠면 서로 다른 점이
+    같은 이름을 갖는다 — 이름이 매핑 키라 트림·마진이 다른 점에 귀속된다."""
+    a = case_name(0.4, 1007.8125, 200.0)
+    b = case_name(0.4, 1007.81255, 200.0)
+    assert a != b, f"고도 격자에서 이름이 겹친다: {a}"
+    # 흔한 값은 기존 표기를 유지한다 (기존 결과·픽스처와의 호환)
+    assert case_name(0.4, 1000.0, 200.0) == "M0.4_h1000_f200"
+    assert case_name(0.2187, 1000.0, 200.0) == "M0.2187_h1000_f200"
