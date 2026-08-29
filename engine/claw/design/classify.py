@@ -24,7 +24,7 @@
 import math
 
 from claw.design.linmodels import model_distance
-from claw.design.points import AXES, ROLE_ANCHOR, ROLE_BREAKPOINT
+from claw.design.points import ROLE_ANCHOR, ROLE_BREAKPOINT
 from claw.design.schedmap import scheduled_gains
 from claw.design.tune import TuneTargets, tune_point
 
@@ -39,27 +39,6 @@ LOOP_SLOTS = {
     "yaw_rate": ("yaw.k_rate",),
 }
 _EPS = 1e-12
-
-
-def _flanking(points, v_name, role_at_least):
-    """v를 축상 양옆에서 끼는 role 이상 점 — (아래, 위, 축) 또는 None."""
-    v = points.get(v_name)
-    vc = v.coords()
-    for axis_i, axis in enumerate(AXES):
-        lo = hi = None
-        for p in points.at_least(role_at_least):
-            if p.name == v_name:
-                continue
-            c = p.coords()
-            if c[:axis_i] + c[axis_i + 1:] != vc[:axis_i] + vc[axis_i + 1:]:
-                continue
-            if c[axis_i] < vc[axis_i] and (lo is None or c[axis_i] > lo.coords()[axis_i]):
-                lo = p
-            if c[axis_i] > vc[axis_i] and (hi is None or c[axis_i] < hi.coords()[axis_i]):
-                hi = p
-        if lo is not None and hi is not None:
-            return lo.name, hi.name, axis
-    return None
 
 
 def _tuned_judgement(tune_out, loop_name, criteria) -> str:
@@ -128,7 +107,7 @@ def classify_margin_deficit(
     evidence["interp_gap"] = {"per_slot": gaps, "max": max_gap, "tol": tol_gain}
 
     # 2) plant 급변 — v를 낀 인접 앵커의 플랜트 거리
-    flank_a = _flanking(points, v_name, ROLE_ANCHOR)
+    flank_a = points.flanking(v_name, ROLE_ANCHOR)
     if flank_a is not None:
         lo, hi, axis = flank_a
         tr_lo, tr_hi = trims.get(lo), trims.get(hi)
@@ -150,7 +129,7 @@ def classify_margin_deficit(
                 }
 
     # 3) 보간 valley — 최적은 통과 + 괴리 큼 + 이웃 breakpoint는 통과
-    flank_b = _flanking(points, v_name, ROLE_BREAKPOINT)
+    flank_b = points.flanking(v_name, ROLE_BREAKPOINT)
     if max_gap > tol_gain and flank_b is not None:
         lo, hi, axis = flank_b
         neighbor_ok = all(

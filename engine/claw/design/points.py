@@ -176,6 +176,30 @@ class PointSet:
                 out.append(a)
         return out
 
+    def flanking(self, name: str, role_at_least: str) -> tuple | None:
+        """이 점을 축상 양옆에서 끼는 role 이상 점 — (아래, 위, 축) 또는 None.
+
+        classify(플랜트 거리·이웃 통과 판정)와 orchestrator(검증점 추가 좌표)가
+        공유하는 인접 정의 — adjacent_pairs와 같은 축정렬 규약이다.
+        """
+        v = self.get(name)
+        vc = v.coords()
+        for axis_i, axis in enumerate(AXES):
+            lo = hi = None
+            for p in self.at_least(role_at_least):
+                if p.name == name:
+                    continue
+                c = p.coords()
+                if c[:axis_i] + c[axis_i + 1:] != vc[:axis_i] + vc[axis_i + 1:]:
+                    continue
+                if c[axis_i] < vc[axis_i] and (lo is None or c[axis_i] > lo.coords()[axis_i]):
+                    lo = p
+                if c[axis_i] > vc[axis_i] and (hi is None or c[axis_i] < hi.coords()[axis_i]):
+                    hi = p
+            if lo is not None and hi is not None:
+                return lo.name, hi.name, axis
+        return None
+
     # ── trim_batch 시드 순서 ─────────────────────────────────────────────
 
     def serpentine(self, role_at_least: str = ROLE_VALIDATION) -> list:
