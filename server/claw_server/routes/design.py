@@ -52,21 +52,35 @@ _INT_KEYS = ("budget_points", "budget_iters", "budget_tune_evals", "n_mach",
 
 
 def _check_number(where: str, v) -> None:
-    """수치 + 유한성 — 범위 판정은 엔진 몫이고 서버는 이 경계만 진다.
+    """수치 + double 표현 가능성 — 범위 판정은 엔진 몫이고 서버는 이 경계만 진다.
 
-    NaN은 엔진의 범위 비교(`v < lo`)를 조용히 통과한다. 통과한 NaN은 작동기·
-    기준값을 오염시켜 마진이 전부 NaN이 되고, 문턱 비교가 모조리 False라
-    **계산한 적 없는 판정이 합격으로 보고된다** — 202 잡이라 화면에는 정상으로
-    보인다. sim·codegen·influence가 같은 이유로 같은 경계를 지킨다.
+    두 가지를 막는다. ① NaN은 엔진의 범위 비교(`v < lo`)를 조용히 통과한다.
+    통과한 NaN은 작동기·기준값을 오염시켜 마진이 전부 NaN이 되고, 문턱 비교가
+    모조리 False라 **계산한 적 없는 판정이 합격으로 보고된다** — 202 잡이라
+    화면에는 정상으로 보인다. ② double 범위를 넘는 정수.
+
+    ②가 새는 방식은 자리마다 다르다. AutoDesignConfig.from_dict는 **중첩 dict만**
+    float()으로 바꾸고 top-level 스칼라는 그대로 넘긴다:
+      - criteria·targets → from_dict의 float()에서 OverflowError. ArithmeticError
+        하위라 라우트의 except (ValueError, TypeError)에 안 잡혀 **500**.
+      - actuator_wn 같은 top-level·alts/fuels 항목 → config 층에 변환하는 자리가
+        없어 **조용히 수용(202)**된다. 뒷일은 잡 스레드로 밀리고(grid.py의
+        float(a) 등) 자리마다 다르다 — 요청은 이미 성공으로 답해진 뒤라 어느
+        쪽이든 사용자는 제출 시점에 알 방법이 없다.
+      - budget_points·budget_iters → 다른 상한에 먼저 걸려 이미 422다. 단 전자의
+        상한은 **이 파일의 MAX_POINTS**이고 엔진엔 하한뿐이다(후자만 엔진 MAX_ITERS).
+    그래서 이 검사는 엔진 안이 아니라 **여기**여야 한다. 엔진 from_dict 두 곳을
+    고쳐도 top-level 경로는 그대로 샌다 — 네 갈래를 다 보는 층은 서버뿐이다.
+    형제 라우트(sim·codegen·influence)는 유한성만 보는데 여기가 float() 선변환까지
+    하는 것은, config가 임의 정밀도 int를 그대로 담아 오는 생 dict이기 때문이다.
     """
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         raise ValueError(f"수치여야 함 — {where}: {v!r}")
-    # float일 때만 본다 — int에 걸면 double 범위를 넘는 정수에서 OverflowError가
-    # 나고, 그건 라우트의 except (ValueError, TypeError)에 안 잡혀 500이 된다
-    # (엔진 범위 검사는 큰 int도 멀쩡히 비교해 422를 낸다). 형제 라우트가 전부
-    # `isinstance(x, float) and not isfinite(x)`인 이유다. JSON의 NaN·Infinity는
-    # json.loads가 전부 float으로 만들므로 차단력은 그대로다
-    if isinstance(v, float) and not math.isfinite(v):
+    try:
+        f = float(v)
+    except OverflowError:
+        raise ValueError(f"double 범위 초과 — {where}: {v!r}")
+    if not math.isfinite(f):
         raise ValueError(f"비유한값 config — {where}: {v!r}")
 
 

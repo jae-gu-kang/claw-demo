@@ -125,6 +125,9 @@ def test_nonfinite_config_is_422(client):
     # 원시 본문으로 보낸다 — httpx의 json= 인코더는 NaN을 거부하지만 파이썬
     # json.loads(서버 파싱 경로)는 NaN·Infinity 리터럴을 받아들인다. 즉 이 경로는
     # 표준 클라이언트로 막히지 않는다
+    # delay_s·criteria 두 줄은 엔진 __post_init__(delay_s < 0, pm_bad <= pm_min)이
+    # 먼저 잡아 이 가드가 없어도 422다 — 계약 표현이지 가드의 증거는 아니다.
+    # 나머지 다섯이 가드를 고정한다(빼면 전부 202로 샌다)
     for body in (
         '{"config": {"actuator_wn": NaN}}',
         '{"config": {"refine_tol": Infinity}}',
@@ -140,19 +143,26 @@ def test_nonfinite_config_is_422(client):
 
 
 def test_huge_int_stays_422(client):
-    """double 범위를 넘는 정수도 422다 — 유한성 검사가 500을 만들지 않는다.
+    """double 범위를 넘는 정수는 422다 — 중첩이든 top-level이든.
 
     json.loads는 임의 정밀도 int를 그대로 만들고 config는 dict라 pydantic이
-    통과시킨다. 유한성 검사를 int에까지 걸면 math.isfinite가 OverflowError를
-    내는데, 그건 라우트의 except (ValueError, TypeError)에 안 잡혀 500이 된다
-    — 엔진 범위 검사는 큰 int도 멀쩡히 비교해 422를 내던 자리다.
+    통과시킨다. 서버가 안 막으면 새는 방식이 자리마다 다르다: 중첩(criteria·
+    targets)은 엔진 from_dict의 float()에서 OverflowError → **500**, top-level
+    스칼라와 alts/fuels 항목은 config 층에 변환 자리가 없어 **조용히 202**로
+    수용된 뒤 잡 스레드로 넘어간다. 아래 여섯은 그 두 갈래를 모두 덮는다 —
+    다른 상한에 먼저 걸려 어차피 422가 되는 자리(budget_points·budget_iters)는
+    이 검사를 고정하지 못해 뺐다.
     """
     big = "9" * 400
-    for body in (f'{{"config": {{"budget_points": {big}}}}}',
-                 f'{{"config": {{"budget_iters": {big}}}}}'):
+    for body in (f'{{"config": {{"actuator_wn": {big}}}}}',      # top-level → 202로 샘
+                 f'{{"config": {{"pade_order": {big}}}}}',
+                 f'{{"config": {{"budget_tune_evals": {big}}}}}',
+                 f'{{"config": {{"alts": [{big}]}}}}',
+                 f'{{"config": {{"criteria": {{"pm_min_deg": {big}}}}}}}',  # 중첩 → 500
+                 f'{{"config": {{"targets": {{"pm_deg": {big}}}}}}}'):
         r = client.post("/api/design/auto", content=body,
                         headers={"content-type": "application/json"})
-        assert r.status_code == 422, f"큰 int → {r.status_code} (500이면 유한성 검사가 터진 것)"
+        assert r.status_code == 422, f"큰 int → {r.status_code} (500 또는 조용한 202로 샌 것)"
 
 
 def test_nonterminating_targets_rejected(client):
