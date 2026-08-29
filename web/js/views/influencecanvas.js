@@ -595,9 +595,11 @@ export function createInfluenceCanvas(opts = {}) {
     const show = new Set();
     if (sel) show.add(sel);
     if (hover) show.add(hover);
-    for (const nd of model.nodes) {
-      if (nd.kind === "plant" || nd.kind === "metric" || nd.kind === "output") show.add(nd.id);
-    }
+    // 상시 캡슐 라벨은 **기체 하나뿐**(법칙 경계의 랜드마크) — 출력(조종면)·지표는
+    // IR 노드와 같은 규칙으로 **활성화될 때만** 아래 점등 라벨(같은 서체·크기)로
+    // 나온다. 상시 캡슐로 두면 쉬는 화면에서 그쪽만 도드라지고, 재생 중에는 점등
+    // 라벨과 서체·크기가 달라 한 화면에 두 종류 글자가 섞였다. 이름 확인은 hover가 맡는다
+    for (const nd of model.nodes) if (nd.kind === "plant") show.add(nd.id);
     for (const id of show) {
       const nd = model.byId.get(id);
       const p = layout.pos.get(id);
@@ -606,9 +608,8 @@ export function createInfluenceCanvas(opts = {}) {
       const w = g.measureText(text).width;
       // 라벨은 노드 오른쪽에 붙이되, 캔버스를 넘칠 것 같으면 왼쪽으로 뒤집는다.
       // 여백만 키워 두면 배치가 조금만 바뀌어도 글자가 다시 잘린다 — 자기교정이 낫다
-      // 출력(조종면)도 **오른쪽**이다: 왼쪽에는 원뿔 재생의 IR 점등 라벨이 서므로
-      // 왼쪽 라벨은 그것들과 겹친다. 오른쪽은 기체 열까지의 빈 구간이라 자리가 있고,
-      // 기체는 위, 지표는 오른쪽 끝 — 겹칠 만한 이웃끼리는 방향이 갈린다
+      // 여기 오는 것은 기체(상시)·선택 파라미터·hover뿐이다. 출력·지표는 hover로
+      // 왔을 때 오른쪽(점등 라벨과 같은 방향 — 왼쪽의 IR 라벨과 안 겹치게), 기체는 위
       const hw = halfExtent(nd.kind, p.r);
       let side = nd.kind === "metric" || nd.kind === "output" ? 1 : 0;
       if (side === 1 && p.x + hw + 12 + w + 12 > width - 4) side = -1;
@@ -635,9 +636,9 @@ export function createInfluenceCanvas(opts = {}) {
 
     // 원뿔 노드는 **켜지는 순간 이름이 함께 나타난다** — 어느 노드가 지금 활성화됐는지
     // 캔버스만 보고도 읽게 한다. 알파를 점등 램프(nodeOn)에 묶어 선이 닿을 때 글자도
-    // 같이 떠오른다. 상시 라벨(출력·기체·지표·선택·hover)이 이미 있는 노드는 제외.
-    // 캡슐 칩 대신 작은 글자 + 어두운 밑판 — 원뿔 하나에 60개까지 켜지는 라벨이라
-    // 칩으로 두르면 배선이 라벨에 묻힌다
+    // 같이 떠오른다. 출력(조종면)·지표도 이 규칙을 따른다(같은 서체·크기) — 상시
+    // 캡슐(기체)과 선택·hover만 제외. 캡슐 칩 대신 작은 글자 + 어두운 밑판 —
+    // 원뿔 하나에 60개까지 켜지는 라벨이라 칩으로 두르면 배선이 라벨에 묻힌다
     if (cone) {
       g.font = FONT_SMALL;
       for (const nd of model.nodes) {
@@ -648,9 +649,11 @@ export function createInfluenceCanvas(opts = {}) {
         if (!p) continue;
         const text = nd.label ?? nd.id;
         const w = g.measureText(text).width;
+        // 출력 캡슐은 r보다 넓다(1.45r) — r로만 띄우면 라벨이 노드 모양에 물린다
+        const hx = halfExtent(nd.kind, p.r);
         // 오른쪽에 붙이되 캔버스를 넘치면 왼쪽으로 — 상시 라벨과 같은 자기교정
-        const right = p.x + p.r + 5 + w + 4 <= width - 2;
-        const x = right ? p.x + p.r + 5 : p.x - p.r - 5 - w;
+        const right = p.x + hx + 5 + w + 4 <= width - 2;
+        const x = right ? p.x + hx + 5 : p.x - hx - 5 - w;
         // fade를 같이 곱는다 — 주기 끝 페이드아웃에서 원뿔은 꺼지는데 라벨만
         // 불투명하게 떠 있으면 되감기 이음새에서 글자 60개가 툭 사라진다
         g.globalAlpha = on * fade;
