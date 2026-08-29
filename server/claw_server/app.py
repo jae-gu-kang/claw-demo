@@ -68,10 +68,15 @@ def _default_web_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "web"  # 모노레포 루트/web (03 §5)
 
 
-def create_app(data_dir=None, web_dir=None, access_password=None) -> FastAPI:
+def create_app(data_dir=None, web_dir=None, access_password=None,
+               result_limit=None) -> FastAPI:
     """앱 생성 — data_dir: 결과 저장 루트 (기본 $CLAW_SERVER_DATA 또는 ./server_data),
     web_dir: M14 정적 파일 루트 (기본 $CLAW_WEB_DIR 또는 모노레포 web/ — 없으면 API만),
-    access_password: 공용 비밀번호 (기본 $CLAW_ACCESS_PASSWORD — 빈 값이면 무인증)."""
+    access_password: 공용 비밀번호 (기본 $CLAW_ACCESS_PASSWORD — 빈 값이면 무인증),
+    result_limit: 결과 보존 개수 상한 (기본 $CLAW_RESULT_LIMIT — 0·미설정이면 무제한).
+
+    네 인자 모두 **환경변수 기본값 + 명시 주입** 패턴이다 — 테스트가 환경을 건드리지
+    않고 상한이 걸린 앱을 세울 수 있어야 보존 상한 관련 동작을 고정할 수 있다."""
     app = FastAPI(title="CLAW server", version="0.1.0")
     pw = (
         access_password
@@ -91,7 +96,8 @@ def create_app(data_dir=None, web_dir=None, access_password=None) -> FastAPI:
         if data_dir is not None
         else os.environ.get("CLAW_SERVER_DATA", "server_data"),
         # "" 포함 미설정·0 = 무제한 — 빈 값이 int()에서 기동 크래시 내지 않게
-        limit=int(os.environ.get("CLAW_RESULT_LIMIT") or 0) or None,
+        limit=(result_limit if result_limit is not None
+               else int(os.environ.get("CLAW_RESULT_LIMIT") or 0) or None),
     )
     for router in (
         system_routes.router,

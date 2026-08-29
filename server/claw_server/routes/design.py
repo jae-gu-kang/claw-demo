@@ -45,6 +45,12 @@ class ResumeIn(BaseModel):
     fingerprint: str = ""
 
 
+# 정수로만 뜻이 있는 필드 — 격자 개수·차수·예산. float을 넣으면 엔진 범위 비교는
+# 통과하고 np.linspace·Padé 차수에서 터져 **202 뒤 원인 없는 실패**가 된다
+_INT_KEYS = ("budget_points", "budget_iters", "budget_tune_evals", "n_mach",
+             "max_degree", "max_segments", "pade_order")
+
+
 def _check_number(where: str, v) -> None:
     """수치 + 유한성 — 범위 판정은 엔진 몫이고 서버는 이 경계만 진다.
 
@@ -87,6 +93,8 @@ def _build_config(overrides: dict) -> AutoDesignConfig:
         if key in ("mode", "alts", "fuels", "criteria", "targets"):
             continue
         _check_number(key, value)
+        if key in _INT_KEYS and isinstance(value, float) and not value.is_integer():
+            raise ValueError(f"{key}는 정수여야 함: {value}")
     for key in ("alts", "fuels"):
         for v in merged[key] or ():
             _check_number(f"{key} 항목", v)
@@ -196,7 +204,11 @@ def resume_auto_design(result_id: str, req: ResumeIn, request: Request,
     store = request.app.state.store
     try:
         payload = store.load(result_id)
-    except (KeyError, ValueError):
+    except ValueError as e:
+        # 저장될 수 없는 형식의 id — 밀려난 것이 아니므로 보존 상한 힌트를 붙이면
+        # 정확히 반대로 안내하게 된다 (잘린 id·확장자 붙은 id가 여기로 온다)
+        raise HTTPException(status_code=422, detail=f"잘못된 결과 id 형식: {e}")
+    except KeyError:
         # 승인 대기 세션은 **저장소 보존 상한에 밀려 사라질 수 있다** — 그 경우와
         # 오타를 구별해 주지 않으면 사용자가 없는 id를 계속 찾는다
         limit = getattr(store, "limit", None)
@@ -205,7 +217,15 @@ def resume_auto_design(result_id: str, req: ResumeIn, request: Request,
         raise HTTPException(status_code=404, detail=f"결과 없음: {result_id}{hint}")
     if payload.get("kind") != "auto_design":
         raise HTTPException(status_code=409, detail=f"auto_design 결과가 아님: {result_id}")
-    session = DesignSession.from_dict(payload)
+    try:
+        session = DesignSession.from_dict(payload)
+    except (KeyError, ValueError, TypeError) as e:
+        # 저장된 세션이 지금 엔진 스키마와 안 맞는다(배포 사이 필드 변경 등) —
+        # 형제 라우트가 엔진 예외를 4xx로 매핑하는 것과 같은 정책. 놓치면 500이다
+        raise HTTPException(
+            status_code=409,
+            detail=f"재개 불가 — 저장된 세션이 현재 엔진 스키마와 맞지 않음: {e}",
+        )
     if session.status == "awaiting_approval":
         if not req.approved:
             raise HTTPException(

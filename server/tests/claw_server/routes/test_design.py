@@ -190,13 +190,73 @@ def test_influence_accepts_poly_gain_tables(client):
                        json={"gain_tables": {"pitch.kp": bad}}).status_code == 422
 
 
-def test_missing_result_hints_at_retention_limit(client):
-    """승인 대기 세션은 보존 상한에 밀려 사라질 수 있다 — 오타와 구별해 준다."""
-    r = client.post("/api/design/no-such/resume", json={"approved": ["x"]})
-    assert r.status_code == 404
-    # 이 앱의 store에 상한이 걸려 있으면 그 사실을 알려 준다 (없으면 그냥 결과 없음)
+def test_missing_result_hints_at_retention_limit(tmp_path):
+    """승인 대기 세션은 보존 상한에 밀려 사라질 수 있다 — 오타와 구별해 준다.
+
+    conftest의 autouse 픽스처가 CLAW_RESULT_LIMIT를 지우므로 기본 client의
+    store.limit은 **항상 None**이다 — 그 앱으로는 힌트 분기가 한 번도 실행되지
+    않아, 힌트를 통째로 지워도 테스트가 통과한다. 상한을 건 앱을 따로 세운다.
+    """
+    from fastapi.testclient import TestClient
+
+    from claw_server import create_app
+
+    with TestClient(create_app(data_dir=tmp_path / "store", result_limit=3)) as c:
+        r = c.post("/api/design/no-such/resume", json={"approved": ["x"]})
+        assert r.status_code == 404
+        assert "보존 상한 3건" in r.json()["detail"]
+
+
+def test_malformed_id_is_422_without_retention_hint(client):
+    """저장될 수 없는 형식의 id는 밀려난 것이 아니다 — 힌트가 반대로 안내하면 안 된다."""
+    r = client.post("/api/design/a.b/resume", json={"approved": ["x"]})
+    assert r.status_code == 422
     detail = r.json()["detail"]
-    assert "결과 없음" in detail
+    assert "잘못된 결과 id" in detail
+    assert "보존 상한" not in detail
+
+
+def test_cancelled_session_resumes_without_approvals(client, tmp_path):
+    """이번 수정의 본래 시나리오 — 취소 세션은 승인할 처방이 없어도 재개된다.
+
+    종전에는 ResumeIn 스키마(min_length=1)가 핸들러 진입 전에 422로 막았다.
+    엔진 테스트는 DesignSession.run만 덮어 이 경로를 지나지 않는다.
+    """
+    from claw.design import AutoDesignConfig, DesignSession
+
+    s = DesignSession(AutoDesignConfig(n_mach=3, alts=(1000.0,), fuels=(200.0,),
+                                       budget_points=12, budget_iters=2))
+    s.status = "cancelled"
+    payload = s.to_dict()
+    payload["report"] = s.report()
+    payload["proposed_actions"] = []
+    payload["gain_export"] = {"tables": {}, "tables_resampled": {}, "constants": {}}
+    client.app.state.store.save("cancelled-x", payload,
+                                meta={"kind": "auto_design", "created": 0.0,
+                                      "status": "cancelled", "stage": "COARSE"})
+    r = client.post("/api/design/cancelled-x/resume", json={"approved": []})
+    assert r.status_code == 202, r.text
+
+
+def test_schema_mismatch_is_409_not_500(client):
+    """저장된 세션이 지금 엔진 스키마와 안 맞으면 409 — 500으로 새면 안 된다."""
+    client.app.state.store.save("stale-x", {"kind": "auto_design", "config": {"nope": 1}},
+                                meta={"kind": "auto_design", "created": 0.0})
+    r = client.post("/api/design/stale-x/resume", json={"approved": ["x"]})
+    assert r.status_code == 409
+    assert "스키마" in r.json()["detail"]
+
+
+def test_non_integer_counts_rejected(client):
+    """격자 개수·차수에 float을 넣으면 엔진 범위 비교는 통과하고 잡 안에서 터진다."""
+    for cfg in ({"n_mach": 2.5}, {"pade_order": 2.5}, {"budget_points": 24.7},
+                {"max_degree": 3.5}):
+        r = client.post("/api/design/auto", json={"config": cfg})
+        assert r.status_code == 422, f"{cfg} → {r.status_code}"
+    # 정수값 float은 통과해야 한다 (JSON은 24와 24.0을 구별하지 않는다)
+    assert client.post("/api/design/auto",
+                       json={"config": _small_config(budget_points=24.0)}
+                       ).status_code == 202
 
 
 def test_awaiting_approval_requires_at_least_one(client, wait_job):
