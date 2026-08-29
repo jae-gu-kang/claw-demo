@@ -1,4 +1,4 @@
-"""M16 refine 검증 — 저마하 집중 세분화, anytime 예산·취소, 깊이 상한, 결정론."""
+"""M17 refine 검증 — 저마하 집중 세분화, anytime 예산·취소, 깊이 상한, 결정론."""
 
 import pytest
 

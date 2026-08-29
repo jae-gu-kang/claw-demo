@@ -1,4 +1,4 @@
-"""M16 criteria 검증 — 판정 경계, nan/inf 취급, 지문·직렬화."""
+"""M17 criteria 검증 — 판정 경계, nan/inf 취급, 지문·직렬화."""
 
 import pytest
 

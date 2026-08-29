@@ -1,4 +1,4 @@
-"""M16 tune 검증 — 설계점 목표 달성, 부호·캡 준수, infeasible 경로, 결정론."""
+"""M17 tune 검증 — 설계점 목표 달성, 부호·캡 준수, infeasible 경로, 결정론."""
 
 import math
 

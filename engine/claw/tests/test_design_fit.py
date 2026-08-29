@@ -1,4 +1,4 @@
-"""M16 fit 검증 — 동압 법칙 적합(캡 knot·차수 에스컬레이션·C0), 축 선택, 재샘플."""
+"""M17 fit 검증 — 동압 법칙 적합(캡 knot·차수 에스컬레이션·C0), 축 선택, 재샘플."""
 
 import numpy as np
 import pytest

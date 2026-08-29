@@ -1,4 +1,4 @@
-"""M16 schedmap 검증 — 실효 게인 보간, 상수 게인 마진맵과의 차이, actuator/delay 조성 일치."""
+"""M17 schedmap 검증 — 실효 게인 보간, 상수 게인 마진맵과의 차이, actuator/delay 조성 일치."""
 
 import numpy as np
 import pytest

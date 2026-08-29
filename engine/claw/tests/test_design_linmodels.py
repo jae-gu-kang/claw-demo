@@ -1,4 +1,4 @@
-"""M16 linmodels 검증 — 캐시·직렬화 왕복, 거리 지표의 대칭성·0·단조 경향."""
+"""M17 linmodels 검증 — 캐시·직렬화 왕복, 거리 지표의 대칭성·0·단조 경향."""
 
 import numpy as np
 import pytest

@@ -1,4 +1,4 @@
-"""M16 orchestrator 검증 — 전자동 종결, gated 일시정지·승인·재개, 왕복, 취소."""
+"""M17 orchestrator 검증 — 전자동 종결, gated 일시정지·승인·재개, 왕복, 취소."""
 
 import pytest
 

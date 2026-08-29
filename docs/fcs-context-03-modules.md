@@ -50,6 +50,7 @@
 | M14 | `web` | 프론트엔드 (대시보드, 테이블 편집, 지도, 재생) | 02§4 |
 | M15 | `pipeline` | 설계 산출물 의존 DAG, 증분 재계산, 정량 Δ리포트·민감도 스윕 | 02§2.4 |
 | M16 | `codegen` | 제어법칙 구조 IR + Python 실행 백엔드 + 탑재 C 생성 백엔드 | 02§1·§2.2 |
+| M17 | `design` | 자동 설계 루프 — 트림 격자 자동화, 게인 자동 튜닝, 다항 스케줄 적합, 스케줄 인지 검증, 원인 분류, 이터레이션 오케스트레이터 | 01§3.4·§4, 02§2.1 번복 |
 
 ### M0 `common` — 기반 규약
 - 좌표계(동체축, NED)·단위계·부호 규약의 **코드 구현체**. `conventions.md`(도메인 문서 §6) 확정과 동시 작성 — 전 모듈이 이것만 참조
@@ -148,6 +149,14 @@
 - **조립 정본은 M7이다** — 생성기(`flight/generate.py`)도 서버 라우트도 `make_demo_fcl().init(dt).runner`를 쓴다. v0.14까지는 generate.py가 `fcl_graph(...)`를 따로 불러 게인·타면 한계·마진을 재기술하고 있었고(02 §5.5 위반), 통합 후 산출물이 **바이트 단위로 동일**함이 등가성 증거다
 - 의존: M0~M3, M7(조립). 후속: 원시 블록 나머지 에미터, 블록도 SVG를 IR에서 렌더, C 백엔드 시뮬 전환(02 §2.3 [TBD] — 제어법칙 구조가 굳은 뒤)
 
+### M17 `design` — 자동 설계 루프
+- **역할 있는 운영점 집합(PointSet)이 단일 정본 상태**: anchor(트림·선형화점) > breakpoint(게인 격자점) > validation(검증점), 승격은 단방향 래칫 — 이터레이션 종료 보장의 한 겹. M15 `pipeline`(반자동 진단·스윕 보조)과 층이 다르다 — 여기는 산출물(트림 격자·게인 테이블·마진 판정)을 **생성**하는 루프다
+- 스테이지: COARSE(엔벨로프 유도 coarse 격자, `grid`) → REFINE(플랜트 거리 adaptive 삽입, `refine` — 거리 정본 `linmodels.model_distance`는 분류기와 공유) → TUNE(결정론 2단 튜닝, `tune`) → FIT(차수 에스컬레이션 + greedy knot 다항 적합, `fit` → M3 `PolyTable`) → VERIFY(스케줄 인지 검증, `schedmap` — successive closure 조성 `closure`) → CLASSIFY(4-verdict 원인 분류, `classify`) → 처방 반영 재진입 (`orchestrator.DesignSession`, 기본 gated)
+- 합격기준은 `criteria.MarginCriteria`(01 §5 엔진 이관 1차) — canonical 지문 동봉. 선형모델은 `linmodels.LinearModelSet`이 (케이스, 지문) 키로 캐시·직렬화 (A/B가 처음으로 세션 저장물에 실린다)
+- 계약: `DesignSession.to_dict/from_dict` 완전 왕복(취소·gated 재개·store 저장의 전제), 협조적 취소는 스테이지 완료분 보존. 서버 소비: `POST /api/design/auto`(202)·`/design/{id}/resume`·`GET /design/defaults`
+- **의도적 이탈 기록**: M15 Pipeline DAG 캐시는 파라미터 지문 축이라 점집합 상태와 결이 달라 직접 채택하지 않음(경량 dict 캐시 + params_fingerprint 계보 승계). openloop GROUP_LOOPS(평탄 SISO Δ-민감도 선언)와 절대 판정 조성(closure)이 다른 이유는 실측 병리(레이트 루프 DC 0 아티팩트·자세 루프 레이트 피드백 누락) — `design/closure.py` 머리말이 정본 설명
+- 의존: M0, M3(Table·PolyTable), M7(design_gains·SCHEDULABLE), M9(trim·linearize), M10(margins·modes·envelope), M15(openloop._effective_gain 패턴 참조). 후속: AP 외측 루프 튜닝(폐루프 경로), 다차원 다항, 비선형 폐루프 스모크 옵션
+
 ### M13 `server` — 백엔드
 - FastAPI: REST API, 배치 작업 실행(트림/시뮬), 웹소켓 진행률, 결과 저장. **엔진 Python API만 호출** — 도메인 로직 없음
 - 단독 사용자·로컬 서버 (02§4). 의존: M1~M12, M15
@@ -196,7 +205,7 @@ CLAW_DEMO/
 │   └── claw/
 │       ├── common/  params/  blocks/  tables/  env/
 │       ├── plant/   nav/     fcl/     guidance/
-│       ├── trim/    analysis/ sim/    verify/  pipeline/
+│       ├── trim/    analysis/ sim/    verify/  pipeline/  design/
 │       └── tests/           # 모듈별 미러 구조
 ├── server/                  # M13 FastAPI 앱
 └── web/                     # M14 프론트엔드 (스택 TBD)
@@ -252,3 +261,4 @@ CLAW_DEMO/
 - *v0.18 — 게인 스케줄 **자리 선택**: M7에 `SCHEDULABLE`(자리 정본 16개)·`design_gains`(자리 → 설계점 상수, AP 이름 차이 흡수)·`make_demo_gain_tables(names)`, M13에 `GET /gains/catalog`, M14 게인 탭에 자리 격자 + 웹 판단부 `lib/gainsched.js`. 게인 이름 규칙이 M7 안에서 세 군데(`graphs.py` 상수·`autopilot_nodes` 하드코딩·`law.py` 재선언)로 갈라져 있던 것을 한 표로 합쳤다 — 그 결과 구조상 불가한 자리가 조립 시점에 "무엇을 잘못 골랐는지"로 걸린다(종전에는 `init(dt)`까지 가서 내부 사정으로 터졌다). 기본 형상 불변: `flight/generate.py` 0개 갱신·지문 유지 (01 v0.22, 02 v0.27)*
 - *v0.20 — **영향성 탭 순차 재생** (02 v0.29): 원뿔이 통째로 켜지던 것을 층 슬롯 + 층 안 시차로 한 줄씩 연결되게. 신설 `lib/influenceplay.js`(`conePlayback`·`cycleAt`·`captionAt`·`summaryOf`·`graphDepth`, 테스트 17건), `lib/influencelayout.js`에 `arcPrefix`(호길이 0..s 부분 스트로크) + 간선 `idx` + `wavefrontSchedule` 삭제. 시간축을 기하에서 분리해 세 배치가 같은 재생을 쓴다*
 - *v0.19 — **M15 영향성 해석 1단 + M14 `#influence` 탭**: 파라미터 하나가 제어법칙과 설계 지표에 어디까지 번지는지를 딥러닝 레이어 그림처럼 보이는 화면 (02 v0.28). 02 §2.4가 v0.8에 [확정]으로 적힌 뒤 M15에 캐시·Δ리포트만 있고 **화면이 없던** 미결의 첫 조각이다. 신설 `pipeline/influence.py`(파라미터 목록·재조립 diff 매핑·전방 원뿔·지표 선언), `routes/influence.py`(`POST /influence/structural`), `lib/influence.js`·`lib/influencelayout.js`·`views/influence.js`·`views/influencecanvas.js`. M7 `make_demo_fcl`에 `scas`·`mixer`·`alpha_margin` 주입 인자(조립 정본을 우회하지 않으려면 해석 모듈이 아니라 조립 함수에 손잡이를 단다 — 02 v0.24의 통합을 되돌리지 않는다), M1 레지스트리에 `param_defs()`. 배치 3안은 사용자 선택 대기 — 고르면 나머지 둘을 지운다*
+- *v0.21 — **M17 `design` 신설**: 자동 설계 루프(트림 격자 자동화 → 게인 자동 튜닝 → 다항 스케줄 적합 → 스케줄 인지 검증 → 원인 분류 → gated 이터레이션). M3에 `PolyTable`(구간별 다항 1D 테이블 — Table과 같은 소비 계약), M2/M16에 `PolyBlock`·`claw_polyeval1d`(C 패리티 비트 일치), M13에 `/design/*` 라우트 + 게인 페이로드 태그드 유니언, M14에 `#autodesign` 탭. 근거 결정은 01 v0.23·02 v0.30*
