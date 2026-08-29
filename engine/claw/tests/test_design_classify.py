@@ -30,7 +30,7 @@ def _setup(machs, v_mach, alt=1000.0, fuel=200.0):
         tr = trim_level(ac, case, fingerprint="fp")
         assert tr.converged
         trims[case.name] = tr
-        role = ROLE_VALIDATION if m == v_mach else ROLE_ANCHOR
+        role = ROLE_VALIDATION if v_mach is not None and m == v_mach else ROLE_ANCHOR
         pt = OperatingPoint(case=case, role=role, origin="test")
         pt.trimmable = True
         points.add(pt)
@@ -143,3 +143,26 @@ def test_classify_failures_supersede():
     superseded = [a for a in actions if "superseded_by" in a]
     assert len(promotes) - len(superseded) <= 1  # 같은 점 유효 승격은 1개
     assert all(a["id"].count(":") == 2 for a in actions)
+
+
+def test_valley_on_anchor_prescribes_refit_not_promotion():
+    """이미 breakpoint 이상인 점의 보간 괴리 — 승격은 래칫 위반이라 세션을 죽인다.
+
+    anchor는 breakpoint 역할을 겸하므로(서열) 그 점의 괴리는 격자가 성긴 게 아니라
+    적합이 못 맞춘 것이다 → 재적합 처방이어야 한다.
+    """
+    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=None)  # 전부 anchor
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    design = demo_design_gains()
+    opt = tune_point(lms.get(ac, trims[v]), design, **ACT)["gains"]
+    tables = {
+        "pitch.kp": Table({"mach": (0.55, 0.65)},
+                          (opt["pitch.kp"] * 3.0,) * 2, extrapolate="clip"),
+    }
+    out = classify_margin_deficit(
+        ac, v, "pitch_att", points, lms, trims, tables, design,
+        _fail_cases(v, lo, hi), criteria=MarginCriteria(), tol_plant=99.0, **ACT,
+    )
+    assert out["verdict"] == "gain_interp_valley"
+    assert out["action"]["type"] == "refit_at", "anchor에 승격 처방을 내면 래칫이 터진다"
+    assert out["action"]["gains"]["pitch.kp"] == pytest.approx(opt["pitch.kp"])

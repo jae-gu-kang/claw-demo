@@ -43,7 +43,7 @@ from claw.fcl.demo import (
 from claw.fcl.scas import Scas
 from claw.params.paramset import canonical_hash
 from claw.params.registry import REGISTRY
-from claw.tables import Table
+from claw.tables import PolyTable, Table
 
 SCAS_AXES = ("pitch", "roll", "yaw")
 _SCAS_BASE = {"pitch": DEMO_PITCH, "roll": DEMO_ROLL, "yaw": DEMO_YAW}
@@ -190,12 +190,16 @@ def make_law(shape: Shape):
                     f"배율을 걸 테이블이 없다: {name!r} — 스케줄 자리 {sorted(gain_tables)}"
                 )
             t = gain_tables[name]
-            gain_tables[name] = Table(
-                {k: np.asarray(v) for k, v in zip(t.axis_names, t.axes)},
-                np.asarray(t.data) * float(scale),
-                name=name,
-                extrapolate=t.extrapolate,
-            )
+            # 다항 스케줄(PolyTable)은 격자 값이 없어 계수에 곱한다 — 같은 곡선 배율이다
+            if isinstance(t, PolyTable):
+                gain_tables[name] = t.scaled(scale)
+            else:
+                gain_tables[name] = Table(
+                    {k: np.asarray(v) for k, v in zip(t.axis_names, t.axes)},
+                    np.asarray(t.data) * float(scale),
+                    name=name,
+                    extrapolate=t.extrapolate,
+                )
     return make_demo_fcl(
         with_schedule=shape.with_schedule,
         with_limiter=shape.with_limiter,
@@ -359,6 +363,9 @@ def _norm(v):
     if isinstance(v, Table):
         return ("Table", tuple(v.axis_names), tuple(tuple(np.asarray(a).ravel().tolist())
                 for a in v.axes), tuple(np.asarray(v.data).ravel().tolist()), v.extrapolate)
+    if isinstance(v, PolyTable):
+        # 다항은 격자 값이 아니라 구간 계수가 신원이다 — to_dict가 그 전부다
+        return ("PolyTable", _norm(v.to_dict()))
     if isinstance(v, np.ndarray):
         return ("nd", v.shape, tuple(v.ravel().tolist()))
     if isinstance(v, dict):
@@ -612,6 +619,11 @@ def _jsonable(v):
     if isinstance(v, Table):
         return {"kind": "table", "name": v.name,
                 "axes": {a: len(np.asarray(x)) for a, x in zip(v.axis_names, v.axes)}}
+    if isinstance(v, PolyTable):
+        # 다항 스케줄도 **요약만** — 빠뜨리면 노드 인자가 그대로 실려 응답 직렬화가 깨진다
+        return {"kind": "poly", "name": v.name, "axis": v.axis_names[0],
+                "segments": len(v.segments),
+                "degrees": [s["degree"] for s in v.segments]}
     if isinstance(v, np.ndarray):
         return v.ravel().tolist()
     if isinstance(v, (list, tuple)):

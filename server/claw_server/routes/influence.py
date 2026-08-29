@@ -20,10 +20,9 @@ from claw.pipeline.influence import Shape, param_universe, structural_payload
 from claw.pipeline.openloop import openloop_delta
 from claw.pipeline.sweep import nonadditivity, run_sweep, sweep_plan
 from claw.plant import make_demo_aircraft
-from claw.tables import Table
 from claw.trim import trim_batch
 from claw_server.routes.codegen import FlightCodeIn
-from claw_server.routes.sim import _load_sim
+from claw_server.routes.sim import _load_sim, build_gain_tables
 from claw_server.routes.trim import TrimCaseIn, build_cases
 from claw_server.serialize import to_jsonable
 
@@ -84,12 +83,9 @@ class InfluenceIn(FlightCodeIn):
 
 def to_shape(req: InfluenceIn) -> Shape:
     """요청 → 엔진 형상. 지정하지 않은 자리는 비워 두어 **엔진 기본값이 채우게** 한다."""
-    gain_tables = None
-    if req.gain_tables is not None:
-        gain_tables = {
-            name: Table(spec.axes, spec.data, name=name, extrapolate=spec.extrapolate)
-            for name, spec in req.gain_tables.items()
-        }
+    # 조립은 sim·codegen과 같은 빌더 하나로 — 여기만 손으로 짜 두면 게인 페이로드가
+    # 넓어질 때(다항 kind='poly') 이 경로만 빠져 AttributeError → 500이 된다
+    gain_tables = build_gain_tables(req.gain_tables)
     return Shape(
         control_hz=req.control_hz,
         with_schedule=req.with_schedule,

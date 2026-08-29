@@ -57,6 +57,34 @@ class TuneTargets:
     # 통과하면 infeasible이다. 백오프는 대역폭을 버리면 거의 항상 마진을 만들 수
     # 있으므로(지연 위상 ∝ ω), 하한 없는 "통과"는 성능 붕괴를 조용히 합격으로 위장한다.
 
+    def __post_init__(self):
+        """값 검증 — 백오프 루프의 종료가 이 불변식에 걸려 있다.
+
+        `_tune_att`의 `while wc >= floor_frac*wc0`는 backoff ≥ 1이면 영원히 돌고,
+        floor_frac = 0이면 wc가 언더플로로 0이 된 뒤에도 참이다. 그 루프는
+        on_progress를 부르지 않아 잡 취소로도 못 멈춘다 — 서버가 config로 이
+        값들을 받으므로(routes/design.py) 검증이 없으면 워커를 영구 점유시킬 수 있다.
+        """
+        if not 0.0 < self.backoff < 1.0:
+            raise ValueError(f"backoff는 (0, 1) 구간: {self.backoff} — 1 이상이면 백오프가 끝나지 않는다")
+        if not 0.0 < self.wc_att_floor_frac < 1.0:
+            raise ValueError(f"wc_att_floor_frac는 (0, 1) 구간: {self.wc_att_floor_frac}")
+        if not self.wc_att_floor_frac <= self.wc_att_ok_frac:
+            raise ValueError(
+                f"wc_att_ok_frac({self.wc_att_ok_frac}) ≥ wc_att_floor_frac"
+                f"({self.wc_att_floor_frac}) 필요 — 탐색 바닥보다 낮은 합격 하한은 무의미"
+            )
+        if self.wc_ratio_att <= 0.0:
+            raise ValueError(f"wc_ratio_att는 양수: {self.wc_ratio_att}")
+        if self.ki_zero_frac <= 0.0:
+            raise ValueError(f"ki_zero_frac는 양수: {self.ki_zero_frac}")
+        if not 0.0 < self.zeta_sp <= 1.0 or not 0.0 < self.zeta_dr <= 1.0:
+            raise ValueError(f"감쇠 목표는 (0, 1]: zeta_sp={self.zeta_sp}, zeta_dr={self.zeta_dr}")
+        if self.roll_lambda <= 0.0:
+            raise ValueError(f"roll_lambda는 양수: {self.roll_lambda}")
+        if self.pm_deg <= 0.0 or self.gm_db <= 0.0:
+            raise ValueError(f"마진 목표는 양수: pm={self.pm_deg}, gm={self.gm_db}")
+
     def to_dict(self) -> dict:
         return asdict(self)
 

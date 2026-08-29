@@ -56,6 +56,24 @@ def _build_config(overrides: dict) -> AutoDesignConfig:
             if bad:
                 raise ValueError(f"미정의 {nested} 키 {bad}")
             merged[nested] = {**base[nested], **overrides[nested]}
+    # 타입 검증 — 데이터클래스는 강제 변환을 하지 않으므로 여기서 걸러야 한다.
+    # 안 걸리는 값은 잡 스레드 안에서 터져 202 뒤 원인 없는 실패가 된다
+    for key, want in (("mode", str), ("alts", (list, type(None))), ("fuels", (list, type(None)))):
+        if not isinstance(merged[key], want):
+            raise ValueError(f"{key} 타입 오류: {type(merged[key]).__name__}")
+    for key, value in merged.items():
+        if key in ("mode", "alts", "fuels", "criteria", "targets"):
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{key}는 수치여야 함: {value!r}")
+    for key in ("alts", "fuels"):
+        for v in merged[key] or ():
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise ValueError(f"{key} 항목은 수치여야 함: {v!r}")
+    for nested in ("criteria", "targets"):
+        for k, v in merged[nested].items():
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise ValueError(f"{nested}.{k}는 수치여야 함: {v!r}")
     cfg = AutoDesignConfig.from_dict(merged)
     if cfg.budget_points > MAX_POINTS:
         raise ValueError(f"budget_points 상한 {MAX_POINTS} 초과: {cfg.budget_points}")
@@ -145,7 +163,10 @@ def design_defaults() -> dict:
 def submit_auto_design(req: AutoDesignIn, request: Request, response: Response) -> dict:
     try:
         cfg = _build_config(req.config)
-    except ValueError as e:
+    except (ValueError, TypeError) as e:
+        # 데이터클래스는 값을 강제 변환하지 않는다 — 타입이 틀린 스칼라는 __post_init__의
+        # 비교에서 TypeError로 나온다. 형제 라우트(sim·codegen·influence)와 같은 정책으로
+        # 422에 매핑한다 (놓치면 500)
         raise HTTPException(status_code=422, detail=str(e))
     return _run_session_job(request, response, DesignSession(cfg), req.fingerprint)
 

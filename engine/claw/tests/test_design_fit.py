@@ -107,3 +107,25 @@ def test_fit_slots_shapes():
     assert set(out["tables"]) == {"pitch.kp"}
     assert out["constants"] == {"yaw.k_rate": pytest.approx(0.8)}
     assert set(out["reports"]) == {"pitch.kp", "yaw.k_rate"}
+
+
+def test_greedy_does_not_abandon_splittable_segments():
+    """잔차 1위 구간을 못 쪼갠다고 전체 세분화를 포기하면 안 된다.
+
+    격자점 2개짜리 구간(pin 제약으로 흔하다)이 최악이면 종전 코드는 아직 쪼갤 수
+    있는 구간을 남긴 채 루프를 끝냈다 — 허용치의 수천 배로 끝나는 적합이 나왔고,
+    그 나쁜 적합이 곧 분류기의 보간 괴리 오탐으로 이어진다.
+    """
+    # 끝에 2점짜리 급변을 두고 앞쪽에 넉넉한 곡선을 둔다
+    xs = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+    ys = np.array([0.0, 9.0, 1.0, 8.0, 2.0, 7.0, 3.0, 40.0])
+    out = fit_gain_surface(xs, ys, tol_fit=0.001, max_degree=2, max_segments=6)
+    assert out["n_segments"] >= 3, "쪼갤 수 있는 구간이 남았는데 2구간에서 멈췄다"
+
+
+def test_greedy_terminates_when_nothing_splittable():
+    """전 구간이 2점이면 더 쪼갤 자리가 없으므로 조용히 종료한다 (무한 루프 금지)."""
+    xs = np.array([0.0, 1.0])
+    ys = np.array([0.0, 5.0])
+    out = fit_gain_surface(xs, ys, tol_fit=1e-12, max_degree=1, max_segments=4)
+    assert out["n_segments"] == 1

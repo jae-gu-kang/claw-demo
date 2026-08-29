@@ -33,6 +33,7 @@ from claw.design.linmodels import LinearModelSet
 from claw.design.points import (
     ROLE_ANCHOR,
     ROLE_BREAKPOINT,
+    ROLE_RANK,
     ROLE_VALIDATION,
     OperatingPoint,
     PointSet,
@@ -77,6 +78,27 @@ class AutoDesignConfig:
             raise ValueError(f"budget_iters는 1~{MAX_ITERS}: {self.budget_iters}")
         if self.budget_points < 4:
             raise ValueError(f"budget_points는 4 이상: {self.budget_points}")
+        # 차수 상한 6 — 반출 다항이 서버 게인 스키마(구간 계수 8개, sim.PolySegmentIn)를
+        # 넘으면 자동 설계 결과를 시뮬·코드젠에 되먹일 수 없다(422). 웹 수동 적합
+        # (lib/polyfit.js)도 1~6이라 두 경로의 표현력을 같게 둔다
+        if not 1 <= self.max_degree <= 6:
+            raise ValueError(f"max_degree는 1~6: {self.max_degree}")
+        if not 1 <= self.max_segments <= 8:
+            raise ValueError(f"max_segments는 1~8: {self.max_segments}")
+        if not 0.0 < self.refine_tol:
+            raise ValueError(f"refine_tol은 양수: {self.refine_tol}")
+        for name in ("fit_tol", "flat_tol", "tol_gain"):
+            v = getattr(self, name)
+            if not 0.0 < v < 1.0:
+                raise ValueError(f"{name}은 (0, 1) 구간: {v}")
+        if self.n_mach < 2:
+            raise ValueError(f"n_mach는 2 이상: {self.n_mach}")
+        if self.budget_tune_evals < 0:
+            raise ValueError(f"budget_tune_evals는 음수 불가: {self.budget_tune_evals}")
+        if self.actuator_wn <= 0 or self.actuator_zeta <= 0:
+            raise ValueError("actuator_wn·actuator_zeta는 양수여야 함")
+        if self.delay_s < 0 or self.pade_order < 1:
+            raise ValueError("delay_s는 음수 불가, pade_order는 1 이상")
 
     def to_dict(self) -> dict:
         d = {k: v for k, v in self.__dict__.items() if k not in ("criteria", "targets")}
@@ -243,7 +265,12 @@ class DesignSession:
         # 승격 의도를 따라가게 한다 (knot 강제가 아니라 잔차 유도 — fit.py greedy)
         samples = {slot: dict(v) for slot, v in self.gain_samples.items()}
         for slot, extra in self.promoted_gains.items():
-            samples.setdefault(slot, {}).update(extra)
+            target = samples.setdefault(slot, {})
+            for name, value in extra.items():
+                # **튜닝 샘플이 이긴다.** 승격 게인은 한 번 들어가면 지워지지 않으므로,
+                # 그 점이 나중에 anchor로 올라가 실제로 튜닝되면 낡은 값이 최신 결과를
+                # 덮어써 같은 점이 영원히 재분류된다 (이터 예산만 태운다)
+                target.setdefault(name, value)
         out = fit_slots(
             samples, self.points, flat_tol=c.flat_tol, tol_fit=c.fit_tol,
             max_degree=c.max_degree, max_segments=c.max_segments,
@@ -271,9 +298,31 @@ class DesignSession:
         self.margin_out = out
         self.stage = "CLASSIFY"
 
+    def judged_count(self) -> int:
+        """실제로 판정이 난 (점, 자리) 수 — "통과"와 "안 봤다"를 가르는 수치.
+
+        미수렴 트림 점은 loops가 비어 있고(schedmap), 제로 개루프 자리는 status
+        'na'다. 둘 다 실패 목록에 안 잡히므로, 판정 수를 세지 않으면 **아무것도
+        검증하지 않은 실행이 converged로 보고된다** — 비행제어 설계툴에서 가장
+        나쁜 실패 양식이다.
+        """
+        return sum(
+            1
+            for entry in self.margin_out.get("cases", {}).values()
+            for m in entry.get("loops", {}).values()
+            if m.get("status") in ("ok", "warn", "fail")
+        )
+
     def _stage_classify(self, aircraft, cb):
         c = self.config
         if not self.margin_out["failures"]:
+            judged = self.judged_count()
+            if judged == 0:
+                # 실패가 없는 게 아니라 볼 것이 없었다 — 트림 전량 미수렴, 빈 격자,
+                # 게인이 전부 0인 형상 등. 통과로 위장하지 않는다
+                self.status = "nothing_verified"
+                self.stage = "DONE"
+                return
             self.status = "converged"
             self.stage = "DONE"
             return
@@ -331,18 +380,30 @@ class DesignSession:
                 continue  # 상위 설계 변경은 자동 적용 금지 — 승인 목록에 있어도 무시
             if act["type"] == "promote":
                 pt = self.points.get(act["point"])
-                if pt.role != act["to"]:
+                # 래칫 방어 — 이미 그 역할 이상이면 승격을 **건너뛴다**. 분류기가
+                # 상위 역할 점에 승격을 내는 경로는 막아 두었지만(classify refit_at),
+                # 여기서 터지면 run()이 못 잡아 세션 전량이 저장 없이 소실된다
+                if ROLE_RANK[pt.role] < ROLE_RANK[act["to"]]:
                     self.points.promote(act["point"], act["to"], reason=a["verdict"])
-                if act["to"] == ROLE_ANCHOR:
-                    need_refine = True
+                    if act["to"] == ROLE_ANCHOR:
+                        need_refine = True
                 else:
-                    for slot, v in (act.get("gains") or {}).items():
-                        self.promoted_gains.setdefault(slot, {})[act["point"]] = float(v)
+                    a["skipped"] = f"이미 {pt.role} — 승격 불필요"
+                for slot, v in (act.get("gains") or {}).items():
+                    self.promoted_gains.setdefault(slot, {})[act["point"]] = float(v)
+            elif act["type"] == "refit_at":
+                # 이미 breakpoint 이상인 점의 보간 괴리 — 역할은 그대로 두고 그 점의
+                # 최적 게인만 적합 샘플에 고정한다
+                for slot, v in (act.get("gains") or {}).items():
+                    self.promoted_gains.setdefault(slot, {})[act["point"]] = float(v)
             elif act["type"] == "add_validation":
                 self._add_validation_around(act["point"])
             applied.append(aid)
+        # 감사 표식은 **실제로 반영한 것에만** — 거부한 에스컬레이션·supersede에 붙이면
+        # 기록이 거짓말을 한다 (escalations가 같은 dict를 참조하므로 함께 오염된다)
+        applied_set = set(applied)
         for a in self.actions:
-            if a["id"] in approved:
+            if a["id"] in applied_set:
                 a["applied"] = True
         self.iter_n += 1
         self.stage = "REFINE" if need_refine else "TUNE"
@@ -410,6 +471,11 @@ class DesignSession:
             "status": self.status, "stage": self.stage, "iterations": self.iter_n,
             "points": roles, "n_points": len(self.points),
             "failures": len(self.margin_out.get("failures", ())),
+            # 판정 수 — "실패 0"이 통과인지 미검증인지 화면이 구별할 수 있어야 한다
+            "judged": self.judged_count(),
+            "tuned": len(self.gain_samples.get(next(iter(self.gain_samples), ""), {}))
+            if self.gain_samples else 0,
+            "skipped": list(self.tune_meta.get("skipped", ())),
             "escalations": len(self.escalations),
             "criteria_fingerprint": c.criteria.fingerprint(),
         }

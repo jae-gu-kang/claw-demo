@@ -94,12 +94,9 @@ def _rel_wn_zeta(mode_a: dict, mode_b: dict) -> float:
     return max(abs(mode_a["wn"] - mode_b["wn"]) / wn, abs(mode_a["zeta"] - mode_b["zeta"]))
 
 
-def _eig_migration(A_a, A_b) -> float:
-    """분류 실패 폴백 — 고유치 최근접 매칭 이동거리 / wn (실패를 데이터로).
-
-    a의 각 고유치를 b의 미사용 최근접 고유치와 짝지어(탐욕, wn 내림차순 — 지배
-    모드 먼저) 상대 이동거리의 최대를 낸다.
-    """
+def _migration_one_way(A_a, A_b) -> float:
+    """a의 각 고유치를 b의 미사용 최근접과 짝지어(탐욕, wn 내림차순 — 지배 모드
+    먼저) 상대 이동거리의 최대를 낸다. **탐욕 매칭이라 방향 의존적이다.**"""
     modes_a = damp(A_a)
     eigs_b = [m["eig"] for m in damp(A_b)]
     worst = 0.0
@@ -110,6 +107,18 @@ def _eig_migration(A_a, A_b) -> float:
         worst = max(worst, dists[j] / wn)
         eigs_b.pop(j)
     return worst
+
+
+def _eig_migration(A_a, A_b) -> float:
+    """분류 실패 폴백 — 고유치 최근접 매칭 이동거리 / wn (실패를 데이터로).
+
+    **양방향 최대를 취해 대칭을 강제한다.** 한 방향 탐욕 매칭은 모드가 크게
+    움직인 쌍에서 짝이 엇갈려 방향에 따라 값이 달라진다(실측: 데모 종축
+    M0.3↔M0.6에서 0.99 vs 0.50). 거리가 방향에 의존하면 "인접점 간 25% 이상
+    변화"라는 refine·classify 공용 문턱(tol 0.25)의 의미가 무너진다 — 같은
+    구간을 어느 쪽에서 재느냐로 세분화 여부가 갈린다.
+    """
+    return max(_migration_one_way(A_a, A_b), _migration_one_way(A_b, A_a))
 
 
 def _mode_distance(lon_a, lon_b, lat_a, lat_b) -> tuple:
@@ -155,6 +164,9 @@ def _ctrl_distance(lon_a, lon_b, lat_a, lat_b) -> tuple:
 
 def model_distance(lm_a, lm_b, tr_a, tr_b) -> dict:
     """인접 운영점 간 플랜트 변화의 무차원 거리 — refine·classify 공용 정본.
+
+    lm_a·lm_b는 **전체축 12상태 모델**이다 (split_axes를 여기서 수행한다).
+    이미 분리된 축 모델을 넘기면 상태 이름 조회에서 터진다.
 
     - d_trim: 트림해 기울기 |Δ[α, δe, thr]| / CONTINUITY_STEP 성분 최대
       (trim.py 상수 재사용 — 축간 정규화를 재발명하지 않는다)

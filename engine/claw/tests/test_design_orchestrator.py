@@ -50,7 +50,7 @@ def test_gated_pauses_then_resumes(env):
     일부러 조악한 적합(1구간·1차·허용치 무한)으로 보간 괴리를 만들어 실패를 유도한다.
     """
     ac, stall, limits, db, design = env
-    s = DesignSession(_small(mode="gated", fit_tol=10.0, max_segments=1, max_degree=1))
+    s = DesignSession(_small(mode="gated", fit_tol=0.99, max_segments=1, max_degree=1))
     report = s.run(ac, stall, limits, db, design, fingerprint="fp")
     if report["status"] in ("converged", "escalated"):
         pytest.skip("조악한 적합으로도 실패가 없다 — gated 경로는 왕복 테스트가 덮는다")
@@ -105,3 +105,169 @@ def test_config_validation():
         AutoDesignConfig(budget_iters=99)
     c = AutoDesignConfig(alts=(1000.0,))
     assert AutoDesignConfig.from_dict(c.to_dict()) == c
+
+
+def test_add_validation_inserts_flanking_midpoints(env):
+    """simple_deficit 처방 — 검증점 좌우 이웃과의 중점 2개를 넣는다 (예산 내)."""
+    from claw.common.contracts import TrimCase
+    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, OperatingPoint, case_name
+
+    s = DesignSession(_small())
+    for mach, role in ((0.3, ROLE_ANCHOR), (0.4, ROLE_VALIDATION), (0.5, ROLE_ANCHOR)):
+        s.points.add(OperatingPoint(
+            case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
+                          alt=1000.0, fuel=200.0),
+            role=role, origin="test",
+        ))
+    target = case_name(0.4, 1000.0, 200.0)
+    s.actions = [{"id": "a1", "verdict": "simple_deficit", "case": target, "loop": "pitch_att",
+                  "action": {"type": "add_validation", "point": target}}]
+    s.apply_actions(["a1"])
+
+    added = sorted(p.case.mach for p in s.points.by_role(ROLE_VALIDATION)
+                   if p.origin.startswith("add_validation"))
+    assert added == pytest.approx([0.35, 0.45])
+    assert s.stage == "TUNE"  # 앵커 승격이 아니므로 리파인으로 돌아가지 않는다
+
+
+def test_add_validation_respects_point_budget(env):
+    """예산이 꽉 차 있으면 검증점을 더 넣지 않는다 (종료 보장의 한 겹)."""
+    from claw.common.contracts import TrimCase
+    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, OperatingPoint, case_name
+
+    s = DesignSession(_small(budget_points=4))
+    for mach, role in ((0.3, ROLE_ANCHOR), (0.4, ROLE_VALIDATION),
+                       (0.5, ROLE_ANCHOR), (0.6, ROLE_ANCHOR)):
+        s.points.add(OperatingPoint(
+            case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
+                          alt=1000.0, fuel=200.0),
+            role=role, origin="test",
+        ))
+    target = case_name(0.4, 1000.0, 200.0)
+    s.actions = [{"id": "a1", "verdict": "simple_deficit", "case": target, "loop": "pitch_att",
+                  "action": {"type": "add_validation", "point": target}}]
+    s.apply_actions(["a1"])
+    assert len(s.points) == 4  # 상한에서 멈춘다
+
+
+def test_ratchet_violation_is_skipped_not_fatal(env):
+    """상위 역할 점에 승격 처방이 오더라도 세션을 죽이지 않는다 (안전망).
+
+    분류기가 그런 처방을 내지 않도록 막아 두었지만(classify refit_at), 여기서
+    ValueError가 나면 run()이 못 잡아 트림·튜닝 전량이 저장 없이 사라진다.
+    """
+    from claw.common.contracts import TrimCase
+    from claw.design import ROLE_ANCHOR, OperatingPoint, case_name
+
+    s = DesignSession(_small())
+    name = case_name(0.5, 1000.0, 200.0)
+    s.points.add(OperatingPoint(
+        case=TrimCase(name=name, mach=0.5, alt=1000.0, fuel=200.0),
+        role=ROLE_ANCHOR, origin="test",
+    ))
+    s.actions = [{"id": "a1", "verdict": "gain_interp_valley", "case": name, "loop": "pitch_att",
+                  "action": {"type": "promote", "to": "breakpoint", "point": name,
+                             "gains": {"pitch.kp": -1.8}}}]
+    out = s.apply_actions(["a1"])  # 터지면 안 된다
+    assert out["applied"] == ["a1"]
+    assert s.points.get(name).role == ROLE_ANCHOR  # 강등되지 않는다
+    assert s.actions[0]["skipped"]
+    assert s.promoted_gains["pitch.kp"][name] == pytest.approx(-1.8)
+
+
+def test_escalation_never_marked_applied(env):
+    """승인 목록에 에스컬레이션이 섞여도 반영도 표식도 없다 (보고 전용 계약)."""
+    s = DesignSession(_small())
+    esc = {"id": "e1", "verdict": "structural_limit", "case": "X", "loop": "pitch_att",
+           "action": {"type": "escalate", "point": "X"}}
+    s.actions = [esc]
+    s.escalations = [esc]  # _stage_classify와 같은 참조 공유 상황
+    out = s.apply_actions(["e1"])
+    assert out["applied"] == []
+    assert "applied" not in esc, "거부한 처방에 반영 표식이 붙었다"
+    assert "applied" not in s.escalations[0]
+
+
+def test_promoted_gains_never_override_fresh_tuning(env):
+    """승격 때 굳은 게인이 나중 TUNE 결과를 덮으면 그 점은 영원히 재분류된다."""
+    from claw.common.contracts import TrimCase
+    from claw.design import ROLE_ANCHOR, OperatingPoint, case_name
+
+    s = DesignSession(_small())
+    name = case_name(0.5, 1000.0, 200.0)
+    s.points.add(OperatingPoint(
+        case=TrimCase(name=name, mach=0.5, alt=1000.0, fuel=200.0),
+        role=ROLE_ANCHOR, origin="test",
+    ))
+    s.gain_samples = {"pitch.kp": {name: -2.4}}   # 최신 튜닝 결과
+    s.promoted_gains = {"pitch.kp": {name: -1.8}}  # 이전 이터에서 굳은 값
+    captured = {}
+    s.fits = {}
+
+    import claw.design.orchestrator as orch
+    real_fit_slots = orch.fit_slots
+    try:
+        orch.fit_slots = lambda samples, points, **kw: (
+            captured.update(samples) or {"tables": {}, "constants": {}, "reports": {}}
+        )
+        s._stage_fit(lambda *a: None)
+    finally:
+        orch.fit_slots = real_fit_slots
+    assert captured["pitch.kp"][name] == pytest.approx(-2.4), "낡은 승격 게인이 최신 튜닝을 덮었다"
+
+
+def test_nothing_verified_is_not_converged(env):
+    """판정이 한 건도 없으면 '통과'가 아니다 — vacuous pass 금지."""
+    s = DesignSession(_small())
+    s.margin_out = {"cases": {"A": {"role": "anchor", "note": "미수렴 트림", "loops": {}}},
+                    "failures": []}
+    assert s.judged_count() == 0
+    s._stage_classify(None, lambda *a: None)
+    assert s.status == "nothing_verified"
+    assert s.stage == "DONE"
+    # 판정이 하나라도 있으면 정상 수렴
+    s2 = DesignSession(_small())
+    s2.margin_out = {"cases": {"A": {"role": "anchor",
+                                     "loops": {"pitch_att": {"status": "ok"}}}},
+                     "failures": []}
+    s2._stage_classify(None, lambda *a: None)
+    assert s2.status == "converged"
+
+
+def test_gated_pause_is_deterministic(env):
+    """gated 일시정지·승인·재개를 실패 유도에 기대지 않고 고정한다.
+
+    실패를 만들어 내는 테스트는 데모 모델이 조금만 바뀌면 skip으로 조용히 no-op이
+    된다 — 처방을 직접 세워 상태 전이만 검사한다.
+    """
+    from claw.common.contracts import TrimCase
+    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, OperatingPoint, case_name
+
+    s = DesignSession(_small(mode="gated"))
+    for mach, role in ((0.3, ROLE_ANCHOR), (0.4, ROLE_VALIDATION), (0.5, ROLE_ANCHOR)):
+        s.points.add(OperatingPoint(
+            case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
+                          alt=1000.0, fuel=200.0),
+            role=role, origin="test",
+        ))
+    v = case_name(0.4, 1000.0, 200.0)
+    s.margin_out = {
+        "cases": {v: {"role": "validation",
+                      "loops": {"pitch_att": {"kind": "margin", "pm_deg": 40.0,
+                                              "gm_db": 7.0, "status": "fail"}}}},
+        "failures": [{"case": v, "loop": "pitch_att", "severity": 40.0}],
+    }
+    # 분류기를 태우지 않고 처방을 직접 세운다 (전이만 본다)
+    s.actions = [{"id": "a1", "verdict": "simple_deficit", "case": v, "loop": "pitch_att",
+                  "action": {"type": "add_validation", "point": v}}]
+    applicable = [a for a in s.actions if a["action"]["type"] != "escalate"]
+    assert applicable
+    s.status = "awaiting_approval"
+    assert s.proposed_actions() == s.actions
+
+    out = s.apply_actions(["a1"])
+    assert out["next_stage"] == "TUNE"
+    assert s.status == "running" and s.iter_n == 1
+    added = [p for p in s.points.by_role(ROLE_VALIDATION)
+             if p.origin.startswith("add_validation")]
+    assert len(added) == 2

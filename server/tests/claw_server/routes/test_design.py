@@ -57,7 +57,7 @@ def test_auto_design_end_to_end(client, wait_job):
 
 def test_gated_pause_and_resume(client, wait_job):
     """조악한 적합 강제로 실패 유도 — awaiting_approval 저장 → 승인 재개 → 새 결과."""
-    cfg = _small_config(mode="gated", fit_tol=10.0, max_segments=1, max_degree=1,
+    cfg = _small_config(mode="gated", fit_tol=0.99, max_segments=1, max_degree=1,
                         budget_iters=3)
     r = client.post("/api/design/auto", json={"config": cfg})
     j = wait_job(r.json()["id"], timeout=300.0)
@@ -94,3 +94,58 @@ def test_resume_rejects_terminal_and_missing(client, wait_job):
     assert r2.status_code == 409
     r3 = client.post("/api/design/no-such/resume", json={"approved": ["x"]})
     assert r3.status_code == 404
+
+
+def test_bad_types_are_422_not_500(client):
+    """데이터클래스는 값을 강제 변환하지 않는다 — 타입 오류가 새면 500이 된다.
+
+    형제 라우트(sim·codegen·influence)는 전부 (ValueError, TypeError)를 422로 매핑한다.
+    """
+    for cfg in (
+        {"budget_points": "abc"},
+        {"budget_iters": None},
+        {"n_mach": "x"},
+        {"refine_tol": "x"},
+        {"alts": "notalist"},
+        {"alts": ["x"]},
+        {"targets": {"pm_deg": None}},
+        {"criteria": {"pm_min_deg": "abc"}},
+        {"mode": 3},
+    ):
+        r = client.post("/api/design/auto", json={"config": cfg})
+        assert r.status_code == 422, f"{cfg} → {r.status_code} (500이면 잡 스레드에서 터진다)"
+
+
+def test_nonterminating_targets_rejected(client):
+    """백오프가 끝나지 않는 목표값은 제출 시점에 막는다 — 워커 영구 점유 방지."""
+    for targets in ({"backoff": 1.0}, {"wc_att_floor_frac": 0.0}, {"wc_ratio_att": 0.0}):
+        r = client.post("/api/design/auto", json={"config": {"targets": targets}})
+        assert r.status_code == 422, f"{targets} → {r.status_code}"
+
+
+def test_max_degree_bounded_to_gain_schema(client):
+    """반출 다항이 게인 페이로드 스키마(구간 계수 8개)를 넘으면 되먹일 수 없다."""
+    assert client.post("/api/design/auto",
+                       json={"config": {"max_degree": 40}}).status_code == 422
+    assert client.post("/api/design/auto",
+                       json={"config": {"max_segments": 999}}).status_code == 422
+
+
+def test_influence_accepts_poly_gain_tables(client):
+    """게인 페이로드가 넓어졌으면 influence도 같은 빌더를 써야 한다 (500 금지)."""
+    poly = {
+        "kind": "poly", "axis": "mach",
+        "segments": [
+            {"x0": 0.15, "x1": 0.3, "coeffs": [-8.0, 0.0], "c": 0.225, "h": 0.075},
+            {"x0": 0.3, "x1": 0.95, "coeffs": [-3.0, 2.0, -0.5], "c": 0.625, "h": 0.325},
+        ],
+    }
+    r = client.post("/api/influence/structural", json={"gain_tables": {"pitch.kp": poly}})
+    assert r.status_code == 200, r.text
+    # 구간 검증 실패는 여전히 422 (500이 아니라)
+    bad = {"kind": "poly", "axis": "mach", "segments": [
+        {"x0": 0.15, "x1": 0.3, "coeffs": [1.0], "c": 0.2, "h": 0.1},
+        {"x0": 0.4, "x1": 0.95, "coeffs": [1.0], "c": 0.6, "h": 0.3},
+    ]}
+    assert client.post("/api/influence/structural",
+                       json={"gain_tables": {"pitch.kp": bad}}).status_code == 422

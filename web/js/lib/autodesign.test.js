@@ -96,3 +96,17 @@ test("adoptStorePayload — 재샘플 테이블을 기존 스토어 계약으로
   assert.equal(empty.tables, null);
   assert.equal(empty.scheduleOff, true);
 });
+
+test("adoptStorePayload — 상수 자리를 버리지 않는다 (검증한 형상 = 채택한 형상)", () => {
+  const p = adoptStorePayload(RESULT);
+  assert.deepEqual(p.constants, { "yaw.k_rate": 0.4 });
+  // 전 자리가 상수로 접혀도 상수는 살아 있어야 한다 — 그때가 가장 위험하다
+  const allConst = adoptStorePayload({
+    gain_export: { tables_resampled: {}, constants: { "pitch.kp": -2, "roll.kp": 1 } },
+  });
+  assert.equal(allConst.tables, null);
+  assert.equal(allConst.scheduleOff, true);
+  assert.deepEqual(allConst.constants, { "pitch.kp": -2, "roll.kp": 1 });
+  // 반출이 아예 없으면 빈 객체 (undefined 접근 금지)
+  assert.deepEqual(adoptStorePayload({}).constants, {});
+});

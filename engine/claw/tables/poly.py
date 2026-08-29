@@ -96,6 +96,19 @@ class PolyTable:
             v = v * u + k * s["coeffs"][k]
         return v / s["h"]
 
+    def scaled(self, factor: float) -> "PolyTable":
+        """곡선 전체에 배율 — 다항은 계수에 곱하면 된다 (p·s의 계수 = 계수·s).
+
+        영향성 파이프라인(pipeline/influence.py gain_scale)이 게인 곡선을 흔드는
+        경로다. Table은 data에 곱하지만 다항은 격자 값이 없으므로 여기서 처리한다.
+        """
+        f = float(factor)
+        return PolyTable(
+            self.axis_names[0],
+            [{**s, "coeffs": [c * f for c in s["coeffs"]]} for s in self.segments],
+            name=self.name,
+        )
+
     def to_dict(self) -> dict:
         return {
             "kind": "poly",

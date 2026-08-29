@@ -142,3 +142,32 @@ test("축이 없는 표가 섞이면 null — 호출자가 사유를 보고한�
   assert.equal(alignTables({ a: { axes: { alt: [0, 1] }, data: [1, 2] } }, "mach"), null);
   assert.deepEqual(alignTables({}, "mach"), { tables: {}, axis: [], aligned: false });
 });
+
+test("서버 제안 격자와 확정본 격자가 섞여도 조회 함수가 보존된다", () => {
+  // 실제 시나리오: 자동 설계 확정본(비균일 4점)을 되읽은 뒤 다른 자리를 새로 켜면
+  // 그 자리는 서버 제안 격자(균일)로 심긴다 — 표는 공통 축을 요구한다
+  const adopted = {
+    axes: { mach: [0.2187, 0.35, 0.62, 0.75] }, data: [-8, -5, -3, -2], extrapolate: "clip",
+  };
+  const proposed = {
+    axes: { mach: [0.15, 0.35, 0.55, 0.75, 0.95] }, data: [4, 3, 2, 1, 0.5],
+    extrapolate: "clip",
+  };
+  const out = alignTables({ a: adopted, b: proposed }, "mach");
+  assert.equal(out.aligned, true);
+  assert.deepEqual(out.axis, [0.15, 0.2187, 0.35, 0.55, 0.62, 0.75, 0.95]);
+  for (const [name, orig] of [["a", adopted], ["b", proposed]]) {
+    for (const m of [0.1, 0.15, 0.2187, 0.3, 0.35, 0.5, 0.62, 0.75, 0.9, 1.5]) {
+      const got = valueAt(out.tables[name], "mach", m);
+      const want = valueAt(orig, "mach", m);
+      // 원래 격자점 위에서는 정확히 같고, 구간 안에서는 보간이 한 번 더 끼어
+      // 마지막 비트가 갈릴 수 있다 (수학적으로는 같은 함수)
+      assert.ok(Math.abs(got - want) <= 1e-12 * Math.max(1, Math.abs(want)),
+        `${name} @M${m}: ${got} vs ${want}`);
+    }
+    for (const [i, x] of orig.axes.mach.entries()) {
+      assert.equal(valueAt(out.tables[name], "mach", x), orig.data[i],
+        `${name} 원래 격자점 @M${x}는 정확히 보존돼야 한다`);
+    }
+  }
+});

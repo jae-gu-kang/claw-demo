@@ -123,3 +123,46 @@ def test_tune_points_skips_untrimmable(setup):
     assert set(out["results"]) == {case_name(0.5, 1000.0, 200.0), case_name(0.7, 1000.0, 200.0)}
     # gain surface 샘플 형식 — 자리별 {이름: 값}
     assert set(out["gains"]["pitch.kp"]) == set(out["results"])
+
+
+def test_polish_does_not_break_criteria(setup):
+    """선택적 마무리(polish=True) — 기본 OFF라 회귀에 안 걸리던 경로.
+
+    대역폭을 밀어 올리되 합격선을 깨면 후퇴하는 계약이라, 켜도 마진이 나빠지면 안 된다.
+    """
+    _, design, _, lm = setup
+    base = tune_point(lm, design, **ACT)
+    pol = tune_point(lm, design, polish=True, max_evals=40, **ACT)
+    assert pol["status"] == "ok"
+    assert pol["evals"] > base["evals"]  # 마무리가 실제로 돌았다
+    for axis in ("pitch", "roll"):
+        b, p = base["achieved"][f"{axis}_att"], pol["achieved"][f"{axis}_att"]
+        assert p["pm_deg"] >= 45.0, f"{axis} 폴리시가 합격선을 깼다"
+        assert p["wcp"] >= b["wcp"] * 0.99, f"{axis} 폴리시가 대역폭을 되레 깎았다"
+
+
+def test_polish_falls_back_when_budget_too_small(setup):
+    """예산이 최소 미만이면 최적화를 돌리지 않고 원 게인을 그대로 낸다."""
+    _, design, _, lm = setup
+    base = tune_point(lm, design, **ACT)
+    tiny = tune_point(lm, design, polish=True, max_evals=2, **ACT)
+    assert tiny["gains"] == base["gains"]
+
+
+def test_targets_reject_nonterminating_backoff():
+    """백오프 루프의 종료가 이 검증에 걸려 있다 — 서버가 config로 받는 값이다.
+
+    backoff ≥ 1이면 wc가 줄지 않고, floor_frac = 0이면 언더플로 후에도 조건이 참이라
+    `_tune_att`가 영원히 돈다. 그 루프는 on_progress를 안 불러 취소도 안 된다.
+    """
+    with pytest.raises(ValueError, match="backoff"):
+        TuneTargets(backoff=1.0)
+    with pytest.raises(ValueError, match="backoff"):
+        TuneTargets(backoff=0.0)
+    with pytest.raises(ValueError, match="wc_att_floor_frac"):
+        TuneTargets(wc_att_floor_frac=0.0)
+    with pytest.raises(ValueError, match="wc_ratio_att"):
+        TuneTargets(wc_ratio_att=0.0)
+    with pytest.raises(ValueError, match="감쇠 목표"):
+        TuneTargets(zeta_sp=0.0)
+    TuneTargets()  # 기본값은 유효해야 한다

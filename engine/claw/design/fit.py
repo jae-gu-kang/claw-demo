@@ -110,17 +110,22 @@ def fit_gain_surface(xs, ys, *, tol_fit=0.02, max_degree=4, max_segments=4) -> d
 
     segs, resids = _refit()
     while len(segs) < max_segments:
-        worst = max(resids)
-        if worst[0] <= tol_fit * scale:
+        # 잔차 큰 구간부터 쪼갤 자리를 찾는다. **못 쪼개는 구간에서 멈추지 않는다** —
+        # 격자점 2개짜리 구간(pin 제약으로 흔하다)이 잔차 1위면, 종전 코드는 아직
+        # 쪼갤 수 있는 다른 구간을 남겨 둔 채 루프 전체를 끝냈다(허용치의 1만 배로
+        # 끝나는 경우가 실측됐다). max_segments를 다 쓰거나 후보가 마를 때까지 간다
+        split = None
+        for resid, _i, lo, hi in sorted(resids, key=lambda r: -r[0]):
+            if resid <= tol_fit * scale:
+                break  # 남은 구간은 전부 허용치 이내 — 더 쪼갤 이유가 없다
+            fit = next(s for s in segs if s["x0"] == float(xs[lo]))
+            local = np.abs(ys[lo:hi + 1] - _eval(fit, xs[lo:hi + 1]))
+            cand = min(max(lo + int(np.argmax(local)), lo + 1), hi - 1)
+            if cand not in edges:  # 양쪽 구간에 격자점이 남는 자리
+                split = cand
+                break
+        if split is None:
             break
-        _, _i, lo, hi = worst
-        sl = slice(lo, hi + 1)
-        fit = next(s for s in segs if s["x0"] == float(xs[lo]))
-        local = np.abs(ys[sl] - _eval(fit, xs[sl]))
-        split = lo + int(np.argmax(local))
-        split = min(max(split, lo + 1), hi - 1)  # 양쪽 구간에 격자점이 남게
-        if split in edges:
-            break  # 더 쪼갤 자리가 없다
         edges = sorted(edges + [split])
         segs, resids = _refit()
 

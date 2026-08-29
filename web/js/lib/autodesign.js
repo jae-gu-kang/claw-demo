@@ -90,9 +90,19 @@ export function actionCards(result) {
   return { approvable, escalations };
 }
 
-/** 게인 채택 — gains 탭 스토어 계약 {tables, scheduleOff} (재샘플 테이블). */
+/** 게인 채택 — gains 탭 스토어 계약 {tables, scheduleOff} + **상수 자리**.
+ *
+ * 적합이 평탄하다고 판정한 자리는 테이블이 아니라 상수로 나온다(gain_export.constants).
+ * 그 자리를 빠뜨리면 시뮬·Autocode가 새 스케줄과 옛 설계 상수를 섞어 돌게 되어,
+ * **이 실행이 검증한 마진이 채택한 형상에 해당하지 않는다.** 전 자리가 상수로 접히면
+ * tables가 비어 scheduleOff가 서지만 그때도 constants는 반영되어야 한다.
+ */
 export function adoptStorePayload(result) {
   const tables = result?.gain_export?.tables_resampled ?? {};
   const off = Object.keys(tables).length === 0;
-  return { tables: off ? null : tables, scheduleOff: off };
+  return {
+    tables: off ? null : tables,
+    scheduleOff: off,
+    constants: { ...(result?.gain_export?.constants ?? {}) },
+  };
 }

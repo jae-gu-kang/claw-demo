@@ -18,6 +18,7 @@ import { clear, el, fmt } from "../dom.js";
 import {
   VERDICT_LABEL, actionCards, adoptStorePayload, buildConfig, pointRows,
 } from "../lib/autodesign.js";
+import { slotIndex, withConstant } from "../lib/gainsync.js";
 import { store } from "../store.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
@@ -68,6 +69,14 @@ export function render() {
 
   const onJobDone = async (job) => {
     runningJobId = null;
+    // watchJob은 error에서도 resolve한다 — 가드가 없으면 result_id=null로 조회해
+    // "결과 없음 404"만 뜨고 **정작 실패 사유가 화면에 안 나온다**. 이 잡의 가장
+    // 흔한 실패가 예산 초과처럼 사유 문장이 전부인 경우다 (views/sim.js와 같은 가드)
+    if (job.status === "error") {
+      clear(errBox).append(el("div", { class: "error-box" },
+        `자동 설계 실패 — ${job.error ?? "사유 없음"}`));
+      return;
+    }
     if (cancelledWithoutResult(job)) return;
     try {
       await showResult(job.result_id);
@@ -206,6 +215,11 @@ function renderResult(box, body, resultId, ctx) {
       attachProgress(ctx.progressBox, job.id, {
         onDone: async (j) => {
           runningJobId = null;
+          if (j.status === "error") {
+            clear(ctx.errBox).append(el("div", { class: "error-box" },
+              `재개 실패 — ${j.error ?? "사유 없음"}`));
+            return;
+          }
           if (!cancelledWithoutResult(j)) await ctx.showResult(j.result_id);
         },
         onError: (e) => clear(ctx.errBox).append(
@@ -216,15 +230,48 @@ function renderResult(box, body, resultId, ctx) {
     }
   };
 
-  const adopt = () => {
+  const adopt = async () => {
     const payload = adoptStorePayload(body);
     store.set("gainTables", payload.tables && JSON.parse(JSON.stringify(payload.tables)));
     store.set("gainScheduleOff", payload.scheduleOff);
     // 출처 — 게인 탭이 되읽을 때 "무엇이 걸려 있는지"를 이름으로 말해 준다
     store.set("gainTablesSource", { kind: "autodesign", resultId });
+
+    // **상수 자리도 함께 채택한다.** 적합이 평탄하다고 판정한 자리는 테이블이 아니라
+    // 상수로 나오는데(gain_export.constants), 그걸 빠뜨리면 시뮬·Autocode가 새 스케줄과
+    // 옛 설계 상수를 섞어 돌린다 — 이 실행이 검증한 마진이 채택한 형상에 해당하지 않게
+    // 된다. 자리→파라미터 대응은 카탈로그가 정본이라 여기서 불러 온다
+    const consts = payload.constants;
+    const constNames = Object.keys(consts);
+    let constNote = "";
+    if (constNames.length) {
+      try {
+        const cat = await api.get("/gains/catalog");
+        const idx = slotIndex(cat);
+        let params = {
+          scas: store.get("scasParams") ?? null,
+          autopilot: store.get("autopilotParams") ?? null,
+        };
+        const unknown = [];
+        for (const [name, value] of Object.entries(consts)) {
+          const slot = idx.get(name);
+          if (!slot) { unknown.push(name); continue; }
+          params = withConstant(cat, slot, Number(value), params);
+        }
+        store.set("scasParams", params.scas);
+        store.set("autopilotParams", params.autopilot);
+        constNote = ` 상수 자리 ${constNames.length - unknown.length}개도 함께 적용했다`
+          + (unknown.length ? ` (카탈로그에 없는 자리 제외: ${unknown.join(", ")})` : "")
+          + ".";
+      } catch (e) {
+        constNote = ` 상수 자리 ${constNames.length}개는 적용하지 못했다`
+          + ` (${errorText(e)}) — 검증한 형상과 다르므로 다시 시도할 것.`;
+      }
+    }
     clear(adoptMsg).append(el("span", { class: "hint" },
       " 확정됨 — 게인 탭·시뮬레이션·Autocode·구조도·영향성이 이 스케줄을 소비한다"
       + " (Autocode 형상 지문이 바뀌는 것으로 확인된다)."
+      + constNote
       + " 게인 탭은 자리마다 다른 breakpoint를 합집합 축으로 정렬해 보여 주며,"
       + " 거기서 편집한 뒤 [시뮬·코드에 적용]을 누르면 이 확정을 덮어쓴다."
       + " 다항 정본은 결과 JSON의 gain_export.tables — API 직접 주입용."));
@@ -264,7 +311,9 @@ function renderResult(box, body, resultId, ctx) {
       el("p", { class: "hint" },
         `스케줄 자리 ${Object.keys(body.gain_export.tables ?? {}).length}개 · `
         + `상수 자리 ${Object.keys(body.gain_export.constants ?? {}).length}개`),
-      el("button", { onclick: adopt }, "게인 확정 (스토어 주입)"), adoptMsg,
+      el("button", { onclick: () => adopt().catch((e) =>
+        clear(adoptMsg).append(el("span", { class: "error-box" }, errorText(e)))) },
+        "게인 확정 (스토어 주입)"), adoptMsg,
     );
   }
   clear(box).append(...sections);

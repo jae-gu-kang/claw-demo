@@ -24,7 +24,7 @@
 import math
 
 from claw.design.linmodels import model_distance
-from claw.design.points import ROLE_ANCHOR, ROLE_BREAKPOINT
+from claw.design.points import ROLE_ANCHOR, ROLE_BREAKPOINT, ROLE_RANK
 from claw.design.schedmap import scheduled_gains
 from claw.design.tune import TuneTargets, tune_point
 
@@ -139,11 +139,23 @@ def classify_margin_deficit(
         )
         evidence["neighbors"] = {"pair": (lo, hi), "axis": axis, "pass": neighbor_ok}
         if neighbor_ok:
+            opt_gains = {s: tune_out["gains"][s] for s in slots if s in tune_out["gains"]}
+            # v가 **이미** breakpoint 이상이면 승격할 자리가 없다 — 역할은 단방향
+            # 래칫이라 요청하면 터진다(세션 전량 소실). anchor는 breakpoint 역할을
+            # 겸하므로(points.at_least 서열) 그 점에서 보간 괴리가 크다는 것은
+            # 격자가 성긴 게 아니라 **적합이 그 점을 못 맞춘 것**이다 — 처방은
+            # 승격이 아니라 그 점의 최적 게인을 적합 샘플에 고정해 재적합하는 것
+            if ROLE_RANK[points.get(v_name).role] >= ROLE_RANK[ROLE_BREAKPOINT]:
+                return {
+                    "verdict": "gain_interp_valley",
+                    "action": {"type": "refit_at", "point": v_name, "gains": opt_gains,
+                               "note": "이미 breakpoint 이상 — 승격 대신 재적합"},
+                    "evidence": evidence,
+                }
             return {
                 "verdict": "gain_interp_valley",
                 "action": {"type": "promote", "to": ROLE_BREAKPOINT, "point": v_name,
-                           "gains": {s: tune_out["gains"][s] for s in slots
-                                     if s in tune_out["gains"]}},
+                           "gains": opt_gains},
                 "evidence": evidence,
             }
 

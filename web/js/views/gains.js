@@ -387,6 +387,23 @@ function renderTables(box, statusLine) {
   // 편집 대상은 **켠 자리만**. 카탈로그의 표를 참조로 들고 있어 셀 편집이 그대로
   // 남는다 — 자리를 껐다 켜도 고쳐 둔 값이 살아 있어야 비교가 성립한다
   tables = appliedTables(catalog, selected);
+  // **표를 그리기 직전에 축을 맞춘다.** 이 표는 행=축 격자·열=자리인데 격자를
+  // 첫 열에서만 읽는다 — 자리마다 축이 다르면(확정본을 되읽은 뒤 다른 자리를 새로
+  // 켜면 서버 제안 격자가 섞여 든다) 셀 편집이 **다른 비행조건 칸에 기록되고**
+  // 짧은 열은 화면 밖으로 사라진다. 되읽기에서만 맞추면 그 이후 토글이 어긋난다
+  const aligned = alignTables(tables, catalog.axis);
+  if (aligned === null) {
+    clear(box).append(slotGrid(box, statusLine),
+      el("p", { class: "error-box" },
+        `축 '${catalog.axis}'가 없는 표가 섞여 있어 편집 표를 세울 수 없습니다.`));
+    return;
+  }
+  if (aligned.aligned) {
+    // 정렬본을 카탈로그에 되심어 편집 경로(slot.table 참조 공유)를 잇는다
+    const idx = slotIndex(catalog);
+    for (const [name, t] of Object.entries(aligned.tables)) idx.get(name).table = t;
+    tables = appliedTables(catalog, selected);
+  }
   const grid = slotGrid(box, statusLine);
   const names = Object.keys(tables);
   if (names.length === 0) {
@@ -396,7 +413,7 @@ function renderTables(box, statusLine) {
         "탑재 코드에서 게인 스케줄 서브시스템(fcl_sched.c)이 통째로 사라집니다."));
     return;
   }
-  const machs = tables[names[0]].axes.mach;
+  const machs = tables[names[0]].axes[catalog.axis];
   const chartBox = el("div");
   const fitStatus = el("span", { class: "hint" });
   const redraw = () => drawCharts(chartBox, fitStatus);
