@@ -108,12 +108,11 @@ export function createInfluenceCanvas(opts = {}) {
 
   const view = document.createElement("canvas");
   const ctx = view.getContext("2d");
-  // CSS 크기는 resize()가 논리 크기 그대로 고정한다 — width:100%였을 때는 좁은
-  // 화면에서 가로만 줄고 높이(px)는 남아 그림이 찌그러졌다(폰에서 비율 붕괴).
-  // 좁은 화면은 부모(canvasBox)의 가로 스크롤이 담당한다. 포인터 매핑은 rect
-  // 비율로 환산하므로(아래 toXY) 어느 쪽이든 좌표는 정확하다
-  // margin:0 auto — 넓은 데스크톱에서는 박스 중앙(우측 검은 띠 방지), 좁은
-  // 화면에서 넘칠 때는 auto가 0으로 풀려 스크롤 시작점이 왼쪽 그대로다
+  // CSS 크기는 resize()가 정한다: 논리 폭 + max-width:100% + aspect-ratio —
+  // 좁은 화면(폰)에서는 비율을 지킨 채 통째로 줄어 전체가 보인다. width:100%에
+  // 높이 px 고정이던 시절의 찌그러짐은 aspect-ratio가 막는다. 포인터 매핑은 rect
+  // 비율로 환산하므로(아래 toXY) 축소돼도 좌표는 정확하다
+  // margin:0 auto — 넓은 데스크톱에서 박스 중앙(우측 검은 띠 방지)
   view.style.cssText =
     "display:block;margin:0 auto;border-radius:16px;border:1px solid rgba(255,255,255,.08);" +
     "box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 18px 44px rgba(0,0,0,.55);" +
@@ -150,8 +149,14 @@ export function createInfluenceCanvas(opts = {}) {
     const dpr = window.devicePixelRatio || 1;
     view.width = Math.round(width * dpr);
     view.height = Math.round(height * dpr);
+    // 좁은 화면(폰)에서는 **비율을 지킨 채 통째로 줄어든다** — width만 줄고 height가
+    // px로 남던 시절이 찌그러짐의 원인이었으므로, 높이는 aspect-ratio가 폭을 따라
+    // 정하게 한다. 가로 스크롤 대신 전체가 한눈에 들어온다(글자는 작아지지만 폰에서의
+    // 요구가 "다 보이게"다). 포인터 매핑은 rect 비율 환산(toXY)이라 축소돼도 정확하다
     view.style.width = `${width}px`;
-    view.style.height = `${height}px`;
+    view.style.maxWidth = "100%";
+    view.style.height = "auto";
+    view.style.aspectRatio = `${width} / ${height}`;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
     bg = null;
@@ -601,10 +606,11 @@ export function createInfluenceCanvas(opts = {}) {
       const w = g.measureText(text).width;
       // 라벨은 노드 오른쪽에 붙이되, 캔버스를 넘칠 것 같으면 왼쪽으로 뒤집는다.
       // 여백만 키워 두면 배치가 조금만 바뀌어도 글자가 다시 잘린다 — 자기교정이 낫다
-      // 오른쪽 끝 세 열(출력·기체·지표)은 서로 붙어 있어 라벨이 같은 방향이면 먹힌다.
-      // 출력은 왼쪽, 기체는 위, 지표는 오른쪽 — 세 방향으로 흩어 놓는다
+      // 출력(조종면)도 **오른쪽**이다: 왼쪽에는 원뿔 재생의 IR 점등 라벨이 서므로
+      // 왼쪽 라벨은 그것들과 겹친다. 오른쪽은 기체 열까지의 빈 구간이라 자리가 있고,
+      // 기체는 위, 지표는 오른쪽 끝 — 겹칠 만한 이웃끼리는 방향이 갈린다
       const hw = halfExtent(nd.kind, p.r);
-      let side = nd.kind === "metric" ? 1 : nd.kind === "output" ? -1 : 0;
+      let side = nd.kind === "metric" || nd.kind === "output" ? 1 : 0;
       if (side === 1 && p.x + hw + 12 + w + 12 > width - 4) side = -1;
       if (side === -1 && p.x - hw - 12 - w - 12 < 4) side = 1;
       g.textAlign = side === 1 ? "left" : side === -1 ? "right" : "center";
@@ -662,18 +668,22 @@ export function createInfluenceCanvas(opts = {}) {
   }
 
   // ── 상호작용 ───────────────────────────────────────────────────────────
+  // k = CSS 축소 배율(논리 px / 화면 px). 폰에서 캔버스가 ~40%로 줄면 논리 11 px
+  // 허용 반경이 화면에서 4-5 px가 되어 노드를 사실상 못 누른다 — 좌표만이 아니라
+  // **허용 반경도** 같은 비율로 환산해야 손끝 기준 크기가 유지된다
   const toXY = (ev) => {
     const r = view.getBoundingClientRect();
     return {
       x: ((ev.clientX - r.left) / r.width) * width,
       y: ((ev.clientY - r.top) / r.height) * height,
+      k: r.width > 0 ? Math.max(1, width / r.width) : 1,
     };
   };
   view.addEventListener("pointermove", (ev) => {
     const layout = getLayout?.();
     if (!layout) return;
-    const { x, y } = toXY(ev);
-    const id = hitTestNodes(layout.pos, x, y, { radius: 11 });
+    const { x, y, k } = toXY(ev);
+    const id = hitTestNodes(layout.pos, x, y, { radius: 11 * k });
     if (id !== hover) {
       hover = id;
       view.style.cursor = id ? "pointer" : "default";
@@ -691,8 +701,8 @@ export function createInfluenceCanvas(opts = {}) {
   view.addEventListener("click", (ev) => {
     const layout = getLayout?.();
     if (!layout) return;
-    const { x, y } = toXY(ev);
-    onSelect?.(hitTestNodes(layout.pos, x, y, { radius: 11 }));
+    const { x, y, k } = toXY(ev);
+    onSelect?.(hitTestNodes(layout.pos, x, y, { radius: 11 * k }));
   });
   view.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") {

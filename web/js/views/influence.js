@@ -23,7 +23,7 @@ import {
   normalizeDiagnosis, normalizeGraph, pairsFor, radiusOf, structuralRequest,
   sweepRequest,
 } from "../lib/influence.js";
-import { conePlayback, graphDepth, summaryOf } from "../lib/influenceplay.js";
+import { conePlayback, summaryOf } from "../lib/influenceplay.js";
 import { cascadeLayout, layeredLayout } from "../lib/influencelayout.js";
 import { createInfluenceCanvas } from "./influencecanvas.js";
 import { store } from "../store.js";
@@ -34,29 +34,16 @@ const ROW_GAP = 19;
 
 // 뷰 재생성마다 처음으로 돌아가지 않도록 모듈 스코프 (autocode.js·sim.js와 같은 패턴)
 const state = {
-  variant: "layered", selection: null, model: null, layout: null,
-  cone: null, play: null, depth: 0,
+  variant: "cascade", selection: null, model: null, layout: null,
+  cone: null, play: null,
   // 진단(2단 앞의 "무엇을") · 스윕(3단 "얼마나") — 탭을 떠났다 와도 결과 유지
   diag: null, sweep: null,
 };
 let canvas = null;
 
-// 층 수는 **데이터에서 온다**. 문구에 박아 두면(전에는 "16층"이었다) 엔진이 노드를
-// 하나 늘리는 순간 자막의 층 수와 어긋나 화면이 조용히 거짓말한다 (02 §5.5)
-// d가 0인 경우가 **영구히 남을 수 있다**: rebuild()는 모델이 없으면 즉시 반환하므로
-// 첫 로드가 실패하면 층 수가 영영 안 채워진다. 그때 「0층」을 내보이면 하드코딩을
-// 걷어낸 자리에 더 틀린 수를 넣는 꼴이라, 수가 없으면 수를 말하지 않는다
-// 성운(radial)은 삭제됐다 — 재생 일정은 배치와 무관한 위상 랭크이므로(influenceplay.js)
-// 남은 두 배치는 **같은 재생·같은 경로 패널**을 공유한다. 그래서 A·B를 오가며
-// 같은 파라미터의 전파를 배치만 바꿔 비교할 수 있다
-const VARIANTS = [
-  ["layered", "A · 레이어 활성망",
-   (d) => `좌→우 ${d > 0 ? `${d}층` : "층 구조"}(파라미터·입력 → IR → 출력·기체·지표) — `
-     + "IR 구간의 층 번호가 곧 실행 순서이자 생성 C의 문장 순서다. 경로 추적이 쉽다"],
-  ["cascade", "B · 전파 폭포",
-   (d) => `${d > 0 ? `${d}층을` : "층 구조를"} 모듈 밴드로 접어 굵은 흐름으로 — `
-     + "어느 모듈을 지나는지가 덩어리로 읽힌다"],
-];
+// 성운(radial)은 삭제됐고 **전파 폭포가 기본**이다. 재생 일정은 배치와 무관한 위상
+// 랭크이므로(influenceplay.js) 「프로세스 뷰」(레이어 활성망)로 전환해도 같은 재생·
+// 같은 경로 패널을 공유한다 — 배치만 바꿔 같은 파라미터의 전파를 비교할 수 있다
 const LAYOUT_FN = { layered: layeredLayout, cascade: cascadeLayout };
 
 export function render() {
@@ -70,7 +57,9 @@ export function render() {
   const statusLine = el("span", { class: "hint" }, "형상 그래프를 불러오는 중…");
   const warnBox = el("div");
   const legendBox = el("div");
-  const variantNote = el("div", { style: "margin-top:4px" });
+  // 폭포(기본)의 굵은 흐름은 유량처럼 읽히지만 영향은 보존량이 아니다 — 이 캐비앳의
+  // 소비처가 없어지면 layout의 meta.conserved 계약이 공중에 뜬다(influencelayout.js)
+  const conservedNote = el("p", { style: "margin:6px 0 0" });
   const tableBox = el("div");
   const detailBox = el("div");
   // 재생 상태 줄 — 캔버스가 시계를 쥐고 있으므로 캔버스가 문자열을 밀어 준다.
@@ -83,9 +72,9 @@ export function render() {
       + "overflow:hidden;text-overflow:ellipsis;min-height:20px",
   });
   const canvasBox = el("div", {
-    // overflow-x:auto — 캔버스는 논리 폭(1180)을 유지하고 좁은 화면(폰)에서는
-    // 여기서 가로 스크롤한다. 100% 축소는 그림을 찌그러뜨렸다(높이는 px 고정이라)
-    style: "position:relative;border-radius:16px;overflow-x:auto;background:#000",
+    // 캔버스는 max-width:100% + aspect-ratio로 비율을 지킨 채 줄어든다(캔버스 쪽
+    // resize() 참조) — 좁은 화면에서도 넘치지 않으므로 가로 스크롤이 필요 없다
+    style: "position:relative;border-radius:16px;background:#000",
   });
   // 전파 경로 패널 — 캔버스가 층을 켜는 것과 **같은 박자**로 층 칩이 켜진다.
   // 칩 목록(층·노드·값)은 선택마다 한 번 만들고, 동기화는 색·배경만 제자리에서
@@ -93,32 +82,27 @@ export function render() {
   // 캔버스는 보조기술에 불투명하므로 재생이 보여 주는 경로가 DOM에도 살게 하는 자리다
   const pathBox = el("div");
   let pathChips = [];   // [0]은 시작(파라미터) 칩, 이후 층 순서
-  let pathInfo = null;  // 활성 층의 경로·설명 — 재생 주기로 계속 바뀌므로 aria-hidden
+  let pathInfo = null;  // 클릭한 층의 상세 — 칩을 눌렀을 때만 채워진다(showPathInfo)
   let pathInk = "#409cff";
   let curLayer = null;  // 캔버스가 마지막으로 알린 층 — 재생성 직후 칩에 되입힌다
 
-  const variantRow = el("div", { class: "row", style: "gap:6px" });
-  // 버튼은 한 번만 만들고 **제자리에서 고친다.** 행을 다시 만들면 방금 누른 버튼이 DOM에서
+  // 프로세스 뷰 토글 — 기본은 전파 폭포, 누르면 레이어 활성망(층별 실행 순서)으로.
+  // 버튼은 한 번만 만들고 **제자리에서 고친다** — 다시 만들면 방금 누른 버튼이 DOM에서
   // 들려 나가 키보드 포커스가 <body>로 떨어지고, aria-pressed가 바뀌어도 낭독되지 않는다
-  const variantBtns = VARIANTS.map(([key, label]) =>
-    el("button", {
-      onclick: () => {
-        state.variant = key;
-        renderVariants();  // 눌린 버튼이 안 바뀌면 지금 무엇을 보고 있는지 알 수 없다
-        rebuild();
-      },
-    }, label));
-  variantRow.append(...variantBtns);
-  function renderVariants() {
-    VARIANTS.forEach(([key, , note], i) => {
-      const on = key === state.variant;
-      const b = variantBtns[i];
-      b.className = on ? "primary" : "";
-      b.setAttribute("aria-pressed", on ? "true" : "false");
-      b.title = note(state.depth ?? 0);
-    });
+  const processBtn = el("button", {
+    title: "층별 실행 순서 배치로 전환 — 층 번호가 곧 생성 C의 문장 순서다",
+    onclick: () => {
+      state.variant = state.variant === "layered" ? "cascade" : "layered";
+      renderProcessBtn();  // 눌림 상태가 안 바뀌면 지금 무엇을 보고 있는지 알 수 없다
+      rebuild();
+    },
+  }, "프로세스 뷰");
+  function renderProcessBtn() {
+    const on = state.variant === "layered";
+    processBtn.className = on ? "primary" : "";
+    processBtn.setAttribute("aria-pressed", on ? "true" : "false");
   }
-  renderVariants();
+  renderProcessBtn();
 
   function rebuild() {
     if (!state.model) return;
@@ -134,16 +118,20 @@ export function render() {
     // 두 번 돈다: 첫 배치로 **가장 높은 열이 몇 행인지** 알아낸 뒤 캔버스 높이를 거기
     // 맞춘다. 고정 높이로 두면 파라미터 열(22행)과 IR 층(최대 12행)의 차이만큼
     // 아래가 통째로 비거나 넘친다 — 열 수를 바꾸면 그 슬랙도 같이 변한다
-    const fn = LAYOUT_FN[state.variant] ?? layeredLayout;
+    const fn = LAYOUT_FN[state.variant] ?? cascadeLayout;
     const probe = fn(graph, { ...opts, height: CANVAS_H });
     const height =
       Math.max(360, probe.bounds.maxRows * (state.variant === "cascade" ? 18 : ROW_GAP) + 96);
     state.layout = fn(graph, { ...opts, height });
     if (canvas) canvas.setSize(CANVAS_W, height);
-    renderVariants();  // 툴팁도 층 수를 쓴다 — 생성 시점의 state.depth는 아직 0이다
+    clear(conservedNote);
+    if (state.layout?.meta?.conserved === false) {
+      // 리본 폭을 유량으로 읽으면 "상류 = 하류 합"이라는 없는 성질을 믿게 된다
+      conservedNote.append(el("span", { style: `font-size:12px;color:${WARN_INK}` },
+        "⚠ 흐름 굵기는 보존량이 아니다 — 파라미터 하나가 여러 노드를 흔들고 하류 합은 상류와 같지 않다"));
+    }
     renderTable();
     renderDetail();
-    renderVariantNote();
   }
 
   // 원뿔과 재생 일정은 (모델, 선택)에만 의존한다 — **배치와 무관**하므로 배치를
@@ -157,7 +145,6 @@ export function render() {
       state.play = null;
       return;
     }
-    state.depth = graphDepth(state.model);
     state.cone = state.selection ? coneOf(state.model, state.selection) : null;
     state.play = state.cone ? conePlayback(state.model, state.cone) : null;
   }
@@ -177,21 +164,10 @@ export function render() {
     canvas?.redraw();
   }
 
-  function renderVariantNote() {
-    clear(variantNote);
-    const [, , note] = VARIANTS.find(([k]) => k === state.variant) ?? [];
-    variantNote.append(el("span", { class: "hint" }, note ? note(state.depth ?? 0) : ""));
-    if (state.layout?.meta?.conserved === false) {
-      // 리본 폭을 유량으로 읽으면 "상류 = 하류 합"이라는 없는 성질을 믿게 된다
-      variantNote.append(el("span", {
-        style: `margin-left:10px;font-size:12px;color:${WARN_INK}`,
-      }, "⚠ 굵기는 보존량이 아니다 — 파라미터 하나가 여러 노드를 흔들고 하류 합은 상류와 같지 않다"));
-    }
-  }
-
-  // ── 전파 경로 — 층 칩 + 활성 층의 경로·설명 (A·B 배치가 같은 일정을 공유한다) ──
-  // 층 하나가 150 ms에 지나가므로 재생만으로는 상세를 읽을 수 없다 — 칩을 누르면
-  // 그 층의 상세가 **고정**된다(다시 누르면 해제). 고정 중에도 점등 동기화는 계속 돈다
+  // ── 전파 경로 — 층 칩 + 클릭한 층의 경로·설명 (두 배치가 같은 일정을 공유한다) ──
+  // 상세는 **칩을 눌렀을 때만** 나온다. 재생을 따라 자동으로 띄우면 층마다 설명
+  // 길이가 달라 아래 내용이 위아래로 계속 출렁여 오히려 읽을 수 없다 — 재생 중에는
+  // 칩 점등과 캔버스 라벨·자막(playLine)이 순서를 말하고, 읽기는 클릭이 연다
 
   let pinnedChip = null;  // null = 재생을 따라감, 0 = 시작(파라미터) 칩, 1.. = 층 칩
 
@@ -211,9 +187,6 @@ export function render() {
         c.style.outline = pinnedChip === j ? `2px solid ${pathInk}` : "none";
         c.style.outlineOffset = "1px";
       });
-      // 고정 = 정적·사용자가 요청한 내용 — 그때만 보조기술에 연다. 재생 추종
-      // 중에는 6초 주기로 계속 바뀌므로 숨긴 채 둔다(playLine과 같은 이유)
-      pathInfo?.setAttribute("aria-hidden", pinnedChip == null ? "true" : "false");
       showPathInfo();
     },
   }, text);
@@ -254,13 +227,13 @@ export function render() {
       pathChips.push(c);
       row.append(c);
     });
-    pathInfo = el("div", {
-      "aria-hidden": "true",  // 6초 주기로 계속 바뀐다 — 정적 사실은 상세 패널이 든다
-      style: "margin-top:6px;font-size:12px;min-height:36px",
-    });
+    // 내용은 클릭했을 때만 채워진다 — 자동으로 바뀌지 않으므로 보조기술에도 그대로
+    // 연다(aria-hidden 불필요). 높이도 예약하지 않는다: 비어 있을 때 공간을 잡아 두면
+    // 그게 또 "출렁임 방지용 여백"이라는 이름의 빈 칸이 된다
+    pathInfo = el("div", { style: "margin-top:6px;font-size:12px" });
     pathBox.append(row,
       el("p", { class: "hint", style: "margin:4px 0 0;font-size:11px" },
-        "칩을 누르면 그 층의 노드·경로·설명이 고정된다 — 다시 누르면 재생을 따라간다."),
+        "칩을 누르면 그 층의 노드·경로·설명이 아래에 나온다 — 다시 누르면 닫힌다."),
       pathInfo);
     // 재생성 직후(탭 복귀 등) 캔버스는 층이 **바뀔 때만** 알린다 — 마지막으로 알린
     // 층을 되입히지 않으면 다음 층 변화까지 칩이 전부 꺼진 채 남는다
@@ -280,34 +253,23 @@ export function render() {
       c.style.background = i === active ? `${pathInk}26` : "rgba(255,255,255,.04)";
       c.style.fontWeight = i === active ? "600" : "400";
     });
-    // 고정 중에는 상세를 다시 그리지 않는다 — 내용이 (모델·선택·고정 칩)에만 걸려
-    // 있어 바뀔 것이 없고, 층마다 clear/재구축하면 사용자가 잡은 텍스트 선택이
-    // 초당 몇 번씩 무너져 "고정"의 이유(읽고 베끼기)가 사라진다
-    if (pinnedChip == null) showPathInfo();
+    // 상세는 건드리지 않는다 — 내용이 (모델·선택·클릭한 칩)에만 걸려 있어 재생이
+    // 바꿀 것이 없고, 층마다 다시 그리면 사용자가 잡은 텍스트 선택이 무너진다
   }
 
-  /** 상세 줄이 보여 줄 것을 한 자리에서 고른다 — 고정 칩이 있으면 그쪽, 없으면 재생. */
+  /** 상세 줄이 보여 줄 것을 한 자리에서 고른다 — **클릭한 칩이 있을 때만** 채운다.
+   *  재생을 따라 자동으로 띄우면 층마다 설명 길이가 달라 아래 내용이 계속 출렁인다.
+   *  재생 중 순서는 칩 점등·캔버스 라벨·자막(playLine)이 이미 말하고 있다. */
   function showPathInfo() {
     if (!pathInfo) return;
+    clear(pathInfo);
+    if (pinnedChip == null) return;
     if (pinnedChip === 0) return renderStartInfo();
-    if (pinnedChip != null) return renderLayerInfo(pinnedChip - 1, true);
-    const nLayers = pathChips.length - 1;
-    if (curLayer == null) return;
-    if (curLayer >= nLayers) return renderSummaryInfo();
-    renderLayerInfo(curLayer, false);
+    renderLayerInfo(pinnedChip - 1);
   }
 
-  function renderSummaryInfo() {
-    clear(pathInfo);
-    const m = state.model;
-    if (!m || !state.play) return;
-    pathInfo.append(el("span", { class: "hint" },
-      summaryOf(state.play, (id) => m.byId.get(id)?.label ?? id)));
-  }
-
-  /** 시작 칩 고정 — 파라미터 자신: 값·설명과 씨앗 간선(값이 **어떻게** 들어가는지). */
+  /** 시작 칩 — 파라미터 자신: 값·설명과 씨앗 간선(값이 **어떻게** 들어가는지). */
   function renderStartInfo() {
-    clear(pathInfo);
     const m = state.model;
     const sel = state.selection ? m?.byId.get(state.selection) : null;
     if (!m || !sel) return;
@@ -333,8 +295,7 @@ export function render() {
   /** 층 상세 — 그 층에 도달하는 **모든** 노드를 한 줄씩: 들어온 간선(출발지·포트)과
    *  노드 설명(블록·파라미터 값·연산·지표 정의). 대표만 말하면 "함께 도달 3개"가
    *  영영 이름 없는 노드로 남는다. */
-  function renderLayerInfo(k, pinned) {
-    clear(pathInfo);
+  function renderLayerInfo(k) {
     const m = state.model;
     const play = state.play;
     const L = play?.layers[k];
@@ -342,7 +303,7 @@ export function render() {
     const labelOf = (id) => m.byId.get(id)?.label ?? id;
     pathInfo.append(el("div", {},
       el("strong", { style: `color:${pathInk}` }, `층 ${L.rank + 1}/${play.maxRank + 1}`),
-      el("span", { class: "hint" }, ` · 노드 ${L.arrive.length}개 도달${pinned ? " · 고정됨" : ""}`)));
+      el("span", { class: "hint" }, ` · 노드 ${L.arrive.length}개 도달`)));
     const MAX_ROWS = 5;
     for (const id of L.arrive.slice(0, MAX_ROWS)) {
       // 이 층에서 이 노드로 들어온 간선 — 출발지와 포트가 곧 경로의 문법이다:
@@ -813,11 +774,10 @@ export function render() {
     el("div", { class: "panel" },
       el("h2", {}, "영향성 — 설계값 연계·정량 영향성 평가 (02 §2.4)"),
       el("div", { class: "row", style: "gap:14px;align-items:center" },
-        variantRow,
         el("span", { class: "grow" }),
+        processBtn,
         el("button", { onclick: load }, "다시 계산"),
       ),
-      variantNote,
       el("div", { class: "row", style: "margin-top:6px" }, statusLine),
       warnBox,
       errBox,
@@ -827,6 +787,7 @@ export function render() {
       playLine,
       pathBox,
       el("div", { style: "margin-top:10px" }, legendBox),
+      conservedNote,
     ),
     el("div", { class: "panel" }, detailBox),
     el("div", { class: "panel" },
