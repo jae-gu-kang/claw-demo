@@ -105,8 +105,14 @@ export function createInfluenceCanvas(opts = {}) {
 
   const view = document.createElement("canvas");
   const ctx = view.getContext("2d");
+  // CSS 크기는 resize()가 논리 크기 그대로 고정한다 — width:100%였을 때는 좁은
+  // 화면에서 가로만 줄고 높이(px)는 남아 그림이 찌그러졌다(폰에서 비율 붕괴).
+  // 좁은 화면은 부모(canvasBox)의 가로 스크롤이 담당한다. 포인터 매핑은 rect
+  // 비율로 환산하므로(아래 toXY) 어느 쪽이든 좌표는 정확하다
+  // margin:0 auto — 넓은 데스크톱에서는 박스 중앙(우측 검은 띠 방지), 좁은
+  // 화면에서 넘칠 때는 auto가 0으로 풀려 스크롤 시작점이 왼쪽 그대로다
   view.style.cssText =
-    "display:block;width:100%;border-radius:16px;border:1px solid rgba(255,255,255,.08);" +
+    "display:block;margin:0 auto;border-radius:16px;border:1px solid rgba(255,255,255,.08);" +
     "box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 18px 44px rgba(0,0,0,.55);" +
     "touch-action:none;cursor:default;outline:none";
   view.tabIndex = 0;
@@ -140,6 +146,7 @@ export function createInfluenceCanvas(opts = {}) {
     const dpr = window.devicePixelRatio || 1;
     view.width = Math.round(width * dpr);
     view.height = Math.round(height * dpr);
+    view.style.width = `${width}px`;
     view.style.height = `${height}px`;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);

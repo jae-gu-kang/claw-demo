@@ -81,7 +81,9 @@ export function render() {
       + "overflow:hidden;text-overflow:ellipsis;min-height:20px",
   });
   const canvasBox = el("div", {
-    style: "position:relative;border-radius:16px;overflow:hidden;background:#000",
+    // overflow-x:auto — 캔버스는 논리 폭(1180)을 유지하고 좁은 화면(폰)에서는
+    // 여기서 가로 스크롤한다. 100% 축소는 그림을 찌그러뜨렸다(높이는 px 고정이라)
+    style: "position:relative;border-radius:16px;overflow-x:auto;background:#000",
   });
 
   const variantRow = el("div", { class: "row", style: "gap:6px" });

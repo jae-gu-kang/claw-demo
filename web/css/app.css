@@ -73,6 +73,7 @@ input, select, textarea {
   border-radius: 6px;
   background: #fff;
   color: var(--text);
+  max-width: 100%; /* 고정폭 입력(230px 결과 id, 340px 슬라이더 등)이 폰 폭을 뚫지 않게 */
 }
 input:invalid { border-color: var(--bad); }
 input.num { width: 90px; font-family: var(--mono); }
@@ -170,13 +171,16 @@ canvas.plot { background: #fff; border: 1px solid #d2d2d7; border-radius: 12px; 
      패널을 컬럼 레이아웃 등 가로 여백이 있는 것으로 감싸면 이 산수를 다시 볼 것. */
   .triview { grid-template-columns: repeat(2, minmax(0, var(--plane-px, 320px))); }
 }
-/* 열이 캔버스보다 좁아지면(1열 구간의 좁은 폭) canvas.plot의 max-width가 폭만 줄이는데,
-   makeCanvas가 인라인으로 박은 height는 그대로 남아 직사각이 된다 — N–E 평면이 타원으로
-   그려져 선회반경을 잘못 읽게 된다. height를 고유비(width/height 속성)에 맡겨 균일
-   축소시킨다. 즉 열이 좁아져도 축척은 보존되고, 해상도만 떨어진다.
+/* 컨테이너가 캔버스보다 좁아지면 canvas.plot의 max-width가 폭만 줄이는데,
+   makeCanvas가 인라인으로 박은 height는 그대로 남아 비율이 깨진다 — N–E 평면이
+   타원으로 그려져 선회반경을 잘못 읽게 되는 식. height를 고유비(width/height
+   속성 — makeCanvas가 논리×dpr로 넣으므로 비율 동일)에 맡겨 균일 축소시킨다.
+   축척은 보존되고 해상도만 떨어진다. 데스크톱(비제약)에서는 width가 인라인 값
+   그대로라 height:auto도 같은 수치로 계산된다 — 무해. 원래 .triview에만 있던
+   규칙을 전 플롯으로 확장 — 폰에서는 모든 탭의 플롯이 같은 방식으로 깨졌다.
    !important는 인라인 스타일을 이기기 위한 것 — 특이도로는 불가능하다.
    측정: 뷰포트 380에서 306×320(직사각) → 306×306(정사각). */
-.triview canvas.plot { height: auto !important; }
+canvas.plot { height: auto !important; }
 
 /* ── 구조도(블록 다이어그램 허브) — 시뮬링크 스타일, .bd 스코프 ───────────
    레퍼런스 디자인(control_law_block_diagram)을 이식 — 다른 뷰와 충돌 방지 */
@@ -383,4 +387,33 @@ body:has(.inf-dark) { background: #0b0b0d; color-scheme: dark; } /* color-scheme
   background: rgba(255, 255, 255, .04);
   border: 1px solid rgba(255, 255, 255, .1);
   border-radius: 12px;
+}
+
+/* ── 좁은 화면 (폰, ≤759px) ────────────────────────────────────────────────
+   원칙: 레이아웃을 새로 설계하지 않는다 — 넘치는 것을 제자리에서 가두거나
+   스크롤로 돌린다. 759는 .triview의 2열 하한(760) 바로 아래 — 겹치지 않는
+   최대값이다(740으로 두면 741~759px 창에서 깨진 헤더가 되돌아온다). */
+@media (max-width: 759px) {
+  /* 탭 10개는 한 줄에 안 들어간다 — 줄바꿈 대신 가로 스크롤 한 줄(iOS 사파리
+     관례). 헤더는 wrap: 1줄째 제목+헬스, 2줄째 전폭 nav */
+  header { flex-wrap: wrap; gap: 2px 10px; padding: 8px 12px; }
+  header h1 { font-size: 15px; }
+  nav { order: 3; flex-basis: 100%; overflow-x: auto; padding: 2px 0; } /* 세로 여백 = 포커스 링 잘림 방지 */
+  nav a { white-space: nowrap; padding: 6px 10px; }
+  .health { margin-left: auto; white-space: nowrap; }
+
+  main { padding: 10px; }
+  .panel { padding: 12px; }
+  .panel h2 { font-size: 14px; }
+  /* 패널이 마지막 방어선 — .scroll-x 없이 놓인 넓은 표·고정폭 요소가 있어도
+     패널 밖(둥근 모서리 밖)으로는 못 나간다. 데스크톱에는 걸지 않는다:
+     넓을 때는 애초에 넘칠 일이 없고, 불필요한 스크롤 컨테이너만 는다 */
+  .panel { overflow-x: auto; }
+  .progress-label { min-width: 0; }
+
+  /* 표 안 칩은 폰에서 꺾지 않는다 — anywhere가 표의 min-content를 줄여 id가
+     글자 단위 세로 쌓임(5줄짜리 칩)으로 변한다. 칩을 한 줄로 두고 표 전체를
+     .scroll-x/.panel 가로 스크롤로 돌린다. 카드 안 칩은 그대로 꺾인다(폭이
+     잠긴 곳의 넘침 방지가 원래 목적). 데스크톱은 두 줄 칩이 낫다 — 미디어 한정 */
+  .inf-dark table code { white-space: nowrap; }
 }

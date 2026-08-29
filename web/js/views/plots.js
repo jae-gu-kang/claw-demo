@@ -8,7 +8,11 @@ const FONT = "11px -apple-system, 'Segoe UI', sans-serif";
 
 export function makeCanvas(width, height) {
   const dpr = window.devicePixelRatio || 1;
-  const canvas = el("canvas", { class: "plot", width: width * dpr, height: height * dpr });
+  // round: 소수 dpr(125% 등)에서 속성값 절사로 고유비가 인라인 크기와 어긋나면
+  // canvas.plot의 height:auto(비율 유도)가 그 어긋난 비율을 쓰게 된다
+  const canvas = el("canvas", {
+    class: "plot", width: Math.round(width * dpr), height: Math.round(height * dpr),
+  });
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
   const ctx = canvas.getContext("2d");
