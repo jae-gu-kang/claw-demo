@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { assignRanks } from "./influencelayout.js";
-import { PLAY, captionAt, conePlayback, cycleAt, graphDepth, summaryOf } from "./influenceplay.js";
+import {
+  PLAY, captionAt, conePlayback, cycleAt, graphDepth, layerIndexAt, summaryOf,
+} from "./influenceplay.js";
 
 const N = (id, kind, extra = {}) => ({ id, kind, band: "x", ...extra });
 
@@ -225,6 +227,28 @@ test("자막: 재생 중에는 절대 층 번호, 끝나면 요약으로 바뀐�
   assert.equal(captionAt(p, p.playMs, label), summaryOf(p, label));
   // 층 안에 여러 노드가 도착하면 사람이 알아보는 종류부터 (출력 > 지표 > 기체 > IR)
   assert.match(captionAt(p, p.layers.at(-1).t0, label), /metric:m1/);
+});
+
+test("layerIndexAt: 자막·경로 패널이 공유하는 층 판정 — 경계가 갈리면 둘이 어긋난다", () => {
+  const p = play();
+  assert.equal(layerIndexAt(null, 0), null, "재생 없음은 층이 아니다");
+  assert.equal(layerIndexAt(p, 0), 0, "t=0은 첫 점유 층");
+  assert.equal(layerIndexAt(p, p.layers[2].t0), 2, "슬롯 시작 순간 그 층으로 넘어간다");
+  assert.equal(layerIndexAt(p, p.layers[2].t0 - 0.001), 1, "직전까지는 이전 층");
+  assert.equal(layerIndexAt(p, p.playMs), p.layers.length, "완료 문턱은 >= (유지 구간 전체)");
+  // 빈 재생(방출 안 되는 상수)은 곧장 완료 — 뷰가 이 값으로 요약 갈래를 탄다
+  const empty = conePlayback(model, { nodes: new Set(["param:p"]), seeds: new Set(), edges: new Set() });
+  assert.equal(layerIndexAt(empty, 0), 0);
+  // 자막과 같은 판정인지 못박는다 — captionAt이 경계를 바꾸면 여기서 같이 끌려온다
+  for (const t of [0, p.layers[1].t0, p.playMs - 1, p.playMs]) {
+    const li = layerIndexAt(p, t);
+    const expect = li >= p.layers.length
+      ? summaryOf(p, (id) => id)
+      : new RegExp(`^층 ${p.layers[li].rank + 1}/`);
+    const cap = captionAt(p, t, (id) => id);
+    if (typeof expect === "string") assert.equal(cap, expect, `t=${t}`);
+    else assert.match(cap, expect, `t=${t}`);
+  }
 });
 
 test("요약 세 갈래 — 출력 도달 / 법칙 밖 / 출력 미도달이 서로 다른 문장", () => {

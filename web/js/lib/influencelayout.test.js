@@ -175,31 +175,8 @@ test("히트테스트는 반경 밖이면 null", () => {
 
 // 파급 일정 테스트 2건(씨앗=0 · 미도달=null · 간선 방향 단조)은 후계인
 // `influenceplay.js`의 conePlayback으로 이관됐다 — 세 성질 모두 그쪽이 승계한다.
-test("각도 평균은 단위벡터로 — 170°와 −170°의 평균은 180°지 0°가 아니다", async () => {
-  const { meanAngle } = await import("./influencelayout.js");
-  const d = Math.PI / 180;
-  assert.ok(Math.abs(Math.abs(meanAngle([170 * d, -170 * d])) - Math.PI) < 1e-9);
-  assert.equal(meanAngle([]), 0);
-  assert.ok(Number.isFinite(meanAngle([0, Math.PI])));
-});
-
-test("성운: 모든 노드가 자기 랭크의 링 위에 정확히 놓인다", async () => {
-  const { radialLayout } = await import("./influencelayout.js");
-  const L = radialLayout(diamond, { width: 600, height: 600 });
-  const byRank = new Map();
-  for (const n of diamond.nodes) {
-    const p = L.pos.get(n.id);
-    const rr = Math.hypot(p.x - L.center.x, p.y - L.center.y);
-    const k = L.ranks.rank.get(n.id);
-    if (byRank.has(k)) assert.ok(Math.abs(byRank.get(k) - rr) < 1e-9, `랭크 ${k} 반경 불일치`);
-    else byRank.set(k, rr);
-  }
-  // diamond에는 파라미터(랭크 0)가 없다 — 존재하는 최소·최대 랭크로 방향만 확인한다
-  const present = [...byRank.keys()].sort((a, b) => a - b);
-  assert.ok(byRank.get(present[0]) > byRank.get(present.at(-1)),
-    "바깥일수록 상류 — 파라미터가 바깥 링, 지표가 중심");
-});
-
+// 성운(radial) 전용 테스트 4건(링 반경·각도 평균·각도 벌리기)은 후보 삭제와 함께
+// 지워졌다 — 배치가 지워지면 그 계약도 같이 지워지는 것이 이 파일의 규약이다.
 test("폭포: 리본 폭은 유량이 아니라고 못박는다", async () => {
   const { cascadeLayout } = await import("./influencelayout.js");
   const L = cascadeLayout(diamond, { width: 600, height: 400 });
@@ -207,31 +184,15 @@ test("폭포: 리본 폭은 유량이 아니라고 못박는다", async () => {
   for (const p of L.pos.values()) assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y));
 });
 
-test("세 배치가 같은 형태를 낸다 — 렌더러가 하나여야 후보를 지우기 쉽다", async () => {
-  const { radialLayout, cascadeLayout } = await import("./influencelayout.js");
-  for (const L of [layeredLayout(diamond, {}), radialLayout(diamond, {}), cascadeLayout(diamond, {})]) {
+test("두 배치가 같은 형태를 낸다 — 렌더러가 하나여야 후보를 지우기 쉽다", async () => {
+  const { cascadeLayout } = await import("./influencelayout.js");
+  for (const L of [layeredLayout(diamond, {}), cascadeLayout(diamond, {})]) {
     assert.ok(L.pos instanceof Map && Array.isArray(L.edges) && L.bounds && L.ranks, L.variant);
     for (const e of L.edges) {
       assert.ok(Number.isFinite(e.bez.x0) && Number.isFinite(e.bez.y1), L.variant);
       assert.ok(e.flat.cum.length > 1, L.variant);
     }
   }
-});
-
-test("같은 링의 각도는 최소 간격만큼 벌어진다 — 안 벌리면 지표가 한 점에 겹친다", async () => {
-  const { spreadAngles } = await import("./influencelayout.js");
-  const a = new Map([["m1", 1], ["m2", 1], ["m3", 1]]);
-  spreadAngles(["m1", "m2", "m3"], a, 0.2);
-  const vs = [a.get("m1"), a.get("m2"), a.get("m3")].sort((x, y) => x - y);
-  assert.ok(vs[1] - vs[0] >= 0.199 && vs[2] - vs[1] >= 0.199, `${vs}`);
-  assert.ok(Math.abs((vs[0] + vs[2]) / 2 - 1) < 1e-9, "가운데는 원래 자리에 남는다");
-});
-
-test("이미 충분히 벌어져 있으면 건드리지 않는다 — 바리센터 순서를 되돌리지 않는다", async () => {
-  const { spreadAngles } = await import("./influencelayout.js");
-  const a = new Map([["x", 0], ["y", 1], ["z", 2]]);
-  spreadAngles(["x", "y", "z"], a, 0.2);
-  assert.deepEqual([a.get("x"), a.get("y"), a.get("z")], [0, 1, 2]);
 });
 
 // ── 부분 스트로크 (순차 재생이 간선을 0..s로 자를 때 쓴다) ────────────────
@@ -287,13 +248,13 @@ test("arcPrefix: 제자리 간선에서 NaN도 예외도 없다", () => {
 });
 
 test("간선의 idx는 **모델 간선 인덱스** — 좌표 없는 간선이 빠져도 안 어긋난다", async () => {
-  const { radialLayout, cascadeLayout } = await import("./influencelayout.js");
+  const { cascadeLayout } = await import("./influencelayout.js");
   // 두 번째 간선의 목적지를 배치에 없는 노드로 둔다 → filter(Boolean)에 떨어진다
   const g = {
     nodes: diamond.nodes,
     edges: [diamond.edges[0], { src: "a", dst: "유령" }, ...diamond.edges.slice(1)],
   };
-  for (const fn of [layeredLayout, radialLayout, cascadeLayout]) {
+  for (const fn of [layeredLayout, cascadeLayout]) {
     const L = fn(g, { width: 600, height: 400 });
     assert.ok(L.edges.length < g.edges.length, "떨어진 간선이 있어야 이 테스트가 의미 있다");
     for (const e of L.edges) {

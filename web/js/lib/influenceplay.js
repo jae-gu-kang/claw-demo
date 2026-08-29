@@ -6,7 +6,8 @@
 **시간축을 기하에서 분리한 것이 이 모듈의 요지다.** 배치가 준 `layout.ranks`를 쓰지
 않는다 — `cascadeLayout`의 ranks는 위상 랭크가 아니라 **모듈 밴드의 열 인덱스**라
 간선 방향으로 단조가 아니고, 그걸 시간으로 쓰면 간선이 거꾸로 자란다. 여기서
-`assignRanks`를 직접 돌려 **IR 실행 순서**로만 시각을 매기므로 세 배치가 같은 재생을 낸다.
+`assignRanks`를 직접 돌려 **IR 실행 순서**로만 시각을 매기므로 두 배치(A·B)가 같은
+재생을 낸다 — 뷰의 전파 경로 패널이 배치와 무관하게 같은 층 칩을 켜는 근거이기도 하다.
 
 층 슬롯이 성립하는 근거: 엔진이 내는 간선의 목적지는 전부 IR 노드·출력·기체·지표이고
 **파라미터나 입력을 목적지로 삼는 간선이 하나도 없다.** 그래서 `assignRanks`의
@@ -185,12 +186,27 @@ export function cycleAt(elapsed, opts = {}) {
   return { t: Math.min(u, playMs), u, fade, cycle };
 }
 
+/** 재생 위치 t가 가리키는 층 인덱스 — 자막(captionAt)과 뷰의 경로 패널(onLayer)이
+ * **같은 판정**을 써야 칩과 자막이 어긋나지 않는다. 판정을 각자 복제하면 경계
+ * (`>=` vs `>`, 완료 문턱)가 어긋나도 화면은 계속 그럴듯해서 아무도 못 알아챈다.
+ *
+ * 반환: 0..K-1 = 그 층이 자라는 중, K(=layers.length) = 완료(요약 구간). 빈 재생
+ * (nLayer 0)도 K=0으로 곧장 완료다. play가 없으면 null — "재생 없음"은 층이 아니다.
+ */
+export function layerIndexAt(play, t) {
+  if (!play) return null;
+  if (play.nLayer === 0 || t >= play.playMs) return play.layers.length;
+  let li = 0;
+  for (let i = 0; i < play.layers.length; i += 1) if (play.layers[i].t0 <= t) li = i;
+  return li;
+}
+
 /** 재생 중 한 줄 — 「층 7/16 · limiter_active 도달」. 완료 후에는 요약으로 바뀐다. */
 export function captionAt(play, t, labelOf = (id) => id) {
   if (!play || play.nLayer === 0) return "번질 곳이 없다 — 이 상수는 그래프에 방출되지 않는다";
-  if (t >= play.playMs) return summaryOf(play, labelOf);
-  let cur = play.layers[0];
-  for (const L of play.layers) if (L.t0 <= t) cur = L;
+  const li = layerIndexAt(play, t);
+  if (li >= play.layers.length) return summaryOf(play, labelOf);
+  const cur = play.layers[li];
   const where = `층 ${cur.rank + 1}/${play.maxRank + 1}`;
   return cur.headline ? `${where} · ${labelOf(cur.headline)} 도달` : `${where} · 노드 ${cur.arrive.length}개`;
 }

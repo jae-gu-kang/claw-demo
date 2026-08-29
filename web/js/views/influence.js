@@ -23,7 +23,7 @@ import {
   normalizeGraph, pairsFor, radiusOf, structuralRequest, sweepRequest,
 } from "../lib/influence.js";
 import { conePlayback, graphDepth, summaryOf } from "../lib/influenceplay.js";
-import { cascadeLayout, layeredLayout, radialLayout } from "../lib/influencelayout.js";
+import { cascadeLayout, layeredLayout } from "../lib/influencelayout.js";
 import { createInfluenceCanvas } from "./influencecanvas.js";
 import { store } from "../store.js";
 
@@ -45,17 +45,18 @@ let canvas = null;
 // d가 0인 경우가 **영구히 남을 수 있다**: rebuild()는 모델이 없으면 즉시 반환하므로
 // 첫 로드가 실패하면 층 수가 영영 안 채워진다. 그때 「0층」을 내보이면 하드코딩을
 // 걷어낸 자리에 더 틀린 수를 넣는 꼴이라, 수가 없으면 수를 말하지 않는다
+// 성운(radial)은 삭제됐다 — 재생 일정은 배치와 무관한 위상 랭크이므로(influenceplay.js)
+// 남은 두 배치는 **같은 재생·같은 경로 패널**을 공유한다. 그래서 A·B를 오가며
+// 같은 파라미터의 전파를 배치만 바꿔 비교할 수 있다
 const VARIANTS = [
   ["layered", "A · 레이어 활성망",
    (d) => `좌→우 ${d > 0 ? `${d}층` : "층 구조"}(파라미터·입력 → IR → 출력·기체·지표) — `
      + "IR 구간의 층 번호가 곧 실행 순서이자 생성 C의 문장 순서다. 경로 추적이 쉽다"],
-  ["radial", "B · 영향 성운",
-   () => "동심원 4겹 + 묶음 허브로 다발 묶기 — 바깥이 파라미터, 중심이 지표. 얽힘의 규모가 한눈에"],
-  ["cascade", "C · 전파 폭포",
+  ["cascade", "B · 전파 폭포",
    (d) => `${d > 0 ? `${d}층을` : "층 구조를"} 모듈 밴드로 접어 굵은 흐름으로 — `
      + "어느 모듈을 지나는지가 덩어리로 읽힌다"],
 ];
-const LAYOUT_FN = { layered: layeredLayout, radial: radialLayout, cascade: cascadeLayout };
+const LAYOUT_FN = { layered: layeredLayout, cascade: cascadeLayout };
 
 export function render() {
   // 탭을 떠났다 돌아오면 이전 DOM은 버려진다 — 그쪽을 밀던 타이머도 같이 정리
@@ -85,6 +86,15 @@ export function render() {
     // 여기서 가로 스크롤한다. 100% 축소는 그림을 찌그러뜨렸다(높이는 px 고정이라)
     style: "position:relative;border-radius:16px;overflow-x:auto;background:#000",
   });
+  // 전파 경로 패널 — 캔버스가 층을 켜는 것과 **같은 박자**로 층 칩이 켜진다.
+  // 칩 목록(층·노드·값)은 선택마다 한 번 만들고, 동기화는 색·배경만 제자리에서
+  // 바꾼다 — 갱신은 25 fps가 아니라 층이 바뀌는 프레임에만 온다(캔버스 onLayer 규약).
+  // 캔버스는 보조기술에 불투명하므로 재생이 보여 주는 경로가 DOM에도 살게 하는 자리다
+  const pathBox = el("div");
+  let pathChips = [];   // [0]은 시작(파라미터) 칩, 이후 층 순서
+  let pathInfo = null;  // 활성 층의 경로·설명 — 재생 주기로 계속 바뀌므로 aria-hidden
+  let pathInk = "#409cff";
+  let curLayer = null;  // 캔버스가 마지막으로 알린 층 — 재생성 직후 칩에 되입힌다
 
   const variantRow = el("div", { class: "row", style: "gap:6px" });
   // 버튼은 한 번만 만들고 **제자리에서 고친다.** 행을 다시 만들면 방금 누른 버튼이 DOM에서
@@ -125,9 +135,8 @@ export function render() {
     // 아래가 통째로 비거나 넘친다 — 열 수를 바꾸면 그 슬랙도 같이 변한다
     const fn = LAYOUT_FN[state.variant] ?? layeredLayout;
     const probe = fn(graph, { ...opts, height: CANVAS_H });
-    const height = state.variant === "radial"
-      ? 760  // 성운은 원반이라 행 수가 아니라 지름이 높이를 정한다
-      : Math.max(360, probe.bounds.maxRows * (state.variant === "cascade" ? 18 : ROW_GAP) + 96);
+    const height =
+      Math.max(360, probe.bounds.maxRows * (state.variant === "cascade" ? 18 : ROW_GAP) + 96);
     state.layout = fn(graph, { ...opts, height });
     if (canvas) canvas.setSize(CANVAS_W, height);
     renderVariants();  // 툴팁도 층 수를 쓴다 — 생성 시점의 state.depth는 아직 0이다
@@ -158,6 +167,7 @@ export function render() {
     state.selection = n?.kind === "param" ? id : id === null ? null : state.selection;
     recompute();
     if (!state.cone) playLine.textContent = "";
+    renderPath();
     renderDetail();
     renderTable();
     // 동작 축소 설정에서는 타이머가 아예 없다 — frame()이 선택을 읽는 유일한 자리이므로
@@ -176,6 +186,117 @@ export function render() {
         style: `margin-left:10px;font-size:12px;color:${WARN_INK}`,
       }, "⚠ 굵기는 보존량이 아니다 — 파라미터 하나가 여러 노드를 흔들고 하류 합은 상류와 같지 않다"));
     }
+  }
+
+  // ── 전파 경로 — 층 칩 + 활성 층의 경로·설명 (A·B 배치가 같은 일정을 공유한다) ──
+
+  const pathChip = (text) => el("span", {
+    style: "padding:2px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.14);" +
+      "background:rgba(255,255,255,.04);color:rgba(235,235,245,.45);" +
+      "font-size:11px;line-height:16px;white-space:nowrap",
+  }, text);
+
+  function renderPath() {
+    clear(pathBox);
+    pathChips = [];
+    pathInfo = null;
+    const m = state.model;
+    const play = state.play;
+    const sel = state.selection ? m?.byId.get(state.selection) : null;
+    if (!m || !sel || !play) return;
+    pathInk = STATE_INK[sel.state] ?? "#409cff";
+    if (play.nLayer === 0) {
+      pathBox.append(el("p", { class: "hint", style: "margin:8px 0 0;font-size:12px" },
+        "전파 경로 없음 — 이 상수는 그래프에 방출되지 않는다."));
+      return;
+    }
+    const labelOf = (id) => m.byId.get(id)?.label ?? id;
+    const row = el("div", {
+      class: "row", style: "gap:4px 2px;flex-wrap:wrap;align-items:center;margin-top:10px",
+    });
+    // 시작 칩 — 파라미터는 층 1(랭크 0)에 고정이고, 값이 있는 유일한 종류다
+    const unit = sel.unit && sel.unit !== "-" ? ` ${sel.unit}` : "";
+    pathChips.push(pathChip(`층 1 · ${sel.label} = ${fmtNum(sel.value)}${unit}`));
+    row.append(pathChips[0]);
+    for (const L of play.layers) {
+      row.append(el("span", {
+        style: "color:rgba(235,235,245,.3);font-size:11px;margin:0 2px",
+      }, "→"));
+      // 대표 노드(headline)만 칩에 세운다 — 나머지는 +n으로 접고 활성 층 줄이 푼다.
+      // headline 부재는 captionAt과 같은 폴백 — 가드 없이 찍으면 「층 X · null」이 된다
+      const name = L.headline ? labelOf(L.headline) : `노드 ${L.arrive.length}개`;
+      const extra = L.headline && L.arrive.length > 1 ? ` +${L.arrive.length - 1}` : "";
+      const c = pathChip(`층 ${L.rank + 1} · ${name}${extra}`);
+      pathChips.push(c);
+      row.append(c);
+    }
+    pathInfo = el("div", {
+      "aria-hidden": "true",  // 6초 주기로 계속 바뀐다 — 정적 사실은 상세 패널이 든다
+      style: "margin-top:6px;font-size:12px;min-height:36px",
+    });
+    pathBox.append(row, pathInfo);
+    // 재생성 직후(탭 복귀 등) 캔버스는 층이 **바뀔 때만** 알린다 — 마지막으로 알린
+    // 층을 되입히지 않으면 다음 층 변화까지 칩이 전부 꺼진 채 남는다
+    if (curLayer != null) setActiveLayer(curLayer);
+  }
+
+  function setActiveLayer(k) {
+    curLayer = k;
+    if (k == null || !pathChips.length || !pathInfo) return;
+    const nLayers = pathChips.length - 1;      // 시작 칩 제외
+    const done = k >= nLayers;
+    const active = done ? -1 : k + 1;          // 층 k가 자라는 중 = 칩 k+1이 진행 중
+    pathChips.forEach((c, i) => {
+      const lit = done || i <= k + 1;
+      c.style.color = lit ? pathInk : "rgba(235,235,245,.45)";
+      c.style.borderColor = lit ? `${pathInk}66` : "rgba(255,255,255,.14)";
+      c.style.background = i === active ? `${pathInk}26` : "rgba(255,255,255,.04)";
+      c.style.fontWeight = i === active ? "600" : "400";
+    });
+    renderPathInfo(k, done);
+  }
+
+  function renderPathInfo(k, done) {
+    clear(pathInfo);
+    const m = state.model;
+    const play = state.play;
+    if (!m || !play) return;
+    const labelOf = (id) => m.byId.get(id)?.label ?? id;
+    if (done) {
+      pathInfo.append(el("span", { class: "hint" }, summaryOf(play, labelOf)));
+      return;
+    }
+    const L = play.layers[k];
+    if (!L) return;
+    if (!L.headline) {
+      // captionAt의 「노드 N개」 폴백과 같은 갈래 — 대표가 없어도 층 사실은 남긴다
+      pathInfo.append(el("div", {},
+        el("strong", { style: `color:${pathInk}` }, `층 ${L.rank + 1}/${play.maxRank + 1}`),
+        el("span", {}, ` — 노드 ${L.arrive.length}개 도달`)));
+      return;
+    }
+    const head = m.byId.get(L.headline);
+    // 이 층에서 대표 노드로 들어오는 간선의 출발지 — "무엇이 무엇을 건드렸나"가 경로다
+    const srcs = [...new Set(L.edges
+      .filter((i) => m.edges[i]?.dst === L.headline)
+      .map((i) => labelOf(m.edges[i].src)))];
+    const others = L.arrive.filter((id) => id !== L.headline).map(labelOf);
+    const desc = head?.desc
+      ?? (head?.block
+        ? `${KIND_NOTE[head.kind] ?? ""} · 블록 ${head.block}`
+        : KIND_NOTE[head?.kind] ?? "");
+    pathInfo.append(
+      el("div", {},
+        el("strong", { style: `color:${pathInk}` }, `층 ${L.rank + 1}/${play.maxRank + 1}`),
+        el("span", {}, ` — ${srcs.length ? `${srcs.join(" · ")} → ` : ""}${labelOf(L.headline)}`),
+        others.length
+          ? el("span", { class: "hint" },
+              ` · 함께 도달 ${others.slice(0, 4).join(", ")}` +
+              (others.length > 4 ? ` 외 ${others.length - 4}개` : ""))
+          : "",
+      ),
+      desc ? el("div", { class: "hint", style: "margin-top:2px" }, desc) : "",
+    );
   }
 
   function renderDetail() {
@@ -310,6 +431,7 @@ export function render() {
         }, `⚠ ${w}`));
       }
       recompute();
+      renderPath();
       renderLegend(m);
       rebuild();
       canvas.invalidate();
@@ -614,6 +736,7 @@ export function render() {
     getPlay: () => state.play,
     onSelect: select,
     onCaption: (text) => { playLine.textContent = text; },
+    onLayer: setActiveLayer,
   });
   canvasBox.append(canvas.root);
 
@@ -638,6 +761,7 @@ export function render() {
     el("div", { class: "panel" },  // 다크 표면은 .inf-dark 스코프가 준다 — 인라인 중복 금지
       canvasBox,
       playLine,
+      pathBox,
       el("div", { style: "margin-top:10px" }, legendBox),
     ),
     el("div", { class: "panel" }, detailBox),
@@ -671,6 +795,17 @@ export function render() {
     ),
   );
 }
+
+// 노드 종류 설명 — desc가 없는 노드(IR 연산 등)가 경로 패널에서 침묵하지 않게.
+// 파라미터는 여기 없다: 간선의 목적지가 될 수 없어 도달 층에 서지 않는다
+const KIND_NOTE = {
+  input: "법칙 입력",
+  ir: "IR 연산 노드 — 층 번호가 곧 실행 순서다",
+  ghost: "구조 변경 시 생기는 노드 — 지금 형상에는 없다",
+  output: "법칙 출력 — 여기까지가 생성 C의 범위다",
+  plant: "기체·작동기·항법 (법칙 밖)",
+  metric: "설계 지표 (법칙 밖) — 「얼마나」는 폐루프 스윕에서만 나온다",
+};
 
 function badge(stateKey) {
   // 바탕 알파 26(15%) — 다크 표면에서 1a(10%)는 칩 윤곽이 사라진다

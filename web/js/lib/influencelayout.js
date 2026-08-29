@@ -1,11 +1,10 @@
 /** 영향성 그래프 배치 — 순수 함수, DOM 무접촉 (판단은 lib에, 그리기는 views에).
 
-세 후보가 **같은 Layout 형태**를 낸다. 그래서 렌더러가 하나면 되고, 하나를 고른 뒤
-나머지를 지우는 일이 함수 두 개를 지우는 일이 된다.
+두 후보가 **같은 Layout 형태**를 낸다. 그래서 렌더러가 하나면 되고, 후보를 지우는
+일이 함수를 지우는 일이 된다 — 성운(radial)이 실제로 그렇게 지워졌다.
 
     layeredLayout  후보 A — 좌→우 층 배치 (신경망 레이어 그림)
-    radialLayout   후보 B — 동심원 + 엣지 번들링 (영향 성운)
-    cascadeLayout  후보 C — 생키 리본 (전파 폭포)
+    cascadeLayout  후보 B — 생키 리본 (전파 폭포)
 
 **결정적이다.** Math.random을 쓰지 않는다 — 같은 입력이면 같은 그림이라야 다시
 그릴 때 흔들리지 않고, 테스트도 쓸 수 있다.
@@ -417,110 +416,7 @@ export function layeredLayout(graph, opts = {}) {
 }
 
 
-/** 각도 평균 — **단위벡터를 더해서** 평균낸다.
- *
- * 산술평균을 쓰면 170°와 −170°의 평균이 180°가 아니라 0°가 되어, 번들 곡선이 원반을
- * 가로질러 반대쪽으로 쏘아진다. 랩이 있는 값을 산술평균하면 안 되는 표준 사례다.
- */
-export function meanAngle(angles) {
-  if (!angles || !angles.length) return 0;
-  let sx = 0;
-  let sy = 0;
-  for (const a of angles) {
-    sx += Math.cos(a);
-    sy += Math.sin(a);
-  }
-  if (Math.abs(sx) < 1e-12 && Math.abs(sy) < 1e-12) return angles[0];
-  return Math.atan2(sy, sx);
-}
-
-/** 후보 B — 영향 성운. 바깥 링이 파라미터, 중심이 지표. 묶음 허브로 간선을 다발로 묶는다.
- *
- * 정지 상태의 실타래 자체가 "이만큼 얽혀 있다"는 메시지다. 다발로 묶지 않으면 그냥
- * 지저분한 원이 되고, 묶으면 어느 묶음에서 어느 묶음으로 흐르는지가 덩어리로 읽힌다.
- */
-export function radialLayout(graph, opts = {}) {
-  const { nodes, edges } = graph;
-  const { width = 1180, height = 700, beta = 0.82, pad = 90, minGap = 0.1 } = opts;
-  const ranks = assignRanks(nodes, edges);
-  const ordered = orderWithinRanks(nodes, edges, ranks, opts);
-  const cx = width / 2;
-  const cy = height / 2;
-  const R = Math.max(40, Math.min(width, height) / 2 - pad);
-  // 안쪽 링이 너무 좁으면 지표 라벨이 한 점에 뭉친다 — 둘레가 라벨 수를 감당해야 한다
-  const r0 = Math.max(18, R * 0.34);
-  const byId = new Map(nodes.map((n) => [n.id, n]));
-  const radiusOfRank = (r) => R - (R - r0) * (r / Math.max(1, ranks.maxRank));
-
-  // 바깥 링(랭크 0 = 파라미터)부터 각을 고르게 깔고, 안쪽은 상류의 평균각을 따른다
-  const angle = new Map();
-  const outer = ordered.byRank[0] ?? [];
-  outer.forEach((id, i) => angle.set(id, (i / Math.max(1, outer.length)) * Math.PI * 2 - Math.PI / 2));
-  const pred = new Map(nodes.map((n) => [n.id, []]));
-  for (const e of edges) if (pred.has(e.dst)) pred.get(e.dst).push(e.src);
-  for (let r = 1; r <= ranks.maxRank; r += 1) {
-    const ids = ordered.byRank[r] ?? [];
-    ids.forEach((id, i) => {
-      const src = pred.get(id).map((s) => angle.get(s)).filter((a) => a !== undefined);
-      angle.set(id, src.length ? meanAngle(src)
-        : (i / Math.max(1, ids.length)) * Math.PI * 2 - Math.PI / 2);
-    });
-    // 간격은 **링 반경에 맞춘다** — 고정 각도를 쓰면 안쪽 링(지름이 작다)에서 호길이가
-    // 몇 px밖에 안 돼 노드가 겹친다. 최소 호길이를 정하고 각도로 되돌린다.
-    // 한 바퀴를 넘지 않도록 상한도 둔다
-    const rr = Math.max(1, radiusOfRank(r));
-    spreadAngles(ids, angle,
-      Math.min((Math.PI * 2) / Math.max(2, ids.length), Math.max(minGap, 22 / rr)));
-  }
-
-  const pos = new Map();
-  for (const n of nodes) {
-    const rr = radiusOfRank(ranks.rank.get(n.id) ?? 0);
-    const a = angle.get(n.id) ?? 0;
-    pos.set(n.id, {
-      x: cx + rr * Math.cos(a), y: cy + rr * Math.sin(a),
-      r: opts.radiusOf ? opts.radiusOf(n) : 4.5,
-    });
-  }
-
-  // 묶음 허브 — 소속 노드들의 평균각·평균반경의 0.55배 지점
-  const hubs = new Map();
-  const groups = new Map();
-  for (const n of nodes) {
-    const b = n.band ?? "top";
-    if (!groups.has(b)) groups.set(b, []);
-    groups.get(b).push(n.id);
-  }
-  for (const [b, ids] of groups) {
-    const a = meanAngle(ids.map((id) => angle.get(id) ?? 0));
-    const rr = ids.reduce((s, id) => s + radiusOfRank(ranks.rank.get(id) ?? 0), 0) / ids.length;
-    hubs.set(b, { x: cx + rr * 0.55 * Math.cos(a), y: cy + rr * 0.55 * Math.sin(a) });
-  }
-
-  const lerp = (p, q, t) => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
-  const eout = edges.map((e, i) => {
-    const p0 = pos.get(e.src);
-    const p1 = pos.get(e.dst);
-    if (!p0 || !p1) return null;
-    // 양 끝을 자기 묶음 허브 쪽으로 당긴다 — beta=0이면 직선, 1이면 허브를 지난다
-    const h0 = hubs.get(byId.get(e.src)?.band ?? "top") ?? { x: cx, y: cy };
-    const h1 = hubs.get(byId.get(e.dst)?.band ?? "top") ?? { x: cx, y: cy };
-    const c1 = lerp(p0, h0, beta * 0.55);
-    const c2 = lerp(p1, h1, beta * 0.55);
-    const bez = { x0: p0.x, y0: p0.y, c1x: c1.x, c1y: c1.y, c2x: c2.x, c2y: c2.y, x1: p1.x, y1: p1.y };
-    return { ...e, idx: i,
-      rankSpan: Math.abs((ranks.rank.get(e.dst) ?? 0) - (ranks.rank.get(e.src) ?? 0)),
-      bez, flat: flattenBezier(bez) };
-  }).filter(Boolean);
-
-  return {
-    variant: "radial", nodes, edges: eout, pos, ranks, order: ordered.order,
-    crossings: ordered.crossings, hubs, center: { x: cx, y: cy, R, r0 },
-    rankX: [], bounds: { w: width, h: height, maxRows: 0 }, meta: { conserved: null },
-  };
-}
-
-/** 후보 C — 전파 폭포. 16층이 아니라 **모듈 밴드**로 접어 굵은 리본으로 흐르게 한다.
+/** 후보 B — 전파 폭포. 16층이 아니라 **모듈 밴드**로 접어 굵은 리본으로 흐르게 한다.
  *
  * 굵기가 곧 영향량이라는 읽기를 주지만, 영향은 **보존량이 아니다** — 파라미터 하나가
  * 여러 노드를 흔들고, 하류 합이 상류와 같지도 않다. 그래서 랭크 내 상대값으로만
@@ -600,24 +496,4 @@ export function cascadeLayout(graph, opts = {}) {
       columns: ["파라미터", "입력", ...groups, "출력", "기체", "지표"],
     },
   };
-}
-
-
-/** 같은 링 위 노드들의 각도를 최소 간격만큼 벌린다 (순서는 유지).
- *
- * 안 벌리면 **예측자가 같은 노드들이 한 점에 겹친다** — 지표 8개가 전부 기체 하나만
- * 바라보므로 평균각이 같아지고, 라벨이 서로를 덮어 아무것도 못 읽는다. 바리센터가
- * 정한 순서는 그대로 두고 간격만 넓힌다.
- */
-export function spreadAngles(ids, angle, minGap = 0.1) {
-  if (!ids || ids.length < 2) return;
-  const sorted = [...ids].sort((a, b) => angle.get(a) - angle.get(b));
-  const need = (sorted.length - 1) * minGap;
-  const lo = angle.get(sorted[0]);
-  const hi = angle.get(sorted[sorted.length - 1]);
-  const span = hi - lo;
-  if (span >= need) return;
-  const mid = (lo + hi) / 2;
-  const start = mid - need / 2;
-  sorted.forEach((id, i) => angle.set(id, start + i * minGap));
 }

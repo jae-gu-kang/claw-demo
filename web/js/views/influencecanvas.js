@@ -27,7 +27,7 @@
 
 import { SKIN, BAND_COLOR, STATE_COLOR, logScale, radiusOf } from "../lib/influence.js";
 import { arcPrefix, hitTestNodes, pointAtArc } from "../lib/influencelayout.js";
-import { PLAY, captionAt, cycleAt } from "../lib/influenceplay.js";
+import { PLAY, captionAt, cycleAt, layerIndexAt } from "../lib/influenceplay.js";
 
 const FRAME_MS = 40; // 25 fps — views/sim.js·replayoverlay.js와 같은 예산
 const RING_MS = 320; // 도착 펄스 수명 — 선 끝이 노드에 닿는 순간에 묶여 있다
@@ -98,7 +98,7 @@ function nodePath(g, kind, x, y, r) {
 export function createInfluenceCanvas(opts = {}) {
   const {
     getModel, getLayout, getSelection, getCone, getPlay, getLoop, getHeat,
-    onSelect, onHover, onCaption,
+    onSelect, onHover, onCaption, onLayer,
   } = opts;
   let width = opts.width ?? 1180;
   let height = opts.height ?? 620;
@@ -137,6 +137,7 @@ export function createInfluenceCanvas(opts = {}) {
   let lastLayout = null;
   let structFor = null; // struct를 구울 때의 레이아웃 신원 — 선택이 바뀌어도 다시 굽지 않는다
   let lastCaption = "";
+  let lastLayer = "unset"; // 숫자·null과 안 겹치는 초기값 — 첫 프레임에 반드시 알린다
   let mounted = false;
   let activeCache = { key: null, layout: null, list: [] };
 
@@ -438,6 +439,16 @@ export function createInfluenceCanvas(opts = {}) {
         onCaption(text);
       }
     }
+    // 경로 패널 동기화 — 자막과 같은 절약 규약: 층이 바뀌는 프레임에만 알린다.
+    // 판정은 자막과 **같은 함수**(layerIndexAt)다 — 여기서 복제하면 경계가 어긋나도
+    // 칩과 자막이 각자 그럴듯해서 못 알아챈다. null = 선택 없음
+    if (onLayer) {
+      const li = cone ? layerIndexAt(play, t) : null;
+      if (li !== lastLayer) {
+        lastLayer = li;
+        onLayer(li);
+      }
+    }
   }
 
   function paintGlow(model, layout, cone, play, t, u, fade, tint, now) {
@@ -576,12 +587,8 @@ export function createInfluenceCanvas(opts = {}) {
     const show = new Set();
     if (sel) show.add(sel);
     if (hover) show.add(hover);
-    // 성운(방사형)에서는 상시 라벨을 달지 않는다 — 안쪽 링의 둘레가 라벨 폭을 감당하지
-    // 못해 지표 8개가 서로를 덮는다. 얽힘의 규모가 이 배치의 메시지이고, 이름은 hover가 맡는다
-    const alwaysLabel = layout.variant !== "radial";
     for (const nd of model.nodes) {
-      if (nd.kind === "plant") show.add(nd.id);
-      else if (alwaysLabel && (nd.kind === "metric" || nd.kind === "output")) show.add(nd.id);
+      if (nd.kind === "plant" || nd.kind === "metric" || nd.kind === "output") show.add(nd.id);
     }
     for (const id of show) {
       const nd = model.byId.get(id);
@@ -636,8 +643,7 @@ export function createInfluenceCanvas(opts = {}) {
       view.style.cursor = id ? "pointer" : "default";
       onHover?.(id);
       // 동작 축소에서는 타이머가 없어 다음 틱이 오지 않는다 — 커서는 pointer로
-      // 바뀌어 "여기 뭔가 있다"고 약속해 놓고 라벨은 영영 안 뜬다. 특히 성운(radial)은
-      // 상시 라벨이 없어 hover가 이름을 볼 유일한 수단이다 (select()와 같은 이유)
+      // 바뀌어 "여기 뭔가 있다"고 약속해 놓고 라벨은 영영 안 뜬다 (select()와 같은 이유)
       if (!timer) frame();
     }
   });
