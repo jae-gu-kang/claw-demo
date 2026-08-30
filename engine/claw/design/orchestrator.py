@@ -373,7 +373,9 @@ class DesignSession:
         actions = classify_failures(
             aircraft, self.points, self.lms, self.trims, self.sched_tables,
             design_eff, self.margin_out,
-            criteria=c.criteria, targets=c.targets,
+            # 튜너의 부호·브래킷은 **손설계 정본**에서 잡는다. design_eff(적합 상수가
+            # 덮인 값)를 쓰면 자유 게인 최적이 적합 결과에 끌려가 g_opt가 틀린다
+            criteria=c.criteria, design_base=self.design, targets=c.targets,
             tol_plant=c.refine_tol, tol_gain=c.tol_gain, **self._act_kw(),
         )
         cb(1, 1, "classify")

@@ -293,3 +293,44 @@ def test_gated_pause_is_deterministic(env):
     added = [p for p in s.points.by_role(ROLE_VALIDATION)
              if p.origin.startswith("add_validation")]
     assert len(added) == 2
+
+
+def test_classify_gets_the_hand_design_not_the_fitted_one(monkeypatch):
+    """오케스트레이터는 분류기에 **손설계 정본**을 함께 넘긴다.
+
+    분류기의 tune_point은 design에서 부호와 탐색 브래킷만 읽는다. 오케스트레이터가
+    넘기던 design_eff는 `{**손설계, **적합 상수}`라, 적합이 어떤 자리를 0으로 접으면
+    그 자리를 아예 안 켠 채로 "자유 게인 최적"을 내놓는다 — "게인으로 될 일인가"의
+    오판이다. 보간 게인 비교(scheduled_gains)는 그대로 design_eff를 써야 하므로
+    **둘 다** 넘어가야 한다.
+
+    분류기 자체는 대역한다 — 여기서 볼 것은 배선이다.
+    """
+    from claw.common.contracts import TrimCase
+    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, OperatingPoint, case_name
+    from claw.design import orchestrator as O
+
+    s = DesignSession(_small())
+    s.design = {"pitch.kp": -2.0, "roll.k_rate": -0.2}
+    s.sched_constants = {"roll.k_rate": 0.0}  # 적합이 이 자리를 0으로 접었다
+    for mach, role in ((0.3, ROLE_ANCHOR), (0.4, ROLE_VALIDATION)):
+        s.points.add(OperatingPoint(
+            case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
+                          alt=1000.0, fuel=200.0), role=role, origin="test"))
+    v = case_name(0.4, 1000.0, 200.0)
+    s.margin_out = {"cases": {v: {"role": "validation", "loops": {}}},
+                    "failures": [{"case": v, "loop": "pitch_att", "severity": 1.0}]}
+
+    seen = {}
+
+    def fake_classify(aircraft, points, lms, trims, tables, design, margin_out, **kw):
+        seen["design"] = design
+        seen["design_base"] = kw.get("design_base")
+        return []
+
+    monkeypatch.setattr(O, "classify_failures", fake_classify)
+    s._stage_classify(None, lambda *a: None)
+
+    assert seen["design_base"] == s.design, "손설계 정본이 안 넘어갔다"
+    assert seen["design"]["roll.k_rate"] == 0.0, "보간 비교 기준은 실효 설계값이어야 한다"
+    assert seen["design_base"]["roll.k_rate"] == -0.2

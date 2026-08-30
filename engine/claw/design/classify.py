@@ -47,7 +47,7 @@ _EPS = 1e-12
 _RELIEF_ACT_FACTOR = 3.0
 
 
-def _relief_probes(lm, design, loop_name, *, targets, criteria, act_kw) -> list:
+def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw) -> list:
     """지연·작동기 대역폭을 하나씩만 완화해 재튜닝 — 병목 지목의 실측 근거.
 
     structural_limit는 "게인으로는 안 된다"까지만 말한다. 그다음 질문인 "그럼 무엇을
@@ -71,7 +71,7 @@ def _relief_probes(lm, design, loop_name, *, targets, criteria, act_kw) -> list:
     for key, to_value, label in plan:
         kw = dict(act_kw)
         kw[key] = to_value
-        out = tune_point(lm, design, targets=targets, **kw)
+        out = tune_point(lm, design_base, targets=targets, **kw)
         judged = _tuned_judgement(out, loop_name, criteria)
         slot = out["slots"].get(loop_name, {})
         probes.append({
@@ -134,12 +134,29 @@ def _tuned_judgement(tune_out, loop_name, criteria) -> str:
 
 def classify_margin_deficit(
     aircraft, v_name, loop_name, points, lms, trims, tables, design, margin_cases, *,
-    criteria, targets=None, tol_plant=0.25, tol_gain=0.10,
+    criteria, design_base=None, targets=None, tol_plant=0.25, tol_gain=0.10,
     hysteresis_pm=5.0, hysteresis_gm=1.0, hysteresis_zeta=0.10,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
 ) -> dict:
-    """실패 (검증점, 자리) 하나의 원인 분류 — {"verdict", "action", "evidence"}."""
+    """실패 (검증점, 자리) 하나의 원인 분류 — {"verdict", "action", "evidence"}.
+
+    design vs design_base — **두 개가 필요하다**:
+    - `design`은 실효 설계값(오케스트레이터의 `{**손설계, **적합 상수}`)이고,
+      보간 게인 비교(`scheduled_gains`)의 기준이다.
+    - `design_base`는 **손설계 정본**이고, 튜너가 부호와 탐색 브래킷을 잡는 값이다
+      (`tune_point`은 design에서 그 둘만 읽는다: 브래킷 = 4×|k_design|).
+
+    둘을 하나로 쓰면 자유 게인 최적이 적합 결과에 끌려간다. 실측(데모 M0.3/h1000,
+    같은 플랜트·같은 목표, design만 다름): 손설계 브래킷은 roll.k_rate −0.592로
+    λ 12.00을 달성하는데, 적합이 −0.05로 접힌 값을 브래킷으로 쓰면 −0.200(정확히
+    천장 4×0.05)에서 λ 4.22로 끝난다 — **4.6배 틀린 g_opt**가 valley 괴리 계산과
+    승격 게인에 그대로 들어간다. 상수가 0.0이면 그 자리는 아예 건너뛰고 0.0을
+    "최적"이라 낸다.
+
+    생략하면 design을 쓴다 (직접 호출·테스트 편의 — 오케스트레이터는 늘 넘긴다).
+    """
     targets = targets if targets is not None else TuneTargets()
+    design_base = design if design_base is None else design_base
     tr = trims[v_name]
     lm = lms.get(aircraft, tr)
     entry = margin_cases[v_name]["loops"][loop_name]
@@ -160,7 +177,7 @@ def classify_margin_deficit(
     #    실패했거나 API로 직접 주입된 다항이면 여기로 온다
     if entry.get("sign_flip"):
         tune_out = tune_point(
-            lm, design, targets=targets,
+            lm, design_base, targets=targets,
             actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
             delay_s=delay_s, pade_order=pade_order,
         )
@@ -182,7 +199,7 @@ def classify_margin_deficit(
 
     # 1) 자유 게인 국소 최적 — structural_limit 판별의 근거
     tune_out = tune_point(
-        lm, design, targets=targets,
+        lm, design_base, targets=targets,
         actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
         delay_s=delay_s, pade_order=pade_order,
     )
@@ -200,7 +217,7 @@ def classify_margin_deficit(
     if slot.get("status") == "infeasible" or tuned_status == "fail":
         wcp = (entry.get("wcp") or entry.get("wc") or 0.0)
         relief = _relief_probes(
-            lm, design, loop_name, targets=targets, criteria=criteria,
+            lm, design_base, loop_name, targets=targets, criteria=criteria,
             act_kw=dict(actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
                         delay_s=delay_s, pade_order=pade_order),
         )
@@ -300,7 +317,7 @@ def classify_margin_deficit(
 
 def classify_failures(
     aircraft, points, lms, trims, tables, design, margin_out, *,
-    criteria, targets=None, tol_plant=0.25, tol_gain=0.10,
+    criteria, design_base=None, targets=None, tol_plant=0.25, tol_gain=0.10,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
 ) -> list:
     """마진맵 결과의 fail 목록 전체 분류 — 처방 카드 목록 (심각 순, id 부여).
@@ -308,9 +325,12 @@ def classify_failures(
     같은 점의 여러 자리 실패는 각각 분류하되, 같은 점에 상위 승격이 이미 나왔으면
     하위 처방은 중복이라 supersede로 표시한다 (같은 점을 두 번 승격할 수 없다 —
     points.promote 래칫).
+
+    design_base(손설계 정본)를 함께 넘긴다 — 이유는 classify_margin_deficit 참조.
     """
     kw = dict(
-        criteria=criteria, targets=targets, tol_plant=tol_plant, tol_gain=tol_gain,
+        criteria=criteria, design_base=design_base, targets=targets,
+        tol_plant=tol_plant, tol_gain=tol_gain,
         actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
         delay_s=delay_s, pade_order=pade_order,
     )

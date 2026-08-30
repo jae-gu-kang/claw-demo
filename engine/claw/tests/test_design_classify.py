@@ -289,3 +289,41 @@ def test_relief_probe_resolves_is_slot_scoped(monkeypatch):
     assert all(p["resolves"] for p in probes), (
         "이 자리를 고친 완화가 다른 축 때문에 '미달'로 보고됐다")
     assert all(p["status"] == "ok" for p in probes)
+
+
+def test_free_gain_optimum_uses_the_hand_design_bracket():
+    """자유 게인 최적은 **손설계 정본**에서 부호·브래킷을 잡아야 한다.
+
+    tune_point은 design에서 그 둘만 읽는다. 오케스트레이터가 분류기에 넘기던 것은
+    `{**손설계, **적합 상수}`라, 적합이 접은 값이 곧 탐색의 출발점이 됐다.
+
+    브래킷 **크기** 차이는 이제 확장(_first_reach_bisect, 최대 256배)이 흡수한다 —
+    같은 최적을 찾아낸다. 남은 노출은 **0**이다: 설계값 0인 자리는 방향 정보가 없어
+    튜너가 통째로 건너뛰고(REASON_ZERO_DESIGN) 0.0을 "자유 게인 최적"이라 낸다.
+    4×0 = 0이라 확장으로도 못 산다. 적합이 부호 가드 폴백으로 상수를 내거나 스케줄
+    자리가 비면 실제로 0이 온다.
+    """
+    from claw.design.tune import REASON_ZERO_DESIGN
+
+    ac, points, lms, trims = _setup((0.25, 0.3, 0.35), v_mach=0.3)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.3, 0.25, 0.35))
+    design = demo_design_gains()
+    ref = tune_point(lms.get(ac, trims[v]), design, **ACT)  # 손설계 정본의 정답
+    assert ref["slots"]["roll_rate"]["status"] == "ok"
+
+    zeroed = {**design, "roll.k_rate": 0.0}  # 적합이 이 자리를 0으로 접은 상황
+    kw = dict(criteria=MarginCriteria(), tol_plant=99.0, **ACT)
+    cases = _fail_cases(v, lo, hi, loop="roll_att")
+    out = classify_margin_deficit(ac, v, "roll_att", points, lms, trims, {}, zeroed,
+                                  cases, design_base=design, **kw)
+    got = out["evidence"]["tuned"]["achieved"]
+    assert got["pm_deg"] == pytest.approx(ref["achieved"]["roll_att"]["pm_deg"]), (
+        "분류기의 자유 게인 최적이 TUNE과 다르다 — 탐색이 적합 상수에 끌려갔다")
+
+    # design_base 없이 부르면 종전 동작 — 롤 댐퍼가 아예 안 켜진 채로 "최적"을 낸다.
+    # 이 단정이 무너지면 두 경로가 같아진 것이므로 이 테스트가 판별력을 잃은 것이다
+    stale = classify_margin_deficit(ac, v, "roll_att", points, lms, trims, {}, zeroed,
+                                    cases, **kw)
+    assert stale["evidence"]["tuned"]["reason"] != REASON_ZERO_DESIGN  # 자세 자리는 살아 있고
+    assert stale["evidence"]["tuned"]["achieved"]["pm_deg"] != pytest.approx(
+        got["pm_deg"], rel=1e-6), "브래킷 차이가 결과를 안 바꾼다 — 판별력 없는 테스트"
