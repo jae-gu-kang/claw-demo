@@ -31,13 +31,92 @@ def test_judge_inf_passes():
     assert c.judge({"pm_deg": 60.0, "gm_db": float("inf")}) == "ok"
 
 
-def test_deficit():
+def test_shortfall_reports_requirement_not_just_achieved():
     c = MarginCriteria()
-    d = c.deficit({"pm_deg": 40.0, "gm_db": 4.0})
-    assert d["pm_deg"] == pytest.approx(5.0)
-    assert d["gm_db"] == pytest.approx(2.0)
-    d2 = c.deficit({"pm_deg": 60.0, "gm_db": float("inf")})
-    assert d2["pm_deg"] < 0 and d2["gm_db"] == 0.0
+    sf = c.shortfall({"pm_deg": 40.0, "gm_db": 4.0})
+    assert sf["pm_deg"] == {"required": 45.0, "achieved": 40.0,
+                            "deficit": pytest.approx(5.0),
+                            "deficit_frac": pytest.approx(5.0 / 45.0)}
+    assert sf["gm_db"]["deficit_frac"] == pytest.approx(2.0 / 6.0)
+    # 여유는 음수 부족 — 통과한 자리도 "얼마나 여유인지"가 같은 필드로 나온다
+    assert c.shortfall({"pm_deg": 60.0, "gm_db": 12.0})["pm_deg"]["deficit"] < 0
+
+
+def test_shortfall_nan_is_none_not_zero():
+    """교차 없음(nan)을 부족 0으로 두면 "판정 불가"가 "부족 없음"과 같아진다.
+
+    종전 deficit()이 그랬다: `pm - self.pm_min_deg if isfinite else 0.0`. 그러면
+    분류기의 히스테리시스 판정에서 nan 자리가 조용히 "밴드 안"으로 들어가 확대
+    경고가 안 붙고, 원장에는 부족 0인 실패로 실린다.
+    """
+    c = MarginCriteria()
+    rec = c.shortfall({"pm_deg": float("nan"), "gm_db": 4.0})["pm_deg"]
+    assert rec["deficit"] is None and rec["deficit_frac"] is None
+    assert rec["achieved"] is None and rec["required"] == 45.0
+
+
+def test_shortfall_picks_metrics_from_entry_shape():
+    """자리 종류마다 담는 키가 다르다 — 없는 지표를 지어내지 않는다."""
+    c = MarginCriteria()
+    assert set(c.shortfall({"kind": "margin", "pm_deg": 40.0, "gm_db": 4.0})) == {
+        "pm_deg", "gm_db"}
+    # 감쇠 자리는 이름이 셋 (schedmap "zeta", tune achieved "zeta_sp"/"zeta_dr")
+    assert set(c.shortfall({"kind": "damping", "zeta": 0.2})) == {"zeta"}
+    assert c.shortfall({"zeta_dr": 0.15})["zeta_dr"]["required"] == 0.30
+    # λ만 요구선이 그 실행의 튜닝 목표에서 온다 — target이 없으면 지표를 안 낸다
+    assert c.shortfall({"kind": "bandwidth", "roll_lambda": 3.0}) == {}
+    lam = c.shortfall({"kind": "bandwidth", "roll_lambda": 3.0, "target": 12.0})
+    assert lam["roll_lambda"]["required"] == pytest.approx(6.0)  # 12 × lam_min_frac
+    assert lam["roll_lambda"]["deficit"] == pytest.approx(3.0)
+
+
+def test_severity_orders_by_shortage_fraction_not_absolute_units():
+    """자리 종류가 섞인 목록을 한 축에서 세운다 — 이 정렬이 곧 분류기의 작업 순서다.
+
+    종전 축(PM은 도 그대로, ζ는 ×90)은 ×90 환산이 감쇠 부족을 과대평가해 **순서를
+    뒤집었다**: PM 35°는 축에서 35.0, ζ 0.28은 25.2라 감쇠가 더 심각하게 섰다.
+    실제로는 PM이 요구선의 22%를, 감쇠는 6.7%를 모자란다.
+    """
+    c = MarginCriteria()
+    pm = c.severity({"kind": "margin", "pm_deg": 35.0, "gm_db": 12.0})
+    zeta = c.severity({"kind": "damping", "zeta": 0.28})
+    assert pm > zeta, "부족이 훨씬 큰 위상여유가 뒤로 밀렸다 — 절대 축으로 되돌아갔다"
+    assert pm == pytest.approx(10.0 / 45.0)  # 크기도 실제 부족 비율이다
+    assert zeta == pytest.approx(0.02 / 0.30)
+    # 종전 축이 앞세우던 순서 (이 값들이 옛 정렬 키다 — 25.2 < 35.0이라 ζ가 먼저였다)
+    assert 0.28 * 90.0 < 35.0
+    # 잴 지표가 하나도 없으면 +inf — "얼마나 나쁜지 모른다"가 목록 맨 앞이다
+    assert c.severity({"kind": "margin", "pm_deg": float("nan"),
+                       "gm_db": float("nan")}) == float("inf")
+    assert c.severity({"kind": "bandwidth", "roll_lambda": 1.0}) == float("inf")
+
+
+def test_judge_bandwidth_uses_target_and_rejects_divergent_root():
+    """λ는 목표 대비 비율로 재고, 발산근이면 수치와 무관하게 fail.
+
+    closure.lat_metrics의 λ = max|Re|는 부호를 지운다 — 발산근 +12 rad/s가 "목표 12
+    달성"으로 보인다. 튜너는 댐퍼 안정 캡이 거르지만 검증에는 그 게이트가 없어서
+    이 인자가 유일한 방어다.
+    """
+    c = MarginCriteria()  # lam_min_frac 0.5, lam_good_frac 0.8
+    assert c.judge_bandwidth(12.0, 12.0) == "ok"
+    assert c.judge_bandwidth(7.0, 12.0) == "warn"
+    assert c.judge_bandwidth(5.9, 12.0) == "fail"
+    # 경계 포함(≥가 통과)은 곱이 정확히 표현되는 목표에서 잰다 — 0.8×12는 부동소수로
+    # 9.600000000000001이라 9.6이 경계 아래로 떨어진다. 판정선이 절대 상수가 아니라
+    # 곱이라 생기는 성질이고, 실제로도 목표 근처 1e-15는 구분할 일이 아니다
+    assert c.judge_bandwidth(8.0, 10.0) == "ok"  # 0.8×10 = 8.0 정확
+    assert c.judge_bandwidth(5.0, 10.0) == "warn"  # 0.5×10 = 5.0 정확 (합격선 포함)
+    assert c.judge_bandwidth(12.0, 12.0, unstable=True) == "fail"
+    assert c.judge_bandwidth(float("nan"), 12.0) == "na"
+    assert c.judge_bandwidth(12.0, 0.0) == "na"  # 목표가 없으면 잴 자가 없다
+
+
+def test_lam_fracs_ordering_rejected():
+    with pytest.raises(ValueError):
+        MarginCriteria(lam_min_frac=0.9, lam_good_frac=0.5)
+    with pytest.raises(ValueError):
+        MarginCriteria(lam_good_frac=1.5)
 
 
 def test_invalid_ordering_rejected():

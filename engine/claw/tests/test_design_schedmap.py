@@ -272,3 +272,39 @@ def test_sign_flip_fails_even_with_healthy_margin(setup):
     # 부호가 맞으면 그대로 통과 — 검사가 무조건 fail을 내는 것이 아니다
     ok = scheduled_margin_point(lm, {}, design, case, criteria=MarginCriteria())
     assert "sign_flip" not in ok["pitch_att"]
+
+
+def test_failures_are_ordered_worst_first_across_slot_kinds():
+    """실패 목록은 **부족 비율이 큰 것부터**다 — 이 순서가 곧 분류기의 작업 목록.
+
+    자리 종류가 섞이므로(마진 자리는 PM·GM, 감쇠 자리는 ζ) 절대 단위로는 한 줄에
+    못 세운다. 종전 축(PM은 도 그대로, ζ는 ×90)은 ×90 환산이 감쇠 부족을 과대평가해
+    **순서를 뒤집었다**: PM 35°가 축에서 35.0, ζ 0.28이 25.2라 6.7% 모자란 감쇠가
+    22% 모자란 위상여유보다 앞에 섰다. 여기서는 둘 다 요구선 대비 비율로 잰다.
+
+    잴 지표가 없는 실패(전 지표 nan)는 +inf라 맨 앞이다 — "얼마나 나쁜지 모른다"를
+    맨 뒤로 보내면 예산이 끊길 때 가장 안 보이는 자리가 조용히 남는다.
+    """
+    from claw.design.schedmap import _worst_failures
+
+    cases = {
+        "shallow_zeta": {"loops": {"yaw_rate": {  # 0.30 대비 6.7% 부족 (옛 축 25.2)
+            "kind": "damping", "zeta": 0.28, "status": "fail"}}},
+        "deep_pm": {"loops": {"pitch_att": {  # 45 대비 22% 부족 (옛 축 35.0)
+            "kind": "margin", "pm_deg": 35.0, "gm_db": 12.0, "status": "fail"}}},
+        "worst_pm": {"loops": {"roll_att": {
+            "kind": "margin", "pm_deg": 10.0, "gm_db": 12.0, "status": "fail"}}},
+        "unmeasurable": {"loops": {"roll_att": {
+            "kind": "margin", "pm_deg": float("nan"), "gm_db": float("nan"),
+            "status": "fail"}}},
+        # 엔벨로프 밖은 목록에 아예 안 든다 (처방이 듣지 않는 점)
+        "outside": {"outside_envelope": True, "loops": {"pitch_att": {
+            "kind": "margin", "pm_deg": 1.0, "gm_db": 1.0, "status": "fail"}}},
+    }
+    out = _worst_failures(cases, MarginCriteria())
+    assert [f["case"] for f in out] == [
+        "unmeasurable", "worst_pm", "deep_pm", "shallow_zeta"]
+    # 부족량 레코드를 함께 실어 분류기·원장이 다시 계산하지 않게 한다
+    deep = next(f for f in out if f["case"] == "deep_pm")
+    assert deep["shortfall"]["pm_deg"]["required"] == 45.0
+    assert deep["shortfall"]["pm_deg"]["deficit"] == pytest.approx(10.0)

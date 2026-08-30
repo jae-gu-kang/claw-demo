@@ -83,6 +83,37 @@ def _relief_probes(lm, design, loop_name, *, targets, criteria, act_kw) -> list:
     return probes
 
 
+_LABEL = {"pm_deg": ("PM", "°"), "gm_db": ("GM", " dB"), "zeta": ("ζ", ""),
+          "zeta_sp": ("ζ_sp", ""), "zeta_dr": ("ζ_dr", ""), "roll_lambda": ("λ", " rad/s")}
+# λ의 히스테리시스만 절대값이 아니라 요구선 비율이다 [기본값] — λ 요구는 실행마다
+# 다른 튜닝 목표에서 오므로(criteria.shortfall) 고정 폭이 뜻을 갖지 못한다.
+_LAM_HYST_FRAC = 0.10
+
+
+def _deficit_note(shortfall, hyst_pm, hyst_gm, hyst_zeta) -> str | None:
+    """부족이 히스테리시스 밴드를 넘은 지표를 한 줄로 — 넘은 게 없으면 None.
+
+    종전에는 PM만 봤다: GM 부족은 criteria가 계산해 놓고도 버려졌고(그래서 GM만
+    모자란 점은 밴드를 아무리 넘어도 "지속 시 재분류" 경고가 안 붙었다), ζ는 헬퍼를
+    안 거쳐 제 식으로 뺐다. 셋 다 같은 자로 재고 **넘은 것을 모두** 적는다 —
+    한 자리에서 두 지표가 동시에 모자란 것이 흔하다.
+    """
+    bands = {"pm_deg": hyst_pm, "gm_db": hyst_gm,
+             "zeta": hyst_zeta, "zeta_sp": hyst_zeta, "zeta_dr": hyst_zeta}
+    over = []
+    for key, rec in shortfall.items():
+        band = bands.get(key)
+        if band is None and key == "roll_lambda":
+            band = _LAM_HYST_FRAC * rec["required"]
+        if band is None or rec["deficit"] is None or rec["deficit"] <= band:
+            continue
+        label, unit = _LABEL.get(key, (key, ""))
+        over.append(f"{label} 부족 {rec['deficit']:.3g}{unit} (밴드 {band:.3g})")
+    if not over:
+        return None
+    return " · ".join(over) + " — 히스테리시스 초과, 지속 시 재분류 예상"
+
+
 def _tuned_judgement(tune_out, loop_name, criteria) -> str:
     """v에서의 자유 게인 최적 결과 판정 — 자리 종류에 맞는 자로 잰다."""
     ach = tune_out["achieved"].get(loop_name)
@@ -101,7 +132,7 @@ def _tuned_judgement(tune_out, loop_name, criteria) -> str:
 def classify_margin_deficit(
     aircraft, v_name, loop_name, points, lms, trims, tables, design, margin_cases, *,
     criteria, targets=None, tol_plant=0.25, tol_gain=0.10,
-    hysteresis_pm=5.0, hysteresis_zeta=0.10,
+    hysteresis_pm=5.0, hysteresis_gm=1.0, hysteresis_zeta=0.10,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
 ) -> dict:
     """실패 (검증점, 자리) 하나의 원인 분류 — {"verdict", "action", "evidence"}."""
@@ -109,8 +140,15 @@ def classify_margin_deficit(
     tr = trims[v_name]
     lm = lms.get(aircraft, tr)
     entry = margin_cases[v_name]["loops"][loop_name]
-    evidence: dict = {"current": {k: entry.get(k) for k in
-                                  ("pm_deg", "gm_db", "zeta", "wc_att", "status")}}
+    evidence: dict = {
+        "current": {k: entry.get(k) for k in
+                    ("pm_deg", "gm_db", "zeta", "roll_lambda", "wcg", "wcp",
+                     "orientation", "status")},
+        # 요구 대비 부족을 **모든 verdict에** 싣는다 — 종전엔 simple_deficit의 note
+        # 문자열로만 잠깐 쓰이고 버려져, 화면이 "현재 PM 38.2°"만 말하고 요구선도
+        # 부족량도 못 냈다
+        "shortfall": criteria.shortfall(entry),
+    }
 
     # 0) 부호 뒤집힘 — 원인이 이미 확정된 경우다. 격자도 보간 valley도 아니고
     #    **적합이 설계 부호를 넘긴 것**이라, 앵커를 늘려도 다항이 다시 0을 가로지른다
@@ -241,14 +279,9 @@ def classify_margin_deficit(
             }
 
     # 4) 나머지 — 검증점 추가 (히스테리시스 밴드 밖이면 note로 확대 경고)
-    deficit_note = None
-    if entry.get("kind") == "margin" and entry.get("pm_deg") is not None:
-        d = criteria.deficit(entry)
-        if d["pm_deg"] > hysteresis_pm:
-            deficit_note = f"PM 부족 {d['pm_deg']:.1f}°가 히스테리시스({hysteresis_pm}°) 초과 — 지속 시 재분류 예상"
-    elif entry.get("zeta") is not None:
-        if criteria.zeta_min - entry["zeta"] > hysteresis_zeta:
-            deficit_note = "ζ 부족이 히스테리시스 초과 — 지속 시 재분류 예상"
+    deficit_note = _deficit_note(
+        evidence["shortfall"], hysteresis_pm, hysteresis_gm, hysteresis_zeta
+    )
     return {
         "verdict": "simple_deficit",
         "action": {"type": "add_validation", "point": v_name, "note": deficit_note},

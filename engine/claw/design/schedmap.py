@@ -28,8 +28,6 @@ closure 조성(closure.py) × pi_loop 전체 조성(작동기 2차계 + Padé �
 
 import math
 
-import numpy as np
-
 from claw.common.contracts import TrimCase
 from claw.design.closure import (
     AXIS_SPECS,
@@ -247,21 +245,16 @@ def scheduled_margin_map(
         "aborted": aborted,
         "criteria": criteria.to_dict(),
         "criteria_fingerprint": criteria.fingerprint(),
-        "failures": _worst_failures(cases),
+        "failures": _worst_failures(cases, criteria),
     }
 
 
-def _severity(entry: dict) -> float:
-    """fail 항목의 처리 순서 키 — 작을수록 심각. 마진 자리는 PM, 감쇠 자리는 ζ×90
-    (0.3 합격선 ≈ 27 '도 상당' — 자리 종류가 섞여도 한 줄로 세우기 위한 근사 축)."""
-    if "pm_deg" in entry:
-        pm = entry["pm_deg"]
-        return pm if np.isfinite(pm) else -np.inf
-    return entry.get("zeta", 0.0) * 90.0
-
-
-def _worst_failures(cases: dict) -> list:
+def _worst_failures(cases: dict, criteria) -> list:
     """fail 판정 (점, 자리) 목록 — 심각 순. 분류기(classify)의 작업 목록.
+
+    심각도는 `criteria.severity` — 요구선 대비 **부족 비율**이라 자리 종류(PM·GM·
+    ζ·λ)가 섞여도 한 축에서 비교된다. 크기가 곧 심각도이므로 내림차순이다.
+    부족량 레코드(shortfall)를 함께 실어 분류기·원장이 다시 계산하지 않게 한다.
 
     엔벨로프 밖(포화·α 여유 미달) 점은 제외한다 — 그 점의 fail에는 반영해도 듣지
     않는 처방밖에 낼 수 없다(위 outside_envelope 주석). 목록이 곧 작업 목록이므로
@@ -276,6 +269,8 @@ def _worst_failures(cases: dict) -> list:
                 out.append({
                     "case": name, "loop": loop_name, "kind": m.get("kind"),
                     "pm_deg": m.get("pm_deg"), "gm_db": m.get("gm_db"),
-                    "zeta": m.get("zeta"), "severity": _severity(m),
+                    "zeta": m.get("zeta"), "roll_lambda": m.get("roll_lambda"),
+                    "shortfall": criteria.shortfall(m),
+                    "severity": criteria.severity(m),
                 })
-    return sorted(out, key=lambda f: f["severity"])
+    return sorted(out, key=lambda f: f["severity"], reverse=True)
