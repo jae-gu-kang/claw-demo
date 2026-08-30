@@ -42,7 +42,7 @@ from claw.design.points import (
 )
 from claw.design.refine import refine_trim_points
 from claw.design.schedmap import midpoint_validation_points, scheduled_margin_map
-from claw.design.tune import TuneTargets, tune_points
+from claw.design.tune import REASON_TEXT, TuneTargets, tune_points
 from claw.env import isa_atmosphere
 from claw.tables import PolyTable, Table
 
@@ -54,6 +54,12 @@ _MAX_SEGMENTS_CAP = 8  # fit_slots 계약 상한 (AutoDesignConfig 검증과 동
 # 처방을 반영한 뒤 판정이 이만큼도 안 움직이면 "안 바뀌었다"로 본다 (부족 비율)
 _EFFECT_EPS = 1e-3
 _SEAL_AFTER = 2  # 연속 무효 횟수 — 이 이상이면 그 (점, 자리, verdict)를 봉인한다
+# 점 예산 중 **보간 구간 검증점 몫**. REFINE이 앵커로 예산을 다 태우면 VERIFY의
+# 중점 검증점이 한 개도 못 들어가고, 그러면 "스케줄 인지 검증"이 이름만 남는다 —
+# 판정된 자리가 전부 자기 게인이 직접 튜닝된 앵커가 되기 때문이다. 실측: 큰 격자
+# (예산 60)에서 요구 60개 중 0개, 기본 테스트 설정(예산 24)에서도 21개 중 2개만
+# 들어갔다. REFINE에 예산을 다 주지 않고 이 비율만큼 남긴다 [기본값]
+_VALIDATION_RESERVE_FRAC = 0.25
 
 
 @dataclass
@@ -269,6 +275,11 @@ class DesignSession:
         # 예산을 태우는 것을 아무도 모른다. ineffective는 {봉인키: 연속 무효 횟수}
         self.applied_log: list = []
         self.ineffective: dict = {}
+        # 검증 커버리지 — "무엇을 안 봤는가". converged가 거짓말하지 않으려면
+        # 실패 수만큼이나 이 수치가 보고에 있어야 한다
+        self.refine_report: dict = {}
+        self.validation_wanted = 0
+        self.validation_added = 0
         self.stage = "COARSE"
         self.status = "running"
         self.iter_n = 0
@@ -300,11 +311,18 @@ class DesignSession:
 
     def _stage_refine(self, aircraft, fingerprint, cb):
         c = self.config
+        # 예산을 다 주지 않는다 — 보간 구간 검증점 몫을 남긴다 (위 상수 주석).
+        # 하한은 현 점 수 + 1이라, 이미 예산 근처인 재개 경로에서도 음수가 안 된다
+        refine_budget = max(len(self.points) + 1,
+                            int(c.budget_points * (1.0 - _VALIDATION_RESERVE_FRAC)))
         report = refine_trim_points(
             aircraft, self.points, self.lms, self.trims,
-            tol=c.refine_tol, max_points=c.budget_points,
+            tol=c.refine_tol, max_points=refine_budget,
             fingerprint=fingerprint, on_progress=lambda d, t, m: cb(d, t, m),
         )
+        self.refine_report = {k: report[k] for k in
+                              ("inserted", "aborted", "max_d_remaining")}
+        self.refine_report["budget"] = refine_budget
         self.iterations.append({"n": self.iter_n, "stage": "REFINE", "report": {
             k: report[k] for k in ("inserted", "gaps", "aborted", "max_d_remaining")
         }})
@@ -325,6 +343,10 @@ class DesignSession:
         self.tune_meta = {
             "skipped": out["skipped"],
             "status": {n: r["status"] for n, r in out["results"].items()},
+            # 자리별 판정 레코드 — 원장이 "튜닝이 설계 목표를 못 채운 자리"를 낼 수
+            # 있으려면 이게 있어야 한다. 종전에는 점 단위 status와 산문 notes뿐이라,
+            # **자동 튜닝이 무엇을 얼마나 달성했는지가 결과 JSON에 없었다**
+            "slots": {n: r["slots"] for n, r in out["results"].items()},
             "notes": {n: r["notes"] for n, r in out["results"].items() if r["notes"]},
         }
         self.stage = "FIT"
@@ -370,10 +392,15 @@ class DesignSession:
 
     def _stage_verify(self, aircraft, fingerprint, cb):
         c = self.config
-        for pt in midpoint_validation_points(self.points):
+        wanted = midpoint_validation_points(self.points)
+        self.validation_wanted = len(wanted)
+        added = 0
+        for pt in wanted:
             if len(self.points) >= c.budget_points:
-                break
+                break  # 예산 소진 — 아래 coverage가 몇 개를 못 넣었는지 보고한다
             self.points.add(pt)
+            added += 1
+        self.validation_added = added
         design_eff = {**self.design, **self.sched_constants}
         out = scheduled_margin_map(
             aircraft, self.points, self.lms, self.sched_tables, design_eff,
@@ -410,6 +437,153 @@ class DesignSession:
             for m in entry.get("loops", {}).values()
             if m.get("status") in ("ok", "warn", "fail")
         )
+
+    def not_trimmed_count(self) -> int:
+        """트림이 안 돼 아무것도 못 본 점 수 — loops가 빈 케이스.
+
+        이 점들은 failures에도 judged에도 안 잡힌다. 유일한 흔적이 judged가 조용히
+        줄어드는 것인데, 기대값을 모르면 그 수가 정상인지 못 본 것인지 구별할 수 없다.
+        """
+        return sum(1 for e in self.margin_out.get("cases", {}).values()
+                   if not e.get("loops"))
+
+    def coverage(self) -> dict:
+        """이 실행이 **무엇을 안 봤는가** — 실패 수만큼 중요한 수치.
+
+        판정 수(judged)가 커도 그 전량이 자기 게인이 직접 튜닝된 앵커면, 스케줄이
+        breakpoint 사이에서 무너지는지는 한 번도 안 본 것이다. 그런데 종전 보고에는
+        검증점 수도, REFINE이 남긴 플랜트 거리도, 트림 미수렴 수도 없었다.
+
+        검증점 수는 **점집합 실물**로 센다 — 스테이지 카운터로 세면 VERIFY가 여러 번
+        도는 이터레이션에서 마지막 패스 값만 남는다 (실측: 1차에서 15개를 넣고
+        2차에서 예산 소진으로 0개를 넣었는데 보고가 0으로 나왔다). midpoint 유래
+        점은 나중에 breakpoint·anchor로 승격돼도 그 구간을 검증한 사실은 그대로다.
+        """
+        rr = self.refine_report
+        return {
+            "validation_points": sum(
+                1 for p in self.points if str(p.origin).startswith("midpoint:")),
+            "validation_missing": max(0, self.validation_wanted - self.validation_added),
+            "refine_remaining": rr.get("max_d_remaining"),
+            "refine_tol": self.config.refine_tol,
+            "refine_aborted": rr.get("aborted"),
+            "not_trimmed": self.not_trimmed_count(),
+        }
+
+    def coverage_gaps(self) -> list:
+        """커버리지 공백을 한국어 한 줄씩 — 비어 있지 않으면 "수렴"이 반쪽이다."""
+        cov = self.coverage()
+        out = []
+        got, missing = cov["validation_points"], cov["validation_missing"]
+        if got == 0 and missing:
+            out.append(
+                f"보간 구간 검증점이 한 개도 없다 (요구 {missing}개가 점 예산"
+                f" {self.config.budget_points} 소진으로 못 들어갔다) — 판정된 자리가"
+                " 전부 자기 게인이 직접 튜닝된 앵커다. 스케줄이 breakpoint 사이에서"
+                " 무너지는지는 보지 않았다"
+            )
+        elif missing:
+            out.append(
+                f"보간 구간 {missing}개가 검증점 없이 남았다 (점 예산 소진, 검증된"
+                f" 구간은 {got}개) — 그 구간의 스케줄은 보지 않았다"
+            )
+        rem, tol = cov["refine_remaining"], cov["refine_tol"]
+        if rem is not None and tol and rem > tol:
+            out.append(
+                f"트림 격자 세분화가 허용치 전에 끊겼다 (남은 플랜트 거리 {rem:.3g} >"
+                f" 허용 {tol:g}, 사유 {cov['refine_aborted'] or '미상'}) — 그 구간의"
+                " 플랜트 변화는 격자가 담지 못한다"
+            )
+        if cov["not_trimmed"]:
+            out.append(
+                f"트림 미수렴 점 {cov['not_trimmed']}개는 아무것도 보지 못했다 —"
+                " 실패 목록에도 판정 수에도 들어가지 않는다"
+            )
+        return out
+
+    def shortfall_ledger(self) -> list:
+        """미달 원장 — 이 실행이 **못 맞춘 것 전부**를 한 목록으로.
+
+        종전에는 처방 카드가 붙은 실패만 화면에 나왔다. 그런데 실제로 못 맞춘 것의
+        대부분은 처방이 안 나오는 것들이다: 자동 튜닝이 설계 목표를 못 채운 자리
+        (합격선은 넘길 수 있어 실패가 아니다), 판정 불가(na), 엔벨로프 경계, 튜닝을
+        건너뛴 점, 트림 미수렴 점, 그리고 **반영했는데 판정이 안 움직인 처방**.
+        이것들이 한 표에 모여야 "무엇이 안 됐고 얼마나 모자라는가"를 볼 수 있다.
+
+        정렬은 severity(요구선 대비 부족 비율) 내림차순이고 **측정 불가가 맨 앞**이다 —
+        criteria.severity와 같은 규약("얼마나 나쁜지 모른다"가 목록 맨 앞).
+        """
+        cr = self.config.criteria
+        cases = self.margin_out.get("cases", {})
+        rows: list = []
+
+        def add(point, loop, kind, note, *, entry=None, **extra):
+            sev = cr.severity(entry) if entry else None
+            row = {
+                "point": point, "loop": loop, "kind": kind, "note": note,
+                "status": (entry or {}).get("status"),
+                "severity": None if sev is None or not math.isfinite(sev) else sev,
+                "shortfall": cr.shortfall(entry) if entry else {},
+                "target": (entry or {}).get("target"),
+                "reason": None, "action": None,
+            }
+            row.update(extra)
+            rows.append(row)
+
+        # ① 검증에서 통과하지 못한 자리 (fail·warn·na 전부 — warn도 목표 미달이다)
+        by_action = {(a.get("case"), a.get("loop")): a for a in self.actions}
+        for name, case in cases.items():
+            if not case.get("loops"):
+                add(name, None, "not_trimmed",
+                    case.get("note") or "트림 미수렴 — 이 점은 아무것도 보지 못했다")
+                continue
+            outside = bool(case.get("outside_envelope"))
+            for loop, m in case["loops"].items():
+                st = m.get("status")
+                if st == "ok":
+                    continue
+                a = by_action.get((name, loop))
+                add(name, loop,
+                    "outside_envelope" if outside else
+                    ("unjudged" if st in (None, "na") else "verify"),
+                    case.get("note") if outside else m.get("note"),
+                    entry=m,
+                    action=None if a is None else {
+                        "id": a.get("id"), "verdict": a.get("verdict"),
+                        "type": a.get("action", {}).get("type"),
+                        "applied": bool(a.get("applied")),
+                        "changed": (a.get("effect") or {}).get("changed"),
+                        "sealed": a.get("sealed"),
+                    })
+
+        # ② 자동 튜닝이 설계 목표를 못 채운 자리 — 검증에서 합격선을 넘기면 실패
+        #    목록에 안 나오지만, "목표를 못 맞췄다"는 사실 자체가 보고 대상이다
+        for name, slots in (self.tune_meta.get("slots") or {}).items():
+            for loop, rec in slots.items():
+                if rec.get("status") == "ok":
+                    continue
+                add(name, loop, "tune", REASON_TEXT.get(rec.get("reason")),
+                    reason=rec.get("reason"), status=rec.get("status"),
+                    target=rec.get("target"), achieved=rec.get("achieved"))
+        for name in self.tune_meta.get("skipped", ()):
+            add(name, None, "skipped",
+                "튜닝을 건너뛴 점 — 트림 미수렴이거나 엔벨로프 경계다 (게인 샘플이 없다)")
+
+        # ③ 반영했는데 판정이 안 움직인 처방
+        for rec in self.applied_log:
+            if rec["effect"].get("changed") is not False:
+                continue
+            add(rec["case"], rec["loop"], "ineffective",
+                f"{rec['verdict']} 처방을 반영했으나 판정이 움직이지 않았다"
+                f" (이터 {rec['iter']}) — 이 자리에서는 이 처방이 듣지 않는다",
+                action={"id": rec["id"], "verdict": rec["verdict"],
+                        "type": rec["type"], "applied": True, "changed": False,
+                        "sealed": None})
+
+        # 측정 불가(None)가 맨 앞, 그 뒤로 부족 비율 내림차순
+        rows.sort(key=lambda r: (0 if r["severity"] is None else 1,
+                                 -(r["severity"] or 0.0)))
+        return rows
 
     def outside_envelope_count(self) -> int:
         """마진은 냈으나 엔벨로프 밖이라 판정·처방에서 뺀 점 수 — 조용한 제외 금지."""
@@ -649,6 +823,12 @@ class DesignSession:
             if self.gain_samples else 0,
             "skipped": list(self.tune_meta.get("skipped", ())),
             "escalations": len(self.escalations),
+            # 이 실행이 **무엇을 안 봤는가** — 실패 0이 곧 통과가 아닌 두 번째 이유다
+            # (첫 번째는 judged: 아무것도 판정 안 한 실행). 공백이 있으면 "수렴"은
+            # 앵커에서만 성립한 것이고, 화면이 그렇게 말해야 한다
+            "coverage": self.coverage(),
+            "coverage_gaps": self.coverage_gaps(),
+            "ledger_size": len(self.shortfall_ledger()),
             # 반영했는데 판정이 안 움직인 처방 수 — "처방을 냈다"와 "고쳤다"는 다르다
             "ineffective_actions": sum(
                 1 for r in self.applied_log if r["effect"].get("changed") is False),
@@ -673,6 +853,9 @@ class DesignSession:
             "fit_tighten": self.fit_tighten,
             "applied_log": self.applied_log,
             "ineffective": dict(self.ineffective),
+            "refine_report": dict(self.refine_report),
+            "validation_wanted": self.validation_wanted,
+            "validation_added": self.validation_added,
             "fits": self.fits,
             "sched_tables": {s: _table_to_dict(t) for s, t in self.sched_tables.items()},
             "sched_constants": dict(self.sched_constants),
@@ -697,6 +880,9 @@ class DesignSession:
         s.fit_tighten = int(d.get("fit_tighten", 0))
         s.applied_log = list(d.get("applied_log", ()))
         s.ineffective = {k: int(v) for k, v in d.get("ineffective", {}).items()}
+        s.refine_report = dict(d.get("refine_report", {}))
+        s.validation_wanted = int(d.get("validation_wanted", 0))
+        s.validation_added = int(d.get("validation_added", 0))
         s.fits = d.get("fits", {})
         s.sched_tables = {k: _table_from_dict(v)
                           for k, v in d.get("sched_tables", {}).items()}

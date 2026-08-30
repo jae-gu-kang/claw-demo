@@ -539,3 +539,113 @@ def test_tighten_fit_at_the_cap_is_still_scored_and_sealable():
     assert over.get("skipped"), "상한 도달 사유가 안 남았다"
     assert over.get("applied") is True, "상한에서 건너뛰면 채점도 봉인도 안 된다"
     assert s.sealed_keys() == {f"{v}|pitch_att|fit_residual"}
+
+
+def test_refine_leaves_room_for_interpolation_checks(env):
+    """REFINE이 점 예산을 앵커로 다 태우면 **보간 구간 검증이 이름만 남는다**.
+
+    VERIFY의 중점 검증점은 남은 예산으로만 들어간다. 종전에는 REFINE에 예산 전부를
+    줘서, 큰 격자(예산 60)에서 요구 60개 중 0개, 기본 테스트 설정(예산 24)에서도
+    21개 중 2개만 들어갔다 — 판정된 자리가 전부 자기 게인이 직접 튜닝된 앵커였고,
+    "스케줄 인지 검증"은 breakpoint 사이를 한 번도 보지 않은 채 converged를 냈다.
+    """
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small())
+    s.run(ac, stall, limits, db, design, fingerprint="fp")
+    mids = [p for p in s.points if str(p.origin).startswith("midpoint:")]
+    assert mids, "보간 구간 검증점이 하나도 없다 — 예약이 듣지 않았다"
+    assert s.coverage()["validation_points"] == len(mids)
+    # 예약분만큼은 REFINE이 못 쓴다
+    assert s.refine_report["budget"] < s.config.budget_points
+
+
+def test_coverage_counts_the_point_set_not_a_stage_counter():
+    """검증점 수는 **점집합 실물**로 센다 — 스테이지 카운터는 마지막 패스만 남는다.
+
+    이터레이션이 돌면 VERIFY도 여러 번 돈다. 실측: 1차에서 15개를 넣고 2차에서
+    예산 소진으로 0개를 넣었는데, 카운터로 세면 보고가 0으로 나왔다 — 실제로는
+    15개 구간을 봤는데 "하나도 안 봤다"고 말하게 된다.
+    """
+    from claw.common.contracts import TrimCase
+    from claw.design import (
+        ROLE_ANCHOR, ROLE_BREAKPOINT, ROLE_VALIDATION, OperatingPoint, case_name,
+    )
+
+    s = DesignSession(_small())
+    for mach, origin, role in ((0.3, "coarse", ROLE_ANCHOR),
+                               (0.4, "midpoint:a|b", ROLE_VALIDATION),
+                               (0.5, "midpoint:b|c", ROLE_BREAKPOINT),  # 승격된 검증점
+                               (0.6, "coarse", ROLE_ANCHOR)):
+        s.points.add(OperatingPoint(
+            case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
+                          alt=1000.0, fuel=200.0), role=role, origin=origin))
+    s.validation_wanted, s.validation_added = 9, 0  # 마지막 패스는 아무것도 못 넣었다
+    cov = s.coverage()
+    assert cov["validation_points"] == 2, "승격된 검증점이 안 세어졌다 — 그 구간은 봤다"
+    assert cov["validation_missing"] == 9
+
+
+def test_coverage_gaps_say_what_the_run_did_not_look_at(env):
+    """"수렴"이 무엇을 안 보고 난 수렴인지 문장으로 남는다."""
+    s = DesignSession(_small())
+    s.validation_wanted, s.validation_added = 21, 0
+    s.refine_report = {"max_d_remaining": 0.54, "aborted": "budget_points"}
+    s.margin_out = {"cases": {"x": {"loops": {}}}, "failures": []}
+    gaps = s.coverage_gaps()
+    assert len(gaps) == 3
+    assert "한 개도 없다" in gaps[0] and "21개" in gaps[0]
+    assert "0.54" in gaps[1] and "0.25" in gaps[1]
+    assert "트림 미수렴 점 1개" in gaps[2]
+    # 공백이 없으면 아무 말도 안 한다 (경고를 남발하면 아무도 안 읽는다)
+    clean = DesignSession(_small())
+    clean.margin_out = {"cases": {}, "failures": []}
+    assert clean.coverage_gaps() == []
+
+
+def test_ledger_gathers_what_has_no_prescription_card():
+    """미달 원장은 **처방이 안 나오는 미달**까지 모은다 — 그게 대부분이다.
+
+    종전 화면은 처방 카드가 붙은 실패만 보여 줬다. 그런데 자동 튜닝이 설계 목표를
+    못 채운 자리(합격선은 넘겨 실패가 아니다), 판정 불가, 엔벨로프 경계, 튜닝을
+    건너뛴 점, 트림 미수렴, 반영했는데 안 바뀐 처방은 카드가 없다 — 어디에도
+    안 나왔다. 정렬은 측정 불가가 맨 앞, 그 뒤 부족 비율 내림차순이다.
+    """
+    s, v = _seed_failing_session()
+    s.margin_out["cases"].update({
+        "M0.9_h0_f200": {"role": "anchor", "loops": {}},  # 트림 미수렴
+        "M0.2_h0_f40": {"role": "anchor", "outside_envelope": True, "loops": {
+            "roll_att": {"kind": "margin", "pm_deg": 20.0, "gm_db": 3.0,
+                         "status": "fail"}}},
+        "M0.5_h0_f200": {"role": "anchor", "loops": {
+            "pitch_att": {"kind": "margin", "pm_deg": float("nan"),
+                          "gm_db": float("nan"), "status": "na"}}},
+    })
+    s.tune_meta = {
+        "skipped": ["M0.9_h0_f200"],
+        "slots": {"M0.3_h0_f200": {
+            "pitch_rate": {"status": "infeasible", "reason": "capped",
+                           "target": 0.7, "achieved": 0.63},
+            "roll_att": {"status": "ok", "reason": "ok"}}},
+    }
+    s.apply_actions(["a1"])
+    _set_margin(s, v, 40.0, "fail")
+    s._score_applied_actions()
+
+    led = s.shortfall_ledger()
+    kinds = {r["kind"] for r in led}
+    assert kinds == {"verify", "unjudged", "outside_envelope", "not_trimmed",
+                     "skipped", "tune", "ineffective"}, kinds
+    # 측정 불가가 맨 앞 (criteria.severity와 같은 규약)
+    assert led[0]["severity"] is None
+    sev = [r["severity"] for r in led if r["severity"] is not None]
+    assert sev == sorted(sev, reverse=True), "부족 비율 내림차순이 아니다"
+    # 튜닝 미달 행은 요구·달성·사유를 들고 온다
+    tune_row = next(r for r in led if r["kind"] == "tune")
+    assert tune_row["reason"] == "capped" and tune_row["target"] == 0.7
+    assert "작동기" in tune_row["note"], "사유를 사람이 읽는 문장으로 안 냈다"
+    # 목표를 맞춘 자리는 원장에 안 든다 (원장이 전 자리 목록이 되면 못 읽는다)
+    assert not any(r["loop"] == "roll_att" and r["kind"] == "tune" for r in led)
+    # 무효 처방이 그 사실과 함께 실린다
+    ineff = next(r for r in led if r["kind"] == "ineffective")
+    assert ineff["action"]["changed"] is False and ineff["action"]["applied"] is True
+    assert s.report()["ledger_size"] == len(led)
