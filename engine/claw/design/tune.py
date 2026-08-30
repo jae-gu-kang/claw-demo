@@ -43,6 +43,11 @@ _SCAN_N = 33  # 레이트 게인 브래킷 스캔 밀도
 _BISECT_N = 24  # 이분 반복 (브래킷 폭 ×2^-24)
 _BRACKET_GROWTH = 4.0  # 목표 미도달 시 브래킷 상한 배율
 _BRACKET_EXPANSIONS = 3  # 확장 횟수 상한 (4^3 = 설계값의 256배까지)
+# 마무리(Nelder-Mead)의 초기 simplex — log 배율 0.3 ≈ ×1.35. scipy 기본값에 맡기면
+# x0 = [0, 0]이라 변 길이가 0.00025가 되어 탐색이 사실상 일어나지 않는다.
+_POLISH_SIMPLEX = ((0.0, 0.0), (0.3, 0.0), (0.0, 0.3))
+_POLISH_GUARD_PM = 0.5  # 벌점 무릎의 가드 [deg] — 최적점이 판정선에 정확히 붙는 것을 막는다
+_POLISH_GUARD_GM = 0.25  # 같은 목적 [dB]
 
 
 @dataclass(frozen=True)
@@ -288,6 +293,18 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
     return gains, achieved, notes
 
 
+def _att_margins_meet(m, targets) -> bool:
+    """자세 마진 수용 판정 — 백오프 루프와 구제 마무리가 **같은 식을 쓴다**.
+
+    두 곳에 따로 적으면 한쪽만 바뀌었을 때 "마무리가 통과시켰다"가 거짓이 된다.
+    (nan GM을 통과로 치는 비대칭은 여기 그대로 있다 — PM은 nan이면 불통과인데
+    GM만 반대다. 자리 단위 사유 코드 작업에서 정리한다.)
+    """
+    pm_ok = math.isfinite(m["pm_deg"]) and m["pm_deg"] >= targets.pm_deg
+    gm_ok = not (math.isfinite(m["gm_db"]) and m["gm_db"] < targets.gm_db)
+    return pm_ok and gm_ok
+
+
 def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> tuple:
     """자세 PI 루프쉐이핑 + 마진 검증 백오프 — (kp, ki, achieved, status, evals)."""
     kp_design = float(design[f"{group}.kp"])
@@ -308,16 +325,17 @@ def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> t
         ki = kp * zc
         m, orient = oriented_margins(att_margin_loop(lm_axis, rate_gains, kp, ki, **act_kw))
         evals += 1
-        best = (kp, ki, {**m, "orientation": orient, "wc_att": wc})
-        pm_ok = math.isfinite(m["pm_deg"]) and m["pm_deg"] >= targets.pm_deg
-        gm_ok = not (math.isfinite(m["gm_db"]) and m["gm_db"] < targets.gm_db)
-        if pm_ok and gm_ok:
+        # wc0(초기 목표 교차)을 함께 낸다 — 이게 없으면 "대역폭이 얼마나 무너졌나"가
+        # 결과 밖에서 계산 불가능하다. 판정식 wc ≥ wc_att_ok_frac·wc0의 분모다
+        best = (kp, ki, {**m, "orientation": orient, "wc_att": wc, "wc0": wc0})
+        if _att_margins_meet(m, targets):
             # 대역폭 하한 — 이 밑에서만 통과하는 것은 성능 붕괴다 (structural limit)
             status = "ok" if wc >= targets.wc_att_ok_frac * wc0 else "infeasible"
             return kp, ki, best[2], status, evals
         wc *= targets.backoff
     if best is None:
-        return 0.0, 0.0, {"note": "기저 루프 응답이 무의미 — 자세 튜닝 불가"}, "infeasible", evals
+        return 0.0, 0.0, {"note": "기저 루프 응답이 무의미 — 자세 튜닝 불가",
+                          "wc0": wc0}, "infeasible", evals
     kp, ki, ach = best
     return kp, ki, ach, "infeasible", evals
 
@@ -351,6 +369,25 @@ def tune_point(
             lm_axis, group, rate_gains, rate_wc, design, targets, act_kw
         )
         evals += ev
+        if st != "ok" and ach.get("wc0"):
+            # 구제 마무리 — 백오프가 대역폭만 버리는 한 방향 탐색이라 놓친 해를 찾는다.
+            # **실패한 자리에만** 돈다: 통과한 자리까지 벌점 무릎으로 밀면 전 운영점이
+            # 마진 경계에 앉게 되고(작동기 공진에 가까워진다) 결정론적 결과도 흔들린다.
+            # 통과시키지 못하면 채택하지 않는다 — 이 경로는 결과를 나쁘게 만들 수 없다.
+            kp2, ki2, ach2, ev2 = _polish_att(
+                lm_axis, group, rate_gains, kp, ki, targets, act_kw,
+                max_evals=max(0, max_evals - evals), wc0=ach["wc0"],
+            )
+            evals += ev2
+            if _att_margins_meet(ach2, targets) and math.isfinite(ach2["wc_att"]) and (
+                ach2["wc_att"] >= targets.wc_att_ok_frac * ach["wc0"]
+            ):
+                kp, ki, ach, st = kp2, ki2, ach2, "ok"
+                notes.append(
+                    f"{group}.kp/ki: 백오프 해가 대역폭 하한 미달이라 마무리로 구제 —"
+                    f" 교차 {ach['wc_att'] / ach['wc0']:.3f}×목표 (하한"
+                    f" {targets.wc_att_ok_frac:g})"
+                )
         gains[f"{group}.kp"] = kp
         gains[f"{group}.ki"] = ki
         achieved[f"{group}_att"] = ach
@@ -358,10 +395,10 @@ def tune_point(
             status = "infeasible"
             notes.append(f"{group}.kp/ki: 백오프 바닥까지 PM {targets.pm_deg}°/"
                          f"GM {targets.gm_db} dB 미달 — structural_limit 후보")
-        if polish and st == "ok":
+        if polish and st == "ok" and not ach.get("polished"):
             kp, ki, ach, ev = _polish_att(
                 lm_axis, group, rate_gains, kp, ki, targets, act_kw,
-                max_evals=max(0, max_evals - evals),
+                max_evals=max(0, max_evals - evals), wc0=ach.get("wc0"),
             )
             evals += ev
             gains[f"{group}.kp"], gains[f"{group}.ki"] = kp, ki
@@ -370,8 +407,19 @@ def tune_point(
             "notes": notes, "evals": evals}
 
 
-def _polish_att(lm_axis, group, rate_gains, kp0, ki0, targets, act_kw, max_evals) -> tuple:
-    """선택적 마무리 — Nelder-Mead(kp·ki 로그 배율), 목적 = −교차 대역폭 + 마진 벌점."""
+def _polish_att(lm_axis, group, rate_gains, kp0, ki0, targets, act_kw, max_evals,
+                wc0=None) -> tuple:
+    """마무리 — Nelder-Mead(kp·ki 로그 배율), 목적 = −교차 대역폭 + 마진 벌점.
+
+    백오프는 ωc를 버려서 마진을 사는 **한 방향** 탐색이라, 마진 여유가 남았는데도
+    대역폭 하한 아래로 내려간 자리가 생긴다. (kp, ki)를 함께 흔들면 같은 마진에서
+    대역폭을 되찾을 수 있다 — 데모 M0.7~0.75/h0의 여섯 자리가 그 경우였다
+    (교차비 0.168 → 0.235~0.286, 하한 0.2 통과).
+
+    벌점 무릎에 **가드 밴드**를 둔다. 목적이 대역폭을 최대화하므로 최적점은 벌점이
+    켜지는 지점에 정확히 붙는데, 그러면 수용 판정이 부동소수 잡음으로 뒤집힌다
+    (실측: GM이 목표 8.0에서 8.00−ε으로 앉아 판정이 오락가락했다).
+    """
     from scipy.optimize import minimize
 
     def cost(x):
@@ -379,23 +427,34 @@ def _polish_att(lm_axis, group, rate_gains, kp0, ki0, targets, act_kw, max_evals
         m, _ = oriented_margins(att_margin_loop(lm_axis, rate_gains, kp, ki, **act_kw))
         pen = 0.0
         if math.isfinite(m["pm_deg"]):
-            pen += 10.0 * max(0.0, targets.pm_deg - m["pm_deg"])
+            pen += 10.0 * max(0.0, targets.pm_deg + _POLISH_GUARD_PM - m["pm_deg"])
         if math.isfinite(m["gm_db"]):
-            pen += 10.0 * max(0.0, targets.gm_db - m["gm_db"])
+            pen += 10.0 * max(0.0, targets.gm_db + _POLISH_GUARD_GM - m["gm_db"])
         bw = m["wcp"] if math.isfinite(m["wcp"]) else 0.0
         return -bw + pen
 
+    def _ach(m, orient, extra=None):
+        # 마무리 뒤의 교차는 설계 목표 wc가 아니라 **실제 이득교차**다 (wcp)
+        out = {**m, "orientation": orient, "wc0": wc0,
+               "wc_att": m["wcp"] if math.isfinite(m["wcp"]) else float("nan")}
+        return {**out, **(extra or {})}
+
     if max_evals < 4:
         m, orient = oriented_margins(att_margin_loop(lm_axis, rate_gains, kp0, ki0, **act_kw))
-        return kp0, ki0, {**m, "orientation": orient}, 1
+        return kp0, ki0, _ach(m, orient), 1
+    # 초기 simplex를 **명시**한다. x0 = [0, 0]이면 scipy는 0 성분에 zdelt = 0.00025를
+    # 써서 변 길이가 0.025%인 simplex를 만든다 — 이 함수가 켜져 있어도 게인이
+    # 사실상 안 움직였다 (실측 Δlog kp = 0.00025 그대로 종료).
     res = minimize(cost, [0.0, 0.0], method="Nelder-Mead",
-                   options={"maxfev": max_evals, "xatol": 1e-3, "fatol": 1e-3})
+                   options={"maxfev": max_evals, "xatol": 1e-3, "fatol": 1e-3,
+                            "initial_simplex": _POLISH_SIMPLEX})
     kp, ki = kp0 * math.exp(res.x[0]), ki0 * math.exp(res.x[1])
     m, orient = oriented_margins(att_margin_loop(lm_axis, rate_gains, kp, ki, **act_kw))
     if math.isfinite(m["pm_deg"]) and m["pm_deg"] >= targets.pm_deg:
-        return kp, ki, {**m, "orientation": orient, "polished": True}, int(res.nfev) + 1
+        return kp, ki, _ach(m, orient, {"polished": True}), int(res.nfev) + 1
     m0, o0 = oriented_margins(att_margin_loop(lm_axis, rate_gains, kp0, ki0, **act_kw))
-    return kp0, ki0, {**m0, "orientation": o0}, int(res.nfev) + 2  # 후퇴 — 마무리가 악화시켰다
+    # 후퇴 — 마무리가 악화시켰다. 시도했다는 사실을 남긴다 (종전엔 흔적이 없었다)
+    return kp0, ki0, _ach(m0, o0, {"polished": False}), int(res.nfev) + 2
 
 
 def tune_points(

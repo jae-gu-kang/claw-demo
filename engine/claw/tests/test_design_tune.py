@@ -344,3 +344,69 @@ def test_cap_finds_conditionally_stable_window(monkeypatch):
     # 안정 표본이 정말 하나도 없을 때만 no_stable_gain
     monkeypatch.setattr(T, "_damper_loop_stable", lambda *a: False)
     assert T._cap_by_stability(None, "p", "da", -1.0, {}) == (0.0, "no_stable_gain")
+
+
+@pytest.fixture(scope="module")
+def bandwidth_collapse():
+    """M0.7/h0 — 마진은 통과하는데 교차가 하한 아래로 내려가던 점."""
+    ac = make_demo_aircraft()
+    design = demo_design_gains()
+    tr = trim_level(ac, TrimCase("bw", mach=0.7, alt=0.0, fuel=40.0), fingerprint="fp")
+    assert tr.converged
+    return design, linearize(ac, tr)
+
+
+def test_rescue_polish_recovers_bandwidth_collapse(bandwidth_collapse):
+    """백오프가 대역폭만 버려서 놓친 해를 마무리가 되찾는다.
+
+    이 점의 자세 루프는 **마진이 모자라서** infeasible이던 게 아니다: 백오프 해가
+    PM 103°·GM 9.6 dB로 목표를 크게 넘겼는데 교차가 목표의 0.168배까지 내려가
+    대역폭 하한(0.2)에 걸렸다. 백오프는 ωc를 버려 마진을 사는 한 방향 탐색이라
+    "마진은 남는데 대역폭이 없는" 해에서 멈춘다 — (kp, ki)를 함께 흔들면
+    같은 마진에서 대역폭이 돌아온다.
+    """
+    design, lm = bandwidth_collapse
+    out = tune_point(lm, design, **ACT)
+    assert out["status"] == "ok", f"구제되지 않았다 — {out['notes']}"
+    ach = out["achieved"]["pitch_att"]
+    assert ach["polished"] is True
+    assert ach["wc_att"] / ach["wc0"] >= TuneTargets().wc_att_ok_frac
+    assert ach["pm_deg"] >= 50.0 and ach["gm_db"] >= 8.0
+    assert any("마무리로 구제" in n for n in out["notes"])
+
+
+def test_rescue_leaves_passing_slots_untouched(setup):
+    """구제는 **실패한 자리에만** 돈다 — 통과한 자리까지 벌점 무릎으로 밀면
+    전 운영점이 마진 경계에 앉고(작동기 공진에 가까워진다) 결과도 흔들린다."""
+    _, design, _, lm = setup
+    out = tune_point(lm, design, **ACT)
+    assert out["status"] == "ok"
+    for axis in ("pitch", "roll"):
+        assert "polished" not in out["achieved"][f"{axis}_att"], axis
+    assert not any("구제" in n for n in out["notes"])
+
+
+def test_polish_initial_simplex_is_explicit(setup):
+    """초기 simplex를 명시하지 않으면 마무리가 사실상 아무것도 안 한다.
+
+    x0 = [0, 0]이라 scipy는 0 성분에 zdelt = 0.00025를 써서 **변 길이 0.025%**인
+    simplex를 만든다. 종전 코드는 polish=True로 켜도 Δlog kp = 0.00025 그대로
+    끝났다 — 켜져 있으나 없는 손잡이였다.
+    """
+    from claw.design.closure import AXIS_SPECS
+    from claw.design.tune import _polish_att, _tune_att, _tune_rates
+    from claw.trim import split_axes
+
+    _, design, _, lm = setup
+    lon, _lat = split_axes(lm)
+    gains, ach, _ = _tune_rates(lon, _lat, design, TuneTargets(), ACT)
+    rg = {f"{g}.k_rate": gains.get(f"{g}.k_rate", 0.0)
+          for g, _, _ in AXIS_SPECS["lon"]["rates"]}
+    kp0, ki0, a0, _st, _ev = _tune_att(
+        lon, "pitch", rg, ach["pitch_rate"]["wc"], design, TuneTargets(), ACT)
+    kp, _ki, a, _ev2 = _polish_att(
+        lon, "pitch", rg, kp0, ki0, TuneTargets(), ACT, max_evals=60, wc0=a0["wc0"])
+    assert abs(math.log(abs(kp / kp0))) > 0.01, (
+        "마무리가 게인을 사실상 안 움직였다 — 기본 simplex(0.00025)로 되돌아갔다")
+    assert a["wc_att"] > a0["wc_att"], "마무리의 목적은 같은 마진에서의 대역폭이다"
+    assert a["pm_deg"] >= 50.0 and a["gm_db"] >= 8.0, "마진 벌점이 지켜지지 않았다"
