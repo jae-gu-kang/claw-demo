@@ -16,8 +16,8 @@ import * as trim from "./views/trim.js";
 
 // 구조도(블록 다이어그램 허브)가 진입점 — 블록 클릭으로 각 편집 화면 진입 (02 §4)
 const VIEWS = {
-  blocks, envelope, trim, gains, margins, sim, duty, results, influence,
-  autodesign, autocode,
+  blocks, envelope, trim, gains, margins, autodesign, sim, duty, autocode,
+  influence, results,
 };
 
 function route() {
