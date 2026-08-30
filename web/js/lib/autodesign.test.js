@@ -7,10 +7,16 @@ import {
   actionCards,
   adoptBlockedText,
   adoptStorePayload,
+  adoptWarnText,
   adoptable,
   buildConfig,
+  coverageLines,
   effectText,
   evidenceLines,
+  ledgerActionText,
+  ledgerKindText,
+  ledgerRows,
+  ledgerTruncatedText,
   pointRows,
   reasonText,
   reliefLines,
@@ -306,6 +312,9 @@ test("reasonText — 서버 맵이 정본, 없으면 폴백, 그것도 없으면
   assert.match(reasonText("bandwidth_collapse"), /교차 주파수가 하한 아래/);
   assert.match(reasonText("margin_floor"), /지연·작동기 예산이 병목/);
   assert.match(reasonText("rescued"), /통과/);
+  // na_no_crossover — 교차 없음을 "통과"로 읽지 않게 하는 사유다. 폴백에 없으면
+  // 서버 사전이 안 왔을 때(기본값 조회 실패) 코드만 뜬다
+  assert.match(reasonText("na_no_crossover"), /통과가 아니라 판정 불가다/);
   // 모르는 코드를 삼키면 엔진에 사유가 늘어도 화면이 조용해진다 — 코드는 남긴다
   assert.equal(reasonText("brand_new_code"), "brand_new_code");
   assert.equal(reasonText(null), null);
@@ -543,6 +552,334 @@ test("tunedLines — 달성 줄은 아는 지표만 적는다 (엔진 레코드�
   for (const noise of ["bracket_growth", "participation", "capped"]) {
     assert.ok(!rate.includes(noise), `메타 ${noise}가 달성 줄에 샜다`);
   }
+});
+
+// ── 미달 원장 ──────────────────────────────────────────────────────────
+
+const LEDGER_BODY = {
+  // failures=0인데 미달은 있다 — 처방이 나오는 실패만 세면 이 실행은 무결해 보인다
+  report: { status: "converged", judged: 40, failures: 0, ledger_size: 5 },
+  ledger: [
+    { point: "M0.8_h5000", loop: null, kind: "not_trimmed", status: null,
+      reason: null, severity: null, shortfall: {}, target: null,
+      note: "트림 미수렴 — 이 점에서는 아무것도 못 봤다", action: null },
+    { point: "M0.35_h0_f200", loop: "roll_att", kind: "tune", status: "warn",
+      reason: "capped", severity: 0.223,
+      shortfall: { pm_deg: { required: 45, achieved: 38.2, deficit: 6.8,
+        deficit_frac: 0.151 } },
+      target: 12, note: "튜닝이 설계 목표 PM에 못 갔다",
+      action: null },
+    { point: "M0.6_h3000", loop: "pitch_att", kind: "ineffective", status: "fail",
+      reason: null, severity: 0.11, shortfall: {}, target: null,
+      note: "같은 처방을 두 번 반영했으나 판정이 그대로다",
+      action: { id: "a7", verdict: "gain_interp_valley", type: "promote",
+        applied: true, changed: false, sealed: "2회 무효" } },
+    { point: "M0.9_h9000", loop: null, kind: "skipped", status: null,
+      reason: null, severity: 0.02, shortfall: {}, target: null,
+      note: "튜닝을 건너뛴 점", action: null },
+  ],
+};
+
+test("ledgerRows — 원장이 없어도 안 터진다 (원장 이전의 구형 결과)", () => {
+  // 화면은 원장 절을 건너뛰기만 하면 된다. 여기서 던지면 결과 조회 전체가 죽어
+  // 구형 결과를 아예 못 연다
+  assert.deepEqual(ledgerRows({}), []);
+  assert.deepEqual(ledgerRows(undefined), []);
+  assert.deepEqual(ledgerRows({ ledger: [] }), []);
+  assert.deepEqual(ledgerRows(RESULT), []);
+});
+
+test("ledgerRows — 실패 0인 실행에도 미달이 남는다 (이 작업의 핵심)", () => {
+  // 처방 카드가 붙는 실패만 그리면 이 결과는 화면에서 무결해 보인다 — 트림 미수렴,
+  // 튜닝 목표 미달, 무효 처방, 건너뛴 점이 전부 카드 없는 미달이기 때문이다
+  const rows = ledgerRows(LEDGER_BODY);
+  assert.equal(LEDGER_BODY.report.failures, 0);
+  assert.ok(rows.length > 0, "실패 0이라고 원장까지 비는 것은 아니다");
+  assert.equal(rows.length, 4);
+});
+
+test("ledgerRows — 못 잰 심각도(null)가 맨 앞 (엔진 severity 규약과 같음)", () => {
+  const rows = ledgerRows({
+    ledger: [
+      { point: "p1", kind: "tune", severity: 0.1 },
+      { point: "p2", kind: "verify", severity: null },
+      { point: "p3", kind: "verify", severity: 0.5 },
+      // 비유한값은 문자열로 온다 — 숫자로 다루면 최악(∞ 부족)이 꼬리에 가라앉는다
+      { point: "p4", kind: "verify", severity: "inf" },
+    ],
+  });
+  assert.deepEqual(rows.map((r) => r.point), ["p2", "p4", "p3", "p1"]);
+  // 못 잰 것을 0으로 그리면 최악이 최선처럼 보인다
+  assert.equal(rows[0].severityText, "못 잼");
+  assert.equal(rows[1].severityText, "∞");
+  assert.equal(rows[3].severityText, "0.100");
+});
+
+test("ledgerRows — 표시용 필드: 종류 라벨·사유·부족 한 줄·처방 효과", () => {
+  const rows = ledgerRows(LEDGER_BODY, { capped: "서버 문구" });
+  const tune = rows.find((r) => r.kind === "tune");
+  assert.equal(tune.kindLabel, "튜닝 목표 미달");
+  assert.match(tune.kindText, /합격선은 넘길 수 있다/); // 다음에 뭘 할지가 있다
+  assert.equal(tune.reasonLine, "capped — 서버 문구"); // 서버 사전이 정본
+  // 부족은 가장 심각한 지표 하나만 — 표 한 칸이다
+  assert.match(tune.shortfallLine, /요구 45° · 달성 38.2° · 부족 6.80°/);
+  assert.equal(tune.shortfallKind, "short");
+  assert.equal(tune.severityText, "0.223");
+  assert.equal(tune.actionLine, null); // 처방 없는 미달 — 이런 행이 더 많다
+
+  const bad = rows.find((r) => r.kind === "ineffective");
+  assert.match(bad.actionLine, /게인 보간 valley/); // verdict는 한국어로
+  assert.match(bad.actionLine, /반영했으나 판정이 그대로다/);
+  assert.match(bad.actionLine, /봉인: 2회 무효/);
+
+  const nt = rows.find((r) => r.kind === "not_trimmed");
+  assert.equal(nt.loop, null); // 점 단위 항목 — 자리가 없다
+  assert.equal(nt.shortfallLine, null);
+  assert.match(nt.note, /아무것도 못 봤다/);
+});
+
+test("ledgerRows — 사유 줄과 같은 문장인 메모는 두 번 뜨지 않는다", () => {
+  // 엔진의 tune 행은 note에 사유 문구를 그대로 넣는다(REASON_TEXT[reason]).
+  // 사유 줄이 "capped — 서버 문구"면 표 한 칸에 같은 문장이 두 번 남는다
+  const map = { capped: "서버 문구" };
+  const [same] = ledgerRows({
+    ledger: [{ point: "p", kind: "tune", reason: "capped", note: "서버 문구" }] }, map);
+  assert.equal(same.reasonLine, "capped — 서버 문구");
+  assert.equal(same.noteLine, null);
+  assert.equal(same.note, "서버 문구"); // 원문은 남긴다 — 지우는 건 표시뿐이다
+  // 다른 문장이면 그대로 보인다 — 겹칠 때만 접는다
+  const [other] = ledgerRows({
+    ledger: [{ point: "p", kind: "tune", reason: "capped", note: "이터 3에서 포기" }] }, map);
+  assert.equal(other.noteLine, "이터 3에서 포기");
+  // 사유가 없는 종류는 메모가 유일한 설명이다
+  const [only] = ledgerRows({
+    ledger: [{ point: "p", kind: "not_trimmed", note: "트림 미수렴" }] });
+  assert.equal(only.reasonLine, null);
+  assert.equal(only.noteLine, "트림 미수렴");
+});
+
+test("ledgerRows — 튜닝 행은 목표·달성으로 부족 칸을 채운다 (빈칸으로 두지 않는다)", () => {
+  // 엔진 tune 행에는 shortfall이 없다(검증 항목이 아니다) — 대신 target·achieved가
+  // 실려 온다. 그 칸을 비우면 "얼마나 모자란가"가 원장에서 사라진다
+  const [row] = ledgerRows({
+    ledger: [{ point: "p", loop: "roll_rate", kind: "tune", status: "warn",
+      reason: "target_unreached", severity: null, shortfall: {}, target: 12,
+      achieved: { kind: "bandwidth", roll_lambda: 8.65, wc: 15.7, reached: false,
+        bracket_growth: 3, participation: 0.93 } }],
+  });
+  assert.match(row.shortfallLine, /목표 12 · 달성 λ 8\.65 rad\/s/);
+  // 달성 줄에 조성 메타가 새면 한 칸이 덤프가 된다 (tunedLines와 같은 규약)
+  for (const noise of ["bracket_growth", "participation", "wc "]) {
+    assert.ok(!row.shortfallLine.includes(noise), `메타 ${noise}가 샜다`);
+  }
+  // 부족량을 잰 것이 아니므로 빨강(short)으로 칠하지 않는다
+  assert.equal(row.shortfallKind, null);
+});
+
+test("ledgerRows — 부족 한 줄은 판정 불가를 먼저 고른다", () => {
+  // 지표가 여럿이면 "가장 심각한 하나"가 표에 남는다. 못 잰 지표가 있는데 잰
+  // 지표를 대표로 세우면, 그 행은 실제보다 덜 나빠 보인다
+  const [row] = ledgerRows({
+    ledger: [{ point: "p", kind: "verify", status: "fail", severity: null,
+      shortfall: {
+        pm_deg: { required: 45, achieved: 30, deficit: 15, deficit_frac: 0.333 },
+        zeta: { required: 0.3, achieved: null, deficit: null, deficit_frac: null },
+      } }],
+  });
+  assert.equal(row.shortfallKind, "na");
+  assert.match(row.shortfallLine, /판정 불가/);
+});
+
+test("ledgerRows — 모르는 종류도 코드 그대로 남는다 (조용히 사라지지 않는다)", () => {
+  // 엔진에 종류가 늘면 화면은 그것을 모른다. 그때 행을 버리거나 라벨을 비우면
+  // 새로 생긴 미달이 화면에서만 존재하지 않게 된다 — 가장 나쁜 실패 모드다
+  const [row] = ledgerRows({
+    ledger: [{ point: "p", loop: "roll_att", kind: "quantization_loss",
+      status: "warn", severity: 0.4 }],
+  });
+  assert.equal(row.kind, "quantization_loss");
+  assert.equal(row.kindLabel, "quantization_loss");
+  assert.match(row.kindText, /quantization_loss/);
+  assert.match(row.kindText, /모르는 종류/);
+  assert.equal(row.tone, "warn"); // 색은 status로 폴백 — 회색으로 숨기지 않는다
+});
+
+test("ledgerTone — 종류가 먼저, 그다음 판정 (무효 처방은 따로 강조)", () => {
+  const tone = (r) => ledgerRows({ ledger: [r] })[0].tone;
+  assert.equal(tone({ kind: "verify", status: "fail" }), "fail");
+  assert.equal(tone({ kind: "verify", status: "warn" }), "warn");
+  assert.equal(tone({ kind: "not_trimmed", status: null }), "fail");
+  // 튜닝 목표 미달·판정 불가는 실패가 아니다 — 빨강으로 칠하면 합격선 미달과 섞인다
+  assert.equal(tone({ kind: "tune", status: "warn" }), "warn");
+  assert.equal(tone({ kind: "unjudged", status: "na" }), "warn");
+  // 설계 대상 밖은 회색 — 처방·수렴 판정에서 빠진 자리다
+  assert.equal(tone({ kind: "outside_envelope", status: "fail" }), "na");
+  assert.equal(tone({ kind: "skipped", status: null }), "na");
+  // 무효 처방은 미달이면서 예산을 태운 처방이라 따로 눈에 띄어야 한다
+  assert.equal(tone({ kind: "ineffective", status: "fail" }), "ineffective");
+});
+
+test("ledgerActionText — 반영 여부와 효과가 같은 줄에 있다", () => {
+  assert.equal(ledgerActionText(null), null);
+  assert.match(ledgerActionText({ verdict: "simple_deficit", applied: false }),
+    /미반영 — 승인하면 반영된다/);
+  assert.match(ledgerActionText({ verdict: "simple_deficit", applied: true, changed: true }),
+    /반영 후 판정이 움직였다/);
+  // changed가 아직 없는 것(채점 전)을 "효과 없음"으로 그리면 거짓이다
+  assert.match(ledgerActionText({ verdict: "simple_deficit", applied: true }),
+    /다음 검증에서 잰다/);
+  // verdict를 모르면 코드 그대로 (VERDICT_LABEL을 못 찾았다고 칸을 비우지 않는다)
+  assert.match(ledgerActionText({ verdict: "new_verdict", applied: false }), /new_verdict/);
+});
+
+test("ledgerTruncatedText — 잘린 원장을 '이게 전부'로 그리지 않는다", () => {
+  // 저장물은 severity 상위 N행만 싣는다(routes/design.py MAX_LEDGER_ROWS). 조용히
+  // 잘린 원장은 못 맞춘 것이 그것뿐이라고 말하는 목록이 된다
+  const body = { ledger: [{ point: "p", kind: "verify", severity: 0.5 }],
+    ledger_truncated: { kept: 1, total: 12 }, report: { ledger_size: 12 } };
+  const t = ledgerTruncatedText(body);
+  assert.match(t, /원장 12행 중 1행만/);
+  assert.match(t, /나머지 11행은 여기에 없다/);
+  assert.match(t, /이게 전부/);
+  // 고지가 빠져도 report.ledger_size가 행 수보다 크면 잘린 것이다 — 한 출처만
+  // 믿으면 다른 쪽이 빠졌을 때 화면이 조용해진다
+  assert.match(ledgerTruncatedText({ ledger: [{ point: "p" }], report: { ledger_size: 9 } }),
+    /원장 9행 중 1행만/);
+  // 전량이면 고지하지 않는다 — 늘 뜨는 경고는 아무도 안 읽는다
+  assert.equal(ledgerTruncatedText({ ledger: [{ point: "p" }],
+    report: { ledger_size: 1 } }), null);
+  assert.equal(ledgerTruncatedText({ ledger: [] }), null);
+  assert.equal(ledgerTruncatedText({}), null);
+  assert.equal(ledgerTruncatedText(undefined), null);
+});
+
+test("ledgerKindText — 7종 전부 뜻과 다음 행동이 있다", () => {
+  for (const k of ["verify", "tune", "unjudged", "outside_envelope",
+    "not_trimmed", "skipped", "ineffective"]) {
+    assert.ok(ledgerKindText(k).length > 20, k);
+  }
+  assert.match(ledgerKindText("tune"), /예산을 늘리거나 목표를 낮춘다/);
+  assert.match(ledgerKindText("unjudged"), /통과가 아니다/);
+});
+
+// ── 검증 커버리지 ──────────────────────────────────────────────────────
+
+test("coverageLines — 검증점 0(요구 있음)이 가장 강한 줄이고 맨 앞이다", () => {
+  // 판정·실패 수는 **본 것만** 센다. 검증점이 0이면 실패도 0이라, 커버리지를 안
+  // 말하면 "무검증"이 "무결"과 같은 얼굴로 뜬다.
+  // coverage의 실물 키는 엔진 orchestrator.coverage() — 남은 수(validation_missing)다
+  const lines = coverageLines({
+    coverage: { validation_points: 0, validation_missing: 60, refine_remaining: 0.5409,
+      refine_tol: 0.25, refine_aborted: "budget_points", not_trimmed: 2 },
+    coverage_gaps: ["breakpoint 사이 구간을 검증하지 않았다"],
+  });
+  assert.equal(lines[0].tone, "fail", "가장 강한 줄이 맨 앞이 아니다");
+  assert.equal(lines[0].key, "validation");
+  assert.match(lines[0].text, /보간 구간 검증점이 한 개도 없다/);
+  assert.match(lines[0].text, /남은 구간 60개/);
+  // points + missing을 "요구 수"로 합치지 않는다 — 이터가 돌면 요구가 갱신되므로
+  // 그 합은 전체 구간 수가 아니다. 합치면 화면이 분모를 지어내는 것이다
+  assert.doesNotMatch(lines[0].text, /요구 60/);
+  // 나머지 공백도 사라지지 않는다
+  const keys = lines.map((l) => l.key);
+  for (const k of ["refine", "not_trimmed", "gap0"]) {
+    assert.ok(keys.includes(k), `${k} 줄이 없다`);
+  }
+  assert.ok(lines.every((l) => l.tone !== "hint"));
+  const refine = lines.find((l) => l.key === "refine").text;
+  assert.match(refine, /0.541 \(허용 0.250\)/);
+  assert.match(refine, /중단 사유 budget_points — 점 예산 소진/);
+});
+
+test("coverageLines — 프로즈는 엔진이 정본, 없을 때만 화면이 대신 말한다", () => {
+  // 엔진 문장(coverage_gaps)과 화면 문장을 둘 다 내면 같은 말이 색만 달리해 두 번
+  // 뜬다. 수치는 화면이 늘 내고("몇 개인가"), 왜 문제인지는 엔진이 낸다
+  const cov = { validation_points: 0, validation_missing: 60 };
+  const withGaps = coverageLines({ coverage: cov, coverage_gaps: ["엔진 문장"] });
+  assert.doesNotMatch(withGaps[0].text, /앵커/);
+  assert.equal(withGaps.find((l) => l.key === "gap0").text, "엔진 문장");
+
+  // 엔진 문장이 없으면(구형 결과) 화면이 그 자리를 메운다 — 수치만 남기고 끝내면
+  // "검증점 0"이 왜 심각한지가 화면 어디에도 없다
+  const alone = coverageLines({ coverage: cov });
+  assert.match(alone[0].text, /전부 자기 게인이 직접 튜닝된 앵커다/);
+  assert.match(alone[0].text, /breakpoint 사이에서 무너지는지는 보지 않았다/);
+});
+
+test("coverageLines — 실측 형상: 검증도 하고 남기기도 한 실행", () => {
+  // 실측(작은 격자): points 6 · missing 11 · refine 0.327 > tol 0.25 · aborted
+  const lines = coverageLines({
+    coverage: { validation_points: 6, validation_missing: 11, refine_remaining: 0.327,
+      refine_tol: 0.25, refine_aborted: "budget_points", not_trimmed: 0 },
+  });
+  const v = lines.find((l) => l.key === "validation");
+  assert.equal(v.tone, "warn");
+  assert.match(v.text, /보간 구간 11개가 검증점 없이 남았다 \(검증된 구간은 6개\)/);
+  // 6과 11을 더해 "요구 17"이라 쓰면 안 된다 — 이터가 돌면 요구가 갱신된다
+  assert.doesNotMatch(v.text, /17/);
+  assert.equal(lines.find((l) => l.key === "not_trimmed"), undefined); // 0은 말 안 한다
+
+  const full = coverageLines({
+    coverage: { validation_points: 60, validation_missing: 0, refine_remaining: 0.1,
+      refine_tol: 0.25, not_trimmed: 0 },
+  });
+  assert.ok(full.every((l) => l.tone === "hint"), "공백이 없는데 경고를 냈다");
+  assert.match(full[0].text, /보간 구간 검증점 60/);
+
+  // 둘 다 0이면 아무 말도 안 한다 — 검증할 구간 자체가 없었던 실행이다
+  assert.deepEqual(coverageLines({
+    coverage: { validation_points: 0, validation_missing: 0 } }), []);
+
+  // coverage 자체가 없는 구형 결과 — 지어내지 않는다
+  assert.deepEqual(coverageLines({}), []);
+  assert.deepEqual(coverageLines(undefined), []);
+
+  // 검증점 수가 안 온 것과 0인 것은 다르다 — 없는 수를 0으로 읽으면 결과가 말한
+  // 적 없는 "한 개도 없다"를 화면이 단정한다
+  const unknown = coverageLines({
+    coverage: { validation_points: null, validation_missing: 60 },
+  });
+  assert.equal(unknown[0].tone, "warn");
+  assert.match(unknown[0].text, /몇 개가 검증됐는지를 결과가 말하지 않는다/);
+  assert.doesNotMatch(unknown[0].text, /한 개도 없다/);
+});
+
+test("coverageLines — refine 잔여가 허용을 넘으면 경고, 안 넘으면 hint", () => {
+  const over = coverageLines({ coverage: { refine_remaining: 0.54, refine_tol: 0.25 } });
+  assert.equal(over[0].tone, "warn");
+  assert.match(over[0].text, /플랜트 변화를 다 못 따라갔다/);
+  const under = coverageLines({ coverage: { refine_remaining: 0.1, refine_tol: 0.25 } });
+  assert.equal(under[0].tone, "hint");
+  // 거리를 못 재도 중단 사실은 남는다 — 모르는 사유 코드도 코드 그대로
+  const aborted = coverageLines({ coverage: { refine_aborted: "wat" } });
+  assert.equal(aborted[0].tone, "warn");
+  assert.match(aborted[0].text, /격자 세분화 중단 — wat/);
+});
+
+test("adoptWarnText — 확정을 막지는 않되 무엇을 모르고 확정하는지 말한다", () => {
+  const report = {
+    judged: 40, failures: 0,
+    coverage: { validation_points: 0, validation_missing: 60 },
+    coverage_gaps: ["보간 구간 검증점이 하나도 들어가지 않았다"],
+  };
+  // 커버리지 공백은 확정을 막는 사유가 아니다 — 앵커에서는 판정이 났다
+  assert.equal(adoptable(report), true);
+  assert.equal(adoptBlockedText(report), null);
+  const warn = adoptWarnText(report);
+  assert.match(warn, /보간 구간 검증점이 한 개도 없다/);
+  assert.match(warn, /보간 구간 검증점이 하나도 들어가지 않았다/); // 엔진 문장 그대로
+  assert.match(warn, /검증된 적 없는 채로/);
+  // 공백이 없으면 경고도 없다 — 늘 뜨는 경고는 아무도 안 읽는다
+  assert.equal(adoptWarnText({ judged: 40, coverage: { validation_points: 60,
+    validation_missing: 0 } }), null);
+  assert.equal(adoptWarnText({}), null);
+  assert.equal(adoptWarnText(undefined), null);
+});
+
+test("reportLine — 원장 크기도 줄에 오른다 (카드 수와 다른 수다)", () => {
+  assert.match(reportLine({ ledger_size: 7 }).join(" · "), /미달 원장 7/);
+  // 0이면 생략 — 원장 없는 구형 결과가 "미달 원장 0"으로 뜨면 거짓말이다
+  assert.doesNotMatch(reportLine({ judged: 3, failures: 0 }).join(" · "), /미달 원장/);
 });
 
 test("reliefLines — 통과한 축은 **임계값**을 말한다 (×3이 아니라 ≥47 rad/s)", () => {

@@ -265,7 +265,11 @@ export function resumeBlockedText(report) {
  *
  * failures가 0이라는 것만으로는 통과의 근거가 못 된다: 트림 전량 미수렴·빈 격자·
  * 엔벨로프 밖 격자는 실패 목록도 비어 있다(engine judged_count 머리말). 그 실행의
- * 게인을 확정할 수 있으면 **아무것도 검증하지 않은 게인이 정본이 된다.** */
+ * 게인을 확정할 수 있으면 **아무것도 검증하지 않은 게인이 정본이 된다.**
+ *
+ * 커버리지 공백(coverage_gaps)은 여기서 막지 않는다 — 검증점이 모자란 실행도
+ * 앵커에서는 판정이 났고, 그것을 확정조차 못 하게 하는 것은 과하다. 대신 무엇을
+ * 모르고 확정하는지를 adoptWarnText가 문장으로 낸다. 막는 것과 말하는 것은 다르다. */
 export function adoptable(report) {
   return Number(report?.judged) > 0;
 }
@@ -280,6 +284,20 @@ export function adoptBlockedText(report) {
   return "판정이 난 (점, 자리)가 0이다 — 이 실행은 아무것도 검증하지 않았다. "
     + "실패 0은 통과가 아니라 볼 것이 없었다는 뜻이므로 게인을 확정할 수 없다. "
     + "트림 미수렴·빈 격자·엔벨로프 밖 격자를 먼저 확인할 것.";
+}
+
+/** 확정해도 되지만 **무엇을 모르고 확정하는지** — 커버리지 공백이 없으면 null.
+ *
+ * adoptBlockedText가 "확정 못 한다"라면 이쪽은 "확정은 되는데 이만큼은 안 봤다"다.
+ * 둘을 한 문장으로 뭉치면 막는 사유와 경고가 같은 무게로 읽혀, 정작 막아야 할
+ * 미검증 실행이 흔한 경고에 섞인다. */
+export function adoptWarnText(report) {
+  const gaps = coverageLines(report).filter((l) => l.tone !== "hint");
+  if (!gaps.length) return null;
+  return "확정은 막지 않는다 — 다만 이 실행이 무엇을 안 봤는지는 알고 확정해야 한다. "
+    + gaps.map((l) => l.text).join(" / ")
+    + " 이대로 확정하면 그 미검증 구간이 검증된 적 없는 채로 시뮬·마진·Autocode의 "
+    + "정본이 된다.";
 }
 
 /** report → 상태 줄 조각 [문자열] — 계산해 놓고 안 내던 수치를 담되 0은 생략한다.
@@ -304,6 +322,9 @@ export function reportLine(report, nPointsFallback) {
     ["ineffective_actions", "무효 처방"],
     ["sealed", "봉인"],
     ["fit_tighten", "적합 조이기"],
+    // 원장 행 수 — 처방 카드 수와 다른 수다. 카드 없는 미달이 대부분이라
+    // 이 수가 카드 수보다 훨씬 클 수 있고, 그 격차가 곧 "안 보이던 것"의 규모다
+    ["ledger_size", "미달 원장"],
   ];
   for (const [key, label] of optional) {
     const v = Number(r[key]) || 0;
@@ -341,6 +362,8 @@ export const REASON_TEXT = {
     + " 지연·작동기 예산을 늘리거나 대역폭 하한을 낮춘다",
   margin_floor: "대역폭을 바닥까지 버려도 PM/GM 목표에 못 미친다 — 지연·작동기 예산이 병목이다",
   degenerate: "이 자리의 기저 루프 응답이 무의미하다 — 입출력·플랜트를 확인한다",
+  na_no_crossover: "교차가 없어 이 루프의 마진을 잴 수 없다 — 통과가 아니라 판정 불가다."
+    + " 루프 조성·게인 부호를 확인한다",
   rescued: "백오프 해가 대역폭 하한 아래여서 마무리로 되찾았다 (통과)",
 };
 
@@ -580,4 +603,292 @@ export function evidenceLines(a, reasonMap) {
     notes,
     flags,
   };
+}
+
+// ── 미달 원장 ──────────────────────────────────────────────────────────
+
+/** 원장 행 종류 → {label, text}. label은 표 칸, text는 "무슨 뜻이고 다음에 뭘 하나".
+ *
+ * 처방 카드가 붙는 실패는 미달의 일부일 뿐이다 — 처방이 나오지 않는 미달(튜닝이
+ * 설계 목표를 못 채운 자리, 판정 불가, 엔벨로프 경계, 튜닝을 건너뛴 점, 트림
+ * 미수렴, 반영했는데 안 바뀐 처방)이 오히려 더 많다. 종전 화면은 그중 카드가 있는
+ * 것만 그려서, **처방이 안 나온 미달은 화면 어디에도 없었다.**
+ *
+ * 종류마다 다음 행동이 다르므로 라벨만 붙이고 뜻을 안 적으면 표가 "무엇이 안 됐나"만
+ * 말하고 "그래서 뭘 하나"는 말하지 않는다. */
+export const LEDGER_KIND = {
+  verify: {
+    label: "검증 미달",
+    text: "보간 실효 게인으로 잰 마진이 합격선(fail) 또는 목표선(warn) 아래다 — "
+      + "처방 카드가 있으면 승인해 재개하고, 없으면 그 점·자리를 직접 볼 것",
+  },
+  tune: {
+    label: "튜닝 목표 미달",
+    text: "자동 튜닝이 설계 목표를 못 채웠다 — 합격선은 넘길 수 있다. 사유를 보고 "
+      + "예산을 늘리거나 목표를 낮춘다",
+  },
+  unjudged: {
+    label: "판정 불가",
+    text: "교차 없음(nan)이거나 트림 미수렴이라 판정이 안 났다 — 통과가 아니다. "
+      + "이 자리는 검증되지 않은 채로 남는다",
+  },
+  outside_envelope: {
+    label: "엔벨로프 경계",
+    text: "포화·α 여유가 없어 처방·수렴 판정에서 뺀 점이다 — 마진은 참고값이다. "
+      + "설계 범위에서 뺄 점인지 먼저 정할 것",
+  },
+  not_trimmed: {
+    label: "트림 미수렴",
+    text: "트림해를 못 찾아 아무것도 못 봤다 — 이 점에는 마진도 게인 근거도 없다. "
+      + "격자 범위·조종면 한계를 확인할 것",
+  },
+  skipped: {
+    label: "튜닝 건너뜀",
+    text: "이 점에서는 튜닝을 돌리지 않았다 — 게인은 이웃에서 보간된 값이고 그 자리의 "
+      + "근거는 없다. 점 예산을 늘리거나 그 점을 breakpoint로 올린다",
+  },
+  ineffective: {
+    label: "무효 처방",
+    text: "반영했는데 판정이 안 움직였다 — 이터 예산만 나갔다. 같은 처방을 다시 "
+      + "승인하지 말고 상위 설계·격자를 볼 것",
+  },
+};
+
+/** 종류 라벨 — 모르는 코드는 **코드 그대로**. 삼키면 엔진에 종류가 늘어도 화면이
+ * 조용해지고, 그 행은 표에서 이름 없는 줄이 된다. */
+export function ledgerKindLabel(kind) {
+  return LEDGER_KIND[kind]?.label ?? String(kind ?? "?");
+}
+
+export function ledgerKindText(kind) {
+  return LEDGER_KIND[kind]?.text
+    ?? `화면이 모르는 종류다 (${kind ?? "없음"}) — 엔진과 화면의 어휘가 어긋났다. `
+      + "결과 JSON의 ledger를 직접 볼 것.";
+}
+
+/** 행 색 계열 — kind가 먼저, 그다음 status.
+ *
+ * fail 계열은 빨강, 목표 미달·판정 불가는 주황, 설계 대상 밖(엔벨로프·건너뜀)은
+ * 회색, 무효 처방은 따로 강조한다 — 무효 처방은 "미달"이면서 동시에 "예산을 태운
+ * 처방"이라, 다른 미달과 같은 색으로 두면 눈에 안 띈다. */
+export function ledgerTone(row) {
+  const kind = row?.kind;
+  if (kind === "ineffective") return "ineffective";
+  if (kind === "outside_envelope" || kind === "skipped") return "na";
+  if (kind === "not_trimmed") return "fail";
+  if (kind === "tune" || kind === "unjudged") return "warn";
+  const s = row?.status;
+  if (s === "fail") return "fail";
+  if (s === "warn") return "warn";
+  if (s === "ok") return "ok";
+  return "na";
+}
+
+/** 심각도 정렬 키 — 큰 것이 앞. null(못 잼)이 가장 앞, 그다음 ∞ 부족.
+ *
+ * 엔진 severity와 같은 규약이다: "얼마나 나쁜지 모른다"가 먼저다. 비유한값은
+ * 문자열로 오므로(serialize.py) numeric()으로 걸러 부호만 본다 — 숫자로 다루면
+ * "inf" 비교가 전부 false가 되어 최악이 목록 꼬리에 가라앉는다. */
+function severityKey(s) {
+  if (s == null) return Number.POSITIVE_INFINITY;
+  const v = numeric(s);
+  if (v != null) return v;
+  return s === "inf" ? Number.MAX_VALUE : -Number.MAX_VALUE;
+}
+
+/** 원장 행의 처방 칸 한 줄 — 처방이 없으면 null.
+ *
+ * verdict만 찍으면 "그 처방이 어떻게 됐는가"가 빠진다. 반영 여부와 효과까지 같은
+ * 줄에 있어야, 카드 목록을 따로 뒤지지 않고도 이 미달이 손을 탄 자리인지 알 수 있다. */
+export function ledgerActionText(action) {
+  if (!action) return null;
+  const parts = [VERDICT_LABEL[action.verdict] ?? action.verdict ?? action.type ?? "처방"];
+  if (!action.applied) parts.push("미반영 — 승인하면 반영된다");
+  else if (action.changed === false) {
+    parts.push("반영했으나 판정이 그대로다 — 이 자리에서 듣지 않았다");
+  } else if (action.changed) parts.push("반영 후 판정이 움직였다");
+  else parts.push("반영됨 — 효과는 다음 검증에서 잰다");
+  if (action.sealed) parts.push(`봉인: ${action.sealed}`);
+  return parts.join(" · ");
+}
+
+/** body.ledger → 표 행. 없으면 [] (원장이 생기기 전의 구형 결과도 그대로 뜬다).
+ *
+ * 표시용 필드를 여기서 붙인다 — 사유 한국어, 부족 한 줄(가장 심각한 지표 하나),
+ * 종류 라벨·뜻, 색 계열, 심각도 표기, 처방 한 줄. 뷰는 배치만 한다.
+ *
+ * 정렬은 엔진 규약(severity 내림차순·못 잼이 맨 앞)을 여기서 한 번 더 세운다.
+ * 엔진 순서를 그대로 믿으면 계약이 흔들렸을 때 화면이 조용히 잘못된 순서를 그리고,
+ * 상위 N개만 펼치는 화면에서 그것은 곧 **가장 나쁜 행이 접힌 채로 남는 것**이다.
+ * 같은 심각도 안에서는 엔진 순서를 지킨다(JS sort는 안정 정렬). */
+export function ledgerRows(body, reasonMap) {
+  const rows = (body?.ledger ?? []).map((r) => {
+    const worst = shortfallLines(r?.shortfall)[0] ?? null;
+    const reasonLine = reasonText(r?.reason, reasonMap);
+    const note = r?.note ?? null;
+    // 튜닝 행에는 shortfall이 없다 — 검증 항목이 아니라서 요구선 대비 부족을 못 낸다.
+    // 대신 목표와 달성이 따로 실려 오는데, 그 칸을 비우면 "얼마나 모자란가"가 원장에서
+    // 사라진다(그걸 보려고 만든 표다). 달성은 **아는 지표만** 적는다 — 엔진 레코드는
+    // 조성 메타를 함께 싣는다 (tunedLines와 같은 이유)
+    let shortfallLine = worst?.text ?? null;
+    let shortfallKind = worst?.kind ?? null;
+    if (!shortfallLine) {
+      const parts = [];
+      if (r?.target != null) parts.push(`목표 ${num(r.target)}`);
+      const ach = achievedText(r?.achieved);
+      if (ach) parts.push(`달성 ${ach}`);
+      if (parts.length) {
+        shortfallLine = parts.join(" · ");
+        shortfallKind = null; // 부족량을 잰 것이 아니다 — 빨강으로 칠하지 않는다
+      }
+    }
+    return {
+      point: r?.point ?? null,
+      loop: r?.loop ?? null,
+      kind: r?.kind ?? null,
+      status: r?.status ?? null,
+      severity: r?.severity ?? null,
+      target: r?.target ?? null,
+      note,
+      // 엔진의 tune 행은 note에 사유 문구를 그대로 넣는다(REASON_TEXT[reason]) —
+      // 사유 줄이 같은 문장을 이미 담고 있으면 표에 한 문장이 두 번 뜬다
+      noteLine: note && reasonLine && reasonLine.includes(note) ? null : note,
+      action: r?.action ?? null,
+      kindLabel: ledgerKindLabel(r?.kind),
+      kindText: ledgerKindText(r?.kind),
+      tone: ledgerTone(r),
+      reason: r?.reason ?? null,
+      reasonLine,
+      // 지표가 여럿이어도 표에는 가장 심각한 하나만 — 나머지는 처방 카드에 있다
+      shortfallLine,
+      shortfallKind,
+      // 못 잰 것을 "0"으로 그리면 최악이 최선처럼 보인다 — 낱말로 적는다
+      severityText: r?.severity == null ? "못 잼" : num(r.severity),
+      actionLine: ledgerActionText(r?.action),
+    };
+  });
+  return rows.sort((a, b) => {
+    const ka = severityKey(a.severity);
+    const kb = severityKey(b.severity);
+    return ka === kb ? 0 : kb - ka;
+  });
+}
+
+/** 원장이 잘렸다는 고지 한 줄 — 전량이면 null.
+ *
+ * 저장물은 원장을 severity 상위 N행만 싣는다(routes/design.py MAX_LEDGER_ROWS).
+ * 원장은 "이 실행이 못 맞춘 것 전부"를 뜻하는 목록이라, 조용히 잘린 원장은 **못
+ * 맞춘 것이 그것뿐이라고 말하는 목록**이 된다 — 실패 0을 통과로 위장하지 않으려고
+ * judged를 함께 세는 것과 같은 이유로, 잘린 사실은 표 위에 적는다.
+ *
+ * 고지(ledger_truncated)가 없어도 report.ledger_size가 행 수보다 크면 잘린 것이다 —
+ * 두 출처 중 하나만 믿으면 다른 쪽이 빠졌을 때 화면이 조용해진다. */
+export function ledgerTruncatedText(body) {
+  const kept = (body?.ledger ?? []).length;
+  if (!kept) return null;
+  const total = numeric(body?.ledger_truncated?.total)
+    ?? numeric(body?.report?.ledger_size);
+  if (total == null || total <= kept) return null;
+  return `원장 ${total}행 중 ${kept}행만 이 결과에 실렸다 (저장 크기 상한) — `
+    + `나머지 ${total - kept}행은 여기에 없다. 심각도 상위부터 남으므로 잘린 쪽이 `
+    + "덜 심각하지만, 이 표를 '미달은 이게 전부'로 읽으면 안 된다.";
+}
+
+// ── 검증 커버리지 ──────────────────────────────────────────────────────
+
+/** 격자 세분화 중단 사유 → 한국어 [폴백]. 모르는 코드는 코드 그대로 붙는다. */
+const REFINE_ABORT_TEXT = {
+  budget_points: "점 예산 소진 (점 예산을 올리면 더 촘촘해진다)",
+  budget_iters: "이터 예산 소진",
+};
+
+function refineAbortText(code) {
+  const t = REFINE_ABORT_TEXT[code];
+  return t ? `${code} — ${t}` : String(code);
+}
+
+const _TONE_RANK = { fail: 2, warn: 1, hint: 0 };
+
+/** report.coverage·coverage_gaps → 줄 목록 [{key, tone, text}] — 없으면 [].
+ *
+ * "무엇을 봤나"가 아니라 **무엇을 안 봤나**를 세는 줄이다. 판정·실패 수는 본 것만
+ * 세므로, 안 본 것이 많을수록 그 수치는 오히려 건강해 보인다 — 검증점이 0이면
+ * 실패도 0이다.
+ *
+ * 검증점 0인데 못 넣은 구간이 있는 것이 가장 강한 줄이다: 보간 구간 검증이 한 건도
+ * 수행되지 않았다는 뜻이고, 그러면 판정된 자리가 전부 자기 게인이 직접 튜닝된
+ * 앵커다 — 스케줄이 breakpoint 사이에서 무너지는지는 아무도 보지 않았다.
+ *
+ * 프로즈는 엔진이 정본이다(coverage_gaps). 여기서 만드는 문장은 **엔진 문장이 없을
+ * 때만** 붙는다 — 둘 다 내면 같은 말이 색만 달리해 두 번 뜬다. 수치 줄은 항상 낸다:
+ * 엔진 문장은 "왜 문제인가"를 말하고 이 줄은 "몇 개인가"를 말한다.
+ *
+ * 검증점 수와 못 넣은 수는 **더하지 않는다**. validation_points는 지금 점집합에
+ * 실재하는 검증점 수이고(스테이지 카운터로 세면 VERIFY가 여러 번 도는 이터레이션에서
+ * 마지막 패스 값만 남아, 15개를 넣고도 0으로 보고된다), validation_missing은 요구했는데
+ * 점 예산 때문에 못 넣은 구간 수다. 이터가 돌면 요구가 갱신되므로 둘의 합은 전체 구간
+ * 수가 아니다 — "요구 N개 중 M개"라고 쓰면 화면이 분모를 지어내게 된다.
+ *
+ * 줄 순서는 심각도순(fail → warn → hint)으로 세운다. 엔진 문장이 먼저 오면 가장 큰
+ * 공백이 목록 중간에 묻힌다. */
+export function coverageLines(report) {
+  const c = report?.coverage ?? null;
+  const gaps = (report?.coverage_gaps ?? []).filter((g) => String(g ?? "").trim());
+  // 엔진 문장이 있으면 화면은 수치만 말한다 — 프로즈를 다시 적지 않는다
+  const prose = (s) => (gaps.length ? "" : s);
+  const out = [];
+  if (c) {
+    // 검증점 수가 아예 안 온 것과 0인 것은 다르다 — 없는 수를 0으로 읽으면
+    // "한 건도 안 봤다"를 결과가 말한 적 없는데 화면이 단정하게 된다
+    const got = numeric(c.validation_points);
+    const missing = numeric(c.validation_missing) ?? 0;
+    if (got == null && missing > 0) {
+      out.push({ key: "validation", tone: "warn",
+        text: `보간 구간 ${num(missing)}개가 검증점 없이 남았는데 실제로 몇 개가 검증됐는지를 `
+          + "결과가 말하지 않는다 — 무엇을 봤는지 확인할 수 없다." });
+    } else if (got === 0 && missing > 0) {
+      out.push({ key: "validation", tone: "fail",
+        text: `보간 구간 검증점이 한 개도 없다 (검증점 없이 남은 구간 ${num(missing)}개).`
+          + prose(" 판정된 자리가 전부 자기 게인이 직접 튜닝된 앵커다 —"
+            + " 스케줄이 breakpoint 사이에서 무너지는지는 보지 않았다.") });
+    } else if (got > 0 && missing > 0) {
+      out.push({ key: "validation", tone: "warn",
+        text: `보간 구간 ${num(missing)}개가 검증점 없이 남았다 (검증된 구간은 ${num(got)}개).`
+          + prose(" 그 구간의 스케줄은 보지 않았다.") });
+    } else if (got > 0) {
+      // 못 넣은 구간이 없다 — 이건 공백이 아니라 근거라 회색으로 둔다
+      out.push({ key: "validation", tone: "hint",
+        text: `보간 구간 검증점 ${num(got)}` });
+    }
+    // got === 0 && missing === 0이면 아무 말도 안 한다 — 검증할 구간 자체가 없었다
+
+    const rem = numeric(c.refine_remaining);
+    const tol = numeric(c.refine_tol);
+    if (rem != null && tol != null) {
+      out.push(rem > tol
+        ? { key: "refine", tone: "warn",
+          text: `REFINE이 남긴 최대 플랜트 거리 ${num(rem)} (허용 ${num(tol)})`
+            + `${c.refine_aborted ? ` · 중단 사유 ${refineAbortText(c.refine_aborted)}` : ""}`
+            + prose(" — 격자가 플랜트 변화를 다 못 따라갔다."
+              + " 그 구간의 게인은 보간으로만 채워진다.") }
+        : { key: "refine", tone: "hint",
+          text: `플랜트 거리 잔여 ${num(rem)} ≤ 허용 ${num(tol)}` });
+    } else if (c.refine_aborted) {
+      // 거리를 못 재도 중단 사실은 남는다 — 조용히 넘기면 격자가 계획대로 찼는지 모른다
+      out.push({ key: "refine", tone: "warn",
+        text: `격자 세분화 중단 — ${refineAbortText(c.refine_aborted)}` });
+    }
+    const nt = numeric(c.not_trimmed) ?? 0;
+    if (nt > 0) {
+      out.push({ key: "not_trimmed", tone: "warn",
+        text: `트림 미수렴 ${num(nt)}점`
+          + prose(" — 그 점들은 실패 목록에도 판정 수에도 들어가지 않는다.") });
+    }
+  }
+  // 엔진이 만든 문장 — 화면이 다시 쓰지 않는다. 비어 있지 않다는 것 자체가
+  // "무엇을 안 봤는지가 있는 실행"이라는 신호다
+  gaps.forEach((g, i) => {
+    out.push({ key: `gap${i}`, tone: "warn", text: String(g) });
+  });
+  return out.sort((a, b) => (_TONE_RANK[b.tone] ?? 0) - (_TONE_RANK[a.tone] ?? 0));
 }

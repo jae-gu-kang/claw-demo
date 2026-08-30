@@ -17,15 +17,23 @@ import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
   CRITERIA_FIELDS, TARGET_FIELDS, VERDICT_LABEL, actionCards, adoptBlockedText,
-  adoptStorePayload, buildConfig, evidenceLines, pointRows, reportLine, resumable,
-  resumeBlockedText, statusCounts, statusSeverity, statusText, trimLabel, verdictLegend,
+  adoptStorePayload, adoptWarnText, buildConfig, coverageLines, evidenceLines,
+  ledgerRows, ledgerTruncatedText, pointRows, reportLine, resumable, resumeBlockedText,
+  statusCounts, statusSeverity, statusText, trimLabel, verdictLegend,
 } from "../lib/autodesign.js";
 import { slotIndex, withConstant } from "../lib/gainsync.js";
 import { store } from "../store.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
 const SEV_COLOR = { ok: "#34c759", warn: "#ff9500", fail: "#ff3b30", na: "#8e8e93" };
+// 무효 처방은 "미달"이면서 동시에 "예산을 태운 처방"이라 다른 미달과 같은 색으로
+// 두면 눈에 안 띈다 — 판정 4색과 섞이지 않는 보라를 따로 준다 (lib ledgerTone)
+const LEDGER_COLOR = { ...SEV_COLOR, ineffective: "#af52de" };
+// 범례 색을 고르는 순서 — 한 종류가 여러 색으로 뜰 때 가장 심한 쪽을 세운다
+const LEDGER_TONE_RANK = { ok: 0, na: 1, warn: 2, ineffective: 3, fail: 4 };
 const ROLE_LABEL = { anchor: "앵커(트림·선형화)", breakpoint: "게인 breakpoint", validation: "검증점" };
+// 원장은 수십 행이 될 수 있다 — 심각도 상위만 펼치고 나머지는 접는다
+const LEDGER_TOP_N = 20;
 
 // 탭 이탈·재진입에도 실행 중 잡·최근 결과를 잃지 않는다 (progress.js 재부착 규약)
 let runningJobId = null;
@@ -248,10 +256,118 @@ function legendBox(criteria) {
       + "fail은 다르다 — 합격선 미달이라 그대로 확정하면 안 된다."));
 }
 
+/** 검증 커버리지 — 무엇을 안 봤나. 볼 것이 없으면 null (el은 null 자식을 거른다).
+ *
+ * 상태 줄 바로 아래 자리다. 판정·실패 수는 **본 것만** 세므로, 안 본 것이 많을수록
+ * 그 수치는 오히려 건강해 보인다 — 검증점이 0이면 실패도 0이다. 공백이 있으면
+ * 회색 hint가 아니라 경고 톤으로 낸다. */
+function coverageBox(report) {
+  const lines = coverageLines(report);
+  if (!lines.length) return null;
+  const strong = lines.some((l) => l.tone !== "hint");
+  return el("div", {},
+    el("p", { class: strong ? null : "hint" }, strong
+      ? el("strong", {}, "검증 커버리지 — 이 실행이 안 본 것")
+      : "검증 커버리지"),
+    ...lines.map((l) => {
+      if (l.tone === "hint") return el("div", { class: "hint" }, l.text);
+      const color = l.tone === "fail" ? SEV_COLOR.fail : SEV_COLOR.warn;
+      return el("div", { style: `color:${color}` },
+        l.tone === "fail" ? el("strong", {}, l.text) : l.text);
+    }),
+  );
+}
+
+/** 원장 표 한 벌 — 상위 N행과 접힌 나머지가 같은 모양이라 함수로 뽑는다. */
+function ledgerTable(rows) {
+  const cell = (line, kind) => {
+    if (!line) return el("td", { class: "hint" }, "—");
+    const color = kind === "short" ? SEV_COLOR.fail
+      : kind === "spare" ? SEV_COLOR.ok : SEV_COLOR.na;
+    return el("td", { style: `color:${color};text-align:left` }, line);
+  };
+  return el("table", { class: "data" },
+    el("thead", {}, el("tr", {},
+      ...["점", "자리", "종류 · 심각도", "판정", "요구 / 달성 / 부족", "사유", "처방"]
+        .map((h) => el("th", {}, h)))),
+    el("tbody", {}, rows.map((r) => el("tr", {},
+      el("td", {}, r.point ?? "—"),
+      // 점 단위 항목은 자리가 없다 — 빈칸으로 두면 앞 행의 자리로 읽힌다
+      el("td", {}, r.loop ?? el("span", { class: "hint" }, "(점 전체)")),
+      el("td", { style: "text-align:left" },
+        el("div", { style: `color:${LEDGER_COLOR[r.tone] ?? SEV_COLOR.na}` },
+          el("strong", {}, r.kindLabel)),
+        // 못 잰 심각도를 0으로 그리면 최악이 최선처럼 보인다 — 낱말로 적는다
+        el("div", { class: "hint" }, `심각도 ${r.severityText}`)),
+      el("td", {}, r.status == null
+        ? el("span", { class: "hint" }, "—") : sevChip(r.status)),
+      cell(r.shortfallLine, r.shortfallKind),
+      el("td", { style: "text-align:left" },
+        r.reasonLine ? el("div", {}, r.reasonLine) : null,
+        // 엔진이 낸 "왜 이 행이 있는가" 한 줄 — 사유 코드가 없는 종류는 이것뿐이다
+        // (사유 줄과 같은 문장이면 lib이 이미 걸렀다)
+        r.noteLine ? el("div", { class: "hint" }, r.noteLine) : null,
+        !r.reasonLine && !r.noteLine ? el("div", { class: "hint" }, "—") : null),
+      el("td", { style: "text-align:left" }, r.actionLine
+        ? el("div", { style: r.action?.changed === false
+          ? `color:${LEDGER_COLOR.ineffective}` : null }, r.actionLine)
+        : el("span", { class: "hint" }, "처방 없음")),
+    ))),
+  );
+}
+
+/** 미달 원장 — 처방이 안 나온 미달까지 한 표에.
+ *
+ * 종전 화면은 처방 카드가 붙는 실패만 보여 줬다. 실제로는 튜닝이 설계 목표를 못
+ * 채운 자리, 판정 불가, 엔벨로프 경계, 건너뛴 점, 트림 미수렴, 반영했는데 안 바뀐
+ * 처방이 더 많고, 그것들은 화면 어디에도 없었다. **failures가 0이어도 원장이 비지
+ * 않으면 이 절은 뜬다** — 실패 0이 곧 미달 0이 아니기 때문이다. */
+function ledgerSection(rows, truncated) {
+  const top = rows.slice(0, LEDGER_TOP_N);
+  const rest = rows.slice(LEDGER_TOP_N);
+  // 종류의 뜻은 표에 나온 종류만 — 안 나온 종류까지 설명하면 목록이 사전이 된다.
+  // 한 종류가 두 색으로 뜰 수 있으므로(verify는 fail·warn 둘 다) 범례 색은 그 종류가
+  // 실제로 낸 것 중 가장 심한 쪽으로 고정한다 — 먼저 만난 행의 색을 쓰면 같은 결과를
+  // 다시 열 때마다 범례 색이 달라 보인다
+  const kinds = new Map();
+  for (const r of rows) {
+    const k = r.kind ?? "?";
+    const prev = kinds.get(k);
+    if (!prev) kinds.set(k, r);
+    else if (LEDGER_TONE_RANK[r.tone] > LEDGER_TONE_RANK[prev.tone]) kinds.set(k, r);
+  }
+  const out = [
+    el("h4", {}, `미달 원장 (${rows.length}행)`),
+    el("p", { class: "hint" },
+      "처방 카드가 붙는 실패는 이 표의 일부다 — 처방이 안 나온 미달(튜닝 목표 미달·"
+      + "판정 불가·엔벨로프 경계·트림 미수렴·튜닝 건너뜀·무효 처방)도 여기 모인다. "
+      + "실패 0인 실행에도 행이 남을 수 있다. 심각도(요구선 대비 부족 비율) 내림차순이고, "
+      + "못 잰 것이 맨 앞이다 — 얼마나 나쁜지 모르는 것이 가장 먼저 볼 자리다."),
+  ];
+  // 잘린 원장을 그대로 그리면 "미달은 이게 전부"라고 말하는 표가 된다
+  if (truncated) {
+    out.push(el("p", { style: `color:${SEV_COLOR.warn}` }, el("strong", {}, truncated)));
+  }
+  out.push(ledgerTable(top));
+  if (rest.length) {
+    out.push(el("details", {},
+      el("summary", { class: "hint" },
+        `나머지 ${rest.length}행 — 심각도 하위 (접힘)`),
+      ledgerTable(rest)));
+  }
+  out.push(el("details", {},
+    el("summary", { class: "hint" }, "종류의 뜻과 다음에 할 일"),
+    el("ul", { class: "hint" }, [...kinds.values()].map((r) => el("li", {},
+      el("strong", { style: `color:${LEDGER_COLOR[r.tone] ?? SEV_COLOR.na}` }, r.kindLabel),
+      ` — ${r.kindText}`)))));
+  return out;
+}
+
 function renderResult(box, body, resultId, ctx) {
   const report = body.report ?? {};
   const rows = pointRows(body);
   const cards = actionCards(body);
+  const ledger = ledgerRows(body, designDefaults?.reason_text);
 
   const pointsTable = el("table", { class: "data" },
     el("thead", {}, el("tr", {},
@@ -369,6 +485,7 @@ function renderResult(box, body, resultId, ctx) {
   };
   const adoptMsg = el("span");
 
+  const covBox = coverageBox(report);
   const sections = [
     el("h3", {}, `결과 ${resultId}`),
     el("p", {},
@@ -377,11 +494,17 @@ function renderResult(box, body, resultId, ctx) {
       reportLine(report, rows.length).join(" · ")),
     // 영어 토큰만 찍으면 상태를 말하되 뜻과 다음 행동을 말하지 않는다
     el("p", { class: "hint" }, statusText(report.status)),
+    // 상태 줄 바로 아래 — 이 실행이 무엇을 안 봤는지가 상태의 전제다.
+    // sections는 native append로 펼쳐지므로 null을 넣으면 터진다 (el과 다르다)
+    ...(covBox ? [covBox] : []),
     el("h4", {}, "운영점"),
     countsLine(rows),
     pointsTable,
     legendBox(body.margin_out?.criteria),
   ];
+
+  // 실패가 0이어도 원장이 비지 않으면 뜬다 — 실패 0이 곧 미달 0이 아니다
+  if (ledger.length) sections.push(...ledgerSection(ledger, ledgerTruncatedText(body)));
 
   if (cards.approvable.length && resumable(report)) {
     sections.push(
@@ -443,6 +566,13 @@ function renderResult(box, body, resultId, ctx) {
     if (adoptBlocked) {
       sections.push(el("p", {}, el("strong", {}, adoptBlocked)));
     } else {
+      // 확정을 막지는 않는다 — 다만 무엇을 모르고 확정하는지는 버튼 옆에 적는다.
+      // 커버리지 줄이 화면 위쪽에 있어도, 확정하는 순간에 다시 보이지 않으면
+      // 스크롤 한 번에 잊힌다
+      const warn = adoptWarnText(report);
+      if (warn) {
+        sections.push(el("p", { style: `color:${SEV_COLOR.warn}` }, el("strong", {}, warn)));
+      }
       sections.push(
         el("button", { onclick: () => adopt().catch((e) =>
           clear(adoptMsg).append(el("span", { class: "error-box" }, errorText(e)))) },
