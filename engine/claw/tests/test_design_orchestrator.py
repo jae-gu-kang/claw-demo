@@ -334,3 +334,158 @@ def test_classify_gets_the_hand_design_not_the_fitted_one(monkeypatch):
     assert seen["design_base"] == s.design, "손설계 정본이 안 넘어갔다"
     assert seen["design"]["roll.k_rate"] == 0.0, "보간 비교 기준은 실효 설계값이어야 한다"
     assert seen["design_base"]["roll.k_rate"] == -0.2
+
+
+def _seed_failing_session(mode="auto", **cfg):
+    """실패 하나가 걸린 세션 — 처방 효과 채점만 보기 위한 최소 상태."""
+    from claw.common.contracts import TrimCase
+    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, OperatingPoint, case_name
+
+    s = DesignSession(_small(mode=mode, **cfg))
+    for mach, role in ((0.3, ROLE_ANCHOR), (0.4, ROLE_VALIDATION), (0.5, ROLE_ANCHOR)):
+        s.points.add(OperatingPoint(
+            case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
+                          alt=1000.0, fuel=200.0), role=role, origin="test"))
+    v = case_name(0.4, 1000.0, 200.0)
+    s.margin_out = {"cases": {v: {"role": "validation", "loops": {
+        "pitch_att": {"kind": "margin", "pm_deg": 40.0, "gm_db": 7.0,
+                      "status": "fail"}}}}, "failures": []}
+    s.actions = [{"id": "a1", "verdict": "simple_deficit", "case": v,
+                  "loop": "pitch_att", "action": {"type": "add_validation", "point": v}}]
+    return s, v
+
+
+def _set_margin(s, v, pm, status):
+    s.margin_out["cases"][v]["loops"]["pitch_att"] = {
+        "kind": "margin", "pm_deg": pm, "gm_db": 7.0, "status": status}
+
+
+def test_applied_action_is_scored_against_the_next_verification():
+    """"반영됨"과 "고쳐짐"은 다르다 — 다음 판정으로 채점한다.
+
+    처방을 내고 applied만 찍으면 무효 처방이 예산을 태우는 것을 아무도 모른다.
+    실제로 앵커에 대한 게인 주입 처방이 구조적으로 무효인 채 이터를 소모했다.
+    """
+    s, v = _seed_failing_session()
+    s.apply_actions(["a1"])
+    a = s.actions[0]
+    assert a["applied"] is True
+    assert a["effect"]["before"]["status"] == "fail"
+    assert "after" not in a["effect"], "아직 재검증 전인데 채점했다"
+
+    _set_margin(s, v, 52.0, "ok")  # 다음 VERIFY에서 좋아졌다
+    s._score_applied_actions()
+    assert a["effect"]["after"]["status"] == "ok"
+    assert a["effect"]["changed"] is True
+    assert s.report()["ineffective_actions"] == 0
+
+
+def test_ineffective_action_is_sealed_after_two_tries():
+    """두 번 반영해도 판정이 안 움직이면 그 처방을 봉인한다 — 같은 카드 재발행 금지.
+
+    봉인이 없으면 무효 처방이 예산 소진까지 같은 순환을 돈다 (fit 잔차가 tol_gain을
+    넘는 앵커에서 실제로 도달 가능한 경로였다).
+    """
+    s, v = _seed_failing_session()
+    for _ in range(2):
+        s.actions = [{"id": "a1", "verdict": "simple_deficit", "case": v,
+                      "loop": "pitch_att",
+                      "action": {"type": "add_validation", "point": v}}]
+        s.apply_actions(["a1"])
+        _set_margin(s, v, 40.0, "fail")  # 아무것도 안 바뀜
+        s._score_applied_actions()
+
+    assert s.report()["ineffective_actions"] == 2
+    assert s.sealed_keys() == {f"{v}|pitch_att|simple_deficit"}
+    # 봉인된 처방은 다음 CLASSIFY에서 적용 대상에서 빠진다 (분류기는 대역)
+    from claw.design import orchestrator as O
+
+    s.margin_out["failures"] = [{"case": v, "loop": "pitch_att", "severity": 1.0}]
+    monkey = [{"id": "a1", "verdict": "simple_deficit", "case": v, "loop": "pitch_att",
+               "action": {"type": "add_validation", "point": v}, "evidence": {}}]
+    orig = O.classify_failures
+    try:
+        O.classify_failures = lambda *a, **k: [dict(x) for x in monkey]
+        s._stage_classify(None, lambda *a: None)
+    finally:
+        O.classify_failures = orig
+    assert s.actions[0]["sealed"], "봉인 표식이 안 붙었다"
+    assert s.status == "escalated", "적용할 처방이 없으면 순환을 멈춰야 한다"
+
+
+def test_effect_unknown_is_not_counted_as_ineffective():
+    """볼 수 없는 것을 무효로 세면 멀쩡한 처방이 봉인된다."""
+    s, v = _seed_failing_session()
+    s.apply_actions(["a1"])
+    s.margin_out["cases"] = {}  # 그 점이 판정에서 사라졌다 (재트림 실패 등)
+    s._score_applied_actions()
+    assert s.actions[0]["effect"]["changed"] is True
+    assert s.sealed_keys() == set()
+
+
+def test_tighten_fit_moves_the_fit_parameters_and_ratchets():
+    """앵커 처방(tighten_fit)은 샘플이 아니라 **적합**을 바꾼다 — 단조 래칫, 상한 있음."""
+    from claw.design.orchestrator import _FIT_TIGHTEN_MAX
+
+    s, v = _seed_failing_session()
+    base = s._fit_params()
+    for i in range(_FIT_TIGHTEN_MAX + 2):
+        s.actions = [{"id": f"t{i}", "verdict": "fit_residual", "case": v,
+                      "loop": "pitch_att",
+                      "action": {"type": "tighten_fit", "point": v, "slots": []}}]
+        s.apply_actions([f"t{i}"])
+    assert s.fit_tighten == _FIT_TIGHTEN_MAX, "상한을 넘어 조여진다 — 래칫이 안 멈춘다"
+    tight = s._fit_params()
+    assert tight["tol_fit"] < base["tol_fit"]
+    assert tight["max_segments"] > base["max_segments"]
+    assert s.actions[0].get("skipped"), "상한 도달 뒤에도 반영했다고 기록한다"
+
+
+def test_refit_gains_beat_promoted_gains():
+    """같은 점에 승격 게인이 먼저 들어가 있어도 새 재적합 값이 이겨야 한다.
+
+    한 겹 setdefault이던 동안, 처음 들어간 승격 값이 계속 이겨 이터를 넘긴 새
+    처방이 아무것도 안 바꿨다 — 반영은 되는데 결과가 그대로인 순환.
+    """
+    s, v = _seed_failing_session()
+    s.promoted_gains = {"pitch.kp": {v: -1.0}}
+    s.actions = [{"id": "r1", "verdict": "gain_interp_valley", "case": v,
+                  "loop": "pitch_att",
+                  "action": {"type": "refit_at", "point": v, "gains": {"pitch.kp": -2.5}}}]
+    s.apply_actions(["r1"])
+    assert s.refit_gains == {"pitch.kp": {v: -2.5}}
+
+    captured = {}
+    from claw.design import orchestrator as O
+    orig = O.fit_slots
+    try:
+        O.fit_slots = lambda samples, points, **kw: (
+            captured.update(samples=samples) or
+            {"tables": {}, "constants": {}, "reports": {}})
+        s._stage_fit(lambda *a: None)
+    finally:
+        O.fit_slots = orig
+    assert captured["samples"]["pitch.kp"][v] == -2.5, "승격 게인이 재적합 값을 덮었다"
+
+
+def test_verify_stage_scores_the_applied_actions(monkeypatch):
+    """채점은 VERIFY가 부른다 — 함수만 있고 배선이 없으면 아무것도 채점되지 않는다.
+
+    직접 호출하는 테스트만 있으면 이 호출을 지워도 스위트가 통과한다.
+    """
+    from claw.design import orchestrator as O
+
+    s, v = _seed_failing_session()
+    s.apply_actions(["a1"])
+    assert "after" not in s.actions[0]["effect"]
+
+    monkeypatch.setattr(O, "midpoint_validation_points", lambda pts: [])
+    monkeypatch.setattr(O, "scheduled_margin_map", lambda *a, **k: {
+        "aborted": None, "failures": [],
+        "cases": {v: {"role": "validation", "loops": {"pitch_att": {
+            "kind": "margin", "pm_deg": 52.0, "gm_db": 9.0, "status": "ok"}}}},
+    })
+    s._stage_verify(None, "fp", lambda *a: None)
+    assert s.stage == "CLASSIFY"
+    assert s.actions[0]["effect"]["after"]["status"] == "ok"
+    assert s.actions[0]["effect"]["changed"] is True

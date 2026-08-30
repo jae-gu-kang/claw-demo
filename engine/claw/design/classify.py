@@ -17,7 +17,12 @@
    이쪽을 택하고 note로 병기.
 3. gain_interp_valley — 최적 게인은 통과 ∧ 보간 게인과의 괴리 > tol_gain ∧ 이웃
    breakpoint 자체는 통과 → 보간이 범인. action=promote v→breakpoint (최적
-   게인을 그 점의 값으로) + FIT 국소 재실행.
+   게인을 그 점의 값으로) + FIT 국소 재실행. 단 v가 **앵커**면 얘기가 다르다 → 3′.
+3′. fit_residual — 앵커에서의 보간 괴리. TUNE이 매 이터레이션 그 점의 자유 게인
+   최적을 샘플에 넣으므로 격자가 성긴 게 아니라 적합이 그 점을 못 지나간 것이다.
+   action=tighten_fit (허용치를 조이고 구간 수를 늘린다). 종전에는 이 경우도
+   refit_at으로 냈는데, 앵커의 최적 게인을 샘플에 "고정"하는 것은 이미 그 값이
+   샘플이라 **구조적으로 무효**였다 — applied로 기록되고 이터 예산만 태웠다.
 4. simple_deficit — 나머지. 미달 폭이 히스테리시스 밴드 내면 좁은 골 가능성 —
    action=add_validation (v 좌우 중점 2개). 지속·확대되면 다음 이터레이션에서
    1~3으로 자연 재분류된다.
@@ -31,7 +36,7 @@ from claw.design.schedmap import scheduled_gains
 from claw.design.tune import TuneTargets, tune_point
 
 VERDICTS = ("simple_deficit", "plant_variation", "gain_interp_valley", "structural_limit",
-            "gain_sign_flip")
+            "gain_sign_flip", "fit_residual")
 
 # 자리(루프) → 관련 게인 슬롯 — valley 괴리·breakpoint 승격 값의 대상
 LOOP_SLOTS = {
@@ -285,16 +290,30 @@ def classify_margin_deficit(
         evidence["neighbors"] = {"pair": (lo, hi), "axis": axis, "pass": neighbor_ok}
         if neighbor_ok:
             opt_gains = {s: tune_out["gains"][s] for s in slots if s in tune_out["gains"]}
-            # v가 **이미** breakpoint 이상이면 승격할 자리가 없다 — 역할은 단방향
-            # 래칫이라 요청하면 터진다(세션 전량 소실). anchor는 breakpoint 역할을
-            # 겸하므로(points.at_least 서열) 그 점에서 보간 괴리가 크다는 것은
-            # 격자가 성긴 게 아니라 **적합이 그 점을 못 맞춘 것**이다 — 처방은
-            # 승격이 아니라 그 점의 최적 게인을 적합 샘플에 고정해 재적합하는 것
-            if ROLE_RANK[points.get(v_name).role] >= ROLE_RANK[ROLE_BREAKPOINT]:
+            role = points.get(v_name).role
+            # **앵커에서의 괴리는 적합 실패다.** TUNE이 매 이터레이션 이 점의 자유 게인
+            # 최적을 샘플에 넣는데도 보간이 그 값과 어긋난다면, 격자가 성긴 게 아니라
+            # 적합 곡선이 이 점을 못 지나간 것이다. "최적 게인을 샘플에 고정"하는 처방은
+            # **구조적으로 무효**다 — 이미 그 값이 샘플이고, 병합에서 튜닝 샘플이 이긴다
+            # (orchestrator._stage_fit setdefault). 그런데도 applied로 기록되어 이터
+            # 예산만 태웠다. 적합을 조이는 것이 이 자리의 유일한 실효 처방이다
+            if role == ROLE_ANCHOR:
+                return {
+                    "verdict": "fit_residual",
+                    "action": {
+                        "type": "tighten_fit", "point": v_name, "slots": list(slots),
+                        "note": "앵커의 보간 괴리 — 이 점의 샘플은 이미 최적이다."
+                                " 적합 허용치를 조이고 구간 수를 늘려 곡선이 이 점을 지나게 한다",
+                    },
+                    "evidence": evidence,
+                }
+            # breakpoint는 TUNE이 안 도는 자리라 최적 게인 주입이 실제로 값을 바꾼다.
+            # 역할은 단방향 래칫이라 승격을 요청하면 터진다 (세션 전량 소실)
+            if ROLE_RANK[role] >= ROLE_RANK[ROLE_BREAKPOINT]:
                 return {
                     "verdict": "gain_interp_valley",
                     "action": {"type": "refit_at", "point": v_name, "gains": opt_gains,
-                               "note": "이미 breakpoint 이상 — 승격 대신 재적합"},
+                               "note": "이미 breakpoint — 승격 대신 그 점의 최적 게인 고정"},
                     "evidence": evidence,
                 }
             return {

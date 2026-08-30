@@ -19,6 +19,7 @@
   완료분을 보존한 채 멈춘다 (JobManager 협조적 취소 패턴).
 """
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -47,6 +48,12 @@ from claw.tables import PolyTable, Table
 
 STAGES = ("COARSE", "REFINE", "TUNE", "FIT", "VERIFY", "CLASSIFY", "DONE")
 MAX_ITERS = 10
+_FIT_TIGHTEN_FACTOR = 0.5  # tighten_fit 1회당 적합 허용치 배율
+_FIT_TIGHTEN_MAX = 3  # 조이기 상한 (허용치 1/8, 구간 +3) — 래칫의 천장
+_MAX_SEGMENTS_CAP = 8  # fit_slots 계약 상한 (AutoDesignConfig 검증과 동일)
+# 처방을 반영한 뒤 판정이 이만큼도 안 움직이면 "안 바뀌었다"로 본다 (부족 비율)
+_EFFECT_EPS = 1e-3
+_SEAL_AFTER = 2  # 연속 무효 횟수 — 이 이상이면 그 (점, 자리, verdict)를 봉인한다
 
 
 @dataclass
@@ -213,6 +220,27 @@ class _Cancelled(Exception):
     pass
 
 
+def _seal_key(case, loop, verdict) -> str:
+    """봉인 키 — 문자열이라야 세션 왕복(JSON)에서 살아남는다."""
+    return f"{case}|{loop}|{verdict}"
+
+
+def _effect_changed(before, after) -> bool:
+    """처방 전후로 이 자리의 판정이 실제로 움직였나.
+
+    볼 수 없으면(둘 중 하나가 없으면) **변화 없음이라 단정하지 않는다** — 모르는
+    것을 무효로 세면 멀쩡한 처방이 봉인된다.
+    """
+    if before is None or after is None:
+        return True
+    if before.get("status") != after.get("status"):
+        return True
+    b, a = before.get("severity"), after.get("severity")
+    if b is None or a is None:
+        return True
+    return abs(a - b) > _EFFECT_EPS
+
+
 class DesignSession:
     """자동 설계 세션 — 상태 전부가 이 객체이고 to_dict/from_dict로 왕복한다."""
 
@@ -225,6 +253,11 @@ class DesignSession:
         self.gain_samples: dict = {}
         self.tune_meta: dict = {}
         self.promoted_gains: dict = {}  # {slot: {이름: 값}} — valley 승격 breakpoint의 게인
+        # refit_at으로 **명시 고정**된 게인. promoted를 이긴다 — 같은 점이 이터를 넘어
+        # 다시 실패하면 새 최적이 들어와야 하는데, 한 겹 setdefault이던 동안에는
+        # 처음 들어간 승격 값이 계속 이겨 새 처방이 아무것도 안 바꿨다
+        self.refit_gains: dict = {}
+        self.fit_tighten = 0  # tighten_fit 반영 횟수 — 단조 증가 래칫 (종료 보장)
         self.fits: dict = {}
         self.sched_tables: dict = {}
         self.sched_constants: dict = {}
@@ -232,6 +265,10 @@ class DesignSession:
         self.actions: list = []
         self.escalations: list = []
         self.iterations: list = []
+        # 반영한 처방의 효과 기록 — "applied"만 찍고 결과를 안 보면 무효 처방이
+        # 예산을 태우는 것을 아무도 모른다. ineffective는 {봉인키: 연속 무효 횟수}
+        self.applied_log: list = []
+        self.ineffective: dict = {}
         self.stage = "COARSE"
         self.status = "running"
         self.iter_n = 0
@@ -292,22 +329,39 @@ class DesignSession:
         }
         self.stage = "FIT"
 
-    def _stage_fit(self, cb):
+    def _fit_params(self) -> dict:
+        """이 이터레이션의 적합 파라미터 — tighten_fit 처방이 반영된 값.
+
+        앵커에서의 보간 괴리(fit_residual)는 샘플을 고쳐서는 안 풀린다. 그 점의
+        샘플은 이미 최적이고, 남은 손잡이는 **적합 자체**다. 조이는 방향으로만
+        움직이는 래칫이라(허용치 ×0.5^n, 구간 +n, 상한 있음) 이터가 종료된다.
+        """
         c = self.config
-        # valley 승격 breakpoint의 최적 게인을 샘플에 합류 — 그 점 근방의 적합이
-        # 승격 의도를 따라가게 한다 (knot 강제가 아니라 잔차 유도 — fit.py greedy)
+        n = min(self.fit_tighten, _FIT_TIGHTEN_MAX)
+        return {
+            "flat_tol": c.flat_tol,
+            "tol_fit": c.fit_tol * (_FIT_TIGHTEN_FACTOR ** n),
+            "max_degree": c.max_degree,
+            "max_segments": min(_MAX_SEGMENTS_CAP, c.max_segments + n),
+        }
+
+    def _stage_fit(self, cb):
+        # 승격·재적합 게인을 샘플에 합류 — 그 점 근방의 적합이 처방 의도를 따라가게
+        # 한다 (knot 강제가 아니라 잔차 유도 — fit.py greedy)
         samples = {slot: dict(v) for slot, v in self.gain_samples.items()}
-        for slot, extra in self.promoted_gains.items():
+        extra: dict = {}
+        for src in (self.promoted_gains, self.refit_gains):  # 뒤가 이긴다
+            for slot, vals in src.items():
+                extra.setdefault(slot, {}).update(vals)
+        for slot, vals in extra.items():
             target = samples.setdefault(slot, {})
-            for name, value in extra.items():
-                # **튜닝 샘플이 이긴다.** 승격 게인은 한 번 들어가면 지워지지 않으므로,
+            for name, value in vals.items():
+                # **튜닝 샘플이 이긴다.** 주입 게인은 한 번 들어가면 지워지지 않으므로,
                 # 그 점이 나중에 anchor로 올라가 실제로 튜닝되면 낡은 값이 최신 결과를
-                # 덮어써 같은 점이 영원히 재분류된다 (이터 예산만 태운다)
+                # 덮어써 같은 점이 영원히 재분류된다 (이터 예산만 태운다). 앵커에 대한
+                # 주입 처방은 이제 분류기가 아예 안 낸다 — fit_residual로 간다
                 target.setdefault(name, value)
-        out = fit_slots(
-            samples, self.points, flat_tol=c.flat_tol, tol_fit=c.fit_tol,
-            max_degree=c.max_degree, max_segments=c.max_segments,
-        )
+        out = fit_slots(samples, self.points, **self._fit_params())
         self.sched_tables = out["tables"]
         self.sched_constants = out["constants"]
         self.fits = out["reports"]
@@ -329,6 +383,9 @@ class DesignSession:
         if out["aborted"]:
             raise _Cancelled()
         self.margin_out = out
+        # 새 판정이 나왔으니 직전에 반영한 처방들을 채점한다 — "applied"만 찍고
+        # 결과를 안 보면 무효 처방이 예산을 태우는 것을 아무도 모른다
+        self._score_applied_actions()
         self.stage = "CLASSIFY"
 
     def judged_count(self) -> int:
@@ -379,6 +436,13 @@ class DesignSession:
             tol_plant=c.refine_tol, tol_gain=c.tol_gain, **self._act_kw(),
         )
         cb(1, 1, "classify")
+        # 두 번 반영해도 판정이 안 움직인 처방은 다시 내지 않는다 — 무효인 줄 알면서
+        # 같은 카드를 다시 내미는 것은 이터 예산만 태우고 사용자를 속인다
+        sealed = self.sealed_keys()
+        for a in actions:
+            if _seal_key(a["case"], a["loop"], a["verdict"]) in sealed:
+                a["sealed"] = (f"{_SEAL_AFTER}회 반영해도 판정이 안 바뀌었다 —"
+                               " 이 처방으로는 풀리지 않는다")
         for a in actions:
             if a["action"]["type"] == "escalate" and all(
                 e["id"] != a["id"] for e in self.escalations
@@ -386,7 +450,8 @@ class DesignSession:
                 self.escalations.append(a)
         self.actions = actions
         applicable = [a for a in actions
-                      if a["action"]["type"] != "escalate" and "superseded_by" not in a]
+                      if a["action"]["type"] != "escalate" and "superseded_by" not in a
+                      and "sealed" not in a]
         self.iterations.append({
             "n": self.iter_n, "stage": "CLASSIFY",
             "failures": len(self.margin_out["failures"]),
@@ -404,6 +469,44 @@ class DesignSession:
             self.status = "awaiting_approval"
             return
         self.apply_actions([a["id"] for a in applicable])
+
+    # ── 처방 효과 ──
+    def _loop_snapshot(self, case, loop) -> dict | None:
+        """(점, 자리)의 현재 판정·부족 비율 — 처방 전후 비교의 단위."""
+        if not case or not loop:
+            return None
+        entry = self.margin_out.get("cases", {}).get(case, {}).get("loops", {}).get(loop)
+        if entry is None:
+            return None
+        sev = self.config.criteria.severity(entry)
+        return {"status": entry.get("status"),
+                "severity": None if not math.isfinite(sev) else sev}
+
+    def _score_applied_actions(self):
+        """직전 VERIFY 결과로 반영한 처방의 효과를 채운다 — applied ≠ 고쳐짐.
+
+        판정도 부족 비율도 안 움직였으면 그 처방은 이 자리에서 듣지 않은 것이다.
+        연속 _SEAL_AFTER회 그러면 봉인해 다음 이터에서 다시 내지 않는다 — 종전에는
+        무효 처방이 applied로 기록되며 예산 소진까지 같은 순환을 돌 수 있었다.
+        """
+        for rec in self.applied_log:
+            eff = rec["effect"]
+            if "after" in eff:
+                continue  # 이미 채점됨
+            after = self._loop_snapshot(rec["case"], rec["loop"])
+            if after is None and eff["before"] is None:
+                continue  # 잴 대상이 애초에 없는 처방
+            eff["after"] = after
+            eff["changed"] = _effect_changed(eff["before"], after)
+            key = _seal_key(rec["case"], rec["loop"], rec["verdict"])
+            if eff["changed"]:
+                self.ineffective.pop(key, None)
+            else:
+                self.ineffective[key] = self.ineffective.get(key, 0) + 1
+
+    def sealed_keys(self) -> set:
+        """연속 무효로 봉인된 (점, 자리, verdict) — 더 내지 않는다."""
+        return {k for k, n in self.ineffective.items() if n >= _SEAL_AFTER}
 
     # ── 승인/반영 ──
     def proposed_actions(self) -> list:
@@ -437,10 +540,16 @@ class DesignSession:
                 for slot, v in (act.get("gains") or {}).items():
                     self.promoted_gains.setdefault(slot, {})[act["point"]] = float(v)
             elif act["type"] == "refit_at":
-                # 이미 breakpoint 이상인 점의 보간 괴리 — 역할은 그대로 두고 그 점의
-                # 최적 게인만 적합 샘플에 고정한다
+                # breakpoint의 보간 괴리 — 역할은 그대로 두고 그 점의 최적 게인만
+                # 적합 샘플에 고정한다. **승격 게인을 이긴다** (refit_gains)
                 for slot, v in (act.get("gains") or {}).items():
-                    self.promoted_gains.setdefault(slot, {})[act["point"]] = float(v)
+                    self.refit_gains.setdefault(slot, {})[act["point"]] = float(v)
+            elif act["type"] == "tighten_fit":
+                # 앵커의 보간 괴리 — 샘플이 아니라 적합을 고친다 (단조 래칫)
+                if self.fit_tighten >= _FIT_TIGHTEN_MAX:
+                    a["skipped"] = f"적합 조이기 상한({_FIT_TIGHTEN_MAX}회) 도달"
+                    continue
+                self.fit_tighten += 1
             elif act["type"] == "add_validation":
                 self._add_validation_around(act["point"])
             applied.append(aid)
@@ -450,6 +559,14 @@ class DesignSession:
         for a in self.actions:
             if a["id"] in applied_set:
                 a["applied"] = True
+                # 반영 전 상태를 찍어 둔다 — 다음 VERIFY가 after를 채우고 효과를 판정한다.
+                # 이게 없으면 "반영됨"이 곧 "고쳐짐"으로 읽히는데, 둘은 다르다
+                a["effect"] = {"before": self._loop_snapshot(a.get("case"), a.get("loop"))}
+                self.applied_log.append({
+                    "id": a["id"], "iter": self.iter_n, "case": a.get("case"),
+                    "loop": a.get("loop"), "verdict": a.get("verdict"),
+                    "type": a["action"]["type"], "effect": a["effect"],
+                })
         self.iter_n += 1
         self.stage = "REFINE" if need_refine else "TUNE"
         self.status = "running"
@@ -524,6 +641,11 @@ class DesignSession:
             if self.gain_samples else 0,
             "skipped": list(self.tune_meta.get("skipped", ())),
             "escalations": len(self.escalations),
+            # 반영했는데 판정이 안 움직인 처방 수 — "처방을 냈다"와 "고쳤다"는 다르다
+            "ineffective_actions": sum(
+                1 for r in self.applied_log if r["effect"].get("changed") is False),
+            "sealed": len(self.sealed_keys()),
+            "fit_tighten": self.fit_tighten,
             "criteria_fingerprint": c.criteria.fingerprint(),
         }
 
@@ -539,6 +661,10 @@ class DesignSession:
             "gain_samples": {s: dict(v) for s, v in self.gain_samples.items()},
             "tune_meta": self.tune_meta,
             "promoted_gains": {s: dict(v) for s, v in self.promoted_gains.items()},
+            "refit_gains": {s: dict(v) for s, v in self.refit_gains.items()},
+            "fit_tighten": self.fit_tighten,
+            "applied_log": self.applied_log,
+            "ineffective": dict(self.ineffective),
             "fits": self.fits,
             "sched_tables": {s: _table_to_dict(t) for s, t in self.sched_tables.items()},
             "sched_constants": dict(self.sched_constants),
@@ -559,6 +685,10 @@ class DesignSession:
         s.gain_samples = {k: dict(v) for k, v in d.get("gain_samples", {}).items()}
         s.tune_meta = d.get("tune_meta", {})
         s.promoted_gains = {k: dict(v) for k, v in d.get("promoted_gains", {}).items()}
+        s.refit_gains = {k: dict(v) for k, v in d.get("refit_gains", {}).items()}
+        s.fit_tighten = int(d.get("fit_tighten", 0))
+        s.applied_log = list(d.get("applied_log", ()))
+        s.ineffective = {k: int(v) for k, v in d.get("ineffective", {}).items()}
         s.fits = d.get("fits", {})
         s.sched_tables = {k: _table_from_dict(v)
                           for k, v in d.get("sched_tables", {}).items()}

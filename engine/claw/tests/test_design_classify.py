@@ -175,11 +175,16 @@ def test_classify_failures_supersede():
     assert all(a["id"].count(":") == 2 for a in actions)
 
 
-def test_valley_on_anchor_prescribes_refit_not_promotion():
-    """이미 breakpoint 이상인 점의 보간 괴리 — 승격은 래칫 위반이라 세션을 죽인다.
+def test_valley_on_anchor_is_a_fit_failure_not_a_sample_failure():
+    """앵커의 보간 괴리는 **적합 실패**다 — 게인 주입 처방은 구조적으로 무효다.
 
-    anchor는 breakpoint 역할을 겸하므로(서열) 그 점의 괴리는 격자가 성긴 게 아니라
-    적합이 못 맞춘 것이다 → 재적합 처방이어야 한다.
+    승격은 래칫 위반이라 세션을 죽이므로 낼 수 없다. 그렇다고 "그 점의 최적 게인을
+    적합 샘플에 고정"하는 것도 답이 아니다: 앵커는 TUNE이 매 이터레이션 자유 게인
+    최적을 넣는 자리라 **이미 그 값이 샘플**이고, 병합에서 튜닝 샘플이 이긴다
+    (orchestrator._stage_fit setdefault). 종전에는 그런 처방을 refit_at으로 내고
+    applied로 기록해 이터 예산만 태웠다 — 반영해도 다음 판정이 그대로였다.
+
+    남은 손잡이는 적합 자체다 (허용치·구간 수).
     """
     ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=None)  # 전부 anchor
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
@@ -193,8 +198,35 @@ def test_valley_on_anchor_prescribes_refit_not_promotion():
         ac, v, "pitch_att", points, lms, trims, tables, design,
         _fail_cases(v, lo, hi), criteria=MarginCriteria(), tol_plant=99.0, **ACT,
     )
+    assert out["verdict"] == "fit_residual"
+    act = out["action"]
+    assert act["type"] == "tighten_fit", "anchor에 승격·게인 주입 처방을 내면 안 된다"
+    assert act["slots"] == ["pitch.kp", "pitch.ki"]
+    assert "gains" not in act, "앵커의 샘플은 이미 최적 — 주입할 값이 없다"
+
+
+def test_valley_on_breakpoint_still_injects_the_optimum():
+    """breakpoint는 TUNE이 안 도는 자리라 최적 게인 주입이 **실제로** 값을 바꾼다.
+
+    앵커와 갈라 두지 않으면 둘 중 하나는 틀린 처방을 받는다.
+    """
+    from claw.design import ROLE_BREAKPOINT
+
+    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    points.promote(v, ROLE_BREAKPOINT, reason="test")
+    design = demo_design_gains()
+    opt = tune_point(lms.get(ac, trims[v]), design, **ACT)["gains"]
+    tables = {
+        "pitch.kp": Table({"mach": (0.55, 0.65)},
+                          (opt["pitch.kp"] * 3.0,) * 2, extrapolate="clip"),
+    }
+    out = classify_margin_deficit(
+        ac, v, "pitch_att", points, lms, trims, tables, design,
+        _fail_cases(v, lo, hi), criteria=MarginCriteria(), tol_plant=99.0, **ACT,
+    )
     assert out["verdict"] == "gain_interp_valley"
-    assert out["action"]["type"] == "refit_at", "anchor에 승격 처방을 내면 래칫이 터진다"
+    assert out["action"]["type"] == "refit_at"
     assert out["action"]["gains"]["pitch.kp"] == pytest.approx(opt["pitch.kp"])
 
 
