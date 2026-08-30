@@ -808,7 +808,13 @@ function opsCanvas(b) {
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = C.limitLine;
-    ctx.fillText(label, px(v) + 3, mT + 12);
+    if (px(v) > W - mR - 70) { // 오른쪽 끝 — 선 왼쪽에 붙여 캔버스 밖으로 잘리지 않게
+      ctx.textAlign = "right";
+      ctx.fillText(label, px(v) - 3, mT + 12);
+      ctx.textAlign = "left";
+    } else {
+      ctx.fillText(label, px(v) + 3, mT + 12);
+    }
   }
 
   ctx.strokeStyle = C.frame;
