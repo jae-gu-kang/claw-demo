@@ -41,6 +41,8 @@ from claw.trim import split_axes
 
 _SCAN_N = 33  # 레이트 게인 브래킷 스캔 밀도
 _BISECT_N = 24  # 이분 반복 (브래킷 폭 ×2^-24)
+_BRACKET_GROWTH = 4.0  # 목표 미도달 시 브래킷 상한 배율
+_BRACKET_EXPANSIONS = 3  # 확장 횟수 상한 (4^3 = 설계값의 256배까지)
 
 
 @dataclass(frozen=True)
@@ -106,28 +108,48 @@ def _metric(lm_axis, rate_gains, key):
     return axis_metrics(lm_axis, rate_gains)[key]
 
 
-def _first_reach_bisect(f, k_lo, k_hi, target, n_scan=_SCAN_N):
-    """|k| 오름차순 스캔으로 f ≥ target 첫 도달 구간을 잡아 이분 — (k, 도달 여부).
+def _first_reach_bisect(f, k_lo, k_hi, target, n_scan=_SCAN_N,
+                        expansions=_BRACKET_EXPANSIONS):
+    """|k| 오름차순 스캔으로 f ≥ target 첫 도달 구간을 잡아 이분 — (k, 도달 여부, 확장 횟수).
 
-    f가 뒤에서 비단조여도(모드 교환) 첫 도달 구간만 쓰므로 안전하다. 브래킷 안에서
-    한 번도 도달하지 못하면 argmax를 낸다 (최선 달성 — 목표 미달 플래그와 함께).
+    f가 뒤에서 비단조여도(모드 교환) 첫 도달 구간만 쓰므로 안전하다.
+
+    브래킷 안에서 못 닿으면 상한을 ×_BRACKET_GROWTH로 넓혀 다시 본다. 초기 상한은
+    **손설계 게인의 배수**라 "그 기체의 손튜닝이 얼마나 맞았나"에 달린 값이지 플랜트가
+    낼 수 있는 한계가 아니다 — 넓히지 않으면 "플랜트가 못 한다"와 "브래킷이 좁다"가
+    갈리지 않고 둘 다 목표 미달로만 보고된다. 데모 M0.2/h0에서 실측: 롤 λ는 상한
+    0.8에서 8.65로 끊겼지만 |k|≈1.15면 목표 12에 닿는다(브래킷 탓). 같은 점의 요 ζ_dr은
+    |k|≈1.55에서 0.477로 정점을 찍고 내려가 어떤 상한에서도 0.5에 못 닿는다(플랜트 탓).
+
+    확장은 **새 구간만 이어 스캔한다** — 이미 촘촘히 본 구간을 성긴 격자로 다시 덮으면
+    좁은 도달 구간을 놓칠 수 있다. 도달 실패는 이미 확인된 뒤이므로 되돌아볼 이유도 없다.
+    끝내 못 닿으면 argmax를 낸다 (최선 달성 — 목표 미달 플래그·확장 횟수와 함께).
     """
     ks = np.linspace(k_lo, k_hi, n_scan)
     vals = [f(k) for k in ks]
-    reach = [i for i, v in enumerate(vals) if v >= target]
-    if not reach:
-        return float(ks[int(np.argmax(vals))]), False
-    i = reach[0]
-    if i == 0:
-        return float(ks[0]), True
-    lo, hi = ks[i - 1], ks[i]
-    for _ in range(_BISECT_N):
-        mid = 0.5 * (lo + hi)
-        if f(mid) >= target:
-            hi = mid
-        else:
-            lo = mid
-    return float(hi), True
+    grown = 0
+    while True:
+        reach = [i for i, v in enumerate(vals) if v >= target]
+        if reach:
+            i = reach[0]
+            if i == 0:
+                return float(ks[0]), True, grown
+            lo, hi = ks[i - 1], ks[i]
+            for _ in range(_BISECT_N):
+                mid = 0.5 * (lo + hi)
+                if f(mid) >= target:
+                    hi = mid
+                else:
+                    lo = mid
+            return float(hi), True, grown
+        if grown >= expansions:
+            return float(ks[int(np.argmax(vals))]), False, grown
+        grown += 1
+        span = float(ks[-1]) - float(k_lo)
+        ks_new = np.linspace(float(ks[-1]), float(k_lo) + span * _BRACKET_GROWTH,
+                             n_scan)[1:]
+        ks = np.concatenate([ks, ks_new])
+        vals = vals + [f(k) for k in ks_new]
 
 
 def _damper_loop_stable(lm_axis, x_rate, u_in, k, act_kw, zeta_act_min=0.10) -> bool:
@@ -161,27 +183,37 @@ def _damper_loop_stable(lm_axis, x_rate, u_in, k, act_kw, zeta_act_min=0.10) -> 
 
 
 def _cap_by_stability(lm_axis, x_rate, u_in, k, act_kw):
-    """댐퍼 폐루프가 불안정해지면 |k|를 이분 축소 — (k', 사유) 사유 ∈ {None,'capped','no_stable_gain'}.
+    """댐퍼 폐루프가 불안정해지면 |k|를 축소 — (k', 사유) 사유 ∈ {None,'capped','no_stable_gain'}.
 
-    이분의 lo는 **안정으로 확인된 경우에만** 올라간다. 개루프가 이미 불안정한
-    플랜트(후방 CG·완화 정안정)나 안정 구간이 [k_lo>0, k_hi]인 조건부 안정에서는
-    lo가 0인 채 끝난다 — 그건 "안정 경계를 찾았다"가 아니라 **댐퍼를 꺼 버린 것**이다.
-    두 경우를 한 플래그로 뭉개면 로그가 "캡 적용"이라 말하면서 실제로는 아무 댐핑도
-    없는 형상을 내놓는다. 판정은 뒤에서 ζ<0 → fail로 정직하게 흐르지만, 사유는
-    구분해서 남긴다.
+    [0, |k|]를 먼저 **스캔**해 안정한 표본을 찾고, 그중 가장 큰 것(=목표에 가장 가까운
+    것)을 상한 경계의 이분 하한으로 삼는다. 순수 이분으로 내려오면 "|k|가 커질수록
+    불안정"이라는 **단조성을 전제**하게 되는데, 그 전제는 두 자리에서 깨진다:
+    개루프가 이미 불안정한 플랜트(후방 CG·완화 정안정)와, 안정 구간이 [k_lo>0, k_hi]인
+    조건부 안정이다. 둘 다 이분의 lo가 0에 머물러 **존재하는 안정 구간을 못 찾고
+    댐퍼를 꺼 버린다**. 스캔은 그 구간을 직접 본다.
+
+    끝내 안정한 표본이 하나도 없을 때만 no_stable_gain이다 — 그건 "안정 경계를
+    찾았다"가 아니라 아무 댐핑도 없는 형상이므로 사유를 구분해 남긴다 (판정은 뒤에서
+    ζ<0 → fail로 흐르지만, 로그가 "캡 적용"이라 말하면 안 된다).
+
+    스캔은 초기 |k|가 불안정할 때만 돈다 (안정하면 첫 줄에서 반환).
     """
     if k == 0.0 or _damper_loop_stable(lm_axis, x_rate, u_in, k, act_kw):
         return k, None
-    lo, hi = 0.0, abs(k)
     sign = math.copysign(1.0, k)
+    mags = np.linspace(0.0, abs(k), _SCAN_N)
+    stable_idx = [i for i in range(1, len(mags))
+                  if _damper_loop_stable(lm_axis, x_rate, u_in, sign * mags[i], act_kw)]
+    if not stable_idx:
+        return 0.0, "no_stable_gain"
+    # 마지막 표본은 |k| 자신이고 불안정으로 이미 확인됐다 — i+1은 항상 존재한다
+    lo, hi = mags[stable_idx[-1]], mags[stable_idx[-1] + 1]
     for _ in range(_BISECT_N):
         mid = 0.5 * (lo + hi)
         if _damper_loop_stable(lm_axis, x_rate, u_in, sign * mid, act_kw):
             lo = mid
         else:
             hi = mid
-    if lo == 0.0:
-        return 0.0, "no_stable_gain"
     return sign * lo, "capped"
 
 
@@ -221,7 +253,7 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
             g[_slot] = _sign * mag
             return _metric(_lm, g, _mk)
 
-        mag, reached = _first_reach_bisect(f, 0.0, 4.0 * abs(k_design), target)
+        mag, reached, grown = _first_reach_bisect(f, 0.0, 4.0 * abs(k_design), target)
         k = sign * mag
         x_rate, u_in = next((x, u) for g, x, u in AXIS_SPECS[axis]["rates"] if g == group)
         k, capped = _cap_by_stability(lm_prior, x_rate, u_in, k, act_kw)
@@ -234,9 +266,16 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
             "target": target,
             "wc": rate_loop_crossover(lm_prior, group, x_rate, u_in, k, **act_kw),
             "capped": capped,
+            "reached": reached,
+            # 확장 횟수 — 목표 미달을 보고할 때 "브래킷 탓이 아니다"의 증거가 된다
+            "bracket_growth": grown,
         }
         if not reached:
-            notes.append(f"{slot}: 브래킷(±4×설계값) 내 목표 {target} 미달 — 최선 달성값 채택")
+            limit = 4.0 * _BRACKET_GROWTH ** grown
+            notes.append(
+                f"{slot}: 설계값의 {limit:g}배까지 넓혀도 목표 {target} 미달 — 최선 달성값"
+                " 채택. 브래킷이 아니라 이 플랜트가 그 지표를 못 낸다"
+            )
         if capped == "capped":
             notes.append(f"{slot}: 댐퍼 안정 캡 적용 — 작동기·지연 포함 폐루프 안정 경계 아래로 축소")
         elif capped == "no_stable_gain":

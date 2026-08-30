@@ -260,3 +260,87 @@ def test_cap_reports_no_stable_gain_separately(setup):
     # 정상 축에서는 캡이 아예 안 걸리거나(None) 경계까지 줄인다('capped')
     k2, reason2 = _cap_by_stability(lon, "q", "de", 0.4, ACT)
     assert reason2 in (None, "capped")
+
+
+@pytest.fixture(scope="module")
+def low_mach():
+    """M0.2/h0 — 손설계 게인의 4배 브래킷이 실제로 좁은 저동압 점."""
+    ac = make_demo_aircraft()
+    design = demo_design_gains()
+    tr = trim_level(ac, TrimCase("lo", mach=0.2, alt=0.0, fuel=40.0), fingerprint="fp")
+    assert tr.converged
+    return design, linearize(ac, tr)
+
+
+def test_bracket_widens_until_the_plant_is_the_limit(low_mach):
+    """"브래킷이 좁다"와 "플랜트가 못 한다"를 가른다 — 한 점에서 둘 다 나온다.
+
+    초기 상한 4×|손설계 게인|은 **그 기체의 손튜닝이 얼마나 맞았나**에 달린 값이지
+    플랜트가 낼 수 있는 한계가 아니다. 넓히지 않으면 둘 다 "목표 미달"로만 보고되어
+    사용자가 게인을 더 밀어 볼 여지가 있는지 알 수 없다.
+
+    이 점에서 실측(확장 전):
+      roll λ  상한 0.8에서 8.65로 끊김 — |k|≈1.12면 목표 12에 닿는다  (브래킷 탓)
+      yaw ζ_dr |k|≈1.55에서 0.477로 정점을 찍고 내려간다 — 어떤 상한에서도 못 닿는다
+    """
+    design, lm = low_mach
+    out = tune_point(lm, design, **ACT)
+
+    rr = out["achieved"]["roll_rate"]
+    assert rr["reached"], f"롤 λ가 여전히 목표 미달 — {rr}"
+    assert rr["bracket_growth"] > 0, "확장 없이 닿았다면 이 점이 브래킷을 재는 자리가 아니다"
+    assert abs(out["gains"]["roll.k_rate"]) > 4.0 * abs(design["roll.k_rate"]), (
+        "채택된 게인이 종전 브래킷 안이다 — 확장이 결과를 바꾸지 않았다"
+    )
+
+    yr = out["achieved"]["yaw_rate"]
+    assert not yr["reached"], "요 ζ_dr이 닿았다면 이 점의 전제가 바뀌었다"
+    assert yr["bracket_growth"] == 3, "끝까지 넓혀 보지도 않고 플랜트 탓이라 말하면 안 된다"
+    assert any("플랜트가 그 지표를 못 낸다" in n for n in out["notes"])
+
+
+def test_first_reach_separates_narrow_bracket_from_flat_plant():
+    """확장 로직 단위 — 도달 가능한 목표는 넓혀서 찾고, 불가능한 목표는 최선을 낸다."""
+    from claw.design.tune import _BRACKET_EXPANSIONS, _first_reach_bisect
+
+    # 단조 증가: 목표 2.0은 초기 상한 1.0 밖 → 넓혀서 도달
+    k, reached, grown = _first_reach_bisect(lambda x: x, 0.0, 1.0, 2.0)
+    assert reached and grown == 1 and k == pytest.approx(2.0, abs=1e-3)
+    # 봉우리형: 최대가 목표 아래 → 끝까지 넓혀 보고 argmax를 낸다
+    k, reached, grown = _first_reach_bisect(lambda x: 1.0 - (x - 3.0) ** 2, 0.0, 1.0, 5.0)
+    assert not reached and grown == _BRACKET_EXPANSIONS
+    assert k == pytest.approx(3.0, abs=0.2), "최선 달성점(argmax)이 아니다"
+    # 초기 브래킷 안에서 닿으면 넓히지 않는다 (쓸데없는 평가 금지)
+    assert _first_reach_bisect(lambda x: x, 0.0, 1.0, 0.5)[1:] == (True, 0)
+
+
+def test_cap_finds_conditionally_stable_window(monkeypatch):
+    """안정 구간이 [k_lo>0, k_hi]면 순수 이분은 못 찾고 **댐퍼를 꺼 버린다**.
+
+    이분은 "|k|가 커질수록 불안정"이라는 단조성을 전제한다. 그 전제는 개루프가 이미
+    불안정한 플랜트(후방 CG·완화 정안정)와 조건부 안정에서 깨지고, 그때 lo가 0에
+    머물러 no_stable_gain이 된다 — 존재하는 안정 구간을 두고 댐핑을 0으로 출하한다.
+
+    판정식이 아니라 **탐색**의 결함이므로 안정 판정을 대역해 탐색만 잰다.
+
+    구간은 **이분이 실제로 놓치는 폭**이어야 한다. [0.3, 0.7]처럼 넓으면 첫 중점
+    0.5가 우연히 구간 안에 떨어져 순수 이분도 찾아낸다 — 그런 구간으로는 이 수정이
+    무엇을 고쳤는지 잴 수 없다. [0.55, 0.60]에서는 이분이 0.5 → 0.25 → …로 계속
+    아래로만 내려가 lo가 0에 머문다.
+    """
+    from claw.design import tune as T
+
+    monkeypatch.setattr(T, "_damper_loop_stable",
+                        lambda lm, x, u, k, act: 0.55 <= abs(k) <= 0.60)
+    k, reason = T._cap_by_stability(None, "p", "da", -1.0, {})
+    assert reason == "capped", "안정 구간이 있는데 댐퍼를 껐다"
+    assert k == pytest.approx(-0.60, abs=1e-3)  # 구간 상단, 부호 유지
+
+    # 단조 경우는 종전과 같은 답 — 넓힌 탐색이 보통 경로를 바꾸지 않는다
+    monkeypatch.setattr(T, "_damper_loop_stable", lambda lm, x, u, k, act: abs(k) <= 0.42)
+    assert T._cap_by_stability(None, "p", "da", 1.0, {}) == (
+        pytest.approx(0.42, abs=1e-3), "capped")
+
+    # 안정 표본이 정말 하나도 없을 때만 no_stable_gain
+    monkeypatch.setattr(T, "_damper_loop_stable", lambda *a: False)
+    assert T._cap_by_stability(None, "p", "da", -1.0, {}) == (0.0, "no_stable_gain")
