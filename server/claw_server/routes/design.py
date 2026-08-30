@@ -13,10 +13,12 @@
 import math
 from typing import Literal
 
+import numpy as np
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from claw.design import AutoDesignConfig, DesignSession, resample_to_table
+from claw.design.tune import REASON_TEXT
 from claw.fcl.demo import demo_design_gains
 from claw.plant import (
     make_demo_aircraft,
@@ -30,6 +32,14 @@ from claw_server.serialize import to_jsonable
 router = APIRouter(tags=["design"])
 
 MAX_POINTS = 200  # influence.py MAX_CASES 정합 — 단일 워커 점유 상한
+
+# 재샘플 허용치 — resample_to_table의 기본값과 같은 값을 **명시로** 넘긴다. 반출에
+# 이 수치를 함께 싣기 때문이다: 엔진 기본값이 바뀌어도 보고한 값과 실제로 쓴 값이
+# 갈리지 않아야 한다 (기본값에 기대면 보고가 조용히 거짓말이 된다).
+_RESAMPLE_TOL = 0.01
+# 재샘플 오차 재측정 격자 — resample_to_table은 구간 중점만 보며 이분하므로
+# knot 사이 최악점이 중점이 아닐 수 있다. 다시 재는 쪽은 촘촘해야 한다.
+_RESAMPLE_PROBE = 401
 
 
 class AutoDesignIn(BaseModel):
@@ -121,32 +131,66 @@ def _build_config(overrides: dict) -> AutoDesignConfig:
     return cfg
 
 
+def _resample_error(poly: PolyTable, tab) -> dict:
+    """다항 정본 대비 재샘플 테이블의 어긋남 — {max_abs, max_frac, at, n_points}.
+
+    `max_frac`은 곡선 진폭(구간 내 최대 |값|) 대비 비율이라 `resample_tol`과 같은
+    자다 — 둘을 나란히 놓으면 "허용치 안에 들었나"가 바로 읽힌다. 절대값도 함께
+    내는 것은 게인 자리마다 크기가 달라 비율만으로는 감이 안 오기 때문이다.
+
+    다시 재는 이유: resample_to_table의 tol_interp는 **목표치이지 보장이 아니다**.
+    구간 중점만 보며 이분하고 max_pts·depth 상한에서 멈추므로, 최악점이 중점이
+    아니거나 상한에 먼저 걸리면 허용치를 넘은 채 끝난다.
+    """
+    axis = poly.axis_names[0]
+    xs = np.linspace(float(poly.knots[0]), float(poly.knots[-1]), _RESAMPLE_PROBE)
+    p = np.asarray(poly.interp(**{axis: xs}), dtype=float)
+    err = np.abs(p - np.asarray(tab.interp(**{axis: xs}), dtype=float))
+    i = int(np.argmax(err))
+    scale = float(np.max(np.abs(p))) or 1.0  # resample_to_table의 scale과 같은 정의
+    return {"max_abs": float(err[i]), "max_frac": float(err[i]) / scale,
+            "at": float(xs[i]), "n_points": int(tab.data.size)}
+
+
 def _gain_export(session: DesignSession) -> dict:
-    """확정 게인 반출 — sched_spec(정본, 다항 포함) + 테이블 호환 재샘플.
+    """확정 게인 반출 — sched_spec(정본, 다항 포함) + 테이블 호환 재샘플 + 그 오차.
 
     tables 항목은 sim/codegen 게인 페이로드(TableIn|PolyTableIn 태그드 유니언)에
     그대로 주입 가능한 형상이다 — 웹 "게인 확정" 버튼의 소비 계약.
+
+    그런데 그 버튼이 실제로 주입하는 것은 `tables_resampled`이고, 그것은 다항을
+    선형 격자로 **재양자화한 근사**다 — 세션이 검증한(margin_out) 형상이 아니다.
+    차이를 어디에도 안 적으면 "확정"이 검증 결과를 그대로 물려받는 것처럼 보인다.
+    그래서 실제로 쓴 허용치(`resample_tol`)와 자리별 최대 어긋남(`resample_error`)을
+    함께 낸다 — 웹이 "확정하면 이만큼 어긋난다"를 말할 수 있어야 한다.
+    비다항 자리는 재샘플이 곧 원본이라 오차가 정의상 0이다.
     """
     tables = {}
     tables_resampled = {}
+    resample_error = {}
     for slot, tab in session.sched_tables.items():
         if isinstance(tab, PolyTable):
             tables[slot] = tab.to_dict()
-            rt = resample_to_table(tab)
+            rt = resample_to_table(tab, tol_interp=_RESAMPLE_TOL)
             tables_resampled[slot] = {
                 "axes": {rt.axis_names[0]: rt.axes[0].tolist()},
                 "data": rt.data.tolist(),
                 "extrapolate": "clip",
             }
+            resample_error[slot] = _resample_error(tab, rt)
         else:
             tables[slot] = {
                 "axes": {n: a.tolist() for n, a in zip(tab.axis_names, tab.axes)},
                 "data": tab.data.tolist(), "extrapolate": tab.extrapolate,
             }
             tables_resampled[slot] = tables[slot]
+            resample_error[slot] = {"max_abs": 0.0, "max_frac": 0.0, "at": None,
+                                    "n_points": int(tab.data.size)}
     return {
         "tables": tables,
         "tables_resampled": tables_resampled,
+        "resample_tol": _RESAMPLE_TOL,
+        "resample_error": resample_error,
         "constants": dict(session.sched_constants),
     }
 
@@ -196,8 +240,19 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
 
 @router.get("/design/defaults")
 def design_defaults() -> dict:
-    """엔진 기본값 그대로 — 합격기준·목표·허용치·예산. 웹은 수치를 재기술하지 않는다."""
-    return {"config": AutoDesignConfig().to_dict(), "max_points": MAX_POINTS}
+    """엔진 기본값 그대로 — 합격기준·목표·허용치·예산. 웹은 수치를 재기술하지 않는다.
+
+    reason_text(튜닝 포기 사유 → 한 줄 설명 + 다음 수)도 같은 원칙으로 내려 준다.
+    사유 코드는 엔진이 만들고 뜻도 엔진이 안다 — 웹이 문구를 다시 적으면 두 곳이
+    갈리고, 갈린 쪽이 화면이라 사용자는 **엔진이 뜻하지 않은 안내**를 읽는다
+    (실제로 그런 사고가 있었다: 마진은 통과했는데 "마진 미달"이라 적혔다 —
+    tune.py REASON_* 머리말). criteria 기본값을 웹이 재기술하지 않는 것과 같은 이유다.
+    """
+    return {
+        "config": AutoDesignConfig().to_dict(),
+        "max_points": MAX_POINTS,
+        "reason_text": dict(REASON_TEXT),
+    }
 
 
 @router.post("/design/auto", status_code=202)
