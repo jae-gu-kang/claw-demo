@@ -116,3 +116,44 @@ def test_case_name_precision_survives_refine_midpoints():
     # 흔한 값은 기존 표기를 유지한다 (기존 결과·픽스처와의 호환)
     assert case_name(0.4, 1000.0, 200.0) == "M0.4_h1000_f200"
     assert case_name(0.2187, 1000.0, 200.0) == "M0.2187_h1000_f200"
+
+
+def _fake_tr(converged=True, alpha_ok=True, de=0.0, thr=0.3):
+    """판정 입력만 갖춘 최소 TrimResult 대역 — envelope_verdict가 보는 필드는
+    converged·flags·control 뿐이라 사유 조합을 자유로 만든다."""
+    from types import SimpleNamespace
+
+    sat_ok = abs(de) < 0.95 * 0.35 and 0.02 < thr < 0.95
+    return SimpleNamespace(
+        converged=converged,
+        flags={"saturation_ok": sat_ok, "alpha_margin_ok": alpha_ok},
+        control=SimpleNamespace(elevon=[de], throttle=[thr]),
+    )
+
+
+def test_envelope_verdict_reasons_priority():
+    """envelope_verdict — ok는 envelope_ok 정본, reasons는 우선순위 순 전체 귀속.
+
+    saturated_throttle_high가 추진 한계의 대리 지표 (01 §2.6, 전용 추력 모델 [TBD]).
+    """
+    from claw.design.points import envelope_ok, envelope_verdict
+
+    good = _fake_tr()
+    assert envelope_verdict(good) == {"ok": True, "reasons": []}
+
+    cases = [
+        (_fake_tr(converged=False), "not_converged"),
+        (_fake_tr(alpha_ok=False), "alpha_margin"),
+        (_fake_tr(thr=0.97), "saturated_throttle_high"),
+        (_fake_tr(de=0.34), "saturated_de"),
+        (_fake_tr(thr=0.01), "saturated_throttle_low"),
+    ]
+    for tr, reason in cases:
+        v = envelope_verdict(tr)
+        assert v["ok"] is False and v["ok"] == envelope_ok(tr)
+        assert v["reasons"] == [reason], reason
+
+    # 복합 실패 — 우선순위 순서 유지 (첫 항목이 표시 대표)
+    multi = _fake_tr(converged=False, alpha_ok=False, thr=0.97)
+    assert envelope_verdict(multi)["reasons"] == [
+        "not_converged", "alpha_margin", "saturated_throttle_high"]

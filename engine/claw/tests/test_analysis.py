@@ -256,3 +256,152 @@ def test_vn_envelope_negative_stall_placeholder():
     # ratio 조정 반영
     env2 = vn_envelope(ac, st, lim, alt=1000.0, fuel=200.0, neg_alpha_ratio=0.4)
     assert env2["n_stall_neg"][10] == pytest.approx(-0.4 * env2["n_stall"][10], rel=1e-9)
+
+
+def test_vn_envelope_rejects_invalid_limits():
+    """구조 한계 오버라이드(01 §2.6)가 열리며 부호·서열 위반은 계산 전에 차단."""
+    from claw.analysis import vn_envelope
+    from claw.plant import make_demo_structural_limits
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    for bad in (
+        {"n_limit_pos": 0.0},
+        {"n_limit_neg": 1.0},
+        {"safety_factor": 0.9},
+        {"mach_no": 0.95},  # > mach_d 0.9 — 서열 위반
+        {"mach_no": 0.0},
+    ):
+        lim = dict(make_demo_structural_limits(), **bad)
+        with pytest.raises(ValueError):
+            vn_envelope(ac, st, lim, alt=1000.0, fuel=200.0)
+
+
+def test_mach_qbar_limit_analytic():
+    """동압 한계 마하 해석 대조 — ½ρ(M_q̄·a)² = q_max 정확, ρ 감소로 고도 단조 증가."""
+    from claw.analysis import mach_qbar_limit
+    from claw.env import isa_atmosphere
+
+    for alt in (0.0, 3000.0, 8000.0):
+        m = mach_qbar_limit(alt, 30000.0)
+        atm = isa_atmosphere(alt)
+        assert 0.5 * atm.rho * (m * atm.a) ** 2 == pytest.approx(30000.0, rel=1e-12)
+    assert (mach_qbar_limit(0.0, 30000.0)
+            < mach_qbar_limit(5000.0, 30000.0)
+            < mach_qbar_limit(11000.0, 30000.0))
+    with pytest.raises(ValueError):
+        mach_qbar_limit(1000.0, 0.0)
+
+
+def test_stall_mach_lo_rederivation_and_sources():
+    """실속 mach 하한 — 독립 np.interp 재유도 + 중량 상승 + DB 폴백 귀속.
+
+    구 design.grid._mach_lo의 정본 이동(01 §2.6) — coarse 격자와 설계 엔벨로프가
+    같은 수를 봐야 하므로 여기서 수식 자체를 핀한다.
+    """
+    from claw.analysis import stall_mach_lo, vn_stall_boundary
+    from claw.env import isa_atmosphere
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    lo, src = stall_mach_lo(ac, st, 1000.0, 200.0, mach_hi=0.75, db_mach_lo=0.1)
+    assert src == "stall"
+    # 독립 재유도 — 같은 스캔 격자에서 V_S 역보간 × 1.1
+    machs = np.linspace(0.1, 0.75, 41)
+    bnd = vn_stall_boundary(ac, st, 1000.0, 200.0, machs)
+    v_s = float(np.interp(1.0, np.asarray(bnd["n"]), np.asarray(bnd["V"])))
+    atm = isa_atmosphere(1000.0)
+    assert lo == pytest.approx((v_s / atm.a) * 1.1, rel=1e-12)
+    # 무거울수록·높을수록 실속 하한 상승
+    lo_heavy, _ = stall_mach_lo(ac, st, 1000.0, 400.0, mach_hi=0.75, db_mach_lo=0.1)
+    lo_high, _ = stall_mach_lo(ac, st, 5000.0, 200.0, mach_hi=0.75, db_mach_lo=0.1)
+    assert lo_heavy > lo and lo_high > lo
+    # DB 하한이 실속 하한보다 높으면 실효 하한 = DB — 귀속 "db"
+    lo_db, src_db = stall_mach_lo(ac, st, 0.0, 100.0, mach_hi=0.75, db_mach_lo=0.5)
+    assert src_db == "db" and lo_db == pytest.approx(0.5)
+
+
+def test_design_envelope_composition_and_attribution():
+    """M-h 합성 (01 §2.6) — 행별 min/max 승자 귀속과 q̄ 경계의 고도 교대."""
+    from claw.analysis import design_envelope, mach_qbar_limit
+    from claw.design.grid import coarse_grid
+    from claw.plant import make_demo_db_ranges, make_demo_structural_limits
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    lim = make_demo_structural_limits()
+    db = make_demo_db_ranges()
+
+    env = design_envelope(ac, st, lim, db, fuel=200.0, q_max=20000.0)
+    b = env["bounds"]
+    assert b["mach_no"] == 0.75 and b["db_mach"] == [0.1, 0.9]
+    assert b["alt_max_used"] == 12000.0 and b["alt_max_is_display_default"] is True
+    assert b["alt_min"] is None and b["alt_max"] is None
+    r = env["region"]
+    n = len(r["alt"])
+    assert n == 41
+    for key in ("mach_lo", "mach_hi", "lo_source", "hi_source", "empty"):
+        assert len(r[key]) == n
+    assert set(r["lo_source"]) <= {"stall", "db"}
+    assert set(r["hi_source"]) <= {"mach_no", "db", "stall_table", "qbar"}
+    # q̄=20 kPa: 저고도는 M_q̄(0)≈0.53 < M_NO 0.75 → qbar 승자, 고고도는 ρ 감소로 역전
+    assert r["hi_source"][0] == "qbar"
+    assert r["mach_hi"][0] == pytest.approx(mach_qbar_limit(r["alt"][0], 20000.0), rel=1e-12)
+    assert r["hi_source"][-1] == "mach_no" and r["mach_hi"][-1] == 0.75
+    assert b["qbar_mach"] is not None and len(b["qbar_mach"]) == n
+
+    # q_max 미지정 — 경계 자체가 없다 (null echo, 합성 제외)
+    env0 = design_envelope(ac, st, lim, db, fuel=200.0)
+    assert env0["bounds"]["qbar_mach"] is None and env0["bounds"]["q_max"] is None
+    assert set(env0["region"]["hi_source"]) == {"mach_no"}
+
+    # 스케줄 격자 좌표 = coarse 격자 좌표 (row_machs 단일 정본 — 리팩토링 등가)
+    grid = coarse_grid(ac, st, lim, db, fuels=(200.0,))
+    coarse_coords = {(p.case.mach, p.case.alt) for p in grid["points"]}
+    sched_coords = {(p["mach"], p["alt"]) for p in env0["schedule_grid"]["points"]}
+    assert sched_coords == coarse_coords
+
+    # 운용 고도 상하한이 표본 범위·격자 필터에 반영
+    env2 = design_envelope(ac, st, lim, db, fuel=200.0, alt_min=500.0, alt_max=4000.0)
+    assert env2["bounds"]["alt_max_is_display_default"] is False
+    assert env2["region"]["alt"][0] == 500.0 and env2["region"]["alt"][-1] == 4000.0
+    assert env2["schedule_grid"]["alts"] == [1000.0, 3000.0]  # 기본 (0,1k,3k,5k) ∩ [500,4000]
+
+
+def test_design_envelope_validation_errors():
+    from claw.analysis import design_envelope
+    from claw.plant import make_demo_db_ranges, make_demo_structural_limits
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    lim = make_demo_structural_limits()
+    db = make_demo_db_ranges()
+    with pytest.raises(ValueError):  # ISA 범위 밖
+        design_envelope(ac, st, lim, db, fuel=200.0, alt_max=99999.0)
+    with pytest.raises(ValueError):  # 하한 ≥ 상한
+        design_envelope(ac, st, lim, db, fuel=200.0, alt_min=5000.0, alt_max=1000.0)
+    with pytest.raises(ValueError):  # 실속 여유 < 1
+        design_envelope(ac, st, lim, db, fuel=200.0, mach_margin=0.9)
+    with pytest.raises(ValueError):  # 동압 한계 비양수
+        design_envelope(ac, st, lim, db, fuel=200.0, q_max=-1.0)
+
+
+def test_aero_envelope_boundaries():
+    """공력 선도 데이터 (01 §2.6) — 실속·보호선 관계와 echo 일습."""
+    from claw.analysis import aero_envelope
+    from claw.plant import make_demo_db_ranges
+
+    st = make_demo_stall_table()
+    db = make_demo_db_ranges()
+    env = aero_envelope(st, db, alpha_margin=0.05, trim_alpha_bounds=(-0.10, 0.35))
+    assert env["mach"][0] == 0.1 and env["mach"][-1] == 0.9
+    for m, a_s, a_p in zip(env["mach"], env["alpha_stall"], env["alpha_prot"]):
+        assert a_s == pytest.approx(float(st.interp(mach=m)), rel=1e-12)
+        assert a_p == pytest.approx(a_s - 0.05, rel=1e-12)  # 보호선 = 실속 − 마진
+    assert env["db"] == {"alpha": [-0.2, 0.45], "mach": [0.1, 0.9]}
+    assert env["trim_alpha_bounds"] == [-0.10, 0.35]
+    assert env["alpha_margin"] == 0.05
+    # 미주입 시 null — 없는 데이터를 만들어내지 않는다
+    assert aero_envelope(st, db)["trim_alpha_bounds"] is None
+    with pytest.raises(ValueError):
+        aero_envelope(st, db, alpha_margin=-0.01)

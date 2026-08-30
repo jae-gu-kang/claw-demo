@@ -32,6 +32,28 @@ CONTINUITY_STEP = np.array([0.05, 0.05, 0.15])  # 인접 케이스 허용 Δ[α,
 _Z0_DEFAULT = np.array([0.05, 0.0, 0.3])
 
 
+def _saturation_channels(de, thr) -> dict:
+    """포화 채널별 판정 — saturation_ok의 부정과 동치인 세 갈래 (상수 단일 거처).
+
+    throttle_high가 추진 한계의 대리 지표다 — 전용 추력 모델 [TBD] 확보 전까지
+    수평비행 추력 부족은 스로틀 상한 포화로만 드러난다 (01 §2.6).
+    """
+    return {
+        "de": bool(abs(de) >= SAT_FRAC * DE_BOUNDS[1]),
+        "throttle_high": bool(thr >= SAT_FRAC * THR_BOUNDS[1]),
+        "throttle_low": bool(thr <= THR_BOUNDS[0] + THR_MARGIN),
+    }
+
+
+def saturation_detail(tr) -> dict:
+    """TrimResult → 포화 채널 상세 {"de", "throttle_high", "throttle_low"}.
+
+    trim_level의 saturation_ok과 같은 식(_saturation_channels) — 어느 채널이
+    걸렸는지는 설계 엔벨로프 스캔(제어 가능 영역 귀속)의 입력이 된다.
+    """
+    return _saturation_channels(float(tr.control.elevon[0]), float(tr.control.throttle[0]))
+
+
 def _controls(z):
     return {"de": float(z[1]), "da": 0.0, "dr": 0.0, "throttle": (float(z[2]), float(z[2]))}
 
@@ -67,10 +89,7 @@ def trim_level(aircraft, case, z0=None, fingerprint=""):
     r = resid(res.x)
 
     residual_ok = bool(np.all(np.abs(r) < RESID_TOL))
-    saturation_ok = bool(
-        abs(de) < SAT_FRAC * DE_BOUNDS[1]
-        and THR_BOUNDS[0] + THR_MARGIN < thr < SAT_FRAC * THR_BOUNDS[1]
-    )
+    saturation_ok = not any(_saturation_channels(de, thr).values())
     alpha_margin_ok = bool(alpha < ALPHA_BOUNDS[1] - ALPHA_MARGIN)
     flags = {
         "residual_ok": residual_ok,

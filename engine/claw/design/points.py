@@ -19,6 +19,7 @@ nameCases와 같은 원칙(비반올림 — 반올림 이름은 정밀 격자에
 from dataclasses import dataclass, field
 
 from claw.common.contracts import TrimCase
+from claw.trim import saturation_detail
 
 ROLE_VALIDATION = "validation"
 ROLE_BREAKPOINT = "breakpoint"
@@ -39,6 +40,29 @@ def envelope_ok(tr) -> bool:
     return bool(tr.converged
                 and tr.flags.get("saturation_ok")
                 and tr.flags.get("alpha_margin_ok"))
+
+
+def envelope_verdict(tr) -> dict:
+    """envelope_ok + 실패 사유 귀속 — {"ok", "reasons"} (설계 엔벨로프 스캔용).
+
+    ok는 반드시 envelope_ok() 호출 — 판정 정본(01 §4.1)을 재기술하지 않는다.
+    reasons는 해당되는 사유 전부, 우선순위 순(첫 항목이 표시 대표):
+    not_converged → alpha_margin → saturated_throttle_high(추진 한계 대리,
+    전용 추력 모델 [TBD] — 01 §2.6) → saturated_de → saturated_throttle_low.
+    """
+    reasons = []
+    if not tr.converged:
+        reasons.append("not_converged")
+    if not tr.flags.get("alpha_margin_ok"):
+        reasons.append("alpha_margin")
+    sat = saturation_detail(tr)
+    if sat["throttle_high"]:
+        reasons.append("saturated_throttle_high")
+    if sat["de"]:
+        reasons.append("saturated_de")
+    if sat["throttle_low"]:
+        reasons.append("saturated_throttle_low")
+    return {"ok": envelope_ok(tr), "reasons": reasons}
 
 
 def case_name(mach: float, alt: float, fuel: float) -> str:

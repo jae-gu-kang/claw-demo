@@ -115,3 +115,22 @@ def test_euler_deriv_consistency_with_quaternion_path(ac):
         fuel=150.0,
     )
     assert xd[XE_U] == pytest.approx(F[0] / m, rel=1e-12)
+
+
+def test_saturation_detail_matches_saturation_ok(ac):
+    """saturation_detail이 트림이 판정한 것과 같은 채널(elevon[0]·throttle[0])을 읽는다.
+
+    두 쪽 다 _saturation_channels를 부르므로 식 자체의 회귀는 여기서 안 잡힌다
+    (식은 test_level_trim_* 의 ok/포화 핀이 지킨다) — 이 테스트가 지키는 것은
+    TrimResult 필드 추출 경로의 일치다 (detail이 다른 타면·엔진 값을 읽으면 실패)."""
+    from claw.trim import saturation_detail
+
+    cases = [
+        TrimCase("cruise", mach=0.7, alt=1000.0, fuel=200.0),
+        TrimCase("slow", mach=0.12, alt=100.0, fuel=400.0),  # 저속 저동압 — 포화 유도
+        TrimCase("high", mach=0.4, alt=5000.0, fuel=400.0),
+    ]
+    for tr in trim_batch(ac, cases):
+        det = saturation_detail(tr)
+        assert set(det) == {"de", "throttle_high", "throttle_low"}
+        assert tr.flags["saturation_ok"] == (not any(det.values())), tr.case.name

@@ -4,18 +4,17 @@
 직사각 격자를 강제하면 저고도·저연료 행에서 트림 불가 영역을 헛돌게 된다.
 PointSet이 격자가 아니라 목록인 이유가 이것이다 (points.py).
 
-- mach 하한: vn_stall_boundary(envelope.py 재사용)의 n(M) 곡선에서 n=1 교차(=V_S)를
-  역보간해 mach_margin(기본 1.1 — 실속 여유 10%, trim.ALPHA_MARGIN과 같은 지위의
-  [기본값])을 곱한다. 교차가 없으면(전 구간 n>1) DB 하한으로 폴백.
+- mach 하한·행 좌표: analysis.envelope의 stall_mach_lo·row_machs가 정본 —
+  V_S(n=1) 역보간 × mach_margin(기본 1.1 — 실속 여유 10%, trim.ALPHA_MARGIN과
+  같은 지위의 [기본값]), 교차가 없으면(전 구간 n>1) DB 하한 폴백. 설계 엔벨로프
+  표시(01 §2.6)와 같은 좌표를 공유한다.
 - mach 상한: min(구조 순항 한계 mach_no, DB 유효 상한, 실속표 축 상한) — 실 DB
   결선 시 db_ranges를 Table.axes에서 유도하는 어댑터가 이 인자 계약으로 들어온다.
 - 격자 생성 후 trim_batch 1회(서펜타인 인접 시드)로 trimmable 플래그를 채운다 —
   포화·α여유 실패점은 버리지 않고 False로 남긴다 (엔벨로프 실경계의 데이터화).
 """
 
-import numpy as np
-
-from claw.analysis.envelope import vn_stall_boundary
+from claw.analysis.envelope import DEFAULT_SCHEDULE_ALTS, row_machs
 from claw.common.contracts import TrimCase
 from claw.design.points import (
     ROLE_ANCHOR,
@@ -24,26 +23,10 @@ from claw.design.points import (
     case_name,
     envelope_ok,
 )
-from claw.env import isa_atmosphere
 from claw.trim import trim_batch
 
-DEFAULT_ALTS = (0.0, 1000.0, 3000.0, 5000.0)  # [m] ISA 유효범위 내 [기본값]
+DEFAULT_ALTS = DEFAULT_SCHEDULE_ALTS  # 정본은 analysis.envelope — 설계 엔벨로프 표시와 공유
 DEFAULT_FUEL_FRACS = (0.1, 0.5, 1.0)  # × fuel_max [기본값]
-_SCAN_POINTS = 41  # 실속 경계 역보간용 mach 스캔 밀도
-
-
-def _mach_lo(aircraft, stall_table, alt, fuel, mach_hi, db_mach_lo, mach_margin):
-    """행(alt, fuel)의 mach 하한 — V_S(n=1) × 여유. 교차 없으면 DB 하한 폴백."""
-    scan_lo = max(float(stall_table.axes[0][0]), db_mach_lo)
-    machs = np.linspace(scan_lo, mach_hi, _SCAN_POINTS)
-    bnd = vn_stall_boundary(aircraft, stall_table, alt, fuel, machs)
-    n_arr = np.asarray(bnd["n"])
-    v_arr = np.asarray(bnd["V"])
-    if not n_arr[0] <= 1.0 <= n_arr[-1]:
-        return max(db_mach_lo, scan_lo)  # 스캔 범위에 V_S가 없다 — DB 하한이 실효 하한
-    v_s = float(np.interp(1.0, n_arr, v_arr))
-    atm = isa_atmosphere(alt)
-    return max((v_s / atm.a) * mach_margin, db_mach_lo)
 
 
 def coarse_grid(
@@ -80,10 +63,12 @@ def coarse_grid(
     points = PointSet()
     for fuel in fuels:
         for alt in alts:
-            lo = _mach_lo(aircraft, stall_table, alt, fuel, mach_hi, db_mach_lo, mach_margin)
-            if lo >= mach_hi:
-                continue  # 이 행은 유효 mach 구간이 없다 (고고도·고중량 — 데이터로 남길 것 없음)
-            machs = np.round(np.linspace(lo, mach_hi, n_mach), 4)
+            machs = row_machs(
+                aircraft, stall_table, alt, fuel,
+                mach_hi=mach_hi, db_mach_lo=db_mach_lo,
+                mach_margin=mach_margin, n_mach=n_mach,
+            )
+            # 빈 행 = 유효 mach 구간 없음 (고고도·고중량 — 데이터로 남길 것 없음)
             for mach in machs:
                 name = case_name(float(mach), alt, fuel)
                 if name in points:

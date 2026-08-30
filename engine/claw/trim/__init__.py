@@ -14,11 +14,12 @@ from claw.trim.linearize import (
     linearize,
     split_axes,
 )
-from claw.trim.trim import trim_batch, trim_level
+from claw.trim.trim import saturation_detail, trim_batch, trim_level
 
 __all__ = [
     "trim_level",
     "trim_batch",
+    "saturation_detail",
     "linearize",
     "split_axes",
     "U_NAMES",

@@ -110,6 +110,132 @@ def test_vn_envelope_endpoint(client):
     assert bad2.status_code == 422
 
 
+def test_vn_envelope_limit_overrides(client):
+    """필요값 입력(01 §2.6) — 구조 한계 오버라이드가 엔진까지 전달되고 출처가
+    echo된다. 부호·서열 위반은 엔진 검증 → 422."""
+    r = client.get("/api/analysis/vn-envelope",
+                   params={"alt": 1000.0, "fuel": 200.0, "mach_no": 0.6, "n_limit_pos": 4.0})
+    assert r.status_code == 200
+    b = r.json()
+    assert b["limits"]["mach_no"] == 0.6 and b["limits"]["n_limit_pos"] == 4.0
+    assert b["limits"]["n_ultimate_pos"] == pytest.approx(4.0 * 1.5)  # 나머지는 데모가 채움
+    assert b["limits_source"] == "user-input"
+    assert sorted(b["limits_overridden"]) == ["mach_no", "n_limit_pos"]
+    # V_NO도 오버라이드 반영 (mach_no × a) — 단순 echo가 아니라 계산 경유
+    assert b["limits"]["v_no"] == pytest.approx(b["limits"]["v_d"] * 0.6 / 0.9, rel=1e-9)
+    bad = client.get("/api/analysis/vn-envelope",
+                     params={"alt": 1000.0, "fuel": 200.0, "n_limit_neg": 1.0})
+    assert bad.status_code == 422  # 음수여야 함 — 엔진 _check_limits
+
+
+def test_design_envelope_endpoint(client):
+    """설계 엔벨로프 M-h 합성 + 공력 선도 (01 §2.6) — 형태·귀속·null 정책."""
+    r = client.get("/api/analysis/design-envelope", params={"fuel": 200.0})
+    assert r.status_code == 200
+    b = r.json()
+    reg = b["region"]
+    n = len(reg["alt"])
+    assert n > 10
+    for key in ("mach_lo", "mach_hi", "lo_source", "hi_source", "empty"):
+        assert len(reg[key]) == n
+    # q̄·운용 고도 미지정 — 경계 없음 (없는 데이터를 만들지 않는다)
+    assert b["bounds"]["qbar_mach"] is None and b["bounds"]["q_max"] is None
+    assert b["bounds"]["alt_min"] is None and b["bounds"]["alt_max"] is None
+    assert b["bounds"]["alt_max_is_display_default"] is True
+    assert b["limits_source"] == "demo-placeholder" and b["limits_overridden"] == []
+    # 스케줄 격자 좌표 존재 (coarse 격자 정본 — trimmable 미판정 좌표)
+    assert len(b["schedule_grid"]["points"]) > 0
+    # 공력 선도 블록 — 보호선 = 실속 − α마진 [기본값 0.05], 트림 α 범위 주입 echo
+    aero = b["aero"]
+    assert aero["alpha_prot"][0] == pytest.approx(aero["alpha_stall"][0] - 0.05, rel=1e-9)
+    assert aero["trim_alpha_bounds"] == [-0.10, 0.35]
+    assert aero["db"]["mach"] == [0.1, 0.9]
+
+    # q̄ 한계 지정 — 저고도에서 qbar가 상한 승자
+    r2 = client.get("/api/analysis/design-envelope", params={"fuel": 200.0, "q_max": 20000.0})
+    b2 = r2.json()
+    assert b2["bounds"]["qbar_mach"] is not None
+    assert b2["region"]["hi_source"][0] == "qbar"
+    # 구조 오버라이드 공유 계약 (vn-envelope와 동일)
+    r3 = client.get("/api/analysis/design-envelope", params={"fuel": 200.0, "mach_no": 0.6})
+    assert r3.json()["bounds"]["mach_no"] == 0.6
+    assert r3.json()["limits_source"] == "user-input"
+    # ISA 밖·서열 위반 → 엔진 ValueError → 422
+    assert client.get("/api/analysis/design-envelope",
+                      params={"fuel": 200.0, "alt_max": 99999.0}).status_code == 422
+    assert client.get("/api/analysis/design-envelope",
+                      params={"fuel": 200.0, "alt_min": 5000.0, "alt_max": 1000.0}).status_code == 422
+    # 비유한 연료 → 422 — fuel_max로 조용히 잘린 정상 차트 + 거짓 echo 방지 (서버 유한성 경계)
+    assert client.get("/api/analysis/design-envelope",
+                      params={"fuel": "inf"}).status_code == 422
+    assert client.get("/api/analysis/vn-envelope",
+                      params={"alt": 1000.0, "fuel": "inf"}).status_code == 422
+
+
+def test_envelope_scan_round_trip(client, wait_job):
+    """제어 가능 영역 스캔 (01 §2.6) — 트림 잡 + envelope_ok 정본 판정·사유 귀속."""
+    cases = [
+        {"mach": 0.6, "alt": 1000.0, "fuel": 200.0},
+        {"mach": 0.7, "alt": 1000.0, "fuel": 200.0},
+        {"name": "slow", "mach": 0.12, "alt": 100.0, "fuel": 400.0},  # 저속 저동압 — 비성립
+    ]
+    r = client.post("/api/analysis/design-envelope-scan",
+                    json={"cases": cases, "fingerprint": "fp-env"})
+    assert r.status_code == 202
+    j = wait_job(r.json()["id"])
+    assert j["status"] == "done"
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    assert body["kind"] == "envelope_scan" and body["n_requested"] == 3
+    entries = body["cases"]
+    assert len(entries) == 3
+    ok0, ok1, bad = entries
+    assert ok0["verdict"]["ok"] is True and ok0["verdict"]["reasons"] == []
+    assert bad["trim"]["case"]["name"] == "slow"
+    assert bad["verdict"]["ok"] is False and len(bad["verdict"]["reasons"]) > 0
+    # 스로틀 소요가 페이로드에 있음 — 추진 선도(스로틀 히트맵)의 데이터 근거
+    assert 0.0 <= ok0["trim"]["control"]["throttle"][0] <= 1.0
+    meta = client.get("/api/results").json()[0]
+    assert meta["kind"] == "envelope_scan" and meta["fingerprint"] == "fp-env"
+
+
+def test_envelope_scan_cases_cap_422(client):
+    """201케이스 → 422 — 오타 격자의 단일 워커 점유 차단 (영향성 MAX_CASES 원칙)."""
+    cases = [{"mach": 0.3 + 0.001 * i, "alt": 1000.0, "fuel": 200.0} for i in range(201)]
+    assert client.post("/api/analysis/design-envelope-scan",
+                       json={"cases": cases}).status_code == 422
+
+
+def test_envelope_scan_cancel_preserves_partial(client, wait_job, monkeypatch):
+    """취소 시 완료 트림·판정 보존 — 마진 맵과 같은 협조적 취소 계약."""
+    import time as _time
+
+    import claw_server.routes.analysis as analysis_route
+
+    real_batch = analysis_route.trim_batch
+
+    def gated_batch(ac, cases, fingerprint="", on_progress=None):
+        deadline = _time.time() + 10.0
+
+        def gated(done, total, tr):
+            cancelled = on_progress(done, total, tr)
+            while not cancelled and _time.time() < deadline:
+                _time.sleep(0.005)
+                cancelled = on_progress(done, total, tr)
+            return cancelled
+
+        return real_batch(ac, cases, fingerprint=fingerprint, on_progress=gated)
+
+    monkeypatch.setattr(analysis_route, "trim_batch", gated_batch)
+    cases = [{"mach": 0.5 + 0.05 * i, "alt": 1000.0, "fuel": 200.0} for i in range(4)]
+    jid = client.post("/api/analysis/design-envelope-scan", json={"cases": cases}).json()["id"]
+    assert client.post(f"/api/jobs/{jid}/cancel").status_code == 200
+    j = wait_job(jid)
+    assert j["status"] == "cancelled"
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    assert len(body["cases"]) == 1  # 첫 케이스 완료 후 취소 감지 — 판정 포함 보존
+    assert body["cases"][0]["verdict"]["ok"] is True
+
+
 def test_margin_map_loop_spec_validation_422(client):
     base = _margin_map_request()
     bad_x = dict(base, loops=[dict(base["loops"][0], x_out="psi")])  # 종축에 없는 상태

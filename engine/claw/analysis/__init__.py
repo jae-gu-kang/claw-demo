@@ -12,7 +12,15 @@ duty — 폐루프 런의 타면 사용 통계(타각 범위별 체류 시간·�
 """
 
 from claw.analysis.duty import duty_report, surface_positions
-from claw.analysis.envelope import vn_envelope, vn_stall_boundary
+from claw.analysis.envelope import (
+    aero_envelope,
+    design_envelope,
+    mach_qbar_limit,
+    row_machs,
+    stall_mach_lo,
+    vn_envelope,
+    vn_stall_boundary,
+)
 from claw.analysis.margins import loop_margins, make_siso, margin_map, pi_loop
 from claw.analysis.modes import classify_lat, classify_lon, damp
 
@@ -26,6 +34,11 @@ __all__ = [
     "margin_map",
     "vn_envelope",
     "vn_stall_boundary",
+    "design_envelope",
+    "aero_envelope",
+    "stall_mach_lo",
+    "row_machs",
+    "mach_qbar_limit",
     "duty_report",
     "surface_positions",
 ]

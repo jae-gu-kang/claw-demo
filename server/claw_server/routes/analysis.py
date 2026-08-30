@@ -13,18 +13,23 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
 from claw.analysis import (
+    aero_envelope,
     classify_lat,
     classify_lon,
     damp,
+    design_envelope,
     loop_margins,
     pi_loop,
     vn_envelope,
 )
+from claw.design.points import envelope_verdict
 from claw.plant import (
     make_demo_aircraft,
+    make_demo_db_ranges,
     make_demo_stall_table,
     make_demo_structural_limits,
 )
+from claw.trim.trim import ALPHA_BOUNDS
 from claw.trim import (
     LAT_INPUTS,
     LAT_STATES,
@@ -117,37 +122,171 @@ def _trim_only_entry(tr) -> dict:
     }
 
 
+def _assemble_limits(
+    n_limit_pos=None, n_limit_neg=None, safety_factor=None, mach_no=None, mach_d=None,
+) -> tuple:
+    """데모 구조 한계 + 사용자 오버라이드 조립 — (limits, source, overridden).
+
+    기본값 재기술 금지(02 §5.5): None은 데모 프로파일이 채우고, 서버는 어느
+    필드가 사용자 값인지(overridden)와 출처(source)만 echo. 값 검증(부호·서열)은
+    엔진 _check_limits 몫 — 서버는 경계 유한성만 (allow_inf_nan).
+    """
+    limits = make_demo_structural_limits()
+    overrides = {
+        "n_limit_pos": n_limit_pos,
+        "n_limit_neg": n_limit_neg,
+        "safety_factor": safety_factor,
+        "mach_no": mach_no,
+        "mach_d": mach_d,
+    }
+    overridden = [k for k, v in overrides.items() if v is not None]
+    limits.update({k: overrides[k] for k in overridden})
+    source = "user-input" if overridden else "demo-placeholder"
+    return limits, source, overridden
+
+
 @router.get("/analysis/vn-envelope")
 def vn_envelope_endpoint(
-    alt: float = Query(...),
-    fuel: float = Query(ge=0.0),
-    alpha_margin: float = Query(default=0.05, ge=0.0),  # α 리미터 [기본값]과 동일
+    alt: float = Query(..., allow_inf_nan=False),
+    fuel: float = Query(ge=0.0, allow_inf_nan=False),  # inf는 fuel_max로 조용히 잘려 거짓 echo가 된다
+    alpha_margin: float = Query(default=0.05, ge=0.0, allow_inf_nan=False),  # α 리미터 [기본값]과 동일
     neg_alpha_ratio: float = Query(default=0.6, gt=0.0, le=1.0),  # 음의 실속 자리표시 비율
+    # 구조 한계 오버라이드 — None = 데모 프로파일이 채움 (기본값 재기술 금지, 02 §5.5)
+    n_limit_pos: float | None = Query(default=None, allow_inf_nan=False),
+    n_limit_neg: float | None = Query(default=None, allow_inf_nan=False),
+    safety_factor: float | None = Query(default=None, allow_inf_nan=False),
+    mach_no: float | None = Query(default=None, allow_inf_nan=False),
+    mach_d: float | None = Query(default=None, allow_inf_nan=False),
 ) -> dict:
-    """V-n 선도 (01 §3.6) — 실속·보호 곡선 + 구조 한계선 + 특성 속도 (동기 계산).
+    """V-n 선도 (01 §2.6·§3.6) — 실속·보호 곡선 + 구조 한계선 + 특성 속도 (동기 계산).
 
-    구조 한계는 비행체 프로파일의 자리표시 [기본값](실기체 값 아님) — 정본
-    확보 시 프로파일 교체. 음의 실속 곡선도 자리표시(−ratio×α_stall, 엔진이
-    ratio echo). 표기는 웹 소관.
+    구조 한계는 비행체 프로파일의 자리표시 [기본값](실기체 값 아님)에 사용자
+    오버라이드를 얹는다(필요값 입력, 01 §2.6) — limits_source·limits_overridden
+    echo. 음의 실속 곡선도 자리표시(−ratio×α_stall, 엔진이 ratio echo).
+    표기는 웹 소관.
     """
     ac = make_demo_aircraft()
+    limits, source, overridden = _assemble_limits(
+        n_limit_pos, n_limit_neg, safety_factor, mach_no, mach_d
+    )
     try:
         env = vn_envelope(
             ac,
             make_demo_stall_table(),
-            make_demo_structural_limits(),
+            limits,
             alt=alt,
             fuel=fuel,
             alpha_margin=alpha_margin,
             neg_alpha_ratio=neg_alpha_ratio,
         )
-    except (ValueError, TypeError) as e:  # ISA 범위 밖 고도 등 — 엔진 검증
+    except (ValueError, TypeError) as e:  # ISA 범위 밖 고도·한계 서열 위반 등 — 엔진 검증
         raise HTTPException(status_code=422, detail=str(e))
     env["alt"] = alt
     env["fuel"] = fuel
     env["alpha_margin"] = alpha_margin
-    env["limits_source"] = "demo-placeholder"  # 실기체 값 아님 — 웹이 명기 표시
+    env["limits_source"] = source  # demo-placeholder = 실기체 값 아님 — 웹이 명기 표시
+    env["limits_overridden"] = overridden
     return env
+
+
+@router.get("/analysis/design-envelope")
+def design_envelope_endpoint(
+    fuel: float = Query(ge=0.0, allow_inf_nan=False),  # inf는 fuel_max로 조용히 잘려 거짓 echo가 된다
+    q_max: float | None = Query(default=None, allow_inf_nan=False),
+    alt_min: float | None = Query(default=None, allow_inf_nan=False),
+    alt_max: float | None = Query(default=None, allow_inf_nan=False),
+    mach_margin: float | None = Query(default=None, allow_inf_nan=False),
+    alpha_margin: float = Query(default=0.05, ge=0.0, allow_inf_nan=False),  # 공력 보호선 — α 리미터 [기본값]과 동일
+    # 구조 한계 오버라이드 — vn-envelope와 같은 계약 (None = 데모 프로파일)
+    n_limit_pos: float | None = Query(default=None, allow_inf_nan=False),
+    n_limit_neg: float | None = Query(default=None, allow_inf_nan=False),
+    safety_factor: float | None = Query(default=None, allow_inf_nan=False),
+    mach_no: float | None = Query(default=None, allow_inf_nan=False),
+    mach_d: float | None = Query(default=None, allow_inf_nan=False),
+) -> dict:
+    """설계 엔벨로프 M-h 합성 + 공력 선도 데이터 (01 §2.6, 동기 계산).
+
+    합성·귀속·좌표는 전부 엔진(design_envelope·aero_envelope) — 서버는 데모
+    프로파일 조립과 비-None 전달만 (기본값 재기술 금지, 02 §5.5). q_max·운용
+    고도는 실기체 값이라 미지정이면 경계 자체가 없다(엔진이 null echo).
+    trim_alpha_bounds는 trim 상수 정본을 조립 시점에 주입 (같은 L4 계층이라
+    엔진 analysis가 직접 import하지 않는다 — 03 §2 계층 규칙).
+    """
+    ac = make_demo_aircraft()
+    stall = make_demo_stall_table()
+    db_ranges = make_demo_db_ranges()
+    limits, source, overridden = _assemble_limits(
+        n_limit_pos, n_limit_neg, safety_factor, mach_no, mach_d
+    )
+    kwargs = {
+        k: v
+        for k, v in dict(q_max=q_max, alt_min=alt_min, alt_max=alt_max, mach_margin=mach_margin).items()
+        if v is not None
+    }
+    try:
+        env = design_envelope(ac, stall, limits, db_ranges, fuel=fuel, **kwargs)
+        env["aero"] = aero_envelope(
+            stall, db_ranges, alpha_margin=alpha_margin, trim_alpha_bounds=ALPHA_BOUNDS
+        )
+    except (ValueError, TypeError) as e:  # ISA 범위·서열 위반 등 — 엔진 검증
+        raise HTTPException(status_code=422, detail=str(e))
+    env["limits"] = limits
+    env["limits_source"] = source
+    env["limits_overridden"] = overridden
+    return to_jsonable(env)
+
+
+MAX_SCAN_CASES = 200  # 영향성 라우트 MAX_CASES와 같은 지위 — 오타 격자의 단일 워커 점유 차단
+
+
+class EnvelopeScanIn(BaseModel):
+    """제어 가능 영역 스캔 — 케이스 격자 트림 + envelope_ok 판정 (01 §2.6)."""
+
+    aircraft: Literal["demo"] = "demo"
+    fingerprint: str = ""
+    cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_SCAN_CASES)
+
+
+@router.post("/analysis/design-envelope-scan", status_code=202)
+def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Response) -> dict:
+    """설계 엔벨로프의 제어 가능 영역 — 격자 트림 잡 (마진 맵과 같은 202 골격).
+
+    점별 판정은 엔진 envelope_verdict(envelope_ok 정본 + 사유 귀속) —
+    saturated_throttle_high가 추진 한계의 대리 지표 (전용 추력 모델 [TBD]).
+    취소는 trim_batch 협조적 중단 — 완료분 보존.
+    """
+    ac = make_demo_aircraft()
+    cases = build_cases(req.cases)
+    store = request.app.state.store
+
+    def work(job):
+        trs = trim_batch(
+            ac,
+            cases,
+            fingerprint=req.fingerprint,
+            on_progress=lambda done, total, tr: job.report(
+                done, total, message=f"트림: {tr.case.name}"
+            ),
+        )
+        entries = [
+            {"trim": trim_result_dict(tr), "verdict": to_jsonable(envelope_verdict(tr))}
+            for tr in trs
+        ]
+        store.save(
+            job.id,
+            {"kind": "envelope_scan", "cases": entries, "n_requested": len(cases)},
+            meta={
+                "kind": "envelope_scan",
+                "created": job.created,
+                "n": len(entries),
+                "fingerprint": req.fingerprint,
+            },
+        )
+        job.result_id = job.id
+
+    job = request.app.state.jobs.submit("envelope_scan", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()
 
 
 @router.post("/analysis/margin-map", status_code=202)
