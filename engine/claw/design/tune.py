@@ -404,6 +404,16 @@ def _report_rates_on_final_composition(axes, gains, achieved, notes, pending):
             )
 
 
+def _bandwidth_ok(wc, wc0, targets) -> bool:
+    """달성 교차가 대역폭 하한을 넘는가 — 백오프·구제·note가 **같은 식을 쓴다**.
+
+    세 곳에 손으로 적혀 있던 판정이다. 게다가 두 곳이 서로 **다른 물리량**을 같은
+    문턱에 댔다: 백오프는 설계 목표 교차(wc), 구제는 마무리 뒤의 실측 이득교차(wcp).
+    게인이 바뀌었으니 후자가 맞지만, 식이 흩어져 있으면 한쪽만 고쳐도 아무도 모른다.
+    """
+    return bool(wc0) and math.isfinite(wc) and wc >= targets.wc_att_ok_frac * wc0
+
+
 def _att_margin_verdict(m, targets) -> str:
     """자세 마진 수용 판정 — "ok" | "short" | "na". 백오프와 구제가 **같은 식을 쓴다**.
 
@@ -462,7 +472,7 @@ def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> t
         if verdict == "ok":
             # 대역폭 하한 — 이 밑에서만 통과하는 것은 성능 붕괴다 (structural limit).
             # **마진은 통과했다** — 사유를 margin_floor와 뭉개면 안내가 거짓이 된다
-            reason = (REASON_OK if wc >= targets.wc_att_ok_frac * wc0
+            reason = (REASON_OK if _bandwidth_ok(wc, wc0, targets)
                       else REASON_BANDWIDTH_COLLAPSE)
             return kp, ki, best[2], reason, evals
         last_verdict = verdict
@@ -524,9 +534,10 @@ def tune_point(
                 meta={k: ach[k] for k in _ATT_META if k in ach},
             )
             evals += ev2
-            if _att_margin_verdict(ach2, targets) == "ok" and math.isfinite(
-                ach2["wc_att"]
-            ) and ach2["wc_att"] >= targets.wc_att_ok_frac * ach["wc0"]:
+            # 마무리가 **후퇴**했으면(게인이 그대로) 구제라 부를 수 없다 — wcp가 wc보다
+            # 큰 루프에서는 아무것도 안 바꾸고 "구제됨"이 될 수 있다
+            if ach2.get("polished") and _att_margin_verdict(ach2, targets) == "ok" \
+                    and _bandwidth_ok(ach2["wc_att"], ach["wc0"], targets):
                 kp, ki, ach, st = kp2, ki2, ach2, REASON_RESCUED
                 notes.append(
                     f"{group}.kp/ki: 백오프 해가 대역폭 하한 미달이라 마무리로 구제 —"

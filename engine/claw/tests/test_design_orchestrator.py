@@ -2,7 +2,7 @@
 
 import pytest
 
-from claw.design import AutoDesignConfig, DesignSession
+from claw.design import AutoDesignConfig, DesignSession, TuneTargets
 from claw.fcl.demo import demo_design_gains
 from claw.plant import (
     make_demo_aircraft,
@@ -649,3 +649,46 @@ def test_ledger_gathers_what_has_no_prescription_card():
     ineff = next(r for r in led if r["kind"] == "ineffective")
     assert ineff["action"]["changed"] is False and ineff["action"]["applied"] is True
     assert s.report()["ledger_size"] == len(led)
+
+
+def test_effect_survives_a_serialization_round_trip():
+    """카드의 효과 기록이 **JSON 왕복** 뒤에도 채워진다.
+
+    프로세스 안에서는 `actions[].effect`와 `applied_log[].effect`가 같은 dict를
+    참조해서 한 번 쓰면 둘 다 갱신된다. 그런데 그 성질은 왕복에서 소리 없이
+    사라진다 — gated 승인은 매번 store를 거치고(load → from_dict → apply → save),
+    취소 후 재개 경로에서는 저장된 카드가 `before`만 가진 채 영영 `after`를 못 받는다.
+    동일 객체에 기대지 않고 id로 찾아 넣는지 잰다.
+    """
+    import json
+
+    s, v = _seed_failing_session()
+    s.apply_actions(["a1"])
+    # **JSON을 실제로 거친다** — to_dict()만으로는 파이썬 dict 참조가 그대로 살아
+    # 있어 이 테스트가 판별력을 잃는다. 서버의 저장 경로가 하는 일 그대로다
+    s2 = DesignSession.from_dict(json.loads(json.dumps(s.to_dict())))
+    assert s2.actions[0]["effect"] is not s2.applied_log[0]["effect"], (
+        "왕복인데 공유가 살아 있다 — 이 테스트가 재려는 상황이 아니다")
+
+    s2.margin_out["cases"][v]["loops"]["pitch_att"] = {
+        "kind": "margin", "pm_deg": 52.0, "gm_db": 9.0, "status": "ok"}
+    s2._score_applied_actions()
+    assert s2.applied_log[0]["effect"]["changed"] is True
+    assert s2.actions[0]["effect"].get("changed") is True, (
+        "왕복 뒤 카드가 효과를 못 받았다 — 화면은 반영만 보고 결과는 못 본다")
+
+
+def test_bandwidth_floor_is_one_predicate():
+    """대역폭 하한 판정이 한 자리에만 있다 — 세 곳에 적히면 서로 다른 물리량을 댄다.
+
+    백오프는 설계 목표 교차(wc), 구제는 마무리 뒤의 실측 이득교차(wcp)를 같은 문턱에
+    댄다. 게인이 바뀌었으니 후자가 맞지만, 식이 흩어져 있으면 한쪽만 고쳐도 아무도
+    모른다. wc0이 0이거나 wc가 비유한이면 통과가 아니다.
+    """
+    from claw.design.tune import _bandwidth_ok
+
+    tg = TuneTargets()  # wc_att_ok_frac = 0.2
+    assert _bandwidth_ok(2.0, 10.0, tg) is True   # 0.20 — 경계 포함
+    assert _bandwidth_ok(1.99, 10.0, tg) is False
+    assert _bandwidth_ok(float("nan"), 10.0, tg) is False, "못 잰 교차가 통과가 됐다"
+    assert _bandwidth_ok(5.0, 0.0, tg) is False, "분모가 없으면 비율이 없다"

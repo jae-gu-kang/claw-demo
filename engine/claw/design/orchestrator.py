@@ -666,6 +666,7 @@ class DesignSession:
         연속 _SEAL_AFTER회 그러면 봉인해 다음 이터에서 다시 내지 않는다 — 종전에는
         무효 처방이 applied로 기록되며 예산 소진까지 같은 순환을 돌 수 있었다.
         """
+        by_id = {a["id"]: a for a in self.actions}
         for rec in self.applied_log:
             eff = rec["effect"]
             if "after" in eff:
@@ -675,6 +676,14 @@ class DesignSession:
                 continue  # 잴 대상이 애초에 없는 처방
             eff["after"] = after
             eff["changed"] = _effect_changed(eff["before"], after)
+            # 카드에도 **id로 찾아** 같은 값을 넣는다. 프로세스 안에서는 두 곳이 같은
+            # dict를 참조하지만 그 성질은 **JSON 왕복에서 소리 없이 사라진다** —
+            # gated 승인은 매번 store를 거치고(routes: load → from_dict → apply →
+            # save), 취소 후 재개 경로에서는 저장된 카드가 before만 가진 채 영영
+            # after를 못 받는다. 동일 객체에 기대지 않는다
+            card = by_id.get(rec["id"])
+            if card is not None:
+                card["effect"] = dict(eff)
             key = _seal_key(rec["case"], rec["loop"], rec["verdict"])
             if eff["changed"]:
                 self.ineffective.pop(key, None)
