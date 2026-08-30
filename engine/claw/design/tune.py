@@ -307,7 +307,8 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
         gains[slot] = k
         final = dict(spec_rates)
         final[slot] = k
-        got = _metric(lm_axis, final, metric_key)
+        final_metrics = axis_metrics(lm_axis, final)
+        got = final_metrics[metric_key]
         # 사유는 **왜 목표에 못 갔나**를 가른다. 캡이 걸렸어도 목표를 넘겼으면 결함이
         # 아니다 (안정 경계 아래에서 목표 달성 = 정상), 그래서 목표 달성 여부를 먼저 본다
         if got >= target * (1.0 - 1e-9):
@@ -328,6 +329,11 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
             # 확장 횟수 — 목표 미달을 보고할 때 "브래킷 탓이 아니다"의 증거가 된다
             "bracket_growth": grown,
             "reason": reason,
+            # λ의 |Re|가 지운 부호와, 그 실근이 롤 상태를 얼마나 담았나 —
+            # 발산근이면 수치와 무관하게 실패이고, 참여도가 낮으면 애초에 롤
+            # 대역폭을 잰 게 아니다 (판정은 criteria.judge_bandwidth 소관)
+            "unstable": bool(final_metrics.get("roll_unstable", False)),
+            "participation": final_metrics.get("roll_participation"),
         }
         if not reached:
             limit = 4.0 * _BRACKET_GROWTH ** grown
@@ -528,7 +534,8 @@ def _polish_att(lm_axis, group, rate_gains, kp0, ki0, targets, act_kw, max_evals
     백오프는 ωc를 버려서 마진을 사는 **한 방향** 탐색이라, 마진 여유가 남았는데도
     대역폭 하한 아래로 내려간 자리가 생긴다. (kp, ki)를 함께 흔들면 같은 마진에서
     대역폭을 되찾을 수 있다 — 데모 M0.7~0.75/h0의 여섯 자리가 그 경우였다
-    (교차비 0.168 → 0.235~0.286, 하한 0.2 통과).
+    (교차비 0.168 → 0.215~0.276, 하한 0.2 통과). 예산(max_evals)을 다 주면 조금 더
+    올라가지만 백오프가 쓴 평가를 빼고 남는 몫이 실제 값이다.
 
     벌점 무릎에 **가드 밴드**를 둔다. 목적이 대역폭을 최대화하므로 최적점은 벌점이
     켜지는 지점에 정확히 붙는데, 그러면 수용 판정이 부동소수 잡음으로 뒤집힌다

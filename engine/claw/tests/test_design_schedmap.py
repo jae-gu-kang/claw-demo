@@ -308,3 +308,83 @@ def test_failures_are_ordered_worst_first_across_slot_kinds():
     deep = next(f for f in out if f["case"] == "deep_pm")
     assert deep["shortfall"]["pm_deg"]["required"] == 45.0
     assert deep["shortfall"]["pm_deg"]["deficit"] == pytest.approx(10.0)
+
+
+def test_roll_rate_is_judged_against_its_target(setup):
+    """roll_rate가 더 이상 상수 "ok"가 아니다 — λ를 그 실행의 튜닝 목표와 견준다.
+
+    종전에는 entry에 target조차 없이 status="ok"를 박았다. 그래서 롤 댐퍼가 목표
+    대역폭을 얼마나 놓치든 검증을 통과했고, 이 자리는 **절대 실패할 수 없는 판정**을
+    하나 보태 judged 수를 부풀렸다. λ는 안정성 마진이 아니라 성능 지표라 관례적
+    절대 합격선이 없으므로 목표 대비 비율로 잰다 (criteria.lam_min_frac/lam_good_frac).
+    """
+    from claw.design import TuneTargets
+
+    ac, tables, design = setup
+    case = _case(0.6)
+    lm = linearize(ac, trim_level(ac, case))
+    crit, tg = MarginCriteria(), TuneTargets()
+
+    good = scheduled_margin_point(lm, tables, design, case, criteria=crit, targets=tg)
+    rr = good["roll_rate"]
+    assert rr["target"] == tg.roll_lambda, "무엇과 견줬는지가 결과에 남아야 한다"
+    assert rr["status"] in ("ok", "warn", "fail")
+
+    # 롤 댐퍼를 아예 끄면 λ가 무너진다 — 종전이라면 그래도 "ok"였다
+    off = dict(tables)
+    off["roll.k_rate"] = Table({"mach": (0.2, 0.9)}, (0.0, 0.0), extrapolate="clip")
+    bad = scheduled_margin_point(lm, off, design, case, criteria=crit, targets=tg)
+    assert bad["roll_rate"]["roll_lambda"] < rr["roll_lambda"]
+    assert bad["roll_rate"]["participation"] > crit.lam_part_min, (
+        "참여도가 낮으면 na가 맞다 — 이 테스트는 fail을 재려는 것이라 전제가 다르다")
+    assert bad["roll_rate"]["status"] == "fail", (
+        f"롤 대역폭이 무너졌는데 통과했다 — {bad['roll_rate']}")
+
+    # 댐퍼가 어중간하게 약하면 롤 모드가 더치롤·나선과 합쳐져 **실근으로 존재하지
+    # 않는다**. 남은 실근의 |Re|를 롤 대역폭이라 부르면 조용한 오답이다 — na여야 한다
+    faint = dict(tables)
+    faint["roll.k_rate"] = Table({"mach": (0.2, 0.9)},
+                                 (design["roll.k_rate"] * 0.2,) * 2, extrapolate="clip")
+    amb = scheduled_margin_point(lm, faint, design, case, criteria=crit, targets=tg)
+    assert amb["roll_rate"]["participation"] < crit.lam_part_min
+    assert amb["roll_rate"]["status"] == "na", (
+        f"롤 모드가 아닌 근을 롤 대역폭으로 판정했다 — {amb['roll_rate']}")
+
+
+def test_roll_lambda_carries_the_sign_it_would_otherwise_erase():
+    """λ = max|Re|는 부호를 지운다 — 발산근 +12가 "목표 12 달성"으로 보인다.
+
+    튜너 쪽은 댐퍼 안정 캡이 걸러 주지만 검증 쪽에는 그 게이트가 없다. 지표가
+    부호를 함께 내지 않으면 발산하는 롤 모드가 성능 달성으로 기록된다.
+    """
+    from claw.design.closure import lat_metrics
+
+    # 대각 행렬이라 모드 k = 상태 k. lat 상태 순서는 (v, p, r, phi)이므로 p는 1번
+    stable = np.diag([-0.5, -12.0, -3.0, -0.02])
+    m = lat_metrics(stable, wn_floor=0.1)
+    assert m["roll_lambda"] == pytest.approx(12.0) and m["roll_unstable"] is False
+    assert m["roll_participation"] == pytest.approx(1.0)
+
+    diverging = np.diag([-0.5, +12.0, -3.0, -0.02])  # 크기는 같고 부호만 반대
+    m2 = lat_metrics(diverging, wn_floor=0.1)
+    assert m2["roll_lambda"] == pytest.approx(12.0), "크기는 그대로 나온다"
+    assert m2["roll_unstable"] is True, "부호가 지워졌다 — 발산근이 달성으로 보인다"
+    assert MarginCriteria().judge_bandwidth(12.0, 12.0, unstable=True) == "fail"
+
+
+def test_roll_mode_is_picked_by_participation_not_by_speed():
+    """"실근 중 가장 빠른 것"은 롤 모드가 아니다 — 롤 상태를 담은 근을 지목한다.
+
+    데모 M0.6/h1000 실측: 요 댐퍼가 만든 실근이 −6.45 rad/s라, 롤 게인을 설계값의
+    0.2배로 줄여도 max|Re|는 6.58에서 안 내려가고 **0으로 완전히 꺼도 6.45**다.
+    재려는 게인에 거의 반응하지 않는 지표였다.
+    """
+    from claw.design.closure import lat_metrics, roll_real_mode
+
+    # p(1번)에 느린 근, 다른 상태에 빠른 근 — max|Re|는 −9를 집는다
+    A = np.diag([-9.0, -2.0, -4.0, -0.01])
+    lam, part = roll_real_mode(A, p_index=1)
+    assert lam.real == pytest.approx(-2.0), "롤과 무관한 빠른 근을 집었다"
+    assert part == pytest.approx(1.0)
+    assert lat_metrics(A, wn_floor=0.1)["roll_lambda"] == pytest.approx(2.0)
+    assert max(abs(v) for v in (-9.0, -2.0, -4.0, -0.01)) == 9.0  # 종전 축의 답

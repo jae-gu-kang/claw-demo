@@ -80,18 +80,59 @@ def lon_metrics(A, wn_floor) -> dict:
     return {"zeta_sp": min((m["zeta"] for m in fast), default=1.0)}
 
 
-def lat_metrics(A, wn_floor) -> dict:
-    """횡축 폐쇄 A′ → {"zeta_dr", "roll_lambda"}.
+def roll_real_mode(A, p_index):
+    """롤 상태(p)를 가장 많이 담은 **실근**과 그 참여도 — (eig, participation).
+
+    종전에는 "실근 중 max|Re|"를 롤 수렴 모드로 봤다. 그 휴리스틱은 두 군데서 깨진다:
+
+    1) 요 댐퍼가 만든 빠른 실근이 롤 근보다 빠르면 그쪽이 뽑힌다. 데모 M0.6/h1000
+       실측 — 롤 게인을 설계값의 0.2배로 줄여도 λ가 6.58에서 안 내려가고, **0으로
+       완전히 꺼도 6.45다**. 재려는 게인에 거의 반응하지 않는 지표였다.
+    2) 댐퍼가 약해지면 롤 모드가 더치롤·나선과 합쳐져 **실근으로 존재하지 않는다**.
+       위 0.2배에서 남은 실근 둘의 p 참여도는 0.080·(나머지)로, 어느 쪽도 롤이 아니다.
+
+    참여도 = |V[p,k] · V⁻¹[k,p]| (표준 participation factor — 모드별 상태 합이 1).
+    호출자는 참여도가 낮으면 "롤 대역폭을 잴 수 없다"로 다뤄야 한다 — 낮은 참여도
+    근의 |Re|를 롤 대역폭이라 부르는 것이 이 지표가 하던 일이다.
+
+    고유벡터 행렬이 특이하면(결함 행렬) (None, None) — 호출자가 판정 불가로 흘린다.
+    """
+    w, V = np.linalg.eig(np.asarray(A, dtype=float))
+    try:
+        Winv = np.linalg.inv(V)
+    except np.linalg.LinAlgError:
+        return None, None
+    best, best_part = None, -1.0
+    for k, lam in enumerate(w):
+        if abs(lam.imag) > 1e-9:
+            continue
+        part = float(abs(V[p_index, k] * Winv[k, p_index]))
+        if part > best_part:
+            best, best_part = complex(lam), part
+    return best, (None if best is None else best_part)
+
+
+def lat_metrics(A, wn_floor, p_index=1) -> dict:
+    """횡축 폐쇄 A′ → {"zeta_dr", "roll_lambda", "roll_unstable", "roll_participation"}.
 
     zeta_dr: floor 위 진동쌍의 최소 ζ (없으면 1.0 — 모드가 실근으로 교환된 상태).
-    roll_lambda: 실근 모드의 최대 |Re| — 롤 수렴 모드 대역폭 [rad/s].
+    roll_lambda: **p 참여도로 지목한** 실근의 |Re| — 롤 수렴 모드 대역폭 [rad/s].
+    roll_unstable: 그 근이 발산근인가. |Re|는 부호를 지우므로(+12가 "목표 12 달성"으로
+      보인다) 따로 낸다 — 튜너는 댐퍼 안정 캡이 걸러 주지만 검증에는 그 게이트가 없다.
+    roll_participation: 지목의 신뢰도. 낮으면 롤 모드가 실근으로 존재하지 않는 것이다.
+
+    판정은 하지 않는다 — criteria.judge_bandwidth가 이 셋을 받아 한다 (지표 계산과
+    판정의 분리). p_index 기본 1은 lat 상태 순서 (v, p, r, phi)의 p 자리다
+    (trim.linearize.LAT_STATES 정본 — axis_metrics가 x_names에서 찾아 넘긴다).
     """
     modes = damp(A)
     pairs = [m for m in modes if m["eig"].imag > 1e-9 and m["wn"] >= wn_floor]
-    reals = [m for m in modes if abs(m["eig"].imag) <= 1e-9]
+    lam_mode, part = roll_real_mode(A, p_index)
     return {
         "zeta_dr": min((m["zeta"] for m in pairs), default=1.0),
-        "roll_lambda": max((abs(m["eig"].real) for m in reals), default=0.0),
+        "roll_lambda": 0.0 if lam_mode is None else abs(lam_mode.real),
+        "roll_unstable": lam_mode is not None and lam_mode.real > 0.0,
+        "roll_participation": part,
     }
 
 
@@ -99,7 +140,10 @@ def axis_metrics(lm_axis, rate_gains: dict) -> dict:
     """개루프 축 모델 + 레이트 게인 → 폐쇄 모드 지표 (판정·튜닝 목적함수 공용)."""
     floor = _WN_FLOOR_FRAC * wn_reference(lm_axis)
     A = close_rates(lm_axis, rate_gains).A
-    return (lon_metrics if lm_axis.axis == "lon" else lat_metrics)(A, floor)
+    if lm_axis.axis == "lon":
+        return lon_metrics(A, floor)
+    # p 자리를 이름으로 찾는다 — 상태 순서를 여기 손으로 적으면 정본(LAT_STATES)과 갈린다
+    return lat_metrics(A, floor, p_index=lm_axis.x_names.index("p"))
 
 
 def oriented_margins(loop) -> tuple:

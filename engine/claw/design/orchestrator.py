@@ -377,7 +377,10 @@ class DesignSession:
         design_eff = {**self.design, **self.sched_constants}
         out = scheduled_margin_map(
             aircraft, self.points, self.lms, self.sched_tables, design_eff,
-            criteria=c.criteria, trims=self.trims, fingerprint=fingerprint,
+            # targets는 λ 판정에만 쓴다 — 롤 대역폭 요구가 튜닝 목표에서 온다.
+            # 튜닝과 검증이 **같은 목표**를 보게 하는 유일한 배선이다
+            criteria=c.criteria, targets=c.targets, trims=self.trims,
+            fingerprint=fingerprint,
             on_progress=lambda d, t, m: cb(d, t, m), **self._act_kw(),
         )
         if out["aborted"]:

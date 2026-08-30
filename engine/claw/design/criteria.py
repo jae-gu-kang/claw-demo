@@ -69,6 +69,10 @@ class MarginCriteria:
     # 확정할 자리다 (docs -01 §7 "합격기준 허용오차 수치").
     lam_min_frac: float = 0.5  # 합격선 = 목표 × 이 값
     lam_good_frac: float = 0.8  # 목표선 = 목표 × 이 값 (이 사이는 warn)
+    # λ를 잰 실근이 롤 상태를 이만큼도 안 담고 있으면 **롤 대역폭을 잰 게 아니다**
+    # → na. 댐퍼가 약하면 롤 모드가 더치롤·나선과 합쳐져 실근으로 존재하지 않는데,
+    # 그때 남은 실근의 |Re|를 롤 대역폭이라 부르면 조용한 오답이 된다 [기본값]
+    lam_part_min: float = 0.5
 
     def __post_init__(self):
         if not self.pm_bad_deg <= self.pm_min_deg:
@@ -77,6 +81,8 @@ class MarginCriteria:
             raise ValueError(f"gm_min_db({self.gm_min_db}) ≤ gm_good_db({self.gm_good_db}) 필요")
         if not 0.0 < self.zeta_min <= self.zeta_good:
             raise ValueError(f"0 < zeta_min({self.zeta_min}) ≤ zeta_good({self.zeta_good}) 필요")
+        if not 0.0 < self.lam_part_min <= 1.0:
+            raise ValueError(f"lam_part_min은 (0, 1] 구간: {self.lam_part_min}")
         if not 0.0 < self.lam_min_frac <= self.lam_good_frac <= 1.0:
             raise ValueError(
                 f"0 < lam_min_frac({self.lam_min_frac}) ≤ lam_good_frac"
@@ -114,17 +120,26 @@ class MarginCriteria:
             return "warn"
         return "ok"
 
-    def judge_bandwidth(self, lam: float, target: float, *, unstable: bool = False) -> str:
+    def judge_bandwidth(self, lam: float, target: float, *, unstable: bool = False,
+                        participation=None) -> str:
         """롤 수렴 대역폭 λ → 'ok' | 'warn' | 'fail' | 'na' — 목표 대비 비율로 잰다.
 
-        `unstable`은 λ를 만든 실근이 **발산근**이라는 표시다. λ = max|Re|라 부호가
-        지워지므로(closure.lat_metrics) 발산근 +12 rad/s가 "목표 12 달성"으로 보인다 —
+        `unstable`은 λ를 만든 실근이 **발산근**이라는 표시다. |Re|는 부호를 지우므로
+        (closure.roll_real_mode) 발산근 +12 rad/s가 "목표 12 달성"으로 보인다 —
         수치와 무관하게 fail이다. 튜너 쪽은 댐퍼 안정 캡이 걸러 주지만 검증 쪽에는
         그 게이트가 없어서, 이 인자가 유일한 방어다.
+
+        `participation`은 그 실근이 롤 상태를 얼마나 담았나(0~1). `lam_part_min`
+        미만이면 **롤 대역폭을 잰 게 아니므로** na다 — 통과도 실패도 아니다.
+        데모 M0.6에서 롤 게인을 설계값의 0.2배로 줄이면 롤 모드가 실근에서 사라지고
+        남은 실근의 참여도가 0.08이 된다. 그 근의 |Re|(6.58)를 "롤 대역폭 목표 12의
+        0.55배"라 판정하는 것이 종전 지표가 하던 일이다.
         """
         z = float(lam)
         t = float(target)
         if math.isnan(z) or not math.isfinite(t) or t <= 0.0:
+            return "na"
+        if participation is not None and float(participation) < self.lam_part_min:
             return "na"
         if unstable:
             return "fail"

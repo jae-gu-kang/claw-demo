@@ -10,7 +10,9 @@ closure 조성(closure.py) × pi_loop 전체 조성(작동기 2차계 + Padé �
 
 판정 (criteria.py):
 - 레이트 자리: 폐쇄 모드 감쇠 — pitch_rate는 ζ_sp, yaw_rate는 ζ_dr(judge_damping).
-  roll_rate는 롤 수렴 모드 대역폭 λ_roll — 안정성 아닌 성능 지표라 정보 보고만
+  roll_rate는 롤 수렴 모드 대역폭 λ_roll — 관례적 절대 합격선이 없어 **그 실행의
+  튜닝 목표 대비 비율**로 잰다(judge_bandwidth). 종전에는 상수 "ok"라 보간이 λ를
+  얼마나 놓치든 통과였다 — 절대 실패할 수 없는 판정이 자리 하나를 차지했다
 - 자세 자리: PI 개루프 마진(레이트 폐쇄 후) — judge(PM/GM), 방향 자동 결정
 
 스케줄 항목은 Table이든 다항(PolySchedule spec)이든 `axis_names` + `interp(**좌표)`
@@ -38,6 +40,7 @@ from claw.design.closure import (
     rate_loop_crossover,
 )
 from claw.design.points import ROLE_BREAKPOINT, ROLE_VALIDATION, OperatingPoint, case_name
+from claw.design.tune import TuneTargets
 from claw.trim import split_axes
 from claw.trim.trim import trim_batch
 
@@ -60,15 +63,20 @@ def scheduled_gains(tables: dict, design: dict, case) -> dict:
 
 
 def scheduled_margin_point(
-    lm_full, tables, design, case, *, criteria=None,
+    lm_full, tables, design, case, *, criteria=None, targets=None,
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
 ) -> dict:
     """한 운영점의 스케줄 인지 검증 — {자리명: 지표+판정}.
 
-    반환 자리: pitch_rate(ζ_sp)·pitch_att(마진)·yaw_rate(ζ_dr)·roll_rate(λ_roll,
-    정보)·roll_att(마진). 자세 마진은 실효 게인 전부 0이면 note로 분리 보고한다
+    반환 자리: pitch_rate(ζ_sp)·pitch_att(마진)·yaw_rate(ζ_dr)·roll_rate(λ_roll)·
+    roll_att(마진). 자세 마진은 실효 게인 전부 0이면 note로 분리 보고한다
     (0 위장 금지 — openloop의 제로 개루프 관례).
+
+    targets는 **λ 판정에만** 쓴다 — 롤 대역폭은 관례적 절대 합격선이 없어 요구가
+    그 실행의 튜닝 목표에서 온다 (criteria.judge_bandwidth). 생략하면 기본값이라
+    tune_point과 같은 목표를 쓴다.
     """
+    targets = targets if targets is not None else TuneTargets()
     lon, lat = split_axes(lm_full)
     eff = scheduled_gains(tables, design, case)
     act_kw = dict(
@@ -93,9 +101,22 @@ def scheduled_margin_point(
             )
             entry = {"gains": {"k_rate": k}, "wc": wc}
             if group == "roll":
+                # 종전에는 여기가 **상수 "ok"**였다 — λ를 목표와 비교조차 하지 않아
+                # (entry에 target도 없었다) 스케줄 보간이 롤 대역폭을 얼마나 놓치든
+                # 통과였고, 그래서 이 자리는 **절대 실패할 수 없는 판정**을 하나씩
+                # 보태 judged 수를 부풀렸다. 데모 손설계 스케줄에서 M0.2/h0 두 점이
+                # 목표의 0.68~0.72배인데 종전에는 ok로 찍혔다
                 entry["kind"] = "bandwidth"
                 entry["roll_lambda"] = metrics["roll_lambda"]
-                entry["status"] = "ok"  # 성능 지표 — 안정성 판정은 ζ_dr·자세 마진 소관
+                entry["roll_unstable"] = bool(metrics.get("roll_unstable", False))
+                entry["participation"] = metrics.get("roll_participation")
+                entry["target"] = targets.roll_lambda
+                if criteria is not None:
+                    entry["status"] = criteria.judge_bandwidth(
+                        metrics["roll_lambda"], targets.roll_lambda,
+                        unstable=entry["roll_unstable"],
+                        participation=entry["participation"],
+                    )
             else:
                 zeta = metrics["zeta_sp"] if lm_axis.axis == "lon" else metrics["zeta_dr"]
                 entry["kind"] = "damping"
@@ -172,7 +193,7 @@ def midpoint_validation_points(points) -> list:
 
 def scheduled_margin_map(
     aircraft, points, lms, tables, design, *,
-    criteria, trims=None, fingerprint="",
+    criteria, targets=None, trims=None, fingerprint="",
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
     on_progress=None,
 ) -> dict:
@@ -217,7 +238,7 @@ def scheduled_margin_map(
             entry = {
                 "role": pt.role,
                 "loops": scheduled_margin_point(
-                    lm, tables, design, pt.case, criteria=criteria,
+                    lm, tables, design, pt.case, criteria=criteria, targets=targets,
                     actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
                     delay_s=delay_s, pade_order=pade_order,
                 ),

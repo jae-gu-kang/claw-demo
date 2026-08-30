@@ -131,6 +131,14 @@ def _tuned_judgement(tune_out, loop_name, criteria) -> str:
         if "pm_deg" not in ach:
             return "na"
         return criteria.judge(ach)
+    if loop_name == "roll_rate":
+        # 롤은 감쇠가 아니라 대역폭이다. 종전에는 여기서도 zeta_dr을 찾았는데 롤
+        # achieved에는 그 키가 없어 **항상 "na"**였다 — 롤이 실패해도 분류가 안 됐다
+        if "roll_lambda" not in ach or not ach.get("target"):
+            return "na"
+        return criteria.judge_bandwidth(ach["roll_lambda"], ach["target"],
+                                        unstable=bool(ach.get("unstable")),
+                                        participation=ach.get("participation"))
     key = "zeta_sp" if loop_name == "pitch_rate" else "zeta_dr"
     if key not in ach:
         return "na"
