@@ -18,10 +18,11 @@ from claw.design import (
     scheduled_margin_map,
     scheduled_margin_point,
 )
+from claw.design.closure import AXIS_SPECS, close_rates, rate_loop_crossover
 from claw.fcl.demo import demo_design_gains, make_demo_gain_tables
 from claw.plant import make_demo_aircraft
 from claw.tables import Table
-from claw.trim import linearize, trim_level
+from claw.trim import linearize, split_axes, trim_level
 
 
 @pytest.fixture(scope="module")
@@ -171,6 +172,39 @@ def test_margin_map_end_to_end_and_cancel(setup):
     )
     assert cancelled["aborted"] == "cancelled"
     assert len(cancelled["cases"]) == 1
+
+
+def test_rate_wc_is_measured_on_the_prior_closed_plant(setup):
+    """레이트 ωc는 **앞서 닫은 레이트까지 접은 플랜트**에서 잰 값이어야 한다.
+
+    이 자리의 조성이 곧 "튜닝과 검증이 같은 자로 잰다"는 전제다: 튜너는 자세 PI의
+    목표 교차를 이 ωc로 정하므로(tune._tune_att의 wc0 = wc/wc_ratio_att), 한쪽만 생
+    모델로 재면 같은 형상의 설계 기준과 검증 기준이 갈린다.
+
+    정확 일치(==)로 잰다. 생 플랜트와의 차이는 데모 게인에서 상대 3e-6~4e-4뿐이라
+    (요 댐퍼 0.8이 롤 루프를 조금만 옮긴다) 어떤 approx 톨러런스로도 안 잡힌다 —
+    실제로 이 자리의 플랜트를 생 모델로 되돌리는 뮤테이션이 전체 스위트를 통과했다.
+    반대로 정상 경로는 같은 함수를 같은 행렬에 부르므로 비트 일치라 취약하지 않다.
+    """
+    ac, tables, design = setup
+    spec = AXIS_SPECS["lat"]
+    idx = 1  # 롤 = 두 번째 (요를 먼저 닫는다 — 유일하게 prior가 비지 않는 자리)
+    group, x_rate, u_in = spec["rates"][idx]
+    act = dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2)
+    for mach in (0.3, 0.6, 0.8):
+        case = _case(mach)
+        lm = linearize(ac, trim_level(ac, case))
+        reported = scheduled_margin_point(lm, tables, design, case, **act)["roll_rate"]["wc"]
+        _lon, lat = split_axes(lm)
+        eff = scheduled_gains(tables, design, case)
+        prior = {f"{g}.k_rate": eff[f"{g}.k_rate"] for g, _, _ in spec["rates"][:idx]}
+        assert prior, "prior가 비면 두 플랜트가 같아져 이 테스트가 항진이 된다"
+        k = eff[f"{group}.k_rate"]
+        on_prior = rate_loop_crossover(
+            close_rates(lat, prior), group, x_rate, u_in, k, **act)
+        on_raw = rate_loop_crossover(lat, group, x_rate, u_in, k, **act)
+        assert reported == on_prior, f"M{mach}: 보고 ωc가 prior-닫은 플랜트 값이 아니다"
+        assert reported != on_raw, f"M{mach}: 두 플랜트가 같은 값을 내 판별력이 없다"
 
 
 def test_outside_envelope_point_is_measured_but_not_prescribed(setup):
