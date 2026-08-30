@@ -40,24 +40,37 @@ from claw.params.paramset import canonical_hash
 _ZETA_KEYS = ("zeta", "zeta_sp", "zeta_dr")
 
 
-def _one(required: float, achieved) -> dict:
-    """지표 하나의 부족 레코드 — {required, achieved, deficit, deficit_frac}.
+def _one(required: float, achieved, goal=None) -> dict:
+    """지표 하나의 부족 레코드 — {required, achieved, deficit, deficit_frac, goal, deficit_goal}.
 
     deficit는 양수가 부족·음수가 여유. achieved가 nan이면 **None**이다 — 0.0으로
     두면 "교차 없음"과 "부족 없음"이 같은 수가 된다 (종전 deficit()의 결함).
     ±inf는 그대로 둔다: 직렬화 정책이 "inf" 문자열로 구분해 내보내므로(serialize.py)
     nan(=null, 판정 불가)과 섞이지 않는다.
+
+    `goal`은 **목표선**이다 (있는 지표만 — gm_good_db·zeta_good·λ의 lam_good_frac).
+    warn은 "합격선은 넘겼으나 목표선 미달"이라는 뜻인데, 부족을 합격선으로만 재면
+    warn 행이 **자기가 넘긴 선에 대한 여유**를 보여 준다 — "미달 원장"이라는 표에
+    "GM 요구 6 dB · 달성 7.22 dB · 여유 1.22 dB"가 뜨고, 정작 못 넘긴 선(8 dB)은
+    이름조차 안 나온다. 화면이 warn을 설명하려면 이 값이 있어야 한다.
+    정렬 키(severity)는 종전대로 **합격선** 기준이다 — 그래야 fail이 warn보다 앞선다.
     """
     a = float(achieved)
+    base = {"goal": None if goal is None else float(goal), "deficit_goal": None}
     if required <= 0.0:
         # 요구선이 0 이하면 비율이 정의되지 않는다. 판정 불가로 흘린다 —
         # 여기서 나누면 잡 스레드가 죽어 "202 뒤 원인 없는 실패"가 된다
-        return {"required": required, "achieved": a if math.isfinite(a) else None,
+        return {**base, "required": required,
+                "achieved": a if math.isfinite(a) else None,
                 "deficit": None, "deficit_frac": None}
     if math.isnan(a):
-        return {"required": required, "achieved": None, "deficit": None, "deficit_frac": None}
+        return {**base, "required": required, "achieved": None,
+                "deficit": None, "deficit_frac": None}
     d = required - a
-    return {"required": required, "achieved": a, "deficit": d, "deficit_frac": d / required}
+    if goal is not None:
+        base["deficit_goal"] = float(goal) - a
+    return {**base, "required": required, "achieved": a,
+            "deficit": d, "deficit_frac": d / required}
 
 
 @dataclass(frozen=True)
@@ -179,19 +192,27 @@ class MarginCriteria:
         (마진 자리는 pm_deg·gm_db, 감쇠 자리는 zeta류, 롤은 roll_lambda), 없는 키는
         건너뛴다. λ의 요구선만 criteria 절대값이 아니라 `entry["target"]×lam_min_frac`
         이다 (판정 관례가 없는 성능 지표 — judge_bandwidth와 같은 근거).
+
+        **목표선(goal)도 함께 낸다** — warn은 "합격선은 넘겼으나 목표선 미달"인데,
+        부족을 합격선으로만 재면 warn 행이 자기가 넘긴 선에 대한 여유를 보여 주고
+        정작 못 넘긴 선은 이름조차 안 나온다 (`_one` 주석의 실측 예).
         """
         out = {}
-        for key, required in (("pm_deg", self.pm_min_deg), ("gm_db", self.gm_min_db)):
+        # PM에는 목표선이 없다 — judge()가 PM으로 warn을 내지 않는다 (합격 아니면 fail).
+        # 없는 선을 지어내면 화면이 통과한 자리를 "목표 미달"이라 부르게 된다
+        for key, required, goal in (("pm_deg", self.pm_min_deg, None),
+                                    ("gm_db", self.gm_min_db, self.gm_good_db)):
             if entry.get(key) is not None:
-                out[key] = _one(required, entry[key])
+                out[key] = _one(required, entry[key], goal)
         for key in _ZETA_KEYS:
             if entry.get(key) is not None:
-                out[key] = _one(self.zeta_min, entry[key])
+                out[key] = _one(self.zeta_min, entry[key], self.zeta_good)
         target = entry.get("target")
         if entry.get("roll_lambda") is not None and target is not None:
             t = float(target)
             if math.isfinite(t) and t > 0.0:
-                out["roll_lambda"] = _one(self.lam_min_frac * t, entry["roll_lambda"])
+                out["roll_lambda"] = _one(self.lam_min_frac * t, entry["roll_lambda"],
+                                          self.lam_good_frac * t)
         return out
 
     def severity(self, entry: dict) -> float:

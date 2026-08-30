@@ -141,7 +141,7 @@ def test_structural_gate_keeps_both_of_its_halves():
     """게이트를 합격선 축으로 옮겨도 **잡아야 할 둘은 그대로** 잡는다 — 술어 헬퍼로 직접 잰다.
 
     (a) 판정이 fail — 자유 게인 최적조차 합격선에 못 미친다.
-    (b) 사유가 "쓸 수 있는 게인 자체가 안 나온" 축(no_stable_gain·degenerate·
+    (b) 사유가 "그 자리의 설계가 성립하지 않은" 축(no_stable_gain·degenerate·
         margin_floor·bandwidth_collapse) — 지연 0.6 s의 pitch_att가 그 경우다. PM 86°/
         GM 10 dB라 마진 판정만 보면 ok지만 교차가 목표의 0.08배로 무너져 있다. 판정
         하나로만 게이트를 만들면 이 자리를 통과시킨다.
@@ -536,7 +536,7 @@ def test_gate_and_relief_probe_read_one_predicate(monkeypatch):
 
 
 def test_nan_crossover_does_not_leak_into_the_bottleneck_numbers(monkeypatch):
-    """교차가 없어 wcp가 nan인 자리에서도 병목 수치 둘이 nan으로 새지 않는다.
+    """교차가 없으면 병목 수치는 nan도 0도 아니고 **None**이다.
 
     `entry.get("wcp") or entry.get("wc") or 0.0`은 폴백처럼 보이지만 **nan은 파이썬에서
     truthy**라 그대로 통과한다. 그러면 wc_over_actuator와 delay_phase_deg_at_wc가 **둘
@@ -567,8 +567,11 @@ def test_nan_crossover_does_not_leak_into_the_bottleneck_numbers(monkeypatch):
                                   demo_design_gains(), cases,
                                   criteria=MarginCriteria(), **ACT)
     bn = out["evidence"]["bottleneck"]
-    assert math.isfinite(bn["wc_over_actuator"]) and math.isfinite(
-        bn["delay_phase_deg_at_wc"]), "nan이 폴백을 통과해 병목 수치를 지웠다"
+    assert bn["wc_over_actuator"] is None and bn["delay_phase_deg_at_wc"] is None, (
+        "못 잰 교차를 0으로 메웠다 — 그 두 수는 '병목 아님'을 단정하게 된다")
+    # nan이 폴백을 통과해 그대로 새지도 않아야 한다 (둘은 다른 결함이다)
+    for k in ("wc_over_actuator", "delay_phase_deg_at_wc"):
+        assert not (isinstance(bn[k], float) and math.isnan(bn[k])), k
 
     # wcp만 nan이고 wc가 살아 있으면 **그쪽을 쓴다** — 폴백 순서까지 고정한다
     cases[v]["loops"]["pitch_att"]["wc"] = 2.5

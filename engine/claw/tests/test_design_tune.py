@@ -548,3 +548,92 @@ def test_envelope_check_is_one_helper_for_all_three_stages():
         assert "envelope_ok(" in src, mod.__name__
         assert 'flags.get("saturation_ok")' not in src, (
             f"{mod.__name__}이 엔벨로프 조건을 다시 적었다")
+
+
+def test_polish_result_inherits_the_requirement_metadata(setup):
+    """마무리를 거친 자리도 **요구선**을 들고 있어야 한다.
+
+    `_polish_att`가 새 achieved를 만들 때 백오프 해의 메타(target_pm_deg·
+    target_gm_db·target_wc_frac·wc_fallback)를 안 물려받으면, `evidence["tuned"]
+    ["target"]`이 **구제된 자리에서만** null이 된다 — 요구선을 함께 낸다고 넣은 값이
+    가장 설명이 필요한 자리에서 빠진다. `wc_fallback`도 마찬가지로, 그 플래그가
+    켜지는 상황이 대개 구제가 도는 상황이다.
+    """
+    from claw.design.closure import AXIS_SPECS
+    from claw.design.tune import _polish_att, _tune_att, _tune_rates
+    from claw.trim import split_axes
+
+    _, design, _, lm = setup
+    lon, lat = split_axes(lm)
+    gains, ach, _ = _tune_rates(lon, lat, design, TuneTargets(), ACT)
+    rg = {f"{g}.k_rate": gains.get(f"{g}.k_rate", 0.0)
+          for g, _, _ in AXIS_SPECS["lon"]["rates"]}
+    kp0, ki0, a0, _st, _ev = _tune_att(
+        lon, "pitch", rg, ach["pitch_rate"]["wc"], design, TuneTargets(), ACT)
+    meta_keys = ("target_pm_deg", "target_gm_db", "target_wc_frac", "wc_fallback")
+    assert all(k in a0 for k in meta_keys), "백오프 해가 메타를 안 실었다 — 전제가 다르다"
+
+    _kp, _ki, a, _e = _polish_att(
+        lon, "pitch", rg, kp0, ki0, TuneTargets(), ACT, max_evals=40,
+        wc0=a0["wc0"], meta={k: a0[k] for k in meta_keys})
+    for k in meta_keys:
+        assert a.get(k) == a0[k], f"마무리가 {k}를 잃었다"
+
+
+def test_crossover_search_says_it_could_not_measure(setup):
+    """천장 확장을 다 쓰고도 |L| ≥ 1이면 **천장 값이 아니라 nan**이다.
+
+    그대로 천장을 돌려주면 교차 주파수가 아닌 수를 교차라 부르는 조용한 오답이다
+    (확장 자체가 그 함정을 막으려고 들어왔는데, 소진 경로에 같은 함정이 남아
+    있었다). nan이면 소비자가 통과로 안 친다 — 튜너는 rate_wc > 0이 거짓이 되어
+    wc_fallback 경로로 가고 플래그가 남는다.
+    """
+    from claw.design.closure import rate_loop_crossover
+    from claw.trim import split_axes
+
+    _, _design, _, lm = setup
+    lon, _lat = split_axes(lm)
+    # 확장을 0회로 막으면 천장 밖 교차가 소진 경로를 탄다
+    import claw.design.closure as C
+
+    saved = C._WC_GRID_EXPANSIONS
+    try:
+        C._WC_GRID_EXPANSIONS = 0
+        wc = rate_loop_crossover(lon, "pitch", "q", "de", 50.0, actuator_wn=30.0,
+                                 actuator_zeta=0.7, delay_s=0.035, pade_order=2)
+    finally:
+        C._WC_GRID_EXPANSIONS = saved
+    assert math.isnan(wc), "소진 경로가 천장 값을 교차라 불렀다"
+    # 정상 경로는 유한값을 낸다 (이 테스트가 항진이 아님을 보인다)
+    ok = rate_loop_crossover(lon, "pitch", "q", "de", 50.0, actuator_wn=30.0,
+                             actuator_zeta=0.7, delay_s=0.035, pade_order=2)
+    assert math.isfinite(ok) and ok > 0.0
+
+
+def test_argmax_does_not_pick_an_unmeasurable_sample():
+    """못 잰 표본(nan)을 "최선 달성값"으로 뽑으면 안 된다.
+
+    `np.argmax([1.0, nan, 3.0])`은 **1**을 낸다 — nan이 하나라도 있으면 그 자리를
+    고른다. 지표가 nan을 낼 수 있게 된 뒤(closure.lat_metrics — 롤 모드를 실근으로
+    지목 못 하면 nan) 이 자리가 노출됐다. 데모 격자에서 스캔 117회 중 14회가 vals에
+    nan을 담고 **전부 |k| = 0 표본**이라, 그대로 두면 "최선 달성값"이 **댐퍼를 끈
+    게인**이 되어 스케줄에 박힌다. 종전 0.0은 최솟값이라 절대 안 뽑혔다.
+
+    지금 데모에서 이 가지를 안 타는 이유는 롤 λ가 |k|에 단조라 `reached`가 늘
+    True이기 때문이다 — 그 불변식은 작동기 캡·목표·플랜트가 바뀌면 깨진다.
+    합성 함수로 직접 잰다.
+    """
+    from claw.design.tune import _first_reach_bisect
+
+    # |k| = 0에서만 nan (지목 실패), 나머지는 유한하고 0.6이 최대 — 목표 5.0은 못 닿는다
+    def f(k):
+        return float("nan") if k == 0.0 else 0.6 - abs(k - 0.5)
+
+    k, reached, _grown = _first_reach_bisect(f, 0.0, 1.0, 5.0)
+    assert not reached
+    assert k == pytest.approx(0.5, abs=0.1), (
+        f"못 잰 표본을 최선이라 뽑았다 (k={k}) — 댐퍼를 끈 게인이 스케줄에 박힌다")
+
+    # 전 표본이 못 잰 값이면 최선을 고를 근거가 없다 — 하한을 낸다 (사유가 미달로 흐른다)
+    k2, reached2, _g2 = _first_reach_bisect(lambda _k: float("nan"), 0.0, 1.0, 5.0)
+    assert not reached2 and k2 == 0.0

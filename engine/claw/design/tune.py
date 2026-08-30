@@ -43,6 +43,9 @@ _SCAN_N = 33  # 레이트 게인 브래킷 스캔 밀도
 _BISECT_N = 24  # 이분 반복 (브래킷 폭 ×2^-24)
 _BRACKET_GROWTH = 4.0  # 목표 미도달 시 브래킷 상한 배율
 _BRACKET_EXPANSIONS = 3  # 확장 횟수 상한 (4^3 = 설계값의 256배까지)
+# 최종 조성 재측정의 목표 달성 허용오차 — 탐색은 프리픽스 조성에서 이분 수렴하므로
+# 조성이 바뀐 값은 목표선 양쪽에 임의로 떨어진다 (실측 상대오차 ~6e-5)
+_FINAL_METRIC_RTOL = 1e-3
 # 마무리(Nelder-Mead)의 초기 simplex — log 배율 0.3 ≈ ×1.35. scipy 기본값에 맡기면
 # x0 = [0, 0]이라 변 길이가 0.00025가 되어 탐색이 사실상 일어나지 않는다.
 _POLISH_SIMPLEX = ((0.0, 0.0), (0.3, 0.0), (0.0, 0.3))
@@ -196,7 +199,18 @@ def _first_reach_bisect(f, k_lo, k_hi, target, n_scan=_SCAN_N,
                     lo = mid
             return float(hi), True, grown
         if grown >= expansions:
-            return float(ks[int(np.argmax(vals))]), False, grown
+            # **nan을 argmax에 넘기면 안 된다.** np.argmax는 nan을 최댓값으로 집는다.
+            # 지표가 nan을 낼 수 있게 된 뒤(closure.lat_metrics — 롤 모드를 실근으로
+            # 지목 못 하면 nan) 이 자리가 노출됐다: 데모 격자에서 스캔 117회 중 14회가
+            # vals에 nan을 담고, 전부 |k| = 0 표본이다. 그대로 두면 "최선 달성값"이
+            # **댐퍼를 끈 게인**이 되어 스케줄에 박힌다. 종전 0.0은 최솟값이라 절대
+            # 안 뽑혔는데 nan은 항상 뽑힌다
+            finite = np.where(np.isfinite(vals), vals, -np.inf)
+            if not np.any(np.isfinite(finite)):
+                # 전 표본이 못 잰 값 — 최선을 고를 근거가 없다. 설계값 방향의 0을
+                # 낸다 (댐퍼를 끄는 것과 같지만, 사유가 미달로 흘러 보고된다)
+                return float(k_lo), False, grown
+            return float(ks[int(np.argmax(finite))]), False, grown
         grown += 1
         span = float(ks[-1]) - float(k_lo)
         ks_new = np.linspace(float(ks[-1]), float(k_lo) + span * _BRACKET_GROWTH,
@@ -361,7 +375,11 @@ def _report_rates_on_final_composition(axes, gains, achieved, notes, pending):
         got = fm[metric_key]
         # 사유는 **왜 목표에 못 갔나**를 가른다. 캡이 걸렸어도 최종 조성에서 목표를
         # 넘겼으면 결함이 아니다 (안정 경계 아래에서 목표 달성 = 정상)
-        if got >= target * (1.0 - 1e-9):
+        # 허용오차: 탐색은 **프리픽스 조성**에서 target에 이분 수렴하는데 여기서는
+        # **최종 조성**으로 다시 잰다. 조성이 다르므로 값이 목표선 양쪽에 임의로
+        # 떨어진다 — 같은 조성에서 재던 시절의 1e-9는 동전 던지기가 된다 (실측:
+        # 상대오차 6e-5 미달로 자리 status가 infeasible이 되는 자리가 12건 나왔다)
+        if got >= target * (1.0 - _FINAL_METRIC_RTOL):
             reason = REASON_OK
         elif capped == "no_stable_gain":
             reason = REASON_NO_STABLE_GAIN
@@ -378,12 +396,22 @@ def _report_rates_on_final_composition(axes, gains, achieved, notes, pending):
             "unstable": bool(fm.get("roll_unstable", False)),
             "participation": fm.get("roll_participation"),
         })
-        if reason == REASON_TARGET_UNREACHED:
+        if reason == REASON_TARGET_UNREACHED and not reached:
+            # 브래킷 단정은 **탐색이 실제로 못 닿았을 때만** 낸다. reason은 최종
+            # 조성에서 정하고 grown·reached는 탐색 조성의 양이라, 둘을 뭉치면
+            # "브래킷을 한 번도 안 넓혔는데 넓혀도 미달"이라 적게 된다 (실측 12건)
             limit = 4.0 * _BRACKET_GROWTH ** grown
             notes.append(
                 f"{slot}: 설계값의 {limit:g}배까지 넓혀도 목표 {target} 미달 (최종 조성"
                 f" 달성 {got:.4g}) — 최선 달성값 채택. 브래킷이 아니라 이 플랜트가 그"
                 " 지표를 못 낸다"
+            )
+        elif reason == REASON_TARGET_UNREACHED:
+            # 탐색은 닿았는데 최종 조성에서 미달 — 뒤에 닫힌 댐퍼가 이 지표를 끌어내렸다.
+            # 브래킷 이야기를 하면 거짓이다
+            notes.append(
+                f"{slot}: 탐색 조성에서는 목표 {target}에 닿았으나 최종 조성에서"
+                f" {got:.4g} — 뒤에 닫힌 댐퍼가 끌어내렸다"
             )
         elif not reached:
             # 탐색 조성에서는 못 닿았는데 최종 조성에서는 닿았다 — 뒤에 닫히는
@@ -499,7 +527,7 @@ def tune_point(
     "infeasible"(미달) | "na"(잴 수 없음 — 설계값 0), reason은 그 사유다.
 
     status(점 단위): "ok" | "degraded"(설계 목표는 못 채웠으나 안정한 게인은 나왔다 —
-    캡·플랜트 한계) | "infeasible"(쓸 수 있는 게인 자체가 안 나온 자리가 있다 —
+    캡·플랜트 한계) | "infeasible"(그 자리를 설계 목표대로 성형하지 못한 자리가 있다 —
     댐퍼 꺼짐·기저 무의미·마진 바닥·대역폭 붕괴). **점 단위 판정을 자리 단위 결정에
     쓰면 안 된다** — 어느 자리가 실패했는지가 지워져서, 피치가 안 되는 점의 롤 실패까지
     "상위 설계 문제"로 넘어간다 (classify는 slots를 본다).

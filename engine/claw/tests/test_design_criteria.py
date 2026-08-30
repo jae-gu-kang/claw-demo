@@ -1,5 +1,7 @@
 """M17 criteria 검증 — 판정 경계, nan/inf 취급, 지문·직렬화, 튜닝 목표와의 정합."""
 
+import math
+
 import pytest
 
 from claw.common.contracts import TrimCase
@@ -36,8 +38,19 @@ def test_shortfall_reports_requirement_not_just_achieved():
     sf = c.shortfall({"pm_deg": 40.0, "gm_db": 4.0})
     assert sf["pm_deg"] == {"required": 45.0, "achieved": 40.0,
                             "deficit": pytest.approx(5.0),
-                            "deficit_frac": pytest.approx(5.0 / 45.0)}
+                            "deficit_frac": pytest.approx(5.0 / 45.0),
+                            # PM에는 목표선이 없다 — judge()가 PM으로 warn을 안 낸다
+                            "goal": None, "deficit_goal": None}
     assert sf["gm_db"]["deficit_frac"] == pytest.approx(2.0 / 6.0)
+    # GM에는 목표선이 있다. warn은 "합격선은 넘겼으나 목표선 미달"이므로, 부족을
+    # 합격선으로만 재면 warn 행이 **자기가 넘긴 선에 대한 여유**를 보여 주고 정작
+    # 못 넘긴 선은 이름조차 안 나온다 (실측: "GM 요구 6 dB · 달성 7.22 · 여유 1.22"가
+    # "미달 원장" 표에 떴다)
+    assert sf["gm_db"]["goal"] == 8.0
+    assert sf["gm_db"]["deficit_goal"] == pytest.approx(4.0)
+    warn = c.shortfall({"pm_deg": 60.0, "gm_db": 7.22})["gm_db"]
+    assert warn["deficit"] < 0 and warn["deficit_goal"] > 0, (
+        "합격선은 넘고 목표선은 못 넘긴 자리가 두 수로 구분돼야 한다")
     # 여유는 음수 부족 — 통과한 자리도 "얼마나 여유인지"가 같은 필드로 나온다
     assert c.shortfall({"pm_deg": 60.0, "gm_db": 12.0})["pm_deg"]["deficit"] < 0
 
@@ -186,3 +199,44 @@ def test_zero_requirement_does_not_divide():
     rec = bad.shortfall({"pm_deg": 50.0, "gm_db": 4.0})["gm_db"]
     assert rec["deficit"] is None and rec["deficit_frac"] is None
     assert bad.severity({"pm_deg": 50.0, "gm_db": 4.0}) == pytest.approx(-5.0 / 45.0)
+
+
+def test_divergent_root_beats_the_participation_gate():
+    """발산근은 참여도보다 **먼저** 본다 — 순서가 바뀌면 발산극이 조용히 빠진다.
+
+    참여도가 낮으면 "롤 대역폭을 못 쟀다"(na)가 맞지만, 그 근이 **발산근**이면
+    얘기가 다르다. na는 실패 목록에도 판정 수에도 안 들어가고, ζ_dr은 진동쌍만
+    보므로 그 발산극은 어디서도 보고되지 않는다. "못 쟀다"가 "발산극을 잠자코
+    넘긴다"의 이유가 될 수는 없다 — 검증 쪽에는 댐퍼 안정 캡이 없어 이 인자가
+    유일한 방어다.
+    """
+    c = MarginCriteria()  # lam_part_min 0.5
+    # 이 커밋 계열이 고친 **바로 그 조합** — 참여도 낮음 ∧ 발산근
+    assert c.judge_bandwidth(6.45, 12.0, unstable=True, participation=0.08) == "fail"
+    # 발산이 아니면 같은 참여도가 na다 (게이트 자체는 살아 있다)
+    assert c.judge_bandwidth(6.45, 12.0, unstable=False, participation=0.08) == "na"
+    # 참여도가 높으면 종전대로
+    assert c.judge_bandwidth(6.45, 12.0, unstable=True, participation=0.99) == "fail"
+    assert c.judge_bandwidth(11.0, 12.0, unstable=False, participation=0.99) == "ok"
+
+
+def test_unidentifiable_roll_mode_is_nan_not_zero():
+    """롤 모드를 실근으로 지목 못 하면 λ는 0.0이 아니라 nan이다.
+
+    0.0을 내면 판정이 "목표의 0배 → fail"로 흐르고 부족 비율 1.0(양수 지표의
+    **최대**)이라 실패 목록 맨 앞에 선다 — 재지도 못한 값으로 이터 예산을 태운다.
+    nan은 judge_bandwidth가 na로 받는다.
+    """
+    import numpy as np
+
+    from claw.design.closure import lat_metrics
+
+    # 실근이 하나도 없는 횡축 (전부 복소쌍) — 롤 모드가 더치롤·나선과 합쳐진 상태
+    A = np.array([[0.0, -2.0, 0.0, 0.0],
+                  [2.0, 0.0, 0.0, 0.0],
+                  [0.0, 0.0, 0.0, -3.0],
+                  [0.0, 0.0, 3.0, 0.0]])
+    m = lat_metrics(A, wn_floor=0.1)
+    assert math.isnan(m["roll_lambda"]), "못 잰 λ가 0으로 나가 fail이 된다"
+    assert m["roll_participation"] is None
+    assert MarginCriteria().judge_bandwidth(m["roll_lambda"], 12.0) == "na"

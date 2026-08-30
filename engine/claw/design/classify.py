@@ -4,7 +4,9 @@
 (사용자 요구의 핵심). 실패 검증점 v·자리에 대해 순서대로:
 
 1. structural_limit — v에서 튜너(tune_point — 자유 게인 국소 최적)를 돌려도
-   **합격선**(criteria) 미달이거나 쓸 수 있는 게인 자체가 안 나온다 → 게인·
+   **합격선**(criteria) 미달이거나 **그 자리의 설계가 성립하지 않았다**
+   (SLOT_DESIGN_FAILED — 넷 다 안정한 게인은 내지만 목표대로 성형하지 못한 것이다)
+   → 게인·
    breakpoint로는 불가 (게이트는 _slot_passes 한 곳에만 있다).
    action=escalate (**보고 전용** — 필터·작동기 대역폭·지연 예산 등 상위 설계
    변경은 어느 모드에서도 자동 적용하지 않는다). evidence로 교차 주파수 vs
@@ -269,14 +271,18 @@ def _tuned_judgement(tune_out, loop_name, criteria) -> str:
     return criteria.judge_damping(ach[key])
 
 
-def _first_finite(*values, default=0.0) -> float:
-    """첫 유한 실수 — 없으면 default.
+def _first_finite(*values):
+    """첫 유한 실수 — 없으면 **None**.
 
-    `a or b or 0.0`으로 쓸 수 없다: **nan은 파이썬에서 truthy**라 폴백을 그대로
-    통과한다. 교차가 없는 자리는 wcp가 nan인데(마진맵이 그렇게 낸다) 그게 새면
-    wc_over_actuator·delay_phase_deg_at_wc가 **둘 다** nan이 되어, 병목을 지목해야
-    할 수치 두 개가 화면에서 "nan"으로 사라진다. 0.0은 "그 주파수를 못 쟀다"는 뜻의
-    보수적 표시다 — 그 자리의 판단 재료는 완화 프로브 쪽이 낸다.
+    `a or b`로 쓸 수 없다: **nan은 파이썬에서 truthy**라 폴백을 그대로 통과한다.
+    교차가 없는 자리는 wcp가 nan이고(마진맵이 그렇게 낸다), 그게 새면 두 병목 수치가
+    함께 nan이 되어 화면에서 사라진다.
+
+    그렇다고 0.0으로 메우면 **더 나쁘다**. 이 값은 `wcp/actuator_wn`과
+    `degrees(wcp·delay)`의 재료인데, 0.0이 들어가면 "작동기 여유 무한 · 지연이 위상을
+    하나도 안 깎음" — **가능한 최선값**이 된다. 병목을 지목하라고 만든 두 수가
+    "병목 아님"을 단정하는 셈이다. None이면 직렬화가 null로 내고 화면은 "—"로
+    적는다 (`wc_over_actuator`가 작동기 인자 없을 때 이미 None을 내는 규약과 같다).
     """
     for v in values:
         if v is None:
@@ -284,7 +290,7 @@ def _first_finite(*values, default=0.0) -> float:
         f = float(v)
         if math.isfinite(f):
             return f
-    return default
+    return None
 
 
 def classify_margin_deficit(
@@ -388,8 +394,11 @@ def classify_margin_deficit(
         else:
             tail = "지연·작동기 대역폭을 완화해도 통과하지 못한다 — 플랜트·루프 구조 자체를 검토"
         evidence["bottleneck"] = {
-            "wc_over_actuator": (wcp / actuator_wn) if actuator_wn else None,
-            "delay_phase_deg_at_wc": math.degrees(wcp * delay_s),
+            # 못 잰 교차는 None으로 흘린다 — 0으로 메우면 두 수가 "병목 아님"을 단정한다
+            "wc_over_actuator": (wcp / actuator_wn) if (wcp is not None and actuator_wn)
+            else None,
+            "delay_phase_deg_at_wc": (math.degrees(wcp * delay_s) if wcp is not None
+                                      else None),
             "relief": relief,
             "resolved_by": [p["label"] for p in resolved],
             # 임계값만 따로 모은다 — 화면이 relief를 훑지 않고도 예산을 쓸 수 있게
