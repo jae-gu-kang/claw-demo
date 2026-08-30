@@ -32,6 +32,7 @@ from claw.design.closure import (
     AXIS_SPECS,
     att_margin_loop,
     axis_metrics,
+    close_rates,
     oriented_margins,
     rate_loop_crossover,
     wn_reference,
@@ -200,8 +201,20 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
             continue
         sign = math.copysign(1.0, k_design)
         target = getattr(targets, target_field)
+        # 이 자리 **앞에서 이미 닫은** 레이트만 담긴다 (gains에 slot이 아직 없다).
+        # 곧 A′로 접어 캡·교차 측정의 플랜트가 된다 — 지표(_metric→axis_metrics)는
+        # 늘 전부 접고 재므로, 캡만 생 플랜트로 재면 둘이 다른 자를 쓰게 된다.
         spec_rates = {f"{g}.k_rate": gains.get(f"{g}.k_rate", 0.0)
                       for g, _, _ in AXIS_SPECS[axis]["rates"]}
+        # successive closure 조성 그대로 — 롤 댐퍼는 **요 댐퍼가 닫힌 뒤** 판정한다
+        # (closure.py AXIS_SPECS "rates 순서 = 닫는 순서"). 생 lat에서 재면 요 댐퍼가
+        # 없는 횡축을 보게 되는데, 그건 출하되지 않는 구성이다. 요 댐퍼의 r 되먹임이
+        # **나선근을 직접 옮긴다** — 데모 M0.6/h1000 개루프 실근이 (−0.98, −0.0075)에서
+        # 요를 닫으면 (−6.45, −2.24)로 간다. 생 lat에 롤 루프를 닫으면 그 느린 근이
+        # 양으로 넘어가고(M0.3/h1000 손설계 게인 기준 +0.0142, 2배 시간 49 s) 캡이
+        # 그걸 보고 |k|를 100분의 1로 깎거나(capped) 아예 0으로 끈다(no_stable_gain).
+        # 실제로 M0.3/h1000에서 −0.592(λ 12 달성) → −0.0047(λ 0.76)이 됐다.
+        lm_prior = close_rates(lm_axis, spec_rates)
 
         def f(mag, _slot=slot, _lm=lm_axis, _sign=sign, _base=dict(spec_rates), _mk=metric_key):
             g = dict(_base)
@@ -211,7 +224,7 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
         mag, reached = _first_reach_bisect(f, 0.0, 4.0 * abs(k_design), target)
         k = sign * mag
         x_rate, u_in = next((x, u) for g, x, u in AXIS_SPECS[axis]["rates"] if g == group)
-        k, capped = _cap_by_stability(lm_axis, x_rate, u_in, k, act_kw)
+        k, capped = _cap_by_stability(lm_prior, x_rate, u_in, k, act_kw)
         gains[slot] = k
         final = dict(spec_rates)
         final[slot] = k
@@ -219,7 +232,7 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
             "kind": "damping" if metric_key != "roll_lambda" else "bandwidth",
             metric_key: _metric(lm_axis, final, metric_key),
             "target": target,
-            "wc": rate_loop_crossover(lm_axis, group, x_rate, u_in, k, **act_kw),
+            "wc": rate_loop_crossover(lm_prior, group, x_rate, u_in, k, **act_kw),
             "capped": capped,
         }
         if not reached:

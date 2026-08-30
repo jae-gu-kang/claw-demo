@@ -51,6 +51,13 @@ def test_design_point_meets_targets(setup):
     assert pr["capped"] or pr["zeta_sp"] == pytest.approx(0.7, abs=0.05)
     assert pr["zeta_sp"] >= 0.3
     assert out["achieved"]["yaw_rate"]["zeta_dr"] >= 0.45
+    # 롤 댐퍼도 자기 목표로 잰다. 이 자리를 안 재면 캡이 **어느 플랜트에서** 걸렸는지가
+    # 아무 데도 안 걸린다 — 실제로 캡이 요 댐퍼를 닫기 전 생 lat에서 판정하던 동안
+    # λ가 목표 12의 1/16(0.76)로 나오면서도 위 단정은 전부 통과했다
+    rr = out["achieved"]["roll_rate"]
+    assert rr["roll_lambda"] == pytest.approx(rr["target"], rel=0.02), (
+        f"롤 댐퍼가 목표 대역폭 미달 — {rr}"
+    )
 
 
 def test_signs_follow_design(setup):
@@ -62,26 +69,86 @@ def test_signs_follow_design(setup):
             assert math.copysign(1.0, g[slot]) == math.copysign(1.0, design[slot]), slot
 
 
-def test_damper_closed_loop_stable_with_actuator(setup):
-    """튜닝된 댐퍼는 작동기·지연 포함 폐루프가 안정 — 01 §4.2 실증 사고 재발 방지 가드."""
+def _damper_poles(lm_axis, prior, x_rate, u_in, k):
+    """댐퍼 폐루프 극 — 판정 플랜트는 **앞서 닫은 댐퍼까지 접은 A′**.
+
+    물리 댐퍼 u = +k·rate → 특성식 1 − L (tune._damper_loop_stable과 동일 규약).
+    """
     import control
 
     from claw.analysis import pi_loop
+    from claw.design.closure import close_rates
+
+    loop = pi_loop(close_rates(lm_axis, prior), x_out=x_rate, u_in=u_in,
+                   kp=k, ki=0.0, sign=1.0, **ACT)
+    return control.feedback(loop, 1, sign=1).poles()
+
+
+def test_damper_closed_loop_stable_with_actuator(setup):
+    """튜닝된 댐퍼는 작동기·지연 포함 폐루프가 안정 — 01 §4.2 실증 사고 재발 방지 가드.
+
+    조성은 successive closure 순서 그대로다 (closure.py AXIS_SPECS "rates 순서 =
+    닫는 순서") — 축·입력 목록을 여기 손으로 다시 적으면 정본과 갈린다.
+    """
+    from claw.design.closure import AXIS_SPECS
     from claw.trim import split_axes
 
     _, design, _, lm = setup
     out = tune_point(lm, design, **ACT)
-    lon, lat = split_axes(lm)
-    for lm_axis, x_rate, u_in, slot in (
-        (lon, "q", "de", "pitch.k_rate"),
-        (lat, "p", "da", "roll.k_rate"),
-        (lat, "r", "dr", "yaw.k_rate"),
-    ):
-        loop = pi_loop(lm_axis, x_out=x_rate, u_in=u_in,
-                       kp=out["gains"][slot], ki=0.0, sign=1.0, **ACT)
-        # 물리 댐퍼 u = +k·rate → 특성식 1 − L (tune._damper_loop_stable과 동일 규약)
-        poles = control.feedback(loop, 1, sign=1).poles()
-        assert (poles.real < 0).all(), slot
+    for lm_axis in split_axes(lm):
+        prior = {}
+        for group, x_rate, u_in in AXIS_SPECS[lm_axis.axis]["rates"]:
+            slot = f"{group}.k_rate"
+            k = out["gains"][slot]
+            poles = _damper_poles(lm_axis, prior, x_rate, u_in, k)
+            assert (poles.real < 0).all(), slot
+            prior[slot] = k
+
+
+def test_rate_plan_order_matches_closure_order():
+    """_RATE_PLAN의 축별 순서 = AXIS_SPECS의 rates 순서 — 캡·검증이 같은 prior를 쓴다.
+
+    이 둘이 갈리면 조용히 어긋난다. tune은 _RATE_PLAN 순서로 gains를 쌓아 prior를
+    만들고(`spec_rates`), schedmap은 AXIS_SPECS를 `[:idx]`로 잘라 prior를 만든다 —
+    순서가 다르면 설계 플랜트와 검증 플랜트가 달라지는데 어느 쪽도 예외를 안 낸다.
+    (_RATE_PLAN을 pitch·roll·yaw로 뒤집으면 롤이 다시 capped로 떨어진다.)
+    """
+    from claw.design.closure import AXIS_SPECS
+    from claw.design.tune import _RATE_PLAN
+
+    for axis, spec in AXIS_SPECS.items():
+        planned = [g for g, a, _, _ in _RATE_PLAN if a == axis]
+        assert planned == [g for g, _, _ in spec["rates"]], axis
+
+
+def test_raw_axis_is_the_wrong_stability_plant(setup):
+    """생 축모델 판정은 **출하 손설계 게인조차** 불안정으로 본다 — 캡이 그걸 쓰면 안 되는 이유.
+
+    캡을 생 lat에서 재던 동안 롤 댐퍼가 엔벨로프 전역에서 100분의 1로 깎이거나
+    (capped) 아예 꺼졌다(no_stable_gain). 원인은 요 댐퍼가 안 닫힌 횡축 — 출하되지
+    않는 구성이고, 거기서 뜨는 유일한 불안정근은 느린 나선이다 (이 설계점
+    M0.6/h1000에서 2배 시간 ~470 s — 안정성 사고가 아니라 조종성 항목의 크기다).
+
+    이 단정은 그 판정 기준 자체가 틀렸음을 고정한다: 같은 기준이 데모의 손설계
+    게인을 불안정으로 판정하고, 요 댐퍼를 닫으면 같은 게인이 안정으로 나온다.
+    한쪽만 성립하면 전제가 바뀐 것이니 캡의 플랜트 선택을 다시 봐야 한다.
+    """
+    from claw.trim import split_axes
+
+    _, design, _, lm = setup
+    _lon, lat = split_axes(lm)
+    k_design = design["roll.k_rate"]
+    assert k_design != 0.0
+
+    raw = _damper_poles(lat, {}, "p", "da", k_design)
+    assert (raw.real >= 0).any(), "생 lat에서 손설계 롤 댐퍼가 안정 — 이 테스트의 전제가 사라졌다"
+    # 그 불안정근은 나선 하나뿐이고 발산이 느리다 (안정성 사고가 아니라 조종성 항목).
+    # 가장 **빠른** 발산을 재야 한다 — 최솟값을 보면 근이 늘어도 통과한다
+    unstable = [p.real for p in raw if p.real >= 0]
+    assert len(unstable) == 1 and max(unstable) < 0.01, f"예상 밖 불안정 모드: {unstable}"
+
+    closed = _damper_poles(lat, {"yaw.k_rate": design["yaw.k_rate"]}, "p", "da", k_design)
+    assert (closed.real < 0).all(), "요 댐퍼를 닫아도 손설계 롤 댐퍼가 불안정 — 전제가 바뀌었다"
 
 
 def test_infeasible_with_excess_delay(setup):

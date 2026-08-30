@@ -38,6 +38,7 @@ AXIS_SPECS = {
     },
 }
 _WN_FLOOR_FRAC = 0.4  # 모드 지표에서 저주파(장주기·나선) 제외 문턱 = 개루프 기준 wn × 이 값
+_WC_GRID_EXPANSIONS = 6  # 교차 탐색 격자 천장 확장 횟수 (4배씩 — 4^6 ≈ 4096배 여유)
 
 
 def close_rates(lm_axis, rate_gains: dict) -> LinearModel:
@@ -150,9 +151,19 @@ def rate_loop_crossover(
         actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
         delay_s=delay_s, pade_order=pade_order,
     )
+    # 격자 천장에서 |L|이 아직 1 이상이면 교차는 격자 **밖**이다. 그대로 w[-1]을
+    # 돌려주면 교차 주파수가 아니라 천장 값을 내놓는 조용한 오답이 된다 — 천장을
+    # 넓혀 실제 교차를 찾는다. 이 함정은 작동기 인자가 없을 때(w_hi가 wn_reference
+    # 기반) 실제로 밟힌다: 레이트를 접은 A′는 진동 모드가 사라져 wn_reference가
+    # 작아지고(데모 M0.6 요-닫은 lat 0.887 vs 생 4.216) 천장이 8.87로 내려앉아
+    # 참값 15.7 대신 8.87이 나왔다.
     w_hi = 10.0 * (actuator_wn if actuator_wn else wn_reference(lm_axis))
-    w = np.logspace(-2, np.log10(w_hi), 600)
-    mag = np.abs(loop.frequency_response(w).magnitude).reshape(-1)
+    for _ in range(_WC_GRID_EXPANSIONS):
+        w = np.logspace(-2, np.log10(w_hi), 600)
+        mag = np.abs(loop.frequency_response(w).magnitude).reshape(-1)
+        if mag[-1] < 1.0:
+            break
+        w_hi *= 4.0
     above = np.nonzero(mag >= 1.0)[0]
     if above.size == 0:
         return 0.0
