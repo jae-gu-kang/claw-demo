@@ -73,12 +73,15 @@ def _relief_probes(lm, design, loop_name, *, targets, criteria, act_kw) -> list:
         kw[key] = to_value
         out = tune_point(lm, design, targets=targets, **kw)
         judged = _tuned_judgement(out, loop_name, criteria)
+        slot = out["slots"].get(loop_name, {})
         probes.append({
             "change": key, "label": label, "from": act_kw.get(key), "to": to_value,
-            "status": out["status"], "judged": judged,
-            # 구조 한계 판정 조건(infeasible ∨ fail)이 더 이상 성립하지 않으면 해소다 —
-            # 판정과 같은 식을 부정해 쓴다 (두 곳이 갈리면 프로브가 거짓 안도를 준다)
-            "resolves": out["status"] != "infeasible" and judged != "fail",
+            "status": slot.get("status"), "reason": slot.get("reason"), "judged": judged,
+            # 구조 한계 판정 조건(자리 infeasible ∨ fail)이 더 이상 성립하지 않으면
+            # 해소다 — 판정과 **같은 식을 부정해** 쓴다 (두 곳이 갈리면 프로브가 거짓
+            # 안도를 준다). 여기도 자리 단위다: 점 단위로 재면 이 자리를 고친 완화도
+            # 다른 축이 못 따라오면 "해소 안 됨"으로 보고된다
+            "resolves": slot.get("status") != "infeasible" and judged != "fail",
         })
     return probes
 
@@ -184,11 +187,17 @@ def classify_margin_deficit(
         delay_s=delay_s, pade_order=pade_order,
     )
     tuned_status = _tuned_judgement(tune_out, loop_name, criteria)
+    slot = tune_out["slots"].get(loop_name, {})
     evidence["tuned"] = {
-        "status": tune_out["status"], "judged": tuned_status,
+        # **자리 단위** status다. 점 단위(tune_out["status"])를 쓰면 같은 점의 다른
+        # 축이 실패했을 때 이 자리까지 구조 한계로 끌려간다 — 실행 가능한 처방
+        # (승격·재적합)이 적용 버튼 없는 에스컬레이션으로 바뀐다
+        "status": slot.get("status"), "reason": slot.get("reason"),
+        "point_status": tune_out["status"],  # 참고용 — 판정에는 안 쓴다
+        "judged": tuned_status, "target": slot.get("target"),
         "achieved": tune_out["achieved"].get(loop_name), "notes": tune_out["notes"],
     }
-    if tune_out["status"] == "infeasible" or tuned_status == "fail":
+    if slot.get("status") == "infeasible" or tuned_status == "fail":
         wcp = (entry.get("wcp") or entry.get("wc") or 0.0)
         relief = _relief_probes(
             lm, design, loop_name, targets=targets, criteria=criteria,

@@ -220,3 +220,72 @@ def test_sign_flip_gets_its_own_verdict_not_promotion():
     assert out["verdict"] == "gain_sign_flip", "부호 뒤집힘이 다른 원인으로 분류됐다"
     assert out["action"]["type"] == "refit_at"
     assert out["evidence"]["sign_flip"]["slots"] == ["pitch.ki"]
+
+
+def test_failing_sibling_axis_does_not_escalate_this_slot():
+    """한 축이 안 되는 점에서 **다른 축의 고칠 수 있는 실패**가 에스컬레이션으로 둔갑하면 안 된다.
+
+    분류는 (점, 자리) 단위인데 구조 한계 판정이 **점 단위** status를 봤다. 그래서
+    피치가 대역폭 붕괴로 infeasible인 점에서는, 자유 게인으로 멀쩡히 통과하는 롤의
+    실패까지 structural_limit → escalate(적용 버튼 없음)가 됐다 — 원래 나왔어야 할
+    breakpoint 승격(실행 가능한 처방)이 사라진다.
+
+    지연 0.6 s에서 이 점의 자리별 상태: pitch_att infeasible / roll_att ok.
+    """
+    act = {**ACT, "delay_s": 0.6}
+    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    design = demo_design_gains()
+    out_t = tune_point(lms.get(ac, trims[v]), design, **act)
+    assert out_t["status"] == "infeasible", "점 단위로는 실패인 상황이어야 한다"
+    assert out_t["slots"]["pitch_att"]["status"] == "infeasible"
+    assert out_t["slots"]["roll_att"]["status"] == "ok", "롤은 멀쩡해야 이 테스트가 성립한다"
+
+    opt = out_t["gains"]
+    tables = {  # 보간 게인을 최적의 3배로 — 괴리 200% > tol_gain 10%
+        "roll.kp": Table({"mach": (0.55, 0.65)}, (opt["roll.kp"] * 3.0,) * 2,
+                         extrapolate="clip"),
+    }
+    out = classify_margin_deficit(
+        ac, v, "roll_att", points, lms, trims, tables, design,
+        _fail_cases(v, lo, hi, loop="roll_att"),
+        criteria=MarginCriteria(), tol_plant=99.0, **act,
+    )
+    assert out["verdict"] == "gain_interp_valley", (
+        f"롤 실패가 {out['verdict']}로 갔다 — 점 단위 status가 자리 판정을 오염시킨다")
+    assert out["action"]["type"] == "promote"
+    # 근거에도 자리 단위 상태가 남아야 한다 (점 단위는 참고로만)
+    assert out["evidence"]["tuned"]["status"] == "ok"
+    assert out["evidence"]["tuned"]["point_status"] == "infeasible"
+
+
+def test_relief_probe_resolves_is_slot_scoped(monkeypatch):
+    """완화 프로브의 "해소" 판정도 자리 단위다.
+
+    점 단위로 재면, 이 자리를 실제로 고친 완화도 **다른 축이 못 따라오면** "여전히
+    미달"로 보고된다. 그러면 화면의 결론 문장("무엇을 바꾸면 통과하는가")이 거짓이
+    되고, 사용자는 통하는 예산 변경을 통하지 않는 것으로 읽는다.
+
+    바뀐 것은 판정식 하나이므로 튜너를 대역해 그 식만 잰다.
+    """
+    from claw.design import classify as C
+
+    def fake_tune_point(lm, design, *, targets=None, **kw):
+        # 완화 후: 이 자리는 통과, 그런데 점 전체는 다른 축 때문에 여전히 실패
+        return {
+            "gains": {}, "notes": [],
+            "achieved": {"roll_att": {"pm_deg": 70.0, "gm_db": 12.0}},
+            "slots": {"roll_att": {"status": "ok", "reason": "ok", "target": 50.0},
+                      "pitch_att": {"status": "infeasible", "reason": "margin_floor"}},
+            "status": "infeasible",
+        }
+
+    monkeypatch.setattr(C, "tune_point", fake_tune_point)
+    probes = C._relief_probes(
+        None, {}, "roll_att", targets=None, criteria=MarginCriteria(),
+        act_kw=dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2),
+    )
+    assert [p["label"] for p in probes] == ["지연 제거", "작동기 대역폭 ×3"]
+    assert all(p["resolves"] for p in probes), (
+        "이 자리를 고친 완화가 다른 축 때문에 '미달'로 보고됐다")
+    assert all(p["status"] == "ok" for p in probes)

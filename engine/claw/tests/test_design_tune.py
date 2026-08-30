@@ -152,12 +152,27 @@ def test_raw_axis_is_the_wrong_stability_plant(setup):
 
 
 def test_infeasible_with_excess_delay(setup):
-    """지연을 인위로 키우면 백오프 바닥에서 infeasible — 던지지 않고 결과로 낸다."""
+    """지연을 인위로 키우면 infeasible — 던지지 않고 결과로 낸다.
+
+    사유는 **대역폭 붕괴**이지 마진 미달이 아니다. 지연 위상은 ω에 비례하므로 백오프가
+    ωc를 버리면 마진은 거의 항상 만들어진다 — 이 점에서도 PM 86°·GM 10 dB로 목표를
+    한참 넘긴 채 교차만 목표의 0.082배로 내려앉는다. 종전 note는 어느 경우든
+    "백오프 바닥까지 PM/GM 미달"이라 적었는데, 그건 **여기서 일어나지 않는 일**이다.
+    사유를 뭉개면 화면이 "마진이 모자란다"와 "성능이 무너졌다"를 구별해 안내할 수 없고,
+    사용자는 마진을 늘리려 애쓰게 된다 — 늘려야 하는 것은 대역폭 예산이다.
+    """
+    from claw.design.tune import REASON_BANDWIDTH_COLLAPSE
+
     _, design, _, lm = setup
     out = tune_point(lm, design, actuator_wn=30.0, actuator_zeta=0.7,
                      delay_s=0.6, pade_order=2)
     assert out["status"] == "infeasible"
-    assert any("structural_limit" in n for n in out["notes"])
+    slot = out["slots"]["pitch_att"]
+    assert slot["reason"] == REASON_BANDWIDTH_COLLAPSE
+    ach = out["achieved"]["pitch_att"]
+    assert ach["pm_deg"] >= 50.0 and ach["gm_db"] >= 8.0, "마진은 통과한 상태여야 한다"
+    assert ach["wc_att"] / ach["wc0"] < TuneTargets().wc_att_ok_frac
+    assert any("교차 주파수가 하한 아래" in n for n in out["notes"])
     assert "pitch.kp" in out["gains"]  # 최선 달성 게인은 그래도 낸다
 
 
@@ -365,14 +380,22 @@ def test_rescue_polish_recovers_bandwidth_collapse(bandwidth_collapse):
     "마진은 남는데 대역폭이 없는" 해에서 멈춘다 — (kp, ki)를 함께 흔들면
     같은 마진에서 대역폭이 돌아온다.
     """
+    from claw.design.tune import REASON_CAPPED, REASON_RESCUED
+
     design, lm = bandwidth_collapse
     out = tune_point(lm, design, **ACT)
-    assert out["status"] == "ok", f"구제되지 않았다 — {out['notes']}"
+    slot = out["slots"]["pitch_att"]
+    assert slot["status"] == "ok", f"구제되지 않았다 — {out['notes']}"
+    assert slot["reason"] == REASON_RESCUED
     ach = out["achieved"]["pitch_att"]
     assert ach["polished"] is True
     assert ach["wc_att"] / ach["wc0"] >= TuneTargets().wc_att_ok_frac
     assert ach["pm_deg"] >= 50.0 and ach["gm_db"] >= 8.0
     assert any("마무리로 구제" in n for n in out["notes"])
+    # 이 점은 여전히 무결하지 않다 — 피치 댐퍼가 안정 캡에 묶여 ζ 목표에 못 간다.
+    # 자세 자리를 구제했다고 점 전체를 ok로 적으면 그 사실이 지워진다
+    assert out["slots"]["pitch_rate"]["reason"] == REASON_CAPPED
+    assert out["status"] == "degraded"
 
 
 def test_rescue_leaves_passing_slots_untouched(setup):
@@ -410,3 +433,33 @@ def test_polish_initial_simplex_is_explicit(setup):
         "마무리가 게인을 사실상 안 움직였다 — 기본 simplex(0.00025)로 되돌아갔다")
     assert a["wc_att"] > a0["wc_att"], "마무리의 목적은 같은 마진에서의 대역폭이다"
     assert a["pm_deg"] >= 50.0 and a["gm_db"] >= 8.0, "마진 벌점이 지켜지지 않았다"
+
+
+def test_slot_status_survives_a_failing_sibling(setup):
+    """한 자리가 실패해도 다른 자리의 판정이 지워지면 안 된다.
+
+    점 단위 status 하나뿐이던 동안 분류기가 그걸 자리 단위 판정에 썼다 — 피치가
+    안 되는 점의 롤 실패까지 "상위 설계 문제(에스컬레이션)"로 넘어가, 실행 가능한
+    처방(승격·재적합)이 사라졌다. 그 오귀속을 막을 **재료**가 여기 있어야 한다.
+    """
+    _, design, _, lm = setup
+    out = tune_point(lm, design, actuator_wn=30.0, actuator_zeta=0.7,
+                     delay_s=0.6, pade_order=2)
+    assert out["status"] == "infeasible"  # 점 전체로는 실패인데…
+    assert out["slots"]["pitch_att"]["status"] == "infeasible"
+    assert out["slots"]["roll_att"]["status"] == "ok"  # …이 자리는 멀쩡하다
+    assert set(out["slots"]) == {
+        "pitch_rate", "yaw_rate", "roll_rate", "pitch_att", "roll_att"}
+
+
+def test_zero_design_slot_is_na_not_failure(setup):
+    """설계값 0인 자리는 튜닝을 **안 한** 것이지 실패한 것이 아니다."""
+    from claw.design.tune import REASON_ZERO_DESIGN
+
+    _, design, _, lm = setup
+    out = tune_point(lm, {**design, "yaw.k_rate": 0.0}, **ACT)
+    slot = out["slots"]["yaw_rate"]
+    assert slot["status"] == "na" and slot["reason"] == REASON_ZERO_DESIGN
+    assert out["gains"]["yaw.k_rate"] == 0.0
+    # na가 점 status를 실패로 끌어내리지 않는다 (판정 불가 ≠ 불합격)
+    assert out["status"] != "infeasible"

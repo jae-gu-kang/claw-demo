@@ -49,6 +49,44 @@ _POLISH_SIMPLEX = ((0.0, 0.0), (0.3, 0.0), (0.0, 0.3))
 _POLISH_GUARD_PM = 0.5  # 벌점 무릎의 가드 [deg] — 최적점이 판정선에 정확히 붙는 것을 막는다
 _POLISH_GUARD_GM = 0.25  # 같은 목적 [dB]
 
+# 자리별 포기 사유 — "왜 목표에 못 갔나"를 한 낱말로. 종전에는 점 단위 status 하나에
+# 서로 다른 사유 넷이 뭉쳐 있었고, 안내 문구는 그중 한 경우에 **사실과 달랐다**
+# (마진은 통과했는데 "마진 미달"이라 적었다).
+REASON_OK = "ok"
+REASON_ZERO_DESIGN = "zero_design"  # 설계값 0 — 방향 정보가 없어 튜닝 자체를 안 한다
+REASON_TARGET_UNREACHED = "target_unreached"  # 브래킷을 끝까지 넓혀도 미달 (플랜트 한계)
+REASON_CAPPED = "capped"  # 댐퍼 안정 캡이 목표 전에 묶었다 (작동기·지연 예산)
+REASON_NO_STABLE_GAIN = "no_stable_gain"  # 안정한 |k|가 없어 댐퍼를 껐다
+REASON_BANDWIDTH_COLLAPSE = "bandwidth_collapse"  # 마진은 통과, 교차가 하한 아래
+REASON_MARGIN_FLOOR = "margin_floor"  # 백오프 바닥까지 PM/GM 미달
+REASON_DEGENERATE = "degenerate"  # 기저 루프 응답이 무의미 — 튜닝 불가
+REASON_RESCUED = "rescued"  # 백오프 해가 하한 미달이라 마무리로 구제됨 (통과)
+
+# 사유 → 사람이 읽는 한 줄 + 다음 수. 화면·원장이 이 표를 쓴다 (엔진이 정본).
+REASON_TEXT = {
+    REASON_OK: "설계 목표 달성",
+    REASON_ZERO_DESIGN: "설계 게인이 0이라 방향 정보가 없다 — 이 자리를 쓸 것이면 설계값을 먼저 정한다",
+    REASON_TARGET_UNREACHED: "게인을 아무리 키워도 목표 지표가 안 나온다 — 플랜트 한계다."
+                             " 목표를 낮추거나 이 조건을 설계 범위에서 뺀다",
+    REASON_CAPPED: "작동기·지연 포함 폐루프 안정 경계가 목표 전에 묶는다 —"
+                   " 작동기 대역폭 예산을 늘리거나 목표를 낮춘다",
+    REASON_NO_STABLE_GAIN: "어떤 게인으로도 이 댐퍼 루프가 안정하지 않아 0으로 두었다 —"
+                           " 플랜트·루프 구조를 검토한다",
+    REASON_BANDWIDTH_COLLAPSE: "마진은 넘겼으나 교차 주파수가 하한 아래다 — 성능이 무너졌다."
+                               " 지연·작동기 예산을 늘리거나 대역폭 하한을 낮춘다",
+    REASON_MARGIN_FLOOR: "대역폭을 바닥까지 버려도 PM/GM 목표에 못 미친다 —"
+                         " 지연·작동기 예산이 병목이다",
+    REASON_DEGENERATE: "이 자리의 기저 루프 응답이 무의미하다 — 입출력·플랜트를 확인한다",
+    REASON_RESCUED: "백오프 해가 대역폭 하한 아래여서 마무리로 되찾았다 (통과)",
+}
+# 통과로 보는 사유 — 나머지는 자리 status가 infeasible이다 (= "자유 게인으로도 설계
+# 목표를 못 맞춘 자리". classify의 structural_limit 입력이 바로 이것이다)
+_PASSING = (REASON_OK, REASON_RESCUED)
+# 그중에서도 **쓸 수 있는 게인 자체가 안 나온** 사유. 캡·플랜트 한계는 목표를 못
+# 채웠을 뿐 안정한 게인은 냈으므로 성격이 다르다 — 점 단위 보고에서 둘을 가른다
+_UNUSABLE = (REASON_NO_STABLE_GAIN, REASON_DEGENERATE, REASON_MARGIN_FLOOR,
+             REASON_BANDWIDTH_COLLAPSE)
+
 
 @dataclass(frozen=True)
 class TuneTargets:
@@ -234,6 +272,10 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
         k_design = float(design[slot])
         if k_design == 0.0:
             gains[slot] = 0.0
+            achieved[f"{group}_rate"] = {
+                "kind": "damping" if metric_key != "roll_lambda" else "bandwidth",
+                "target": getattr(targets, target_field), "reason": REASON_ZERO_DESIGN,
+            }
             notes.append(f"{slot}: 설계값 0 — 방향 정보가 없어 튜닝하지 않는다")
             continue
         sign = math.copysign(1.0, k_design)
@@ -265,15 +307,27 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
         gains[slot] = k
         final = dict(spec_rates)
         final[slot] = k
+        got = _metric(lm_axis, final, metric_key)
+        # 사유는 **왜 목표에 못 갔나**를 가른다. 캡이 걸렸어도 목표를 넘겼으면 결함이
+        # 아니다 (안정 경계 아래에서 목표 달성 = 정상), 그래서 목표 달성 여부를 먼저 본다
+        if got >= target * (1.0 - 1e-9):
+            reason = REASON_OK
+        elif capped == "no_stable_gain":
+            reason = REASON_NO_STABLE_GAIN
+        elif capped == "capped":
+            reason = REASON_CAPPED
+        else:
+            reason = REASON_TARGET_UNREACHED
         achieved[f"{group}_rate"] = {
             "kind": "damping" if metric_key != "roll_lambda" else "bandwidth",
-            metric_key: _metric(lm_axis, final, metric_key),
+            metric_key: got,
             "target": target,
             "wc": rate_loop_crossover(lm_prior, group, x_rate, u_in, k, **act_kw),
             "capped": capped,
             "reached": reached,
             # 확장 횟수 — 목표 미달을 보고할 때 "브래킷 탓이 아니다"의 증거가 된다
             "bracket_growth": grown,
+            "reason": reason,
         }
         if not reached:
             limit = 4.0 * _BRACKET_GROWTH ** grown
@@ -306,9 +360,12 @@ def _att_margins_meet(m, targets) -> bool:
 
 
 def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> tuple:
-    """자세 PI 루프쉐이핑 + 마진 검증 백오프 — (kp, ki, achieved, status, evals)."""
+    """자세 PI 루프쉐이핑 + 마진 검증 백오프 — (kp, ki, achieved, reason, evals)."""
     kp_design = float(design[f"{group}.kp"])
     sign = math.copysign(1.0, kp_design) if kp_design != 0.0 else 1.0
+    # rate_wc = 0이면(댐퍼가 0으로 캡됐거나 교차를 못 찾음) 목표 교차가 **다른 물리량**
+    # 으로 바뀐다 — 개루프 최속 진동 wn. 조용히 갈아타지 않고 플래그로 남긴다
+    wc_fallback = not (rate_wc > 0)
     wc0 = (rate_wc if rate_wc > 0 else wn_reference(lm_axis)) / targets.wc_ratio_att
     wc = wc0
     evals = 0
@@ -327,17 +384,21 @@ def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> t
         evals += 1
         # wc0(초기 목표 교차)을 함께 낸다 — 이게 없으면 "대역폭이 얼마나 무너졌나"가
         # 결과 밖에서 계산 불가능하다. 판정식 wc ≥ wc_att_ok_frac·wc0의 분모다
-        best = (kp, ki, {**m, "orientation": orient, "wc_att": wc, "wc0": wc0})
+        best = (kp, ki, {**m, "orientation": orient, "wc_att": wc, "wc0": wc0,
+                         "wc_fallback": wc_fallback, "target_pm_deg": targets.pm_deg,
+                         "target_gm_db": targets.gm_db,
+                         "target_wc_frac": targets.wc_att_ok_frac})
         if _att_margins_meet(m, targets):
-            # 대역폭 하한 — 이 밑에서만 통과하는 것은 성능 붕괴다 (structural limit)
-            status = "ok" if wc >= targets.wc_att_ok_frac * wc0 else "infeasible"
-            return kp, ki, best[2], status, evals
+            # 대역폭 하한 — 이 밑에서만 통과하는 것은 성능 붕괴다 (structural limit).
+            # **마진은 통과했다** — 사유를 margin_floor와 뭉개면 안내가 거짓이 된다
+            reason = (REASON_OK if wc >= targets.wc_att_ok_frac * wc0
+                      else REASON_BANDWIDTH_COLLAPSE)
+            return kp, ki, best[2], reason, evals
         wc *= targets.backoff
     if best is None:
-        return 0.0, 0.0, {"note": "기저 루프 응답이 무의미 — 자세 튜닝 불가",
-                          "wc0": wc0}, "infeasible", evals
+        return 0.0, 0.0, {"wc0": wc0, "wc_fallback": wc_fallback}, REASON_DEGENERATE, evals
     kp, ki, ach = best
-    return kp, ki, ach, "infeasible", evals
+    return kp, ki, ach, REASON_MARGIN_FLOOR, evals
 
 
 def tune_point(
@@ -345,10 +406,19 @@ def tune_point(
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
     polish=False, max_evals=60,
 ) -> dict:
-    """한 운영점의 SCAS 7자리 자동 튜닝 — {"gains", "achieved", "status", "notes", "evals"}.
+    """한 운영점의 SCAS 7자리 자동 튜닝 — {"gains", "achieved", "slots", "status", ...}.
 
-    status: "ok" | "infeasible"(어느 자세 축이든 목표 미달 잔존 — 자유 게인으로도
-    기준을 못 맞춘 점, classify의 structural_limit 입력). 예외로 던지지 않는다.
+    slots: {자리 이름: {"status", "reason", "target", "achieved"}} — **판정의 단위**.
+    자리는 5개(pitch_rate·yaw_rate·roll_rate·pitch_att·roll_att)이고 이름은 검증
+    쪽(openloop.GROUP_LOOPS·schedmap)과 같다. status는 "ok"(설계 목표 달성) |
+    "infeasible"(미달) | "na"(잴 수 없음 — 설계값 0), reason은 그 사유다.
+
+    status(점 단위): "ok" | "degraded"(설계 목표는 못 채웠으나 안정한 게인은 나왔다 —
+    캡·플랜트 한계) | "infeasible"(쓸 수 있는 게인 자체가 안 나온 자리가 있다 —
+    댐퍼 꺼짐·기저 무의미·마진 바닥·대역폭 붕괴). **점 단위 판정을 자리 단위 결정에
+    쓰면 안 된다** — 어느 자리가 실패했는지가 지워져서, 피치가 안 되는 점의 롤 실패까지
+    "상위 설계 문제"로 넘어간다 (classify는 slots를 본다).
+    예외로 던지지 않는다: infeasible도 결과다.
     """
     targets = targets if targets is not None else TuneTargets()
     act_kw = dict(
@@ -359,7 +429,6 @@ def tune_point(
     gains, achieved, notes = _tune_rates(lon, lat, design, targets, act_kw)
 
     evals = 0
-    status = "ok"
     for lm_axis, group in ((lon, "pitch"), (lat, "roll")):
         spec = AXIS_SPECS[lm_axis.axis]
         rate_gains = {f"{g}.k_rate": gains.get(f"{g}.k_rate", 0.0)
@@ -369,7 +438,7 @@ def tune_point(
             lm_axis, group, rate_gains, rate_wc, design, targets, act_kw
         )
         evals += ev
-        if st != "ok" and ach.get("wc0"):
+        if st != REASON_OK and ach.get("wc0"):
             # 구제 마무리 — 백오프가 대역폭만 버리는 한 방향 탐색이라 놓친 해를 찾는다.
             # **실패한 자리에만** 돈다: 통과한 자리까지 벌점 무릎으로 밀면 전 운영점이
             # 마진 경계에 앉게 되고(작동기 공진에 가까워진다) 결정론적 결과도 흔들린다.
@@ -382,7 +451,7 @@ def tune_point(
             if _att_margins_meet(ach2, targets) and math.isfinite(ach2["wc_att"]) and (
                 ach2["wc_att"] >= targets.wc_att_ok_frac * ach["wc0"]
             ):
-                kp, ki, ach, st = kp2, ki2, ach2, "ok"
+                kp, ki, ach, st = kp2, ki2, ach2, REASON_RESCUED
                 notes.append(
                     f"{group}.kp/ki: 백오프 해가 대역폭 하한 미달이라 마무리로 구제 —"
                     f" 교차 {ach['wc_att'] / ach['wc0']:.3f}×목표 (하한"
@@ -390,21 +459,66 @@ def tune_point(
                 )
         gains[f"{group}.kp"] = kp
         gains[f"{group}.ki"] = ki
+        ach["reason"] = st
         achieved[f"{group}_att"] = ach
-        if st != "ok":
-            status = "infeasible"
-            notes.append(f"{group}.kp/ki: 백오프 바닥까지 PM {targets.pm_deg}°/"
-                         f"GM {targets.gm_db} dB 미달 — structural_limit 후보")
-        if polish and st == "ok" and not ach.get("polished"):
+        if st not in _PASSING:
+            # 사유별로 정확히 적는다. 종전에는 어느 경우든 "백오프 바닥까지 PM/GM 미달"
+            # 이었는데, 대역폭 붕괴에서는 **마진을 통과한 뒤** 하한에 걸린 것이라
+            # 문구가 사실과 달랐다 (실측 PM 103°·GM 9.6 dB)
+            detail = ""
+            if st == REASON_BANDWIDTH_COLLAPSE:
+                detail = (f" — 교차 {ach['wc_att'] / ach['wc0']:.3f}×목표"
+                          f" (하한 {targets.wc_att_ok_frac:g}), PM {ach['pm_deg']:.1f}°/"
+                          f"GM {ach['gm_db']:.1f} dB는 통과")
+            elif st == REASON_MARGIN_FLOOR:
+                detail = (f" — 최선 PM {ach['pm_deg']:.1f}°/GM {ach['gm_db']:.1f} dB,"
+                          f" 목표 {targets.pm_deg}°/{targets.gm_db} dB")
+            notes.append(f"{group}.kp/ki: {REASON_TEXT[st]}{detail}")
+        if polish and st in _PASSING and not ach.get("polished"):
             kp, ki, ach, ev = _polish_att(
                 lm_axis, group, rate_gains, kp, ki, targets, act_kw,
                 max_evals=max(0, max_evals - evals), wc0=ach.get("wc0"),
             )
             evals += ev
             gains[f"{group}.kp"], gains[f"{group}.ki"] = kp, ki
+            ach["reason"] = st
             achieved[f"{group}_att"] = ach
-    return {"gains": gains, "achieved": achieved, "status": status,
+    slots = _slot_records(achieved)
+    reasons = [s["reason"] for s in slots.values()]
+    if any(r in _UNUSABLE for r in reasons):
+        status = "infeasible"
+    elif any(s["status"] == "infeasible" for s in slots.values()):
+        status = "degraded"
+    else:
+        status = "ok"
+    return {"gains": gains, "achieved": achieved, "slots": slots, "status": status,
             "notes": notes, "evals": evals}
+
+
+_METRIC_KEYS = ("zeta_sp", "zeta_dr", "roll_lambda", "pm_deg")
+
+
+def _slot_records(achieved: dict) -> dict:
+    """achieved → 자리별 판정 레코드 {status, reason, target, achieved}.
+
+    자리 단위가 판정의 단위다. 종전에는 점 단위 status 하나뿐이라 "어느 자리가
+    실패했나"가 지워졌고, 그 하나를 자리별 분류에 쓰는 바람에 피치가 안 되는 점의
+    롤 실패까지 에스컬레이션으로 넘어갔다 (고칠 수 있는 것을 못 고치게 만든다).
+    """
+    out = {}
+    for name, a in achieved.items():
+        reason = a.get("reason", REASON_OK)
+        if reason == REASON_ZERO_DESIGN:
+            status = "na"  # 튜닝을 안 한 것이지 실패한 것이 아니다
+        else:
+            status = "ok" if reason in _PASSING else "infeasible"
+        got = next((a[k] for k in _METRIC_KEYS if k in a), None)
+        # 대표 지표 하나만 스칼라로 낸다 — 레이트 자리는 ζ/λ, 자세 자리는 PM.
+        # 자세 자리의 GM·대역폭 목표는 achieved[name]에 나란히 있고, 요구 대비
+        # 부족은 criteria.shortfall이 그 entry에서 지표별로 낸다
+        out[name] = {"status": status, "reason": reason,
+                     "target": a.get("target", a.get("target_pm_deg")), "achieved": got}
+    return out
 
 
 def _polish_att(lm_axis, group, rate_gains, kp0, ki0, targets, act_kw, max_evals,
