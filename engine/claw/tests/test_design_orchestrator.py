@@ -109,6 +109,26 @@ def test_config_validation():
     assert AutoDesignConfig.from_dict(c.to_dict()) == c
 
 
+def test_targets_must_meet_criteria():
+    """튜닝 목표가 판정선보다 낮으면 제출 시점에 막는다 — 성공점이 warn/fail로 찍힌다.
+
+    기본값끼리 이미 정합이라는 첫 단정이 핵심이다: 종전에는 gm_good_db 10 dB >
+    targets.gm_db 8 dB로 어긋나 있어 튜닝 성공점이 구조적으로 warn이었다.
+    """
+    from claw.design import MarginCriteria, TuneTargets
+
+    AutoDesignConfig()  # 출하 기본값은 정합이어야 한다
+    with pytest.raises(ValueError, match="gm_db"):
+        AutoDesignConfig(targets=TuneTargets(gm_db=7.0))
+    with pytest.raises(ValueError, match="pm_deg"):
+        AutoDesignConfig(criteria=MarginCriteria(pm_min_deg=60.0))
+    with pytest.raises(ValueError, match="zeta_dr"):
+        AutoDesignConfig(targets=TuneTargets(zeta_dr=0.4))
+    # 금지가 아니라 **정합 요구**다 — 판정선을 올리면서 목표도 함께 올리면 통과한다
+    AutoDesignConfig(criteria=MarginCriteria(gm_good_db=12.0),
+                     targets=TuneTargets(gm_db=12.0))
+
+
 def test_add_validation_inserts_flanking_midpoints(env):
     """simple_deficit 처방 — 검증점 좌우 이웃과의 중점 2개를 넣는다 (예산 내)."""
     from claw.common.contracts import TrimCase

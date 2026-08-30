@@ -5,10 +5,17 @@ views/margins.js gmColor — PM 30/45°, GM 6/10 dB). 자동 설계 루프는 �
 기계가 하므로 기준이 엔진에 있어야 하고, 웹은 /api/design/defaults로 이 값을
 받아 색칠한다 (하드코딩은 폴백).
 
-의미 구분 — 자동화 합격선과 표시 음영선은 다르다:
+의미 구분 — 합격선·목표선·표시 음영선의 세 층:
 - 합격(pass) = pm_deg ≥ pm_min_deg ∧ gm_db ≥ gm_min_db  (관례 45° / 6 dB)
 - pm_bad_deg(30°)는 표시용 심각선(30~45° 주의 음영) — 자동화에서는 45° 미만이 곧 fail
-- gm_good_db(10 dB)는 표시용 양호선 — 합격이되 6~10 dB는 warn(얇은 여유)
+- gm_good_db·zeta_good은 **설계 목표선**이다 — 합격이되 목표 미달이면 warn
+
+warn이 뜻하는 것: "합격선은 넘겼으나 튜너가 겨냥한 설계 목표에는 못 미친다".
+그러려면 목표선이 튜너 목표(TuneTargets) **이하**여야 한다 — 그렇지 않으면 튜닝이
+완벽히 성공한 점조차 warn으로 찍혀 warn이 아무 정보도 못 준다. 실제로 그랬다:
+gm_good_db 10 dB > TuneTargets.gm_db 8 dB라 자유 게인 최적점이 구조적으로 warn이었고,
+사용자에게는 "경고가 압도적으로 많다"로 보였다. 이 정합은 AutoDesignConfig.__post_init__이
+강제한다 (기준과 목표가 만나는 유일한 자리 — 한쪽만 조정하면 거기서 걸린다).
 
 판정 불가(nan — 교차 없음)는 "na"로 낸다. 무한 여유(inf)는 그 축 통과로 본다.
 loop_margins가 nan을 nan으로 유지하는 이유(margins.py — 무한 여유 오인 금지)와
@@ -26,9 +33,9 @@ class MarginCriteria:
     pm_min_deg: float = 45.0  # 위상여유 합격선 [deg]
     gm_min_db: float = 6.0  # 이득여유 합격선 [dB]
     pm_bad_deg: float = 30.0  # 표시용 심각선 [deg] (30~45 주의 음영)
-    gm_good_db: float = 10.0  # 표시용 양호선 [dB] (6~10 주의 음영)
+    gm_good_db: float = 8.0  # 설계 목표선 [dB] — TuneTargets.gm_db와 같은 값 (6~8 warn)
     zeta_min: float = 0.30  # 레이트 댐퍼 폐쇄 모드 감쇠 합격선 (MIL-8785류 Level 관례 대역)
-    zeta_good: float = 0.50  # 감쇠 양호선 — 합격이되 이 미만은 warn
+    zeta_good: float = 0.50  # 감쇠 목표선 — 합격이되 이 미만은 warn (TuneTargets.zeta_dr와 동치)
 
     def __post_init__(self):
         if not self.pm_bad_deg <= self.pm_min_deg:

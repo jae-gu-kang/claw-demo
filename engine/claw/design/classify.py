@@ -7,7 +7,9 @@
    infeasible이거나 최적 게인의 판정이 fail → 게인·breakpoint로는 불가.
    action=escalate (**보고 전용** — 필터·작동기 대역폭·지연 예산 등 상위 설계
    변경은 어느 모드에서도 자동 적용하지 않는다). evidence로 교차 주파수 vs
-   작동기 대역폭 비·지연 위상 기여를 동봉 — 병목을 사람이 판단할 재료.
+   작동기 대역폭 비·지연 위상 기여에 더해 **완화 프로브**(_relief_probes —
+   지연·작동기 대역폭을 하나씩 풀어 재튜닝)를 동봉한다: 자동 적용은 안 해도
+   "무엇을 바꾸면 통과하는가"까지는 기계가 답해야 사람이 판단할 수 있다.
 2. plant_variation — v를 낀 인접 앵커 간 model_distance.d_total > tol_plant
    (refine tol과 **같은 상수** — 기준 이원화 금지) → 트림 격자가 플랜트 변화를
    못 담는 것. action=promote v→anchor (검증 시 트림·선형화는 이미 완료 — 역할
@@ -40,6 +42,45 @@ LOOP_SLOTS = {
     "yaw_rate": ("yaw.k_rate",),
 }
 _EPS = 1e-12
+# 구조 한계 완화 프로브의 작동기 대역폭 배수. 데모 30 rad/s → 90 rad/s로, docs -01 §7
+# 백로그가 적어 둔 소멸 경계(wn ≥ 50 rad/s)를 넘는 값이라 "대역폭이 병목인가"에 답한다.
+_RELIEF_ACT_FACTOR = 3.0
+
+
+def _relief_probes(lm, design, loop_name, *, targets, criteria, act_kw) -> list:
+    """지연·작동기 대역폭을 하나씩만 완화해 재튜닝 — 병목 지목의 실측 근거.
+
+    structural_limit는 "게인으로는 안 된다"까지만 말한다. 그다음 질문인 "그럼 무엇을
+    바꾸나"는 상위 설계 결정이라 자동 적용하지 않지만, **판단 재료는 기계가 낼 수
+    있다**. 종전 evidence는 ωc/작동기 비와 지연 위상 두 수치뿐이었는데 그 둘은 같이
+    커지므로(둘 다 ωc에 비례) 어느 쪽이 병목인지 화면에서 읽어낼 수 없었다.
+    프로브는 한 번에 하나씩만 바꿔 돌려 인과를 분리한다.
+
+    비용은 구조 한계로 판정된 (점, 자리)당 튜닝 2회 추가다 — 그 판정 자체가 이미
+    자유 게인 튜닝 1회를 돌린 뒤이고, 구조 한계는 드물어 전체 실행에는 거의 영향이 없다.
+    """
+    act_wn = float(act_kw.get("actuator_wn") or 0.0)
+    delay = float(act_kw.get("delay_s") or 0.0)
+    plan = []
+    if delay > 0.0:  # 이미 0이면 "지연을 빼 보라"가 답이 될 수 없다
+        plan.append(("delay_s", 0.0, "지연 제거"))
+    if act_wn > 0.0:
+        plan.append(("actuator_wn", act_wn * _RELIEF_ACT_FACTOR,
+                     f"작동기 대역폭 ×{_RELIEF_ACT_FACTOR:g}"))
+    probes = []
+    for key, to_value, label in plan:
+        kw = dict(act_kw)
+        kw[key] = to_value
+        out = tune_point(lm, design, targets=targets, **kw)
+        judged = _tuned_judgement(out, loop_name, criteria)
+        probes.append({
+            "change": key, "label": label, "from": act_kw.get(key), "to": to_value,
+            "status": out["status"], "judged": judged,
+            # 구조 한계 판정 조건(infeasible ∨ fail)이 더 이상 성립하지 않으면 해소다 —
+            # 판정과 같은 식을 부정해 쓴다 (두 곳이 갈리면 프로브가 거짓 안도를 준다)
+            "resolves": out["status"] != "infeasible" and judged != "fail",
+        })
+    return probes
 
 
 def _tuned_judgement(tune_out, loop_name, criteria) -> str:
@@ -111,10 +152,22 @@ def classify_margin_deficit(
     }
     if tune_out["status"] == "infeasible" or tuned_status == "fail":
         wcp = (entry.get("wcp") or entry.get("wc") or 0.0)
+        relief = _relief_probes(
+            lm, design, loop_name, targets=targets, criteria=criteria,
+            act_kw=dict(actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
+                        delay_s=delay_s, pade_order=pade_order),
+        )
+        resolved = [p["label"] for p in relief if p["resolves"]]
         evidence["bottleneck"] = {
             "wc_over_actuator": (wcp / actuator_wn) if actuator_wn else None,
             "delay_phase_deg_at_wc": math.degrees(wcp * delay_s),
-            "note": "자유 게인으로도 기준 미달 — 필터/작동기 대역폭/지연 예산 중 병목 검토",
+            "relief": relief,
+            "resolved_by": resolved,
+            "note": "자유 게인으로도 기준 미달 — " + (
+                f"{' / '.join(resolved)} 시 통과: 병목은 게인이 아니라 이 예산이다"
+                if resolved else
+                "지연·작동기 대역폭을 완화해도 통과하지 못한다 — 플랜트·루프 구조 자체를 검토"
+            ),
         }
         return {
             "verdict": "structural_limit",

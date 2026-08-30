@@ -8,7 +8,9 @@ import {
   adoptStorePayload,
   buildConfig,
   pointRows,
+  statusCounts,
   statusRank,
+  verdictLegend,
   worstStatus,
 } from "./autodesign.js";
 
@@ -109,4 +111,31 @@ test("adoptStorePayload — 상수 자리를 버리지 않는다 (검증한 형�
   assert.deepEqual(allConst.constants, { "pitch.kp": -2, "roll.kp": 1 });
   // 반출이 아예 없으면 빈 객체 (undefined 접근 금지)
   assert.deepEqual(adoptStorePayload({}).constants, {});
+});
+
+test("statusCounts — 미판정을 통과로 세지 않는다", () => {
+  // status null은 "판정을 못 했다"이지 "합격"이 아니다 — 한 칸으로 뭉치면
+  // 트림 불가·판정 불가 점이 ok 개수에 섞여 실행이 실제보다 건강해 보인다
+  // A는 pitch_att ok + pitch_rate warn → 점 판정은 최악값 warn (worstStatus 규약)
+  const c = statusCounts(pointRows(RESULT));
+  assert.deepEqual(c, { ok: 0, warn: 1, fail: 1, na: 0, unjudged: 1 });
+  assert.deepEqual(statusCounts(undefined),
+    { ok: 0, warn: 0, fail: 0, na: 0, unjudged: 0 });
+});
+
+test("verdictLegend — 기준 수치를 결과에서 읽어 문장에 박는다", () => {
+  const lines = verdictLegend({
+    pm_min_deg: 45, gm_min_db: 6, gm_good_db: 8, zeta_min: 0.3, zeta_good: 0.5,
+  });
+  assert.deepEqual(lines.map((l) => l.key), ["ok", "warn", "fail", "na"]);
+  const ok = lines.find((l) => l.key === "ok").text;
+  const warn = lines.find((l) => l.key === "warn").text;
+  // ok는 **목표선**(gm_good), warn은 합격선~목표선 구간을 말해야 한다.
+  // 여기가 어긋나면 화면이 warn을 "곧 실패"로 오해하게 설명한다
+  assert.match(ok, /GM ≥ 8 dB/);
+  assert.match(warn, /GM 6~8 dB/);
+  assert.match(lines.find((l) => l.key === "fail").text, /GM < 6 dB/);
+  // 기준을 바꾸면 문장도 따라가야 한다 — 기본값을 웹에 다시 적으면 안 되는 이유
+  const strict = verdictLegend({ pm_min_deg: 50, gm_min_db: 8, gm_good_db: 12 });
+  assert.match(strict.find((l) => l.key === "ok").text, /PM ≥ 50° · GM ≥ 12 dB/);
 });

@@ -17,6 +17,7 @@ import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
   VERDICT_LABEL, actionCards, adoptStorePayload, buildConfig, pointRows,
+  statusCounts, verdictLegend,
 } from "../lib/autodesign.js";
 import { slotIndex, withConstant } from "../lib/gainsync.js";
 import { store } from "../store.js";
@@ -166,6 +167,30 @@ function sevChip(status) {
   }, s === "na" || status == null ? "미판정" : s);
 }
 
+/** 판정 개수 한 줄 — 표를 눈으로 세지 않아도 규모를 알 수 있게. */
+function countsLine(rows) {
+  const c = statusCounts(rows);
+  const parts = [];
+  for (const k of ["ok", "warn", "fail", "na"]) {
+    if (c[k]) parts.push(el("span", {}, " ", sevChip(k), ` ${c[k]}`));
+  }
+  if (c.unjudged) parts.push(el("span", { class: "hint" }, ` · 미판정 ${c.unjudged}`));
+  return el("p", {}, "점 판정", ...parts);
+}
+
+/** 판정어의 뜻 — 칩만 띄우고 뜻을 안 적으면 warn이 잡음인지 신호인지 알 수 없다. */
+function legendBox(criteria) {
+  return el("details", {},
+    el("summary", { class: "hint" }, "판정어의 뜻 (ok · warn · fail · na)"),
+    el("ul", { class: "hint" }, verdictLegend(criteria).map((l) =>
+      el("li", {}, sevChip(l.key), ` ${l.text}`))),
+    el("p", { class: "hint" },
+      "warn은 자동 설계가 실패한 것이 아니다 — 튜닝은 목표를 맞췄는데 그 사이를 잇는 "
+      + "스케줄 곡선이 목표선 아래로 내려온 자리다. 줄이려면 그 구간에 breakpoint를 "
+      + "늘리거나(처방 카드가 이미 그것을 제안한다) 적합 허용치를 조인다. "
+      + "fail은 다르다 — 합격선 미달이라 그대로 확정하면 안 된다."));
+}
+
 function renderResult(box, body, resultId, ctx) {
   const report = body.report ?? {};
   const rows = pointRows(body);
@@ -289,7 +314,9 @@ function renderResult(box, body, resultId, ctx) {
       + `(앵커 ${report.points?.anchor ?? "?"} · bp ${report.points?.breakpoint ?? "?"} `
       + `· 검증 ${report.points?.validation ?? "?"}) · 실패 ${report.failures ?? 0}`),
     el("h4", {}, "운영점"),
+    countsLine(rows),
     pointsTable,
+    legendBox(body.margin_out?.criteria),
   ];
 
   if (cards.approvable.length) {
@@ -323,6 +350,22 @@ function renderResult(box, body, resultId, ctx) {
       el("p", { class: "hint" },
         `스케줄 자리 ${Object.keys(body.gain_export.tables ?? {}).length}개 · `
         + `상수 자리 ${Object.keys(body.gain_export.constants ?? {}).length}개`),
+      // 확정 버튼만 있고 그다음이 없으면 "자동 설계를 돌린 뒤 무엇을 하라는 건지"가
+      // 화면 어디에도 없다 — 소비 순서를 여기서 밝힌다
+      el("p", { class: "hint" },
+        "확정하면 이 스케줄이 게인 탭·시뮬레이션·마진·Autocode·구조도·영향성의 정본이 된다. "
+        + "권장 순서: ① 게인 탭에서 곡선과 breakpoint를 확인한다(필요하면 편집 후 "
+        + "[시뮬·코드에 적용] — 이 확정을 덮어쓴다) → ② 시뮬레이션 탭에서 비선형 응답을 "
+        + "본다 → ③ 마진 탭에서 스케줄 게인으로 재검증한다 → ④ Autocode로 탑재 C를 "
+        + "생성한다(형상 지문이 바뀌는 것으로 확정이 걸렸는지 확인된다)."),
+    );
+    if (report.failures) {
+      sections.push(el("p", {}, el("strong", {},
+        `실패 ${report.failures}건이 남아 있다 — 그대로 확정하면 그 운영점은 합격선 `
+        + "미달인 채로 굳는다. 처방 카드를 승인해 재개하거나, 에스컬레이션이면 "
+        + "작동기·지연 예산 같은 상위 설계를 먼저 정한 뒤 다시 돌릴 것.")));
+    }
+    sections.push(
       el("button", { onclick: () => adopt().catch((e) =>
         clear(adoptMsg).append(el("span", { class: "error-box" }, errorText(e)))) },
         "게인 확정 (스토어 주입)"), adoptMsg,
@@ -352,6 +395,17 @@ function evidenceLine(a) {
   if (ev.bottleneck) {
     bits.push(`ωc/작동기 ${fmt(ev.bottleneck.wc_over_actuator)} · 지연 위상 `
       + `${fmt(ev.bottleneck.delay_phase_deg_at_wc)}°`);
+    // 완화 프로브가 이 카드의 실질이다 — 위 두 수치는 둘 다 ωc에 비례해 같이 커지므로
+    // 어느 예산이 병목인지 알려 주지 못한다. 하나씩 풀어 본 결과를 그대로 보인다
+    for (const p of ev.bottleneck.relief ?? []) {
+      bits.push(`${p.label} → ${p.resolves ? "통과" : "여전히 미달"}`);
+    }
   }
-  return el("div", { class: "hint" }, bits.join(" · ") || "—");
+  const lines = [el("div", { class: "hint" }, bits.join(" · ") || "—")];
+  // 에스컬레이션은 "무엇을 바꾸면 통과하는가"가 결론이다 — 흐린 회색 나열에 묻히면
+  // 사용자는 이 카드를 보고도 다음 행동을 정할 수 없다
+  if (ev.bottleneck?.note) {
+    lines.push(el("div", { class: "hint" }, el("strong", {}, ev.bottleneck.note)));
+  }
+  return el("div", {}, ...lines);
 }

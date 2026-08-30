@@ -60,8 +60,38 @@ def test_structural_limit_with_excess_delay():
     )
     assert out["verdict"] == "structural_limit"
     assert out["action"]["type"] == "escalate"
-    assert "bottleneck" in out["evidence"]
-    assert "delay_phase_deg_at_wc" in out["evidence"]["bottleneck"]
+    bn = out["evidence"]["bottleneck"]
+    assert "delay_phase_deg_at_wc" in bn
+    # 완화 프로브가 병목을 **지목**한다 — 지연 0.6 s가 원인이므로 지연 제거만 통과해야
+    # 하고, 작동기 대역폭을 3배로 올려도 그 지연은 그대로라 통과하지 못한다.
+    # 둘 다 통과한다고 나오면 프로브가 인과를 분리하지 못하는 것이다
+    by_change = {p["change"]: p for p in bn["relief"]}
+    assert set(by_change) == {"delay_s", "actuator_wn"}
+    assert by_change["delay_s"]["resolves"] is True
+    assert by_change["delay_s"]["from"] == 0.6 and by_change["delay_s"]["to"] == 0.0
+    assert by_change["actuator_wn"]["resolves"] is False
+    assert bn["resolved_by"] == ["지연 제거"]
+    assert "지연 제거" in bn["note"]
+
+
+def test_structural_limit_reports_no_relief_when_nothing_helps():
+    """완화해도 통과 못 하는 경우 — 프로브가 "해결된다"고 위장하지 않는다.
+
+    합격선을 도달 불가능하게(PM ≥ 179°) 두어 지연·작동기와 무관하게 미달을 만든다.
+    긍정 분기만 테스트하면 `resolves`를 무조건 True로 만드는 실수를 못 잡는다 —
+    그러면 화면이 "지연만 빼면 된다"고 잘못 안내하고, 실제로는 상위 설계를 헛짚는다.
+    """
+    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    out = classify_margin_deficit(
+        ac, v, "pitch_att", points, lms, trims, {}, demo_design_gains(),
+        _fail_cases(v, lo, hi), criteria=MarginCriteria(pm_min_deg=179.0), **ACT,
+    )
+    assert out["verdict"] == "structural_limit"
+    bn = out["evidence"]["bottleneck"]
+    assert [p["resolves"] for p in bn["relief"]] == [False, False]
+    assert bn["resolved_by"] == []
+    assert "플랜트" in bn["note"]
 
 
 def test_plant_variation_promotes_to_anchor():

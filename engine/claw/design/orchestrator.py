@@ -99,6 +99,39 @@ class AutoDesignConfig:
             raise ValueError("actuator_wn·actuator_zeta는 양수여야 함")
         if self.delay_s < 0 or self.pade_order < 1:
             raise ValueError("delay_s는 음수 불가, pade_order는 1 이상")
+        self._check_targets_meet_criteria()
+
+    def _check_targets_meet_criteria(self):
+        """튜너 목표가 판정선을 넘는지 — warn/fail이 의미를 갖게 하는 유일한 불변식.
+
+        criteria(판정)와 targets(튜닝)는 서로를 모른 채 각자 기본값을 들고 있어서
+        조용히 어긋난다. 어긋나면 산출물이 거짓말을 한다:
+        - targets.gm_db < criteria.gm_good_db  → 튜닝이 **성공한** 점이 전부 warn.
+          실제로 8 dB vs 10 dB로 어긋나 있었고, 화면은 경고로 뒤덮였다.
+        - targets.pm_deg < criteria.pm_min_deg → 튜닝 성공점이 곧바로 fail.
+          그러면 분류기가 그 점을 structural_limit로 몰아 에스컬레이션을 양산한다
+          (자유 게인 최적조차 fail이니 정의상 구조 한계로 보인다).
+        둘 다 "판정이 틀렸다"가 아니라 **설정이 모순**인 것이라 제출 시점에 막는다
+        (routes/design.py가 ValueError를 422로 낸다 — 워커를 돌린 뒤 알아채면 늦다).
+        """
+        cr, tg = self.criteria, self.targets
+        if tg.pm_deg < cr.pm_min_deg:
+            raise ValueError(
+                f"targets.pm_deg({tg.pm_deg}°) ≥ criteria.pm_min_deg({cr.pm_min_deg}°) 필요 — "
+                "튜닝 목표가 합격선보다 낮으면 성공한 점이 곧바로 fail로 찍힌다"
+            )
+        if tg.gm_db < cr.gm_good_db:
+            raise ValueError(
+                f"targets.gm_db({tg.gm_db} dB) ≥ criteria.gm_good_db({cr.gm_good_db} dB) 필요 — "
+                "튜닝 목표가 목표선보다 낮으면 성공한 점이 전부 warn이 되어 warn이 무의미해진다"
+            )
+        for field_name in ("zeta_sp", "zeta_dr"):
+            z = getattr(tg, field_name)
+            if z < cr.zeta_good:
+                raise ValueError(
+                    f"targets.{field_name}({z}) ≥ criteria.zeta_good({cr.zeta_good}) 필요 — "
+                    "감쇠 목표가 목표선보다 낮으면 성공한 댐퍼가 warn으로 찍힌다"
+                )
 
     def to_dict(self) -> dict:
         d = {k: v for k, v in self.__dict__.items() if k not in ("criteria", "targets")}

@@ -136,8 +136,8 @@ export function render() {
         "루프를 전부 지우면 고유치·감쇠비만 계산. 작동기·지연 미포함 마진은 낙관적 ",
         "(01 §4.2) — 기본은 포함, 체크 해제로 영향 분리 비교. 지연 기본값 0.035 s = ",
         "항법 출력 지연 0.03 s [기본값] + 제어주기(100 Hz) 등가지연 0.005 s. ",
-        "상태색 [기본값]: PM ≥45° 양호 · 30~45° 주의 · <30° 부족 · GM ≥10 dB 양호 · ",
-        "6~10 주의 · <6 부족 · 회색 = 트림 불가/판정 불가."),
+        "상태색 [기본값]: PM ≥45° 양호 · 30~45° 주의 · <30° 부족 · GM ≥8 dB 양호 · ",
+        "6~8 주의 · <6 부족 · 회색 = 트림 불가/판정 불가."),
       progressBox, errBox,
     ),
     el("div", { class: "panel" }, el("h2", {}, "대시보드"), resultBox),
@@ -224,10 +224,14 @@ function renderLoopEditor(loopBox) {
 
 // ── 결과 대시보드 ──────────────────────────────────────────────────────
 
+// 음영 문턱은 엔진 MarginCriteria(design/criteria.py)의 합격선 6 dB·목표선 8 dB와
+// 같은 값이다 — 자동 설계 탭이 ok로 찍은 수치가 여기서 주의로 뜨면 같은 GM을 두 탭이
+// 다르게 판정하는 셈이 된다. 목표선 8은 튜너 목표(TuneTargets.gm_db)와도 같은 값이라
+// 세 자리가 한 수치를 공유한다 (하드코딩은 폴백 — 정본은 /design/defaults)
 function gmColor(gm) {
   if (gm === "inf") return STATUS.ok;
   if (typeof gm !== "number") return STATUS.na;
-  return gm < 6 ? STATUS.bad : gm < 10 ? STATUS.warn : STATUS.ok;
+  return gm < 6 ? STATUS.bad : gm < 8 ? STATUS.warn : STATUS.ok;
 }
 
 /** 결과에 포함된 루프 스펙 — 저장 결과의 loops가 정본 (재열람 시 폼 상태와 무관).

@@ -79,6 +79,42 @@ export function pointRows(result) {
   }));
 }
 
+/** 점 행 목록 → 판정 개수 {ok, warn, fail, na, unjudged}.
+ *
+ * "경고가 왜 이렇게 많나"에 화면이 스스로 답하려면 먼저 몇 건인지 세어야 한다.
+ * 표를 눈으로 세는 것이 유일한 방법이면 사용자는 경고의 규모를 오해한다. */
+export function statusCounts(rows) {
+  const out = { ok: 0, warn: 0, fail: 0, na: 0, unjudged: 0 };
+  for (const r of rows ?? []) {
+    const s = r?.status;
+    if (s == null) out.unjudged += 1;
+    else if (s in out) out[s] += 1;
+  }
+  return out;
+}
+
+/** 판정 기준 dict → 판정어의 뜻 문장 [{key, text}] — 기준 수치를 문장에 박아 낸다.
+ *
+ * 종전 화면은 ok/warn/fail 칩만 띄우고 뜻을 어디에도 적지 않아, warn이 "합격이나
+ * 목표 미달"인지 "곧 실패"인지 알 수 없었다. 수치는 결과에 동봉된 criteria(판정에
+ * 실제로 쓴 값)에서 읽는다 — 여기에 기본값을 다시 적으면 기준을 바꿨을 때 화면만
+ * 옛 수치를 말하게 된다. */
+export function verdictLegend(criteria) {
+  const c = criteria ?? {};
+  const n = (v, unit) => (v == null ? "?" : `${v}${unit}`);
+  return [
+    { key: "ok", text: `설계 목표 달성 — PM ≥ ${n(c.pm_min_deg, "°")} · `
+      + `GM ≥ ${n(c.gm_good_db, " dB")} · ζ ≥ ${n(c.zeta_good, "")}` },
+    { key: "warn", text: `합격선은 넘겼으나 목표 미달 — GM ${n(c.gm_min_db, "")}~`
+      + `${n(c.gm_good_db, " dB")} 또는 ζ ${n(c.zeta_min, "")}~${n(c.zeta_good, "")}. `
+      + "채택해도 되지만 여유가 얇아 형상이 바뀌면 먼저 무너지는 자리다" },
+    { key: "fail", text: `합격선 미달 — PM < ${n(c.pm_min_deg, "°")} 또는 `
+      + `GM < ${n(c.gm_min_db, " dB")} 또는 ζ < ${n(c.zeta_min, "")}, 혹은 게인 부호 뒤집힘. `
+      + "처방 카드로 이어진다" },
+    { key: "na", text: "판정 불가 — 교차 없음(nan)이거나 트림 미수렴. **통과가 아니다**" },
+  ];
+}
+
 /** 처방 카드 그룹 — {approvable, escalations}. supersede는 양쪽 다 제외
  * (같은 점 상위 승격에 흡수됨 — 엔진 promote 래칫과 정합). */
 export function actionCards(result) {
