@@ -10,7 +10,9 @@ import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { AXIS_NAMES, DEFAULT_LOOPS, validateActuatorDelay, validateLoops } from "../lib/loops.js";
-import { STATUS, fuelsOf, marginColor, pivotCases } from "../lib/plot.js";
+import {
+  FALLBACK_CRITERIA, STATUS, fuelsOf, gmColor, marginColor, marginLegendText, pivotCases,
+} from "../lib/plot.js";
 import { store } from "../store.js";
 import { heatmapCanvas, scatterCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
@@ -19,6 +21,11 @@ let lastBody = null;
 let runningJobId = null;
 // 탭 재진입에도 루프 편집 상태 유지 (수치는 입력 문자열 — 제출 시 파싱)
 let loopRows = DEFAULT_LOOPS.map((r) => ({ ...r }));
+// 판정선 — 정본은 /design/defaults(엔진 MarginCriteria). 하드코딩 폴백을 쓰면
+// 자동 설계 탭에서 기준을 바꿨을 때 같은 점을 두 탭이 다르게 칠한다 (lib/plot.js
+// FALLBACK_CRITERIA 머리말). 탭 재진입마다 다시 부르지 않도록 모듈에 남긴다
+let criteria = null;
+let criteriaErr = null;
 
 export function render() {
   const errBox = el("div");
@@ -42,6 +49,33 @@ export function render() {
 
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
+
+  // 판정선 한 줄 — 폴백을 썼다는 사실을 숨기지 않는다. 숨기면 화면이 자기 기준을
+  // 정본인 척하게 되고, 그게 두 탭이 어긋나는 것보다 나쁘다
+  const criteriaBox = el("p", { class: "hint" }, "판정선 불러오는 중… (정본: /design/defaults)");
+  const drawCriteria = () => {
+    clear(criteriaBox).append(
+      marginLegendText(criteria ?? FALLBACK_CRITERIA),
+      criteria
+        ? " — 정본: /design/defaults (엔진 MarginCriteria)"
+        : ` — 판정선 조회 실패로 웹 폴백값을 쓰는 중이다 (${criteriaErr}). `
+          + "자동 설계 탭에서 기준을 바꿨다면 이 색은 그 기준이 아니다.",
+    );
+  };
+
+  const loadCriteria = async () => {
+    try {
+      const d = await api.get("/design/defaults");
+      criteria = d?.config?.criteria ?? null;
+      criteriaErr = criteria ? null : "응답에 config.criteria가 없다";
+    } catch (e) {
+      criteria = null;
+      criteriaErr = errorText(e);
+    }
+    drawCriteria();
+    // 문턱이 바뀌었으니 이미 그려진 히트맵도 다시 칠한다 (조용히 옛 색으로 두지 않는다)
+    if (lastBody) renderResults(resultBox, lastBody);
+  };
 
   const watch = () => attachProgress(progressBox, runningJobId, {
     onDone: async (job) => {
@@ -135,15 +169,16 @@ export function render() {
         "트림 → 선형화 → 모드 분류 → 루프별 sign·PI·G(x_out←u_in) 마진 (엔진 M9·M10). ",
         "루프를 전부 지우면 고유치·감쇠비만 계산. 작동기·지연 미포함 마진은 낙관적 ",
         "(01 §4.2) — 기본은 포함, 체크 해제로 영향 분리 비교. 지연 기본값 0.035 s = ",
-        "항법 출력 지연 0.03 s [기본값] + 제어주기(100 Hz) 등가지연 0.005 s. ",
-        "상태색 [기본값]: PM ≥45° 양호 · 30~45° 주의 · <30° 부족 · GM ≥8 dB 양호 · ",
-        "6~8 주의 · <6 부족 · 회색 = 트림 불가/판정 불가."),
+        "항법 출력 지연 0.03 s [기본값] + 제어주기(100 Hz) 등가지연 0.005 s."),
+      criteriaBox,
       progressBox, errBox,
     ),
     el("div", { class: "panel" }, el("h2", {}, "대시보드"), resultBox),
   );
   if (lastBody) renderResults(resultBox, lastBody);
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
+  if (criteria) drawCriteria(); // 이미 받아 둔 판정선 — 재진입마다 다시 부르지 않는다
+  else loadCriteria();
   return root;
 }
 
@@ -224,16 +259,6 @@ function renderLoopEditor(loopBox) {
 
 // ── 결과 대시보드 ──────────────────────────────────────────────────────
 
-// 음영 문턱은 엔진 MarginCriteria(design/criteria.py)의 합격선 6 dB·목표선 8 dB와
-// 같은 값이다 — 자동 설계 탭이 ok로 찍은 수치가 여기서 주의로 뜨면 같은 GM을 두 탭이
-// 다르게 판정하는 셈이 된다. 목표선 8은 튜너 목표(TuneTargets.gm_db)와도 같은 값이라
-// 세 자리가 한 수치를 공유한다 (하드코딩은 폴백 — 정본은 /design/defaults)
-function gmColor(gm) {
-  if (gm === "inf") return STATUS.ok;
-  if (typeof gm !== "number") return STATUS.na;
-  return gm < 6 ? STATUS.bad : gm < 8 ? STATUS.warn : STATUS.ok;
-}
-
 /** 결과에 포함된 루프 스펙 — 저장 결과의 loops가 정본 (재열람 시 폼 상태와 무관).
 구형 결과 폴백: 케이스 margins 키에서 이름만 복원. */
 function loopsOf(body) {
@@ -262,6 +287,8 @@ function renderResults(resultBox, body) {
     fuels.map((f) => el("option", { value: f }, `연료 ${f} kg`)));
   const plotBox = el("div");
   const draw = () => {
+    // 판정선은 그릴 때마다 읽는다 — /design/defaults가 뒤늦게 도착해도 다시 칠해진다
+    const cr = criteria ?? FALLBACK_CRITERIA;
     const fuel = Number(fuelSel.value);
     const pivot = pivotCases(entries, fuel);
     const loopPlots = loops.flatMap((lp) => {
@@ -273,13 +300,13 @@ function renderResults(resultBox, body) {
         heatmapCanvas(pivot, (e) => {
           if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
           const pm = e.margins[lp.name] ? e.margins[lp.name].pm_deg : null;
-          return { color: marginColor(pm), text: `${fmt(pm, 3)}°` };
-        }, { title: `위상여유 PM [deg] — ${lp.name}` }),
+          return { color: marginColor(pm, cr), text: `${fmt(pm, 3)}°` };
+        }, { title: `위상여유 PM [deg] — ${lp.name} (≥${cr.pm_min_deg}°)` }),
         heatmapCanvas(pivot, (e) => {
           if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
           const gm = e.margins[lp.name] ? e.margins[lp.name].gm_db : null;
-          return { color: gmColor(gm), text: gm === "inf" ? "∞ dB" : `${fmt(gm, 3)} dB` };
-        }, { title: `이득여유 GM [dB] — ${lp.name} (≥6 dB [기본값])` }),
+          return { color: gmColor(gm, cr), text: gm === "inf" ? "∞ dB" : `${fmt(gm, 3)} dB` };
+        }, { title: `이득여유 GM [dB] — ${lp.name} (≥${cr.gm_min_db} dB)` }),
       ];
     });
     const points = [];

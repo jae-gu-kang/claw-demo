@@ -30,14 +30,53 @@ export const STATUS = {
   na: "#aeaeb2", // 판정 불가·트림 불가
 };
 
-/** PM[deg] → 상태색 — 관례 여유 기준 [기본값]: ≥45° 양호, 30~45° 주의, <30° 부족.
- * 합격기준 수치는 파라미터 관리 계층 확정 시 그쪽이 정본 (02 §5.5). */
-export function marginColor(pm) {
+/** 판정 문턱 [폴백] — **정본은 서버 GET /design/defaults**(엔진 MarginCriteria).
+ *
+ * 여기 수치는 그 조회가 실패했을 때만 쓴다. 종전에는 이 값이 하드코딩된 판정선
+ * 자체였고, 자동 설계 탭에서 criteria.pm_min_deg를 50으로 올려도 마진 탭은 그대로
+ * 45로 칠했다 — 같은 47° 점을 한 탭은 초록, 다른 탭은 fail로 보이게 하는 어긋남이다.
+ * 폴백을 쓴 화면은 그 사실을 힌트로 밝힌다 (조용한 폴백 금지). */
+export const FALLBACK_CRITERIA = Object.freeze({
+  pm_min_deg: 45, // 합격선
+  pm_bad_deg: 30, // 표시용 심각선
+  gm_min_db: 6, // 합격선
+  gm_good_db: 8, // 목표선
+});
+
+function threshold(criteria, key) {
+  const v = criteria?.[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : FALLBACK_CRITERIA[key];
+}
+
+/** PM[deg] → 상태색 — 문턱은 인자로 받는다 (criteria 생략 시 폴백).
+ * ≥pm_min_deg 양호 · pm_bad_deg~pm_min_deg 주의 · <pm_bad_deg 부족. */
+export function marginColor(pm, criteria) {
   if (pm === "inf") return STATUS.ok;
   if (typeof pm !== "number") return STATUS.na; // null(NaN)·문자열 — 판정 불가
-  if (pm < 30) return STATUS.bad;
-  if (pm < 45) return STATUS.warn;
+  if (pm < threshold(criteria, "pm_bad_deg")) return STATUS.bad;
+  if (pm < threshold(criteria, "pm_min_deg")) return STATUS.warn;
   return STATUS.ok;
+}
+
+/** GM[dB] → 상태색 — 합격선 gm_min_db, 목표선 gm_good_db.
+ *
+ * 목표선은 튜너 목표(TuneTargets.gm_db)와도 같은 값이라 세 자리가 한 수치를
+ * 공유한다 — 그래서 이 문턱을 화면이 따로 들고 있으면 안 된다. */
+export function gmColor(gm, criteria) {
+  if (gm === "inf") return STATUS.ok;
+  if (typeof gm !== "number") return STATUS.na;
+  if (gm < threshold(criteria, "gm_min_db")) return STATUS.bad;
+  if (gm < threshold(criteria, "gm_good_db")) return STATUS.warn;
+  return STATUS.ok;
+}
+
+/** 상태색 범례 문장 — 문턱을 문장에 박아 낸다 (수치를 두 번 적지 않는다). */
+export function marginLegendText(criteria) {
+  const t = (k) => threshold(criteria, k);
+  return `상태색: PM ≥${t("pm_min_deg")}° 양호 · ${t("pm_bad_deg")}~${t("pm_min_deg")}° 주의 `
+    + `· <${t("pm_bad_deg")}° 부족 · GM ≥${t("gm_good_db")} dB 양호 · `
+    + `${t("gm_min_db")}~${t("gm_good_db")} dB 주의 · <${t("gm_min_db")} dB 부족 · `
+    + "회색 = 트림 불가/판정 불가";
 }
 
 /** 트림 판정 → 비행 엔벨로프 셀 (01 §4.1 자동 판정 플래그 기반 근사).

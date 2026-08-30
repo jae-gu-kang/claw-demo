@@ -15,6 +15,19 @@
 
 import { parseNumberList } from "./grid.js";
 
+/** 수치 표기 — dom.js의 fmt와 같은 정책(null=—, "inf"=∞, 유효자릿수).
+ *
+ * lib은 DOM 계층을 import하지 않는다는 규약 때문에 여기 한 벌을 둔다. 정책이
+ * 갈리면 같은 수가 카드와 표에서 다르게 보이므로 fmt와 함께 고칠 자리다. */
+function num(x, digits = 3) {
+  if (x == null) return "—";
+  if (x === "inf") return "∞";
+  if (x === "-inf") return "−∞";
+  if (typeof x !== "number") return String(x);
+  if (Number.isInteger(x) && Math.abs(x) < 1e6) return String(x);
+  return x.toPrecision(digits);
+}
+
 export const VERDICT_LABEL = {
   simple_deficit: "단순 마진 부족 — 검증점 추가",
   plant_variation: "플랜트 급변 — 트림/선형화점 승격",
@@ -40,7 +53,33 @@ export function worstStatus(loops) {
   return worst;
 }
 
-/** 폼 → config 덮어쓰기 — 채운 칸만. 수치 목록 오류는 던진다 (호출측이 표시). */
+/** 요구 조정 칸의 정의 — 서버 config.criteria/targets 키와 1:1 (routes/design.py가
+ * 중첩 덮어쓰기를 이미 받는다). 라벨만 여기 있고 기본 수치는 없다 — placeholder는
+ * /design/defaults가 채운다. */
+export const CRITERIA_FIELDS = [
+  ["pm_min_deg", "PM 합격선 [°]"],
+  ["gm_min_db", "GM 합격선 [dB]"],
+  ["pm_bad_deg", "PM 심각선 [°]"],
+  ["gm_good_db", "GM 목표선 [dB]"],
+  ["zeta_min", "ζ 합격선"],
+  ["zeta_good", "ζ 목표선"],
+  ["lam_min_frac", "λ 합격 비율"],
+  ["lam_good_frac", "λ 목표 비율"],
+  ["lam_part_min", "λ 참여도 하한"],
+];
+
+export const TARGET_FIELDS = [
+  ["pm_deg", "튜닝 목표 PM [°]"],
+  ["gm_db", "튜닝 목표 GM [dB]"],
+  ["zeta_sp", "목표 ζ_sp"],
+  ["zeta_dr", "목표 ζ_dr"],
+  ["roll_lambda", "목표 λ_roll [rad/s]"],
+];
+
+/** 폼 → config 덮어쓰기 — 채운 칸만. 수치 목록 오류는 던진다 (호출측이 표시).
+ *
+ * criteria·targets는 **중첩 덮어쓰기**다 (서버 _build_config가 base와 병합한다) —
+ * 빈 dict를 보내면 안 되므로 채운 칸이 하나도 없으면 키 자체를 넣지 않는다. */
 export function buildConfig(form) {
   const out = {};
   if (form.mode) out.mode = form.mode;
@@ -48,6 +87,9 @@ export function buildConfig(form) {
     ["budgetPoints", "budget_points"],
     ["budgetIters", "budget_iters"],
     ["nMach", "n_mach"],
+    ["actuatorWn", "actuator_wn"],
+    ["actuatorZeta", "actuator_zeta"],
+    ["delayS", "delay_s"],
   ];
   for (const [from, to] of nums) {
     const raw = String(form[from] ?? "").trim();
@@ -60,6 +102,17 @@ export function buildConfig(form) {
     const raw = String(form[from] ?? "").trim();
     if (!raw) continue;
     out[to] = parseNumberList(raw);
+  }
+  for (const key of ["criteria", "targets"]) {
+    const nested = {};
+    for (const [k, raw0] of Object.entries(form[key] ?? {})) {
+      const raw = String(raw0 ?? "").trim();
+      if (!raw) continue;
+      const v = Number(raw);
+      if (!Number.isFinite(v)) throw new Error(`${key}.${k}: 수치가 아님 — ${raw}`);
+      nested[k] = v;
+    }
+    if (Object.keys(nested).length) out[key] = nested;
   }
   return out;
 }
@@ -135,6 +188,161 @@ export function verdictLegend(criteria) {
   ];
 }
 
+// ── 종료 상태 ──────────────────────────────────────────────────────────
+
+/** 종료 상태 6종 + running의 뜻과 **다음에 할 일**.
+ *
+ * 영어 토큰만 찍으면 화면이 상태를 말하되 뜻을 말하지 않는다 — 특히
+ * nothing_verified는 "실패 0"으로 보여 통과로 오독되는 상태다. */
+export const STATUS_TEXT = {
+  converged: "수렴 — 판정한 자리가 모두 합격선을 넘었다. 게인을 확정하고 게인·시뮬·"
+    + "마진·Autocode 순으로 확인할 것.",
+  escalated: "남은 실패가 전부 상위 설계 변경 대상이다 — 게인·격자로는 풀리지 않는다. "
+    + "작동기 대역폭·지연 예산 같은 상위 설계를 먼저 정하고 다시 돌릴 것.",
+  budget_exhausted: "이터레이션 예산을 다 썼다 — 남은 처방이 있으나 반영하지 못했다. "
+    + "이터 상한을 올려 새로 돌릴 것 (이 결과는 재개할 수 없다).",
+  awaiting_approval: "처방 카드를 기다리는 중이다 — 승인한 처방만 반영해 그 자리에서 "
+    + "이어 돈다. 승인 없이 두면 이 상태로 남는다.",
+  nothing_verified: "실패가 없는 게 아니라 볼 것이 없었다 — 트림 전량 미수렴이거나 격자가 "
+    + "비었다. 게인을 확정하면 안 된다.",
+  cancelled: "사용자 취소로 스테이지 도중에 멈췄다 — 트림·선형모델·튜닝 결과는 남아 있어 "
+    + "남은 스테이지부터 이어서 돌 수 있다.",
+  running: "아직 도는 중이다 — 종료 상태가 아니므로 이 결과로 판단하지 말 것.",
+};
+
+export function statusText(status) {
+  return STATUS_TEXT[status]
+    ?? `알 수 없는 상태 (${status ?? "없음"}) — 엔진과 화면의 상태 어휘가 어긋났다.`;
+}
+
+/** 상태 칩 색 — 종료 상태를 3갈래로. converged만 ok, 사람 손을 기다리는 것은 warn,
+ * 나머지(미검증·예산 소진·에스컬레이션·취소)는 통과가 아니므로 fail 쪽에 둔다. */
+export function statusSeverity(status) {
+  if (status === "converged") return "ok";
+  if (status === "awaiting_approval" || status === "running") return "warn";
+  if (status === "nothing_verified" || status === "escalated"
+      || status === "budget_exhausted") return "fail";
+  return "na";
+}
+
+/** 재개 가능 판정 — 서버 계약 그대로 (routes/design.py: awaiting_approval·cancelled만).
+ *
+ * 종전 화면은 처방 카드가 하나라도 있으면 "승인 반영 재개" 버튼을 그렸다.
+ * budget_exhausted는 카드가 남은 채로 끝나는 상태라 버튼이 늘 떴고, 누르면 409다. */
+export const RESUMABLE_STATUS = ["awaiting_approval", "cancelled"];
+
+export function resumable(report) {
+  return RESUMABLE_STATUS.includes(report?.status);
+}
+
+/** 재개 불가 사유 한 줄 — 재개 가능하면 null. 버튼 자리를 빈칸으로 두지 않는다. */
+export function resumeBlockedText(report) {
+  if (resumable(report)) return null;
+  const s = report?.status;
+  const why = {
+    budget_exhausted: "이터 예산을 다 써 세션이 종료됐다 — 남은 처방이 있어도 재개할 수 "
+      + "없다(서버가 409로 거절한다). 이터 상한을 올려 새로 돌릴 것.",
+    escalated: "남은 실패가 전부 상위 설계 변경 대상이라 세션이 종료됐다 — 승인해 "
+      + "반영할 처방이 없다. 작동기·지연 예산을 바꾼 뒤 새로 돌릴 것.",
+    converged: "이미 수렴해 종료된 세션이다 — 재개할 것이 없다.",
+    nothing_verified: "판정된 자리가 하나도 없어 종료됐다 — 재개가 아니라 격자·트림을 "
+      + "고쳐 새로 돌려야 한다.",
+    running: "아직 실행 중이다 — 끝난 뒤에 재개 여부가 정해진다.",
+  };
+  return why[s] ?? `재개할 수 없는 상태다 (${s ?? "없음"}) — 승인 대기·취소만 재개 가능.`;
+}
+
+/** 게인 확정 가능 판정 — **판정이 난 자리가 하나라도 있어야** 한다.
+ *
+ * failures가 0이라는 것만으로는 통과의 근거가 못 된다: 트림 전량 미수렴·빈 격자·
+ * 엔벨로프 밖 격자는 실패 목록도 비어 있다(engine judged_count 머리말). 그 실행의
+ * 게인을 확정할 수 있으면 **아무것도 검증하지 않은 게인이 정본이 된다.** */
+export function adoptable(report) {
+  return Number(report?.judged) > 0;
+}
+
+/** 확정 불가 사유 한 줄 — 확정 가능하면 null. */
+export function adoptBlockedText(report) {
+  if (adoptable(report)) return null;
+  if (report?.judged == null) {
+    return "이 결과에는 판정 수(judged)가 없다 — 그 필드가 생기기 전의 구형 결과다. "
+      + "무엇을 검증했는지 확인할 수 없으므로 확정하지 않는다. 다시 돌릴 것.";
+  }
+  return "판정이 난 (점, 자리)가 0이다 — 이 실행은 아무것도 검증하지 않았다. "
+    + "실패 0은 통과가 아니라 볼 것이 없었다는 뜻이므로 게인을 확정할 수 없다. "
+    + "트림 미수렴·빈 격자·엔벨로프 밖 격자를 먼저 확인할 것.";
+}
+
+/** report → 상태 줄 조각 [문자열] — 계산해 놓고 안 내던 수치를 담되 0은 생략한다.
+ *
+ * judged와 failures만은 0이어도 낸다: "실패 0 / 판정 0"이 곧 nothing_verified의
+ * 얼굴이라, 하나를 감추면 남은 하나가 통과처럼 읽힌다. */
+export function reportLine(report, nPointsFallback) {
+  const r = report ?? {};
+  const pts = r.points ?? {};
+  const parts = [
+    `스테이지 ${r.stage ?? "?"}`,
+    `이터레이션 ${r.iterations ?? 0}`,
+    `점 ${r.n_points ?? nPointsFallback ?? "?"} (앵커 ${pts.anchor ?? "?"} · `
+      + `bp ${pts.breakpoint ?? "?"} · 검증 ${pts.validation ?? "?"})`,
+    `판정 ${Number(r.judged) || 0}`,
+    `실패 ${Number(r.failures) || 0}`,
+  ];
+  const optional = [
+    ["outside_envelope", "엔벨로프 밖"],
+    ["tuned", "튜닝"],
+    ["escalations", "에스컬레이션"],
+    ["ineffective_actions", "무효 처방"],
+    ["sealed", "봉인"],
+    ["fit_tighten", "적합 조이기"],
+  ];
+  for (const [key, label] of optional) {
+    const v = Number(r[key]) || 0;
+    if (v) parts.push(`${label} ${v}`);
+  }
+  const skipped = r.skipped ?? [];
+  if (skipped.length) {
+    // 이름을 다 늘어놓으면 줄이 넘친다 — 앞 셋만 보이고 나머지는 수로 말한다
+    const head = skipped.slice(0, 3).join(", ");
+    parts.push(`튜닝 건너뜀 ${skipped.length} (${head}`
+      + (skipped.length > 3 ? ` 외 ${skipped.length - 3}` : "") + ")");
+  }
+  if (r.criteria_fingerprint) {
+    parts.push(`기준 지문 ${String(r.criteria_fingerprint).slice(0, 8)}`);
+  }
+  return parts;
+}
+
+// ── 사유 코드 ──────────────────────────────────────────────────────────
+
+/** 튜닝 포기 사유 코드 → 한국어 [폴백].
+ *
+ * 정본은 서버 /design/defaults의 reason_text(← 엔진 tune.REASON_TEXT)다 —
+ * 여기 문구는 그 응답에 코드가 없을 때만 쓴다. */
+export const REASON_TEXT = {
+  ok: "설계 목표 달성",
+  zero_design: "설계 게인이 0이라 방향 정보가 없다 — 이 자리를 쓸 것이면 설계값을 먼저 정한다",
+  target_unreached: "게인을 아무리 키워도 목표 지표가 안 나온다 — 플랜트 한계다."
+    + " 목표를 낮추거나 이 조건을 설계 범위에서 뺀다",
+  capped: "작동기·지연 포함 폐루프 안정 경계가 목표 전에 묶는다 —"
+    + " 작동기 대역폭 예산을 늘리거나 목표를 낮춘다",
+  no_stable_gain: "어떤 게인으로도 이 댐퍼 루프가 안정하지 않아 0으로 두었다 —"
+    + " 플랜트·루프 구조를 검토한다",
+  bandwidth_collapse: "마진은 넘겼으나 교차 주파수가 하한 아래다 — 성능이 무너졌다."
+    + " 지연·작동기 예산을 늘리거나 대역폭 하한을 낮춘다",
+  margin_floor: "대역폭을 바닥까지 버려도 PM/GM 목표에 못 미친다 — 지연·작동기 예산이 병목이다",
+  degenerate: "이 자리의 기저 루프 응답이 무의미하다 — 입출력·플랜트를 확인한다",
+  rescued: "백오프 해가 대역폭 하한 아래여서 마무리로 되찾았다 (통과)",
+};
+
+/** 사유 코드 → "코드 — 뜻". 서버 맵이 우선, 없으면 폴백, 그것도 없으면 코드 그대로.
+ * 모르는 코드를 삼키면 새 사유가 생겼을 때 화면이 조용해진다. */
+export function reasonText(code, reasonMap) {
+  if (!code) return null;
+  const t = reasonMap?.[code] ?? REASON_TEXT[code];
+  return t ? `${code} — ${t}` : String(code);
+}
+
 /** 처방 카드 그룹 — {approvable, escalations}. supersede는 양쪽 다 제외
  * (같은 점 상위 승격에 흡수됨 — 엔진 promote 래칫과 정합). */
 export function actionCards(result) {
@@ -161,5 +369,187 @@ export function adoptStorePayload(result) {
     tables: off ? null : tables,
     scheduleOff: off,
     constants: { ...(result?.gain_export?.constants ?? {}) },
+  };
+}
+
+// ── 처방 카드 근거 ─────────────────────────────────────────────────────
+
+/** 지표 키 → 표시 이름·단위 — 엔진 classify._LABEL과 같은 대응. */
+const METRIC = {
+  pm_deg: ["PM", "°"],
+  gm_db: ["GM", " dB"],
+  zeta: ["ζ", ""],
+  zeta_sp: ["ζ_sp", ""],
+  zeta_dr: ["ζ_dr", ""],
+  roll_lambda: ["λ", " rad/s"],
+};
+
+const TUNED_STATUS_TEXT = {
+  ok: "가능 (자유 게인으로 이 자리를 맞출 수 있다)",
+  infeasible: "불가 (자유 게인으로도 설계 목표에 못 간다)",
+  na: "해당 없음",
+};
+
+/** evidence.shortfall → 지표별 한 줄 [{key, kind, text}] — **요구선·달성·부족을 함께**.
+ *
+ * 종전 화면은 "현재 PM 38.2°"만 말했다. 요구선(45°)도 부족(6.8°)도 없으면 그 수치가
+ * 합격인지 미달인지, 얼마나 모자란지를 화면만 보고는 알 수 없다 — 처방 카드에서
+ * 가장 먼저 알아야 할 것이 그 둘이다.
+ *
+ * deficit는 양수가 부족·음수가 여유·null이 판정 불가(교차 없음)다. 정렬은 요구선
+ * 대비 비율의 내림차순이고 판정 불가를 맨 앞에 둔다 — 엔진 severity와 같은 규약
+ * ("얼마나 나쁜지 모른다"가 목록 맨 앞). */
+export function shortfallLines(shortfall) {
+  const rows = [];
+  for (const [key, rec] of Object.entries(shortfall ?? {})) {
+    if (!rec) continue;
+    const [label, unit] = METRIC[key] ?? [key, ""];
+    const req = `요구 ${num(rec.required)}${unit}`;
+    if (rec.deficit == null) {
+      rows.push({ key, kind: "na", rank: Infinity,
+        text: `${label} ${req} · 달성 판정 불가 (교차 없음 — 통과가 아니다)` });
+      continue;
+    }
+    const short = rec.deficit > 0;
+    const frac = rec.deficit_frac;
+    const pct = frac == null ? "" : ` (요구선 대비 ${num(100 * Math.abs(frac), 3)}%)`;
+    rows.push({
+      key,
+      kind: short ? "short" : "spare",
+      rank: frac ?? 0,
+      text: `${label} ${req} · 달성 ${num(rec.achieved)}${unit} · `
+        + `${short ? "부족" : "여유"} ${num(Math.abs(rec.deficit))}${unit}${pct}`,
+    });
+  }
+  rows.sort((a, b) => b.rank - a.rank);
+  return rows.map(({ key, kind, text }) => ({ key, kind, text }));
+}
+
+/** 달성 지표 dict → 한 줄 ("PM 46.1° · GM 8.2 dB"). 빈 dict는 null. */
+function achievedText(ach) {
+  const parts = [];
+  for (const [key, v] of Object.entries(ach ?? {})) {
+    const [label, unit] = METRIC[key] ?? [key, ""];
+    parts.push(`${label} ${num(v)}${unit}`);
+  }
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/** evidence.tuned → 줄 목록 — 자유 게인으로 그 자리를 맞출 수 있었나와 그 사유.
+ *
+ * 이 판정이 structural_limit(에스컬레이션)의 근거다. 자리 단위 status를 내고,
+ * 점 단위(point_status)가 다를 때만 참고로 덧붙인다 — 둘을 뭉치면 실행 가능한
+ * 처방이 적용 버튼 없는 에스컬레이션처럼 읽힌다. */
+export function tunedLines(tuned, reasonMap) {
+  if (!tuned) return [];
+  const out = [];
+  const head = [`자유 게인 튜닝 ${TUNED_STATUS_TEXT[tuned.status] ?? tuned.status ?? "?"}`];
+  const r = reasonText(tuned.reason, reasonMap);
+  if (r) head.push(`사유 ${r}`);
+  out.push(head.join(" · "));
+  const detail = [];
+  if (tuned.judged) detail.push(`그 자리 판정 ${tuned.judged}`);
+  if (tuned.target != null) detail.push(`목표 ${num(tuned.target)}`);
+  const ach = achievedText(tuned.achieved);
+  if (ach) detail.push(`달성 ${ach}`);
+  if (tuned.point_status && tuned.point_status !== tuned.status) {
+    detail.push(`점 단위 ${tuned.point_status} (참고 — 판정에는 안 쓴다)`);
+  }
+  if (detail.length) out.push(detail.join(" · "));
+  for (const note of tuned.notes ?? []) out.push(`튜너 메모: ${note}`);
+  return out;
+}
+
+/** 처방 전후 판정 스냅샷 한 줄 — 채점 전이면 그 사실을 적는다.
+ *
+ * **반영했는데 안 바뀐 처방**을 드러내는 것이 목적이다. "applied"만 찍고 결과를
+ * 안 보면 무효 처방이 이터 예산을 태우는 것을 아무도 모른다 (엔진 _score_applied_actions). */
+export function effectText(effect) {
+  if (!effect) return null;
+  const snap = (s) => (s == null ? "없음"
+    : `${s.status ?? "?"}${s.severity == null ? "" : ` (심각도 ${num(s.severity)})`}`);
+  if (!("changed" in effect)) {
+    return `반영됨 — 효과는 다음 검증에서 잰다 (반영 전 ${snap(effect.before)})`;
+  }
+  if (effect.changed) {
+    return `반영 효과 ${snap(effect.before)} → ${snap(effect.after)}`;
+  }
+  return `반영했으나 판정이 그대로다 ${snap(effect.before)} → ${snap(effect.after)}`
+    + " — 이 처방은 이 자리에서 듣지 않았다";
+}
+
+/** 완화 프로브 한 줄 — 무엇을 얼마에서 얼마로 바꿨더니 통과했는지까지 낸다.
+ *
+ * label과 통과 여부만 그리면 "작동기 대역폭 ×3"이 30에서 90인지 10에서 30인지
+ * 알 수 없어, 예산을 얼마로 잡아야 하는지가 화면에서 안 나온다. */
+export function reliefLines(relief, reasonMap) {
+  return (relief ?? []).map((p) => {
+    const move = p.from == null && p.to == null
+      ? "" : ` (${p.change ?? "?"} ${num(p.from)} → ${num(p.to)})`;
+    const why = p.resolves ? null : reasonText(p.reason, reasonMap);
+    return {
+      resolves: Boolean(p.resolves),
+      text: `${p.label ?? p.change ?? "?"}${move} → ${p.resolves ? "통과" : "여전히 미달"}`
+        + (why ? ` · 사유 ${why}` : ""),
+    };
+  });
+}
+
+/** 처방 카드 하나 → 표시용 줄 묶음. DOM은 뷰가 만든다.
+ *
+ * {head} 인라인 수치 · {shortfall} 요구 대비 부족 · {tuned} 자유 게인 결과 ·
+ * {relief} 완화 프로브 · {effect} 반영 효과 · {notes} 강조 문장 · {flags} 봉인·건너뜀.
+ * 카드에 실려 오는데 화면에 안 나오던 것들이 여기서 전부 줄이 된다. */
+export function evidenceLines(a, reasonMap) {
+  const ev = a?.evidence ?? {};
+  const cur = ev.current ?? {};
+  const head = [];
+  // 부호 뒤집힘은 **가장 먼저** 말해야 한다 — 마진 수치는 방향 보정 후 값이라
+  // PM 116°처럼 건강해 보이고, 그러면 왜 fail인지 화면만 봐서는 알 수 없다
+  if (ev.sign_flip) {
+    const slots = (ev.sign_flip.slots ?? []).join(", ");
+    head.push(`부호 반대: ${slots} (설계와 반대 방향 — 양의 되먹임)`);
+  }
+  if (cur.pm_deg != null) head.push(`현재 PM ${num(cur.pm_deg)}° / GM ${num(cur.gm_db)} dB`);
+  if (cur.zeta != null) head.push(`현재 ζ ${num(cur.zeta)}`);
+  if (cur.roll_lambda != null) head.push(`현재 λ ${num(cur.roll_lambda)} rad/s`);
+  if (a?.severity != null) {
+    head.push(`심각도 ${num(a.severity)} (요구선 대비 부족 비율 — 클수록 심각)`);
+  }
+  if (ev.interp_gap?.max != null) {
+    head.push(`보간 괴리 ${num(100 * ev.interp_gap.max, 3)}% `
+      + `(허용 ${num(100 * (ev.interp_gap.tol ?? 0), 2)}%)`);
+  }
+  if (ev.plant?.d_total != null) {
+    head.push(`플랜트 거리 ${num(ev.plant.d_total)} (허용 ${num(ev.plant.tol)})`);
+  }
+  if (ev.bottleneck) {
+    head.push(`ωc/작동기 ${num(ev.bottleneck.wc_over_actuator)} · 지연 위상 `
+      + `${num(ev.bottleneck.delay_phase_deg_at_wc)}°`);
+  }
+
+  const notes = [];
+  // 에스컬레이션은 "무엇을 바꾸면 통과하는가"가 결론이다 — 흐린 회색 나열에 묻히면
+  // 사용자는 이 카드를 보고도 다음 행동을 정할 수 없다
+  if (ev.bottleneck?.note) notes.push(ev.bottleneck.note);
+  // 분류기 자신의 설명 — 왜 이 처방인지를 분류기가 이미 적어 놓았는데 버려져 있었다
+  if (a?.action?.note) notes.push(a.action.note);
+
+  const flags = [];
+  if (a?.sealed) flags.push(`봉인: ${a.sealed}`);
+  if (a?.skipped) flags.push(`건너뜀: ${a.skipped}`);
+
+  const effect = a?.effect
+    ? { text: effectText(a.effect), ineffective: a.effect.changed === false }
+    : null;
+
+  return {
+    head,
+    shortfall: shortfallLines(ev.shortfall),
+    tuned: tunedLines(ev.tuned, reasonMap),
+    relief: reliefLines(ev.bottleneck?.relief, reasonMap),
+    effect,
+    notes,
+    flags,
   };
 }

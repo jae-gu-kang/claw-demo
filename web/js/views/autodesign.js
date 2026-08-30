@@ -16,8 +16,9 @@ config 덮어쓰기로 보낸다. "게인 확정"은 결과의 호환 반출(재
 import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
-  VERDICT_LABEL, actionCards, adoptStorePayload, buildConfig, pointRows,
-  statusCounts, trimLabel, verdictLegend,
+  CRITERIA_FIELDS, TARGET_FIELDS, VERDICT_LABEL, actionCards, adoptBlockedText,
+  adoptStorePayload, buildConfig, evidenceLines, pointRows, reportLine, resumable,
+  resumeBlockedText, statusCounts, statusSeverity, statusText, trimLabel, verdictLegend,
 } from "../lib/autodesign.js";
 import { slotIndex, withConstant } from "../lib/gainsync.js";
 import { store } from "../store.js";
@@ -29,6 +30,9 @@ const ROLE_LABEL = { anchor: "앵커(트림·선형화)", breakpoint: "게인 br
 // 탭 이탈·재진입에도 실행 중 잡·최근 결과를 잃지 않는다 (progress.js 재부착 규약)
 let runningJobId = null;
 let lastResultId = null;
+// /design/defaults 응답 전체 — 폼 placeholder와 사유 코드 사전(reason_text)의 출처.
+// 사전은 서버가 정본이고 웹 폴백은 lib/autodesign.REASON_TEXT다
+let designDefaults = null;
 
 export function render() {
   const errBox = el("div");
@@ -46,19 +50,35 @@ export function render() {
     nMach: el("input", { size: 3, placeholder: "5" }),
     altsText: el("input", { size: 16, placeholder: "0 1000 3000 5000" }),
     fuelsText: el("input", { size: 12, placeholder: "40 200 400" }),
+    actuatorWn: el("input", { size: 5 }),
+    actuatorZeta: el("input", { size: 5 }),
+    delayS: el("input", { size: 6 }),
+    // 중첩 덮어쓰기 칸 — 채운 것만 config.criteria / config.targets로 나간다
+    criteria: Object.fromEntries(CRITERIA_FIELDS.map(([k]) => [k, el("input", { size: 5 })])),
+    targets: Object.fromEntries(TARGET_FIELDS.map(([k]) => [k, el("input", { size: 5 })])),
   };
 
   const loadDefaults = async () => {
     try {
       const d = await api.get("/design/defaults");
+      designDefaults = d;
       const c = d.config;
       form.mode.value = c.mode;
+      // 기본값은 placeholder로만 — 값으로 채우면 사용자가 안 건드린 칸까지 덮어쓰기로
+      // 나가고, 서버 기본값이 바뀌어도 화면이 옛 수치를 계속 보낸다
+      const ph = (input, v) => { if (v != null) input.placeholder = String(v); };
+      for (const [k] of CRITERIA_FIELDS) ph(form.criteria[k], c.criteria?.[k]);
+      for (const [k] of TARGET_FIELDS) ph(form.targets[k], c.targets?.[k]);
+      ph(form.actuatorWn, c.actuator_wn);
+      ph(form.actuatorZeta, c.actuator_zeta);
+      ph(form.delayS, c.delay_s);
       defaultsBox.textContent =
         `합격기준 PM ≥ ${c.criteria.pm_min_deg}° · GM ≥ ${c.criteria.gm_min_db} dB · `
         + `ζ ≥ ${c.criteria.zeta_min} — 설계 목표 PM ${c.targets.pm_deg}° / GM `
         + `${c.targets.gm_db} dB · ζsp ${c.targets.zeta_sp} (정본: 엔진 AutoDesignConfig)`;
     } catch (e) {
-      defaultsBox.textContent = `기본값 조회 실패: ${errorText(e)}`;
+      defaultsBox.textContent = `기본값 조회 실패: ${errorText(e)}`
+        + " — 아래 [요구 조정] 칸은 기본값을 못 보여 주고, 사유 코드는 웹 폴백 문구로 뜬다.";
     }
   };
 
@@ -89,6 +109,8 @@ export function render() {
   const start = async () => {
     try {
       clear(errBox);
+      const values = (inputs) =>
+        Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value]));
       const config = buildConfig({
         mode: form.mode.value,
         budgetPoints: form.budgetPoints.value,
@@ -96,6 +118,11 @@ export function render() {
         nMach: form.nMach.value,
         altsText: form.altsText.value,
         fuelsText: form.fuelsText.value,
+        actuatorWn: form.actuatorWn.value,
+        actuatorZeta: form.actuatorZeta.value,
+        delayS: form.delayS.value,
+        criteria: values(form.criteria),
+        targets: values(form.targets),
       });
       const job = await api.post("/design/auto", { config });
       runningJobId = job.id;
@@ -126,6 +153,31 @@ export function render() {
     } catch { /* 목록 실패는 시작 흐름을 막지 않는다 */ }
   };
 
+  const fieldRow = (fields, inputs) => el("div", { class: "form-row" },
+    fields.map(([k, label]) => el("label", {}, `${label} `, inputs[k])));
+
+  // 서버는 이 중첩 덮어쓰기를 이미 받는다(routes/design.py _build_config) — 화면만
+  // 안 내주고 있었다. 접어 두는 이유는 기본값이 정본이고 조정이 예외이기 때문이다
+  const tuningBox = el("details", {},
+    el("summary", { class: "hint" },
+      "요구 조정 — 합격기준·튜닝 목표·작동기·지연 (비우면 서버 기본값)"),
+    el("p", { class: "hint" },
+      "채운 칸만 config 덮어쓰기로 나간다. 회색 수치가 서버 기본값이다. "
+      + "튜닝 목표가 합격선보다 낮으면 서버가 422로 거절한다 — 튜닝이 성공한 점이 "
+      + "곧바로 fail로 찍히기 때문이다(PM은 목표 ≥ 합격선, GM은 목표 ≥ 목표선). "
+      + "여기서 바꾼 합격기준은 결과에 동봉되어 마진 탭 색과 판정어 설명에도 그대로 쓰인다."),
+    el("p", { class: "hint" }, "합격기준 (판정선)"),
+    fieldRow(CRITERIA_FIELDS, form.criteria),
+    el("p", { class: "hint" }, "튜닝 목표 (설계선)"),
+    fieldRow(TARGET_FIELDS, form.targets),
+    el("p", { class: "hint" }, "작동기·지연 예산 (마진의 병목이 되는 상위 설계값)"),
+    el("div", { class: "form-row" },
+      el("label", {}, "작동기 wn [rad/s] ", form.actuatorWn),
+      el("label", {}, " 작동기 ζ ", form.actuatorZeta),
+      el("label", {}, " 총 지연 [s] ", form.delayS),
+    ),
+  );
+
   const listBox = el("span");
   const root = el("div",
     {},
@@ -145,6 +197,7 @@ export function render() {
       el("button", { onclick: start }, "자동 설계 시작"),
       " ", listBox,
     ),
+    tuningBox,
     errBox, progressBox, resultBox,
   );
 
@@ -217,11 +270,17 @@ function renderResult(box, body, resultId, ctx) {
   );
 
   const approveBoxes = new Map();
-  const cardEl = (a) => el("div", { class: "card" },
+  // canApprove=false는 카드는 보이되 승인할 수 없는 자리다 (재개 불가 상태·에스컬레이션)
+  // — 체크박스를 그리면 누를 수 있는 것처럼 보이고 재개는 서버가 409로 막는다
+  const cardEl = (a, canApprove = true) => el("div", { class: "card" },
     el("label", {},
-      a.action.type === "escalate" ? null
+      !canApprove || a.action.type === "escalate" ? null
         : (() => {
-          const cb = el("input", { type: "checkbox", checked: true });
+          // 봉인·건너뜀 처방은 기본 해제 — 엔진 apply_actions는 승인만 하면 봉인된
+          // 것도 그대로 반영한다(그리고 다시 봉인된다). 기본 체크로 두면 무효인 줄
+          // 아는 처방에 이터 예산이 나간다. 끄기만 하고 막지는 않는다
+          const dead = Boolean(a.sealed || a.skipped);
+          const cb = el("input", { type: "checkbox", checked: !dead });
           approveBoxes.set(a.id, cb);
           return cb;
         })(),
@@ -313,23 +372,30 @@ function renderResult(box, body, resultId, ctx) {
   const sections = [
     el("h3", {}, `결과 ${resultId}`),
     el("p", {},
-      "상태 ", sevChip(report.status === "converged" ? "ok"
-        : report.status === "awaiting_approval" ? "warn" : "na"),
-      ` ${report.status ?? "?"} · 스테이지 ${report.stage ?? "?"} · 이터레이션 `
-      + `${report.iterations ?? 0} · 점 ${report.n_points ?? rows.length} `
-      + `(앵커 ${report.points?.anchor ?? "?"} · bp ${report.points?.breakpoint ?? "?"} `
-      + `· 검증 ${report.points?.validation ?? "?"}) · 실패 ${report.failures ?? 0}`),
+      "상태 ", sevChip(statusSeverity(report.status)), ` ${report.status ?? "?"} · `,
+      // 계산해 놓고 안 내던 수치들 — 특히 판정 수가 없으면 "실패 0"의 뜻이 갈리지 않는다
+      reportLine(report, rows.length).join(" · ")),
+    // 영어 토큰만 찍으면 상태를 말하되 뜻과 다음 행동을 말하지 않는다
+    el("p", { class: "hint" }, statusText(report.status)),
     el("h4", {}, "운영점"),
     countsLine(rows),
     pointsTable,
     legendBox(body.margin_out?.criteria),
   ];
 
-  if (cards.approvable.length) {
+  if (cards.approvable.length && resumable(report)) {
     sections.push(
       el("h4", {}, "처방 카드 (승인 후 재개)"),
-      ...cards.approvable.map(cardEl),
+      ...cards.approvable.map((a) => cardEl(a)),
       el("button", { onclick: resume }, "승인 반영 재개"),
+    );
+  } else if (cards.approvable.length) {
+    // 처방은 남았으나 서버가 재개를 거절하는 상태다(budget_exhausted 등). 종전에는
+    // 카드 수만 보고 버튼을 그려, 누르면 409만 돌아오는 죽은 버튼이 떴다
+    sections.push(
+      el("h4", {}, "남은 처방 — 반영되지 않았다 (재개 불가)"),
+      ...cards.approvable.map((a) => cardEl(a, false)),
+      el("p", {}, el("strong", {}, resumeBlockedText(report))),
     );
   } else if (report.status === "cancelled") {
     // 취소된 세션은 승인할 처방이 없다 — 그렇다고 막다른 길이면 안 된다.
@@ -346,7 +412,7 @@ function renderResult(box, body, resultId, ctx) {
   if (cards.escalations.length) {
     sections.push(
       el("h4", {}, "에스컬레이션 — 상위 설계 변경 검토 (자동 적용 없음)"),
-      ...cards.escalations.map(cardEl),
+      ...cards.escalations.map((a) => cardEl(a)),
     );
   }
   if (body.gain_export && (Object.keys(body.gain_export.tables_resampled ?? {}).length
@@ -371,47 +437,57 @@ function renderResult(box, body, resultId, ctx) {
         + "미달인 채로 굳는다. 처방 카드를 승인해 재개하거나, 에스컬레이션이면 "
         + "작동기·지연 예산 같은 상위 설계를 먼저 정한 뒤 다시 돌릴 것.")));
     }
-    sections.push(
-      el("button", { onclick: () => adopt().catch((e) =>
-        clear(adoptMsg).append(el("span", { class: "error-box" }, errorText(e)))) },
-        "게인 확정 (스토어 주입)"), adoptMsg,
-    );
+    // 실패 0은 통과의 근거가 못 된다 — 판정 수가 0이면 볼 것이 없었던 실행이고,
+    // 그 게인을 확정하면 **아무것도 검증하지 않은 게인이 정본이 된다**
+    const adoptBlocked = adoptBlockedText(report);
+    if (adoptBlocked) {
+      sections.push(el("p", {}, el("strong", {}, adoptBlocked)));
+    } else {
+      sections.push(
+        el("button", { onclick: () => adopt().catch((e) =>
+          clear(adoptMsg).append(el("span", { class: "error-box" }, errorText(e)))) },
+          "게인 확정 (스토어 주입)"), adoptMsg,
+      );
+    }
   }
   clear(box).append(...sections);
 }
 
+/** 처방 카드의 근거 — 수치 계층은 lib/autodesign.evidenceLines, 여기는 배치만.
+ *
+ * 종전에는 카드에 실려 온 것의 절반이 버려졌다: 요구선·부족량(shortfall), 심각도,
+ * 자유 게인 결과와 그 사유, 반영 효과, 봉인·건너뜀 사유, 완화 프로브의 from/to.
+ * 그래서 화면은 "현재 PM 38.2°"만 말하고 그게 얼마나 모자란지를 말하지 못했다. */
 function evidenceLine(a) {
-  const ev = a.evidence ?? {};
-  const bits = [];
-  const cur = ev.current ?? {};
-  // 부호 뒤집힘은 **가장 먼저** 말해야 한다 — 마진 수치는 방향 보정 후 값이라
-  // PM 116°처럼 건강해 보이고, 그러면 왜 fail인지 화면만 봐서는 알 수 없다
-  if (ev.sign_flip) {
-    const slots = (ev.sign_flip.slots ?? []).join(", ");
-    bits.push(`부호 반대: ${slots} (설계와 반대 방향 — 양의 되먹임)`);
+  const reasonMap = designDefaults?.reason_text;
+  const ev = evidenceLines(a, reasonMap);
+  const lines = [];
+  if (ev.head.length) lines.push(el("div", { class: "hint" }, ev.head.join(" · ")));
+  // 요구 대비 부족이 이 카드에서 가장 먼저 읽어야 할 줄이다 — 흐린 회색에 묻히면
+  // 안 된다. 부족은 빨강, 여유는 초록, 판정 불가는 회색 (SEV_COLOR 규약 그대로)
+  for (const s of ev.shortfall) {
+    const color = s.kind === "short" ? SEV_COLOR.fail
+      : s.kind === "spare" ? SEV_COLOR.ok : SEV_COLOR.na;
+    lines.push(el("div", { style: `color:${color}` }, s.text));
   }
-  if (cur.pm_deg != null) bits.push(`현재 PM ${fmt(cur.pm_deg)}° / GM ${fmt(cur.gm_db)} dB`);
-  if (cur.zeta != null) bits.push(`현재 ζ ${fmt(cur.zeta)}`);
-  if (ev.interp_gap?.max != null) {
-    bits.push(`보간 괴리 ${fmt(100 * ev.interp_gap.max, 3)}% (허용 ${fmt(100 * (ev.interp_gap.tol ?? 0), 2)}%)`);
+  for (const t of ev.tuned) lines.push(el("div", { class: "hint" }, t));
+  // 완화 프로브가 에스컬레이션 카드의 실질이다 — ωc/작동기와 지연 위상은 둘 다 ωc에
+  // 비례해 같이 커지므로 어느 예산이 병목인지 알려 주지 못한다. 하나씩 풀어 본
+  // 결과를 수치(무엇을 얼마에서 얼마로)와 함께 보인다
+  for (const p of ev.relief) {
+    lines.push(el("div", { style: `color:${p.resolves ? SEV_COLOR.ok : SEV_COLOR.na}` }, p.text));
   }
-  if (ev.plant?.d_total != null) {
-    bits.push(`플랜트 거리 ${fmt(ev.plant.d_total)} (허용 ${fmt(ev.plant.tol)})`);
+  if (ev.effect) {
+    lines.push(ev.effect.ineffective
+      ? el("div", { style: `color:${SEV_COLOR.warn}` }, ev.effect.text)
+      : el("div", { class: "hint" }, ev.effect.text));
   }
-  if (ev.bottleneck) {
-    bits.push(`ωc/작동기 ${fmt(ev.bottleneck.wc_over_actuator)} · 지연 위상 `
-      + `${fmt(ev.bottleneck.delay_phase_deg_at_wc)}°`);
-    // 완화 프로브가 이 카드의 실질이다 — 위 두 수치는 둘 다 ωc에 비례해 같이 커지므로
-    // 어느 예산이 병목인지 알려 주지 못한다. 하나씩 풀어 본 결과를 그대로 보인다
-    for (const p of ev.bottleneck.relief ?? []) {
-      bits.push(`${p.label} → ${p.resolves ? "통과" : "여전히 미달"}`);
-    }
+  // "무엇을 바꾸면 통과하는가"가 결론이다 — 흐린 회색 나열에 묻히면 사용자는 이
+  // 카드를 보고도 다음 행동을 정할 수 없다
+  for (const n of ev.notes) {
+    lines.push(el("div", { class: "hint" }, el("strong", {}, n)));
   }
-  const lines = [el("div", { class: "hint" }, bits.join(" · ") || "—")];
-  // 에스컬레이션은 "무엇을 바꾸면 통과하는가"가 결론이다 — 흐린 회색 나열에 묻히면
-  // 사용자는 이 카드를 보고도 다음 행동을 정할 수 없다
-  if (ev.bottleneck?.note) {
-    lines.push(el("div", { class: "hint" }, el("strong", {}, ev.bottleneck.note)));
-  }
+  for (const f of ev.flags) lines.push(el("div", { style: `color:${SEV_COLOR.warn}` }, f));
+  if (!lines.length) lines.push(el("div", { class: "hint" }, "—"));
   return el("div", {}, ...lines);
 }
