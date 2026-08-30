@@ -111,7 +111,8 @@ export function verdictLegend(criteria) {
     { key: "fail", text: `합격선 미달 — PM < ${n(c.pm_min_deg, "°")} 또는 `
       + `GM < ${n(c.gm_min_db, " dB")} 또는 ζ < ${n(c.zeta_min, "")}, 혹은 게인 부호 뒤집힘. `
       + "처방 카드로 이어진다" },
-    { key: "na", text: "판정 불가 — 교차 없음(nan)이거나 트림 미수렴. **통과가 아니다**" },
+    // 문장은 그대로 텍스트 노드로 들어간다 — 마크다운 강조는 별표가 화면에 그대로 뜬다
+    { key: "na", text: "판정 불가 — 교차 없음(nan)이거나 트림 미수렴. 통과가 아니다" },
   ];
 }
 
