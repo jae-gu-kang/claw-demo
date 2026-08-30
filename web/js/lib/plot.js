@@ -43,7 +43,7 @@ export const FALLBACK_CRITERIA = Object.freeze({
   gm_good_db: 8, // 목표선
 });
 
-function threshold(criteria, key) {
+export function threshold(criteria, key) {
   const v = criteria?.[key];
   return typeof v === "number" && Number.isFinite(v) ? v : FALLBACK_CRITERIA[key];
 }

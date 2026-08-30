@@ -161,3 +161,28 @@ def test_roundtrip_and_fingerprint():
     assert c2 == c
     assert c.fingerprint() == c2.fingerprint()
     assert c.fingerprint() != MarginCriteria().fingerprint()
+
+
+def test_zero_requirement_does_not_divide():
+    """요구선 0은 서버 입력으로 **도달 가능한** 값이다 — 나누면 잡 스레드가 죽는다.
+
+    `config: {"criteria": {"gm_min_db": 0}}`가 라우트를 통과하던 동안, 첫 VERIFY의
+    `_worst_failures`가 실패마다 shortfall을 불러 ZeroDivisionError로 잡이 죽었다 —
+    "202를 받았는데 사유 없이 실패"하는 형태다. 이제 두 겹으로 막는다: 설정 시점의
+    양수 검사와, 그래도 0이 들어왔을 때 판정 불가로 흘리는 것.
+    """
+    with pytest.raises(ValueError):
+        MarginCriteria(gm_min_db=0.0)
+    with pytest.raises(ValueError):
+        MarginCriteria(pm_min_deg=0.0, pm_bad_deg=0.0)
+    # 생성자를 우회해 들어온 경우에도 나누지 않는다 — 검증은 __post_init__에만 있고
+    # 세션 역직렬화·직접 구성 같은 경로가 그것을 지나치지 않는다는 보장이 없다
+    bad = object.__new__(MarginCriteria)
+    object.__setattr__(bad, "pm_min_deg", 45.0)
+    object.__setattr__(bad, "gm_min_db", 0.0)
+    for f in ("pm_bad_deg", "gm_good_db", "zeta_min", "zeta_good",
+              "lam_min_frac", "lam_good_frac", "lam_part_min"):
+        object.__setattr__(bad, f, getattr(MarginCriteria(), f))
+    rec = bad.shortfall({"pm_deg": 50.0, "gm_db": 4.0})["gm_db"]
+    assert rec["deficit"] is None and rec["deficit_frac"] is None
+    assert bad.severity({"pm_deg": 50.0, "gm_db": 4.0}) == pytest.approx(-5.0 / 45.0)

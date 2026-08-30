@@ -485,3 +485,80 @@ test("buildConfig — 중첩 칸의 비수치는 어느 칸인지 밝히며 던�
   assert.throws(() => buildConfig({ targets: { gm_db: "abc" } }), /targets.gm_db/);
   assert.throws(() => buildConfig({ actuatorWn: "xx" }), /actuator_wn/);
 });
+
+test("shortfallLines — 비유한값은 문자열로 온다, 숫자로 다루면 최악이 초록이 된다", () => {
+  // 엔진은 nan(=null, 판정 불가)과 ±inf(=무한 여유/최악)를 **구별해서** 낸다.
+  // ±inf는 "inf"/"-inf" 문자열이다(serialize.py). 숫자로 다루면 `"inf" > 0`이
+  // false라 GM −∞(있을 수 있는 최악의 이득여유)가 "여유"로 초록칠되고,
+  // Math.abs("−inf")가 NaN이 되어 부족량과 정렬 키가 통째로 망가진다.
+  const spare = shortfallLines({
+    gm_db: { required: 6, achieved: "inf", deficit: "-inf", deficit_frac: null },
+  });
+  assert.equal(spare[0].kind, "spare");
+  assert.match(spare[0].text, /달성 ∞ dB · 여유 ∞ dB/);
+  assert.ok(!/NaN/.test(spare[0].text));
+
+  const worst = shortfallLines({
+    gm_db: { required: 6, achieved: "-inf", deficit: "inf", deficit_frac: null },
+  });
+  assert.equal(worst[0].kind, "short", "GM −∞를 여유로 칠했다");
+  assert.match(worst[0].text, /부족 ∞ dB/);
+  assert.ok(!/NaN/.test(worst[0].text));
+
+  // 무한 부족이 유한한 부족보다 앞에 선다 (정렬 키가 NaN이 되면 순서가 무너진다)
+  const mixed = shortfallLines({
+    pm_deg: { required: 45, achieved: 40, deficit: 5, deficit_frac: 0.111 },
+    gm_db: { required: 6, achieved: "-inf", deficit: "inf", deficit_frac: null },
+  });
+  assert.deepEqual(mixed.map((r) => r.key), ["gm_db", "pm_deg"]);
+});
+
+test("tunedLines — 달성 줄은 아는 지표만 적는다 (엔진 레코드는 메타를 함께 싣는다)", () => {
+  // 엔진의 achieved는 지표만 담은 dict가 아니다. 전부 훑으면 한 줄이
+  // "PM 38.2° · GM 7.10 dB · wcg 4.21 · wcp 2.13 · orientation 1 · wc_att 1.22 ·
+  //  wc0 2.44 · wc_fallback false · target_pm_deg 50 · … · reason margin_floor"
+  // 이 되고, 사유 코드는 바로 위에서 한국어로 푼 것을 원문으로 한 번 더 찍는다.
+  const real = {  // tune._tune_att이 실제로 만드는 모양
+    status: "infeasible", reason: "margin_floor", judged: "fail",
+    achieved: {
+      pm_deg: 38.2, gm_db: 7.1, wcg: 4.21, wcp: 2.13, orientation: 1,
+      wc_att: 1.22, wc0: 2.44, wc_fallback: false,
+      target_pm_deg: 50, target_gm_db: 8, target_wc_frac: 0.2, reason: "margin_floor",
+    },
+  };
+  const line = tunedLines(real, {}).join(" / ");
+  assert.match(line, /달성 PM 38\.2° · GM 7\.10 dB$/);
+  for (const noise of ["orientation", "wc_fallback", "target_pm_deg", "wcg"]) {
+    assert.ok(!line.includes(noise), `메타 ${noise}가 달성 줄에 샜다`);
+  }
+  // 레이트 자리도 같은 문제 — participation·bracket_growth 등이 섞이면 안 된다
+  const rate = tunedLines({
+    status: "infeasible", reason: "target_unreached", judged: "warn",
+    achieved: {
+      kind: "bandwidth", roll_lambda: 8.65, target: 12, wc: 15.7, capped: null,
+      reached: false, bracket_growth: 3, unstable: false, participation: 0.93,
+    },
+  }, {}).join(" / ");
+  assert.match(rate, /λ 8\.65 rad\/s/);
+  for (const noise of ["bracket_growth", "participation", "capped"]) {
+    assert.ok(!rate.includes(noise), `메타 ${noise}가 달성 줄에 샜다`);
+  }
+});
+
+test("reliefLines — 통과한 축은 **임계값**을 말한다 (×3이 아니라 ≥47 rad/s)", () => {
+  // "작동기 대역폭 ×3이면 통과"는 무엇을 주문해야 하는지 알려 주지 않는다.
+  // 엔진이 이분으로 최소 완화량을 실측하므로 화면은 그 수치를 그대로 낸다 —
+  // docs §7 "작동기 대역폭 요구 사양 미도출"이 요구하던 답이다.
+  const [ok, no] = reliefLines([
+    { change: "actuator_wn", label: "작동기 대역폭 ×3", from: 18, to: 54,
+      resolves: true,
+      threshold: { name: "min_actuator_wn", value: 20.39, unit: "rad/s",
+                   text: "작동기 대역폭 ≥ 20.4 rad/s면 통과 (현재 18)" } },
+    { change: "delay_s", label: "지연 제거", from: 0.035, to: 0, resolves: false,
+      reason: "margin_floor" },
+  ], {});
+  assert.equal(ok.threshold, "작동기 대역폭 ≥ 20.4 rad/s면 통과 (현재 18)");
+  assert.match(ok.text, /통과 · 작동기 대역폭 ≥ 20\.4 rad\/s면 통과 \(현재 18\)/);
+  assert.equal(no.threshold, null, "미달 축에 임계값을 지어내면 안 된다");
+  assert.match(no.text, /여전히 미달 · 사유 /);
+});

@@ -287,31 +287,63 @@ def low_mach():
     return design, linearize(ac, tr)
 
 
-def test_bracket_widens_until_the_plant_is_the_limit(low_mach):
-    """"브래킷이 좁다"와 "플랜트가 못 한다"를 가른다 — 한 점에서 둘 다 나온다.
+def test_bracket_widens_when_the_target_is_reachable(low_mach):
+    """초기 브래킷은 **손튜닝이 얼마나 맞았나**에 달린 값이지 플랜트의 한계가 아니다.
 
-    초기 상한 4×|손설계 게인|은 **그 기체의 손튜닝이 얼마나 맞았나**에 달린 값이지
-    플랜트가 낼 수 있는 한계가 아니다. 넓히지 않으면 둘 다 "목표 미달"로만 보고되어
-    사용자가 게인을 더 밀어 볼 여지가 있는지 알 수 없다.
-
-    이 점에서 실측(확장 전):
-      roll λ  상한 0.8에서 8.65로 끊김 — |k|≈1.12면 목표 12에 닿는다  (브래킷 탓)
-      yaw ζ_dr |k|≈1.55에서 0.477로 정점을 찍고 내려간다 — 어떤 상한에서도 못 닿는다
+    이 점의 롤 λ는 상한 0.8에서 8.65로 끊겼는데 |k|≈1.12면 목표 12에 닿는다.
+    넓히지 않으면 "목표 미달"로만 보고되어, 게인을 더 밀어 볼 여지가 있는지
+    사용자가 알 수 없다.
     """
     design, lm = low_mach
     out = tune_point(lm, design, **ACT)
-
     rr = out["achieved"]["roll_rate"]
     assert rr["reached"], f"롤 λ가 여전히 목표 미달 — {rr}"
     assert rr["bracket_growth"] > 0, "확장 없이 닿았다면 이 점이 브래킷을 재는 자리가 아니다"
     assert abs(out["gains"]["roll.k_rate"]) > 4.0 * abs(design["roll.k_rate"]), (
         "채택된 게인이 종전 브래킷 안이다 — 확장이 결과를 바꾸지 않았다"
     )
+    assert out["slots"]["roll_rate"]["reason"] == "ok"
 
+
+def test_rate_metrics_are_reported_on_the_final_composition(low_mach):
+    """레이트 자리의 보고값은 **세 자리가 다 닫힌 뒤**의 값이어야 한다.
+
+    탐색은 successive closure 순서대로 프리픽스 조성에서 한다(요를 닫은 뒤 롤).
+    그래서 요 차례에는 롤이 아직 열려 있는데, 검증(schedmap)은 세 자리를 다 닫고
+    잰다. 프리픽스 값을 그대로 보고하면 튜너와 검증이 같은 자리에 다른 수를 말한다.
+
+    이 점이 정확히 그 경우다 — 요 ζ_dr이 탐색 조성에서는 목표 0.5에 못 닿아
+    브래킷을 끝까지(설계값 256배) 넓히고도 실패로 끝나지만, 롤 댐퍼가 닫힌 최종
+    조성에서는 0.77이다. 그 차이가 판정을 뒤집는다: 종전에는 `target_unreached`가
+    되어 "브래킷이 아니라 이 플랜트가 그 지표를 못 낸다"는 **단정**이 붙었고,
+    그 단정이 다시 구조 한계 에스컬레이션으로 이어졌다. 출하되는 조성에서는
+    목표를 넘기는 자리인데도.
+    """
+    from claw.design.closure import AXIS_SPECS, axis_metrics
+    from claw.trim import split_axes
+
+    design, lm = low_mach
+    out = tune_point(lm, design, **ACT)
     yr = out["achieved"]["yaw_rate"]
-    assert not yr["reached"], "요 ζ_dr이 닿았다면 이 점의 전제가 바뀌었다"
-    assert yr["bracket_growth"] == 3, "끝까지 넓혀 보지도 않고 플랜트 탓이라 말하면 안 된다"
-    assert any("플랜트가 그 지표를 못 낸다" in n for n in out["notes"])
+
+    assert not yr["reached"], "탐색 조성에서 닿았다면 이 점의 전제가 사라졌다"
+    assert yr["bracket_growth"] == 3, "끝까지 넓혀 보지도 않고 결론을 내면 안 된다"
+    # 그런데 최종 조성에서는 목표를 넘긴다 → 사유는 ok이고 "플랜트 한계"가 아니다
+    assert yr["zeta_dr"] >= 0.5
+    assert out["slots"]["yaw_rate"]["reason"] == "ok"
+    assert not any("플랜트가 그 지표를 못 낸다" in n for n in out["notes"]), (
+        "출하 조성에서 목표를 넘기는 자리에 플랜트 한계라 단정했다")
+    assert any("뒤에 닫힌 댐퍼가 끌어올렸다" in n for n in out["notes"]), (
+        "탐색과 보고의 조성이 다르다는 사실이 어디에도 안 남았다")
+
+    # 보고값이 **검증이 재는 그 값**인지 직접 대조한다 — 이게 이 수정의 요지다
+    _lon, lat = split_axes(lm)
+    closed_all = {f"{g}.k_rate": out["gains"][f"{g}.k_rate"]
+                  for g, _, _ in AXIS_SPECS["lat"]["rates"]}
+    assert yr["zeta_dr"] == axis_metrics(lat, closed_all)["zeta_dr"]
+    # 프리픽스 조성(롤 열림)의 값과는 달라야 한다 — 같으면 판별력이 없는 테스트다
+    prefix_only = {"yaw.k_rate": out["gains"]["yaw.k_rate"], "roll.k_rate": 0.0}
+    assert yr["zeta_dr"] != axis_metrics(lat, prefix_only)["zeta_dr"]
 
 
 def test_first_reach_separates_narrow_bracket_from_flat_plant():

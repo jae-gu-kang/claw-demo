@@ -4,12 +4,14 @@
 (사용자 요구의 핵심). 실패 검증점 v·자리에 대해 순서대로:
 
 1. structural_limit — v에서 튜너(tune_point — 자유 게인 국소 최적)를 돌려도
-   infeasible이거나 최적 게인의 판정이 fail → 게인·breakpoint로는 불가.
+   **합격선**(criteria) 미달이거나 쓸 수 있는 게인 자체가 안 나온다 → 게인·
+   breakpoint로는 불가 (게이트는 _slot_passes 한 곳에만 있다).
    action=escalate (**보고 전용** — 필터·작동기 대역폭·지연 예산 등 상위 설계
    변경은 어느 모드에서도 자동 적용하지 않는다). evidence로 교차 주파수 vs
    작동기 대역폭 비·지연 위상 기여에 더해 **완화 프로브**(_relief_probes —
-   지연·작동기 대역폭을 하나씩 풀어 재튜닝)를 동봉한다: 자동 적용은 안 해도
-   "무엇을 바꾸면 통과하는가"까지는 기계가 답해야 사람이 판단할 수 있다.
+   지연·작동기 대역폭을 하나씩 풀어 재튜닝하고 통과하면 이분으로 **최소 완화량**
+   까지 실측)를 동봉한다: 자동 적용은 안 해도 "무엇을 얼마로 바꾸면 통과하는가"
+   까지는 기계가 답해야 사람이 판단할 수 있다.
 2. plant_variation — v를 낀 인접 앵커 간 model_distance.d_total > tol_plant
    (refine tol과 **같은 상수** — 기준 이원화 금지) → 트림 격자가 플랜트 변화를
    못 담는 것. action=promote v→anchor (검증 시 트림·선형화는 이미 완료 — 역할
@@ -35,6 +37,11 @@ from claw.design.points import ROLE_ANCHOR, ROLE_BREAKPOINT, ROLE_RANK
 from claw.design.schedmap import scheduled_gains
 from claw.design.tune import TuneTargets, tune_point
 
+# 그 자리의 **설계가 성립하지 않은** 사유 목록 — 구조 한계 게이트의 절반이다.
+# tune.py의 목록을 import해서만 쓴다: 여기 손으로 옮겨 적으면 사유가 하나 늘 때
+# 두 모듈의 판정이 조용히 갈린다
+from claw.design.tune import SLOT_DESIGN_FAILED
+
 VERDICTS = ("simple_deficit", "plant_variation", "gain_interp_valley", "structural_limit",
             "gain_sign_flip", "fit_residual")
 
@@ -50,9 +57,99 @@ _EPS = 1e-12
 # 구조 한계 완화 프로브의 작동기 대역폭 배수. 데모 30 rad/s → 90 rad/s로, docs -01 §7
 # 백로그가 적어 둔 소멸 경계(wn ≥ 50 rad/s)를 넘는 값이라 "대역폭이 병목인가"에 답한다.
 _RELIEF_ACT_FACTOR = 3.0
+_RELIEF_BISECT_N = 8  # 최소 완화량 이분 반복 — 브래킷 폭의 2^-8 = 1/256 정밀도
+# 완화 축별 표시 정보 — 임계값의 향(≥/≤)·단위·화면 문장. 이분은 늘 **통과 쪽 끝**을
+# 돌려주므로 방향은 언제나 "이 값이면 통과한다"로 읽힌다 (반올림이 안전한 쪽으로만).
+_RELIEF_AXES = {
+    "actuator_wn": {"name": "min_actuator_wn", "unit": "rad/s", "direction": ">=",
+                    "text": "작동기 대역폭 ≥ {value:.3g} rad/s면 통과 (현재 {current:.3g})"},
+    "delay_s": {"name": "max_delay_s", "unit": "s", "direction": "<=",
+                "text": "지연 ≤ {value:.3g} s면 통과 (현재 {current:.3g})"},
+}
+# 자리 종류별 "달성 수치" 키 — 완화 전/후를 **같은 키로** 비교하기 위한 목록.
+# achieved를 통째로 실으면 자리마다 모양이 달라 화면이 전후 비교를 그리지 못한다.
+_ACHIEVED_KEYS = {
+    "att": ("pm_deg", "gm_db", "wc_att", "wc0"),
+    "pitch_rate": ("zeta_sp", "target"),
+    "yaw_rate": ("zeta_dr", "target"),
+    "roll_rate": ("roll_lambda", "target", "unstable", "participation"),
+}
 
 
-def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw) -> list:
+def _slot_passes(tune_out, loop_name, criteria) -> bool:
+    """이 자리가 구조 한계를 **벗어났나** — 게이트·완화 프로브·이분 술어의 유일한 정의.
+
+    둘 중 하나라도 걸리면 구조 한계다 (이 함수는 그 부정이다):
+    - 자유 게인 최적의 판정이 fail — **합격선**(criteria)에조차 못 미친다.
+    - 자리 사유가 **그 자리의 설계가 성립하지 않은** 축이다 (tune의 SLOT_DESIGN_FAILED:
+      no_stable_gain·degenerate·margin_floor·bandwidth_collapse).
+
+    종전 게이트는 `slot["status"] == "infeasible" or judged == "fail"`이었는데, 자리
+    status는 **TuneTargets**(설계 목표 ζ_dr 0.5·PM 50°) 기준이고 judged는
+    **MarginCriteria**(합격선 ζ 0.30·PM 45°) 기준이라 **서로 다른 자 둘을 OR로** 묶었다.
+    그 간격은 히스테리시스로 일부러 둔 것인데 게이트가 그걸 결함으로 읽었다: 데모
+    M0.6/h1000 yaw_rate를 ζ_dr 목표 0.95로 돌리면 달성 0.923(합격선 0.30의 3배)인데도
+    reason=target_unreached라 escalate(적용 버튼 없는 처방)로 갔고, 한 카드 안에서
+    evidence["tuned"]["judged"] == "ok"와 verdict가 서로를 부정했다.
+    target_unreached·capped는 "설계 목표엔 못 갔으나 합격선은 통과"라 구조 한계가
+    아니다 — evidence["tuned"]에는 그대로 실어 보내고(사용자는 알아야 한다) verdict는
+    아래 분기(plant_variation / valley / fit_residual / simple_deficit)로 흘린다.
+
+    자리 단위인 것도 판정의 일부다: 점 단위로 재면 이 자리를 고친 완화도 다른 축이
+    못 따라오면 "해소 안 됨"으로 보고된다.
+    """
+    if _tuned_judgement(tune_out, loop_name, criteria) == "fail":
+        return False
+    return tune_out["slots"].get(loop_name, {}).get("reason") not in SLOT_DESIGN_FAILED
+
+
+def _achieved_digest(tune_out, loop_name) -> dict | None:
+    """튜닝 결과에서 이 자리의 달성 수치만 추린다 — 잴 것이 없으면 None."""
+    if tune_out is None:
+        return None
+    ach = (tune_out.get("achieved") or {}).get(loop_name)
+    if not ach:
+        return None
+    keys = _ACHIEVED_KEYS.get("att" if loop_name.endswith("_att") else loop_name, ())
+    return {k: ach[k] for k in keys if k in ach}
+
+
+def _min_relief(lm, design_base, loop_name, *, targets, criteria, act_kw, key,
+                pass_value) -> tuple:
+    """통과하는 **최소 완화량** — 고정 8회 이분, (통과 쪽 끝, 미달 쪽 끝)을 낸다.
+
+    브래킷은 [현재값, 완화값]으로 시작한다. 양 끝은 이미 실측돼 있다: 현재값은
+    structural_limit 게이트가 미달로, 완화값은 프로브가 통과로 판정한 값이다.
+    술어는 그 게이트와 **같은 함수**(_slot_passes)라 "이분이 찾은 경계"와 "구조 한계
+    경계"가 정의상 같은 선이다.
+
+    **단조성 전제**: 작동기 대역폭은 클수록, 지연은 작을수록 유리하다. 물리적으로
+    완전한 단조는 아니다 — 백오프·구제 마무리가 계단을 만들고, 작동기 공진이 특정
+    대역에서 되레 마진을 깎는다 (실측: M0.6/h1000 pitch_att에서 wn 18은 미달인데 10은
+    통과). 그래서 반환값은 "이 값에서 통과함을 실측했다"로만 읽어야 하고, 늘 **통과 쪽
+    끝**을 돌려준다 — 오차가 안전한 방향으로만 생긴다. 미달 쪽 끝을 함께 내는 것은
+    그 정밀도(구간 폭 = 초기 폭의 1/256)를 화면이 숨기지 않게 하기 위해서다.
+
+    비용은 튜닝 8회다. tune_point 1회는 자리에 따라 크게 다르다 — 구제 마무리
+    (_polish_att)가 도는 점은 ~270 ms, 안 도는 점은 ~35 ms(실측). 두 축이 모두
+    해소되면 이분만 16회라 (점, 자리)당 최악 ~4.3초가 더 붙는다. 구조 한계는 드물어
+    전체 실행에는 거의 영향이 없지만, 한 점이 통째로 구조 한계인 실행에서는 보인다.
+    """
+    bad, good = float(act_kw[key]), float(pass_value)
+    for _ in range(_RELIEF_BISECT_N):
+        mid = 0.5 * (bad + good)
+        kw = dict(act_kw)
+        kw[key] = mid
+        if _slot_passes(tune_point(lm, design_base, targets=targets, **kw),
+                        loop_name, criteria):
+            good = mid
+        else:
+            bad = mid
+    return good, bad
+
+
+def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw,
+                   base_out=None) -> list:
     """지연·작동기 대역폭을 하나씩만 완화해 재튜닝 — 병목 지목의 실측 근거.
 
     structural_limit는 "게인으로는 안 된다"까지만 말한다. 그다음 질문인 "그럼 무엇을
@@ -61,8 +158,18 @@ def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw) -> 
     커지므로(둘 다 ωc에 비례) 어느 쪽이 병목인지 화면에서 읽어낼 수 없었다.
     프로브는 한 번에 하나씩만 바꿔 돌려 인과를 분리한다.
 
-    비용은 구조 한계로 판정된 (점, 자리)당 튜닝 2회 추가다 — 그 판정 자체가 이미
-    자유 게인 튜닝 1회를 돌린 뒤이고, 구조 한계는 드물어 전체 실행에는 거의 영향이 없다.
+    각 항목은 세 가지를 낸다:
+    - `resolves` — 그 완화로 구조 한계를 벗어나는가 (게이트와 **같은 함수**).
+    - `achieved.before/after` — 완화 전후 달성 수치. 종전에는 프로브가 튜닝을 통째로
+      한 번 더 돌리고 `out["achieved"]`를 버렸다: "지연을 빼면 PM 31° → 58°"를
+      계산해 놓고 폐기한 것이다. 자리 종류에 맞는 키만 골라 같은 모양으로 싣는다.
+    - `threshold` — resolves일 때만. 이분으로 잰 **최소 완화량**이다. "×3이면 통과"는
+      예산이 아니다 (docs -01 §7 백로그 "작동기 대역폭 요구 사양 미도출"이 묻는 것은
+      배수가 아니라 rad/s 값이다).
+
+    비용은 구조 한계로 판정된 (점, 자리)당 튜닝 2회 + 해소된 축마다 8회다 — 최악
+    18회. 1회가 ~35 ms(구제 마무리 없음)~270 ms(있음)라 최악 ~4.9초가 (점, 자리)당
+    더 든다. 구조 한계는 드물다는 전제 위의 값이다.
     """
     act_wn = float(act_kw.get("actuator_wn") or 0.0)
     delay = float(act_kw.get("delay_s") or 0.0)
@@ -72,22 +179,39 @@ def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw) -> 
     if act_wn > 0.0:
         plan.append(("actuator_wn", act_wn * _RELIEF_ACT_FACTOR,
                      f"작동기 대역폭 ×{_RELIEF_ACT_FACTOR:g}"))
+    before = _achieved_digest(base_out, loop_name)
     probes = []
     for key, to_value, label in plan:
         kw = dict(act_kw)
         kw[key] = to_value
         out = tune_point(lm, design_base, targets=targets, **kw)
-        judged = _tuned_judgement(out, loop_name, criteria)
         slot = out["slots"].get(loop_name, {})
-        probes.append({
+        # 구조 한계 게이트가 더 이상 성립하지 않으면 해소다 — 같은 함수를 부른다.
+        # 식을 두 곳에 적으면 한쪽만 바뀐 날 프로브가 거짓 안도를 준다
+        resolves = _slot_passes(out, loop_name, criteria)
+        probe = {
             "change": key, "label": label, "from": act_kw.get(key), "to": to_value,
-            "status": slot.get("status"), "reason": slot.get("reason"), "judged": judged,
-            # 구조 한계 판정 조건(자리 infeasible ∨ fail)이 더 이상 성립하지 않으면
-            # 해소다 — 판정과 **같은 식을 부정해** 쓴다 (두 곳이 갈리면 프로브가 거짓
-            # 안도를 준다). 여기도 자리 단위다: 점 단위로 재면 이 자리를 고친 완화도
-            # 다른 축이 못 따라오면 "해소 안 됨"으로 보고된다
-            "resolves": slot.get("status") != "infeasible" and judged != "fail",
-        })
+            "status": slot.get("status"), "reason": slot.get("reason"),
+            "judged": _tuned_judgement(out, loop_name, criteria),
+            "resolves": resolves,
+            "achieved": {"before": before, "after": _achieved_digest(out, loop_name)},
+        }
+        if resolves:
+            value, fail_at = _min_relief(
+                lm, design_base, loop_name, targets=targets, criteria=criteria,
+                act_kw=act_kw, key=key, pass_value=to_value,
+            )
+            spec = _RELIEF_AXES[key]
+            current = float(act_kw[key])
+            probe["threshold"] = {
+                "name": spec["name"], "value": value, "unit": spec["unit"],
+                "direction": spec["direction"], "current": current,
+                "probe_value": to_value,
+                # 통과/미달 양 끝 — 이 폭이 곧 실측 정밀도다 (초기 브래킷의 1/256)
+                "bracket": [value, fail_at], "iterations": _RELIEF_BISECT_N,
+                "text": spec["text"].format(value=value, current=current),
+            }
+        probes.append(probe)
     return probes
 
 
@@ -143,6 +267,24 @@ def _tuned_judgement(tune_out, loop_name, criteria) -> str:
     if key not in ach:
         return "na"
     return criteria.judge_damping(ach[key])
+
+
+def _first_finite(*values, default=0.0) -> float:
+    """첫 유한 실수 — 없으면 default.
+
+    `a or b or 0.0`으로 쓸 수 없다: **nan은 파이썬에서 truthy**라 폴백을 그대로
+    통과한다. 교차가 없는 자리는 wcp가 nan인데(마진맵이 그렇게 낸다) 그게 새면
+    wc_over_actuator·delay_phase_deg_at_wc가 **둘 다** nan이 되어, 병목을 지목해야
+    할 수치 두 개가 화면에서 "nan"으로 사라진다. 0.0은 "그 주파수를 못 쟀다"는 뜻의
+    보수적 표시다 — 그 자리의 판단 재료는 완화 프로브 쪽이 낸다.
+    """
+    for v in values:
+        if v is None:
+            continue
+        f = float(v)
+        if math.isfinite(f):
+            return f
+    return default
 
 
 def classify_margin_deficit(
@@ -227,24 +369,33 @@ def classify_margin_deficit(
         "judged": tuned_status, "target": slot.get("target"),
         "achieved": tune_out["achieved"].get(loop_name), "notes": tune_out["notes"],
     }
-    if slot.get("status") == "infeasible" or tuned_status == "fail":
-        wcp = (entry.get("wcp") or entry.get("wc") or 0.0)
+    if not _slot_passes(tune_out, loop_name, criteria):
+        wcp = _first_finite(entry.get("wcp"), entry.get("wc"))
         relief = _relief_probes(
             lm, design_base, loop_name, targets=targets, criteria=criteria,
             act_kw=dict(actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
                         delay_s=delay_s, pade_order=pade_order),
+            base_out=tune_out,
         )
-        resolved = [p["label"] for p in relief if p["resolves"]]
+        resolved = [p for p in relief if p["resolves"]]
+        # 결론 문장에 **임계값을 넣는다**. "작동기 대역폭 ×3이면 통과"는 배수라 사양이
+        # 못 되지만 "≥ 20.4 rad/s면 통과 (현재 18)"는 그대로 예산이 된다. 아무 완화도
+        # 안 통하면 종전 문구 그대로 — 그때는 답이 이 두 축 밖에 있다
+        if resolved:
+            tail = " / ".join(p["threshold"]["text"] if p.get("threshold")
+                              else f"{p['label']} 시 통과" for p in resolved)
+            tail += ": 병목은 게인이 아니라 이 예산이다"
+        else:
+            tail = "지연·작동기 대역폭을 완화해도 통과하지 못한다 — 플랜트·루프 구조 자체를 검토"
         evidence["bottleneck"] = {
             "wc_over_actuator": (wcp / actuator_wn) if actuator_wn else None,
             "delay_phase_deg_at_wc": math.degrees(wcp * delay_s),
             "relief": relief,
-            "resolved_by": resolved,
-            "note": "자유 게인으로도 기준 미달 — " + (
-                f"{' / '.join(resolved)} 시 통과: 병목은 게인이 아니라 이 예산이다"
-                if resolved else
-                "지연·작동기 대역폭을 완화해도 통과하지 못한다 — 플랜트·루프 구조 자체를 검토"
-            ),
+            "resolved_by": [p["label"] for p in resolved],
+            # 임계값만 따로 모은다 — 화면이 relief를 훑지 않고도 예산을 쓸 수 있게
+            "thresholds": {p["threshold"]["name"]: p["threshold"]["value"]
+                           for p in resolved if p.get("threshold")},
+            "note": "자유 게인으로도 기준 미달 — " + tail,
         }
         return {
             "verdict": "structural_limit",

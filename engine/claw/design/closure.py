@@ -130,7 +130,10 @@ def lat_metrics(A, wn_floor, p_index=1) -> dict:
     lam_mode, part = roll_real_mode(A, p_index)
     return {
         "zeta_dr": min((m["zeta"] for m in pairs), default=1.0),
-        "roll_lambda": 0.0 if lam_mode is None else abs(lam_mode.real),
+        # 지목 실패(실근이 없거나 고유벡터 행렬이 특이)는 **0.0이 아니라 nan**이다.
+        # 0.0을 내면 판정이 "목표의 0배 → fail"로 흘러 못 잰 것이 실패로 둔갑한다 —
+        # nan은 judge_bandwidth가 na로 받는다 (loop_margins가 nan을 유지하는 원칙과 동일)
+        "roll_lambda": float("nan") if lam_mode is None else abs(lam_mode.real),
         "roll_unstable": lam_mode is not None and lam_mode.real > 0.0,
         "roll_participation": part,
     }
@@ -202,12 +205,20 @@ def rate_loop_crossover(
     # 작아지고(데모 M0.6 요-닫은 lat 0.887 vs 생 4.216) 천장이 8.87로 내려앉아
     # 참값 15.7 대신 8.87이 나왔다.
     w_hi = 10.0 * (actuator_wn if actuator_wn else wn_reference(lm_axis))
+    exhausted = True
     for _ in range(_WC_GRID_EXPANSIONS):
         w = np.logspace(-2, np.log10(w_hi), 600)
         mag = np.abs(loop.frequency_response(w).magnitude).reshape(-1)
         if mag[-1] < 1.0:
+            exhausted = False
             break
         w_hi *= 4.0
+    if exhausted:
+        # 4096배까지 넓히고도 |L| ≥ 1이면 교차는 여전히 격자 밖이다. w[-1]을 내면
+        # 종류가 같은 조용한 오답이다(천장을 교차라 부른다). nan은 "못 쟀다"이고,
+        # 소비자는 이미 그 값을 통과로 안 친다 — 튜너는 rate_wc > 0이 거짓이 되어
+        # wc_fallback 경로로 가고(플래그가 남는다), 직렬화는 null로 낸다
+        return float("nan")
     above = np.nonzero(mag >= 1.0)[0]
     if above.size == 0:
         return 0.0

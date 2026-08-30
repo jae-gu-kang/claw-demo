@@ -12,6 +12,7 @@ import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { AXIS_NAMES, DEFAULT_LOOPS, validateActuatorDelay, validateLoops } from "../lib/loops.js";
 import {
   FALLBACK_CRITERIA, STATUS, fuelsOf, gmColor, marginColor, marginLegendText, pivotCases,
+  threshold,
 } from "../lib/plot.js";
 import { store } from "../store.js";
 import { heatmapCanvas, scatterCanvas } from "./plots.js";
@@ -52,12 +53,14 @@ export function render() {
 
   // 판정선 한 줄 — 폴백을 썼다는 사실을 숨기지 않는다. 숨기면 화면이 자기 기준을
   // 정본인 척하게 되고, 그게 두 탭이 어긋나는 것보다 나쁘다
-  const criteriaBox = el("p", { class: "hint" }, "판정선 불러오는 중… (정본: /design/defaults)");
+  const criteriaBox = el("p", { class: "hint" },
+    "판정선 불러오는 중… (엔진 기본값 /design/defaults)");
   const drawCriteria = () => {
     clear(criteriaBox).append(
       marginLegendText(criteria ?? FALLBACK_CRITERIA),
       criteria
-        ? " — 정본: /design/defaults (엔진 MarginCriteria)"
+        ? " — 엔진 기본값(/design/defaults). 자동 설계 실행이 요구를 덮어썼다면"
+          + " 그 실행의 판정선은 결과의 margin_out.criteria다"
         : ` — 판정선 조회 실패로 웹 폴백값을 쓰는 중이다 (${criteriaErr}). `
           + "자동 설계 탭에서 기준을 바꿨다면 이 색은 그 기준이 아니다.",
     );
@@ -301,12 +304,12 @@ function renderResults(resultBox, body) {
           if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
           const pm = e.margins[lp.name] ? e.margins[lp.name].pm_deg : null;
           return { color: marginColor(pm, cr), text: `${fmt(pm, 3)}°` };
-        }, { title: `위상여유 PM [deg] — ${lp.name} (≥${cr.pm_min_deg}°)` }),
+        }, { title: `위상여유 PM [deg] — ${lp.name} (≥${threshold(cr, "pm_min_deg")}°)` }),
         heatmapCanvas(pivot, (e) => {
           if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
           const gm = e.margins[lp.name] ? e.margins[lp.name].gm_db : null;
           return { color: gmColor(gm, cr), text: gm === "inf" ? "∞ dB" : `${fmt(gm, 3)} dB` };
-        }, { title: `이득여유 GM [dB] — ${lp.name} (≥${cr.gm_min_db} dB)` }),
+        }, { title: `이득여유 GM [dB] — ${lp.name} (≥${threshold(cr, "gm_min_db")} dB)` }),
       ];
     });
     const points = [];

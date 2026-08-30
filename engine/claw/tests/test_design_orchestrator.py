@@ -489,3 +489,53 @@ def test_verify_stage_scores_the_applied_actions(monkeypatch):
     assert s.stage == "CLASSIFY"
     assert s.actions[0]["effect"]["after"]["status"] == "ok"
     assert s.actions[0]["effect"]["changed"] is True
+
+
+def test_effect_notices_a_severity_move_without_a_status_change():
+    """판정어가 그대로여도 부족 비율이 움직였으면 처방이 **들은** 것이다.
+
+    fail → fail이라도 PM 40° → 44°면 그 처방은 효과가 있었다. 이 가지가 무너지면
+    실제로 개선되고 있는 처방까지 2회 만에 봉인되어, 봉인 장치가 반대로 작동한다.
+    (통합 실행에서 같은 status에 severity만 움직이는 쌍이 실제로 발생한다.)
+    """
+    s, v = _seed_failing_session()
+    s.apply_actions(["a1"])
+    _set_margin(s, v, 44.0, "fail")  # 여전히 fail인데 부족이 절반 이하로 줄었다
+    s._score_applied_actions()
+    eff = s.actions[0]["effect"]
+    assert eff["before"]["status"] == eff["after"]["status"] == "fail"
+    assert eff["changed"] is True, "판정어만 보고 '안 바뀌었다'고 했다"
+    assert s.sealed_keys() == set()
+
+    # 반대로 정말 그대로면 무효로 센다 (이 테스트가 항진이 아님을 보인다)
+    s2, v2 = _seed_failing_session()
+    s2.apply_actions(["a1"])
+    _set_margin(s2, v2, 40.0, "fail")
+    s2._score_applied_actions()
+    assert s2.actions[0]["effect"]["changed"] is False
+
+
+def test_tighten_fit_at_the_cap_is_still_scored_and_sealable():
+    """조이기 상한에 닿은 처방도 **applied로 세야** 봉인될 수 있다.
+
+    상한에서 그냥 건너뛰면 effect 레코드가 안 생겨 채점 대상에서 빠지고, 그러면
+    `ineffective` 카운터가 영원히 0이라 봉인되지 않는다. 그런데 CLASSIFY는 그 카드를
+    계속 applicable로 세므로, 아무것도 안 바꾸는 이터를 예산 소진까지 반복한다 —
+    이 커밋이 막으려던 바로 그 순환이 봉인이 안 보이는 형태로 하나 더 생긴다.
+    """
+    from claw.design.orchestrator import _FIT_TIGHTEN_MAX
+
+    s, v = _seed_failing_session()
+    for i in range(_FIT_TIGHTEN_MAX + 2):
+        s.actions = [{"id": f"t{i}", "verdict": "fit_residual", "case": v,
+                      "loop": "pitch_att",
+                      "action": {"type": "tighten_fit", "point": v, "slots": []}}]
+        s.apply_actions([f"t{i}"])
+        _set_margin(s, v, 40.0, "fail")  # 상한 뒤로는 아무것도 안 바뀐다
+        s._score_applied_actions()
+
+    assert s.fit_tighten == _FIT_TIGHTEN_MAX
+    over = s.actions[0]
+    assert over.get("skipped"), "상한 도달 사유가 안 남았다"
+    assert over.get("applied") is True, "상한에서 건너뛰면 채점도 봉인도 안 된다"
+    assert s.sealed_keys() == {f"{v}|pitch_att|fit_residual"}

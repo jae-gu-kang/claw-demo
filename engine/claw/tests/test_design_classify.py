@@ -1,4 +1,6 @@
-"""M17 classify 검증 — 4-verdict 분기·evidence 수치·supersede (합성 시나리오)."""
+"""M17 classify 검증 — 4-verdict 분기·evidence 수치·완화 임계값·supersede (합성 시나리오)."""
+
+import math
 
 import pytest
 
@@ -10,6 +12,7 @@ from claw.design import (
     MarginCriteria,
     OperatingPoint,
     PointSet,
+    TuneTargets,
     case_name,
     tune_point,
 )
@@ -71,7 +74,10 @@ def test_structural_limit_with_excess_delay():
     assert by_change["delay_s"]["from"] == 0.6 and by_change["delay_s"]["to"] == 0.0
     assert by_change["actuator_wn"]["resolves"] is False
     assert bn["resolved_by"] == ["지연 제거"]
-    assert "지연 제거" in bn["note"]
+    # 결론 문장은 "지연 제거"가 아니라 **얼마까지 줄이면 되는지**를 말한다
+    assert "지연 ≤" in bn["note"] and " s면 통과" in bn["note"]
+    assert set(bn["thresholds"]) == {"max_delay_s"}, "통과한 축에만 임계값이 붙는다"
+    assert "threshold" not in by_change["actuator_wn"], "미달 축에 임계값을 지어내면 안 된다"
 
 
 def test_structural_limit_reports_no_relief_when_nothing_helps():
@@ -80,6 +86,10 @@ def test_structural_limit_reports_no_relief_when_nothing_helps():
     합격선을 도달 불가능하게(PM ≥ 179°) 두어 지연·작동기와 무관하게 미달을 만든다.
     긍정 분기만 테스트하면 `resolves`를 무조건 True로 만드는 실수를 못 잡는다 —
     그러면 화면이 "지연만 빼면 된다"고 잘못 안내하고, 실제로는 상위 설계를 헛짚는다.
+
+    **임계값도 없어야 한다.** 이분은 [현재값, 완화값] 브래킷의 양 끝이 각각 미달·통과로
+    실측됐다는 전제 위에서만 뜻을 갖는다 — 완화값이 미달인데도 숫자를 내면 그건 실측이
+    아니라 이분의 마지막 좌표일 뿐이고, 결론 문장이 없는 예산을 있다고 말하게 된다.
     """
     ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
@@ -91,7 +101,72 @@ def test_structural_limit_reports_no_relief_when_nothing_helps():
     bn = out["evidence"]["bottleneck"]
     assert [p["resolves"] for p in bn["relief"]] == [False, False]
     assert bn["resolved_by"] == []
+    assert bn["thresholds"] == {}
+    assert all("threshold" not in p for p in bn["relief"])
     assert "플랜트" in bn["note"]
+    assert "면 통과" not in bn["note"], "통하는 완화가 없는데 임계값 문장을 낸다"
+
+
+def test_design_target_miss_alone_is_not_a_structural_limit():
+    """**설계 목표**에만 못 미치는 자리를 에스컬레이션으로 보내면 안 된다 — 자가 둘이었다.
+
+    자리 status는 TuneTargets(설계 목표 ζ_dr 0.5) 기준이고 judged는 MarginCriteria
+    (합격선 ζ 0.30) 기준인데, 종전 게이트가 그 둘을 OR로 묶었다. 두 선의 간격은
+    히스테리시스로 **일부러** 둔 것이라, 게이트가 그걸 결함으로 읽으면 합격선을 여유
+    있게 넘는 자리가 적용 버튼 없는 escalate로 간다 — 원래 나왔어야 할 실행 가능한
+    처방(승격·재적합)이 사라진다. 한 카드 안에서 evidence의 judged=="ok"와 verdict가
+    서로를 부정하는 것도 그 증상이다.
+
+    재현: 데모 M0.6/h1000 yaw_rate에 ζ_dr 목표 0.95(플랜트가 못 내는 값)를 준다.
+    달성 0.923 — 합격선 0.30의 3배인데 사유는 target_unreached다.
+    """
+    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    cases = _fail_cases(v, lo, hi, loop="yaw_rate")
+    cases[v]["loops"]["yaw_rate"] = {"kind": "damping", "zeta": 0.2, "status": "fail"}
+    out = classify_margin_deficit(
+        ac, v, "yaw_rate", points, lms, trims, {}, demo_design_gains(), cases,
+        criteria=MarginCriteria(), targets=TuneTargets(zeta_dr=0.95), **ACT,
+    )
+    tuned = out["evidence"]["tuned"]
+    assert tuned["reason"] == "target_unreached", "이 테스트가 겨냥한 상황이 아니다"
+    assert tuned["judged"] == "ok" and tuned["achieved"]["zeta_dr"] > 0.9
+    assert out["verdict"] != "structural_limit", (
+        f"합격선의 3배를 내는 자리가 {out['verdict']}로 갔다 — 게이트가 설계 목표선을 결함으로 읽는다")
+    assert out["action"]["type"] != "escalate"
+    assert "bottleneck" not in out["evidence"], "구조 한계가 아닌데 완화 프로브를 돌렸다"
+
+
+def test_structural_gate_keeps_both_of_its_halves():
+    """게이트를 합격선 축으로 옮겨도 **잡아야 할 둘은 그대로** 잡는다 — 술어 헬퍼로 직접 잰다.
+
+    (a) 판정이 fail — 자유 게인 최적조차 합격선에 못 미친다.
+    (b) 사유가 "쓸 수 있는 게인 자체가 안 나온" 축(no_stable_gain·degenerate·
+        margin_floor·bandwidth_collapse) — 지연 0.6 s의 pitch_att가 그 경우다. PM 86°/
+        GM 10 dB라 마진 판정만 보면 ok지만 교차가 목표의 0.08배로 무너져 있다. 판정
+        하나로만 게이트를 만들면 이 자리를 통과시킨다.
+    (c) 그 목록에 없는 사유(target_unreached·capped)는 구조 한계가 아니다.
+
+    게이트·프로브·이분이 모두 이 함수 하나를 부르므로, 여기서 셋을 한 번에 고정한다.
+    """
+    from claw.design.classify import _slot_passes, _tuned_judgement
+
+    ac, _points, lms, trims = _setup((0.6,), v_mach=None)
+    lm = lms.get(ac, trims[case_name(0.6, 1000.0, 200.0)])
+    design = demo_design_gains()
+
+    fail_judged = tune_point(lm, design, **ACT)
+    assert not _slot_passes(fail_judged, "pitch_att", MarginCriteria(pm_min_deg=179.0))
+
+    collapsed = tune_point(lm, design, **{**ACT, "delay_s": 0.6})
+    assert collapsed["slots"]["pitch_att"]["reason"] == "bandwidth_collapse"
+    assert _tuned_judgement(collapsed, "pitch_att", MarginCriteria()) == "ok"
+    assert not _slot_passes(collapsed, "pitch_att", MarginCriteria()), (
+        "대역폭이 무너진 자리를 마진 판정만 보고 통과시킨다")
+
+    unreached = tune_point(lm, design, targets=TuneTargets(zeta_dr=0.95), **ACT)
+    assert unreached["slots"]["yaw_rate"]["reason"] == "target_unreached"
+    assert _slot_passes(unreached, "yaw_rate", MarginCriteria())
 
 
 def test_plant_variation_promotes_to_anchor():
@@ -321,6 +396,188 @@ def test_relief_probe_resolves_is_slot_scoped(monkeypatch):
     assert all(p["resolves"] for p in probes), (
         "이 자리를 고친 완화가 다른 축 때문에 '미달'로 보고됐다")
     assert all(p["status"] == "ok" for p in probes)
+
+
+def test_relief_threshold_is_measured_not_the_probe_value():
+    """"×3이면 통과"가 아니라 **최소 몇이면 통과**인지를 낸다 — 그 수치가 곧 요구 사양이다.
+
+    docs -01 §7 백로그의 "작동기 대역폭 요구 사양 미도출"이 묻는 것은 배수가 아니라
+    rad/s 값이다. 프로브는 그 답을 눈앞에 두고도 불리언만 남기고 있었다.
+
+    이 테스트가 가르는 것은 "임계값이 실측인가"다. 이분이 낸 min_actuator_wn을 **다시
+    돌려** 통과를 확인하고, 브래킷의 반대쪽 끝(한 걸음 아래)에서는 통과하지 않음을
+    확인한다. 폭이 초기 브래킷의 1/256임도 같이 고정한다 — 이분을 지우고 완화값(×3)을
+    그대로 내면 "그 값에서 통과"는 여전히 참이지만 폭과 "완화값보다 작다"가 무너진다.
+
+    시나리오: 작동기 18 rad/s(데모 30보다 짠 예산)에서 M0.6/h1000 pitch_att는 대역폭
+    붕괴로 구조 한계다. 두 축이 모두 통과하므로 전/후 달성값도 여기서 함께 잰다.
+    """
+    from claw.design.classify import _slot_passes
+
+    act = {**ACT, "actuator_wn": 18.0}
+    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    design = demo_design_gains()
+    out = classify_margin_deficit(
+        ac, v, "pitch_att", points, lms, trims, {}, design, _fail_cases(v, lo, hi),
+        criteria=MarginCriteria(), **act,
+    )
+    assert out["verdict"] == "structural_limit"
+    bn = out["evidence"]["bottleneck"]
+    probe = next(p for p in bn["relief"] if p["change"] == "actuator_wn")
+    assert probe["resolves"] is True, "이 시나리오는 작동기 완화가 통해야 성립한다"
+    th = probe["threshold"]
+    assert th["name"] == "min_actuator_wn" and th["unit"] == "rad/s"
+    assert th["direction"] == ">=" and th["current"] == 18.0
+    assert bn["thresholds"]["min_actuator_wn"] == th["value"]
+
+    # 1) 배수가 아니라 경계다 — ×3(54)보다 한참 아래에서 이미 통과한다
+    assert 18.0 < th["value"] < th["probe_value"]
+    # 2) 폭 = 초기 브래킷 ÷ 2^8. 이분을 지우면 여기서 걸린다
+    passed, failed = th["bracket"]
+    assert passed == th["value"]
+    assert abs(failed - passed) == pytest.approx((54.0 - 18.0) / 2**8)
+
+    # 3) **실측 확인** — 그 값이면 통과하고, 한 걸음 아래면 통과하지 않는다.
+    #    술어는 게이트와 같은 함수라 "이분이 찾은 경계 = 구조 한계 경계"다
+    lm = lms.get(ac, trims[v])
+    crit = MarginCriteria()
+    assert _slot_passes(tune_point(lm, design, **{**act, "actuator_wn": passed}),
+                        "pitch_att", crit)
+    assert not _slot_passes(tune_point(lm, design, **{**act, "actuator_wn": failed}),
+                            "pitch_att", crit), (
+        "한 걸음 아래에서도 통과한다 — 낸 값이 경계가 아니다")
+
+    # 4) 완화 전/후 달성값 — 프로브가 이미 치른 계산이다. 대역폭 붕괴가 원인이므로
+    #    후에는 교차가 크게 회복돼 있어야 한다
+    ach = probe["achieved"]
+    assert set(ach["before"]) == {"pm_deg", "gm_db", "wc_att", "wc0"}
+    assert set(ach["after"]) == set(ach["before"])
+    assert ach["after"]["wc_att"] > ach["before"]["wc_att"]
+    assert bn["note"].startswith("자유 게인으로도 기준 미달 — ")
+    assert f"작동기 대역폭 ≥ {th['value']:.3g} rad/s면 통과 (현재 18)" in bn["note"]
+
+
+def test_relief_probe_carries_the_achieved_numbers_it_already_paid_for(monkeypatch):
+    """프로브가 계산해 놓고 버리던 달성 수치를 전/후로 싣는다 — 자리 종류에 맞는 키로.
+
+    종전 프로브는 tune_point을 통째로 한 번 더 돌리고 out["achieved"]를 버렸다.
+    "지연을 빼면 λ 4.2 → 9.0"이 매번 계산되고 폐기된 것이다. 화면이 전후를 비교하려면
+    양쪽이 **같은 키**여야 하므로 자리 종류별로 골라 담는다 — 롤은 λ와 목표에 더해
+    발산 여부·참여도까지다 (그 둘이 없으면 λ 수치만으로는 판정을 재현할 수 없다).
+
+    바뀐 것은 담는 규칙 하나이므로 튜너를 대역해 그 규칙만 잰다.
+    """
+    from claw.design import classify as C
+
+    def make(lam):
+        return {
+            "gains": {}, "notes": [],
+            "achieved": {"roll_rate": {"kind": "bandwidth", "roll_lambda": lam,
+                                       "target": 12.0, "wc": 8.0, "capped": None,
+                                       "reason": "ok", "unstable": False,
+                                       "participation": 0.9}},
+            "slots": {"roll_rate": {"status": "ok", "reason": "ok", "target": 12.0}},
+            "status": "ok",
+        }
+
+    monkeypatch.setattr(C, "tune_point", lambda *a, **kw: make(9.0))
+    probes = C._relief_probes(
+        None, {}, "roll_rate", targets=None, criteria=MarginCriteria(),
+        act_kw=dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2),
+        base_out=make(4.2),
+    )
+    keys = {"roll_lambda", "target", "unstable", "participation"}
+    for p in probes:
+        assert set(p["achieved"]["before"]) == keys
+        assert p["achieved"]["before"]["roll_lambda"] == 4.2
+        assert p["achieved"]["after"]["roll_lambda"] == 9.0
+        assert p["achieved"]["after"]["participation"] == 0.9
+    # 완화 전 결과가 없으면 지어내지 않는다 (None) — 후만 낸다
+    bare = C._relief_probes(
+        None, {}, "roll_rate", targets=None, criteria=MarginCriteria(),
+        act_kw=dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2),
+    )
+    assert all(p["achieved"]["before"] is None for p in bare)
+
+
+def test_gate_and_relief_probe_read_one_predicate(monkeypatch):
+    """구조 한계 술어는 **한 함수에만** 있다 — 게이트도 프로브도 그것을 부른다.
+
+    같은 식이 두 곳에 손으로 적혀 있으면 한쪽만 바뀐 날 프로브가 거짓 안도를 준다
+    ("지연만 빼면 통과"라고 말하는데 게이트는 여전히 미달로 본다). 술어를 대역해
+    두 자리가 **함께** 뒤집히는지를 본다 — 어느 한쪽이라도 제 식을 갖고 있으면
+    여기서 갈라진다.
+    """
+    from claw.design import classify as C
+
+    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    kw = dict(criteria=MarginCriteria(), tol_plant=99.0)
+
+    # 술어가 "미달"이라 하면 멀쩡한 점도 구조 한계다 — 게이트가 이 함수를 읽는다는 증거
+    monkeypatch.setattr(C, "_slot_passes", lambda *a, **k: False)
+    out = classify_margin_deficit(ac, v, "pitch_att", points, lms, trims, {},
+                                  demo_design_gains(), _fail_cases(v, lo, hi),
+                                  **kw, **ACT)
+    assert out["verdict"] == "structural_limit"
+    bn = out["evidence"]["bottleneck"]
+    # 프로브도 같은 함수를 읽는다 — 제 식을 갖고 있으면 여기서 통과로 나온다
+    assert [p["resolves"] for p in bn["relief"]] == [False, False]
+    assert bn["thresholds"] == {}
+
+    # 반대로 "통과"라 하면 진짜 구조 한계(지연 0.6 s)도 아래 분기로 흐른다
+    monkeypatch.setattr(C, "_slot_passes", lambda *a, **k: True)
+    out = classify_margin_deficit(ac, v, "pitch_att", points, lms, trims, {},
+                                  demo_design_gains(), _fail_cases(v, lo, hi),
+                                  **kw, **{**ACT, "delay_s": 0.6})
+    assert out["verdict"] != "structural_limit"
+    assert "bottleneck" not in out["evidence"]
+
+
+def test_nan_crossover_does_not_leak_into_the_bottleneck_numbers(monkeypatch):
+    """교차가 없어 wcp가 nan인 자리에서도 병목 수치 둘이 nan으로 새지 않는다.
+
+    `entry.get("wcp") or entry.get("wc") or 0.0`은 폴백처럼 보이지만 **nan은 파이썬에서
+    truthy**라 그대로 통과한다. 그러면 wc_over_actuator와 delay_phase_deg_at_wc가 **둘
+    다** nan이 되어, "지연이 병목인가 작동기가 병목인가"에 답할 수치 두 개가 화면에서
+    동시에 사라진다 — 하필 그 판단이 필요한 카드에서.
+
+    튜너는 대역한다: 여기서 재는 것은 evidence의 수치 두 개뿐이고, 실기동을 돌리면
+    이분까지 따라와 초 단위로 느려진다.
+    """
+    from claw.design import classify as C
+
+    def fake_tune_point(lm, design, *, targets=None, **kw):
+        # 어느 완화로도 안 되는 자리 — 프로브가 이분까지 가지 않는다
+        return {
+            "gains": {}, "notes": [],
+            "achieved": {"pitch_att": {"pm_deg": 20.0, "gm_db": 3.0, "wc_att": 0.1,
+                                       "wc0": 3.0, "reason": "margin_floor"}},
+            "slots": {"pitch_att": {"status": "infeasible", "reason": "margin_floor"}},
+            "status": "infeasible",
+        }
+
+    monkeypatch.setattr(C, "tune_point", fake_tune_point)
+    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    cases = _fail_cases(v, lo, hi)
+    cases[v]["loops"]["pitch_att"]["wcp"] = float("nan")
+    out = classify_margin_deficit(ac, v, "pitch_att", points, lms, trims, {},
+                                  demo_design_gains(), cases,
+                                  criteria=MarginCriteria(), **ACT)
+    bn = out["evidence"]["bottleneck"]
+    assert math.isfinite(bn["wc_over_actuator"]) and math.isfinite(
+        bn["delay_phase_deg_at_wc"]), "nan이 폴백을 통과해 병목 수치를 지웠다"
+
+    # wcp만 nan이고 wc가 살아 있으면 **그쪽을 쓴다** — 폴백 순서까지 고정한다
+    cases[v]["loops"]["pitch_att"]["wc"] = 2.5
+    out = classify_margin_deficit(ac, v, "pitch_att", points, lms, trims, {},
+                                  demo_design_gains(), cases,
+                                  criteria=MarginCriteria(), **ACT)
+    bn = out["evidence"]["bottleneck"]
+    assert bn["wc_over_actuator"] == pytest.approx(2.5 / 30.0)
+    assert bn["delay_phase_deg_at_wc"] == pytest.approx(math.degrees(2.5 * 0.035))
 
 
 def test_free_gain_optimum_uses_the_hand_design_bracket():

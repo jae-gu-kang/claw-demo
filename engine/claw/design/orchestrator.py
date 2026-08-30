@@ -548,11 +548,16 @@ class DesignSession:
                 for slot, v in (act.get("gains") or {}).items():
                     self.refit_gains.setdefault(slot, {})[act["point"]] = float(v)
             elif act["type"] == "tighten_fit":
-                # 앵커의 보간 괴리 — 샘플이 아니라 적합을 고친다 (단조 래칫)
+                # 앵커의 보간 괴리 — 샘플이 아니라 적합을 고친다 (단조 래칫).
+                # 상한에 닿아도 **applied로 센다**: continue로 빠지면 effect 레코드가
+                # 안 생겨 채점 대상에서 빠지고, 그러면 이 카드는 영원히 봉인되지
+                # 않은 채 매 이터 applicable로 다시 잡혀 아무것도 안 바꾸는 순환을
+                # 예산 소진까지 돈다. promote의 래칫 방어도 같은 규약이다
+                # (skipped를 남기되 applied로 센다)
                 if self.fit_tighten >= _FIT_TIGHTEN_MAX:
-                    a["skipped"] = f"적합 조이기 상한({_FIT_TIGHTEN_MAX}회) 도달"
-                    continue
-                self.fit_tighten += 1
+                    a["skipped"] = f"적합 조이기 상한({_FIT_TIGHTEN_MAX}회) 도달 — 더 조일 수 없다"
+                else:
+                    self.fit_tighten += 1
             elif act["type"] == "add_validation":
                 self._add_validation_around(act["point"])
             applied.append(aid)

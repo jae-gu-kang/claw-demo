@@ -49,6 +49,11 @@ def _one(required: float, achieved) -> dict:
     nan(=null, 판정 불가)과 섞이지 않는다.
     """
     a = float(achieved)
+    if required <= 0.0:
+        # 요구선이 0 이하면 비율이 정의되지 않는다. 판정 불가로 흘린다 —
+        # 여기서 나누면 잡 스레드가 죽어 "202 뒤 원인 없는 실패"가 된다
+        return {"required": required, "achieved": a if math.isfinite(a) else None,
+                "deficit": None, "deficit_frac": None}
     if math.isnan(a):
         return {"required": required, "achieved": None, "deficit": None, "deficit_frac": None}
     d = required - a
@@ -71,18 +76,27 @@ class MarginCriteria:
     lam_good_frac: float = 0.8  # 목표선 = 목표 × 이 값 (이 사이는 warn)
     # λ를 잰 실근이 롤 상태를 이만큼도 안 담고 있으면 **롤 대역폭을 잰 게 아니다**
     # → na. 댐퍼가 약하면 롤 모드가 더치롤·나선과 합쳐져 실근으로 존재하지 않는데,
-    # 그때 남은 실근의 |Re|를 롤 대역폭이라 부르면 조용한 오답이 된다 [기본값]
+    # 그때 남은 실근의 |Re|를 롤 대역폭이라 부르면 조용한 오답이 된다 [기본값].
+    # 상한은 두지 않는다 — participation factor는 **1을 넘을 수 있다**. 모드별 상태
+    # 합이 1인 것은 부호 있는 합이고, 개별 |V[p,k]·V⁻¹[k,p]|는 비정규 행렬에서 1을
+    # 넘는다 (데모 실측 1.002~1.009). 1로 막으면 더 엄한 설정이 막힌다
     lam_part_min: float = 0.5
 
     def __post_init__(self):
+        # 합격선의 양수성 — shortfall이 요구선으로 나눈다. 종전 deficit()은 나눗셈이
+        # 없어 이 노출이 없었는데, 서버가 criteria를 통째로 덮어쓸 수 있으므로
+        # (routes/design.py config.criteria) 0을 넣으면 첫 VERIFY에서 잡이 죽는다
+        for name in ("pm_min_deg", "gm_min_db"):
+            if getattr(self, name) <= 0.0:
+                raise ValueError(f"{name}은 양수여야 함: {getattr(self, name)}")
         if not self.pm_bad_deg <= self.pm_min_deg:
             raise ValueError(f"pm_bad_deg({self.pm_bad_deg}) ≤ pm_min_deg({self.pm_min_deg}) 필요")
         if not self.gm_min_db <= self.gm_good_db:
             raise ValueError(f"gm_min_db({self.gm_min_db}) ≤ gm_good_db({self.gm_good_db}) 필요")
         if not 0.0 < self.zeta_min <= self.zeta_good:
             raise ValueError(f"0 < zeta_min({self.zeta_min}) ≤ zeta_good({self.zeta_good}) 필요")
-        if not 0.0 < self.lam_part_min <= 1.0:
-            raise ValueError(f"lam_part_min은 (0, 1] 구간: {self.lam_part_min}")
+        if not self.lam_part_min > 0.0:
+            raise ValueError(f"lam_part_min은 양수: {self.lam_part_min}")
         if not 0.0 < self.lam_min_frac <= self.lam_good_frac <= 1.0:
             raise ValueError(
                 f"0 < lam_min_frac({self.lam_min_frac}) ≤ lam_good_frac"
@@ -129,7 +143,8 @@ class MarginCriteria:
         수치와 무관하게 fail이다. 튜너 쪽은 댐퍼 안정 캡이 걸러 주지만 검증 쪽에는
         그 게이트가 없어서, 이 인자가 유일한 방어다.
 
-        `participation`은 그 실근이 롤 상태를 얼마나 담았나(0~1). `lam_part_min`
+        `participation`은 그 실근이 롤 상태를 얼마나 담았나(≈1이 온전한 지목이고
+        비정규 행렬에서는 1을 조금 넘는다 — 실측 1.002~1.009). `lam_part_min`
         미만이면 **롤 대역폭을 잰 게 아니므로** na다 — 통과도 실패도 아니다.
         데모 M0.6에서 롤 게인을 설계값의 0.2배로 줄이면 롤 모드가 실근에서 사라지고
         남은 실근의 참여도가 0.08이 된다. 그 근의 |Re|(6.58)를 "롤 대역폭 목표 12의
@@ -139,10 +154,14 @@ class MarginCriteria:
         t = float(target)
         if math.isnan(z) or not math.isfinite(t) or t <= 0.0:
             return "na"
-        if participation is not None and float(participation) < self.lam_part_min:
-            return "na"
+        # 발산근을 **먼저** 본다. 참여도가 낮다고 na로 흘리면, 그 실근이 발산근일 때
+        # 아무 데서도 보고되지 않는다 — ζ_dr은 진동쌍만 보고, na는 실패 목록에도
+        # judged에도 안 들어간다. "롤 대역폭을 못 쟀다"가 "발산극을 잠자코 넘긴다"의
+        # 이유가 될 수는 없다 (검증 쪽에는 댐퍼 안정 캡이 없어 이 인자가 유일한 방어다)
         if unstable:
             return "fail"
+        if participation is not None and float(participation) < self.lam_part_min:
+            return "na"
         if z < self.lam_min_frac * t:
             return "fail"
         if z < self.lam_good_frac * t:

@@ -48,6 +48,9 @@ _BRACKET_EXPANSIONS = 3  # 확장 횟수 상한 (4^3 = 설계값의 256배까지
 _POLISH_SIMPLEX = ((0.0, 0.0), (0.3, 0.0), (0.0, 0.3))
 _POLISH_GUARD_PM = 0.5  # 벌점 무릎의 가드 [deg] — 최적점이 판정선에 정확히 붙는 것을 막는다
 _POLISH_GUARD_GM = 0.25  # 같은 목적 [dB]
+# 마무리가 게인을 바꿔도 그대로인 메타 — 요구선과 "목표 교차가 다른 물리량으로
+# 갈아탔다"는 표시. 마무리 결과에 물려받지 않으면 구제된 자리에서만 사라진다
+_ATT_META = ("target_pm_deg", "target_gm_db", "target_wc_frac", "wc_fallback")
 
 # 자리별 포기 사유 — "왜 목표에 못 갔나"를 한 낱말로. 종전에는 점 단위 status 하나에
 # 서로 다른 사유 넷이 뭉쳐 있었고, 안내 문구는 그중 한 경우에 **사실과 달랐다**
@@ -82,10 +85,14 @@ REASON_TEXT = {
 # 통과로 보는 사유 — 나머지는 자리 status가 infeasible이다 (= "자유 게인으로도 설계
 # 목표를 못 맞춘 자리". classify의 structural_limit 입력이 바로 이것이다)
 _PASSING = (REASON_OK, REASON_RESCUED)
-# 그중에서도 **쓸 수 있는 게인 자체가 안 나온** 사유. 캡·플랜트 한계는 목표를 못
-# 채웠을 뿐 안정한 게인은 냈으므로 성격이 다르다 — 점 단위 보고에서 둘을 가른다
-_UNUSABLE = (REASON_NO_STABLE_GAIN, REASON_DEGENERATE, REASON_MARGIN_FLOOR,
-             REASON_BANDWIDTH_COLLAPSE)
+# 그중에서도 **루프를 설계 목표대로 성형하지 못한** 사유. 넷 다 안정한 게인은
+# 내지만(백오프 최선해·0 댐퍼도 게인이긴 하다) 그 자리의 설계가 성립하지 않은 것이다.
+# 반면 capped·target_unreached는 물리 한계에 걸렸을 뿐 **작동하는 댐퍼를 냈다** —
+# 합격선은 넘길 수 있으므로 성격이 다르다. 점 단위 status가 이 둘을 가르고,
+# 분류기의 구조 한계 게이트도 이 목록을 본다 (classify가 import한다 — 두 모듈에
+# 같은 목록이 손으로 두 번 적히면 갈린다)
+SLOT_DESIGN_FAILED = (REASON_NO_STABLE_GAIN, REASON_DEGENERATE, REASON_MARGIN_FLOOR,
+                      REASON_BANDWIDTH_COLLAPSE)
 
 
 @dataclass(frozen=True)
@@ -266,6 +273,7 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
     gains: dict = {}
     achieved: dict = {}
     notes: list = []
+    pending: list = []  # 2차 패스(최종 조성 재측정) 대기 목록
     for group, axis, metric_key, target_field in _RATE_PLAN:
         slot = f"{group}.k_rate"
         lm_axis = axes[axis]
@@ -281,8 +289,9 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
         sign = math.copysign(1.0, k_design)
         target = getattr(targets, target_field)
         # 이 자리 **앞에서 이미 닫은** 레이트만 담긴다 (gains에 slot이 아직 없다).
-        # 곧 A′로 접어 캡·교차 측정의 플랜트가 된다 — 지표(_metric→axis_metrics)는
-        # 늘 전부 접고 재므로, 캡만 생 플랜트로 재면 둘이 다른 자를 쓰게 된다.
+        # 곧 A′로 접어 캡·교차 측정의 플랜트가 된다. 탐색도 이 프리픽스 조성에서
+        # 하지만(successive closure 순서 그대로), **보고·판정은 아래 2차 패스에서
+        # 최종 조성으로 다시 잰다** — 검증(schedmap)이 세 자리를 다 닫고 재기 때문이다.
         spec_rates = {f"{g}.k_rate": gains.get(f"{g}.k_rate", 0.0)
                       for g, _, _ in AXIS_SPECS[axis]["rates"]}
         # successive closure 조성 그대로 — 롤 댐퍼는 **요 댐퍼가 닫힌 뒤** 판정한다
@@ -305,12 +314,50 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
         x_rate, u_in = next((x, u) for g, x, u in AXIS_SPECS[axis]["rates"] if g == group)
         k, capped = _cap_by_stability(lm_prior, x_rate, u_in, k, act_kw)
         gains[slot] = k
-        final = dict(spec_rates)
-        final[slot] = k
-        final_metrics = axis_metrics(lm_axis, final)
-        got = final_metrics[metric_key]
-        # 사유는 **왜 목표에 못 갔나**를 가른다. 캡이 걸렸어도 목표를 넘겼으면 결함이
-        # 아니다 (안정 경계 아래에서 목표 달성 = 정상), 그래서 목표 달성 여부를 먼저 본다
+        achieved[f"{group}_rate"] = {
+            "kind": "damping" if metric_key != "roll_lambda" else "bandwidth",
+            "target": target,
+            # ωc는 프리픽스 조성에서 잰다 — 검증(schedmap)도 `prior`로 같게 잰다
+            "wc": rate_loop_crossover(lm_prior, group, x_rate, u_in, k, **act_kw),
+            "capped": capped,
+            "reached": reached,
+            # 확장 횟수 — 목표 미달을 보고할 때 "브래킷 탓이 아니다"의 증거가 된다
+            "bracket_growth": grown,
+        }
+        pending.append((group, axis, metric_key, target, reached, grown, capped, slot))
+
+    _report_rates_on_final_composition(axes, gains, achieved, notes, pending)
+    return gains, achieved, notes
+
+
+def _report_rates_on_final_composition(axes, gains, achieved, notes, pending):
+    """레이트 자리의 **보고값·사유**를 세 자리가 다 정해진 뒤 다시 잰다.
+
+    탐색은 successive closure 순서대로 프리픽스 조성에서 한다 (요를 닫은 뒤 롤).
+    그런데 그 순서 때문에 **요 차례에는 롤이 아직 열려 있고**, 검증(schedmap)은
+    세 자리를 다 닫고 잰다. 프리픽스 값을 그대로 보고하면 튜너와 검증이 같은 자리에
+    다른 수를 말한다 — 데모 실측:
+
+        M0.2/h0/f40  ζ_dr  튜닝(롤 열림) 0.4766  /  검증(롤 닫힘) 0.7736
+        M0.3/h0/f200 ζ_dr        0.5000        /        0.6233
+        M0.6/h1000   ζ_dr        0.5000        /        0.5302
+
+    차이가 판정을 뒤집는다: 0.4766은 목표 0.5 미달이라 `target_unreached`가 되고
+    "설계값의 256배까지 넓혀도 미달 — 플랜트가 그 지표를 못 낸다"는 **단정**이
+    붙는데, 출하되는 조성에서는 0.774다. 그 단정이 다시 구조 한계 에스컬레이션으로
+    이어져 "플랜트·루프 구조를 검토하라"는 최종 안내가 나왔다.
+
+    탐색 조성은 바꾸지 않는다 (그건 설계 방식이다). 바꾸는 것은 **무엇을 보고하고
+    무엇으로 판정하는가**뿐이다.
+    """
+    for group, axis, metric_key, target, reached, grown, capped, slot in pending:
+        lm_axis = axes[axis]
+        final_all = {f"{g}.k_rate": gains.get(f"{g}.k_rate", 0.0)
+                     for g, _, _ in AXIS_SPECS[axis]["rates"]}
+        fm = axis_metrics(lm_axis, final_all)
+        got = fm[metric_key]
+        # 사유는 **왜 목표에 못 갔나**를 가른다. 캡이 걸렸어도 최종 조성에서 목표를
+        # 넘겼으면 결함이 아니다 (안정 경계 아래에서 목표 달성 = 정상)
         if got >= target * (1.0 - 1e-9):
             reason = REASON_OK
         elif capped == "no_stable_gain":
@@ -319,38 +366,39 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
             reason = REASON_CAPPED
         else:
             reason = REASON_TARGET_UNREACHED
-        achieved[f"{group}_rate"] = {
-            "kind": "damping" if metric_key != "roll_lambda" else "bandwidth",
+        achieved[f"{group}_rate"].update({
             metric_key: got,
-            "target": target,
-            "wc": rate_loop_crossover(lm_prior, group, x_rate, u_in, k, **act_kw),
-            "capped": capped,
-            "reached": reached,
-            # 확장 횟수 — 목표 미달을 보고할 때 "브래킷 탓이 아니다"의 증거가 된다
-            "bracket_growth": grown,
             "reason": reason,
             # λ의 |Re|가 지운 부호와, 그 실근이 롤 상태를 얼마나 담았나 —
             # 발산근이면 수치와 무관하게 실패이고, 참여도가 낮으면 애초에 롤
             # 대역폭을 잰 게 아니다 (판정은 criteria.judge_bandwidth 소관)
-            "unstable": bool(final_metrics.get("roll_unstable", False)),
-            "participation": final_metrics.get("roll_participation"),
-        }
-        if not reached:
+            "unstable": bool(fm.get("roll_unstable", False)),
+            "participation": fm.get("roll_participation"),
+        })
+        if reason == REASON_TARGET_UNREACHED:
             limit = 4.0 * _BRACKET_GROWTH ** grown
             notes.append(
-                f"{slot}: 설계값의 {limit:g}배까지 넓혀도 목표 {target} 미달 — 최선 달성값"
-                " 채택. 브래킷이 아니라 이 플랜트가 그 지표를 못 낸다"
+                f"{slot}: 설계값의 {limit:g}배까지 넓혀도 목표 {target} 미달 (최종 조성"
+                f" 달성 {got:.4g}) — 최선 달성값 채택. 브래킷이 아니라 이 플랜트가 그"
+                " 지표를 못 낸다"
+            )
+        elif not reached:
+            # 탐색 조성에서는 못 닿았는데 최종 조성에서는 닿았다 — 뒤에 닫히는
+            # 댐퍼가 이 지표를 끌어올린 것이다. 조용히 넘기면 "왜 목표를 넘겼나"가
+            # 안 남는다 (successive closure 순서의 부수 효과다)
+            notes.append(
+                f"{slot}: 탐색 조성(앞선 자리만 닫음)에서는 목표 {target} 미달이었으나"
+                f" 최종 조성에서 {got:.4g} — 뒤에 닫힌 댐퍼가 끌어올렸다"
             )
         if capped == "capped":
             notes.append(f"{slot}: 댐퍼 안정 캡 적용 — 작동기·지연 포함 폐루프 안정 경계 아래로 축소")
         elif capped == "no_stable_gain":
             # 경계를 찾은 게 아니라 댐퍼를 끈 것이다 — 로그가 그렇게 말해야 한다
             notes.append(
-                f"{slot}: **안정한 댐퍼 게인이 없다** — 어떤 |k|도 작동기·지연 포함 폐루프를"
+                f"{slot}: 안정한 댐퍼 게인이 없다 — 어떤 |k|도 작동기·지연 포함 폐루프를"
                 " 안정화하지 못해 0으로 두었다 (개루프 불안정 플랜트이거나 조건부 안정 구간)."
                 " 이 축의 판정은 감쇠 미달로 흐르고 structural_limit 후보가 된다"
             )
-    return gains, achieved, notes
 
 
 def _att_margins_meet(m, targets) -> bool:
@@ -452,6 +500,7 @@ def tune_point(
             kp2, ki2, ach2, ev2 = _polish_att(
                 lm_axis, group, rate_gains, kp, ki, targets, act_kw,
                 max_evals=max(0, max_evals - evals), wc0=ach["wc0"],
+                meta={k: ach[k] for k in _ATT_META if k in ach},
             )
             evals += ev2
             if _att_margins_meet(ach2, targets) and math.isfinite(ach2["wc_att"]) and (
@@ -484,6 +533,7 @@ def tune_point(
             kp, ki, ach, ev = _polish_att(
                 lm_axis, group, rate_gains, kp, ki, targets, act_kw,
                 max_evals=max(0, max_evals - evals), wc0=ach.get("wc0"),
+                meta={k: ach[k] for k in _ATT_META if k in ach},
             )
             evals += ev
             gains[f"{group}.kp"], gains[f"{group}.ki"] = kp, ki
@@ -491,7 +541,7 @@ def tune_point(
             achieved[f"{group}_att"] = ach
     slots = _slot_records(achieved)
     reasons = [s["reason"] for s in slots.values()]
-    if any(r in _UNUSABLE for r in reasons):
+    if any(r in SLOT_DESIGN_FAILED for r in reasons):
         status = "infeasible"
     elif any(s["status"] == "infeasible" for s in slots.values()):
         status = "degraded"
@@ -528,7 +578,7 @@ def _slot_records(achieved: dict) -> dict:
 
 
 def _polish_att(lm_axis, group, rate_gains, kp0, ki0, targets, act_kw, max_evals,
-                wc0=None) -> tuple:
+                wc0=None, meta=None) -> tuple:
     """마무리 — Nelder-Mead(kp·ki 로그 배율), 목적 = −교차 대역폭 + 마진 벌점.
 
     백오프는 ωc를 버려서 마진을 사는 **한 방향** 탐색이라, 마진 여유가 남았는데도
@@ -555,8 +605,10 @@ def _polish_att(lm_axis, group, rate_gains, kp0, ki0, targets, act_kw, max_evals
         return -bw + pen
 
     def _ach(m, orient, extra=None):
-        # 마무리 뒤의 교차는 설계 목표 wc가 아니라 **실제 이득교차**다 (wcp)
-        out = {**m, "orientation": orient, "wc0": wc0,
+        # 마무리 뒤의 교차는 설계 목표 wc가 아니라 **실제 이득교차**다 (wcp).
+        # 백오프 해가 실어 둔 메타(목표선·wc_fallback)는 **물려받는다** — 안 물려받으면
+        # 요구선이 가장 설명이 필요한 자리(구제된 자리)에서만 null이 된다
+        out = {**(meta or {}), **m, "orientation": orient, "wc0": wc0,
                "wc_att": m["wcp"] if math.isfinite(m["wcp"]) else float("nan")}
         return {**out, **(extra or {})}
 

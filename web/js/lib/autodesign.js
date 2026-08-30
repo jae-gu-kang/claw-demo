@@ -19,6 +19,13 @@ import { parseNumberList } from "./grid.js";
  *
  * lib은 DOM 계층을 import하지 않는다는 규약 때문에 여기 한 벌을 둔다. 정책이
  * 갈리면 같은 수가 카드와 표에서 다르게 보이므로 fmt와 함께 고칠 자리다. */
+/** 비유한값 문자열("inf"/"-inf")을 걸러낸 수치 — 아니면 null.
+ *
+ * 크기 계산·정렬에는 이걸 쓴다. `num`은 표시용이라 문자열을 그대로 받아 넘긴다. */
+function numeric(x) {
+  return typeof x === "number" && Number.isFinite(x) ? x : null;
+}
+
 function num(x, digits = 3) {
   if (x == null) return "—";
   if (x === "inf") return "∞";
@@ -215,8 +222,10 @@ export function statusText(status) {
     ?? `알 수 없는 상태 (${status ?? "없음"}) — 엔진과 화면의 상태 어휘가 어긋났다.`;
 }
 
-/** 상태 칩 색 — 종료 상태를 3갈래로. converged만 ok, 사람 손을 기다리는 것은 warn,
- * 나머지(미검증·예산 소진·에스컬레이션·취소)는 통과가 아니므로 fail 쪽에 둔다. */
+/** 상태 칩 색. converged만 ok, 사람 손을 기다리는 것(승인 대기·실행 중)은 warn,
+ * **통과가 아닌 채 끝난 것**(미검증·에스컬레이션·예산 소진)은 fail 쪽에 둔다.
+ * 취소는 판정이 아니라 중단이라 na다 — 실패라 칠하면 사용자가 자기 취소를 결함으로
+ * 읽는다 (재개 버튼은 그대로 뜬다). */
 export function statusSeverity(status) {
   if (status === "converged") return "ok";
   if (status === "awaiting_approval" || status === "running") return "warn";
@@ -410,26 +419,40 @@ export function shortfallLines(shortfall) {
         text: `${label} ${req} · 달성 판정 불가 (교차 없음 — 통과가 아니다)` });
       continue;
     }
-    const short = rec.deficit > 0;
-    const frac = rec.deficit_frac;
+    // 비유한값은 **문자열**로 온다 ("inf" / "-inf" — 엔진이 nan(=null)과 구별하려고
+    // 일부러 그렇게 낸다, serialize.py). 숫자로 다루면 `"inf" > 0`이 false라
+    // **GM −∞(최악)가 "여유"로 초록칠**되고, Math.abs("−inf")가 NaN이 되어 부족량과
+    // 정렬 키가 통째로 망가진다. 부호만 뽑아 쓰고 크기는 ∞로 적는다
+    const d = numeric(rec.deficit);
+    const short = d == null ? rec.deficit === "inf" : d > 0;
+    const frac = numeric(rec.deficit_frac);
     const pct = frac == null ? "" : ` (요구선 대비 ${num(100 * Math.abs(frac), 3)}%)`;
+    const size = d == null ? "∞" : num(Math.abs(d));
     rows.push({
       key,
       kind: short ? "short" : "spare",
-      rank: frac ?? 0,
+      // 무한 부족은 유한한 어떤 부족보다 심각하고, 무한 여유는 어떤 여유보다 낫다
+      rank: frac ?? (short ? Infinity : -Infinity),
       text: `${label} ${req} · 달성 ${num(rec.achieved)}${unit} · `
-        + `${short ? "부족" : "여유"} ${num(Math.abs(rec.deficit))}${unit}${pct}`,
+        + `${short ? "부족" : "여유"} ${size}${unit}${pct}`,
     });
   }
   rows.sort((a, b) => b.rank - a.rank);
   return rows.map(({ key, kind, text }) => ({ key, kind, text }));
 }
 
-/** 달성 지표 dict → 한 줄 ("PM 46.1° · GM 8.2 dB"). 빈 dict는 null. */
+/** 달성 지표 dict → 한 줄 ("PM 46.1° · GM 8.2 dB"). 볼 게 없으면 null.
+ *
+ * **아는 지표만** 적는다. 엔진의 achieved 레코드는 지표만 담은 dict가 아니라
+ * 조성 메타를 함께 싣는다 — 자세 자리는 orientation·wc0·wc_fallback·target_pm_deg…,
+ * 레이트 자리는 kind·capped·reached·bracket_growth·participation… 전부 훑으면
+ * 한 줄이 열두 조각짜리 덤프가 되고, 사유 코드는 바로 위에서 이미 한국어로 푼 것을
+ * 원문으로 한 번 더 찍는다. */
 function achievedText(ach) {
   const parts = [];
   for (const [key, v] of Object.entries(ach ?? {})) {
-    const [label, unit] = METRIC[key] ?? [key, ""];
+    if (!(key in METRIC)) continue;
+    const [label, unit] = METRIC[key];
     parts.push(`${label} ${num(v)}${unit}`);
   }
   return parts.length ? parts.join(" · ") : null;
@@ -487,10 +510,15 @@ export function reliefLines(relief, reasonMap) {
     const move = p.from == null && p.to == null
       ? "" : ` (${p.change ?? "?"} ${num(p.from)} → ${num(p.to)})`;
     const why = p.resolves ? null : reasonText(p.reason, reasonMap);
+    // 임계값이 이 카드의 실질이다 — "×3이면 통과"가 아니라 "≥ 47 rad/s면 통과"가
+    // 사용자가 바로 쓸 수 있는 답이고, docs §7의 "작동기 대역폭 요구 사양"이
+    // 요구하던 수치다. 통과한 축에만 붙는다 (미달 축에 숫자를 지어내면 안 된다)
+    const th = p.threshold?.text;
     return {
       resolves: Boolean(p.resolves),
+      threshold: th ?? null,
       text: `${p.label ?? p.change ?? "?"}${move} → ${p.resolves ? "통과" : "여전히 미달"}`
-        + (why ? ` · 사유 ${why}` : ""),
+        + (th ? ` · ${th}` : "") + (why ? ` · 사유 ${why}` : ""),
     };
   });
 }
