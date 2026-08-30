@@ -10,6 +10,7 @@ import {
   pointRows,
   statusCounts,
   statusRank,
+  trimLabel,
   verdictLegend,
   worstStatus,
 } from "./autodesign.js";
@@ -118,9 +119,39 @@ test("statusCounts — 미판정을 통과로 세지 않는다", () => {
   // 트림 불가·판정 불가 점이 ok 개수에 섞여 실행이 실제보다 건강해 보인다
   // A는 pitch_att ok + pitch_rate warn → 점 판정은 최악값 warn (worstStatus 규약)
   const c = statusCounts(pointRows(RESULT));
-  assert.deepEqual(c, { ok: 0, warn: 1, fail: 1, na: 0, unjudged: 1 });
+  assert.deepEqual(c, { ok: 0, warn: 1, fail: 1, na: 0, outside: 0, unjudged: 1 });
   assert.deepEqual(statusCounts(undefined),
-    { ok: 0, warn: 0, fail: 0, na: 0, unjudged: 0 });
+    { ok: 0, warn: 0, fail: 0, na: 0, outside: 0, unjudged: 0 });
+});
+
+test("엔벨로프 경계 점은 판정 칸이 아니라 자기 칸에 센다", () => {
+  // 엔진이 그 점의 실패를 처방 목록에서 뺀다(schedmap.outside_envelope). 화면이
+  // 그걸 fail로 세면 "실패 N건"과 처방 카드 수가 어긋나 사용자가 사라진 카드를 찾는다.
+  // 그렇다고 빼고 안 세면 조용한 누락이므로 자기 칸이 필요하다
+  const withOutside = {
+    ...RESULT,
+    margin_out: {
+      cases: {
+        ...RESULT.margin_out.cases,
+        V: { outside_envelope: true, loops: { pitch_att: { status: "fail" } } },
+      },
+    },
+  };
+  const rows = pointRows(withOutside);
+  assert.deepEqual(statusCounts(rows),
+    { ok: 0, warn: 1, fail: 0, na: 0, outside: 1, unjudged: 1 });
+  const v = rows.find((r) => r.name === "V");
+  assert.equal(v.outsideEnvelope, true);
+  assert.equal(v.status, "fail"); // 수치는 남긴다 — 경계의 마진은 자료다
+});
+
+test("trimLabel — 미수렴과 엔벨로프 경계를 한 낱말로 뭉치지 않는다", () => {
+  assert.equal(trimLabel({ trimmable: true }), "OK");
+  assert.equal(trimLabel({ trimmable: null }), "미판정");
+  assert.equal(trimLabel({ trimmable: false }), "미수렴");
+  // 엔벨로프 경계는 trimmable=false로도 오지만 트림해는 있다 — 종전엔 둘 다 "불가"였다
+  assert.equal(trimLabel({ trimmable: false, outsideEnvelope: true }), "엔벨로프 경계");
+  assert.equal(trimLabel(undefined), "미판정");
 });
 
 test("verdictLegend — 기준 수치를 결과에서 읽어 문장에 박는다", () => {

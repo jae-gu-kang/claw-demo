@@ -75,17 +75,36 @@ export function pointRows(result) {
     fuel: p.fuel,
     role: p.role,
     trimmable: p.trimmable,
+    // 엔진이 처방·수렴 판정에서 뺀 점(포화·α 여유 미달) — 미수렴과 다른 상태다
+    outsideEnvelope: Boolean(cases[p.name]?.outside_envelope),
     status: worstStatus(cases[p.name]?.loops),
   }));
 }
 
-/** 점 행 목록 → 판정 개수 {ok, warn, fail, na, unjudged}.
+/** 트림 상태 표기 — 세 상태를 한 낱말로 뭉치지 않는다.
+ *
+ * 종전에는 "불가" 하나가 **미수렴**과 **엔벨로프 경계**를 함께 가리켰다. 둘은
+ * 성격이 전혀 다르다: 앞은 트림해가 없어 볼 것이 없는 점이고, 뒤는 트림해는
+ * 있으나 포화·α 여유가 없어 설계 대상에서 빠진 점이다(마진 수치는 나온다). */
+export function trimLabel(row) {
+  if (row?.outsideEnvelope) return "엔벨로프 경계";
+  if (row?.trimmable === false) return "미수렴";
+  if (row?.trimmable) return "OK";
+  return "미판정";
+}
+
+/** 점 행 목록 → 판정 개수 {ok, warn, fail, na, outside, unjudged}.
  *
  * "경고가 왜 이렇게 많나"에 화면이 스스로 답하려면 먼저 몇 건인지 세어야 한다.
- * 표를 눈으로 세는 것이 유일한 방법이면 사용자는 경고의 규모를 오해한다. */
+ * 표를 눈으로 세는 것이 유일한 방법이면 사용자는 경고의 규모를 오해한다.
+ *
+ * 엔벨로프 경계 점은 **판정 칸에서 뺀다** — 엔진이 그 점의 실패를 처방 목록에서
+ * 제외하므로(schedmap.outside_envelope), 개수에만 섞으면 화면이 세는 실패와
+ * 처방 카드 수가 어긋난다. 빼되 자기 칸에 세어 조용한 누락은 만들지 않는다. */
 export function statusCounts(rows) {
-  const out = { ok: 0, warn: 0, fail: 0, na: 0, unjudged: 0 };
+  const out = { ok: 0, warn: 0, fail: 0, na: 0, outside: 0, unjudged: 0 };
   for (const r of rows ?? []) {
+    if (r?.outsideEnvelope) { out.outside += 1; continue; }
     const s = r?.status;
     if (s == null) out.unjudged += 1;
     else if (s in out) out[s] += 1;

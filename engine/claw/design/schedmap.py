@@ -19,6 +19,11 @@ closure 조성(closure.py) × pi_loop 전체 조성(작동기 2차계 + Padé �
 검증점 생성 기본값(01 §3.4 [TBD] "보간 구간 검증점 밀도"의 확정): breakpoint 이상
 역할 점의 축정렬 인접쌍마다 중점 1개. anchor는 breakpoint 역할을 겸하므로
 (points.at_least 서열) 트림 앵커 인접 구간의 중점도 함께 나온다.
+
+점의 세 상태를 구분해 낸다 (종전에는 뒤 둘이 한 덩어리였다):
+- 트림 수렴 + 엔벨로프 안 → 정상 판정, 실패는 처방으로
+- 트림 수렴 + 포화·α 여유 미달 → `outside_envelope` — 마진은 내되 실패 목록에서 제외
+- 트림 미수렴 → loops 비움 (판정 불가)
 """
 
 import math
@@ -30,6 +35,7 @@ from claw.design.closure import (
     AXIS_SPECS,
     att_margin_loop,
     axis_metrics,
+    close_rates,
     oriented_margins,
     rate_loop_crossover,
 )
@@ -78,9 +84,15 @@ def scheduled_margin_point(
             f"{g}.k_rate": eff.get(f"{g}.k_rate", 0.0) for g, _, _ in spec["rates"]
         }
         metrics = axis_metrics(lm_axis, rate_gains)
-        for group, x_rate, u_in in spec["rates"]:
+        for idx, (group, x_rate, u_in) in enumerate(spec["rates"]):
             k = rate_gains[f"{group}.k_rate"]
-            wc = rate_loop_crossover(lm_axis, group, x_rate, u_in, k, **act_kw)
+            # 튜닝(tune._tune_rates)과 같은 플랜트에서 잰다 — 앞서 닫은 레이트까지
+            # 접은 A′. 여기만 생 모델로 재면 같은 형상의 ωc가 설계·검증에서 갈린다
+            prior = {f"{g}.k_rate": rate_gains[f"{g}.k_rate"]
+                     for g, _, _ in spec["rates"][:idx]}
+            wc = rate_loop_crossover(
+                close_rates(lm_axis, prior), group, x_rate, u_in, k, **act_kw
+            )
             entry = {"gains": {"k_rate": k}, "wc": wc}
             if group == "roll":
                 entry["kind"] = "bandwidth"
@@ -204,7 +216,7 @@ def scheduled_margin_map(
             if pt.trimmable is None:
                 pt.trimmable = True
             lm = lms.get(aircraft, tr)
-            cases[name] = {
+            entry = {
                 "role": pt.role,
                 "loops": scheduled_margin_point(
                     lm, tables, design, pt.case, criteria=criteria,
@@ -212,6 +224,20 @@ def scheduled_margin_map(
                     delay_s=delay_s, pade_order=pade_order,
                 ),
             }
+            # 트림은 수렴했으나 포화·α 여유 미달 = 엔벨로프 실경계. 마진은 참고로 내되
+            # **처방 대상에서는 뺀다** — 튜닝(tune_points)이 이미 이 점을 건너뛰므로
+            # 스케줄은 애초에 이 조건을 덮으라고 요구받은 적이 없다. 그런데도 채점만
+            # 하면 처방이 나오는데, 앵커로 승격해도 TUNE이 다시 건너뛰어 게인 샘플이
+            # 하나도 안 늘어난다 — 반영해도 결과가 그대로인 카드를 사용자에게 계속
+            # 내미는 셈이다(래칫·예산으로만 겨우 멈춘다). 판정 자체는 남긴다:
+            # 엔벨로프 경계의 마진은 "왜 여기가 경계인가"의 자료다
+            if pt.trimmable is False:
+                entry["outside_envelope"] = True
+                entry["note"] = (
+                    "포화·α 여유 미달 — 엔벨로프 실경계다. 마진은 참고값이며 처방·수렴"
+                    " 판정에서 제외한다 (튜닝도 이 점을 건너뛴다)"
+                )
+            cases[name] = entry
         if on_progress is not None and on_progress(done, total, f"margin {name}"):
             aborted = "cancelled"
             break
@@ -235,9 +261,16 @@ def _severity(entry: dict) -> float:
 
 
 def _worst_failures(cases: dict) -> list:
-    """fail 판정 (점, 자리) 목록 — 심각 순. 분류기(classify)의 작업 목록."""
+    """fail 판정 (점, 자리) 목록 — 심각 순. 분류기(classify)의 작업 목록.
+
+    엔벨로프 밖(포화·α 여유 미달) 점은 제외한다 — 그 점의 fail에는 반영해도 듣지
+    않는 처방밖에 낼 수 없다(위 outside_envelope 주석). 목록이 곧 작업 목록이므로
+    여기서 빼는 것이 곧 "처방·수렴 판정에서 제외"다.
+    """
     out = []
     for name, entry in cases.items():
+        if entry.get("outside_envelope"):
+            continue
         for loop_name, m in entry["loops"].items():
             if m.get("status") == "fail":
                 out.append({

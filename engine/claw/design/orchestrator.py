@@ -338,13 +338,23 @@ class DesignSession:
         'na'다. 둘 다 실패 목록에 안 잡히므로, 판정 수를 세지 않으면 **아무것도
         검증하지 않은 실행이 converged로 보고된다** — 비행제어 설계툴에서 가장
         나쁜 실패 양식이다.
+
+        엔벨로프 밖 점도 같은 이유로 뺀다: 그 점은 실패 목록에서 제외되므로
+        (schedmap._worst_failures), 여기서 세면 "격자가 전부 엔벨로프 밖"인 실행이
+        judged>0·failures=0으로 converged가 된다 — 가드가 막으려던 바로 그 형태다.
         """
         return sum(
             1
             for entry in self.margin_out.get("cases", {}).values()
+            if not entry.get("outside_envelope")
             for m in entry.get("loops", {}).values()
             if m.get("status") in ("ok", "warn", "fail")
         )
+
+    def outside_envelope_count(self) -> int:
+        """마진은 냈으나 엔벨로프 밖이라 판정·처방에서 뺀 점 수 — 조용한 제외 금지."""
+        return sum(1 for entry in self.margin_out.get("cases", {}).values()
+                   if entry.get("outside_envelope"))
 
     def _stage_classify(self, aircraft, cb):
         c = self.config
@@ -506,6 +516,8 @@ class DesignSession:
             "failures": len(self.margin_out.get("failures", ())),
             # 판정 수 — "실패 0"이 통과인지 미검증인지 화면이 구별할 수 있어야 한다
             "judged": self.judged_count(),
+            # 판정·처방에서 뺀 엔벨로프 밖 점 수 — 제외했다는 사실 자체가 보고 대상이다
+            "outside_envelope": self.outside_envelope_count(),
             "tuned": len(self.gain_samples.get(next(iter(self.gain_samples), ""), {}))
             if self.gain_samples else 0,
             "skipped": list(self.tune_meta.get("skipped", ())),

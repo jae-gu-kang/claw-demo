@@ -173,6 +173,49 @@ def test_margin_map_end_to_end_and_cancel(setup):
     assert len(cancelled["cases"]) == 1
 
 
+def test_outside_envelope_point_is_measured_but_not_prescribed(setup):
+    """포화·α 여유 미달 점 — 마진은 내되 실패 목록·판정 수에서 뺀다.
+
+    이 점은 TUNE이 이미 건너뛴다(tune_points: trimmable is False → skipped). 스케줄이
+    덮으라고 요구받은 적 없는 조건인데 채점만 하면, 나오는 처방이 **반영해도 듣지
+    않는다** — 앵커로 승격해도 TUNE이 또 건너뛰어 게인 샘플이 하나도 안 는다.
+    미수렴 점(loops 자체가 빔)과는 다른 상태라 따로 구분해 낸다.
+    """
+    ac, tables, design = setup
+    ps = PointSet([
+        OperatingPoint(case=_case(m), role=ROLE_ANCHOR, origin="coarse")
+        for m in (0.4, 0.6)
+    ])
+    # 한 점을 엔벨로프 밖으로 표시 — 격자·리파인이 포화/α 여유로 세우는 플래그와 같다
+    ps.get(case_name(0.4, 1000.0, 200.0)).trimmable = False
+    out = scheduled_margin_map(
+        ac, ps, LinearModelSet(), tables, design, criteria=MarginCriteria(), trims={},
+        actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035,
+    )
+    marked = out["cases"][case_name(0.4, 1000.0, 200.0)]
+    other = out["cases"][case_name(0.6, 1000.0, 200.0)]
+    assert marked["outside_envelope"] is True
+    assert marked["loops"], "마진 수치까지 없애면 왜 경계인지 볼 자료가 사라진다"
+    assert "outside_envelope" not in other
+    assert all(f["case"] != case_name(0.4, 1000.0, 200.0) for f in out["failures"])
+
+    # 판정 수도 빠져야 한다 — 안 그러면 격자가 전부 엔벨로프 밖인 실행이
+    # judged>0·failures=0으로 converged가 된다 (vacuous pass 가드가 막으려던 형태)
+    from claw.design import AutoDesignConfig, DesignSession
+
+    s = DesignSession(AutoDesignConfig(mode="auto"))
+    s.margin_out = out
+    assert s.outside_envelope_count() == 1
+    marked_judged = sum(1 for m in marked["loops"].values()
+                        if m.get("status") in ("ok", "warn", "fail"))
+    assert marked_judged > 0, "이 점이 애초에 판정을 안 냈다면 배제를 재는 테스트가 아니다"
+    all_judged = sum(
+        1 for e in out["cases"].values() for m in e["loops"].values()
+        if m.get("status") in ("ok", "warn", "fail")
+    )
+    assert s.judged_count() == all_judged - marked_judged
+
+
 def test_sign_flip_fails_even_with_healthy_margin(setup):
     """실효 게인 부호가 설계와 반대면 마진이 좋아 보여도 fail.
 

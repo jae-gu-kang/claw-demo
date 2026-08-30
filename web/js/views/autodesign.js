@@ -17,7 +17,7 @@ import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
   VERDICT_LABEL, actionCards, adoptStorePayload, buildConfig, pointRows,
-  statusCounts, verdictLegend,
+  statusCounts, trimLabel, verdictLegend,
 } from "../lib/autodesign.js";
 import { slotIndex, withConstant } from "../lib/gainsync.js";
 import { store } from "../store.js";
@@ -174,6 +174,10 @@ function countsLine(rows) {
   for (const k of ["ok", "warn", "fail", "na"]) {
     if (c[k]) parts.push(el("span", {}, " ", sevChip(k), ` ${c[k]}`));
   }
+  if (c.outside) {
+    parts.push(el("span", { class: "hint" },
+      ` · 엔벨로프 경계 ${c.outside} (포화·α 여유 미달 — 튜닝·처방 대상 밖이라 판정에서 제외)`));
+  }
   if (c.unjudged) parts.push(el("span", { class: "hint" }, ` · 미판정 ${c.unjudged}`));
   return el("p", {}, "점 판정", ...parts);
 }
@@ -205,8 +209,10 @@ function renderResult(box, body, resultId, ctx) {
       el("td", {}, fmt(r.alt)),
       el("td", {}, fmt(r.fuel)),
       el("td", {}, ROLE_LABEL[r.role] ?? r.role),
-      el("td", {}, r.trimmable === false ? "불가" : r.trimmable ? "OK" : "미판정"),
-      el("td", {}, sevChip(r.status)),
+      el("td", {}, trimLabel(r)),
+      el("td", {}, r.outsideEnvelope
+        ? el("span", { class: "hint" }, `(${r.status ?? "미판정"}) 판정 제외`)
+        : sevChip(r.status)),
     ))),
   );
 
