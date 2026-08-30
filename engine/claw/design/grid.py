@@ -17,7 +17,13 @@ import numpy as np
 
 from claw.analysis.envelope import vn_stall_boundary
 from claw.common.contracts import TrimCase
-from claw.design.points import ROLE_ANCHOR, OperatingPoint, PointSet, case_name
+from claw.design.points import (
+    ROLE_ANCHOR,
+    OperatingPoint,
+    PointSet,
+    case_name,
+    envelope_ok,
+)
 from claw.env import isa_atmosphere
 from claw.trim import trim_batch
 
@@ -94,11 +100,7 @@ def coarse_grid(
     def _progress(done, total_, tr):
         trims[tr.case.name] = tr
         pt = points.get(tr.case.name)
-        pt.trimmable = bool(
-            tr.converged
-            and tr.flags.get("saturation_ok")
-            and tr.flags.get("alpha_margin_ok")
-        )
+        pt.trimmable = envelope_ok(tr)
         if on_progress is not None and on_progress(done, total_, f"trim {tr.case.name}"):
             return True
         return False

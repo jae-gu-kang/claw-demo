@@ -64,6 +64,7 @@ REASON_BANDWIDTH_COLLAPSE = "bandwidth_collapse"  # 마진은 통과, 교차가 
 REASON_MARGIN_FLOOR = "margin_floor"  # 백오프 바닥까지 PM/GM 미달
 REASON_DEGENERATE = "degenerate"  # 기저 루프 응답이 무의미 — 튜닝 불가
 REASON_RESCUED = "rescued"  # 백오프 해가 하한 미달이라 마무리로 구제됨 (통과)
+REASON_NA_NO_CROSSOVER = "na_no_crossover"  # 교차가 없어 마진을 잴 수 없다 (통과 아님)
 
 # 사유 → 사람이 읽는 한 줄 + 다음 수. 화면·원장이 이 표를 쓴다 (엔진이 정본).
 REASON_TEXT = {
@@ -81,6 +82,8 @@ REASON_TEXT = {
                          " 지연·작동기 예산이 병목이다",
     REASON_DEGENERATE: "이 자리의 기저 루프 응답이 무의미하다 — 입출력·플랜트를 확인한다",
     REASON_RESCUED: "백오프 해가 대역폭 하한 아래여서 마무리로 되찾았다 (통과)",
+    REASON_NA_NO_CROSSOVER: "교차가 없어 이 루프의 마진을 잴 수 없다 — 통과가 아니라"
+                            " 판정 불가다. 루프 조성·게인 부호를 확인한다",
 }
 # 통과로 보는 사유 — 나머지는 자리 status가 infeasible이다 (= "자유 게인으로도 설계
 # 목표를 못 맞춘 자리". classify의 structural_limit 입력이 바로 이것이다)
@@ -92,7 +95,7 @@ _PASSING = (REASON_OK, REASON_RESCUED)
 # 분류기의 구조 한계 게이트도 이 목록을 본다 (classify가 import한다 — 두 모듈에
 # 같은 목록이 손으로 두 번 적히면 갈린다)
 SLOT_DESIGN_FAILED = (REASON_NO_STABLE_GAIN, REASON_DEGENERATE, REASON_MARGIN_FLOOR,
-                      REASON_BANDWIDTH_COLLAPSE)
+                      REASON_BANDWIDTH_COLLAPSE, REASON_NA_NO_CROSSOVER)
 
 
 @dataclass(frozen=True)
@@ -401,16 +404,28 @@ def _report_rates_on_final_composition(axes, gains, achieved, notes, pending):
             )
 
 
-def _att_margins_meet(m, targets) -> bool:
-    """자세 마진 수용 판정 — 백오프 루프와 구제 마무리가 **같은 식을 쓴다**.
+def _att_margin_verdict(m, targets) -> str:
+    """자세 마진 수용 판정 — "ok" | "short" | "na". 백오프와 구제가 **같은 식을 쓴다**.
 
-    두 곳에 따로 적으면 한쪽만 바뀌었을 때 "마무리가 통과시켰다"가 거짓이 된다.
-    (nan GM을 통과로 치는 비대칭은 여기 그대로 있다 — PM은 nan이면 불통과인데
-    GM만 반대다. 자리 단위 사유 코드 작업에서 정리한다.)
+    nan과 inf를 가른다 (loop_margins의 규약: 교차가 없으면 nan, 무한 여유는 inf —
+    "판정 불가를 무한 여유로 오인하지 않도록" 둘을 구분해 낸다). 종전 식은 그 구분을
+    무너뜨렸다:
+
+        gm_ok = not (isfinite(gm) and gm < target)
+
+    `isfinite`가 False인 두 경우를 똑같이 통과로 쳤다 — inf(무한 여유, 통과가 맞다)와
+    **nan(판정 불가, 통과가 아니다)**. PM은 반대로 nan이면 불통과였다. 한 판정식
+    안에서 같은 값에 다른 규약을 쓴 셈이고, 그래서 "GM을 못 잰 자리"가 조용히
+    설계 목표 달성으로 기록됐다.
+
+    inf는 그대로 통과다 — `inf < target`이 False이므로 아래 비교가 그것을 처리한다.
     """
-    pm_ok = math.isfinite(m["pm_deg"]) and m["pm_deg"] >= targets.pm_deg
-    gm_ok = not (math.isfinite(m["gm_db"]) and m["gm_db"] < targets.gm_db)
-    return pm_ok and gm_ok
+    pm, gm = float(m["pm_deg"]), float(m["gm_db"])
+    if math.isnan(pm) or math.isnan(gm):
+        return "na"  # 판정 불가 — 통과도 미달도 아니다
+    if pm < targets.pm_deg or gm < targets.gm_db:
+        return "short"
+    return "ok"
 
 
 def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> tuple:
@@ -424,6 +439,7 @@ def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> t
     wc = wc0
     evals = 0
     best = None
+    last_verdict = "na"
     while wc >= targets.wc_att_floor_frac * wc0:
         zc = wc * targets.ki_zero_frac
         base = att_margin_loop(lm_axis, rate_gains, kp=1.0, ki=zc, **act_kw)
@@ -438,21 +454,26 @@ def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> t
         evals += 1
         # wc0(초기 목표 교차)을 함께 낸다 — 이게 없으면 "대역폭이 얼마나 무너졌나"가
         # 결과 밖에서 계산 불가능하다. 판정식 wc ≥ wc_att_ok_frac·wc0의 분모다
+        verdict = _att_margin_verdict(m, targets)
         best = (kp, ki, {**m, "orientation": orient, "wc_att": wc, "wc0": wc0,
                          "wc_fallback": wc_fallback, "target_pm_deg": targets.pm_deg,
                          "target_gm_db": targets.gm_db,
                          "target_wc_frac": targets.wc_att_ok_frac})
-        if _att_margins_meet(m, targets):
+        if verdict == "ok":
             # 대역폭 하한 — 이 밑에서만 통과하는 것은 성능 붕괴다 (structural limit).
             # **마진은 통과했다** — 사유를 margin_floor와 뭉개면 안내가 거짓이 된다
             reason = (REASON_OK if wc >= targets.wc_att_ok_frac * wc0
                       else REASON_BANDWIDTH_COLLAPSE)
             return kp, ki, best[2], reason, evals
+        last_verdict = verdict
         wc *= targets.backoff
     if best is None:
         return 0.0, 0.0, {"wc0": wc0, "wc_fallback": wc_fallback}, REASON_DEGENERATE, evals
     kp, ki, ach = best
-    return kp, ki, ach, REASON_MARGIN_FLOOR, evals
+    # 백오프를 다 쓰고도 **판정 불가로만** 끝났으면 "마진 미달"이 아니다 —
+    # 교차가 없어 잴 수 없었던 것이고, 그 둘을 뭉개면 안내가 엉뚱한 예산을 가리킨다
+    return kp, ki, ach, (REASON_NA_NO_CROSSOVER if last_verdict == "na"
+                         else REASON_MARGIN_FLOOR), evals
 
 
 def tune_point(
@@ -503,9 +524,9 @@ def tune_point(
                 meta={k: ach[k] for k in _ATT_META if k in ach},
             )
             evals += ev2
-            if _att_margins_meet(ach2, targets) and math.isfinite(ach2["wc_att"]) and (
-                ach2["wc_att"] >= targets.wc_att_ok_frac * ach["wc0"]
-            ):
+            if _att_margin_verdict(ach2, targets) == "ok" and math.isfinite(
+                ach2["wc_att"]
+            ) and ach2["wc_att"] >= targets.wc_att_ok_frac * ach["wc0"]:
                 kp, ki, ach, st = kp2, ki2, ach2, REASON_RESCUED
                 notes.append(
                     f"{group}.kp/ki: 백오프 해가 대역폭 하한 미달이라 마무리로 구제 —"

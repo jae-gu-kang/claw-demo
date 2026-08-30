@@ -28,6 +28,19 @@ ROLE_RANK = {ROLE_VALIDATION: 0, ROLE_BREAKPOINT: 1, ROLE_ANCHOR: 2}
 AXES = ("mach", "alt", "fuel")  # fcl/schedule.py SCHED_VARS와 같은 축 — 스케줄 변수가 곧 격자 축
 
 
+def envelope_ok(tr) -> bool:
+    """이 트림해가 **엔벨로프 안**인가 — 수렴 + 포화 여유 + α 여유.
+
+    세 곳(grid·refine·schedmap)이 각자 판정하던 것을 한 자리로 모은다. schedmap만
+    `converged`만 봤고, 그래서 **트림은 되지만 포화·α 여유가 미달인 중점 검증점**이
+    엔벨로프 안으로 취급돼 판정·승격·튜닝까지 흘러갔다 — 같은 조건의 coarse 앵커는
+    TUNE이 건너뛰고 실패 목록에서도 빠지는데, 두 경로가 갈렸다.
+    """
+    return bool(tr.converged
+                and tr.flags.get("saturation_ok")
+                and tr.flags.get("alpha_margin_ok"))
+
+
 def case_name(mach: float, alt: float, fuel: float) -> str:
     """격자 값 그대로의 정본 이름 — 반올림하지 않는다 (web grid.js nameCases 원칙).
 

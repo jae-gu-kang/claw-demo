@@ -1,4 +1,5 @@
-"""자동 설계 라우트 검증 — 기본값 응답, 202 잡, 저장 스키마, 예산 422, gated 재개."""
+"""자동 설계 라우트 검증 — 기본값 응답, 202 잡, 저장 스키마(미달 원장·커버리지 포함),
+예산 422, gated 재개."""
 
 import math
 import types
@@ -432,6 +433,214 @@ def test_saved_effect_log_obeys_nonfinite_policy(client):
     assert eff["before"]["severity"] == "inf"  # ±inf → 문자열
     assert eff["after"]["severity"] is None  # NaN → null
     assert body["margin_out"]["failures"][0]["severity"] == "inf"
+
+
+_LEDGER_KINDS = {"verify", "tune", "unjudged", "outside_envelope", "not_trimmed",
+                 "skipped", "ineffective"}
+
+
+def _ledger_session(fillers: int = 0):
+    """미달 원장이 채워진 세션 — 실행 없이 저장 계약만 보기 위한 최소 구성.
+
+    심각도가 서로 다른 자리를 섞는다: 트림 미수렴 점(볼 것이 없어 측정 불가) ·
+    판정 불가 자리(볼 지표가 없어 측정 불가) · PM 부족 셋(요구 45°). `fillers`는
+    상한 검사용 꼬리 행 수 — 전부 worst보다 덜 심각하고 서로 순서가 갈린다.
+
+    **점 이름 순과 심각도 순이 일부러 어긋나 있다** — 나란하면 라우트가 점 이름으로
+    다시 정렬해도(dict 순회·sorted) 테스트가 못 잡는다.
+    """
+    from claw.design import AutoDesignConfig, DesignSession
+
+    s = DesignSession(AutoDesignConfig())
+    cases = {
+        # 트림 미수렴 — loops가 비어 kind=not_trimmed, severity 측정 불가
+        "m020_a05000_f0200": {"loops": {}, "note": "트림 미수렴"},
+        # 이름은 앞, 심각도는 중간
+        "m040_a05000_f0200": {"loops": {
+            "yaw_damper": {"status": "fail", "pm_deg": 35.0}}},  # 부족 비율 0.222
+        "m060_a05000_f0200": {"loops": {
+            "roll_att": {"status": "warn", "pm_deg": 44.0},    # 0.022 — 가장 덜 심각
+            "pitch_rate": {"status": "na"},                    # 볼 지표 없음 → 측정 불가
+        }},
+        # 이름은 맨 뒤, 심각도는 (fillers 없을 때) 맨 앞
+        "m090_a05000_f0200": {"loops": {
+            "pitch_att": {"status": "fail", "pm_deg": 20.0}}},  # 0.556
+    }
+    if fillers:
+        # 최악 한 행(부족 비율 0.978)과, 그보다 전부 덜 심각한 꼬리 행들.
+        # 꼬리는 i가 클수록 덜 심각하다 — 마지막 행이 가장 먼저 잘려야 한다
+        cases["worst"] = {"loops": {"pitch_att": {"status": "fail", "pm_deg": 1.0}}}
+        for i in range(fillers):
+            cases[f"fill{i:04d}"] = {"loops": {
+                "pitch_att": {"status": "fail", "pm_deg": 30.0 + i * 0.02}}}
+    s.margin_out = {"cases": cases, "failures": []}
+    return s
+
+
+def test_auto_run_saves_ledger_and_coverage(client, wait_job):
+    """실제 auto 실행의 저장물에 미달 원장·커버리지가 실리는지 — 조용히 빠지는 자리다.
+
+    _save_session은 세션 조각들을 손으로 이어 붙인다. 엔진이 shortfall_ledger()·
+    coverage()를 내도 서버가 안 실으면 아무 데서도 안 터지고 화면에서만 사라진다
+    (효과 회계 때와 같은 함정). 대역이 아니라 실제 실행으로 한 번은 확인한다 —
+    행 모양이 엔진과 갈리면 여기서 걸린다.
+    """
+    r = client.post("/api/design/auto", json={"config": _small_config()})
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    body = client.get(f"/api/results/{j['result_id']}").json()
+
+    assert isinstance(body["ledger"], list)
+    rep = body["report"]
+    assert isinstance(rep["ledger_size"], int)
+    for row in body["ledger"]:
+        assert set(row) >= {"point", "loop", "kind", "status", "reason", "severity",
+                            "shortfall", "target", "note", "action"}
+        assert row["kind"] in _LEDGER_KINDS, row["kind"]
+
+    cov = rep["coverage"]
+    # 키 목록을 통째로 베끼지 않는다 — 무엇을 안 봤는지의 항목은 엔진이 늘리고 이름도
+    # 바꾼다(서버 테스트가 그 거울이 되면 엔진이 항목을 늘릴 때마다 여기가 깨진다).
+    # 서버가 지는 계약은 "엔진이 낸 것이 그대로 실린다"이므로 실림과, 원장과 서로
+    # 어긋나지 않음을 본다
+    assert isinstance(cov, dict) and cov
+    assert isinstance(cov["not_trimmed"], int)
+    assert cov["refine_tol"] > 0.0
+    # 커버리지 공백은 사람이 읽는 한국어 문장 — 빈 문자열이 섞이면 화면이 빈 줄을 낸다
+    assert isinstance(rep["coverage_gaps"], list)
+    assert all(isinstance(t, str) and t.strip() for t in rep["coverage_gaps"])
+
+    if "ledger_truncated" not in body:
+        # 상한 안이면 원장은 전량이다 — 잘렸다면 고지가 대신 그 사실을 말해야 한다
+        assert len(body["ledger"]) == rep["ledger_size"]
+        # report와 원장이 같은 실행을 말하는지 — 트림 미수렴 점은 양쪽에 한 번씩 센다.
+        # 어긋나면 둘 중 하나가 다른 시점의 세션에서 나온 것이다
+        assert sum(r["kind"] == "not_trimmed" for r in body["ledger"]) == cov["not_trimmed"]
+
+
+def test_saved_ledger_keeps_severity_order(client):
+    """원장 순서를 라우트가 흐트러뜨리지 않는지 — 정렬은 엔진 규약이다.
+
+    측정 불가가 맨 앞, 그 뒤로 요구선 대비 부족 비율 내림차순(criteria.severity와
+    같은 규약). 라우트가 dict로 훑거나 다시 정렬하면 "가장 심각한 것"이 목록 맨 앞이
+    아니게 되고, 화면은 엉뚱한 행을 최악으로 지목한다. 저장→조회 왕복 뒤에도 엔진이
+    준 순서 그대로인지 본다.
+    """
+    from claw_server.routes.design import _save_session
+
+    s = _ledger_session()
+    want = [(r["point"], r["loop"], r["severity"]) for r in s.shortfall_ledger()]
+    # 표본이 실제로 재정렬을 잡는지부터 — 심각도 순과 점 이름 순이 같으면 이 테스트는
+    # 라우트가 dict 순회로 갈아타도 통과한다 (그런 표본은 아무것도 고정하지 못한다)
+    assert want != sorted(want, key=lambda t: (t[0], t[1] or ""))
+
+    job = types.SimpleNamespace(id="ledger-order", created=0.0, result_id=None)
+    _save_session(client.app.state.store, job, s, "fp-order")
+
+    rows = client.get("/api/results/ledger-order").json()["ledger"]
+    assert [(r["point"], r["loop"], r["severity"]) for r in rows] == want
+
+    sev = [r["severity"] for r in rows]
+    n_none = sum(v is None for v in sev)
+    assert n_none == 2  # 트림 미수렴 점 + 판정 불가 자리 — 둘 다 "못 잰 것"이다
+    assert sev[:n_none] == [None] * n_none  # 측정 불가가 맨 앞
+    nums = sev[n_none:]
+    assert len(nums) >= 3  # 순서를 흐트러뜨리면 실제로 깨지는 표본이어야 한다
+    assert nums == sorted(nums, reverse=True)
+
+
+def test_saved_ledger_obeys_nonfinite_policy(client):
+    """원장의 inf/nan이 직렬화 정책을 우회하지 않는지 — 저장이 통째로 터지는 자리다.
+
+    severity는 볼 지표가 없으면 +inf이고, shortfall의 achieved·deficit·deficit_frac은
+    발산 해에서 ±inf가 된다(criteria._one은 ±inf를 일부러 그대로 둔다 — nan(=판정
+    불가)과 섞이지 않게 하려고). ResultStore는 allow_nan=False라 원시 비유한값이 한
+    조각이라도 남으면 **저장 시점에 ValueError**로 세션 전량이 소실된다(잡은 이미
+    202로 답한 뒤다). 원장을 to_jsonable 봉투 밖에서 이어 붙이면 여기서 걸린다.
+    """
+    from claw_server.routes.design import _save_session
+
+    s = _ledger_session()
+    s.shortfall_ledger = lambda: [{  # 인스턴스 대역 — 엔진은 건드리지 않는다
+        "point": "m060_a05000_f0200", "loop": "pitch_att", "kind": "verify",
+        "status": "fail", "reason": None, "severity": math.inf, "target": None,
+        "note": None, "action": None,
+        "shortfall": {"pm_deg": {"required": 45.0, "achieved": -math.inf,
+                                 "deficit": math.inf, "deficit_frac": math.nan}},
+    }]
+    job = types.SimpleNamespace(id="ledger-policy", created=0.0, result_id=None)
+    _save_session(client.app.state.store, job, s, "fp-lpolicy")  # 여기서 안 터져야 한다
+
+    row = client.get("/api/results/ledger-policy").json()["ledger"][0]
+    assert row["severity"] == "inf"  # ±inf → 문자열 (0으로 뭉개면 최악이 최선이 된다)
+    sf = row["shortfall"]["pm_deg"]
+    assert sf["achieved"] == "-inf"
+    assert sf["deficit"] == "inf"
+    assert sf["deficit_frac"] is None  # NaN → null (판정 불가는 부족 0이 아니다)
+
+
+def test_saved_ledger_truncation_is_reported(client):
+    """상한을 넘는 원장은 잘리되 **조용히** 잘리지 않는지 + 남는 쪽이 심각한 쪽인지.
+
+    원장은 (점 × 자리) 규모라 큰 격자에서 수백~수천 행이 된다. 저장물은 한 덩어리
+    JSON이고 재개가 그것을 통째로 읽으므로 상한이 필요한데, 고지 없이 자르면 원장은
+    **못 맞춘 것이 그것뿐이라고 말하는 목록**이 된다. kept/total이 실리는지, total이
+    엔진 전량 수(report.ledger_size)와 같은지, 그리고 잘린 뒤에도 가장 심각한 행이
+    남고 가장 덜 심각한 행이 사라지는지를 함께 고정한다 — 뒤에서 자르는 것이 아니라
+    **앞을 남기는** 것이어야 한다.
+    """
+    from claw_server.routes.design import MAX_LEDGER_ROWS, _save_session
+
+    s = _ledger_session(fillers=MAX_LEDGER_ROWS + 100)
+    total = len(s.shortfall_ledger())
+    assert total > MAX_LEDGER_ROWS
+    job = types.SimpleNamespace(id="ledger-cut", created=0.0, result_id=None)
+    _save_session(client.app.state.store, job, s, "fp-cut")
+
+    body = client.get("/api/results/ledger-cut").json()
+    assert len(body["ledger"]) == MAX_LEDGER_ROWS
+    assert body["ledger_truncated"] == {"kept": MAX_LEDGER_ROWS, "total": total}
+    # 고지의 total은 엔진 전량 기준 — 잘린 목록 길이를 되받아 적으면 거짓말이 된다
+    assert body["report"]["ledger_size"] == total
+
+    pairs = [(r["point"], r["loop"]) for r in body["ledger"]]
+    assert body["ledger"][0]["severity"] is None  # 측정 불가가 맨 앞 (규약 유지)
+    assert ("worst", "pitch_att") in pairs  # 가장 심각한 측정 행은 남는다
+    assert ("m060_a05000_f0200", "pitch_rate") in pairs  # 측정 불가도 맨 앞이라 남는다
+    # 가장 덜 심각한 행들이 잘려 나간다 (자르는 쪽이 **뒤**라는 증거)
+    assert ("m060_a05000_f0200", "roll_att") not in pairs  # 부족 0.022 — 전체 최하위
+    assert ("fill0000", "pitch_att") in pairs
+    assert (f"fill{MAX_LEDGER_ROWS + 99:04d}", "pitch_att") not in pairs
+
+
+def test_old_result_without_ledger_still_reads(client):
+    """원장 이전에 저장된 결과에는 ledger가 없다 — 조회가 그것으로 터지면 안 된다.
+
+    보존 상한 안에는 배포 이전 저장물이 남아 있다. 조회가 무사한 것과, 그 세션을
+    복원해 다시 저장하면 원장이 붙는 것(구형 → 신형 승급)을 함께 본다 — 재저장에
+    안 붙으면 재개한 결과만 계속 원장 없는 채로 남는다.
+    """
+    from claw.design import AutoDesignConfig, DesignSession
+    from claw_server.routes.design import _save_session
+
+    s = DesignSession(AutoDesignConfig(n_mach=3, alts=(1000.0,), fuels=(200.0,),
+                                       budget_points=12, budget_iters=2))
+    s.status = "cancelled"
+    payload = s.to_dict()  # 구형 저장물 재현 — report·ledger 없이 세션 직렬화만
+    client.app.state.store.save("legacy-noledger", payload,
+                                meta={"kind": "auto_design", "created": 0.0,
+                                      "status": "cancelled", "stage": "COARSE"})
+
+    body = client.get("/api/results/legacy-noledger").json()
+    assert body["kind"] == "auto_design"
+    assert "ledger" not in body and "ledger_truncated" not in body
+
+    restored = DesignSession.from_dict(client.app.state.store.load("legacy-noledger"))
+    job = types.SimpleNamespace(id="legacy-upgraded", created=0.0, result_id=None)
+    _save_session(client.app.state.store, job, restored, "fp-legacy")
+    up = client.get("/api/results/legacy-upgraded").json()
+    assert isinstance(up["ledger"], list)  # 재저장하면 원장이 붙는다
+    assert isinstance(up["report"]["ledger_size"], int)
 
 
 def _poly_session():

@@ -495,3 +495,56 @@ def test_zero_design_slot_is_na_not_failure(setup):
     assert out["gains"]["yaw.k_rate"] == 0.0
     # na가 점 status를 실패로 끌어내리지 않는다 (판정 불가 ≠ 불합격)
     assert out["status"] != "infeasible"
+
+
+def test_unmeasurable_margin_is_not_a_pass():
+    """nan(판정 불가)과 inf(무한 여유)를 가른다 — 종전 식은 둘을 같이 통과시켰다.
+
+    `loop_margins`는 그 둘을 일부러 구분해 낸다(margins.py: "판정 불가를 무한 여유로
+    오인하지 않도록 nan 유지"). 그런데 수용식이
+        gm_ok = not (isfinite(gm) and gm < target)
+    라 `isfinite`가 False인 두 경우를 똑같이 통과로 쳤다. PM은 반대로 nan이면
+    불통과였다 — 한 판정식 안에서 같은 값에 다른 규약을 쓴 셈이고, 그래서
+    "GM을 못 잰 자리"가 조용히 설계 목표 달성으로 기록됐다.
+    """
+    from claw.design.tune import _att_margin_verdict
+
+    tg = TuneTargets()  # PM 50° / GM 8 dB
+    assert _att_margin_verdict({"pm_deg": 60.0, "gm_db": 12.0}, tg) == "ok"
+    # 무한 여유는 통과다 — 그 축에 잘라 낼 이득이 없다는 뜻이다
+    assert _att_margin_verdict({"pm_deg": 60.0, "gm_db": float("inf")}, tg) == "ok"
+    # 판정 불가는 통과가 아니다
+    assert _att_margin_verdict({"pm_deg": 60.0, "gm_db": float("nan")}, tg) == "na"
+    assert _att_margin_verdict({"pm_deg": float("nan"), "gm_db": 12.0}, tg) == "na"
+    assert _att_margin_verdict({"pm_deg": 40.0, "gm_db": 12.0}, tg) == "short"
+
+
+def test_envelope_check_is_one_helper_for_all_three_stages():
+    """엔벨로프 판정을 세 곳이 각자 하면 같은 조건의 점이 갈린다.
+
+    schedmap만 `converged`를 봤고 grid·refine은 포화·α 여유까지 봤다. 그래서
+    **트림은 되지만 포화하는 중점 검증점**은 `outside_envelope` 표시를 못 받고
+    판정·승격·튜닝까지 흘러갔는데, 같은 조건의 coarse 앵커는 TUNE이 건너뛰고
+    실패 목록에서도 빠졌다.
+    """
+    import inspect
+
+    from claw.design import grid, refine, schedmap
+    from claw.design.points import envelope_ok
+
+    class _T:
+        def __init__(self, conv, sat, alpha):
+            self.converged, self.flags = conv, {
+                "saturation_ok": sat, "alpha_margin_ok": alpha}
+
+    assert envelope_ok(_T(True, True, True)) is True
+    assert envelope_ok(_T(True, False, True)) is False  # 포화 — 엔벨로프 경계다
+    assert envelope_ok(_T(True, True, False)) is False  # α 여유 미달
+    assert envelope_ok(_T(False, True, True)) is False  # 미수렴
+
+    # 세 모듈이 **그 헬퍼를 부른다** — 각자 다시 적으면 이 단정이 무의미해진다
+    for mod in (grid, refine, schedmap):
+        src = inspect.getsource(mod)
+        assert "envelope_ok(" in src, mod.__name__
+        assert 'flags.get("saturation_ok")' not in src, (
+            f"{mod.__name__}이 엔벨로프 조건을 다시 적었다")

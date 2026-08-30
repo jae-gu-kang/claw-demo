@@ -18,7 +18,7 @@ import numpy as np
 
 from claw.common.contracts import TrimCase
 from claw.design.linmodels import model_distance
-from claw.design.points import AXES, ROLE_ANCHOR, OperatingPoint, case_name
+from claw.design.points import AXES, ROLE_ANCHOR, OperatingPoint, case_name, envelope_ok
 from claw.trim import trim_level
 
 _ROUND = 6  # 중점 좌표 반올림 자릿수 — depth 3(간격 1/8)까지 이름 안정
@@ -105,9 +105,7 @@ def refine_trim_points(
         tr = trim_level(aircraft, mid, z0=z0, fingerprint=fingerprint)
         trims[mid.name] = tr
         pt = OperatingPoint(case=mid, role=ROLE_ANCHOR, origin="refine")
-        pt.trimmable = bool(
-            tr.converged and tr.flags.get("saturation_ok") and tr.flags.get("alpha_margin_ok")
-        )
+        pt.trimmable = envelope_ok(tr)
         points.add(pt)
         inserted.append(mid.name)
         if tr.converged:

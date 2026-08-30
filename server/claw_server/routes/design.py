@@ -8,6 +8,10 @@
 
 기본값의 정본은 엔진 AutoDesignConfig — /design/defaults가 그대로 내려 주고 웹은
 수치를 재기술하지 않는다 (합격기준 하드코딩 이관, 01 §5).
+
+저장물에는 세션 직렬화 외에 report·proposed_actions·gain_export와 **미달 원장**
+(`ledger`, 상한 초과 시 `ledger_truncated`)이 함께 실린다 — 엔진이 계산하고 정렬한
+것을 그대로 옮기며, 라우트가 더하는 것은 저장 크기 상한과 그 고지뿐이다.
 """
 
 import math
@@ -32,6 +36,14 @@ from claw_server.serialize import to_jsonable
 router = APIRouter(tags=["design"])
 
 MAX_POINTS = 200  # influence.py MAX_CASES 정합 — 단일 워커 점유 상한
+
+# 저장물에 싣는 미달 원장 행 수 상한. 원장은 **(점 × 자리)** 규모라 MAX_POINTS 격자에
+# 자리 5개면 1000행을 넘고, 거기에 튜닝·무효 처방 행이 더 붙는다. 저장물은 한 덩어리
+# JSON이고 재개(/design/{id}/resume)는 그것을 통째로 읽어 세션을 복원하므로, 원장이
+# 커지면 조회와 재개가 함께 무거워진다. 상한은 엔진이 아니라 여기 있다 — 엔진 원장은
+# 판정의 전량 목록이어야 하고(report의 ledger_size가 그 전량 수다), 줄이는 것은 저장·
+# 전송 사정이지 판정 사정이 아니다. 자를 때는 severity 상위부터 남긴다.
+MAX_LEDGER_ROWS = 500
 
 # 재샘플 허용치 — resample_to_table의 기본값과 같은 값을 **명시로** 넘긴다. 반출에
 # 이 수치를 함께 싣기 때문이다: 엔진 기본값이 바뀌어도 보고한 값과 실제로 쓴 값이
@@ -195,12 +207,40 @@ def _gain_export(session: DesignSession) -> dict:
     }
 
 
+def _ledger_payload(session: DesignSession) -> dict:
+    """미달 원장 조각 — {ledger} 또는 {ledger, ledger_truncated}.
+
+    행을 만드는 것도 정렬하는 것도 엔진 몫이다(severity 내림차순, 측정 불가가 맨 앞
+    — criteria.severity와 같은 규약). 라우트는 **앞에서 자르기만** 한다: 여기서 행을
+    조립하거나 다시 정렬하면 화면이 읽는 순서가 엔진 규약과 갈리고, 갈린 쪽이 화면이라
+    사용자는 "가장 심각한 것"으로 엉뚱한 행을 본다.
+
+    자른 사실은 `ledger_truncated`로 반드시 남긴다. 원장은 "이 실행이 못 맞춘 것
+    전부"를 뜻하는 목록이라, 조용히 잘린 원장은 **못 맞춘 것이 그것뿐이라고 말하는
+    목록**이 된다 — 실패 0을 통과로 위장하지 않으려고 judged·outside_envelope·
+    not_trimmed를 함께 세는 것과 같은 이유다. total은 report의 ledger_size(엔진 전량
+    기준)와 같은 수이므로, 화면은 둘 중 어느 쪽을 봐도 "몇 개를 안 보여주는가"를 안다.
+
+    비유한값은 여기서 손대지 않는다 — 행의 severity·shortfall(deficit·achieved 등)은
+    ±inf·nan일 수 있고, 그 정리는 _save_session의 to_jsonable 봉투가 일괄로 한다.
+    """
+    rows = list(session.shortfall_ledger())
+    if len(rows) <= MAX_LEDGER_ROWS:
+        return {"ledger": rows}
+    return {
+        "ledger": rows[:MAX_LEDGER_ROWS],
+        "ledger_truncated": {"kept": MAX_LEDGER_ROWS, "total": len(rows)},
+    }
+
+
 def _save_session(store, job, session: DesignSession, fingerprint: str,
                   parent: str | None = None) -> None:
     payload = session.to_dict()
     payload["report"] = session.report()
     payload["proposed_actions"] = session.proposed_actions()
     payload["gain_export"] = _gain_export(session)
+    # 마지막에 얹는다 — to_jsonable 봉투 **안**이어야 원장의 inf/nan이 정책을 탄다
+    payload.update(_ledger_payload(session))
     store.save(
         job.id,
         to_jsonable(payload),

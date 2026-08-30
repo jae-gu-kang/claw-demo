@@ -39,7 +39,13 @@ from claw.design.closure import (
     oriented_margins,
     rate_loop_crossover,
 )
-from claw.design.points import ROLE_BREAKPOINT, ROLE_VALIDATION, OperatingPoint, case_name
+from claw.design.points import (
+    ROLE_BREAKPOINT,
+    ROLE_VALIDATION,
+    OperatingPoint,
+    case_name,
+    envelope_ok,
+)
 from claw.design.tune import TuneTargets
 from claw.trim import split_axes
 from claw.trim.trim import trim_batch
@@ -232,8 +238,12 @@ def scheduled_margin_map(
             pt.trimmable = False
             cases[name] = {"role": pt.role, "note": "미수렴 트림 — 마진 판정 불가", "loops": {}}
         else:
+            # 종전에는 `converged`만 보고 True를 박았다 — 그래서 **트림은 되지만
+            # 포화·α 여유가 미달인 중점 검증점**이 엔벨로프 안으로 취급돼 판정·승격·
+            # 튜닝까지 흘러갔다. 같은 조건의 coarse 앵커는 TUNE이 건너뛰는데 두 경로가
+            # 갈렸다. 판정은 한 헬퍼가 한다 (points.envelope_ok)
             if pt.trimmable is None:
-                pt.trimmable = True
+                pt.trimmable = envelope_ok(tr)
             lm = lms.get(aircraft, tr)
             entry = {
                 "role": pt.role,
