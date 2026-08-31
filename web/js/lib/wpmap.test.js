@@ -4,8 +4,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  DEFAULT_SPAN, DRAG_PX, fitView, fmtMeters, hitTest, isDrag,
-  makeProjection, moveWaypoint, panBy, rowsToPoints, toCanvasXY, zoomAt,
+  DEFAULT_SPAN, DRAG_PX, ZOOM_STEP, fitView, fmtMeters, hitTest, isDrag,
+  makeProjection, moveWaypoint, panBy, planProfile, rowsToPoints, toCanvasXY,
+  trackProfile, zoomAt,
 } from "./wpmap.js";
 
 const W = 380, H = 380, M = 42;
@@ -104,10 +105,10 @@ test("rowsToPoints: 빈 문자열이 0으로 조용히 주입되지 않음 — o
     { n: "8000", e: "0" }, { n: "", e: "5" }, { n: "abc", e: "1" }, { n: " 3 ", e: "-2" },
   ]);
   assert.equal(pts.length, 4); // 행 순서·길이 보존 (인덱스 = 표 행)
-  assert.deepEqual(pts[0], { n: 8000, e: 0, ok: true });
+  assert.deepEqual(pts[0], { n: 8000, e: 0, ok: true, d: null }); // 고도 열은 선택
   assert.equal(pts[1].ok, false); // Number("")===0 함정 회피
   assert.equal(pts[2].ok, false);
-  assert.deepEqual(pts[3], { n: 3, e: -2, ok: true });
+  assert.deepEqual(pts[3], { n: 3, e: -2, ok: true, d: null });
 });
 
 test("isDrag: 임계 — 미만은 클릭(추가/선택), 초과는 드래그/팬", () => {
@@ -129,4 +130,66 @@ test("fmtMeters: 1 m 반올림 · -0 정규화 — 표 문자열 오염 방지",
   assert.equal(fmtMeters(1234.6), "1235");
   assert.equal(fmtMeters(-0.4), "0"); // "-0" 금지
   assert.equal(fmtMeters(-1234.6), "-1235");
+});
+
+test("ZOOM_STEP: 휠 한 이벤트당 줌이 로그 기준 100배 둔하다 (사용자 제기)", () => {
+  // 종전 1.2는 이벤트당이라 트랙패드 한 제스처(수십 이벤트)에 지도가 튀었다.
+  // 100회 굴려야 종전 한 번과 같아진다 — 그것이 "100배 둔하게"의 정의다
+  assert.ok(Math.abs(ZOOM_STEP ** 100 - 1.2) < 1e-9);
+  assert.ok(ZOOM_STEP > 1 && ZOOM_STEP < 1.01); // 방향은 확대, 한 번에 1%도 안 움직인다
+});
+
+test("rowsToPoints: 고도는 선택 — 빈 칸은 null이지 0이 아니다", () => {
+  const pts = rowsToPoints([
+    { n: "100", e: "200", d: "1500" },
+    { n: "300", e: "400" }, // 고도 열 자체가 없는 구버전 행
+    { n: "500", e: "600", d: "" },
+    { n: "700", e: "800", d: "abc" },
+  ]);
+  assert.deepEqual(pts.map((p) => p.d), [1500, null, null, null]);
+  assert.ok(pts.every((p) => p.ok)); // 고도 유무는 표시 가능 여부와 무관
+});
+
+test("planProfile: 누적 수평거리 — 출발점(원점)부터, 표시 불가 행은 건너뛴다", () => {
+  const pts = rowsToPoints([
+    { n: "300", e: "400", d: "1500" }, // 원점에서 500 m
+    { n: "", e: "0", d: "900" }, // 표시 불가 — 거리 누적에서도 빠진다
+    { n: "300", e: "1400", d: "800" }, // 앞 유효점에서 1000 m
+  ]);
+  const prof = planProfile(pts, 200); // 반경 0 = 중심끼리 잇기 (폴백)
+  assert.deepEqual(prof.map((p) => p.idx), [-1, 0, 2]);
+  assert.deepEqual(prof.map((p) => Math.round(p.dist)), [0, 500, 1500]);
+  assert.deepEqual(prof.map((p) => p.alt), [200, 1500, 800]);
+  assert.deepEqual(prof.map((p) => p.mark), ["start", "wp", "wp"]);
+  // 고도 미입력은 null 그대로 — 이웃 값으로 메우면 안 넣은 고도를 그리게 된다
+  assert.equal(planProfile(rowsToPoints([{ n: "0", e: "100" }]))[1].alt, null);
+  assert.equal(planProfile([], null)[0].alt, null); // 출발 고도 미상도 null
+});
+
+test("trackProfile: 비수치 샘플은 건너뛴다 — x가 뒤로 감기지 않는다", () => {
+  const prof = trackProfile([0, 300, null, 300], [0, 400, 0, 1400], [100, 200, 300, 400]);
+  assert.deepEqual(prof.map((p) => Math.round(p.dist)), [0, 500, 1500]);
+  assert.deepEqual(prof.map((p) => p.alt), [100, 200, 400]);
+  // 거리는 단조 증가여야 한다 (접힌 곡선 금지)
+  for (let i = 1; i < prof.length; i += 1) assert.ok(prof[i].dist >= prof[i - 1].dist);
+  assert.deepEqual(trackProfile([], [], []), []);
+});
+
+test("planProfile: 도달 반경을 주면 램프 마루가 생긴다 — 엔진 명령과 같은 모양", () => {
+  // 엔진 램프는 웨이포인트 중심이 아니라 반경 경계에서 끝나고 그 뒤는 평평하다
+  // (guidance/path.py _leg_alt). 중심끼리 곧게 이으면 화면이 구간 내내 명령보다
+  // 뒤처진 기울기를 그린다 — 최대 Δalt·r/seg
+  const pts = rowsToPoints([{ n: "1000", e: "0", d: "1500" }]);
+  const prof = planProfile(pts, 500, 200);
+  assert.deepEqual(prof.map((p) => p.mark), ["start", "ramp", "wp"]);
+  assert.deepEqual(prof.map((p) => p.dist), [0, 800, 1000]); // 마루는 1000-200
+  assert.deepEqual(prof.map((p) => p.alt), [500, 1500, 1500]); // 마루부터 평평
+  // 구간이 반경보다 짧으면 이을 자리가 없다 — 구간 시작에서 곧바로 목표 고도
+  // (엔진 denom <= 0 분기와 같은 퇴화). 같은 x의 두 점 = 수직 계단
+  const short = planProfile(rowsToPoints([{ n: "100", e: "0", d: "900" }]), 500, 200);
+  assert.deepEqual(short.map((p) => p.dist), [0, 0, 100]);
+  assert.deepEqual(short.map((p) => p.alt), [500, 900, 900]);
+  // 고도 없는 웨이포인트에는 마루를 만들지 않는다 (없는 계획을 그리지 않는다)
+  const noAlt = planProfile(rowsToPoints([{ n: "1000", e: "0" }]), 500, 200);
+  assert.deepEqual(noAlt.map((p) => p.mark), ["start", "wp"]);
 });

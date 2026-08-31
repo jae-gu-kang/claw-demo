@@ -100,7 +100,7 @@
 - 의존: M0~M4 (env는 스케줄 변수 마하 산출용 — L3→L1 계층 규칙 내). 검증: 선형모델 상 루프별 응답, 이후 폐루프 sim
 
 ### M8 `guidance` — 유도
-- 웨이포인트 열 → 경로 생성 → 경로추종(알고리즘은 레지스트리 교체: LOS/L1/벡터필드 **[TBD]**), 출력은 속도/고도/헤딩 명령
+- 웨이포인트 열 → 경로 생성 → 경로추종(알고리즘은 레지스트리 교체: LOS/L1/벡터필드 **[TBD]**), 출력은 속도/고도/헤딩 명령. 웨이포인트는 `(n, e)` 또는 `(n, e, alt)`이고 `LosPath.step`은 `(heading, alt, done)`을 낸다 — 고도는 `alt="path"`인 모드에서만 쓰인다(`heading="path"`와 같은 규약, 01 §3.3). 고도 명령은 구간 선형 보간이고 소진 시 마지막 웨이포인트 고도로 정착한다
 - 비행모드: **선언적 모드 테이블 + 실행기(sequencer)** (01§3.3.1) — 각 모드 {진입조건, 활성 명령, 이탈조건}. 이륙→상승→…→착륙
 - 범프리스 전환은 M2 Fader·적분기 초기화 인터페이스 소비
 - 의존: M0~M2. (M7과 상호 의존 없음 — `GuidanceCommand` 계약으로만 연결)
@@ -277,3 +277,4 @@ CLAW_DEMO/
 - *v0.27 — M10 엔벨로프 수치에 하중배수 축과 등고선 등재(01 §2.6 v0.31과 한 세트): `stall_mach_lo(n_target=)` + 귀속 `n_reach`, `iso_curves`(등동압선은 `mach_qbar_limit` 재사용 — q̄ 경계선과 산식 공유). M14 웹 lib에 `outlineCaps`·`thrustFrontier`·`spreadLabels`·`outsideRegion` 표현 변환 추가*
 - *v0.28 — M10에 보드선도 등재(01 §4.2 v0.32와 한 세트): `bode_data`(교차점 전량 — `control.margin`이 고른 하나와 나머지를 화면이 구분할 수 있게)·`omega_covering`(두 조립을 겹쳐 비교하기 위한 공통 log 격자). M14 웹 lib에 `heatmapCellAt`·`heatmapCanvasHeight`·`logScale`·`decadeTicks`·`bodeSeries`, 뷰에 `bodeCanvas` 추가*
 - *v0.29 — M10 `design_envelope`에 `bounds.speed_of_sound` echo(01 §2.6 v0.33과 한 세트) — 상단 대기속도 보조축이 자기가 놓인 모서리에서 정확하고, 반대 모서리에서 얼마나 어긋나는지 소비자가 지어내지 않고 말하도록 두 값을 다 싣는다. M14 웹 lib에 `msToKt`·`ftToM`·`tasAxisTicks`·`machWindow`·`isoOffWindow`·`machSpan` 추가*
+- *v0.30 — M8 경로추종이 세로 프로파일도 낸다(01 §3.3 v0.40과 한 세트): 웨이포인트 3열 + `step` 3튜플 + `has_alt`, 모드 `alt="path"`. M14 웹 lib에 `planProfile`·`trackProfile`·`ZOOM_STEP`, 뷰에 `altProfileCanvas`. M11 `_xtrack_rms`는 고도 열을 버린다(3열을 `reshape(-1, 2)`로 뭉개면 좌표가 조용히 엉킨다)*

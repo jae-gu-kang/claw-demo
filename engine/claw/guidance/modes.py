@@ -66,13 +66,17 @@ def eval_condition(cond, nav, ctx) -> bool:
 
 @dataclass(frozen=True)
 class ModeSpec:
-    """모드 선언 — 명령 None은 해당 축 비활성(오토파일럿 홀드), heading은
-    수치[rad] 또는 "path"(경로추종 헤딩)."""
+    """모드 선언 — 명령 None은 해당 축 비활성(오토파일럿 홀드).
+
+    heading·alt는 수치 또는 "path" — "path"면 그 축의 명령을 경로추종기가 낸다
+    (guidance.py). 두 축이 같은 규약을 쓰므로 "경로와 모드 중 누가 이기나"라는
+    우선순위 규칙이 따로 없다: 모드 테이블이 축마다 출처를 고르는 쪽이다.
+    """
 
     name: str
     speed: float | None = None
-    alt: float | None = None
-    heading: object = None  # float | "path" | None
+    alt: object = None  # float | "path"(경로추종 고도) | None
+    heading: object = None  # float | "path"(경로추종 헤딩) | None
     exit_when: tuple = ("always",)
     next: str | None = None
 

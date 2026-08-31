@@ -81,7 +81,13 @@ def _xtrack_rms(signals, waypoints):
     pn, pe = _arr(signals, "pn"), _arr(signals, "pe")
     if pn is None or pe is None:
         return None
-    wps = np.asarray(waypoints, dtype=float).reshape(-1, 2)
+    wps = np.asarray(waypoints, dtype=float)
+    if wps.ndim == 1:
+        wps = wps.reshape(-1, 2)  # 평탄 목록 관용 (종전 동작 유지)
+    # (n, e) 또는 (n, e, alt) — 고도 열은 **수평** 경로오차와 무관하므로 버린다.
+    # 종전처럼 reshape(-1, 2)로 뭉개면 3열 목록이 조용히 엉뚱한 좌표쌍이 된다:
+    # 원소 수가 짝수이기만 하면 예외도 안 나서 xtrack_rms가 말없이 거짓이 된다
+    wps = wps[:, :2]
     pts = np.column_stack([pn, pe])
     if wps.shape[0] == 1:
         return _rms(np.hypot(pn - wps[0, 0], pe - wps[0, 1]))

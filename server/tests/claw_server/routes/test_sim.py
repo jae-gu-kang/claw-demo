@@ -4,6 +4,8 @@
 서버가, 검증·실행은 엔진이. 구성 오류는 제출 시점 422, 실행은 배치 작업.
 """
 
+import pytest
+
 
 def _hold_mission(t_end=20.0, alt=1000.0, **over):
     base = {
@@ -310,3 +312,44 @@ def test_sim_autopilot_nonfinite_422(client):
             "/api/sim/run", content=raw, headers={"content-type": "application/json"}
         )
         assert r.status_code == 422, bad
+
+
+def test_sim_waypoint_altitude_flies_the_vertical_profile(client, wait_job):
+    """웨이포인트 고도 + alt="path" → 기체가 그 세로 프로파일을 실제로 난다.
+
+    고도를 받아 두고 유도가 안 쓰면 화면의 프로파일이 계획서일 뿐이다 —
+    사용자 요청(01 §3.3)의 요점이 "실제로 추종"이므로 그것을 핀한다.
+    """
+    req = _hold_mission(
+        t_end=90.0,
+        waypoints=[[6000.0, 0.0, 1600.0]],
+        accept_radius=300.0,
+        modes=[{"name": "wpnav", "speed": 199.0, "alt": "path", "heading": "path",
+                "exit": ["time_ge", 1e9]}],
+    )
+    j = wait_job(client.post("/api/sim/run", json=req).json()["id"], timeout=300.0)
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    assert body["meta"]["waypoints"] == [[6000.0, 0.0, 1600.0]]
+    h = body["signals"]["h"]
+    # 1000 m에서 시작해 1600 m를 향해 올라간다 (구간 선형 명령 + 고도 루프 추종)
+    assert h[0] == pytest.approx(1000.0, abs=30.0)
+    assert max(h) > 1300.0, f"고도 명령이 먹지 않았다 — 최고 {max(h):.0f} m"
+
+
+def test_sim_waypoint_altitude_contract_rejections(client):
+    """고도 섞인 목록·alt="path" 오용은 제출 시점 422 (조용한 무시 금지)."""
+    mixed = _hold_mission(waypoints=[[1000.0, 0.0, 800.0], [2000.0, 0.0]])
+    assert client.post("/api/sim/run", json=mixed).status_code == 422
+    # 경로가 없는데 alt="path"
+    no_path = _hold_mission(
+        modes=[{"name": "m", "speed": 199.0, "alt": "path", "exit": ["time_ge", 1e9]}])
+    assert client.post("/api/sim/run", json=no_path).status_code == 422
+    # 경로는 있는데 고도가 없다 — 고도 축이 조용히 꺼진 채 날면 안 된다
+    no_alt = _hold_mission(
+        waypoints=[[1000.0, 0.0]],
+        modes=[{"name": "m", "speed": 199.0, "alt": "path", "exit": ["time_ge", 1e9]}])
+    assert client.post("/api/sim/run", json=no_alt).status_code == 422
+    # 문자열은 "path"만 — 오타가 축 off로 조용히 흘러가지 않는다
+    typo = _hold_mission(
+        modes=[{"name": "m", "speed": 199.0, "alt": "pat", "exit": ["time_ge", 1e9]}])
+    assert client.post("/api/sim/run", json=typo).status_code == 422

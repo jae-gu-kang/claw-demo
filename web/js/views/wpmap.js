@@ -8,13 +8,97 @@
 
 import { el } from "../dom.js";
 import {
-  fitView, fmtMeters, hitTest, isDrag, makeProjection, moveWaypoint,
+  ZOOM_STEP, fitView, fmtMeters, hitTest, isDrag, makeProjection, moveWaypoint,
   rowsToPoints, toCanvasXY, zoomAt, panBy,
 } from "../lib/wpmap.js";
-import { niceTicks } from "../lib/plot.js";
+import { linScale, niceTicks } from "../lib/plot.js";
 import { makeCanvas } from "./plots.js";
 
 const HIT_PX = 10; // WP 히트 반경 [논리 px]
+
+/** 세로 프로파일 (거리-고도) — 계획 꺾은선 + 최근 시뮬 실제 고도.
+ *
+ * 계획선은 엔진 LosPath가 실제로 내는 명령과 같은 모양이다 — 구간 선형 보간,
+ * 첫 구간은 기체 시작 고도에서 시작, 램프는 도달 반경 경계에서 끝나고 거기부터
+ * 웨이포인트 중심까지 평평(guidance/path.py). 그 마루를 그리려면 호출측이
+ * planProfile에 도달 반경을 넘겨야 한다 — 안 넘기면 중심끼리 곧게 이어져 화면이
+ * 구간 내내 명령보다 뒤처진 기울기를 그린다(최대 Δalt·r/seg).
+ * 실제선이 있으면 겹쳐 그려 둘의 차이를 보게 한다.
+ *
+ * 고도가 하나도 없으면 그릴 것이 없다 — 빈 축 대신 사유 문장을 낸다(호출측).
+ */
+export function altProfileCanvas(plan, track, { width = 380, height = 190 } = {}) {
+  const { canvas, ctx } = makeCanvas(width, height);
+  const mL = 46, mT = 16, mR = 10, mB = 30;
+  const pts = plan.filter((p) => p.alt != null);
+  const alts = [...pts.map((p) => p.alt), ...track.map((p) => p.alt)];
+  const dists = [...plan.map((p) => p.dist), ...track.map((p) => p.dist)];
+  const d1 = Math.max(1, ...dists);
+  let a0 = Math.min(0, ...alts), a1 = Math.max(...alts, a0 + 1);
+  const padA = Math.max(1, (a1 - a0) * 0.12); // 위아래 여백 — 선이 테두리에 붙지 않게
+  a0 -= padA; a1 += padA;
+  const px = linScale(0, d1, mL, width - mR);
+  const py = linScale(a0, a1, height - mB, mT);
+
+  ctx.strokeStyle = "#e5e5ea";
+  ctx.strokeRect(mL, mT, width - mL - mR, height - mT - mB);
+  ctx.fillStyle = "#86868b";
+  for (const tk of niceTicks(0, d1, 4)) {
+    ctx.fillText(`${Math.round(tk)}`, px(tk) - 12, height - mB + 14);
+  }
+  for (const tk of niceTicks(a0, a1, 4)) {
+    const y = py(tk);
+    if (y < mT || y > height - mB) continue;
+    ctx.fillText(`${Math.round(tk)}`, 2, y + 3);
+  }
+  ctx.fillText("누적 수평거리 [m] →", width / 2 - 48, height - 4);
+
+  // 실제 궤적 (옅은 파랑 — 지도의 궤적 오버레이와 같은 색 언어)
+  if (track.length) {
+    ctx.strokeStyle = "rgba(0, 122, 255, .55)";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    track.forEach((p, i) => (i === 0 ? ctx.moveTo(px(p.dist), py(p.alt)) : ctx.lineTo(px(p.dist), py(p.alt))));
+    ctx.stroke();
+  }
+  // 계획 꺾은선 + 웨이포인트 점 (주황 — 지도의 편집 대상과 같은 색).
+  // **고도가 빠진 자리에서 선을 끊는다** — 이어 그리면 제출하면 422로 거부될
+  // 목록(고도가 섞인 열)이 멀쩡한 램프처럼 보인다. 빠진 자리를 눈에 남기는 것이
+  // 이 리포의 "조용한 비표시 금지"다. 몇 번이 빠졌는지는 호출측이 문장으로 낸다
+  if (pts.length) {
+    ctx.strokeStyle = "#ff9500";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    let pen = false;
+    for (const p of plan) {
+      if (p.alt == null) { pen = false; continue; } // 구멍 — 여기서 붓을 뗀다
+      const x = px(p.dist), y = py(p.alt);
+      if (pen) ctx.lineTo(x, y);
+      else { ctx.moveTo(x, y); pen = true; }
+    }
+    ctx.stroke();
+    ctx.fillStyle = "#ff9500";
+    for (const p of pts) {
+      // 램프 꼭대기는 선만 — 점을 찍으면 웨이포인트마다 점이 둘로 보인다
+      if (p.mark === "ramp") continue;
+      ctx.beginPath();
+      ctx.arc(px(p.dist), py(p.alt), p.idx < 0 ? 3 : 4, 0, 2 * Math.PI);
+      ctx.fill();
+      if (p.idx >= 0) {
+        ctx.fillStyle = "#1d1d1f";
+        const label = String(p.idx + 1);
+        // 마지막 WP는 축 오른쪽 끝에 있다 — 오른쪽에 적으면 잘린다 (라이브 확인)
+        const x = px(p.dist);
+        const flip = x + 6 + ctx.measureText(label).width > width - mR;
+        ctx.textAlign = flip ? "right" : "left";
+        ctx.fillText(label, x + (flip ? -6 : 6), py(p.alt) - 6);
+        ctx.textAlign = "left";
+        ctx.fillStyle = "#ff9500";
+      }
+    }
+  }
+  return canvas;
+}
 
 export function createWpMap({
   getRows, // () => wpRows — 문자열 행 참조 (지도가 직접 변이)
@@ -128,7 +212,8 @@ export function createWpMap({
         ctx.stroke();
       }
       ctx.fillStyle = "#1d1d1f";
-      ctx.fillText(String(i + 1), x + 7, y - 7);
+      // 고도가 있으면 배지에 함께 — 세로 프로파일과 지도를 눈으로 잇는 자리다
+      ctx.fillText(p.d == null ? String(i + 1) : `${i + 1} · ${Math.round(p.d)} m`, x + 7, y - 7);
     });
 
     // 시작점 (초록)
@@ -194,8 +279,16 @@ export function createWpMap({
         const { toNed } = makeProjection(view(), width, height);
         const p = eventXY(ev);
         const ned = toNed(p.x, p.y);
-        getRows().push({ n: fmtMeters(ned.n), e: fmtMeters(ned.e) });
-        selected = getRows().length - 1;
+        // 고도는 직전 행에서 물려받는다 — "전부 있거나 전부 없거나" 규칙(엔진
+        // set_waypoints)을 클릭 한 번으로 깨뜨리지 않게. 값도 "같은 고도로 계속"이
+        // 라는 합리적 기본이고, 표·툴바에서 바로 고칠 수 있다
+        const rows = getRows();
+        const prevAlt = rows.length ? rows[rows.length - 1].d : undefined;
+        rows.push({
+          n: fmtMeters(ned.n), e: fmtMeters(ned.e),
+          ...(String(prevAlt ?? "").trim() === "" ? {} : { d: String(prevAlt) }),
+        });
+        selected = rows.length - 1;
         onRowsChanged();
         redraw();
       }
@@ -219,7 +312,9 @@ export function createWpMap({
     ev.preventDefault();
     const { x, y } = eventXY(ev);
     const { toNed } = makeProjection(view(), width, height);
-    viewRef.view = zoomAt(view(), ev.deltaY > 0 ? 1 / 1.2 : 1.2, toNed(x, y));
+    // 배율 정본은 lib ZOOM_STEP — 종전 1.2는 **이벤트당**이라 트랙패드 한 제스처에
+    // 수십 번 곱해져 지도가 튀었다 (사용자 제기). 여기서 수를 다시 적지 않는다
+    viewRef.view = zoomAt(view(), ev.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP, toNed(x, y));
     redraw();
   }, { passive: false });
 
@@ -251,18 +346,38 @@ export function createWpMap({
   const btnDel = el("button", { class: "danger", onclick: () => selected >= 0 && removeAt(selected) }, "삭제");
   const btnUp = el("button", { onclick: () => reorder(-1) }, "▲");
   const btnDown = el("button", { onclick: () => reorder(1) }, "▼");
+  // 찍은 직후 그 자리에서 고도를 고치는 자리 — 표까지 눈을 옮기지 않아도 된다.
+  // 표와 같은 wpRows를 쓰므로 단일 소스는 그대로다 (지도가 직접 변이 → onRowsChanged)
+  const altInput = el("input", { class: "num-sm", "aria-label": "선택한 웨이포인트 고도 [m]" });
+  altInput.oninput = () => {
+    if (selected < 0) return;
+    const r = getRows()[selected];
+    if (altInput.value.trim() === "") delete r.d; // 빈 칸 = 고도 없음 (0이 아니다)
+    else r.d = altInput.value;
+    onRowsChanged();
+    redraw();
+  };
   function syncToolbar() {
     const rows = getRows();
     btnDel.disabled = selected < 0;
     btnUp.disabled = selected <= 0;
     btnDown.disabled = selected < 0 || selected >= rows.length - 1;
+    altInput.disabled = selected < 0;
+    // 입력 중인 칸은 건드리지 않는다 — 자기 타이핑이 커서를 앞으로 튕긴다
+    if (document.activeElement !== altInput) {
+      altInput.value = selected < 0 ? "" : String(rows[selected].d ?? "");
+    }
   }
 
   const root = el("div", {},
     canvas,
-    el("div", { class: "row", style: "margin-top: 6px" }, btnFit, btnDel, btnUp, btnDown),
+    el("div", { class: "row", style: "margin-top: 6px" },
+      btnFit, btnDel, btnUp, btnDown,
+      el("label", { class: "field" }, "선택 WP 고도 [m]", altInput)),
     el("p", { class: "hint" },
-      "클릭=추가 · 드래그=이동 · 우클릭=삭제 · 휠=줌 · 빈 곳 드래그=팬 · ▲▼=방문 순서"),
+      "클릭=추가 · 드래그=이동 · 우클릭=삭제 · 휠=줌 · 빈 곳 드래그=팬 · ▲▼=방문 순서. ",
+      "새 웨이포인트는 직전 행의 고도를 물려받습니다 — 고도는 전부 채우거나 전부 비워야 하고, ",
+      '그 값을 실제로 날려면 모드 테이블의 고도 칸에 "path"를 적습니다.'),
   );
 
   redraw();

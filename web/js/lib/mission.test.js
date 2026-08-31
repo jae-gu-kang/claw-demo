@@ -65,3 +65,30 @@ test("buildWaypoints: (N,E) 행 → 튜플 배열, 빈 목록 → null", () => {
   assert.equal(buildWaypoints([]), null);
   assert.throws(() => buildWaypoints([{ n: "abc", e: "0" }]));
 });
+
+test('buildModes: alt도 "path"를 받는다 — heading과 같은 규약 (축별 명령 출처)', () => {
+  const [m] = buildModes([{
+    name: "wpnav", speed: "140", alt: "path", heading: "path",
+    exitKind: "path_done", exitValue: "", next: null,
+  }]);
+  assert.equal(m.alt, "path");
+  assert.equal(m.heading, "path");
+  // 오타는 조용히 축 off가 되지 않고 던진다 (서버도 같은 말로 거부한다)
+  assert.throws(() => buildModes([{
+    name: "x", speed: "", alt: "pat", heading: "", exitKind: "always", exitValue: "", next: null,
+  }]), /x\.alt.*수치가 아님/);
+});
+
+test("buildWaypoints: 고도는 전부 채우거나 전부 비우거나 — 섞이면 행 번호를 짚는다", () => {
+  assert.deepEqual(buildWaypoints([{ n: "8000", e: "0" }, { n: "8000", e: "8000" }]),
+    [[8000, 0], [8000, 8000]]);
+  assert.deepEqual(
+    buildWaypoints([{ n: "8000", e: "0", d: "1500" }, { n: "8000", e: "8000", d: "900" }]),
+    [[8000, 0, 1500], [8000, 8000, 900]]);
+  // 섞인 채 보내면 서버가 422로 답하지만 어느 행인지는 안 알려준다 — 여기서 짚는다
+  assert.throws(() => buildWaypoints([
+    { n: "1", e: "2", d: "100" }, { n: "3", e: "4" }, { n: "5", e: "6", d: "" },
+  ]), /비어 있는 행: 2, 3/);
+  assert.equal(buildWaypoints([]), null);
+  assert.throws(() => buildWaypoints([{ n: "1", e: "2", d: "abc" }]), /wp0\.고도/);
+});

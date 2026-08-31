@@ -34,15 +34,19 @@ class ModeIn(BaseModel):
 
     name: str = Field(min_length=1)
     speed: FiniteFloat | None = None  # null = 축 off
-    alt: FiniteFloat | None = None
+    alt: FiniteFloat | str | None = None  # 숫자 | "path"(경로 세로 프로파일) | null
     heading: FiniteFloat | str | None = None  # 숫자 | "path"(LOS) | null
     exit: list = Field(min_length=1)  # 조건 DSL ["kind", 인자...] — 엔진이 검증
     next: str | None = None
 
     @model_validator(mode="after")
-    def _heading_str_only_path(self):
-        if isinstance(self.heading, str) and self.heading != "path":
-            raise ValueError(f'heading 문자열은 "path"만 허용: {self.heading!r}')
+    def _path_is_the_only_string(self):
+        # heading·alt가 같은 규약이다 — 모드가 축별로 명령 출처를 고른다(엔진
+        # guidance.py). 오타가 조용히 "축 off"가 되지 않도록 문자열을 좁힌다
+        for name in ("heading", "alt"):
+            v = getattr(self, name)
+            if isinstance(v, str) and v != "path":
+                raise ValueError(f'{name} 문자열은 "path"만 허용: {v!r}')
         return self
 
     @field_validator("exit")
@@ -131,9 +135,12 @@ class SimRunIn(BaseModel):
     trim: TrimCaseIn  # 시작 트림점 (웜스타트 기준)
     modes: list[ModeIn] = Field(min_length=1)
     initial_mode: str | None = None
-    waypoints: list[tuple[FiniteFloat, FiniteFloat]] | None = Field(
-        default=None, min_length=1
-    )  # (N, E) [m] — 빈 리스트는 무의미 구성이라 거부
+    # (N, E) 또는 (N, E, 고도) [m] — 빈 리스트는 무의미 구성이라 거부.
+    # 고도를 주면 경로가 세로 프로파일도 낸다(alt="path" 모드가 소비, 01 §3.3).
+    # 섞인 목록 거부는 엔진 set_waypoints가 정본 — 여기서 다시 적지 않는다(§5.5)
+    waypoints: list[
+        tuple[FiniteFloat, FiniteFloat] | tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+    ] | None = Field(default=None, min_length=1)
     accept_radius: float = Field(default=200.0, gt=0.0, allow_inf_nan=False)
     t_end: float = Field(gt=0.0, le=3600.0)  # 상한 = 메모리 가드 [기본값]
     dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
@@ -243,7 +250,7 @@ def _build(req: SimRunIn):
     path = None
     if req.waypoints is not None:
         path = LosPath(
-            waypoints=tuple((float(n), float(e)) for n, e in req.waypoints),
+            waypoints=tuple(tuple(float(v) for v in w) for w in req.waypoints),
             accept_radius=req.accept_radius,
         )
     modes = [
@@ -300,7 +307,7 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
         # "기준선은 결과와 함께 다닌다" 규약). 없으면 None — 경로 없는 미션이다
         payload["meta"]["waypoints"] = (
             None if req.waypoints is None
-            else [[float(n), float(e)] for n, e in req.waypoints]
+            else [[float(v) for v in w] for w in req.waypoints]
         )
         store.save(
             job.id,

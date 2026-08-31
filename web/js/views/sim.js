@@ -9,12 +9,12 @@ import { clear, el, flagBadge, fmt } from "../dom.js";
 import { buildModes, buildWaypoints, COND_KINDS } from "../lib/mission.js";
 import { planeViews } from "../lib/plot.js";
 import { flaggedNames, modeSpans, strideFor } from "../lib/replay.js";
-import { moveWaypoint } from "../lib/wpmap.js";
+import { moveWaypoint, planProfile, rowsToPoints, trackProfile } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
 import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
-import { createWpMap } from "./wpmap.js";
+import { altProfileCanvas, createWpMap } from "./wpmap.js";
 
 // 기본 미션 = Phase 4 완주 회귀 미션 (test_mission — 상승→선회 항법→디센트→임무수행)
 let modeRows = [
@@ -32,6 +32,10 @@ let lastReplay = null; // {body, waypoints, acceptRadius}
 let runningJobId = null;
 // 제출 시점 스냅샷 — 실행 중 편집이 재생 오버레이를 오염시키지 않도록 (리뷰 S3)
 let runningSnapshot = { waypoints: [], acceptRadius: 0 };
+// 세로 프로파일 다시 그리기 — render()가 채운다. renderWpTable은 모듈 함수라
+// 클로저에 닿지 못하는데, 표에서 고도를 고쳐도 프로파일이 따라와야 한다
+// (wpRows·lastReplay·wpMapView와 같은 모듈 상태 관례)
+let redrawProfile = () => {};
 // 지도 줌/팬 상태 — 탭 재진입 시 유지 (wpRows·lastReplay와 동렬)
 let wpMapView = { view: null };
 // 3D 시점(방위·고각) — 재렌더·탭 전환에도 돌려놓은 각도를 잃지 않게
@@ -160,16 +164,77 @@ export function render() {
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
 
+  const profileBox = el("div", { style: "margin-top: 8px" });
+  // 세로 프로파일 — 계획(입력한 WP 고도)과 최근 시뮬 실제 고도를 같은 거리축에.
+  // 지도가 수평면을, 이쪽이 세로면을 맡아 웨이포인트 한 벌을 두 면으로 본다
+  const drawProfile = () => {
+    const pts = rowsToPoints(wpRows);
+    // 출발 고도는 시작 트림 고도 — 엔진 LosPath도 첫 구간을 기체 시작 고도에서
+    // 잇는다(guidance/path.py). 폼이 비면 null(미상)로 두고 지어내지 않는다
+    const sAlt = String(f.alt.value).trim();
+    const startAlt = sAlt !== "" && Number.isFinite(Number(sAlt)) ? Number(sAlt) : null;
+    // 도달 반경을 넘겨야 계획선이 엔진 명령과 같은 모양이 된다 (램프 마루)
+    const plan = planProfile(pts, startAlt, Number(f.accept.value) || 0);
+    const sig = lastReplay?.body?.signals;
+    const track = sig ? trackProfile(sig.pn, sig.pe, sig.h) : [];
+    const kids = [];
+    // 출발점(트림 고도)은 planProfile이 항상 붙인다 — 그걸 세면 WP 고도가 하나도
+    // 없어도 "계획"을 그리게 되고, 캡션이 사용자가 넣지 않은 선을 설명한다.
+    // 사용법 안내(else)도 트림 고도 칸을 비워야만 나오는 죽은 문장이 된다
+    const wpAlts = plan.filter((p) => p.idx >= 0 && p.alt != null);
+    if (wpAlts.length || track.length) {
+      kids.push(altProfileCanvas(plan, track));
+      // 계획이 없으면 주황을 설명하지 않는다 — 그 상태의 주황은 출발점 점 하나뿐이라
+      // 없는 층을 설명하는 범례와 같은 거짓말이 된다 (02 v0.36과 같은 자리)
+      kids.push(wpAlts.length
+        ? el("p", { class: "hint" },
+          "주황=계획(입력한 WP 고도, 구간 선형 — 램프는 도달 반경 경계에서 끝나고 그 뒤는 평평) · ",
+          "파랑=최근 시뮬 실제 고도. ",
+          '이 계획을 실제로 날려면 모드 테이블의 고도 칸에 "path"를 적습니다 — ',
+          "비워 두면 그 모드의 고도 축은 꺼지고, 숫자를 적으면 그 숫자가 이깁니다.")
+        : el("p", { class: "hint" },
+          "파랑=최근 시뮬 실제 고도. 웨이포인트 고도를 입력하면 계획선이 함께 그려집니다."));
+      // 두 곡선의 x는 같은 이름이지만 다른 양이다 — 선회로 부푼 만큼 파랑이
+      // 오른쪽으로 밀리므로, 완벽히 추종해도 "늦게 도달"로 읽힐 수 있다
+      if (track.length) {
+        kids.push(el("p", { class: "hint" },
+          "가로축은 계획선에서는 웨이포인트를 잇는 거리, 실제선에서는 날아간 경로장입니다 — ",
+          "선회로 부푼 만큼 파랑이 오른쪽으로 밀리므로 두 선의 가로 어긋남은 지연이 아닙니다."));
+      }
+      // 고도가 빠진 행이 있으면 계획선이 그 자리에서 끊긴다 — 몇 번인지 말한다.
+      // 제출 전까지 화면만 보면 "끊긴 이유"를 알 수 없어 조용한 비표시가 된다
+      // **고도를 하나도 안 넣은 정상 상태**에서는 구멍이 아니다 — 시뮬을 한 번
+      // 돌리면 track 때문에 이 분기에 들어오는데, 그때 전 행을 "빈 행"으로 세면
+      // 방금 성공한 실행을 두고 "실행이 거부됩니다"라고 말한다 (리뷰 실측)
+      const gaps = wpAlts.length
+        ? pts.map((p, i) => (p.ok && p.d == null ? i + 1 : null)).filter((v) => v)
+        : [];
+      if (gaps.length) {
+        kids.push(el("p", { class: "hint" },
+          `⚠ 고도가 빈 웨이포인트 ${gaps.join(", ")}번에서 계획선이 끊깁니다 — 고도는 전부 `
+          + "채우거나 전부 비워야 하고, 섞인 채로는 실행이 거부됩니다."));
+      }
+    } else {
+      kids.push(el("p", { class: "hint" },
+        "세로 프로파일 — 웨이포인트 고도를 입력하면 거리-고도로 그립니다 (표의 '고도' 열 또는 "
+        + "지도의 '선택 WP 고도'). 시뮬을 돌리면 실제 고도가 겹쳐 그려집니다."));
+    }
+    clear(profileBox).append(...kids);
+  };
+  redrawProfile = drawProfile;
+
   // NED 평면 지도 편집기 — 표와 양방향 동기 (단일 소스 = wpRows)
   const wpMap = createWpMap({
     getRows: () => wpRows,
     getAcceptRadius: () => Number(f.accept.value) || 0,
     getTrack: () => lastReplay &&
       { pn: lastReplay.body.signals.pn, pe: lastReplay.body.signals.pe },
-    onRowsChanged: () => renderWpTable(wpBox, wpMap),
+    onRowsChanged: () => { renderWpTable(wpBox, wpMap); drawProfile(); },
     viewRef: wpMapView,
   });
   f.accept.addEventListener("input", () => wpMap.refresh()); // 도달반경 원 즉시 갱신
+  // 시작 트림 고도가 계획선의 출발점이다 — 바꾸면 프로파일도 따라 움직여야 한다
+  f.alt.addEventListener("input", drawProfile);
 
   const watch = () => attachProgress(progressBox, runningJobId, {
     onDone: async (job) => {
@@ -190,6 +255,7 @@ export function render() {
         store.set("simResult", { id: job.result_id });
         renderReplay(replayBox);
         wpMap.refresh(); // 지도 궤적 오버레이 갱신
+        drawProfile(); // 세로 프로파일에 실제 고도 겹치기
       } catch (e) {
         showErr(e);
       }
@@ -272,8 +338,8 @@ export function render() {
     el("div", { class: "panel" },
       el("h2", {}, "미션 정의 (선언적 모드 테이블 — 01 §3.1)"),
       modeBox,
-      el("h2", {}, "웨이포인트 (N, E) [m]"),
-      el("div", { class: "row" }, wpBox, wpMap.root),
+      el("h2", {}, "웨이포인트 (N, E, 고도) [m]"),
+      el("div", { class: "row" }, wpBox, el("div", {}, wpMap.root, profileBox)),
     ),
     el("div", { class: "panel" },
       el("h2", {}, "실행 조건"),
@@ -326,6 +392,7 @@ export function render() {
 
   renderModeTable(modeBox);
   renderWpTable(wpBox, wpMap);
+  drawProfile();
   if (lastReplay) renderReplay(replayBox);
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
   return root;
@@ -336,7 +403,8 @@ function renderModeTable(modeBox) {
     el("div", { class: "scroll-x" }, el("table", { class: "edit" },
       el("thead", {}, el("tr", {},
         el("th", { class: "c-md" }, "모드"),
-        el("th", { class: "c-sm" }, "속도 [m/s]"), el("th", { class: "c-sm" }, "고도 [m]"),
+        el("th", { class: "c-sm" }, "속도 [m/s]"),
+        el("th", { class: "c-sm" }, "고도 [m] | path"),
         el("th", { class: "c-md" }, "헤딩"),
         el("th", { class: "c-md" }, "이탈 조건"), el("th", { class: "c-sm" }, "값"),
         el("th", { class: "c-md" }, "다음"), el("th", {}, ""))),
@@ -370,7 +438,8 @@ function renderModeTable(modeBox) {
         renderModeTable(modeBox);
       } }, "모드 추가"),
       el("span", { class: "hint" },
-        '헤딩: 수치 | "path"(경로 추종) | 빈=유지 안 함 · 속도/고도도 빈 칸이면 해당 루프 off')),
+        '헤딩·고도: 수치 | "path"(경로추종이 낸다) | 빈=그 축 off. 속도는 수치 | 빈=off. ',
+      '고도에 "path"를 적으면 웨이포인트의 세로 프로파일을 따라 난다 — 숫자를 적으면 그 숫자가 이긴다')),
   );
 }
 
@@ -379,19 +448,31 @@ function renderWpTable(wpBox, wpMap) {
   const sync = () => {
     renderWpTable(wpBox, wpMap);
     wpMap?.refresh();
+    redrawProfile();
   };
   clear(wpBox).append(
     el("table", { class: "edit" },
       el("thead", {}, el("tr", {},
         el("th", {}, "#"), el("th", { class: "c-md" }, "N [m]"),
         el("th", { class: "c-md" }, "E [m]"),
+        el("th", { class: "c-md" }, "고도 [m]"),
         el("th", {}, "순서"), el("th", {}, ""))),
       el("tbody", {}, wpRows.map((r, i) => el("tr", {},
         el("td", {}, i + 1),
+        // N·E도 프로파일을 갱신한다 — x축이 N/E로 만든 **누적 수평거리**라,
+        // 지도만 다시 그리면 두 화면이 서로 다른 미션을 말한다 (리뷰 실측)
         el("td", {}, el("input", { value: r.n,
-          onchange: (ev) => { r.n = ev.target.value; wpMap?.refresh(); } })),
+          onchange: (ev) => { r.n = ev.target.value; wpMap?.refresh(); redrawProfile(); } })),
         el("td", {}, el("input", { value: r.e,
-          onchange: (ev) => { r.e = ev.target.value; wpMap?.refresh(); } })),
+          onchange: (ev) => { r.e = ev.target.value; wpMap?.refresh(); redrawProfile(); } })),
+        // 고도는 선택 — 빈 칸은 "고도 없음"이지 0이 아니다. 빈 칸으로 되돌리면
+        // 키 자체를 지운다(rowsToPoints·buildWaypoints가 그 규약을 공유한다)
+        el("td", {}, el("input", { value: r.d ?? "", placeholder: "선택",
+          onchange: (ev) => {
+            if (ev.target.value.trim() === "") delete r.d;
+            else r.d = ev.target.value;
+            sync();
+          } })),
         el("td", {},
           el("button", { title: "위로", onclick: () => {
             if (moveWaypoint(wpRows, i, i - 1)) sync();
@@ -407,7 +488,10 @@ function renderWpTable(wpBox, wpMap) {
     ),
     el("div", { class: "row", style: "margin-top: 8px" },
       el("button", { onclick: () => {
-        wpRows.push({ n: "0", e: "0" });
+        // 고도는 직전 행에서 물려받는다 — "전부 있거나 전부 없거나" 규칙을
+        // 행 추가 한 번으로 깨뜨리지 않게 (지도 클릭 추가와 같은 규칙)
+        const prev = wpRows[wpRows.length - 1]?.d;
+        wpRows.push({ n: "0", e: "0", ...(String(prev ?? "").trim() === "" ? {} : { d: String(prev) }) });
         sync();
       } }, "웨이포인트 추가"),
       el("span", { class: "hint" }, "지도에서 클릭 추가 · 드래그 이동 · 우클릭 삭제 가능")),

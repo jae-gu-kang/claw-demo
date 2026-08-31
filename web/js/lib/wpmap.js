@@ -7,6 +7,11 @@ kScale). 여기는 DOM 무접촉 순수 함수만 — 캔버스·포인터 이�
 import { linScale } from "./plot.js";
 
 export const DRAG_PX = 5; // 클릭↔드래그 판별 임계 [px]
+// 휠 한 이벤트당 줌 배율. 종전 1.2는 **이벤트당**이라 트랙패드처럼 한 제스처에
+// 수십 개가 오는 입력에서 한 번 굴릴 때마다 지도가 너무 크거나 너무 작아졌다
+// (사용자 제기). 로그 줌 기준으로 100배 둔하게 — 지수만 고치면 되도록 남긴다.
+export const WHEEL_ZOOM_DIVISOR = 100;
+export const ZOOM_STEP = 1.2 ** (1 / WHEEL_ZOOM_DIVISOR);
 export const SPAN_MIN = 50; // 줌 인 한계 [m]
 export const SPAN_MAX = 1e6; // 줌 아웃 한계 [m]
 export const DEFAULT_SPAN = 20000; // 빈 목록 초기 뷰 [m] — 기본 미션 스케일
@@ -90,10 +95,72 @@ num()과 같은 이유 — 거기는 제출 시점 throw, 여기는 표시 제�
 export function rowsToPoints(rows) {
   return rows.map((r) => {
     const sn = String(r.n).trim(), se = String(r.e).trim();
-    const n = Number(sn), e = Number(se);
+    const sd = String(r.d ?? "").trim();
+    const n = Number(sn), e = Number(se), d = Number(sd);
     const ok = sn !== "" && se !== "" && Number.isFinite(n) && Number.isFinite(e);
-    return { n, e, ok };
+    // 고도는 선택 — 빈 칸/비수치는 null(고도 없음)이지 0이 아니다. 0으로 두면
+    // 세로 프로파일이 사용자가 넣지 않은 해면 고도를 넣은 것처럼 그린다
+    return { n, e, ok, d: sd !== "" && Number.isFinite(d) ? d : null };
   });
+}
+
+/** 계획 세로 프로파일 — [{dist, alt, idx, mark}] (거리 = 출발점부터의 누적 **수평** 거리).
+ *
+ * mark: "start" 출발점 · "wp" 웨이포인트 중심 · "ramp" 램프 꼭대기.
+ * idx는 웨이포인트 번호("wp"만 ≥0). 고도가 없는 점은 alt: null로 남긴다 —
+ * 이웃 값으로 메우면 화면이 사용자가 넣지 않은 고도를 넣은 것처럼 그린다.
+ * 출발점 고도(startAlt)는 시뮬 시작 트림 고도다: 엔진 LosPath도 첫 구간을
+ * **첫 스텝의 기체 고도**에서 시작하므로 둘이 같은 점에서 출발한다.
+ *
+ * acceptRadius를 주면 **엔진 명령과 같은 모양**이 된다. 엔진 램프는 웨이포인트
+ * 중심이 아니라 도달 반경 경계에서 끝나고(guidance/path.py _leg_alt) 거기서
+ * 다음 구간으로 전환하므로, 중심까지 곧게 이으면 화면이 구간 내내 명령보다
+ * 뒤처진 기울기를 그린다 — 최대 Δalt·r/seg 어긋난다(리뷰 실측: 8 km 구간·반경
+ * 200 m·Δ500 m에서 12.5 m, 500 m 구간에서는 200 m). 램프 꼭대기 점을 하나 더
+ * 찍어 평평한 마루를 그리면 그 어긋남이 없어진다. 0이면 종전대로 중심끼리 잇는다
+ * (반경을 모르는 호출측을 위한 폴백 — 그 경우 위 어긋남이 남는다).
+ *
+ * [남은 어긋남] 웨이포인트를 도달 반경보다 **촘촘히** 찍어 중간 구간이 seg ≤ r로
+ * 퇴화하면, 그 계단의 x가 r만큼 늦다: 엔진은 직전 웨이포인트 반경 진입(cum−r)에서
+ * 그 구간을 활성화하는데 여기서는 직전 중심(cum)에 찍는다. 비퇴화 구간에서는
+ * 활성화 직후 명령이 wa_prev로 클램프돼 화면의 마루와 겹치므로 보이지 않고,
+ * 첫 구간이 퇴화면 활성화가 cum 0이라 일치한다 — 중간 퇴화 구간 하나뿐이다.
+ * 고치려면 퇴화 구간의 마루를 직전 구간의 마루 x로 이어 나르면 된다(리뷰 제안).
+ */
+export function planProfile(points, startAlt = null, acceptRadius = 0) {
+  const out = [{ dist: 0, alt: startAlt, idx: -1, mark: "start" }];
+  let dist = 0;
+  let pn = 0, pe = 0;
+  points.forEach((p, i) => {
+    if (!p.ok) return; // 표시 불가 행은 거리 누적에서도 빠진다 (지도와 같은 규칙)
+    const seg = Math.hypot(p.n - pn, p.e - pe);
+    // 램프 꼭대기 — 구간이 반경보다 짧으면 이을 자리가 없어 구간 시작에서 곧바로
+    // 목표 고도다(엔진 denom <= 0 분기와 같은 퇴화). 그때 두 점이 같은 x가 되어
+    // 화면에 수직 계단으로 그려지는데, 그것이 실제 명령이다
+    const top = dist + Math.max(0, seg - acceptRadius);
+    dist += seg;
+    pn = p.n; pe = p.e;
+    if (acceptRadius > 0 && p.d != null) out.push({ dist: top, alt: p.d, idx: -1, mark: "ramp" });
+    out.push({ dist, alt: p.d, idx: i, mark: "wp" });
+  });
+  return out;
+}
+
+/** 실측 세로 프로파일 — 궤적 (pn, pe, h) → [{dist, alt}] 누적 수평거리 기준.
+ * 비수치 샘플에서 끊지 않고 **건너뛴다** — 거리 누적이 그 구간만큼 짧아지는 것이
+ * 없는 점을 이어 그리는 것보다 낫다(끊으면 x가 뒤로 감기어 곡선이 접힌다). */
+export function trackProfile(pn, pe, h) {
+  const out = [];
+  let dist = 0;
+  let ln = null, le = null;
+  for (let i = 0; i < pn.length; i += 1) {
+    const n = pn[i], e = pe[i], a = h?.[i];
+    if (typeof n !== "number" || typeof e !== "number" || !Number.isFinite(n) || !Number.isFinite(e)) continue;
+    if (ln !== null) dist += Math.hypot(n - ln, e - le);
+    ln = n; le = e;
+    if (typeof a === "number" && Number.isFinite(a)) out.push({ dist, alt: a });
+  }
+  return out;
 }
 
 /** 드래그 판별 — 시작점 대비 이동량이 임계 초과인가. */

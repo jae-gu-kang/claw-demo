@@ -156,11 +156,12 @@ def test_sequencer_unknown_next_raises_at_construction():
 
 def test_los_heading_switching_and_done():
     path = LosPath(waypoints=((1000.0, 0.0), (1000.0, 1000.0)), accept_radius=50.0).init(DT)
-    hdg, done = path.step(_nav(n=0.0, e=0.0))
+    hdg, alt, done = path.step(_nav(n=0.0, e=0.0))
     assert hdg == pytest.approx(0.0) and not done  # 정북 wp1
-    hdg, done = path.step(_nav(n=990.0, e=0.0))  # wp1 반경 내 → wp2로 전환
+    assert alt is None  # 고도 없는 웨이포인트 열 — 없는 명령을 0으로 위장하지 않는다
+    hdg, _alt, done = path.step(_nav(n=990.0, e=0.0))  # wp1 반경 내 → wp2로 전환
     assert hdg == pytest.approx(math.atan2(1000.0, 10.0)) and not done
-    hdg, done = path.step(_nav(n=1000.0, e=980.0))  # wp2 반경 내 → 소진
+    hdg, _alt, done = path.step(_nav(n=1000.0, e=980.0))  # wp2 반경 내 → 소진
     assert done
     assert hdg == pytest.approx(math.atan2(1000.0, 10.0))  # 마지막 헤딩 유지
 
@@ -169,15 +170,15 @@ def test_los_chained_skip_within_radius():
     """반경 내 웨이포인트 여러 개를 한 스텝에 연쇄 스킵 (docstring 계약 핀)."""
     path = LosPath(waypoints=((10.0, 0.0), (20.0, 20.0), (1000.0, 1000.0)),
                    accept_radius=50.0).init(DT)
-    hdg, done = path.step(_nav(n=0.0, e=0.0))
+    hdg, _alt, done = path.step(_nav(n=0.0, e=0.0))
     assert hdg == pytest.approx(math.atan2(1000.0, 1000.0)) and not done
 
 
 def test_los_exhausted_before_first_heading_uses_current_course():
     """빈 리스트/반경 내 시작 — 정북(0) 급선회 대신 현재 침로 유지 (리뷰 반영)."""
     path = LosPath(waypoints=()).init(DT)
-    hdg, done = path.step(_nav(psi=math.pi / 2))  # 동쪽 비행 중
-    assert done and hdg == pytest.approx(math.pi / 2)
+    hdg, alt, done = path.step(_nav(psi=math.pi / 2))  # 동쪽 비행 중
+    assert done and hdg == pytest.approx(math.pi / 2) and alt is None
 
 
 def test_los_registry_swappable():
@@ -187,7 +188,7 @@ def test_los_registry_swappable():
     los = REGISTRY.create("guidance", "LOS", {"accept_radius": 120.0})
     assert los.accept_radius == 120.0
     los.set_waypoints(((500.0, 0.0),))
-    hdg, done = los.init(DT).step(_nav())
+    hdg, _alt, done = los.init(DT).step(_nav())
     assert hdg == pytest.approx(0.0) and not done
 
 
@@ -211,3 +212,144 @@ def test_guidance_full_mission_logic_scripted_nav():
     seen.append(final.mode)
     assert seen == ["climb", "wpnav", "descent"]
     assert final.alt == 50.0  # 디센트 명령 반영
+
+
+# ---------- LOS 세로 프로파일 (웨이포인트 고도, 01 §3.3) ----------
+
+
+def test_los_leg_altitude_is_linear_not_a_step():
+    """구간 선형 보간 — 활성 웨이포인트 고도를 곧바로 명령(계단)하지 않는다.
+
+    계단이면 화면의 세로 프로파일(거리-고도 꺾은선)이 실제 명령과 다른 것을
+    그리게 된다. 첫 구간의 시작 고도는 **첫 스텝의 기체 고도**다 — 출발점은
+    웨이포인트가 아니라 계획에 없으므로, 기체가 실제 있는 자리에서 이어야 한다.
+    """
+    path = LosPath(waypoints=((1000.0, 0.0, 1500.0),), accept_radius=50.0).init(DT)
+    # 첫 스텝: 기체 500 m, 남은 거리 = 구간 전체 → 시작 고도 그대로
+    hdg, alt, done = path.step(_nav(n=0.0, e=0.0, h=500.0))
+    assert not done and hdg == pytest.approx(0.0)
+    assert alt == pytest.approx(500.0)
+    # 램프는 **반경 경계**까지다 — 유효 구간 1000-50=950, 절반은 rem=525 (n=475)
+    _h, alt, _d = path.step(_nav(n=475.0, e=0.0, h=900.0))
+    assert alt == pytest.approx(1000.0)  # 500↔1500의 중간
+    # 구간을 벗어나 뒤로 물러나도 계획 밖 고도로 외삽하지 않는다 ([0,1] 클램프)
+    _h, alt, _d = path.step(_nav(n=-4000.0, e=0.0, h=900.0))
+    assert alt == pytest.approx(500.0)
+    # 반경 경계 직전(rem=51)에 이미 목표 고도에 거의 닿아 있다 — 전환이 반경에서
+    # 일어나므로 명령이 연속이다. 중심 기준으로 이었다면 여기서 Δ·r/seg = 50 m
+    # 모자란 1450에 머물다 다음 구간 시작에 1500으로 튄다
+    _h, alt, done = path.step(_nav(n=949.0, e=0.0, h=1400.0))
+    assert not done and alt == pytest.approx(1500.0, abs=2.0)
+
+
+def test_los_altitude_carries_across_legs_and_holds_after_done():
+    """구간이 바뀌면 시작 고도도 그 웨이포인트 고도로 — 소진 후엔 마지막 값 유지."""
+    path = LosPath(
+        waypoints=((1000.0, 0.0, 800.0), (1000.0, 1000.0, 400.0)), accept_radius=50.0
+    ).init(DT)
+    path.step(_nav(n=0.0, e=0.0, h=800.0))
+    # wp1 반경 진입 → wp2 구간 시작(고도 800에서 400으로). 갓 전환한 시점은 800 근처
+    _h, alt, done = path.step(_nav(n=990.0, e=0.0, h=800.0))
+    assert not done and alt == pytest.approx(800.0)  # 새 구간의 시작이라 정확히 800
+    # 유효 구간 1000-50=950, 절반은 rem=525 (e=475)
+    _h, alt, _d = path.step(_nav(n=1000.0, e=475.0, h=600.0))
+    assert alt == pytest.approx(600.0)  # 800↔400의 중간
+    _h, alt, done = path.step(_nav(n=1000.0, e=980.0, h=420.0))
+    # 소진 — "마지막 명령 유지"가 아니라 **마지막 웨이포인트 고도로 정착**이다.
+    # 유지였다면 직전 스텝의 600이 남는다 (그것이 계획보다 200 m 높은 수평비행)
+    assert done and alt == pytest.approx(400.0)
+
+
+def test_los_altitude_all_or_none():
+    """고도는 전부 있거나 전부 없거나 — 섞이면 구성 시점 거부.
+
+    없는 쪽을 0이나 이웃 값으로 메우면 화면의 세로 프로파일이 사용자가 넣지 않은
+    고도를 넣은 것처럼 그린다 (판정 불가를 정상으로 위장하지 않는 것과 같은 자리).
+    """
+    with pytest.raises(ValueError, match="전부 있거나"):
+        LosPath(waypoints=((1000.0, 0.0, 800.0), (2000.0, 0.0)))
+    with pytest.raises(ValueError, match="n, e"):
+        LosPath(waypoints=((1000.0,),))
+    assert LosPath(waypoints=((1000.0, 0.0),)).has_alt is False
+    assert LosPath(waypoints=((1000.0, 0.0, 800.0),)).has_alt is True
+
+
+def test_mode_alt_path_selects_the_path_altitude():
+    """alt="path"는 heading="path"와 **같은 규약** — 모드가 축별 출처를 고른다.
+
+    경로와 모드 중 누가 이기는지 따로 정하지 않는 이유가 이것이다.
+    """
+    path = LosPath(waypoints=((1000.0, 0.0, 1500.0),), accept_radius=50.0)
+    g = Guidance([_hold_forever(name="climb", speed=170.0, alt="path", heading="path")],
+                 path=path).init(DT)
+    cmd = g.step(_nav(n=500.0, e=0.0, h=500.0))
+    assert cmd.alt_on and cmd.alt == pytest.approx(500.0)  # 첫 스텝 기준 고도
+    # 유효 구간 (1000-500)-50 = 450, 절반은 rem=275 (n=725)
+    cmd = g.step(_nav(n=725.0, e=0.0, h=900.0))
+    assert cmd.alt == pytest.approx(1000.0)  # 500↔1500의 중간
+    # 같은 경로라도 수치를 적은 모드는 그 수치가 이긴다 (경로가 덮지 않는다)
+    g2 = Guidance([_hold_forever(name="hold", alt=300.0, heading="path")],
+                  path=LosPath(waypoints=((1000.0, 0.0, 1500.0),))).init(DT)
+    assert g2.step(_nav(n=0.0, e=0.0, h=500.0)).alt == pytest.approx(300.0)
+
+
+def test_mode_alt_path_without_usable_path_is_rejected_loudly():
+    """경로가 없거나 고도가 없는데 alt="path"면 구성 시점 거부.
+
+    허용하면 고도 축이 조용히 꺼진 채 날거나(alt_on=False) None을 0으로 읽어
+    해면을 명령한다 — 둘 다 요청한 것과 다르다.
+    """
+    with pytest.raises(ValueError, match='alt="path".*경로추종기가 없음'):
+        Guidance([_hold_forever(name="m", alt="path")])
+    with pytest.raises(ValueError, match='alt="path".*고도가 없음'):
+        Guidance([_hold_forever(name="m", alt="path")],
+                 path=LosPath(waypoints=((1000.0, 0.0),)))
+
+
+def test_mode_alt_path_detects_a_path_swapped_out_after_construction():
+    """구성 뒤 set_waypoints로 고도를 없애면 시끄럽게 터진다.
+
+    __init__ 가드는 그때의 has_alt를 본 스냅샷이라 뒤에서 뚫린다. 조용히 두면
+    alt_on=False로 고도 축이 꺼진 채 날아 가드가 막으려던 결과가 그대로 난다.
+    """
+    path = LosPath(waypoints=((1000.0, 0.0, 1500.0),), accept_radius=50.0)
+    g = Guidance([_hold_forever(name="m", alt="path")], path=path).init(DT)
+    assert g.step(_nav(n=0.0, e=0.0, h=500.0)).alt_on  # 아직은 정상
+    path.set_waypoints(((1000.0, 0.0),))  # 고도를 뺀 열로 교체
+    # ValueError면 서버가 422(사용자 입력 오류)로 매핑한다 — 이건 계약 위반이다
+    with pytest.raises(RuntimeError, match="고도를 내지 않는다"):
+        g.step(_nav(n=0.0, e=0.0, h=500.0))
+
+
+def test_los_altitude_command_is_continuous_across_waypoint_transitions():
+    """구간 전환에서 고도 명령이 튀지 않는다 — 이 기하의 **유일한 존재 이유**.
+
+    램프를 웨이포인트 중심까지 이으면 전환(반경 진입) 시점에 목표에 닿기 전에
+    끊기고 다음 구간 시작이 wa로 점프한다: Δalt·r/seg. 실측 201 m(구간 500 m·
+    반경 200 m·Δ500 m)였다. 반경 경계에서 끝내면 그 점프가 사라진다.
+
+    핀하는 방식: 촘촘히 밟으며 스텝 간 명령 변화가 **구간 기울기 × 이동거리**를
+    넘지 않아야 한다. 넘는 순간이 곧 점프다.
+    """
+    wps = ((2000.0, 0.0, 1500.0), (2000.0, 2000.0, 900.0))
+    r, dx = 200.0, 5.0
+    path = LosPath(waypoints=wps, accept_radius=r).init(DT)
+    # 두 구간 다 seg=2000 → 유효 구간 1800, 최대 기울기는 |Δalt|/1800
+    slope = max(abs(1500.0 - 1000.0), abs(900.0 - 1500.0)) / (2000.0 - r)
+    prev = None
+    worst = 0.0
+    for n in [i * dx for i in range(int(2000 / dx) + 1)]:  # 1구간: 북으로
+        _h, alt, _d = path.step(_nav(n=n, e=0.0, h=1000.0))
+        if prev is not None:
+            worst = max(worst, abs(alt - prev))
+        prev = alt
+    for e in [i * dx for i in range(int(2000 / dx) + 1)]:  # 2구간: 동으로
+        _h, alt, _d = path.step(_nav(n=2000.0, e=e, h=1200.0))
+        if prev is not None:
+            worst = max(worst, abs(alt - prev))
+        prev = alt
+    assert worst <= slope * dx + 1e-9, (
+        f"전환에서 명령이 튀었다 — 최대 스텝간 변화 {worst:.3f} m > 기울기 한계 "
+        f"{slope * dx:.3f} m (중심 기준 램프였다면 Δ·r/seg = 60 m 점프)"
+    )
+    assert prev == pytest.approx(900.0)  # 끝에는 마지막 웨이포인트 고도로 정착

@@ -108,3 +108,24 @@ def test_경로오차는_폴리라인_최근접이고_부재는_None():
     # 인자 waypoints가 meta보다 우선한다 (호출자가 명시하면 그것이 정본)
     out = metric_values(t, signals, envelope, meta, waypoints=[[0.0, 3.0], [100.0, 3.0]])
     assert out["xtrack_rms"] == pytest.approx(np.sqrt((0.0 + 1.0 + 9.0 + 9.0) / 4.0))
+
+
+def test_xtrack_rms_ignores_the_altitude_column():
+    """3열 웨이포인트(n, e, alt)에서 고도 열이 좌표로 섞이지 않는다.
+
+    종전 reshape(-1, 2)는 원소 수가 짝수이기만 하면 예외 없이 엉뚱한 좌표쌍을
+    만들었다 — 지표가 말없이 거짓이 되는 자리다. 같은 수평 경로면 고도를 붙이든
+    말든 xtrack_rms가 **같아야** 한다.
+    """
+    from claw.pipeline.metrics import _xtrack_rms
+
+    sig = {"pn": [0.0, 500.0, 1000.0], "pe": [0.0, 30.0, 0.0]}
+    flat = _xtrack_rms(sig, [[0.0, 0.0], [1000.0, 0.0]])
+    with_alt = _xtrack_rms(sig, [[0.0, 0.0, 500.0], [1000.0, 0.0, 1500.0]])
+    assert flat == pytest.approx(with_alt)
+    assert with_alt == pytest.approx(_rms_of([0.0, 30.0, 0.0]))
+
+
+def _rms_of(vals):
+    import numpy as np
+    return float(np.sqrt(np.mean(np.square(np.asarray(vals, dtype=float)))))
