@@ -8,7 +8,7 @@
 
 import { el } from "../dom.js";
 import {
-  PROFILE_LAYOUT, ZOOM_STEP, fitView, fmtMeters, hitTest, isDrag, makeProjection,
+  PROFILE_LAYOUT, ZOOM_STEP, defaultWaypointAlt, fitView, fmtMeters, hitTest, isDrag, makeProjection,
   moveWaypoint, planProfile, profileHitTest, profileScale, rowsToPoints, toCanvasXY,
   trackProfile, zoomAt, panBy,
 } from "../lib/wpmap.js";
@@ -396,14 +396,17 @@ export function createWpMap({
         const { toNed } = makeProjection(view(), width, height);
         const p = eventXY(ev);
         const ned = toNed(p.x, p.y);
-        // 고도는 직전 행에서 물려받는다 — "전부 있거나 전부 없거나" 규칙(엔진
-        // set_waypoints)을 클릭 한 번으로 깨뜨리지 않게. 값도 "같은 고도로 계속"이
-        // 라는 합리적 기본이고, 표·툴바에서 바로 고칠 수 있다
+        // 고도 기본값은 lib 정본 — 원점(이륙점) 반경 안이면 0, 밖이면 직전 행 상속.
+        // **고도 없는 목록이면 null**이라 d 키를 생략한다: "전부 있거나 전부 없거나"
+        // 규칙(엔진 set_waypoints)을 클릭 한 번으로 깨뜨리지 않는다.
+        // 표의 추가 버튼과 **같은 함수**를 쓴다
         const rows = getRows();
-        const prevAlt = rows.length ? rows[rows.length - 1].d : undefined;
+        const d = defaultWaypointAlt(ned.n, ned.e, rows, {
+          acceptRadius: getAcceptRadius?.() || 0,
+        });
         rows.push({
           n: fmtMeters(ned.n), e: fmtMeters(ned.e),
-          ...(String(prevAlt ?? "").trim() === "" ? {} : { d: String(prevAlt) }),
+          ...(d == null ? {} : { d }),
         });
         selected = rows.length - 1;
         onRowsChanged();

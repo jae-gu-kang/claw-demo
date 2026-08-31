@@ -207,6 +207,64 @@ export function profileHitTest(plan, x, y, scale, { radiusPx = 10 } = {}) {
   return -1;
 }
 
+// 순항 고도 [기본값] — 고도가 하나도 없는 목록에 첫 점을 찍을 때 받는 값.
+// 엔진에 대응 기본값이 없는 "미션 시나리오" 값이라 웹이 든다 (lib/loops.js의
+// DEFAULT_LOOPS와 같은 부류 — 02 §5.5의 "엔진 기본값 재기술"이 아니다).
+//
+// 700 m인 이유는 **기체가 실제로 낼 수 있는 상승 경사**다: 데모 기체는 약 11%
+// (실측 Δ738 m / Δ6600 m)를 내는데, 8 km 첫 구간의 램프 구간은 도달 반경을 뺀
+// 6.5 km라 1300 m를 요구하면 20%가 되어 계획선이 실제선보다 5 km 앞서 달아난다.
+// 계획과 실제를 겹쳐 보라고 만든 화면이 기본 상태에서 못 따라갈 계획을 그리면 안 된다.
+export const CRUISE_ALT_DEFAULT = 700;
+
+/** 새 웨이포인트의 기본 고도 [m 문자열] — 원점 반경 안이면 "0", 밖이면 직전 행 고도,
+ * 그것도 없으면 순항 [기본값].
+ *
+ * 원점은 이륙점이다(docs/conventions.md — "NED 원점 = 이륙점"). 거기로 돌아오는 점은
+ * 곧 착륙점이므로 0이 맞다. 판정 반경은 **도달 반경을 재사용**한다: 엔진이 "이
+ * 웨이포인트에 도달했다"를 재는 바로 그 값이라(guidance/path.py `rem <= accept_radius`)
+ * 화면과 엔진이 같은 기준으로 "원점에 왔다"를 말한다.
+ *
+ * **반환은 문자열 또는 `null`**이다 — 고도가 하나도 없는 목록에는 `null`을 내고
+ * 호출측이 `d` 키를 생략해야 한다("전부 있거나 전부 없거나", 엔진 set_waypoints).
+ * 빈 목록은 첫 점이라 값을 준다: 거기서 고도 있는 목록이 시작된다.
+ *
+ * **찍는 순간에만** 쓴다 — 이후 끌어 옮길 때 다시 적용하면 사용자가 고친 값을 덮는다.
+ * 반경이 없거나 비유한이면 0으로 본다: 그래도 **정확히 원점**인 점은 0을 받는다
+ * (표의 "웨이포인트 추가"가 (0,0)에 만드는 경로가 그것이다).
+ */
+export function defaultWaypointAlt(n, e, rows, { acceptRadius, cruiseAlt } = {}) {
+  // 비배열을 빈 목록으로 눙치면 **고도 없는 목록이 값을 받아** 방금 막은 회귀가
+  // 조용히 되살아난다 — 게다가 옛 3인자 호출이 그럴듯한 값("700")을 돌려받아
+  // 더 안 들킨다(리뷰 실측). 판정 불가를 정상으로 위장하지 않는다
+  if (!Array.isArray(rows)) {
+    throw new TypeError(
+      `defaultWaypointAlt: rows는 웨이포인트 행 배열이어야 함 — 받은 것 ${typeof rows}`,
+    );
+  }
+  // **고도 없는 목록에는 값을 넣지 않는다** — null을 내면 호출측이 d 키를 생략한다.
+  // 값을 넣으면 "전부 있거나 전부 없거나"가 그 자리에서 깨져, 모드가 고도를 내는
+  // 미션(웨이포인트 고도를 안 쓰는 구성)에서 **지도 클릭 한 번마다 제출이 거부**되고
+  // 사용자가 손대지도 않은 앞 행들에 "고도가 빈 행" 경고가 뜬다(리뷰 실측).
+  // 직전 행만 봐서는 "마지막만 빔"과 "전부 빔"을 구분할 수 없어 목록 전체를 받는다.
+  const filled = rows.filter((r) => String(r?.d ?? "").trim() !== "");
+  if (rows.length > 0 && filled.length === 0) return null;
+
+  const r = Number(acceptRadius);
+  const rr = Number.isFinite(r) && r > 0 ? r : 0;
+  if (Number.isFinite(n) && Number.isFinite(e) && Math.hypot(n, e) <= rr) return "0";
+  // 직전이 **양수일 때만** 물려받는다. 기본 목록은 착륙점(0)으로 끝나므로, 그냥
+  // 상속하면 그 뒤에 찍는 공중 웨이포인트가 전부 지상 고도를 받는다 — 실측에서
+  // 지도 먼 곳을 찍었는데 0이 들어왔다. 원점 밖은 날고 있는 자리다
+  const prev = String(rows[rows.length - 1]?.d ?? "").trim();
+  const prevNum = Number(prev);
+  if (prev !== "" && Number.isFinite(prevNum) && prevNum > 0) return prev;
+  // cruiseAlt도 **양수 검사**를 건다 — Number(null)·Number("")은 0이라 그냥 통과하면
+  // 빈 입력이 조용히 해면 고도가 된다(lib/mission.js num()이 막는 그 함정)
+  const cruise = Number(cruiseAlt);
+  return String(Number.isFinite(cruise) && cruise > 0 ? cruise : CRUISE_ALT_DEFAULT);
+}
+
 /** 드래그 판별 — 시작점 대비 이동량이 임계 초과인가. */
 export function isDrag(dx, dy, threshold = DRAG_PX) {
   return Math.hypot(dx, dy) > threshold;

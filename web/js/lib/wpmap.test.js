@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  DEFAULT_SPAN, DRAG_PX, ZOOM_STEP, fitView, fmtMeters, hitTest, isDrag,
+  CRUISE_ALT_DEFAULT, DEFAULT_SPAN, DRAG_PX, ZOOM_STEP, defaultWaypointAlt,
+  fitView, fmtMeters, hitTest, isDrag,
   makeProjection, moveWaypoint, panBy, planProfile, profileHitTest, profileScale,
   rowsToPoints, toCanvasXY, trackProfile, zoomAt,
 } from "./wpmap.js";
@@ -227,4 +228,78 @@ test("profileHitTest: 웨이포인트 점만 잡는다 — 출발점·램프 꼭
   const noAlt = planProfile(rowsToPoints([{ n: "1000", e: "0" }]), 1000, 200);
   const sc2 = profileScale(noAlt, [], 380, 190);
   assert.equal(profileHitTest(noAlt, sc2.px(noAlt[1].dist), 95, sc2), -1);
+});
+
+test("defaultWaypointAlt: 원점 반경 안은 0 — 이륙점으로 돌아오면 착륙 고도", () => {
+  const rows = [{ n: "8000", e: "0", d: "700" }];
+  const opt = { acceptRadius: 1500 };
+  assert.equal(defaultWaypointAlt(0, 0, rows, opt), "0"); // 정확히 원점
+  assert.equal(defaultWaypointAlt(900, 1200, rows, opt), "0"); // 반경 1500 안 (거리 1500)
+  // 반경 밖은 직전 행 상속 — "같은 고도로 계속"이라는 기존 관례
+  assert.equal(defaultWaypointAlt(0, 1501, rows, opt), "700");
+  assert.equal(defaultWaypointAlt(8000, 8000, rows, opt), "700");
+});
+
+test("defaultWaypointAlt: **고도 없는 목록에는 값을 넣지 않는다** (null)", () => {
+  // 넣으면 "전부 있거나 전부 없거나"가 그 자리에서 깨져, 모드가 고도를 내는 미션에서
+  // 지도 클릭 한 번마다 제출이 거부되고 앞 행들에 "고도가 빈 행" 경고가 뜬다(리뷰 실측)
+  const none = [{ n: "8000", e: "0" }, { n: "8000", e: "8000" }];
+  const opt = { acceptRadius: 1500 };
+  assert.equal(defaultWaypointAlt(5000, 3000, none, opt), null); // 먼 곳
+  assert.equal(defaultWaypointAlt(0, 0, none, opt), null); // 원점도 마찬가지 — 목록을 따른다
+  // 빈 문자열·공백만 있는 것도 "고도 없음"이다
+  assert.equal(defaultWaypointAlt(5000, 3000, [{ n: "1", e: "2", d: "  " }], opt), null);
+  // **빈 목록**은 첫 점이므로 값을 준다 (여기서 고도 있는 목록이 시작된다)
+  assert.equal(defaultWaypointAlt(8000, 0, [], opt), String(CRUISE_ALT_DEFAULT));
+  assert.equal(defaultWaypointAlt(0, 0, [], opt), "0");
+  // 하나라도 차 있으면 "고도 있는 목록" — 섞인 상태는 이미 무효라 값을 준다
+  assert.equal(defaultWaypointAlt(8000, 0, [{ n: "1", e: "2" }, { n: "3", e: "4", d: "700" }], opt), "700");
+});
+
+test("defaultWaypointAlt: 직전이 비면 순항 [기본값] — 목록의 첫 점", () => {
+  const opt = { acceptRadius: 1500 };
+  assert.equal(defaultWaypointAlt(8000, 0, [], opt), String(CRUISE_ALT_DEFAULT));
+  // 호출측이 순항값을 정할 수 있다 (기본값을 뷰가 재기술하지 않게)
+  assert.equal(defaultWaypointAlt(8000, 0, [], { ...opt, cruiseAlt: 900 }), "900");
+  // null·""·0·음수는 0으로 통과하면 안 된다 — Number(null)===0 함정
+  for (const bad of [null, "", 0, -100, NaN, "abc"]) {
+    assert.equal(defaultWaypointAlt(8000, 0, [], { ...opt, cruiseAlt: bad }),
+      String(CRUISE_ALT_DEFAULT), `cruiseAlt=${JSON.stringify(bad)}`);
+  }
+});
+
+test("defaultWaypointAlt: 착륙점(0)은 물려받지 않는다 — 원점 밖은 날고 있는 자리", () => {
+  // 기본 목록은 원점 복귀(0)로 끝난다. 그냥 상속하면 그 뒤에 찍는 공중 웨이포인트가
+  // 전부 지상 고도를 받는다 — 라이브에서 지도 먼 곳을 찍었는데 0이 들어왔다
+  const opt = { acceptRadius: 1500 };
+  const landed = [{ n: "8000", e: "0", d: "700" }, { n: "0", e: "0", d: "0" }];
+  assert.equal(defaultWaypointAlt(8000, 8000, landed, opt), String(CRUISE_ALT_DEFAULT));
+  assert.equal(defaultWaypointAlt(8000, 8000, landed, { ...opt, cruiseAlt: 900 }), "900");
+  const neg = [{ n: "1", e: "2", d: "-50" }];
+  assert.equal(defaultWaypointAlt(8000, 8000, neg, opt), String(CRUISE_ALT_DEFAULT));
+  // 양수는 그대로 — 문자열 원형 보존 (소수점 표기를 정규화하지 않는다)
+  assert.equal(defaultWaypointAlt(8000, 8000, [{ n: "1", e: "2", d: "1250.5" }], opt), "1250.5");
+});
+
+test("defaultWaypointAlt: 반경이 없거나 비유한이어도 **정확히 원점**은 0", () => {
+  const rows = [{ n: "8000", e: "0", d: "700" }];
+  for (const bad of [undefined, null, NaN, Infinity, -100, 0]) {
+    assert.equal(defaultWaypointAlt(0, 0, rows, { acceptRadius: bad }), "0");
+  }
+  // 그때 원점이 아닌 점은 원점 규칙을 안 탄다 (반경 0 = 원점만 원점)
+  assert.equal(defaultWaypointAlt(1, 0, rows, { acceptRadius: NaN }), "700");
+});
+
+test("defaultWaypointAlt: 좌표가 비유한이면 원점 규칙을 안 탄다", () => {
+  const opt = { acceptRadius: 1500 };
+  assert.equal(defaultWaypointAlt(NaN, 0, [{ n: "1", e: "2", d: "700" }], opt), "700");
+  assert.equal(defaultWaypointAlt(0, undefined, [], opt), String(CRUISE_ALT_DEFAULT));
+});
+
+test("defaultWaypointAlt: 비배열 rows는 던진다 — 빈 목록으로 눙치지 않는다", () => {
+  // 눙치면 "고도 없는 목록"이 값을 받아 불변식 회귀가 조용히 되살아나고,
+  // 옛 3인자 호출이 그럴듯한 값을 돌려받아 더 안 들킨다
+  assert.throws(() => defaultWaypointAlt(0, 0, undefined, { acceptRadius: 1500 }), /배열이어야 함/);
+  assert.throws(() => defaultWaypointAlt(5000, 3000, { prevAlt: "700" }), /배열이어야 함/);
+  assert.throws(() => defaultWaypointAlt(0, 0, null), /배열이어야 함/);
 });

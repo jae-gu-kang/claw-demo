@@ -659,18 +659,18 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="450" y="260">미계산 소진 → 현재 침로 시드</text></g>
   <path class="wire" d="M560 236 H700" marker-end="url(#aw-gpath)"/>
   <g class="sblk"><rect class="body" x="704" y="224" width="36" height="24" rx="12"/><text class="pnum" x="722" y="240">2</text></g>
-  <text class="pname" x="726" y="268">done → 모드 시퀀서</text>
-  <text class="canvas-note" x="24" y="320">※ 반경 내 연쇄 스킵 — 붙은 웨이포인트 여러 개를 한 스텝에 통과 · done 후에도 heading 출력은 마지막 값 유지 — 출력 계약은 (heading, done) 상시 쌍</text>
-  <text class="canvas-note" x="24" y="340">※ 소진 안전: 첫 헤딩 계산 전 소진(빈 목록·반경 내 시작)이면 정북(0) 아닌 현재 침로 명령 — 조용한 급선회 방지 · 도달반경 200 m [기본값] — 편집: 시뮬 탭</text>
-  <text class="canvas-note" x="24" y="360">※ 경로는 헤딩만 담당 — 고도·속도는 모드 테이블 소관 (M8 분업) · L1·벡터필드 대안은 같은 step(nav)→(heading, done) 계약으로 등록 [TBD 01 §3.3]</text>
+  <text class="pname" x="726" y="268">alt·done → 모드 시퀀서</text>
+  <text class="canvas-note" x="24" y="320">※ 반경 내 연쇄 스킵 — 붙은 웨이포인트 여러 개를 한 스텝에 통과 · done 후 heading은 마지막 값 유지, alt는 마지막 웨이포인트 고도로 정착 — 계약은 (heading, alt, done)</text>
+  <text class="canvas-note" x="24" y="340">※ 소진 안전: 첫 헤딩 계산 전 소진(빈 목록·반경 내 시작)이면 정북(0) 아닌 현재 침로 명령 — 조용한 급선회 방지 · 도달반경 엔진 기본 200 m [기본값] / 시뮬 탭 폼 1500 m — 편집: 시뮬 탭</text>
+  <text class="canvas-note" x="24" y="360">※ 경로가 헤딩과 **세로 프로파일**을 낸다 — 모드가 alt=&quot;path&quot;일 때만 쓰인다(heading과 같은 규약) · 속도는 모드 소관 · 대안은 같은 step(nav)→(heading, alt, done) 계약 [TBD 01 §3.3]</text>
 </svg>`,
         notes: `
 <h4>설계 노트</h4>
 <ul>
-  <li>교체 계약: <span class="mono">step(nav) → (heading_cmd, done)</span> — L1·벡터필드 등 대안 알고리즘 선정 <span class="chip tbd">TBD 01 §3.3</span> · M8 1차는 <b>LOS</b> <span class="chip dft">기본값</span></li>
-  <li>도달 반경 진입 시 다음 웨이포인트 — <b>반경 내 연쇄 스킵</b> 허용 (while) · 도달반경 accept_radius 200 m <span class="chip dft">기본값</span>, 편집은 시뮬 탭 미션 그룹</li>
+  <li>교체 계약: <span class="mono">step(nav) → (heading_cmd, alt_cmd, done)</span> — L1·벡터필드 등 대안 알고리즘 선정 <span class="chip tbd">TBD 01 §3.3</span> · M8 1차는 <b>LOS</b> <span class="chip dft">기본값</span></li>
+  <li>도달 반경 진입 시 다음 웨이포인트 — <b>반경 내 연쇄 스킵</b> 허용 (while) · 도달반경 accept_radius — <b>엔진 기본값 200 m</b> <span class="chip dft">기본값</span>이지만 <b>시뮬 탭 폼 기본값은 1500 m</b>다(데모 미션 스케일에 맞춘 값, 웹이 항상 명시 전송). 세로 프로파일의 램프 마루와 새 웨이포인트의 "원점 판정"도 이 값을 쓴다 — 편집은 시뮬 탭 미션 그룹</li>
   <li>소진 안전: 헤딩을 한 번도 계산하기 전 소진(빈 목록·반경 내 시작)이면 정북(0)이 아닌 <b>현재 침로</b>를 명령 — 조용한 급선회 방지 <span class="chip ok">확정</span></li>
-  <li>웨이포인트는 NED 수평면 (n, e)[m] 열 — 고도·속도는 모드 테이블 소관 (M8 분업: 경로는 헤딩만) <span class="chip ok">확정</span></li>
+  <li>웨이포인트는 <span class="mono">(n, e)</span> 또는 <span class="mono">(n, e, alt)</span>[m] — 고도를 주면 <b>경로가 세로 프로파일도 낸다</b>(구간 선형, 램프는 도달 반경 경계에서 종료). 모드가 <span class="mono">alt="path"</span>일 때만 쓰이므로 <b>heading과 같은 규약</b>이고, 그래서 "경로와 모드 중 누가 이기나"라는 우선순위 규칙이 따로 없다. 속도는 모드 소관 <span class="chip ok">확정</span></li>
 </ul>`,
       },
       modes: {

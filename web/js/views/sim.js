@@ -9,25 +9,37 @@ import { clear, el, flagBadge, fmt } from "../dom.js";
 import { buildModes, buildWaypoints, COND_KINDS } from "../lib/mission.js";
 import { planeViews } from "../lib/plot.js";
 import { flaggedNames, modeSpans, strideFor } from "../lib/replay.js";
-import { moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
+import { defaultWaypointAlt, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
 import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createProfileChart, createWpMap } from "./wpmap.js";
 
-// 기본 미션 = Phase 4 완주 회귀 미션 (test_mission — 상승→선회 항법→디센트→임무수행)
+// 기본 미션 = 이륙점(원점) 출발 → 순항 → 원점 복귀. 고도는 **경로가 낸다**(alt="path")
+// — 웨이포인트 세로 프로파일이 곧 이 미션의 고도 계획이고, 지도 옆 거리-고도 그래프가
+// 그것을 그대로 그린다. 모드는 속도·헤딩만 맡는다. 웨이포인트가 고도를 갖는 순간
+// 모드도 고도를 내면 주인이 둘이 되어 계획선과 실제선이 갈리므로, 한쪽으로 모았다.
+//
+// 종전 기본값은 엔진 회귀 미션(test_mission — 모드가 고도를 내는 climb→wpnav→descent→
+// mission 4단)의 사본이었다. 웹 기본값이 그것과 갈라지는 것이 이 변경이고, **엔진
+// 테스트는 그대로다**. 이 값들은 엔진 기본값의 사본이 아니라 미션 시나리오라
+// 02 §5.5의 "엔진 기본값 재기술" 대상이 아니다 (lib/loops.js DEFAULT_LOOPS와 같은 부류).
+//
+// **출발점은 이륙 직후다.** 원점은 이륙점이고(docs/conventions.md) 트림 고도가 0이지만,
+// 트림은 정상 수평비행이라 활주로에 서 있는 상태가 아니다 — 지상 반력·착륙장치 모델이
+// 없어 지상 정지에서 출발할 수 없다(01 §7 백로그).
 let modeRows = [
-  { name: "climb", speed: "202", alt: "1300", heading: "0",
-    exitKind: "alt_ge", exitValue: "1280", next: "wpnav" },
-  { name: "wpnav", speed: "140", alt: "1300", heading: "path",
-    exitKind: "path_done", exitValue: "", next: "descent" },
-  { name: "descent", speed: "140", alt: "100", heading: "",
-    exitKind: "alt_le", exitValue: "130", next: "mission" },
-  { name: "mission", speed: "140", alt: "30", heading: "",
+  { name: "wpnav", speed: "160", alt: "path", heading: "path",
+    exitKind: "path_done", exitValue: "", next: "hold" },
+  { name: "hold", speed: "140", alt: "path", heading: "",
     exitKind: "time_ge", exitValue: "1e9", next: "" },
 ];
-let wpRows = [{ n: "8000", e: "0" }, { n: "8000", e: "8000" }];
+let wpRows = [
+  { n: "8000", e: "0", d: "700" }, // 상승 후 순항 진입 (700 = 기체가 낼 수 있는 경사 — lib CRUISE_ALT_DEFAULT)
+  { n: "8000", e: "8000", d: "700" }, // 순항 다리
+  { n: "0", e: "0", d: "0" }, // 원점 복귀 — 이륙점으로 돌아와 0
+];
 let lastReplay = null; // {body, waypoints, acceptRadius}
 let runningJobId = null;
 // 제출 시점 스냅샷 — 실행 중 편집이 재생 오버레이를 오염시키지 않도록 (리뷰 S3)
@@ -36,6 +48,9 @@ let runningSnapshot = { waypoints: [], acceptRadius: 0 };
 // 클로저에 닿지 못하는데, 표에서 고도를 고쳐도 프로파일이 따라와야 한다
 // (wpRows·lastReplay·wpMapView와 같은 모듈 상태 관례)
 let redrawProfile = () => {};
+// 도달 반경 읽기 — renderWpTable도 모듈 함수라 폼(f)에 닿지 못한다. 새 웨이포인트의
+// 원점 판정에 쓰므로 지도·표 두 추가 경로가 같은 값을 봐야 한다 (redrawProfile과 같은 관례)
+let acceptRadiusOf = () => 0;
 // 지도 줌/팬 상태 — 탭 재진입 시 유지 (wpRows·lastReplay와 동렬)
 let wpMapView = { view: null };
 // 3D 시점(방위·고각) — 재렌더·탭 전환에도 돌려놓은 각도를 잃지 않게
@@ -131,8 +146,12 @@ export function render() {
   const actApplied = store.get("actuatorParams");
   const f = {
     mach: numInput("0.6"),
-    alt: numInput("1000"),
+    alt: numInput("0"), // 이륙점 고도 — 프로파일 출발점이자 엔진 첫 구간의 시작
     fuel: numInput("300"),
+    // 경로 27.3 km + 선회 여유. 길게 두면 path_done 뒤 hold가 마지막 웨이포인트
+    // 고도(0)를 잡고 **기준면 아래로 진동**한다 — 엔진 실측: t_end 210이면 3041틱
+    // 이탈에 최저 −21.6 m, 180이면 214틱에 −0.64 m(그 214는 복귀 고도를 30·50 m로
+    // 올려도 같다 — 출발 트림이 정확히 0이라 생기는 이륙 직후 접지다)
     tEnd: numInput("180"),
     accept: numInput("1500"),
     navOn: el("input", { type: "checkbox", checked: true }),
@@ -234,6 +253,7 @@ export function render() {
     clear(profileHints).append(...kids);
   };
   redrawProfile = drawProfile;
+  acceptRadiusOf = () => Number(f.accept.value) || 0; // 다른 두 호출부와 같은 표기
 
   // NED 평면 지도 편집기 — 표와 양방향 동기 (단일 소스 = wpRows)
   const wpMap = createWpMap({
@@ -368,7 +388,14 @@ export function render() {
             field("마하", f.mach),
             field("고도 [m]", f.alt),
             field("연료 [kg]", f.fuel),
-            field("t_end [s]", f.tEnd))),
+            field("t_end [s]", f.tEnd)),
+          // t_end가 경로 완주 시간과 묶여 있다는 사실이 소스에만 있으면 편집이 조용한
+          // 미완주로 끝난다 — 도달반경을 200(엔진 기본)으로, 속도를 140으로 내리면
+          // 기본 미션이 완주 못 하고 150~260 m 상공에서 끝난다(리뷰 실측)
+          el("p", { class: "hint", style: HINT_ST },
+            "고도 0 = 이륙점(원점) — 트림은 정상 수평비행이라 활주로 정지가 아니라 ",
+            "이륙 직후다. t_end는 경로 완주 시간을 덮어야 한다 (기본 미션 ~176 s) — ",
+            "짧으면 복귀 전에 끊기고, 길면 착륙 고도 0을 잡은 채 기준면 아래로 진동한다.")),
         el("div", { class: "opt-group", style: GROUP_ST },
           groupTitle("항법 오차 모델", f.navOn),
           el("div", { class: "row-inner", style: INNER_ST },
@@ -506,10 +533,11 @@ function renderWpTable(wpBox, wpMap) {
     ),
     el("div", { class: "row", style: "margin-top: 8px" },
       el("button", { onclick: () => {
-        // 고도는 직전 행에서 물려받는다 — "전부 있거나 전부 없거나" 규칙을
-        // 행 추가 한 번으로 깨뜨리지 않게 (지도 클릭 추가와 같은 규칙)
-        const prev = wpRows[wpRows.length - 1]?.d;
-        wpRows.push({ n: "0", e: "0", ...(String(prev ?? "").trim() === "" ? {} : { d: String(prev) }) });
+        // 새 행은 좌표 (0,0) = 원점이라 고도 있는 목록에서는 "0"(착륙점)이 붙고,
+        // **고도 없는 목록이면 null이라 d 키를 생략**한다. 규칙은 지도 클릭 추가와
+        // 같은 함수다 — 두 곳에 따로 적으면 추가 경로마다 다른 고도가 붙는다
+        const d = defaultWaypointAlt(0, 0, wpRows, { acceptRadius: acceptRadiusOf() });
+        wpRows.push({ n: "0", e: "0", ...(d == null ? {} : { d }) });
         sync();
       } }, "웨이포인트 추가"),
       el("span", { class: "hint" }, "지도에서 클릭 추가 · 드래그 이동 · 우클릭 삭제 가능")),
