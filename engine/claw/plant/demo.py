@@ -5,16 +5,62 @@ CFD DB 반입 전의 대역(placeholder) 프로파일이며 "비행체 프로파
 델타윙 상정. 수치는 검증 손계산이 쉬운 라운드 값 — 실기체 값 아님.
 """
 
+import math
+
 import numpy as np
 
 from claw.plant.aero import AeroModel, wind_to_body_coeffs
 from claw.plant.aircraft import Aircraft
+from claw.plant.ground import LaunchRail, SkidGear
 from claw.plant.mass import FuelMass
 from claw.plant.prop import TwinEngine
 from claw.tables import Table
 
+# 스키드 접촉 [기본값] — 강성은 "정지 침투량"으로 정한다. 총중량 10.8 kN을 5 cm에서
+# 받으려면 k_total = W/0.05 ≈ 216 kN/m, 4점이면 점당 54 kN/m. 감쇠는 ζ≈0.7:
+# ω_n = √(k_total/m) ≈ 14 rad/s → c_total = 2ζmω_n ≈ 21.6 kN·s/m, 점당 5.4 kN·s/m.
+# 접촉 고유주파수 2.2 Hz라 dt_plant 0.005~0.01에서 RK4가 충분히 분해한다.
+SKID_K = 54_000.0  # [N/m] 점당
+SKID_C = 5_400.0  # [N·s/m] 점당
+SKID_MU = 0.35  # [-] 미끄럼 마찰 (바퀴 아님 — 구름이 아니라 미끄럼)
 
-def make_demo_aircraft() -> Aircraft:
+
+def make_demo_skid_gear() -> SkidGear:
+    """데모 스키드 — 좌·우 스키드를 각각 앞·뒤 2점으로, 총 4점.
+
+    좌우 2점만 두면 피치 자유도가 없어 접지 후 기수 내려앉음이 나오지 않는다.
+
+    **접촉점 중심을 CG에 맞춘다(x 대칭).** 어긋나면 수평 자세가 평형이 아니게 되어
+    기체가 지상에서 늘 한쪽으로 기운 채 선다 — 접촉 중심이 CG보다 Δx 앞이면 정지
+    상태에서 M_y = Δx·W 의 기수 올림이 남는다(0.10 m면 1.08 kN·m). 활주 이륙이라면
+    CG를 주기어 앞에 두어 회전(rotation)을 얻지만, 이 기체는 발사대 이륙이라
+    그럴 이유가 없고 수평 정지가 더 쓸모 있다.
+    수치는 데모 프로파일용 라운드 값 — 실기체 값 아님.
+    """
+    contacts = np.array(
+        [
+            [0.60, -0.60, 0.55],  # 좌 앞
+            [-0.60, -0.60, 0.55],  # 좌 뒤
+            [0.60, 0.60, 0.55],  # 우 앞
+            [-0.60, 0.60, 0.55],  # 우 뒤
+        ]
+    )
+    return SkidGear(contacts, k=SKID_K, c=SKID_C, mu=SKID_MU)
+
+
+def make_demo_launch_rail() -> LaunchRail:
+    """데모 발사대 [기본값] — 레일 10 m, 앙각 15°, 이탈 81.5 m/s.
+
+    이탈 속도는 트림 정합 실속속도 70.9 m/s의 1.15배다. α_stall 0.40에서 CL 1.40이
+    나오지만 거기까지 가려면 상향 엘러본이 필요하고 그것이 양력을 깎으므로
+    (Cm = 0.02 − 0.8α − 1.0δe = 0 동시 만족), 실제 최대 트림 CL은 1.169다.
+    레일 10 m에서 이 속도는 **33.9 g**를 요구한다 — 판정 기준은 구조 한계
+    n_x_launch이고 그 값은 아직 [TBD]라 "미판정"으로 표시된다.
+    """
+    return LaunchRail(length=10.0, elev_angle=math.radians(15.0), exit_speed=81.5)
+
+
+def make_demo_aircraft(ground=None) -> Aircraft:
     def coef(inp):
         a, b_ = inp["alpha"], inp["beta"]
         de = inp.get("de", 0.0)
@@ -43,7 +89,7 @@ def make_demo_aircraft() -> Aircraft:
         cg_full=np.zeros(3),
     )
     engine = TwinEngine(max_thrust=4000.0, y_offset=0.5)
-    return Aircraft(fuel_mass, aero, engine)
+    return Aircraft(fuel_mass, aero, engine, ground=ground)
 
 
 def make_demo_db_ranges() -> dict:
@@ -60,6 +106,11 @@ def make_demo_structural_limits() -> dict:
     구조팀 정본 확보 시 교체 (01 §3.6 — Nz 제한 [TBD]와 한 세트).
     제한하중배수(운용 허용) ±, 극한 = 제한 × 안전계수 1.5 [관례],
     mach_no = 최대 구조 순항 마하(V_NO 상당), mach_d = 급강하 한계 마하(V_D).
+
+    n_x_launch는 **종방향** 발사 하중 한계다 [TBD — 값 없음]. n_limit_pos 6.0은 Nz(수직)
+    이라 레일 사출의 34 g를 판정할 수 없다. 값이 None인 동안 시뮬은 사출 가속도를
+    기록하되 판정은 "미판정"으로 낸다 — None을 0이나 통과로 바꾸면 "판정 불가"와
+    "한계 이내"가 같은 화면이 된다 (01 §4.2와 같은 자리).
     """
     return {
         "n_limit_pos": 6.0,
@@ -67,6 +118,7 @@ def make_demo_structural_limits() -> dict:
         "safety_factor": 1.5,
         "mach_no": 0.75,
         "mach_d": 0.9,
+        "n_x_launch": None,
     }
 
 
