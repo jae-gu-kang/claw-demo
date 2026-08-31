@@ -28,6 +28,13 @@ let loopRows = DEFAULT_LOOPS.map((r) => ({ ...r }));
 // FALLBACK_CRITERIA 머리말). 탭 재진입마다 다시 부르지 않도록 모듈에 남긴다
 let criteria = null;
 let criteriaErr = null;
+// 보드선도 요청 시퀀스 — **모듈 스코프**여야 한다. renderResults 지역이면 재진입이
+// bodeSeq=0인 새 클로저를 만들어, 옛 클로저의 진행 중 요청이 자기 카운터로는
+// 유효(seq === bodeSeq)라 **DOM에서 떨어진 슬롯**에 곡선을 그린다 — 사용자는
+// "계산 중"만 보고 곡선은 영영 안 온다(조용한 비표시). 대시보드 재렌더 경로는
+// /design/defaults 응답 뒤와 탭 재진입 둘 다 있다. 인스턴스는 동시에 하나뿐이라
+// 모듈로 올려도 서로 간섭하지 않는다
+let bodeSeq = 0;
 
 export function render() {
   const errBox = el("div");
@@ -290,15 +297,35 @@ function renderResults(resultBox, body) {
   const fuelSel = el("select", { "aria-label": "연료 선택" },
     fuels.map((f) => el("option", { value: f }, `연료 ${f} kg`)));
   const plotBox = el("div");
-  const detailBox = el("div");
   const HEAT_W = 560; // heatmapCanvas 기본 폭 — 클릭 역매핑이 같은 값을 써야 한다
 
   /** 히트맵 칸 클릭 → 그 운용점·그 루프의 보드선도. GM·PM이 주파수축 어디에
-   * 있는지는 히트맵 두 장으로는 원리적으로 안 보인다 (01 §4.2). */
-  let bodeSeq = 0; // 늦게 도착한 응답이 새 선택을 덮지 않도록
+   * 있는지는 히트맵 두 장으로는 원리적으로 안 보인다 (01 §4.2).
+   * bodeSeq(늦게 도착한 응답 폐기)는 모듈 스코프 — 머리말 참조. */
+  // 루프 구간마다 상세 슬롯 — 보드선도는 **누른 칸 바로 밑**에 연다. 종전처럼
+  // 대시보드 맨 아래 한 자리에 열면 위쪽 루프를 누른 사람은 히트맵과 곡선을 나란히
+  // 못 보고 화면 밖으로 스크롤해야 했다 (사용자 제기). draw()마다 새로 만든다.
+  // **키는 이름이 아니라 루프 객체**다 — 이름은 서버 echo라 유일성 보장이 없고,
+  // 겹치면 위 루프를 눌렀는데 아래 루프 자리에 곡선이 열린다
+  let detailBoxes = new Map();
+  /** 모든 슬롯을 비우고 그 루프의 슬롯을 돌려준다 — 한 번에 하나만 연다
+   * (루프마다 남겨 두면 어느 것이 방금 누른 것인지 흐려진다). */
+  const slotFor = (lp) => {
+    for (const b of detailBoxes.values()) clear(b);
+    return detailBoxes.get(lp) ?? null;
+  };
+  /** 계산 없이 사유만 내는 자리 — bodeSeq를 올려 **진행 중인 요청이 이 문장을
+   * 덮지 않게** 한다. 안 올리면 미수렴 칸을 누른 직후 앞서 보낸 응답이 도착해
+   * 사유를 지우고 남의 칸 곡선을 그린다. */
+  const showNote = (lp, node) => {
+    bodeSeq += 1;
+    slotFor(lp)?.append(node);
+  };
   const openBode = async (lp, entry) => {
     const seq = ++bodeSeq;
-    clear(detailBox).append(el("p", { class: "hint" },
+    const box = slotFor(lp);
+    if (!box) return; // 그사이 다시 그려져 슬롯이 사라졌다
+    box.append(el("p", { class: "hint" },
       `보드선도 계산 중 — ${entry.trim.case.name} · ${lp.name}`));
     try {
       const res = await api.post("/analysis/bode", {
@@ -312,10 +339,10 @@ function renderResults(resultBox, body) {
         z0: [entry.trim.euler[1], entry.trim.control.elevon[0], entry.trim.control.throttle[0]],
       });
       if (seq !== bodeSeq) return; // 그사이 다른 칸을 눌렀다 — 옛 응답을 버린다
-      renderBode(detailBox, lp, entry, res);
+      renderBode(box, lp, entry, res);
     } catch (e) {
       if (seq !== bodeSeq) return;
-      clear(detailBox).append(el("div", { class: "error-box" }, errorText(e)));
+      clear(box).append(el("div", { class: "error-box" }, errorText(e)));
     }
   };
 
@@ -335,25 +362,38 @@ function renderResults(resultBox, body) {
     canvas.addEventListener("click", (ev) => {
       const hit = hitAt(ev);
       if (!hit || !hit.entry) return; // 여백·격자 밖 — 가까운 칸으로 끌어붙이지 않는다
+      // 열려 있던 슬롯이 **이 캔버스보다 위**에 있으면 비우는 순간 그만큼 페이지가
+      // 위로 밀려 방금 누른 히트맵이 손가락 밑에서 튄다(상세 높이가 노트북 한 화면쯤
+      // 된다). Chrome·Firefox는 scroll anchoring이 흡수하지만 Safari에는 없다 —
+      // 눌린 자리를 화면상 제자리에 붙들어 둔다
+      const top0 = canvas.getBoundingClientRect().top;
+      const keepAnchored = () => {
+        const d = canvas.getBoundingClientRect().top - top0;
+        if (d) window.scrollBy(0, d);
+      };
       if (!hit.entry.trim.converged) {
-        clear(detailBox).append(el("p", { class: "hint" },
+        showNote(lp, el("p", { class: "hint" },
           `${hit.entry.trim.case.name}: 트림 미수렴이라 선형화점이 없습니다 — 보드선도를 낼 수 없습니다.`));
+        keepAnchored();
         return;
       }
       if (!hit.entry.margins?.[lp.name]) {
         // 이 루프의 마진이 없는 칸(해석 실패로 회색) — 열어 봐야 서버도 같은
         // 이유로 못 푼다. 색칠된 칸만 열린다는 약속을 여기서 지킨다
-        clear(detailBox).append(el("p", { class: "hint" },
+        showNote(lp, el("p", { class: "hint" },
           `${hit.entry.trim.case.name}: 이 루프의 마진이 없는 칸입니다`
           + (hit.entry.note ? ` — ${hit.entry.note}` : " (해석 실패)")));
+        keepAnchored();
         return;
       }
       if (!lp.x_out) { // 구버전 결과(loopsOf 폴백) — 루프 스펙이 없어 재조립 불가
-        clear(detailBox).append(el("p", { class: "hint" },
+        showNote(lp, el("p", { class: "hint" },
           "이 결과에는 루프 스펙이 저장돼 있지 않아(구버전) 보드선도를 낼 수 없습니다 — 다시 실행하세요."));
+        keepAnchored();
         return;
       }
-      openBode(lp, hit.entry);
+      openBode(lp, hit.entry); // 동기 구간(슬롯 비우기 + "계산 중")까지 끝난 뒤 보정
+      keepAnchored();
     });
   };
 
@@ -364,7 +404,7 @@ function renderResults(resultBox, body) {
     const pivot = pivotCases(entries, fuel);
     // 연료가 바뀌면 다른 격자다 — 옛 상세도, **진행 중인 요청도** 무효다
     bodeSeq += 1;
-    clear(detailBox);
+    detailBoxes = new Map(); // 슬롯도 새로 만든다 (옛 노드는 곧 버려진다)
     const loopPlots = loops.flatMap((lp) => {
       const label = lp.x_out
         ? `${lp.name} — ${lp.sign < 0 ? "−" : "+"}PI·G(${lp.x_out} ← ${lp.u_in}) [${lp.axis}]`
@@ -382,9 +422,11 @@ function renderResults(resultBox, body) {
       // PM·GM 두 장 다 같은 루프의 같은 칸이므로 어느 쪽을 눌러도 같은 선도가 뜬다
       wireCells(pmCanvas, pivot, lp);
       wireCells(gmCanvas, pivot, lp);
+      const detail = el("div"); // 이 구간의 보드선도 자리 — 누른 칸 바로 밑
+      detailBoxes.set(lp, detail);
       return [
         el("h3", { style: "font-size: 13px; margin: 14px 0 4px" }, label),
-        pmCanvas, gmCanvas,
+        pmCanvas, gmCanvas, detail,
       ];
     });
     const points = [];
@@ -409,9 +451,14 @@ function renderResults(resultBox, body) {
   clear(resultBox).append(
     el("p", {}, el("b", {}, `계산 완료 — 케이스 ${entries.length}건 · 루프 ${loops.length}개`)),
     el("p", { class: "hint" }, appliedSummary(body)),
-    el("div", { class: "row" }, fuelSel), plotBox,
-    el("p", { class: "hint" }, "히트맵 칸을 클릭하면 그 운용점·그 루프의 보드선도가 아래에 열립니다."),
-    detailBox);
+    el("div", { class: "row" }, fuelSel),
+    // 안내가 플롯 **앞**에 있어야 한다 — 상세가 루프 구간마다 열리므로 맨 아래
+    // 한 줄로는 어디를 눌러야 하는지 읽을 자리가 없다. 루프가 0개면(루프를 전부
+    // 지웠거나 전 케이스 해석 실패) 히트맵이 한 장도 없으므로 안내도 내지 않는다 —
+    // 맨 앞자리라 "루프 0개" 헤더 바로 밑에서 없는 것을 누르라고 하게 된다
+    loops.length > 0 && el("p", { class: "hint" },
+      "히트맵 칸을 클릭하면 그 운용점·그 루프의 보드선도가 그 구간 바로 아래에 열립니다 — 한 번에 한 곳만."),
+    plotBox);
   draw();
 }
 
