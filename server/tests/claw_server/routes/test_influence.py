@@ -24,7 +24,8 @@ def test_structural_node_census(client):
     # 66/23 — 이륙·착륙 도입으로 종방향 축(승강률 4노드·피치 1노드·θ 출처 Switch 2단)과
     # 그 입력 4개(cmd_pitch·cmd_hdot·pitch_on·hdot_on)가 늘었다 (엔진 test_influence와 한 쌍)
     assert kinds["ir"] == 66 and kinds["input"] == 23 and kinds["output"] == 7
-    assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 8
+    # 지표 8 → 12: 이착륙 4종(접지 강하율·접지 속도·미끄럼 거리·사출 하중) 추가
+    assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 12
 
 
 def test_structural_is_json_safe(client):

@@ -1,10 +1,12 @@
 """pipeline.metrics 검증 — METRICS 선언(influence.py)과 계산의 짝 맞춤 + 합성 수치.
 
-지표 8개는 지금까지 선언(MetricDef)만 있고 계산이 없었다 — metric_values가 그
+지표는 지금까지 선언(MetricDef)만 있고 계산이 없었다 — metric_values가 그
 계산 짝이다. 여기서 지키는 것: ① 선언·계산 이중 정의가 드리프트하면 터진다
 ② 수치가 손계산과 일치한다 ③ JSON 왕복본(list·null)을 수용한다 ④ 활성 게이팅
 (비활성 축의 cmd는 의미 없음) ⑤ 웨이포인트 부재는 0이 아니라 None.
 """
+
+import math
 
 import numpy as np
 import pytest
@@ -129,3 +131,165 @@ def test_xtrack_rms_ignores_the_altitude_column():
 def _rms_of(vals):
     import numpy as np
     return float(np.sqrt(np.mean(np.square(np.asarray(vals, dtype=float)))))
+
+
+# ---- 이착륙 지표 (01 §3.3.1) ----
+
+
+def _landing_signals(n=12):
+    """접지 t=0.03, 정지 t=0.09인 합성 신호 — **실제로 강하 중**이고 뱅크가 있다.
+
+    처음 이 픽스처는 w=19.7이었는데 그 값에서 ḣ = +0.46, 즉 초당 0.46 m로
+    **올라가는** 접지였다. 기댓값을 구현식으로 다시 평가해 만들었던 탓에 아무도
+    못 잡았다 — 그래서 여기 값은 손으로 확인한 −1.0 근처로 두고, 아래 단정은
+    구현을 베끼지 않은 독립 산출값을 쓴다.
+
+    φ와 v를 0이 아닌 값으로 두는 것이 핵심이다: 근사식(u·sinθ − w·cosθ)은 그 둘이
+    0일 때만 맞으므로, 여기서 0을 주면 φ·v 항 누락을 원리적으로 못 잡는다.
+    """
+    import numpy as np
+
+    th = np.full(n, 0.25)  # θ = 14.32°
+    phi = np.full(n, 0.17)  # φ = 9.74° — 측풍 접지(디크랩)
+    u = np.full(n, 79.0)
+    v = np.full(n, 5.0)  # 횡속도가 있어야 v·sinφ·cosθ 항이 드러난다
+    w = np.full(n, 20.4)
+    return {
+        "u": u, "v": v, "w": w, "phi": phi, "theta": th,
+        # V·theta를 표본마다 흔들어 인덱스를 실제로 고정한다 — 전부 상수면
+        # k가 한 칸 어긋나도 단정이 통과해 버린다
+        "V": 81.4 + np.arange(n) * 0.5,
+        "pn": np.arange(n) * 100.0, "pe": np.zeros(n),
+        "launch_gx": np.array([33.9] * 3 + [0.0] * (n - 3)),
+        "on_rail": np.array([1.0] * 3 + [0.0] * (n - 3)),
+        "wow": np.array([0, 0, 0] + [1] * (n - 3), dtype=bool),
+    }
+
+
+def test_climb_rate_is_the_exact_rotation_not_the_phi_zero_special_case():
+    """φ·v 항이 빠진 근사식과 정확식이 갈리는 것을 직접 못박는다.
+
+    근사 u·sinθ − w·cosθ는 φ=0·v=0에서만 맞는다. 측풍 접지에서 0.5 m/s 넘게
+    틀리고, 접지 강하율의 판별 범위(1.0 대 4.6)를 생각하면 결론이 바뀐다.
+    """
+    from claw.pipeline.metrics import climb_rate
+
+    sig = _landing_signals()
+    got = climb_rate(sig, 3)
+    u, v, w, phi, th = 79.0, 5.0, 20.4, 0.17, 0.25
+    exact = (u * math.sin(th) - v * math.sin(phi) * math.cos(th)
+             - w * math.cos(phi) * math.cos(th))
+    assert got == pytest.approx(exact)
+    naive = u * math.sin(th) - w * math.cos(th)
+    assert abs(naive - exact) > 0.5, "이 픽스처가 근사식 오차를 드러내야 한다"
+    # φ=0·v=0이면 둘이 같아진다 — 근사가 언제 맞는지도 함께 고정
+    flat = {**sig, "phi": np.zeros(12), "v": np.zeros(12)}
+    assert climb_rate(flat, 3) == pytest.approx(
+        u * math.sin(th) - w * math.cos(th)
+    )
+
+
+def test_climb_rate_refuses_nonfinite_samples():
+    """JSON 왕복본의 null은 _arr에서 NaN이 된다 — 수치인 척 흘려보내지 않는다."""
+    from claw.pipeline.metrics import climb_rate
+
+    sig = _landing_signals()
+    assert climb_rate(sig, 3) is not None
+    assert climb_rate({**sig, "v": [None] * 12}, 3) is None
+    assert climb_rate({**sig, "phi": np.full(12, np.nan)}, 3) is None
+    assert climb_rate({k2: v2 for k2, v2 in sig.items() if k2 != "w"}, 3) is None
+    assert climb_rate(sig, 999) is None, "범위 밖 인덱스"
+
+
+def test_landing_metrics_from_phase_times():
+    from claw.pipeline.metrics import _landing_metrics
+
+    n = 12
+    t = np.arange(n) * 0.01
+    meta = {"phases": {"launch_exit_t": 0.02, "touchdown_t": 0.03, "stop_t": 0.09}}
+    out = _landing_metrics(t, _landing_signals(n), meta)
+    # **독립 산출값이다** — 구현식을 다시 평가하지 않는다.
+    #   79·sin0.25          = +19.5449
+    #   −5·sin0.17·cos0.25  =  −0.8196
+    #   −20.4·cos0.17·cos0.25 = −19.4809
+    #   합 ḣ = −0.7556  →  크기 0.7556
+    # (처음 여기 −1.0245를 적었다가 틀렸다. 구현식을 베꼈다면 그 오류가 드러나지
+    #  않았을 것이고, 그래서 이 자리는 손계산 상수여야 한다.)
+    assert out["td_sink_rate"] == pytest.approx(0.7556, abs=1e-3)
+    assert out["td_sink_rate"] > 0.0, "지표는 **크기**다 (better='lower'가 참이려면)"
+    assert out["td_speed"] == pytest.approx(81.4 + 3 * 0.5), "접지 표본의 V"
+    assert out["rollout_dist"] == pytest.approx(600.0)  # 300 m → 900 m
+    assert out["launch_gx"] == pytest.approx(33.9)
+
+
+def test_touchdown_is_a_descent_in_this_fixture():
+    """부호 규약을 따로 고정한다 — 지표가 크기라 그 안에서는 안 드러난다."""
+    from claw.pipeline.metrics import climb_rate
+
+    assert climb_rate(_landing_signals(), 3) < 0.0, "접지는 내려오면서 한다"
+
+
+def test_landing_metrics_are_none_when_the_phase_never_happened():
+    """0으로 채우면 착륙하지 않은 런이 '접지 강하율 0 = 완벽한 착륙'이 된다."""
+    from claw.pipeline.metrics import _landing_metrics
+
+    n = 12
+    t = np.arange(n) * 0.01
+    sig = _landing_signals(n)
+    sig["launch_gx"] = np.zeros(n)
+    sig["on_rail"] = np.zeros(n)
+    sig["wow"] = np.zeros(n, dtype=bool)
+    out = _landing_metrics(t, sig, {"phases": {
+        "launch_exit_t": None, "touchdown_t": None, "stop_t": None}})
+    assert out == {"td_sink_rate": None, "td_speed": None,
+                   "rollout_dist": None, "launch_gx": None}
+    # meta에 phases 자체가 없어도(구 결과 재생) 조용히 0을 만들지 않는다
+    assert _landing_metrics(t, sig, {})["td_sink_rate"] is None
+
+
+def test_launch_load_survives_a_run_cut_short_on_the_rail():
+    """레일 위에서 절단된 런도 사출 하중을 낸다 — 하중 판정이 가장 급한 런이다.
+
+    이탈 시각으로 관문을 걸면 이 런이 "발사 없음"으로 접혀 측정값이 버려진다.
+    발사가 있었는가의 직접 근거는 on_rail이다.
+    """
+    from claw.pipeline.metrics import _landing_metrics
+
+    n = 3
+    sig = {k2: v2[:n] for k2, v2 in _landing_signals(12).items()}
+    out = _landing_metrics(np.arange(n) * 0.01, sig,
+                           {"phases": {"launch_exit_t": None,
+                                       "touchdown_t": None, "stop_t": None}})
+    assert out["launch_gx"] == pytest.approx(33.9)
+    assert out["td_sink_rate"] is None, "접지는 하지 않았다"
+
+
+def test_touchdown_without_stop_has_no_rollout():
+    """접지했지만 아직 안 멈췄으면 미끄럼 거리는 없음 — 미래를 지어내지 않는다."""
+    from claw.pipeline.metrics import _landing_metrics
+
+    n = 12
+    sig = _landing_signals(n)
+    sig["on_rail"] = np.zeros(n)
+    out = _landing_metrics(np.arange(n) * 0.01, sig,
+                           {"phases": {"launch_exit_t": None,
+                                       "touchdown_t": 0.03, "stop_t": None}})
+    assert out["td_speed"] is not None
+    assert out["rollout_dist"] is None
+    assert out["launch_gx"] is None, "레일에 오른 적이 없으면 사출 하중도 없다"
+
+
+def test_nan_samples_do_not_pass_as_metric_values():
+    """NaN이 None 자리로 새면 '판정 불가'가 수치인 척 집계에 들어간다."""
+    from claw.pipeline.metrics import _landing_metrics
+
+    n = 12
+    sig = _landing_signals(n)
+    sig["V"] = np.full(n, np.nan)
+    sig["pn"] = np.full(n, np.nan)
+    out = _landing_metrics(np.arange(n) * 0.01, sig,
+                           {"phases": {"launch_exit_t": 0.02,
+                                       "touchdown_t": 0.03, "stop_t": 0.09}})
+    assert out["td_speed"] is None
+    assert out["rollout_dist"] is None
+    assert out["td_sink_rate"] is not None, "온전한 신호는 그대로 나온다"

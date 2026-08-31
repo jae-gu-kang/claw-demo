@@ -15,6 +15,8 @@ test_metrics가 핀한다 (한쪽에 지표를 더하고 다른 쪽을 잊으면
 "잴 수 없다"는 다른 사실이다 (duty의 None 규약과 동일).
 """
 
+import math
+
 import numpy as np
 
 from claw.analysis.duty import CHANNELS, POS_TOL, surface_positions
@@ -105,8 +107,99 @@ def _xtrack_rms(signals, waypoints):
     return _rms(best)
 
 
+def climb_rate(signals, k):
+    """표본 k의 승강률 ḣ [m/s] (상승 +) — 동체축 속도를 자세로 돌린 NED 상방 성분.
+
+        ḣ = u·sinθ − v·sinφ·cosθ − w·cosφ·cosθ
+
+    3-2-1 회전의 **정확한 셋째 행**이다. φ·v 항을 빼고 u·sinθ − w·cosθ로 쓰면
+    φ=0·v=0에서만 맞는다 — 측풍 접지(디크랩: φ 10°·v 5 m/s)에서 0.55 m/s가 틀리고
+    부호가 뒤집히는 구간도 있다. 접지 강하율의 판별 범위 전체가 1.0(플레어 있음)
+    대 4.6(없음)이라 그 오차는 결론을 바꾼다.
+
+    법칙·유도 쪽 승강률 정본은 `−nav.vel_n[2]`다(guidance/modes.py, fcl/law.py).
+    여기서 그 값을 그대로 못 쓰는 이유는 SimResult가 항법 NED 속도가 아니라
+    **참값 동체 속도**를 기록하기 때문이고(sim/simulator.py), 그래서 같은 물리량을
+    로그에서 복원하는 자리는 **이 함수 하나**여야 한다.
+
+    비유한 표본이면 None — JSON 왕복본의 null이 _arr에서 NaN이 되어 들어올 수 있고
+    (모듈 머리말 계약), NaN을 그대로 내보내면 "판정 불가"가 수치인 척 흘러간다.
+    """
+    parts = [_arr(signals, n) for n in ("u", "v", "w", "phi", "theta")]
+    if any(a is None or k >= len(a) for a in parts):
+        return None
+    u, v, w, phi, th = (float(a[k]) for a in parts)
+    if not all(math.isfinite(x) for x in (u, v, w, phi, th)):
+        return None
+    return (
+        u * math.sin(th)
+        - v * math.sin(phi) * math.cos(th)
+        - w * math.cos(phi) * math.cos(th)
+    )
+
+
+def _finite_at(signals, name, k):
+    """표본 k의 유한값 또는 None — NaN이 지표 자리로 새지 않게 하는 공통 관문."""
+    a = _arr(signals, name)
+    if a is None or k >= len(a):
+        return None
+    x = float(a[k])
+    return x if math.isfinite(x) else None
+
+
+def _landing_metrics(t, signals, meta) -> dict:
+    """이착륙 지표 — 그 단계가 없으면 **전부 None**이다 (01 §3.3.1).
+
+    0으로 채우면 착륙하지 않은 런이 "접지 강하율 0 = 완벽한 착륙"으로, 발사하지
+    않은 런이 "사출 하중 0 = 안전"으로 읽힌다. 없는 것은 없다고 말한다
+    (01 §4.2 판정 불가를 0으로 위장하지 않는다와 같은 자리).
+
+    단계 시각은 시뮬이 meta["phases"]에 이미 넣어 둔 것을 쓴다 — 여기서 wow를
+    다시 훑어 접지 시각을 구하면 같은 판정이 두 곳에 적히고, 어긋나면 지표와
+    화면이 다른 접지를 가리킨다 (02 §5.5).
+    """
+    out = {"td_sink_rate": None, "td_speed": None, "rollout_dist": None, "launch_gx": None}
+    ph = (meta or {}).get("phases") or {}
+    t_arr = np.asarray(t, dtype=float)
+
+    # 발사가 **있었는가**의 직접 근거는 on_rail이다. launch_exit_t로 관문을 걸면
+    # 레일 구간에서 절단된 런(구조 하중 판정이 가장 급한 런)이 이탈 시각 없음을
+    # 이유로 측정값을 버린다 — 하중은 배열에 멀쩡히 기록돼 있는데도.
+    rail = _arr(signals, "on_rail")
+    gx = _arr(signals, "launch_gx")
+    if rail is not None and gx is not None and len(gx) and np.any(rail > 0.0):
+        peak = np.abs(gx[np.isfinite(gx)])
+        if peak.size:
+            out["launch_gx"] = float(peak.max())
+
+    td = ph.get("touchdown_t")
+    if td is None or len(t_arr) == 0:
+        return out
+    k = int(np.argmin(np.abs(t_arr - float(td))))
+
+    hdot = climb_rate(signals, k)
+    # **크기로 낸다.** better='lower'가 문자 그대로 참이어야 하는데, 부호 있는 승강률로는
+    # 'higher'도 'lower'도 거짓이다 — 접지 순간 위로 튄 런(ḣ>0)이 소프트 랜딩보다
+    # 좋게 랭크되거나 그 반대가 된다. |ḣ|는 "지면에 닿을 때 수직으로 얼마나 빨랐나"라
+    # 구조 하중과 직결되고 작을수록 좋은 것이 항상 참이다. 부호가 필요한 소비자는
+    # climb_rate()를 직접 부른다.
+    out["td_sink_rate"] = None if hdot is None else abs(hdot)
+    out["td_speed"] = _finite_at(signals, "V", k)
+
+    st = ph.get("stop_t")
+    if st is not None:
+        j = int(np.argmin(np.abs(t_arr - float(st))))
+        # 컴프리헨션으로 묶으면 언패킹 순서를 읽는 사람이 매번 다시 검증해야 한다 —
+        # 네 줄이 더 짧지도 않으면서 검증이 필요 없다
+        pn_k, pn_j = _finite_at(signals, "pn", k), _finite_at(signals, "pn", j)
+        pe_k, pe_j = _finite_at(signals, "pe", k), _finite_at(signals, "pe", j)
+        if None not in (pn_k, pn_j, pe_k, pe_j):
+            out["rollout_dist"] = float(math.hypot(pn_j - pn_k, pe_j - pe_k))
+    return out
+
+
 def metric_values(t, signals, envelope, meta, waypoints=None) -> dict:
-    """설계 지표 8개 전부 — 키 집합은 METRICS 선언과 일치한다 (test_metrics 핀).
+    """설계 지표 전부 — 키 집합은 METRICS 선언과 일치한다 (test_metrics 핀).
 
     waypoints 인자가 정본이고, 없으면 저장 meta의 동봉본(routes/sim.py가 싣는다)을
     쓴다. 둘 다 없으면 xtrack_rms=None.
@@ -137,6 +230,7 @@ def metric_values(t, signals, envelope, meta, waypoints=None) -> dict:
             None if la is None else float(np.mean(np.asarray(la, dtype=bool)))
         ),
         "xtrack_rms": _xtrack_rms(signals, waypoints),
+        **_landing_metrics(t, signals, meta),
     }
     assert set(out) == {m.key for m in METRICS}, "METRICS 선언·계산 드리프트"
     return out

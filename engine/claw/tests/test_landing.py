@@ -21,6 +21,7 @@ from claw.common.contracts import TrimCase
 from claw.fcl import make_demo_fcl
 from claw.guidance import Guidance, ModeSpec
 from claw.nav import NavErrorModel
+from claw.pipeline.metrics import climb_rate
 from claw.plant import (
     make_demo_aircraft,
     make_demo_db_ranges,
@@ -77,9 +78,11 @@ def fly(nav=None, flare_alt=FLARE_ALT, t_end=220.0):
     return sim.run(tr, t_end=t_end, fingerprint="landing-demo")
 
 
-def sink_rate(sig, k):
-    """접지 순간의 승강률 [m/s] — 동체축 속도를 자세로 회전해 NED 상방 성분."""
-    return float(sig["u"][k] * math.sin(sig["theta"][k]) - sig["w"][k] * math.cos(sig["theta"][k]))
+# 승강률은 **생산 경로의 것을 그대로 쓴다** (pipeline.metrics.climb_rate).
+# 사본을 두면 지표 쪽 식을 고쳐도 이 회귀는 자기 사본으로 계속 통과해, 지표와
+# 테스트가 서로 다른 승강률을 가리키는데 빨간불이 안 들어온다 (02 §5.5).
+# 별칭도 두지 않는다 — sink(아래가 +)와 climb(위가 +)은 부호가 반대라
+# `sink_rate(...) == approx(-1.0)`이 읽다가 멈추게 만든다.
 
 
 @pytest.fixture(scope="module")
@@ -112,7 +115,7 @@ def test_touchdown_is_soft_enough(landed):
     """
     s = landed.signals
     k = int(round(landed.meta["phases"]["touchdown_t"] / DT))
-    assert sink_rate(s, k) == pytest.approx(-1.0, abs=0.4)
+    assert climb_rate(s, k) == pytest.approx(-1.0, abs=0.4)
     assert s["V"][k] == pytest.approx(79.5, rel=0.05), "접지 속도"
     # 기수를 든 채 접지 — 뒤쪽 접촉점이 먼저 닿는다(스키드 기하상 정상)
     assert math.degrees(s["theta"][k]) == pytest.approx(14.5, abs=2.0)
@@ -187,7 +190,7 @@ def test_rtk_buys_a_repeatable_touchdown_point_not_a_softer_one(seed):
     k = int(round(rtk.meta["phases"]["touchdown_t"] / DT))
     # RTK면 시드가 바뀌어도 같은 자리에 내린다 (5시드 실측 9902~9995 m)
     assert float(rtk.signals["pn"][k]) == pytest.approx(9957.0, abs=150.0)
-    assert sink_rate(rtk.signals, k) == pytest.approx(-0.89, abs=0.25)
+    assert climb_rate(rtk.signals, k) == pytest.approx(-0.89, abs=0.25)
 
 
 def test_default_nav_lands_but_scatters_the_touchdown_point():

@@ -609,6 +609,21 @@ METRICS = (
               "리미터가 피치 명령을 잘라낸 표본 비율"),
     MetricDef("xtrack_rms", "경로오차 RMS", "m", ("pn", "pe"), "lower",
               "웨이포인트 폴리라인까지의 최근접 거리 RMS (사후 기하)"),
+    # ── 이착륙 (01 §3.3.1) — 그 단계가 없는 런에서는 **None**이다.
+    # 0으로 채우면 착륙하지 않은 런이 "접지 강하율 0 = 완벽한 착륙"으로 읽힌다.
+    # 부호가 아니라 **크기**다 — better가 'lower'|'higher' 둘뿐이라 부호 있는 값으로는
+    # 어느 쪽도 참이 아니다(위로 튄 접지가 소프트 랜딩보다 좋게 랭크된다).
+    MetricDef("td_sink_rate", "접지 수직속도", "m/s",
+              ("u", "v", "w", "phi", "theta", "wow"), "lower",
+              "접지 순간 |ḣ| — 작을수록 부드럽다. 부호(오르는 중인지)가 필요하면 "
+              "pipeline.metrics.climb_rate. 접지 없으면 없음"),
+    MetricDef("td_speed", "접지 속도", "m/s", ("V", "wow"), "lower",
+              "접지 순간의 대기속도. 접지 없으면 없음"),
+    MetricDef("rollout_dist", "접지→정지 직선거리", "m", ("pn", "pe", "wow"), "lower",
+              "접지점과 정지점의 직선거리(경로장 아님) — 활주로 길이 요구의 근거. "
+              "정지 전이면 없음"),
+    MetricDef("launch_gx", "사출 하중", "g", ("launch_gx", "on_rail"), "lower",
+              "발사 레일 축 가속도 — 판정 기준(구조 한계 n_x_launch)은 아직 없다 [TBD]"),
 )
 
 
