@@ -4,8 +4,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  boundColor, boundLabel, boundarySegments, envelopeQuery, kindColor, kindLabel,
-  optNum, prefillValue, regionPolygons, scanCells, scanSummary, throttleCell,
+  boundColor, boundLabel, boundarySegments, capLabel, envelopeQuery, isoLabelIndex,
+  kindColor, kindLabel, mToFt, optNum, outlineCaps, prefillValue, regionPolygons,
+  outsideRegion, scanCells, scanSummary, spreadLabels, throttleCell, thrustFrontier,
 } from "./envelope.js";
 
 const region = (rows) => ({
@@ -15,6 +16,11 @@ const region = (rows) => ({
   lo_source: rows.map((r) => r[3]),
   hi_source: rows.map((r) => r[4]),
   empty: rows.map((r) => r[5] ?? false),
+});
+
+const bounds = (o = {}) => ({
+  alt_min: null, alt_max: null, alt_min_used: 0, alt_max_used: 4000,
+  alt_max_is_display_default: true, ...o,
 });
 
 test("regionPolygons — lo 오름·hi 내림 폐곡선, empty 행에서 분할", () => {
@@ -155,4 +161,156 @@ test("optNum — 빈칸 null(생략 계약), 비수치는 라벨 달아 던진�
 test("envelopeQuery — null 생략 (보내는 순간 user-input이 되므로), 0은 보낸다", () => {
   const q = envelopeQuery({ fuel: 200, q_max: null, alt_min: 0, mach_no: undefined });
   assert.equal(q, "fuel=200&alt_min=0");
+});
+
+test("outlineCaps — 상·하 캡 귀속: 운용 한계 / 표시 한계 / 자연 천장", () => {
+  // 도메인 바닥(0)에서 시작해 3000에서 자연 천장, 4000은 다시 유효
+  const r = region([
+    [0, 0.3, 0.75, "stall", "mach_no"],
+    [1000, 0.32, 0.75, "stall", "mach_no"],
+    [2000, 0.34, 0.75, "stall", "mach_no"],
+    [3000, 0.8, 0.75, "stall", "mach_no", true],
+    [4000, 0.4, 0.75, "stall", "mach_no"],
+  ]);
+  const caps = outlineCaps(r, bounds());
+  // 첫 run: 바닥은 표시 하한(운용 하한 미입력), 위는 자연 천장
+  assert.deepEqual(caps[0], { side: "bottom", alt: 0, mach0: 0.3, mach1: 0.75, source: "display_min" });
+  assert.deepEqual(caps[1], { side: "top", alt: 2000, mach0: 0.34, mach1: 0.75, source: "natural_ceiling" });
+  // 둘째 run은 한 행짜리 — 아래는 자연 바닥, 위는 표시 상한
+  assert.equal(caps[2].source, "natural_floor");
+  assert.equal(caps[3].source, "display_max");
+  assert.equal(caps.length, 4);
+});
+
+test("outlineCaps — 운용 고도를 입력하면 표시 한계가 아니라 운용 한계로 귀속", () => {
+  const r = region([
+    [500, 0.3, 0.75, "stall", "mach_no"],
+    [4000, 0.4, 0.75, "stall", "mach_no"],
+  ]);
+  const caps = outlineCaps(r, bounds({
+    alt_min: 500, alt_max: 4000, alt_min_used: 500, alt_max_is_display_default: false,
+  }));
+  assert.equal(caps[0].source, "ops_alt_min");
+  assert.equal(caps[1].source, "ops_alt_max");
+  // 라벨은 "실제 천장인가 표시 상한인가"를 문장으로 구분해야 한다
+  assert.notEqual(capLabel("ops_alt_max"), capLabel("display_max"));
+  assert.equal(capLabel("존재하지않는코드"), "존재하지않는코드");
+});
+
+test("outlineCaps — 전 행이 empty면 캡이 없다 (없는 경계를 그리지 않는다)", () => {
+  const r = region([
+    [0, 0.8, 0.75, "n_reach", "mach_no", true],
+    [1000, 0.8, 0.75, "n_reach", "mach_no", true],
+  ]);
+  assert.deepEqual(outlineCaps(r, bounds()), []);
+});
+
+test("spreadLabels — 겹치는 라벨을 최소 간격으로 밀되 순서를 보존", () => {
+  const items = [{ y: 100, t: "a" }, { y: 104, t: "b" }, { y: 300, t: "c" }, { y: 106, t: "d" }];
+  const out = spreadLabels(items, 12);
+  assert.deepEqual(out.map((o) => o.t), ["a", "b", "c", "d"]); // 입력 순서 유지
+  const byY = [...out].sort((p, q) => p.y - q.y);
+  assert.deepEqual(byY.map((o) => o.t), ["a", "b", "d", "c"]); // y 순서 유지
+  for (let i = 1; i < byY.length; i += 1) {
+    assert.ok(byY[i].y - byY[i - 1].y >= 12 - 1e-9);
+  }
+  // 이미 벌어져 있으면 손대지 않는다
+  assert.deepEqual(spreadLabels([{ y: 0 }, { y: 50 }], 12).map((o) => o.y), [0, 50]);
+});
+
+test("thrustFrontier — 포화/비포화 전이점을 양쪽 다 낸다 (고속 한계·저속 backside)", () => {
+  const sat = ["saturated_throttle_high"];
+  const cells = [
+    // 고속 쪽 포화 — 마하가 오르며 비포화→포화로 넘어간다
+    { mach: 0.3, alt: 0, reasons: [] },
+    { mach: 0.5, alt: 0, reasons: [] },
+    { mach: 0.6, alt: 0, reasons: sat },
+    { mach: 0.7, alt: 0, reasons: sat },
+    // 저속 쪽 포화 — 유도항력이 커서 느릴수록 추력이 모자란다 (항력곡선 backside).
+    // 최소 마하만 보면 스캔 왼쪽 끝을 경계라고 우기게 된다 — 실측에서 드러난 오류
+    { mach: 0.2, alt: 3000, reasons: sat },
+    { mach: 0.3, alt: 3000, reasons: ["not_converged", ...sat] }, // 대표 kind에 가려진 포화
+    { mach: 0.4, alt: 3000, reasons: [] },
+    { mach: 0.4, alt: 6000, reasons: ["alpha_margin"] }, // 포화 없음 — 행 자체가 빠진다
+  ];
+  assert.deepEqual(thrustFrontier(cells), [
+    { alt: 0, mach: 0.6, side: "hi", provisional: false },
+    { alt: 3000, mach: 0.3, side: "lo", provisional: true }, // 미수렴 셀이 전이점
+  ]);
+  // 행 전체가 포화면 전이가 없다 — 경계를 스캔 가장자리에서 지어내지 않는다
+  assert.deepEqual(thrustFrontier([
+    { mach: 0.2, alt: 0, reasons: sat }, { mach: 0.3, alt: 0, reasons: sat },
+  ]), []);
+  assert.deepEqual(thrustFrontier([]), []);
+});
+
+test("scanCells — reasons 전량을 함께 싣는다 (대표 kind만으로는 못 찾는 사유가 있다)", () => {
+  const e = entry(0.5, 1000, false, ["not_converged", "saturated_throttle_high"]);
+  const [c] = scanCells([e]);
+  assert.equal(c.kind, "not_converged"); // 대표는 여전히 첫 사유
+  assert.deepEqual(c.reasons, ["not_converged", "saturated_throttle_high"]);
+  assert.deepEqual(scanCells([entry(0.5, 0, true)])[0].reasons, []);
+});
+
+test("mToFt — 우측 고도축 환산 (정의값 0.3048)", () => {
+  assert.equal(mToFt(0), 0);
+  assert.ok(Math.abs(mToFt(1000) - 3280.839895) < 1e-6);
+  assert.ok(Math.abs(mToFt(0.3048) - 1) < 1e-12);
+});
+
+test("isoLabelIndex — 기준점에서 바깥으로 훑어 첫 범위 안 인덱스, 전부 밖이면 -1", () => {
+  const curve = { q: 10000, mach: [0.2, 0.5, 0.9, 1.4] };
+  assert.equal(isoLabelIndex(curve, 0.3, 1.0), 2); // 기본 기준점은 마지막
+  assert.equal(isoLabelIndex(curve, 0.0, 0.3), 0);
+  assert.equal(isoLabelIndex(curve, 2.0, 3.0), -1);
+  // 기준점을 주면 그 근처를 고른다 — 여러 곡선이 같은 행에 몰리는 것을 피하는 수단
+  assert.equal(isoLabelIndex(curve, 0.0, 2.0, 1), 1);
+  assert.equal(isoLabelIndex(curve, 0.3, 1.0, 0), 1); // 0은 범위 밖 → 바깥으로 한 칸
+});
+
+test("outsideRegion — q̄ 경계 밖 스케줄 격자점을 집어낸다 (이웃 행 보간)", () => {
+  const r = region([
+    [0, 0.3, 0.55, "stall", "qbar"],
+    [1000, 0.32, 0.60, "stall", "qbar"],
+    [2000, 0.8, 0.75, "stall", "mach_no", true], // empty 행 — 어떤 마하든 밖
+  ]);
+  assert.equal(outsideRegion({ mach: 0.45, alt: 0 }, r), false);
+  assert.equal(outsideRegion({ mach: 0.7, alt: 0 }, r), true); // q̄ 상한 밖
+  assert.equal(outsideRegion({ mach: 0.2, alt: 1000 }, r), true); // 실속 하한 밖
+  assert.equal(outsideRegion({ mach: 0.5, alt: 2000 }, r), true); // empty 행
+  assert.equal(outsideRegion({ mach: 0.5, alt: 0 }, { alt: [], mach_lo: [], mach_hi: [], empty: [] }), false);
+  // 행 사이 고도는 보간 — 500 m에서 하한은 0.31, 상한은 0.575
+  assert.equal(outsideRegion({ mach: 0.312, alt: 500 }, r), false);
+  assert.equal(outsideRegion({ mach: 0.29, alt: 500 }, r), true);
+  assert.equal(outsideRegion({ mach: 0.57, alt: 500 }, r), false);
+  assert.equal(outsideRegion({ mach: 0.60, alt: 500 }, r), true);
+});
+
+test("outsideRegion — 행 이산화만큼의 어긋남은 이탈이 아니다 (상시 경고 방지)", () => {
+  // 표시 행은 300 m 간격인데 격자점 마하는 자기 고도에서 정확히 계산된다.
+  // 그 차이(≪1e-3)를 이탈로 세면 경고가 늘 켜져 진짜 q̄ 이탈을 덮는다.
+  const r = region([
+    [4800, 0.3050, 0.75, "stall", "mach_no"],
+    [5100, 0.3095, 0.75, "stall", "mach_no"],
+  ]);
+  assert.equal(outsideRegion({ mach: 0.3080 - 2e-4, alt: 5000 }, r), false);
+  assert.equal(outsideRegion({ mach: 0.3080 - 5e-3, alt: 5000 }, r), true); // 진짜 이탈은 잡는다
+});
+
+test("thrustFrontier — 미수렴 셀의 전이점은 잠정 (해가 아니라 솔버 마지막 반복값)", () => {
+  const sat = ["saturated_throttle_high"];
+  const pts = thrustFrontier([
+    { mach: 0.3, alt: 0, reasons: [] },
+    { mach: 0.6, alt: 0, reasons: sat }, // 수렴한 포화 — 측정
+    { mach: 0.3, alt: 3000, reasons: [] },
+    { mach: 0.6, alt: 3000, reasons: ["not_converged", ...sat] }, // 미수렴 — 잠정
+  ]);
+  assert.deepEqual(pts.map((p) => p.provisional), [false, true]);
+});
+
+test("isoLabelIndex — 범위 밖 기준점은 배열 안으로 접는다 ('화면 밖'과 혼동 금지)", () => {
+  const curve = { q: 1000, mach: [0.2, 0.5] };
+  assert.equal(isoLabelIndex(curve, 0.1, 0.6, 99), 1); // 접지 않으면 -1이 나온다
+  assert.equal(isoLabelIndex(curve, 0.1, 0.6, -5), 0);
+  assert.equal(isoLabelIndex(curve, 2.0, 3.0, 99), -1); // 진짜 화면 밖은 여전히 -1
 });

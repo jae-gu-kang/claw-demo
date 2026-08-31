@@ -6,6 +6,7 @@ pi_loop+loop_margins. 루프 정의(축·입출력·PI 게인·부호)는 요청
 격자 시각화는 M14(web) 소관 (01 §4.2).
 """
 
+import math
 from typing import Literal
 
 import numpy as np
@@ -145,6 +146,41 @@ def _assemble_limits(
     return limits, source, overridden
 
 
+MAX_ISO_VALUES = 20  # 등고선 개수 상한 — MAX_SCAN_CASES와 같은 지위 (아래 참조)
+
+
+def _num_list(raw, label) -> list | None:
+    """콤마 구분 수 목록 → list[float]. None/빈 문자열이면 None (= 엔진 기본값).
+
+    등고선 값처럼 개수가 정해지지 않은 입력의 쿼리 표현. 비유한값은 422 —
+    다른 수치 파라미터의 allow_inf_nan=False와 같은 지위다.
+
+    개수 상한은 MAX_SCAN_CASES·MAX_POINTS·MAX_CASES와 같은 이유다("오타 격자의
+    단일 워커 점유 차단"): 값 하나가 표시 고도 41행마다 대기 계산을 돌리고 응답에
+    41개 수를 더한다. 상한 없이는 15 KB 쿼리 하나가 2.4 MB 응답과 4배 처리시간이
+    되어(실측) 단일 워커를 물고 늘어진다 — 공격이 아니라 CSV 한 열을 붙여넣는
+    실수로 충분히 닿는다. 20이면 사람이 읽을 수 있는 곡선 수를 넉넉히 넘는다.
+    """
+    if raw is None or not raw.strip():
+        return None
+    toks = raw.split(",")
+    if len(toks) > MAX_ISO_VALUES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label} 개수 상한 {MAX_ISO_VALUES} 초과: {len(toks)}개",
+        )
+    out = []
+    for tok in toks:
+        try:
+            v = float(tok)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"{label}가 숫자 목록이 아님: {tok.strip()!r}")
+        if not math.isfinite(v):
+            raise HTTPException(status_code=422, detail=f"{label}는 유한값이어야 함: {tok.strip()!r}")
+        out.append(v)
+    return out
+
+
 @router.get("/analysis/vn-envelope")
 def vn_envelope_endpoint(
     alt: float = Query(..., allow_inf_nan=False),
@@ -197,6 +233,9 @@ def design_envelope_endpoint(
     alt_max: float | None = Query(default=None, allow_inf_nan=False),
     mach_margin: float | None = Query(default=None, allow_inf_nan=False),
     alpha_margin: float = Query(default=0.05, ge=0.0, allow_inf_nan=False),  # 공력 보호선 — α 리미터 [기본값]과 동일
+    nz: float | None = Query(default=None, gt=0.0, allow_inf_nan=False),  # 기동 엔벨로프 하중배수
+    iso_qbar: str | None = Query(default=None),  # 콤마 구분 [Pa] — None이면 엔진 [기본값]
+    iso_tas: str | None = Query(default=None),  # 콤마 구분 [m/s]
     # 구조 한계 오버라이드 — vn-envelope와 같은 계약 (None = 데모 프로파일)
     n_limit_pos: float | None = Query(default=None, allow_inf_nan=False),
     n_limit_neg: float | None = Query(default=None, allow_inf_nan=False),
@@ -211,6 +250,9 @@ def design_envelope_endpoint(
     고도는 실기체 값이라 미지정이면 경계 자체가 없다(엔진이 null echo).
     trim_alpha_bounds는 trim 상수 정본을 조립 시점에 주입 (같은 L4 계층이라
     엔진 analysis가 직접 import하지 않는다 — 03 §2 계층 규칙).
+
+    nz·iso_qbar·iso_tas도 같은 계약 — 미지정이면 전달하지 않고 엔진이 정한다
+    (기동 엔벨로프는 아예 없는 것, 등고선은 엔진 [기본값]).
     """
     ac = make_demo_aircraft()
     stall = make_demo_stall_table()
@@ -220,7 +262,11 @@ def design_envelope_endpoint(
     )
     kwargs = {
         k: v
-        for k, v in dict(q_max=q_max, alt_min=alt_min, alt_max=alt_max, mach_margin=mach_margin).items()
+        for k, v in dict(
+            q_max=q_max, alt_min=alt_min, alt_max=alt_max, mach_margin=mach_margin,
+            nz=nz, iso_qbar=_num_list(iso_qbar, "iso_qbar"),
+            iso_tas=_num_list(iso_tas, "iso_tas"),
+        ).items()
         if v is not None
     }
     try:

@@ -23,11 +23,15 @@ import numpy as np
 
 from claw.common.constants import G0
 from claw.env import isa_atmosphere
-from claw.env.constants import ISA_MIN_ALT, ISA_STRATO1_TOP_ALT
+from claw.env.constants import ISA_MIN_ALT, ISA_STRATO1_TOP_ALT, ISA_TROPOPAUSE_ALT
 
 DEFAULT_SCHEDULE_ALTS = (0.0, 1000.0, 3000.0, 5000.0)  # [m] coarse 격자 고도 [기본값]
 _ALT_DISPLAY_MAX = 12000.0  # [m] 설계 엔벨로프 표시 상한 [기본값] — 운용 상한 아님 (echo로 명기)
 _SCAN_POINTS = 41  # 실속 경계 역보간용 mach 스캔 밀도 (구 design.grid._SCAN_POINTS)
+# 등고선 [기본값] — q_max가 있으면 그 비율(경계선이 곧 1.0배 등동압선), 없으면 고정값
+_ISO_QBAR_FRACS = (0.25, 0.5, 0.75)
+_ISO_QBAR_FALLBACK = (5000.0, 10000.0, 20000.0, 40000.0)  # [Pa]
+_ISO_TAS_DEFAULT = (100.0, 150.0, 200.0, 250.0)  # [m/s]
 
 
 def _check_limits(limits) -> None:
@@ -142,23 +146,40 @@ def vn_stall_boundary(aircraft, stall_table, alt, fuel, machs, alpha_margin=0.0,
 
 def stall_mach_lo(
     aircraft, stall_table, alt, fuel, *,
-    mach_hi, db_mach_lo=0.0, mach_margin=1.1, n_scan=_SCAN_POINTS,
+    mach_hi, db_mach_lo=0.0, mach_margin=1.1, n_scan=_SCAN_POINTS, n_target=1.0,
 ) -> tuple:
     """행(alt, fuel)의 mach 하한 — (mach_lo, source). 구 design.grid._mach_lo의 정본 이동.
 
-    V_S(n=1)를 실속 경계 곡선에서 역보간해 mach_margin(1.1 [기본값] — 실속 여유
-    10%)을 곱한다. source는 경계 귀속: "stall"(실속이 결정) | "db"(스캔 범위에
-    V_S가 없거나 DB 하한이 더 높아 실효 하한이 됨). 단조 n(V) 가정(동압 V²
-    지배)은 vn_envelope와 공유 — 비단조 실 DB 결선 시 함께 재검토.
+    V_S(n_target)를 실속 경계 곡선에서 역보간해 mach_margin(1.1 [기본값] — 실속
+    여유 10%)을 곱한다. n_target [기본값 1.0]은 수평비행 하한이고, n_z > 1을 주면
+    "그 하중배수를 낼 수 있는 최저 마하" = 기동 엔벨로프의 하한이다 (01 §2.6이
+    선언한 E = {…, n_z, …}의 n_z 축).
+
+    source는 경계 귀속:
+
+    - "stall"   실속이 하한을 결정
+    - "db"      DB 하한이 더 높아 실효 하한 (또는 V_S가 스캔 범위 아래)
+    - "n_reach" 스캔 범위 어디에서도 n_target에 못 미친다 — 그 고도에서는 하중배수
+      자체가 도달 불가다. mach_hi를 돌려주어 호출자가 empty 행으로 잡게 한다.
+      **"db"로 뭉뚱그리면 도달 불가가 넓은 설계 영역으로 둔갑한다** — 실측상 데모
+      기체의 도달 가능 최대 n은 해면 12.50에서 12 km 2.38로 떨어지므로 n_z=3이면
+      고고도 행이 곧바로 이 분기다.
+
+    단조 n(V) 가정(동압 V² 지배)은 vn_envelope와 공유 — 비단조 실 DB 결선 시 함께 재검토.
     """
+    n_target = float(n_target)
+    if not n_target > 0.0:
+        raise ValueError(f"n_target은 양수여야 함 (하중배수): {n_target}")
     scan_lo = max(float(stall_table.axes[0][0]), db_mach_lo)
     machs = np.linspace(scan_lo, mach_hi, int(n_scan))
     bnd = vn_stall_boundary(aircraft, stall_table, alt, fuel, machs)
     n_arr = np.asarray(bnd["n"])
     v_arr = np.asarray(bnd["V"])
-    if not n_arr[0] <= 1.0 <= n_arr[-1]:
-        return max(db_mach_lo, scan_lo), "db"  # 스캔 범위에 V_S가 없다 — DB 하한이 실효 하한
-    v_s = float(np.interp(1.0, n_arr, v_arr))
+    if n_arr[-1] < n_target:
+        return float(mach_hi), "n_reach"  # 도달 불가 — lo=hi로 빈 행
+    if n_arr[0] > n_target:
+        return max(db_mach_lo, scan_lo), "db"  # V_S가 스캔 범위 아래 — DB 하한이 실효 하한
+    v_s = float(np.interp(n_target, n_arr, v_arr))
     atm = isa_atmosphere(alt)
     lo = (v_s / atm.a) * mach_margin
     if lo > db_mach_lo:
@@ -194,10 +215,88 @@ def mach_qbar_limit(alt, q_max) -> float:
     return math.sqrt(2.0 * float(q_max) / atm.rho) / atm.a
 
 
+def iso_curves(alts, *, qbar=(), tas=()) -> dict:
+    """M-h 평면의 등동압선·등속선 — 상단 대기속도 보조축의 정직한 대체.
+
+    교과서 엔벨로프 도해는 마하축 위에 대기속도(kt) 보조축을 겹쳐 그리지만,
+    M-h 평면에서 그 대응은 고도마다 다르다 — M0.8이 해면 529 kt, 12 km 458 kt.
+    축을 하나 그으면 한 고도에서만 맞다. 대신 평면 **안에** 곡선을 그린다:
+
+    - 등동압선 M_q̄(h)는 `mach_qbar_limit`을 q만 바꿔 부른다 (구조 동압 경계와
+      같은 산식을 두 번 적지 않는다 — 경계선은 q=q_max인 등동압선이다)
+    - 등속선은 M = V/a(h)
+
+    q̄는 게인 스케줄이 실제로 쓰는 변수이기도 해서(01 §3.4) 설계에 직접 쓸모가 있다.
+    반환 곡선은 입력 q·V 값을 함께 실어 소비자가 라벨을 재기술하지 않게 한다.
+    **각 곡선의 mach는 인자 alts와 인덱스로 짝이다** — 소비자는 자기가 가진 고도
+    격자와 함께 그린다(design_envelope 응답에서는 region.alt가 그 격자다).
+
+    q·V 모두 양수여야 한다. V쪽은 나눗셈이라 음수·0이 그냥 통과해 **음의 마하
+    곡선을 만들고 화면 밖으로 잘려 조용히 사라진다** — 요청한 곡선이 사유 없이
+    안 보이는 것은 이 리포가 금하는 조용한 비표시다. q쪽은 mach_qbar_limit이
+    이미 막지만 그 문장은 구조 경계용 "q_max"를 지목한다 — 등고선 입력을 틀린
+    사람이 **보내지도 않은 파라미터**를 고치러 가므로 여기서 제 이름으로 먼저
+    막는다. 둘 다 계산 전에 검사해 41행짜리 곡선을 만들다 중간에 죽지 않게 한다.
+    """
+    # 검사가 소진해 버리면 아래 조립이 빈 목록을 보고 조용히 곡선을 안 그린다 —
+    # 이 함수가 막으려는 바로 그 비표시다. 제너레이터를 받아도 되게 먼저 굳힌다
+    qbar, tas = list(qbar), list(tas)
+    for q in qbar:
+        if not float(q) > 0.0:
+            raise ValueError(f"등동압선 동압은 양수여야 함 [Pa]: {q}")
+    for v in tas:
+        if not float(v) > 0.0:
+            raise ValueError(f"등속선 속도는 양수여야 함 [m/s]: {v}")
+    return {
+        "qbar": [
+            {"q": float(q), "mach": [mach_qbar_limit(a, q) for a in alts]} for q in qbar
+        ],
+        "tas": [
+            {"v": float(v), "mach": [float(v) / isa_atmosphere(a).a for a in alts]}
+            for v in tas
+        ],
+    }
+
+
+def _region_rows(
+    aircraft, stall_table, alts, fuel, *,
+    static_hi, static_src, db_mach_lo, mach_margin, q_max, n_target,
+) -> tuple:
+    """행별 (lo, hi) 합성 한 벌 — (region, qbar_mach). 1g와 기동 영역이 공유한다.
+
+    상한은 하중배수와 무관하다(구조 마하·DB·동압 한계는 n_z를 안 본다) — n_target은
+    하한만 움직이므로 기동 영역은 1g 영역의 부분집합이 된다.
+    """
+    region = {
+        "alt": [float(a) for a in alts],
+        "mach_lo": [], "mach_hi": [], "lo_source": [], "hi_source": [], "empty": [],
+    }
+    qbar_mach = [] if q_max is not None else None
+    for alt in alts:
+        lo, lo_src = stall_mach_lo(
+            aircraft, stall_table, alt, fuel,
+            mach_hi=static_hi, db_mach_lo=db_mach_lo,
+            mach_margin=mach_margin, n_target=n_target,
+        )
+        hi, hi_src = static_hi, static_src
+        if q_max is not None:
+            qm = mach_qbar_limit(alt, q_max)
+            qbar_mach.append(float(qm))
+            if qm < hi:
+                hi, hi_src = qm, "qbar"
+        region["mach_lo"].append(float(lo))
+        region["mach_hi"].append(float(hi))
+        region["lo_source"].append(lo_src)
+        region["hi_source"].append(hi_src)
+        region["empty"].append(bool(lo >= hi))
+    return region, qbar_mach
+
+
 def design_envelope(
     aircraft, stall_table, limits, db_ranges, *, fuel,
     q_max=None, alt_min=None, alt_max=None, mach_margin=1.1,
     n_alt=41, schedule_n_mach=5, schedule_alts=None,
+    nz=None, iso_qbar=None, iso_tas=None,
 ) -> dict:
     """제어법칙 설계 엔벨로프 M-h 합성 (01 §2.6) — 행별 경계와 승자 귀속.
 
@@ -213,8 +312,24 @@ def design_envelope(
 
     schedule_grid는 coarse 격자(design.grid)와 같은 row_machs 좌표 —
     trimmable 판정 없는 좌표 표시용(판정은 트림 스캔 + envelope_ok 정본).
+    좌표를 맞추려고 **q̄를 보지 않는다**(design.grid에는 q_max 입력이 없다) —
+    q_max가 낮으면 격자점이 region 밖에 놓일 수 있고, 그것이 실제 설계점 위치다.
+
+    nz: 기동 엔벨로프 하중배수. 주면 같은 합성을 n_target=nz로 한 번 더 돌린
+    maneuver를 함께 낸다(하한만 움직여 1g 영역의 부분집합). None이면 키가 null —
+    q_max·alt_min과 같은 규약으로 가짜 기본값을 만들지 않는다. nz가 구조 제한하중
+    n_limit_pos를 넘으면 **거부하지 않고** nz_over_limit로 echo한다: 구조 한계 밖을
+    보겠다는 것도 정당한 탐색이고, 판단 재료는 화면이 준다.
+
+    iso_qbar·iso_tas: 등고선 값 목록(iso_curves 참조). 미지정 시 [기본값] —
+    q̄쪽은 q_max가 있으면 그 0.25·0.5·0.75배(경계와 의미가 이어진 값), 없으면
+    고정 튜플. 무엇을 썼는지는 반환 곡선이 값을 실어 echo한다. **iso 곡선의
+    mach 배열은 region.alt와 인덱스로 짝**이다(둘 다 같은 alts로 만든다) —
+    소비자는 region.alt를 x가 아니라 y 격자로 삼아 그린다.
     """
     _check_limits(limits)
+    if nz is not None and not float(nz) > 0.0:
+        raise ValueError(f"nz는 양수여야 함 (하중배수): {nz}")
     if not mach_margin >= 1.0:
         raise ValueError(f"mach_margin은 1 이상 (실속 여유): {mach_margin}")
     if int(n_alt) < 2:
@@ -240,24 +355,33 @@ def design_envelope(
     )
 
     alts = [float(a) for a in np.linspace(alt_lo_used, alt_hi_used, int(n_alt))]
-    region = {"alt": alts, "mach_lo": [], "mach_hi": [], "lo_source": [], "hi_source": [], "empty": []}
-    qbar_mach = [] if q_max is not None else None
-    for alt in alts:
-        lo, lo_src = stall_mach_lo(
-            aircraft, stall_table, alt, fuel,
-            mach_hi=static_hi, db_mach_lo=db_mach_lo, mach_margin=mach_margin,
+    row_kw = dict(
+        static_hi=static_hi, static_src=static_src, db_mach_lo=db_mach_lo,
+        mach_margin=mach_margin, q_max=q_max,
+    )
+    region, qbar_mach = _region_rows(
+        aircraft, stall_table, alts, fuel, n_target=1.0, **row_kw
+    )
+    maneuver = None
+    if nz is not None:
+        # q̄ 한계는 하중배수와 무관하므로 두 패스의 qbar_mach는 같다 — 위 것만 싣는다
+        man_region, _same_qbar = _region_rows(
+            aircraft, stall_table, alts, fuel, n_target=float(nz), **row_kw
         )
-        hi, hi_src = static_hi, static_src
-        if q_max is not None:
-            qm = mach_qbar_limit(alt, q_max)
-            qbar_mach.append(float(qm))
-            if qm < hi:
-                hi, hi_src = qm, "qbar"
-        region["mach_lo"].append(float(lo))
-        region["mach_hi"].append(float(hi))
-        region["lo_source"].append(lo_src)
-        region["hi_source"].append(hi_src)
-        region["empty"].append(bool(lo >= hi))
+        maneuver = {
+            "nz": float(nz),
+            "nz_over_limit": bool(float(nz) > float(limits["n_limit_pos"])),
+            "region": man_region,
+        }
+
+    if iso_qbar is None:
+        iso_qbar = (
+            [float(q_max) * f for f in _ISO_QBAR_FRACS]
+            if q_max is not None
+            else list(_ISO_QBAR_FALLBACK)
+        )
+    if iso_tas is None:
+        iso_tas = list(_ISO_TAS_DEFAULT)
 
     sched_alts = tuple(
         float(a) for a in (schedule_alts if schedule_alts is not None else DEFAULT_SCHEDULE_ALTS)
@@ -286,8 +410,11 @@ def design_envelope(
             "alt_min_used": alt_lo_used,
             "alt_max_used": alt_hi_used,
             "alt_max_is_display_default": alt_max is None,
+            "tropopause_alt": ISA_TROPOPAUSE_ALT,  # 소비자가 11000을 재기술하지 않도록 (02 §5.5)
         },
         "region": region,
+        "maneuver": maneuver,
+        "iso": iso_curves(alts, qbar=iso_qbar, tas=iso_tas),
         "schedule_grid": {
             "n_mach": int(schedule_n_mach),
             "alts": list(sched_alts),

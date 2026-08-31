@@ -1,5 +1,7 @@
 """M10 analysis 검증 — 감쇠비 해석해, 모드 자동 분류, 교과서 전달함수 마진, 마진 맵."""
 
+import math
+
 import control
 import numpy as np
 import pytest
@@ -384,6 +386,124 @@ def test_design_envelope_validation_errors():
         design_envelope(ac, st, lim, db, fuel=200.0, mach_margin=0.9)
     with pytest.raises(ValueError):  # 동압 한계 비양수
         design_envelope(ac, st, lim, db, fuel=200.0, q_max=-1.0)
+    with pytest.raises(ValueError):  # 하중배수 비양수
+        design_envelope(ac, st, lim, db, fuel=200.0, nz=0.0)
+
+
+def test_stall_mach_lo_load_factor_raises_the_bound():
+    """V_S(n) — n에 단조 증가하고 V_S(1)·√n보다 크다 (α_stall(M) 감소의 귀결).
+
+    √n 법칙은 CL_max 일정을 전제하는 비압축 이상화다. 실속 테이블은 α_stall이
+    M0.1 0.40 → M0.9 0.27로 줄어들어 빠를수록 CL_max가 낮으므로, 같은 n을 내려면
+    √n보다 **더** 빨라야 한다 (실측 이탈 n=2에서 +2.9%, n=6에서 +6.5%).
+    상수를 핀하면 테이블이 바뀔 때 의미 없이 깨지므로 부등식으로 고정한다.
+    """
+    from claw.analysis import stall_mach_lo
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    kw = dict(mach_hi=0.75, db_mach_lo=0.1, mach_margin=1.0)
+    lo1, _ = stall_mach_lo(ac, st, 0.0, 200.0, n_target=1.0, **kw)
+    prev = lo1
+    for n in (2.0, 3.0, 4.0, 6.0):
+        lo, src = stall_mach_lo(ac, st, 0.0, 200.0, n_target=n, **kw)
+        assert src == "stall"
+        assert lo > prev  # n 단조 증가
+        assert lo > lo1 * math.sqrt(n)  # √n 이상화보다 항상 더 빨라야 한다
+        prev = lo
+    with pytest.raises(ValueError):
+        stall_mach_lo(ac, st, 0.0, 200.0, n_target=0.0, **kw)
+
+
+def test_stall_mach_lo_unreachable_load_factor_is_not_disguised():
+    """도달 불가 하중배수는 "n_reach"로 귀속 — DB 하한으로 뭉뚱그리지 않는다.
+
+    데모 기체의 도달 가능 최대 n은 해면 12.50에서 12 km 2.38로 떨어진다. 종전
+    코드는 범위 밖을 전부 "db"로 처리해 **DB 하한**(=넓은 영역)을 돌려줬으므로,
+    n_z를 열면 기동 영역이 1g 영역보다 넓게 그려졌을 것이다. 판정 불가를 정상으로
+    위장하지 않는다는 규약(loop_margins의 nan 유지와 같은 자리).
+    """
+    from claw.analysis import stall_mach_lo
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    lo, src = stall_mach_lo(
+        ac, st, 12000.0, 200.0, mach_hi=0.75, db_mach_lo=0.1, n_target=3.0
+    )
+    assert src == "n_reach"
+    assert lo == 0.75  # lo = hi → 호출자가 빈 행으로 잡는다
+    # 같은 고도에서 도달 가능한 하중배수는 정상 귀속
+    _lo2, src2 = stall_mach_lo(
+        ac, st, 12000.0, 200.0, mach_hi=0.75, db_mach_lo=0.1, n_target=2.0
+    )
+    assert src2 == "stall"
+
+
+def test_design_envelope_maneuver_region_is_inside_the_1g_region():
+    """기동 엔벨로프 (01 §2.6 n_z 축) — 하한만 올라가는 진부분집합 + 상한 불변."""
+    from claw.analysis import design_envelope
+    from claw.plant import make_demo_db_ranges, make_demo_structural_limits
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    lim = make_demo_structural_limits()
+    db = make_demo_db_ranges()
+    env = design_envelope(ac, st, lim, db, fuel=200.0, nz=3.0)
+    r, man = env["region"], env["maneuver"]["region"]
+    assert env["maneuver"]["nz"] == 3.0
+    assert env["maneuver"]["nz_over_limit"] is False  # 3 < n_limit_pos 6
+    assert r["alt"] == man["alt"] and r["mach_hi"] == man["mach_hi"]  # 상한은 n_z 무관
+    for i, empty in enumerate(man["empty"]):
+        assert man["mach_lo"][i] > r["mach_lo"][i]  # 하한은 언제나 위로
+        if empty:
+            assert man["mach_lo"][i] >= man["mach_hi"][i]
+    assert sum(r["empty"]) == 0 and sum(man["empty"]) > 0  # 고고도는 기동 불가
+    assert "n_reach" in man["lo_source"]  # 도달 불가 귀속이 실제로 나온다
+    # 구조 제한하중 초과는 거부가 아니라 echo
+    over = design_envelope(ac, st, lim, db, fuel=200.0, nz=8.0)
+    assert over["maneuver"]["nz_over_limit"] is True
+    assert design_envelope(ac, st, lim, db, fuel=200.0)["maneuver"] is None
+
+
+def test_iso_curves_share_the_qbar_formula_with_the_boundary():
+    """등동압선·등속선 — 경계선은 q=q_max인 등동압선이라는 것을 핀한다.
+
+    같은 산식을 두 곳에 적으면 갈린다(02 §5.5) — iso_curves의 q_max 곡선은
+    bounds.qbar_mach와 **정확히** 같아야 한다.
+    """
+    from claw.analysis import design_envelope, iso_curves
+    from claw.env import isa_atmosphere
+    from claw.plant import make_demo_db_ranges, make_demo_structural_limits
+
+    ac = make_demo_aircraft()
+    st = make_demo_stall_table()
+    lim = make_demo_structural_limits()
+    db = make_demo_db_ranges()
+    env = design_envelope(ac, st, lim, db, fuel=200.0, q_max=20000.0, iso_qbar=[20000.0])
+    assert env["iso"]["qbar"][0]["mach"] == env["bounds"]["qbar_mach"]
+    # 등고 기본값은 q_max 비율 — 경계와 의미가 이어진 값
+    auto = design_envelope(ac, st, lim, db, fuel=200.0, q_max=20000.0)
+    assert [c["q"] for c in auto["iso"]["qbar"]] == [5000.0, 10000.0, 15000.0]
+    # 등속선은 M = V/a(h) — 고도 단조 증가 (a 감소)
+    alts = [0.0, 5000.0, 10000.0]
+    tas = iso_curves(alts, tas=[200.0])["tas"][0]
+    assert tas["mach"] == [200.0 / isa_atmosphere(a).a for a in alts]
+    assert tas["mach"][0] < tas["mach"][1] < tas["mach"][2]
+    assert env["bounds"]["tropopause_alt"] == 11000.0
+    # 등속선 속도 비양수는 거부 — 나눗셈이라 그냥 통과하면 음의 마하 곡선이 되어
+    # 화면 밖으로 잘려 **사유 없이 사라진다**(등동압선은 mach_qbar_limit이 이미 막는다)
+    for bad in (0.0, -100.0):
+        with pytest.raises(ValueError, match="등속선"):
+            iso_curves(alts, tas=[bad])
+        with pytest.raises(ValueError, match="등속선"):
+            design_envelope(ac, st, lim, db, fuel=200.0, iso_tas=[bad])
+        # 사유는 제 파라미터를 지목해야 한다 — mach_qbar_limit에 맡기면 "q_max"라
+        # 답해서, 보내지도 않은 구조 경계 필드를 고치러 가게 만든다
+        with pytest.raises(ValueError, match="등동압선"):
+            design_envelope(ac, st, lim, db, fuel=200.0, iso_qbar=[bad])
+    # 등고선 배열은 region.alt와 인덱스 짝 — 소비자가 검사 없이 짝지어 그린다
+    assert len(env["iso"]["tas"][0]["mach"]) == len(env["region"]["alt"])
+    assert len(env["iso"]["qbar"][0]["mach"]) == len(env["region"]["alt"])
 
 
 def test_aero_envelope_boundaries():

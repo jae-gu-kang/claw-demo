@@ -15,6 +15,7 @@ from claw.analysis.duty import duty_report, surface_positions
 from claw.analysis.envelope import (
     aero_envelope,
     design_envelope,
+    iso_curves,
     mach_qbar_limit,
     row_machs,
     stall_mach_lo,
@@ -39,6 +40,7 @@ __all__ = [
     "stall_mach_lo",
     "row_machs",
     "mach_qbar_limit",
+    "iso_curves",
     "duty_report",
     "surface_positions",
 ]

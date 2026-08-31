@@ -15,8 +15,10 @@
 import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
-  boundColor, boundLabel, boundarySegments, envelopeQuery, kindColor, kindLabel,
-  optNum, prefillValue, regionPolygons, scanCells, scanSummary, throttleCell,
+  boundColor, boundLabel, boundarySegments, capColor, capLabel, envelopeQuery,
+  isoLabelIndex, kindColor, kindLabel, mToFt, optNum, outlineCaps, prefillValue,
+  outsideRegion, regionPolygons, scanCells, scanSummary, spreadLabels, throttleCell,
+  thrustFrontier,
 } from "../lib/envelope.js";
 import { machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { fuelsOf, linScale, niceTicks, pivotCases } from "../lib/plot.js";
@@ -31,15 +33,23 @@ let runningJobId = null;
 const form = {
   alt: "1000", fuel: "200", margin: "0.05",
   nPos: "", nNeg: "", sf: "", machNo: "", machD: "",
-  qMax: "", altMin: "", altMax: "", machMargin: "",
+  qMax: "", altMin: "", altMax: "", machMargin: "", nz: "",
   scanFrom: "0.2", scanTo: "0.7", scanStep: "0.05", scanAlts: "0, 1000, 3000, 5000",
 };
 const touched = new Set(); // 구조 필드 중 사용자가 손댄 것 — 이것만 서버로 보낸다
+// 레이어 토글 — 겹쳐 그릴 것이 아홉 가지라 토글 없이는 읽히지 않는다.
+// 응답을 다시 받지 않고 다시 그리기만 하므로 서버 계약과 무관한 순수 표시 상태.
+const layers = { isoQbar: true, isoTas: false, maneuver: true, scan: true, thrust: true };
 
 // [폼 키, 서버 파라미터] — 구조 한계 오버라이드 5종 (vn·design-envelope 공유 계약)
 const STRUCT_FIELDS = [
   ["nPos", "n_limit_pos"], ["nNeg", "n_limit_neg"], ["sf", "safety_factor"],
   ["machNo", "mach_no"], ["machD", "mach_d"],
+];
+
+const LAYER_FIELDS = [
+  ["isoQbar", "등동압선"], ["isoTas", "등속선"], ["maneuver", "기동 엔벨로프"],
+  ["scan", "스캔 판정"], ["thrust", "추력 대리 경계"],
 ];
 
 export function render() {
@@ -101,6 +111,7 @@ export function render() {
           alt_min: optNum(form.altMin, "운용 고도 하한"),
           alt_max: optNum(form.altMax, "운용 고도 상한"),
           mach_margin: optNum(form.machMargin, "실속 여유"),
+          nz: optNum(form.nz, "기동 하중배수"),
         }));
       syncStructural(lastMh.limits);
       renderAll();
@@ -152,6 +163,20 @@ export function render() {
     }
   };
 
+  // 레이어는 응답을 다시 받지 않고 다시 그리기만 한다 (표시 상태 — 서버 왕복 없음)
+  const layerToggle = (key, label) => {
+    const inp = el("input", { type: "checkbox" });
+    inp.checked = layers[key];
+    // 기동 층은 V-n에도 참조선을 긋는다 — 한쪽만 다시 그리면 없는 층을 가리키는 선이 남는다
+    inp.onchange = () => {
+      layers[key] = inp.checked;
+      renderMh(mhBox);
+      if (key === "maneuver") renderVn(vnBox);
+    };
+    return el("label", { class: "field", style: "flex-direction: row; align-items: center; gap: 4px" },
+      inp, label);
+  };
+
   const renderAll = () => {
     renderMh(mhBox);
     renderVn(vnBox);
@@ -184,7 +209,8 @@ export function render() {
             el("label", { class: "field" }, "q̄_max [Pa]", bind("qMax")),
             el("label", { class: "field" }, "운용 하한 [m]", bind("altMin")),
             el("label", { class: "field" }, "운용 상한 [m]", bind("altMax")),
-            el("label", { class: "field" }, "실속 여유 ×", bind("machMargin")))),
+            el("label", { class: "field" }, "실속 여유 ×", bind("machMargin")),
+            el("label", { class: "field" }, "기동 n_z [g]", bind("nz")))),
         el("div", { class: "opt-group" },
           el("div", { class: "g-title" }, "제어 가능 스캔 격자 (트림 잡 — 점당 트림 1회)"),
           el("div", { class: "row-inner" },
@@ -194,10 +220,15 @@ export function render() {
             el("label", { class: "field grow" }, "고도 목록 [m]", bind("scanAlts", { class: "" })),
             el("button", { onclick: runScan }, "제어 가능 판정 (트림 스캔)"))),
       ),
+      el("div", { class: "row", style: "margin-top: 10px" },
+        el("span", { class: "g-title" }, "M-h 레이어"),
+        ...LAYER_FIELDS.map(([key, label]) => layerToggle(key, label)),
+      ),
       el("p", { class: "hint" },
         "설계 엔벨로프 = 구조 ∧ 공력 ∧ 추진 ∧ 운용 ∧ 제어 가능 영역 (01 §2.6) — ",
         "V-n은 상위 constraint 하나. 구조 필드는 손댄 것만 서버로 보내고(02 §5.5), ",
-        "빈칸으로 되돌리면 데모 자리표시로 복귀. 실속 여유 빈칸 = 엔진 기본값."),
+        "빈칸으로 되돌리면 데모 자리표시로 복귀. 실속 여유 빈칸 = 엔진 기본값. ",
+        "기동 n_z는 그 하중배수를 낼 수 있는 영역(1g 영역의 안쪽) — 빈칸이면 안 그린다."),
       progressBox, errBox,
     ),
     el("div", { class: "panel" }, el("h2", {}, "설계 엔벨로프 합성 (M-h)"), mhBox),
@@ -219,6 +250,8 @@ const C = {
   stallLine: "#ff3b30", protLine: "#34c759", limitLine: "#c93400",
   ultLine: "#d70015", speedLine: "#8e8e93", text: "#1d1d1f", sub: "#86868b",
   frame: "#d2d2d7", opsLine: "#007aff", dbTint: "#f6effc", schedPt: "#8e8e93",
+  manFill: "rgba(10, 132, 255, 0.16)", manLine: "#0a84ff",
+  isoLine: "#c7c7cc", tropo: "#8e8e93", thrustLine: "#ff6b00",
 };
 const FONT_BASE = "11px -apple-system, 'Segoe UI', sans-serif";
 const FONT_LABEL = "600 11px -apple-system, 'Segoe UI', sans-serif";
@@ -236,15 +269,34 @@ const placeholderHint = (body) => (body?.limits_source === "user-input"
 
 function mhEnvelopeCanvas(mh, cells) {
   const W = 780;
-  const H = 470;
+  const H = 520;
   const { canvas, ctx } = makeCanvas(W, H);
-  const mL = 56, mT = 30, mR = 16, mB = 40;
+  const mL = 56, mT = 30, mR = 54, mB = 40; // mR 확대 — 우측 ft 보조축 자리
   const b = mh.bounds;
   const r = mh.region;
+  const man = layers.maneuver ? mh.maneuver : null;
   const xMin = Math.min(b.db_mach[0], ...r.mach_lo) - 0.03;
   const xMax = Math.max(b.mach_d, ...r.mach_hi) + 0.03;
   const px = linScale(xMin, xMax, mL, W - mR);
   const py = linScale(b.alt_min_used, b.alt_max_used, H - mB, mT);
+  // 채움 위에 얹히는 글자는 흰 테두리를 깔아야 읽힌다.
+  // save/restore로 감싼다 — 안 그러면 흰 strokeStyle·굵기 3이 남아, 다음에 라벨
+  // 뒤에 선을 긋는 사람이 흰 선을 보게 된다 (지금은 호출부마다 우연히 다시 세운다)
+  const haloText = (text, x, y, color) => {
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.92)";
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  };
+  const polyline = (machs, alts) => {
+    ctx.beginPath();
+    machs.forEach((m, i) => (i === 0 ? ctx.moveTo(px(m), py(alts[i])) : ctx.lineTo(px(m), py(alts[i]))));
+    ctx.stroke();
+  };
 
   ctx.strokeStyle = C.frame;
   ctx.lineWidth = 1;
@@ -254,13 +306,73 @@ function mhEnvelopeCanvas(mh, cells) {
   ctx.rect(mL, mT, W - mL - mR, H - mT - mB);
   ctx.clip();
 
-  // 설계 영역 틴트
-  ctx.fillStyle = C.ok;
-  for (const poly of regionPolygons(r)) {
+  // 대류권계면 — 엔진 echo (웹이 11000을 재기술하지 않는다, 02 §5.5)
+  const tropo = b.tropopause_alt;
+  if (tropo != null && tropo > b.alt_min_used && tropo < b.alt_max_used) {
+    ctx.strokeStyle = C.tropo;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([8, 5]);
     ctx.beginPath();
-    poly.forEach((p, i) => (i === 0 ? ctx.moveTo(px(p.mach), py(p.alt)) : ctx.lineTo(px(p.mach), py(p.alt))));
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(mL, py(tropo));
+    ctx.lineTo(W - mR, py(tropo));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    haloText("대류권계면", W - mR - 60, py(tropo) - 4, C.sub);
+  }
+
+  // 설계 영역 틴트 (1g)
+  const fillRegion = (reg, style) => {
+    ctx.fillStyle = style;
+    for (const poly of regionPolygons(reg)) {
+      ctx.beginPath();
+      poly.forEach((p, i) => (i === 0 ? ctx.moveTo(px(p.mach), py(p.alt)) : ctx.lineTo(px(p.mach), py(p.alt))));
+      ctx.closePath();
+      ctx.fill();
+    }
+  };
+  fillRegion(r, C.ok);
+  // 기동 엔벨로프 — 1g 안쪽 (하한만 올라간다). 그림 17의 내부 엔벨로프 자리
+  if (man) {
+    fillRegion(man.region, C.manFill);
+    ctx.strokeStyle = C.manLine;
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([5, 3]);
+    for (const seg of boundarySegments(man.region)) {
+      if (seg.side !== "lo" || seg.pts.length < 2) continue;
+      polyline(seg.pts.map((p) => p.mach), seg.pts.map((p) => p.alt));
+    }
+    ctx.setLineDash([]);
+  }
+
+  // 등동압선·등속선 — M-h 평면에서 대기속도 보조축은 한 고도에서만 맞으므로(엔진
+  // iso_curves 참조) 축 대신 곡선. **채움 뒤가 아니라 위에** 그린다 — 영역 틴트가
+  // 불투명이라 뒤에 깔면 정작 설계 영역 안에서 안 보인다 (라이브 확인에서 드러남)
+  const isoSets = [
+    layers.isoQbar ? { curves: mh.iso.qbar, key: "q", unit: "Pa" } : null,
+    layers.isoTas ? { curves: mh.iso.tas, key: "v", unit: "m/s" } : null,
+  ].filter(Boolean);
+  ctx.font = FONT_BASE;
+  // 라벨 기준 높이를 도표 중상단으로 잡는다 — 곡선들이 하나같이 천장으로 빠져나가서
+  // "범위 안 마지막 행"이 전부 같은 줄이 되면 라벨이 겹쳐 뭉갠다 (라이브 확인)
+  const isoPrefer = Math.round((r.alt.length - 1) * 0.62);
+  for (const set of isoSets) {
+    for (const cur of set.curves) {
+      ctx.strokeStyle = C.isoLine;
+      ctx.lineWidth = 1.1;
+      ctx.setLineDash([2, 3]);
+      polyline(cur.mach, r.alt);
+      ctx.setLineDash([]);
+      const i = isoLabelIndex(cur, xMin, xMax, isoPrefer);
+      if (i < 0) continue;
+      const text = `${fmt(cur[set.key], 4)} ${set.unit}`;
+      const x = px(cur.mach[i]);
+      // 오른쪽 끝에서는 글자를 왼쪽으로 뒤집는다 — 안 그러면 잘려서 "4"만 남는다
+      const flip = x > W - mR - 60;
+      const yTop = py(r.alt[i]) - 3;
+      ctx.textAlign = flip ? "right" : "left";
+      haloText(text, x + (flip ? -3 : 3), yTop < mT + 10 ? yTop + 15 : yTop, C.sub);
+      ctx.textAlign = "left";
+    }
   }
 
   // 참고 수직선 — M_D, DB 범위 (합성 경계 밖 정보). 오른쪽 끝에서는 라벨을 왼쪽으로
@@ -316,31 +428,85 @@ function mhEnvelopeCanvas(mh, cells) {
     seg.pts.forEach((p, i) => (i === 0 ? ctx.moveTo(px(p.mach), py(p.alt)) : ctx.lineTo(px(p.mach), py(p.alt))));
     ctx.stroke();
   }
-  // 귀속 라벨 — source별 가장 긴 세그먼트의 중앙에 한 번
-  ctx.font = FONT_LABEL;
-  const longest = new Map();
-  for (const seg of segs) {
-    if (seg.pts.length < 2) continue;
-    if (!longest.has(seg.source) || longest.get(seg.source).pts.length < seg.pts.length) {
-      longest.set(seg.source, seg);
-    }
+  // 닫힌 경계의 위·아래 캡 — 운용 한계는 위 hline이 이미 전 폭에 그렸으므로
+  // 여기서는 **모호한 모서리만**: 자연 천장/바닥과 표시 한계. 셋을 구분하지 않으면
+  // 화면이 "여기가 상승한도"라고 말해버린다 (추력 모델은 없다, 01 §2.6 [TBD])
+  const caps = outlineCaps(r, b).filter((c) => !c.source.startsWith("ops_"));
+  for (const cap of caps) {
+    ctx.strokeStyle = capColor(cap.source);
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath();
+    ctx.moveTo(px(cap.mach0), py(cap.alt));
+    ctx.lineTo(px(cap.mach1), py(cap.alt));
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
-  for (const seg of longest.values()) {
-    const mid = seg.pts[Math.floor(seg.pts.length / 2)];
-    ctx.fillStyle = boundColor(seg.source);
-    const dx = seg.side === "lo" ? -8 : 8;
-    ctx.textAlign = seg.side === "lo" ? "right" : "left";
-    ctx.fillText(boundLabel(seg.source), px(mid.mach) + dx, py(mid.alt));
+  ctx.font = FONT_LABEL;
+  ctx.textAlign = "center";
+  for (const cap of caps) {
+    // 캡이 도표 위/아래 끝에 붙으면(표시 한계가 그렇다) 바깥쪽 라벨은 클립돼 사라진다
+    // — 그 경우 안쪽으로 접는다. 라이브 확인 전에는 두 라벨 다 보이지 않았다
+    const y = py(cap.alt);
+    const above = y - 6, below = y + 13;
+    haloText(capLabel(cap.source), (px(cap.mach0) + px(cap.mach1)) / 2,
+      cap.side === "top" ? (above < mT + 10 ? below : above)
+        : (below > H - mB - 4 ? above : below),
+      capColor(cap.source));
   }
   ctx.textAlign = "left";
 
-  // 게인 스케줄 격자점 (엔진 coarse 좌표 — trimmable 미판정, 빈 원)
+  // 추력 대리 경계 — 스캔의 스로틀 상한 포화 전선. 해석 곡선이 아니라 측정점이라
+  // 격자 해상도가 곧 경계 해상도다 (전용 추력 모델 [TBD] — 대체가 아니다)
+  // 저속(backside)·고속 전선은 서로 다른 곡선이다 — 한 줄로 이으면 평면을 가로지른다
+  const frontier = layers.thrust && cells ? thrustFrontier(cells) : [];
+  for (const side of ["lo", "hi"]) {
+    const pts = frontier.filter((p) => p.side === side);
+    if (!pts.length) continue;
+    ctx.strokeStyle = C.thrustLine;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([7, 4]);
+    if (pts.length >= 2) polyline(pts.map((p) => p.mach), pts.map((p) => p.alt));
+    ctx.setLineDash([]);
+    // 미수렴 셀에서 나온 전이점은 속 빈 원 — 그 스로틀은 해가 아니라 솔버의
+    // 마지막 반복값이라 "수평비행에 이만큼 필요하다"는 측정이 아니다
+    for (const p of pts) {
+      ctx.beginPath();
+      ctx.arc(px(p.mach), py(p.alt), 3, 0, Math.PI * 2);
+      if (p.provisional) {
+        ctx.strokeStyle = C.thrustLine;
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = C.thrustLine;
+        ctx.fill();
+      }
+    }
+    const mid = pts[Math.floor(pts.length / 2)];
+    ctx.font = FONT_LABEL;
+    ctx.textAlign = side === "lo" ? "right" : "left";
+    haloText(side === "lo" ? "추력 대리 (저속)" : "추력 대리 (고속)",
+      px(mid.mach) + (side === "lo" ? -8 : 8), py(mid.alt) + 4, C.thrustLine);
+    ctx.textAlign = "left";
+  }
+
+  // 게인 스케줄 격자점 (엔진 coarse 좌표 — trimmable 미판정, 빈 원).
+  // 영역 밖 점은 ×로 — 좌표는 coarse 격자와 맞추느라 q̄를 안 보므로 실제로 밖일 수 있다
   for (const p of mh.schedule_grid.points) {
+    const x = px(p.mach), y = py(p.alt);
     ctx.strokeStyle = C.schedPt;
     ctx.lineWidth = 1.4;
-    ctx.beginPath();
-    ctx.arc(px(p.mach), py(p.alt), 4, 0, Math.PI * 2);
-    ctx.stroke();
+    if (outsideRegion(p, r)) {
+      ctx.strokeStyle = C.limitLine;
+      ctx.beginPath();
+      ctx.moveTo(x - 4, y - 4); ctx.lineTo(x + 4, y + 4);
+      ctx.moveTo(x + 4, y - 4); ctx.lineTo(x - 4, y + 4);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   // 합성 경계가 한 행뿐인 조각 — 선이 못 되므로 점으로라도 남긴다 (조용한 비표시 금지)
@@ -353,7 +519,7 @@ function mhEnvelopeCanvas(mh, cells) {
   }
 
   // 제어 가능 스캔 판정 점 (호출측이 연료 일치분만 전달)
-  if (cells) {
+  if (cells && layers.scan) {
     for (const c of cells) {
       ctx.fillStyle = kindColor(c.kind);
       ctx.beginPath();
@@ -361,17 +527,55 @@ function mhEnvelopeCanvas(mh, cells) {
       ctx.fill();
     }
   }
+
+  // 귀속 라벨 — source별 가장 긴 세그먼트에 지시선을 달고, 좌·우 무리를 각각 벌린다
+  const longest = new Map();
+  for (const seg of segs) {
+    if (seg.pts.length < 2) continue;
+    if (!longest.has(seg.source) || longest.get(seg.source).pts.length < seg.pts.length) {
+      longest.set(seg.source, seg);
+    }
+  }
+  const anchors = [...longest.values()].map((seg) => {
+    const mid = seg.pts[Math.floor(seg.pts.length / 2)];
+    return {
+      side: seg.side, color: boundColor(seg.source), text: boundLabel(seg.source),
+      ax: px(mid.mach), ay: py(mid.alt), y: py(mid.alt),
+    };
+  });
+  if (man) {
+    const lo = boundarySegments(man.region).filter((s) => s.side === "lo" && s.pts.length >= 2);
+    const seg = lo.sort((a, c) => c.pts.length - a.pts.length)[0];
+    if (seg) {
+      const mid = seg.pts[Math.floor(seg.pts.length / 2)];
+      anchors.push({
+        side: "hi", color: C.manLine, text: `기동 n_z=${fmt(man.nz, 3)}`,
+        ax: px(mid.mach), ay: py(mid.alt), y: py(mid.alt),
+      });
+    }
+  }
+  ctx.font = FONT_LABEL;
+  for (const side of ["lo", "hi"]) {
+    const group = spreadLabels(anchors.filter((a) => a.side === side), 15);
+    for (const a of group) {
+      const tx = a.ax + (side === "lo" ? -10 : 10);
+      ctx.strokeStyle = a.color;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath(); // 지시선 — 라벨이 밀려도 어느 곡선인지 남는다
+      ctx.moveTo(a.ax, a.ay);
+      ctx.lineTo(tx, a.y - 3);
+      ctx.stroke();
+      ctx.textAlign = side === "lo" ? "right" : "left";
+      haloText(a.text, tx, a.y, a.color);
+    }
+  }
+  ctx.textAlign = "left";
   ctx.restore();
 
-  // 영역 라벨 + 축
+  // 영역 없음 안내 + 축
   ctx.font = FONT_LABEL;
   ctx.fillStyle = C.sub;
-  const okRow = r.empty.findIndex((e) => !e);
-  if (okRow >= 0) {
-    ctx.fillText("설계 영역",
-      (px(r.mach_lo[okRow]) + px(r.mach_hi[okRow])) / 2 - 24,
-      py(r.alt[okRow]) - 12);
-  } else {
+  if (!r.empty.some((e) => !e)) {
     ctx.fillText("설계 영역 없음 — 경계가 전 고도에서 닫힘", mL + 20, (mT + H - mB) / 2);
   }
   ctx.font = FONT_BASE;
@@ -380,8 +584,10 @@ function mhEnvelopeCanvas(mh, cells) {
   }
   for (const t of niceTicks(b.alt_min_used, b.alt_max_used, 7)) {
     ctx.fillText(`${Math.round(t)}`, 6, py(t) + 3);
+    ctx.fillText(`${Math.round(mToFt(t))}`, W - mR + 6, py(t) + 3); // 보조축 — 순수 환산
   }
   ctx.fillText("Mach", W / 2 - 14, H - 8);
+  ctx.fillText("ft", W - mR + 6, mT - 6);
   ctx.font = FONT_TITLE;
   ctx.fillStyle = C.text;
   ctx.fillText(`h [m] — 연료 ${fmt(mh.fuel, 4)} kg · 실속 여유 ×${fmt(mh.mach_margin, 3)}`, mL, 18);
@@ -403,23 +609,67 @@ function renderMh(box) {
     sources.add(lastMh.region.lo_source[i]);
     sources.add(lastMh.region.hi_source[i]);
   });
+  const man = layers.maneuver ? lastMh.maneuver : null;
   const legend = el("div", { class: "legend" },
-    el("span", {}, el("span", { class: "chip", style: `background:${C.ok}` }), "설계 영역 (합성)"),
+    el("span", {}, el("span", { class: "chip", style: `background:${C.ok}` }), "설계 영역 (1g 합성)"),
+    ...(man ? [el("span", {}, el("span", { class: "chip", style: `background:${C.manLine}` }),
+      `기동 엔벨로프 n_z=${fmt(man.nz, 3)} g`)] : []),
     ...[...sources].map((s) => el("span", {},
       el("span", { class: "chip", style: `background:${boundColor(s)}` }), boundLabel(s))),
     el("span", {}, el("span", { class: "chip", style: `border:1.4px solid ${C.schedPt}; background:transparent` }),
       "게인 스케줄 격자점 (coarse [기본값] — trimmable 미판정)"),
+    // 꺼진 층은 범례에서도 뺀다 — 화면에 없는 표시를 설명하면 범례가 거짓말이 된다
+    ...(layers.thrust ? [el("span", {}, el("span", { class: "chip", style: `background:${C.thrustLine}` }),
+      "추력 대리 경계 (스로틀 상한 포화)")] : []),
   );
   const kids = [el("div", { class: "scroll-x" }, mhEnvelopeCanvas(lastMh, cells)), legend];
+  if (man) {
+    // n_reach 행은 전부 empty라 경계 세그먼트도 범례 칩도 안 나온다 — 갈라 둔 귀속이
+    // 화면에 닿는 자리가 여기뿐이므로 개수를 숫자로 낸다 (안 그리면 갈라 둔 값이 죽는다)
+    const nEmpty = man.region.empty.filter(Boolean).length;
+    const nReach = man.region.lo_source.filter((s) => s === "n_reach").length;
+    kids.push(el("p", { class: "hint" },
+      `기동 엔벨로프는 n_z=${fmt(man.nz, 3)} g를 낼 수 있는 영역 — 하한만 올라가므로 1g 영역의 안쪽이다. `
+      // 다 열린 흔한 경우(낮은 n_z)에 "0행 … 0행 … 0행"을 늘어놓지 않는다
+      + (nEmpty
+        ? `${nEmpty}/${man.region.alt.length}행이 비었고 그중 ${nReach}행은 `
+          + `'${boundLabel("n_reach")}' — 그 고도에서는 어느 마하로도 그 하중배수를 못 낸다. `
+          + `나머지 ${nEmpty - nReach}행은 하한이 상한(구조·DB·q̄)을 넘어 닫힌 것이다. `
+        : "표시 고도 전 구간에서 이 하중배수가 가능하다. ")
+      + (man.nz_over_limit
+        ? "⚠ 입력한 n_z가 구조 제한하중을 넘습니다 — 구조 엔벨로프 밖입니다."
+        : "V-n 선도의 같은 n_z 선과 한 세트.")));
+  }
+  const outCount = lastMh.schedule_grid.points.filter((p) => outsideRegion(p, lastMh.region)).length;
+  if (outCount) {
+    kids.push(el("p", { class: "hint" },
+      `⚠ 스케줄 격자점 ${outCount}개가 합성 영역 밖(×)입니다 — 격자 좌표는 coarse 격자(design.grid)와 `
+      + "맞추려고 q̄를 보지 않고 만들어지므로, 이것이 실제 설계점 위치입니다. 좌표를 옮기지 않고 표시만 합니다."));
+  }
   if (cells && cells.length) {
-    const s = scanSummary(cells);
-    kids.push(el("div", { class: "legend" },
-      el("span", {}, el("span", { class: "chip", style: `background:${kindColor("ok")}` }),
-        `${kindLabel("ok")} ${s.ok}/${s.total}`),
-      ...s.byKind.map(({ kind, n }) => el("span", {},
-        el("span", { class: "chip", style: `background:${kindColor(kind)}` }),
-        `${kindLabel(kind)} ${n}건`)),
-    ));
+    // 범례·집계도 층 토글을 따른다 — 안 그리는 점의 개수를 세어 주면 화면과 어긋난다
+    if (layers.scan) {
+      const s = scanSummary(cells);
+      kids.push(el("div", { class: "legend" },
+        el("span", {}, el("span", { class: "chip", style: `background:${kindColor("ok")}` }),
+          `${kindLabel("ok")} ${s.ok}/${s.total}`),
+        ...s.byKind.map(({ kind, n }) => el("span", {},
+          el("span", { class: "chip", style: `background:${kindColor(kind)}` }),
+          `${kindLabel(kind)} ${n}건`)),
+      ));
+    }
+    if (layers.thrust) {
+      const frontier = thrustFrontier(cells);
+      const nLo = frontier.filter((p) => p.side === "lo").length;
+      const nProv = frontier.filter((p) => p.provisional).length;
+      kids.push(el("p", { class: "hint" }, frontier.length
+        ? `추력 대리 경계 — 고속 전이 ${frontier.length - nLo}점 · 저속(항력곡선 backside) 전이 ${nLo}점`
+          + (nProv ? `, 그중 ${nProv}점은 미수렴 셀이라 잠정(속 빈 원) — 그 스로틀은 해가 아니라 솔버의 마지막 반복값입니다. ` : ". ")
+          + "전용 추력 모델이 아니라 트림이 스로틀 상한에 닿은 지점입니다(01 §2.6 [TBD]). "
+          + "해석 곡선이 아니므로 스캔 격자 해상도가 곧 경계 해상도이고, 격자를 촘촘히 하면 경계가 움직입니다."
+        : "추력 대리 경계 없음 — 스캔 격자 안에서 스로틀 상한 포화가 나오지 않았습니다. "
+          + "상한이 없다는 뜻이 아니라 격자가 거기 닿지 않았다는 뜻입니다."));
+    }
   } else if (allCells) {
     // 스캔은 있는데 이 차트 연료와 안 맞는다 — 옛 집계를 그대로 보여주면 거짓말이 된다
     const scanned = [...new Set(allCells.map((c) => c.fuel))].join(", ");
@@ -573,6 +823,11 @@ function vnDiagramCanvas(body) {
   hline(L.n_ultimate_pos, C.ultLine, [3, 3], `+극한하중 ${fmt(L.n_ultimate_pos, 3)} g (제한×${L.safety_factor})`);
   hline(L.n_ultimate_neg, C.ultLine, [3, 3], `−극한하중 ${fmt(L.n_ultimate_neg, 3)} g`);
   hline(1.0, "#aeaeb2", [2, 4], "n=1 수평비행");
+  // M-h 탭의 기동 엔벨로프와 같은 n_z — 두 패널이 같은 축을 본다는 것을 눈으로 잇는다
+  const nzMan = layers.maneuver ? lastMh?.maneuver?.nz : null;
+  if (nzMan != null && nzMan > nBot && nzMan < nTop) {
+    hline(nzMan, C.manLine, [5, 3], `기동 n_z=${fmt(nzMan, 3)} g (M-h 기동 엔벨로프)`);
+  }
   const vline = (v, label) => {
     if (v == null) return;
     ctx.strokeStyle = C.speedLine;

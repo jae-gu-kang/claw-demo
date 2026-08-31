@@ -15,10 +15,62 @@ export const BOUND_META = {
   stall_table: { label: "실속표 축 상한 (공력)", color: "#5856d6" },
   mach_no: { label: "M_NO (구조)", color: "#c93400" },
   qbar: { label: "q̄ 한계 (구조)", color: "#ff9500" },
+  n_reach: { label: "하중배수 도달 불가", color: "#8e8e93" },
 };
 
 export const boundLabel = (code) => BOUND_META[code]?.label ?? code;
 export const boundColor = (code) => BOUND_META[code]?.color ?? "#8e8e93";
+
+/** 영역의 위·아래 모서리 귀속 — "실제 천장인가 표시 상한인가"를 문장으로 구분한다.
+ * 교과서 엔벨로프는 닫힌 곡선이지만, 우리 상단 모서리는 셋 중 하나다: 운용
+ * 상한(실기체 값), 표시 상한([기본값] — 운용 한계 아님), 자연 천장(실속 하한이
+ * 마하 상한을 만나 설계 영역이 사라진 지점). 셋을 같은 선으로 그리면 화면이
+ * 없는 상승한도를 있는 것처럼 말한다. */
+export const CAP_META = {
+  ops_alt_max: { label: "운용 고도 상한", color: "#007aff", dashed: false },
+  ops_alt_min: { label: "운용 고도 하한", color: "#007aff", dashed: false },
+  display_max: { label: "표시 상한 [기본값] — 운용 한계 아님", color: "#aeaeb2", dashed: true },
+  display_min: { label: "표시 하한 — 운용 하한 미입력", color: "#aeaeb2", dashed: true },
+  natural_ceiling: { label: "자연 천장 (설계 영역 소멸)", color: "#8e8e93", dashed: true },
+  natural_floor: { label: "자연 바닥 (설계 영역 소멸)", color: "#8e8e93", dashed: true },
+};
+
+export const capLabel = (code) => CAP_META[code]?.label ?? code;
+export const capColor = (code) => CAP_META[code]?.color ?? "#8e8e93";
+
+const EPS = 1e-9;
+
+/** region → 닫힌 경계의 상·하 캡 [{side, alt, mach0, mach1, source}].
+ * boundarySegments가 좌우(lo·hi)를 내므로 이쪽이 나머지 두 변이다. 한 행짜리
+ * run도 위·아래 두 캡을 낸다 — 같은 선이지만 귀속이 다르고, 그 귀속이 정보다. */
+export function outlineCaps(region, bounds) {
+  const caps = [];
+  let run = [];
+  const capAt = (i, side) => {
+    const alt = region.alt[i];
+    const source = side === "bottom"
+      ? (Math.abs(alt - bounds.alt_min_used) < EPS
+        ? (bounds.alt_min != null ? "ops_alt_min" : "display_min")
+        : "natural_floor")
+      : (Math.abs(alt - bounds.alt_max_used) < EPS
+        ? (bounds.alt_max_is_display_default ? "display_max" : "ops_alt_max")
+        : "natural_ceiling");
+    return { side, alt, mach0: region.mach_lo[i], mach1: region.mach_hi[i], source };
+  };
+  const flush = () => {
+    if (run.length) {
+      caps.push(capAt(run[0], "bottom"));
+      caps.push(capAt(run[run.length - 1], "top"));
+    }
+    run = [];
+  };
+  region.alt.forEach((_, i) => {
+    if (region.empty[i]) flush();
+    else run.push(i);
+  });
+  flush();
+  return caps;
+}
 
 /** region → 채움 다각형 목록 [[{mach, alt}, …], …] — empty 행에서 분할.
  * lo 곡선을 고도 오름차순으로, hi 곡선을 내림차순으로 이어 폐곡선. 한 행짜리
@@ -94,7 +146,54 @@ export function scanCells(entries) {
     fuel: e.trim.case.fuel,
     ok: e.verdict.ok === true,
     kind: e.verdict.ok === true ? "ok" : (e.verdict.reasons?.[0] ?? "unknown"),
+    // 대표 kind는 우선순위 첫 사유뿐 — 스로틀 포화(3순위)는 미수렴에 가려진다.
+    // 추력 대리 경계가 그 가려진 사유를 봐야 하므로 전량을 함께 싣는다.
+    reasons: e.verdict.reasons ?? [],
   }));
+}
+
+/** 판정 셀 → 추력 대리 경계 [{alt, mach, side}] — 고도별 포화/비포화 전이점.
+ *
+ * 교과서 엔벨로프의 "available thrust limit"에 대응하지만 **추력 모델이 아니다**:
+ * 전용 추력 모델은 부재이고(01 §2.6 [TBD] — T = max_thrust×δt로 마하·고도 무관),
+ * 여기 쓰는 것은 트림이 실제로 스로틀 상한에 부딪힌 지점, 즉 01 §2.6이 정한
+ * "추진 한계는 수평비행 트림의 스로틀 상한 포화로만 표면화한다"의 데이터다.
+ * 해석 곡선이 아니라 측정점이므로 **스캔 격자 해상도가 곧 경계 해상도**다.
+ *
+ * side는 포화가 어느 쪽에 있는지다 — "hi"는 빨라서 모자란 것(항력), "lo"는 느려서
+ * 모자란 것(유도항력이 커지는 항력곡선 backside). 둘 다 실제로 나오므로 한쪽을
+ * 가정하면 안 된다: 추력을 낮춘 실측에서 포화가 전부 저마하 쪽에 몰렸고, 그때
+ * "최저 포화 마하"를 경계라 부르면 스캔의 왼쪽 끝을 경계라고 우기게 된다.
+ * 전이가 없는 행(전부 포화/전부 비포화)은 낸다 — 가장자리를 경계로 지어내지 않는다.
+ *
+ * provisional은 그 전이점의 포화 셀이 **트림 미수렴**이라는 뜻이다. 미수렴 트림의
+ * 스로틀은 해가 아니라 솔버의 마지막 반복값이므로 "수평비행에 이만큼 필요하다"는
+ * 측정이 아니다 — 버리지도 않는다(대표 kind에 가려진 포화를 드러내는 것이 이
+ * 함수의 존재 이유다). 잠정으로 표시하고 화면이 구분해 그린다. */
+export function thrustFrontier(cells) {
+  const sat = (c) => c.reasons?.includes("saturated_throttle_high") === true;
+  const unconverged = (c) => c.reasons?.includes("not_converged") === true;
+  const byAlt = new Map();
+  for (const c of cells) {
+    if (!byAlt.has(c.alt)) byAlt.set(c.alt, []);
+    byAlt.get(c.alt).push(c);
+  }
+  const out = [];
+  for (const alt of [...byAlt.keys()].sort((a, b) => a - b)) {
+    const row = byAlt.get(alt).sort((a, b) => a.mach - b.mach);
+    for (let i = 0; i + 1 < row.length; i += 1) {
+      const a = row[i], c = row[i + 1];
+      if (sat(a) === sat(c)) continue;
+      const at = sat(a) ? a : c;               // 전이의 포화 쪽 셀이 경계점
+      out.push({
+        alt,
+        mach: at.mach,
+        side: sat(a) ? "lo" : "hi",            // 느린 쪽 포화면 저속, 빠른 쪽이면 고속 한계
+        provisional: unconverged(at),
+      });
+    }
+  }
+  return out;
 }
 
 const KIND_ORDER = [
@@ -131,6 +230,72 @@ export function throttleCell(entry) {
   }
   const t = Math.min(1, Math.max(0, thr));
   return { color: `hsl(${Math.round(130 - 100 * t)}, 65%, 42%)`, text: pct };
+}
+
+// 표시 행 격자의 이산화 오차를 넘는 실제 이탈만 센다. 스케줄 격자점의 마하는
+// 자기 고도에서 정확히 계산되는데 경계는 표시 행(41행 = 300 m 간격)에서만
+// 샘플되므로, 보간해도 머리카락만큼은 어긋난다 — 그걸 "영역 밖"이라 부르면
+// 경고가 상시 켜져 진짜 이탈(q̄ 경계는 훨씬 크게 벌어진다)을 덮는다.
+const REGION_TOL = 1e-3;
+
+/** 점이 합성 영역 밖인가 — 고도 이웃 두 행 사이를 보간한 [mach_lo, mach_hi] 기준.
+ *
+ * 스케줄 격자점은 좌표를 coarse 격자(design.grid)와 맞추려고 **q̄를 보지 않고**
+ * 만들어진다(design_envelope docstring). q̄_max가 낮으면 격자점이 영역 밖에
+ * 놓이는데, 그것이 실제 설계점 위치이므로 좌표를 고치면 화면이 거짓말을 한다 —
+ * 대신 밖이라는 사실을 표시한다. 이웃 행 중 하나라도 empty면 밖으로 본다. */
+export function outsideRegion(point, region) {
+  const n = region.alt.length;
+  if (!n) return false;
+  let hi = region.alt.findIndex((a) => a >= point.alt);
+  if (hi < 0) hi = n - 1;
+  const lo = Math.max(0, hi - 1);
+  if (region.empty[lo] || region.empty[hi]) return true;
+  const span = region.alt[hi] - region.alt[lo];
+  const t = span === 0 ? 0 : (point.alt - region.alt[lo]) / span;
+  const at = (arr) => arr[lo] + (arr[hi] - arr[lo]) * t;
+  return point.mach < at(region.mach_lo) - REGION_TOL
+    || point.mach > at(region.mach_hi) + REGION_TOL;
+}
+
+// ── 표시 보조 (좌표 변환·라벨 배치 — 수치를 만들지 않는다) ────────────────
+
+const FT_PER_M = 1 / 0.3048; // 국제피트 정의값 — 근사 상수를 손으로 적지 않는다
+
+/** m → ft. 우측 보조 고도축 전용 — 순수 단위 환산이라 근사가 없다. */
+export const mToFt = (m) => m * FT_PER_M;
+
+/** 라벨 세로 겹침 해소 — [{y, …}] → 같은 순서·같은 상하 관계, 간격 ≥ minGap.
+ * y 오름순으로 훑으며 앞 라벨 아래로 밀기만 한다(위로 당기지 않는다 — 지시선이
+ * 가리키는 점보다 라벨이 위로 튀면 어느 경계 이름인지 되레 헷갈린다). */
+export function spreadLabels(items, minGap) {
+  const order = items.map((it, i) => i).sort((a, b) => items[a].y - items[b].y);
+  const out = items.map((it) => ({ ...it }));
+  let prev = -Infinity;
+  for (const i of order) {
+    out[i].y = Math.max(out[i].y, prev + minGap);
+    prev = out[i].y;
+  }
+  return out;
+}
+
+/** 등고선 라벨 자리 — preferIdx에서 바깥으로 훑어 처음 만나는 x 범위 안 인덱스, 없으면 -1.
+ *
+ * 곡선이 평면을 비스듬히 가로지르므로 끝점은 대개 범위 밖이다. 기준점을 호출측이
+ * 정하게 두는 이유: 여러 곡선이 모두 도표 천장으로 빠져나가면 "범위 안 마지막
+ * 인덱스"가 전부 같은 행이 되어 라벨이 한 줄에 겹쳐 뭉갠다(라이브 확인에서 드러남).
+ * 중간 높이를 기준으로 주면 곡선마다 x가 달라 자연히 흩어진다. */
+export function isoLabelIndex(curve, xMin, xMax, preferIdx = curve.mach.length - 1) {
+  const n = curve.mach.length;
+  // 범위 밖 기준점을 그대로 쓰면 바깥 훑기가 배열을 다 못 덮어 -1이 나온다 —
+  // "곡선이 화면 밖"과 구분이 안 되므로 기준점을 배열 안으로 접는다
+  const start = Math.min(n - 1, Math.max(0, preferIdx));
+  const inRange = (i) => i >= 0 && i < n && curve.mach[i] >= xMin && curve.mach[i] <= xMax;
+  for (let d = 0; d < n; d += 1) {
+    if (inRange(start - d)) return start - d;
+    if (inRange(start + d)) return start + d;
+  }
+  return -1;
 }
 
 // ── 필요값 폼 (02 §5.5 — 웹은 엔진 기본값을 재기술하지 않는다) ────────────

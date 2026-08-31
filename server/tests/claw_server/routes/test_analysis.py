@@ -172,6 +172,55 @@ def test_design_envelope_endpoint(client):
                       params={"alt": 1000.0, "fuel": "inf"}).status_code == 422
 
 
+def test_design_envelope_maneuver_and_iso_params(client):
+    """n_z·등고선 파라미터 — 미지정이면 엔진이 정하고, 지정하면 그대로 전달."""
+    base = client.get("/api/analysis/design-envelope", params={"fuel": 200.0}).json()
+    assert base["maneuver"] is None  # 미지정 = 기동 엔벨로프 자체가 없다
+    assert [c["q"] for c in base["iso"]["qbar"]] == [5000.0, 10000.0, 20000.0, 40000.0]
+    assert base["bounds"]["tropopause_alt"] == 11000.0  # 웹이 11000을 재기술하지 않도록
+
+    man = client.get("/api/analysis/design-envelope",
+                     params={"fuel": 200.0, "nz": 3.0}).json()
+    assert man["maneuver"]["nz"] == 3.0 and man["maneuver"]["nz_over_limit"] is False
+    mreg, reg = man["maneuver"]["region"], man["region"]
+    assert all(a > b for a, b in zip(mreg["mach_lo"], reg["mach_lo"]))  # 안쪽
+    assert sum(mreg["empty"]) > 0 and "n_reach" in mreg["lo_source"]
+    # 구조 제한하중 초과는 422가 아니라 echo — 한계 밖을 보는 것도 정당한 탐색
+    over = client.get("/api/analysis/design-envelope", params={"fuel": 200.0, "nz": 9.0})
+    assert over.status_code == 200 and over.json()["maneuver"]["nz_over_limit"] is True
+
+    iso = client.get("/api/analysis/design-envelope",
+                     params={"fuel": 200.0, "iso_qbar": "1000, 2000", "iso_tas": "120"}).json()
+    assert [c["q"] for c in iso["iso"]["qbar"]] == [1000.0, 2000.0]
+    assert [c["v"] for c in iso["iso"]["tas"]] == [120.0]
+    # 비수치·비유한·비양수 목록과 비양수 n_z → 422
+    for params in ({"iso_qbar": "1000, 어"}, {"iso_tas": "inf"}, {"nz": 0.0}, {"nz": -1.0},
+                   {"iso_tas": "0"}, {"iso_tas": "-100"}, {"iso_qbar": "0"}):
+        assert client.get("/api/analysis/design-envelope",
+                          params={"fuel": 200.0, **params}).status_code == 422
+
+
+def test_iso_value_count_is_bounded(client):
+    """등고선 개수 상한 — MAX_SCAN_CASES와 같은 이유(단일 워커 점유 차단).
+
+    값 하나가 표시 41행마다 대기 계산을 돌리고 응답에 41개 수를 더한다. 상한이
+    없으면 15 KB 쿼리 하나가 2.4 MB 응답이 되며, 공격이 아니라 CSV 한 열을
+    붙여넣는 실수로 닿는다.
+    """
+    from claw_server.routes.analysis import MAX_ISO_VALUES
+
+    ok = ",".join(str(1000 + i) for i in range(MAX_ISO_VALUES))
+    r = client.get("/api/analysis/design-envelope", params={"fuel": 200.0, "iso_qbar": ok})
+    assert r.status_code == 200 and len(r.json()["iso"]["qbar"]) == MAX_ISO_VALUES
+    too_many = ",".join(str(1000 + i) for i in range(MAX_ISO_VALUES + 1))
+    over = client.get("/api/analysis/design-envelope",
+                      params={"fuel": 200.0, "iso_qbar": too_many})
+    assert over.status_code == 422 and "상한" in over.json()["detail"]
+    # 같은 상한이 등속선에도 걸린다 (두 파라미터가 같은 계약)
+    assert client.get("/api/analysis/design-envelope",
+                      params={"fuel": 200.0, "iso_tas": too_many}).status_code == 422
+
+
 def test_envelope_scan_round_trip(client, wait_job):
     """제어 가능 영역 스캔 (01 §2.6) — 트림 잡 + envelope_ok 정본 판정·사유 귀속."""
     cases = [
