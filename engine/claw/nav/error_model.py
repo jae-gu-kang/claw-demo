@@ -27,6 +27,20 @@ from claw.common.contracts import NavOutput
 from claw.params.param import ParamDef
 
 
+# RTK 고정해 등급 파라미터 [기본값] — NavErrorModel.rtk_fixed()가 쓰는 값.
+# 수직을 수평의 1.5배로 두는 관계는 기본값과 같다(VDOP/HDOP 통상비). 자세·각속도·
+# 지연·갱신주기는 손대지 않는다 — RTK가 개선하는 것은 측위이지 자세가 아니다.
+# 수치는 RTK 고정해 일반 수준 자리표시자이며 실측 자료가 아니다 [TBD].
+RTK_FIXED = {
+    "pos_std_h": 0.02,
+    "pos_std_v": 0.03,
+    "vel_std_h": 0.02,
+    "vel_std_v": 0.03,
+    "bias_std_h": 0.01,
+    "bias_std_v": 0.015,
+}
+
+
 class NavErrorModel:
     NAME = "ErrorModel"
     PARAM_DEFS = (
@@ -76,6 +90,38 @@ class NavErrorModel:
         self._sigma_vel = np.array([vel_std_h, vel_std_h, vel_std_v])
         self._sigma_bias = np.array([bias_std_h, bias_std_h, bias_std_v])
         self.delay_s, self.update_hz, self.seed = delay_s, update_hz, int(seed)
+
+    @classmethod
+    def rtk_fixed(cls, **overrides) -> "NavErrorModel":
+        """RTK 고정해 등급 항법 [기본값] — 위치·속도 오차만 낮춘다.
+
+        **왜 필요한가 — 접지 지점의 반복성이다.** 처음에는 "기본 항법의 수직 오차가
+        플레어 개시 고도보다 커서 플레어가 잡음에 묻힌다"로 적었는데, 5시드 실측이
+        그것을 뒤집었다: 접지 강하율은 기본 −0.72 m/s·RTK −0.89 m/s로 오히려 기본
+        쪽이 살짝 부드럽고 산포도 σ 0.07로 같다. 강하율은 vel_std_v(0.45 m/s)가
+        지배하고, 플레어 개시 고도가 20 m라 4.5 m짜리 위치 잡음이 그 자릿수를
+        흔들지 못하기 때문이다.
+
+        갈리는 것은 **어디에 내리는가**다. 플레어 개시가 고도 조건이므로 고도 오차가
+        곧 개시 시점 오차이고, 접근 속도 88 m/s가 그것을 접지 지점으로 증폭한다:
+
+            기본 GNSS   접지 지점 폭 874 m (σ 344 m)
+            RTK 고정해  접지 지점 폭  92 m (σ  33 m)
+
+        활주로가 1,500 m인데 ±437 m가 흔들리면 활주로에 못 내린다.
+        (문서 01 §2.5의 RALT [TBD]도 같은 문제를 다른 수단으로 푸는 자리다.)
+
+        자세·각속도 오차는 **그대로 둔다**: RTK가 개선하는 것은 반송파 위상 기반
+        측위이지 자세가 아니다(2안테나 자세 결정은 별개 장비 [TBD]). 낮춰 두면
+        착륙 성능이 실제보다 좋게 나온다.
+
+        **가정 — fix 상실은 미모델이다 [TBD].** 실제 RTK는 기준국 보정 링크가 끊기거나
+        가시위성이 줄면 float·단독으로 강등되고 오차가 수십 배로 뛴다. 이 모델에는
+        그 상태 전이가 없으므로 **fix 유지가 전제**다. 접지 지점 정확도가 통째로 이
+        전제에 걸려 있으니 화면·문서에 함께 적는다 (조용한 전제 금지). 강등되면
+        위 표의 "기본 GNSS" 쪽으로 되돌아간다 — 착륙 자체는 하되 지점이 흩어진다.
+        """
+        return cls(**{**RTK_FIXED, **overrides})
 
     def init(self, dt: float) -> "NavErrorModel":
         """틱 주기 dt[s] (제어/시뮬 주기)로 초기화. 체이닝을 위해 self 반환."""

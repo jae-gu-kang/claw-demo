@@ -5,11 +5,11 @@
 (인터페이스 개방, 02 §3.1).
 """
 
-from claw.nav.error_model import NavErrorModel
+from claw.nav.error_model import RTK_FIXED, NavErrorModel
 from claw.params.registry import REGISTRY
 
 REGISTRY.register(
     "nav", NavErrorModel.NAME, lambda ps: NavErrorModel(**ps.as_dict()), NavErrorModel.PARAM_DEFS
 )
 
-__all__ = ["NavErrorModel"]
+__all__ = ["NavErrorModel", "RTK_FIXED"]

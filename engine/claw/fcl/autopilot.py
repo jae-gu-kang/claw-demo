@@ -43,8 +43,8 @@ class Autopilot(Block):
         ParamDef("kp_hdg", 4.0, "-", "헤딩 비례 게인"),
         ParamDef("ki_hdg", 0.0, "1/s", "헤딩 적분 게인"),
         ParamDef("tau_hdg", 1.0, "s", "헤딩 명령필터 시정수", lo=0.0),
-        ParamDef("kp_vs", 0.02, "rad·s/m", "승강률 비례 게인"),
-        ParamDef("ki_vs", 0.005, "rad/m", "승강률 적분 게인"),
+        ParamDef("kp_vs", 0.08, "rad·s/m", "승강률 비례 게인"),
+        ParamDef("ki_vs", 0.02, "rad/m", "승강률 적분 게인"),
         ParamDef("tau_vs", 2.0, "s", "승강률 명령필터 시정수", lo=0.0),
         ParamDef("theta_lo", -0.3, "rad", "피치 명령 하한"),
         ParamDef("theta_hi", 0.3, "rad", "피치 명령 상한"),
@@ -65,10 +65,14 @@ class Autopilot(Block):
         kp_hdg: float = 4.0,
         ki_hdg: float = 0.0,
         tau_hdg: float = 1.0,
-        # 승강률 축 [기본값] — 오차 [m/s] → θ [rad]. 접근 −4.8에서 접지 −1.0으로
-        # 세우려면 오차 3.8 m/s에 θ +0.076 rad(4.4°)이 붙는 크기다. 튜닝 대상.
-        kp_vs: float = 0.02,
-        ki_vs: float = 0.005,
+        # 승강률 축 [기본값] — 오차 [m/s] → θ [rad]. **착륙 실측으로 정했다**:
+        # 접근 −4.8 m/s에서 플레어 개시 고도를 바꿔 가며 접지 강하율을 재면
+        #   개시 5 m·kp 0.02 → 접지 −4.58 m/s (플레어가 0.9 s뿐이라 못 세운다)
+        #   개시 20 m·kp 0.08 → 접지 −1.00 m/s, 실속 마진 0.071 rad ← 채택
+        #   개시 35 m·kp 0.12 → 접지 −0.72 m/s, 그러나 마진 0.043으로 얇아진다
+        # 더 부드러운 접지는 더 오래 기수를 들고 있어야 하므로 실속 여유와 맞바꾼다.
+        kp_vs: float = 0.08,
+        ki_vs: float = 0.02,
         tau_vs: float = 2.0,
         theta_lo: float = -0.3,
         theta_hi: float = 0.3,

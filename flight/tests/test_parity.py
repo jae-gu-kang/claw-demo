@@ -250,4 +250,4 @@ def test_분할해도_지문은_그대로다():
     for name in ("fcl.h", "fcl_types.h", "fcl_data.c", *(f"fcl_{g}.h" for g in GROUPS)):
         line = next(ln for ln in _gen(name).splitlines() if "지문" in ln)
         fps.add(line.split(":")[1].strip())
-    assert fps == {"6a4f463bb10c42dc"}, f"형상 지문이 움직였다: {fps}"
+    assert fps == {"b03d13b65eae3f57"}, f"형상 지문이 움직였다: {fps}"
