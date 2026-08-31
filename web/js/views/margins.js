@@ -11,11 +11,12 @@ import { clear, el, fmt } from "../dom.js";
 import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { AXIS_NAMES, DEFAULT_LOOPS, validateActuatorDelay, validateLoops } from "../lib/loops.js";
 import {
-  FALLBACK_CRITERIA, STATUS, fuelsOf, gmColor, marginColor, marginLegendText, pivotCases,
-  threshold,
+  FALLBACK_CRITERIA, STATUS, fuelsOf, gmColor, heatmapCanvasHeight, heatmapCellAt, marginColor,
+  marginLegendText, pivotCases, threshold,
 } from "../lib/plot.js";
+import { toCanvasXY } from "../lib/wpmap.js";
 import { store } from "../store.js";
-import { heatmapCanvas, scatterCanvas } from "./plots.js";
+import { bodeCanvas, heatmapCanvas, scatterCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
 let lastBody = null;
@@ -289,27 +290,101 @@ function renderResults(resultBox, body) {
   const fuelSel = el("select", { "aria-label": "연료 선택" },
     fuels.map((f) => el("option", { value: f }, `연료 ${f} kg`)));
   const plotBox = el("div");
+  const detailBox = el("div");
+  const HEAT_W = 560; // heatmapCanvas 기본 폭 — 클릭 역매핑이 같은 값을 써야 한다
+
+  /** 히트맵 칸 클릭 → 그 운용점·그 루프의 보드선도. GM·PM이 주파수축 어디에
+   * 있는지는 히트맵 두 장으로는 원리적으로 안 보인다 (01 §4.2). */
+  let bodeSeq = 0; // 늦게 도착한 응답이 새 선택을 덮지 않도록
+  const openBode = async (lp, entry) => {
+    const seq = ++bodeSeq;
+    clear(detailBox).append(el("p", { class: "hint" },
+      `보드선도 계산 중 — ${entry.trim.case.name} · ${lp.name}`));
+    try {
+      const res = await api.post("/analysis/bode", {
+        case: entry.trim.case, loop: lp,
+        actuator: lastBody.actuator ?? null,
+        delay_s: lastBody.delay_s ?? 0.0,
+        pade_order: lastBody.pade_order ?? 2,
+        // 이 칸의 트림 해를 씨앗으로 — 마진 맵은 웜스타트로 풀었으므로 냉간으로
+        // 다시 풀면 다른 선형화점에 앉아 곡선과 칸이 어긋난다(칸은 수렴인데
+        // 보드만 422가 나기도 한다). 수평비행 트림은 θ = α라 euler[1]이 α다
+        z0: [entry.trim.euler[1], entry.trim.control.elevon[0], entry.trim.control.throttle[0]],
+      });
+      if (seq !== bodeSeq) return; // 그사이 다른 칸을 눌렀다 — 옛 응답을 버린다
+      renderBode(detailBox, lp, entry, res);
+    } catch (e) {
+      if (seq !== bodeSeq) return;
+      clear(detailBox).append(el("div", { class: "error-box" }, errorText(e)));
+    }
+  };
+
+  /** 캔버스에 클릭·커서를 붙인다 — 좌표 변환은 lib/wpmap.js toCanvasXY(CSS 축소 보정). */
+  const wireCells = (canvas, pivot, lp) => {
+    const hitAt = (ev) => {
+      // 논리 크기를 넘긴다 — clientHeight(축소된 렌더 높이)를 넘기면 y 배율이
+      // 1이 되어 좁은 화면에서 세로 좌표가 안 풀린다
+      const { x, y } = toCanvasXY(ev.clientX, ev.clientY,
+        canvas.getBoundingClientRect(), HEAT_W, heatmapCanvasHeight(pivot.alts.length));
+      return heatmapCellAt(pivot, x, y, { width: HEAT_W });
+    };
+    canvas.addEventListener("pointermove", (ev) => {
+      const hit = hitAt(ev);
+      canvas.style.cursor = hit && hit.entry ? "pointer" : "default";
+    });
+    canvas.addEventListener("click", (ev) => {
+      const hit = hitAt(ev);
+      if (!hit || !hit.entry) return; // 여백·격자 밖 — 가까운 칸으로 끌어붙이지 않는다
+      if (!hit.entry.trim.converged) {
+        clear(detailBox).append(el("p", { class: "hint" },
+          `${hit.entry.trim.case.name}: 트림 미수렴이라 선형화점이 없습니다 — 보드선도를 낼 수 없습니다.`));
+        return;
+      }
+      if (!hit.entry.margins?.[lp.name]) {
+        // 이 루프의 마진이 없는 칸(해석 실패로 회색) — 열어 봐야 서버도 같은
+        // 이유로 못 푼다. 색칠된 칸만 열린다는 약속을 여기서 지킨다
+        clear(detailBox).append(el("p", { class: "hint" },
+          `${hit.entry.trim.case.name}: 이 루프의 마진이 없는 칸입니다`
+          + (hit.entry.note ? ` — ${hit.entry.note}` : " (해석 실패)")));
+        return;
+      }
+      if (!lp.x_out) { // 구버전 결과(loopsOf 폴백) — 루프 스펙이 없어 재조립 불가
+        clear(detailBox).append(el("p", { class: "hint" },
+          "이 결과에는 루프 스펙이 저장돼 있지 않아(구버전) 보드선도를 낼 수 없습니다 — 다시 실행하세요."));
+        return;
+      }
+      openBode(lp, hit.entry);
+    });
+  };
+
   const draw = () => {
     // 판정선은 그릴 때마다 읽는다 — /design/defaults가 뒤늦게 도착해도 다시 칠해진다
     const cr = criteria ?? FALLBACK_CRITERIA;
     const fuel = Number(fuelSel.value);
     const pivot = pivotCases(entries, fuel);
+    // 연료가 바뀌면 다른 격자다 — 옛 상세도, **진행 중인 요청도** 무효다
+    bodeSeq += 1;
+    clear(detailBox);
     const loopPlots = loops.flatMap((lp) => {
       const label = lp.x_out
         ? `${lp.name} — ${lp.sign < 0 ? "−" : "+"}PI·G(${lp.x_out} ← ${lp.u_in}) [${lp.axis}]`
         : lp.name;
+      const pmCanvas = heatmapCanvas(pivot, (e) => {
+        if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
+        const pm = e.margins[lp.name] ? e.margins[lp.name].pm_deg : null;
+        return { color: marginColor(pm, cr), text: `${fmt(pm, 3)}°` };
+      }, { title: `위상여유 PM [deg] — ${lp.name} (≥${threshold(cr, "pm_min_deg")}°)`, width: HEAT_W });
+      const gmCanvas = heatmapCanvas(pivot, (e) => {
+        if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
+        const gm = e.margins[lp.name] ? e.margins[lp.name].gm_db : null;
+        return { color: gmColor(gm, cr), text: gm === "inf" ? "∞ dB" : `${fmt(gm, 3)} dB` };
+      }, { title: `이득여유 GM [dB] — ${lp.name} (≥${threshold(cr, "gm_min_db")} dB)`, width: HEAT_W });
+      // PM·GM 두 장 다 같은 루프의 같은 칸이므로 어느 쪽을 눌러도 같은 선도가 뜬다
+      wireCells(pmCanvas, pivot, lp);
+      wireCells(gmCanvas, pivot, lp);
       return [
         el("h3", { style: "font-size: 13px; margin: 14px 0 4px" }, label),
-        heatmapCanvas(pivot, (e) => {
-          if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
-          const pm = e.margins[lp.name] ? e.margins[lp.name].pm_deg : null;
-          return { color: marginColor(pm, cr), text: `${fmt(pm, 3)}°` };
-        }, { title: `위상여유 PM [deg] — ${lp.name} (≥${threshold(cr, "pm_min_deg")}°)` }),
-        heatmapCanvas(pivot, (e) => {
-          if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
-          const gm = e.margins[lp.name] ? e.margins[lp.name].gm_db : null;
-          return { color: gmColor(gm, cr), text: gm === "inf" ? "∞ dB" : `${fmt(gm, 3)} dB` };
-        }, { title: `이득여유 GM [dB] — ${lp.name} (≥${threshold(cr, "gm_min_db")} dB)` }),
+        pmCanvas, gmCanvas,
       ];
     });
     const points = [];
@@ -334,8 +409,57 @@ function renderResults(resultBox, body) {
   clear(resultBox).append(
     el("p", {}, el("b", {}, `계산 완료 — 케이스 ${entries.length}건 · 루프 ${loops.length}개`)),
     el("p", { class: "hint" }, appliedSummary(body)),
-    el("div", { class: "row" }, fuelSel), plotBox);
+    el("div", { class: "row" }, fuelSel), plotBox,
+    el("p", { class: "hint" }, "히트맵 칸을 클릭하면 그 운용점·그 루프의 보드선도가 아래에 열립니다."),
+    detailBox);
   draw();
+}
+
+/** 필터 스펙 한 줄 — 파라미터 이름·단위는 블록 PARAM_DEFS 그대로 (엔진 filter_tf
+ * 규격). kind와 무관하게 τ로 적으면 저역통과(fc)·노치(f0·q)에서 "τ=— s"가 된다. */
+function filterText(f) {
+  if (f.kind === "washout") return `washout τ=${fmt(f.tau, 3)} s`;
+  if (f.kind === "lowpass") return `lowpass fc=${fmt(f.fc, 3)} Hz`;
+  if (f.kind === "notch") return `notch f0=${fmt(f.f0, 3)} Hz · Q=${fmt(f.q, 3)}`;
+  return f.kind;
+}
+
+/** 보드선도 상세 — 어느 칸인지, 무엇이 기준인지, 교차가 몇 개인지를 문장으로. */
+function renderBode(box, lp, entry, body) {
+  const c = entry.trim.case;
+  const m = body.margins;
+  const nGain = body.crossings.gain.length;
+  const nPhase = body.crossings.phase.length;
+  const kids = [
+    el("h3", { style: "font-size: 13px; margin: 14px 0 4px" },
+      `보드선도 — ${lp.name} @ M${fmt(c.mach, 3)} · ${fmt(c.alt, 5)} m · 연료 ${fmt(c.fuel, 4)} kg`),
+    el("div", { class: "scroll-x" },
+      bodeCanvas(body, { title: `${lp.name} — ${lp.sign < 0 ? "−" : "+"}PI·G(${lp.x_out} ← ${lp.u_in}) [${lp.axis}]` })),
+    el("p", { class: "hint" },
+      `실선이 기준입니다 — 클릭한 칸의 PM ${fmt(m.pm_deg, 4)}° · GM `
+      + `${m.gm_db === "inf" ? "∞" : fmt(m.gm_db, 4)} dB가 이 곡선에서 읽은 값입니다. `
+      + "PM은 |L|=0 dB인 wcp(초록)에서, GM은 ∠L=−180°인 wcg(주황)에서 읽습니다 — "
+      + "두 수가 서로 다른 주파수의 값이라는 것이 두 수직선의 간격입니다."),
+  ];
+  // 교차가 여럿이면 보고된 마진은 그중 하나다 — 01 §4.2의 yaw_rate 사례가 이것이다
+  if (nGain > 1 || nPhase > 1) {
+    kids.push(el("p", { class: "hint" },
+      `⚠ 0 dB 교차 ${nGain}개 · −180° 교차 ${nPhase}개 — 보고된 마진은 그중 하나입니다`
+      + "(채운 원이 control.margin이 고른 자리, 빈 원이 나머지). 조립이 조금 바뀔 때 "
+      + "마진 숫자가 크게 튀면 값이 나빠진 것이 아니라 **선택이 바뀐 것**일 수 있습니다."));
+  }
+  if (body.filtered) {
+    const f = body.filtered.margins;
+    kids.push(el("p", { class: "hint" },
+      `파선은 법칙에 실제로 있는 레이트 필터(${filterText(body.filtered.filter)})를 `
+      + `넣은 조립입니다 — PM ${fmt(f.pm_deg, 4)}° · `
+      + `GM ${f.gm_db === "inf" ? "∞" : fmt(f.gm_db, 4)} dB. 마진 맵은 이 필터를 정적 게인으로 `
+      + "보므로(01 §4.2 [한계]) 두 곡선의 간격이 곧 그 한계의 크기입니다 — 히트맵 숫자가 "
+      + "틀린 것이 아니라 필터를 안 본 값입니다."));
+  } else if (body.filtered_note) {
+    kids.push(el("p", { class: "hint" }, `필터 반영 곡선 없음 — ${body.filtered_note}.`));
+  }
+  clear(box).append(...kids);
 }
 
 function dampingTable(entries) {

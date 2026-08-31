@@ -1,7 +1,10 @@
 /** 캔버스 렌더러 (DOM 전용 — 수치는 lib/plot.js·lib/replay.js) — 히트맵·산점도·시계열·궤적. */
 
 import { el } from "../dom.js";
-import { linScale, niceTicks } from "../lib/plot.js";
+import {
+  HEATMAP_LAYOUT, decadeTicks, heatmapCanvasHeight, heatmapCellWidth, interpLogAt,
+  linScale, logScale, niceTicks,
+} from "../lib/plot.js";
 import { extent } from "../lib/replay.js";
 
 const FONT = "11px -apple-system, 'Segoe UI', sans-serif";
@@ -27,10 +30,11 @@ export function makeCanvas(width, height) {
  */
 export function heatmapCanvas(pivot, cellOf, { title = "", width = 560 } = {}) {
   const { machs, alts } = pivot;
-  const mL = 64, mT = 28, mR = 10, mB = 34;
-  const cw = Math.min(90, (width - mL - mR) / Math.max(1, machs.length));
-  const ch = 34;
-  const height = mT + ch * alts.length + mB;
+  // 레이아웃 상수는 lib/plot.js가 정본 — 클릭 역매핑(heatmapCellAt)이 같은 표를
+  // 읽는다. 여기에 따로 적으면 갈리고, 갈려도 칸이 한 칸씩 어긋날 뿐이라 눈에 안 띈다
+  const { mL, mT, ch } = HEATMAP_LAYOUT;
+  const cw = heatmapCellWidth(machs.length, width);
+  const height = heatmapCanvasHeight(alts.length);
   const { canvas, ctx } = makeCanvas(width, height);
 
   const cellRect = (x, y, w, h) => {
@@ -51,7 +55,7 @@ export function heatmapCanvas(pivot, cellOf, { title = "", width = 560 } = {}) {
       const entry = pivot.at(mach, alt);
       const cell = entry ? cellOf(entry) : null;
       ctx.fillStyle = cell ? cell.color : "#f2f2f7";
-      cellRect(x, y, cw - 3, ch - 3);
+      cellRect(x, y, cw - HEATMAP_LAYOUT.gap, ch - HEATMAP_LAYOUT.gap);
       if (cell && cell.text != null) {
         ctx.font = "600 11px -apple-system, 'Segoe UI', sans-serif";
         ctx.fillStyle = "#ffffff";
@@ -151,6 +155,19 @@ export function lineChartCanvas(t, series, { title = "", width = 620, height = 1
 
 function fmtTick(v) {
   return Math.abs(v) >= 1000 ? String(Math.round(v)) : String(Math.round(v * 1000) / 1000);
+}
+
+/** dB 값 — ±inf 문자열과 nan을 뭉개지 않는다. fmtTick(num(v))는 비유한값을
+ * null로 만든 뒤 Math.abs(null)=0을 타 "0 dB"로 찍는다(판정 불가를 0으로 위장). */
+function fmtDb(v) {
+  if (v === "inf") return "∞";
+  if (v === "-inf") return "−∞";
+  return typeof v === "number" && Number.isFinite(v) ? fmtTick(v) : "판정 불가";
+}
+
+/** log 주파수축 눈금 — fmtTick은 1e-4를 "0"으로 만든다(log 축에 0은 없다). */
+function fmtFreq(v) {
+  return String(Number(v.toPrecision(3)));
 }
 
 /** 지상 궤적 (NED 평면, 북쪽 위) — 웨이포인트 원(도달 반경)·시각 마커. */
@@ -493,5 +510,155 @@ export function scatterCanvas(points, { title = "", width = 420, height = 300 } 
     ctx.arc(sx(p.x), sy(p.y), 3.5, 0, 2 * Math.PI);
     ctx.fill();
   }
+  return canvas;
+}
+
+/** 개루프 보드선도 — 이득·위상 두 패널이 **같은 log 주파수축**을 공유 (01 §4.2).
+ *
+ * GM과 PM은 같은 곡선의 서로 다른 자리에서 읽는 수다: PM은 |L|=0 dB인 wcp의 위상
+ * 여유, GM은 ∠L=−180°인 wcg의 이득 여유. 두 패널을 관통하는 wcp·wcg 수직선이 이
+ * 선도의 요점 — 히트맵 두 장으로는 그 주파수 관계가 원리적으로 안 보인다.
+ *
+ * data.filtered가 있으면 파선으로 겹친다 — 마진 맵은 법칙의 레이트 필터를 정적
+ * 게인으로 보므로(01 §4.2 [한계]) 두 곡선의 간격이 곧 그 한계의 크기다.
+ * **실선이 기준**이다: 클릭한 히트맵 칸의 숫자는 실선에서 읽은 값이다.
+ */
+export function bodeCanvas(data, { title = "", width = 700 } = {}) {
+  const magH = 150, phH = 150, mL = 60, mT = 26, mR = 16, gapY = 30, mB = 46;
+  const height = mT + magH + gapY + phH + mB;
+  const { canvas, ctx } = makeCanvas(width, height);
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const series = [
+    { d: data, color: "#007aff", dash: null, label: "마진 맵 조립 (필터 미반영)" },
+    ...(data.filtered
+      ? [{ d: data.filtered, color: "#af52de", dash: [6, 4],
+           label: `법칙 필터 포함 (${data.filtered.filter?.kind ?? "필터"})` }]
+      : []),
+  ];
+  const w0 = data.w[0], w1 = data.w[data.w.length - 1];
+  const px = logScale(w0, w1, mL, width - mR);
+
+  const magVals = series.flatMap((s) => s.d.mag_db.map(num)).filter((v) => v !== null);
+  const phVals = series.flatMap((s) => s.d.phase_deg.map(num)).filter((v) => v !== null);
+  const span = (vals, must) => {
+    const all = [...vals, ...must];
+    const lo = Math.min(...all), hi = Math.max(...all);
+    const pad = 0.08 * (hi - lo || 1);
+    return [lo - pad, hi + pad];
+  };
+  const [m0, m1] = span(magVals, [0]);       // 0 dB 기준선이 항상 보이게
+  const [p0, p1] = span(phVals, [-180]);     // −180° 기준선이 항상 보이게
+  const magTop = mT, phTop = mT + magH + gapY;
+  const pyM = linScale(m0, m1, magTop + magH, magTop);
+  const pyP = linScale(p0, p1, phTop + phH, phTop);
+
+  // 데케이드 격자 — 두 패널 공통
+  ctx.strokeStyle = "#eeeef0";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const t of decadeTicks(w0, w1)) {
+    ctx.moveTo(px(t), magTop); ctx.lineTo(px(t), magTop + magH);
+    ctx.moveTo(px(t), phTop); ctx.lineTo(px(t), phTop + phH);
+  }
+  ctx.stroke();
+
+  const href = (py, v, top, h, color, label) => {
+    ctx.strokeStyle = color;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(mL, py(v)); ctx.lineTo(width - mR, py(v)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    // 선 **아래**에 — 위에 두면 우상단의 wcp·wcg 주석 블록과 같은 줄에서 겹친다
+    ctx.fillText(label, width - mR - 46, Math.min(top + h - 4, py(v) + 11));
+  };
+  href(pyM, 0, magTop, magH, "#c93400", "0 dB");
+  for (let lv = -180; lv >= p0; lv -= 360) if (lv <= p1) href(pyP, lv, phTop, phH, "#c93400", `${lv}°`);
+  for (let lv = 180; lv <= p1; lv += 360) if (lv >= p0) href(pyP, lv, phTop, phH, "#c93400", `${lv}°`);
+
+  // wcp·wcg — 두 패널을 관통. 이 두 선의 위치 관계가 이 선도의 요점이다
+  const marks = [
+    { w: num(data.margins.wcp), color: "#34c759", text: `wcp ${fmtFreq(num(data.margins.wcp) ?? 0)} — PM ${fmtTick(num(data.margins.pm_deg))}°` },
+    { w: num(data.margins.wcg), color: "#ff9500", text: `wcg ${fmtFreq(num(data.margins.wcg) ?? 0)} — GM ${fmtDb(data.margins.gm_db)} dB` },
+  ];
+  marks.forEach((mk, i) => {
+    if (mk.w === null || mk.w < w0 || mk.w > w1) return;
+    ctx.strokeStyle = mk.color;
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(px(mk.w), magTop); ctx.lineTo(px(mk.w), phTop + phH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = mk.color;
+    ctx.fillText(mk.text, Math.min(px(mk.w) + 4, width - mR - 150), magTop + 12 + 13 * i);
+  });
+
+  // 곡선
+  const curve = (xs, ys, py, color, dash) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = dash ? 1.3 : 1.6;
+    if (dash) ctx.setLineDash(dash);
+    ctx.beginPath();
+    let started = false;
+    ys.forEach((raw, i) => {
+      const v = num(raw);
+      if (v === null) { started = false; return; }
+      if (!started) { ctx.moveTo(px(xs[i]), py(v)); started = true; }
+      else ctx.lineTo(px(xs[i]), py(v));
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  for (const s of series) {
+    curve(s.d.w, s.d.mag_db, pyM, s.color, s.dash);
+    curve(s.d.w, s.d.phase_deg, pyP, s.color, s.dash);
+  }
+
+  // 교차 전량 — margin이 고른 것만 채운 원, 나머지는 빈 원 (하나만 답한다는 사실을 드러낸다)
+  const chosen = (x, ref) => ref !== null && Math.abs(x - ref) < 1e-3 * Math.max(ref, 1e-9);
+  // 마커는 **곡선 위에** 찍는다. 위상 교차는 −180뿐 아니라 −180±360k에서도 나므로
+  // (bode_data가 등가 준위를 모두 훑는다) 고정 준위에 찍으면 −540 교차가 −180 줄에
+  // 떠서 곡선에서 반 패널쯤 떨어져 앉는다 — "채운 원이 고른 자리"라는 말이 깨진다
+  const crossMarks = (d, key, py, ref, color) => {
+    for (const x of d.crossings[key === "mag_db" ? "gain" : "phase"]) {
+      if (x < w0 || x > w1) continue;
+      const y = interpLogAt(d.w, d[key], x);
+      if (y === null) continue;
+      ctx.beginPath();
+      ctx.arc(px(x), py(y), 3.4, 0, Math.PI * 2);
+      if (chosen(x, ref)) { ctx.fillStyle = color; ctx.fill(); }
+      else { ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.stroke(); }
+    }
+  };
+  crossMarks(data, "mag_db", pyM, num(data.margins.wcp), "#34c759");
+  crossMarks(data, "phase_deg", pyP, num(data.margins.wcg), "#ff9500");
+
+  // 축·범례
+  ctx.strokeStyle = "#d2d2d7";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(mL, magTop, width - mL - mR, magH);
+  ctx.strokeRect(mL, phTop, width - mL - mR, phH);
+  ctx.fillStyle = "#86868b";
+  for (const t of niceTicks(m0, m1, 4)) ctx.fillText(fmtTick(t), 6, pyM(t) + 3);
+  for (const t of niceTicks(p0, p1, 4)) ctx.fillText(fmtTick(t), 6, pyP(t) + 3);
+  for (const t of decadeTicks(w0, w1)) ctx.fillText(fmtFreq(t), px(t) - 8, phTop + phH + 14);
+  ctx.fillText("ω [rad/s]", width / 2 - 22, phTop + phH + 28);
+  ctx.fillText("|L| [dB]", 6, magTop - 6);
+  ctx.fillText("∠L [deg]", 6, phTop - 6);
+  ctx.font = "600 12px -apple-system, 'Segoe UI', sans-serif";
+  ctx.fillStyle = "#1d1d1f";
+  ctx.fillText(title, mL, 16);
+  ctx.font = FONT;
+  series.forEach((s, i) => {
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = 2;
+    if (s.dash) ctx.setLineDash(s.dash);
+    ctx.beginPath();
+    ctx.moveTo(mL + 200 * i, height - 10); ctx.lineTo(mL + 200 * i + 18, height - 10);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = s.color;
+    ctx.fillText(s.label, mL + 200 * i + 22, height - 6);
+  });
   return canvas;
 }

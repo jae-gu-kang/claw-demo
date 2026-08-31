@@ -172,3 +172,104 @@ export function pivotCases(entries, fuel) {
 export function fuelsOf(entries) {
   return [...new Set(entries.map((e) => e.trim.case.fuel))].sort((a, b) => a - b);
 }
+
+// ── 마진 맵 격자 레이아웃 (views/plots.js heatmapCanvas와 **공유**) ────────
+// 그리기와 역매핑이 각자 상수를 들고 있으면 갈린다 — 갈려도 화면은 멀쩡해 보이고
+// 클릭만 한 칸씩 어긋나므로 눈에 잘 안 띈다. 한 표를 양쪽이 읽는다.
+export const HEATMAP_LAYOUT = {
+  mL: 64, mT: 28, mR: 10, mB: 34,
+  ch: 34,        // 행 높이
+  cwMax: 90,     // 열 폭 상한 — 케이스가 적으면 격자가 width를 다 채우지 않는다
+  gap: 3,        // 칸 사이 여백 (칠하는 폭은 cw-gap / ch-gap)
+};
+
+/** 마하 개수·캔버스 폭 → 열 폭. heatmapCanvas와 같은 식. */
+export function heatmapCellWidth(nMach, width) {
+  const { mL, mR, cwMax } = HEATMAP_LAYOUT;
+  return Math.min(cwMax, (width - mL - mR) / Math.max(1, nMach));
+}
+
+/** 고도 개수 → 캔버스 **논리** 높이. 클릭 역변환이 이 값을 알아야 한다 —
+ * canvas.clientHeight는 CSS로 축소된 뒤의 높이라 그걸 쓰면 y 배율이 1이 되어
+ * 좁은 화면에서 세로 좌표가 안 풀린다(app.css의 max-width·height:auto). */
+export function heatmapCanvasHeight(nAlt) {
+  const { mT, mB, ch } = HEATMAP_LAYOUT;
+  return mT + ch * nAlt + mB;
+}
+
+/** 캔버스 논리 좌표 → {mach, alt, entry} | null — 히트맵 칸 역매핑.
+ *
+ * 칸 사이 여백과 cwMax로 남는 우측 공백은 **null**이다. 가장 가까운 칸으로
+ * 끌어붙이면 사용자가 안 누른 운용점의 선도가 뜬다. `entry`는 그 좌표에 케이스가
+ * 없으면 null이지만 칸 자체는 존재하므로 mach·alt는 채워 보낸다(호출측이
+ * "빈 칸을 눌렀다"와 "격자 밖을 눌렀다"를 구분할 수 있게). */
+export function heatmapCellAt(pivot, x, y, { width = 560 } = {}) {
+  const { machs, alts } = pivot;
+  const { mL, mT, ch, gap } = HEATMAP_LAYOUT;
+  const cw = heatmapCellWidth(machs.length, width);
+  const dx = x - mL;
+  const dy = y - mT;
+  if (dx < 0 || dy < 0) return null;
+  const i = Math.floor(dx / cw);
+  const row = Math.floor(dy / ch);
+  if (i >= machs.length || row >= alts.length) return null;
+  if (dx - i * cw > cw - gap || dy - row * ch > ch - gap) return null; // 칸 사이 여백
+  const alt = alts[alts.length - 1 - row]; // 고도는 위로 증가 (heatmapCanvas와 동일)
+  const mach = machs[i];
+  return { mach, alt, entry: pivot.at(mach, alt) };
+}
+
+// ── 주파수축 (보드선도) ───────────────────────────────────────────────────
+
+/** linScale의 log10판 — 데케이드가 등간격이 된다. */
+export function logScale(d0, d1, r0, r1) {
+  const a = Math.log10(d0);
+  const k = (r1 - r0) / ((Math.log10(d1) - a) || 1);
+  return (v) => r0 + (Math.log10(v) - a) * k;
+}
+
+/** log 축 눈금 — 넓으면 10^k만, 좁으면 1·2·5×10^k까지 (선형 niceTicks의 log판). */
+export function decadeTicks(min, max) {
+  if (!(max > min)) return [min];
+  const lo = Math.floor(Math.log10(min));
+  const hi = Math.ceil(Math.log10(max));
+  const decades = [];
+  for (let k = lo; k <= hi; k += 1) decades.push(10 ** k);
+  const inRange = (t) => t >= min * (1 - 1e-12) && t <= max * (1 + 1e-12);
+  const plain = decades.filter(inRange);
+  if (plain.length >= 4) return plain;
+  const fine = [];
+  for (let k = lo; k <= hi; k += 1) for (const m of [1, 2, 5]) fine.push(m * 10 ** k);
+  const dense = fine.filter(inRange).sort((a, b) => a - b);
+  return dense.length ? dense : plain.length ? plain : [min, max];
+}
+
+/** log-x 선형보간 — xs 오름차순, ys에 null 갭 허용. 범위 밖은 가장 가까운 끝값.
+ *
+ * 보드선도 교차 마커를 **곡선 위에** 찍는 데 쓴다: 교차 위치는 _level_crossings가
+ * log-w 보간으로 찾았으므로 같은 자로 되읽어야 마커가 곡선에 앉는다. */
+export function interpLogAt(xs, ys, x) {
+  const n = xs.length;
+  if (!n) return null;
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const i = xs.findIndex((v) => v >= x);
+  if (i < 0) return num(ys[n - 1]);   // x가 마지막 표본보다 크다 — 끝값
+  if (i === 0) return num(ys[0]);
+  const a = num(ys[i - 1]), b = num(ys[i]);
+  if (a === null || b === null) return b ?? a;
+  const lo = Math.log10(xs[i - 1]), hi = Math.log10(xs[i]);
+  return a + (b - a) * ((Math.log10(x) - lo) / ((hi - lo) || 1));
+}
+
+/** 보드 응답 → 그리기용 시리즈 {w, mag, phase} — 비유한 dB는 null 갭.
+ *
+ * to_jsonable이 ±inf를 문자열 "inf"/"-inf"로, nan을 null로 보낸다. 그것을 0으로
+ * 채우면 없는 교차가 생기고 있는 교차가 사라진다 — 끊어 그린다. */
+export function bodeSeries(data) {
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return {
+    w: data.w,
+    mag: data.mag_db.map(num),
+    phase: data.phase_deg.map(num),
+  };
+}

@@ -15,14 +15,18 @@ from pydantic import BaseModel, Field, model_validator
 
 from claw.analysis import (
     aero_envelope,
+    bode_data,
     classify_lat,
     classify_lon,
     damp,
     design_envelope,
     loop_margins,
+    omega_covering,
     pi_loop,
     vn_envelope,
 )
+from claw.fcl.demo import demo_rate_filters
+from claw.pipeline.openloop import GROUP_LOOPS
 from claw.design.points import envelope_verdict
 from claw.plant import (
     make_demo_aircraft,
@@ -31,6 +35,7 @@ from claw.plant import (
     make_demo_structural_limits,
 )
 from claw.trim.trim import ALPHA_BOUNDS
+from claw.trim import trim_level
 from claw.trim import (
     LAT_INPUTS,
     LAT_STATES,
@@ -111,6 +116,40 @@ def _axis_block(model, classify_fn) -> dict:
         block["classified"] = None
         block["note"] = str(e)
     return block
+
+
+# 마진 탭 루프 → 스케줄 그룹. 대응 **선언의 정본은 pipeline.openloop.GROUP_LOOPS**
+# ("유도가 아니라 선언이다" — 그 머리말이 레이트 루프 3개가 웹 마진 탭 DEFAULT_LOOPS와
+# 정합임을 못박고 test_openloop이 핀한다). 여기서는 역인덱스만 만든다 — 대응을 다시
+# 적으면 두 곳이 갈리고, 갈려도 화면에는 그럴듯한 곡선이 나와 티가 안 난다.
+# **필터 선언은 그룹이 아니라 루프 자리에 달려 있다** — yaw_rate는 filter 항을
+# 갖고 pitch_att는 안 갖는다(openloop._effective_filter도 sp.get("filter")를 읽는다).
+# 그룹만 키로 쓰면 DEMO_PITCH에 washout_tau가 켜지는 날 **자세 루프**가 선언에 없는
+# 레이트 워시아웃을 얻고, 그 사유 문장은 사실과 반대를 말하게 된다.
+_LOOP_GROUP = {
+    (d["axis"], d["x_out"], d["u_in"]): (group, d.get("filter"))
+    for group, decls in GROUP_LOOPS.items()
+    for d in decls
+}
+
+
+def _compose_loop(model, spec, actuator, delay_s, pade_order, rate_filter=None):
+    """루프 스펙 + 작동기·지연 → 개루프 — 마진 맵과 보드선도의 **공용 조립**.
+
+    두 곳이 따로 조립하면 곡선과 클릭한 칸의 수가 어긋난다. 어긋나도 화면에는
+    둘 다 그럴듯하게 보이므로(값이 조금 다를 뿐) 조립은 한 곳에만 적는다.
+    rate_filter는 **마진 맵 경로에서 항상 None**이다 — 히트맵이 법칙의 필터를 안
+    본다는 01 §4.2 [한계]를 보드선도가 몰래 바꾸면 칸의 수와 곡선이 어긋난다.
+    보드선도는 그 차이를 없애는 대신 **두 곡선으로 보여준다**(아래 bode_endpoint).
+    """
+    return pi_loop(
+        model, x_out=spec.x_out, u_in=spec.u_in,
+        kp=spec.kp, ki=spec.ki, sign=spec.sign,
+        actuator_wn=actuator.wn if actuator else None,
+        actuator_zeta=actuator.zeta if actuator else None,
+        delay_s=delay_s, pade_order=pade_order,
+        rate_filter=rate_filter,
+    )
 
 
 def _trim_only_entry(tr) -> dict:
@@ -335,6 +374,113 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
     return job.to_dict()
 
 
+class BodeIn(BaseModel):
+    """단일 케이스·단일 루프의 보드선도 — 마진 맵 칸을 클릭했을 때의 상세.
+
+    작동기·지연을 마진 맵과 같은 계약으로 받는 이유: 조립이 다르면 곡선에서 읽는
+    값과 클릭한 칸의 수가 어긋난다. 호출측(웹)이 결과의 `actuator`/`delay_s`를
+    그대로 실어 보내는 것이 전제다.
+    """
+
+    aircraft: Literal["demo"] = "demo"
+    fingerprint: str = ""
+    case: TrimCaseIn
+    loop: LoopIn
+    actuator: ActuatorIn | None = None
+    delay_s: FiniteFloat = Field(default=0.0, ge=0.0)
+    # 상한을 두지 않는다 — MarginMapIn과 같은 계약이어야 마진 맵이 칠한 칸을 여기서
+    # 거절하는 모순이 안 생긴다. 계수가 넘치는 조합은 엔진 pi_loop이 이름으로 거절한다
+    pade_order: int = Field(default=2, ge=1)
+    n_points: int = Field(default=400, ge=50, le=2000)  # 상한 — 교차 탐색 격자 폭주 차단
+    # 마진 맵이 이미 푼 트림의 해 [α, δe, δt] — **선형화점을 같게 만드는 수단**이다.
+    # 마진 맵은 trim_batch가 직전 수렴해로 웜스타트하는데(trim.py, z0=z_prev — 웹이
+    # serpentine 순서를 쓰는 이유가 그것) 여기서 냉간으로 다시 풀면 다른 점에 앉는다.
+    # 실측: 같은 격자에서 M0.75는 마진이 어긋나고 M0.85는 **칸은 수렴인데 여기서만
+    # 미수렴**이 나 422가 된다 — 색칠된 칸이 안 열리는 모순.
+    z0: list[FiniteFloat] | None = Field(default=None, min_length=3, max_length=3)
+
+
+@router.post("/analysis/bode")
+def bode_endpoint(req: BodeIn) -> dict:
+    """개루프 보드선도 (01 §4.2) — 트림 1건이라 동기 계산.
+
+    GM과 PM은 같은 곡선의 서로 다른 자리에서 읽는 수라 히트맵 두 장으로는 둘의
+    주파수 관계가 안 보인다. 이 응답이 같은 주파수축의 이득·위상과 **교차점 전량**을
+    줘서 화면이 "보고된 마진이 어느 교차의 것인가"까지 말하게 한다 (엔진 bode_data).
+    """
+    ac = make_demo_aircraft()
+    (case,) = build_cases([req.case])
+    tr = trim_level(ac, case, z0=req.z0, fingerprint=req.fingerprint)
+    if not tr.converged:
+        # 트림이 없으면 선형화할 점이 없다 — 빈 곡선을 그려 정상인 척하지 않는다.
+        # z0를 안 받으면 냉간 트림이라 마진 맵이 웜스타트로 푼 칸에서도 여기서만
+        # 미수렴이 날 수 있다 — 그래서 호출자가 칸의 해를 씨앗으로 넘긴다
+        raise HTTPException(
+            status_code=422,
+            detail=f"트림 미수렴 ({case.name}) — 선형화점이 없어 보드선도를 낼 수 없습니다"
+            + ("" if req.z0 else " (칸의 트림 해를 z0로 넘기면 같은 점에서 풀립니다)"),
+        )
+    # 법칙이 이 자리에 실제로 가진 레이트 필터 — 있으면 두 번째 곡선으로 겹친다.
+    # 마진 맵은 이것을 정적 게인으로 보므로(01 §4.2 [한계]) 그 차이가 곧 한계의 크기다.
+    group, fdecl = _LOOP_GROUP.get((req.loop.axis, req.loop.x_out, req.loop.u_in), (None, None))
+    # 선언이 있는 자리만 법칙 값을 읽는다 — 선언이 정본이고 값은 프로파일이 준다
+    fspec = demo_rate_filters().get(group) if fdecl else None
+    if fspec is None:
+        filtered_note = (
+            # 선언이 있는데 값이 0인 것과 선언 자체가 없는 것은 다른 사실이다 —
+            # 뭉치면 읽는 사람이 이미 있는 선언을 추가하러 간다
+            (f"'{group}' 그룹의 이 자리({req.loop.x_out}←{req.loop.u_in})는 필터를"
+             " 선언하지만 이 프로파일에서 꺼져 있습니다(값 0) — 두 조립이 같습니다"
+             if fdecl else
+             f"'{group}' 그룹의 이 자리({req.loop.x_out}←{req.loop.u_in})에는 레이트 필터"
+             " 선언이 없습니다 — 두 조립이 같습니다")
+            if group else
+            f"이 루프({req.loop.axis} {req.loop.x_out}←{req.loop.u_in})에 대응하는 법칙 자리"
+            " 선언이 없어(pipeline.openloop.GROUP_LOOPS) 필터 반영 곡선을 낼 수 없습니다"
+        )
+    else:
+        filtered_note = None
+    try:
+        lon, lat = split_axes(linearize(ac, tr))
+        model = lon if req.loop.axis == "lon" else lat
+        loop = _compose_loop(model, req.loop, req.actuator, req.delay_s, req.pade_order)
+        floop = (
+            _compose_loop(model, req.loop, req.actuator, req.delay_s, req.pade_order,
+                          rate_filter=fspec)
+            if fspec else None
+        )
+        # 겹쳐 비교하려면 같은 축이어야 한다 — 워시아웃 코너처럼 한쪽에만 있는 극이
+        # 다른 쪽 범위 밖으로 나가면 그 교차를 통째로 놓친다
+        w = omega_covering(*( [loop, floop] if floop else [loop] ), n_points=req.n_points)
+        data = bode_data(loop, w=w)
+        filtered = {**bode_data(floop, w=w), "filter": fspec} if floop else None
+    except (ValueError, ArithmeticError) as e:
+        # LinAlgError는 ValueError지만 **ZeroDivisionError는 아니다** — 고차 Padé에서
+        # 분모 선두 계수가 0으로 내려앉으면 control이 나눗셈을 하고, 그것이 그대로
+        # 500으로 샌다(사유도 힌트도 없이). ArithmeticError로 함께 잡는다.
+        # 날것의 numpy 문장("Array must not contain
+        # infs or NaNs")을 그대로 내보내면 사용자가 자기 입력이 잘못됐다고 읽는다.
+        # 실제 원인은 delay_s·pade_order 조합이 커서 근 계산이 넘친 것이고(실측:
+        # 0.001 s·20차는 죽고 0.01 s·20차는 산다), 그 조합은 마진 맵도 못 푼다
+        detail = str(e)
+        if req.delay_s > 0.0 and req.pade_order > 8:
+            detail += (
+                f" — delay_s {req.delay_s} s와 pade_order {req.pade_order}의 조합이"
+                " 커서 Padé 계수의 근 계산이 넘쳤을 수 있습니다 (차수를 낮춰 보세요)"
+            )
+        raise HTTPException(status_code=422, detail=detail)
+    return to_jsonable({
+        **data,
+        "filtered": filtered,
+        "filtered_note": filtered_note,
+        "trim": trim_result_dict(tr),
+        "loop": req.loop.model_dump(),
+        "actuator": req.actuator.model_dump() if req.actuator else None,
+        "delay_s": req.delay_s,
+        "pade_order": req.pade_order,
+    })
+
+
 @router.post("/analysis/margin-map", status_code=202)
 def submit_margin_map(req: MarginMapIn, request: Request, response: Response) -> dict:
     ac = make_demo_aircraft()
@@ -367,15 +513,12 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                     entry["lat"] = _axis_block(lat, classify_lat)
                     for spec in req.loops:
                         model = lon if spec.axis == "lon" else lat
-                        loop = pi_loop(
-                            model, x_out=spec.x_out, u_in=spec.u_in,
-                            kp=spec.kp, ki=spec.ki, sign=spec.sign,
-                            actuator_wn=req.actuator.wn if req.actuator else None,
-                            actuator_zeta=req.actuator.zeta if req.actuator else None,
-                            delay_s=req.delay_s, pade_order=req.pade_order,
-                        )
+                        loop = _compose_loop(
+                            model, spec, req.actuator, req.delay_s, req.pade_order)
                         entry["margins"][spec.name] = to_jsonable(loop_margins(loop))
-                except ValueError as e:  # 케이스별 해석 실패 — 전량 소실 대신 데이터로
+                except (ValueError, ArithmeticError) as e:
+                    # 케이스별 해석 실패 — 전량 소실 대신 데이터로. ArithmeticError는
+                    # 고차 Padé의 ZeroDivisionError 몫이다(보드선도 라우트와 같은 이유)
                     entry["note"] = str(e)
             entries.append(entry)
             job.report(n + i + 1, total, message=f"해석: {tr.case.name}")

@@ -599,3 +599,98 @@ def test_pi_loop_filter_is_opt_in(lon_lat):
     assert control.evalfr(wo, at) == pytest.approx(
         control.evalfr(base, at) * control.evalfr(filter_tf({"kind": "washout", "tau": 2.0}), at)
     )
+
+
+def test_bode_data_textbook_and_reuses_loop_margins():
+    """보드선도 데이터 (01 §4.2) — 교과서 대조 + 마진 정본 재사용.
+
+    GM과 PM은 같은 곡선의 서로 다른 자리에서 읽는 수다: PM은 |L|=0 dB인 wcp의
+    위상, GM은 ∠L=−180°인 wcg의 이득. 두 자리가 실제로 그 값을 갖는지 곡선에서
+    직접 확인한다 (마진 수치는 loop_margins가 정본이라 재계산하지 않는다).
+    """
+    from claw.analysis import bode_data, loop_margins
+
+    s = control.tf("s")
+    loop = 10.0 / (s * (s + 1.0) * (s + 5.0))  # 교과서 gm=3(9.54 dB), wcg=√5
+    b = bode_data(loop)
+    assert b["margins"] == loop_margins(loop)  # 재계산 금지 — 정본 그대로
+    n = len(b["w"])
+    assert n > 50 and len(b["mag_db"]) == n and len(b["phase_deg"]) == n
+    assert all(b["w"][i] < b["w"][i + 1] for i in range(n - 1))  # 단조 증가
+
+    m = b["margins"]
+    assert m["wcg"] == pytest.approx(math.sqrt(5.0), rel=1e-6)
+    assert m["gm_db"] == pytest.approx(20.0 * math.log10(3.0), rel=1e-9)
+    # 교차 주파수가 실제로 그 자리인지 곡선에서 역확인
+    assert min(abs(x - m["wcp"]) for x in b["crossings"]["gain"]) < 1e-2 * m["wcp"]
+    assert min(abs(x - m["wcg"]) for x in b["crossings"]["phase"]) < 1e-2 * m["wcg"]
+    # wcg에서의 이득이 곧 −GM (부호 규약 확인)
+    mag_at_wcg = float(np.interp(m["wcg"], b["w"], b["mag_db"]))
+    assert mag_at_wcg == pytest.approx(-m["gm_db"], abs=0.15)
+
+
+def test_bode_data_surfaces_every_crossing_not_just_the_chosen_one():
+    """다중 0 dB 교차를 전량 낸다 — control.margin은 그중 하나만 골라 답한다.
+
+    01 §4.2에 기록된 사례: 요축 워시아웃을 반영하자 yaw_rate 마진이 91.4° →
+    −86.7°로 튀었는데 그것은 개선이 아니라 다중 교차 중 선택이 바뀐 것이었다.
+    보드선도의 존재 이유가 그 구분이므로, 교차를 하나로 줄이면 안 된다.
+    """
+    from claw.analysis import bode_data
+
+    s = control.tf("s")
+    loop = (8.0 * (s * s + 2 * 0.03 * 2.0 * s + 4.0)
+            / ((s + 0.5) * (s * s + 2 * 0.6 * 2.0 * s + 4.0) * (s / 8.0 + 1.0)))
+    b = bode_data(loop, n_points=800)
+    gains = b["crossings"]["gain"]
+    assert len(gains) == 3, gains  # margin이 고르는 것은 이 중 하나뿐
+    assert min(abs(x - b["margins"]["wcp"]) for x in gains) < 1e-2 * b["margins"]["wcp"]
+    # 교차마다 실제로 0 dB를 지나는지 곡선에서 확인
+    for x in gains:
+        assert abs(float(np.interp(x, b["w"], b["mag_db"]))) < 0.5
+
+
+def test_bode_data_finds_crossings_at_wrapped_phase_levels():
+    """−180뿐 아니라 −180±360k 교차도 낸다 — 준위 하나만 보면 통째로 놓친다.
+
+    고차 지연이 붙으면 위상이 −180을 지나 −540까지 내려간다. 그 두 번째 교차도
+    이득 여유를 읽을 수 있는 자리이고, 화면이 마커를 찍는 근거다.
+    """
+    from claw.analysis import bode_data
+
+    s = control.tf("s")
+    num, den = control.pade(0.3, 6)
+    loop = 2.0 / (s + 1.0) * control.tf(num, den)  # 큰 지연 → 위상이 여러 바퀴 감긴다
+    b = bode_data(loop, n_points=1200)
+    assert min(b["phase_deg"]) < -540.0, min(b["phase_deg"])  # 픽스처 전제 확인
+    lv = [round(float(np.interp(x, b["w"], b["phase_deg"]))) for x in b["crossings"]["phase"]]
+    assert any(abs(v + 180) <= 2 for v in lv), lv   # −180 교차
+    assert any(abs(v + 540) <= 2 for v in lv), lv   # −540 교차도 잡힌다
+
+
+def test_omega_covering_spans_every_loop_it_is_given():
+    """여러 루프를 받으면 **합집합**을 덮는다 — 겹쳐 비교하려면 축이 같아야 한다.
+
+    한쪽에만 있는 극(필터 코너 등)이 다른 쪽 범위 밖으로 나가면 그 교차를 통째로
+    놓친다. 데모 워시아웃은 기저 루프 범위 안이라 이 성질이 그 픽스처로는 안 드러난다.
+    """
+    from claw.analysis import omega_covering
+
+    s = control.tf("s")
+    slow = 1.0 / (s + 1e-3)      # 극 0.001 — 저주파 쪽
+    fast = 1.0 / (s + 1e4)       # 극 10000 — 고주파 쪽
+    w_slow, w_fast = omega_covering(slow), omega_covering(fast)
+    both = omega_covering(slow, fast)
+    assert both[0] <= min(w_slow[0], w_fast[0]) and both[-1] >= max(w_slow[-1], w_fast[-1])
+    assert both[0] < w_fast[0] and both[-1] > w_slow[-1]  # 각자 범위보다 실제로 넓다
+
+
+def test_level_crossings_does_not_multiply_a_tangency():
+    """준위에 딱 앉은 표본이 이어져도 교차는 하나다 — 표본 수만큼 세지 않는다.
+
+    순수 이득 루프가 0 dB에 놓이면 격자점마다 교차가 나 400점에서 399개가 되던 자리.
+    """
+    from claw.analysis import bode_data
+
+    b = bode_data(control.tf([1.0], [1.0]), n_points=400)  # |L| = 0 dB 전 구간
+    assert len(b["crossings"]["gain"]) == 1, len(b["crossings"]["gain"])

@@ -9,7 +9,15 @@ import {
   fuelsOf,
   gainPlotGroups,
   gmColor,
+  HEATMAP_LAYOUT,
+  bodeSeries,
+  decadeTicks,
+  heatmapCanvasHeight,
+  heatmapCellAt,
+  heatmapCellWidth,
+  interpLogAt,
   linScale,
+  logScale,
   marginColor,
   marginLegendText,
   niceTicks,
@@ -214,4 +222,116 @@ test("planeViews: 연직축 라벨에 부호 규약 명시 (D 하방 양 → h =
   const views = planeViews(SIG);
   for (const v of views.slice(1)) assert.match(v.yLabel, /−D/);
   assert.equal(views[0].yLabel, "N [m]"); // N–E 평면에는 붙지 않음
+});
+
+// ── 마진 맵 칸 클릭 → 보드선도 드릴다운 (01 §4.2) ──────────────────────────
+
+const cellEntry = (mach, alt) => ({
+  trim: { case: { name: `M${mach}_h${alt}`, mach, alt, fuel: 200 }, converged: true },
+  margins: {},
+});
+const gridPivot = () => pivotCases(
+  [cellEntry(0.5, 0), cellEntry(0.6, 0), cellEntry(0.5, 3000), cellEntry(0.6, 3000)], 200);
+
+test("heatmapCellAt — 칸 중앙이 그 칸, 고도축은 위가 큰 값", () => {
+  const p = gridPivot();
+  const { mL, mT, ch } = HEATMAP_LAYOUT;
+  const cw = heatmapCellWidth(p.machs.length, 560);
+  // 위쪽 행 = 큰 고도 (heatmapCanvas가 alts를 뒤집어 그린다)
+  const top = heatmapCellAt(p, mL + cw / 2, mT + ch / 2, { width: 560 });
+  assert.equal(top.mach, 0.5);
+  assert.equal(top.alt, 3000);
+  assert.equal(top.entry.trim.case.name, "M0.5_h3000");
+  const bottomRight = heatmapCellAt(p, mL + cw + cw / 2, mT + ch + ch / 2, { width: 560 });
+  assert.equal(bottomRight.mach, 0.6);
+  assert.equal(bottomRight.alt, 0);
+});
+
+test("heatmapCellAt — 칸 사이 여백은 null (가까운 칸으로 끌어붙이지 않는다)", () => {
+  const p = gridPivot();
+  const { mL, mT, ch } = HEATMAP_LAYOUT;
+  const cw = heatmapCellWidth(p.machs.length, 560);
+  // 셀은 cw-3 / ch-3만 칠해진다 — 그 뒤 3 px는 어느 칸도 아니다
+  assert.equal(heatmapCellAt(p, mL + cw - 1.5, mT + ch / 2, { width: 560 }), null);
+  assert.equal(heatmapCellAt(p, mL + cw / 2, mT + ch - 1.5, { width: 560 }), null);
+});
+
+test("heatmapCellAt — 격자 밖·좌측 라벨·cw 상한 우측 여백은 전부 null", () => {
+  const p = gridPivot();
+  const { mL, mT, ch } = HEATMAP_LAYOUT;
+  const cw = heatmapCellWidth(p.machs.length, 560);
+  assert.equal(heatmapCellAt(p, mL - 10, mT + ch / 2, { width: 560 }), null); // 고도 라벨
+  assert.equal(heatmapCellAt(p, mL + cw / 2, mT - 5, { width: 560 }), null); // 제목
+  assert.equal(heatmapCellAt(p, mL + cw / 2, mT + 2 * ch + 5, { width: 560 }), null); // 마하 라벨
+  // cw가 90에서 잘려 격자가 width를 다 못 채운다 — 그 우측 여백도 칸이 아니다
+  assert.equal(cw, 90);
+  assert.equal(heatmapCellAt(p, mL + 2 * cw + 20, mT + ch / 2, { width: 560 }), null);
+});
+
+test("heatmapCellAt — 좌표에 케이스가 없으면 entry는 null (칸 자체는 있다)", () => {
+  const p = pivotCases([cellEntry(0.5, 0), cellEntry(0.6, 3000)], 200);
+  const { mL, mT, ch } = HEATMAP_LAYOUT;
+  const cw = heatmapCellWidth(p.machs.length, 560);
+  const hole = heatmapCellAt(p, mL + cw / 2, mT + ch / 2, { width: 560 }); // M0.5 @ 3000 없음
+  assert.equal(hole.entry, null);
+  assert.equal(hole.mach, 0.5);
+});
+
+test("logScale — 데케이드가 등간격, 양끝이 range 끝", () => {
+  const px = logScale(0.01, 100, 0, 400);
+  assert.equal(px(0.01), 0);
+  assert.equal(px(100), 400);
+  assert.ok(Math.abs(px(1) - 200) < 1e-9);
+  // 한 데케이드의 폭이 일정 — log 축의 정의
+  assert.ok(Math.abs((px(1) - px(0.1)) - (px(10) - px(1))) < 1e-9);
+});
+
+test("decadeTicks — 구간을 덮는 10^k, 좁은 구간은 1·2·5 보조", () => {
+  assert.deepEqual(decadeTicks(0.01, 100), [0.01, 0.1, 1, 10, 100]);
+  const narrow = decadeTicks(1, 5);
+  assert.ok(narrow.length >= 3, narrow);
+  assert.ok(narrow.every((t) => t >= 1 && t <= 5), narrow);
+  assert.deepEqual(decadeTicks(5, 5), [5]); // 폭 0 — 한 점
+});
+
+test("bodeSeries — 비유한 dB는 갭(null), 숫자인 척 0으로 채우지 않는다", () => {
+  const s = bodeSeries({
+    w: [1, 2, 3, 4],
+    mag_db: [10, "-inf", null, -5],
+    phase_deg: [-90, -120, -170, -200],
+  });
+  assert.deepEqual(s.mag, [10, null, null, -5]);
+  assert.deepEqual(s.phase, [-90, -120, -170, -200]);
+  assert.deepEqual(s.w, [1, 2, 3, 4]);
+});
+
+test("heatmapCanvasHeight — 그리기와 클릭 역변환이 같은 논리 높이를 쓴다", () => {
+  const { mT, mB, ch } = HEATMAP_LAYOUT;
+  assert.equal(heatmapCanvasHeight(3), mT + 3 * ch + mB);
+  assert.equal(heatmapCanvasHeight(0), mT + mB);
+  // 마지막 행의 아래 끝이 격자 안이어야 한다 — 높이가 짧으면 맨 아래 행이 안 잡힌다
+  const p = gridPivot();
+  const h = heatmapCanvasHeight(p.alts.length);
+  const cw = heatmapCellWidth(p.machs.length, 560);
+  const last = heatmapCellAt(p, mL0() + cw / 2, h - mB - 4, { width: 560 });
+  assert.notEqual(last, null);
+  assert.equal(last.alt, 0); // 맨 아래 행 = 가장 낮은 고도
+});
+
+function mL0() { return HEATMAP_LAYOUT.mL; }
+
+test("interpLogAt — log-x 보간, 범위 밖은 가장 가까운 끝값, null은 이웃값", () => {
+  const xs = [1, 10, 100];
+  const ys = [0, -20, -40];
+  assert.equal(interpLogAt(xs, ys, 1), 0);
+  assert.equal(interpLogAt(xs, ys, 100), -40);
+  assert.ok(Math.abs(interpLogAt(xs, ys, Math.sqrt(10)) - -10) < 1e-9); // 데케이드 중앙
+  // 범위 밖 — findIndex가 -1을 내는 자리를 첫 표본으로 접으면 곡선 반대쪽 값이 나온다
+  assert.equal(interpLogAt(xs, ys, 1000), -40);
+  assert.equal(interpLogAt(xs, ys, 0.1), 0);
+  // null 갭은 **알려진 쪽 이웃값**으로 (0으로 채우지 않는다). x=5는 (0, null)
+  // 사이라 왼쪽 0, x=50은 (null, -40) 사이라 오른쪽 -40
+  assert.equal(interpLogAt(xs, [0, null, -40], 5), 0);
+  assert.equal(interpLogAt(xs, [0, null, -40], 50), -40);
+  assert.equal(interpLogAt([], [], 1), null);
 });

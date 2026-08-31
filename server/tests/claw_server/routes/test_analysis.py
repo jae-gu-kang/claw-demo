@@ -375,3 +375,128 @@ def test_margin_map_cancel_preserves_trim_results(client, wait_job, monkeypatch)
     entry = body["cases"][0]
     assert entry["trim"]["converged"] is True
     assert entry["lon"] is None and entry["margins"] == {}
+
+
+_BODE_CASE = {"name": "", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}
+_YAW_LOOP = {"name": "yaw_rate", "axis": "lat", "x_out": "r", "u_in": "dr",
+             "kp": 0.8, "ki": 0.0, "sign": -1.0}
+_PITCH_LOOP = {"name": "pitch_rate", "axis": "lon", "x_out": "q", "u_in": "de",
+               "kp": 0.5, "ki": 0.0, "sign": -1.0}
+
+
+def test_bode_opens_every_converged_cell_and_agrees_with_it(client, wait_job):
+    """수렴한 칸은 **전부** 열리고 마진이 칸과 일치한다 — 격자 여러 칸으로 본다.
+
+    마진 맵은 `trim_batch`가 직전 수렴해로 웜스타트한다(웹이 serpentine 순서를 쓰는
+    이유). 드릴다운이 냉간으로 다시 풀면 다른 선형화점에 앉아, 색칠된 칸이 **여기서만
+    미수렴**이 나 422가 되기도 한다 — 실측으로 M0.85가 그랬다. 그래서 호출자가 칸의
+    트림 해를 z0로 넘긴다. 한 칸짜리 격자로는 z_prev가 None이라 두 경로가 똑같이
+    냉간 트림을 해서 이 결함이 안 보인다 — 격자를 여럿으로 두는 것이 이 테스트의 요점.
+    """
+    act = {"wn": 30.0, "zeta": 0.7}
+    cases = [{"name": "", "mach": m, "alt": 0.0, "fuel": 200.0} for m in (0.65, 0.75, 0.85)]
+    mm = client.post("/api/analysis/margin-map", json={
+        "cases": cases, "loops": [_PITCH_LOOP], "actuator": act, "delay_s": 0.035})
+    assert mm.status_code == 202
+    job = wait_job(mm.json()["id"])
+    entries = client.get(f"/api/results/{job['result_id']}").json()["cases"]
+    assert sum(e["trim"]["converged"] for e in entries) >= 3  # 픽스처 전제
+
+    for e in entries:
+        t = e["trim"]
+        z0 = [t["euler"][1], t["control"]["elevon"][0], t["control"]["throttle"][0]]
+        b = client.post("/api/analysis/bode", json={
+            "case": t["case"], "loop": _PITCH_LOOP, "actuator": act,
+            "delay_s": 0.035, "z0": z0})
+        assert b.status_code == 200, f"{t['case']['name']}: {b.json()}"
+        got, want = b.json()["margins"], e["margins"]["pitch_rate"]
+        # 같은 선형화점이므로 일치한다. 재풀이라 비트일치는 보장하지 않는다 —
+        # 보장한다고 적으면 지키지 못할 약속이 된다
+        for k in ("pm_deg", "wcp"):
+            assert got[k] == pytest.approx(want[k], rel=1e-6, abs=1e-9), (k, t["case"]["name"])
+    # z0 없이 부르면 냉간 트림이라 열리지 않을 수 있다 — 사유에 그 수단을 적어 준다
+    cold = client.post("/api/analysis/bode", json={
+        "case": entries[-1]["trim"]["case"], "loop": _PITCH_LOOP,
+        "actuator": act, "delay_s": 0.035})
+    if cold.status_code == 422:
+        assert "z0" in cold.json()["detail"]
+
+
+def test_bode_overlays_the_law_rate_filter_where_the_law_has_one(client):
+    """법칙에 필터가 있는 자리는 두 곡선, 없는 자리는 사유 문장.
+
+    마진 맵은 요축 워시아웃을 정적 게인으로 본다(01 §4.2 [한계]). 보드선도는 그
+    한계를 없애는 대신 두 조립을 겹쳐 **차이의 크기를 보여준다** — 조용히 한 곡선만
+    그리면 "이 자리엔 필터가 없다"와 "대응을 못 찾았다"가 구분되지 않는다.
+    """
+    body = {"case": _BODE_CASE, "loop": _YAW_LOOP}
+    b = client.post("/api/analysis/bode", json=body).json()
+    f = b["filtered"]
+    assert f is not None and b["filtered_note"] is None
+    assert f["filter"] == {"kind": "washout", "tau": 2.0}  # fcl.demo 정본
+    assert f["margins"] != b["margins"]  # 필터가 실제로 마진을 움직인다
+    assert f["w"] == b["w"]  # 같은 축이라야 겹쳐 비교가 성립
+    # 필터 없는 자리는 거부가 아니라 사유
+    p = client.post("/api/analysis/bode",
+                    json={"case": _BODE_CASE, "loop": _PITCH_LOOP}).json()
+    assert p["filtered"] is None and "선언이 없습니다" in p["filtered_note"]
+    # 선언은 **그룹이 아니라 루프 자리**에 달려 있다 — 같은 yaw 그룹이라도 선언이
+    # 없는 자리는 필터를 받으면 안 된다 (그룹만 키로 쓰면 자세 루프가 레이트
+    # 워시아웃을 얻는 날이 온다). 요축 자세 자리는 GROUP_LOOPS에 선언이 없다
+    yaw_att = {"name": "yaw_att", "axis": "lat", "x_out": "phi", "u_in": "dr",
+               "kp": 0.4, "ki": 0.0, "sign": -1.0}
+    ya = client.post("/api/analysis/bode",
+                     json={"case": _BODE_CASE, "loop": yaw_att}).json()
+    assert ya["filtered"] is None
+    # GROUP_LOOPS에 선언이 없는 자리(v←dr — 사이드슬립 루프는 선언 안 됨)는
+    # "필터가 없다"가 아니라 "대응을 못 찾았다"여야 한다 — 두 경우는 다른 사실이다
+    undeclared = {"name": "sideslip", "axis": "lat", "x_out": "v", "u_in": "dr",
+                  "kp": 0.3, "ki": 0.0, "sign": -1.0}
+    a = client.post("/api/analysis/bode",
+                    json={"case": _BODE_CASE, "loop": undeclared}).json()
+    assert a["filtered"] is None
+    assert "대응하는 법칙 자리" in a["filtered_note"]
+    assert a["filtered_note"] != p["filtered_note"]
+
+
+def test_bode_and_margin_map_agree_on_what_is_computable(client):
+    """마진 맵이 받는 pade_order는 보드선도도 받는다 — 상한이 갈리면 모순이 난다.
+
+    한쪽에만 상한을 두면 **마진 맵이 칠한 칸을 드릴다운이 거절**한다(z0 씨앗이
+    없애려던 바로 그 모순이 다른 문으로 되돌아온다). 실제 실패 조건은 차수 하나가
+    아니라 delay_s×pade_order 조합이라 상수 상한으로는 표현되지 않는다.
+    """
+    case = dict(_BODE_CASE)
+    for order in (2, 20, 21):
+        mm = client.post("/api/analysis/margin-map", json={
+            "cases": [case], "loops": [_PITCH_LOOP], "delay_s": 0.035, "pade_order": order})
+        bd = client.post("/api/analysis/bode", json={
+            "case": case, "loop": _PITCH_LOOP, "delay_s": 0.035, "pade_order": order})
+        assert mm.status_code == 202 and bd.status_code == 200, (order, bd.status_code)
+    # 계수가 넘치는 조합은 사유가 파라미터를 지목한다 — 날것의 numpy 문장만 내보내면
+    # 사용자가 자기 입력 형식이 틀렸다고 읽는다
+    over = client.post("/api/analysis/bode", json={
+        "case": case, "loop": _PITCH_LOOP, "delay_s": 0.035, "pade_order": 60})
+    assert over.status_code == 422
+    assert "pade_order" in over.json()["detail"] and "delay_s" in over.json()["detail"]
+    # 더 높은 차수는 control 내부에서 0으로 나눈다 — ZeroDivisionError는 ValueError가
+    # 아니라서 잡지 않으면 사유도 없는 500으로 샌다 (공개 동기 엔드포인트)
+    for order in (95, 200):
+        r = client.post("/api/analysis/bode", json={
+            "case": case, "loop": _PITCH_LOOP, "delay_s": 0.035, "pade_order": order})
+        assert r.status_code == 422, (order, r.status_code)
+        assert "pade_order" in r.json()["detail"]
+
+
+def test_bode_refuses_what_it_cannot_linearize(client):
+    """트림이 없으면 선형화점이 없다 — 빈 곡선을 그려 정상인 척하지 않는다."""
+    bad = client.post("/api/analysis/bode", json={
+        "case": {"name": "", "mach": 0.02, "alt": 18000.0, "fuel": 400.0},
+        "loop": _PITCH_LOOP})
+    assert bad.status_code == 422 and "트림 미수렴" in bad.json()["detail"]
+    # 축에 없는 상태·입력은 엔진 축 이름 검증이 잡는다 (마진 맵과 같은 계약)
+    assert client.post("/api/analysis/bode", json={
+        "case": _BODE_CASE, "loop": {**_PITCH_LOOP, "x_out": "phi"}}).status_code == 422
+    # n_points 상한 — 교차 탐색 격자 폭주 차단
+    assert client.post("/api/analysis/bode", json={
+        "case": _BODE_CASE, "loop": _PITCH_LOOP, "n_points": 99999}).status_code == 422
