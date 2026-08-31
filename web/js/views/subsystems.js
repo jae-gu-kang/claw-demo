@@ -671,6 +671,8 @@ export const SUBSYSTEMS = {
   <li>도달 반경 진입 시 다음 웨이포인트 — <b>반경 내 연쇄 스킵</b> 허용 (while) · 도달반경 accept_radius — <b>엔진 기본값 200 m</b> <span class="chip dft">기본값</span>이지만 <b>시뮬 탭 폼 기본값은 1500 m</b>다(데모 미션 스케일에 맞춘 값, 웹이 항상 명시 전송). 세로 프로파일의 램프 마루와 새 웨이포인트의 "원점 판정"도 이 값을 쓴다 — 편집은 시뮬 탭 미션 그룹</li>
   <li>소진 안전: 헤딩을 한 번도 계산하기 전 소진(빈 목록·반경 내 시작)이면 정북(0)이 아닌 <b>현재 침로</b>를 명령 — 조용한 급선회 방지 <span class="chip ok">확정</span></li>
   <li>웨이포인트는 <span class="mono">(n, e)</span> 또는 <span class="mono">(n, e, alt)</span>[m] — 고도를 주면 <b>경로가 세로 프로파일도 낸다</b>(구간 선형, 램프는 도달 반경 경계에서 종료). 모드가 <span class="mono">alt="path"</span>일 때만 쓰이므로 <b>heading과 같은 규약</b>이고, 그래서 "경로와 모드 중 누가 이기나"라는 우선순위 규칙이 따로 없다. 속도는 모드 소관 <span class="chip ok">확정</span></li>
+  <li><b>종방향 지령은 고도·피치·강하율 중 하나</b> — 셋 다 θ 명령으로 가므로 둘을 켜면 화면이 "무엇이 먹었는지"를 말할 수 없다. 우선순위를 두는 대신 <b>모드 구성 시점에 거부</b>한다(<span class="mono">validate_longitudinal</span>) — 위 "축마다 출처를 고른다"를 검증으로 못박은 것 <span class="chip ok">확정</span></li>
+  <li>이탈 조건에 강하율(<span class="mono">hdot_ge/le</span>)·접지(<span class="mono">on_ground/airborne</span>)·레일 이탈(<span class="mono">off_rail</span>). 뒤 넷은 <b>항법에 없는 정보</b>라 시뮬이 착륙장치·레일에서 읽어 넣는다 — 그 형상이 아니면 <b>판정 불가</b>로 멈춘다(False로 눙치면 모드가 조용히 그 자리에 선다). <span class="mono">airborne</span>은 <b>레일 이탈이 아니다</b>: 레일이 받치는 동안 기어는 닿지 않아 t=0부터 참이다 <span class="chip ok">확정</span></li>
 </ul>`,
       },
       modes: {
@@ -1009,6 +1011,7 @@ export const SUBSYSTEMS = {
   <li>실속: <b>명시적 실속 경계 테이블</b> <span class="mono">α_stall = f(Mach, 형상조건)</span> — 공력팀 정본 <span class="chip ok">확정</span></li>
   <li>환경: WGS-84, ISA <span class="chip ok">확정</span> (바람/난류 Dryden은 추후 확장) · RK4 dt 10 ms <span class="chip ok">확정 02 §6</span></li>
   <li>공력·추진·6DOF·질량특성 내부는 블록 클릭 — 층3</li>
+  <li><b>지면(스키드 접촉·발사 레일)</b>은 선택 항목 — 활주로를 켠 런에서만 붙는다. 접촉은 <span class="mono">fm</span>의 네 번째 항(공력+추진+중력에 이어)이고 <b>착륙장치의 M += r×F가 여기서 처음 실제로 걸린다</b>. 레일은 힘이 아니라 <b>구속</b>이라 RK4를 타지 않고 등가속 해석해로 전진한다. 공력 DB 기준점 이전은 규격 미확정이라 여전히 <span class="chip tbd">TBD</span></li>
 </ul>
 <h4>설계 1단계 — 트림 · 선형해석</h4>
 <ul>
