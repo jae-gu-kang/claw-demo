@@ -43,6 +43,9 @@ class Autopilot(Block):
         ParamDef("kp_hdg", 4.0, "-", "헤딩 비례 게인"),
         ParamDef("ki_hdg", 0.0, "1/s", "헤딩 적분 게인"),
         ParamDef("tau_hdg", 1.0, "s", "헤딩 명령필터 시정수", lo=0.0),
+        ParamDef("kp_vs", 0.02, "rad·s/m", "승강률 비례 게인"),
+        ParamDef("ki_vs", 0.005, "rad/m", "승강률 적분 게인"),
+        ParamDef("tau_vs", 2.0, "s", "승강률 명령필터 시정수", lo=0.0),
         ParamDef("theta_lo", -0.3, "rad", "피치 명령 하한"),
         ParamDef("theta_hi", 0.3, "rad", "피치 명령 상한"),
         ParamDef("phi_max", 0.7, "rad", "뱅크 명령 한계 (π/2 미만 — 선회 FF 부호 보전)", lo=0.0, hi=1.5),
@@ -62,6 +65,11 @@ class Autopilot(Block):
         kp_hdg: float = 4.0,
         ki_hdg: float = 0.0,
         tau_hdg: float = 1.0,
+        # 승강률 축 [기본값] — 오차 [m/s] → θ [rad]. 접근 −4.8에서 접지 −1.0으로
+        # 세우려면 오차 3.8 m/s에 θ +0.076 rad(4.4°)이 붙는 크기다. 튜닝 대상.
+        kp_vs: float = 0.02,
+        ki_vs: float = 0.005,
+        tau_vs: float = 2.0,
         theta_lo: float = -0.3,
         theta_hi: float = 0.3,
         phi_max: float = 0.7,
@@ -80,6 +88,7 @@ class Autopilot(Block):
             "kp_spd": kp_spd, "ki_spd": ki_spd, "tau_spd": tau_spd,
             "kp_alt": kp_alt, "ki_alt": ki_alt, "k_hdot": k_hdot, "tau_alt": tau_alt,
             "kp_hdg": kp_hdg, "ki_hdg": ki_hdg, "tau_hdg": tau_hdg,
+            "kp_vs": kp_vs, "ki_vs": ki_vs, "tau_vs": tau_vs,
             "theta_lo": theta_lo, "theta_hi": theta_hi, "phi_max": phi_max,
             "k_pitch_turn": k_pitch_turn, "k_thr_turn": k_thr_turn,
         }
@@ -119,7 +128,9 @@ class Autopilot(Block):
             psi=float(psi), h=-float(nav.pos_n[2]), hdot=-float(nav.vel_n[2]), V=V,
             cmd_heading=float(cmd.heading), cmd_alt=float(cmd.alt),
             cmd_speed=float(cmd.speed),
+            cmd_pitch=float(cmd.pitch), cmd_hdot=float(cmd.hdot),
             heading_on=float(bool(cmd.heading_on)), alt_on=float(bool(cmd.alt_on)),
-            speed_on=float(bool(cmd.speed_on)), **ports,
+            speed_on=float(bool(cmd.speed_on)), pitch_on=float(bool(cmd.pitch_on)),
+            hdot_on=float(bool(cmd.hdot_on)), **ports,
         )
         return o["theta_cmd"], o["phi_cmd"], o["throttle"]

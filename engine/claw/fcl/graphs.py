@@ -22,7 +22,7 @@
 `Function packaging: Nonreusable function`에 해당한다.
 """
 
-from claw.blocks.basic import Gain, Product, Saturation, Sum
+from claw.blocks.basic import Gain, Product, Saturation, Sum, Switch
 from claw.blocks.controllers import PID
 from claw.blocks.filters import CommandFilter, Washout
 from claw.blocks.lookup import LookupBlock, PolyBlock
@@ -273,6 +273,7 @@ def autopilot_nodes(
     kp_spd, ki_spd, tau_spd,
     kp_alt, ki_alt, k_hdot, tau_alt,
     kp_hdg, ki_hdg, tau_hdg,
+    kp_vs, ki_vs, tau_vs,
     theta_lo, theta_hi, phi_max,
     k_pitch_turn, k_thr_turn,
 ):
@@ -344,6 +345,40 @@ def autopilot_nodes(
     )
     nodes += alt_nodes
 
+    # ── 승강률 축: 고도와 같은 구조, 물리량만 다르다 (ḣ_ref − ḣ) PI → θ ──
+    # 접근 강하율·플레어처럼 "어느 고도"가 아니라 "얼마나 빨리 내려가는가"를 잡아야
+    # 하는 구간용이다. 고도축과 같은 θ 한계로 포화한다.
+    vs_en = {"enable": srcs["hdot_on"]}
+    nodes += [
+        Node(nm("fvs"), CommandFilter, inputs=(srcs["cmd_hdot"], srcs["hdot"]),
+             params={"tau": tau_vs}, on_disable={"x": srcs["hdot"]}, **vs_en),
+        Node(nm("vs_err"), Sum, inputs=(nm("fvs"), srcs["hdot"]),
+             params={"signs": (1.0, -1.0)}, **vs_en),
+    ]
+    # 승강률 축은 게인 스케줄 자리로 열지 않는다 — SCHEDULABLE을 늘리면 서버
+    # 자리 목록·웹 UI·탑재 코드까지 파급된다. 필요해지면 그때 한 번에 연다.
+    vs_nodes, vs_axis = scas_axis_nodes(
+        nm("vs"), kp=kp_vs, ki=ki_vs, k_rate=0.0, out_lo=theta_lo, out_hi=theta_hi,
+        err_src=nm("vs_err"),
+    )
+    nodes += vs_nodes
+
+    # ── θ 출처 선택: pitch > hdot > alt ──
+    # 셋은 **배타**라(모드 구성 시 validate_longitudinal이 거부) 순서가 우선순위가
+    # 아니라 단순 선택이다. 셋 다 꺼지면 고도축이 남아 오차 0을 물고 트림 θ를
+    # 유지한다 — 종전 alt_on=False 거동 그대로다.
+    # 피치 축은 PI가 없다: θ를 직접 지령하는 것이라 통과시키고 축 한계로만 자른다.
+    nodes += [
+        Node(nm("pitch_sat"), Saturation, inputs=(srcs["cmd_pitch"],),
+             params={"lo": theta_lo, "hi": theta_hi}),
+        Node(nm("theta_vs"), Switch, inputs=(vs_axis, srcs["hdot_on"], theta_axis),
+             params={"threshold": 0.5}),
+        Node(nm("theta_src"), Switch,
+             inputs=(nm("pitch_sat"), srcs["pitch_on"], nm("theta_vs")),
+             params={"threshold": 0.5}),
+    ]
+    theta_axis = nm("theta_src")
+
     theta_out = theta_axis
     if k_pitch_turn != 0.0:  # 01 §3.3.1 델타윙 선회 고도손실 보상
         nodes += [
@@ -386,7 +421,8 @@ def autopilot_nodes(
 
 
 AP_INPUTS = ("psi", "h", "hdot", "V", "cmd_heading", "cmd_alt", "cmd_speed",
-             "heading_on", "alt_on", "speed_on")
+             "cmd_pitch", "cmd_hdot",
+             "heading_on", "alt_on", "speed_on", "pitch_on", "hdot_on")
 
 # 단독 실행 그래프가 게인 포트를 갖는 이유: `Autopilot.step(gains=…)`이 스텝마다
 # 임의 조합을 덮어쓸 수 있어서다. 조합마다 그래프를 새로 만들 수는 없으므로 전부
@@ -539,7 +575,8 @@ def mixer_graph(name="mixer", **params):
 FCL_INPUTS = (
     "nav_valid",
     "theta", "phi", "psi", "p", "q", "r", "V", "alpha", "beta", "h", "hdot", "mach",
-    "cmd_speed", "cmd_alt", "cmd_heading", "speed_on", "alt_on", "heading_on",
+    "cmd_speed", "cmd_alt", "cmd_heading", "cmd_pitch", "cmd_hdot",
+    "speed_on", "alt_on", "heading_on", "pitch_on", "hdot_on",
 )
 
 

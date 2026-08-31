@@ -98,7 +98,10 @@ def test_signature_is_stable_across_independent_builds(base_shape):
     """
     a, b = law_signature(make_law(base_shape)), law_signature(make_law(base_shape))
     assert a == b
-    assert len([k for k in a if not k.startswith("__")]) == 59
+    # 59 → 66: 종방향 축 도입으로 노드 7개가 늘었다 (ap_fvs·ap_vs_err·ap_vs_pid·
+    # ap_vs_sat = 승강률 축, ap_pitch_sat = 피치 직접 지령, ap_theta_vs·ap_theta_src
+    # = θ 출처 Switch 2단). 이 수가 움직이는 것이 곧 법칙 구조 변경이다.
+    assert len([k for k in a if not k.startswith("__")]) == 66
 
 
 # ── 구조적 영향: 관측된 매핑 ───────────────────────────────────────────────
@@ -110,7 +113,10 @@ def test_signature_is_stable_across_independent_builds(base_shape):
         ("fcl/Autopilot.k_hdot", {"ap_alt_damp"}),
         ("fcl/Autopilot.tau_spd", {"ap_fv"}),
         ("fcl/Autopilot.phi_max", {"ap_hdg_pid", "ap_hdg_sat"}),
-        ("fcl/Autopilot.theta_hi", {"ap_alt_pid", "ap_alt_sat", "ap_theta_out"}),
+        # θ 한계는 세 종방향 갈래 전부의 포화 한계다 — 축이 늘면 씨앗도 는다
+        ("fcl/Autopilot.theta_hi",
+         {"ap_alt_pid", "ap_alt_sat", "ap_theta_out",
+          "ap_vs_pid", "ap_vs_sat", "ap_pitch_sat"}),
         ("table.pitch.kp", {"sched_pitch_kp"}),
     ],
 )
@@ -160,7 +166,7 @@ def test_control_rate_touches_every_stateful_node(impacts):
     """dt는 fcl_graph의 인자가 아니라 러너의 인자다 — 노드 인자만 보면 '아무것도
     안 건드린다'는 거짓말이 나온다. 이산 계수가 형상의 일부라는 것(02 §2.2)의 시각화."""
     imp = impacts["rate.control_hz"]
-    assert len(imp.reach) == 59
+    assert len(imp.reach) == 66
     assert "sched_f_mach" in imp.seeds
 
 
@@ -236,7 +242,8 @@ def test_structural_payload_shape(base_shape):
 
     p = structural_payload(base_shape)
     kinds = Counter(n["kind"] for n in p["nodes"])
-    assert kinds["ir"] == 59 and kinds["input"] == 19 and kinds["output"] == 7
+    # 입력 19 → 23: cmd_pitch·cmd_hdot·pitch_on·hdot_on
+    assert kinds["ir"] == 66 and kinds["input"] == 23 and kinds["output"] == 7
     assert kinds["metric"] == len(p["metrics"]) and kinds["plant"] == 1
     assert p["topological_order"] is True
     assert "rank" not in p["nodes"][0]  # 층 번호는 소비자가 계산 — 두 곳에 정의하지 않는다

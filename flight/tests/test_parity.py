@@ -96,7 +96,7 @@ def test_trace_exercises_the_hard_paths(trace):
     """대조가 통과해도 그 경로를 안 밟았으면 의미가 없다 — 커버리지를 단정한다."""
     inputs, refs, _warm = trace
     assert any(row["nav_valid"] == 0.0 for row in inputs), "항법 무효(홀드) 구간 없음"
-    for flag in ("speed_on", "alt_on", "heading_on"):
+    for flag in ("speed_on", "alt_on", "heading_on", "pitch_on", "hdot_on"):
         vals = {row[flag] for row in inputs}
         assert vals == {0.0, 1.0}, f"{flag}가 두 상태를 모두 밟지 않음: {vals}"
     assert len({row["mach"] for row in inputs}) > 100, "게인 스케줄이 움직이지 않음"
@@ -250,4 +250,4 @@ def test_분할해도_지문은_그대로다():
     for name in ("fcl.h", "fcl_types.h", "fcl_data.c", *(f"fcl_{g}.h" for g in GROUPS)):
         line = next(ln for ln in _gen(name).splitlines() if "지문" in ln)
         fps.add(line.split(":")[1].strip())
-    assert fps == {"c0f9af6f848059c4"}, f"형상 지문이 움직였다: {fps}"
+    assert fps == {"6a4f463bb10c42dc"}, f"형상 지문이 움직였다: {fps}"

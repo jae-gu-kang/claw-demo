@@ -1,8 +1,8 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : c0f9af6f848059c4
+ * 지문    : 6a4f463bb10c42dc
  * 엔진    : claw 0.1.0
- * ap — 기능축 분할, 19개 블록
+ * ap — 기능축 분할, 26개 블록
  */
 #include "fcl_ap.h"
 
@@ -11,7 +11,8 @@
 
 void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
                  double psi, double V, double h, double hdot, double cmd_speed, double cmd_alt,
-                 double cmd_heading, double speed_on, double alt_on, double heading_on,
+                 double cmd_heading, double cmd_pitch, double cmd_hdot, double speed_on,
+                 double alt_on, double heading_on, double pitch_on, double hdot_on,
                  double *out_ap_hdg_sat, double *out_ap_theta_out, double *out_ap_spd_sat)
 {
     /* ── heading_on 영역 (5개 노드) ── */
@@ -85,6 +86,44 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
     /* ap_alt_sat — Saturation */
     const double ap_alt_sat_y = claw_clip(ap_alt_sum_y, prm->ap_alt_sat_lo, prm->ap_alt_sat_hi);
 
+    /* ── hdot_on 영역 (2개 노드) ── */
+    double ap_fvs_y = 0.0;
+    double ap_vs_err_y = 0.0;
+    if (hdot_on != 0.0) {
+        /* ap_fvs — CommandFilter */
+        if (!sta->ap_fvs_seeded) { sta->ap_fvs_x = hdot; sta->ap_fvs_seeded = 1; }
+        const double ap_fvs_d = cmd_hdot - sta->ap_fvs_x;
+        sta->ap_fvs_x = sta->ap_fvs_x + prm->ap_fvs_one_minus_p * ap_fvs_d;
+        ap_fvs_y = sta->ap_fvs_x;
+
+        /* ap_vs_err — Sum */
+        ap_vs_err_y = ap_fvs_y - hdot;
+    } else {
+        /* 비활성 — 상태만 정리한다 (실행하지 않는다) */
+        sta->ap_fvs_x = hdot;
+        sta->ap_fvs_seeded = 1;
+    }
+
+    /* ap_vs_pid — PID */
+    /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
+    const double ap_vs_pid_y = claw_clip(prm->ap_vs_pid_kp * ap_vs_err_y + sta->ap_vs_pid_i,
+                                         prm->ap_vs_pid_out_lo, prm->ap_vs_pid_out_hi);
+    sta->ap_vs_pid_i = claw_clip(sta->ap_vs_pid_i + FCL_DT * prm->ap_vs_pid_ki * ap_vs_err_y,
+                                 prm->ap_vs_pid_out_lo, prm->ap_vs_pid_out_hi);
+
+    /* ap_vs_sat — Saturation */
+    const double ap_vs_sat_y = claw_clip(ap_vs_pid_y, prm->ap_vs_sat_lo, prm->ap_vs_sat_hi);
+
+    /* ap_pitch_sat — Saturation */
+    const double ap_pitch_sat_y = claw_clip(cmd_pitch, prm->ap_pitch_sat_lo,
+                                            prm->ap_pitch_sat_hi);
+
+    /* ap_theta_vs — Switch */
+    const double ap_theta_vs_y = ((hdot_on) >= prm->ap_theta_vs_threshold ? (ap_vs_sat_y) : (ap_alt_sat_y));
+
+    /* ap_theta_src — Switch */
+    const double ap_theta_src_y = ((pitch_on) >= prm->ap_theta_src_threshold ? (ap_pitch_sat_y) : (ap_theta_vs_y));
+
     /* ap_ff_p_raw — sec_minus_1 */
     const double ap_ff_p_raw_y = 1.0 / cos(ap_hdg_sat_y) - 1.0;
 
@@ -92,7 +131,7 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
     const double ap_ff_p_y = prm->ap_ff_p_k * ap_ff_p_raw_y;
 
     /* ap_theta_ff — Sum */
-    const double ap_theta_ff_y = ap_alt_sat_y + ap_ff_p_y;
+    const double ap_theta_ff_y = ap_theta_src_y + ap_ff_p_y;
 
     /* ap_theta_out — Saturation */
     const double ap_theta_out_y = claw_clip(ap_theta_ff_y, prm->ap_theta_out_lo,

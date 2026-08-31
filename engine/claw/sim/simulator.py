@@ -37,20 +37,22 @@ from claw.plant import OMEGA, POS, QUAT, VEL, RigidBody, SecondOrderActuator, pa
 # 형상 의존 채널(law.py INSTRUMENT_NODES 참조)은 0이 아니라 NaN — 부재 집합은
 # test_sim이 못박는다.
 _CHAIN_SIGNALS = (
-    "cmd_speed", "cmd_alt", "cmd_heading",  # 유도 → AP
+    "cmd_speed", "cmd_alt", "cmd_heading", "cmd_pitch", "cmd_hdot",  # 유도 → AP
     "speed_on", "alt_on", "heading_on",  # 축 활성 — 진단의 활성 구간 게이팅 근거
+    "pitch_on", "hdot_on",  # 종방향 축 선택 (alt·pitch·hdot 배타)
     "alt_cmd_filt", "spd_cmd_filt", "hdg_cmd_filt",  # 명령필터 통과 (오차 분해)
     "theta_cmd", "phi_cmd",  # AP → α 리미터
     "ap_alt_pi", "ap_alt_damp", "ap_alt_raw",  # AP 고도축 기여항 (포화 전)
     "ap_spd_pi", "ap_hdg_pi",
     "ap_pitch_ff", "ap_thr_ff", "ap_theta_raw",  # 선회 FF·재클램프 전 θ
+    "ap_vs_pi", "ap_theta_alt", "ap_theta_vs", "ap_theta_pitch", "ap_theta_src",
     "theta_lim",  # 리미터 → SCAS (보호가 물리면 theta_cmd와 갈라진다)
     "lim_cap",  # 리미터 θ 상한 — 귀속(감쇠 vs margin)의 근거
     "pitch", "roll", "yaw",  # SCAS → 믹서
     "pitch_pi", "pitch_damp", "pitch_raw",  # SCAS 축 기여항 (포화 전)
     "roll_pi", "roll_damp", "roll_raw",
     "yaw_pi", "yaw_damp", "yaw_raw", "yaw_wo",
-    "i_pitch", "i_roll", "i_yaw", "i_alt", "i_spd", "i_hdg",  # 적분기 (와인드업)
+    "i_pitch", "i_roll", "i_yaw", "i_alt", "i_spd", "i_hdg", "i_vs",  # 적분기 (와인드업)
 )
 
 
@@ -115,6 +117,18 @@ class Simulator:
         self.launch = launch
         if launch is not None and not hasattr(launch, "state_at"):
             raise ValueError("launch는 LaunchRail 계약(state_at·exit_time·length)이어야 함")
+        # on_ground·airborne 조건은 착륙장치가 있어야 판정된다. 없으면 그 조건이
+        # 영원히 판정 불가라 모드 체인이 조용히 그 자리에 멈춘다 — path 없이
+        # path_done을 쓰는 것을 구성 시점에 거부하는 것과 같은 자리다(guidance.py).
+        if getattr(guidance, "needs_ground", False) and aircraft.ground is None:
+            raise ValueError(
+                "on_ground·airborne 이탈 조건이 있으나 기체에 착륙장치가 없음 "
+                "— Aircraft(ground=...)로 장착하거나 조건을 바꿔야 함"
+            )
+        if getattr(guidance, "needs_rail", False) and launch is None:
+            raise ValueError(
+                "off_rail 이탈 조건이 있으나 발사 레일이 없음 — launch=를 주거나 조건을 바꿔야 함"
+            )
         self.dt_plant = dt_plant
         self.control_hz = control_hz
         self.n_ctrl = int(n)
@@ -227,8 +241,21 @@ class Simulator:
                     q_nb=q_nb.copy(), omega_b=omega.copy(),
                     t_meas=t, valid=True, fuel=fuel,
                 )
+            # 접지 여부는 유도의 이탈 조건(on_ground·airborne)이 쓰므로 **제어 틱보다
+            # 먼저** 재야 한다. 레일 위에서는 레일이 받치므로 기어는 닿지 않는다.
+            gs = (
+                self.aircraft.ground.contact_state(
+                    pos, vel_b, q_nb, omega, self.ground_elev
+                )
+                if self.aircraft.ground is not None
+                else None
+            )
             if k % self.n_ctrl == 0:
-                cmd = self.guidance.step(nav)
+                cmd = self.guidance.step(
+                    nav,
+                    on_ground=None if gs is None else gs["wow"],
+                    on_rail=on_rail if self.launch is not None else None,
+                )
                 sc = self.fcl.step(cmd, nav)
 
             if actuators is not None:
@@ -265,12 +292,9 @@ class Simulator:
                 np.nan if self.fcl.alpha_margin is None else self.fcl.alpha_margin
             )
             sig["limiter_active"][k] = self.fcl.limiter_active
-            # 지면 접촉 진단 — 스텝당 1회. RK4 부단계에서는 부르지 않는다(힘 계산과
-            # 별개 경로라 값이 갈리지 않도록 같은 상태에서 한 번만 잰다).
-            if self.aircraft.ground is not None:
-                gs = self.aircraft.ground.contact_state(
-                    pos, vel_b, q_nb, omega, self.ground_elev
-                )
+            # 지면 접촉 — 위(제어 틱 전)에서 이미 잰 값을 그대로 기록한다. 두 번 재면
+            # 유도가 본 접지와 화면이 보는 접지가 갈릴 수 있다.
+            if gs is not None:
                 sig["wow"][k] = gs["wow"]
                 sig["n_gear"][k] = gs["n_total"]
             else:

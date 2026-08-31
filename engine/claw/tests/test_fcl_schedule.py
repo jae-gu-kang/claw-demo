@@ -44,12 +44,14 @@ def test_자리표가_조립_거부와_일치한다():
     웹이 '켤 수 있다'고 보여 준 자리가 실행 시점에 터진다."""
     srcs = {u: u for u in (
         "psi", "h", "hdot", "V", "cmd_speed", "cmd_alt", "cmd_heading",
-        "speed_on", "alt_on", "heading_on",
+        "cmd_pitch", "cmd_hdot",
+        "speed_on", "alt_on", "heading_on", "pitch_on", "hdot_on",
     )}
     cfg = dict(
         kp_spd=0.15, ki_spd=0.03, tau_spd=2.0,
         kp_alt=0.004, ki_alt=0.0004, k_hdot=-0.008, tau_alt=5.0,
         kp_hdg=4.0, ki_hdg=0.0, tau_hdg=1.0,
+        kp_vs=0.02, ki_vs=0.005, tau_vs=2.0,
         theta_lo=-0.3, theta_hi=0.3, phi_max=0.7, k_pitch_turn=0.05, k_thr_turn=0.0,
     )
     for group in ("speed", "alt", "heading"):
@@ -129,7 +131,10 @@ def test_기본_테이블은_예전과_같다():
         assert tab.axis_names == ("mach",)
         # 설계점 M0.6에서는 어느 자리든 설계 상수 그대로
         assert float(tab.interp(mach=0.6)) == pytest.approx(design[name])
-    assert _module().fingerprint == "c0f9af6f848059c4"
+    # 지문은 이륙·착륙 도입에서 갱신됐다 — 종방향 축(pitch·hdot)과 θ 출처 Switch가
+    # 그래프에 들어가 탑재 코드가 실제로 달라졌다(flight/gen 재생성 동반). 지문이
+    # 움직이는 것이 곧 설계 변경이고, 안 움직였다면 그게 이상한 것이다.
+    assert _module().fingerprint == "6a4f463bb10c42dc"
 
 
 def test_없는_자리를_요구하면_거부한다():

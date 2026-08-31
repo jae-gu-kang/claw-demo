@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : c0f9af6f848059c4
+ * 지문    : 6a4f463bb10c42dc
  * 엔진    : claw 0.1.0
  * 자료형 (MATLAB _types.h 대응)
  */
@@ -30,6 +30,17 @@ typedef struct {
     double ap_alt_pid_out_hi;           /* 출력·적분기 클램프 상한 (안티와인드업) */
     double ap_alt_sat_lo;               /* 하한 */
     double ap_alt_sat_hi;               /* 상한 */
+    double ap_fvs_one_minus_p;          /* 1 − exp(-dt/tau), tau=2.0 s */
+    double ap_vs_pid_kp;                /* 비례 게인 */
+    double ap_vs_pid_ki;                /* 적분 게인 */
+    double ap_vs_pid_out_lo;            /* 출력·적분기 클램프 하한 (안티와인드업) */
+    double ap_vs_pid_out_hi;            /* 출력·적분기 클램프 상한 (안티와인드업) */
+    double ap_vs_sat_lo;                /* 하한 */
+    double ap_vs_sat_hi;                /* 상한 */
+    double ap_pitch_sat_lo;             /* 하한 */
+    double ap_pitch_sat_hi;             /* 상한 */
+    double ap_theta_vs_threshold;       /* 전환 임계값 */
+    double ap_theta_src_threshold;      /* 전환 임계값 */
     double ap_ff_p_k;                   /* 게인 */
     double ap_theta_out_lo;             /* 하한 */
     double ap_theta_out_hi;             /* 상한 */
@@ -105,6 +116,9 @@ typedef struct {
     double ap_fh_x;           /* 필터 상태(= 출력) */
     int ap_fh_seeded;         /* 시드 완료 여부 — 첫 스텝은 측정에서 출발 */
     double ap_alt_pid_i;      /* 적분기 상태 */
+    double ap_fvs_x;          /* 필터 상태(= 출력) */
+    int ap_fvs_seeded;        /* 시드 완료 여부 — 첫 스텝은 측정에서 출발 */
+    double ap_vs_pid_i;       /* 적분기 상태 */
     double ap_fv_x;           /* 필터 상태(= 출력) */
     int ap_fv_seeded;         /* 시드 완료 여부 — 첫 스텝은 측정에서 출발 */
     double ap_spd_pid_i;      /* 적분기 상태 */

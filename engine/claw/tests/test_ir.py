@@ -487,7 +487,10 @@ def test_오토파일럿_어댑터가_모드_전환을_포함해_같은_답을_�
     seen = set()
     for k in range(1500):
         t = k * DT
-        on = (t < 4.0 or t >= 8.0, not (3.0 <= t < 6.0), t >= 1.0)  # heading, alt, speed
+        # 종방향은 alt·pitch·hdot·없음 넷 중 하나 — 배타라 조합이 아니라 선택이다
+        # (모드 구성 시 validate_longitudinal이 둘 이상을 거부한다)
+        lon = ("alt", "pitch", "none", "hdot")[int(t / 3.0) % 4]
+        on = (t < 4.0 or t >= 8.0, lon, t >= 1.0)  # heading, 종방향, speed
         seen.add(on)
         psi_set, h, hdot = 0.3 * math.sin(0.5 * t), 100.0 + 20.0 * math.sin(0.3 * t), 6.0
         V_set = 60.0 + 5.0 * math.sin(0.4 * t)
@@ -498,7 +501,9 @@ def test_오토파일럿_어댑터가_모드_전환을_포함해_같은_답을_�
         )
         cmd = GuidanceCommand(
             speed=65.0, alt=120.0, heading=0.8 * math.sin(0.2 * t),
-            heading_on=on[0], alt_on=on[1], speed_on=on[2],
+            pitch=0.12 * math.sin(0.3 * t), hdot=-3.0 + math.sin(0.25 * t),
+            heading_on=on[0], alt_on=(lon == "alt"), speed_on=on[2],
+            pitch_on=(lon == "pitch"), hdot_on=(lon == "hdot"),
         )
         ref = oracle.step(cmd, nav)
         # 통합 계층이 넘길 값 그대로 (원시 상태 → 공학량 변환은 그래프 밖)
@@ -506,7 +511,9 @@ def test_오토파일럿_어댑터가_모드_전환을_포함해_같은_답을_�
             psi=float(quat_to_euler(nav.q_nb)[2]), h=-float(nav.pos_n[2]),
             hdot=-float(nav.vel_n[2]), V=float(airdata_from_nav(nav)[0]),
             cmd_heading=cmd.heading, cmd_alt=cmd.alt, cmd_speed=cmd.speed,
-            heading_on=float(on[0]), alt_on=float(on[1]), speed_on=float(on[2]),
+            cmd_pitch=cmd.pitch, cmd_hdot=cmd.hdot,
+            heading_on=float(on[0]), alt_on=float(cmd.alt_on), speed_on=float(on[2]),
+            pitch_on=float(cmd.pitch_on), hdot_on=float(cmd.hdot_on),
         )
         for i, name in enumerate(("theta_cmd", "phi_cmd", "throttle")):
             assert ref[i] == got[name], f"스텝 {k} ({name}) 모드={on}"

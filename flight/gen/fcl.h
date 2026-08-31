@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : c0f9af6f848059c4
+ * 지문    : 6a4f463bb10c42dc
  * 엔진    : claw 0.1.0
  */
 #ifndef CLAW_FCL_H
@@ -28,7 +28,8 @@ void fcl_reset(fcl_state_t *sta);
 void fcl_step(const fcl_params_t *prm, fcl_state_t *sta, fcl_out_t *out,
               double nav_valid, double theta, double phi, double psi, double p, double q,
               double r, double V, double alpha, double beta, double h, double hdot, double mach,
-              double cmd_speed, double cmd_alt, double cmd_heading, double speed_on,
-              double alt_on, double heading_on);
+              double cmd_speed, double cmd_alt, double cmd_heading, double cmd_pitch,
+              double cmd_hdot, double speed_on, double alt_on, double heading_on,
+              double pitch_on, double hdot_on);
 
 #endif /* CLAW_FCL_H */

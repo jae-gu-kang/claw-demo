@@ -17,6 +17,9 @@ void fcl_reset(fcl_state_t *sta)
     sta->ap_fh_x = 0.0;
     sta->ap_fh_seeded = 0;
     sta->ap_alt_pid_i = 0.0;
+    sta->ap_fvs_x = 0.0;
+    sta->ap_fvs_seeded = 0;
+    sta->ap_vs_pid_i = 0.0;
     sta->ap_fv_x = 0.0;
     sta->ap_fv_seeded = 0;
     sta->ap_spd_pid_i = 0.0;
@@ -36,8 +39,9 @@ void fcl_reset(fcl_state_t *sta)
 void fcl_step(const fcl_params_t *prm, fcl_state_t *sta, fcl_out_t *out,
               double nav_valid, double theta, double phi, double psi, double p, double q,
               double r, double V, double alpha, double beta, double h, double hdot, double mach,
-              double cmd_speed, double cmd_alt, double cmd_heading, double speed_on,
-              double alt_on, double heading_on)
+              double cmd_speed, double cmd_alt, double cmd_heading, double cmd_pitch,
+              double cmd_hdot, double speed_on, double alt_on, double heading_on,
+              double pitch_on, double hdot_on)
 {
     if (nav_valid == 0.0) {  /* 직전 출력 유지, 상태 동결 */
         *out = sta->hold;
@@ -54,12 +58,13 @@ void fcl_step(const fcl_params_t *prm, fcl_state_t *sta, fcl_out_t *out,
     fcl_sched_step(prm, sta, mach, &sched_pitch_k_rate_y, &sched_pitch_ki_y, &sched_pitch_kp_y,
                    &sched_roll_k_rate_y, &sched_roll_ki_y, &sched_roll_kp_y);
 
-    /* ── ap — 19개 블록 ── */
+    /* ── ap — 26개 블록 ── */
     double ap_hdg_sat_y;
     double ap_theta_out_y;
     double ap_spd_sat_y;
-    fcl_ap_step(prm, sta, psi, V, h, hdot, cmd_speed, cmd_alt, cmd_heading, speed_on, alt_on,
-                heading_on, &ap_hdg_sat_y, &ap_theta_out_y, &ap_spd_sat_y);
+    fcl_ap_step(prm, sta, psi, V, h, hdot, cmd_speed, cmd_alt, cmd_heading, cmd_pitch, cmd_hdot,
+                speed_on, alt_on, heading_on, pitch_on, hdot_on, &ap_hdg_sat_y, &ap_theta_out_y,
+                &ap_spd_sat_y);
 
     /* ── lim — 6개 블록 ── */
     double lim_a_margin_y;

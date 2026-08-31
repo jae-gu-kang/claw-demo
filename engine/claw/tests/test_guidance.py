@@ -353,3 +353,97 @@ def test_los_altitude_command_is_continuous_across_waypoint_transitions():
         f"{slope * dx:.3f} m (중심 기준 램프였다면 Δ·r/seg = 60 m 점프)"
     )
     assert prev == pytest.approx(900.0)  # 끝에는 마지막 웨이포인트 고도로 정착
+
+
+# ---- 종방향 축 (01 §3.3.1 이륙·착륙) ----
+
+
+def test_longitudinal_axes_are_exclusive():
+    """alt·pitch·hdot은 셋 다 θ_cmd로 간다 — 둘을 켜면 구성 시점에 거부한다.
+
+    우선순위를 두면 화면이 "무엇이 먹었는지"를 말할 수 없다. 축마다 출처를 고르는
+    기존 규약과 같은 정신이고, 이번엔 검증으로 못박는다.
+    """
+    from claw.guidance.modes import validate_longitudinal
+
+    ok = ModeSpec(name="m", alt=100.0, exit_when=("time_ge", 1.0))
+    validate_longitudinal(ok)  # 하나면 통과
+    validate_longitudinal(ModeSpec(name="m", pitch=0.1, exit_when=("time_ge", 1.0)))
+    validate_longitudinal(ModeSpec(name="m", hdot=-2.0, exit_when=("time_ge", 1.0)))
+    validate_longitudinal(ModeSpec(name="m", exit_when=("time_ge", 1.0)))  # 전부 꺼짐도 통과
+    for bad in (
+        ModeSpec(name="b", alt=100.0, pitch=0.1),
+        ModeSpec(name="b", alt=100.0, hdot=-2.0),
+        ModeSpec(name="b", pitch=0.1, hdot=-2.0),
+        ModeSpec(name="b", alt=100.0, pitch=0.1, hdot=-2.0),
+    ):
+        with pytest.raises(ValueError, match="종방향 축은 하나만"):
+            validate_longitudinal(bad)
+    # 시퀀서 구성에서도 같은 검증이 걸린다
+    with pytest.raises(ValueError, match="종방향 축은 하나만"):
+        ModeSequencer([ModeSpec(name="b", alt=100.0, hdot=-2.0)])
+
+
+def test_pitch_and_hdot_reach_the_command():
+    g = Guidance([
+        ModeSpec(name="p", speed=100.0, pitch=0.15, exit_when=("time_ge", 1.0), next="v"),
+        ModeSpec(name="v", speed=100.0, hdot=-3.0, exit_when=("time_ge", 1e9)),
+    ]).init(0.01)
+    cmd = g.step(_nav(t=0.0))
+    assert cmd.pitch_on and not cmd.alt_on and not cmd.hdot_on
+    assert cmd.pitch == pytest.approx(0.15)
+    cmd = g.step(_nav(t=2.0))
+    assert cmd.hdot_on and not cmd.pitch_on
+    assert cmd.hdot == pytest.approx(-3.0)
+    # 축이 꺼진 자리의 값은 0이고 플래그가 그 사실을 말한다
+    assert cmd.pitch == 0.0 and cmd.alt == 0.0
+
+
+def test_hdot_conditions_use_climb_positive_sign():
+    """승강률은 상승 +다 — 강하 4 m/s보다 가파른 것은 ("hdot_le", -4.0)."""
+    from claw.guidance.modes import eval_condition
+
+    ctx = {"t_mode": 0.0, "path_done": False, "on_ground": None, "on_rail": None}
+
+    def vertical(vd):  # NED 하방 + — 강하가 양수인 성분
+        return NavOutput(t=0.0, pos_n=np.array([0.0, 0.0, -500.0]),
+                         vel_n=np.array([50.0, 0.0, vd]),
+                         q_nb=euler_to_quat(0.0, 0.0, 0.0))
+
+    descending = vertical(5.0)  # 강하 5 m/s → ḣ = −5
+    assert eval_condition(("hdot_le", -4.0), descending, ctx) is True
+    assert eval_condition(("hdot_ge", -4.0), descending, ctx) is False
+    climbing = vertical(-3.0)  # 상승 3 m/s → ḣ = +3
+    assert eval_condition(("hdot_ge", 2.0), climbing, ctx) is True
+    assert eval_condition(("hdot_le", -4.0), climbing, ctx) is False
+
+
+def test_ground_and_rail_conditions_refuse_to_guess():
+    """판정 불가를 False로 눙치면 모드가 조용히 그 자리에 멈춘다."""
+    from claw.guidance.modes import eval_condition
+
+    base = {"t_mode": 0.0, "path_done": False, "on_ground": None, "on_rail": None}
+    nav = _nav(t=0.0)
+    for cond in (("on_ground",), ("airborne",), ("off_rail",)):
+        with pytest.raises(RuntimeError):
+            eval_condition(cond, nav, base)
+    on = {**base, "on_ground": True, "on_rail": True}
+    assert eval_condition(("on_ground",), nav, on) is True
+    assert eval_condition(("airborne",), nav, on) is False
+    assert eval_condition(("off_rail",), nav, on) is False
+    off = {**base, "on_ground": False, "on_rail": False}
+    assert eval_condition(("on_ground",), nav, off) is False
+    assert eval_condition(("airborne",), nav, off) is True
+    assert eval_condition(("off_rail",), nav, off) is True
+
+
+def test_guidance_declares_what_the_table_needs():
+    """접지·레일 조건을 쓰면 그 사실이 드러나야 시뮬이 형상을 대조할 수 있다."""
+    plain = Guidance([ModeSpec(name="m", exit_when=("time_ge", 1e9))])
+    assert plain.needs_ground is False and plain.needs_rail is False
+    g = Guidance([
+        ModeSpec(name="a", exit_when=("off_rail",), next="b"),
+        ModeSpec(name="b", exit_when=("on_ground",), next="c"),
+        ModeSpec(name="c", exit_when=("time_ge", 1e9)),
+    ])
+    assert g.needs_ground is True and g.needs_rail is True

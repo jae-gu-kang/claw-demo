@@ -38,7 +38,7 @@ import re
 from collections import namedtuple
 
 import claw
-from claw.blocks.basic import Gain, Product, Saturation, Sum
+from claw.blocks.basic import Gain, Product, Saturation, Sum, Switch
 from claw.blocks.controllers import PID
 from claw.blocks.filters import CommandFilter, Washout
 from claw.blocks.lookup import LookupBlock, PolyBlock
@@ -283,6 +283,18 @@ def _emit_gain(ctx, node, inst, ins, gains, dt_macro):
 @_emitter(Product)
 def _emit_product(ctx, node, inst, ins, gains, dt_macro):
     return ctx.declare(f"{node.id}_y", " * ".join(ins))
+
+
+@_emitter(Switch)
+def _emit_switch(ctx, node, inst, ins, gains, dt_macro):
+    """Simulink Switch 관례 — (in1, ctrl, in3) → ctrl >= threshold면 in1, 아니면 in3.
+
+    블록·IR·blockspec(SEQ_INPUT)에는 진작 있었는데 C 에미터만 비어 있었다 —
+    그래프에 쓰는 순간 코드젠이 조용히가 아니라 미지원으로 터지던 자리다.
+    """
+    thr = ctx.param(node.id, "threshold", inst.threshold, "전환 임계값")
+    in1, ctrl, in3 = ins
+    return ctx.declare(f"{node.id}_y", f"(({ctrl}) >= {thr} ? ({in1}) : ({in3}))")
 
 
 @_emitter(Sum)

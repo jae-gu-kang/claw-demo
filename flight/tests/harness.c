@@ -19,7 +19,8 @@ int main(void)
     fcl_out_t out;
     double de0, th0, thr0;
     double nav_valid, theta, phi, psi, p, q, r, V, alpha, beta, h, hdot, mach;
-    double cmd_speed, cmd_alt, cmd_heading, speed_on, alt_on, heading_on;
+    double cmd_speed, cmd_alt, cmd_heading, cmd_pitch, cmd_hdot;
+    double speed_on, alt_on, heading_on, pitch_on, hdot_on;
 
     if (scanf("%lf %lf %lf", &de0, &th0, &thr0) != 3) { return 1; }
     fcl_reset(&s);
@@ -33,13 +34,15 @@ int main(void)
     s.hold.throttle_r = thr0;
 
     while (scanf("%lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf"
-                 " %lf %lf %lf %lf %lf %lf",
+                 " %lf %lf %lf %lf %lf %lf %lf %lf %lf %lf",
                  &nav_valid, &theta, &phi, &psi, &p, &q, &r, &V, &alpha, &beta,
                  &h, &hdot, &mach, &cmd_speed, &cmd_alt, &cmd_heading,
-                 &speed_on, &alt_on, &heading_on) == 19) {
+                 &cmd_pitch, &cmd_hdot,
+                 &speed_on, &alt_on, &heading_on, &pitch_on, &hdot_on) == 23) {
         fcl_step(&fcl_params, &s, &out,
                  nav_valid, theta, phi, psi, p, q, r, V, alpha, beta, h, hdot, mach,
-                 cmd_speed, cmd_alt, cmd_heading, speed_on, alt_on, heading_on);
+                 cmd_speed, cmd_alt, cmd_heading, cmd_pitch, cmd_hdot,
+                 speed_on, alt_on, heading_on, pitch_on, hdot_on);
         printf("%.17g %.17g %.17g %.17g %.17g %.17g %.17g\n",
                out.elevon_l, out.elevon_r, out.rudder, out.throttle_l, out.throttle_r,
                out.limiter_active, out.alpha_margin);

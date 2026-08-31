@@ -210,3 +210,89 @@ def test_ground_elev_validation():
             guidance=Guidance([ModeSpec(name="m", exit_when=("time_ge", 1e9))]),
             launch=object(),
         )
+
+
+# ---- 피치 지령으로 발사 구성 잡기 (사용자 제기) ----
+
+
+def _pitch_launch(t_end=40.0):
+    """레일 위에서 **엘러본 상향**으로 자리잡고 이탈하는 발사 — 종방향 피치 축 사용."""
+    gear = make_demo_skid_gear()
+    ac = make_demo_aircraft(ground=gear)
+    rail = make_demo_launch_rail()
+    tr = trim_ground(ac, TrimCase("pad", mach=0.0, alt=0.0, fuel=300.0, condition="ground"))
+    modes = [
+        ModeSpec(name="launch", speed=110.0, pitch=math.radians(21.0), heading=0.0,
+                 exit_when=("off_rail",), next="climb"),
+        ModeSpec(name="climb", speed=110.0, pitch=math.radians(21.0), heading=0.0,
+                 exit_when=("alt_ge", 150.0), next="cruise"),
+        ModeSpec(name="cruise", speed=110.0, alt=300.0, heading=0.0,
+                 exit_when=("time_ge", 1e9)),
+    ]
+    sim = Simulator(
+        aircraft=ac, fcl=make_demo_fcl(), guidance=Guidance(modes),
+        stall_table=make_demo_stall_table(), db_ranges=make_demo_db_ranges(),
+        dt_plant=DT, control_hz=100.0, ground_elev=0.0, launch=rail,
+    )
+    return rail, sim.run(tr, t_end=t_end, fingerprint="pitch-launch")
+
+
+@pytest.fixture(scope="module")
+def pitch_launched():
+    return _pitch_launch()
+
+
+def test_elevons_sit_trailing_edge_up_on_the_rail(pitch_launched):
+    """무미익에서 "플랩 역할"은 **상향(리플렉스)**이 한다 (사용자 제기).
+
+    하향은 Cm_δe(−1.0)이 CL_δe(+0.4)를 압도해 기수를 내리고 트림 α를 깎지만,
+    상향은 기수를 들어 α를 키우고 3.5α가 0.4δe 손실을 이긴다. 레일 위에서
+    자세는 구속돼 있으므로 타면이 하는 일은 **이탈 직후를 준비하는 것**이다.
+    피치 축이 없던 때는 고도 루프가 기수 내림(δe +0.31)을 물고 이탈했다.
+    """
+    _rail, res = pitch_launched
+    s = res.signals
+    on = s["on_rail"]
+    assert (s["de"][on] < -0.25).all(), "레일 구간 내내 엘러본이 상향이어야 함"
+    i = int(np.flatnonzero(on)[-1])
+    assert s["de"][i] < 0.0, "이탈 직전 타면이 기수 올림 쪽"
+
+
+def test_pitch_axis_is_the_theta_source_on_the_rail(pitch_launched):
+    """θ가 어디서 왔는지 화면이 말할 수 있어야 한다 — 출처를 계측한다."""
+    _rail, res = pitch_launched
+    s = res.signals
+    on = s["on_rail"]
+    assert (s["pitch_on"][on] == 1.0).all()
+    assert (s["hdot_on"][on] == 0.0).all()
+    assert (s["alt_on"][on] == 0.0).all()
+    # 피치 지령 21°는 축 한계 0.3 rad(17.2°)로 잘린다 — 잘린 값이 곧 θ 출처
+    assert np.allclose(s["ap_theta_pitch"][on], 0.3)
+    assert np.allclose(s["ap_theta_src"][on], 0.3)
+    assert np.allclose(s["theta_cmd"][on], 0.3)
+
+
+def test_off_rail_switches_the_mode_without_restating_the_rail(pitch_launched):
+    """레일 이탈이 곧 모드 전이 — 모드표가 0.245 s를 다시 적지 않는다.
+
+    airborne으로는 이걸 못 한다: 레일이 받치는 동안 기어는 닿지 않아 airborne이
+    t=0부터 참이다(그때는 첫 스텝에 바로 넘어가 버린다).
+    """
+    rail, res = pitch_launched
+    s, t = res.signals, res.t
+    seq = [m for i, m in enumerate(s["mode"]) if i == 0 or m != s["mode"][i - 1]]
+    assert seq == ["launch", "climb", "cruise"]
+    # launch → climb 전이가 레일 이탈 시각과 같은 스텝에서 일어난다
+    first_climb = int(np.flatnonzero(np.array(s["mode"]) == "climb")[0])
+    assert not s["on_rail"][first_climb]
+    assert s["on_rail"][first_climb - 1]
+    assert t[first_climb] == pytest.approx(rail.exit_time, abs=DT)
+
+
+def test_pitch_launch_climbs_out_cleanly(pitch_launched):
+    _rail, res = pitch_launched
+    s = res.signals
+    assert res.meta["aborted"] is None
+    assert res.envelope["any_flag"] is False
+    assert res.envelope["min_alt"] >= 1.0, "발사대 높이 아래로 내려간 적 없음"
+    assert s["h"][-1] == pytest.approx(300.0, rel=0.15)

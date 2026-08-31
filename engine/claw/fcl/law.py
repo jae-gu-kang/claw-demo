@@ -55,6 +55,14 @@ INSTRUMENT_NODES = {
     "ap_pitch_ff": "ap_ff_p",  # 선회 피치 FF항 (k_pitch_turn≠0일 때만 존재)
     "ap_thr_ff": "ap_ff_t",  # 선회 스로틀 FF항 (k_thr_turn≠0일 때만 존재)
     "ap_theta_raw": "ap_theta_ff",  # FF 합산 후·재클램프 전 θ
+    # ── 종방향 축 선택 (01 §3.3.1 이륙·착륙) ──
+    # 셋 중 무엇이 θ를 냈는지는 화면이 말해야 한다 — 조용한 출처 전환은 "왜 이렇게
+    # 날았나"를 설명할 수 없게 만든다. 세 갈래의 값을 모두 계측한다.
+    "ap_vs_pi": "ap_vs_pid",  # 승강률축 PI (클램프 내)
+    "ap_theta_alt": "ap_alt_sat",  # 고도축이 냈을 θ
+    "ap_theta_vs": "ap_vs_sat",  # 승강률축이 냈을 θ
+    "ap_theta_pitch": "ap_pitch_sat",  # 피치 직접 지령(축 한계로 자른 값)
+    "ap_theta_src": "ap_theta_src",  # 실제로 고른 값
     "pitch_pi": "scas_pitch_pid",
     "pitch_damp": "scas_pitch_damp",
     "pitch_raw": "scas_pitch_sum",  # 포화 전 합 — |raw−sat|>0이 곧 축 포화 틱
@@ -73,6 +81,7 @@ INSTRUMENT_NODES = {
 # 인스턴스 속성이라 last_env에 없다 — blockspec.get_state(set_state의 read 대칭)로
 # 꺼낸다. 적분기가 클램프에 주차하는가(안티와인드업 진단, 규칙 3)의 유일한 근거.
 INSTRUMENT_STATES = {
+    "i_vs": ("ap_vs_pid", "i"),
     "i_pitch": ("scas_pitch_pid", "i"),
     "i_roll": ("scas_roll_pid", "i"),
     "i_yaw": ("scas_yaw_pid", "i"),
@@ -188,8 +197,10 @@ class FlightControlLaw:
             h=h, hdot=-float(nav.vel_n[2]), mach=float(V / isa_atmosphere(h_isa).a),
             cmd_speed=float(cmd.speed), cmd_alt=float(cmd.alt),
             cmd_heading=float(cmd.heading),
+            cmd_pitch=float(cmd.pitch), cmd_hdot=float(cmd.hdot),
             speed_on=float(bool(cmd.speed_on)), alt_on=float(bool(cmd.alt_on)),
             heading_on=float(bool(cmd.heading_on)),
+            pitch_on=float(bool(cmd.pitch_on)), hdot_on=float(bool(cmd.hdot_on)),
         )
         # 항법 무효 스텝은 아무것도 실행되지 않았다 — 로깅 속성도 직전 값을 유지한다
         if nav.valid:

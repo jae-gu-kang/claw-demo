@@ -21,7 +21,9 @@ def test_structural_node_census(client):
     from collections import Counter
 
     kinds = Counter(n["kind"] for n in _post(client)["nodes"])
-    assert kinds["ir"] == 59 and kinds["input"] == 19 and kinds["output"] == 7
+    # 66/23 — 이륙·착륙 도입으로 종방향 축(승강률 4노드·피치 1노드·θ 출처 Switch 2단)과
+    # 그 입력 4개(cmd_pitch·cmd_hdot·pitch_on·hdot_on)가 늘었다 (엔진 test_influence와 한 쌍)
+    assert kinds["ir"] == 66 and kinds["input"] == 23 and kinds["output"] == 7
     assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 8
 
 

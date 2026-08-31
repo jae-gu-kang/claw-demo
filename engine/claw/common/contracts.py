@@ -50,14 +50,25 @@ class NavOutput:
 
 @dataclass
 class GuidanceCommand:
-    """유도→오토파일럿 명령 (M8→M7). 축별 활성화 플래그는 비행모드 테이블이 정의."""
+    """유도→오토파일럿 명령 (M8→M7). 축별 활성화 플래그는 비행모드 테이블이 정의.
+
+    **종방향 축은 셋 중 최대 하나만 켠다** — alt·pitch·hdot이 전부 θ_cmd로 가기
+    때문이다(01 §3.3.1 이륙·착륙 도입). 둘 이상 켜지면 화면이 "어느 것이 먹었는지"
+    말할 수 없으므로 우선순위를 두는 대신 모드 구성 시점에 거부한다
+    (guidance/modes.py validate_longitudinal). 셋 다 꺼지면 고도축 PI가 오차 0을
+    물고 돌아 트림 θ를 유지한다 — 종전 alt_on=False 거동 그대로다.
+    """
 
     speed: float = 0.0  # [m/s]
     alt: float = 0.0  # [m], MSL 기준 (저고도 임무 0 ft = MSL, 도메인 문서 §2.5)
     heading: float = 0.0  # [rad]
+    pitch: float = 0.0  # [rad] θ 직접 지령 — 발사 이탈 자세·지상 자세
+    hdot: float = 0.0  # [m/s] 승강률 지령 (상승 +) — 접근 강하율·플레어
     speed_on: bool = False
     alt_on: bool = False
     heading_on: bool = False
+    pitch_on: bool = False
+    hdot_on: bool = False
     mode: str = ""
 
 

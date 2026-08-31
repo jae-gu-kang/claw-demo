@@ -30,6 +30,12 @@ class Guidance:
             # 꺼진 채(alt_on=False) 날거나, None을 0으로 읽어 해면을 명령한다 —
             # 둘 다 요청한 것과 다르므로 구성 시점에 시끄럽게 거부한다
             raise ValueError('alt="path" 모드가 있으나 웨이포인트에 고도가 없음')
+        # 접지 조건을 쓰는 테이블인가 — 시뮬이 착륙장치 유무를 여기에 대조한다.
+        # path_done이 경로추종기를 요구하는 것과 같은 자리의 전제 검사다.
+        self.needs_ground = any(
+            m.exit_when[0] in ("on_ground", "airborne") for m in modes
+        )
+        self.needs_rail = any(m.exit_when[0] == "off_rail" for m in modes)
 
     def init(self, dt: float) -> "Guidance":
         self.dt = dt
@@ -44,7 +50,7 @@ class Guidance:
             self.path.reset()
         self._last_cmd = None
 
-    def step(self, nav) -> GuidanceCommand:
+    def step(self, nav, on_ground=None, on_rail=None) -> GuidanceCommand:
         if not nav.valid:
             if self._last_cmd is not None:
                 return replace(self._last_cmd)
@@ -52,7 +58,7 @@ class Guidance:
         path_hdg, path_alt, path_done = (
             self.path.step(nav) if self.path is not None else (None, None, False)
         )
-        mode = self.seq.step(nav, nav.t, path_done)
+        mode = self.seq.step(nav, nav.t, path_done, on_ground=on_ground, on_rail=on_rail)
         # 모드 테이블이 축마다 **출처를 고른다** — heading과 alt가 같은 규약이다.
         # 경로가 이기느니 모드가 이기느니 하는 우선순위를 따로 두지 않는 이유가 이것
         heading = path_hdg if mode.heading == "path" else mode.heading
@@ -74,9 +80,15 @@ class Guidance:
             speed=0.0 if mode.speed is None else float(mode.speed),
             alt=0.0 if alt is None else float(alt),
             heading=0.0 if heading is None else float(heading),
+            # 종방향 배타는 모드 구성 시점(ModeSequencer → validate_longitudinal)에
+            # 이미 걸러졌다 — 여기서 다시 우선순위를 만들지 않는다
+            pitch=0.0 if mode.pitch is None else float(mode.pitch),
+            hdot=0.0 if mode.hdot is None else float(mode.hdot),
             speed_on=mode.speed is not None,
             alt_on=alt is not None,
             heading_on=heading is not None,
+            pitch_on=mode.pitch is not None,
+            hdot_on=mode.hdot is not None,
             mode=mode.name,
         )
         self._last_cmd = cmd

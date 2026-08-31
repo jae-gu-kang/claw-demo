@@ -26,7 +26,8 @@ from claw.trim import trim_level
 INPUT_ORDER = (
     "nav_valid", "theta", "phi", "psi", "p", "q", "r", "V", "alpha", "beta",
     "h", "hdot", "mach", "cmd_speed", "cmd_alt", "cmd_heading",
-    "speed_on", "alt_on", "heading_on",
+    "cmd_pitch", "cmd_hdot",
+    "speed_on", "alt_on", "heading_on", "pitch_on", "hdot_on",
 )
 OUTPUT_ORDER = (
     "elevon_l", "elevon_r", "rudder", "throttle_l", "throttle_r",
@@ -47,7 +48,15 @@ def run(t_end=180.0):
         ModeSpec(name="wpnav", speed=140.0, alt=1300.0, heading="path",
                  exit_when=("path_done",), next="descent"),
         ModeSpec(name="descent", speed=140.0, alt=100.0,
-                 exit_when=("alt_le", 130.0), next="mission"),
+                 exit_when=("alt_le", 130.0), next="arrest"),
+        # 아래 두 모드는 **C 대조를 위해** 있다 — 종방향 축 선택(θ 출처 Switch)의
+        # hdot·pitch 갈래를 실제로 밟지 않으면 생성 C의 그 분기가 검증되지 않는다.
+        # 대조 트레이스가 test_mission의 사본이면서 여기만 갈라지는 이유가 이것이고,
+        # 회귀 미션 자체는 engine 쪽에서 순항 시나리오 그대로 남는다.
+        ModeSpec(name="arrest", speed=140.0, hdot=-2.0,
+                 exit_when=("time_ge", 6.0), next="hold_att"),
+        ModeSpec(name="hold_att", speed=140.0, pitch=0.02,
+                 exit_when=("time_ge", 6.0), next="mission"),
         ModeSpec(name="mission", speed=140.0, alt=30.0, heading=None,
                  exit_when=("time_ge", 1e9)),
     ]
@@ -71,8 +80,10 @@ def run(t_end=180.0):
             "mach": float(V / isa_atmosphere(h_isa).a),
             "cmd_speed": float(cmd.speed), "cmd_alt": float(cmd.alt),
             "cmd_heading": float(cmd.heading),
+            "cmd_pitch": float(cmd.pitch), "cmd_hdot": float(cmd.hdot),
             "speed_on": float(bool(cmd.speed_on)), "alt_on": float(bool(cmd.alt_on)),
             "heading_on": float(bool(cmd.heading_on)),
+            "pitch_on": float(bool(cmd.pitch_on)), "hdot_on": float(bool(cmd.hdot_on)),
         })
         refs.append((
             float(out.elevon[0]), float(out.elevon[2]), float(out.rudder),

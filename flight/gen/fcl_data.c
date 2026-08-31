@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : c0f9af6f848059c4
+ * 지문    : 6a4f463bb10c42dc
  * 엔진    : claw 0.1.0
  * 파라미터 데이터 (MATLAB _data.c 대응)
  */
@@ -24,6 +24,17 @@ const fcl_params_t fcl_params = {
     .ap_alt_pid_out_hi        = 0.3,                   /* 출력·적분기 클램프 상한 (안티와인드업) */
     .ap_alt_sat_lo            = -0.3,                  /* 하한 */
     .ap_alt_sat_hi            = 0.3,                   /* 상한 */
+    .ap_fvs_one_minus_p       = 0.00498752080731768,   /* 1 − exp(-dt/tau), tau=2.0 s */
+    .ap_vs_pid_kp             = 0.02,                  /* 비례 게인 */
+    .ap_vs_pid_ki             = 0.005,                 /* 적분 게인 */
+    .ap_vs_pid_out_lo         = -0.3,                  /* 출력·적분기 클램프 하한 (안티와인드업) */
+    .ap_vs_pid_out_hi         = 0.3,                   /* 출력·적분기 클램프 상한 (안티와인드업) */
+    .ap_vs_sat_lo             = -0.3,                  /* 하한 */
+    .ap_vs_sat_hi             = 0.3,                   /* 상한 */
+    .ap_pitch_sat_lo          = -0.3,                  /* 하한 */
+    .ap_pitch_sat_hi          = 0.3,                   /* 상한 */
+    .ap_theta_vs_threshold    = 0.5,                   /* 전환 임계값 */
+    .ap_theta_src_threshold   = 0.5,                   /* 전환 임계값 */
     .ap_ff_p_k                = 0.05,                  /* 게인 */
     .ap_theta_out_lo          = -0.3,                  /* 하한 */
     .ap_theta_out_hi          = 0.3,                   /* 상한 */
