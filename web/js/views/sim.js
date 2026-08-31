@@ -6,9 +6,9 @@
 
 import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
-import { buildModes, buildWaypoints, COND_KINDS } from "../lib/mission.js";
+import { buildModes, buildWaypoints, COND_KINDS, LON_AXES } from "../lib/mission.js";
 import { planeViews } from "../lib/plot.js";
-import { flaggedNames, modeSpans, strideFor } from "../lib/replay.js";
+import { flaggedNames, landingSummary, modeSpans, strideFor } from "../lib/replay.js";
 import { defaultWaypointAlt, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
@@ -16,30 +16,43 @@ import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createProfileChart, createWpMap } from "./wpmap.js";
 
-// 기본 미션 = 이륙점(원점) 출발 → 순항 → 원점 복귀. 고도는 **경로가 낸다**(alt="path")
-// — 웨이포인트 세로 프로파일이 곧 이 미션의 고도 계획이고, 지도 옆 거리-고도 그래프가
-// 그것을 그대로 그린다. 모드는 속도·헤딩만 맡는다. 웨이포인트가 고도를 갖는 순간
-// 모드도 고도를 내면 주인이 둘이 되어 계획선과 실제선이 갈리므로, 한쪽으로 모았다.
+// 기본 미션 = **발사대에서 떠서 활주로에 선다** (01 §3.3.1 이륙~착륙).
+// 발사 → 상승 → 순항 → 접근 → 플레어 → 미끄럼 → 정지.
 //
-// 종전 기본값은 엔진 회귀 미션(test_mission — 모드가 고도를 내는 climb→wpnav→descent→
-// mission 4단)의 사본이었다. 웹 기본값이 그것과 갈라지는 것이 이 변경이고, **엔진
-// 테스트는 그대로다**. 이 값들은 엔진 기본값의 사본이 아니라 미션 시나리오라
-// 02 §5.5의 "엔진 기본값 재기술" 대상이 아니다 (lib/loops.js DEFAULT_LOOPS와 같은 부류).
+// 종방향 축이 단계마다 갈린다 — launch·climb·rollout은 **피치**(고도 루프를 거칠
+// 이유가 없는 자세 구간), approach·flare는 **강하율**(어느 고도가 아니라 내려가는
+// 속도를 잡는 구간), cruise만 **고도**다. 셋은 배타라 한 모드에 하나씩만 들어간다.
 //
-// **출발점은 이륙 직후다.** 원점은 이륙점이고(docs/conventions.md) 트림 고도가 0이지만,
-// 트림은 정상 수평비행이라 활주로에 서 있는 상태가 아니다 — 지상 반력·착륙장치 모델이
-// 없어 지상 정지에서 출발할 수 없다(01 §7 백로그).
+// 수치는 엔진 실측으로 정했다(engine test_landing과 같은 값):
+//   이탈 81.5 m/s = 1.15 × 트림 실속속도 70.9 — α_stall 0.40에서 CL 1.40이 나오지만
+//   거기까지 가려면 상향 엘러본이 필요하고 그것이 양력을 깎아 실제 최대 트림 CL은 1.169다
+//   플레어 개시 20 m·kp_vs 0.08 → 접지 −1.0 m/s (5 m에서는 0.9 s뿐이라 −4.6)
+//   접지 후 미끄럼 870 m → 활주로 1,500 m
+//
+// 이 값들은 엔진 기본값의 사본이 아니라 **미션 시나리오**라 02 §5.5의 "엔진 기본값
+// 재기술" 대상이 아니다 (lib/loops.js DEFAULT_LOOPS와 같은 부류). 엔진 회귀 미션
+// (test_mission — 지면 미장착 순항 시나리오)은 그대로 남아 있다.
+const CLIMB_PITCH = "0.3665"; // [rad] 21° — α 리미터 한계까지 기수를 든다
 let modeRows = [
-  { name: "wpnav", speed: "160", alt: "path", heading: "path",
-    exitKind: "path_done", exitValue: "", next: "hold" },
-  { name: "hold", speed: "140", alt: "path", heading: "",
+  { name: "launch", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH, heading: "0",
+    exitKind: "off_rail", exitValue: "", next: "climb" },
+  { name: "climb", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH, heading: "0",
+    exitKind: "alt_ge", exitValue: "250", next: "cruise" },
+  { name: "cruise", speed: "88", lonAxis: "alt", lonValue: "300", heading: "0",
+    exitKind: "time_ge", exitValue: "20", next: "approach" },
+  // 3° 활공: 88 m/s · sin3° ≈ 4.6 m/s
+  { name: "approach", speed: "88", lonAxis: "hdot", lonValue: "-4.8", heading: "0",
+    exitKind: "alt_le", exitValue: "20", next: "flare" },
+  { name: "flare", speed: "80", lonAxis: "hdot", lonValue: "-0.8", heading: "0",
+    exitKind: "on_ground", exitValue: "", next: "rollout" },
+  { name: "rollout", speed: "0", lonAxis: "pitch", lonValue: "0", heading: "0",
+    exitKind: "speed_le", exitValue: "0.5", next: "stopped" },
+  { name: "stopped", speed: "0", lonAxis: "pitch", lonValue: "0", heading: "",
     exitKind: "time_ge", exitValue: "1e9", next: "" },
 ];
-let wpRows = [
-  { n: "8000", e: "0", d: "700" }, // 상승 후 순항 진입 (700 = 기체가 낼 수 있는 경사 — lib CRUISE_ALT_DEFAULT)
-  { n: "8000", e: "8000", d: "700" }, // 순항 다리
-  { n: "0", e: "0", d: "0" }, // 원점 복귀 — 이륙점으로 돌아와 0
-];
+// 기본 미션은 직진 이착륙이라 웨이포인트가 없다 — 경로추종기 없이 헤딩 0으로 난다.
+// 지도에서 점을 찍으면 그때부터 경로가 생기고, 고도를 넣으면 세로 프로파일도 낸다.
+let wpRows = [];
 let lastReplay = null; // {body, waypoints, acceptRadius}
 let runningJobId = null;
 // 제출 시점 스냅샷 — 실행 중 편집이 재생 오버레이를 오염시키지 않도록 (리뷰 S3)
@@ -93,7 +106,10 @@ const FILL_ST = "width:100%; box-sizing:border-box;";
 const TITLE_ST = "display:flex; align-items:center; gap:8px;";
 // margin-top:auto — 힌트를 그룹 바닥에 붙인다. .field-grid의 align-items:stretch가
 // 같은 줄 박스 높이를 맞춰 주므로, 바닥 정렬이면 힌트 줄도 나란히 선다
-const HINT_ST = "margin:auto 0 0; padding-top:8px;";
+// 힌트에 폭 상한을 둔다 — opt-group이 flex:0 0 auto라 **내용이 폭을 정하므로**,
+// 긴 문장 하나가 그룹을 늘려 실행 조건 패널 전체를 화면 밖으로 밀어낸다(라이브에서
+// 실제로 잘렸다). 상한을 두면 문장이 접히고 그리드가 열로 나뉜다.
+const HINT_ST = "margin:auto 0 0; padding-top:8px; max-width:360px;";
 // 궤적 뷰 한 변 [px] — 2열일 때 2×320 + 여백이 패널에 들어가는 크기.
 // .triview에 --plane-px로 넘겨 열 상한이 된다. 이 값을 키우면 app.css의 2열 전환
 // 폭(760px)도 같이 올리는 게 좋다 — 안 올리면 깨지지는 않고, 좁은 구간에서 캔버스가
@@ -145,14 +161,22 @@ export function render() {
   // 항법은 제출 시 병합 (시드만 이 탭이 우선, 나머지 미지정분은 엔진 기본값)
   const actApplied = store.get("actuatorParams");
   const f = {
-    mach: numInput("0.6"),
-    alt: numInput("0"), // 이륙점 고도 — 프로파일 출발점이자 엔진 첫 구간의 시작
+    // 기본 미션은 **발사대 위 정지**에서 출발한다 — 지상 평형해라 mach는 0이고
+    // alt는 비행 고도가 아니라 활주로 표고다 (엔진 trim_ground)
+    mach: numInput("0"),
+    alt: numInput("0"), // 활주로 표고 — 기준면 감시도 이 값이 된다
     fuel: numInput("300"),
-    // 경로 27.3 km + 선회 여유. 길게 두면 path_done 뒤 hold가 마지막 웨이포인트
-    // 고도(0)를 잡고 **기준면 아래로 진동**한다 — 엔진 실측: t_end 210이면 3041틱
-    // 이탈에 최저 −21.6 m, 180이면 214틱에 −0.64 m(그 214는 복귀 고도를 30·50 m로
-    // 올려도 같다 — 출발 트림이 정확히 0이라 생기는 이륙 직후 접지다)
-    tEnd: numInput("180"),
+    groundOn: el("input", { type: "checkbox", checked: true }),
+    rwHeading: numInput("0"),
+    rwLength: numInput("1500"), // 접지 미끄럼 870 m + 접지점 산포 여유 (엔진 실측)
+    launchOn: el("input", { type: "checkbox", checked: true }),
+    railLen: numInput("10"),
+    railAngle: numInput("0.2618"), // [rad] 15°
+    railExit: numInput("81.5"), // 1.15 × 트림 실속속도 70.9 → 33.9 g
+    rtkOn: el("input", { type: "checkbox", checked: true }),
+    // 발사 0.25 s + 상승·순항 ~90 s + 접근 ~65 s + 미끄럼 ~23 s. 엔진 실측으로
+    // 접지 110 s·정지 133 s라 200이면 정지 후 여유가 남는다 (짧으면 서기 전에 끊긴다)
+    tEnd: numInput("200"),
     accept: numInput("1500"),
     navOn: el("input", { type: "checkbox", checked: true }),
     seed: numInput("11"),
@@ -312,11 +336,26 @@ export function render() {
         trim: {
           name: "start",
           mach: Number(f.mach.value), alt: Number(f.alt.value), fuel: Number(f.fuel.value),
+          // 지상 평형인지 수평비행인지 — 활주로가 있으면 발사대/활주로 위 정지에서
+          // 출발한다. 엔진이 mach=0을 요구하므로 둘이 어긋나면 서버가 422로 답한다
+          condition: f.groundOn.checked ? "ground" : "level",
         },
         modes: buildModes(modeRows),
         waypoints: buildWaypoints(wpRows),
         accept_radius: Number(f.accept.value),
         t_end: Number(f.tEnd.value),
+        // 활주로가 있어야 스키드가 달린다 — 없으면 지면 자체가 없어서 기체가
+        // h<0을 그대로 통과한다(접지·정지 판정도 불가)
+        ...(f.groundOn.checked ? { runway: {
+          elevation: Number(f.alt.value),
+          heading: Number(f.rwHeading.value),
+          length: Number(f.rwLength.value),
+        } } : {}),
+        ...(f.launchOn.checked ? { launch: {
+          length: Number(f.railLen.value),
+          elev_angle: Number(f.railAngle.value),
+          exit_speed: Number(f.railExit.value),
+        } } : {}),
         fuel_flow: Number(f.fuelFlow.value),
         fingerprint: f.fp.value,
       };
@@ -331,6 +370,9 @@ export function render() {
         // psi_std·rate_std·bias_std·delay_s·update_hz). 빈 dict도 오차 모델은 장착 —
         // 미장착은 nav 필드 자체를 생략하는 경우뿐 (routes/sim.py::_build)
         req.nav = { ...(store.get("navParams") ?? {}), seed: Number(f.seed.value) };
+        // 등급은 **이름으로** 고른다 — RTK 수치를 여기 적으면 엔진 RTK_FIXED와
+        // 조용히 어긋난다(§5.5, 항법 기본값 7개가 어긋난 채 돌던 전례와 같은 자리)
+        if (f.rtkOn.checked) req.nav_grade = "rtk";
       }
       if (f.actOn.checked) {
         // 구조도 작동기 블록 적용값(pos 한계·initial 포함) 위에 이 탭 필드가 최종 덮어씀
@@ -389,20 +431,49 @@ export function render() {
             field("고도 [m]", f.alt),
             field("연료 [kg]", f.fuel),
             field("t_end [s]", f.tEnd)),
-          // t_end가 경로 완주 시간과 묶여 있다는 사실이 소스에만 있으면 편집이 조용한
-          // 미완주로 끝난다 — 도달반경을 200(엔진 기본)으로, 속도를 140으로 내리면
-          // 기본 미션이 완주 못 하고 150~260 m 상공에서 끝난다(리뷰 실측)
+          // t_end가 완주 시간과 묶여 있다는 사실이 소스에만 있으면 편집이 조용한
+          // 미완주로 끝난다 — 짧으면 서기 전에 끊긴다
           el("p", { class: "hint", style: HINT_ST },
-            "고도 0 = 이륙점(원점) — 트림은 정상 수평비행이라 활주로 정지가 아니라 ",
-            "이륙 직후다. t_end는 경로 완주 시간을 덮어야 한다 (기본 미션 ~176 s) — ",
-            "짧으면 복귀 전에 끊기고, 길면 착륙 고도 0을 잡은 채 기준면 아래로 진동한다.")),
+            "활주로를 켜면 발사대·활주로 위 정지에서 출발합니다 — 그때 마하는 0이고 ",
+            "고도는 비행 고도가 아니라 활주로 표고입니다(지상 평형해). 끄면 종전처럼 ",
+            "수평비행 트림에서 출발하고 마하 > 0이 필요합니다. ",
+            "t_end는 정지까지 덮어야 합니다 — 기본 미션 실측 접지 110 s · 정지 133 s.")),
+        el("div", { class: "opt-group", style: GROUP_ST },
+          groupTitle("활주로 · 지면", f.groundOn),
+          el("div", { class: "row-inner", style: INNER_ST },
+            field("방위 [rad]", f.rwHeading),
+            field("길이 [m]", f.rwLength)),
+          el("p", { class: "hint", style: HINT_ST },
+            "이걸 켜야 스키드가 달립니다 — 끄면 지면 자체가 없어 기체가 지면을 ",
+            "그대로 통과하고, 접지·정지 판정(on_ground·speed_le)도 성립하지 않습니다. ",
+            "지면은 표고 하나짜리 평면입니다 — 지형·파고는 미모델입니다. ",
+            "표고는 위 '고도' 칸이고 기준면 감시도 그 값을 씁니다. ",
+            "길이 1,500 m는 실측 미끄럼 870 m + 접지점 산포 여유입니다.")),
+        el("div", { class: "opt-group", style: GROUP_ST },
+          groupTitle("발사 레일", f.launchOn),
+          el("div", { class: "row-inner", style: INNER_ST },
+            field("길이 [m]", f.railLen),
+            field("앙각 [rad]", f.railAngle),
+            field("이탈속도 [m/s]", f.railExit)),
+          el("p", { class: "hint", style: HINT_ST },
+            "레일 구간은 힘이 아니라 구속이라, 자세가 고정된 등가속 운동입니다 ",
+            "— 해석해로 정확히 적분하므로 스텝 수와 무관합니다. ",
+            "이탈속도 81.5 m/s는 트림 실속속도 70.9의 1.15배이고, 레일 10 m에서 ",
+            "그 속도는 33.9 g를 요구합니다 — 종방향 발사하중 한계가 아직 없어 ",
+            "(구조 한계표의 6.0은 Nz입니다) 결과에 '미판정'으로 표시됩니다.")),
         el("div", { class: "opt-group", style: GROUP_ST },
           groupTitle("항법 오차 모델", f.navOn),
           el("div", { class: "row-inner", style: INNER_ST },
             field("시드", f.seed)),
+          el("div", { class: "row-inner", style: INNER_ST },
+            el("label", { class: "chk" }, f.rtkOn, " RTK 고정해")),
           el("p", { class: "hint", style: HINT_ST }, store.get("navParams")
-            ? "구조도 적용값 사용 중 (시드만 여기서 우선)"
-            : "미지정 항목은 엔진 기본값 — 편집은 구조도 탭 항법 블록")),
+            ? "구조도 적용값 사용 중 (시드만 여기서 우선). "
+            : "미지정 항목은 엔진 기본값 — 편집은 구조도 탭 항법 블록. ",
+            "RTK는 접지를 부드럽게 하지 않습니다 — 접지 지점을 반복 가능하게 합니다 ",
+            "(실측 5시드: 접지 지점 폭 기본 874 m → RTK 92 m, 강하율은 둘 다 σ 0.07). ",
+            "활주로가 1,500 m라 그 산포가 곧 활주로에 내리느냐를 가릅니다. ",
+            "fix 유지가 전제입니다 — 보정 링크가 끊겨 강등되는 상황은 미모델입니다.")),
         el("div", { class: "opt-group", style: GROUP_ST },
           groupTitle("작동기 (2차계)", f.actOn),
           el("div", { class: "row-inner", style: INNER_ST },
@@ -449,7 +520,7 @@ function renderModeTable(modeBox) {
       el("thead", {}, el("tr", {},
         el("th", { class: "c-md" }, "모드"),
         el("th", { class: "c-sm" }, "속도 [m/s]"),
-        el("th", { class: "c-sm" }, "고도 [m] | path"),
+        el("th", { class: "c-md" }, "종방향"), el("th", { class: "c-sm" }, "값"),
         el("th", { class: "c-md" }, "헤딩"),
         el("th", { class: "c-md" }, "이탈 조건"), el("th", { class: "c-sm" }, "값"),
         el("th", { class: "c-md" }, "다음"), el("th", {}, ""))),
@@ -458,8 +529,22 @@ function renderModeTable(modeBox) {
           onchange: (ev) => { r.name = ev.target.value; } })),
         el("td", {}, el("input", { value: r.speed,
           onchange: (ev) => { r.speed = ev.target.value; } })),
-        el("td", {}, el("input", { value: r.alt,
-          onchange: (ev) => { r.alt = ev.target.value; } })),
+        // 종방향은 **하나를 고르게** 한다 — alt·pitch·hdot이 전부 θ_cmd로 가므로
+        // 축마다 칸을 주면 둘을 채운 행이 만들어지고, 그때 화면은 "무엇이 먹었는지"를
+        // 말할 수 없다. 배타 규칙이 편집 형태에 그대로 드러난다
+        el("td", {}, el("select", {
+          onchange: (ev) => { r.lonAxis = ev.target.value; renderModeTable(modeBox); },
+        }, LON_AXES.map((a) =>
+          el("option", { value: a.value, selected: a.value === (r.lonAxis ?? "") },
+            a.label)))),
+        el("td", {}, el("input", {
+          value: r.lonValue ?? "",
+          // 축이 off면 값 칸도 잠근다 — 적어 둔 숫자가 나가지 않는데 남아 있으면
+          // "이 값이 쓰인다"고 읽힌다
+          disabled: !(r.lonAxis ?? ""),
+          title: LON_AXES.find((a) => a.value === (r.lonAxis ?? ""))?.unit ?? "",
+          onchange: (ev) => { r.lonValue = ev.target.value; },
+        })),
         el("td", {}, el("input", { value: r.heading,
           onchange: (ev) => { r.heading = ev.target.value; } })),
         el("td", {}, el("select", {
@@ -478,13 +563,16 @@ function renderModeTable(modeBox) {
     )),
     el("div", { class: "row", style: "margin-top: 8px" },
       el("button", { onclick: () => {
-        modeRows.push({ name: `mode${modeRows.length + 1}`, speed: "", alt: "",
+        modeRows.push({ name: `mode${modeRows.length + 1}`, speed: "",
+                        lonAxis: "", lonValue: "",
                         heading: "", exitKind: "time_ge", exitValue: "1e9", next: "" });
         renderModeTable(modeBox);
       } }, "모드 추가"),
       el("span", { class: "hint" },
-        '헤딩·고도: 수치 | "path"(경로추종이 낸다) | 빈=그 축 off. 속도는 수치 | 빈=off. ',
-      '고도에 "path"를 적으면 웨이포인트의 세로 프로파일을 따라 난다 — 숫자를 적으면 그 숫자가 이긴다')),
+        "종방향은 고도·피치·강하율 중 하나만 — 셋 다 θ 명령으로 가므로 함께 켤 수 없습니다. ",
+        'off면 고도축이 트림 자세를 유지합니다. 고도축에만 "path"를 적을 수 있고, 그러면 ',
+        "웨이포인트의 세로 프로파일을 따라 납니다. 강하율은 상승이 + 라 강하는 음수입니다. ",
+        '헤딩: 수치 | "path"(경로추종) | 빈=off. 속도는 수치 | 빈=off')),
   );
 }
 
@@ -650,6 +738,14 @@ function renderReplay(replayBox) {
         ? ` · 최저 고도 ${fmt(env.min_alt, 4)} m @ ${fmt(env.min_alt_t, 4)}s` : "",
       env.first_flag_t != null ? ` · 최초 플래그 ${fmt(env.first_flag_t, 4)}s` : "",
       ` · 최종 h ${fmt(sig.h[sig.h.length - 1], 4)} m · 잔여 연료 ${fmt(sig.fuel[sig.fuel.length - 1], 4)} kg`),
+    // 이착륙 요약 — 단계가 없으면 **행 자체가 없다**(0으로 채우면 착륙하지 않은 런이
+    // "접지 강하율 0 = 완벽한 착륙"으로 읽힌다). 판정 기준이 없는 사출 하중은
+    // 값과 함께 "미판정"을 낸다 — 초록 배지를 주면 34 g가 통과한 것처럼 보인다
+    ...landingSummary(body).map((r) => el("p", { class: "hint" },
+      el("b", {}, `${r.label} `), r.value,
+      r.note ? " — " : "", r.note ?? "",
+      r.unjudged ? " " : "", r.unjudged ? flagBadge(null) : "",
+      r.over ? " " : "", r.over ? flagBadge(false, "", "활주로 초과") : "")),
     el("div", { class: "row" }, playBtn, speedSel, slider, readout),
     // 궤적 뷰 — 입체·평면·측면·정면 순. 배치는 .triview가 폭에 따라 1열/2열로
     // 고르며, 열 수를 4의 약수로만 두어 마지막 줄에 외톨이가 남지 않게 한다.

@@ -11,8 +11,28 @@ export const COND_KINDS = {
   alt_le: 1,
   speed_ge: 1,
   speed_le: 1,
+  hdot_ge: 1,
+  hdot_le: 1,
   path_done: 0,
+  on_ground: 0,
+  airborne: 0,
+  off_rail: 0,
 };
+
+/** 종방향 지령 축 — 셋은 **배타**다(엔진 validate_longitudinal).
+ *
+ * alt·pitch·hdot이 전부 θ_cmd로 가므로 둘을 켜면 누가 이기는지를 어딘가에 정해야
+ * 하고, 그 순간 화면은 "무엇이 먹었는지"를 말할 수 없다. 그래서 편집 표도 축마다
+ * 칸을 주지 않고 **하나를 고르게** 한다 — 배타 규칙이 UI 형태에 그대로 드러난다.
+ *
+ * value: 서버 ModeIn의 필드 이름. ""는 종방향 축 전부 끔(고도축 PI가 트림 θ 유지).
+ */
+export const LON_AXES = [
+  { value: "", label: "off", unit: "" },
+  { value: "alt", label: "고도", unit: "m | path" },
+  { value: "pitch", label: "피치", unit: "rad" },
+  { value: "hdot", label: "강하율", unit: "m/s (상승 +)" },
+];
 
 function num(text, what) {
   const s = String(text).trim();
@@ -36,6 +56,32 @@ function numOrPath(text, what) {
   return s === "path" ? "path" : num(s, what);
 }
 
+/** 편집 행의 종방향 선택 → 서버 ModeIn의 세 필드 {alt, pitch, hdot}.
+ *
+ * 고른 축 하나에만 값이 들어가고 나머지는 null이다 — 배타가 여기서 구조적으로
+ * 보장되므로 "둘 다 채운 행"이 만들어질 수 없다. "path"는 고도축에서만 뜻이 있다
+ * (경로가 세로 프로파일을 낸다) — 피치·강하율에 넣으면 서버가 422로 거부하지만,
+ * 그 전에 여기서 무엇이 잘못됐는지 짚어 준다.
+ */
+function lonAxes(r, name) {
+  const axis = String(r.lonAxis ?? "").trim();
+  const out = { alt: null, pitch: null, hdot: null };
+  if (axis === "") return out;
+  if (!Object.hasOwn(out, axis)) throw new Error(`${name}: 모르는 종방향 축 — ${axis}`);
+  if (axis === "alt") {
+    out.alt = numOrPath(r.lonValue, `${name}.고도`);
+  } else {
+    const s = String(r.lonValue ?? "").trim();
+    if (s === "path") {
+      throw new Error(
+        `${name}: "path"는 고도축에서만 — 경로가 내는 것은 세로 프로파일(고도)이다`,
+      );
+    }
+    out[axis] = numOrNull(s, `${name}.${axis === "pitch" ? "피치" : "강하율"}`);
+  }
+  return out;
+}
+
 export function buildModes(rows) {
   return rows.map((r) => {
     const name = String(r.name).trim();
@@ -45,7 +91,7 @@ export function buildModes(rows) {
     return {
       name,
       speed: numOrNull(r.speed, `${name}.speed`),
-      alt: numOrPath(r.alt, `${name}.alt`),
+      ...lonAxes(r, name),
       heading: numOrPath(r.heading, `${name}.heading`),
       exit,
       next: String(r.next).trim() || null,

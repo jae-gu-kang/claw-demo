@@ -41,3 +41,73 @@ export function extent(arr) {
   }
   return lo <= hi ? [lo, hi] : [0, 1];
 }
+
+/** 재생 응답 → 이착륙 요약 [{label, value, note}] — 단계가 없으면 **행 자체가 없다**.
+ *
+ * 0으로 채우면 착륙하지 않은 런이 "접지 강하율 0 = 완벽한 착륙"으로 읽힌다.
+ * 사출 하중은 **판정 기준이 없어** 값과 함께 "미판정"을 낸다 — 구조 한계표의
+ * n_limit_pos 6.0은 Nz라 종방향 34 g를 판정할 수 없고, n_x_launch는 아직 [TBD]다.
+ * 판정 불가를 통과로 위장하지 않는다는 규약이 화면에 나오는 자리다.
+ */
+export function landingSummary(body) {
+  const ph = body?.meta?.phases;
+  const sig = body?.signals ?? {};
+  const t = body?.t ?? [];
+  if (!ph) return [];
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const rows = [];
+  const idxAt = (tv) => {
+    if (typeof tv !== "number" || !t.length) return null;
+    let best = 0;
+    for (let i = 1; i < t.length; i += 1) {
+      if (Math.abs(t[i] - tv) < Math.abs(t[best] - tv)) best = i;
+    }
+    return best;
+  };
+
+  if (typeof ph.launch_exit_t === "number") {
+    const gx = Array.isArray(sig.launch_gx)
+      ? sig.launch_gx.reduce((m, x) => (typeof x === "number" && x > m ? x : m), 0) : null;
+    rows.push({
+      label: "레일 이탈",
+      value: `${ph.launch_exit_t.toFixed(3)} s`,
+      note: gx
+        ? `사출 ${gx.toFixed(1)} g — 종방향 발사하중 한계 미정 [TBD], 판정 불가`
+        : "사출 하중 미계측",
+      unjudged: Boolean(gx),
+    });
+  }
+  const k = idxAt(ph.touchdown_t);
+  if (k !== null) {
+    // 강하율·속도는 **엔진이 전 해상도에서 잰 값**을 그대로 쓴다. 여기서 신호로
+    // 다시 계산하면 재생 응답이 stride로 솎여 있어 다른 수가 나온다 — 접지 직후
+    // 승강률은 0.02 s에 −0.98 → −0.83으로 움직이고, 라이브에서 실제로 −0.98을
+    // −0.74로 표시했다. 화면이 조용히 다른 접지를 말하는 자리였다.
+    const hdot = num(ph.td_sink_rate);
+    const V = num(ph.td_speed);
+    rows.push({
+      label: "접지",
+      value: `${ph.touchdown_t.toFixed(2)} s`,
+      note: [
+        hdot === null ? "강하율 미계측" : `강하율 ${hdot.toFixed(2)} m/s`,
+        V === null ? null : `속도 ${V.toFixed(1)} m/s`,
+      ].filter(Boolean).join(" · "),
+    });
+  }
+  const j = idxAt(ph.stop_t);
+  if (j !== null && k !== null) {
+    const dn = (sig.pn?.[j] ?? 0) - (sig.pn?.[k] ?? 0);
+    const de = (sig.pe?.[j] ?? 0) - (sig.pe?.[k] ?? 0);
+    const dist = Math.hypot(dn, de);
+    const rw = body?.meta?.runway?.length;
+    rows.push({
+      label: "정지",
+      value: `${ph.stop_t.toFixed(2)} s`,
+      note: `접지→정지 직선거리 ${Math.round(dist)} m`
+        + (typeof rw === "number"
+          ? ` / 활주로 ${Math.round(rw)} m${dist > rw ? " — **넘어섰다**" : ""}` : ""),
+      over: typeof rw === "number" && dist > rw,
+    });
+  }
+  return rows;
+}

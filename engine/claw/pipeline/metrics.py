@@ -108,34 +108,17 @@ def _xtrack_rms(signals, waypoints):
 
 
 def climb_rate(signals, k):
-    """표본 k의 승강률 ḣ [m/s] (상승 +) — 동체축 속도를 자세로 돌린 NED 상방 성분.
+    """표본 k의 승강률 ḣ [m/s] (상승 +) — 시뮬이 기록한 참값 신호를 읽는다.
 
-        ḣ = u·sinθ − v·sinφ·cosθ − w·cosφ·cosθ
+    **여기에 오일러 전개식을 적지 않는다.** 시뮬이 body_to_ned로 정확히 계산해
+    "hdot" 신호로 남기므로(sim/simulator.py), 로그에서 그것을 다시 유도하면 같은
+    물리량이 두 번 정의된다 — 실제로 그 사본이 웹까지 세 벌로 늘어났고, 그중
+    하나가 φ·v 항을 빠뜨린 φ=0 특수해였다(측풍 접지에서 0.5 m/s 오차).
 
-    3-2-1 회전의 **정확한 셋째 행**이다. φ·v 항을 빼고 u·sinθ − w·cosθ로 쓰면
-    φ=0·v=0에서만 맞는다 — 측풍 접지(디크랩: φ 10°·v 5 m/s)에서 0.55 m/s가 틀리고
-    부호가 뒤집히는 구간도 있다. 접지 강하율의 판별 범위 전체가 1.0(플레어 있음)
-    대 4.6(없음)이라 그 오차는 결론을 바꾼다.
-
-    법칙·유도 쪽 승강률 정본은 `−nav.vel_n[2]`다(guidance/modes.py, fcl/law.py).
-    여기서 그 값을 그대로 못 쓰는 이유는 SimResult가 항법 NED 속도가 아니라
-    **참값 동체 속도**를 기록하기 때문이고(sim/simulator.py), 그래서 같은 물리량을
-    로그에서 복원하는 자리는 **이 함수 하나**여야 한다.
-
-    비유한 표본이면 None — JSON 왕복본의 null이 _arr에서 NaN이 되어 들어올 수 있고
-    (모듈 머리말 계약), NaN을 그대로 내보내면 "판정 불가"가 수치인 척 흘러간다.
+    신호가 없거나(지면 도입 전 저장 결과) 비유한이면 None — NaN을 수치인 척
+    흘려보내지 않는다.
     """
-    parts = [_arr(signals, n) for n in ("u", "v", "w", "phi", "theta")]
-    if any(a is None or k >= len(a) for a in parts):
-        return None
-    u, v, w, phi, th = (float(a[k]) for a in parts)
-    if not all(math.isfinite(x) for x in (u, v, w, phi, th)):
-        return None
-    return (
-        u * math.sin(th)
-        - v * math.sin(phi) * math.cos(th)
-        - w * math.cos(phi) * math.cos(th)
-    )
+    return _finite_at(signals, "hdot", k)
 
 
 def _finite_at(signals, name, k):

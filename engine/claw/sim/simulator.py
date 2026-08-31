@@ -205,7 +205,7 @@ class Simulator:
         progress_stride = max(1, n_steps // 100)
         sig = {k: np.empty(n_steps) for k in (
             "pn", "pe", "h", "u", "v", "w", "p", "q", "r", "phi", "theta", "psi",
-            "V", "alpha", "beta", "mach", "fuel",
+            "V", "alpha", "beta", "mach", "fuel", "hdot",
             "de", "da", "dr", "thr_l", "thr_r", "alpha_margin",
             "n_gear", "launch_gx",
             *_CHAIN_SIGNALS,
@@ -284,6 +284,10 @@ class Simulator:
                 ("p", omega[0]), ("q", omega[1]), ("r", omega[2]),
                 ("phi", eul[0]), ("theta", eul[1]), ("psi", eul[2]),
                 ("V", V), ("alpha", alpha), ("beta", beta), ("mach", mach),
+                # 참값 승강률 (상승 +) — 법칙이 보는 것은 nav의 추정치이고 이건 참값이다
+                # (h·V·α와 같은 자리). 동체 속도를 자세로 돌린 NED 상방 성분이라
+                # body_to_ned 하나로 정확히 나온다 — 오일러 전개식을 어디에도 적지 않는다
+                ("hdot", -float(body_to_ned(q_nb, vel_b)[2])),
                 ("fuel", fuel), ("de", de), ("da", da), ("dr", rud_pos),
                 ("thr_l", controls["throttle"][0]), ("thr_r", controls["throttle"][1]),
             ):
@@ -425,7 +429,14 @@ class Simulator:
         읽힌다(01 §4.2 판정 불가를 0으로 위장하지 않는다와 같은 자리). 소비자는
         None을 "그 일이 일어나지 않았다"로 읽으면 된다.
         """
-        out = {"launch_exit_t": launch_exit_t, "touchdown_t": None, "stop_t": None}
+        # td_sink_rate·td_speed는 **여기서(전 해상도) 잰다.** 재생 응답은 stride로
+        # 솎여 나가는데, 접지 직후 승강률은 0.02 s에 −0.98 → −0.83으로 움직인다 —
+        # 화면이 솎아낸 표본에서 다시 계산하면 조용히 다른 수를 말한다(라이브에서
+        # −0.98을 −0.74로 표시했다). 기준선은 결과와 함께 다닌다.
+        out = {
+            "launch_exit_t": launch_exit_t, "touchdown_t": None, "stop_t": None,
+            "td_sink_rate": None, "td_speed": None,
+        }
         wow = sig["wow"]
         if len(t_arr) == 0 or self.aircraft.ground is None:
             return out
@@ -436,6 +447,9 @@ class Simulator:
             if after.size:
                 i = int(np.argmax(airborne)) + int(after[0])
                 out["touchdown_t"] = float(t_arr[i])
+                for key, name in (("td_sink_rate", "hdot"), ("td_speed", "V")):
+                    v = float(sig[name][i])
+                    out[key] = v if math.isfinite(v) else None
                 # 정지 = 접지 이후 속도가 문턱 아래로 처음 내려간 순간 (접지 상태 유지)
                 slow = np.flatnonzero((sig["V"][i:] < self.STOP_SPEED) & wow[i:])
                 if slow.size:

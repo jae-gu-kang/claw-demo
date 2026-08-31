@@ -137,27 +137,18 @@ def _rms_of(vals):
 
 
 def _landing_signals(n=12):
-    """접지 t=0.03, 정지 t=0.09인 합성 신호 — **실제로 강하 중**이고 뱅크가 있다.
+    """접지 t=0.03, 정지 t=0.09인 합성 신호.
 
-    처음 이 픽스처는 w=19.7이었는데 그 값에서 ḣ = +0.46, 즉 초당 0.46 m로
-    **올라가는** 접지였다. 기댓값을 구현식으로 다시 평가해 만들었던 탓에 아무도
-    못 잡았다 — 그래서 여기 값은 손으로 확인한 −1.0 근처로 두고, 아래 단정은
-    구현을 베끼지 않은 독립 산출값을 쓴다.
-
-    φ와 v를 0이 아닌 값으로 두는 것이 핵심이다: 근사식(u·sinθ − w·cosθ)은 그 둘이
-    0일 때만 맞으므로, 여기서 0을 주면 φ·v 항 누락을 원리적으로 못 잡는다.
+    승강률은 **시뮬이 기록한 hdot 신호**다 — 지표는 그것을 읽을 뿐 u·v·w·φ·θ에서
+    다시 유도하지 않는다. 그 유도식이 세 벌로 늘어났던 것이 문제였고(하나는 φ·v를
+    빠뜨린 φ=0 특수해), 지금은 sim/simulator.py의 body_to_ned 한 곳에만 있다.
     """
     import numpy as np
 
-    th = np.full(n, 0.25)  # θ = 14.32°
-    phi = np.full(n, 0.17)  # φ = 9.74° — 측풍 접지(디크랩)
-    u = np.full(n, 79.0)
-    v = np.full(n, 5.0)  # 횡속도가 있어야 v·sinφ·cosθ 항이 드러난다
-    w = np.full(n, 20.4)
     return {
-        "u": u, "v": v, "w": w, "phi": phi, "theta": th,
-        # V·theta를 표본마다 흔들어 인덱스를 실제로 고정한다 — 전부 상수면
-        # k가 한 칸 어긋나도 단정이 통과해 버린다
+        "hdot": np.full(n, -0.7556),  # 강하 중 (상승 +이므로 음수)
+        # V·pn을 표본마다 흔들어 인덱스를 실제로 고정한다 — 전부 상수면 k가 한 칸
+        # 어긋나도 단정이 통과해 버린다
         "V": 81.4 + np.arange(n) * 0.5,
         "pn": np.arange(n) * 100.0, "pe": np.zeros(n),
         "launch_gx": np.array([33.9] * 3 + [0.0] * (n - 3)),
@@ -166,39 +157,27 @@ def _landing_signals(n=12):
     }
 
 
-def test_climb_rate_is_the_exact_rotation_not_the_phi_zero_special_case():
-    """φ·v 항이 빠진 근사식과 정확식이 갈리는 것을 직접 못박는다.
+def test_climb_rate_reads_the_logged_signal_not_a_second_formula():
+    """지표는 시뮬이 남긴 참값 승강률을 **읽는다** — 여기서 다시 유도하지 않는다.
 
-    근사 u·sinθ − w·cosθ는 φ=0·v=0에서만 맞는다. 측풍 접지에서 0.5 m/s 넘게
-    틀리고, 접지 강하율의 판별 범위(1.0 대 4.6)를 생각하면 결론이 바뀐다.
+    신호가 없으면(지면 도입 전 저장 결과) None이지 0이 아니다. 회전식 자체의
+    정확성은 시뮬 쪽 성질이라 test_launch가 body_to_ned 대조로 못박는다.
     """
     from claw.pipeline.metrics import climb_rate
 
     sig = _landing_signals()
-    got = climb_rate(sig, 3)
-    u, v, w, phi, th = 79.0, 5.0, 20.4, 0.17, 0.25
-    exact = (u * math.sin(th) - v * math.sin(phi) * math.cos(th)
-             - w * math.cos(phi) * math.cos(th))
-    assert got == pytest.approx(exact)
-    naive = u * math.sin(th) - w * math.cos(th)
-    assert abs(naive - exact) > 0.5, "이 픽스처가 근사식 오차를 드러내야 한다"
-    # φ=0·v=0이면 둘이 같아진다 — 근사가 언제 맞는지도 함께 고정
-    flat = {**sig, "phi": np.zeros(12), "v": np.zeros(12)}
-    assert climb_rate(flat, 3) == pytest.approx(
-        u * math.sin(th) - w * math.cos(th)
-    )
+    assert climb_rate(sig, 3) == pytest.approx(-0.7556)
+    assert climb_rate({k2: v2 for k2, v2 in sig.items() if k2 != "hdot"}, 3) is None
+    assert climb_rate({**sig, "hdot": [None] * 12}, 3) is None
+    assert climb_rate({**sig, "hdot": np.full(12, np.nan)}, 3) is None
+    assert climb_rate(sig, 999) is None, "범위 밖 인덱스"
 
 
-def test_climb_rate_refuses_nonfinite_samples():
-    """JSON 왕복본의 null은 _arr에서 NaN이 된다 — 수치인 척 흘려보내지 않는다."""
+def test_touchdown_is_a_descent_in_this_fixture():
+    """부호 규약을 따로 고정한다 — 지표가 크기라 그 안에서는 안 드러난다."""
     from claw.pipeline.metrics import climb_rate
 
-    sig = _landing_signals()
-    assert climb_rate(sig, 3) is not None
-    assert climb_rate({**sig, "v": [None] * 12}, 3) is None
-    assert climb_rate({**sig, "phi": np.full(12, np.nan)}, 3) is None
-    assert climb_rate({k2: v2 for k2, v2 in sig.items() if k2 != "w"}, 3) is None
-    assert climb_rate(sig, 999) is None, "범위 밖 인덱스"
+    assert climb_rate(_landing_signals(), 3) < 0.0, "접지는 내려오면서 한다"
 
 
 def test_landing_metrics_from_phase_times():
@@ -208,14 +187,7 @@ def test_landing_metrics_from_phase_times():
     t = np.arange(n) * 0.01
     meta = {"phases": {"launch_exit_t": 0.02, "touchdown_t": 0.03, "stop_t": 0.09}}
     out = _landing_metrics(t, _landing_signals(n), meta)
-    # **독립 산출값이다** — 구현식을 다시 평가하지 않는다.
-    #   79·sin0.25          = +19.5449
-    #   −5·sin0.17·cos0.25  =  −0.8196
-    #   −20.4·cos0.17·cos0.25 = −19.4809
-    #   합 ḣ = −0.7556  →  크기 0.7556
-    # (처음 여기 −1.0245를 적었다가 틀렸다. 구현식을 베꼈다면 그 오류가 드러나지
-    #  않았을 것이고, 그래서 이 자리는 손계산 상수여야 한다.)
-    assert out["td_sink_rate"] == pytest.approx(0.7556, abs=1e-3)
+    assert out["td_sink_rate"] == pytest.approx(0.7556, abs=1e-4)
     assert out["td_sink_rate"] > 0.0, "지표는 **크기**다 (better='lower'가 참이려면)"
     assert out["td_speed"] == pytest.approx(81.4 + 3 * 0.5), "접지 표본의 V"
     assert out["rollout_dist"] == pytest.approx(600.0)  # 300 m → 900 m

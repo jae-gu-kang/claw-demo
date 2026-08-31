@@ -133,6 +133,7 @@ def test_without_launch_nothing_changes(launched):
     _rail, res = _sim(t_end=2.0, launch=False)
     assert res.meta["phases"] == {
         "launch_exit_t": None, "touchdown_t": None, "stop_t": None,
+        "td_sink_rate": None, "td_speed": None,
     }
     assert not res.signals["on_rail"].any()
     assert res.signals["wow"][0], "지상 평형에서 출발하므로 처음부터 접지"
@@ -164,24 +165,31 @@ def test_touchdown_and_stop_are_found_in_order():
     sig = {
         "wow": np.array([0, 0, 0, 1, 1, 1, 1, 1, 1, 1], dtype=bool),
         "V": np.array([80.0, 70, 60, 50, 40, 20, 5, 0.4, 0.2, 0.1]),
+        "hdot": np.array([-5.0, -3.0, -2.0, -1.0, 0.0, 0, 0, 0, 0, 0]),
     }
     out = _phase_times(sig, n)
     assert out["touchdown_t"] == pytest.approx(0.03)
     assert out["stop_t"] == pytest.approx(0.07)
+    # 접지 순간의 상태도 **여기서(전 해상도) 잰다** — 화면이 솎아낸 재생본에서
+    # 다시 계산하면 다른 수가 나온다(접지 직후 승강률은 0.02 s에 크게 움직인다)
+    assert out["td_sink_rate"] == pytest.approx(-1.0)
+    assert out["td_speed"] == pytest.approx(50.0)
 
 
 def test_never_landing_reports_none_not_zero():
     """0으로 채우면 't=0에 접지'가 되어 착륙하지 않은 런이 완벽한 착륙으로 읽힌다."""
     n = 5
-    sig = {"wow": np.zeros(n, dtype=bool), "V": np.full(n, 90.0)}
+    sig = {"wow": np.zeros(n, dtype=bool), "V": np.full(n, 90.0),
+           "hdot": np.full(n, -4.0)}
     out = _phase_times(sig, n)
     assert out["touchdown_t"] is None
     assert out["stop_t"] is None
+    assert out["td_sink_rate"] is None and out["td_speed"] is None
 
 
 def test_starting_on_the_ground_is_not_a_touchdown():
     n = 5
-    sig = {"wow": np.ones(n, dtype=bool), "V": np.zeros(n)}
+    sig = {"wow": np.ones(n, dtype=bool), "V": np.zeros(n), "hdot": np.zeros(n)}
     assert _phase_times(sig, n)["touchdown_t"] is None
 
 
@@ -191,10 +199,12 @@ def test_touchdown_without_stopping_reports_no_stop():
     sig = {
         "wow": np.array([0, 0, 1, 1, 1, 1], dtype=bool),
         "V": np.array([80.0, 78, 76, 60, 40, 30]),
+        "hdot": np.array([-4.0, -3.0, -1.2, 0.0, 0, 0]),
     }
     out = _phase_times(sig, n)
     assert out["touchdown_t"] == pytest.approx(0.02)
     assert out["stop_t"] is None
+    assert out["td_sink_rate"] == pytest.approx(-1.2), "접지 상태는 정지 전에도 난다"
 
 
 def test_ground_elev_validation():
@@ -296,3 +306,45 @@ def test_pitch_launch_climbs_out_cleanly(pitch_launched):
     assert res.envelope["any_flag"] is False
     assert res.envelope["min_alt"] >= 1.0, "발사대 높이 아래로 내려간 적 없음"
     assert s["h"][-1] == pytest.approx(300.0, rel=0.15)
+
+
+# ---- 참값 승강률 신호 (지표·화면이 공유하는 단일 정의) ----
+
+
+def test_logged_hdot_is_the_exact_ned_up_component(launched):
+    """hdot 신호가 body_to_ned의 셋째 성분과 **정확히** 같다.
+
+    승강률 유도식이 한때 엔진 지표·웹·테스트에 세 벌로 있었고 그중 하나가
+    u·sinθ − w·cosθ, 즉 φ=0·v=0 특수해였다. 지금은 시뮬이 body_to_ned로 한 번
+    계산해 신호로 남기고 나머지는 읽기만 한다 — 그 등식을 여기서 못박는다.
+    """
+    from claw.common.attitude import euler_to_quat
+    from claw.common.frames import body_to_ned
+
+    _rail, res = launched
+    s = res.signals
+    for k in (0, 30, 200, 1000, len(res.t) - 1):
+        q = euler_to_quat(float(s["phi"][k]), float(s["theta"][k]), float(s["psi"][k]))
+        vel_b = np.array([float(s["u"][k]), float(s["v"][k]), float(s["w"][k])])
+        assert s["hdot"][k] == pytest.approx(-float(body_to_ned(q, vel_b)[2]), abs=1e-9)
+
+
+def test_naive_euler_formula_is_a_phi_zero_special_case():
+    """φ·v 항을 뺀 근사가 언제 맞고 언제 틀리는지 — 신호를 body_to_ned로 낸 이유.
+
+    이 런(직진 발사·상승)에서는 φ와 v가 정확히 0이라 근사와 정확식이 5e-15까지
+    같다 — **오차가 오래 숨을 수 있었던 이유가 그것이다.** 뱅크와 횡속도가 있는
+    상태를 직접 주면 0.5 m/s 넘게 갈리고, 접지 강하율의 판별 범위(1.0 대 4.6)에서는
+    그 차이가 결론을 바꾼다. 그래서 로그에서 유도하지 않고 신호로 남긴다.
+    """
+    from claw.common.attitude import euler_to_quat
+    from claw.common.frames import body_to_ned
+
+    u, v, w, phi, th = 79.0, 5.0, 20.4, 0.17, 0.25
+    exact = -float(body_to_ned(euler_to_quat(phi, th, 0.0), np.array([u, v, w]))[2])
+    naive = u * math.sin(th) - w * math.cos(th)
+    assert exact == pytest.approx(-0.7556, abs=1e-3)
+    assert abs(naive - exact) > 0.5, "뱅크·횡속도가 있으면 근사가 크게 틀린다"
+    # φ=0·v=0이면 둘이 같아진다 — 근사가 **언제** 맞는지도 함께 고정
+    flat = -float(body_to_ned(euler_to_quat(0.0, th, 0.0), np.array([u, 0.0, w]))[2])
+    assert flat == pytest.approx(naive)
