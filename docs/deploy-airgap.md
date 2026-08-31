@@ -141,7 +141,7 @@ sudo systemctl daemon-reload && sudo systemctl restart claw
 
 ```bash
 scripts/run.sh                  # 본인만
-HOST=0.0.0.0 scripts/run.sh     # 팀원 접속
+HOST=0.0.0.0 scripts/run.sh     # 팀원 접속 — 인증은 옵트인이다, 아래 절 먼저 볼 것
 ```
 
 **`uvicorn --workers 2` 이상은 조용히 깨진다.** `server/claw_server/jobs.py`의
@@ -216,15 +216,42 @@ Render 대시보드 같은 대안이 없으므로 이 대조가 유일한 확인
 `Restart=on-failure` 아래서 PyPI 재시도 루프가 됐을 자리다. 반입한 wheelhouse는
 지우지 말고 고정된 경로에 두는 것이 좋다.
 
-### 인증이 없다
+### 인증은 옵트인이다
 
-이 서버에는 인증이 없고 CORS도 전면 허용이다(`server/claw_server/app.py`).
-`HOST=0.0.0.0`으로 노출하면 접근 가능한 누구나 결과를 읽고 쓰고 연산 작업을
-실행할 수 있다. 팀 공유 용도로 쓸 계획이면 **이동 전에 일반망에서** 인증을
-붙여 두는 편이 낫다 — 폐쇄망에서 개발하면 느려지는 것이 이 전략의 전제다.
+**기본은 무인증**이고 CORS는 전면 허용이다(`app.py`). `HOST=0.0.0.0`으로 노출하면
+접근 가능한 누구나 결과를 읽고 쓰고 연산 작업을 실행할 수 있다 — 위 '워커를 늘리지
+말 것'의 `HOST=0.0.0.0 scripts/run.sh`가 그 상태다.
 
-리버스 프록시(nginx·Caddy)보다 앱 자체에 붙이는 쪽을 권한다. 프록시를 쓰면 그
-바이너리와 설정까지 별도 반입 대상이 되어 승인 surface가 넓어진다.
+`CLAW_ACCESS_PASSWORD`를 주면 **공용 비밀번호 하나짜리 Basic Auth**가 켜진다
+(`auth.py` — 공개 데모가 쓰는 방식, 아이디는 무엇이든 무시하고 비밀번호만 본다).
+따로 만들 필요가 없다. `/api/health`만 면제인데, 배포 플랫폼 헬스체크가 자격 없이
+오기 때문이고 위 커밋 대조 절차도 그 면제 위에 선다.
+
+**비밀번호를 유닛 파일에 인라인으로 넣지 말 것.** `/etc/systemd/system/*.service`는
+통상 0644라 그 장비의 모든 사용자가 읽는다. 위 systemd 예시의 `Environment=`는
+`CLAW_GIT_COMMIT`(커밋 해시 — 비밀이 아니다)에만 쓰고, 비밀번호는 파일로 뺀다:
+
+```ini
+# claw.service
+EnvironmentFile=/etc/claw.env
+```
+
+```bash
+# /etc/claw.env — 0600, claw 소유
+sudo install -o claw -g claw -m 600 /dev/null /etc/claw.env
+sudo -e /etc/claw.env    # CLAW_ACCESS_PASSWORD=... 한 줄
+```
+
+`echo ... | sudo tee`로 쓰지 않는 이유는 그러면 비밀번호가 셸 히스토리에 남기
+때문이다. `sudo -e`는 편집기를 거치고 원본의 소유·권한을 보존한다.
+
+CORS는 여전히 전면 허용이라 인증을 켜도 그대로다 — 자격이 실린 요청은 출처를
+가리지 않는다. 단독 사용자 로컬 서버 전제의 [기본값]이므로(02 §4), 그것까지
+좁혀야 하면 별도 결정이 필요하다.
+
+붙일 것이 더 필요하면 리버스 프록시(nginx·Caddy)보다 앱 자체에 붙이는 쪽을 권한다.
+프록시를 쓰면 그 바이너리와 설정까지 별도 반입 대상이 되어 승인 surface가 넓어진다 —
+지금 인증이 앱 안에 있는 이유도 그것이다.
 
 ## 크기 줄이기 (필요할 때만)
 
