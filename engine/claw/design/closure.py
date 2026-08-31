@@ -23,6 +23,7 @@ import numpy as np
 
 from claw.analysis import loop_margins, pi_loop
 from claw.analysis.modes import damp
+from claw.blocks.filters import RATE_FILTERS, rate_filter_tau
 from claw.common.contracts import LinearModel
 
 # 축 → successive closure 명세. rates 순서 = 닫는 순서(튜닝 순서이기도 하다 —
@@ -42,24 +43,86 @@ _WC_GRID_EXPANSIONS = 6  # 교차 탐색 격자 천장 확장 시도 횟수 (4�
 # 시험 없이 버려지므로 실제로 **시험되는 최대 천장은 초기값의 4^5 = 1024배**다)
 
 
-def close_rates(lm_axis, rate_gains: dict) -> LinearModel:
+# 1차 필터의 출력 사상 — 상태식은 둘 다 ẋ_f = (x_rate − x_f)/τ로 같고 출력만 다르다.
+# (c_rate, c_filt): 댐퍼가 먹는 신호 = c_rate·x_rate + c_filt·x_f
+#   저역통과 y = x_f            → (0, 1)
+#   워시아웃 y = x_rate − x_f    → (1, −1)
+_FILTER_OUT = {"lowpass": (0.0, 1.0), "washout": (1.0, -1.0)}
+# 어휘가 늘면 여기서 죽는다 — 안 그러면 5번째 종류가 스테이지 한복판에서 맨
+# KeyError를 내고, run()은 _Cancelled만 잡으므로 세션이 저장 없이 죽는다.
+# 노치는 아래 close_rates가 사유를 달아 거부하므로 이 표의 대상이 아니다.
+_UNSUPPORTED = {"notch"}
+assert set(_FILTER_OUT) | _UNSUPPORTED == set(RATE_FILTERS) - {"none"}, (
+    f"필터 어휘와 레이트 지표 표가 어긋남: "
+    f"{sorted(set(RATE_FILTERS) - {'none'})} vs {sorted(set(_FILTER_OUT) | _UNSUPPORTED)}"
+)
+
+
+def close_rates(lm_axis, rate_gains: dict, rate_filters: dict | None = None) -> LinearModel:
     """레이트 댐퍼 상태 피드백을 접은 축 모델 — A′ = A + Σ B[:,u]·k·e_rateᵀ.
 
     실제 법칙의 u += k_rate·rate 항 그대로다 (부호는 게인이 보유). B는 그대로 —
     자세 PI 루프가 같은 입력으로 들어간다.
+
+    rate_filters: {group: 필터 스펙} — 그 자리의 댐퍼가 **필터를 거친 신호**를
+    먹는 경우(데모 요축 워시아웃 τ=2 s, fcl/demo.py DEMO_YAW). 필터마다 상태를
+    하나 **뒤에 붙인다** — 물리 상태 인덱스가 밀리지 않아야 이름 조회
+    (x_names.index("p") 등)를 쓰는 소비자가 전부 그대로 동작한다.
+
+    노치는 **거부한다**: f0에 복소쌍을 만들고 그 쌍이 `_WN_FLOOR_FRAC` 위에 들어와
+    lat_metrics의 zeta_dr 최소값을 오염시킨다 (01 §7 "작동기·Padé 극이 강체 모드와
+    섞인다"와 같은 문제 — 모드 선별 규칙을 새로 설계해야 한다). 조용히 무시하면
+    지표가 필터를 반영한 척하므로 예외로 막는다. 노치의 마진 평가는 pi_loop 경유.
     """
     A = lm_axis.A.copy()
+    B = lm_axis.B
+    x_names = list(lm_axis.x_names)
+    specs = dict(rate_filters or {})
     spec = AXIS_SPECS[lm_axis.axis]
+
+    # 붙일 필터 상태를 먼저 세어 A를 한 번에 확장 — 물리 상태는 앞쪽 그대로다
+    pending = []
     for group, x_rate, u_in in spec["rates"]:
         k = float(rate_gains.get(f"{group}.k_rate", 0.0))
+        fs = specs.get(group)
         if k == 0.0:
-            continue
-        i = lm_axis.x_names.index(x_rate)
+            continue  # 댐퍼가 꺼진 자리 — 필터도 루프에 없다 (종류를 따지지 않는다)
+        kind = fs.get("kind", "none") if fs is not None else "none"
+        if kind in _UNSUPPORTED:
+            raise ValueError(
+                f"{group}: 노치는 레이트 지표 경로(close_rates)에서 지원하지 않는다 — "
+                "f0 복소쌍이 모드 지표를 오염시킨다 (마진은 pi_loop 경유로 평가할 것)"
+            )
+        use_filter = kind != "none"
+        pending.append((group, x_rate, u_in, k, fs if use_filter else None))
+
+    n0 = A.shape[0]
+    n_new = sum(1 for *_, fs in pending if fs is not None)
+    if n_new:
+        A = np.pad(A, ((0, n_new), (0, n_new)))
+        B = np.pad(B, ((0, n_new), (0, 0)))
+
+    slot = n0
+    for group, x_rate, u_in, k, fs in pending:
+        i = x_names.index(x_rate)
         j = lm_axis.u_names.index(u_in)
-        A[:, i] += lm_axis.B[:, j] * k
+        if fs is None:
+            A[:n0, i] += lm_axis.B[:, j] * k  # 물리 행만 — 확장된 필터 행은 B가 안 닿는다
+            continue
+        tau = rate_filter_tau(fs)  # 환산 정본은 blocks.filters
+        c_rate, c_filt = _FILTER_OUT[fs["kind"]]
+        A[slot, i] += 1.0 / tau  # ẋ_f = (x_rate − x_f)/τ
+        A[slot, slot] += -1.0 / tau
+        if c_rate:
+            A[:n0, i] += lm_axis.B[:, j] * (k * c_rate)
+        A[:n0, slot] += lm_axis.B[:, j] * (k * c_filt)
+        x_names.append(f"{group}_filt")
+        slot += 1
+
+    C = np.pad(lm_axis.C, ((0, 0), (0, n_new))) if n_new else lm_axis.C
     return LinearModel(
-        A=A, B=lm_axis.B, C=lm_axis.C, D=lm_axis.D,
-        x_names=lm_axis.x_names, u_names=lm_axis.u_names, axis=lm_axis.axis,
+        A=A, B=B, C=C, D=lm_axis.D,
+        x_names=tuple(x_names), u_names=lm_axis.u_names, axis=lm_axis.axis,
         dt=lm_axis.dt, case=lm_axis.case, params_fingerprint=lm_axis.params_fingerprint,
     )
 
@@ -140,10 +203,13 @@ def lat_metrics(A, wn_floor, p_index=1) -> dict:
     }
 
 
-def axis_metrics(lm_axis, rate_gains: dict) -> dict:
-    """개루프 축 모델 + 레이트 게인 → 폐쇄 모드 지표 (판정·튜닝 목적함수 공용)."""
+def axis_metrics(lm_axis, rate_gains: dict, rate_filters: dict | None = None) -> dict:
+    """개루프 축 모델 + 레이트 게인 → 폐쇄 모드 지표 (판정·튜닝 목적함수 공용).
+
+    floor는 **개루프** 기준 wn으로 잡는다 — 필터 상태가 붙어도 기준선은 안 움직인다.
+    """
     floor = _WN_FLOOR_FRAC * wn_reference(lm_axis)
-    A = close_rates(lm_axis, rate_gains).A
+    A = close_rates(lm_axis, rate_gains, rate_filters).A
     if lm_axis.axis == "lon":
         return lon_metrics(A, floor)
     # p 자리를 이름으로 찾는다 — 상태 순서를 여기 손으로 적으면 정본(LAT_STATES)과 갈린다
@@ -169,12 +235,14 @@ def oriented_margins(loop) -> tuple:
 def att_margin_loop(
     lm_axis, rate_gains: dict, kp, ki, *,
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
+    rate_filters=None,
 ):
     """자세 PI 개루프 — 레이트 폐쇄 A′ 위 PI(kp,ki)·G·Act·Delay (sign=+1 기저).
 
     방향은 oriented_margins가 결정하므로 여기서는 +1로 조성한다.
+    rate_filters는 **레이트 폐쇄에만** 든다 — 자세 경로에는 필터가 없다.
     """
-    closed = close_rates(lm_axis, rate_gains)
+    closed = close_rates(lm_axis, rate_gains, rate_filters)
     _group, x_out, u_in = AXIS_SPECS[lm_axis.axis]["att"]
     return pi_loop(
         closed, x_out=x_out, u_in=u_in, kp=kp, ki=ki, sign=1.0,
@@ -186,6 +254,7 @@ def att_margin_loop(
 def rate_loop_crossover(
     lm_axis, group, x_rate, u_in, k, *,
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
+    rate_filters=None,
 ) -> float:
     """레이트 루프 |L|=1 최고 교차 주파수 [rad/s] — 작동기 대역폭 예산 검사용.
 
@@ -203,6 +272,7 @@ def rate_loop_crossover(
         lm_axis, x_out=x_rate, u_in=u_in, kp=k, ki=0.0, sign=1.0,
         actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
         delay_s=delay_s, pade_order=pade_order,
+        rate_filter=(rate_filters or {}).get(group),
     )
     # 격자 천장에서 |L|이 아직 1 이상이면 교차는 격자 **밖**이다. 그대로 w[-1]을
     # 돌려주면 교차 주파수가 아니라 천장 값을 내놓는 조용한 오답이 된다 — 천장을

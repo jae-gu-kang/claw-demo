@@ -707,3 +707,42 @@ def test_resample_error_is_measured_not_assumed(client):
     # max_frac은 곡선 진폭 대비 — resample_tol과 같은 자여야 나란히 놓고 읽을 수 있다
     scale = float(np.max(np.abs(poly.interp(mach=np.linspace(0.2, 0.95, 1001)))))
     assert err["max_frac"] == pytest.approx(err["max_abs"] / scale, rel=1e-3)
+
+
+def test_route_hands_the_law_rate_filters_to_the_session(client, wait_job, monkeypatch):
+    """라우트가 법칙의 레이트 필터를 세션에 넘긴다 — 이 인계가 빠지면 조용히 어긋난다.
+
+    엔진 쪽은 "필터가 있으면 설계가 바뀐다"를 핀했지만(test_design_closure), 그
+    **인계**는 서버에만 있다. `rate_filters=demo_rate_filters()` 한 줄을 지워도
+    엔진 테스트는 전부 통과하고 서버 테스트도 통과했다 — 그 사이로 자동 설계가
+    출하되지 않는 플랜트(요 댐퍼에 워시아웃이 없는 A′)를 상대로 돌게 된다.
+
+    실행 결과가 아니라 인계를 직접 잡는다: 실제 설계 1회는 수 초~수십 초이고,
+    여기서 확인해야 할 것은 "무엇을 넘겼는가" 하나다.
+    """
+    import claw_server.routes.design as design_route
+    from claw.design.orchestrator import DesignSession
+    from claw.fcl.demo import demo_rate_filters
+
+    seen = {}
+    real_run = DesignSession.run
+
+    def spy_run(self, *args, **kwargs):
+        seen["rate_filters"] = kwargs.get("rate_filters")
+        self.status = "converged"  # 실제 설계는 돌리지 않는다 — 인계만 본다
+        self.stage = "DONE"
+        return self.report()
+
+    # raising=False를 쓰지 않는다 — run이 개명되면 새 속성을 조용히 만들어
+    # 테스트가 진짜 경로를 안 건드린 채 통과한다
+    monkeypatch.setattr(design_route.DesignSession, "run", spy_run)
+    r = client.post("/api/design/auto", json={"config": _small_config()})
+    wait_job(r.json()["id"], timeout=120.0)
+    # 패치가 **그 클래스에** 걸렸는지 — real_run과 비교하면 서로 다른 함수라
+    # 항상 참이라 아무것도 확인하지 못한다
+    assert design_route.DesignSession.run is spy_run
+    assert real_run is not spy_run  # (원본을 잡아 뒀다는 확인용)
+    assert seen["rate_filters"] == demo_rate_filters(), (
+        "라우트가 법칙의 레이트 필터를 안 넘긴다 — 자동 설계가 필터 없는 플랜트를 본다"
+    )
+    assert seen["rate_filters"], "데모 프로파일에 필터가 하나도 없다 — 전제가 바뀌었다"

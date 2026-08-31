@@ -269,11 +269,11 @@ def test_cap_reports_no_stable_gain_separately(setup):
     A[2, 2] += 40.0  # q̇/q 를 크게 양수로
     unstable = LinearModel(A=A, B=lon.B, C=lon.C, D=lon.D, x_names=lon.x_names,
                            u_names=lon.u_names, axis="lon")
-    k, reason = _cap_by_stability(unstable, "q", "de", 0.4, ACT)
+    k, reason = _cap_by_stability(unstable, "pitch", "q", "de", 0.4, ACT)
     assert reason == "no_stable_gain"
     assert k == 0.0
     # 정상 축에서는 캡이 아예 안 걸리거나(None) 경계까지 줄인다('capped')
-    k2, reason2 = _cap_by_stability(lon, "q", "de", 0.4, ACT)
+    k2, reason2 = _cap_by_stability(lon, "pitch", "q", "de", 0.4, ACT)
     assert reason2 in (None, "capped")
 
 
@@ -378,19 +378,19 @@ def test_cap_finds_conditionally_stable_window(monkeypatch):
     from claw.design import tune as T
 
     monkeypatch.setattr(T, "_damper_loop_stable",
-                        lambda lm, x, u, k, act: 0.55 <= abs(k) <= 0.60)
-    k, reason = T._cap_by_stability(None, "p", "da", -1.0, {})
+                        lambda lm, grp, x, u, k, act: 0.55 <= abs(k) <= 0.60)
+    k, reason = T._cap_by_stability(None, "roll", "p", "da", -1.0, {})
     assert reason == "capped", "안정 구간이 있는데 댐퍼를 껐다"
     assert k == pytest.approx(-0.60, abs=1e-3)  # 구간 상단, 부호 유지
 
     # 단조 경우는 종전과 같은 답 — 넓힌 탐색이 보통 경로를 바꾸지 않는다
-    monkeypatch.setattr(T, "_damper_loop_stable", lambda lm, x, u, k, act: abs(k) <= 0.42)
-    assert T._cap_by_stability(None, "p", "da", 1.0, {}) == (
+    monkeypatch.setattr(T, "_damper_loop_stable", lambda lm, grp, x, u, k, act: abs(k) <= 0.42)
+    assert T._cap_by_stability(None, "roll", "p", "da", 1.0, {}) == (
         pytest.approx(0.42, abs=1e-3), "capped")
 
     # 안정 표본이 정말 하나도 없을 때만 no_stable_gain
     monkeypatch.setattr(T, "_damper_loop_stable", lambda *a: False)
-    assert T._cap_by_stability(None, "p", "da", -1.0, {}) == (0.0, "no_stable_gain")
+    assert T._cap_by_stability(None, "roll", "p", "da", -1.0, {}) == (0.0, "no_stable_gain")
 
 
 @pytest.fixture(scope="module")

@@ -71,6 +71,7 @@ def scheduled_gains(tables: dict, design: dict, case) -> dict:
 def scheduled_margin_point(
     lm_full, tables, design, case, *, criteria=None, targets=None,
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
+    rate_filters=None,
 ) -> dict:
     """한 운영점의 스케줄 인지 검증 — {자리명: 지표+판정}.
 
@@ -88,6 +89,8 @@ def scheduled_margin_point(
     act_kw = dict(
         actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
         delay_s=delay_s, pade_order=pade_order,
+        # 법칙에 있는 레이트 필터 — 검증이 튜닝과 같은 플랜트를 봐야 한다 (01 §4.2)
+        rate_filters=dict(rate_filters or {}),
     )
     out = {}
     for lm_axis in (lon, lat):
@@ -95,7 +98,7 @@ def scheduled_margin_point(
         rate_gains = {
             f"{g}.k_rate": eff.get(f"{g}.k_rate", 0.0) for g, _, _ in spec["rates"]
         }
-        metrics = axis_metrics(lm_axis, rate_gains)
+        metrics = axis_metrics(lm_axis, rate_gains, act_kw.get("rate_filters"))
         for idx, (group, x_rate, u_in) in enumerate(spec["rates"]):
             k = rate_gains[f"{group}.k_rate"]
             # 튜닝(tune._tune_rates)과 같은 플랜트에서 잰다 — 앞서 닫은 레이트까지
@@ -103,7 +106,8 @@ def scheduled_margin_point(
             prior = {f"{g}.k_rate": rate_gains[f"{g}.k_rate"]
                      for g, _, _ in spec["rates"][:idx]}
             wc = rate_loop_crossover(
-                close_rates(lm_axis, prior), group, x_rate, u_in, k, **act_kw
+                close_rates(lm_axis, prior, act_kw.get("rate_filters")),
+                group, x_rate, u_in, k, **act_kw
             )
             entry = {"gains": {"k_rate": k}, "wc": wc}
             if group == "roll":
@@ -201,7 +205,7 @@ def scheduled_margin_map(
     aircraft, points, lms, tables, design, *,
     criteria, targets=None, trims=None, fingerprint="",
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
-    on_progress=None,
+    rate_filters=None, on_progress=None,
 ) -> dict:
     """전 역할 점(anchor+breakpoint+validation)의 스케줄 인지 검증 + 판정.
 
@@ -251,6 +255,7 @@ def scheduled_margin_map(
                     lm, tables, design, pt.case, criteria=criteria, targets=targets,
                     actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
                     delay_s=delay_s, pade_order=pade_order,
+                    rate_filters=rate_filters,
                 ),
             }
             # 트림은 수렴했으나 포화·α 여유 미달 = 엔벨로프 실경계. 마진은 참고로 내되

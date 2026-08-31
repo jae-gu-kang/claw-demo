@@ -899,3 +899,19 @@ test("reliefLines — 통과한 축은 **임계값**을 말한다 (×3이 아니
   assert.equal(no.threshold, null, "미달 축에 임계값을 지어내면 안 된다");
   assert.match(no.text, /여전히 미달 · 사유 /);
 });
+
+test("reliefLines — 없는 것을 추가하는 축은 '없음 → 값' (필터 프로브)", () => {
+  // 완화 축이 늘 "현재값을 바꾼다"는 아니다 — 레이트 필터는 지금 **없는** 것을
+  // 더해 보는 프로브라 from이 null이다. num()의 "—"로 그리면 "값을 모른다"로
+  // 읽혀, 아직 안 붙은 것과 못 잰 것이 화면에서 같아진다
+  const [line] = reliefLines([
+    { change: "rate_filter_fc", label: "레이트 저역통과 추가",
+      from: null, to: 2.39, resolves: false, reason: "bandwidth_collapse" },
+  ], {});
+  assert.match(line.text, /없음 → 2\.39/);
+  assert.equal(line.resolves, false);
+  assert.equal(line.threshold, null);
+  // 양쪽 다 없는 경우는 종전대로 괄호 자체를 안 그린다
+  const [bare] = reliefLines([{ label: "x", from: null, to: null, resolves: true }], {});
+  assert.equal(bare.text, "x → 통과");
+});

@@ -530,8 +530,11 @@ export function effectText(effect) {
  * 알 수 없어, 예산을 얼마로 잡아야 하는지가 화면에서 안 나온다. */
 export function reliefLines(relief, reasonMap) {
   return (relief ?? []).map((p) => {
+    // from이 없는 축은 "지금 그것이 없다"는 뜻이다 (필터 추가 프로브) — "—"로
+    // 그리면 "값을 모른다"로 읽힌다
+    const from = p.from == null && p.to != null ? "없음" : num(p.from);
     const move = p.from == null && p.to == null
-      ? "" : ` (${p.change ?? "?"} ${num(p.from)} → ${num(p.to)})`;
+      ? "" : ` (${p.change ?? "?"} ${from} → ${num(p.to)})`;
     const why = p.resolves ? null : reasonText(p.reason, reasonMap);
     // 임계값이 이 카드의 실질이다 — "×3이면 통과"가 아니라 "≥ 47 rad/s면 통과"가
     // 사용자가 바로 쓸 수 있는 답이고, docs §7의 "작동기 대역폭 요구 사양"이

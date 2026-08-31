@@ -67,7 +67,54 @@ _RELIEF_AXES = {
                     "text": "작동기 대역폭 ≥ {value:.3g} rad/s면 통과 (현재 {current:.3g})"},
     "delay_s": {"name": "max_delay_s", "unit": "s", "direction": "<=",
                 "text": "지연 ≤ {value:.3g} s면 통과 (현재 {current:.3g})"},
+    # 세 번째 축은 **하드웨어가 아니라 법칙**을 바꾸는 완화다 — 작동기를 못 바꾸는
+    # 상황에서 "필터로 되는가"를 같은 자로 재 준다 (이 모듈 머리말이 에스컬레이션
+    # 사유 첫머리에 "필터"를 적어 두고도 그 축을 잴 수단이 없었다).
+    "rate_filter_fc": {"name": "max_filter_fc", "unit": "Hz", "direction": "<=",
+                       "text": "레이트 저역통과 코너 fc ≤ {value:.3g} Hz면 통과 (현재 필터 없음)"},
 }
+# 저역통과 프로브 코너 = 작동기 wn(rad/s)의 이 배수를 Hz로 환산 [기본값]. 1.0은
+# **작동기 극과 같은 자리** — 그 위 루프 이득을 깎되 레이트 대역은 최대한 남기는,
+# 구조 필터의 통상 위치다. 더 낮게 두면 댐퍼 자체를 죽여 "필터가 안 듣는다"가
+# 아니라 "필터를 잘못 놨다"가 된다.
+#
+# 실측(데모 M0.6/h1000 pitch_att, 작동기 wn 18): 코너를 3~1257 rad/s로 훑어도
+# **통과하는 구간이 없다**(251 rad/s 한 점만 통과하고 그 양옆 126·503은 미통과 —
+# _min_relief 머리말이 적어 둔 비단조성이지 필터의 효과가 아니다). 즉 이 병목에는
+# 1차 저역통과가 답이 아니고, 프로브는 그 사실을 카드에 적어 주는 역할이다.
+_RELIEF_FILT_FRAC = 1.0
+# "필터 없음"의 유한 대역 [기본값] — 이분은 양끝이 유한해야 한다. 작동기 wn의 10배
+# 위 코너는 루프 대역에서 사실상 통과이므로 미달 쪽 끝으로 쓴다.
+_FILTER_NONE_FRAC = 10.0
+
+
+def _relief_group(loop_name: str) -> str:
+    """자리 이름 → 필터를 놓을 그룹 ("pitch_att" → "pitch")."""
+    return loop_name.split("_", 1)[0]
+
+
+def _axis_get(act_kw, key, loop_name):
+    """완화 축의 스칼라 값 — 필터 축만 스펙 dict 안의 코너를 꺼낸다."""
+    if key != "rate_filter_fc":
+        return float(act_kw[key])
+    spec = (act_kw.get("rate_filters") or {}).get(_relief_group(loop_name))
+    if spec is None or spec.get("kind") != "lowpass":
+        # 저역통과가 없다 = 이 축에서는 "코너 무한대"와 같다 (다른 종류의 필터가
+        # 있어도 이 축은 그것을 재지 않는다 — 프로브 자체가 그 경우 안 돈다)
+        return _FILTER_NONE_FRAC * float(act_kw.get("actuator_wn") or 0.0) / (2.0 * math.pi)
+    return float(spec["fc"])
+
+
+def _axis_set(kw, key, value, loop_name):
+    """완화 축에 값을 넣은 act_kw 사본 — 필터 축은 그룹 스펙으로 조립한다."""
+    out = dict(kw)
+    if key != "rate_filter_fc":
+        out[key] = value
+        return out
+    filters = dict(out.get("rate_filters") or {})
+    filters[_relief_group(loop_name)] = {"kind": "lowpass", "fc": value}
+    out["rate_filters"] = filters
+    return out
 # 자리 종류별 "달성 수치" 키 — 완화 전/후를 **같은 키로** 비교하기 위한 목록.
 # achieved를 통째로 실으면 자리마다 모양이 달라 화면이 전후 비교를 그리지 못한다.
 _ACHIEVED_KEYS = {
@@ -137,11 +184,10 @@ def _min_relief(lm, design_base, loop_name, *, targets, criteria, act_kw, key,
     해소되면 이분만 16회라 (점, 자리)당 최악 ~4.3초가 더 붙는다. 구조 한계는 드물어
     전체 실행에는 거의 영향이 없지만, 한 점이 통째로 구조 한계인 실행에서는 보인다.
     """
-    bad, good = float(act_kw[key]), float(pass_value)
+    bad, good = _axis_get(act_kw, key, loop_name), float(pass_value)
     for _ in range(_RELIEF_BISECT_N):
         mid = 0.5 * (bad + good)
-        kw = dict(act_kw)
-        kw[key] = mid
+        kw = _axis_set(act_kw, key, mid, loop_name)
         if _slot_passes(tune_point(lm, design_base, targets=targets, **kw),
                         loop_name, criteria):
             good = mid
@@ -181,11 +227,19 @@ def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw,
     if act_wn > 0.0:
         plan.append(("actuator_wn", act_wn * _RELIEF_ACT_FACTOR,
                      f"작동기 대역폭 ×{_RELIEF_ACT_FACTOR:g}"))
+        # 하드웨어를 못 바꾸는 경우의 대안 — 같은 자로 재서 나란히 보여 준다.
+        # **이미 필터가 있는 자리는 건너뛴다**: 스펙은 자리당 하나이므로 프로브가
+        # 저역통과를 넣으면 법칙에 있는 필터(데모 요축 워시아웃)를 덮어쓰게 된다 —
+        # 그건 "추가하면 어떤가"가 아니라 "떼어내면 어떤가"라 물음이 달라진다.
+        existing = (act_kw.get("rate_filters") or {}).get(_relief_group(loop_name))
+        if existing is None or existing.get("kind", "none") == "none":
+            fc = _RELIEF_FILT_FRAC * act_wn / (2.0 * math.pi)
+            # 라벨에 값을 넣지 않는다 — 화면이 from → to를 따로 그린다
+            plan.append(("rate_filter_fc", fc, "레이트 저역통과 추가"))
     before = _achieved_digest(base_out, loop_name)
     probes = []
     for key, to_value, label in plan:
-        kw = dict(act_kw)
-        kw[key] = to_value
+        kw = _axis_set(act_kw, key, to_value, loop_name)
         out = tune_point(lm, design_base, targets=targets, **kw)
         slot = out["slots"].get(loop_name, {})
         # 구조 한계 게이트가 더 이상 성립하지 않으면 해소다 — 같은 함수를 부른다.
@@ -204,10 +258,14 @@ def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw,
                 act_kw=act_kw, key=key, pass_value=to_value,
             )
             spec = _RELIEF_AXES[key]
-            current = float(act_kw[key])
+            # 필터 축의 "현재"는 값이 아니라 **없음**이다 — 이분의 미달 쪽 끝
+            # (센티널 코너)을 current로 실으면 없는 필터의 코너를 지어내게 된다
+            current = None if key == "rate_filter_fc" else _axis_get(act_kw, key, loop_name)
             probe["threshold"] = {
                 "name": spec["name"], "value": value, "unit": spec["unit"],
                 "direction": spec["direction"], "current": current,
+                # 이 축의 미달 쪽 끝은 실측이 아니라 "필터 없음"의 유한 대역 표현이다
+                "bracket_is_sentinel": key == "rate_filter_fc",
                 "probe_value": to_value,
                 # 통과/미달 양 끝 — 이 폭이 곧 실측 정밀도다 (초기 브래킷의 1/256)
                 "bracket": [value, fail_at], "iterations": _RELIEF_BISECT_N,
@@ -298,6 +356,7 @@ def classify_margin_deficit(
     criteria, design_base=None, targets=None, tol_plant=0.25, tol_gain=0.10,
     hysteresis_pm=5.0, hysteresis_gm=1.0, hysteresis_zeta=0.10,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
+    rate_filters=None,
 ) -> dict:
     """실패 (검증점, 자리) 하나의 원인 분류 — {"verdict", "action", "evidence"}.
 
@@ -340,6 +399,7 @@ def classify_margin_deficit(
         tune_out = tune_point(
             lm, design_base, targets=targets,
             actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
+            rate_filters=rate_filters,
             delay_s=delay_s, pade_order=pade_order,
         )
         slots = LOOP_SLOTS.get(loop_name, ())
@@ -362,6 +422,7 @@ def classify_margin_deficit(
     tune_out = tune_point(
         lm, design_base, targets=targets,
         actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
+        rate_filters=rate_filters,
         delay_s=delay_s, pade_order=pade_order,
     )
     tuned_status = _tuned_judgement(tune_out, loop_name, criteria)
@@ -380,6 +441,7 @@ def classify_margin_deficit(
         relief = _relief_probes(
             lm, design_base, loop_name, targets=targets, criteria=criteria,
             act_kw=dict(actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
+                        rate_filters=rate_filters,
                         delay_s=delay_s, pade_order=pade_order),
             base_out=tune_out,
         )
@@ -506,6 +568,7 @@ def classify_failures(
     aircraft, points, lms, trims, tables, design, margin_out, *,
     criteria, design_base=None, targets=None, tol_plant=0.25, tol_gain=0.10,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
+    rate_filters=None,
 ) -> list:
     """마진맵 결과의 fail 목록 전체 분류 — 처방 카드 목록 (심각 순, id 부여).
 
@@ -519,6 +582,7 @@ def classify_failures(
         criteria=criteria, design_base=design_base, targets=targets,
         tol_plant=tol_plant, tol_gain=tol_gain,
         actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
+        rate_filters=rate_filters,
         delay_s=delay_s, pade_order=pade_order,
     )
     actions = []

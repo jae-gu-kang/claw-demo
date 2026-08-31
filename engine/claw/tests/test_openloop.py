@@ -110,3 +110,56 @@ def test_알_수_없는_파라미터는_시끄럽게_거부한다(design_trim):
     ac, tr = design_trim
     with pytest.raises(ValueError):
         openloop_delta(ac, [tr], Shape(), ["없는.자리"])
+
+
+def test_yaw_rate_loop_includes_the_law_washout(design_trim):
+    """요축 댐퍼 루프는 법칙에 있는 워시아웃(τ=2 s)을 보고 재야 한다 (01 §2.6).
+
+    종전에는 GROUP_LOOPS가 이 자리를 **정적 게인 0.8**로만 선언해, `fcl/demo.py`
+    DEMO_YAW의 워시아웃이 파이썬에도 생성 C에도 살아 있는데 마진만 그걸 안 봤다.
+
+    실측 주의 — 이 루프는 0 dB 교차가 여러 개다(미반영 3개·반영 4개). 물리적으로
+    유의미한 고주파 교차(10.474 rad/s)의 위상은 −88.6° → −85.9°로 **거의 안
+    움직인다**(ωτ=21이라 워시아웃은 그 대역에서 투과). 그런데 control.margin이
+    고르는 교차가 바뀌어 보고 PM은 91.4° → −86.7°로 뛴다. 이 자리의 절대 마진이
+    판정용이 아니라는 것은 closure.py 머리말이 이미 적어 둔 사실이고, 2단이 쓰는
+    Δ는 양쪽 다 매끄럽다 — 여기서는 **필터가 루프에 실제로 들어갔다**만 고정한다.
+    """
+    from claw.analysis import loop_margins, pi_loop
+    from claw.pipeline.openloop import _effective_filter
+    from claw.trim import linearize, split_axes
+
+    ac, tr = design_trim
+    _lon, lat = split_axes(linearize(ac, tr))
+
+    spec = next(sp for sp in GROUP_LOOPS["yaw"] if sp["name"] == "yaw_rate")
+    assert spec.get("filter") is not None, "요축 루프 선언에 필터 항이 없다"
+
+    without = loop_margins(pi_loop(lat, x_out="r", u_in="dr", kp=0.8, sign=-1.0))
+    with_wo = loop_margins(pi_loop(lat, x_out="r", u_in="dr", kp=0.8, sign=-1.0,
+                                   rate_filter={"kind": "washout", "tau": 2.0}))
+    assert without["pm_deg"] != pytest.approx(with_wo["pm_deg"], abs=1.0), (
+        "워시아웃을 넣었는데 루프가 그대로다 — 필터가 캐스케이드되지 않았다"
+    )
+
+    # 피치·롤은 워시아웃이 0이라 선언이 없고, 있어도 None이 나와야 한다
+    for group in ("pitch", "roll"):
+        for sp in GROUP_LOOPS[group]:
+            assert sp.get("filter") is None, f"{group}: 데모에 없는 필터를 선언했다"
+
+
+def test_effective_filter_reads_the_law_not_a_constant(design_trim):
+    """필터 값은 법칙에서 읽는다 — 0이면 "필터 없음"(graphs.py 관용과 같은 규약)."""
+    from claw.pipeline.influence import make_law
+    from claw.pipeline.openloop import _effective_filter
+
+    _ac, _tr = design_trim
+    law = make_law(Shape())
+    spec = next(sp for sp in GROUP_LOOPS["yaw"] if sp["name"] == "yaw_rate")
+    got = _effective_filter(law, "yaw", spec)
+    assert got == {"kind": "washout", "tau": float(law.scas.cfg["yaw"]["washout_tau"])}
+    assert got["tau"] > 0.0
+
+    law.scas.cfg["yaw"]["washout_tau"] = 0.0  # 법칙에서 껐다 → 해석도 안 본다
+    assert _effective_filter(law, "yaw", spec) is None
+    assert _effective_filter(law, "pitch", {"name": "x"}) is None  # 선언 없음

@@ -252,3 +252,46 @@ class CommandFilter(Block):
         if self.angle:
             self._x = float(wrap_pi(self._x))
         return self._x
+
+
+# 레이트 피드백 경로에 놓을 수 있는 필터의 **정본 목록** — 해석(analysis.margins)과
+# 향후 법칙 그래프(fcl.graphs)가 같은 표를 읽는다. 목록이 두 곳에 적히면 그 순간
+# 어긋난다 (codegen/blockspec.py 머리말과 같은 원칙).
+#
+# "none"은 값이 None이다 — 자리는 있는데 필터가 없는 상태를 이름으로 표현한다
+# (washout_tau == 0으로 부재를 표현하던 기존 관용과 달리, 종류가 여럿이면
+# 부재도 하나의 선택지여야 한다).
+RATE_FILTERS = {
+    "none": None,
+    "washout": Washout,
+    "lowpass": LowPass,
+    "notch": Notch,
+}
+
+
+def rate_filter_tau(spec) -> float:
+    """1차 레이트 필터 스펙 → 시정수 [s] — 해석 두 경로가 공유하는 환산의 정본.
+
+    파라미터 이름·단위는 각 블록 PARAM_DEFS 그대로다: washout `tau`[s],
+    lowpass `fc`[Hz]. fc → tau 환산은 LowPass가 Lag에 넘기는 것과 **같은 식**이고
+    (아래 클래스 정의), 그것을 마진(analysis.margins)과 레이트 지표(design.closure)가
+    각자 적으면 한쪽만 고쳐진 날 두 해석이 다른 필터를 보게 된다.
+
+    1차가 아닌 종류(notch)는 시정수로 기술되지 않으므로 거부한다.
+    """
+    kind = spec["kind"]
+    if kind == "washout":
+        tau = float(spec["tau"])
+    elif kind == "lowpass":
+        fc = float(spec["fc"])
+        # 나눗셈 **전에** 본다 — 0/음수/nan을 그대로 넣으면 ZeroDivisionError나
+        # 조용한 inf 시정수가 되어, 이 모듈이 잘못된 입력에 내기로 한 ValueError
+        # 계약(같은 파일 다른 블록들의 생성자 검증과 같은 규약)이 깨진다
+        if not fc > 0.0:
+            raise ValueError(f"저역통과 fc는 양수여야 함 [Hz]: {fc}")
+        tau = 1.0 / (2.0 * math.pi * fc)
+    else:
+        raise ValueError(f"1차 필터가 아니라 시정수가 없다: {kind!r}")
+    if not tau > 0.0:
+        raise ValueError(f"필터 시정수는 양수여야 함: {kind} {spec}")
+    return tau

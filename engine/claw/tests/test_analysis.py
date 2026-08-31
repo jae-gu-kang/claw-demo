@@ -405,3 +405,77 @@ def test_aero_envelope_boundaries():
     assert aero_envelope(st, db)["trim_alpha_bounds"] is None
     with pytest.raises(ValueError):
         aero_envelope(st, db, alpha_margin=-0.01)
+
+
+def test_filter_tf_analytic():
+    """레이트 경로 필터의 연속시간 등가 — 해석 대조 (01 §2.6·§4.2).
+
+    블록은 이산(1차 ZOH-정확, 노치 RBJ)이지만 pi_loop는 작동기·Padé도 연속으로
+    모델하므로 같은 자를 쓴다. 여기서 고정하는 것은 그 연속 표현이 각 필터의
+    정의(워시아웃=고역통과, 저역통과 코너 −3 dB, 노치 f0 차단)와 맞는가다.
+    """
+    import control
+
+    from claw.analysis.margins import filter_tf
+
+    wo = filter_tf({"kind": "washout", "tau": 2.0})
+    assert abs(control.evalfr(wo, 1e-6j)) < 1e-5  # DC 차단
+    assert abs(control.evalfr(wo, 1e6j)) == pytest.approx(1.0, abs=1e-9)  # HF 통과
+    # 코너 1/τ에서 −3 dB
+    assert 20 * np.log10(abs(control.evalfr(wo, 0.5j))) == pytest.approx(-3.0103, abs=1e-3)
+
+    lp = filter_tf({"kind": "lowpass", "fc": 15.0})
+    assert abs(control.evalfr(lp, 1e-6j)) == pytest.approx(1.0, abs=1e-9)  # DC 통과
+    w_c = 2 * np.pi * 15.0
+    assert 20 * np.log10(abs(control.evalfr(lp, 1j * w_c))) == pytest.approx(-3.0103, abs=1e-3)
+
+    nt = filter_tf({"kind": "notch", "f0": 4.4, "q": 2.0})
+    assert abs(control.evalfr(nt, 1j * 2 * np.pi * 4.4)) < 1e-9  # f0 차단
+    assert abs(control.evalfr(nt, 1e-6j)) == pytest.approx(1.0, abs=1e-9)
+    assert abs(control.evalfr(nt, 1e6j)) == pytest.approx(1.0, abs=1e-9)
+
+    # "필터 없음"의 두 표현
+    assert filter_tf(None) is None and filter_tf({"kind": "none"}) is None
+    for bad in ({"kind": "zzz"}, {"kind": "lowpass", "fc": 0.0},
+                {"kind": "washout", "tau": -1.0}, {"kind": "notch", "f0": 4.4, "q": 0.0}):
+        with pytest.raises(ValueError):
+            filter_tf(bad)
+
+
+def test_filter_vocabulary_and_tf_stay_in_sync():
+    """어휘(blocks.RATE_FILTERS)와 마진 TF가 어긋나면 import 시점에 죽는다.
+
+    단정문 자체는 모듈 로드 때 이미 돌았으므로(margins.py) 여기서는 그 단정이
+    **존재하고 실제로 두 표를 비교한다**는 것을 고정한다 — codegen/ir_exec.py의
+    `assert set(_OP_FN) == set(OPS)`와 같은 드리프트 가드다.
+    """
+    from claw.analysis.margins import _FILTER_TF
+    from claw.blocks.filters import RATE_FILTERS
+
+    assert set(_FILTER_TF) == set(RATE_FILTERS) - {"none"}
+    assert "none" in RATE_FILTERS and RATE_FILTERS["none"] is None
+
+
+def test_pi_loop_filter_is_opt_in(lon_lat):
+    """rate_filter 미지정이면 기존 루프와 **완전히 동일** — 하위호환 핀.
+
+    지정하면 캐스케이드가 하나 늘고(극·영점 수 증가) 응답이 필터배만큼 바뀐다.
+    """
+    import control
+
+    from claw.analysis import pi_loop
+
+    lon, _lat = lon_lat[1]
+    kw = dict(x_out="q", u_in="de", kp=0.5, ki=0.8)
+    base = pi_loop(lon, **kw)
+    same = pi_loop(lon, **kw, rate_filter=None)
+    assert control.evalfr(base, 2j) == control.evalfr(same, 2j)
+    assert control.evalfr(base, 2j) == control.evalfr(pi_loop(lon, **kw,
+                                                             rate_filter={"kind": "none"}), 2j)
+    wo = pi_loop(lon, **kw, rate_filter={"kind": "washout", "tau": 2.0})
+    # 필터배만큼 정확히 달라진다 — 곱해 넣는 것 이상을 하지 않는다
+    at = 2j
+    from claw.analysis.margins import filter_tf
+    assert control.evalfr(wo, at) == pytest.approx(
+        control.evalfr(base, at) * control.evalfr(filter_tf({"kind": "washout", "tau": 2.0}), at)
+    )

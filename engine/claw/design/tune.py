@@ -160,8 +160,8 @@ _RATE_PLAN = (
 )
 
 
-def _metric(lm_axis, rate_gains, key):
-    return axis_metrics(lm_axis, rate_gains)[key]
+def _metric(lm_axis, rate_gains, key, rate_filters=None):
+    return axis_metrics(lm_axis, rate_gains, rate_filters)[key]
 
 
 def _first_reach_bisect(f, k_lo, k_hi, target, n_scan=_SCAN_N,
@@ -219,7 +219,7 @@ def _first_reach_bisect(f, k_lo, k_hi, target, n_scan=_SCAN_N,
         vals = vals + [f(k) for k in ks_new]
 
 
-def _damper_loop_stable(lm_axis, x_rate, u_in, k, act_kw, zeta_act_min=0.10) -> bool:
+def _damper_loop_stable(lm_axis, group, x_rate, u_in, k, act_kw, zeta_act_min=0.10) -> bool:
     """레이트 댐퍼 폐루프(작동기 2차계+Padé 지연 포함)의 안정 판정.
 
     01 §4.2 실증 사고(작동기·지연 포함 시 PM 91°→−76.3° 불안정 전환)를 직접 막는
@@ -232,8 +232,12 @@ def _damper_loop_stable(lm_axis, x_rate, u_in, k, act_kw, zeta_act_min=0.10) -> 
 
     from claw.analysis import pi_loop
 
+    kw = dict(act_kw)
+    # act_kw는 그룹별 dict를 나르고 pi_loop는 자리 하나를 받는다 — 이 자리 것만 꺼낸다
+    filt = (kw.pop("rate_filters", None) or {}).get(group)
     loop = pi_loop(
-        lm_axis, x_out=x_rate, u_in=u_in, kp=k, ki=0.0, sign=1.0, **act_kw
+        lm_axis, x_out=x_rate, u_in=u_in, kp=k, ki=0.0, sign=1.0,
+        rate_filter=filt, **kw
     )
     # 물리 댐퍼는 u = +k·rate (안정화 부호는 k가 보유, closure.close_rates의
     # A+Bk·eᵀ와 동일) — 폐루프 특성식은 1 − L = 0이므로 양의 되먹임으로 닫는다
@@ -249,7 +253,7 @@ def _damper_loop_stable(lm_axis, x_rate, u_in, k, act_kw, zeta_act_min=0.10) -> 
     return True
 
 
-def _cap_by_stability(lm_axis, x_rate, u_in, k, act_kw):
+def _cap_by_stability(lm_axis, group, x_rate, u_in, k, act_kw):
     """댐퍼 폐루프가 불안정해지면 |k|를 축소 — (k', 사유) 사유 ∈ {None,'capped','no_stable_gain'}.
 
     [0, |k|]를 먼저 **스캔**해 안정한 표본을 찾고, 그중 가장 큰 것(=목표에 가장 가까운
@@ -265,19 +269,19 @@ def _cap_by_stability(lm_axis, x_rate, u_in, k, act_kw):
 
     스캔은 초기 |k|가 불안정할 때만 돈다 (안정하면 첫 줄에서 반환).
     """
-    if k == 0.0 or _damper_loop_stable(lm_axis, x_rate, u_in, k, act_kw):
+    if k == 0.0 or _damper_loop_stable(lm_axis, group, x_rate, u_in, k, act_kw):
         return k, None
     sign = math.copysign(1.0, k)
     mags = np.linspace(0.0, abs(k), _SCAN_N)
     stable_idx = [i for i in range(1, len(mags))
-                  if _damper_loop_stable(lm_axis, x_rate, u_in, sign * mags[i], act_kw)]
+                  if _damper_loop_stable(lm_axis, group, x_rate, u_in, sign * mags[i], act_kw)]
     if not stable_idx:
         return 0.0, "no_stable_gain"
     # 마지막 표본은 |k| 자신이고 불안정으로 이미 확인됐다 — i+1은 항상 존재한다
     lo, hi = mags[stable_idx[-1]], mags[stable_idx[-1] + 1]
     for _ in range(_BISECT_N):
         mid = 0.5 * (lo + hi)
-        if _damper_loop_stable(lm_axis, x_rate, u_in, sign * mid, act_kw):
+        if _damper_loop_stable(lm_axis, group, x_rate, u_in, sign * mid, act_kw):
             lo = mid
         else:
             hi = mid
@@ -319,17 +323,20 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
         # 양으로 넘어가고(M0.3/h1000 손설계 게인 기준 +0.0142, 2배 시간 49 s) 캡이
         # 그걸 보고 |k|를 100분의 1로 깎거나(capped) 아예 0으로 끈다(no_stable_gain).
         # 실제로 M0.3/h1000에서 −0.592(λ 12 달성) → −0.0047(λ 0.76)이 됐다.
-        lm_prior = close_rates(lm_axis, spec_rates)
+        lm_prior = close_rates(lm_axis, spec_rates, act_kw.get("rate_filters"))
 
-        def f(mag, _slot=slot, _lm=lm_axis, _sign=sign, _base=dict(spec_rates), _mk=metric_key):
+        _rf = act_kw.get("rate_filters")
+
+        def f(mag, _slot=slot, _lm=lm_axis, _sign=sign, _base=dict(spec_rates),
+              _mk=metric_key, _rf=_rf):
             g = dict(_base)
             g[_slot] = _sign * mag
-            return _metric(_lm, g, _mk)
+            return _metric(_lm, g, _mk, _rf)
 
         mag, reached, grown = _first_reach_bisect(f, 0.0, 4.0 * abs(k_design), target)
         k = sign * mag
         x_rate, u_in = next((x, u) for g, x, u in AXIS_SPECS[axis]["rates"] if g == group)
-        k, capped = _cap_by_stability(lm_prior, x_rate, u_in, k, act_kw)
+        k, capped = _cap_by_stability(lm_prior, group, x_rate, u_in, k, act_kw)
         gains[slot] = k
         achieved[f"{group}_rate"] = {
             "kind": "damping" if metric_key != "roll_lambda" else "bandwidth",
@@ -343,11 +350,13 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
         }
         pending.append((group, axis, metric_key, target, reached, grown, capped, slot))
 
-    _report_rates_on_final_composition(axes, gains, achieved, notes, pending)
+    _report_rates_on_final_composition(axes, gains, achieved, notes, pending,
+                                       act_kw.get("rate_filters"))
     return gains, achieved, notes
 
 
-def _report_rates_on_final_composition(axes, gains, achieved, notes, pending):
+def _report_rates_on_final_composition(axes, gains, achieved, notes, pending,
+                                       rate_filters=None):
     """레이트 자리의 **보고값·사유**를 세 자리가 다 정해진 뒤 다시 잰다.
 
     탐색은 successive closure 순서대로 프리픽스 조성에서 한다 (요를 닫은 뒤 롤).
@@ -371,7 +380,7 @@ def _report_rates_on_final_composition(axes, gains, achieved, notes, pending):
         lm_axis = axes[axis]
         final_all = {f"{g}.k_rate": gains.get(f"{g}.k_rate", 0.0)
                      for g, _, _ in AXIS_SPECS[axis]["rates"]}
-        fm = axis_metrics(lm_axis, final_all)
+        fm = axis_metrics(lm_axis, final_all, rate_filters)
         got = fm[metric_key]
         # 사유는 **왜 목표에 못 갔나**를 가른다. 캡이 걸렸어도 최종 조성에서 목표를
         # 넘겼으면 결함이 아니다 (안정 경계 아래에서 목표 달성 = 정상)
@@ -517,7 +526,7 @@ def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> t
 def tune_point(
     lm_full, design, *, targets=None,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
-    polish=False, max_evals=60,
+    rate_filters=None, polish=False, max_evals=60,
 ) -> dict:
     """한 운영점의 SCAS 7자리 자동 튜닝 — {"gains", "achieved", "slots", "status", ...}.
 
@@ -537,6 +546,9 @@ def tune_point(
     act_kw = dict(
         actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
         delay_s=delay_s, pade_order=pade_order,
+        # 그룹별 레이트 필터 스펙 — 법칙에 있는 필터(데모 요축 워시아웃)와
+        # 완화 프로브가 가정하는 필터가 같은 통로로 흐른다
+        rate_filters=dict(rate_filters or {}),
     )
     lon, lat = split_axes(lm_full)
     gains, achieved, notes = _tune_rates(lon, lat, design, targets, act_kw)
@@ -693,7 +705,7 @@ def _polish_att(lm_axis, group, rate_gains, kp0, ki0, targets, act_kw, max_evals
 def tune_points(
     aircraft, points, lms, trims, *, design, targets=None,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
-    polish=False, max_evals=60, on_progress=None,
+    rate_filters=None, polish=False, max_evals=60, on_progress=None,
 ) -> dict:
     """앵커 전체 튜닝 → gain surface 샘플 — {"gains": {자리: {이름: 값}}, "results", "aborted"}.
 
@@ -717,7 +729,7 @@ def tune_points(
             out = tune_point(
                 lms.get(aircraft, tr), design, targets=targets,
                 actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
-                delay_s=delay_s, pade_order=pade_order,
+                delay_s=delay_s, pade_order=pade_order, rate_filters=rate_filters,
                 polish=polish, max_evals=max_evals,
             )
             results[name] = out

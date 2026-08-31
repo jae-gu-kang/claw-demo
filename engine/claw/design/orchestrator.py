@@ -256,6 +256,10 @@ class DesignSession:
         self.lms = LinearModelSet()
         self.trims: dict = {}
         self.design: dict = {}
+        # 법칙의 레이트 경로 필터 {그룹: 스펙} — design과 같은 성격(프로파일이 주는 값)이라
+        # 같은 자리에서 초기화·직렬화한다. 왕복에서 빠지면 재개한 세션이 조용히
+        # 필터 없는 플랜트로 되돌아간다 (이 모듈 머리말의 '완전 왕복' 전제)
+        self.rate_filters: dict = {}
         self.gain_samples: dict = {}
         self.tune_meta: dict = {}
         self.promoted_gains: dict = {}  # {slot: {이름: 값}} — valley 승격 breakpoint의 게인
@@ -292,7 +296,8 @@ class DesignSession:
     def _act_kw(self):
         c = self.config
         return dict(actuator_wn=c.actuator_wn, actuator_zeta=c.actuator_zeta,
-                    delay_s=c.delay_s, pade_order=c.pade_order)
+                    delay_s=c.delay_s, pade_order=c.pade_order,
+                    rate_filters=dict(self.rate_filters))
 
     # ── 스테이지 ──
     def _stage_coarse(self, aircraft, stall_table, limits, db_ranges, fingerprint, cb):
@@ -785,9 +790,23 @@ class DesignSession:
 
     # ── 실행 ──
     def run(self, aircraft, stall_table, limits, db_ranges, design, *,
-            fingerprint="", on_progress=None) -> dict:
-        """현 스테이지부터 계속 실행 — DONE·awaiting_approval·취소에서 멈춘다."""
+            rate_filters=None, fingerprint="", on_progress=None) -> dict:
+        """현 스테이지부터 계속 실행 — DONE·awaiting_approval·취소에서 멈춘다.
+
+        rate_filters: 법칙의 레이트 경로 필터 {그룹: 스펙}. `design`과 같이 **비행체
+        프로파일이 주는 값**이지 사용자 요청 knob이 아니다 (데모는 fcl.demo
+        demo_rate_filters — 요축 워시아웃 τ=2 s). 이것을 안 보고 도는 튜닝·검증은
+        출하되지 않는 조성을 상대하게 된다 (01 §4.2).
+
+        **None은 "안 바꾼다"**이지 "필터 없음"이 아니다 — 재개 호출이 인자를
+        생략해도 저장된 값(from_dict가 복원한 것)을 이어간다. 필터를 실제로
+        비우려면 빈 dict를 명시한다.
+        """
         self.design = dict(design)
+        # None은 "안 바꾼다" — 재개 호출이 인자를 안 주면 저장된 값을 이어간다.
+        # dict(rate_filters or {})로 덮으면 재개가 조용히 필터 없는 플랜트로 돌아간다.
+        if rate_filters is not None:
+            self.rate_filters = dict(rate_filters)
         if self.status == "awaiting_approval":
             return self.report()  # 승인 없이 재호출 — 상태 유지 (apply_actions가 풀어 준다)
         self.status = "running"
@@ -855,6 +874,7 @@ class DesignSession:
             "linmodels": self.lms.to_dict(),
             "trims": {n: _trim_to_dict(tr) for n, tr in self.trims.items()},
             "design": dict(self.design),
+            "rate_filters": {g: dict(f) for g, f in self.rate_filters.items()},
             "gain_samples": {s: dict(v) for s, v in self.gain_samples.items()},
             "tune_meta": self.tune_meta,
             "promoted_gains": {s: dict(v) for s, v in self.promoted_gains.items()},
@@ -882,6 +902,7 @@ class DesignSession:
         s.lms = LinearModelSet.from_dict(d["linmodels"])
         s.trims = {n: _trim_from_dict(td) for n, td in d["trims"].items()}
         s.design = dict(d.get("design", {}))
+        s.rate_filters = {g: dict(f) for g, f in d.get("rate_filters", {}).items()}
         s.gain_samples = {k: dict(v) for k, v in d.get("gain_samples", {}).items()}
         s.tune_meta = d.get("tune_meta", {})
         s.promoted_gains = {k: dict(v) for k, v in d.get("promoted_gains", {}).items()}

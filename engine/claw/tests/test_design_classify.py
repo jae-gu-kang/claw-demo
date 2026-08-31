@@ -69,7 +69,12 @@ def test_structural_limit_with_excess_delay():
     # 하고, 작동기 대역폭을 3배로 올려도 그 지연은 그대로라 통과하지 못한다.
     # 둘 다 통과한다고 나오면 프로브가 인과를 분리하지 못하는 것이다
     by_change = {p["change"]: p for p in bn["relief"]}
-    assert set(by_change) == {"delay_s", "actuator_wn"}
+    # 세 축 — 하드웨어 둘(지연·작동기)과 법칙 하나(레이트 저역통과).
+    # 필터 축은 "작동기를 못 바꾸면?"에 답하는 자리라 통과/미통과 둘 다 정보다
+    assert set(by_change) == {"delay_s", "actuator_wn", "rate_filter_fc"}
+    assert by_change["rate_filter_fc"]["resolves"] is False, (
+        "이 병목(과대 지연)은 레이트 필터로 안 풀린다 — 코너를 훑어도 통과 구간이 없다"
+    )
     assert by_change["delay_s"]["resolves"] is True
     assert by_change["delay_s"]["from"] == 0.6 and by_change["delay_s"]["to"] == 0.0
     assert by_change["actuator_wn"]["resolves"] is False
@@ -99,7 +104,7 @@ def test_structural_limit_reports_no_relief_when_nothing_helps():
     )
     assert out["verdict"] == "structural_limit"
     bn = out["evidence"]["bottleneck"]
-    assert [p["resolves"] for p in bn["relief"]] == [False, False]
+    assert [p["resolves"] for p in bn["relief"]] == [False, False, False]
     assert bn["resolved_by"] == []
     assert bn["thresholds"] == {}
     assert all("threshold" not in p for p in bn["relief"])
@@ -392,7 +397,8 @@ def test_relief_probe_resolves_is_slot_scoped(monkeypatch):
         None, {}, "roll_att", targets=None, criteria=MarginCriteria(),
         act_kw=dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2),
     )
-    assert [p["label"] for p in probes] == ["지연 제거", "작동기 대역폭 ×3"]
+    assert [p["label"] for p in probes][:2] == ["지연 제거", "작동기 대역폭 ×3"]
+    assert probes[2]["change"] == "rate_filter_fc"
     assert all(p["resolves"] for p in probes), (
         "이 자리를 고친 완화가 다른 축 때문에 '미달'로 보고됐다")
     assert all(p["status"] == "ok" for p in probes)
@@ -523,7 +529,7 @@ def test_gate_and_relief_probe_read_one_predicate(monkeypatch):
     assert out["verdict"] == "structural_limit"
     bn = out["evidence"]["bottleneck"]
     # 프로브도 같은 함수를 읽는다 — 제 식을 갖고 있으면 여기서 통과로 나온다
-    assert [p["resolves"] for p in bn["relief"]] == [False, False]
+    assert [p["resolves"] for p in bn["relief"]] == [False, False, False]
     assert bn["thresholds"] == {}
 
     # 반대로 "통과"라 하면 진짜 구조 한계(지연 0.6 s)도 아래 분기로 흐른다

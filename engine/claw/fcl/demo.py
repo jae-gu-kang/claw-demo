@@ -50,6 +50,25 @@ def demo_design_gains() -> dict:
     )
 
 
+def demo_rate_filters() -> dict:
+    """레이트 경로 필터 스펙 {그룹: 스펙} — 위 DEMO_* 프로파일이 실제로 조립하는 것.
+
+    자동 설계(M17)가 **출하되는 조성**을 보고 튜닝·검증하도록 넘기는 값이다.
+    이 dict를 안 넘기면 해석은 필터 없는 A′를 보는데, 데모 요축은 워시아웃 τ=2 s가
+    켜져 있어 그 차이가 ζ_dr를 움직인다 (01 §4.2 실측 M0.3/h0 0.5951 → 0.6612).
+
+    `washout_tau == 0`은 "그 축에 필터 없음"이라는 법칙 쪽 관용(graphs.py는 0이면
+    노드를 아예 안 만든다)을 그대로 따라 목록에서 뺀다 — 해석이 법칙에 없는
+    필터를 만들어 내지 않는다. 어휘 정본은 blocks.RATE_FILTERS.
+    """
+    out = {}
+    for group, cfg in (("pitch", DEMO_PITCH), ("roll", DEMO_ROLL), ("yaw", DEMO_YAW)):
+        tau = float(cfg.get("washout_tau", 0.0))
+        if tau > 0.0:
+            out[group] = {"kind": "washout", "tau": tau}
+    return out
+
+
 def make_demo_gain_tables(names=None) -> dict:
     """동압 스케일 1D mach 게인 테이블 — 기본은 피치·롤 PI·레이트 게인 6개.
 

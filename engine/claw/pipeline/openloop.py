@@ -45,8 +45,12 @@ GROUP_LOOPS = {
     "yaw": (
         # 요축 자세 오차는 −β(항법 추정)라 분리모델 상태로 직접 대응이 없다 —
         # 레이트 댐퍼 루프만 선언한다 (kp·ki는 no_loop로 남는 것이 맞다)
+        # filter: 이 자리의 댐퍼는 워시아웃을 거친 rate를 먹는다 (01 §3.1, 데모
+        # τ=2 s). 선언하지 않으면 루프가 정적 게인이 되어 **법칙에 있는 필터를
+        # 안 본 마진**이 나온다 — 아래 _effective_filter가 법칙에서 실값을 읽는다
         {"name": "yaw_rate", "axis": "lat", "x_out": "r", "u_in": "dr",
-         "sign": -1.0, "gains": {"kp": "k_rate"}},
+         "sign": -1.0, "gains": {"kp": "k_rate"},
+         "filter": ("washout", "washout_tau", "tau")},
     ),
     "speed": (
         {"name": "spd_u", "axis": "lon", "x_out": "u", "u_in": "thr",
@@ -90,6 +94,27 @@ def _effective_gain(law, group, key, case):
     if group in ("pitch", "roll", "yaw"):
         return float(law.scas.cfg[group][key])
     return float(law.autopilot.cfg[AP_PARAM[(group, key)]])
+
+
+def _effective_filter(law, group, sp):
+    """루프 선언의 filter 항 → pi_loop 필터 스펙 (선언이 없거나 꺼져 있으면 None).
+
+    선언은 (필터 종류, 법칙 파라미터 이름, 스펙 파라미터 이름)이다. 값 0은
+    "그 필터 없음"이라는 법칙 쪽 관용(graphs.py: washout_tau > 0일 때만 노드 생성)을
+    그대로 따른다 — 해석이 법칙에 없는 필터를 만들어 내지 않는다.
+
+    위 _effective_gain의 "스케줄 필터는 준정적이라 생략" 주석과 **다른 사안**이다.
+    그쪽은 게인 스케줄 변수의 입력 필터(정상상태 전제로 생략 가능)이고, 이쪽은
+    피드백 경로에 직접 있는 댐퍼 필터라 루프 대역에서 그대로 작용한다.
+    """
+    decl = sp.get("filter")
+    if decl is None:
+        return None
+    kind, law_param, spec_param = decl
+    value = float(law.scas.cfg[group][law_param])
+    if value <= 0.0:
+        return None
+    return {"kind": kind, spec_param: value}
 
 
 def _delta(base, pert):
@@ -172,10 +197,10 @@ def openloop_delta(aircraft, trs, shape: Shape, param_ids=None, *,
         models = {"lon": lon, "lat": lat}
         base_cache = {}
 
-        def margins_for(sp, gains):
+        def margins_for(sp, gains, rate_filter=None):
             loop = pi_loop(models[sp["axis"]], x_out=sp["x_out"], u_in=sp["u_in"],
                            kp=gains.get("kp", 0.0), ki=gains.get("ki", 0.0),
-                           sign=sp["sign"])
+                           sign=sp["sign"], rate_filter=rate_filter)
             return loop_margins(loop)
 
         for pid, group, key, loops, target in active:
@@ -189,8 +214,9 @@ def openloop_delta(aircraft, trs, shape: Shape, param_ids=None, *,
                         "note": "제로 개루프 — 이 케이스 실효 게인이 전부 0",
                     }
                     continue
+                rate_filter = _effective_filter(law, group, sp)
                 if sp["name"] not in base_cache:
-                    base_cache[sp["name"]] = margins_for(sp, gains)
+                    base_cache[sp["name"]] = margins_for(sp, gains, rate_filter)
                 base = base_cache[sp["name"]]
                 pert_gains = dict(gains)
                 # 섭동 반영 — 배율 자리는 실효 게인에 비율로, 상수 자리는 값 직접
@@ -199,7 +225,7 @@ def openloop_delta(aircraft, trs, shape: Shape, param_ids=None, *,
                     pert_gains[slot] = gains[slot] * (target / ref.value)
                 else:
                     pert_gains[slot] = target
-                pert = margins_for(sp, pert_gains)
+                pert = margins_for(sp, pert_gains, rate_filter)
                 params[pid]["loops"][sp["name"]][tr.case.name] = {
                     "base": base, "perturbed": pert, "delta": _delta(base, pert),
                 }
