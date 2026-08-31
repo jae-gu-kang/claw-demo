@@ -32,6 +32,50 @@ def test_health_reports_versions_for_traceability(client):
     body = client.get("/api/health").json()
     assert body["status"] == "ok"
     assert body["version"] and body["engine"]
+    # commit 키는 **항상** 있다 — 없으면 소비자가 "옛 서버라 키가 없다"와
+    # "커밋을 모른다"를 구분하지 못한다. 로컬 실행은 값이 None
+    assert "commit" in body
+
+
+def test_health_commit_is_the_deploy_identity_or_honest_none(monkeypatch):
+    """version은 정적 문자열이라 "어느 커밋이 떠 있나"에 답하지 못한다.
+
+    공개 데모는 /api/health만 무인증이라 밖에서 형상을 확인할 통로가 여기뿐이다.
+    모를 때 빈 문자열이나 "unknown"을 내면 소비자가 그것을 SHA로 착각해 비교한다.
+    """
+    from claw_server.routes.system import deployed_commit
+
+    monkeypatch.delenv("CLAW_GIT_COMMIT", raising=False)
+    monkeypatch.delenv("RENDER_GIT_COMMIT", raising=False)
+    assert deployed_commit() is None
+
+    # Render는 배포마다 자동 주입 — 설정 없이 동작해야 한다
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "bb39616deadbeef")
+    assert deployed_commit() == "bb39616deadbeef"
+    # 플랫폼 중립 오버라이드가 이긴다 (Render 아닌 배포가 직접 넣는 값)
+    monkeypatch.setenv("CLAW_GIT_COMMIT", "cafebabe1234")
+    assert deployed_commit() == "cafebabe1234"
+    # 빈 값·공백은 미설정과 같다 — 플랫폼이 빈 문자열을 주는 경우 방어
+    monkeypatch.setenv("CLAW_GIT_COMMIT", "   ")
+    assert deployed_commit() == "bb39616deadbeef"
+    # 양옆 공백은 **벗긴다** — 그대로 나가면 소비자의 SHA 비교가 조용히 실패한다.
+    # 화면에는 SHA가 멀쩡히 보이므로 원인이 눈에 안 띈다
+    monkeypatch.setenv("CLAW_GIT_COMMIT", "  abc123  ")
+    assert deployed_commit() == "abc123"
+
+
+def test_health_actually_serves_the_commit_not_just_the_key(client, monkeypatch):
+    """라우트가 값을 **실어 나르는지** 핀한다.
+
+    키 존재만 보면 `"commit": None` 하드코딩으로도 통과한다(실측). 그 실패는
+    "Render가 주입을 안 했다"와 **바이트 단위로 같은 응답**이라, 확인하는 사람이
+    코드가 아니라 플랫폼을 의심하며 다시 대시보드를 열게 된다 — 이 필드가
+    없애려던 바로 그 상태로, 이번엔 원인이 안 보이는 채로 돌아간다.
+    """
+    monkeypatch.setenv("CLAW_GIT_COMMIT", "cafebabe1234")
+    assert client.get("/api/health").json()["commit"] == "cafebabe1234"
+    monkeypatch.delenv("CLAW_GIT_COMMIT")
+    assert client.get("/api/health").json()["commit"] is None
 
 
 def test_validate_returns_importable_symbol(client):

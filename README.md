@@ -27,6 +27,18 @@ MATLAB 없이 고정익 항공기의 제어법칙을 설계·해석·검증하�
 
 배포 구성은 리포 루트의 `render.yaml` 하나다. main에 push하면 자동 재배포된다.
 
+**어느 커밋이 떠 있는지**는 `/api/health`가 답한다 — Basic Auth 면제 경로라 자격
+없이 확인할 수 있다:
+
+```bash
+curl -s https://claw-demo.onrender.com/api/health
+# {"status":"ok","version":"0.1.0","engine":"0.1.0","commit":"bb39616…","jobs":0}
+```
+
+`commit`은 Render가 배포마다 주는 `RENDER_GIT_COMMIT`이다. Render가 아닌 배포는
+`CLAW_GIT_COMMIT`으로 직접 넣으면 되고(그쪽이 우선), 둘 다 없으면 `null` —
+로컬 실행이 그렇다. 모른다를 빈 문자열이나 `"unknown"`으로 위장하지 않는다.
+
 ### 로컬
 
 Python 3.10+ 만 있으면 된다.

@@ -101,7 +101,20 @@ git fetch /경로/claw-code.bundle main
 git reset --hard "$(cat /경로/COMMIT)"
 git rev-parse HEAD                             # COMMIT과 같은지 확인
 scripts/setup.sh --offline /경로/wheelhouse    # 대개 아무것도 안 깔린다
+
+# 서비스로 돌린다면 — 빼먹으면 /api/health가 옛 커밋을 계속 답한다.
+# sed는 **그 줄이 이미 있을 때만** 걸린다: 없으면 조용히 아무것도 안 하고 0으로 끝나므로
+# 먼저 확인한다 (이 줄은 나중에 생겼다 — 그 전에 설치한 유닛에는 없다)
+UNIT=/etc/systemd/system/claw.service
+grep -q '^Environment=CLAW_GIT_COMMIT=' "$UNIT" \
+  || echo "유닛에 그 줄이 없다 — 아래 '운영 → systemd' 예시를 먼저 반영할 것"
+sudo sed -i "s|^Environment=CLAW_GIT_COMMIT=.*|Environment=CLAW_GIT_COMMIT=$(cat /경로/COMMIT)|" "$UNIT"
+sudo systemctl daemon-reload && sudo systemctl restart claw
 ```
+
+**`CLAW_GIT_COMMIT` 갱신을 빼먹지 말 것.** 코드만 reset하고 유닛을 그대로 두면
+`/api/health`가 이전 커밋을 자신 있게 답하고, 아래 '운영'의 대조가 **매번 오탐으로**
+울린다. 몇 번 울리면 사람이 그 대조를 믿지 않게 되고, 그러면 이 필드는 없느니만 못하다.
 
 **`git pull`을 쓰면 안 된다.** 일반망에서 커밋을 고쳐 쓴 적이 있으면(amend·rebase —
 이 리포는 동시 세션 amend 경합 이력이 있다) far side의 `main`과 번들의 `main`은
@@ -145,6 +158,8 @@ JobManager가 작업을 프로세스 메모리에 들고 있어(큐·워커 풀 
 
 ### systemd
 
+`/etc/systemd/system/claw.service` — 갱신 절의 `sed`가 이 경로를 쓴다.
+
 ```ini
 [Unit]
 Description=CLAW 설계툴
@@ -155,6 +170,7 @@ Type=exec
 User=claw
 WorkingDirectory=/opt/claw-demo
 Environment=HOST=0.0.0.0
+Environment=CLAW_GIT_COMMIT=<COMMIT 파일의 값>
 ExecStart=/opt/claw-demo/scripts/run.sh
 Restart=on-failure
 
@@ -164,6 +180,34 @@ WantedBy=multi-user.target
 
 `WorkingDirectory`를 리포 루트로 두는 것이 중요하다(위 항목). 워커 수를 늘리는
 옵션은 넣지 말 것.
+
+`CLAW_GIT_COMMIT`은 **도는 것**이 무엇인지 답한다. `git rev-parse HEAD`는 워킹트리가
+무엇인지 말할 뿐이라, 재시작을 빼먹었거나 venv 자동 복구가 실패한 채면 둘이 갈린다.
+반입한 것과 서빙 중인 것을 직접 대조할 수 있게 `COMMIT` 파일의 값을 여기 넣는다:
+
+```bash
+URL=http://127.0.0.1:8000/api/health
+curl -s "$URL"                                    # {"status":"ok", …, "commit":"…"}
+# 양쪽을 **먼저 받아 비어 있는지 본다.** 그냥 비교하면 commit이 null이고 COMMIT
+# 경로도 틀렸을 때 ""="" 가 참이라 "모름 vs 모름"을 "일치"라고 답한다(실측) —
+# 바로 아래 문장이 금하는 그 위장이다. 결과도 말하게 한다(test만 쓰면 침묵한다)
+got=$(curl -s "$URL" | grep -o '"commit":"[^"]*"' | cut -d'"' -f4)
+want=$(cat /경로/COMMIT 2>/dev/null)
+if   [ -z "$got"  ]; then echo "commit이 null — 유닛에 CLAW_GIT_COMMIT이 없거나 재시작 안 됨"
+elif [ -z "$want" ]; then echo "COMMIT 파일을 못 읽음 — 경로 확인"
+elif [ "$got" = "$want" ]; then echo "일치"
+else echo "불일치: 도는 것 $got / 반입한 것 $want"
+fi
+```
+
+안 넣으면 `commit`이 `null`이다 — "모른다"이지 "일치한다"가 아니다. 폐쇄망에는
+Render 대시보드 같은 대안이 없으므로 이 대조가 유일한 확인 통로다.
+
+**한계도 알고 쓸 것.** Render의 `RENDER_GIT_COMMIT`은 플랫폼이 **관측**해 주입하지만
+`CLAW_GIT_COMMIT`은 사람이 **주장**하는 값이다. `git reset`이 실패했는데 유닛만 갱신하고
+재시작하면 `/api/health`는 돌지 않는 커밋을 자신 있게 답한다. 위 갱신 절차에서
+`git rev-parse HEAD`와 `COMMIT` 대조를 먼저 통과시키는 것이 그래서 필요하다 —
+두 확인은 서로 다른 것을 보며(트리 / 도는 프로세스) 어느 하나로 대체되지 않는다.
 
 **wheelhouse를 지우지 말 것.** `run.sh`는 venv가 깨져 있으면(호스트 파이썬 업그레이드
 등) 자동 복구를 시도한다. `setup.sh --offline`이 wheelhouse 경로를

@@ -8,6 +8,7 @@
 
 import importlib
 import math
+import os
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, field_validator
@@ -18,13 +19,48 @@ from claw.params.registry import REGISTRY, RegistryError
 router = APIRouter(tags=["system"])
 
 
+def deployed_commit() -> str | None:
+    """배포된 형상의 커밋 SHA — 없으면 None (지어내지 않는다).
+
+    `version`은 정적 문자열이라 "떠 있는 것이 어느 커밋인가"에 답하지 못한다.
+    공개 데모는 /api/health만 무인증이라(auth.py) 그 답을 밖에서 얻을 방법이
+    없었고, 배포 확인이 매번 "대시보드를 보세요"로 끝났다.
+
+    CLAW_GIT_COMMIT이 먼저다 — 플랫폼 중립 오버라이드(폐쇄망 반입 등 Render가
+    아닌 배포는 이 값을 직접 넣는다 — docs/deploy-airgap.md '운영' 절). Render는 배포마다
+    RENDER_GIT_COMMIT을 자동 주입하므로 설정 없이 동작한다. 로컬 실행처럼 둘 다
+    없으면 None: "모른다"를 빈 문자열이나 "unknown"으로 위장하면 소비자가
+    그것을 SHA로 착각해 비교한다.
+    """
+    # 프로세스 수명 내내 상수인 값이지만 **요청마다 읽는다** — 모듈 상수로 올리면
+    # 라우트가 이 값을 실제로 실어 나르는지 검사할 방법이 사라진다(앱 재생성 없이는
+    # 환경을 못 바꾼다). 비용은 헬스 응답 한 번당 dict 조회 하나다
+    for name in ("CLAW_GIT_COMMIT", "RENDER_GIT_COMMIT"):
+        v = os.environ.get(name, "").strip()
+        if v:
+            return v
+    return None
+
+
 @router.get("/health")
 def health(request: Request) -> dict:
-    # 버전은 생성 코드·리포트의 추적성 메타 (어느 엔진·서버로 뽑은 형상인지)
+    # 버전은 생성 코드·리포트의 추적성 메타 (어느 엔진·서버로 뽑은 형상인지).
+    # commit은 그 위의 배포 형상 — 이 응답은 **무인증 경로**라 공개된다.
+    #
+    # 리포가 공개(README의 GitHub 링크)라는 것만으로는 근거가 안 된다: 공개
+    # 리포라도 "어느 커밋이 도는지"는 리포를 읽어서 알 수 없다. 실제로 하중을
+    # 받는 것은 render.yaml의 autoDeploy — main push에서만 배포되므로 떠 있는
+    # SHA가 GitHub에서 이미 보이는 공개 커밋임이 그것으로 보장된다. 배포가 main
+    # 보다 뒤처진 동안에만 "여기서 멈춰 있다"가 새로 드러나는데, 그 신호가 곧
+    # 이 필드의 값어치다.
+    # **재검토 조건은 둘**: ① 리포가 비공개가 되면 (SHA가 안정적 지문이 되어
+    # 공개 권고와 대조하면 탐침 없이 미패치 여부가 확정된다) ② 배포 원천이
+    # 공개 main이 아니게 되면 (autoDeploy 해제·수동 배포 등)
     return {
         "status": "ok",
         "version": request.app.version,
         "engine": claw.__version__,
+        "commit": deployed_commit(),
         "jobs": len(request.app.state.jobs.list()),
     }
 
