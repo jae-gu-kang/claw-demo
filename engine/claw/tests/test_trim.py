@@ -134,3 +134,84 @@ def test_saturation_detail_matches_saturation_ok(ac):
         det = saturation_detail(tr)
         assert set(det) == {"de", "throttle_high", "throttle_low"}
         assert tr.flags["saturation_ok"] == (not any(det.values())), tr.case.name
+
+
+# ---- 지상 정지 평형 (01 §3.3.1 이륙·착륙) ----
+
+
+@pytest.fixture(scope="module")
+def ac_ground():
+    from claw.plant import make_demo_skid_gear
+
+    return make_demo_aircraft(ground=make_demo_skid_gear())
+
+
+def _ground_case(alt=0.0, fuel=300.0):
+    return TrimCase("ground", mach=0.0, alt=alt, fuel=fuel, condition="ground")
+
+
+def test_ground_trim_stands_on_its_gear(ac_ground):
+    """정지 평형 = 기어 반력이 무게를 정확히 받는 높이·자세."""
+    from claw.common.constants import G0
+    from claw.trim import trim_ground
+
+    tr = trim_ground(ac_ground, _ground_case())
+    assert tr.converged
+    m, _cg, _J = ac_ground.fuel_mass.at(300.0)
+    weight = m * G0
+    # 대칭 기하라 평형 자세는 수평이고 침투는 해석값과 같다
+    phi, theta, _psi = tr.state.euler()
+    assert theta == pytest.approx(0.0, abs=1e-6)
+    assert phi == pytest.approx(0.0, abs=1e-6)
+    st = ac_ground.ground.contact_state(
+        tr.state.pos_n, np.zeros(3), tr.state.q_nb, np.zeros(3), 0.0
+    )
+    assert st["n_total"] == pytest.approx(weight, rel=1e-6)
+    assert st["max_pen"] == pytest.approx(ac_ground.ground.rest_penetration(weight), abs=1e-5)
+    assert np.allclose(tr.state.vel_b, 0.0), "정지 상태"
+
+
+def test_ground_trim_follows_runway_elevation_and_fuel(ac_ground):
+    """표고는 그대로 얹히고, 가벼우면 덜 파고든다 — 두 입력이 실제로 먹는지."""
+    from claw.trim import trim_ground
+
+    low = trim_ground(ac_ground, _ground_case(alt=0.0))
+    high = trim_ground(ac_ground, _ground_case(alt=1500.0))
+    assert -high.state.pos_n[2] - (-low.state.pos_n[2]) == pytest.approx(1500.0, abs=1e-4)
+    light = trim_ground(ac_ground, _ground_case(fuel=0.0))
+    assert -light.state.pos_n[2] > -low.state.pos_n[2], "가벼우면 덜 파고들어 더 높이 선다"
+
+
+def test_ground_trim_does_not_fake_the_flight_judgements(ac_ground):
+    """V=0에서 의미 없는 판정은 미판정(None) — True로 두면 없는 여유를 보고하게 된다."""
+    from claw.trim import trim_ground
+
+    tr = trim_ground(ac_ground, _ground_case())
+    assert tr.flags["residual_ok"] is True
+    assert tr.flags["supported_ok"] is True
+    assert tr.flags["saturation_ok"] is None
+    assert tr.flags["alpha_margin_ok"] is None
+    assert tr.flags["continuity_ok"] is None
+    assert np.allclose(tr.control.throttle, 0.0), "정칙화 마찰은 v=0에서 0 — 추력이 있으면 가속"
+
+
+def test_ground_trim_refuses_what_it_cannot_mean(ac_ground):
+    from claw.trim import trim_ground
+
+    with pytest.raises(ValueError, match="mach"):
+        trim_ground(ac_ground, TrimCase("x", mach=0.5, alt=0.0, fuel=300.0, condition="ground"))
+    with pytest.raises(ValueError, match="착륙장치"):
+        trim_ground(make_demo_aircraft(), _ground_case())
+
+
+def test_trim_dispatcher_reads_the_condition_field(ac, ac_ground):
+    """condition이 실제로 갈린다 — 그 전까지 계약에만 있고 아무도 안 읽던 필드."""
+    from claw.trim import trim
+
+    lvl = trim(ac, TrimCase("cruise", mach=0.7, alt=1000.0, fuel=200.0))
+    assert lvl.converged and np.linalg.norm(lvl.state.vel_b) > 100.0
+    gnd = trim(ac_ground, _ground_case())
+    assert gnd.converged and np.allclose(gnd.state.vel_b, 0.0)
+    # 모르는 조건을 조용히 level로 떨어뜨리면 지상 케이스가 비행 트림으로 풀린다
+    with pytest.raises(ValueError, match="모르는 트림 조건"):
+        trim(ac, TrimCase("x", mach=0.5, alt=0.0, fuel=200.0, condition="hover"))

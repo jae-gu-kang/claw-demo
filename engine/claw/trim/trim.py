@@ -1,4 +1,9 @@
-"""M9 trim — 수평정상비행 구속 트림 (scipy SLSQP) + 배치 (01 §4.1, MATLAB trim 대체).
+"""M9 trim — 구속 트림 (scipy SLSQP) + 배치 (01 §4.1, MATLAB trim 대체).
+
+두 가지 조건을 푼다 — TrimCase.condition이 고른다 (dispatcher: trim):
+
+- "level"  : 수평정상비행 (trim_level). 미지수 z = [α, δe, throttle], 잔차 (u̇, ẇ, q̇)
+- "ground" : 지상 정지 평형 (trim_ground). 미지수 z = [h_cg, θ, φ], 잔차 = 6축 가속도
 
 미지수 z = [α, δe(collective), throttle(양 엔진 공통)] — 대칭 가정 (β=φ=δa=δr=0).
 상태 구성: θ = α (수평비행 γ=0 → ḣ=0 자동), 잔차 = (u̇, ẇ, q̇).
@@ -16,9 +21,10 @@ import numpy as np
 from scipy.optimize import minimize
 
 from claw.common.attitude import euler_to_quat
+from claw.common.constants import G0
 from claw.common.contracts import SurfaceCommand, TrimResult, VehicleState
 from claw.env import isa_atmosphere
-from claw.plant.aircraft import XE_H, XE_Q, XE_THETA, XE_U, XE_W
+from claw.plant.aircraft import XE_H, XE_P, XE_PHI, XE_Q, XE_R, XE_THETA, XE_U, XE_V, XE_W
 
 ALPHA_BOUNDS = (-0.10, 0.35)  # [rad]
 DE_BOUNDS = (-0.35, 0.35)  # [rad]
@@ -117,6 +123,120 @@ def trim_level(aircraft, case, z0=None, fingerprint=""):
         flags=flags,
         params_fingerprint=fingerprint,
     )
+
+
+GROUND_TILT_BOUNDS = (-0.5, 0.5)  # [rad] 지상 평형 탐색의 θ·φ 범위
+GROUND_RESID_TOL = 1e-6  # [m/s², rad/s²] — 6축 전부에 적용
+
+
+def trim_ground(aircraft, case, fingerprint=""):
+    """지상 정지 평형 — 착륙장치 반력이 중력을 받는 자세·높이 (01 §3.3.1).
+
+    trim_level과 **대칭**이다: 미지수 3개를 움직여 가속도를 0으로 만든다. 다만 무엇을
+    움직이는지가 다르다 — 수평비행은 (α, δe, thr)로 (u̇, ẇ, q̇)를, 지상 평형은
+    (h_cg, θ, φ)로 **6축 가속도 전부**를 0으로 만든다. 6축을 다 보는 이유는 지상에서는
+    어느 축이든 남은 가속도가 곧 "기체가 미끄러지거나 기울어진다"는 뜻이라 하나도
+    버릴 수 없기 때문이다.
+
+    V=0이므로 공력은 정확히 0이고(aero.forces의 V≤0 분기) 타면은 아무 일도 하지 않는다.
+    스로틀도 0으로 둔다 — 정칙화 마찰은 v=0에서 0이라(plant/ground.py §마찰) 추력이
+    있으면 평형이 아니라 가속이다. 그래서 **포화·α 여유는 미판정(None)** 이다:
+    V=0에서 그 둘은 의미가 없고 True로 두면 "여유가 있다"는 없는 정보를 만든다
+    (연속성 미판정과 같은 자리 — 화면은 flagBadge가 "미판정"으로 낸다).
+
+    case.alt는 **활주로 표고**로 읽는다(비행 트림에서 비행 고도인 것과 대비).
+    case.mach는 0이어야 한다 — 정지 상태라 쓰이지 않는 값을 조용히 받지 않는다.
+    """
+    if aircraft.ground is None:
+        raise ValueError("지상 평형은 착륙장치가 달린 기체에서만 — Aircraft(ground=...)")
+    if float(case.mach) != 0.0:
+        raise ValueError(f"지상 평형은 정지 상태 — mach는 0이어야 함: {case.mach}")
+
+    elev = float(case.alt)
+    gear = aircraft.ground
+    z_lo = float(np.min(gear.contacts[:, 2]))
+    z_hi = float(np.max(gear.contacts[:, 2]))
+    if z_hi <= 0.0:
+        raise ValueError("접촉점이 CG 아래(z>0)에 하나도 없음 — 지상 평형을 세울 수 없음")
+    m, _cg, _J = aircraft.fuel_mass.at(case.fuel)
+    h_seed = elev + z_hi - gear.rest_penetration(m * G0)
+    controls = {"de": 0.0, "da": 0.0, "dr": 0.0, "throttle": (0.0, 0.0)}
+
+    def _xe(z):
+        xe = np.zeros(12)
+        xe[XE_H] = z[0]
+        xe[XE_THETA] = z[1]
+        xe[XE_PHI] = z[2]
+        return xe
+
+    def resid(z):
+        xd = aircraft.deriv_euler(_xe(z), controls, case.fuel, ground_elev=elev)
+        return np.array([xd[XE_U], xd[XE_V], xd[XE_W], xd[XE_P], xd[XE_Q], xd[XE_R]])
+
+    res = minimize(
+        lambda z: float(np.sum(resid(z) ** 2)),
+        np.array([h_seed, 0.0, 0.0]),
+        method="SLSQP",
+        bounds=[(elev + 0.5 * z_lo, elev + 2.0 * z_hi), GROUND_TILT_BOUNDS, GROUND_TILT_BOUNDS],
+        # ftol은 trim_level과 같은 1e-16. 1e-16보다 작게 잡으면 도달 불가라 솔버가
+        # maxiter를 다 돌고 success=False를 보고한다 — 잔차는 1e-8로 이미 맞는데도
+        # "미수렴"이 되어 시뮬 진입이 막힌다(실측: ftol 1e-18에서 nit 300·실패,
+        # 1e-16에서 nit 2·성공, 두 경우 잔차는 같은 자릿수).
+        options={"maxiter": 300, "ftol": 1e-16},
+    )
+    h_cg, theta, phi = res.x
+    r = resid(res.x)
+    residual_ok = bool(np.all(np.abs(r) < GROUND_RESID_TOL))
+
+    q_nb = euler_to_quat(phi, theta, 0.0)
+    pos_n = np.array([0.0, 0.0, -h_cg])
+    st = gear.contact_state(pos_n, np.zeros(3), q_nb, np.zeros(3), elev)
+    flags = {
+        "residual_ok": residual_ok,
+        # 정지 상태에선 타면·α가 아무 일도 하지 않는다 — 통과로 위장하지 않는다
+        "saturation_ok": None,
+        "alpha_margin_ok": None,
+        "continuity_ok": None,
+        # 지상 평형 고유: 기체가 실제로 받쳐지고 있는가 (반력이 0이면 떠 있거나 빠졌다)
+        "supported_ok": bool(st["wow"]),
+    }
+    state = VehicleState(
+        t=0.0,
+        pos_n=pos_n,
+        vel_b=np.zeros(3),
+        q_nb=q_nb,
+        omega_b=np.zeros(3),
+        fuel=case.fuel,
+    )
+    control = SurfaceCommand(elevon=np.zeros(4), rudder=0.0, throttle=np.zeros(2))
+    return TrimResult(
+        case=case,
+        state=state,
+        control=control,
+        converged=bool(res.success) and residual_ok and bool(st["wow"]),
+        cost=float(res.fun),
+        flags=flags,
+        params_fingerprint=fingerprint,
+    )
+
+
+_CONDITIONS = {"level": trim_level, "ground": trim_ground}
+
+
+def trim(aircraft, case, fingerprint=""):
+    """TrimCase.condition으로 트림 종류를 고른다 — 조건 문자열의 단일 해석 지점.
+
+    이 필드는 계약에 있으면서 아무도 읽지 않던 자리였다(01 §4.1이 "수평정상비행부터"
+    라고 적어 둔 확장 구멍). 지상 평형이 들어오면서 실제로 갈라진다.
+    모르는 조건은 거부한다 — 조용히 level로 떨어지면 지상 케이스가 비행 트림으로
+    풀려 "수렴했다"는 엉뚱한 해가 나온다.
+    """
+    fn = _CONDITIONS.get(str(case.condition))
+    if fn is None:
+        raise ValueError(
+            f"모르는 트림 조건: {case.condition!r} (가능: {sorted(_CONDITIONS)})"
+        )
+    return fn(aircraft, case, fingerprint=fingerprint)
 
 
 def trim_batch(aircraft, cases, fingerprint="", on_progress=None):
