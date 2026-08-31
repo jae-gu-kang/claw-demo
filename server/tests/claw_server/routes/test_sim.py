@@ -6,6 +6,8 @@
 
 import pytest
 
+from claw.nav import NavErrorModel
+
 
 def _hold_mission(t_end=20.0, alt=1000.0, **over):
     base = {
@@ -353,3 +355,149 @@ def test_sim_waypoint_altitude_contract_rejections(client):
     typo = _hold_mission(
         modes=[{"name": "m", "speed": 199.0, "alt": "pat", "exit": ["time_ge", 1e9]}])
     assert client.post("/api/sim/run", json=typo).status_code == 422
+
+
+# ---- 이륙·착륙 (01 §3.3.1) ----
+
+
+def _landing_mission(**over):
+    """발사대 이륙 → 스키드 착륙 전장 — 활주로가 있어야 스키드가 달린다."""
+    import math
+
+    base = {
+        "trim": {"mach": 0.0, "alt": 0.0, "fuel": 300.0, "condition": "ground"},
+        "runway": {"elevation": 0.0, "heading": 0.0, "length": 1500.0},
+        "launch": {"length": 10.0, "elev_angle": math.radians(15.0), "exit_speed": 81.5},
+        "nav": {"seed": 11},
+        "nav_grade": "rtk",
+        "modes": [
+            {"name": "launch", "speed": 110.0, "pitch": math.radians(21.0),
+             "heading": 0.0, "exit": ["off_rail"], "next": "climb"},
+            {"name": "climb", "speed": 110.0, "pitch": math.radians(21.0),
+             "heading": 0.0, "exit": ["alt_ge", 250.0], "next": "cruise"},
+            {"name": "cruise", "speed": 88.0, "alt": 300.0, "heading": 0.0,
+             "exit": ["time_ge", 20.0], "next": "approach"},
+            {"name": "approach", "speed": 88.0, "hdot": -4.8, "heading": 0.0,
+             "exit": ["alt_le", 20.0], "next": "flare"},
+            {"name": "flare", "speed": 80.0, "hdot": -0.8, "heading": 0.0,
+             "exit": ["on_ground"], "next": "rollout"},
+            {"name": "rollout", "speed": 0.0, "pitch": 0.0, "heading": 0.0,
+             "exit": ["speed_le", 0.5], "next": "stopped"},
+            {"name": "stopped", "speed": 0.0, "pitch": 0.0, "exit": ["time_ge", 1e9]},
+        ],
+        "t_end": 200.0, "dt_plant": 0.01, "control_hz": 100.0,
+        "actuators": {"wn": 30.0, "zeta": 0.7, "rate_max": 10.0},
+        "fuel_flow": 0.3,
+        "fingerprint": "fp-landing-web",
+    }
+    base.update(over)
+    return base
+
+
+def test_landing_mission_runs_over_http(client, wait_job):
+    """발사→…→정지가 HTTP 경로로 완주하고 단계 시각·기준선이 응답에 실린다.
+
+    **물리 회귀는 엔진 test_landing이 맡는다** — 여기서 보는 것은 전송 계층이다:
+    스키마가 받는가, 체인이 도는가, 화면이 그릴 것이 결과와 함께 오는가.
+    200초 미션이라 한 번만 돌리고 세 가지를 함께 단정한다.
+    """
+    r = client.post("/api/sim/run", json=_landing_mission())
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=600.0)
+    assert j["status"] == "done", j
+    body = client.get(f"/api/results/{j['result_id']}").json()
+
+    seq = []
+    for m in body["signals"]["mode"]:
+        if not seq or seq[-1] != m:
+            seq.append(m)
+    assert seq == ["launch", "climb", "cruise", "approach", "flare", "rollout", "stopped"]
+    assert body["meta"]["aborted"] is None
+    assert not any(any(v) for v in body["envelope"]["flags"].values())
+
+    # 단계 시각 — 없으면 화면이 "언제 접지했나"를 말할 수 없다
+    ph = body["meta"]["phases"]
+    assert ph["launch_exit_t"] == pytest.approx(0.245, abs=0.001)
+    assert ph["touchdown_t"] == pytest.approx(110.1, abs=2.0)
+    assert ph["stop_t"] == pytest.approx(132.8, abs=3.0)
+
+    # 기준선은 결과와 함께 다닌다 — 엔진이 소비하지 않는 heading·length도 실려야
+    # 재생 화면이 활주로 띠를 그린다 (웨이포인트 동봉과 같은 규약)
+    assert body["meta"]["runway"] == {"elevation": 0.0, "heading": 0.0, "length": 1500.0}
+    assert body["meta"]["launch"]["length"] == 10.0
+    assert body["meta"]["launch"]["exit_speed"] == pytest.approx(81.5)
+    assert body["meta"]["launch"]["accel"] is None, "둘 중 준 쪽만 실린다"
+    assert body["meta"]["launch"]["origin_height"] == pytest.approx(1.2)
+
+
+def test_longitudinal_axes_are_exclusive_at_submit(client):
+    """alt·pitch·hdot을 함께 켜면 제출 시점 422 — 엔진 판정이 그대로 올라온다."""
+    bad = _landing_mission(modes=[
+        {"name": "x", "alt": 100.0, "hdot": -2.0, "exit": ["time_ge", 1e9]},
+    ])
+    r = client.post("/api/sim/run", json=bad)
+    assert r.status_code == 422
+    assert "종방향" in r.json()["detail"]
+
+
+def test_ground_conditions_need_a_runway(client):
+    """활주로가 없으면 스키드도 없어서 on_ground를 판정할 수 없다 — 제출 시점 거부."""
+    body = _landing_mission()
+    del body["runway"]
+    r = client.post("/api/sim/run", json=body)
+    assert r.status_code == 422
+    assert "착륙장치" in r.json()["detail"]
+
+
+def test_off_rail_needs_a_launch_rail(client):
+    body = _landing_mission()
+    del body["launch"]
+    r = client.post("/api/sim/run", json=body)
+    assert r.status_code == 422
+    assert "발사 레일" in r.json()["detail"]
+
+
+def test_ground_trim_requires_zero_mach(client):
+    """지상 평형에서 mach는 쓰이지 않는다 — 조용히 무시하지 않고 거부한다."""
+    r = client.post("/api/sim/run", json=_landing_mission(
+        trim={"mach": 0.6, "alt": 0.0, "fuel": 300.0, "condition": "ground"}))
+    assert r.status_code == 422
+    r = client.post("/api/sim/run", json=_landing_mission(
+        trim={"mach": 0.0, "alt": 0.0, "fuel": 300.0}))  # condition 기본 level
+    assert r.status_code == 422
+
+
+def test_rail_needs_exactly_one_of_speed_or_accel(client):
+    """둘 다 주면 어느 쪽이 이겼는지 화면이 말할 수 없다 — 엔진 판정이 정본."""
+    for launch in ({"length": 10.0, "elev_angle": 0.26, "exit_speed": 81.5, "accel": 300.0},
+                   {"length": 10.0, "elev_angle": 0.26}):
+        r = client.post("/api/sim/run", json=_landing_mission(launch=launch))
+        assert r.status_code == 422
+        assert "정확히 하나" in r.json()["detail"]
+
+
+def test_nav_grade_picks_rtk_without_the_web_restating_numbers():
+    """등급은 **이름으로** 고른다 — 웹이 RTK 수치를 재기술하면 §5.5 위반이다.
+
+    요청은 seed만 담고, 값은 엔진 RTK_FIXED에서 온다. nav의 덮어쓰기가 등급 위에
+    얹히는 것도 함께 고정한다(등급이 바탕, nav가 위).
+    """
+    from claw.nav import RTK_FIXED
+    from claw_server.routes.sim import SimRunIn, _build
+
+    req = _landing_mission(nav_grade="rtk", nav={"seed": 5})
+    assert set(req["nav"]) & set(RTK_FIXED) == set(), "요청에 RTK 수치가 없어야 한다"
+    sim, _tr = _build(SimRunIn(**req))
+    assert sim.nav_model.pos_std_v == RTK_FIXED["pos_std_v"]
+    assert sim.nav_model.bias_std_v == RTK_FIXED["bias_std_v"]
+    assert sim.nav_model.seed == 5
+    # 자세 오차는 등급이 손대지 않는다 — RTK는 측위를 개선하지 자세가 아니다
+    assert sim.nav_model.att_std == NavErrorModel().att_std
+
+    # 대조군 — _landing_mission의 기본이 rtk라 등급을 명시적으로 되돌려야 한다
+    plain, _ = _build(SimRunIn(**_landing_mission(nav_grade="default", nav={"seed": 5})))
+    assert plain.nav_model.pos_std_v == NavErrorModel().pos_std_v
+    # 등급 위에 nav가 덮인다
+    over, _ = _build(SimRunIn(**_landing_mission(
+        nav_grade="rtk", nav={"seed": 5, "pos_std_v": 0.5})))
+    assert over.nav_model.pos_std_v == 0.5

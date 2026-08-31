@@ -47,7 +47,11 @@ def test_validation_422_ctx_types_preserved(tmp_path):
         )
         assert r.status_code == 422
         err = r.json()["detail"][0]
-        assert err["ctx"]["gt"] == 0.0  # 숫자 유지
+        # 이 테스트가 보는 것은 **ctx 수치 타입 보존**이고 mach는 그 매개일 뿐이다.
+        # 키가 gt에서 ge로 옮긴 것은 이륙·착륙 도입 때문이다 — 지상 평형은 mach=0을
+        # 요구하므로 필드 제약을 ge로 풀고 조건별 하한은 검증기가 본다(TrimCaseIn).
+        # mach=-1.0이 거부되는 것 자체는 그대로다.
+        assert err["ctx"]["ge"] == 0.0  # 숫자 유지
         assert "url" not in err
         # malformed JSON — ctx의 예외 객체는 문자열로
         r2 = client.post(

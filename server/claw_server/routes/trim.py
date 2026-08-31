@@ -7,7 +7,7 @@
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from claw.common.contracts import TrimCase
 from claw.plant import make_demo_aircraft
@@ -22,10 +22,29 @@ FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
 
 
 class TrimCaseIn(BaseModel):
+    """트림 케이스 — condition이 무엇을 푸는지 고른다 (엔진 trim.trim 디스패처).
+
+    "level"  : 수평정상비행. mach > 0, alt는 비행 고도.
+    "ground" : 지상 정지 평형(01 §3.3.1 이륙·착륙). **mach는 0이어야 하고**
+               alt는 비행 고도가 아니라 **활주로 표고**다.
+    """
+
     name: str = ""  # 빈 이름 → "M{mach}_h{alt}_f{fuel}" 자동 생성
-    mach: float = Field(gt=0.0, allow_inf_nan=False)
+    # mach 하한이 조건별로 갈리므로 필드 제약이 아니라 아래 검증기가 판정한다
+    mach: float = Field(ge=0.0, allow_inf_nan=False)
     alt: float = Field(allow_inf_nan=False)
     fuel: float = Field(ge=0.0, allow_inf_nan=False)
+    condition: Literal["level", "ground"] = "level"
+
+    @model_validator(mode="after")
+    def _mach_matches_the_condition(self):
+        # 지상 평형에서 mach는 쓰이지 않는다 — 조용히 무시하지 않고 0을 요구한다.
+        # 반대로 수평비행에 mach=0은 해가 없다(양력 0으로 중력을 못 맞춘다).
+        if self.condition == "ground" and self.mach != 0.0:
+            raise ValueError(f"condition='ground'는 정지 상태 — mach는 0이어야 함: {self.mach}")
+        if self.condition == "level" and self.mach <= 0.0:
+            raise ValueError(f"condition='level'은 mach > 0이 필요함: {self.mach}")
+        return self
 
 
 class TrimBatchIn(BaseModel):
@@ -42,6 +61,7 @@ def build_cases(case_inputs: list[TrimCaseIn]) -> list[TrimCase]:
             mach=c.mach,
             alt=c.alt,
             fuel=c.fuel,
+            condition=c.condition,
         )
         for c in case_inputs
     ]

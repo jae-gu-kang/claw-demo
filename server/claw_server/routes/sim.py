@@ -19,10 +19,16 @@ from claw.guidance import Guidance, LosPath, ModeSpec
 from claw.nav import NavErrorModel
 from claw.params.registry import REGISTRY
 from claw.pipeline.influence import SCAS_AXES
-from claw.plant import make_demo_aircraft, make_demo_db_ranges, make_demo_stall_table
+from claw.plant import (
+    LaunchRail,
+    make_demo_aircraft,
+    make_demo_db_ranges,
+    make_demo_skid_gear,
+    make_demo_stall_table,
+)
 from claw.sim import Simulator
 from claw.tables import PolyTable, Table
-from claw.trim import trim_level
+from claw.trim import trim
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
 from claw_server.serialize import sim_result_dict, to_jsonable
 
@@ -34,8 +40,13 @@ class ModeIn(BaseModel):
 
     name: str = Field(min_length=1)
     speed: FiniteFloat | None = None  # null = 축 off
+    # 종방향은 alt·pitch·hdot 셋 중 **최대 하나**만 켤 수 있다 — 셋 다 θ_cmd로 가기
+    # 때문이다. 배타 판정은 엔진 guidance.validate_longitudinal이 정본이라
+    # 여기서 다시 적지 않는다(§5.5) — 위반은 구성 오류로 422가 된다.
     alt: FiniteFloat | str | None = None  # 숫자 | "path"(경로 세로 프로파일) | null
     heading: FiniteFloat | str | None = None  # 숫자 | "path"(LOS) | null
+    pitch: FiniteFloat | None = None  # [rad] θ 직접 지령 (발사 이탈 자세·지상 자세)
+    hdot: FiniteFloat | None = None  # [m/s] 승강률 지령, 상승 + (접근·플레어)
     exit: list = Field(min_length=1)  # 조건 DSL ["kind", 인자...] — 엔진이 검증
     next: str | None = None
 
@@ -129,6 +140,37 @@ def build_gain_tables(spec: dict | None) -> dict | None:
     return out
 
 
+class RunwayIn(BaseModel):
+    """활주로 — 지면은 표고 하나짜리 평면이다(지형·파고 미모델, 01 §2.5 [TBD]).
+
+    **이 블록이 있으면 기체에 스키드가 달린다.** 없으면 지면 자체가 없어서
+    도입 전과 완전히 같이 동작한다(기체가 h<0을 그대로 통과한다).
+    heading·length는 엔진이 소비하지 않고 결과 meta에 실려 화면이 활주로를 그리고
+    "활주로 안에 섰는가"를 판정하는 데 쓴다 — 기준선은 결과와 함께 다닌다.
+    """
+
+    elevation: FiniteFloat = 0.0  # [m] 지면 표고 — 기준면 감시도 이 값이 된다
+    heading: FiniteFloat = 0.0  # [rad] 활주로 방위 (표시·판정용)
+    length: float = Field(default=1500.0, gt=0.0, allow_inf_nan=False)  # [m] (표시·판정용)
+
+
+class LaunchIn(BaseModel):
+    """발사 레일 — 레일 구간은 힘이 아니라 **구속**이다 (01 §3.3.1 이륙).
+
+    exit_speed와 accel은 같은 관계의 두 표현이라 **정확히 하나만** 준다 —
+    둘 다 주면 어느 쪽이 이겼는지 화면이 말할 수 없다(엔진 LaunchRail이 정본 판정).
+    """
+
+    length: float = Field(gt=0.0, allow_inf_nan=False)  # [m] 레일 길이
+    elev_angle: FiniteFloat  # [rad] 레일 앙각
+    azimuth: FiniteFloat = 0.0  # [rad] 레일 방위
+    exit_speed: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
+    accel: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
+    # 발사대 구조물이 기체를 지면에서 들어 올린 높이 [m]. 0이면 스키드가 지면에
+    # 박힌 채 출발해 레일 구간 내내 기어 반력이 거짓으로 선다
+    origin_height: float = Field(default=1.2, ge=0.0, allow_inf_nan=False)
+
+
 class SimRunIn(BaseModel):
     aircraft: Literal["demo"] = "demo"
     fingerprint: str = ""
@@ -145,7 +187,13 @@ class SimRunIn(BaseModel):
     t_end: float = Field(gt=0.0, le=3600.0)  # 상한 = 메모리 가드 [기본값]
     dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
     control_hz: float = Field(default=100.0, gt=0.0, allow_inf_nan=False)
+    # 활주로가 있으면 스키드 장착 + 기준면이 표고가 된다. 없으면 지면 없음(종전 동작).
+    runway: RunwayIn | None = None
+    launch: LaunchIn | None = None  # 발사 레일 — 있으면 레일 위 정지에서 출발
     nav: dict | None = None  # NavErrorModel kwargs — 파라미터 정의는 엔진이 정본
+    # 항법 등급 — 수치를 웹이 재기술하지 않도록 **이름으로** 고른다(§5.5).
+    # "rtk"는 엔진 RTK_FIXED를 바탕에 깔고 nav가 그 위를 덮는다.
+    nav_grade: Literal["default", "rtk"] = "default"
     actuators: dict | None = None  # SecondOrderActuator kwargs (wn·zeta·rate_max 등)
     fuel_flow: float = Field(default=0.0, ge=0.0, allow_inf_nan=False)
     with_schedule: bool = True  # 데모 FCL 게인 스케줄 장착 여부
@@ -243,8 +291,9 @@ def build_scas(spec: dict | None):
 
 def _build(req: SimRunIn):
     """미션 스펙 → (Simulator, TrimResult) — 구성 오류는 ValueError/TypeError."""
-    ac = make_demo_aircraft()
-    tr = trim_level(ac, build_cases([req.trim])[0])
+    # 활주로가 있으면 스키드를 단다 — 없으면 ground=None이라 지면 도입 전과 동일하다
+    ac = make_demo_aircraft(ground=make_demo_skid_gear() if req.runway else None)
+    tr = trim(ac, build_cases([req.trim])[0])
     if not tr.converged:
         raise ValueError(f"시작 트림 미수렴: {req.trim.model_dump()}")
     path = None
@@ -256,13 +305,20 @@ def _build(req: SimRunIn):
     modes = [
         ModeSpec(
             name=m.name, speed=m.speed, alt=m.alt, heading=m.heading,
+            pitch=m.pitch, hdot=m.hdot,
             exit_when=tuple(m.exit), next=m.next,
         )
         for m in req.modes
     ]
     guidance = Guidance(modes, path=path, initial=req.initial_mode)
     # 빈 dict = 기본 파라미터 오차 모델 장착 (조용한 미장착 금지 — None만 이상 항법)
-    nav_model = NavErrorModel(**req.nav) if req.nav is not None else None
+    if req.nav is None:
+        nav_model = None
+    elif req.nav_grade == "rtk":
+        # 등급은 바탕이고 nav는 그 위의 덮어쓰기다 — 웹이 RTK 수치를 재기술하지 않는다
+        nav_model = NavErrorModel.rtk_fixed(**req.nav)
+    else:
+        nav_model = NavErrorModel(**req.nav)
     gain_tables = build_gain_tables(req.gain_tables)
     fcl = make_demo_fcl(
         with_schedule=req.with_schedule,
@@ -285,8 +341,27 @@ def _build(req: SimRunIn):
         control_hz=req.control_hz,
         actuator_params=req.actuators,
         fuel_flow=req.fuel_flow,
+        # 기준면은 **활주로 표고다** — 따로 손잡이를 두면 둘이 어긋날 수 있다.
+        # 활주로가 없으면 엔진 기본값(해수면 0)이 그대로다.
+        ground_elev=req.runway.elevation if req.runway else 0.0,
+        min_altitude=req.runway.elevation if req.runway else 0.0,
+        launch=_build_rail(req.launch),
     )
     return sim, tr
+
+
+def _build_rail(spec):
+    """LaunchIn → 엔진 LaunchRail. exit_speed·accel 배타 판정은 엔진이 정본이다."""
+    if spec is None:
+        return None
+    return LaunchRail(
+        length=spec.length,
+        elev_angle=spec.elev_angle,
+        azimuth=spec.azimuth,
+        exit_speed=spec.exit_speed,
+        accel=spec.accel,
+        origin_n=(0.0, 0.0, -spec.origin_height),
+    )
 
 
 @router.post("/sim/run", status_code=202)
@@ -308,6 +383,15 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
         payload["meta"]["waypoints"] = (
             None if req.waypoints is None
             else [[float(v) for v in w] for w in req.waypoints]
+        )
+        # 활주로·발사대도 같은 이유로 동봉한다 — 화면이 활주로 띠와 레일을 그리고
+        # "활주로 안에 섰는가"를 판정하려면 그 기하가 결과와 함께 다녀야 한다.
+        # 엔진이 소비하지 않는 heading·length도 여기 실려야 재생 화면이 그릴 수 있다.
+        payload["meta"]["runway"] = (
+            None if req.runway is None else req.runway.model_dump()
+        )
+        payload["meta"]["launch"] = (
+            None if req.launch is None else req.launch.model_dump()
         )
         store.save(
             job.id,
