@@ -68,6 +68,8 @@ class Simulator:
         actuator_params=None,
         fuel_flow: float = 0.0,
         min_altitude: float | None = 0.0,
+        ground_elev: float = 0.0,
+        launch=None,
     ):
         if dt_plant <= 0 or control_hz <= 0:
             raise ValueError(f"dt_plant({dt_plant})·control_hz({control_hz})는 양수여야 함")
@@ -93,10 +95,26 @@ class Simulator:
         self.nav_model = nav_model
         self.stall_table = stall_table
         self.db_ranges = dict(db_ranges) if db_ranges else {}
-        # 기준면 여유 감시 [기본값 0 m = 해수면 MSL, 01 §2.5]. 지형·파고는 미모델이라
-        # 이건 "지면 충돌 판정"이 아니라 특이 상황 표시 — 시뮬은 중단하지 않고 플래그만
-        # 남긴다(엔벨로프 감시 항상 장착, 02 §6.1). None이면 감시 끔.
+        # 기준면 여유 감시 [기본값 0 m = 해수면 MSL, 01 §2.5]. None이면 감시 끔.
+        #
+        # **의미가 지면 도입으로 갈린다.** 착륙장치가 없으면 예전 그대로다 — 지형·파고
+        # 미모델이라 "지면 충돌 판정"이 아니라 특이 상황 표시이고, 시뮬은 중단하지 않고
+        # 플래그만 남긴다(02 §6.1). 착륙장치가 달리면 접촉점이 지면을 파고드는 것은
+        # 정상(스프링 침투)이고, 이 플래그가 잡는 것은 **동체 기준점(CG)이 지면 아래**로
+        # 내려간 경우다 — 스키드가 0.55 m 아래에 있으므로 CG가 지면 밑이면 기체가
+        # 통째로 잠긴 것이다. 활주로 표고가 0이 아니면 기준면도 표고여야 한다
+        # (호출자가 ground_elev와 같은 값을 준다 — 여기서 자동으로 끌어오지 않는 것은
+        # 감시를 끄거나 다른 기준면을 보고 싶은 경우를 막지 않기 위해서다).
         self.min_altitude = float(min_altitude) if min_altitude is not None else None
+        if not math.isfinite(ground_elev):
+            raise ValueError(f"ground_elev는 유한값이어야 함: {ground_elev}")
+        # 지면 평면 표고 [m] — 착륙장치가 침투를 재는 기준. 지형은 미모델이라 평면 하나다.
+        self.ground_elev = float(ground_elev)
+        # 발사 레일 (plant.ground.LaunchRail | None). 레일 구간은 **힘이 아니라 구속**이라
+        # RK4를 타지 않고 등가속 해석해로 전진한다 — run()의 레일 분기 참조.
+        self.launch = launch
+        if launch is not None and not hasattr(launch, "state_at"):
+            raise ValueError("launch는 LaunchRail 계약(state_at·exit_time·length)이어야 함")
         self.dt_plant = dt_plant
         self.control_hz = control_hz
         self.n_ctrl = int(n)
@@ -143,17 +161,22 @@ class Simulator:
         """
         if not tr.converged:
             raise ValueError(f"미수렴 트림해로는 시뮬 불가: {tr.case.name}")
-        th0 = tr.state.euler()[1]
         de0 = float(tr.control.elevon[0])
         thr0 = float(tr.control.throttle[0])
         fuel = float(tr.case.fuel)
 
-        x = pack(
-            np.array([0.0, 0.0, -tr.case.alt]),
-            tr.state.vel_b,
-            tr.state.q_nb,
-            np.zeros(3),
-        )
+        # 초기 상태는 **트림해의 상태**에서 온다. 수평비행 트림은 pos_n = [0,0,−case.alt]
+        # 이라 종전(case.alt를 직접 쓰던 것)과 완전히 같고, 지상 평형 트림은 풀어낸
+        # CG 높이(표고 + 0.50 m)를 담고 있어 그 값이 그대로 쓰인다 — case.alt를 쓰면
+        # 활주로 표면에 CG를 놓아 기체가 반쯤 잠긴 채 출발한다.
+        x = pack(tr.state.pos_n, tr.state.vel_b, tr.state.q_nb, tr.state.omega_b)
+        on_rail = self.launch is not None
+        if on_rail:
+            # 발사 구성에서는 **레일 기하가 초기 상태를 정한다** — 레일이 기체를 잡고
+            # 있으므로 평형해가 아니라 구속 상태다. 트림해는 질량·연료와 법칙 웜스타트의
+            # 출처로만 남는다. 웜스타트 자세도 레일 앙각이어야 한다(수평이 아니다).
+            x = pack(*self.launch.state_at(0.0))
+        th0 = float(VehicleState(q_nb=x[QUAT]).euler()[1])
         self.fcl.init(self.dt_ctrl)
         self.fcl.reset(state={"theta": th0, "throttle": thr0, "de": de0})
         self.guidance.init(self.dt_ctrl)
@@ -170,9 +193,14 @@ class Simulator:
             "pn", "pe", "h", "u", "v", "w", "p", "q", "r", "phi", "theta", "psi",
             "V", "alpha", "beta", "mach", "fuel",
             "de", "da", "dr", "thr_l", "thr_r", "alpha_margin",
+            "n_gear", "launch_gx",
             *_CHAIN_SIGNALS,
         )}
         sig["limiter_active"] = np.zeros(n_steps, dtype=bool)
+        # 지면 접촉 — 착륙장치가 없으면 반력은 0이 아니라 **NaN**(미계측)이다.
+        # 0으로 두면 "지면에 닿았는데 반력이 0"과 구분되지 않는다.
+        sig["wow"] = np.zeros(n_steps, dtype=bool)
+        sig["on_rail"] = np.zeros(n_steps, dtype=bool)
         modes = []
         stall_margin = np.full(n_steps, np.nan)
         flag_keys = list(self.db_ranges)
@@ -183,6 +211,7 @@ class Simulator:
         sc = None
         aborted = None
         n_done = n_steps
+        launch_exit_t = None
         for k in range(n_steps):
             t = k * self.dt_plant
             pos, vel_b, q_nb, omega = x[POS], x[VEL], x[QUAT], x[OMEGA]
@@ -236,6 +265,20 @@ class Simulator:
                 np.nan if self.fcl.alpha_margin is None else self.fcl.alpha_margin
             )
             sig["limiter_active"][k] = self.fcl.limiter_active
+            # 지면 접촉 진단 — 스텝당 1회. RK4 부단계에서는 부르지 않는다(힘 계산과
+            # 별개 경로라 값이 갈리지 않도록 같은 상태에서 한 번만 잰다).
+            if self.aircraft.ground is not None:
+                gs = self.aircraft.ground.contact_state(
+                    pos, vel_b, q_nb, omega, self.ground_elev
+                )
+                sig["wow"][k] = gs["wow"]
+                sig["n_gear"][k] = gs["n_total"]
+            else:
+                sig["n_gear"][k] = np.nan  # 착륙장치 미장착 — 0이 아니라 미계측
+            sig["on_rail"][k] = on_rail
+            # 사출 하중은 레일 위에서만 존재한다 — 이탈 후 0이 아니라 NaN이면
+            # "하중이 없다"와 "레일이 없다"가 섞인다. 레일 밖은 0이 맞다(가속 없음).
+            sig["launch_gx"][k] = self.launch.launch_gx if on_rail else 0.0
             # 명령 사슬 계측 — 유도 명령은 cmd에서, 법칙 내부는 그래프 계측 창구에서.
             # 둘 다 제어주기(n_ctrl)마다만 갱신되므로 사이 스텝은 직전 값이 유지된다
             # (de/da/dr과 같은 규약 — 제로홀드가 아니라 실제로 그 값이 유지된 것).
@@ -282,11 +325,34 @@ class Simulator:
 
             def fm(xx):
                 F, M, _m, _J = self.aircraft.fm(
-                    xx[VEL], xx[OMEGA], xx[QUAT], -float(xx[POS][2]), controls, fuel
+                    xx[VEL], xx[OMEGA], xx[QUAT], -float(xx[POS][2]), controls, fuel,
+                    pos_n=xx[POS], ground_elev=self.ground_elev,
                 )
                 return F, M
 
-            x = rb.step(x, fm, self.dt_plant)
+            t_next = t + self.dt_plant
+            if on_rail:
+                # **레일 구간은 적분하지 않는다.** 기체가 레일에 물려 자세·횡방향이
+                # 구속된 1자유도 등가속 운동이라 해석해가 닫힌 형태로 있다. 데모
+                # 사출은 0.245 s뿐이라 dt 0.01이면 25스텝인데, 그걸 RK4로 근사할
+                # 이유가 없다. 레일이 주는 구속 반력은 fm에 들어가지 않는다 —
+                # 들어갈 자리가 없어서가 아니라, 구속을 힘으로 흉내내면 매우 뻣뻣한
+                # 스프링이 되어 같은 시간을 훨씬 잘게 쪼개야 하기 때문이다.
+                rail = self.launch
+                if t_next < rail.exit_time:
+                    x = pack(*rail.state_at(0.5 * rail.accel * t_next * t_next))
+                else:
+                    # 이탈 시각이 스텝 경계에 떨어지지 않는다 — 이탈 상태에서 **남은
+                    # 시간만** 자유비행으로 적분한다. 다음 스텝 경계까지 통째로
+                    # 레일에 두면 최대 dt만큼 늦게 놓여 81.5 m/s에서 0.8 m가 밀린다.
+                    x = pack(*rail.state_at(rail.length))
+                    rem = t_next - rail.exit_time
+                    if rem > 0.0:
+                        x = rb.step(x, fm, rem)
+                    on_rail = False
+                    launch_exit_t = rail.exit_time
+            else:
+                x = rb.step(x, fm, self.dt_plant)
             if self.fuel_flow > 0.0:
                 burn = self.fuel_flow * float(np.mean(sc.throttle)) * self.dt_plant
                 fuel = max(fuel - burn, 0.0)
@@ -304,6 +370,7 @@ class Simulator:
         sig["mode"] = modes
         t_arr = np.arange(n_done) * self.dt_plant
         envelope = self._envelope(t_arr, stall_margin, flags, sig["h"])
+        phases = self._phase_times(t_arr, sig, launch_exit_t)
         return SimResult(
             t=t_arr,
             signals=sig,
@@ -319,8 +386,37 @@ class Simulator:
                 "aborted": aborted,
                 "limits": self._effector_limits(actuators),
                 "clamps": self._command_clamps(),
+                "phases": phases,
             },
         )
+
+    # 접지 후 "정지"로 치는 속도 [m/s] — 정칙화 마찰은 v→0에서 점근이라 정확히 0에
+    # 닿지 않는다(plant/ground.py §마찰). 0을 기다리면 영원히 안 오므로 문턱이 필요하다.
+    STOP_SPEED = 0.5
+
+    def _phase_times(self, t_arr, sig, launch_exit_t) -> dict:
+        """비행 단계 시각 — 이탈·접지·정지. **없으면 None**이지 0이 아니다.
+
+        0으로 채우면 "t=0에 접지했다"가 되어, 착륙하지 않은 런이 완벽한 착륙으로
+        읽힌다(01 §4.2 판정 불가를 0으로 위장하지 않는다와 같은 자리). 소비자는
+        None을 "그 일이 일어나지 않았다"로 읽으면 된다.
+        """
+        out = {"launch_exit_t": launch_exit_t, "touchdown_t": None, "stop_t": None}
+        wow = sig["wow"]
+        if len(t_arr) == 0 or self.aircraft.ground is None:
+            return out
+        # 접지 = 떠 있다가 닿은 첫 순간. 지상에서 출발한 런의 첫 샘플은 접지가 아니다
+        airborne = ~wow
+        if airborne.any():
+            after = np.flatnonzero(wow[int(np.argmax(airborne)):])
+            if after.size:
+                i = int(np.argmax(airborne)) + int(after[0])
+                out["touchdown_t"] = float(t_arr[i])
+                # 정지 = 접지 이후 속도가 문턱 아래로 처음 내려간 순간 (접지 상태 유지)
+                slow = np.flatnonzero((sig["V"][i:] < self.STOP_SPEED) & wow[i:])
+                if slow.size:
+                    out["stop_t"] = float(t_arr[i + int(slow[0])])
+        return out
 
     def _effector_limits(self, actuators) -> dict:
         """이 런의 판정 기준선 — 타면 위치 한계와 작동기 rate 한계.

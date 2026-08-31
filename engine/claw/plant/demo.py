@@ -48,6 +48,13 @@ def make_demo_skid_gear() -> SkidGear:
     return SkidGear(contacts, k=SKID_K, c=SKID_C, mu=SKID_MU)
 
 
+# 발사대 위 CG 시작 높이 [m] [기본값] — 레일 구조물이 기체를 지면에서 들어 올린 높이.
+# 0으로 두면 스키드 접촉점(CG 아래 0.55 m)이 지면 0.55 m 아래에 박힌 채 시작해,
+# 레일 구간 내내 wow·기어 반력이 거짓으로 선다(레일이 받치는데 기어가 받는 것처럼
+# 기록된다). 1.2 m면 접촉점이 지면 위 0.65 m라 레일 구간에서 기어가 닿지 않는다.
+RAIL_ORIGIN_H = 1.2
+
+
 def make_demo_launch_rail() -> LaunchRail:
     """데모 발사대 [기본값] — 레일 10 m, 앙각 15°, 이탈 81.5 m/s.
 
@@ -57,7 +64,12 @@ def make_demo_launch_rail() -> LaunchRail:
     레일 10 m에서 이 속도는 **33.9 g**를 요구한다 — 판정 기준은 구조 한계
     n_x_launch이고 그 값은 아직 [TBD]라 "미판정"으로 표시된다.
     """
-    return LaunchRail(length=10.0, elev_angle=math.radians(15.0), exit_speed=81.5)
+    return LaunchRail(
+        length=10.0,
+        elev_angle=math.radians(15.0),
+        exit_speed=81.5,
+        origin_n=np.array([0.0, 0.0, -RAIL_ORIGIN_H]),
+    )
 
 
 def make_demo_aircraft(ground=None) -> Aircraft:

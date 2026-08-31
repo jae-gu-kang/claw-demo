@@ -263,8 +263,14 @@ def test_demo_rail_matches_design_numbers():
 
 def test_rail_state_at_endpoints():
     rail = make_demo_launch_rail()
+    # 레일 원점은 지면이 아니라 발사대 구조물 높이(1.2 m)다 — 0으로 두면 스키드
+    # 접촉점(CG 아래 0.55 m)이 지면에 박힌 채 출발해 레일 구간 내내 기어 반력이
+    # 거짓으로 선다. RAIL_ORIGIN_H가 그 값의 단일 거처다.
+    from claw.plant.demo import RAIL_ORIGIN_H
+
     pos0, vel0, q0, w0 = rail.state_at(0.0)
-    assert np.allclose(pos0, 0.0)
+    assert pos0[0] == pytest.approx(0.0) and pos0[1] == pytest.approx(0.0)
+    assert -pos0[2] == pytest.approx(RAIL_ORIGIN_H)
     assert vel0[0] == pytest.approx(0.0)
     assert np.allclose(w0, 0.0)
     assert np.allclose(q0, rail.attitude())
@@ -272,8 +278,8 @@ def test_rail_state_at_endpoints():
     posL, velL, _q, _w = rail.state_at(rail.length)
     assert velL[0] == pytest.approx(rail.exit_speed)
     assert velL[1] == 0.0 and velL[2] == 0.0, "레일에 물려 있으므로 속도는 동체 x축뿐"
-    # 앙각 15°·길이 10 m → 이탈 고도 = 10·sin15°
-    assert -posL[2] == pytest.approx(10.0 * math.sin(math.radians(15.0)))
+    # 앙각 15°·길이 10 m → 이탈 고도 = 발사대 높이 + 10·sin15°
+    assert -posL[2] == pytest.approx(RAIL_ORIGIN_H + 10.0 * math.sin(math.radians(15.0)))
     assert posL[0] == pytest.approx(10.0 * math.cos(math.radians(15.0)))
 
 
