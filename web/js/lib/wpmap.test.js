@@ -5,8 +5,8 @@ import { test } from "node:test";
 
 import {
   DEFAULT_SPAN, DRAG_PX, ZOOM_STEP, fitView, fmtMeters, hitTest, isDrag,
-  makeProjection, moveWaypoint, panBy, planProfile, rowsToPoints, toCanvasXY,
-  trackProfile, zoomAt,
+  makeProjection, moveWaypoint, panBy, planProfile, profileHitTest, profileScale,
+  rowsToPoints, toCanvasXY, trackProfile, zoomAt,
 } from "./wpmap.js";
 
 const W = 380, H = 380, M = 42;
@@ -132,10 +132,11 @@ test("fmtMeters: 1 m 반올림 · -0 정규화 — 표 문자열 오염 방지",
   assert.equal(fmtMeters(-1234.6), "-1235");
 });
 
-test("ZOOM_STEP: 휠 한 이벤트당 줌이 로그 기준 100배 둔하다 (사용자 제기)", () => {
+test("ZOOM_STEP: 휠 한 이벤트당 줌이 로그 기준 20배 둔하다 (사용자 제기)", () => {
   // 종전 1.2는 이벤트당이라 트랙패드 한 제스처(수십 이벤트)에 지도가 튀었다.
-  // 100회 굴려야 종전 한 번과 같아진다 — 그것이 "100배 둔하게"의 정의다
-  assert.ok(Math.abs(ZOOM_STEP ** 100 - 1.2) < 1e-9);
+  // 20회 굴려야 종전 한 번과 같아진다 — 그것이 "20배 둔하게"의 정의다
+  // (처음 100배는 반대로 너무 둔해서 사용자가 5배 올려 달라고 했다)
+  assert.ok(Math.abs(ZOOM_STEP ** 20 - 1.2) < 1e-9);
   assert.ok(ZOOM_STEP > 1 && ZOOM_STEP < 1.01); // 방향은 확대, 한 번에 1%도 안 움직인다
 });
 
@@ -192,4 +193,38 @@ test("planProfile: 도달 반경을 주면 램프 마루가 생긴다 — 엔진
   // 고도 없는 웨이포인트에는 마루를 만들지 않는다 (없는 계획을 그리지 않는다)
   const noAlt = planProfile(rowsToPoints([{ n: "1000", e: "0" }]), 500, 200);
   assert.deepEqual(noAlt.map((p) => p.mark), ["start", "wp"]);
+});
+
+test("profileScale: toAlt는 py의 역함수 — 끈 자리가 곧 고도가 된다", () => {
+  const plan = planProfile(rowsToPoints([
+    { n: "1000", e: "0", d: "1500" }, { n: "2000", e: "0", d: "500" },
+  ]), 1000);
+  const sc = profileScale(plan, [], 380, 190);
+  // 왕복: 고도 → y → 고도
+  for (const a of [500, 1000, 1500, sc.a0, sc.a1]) {
+    assert.ok(Math.abs(sc.toAlt(sc.py(a)) - a) < 1e-9, `왕복 실패 ${a}`);
+  }
+  // 위로 끌면 고도가 오른다 (화면 y는 아래가 큰 값)
+  assert.ok(sc.toAlt(50) > sc.toAlt(150));
+  assert.ok(sc.a0 < 500 && sc.a1 > 1500); // 여백이 데이터를 감싼다
+});
+
+test("profileHitTest: 웨이포인트 점만 잡는다 — 출발점·램프 꼭대기는 아니다", () => {
+  const pts = rowsToPoints([{ n: "1000", e: "0", d: "1500" }]);
+  const plan = planProfile(pts, 1000, 200); // 반경 200 → 램프 꼭대기 생성
+  const sc = profileScale(plan, [], 380, 190);
+  const wp = plan.find((p) => p.mark === "wp");
+  const ramp = plan.find((p) => p.mark === "ramp");
+  const start = plan.find((p) => p.mark === "start");
+  assert.equal(profileHitTest(plan, sc.px(wp.dist), sc.py(wp.alt), sc), 0);
+  // 램프 꼭대기는 웨이포인트 고도에서 유도된 점이라 끌 대상이 아니다.
+  // (x가 wp와 다르므로 그 자리를 눌러도 wp가 잡히지 않는다)
+  assert.equal(profileHitTest(plan, sc.px(ramp.dist), sc.py(ramp.alt), sc), -1);
+  // 출발점 고도는 시작 트림 고도라 이 표의 값이 아니다
+  assert.equal(profileHitTest(plan, sc.px(start.dist), sc.py(start.alt), sc), -1);
+  assert.equal(profileHitTest(plan, 5, 5, sc), -1); // 빈 곳
+  // 고도 없는 웨이포인트는 점이 없어 잡히지 않는다 (없는 것을 끌 수 없다)
+  const noAlt = planProfile(rowsToPoints([{ n: "1000", e: "0" }]), 1000, 200);
+  const sc2 = profileScale(noAlt, [], 380, 190);
+  assert.equal(profileHitTest(noAlt, sc2.px(noAlt[1].dist), 95, sc2), -1);
 });

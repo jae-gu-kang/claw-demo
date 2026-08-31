@@ -9,8 +9,9 @@ import { linScale } from "./plot.js";
 export const DRAG_PX = 5; // 클릭↔드래그 판별 임계 [px]
 // 휠 한 이벤트당 줌 배율. 종전 1.2는 **이벤트당**이라 트랙패드처럼 한 제스처에
 // 수십 개가 오는 입력에서 한 번 굴릴 때마다 지도가 너무 크거나 너무 작아졌다
-// (사용자 제기). 로그 줌 기준으로 100배 둔하게 — 지수만 고치면 되도록 남긴다.
-export const WHEEL_ZOOM_DIVISOR = 100;
+// (사용자 제기). 로그 줌 기준으로 20배 둔하게 — 처음 100배는 반대로 너무 둔해서
+// 사용자가 5배 올려 달라고 했다(100/5). 지수만 고치면 되도록 남긴다.
+export const WHEEL_ZOOM_DIVISOR = 20;
 export const ZOOM_STEP = 1.2 ** (1 / WHEEL_ZOOM_DIVISOR);
 export const SPAN_MIN = 50; // 줌 인 한계 [m]
 export const SPAN_MAX = 1e6; // 줌 아웃 한계 [m]
@@ -161,6 +162,49 @@ export function trackProfile(pn, pe, h) {
     if (typeof a === "number" && Number.isFinite(a)) out.push({ dist, alt: a });
   }
   return out;
+}
+
+// 세로 프로파일 캔버스 여백 — 그리기와 **클릭 역사상**이 같은 표를 읽는다.
+// 따로 적으면 갈리고, 갈려도 점이 조금 어긋날 뿐이라 눈에 안 띈다
+// (lib/plot.js HEATMAP_LAYOUT과 같은 이유).
+export const PROFILE_LAYOUT = { mL: 46, mT: 16, mR: 10, mB: 30 };
+
+/** 프로파일 축 사상 — {px, py, toAlt, d1, a0, a1}. 그리기·히트테스트·역사상 공용.
+ *
+ * toAlt는 py의 역함수다: 점을 위아래로 끌면 그 y가 곧 고도가 되어야 하므로,
+ * 그리는 쪽과 읽는 쪽이 반드시 같은 축을 봐야 한다.
+ */
+export function profileScale(plan, track, width, height) {
+  const { mL, mT, mR, mB } = PROFILE_LAYOUT;
+  const pts = plan.filter((p) => p.alt != null);
+  const alts = [...pts.map((p) => p.alt), ...track.map((p) => p.alt)];
+  const d1 = Math.max(1, ...plan.map((p) => p.dist), ...track.map((p) => p.dist));
+  let a0 = Math.min(0, ...alts);
+  let a1 = Math.max(...alts, a0 + 1);
+  const pad = Math.max(1, (a1 - a0) * 0.12); // 위아래 여백 — 선이 테두리에 붙지 않게
+  a0 -= pad; a1 += pad;
+  const span = height - mB - mT;
+  return {
+    px: linScale(0, d1, mL, width - mR),
+    py: linScale(a0, a1, height - mB, mT),
+    toAlt: (y) => a0 + ((height - mB - y) / span) * (a1 - a0),
+    d1, a0, a1,
+  };
+}
+
+/** 프로파일에서 웨이포인트 점 찾기 — 웨이포인트 번호, 없으면 -1.
+ *
+ * 출발점(idx -1)과 램프 꼭대기는 **잡히지 않는다**: 출발점 고도는 시작 트림
+ * 고도라 이 표의 값이 아니고, 램프 꼭대기는 웨이포인트 고도에서 유도된 점이라
+ * 끌 대상이 아니다. 뒤 인덱스 우선(위에 그려진 것) — 지도 hitTest와 같은 관례.
+ */
+export function profileHitTest(plan, x, y, scale, { radiusPx = 10 } = {}) {
+  for (let i = plan.length - 1; i >= 0; i -= 1) {
+    const p = plan[i];
+    if (p.idx < 0 || p.alt == null) continue;
+    if (Math.hypot(scale.px(p.dist) - x, scale.py(p.alt) - y) <= radiusPx) return p.idx;
+  }
+  return -1;
 }
 
 /** 드래그 판별 — 시작점 대비 이동량이 임계 초과인가. */

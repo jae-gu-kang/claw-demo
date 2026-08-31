@@ -8,10 +8,11 @@
 
 import { el } from "../dom.js";
 import {
-  ZOOM_STEP, fitView, fmtMeters, hitTest, isDrag, makeProjection, moveWaypoint,
-  rowsToPoints, toCanvasXY, zoomAt, panBy,
+  PROFILE_LAYOUT, ZOOM_STEP, fitView, fmtMeters, hitTest, isDrag, makeProjection,
+  moveWaypoint, planProfile, profileHitTest, profileScale, rowsToPoints, toCanvasXY,
+  trackProfile, zoomAt, panBy,
 } from "../lib/wpmap.js";
-import { linScale, niceTicks } from "../lib/plot.js";
+import { niceTicks } from "../lib/plot.js";
 import { makeCanvas } from "./plots.js";
 
 const HIT_PX = 10; // WP 히트 반경 [논리 px]
@@ -27,18 +28,11 @@ const HIT_PX = 10; // WP 히트 반경 [논리 px]
  *
  * 고도가 하나도 없으면 그릴 것이 없다 — 빈 축 대신 사유 문장을 낸다(호출측).
  */
-export function altProfileCanvas(plan, track, { width = 380, height = 190 } = {}) {
-  const { canvas, ctx } = makeCanvas(width, height);
-  const mL = 46, mT = 16, mR = 10, mB = 30;
+function drawProfile(ctx, plan, track, scale, width, height, selected) {
+  const { mL, mT, mR, mB } = PROFILE_LAYOUT;
+  const { px, py, d1, a0, a1 } = scale;
   const pts = plan.filter((p) => p.alt != null);
-  const alts = [...pts.map((p) => p.alt), ...track.map((p) => p.alt)];
-  const dists = [...plan.map((p) => p.dist), ...track.map((p) => p.dist)];
-  const d1 = Math.max(1, ...dists);
-  let a0 = Math.min(0, ...alts), a1 = Math.max(...alts, a0 + 1);
-  const padA = Math.max(1, (a1 - a0) * 0.12); // 위아래 여백 — 선이 테두리에 붙지 않게
-  a0 -= padA; a1 += padA;
-  const px = linScale(0, d1, mL, width - mR);
-  const py = linScale(a0, a1, height - mB, mT);
+  ctx.clearRect(0, 0, width, height);
 
   ctx.strokeStyle = "#e5e5ea";
   ctx.strokeRect(mL, mT, width - mL - mR, height - mT - mB);
@@ -95,9 +89,131 @@ export function altProfileCanvas(plan, track, { width = 380, height = 190 } = {}
         ctx.textAlign = "left";
         ctx.fillStyle = "#ff9500";
       }
+      // 선택한 웨이포인트 — 지도와 같은 표시(파란 테). 끌 수 있는 점임을 알린다.
+      // **idx >= 0 필수**: selected 초기값 -1이 출발점의 idx -1과 같아서, 조건을
+      // 그냥 두면 페이지를 열자마자 출발점에 테가 붙는다 — profileHitTest가
+      // 명시적으로 제외하는 점이라 눌러도 안 잡히고 끌리지도 않는다(화면이
+      // 사실이 아닌 것을 말하는 자리). 지도 쪽 루프는 i >= 0이라 무사했다
+      if (p.idx >= 0 && p.idx === selected) {
+        ctx.strokeStyle = "#007aff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(px(p.dist), py(p.alt), 7.5, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.fillStyle = "#ff9500";
+      }
     }
   }
-  return canvas;
+}
+
+/** 세로 프로파일 차트 — 그리기 + **점을 위아래로 끌어 고도 편집**.
+ *
+ * 지도에서 위아래 드래그는 고도가 될 수 없다: 지도 세로축이 N이라 그러면
+ * 웨이포인트를 북쪽으로 옮길 수 없다. 위아래가 곧 고도인 평면은 여기뿐이라
+ * 고도 편집 제스처의 자리도 여기다 (사용자 요청).
+ *
+ * 캔버스는 재생성 금지 — setPointerCapture가 요소에 붙는다. 지도와 같은 규약:
+ * 끄는 동안에는 캔버스만 다시 그리고 표 재렌더(onRowsChanged)는 pointerup 1회다.
+ */
+export function createProfileChart({
+  getRows, // () => wpRows — 문자열 행 참조 (차트가 직접 변이)
+  getStartAlt, // () => number | null — 시작 트림 고도 (계획선의 출발점)
+  getAcceptRadius, // () => number [m] — 램프 마루 위치
+  getTrack, // () => {pn, pe, h} | null — 최근 시뮬 궤적
+  onRowsChanged, // () => void — 편집 확정 후 표 재렌더
+  onSelect, // (idx) => void — 선택 동기 (지도와 같은 웨이포인트를 가리키게)
+  width = 380, height = 380,
+} = {}) {
+  const { canvas, ctx } = makeCanvas(width, height);
+  canvas.style.touchAction = "none";
+  canvas.setAttribute("aria-label", "세로 프로파일 — 점을 위아래로 끌면 고도, 표로도 편집 가능");
+  let selected = -1;
+  let scale = null; // 마지막 그리기의 축 — 히트테스트·역사상이 같은 표를 본다
+  // 드래그 중에는 축을 **얼린다**. 안 얼리면 끌 때마다 y범위가 다시 잡혀
+  // 점이 손에서 달아나고(끌수록 축이 따라 커진다) 커서와 점이 어긋난다
+  let gesture = null; // {idx, scale, moved}
+
+  const build = () => {
+    const pts = rowsToPoints(getRows());
+    const plan = planProfile(pts, getStartAlt?.() ?? null, getAcceptRadius?.() || 0);
+    const t = getTrack?.();
+    const track = t ? trackProfile(t.pn, t.pe, t.h) : [];
+    return { plan, track };
+  };
+
+  function redraw() {
+    const { plan, track } = build();
+    scale = gesture ? gesture.scale : profileScale(plan, track, width, height);
+    // 그릴 것이 없으면 캔버스를 접는다 — 축·눈금만 있는 빈 프레임에 출발점 점
+    // 하나(트림 고도)가 떠 있으면, 바로 아래 "고도를 입력하면 그립니다" 안내와
+    // 어긋나고 그 주황이 무엇인지 화면에 설명도 없다. 노드는 유지한다 —
+    // 포인터 캡처가 요소에 붙으므로 없앴다 다시 만들면 안 된다
+    const nothing = !plan.some((p) => p.idx >= 0 && p.alt != null) && !track.length;
+    canvas.style.display = nothing ? "none" : "";
+    // 그리기만 조건부다 — 반환은 무조건. 조기 반환으로 두면 "그린 것"과
+    // "그렸을 것"이 한 계약에 섞이고, 나중에 다른 가드가 하나 붙는 순간
+    // 호출측이 조용히 안 그린 것을 설명하게 된다 (그 재파생 탈출구가 §5.5)
+    if (!nothing) drawProfile(ctx, plan, track, scale, width, height, selected);
+    return { plan, track };
+  }
+
+  const eventXY = (ev) =>
+    toCanvasXY(ev.clientX, ev.clientY, canvas.getBoundingClientRect(), width, height);
+
+  canvas.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 0 || !scale) return;
+    const { x, y } = eventXY(ev);
+    const idx = profileHitTest(build().plan, x, y, scale, { radiusPx: HIT_PX });
+    if (idx < 0) return;
+    gesture = { idx, scale, moved: false, y0: y };
+    selected = idx;
+    onSelect?.(idx);
+    canvas.setPointerCapture(ev.pointerId);
+    redraw();
+  });
+
+  canvas.addEventListener("pointermove", (ev) => {
+    const { x, y } = eventXY(ev);
+    if (!gesture) {
+      // 끌 수 있는 점 위에서만 커서를 바꾼다 (app.css는 안 건드린다 — wpmap 관례)
+      canvas.style.cursor =
+        scale && profileHitTest(build().plan, x, y, scale, { radiusPx: HIT_PX }) >= 0
+          ? "ns-resize" : "default";
+      return;
+    }
+    // 문턱은 지도와 같은 정본(DRAG_PX) — 여기 1 px을 따로 적었더니 축 배율상
+    // 1 px ≈ 6 m라, 손가락 탭이 2~5 px 흔들리는 터치에서는 **점을 고르려고
+    // 누를 때마다 고도가 바뀌었다**(touchAction:none이라 탭도 이 경로로 온다)
+    if (!gesture.moved && !isDrag(0, y - gesture.y0)) return; // 클릭=선택만
+    gesture.moved = true;
+    // 끈 자리가 곧 고도다 — 얼린 축의 역사상. 1 m 반올림은 표 문자열 관례 공유
+    getRows()[gesture.idx].d = fmtMeters(gesture.scale.toAlt(y));
+    redraw();
+  });
+
+  const endGesture = (ev) => {
+    if (!gesture) return;
+    const moved = gesture.moved;
+    gesture = null;
+    if (canvas.hasPointerCapture?.(ev.pointerId)) canvas.releasePointerCapture(ev.pointerId);
+    if (moved) onRowsChanged?.(); // 표 동기는 여기서 1회 (input 포커스 파괴 방지)
+    redraw(); // 얼린 축을 풀고 다시 잡는다
+  };
+  canvas.addEventListener("pointerup", endGesture);
+  canvas.addEventListener("pointercancel", endGesture);
+
+  redraw();
+  return {
+    root: canvas,
+    // 그린 것을 그대로 돌려준다 — 호출측이 캡션(무엇을 설명할지·어느 행이 비었는지)을
+    // 고르려고 같은 계산을 두 번째로 적으면, 한쪽만 고쳤을 때 캡션이 그려지지 않은
+    // 선을 설명하게 된다 (v0.36·v0.38·v0.40이 반복해서 고쳐 온 실패, 02 §5.5)
+    refresh: (sel) => {
+      if (sel !== undefined) selected = sel;
+      if (selected >= getRows().length) selected = -1;
+      return redraw();
+    },
+  };
 }
 
 export function createWpMap({
@@ -105,6 +221,7 @@ export function createWpMap({
   getAcceptRadius, // () => number [m]
   getTrack, // () => {pn, pe} | null — 최근 시뮬 궤적
   onRowsChanged, // () => void — 추가·삭제·이동·재배열 후 표 재렌더
+  onSelect, // (idx) => void — 선택이 **바뀔 때만** (세로 프로파일이 같은 점을 가리키게)
   viewRef, // {view: {cN,cE,span}|null} — 호출측 스코프 홀더 (탭 재진입 시 줌/팬 유지)
   width = 380, height = 380,
 } = {}) {
@@ -357,8 +474,13 @@ export function createWpMap({
     onRowsChanged();
     redraw();
   };
+  let notifiedSel = null; // 마지막으로 알린 선택 — 팬 재그리기마다 알리지 않으려고
   function syncToolbar() {
     const rows = getRows();
+    if (notifiedSel !== selected) {
+      notifiedSel = selected;
+      onSelect?.(selected);
+    }
     btnDel.disabled = selected < 0;
     btnUp.disabled = selected <= 0;
     btnDown.disabled = selected < 0 || selected >= rows.length - 1;
@@ -369,7 +491,10 @@ export function createWpMap({
     }
   }
 
-  const root = el("div", {},
+  // 폭을 캔버스에 맞춘다 — 안 주면 아래 안내문이 늘어나 열이 한 줄을 다 먹고
+  // 옆에 놓기로 한 세로 프로파일이 아래로 밀린다(라이브 확인). 좁은 화면에서는
+  // shrink로 줄었다가 wrap — 캔버스는 .plot의 max-width:100%가 함께 줄인다
+  const root = el("div", { style: `flex: 0 1 ${width + 16}px; min-width: 240px` },
     canvas,
     el("div", { class: "row", style: "margin-top: 6px" },
       btnFit, btnDel, btnUp, btnDown,
@@ -387,6 +512,9 @@ export function createWpMap({
       if (selected >= getRows().length) selected = -1; // 표에서 행 삭제된 경우
       redraw();
     },
+    // 프로파일에서 고른 점을 지도도 가리키게 — 두 면이 같은 웨이포인트를 말한다
+    // 되울림 차단: 프로파일이 부른 선택을 지도가 다시 프로파일에 알리지 않는다
+    select: (idx) => { selected = idx; notifiedSel = idx; redraw(); },
     fit: () => { fitAll(); redraw(); },
   };
 }

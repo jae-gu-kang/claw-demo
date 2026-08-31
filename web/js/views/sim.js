@@ -9,12 +9,12 @@ import { clear, el, flagBadge, fmt } from "../dom.js";
 import { buildModes, buildWaypoints, COND_KINDS } from "../lib/mission.js";
 import { planeViews } from "../lib/plot.js";
 import { flaggedNames, modeSpans, strideFor } from "../lib/replay.js";
-import { moveWaypoint, planProfile, rowsToPoints, trackProfile } from "../lib/wpmap.js";
+import { moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
 import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
-import { altProfileCanvas, createWpMap } from "./wpmap.js";
+import { createProfileChart, createWpMap } from "./wpmap.js";
 
 // 기본 미션 = Phase 4 완주 회귀 미션 (test_mission — 상승→선회 항법→디센트→임무수행)
 let modeRows = [
@@ -164,26 +164,38 @@ export function render() {
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
 
-  const profileBox = el("div", { style: "margin-top: 8px" });
   // 세로 프로파일 — 계획(입력한 WP 고도)과 최근 시뮬 실제 고도를 같은 거리축에.
-  // 지도가 수평면을, 이쪽이 세로면을 맡아 웨이포인트 한 벌을 두 면으로 본다
-  const drawProfile = () => {
-    const pts = rowsToPoints(wpRows);
+  // 지도가 수평면을, 이쪽이 세로면을 맡아 웨이포인트 한 벌을 두 면으로 본다.
+  // 캔버스는 차트가 소유하고(포인터 캡처가 요소에 붙는다) 여기서는 캡션만 다시 만든다
+  const profileHints = el("div");
+  const profileChart = createProfileChart({
+    getRows: () => wpRows,
     // 출발 고도는 시작 트림 고도 — 엔진 LosPath도 첫 구간을 기체 시작 고도에서
     // 잇는다(guidance/path.py). 폼이 비면 null(미상)로 두고 지어내지 않는다
-    const sAlt = String(f.alt.value).trim();
-    const startAlt = sAlt !== "" && Number.isFinite(Number(sAlt)) ? Number(sAlt) : null;
+    getStartAlt: () => {
+      const sAlt = String(f.alt.value).trim();
+      return sAlt !== "" && Number.isFinite(Number(sAlt)) ? Number(sAlt) : null;
+    },
     // 도달 반경을 넘겨야 계획선이 엔진 명령과 같은 모양이 된다 (램프 마루)
-    const plan = planProfile(pts, startAlt, Number(f.accept.value) || 0);
-    const sig = lastReplay?.body?.signals;
-    const track = sig ? trackProfile(sig.pn, sig.pe, sig.h) : [];
+    getAcceptRadius: () => Number(f.accept.value) || 0,
+    getTrack: () => lastReplay && lastReplay.body.signals,
+    onRowsChanged: () => { renderWpTable(wpBox, wpMap); wpMap.refresh(); drawProfile(); },
+    onSelect: (idx) => wpMap.select(idx), // 지도와 같은 점을 가리키게
+  });
+  // 지도와 같은 폭 규약 — 두 면이 나란히 서고 좁아지면 함께 접힌다
+  const profileBox = el("div", { style: "flex: 0 1 396px; min-width: 240px" },
+    profileChart.root, profileHints);
+  const drawProfile = () => {
+    // 차트가 **그린 것**을 그대로 받아 캡션을 고른다 — 같은 계산을 여기서 다시
+    // 적으면 한쪽만 고쳤을 때 캡션이 그려지지 않은 선을 설명한다 (02 §5.5)
+    const { plan, track } = profileChart.refresh();
+    const pts = rowsToPoints(wpRows);
     const kids = [];
     // 출발점(트림 고도)은 planProfile이 항상 붙인다 — 그걸 세면 WP 고도가 하나도
     // 없어도 "계획"을 그리게 되고, 캡션이 사용자가 넣지 않은 선을 설명한다.
     // 사용법 안내(else)도 트림 고도 칸을 비워야만 나오는 죽은 문장이 된다
     const wpAlts = plan.filter((p) => p.idx >= 0 && p.alt != null);
     if (wpAlts.length || track.length) {
-      kids.push(altProfileCanvas(plan, track));
       // 계획이 없으면 주황을 설명하지 않는다 — 그 상태의 주황은 출발점 점 하나뿐이라
       // 없는 층을 설명하는 범례와 같은 거짓말이 된다 (02 v0.36과 같은 자리)
       kids.push(wpAlts.length
@@ -219,7 +231,7 @@ export function render() {
         "세로 프로파일 — 웨이포인트 고도를 입력하면 거리-고도로 그립니다 (표의 '고도' 열 또는 "
         + "지도의 '선택 WP 고도'). 시뮬을 돌리면 실제 고도가 겹쳐 그려집니다."));
     }
-    clear(profileBox).append(...kids);
+    clear(profileHints).append(...kids);
   };
   redrawProfile = drawProfile;
 
@@ -230,6 +242,7 @@ export function render() {
     getTrack: () => lastReplay &&
       { pn: lastReplay.body.signals.pn, pe: lastReplay.body.signals.pe },
     onRowsChanged: () => { renderWpTable(wpBox, wpMap); drawProfile(); },
+    onSelect: (idx) => profileChart.refresh(idx), // 프로파일도 같은 점을 가리키게
     viewRef: wpMapView,
   });
   f.accept.addEventListener("input", () => wpMap.refresh()); // 도달반경 원 즉시 갱신
@@ -339,7 +352,12 @@ export function render() {
       el("h2", {}, "미션 정의 (선언적 모드 테이블 — 01 §3.1)"),
       modeBox,
       el("h2", {}, "웨이포인트 (N, E, 고도) [m]"),
-      el("div", { class: "row" }, wpBox, el("div", {}, wpMap.root, profileBox)),
+      // 지도(수평면)와 프로파일(세로면)을 **한 묶음**으로 — 셋을 한 줄에 늘어놓으면
+      // 표가 넓어(고도 열) 프로파일만 아래로 밀린다. 묶어 두면 표와 함께 접힐 뿐
+      // 둘은 끝까지 나란히 선다 (라이브 확인)
+      el("div", { class: "row" }, wpBox,
+        el("div", { class: "row", style: "gap: 12px; align-items: flex-start" },
+          wpMap.root, profileBox)),
     ),
     el("div", { class: "panel" },
       el("h2", {}, "실행 조건"),
