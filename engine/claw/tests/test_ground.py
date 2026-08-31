@@ -317,6 +317,43 @@ def test_rail_validation():
 # ---- 구조 한계 ----
 
 
+def test_low_speed_is_inside_the_declared_aero_range():
+    """이착륙 속도대가 DB 유효범위 안에 들어온다 — 안 그러면 엔벨로프 요약이 상시 참.
+
+    종전 마하 하한 0.1은 해면 34 m/s로, 발사 레일(0→81.5)과 착륙 미끄럼(81.5→0)
+    구간 대부분이 "DB 범위 밖"으로 찍혔다. demo 계수 함수는 마하를 쓰지 않으므로
+    그 하한은 데이터의 성질이 아니었다.
+    """
+    from claw.env import isa_atmosphere
+
+    from claw.plant import make_demo_db_ranges
+
+    rng = make_demo_db_ranges()
+    lo, hi = rng["mach"]
+    assert lo == 0.0
+    assert hi == 0.9, "천음속 상한은 실제 주장이라 남는다"
+    a = isa_atmosphere(0.0).a
+    for v in (0.0, 5.0, 34.0, 81.5):  # 정지·미끄럼 꼬리·종전 하한·이탈
+        assert lo <= v / a <= hi, f"{v} m/s가 범위 밖"
+
+
+def test_stall_table_answers_at_ground_speeds_by_clip():
+    """이착륙 속도대는 실속표 격자 아래이고 clip이 0.40으로 답한다 — 선언된 정책.
+
+    격자점을 M=0에 더하면 정의역이 명시되지만 수치가 완전히 같고(clip이 이미 0.40)
+    생성 비행코드의 룩업 데이터·지문만 흔들려서 두지 않았다. 대신 "그 구간에서
+    표가 실제로 무엇을 답하는가"를 여기서 못박는다.
+    """
+    from claw.plant import make_demo_stall_table
+
+    st = make_demo_stall_table()
+    assert st.extrapolate == "clip"
+    assert st.interp(mach=0.0) == pytest.approx(0.40)
+    assert st.interp(mach=0.05) == pytest.approx(0.40)
+    assert st.interp(mach=0.1) == pytest.approx(0.40)
+    assert st.interp(mach=0.9) == pytest.approx(0.27)
+
+
 def test_launch_load_limit_is_unjudged_not_zero():
     """종방향 발사 한계는 값이 없다 — None이어야 하고 0이면 '한계 0'으로 읽힌다."""
     lim = make_demo_structural_limits()

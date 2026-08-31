@@ -22,6 +22,17 @@ import numpy as np
 
 from claw.common.frames import wind_angles
 
+# 무차원 각속도(phat·qhat·rhat)의 기준속도 하한 [m/s] [기본값].
+# p·b/2V 류는 V ≫ 회전에 의한 국소속도를 전제한 상사변수라 V→0에서 정의되지 않는다.
+# **힘이 발산해서 두는 방어가 아니다** — 감쇠 모멘트는 q̄∝V²와 1/V가 상쇄돼 ∝V로
+# 0에 수렴한다(실측: q=0.2 rad/s에서 V 0.05 m/s → M_y −0.12 N·m). 두는 이유는
+# 계수 **입력**을 실제 DB가 답할 수 있는 범위에 두기 위해서다: 지상 감속 꼬리에서
+# qhat이 3까지 오르는데, 이는 어떤 공력 DB의 축에도 없는 값이라 M3 Table 결선 시
+# extrapolate="clip"이면 조용히 경계로 뭉개지고 "error"면 예외가 된다.
+# 대가: V < 이 값에서 감쇠가 ∝V 대신 ∝V²가 되어 약간 약해진다. 비행 속도대(≥60 m/s)
+# 에는 닿지 않고 착륙 미끄럼 꼬리에만 걸린다.
+V_REF_MIN = 5.0
+
 
 def wind_to_body_coeffs(CL, CD, alpha, beta):
     """풍축 양력·항력 계수 → 동체축 (CX, CY, CZ) [기본값 변환]:
@@ -45,7 +56,7 @@ class AeroModel:
         if V <= 0.0:
             return np.zeros(3), np.zeros(3)
         p, q, r = np.asarray(omega_b, dtype=float)
-        inv2v = 1.0 / (2.0 * V)
+        inv2v = 1.0 / (2.0 * max(V, V_REF_MIN))  # 기준속도 하한 — 위 V_REF_MIN 주석
         inputs = {
             "alpha": alpha,
             "beta": beta,

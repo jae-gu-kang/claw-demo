@@ -312,10 +312,32 @@ export function spreadLabels(items, minGap) {
 /** 도표의 마하 창 {xMin, xMax} — 캔버스와 캡션이 **같은 창**을 봐야 "창 밖"이 한 말이
  * 된다. 창은 DB 하한·합성 하한의 최소와 M_D·합성 상한의 최대에 여백(pad)을 더한 것. */
 export function machWindow(bounds, region, pad = 0.03) {
+  const lo = dbLoBinds(bounds, region)
+    ? Math.min(bounds.db_mach[0], ...region.mach_lo)
+    : Math.min(...region.mach_lo);
   return {
-    xMin: Math.min(bounds.db_mach[0], ...region.mach_lo) - pad,
+    xMin: lo - pad,
     xMax: Math.max(bounds.mach_d, ...region.mach_hi) + pad,
   };
+}
+
+/** DB 마하 하한이 **실효 구속인가** — 합성 영역의 하한보다 위에 있을 때만 참.
+ *
+ * 공력 DB 대역의 하한이 비행 가능 영역보다 아래면 그 선은 아무것도 자르지 않는다.
+ * 그래도 창을 거기까지 벌리면 왼쪽에 빈 띠가 생기고, 그 자리에 "DB 0.000" 선이
+ * 그려지면 **없는 제약을 있다고 말하는** 그림이 된다 — 조용한 비표시의 반대쪽
+ * 잘못이다. 데모 프로파일에서 영역 하한은 항상 실속 귀속(M0.205~0.500)이라
+ * DB 하한은 0.1이던 시절에도 구속이 아니었고, 계수 함수가 마하를 쓰지 않아
+ * 하한이 0으로 내려가면서 그 사실이 드러났을 뿐이다.
+ *
+ * 판정은 여기(lib)에서 한다 — 뷰에는 테스트가 없고, 선을 그릴지와 창을 어디까지
+ * 벌릴지는 **같은 판단**이라 두 곳에 적으면 갈라진다. */
+export function dbLoBinds(bounds, region) {
+  const db = Number(bounds?.db_mach?.[0]);
+  if (!Number.isFinite(db)) return false;
+  const lows = (region?.mach_lo ?? []).filter((m) => Number.isFinite(m));
+  if (lows.length === 0) return false;
+  return db > Math.min(...lows);
 }
 
 /** 등고선 중 마하 창 안에 **한 점도** 없는 것 — 그리면 통째로 사라지는 곡선이다.

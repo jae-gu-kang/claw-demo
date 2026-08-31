@@ -5,6 +5,7 @@ import pytest
 
 from claw.common.constants import G0
 from claw.plant import OMEGA, QUAT, VEL, AeroModel, RigidBody, gravity_body, pack, wind_to_body_coeffs
+from claw.plant.aero import V_REF_MIN
 from claw.common.attitude import euler_to_quat
 from claw.tables import Table
 
@@ -51,6 +52,45 @@ def test_nondimensional_inputs_passed():
     assert seen["rhat"] == pytest.approx(r * B / (2 * V))
     assert seen["mach"] == pytest.approx(0.4)
     assert seen["de"] == pytest.approx(0.05)
+
+
+def test_low_speed_uses_clamped_reference_speed():
+    """V < V_REF_MIN에서 무차원 각속도가 기준속도 하한으로 계산된다.
+
+    p·b/2V 류는 V ≫ 회전 국소속도를 전제한 상사변수라 V→0에서 정의되지 않는다.
+    막지 않으면 착륙 미끄럼 꼬리(V→0)에서 qhat이 3까지 올라 어떤 DB 축에도 없는
+    값이 계수 함수로 들어간다 — M3 Table 결선 시 조용한 clip이나 예외가 된다.
+    """
+    seen = {}
+
+    def coef(inp):
+        seen.update(inp)
+        return {"CX": 0, "CY": 0, "CZ": 0, "Cl": 0, "Cm": 0, "Cn": 0}
+
+    aero = AeroModel(S=S, cbar=CBAR, b=B, coef_fn=coef)
+    q = 0.2
+    aero.forces(rho=1.2, vel_air_b=np.array([0.5, 0.0, 0.0]), omega_b=np.array([0.0, q, 0.0]))
+    assert seen["V"] == pytest.approx(0.5), "V 자체는 실제값 그대로 전달"
+    assert seen["qhat"] == pytest.approx(q * CBAR / (2 * V_REF_MIN)), "무차원화만 하한 적용"
+    assert abs(seen["qhat"]) < 0.05, "DB 축에 있을 법한 크기"
+
+
+def test_damping_moment_vanishes_at_low_speed_either_way():
+    """저속에서 감쇠 모멘트는 원래도 0으로 간다 — 하한은 힘을 막는 장치가 아니다.
+
+    q̄ ∝ V²와 1/V가 상쇄돼 M_damp ∝ V다. 하한을 두면 그 아래에서 ∝V²가 되어
+    약간 더 약해질 뿐이고, 어느 쪽이든 발산하지 않는다. 이 사실을 못박아 두어야
+    V_REF_MIN이 "수치 발산 방어"로 오해되지 않는다.
+    """
+    coef = lambda inp: {"CX": 0, "CY": 0, "CZ": 0, "Cl": 0, "Cm": -6.0 * inp["qhat"], "Cn": 0}  # noqa: E731
+    aero = AeroModel(S=S, cbar=CBAR, b=B, coef_fn=coef)
+    prev = None
+    for v in (4.0, 2.0, 1.0, 0.5, 0.1):
+        _F, M = aero.forces(rho=1.2, vel_air_b=np.array([v, 0.0, 0.0]), omega_b=np.array([0.0, 0.3, 0.0]))
+        mag = abs(M[1])
+        assert prev is None or mag < prev, "속도가 줄면 감쇠 모멘트도 단조 감소"
+        prev = mag
+    assert prev < 1e-3
 
 
 def test_wind_to_body_helper():

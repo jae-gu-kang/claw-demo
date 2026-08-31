@@ -15,7 +15,7 @@
 import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
-  boundColor, boundLabel, boundarySegments, capColor, capLabel, envelopeQuery,
+  boundColor, boundLabel, boundarySegments, capColor, capLabel, dbLoBinds, envelopeQuery,
   ftToM, isoLabelIndex, isoOffWindow, kindColor, kindLabel, machSpan, machWindow, mToFt, msToKt,
   optNum, outlineCaps, prefillValue, outsideRegion, regionPolygons, scanCells, scanSummary,
   spreadLabels, tasAxisTicks, throttleCell, thrustFrontier,
@@ -423,7 +423,9 @@ function mhEnvelopeCanvas(mh, cells) {
   // 데모는 M_D = DB 상한(0.9) — 같은 자리면 선 하나에 합친 라벨 (겹침 방지)
   const dbHiCoincides = Math.abs(b.db_mach[1] - b.mach_d) < 1e-9;
   vline(b.mach_d, dbHiCoincides ? `M_D·DB ${fmt(b.mach_d, 3)}` : `M_D ${fmt(b.mach_d, 3)}`);
-  vline(b.db_mach[0], `DB ${fmt(b.db_mach[0], 3)}`, "#c7b3e0");
+  // DB 하한은 **구속일 때만** 그린다 — 영역보다 아래면 아무것도 자르지 않으므로
+  // 그리면 없는 제약을 있다고 말하게 된다. 안 그린 사유는 캡션이 문장으로 낸다.
+  if (dbLoBinds(b, r)) vline(b.db_mach[0], `DB ${fmt(b.db_mach[0], 3)}`, "#c7b3e0");
   if (!dbHiCoincides) vline(b.db_mach[1], `DB ${fmt(b.db_mach[1], 3)}`, "#c7b3e0");
 
   // 운용 고도 한계 — 입력했을 때만 (없는 경계를 그리지 않는다). 상단 끝이면 라벨을 선 아래로
@@ -760,6 +762,15 @@ function renderMh(box) {
   // 40000 Pa 등동압선이 M 1.27~1.72로 밀려난다(창 [0.07, 0.93]은 그대로다). 그때
   // "창이 좁으니 M_NO·M_D를 보라"고 하면 **표시 문제 때문에 구조 한계를 만지게** 만든다.
   // 대신 곡선의 실제 마하 구간을 적는다 — 응답에 이미 있는 수라 지어내지 않는다
+  // DB 마하 하한선이 도표에 없으면 **그 사유를 적는다** — 선이 사유 없이 사라지는 것은
+  // 이 리포가 금하는 조용한 비표시다. 반대로 구속도 아닌 선을 그리면 없는 제약을 있다고
+  // 말하게 되므로, 안 그리는 쪽이 맞고 대신 문장이 그 자리를 대신한다.
+  if (!dbLoBinds(lastMh.bounds, lastMh.region)) {
+    kids.push(el("p", { class: "hint" },
+      `공력 DB 마하 하한(${fmt(lastMh.bounds.db_mach[0], 3)})은 세로선으로 그리지 않았습니다 — `
+      + `비행 가능 영역의 하한(M ${fmt(Math.min(...lastMh.region.mach_lo), 3)})보다 아래라 `
+      + "아무것도 자르지 않기 때문입니다. 이 영역의 저속 경계는 실속이 정합니다."));
+  }
   const span = (name, c) => {
     const s = machSpan(c); // 구간을 못 내면 이름만 — "M NaN~NaN"을 증거인 척 내지 않는다
     return s ? `${name} (M ${fmt(s.lo, 3)}~${fmt(s.hi, 3)})` : name;
@@ -772,7 +783,11 @@ function renderMh(box) {
     kids.push(el("p", { class: "hint" },
       `⚠ 등고선 ${offWin.length}개가 마하 창 [${fmt(win.xMin, 3)}, ${fmt(win.xMax, 3)}] 밖이라 `
       + `그려지지 않습니다 — ${offWin.join(", ")}. 값이 없어진 것이 아니라 창이 곡선에 닿지 `
-      + "않는 것입니다. 창은 DB 하한·합성 하한의 최소부터 M_D·합성 상한의 최대까지입니다 — "
+      + "않는 것입니다. 창은 "
+      // DB 하한이 구속이 아니면 창을 벌리지도 않는다 — 규칙이 갈리는데 문장이 하나면
+      // 캡션이 창을 잘못 설명한다(같은 판정을 lib dbLoBinds 하나로 쓰는 이유)
+      + (dbLoBinds(lastMh.bounds, lastMh.region) ? "DB 하한·합성 하한의 최소" : "합성 하한")
+      + "부터 M_D·합성 상한의 최대까지입니다 — "
       // "예를 들어": 기전이 이 둘뿐인 것처럼 읽히면 안 된다. q̄_max를 크게 잡아도
       // [기본값] 등동압선이 그 배수라 밖으로 나간다(창도 안 좁고 고도대도 기본이다)
       + "예를 들어 M_NO·M_D를 낮게 잡으면 창이 좁아지고, 운용 고도대가 높거나 q̄_max가 크면 "

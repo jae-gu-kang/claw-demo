@@ -336,7 +336,7 @@ def test_design_envelope_composition_and_attribution():
 
     env = design_envelope(ac, st, lim, db, fuel=200.0, q_max=20000.0)
     b = env["bounds"]
-    assert b["mach_no"] == 0.75 and b["db_mach"] == [0.1, 0.9]
+    assert b["mach_no"] == 0.75 and b["db_mach"] == [0.0, 0.9]
     assert b["alt_max_used"] == 12000.0 and b["alt_max_is_display_default"] is True
     assert b["alt_min"] is None and b["alt_max"] is None
     r = env["region"]
@@ -529,11 +529,15 @@ def test_aero_envelope_boundaries():
     st = make_demo_stall_table()
     db = make_demo_db_ranges()
     env = aero_envelope(st, db, alpha_margin=0.05, trim_alpha_bounds=(-0.10, 0.35))
+    # 스윕 격자는 **실속표 축**에서 오고(0.1~0.9), db echo는 db_ranges에서 온다(0.0~0.9).
+    # 두 수가 갈린 것은 이착륙 도입 때 DB 마하 하한만 0으로 내렸기 때문이다 —
+    # 계수 함수가 마하를 쓰지 않아 하한이 데이터의 성질이 아니었던 반면, 실속표는
+    # 실제로 마하 의존이라 축이 그대로다. 같은 값일 것이라 넘겨짚지 않도록 못박는다.
     assert env["mach"][0] == 0.1 and env["mach"][-1] == 0.9
     for m, a_s, a_p in zip(env["mach"], env["alpha_stall"], env["alpha_prot"]):
         assert a_s == pytest.approx(float(st.interp(mach=m)), rel=1e-12)
         assert a_p == pytest.approx(a_s - 0.05, rel=1e-12)  # 보호선 = 실속 − 마진
-    assert env["db"] == {"alpha": [-0.2, 0.45], "mach": [0.1, 0.9]}
+    assert env["db"] == {"alpha": [-0.2, 0.45], "mach": [0.0, 0.9]}
     assert env["trim_alpha_bounds"] == [-0.10, 0.35]
     assert env["alpha_margin"] == 0.05
     # 미주입 시 null — 없는 데이터를 만들어내지 않는다

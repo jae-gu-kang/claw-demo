@@ -149,7 +149,9 @@ def test_design_envelope_endpoint(client):
     aero = b["aero"]
     assert aero["alpha_prot"][0] == pytest.approx(aero["alpha_stall"][0] - 0.05, rel=1e-9)
     assert aero["trim_alpha_bounds"] == [-0.10, 0.35]
-    assert aero["db"]["mach"] == [0.1, 0.9]
+    # 하한 0 — demo 계수 함수가 마하를 쓰지 않아 하한이 데이터의 성질이 아니었고,
+    # 0.1(해면 34 m/s)이면 발사·착륙 미끄럼 구간 전체가 "DB 범위 밖"으로 찍혔다
+    assert aero["db"]["mach"] == [0.0, 0.9]
 
     # q̄ 한계 지정 — 저고도에서 qbar가 상한 승자
     r2 = client.get("/api/analysis/design-envelope", params={"fuel": 200.0, "q_max": 20000.0})

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  boundColor, boundLabel, boundarySegments, capLabel, envelopeQuery, ftToM, isoLabelIndex,
+  boundColor, boundLabel, boundarySegments, capLabel, dbLoBinds, envelopeQuery, ftToM, isoLabelIndex,
   isoOffWindow, kindColor, kindLabel, machSpan, machWindow, mToFt, msToKt, optNum, outlineCaps,
   outsideRegion, prefillValue, regionPolygons, scanCells, scanSummary, spreadLabels,
   tasAxisTicks, throttleCell, thrustFrontier,
@@ -352,18 +352,37 @@ test("tasAxisTicks — 음속이 비유한·비양수면 축을 안 그린다 (0
   assert.deepEqual(tasAxisTicks(0.5, 0.5, 340), []); // 폭 0인 축도 마찬가지
 });
 
-test("machWindow — 캔버스와 캡션이 같은 창을 본다 (DB 하한~M_D + 여백)", () => {
+test("machWindow — 캔버스와 캡션이 같은 창을 본다 (구속하는 DB 하한~M_D + 여백)", () => {
   const r = region([
     [0, 0.30, 0.75, "stall", "mach_no"],
     [1000, 0.32, 0.60, "stall", "qbar"],
   ]);
+  // DB 하한 0.1은 합성 하한 0.30보다 아래 → 구속이 아니므로 창을 벌리지 않는다
   const w = machWindow({ db_mach: [0.1, 0.9], mach_d: 0.9 }, r);
-  assert.ok(Math.abs(w.xMin - 0.07) < 1e-12); // min(DB 하한 0.1, 합성 하한 0.30) − 0.03
+  assert.ok(Math.abs(w.xMin - 0.27) < 1e-12); // 합성 하한 0.30 − 0.03
   assert.ok(Math.abs(w.xMax - 0.93) < 1e-12); // max(M_D 0.9, 합성 상한 0.75) + 0.03
   // 합성 하한이 DB 하한보다 낮으면 그쪽이 이긴다 (창이 곡선을 자르지 않게)
   const w2 = machWindow({ db_mach: [0.5, 0.9], mach_d: 0.6 }, r, 0);
   assert.ok(Math.abs(w2.xMin - 0.30) < 1e-12);
   assert.ok(Math.abs(w2.xMax - 0.75) < 1e-12);
+  // DB 하한이 실제로 영역을 자르면 그때는 창이 거기까지 벌어진다
+  const w3 = machWindow({ db_mach: [0.40, 0.9], mach_d: 0.9 }, r, 0);
+  assert.ok(Math.abs(w3.xMin - 0.30) < 1e-12); // min(0.40, 0.30) = 0.30
+});
+
+test("dbLoBinds — DB 마하 하한이 실효 구속일 때만 참 (선을 그릴지와 창을 벌릴지가 같은 판단)", () => {
+  const r = region([
+    [0, 0.30, 0.75, "stall", "mach_no"],
+    [1000, 0.32, 0.60, "stall", "qbar"],
+  ]);
+  assert.equal(dbLoBinds({ db_mach: [0.1, 0.9] }, r), false); // 영역 아래 — 아무것도 안 자름
+  assert.equal(dbLoBinds({ db_mach: [0.0, 0.9] }, r), false); // 이착륙 도입 후 데모 값
+  assert.equal(dbLoBinds({ db_mach: [0.40, 0.9] }, r), true); // 영역 안 — 실제로 자름
+  assert.equal(dbLoBinds({ db_mach: [0.30, 0.9] }, r), false); // 하한과 같으면 자르지 않음
+  // 판정 불가를 "구속함"으로 위장하지 않는다 — 근거가 없으면 선을 그리지 않는다
+  assert.equal(dbLoBinds({}, r), false);
+  assert.equal(dbLoBinds({ db_mach: [NaN, 0.9] }, r), false);
+  assert.equal(dbLoBinds({ db_mach: [0.4, 0.9] }, { mach_lo: [] }), false);
 });
 
 test("isoOffWindow — 한 점도 창 안에 없는 곡선만 (조용한 비표시를 화면이 세도록)", () => {
