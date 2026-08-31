@@ -216,11 +216,13 @@ def mach_qbar_limit(alt, q_max) -> float:
 
 
 def iso_curves(alts, *, qbar=(), tas=()) -> dict:
-    """M-h 평면의 등동압선·등속선 — 상단 대기속도 보조축의 정직한 대체.
+    """M-h 평면의 등동압선·등속선 — 상단 대기속도 보조축이 못 말하는 나머지.
 
     교과서 엔벨로프 도해는 마하축 위에 대기속도(kt) 보조축을 겹쳐 그리지만,
     M-h 평면에서 그 대응은 고도마다 다르다 — M0.8이 해면 529 kt, 12 km 458 kt.
-    축을 하나 그으면 한 고도에서만 맞다. 대신 평면 **안에** 곡선을 그린다:
+    축을 하나 그으면 **한 고도에서만** 맞다(그래서 bounds.speed_of_sound는 축을
+    그리는 자리인 도표 모서리의 음속을 echo한다 — 거기서는 정확하다). 축이 못
+    말하는 고도 의존은 평면 **안의** 곡선이 말한다:
 
     - 등동압선 M_q̄(h)는 `mach_qbar_limit`을 q만 바꿔 부른다 (구조 동압 경계와
       같은 산식을 두 번 적지 않는다 — 경계선은 q=q_max인 등동압선이다)
@@ -309,6 +311,9 @@ def design_envelope(
     경계를 합성에서 제외하고 출력에도 null (없는 데이터를 그리지 않는다).
     표시 고도 상한만 _ALT_DISPLAY_MAX [기본값]로 채우고
     alt_max_is_display_default로 echo — 소비자(웹)가 자리표시임을 명기.
+    bounds.speed_of_sound는 그 표시 상·하 모서리의 음속 — 상단 대기속도 보조축이
+    자기가 그려지는 모서리에서 정확하고, 반대 모서리에서 얼마나 어긋나는지 소비자가
+    말할 수 있게 한다.
 
     schedule_grid는 coarse 격자(design.grid)와 같은 row_machs 좌표 —
     trimmable 판정 없는 좌표 표시용(판정은 트림 스캔 + envelope_ok 정본).
@@ -411,6 +416,16 @@ def design_envelope(
             "alt_max_used": alt_hi_used,
             "alt_max_is_display_default": alt_max is None,
             "tropopause_alt": ISA_TROPOPAUSE_ALT,  # 소비자가 11000을 재기술하지 않도록 (02 §5.5)
+            # 표시 고도 상·하 모서리의 음속 — 상단 대기속도 보조축(M ↔ V = M·a)의
+            # 기준. 교과서 도해(Fig 1)는 마하축 위에 kt 축을 겹쳐 그리는데 그 대응은
+            # 고도마다 다르므로, 축은 **그것이 그려지는 모서리**에서만 참이다. 두 값을
+            # 다 싣는 이유: 소비자가 그 축의 오차 폭(아래 모서리에서 a_min/a_max배
+            # 빠르다)을 지어내지 않고 말할 수 있어야 한다 (02 §5.5 — 웹이 ISA를
+            # 재기술하지 않는다). 고도 의존 자체는 iso.tas 곡선이 그린다.
+            "speed_of_sound": {
+                "alt_min_used": float(isa_atmosphere(alt_lo_used).a),
+                "alt_max_used": float(isa_atmosphere(alt_hi_used).a),
+            },
         },
         "region": region,
         "maneuver": maneuver,

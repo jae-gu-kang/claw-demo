@@ -16,9 +16,9 @@ import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
   boundColor, boundLabel, boundarySegments, capColor, capLabel, envelopeQuery,
-  isoLabelIndex, kindColor, kindLabel, mToFt, optNum, outlineCaps, prefillValue,
-  outsideRegion, regionPolygons, scanCells, scanSummary, spreadLabels, throttleCell,
-  thrustFrontier,
+  ftToM, isoLabelIndex, isoOffWindow, kindColor, kindLabel, machSpan, machWindow, mToFt, msToKt,
+  optNum, outlineCaps, prefillValue, outsideRegion, regionPolygons, scanCells, scanSummary,
+  spreadLabels, tasAxisTicks, throttleCell, thrustFrontier,
 } from "../lib/envelope.js";
 import { machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { fuelsOf, linScale, niceTicks, pivotCases } from "../lib/plot.js";
@@ -257,6 +257,15 @@ const FONT_BASE = "11px -apple-system, 'Segoe UI', sans-serif";
 const FONT_LABEL = "600 11px -apple-system, 'Segoe UI', sans-serif";
 const FONT_TITLE = "600 12px -apple-system, 'Segoe UI', sans-serif";
 
+// 등고선 이름 — 캔버스 라벨과 "창 밖" 안내가 **한 곳**에서 나온다. 두 곳에서 따로
+// 조립하면 한쪽만 고쳤을 때 안내가 가리키는 이름을 화면에서 못 찾는다 (TAS 접두를
+// 넣기까지 리뷰 두 라운드가 걸렸다 — 그 결정이 한쪽에만 남으면 안 된다). 캔버스는
+// 여기에 kt 병기를 덧붙일 뿐이다
+const ISO_NAME = {
+  qbar: (c) => `${fmt(c.q, 4)} Pa`,
+  tas: (c) => `TAS ${fmt(c.v, 4)} m/s`,
+};
+
 const placeholderHint = (body) => (body?.limits_source === "user-input"
   ? el("p", { class: "hint" },
     `구조 한계 중 사용자 입력: ${(body.limits_overridden ?? []).join(", ")} — `
@@ -269,14 +278,15 @@ const placeholderHint = (body) => (body?.limits_source === "user-input"
 
 function mhEnvelopeCanvas(mh, cells) {
   const W = 780;
-  const H = 520;
+  const H = 544; // 상단 축이 먹은 24 px만큼 키운다 — 플롯 영역을 줄이지 않는다
   const { canvas, ctx } = makeCanvas(W, H);
-  const mL = 56, mT = 30, mR = 54, mB = 40; // mR 확대 — 우측 ft 보조축 자리
+  // mR — 우측 ft 보조축, mT — 상단 대기속도(kt) 보조축 눈금·이름 자리
+  const mL = 56, mT = 54, mR = 54, mB = 40;
   const b = mh.bounds;
   const r = mh.region;
   const man = layers.maneuver ? mh.maneuver : null;
-  const xMin = Math.min(b.db_mach[0], ...r.mach_lo) - 0.03;
-  const xMax = Math.max(b.mach_d, ...r.mach_hi) + 0.03;
+  // 창 계산은 lib 정본 — renderMh의 "창 밖" 안내가 같은 창을 봐야 한 말이 된다
+  const { xMin, xMax } = machWindow(b, r);
   const px = linScale(xMin, xMax, mL, W - mR);
   const py = linScale(b.alt_min_used, b.alt_max_used, H - mB, mT);
   // 채움 위에 얹히는 글자는 흰 테두리를 깔아야 읽힌다.
@@ -347,15 +357,30 @@ function mhEnvelopeCanvas(mh, cells) {
   // 등동압선·등속선 — M-h 평면에서 대기속도 보조축은 한 고도에서만 맞으므로(엔진
   // iso_curves 참조) 축 대신 곡선. **채움 뒤가 아니라 위에** 그린다 — 영역 틴트가
   // 불투명이라 뒤에 깔면 정작 설계 영역 안에서 안 보인다 (라이브 확인에서 드러남)
+  // prefer는 라벨을 붙일 기준 행(고도 비율) — 두 계열에 다른 값을 준다. 같은 행을
+  // 쓰면 등동압선과 등속선 라벨이 한 줄에 겹쳐 "1000"+"200 m/s…"처럼 서로를 잘라
+  // 먹는다(두 층을 함께 켜면 바로 드러난다). 계열 안의 흩어짐은 곡선마다 x가
+  // 다른 것으로 해결되지만, 계열끼리는 행을 갈라야 한다
   const isoSets = [
-    layers.isoQbar ? { curves: mh.iso.qbar, key: "q", unit: "Pa" } : null,
-    layers.isoTas ? { curves: mh.iso.tas, key: "v", unit: "m/s" } : null,
+    layers.isoQbar
+      ? { curves: mh.iso.qbar, prefer: 0.62, label: ISO_NAME.qbar }
+      : null,
+    // 등속선은 상단 kt 축과 **같은 물리량**이다 — m/s만 적으면 축과 곡선이 서로 다른
+    // 단위로 같은 것을 말해 대조가 안 된다. 곡선이 상단 모서리에 닿는 자리가 곧
+    // 그 kt 눈금 자리이므로, 두 표시가 한 눈에 이어져야 축의 고도 의존이 읽힌다
+    layers.isoTas
+      ? {
+        curves: mh.iso.tas,
+        prefer: 0.34,
+        label: (c) => `${ISO_NAME.tas(c)} · ${Math.round(msToKt(c.v))} kt`,
+      }
+      : null,
   ].filter(Boolean);
   ctx.font = FONT_BASE;
-  // 라벨 기준 높이를 도표 중상단으로 잡는다 — 곡선들이 하나같이 천장으로 빠져나가서
+  // 라벨 기준 높이를 도표 안쪽으로 잡는다 — 곡선들이 하나같이 천장으로 빠져나가서
   // "범위 안 마지막 행"이 전부 같은 줄이 되면 라벨이 겹쳐 뭉갠다 (라이브 확인)
-  const isoPrefer = Math.round((r.alt.length - 1) * 0.62);
   for (const set of isoSets) {
+    const isoPrefer = Math.round((r.alt.length - 1) * set.prefer);
     for (const cur of set.curves) {
       ctx.strokeStyle = C.isoLine;
       ctx.lineWidth = 1.1;
@@ -364,10 +389,11 @@ function mhEnvelopeCanvas(mh, cells) {
       ctx.setLineDash([]);
       const i = isoLabelIndex(cur, xMin, xMax, isoPrefer);
       if (i < 0) continue;
-      const text = `${fmt(cur[set.key], 4)} ${set.unit}`;
+      const text = set.label(cur);
       const x = px(cur.mach[i]);
-      // 오른쪽 끝에서는 글자를 왼쪽으로 뒤집는다 — 안 그러면 잘려서 "4"만 남는다
-      const flip = x > W - mR - 60;
+      // 오른쪽 끝에서는 글자를 왼쪽으로 뒤집는다 — 안 그러면 잘려서 "4"만 남는다.
+      // 폭은 재서 판단한다 — 고정 60 px는 kt를 덧붙인 등속선 라벨에서 모자란다
+      const flip = x + 3 + ctx.measureText(text).width > W - mR;
       const yTop = py(r.alt[i]) - 3;
       ctx.textAlign = flip ? "right" : "left";
       haloText(text, x + (flip ? -3 : 3), yTop < mT + 10 ? yTop + 15 : yTop, C.sub);
@@ -580,14 +606,53 @@ function mhEnvelopeCanvas(mh, cells) {
   }
   ctx.font = FONT_BASE;
   for (const t of niceTicks(xMin, xMax, 7)) {
-    ctx.fillText(fmt(t, 3), px(t) - 10, H - mB + 16);
+    // 끝 눈금은 프레임 안으로 접는다 — 가운데 정렬로 두면 우측 ft 축의 바닥 라벨과
+    // 겹쳐 "0.350"과 "0"이 한 덩어리로 읽힌다 (마하 창이 좁을 때 라이브 확인)
+    const x = px(t);
+    ctx.textAlign = x > W - mR - 14 ? "right" : (x < mL + 14 ? "left" : "center");
+    ctx.fillText(fmt(t, 3), x, H - mB + 16);
   }
+  ctx.textAlign = "left";
   for (const t of niceTicks(b.alt_min_used, b.alt_max_used, 7)) {
     ctx.fillText(`${Math.round(t)}`, 6, py(t) + 3);
-    ctx.fillText(`${Math.round(mToFt(t))}`, W - mR + 6, py(t) + 3); // 보조축 — 순수 환산
+  }
+  // 우측 ft 보조축은 **자기 눈금**을 가진다 — m 눈금 자리에 환산값을 얹으면
+  // 39370·32808·26247이 늘어서 축 구실을 못 한다. 교과서 도해도 좌 k ft·우 km를
+  // 서로 다른 높이에 찍는다. 환산은 정의값이라 자리는 여전히 정확하다
+  for (const t of niceTicks(mToFt(b.alt_min_used), mToFt(b.alt_max_used), 9)) {
+    ctx.fillText(`${Math.round(t)}`, W - mR + 6, py(ftToM(t)) + 3);
   }
   ctx.fillText("Mach", W / 2 - 14, H - 8);
-  ctx.fillText("ft", W - mR + 6, mT - 6);
+  ctx.fillText("ft", W - mR + 6, H - mB + 16);
+
+  // 상단 대기속도(kt) 보조축 — 교과서 도해의 윗변. M ↔ V = M·a의 대응은 고도마다
+  // 다르므로 이 축은 **자기가 놓인 선**, 즉 도표 윗변에서만 참이다: 기준 음속을
+  // 엔진 echo에서 받아(웹이 ISA를 재기술하지 않는다, 02 §5.5) 기준 고도를 축 이름에
+  // 적는다. 아래로 갈수록 같은 마하가 더 빠르다는 사실은 축이 아니라 등속선 층과
+  // renderMh의 캡션이 말한다 — 축 하나로 뭉개면 화면이 한 고도의 값을 전부에 대해
+  // 참인 것처럼 말하게 된다. 구버전 응답(재시작 전 캐시)에는 이 echo가 없다:
+  // tasAxisTicks가 빈 목록을 내고 축이 아예 안 그려진다 (0 kt 눈금 금지)
+  const ktTicks = tasAxisTicks(xMin, xMax, b.speed_of_sound?.alt_max_used);
+  if (ktTicks.length) {
+    ctx.strokeStyle = C.frame;
+    ctx.lineWidth = 1;
+    ctx.textAlign = "center";
+    for (const t of ktTicks) {
+      ctx.beginPath();
+      ctx.moveTo(px(t.mach), mT);
+      ctx.lineTo(px(t.mach), mT - 5);
+      ctx.stroke();
+      ctx.fillText(`${Math.round(t.kt)}`, px(t.mach), mT - 9);
+    }
+    ctx.textAlign = "right";
+    // **TAS를 이름에 박는다.** 엔진 실체는 M = V/a(h)라 진대기속도인데, M-h 도표
+    // 윗변에 kt로 붙은 "대기속도"는 KEAS/KCAS로 읽히기 쉽다(교과서 도해의 윗변
+    // 속도축이 대개 EAS인 것도 그쪽으로 민다). 12 km에서 TAS 400 kt는 EAS로 약
+    // 202 kt — 이 캔버스가 정직하게 고지하는 15.3%보다 **한 자릿수 큰** 어긋남이
+    // 단위 이름 하나에 숨는다. V-n 캔버스가 이미 "V (TAS) [m/s]"로 명시한다
+    ctx.fillText(`진대기속도 TAS [kt] — h ${Math.round(b.alt_max_used)} m 기준`, W - mR, mT - 24);
+    ctx.textAlign = "left";
+  }
   ctx.font = FONT_TITLE;
   ctx.fillStyle = C.text;
   ctx.fillText(`h [m] — 연료 ${fmt(mh.fuel, 4)} kg · 실속 여유 ×${fmt(mh.mach_margin, 3)}`, mL, 18);
@@ -623,6 +688,96 @@ function renderMh(box) {
       "추력 대리 경계 (스로틀 상한 포화)")] : []),
   );
   const kids = [el("div", { class: "scroll-x" }, mhEnvelopeCanvas(lastMh, cells)), legend];
+  // 상단 kt 축의 기준과 오차 폭 — 축은 자기가 놓인 윗변에서만 참이므로, 아래로
+  // 갈수록 얼마나 어긋나는지를 화면이 스스로 말해야 한다. 두 모서리 음속이 엔진
+  // echo로 오므로 어긋남을 지어내지 않고 계산해 적는다 (02 §5.5)
+  // 창 밖 판정은 캡션보다 먼저 — 캡션이 "켜면 그려집니다"라고 단정하려면 켰을 때
+  // 실제로 그려지는지를 알아야 한다(창이 아주 좁으면 켜도 안 그려진다)
+  const win = machWindow(lastMh.bounds, lastMh.region);
+  const tasOff = isoOffWindow(lastMh.iso.tas, win.xMin, win.xMax);
+  const qbarOff = isoOffWindow(lastMh.iso.qbar, win.xMin, win.xMax);
+  const tasAllOff = lastMh.iso.tas.length > 0 && tasOff.length === lastMh.iso.tas.length;
+  const sos = lastMh.bounds.speed_of_sound;
+  if (sos) {
+    const faster = (sos.alt_min_used / sos.alt_max_used - 1) * 100;
+    // 표시 범위가 ISA 등온층 안에만 있으면 두 모서리 음속이 같다. 그때 종전 문장은
+    // "M ↔ V는 고도마다 다르므로 … 0% 더 빠릅니다"가 되어 **전제절부터 거짓**이고 0%는
+    // 포맷 버그처럼 읽힌다 — 실은 자랑할 사실이다: 그 창에서는 축이 전 고도에서 정확하다.
+    // 축의 한계를 고지하는 캡션이 한계가 없는 경우도 말한다.
+    //
+    // 판정 근거는 엔진이 echo하는 대류권계면 고도다 — 문구와 **같은 근거**를 써야 한다
+    // (02 §5.5: 웹이 11000을 재기술하지 않는다). 첫 구현은 "음속비 0.05%" 문턱이었는데
+    // 그건 h≈10966 m라 alt_min ∈ [10966, 11000)에서 "고도 범위(h 10970~…)는 ISA
+    // 등온층(11 km 위) 안"이라는 자기모순 문장이 나왔다 — 판정과 문구의 근거가 갈리면
+    // 폭 34 m짜리 틈이 생긴다. 엔진이 표시 고도를 ISA 상한(등온층 천장 20 km) 안으로
+    // 강제하므로 하한만 보면 범위 전체가 등온층이다.
+    //
+    // echo가 없으면 **일반 분기로 보낸다**(문턱 폴백을 두지 않는다): 그 폴백은 같은 틈을
+    // 눈에 안 띄게 되살릴 뿐이고 — 숫자를 뺀 "대류권계면 위"는 10970 m에서도 거짓이다,
+    // 거짓을 들키게 해 주던 단서만 지운 셈 — 애초에 도달할 수도 없다. 이 문단은
+    // if (sos) 안이고 speed_of_sound가 tropopause_alt보다 나중에 생긴 키라
+    // sos != null ⟹ tropo != null이다
+    const tropo = lastMh.bounds.tropopause_alt;
+    const isothermal = tropo != null && lastMh.bounds.alt_min_used >= tropo;
+    kids.push(el("p", { class: "hint" },
+      `상단 진대기속도(TAS, kt) 축은 도표 윗변 h ${fmt(lastMh.bounds.alt_max_used, 5)} m의 음속 `
+      + `${fmt(sos.alt_max_used, 4)} m/s로 환산한 값`
+      + (isothermal
+        ? `입니다. 이 도표의 고도 범위(h ${fmt(lastMh.bounds.alt_min_used, 5)}~`
+          + `${fmt(lastMh.bounds.alt_max_used, 5)} m)는 ISA 등온층`
+          // isothermal이 tropo != null을 함의하므로 여기서 다시 방어하지 않는다
+          + `(대류권계면 ${fmt(tropo, 5)} m 위) 안이라 음속이 일정해 `
+          + "축이 전 고도에서 정확합니다. "
+        : ` — 그 선 위에서만 정확합니다. M ↔ V는 고도마다 다르므로 아래 모서리`
+          + `(h ${fmt(lastMh.bounds.alt_min_used, 5)} m, ${fmt(sos.alt_min_used, 4)} m/s)에서는 `
+          + `같은 마하가 ${fmt(faster, 3)}% 더 빠릅니다. `)
+      // 등속선은 기본 꺼짐이다 — 무조건 "그립니다"라고 적으면 탭을 연 첫 화면에서
+      // 없는 곡선을 있다고 말하게 되고(범례가 꺼진 층을 설명하지 않는 것과 같은
+      // 자리), 축의 한계를 메우는 물건을 켜 볼 이유도 사라진다("이미 있다는데
+      // 안 보이네"). 고지는 어느 쪽이든 남기고 동사만 갈린다 — 꼬리 문장은 삼항
+      // 밖으로: 한쪽만 고쳐 두 문장이 갈리는 것을 막는다
+      //
+      // **tasAllOff가 층 분기보다 위다.** 켜짐 분기에서 이 조건을 안 보면, 층을 켠
+      // 채 전 곡선이 창 밖인 상태에서 이 문단은 "그립니다"라고 하고 바로 아래 경고는
+      // 같은 곡선을 두고 "그려지지 않습니다"라고 한다 — 붙어 있는 두 문단이 정반대를
+      // 말하는 것은 침묵보다 나쁘다(침묵은 정보가 없을 뿐이지만 모순은 화면 전체의
+      // 신뢰를 깎는다). 창 밖이면 켜짐·꺼짐과 무관하게 그 사실이 먼저다
+      + (tasAllOff
+        ? "고도에 따른 실제 값은 '등속선' 층이 그리지만, 지금 마하 창에서는 그 곡선이 전부 창 밖입니다"
+        : (layers.isoTas
+          ? "고도에 따른 실제 값은 '등속선' 층이 평면 안에 그립니다"
+          : "고도에 따른 실제 값은 '등속선' 층을 켜면 평면 안에 그려집니다"))
+      // "닿는 자리가" → "닿으면 그 자리가": 마하 창이 좁으면 곡선이 윗변까지 못 가는데
+      // (M_NO·M_D를 낮게 입력한 경우) 단정형은 그때 거짓이 된다. 조건형은 늘 참이다
+      + " — 등속선이 윗변에 닿으면 그 자리가 곧 그 속도의 눈금 자리입니다."));
+  }
+  // 층은 켜져 있는데 곡선이 통째로 마하 창 밖일 수 있다 — 값은 멀쩡하다. 사유 없이
+  // 사라지면 조용한 비표시이고, 위 캡션이 "등속선이 그린다"고 말하는 상황에서는 그
+  // 문장까지 거짓이 된다. 켜진 층만 센다 (안 그리는 것을 세면 범례와 같은 거짓말)
+  //
+  // **원인을 단정하지 않는다.** 창이 좁아서일 수도 있지만(M_NO·M_D를 낮게 입력),
+  // 창이 데모 최대 폭인데도 곡선이 밖일 수 있다 — 운용 고도대를 8~12 km로 주면
+  // 40000 Pa 등동압선이 M 1.27~1.72로 밀려난다(창 [0.07, 0.93]은 그대로다). 그때
+  // "창이 좁으니 M_NO·M_D를 보라"고 하면 **표시 문제 때문에 구조 한계를 만지게** 만든다.
+  // 대신 곡선의 실제 마하 구간을 적는다 — 응답에 이미 있는 수라 지어내지 않는다
+  const span = (name, c) => {
+    const s = machSpan(c); // 구간을 못 내면 이름만 — "M NaN~NaN"을 증거인 척 내지 않는다
+    return s ? `${name} (M ${fmt(s.lo, 3)}~${fmt(s.hi, 3)})` : name;
+  };
+  const offWin = [
+    ...(layers.isoQbar ? qbarOff.map((c) => span(ISO_NAME.qbar(c), c)) : []),
+    ...(layers.isoTas ? tasOff.map((c) => span(ISO_NAME.tas(c), c)) : []),
+  ];
+  if (offWin.length) {
+    kids.push(el("p", { class: "hint" },
+      `⚠ 등고선 ${offWin.length}개가 마하 창 [${fmt(win.xMin, 3)}, ${fmt(win.xMax, 3)}] 밖이라 `
+      + `그려지지 않습니다 — ${offWin.join(", ")}. 값이 없어진 것이 아니라 창이 곡선에 닿지 `
+      + "않는 것입니다. 창은 DB 하한·합성 하한의 최소부터 M_D·합성 상한의 최대까지입니다 — "
+      // "예를 들어": 기전이 이 둘뿐인 것처럼 읽히면 안 된다. q̄_max를 크게 잡아도
+      // [기본값] 등동압선이 그 배수라 밖으로 나간다(창도 안 좁고 고도대도 기본이다)
+      + "예를 들어 M_NO·M_D를 낮게 잡으면 창이 좁아지고, 운용 고도대가 높거나 q̄_max가 크면 "
+      + "등고선이 더 높은 마하로 밀립니다."));
+  }
   if (man) {
     // n_reach 행은 전부 empty라 경계 세그먼트도 범례 칩도 안 나온다 — 갈라 둔 귀속이
     // 화면에 닿는 자리가 여기뿐이므로 개수를 숫자로 낸다 (안 그리면 갈라 둔 값이 죽는다)

@@ -4,9 +4,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  boundColor, boundLabel, boundarySegments, capLabel, envelopeQuery, isoLabelIndex,
-  kindColor, kindLabel, mToFt, optNum, outlineCaps, prefillValue, regionPolygons,
-  outsideRegion, scanCells, scanSummary, spreadLabels, throttleCell, thrustFrontier,
+  boundColor, boundLabel, boundarySegments, capLabel, envelopeQuery, ftToM, isoLabelIndex,
+  isoOffWindow, kindColor, kindLabel, machSpan, machWindow, mToFt, msToKt, optNum, outlineCaps,
+  outsideRegion, prefillValue, regionPolygons, scanCells, scanSummary, spreadLabels,
+  tasAxisTicks, throttleCell, thrustFrontier,
 } from "./envelope.js";
 
 const region = (rows) => ({
@@ -252,10 +253,14 @@ test("scanCells — reasons 전량을 함께 싣는다 (대표 kind만으로는 
   assert.deepEqual(scanCells([entry(0.5, 0, true)])[0].reasons, []);
 });
 
-test("mToFt — 우측 고도축 환산 (정의값 0.3048)", () => {
+test("mToFt/ftToM — 우측 고도축 환산 (정의값 0.3048)", () => {
   assert.equal(mToFt(0), 0);
   assert.ok(Math.abs(mToFt(1000) - 3280.839895) < 1e-6);
   assert.ok(Math.abs(mToFt(0.3048) - 1) < 1e-12);
+  // 보조축이 자기 눈금을 가지려면 그 ft 값을 다시 m 자리로 되돌려야 한다
+  assert.equal(ftToM(0), 0);
+  assert.ok(Math.abs(ftToM(1) - 0.3048) < 1e-15);
+  assert.ok(Math.abs(ftToM(mToFt(12345)) - 12345) < 1e-9);
 });
 
 test("isoLabelIndex — 기준점에서 바깥으로 훑어 첫 범위 안 인덱스, 전부 밖이면 -1", () => {
@@ -313,4 +318,73 @@ test("isoLabelIndex — 범위 밖 기준점은 배열 안으로 접는다 ('화
   assert.equal(isoLabelIndex(curve, 0.1, 0.6, 99), 1); // 접지 않으면 -1이 나온다
   assert.equal(isoLabelIndex(curve, 0.1, 0.6, -5), 0);
   assert.equal(isoLabelIndex(curve, 2.0, 3.0, 99), -1); // 진짜 화면 밖은 여전히 -1
+});
+
+test("msToKt — 상단 속도축 환산 (해리 정의값 1852 m)", () => {
+  assert.equal(msToKt(1852 / 3600), 1); // 정의 그대로: 1 kt = 1852 m/h
+  assert.ok(Math.abs(msToKt(100) - 194.384) < 1e-3);
+});
+
+test("tasAxisTicks — 눈금은 기준 고도의 음속으로 마하에 얹히고, 범위 밖은 안 낸다", () => {
+  const a = 295.0694935090715; // 12 km ISA — 도표 상단 모서리
+  const ticks = tasAxisTicks(0.07, 0.93, a);
+  assert.ok(ticks.length >= 3);
+  for (const t of ticks) {
+    // 눈금 자리는 정확히 M = V/a — 축은 이 고도 선 위에서 참이다
+    assert.ok(Math.abs(t.mach - t.kt / msToKt(1) / a) < 1e-12);
+    // 범위 밖 눈금을 안 낸다 — 상단 축은 클립 **밖**에서 그려지므로 여기서
+    // 걸러야 프레임 밖에 눈금이 찍히지 않는다. 다만 지금 niceTicks가 이미 범위
+    // 안만 내므로 이 단언은 필터 **단독**을 핀하지 못한다(필터를 지워도 통과):
+    // niceTicks의 범위 계약이 바뀌는 회귀를 잡는 자리다
+    assert.ok(t.mach >= 0.07 && t.mach <= 0.93);
+    assert.equal(t.kt, Math.round(t.kt)); // niceTicks의 둥근 값이 그대로 라벨
+  }
+  // 같은 마하라도 기준 고도가 낮으면(음속이 크면) 더 빠른 kt가 붙는다
+  const lo = tasAxisTicks(0.07, 0.93, 340.293988026089);
+  assert.ok(lo[lo.length - 1].kt > ticks[ticks.length - 1].kt);
+});
+
+test("tasAxisTicks — 음속이 비유한·비양수면 축을 안 그린다 (0 kt 눈금 금지)", () => {
+  // 환산이 실패한 자리에 그럴듯한 숫자를 남기면 화면이 없는 속도를 말한다
+  for (const bad of [0, -1, NaN, Infinity, undefined]) {
+    assert.deepEqual(tasAxisTicks(0.1, 0.9, bad), []);
+  }
+  assert.deepEqual(tasAxisTicks(0.5, 0.5, 340), []); // 폭 0인 축도 마찬가지
+});
+
+test("machWindow — 캔버스와 캡션이 같은 창을 본다 (DB 하한~M_D + 여백)", () => {
+  const r = region([
+    [0, 0.30, 0.75, "stall", "mach_no"],
+    [1000, 0.32, 0.60, "stall", "qbar"],
+  ]);
+  const w = machWindow({ db_mach: [0.1, 0.9], mach_d: 0.9 }, r);
+  assert.ok(Math.abs(w.xMin - 0.07) < 1e-12); // min(DB 하한 0.1, 합성 하한 0.30) − 0.03
+  assert.ok(Math.abs(w.xMax - 0.93) < 1e-12); // max(M_D 0.9, 합성 상한 0.75) + 0.03
+  // 합성 하한이 DB 하한보다 낮으면 그쪽이 이긴다 (창이 곡선을 자르지 않게)
+  const w2 = machWindow({ db_mach: [0.5, 0.9], mach_d: 0.6 }, r, 0);
+  assert.ok(Math.abs(w2.xMin - 0.30) < 1e-12);
+  assert.ok(Math.abs(w2.xMax - 0.75) < 1e-12);
+});
+
+test("isoOffWindow — 한 점도 창 안에 없는 곡선만 (조용한 비표시를 화면이 세도록)", () => {
+  const curves = [
+    { v: 100, mach: [0.30, 0.34] }, // 전부 창 안
+    { v: 150, mach: [0.44, 0.51] }, // 전부 창 밖 — 켜도 통째로 사라진다
+    { v: 120, mach: [0.34, 0.42] }, // 한 점만 걸쳐도 보이는 것이다 (창 밖 아님)
+  ];
+  assert.deepEqual(isoOffWindow(curves, 0.07, 0.35).map((c) => c.v), [150]);
+  // 창이 넓으면 아무것도 숨지 않는다 — 없는 경고를 내지 않는다
+  assert.deepEqual(isoOffWindow(curves, 0.07, 0.93), []);
+  // 경계는 포함 — 끝점이 정확히 창 모서리인 곡선을 "밖"이라 부르지 않는다
+  assert.deepEqual(isoOffWindow([{ v: 9, mach: [0.35, 0.51] }], 0.07, 0.35), []);
+});
+
+test("machSpan — 창 밖 안내의 증거 숫자, 비유한값이 섞이면 null (지어내지 않는다)", () => {
+  assert.deepEqual(machSpan({ mach: [0.45, 0.52, 0.61] }), { lo: 0.45, hi: 0.61 });
+  assert.deepEqual(machSpan({ mach: [0.61, 0.45] }), { lo: 0.45, hi: 0.61 }); // 단조 가정 안 함
+  // Math.min은 null을 0으로 취급한다 — 그대로 두면 "M 0~1.72"가 증거인 척 찍힌다
+  assert.equal(machSpan({ mach: [null, 1.72] }), null);
+  assert.equal(machSpan({ mach: [0.3, undefined] }), null); // 이쪽은 NaN이 된다
+  assert.equal(machSpan({ mach: [] }), null);
+  assert.equal(machSpan({}), null);
 });

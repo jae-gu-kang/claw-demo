@@ -114,7 +114,7 @@
 - python-control 기반: 고유치·감쇠비 + 모드 자동 분류(단주기/장주기/더치롤/롤/스파이럴), 이득·위상여유, 보드선도
   - 횡축 롤/나선 갈래(`classify_lat`)는 **실근 `max|Re|` 순** 휴리스틱이라 요 댐퍼 실근을 롤로 뽑거나 실근으로 존재하지 않는 롤 모드를 잰다 — 자동 설계 경로(M17 `closure.roll_real_mode`)는 참여도 지목으로 갈라섰고, 여기는 소비자가 여럿이라 미변경 [백로그] (01 §7)
 - **마진 맵**: Mach-고도-연료 격자 전체 마진 계산·취약 구간 식별. 100 vs 50 Hz 이산화 영향 비교 자동화
-- **엔벨로프 수치**(`analysis/envelope.py`): V-n 경계(`vn_envelope`·`vn_stall_boundary`) + 설계 엔벨로프 M-h 합성(`design_envelope` — 01 §2.6, 행별 경계 승자 귀속)·공력 선도(`aero_envelope`)·mach 경계 단일 정본(`stall_mach_lo`·`row_machs` — M17 `design/grid.py`가 호출, 종전 grid 사유 `_mach_lo`의 승격). `stall_mach_lo`는 `n_target`으로 하중배수를 받아 기동 엔벨로프 하한을 내고, 도달 불가는 `n_reach` 귀속으로 빈 행이 된다(01 §2.6). `iso_curves`는 M-h 등동압선·등속선 — 등동압선은 `mach_qbar_limit` 재사용이라 q̄ 경계선과 산식을 공유한다
+- **엔벨로프 수치**(`analysis/envelope.py`): V-n 경계(`vn_envelope`·`vn_stall_boundary`) + 설계 엔벨로프 M-h 합성(`design_envelope` — 01 §2.6, 행별 경계 승자 귀속)·공력 선도(`aero_envelope`)·mach 경계 단일 정본(`stall_mach_lo`·`row_machs` — M17 `design/grid.py`가 호출, 종전 grid 사유 `_mach_lo`의 승격). `stall_mach_lo`는 `n_target`으로 하중배수를 받아 기동 엔벨로프 하한을 내고, 도달 불가는 `n_reach` 귀속으로 빈 행이 된다(01 §2.6). `iso_curves`는 M-h 등동압선·등속선 — 등동압선은 `mach_qbar_limit` 재사용이라 q̄ 경계선과 산식을 공유한다. `design_envelope`의 `bounds.speed_of_sound`는 표시 상·하 모서리의 음속 — 웹 상단 대기속도(kt) 보조축의 기준이자 그 축의 오차 폭 근거다(01 §2.6)
 - **보드선도**(`bode_data` + `omega_covering`, v0.27): 개루프 주파수응답 + **교차점 전량**. `control.margin`은 다중 교차 중 하나만 답하므로 어느 자리 것인지 화면이 말할 수 있어야 한다(01 §4.2 yaw_rate 사례). 마진은 `loop_margins` 정본 재사용 — 재계산하지 않는다. `omega_covering`은 여러 루프를 덮는 공통 격자(두 조립을 겹쳐 비교하려면 같은 축이어야 한다)
 - **레이트 경로 필터**(v0.30): `filter_tf`가 `RATE_FILTERS`(M2 정본)의 연속시간 등가를 내고 `pi_loop`가 4번째 항으로 캐스케이드한다. M17 `closure.close_rates`는 필터 상태를 뒤에 붙여 증강 — 노치는 모드 지표를 오염시켜 거부(01 §4.2 [한계])
 - 의존: M2(이산 제어기 포함 해석), M9의 `LinearModel` 소비
@@ -276,3 +276,4 @@ CLAW_DEMO/
 - *v0.26 — M10에 레이트 경로 필터 등재(01 §4.2 v0.30과 한 세트): `filter_tf` + `pi_loop` 캐스케이드, M17 `close_rates` 상태 증강. 어휘 정본은 M2 `blocks/filters.py RATE_FILTERS` — M10과 (향후) M7이 같은 표를 읽는다*
 - *v0.27 — M10 엔벨로프 수치에 하중배수 축과 등고선 등재(01 §2.6 v0.31과 한 세트): `stall_mach_lo(n_target=)` + 귀속 `n_reach`, `iso_curves`(등동압선은 `mach_qbar_limit` 재사용 — q̄ 경계선과 산식 공유). M14 웹 lib에 `outlineCaps`·`thrustFrontier`·`spreadLabels`·`outsideRegion` 표현 변환 추가*
 - *v0.28 — M10에 보드선도 등재(01 §4.2 v0.32와 한 세트): `bode_data`(교차점 전량 — `control.margin`이 고른 하나와 나머지를 화면이 구분할 수 있게)·`omega_covering`(두 조립을 겹쳐 비교하기 위한 공통 log 격자). M14 웹 lib에 `heatmapCellAt`·`heatmapCanvasHeight`·`logScale`·`decadeTicks`·`bodeSeries`, 뷰에 `bodeCanvas` 추가*
+- *v0.29 — M10 `design_envelope`에 `bounds.speed_of_sound` echo(01 §2.6 v0.33과 한 세트) — 상단 대기속도 보조축이 자기가 놓인 모서리에서 정확하고, 반대 모서리에서 얼마나 어긋나는지 소비자가 지어내지 않고 말하도록 두 값을 다 싣는다. M14 웹 lib에 `msToKt`·`ftToM`·`tasAxisTicks`·`machWindow`·`isoOffWindow`·`machSpan` 추가*

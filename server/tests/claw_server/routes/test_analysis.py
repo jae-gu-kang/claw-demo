@@ -178,6 +178,9 @@ def test_design_envelope_maneuver_and_iso_params(client):
     assert base["maneuver"] is None  # 미지정 = 기동 엔벨로프 자체가 없다
     assert [c["q"] for c in base["iso"]["qbar"]] == [5000.0, 10000.0, 20000.0, 40000.0]
     assert base["bounds"]["tropopause_alt"] == 11000.0  # 웹이 11000을 재기술하지 않도록
+    # 상단 대기속도 보조축 기준 — 웹이 ISA 음속을 재기술하지 않도록 모서리 값이 온다
+    assert base["bounds"]["speed_of_sound"]["alt_min_used"] == pytest.approx(340.294, abs=1e-3)
+    assert base["bounds"]["speed_of_sound"]["alt_max_used"] == pytest.approx(295.070, abs=1e-3)
 
     man = client.get("/api/analysis/design-envelope",
                      params={"fuel": 200.0, "nz": 3.0}).json()

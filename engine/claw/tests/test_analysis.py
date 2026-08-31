@@ -490,6 +490,21 @@ def test_iso_curves_share_the_qbar_formula_with_the_boundary():
     assert tas["mach"] == [200.0 / isa_atmosphere(a).a for a in alts]
     assert tas["mach"][0] < tas["mach"][1] < tas["mach"][2]
     assert env["bounds"]["tropopause_alt"] == 11000.0
+    # 상단 대기속도 보조축의 기준 — 축은 **자기가 그려지는 모서리**에서만 참이므로
+    # 그 모서리의 음속이 함께 와야 한다. 표시 상·하가 실제로 다른 값이어야
+    # 소비자가 축의 오차 폭을 말할 수 있다 (한 값만 주면 어긋남을 지어내야 한다)
+    sos = env["bounds"]["speed_of_sound"]
+    assert sos["alt_min_used"] == isa_atmosphere(0.0).a
+    assert sos["alt_max_used"] == isa_atmosphere(12000.0).a  # _ALT_DISPLAY_MAX
+    assert sos["alt_min_used"] > sos["alt_max_used"]  # 고도가 오르면 음속이 준다
+    # 축과 등속선이 **한 물체의 두 표시**임을 핀한다: 등속선이 윗변에 닿는 마하가
+    # 곧 그 속도의 kt 눈금 자리다(화면이 그렇게 말한다). 두 값이 갈리면 곡선이
+    # 자기 눈금을 빗나가 그리므로, 같은 a를 쓴다는 사실 자체가 계약이다
+    tas_top = design_envelope(ac, st, lim, db, fuel=200.0, iso_tas=[200.0])["iso"]["tas"][0]
+    assert tas_top["mach"][-1] == 200.0 / sos["alt_max_used"]
+    # 운용 상한을 주면 축 기준도 그 모서리로 따라 움직인다 (모서리 고정이 규약)
+    capped = design_envelope(ac, st, lim, db, fuel=200.0, alt_max=5000.0)
+    assert capped["bounds"]["speed_of_sound"]["alt_max_used"] == isa_atmosphere(5000.0).a
     # 등속선 속도 비양수는 거부 — 나눗셈이라 그냥 통과하면 음의 마하 곡선이 되어
     # 화면 밖으로 잘려 **사유 없이 사라진다**(등동압선은 mach_qbar_limit이 이미 막는다)
     for bad in (0.0, -100.0):

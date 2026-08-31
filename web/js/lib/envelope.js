@@ -6,7 +6,7 @@
 숨기면 엔진이 코드를 늘렸을 때 화면이 거짓말을 한다).
 */
 
-import { STATUS } from "./plot.js";
+import { niceTicks, STATUS } from "./plot.js";
 
 // ── 경계 귀속 (엔진 lo_source/hi_source 코드가 정본) ──────────────────────
 export const BOUND_META = {
@@ -261,9 +261,39 @@ export function outsideRegion(point, region) {
 // ── 표시 보조 (좌표 변환·라벨 배치 — 수치를 만들지 않는다) ────────────────
 
 const FT_PER_M = 1 / 0.3048; // 국제피트 정의값 — 근사 상수를 손으로 적지 않는다
+const KT_PER_MS = 3600 / 1852; // 해리 정의값 1852 m — 1.94384…를 손으로 적지 않는다
 
 /** m → ft. 우측 보조 고도축 전용 — 순수 단위 환산이라 근사가 없다. */
 export const mToFt = (m) => m * FT_PER_M;
+
+/** ft → m. 우측 보조축이 **자기 눈금**(둥근 ft)을 가지려면 그 자리를 되돌려야 한다. */
+export const ftToM = (ft) => ft / FT_PER_M;
+
+/** m/s → kt. 상단 보조 속도축·등속선 라벨 전용 — 순수 단위 환산. */
+export const msToKt = (v) => v * KT_PER_MS;
+
+/** 상단 대기속도 보조축 눈금 — [{kt, mach}], 마하 범위 안만.
+ *
+ * 교과서 엔벨로프(Fig 1)는 마하축 위에 kt 축을 겹쳐 그린다. M ↔ V = M·a의
+ * 대응은 고도마다 다르므로 그 축은 **한 고도에서만** 참이다 — 그래서 a를
+ * 인자로 받는다: 호출측이 축을 그리는 자리(도표 상단 모서리)의 음속을 엔진
+ * echo(bounds.speed_of_sound)에서 넘기면, 축은 적어도 자기가 놓인 선 위에서
+ * 정확하다. 고도 의존 자체는 등속선(iso.tas)이 평면 안에서 그린다.
+ *
+ * a가 비유한·비양수면 빈 목록 — 축을 안 그리는 것이 0 kt 눈금을 늘어놓는 것보다
+ * 낫다(단위 환산이 실패한 자리에 그럴듯한 숫자를 남기지 않는다).
+ *
+ * 범위 필터는 죽은 코드가 아니다 — 상단 축은 호출측에서 **클립을 푼 뒤** 그려지므로
+ * 범위 밖 눈금은 잘리지 않고 여백·프레임 밖에 찍힌다. 지금은 `niceTicks`가 이미
+ * 범위 안만 내서 필터가 발화하지 않지만, 그 계약이 바뀌는 날 눈금이 캔버스 밖으로
+ * 새 나간다(축이 없는 것보다 나쁘다). 테스트도 이 사정을 그대로 적어 둔다.
+ */
+export function tasAxisTicks(machMin, machMax, a, n = 6) {
+  if (!Number.isFinite(a) || a <= 0 || !(machMax > machMin)) return [];
+  return niceTicks(msToKt(machMin * a), msToKt(machMax * a), n)
+    .map((kt) => ({ kt, mach: kt / KT_PER_MS / a }))
+    .filter((t) => t.mach >= machMin && t.mach <= machMax);
+}
 
 /** 라벨 세로 겹침 해소 — [{y, …}] → 같은 순서·같은 상하 관계, 간격 ≥ minGap.
  * y 오름순으로 훑으며 앞 라벨 아래로 밀기만 한다(위로 당기지 않는다 — 지시선이
@@ -277,6 +307,38 @@ export function spreadLabels(items, minGap) {
     prev = out[i].y;
   }
   return out;
+}
+
+/** 도표의 마하 창 {xMin, xMax} — 캔버스와 캡션이 **같은 창**을 봐야 "창 밖"이 한 말이
+ * 된다. 창은 DB 하한·합성 하한의 최소와 M_D·합성 상한의 최대에 여백(pad)을 더한 것. */
+export function machWindow(bounds, region, pad = 0.03) {
+  return {
+    xMin: Math.min(bounds.db_mach[0], ...region.mach_lo) - pad,
+    xMax: Math.max(bounds.mach_d, ...region.mach_hi) + pad,
+  };
+}
+
+/** 등고선 중 마하 창 안에 **한 점도** 없는 것 — 그리면 통째로 사라지는 곡선이다.
+ *
+ * 요청한(또는 엔진 [기본값]으로 들어간) 곡선이 사유 없이 화면에서 없어지는 것은 이
+ * 리포가 금하는 조용한 비표시다 — `iso_curves`가 음수 V를 거부하는 사유로 든 것과
+ * 같은 현상이고, 이쪽은 값이 멀쩡한데 창이 좁아서 벌어진다: M_NO·M_D를 낮게 입력하면
+ * (저속기 프로파일) 엔진 [기본값] 등속선 100~250 m/s가 전부 창 밖으로 나간다.
+ * 화면이 개수와 사유를 말할 수 있도록 목록으로 낸다. */
+export function isoOffWindow(curves, xMin, xMax) {
+  return curves.filter((c) => !c.mach.some((m) => m >= xMin && m <= xMax));
+}
+
+/** 등고선의 마하 구간 {lo, hi} — 창 밖 안내가 "왜 안 보이는지"의 **증거로 화면에 내는**
+ * 수라서 뷰가 아니라 여기서 만든다(뷰에는 테스트가 없다).
+ *
+ * 비유한값이 하나라도 섞이면 null — Math.min은 null을 0으로 취급하고 undefined에는
+ * NaN을 내므로, 그대로 쓰면 화면에 "M 0~1.72"나 "M NaN~NaN"이 증거인 척 찍힌다.
+ * 현 엔진 계약에는 null이 오지 않지만, 증거 숫자를 지어내지 않는 것이 규칙이다. */
+export function machSpan(curve) {
+  const ms = curve.mach;
+  if (!ms?.length || !ms.every((m) => Number.isFinite(m))) return null;
+  return { lo: Math.min(...ms), hi: Math.max(...ms) };
 }
 
 /** 등고선 라벨 자리 — preferIdx에서 바깥으로 훑어 처음 만나는 x 범위 안 인덱스, 없으면 -1.
