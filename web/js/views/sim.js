@@ -1,6 +1,6 @@
 /** 시뮬레이션 뷰 (02 §8 5단계) — 미션 편집 → 폐루프 시뮬 → 재생 + 엔벨로프.
 
-미션 스펙 변환은 lib/mission.js, 재생 수치는 lib/replay.js. 검증·수치는 전부
+미션 스펙 변환은 lib/mission.js, 재생 수치는 lib/replay.js·lib/playcursor.js. 검증·수치는 전부
 서버(엔진) 소관 — 구성 오류는 422 텍스트로 표시.
 */
 
@@ -8,7 +8,9 @@ import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { buildModes, buildWaypoints, COND_KINDS, LON_AXES, pathUsage } from "../lib/mission.js";
 import { planeViews, wpMarks } from "../lib/plot.js";
+import { atEnd as cursorAtEnd, dtSample, indexAt, isPlayable } from "../lib/playcursor.js";
 import { flaggedNames, landingSummary, modeSpans, strideFor } from "../lib/replay.js";
+import { GOHEUNG, touchdownWindowM } from "../lib/site.js";
 import { defaultWaypointAlt, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
@@ -23,29 +25,40 @@ import { createProfileChart, createWpMap } from "./wpmap.js";
 // 이유가 없는 자세 구간), approach·flare는 **강하율**(어느 고도가 아니라 내려가는
 // 속도를 잡는 구간), cruise만 **고도**다. 셋은 배타라 한 모드에 하나씩만 들어간다.
 //
-// 수치는 엔진 실측으로 정했다(engine test_landing과 같은 값):
+// 수치는 엔진 실측으로 정했다. 이탈속도·플레어 개시·미끄럼은 engine test_landing과
+// 같은 값이고, **climb·cruise는 일부러 다르다** — 저쪽은 250/300 m라 다운레인지가
+// 10.8 km인데, 이쪽은 지형 팩 안에 들어오도록 180/200 m로 낮춰 7.9 km로 줄였다:
 //   이탈 81.5 m/s = 1.15 × 트림 실속속도 70.9 — α_stall 0.40에서 CL 1.40이 나오지만
 //   거기까지 가려면 상향 엘러본이 필요하고 그것이 양력을 깎아 실제 최대 트림 CL은 1.169다
 //   플레어 개시 20 m·kp_vs 0.08 → 접지 −1.0 m/s (5 m에서는 0.9 s뿐이라 −4.6)
-//   접지 후 미끄럼 870 m → 활주로 1,500 m
+//   접지 후 미끄럼 870 m — 고흥 활주로 실측 1,205 m에서 접지 창은 335 m뿐이다
+//   (기본 미션은 활주로가 아니라 한참 북쪽에 내린다 — 화면이 그것을 숨기지 않도록
+//    착륙 요약이 "접지 지점" 행에 활주로 축 기준 실제 값을 낸다. 여기에 그 수를 적어
+//    두면 프로파일이 바뀔 때마다 조용히 낡는다 — lib/replay.js landingSummary)
 //
 // 이 값들은 엔진 기본값의 사본이 아니라 **미션 시나리오**라 02 §5.5의 "엔진 기본값
 // 재기술" 대상이 아니다 (lib/loops.js DEFAULT_LOOPS와 같은 부류). 엔진 회귀 미션
 // (test_mission — 지면 미장착 순항 시나리오)은 그대로 남아 있다.
 const CLIMB_PITCH = "0.3665"; // [rad] 21° — α 리미터 한계까지 기수를 든다
+// 고흥 활주로 진방위 실측 (lib/site.js ← data/geo/goheung-runway.json). 미션 헤딩과
+// 활주로 칸의 **초기값**이 같은 상수에서 나온다 — 헤딩 0으로 날던 때는 10 km 뒤에
+// 축에서 595 m 벌어져 있었고, 맞추고 나니 29 m다. 다만 렌더 뒤로는 두 칸이 독립이라
+// 한쪽만 고치면 다시 벌어진다. 그때 어긋남을 말해 주는 것은 이 상수가 아니라
+// 착륙 요약의 접지 위치 줄이다.
+const RUNWAY_HDG = String(GOHEUNG.runwayHeadingRad); // [rad] 3.417°
 let modeRows = [
-  { name: "launch", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH, heading: "0",
+  { name: "launch", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH, heading: RUNWAY_HDG,
     exitKind: "off_rail", exitValue: "", next: "climb" },
-  { name: "climb", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH, heading: "0",
-    exitKind: "alt_ge", exitValue: "250", next: "cruise" },
-  { name: "cruise", speed: "88", lonAxis: "alt", lonValue: "300", heading: "0",
-    exitKind: "time_ge", exitValue: "20", next: "approach" },
+  { name: "climb", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH, heading: RUNWAY_HDG,
+    exitKind: "alt_ge", exitValue: "180", next: "cruise" },
+  { name: "cruise", speed: "88", lonAxis: "alt", lonValue: "200", heading: RUNWAY_HDG,
+    exitKind: "time_ge", exitValue: "15", next: "approach" },
   // 3° 활공: 88 m/s · sin3° ≈ 4.6 m/s
-  { name: "approach", speed: "88", lonAxis: "hdot", lonValue: "-4.8", heading: "0",
+  { name: "approach", speed: "88", lonAxis: "hdot", lonValue: "-4.8", heading: RUNWAY_HDG,
     exitKind: "alt_le", exitValue: "20", next: "flare" },
-  { name: "flare", speed: "80", lonAxis: "hdot", lonValue: "-0.8", heading: "0",
+  { name: "flare", speed: "80", lonAxis: "hdot", lonValue: "-0.8", heading: RUNWAY_HDG,
     exitKind: "on_ground", exitValue: "", next: "rollout" },
-  { name: "rollout", speed: "0", lonAxis: "pitch", lonValue: "0", heading: "0",
+  { name: "rollout", speed: "0", lonAxis: "pitch", lonValue: "0", heading: RUNWAY_HDG,
     exitKind: "speed_le", exitValue: "0.5", next: "stopped" },
   { name: "stopped", speed: "0", lonAxis: "pitch", lonValue: "0", heading: "",
     exitKind: "time_ge", exitValue: "1e9", next: "" },
@@ -131,6 +144,12 @@ function checkField(input, label) {
   return field("", input, el("span", { style: "font-size:12px;" }, label));
 }
 
+/** 빈 칸은 0이 아니라 NaN — JSON에서 null이 되어 서버가 422로 답한다.
+ *  `Number("")`가 0인 것이 조용한 오답의 통로다. */
+function blankIsNaN(value) {
+  return String(value).trim() === "" ? NaN : Number(value);
+}
+
 /** 수치 입력 — 칸 폭을 채운다 (mono 글꼴은 .num이 준다). */
 function numInput(value) {
   return el("input", { class: "num", style: FILL_ST, value });
@@ -170,15 +189,29 @@ export function render() {
     alt: numInput("0"), // 활주로 표고 — 기준면 감시도 이 값이 된다
     fuel: numInput("300"),
     groundOn: el("input", { type: "checkbox", checked: true }),
-    rwHeading: numInput("0"),
-    rwLength: numInput("1500"), // 접지 미끄럼 870 m + 접지점 산포 여유 (엔진 실측)
+    // 방위·길이는 고흥 활주로 실측이다 — data/geo/goheung-runway.json 참조.
+    // 미끄럼 870 m가 1,205 m 안에 들어가지만, 그것은 **미끄럼이 짧다**는 뜻일 뿐
+    // 활주로에 내렸다는 뜻이 아니다 (lib/replay.js landingSummary는 접지 위치를 본다).
+    rwHeading: numInput(RUNWAY_HDG),
+    rwLength: numInput(String(GOHEUNG.runwayLengthM)),
     launchOn: el("input", { type: "checkbox", checked: true }),
     railLen: numInput("10"),
     railAngle: numInput("0.2618"), // [rad] 15°
     railExit: numInput("81.5"), // 1.15 × 트림 실속속도 70.9 → 33.9 g
     rtkOn: el("input", { type: "checkbox", checked: true }),
-    // 발사 0.25 s + 상승·순항 ~90 s + 접근 ~65 s + 미끄럼 ~23 s. 엔진 실측으로
-    // 접지 110 s·정지 133 s라 200이면 정지 후 여유가 남는다 (짧으면 서기 전에 끊긴다)
+    // 측지 원점 — NED (0,0)이 지구상 어디인가. 엔진은 보지 않고 결과 meta에만 실린다.
+    // 이것이 없으면 3D 월드가 지형을 얹을 수 없다(같은 N·E가 어디인지 모르므로).
+    // 기본값은 고흥 활주로 **남단 임계** 실측값이다(항공영상에서 측정 —
+    // data/geo/goheung-runway.json에 방법과 검산이 있다). 남단인 이유는 활주로가
+    // 화면·판정 양쪽에서 "원점에서 heading 방향 length 구간"이기 때문이다.
+    // 기본 켜짐 — 끄면 결과에 원점이 없어 3D 월드가 지형을 얹지 못한다.
+    originOn: el("input", { type: "checkbox", checked: true }),
+    originLat: numInput(String(GOHEUNG.originLatDeg)),
+    originLon: numInput(String(GOHEUNG.originLonDeg)),
+    // 기본 미션은 100 s 안팎에 선다(순항 고도를 낮추며 짧아졌다 — 107/130은 엔진
+    // test_landing 쪽 시각이지 이제 이 미션의 시각이 아니다). 200은 그 두 배 여유다.
+    // 짧으면 서기 전에 끊긴다. **정확한 시각은 실행 후 착륙 요약이 말한다** — 여기에
+    // 적어 두면 프로파일이나 스케줄이 바뀔 때마다 조용히 낡는다
     tEnd: numInput("200"),
     accept: numInput("1500"),
     navOn: el("input", { type: "checkbox", checked: true }),
@@ -390,6 +423,14 @@ export function render() {
           heading: Number(f.rwHeading.value),
           length: Number(f.rwLength.value),
         } } : {}),
+        // 빈 칸을 Number()에 그대로 넘기면 0이 된다 — 오타(NaN→null→422)와 달리
+        // (0,0)은 **유효하고 그럴듯한 틀린 값**이라 기니만 앞바다가 결과 meta에 박힌 채
+        // 저장된다. 다른 칸은 서버 제약(length gt=0 등)이 막아 주지만 원점은 안 막힌다.
+        // 빈 칸은 오타와 같은 길로 보내 서버가 422로 답하게 한다 (리뷰 지적).
+        ...(f.originOn.checked ? { origin: {
+          lat: blankIsNaN(f.originLat.value),
+          lon: blankIsNaN(f.originLon.value),
+        } } : {}),
         ...(f.launchOn.checked ? { launch: {
           length: Number(f.railLen.value),
           elev_angle: Number(f.railAngle.value),
@@ -477,7 +518,8 @@ export function render() {
             "활주로를 켜면 발사대·활주로 위 정지에서 출발합니다 — 그때 마하는 0이고 ",
             "고도는 비행 고도가 아니라 활주로 표고입니다(지상 평형해). 끄면 종전처럼 ",
             "수평비행 트림에서 출발하고 마하 > 0이 필요합니다. ",
-            "t_end는 정지까지 덮어야 합니다 — 기본 미션 실측 접지 110 s · 정지 133 s.")),
+            "t_end는 정지까지 덮어야 합니다 — 기본 미션은 100 s 안팎에 서므로 ",
+            "200 s면 여유가 남습니다. 실제 접지·정지 시각은 실행 후 착륙 요약에 나옵니다.")),
         el("div", { class: "opt-group", style: GROUP_ST },
           groupTitle("활주로 · 지면", f.groundOn),
           el("div", { class: "row-inner", style: INNER_ST },
@@ -488,7 +530,25 @@ export function render() {
             "그대로 통과하고, 접지·정지 판정(on_ground·speed_le)도 성립하지 않습니다. ",
             "지면은 표고 하나짜리 평면입니다 — 지형·파고는 미모델입니다. ",
             "표고는 위 '고도' 칸이고 기준면 감시도 그 값을 씁니다. ",
-            "길이 1,500 m는 실측 미끄럼 870 m + 접지점 산포 여유입니다.")),
+            `방위 ${RUNWAY_HDG} rad(3.417°)·길이 ${GOHEUNG.runwayLengthM} m는 고흥 `,
+            "활주로를 항공영상에서 잰 값입니다 — 공표 제원 1.2 km와 0.4% 안에서 맞습니다. ",
+            `접지 후 미끄럼이 ${GOHEUNG.rolloutM} m라, 활주로 안에 서려면 `,
+            `${touchdownWindowM()} m 안에 접지해야 합니다. `,
+            "아래 착륙 요약은 접지→정지 ", el("strong", {}, "거리"), "만 이 길이와 ",
+            "견주고 접지 ", el("strong", {}, "위치"), "는 보지 않습니다 — ",
+            "활주로에 내렸는지는 판정하지 않습니다.")),
+        el("div", { class: "opt-group", style: GROUP_ST },
+          groupTitle("측지 원점", f.originOn),
+          el("div", { class: "row-inner", style: INNER_ST },
+            field("위도 [deg]", f.originLat),
+            field("경도 [deg]", f.originLon)),
+          el("p", { class: "hint", style: HINT_ST },
+            "NED 원점 (0,0)이 지구상 어디인지 적습니다. 엔진은 이 값을 보지 않고 ",
+            "결과에만 실립니다 — 3D 월드가 지형을 얹으려면 지형 팩과 이 원점이 같아야 ",
+            "합니다. 기본값은 고흥 시험장 활주로 ",
+            el("strong", {}, "남단 임계"),
+            "를 항공영상에서 측정한 값입니다(34.601303 / 127.212067). 측정 방법과 ",
+            "공표 제원 대조는 data/geo/goheung-runway.json에 있습니다.")),
         el("div", { class: "opt-group", style: GROUP_ST },
           groupTitle("발사 레일", f.launchOn),
           el("div", { class: "row-inner", style: INNER_ST },
@@ -511,14 +571,18 @@ export function render() {
             ? "구조도 적용값 사용 중 (시드만 여기서 우선). "
             : "미지정 항목은 엔진 기본값 — 편집은 구조도 탭 항법 블록. ",
             "RTK는 접지를 부드럽게 하지 않습니다 — 접지 지점을 반복 가능하게 합니다. ",
+            `활주로 ${GOHEUNG.runwayLengthM} m라도 미끄럼 ${GOHEUNG.rolloutM} m는 `,
+            `굴러가므로, 활주로 안에 서려면 ${touchdownWindowM()} m 안에 접지해야 `,
+            "합니다 — 산포를 활주로 전장과 견주면 안 됩니다. ",
             // **수치를 옮겨 적지 않는다.** 산포는 항법 등급·접근 프로파일·게인
             // 스케줄의 함수라 여기 적으면 낡는데, 웹은 엔진을 읽지 않고 엔진은
-            // 여기를 읽지 않아 **낡아도 아무것도 빨개지지 않는다**. 실제로 게인
-            // 스케줄 상한을 내리면서 874/92가 512/12가 됐고, 그때 출처만 덧붙였더니
-            // 낡음을 기록만 하고 해결하지는 못했다(리뷰 지적). UI 결정(RTK 토글)에
-            // 필요한 것은 정밀한 수가 아니라 **순서**이고, 그것은 재측정을 견딘다
-            "기본 항법의 접지 산포는 활주로 안에 서기 위한 창을 넘고 RTK는 그 안에 ",
-            "듭니다 — 현재 수치는 엔진 test_landing이 5시드로 잽니다. ",
+            // 여기를 읽지 않아 **낡아도 아무것도 빨개지지 않는다**. 실제로 이번에
+            // 게인 스케줄 상한을 내리면서 874/92가 512/12가 됐고, 그때 출처만
+            // 덧붙였더니 낡음을 기록만 하고 해결하지는 못했다(리뷰 지적).
+            // UI 결정(RTK 토글)에 필요한 것은 정밀한 수가 아니라 **순서**이고,
+            // 그것은 재측정을 견딘다. 현재 수치가 필요하면 엔진이 집이다
+            "기본 항법의 접지 산포는 그 창을 넘고 RTK는 그 안에 듭니다 — ",
+            "현재 수치는 엔진 test_landing이 5시드로 잽니다. ",
             "fix 유지가 전제입니다 — 보정 링크가 끊겨 강등되는 상황은 미모델입니다.")),
         el("div", { class: "opt-group", style: GROUP_ST },
           groupTitle("작동기 (2차계)", f.actOn),
@@ -759,18 +823,19 @@ function renderReplay(replayBox) {
   // 자동 재생 — 손으로 슬라이더를 끄는 것 외에 시간을 흘려보낼 방법이 없었다.
   // 샘플 간격(stride 적용 후)을 기준으로 배속을 곱해 진행하므로, 표시 시각은
   // 실제 시뮬 시간과 배속의 곱으로 흐른다 (프레임을 세는 게 아니라).
-  const dtSample = body.t.length > 1 ? body.t[1] - body.t[0] : 0;
-  const playable = body.t.length > 1 && dtSample > 0;
+  // 수치는 lib/playcursor.js가 정본 — 3D 월드 탭과 **같은 함수**를 쓴다. 두 화면이 각자
+  // 적으면 같은 결과를 보면서 서로 다른 시각을 말하게 된다.
+  const dt = dtSample(body.t);
+  const playable = isPlayable(body.t);
   const playBtn = el("button", { disabled: !playable },
     playable ? "▶ 재생" : "▶ 재생 (샘플 부족)");
   const speedSel = el("select", { "aria-label": "재생 배속" },
     ...[1, 2, 5, 10, 20].map((x) =>
       el("option", { value: String(x), selected: x === 5 }, `${x}×`)));
-  const atEnd = () => Number(slider.value) >= body.t.length - 1;
+  const atEnd = () => cursorAtEnd(Number(slider.value), body.t.length);
 
-  // 진행은 프레임당 고정 샘플이 아니라 **경과 벽시계 시간**으로 센다. 프레임당
-  // 샘플로 세면 stride가 큰 결과(dtSample이 큰)에서 저속 배속의 몫이 1샘플 미만이
-  // 되어 최소 1로 잘리고, 그만큼 요청 배속보다 빨리 재생된다 (1×가 1×가 아니게 됨).
+  // 진행은 프레임당 고정 샘플이 아니라 **경과 벽시계 시간**으로 센다 (그 사유는
+  // lib/playcursor.js 독스트링 — 프레임당 샘플로 세면 1×가 1×가 아니게 된다).
   let fromIdx = 0;
   let fromWall = 0;
   const stopPlay = () => {
@@ -783,10 +848,10 @@ function renderReplay(replayBox) {
     if (atEnd()) { slider.value = "0"; updateCursor(); } // 끝에서 누르면 처음부터
     anchor();
     playTimer = setInterval(() => {
-      const simElapsed = (performance.now() - fromWall) / 1000 * Number(speedSel.value);
-      const next = Math.min(fromIdx + Math.round(simElapsed / dtSample), body.t.length - 1);
+      const next = indexAt(fromIdx, fromWall, performance.now(),
+        Number(speedSel.value), dt, body.t.length);
       if (next !== Number(slider.value)) { slider.value = String(next); updateCursor(); }
-      if (next >= body.t.length - 1) stopPlay(); // 끝에 닿으면 자동 정지
+      if (cursorAtEnd(next, body.t.length)) stopPlay(); // 끝에 닿으면 자동 정지
     }, PLAY_FRAME_MS);
     playBtn.textContent = "⏸ 일시정지";
   };
@@ -819,7 +884,7 @@ function renderReplay(replayBox) {
       el("b", {}, `${r.label} `), r.value,
       r.note ? " — " : "", r.note ?? "",
       r.unjudged ? " " : "", r.unjudged ? flagBadge(null) : "",
-      r.over ? " " : "", r.over ? flagBadge(false, "", "활주로 초과") : "")),
+      r.over ? " " : "", r.over ? flagBadge(false, "", r.overLabel ?? "활주로 초과") : "")),
     el("div", { class: "row" }, playBtn, speedSel, slider, readout),
     // 궤적 뷰 — 입체·평면·측면·정면 순. 배치는 .triview가 폭에 따라 1열/2열로
     // 고르며, 열 수를 4의 약수로만 두어 마지막 줄에 외톨이가 남지 않게 한다.

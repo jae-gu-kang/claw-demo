@@ -1,7 +1,8 @@
 """M4 env — ISA 대기, 중력, WGS-84 지구모델, 바람/난류(확장) (도메인 문서 §2.5).
 
 구현됨: ISA 표준대기 2층 모델(atmosphere), WGS-84 Somigliana 중력+고도보정(gravity),
-곡률반경·지오퍼텐셜↔기하고도 변환(earth), 표준중력 G0 재수출.
+곡률반경·지오퍼텐셜↔기하고도 변환(earth), 국지 접평면 측지 변환(geodesy),
+표준중력 G0 재수출.
 후속 증분: 바람/Dryden 난류(확장 항목).
 """
 
@@ -13,6 +14,7 @@ from claw.env.earth import (
     radius_meridian,
     radius_prime_vertical,
 )
+from claw.env.geodesy import geodetic_to_ned, local_scales, ned_to_geodetic
 from claw.env.gravity import gravity_wgs84
 
 __all__ = [
@@ -24,4 +26,7 @@ __all__ = [
     "radius_prime_vertical",
     "geopotential_altitude",
     "geometric_altitude",
+    "ned_to_geodetic",
+    "geodetic_to_ned",
+    "local_scales",
 ]

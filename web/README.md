@@ -1,6 +1,6 @@
 # web — M14 프론트엔드 (Phase 5)
 
-**바닐라 ES 모듈 + no-build, 외부 의존 0** [확정 02 §4] — 폐쇄망 반입물은 이
+**바닐라 ES 모듈 + no-build** [확정 02 §4]. 외부 의존은 3D 월드용 vendored three.js **1건뿐**이며 CDN이 아니라 `js/vendor/` 아래 파일이다(출처·해시·`eval` 0건 검사 결과는 `js/vendor/three/VERSION`). 폐쇄망 반입물은 이
 디렉터리 파일 전부이며, 현지 수정은 텍스트 에디터로 가능하다. eval-free
 (엄격 CSP 호환), 플롯은 자체 Canvas.
 
@@ -29,7 +29,12 @@ js/
 │   ├── grid.js       #   트림 격자 — 서펜타인 순서 (인접 시드 전제 01 §4.1)
 │   ├── plot.js       #   스케일·눈금·마진 상태색·격자 피벗
 │   ├── mission.js    #   편집 행 → 미션 스펙 (조건 인자수 = 엔진 _COND_ARITY)
-│   └── replay.js     #   stride 산정·모드 구간·극값
+│   ├── replay.js     #   stride 산정·모드 구간·극값
+│   ├── playcursor.js #   재생 커서 정본 — 벽시계 경과 → 샘플 인덱스 (시뮬·3D 월드 공유)
+│   ├── geo.js        #   NED↔위경도↔타일 (엔진 claw.env.geodesy의 짝, 공유 고정점으로 대조)
+│   ├── attitude.js   #   3-2-1 오일러 → 쿼터니언 → 동체축의 NED 성분 (규약 §2)
+│   ├── uavmesh.js    #   기체 형상 — 엔진 기준량(S·c̄·b)에서 만드는 절차적 메시
+│   └── camera.js     #   시점 4종 (추적·궤도·온보드·자세) + 지면 클램프
 └── views/            # DOM 조립 전용 (얇게 유지)
     ├── blocks.js     #   구조도 허브: 블록 클릭 → 서브시스템 페이지 #blocks/<id> (02 §4)
     ├── diagram.js    #   최상위 SVG 블록도 (설계순서 프레임·피드백 — 시뮬링크 스타일)
@@ -40,7 +45,10 @@ js/
     ├── gains.js      #   4단계: 게인 테이블 편집 → 시뮬 주입 (전체 교체)
     ├── sim.js        #   5단계: 모드 테이블·웨이포인트 편집 → 재생+엔벨로프
     ├── results.js    #   6단계 열람: 산출물 목록·계보 지문
-    └── plots.js      #   캔버스 렌더러 (히트맵·산점도·시계열·NED 궤적)
+    ├── plots.js      #   캔버스 렌더러 (히트맵·산점도·시계열·NED 궤적)
+    ├── world.js      #   3D 월드 탭 — 결과 선택·시점 4종·재생·환경
+    ├── worldrenderer.js #  렌더러 계약 + 팩토리 (구현 교체 지점)
+    └── renderer-three.js # three.js 어댑터 — 축 변환은 여기 toWorld 한 줄뿐
 ```
 
 ## 테스트 (개발 환경 전용 — 반입물 아님)

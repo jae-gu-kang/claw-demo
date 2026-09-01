@@ -24,6 +24,7 @@ from claw_server.routes import results as results_routes
 from claw_server.routes import sim as sim_routes
 from claw_server.routes import system as system_routes
 from claw_server.routes import trim as trim_routes
+from claw_server.routes import world as world_routes
 from claw_server.store import ResultStore
 
 
@@ -110,6 +111,7 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
         codegen_routes.router,
         influence_routes.router,
         design_routes.router,
+        world_routes.router,
     ):
         app.include_router(router, prefix="/api")
 

@@ -58,17 +58,132 @@ const landingBody = (over = {}) => ({
   ...over,
 });
 
-test("landingSummary: 세 단계가 각각 한 줄 — 사출 하중은 미판정으로 나온다", () => {
+test("landingSummary: 각 단계가 한 줄 — 사출 하중은 미판정으로 나온다", () => {
   const rows = landingSummary(landingBody());
-  assert.deepEqual(rows.map((r) => r.label), ["레일 이탈", "접지", "정지"]);
-  assert.match(rows[0].note, /33\.9 g/);
-  assert.match(rows[0].note, /판정 불가/);
-  assert.equal(rows[0].unjudged, true, "판정 기준이 없으면 통과로 위장하지 않는다");
-  assert.match(rows[1].note, /강하율 -0\.98 m\/s/, "엔진이 잰 값을 그대로 표시한다");
-  assert.match(rows[1].note, /속도 79\.5 m\/s/);
-  assert.match(rows[2].note, /600 m/); // 300 → 900
-  assert.match(rows[2].note, /활주로 1500 m/);
-  assert.equal(rows[2].over, false);
+  // "접지 지점"은 접지 **뒤**, 정지 **앞**이다 — 접지 이야기가 붙어 있어야 읽힌다
+  assert.deepEqual(rows.map((r) => r.label),
+    ["레일 이탈", "접지", "접지 지점", "정지"]);
+  const by = (label) => rows.find((r) => r.label === label);
+  assert.match(by("레일 이탈").note, /33\.9 g/);
+  assert.match(by("레일 이탈").note, /판정 불가/);
+  assert.equal(by("레일 이탈").unjudged, true, "판정 기준이 없으면 통과로 위장하지 않는다");
+  assert.match(by("접지").note, /강하율 -0\.98 m\/s/, "엔진이 잰 값을 그대로 표시한다");
+  assert.match(by("접지").note, /속도 79\.5 m\/s/);
+  assert.match(by("정지").note, /600 m/); // 300 → 900
+  assert.match(by("정지").note, /활주로 1500 m/);
+  assert.equal(by("정지").over, false);
+});
+
+test("landingSummary: 접지 지점이 활주로 구간 밖이면 그렇게 말한다", () => {
+  // 기본 미션은 발사대에서 떠서 **7 km 북쪽**에 내린다. 접지→정지 거리만 길이와
+  // 견주면 "869 m / 활주로 1205 m"가 되어 활주로에 선 것처럼 읽힌다 — 실제로
+  // 그렇게 읽혔다. 축방향 위치를 함께 내야 그 착시가 없어진다.
+  const far = landingSummary(landingBody({
+    signals: { ...landingBody().signals, pn: [0, 100, 200, 7000, 7400, 7870] },
+  }));
+  const spot = far.find((r) => r.label === "접지 지점");
+  assert.ok(spot, "접지 지점 행이 없다");
+  assert.equal(spot.value, "활주로 축 +7,000 m"); // 구분자 포함 — ko-KR 고정
+  assert.equal(spot.over, true, "활주로 구간 밖인데 밖이라고 하지 않는다");
+  assert.match(spot.note, /구간\(0~1,500 m\) 밖이다/);
+  assert.equal(spot.overLabel, "활주로 밖");
+});
+
+test("landingSummary: 방위를 모르면 접지 지점 행이 없다 — 축을 지어내지 않는다", () => {
+  // 방위가 없으면 "활주로 축"이라는 축 자체가 없다. 0으로 메우면 방위를 알 때와
+  // 똑같은 확신으로 축방향 거리를 찍게 된다 — 이 파일의 "0으로 채우지 않는다" 규약 위반.
+  const rows = landingSummary(landingBody({
+    meta: { ...landingBody().meta, runway: { elevation: 0, length: 1500 } },
+  }));
+  assert.equal(rows.find((r) => r.label === "접지 지점"), undefined);
+  // 활주로 자체는 있으므로 "정지" 행의 길이 비교는 그대로 산다
+  assert.match(rows.find((r) => r.label === "정지").note, /활주로 1500 m/);
+});
+
+test("landingSummary: 길이가 0 이하면 접지 지점 행이 없다 — 항상 '밖'이 되지 않게", () => {
+  for (const length of [0, -100]) {
+    const rows = landingSummary(landingBody({
+      meta: { ...landingBody().meta, runway: { elevation: 0, heading: 0, length } },
+    }));
+    assert.equal(rows.find((r) => r.label === "접지 지점"), undefined, `length=${length}`);
+  }
+});
+
+test("landingSummary: 접지 위치가 결측이면 행이 없다", () => {
+  const rows = landingSummary(landingBody({
+    signals: { ...landingBody().signals, pn: [0, 100, 200, null, 700, 900] },
+  }));
+  assert.equal(rows.find((r) => r.label === "접지 지점"), undefined);
+});
+
+test("landingSummary: 횡편차가 길이를 넘으면 폭을 몰라도 밖이라고 단정한다", () => {
+  // 활주로가 자기 길이보다 넓을 수는 없다 — 축방향 하한과 같은 논법이다.
+  const wide = landingSummary(landingBody({
+    signals: {
+      ...landingBody().signals,
+      pn: [0, 100, 200, 300, 700, 900], pe: [0, 0, 0, 3000, 3000, 3000],
+    },
+  }));
+  const spot = wide.find((r) => r.label === "접지 지점");
+  assert.equal(spot.over, true, "횡편차 3000 m인데 판정 불가로 나온다");
+  assert.equal(spot.unjudged, undefined);
+  assert.equal(spot.overLabel, "활주로 밖");
+});
+
+test("landingSummary: 접지 지점은 10 m 단위 — 재생 표본이 그보다 성글다", () => {
+  // 재생 응답은 stride로 솎여 있어 표본 간격이 88 m/s × 0.14 s ≈ 12 m다.
+  // 1 m 단위로 찍으면 갖지 않은 분해능을 주장한다.
+  const rows = landingSummary(landingBody({
+    signals: { ...landingBody().signals, pn: [0, 100, 200, 7073, 7400, 7870] },
+  }));
+  const spot = rows.find((r) => r.label === "접지 지점");
+  assert.match(spot.value, /7,070 m/, "1 m 단위로 찍고 있다");
+});
+
+test("landingSummary: 시단 앞에 내린 것을 '활주로 초과'라 하지 않는다", () => {
+  const short = landingSummary(landingBody({
+    signals: { ...landingBody().signals, pn: [0, -100, -200, -300, -100, 100] },
+  }));
+  const spot = short.find((r) => r.label === "접지 지점");
+  assert.equal(spot.over, true);
+  assert.equal(spot.overLabel, "시단 못 미침");
+  const far = landingSummary(landingBody({
+    signals: { ...landingBody().signals, pn: [0, 100, 200, 7000, 7400, 7870] },
+  }));
+  assert.equal(far.find((r) => r.label === "접지 지점").overLabel, "활주로 밖");
+});
+
+test("landingSummary: 구간 안이어도 **통과로 말하지 않는다** — 폭을 모른다", () => {
+  // 축방향이 0~length 안이라는 것은 활주로에 내렸다는 뜻이 아니다. 활주로 폭이
+  // 결과 meta에 없으므로 횡편차를 판정할 수 없다 — 미판정이지 통과가 아니다.
+  const near = landingSummary(landingBody({
+    signals: { ...landingBody().signals, pn: [0, 100, 200, 300, 700, 900] },
+  }));
+  const spot = near.find((r) => r.label === "접지 지점");
+  assert.equal(spot.over, false);
+  assert.equal(spot.unjudged, true, "폭을 모르는데 통과로 말한다");
+  assert.match(spot.note, /폭/);
+});
+
+test("landingSummary: 활주로가 없으면 접지 지점 행도 없다", () => {
+  const rows = landingSummary(landingBody({
+    meta: { ...landingBody().meta, runway: undefined },
+  }));
+  assert.equal(rows.find((r) => r.label === "접지 지점"), undefined);
+});
+
+test("landingSummary: 축방향은 활주로 방위 기준이다 (정북이 아니라)", () => {
+  // 방위가 90°면 북쪽으로 간 거리는 축방향이 아니라 횡편차다
+  const east = landingSummary(landingBody({
+    signals: { ...landingBody().signals, pn: [0, 100, 200, 300, 700, 900] },
+    meta: {
+      ...landingBody().meta,
+      runway: { elevation: 0, heading: Math.PI / 2, length: 1500 },
+    },
+  }));
+  const spot = east.find((r) => r.label === "접지 지점");
+  assert.match(spot.value, /축 \+?0 m/);
+  assert.match(spot.note, /300 m/); // 횡편차로 나온다
 });
 
 test("landingSummary: 없는 단계는 **행 자체가 없다** (0으로 채우지 않는다)", () => {

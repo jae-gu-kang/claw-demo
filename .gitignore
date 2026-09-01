@@ -11,3 +11,9 @@ server_data/
 # dist-code/ 는 --code-only 모드의 출력 — 전체 꾸러미와 섞이지 않게 따로 쓴다.
 dist/
 dist-code/
+
+# 지형·영상 자산 — 코드(1 MB 미만)·의존성(수백 MB)과 변경 빈도가 또 다른 **세 번째 꾸러미**다
+# (docs/deploy-airgap.md의 분리 원칙과 같은 사유). raw/는 내려받은 원본 타일 캐시,
+# *.bin은 scripts/terrain/build_terrain.py가 구운 팩 — 둘 다 재생성 가능하므로 커밋하지 않는다.
+data/geo/raw/
+data/geo/*.bin

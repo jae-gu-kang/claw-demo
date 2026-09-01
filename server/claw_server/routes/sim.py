@@ -140,17 +140,57 @@ def build_gain_tables(spec: dict | None) -> dict | None:
     return out
 
 
+class OriginIn(BaseModel):
+    """NED 원점의 측지 좌표 — 지형·배경지도·3D 월드의 등록(registration) 기준.
+
+    **엔진은 이 값을 보지 않는다.** 동역학은 종전대로 평면지구 NED이고, 이것은 "그 평면이
+    지구 어디에 놓였는가"를 적은 등록 정보다 — 지형 자산 정합·타일 조회·좌표 표시가
+    소비자이며, 결과 meta에 실려 저장된 결과만으로 지도를 다시 그릴 수 있게 한다
+    (meta["waypoints"]·["runway"]와 같은 "기준선은 결과와 함께 다닌다" 규약).
+
+    **활주로가 아니라 최상위에 두는 이유**: 원점은 활주로 없이도 필요하다. 발사 레일만
+    켜는 구성이 가능하고(runway·launch 토글은 독립), 지면 없는 회귀 미션도 지도 위에
+    그릴 수 있어야 한다. 활주로 토글 하나가 "스키드가 달린다"와 "배경지도가 나온다"
+    두 뜻을 갖게 되는 것도 피한다.
+
+    **수직 기준은 갖지 않는다.** 이 리포의 h는 이미 MSL 절대고도라(common/contracts.py)
+    D축과 해면 사이에 오프셋이 없다. 곡률반경을 평가할 기준 고도만 활주로 표고에서
+    빌려 쓰고, **무엇을 썼는지 meta가 밝힌다**(h_ref_src) — 그 값이 모호하면 원점에서
+    20 km 떨어진 곳의 1.6 m 어긋남을 나중에 설명할 수 없다.
+
+    기본값을 두지 않는 것도 의도다. 특정 시험장 좌표를 서버 기본값으로 박으면 원점을
+    주지 않은 미션이 **조용히 그 시험장 것이 된다**. 기본값 제안은 화면이 한다.
+    """
+
+    # 경계(입출력)이므로 deg 허용 — 내부 계산은 rad (규약 §3).
+    #
+    # 상한이 ±90이 아니라 **±89**인 것은 소비자와 맞추기 위해서다: 국지 접평면 근사는
+    # 극 근방에서 동서 스케일이 발산해 `claw.env.geodesy`와 웹 `lib/geo.js`가 둘 다
+    # |lat| > 89를 거부한다. 여기서 90까지 받아 주면 그 값이 결과 meta에 저장됐다가
+    # 나중에 지도·지형을 붙이는 순간 **렌더 루프 안에서** 예외가 되는데, origin은 엔진에
+    # 넘어가지 않아 "엔진 ValueError → 422" 경로로도 잡히지 않는다. 제출 시점에 막는다.
+    lat: FiniteFloat = Field(ge=-89.0, le=89.0)
+    lon: FiniteFloat = Field(ge=-180.0, le=180.0)
+    datum: Literal["wgs84"] = "wgs84"
+
+
 class RunwayIn(BaseModel):
     """활주로 — 지면은 표고 하나짜리 평면이다(지형·파고 미모델, 01 §2.5 [TBD]).
 
     **이 블록이 있으면 기체에 스키드가 달린다.** 없으면 지면 자체가 없어서
     도입 전과 완전히 같이 동작한다(기체가 h<0을 그대로 통과한다).
-    heading·length는 엔진이 소비하지 않고 결과 meta에 실려 화면이 활주로를 그리고
-    "활주로 안에 섰는가"를 판정하는 데 쓴다 — 기준선은 결과와 함께 다닌다.
+    heading·length는 엔진이 소비하지 않고 결과 meta에 실려 화면이 활주로를 그리는 데
+    쓴다 — 기준선은 결과와 함께 다닌다. 다만 화면의 착륙 요약(lib/replay.js
+    landingSummary)은 접지→정지 **거리**만 length와 견주고 접지 **위치**는 보지
+    않는다. 즉 "활주로에 섰는가"는 아직 아무도 판정하지 않는다.
     """
 
     elevation: FiniteFloat = 0.0  # [m] 지면 표고 — 기준면 감시도 이 값이 된다
     heading: FiniteFloat = 0.0  # [rad] 활주로 방위 (표시·판정용)
+    # 기본 1500은 **어느 실제 활주로도 아니다** — 엔진 실측 미끄럼 870 m에 접지점
+    # 산포 여유를 얹은 일반 데모값이다. 특정 시험장 제원을 서버 기본값으로 박지 않는
+    # 것은 위 OriginIn과 같은 이유다(길이를 생략한 요청이 조용히 그 시험장 것이 된다).
+    # 고흥 실측 1,205 m는 웹 폼이 제안한다(web/js/lib/site.js ← goheung-runway.json).
     length: float = Field(default=1500.0, gt=0.0, allow_inf_nan=False)  # [m] (표시·판정용)
 
 
@@ -187,6 +227,8 @@ class SimRunIn(BaseModel):
     t_end: float = Field(gt=0.0, le=3600.0)  # 상한 = 메모리 가드 [기본값]
     dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
     control_hz: float = Field(default=100.0, gt=0.0, allow_inf_nan=False)
+    # NED 원점의 측지 좌표 — 엔진에 넘기지 않고 결과 meta에만 실린다(OriginIn 참조).
+    origin: OriginIn | None = None
     # 활주로가 있으면 스키드 장착 + 기준면이 표고가 된다. 없으면 지면 없음(종전 동작).
     runway: RunwayIn | None = None
     launch: LaunchIn | None = None  # 발사 레일 — 있으면 레일 위 정지에서 출발
@@ -384,6 +426,12 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
             None if req.waypoints is None
             else [[float(v) for v in w] for w in req.waypoints]
         )
+        # 도달 반경도 같이 — 이것이 없으면 재생 화면이 웨이포인트 포획원을 그릴 수 없고,
+        # 그리려면 미션 스펙을 따로 들고 와야 한다(웨이포인트 동봉과 같은 사유).
+        # 경로가 없으면 반경도 뜻이 없으므로 None이다.
+        payload["meta"]["accept_radius"] = (
+            None if req.waypoints is None else float(req.accept_radius)
+        )
         # 활주로·발사대도 같은 이유로 동봉한다 — 화면이 활주로 띠와 레일을 그리고
         # "활주로 안에 섰는가"를 판정하려면 그 기하가 결과와 함께 다녀야 한다.
         # 엔진이 소비하지 않는 heading·length도 여기 실려야 재생 화면이 그릴 수 있다.
@@ -392,6 +440,33 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
         )
         payload["meta"]["launch"] = (
             None if req.launch is None else req.launch.model_dump()
+        )
+        # 기체 형상 치수 — 3D 월드가 기체를 그리려면 실제 기준량이 필요하다.
+        #
+        # 이것을 화면이 상수로 들고 있으면 안 된다(§5.5 "엔진 기본값 재기술 금지"). 데모
+        # 기체는 스팬 2.5 m·MAC 1.5 m·S 3.0 m²의 **엘레본 4면 델타**인데, 화면이 임의로
+        # 여객기 모양을 그리면 기체를 잘못 말하는 것이 된다. 접촉점까지 실어야 착륙 장면의
+        # 스키드가 실제 위치(CG 기준 x·y ±0.6 m, 0.55 m 아래)에 붙는다.
+        aero = sim.aircraft.aero
+        gear = sim.aircraft.ground
+        payload["meta"]["geometry"] = {
+            "s_ref": float(aero.S), "cbar": float(aero.cbar), "b": float(aero.b),
+            "gear_contacts": (
+                None if gear is None
+                else [[float(v) for v in row] for row in gear.contacts]
+            ),
+        }
+        # 측지 원점 — 이것이 있어야 저장된 결과만으로 궤적을 실제 지도 위에 얹을 수 있다.
+        # h_ref는 곡률반경 평가용 기준 고도이고 수직 원점이 아니다(OriginIn 참조).
+        # 출처를 함께 적는 이유: 어느 값을 썼는지 모호하면 원점에서 20 km 떨어진 지점의
+        # 1.6 m 어긋남(h_ref 500 m / R 6.37e6 = 7.8e-5)을 나중에 설명할 수 없다.
+        payload["meta"]["origin"] = (
+            None if req.origin is None
+            else {
+                **req.origin.model_dump(),
+                "h_ref": req.runway.elevation if req.runway else 0.0,
+                "h_ref_src": "runway.elevation" if req.runway else "default 0",
+            }
         )
         store.save(
             job.id,

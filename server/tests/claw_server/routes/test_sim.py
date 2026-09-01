@@ -502,3 +502,91 @@ def test_nav_grade_picks_rtk_without_the_web_restating_numbers():
     over, _ = _build(SimRunIn(**_landing_mission(
         nav_grade="rtk", nav={"seed": 5, "pos_std_v": 0.5})))
     assert over.nav_model.pos_std_v == 0.5
+
+
+def test_sim_meta에_측지_원점이_동봉된다(client, wait_job):
+    """저장된 결과만으로 궤적을 실제 지도 위에 얹으려면 원점이 함께 다녀야 한다.
+
+    웨이포인트·활주로와 같은 "기준선은 결과와 함께 다닌다" 규약이다. 원점 없이 저장된
+    결과는 나중에 어느 지점의 비행이었는지 알 방법이 없고, 그때 추정 원점을 끼워 넣으면
+    화면이 지어낸 좌표를 사실처럼 그린다.
+    """
+    origin = {"lat": 34.6, "lon": 127.2}
+    j = wait_job(
+        client.post("/api/sim/run", json=_hold_mission(t_end=2.0, origin=origin))
+        .json()["id"],
+        timeout=120.0,
+    )
+    meta = client.get(f"/api/results/{j['result_id']}").json()["meta"]
+    assert meta["origin"]["lat"] == 34.6
+    assert meta["origin"]["lon"] == 127.2
+    assert meta["origin"]["datum"] == "wgs84"
+    # 활주로가 없으면 곡률반경 기준 고도는 0이고, **그 사실을 출처로 밝힌다**
+    assert meta["origin"]["h_ref"] == 0.0
+    assert meta["origin"]["h_ref_src"] == "default 0"
+
+
+def test_원점_없는_미션은_meta에_None을_남긴다(client, wait_job):
+    """"원점 미지정"과 "적도 본초자오선"은 다른 사실이다 — 0,0으로 위장하지 않는다."""
+    j = wait_job(
+        client.post("/api/sim/run", json=_hold_mission(t_end=2.0)).json()["id"],
+        timeout=120.0,
+    )
+    assert client.get(f"/api/results/{j['result_id']}").json()["meta"]["origin"] is None
+
+
+def test_활주로가_있으면_원점의_기준고도가_활주로_표고다(client, wait_job):
+    """곡률반경 평가에 쓴 고도가 무엇이었는지 결과가 밝혀야 한다.
+
+    h_ref 500 m는 곡률반경을 7.8e-5만큼 바꾸고 원점 20 km 지점에서 1.6 m 어긋난다 —
+    나중에 그 어긋남을 설명하려면 어느 값을 썼는지가 결과에 남아 있어야 한다.
+    """
+    j = wait_job(
+        client.post("/api/sim/run", json=_hold_mission(
+            t_end=2.0, origin={"lat": 34.6, "lon": 127.2},
+            runway={"elevation": 12.5, "heading": 0.0, "length": 1200.0},
+        )).json()["id"],
+        timeout=120.0,
+    )
+    origin = client.get(f"/api/results/{j['result_id']}").json()["meta"]["origin"]
+    assert origin["h_ref"] == 12.5
+    assert origin["h_ref_src"] == "runway.elevation"
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        {"lat": 91.0, "lon": 127.2},
+        {"lat": -91.0, "lon": 127.2},
+        # 극 근방 — 국지 접평면 근사가 성립하지 않는 구간(geodesy가 |lat| > 89를 거부).
+        # 여기서 받아 주면 저장된 뒤 지도 계층에서 터진다.
+        {"lat": 89.5, "lon": 127.2},
+        {"lat": -89.5, "lon": 127.2},
+        {"lat": 34.6, "lon": 181.0},
+        {"lat": 34.6, "lon": -181.0},
+        {"lat": 34.6},  # lon 누락 — 반쪽 원점은 원점이 아니다
+        {"lat": 34.6, "lon": 127.2, "datum": "bessel"},  # 미지원 측지계
+    ],
+)
+def test_범위_밖_원점은_422로_거부된다(client, origin):
+    """지도 등록 기준이 말이 안 되면 제출 시점에 막는다 — 조용히 감싸 돌지 않는다."""
+    r = client.post("/api/sim/run", json=_hold_mission(t_end=2.0, origin=origin))
+    assert r.status_code == 422
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity"])
+def test_비유한_원점_리터럴은_422로_거부된다(client, bad):
+    """JSON 파서는 NaN·Infinity 리터럴을 받아 주지만 FiniteFloat이 경계에서 막는다.
+
+    통과시키면 지도 등록이 조용히 무의미해지는 데다, 저장 시점 allow_nan=False에서
+    결과 인코딩이 통째로 죽는다 (routes/trim.py FiniteFloat 도입 사유와 같다).
+    """
+    import json as _json
+
+    mission = _hold_mission(t_end=2.0)
+    mission["origin"] = {"lat": 34.6, "lon": 127.2}
+    raw = _json.dumps(mission).replace('"lon": 127.2', f'"lon": {bad}')
+    r = client.post(
+        "/api/sim/run", content=raw, headers={"content-type": "application/json"}
+    )
+    assert r.status_code == 422
