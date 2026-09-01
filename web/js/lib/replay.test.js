@@ -106,6 +106,23 @@ test("landingSummary: 활주로를 넘어서면 그 사실을 말한다", () => 
   assert.match(stop.note, /넘어섰다/);
 });
 
+test("landingSummary: 어느 행에도 마크다운이 없다 — 문자열이 그대로 화면에 나간다", () => {
+  // label·value·note·overLabel은 전부 **텍스트 노드**로 들어간다(views/sim.js —
+  // label은 el("b"), overLabel은 flagBadge → el("span")). 그래서 `**강조**`를 적으면
+  // 별표째 찍힌다. 실제로 정지 행의 `**넘어섰다**`가 그렇게 나가고 있었는데,
+  // 위 시나리오 테스트의 `/넘어섰다/`가 **부분 일치**라 별표 안쪽을 그냥 통과시켰다.
+  //
+  // 이 단정을 그 시나리오 테스트 안에 두면 안 된다 — 거기는 launch_exit_t가 null이라
+  // **레일 이탈 행이 아예 안 생기고**, 접지·접지 지점 행도 분기 하나씩만 탄다.
+  // 네 행이 다 나오는 기본 본문으로 따로 세워야 전 문구를 덮는다 (리뷰 지적).
+  const rows = landingSummary(landingBody());
+  assert.ok(rows.length >= 3, "행이 안 생기면 아무것도 검사하지 못한다");
+  for (const r of rows) {
+    const text = [r.label, r.value, r.note, r.overLabel].filter(Boolean).join(" ");
+    assert.doesNotMatch(text, /\*\*|`|<[a-z]/i, `${r.label}: 마크다운·마크업 잔재`);
+  }
+});
+
 test("landingSummary: 강하율이 없으면 '미계측' — 0으로 눙치지 않는다", () => {
   const rows = landingSummary(landingBody({
     meta: { phases: {

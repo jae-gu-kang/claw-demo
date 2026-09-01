@@ -105,7 +105,9 @@ export function landingSummary(body) {
       value: `${ph.stop_t.toFixed(2)} s`,
       note: `접지→정지 직선거리 ${Math.round(dist)} m`
         + (typeof rw === "number"
-          ? ` / 활주로 ${Math.round(rw)} m${dist > rw ? " — **넘어섰다**" : ""}` : ""),
+          // 마크다운 **는 여기서 글자 그대로 나온다 — note는 텍스트 노드로 들어간다
+          // (views/sim.js). 강조는 이 행이 이미 내는 over 배지가 맡는다
+          ? ` / 활주로 ${Math.round(rw)} m${dist > rw ? " — 넘어섰다" : ""}` : ""),
       over: typeof rw === "number" && dist > rw,
     });
   }
