@@ -224,7 +224,9 @@ for sx, side in ((1.0, "R"), (-1.0, "L")):
             rings.append([(lx, -0.006, 0.012), (lx, -0.190, 0.002),
                           (lx, -0.190, -0.002), (lx, -0.006, -0.012)])
         loft(bm, rings)
-        ob = finish_bm("Elevon.%s.%s" % (seg, side), bm, [MAT_CTRL], col_model)
+        # 밑줄 이름 — glTF/three.js는 노드 이름의 점(.)을 지운다. 밑줄은 보존되므로
+        # Blender와 three.js에서 같은 이름(Elevon_In_L …)으로 조회된다.
+        ob = finish_bm("Elevon_%s_%s" % (seg, side), bm, [MAT_CTRL], col_model)
         ob.location = (sx * xc, -1.262, WING_ZC)      # 원점 = 힌지선 위
         elevons[seg + side] = ob
 
@@ -237,7 +239,7 @@ for sx, tag in ((1.0, "R"), (-1.0, "L")):
     x0, x1 = sorted((sx * 1.228, sx * 1.252))
     loft(bm, [[(x0, y, WING_ZC + z) for y, z in FIN_PENT],
               [(x1, y, WING_ZC + z) for y, z in FIN_PENT]])
-    fin = finish_bm("Fin." + tag, bm, [MAT_AIRFRAME], col_model)
+    fin = finish_bm("Fin_" + tag, bm, [MAT_AIRFRAME], col_model)
 
     # 러더 자리 절개 — 힌지선 y = -1.383
     bm = bmesh.new()
@@ -260,7 +262,7 @@ for sx, tag in ((1.0, "R"), (-1.0, "L")):
         rings.append([(0.010, -0.006, lz), (0.002, -0.131, lz),
                       (-0.002, -0.131, lz), (-0.010, -0.006, lz)])
     loft(bm, rings)
-    ob = finish_bm("Rudder." + tag, bm, [MAT_CTRL], col_model)
+    ob = finish_bm("Rudder_" + tag, bm, [MAT_CTRL], col_model)
     ob.location = (sx * 1.24, -1.383, WING_ZC + 0.07)
     rudders[tag] = ob
 
@@ -436,16 +438,7 @@ scene.frame_set(1)
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT_DIR, "shahed136.blend"))
 print("[gen] saved shahed136.blend")
 
-try:
-    for ob in bpy.data.objects:
-        ob.select_set(ob.name in {o.name for o in col_model.objects})
-    bpy.ops.export_scene.gltf(filepath=os.path.join(OUT_DIR, "shahed136.glb"),
-                              export_format='GLB', use_selection=True,
-                              export_animations=False)
-    print("[gen] exported shahed136.glb")
-except Exception as exc:
-    print("[gen] glb export skipped:", exc)
-
+# 미리보기 렌더는 드라이버 리그가 온전한 상태에서 먼저 (GLB 베이크가 in-메모리 리그를 바꾸므로)
 if os.environ.get("SHAHED_SKIP_RENDER") != "1":
     scene.frame_set(114)                        # 엘레본 차동 + 러더 변위가 보이는 프레임
     scene.render.filepath = os.path.join(OUT_DIR, "preview.png")
@@ -454,5 +447,57 @@ if os.environ.get("SHAHED_SKIP_RENDER") != "1":
         print("[gen] rendered preview.png")
     except Exception as exc:
         print("[gen] render failed:", exc)
+
+
+# ---------------------------------------------------------------- three.js용 GLB 내보내기
+# three.js(GLTFLoader)는 블렌더의 드라이버·커스텀 프로퍼티를 실행하지 않는다. 그래서
+#   (1) 각 타면의 드라이버 모션을 프레임별로 샘플해 rotation_euler 키프레임으로 굽고
+#       (노드 피벗은 힌지선 그대로 → three.js에서 코드로 직접 회전 가능),
+#   (2) 데모 동작을 glTF 애니메이션 트랙으로 내보낸다(AnimationMixer로 바로 재생).
+# 이 베이크는 이미 저장된 .blend가 아니라 in-메모리 상태만 바꾼다(스크립트 종료 시 폐기).
+def export_threejs_glb(path):
+    ctrl = [elevons["InL"], elevons["OutL"], elevons["InR"], elevons["OutR"],
+            rudders["L"], rudders["R"], prop]
+
+    frames = range(scene.frame_start, scene.frame_end + 1)
+    samples = {ob: [] for ob in ctrl}           # 드라이버 결과를 먼저 샘플
+    for f in frames:
+        scene.frame_set(f)
+        dg = bpy.context.evaluated_depsgraph_get()
+        for ob in ctrl:
+            samples[ob].append((f, tuple(ob.evaluated_get(dg).rotation_euler)))
+
+    for ob in ctrl:                             # 드라이버·컨스트레인트 제거 → 베이크 키프레임이 정본
+        if ob.animation_data:
+            for d in list(ob.animation_data.drivers):
+                ob.animation_data.drivers.remove(d)
+        for c in list(ob.constraints):
+            ob.constraints.remove(c)
+    if root.animation_data:                     # 루트 커스텀 프로퍼티 데모 액션은 glTF로 안 나가므로 정리
+        root.animation_data_clear()
+
+    for ob, seq in samples.items():             # 샘플값을 명시 키프레임으로
+        for f, rot in seq:
+            ob.rotation_euler = rot
+            ob.keyframe_insert("rotation_euler", frame=f)
+
+    for ob in bpy.data.objects:
+        ob.select_set(ob.name in {o.name for o in col_model.objects})
+
+    common = dict(filepath=path, export_format='GLB', use_selection=True,
+                  export_animations=True, export_frame_range=True,
+                  export_apply=False, export_yup=True)
+    try:                                        # 씬 전체를 단일 클립으로 (three.js에 이상적)
+        bpy.ops.export_scene.gltf(export_animation_mode='SCENE',
+                                  export_anim_scene_split_object=False, **common)
+    except TypeError:                           # 구버전 폴백
+        bpy.ops.export_scene.gltf(**common)
+    print("[gen] exported shahed136.glb (three.js: rigged nodes + baked clip)")
+
+
+try:
+    export_threejs_glb(os.path.join(OUT_DIR, "shahed136.glb"))
+except Exception as exc:
+    print("[gen] glb export skipped:", exc)
 
 print("[gen] done. objects:", sorted(o.name for o in col_model.objects))
