@@ -96,7 +96,7 @@ else
   bad "find-links 흔적 없음 — --offline 이 실제로 걸리지 않았을 수 있습니다"
 fi
 
-# --- 4. 테스트 4종 ----------------------------------------------------------
+# --- 4. 테스트 6종 ----------------------------------------------------------
 step "4/6 테스트"
 run_suite() { # 이름, 디렉터리, 명령…
   local name="$1" dir="$2"; shift 2
@@ -106,9 +106,20 @@ run_suite() { # 이름, 디렉터리, 명령…
   if (cd "$dir" && "$@" > "$WORK/$name.log" 2>&1); then
     # || true 필수 — pipefail 아래서 grep이 못 찾으면(예: skip이 없는 스위트) 1을
     # 반환하고, 그 대입이 set -e에 걸려 리허설 전체가 여기서 조용히 끝난다.
-    local n s
+    local n s count
     n="$(grep -oE '([0-9]+ passed|pass [0-9]+)' "$WORK/$name.log" | tail -1 || true)"
     s="$(grep -oE '[0-9]+ skipped' "$WORK/$name.log" | tail -1 || true)"
+    # **0건은 실패로 친다.** `node --test`는 글로브가 하나도 안 맞으면 `pass 0`을 찍고
+    # **종료코드 0**으로 끝난다(실측). 그러면 이 함수가 "OK world — pass 0"을 찍고
+    # 리허설이 통과하는데, 그건 정확히 이 게이트가 막으려던 상태다 — 파일을 옮기거나
+    # 확장자를 바꾸거나 번들에서 src/가 빠지면 전부 이 모양이 된다.
+    # (pytest는 수집 0에서 종료코드 5라 위 if에서 이미 걸린다.)
+    count="$(printf '%s' "$n" | grep -oE '[0-9]+' | tail -1 || true)"
+    if [ -z "$count" ] || [ "$count" -eq 0 ]; then
+      bad "$name — 통과 건수가 0입니다 (테스트를 하나도 못 찾았을 수 있습니다)"
+      tail -15 "$WORK/$name.log" | sed 's/^/    /'
+      return
+    fi
     ok "$name — $n${s:+ · $s}"
   else
     bad "$name"
@@ -118,11 +129,15 @@ run_suite() { # 이름, 디렉터리, 명령…
 run_suite engine "$REPO/engine" "$VPY" -m pytest -q
 run_suite server "$REPO/server" "$VPY" -m pytest -q
 run_suite flight "$REPO/flight" "$VPY" -m pytest -q   # cc 없으면 2건 skip
+run_suite models "$REPO" "$VPY" -m pytest -q models   # 모델 생성 스크립트 유틸 (블렌더 불요)
 
 if command -v node >/dev/null 2>&1; then
   run_suite web "$REPO/web" node --test "js/**/*.test.js"
+  # **가상환경 탭은 별도 스위트다.** 위 글로브는 `web/js/**`만 훑어 `web/world/src`에
+  # 닿지 못한다 — 안 걸어 두면 그 테스트들이 한 번도 안 돌면서 위 줄이 초록을 보고한다.
+  run_suite world "$REPO/web/world" node --test "src/**/*.test.ts"
 else
-  echo "  건너뜀 web — node 없음 (구동에는 불필요, 대상 서버에도 없어도 됩니다)"
+  echo "  건너뜀 web·world — node 없음 (구동에는 불필요, 대상 서버에도 없어도 됩니다)"
 fi
 
 # --- 5. 기동 ---------------------------------------------------------------

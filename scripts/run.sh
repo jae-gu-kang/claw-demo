@@ -49,7 +49,14 @@ PORT="${PORT:-8000}"
 EXTRA=()
 for a in "$@"; do
   if [ "$a" = "--reload" ]; then
-    EXTRA=(--reload-dir engine --reload-dir server --reload-dir web)
+    # **web/ 은 감시하지 않는다.** uvicorn의 리로드 필터는 includes가 `['*.py']`뿐이라
+    # web/ 아래 파일은 애초에 재시작을 못 일으킨다(실측). 즉 감시해도 얻는 게 없다.
+    # 그런데 web/world/node_modules가 생기면서 web/ 아래 디렉터리가 13 → 490개,
+    # 감시 대상 전체가 **71 → 548개**가 됐고(실측), watchfiles는 uvicorn이
+    # `watch_filter=None`으로 부르므로 전부 걷는다 —
+    # `--reload-exclude`는 이벤트를 거를 뿐 순회를 줄이지 못한다. 위 주석이 경계한
+    # inotify 한도가 정확히 이 자리다.
+    EXTRA=(--reload-dir engine --reload-dir server)
     break
   fi
 done

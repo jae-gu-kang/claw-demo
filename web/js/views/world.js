@@ -182,10 +182,18 @@ async function boot(root) {
     // 나중에 도착해 이긴다. 그러면 state.body는 A인데 선택칸·캡션·판독부는 B를 말한다.
     const gen = ++state.loadGen;
     caption.textContent = "결과를 불러오는 중…";
-    const head = await api.get(`/results/${id}`);
-    if (gen !== state.loadGen || abandoned()) return;
-    const body = await api.get(
-      `/sim/${id}/replay?stride=${strideFor(head.n_total ?? head.t.length)}`);
+    // 표본 수는 **목록이 이미 들고 있다**(`/results`의 `n`). 예전에는 `/results/{id}`를
+    // 먼저 받아 `n_total` 하나를 읽었는데, 그 응답이 결과 **전체**라 실측 10~26 MB를
+    // 내려받아 서버가 파싱하고 버렸다. 무료 티어 512 MB에서 가장 유력한 OOM 경로였다.
+    let n = results.find((m) => m.id === id)?.n;
+    if (!Number.isFinite(n) || n <= 0) {
+      // 목록에 표본 수가 없는 결과(손상되었거나 아주 옛 meta) — 그때만 예전 경로로
+      // 물러난다. 조용히 stride 1로 받으면 그게 곧 예전의 그 26 MB다.
+      const head = await api.get(`/results/${id}`);
+      if (gen !== state.loadGen || abandoned()) return;
+      n = head.n_total ?? head.t?.length ?? 1;
+    }
+    const body = await api.get(`/sim/${id}/replay?stride=${strideFor(n)}`);
     if (gen !== state.loadGen || abandoned()) return;
     state.body = body;
     state.n = body.t.length;
