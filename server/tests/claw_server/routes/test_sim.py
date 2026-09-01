@@ -418,8 +418,9 @@ def test_landing_mission_runs_over_http(client, wait_job):
     # 단계 시각 — 없으면 화면이 "언제 접지했나"를 말할 수 없다
     ph = body["meta"]["phases"]
     assert ph["launch_exit_t"] == pytest.approx(0.245, abs=0.001)
-    assert ph["touchdown_t"] == pytest.approx(110.1, abs=2.0)
-    assert ph["stop_t"] == pytest.approx(132.8, abs=3.0)
+    # 엔진 test_landing과 같은 값 — 동압 스케줄 상한을 2.0으로 내리며 앞당겨졌다
+    assert ph["touchdown_t"] == pytest.approx(107.3, abs=2.0)
+    assert ph["stop_t"] == pytest.approx(129.9, abs=3.0)
 
     # 기준선은 결과와 함께 다닌다 — 엔진이 소비하지 않는 heading·length도 실려야
     # 재생 화면이 활주로 띠를 그린다 (웨이포인트 동봉과 같은 규약)

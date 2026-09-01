@@ -293,6 +293,69 @@ def test_mode_alt_path_selects_the_path_altitude():
     assert g2.step(_nav(n=0.0, e=0.0, h=500.0)).alt == pytest.approx(300.0)
 
 
+def test_alt_axis_engagement_reanchors_the_ramp_where_the_aircraft_is():
+    """고도 축이 경로를 **잡는 순간** 구간 램프를 그 자리에서 다시 긋는다.
+
+    첫 스텝 자리에 램프를 박아 두면 지상 출발에서 그 자리는 발사대(h≈1.2 m)다.
+    고도 축은 한참 뒤 순항에서야 경로를 잡는데, 그때까지 기체가 250 m를 올라와도
+    램프는 여전히 지상에서 재어져 **한참 아래**를 명령한다 — 고도 루프는 그것을
+    급강하 지령으로 읽는다. 여기서 못박는 것은 그 재기준이다.
+
+    수치: 첫 구간 (0,0,1.2)→(10000,0,300), 도달반경 300 → 유효 램프 9700 m.
+    기체가 (2000, 0, 250)에 있을 때 옛 규약이면 rem 8000에서
+    1.2 + 298.8·(1 − 7700/9700) = 62.8 m — 실제 고도보다 187 m 낮다.
+    재기준 후에는 그 자리가 곧 램프의 시작이라 첫 명령이 250 m다.
+    """
+    path = LosPath(waypoints=((10000.0, 0.0, 300.0),), accept_radius=300.0)
+    modes = [
+        ModeSpec(name="climb", speed=110.0, pitch=0.36, heading=0.0,
+                 exit_when=("alt_ge", 250.0), next="cruise"),
+        _hold_forever(name="cruise", speed=88.0, alt="path", heading="path"),
+    ]
+    g = Guidance(modes, path=path).init(DT)
+    # 지상에서 출발 — 고도 축은 아직 경로를 안 잡는다 (피치 축 구간)
+    cmd = g.step(_nav(t=0.0, n=0.0, e=0.0, h=1.2))
+    assert cmd.mode == "climb" and not cmd.alt_on
+    # 2 km 북쪽·250 m에서 순항 진입 → 여기서부터 램프를 다시 긋는다
+    g.step(_nav(t=20.0, n=2000.0, e=0.0, h=250.0))  # 이 스텝에 전환 (명령은 다음 스텝)
+    cmd = g.step(_nav(t=20.01, n=2000.0, e=0.0, h=250.0))
+    assert cmd.mode == "cruise" and cmd.alt_on
+    assert cmd.alt == pytest.approx(250.0, abs=1.0), "재기준 없으면 62.8 m가 나온다"
+    # 램프는 여기서 목표까지 — 남은 8000 m의 절반쯤에서 중간 고도
+    # 유효 구간 8000−300 = 7700, rem 4150 → frac = 1 − 3850/7700 = 0.5
+    cmd = g.step(_nav(t=60.0, n=5850.0, e=0.0, h=280.0))
+    assert cmd.alt == pytest.approx(275.0, abs=1.0)  # 250↔300의 중간
+    # **진입 때 한 번만** 긋는다 — 매 스텝 다시 그으면 frac이 늘 0이라 명령이 현재
+    # 고도에 얼어붙고, 세로 경로추종이 "지금 고도 유지"로 조용히 무너진다(리뷰 실측:
+    # 선회 미션 순항 고도대가 250→525 m 상승에서 241→278 m 제자리로 붕괴). 위 단정만
+    # 으로는 그 변이가 안 잡힌다 — begin_alt_leg가 path.step **뒤**에 불려 한 스텝
+    # 늦게 드러나기 때문이다. 같은 자리를 한 번 더 밟아 그 차이를 본다
+    assert g.step(_nav(t=60.01, n=5850.0, e=0.0, h=280.0)).alt == pytest.approx(275.0, abs=1.0)
+
+
+def test_alt_axis_reengagement_reanchors_again():
+    """껐다 켜면 **그때마다** 다시 긋는다 — 재진입은 곧 재계획이다.
+
+    한 번만 긋고 마는 규약이면, 중간에 수치 고도로 빠졌다 돌아온 미션이 옛
+    시작점을 계속 들고 있어 같은 낙차가 되살아난다.
+    """
+    path = LosPath(waypoints=((10000.0, 0.0, 1000.0),), accept_radius=100.0)
+    modes = [
+        ModeSpec(name="a", alt="path", exit_when=("alt_ge", 400.0), next="b"),
+        ModeSpec(name="b", alt=500.0, exit_when=("alt_ge", 600.0), next="c"),
+        _hold_forever(name="c", alt="path"),
+    ]
+    g = Guidance(modes, path=path).init(DT)
+    g.step(_nav(t=0.0, n=0.0, h=300.0))          # a — (0,0,300)에서 램프 시작
+    g.step(_nav(t=1.0, n=100.0, h=450.0))        # a→b 전환
+    assert g.step(_nav(t=2.0, n=200.0, h=520.0)).alt == pytest.approx(500.0)  # b는 수치
+    g.step(_nav(t=3.0, n=300.0, h=650.0))        # b→c 전환 (여기서 다시 긋는다)
+    cmd = g.step(_nav(t=3.01, n=300.0, h=650.0))
+    assert cmd.mode == "c"
+    # 재기준했으면 (300, 650)에서 시작 → 첫 명령이 650. 안 했으면 300에서 재어진 값
+    assert cmd.alt == pytest.approx(650.0, abs=1.0)
+
+
 def test_mode_alt_path_without_usable_path_is_rejected_loudly():
     """경로가 없거나 고도가 없는데 alt="path"면 구성 시점 거부.
 

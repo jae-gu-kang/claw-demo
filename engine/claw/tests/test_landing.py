@@ -6,9 +6,10 @@
 그때의 실측 수치다.
 
 전제 하나를 명시한다 — **RTK 고정해**. 다만 그 이유는 처음 적었던 것과 다르다:
-실측해 보니 접지 강하율은 항법 등급과 거의 무관하고(σ 0.07로 동일), 갈리는 것은
-**접지 지점**이다 — 기본 GNSS 874 m 폭, RTK 92 m 폭. 활주로가 1,500 m이므로
-그 산포가 곧 "활주로에 내리느냐"를 가른다.
+실측해 보니 접지 강하율은 항법 등급과 거의 무관하고, 갈리는 것은
+**접지 지점**이다 — 기본 GNSS 512 m 폭, RTK 12 m 폭. 활주로가 1,500 m이므로
+그 산포가 곧 "활주로에 내리느냐"를 가른다. (두 수치는 동압 스케줄 상한을 2.0으로
+내리면서 874 / 92 m에서 함께 좁아졌다 — 아래 테스트 독스트링에 경위가 있다.)
 test_rtk_buys_a_repeatable_touchdown_point_not_a_softer_one이 그 대비를 담는다.
 """
 
@@ -20,6 +21,7 @@ import pytest
 from claw.common.contracts import TrimCase
 from claw.fcl import make_demo_fcl
 from claw.guidance import Guidance, ModeSpec
+from claw.guidance.path import LosPath
 from claw.nav import NavErrorModel
 from claw.pipeline.metrics import climb_rate
 from claw.plant import (
@@ -102,8 +104,11 @@ def test_phase_times_are_recorded(landed):
     """이탈·접지·정지 시각 — 실측 회귀. 셋 다 None이 아니어야 '착륙했다'가 성립한다."""
     ph = landed.meta["phases"]
     assert ph["launch_exit_t"] == pytest.approx(0.245, abs=0.001)
-    assert ph["touchdown_t"] == pytest.approx(110.1, abs=1.0)
-    assert ph["stop_t"] == pytest.approx(132.8, abs=2.0)
+    # 접지·정지가 앞당겨진 것은 동압 스케줄 상한을 2.0으로 내리면서다 — 승강타
+    # 리밋사이클이 잦아들어 접근 궤적이 덜 흔들린다 (110.1→107.3, 132.8→129.9).
+    # 레일 이탈은 구속 적분이라 게인과 무관하게 그대로다
+    assert ph["touchdown_t"] == pytest.approx(107.3, abs=1.0)
+    assert ph["stop_t"] == pytest.approx(129.9, abs=2.0)
     assert ph["touchdown_t"] < ph["stop_t"]
 
 
@@ -173,24 +178,121 @@ def test_rtk_buys_a_repeatable_touchdown_point_not_a_softer_one(seed):
     """RTK가 사는 것은 **접지 지점의 반복성**이지 부드러움이 아니다.
 
     처음엔 "기본 항법이면 플레어가 잡음에 묻힌다"고 적었는데 **실측이 그것을 뒤집었다**:
-    다섯 시드에서 접지 강하율은 기본 −0.72, RTK −0.89로 오히려 기본 쪽이 살짝
-    부드럽고 산포(σ 0.07)는 같다. 강하율은 vel_std_v(0.45 m/s)가 지배하고 플레어
-    개시 고도가 20 m라 4.5 m짜리 위치 잡음이 그 자릿수를 흔들지 못하기 때문이다.
+    다섯 시드에서 접지 강하율은 기본 −0.76, RTK −0.91로 오히려 기본 쪽이 살짝
+    부드럽다. 강하율은 vel_std_v(0.45 m/s)가 지배하고 플레어 개시 고도가 20 m라
+    4.5 m짜리 위치 잡음이 그 자릿수를 흔들지 못하기 때문이다.
 
     갈리는 것은 **어디에 내리는가**다 — 플레어 개시가 alt_le 20이므로 고도 오차가
     곧 개시 시점 오차이고, 88 m/s에서 그것이 접지 지점으로 증폭된다:
 
-        기본 GNSS   접지 지점 폭 874 m (σ 344 m)
-        RTK 고정해  접지 지점 폭  92 m (σ  33 m)
+        기본 GNSS   접지 지점 폭 512 m (σ 175 m)
+        RTK 고정해  접지 지점 폭  12 m (σ   4 m)
 
-    활주로 길이가 1,500 m인데 ±437 m가 흔들리면 활주로에 못 내린다. 그래서 RTK가
-    전제이고, **fix 상실은 미모델**이라는 것도 함께 적어야 한다 [TBD].
+    두 수치는 동압 스케줄 상한을 2.0으로 내리면서 **함께 좁아졌다**(종전 874 / 92 m)
+    — 승강타 리밋사이클이 접근 궤적에 얹던 흔들림이 줄어든 결과다. 대비 자체는
+    오히려 커졌다(9.5배 → 43배). 활주로 길이가 1,500 m인데 ±256 m가 흔들리면
+    활주로에 못 내린다. 그래서 RTK가 전제이고, **fix 상실은 미모델**이다 [TBD].
     """
     rtk = fly(nav=NavErrorModel.rtk_fixed(seed=seed))
     k = int(round(rtk.meta["phases"]["touchdown_t"] / DT))
-    # RTK면 시드가 바뀌어도 같은 자리에 내린다 (5시드 실측 9902~9995 m)
-    assert float(rtk.signals["pn"][k]) == pytest.approx(9957.0, abs=150.0)
-    assert climb_rate(rtk.signals, k) == pytest.approx(-0.89, abs=0.25)
+    # RTK면 시드가 바뀌어도 같은 자리에 내린다 (5시드 실측 9694~9707 m).
+    # 스케줄 상한을 내리면서 접지점이 9957 → 9700 언저리로 옮겼고 **폭은 더 좁아졌다**
+    # (93 m → 12 m) — 승강타 진동이 접근 궤적에 얹던 흔들림이 줄어든 결과다
+    assert float(rtk.signals["pn"][k]) == pytest.approx(9700.0, abs=150.0)
+    assert climb_rate(rtk.signals, k) == pytest.approx(-0.91, abs=0.25)
+
+
+def _turning_path_modes():
+    """순항이 경로를 따르는 미션 — 수평·세로 프로파일을 **둘 다** 경로가 낸다."""
+    modes = landing_modes()
+    for i, m in enumerate(modes):
+        if m.name == "cruise":
+            modes[i] = ModeSpec(name="cruise", speed=88.0, alt="path", heading="path",
+                                exit_when=("path_done",), next="approach")
+    return modes
+
+
+def fly_path(wps, accept=300.0, t_end=200.0):
+    ac = make_demo_aircraft(ground=make_demo_skid_gear())
+    tr = trim_ground(ac, TrimCase("pad", mach=0.0, alt=0.0, fuel=300.0, condition="ground"))
+    assert tr.converged
+    sim = Simulator(
+        aircraft=ac, fcl=make_demo_fcl(),
+        guidance=Guidance(_turning_path_modes(),
+                          path=LosPath(wps, accept_radius=accept)),
+        nav_model=NavErrorModel.rtk_fixed(seed=11),
+        stall_table=make_demo_stall_table(), db_ranges=make_demo_db_ranges(),
+        dt_plant=DT, control_hz=100.0, ground_elev=0.0, launch=make_demo_launch_rail(),
+        actuator_params={"wn": 30.0, "zeta": 0.7, "rate_max": 10.0}, fuel_flow=0.3,
+    )
+    return sim.run(tr, t_end=t_end, fingerprint="landing-path")
+
+
+def test_following_a_turning_path_does_not_fly_into_the_ground():
+    """저속 순항에서 경로를 따라 **선회해도** 고도를 잃고 지면까지 가지 않는다.
+
+    이 회귀가 생긴 사건: 순항(88 m/s)에서 웨이포인트로 65° 선회를 걸면 기체가
+    나선 강하로 36 s에 −42.6 m/s로 지면에 닿았다. 실속이 아니라 **내측 피치 루프의
+    리밋사이클**이 원인이었다 — 동압 스케줄 상한 4.0이 M0.26에서 pitch.kp·k_rate를
+    4배로 밀어 승강타가 ±20°(전 스트로크)를 2 Hz로 왕복했고(de σ 10.6°), 타면 여유가
+    남지 않아 선회 하중을 못 받쳤다. 상한을 2.0으로 내려 고쳤다(fcl/demo.py 주석).
+
+    직진 미션은 그 진동을 안고도 착륙했기 때문에 **기존 회귀 전부가 통과했다** —
+    선회를 시키는 시나리오가 없어서 안 걸린 것이다. 그래서 여기에 하나 세운다.
+    """
+    res = fly_path(((3000.0, 2000.0, 600.0), (6000.0, -1000.0, 400.0)), t_end=120.0)
+    s = res.signals
+    # 진단이 먼저다 — 회귀하면 실제로 일어나는 일은 **추락**(접지 36 s·h −1.4 m·
+    # 마진 −2.73)인데, 모드 체인 단정이 먼저 터지면 실패가 "순항을 못 벗어남"으로만
+    # 읽혀 독스트링이 말하는 사건과 다른 이야기가 된다 (리뷰 지적)
+    cruise = np.array(s["mode"]) == "cruise"
+    # 빈 배열에 min을 걸면 ValueError라 "왜 실패했는지"가 사라진다 — 아래 회귀와 같은 관문
+    assert cruise.any(), "순항 구간 없음 — 상승에서 이미 끝났다"
+    assert float(np.min(np.asarray(s["h"])[cruise])) > 150.0, "순항 중 지면으로 내려감"
+    assert res.envelope["worst_margin"] > 0.0, "실속마진이 음수 — 이탈"
+    assert res.meta["phases"]["touchdown_t"] is None or \
+        res.meta["phases"]["touchdown_t"] > 90.0, "순항 중 접지 = 추락"
+    seq = [m for i, m in enumerate(s["mode"]) if i == 0 or m != s["mode"][i - 1]]
+    assert seq[:4] == ["launch", "climb", "cruise", "approach"], "순항을 못 벗어남"
+
+
+def test_path_altitude_ramp_starts_where_the_aircraft_is_not_on_the_pad():
+    """램프 시작점 회귀 — **선회 없이** 경로 고도만으로도 지면까지 갔다.
+
+    위 선회 시나리오는 이 결함을 못 잡는다: 순항 진입 시점에 기체가 이미 1,900 m
+    북쪽이라 발사대 기준 램프도 240.8 m까지 올라와 있어 낙차가 10 m뿐이다(리뷰 실측).
+    긴 다리에 낮은 목표 고도를 주면 드러난다 — (10000, 0, 300)은 램프 기울기 3%라
+    38% 경사로 올라온 기체와 크게 어긋난다.
+
+    실측 대비: 고침 후 진입 명령 250.1 m·순항 고도 247.9~297.2 m,
+    고치기 전 진입 명령 **59.7 m**·순항 중 **69.8 m**까지 강하.
+    """
+    res = fly_path(((10000.0, 0.0, 300.0),), accept=300.0, t_end=140.0)
+    s = res.signals
+    cruise = np.array(s["mode"]) == "cruise"
+    assert cruise.any(), "순항 구간 없음"
+    assert float(np.min(np.asarray(s["h"])[cruise])) > 200.0, "경로 고도가 급강하를 지시함"
+
+
+def test_cruise_elevon_activity_stays_bounded(landed):
+    """순항에서 승강타가 스트로크를 왕복하지 않는다 — 리밋사이클 감시.
+
+    이 수치가 곧 "선회를 얹을 여유가 있는가"다. 상한 4.0 시절 de σ는 10.6°였고
+    피크는 ±20°(포화)였다 — 그 상태로도 직진 착륙은 됐으므로, 착륙 성공만 보는
+    회귀로는 이 결함을 잡을 수 없다. 활동량 자체를 못박는 자리가 필요하다.
+
+    자리별 실측(4배 부스트): pitch.kp만 σ 11.0°, pitch.k_rate만 σ 12.1°,
+    pitch.ki만 σ 3.3°(= 부스트 없음), 롤 3개 σ 3.3°. 피치 비례·레이트가 원인이다.
+
+    **순항 후반만 본다.** 앞부분은 상승(θ 17°)에서 수평으로 내려앉는 전환 과도라
+    느린 성분이 σ를 지배해 두 형상이 안 갈린다 — 전체 구간으로 재면 10.6° 대 9.3°로
+    거의 같아 보이지만, 정착 구간만 보면 8.8° 대 4.1°로 갈린다. 문턱 6.0°는 그 사이다.
+    """
+    s = landed.signals
+    k = np.flatnonzero(np.array(s["mode"]) == "cruise")
+    assert len(k) > 100, "순항 구간이 너무 짧아 정착을 볼 수 없다"
+    de = np.degrees(np.asarray(s["de"])[k[len(k) // 2:]])
+    assert de.std() < 6.0, f"승강타 왕복 σ {de.std():.1f}° — 리밋사이클 의심"
 
 
 def test_default_nav_lands_but_scatters_the_touchdown_point():
@@ -201,5 +303,7 @@ def test_default_nav_lands_but_scatters_the_touchdown_point():
         assert res.meta["phases"]["touchdown_t"] is not None, "착륙 자체는 한다"
         k = int(round(res.meta["phases"]["touchdown_t"] / DT))
         pns.append(float(res.signals["pn"][k]))
-    # 이 두 시드만으로도 RTK 전체 폭(92 m)을 훌쩍 넘는다
-    assert abs(pns[0] - pns[1]) > 300.0
+    # 이 두 시드만으로도 RTK 전체 폭을 훌쩍 넘는다 — 실측 155 m 대 RTK 5시드 12 m.
+    # 문턱은 RTK 폭의 4배 자리에 둔다: 이 테스트가 말하는 것은 "기본 항법이 자릿수
+    # 크게 흩어진다"이지 특정 두 시드의 거리가 아니다 (5시드 전체 폭은 512 m)
+    assert abs(pns[0] - pns[1]) > 50.0

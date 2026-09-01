@@ -250,4 +250,7 @@ def test_분할해도_지문은_그대로다():
     for name in ("fcl.h", "fcl_types.h", "fcl_data.c", *(f"fcl_{g}.h" for g in GROUPS)):
         line = next(ln for ln in _gen(name).splitlines() if "지문" in ln)
         fps.add(line.split(":")[1].strip())
-    assert fps == {"b03d13b65eae3f57"}, f"형상 지문이 움직였다: {fps}"
+    # 지문은 동압 스케줄 상한을 4.0 → 2.0으로 내리면서 갱신됐다 — 저속에서 내측
+    # 피치 루프가 리밋사이클에 들어 선회를 못 받치던 것을 고친 설계 변경이고,
+    # 게인 표 값이 바뀌었으므로 탑재 코드도 실제로 달라진다(fcl_data.c).
+    assert fps == {"ba6323a1825a7740"}, f"형상 지문이 움직였다: {fps}"

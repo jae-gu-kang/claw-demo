@@ -19,7 +19,14 @@ from claw.design import (
     scheduled_margin_point,
 )
 from claw.design.closure import AXIS_SPECS, close_rates, rate_loop_crossover
-from claw.fcl.demo import demo_design_gains, make_demo_gain_tables
+# _M_DESIGN·_F_CAP은 비공개지만 **스케줄 형상의 정의**라, 여기서 수를 다시 적는
+# 것보다 정본을 읽는 편이 낫다 — 적어 두면 상한 조정이 이 파일을 조용히 깨뜨린다
+from claw.fcl.demo import (
+    _F_CAP,
+    _M_DESIGN,
+    demo_design_gains,
+    make_demo_gain_tables,
+)
 from claw.plant import make_demo_aircraft
 from claw.tables import Table
 from claw.trim import linearize, split_axes, trim_level
@@ -110,17 +117,34 @@ def test_scheduled_differs_from_constant_gain_map(setup):
     기존 마진맵(상수 게인) 경로가 §3.4 검증 요구를 대신할 수 없다는 실증.
     """
     ac, tables, design = setup
-    case = _case(0.3)  # f = (0.6/0.3)² = 4 (상한) — 실효 게인이 설계값의 4배
+    # 배수를 **상수로 적지 않는다.** M0.3의 1/q̄ 스케일은 (0.6/0.3)² = 4를 부르지만
+    # 상한(_F_CAP)이 물리므로 실효 배수는 상한을 따라 움직인다. 여기 수를 박아 두면
+    # 상한을 조정하는 순간 이 테스트가 **다른 줄에서 설명 없이** 터진다 — 실제로
+    # 그랬다: 상한 4.0→2.0에서 `* 4.0`이 먼저 깨졌고, 그때 나는 배수만 2.0으로
+    # 바꾸면서 "문턱을 낮춰 튜닝 여지를 뒀다"는 주석을 달았는데 거짓이었다.
+    # 게인 단정이 여전히 등호라 상한 1.5는 여기서(배수 단정에서) 먼저 죽는다(리뷰 실측).
+    # 상한에서 유도하면 그 덫이 사라지고, 이 테스트는 원래 주장만 남는다 —
+    # "스케줄 맵의 판정이 상수 게인 맵과 다르다".
+    f = min((_M_DESIGN / 0.3) ** 2, _F_CAP)
+    case = _case(0.3)
     tr = trim_level(ac, case)
     assert tr.converged
     lm = linearize(ac, tr)
     sched = scheduled_margin_point(lm, tables, design, case)
     const = scheduled_margin_point(lm, {}, design, case)  # 스케줄 없음 = 설계 상수
     assert sched["pitch_rate"]["gains"]["k_rate"] == pytest.approx(
-        design["pitch.k_rate"] * 4.0
+        design["pitch.k_rate"] * f
     )
-    # 실효 게인 4배 → 레이트 루프 교차 주파수가 뚜렷이 다르다 (동압 보상의 실체)
-    assert sched["pitch_rate"]["wc"] > 2.0 * const["pitch_rate"]["wc"]
+    # 상한이 1.0이면 M0.3의 스케줄 게인이 설계 상수와 **문자 그대로 같아져** 두 맵이
+    # 구별되지 않는다 — 그때 이 단정들은 참이 될 수 없고, 거짓인 것이 옳다.
+    # 비교 자체를 건너뛰는 대신 그 사실을 명시한다 (조용한 skip이 아니라 사유 있는 분기)
+    if f == pytest.approx(1.0):
+        assert sched["pitch_rate"]["wc"] == pytest.approx(const["pitch_rate"]["wc"])
+        return
+    # 실효 게인이 클수록 레이트 루프 교차 주파수가 높다 (동압 보상의 실체).
+    # 실측: 상한 2.0에서 비 1.800(21.305 vs 11.833), 1.5에서 1.392 — 배수보다 완만하다.
+    # 문턱은 상한 1.5까지 성립하는 자리에 둔다
+    assert sched["pitch_rate"]["wc"] > 1.2 * const["pitch_rate"]["wc"]
     assert abs(sched["pitch_att"]["pm_deg"] - const["pitch_att"]["pm_deg"]) > 1.0
 
 

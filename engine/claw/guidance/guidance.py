@@ -49,6 +49,7 @@ class Guidance:
         if self.path is not None:
             self.path.reset()
         self._last_cmd = None
+        self._alt_on_path = False  # 고도 축이 경로를 잡고 있었는가 (상승엣지 검출)
 
     def step(self, nav, on_ground=None, on_rail=None) -> GuidanceCommand:
         if not nav.valid:
@@ -59,6 +60,17 @@ class Guidance:
             self.path.step(nav) if self.path is not None else (None, None, False)
         )
         mode = self.seq.step(nav, nav.t, path_done, on_ground=on_ground, on_rail=on_rail)
+        # 고도 축이 **경로를 새로 잡는 순간** 구간 램프를 여기서부터 다시 긋는다.
+        # 안 그으면 램프가 첫 스텝 자리(지상 출발이면 발사대 h≈1.2 m)에서 재어져,
+        # 이미 250 m를 올라온 기체에 62.8 m를 명령하고 고도 루프가 급강하를 지시한다
+        # — 실측: 선회가 전혀 없는 정북 미션도 263 m에서 지면까지 내려갔다.
+        # 이번 스텝의 명령은 아직 이전 시드로 계산된 값이지만 제어주기 한 번(10 ms)
+        # 뿐이고 명령필터가 그 한 표본을 흡수한다. seq.step이 path.step 뒤에 오는
+        # 것은 path_done이 전환 조건이기 때문이라 순서를 뒤집을 수 없다.
+        alt_on_path = mode.alt == "path"
+        if alt_on_path and not self._alt_on_path and self.path is not None:
+            self.path.begin_alt_leg(nav)
+        self._alt_on_path = alt_on_path
         # 모드 테이블이 축마다 **출처를 고른다** — heading과 alt가 같은 규약이다.
         # 경로가 이기느니 모드가 이기느니 하는 우선순위를 따로 두지 않는 이유가 이것
         heading = path_hdg if mode.heading == "path" else mode.heading

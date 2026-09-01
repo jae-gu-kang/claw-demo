@@ -134,7 +134,7 @@ def test_기본_테이블은_예전과_같다():
     # 지문은 이륙·착륙 도입에서 갱신됐다 — 종방향 축(pitch·hdot)과 θ 출처 Switch가
     # 그래프에 들어가 탑재 코드가 실제로 달라졌다(flight/gen 재생성 동반). 지문이
     # 움직이는 것이 곧 설계 변경이고, 안 움직였다면 그게 이상한 것이다.
-    assert _module().fingerprint == "b03d13b65eae3f57"
+    assert _module().fingerprint == "ba6323a1825a7740"
 
 
 def test_없는_자리를_요구하면_거부한다():
