@@ -9,11 +9,27 @@ server_data/
 # scripts/bundle.sh 산출물 (반입 꾸러미). 무시하지 않으면 bundle.sh의
 # "미커밋 변경 없음" 검사가 자기 산출물에 걸려 두 번째 실행부터 막힌다.
 # dist-code/ 는 --code-only 모드의 출력 — 전체 꾸러미와 섞이지 않게 따로 쓴다.
-dist/
-dist-code/
+# **앵커(/)가 붙어 있다.** 앞에 / 가 없으면 이 패턴은 깊이를 안 가리고 **dist라는
+# 이름의 디렉터리**를 전부 삼킨다. 여기서 뜻하는 것은 리포 루트의 반입 꾸러미뿐이므로
+# 앵커가 곧 의도의 정확한 표현이다.
+#
+# 지금 그런 하위 디렉터리는 없다 — 이건 버그 고침이 아니라 정밀화다. 가상환경 빌드
+# 출력을 `dist`가 아니라 `build`로 이름 지은 것(web/world/vite.config.ts)이 같은
+# 사유의 두 번째 방어다. 커밋했다고 믿은 산출물이 조용히 무시되면 배포에서 404가
+# 나는데 어디에도 오류가 안 남는다.
+/dist/
+/dist-code/
 
 # 지형·영상 자산 — 코드(1 MB 미만)·의존성(수백 MB)과 변경 빈도가 또 다른 **세 번째 꾸러미**다
 # (docs/deploy-airgap.md의 분리 원칙과 같은 사유). raw/는 내려받은 원본 타일 캐시,
 # *.bin은 scripts/terrain/build_terrain.py가 구운 팩 — 둘 다 재생성 가능하므로 커밋하지 않는다.
 data/geo/raw/
 data/geo/*.bin
+web/world/node_modules/
+
+# 모델 산출물 — 지형 팩과 같은 사유의 **네 번째 꾸러미**다. `generate_*.py`가 정본이고
+# `.blend`(인터랙티브 리그)와 `preview.png`(Cycles 렌더)는 거기서 재생성된다.
+# 커밋하면 `bundle.sh`가 매 반입에 영구히 싣는데, preview.png는 이미 deflate라
+# **gzip이 한 톨도 안 줄인다**(2.35 MB 실측). 런타임이 쓰는 것은 `.glb` 뿐이다.
+models/*/*.blend
+models/*/preview.png

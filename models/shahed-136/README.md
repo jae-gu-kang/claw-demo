@@ -145,4 +145,10 @@ blender -b --factory-startup -P generate_shahed136.py
 저장된 `.blend`는 인터랙티브용 드라이버 리그를 그대로 유지한다 — GLB용 베이크는
 내보내기 직전 in-메모리 상태에서만 일어나고 `.blend`에는 반영되지 않는다.
 
-Blender 4.0.2 / three.js r185에서 검증. 외부 에셋·애드온 의존성 없음.
+### 커밋 대상과 블렌더 numpy
+
+`.glb`·`.py`·README만 커밋하고 `.blend`·`preview.png`는 커밋하지 않는다. 그리고 내장
+numpy가 못 뜨는 블렌더에서는 GLB 내보내기가 **조용히** 빠진다. 두 사유와 대처는
+`models/README.md`에 한 번만 적혀 있다 — 여기 옮겨 적으면 갈린다.
+
+Blender 4.0.2·5.2.1 / three.js r185에서 검증. 외부 에셋·애드온 의존성 없음.

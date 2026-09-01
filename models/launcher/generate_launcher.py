@@ -16,9 +16,17 @@ import bpy
 import bmesh
 import math
 import os
+import sys
 from mathutils import Vector
 
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 내장 numpy가 못 뜨는 블렌더 빌드가 있다 — glTF 내보내기가 그때 조용히 빠진다.
+# 사유·증상·복구는 models/blender_numpy.py 참조. **bpy.ops 호출 전에** 부른다.
+sys.path.insert(0, os.path.dirname(OUT_DIR))  # models/
+from blender_numpy import ensure_numpy  # noqa: E402
+
+ensure_numpy(repo_root=os.path.dirname(os.path.dirname(OUT_DIR)))
 TAU = 2.0 * math.pi
 
 # ---------------------------------------------------------------- 기본 장면
