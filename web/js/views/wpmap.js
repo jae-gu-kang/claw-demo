@@ -16,6 +16,9 @@ import { niceTicks } from "../lib/plot.js";
 import { makeCanvas } from "./plots.js";
 
 const HIT_PX = 10; // WP 히트 반경 [논리 px]
+// 도달반경 원의 그리기 하한 [논리 px] — WP 점(반지름 4)보다 커야 덮이지 않는다.
+// 이 값 미만은 축척이 아니라 하한이 그린 것이라 점선으로 낸다 (redraw 참조).
+const R_ACCEPT_FLOOR_PX = 5.5;
 
 /** 세로 프로파일 (거리-고도) — 계획 꺾은선 + 최근 시뮬 실제 고도.
  *
@@ -312,15 +315,36 @@ export function createWpMap({
     pts.forEach((p, i) => {
       if (!p.ok) return;
       const { x, y } = toPx(p.n, p.e);
-      ctx.strokeStyle = "#ff9500";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(x, y, Math.max(3, accept * kScale), 0, 2 * Math.PI);
-      ctx.stroke();
       ctx.fillStyle = "#ff9500";
       ctx.beginPath();
       ctx.arc(x, y, 4, 0, 2 * Math.PI);
       ctx.fill();
+      // 도달반경 원은 **점 뒤에** 그린다. 종전엔 점보다 먼저 그려서, 반경이 작아
+      // 하한(3 px)에 걸리면 같은 색 반경 4 점이 그대로 덮어 **원이 사라졌다** —
+      // 축척상 accept·kScale > 4, 즉 기본 뷰(span 20 km)에서 270 m를 넘어야 보였다.
+      // 하필 반경이 작을수록(= 통과 판정이 빡빡할수록) 그 사실이 화면에서 지워지는
+      // 자리였고, 도달반경 입력의 즉시 갱신도 그 구간에서는 아무 일도 안 했다.
+      // 하한은 **한 번만 적는다.** 문턱과 하한을 따로 두면 그 사이(5 < rPx < 5.5)가
+      // "하한이 일했는데 실선"이라 축척인 줄 읽히고, 줌하는 동안 원이 잠깐 5.5 px에
+      // 얼어붙은 채 실선으로 서 있다(리뷰 실측 — 기본 뷰에서 accept 338~372 m).
+      // 두 수가 갈리면 눈에 안 띄는 채로 조금씩 틀린다 — PROFILE_LAYOUT과 같은 자리.
+      //
+      // **반경이 없으면 원도 없다.** 칸을 비우면 여기 오는 값이 0인데(Number("")||0),
+      // 그리면 하한 때문에 "작지만 유효한 반경"과 똑같이 보인다 — 서버는 그 값을
+      // 422로 거부하므로 지도가 없는 포획 반경을 주장하는 셈이다. 종전에는 3 px
+      // 원이 점에 덮여 안 보였고, 원을 살린 이번 변경이 그 주장을 드러냈다
+      if (accept > 0) {
+        const rPx = accept * kScale;
+        const atFloor = rPx < R_ACCEPT_FLOOR_PX; // 정의상 하한이 일한 자리와 같다
+        ctx.strokeStyle = "#ff9500";
+        ctx.lineWidth = 1;
+        // 하한에 걸린 원은 **점선**이다 — 실선으로 두면 그 크기가 축척인 줄 읽힌다
+        if (atFloor) ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(R_ACCEPT_FLOOR_PX, rPx), 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       if (i === selected) {
         ctx.strokeStyle = "#007aff";
         ctx.lineWidth = 2;

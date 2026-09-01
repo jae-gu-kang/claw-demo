@@ -46,7 +46,7 @@ js/
     ├── sim.js        #   5단계: 모드 테이블·웨이포인트 편집 → 재생+엔벨로프
     ├── results.js    #   6단계 열람: 산출물 목록·계보 지문
     ├── plots.js      #   캔버스 렌더러 (히트맵·산점도·시계열·NED 궤적)
-    ├── world.js      #   3D 월드 탭 — 결과 선택·시점 4종·재생·환경
+    ├── world.js      #   가상환경 탭 — 결과 선택·시점 4종·재생·환경
     ├── worldrenderer.js #  렌더러 계약 + 팩토리 (구현 교체 지점)
     └── renderer-three.js # three.js 어댑터 — 축 변환은 여기 toWorld 한 줄뿐
 ```

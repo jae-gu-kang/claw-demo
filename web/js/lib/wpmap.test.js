@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  CRUISE_ALT_DEFAULT, DEFAULT_SPAN, DRAG_PX, ZOOM_STEP, defaultWaypointAlt,
+  CRUISE_ALT_DEFAULT, DEFAULT_SPAN, DRAG_PX, SPAN_MAX, SPAN_MIN, WHEEL_ZOOM_DIVISOR,
+  ZOOM_STEP, defaultWaypointAlt,
   fitView, fmtMeters, hitTest, isDrag,
   makeProjection, moveWaypoint, panBy, planProfile, profileHitTest, profileScale,
   rowsToPoints, toCanvasXY, trackProfile, zoomAt,
@@ -133,12 +134,29 @@ test("fmtMeters: 1 m 반올림 · -0 정규화 — 표 문자열 오염 방지",
   assert.equal(fmtMeters(-1234.6), "-1235");
 });
 
-test("ZOOM_STEP: 휠 한 이벤트당 줌이 로그 기준 20배 둔하다 (사용자 제기)", () => {
+test("ZOOM_STEP: 휠 줌은 나눗수에서 유도된다 — 수를 여기 다시 적지 않는다", () => {
   // 종전 1.2는 이벤트당이라 트랙패드 한 제스처(수십 이벤트)에 지도가 튀었다.
-  // 20회 굴려야 종전 한 번과 같아진다 — 그것이 "20배 둔하게"의 정의다
-  // (처음 100배는 반대로 너무 둔해서 사용자가 5배 올려 달라고 했다)
-  assert.ok(Math.abs(ZOOM_STEP ** 20 - 1.2) < 1e-9);
-  assert.ok(ZOOM_STEP > 1 && ZOOM_STEP < 1.01); // 방향은 확대, 한 번에 1%도 안 움직인다
+  // "N배 둔하게" = N회 굴려야 종전 한 번과 같아진다는 뜻이고, N이 곧 나눗수다.
+  //
+  // **배수를 상수로 적지 않는다.** 이 값은 사용자 요청으로 두 번 조정됐고
+  // (100 → 20 → 2), 그때마다 여기 박아 둔 수가 먼저 깨졌다 — 감도 조정은 예상된
+  // 변경인데 테스트가 그 자리를 좁히면 안 된다.
+  assert.ok(Math.abs(ZOOM_STEP ** WHEEL_ZOOM_DIVISOR - 1.2) < 1e-9, "식은 지수 형태");
+
+  // 다만 방향·상한만 보면 **너무 둔한 쪽이 통째로 안 잡힌다** — 나눗수를 1e6으로
+  // 두면 ZOOM_STEP이 정확히 1.0이라 휠이 죽는데 그 단정들은 전부 통과한다
+  // (리뷰 실측). 감도는 배수가 아니라 **줌 전 구간을 넘나드는 눈금 수**로 재는
+  // 것이 뜻이 통한다 — 그러면 조정은 자유롭고 양쪽 퇴화만 닫힌다.
+  // 예민한 쪽은 **눈금 크기로 직접** 잰다. 전 구간 눈금 수로 대신 재면(60 이상)
+  // 한 눈금 17.95%까지 통과하는데, 애초 문제였던 1.2(20%)에서 2%p 떨어진 자리라
+  // 사실상 그 실패를 다시 허용한다 (리뷰 실측). 문턱은 그 실패를 이름으로 부른다.
+  assert.ok(ZOOM_STEP < 1.10, `한 눈금 ${((ZOOM_STEP - 1) * 100).toFixed(1)}% — `
+    + "10%를 넘으면 종전 1.2가 튀던 크기에 가깝다");
+  // 둔한 쪽은 눈금 크기로 못 잰다(1.0에 한없이 가까워질 뿐이라 문턱이 임의가 된다).
+  // "지도 끝에서 끝까지 몇 번 굴려야 하나"가 그 끝의 뜻이다
+  const notches = Math.log(SPAN_MAX / SPAN_MIN) / Math.log(ZOOM_STEP);
+  assert.ok(notches < 2000, `한 눈금이 너무 작다 (전 구간 ${notches.toFixed(0)}눈금)`);
+  assert.ok(ZOOM_STEP > 1, "휠 위로 = 확대");
 });
 
 test("rowsToPoints: 고도는 선택 — 빈 칸은 null이지 0이 아니다", () => {

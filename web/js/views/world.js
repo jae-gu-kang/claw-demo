@@ -78,11 +78,11 @@ export function dispose() {
 export function render() {
   dispose(); // 재진입 시 이전 컨텍스트를 먼저 반납
   const root = el("section", { class: "panel" },
-    el("h2", {}, "3D 월드"),
+    el("h2", {}, "가상환경"),
     el("p", { class: "hint", style: HINT }, "결과를 불러오는 중…"));
   boot(root).catch((e) => {
     clear(root).append(
-      el("h2", {}, "3D 월드"),
+      el("h2", {}, "가상환경"),
       el("p", { class: "hint", style: HINT }, `불러오지 못했습니다 — ${errorText(e)}`));
   });
   return root;
@@ -105,7 +105,7 @@ async function boot(root) {
   if (abandoned()) return;
   if (results.length === 0) {
     clear(root).append(
-      el("h2", {}, "3D 월드"),
+      el("h2", {}, "가상환경"),
       el("p", { class: "hint", style: HINT },
         "시뮬레이션 결과가 없습니다 — ",
         el("a", { href: "#sim" }, "시뮬레이션 탭"),
@@ -119,14 +119,14 @@ async function boot(root) {
     style: "width:100%; display:block; border-radius:8px; background:#0d1117; touch-action:none;",
     tabindex: "0",
   });
-  canvas.setAttribute("aria-label", "3D 비행 월드 — 끌어서 시점 회전, 휠로 거리 조절");
+  canvas.setAttribute("aria-label", "가상환경 — 끌어서 시점 회전, 휠로 거리 조절");
 
   const { renderer, reason } = await import("./worldrenderer.js")
     .then((m) => m.createRenderer(canvas));
   if (abandoned()) { renderer?.dispose(); return; }
   if (renderer == null) {
     clear(root).append(
-      el("h2", {}, "3D 월드"),
+      el("h2", {}, "가상환경"),
       el("p", { class: "hint", style: HINT }, reason, " ",
         el("a", { href: "#sim" }, "시뮬레이션 탭"), "의 3D 궤적 뷰는 2D 캔버스라 동작합니다."));
     return;
@@ -143,7 +143,7 @@ async function boot(root) {
   const modeBtns = CAM_MODES.map((m) => el("button", {}, CAM_LABEL[m]));
 
   clear(root).append(
-    el("h2", {}, "3D 월드"),
+    el("h2", {}, "가상환경"),
     el("div", { class: "row", style: ROW }, picker, ...modeBtns),
     canvas,
     el("div", { class: "row", style: `${ROW} margin-top:8px;` }, playBtn,
