@@ -12,8 +12,8 @@
 | 파일 | 내용 |
 |------|------|
 | `generate_shahed136.py` | 모델·리그·애니메이션을 처음부터 만드는 스크립트 (정본) |
-| `shahed136.blend` | 산출된 블렌더 파일 (Blender 4.0+) |
-| `shahed136.glb` | 정지 형상 glTF 내보내기 (웹·뷰어용, 애니메이션 미포함) |
+| `shahed136.blend` | 산출된 블렌더 파일 (Blender 4.0+) — 드라이버·커스텀 프로퍼티 리그 |
+| `shahed136.glb` | **three.js용** glTF — 조종면이 개별 노드로 살아 있고, 데모 동작이 애니메이션 클립으로 구워져 있다 |
 | `preview.png` | 미리보기 렌더 (Cycles) |
 
 ## 움직이는 조종면 (6개)
@@ -23,15 +23,19 @@
 
 | 오브젝트 | 힌지축(로컬) | 부모 | + 변위 방향 |
 |----------|-------------|------|-------------|
-| `Elevon.In.L` / `Elevon.In.R` | X (스팬) | `Wing` | 뒷전 내림 (TE down) |
-| `Elevon.Out.L` / `Elevon.Out.R` | X (스팬) | `Wing` | 뒷전 내림 (TE down) |
-| `Rudder.L` / `Rudder.R` | Z (수직) | `Fin.L` / `Fin.R` | 뒷전 좌 (TE left) |
+| `Elevon_In_L` / `Elevon_In_R` | X (스팬) | `Wing` | 뒷전 내림 (TE down) |
+| `Elevon_Out_L` / `Elevon_Out_R` | X (스팬) | `Wing` | 뒷전 내림 (TE down) |
+| `Rudder_L` / `Rudder_R` | Z (수직) | `Fin_L` / `Fin_R` | 뒷전 좌 (TE left) |
 
 엘레본은 **좌/우 × 인보드/아웃보드 = 4면**이 각각 독립이다. `docs/conventions.md`
 §5의 4면 배치 규약(collective δe = 4면 평균 → 피치, differential δa = (좌−우)/2 →
 롤)을 그대로 구동할 수 있다. 부호도 규약에 맞췄다: 엘레본 + = TE down, 러더 + = TE left.
 
 `Propeller`도 별도 오브젝트로, 회전축(로컬 Y)을 중심으로 프레임에 비례해 돈다.
+
+> 오브젝트 이름에 점(`.`)을 안 쓰고 밑줄을 쓴 이유: glTF/three.js는 노드 이름의
+> 점을 지운다(`Elevon.In.L` → `ElevonInL`). 밑줄은 보존되므로 Blender와 three.js가
+> **같은 이름**으로 조회된다.
 
 ## 조종하는 법 — 루트의 커스텀 프로퍼티
 
@@ -63,6 +67,71 @@
 
 키프레임은 루트 프로퍼티에 찍혀 있으므로, 지우고 새로 제어법칙 출력을 물려도 된다.
 
+## three.js에서 쓰기 (`shahed136.glb`)
+
+three.js(`GLTFLoader`)는 블렌더의 **드라이버·커스텀 프로퍼티를 실행하지 않는다.**
+그래서 GLB로 내보낼 때 각 타면의 드라이버 모션을 프레임별로 샘플해 **노드 회전
+키프레임으로 굽고**, 데모 동작을 단일 애니메이션 클립(`"SHAHED-136"`, 7 s @ 24 fps)으로
+넣었다. 동시에 각 조종면은 **힌지에 피벗이 맞춰진 개별 노드**로 남아 코드에서 직접
+회전시킬 수 있다. 두 방식 모두 실제 three.js r185 + `GLTFLoader`에서 로드·구동을 확인했다.
+
+### 노드 이름과 회전축 (glTF Y-up 변환 반영)
+
+| 노드 | three.js 회전축 | + 방향 |
+|------|----------------|--------|
+| `Elevon_In_L`, `Elevon_In_R` | `rotation.x` | 뒷전 내림 (TE down) |
+| `Elevon_Out_L`, `Elevon_Out_R` | `rotation.x` | 뒷전 내림 (TE down) |
+| `Rudder_L`, `Rudder_R` | `rotation.y` | 뒷전 좌 (TE left) |
+| `Propeller` | `rotation.z` | 회전 |
+
+계층: `SHAHED136_Root › Fuselage › { Propeller, Wing › {엘레본 4, Fin_L/R › Rudder} }`.
+(`Fuselage`·`Wing`은 다중 머티리얼이라 `Fuselage_1`처럼 렌더용 서브메시로 갈리지만,
+조종면 노드는 위 이름 그대로다.)
+
+### 1) 데모 클립 재생
+
+```js
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+let mixer;
+new GLTFLoader().load('shahed136.glb', (gltf) => {
+  scene.add(gltf.scene);
+  mixer = new THREE.AnimationMixer(gltf.scene);
+  mixer.clipAction(gltf.animations[0]).play();   // "SHAHED-136" 클립
+});
+
+// 렌더 루프에서
+const dt = clock.getDelta();
+if (mixer) mixer.update(dt);
+```
+
+### 2) 코드로 직접 조종 (제어법칙 출력 물리기)
+
+```js
+const deg = THREE.MathUtils.degToRad;
+const root = gltf.scene;
+const el = n => root.getObjectByName(n);
+
+// 피치 업: 4개 엘레본 TE up (음수)
+for (const n of ['Elevon_In_L','Elevon_In_R','Elevon_Out_L','Elevon_Out_R'])
+  el(n).rotation.x = deg(-15);
+
+// 롤 우: 좌 +, 우 −
+el('Elevon_In_L').rotation.x = el('Elevon_Out_L').rotation.x = deg(+15);
+el('Elevon_In_R').rotation.x = el('Elevon_Out_R').rotation.x = deg(-15);
+
+// 요 우: 러더 TE right (음수)
+el('Rudder_L').rotation.y = el('Rudder_R').rotation.y = deg(-15);
+
+// 프로펠러 스핀 (렌더 루프에서)
+el('Propeller').rotation.z += 12 * dt;
+```
+
+직접 회전은 데모 클립과 배타적이다 — 코드로 제어할 거면 `mixer`를 만들지 않거나
+`mixer.stopAllAction()` 후 노드 회전을 준다. (GLB에는 블렌더의 ±35° 리밋
+컨스트레인트가 안 들어가므로, 각도 클램프가 필요하면 앱에서 건다.)
+
 ## 재생성
 
 ```bash
@@ -73,4 +142,7 @@ blender -b --factory-startup -P generate_shahed136.py
 `SHAHED_SKIP_RENDER=1`. glTF 내보내기는 Blender 내장 파이썬에 `numpy`가 필요하다
 (없으면 그 단계만 건너뛰고 `.blend`는 정상 생성).
 
-Blender 4.0.2에서 검증. 외부 에셋·애드온 의존성 없음.
+저장된 `.blend`는 인터랙티브용 드라이버 리그를 그대로 유지한다 — GLB용 베이크는
+내보내기 직전 in-메모리 상태에서만 일어나고 `.blend`에는 반영되지 않는다.
+
+Blender 4.0.2 / three.js r185에서 검증. 외부 에셋·애드온 의존성 없음.
