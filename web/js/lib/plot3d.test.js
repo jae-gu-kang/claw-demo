@@ -13,7 +13,25 @@ test("bounds3d: 웨이포인트까지 포함 — 상자 밖에 놓이면 안내�
   assert.equal(b.n1, 500); // 웨이포인트 N이 궤적보다 북쪽
   assert.equal(b.e0, -200); // 웨이포인트 E가 궤적보다 서쪽
   assert.equal(b.e1, 50);
-  assert.deepEqual([b.h0, b.h1], [1000, 1200]); // 고도에는 웨이포인트가 없다
+  assert.deepEqual([b.h0, b.h1], [1000, 1200]); // 고도 없는 열은 h를 넓히지 않는다
+});
+
+test("bounds3d: 웨이포인트 고도도 상자에 든다 — 궤적 위/아래 점이 잘리지 않게", () => {
+  // 궤적은 1000~1200 m인데 계획은 1500 m·800 m — 빼면 두 점이 상자 밖에 찍힌다
+  const b = bounds3d([0, 100], [0, 50], [1000, 1200], [[10, 10, 1500], [20, 20, 800]]);
+  assert.deepEqual([b.h0, b.h1], [800, 1500]);
+  // 상자 안이 된 것을 투영으로 확인 — 여백 안에 들어와야 화면에서 안 잘린다
+  const p = projector3d(b, { az: 0.6, el: 0.4 }, LAYOUT);
+  for (const [n, e, alt] of [[10, 10, 1500], [20, 20, 800]]) {
+    const q = p.toPx(n, e, alt);
+    assert.ok(q.x >= 0 && q.x <= LAYOUT.width, `x ${q.x}`);
+    assert.ok(q.y >= 0 && q.y <= LAYOUT.height, `y ${q.y}`);
+  }
+});
+
+test("bounds3d: 고도가 섞인 열에서도 있는 것만 센다 (전부/전무는 엔진이 막는다)", () => {
+  const b = bounds3d([0, 10], [0, 10], [100, 110], [[1, 1], [2, 2, 400]]);
+  assert.deepEqual([b.h0, b.h1], [100, 400]);
 });
 
 test("bounds3d: 퇴화 축(정고도·단일점)은 폭 1로 벌린다 — 0-span 나눗셈 금지", () => {

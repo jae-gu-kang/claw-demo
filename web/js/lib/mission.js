@@ -99,6 +99,59 @@ export function buildModes(rows) {
   });
 }
 
+/** 실행이 **닿을 수 있는** 모드 행만 — 첫 행에서 next를 따라간 것.
+ *
+ * 엔진은 modes[0]에서 시작해 next로만 넘어간다(ModeSequencer). 그래서 아무도
+ * 가리키지 않는 행은 표에 있어도 절대 실행되지 않는다 — "모드 추가" 버튼이
+ * 만드는 행이 정확히 그것이다(next 빈 칸). 이걸 안 걸러 내면 사용자가 안내대로
+ * 그 새 행에 "path"를 적는 순간 경고만 사라지고 비행은 한 비트도 안 바뀐다
+ * (리뷰 지적) — 경고를 없애는 방법이 문제를 안 고치는 것이면 없느니만 못하다.
+ *
+ * 이름 중복·미정의 next는 엔진이 구성 시점에 거부하므로(서버 422) 여기서는
+ * 먼저 나온 행이 이기고 모르는 이름은 끝으로 본다. 순환은 방문 집합으로 끊는다.
+ */
+function reachableModes(rows) {
+  const byName = new Map();
+  for (const r of rows) {
+    const n = String(r?.name ?? "").trim();
+    if (n && !byName.has(n)) byName.set(n, r);
+  }
+  const out = [];
+  const seen = new Set();
+  let cur = rows[0];
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    out.push(cur);
+    cur = byName.get(String(cur.next ?? "").trim());
+  }
+  return out;
+}
+
+/** 이 모드 표가 웨이포인트를 **실제로 쓰는가** — {heading, alt}.
+ *
+ * 웨이포인트를 찍어도 그것을 고르는 모드가 없으면 시뮬은 그냥 직진한다. 실측:
+ * 기본 미션(헤딩 전부 "0")에 (3000, 2000, 600)·(6000, −1000, 400)을 넣고 돌리면
+ * pe가 −6e-18 ~ 5e-16, 즉 동쪽으로 1 mm도 안 간다. 같은 미션의 cruise만
+ * heading="path"로 바꾸면 pe가 −1495 ~ +2859로 움직인다.
+ *
+ * 그런데 화면은 지도에 주황 경로를 그리고 재생에도 웨이포인트를 찍는다 — 말하지
+ * 않으면 화면이 스스로 모순된다("조용한 비표시 금지"). 엔진은 **반대 방향만**
+ * 막는다(path인데 경로추종기 없음 → 422). 이쪽을 막을 수는 없다: 웨이포인트를
+ * 날지 않고 **기준선으로만** 두고 경로오차(pipeline.metrics xtrack_rms)를 재는
+ * 쓰임이 있어서다. 그래서 거부가 아니라 화면이 사실을 말하는 쪽으로 푼다.
+ *
+ * 반쯤 고친 행에서도 답해야 하므로 buildModes(던진다)를 거치지 않고 행을 직접 본다.
+ */
+export function pathUsage(rows) {
+  const isPath = (v) => String(v ?? "").trim() === "path";
+  const live = reachableModes(rows); // 실행이 닿지 않는 행의 "path"는 세지 않는다
+  return {
+    heading: live.some((r) => isPath(r.heading)),
+    // 고도축일 때만 — 피치·강하율 칸의 "path"는 buildModes가 거부한다
+    alt: live.some((r) => String(r.lonAxis ?? "").trim() === "alt" && isPath(r.lonValue)),
+  };
+}
+
 /** 편집 행 → [[n, e], …] 또는 [[n, e, alt], …].
  *
  * 고도는 **전부 있거나 전부 없거나** — 엔진 set_waypoints와 같은 규칙을 제출

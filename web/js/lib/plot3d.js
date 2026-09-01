@@ -15,6 +15,8 @@
 같은 이유). 대신 과장 배율을 vExag로 돌려주니 화면에 밝혀 쓸 것.
 */
 
+import { wpAlt } from "./plot.js";
+
 const EPS = 1e-9;
 
 /** 신호·웨이포인트를 모두 담는 데이터 상자. 퇴화(단일점) 축은 폭 1로 벌린다. */
@@ -32,7 +34,10 @@ export function bounds3d(pn, pe, h, waypoints = []) {
   };
   const [n0, n1] = span(pn, waypoints.map((w) => w[0]));
   const [e0, e1] = span(pe, waypoints.map((w) => w[1]));
-  const [h0, h1] = span(h);
+  // 고도도 웨이포인트를 포함한다 — (n, e, alt) 열을 받게 된 뒤로 웨이포인트가
+  // 궤적보다 위/아래일 수 있고, 빼면 그 점이 상자 밖에 찍혀 잘린다. 고도 없는
+  // 열은 null이라 span이 건너뛴다(비유한 규칙과 같은 자리)
+  const [h0, h1] = span(h, waypoints.map(wpAlt));
   return { n0, n1, e0, e1, h0, h1 };
 }
 

@@ -10,6 +10,7 @@
 */
 
 import { el } from "../dom.js";
+import { wpAlt } from "../lib/plot.js";
 import { bounds3d, projector3d } from "../lib/plot3d.js";
 import { makeCanvas } from "./plots.js";
 
@@ -21,7 +22,7 @@ const ROT_PER_PX = 0.012; // 드래그 1 px당 회전량 [rad]
 /** 3D 궤적 뷰 — {root, refresh(markerIdx)}. viewRef로 회전 상태를 바깥이 보관한다. */
 export function createTrack3d({
   getSignals, // () => {pn, pe, h}
-  getWaypoints, // () => [[n, e], ...]
+  getWaypoints, // () => [[n, e], ...] 또는 [[n, e, alt], ...]
   viewRef, // {view: {az, el} | null} — 탭 재진입·재렌더에도 시점 유지
   size = 320,
 } = {}) {
@@ -62,13 +63,36 @@ export function createTrack3d({
     }
     ctx.stroke();
 
-    // 웨이포인트 — 바닥면 위 점 + 고도 정보가 없으므로 기둥은 세우지 않는다
-    ctx.fillStyle = "#ff9500";
-    for (const [n, e] of wps) {
+    // 웨이포인트 — 바닥면 위 점, **고도가 있으면 그 높이에 점 + 수선**.
+    // 원근 없는 직교투영이라 수선이 없으면 높이가 안 읽힌다(현재 시각 표식과 같은
+    // 이유). 고도 없는 열은 종전대로 바닥 점뿐 — 없는 정보를 지어내지 않는다
+    for (const w of wps) {
+      const [n, e] = w;
       if (!Number.isFinite(n) || !Number.isFinite(e)) continue;
-      const q = p.toPxFloor(n, e);
+      const alt = wpAlt(w); // 판정은 lib 정본 — 여기 사본을 두면 조용히 갈린다
+      const floorQ = p.toPxFloor(n, e);
+      if (alt == null) {
+        ctx.fillStyle = "#ff9500";
+        ctx.beginPath();
+        ctx.arc(floorQ.x, floorQ.y, 3.5, 0, 2 * Math.PI);
+        ctx.fill();
+        continue;
+      }
+      const upQ = p.toPx(n, e, alt);
+      ctx.strokeStyle = "#ffcc80";
+      ctx.setLineDash([2, 3]);
       ctx.beginPath();
-      ctx.arc(q.x, q.y, 3.5, 0, 2 * Math.PI);
+      ctx.moveTo(upQ.x, upQ.y);
+      ctx.lineTo(floorQ.x, floorQ.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#ffcc80"; // 그림자는 옅게 — 계획 고도의 점이 주인공
+      ctx.beginPath();
+      ctx.arc(floorQ.x, floorQ.y, 2.5, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.fillStyle = "#ff9500";
+      ctx.beginPath();
+      ctx.arc(upQ.x, upQ.y, 3.5, 0, 2 * Math.PI);
       ctx.fill();
     }
 

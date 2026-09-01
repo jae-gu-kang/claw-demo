@@ -6,8 +6,8 @@
 
 import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
-import { buildModes, buildWaypoints, COND_KINDS, LON_AXES } from "../lib/mission.js";
-import { planeViews } from "../lib/plot.js";
+import { buildModes, buildWaypoints, COND_KINDS, LON_AXES, pathUsage } from "../lib/mission.js";
+import { planeViews, wpMarks } from "../lib/plot.js";
 import { flaggedNames, landingSummary, modeSpans, strideFor } from "../lib/replay.js";
 import { defaultWaypointAlt, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
 import { store } from "../store.js";
@@ -61,6 +61,9 @@ let runningSnapshot = { waypoints: [], acceptRadius: 0 };
 // 클로저에 닿지 못하는데, 표에서 고도를 고쳐도 프로파일이 따라와야 한다
 // (wpRows·lastReplay·wpMapView와 같은 모듈 상태 관례)
 let redrawProfile = () => {};
+// 웨이포인트가 미션에 반영되는지 다시 판정 — 모드 표(헤딩·종방향 값)와 웨이포인트
+// 표 양쪽이 부른다. 둘 다 모듈 함수라 render()의 노드에 닿지 못한다 (redrawProfile 관례)
+let renderWpNotice = () => {};
 // 도달 반경 읽기 — renderWpTable도 모듈 함수라 폼(f)에 닿지 못한다. 새 웨이포인트의
 // 원점 판정에 쓰므로 지도·표 두 추가 경로가 같은 값을 봐야 한다 (redrawProfile과 같은 관례)
 let acceptRadiusOf = () => 0;
@@ -279,6 +282,42 @@ export function render() {
   redrawProfile = drawProfile;
   acceptRadiusOf = () => Number(f.accept.value) || 0; // 다른 두 호출부와 같은 표기
 
+  // 웨이포인트를 **쓰는 모드가 있는가**. 없으면 지도·재생은 주황 경로를 그리는데
+  // 기체는 그 옆을 직진한다 — 화면이 스스로 모순되는 자리라 말해 준다.
+  // 실측(기본 미션 + WP 2개): 헤딩이 전부 숫자면 pe가 5e-16, cruise만 "path"로
+  // 바꾸면 −1495~+2859. 엔진은 반대 방향만 막는다(path인데 경로 없음 → 422);
+  // 이쪽은 막을 수 없다 — 날지 않고 경로오차(xtrack_rms) 기준선으로만 두는 쓰임이 있다
+  const wpNotice = el("div");
+  const drawWpNotice = () => {
+    clear(wpNotice);
+    const pts = rowsToPoints(wpRows).filter((p) => p.ok);
+    if (!pts.length) return;
+    const use = pathUsage(modeRows);
+    const hasAlt = pts.some((p) => p.d != null);
+    // 축을 따로 센다 — 수평만 따르는 미션이 흔한데(고도는 모드가 낸다) 그때
+    // "웨이포인트가 반영되지 않습니다"라고 뭉뚱그리면 화면이 사실이 아닌 말을 한다
+    // 안내 문장은 축마다 **통째로** 든다 — 이름에 조사를 붙여 조립하면
+    // "수평 경로이"·"세로 프로파일는"이 된다(라이브 확인). 목록 자리도 조사를 피한다
+    const miss = [];
+    if (!use.heading) {
+      miss.push(["수평 경로",
+        '수평 경로는 어느 모드의 헤딩 칸에 "path"를 적어야 따릅니다.']);
+    }
+    if (hasAlt && !use.alt) {
+      miss.push(["세로 프로파일",
+        '세로 프로파일은 종방향 축을 ‘고도’로 두고 값에 "path"를 적어야 따릅니다.']);
+    }
+    if (!miss.length) return;
+    clear(wpNotice).append(el("div", { class: "error-box" },
+      `⚠ 웨이포인트 ${pts.length}개 — 비행에 반영되지 않는 축: `,
+      el("b", {}, miss.map((m) => m[0]).join(" · ")),
+      ". ",
+      miss.map((m) => m[1]).join(" "),
+      " 지금 실행해도 그 축은 결과에 기준선으로만 실립니다(경로오차 지표) — ",
+      "기체는 모드 표의 값대로 날아갑니다."));
+  };
+  renderWpNotice = drawWpNotice;
+
   // NED 평면 지도 편집기 — 표와 양방향 동기 (단일 소스 = wpRows)
   const wpMap = createWpMap({
     getRows: () => wpRows,
@@ -414,6 +453,7 @@ export function render() {
       el("h2", {}, "미션 정의 (선언적 모드 테이블 — 01 §3.1)"),
       modeBox,
       el("h2", {}, "웨이포인트 (N, E, 고도) [m]"),
+      wpNotice,
       // 지도(수평면)와 프로파일(세로면)을 **한 묶음**으로 — 셋을 한 줄에 늘어놓으면
       // 표가 넓어(고도 열) 프로파일만 아래로 밀린다. 묶어 두면 표와 함께 접힐 뿐
       // 둘은 끝까지 나란히 선다 (라이브 확인)
@@ -525,8 +565,11 @@ function renderModeTable(modeBox) {
         el("th", { class: "c-md" }, "이탈 조건"), el("th", { class: "c-sm" }, "값"),
         el("th", { class: "c-md" }, "다음"), el("th", {}, ""))),
       el("tbody", {}, modeRows.map((r, i) => el("tr", {},
+        // 이름·next는 **어느 모드가 실행에 닿는지**를 정한다 (엔진은 첫 행에서
+        // next로만 넘어간다) — 사슬이 끊기면 그 뒤의 "path"는 죽은 값이므로
+        // 웨이포인트 안내도 다시 판정해야 한다
         el("td", {}, el("input", { value: r.name,
-          onchange: (ev) => { r.name = ev.target.value; } })),
+          onchange: (ev) => { r.name = ev.target.value; renderWpNotice(); } })),
         el("td", {}, el("input", { value: r.speed,
           onchange: (ev) => { r.speed = ev.target.value; } })),
         // 종방향은 **하나를 고르게** 한다 — alt·pitch·hdot이 전부 θ_cmd로 가므로
@@ -543,10 +586,12 @@ function renderModeTable(modeBox) {
           // "이 값이 쓰인다"고 읽힌다
           disabled: !(r.lonAxis ?? ""),
           title: LON_AXES.find((a) => a.value === (r.lonAxis ?? ""))?.unit ?? "",
-          onchange: (ev) => { r.lonValue = ev.target.value; },
+          // 이 칸의 "path"가 세로 프로파일을 켜는 곳이라, 고치면 웨이포인트 안내도
+          // 다시 판정해야 한다 (헤딩 칸도 같은 이유)
+          onchange: (ev) => { r.lonValue = ev.target.value; renderWpNotice(); },
         })),
         el("td", {}, el("input", { value: r.heading,
-          onchange: (ev) => { r.heading = ev.target.value; } })),
+          onchange: (ev) => { r.heading = ev.target.value; renderWpNotice(); } })),
         el("td", {}, el("select", {
           onchange: (ev) => { r.exitKind = ev.target.value; },
         }, Object.keys(COND_KINDS).map((k) =>
@@ -554,7 +599,7 @@ function renderModeTable(modeBox) {
         el("td", {}, el("input", { value: r.exitValue,
           onchange: (ev) => { r.exitValue = ev.target.value; } })),
         el("td", {}, el("input", { value: r.next,
-          onchange: (ev) => { r.next = ev.target.value; } })),
+          onchange: (ev) => { r.next = ev.target.value; renderWpNotice(); } })),
         el("td", {}, el("button", { class: "danger", onclick: () => {
           modeRows.splice(i, 1);
           renderModeTable(modeBox);
@@ -572,8 +617,19 @@ function renderModeTable(modeBox) {
         "종방향은 고도·피치·강하율 중 하나만 — 셋 다 θ 명령으로 가므로 함께 켤 수 없습니다. ",
         'off면 고도축이 트림 자세를 유지합니다. 고도축에만 "path"를 적을 수 있고, 그러면 ',
         "웨이포인트의 세로 프로파일을 따라 납니다. 강하율은 상승이 + 라 강하는 음수입니다. ",
-        '헤딩: 수치 | "path"(경로추종) | 빈=off. 속도는 수치 | 빈=off')),
+        '헤딩: 수치 | "path"(경로추종) | 빈=off. 속도는 수치 | 빈=off. ',
+        // 경고는 next 사슬만 본다 — 그 이탈 조건이 실제로 성립하는지는 돌려 봐야
+        // 안다(정적으로 판정 불가). 판정 못 하는 것을 정상으로 보이게 두지 않으려면
+        // 화면이 그 한계를 말해야 한다: 사슬로 이어 두면 경고는 사라진다
+        // 마크다운 ** 는 여기서 글자 그대로 나온다 — 강조는 노드로 (이전 실측)
+        '"path" 모드는 사슬로 잇는 것만으로는 부족하고 ', el("b", {}, "들어가야"),
+        " 씁니다 — 앞 모드의 이탈 조건이 실제로 성립해야 합니다. ",
+        "위 경고는 next 연결만 보므로, 예컨대 ",
+        "이탈이 time_ge 1e9인 모드 뒤에 붙이면 경고는 사라져도 그 모드는 끝내 실행되지 ",
+        "않습니다.")),
   );
+  // 축 선택·모드 추가·삭제도 "웨이포인트를 쓰는 모드"를 없앨 수 있다
+  renderWpNotice();
 }
 
 function renderWpTable(wpBox, wpMap) {
@@ -593,11 +649,18 @@ function renderWpTable(wpBox, wpMap) {
       el("tbody", {}, wpRows.map((r, i) => el("tr", {},
         el("td", {}, i + 1),
         // N·E도 프로파일을 갱신한다 — x축이 N/E로 만든 **누적 수평거리**라,
-        // 지도만 다시 그리면 두 화면이 서로 다른 미션을 말한다 (리뷰 실측)
+        // 지도만 다시 그리면 두 화면이 서로 다른 미션을 말한다 (리뷰 실측).
+        // 안내도 함께다: 좌표가 유효한지가 곧 "웨이포인트가 있는가"라, 빈 N에
+        // 수치를 넣으면 그 순간 안 쓰이는 축이 생기고 지우면 사라진다. 이 두 칸만
+        // sync()를 안 거쳐 안내가 남거나 안 뜨는 상태로 얼어 있었다 (리뷰 지적)
         el("td", {}, el("input", { value: r.n,
-          onchange: (ev) => { r.n = ev.target.value; wpMap?.refresh(); redrawProfile(); } })),
+          onchange: (ev) => {
+            r.n = ev.target.value; wpMap?.refresh(); redrawProfile(); renderWpNotice();
+          } })),
         el("td", {}, el("input", { value: r.e,
-          onchange: (ev) => { r.e = ev.target.value; wpMap?.refresh(); redrawProfile(); } })),
+          onchange: (ev) => {
+            r.e = ev.target.value; wpMap?.refresh(); redrawProfile(); renderWpNotice();
+          } })),
         // 고도는 선택 — 빈 칸은 "고도 없음"이지 0이 아니다. 빈 칸으로 되돌리면
         // 키 자체를 지운다(rowsToPoints·buildWaypoints가 그 규약을 공유한다)
         el("td", {}, el("input", { value: r.d ?? "", placeholder: "선택",
@@ -630,6 +693,9 @@ function renderWpTable(wpBox, wpMap) {
       } }, "웨이포인트 추가"),
       el("span", { class: "hint" }, "지도에서 클릭 추가 · 드래그 이동 · 우클릭 삭제 가능")),
   );
+  // 행이 하나 생기거나 사라질 때마다 "이 경로를 쓰는 모드가 있는가"를 다시 묻는다 —
+  // 표를 다시 그리는 모든 경로(지도 클릭·드래그·추가·삭제·순서)가 여기를 지난다
+  renderWpNotice();
 }
 
 function renderReplay(replayBox) {
@@ -673,7 +739,9 @@ function renderReplay(replayBox) {
           { markerIdx: i, width: PLANE_PX, height: PLANE_PX })
         : profileCanvas(v.xs, v.ys, {
           xLabel: v.xLabel, yLabel: v.yLabel, markerIdx: i,
-          wpXs: waypoints.map((w) => w[v.wpIdx]),
+          // 가로좌표 **와 고도**를 함께 넘긴다 — 종전엔 w[v.wpIdx]만 넘겨,
+          // 고도 화면이 평면 정보만 그렸다 (사용자 제기). 색인 정본은 lib
+          wps: wpMarks(waypoints, v.wpIdx),
           width: PLANE_PX, height: PLANE_PX,
         });
       // 평면 이름은 축 라벨로 읽히므로 그리지 않는다 — 대신 보조기술용으로 남긴다
@@ -753,7 +821,11 @@ function renderReplay(replayBox) {
     el("div", { style: "display:flex; flex-direction:column; gap:6px; margin-bottom:12px;" },
       el("div", { class: "hint" },
         "궤적 3D + 3면도 (NED) — N–E 평면만 등축(선회반경 판독용), 연직 평면과 3D는 ",
-        "비등축이라 경사각을 눈으로 재면 안 됨. 주황 세로선·점은 웨이포인트의 수평좌표"),
+        "비등축이라 경사각을 눈으로 재면 안 됨. 주황 세로선은 웨이포인트의 수평좌표, ",
+        // 이 캡션은 3D 패널까지 덮는다 — 3D는 고도가 없으면 선이 아니라 바닥 점을
+        // 찍으므로 "선만 그립니다"는 그쪽에서 거짓이 된다 (리뷰 지적)
+        "그 위의 점은 입력한 고도입니다 — 고도를 넣지 않은 목록에서는 3면도는 선만, ",
+        "3D는 바닥 점만 그립니다"),
       // --plane-px로 열 상한을 넘겨 PLANE_PX를 단일 정본으로 유지한다 (CSS에 320을
       // 또 박지 않기 위함). 2열 전환 폭만은 미디어 쿼리라 app.css와 수동 동기.
       el("div", { class: "triview", style: `--plane-px: ${PLANE_PX}px` },

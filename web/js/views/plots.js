@@ -243,18 +243,23 @@ export function trackCanvas(pn, pe, waypoints, acceptRadius, { markerIdx = null,
 수평면(trackCanvas)과 달리 **비등축**: 수평 이동이 고도 변화보다 통상 한 자릿수
 이상 커서 등축이면 궤적이 직선으로 뭉개진다 (lib/plot.js planeViews). 두 축의
 축척이 다르므로 경사각을 눈으로 재면 안 된다 — 캡션에 명시한다.
-wpXs: 웨이포인트의 가로축 성분. 웨이포인트에는 고도가 없으므로(고도는 모드
-테이블 소관) 점이 아니라 세로 안내선으로만 그린다 — 없는 정보를 그리지 않기 위해.
+wps: 웨이포인트 표식 [{x, alt}] — lib/plot.js wpMarks가 뽑는다. 가로좌표는 세로
+안내선으로, **고도가 있으면 그 높이에 점을** 찍는다. 종전에는 고도가 모드 테이블
+전담이라 안내선만 그렸는데, 경로가 고도도 내게 된 뒤로 그 코드는 고도 화면에
+평면 정보만 그리는 자리가 됐다 — 사용자가 넣은 고도가 화면에서 사라진다.
+고도 없는 열(alt null)에서는 종전대로 안내선뿐이다 — 없는 정보는 그리지 않는다.
 */
 export function profileCanvas(xs, ys, {
-  xLabel = "", yLabel = "", wpXs = [], markerIdx = null,
+  xLabel = "", yLabel = "", wps = [], markerIdx = null,
   width = 380, height = 185,
 } = {}) {
   const { canvas, ctx } = makeCanvas(width, height);
   // mT는 세로축 라벨 한 줄 몫만 — 평면 이름은 축 라벨로 충분해 제목을 그리지 않는다
   const mL = 52, mT = 18, mR = 12, mB = 28;
-  const [x0r, x1r] = extent([...xs, ...wpXs]);
-  const [y0r, y1r] = extent(ys);
+  const [x0r, x1r] = extent([...xs, ...wps.map((w) => w.x)]);
+  // 계획 고도도 세로 범위에 든다 — 빼면 궤적보다 높은 웨이포인트가 축 밖에 찍혀
+  // "계획이 저 위에 있다"는 사실이 잘려 나간다 (bounds3d와 같은 이유)
+  const [y0r, y1r] = extent([...ys, ...wps.map((w) => w.alt)]);
   // 퇴화 구간(정고도 순항 등) 0-span 나눗셈 금지 — lineChartCanvas와 같은 정책
   const padOf = (lo, hi) => (lo < hi ? [lo - 0.06 * (hi - lo), hi + 0.06 * (hi - lo)]
     : [lo - 1, hi + 1]);
@@ -282,17 +287,26 @@ export function profileCanvas(xs, ys, {
   ctx.fillText(xLabel, width - mR - 46, height - 4);
   ctx.fillText(yLabel, 4, mT - 6);
 
-  // 웨이포인트 가로좌표 안내선 (고도 정보 없음 — 세로선만)
+  // 웨이포인트 — 가로좌표 안내선 + 고도가 있으면 그 높이에 점.
+  // 안내선만 그리면 세로 화면이 평면 정보만 말하게 된다 (사용자 제기)
   ctx.strokeStyle = "#ffcc80";
   ctx.setLineDash([3, 3]);
   ctx.beginPath();
-  for (const wx of wpXs) {
-    if (typeof wx !== "number" || !Number.isFinite(wx)) continue;
-    ctx.moveTo(px(wx), mT);
-    ctx.lineTo(px(wx), height - mB);
+  for (const { x } of wps) {
+    if (x == null) continue;
+    ctx.moveTo(px(x), mT);
+    ctx.lineTo(px(x), height - mB);
   }
   ctx.stroke();
   ctx.setLineDash([]);
+  // 점은 지도·세로 프로파일 편집기와 같은 주황 — 세 화면이 같은 것을 같은 색으로
+  ctx.fillStyle = "#ff9500";
+  for (const { x, alt } of wps) {
+    if (x == null || alt == null) continue;
+    ctx.beginPath();
+    ctx.arc(px(x), py(alt), 3.5, 0, 2 * Math.PI);
+    ctx.fill();
+  }
 
   ctx.strokeStyle = "#007aff";
   ctx.lineWidth = 1.6;

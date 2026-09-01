@@ -2,7 +2,81 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildModes, buildWaypoints, COND_KINDS, LON_AXES } from "./mission.js";
+import { buildModes, buildWaypoints, COND_KINDS, LON_AXES, pathUsage } from "./mission.js";
+
+const modeRow = (over = {}) => ({
+  name: "m", speed: "100", lonAxis: "", lonValue: "", heading: "",
+  exitKind: "always", exitValue: "", next: "", ...over,
+});
+
+test("pathUsage: 웨이포인트를 쓰는 모드가 없으면 둘 다 false (기본 미션의 상태)", () => {
+  // 기본 미션은 헤딩이 전부 숫자다 — 지도에 경로를 그려도 기체는 직진한다(실측)
+  const rows = [modeRow({ heading: "0" }), modeRow({ lonAxis: "alt", lonValue: "300" })];
+  assert.deepEqual(pathUsage(rows), { heading: false, alt: false });
+});
+
+test("pathUsage: 축별로 따로 센다 — 수평만 따르고 고도는 숫자인 미션이 흔하다", () => {
+  assert.deepEqual(pathUsage([modeRow({ heading: "path" })]),
+    { heading: true, alt: false });
+  assert.deepEqual(pathUsage([modeRow({ lonAxis: "alt", lonValue: "path" })]),
+    { heading: false, alt: true });
+  assert.deepEqual(
+    pathUsage([modeRow({ heading: "path", lonAxis: "alt", lonValue: "path" })]),
+    { heading: true, alt: true });
+});
+
+test('pathUsage: 고도축이 아닌 칸의 "path"는 세지 않는다 (buildModes가 거부하는 값)', () => {
+  for (const axis of ["pitch", "hdot", ""]) {
+    assert.equal(pathUsage([modeRow({ lonAxis: axis, lonValue: "path" })]).alt, false);
+  }
+});
+
+test("pathUsage: 여러 모드 중 하나만 써도 참 · 공백은 값이 아니다", () => {
+  // 연결된 사슬이어야 센다 — a → b → c
+  const rows = [
+    modeRow({ name: "a", heading: "0", next: "b" }),
+    modeRow({ name: "b", heading: " path ", next: "c" }),
+    modeRow({ name: "c" }),
+  ];
+  assert.equal(pathUsage(rows).heading, true);
+  assert.equal(pathUsage([modeRow({ heading: "  " })]).heading, false);
+  assert.deepEqual(pathUsage([]), { heading: false, alt: false });
+});
+
+test("pathUsage: 아무도 가리키지 않는 모드의 path는 세지 않는다 ('모드 추가'가 만드는 행)", () => {
+  // 사용자가 안내대로 새 행에 path를 적으면 경고만 사라지고 비행은 그대로다 —
+  // 경고를 없애는 방법이 문제를 안 고치는 것이면 없느니만 못하다
+  const rows = [
+    modeRow({ name: "cruise", heading: "0", next: "" }),
+    modeRow({ name: "mode2", heading: "path", lonAxis: "alt", lonValue: "path", next: "" }),
+  ];
+  assert.deepEqual(pathUsage(rows), { heading: false, alt: false });
+  // next로 이어 주면 그때 세진다
+  rows[0].next = "mode2";
+  assert.deepEqual(pathUsage(rows), { heading: true, alt: true });
+});
+
+test("pathUsage: 실행은 첫 행에서 시작한다 — 앞 행이 뒤를 안 가리키면 뒤는 죽은 행", () => {
+  // 엔진 ModeSequencer는 modes[0]에서 시작한다 (initial 미지정 시)
+  const rows = [
+    modeRow({ name: "first", heading: "0", next: "first" }), // 자기 자신 → 여기서 끝
+    modeRow({ name: "orphan", heading: "path" }),
+  ];
+  assert.equal(pathUsage(rows).heading, false);
+});
+
+test("pathUsage: next 순환에서 멈춘다 (무한 루프 금지) · 미정의 next는 종단", () => {
+  const cyc = [
+    modeRow({ name: "a", next: "b" }),
+    modeRow({ name: "b", heading: "path", next: "a" }),
+  ];
+  assert.equal(pathUsage(cyc).heading, true); // b는 닿는다
+  const dangling = [
+    modeRow({ name: "a", next: "없는모드" }),
+    modeRow({ name: "b", heading: "path" }),
+  ];
+  assert.equal(pathUsage(dangling).heading, false); // 서버가 422로 거부할 표
+});
 
 test("buildModes: 빈 값 → null(축 off), heading path/숫자, next 연결", () => {
   const rows = [

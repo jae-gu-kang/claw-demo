@@ -146,8 +146,9 @@ NED이므로 XY/YZ/ZX로 부르면 어느 축이 어디인지 한 번 더 번역
 
 equal(등축)은 N–E 평면만 true — 선회반경을 왜곡 없이 읽어야 하므로. 연직 평면은
 수평 이동이 고도 변화보다 통상 한 자릿수 이상 커서 등축이면 직선으로 뭉개진다.
-wpIdx: 웨이포인트 [n, e] 중 그 뷰의 가로축에 해당하는 성분 (N–E 평면은 원으로
-직접 그리므로 null). 배열은 입력 참조 — 복사하지 않는다.
+wpIdx: 웨이포인트 (n, e, alt) 중 그 뷰의 **가로축**에 해당하는 성분 색인 (N–E
+평면은 원으로 직접 그리므로 null). 세로축 값은 wpMarks가 함께 뽑는다.
+배열은 입력 참조 — 복사하지 않는다.
 */
 export function planeViews(sig) {
   return [
@@ -158,6 +159,38 @@ export function planeViews(sig) {
     { key: "ed", title: "E–D 평면 (정면도)", equal: false, wpIdx: 1,
       xs: sig.pe, ys: sig.h, xLabel: "E [m]", yLabel: "h [m] (= −D)" },
   ];
+}
+
+/** 연직 단면(측면도·정면도)에 찍을 웨이포인트 표식 — [{x, alt}].
+ *
+ * 웨이포인트는 (n, e) **또는 (n, e, alt)**다. 고도가 모드 테이블 전담이던 시절에는
+ * 연직 평면이 가로좌표 안내선만 그렸고 그 전제가 세 곳(planeViews·profileCanvas·
+ * plot3d)에 주석으로 박혀 있었는데, 경로가 고도도 내게 된 뒤로 그 안내선은
+ * **고도 화면에 평면 정보만 그리는** 자리가 됐다 — 사용자가 넣은 고도가 화면에서
+ * 사라진다(사용자 제기). 두 성분을 여기서 한 번에 뽑아 그리기 쪽이 다시 고르지
+ * 않게 한다.
+ *
+ * xIdx는 그 뷰의 가로축 성분(planeViews wpIdx). 비수치는 **행을 버리지 않고**
+ * null로 남긴다 — 걸러내면 색인이 밀려 몇 번 웨이포인트인지 셀 수 없게 된다.
+ * alt가 null이면 "고도 없음"이지 0이 아니다(엔진 set_waypoints의 전부/전무 규약).
+ */
+export function wpMarks(waypoints, xIdx) {
+  const fin = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return (waypoints ?? []).map((w) => ({ x: fin(w?.[xIdx]), alt: wpAlt(w) }));
+}
+
+/** 웨이포인트 한 행의 고도 [m] 또는 null — "고도가 있는가"의 **단일 정본**.
+ *
+ * 색인 2와 유한성 판정이 세 곳(wpMarks·bounds3d·3D 그리기)에 각자 적혀 있었다.
+ * 오늘은 셋이 일치하지만 열이 하나 늘거나 색인이 밀리면 테스트가 있는 lib 둘만
+ * 터지고 뷰의 사본은 조용히 엉뚱한 양을 그린다 — 이번 버그를 만든 드리프트와
+ * 같은 종류다(리뷰 지적). wpMarks가 3D를 못 맡는 이유는 그쪽이 n·e·alt 셋을
+ * 다 쓰기 때문이라, 공유할 수 있는 조각은 이 판정 하나다.
+ */
+export function wpAlt(w) {
+  if (w == null || w.length < 3) return null;
+  const a = w[2];
+  return typeof a === "number" && Number.isFinite(a) ? a : null;
 }
 
 /** margin-map entries → 연료 고정 (mach×alt) 격자 조회. */

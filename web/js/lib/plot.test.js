@@ -24,6 +24,8 @@ import {
   pivotCases,
   planeViews,
   trimEnvelopeCell,
+  wpAlt,
+  wpMarks,
 } from "./plot.js";
 
 test("linScale: 선형 사상·역방향 범위", () => {
@@ -207,6 +209,43 @@ test("planeViews: 배열은 복사 없이 참조 — 재렌더가 최신 신호�
   const views = planeViews(SIG);
   assert.equal(views[0].ys, SIG.pn); // deepEqual이 아닌 동일성
   assert.equal(views[1].ys, SIG.h);
+});
+
+test("wpMarks: 고도가 있으면 세로축 값으로 함께 나온다 (평면 정보만 그리던 회귀)", () => {
+  const [, nd, ed] = planeViews(SIG);
+  const wps = [[3000, 2000, 600], [6000, -1000, 400]];
+  // 측면도 가로축은 N, 정면도는 E — 어느 쪽이든 alt는 같은 세로축 값이다
+  assert.deepEqual(wpMarks(wps, nd.wpIdx), [{ x: 3000, alt: 600 }, { x: 6000, alt: 400 }]);
+  assert.deepEqual(wpMarks(wps, ed.wpIdx), [{ x: 2000, alt: 600 }, { x: -1000, alt: 400 }]);
+});
+
+test("wpMarks: 고도 없는 열은 alt null — 0으로 메우면 넣지 않은 해면 고도를 그린다", () => {
+  assert.deepEqual(wpMarks([[100, 200], [300, 400]], 0),
+    [{ x: 100, alt: null }, { x: 300, alt: null }]);
+});
+
+test("wpMarks: 비수치는 행을 버리지 않고 null — 걸러내면 색인이 밀린다", () => {
+  const marks = wpMarks([[0, 0, 100], [null, 5, 200], [10, 20, "높이"]], 0);
+  assert.equal(marks.length, 3); // 3번 웨이포인트가 사라지지 않는다
+  assert.deepEqual(marks[1], { x: null, alt: 200 });
+  assert.deepEqual(marks[2], { x: 10, alt: null }); // 좌표는 살고 고도만 미상
+});
+
+test("wpMarks: 웨이포인트가 없으면 빈 목록 (null 입력도)", () => {
+  assert.deepEqual(wpMarks([], 0), []);
+  assert.deepEqual(wpMarks(null, 0), []);
+});
+
+test("wpAlt: '고도가 있는가'의 단일 정본 — 세 그리기가 같은 판정을 본다", () => {
+  assert.equal(wpAlt([100, 200, 300]), 300);
+  assert.equal(wpAlt([100, 200]), null); // 2열 = 고도 없음 (0이 아니다)
+  assert.equal(wpAlt([100, 200, null]), null); // JSON 직렬화 null
+  assert.equal(wpAlt([100, 200, NaN]), null);
+  assert.equal(wpAlt([100, 200, "300"]), null); // 문자열은 수치가 아니다
+  assert.equal(wpAlt([100, 200, 0]), 0); // 해면 고도는 **있는** 값이다
+  assert.equal(wpAlt(null), null);
+  // wpMarks·bounds3d·3D 그리기가 이 함수를 쓴다 — 사본이 생기면 갈린다
+  assert.equal(wpMarks([[1, 2, 3]], 0)[0].alt, wpAlt([1, 2, 3]));
 });
 
 test("planeViews: wpIdx는 가로축 성분 — 웨이포인트 [n, e] 색인", () => {
