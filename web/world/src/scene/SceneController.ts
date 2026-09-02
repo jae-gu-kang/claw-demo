@@ -24,6 +24,7 @@ import { attitudeAt, originsAgree, sampleAt, sceneExtent, trackPoints, velocityA
 import { elevationAt, parseTerrainPack, type TerrainPack } from "../lib/terrainpack.ts";
 import { strideFor } from "../lib/replay.ts";
 import { ATMOSPHERE_NOTES, CLOUD_NOTES } from "./atmosphere.ts";
+import { WEAR_NOTES } from "./materials.ts";
 import { launcherCaptionNotes, launcherPose } from "../core/launcher.ts";
 import { SURFACE_NOTES, propellerRate, surfacePose } from "../core/surfaces.ts";
 import { WAVE_NOTES } from "../core/waves.ts";
@@ -333,6 +334,7 @@ export class SceneController {
     );
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
     notes.push(CLOUD_NOTES.model);
+    if (this.vehicle || this.launcher) notes.push(WEAR_NOTES.model);
     notes.push(
       "해면은 지형 격자 밖(외곽 티어 30 km 밖)까지 이어 그립니다 — "
       + "그 부분은 실측 지리가 아니라 이어 붙인 평면입니다.",

@@ -5,6 +5,10 @@ import { ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL } from "./atmosphere.ts";
 import { CLOUD_UNIFORM_DECL, cloudGlsl } from "./clouds.ts";
 import { NOISE_GLSL } from "./noise.ts";
 import { OCEAN_FRAG, OCEAN_VERT } from "./ocean.ts";
+import {
+  WEAR_FRAG_BODY, WEAR_GLSL, WEAR_NORMAL_BODY, WEAR_UNIFORM_DECL, WEAR_VARYING_DECL,
+  WEAR_VERT_BODY,
+} from "./wear.ts";
 
 const SOURCES: [string, string][] = [
   ["ATMOSPHERE_GLSL", ATMOSPHERE_GLSL],
@@ -15,6 +19,12 @@ const SOURCES: [string, string][] = [
   ["cloudGlsl(3,1)", cloudGlsl(3, 1)],
   ["OCEAN_VERT", OCEAN_VERT],
   ["OCEAN_FRAG", OCEAN_FRAG],
+  ["WEAR_UNIFORM_DECL", WEAR_UNIFORM_DECL],
+  ["WEAR_VARYING_DECL", WEAR_VARYING_DECL],
+  ["WEAR_VERT_BODY", WEAR_VERT_BODY],
+  ["WEAR_GLSL", WEAR_GLSL],
+  ["WEAR_FRAG_BODY", WEAR_FRAG_BODY],
+  ["WEAR_NORMAL_BODY", WEAR_NORMAL_BODY],
 ];
 
 describe("GLSL 문자열", () => {

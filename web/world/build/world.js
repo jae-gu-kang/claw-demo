@@ -37677,6 +37677,314 @@ ${FRAG_BODY}`);
   };
   material.needsUpdate = true;
 }
+const WEAR_UNIFORM_DECL = (
+  /* glsl */
+  `
+uniform vec3 uWearPanel;        // 패널라인 간격 (x, y, z) [m] — 0이면 그 축은 없음
+uniform float uWearPanelDepth;  // 0~1
+uniform float uWearEdge;        // 0~1
+uniform float uWearDirt;        // 0~1
+uniform vec2 uWearSoot;         // 그을음: 로컬 z (시작, 끝). 끝 ≤ 시작이면 없음
+uniform vec2 uWearMud;          // 진흙: 로컬 y (위, 아래). 위 ≤ 아래면 없음
+uniform float uWearSeed;
+`
+);
+const WEAR_VARYING_DECL = (
+  /* glsl */
+  `
+varying vec3 vWearLocal;
+varying vec3 vWearNLocal;
+varying vec3 vWearWorld;
+varying vec3 vWearNWorld;
+varying mat3 vWearL2V;
+`
+);
+const WEAR_VERT_BODY = (
+  /* glsl */
+  `
+  vWearLocal = transformed;
+  vWearNLocal = objectNormal;
+  vWearWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+  vWearNWorld = normalize(mat3(modelMatrix) * objectNormal);
+  vWearL2V = normalMatrix;
+`
+);
+const WEAR_GLSL = (
+  /* glsl */
+  `
+/** 한 축의 패널라인 — 0~1. grad는 홈의 법선 기울기 부호(선 중심을 향한다). */
+float wearPanelLine(float c, float spacing, out float grad) {
+  grad = 0.0;
+  if (spacing <= 0.0) return 0.0;
+  float fw = fwidth(c);
+  float d = (fract(c / spacing + 0.5) - 0.5) * spacing;   // 가장 가까운 선까지 부호 거리 [m]
+  float w = max(0.004, fw * 1.2);                           // 반폭 — 픽셀보다 좁아지지 않게
+  float m = 1.0 - smoothstep(w * 0.5, w * 1.6, abs(d));
+  // 간격이 픽셀 몇 개로 줄면 선이 무아레가 된다 — 지운다.
+  m *= 1.0 - smoothstep(0.10, 0.28, fw / spacing);
+  grad = -sign(d) * m;
+  return m;
+}
+
+/** 마모를 한꺼번에 — 색·거칠기·금속성을 고치고, 법선을 꺾을 로컬 기울기를 낸다. */
+void wearApply(inout vec3 albedo, inout float rough, inout float metal, out vec3 lineGradLocal) {
+  vec3 p = vWearLocal;
+  vec3 n = normalize(vWearNLocal);
+  vec3 seed = vec3(uWearSeed * 7.31, uWearSeed * 3.17, uWearSeed * 5.53);
+
+  // --- 패널라인: 삼면 투영 -------------------------------------------------
+  vec3 w = pow(abs(n), vec3(4.0));
+  w /= max(w.x + w.y + w.z, 1.0e-5);
+  float gx, gy, gz;
+  float lx = wearPanelLine(p.x, uWearPanel.x, gx);
+  float ly = wearPanelLine(p.y, uWearPanel.y, gy);
+  float lz = wearPanelLine(p.z, uWearPanel.z, gz);
+  // 축 k 방향에서 본 면에는 나머지 두 축의 선이 그어진다.
+  float line = w.y * max(lx, lz) + w.x * max(ly, lz) + w.z * max(lx, ly);
+  line *= uWearPanelDepth;
+  lineGradLocal = vec3(gx * (w.y + w.z), gy * (w.x + w.z), gz * (w.y + w.x)) * uWearPanelDepth;
+
+  // --- 엣지웨어: 화면공간 곡률 ----------------------------------------------
+  float pw = max(length(fwidth(vWearWorld)), 1.0e-5);
+  float curv = length(fwidth(vWearNWorld)) / pw;
+  float edge = smoothstep(10.0, 35.0, curv) * uWearEdge;
+  edge *= 1.0 - smoothstep(0.012, 0.045, pw);                // 베벨보다 픽셀이 크면 지운다
+  edge *= smoothstep(0.30, 0.62, fbm3(p * 46.0 + seed));      // 군데군데 벗겨진다
+
+  // --- 오염: 세로 줄무늬 · 밑면 때 · 윗면 먼지 --------------------------------
+  // 줄무늬는 로컬 위아래로 늘린 노이즈 — 옆면에서 흘러내린 자국.
+  float streak = fbm3(vec3(p.x * 13.0, p.y * 2.6, p.z * 13.0) + seed);
+  float side = 1.0 - abs(n.y);
+  float under = max(-n.y, 0.0);
+  float top = max(n.y, 0.0);
+  float dirt = uWearDirt * (
+      0.55 * side * smoothstep(0.38, 0.72, streak)
+    + 0.40 * under * smoothstep(0.30, 0.60, fbm3(p * 19.0 + seed * 1.3))
+    + 0.18 * top * fbm3(p * 31.0 + seed * 0.7));
+  dirt = clamp(dirt, 0.0, 1.0);
+
+  // --- 그을음: 배기 뒤 축방향 누적 -----------------------------------------
+  float soot = 0.0;
+  if (uWearSoot.y > uWearSoot.x) {
+    soot = smoothstep(uWearSoot.x, uWearSoot.y, p.z) * (0.55 + 0.45 * fbm3(p * 9.0 + seed));
+  }
+
+  // --- 진흙: 아래로 갈수록 -------------------------------------------------
+  float mud = 0.0;
+  if (uWearMud.x > uWearMud.y) {
+    mud = smoothstep(uWearMud.x, uWearMud.y, p.y) * (0.45 + 0.55 * fbm3(p * 6.5 + seed));
+  }
+
+  // --- 겹치는 순서: 홈 → 오염 → 그을음 → 진흙 → 마지막에 벗겨진 금속 ----------
+  albedo *= 1.0 - line * 0.45;
+  rough = mix(rough, 0.85, line * 0.6);
+
+  albedo = mix(albedo, albedo * vec3(0.55, 0.50, 0.42), dirt);
+  rough = mix(rough, 0.90, dirt * 0.6);
+
+  albedo = mix(albedo, albedo * 0.22, soot);
+  rough = mix(rough, 0.95, soot);
+
+  albedo = mix(albedo, vec3(0.16, 0.12, 0.08), mud * 0.85);
+  rough = mix(rough, 0.95, mud);
+
+  albedo = mix(albedo, vec3(0.52, 0.53, 0.55), edge);
+  metal = mix(metal, 0.85, edge);
+  rough = mix(rough, 0.32, edge);
+}
+`
+);
+const WEAR_FRAG_BODY = (
+  /* glsl */
+  `
+  vec3 wearLineGrad;
+  wearApply(diffuseColor.rgb, roughnessFactor, metalnessFactor, wearLineGrad);
+`
+);
+const WEAR_NORMAL_BODY = (
+  /* glsl */
+  `
+  normal = normalize(normal + vWearL2V * (wearLineGrad * 0.35));
+`
+);
+const NOISE_GLSL = (
+  /* glsl */
+  `
+vec2 hash2(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
+}
+
+/** 그래디언트 노이즈 — (값, ∂/∂x, ∂/∂y). 값은 대략 [−0.7, 0.7]. */
+vec3 gnoise2(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+  vec2 ga = hash2(i);
+  vec2 gb = hash2(i + vec2(1.0, 0.0));
+  vec2 gc = hash2(i + vec2(0.0, 1.0));
+  vec2 gd = hash2(i + vec2(1.0, 1.0));
+  float va = dot(ga, f);
+  float vb = dot(gb, f - vec2(1.0, 0.0));
+  float vc = dot(gc, f - vec2(0.0, 1.0));
+  float vd = dot(gd, f - vec2(1.0, 1.0));
+  float k1 = vb - va;
+  float k2 = vc - va;
+  float k3 = va - vb - vc + vd;
+  float v = va + k1 * u.x + k2 * u.y + k3 * u.x * u.y;
+  vec2 d = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
+         + du * (vec2(k1, k2) + k3 * vec2(u.y, u.x));
+  return vec3(v, d);
+}
+
+/** 3D 값 노이즈 — 재질 마모용. 그래디언트 노이즈보다 싸고(해시 8번) 표면 얼룩에는 충분하다. */
+float hash31(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+
+float vnoise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = mix(hash31(i), hash31(i + vec3(1.0, 0.0, 0.0)), f.x);
+  float b = mix(hash31(i + vec3(0.0, 1.0, 0.0)), hash31(i + vec3(1.0, 1.0, 0.0)), f.x);
+  float c = mix(hash31(i + vec3(0.0, 0.0, 1.0)), hash31(i + vec3(1.0, 0.0, 1.0)), f.x);
+  float d = mix(hash31(i + vec3(0.0, 1.0, 1.0)), hash31(i + vec3(1.0, 1.0, 1.0)), f.x);
+  return mix(mix(a, b, f.y), mix(c, d, f.y), f.z);
+}
+
+/** 3옥타브 fBm — 0~0.875. */
+float fbm3(vec3 p) {
+  return 0.5 * vnoise3(p) + 0.25 * vnoise3(p * 2.07 + 1.7) + 0.125 * vnoise3(p * 4.13 + 3.1);
+}
+
+/** fBm — 값만. 옥타브는 최대 5, 라쿠나리티 2.03(정수를 피해 반복 무늬를 줄인다). */
+float fbm2(vec2 p, int octaves) {
+  float v = 0.0;
+  float a = 0.5;
+  float norm = 0.0;
+  for (int i = 0; i < 5; i++) {
+    if (i >= octaves) break;
+    v += a * gnoise2(p).x;
+    norm += a;
+    p = p * 2.03 + vec2(17.3, 9.1);
+    a *= 0.5;
+  }
+  return v / max(norm, 1.0e-6);
+}
+`
+);
+const NONE = [0, 0];
+const WEAR_BY_MATERIAL = {
+  // --- 기체 (전장 3.5 m, 동체 z −1.75…+1.77, 기수 −z) --------------------------
+  // 패널: 동체 링 프레임(z 0.42 m 간격)과 날개 리브/스파(x 0.30 m). 그을음은 추진부 —
+  // 프로펠러가 z=+1.84이고 엔진이 그 앞이라 +0.9부터 뒤로 짙어진다.
+  Airframe: {
+    panel: [0.3, 0, 0.42],
+    panelDepth: 0.7,
+    edge: 0.5,
+    dirt: 0.35,
+    soot: [0.9, 1.77],
+    mud: NONE,
+    seed: 3
+  },
+  // 타면은 별 부품이라 패널 없이 힌지 쪽 마모와 때만.
+  ControlSurface: {
+    panel: [0, 0, 0],
+    panelDepth: 0,
+    edge: 0.6,
+    dirt: 0.3,
+    soot: NONE,
+    mud: NONE,
+    seed: 7
+  },
+  // --- 발사관 (지상 장비 — 이야기의 대부분이 진흙과 긁힘) -------------------------
+  LauncherOlive: {
+    panel: [0.45, 0, 0.6],
+    panelDepth: 0.5,
+    edge: 0.6,
+    dirt: 0.55,
+    soot: NONE,
+    mud: [0.75, 0.42],
+    seed: 11
+  },
+  LauncherFrame: {
+    panel: [0, 0, 0],
+    panelDepth: 0,
+    edge: 0.7,
+    dirt: 0.6,
+    soot: NONE,
+    mud: [0.8, 0.4],
+    seed: 13
+  },
+  Metal: {
+    panel: [0, 0, 0],
+    panelDepth: 0,
+    edge: 0.85,
+    dirt: 0.45,
+    soot: NONE,
+    mud: [0.65, 0.4],
+    seed: 17
+  },
+  DarkDetail: {
+    panel: [0, 0, 0],
+    panelDepth: 0,
+    edge: 0.3,
+    dirt: 0.4,
+    soot: NONE,
+    mud: [0.55, 0.35],
+    seed: 19
+  }
+  // CanisterInner는 뺀다 — 관 안쪽은 거의 안 보이고, 보일 때는 어둠이 이야기다.
+};
+const WEAR_NOTES = {
+  model: "기체·발사관의 패널라인·긁힘·오염·그을음·진흙은 절차 생성 표시 효과이며 실제 기체의 상태·도장이 아닙니다."
+};
+function applyWear(material, cfg) {
+  const m2 = material;
+  if (m2.__wear) return;
+  m2.__wear = true;
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = function(shader, renderer) {
+    prevCompile.call(this, shader, renderer);
+    Object.assign(shader.uniforms, {
+      uWearPanel: { value: cfg.panel },
+      uWearPanelDepth: { value: cfg.panelDepth },
+      uWearEdge: { value: cfg.edge },
+      uWearDirt: { value: cfg.dirt },
+      uWearSoot: { value: cfg.soot },
+      uWearMud: { value: cfg.mud },
+      uWearSeed: { value: cfg.seed }
+    });
+    shader.vertexShader = shader.vertexShader.replace("#include <common>", `#include <common>
+${WEAR_VARYING_DECL}`).replace("#include <fog_vertex>", `#include <fog_vertex>
+${WEAR_VERT_BODY}`);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <common>",
+      `#include <common>
+${WEAR_UNIFORM_DECL}
+${WEAR_VARYING_DECL}
+${NOISE_GLSL}
+${WEAR_GLSL}`
+    ).replace(
+      "#include <metalnessmap_fragment>",
+      `#include <metalnessmap_fragment>
+${WEAR_FRAG_BODY}`
+    ).replace(
+      "#include <normal_fragment_begin>",
+      `#include <normal_fragment_begin>
+${WEAR_NORMAL_BODY}`
+    );
+  };
+  material.customProgramCacheKey = function() {
+    return `wear-v1|${prevKey.call(this)}`;
+  };
+  material.needsUpdate = true;
+}
 function finite(v2) {
   return typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
 }
@@ -39917,53 +40225,6 @@ vec4 cloudLayer(vec3 camPos, vec3 dir, vec3 sunDir, float sunIntensity, float ha
 `
   );
 }
-const NOISE_GLSL = (
-  /* glsl */
-  `
-vec2 hash2(vec2 p) {
-  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-  return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
-}
-
-/** 그래디언트 노이즈 — (값, ∂/∂x, ∂/∂y). 값은 대략 [−0.7, 0.7]. */
-vec3 gnoise2(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
-  vec2 ga = hash2(i);
-  vec2 gb = hash2(i + vec2(1.0, 0.0));
-  vec2 gc = hash2(i + vec2(0.0, 1.0));
-  vec2 gd = hash2(i + vec2(1.0, 1.0));
-  float va = dot(ga, f);
-  float vb = dot(gb, f - vec2(1.0, 0.0));
-  float vc = dot(gc, f - vec2(0.0, 1.0));
-  float vd = dot(gd, f - vec2(1.0, 1.0));
-  float k1 = vb - va;
-  float k2 = vc - va;
-  float k3 = va - vb - vc + vd;
-  float v = va + k1 * u.x + k2 * u.y + k3 * u.x * u.y;
-  vec2 d = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
-         + du * (vec2(k1, k2) + k3 * vec2(u.y, u.x));
-  return vec3(v, d);
-}
-
-/** fBm — 값만. 옥타브는 최대 5, 라쿠나리티 2.03(정수를 피해 반복 무늬를 줄인다). */
-float fbm2(vec2 p, int octaves) {
-  float v = 0.0;
-  float a = 0.5;
-  float norm = 0.0;
-  for (int i = 0; i < 5; i++) {
-    if (i >= octaves) break;
-    v += a * gnoise2(p).x;
-    norm += a;
-    p = p * 2.03 + vec2(17.3, 9.1);
-    a *= 0.5;
-  }
-  return v / max(norm, 1.0e-6);
-}
-`
-);
 const COAST_GLSL = (
   /* glsl */
   `
@@ -43442,7 +43703,11 @@ async function loadModel(url, expect, signal) {
   gltf.scene.traverse((o) => {
     const m2 = o.material;
     if (!m2) return;
-    for (const one of Array.isArray(m2) ? m2 : [m2]) applyAerialPerspective(one);
+    for (const one of Array.isArray(m2) ? m2 : [m2]) {
+      const wear = WEAR_BY_MATERIAL[one.name];
+      if (wear) applyWear(one, wear);
+      applyAerialPerspective(one);
+    }
   });
   return {
     model: {
@@ -43759,6 +44024,7 @@ class SceneController {
     );
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
     notes.push(CLOUD_NOTES.model);
+    if (this.vehicle || this.launcher) notes.push(WEAR_NOTES.model);
     notes.push(
       "해면은 지형 격자 밖(외곽 티어 30 km 밖)까지 이어 그립니다 — 그 부분은 실측 지리가 아니라 이어 붙인 평면입니다."
     );

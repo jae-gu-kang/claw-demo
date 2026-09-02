@@ -27,6 +27,7 @@ import { modelColumnsNed } from "../core/modelaxes.ts";
 import type { LauncherPose } from "../core/launcher.ts";
 import type { SurfacePose } from "../core/surfaces.ts";
 import { applyAerialPerspective } from "./atmosphere.ts";
+import { WEAR_BY_MATERIAL, applyWear } from "./materials.ts";
 import { disposeTree } from "./dispose.ts";
 import { toWorld } from "./axes.ts";
 
@@ -81,13 +82,19 @@ export async function loadModel(
   // 기체 루트만 `setVehiclePose`가 행렬을 직접 쓰면서 그 자리에서 끈다.
   gltf.scene.matrixAutoUpdate = true;
 
-  // **GLB 재질에도 대기를 건다.** 여기서 빠뜨리면 30 km 밖 지형이 하늘로 녹아드는데
-  // 기체만 또렷하게 남아, 배경에서 오려 붙인 것처럼 보인다. 재질은 한 GLB 안에서
-  // 메시끼리 공유되기도 하므로 `applyAerialPerspective`가 중복 호출을 흡수한다.
+  // **GLB 재질에 마모와 대기를 건다.** 대기를 빠뜨리면 30 km 밖 지형이 하늘로 녹아드는데
+  // 기체만 또렷하게 남아, 배경에서 오려 붙인 것처럼 보인다. 마모는 재질 **이름**으로
+  // 조회한다 — 이름이 목록에 없으면 민짜로 남을 뿐 실패하지 않는다(관 안쪽처럼 일부러
+  // 뺀 것과 구별할 수 없기 때문에, 조용히 넘기는 쪽이 맞다). 재질은 한 GLB 안에서
+  // 메시끼리 공유되기도 하므로 두 패처 모두 중복 호출을 흡수한다.
   gltf.scene.traverse((o) => {
     const m = (o as Mesh).material as Material | Material[] | undefined;
     if (!m) return;
-    for (const one of Array.isArray(m) ? m : [m]) applyAerialPerspective(one);
+    for (const one of Array.isArray(m) ? m : [m]) {
+      const wear = WEAR_BY_MATERIAL[one.name];
+      if (wear) applyWear(one, wear);
+      applyAerialPerspective(one);
+    }
   });
 
   return {

@@ -44,6 +44,29 @@ vec3 gnoise2(vec2 p) {
   return vec3(v, d);
 }
 
+/** 3D 값 노이즈 — 재질 마모용. 그래디언트 노이즈보다 싸고(해시 8번) 표면 얼룩에는 충분하다. */
+float hash31(vec3 p) {
+  p = fract(p * 0.1031);
+  p += dot(p, p.yzx + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+
+float vnoise3(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = mix(hash31(i), hash31(i + vec3(1.0, 0.0, 0.0)), f.x);
+  float b = mix(hash31(i + vec3(0.0, 1.0, 0.0)), hash31(i + vec3(1.0, 1.0, 0.0)), f.x);
+  float c = mix(hash31(i + vec3(0.0, 0.0, 1.0)), hash31(i + vec3(1.0, 0.0, 1.0)), f.x);
+  float d = mix(hash31(i + vec3(0.0, 1.0, 1.0)), hash31(i + vec3(1.0, 1.0, 1.0)), f.x);
+  return mix(mix(a, b, f.y), mix(c, d, f.y), f.z);
+}
+
+/** 3옥타브 fBm — 0~0.875. */
+float fbm3(vec3 p) {
+  return 0.5 * vnoise3(p) + 0.25 * vnoise3(p * 2.07 + 1.7) + 0.125 * vnoise3(p * 4.13 + 3.1);
+}
+
 /** fBm — 값만. 옥타브는 최대 5, 라쿠나리티 2.03(정수를 피해 반복 무늬를 줄인다). */
 float fbm2(vec2 p, int octaves) {
   float v = 0.0;
