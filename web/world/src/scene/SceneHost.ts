@@ -18,7 +18,7 @@
 import {
   ACESFilmicToneMapping, BufferAttribute, BufferGeometry, Color, DirectionalLight,
   Group, HemisphereLight, LineBasicMaterial, LineSegments, Matrix4, Mesh,
-  MeshStandardMaterial, PerspectiveCamera, Scene, SRGBColorSpace, Vector3,
+  MeshStandardMaterial, PerspectiveCamera, Scene, SphereGeometry, SRGBColorSpace, Vector3,
   WebGLRenderer,
 } from "three";
 
@@ -105,6 +105,13 @@ const CINEMATIC_POST: PostOptions = {
 
 export type ViewStyle = "engineering" | "cinematic";
 
+/** 표지 하나 — NED 지점과 종류. `radius`는 웨이포인트 포획 반경 [m]. */
+export interface Marker {
+  ne: readonly [number, number, number];
+  kind: "waypoint" | "start";
+  radius: number;
+}
+
 export interface CameraPose {
   eye: readonly number[];
   target: readonly number[];
@@ -170,7 +177,7 @@ export class SceneHost {
   private readonly sun: DirectionalLight;
   private readonly ambient: HemisphereLight;
   private readonly groups = {
-    terrain: new Group(), paths: new Group(), models: new Group(),
+    terrain: new Group(), paths: new Group(), models: new Group(), marks: new Group(),
   };
 
   private stats: SceneStats = { drawCalls: 0, triangles: 0, ms: 0 };
@@ -180,6 +187,7 @@ export class SceneHost {
   private size = { w: 1, h: 1, dpr: 1 };
   /** 프레임마다 다시 채운다 — 매번 새로 만들면 GC가 프레임을 갉는다. */
   private readonly gridInvViewProj = new Matrix4();
+  private renderScale = 1;
 
   constructor(canvas: HTMLCanvasElement, context: WebGL2RenderingContext) {
     // 컨텍스트를 밖에서 만들어 넘긴다 — 같은 캔버스의 두 번째 getContext는 기존 것을
@@ -224,6 +232,7 @@ export class SceneHost {
   setViewStyle(style: ViewStyle): void {
     this.setPost(style === "cinematic" ? CINEMATIC_POST : ENGINEERING_POST);
     this.groups.paths.visible = style === "engineering";
+    this.groups.marks.visible = style === "engineering";
   }
 
   /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
@@ -234,13 +243,30 @@ export class SceneHost {
   }
 
   resize(width: number, height: number, dpr: number): void {
-    // dpr 3 기기에서 픽셀 수가 9배가 되는 것을 막는다.
+    // dpr 3 기기에서 픽셀 수가 9배가 되는 것을 막는다. renderScale은 자동 강등 몫이다.
     this.size = { w: width, h: height, dpr };
-    this.renderer.setPixelRatio(Math.min(dpr, 2));
+    const ratio = Math.min(dpr, 2) * this.renderScale;
+    this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(height, 1);
     this.camera.updateProjectionMatrix();
-    this.post?.setSize(width, height, dpr);
+    this.post?.setSize(width, height, dpr * this.renderScale);
+  }
+
+  /** 렌더 배율 — 품질 자동 강등의 한 손잡이.
+   *
+   * 픽셀 수를 배율²로 줄이므로 GPU 픽셀 비용(바다·구름·대기가 다 픽셀 셰이더다)에
+   * 정비례로 듣는다. 기하·걸음 수를 줄이는 것보다 이것 하나가 낫다: 셰이더 재컴파일이
+   * 없어 강등 자체가 프레임을 먹지 않고, 되돌리기도 즉시다. 값은 캡션이 말한다. */
+  setRenderScale(scale: number): void {
+    const s = Math.min(Math.max(scale, 0.4), 1);
+    if (s === this.renderScale) return;
+    this.renderScale = s;
+    this.resize(this.size.w, this.size.h, this.size.dpr);
+  }
+
+  getRenderScale(): number {
+    return this.renderScale;
   }
 
   setEnvironment({ sunAzEl, visibility, exposure, sea, cloudCover }: Environment): void {
@@ -331,6 +357,49 @@ export class SceneHost {
       // 궤적도 대기를 탄다 — 안 걸면 30 km 밖 선만 또렷해서 지형 위에 떠 보인다.
       applyAerialPerspective(mat);
       this.groups.paths.add(new LineSegments(geo, mat));
+    }
+  }
+
+  /** 표지 — 웨이포인트 기둥·포획원과 출발점. 옛 화면의 `setMarkers`와 같은 어휘다.
+   *
+   * 웨이포인트는 지점 자체가 아니라 **지점 + 포획 반경**이 유도의 사실이다 — 원이 없으면
+   * "지나갔는데 왜 잡혔지/안 잡혔지"를 화면이 설명하지 못한다. 고도가 없는 웨이포인트는
+   * 호출측이 활주로 표고를 넣어 준다(그 선택은 캡션 몫이 아니라 관례다 — 옛 화면과 같다). */
+  setMarkers(marks: readonly Marker[]): void {
+    disposeTree(this.groups.marks);
+    for (const m of marks) {
+      const w = toWorld(m.ne[0]!, m.ne[1]!, m.ne[2]!);
+      if (m.kind === "start") {
+        // 옛 화면은 반지름 14 m였다 — 기체를 12배로 그려 카메라가 멀었기 때문이다.
+        // 지금 자세 관측은 3배 배율이라 카메라가 지점 몇 m 안까지 오고, 14 m 구는
+        // 화면을 통째로 삼킨다(실측). 표지는 눈에 띄면 되지 가릴 이유가 없다.
+        const geo = new SphereGeometry(3, 12, 10);
+        const mesh = new Mesh(geo, new MeshStandardMaterial({ color: 0x34c759, roughness: 0.7 }));
+        mesh.position.set(w[0], w[1], w[2]);
+        this.groups.marks.add(mesh);
+        continue;
+      }
+      // 기둥 — 지점에서 위로 120 m. 지면에 붙어 멀리서 안 보이는 것을 막는다.
+      const seg = new Float32Array([w[0], w[1], w[2], w[0], w[1] + 120, w[2]]);
+      const geo = new BufferGeometry();
+      geo.setAttribute("position", new BufferAttribute(seg, 3));
+      this.groups.marks.add(new LineSegments(geo, new LineBasicMaterial({ color: 0xff9500 })));
+      if (m.radius > 0) {
+        const n = 64;
+        const pts = new Float32Array(n * 6);
+        for (let i = 0; i < n; i++) {
+          for (const [j, k] of [[0, i], [1, (i + 1) % n]] as const) {
+            const a = (2 * Math.PI * k) / n;
+            const c = toWorld(m.ne[0]! + m.radius * Math.cos(a), m.ne[1]! + m.radius * Math.sin(a), m.ne[2]!);
+            pts.set(c, i * 6 + j * 3);
+          }
+        }
+        const cg = new BufferGeometry();
+        cg.setAttribute("position", new BufferAttribute(pts, 3));
+        this.groups.marks.add(new LineSegments(cg, new LineBasicMaterial({
+          color: 0xff9500, transparent: true, opacity: 0.7,
+        })));
+      }
     }
   }
 

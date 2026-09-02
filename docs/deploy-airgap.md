@@ -12,7 +12,7 @@
 
 | | 크기 | 변경 빈도 |
 |---|---|---|
-| 코드 (`claw-code.bundle`, 전체 git 이력) | **~0.9 MB** | 매일 |
+| 코드 (`claw-code.bundle`, 전체 git 이력) | **~3 MB** (2026-09-02 실측 2.75) | 매일 |
 | 의존성 (`wheelhouse/`) | **수십~수백 MB** | 거의 없음 |
 
 그래서 **한 덩어리로 묶지 않는다.** 의존성은 한 번 반입하고, 이후에는 코드만
@@ -93,7 +93,7 @@ scripts/run.sh
 
 ```bash
 # 일반망
-scripts/bundle.sh --code-only     # dist-code/, ~0.9 MB
+scripts/bundle.sh --code-only     # dist-code/, ~3 MB
 
 # 폐쇄망
 cd claw-demo

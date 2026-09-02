@@ -33,7 +33,7 @@ import {
   fetchReplay, fetchTerrainPack, fetchWorldManifest, listSimResults, modelUrl,
   type SimResultRow, type WorldManifest,
 } from "../data/api.ts";
-import { SceneHost, createSceneHost, type ViewStyle } from "./SceneHost.ts";
+import { SceneHost, createSceneHost, type Marker, type ViewStyle } from "./SceneHost.ts";
 import { buildCoastField } from "../core/coastfield.ts";
 import { buildTerrain } from "./terrain.ts";
 import {
@@ -274,9 +274,30 @@ export class SceneController {
       if (this.pack && agree.reason) notes.push(agree.reason);
     }
 
+    // --- 활주로: 중심선 + 시단·종단 --- (원점에서 heading 방향 length 구간 — lib/site.js와
+    // lib/replay.js가 이 규약을 전제로 판정한다. 폭은 결과에 없어 그리지 않는다.)
+    const rw = body.meta?.runway;
+    const rwLines: { points: Float32Array; color: number }[] = [];
+    if (rw && num(rw.heading) !== null && num(rw.length) !== null) {
+      const el = num(rw.elevation) ?? 0;
+      const h = num(rw.heading)!;
+      const L = num(rw.length)!;
+      const n1 = Math.cos(h) * L;
+      const e1 = Math.sin(h) * L;
+      const pts: number[] = [0, 0, -el, n1, e1, -el];
+      // 시단·종단 가로선 — 접지 지점을 눈으로 짚을 수 있게 (옛 화면과 같은 22 m 반폭).
+      for (const [n0, e0] of [[0, 0], [n1, e1]] as const) {
+        pts.push(n0 - -Math.sin(h) * 22, e0 - Math.cos(h) * 22, -el,
+                 n0 + -Math.sin(h) * 22, e0 + Math.cos(h) * 22, -el);
+      }
+      rwLines.push({ points: new Float32Array(pts), color: 0xffffff });
+      notes.push("활주로는 중심선과 양 끝만 그립니다 — 폭은 결과에 없습니다.");
+    }
+
+
     // --- 궤적 ---
     const { points, breaks } = trackPoints(body.signals, this.n);
-    this.host.setPaths([{ points, color: 0x32d3ff, breaks }]);
+    this.host.setPaths([{ points, color: 0x32d3ff, breaks }, ...rwLines]);
     this.missingPos = breaks.length;
     this.missingAtt = 0;
     for (let i = 0; i < this.n; i++) if (attitudeAt(body.signals, i) === null) this.missingAtt++;
@@ -286,6 +307,25 @@ export class SceneController {
     if (this.missingAtt > 0) {
       notes.push(`자세 결측 ${this.missingAtt}/${this.n} 표본 — 그 구간은 기체를 그리지 않습니다.`);
     }
+
+    // --- 표지: 웨이포인트 + 출발점 --- (옛 화면과 같은 어휘 — 기능 동등의 마지막 조각)
+    const marks: Marker[] = [];
+    const acceptRadius = num(body.meta?.accept_radius) ?? 0;
+    const rwElev = num(body.meta?.runway?.elevation) ?? 0;
+    for (const w of body.meta?.waypoints ?? []) {
+      const n0 = num(w[0]);
+      const e0 = num(w[1]);
+      if (n0 === null || e0 === null) continue;
+      // 고도가 없는 웨이포인트는 활주로 표고에 놓는다 — 옛 화면과 같은 관례다.
+      const d = w.length > 2 && num(w[2]) !== null ? -num(w[2])! : -rwElev;
+      marks.push({ ne: [n0, e0, d], kind: "waypoint", radius: acceptRadius });
+    }
+    // 출발점은 **성한 첫 표본**에만 찍는다 — 결측이면 원점에 초록 점을 지어내게 된다.
+    for (let i = 0; i < this.n; i++) {
+      const s0 = sampleAt(body.signals, i);
+      if (s0) { marks.push({ ne: s0, kind: "start", radius: 0 }); break; }
+    }
+    this.host.setMarkers(marks);
 
     // --- 기체 형상 --- (확대 배율은 시점마다 다르므로 여기서 말하지 않는다 — emitNotes)
     if (this.vehicle == null) {
@@ -335,6 +375,12 @@ export class SceneController {
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
     notes.push(CLOUD_NOTES.model);
     if (this.vehicle || this.launcher) notes.push(WEAR_NOTES.model);
+    const scale = this.host.getRenderScale();
+    if (scale < 1) {
+      notes.push(
+        `성능: 프레임이 늦어 렌더 배율을 ${scale}로 내렸습니다 — 빨라지면 되돌립니다.`,
+      );
+    }
     if (this.style === "cinematic") {
       notes.push(
         "시네마틱 모드 — 궤적 오버레이를 숨기고 블룸·비네트·그레이딩을 겁니다. "
@@ -461,6 +507,7 @@ export class SceneController {
     const now = performance.now();
     const dtWall = Math.min((now - this.lastFrameMs) / 1000, 0.25);
     this.lastFrameMs = now;
+    this.autoQuality(dtWall);
 
     if (this.playing && this.body && isPlayable(this.body.t)) {
       const next = indexAt(this.fromIdx, this.fromWall, now, this.speed, this.dt, this.n);
@@ -586,6 +633,41 @@ export class SceneController {
     this.emitNotes();
   }
 
+  /** 품질 자동 강등 — 렌더 배율 사다리 1 → 0.85 → 0.7 → 0.55 (계획 §리스크 7).
+   *
+   * 신호는 **재생 중의 프레임 간격**이다. CPU 제출 ms는 GPU가 막힌 것을 못 보고
+   * (바다·구름·대기가 다 픽셀 셰이더라 병목은 GPU 쪽이다), 재생이 아닐 때는 온디맨드
+   * 루프라 간격이 뜻이 없다. 250 ms를 넘는 표본은 버린다 — 그건 부하가 아니라 브라우저
+   * 스로틀(가려진 탭은 rAF가 1 Hz다)이고, 그걸 부하로 읽으면 탭을 가렸다 돌아올 때마다
+   * 화질이 떨어져 있다.
+   *
+   * 내리기는 빠르게(EMA 24 ms 초과가 이어지면), 올리기는 천천히(11 ms 미만이 오래) —
+   * 경계에서 오르내리면 해상도가 숨쉬는 것이 눈에 띈다. */
+  private autoQuality(dtWall: number): void {
+    if (!this.playing || dtWall > 0.25) return;
+    this.frameEma = this.frameEma === 0 ? dtWall : this.frameEma * 0.9 + dtWall * 0.1;
+    if (this.qualityHold > 0) { this.qualityHold--; return; }
+    const LADDER = [1, 0.85, 0.7, 0.55];
+    const cur = LADDER.indexOf(this.host.getRenderScale());
+    if (this.frameEma > 0.024 && cur >= 0 && cur < LADDER.length - 1) {
+      this.host.setRenderScale(LADDER[cur + 1]!);
+      this.qualityHold = 120;
+      this.dirty = true;
+      this.emitNotes();
+    } else if (this.frameEma < 0.011 && cur > 0) {
+      this.upgradeStreak++;
+      if (this.upgradeStreak > 300) {
+        this.host.setRenderScale(LADDER[cur - 1]!);
+        this.upgradeStreak = 0;
+        this.qualityHold = 120;
+        this.dirty = true;
+        this.emitNotes();
+      }
+      return;
+    }
+    this.upgradeStreak = 0;
+  }
+
   /** **시간 간격으로** 올린다 — 값 비교로는 못 줄인다.
    *
    * 처음엔 "바뀔 때만"으로 두었는데, `ms`를 0.1 ms 단위로 비교하니 CPU 제출 시간이 그보다
@@ -604,6 +686,9 @@ export class SceneController {
   }
 
   private style: ViewStyle = "engineering";
+  private frameEma = 0;
+  private qualityHold = 0;
+  private upgradeStreak = 0;
   private lastSeaTime = 0;
   private lastStatsAt = 0;
   private readonly depthBits: number;

@@ -101,7 +101,8 @@ export function landingSummary(body) {
   // 보면 "869 m / 활주로 1205 m"라 활주로에 선 것처럼 읽혔다.
   //
   // 활주로 기하는 화면과 같은 규약을 쓴다 — 원점에서 heading 방향 length 구간
-  // (views/renderer-three.js runwayMarks). 두 가지는 **폭을 몰라도 단정할 수 있다**:
+  // (world/src/scene/SceneController.ts 활주로 그리기 — 옛 renderer-three.js에서 왔다).
+  // 두 가지는 **폭을 몰라도 단정할 수 있다**:
   //   ① 축방향이 0~length 밖이면 밖이다
   //   ② |횡편차| > length면 밖이다 — 활주로가 자기 길이보다 넓을 수는 없다
   // 둘 다 아니면 단정하지 않는다. 활주로 **폭이 결과에 없어** 그 안쪽을 가릴 수단이

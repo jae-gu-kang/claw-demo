@@ -40830,7 +40830,8 @@ class SceneHost {
   groups = {
     terrain: new Group(),
     paths: new Group(),
-    models: new Group()
+    models: new Group(),
+    marks: new Group()
   };
   stats = { drawCalls: 0, triangles: 0, ms: 0 };
   disposed = false;
@@ -40839,6 +40840,7 @@ class SceneHost {
   size = { w: 1, h: 1, dpr: 1 };
   /** 프레임마다 다시 채운다 — 매번 새로 만들면 GC가 프레임을 갉는다. */
   gridInvViewProj = new Matrix4();
+  renderScale = 1;
   constructor(canvas, context) {
     this.renderer = new WebGLRenderer({ canvas, context });
     this.renderer.outputColorSpace = SRGBColorSpace;
@@ -40867,6 +40869,7 @@ class SceneHost {
   setViewStyle(style) {
     this.setPost(style === "cinematic" ? CINEMATIC_POST : ENGINEERING_POST);
     this.groups.paths.visible = style === "engineering";
+    this.groups.marks.visible = style === "engineering";
   }
   /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
   setPost(opts) {
@@ -40876,11 +40879,26 @@ class SceneHost {
   }
   resize(width, height, dpr) {
     this.size = { w: width, h: height, dpr };
-    this.renderer.setPixelRatio(Math.min(dpr, 2));
+    const ratio = Math.min(dpr, 2) * this.renderScale;
+    this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(height, 1);
     this.camera.updateProjectionMatrix();
-    this.post?.setSize(width, height, dpr);
+    this.post?.setSize(width, height, dpr * this.renderScale);
+  }
+  /** 렌더 배율 — 품질 자동 강등의 한 손잡이.
+   *
+   * 픽셀 수를 배율²로 줄이므로 GPU 픽셀 비용(바다·구름·대기가 다 픽셀 셰이더다)에
+   * 정비례로 듣는다. 기하·걸음 수를 줄이는 것보다 이것 하나가 낫다: 셰이더 재컴파일이
+   * 없어 강등 자체가 프레임을 먹지 않고, 되돌리기도 즉시다. 값은 캡션이 말한다. */
+  setRenderScale(scale) {
+    const s = Math.min(Math.max(scale, 0.4), 1);
+    if (s === this.renderScale) return;
+    this.renderScale = s;
+    this.resize(this.size.w, this.size.h, this.size.dpr);
+  }
+  getRenderScale() {
+    return this.renderScale;
   }
   setEnvironment({ sunAzEl, visibility, exposure, sea, cloudCover }) {
     const [az, el2] = sunAzEl;
@@ -40958,6 +40976,46 @@ class SceneHost {
       const mat = new LineBasicMaterial({ color: ln.color });
       applyAerialPerspective(mat);
       this.groups.paths.add(new LineSegments(geo, mat));
+    }
+  }
+  /** 표지 — 웨이포인트 기둥·포획원과 출발점. 옛 화면의 `setMarkers`와 같은 어휘다.
+   *
+   * 웨이포인트는 지점 자체가 아니라 **지점 + 포획 반경**이 유도의 사실이다 — 원이 없으면
+   * "지나갔는데 왜 잡혔지/안 잡혔지"를 화면이 설명하지 못한다. 고도가 없는 웨이포인트는
+   * 호출측이 활주로 표고를 넣어 준다(그 선택은 캡션 몫이 아니라 관례다 — 옛 화면과 같다). */
+  setMarkers(marks) {
+    disposeTree(this.groups.marks);
+    for (const m2 of marks) {
+      const w2 = toWorld(m2.ne[0], m2.ne[1], m2.ne[2]);
+      if (m2.kind === "start") {
+        const geo2 = new SphereGeometry(3, 12, 10);
+        const mesh = new Mesh(geo2, new MeshStandardMaterial({ color: 3458905, roughness: 0.7 }));
+        mesh.position.set(w2[0], w2[1], w2[2]);
+        this.groups.marks.add(mesh);
+        continue;
+      }
+      const seg = new Float32Array([w2[0], w2[1], w2[2], w2[0], w2[1] + 120, w2[2]]);
+      const geo = new BufferGeometry();
+      geo.setAttribute("position", new BufferAttribute(seg, 3));
+      this.groups.marks.add(new LineSegments(geo, new LineBasicMaterial({ color: 16749824 })));
+      if (m2.radius > 0) {
+        const n2 = 64;
+        const pts = new Float32Array(n2 * 6);
+        for (let i = 0; i < n2; i++) {
+          for (const [j, k2] of [[0, i], [1, (i + 1) % n2]]) {
+            const a = 2 * Math.PI * k2 / n2;
+            const c = toWorld(m2.ne[0] + m2.radius * Math.cos(a), m2.ne[1] + m2.radius * Math.sin(a), m2.ne[2]);
+            pts.set(c, i * 6 + j * 3);
+          }
+        }
+        const cg2 = new BufferGeometry();
+        cg2.setAttribute("position", new BufferAttribute(pts, 3));
+        this.groups.marks.add(new LineSegments(cg2, new LineBasicMaterial({
+          color: 16749824,
+          transparent: true,
+          opacity: 0.7
+        })));
+      }
     }
   }
   /** 모델 그룹 — GLB 루트를 넣고 뺀다.
@@ -44028,8 +44086,30 @@ class SceneController {
       notes.push("지형이 없어 해안선을 모릅니다 — 해면도 그리지 않습니다.");
       if (this.pack && agree.reason) notes.push(agree.reason);
     }
+    const rw = body.meta?.runway;
+    const rwLines = [];
+    if (rw && num(rw.heading) !== null && num(rw.length) !== null) {
+      const el2 = num(rw.elevation) ?? 0;
+      const h = num(rw.heading);
+      const L2 = num(rw.length);
+      const n1 = Math.cos(h) * L2;
+      const e1 = Math.sin(h) * L2;
+      const pts = [0, 0, -el2, n1, e1, -el2];
+      for (const [n0, e0] of [[0, 0], [n1, e1]]) {
+        pts.push(
+          n0 - -Math.sin(h) * 22,
+          e0 - Math.cos(h) * 22,
+          -el2,
+          n0 + -Math.sin(h) * 22,
+          e0 + Math.cos(h) * 22,
+          -el2
+        );
+      }
+      rwLines.push({ points: new Float32Array(pts), color: 16777215 });
+      notes.push("활주로는 중심선과 양 끝만 그립니다 — 폭은 결과에 없습니다.");
+    }
     const { points, breaks } = trackPoints(body.signals, this.n);
-    this.host.setPaths([{ points, color: 3331071, breaks }]);
+    this.host.setPaths([{ points, color: 3331071, breaks }, ...rwLines]);
     this.missingPos = breaks.length;
     this.missingAtt = 0;
     for (let i = 0; i < this.n; i++) if (attitudeAt(body.signals, i) === null) this.missingAtt++;
@@ -44039,6 +44119,24 @@ class SceneController {
     if (this.missingAtt > 0) {
       notes.push(`자세 결측 ${this.missingAtt}/${this.n} 표본 — 그 구간은 기체를 그리지 않습니다.`);
     }
+    const marks = [];
+    const acceptRadius = num(body.meta?.accept_radius) ?? 0;
+    const rwElev = num(body.meta?.runway?.elevation) ?? 0;
+    for (const w2 of body.meta?.waypoints ?? []) {
+      const n0 = num(w2[0]);
+      const e0 = num(w2[1]);
+      if (n0 === null || e0 === null) continue;
+      const d = w2.length > 2 && num(w2[2]) !== null ? -num(w2[2]) : -rwElev;
+      marks.push({ ne: [n0, e0, d], kind: "waypoint", radius: acceptRadius });
+    }
+    for (let i = 0; i < this.n; i++) {
+      const s0 = sampleAt(body.signals, i);
+      if (s0) {
+        marks.push({ ne: s0, kind: "start", radius: 0 });
+        break;
+      }
+    }
+    this.host.setMarkers(marks);
     if (this.vehicle == null) {
       notes.push("기체 모델이 없어 궤적만 그립니다.");
     } else {
@@ -44084,6 +44182,12 @@ class SceneController {
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
     notes.push(CLOUD_NOTES.model);
     if (this.vehicle || this.launcher) notes.push(WEAR_NOTES.model);
+    const scale = this.host.getRenderScale();
+    if (scale < 1) {
+      notes.push(
+        `성능: 프레임이 늦어 렌더 배율을 ${scale}로 내렸습니다 — 빨라지면 되돌립니다.`
+      );
+    }
     if (this.style === "cinematic") {
       notes.push(
         "시네마틱 모드 — 궤적 오버레이를 숨기고 블룸·비네트·그레이딩을 겁니다. 판독 값과 이 캡션은 계속 표시합니다."
@@ -44190,6 +44294,7 @@ class SceneController {
     const now = performance.now();
     const dtWall = Math.min((now - this.lastFrameMs) / 1e3, 0.25);
     this.lastFrameMs = now;
+    this.autoQuality(dtWall);
     if (this.playing && this.body && isPlayable(this.body.t)) {
       const next = indexAt(this.fromIdx, this.fromWall, now, this.speed, this.dt, this.n);
       if (next !== this.idx) {
@@ -44309,6 +44414,43 @@ class SceneController {
     this.fellBack = v2;
     this.emitNotes();
   }
+  /** 품질 자동 강등 — 렌더 배율 사다리 1 → 0.85 → 0.7 → 0.55 (계획 §리스크 7).
+   *
+   * 신호는 **재생 중의 프레임 간격**이다. CPU 제출 ms는 GPU가 막힌 것을 못 보고
+   * (바다·구름·대기가 다 픽셀 셰이더라 병목은 GPU 쪽이다), 재생이 아닐 때는 온디맨드
+   * 루프라 간격이 뜻이 없다. 250 ms를 넘는 표본은 버린다 — 그건 부하가 아니라 브라우저
+   * 스로틀(가려진 탭은 rAF가 1 Hz다)이고, 그걸 부하로 읽으면 탭을 가렸다 돌아올 때마다
+   * 화질이 떨어져 있다.
+   *
+   * 내리기는 빠르게(EMA 24 ms 초과가 이어지면), 올리기는 천천히(11 ms 미만이 오래) —
+   * 경계에서 오르내리면 해상도가 숨쉬는 것이 눈에 띈다. */
+  autoQuality(dtWall) {
+    if (!this.playing || dtWall > 0.25) return;
+    this.frameEma = this.frameEma === 0 ? dtWall : this.frameEma * 0.9 + dtWall * 0.1;
+    if (this.qualityHold > 0) {
+      this.qualityHold--;
+      return;
+    }
+    const LADDER = [1, 0.85, 0.7, 0.55];
+    const cur = LADDER.indexOf(this.host.getRenderScale());
+    if (this.frameEma > 0.024 && cur >= 0 && cur < LADDER.length - 1) {
+      this.host.setRenderScale(LADDER[cur + 1]);
+      this.qualityHold = 120;
+      this.dirty = true;
+      this.emitNotes();
+    } else if (this.frameEma < 0.011 && cur > 0) {
+      this.upgradeStreak++;
+      if (this.upgradeStreak > 300) {
+        this.host.setRenderScale(LADDER[cur - 1]);
+        this.upgradeStreak = 0;
+        this.qualityHold = 120;
+        this.dirty = true;
+        this.emitNotes();
+      }
+      return;
+    }
+    this.upgradeStreak = 0;
+  }
   /** **시간 간격으로** 올린다 — 값 비교로는 못 줄인다.
    *
    * 처음엔 "바뀔 때만"으로 두었는데, `ms`를 0.1 ms 단위로 비교하니 CPU 제출 시간이 그보다
@@ -44328,6 +44470,9 @@ class SceneController {
     });
   }
   style = "engineering";
+  frameEma = 0;
+  qualityHold = 0;
+  upgradeStreak = 0;
   lastSeaTime = 0;
   lastStatsAt = 0;
   depthBits;

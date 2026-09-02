@@ -25,7 +25,8 @@
 
 /** 고흥 국가종합비행성능시험장. 원점은 활주로 **남단 임계**다 —
  *  활주로를 "원점에서 heading 방향 length 구간"으로 그리는 규약
- *  (views/renderer-three.js runwayMarks)과 기본 미션이 북향인 것이 함께 정한다. */
+ *  (world/src/scene/SceneController.ts의 활주로 그리기 — 옛 renderer-three.js
+ *  runwayMarks에서 왔다)과 기본 미션이 북향인 것이 함께 정한다. */
 export const GOHEUNG = {
   originLatDeg: 34.601303,
   originLonDeg: 127.212067,
