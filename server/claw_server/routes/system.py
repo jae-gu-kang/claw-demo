@@ -16,7 +16,7 @@ from pydantic import BaseModel, field_validator
 import claw
 from claw.params.registry import REGISTRY, RegistryError
 
-from claw_server.routes.world import _terrain_packs
+from claw_server.routes.world import _root, _terrain_packs
 
 router = APIRouter(tags=["system"])
 
@@ -63,6 +63,18 @@ def health(request: Request) -> dict:
     # 지형 생성을 추가한 뒤 실제로 이 질문에 답할 수가 없어서 겪었다). 이름만 내고
     # 바이트는 안 낸다 — 헬스체크가 지형 다운로드 엔드포인트가 될 이유는 없다.
     packs = [p["name"] for p in _terrain_packs()]
+    # 팩이 비면 **왜**가 필요하다 — 위 지형 팩 항목과 같은 동기, 같은 무인증 제약.
+    # buildCommand가 실패 원인을 data/geo/.terrain-build.log로 남기므로(render.yaml)
+    # 그 꼬리만 낸다. 통째로 내지 않는 이유: terrain_terrain.py가 타일마다 진행률을
+    # 찍어 길면 수백 줄이라 — 실패 원인은 보통 마지막 몇 줄에 있다.
+    build_log_tail = None
+    if not packs:
+        try:
+            text = (_root() / ".terrain-build.log").read_text(errors="replace")
+            lines = text.splitlines()
+            build_log_tail = "\n".join(lines[-30:])
+        except OSError:
+            pass  # 로그가 아직 없다(첫 빌드 전) — None으로 답한다, 지어내지 않는다
     return {
         "status": "ok",
         "version": request.app.version,
@@ -70,6 +82,7 @@ def health(request: Request) -> dict:
         "commit": deployed_commit(),
         "jobs": len(request.app.state.jobs.list()),
         "world_terrain_packs": packs,
+        "world_terrain_build_log_tail": build_log_tail,
     }
 
 

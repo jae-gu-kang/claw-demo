@@ -17,7 +17,7 @@ services:
     # certifi를 함께 들여오던 유일한 통로였다(2026-09-02, 배포에서만 CA 번들을 못 찾아
     # 조용히 실패해 겪었다). scripts/terrain/build_terrain.py의 폴백 경로도 macOS/BSD
     # 경로라 Render 리눅스 빌드 이미지와는 맞지 않는다 — certifi가 그 폴백보다 먼저다.
-    buildCommand: pip install --upgrade pip && pip install -e engine && pip install -e server && pip install certifi && (python3 scripts/terrain/build_terrain.py --origin-lat 34.601303 --origin-lon 127.212067 --tier core:radius=12000,step=30 --tier outer:radius=30000,step=90 --out data/geo/site-terrain-v1.bin || echo "지형 팩 생성 실패 — 지형 없이 배포를 계속합니다")
+    buildCommand: pip install --upgrade pip && pip install -e engine && pip install -e server && pip install certifi && (python3 scripts/terrain/build_terrain.py --origin-lat 34.601303 --origin-lon 127.212067 --tier core:radius=12000,step=30 --tier outer:radius=30000,step=90 --out data/geo/site-terrain-v1.bin > data/geo/.terrain-build.log 2>&1 || echo "지형 팩 생성 실패 — 로그는 data/geo/.terrain-build.log, 지형 없이 배포를 계속합니다")
     # --workers 1 명시 — uvicorn이 $WEB_CONCURRENCY로 워커를 늘리면 프로세스 메모리의
     # JobManager가 갈라져 진행률 조회가 조용히 404가 된다 (README 알려진 제약).
     startCommand: uvicorn --factory claw_server:create_app --host 0.0.0.0 --port $PORT --workers 1
