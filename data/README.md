@@ -20,7 +20,7 @@
 ```
 data/geo/
   raw/                      내려받은 원본 타일 캐시
-  goheung-terrain-v1.bin    구운 지형 팩 (약 2.2 MB)
+  site-terrain-v1.bin       구운 지형 팩 (약 2.2 MB)
 ```
 
 **왜 커밋하지 않나.** 코드(1 MB 미만)·의존성(수백 MB)과 변경 빈도가 또 다르다 — 지형은
@@ -33,7 +33,7 @@ data/geo/
 python3 scripts/terrain/build_terrain.py \
     --origin-lat 34.601303 --origin-lon 127.212067 \
     --tier core:radius=12000,step=30 --tier outer:radius=30000,step=90 \
-    --out data/geo/goheung-terrain-v1.bin
+    --out data/geo/site-terrain-v1.bin
 ```
 
 원점은 고흥 국가종합비행성능시험장 활주로의 **남단 임계**이고, 항공영상에서 측정한

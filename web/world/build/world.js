@@ -37678,7 +37678,7 @@ const shared = {
 const atmosphereUniforms = shared;
 const cloud = {
   uCloudCover: { value: 0.35 },
-  // 밑면·두께는 표시용 고정값이다. 고흥의 여름 적운 밑면이 대개 1~2 km라 그 안에 뒀다.
+  // 밑면·두께는 표시용 고정값이다. 이 위도대의 여름 적운 밑면이 대개 1~2 km라 그 안에 뒀다.
   uCloudBase: { value: 1500 },
   uCloudThick: { value: 600 },
   uCloudWind: { value: new Vector2(4, 2) },
