@@ -38343,6 +38343,7 @@ const LAUNCHER_GEOMETRY = {
    *  지면 기준 미터로 바꿀 때만 곱한다. 관절 값은 로컬이라 곱하지 않는다. */
   rootScale: 2
 };
+const VEHICLE_AFT_EXTENT = 1.9;
 const LAUNCHER_SPAN = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.railTipZ) * LAUNCHER_GEOMETRY.rootScale;
 const CANISTER_LENGTH = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.muzzleZ) * LAUNCHER_GEOMETRY.rootScale;
 function boresightNed(azimuth, elevation) {
@@ -38358,7 +38359,8 @@ function launcherPose(launch) {
   const pivotHeight = g.turntableY + g.cradleY;
   const muzzleHeight = (pivotHeight + Math.abs(g.muzzleZ) * Math.sin(clamped)) * g.rootScale;
   const breechHeight = (pivotHeight - g.tubeAftZ * Math.sin(clamped)) * g.rootScale;
-  const yawR = (g.cradleAftZ + g.tubeAftZ * Math.cos(clamped)) * g.rootScale;
+  const anchorZ = g.tubeAftZ - VEHICLE_AFT_EXTENT / g.rootScale;
+  const yawR = (g.cradleAftZ + anchorZ * Math.cos(clamped)) * g.rootScale;
   const rootOffsetNed = [
     g.turntableAftZ * g.rootScale + yawR * Math.cos(az),
     yawR * Math.sin(az),

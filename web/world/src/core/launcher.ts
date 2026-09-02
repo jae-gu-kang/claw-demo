@@ -36,6 +36,17 @@
  * 뚫는다. 시뮬 기본 `origin_height`는 2.9 m로 올려져 있다(엔진 `RAIL_ORIGIN_H`,
  * 관축 시작점 2.83 m와 정합) — 그 이전에 저장된 결과는 1.2 m를 들고 있으므로
  * 캡션의 높이 차이 줄이 그 결과에서만 선다.
+ *
+ * ## 3차 수정 (같은 날) — 관 뒤끝에 맞췄더니 기체 꼬리가 관 밖으로 나왔다
+ *
+ * 관축 시작점(관 뒤끝)을 레일 원점에 그대로 맞추면, 기체 GLB의 원점(≈ 무게중심)이
+ * 관 뒤끝에 서는 셈이다. 그런데 `shahed136.glb`는 원점 뒤로 꼬리·프로펠러가
+ * `VEHICLE_AFT_EXTENT`(1.90 m)만큼 뻗어 있다 — 실물 축척 1:1로 놓이므로(`MODEL_SCALE`,
+ * `SceneController.ts`) 그 1.90 m가 고스란히 관 밖으로 삐져나왔다. 포구 쪽(1.75 m)은
+ * 관이 7.22 m나 남아 있어 문제가 없었던 것과 대비된다. 관축 시작점 자체(`tubeAftZ`,
+ * 물리 구조물)는 그대로 두고, **배치 기준점만** 관 안쪽(포구 방향)으로 그만큼 당겨
+ * 잡는다 — 그 결과 발사관 전체가 기체보다 더 뒤로 밀리고, 관 뒤끝은 기체 원점보다
+ * 1.90 m 뒤(관 밖이 아니라 안)에 남아 꼬리를 담는다.
  */
 
 import { finite, type LaunchMeta } from "./types.ts";
@@ -72,6 +83,12 @@ export const LAUNCHER_GEOMETRY = {
   rootScale: 2.0,
 } as const;
 
+/** 기체(`shahed-136/shahed136.glb`) 원점(≈ 무게중심)에서 꼬리·프로펠러 끝까지 로컬
+ *  +Z(후방) 거리 [m, 실물 축척]. 기체 모델은 `rootScale` 없이 1:1로 놓이므로
+ *  (`MODEL_SCALE`, `scene/SceneController.ts`) 이 값도 미터 그대로 더한다.
+ *  GLB 노드 좌표 실측: bbox z ∈ [−1.75, 1.90] → 원점 뒤(+Z) 최댓값 1.90. */
+const VEHICLE_AFT_EXTENT = 1.90;
+
 /** 발사관 구조 전장 [m, 지면 기준] — 상부 레일 앞끝에서 캐니스터 뒤끝까지. 캡션이 쓴다. */
 export const LAUNCHER_SPAN =
   Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.railTipZ) * LAUNCHER_GEOMETRY.rootScale;
@@ -89,9 +106,10 @@ export interface LauncherPose {
   /** 지면 기준 관축 시작점(관 뒤끝) 높이 [m] — 발사 원점과 비교하는 기준.
    *  트러니언이 관 뒤에 있어 고각을 들면 이 점은 오히려 **내려간다**. */
   breechHeight: number;
-  /** 발사관 루트를 놓을 자리 = 발사 지점 + 이 오프셋 [NED, m]. 관축 시작점이
-   *  시뮬 레일 원점 위에 오도록 수평만 민다 — 시뮬에 발사관 위치는 없으므로
-   *  이 배치는 표시용 선택이고 캡션이 밝힌다. */
+  /** 발사관 루트를 놓을 자리 = 발사 지점 + 이 오프셋 [NED, m]. 관 뒤끝(`tubeAftZ`)이
+   *  아니라 그보다 `VEHICLE_AFT_EXTENT`만큼 관 안쪽인 지점을 레일 원점 위에 오도록
+   *  수평만 민다 — 그래야 기체 꼬리가 관 밖으로 나오지 않는다. 시뮬에 발사관 위치는
+   *  없으므로 이 배치는 표시용 선택이고 캡션이 밝힌다. */
   rootOffsetNed: [number, number, number];
   /** 고각이 가동 범위를 벗어나 잘렸나 */ elevationClamped: boolean;
 }
@@ -119,10 +137,13 @@ export function launcherPose(launch: LaunchMeta | null | undefined): LauncherPos
   // 관축 시작점(관 뒤끝, 피벗 뒤 tubeAftZ): 고각을 들면 뒤끝은 **내려간다**.
   const breechHeight = (pivotHeight - g.tubeAftZ * Math.sin(clamped)) * g.rootScale;
 
-  // 루트 배치 오프셋: 관축 시작점이 시뮬 레일 원점 위(수평)에 오게 루트를 민다.
-  // 루트→턴테이블(트레일러 프레임, 방위 무관) + 턴테이블→크래들·관 뒤끝(방위와
+  // 루트 배치 오프셋: 관 뒤끝(tubeAftZ)이 아니라 그보다 기체 꼬리 길이만큼 관 안쪽인
+  // 지점(anchorZ)을 시뮬 레일 원점 위(수평)에 오게 루트를 민다 — 관 뒤끝 그대로 맞추면
+  // 기체 원점이 곧 관 뒤끝이 되어 꼬리(VEHICLE_AFT_EXTENT)가 관 밖으로 남는다.
+  // 루트→턴테이블(트레일러 프레임, 방위 무관) + 턴테이블→크래들·anchorZ(방위와
   // 함께 도는 수평 성분). 수직은 밀지 않는다 — 트레일러는 지면에 선다.
-  const yawR = (g.cradleAftZ + g.tubeAftZ * Math.cos(clamped)) * g.rootScale;
+  const anchorZ = g.tubeAftZ - VEHICLE_AFT_EXTENT / g.rootScale;
+  const yawR = (g.cradleAftZ + anchorZ * Math.cos(clamped)) * g.rootScale;
   const rootOffsetNed: [number, number, number] = [
     (g.turntableAftZ * g.rootScale) + yawR * Math.cos(az),
     yawR * Math.sin(az),

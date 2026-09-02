@@ -231,8 +231,10 @@ export function applyLauncher(model: LoadedModel, pose: LauncherPose | null): bo
 /** 발사관을 발사 지점 곁에 놓는다 (NED). 방위·고각은 관절이 맡는다.
  *
  * 루트를 발사 지점에 그대로 두지 않는다 — 트러니언이 관 뒤에 있어 그러면 원점
- * 자리의 관축이 기체보다 1 m 높아 기체가 관 바닥을 뚫는다. `pose.rootOffsetNed`가
- * 관축 시작점을 원점 위로 가져오는 수평 이동이고, 유도는 core/launcher.ts에 있다. */
+ * 자리의 관축이 기체보다 1 m 높아 기체가 관 바닥을 뚫는다. 관 뒤끝을 원점에 그대로
+ * 맞추지도 않는다 — 기체 원점 뒤로 뻗은 꼬리가 관 밖으로 남는다. `pose.rootOffsetNed`가
+ * (관 뒤끝보다 기체 꼬리 길이만큼 안쪽인 지점을) 원점 위로 가져오는 수평 이동이고,
+ * 유도는 core/launcher.ts에 있다. */
 export function placeLauncher(model: LoadedModel, siteNed: Vec3, pose: LauncherPose): void {
   const off = pose.rootOffsetNed;
   const p = toWorld(siteNed[0] + off[0], siteNed[1] + off[1], siteNed[2] + off[2]);
