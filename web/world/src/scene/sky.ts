@@ -1,51 +1,52 @@
-/** 하늘 — 표시용 그라디언트 (Preetham 같은 물리 모델이 아니다. 캡션이 그렇게 말한다).
+/** 하늘 — 지형·모델과 **같은 산란 함수**를 읽는다.
  *
- * 옛 `views/renderer-three.js`에서 옮겨 온 셰이더다. 대기 산란 모델로 갈아 끼우는 것은
- * 뒤 단계이고, 그때 `FogExp2`도 함께 걷힌다 — 기본 시정 25 km에서 30 km 지점 투과율이
- * **0.36%**라 수평선의 윤슬을 지워 버리기 때문이다(실측).
+ * 예전에는 천정↔지평 그라디언트였고 캡션이 "표시용"이라고 밝히고 있었다. 이제 레일리 +
+ * 미 단일산란이라 시간대가 물리에서 나온다 — 여전히 근사지만(밀도 상수·다중산란 없음)
+ * 지어낸 색 보간은 아니다. 무엇보다 **먼 지형이 저절로 그 방향의 하늘색이 된다**:
+ * 에어리얼 퍼스펙티브가 같은 함수를 s만 유한하게 부르므로, 옛 코드가 `fog.color = horizon`
+ * 으로 손수 맞추던 일이 없어졌다.
  *
- * ## depthTest를 끄고 가장 먼저 그린다
+ * ## 여전히 depthTest를 끈다 — 이유는 정밀도가 아니다
  *
- * `logarithmicDepthBuffer`를 켜면 three 기본 재질은 프래그먼트에서 로그 깊이를 써 넣는데
- * 커스텀 `ShaderMaterial`은 그 청크를 포함하지 않아 비교가 어긋나고 **하늘이 통째로
- * 깊이 테스트에서 탈락한다**(화면이 검게 나오는데 셰이더는 멀쩡하다). 하늘은 언제나
- * 가장 뒤이므로 깊이 테스트를 끄고 `renderOrder`로 먼저 그린다 — three 내부 청크 구성에
- * 기대지 않아 버전 올림에도 안전하다.
+ * 원거리 프러스텀에서 45 km 지점의 깊이 눈금은 0.08 m라 넉넉하다. 진짜 이유는 **구가
+ * 유한한 껍질**이라는 것이다: 반지름 45 km인데 프러스텀은 50 km까지 보므로, 깊이 테스트를
+ * 켜면 45 km 너머의 지형을 하늘이 **가린다.** 배경은 언제나 가장 뒤라는 사실이 확실하므로
+ * 비교할 이유가 없다.
+ *
+ * **근거리 패스에서는 `SplitFrustumPass`가 명시적으로 숨긴다** — 구가 카메라를 감싸고 있어
+ * 프러스텀 컬링이 걸러 주지 않는다.
  */
 
-import {
-  BackSide, Color, Mesh, ShaderMaterial, SphereGeometry, Vector3,
-} from "three";
+import { BackSide, Color, Mesh, ShaderMaterial, SphereGeometry } from "three";
 
-const VERT = `
+import { ATMOSPHERE_GLSL } from "../shaders/atmosphere.ts";
+import { atmosphereUniforms } from "./atmosphere.ts";
+
+const VERT = /* glsl */`
 varying vec3 vDir;
 void main() {
   vDir = normalize(position);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
-const FRAG = `
+const FRAG = /* glsl */`
 varying vec3 vDir;
-uniform vec3 uZenith;
-uniform vec3 uHorizon;
-uniform vec3 uGround;
-uniform vec3 uSunDir;
+uniform vec3 uSunDirWorld;
 uniform float uSunIntensity;
+uniform float uHaze;
+uniform vec3 uGround;
+${ATMOSPHERE_GLSL}
 void main() {
   vec3 dir = normalize(vDir);
-  float h = dir.y;
-  vec3 sky = mix(uHorizon, uZenith, pow(clamp(h, 0.0, 1.0), 0.45));
-  vec3 col = mix(uGround, sky, smoothstep(-0.06, 0.02, h));
-  float cosA = dot(dir, normalize(uSunDir));
-  col += uSunIntensity * vec3(1.0, 0.93, 0.80) * pow(max(cosA, 0.0), 900.0) * 12.0; // 원반
-  col += uSunIntensity * vec3(1.0, 0.85, 0.65) * pow(max(cosA, 0.0), 8.0) * 0.30;   // 둘레 번짐
+  vec3 col = skyRadiance(dir, uSunDirWorld, uSunIntensity, uHaze);
+  // 지평 아래 — 카메라가 낮으면 구의 아래쪽이 보인다. 지면색으로 가라앉힌다(표시용).
+  col = mix(uGround, col, smoothstep(-0.06, 0.02, dir.y));
   gl_FragColor = vec4(col, 1.0);
 }`;
 
 export interface Sky {
   mesh: Mesh;
-  /** 태양 방향(월드)과 세기를 넣는다. 지평선 색을 돌려준다 — 안개가 같은 값을 쓴다. */
-  setSun(dirWorld: readonly number[], elevation: number): Color;
+  setGroundColor(hex: number): void;
   dispose(): void;
 }
 
@@ -54,28 +55,20 @@ export function createSky(radius: number): Sky {
     side: BackSide, depthWrite: false, depthTest: false, fog: false,
     vertexShader: VERT, fragmentShader: FRAG,
     uniforms: {
-      uZenith: { value: new Color(0x2f6fb0) },
-      uHorizon: { value: new Color(0x9fb4c7) },
+      // **공유 유니폼을 그대로 꽂는다** — 하늘과 에어리얼이 같은 태양·같은 뿌연 정도를 본다.
+      ...atmosphereUniforms,
       uGround: { value: new Color(0x5d6352) },
-      uSunDir: { value: new Vector3(0.4, 0.6, 0.2) },
-      uSunIntensity: { value: 1.0 },
     },
   });
   const geometry = new SphereGeometry(radius, 32, 20);
   const mesh = new Mesh(geometry, material);
-  mesh.renderOrder = -1;        // 배경이므로 가장 먼저 (위 주석)
+  mesh.renderOrder = -1;        // 배경이므로 가장 먼저
   mesh.frustumCulled = false;   // 카메라를 따라다니므로 컬링 판정이 뜻이 없다
 
   return {
     mesh,
-    setSun(dirWorld, elevation) {
-      material.uniforms.uSunDir!.value.set(dirWorld[0]!, dirWorld[1]!, dirWorld[2]!);
-      // 해가 낮을수록 지평선이 붉어진다 — 표시 효과다(기상 모델 아님).
-      const low = 1 - Math.min(Math.max(Math.sin(elevation), 0), 1);
-      const horizon = new Color(0x9fb4c7).lerp(new Color(0xd9a066), low * 0.8);
-      material.uniforms.uHorizon!.value.copy(horizon);
-      material.uniforms.uSunIntensity!.value = Math.max(Math.sin(elevation), 0.05);
-      return horizon;
+    setGroundColor(hex) {
+      (material.uniforms.uGround!.value as Color).set(hex);
     },
     dispose() {
       geometry.dispose();

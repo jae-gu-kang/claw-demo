@@ -7449,183 +7449,6 @@ function strideFor$1(nTotal, target = 1500) {
 function strideFor(nTotal, target = 1500) {
   return strideFor$1(nTotal, target);
 }
-function finite(v2) {
-  return typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
-}
-const LAUNCHER_GEOMETRY = {
-  /** 턴테이블 회전축 높이 (트레일러 기준) — GLB `Turntable.translation.y` */
-  turntableY: 0.92,
-  /** 크래들 피벗 높이 (턴테이블 기준) — GLB `Cradle.translation.y` */
-  cradleY: 0.86,
-  /** 캐니스터 포구의 크래들 로컬 Z — GLB `Box_Tubes` bbox 앞끝 (기준축은 −Z) */
-  muzzleZ: -0.94,
-  /** 캐니스터 관 뒤끝 — GLB `Box_Tubes` bbox 뒤끝 */
-  tubeAftZ: 0.78,
-  /** 상부 레일 앞끝 — GLB `Box_Rails` bbox */
-  railTipZ: -1.55,
-  /** 크래들 가동 범위 — `generate_launcher.py`의 `PROPS`(317~319행)와 모델 README 표.
-   *
-   * **`LIMIT_ROTATION` 컨스트레인트가 아니다.** 그쪽은 크래들 −2~52°, 턴테이블 ±110°로
-   * 일부러 더 느슨한 오버트래블 여유다. 그 값으로 "고쳤다"가는 −2~0° 구간에서 잘림
-   * 판정이 안 뜨는데 캡션은 계속 0~48°라고 말하게 된다. */
-  elevMin: 0,
-  elevMax: 48 * Math.PI / 180,
-  /** 방위 가동 범위 — 같은 출처. **여기서 자르지 않는다**(아래 캡션 참조) */
-  azMin: -100 * Math.PI / 180,
-  azMax: 100 * Math.PI / 180
-};
-const LAUNCHER_SPAN = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.railTipZ);
-const CANISTER_LENGTH = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.muzzleZ);
-function boresightNed(azimuth, elevation) {
-  const c = Math.cos(elevation);
-  return [c * Math.cos(azimuth), c * Math.sin(azimuth), -Math.sin(elevation)];
-}
-function launcherPose(launch) {
-  const az = finite(launch?.azimuth);
-  const el2 = finite(launch?.elev_angle);
-  if (az === null || el2 === null) return null;
-  const g = LAUNCHER_GEOMETRY;
-  const clamped = Math.min(Math.max(el2, g.elevMin), g.elevMax);
-  const pivotHeight = g.turntableY + g.cradleY;
-  const muzzleHeight = pivotHeight + Math.abs(g.muzzleZ) * Math.sin(clamped);
-  return {
-    // **부호가 뒤집히는 자리** — 위 주석의 유도 참조.
-    turntableY: -az,
-    cradleX: clamped,
-    jackOffsetY: -0.46,
-    boresightNed: boresightNed(az, clamped),
-    muzzleHeight,
-    elevationClamped: clamped !== el2
-  };
-}
-const deg$1 = (rad) => (rad * 180 / Math.PI).toFixed(0);
-function launcherCaptionNotes(launch, pose2) {
-  if (pose2 == null || launch == null) return [];
-  const notes = [];
-  const originHeight = finite(launch.origin_height);
-  if (originHeight !== null) {
-    const dz = pose2.muzzleHeight - originHeight;
-    if (Math.abs(dz) > 0.05) {
-      notes.push(
-        `발사 원점(${originHeight.toFixed(1)} m)과 발사관 포구(${pose2.muzzleHeight.toFixed(1)} m) 높이가 ${Math.abs(dz).toFixed(1)} m 다릅니다 — 트레일러를 지면에 두었고 기체는 시뮬이 준 자리에 있습니다.`
-      );
-    }
-  }
-  const len = finite(launch.length);
-  if (len !== null && len > LAUNCHER_SPAN * 1.5) {
-    notes.push(
-      `발사 구간은 ${len.toFixed(0)} m 가속 모델이고 발사관 형상(캐니스터 관 ${CANISTER_LENGTH.toFixed(1)} m · 상부 레일까지 ${LAUNCHER_SPAN.toFixed(1)} m)과 별개입니다.`
-    );
-  }
-  if (pose2.elevationClamped) {
-    notes.push(
-      `발사관 고각이 모델 가동 범위(${deg$1(LAUNCHER_GEOMETRY.elevMin)}~${deg$1(LAUNCHER_GEOMETRY.elevMax)}°)를 벗어나 잘렸습니다.`
-    );
-  }
-  const az = finite(launch.azimuth);
-  if (az !== null) {
-    const wrapped = Math.atan2(Math.sin(az), Math.cos(az));
-    if (wrapped < LAUNCHER_GEOMETRY.azMin || wrapped > LAUNCHER_GEOMETRY.azMax) {
-      notes.push(
-        `발사 방위 ${deg$1(wrapped)}°는 실장비 선회 범위(${deg$1(LAUNCHER_GEOMETRY.azMin)}~${deg$1(LAUNCHER_GEOMETRY.azMax)}°)를 벗어납니다 — 화면은 시뮬이 준 방향 그대로 그립니다.`
-      );
-    }
-  }
-  return notes;
-}
-const SURFACE_NOTES = {
-  innerOuterShared: "엘레본 내측·외측은 같은 각을 씁니다 — 믹서가 1:1 고정이라 시뮬이 둘을 구분하지 않습니다.",
-  rudderShared: "러더 두 면은 같은 각을 씁니다 — 시뮬의 러더 채널이 하나입니다.",
-  propellerDisplay: "프로펠러 회전은 좌·우 스로틀 평균에 비례한 표시 값이며, 실제 회전수가 아닙니다.",
-  holdOnMissing: "조종면 각이 결측인 구간에서는 **마지막 각을 유지**합니다 — 중립으로 되돌리면 없는 조종 입력을 그리게 됩니다. 결측이 계속되면 타면이 움직이지 않습니다."
-};
-function clamp$1(v2, lo, hi2) {
-  let out = v2;
-  if (typeof lo === "number" && Number.isFinite(lo) && out < lo) out = lo;
-  if (typeof hi2 === "number" && Number.isFinite(hi2) && out > hi2) out = hi2;
-  return [out, out !== v2];
-}
-function surfacePose(de2, da2, dr, limits = {}) {
-  const e = finite(de2);
-  const a = finite(da2);
-  const r2 = finite(dr);
-  if (e === null || a === null || r2 === null) return null;
-  const [left, cl2] = clamp$1(e + a, limits.elevon_lo, limits.elevon_hi);
-  const [right, cr] = clamp$1(e - a, limits.elevon_lo, limits.elevon_hi);
-  const [rud, cd2] = clamp$1(r2, limits.rudder_lo, limits.rudder_hi);
-  return {
-    elevon: {
-      Elevon_In_L: left,
-      Elevon_Out_L: left,
-      Elevon_In_R: right,
-      Elevon_Out_R: right
-    },
-    rudder: rud,
-    clamped: cl2 || cr || cd2
-  };
-}
-function propellerRate(thrL, thrR, maxRadPerSec = 220) {
-  const l2 = finite(thrL);
-  const r2 = finite(thrR);
-  if (l2 === null || r2 === null) return null;
-  const mean = Math.min(Math.max((l2 + r2) / 2, 0), 1);
-  return mean * maxRadPerSec;
-}
-const BASE = "/api";
-class ApiError extends Error {
-  constructor(status, detail) {
-    super(typeof detail === "string" ? detail : JSON.stringify(detail));
-    this.status = status;
-    this.detail = detail;
-  }
-}
-async function request(method, path, body) {
-  const opts = { method, headers: {} };
-  if (body !== void 0) {
-    opts.headers["content-type"] = "application/json";
-    opts.body = JSON.stringify(body);
-  }
-  const res = await fetch(BASE + path, opts);
-  const text = await res.text();
-  let data = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
-    }
-  }
-  if (!res.ok) {
-    throw new ApiError(res.status, data && data.detail !== void 0 ? data.detail : data);
-  }
-  return data;
-}
-const api = {
-  get: (path) => request("GET", path),
-  post: (path, body) => request("POST", path, body)
-};
-const rawApi = api;
-async function listSimResults() {
-  const rows = await rawApi.get("/results");
-  return rows.filter((r2) => r2.kind === "sim");
-}
-async function fetchReplay(id2, stride) {
-  return await rawApi.get(`/sim/${id2}/replay?stride=${stride}`);
-}
-async function fetchWorldManifest() {
-  return await rawApi.get("/world/manifest");
-}
-async function fetchTerrainPack(name, signal) {
-  const r2 = await fetch(`/api/world/terrain/${encodeURIComponent(name)}`, {
-    cache: "no-cache",
-    signal
-  });
-  if (!r2.ok) throw new Error(`지형 팩을 받지 못했습니다 (${r2.status})`);
-  return r2.arrayBuffer();
-}
-function modelUrl(name) {
-  return `/api/world/model/${encodeURIComponent(name)}`;
-}
 /**
  * @license
  * Copyright 2010-2026 Three.js Authors
@@ -7965,7 +7788,7 @@ function generateUUID() {
   const uuid = _lut[d0 & 255] + _lut[d0 >> 8 & 255] + _lut[d0 >> 16 & 255] + _lut[d0 >> 24 & 255] + "-" + _lut[d1 & 255] + _lut[d1 >> 8 & 255] + "-" + _lut[d1 >> 16 & 15 | 64] + _lut[d1 >> 24 & 255] + "-" + _lut[d2 & 63 | 128] + _lut[d2 >> 8 & 255] + "-" + _lut[d2 >> 16 & 255] + _lut[d2 >> 24 & 255] + _lut[d3 & 255] + _lut[d3 >> 8 & 255] + _lut[d3 >> 16 & 255] + _lut[d3 >> 24 & 255];
   return uuid.toLowerCase();
 }
-function clamp(value, min, max) {
+function clamp$1(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 function euclideanModulo(n2, m2) {
@@ -8129,7 +7952,7 @@ const MathUtils = {
    * @param {number} max - The max value.
    * @return {number} The clamped value.
    */
-  clamp,
+  clamp: clamp$1,
   /**
    * Computes the Euclidean modulo of the given parameters that
    * is `( ( n % m ) + m ) % m`.
@@ -8656,8 +8479,8 @@ class Vector2 {
    * @return {Vector2} A reference to this vector.
    */
   clamp(min, max) {
-    this.x = clamp(this.x, min.x, max.x);
-    this.y = clamp(this.y, min.y, max.y);
+    this.x = clamp$1(this.x, min.x, max.x);
+    this.y = clamp$1(this.y, min.y, max.y);
     return this;
   }
   /**
@@ -8671,8 +8494,8 @@ class Vector2 {
    * @return {Vector2} A reference to this vector.
    */
   clampScalar(minVal, maxVal) {
-    this.x = clamp(this.x, minVal, maxVal);
-    this.y = clamp(this.y, minVal, maxVal);
+    this.x = clamp$1(this.x, minVal, maxVal);
+    this.y = clamp$1(this.y, minVal, maxVal);
     return this;
   }
   /**
@@ -8687,7 +8510,7 @@ class Vector2 {
    */
   clampLength(min, max) {
     const length = this.length();
-    return this.divideScalar(length || 1).multiplyScalar(clamp(length, min, max));
+    return this.divideScalar(length || 1).multiplyScalar(clamp$1(length, min, max));
   }
   /**
    * The components of this vector are rounded down to the nearest integer value.
@@ -8812,7 +8635,7 @@ class Vector2 {
     const denominator = Math.sqrt(this.lengthSq() * v2.lengthSq());
     if (denominator === 0) return Math.PI / 2;
     const theta = this.dot(v2) / denominator;
-    return Math.acos(clamp(theta, -1, 1));
+    return Math.acos(clamp$1(theta, -1, 1));
   }
   /**
    * Computes the distance from the given vector to this instance.
@@ -9299,7 +9122,7 @@ class Quaternion {
    * @return {number} The angle in radians.
    */
   angleTo(q2) {
-    return 2 * Math.acos(Math.abs(clamp(this.dot(q2), -1, 1)));
+    return 2 * Math.acos(Math.abs(clamp$1(this.dot(q2), -1, 1)));
   }
   /**
    * Rotates this quaternion by a given angular step to the given quaternion.
@@ -10005,9 +9828,9 @@ class Vector3 {
    * @return {Vector3} A reference to this vector.
    */
   clamp(min, max) {
-    this.x = clamp(this.x, min.x, max.x);
-    this.y = clamp(this.y, min.y, max.y);
-    this.z = clamp(this.z, min.z, max.z);
+    this.x = clamp$1(this.x, min.x, max.x);
+    this.y = clamp$1(this.y, min.y, max.y);
+    this.z = clamp$1(this.z, min.z, max.z);
     return this;
   }
   /**
@@ -10021,9 +9844,9 @@ class Vector3 {
    * @return {Vector3} A reference to this vector.
    */
   clampScalar(minVal, maxVal) {
-    this.x = clamp(this.x, minVal, maxVal);
-    this.y = clamp(this.y, minVal, maxVal);
-    this.z = clamp(this.z, minVal, maxVal);
+    this.x = clamp$1(this.x, minVal, maxVal);
+    this.y = clamp$1(this.y, minVal, maxVal);
+    this.z = clamp$1(this.z, minVal, maxVal);
     return this;
   }
   /**
@@ -10038,7 +9861,7 @@ class Vector3 {
    */
   clampLength(min, max) {
     const length = this.length();
-    return this.divideScalar(length || 1).multiplyScalar(clamp(length, min, max));
+    return this.divideScalar(length || 1).multiplyScalar(clamp$1(length, min, max));
   }
   /**
    * The components of this vector are rounded down to the nearest integer value.
@@ -10248,7 +10071,7 @@ class Vector3 {
     const denominator = Math.sqrt(this.lengthSq() * v2.lengthSq());
     if (denominator === 0) return Math.PI / 2;
     const theta = this.dot(v2) / denominator;
-    return Math.acos(clamp(theta, -1, 1));
+    return Math.acos(clamp$1(theta, -1, 1));
   }
   /**
    * Computes the distance from the given vector to this instance.
@@ -12078,10 +11901,10 @@ class Vector4 {
    * @return {Vector4} A reference to this vector.
    */
   clamp(min, max) {
-    this.x = clamp(this.x, min.x, max.x);
-    this.y = clamp(this.y, min.y, max.y);
-    this.z = clamp(this.z, min.z, max.z);
-    this.w = clamp(this.w, min.w, max.w);
+    this.x = clamp$1(this.x, min.x, max.x);
+    this.y = clamp$1(this.y, min.y, max.y);
+    this.z = clamp$1(this.z, min.z, max.z);
+    this.w = clamp$1(this.w, min.w, max.w);
     return this;
   }
   /**
@@ -12095,10 +11918,10 @@ class Vector4 {
    * @return {Vector4} A reference to this vector.
    */
   clampScalar(minVal, maxVal) {
-    this.x = clamp(this.x, minVal, maxVal);
-    this.y = clamp(this.y, minVal, maxVal);
-    this.z = clamp(this.z, minVal, maxVal);
-    this.w = clamp(this.w, minVal, maxVal);
+    this.x = clamp$1(this.x, minVal, maxVal);
+    this.y = clamp$1(this.y, minVal, maxVal);
+    this.z = clamp$1(this.z, minVal, maxVal);
+    this.w = clamp$1(this.w, minVal, maxVal);
     return this;
   }
   /**
@@ -12113,7 +11936,7 @@ class Vector4 {
    */
   clampLength(min, max) {
     const length = this.length();
-    return this.divideScalar(length || 1).multiplyScalar(clamp(length, min, max));
+    return this.divideScalar(length || 1).multiplyScalar(clamp$1(length, min, max));
   }
   /**
    * The components of this vector are rounded down to the nearest integer value.
@@ -13882,7 +13705,7 @@ class Euler {
     const m31 = te2[2], m32 = te2[6], m33 = te2[10];
     switch (order) {
       case "XYZ":
-        this._y = Math.asin(clamp(m13, -1, 1));
+        this._y = Math.asin(clamp$1(m13, -1, 1));
         if (Math.abs(m13) < 0.9999999) {
           this._x = Math.atan2(-m23, m33);
           this._z = Math.atan2(-m12, m11);
@@ -13892,7 +13715,7 @@ class Euler {
         }
         break;
       case "YXZ":
-        this._x = Math.asin(-clamp(m23, -1, 1));
+        this._x = Math.asin(-clamp$1(m23, -1, 1));
         if (Math.abs(m23) < 0.9999999) {
           this._y = Math.atan2(m13, m33);
           this._z = Math.atan2(m21, m22);
@@ -13902,7 +13725,7 @@ class Euler {
         }
         break;
       case "ZXY":
-        this._x = Math.asin(clamp(m32, -1, 1));
+        this._x = Math.asin(clamp$1(m32, -1, 1));
         if (Math.abs(m32) < 0.9999999) {
           this._y = Math.atan2(-m31, m33);
           this._z = Math.atan2(-m12, m22);
@@ -13912,7 +13735,7 @@ class Euler {
         }
         break;
       case "ZYX":
-        this._y = Math.asin(-clamp(m31, -1, 1));
+        this._y = Math.asin(-clamp$1(m31, -1, 1));
         if (Math.abs(m31) < 0.9999999) {
           this._x = Math.atan2(m32, m33);
           this._z = Math.atan2(m21, m11);
@@ -13922,7 +13745,7 @@ class Euler {
         }
         break;
       case "YZX":
-        this._z = Math.asin(clamp(m21, -1, 1));
+        this._z = Math.asin(clamp$1(m21, -1, 1));
         if (Math.abs(m21) < 0.9999999) {
           this._x = Math.atan2(-m23, m22);
           this._y = Math.atan2(-m31, m11);
@@ -13932,7 +13755,7 @@ class Euler {
         }
         break;
       case "XZY":
-        this._z = Math.asin(-clamp(m12, -1, 1));
+        this._z = Math.asin(-clamp$1(m12, -1, 1));
         if (Math.abs(m12) < 0.9999999) {
           this._x = Math.atan2(m32, m22);
           this._y = Math.atan2(m13, m11);
@@ -15570,8 +15393,8 @@ class Color {
    */
   setHSL(h, s, l2, colorSpace = ColorManagement.workingColorSpace) {
     h = euclideanModulo(h, 1);
-    s = clamp(s, 0, 1);
-    l2 = clamp(l2, 0, 1);
+    s = clamp$1(s, 0, 1);
+    l2 = clamp$1(l2, 0, 1);
     if (s === 0) {
       this.r = this.g = this.b = l2;
     } else {
@@ -15757,7 +15580,7 @@ class Color {
    */
   getHex(colorSpace = SRGBColorSpace) {
     ColorManagement.workingToColorSpace(_color.copy(this), colorSpace);
-    return Math.round(clamp(_color.r * 255, 0, 255)) * 65536 + Math.round(clamp(_color.g * 255, 0, 255)) * 256 + Math.round(clamp(_color.b * 255, 0, 255));
+    return Math.round(clamp$1(_color.r * 255, 0, 255)) * 65536 + Math.round(clamp$1(_color.g * 255, 0, 255)) * 256 + Math.round(clamp$1(_color.b * 255, 0, 255));
   }
   /**
    * Returns the hexadecimal value of this color as a string (for example, 'FFFFFF').
@@ -16065,42 +15888,6 @@ class Color {
 }
 const _color = /* @__PURE__ */ new Color();
 Color.NAMES = _colorKeywords;
-class FogExp2 {
-  /**
-   * Constructs a new fog.
-   *
-   * @param {number|Color} color - The fog's color.
-   * @param {number} [density=0.00025] - Defines how fast the fog will grow dense.
-   */
-  constructor(color, density = 25e-5) {
-    this.isFogExp2 = true;
-    this.name = "";
-    this.color = new Color(color);
-    this.density = density;
-  }
-  /**
-   * Returns a new fog with copied values from this instance.
-   *
-   * @return {FogExp2} A clone of this instance.
-   */
-  clone() {
-    return new FogExp2(this.color, this.density);
-  }
-  /**
-   * Serializes the fog into JSON.
-   *
-   * @param {?(Object|string)} meta - An optional value holding meta information about the serialization.
-   * @return {Object} A JSON object representing the serialized fog
-   */
-  toJSON() {
-    return {
-      type: "FogExp2",
-      name: this.name,
-      color: this.color.getHex(),
-      density: this.density
-    };
-  }
-}
 class Scene extends Object3D {
   /**
    * Constructs a new scene.
@@ -22513,7 +22300,7 @@ class MeshPhysicalMaterial extends MeshStandardMaterial {
     this.ior = 1.5;
     Object.defineProperty(this, "reflectivity", {
       get: function() {
-        return clamp(2.5 * (this.ior - 1) / (this.ior + 1), 0, 1);
+        return clamp$1(2.5 * (this.ior - 1) / (this.ior + 1), 0, 1);
       },
       set: function(reflectivity) {
         this.ior = (1 + 0.4 * reflectivity) / (1 - 0.4 * reflectivity);
@@ -25564,6 +25351,120 @@ class ArrayCamera extends PerspectiveCamera {
     this.isMultiViewCamera = false;
     this.cameras = array;
   }
+}
+class Timer {
+  /**
+   * Constructs a new timer.
+   */
+  constructor() {
+    this._previousTime = 0;
+    this._currentTime = 0;
+    this._startTime = performance.now();
+    this._delta = 0;
+    this._elapsed = 0;
+    this._timescale = 1;
+    this._document = null;
+    this._pageVisibilityHandler = null;
+  }
+  /**
+   * Connect the timer to the given document.Calling this method is not mandatory to
+   * use the timer but enables the usage of the Page Visibility API to avoid large time
+   * delta values.
+   *
+   * @param {Document} document - The document.
+   */
+  connect(document2) {
+    this._document = document2;
+    if (document2.hidden !== void 0) {
+      this._pageVisibilityHandler = handleVisibilityChange.bind(this);
+      document2.addEventListener("visibilitychange", this._pageVisibilityHandler, false);
+    }
+  }
+  /**
+   * Disconnects the timer from the DOM and also disables the usage of the Page Visibility API.
+   */
+  disconnect() {
+    if (this._pageVisibilityHandler !== null) {
+      this._document.removeEventListener("visibilitychange", this._pageVisibilityHandler);
+      this._pageVisibilityHandler = null;
+    }
+    this._document = null;
+  }
+  /**
+   * Returns the time delta in seconds.
+   *
+   * @return {number} The time delta in second.
+   */
+  getDelta() {
+    return this._delta / 1e3;
+  }
+  /**
+   * Returns the elapsed time in seconds.
+   *
+   * @return {number} The elapsed time in second.
+   */
+  getElapsed() {
+    return this._elapsed / 1e3;
+  }
+  /**
+   * Returns the timescale.
+   *
+   * @return {number} The timescale.
+   */
+  getTimescale() {
+    return this._timescale;
+  }
+  /**
+   * Sets the given timescale which scale the time delta computation
+   * in `update()`.
+   *
+   * @param {number} timescale - The timescale to set.
+   * @return {Timer} A reference to this timer.
+   */
+  setTimescale(timescale) {
+    this._timescale = timescale;
+    return this;
+  }
+  /**
+   * Resets the time computation for the current simulation step.
+   *
+   * @return {Timer} A reference to this timer.
+   */
+  reset() {
+    this._currentTime = performance.now() - this._startTime;
+    return this;
+  }
+  /**
+   * Can be used to free all internal resources. Usually called when
+   * the timer instance isn't required anymore.
+   */
+  dispose() {
+    this.disconnect();
+  }
+  /**
+   * Updates the internal state of the timer. This method should be called
+   * once per simulation step and before you perform queries against the timer
+   * (e.g. via `getDelta()`).
+   *
+   * @param {number} timestamp - The current time in milliseconds. Can be obtained
+   * from the `requestAnimationFrame` callback argument. If not provided, the current
+   * time will be determined with `performance.now`.
+   * @return {Timer} A reference to this timer.
+   */
+  update(timestamp) {
+    if (this._pageVisibilityHandler !== null && this._document.hidden === true) {
+      this._delta = 0;
+    } else {
+      this._previousTime = this._currentTime;
+      this._currentTime = (timestamp !== void 0 ? timestamp : performance.now()) - this._startTime;
+      this._delta = (this._currentTime - this._previousTime) * this._timescale;
+      this._elapsed += this._delta;
+    }
+    return this;
+  }
+}
+function handleVisibilityChange() {
+  if (this._document.hidden === false) this.reset();
 }
 const _RESERVED_CHARS_RE = "\\[\\]\\.:\\/";
 const _reservedRe = new RegExp("[" + _RESERVED_CHARS_RE + "]", "g");
@@ -37581,9 +37482,1992 @@ class WebGLRenderer {
     gl2.unpackColorSpace = ColorManagement._getUnpackColorSpace();
   }
 }
+const BETA_R = [58e-7, 135e-7, 331e-7];
+const BETA_M = 21e-6;
+const MIE_G = 0.76;
+const H_RAYLEIGH = 8e3;
+const H_MIE = 1200;
+const SUN_TINT = [1, 0.95, 0.88];
+const glsl = (x2) => Number.isInteger(x2) ? x2.toFixed(1) : String(x2);
+const ATMOSPHERE_GLSL = (
+  /* glsl */
+  `
+const vec3 BETA_R = vec3(${BETA_R.map(glsl).join(", ")});
+const float BETA_M = ${glsl(BETA_M)};
+const float MIE_G = ${glsl(MIE_G)};
+const float H_R = ${glsl(H_RAYLEIGH)};
+const float H_M = ${glsl(H_MIE)};
+const vec3 SUN_TINT = vec3(${SUN_TINT.map(glsl).join(", ")});
+// 태양 고도가 0에 닿아도 경로가 발산하지 않게 — 평면-평행 근사에 곡률 대신 깐 바닥.
+const float MU_MIN = 0.02;
+
+// 레일리 위상함수 — 앞뒤 대칭, 옆이 어둡다
+float phaseRayleigh(float c) {
+  return (3.0 / (16.0 * 3.14159265)) * (1.0 + c * c);
+}
+
+// 헤니-그린슈타인 — g가 클수록 전방으로 몰린다(그래서 태양 쪽이 밝아진다)
+float phaseMie(float c, float g) {
+  float g2 = g * g;
+  float d = 1.0 + g2 - 2.0 * g * c;
+  return (1.0 / (4.0 * 3.14159265)) * ((1.0 - g2) / max(d * sqrt(d), 1e-4));
+}
+
+/** 대기를 지나 온 태양색.
+ *
+ *  **이것이 빠져 있으면 지평의 태양이 정오만큼 밝다** — 실제로 그렇게 만들어 보니
+ *  낮은 해에서 전방산란 아우레올이 화면을 통째로 하얗게 태웠다. 태양 자신도 같은
+ *  대기를 지나 오므로, 고도가 낮을수록 긴 경로를 지나 **어두워지고 붉어진다.**
+ *  노을이 여기서 나온다. */
+vec3 sunThroughAtmosphere(vec3 sunDir, float sunIntensity, float haze) {
+  float mu = max(sunDir.y, MU_MIN);
+  vec3 tau = BETA_R * (H_R / mu) + vec3(BETA_M * haze * (H_M / mu));
+  return SUN_TINT * sunIntensity * exp(-tau);
+}
+
+/** 광학두께를 직접 받는 본체 — 레일리와 미가 **다른 거리**를 지날 수 있다.
+ *
+ *  하늘에서 그 둘이 갈린다: 레일리는 척도고도 8 km인데 에어로졸은 1.2 km다. 한 거리로
+ *  묶으면 시정 25 km에 해당하는 에어로졸을 8 km 기둥 전체에 퍼뜨리게 되어 **천정까지
+ *  뿌예진다** — 파랗지 않은 한낮 하늘이 나온다(실측으로 확인하고 고친 자리). 원경은
+ *  카메라가 경계층 안이라 둘이 같다.
+ *
+ *  c는 시선과 태양 방향의 코사인, sunCol은 이미 대기를 지나 온 태양색이다.
+ *  (이 주석은 템플릿 리터럴 안이라 백틱을 못 쓴다.) */
+void atmosphereOD(float c, vec3 tauR, vec3 tauM, vec3 sunCol,
+                  out vec3 transmittance, out vec3 inscatter) {
+  vec3 tau = tauR + tauM;
+  transmittance = exp(-tau);
+
+  // 산란 **광학두께**에 위상함수를 곱한다 — 두 거리가 같으면 β 비율과 똑같아진다.
+  vec3 scatter = tauR * phaseRayleigh(c) + tauM * phaseMie(c, MIE_G);
+  // 소산 대비 산란 비율 — 광학두께가 커질수록 하늘색으로 수렴한다
+  vec3 ratio = scatter / max(tau, vec3(1e-9));
+  // 위상함수는 1/sr 단위라 4π를 곱해 무차원 비율로 되돌린다
+  inscatter = ratio * (sunCol * 4.0 * 3.14159265) * (1.0 - transmittance);
+}
+
+/** 거리 s를 지난 뒤의 투과율과 in-scattering — 밀도가 일정한 구간용(원경).
+ *  haze는 미 산란 배수(시정 슬라이더). dir·sunDir은 정규화된 월드 방향. */
+void atmosphere(vec3 dir, vec3 sunDir, float sunIntensity, float haze, float s,
+                out vec3 transmittance, out vec3 inscatter) {
+  atmosphereOD(dot(dir, sunDir), BETA_R * s, vec3(BETA_M * haze * s),
+               sunThroughAtmosphere(sunDir, sunIntensity, haze),
+               transmittance, inscatter);
+}
+
+/** 하늘 한 방향의 복사휘도 — 대기를 끝까지 본 극한. */
+vec3 skyRadiance(vec3 dir, vec3 sunDir, float sunIntensity, float haze) {
+  float mu = max(dir.y, MU_MIN);
+  vec3 sunCol = sunThroughAtmosphere(sunDir, sunIntensity, haze);
+  vec3 T, S;
+  atmosphereOD(dot(dir, sunDir),
+               BETA_R * (H_R / mu),
+               vec3(BETA_M * haze * (H_M / mu)),
+               sunCol, T, S);
+
+  // 태양 원반 — 각반경 0.265°. 블룸이 이 값을 물어가므로 1.0을 크게 넘겨 둔다.
+  // 원반을 볼 때의 시선 경로는 태양 경로와 같으므로 sunCol이 곧 감쇠분이다:
+  // 해가 낮으면 원반이 저절로 어둡고 붉어진다.
+  float disc = smoothstep(0.99997, 0.99999, dot(dir, sunDir));
+  S += disc * sunCol * 60.0;
+
+  return S;
+}
+`
+);
+function sunColorRgb(sunElRad, haze) {
+  const mu = Math.max(Math.sin(sunElRad), 0.02);
+  const out = [];
+  for (let i = 0; i < 3; i++) {
+    const tau = BETA_R[i] * (H_RAYLEIGH / mu) + BETA_M * haze * (H_MIE / mu);
+    out.push(SUN_TINT[i] * Math.exp(-tau));
+  }
+  return [out[0], out[1], out[2]];
+}
+function hazeForVisibility(visibilityM) {
+  const betaExt = 3.912 / Math.max(visibilityM, 100);
+  return Math.max(betaExt / 21e-6, 0.05);
+}
+const shared = {
+  uSunDirWorld: { value: new Vector3(0.4, 0.6, 0.2) },
+  uSunIntensity: { value: 1 },
+  uHaze: { value: 1 }
+};
+const atmosphereUniforms = shared;
+function setAtmosphere(sunDirWorld, sunElRad, sunIntensity, visibilityM) {
+  const haze = hazeForVisibility(visibilityM);
+  shared.uSunDirWorld.value.set(sunDirWorld[0], sunDirWorld[1], sunDirWorld[2]).normalize();
+  shared.uSunIntensity.value = sunIntensity;
+  shared.uHaze.value = haze;
+  return sunColorRgb(sunElRad, haze);
+}
+const ATMOSPHERE_NOTES = {
+  model: "하늘·원경은 레일리 + 미 단일산란으로 그립니다 — 표시용 근사입니다. 원경은 시선을 따라 대기 밀도가 일정하다고 보며, 오존 흡수·다중산란·지구 곡률은 넣지 않았습니다.",
+  visibility: "가시거리 슬라이더는 미 소산계수를 움직이는 표시 값이며 시뮬 입력이 아닙니다 — 궤적·자세·타면은 이 값과 무관합니다."
+};
+const VERT_DECL = "varying vec3 vAerialView;\n";
+const VERT_BODY = `
+  // 카메라에서 이 정점까지의 **월드** 벡터. 길이가 시선 거리, 방향이 산란각의 한 변이다.
+  // (three의 vFogDepth는 뷰공간 z라 시야 가장자리에서 실제 거리보다 짧다.)
+  vAerialView = (modelMatrix * vec4(transformed, 1.0)).xyz - cameraPosition;
+`;
+const FRAG_DECL = `
+varying vec3 vAerialView;
+uniform vec3 uSunDirWorld;
+uniform float uSunIntensity;
+uniform float uHaze;
+${ATMOSPHERE_GLSL}
+`;
+const FRAG_BODY = `
+  {
+    float s = length(vAerialView);
+    vec3 dir = vAerialView / max(s, 1e-4);
+    vec3 T, S;
+    atmosphere(dir, uSunDirWorld, uSunIntensity, uHaze, s, T, S);
+    // 선형 공간에서 소산 후 in-scattering을 더한다 — 톤매핑·색공간 변환 **전**이다.
+    gl_FragColor.rgb = gl_FragColor.rgb * T + S;
+  }
+`;
+function applyAerialPerspective(material) {
+  const m2 = material;
+  if (m2.__aerial) return;
+  m2.__aerial = true;
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = function(shader, renderer) {
+    prevCompile.call(this, shader, renderer);
+    Object.assign(shader.uniforms, shared);
+    shader.vertexShader = shader.vertexShader.replace("#include <common>", `#include <common>
+${VERT_DECL}`).replace("#include <fog_vertex>", `#include <fog_vertex>
+${VERT_BODY}`);
+    shader.fragmentShader = shader.fragmentShader.replace("#include <common>", `#include <common>
+${FRAG_DECL}`).replace("#include <opaque_fragment>", `#include <opaque_fragment>
+${FRAG_BODY}`);
+  };
+  material.customProgramCacheKey = function() {
+    return `aerial-v1|${prevKey.call(this)}`;
+  };
+  material.needsUpdate = true;
+}
+function finite(v2) {
+  return typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+}
+const LAUNCHER_GEOMETRY = {
+  /** 턴테이블 회전축 높이 (트레일러 기준) — GLB `Turntable.translation.y` */
+  turntableY: 0.92,
+  /** 크래들 피벗 높이 (턴테이블 기준) — GLB `Cradle.translation.y` */
+  cradleY: 0.86,
+  /** 캐니스터 포구의 크래들 로컬 Z — GLB `Box_Tubes` bbox 앞끝 (기준축은 −Z) */
+  muzzleZ: -0.94,
+  /** 캐니스터 관 뒤끝 — GLB `Box_Tubes` bbox 뒤끝 */
+  tubeAftZ: 0.78,
+  /** 상부 레일 앞끝 — GLB `Box_Rails` bbox */
+  railTipZ: -1.55,
+  /** 크래들 가동 범위 — `generate_launcher.py`의 `PROPS`(317~319행)와 모델 README 표.
+   *
+   * **`LIMIT_ROTATION` 컨스트레인트가 아니다.** 그쪽은 크래들 −2~52°, 턴테이블 ±110°로
+   * 일부러 더 느슨한 오버트래블 여유다. 그 값으로 "고쳤다"가는 −2~0° 구간에서 잘림
+   * 판정이 안 뜨는데 캡션은 계속 0~48°라고 말하게 된다. */
+  elevMin: 0,
+  elevMax: 48 * Math.PI / 180,
+  /** 방위 가동 범위 — 같은 출처. **여기서 자르지 않는다**(아래 캡션 참조) */
+  azMin: -100 * Math.PI / 180,
+  azMax: 100 * Math.PI / 180
+};
+const LAUNCHER_SPAN = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.railTipZ);
+const CANISTER_LENGTH = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.muzzleZ);
+function boresightNed(azimuth, elevation) {
+  const c = Math.cos(elevation);
+  return [c * Math.cos(azimuth), c * Math.sin(azimuth), -Math.sin(elevation)];
+}
+function launcherPose(launch) {
+  const az = finite(launch?.azimuth);
+  const el2 = finite(launch?.elev_angle);
+  if (az === null || el2 === null) return null;
+  const g = LAUNCHER_GEOMETRY;
+  const clamped = Math.min(Math.max(el2, g.elevMin), g.elevMax);
+  const pivotHeight = g.turntableY + g.cradleY;
+  const muzzleHeight = pivotHeight + Math.abs(g.muzzleZ) * Math.sin(clamped);
+  return {
+    // **부호가 뒤집히는 자리** — 위 주석의 유도 참조.
+    turntableY: -az,
+    cradleX: clamped,
+    jackOffsetY: -0.46,
+    boresightNed: boresightNed(az, clamped),
+    muzzleHeight,
+    elevationClamped: clamped !== el2
+  };
+}
+const deg$1 = (rad) => (rad * 180 / Math.PI).toFixed(0);
+function launcherCaptionNotes(launch, pose2) {
+  if (pose2 == null || launch == null) return [];
+  const notes = [];
+  const originHeight = finite(launch.origin_height);
+  if (originHeight !== null) {
+    const dz = pose2.muzzleHeight - originHeight;
+    if (Math.abs(dz) > 0.05) {
+      notes.push(
+        `발사 원점(${originHeight.toFixed(1)} m)과 발사관 포구(${pose2.muzzleHeight.toFixed(1)} m) 높이가 ${Math.abs(dz).toFixed(1)} m 다릅니다 — 트레일러를 지면에 두었고 기체는 시뮬이 준 자리에 있습니다.`
+      );
+    }
+  }
+  const len = finite(launch.length);
+  if (len !== null && len > LAUNCHER_SPAN * 1.5) {
+    notes.push(
+      `발사 구간은 ${len.toFixed(0)} m 가속 모델이고 발사관 형상(캐니스터 관 ${CANISTER_LENGTH.toFixed(1)} m · 상부 레일까지 ${LAUNCHER_SPAN.toFixed(1)} m)과 별개입니다.`
+    );
+  }
+  if (pose2.elevationClamped) {
+    notes.push(
+      `발사관 고각이 모델 가동 범위(${deg$1(LAUNCHER_GEOMETRY.elevMin)}~${deg$1(LAUNCHER_GEOMETRY.elevMax)}°)를 벗어나 잘렸습니다.`
+    );
+  }
+  const az = finite(launch.azimuth);
+  if (az !== null) {
+    const wrapped = Math.atan2(Math.sin(az), Math.cos(az));
+    if (wrapped < LAUNCHER_GEOMETRY.azMin || wrapped > LAUNCHER_GEOMETRY.azMax) {
+      notes.push(
+        `발사 방위 ${deg$1(wrapped)}°는 실장비 선회 범위(${deg$1(LAUNCHER_GEOMETRY.azMin)}~${deg$1(LAUNCHER_GEOMETRY.azMax)}°)를 벗어납니다 — 화면은 시뮬이 준 방향 그대로 그립니다.`
+      );
+    }
+  }
+  return notes;
+}
+const SURFACE_NOTES = {
+  innerOuterShared: "엘레본 내측·외측은 같은 각을 씁니다 — 믹서가 1:1 고정이라 시뮬이 둘을 구분하지 않습니다.",
+  rudderShared: "러더 두 면은 같은 각을 씁니다 — 시뮬의 러더 채널이 하나입니다.",
+  propellerDisplay: "프로펠러 회전은 좌·우 스로틀 평균에 비례한 표시 값이며, 실제 회전수가 아닙니다.",
+  holdOnMissing: "조종면 각이 결측인 구간에서는 **마지막 각을 유지**합니다 — 중립으로 되돌리면 없는 조종 입력을 그리게 됩니다. 결측이 계속되면 타면이 움직이지 않습니다."
+};
+function clamp(v2, lo, hi2) {
+  let out = v2;
+  if (typeof lo === "number" && Number.isFinite(lo) && out < lo) out = lo;
+  if (typeof hi2 === "number" && Number.isFinite(hi2) && out > hi2) out = hi2;
+  return [out, out !== v2];
+}
+function surfacePose(de2, da2, dr, limits = {}) {
+  const e = finite(de2);
+  const a = finite(da2);
+  const r2 = finite(dr);
+  if (e === null || a === null || r2 === null) return null;
+  const [left, cl2] = clamp(e + a, limits.elevon_lo, limits.elevon_hi);
+  const [right, cr] = clamp(e - a, limits.elevon_lo, limits.elevon_hi);
+  const [rud, cd2] = clamp(r2, limits.rudder_lo, limits.rudder_hi);
+  return {
+    elevon: {
+      Elevon_In_L: left,
+      Elevon_Out_L: left,
+      Elevon_In_R: right,
+      Elevon_Out_R: right
+    },
+    rudder: rud,
+    clamped: cl2 || cr || cd2
+  };
+}
+function propellerRate(thrL, thrR, maxRadPerSec = 220) {
+  const l2 = finite(thrL);
+  const r2 = finite(thrR);
+  if (l2 === null || r2 === null) return null;
+  const mean = Math.min(Math.max((l2 + r2) / 2, 0), 1);
+  return mean * maxRadPerSec;
+}
+const BASE = "/api";
+class ApiError extends Error {
+  constructor(status, detail) {
+    super(typeof detail === "string" ? detail : JSON.stringify(detail));
+    this.status = status;
+    this.detail = detail;
+  }
+}
+async function request(method, path, body) {
+  const opts = { method, headers: {} };
+  if (body !== void 0) {
+    opts.headers["content-type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(BASE + path, opts);
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, data && data.detail !== void 0 ? data.detail : data);
+  }
+  return data;
+}
+const api = {
+  get: (path) => request("GET", path),
+  post: (path, body) => request("POST", path, body)
+};
+const rawApi = api;
+async function listSimResults() {
+  const rows = await rawApi.get("/results");
+  return rows.filter((r2) => r2.kind === "sim");
+}
+async function fetchReplay(id2, stride) {
+  return await rawApi.get(`/sim/${id2}/replay?stride=${stride}`);
+}
+async function fetchWorldManifest() {
+  return await rawApi.get("/world/manifest");
+}
+async function fetchTerrainPack(name, signal) {
+  const r2 = await fetch(`/api/world/terrain/${encodeURIComponent(name)}`, {
+    cache: "no-cache",
+    signal
+  });
+  if (!r2.ok) throw new Error(`지형 팩을 받지 못했습니다 (${r2.status})`);
+  return r2.arrayBuffer();
+}
+function modelUrl(name) {
+  return `/api/world/model/${encodeURIComponent(name)}`;
+}
 function toWorld(n2, e, d) {
   const v2 = nedToRender(n2, e, d);
   return [v2[0], v2[1], v2[2]];
+}
+const CopyShader = {
+  name: "CopyShader",
+  uniforms: {
+    "tDiffuse": { value: null },
+    "opacity": { value: 1 }
+  },
+  vertexShader: (
+    /* glsl */
+    `
+
+		varying vec2 vUv;
+
+		void main() {
+
+			vUv = uv;
+			gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+		}`
+  ),
+  fragmentShader: (
+    /* glsl */
+    `
+
+		uniform float opacity;
+
+		uniform sampler2D tDiffuse;
+
+		varying vec2 vUv;
+
+		void main() {
+
+			vec4 texel = texture2D( tDiffuse, vUv );
+			gl_FragColor = opacity * texel;
+
+
+		}`
+  )
+};
+class Pass {
+  /**
+   * Constructs a new pass.
+   */
+  constructor() {
+    this.isPass = true;
+    this.enabled = true;
+    this.needsSwap = true;
+    this.clear = false;
+    this.renderToScreen = false;
+  }
+  /**
+   * Sets the size of the pass.
+   *
+   * @abstract
+   * @param {number} width - The width to set.
+   * @param {number} height - The height to set.
+   */
+  setSize() {
+  }
+  /**
+   * This method holds the render logic of a pass. It must be implemented in all derived classes.
+   *
+   * @abstract
+   * @param {WebGLRenderer} renderer - The renderer.
+   * @param {WebGLRenderTarget} writeBuffer - The write buffer. This buffer is intended as the rendering
+   * destination for the pass.
+   * @param {WebGLRenderTarget} readBuffer - The read buffer. The pass can access the result from the
+   * previous pass from this buffer.
+   * @param {number} deltaTime - The delta time in seconds.
+   * @param {boolean} maskActive - Whether masking is active or not.
+   */
+  render() {
+    console.error("THREE.Pass: .render() must be implemented in derived pass.");
+  }
+  /**
+   * Frees the GPU-related resources allocated by this instance. Call this
+   * method whenever the pass is no longer used in your app.
+   *
+   * @abstract
+   */
+  dispose() {
+  }
+}
+const _camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+class FullscreenTriangleGeometry extends BufferGeometry {
+  constructor() {
+    super();
+    this.setAttribute("position", new Float32BufferAttribute([-1, 3, 0, -1, -1, 0, 3, -1, 0], 3));
+    this.setAttribute("uv", new Float32BufferAttribute([0, 2, 0, 0, 2, 0], 2));
+  }
+}
+const _geometry = new FullscreenTriangleGeometry();
+class FullScreenQuad {
+  /**
+   * Constructs a new full screen quad.
+   *
+   * @param {?Material} material - The material to render te full screen quad with.
+   */
+  constructor(material) {
+    this._mesh = new Mesh(_geometry, material);
+  }
+  /**
+   * Frees the GPU-related resources allocated by this instance. Call this
+   * method whenever the instance is no longer used in your app.
+   */
+  dispose() {
+    this._mesh.geometry.dispose();
+  }
+  /**
+   * Renders the full screen quad.
+   *
+   * @param {WebGLRenderer} renderer - The renderer.
+   */
+  render(renderer) {
+    renderer.render(this._mesh, _camera);
+  }
+  /**
+   * The quad's material.
+   *
+   * @type {?Material}
+   */
+  get material() {
+    return this._mesh.material;
+  }
+  set material(value) {
+    this._mesh.material = value;
+  }
+}
+class ShaderPass extends Pass {
+  /**
+   * Constructs a new shader pass.
+   *
+   * @param {Object|ShaderMaterial} [shader] - A shader object holding vertex and fragment shader as well as
+   * defines and uniforms. It's also valid to pass a custom shader material.
+   * @param {string} [textureID='tDiffuse'] - The name of the texture uniform that should sample
+   * the read buffer.
+   */
+  constructor(shader, textureID = "tDiffuse") {
+    super();
+    this.textureID = textureID;
+    this.uniforms = null;
+    this.material = null;
+    if (shader instanceof ShaderMaterial) {
+      this.uniforms = shader.uniforms;
+      this.material = shader;
+    } else if (shader) {
+      this.uniforms = UniformsUtils.clone(shader.uniforms);
+      this.material = new ShaderMaterial({
+        name: shader.name !== void 0 ? shader.name : "unspecified",
+        defines: Object.assign({}, shader.defines),
+        uniforms: this.uniforms,
+        vertexShader: shader.vertexShader,
+        fragmentShader: shader.fragmentShader
+      });
+    }
+    this._fsQuad = new FullScreenQuad(this.material);
+  }
+  /**
+   * Performs the shader pass.
+   *
+   * @param {WebGLRenderer} renderer - The renderer.
+   * @param {WebGLRenderTarget} writeBuffer - The write buffer. This buffer is intended as the rendering
+   * destination for the pass.
+   * @param {WebGLRenderTarget} readBuffer - The read buffer. The pass can access the result from the
+   * previous pass from this buffer.
+   * @param {number} deltaTime - The delta time in seconds.
+   * @param {boolean} maskActive - Whether masking is active or not.
+   */
+  render(renderer, writeBuffer, readBuffer) {
+    if (this.uniforms[this.textureID]) {
+      this.uniforms[this.textureID].value = readBuffer.texture;
+    }
+    this._fsQuad.material = this.material;
+    if (this.renderToScreen) {
+      renderer.setRenderTarget(null);
+      this._fsQuad.render(renderer);
+    } else {
+      renderer.setRenderTarget(writeBuffer);
+      if (this.clear) renderer.clear(renderer.autoClearColor, renderer.autoClearDepth, renderer.autoClearStencil);
+      this._fsQuad.render(renderer);
+    }
+  }
+  /**
+   * Frees the GPU-related resources allocated by this instance. Call this
+   * method whenever the pass is no longer used in your app.
+   */
+  dispose() {
+    this.material.dispose();
+    this._fsQuad.dispose();
+  }
+}
+class MaskPass extends Pass {
+  /**
+   * Constructs a new mask pass.
+   *
+   * @param {Scene} scene - The 3D objects in this scene will define the mask.
+   * @param {Camera} camera - The camera.
+   */
+  constructor(scene, camera) {
+    super();
+    this.scene = scene;
+    this.camera = camera;
+    this.clear = true;
+    this.needsSwap = false;
+    this.inverse = false;
+  }
+  /**
+   * Performs a mask pass with the configured scene and camera.
+   *
+   * @param {WebGLRenderer} renderer - The renderer.
+   * @param {WebGLRenderTarget} writeBuffer - The write buffer. This buffer is intended as the rendering
+   * destination for the pass.
+   * @param {WebGLRenderTarget} readBuffer - The read buffer. The pass can access the result from the
+   * previous pass from this buffer.
+   * @param {number} deltaTime - The delta time in seconds.
+   * @param {boolean} maskActive - Whether masking is active or not.
+   */
+  render(renderer, writeBuffer, readBuffer) {
+    const context = renderer.getContext();
+    const state = renderer.state;
+    state.buffers.color.setMask(false);
+    state.buffers.depth.setMask(false);
+    state.buffers.color.setLocked(true);
+    state.buffers.depth.setLocked(true);
+    let writeValue, clearValue;
+    if (this.inverse) {
+      writeValue = 0;
+      clearValue = 1;
+    } else {
+      writeValue = 1;
+      clearValue = 0;
+    }
+    state.buffers.stencil.setTest(true);
+    state.buffers.stencil.setOp(context.REPLACE, context.REPLACE, context.REPLACE);
+    state.buffers.stencil.setFunc(context.ALWAYS, writeValue, 4294967295);
+    state.buffers.stencil.setClear(clearValue);
+    state.buffers.stencil.setLocked(true);
+    renderer.setRenderTarget(readBuffer);
+    if (this.clear) renderer.clear();
+    renderer.render(this.scene, this.camera);
+    renderer.setRenderTarget(writeBuffer);
+    if (this.clear) renderer.clear();
+    renderer.render(this.scene, this.camera);
+    state.buffers.color.setLocked(false);
+    state.buffers.depth.setLocked(false);
+    state.buffers.color.setMask(true);
+    state.buffers.depth.setMask(true);
+    state.buffers.stencil.setLocked(false);
+    state.buffers.stencil.setFunc(context.EQUAL, 1, 4294967295);
+    state.buffers.stencil.setOp(context.KEEP, context.KEEP, context.KEEP);
+    state.buffers.stencil.setLocked(true);
+  }
+}
+class ClearMaskPass extends Pass {
+  /**
+   * Constructs a new clear mask pass.
+   */
+  constructor() {
+    super();
+    this.needsSwap = false;
+  }
+  /**
+   * Performs the clear of the currently defined mask.
+   *
+   * @param {WebGLRenderer} renderer - The renderer.
+   * @param {WebGLRenderTarget} writeBuffer - The write buffer. This buffer is intended as the rendering
+   * destination for the pass.
+   * @param {WebGLRenderTarget} readBuffer - The read buffer. The pass can access the result from the
+   * previous pass from this buffer.
+   * @param {number} deltaTime - The delta time in seconds.
+   * @param {boolean} maskActive - Whether masking is active or not.
+   */
+  render(renderer) {
+    renderer.state.buffers.stencil.setLocked(false);
+    renderer.state.buffers.stencil.setTest(false);
+  }
+}
+class EffectComposer {
+  /**
+   * Constructs a new effect composer.
+   *
+   * @param {WebGLRenderer} renderer - The renderer.
+   * @param {WebGLRenderTarget} [renderTarget] - This render target and a clone will
+   * be used as the internal read and write buffers. If not given, the composer creates
+   * the buffers automatically.
+   */
+  constructor(renderer, renderTarget) {
+    this.renderer = renderer;
+    this._pixelRatio = renderer.getPixelRatio();
+    if (renderTarget === void 0) {
+      const size = renderer.getSize(new Vector2());
+      this._width = size.width;
+      this._height = size.height;
+      renderTarget = new WebGLRenderTarget(this._width * this._pixelRatio, this._height * this._pixelRatio, { type: HalfFloatType });
+      renderTarget.texture.name = "EffectComposer.rt1";
+    } else {
+      this._width = renderTarget.width;
+      this._height = renderTarget.height;
+    }
+    this.renderTarget1 = renderTarget;
+    this.renderTarget2 = renderTarget.clone();
+    this.renderTarget2.texture.name = "EffectComposer.rt2";
+    this.writeBuffer = this.renderTarget1;
+    this.readBuffer = this.renderTarget2;
+    this.renderToScreen = true;
+    this.passes = [];
+    this.copyPass = new ShaderPass(CopyShader);
+    this.copyPass.material.blending = NoBlending;
+    this.timer = new Timer();
+  }
+  /**
+   * Swaps the internal read/write buffers.
+   */
+  swapBuffers() {
+    const tmp = this.readBuffer;
+    this.readBuffer = this.writeBuffer;
+    this.writeBuffer = tmp;
+  }
+  /**
+   * Adds the given pass to the pass chain.
+   *
+   * @param {Pass} pass - The pass to add.
+   */
+  addPass(pass) {
+    this.passes.push(pass);
+    pass.setSize(this._width * this._pixelRatio, this._height * this._pixelRatio);
+  }
+  /**
+   * Inserts the given pass at a given index.
+   *
+   * @param {Pass} pass - The pass to insert.
+   * @param {number} index - The index into the pass chain.
+   */
+  insertPass(pass, index) {
+    this.passes.splice(index, 0, pass);
+    pass.setSize(this._width * this._pixelRatio, this._height * this._pixelRatio);
+  }
+  /**
+   * Removes the given pass from the pass chain.
+   *
+   * @param {Pass} pass - The pass to remove.
+   */
+  removePass(pass) {
+    const index = this.passes.indexOf(pass);
+    if (index !== -1) {
+      this.passes.splice(index, 1);
+    }
+  }
+  /**
+   * Returns `true` if the pass for the given index is the last enabled pass in the pass chain.
+   *
+   * @param {number} passIndex - The pass index.
+   * @return {boolean} Whether the pass for the given index is the last pass in the pass chain.
+   */
+  isLastEnabledPass(passIndex) {
+    for (let i = passIndex + 1; i < this.passes.length; i++) {
+      if (this.passes[i].enabled) {
+        return false;
+      }
+    }
+    return true;
+  }
+  /**
+   * Executes all enabled post-processing passes in order to produce the final frame.
+   *
+   * @param {number} deltaTime - The delta time in seconds. If not given, the composer computes
+   * its own time delta value.
+   */
+  render(deltaTime) {
+    this.timer.update();
+    if (deltaTime === void 0) {
+      deltaTime = this.timer.getDelta();
+    }
+    const currentRenderTarget = this.renderer.getRenderTarget();
+    let maskActive = false;
+    for (let i = 0, il2 = this.passes.length; i < il2; i++) {
+      const pass = this.passes[i];
+      if (pass.enabled === false) continue;
+      pass.renderToScreen = this.renderToScreen && this.isLastEnabledPass(i);
+      pass.render(this.renderer, this.writeBuffer, this.readBuffer, deltaTime, maskActive);
+      if (pass.needsSwap) {
+        if (maskActive) {
+          const context = this.renderer.getContext();
+          const stencil = this.renderer.state.buffers.stencil;
+          stencil.setFunc(context.NOTEQUAL, 1, 4294967295);
+          this.copyPass.render(this.renderer, this.writeBuffer, this.readBuffer, deltaTime);
+          stencil.setFunc(context.EQUAL, 1, 4294967295);
+        }
+        this.swapBuffers();
+      }
+      if (MaskPass !== void 0) {
+        if (pass instanceof MaskPass) {
+          maskActive = true;
+        } else if (pass instanceof ClearMaskPass) {
+          maskActive = false;
+        }
+      }
+    }
+    this.renderer.setRenderTarget(currentRenderTarget);
+  }
+  /**
+   * Resets the internal state of the EffectComposer.
+   *
+   * @param {WebGLRenderTarget} [renderTarget] - This render target has the same purpose like
+   * the one from the constructor. If set, it is used to setup the read and write buffers.
+   */
+  reset(renderTarget) {
+    if (renderTarget === void 0) {
+      const size = this.renderer.getSize(new Vector2());
+      this._pixelRatio = this.renderer.getPixelRatio();
+      this._width = size.width;
+      this._height = size.height;
+      renderTarget = this.renderTarget1.clone();
+      renderTarget.setSize(this._width * this._pixelRatio, this._height * this._pixelRatio);
+    }
+    this.renderTarget1.dispose();
+    this.renderTarget2.dispose();
+    this.renderTarget1 = renderTarget;
+    this.renderTarget2 = renderTarget.clone();
+    this.writeBuffer = this.renderTarget1;
+    this.readBuffer = this.renderTarget2;
+  }
+  /**
+   * Resizes the internal read and write buffers as well as all passes. Similar to {@link WebGLRenderer#setSize},
+   * this method honors the current pixel ration.
+   *
+   * @param {number} width - The width in logical pixels.
+   * @param {number} height - The height in logical pixels.
+   */
+  setSize(width, height) {
+    this._width = width;
+    this._height = height;
+    const effectiveWidth = this._width * this._pixelRatio;
+    const effectiveHeight = this._height * this._pixelRatio;
+    this.renderTarget1.setSize(effectiveWidth, effectiveHeight);
+    this.renderTarget2.setSize(effectiveWidth, effectiveHeight);
+    for (let i = 0; i < this.passes.length; i++) {
+      this.passes[i].setSize(effectiveWidth, effectiveHeight);
+    }
+  }
+  /**
+   * Sets device pixel ratio. This is usually used for HiDPI device to prevent blurring output.
+   * Setting the pixel ratio will automatically resize the composer.
+   *
+   * @param {number} pixelRatio - The pixel ratio to set.
+   */
+  setPixelRatio(pixelRatio) {
+    this._pixelRatio = pixelRatio;
+    this.setSize(this._width, this._height);
+  }
+  /**
+   * Frees the GPU-related resources allocated by this instance. Call this
+   * method whenever the composer is no longer used in your app.
+   */
+  dispose() {
+    this.renderTarget1.dispose();
+    this.renderTarget2.dispose();
+    this.copyPass.dispose();
+  }
+}
+const OutputShader = {
+  name: "OutputShader",
+  uniforms: {
+    "tDiffuse": { value: null },
+    "toneMappingExposure": { value: 1 }
+  },
+  vertexShader: (
+    /* glsl */
+    `
+		precision highp float;
+
+		uniform mat4 modelViewMatrix;
+		uniform mat4 projectionMatrix;
+
+		attribute vec3 position;
+		attribute vec2 uv;
+
+		varying vec2 vUv;
+
+		void main() {
+
+			vUv = uv;
+			gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+		}`
+  ),
+  fragmentShader: (
+    /* glsl */
+    `
+
+		precision highp float;
+
+		uniform sampler2D tDiffuse;
+
+		#include <tonemapping_pars_fragment>
+		#include <colorspace_pars_fragment>
+
+		varying vec2 vUv;
+
+		void main() {
+
+			gl_FragColor = texture2D( tDiffuse, vUv );
+
+			// tone mapping
+
+			#ifdef LINEAR_TONE_MAPPING
+
+				gl_FragColor.rgb = LinearToneMapping( gl_FragColor.rgb );
+
+			#elif defined( REINHARD_TONE_MAPPING )
+
+				gl_FragColor.rgb = ReinhardToneMapping( gl_FragColor.rgb );
+
+			#elif defined( CINEON_TONE_MAPPING )
+
+				gl_FragColor.rgb = CineonToneMapping( gl_FragColor.rgb );
+
+			#elif defined( ACES_FILMIC_TONE_MAPPING )
+
+				gl_FragColor.rgb = ACESFilmicToneMapping( gl_FragColor.rgb );
+
+			#elif defined( AGX_TONE_MAPPING )
+
+				gl_FragColor.rgb = AgXToneMapping( gl_FragColor.rgb );
+
+			#elif defined( NEUTRAL_TONE_MAPPING )
+
+				gl_FragColor.rgb = NeutralToneMapping( gl_FragColor.rgb );
+
+			#elif defined( CUSTOM_TONE_MAPPING )
+
+				gl_FragColor.rgb = CustomToneMapping( gl_FragColor.rgb );
+
+			#endif
+
+			// color space
+
+			#ifdef SRGB_TRANSFER
+
+				gl_FragColor = sRGBTransferOETF( gl_FragColor );
+
+			#endif
+
+		}`
+  )
+};
+class OutputPass extends Pass {
+  /**
+   * Constructs a new output pass.
+   */
+  constructor() {
+    super();
+    this.isOutputPass = true;
+    this.uniforms = UniformsUtils.clone(OutputShader.uniforms);
+    this.material = new RawShaderMaterial({
+      name: OutputShader.name,
+      uniforms: this.uniforms,
+      vertexShader: OutputShader.vertexShader,
+      fragmentShader: OutputShader.fragmentShader
+    });
+    this._fsQuad = new FullScreenQuad(this.material);
+    this._outputColorSpace = null;
+    this._toneMapping = null;
+  }
+  /**
+   * Performs the output pass.
+   *
+   * @param {WebGLRenderer} renderer - The renderer.
+   * @param {WebGLRenderTarget} writeBuffer - The write buffer. This buffer is intended as the rendering
+   * destination for the pass.
+   * @param {WebGLRenderTarget} readBuffer - The read buffer. The pass can access the result from the
+   * previous pass from this buffer.
+   * @param {number} deltaTime - The delta time in seconds.
+   * @param {boolean} maskActive - Whether masking is active or not.
+   */
+  render(renderer, writeBuffer, readBuffer) {
+    this.uniforms["tDiffuse"].value = readBuffer.texture;
+    this.uniforms["toneMappingExposure"].value = renderer.toneMappingExposure;
+    if (this._outputColorSpace !== renderer.outputColorSpace || this._toneMapping !== renderer.toneMapping) {
+      this._outputColorSpace = renderer.outputColorSpace;
+      this._toneMapping = renderer.toneMapping;
+      this.material.defines = {};
+      if (ColorManagement.getTransfer(this._outputColorSpace) === SRGBTransfer) this.material.defines.SRGB_TRANSFER = "";
+      if (this._toneMapping === LinearToneMapping) this.material.defines.LINEAR_TONE_MAPPING = "";
+      else if (this._toneMapping === ReinhardToneMapping) this.material.defines.REINHARD_TONE_MAPPING = "";
+      else if (this._toneMapping === CineonToneMapping) this.material.defines.CINEON_TONE_MAPPING = "";
+      else if (this._toneMapping === ACESFilmicToneMapping) this.material.defines.ACES_FILMIC_TONE_MAPPING = "";
+      else if (this._toneMapping === AgXToneMapping) this.material.defines.AGX_TONE_MAPPING = "";
+      else if (this._toneMapping === NeutralToneMapping) this.material.defines.NEUTRAL_TONE_MAPPING = "";
+      else if (this._toneMapping === CustomToneMapping) this.material.defines.CUSTOM_TONE_MAPPING = "";
+      this.material.needsUpdate = true;
+    }
+    if (this.renderToScreen === true) {
+      renderer.setRenderTarget(null);
+      this._fsQuad.render(renderer);
+    } else {
+      renderer.setRenderTarget(writeBuffer);
+      if (this.clear) renderer.clear(renderer.autoClearColor, renderer.autoClearDepth, renderer.autoClearStencil);
+      this._fsQuad.render(renderer);
+    }
+  }
+  /**
+   * Frees the GPU-related resources allocated by this instance. Call this
+   * method whenever the pass is no longer used in your app.
+   */
+  dispose() {
+    this.material.dispose();
+    this._fsQuad.dispose();
+  }
+}
+const SMAAEdgesShader = {
+  defines: {
+    "SMAA_THRESHOLD": "0.1"
+  },
+  uniforms: {
+    "tDiffuse": { value: null },
+    "resolution": { value: new Vector2(1 / 1024, 1 / 512) }
+  },
+  vertexShader: (
+    /* glsl */
+    `
+
+		uniform vec2 resolution;
+
+		varying vec2 vUv;
+		varying vec4 vOffset[ 3 ];
+
+		void SMAAEdgeDetectionVS( vec2 texcoord ) {
+			vOffset[ 0 ] = texcoord.xyxy + resolution.xyxy * vec4( -1.0, 0.0, 0.0,  1.0 ); // WebGL port note: Changed sign in W component
+			vOffset[ 1 ] = texcoord.xyxy + resolution.xyxy * vec4(  1.0, 0.0, 0.0, -1.0 ); // WebGL port note: Changed sign in W component
+			vOffset[ 2 ] = texcoord.xyxy + resolution.xyxy * vec4( -2.0, 0.0, 0.0,  2.0 ); // WebGL port note: Changed sign in W component
+		}
+
+		void main() {
+
+			vUv = uv;
+
+			SMAAEdgeDetectionVS( vUv );
+
+			gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+		}`
+  ),
+  fragmentShader: (
+    /* glsl */
+    `
+
+		uniform sampler2D tDiffuse;
+
+		varying vec2 vUv;
+		varying vec4 vOffset[ 3 ];
+
+		vec4 SMAAColorEdgeDetectionPS( vec2 texcoord, vec4 offset[3], sampler2D colorTex ) {
+			vec2 threshold = vec2( SMAA_THRESHOLD, SMAA_THRESHOLD );
+
+			// Calculate color deltas:
+			vec4 delta;
+			vec3 C = texture2D( colorTex, texcoord ).rgb;
+
+			vec3 Cleft = texture2D( colorTex, offset[0].xy ).rgb;
+			vec3 t = abs( C - Cleft );
+			delta.x = max( max( t.r, t.g ), t.b );
+
+			vec3 Ctop = texture2D( colorTex, offset[0].zw ).rgb;
+			t = abs( C - Ctop );
+			delta.y = max( max( t.r, t.g ), t.b );
+
+			// We do the usual threshold:
+			vec2 edges = step( threshold, delta.xy );
+
+			// Then discard if there is no edge:
+			if ( dot( edges, vec2( 1.0, 1.0 ) ) == 0.0 )
+				discard;
+
+			// Calculate right and bottom deltas:
+			vec3 Cright = texture2D( colorTex, offset[1].xy ).rgb;
+			t = abs( C - Cright );
+			delta.z = max( max( t.r, t.g ), t.b );
+
+			vec3 Cbottom  = texture2D( colorTex, offset[1].zw ).rgb;
+			t = abs( C - Cbottom );
+			delta.w = max( max( t.r, t.g ), t.b );
+
+			// Calculate the maximum delta in the direct neighborhood:
+			float maxDelta = max( max( max( delta.x, delta.y ), delta.z ), delta.w );
+
+			// Calculate left-left and top-top deltas:
+			vec3 Cleftleft  = texture2D( colorTex, offset[2].xy ).rgb;
+			t = abs( C - Cleftleft );
+			delta.z = max( max( t.r, t.g ), t.b );
+
+			vec3 Ctoptop = texture2D( colorTex, offset[2].zw ).rgb;
+			t = abs( C - Ctoptop );
+			delta.w = max( max( t.r, t.g ), t.b );
+
+			// Calculate the final maximum delta:
+			maxDelta = max( max( maxDelta, delta.z ), delta.w );
+
+			// Local contrast adaptation in action:
+			edges.xy *= step( 0.5 * maxDelta, delta.xy );
+
+			return vec4( edges, 0.0, 0.0 );
+		}
+
+		void main() {
+
+			gl_FragColor = SMAAColorEdgeDetectionPS( vUv, vOffset, tDiffuse );
+
+		}`
+  )
+};
+const SMAAWeightsShader = {
+  defines: {
+    "SMAA_MAX_SEARCH_STEPS": "8",
+    "SMAA_AREATEX_MAX_DISTANCE": "16",
+    "SMAA_AREATEX_PIXEL_SIZE": "( 1.0 / vec2( 160.0, 560.0 ) )",
+    "SMAA_AREATEX_SUBTEX_SIZE": "( 1.0 / 7.0 )"
+  },
+  uniforms: {
+    "tDiffuse": { value: null },
+    "tArea": { value: null },
+    "tSearch": { value: null },
+    "resolution": { value: new Vector2(1 / 1024, 1 / 512) }
+  },
+  vertexShader: (
+    /* glsl */
+    `
+
+		uniform vec2 resolution;
+
+		varying vec2 vUv;
+		varying vec4 vOffset[ 3 ];
+		varying vec2 vPixcoord;
+
+		void SMAABlendingWeightCalculationVS( vec2 texcoord ) {
+			vPixcoord = texcoord / resolution;
+
+			// We will use these offsets for the searches later on (see @PSEUDO_GATHER4):
+			vOffset[ 0 ] = texcoord.xyxy + resolution.xyxy * vec4( -0.25, 0.125, 1.25, 0.125 ); // WebGL port note: Changed sign in Y and W components
+			vOffset[ 1 ] = texcoord.xyxy + resolution.xyxy * vec4( -0.125, 0.25, -0.125, -1.25 ); // WebGL port note: Changed sign in Y and W components
+
+			// And these for the searches, they indicate the ends of the loops:
+			vOffset[ 2 ] = vec4( vOffset[ 0 ].xz, vOffset[ 1 ].yw ) + vec4( -2.0, 2.0, -2.0, 2.0 ) * resolution.xxyy * float( SMAA_MAX_SEARCH_STEPS );
+
+		}
+
+		void main() {
+
+			vUv = uv;
+
+			SMAABlendingWeightCalculationVS( vUv );
+
+			gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+		}`
+  ),
+  fragmentShader: (
+    /* glsl */
+    `
+
+		#define SMAASampleLevelZeroOffset( tex, coord, offset ) texture2D( tex, coord + float( offset ) * resolution, 0.0 )
+
+		uniform sampler2D tDiffuse;
+		uniform sampler2D tArea;
+		uniform sampler2D tSearch;
+		uniform vec2 resolution;
+
+		varying vec2 vUv;
+		varying vec4 vOffset[3];
+		varying vec2 vPixcoord;
+
+		#if __VERSION__ == 100
+		vec2 round( vec2 x ) {
+			return sign( x ) * floor( abs( x ) + 0.5 );
+		}
+		#endif
+
+		float SMAASearchLength( sampler2D searchTex, vec2 e, float bias, float scale ) {
+			// Not required if searchTex accesses are set to point:
+			// float2 SEARCH_TEX_PIXEL_SIZE = 1.0 / float2(66.0, 33.0);
+			// e = float2(bias, 0.0) + 0.5 * SEARCH_TEX_PIXEL_SIZE +
+			//     e * float2(scale, 1.0) * float2(64.0, 32.0) * SEARCH_TEX_PIXEL_SIZE;
+			e.r = bias + e.r * scale;
+			return 255.0 * texture2D( searchTex, e, 0.0 ).r;
+		}
+
+		float SMAASearchXLeft( sampler2D edgesTex, sampler2D searchTex, vec2 texcoord, float end ) {
+			/**
+				* @PSEUDO_GATHER4
+				* This texcoord has been offset by (-0.25, -0.125) in the vertex shader to
+				* sample between edge, thus fetching four edges in a row.
+				* Sampling with different offsets in each direction allows to disambiguate
+				* which edges are active from the four fetched ones.
+				*/
+			vec2 e = vec2( 0.0, 1.0 );
+
+			for ( int i = 0; i < SMAA_MAX_SEARCH_STEPS; i ++ ) { // WebGL port note: Changed while to for
+				e = texture2D( edgesTex, texcoord, 0.0 ).rg;
+				texcoord -= vec2( 2.0, 0.0 ) * resolution;
+				if ( ! ( texcoord.x > end && e.g > 0.8281 && e.r == 0.0 ) ) break;
+			}
+
+			// We correct the previous (-0.25, -0.125) offset we applied:
+			texcoord.x += 0.25 * resolution.x;
+
+			// The searches are bias by 1, so adjust the coords accordingly:
+			texcoord.x += resolution.x;
+
+			// Disambiguate the length added by the last step:
+			texcoord.x += 2.0 * resolution.x; // Undo last step
+			texcoord.x -= resolution.x * SMAASearchLength(searchTex, e, 0.0, 0.5);
+
+			return texcoord.x;
+		}
+
+		float SMAASearchXRight( sampler2D edgesTex, sampler2D searchTex, vec2 texcoord, float end ) {
+			vec2 e = vec2( 0.0, 1.0 );
+
+			for ( int i = 0; i < SMAA_MAX_SEARCH_STEPS; i ++ ) { // WebGL port note: Changed while to for
+				e = texture2D( edgesTex, texcoord, 0.0 ).rg;
+				texcoord += vec2( 2.0, 0.0 ) * resolution;
+				if ( ! ( texcoord.x < end && e.g > 0.8281 && e.r == 0.0 ) ) break;
+			}
+
+			texcoord.x -= 0.25 * resolution.x;
+			texcoord.x -= resolution.x;
+			texcoord.x -= 2.0 * resolution.x;
+			texcoord.x += resolution.x * SMAASearchLength( searchTex, e, 0.5, 0.5 );
+
+			return texcoord.x;
+		}
+
+		float SMAASearchYUp( sampler2D edgesTex, sampler2D searchTex, vec2 texcoord, float end ) {
+			vec2 e = vec2( 1.0, 0.0 );
+
+			for ( int i = 0; i < SMAA_MAX_SEARCH_STEPS; i ++ ) { // WebGL port note: Changed while to for
+				e = texture2D( edgesTex, texcoord, 0.0 ).rg;
+				texcoord += vec2( 0.0, 2.0 ) * resolution; // WebGL port note: Changed sign
+				if ( ! ( texcoord.y > end && e.r > 0.8281 && e.g == 0.0 ) ) break;
+			}
+
+			texcoord.y -= 0.25 * resolution.y; // WebGL port note: Changed sign
+			texcoord.y -= resolution.y; // WebGL port note: Changed sign
+			texcoord.y -= 2.0 * resolution.y; // WebGL port note: Changed sign
+			texcoord.y += resolution.y * SMAASearchLength( searchTex, e.gr, 0.0, 0.5 ); // WebGL port note: Changed sign
+
+			return texcoord.y;
+		}
+
+		float SMAASearchYDown( sampler2D edgesTex, sampler2D searchTex, vec2 texcoord, float end ) {
+			vec2 e = vec2( 1.0, 0.0 );
+
+			for ( int i = 0; i < SMAA_MAX_SEARCH_STEPS; i ++ ) { // WebGL port note: Changed while to for
+				e = texture2D( edgesTex, texcoord, 0.0 ).rg;
+				texcoord -= vec2( 0.0, 2.0 ) * resolution; // WebGL port note: Changed sign
+				if ( ! ( texcoord.y < end && e.r > 0.8281 && e.g == 0.0 ) ) break;
+			}
+
+			texcoord.y += 0.25 * resolution.y; // WebGL port note: Changed sign
+			texcoord.y += resolution.y; // WebGL port note: Changed sign
+			texcoord.y += 2.0 * resolution.y; // WebGL port note: Changed sign
+			texcoord.y -= resolution.y * SMAASearchLength( searchTex, e.gr, 0.5, 0.5 ); // WebGL port note: Changed sign
+
+			return texcoord.y;
+		}
+
+		vec2 SMAAArea( sampler2D areaTex, vec2 dist, float e1, float e2, float offset ) {
+			// Rounding prevents precision errors of bilinear filtering:
+			vec2 texcoord = float( SMAA_AREATEX_MAX_DISTANCE ) * round( 4.0 * vec2( e1, e2 ) ) + dist;
+
+			// We do a scale and bias for mapping to texel space:
+			texcoord = SMAA_AREATEX_PIXEL_SIZE * texcoord + ( 0.5 * SMAA_AREATEX_PIXEL_SIZE );
+
+			// Move to proper place, according to the subpixel offset:
+			texcoord.y += SMAA_AREATEX_SUBTEX_SIZE * offset;
+
+			return texture2D( areaTex, texcoord, 0.0 ).rg;
+		}
+
+		vec4 SMAABlendingWeightCalculationPS( vec2 texcoord, vec2 pixcoord, vec4 offset[ 3 ], sampler2D edgesTex, sampler2D areaTex, sampler2D searchTex, ivec4 subsampleIndices ) {
+			vec4 weights = vec4( 0.0, 0.0, 0.0, 0.0 );
+
+			vec2 e = texture2D( edgesTex, texcoord ).rg;
+
+			if ( e.g > 0.0 ) { // Edge at north
+				vec2 d;
+
+				// Find the distance to the left:
+				vec2 coords;
+				coords.x = SMAASearchXLeft( edgesTex, searchTex, offset[ 0 ].xy, offset[ 2 ].x );
+				coords.y = offset[ 1 ].y; // offset[1].y = texcoord.y - 0.25 * resolution.y (@CROSSING_OFFSET)
+				d.x = coords.x;
+
+				// Now fetch the left crossing edges, two at a time using bilinear
+				// filtering. Sampling at -0.25 (see @CROSSING_OFFSET) enables to
+				// discern what value each edge has:
+				float e1 = texture2D( edgesTex, coords, 0.0 ).r;
+
+				// Find the distance to the right:
+				coords.x = SMAASearchXRight( edgesTex, searchTex, offset[ 0 ].zw, offset[ 2 ].y );
+				d.y = coords.x;
+
+				// We want the distances to be in pixel units (doing this here allow to
+				// better interleave arithmetic and memory accesses):
+				d = d / resolution.x - pixcoord.x;
+
+				// SMAAArea below needs a sqrt, as the areas texture is compressed
+				// quadratically:
+				vec2 sqrt_d = sqrt( abs( d ) );
+
+				// Fetch the right crossing edges:
+				coords.y -= 1.0 * resolution.y; // WebGL port note: Added
+				float e2 = SMAASampleLevelZeroOffset( edgesTex, coords, ivec2( 1, 0 ) ).r;
+
+				// Ok, we know how this pattern looks like, now it is time for getting
+				// the actual area:
+				weights.rg = SMAAArea( areaTex, sqrt_d, e1, e2, float( subsampleIndices.y ) );
+			}
+
+			if ( e.r > 0.0 ) { // Edge at west
+				vec2 d;
+
+				// Find the distance to the top:
+				vec2 coords;
+
+				coords.y = SMAASearchYUp( edgesTex, searchTex, offset[ 1 ].xy, offset[ 2 ].z );
+				coords.x = offset[ 0 ].x; // offset[1].x = texcoord.x - 0.25 * resolution.x;
+				d.x = coords.y;
+
+				// Fetch the top crossing edges:
+				float e1 = texture2D( edgesTex, coords, 0.0 ).g;
+
+				// Find the distance to the bottom:
+				coords.y = SMAASearchYDown( edgesTex, searchTex, offset[ 1 ].zw, offset[ 2 ].w );
+				d.y = coords.y;
+
+				// We want the distances to be in pixel units:
+				d = d / resolution.y - pixcoord.y;
+
+				// SMAAArea below needs a sqrt, as the areas texture is compressed
+				// quadratically:
+				vec2 sqrt_d = sqrt( abs( d ) );
+
+				// Fetch the bottom crossing edges:
+				coords.y -= 1.0 * resolution.y; // WebGL port note: Added
+				float e2 = SMAASampleLevelZeroOffset( edgesTex, coords, ivec2( 0, 1 ) ).g;
+
+				// Get the area for this direction:
+				weights.ba = SMAAArea( areaTex, sqrt_d, e1, e2, float( subsampleIndices.x ) );
+			}
+
+			return weights;
+		}
+
+		void main() {
+
+			gl_FragColor = SMAABlendingWeightCalculationPS( vUv, vPixcoord, vOffset, tDiffuse, tArea, tSearch, ivec4( 0.0 ) );
+
+		}`
+  )
+};
+const SMAABlendShader = {
+  uniforms: {
+    "tDiffuse": { value: null },
+    "tColor": { value: null },
+    "resolution": { value: new Vector2(1 / 1024, 1 / 512) }
+  },
+  vertexShader: (
+    /* glsl */
+    `
+
+		uniform vec2 resolution;
+
+		varying vec2 vUv;
+		varying vec4 vOffset[ 2 ];
+
+		void SMAANeighborhoodBlendingVS( vec2 texcoord ) {
+			vOffset[ 0 ] = texcoord.xyxy + resolution.xyxy * vec4( -1.0, 0.0, 0.0, 1.0 ); // WebGL port note: Changed sign in W component
+			vOffset[ 1 ] = texcoord.xyxy + resolution.xyxy * vec4( 1.0, 0.0, 0.0, -1.0 ); // WebGL port note: Changed sign in W component
+		}
+
+		void main() {
+
+			vUv = uv;
+
+			SMAANeighborhoodBlendingVS( vUv );
+
+			gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+		}`
+  ),
+  fragmentShader: (
+    /* glsl */
+    `
+
+		uniform sampler2D tDiffuse;
+		uniform sampler2D tColor;
+		uniform vec2 resolution;
+
+		varying vec2 vUv;
+		varying vec4 vOffset[ 2 ];
+
+		vec4 SMAANeighborhoodBlendingPS( vec2 texcoord, vec4 offset[ 2 ], sampler2D colorTex, sampler2D blendTex ) {
+			// Fetch the blending weights for current pixel:
+			vec4 a;
+			a.xz = texture2D( blendTex, texcoord ).xz;
+			a.y = texture2D( blendTex, offset[ 1 ].zw ).g;
+			a.w = texture2D( blendTex, offset[ 1 ].xy ).a;
+
+			// Is there any blending weight with a value greater than 0.0?
+			if ( dot(a, vec4( 1.0, 1.0, 1.0, 1.0 )) < 1e-5 ) {
+				return texture2D( colorTex, texcoord, 0.0 );
+			} else {
+				// Up to 4 lines can be crossing a pixel (one through each edge). We
+				// favor blending by choosing the line with the maximum weight for each
+				// direction:
+				vec2 offset;
+				offset.x = a.a > a.b ? a.a : -a.b; // left vs. right
+				offset.y = a.g > a.r ? -a.g : a.r; // top vs. bottom // WebGL port note: Changed signs
+
+				// Then we go in the direction that has the maximum weight:
+				if ( abs( offset.x ) > abs( offset.y )) { // horizontal vs. vertical
+					offset.y = 0.0;
+				} else {
+					offset.x = 0.0;
+				}
+
+				// Fetch the opposite color and lerp by hand:
+				vec4 C = texture2D( colorTex, texcoord, 0.0 );
+				texcoord += sign( offset ) * resolution;
+				vec4 Cop = texture2D( colorTex, texcoord, 0.0 );
+				float s = abs( offset.x ) > abs( offset.y ) ? abs( offset.x ) : abs( offset.y );
+
+				// WebGL port note: Added gamma correction
+				C.xyz = pow(C.xyz, vec3(2.2));
+				Cop.xyz = pow(Cop.xyz, vec3(2.2));
+				vec4 mixed = mix(C, Cop, s);
+				mixed.xyz = pow(mixed.xyz, vec3(1.0 / 2.2));
+
+				return mixed;
+			}
+		}
+
+		void main() {
+
+			gl_FragColor = SMAANeighborhoodBlendingPS( vUv, vOffset, tColor, tDiffuse );
+
+		}`
+  )
+};
+class SMAAPass extends Pass {
+  /**
+   * Constructs a new SMAA pass.
+   */
+  constructor() {
+    super();
+    this._edgesRT = new WebGLRenderTarget(1, 1, {
+      depthBuffer: false,
+      type: HalfFloatType
+    });
+    this._edgesRT.texture.name = "SMAAPass.edges";
+    this._weightsRT = new WebGLRenderTarget(1, 1, {
+      depthBuffer: false,
+      type: HalfFloatType
+    });
+    this._weightsRT.texture.name = "SMAAPass.weights";
+    const scope = this;
+    const areaTextureImage = new Image();
+    areaTextureImage.src = this._getAreaTexture();
+    areaTextureImage.onload = function() {
+      scope._areaTexture.needsUpdate = true;
+    };
+    this._areaTexture = new Texture();
+    this._areaTexture.name = "SMAAPass.area";
+    this._areaTexture.image = areaTextureImage;
+    this._areaTexture.minFilter = LinearFilter;
+    this._areaTexture.generateMipmaps = false;
+    this._areaTexture.flipY = false;
+    const searchTextureImage = new Image();
+    searchTextureImage.src = this._getSearchTexture();
+    searchTextureImage.onload = function() {
+      scope._searchTexture.needsUpdate = true;
+    };
+    this._searchTexture = new Texture();
+    this._searchTexture.name = "SMAAPass.search";
+    this._searchTexture.image = searchTextureImage;
+    this._searchTexture.magFilter = NearestFilter;
+    this._searchTexture.minFilter = NearestFilter;
+    this._searchTexture.generateMipmaps = false;
+    this._searchTexture.flipY = false;
+    this._uniformsEdges = UniformsUtils.clone(SMAAEdgesShader.uniforms);
+    this._materialEdges = new ShaderMaterial({
+      defines: Object.assign({}, SMAAEdgesShader.defines),
+      uniforms: this._uniformsEdges,
+      vertexShader: SMAAEdgesShader.vertexShader,
+      fragmentShader: SMAAEdgesShader.fragmentShader
+    });
+    this._uniformsWeights = UniformsUtils.clone(SMAAWeightsShader.uniforms);
+    this._uniformsWeights["tDiffuse"].value = this._edgesRT.texture;
+    this._uniformsWeights["tArea"].value = this._areaTexture;
+    this._uniformsWeights["tSearch"].value = this._searchTexture;
+    this._materialWeights = new ShaderMaterial({
+      defines: Object.assign({}, SMAAWeightsShader.defines),
+      uniforms: this._uniformsWeights,
+      vertexShader: SMAAWeightsShader.vertexShader,
+      fragmentShader: SMAAWeightsShader.fragmentShader
+    });
+    this._uniformsBlend = UniformsUtils.clone(SMAABlendShader.uniforms);
+    this._uniformsBlend["tDiffuse"].value = this._weightsRT.texture;
+    this._materialBlend = new ShaderMaterial({
+      uniforms: this._uniformsBlend,
+      vertexShader: SMAABlendShader.vertexShader,
+      fragmentShader: SMAABlendShader.fragmentShader
+    });
+    this._fsQuad = new FullScreenQuad(null);
+  }
+  /**
+   * Performs the SMAA pass.
+   *
+   * @param {WebGLRenderer} renderer - The renderer.
+   * @param {WebGLRenderTarget} writeBuffer - The write buffer. This buffer is intended as the rendering
+   * destination for the pass.
+   * @param {WebGLRenderTarget} readBuffer - The read buffer. The pass can access the result from the
+   * previous pass from this buffer.
+   * @param {number} deltaTime - The delta time in seconds.
+   * @param {boolean} maskActive - Whether masking is active or not.
+   */
+  render(renderer, writeBuffer, readBuffer) {
+    this._uniformsEdges["tDiffuse"].value = readBuffer.texture;
+    this._fsQuad.material = this._materialEdges;
+    renderer.setRenderTarget(this._edgesRT);
+    if (this.clear) renderer.clear();
+    this._fsQuad.render(renderer);
+    this._fsQuad.material = this._materialWeights;
+    renderer.setRenderTarget(this._weightsRT);
+    if (this.clear) renderer.clear();
+    this._fsQuad.render(renderer);
+    this._uniformsBlend["tColor"].value = readBuffer.texture;
+    this._fsQuad.material = this._materialBlend;
+    if (this.renderToScreen) {
+      renderer.setRenderTarget(null);
+      this._fsQuad.render(renderer);
+    } else {
+      renderer.setRenderTarget(writeBuffer);
+      if (this.clear) renderer.clear();
+      this._fsQuad.render(renderer);
+    }
+  }
+  /**
+   * Sets the size of the pass.
+   *
+   * @param {number} width - The width to set.
+   * @param {number} height - The height to set.
+   */
+  setSize(width, height) {
+    this._edgesRT.setSize(width, height);
+    this._weightsRT.setSize(width, height);
+    this._materialEdges.uniforms["resolution"].value.set(1 / width, 1 / height);
+    this._materialWeights.uniforms["resolution"].value.set(1 / width, 1 / height);
+    this._materialBlend.uniforms["resolution"].value.set(1 / width, 1 / height);
+  }
+  /**
+   * Frees the GPU-related resources allocated by this instance. Call this
+   * method whenever the pass is no longer used in your app.
+   */
+  dispose() {
+    this._edgesRT.dispose();
+    this._weightsRT.dispose();
+    this._areaTexture.dispose();
+    this._searchTexture.dispose();
+    this._materialEdges.dispose();
+    this._materialWeights.dispose();
+    this._materialBlend.dispose();
+    this._fsQuad.dispose();
+  }
+  // internals
+  _getAreaTexture() {
+    return "data:image/png;base64,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";
+  }
+  _getSearchTexture() {
+    return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEIAAAAhCAAAAABIXyLAAAAAOElEQVRIx2NgGAWjYBSMglEwEICREYRgFBZBqDCSLA2MGPUIVQETE9iNUAqLR5gIeoQKRgwXjwAAGn4AtaFeYLEAAAAASUVORK5CYII=";
+  }
+}
+const LuminosityHighPassShader = {
+  uniforms: {
+    "tDiffuse": { value: null },
+    "luminosityThreshold": { value: 1 },
+    "smoothWidth": { value: 1 },
+    "defaultColor": { value: new Color(0) },
+    "defaultOpacity": { value: 0 }
+  },
+  vertexShader: (
+    /* glsl */
+    `
+
+		varying vec2 vUv;
+
+		void main() {
+
+			vUv = uv;
+
+			gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+		}`
+  ),
+  fragmentShader: (
+    /* glsl */
+    `
+
+		uniform sampler2D tDiffuse;
+		uniform vec3 defaultColor;
+		uniform float defaultOpacity;
+		uniform float luminosityThreshold;
+		uniform float smoothWidth;
+
+		varying vec2 vUv;
+
+		void main() {
+
+			vec4 texel = texture2D( tDiffuse, vUv );
+
+			float v = luminance( texel.xyz );
+
+			vec4 outputColor = vec4( defaultColor.rgb, defaultOpacity );
+
+			float alpha = smoothstep( luminosityThreshold, luminosityThreshold + smoothWidth, v );
+
+			gl_FragColor = mix( outputColor, texel, alpha );
+
+		}`
+  )
+};
+class UnrealBloomPass extends Pass {
+  /**
+   * Constructs a new Unreal Bloom pass.
+   *
+   * @param {Vector2} [resolution] - The effect's resolution.
+   * @param {number} [strength=1] - The Bloom strength.
+   * @param {number} radius - The Bloom radius.
+   * @param {number} threshold - The luminance threshold limits which bright areas contribute to the Bloom effect.
+   */
+  constructor(resolution, strength = 1, radius, threshold) {
+    super();
+    this.strength = strength;
+    this.radius = radius;
+    this.threshold = threshold;
+    this.resolution = resolution !== void 0 ? new Vector2(resolution.x, resolution.y) : new Vector2(256, 256);
+    this.clearColor = new Color(0, 0, 0);
+    this.needsSwap = false;
+    this.renderTargetsHorizontal = [];
+    this.renderTargetsVertical = [];
+    this.nMips = 5;
+    let resx = Math.round(this.resolution.x / 2);
+    let resy = Math.round(this.resolution.y / 2);
+    this.renderTargetBright = new WebGLRenderTarget(resx, resy, { type: HalfFloatType });
+    this.renderTargetBright.texture.name = "UnrealBloomPass.bright";
+    this.renderTargetBright.texture.generateMipmaps = false;
+    for (let i = 0; i < this.nMips; i++) {
+      const renderTargetHorizontal = new WebGLRenderTarget(resx, resy, { type: HalfFloatType });
+      renderTargetHorizontal.texture.name = "UnrealBloomPass.h" + i;
+      renderTargetHorizontal.texture.generateMipmaps = false;
+      this.renderTargetsHorizontal.push(renderTargetHorizontal);
+      const renderTargetVertical = new WebGLRenderTarget(resx, resy, { type: HalfFloatType });
+      renderTargetVertical.texture.name = "UnrealBloomPass.v" + i;
+      renderTargetVertical.texture.generateMipmaps = false;
+      this.renderTargetsVertical.push(renderTargetVertical);
+      resx = Math.round(resx / 2);
+      resy = Math.round(resy / 2);
+    }
+    const highPassShader = LuminosityHighPassShader;
+    this.highPassUniforms = UniformsUtils.clone(highPassShader.uniforms);
+    this.highPassUniforms["luminosityThreshold"].value = threshold;
+    this.highPassUniforms["smoothWidth"].value = 0.01;
+    this.materialHighPassFilter = new ShaderMaterial({
+      uniforms: this.highPassUniforms,
+      vertexShader: highPassShader.vertexShader,
+      fragmentShader: highPassShader.fragmentShader
+    });
+    this.separableBlurMaterials = [];
+    const kernelSizeArray = [6, 10, 14, 18, 22];
+    resx = Math.round(this.resolution.x / 2);
+    resy = Math.round(this.resolution.y / 2);
+    for (let i = 0; i < this.nMips; i++) {
+      this.separableBlurMaterials.push(this._getSeparableBlurMaterial(kernelSizeArray[i]));
+      this.separableBlurMaterials[i].uniforms["invSize"].value = new Vector2(1 / resx, 1 / resy);
+      resx = Math.round(resx / 2);
+      resy = Math.round(resy / 2);
+    }
+    this.compositeMaterial = this._getCompositeMaterial(this.nMips);
+    this.compositeMaterial.uniforms["blurTexture1"].value = this.renderTargetsVertical[0].texture;
+    this.compositeMaterial.uniforms["blurTexture2"].value = this.renderTargetsVertical[1].texture;
+    this.compositeMaterial.uniforms["blurTexture3"].value = this.renderTargetsVertical[2].texture;
+    this.compositeMaterial.uniforms["blurTexture4"].value = this.renderTargetsVertical[3].texture;
+    this.compositeMaterial.uniforms["blurTexture5"].value = this.renderTargetsVertical[4].texture;
+    this.compositeMaterial.uniforms["bloomStrength"].value = strength;
+    this.compositeMaterial.uniforms["bloomRadius"].value = 0.1;
+    const bloomFactors = [1, 0.8, 0.6, 0.4, 0.2];
+    this.compositeMaterial.uniforms["bloomFactors"].value = bloomFactors;
+    this.bloomTintColors = [new Vector3(1, 1, 1), new Vector3(1, 1, 1), new Vector3(1, 1, 1), new Vector3(1, 1, 1), new Vector3(1, 1, 1)];
+    this.compositeMaterial.uniforms["bloomTintColors"].value = this.bloomTintColors;
+    this.copyUniforms = UniformsUtils.clone(CopyShader.uniforms);
+    this.blendMaterial = new ShaderMaterial({
+      uniforms: this.copyUniforms,
+      vertexShader: CopyShader.vertexShader,
+      fragmentShader: CopyShader.fragmentShader,
+      premultipliedAlpha: true,
+      blending: AdditiveBlending,
+      depthTest: false,
+      depthWrite: false,
+      transparent: true
+    });
+    this._oldClearColor = new Color();
+    this._oldClearAlpha = 1;
+    this._basic = new MeshBasicMaterial();
+    this._fsQuad = new FullScreenQuad(null);
+  }
+  /**
+   * Frees the GPU-related resources allocated by this instance. Call this
+   * method whenever the pass is no longer used in your app.
+   */
+  dispose() {
+    for (let i = 0; i < this.renderTargetsHorizontal.length; i++) {
+      this.renderTargetsHorizontal[i].dispose();
+    }
+    for (let i = 0; i < this.renderTargetsVertical.length; i++) {
+      this.renderTargetsVertical[i].dispose();
+    }
+    this.renderTargetBright.dispose();
+    for (let i = 0; i < this.separableBlurMaterials.length; i++) {
+      this.separableBlurMaterials[i].dispose();
+    }
+    this.compositeMaterial.dispose();
+    this.blendMaterial.dispose();
+    this._basic.dispose();
+    this._fsQuad.dispose();
+  }
+  /**
+   * Sets the size of the pass.
+   *
+   * @param {number} width - The width to set.
+   * @param {number} height - The height to set.
+   */
+  setSize(width, height) {
+    let resx = Math.round(width / 2);
+    let resy = Math.round(height / 2);
+    this.renderTargetBright.setSize(resx, resy);
+    for (let i = 0; i < this.nMips; i++) {
+      this.renderTargetsHorizontal[i].setSize(resx, resy);
+      this.renderTargetsVertical[i].setSize(resx, resy);
+      this.separableBlurMaterials[i].uniforms["invSize"].value = new Vector2(1 / resx, 1 / resy);
+      resx = Math.round(resx / 2);
+      resy = Math.round(resy / 2);
+    }
+  }
+  /**
+   * Performs the Bloom pass.
+   *
+   * @param {WebGLRenderer} renderer - The renderer.
+   * @param {WebGLRenderTarget} writeBuffer - The write buffer. This buffer is intended as the rendering
+   * destination for the pass.
+   * @param {WebGLRenderTarget} readBuffer - The read buffer. The pass can access the result from the
+   * previous pass from this buffer.
+   * @param {number} deltaTime - The delta time in seconds.
+   * @param {boolean} maskActive - Whether masking is active or not.
+   */
+  render(renderer, writeBuffer, readBuffer, deltaTime, maskActive) {
+    renderer.getClearColor(this._oldClearColor);
+    this._oldClearAlpha = renderer.getClearAlpha();
+    const oldAutoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    renderer.setClearColor(this.clearColor, 0);
+    if (maskActive) renderer.state.buffers.stencil.setTest(false);
+    if (this.renderToScreen) {
+      this._fsQuad.material = this._basic;
+      this._basic.map = readBuffer.texture;
+      renderer.setRenderTarget(null);
+      renderer.clear();
+      this._fsQuad.render(renderer);
+    }
+    this.highPassUniforms["tDiffuse"].value = readBuffer.texture;
+    this.highPassUniforms["luminosityThreshold"].value = this.threshold;
+    this._fsQuad.material = this.materialHighPassFilter;
+    renderer.setRenderTarget(this.renderTargetBright);
+    renderer.clear();
+    this._fsQuad.render(renderer);
+    let inputRenderTarget = this.renderTargetBright;
+    for (let i = 0; i < this.nMips; i++) {
+      this._fsQuad.material = this.separableBlurMaterials[i];
+      this.separableBlurMaterials[i].uniforms["colorTexture"].value = inputRenderTarget.texture;
+      this.separableBlurMaterials[i].uniforms["direction"].value = UnrealBloomPass.BlurDirectionX;
+      renderer.setRenderTarget(this.renderTargetsHorizontal[i]);
+      renderer.clear();
+      this._fsQuad.render(renderer);
+      this.separableBlurMaterials[i].uniforms["colorTexture"].value = this.renderTargetsHorizontal[i].texture;
+      this.separableBlurMaterials[i].uniforms["direction"].value = UnrealBloomPass.BlurDirectionY;
+      renderer.setRenderTarget(this.renderTargetsVertical[i]);
+      renderer.clear();
+      this._fsQuad.render(renderer);
+      inputRenderTarget = this.renderTargetsVertical[i];
+    }
+    this._fsQuad.material = this.compositeMaterial;
+    this.compositeMaterial.uniforms["bloomStrength"].value = this.strength;
+    this.compositeMaterial.uniforms["bloomRadius"].value = this.radius;
+    this.compositeMaterial.uniforms["bloomTintColors"].value = this.bloomTintColors;
+    renderer.setRenderTarget(this.renderTargetsHorizontal[0]);
+    renderer.clear();
+    this._fsQuad.render(renderer);
+    this._fsQuad.material = this.blendMaterial;
+    this.copyUniforms["tDiffuse"].value = this.renderTargetsHorizontal[0].texture;
+    if (maskActive) renderer.state.buffers.stencil.setTest(true);
+    if (this.renderToScreen) {
+      renderer.setRenderTarget(null);
+      this._fsQuad.render(renderer);
+    } else {
+      renderer.setRenderTarget(readBuffer);
+      this._fsQuad.render(renderer);
+    }
+    renderer.setClearColor(this._oldClearColor, this._oldClearAlpha);
+    renderer.autoClear = oldAutoClear;
+  }
+  // internals
+  _getSeparableBlurMaterial(kernelRadius) {
+    const coefficients = [];
+    const sigma = kernelRadius / 3;
+    for (let i = 0; i < kernelRadius; i++) {
+      coefficients.push(0.39894 * Math.exp(-0.5 * i * i / (sigma * sigma)) / sigma);
+    }
+    return new ShaderMaterial({
+      defines: {
+        "KERNEL_RADIUS": kernelRadius
+      },
+      uniforms: {
+        "colorTexture": { value: null },
+        "invSize": { value: new Vector2(0.5, 0.5) },
+        // inverse texture size
+        "direction": { value: new Vector2(0.5, 0.5) },
+        "gaussianCoefficients": { value: coefficients }
+        // precomputed Gaussian coefficients
+      },
+      vertexShader: (
+        /* glsl */
+        `
+
+				varying vec2 vUv;
+
+				void main() {
+
+					vUv = uv;
+					gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+				}`
+      ),
+      fragmentShader: (
+        /* glsl */
+        `
+
+				#include <common>
+
+				varying vec2 vUv;
+
+				uniform sampler2D colorTexture;
+				uniform vec2 invSize;
+				uniform vec2 direction;
+				uniform float gaussianCoefficients[KERNEL_RADIUS];
+
+				void main() {
+
+					float weightSum = gaussianCoefficients[0];
+					vec3 diffuseSum = texture2D( colorTexture, vUv ).rgb * weightSum;
+
+					for ( int i = 1; i < KERNEL_RADIUS; i ++ ) {
+
+						float x = float( i );
+						float w = gaussianCoefficients[i];
+						vec2 uvOffset = direction * invSize * x;
+						vec3 sample1 = texture2D( colorTexture, vUv + uvOffset ).rgb;
+						vec3 sample2 = texture2D( colorTexture, vUv - uvOffset ).rgb;
+						diffuseSum += ( sample1 + sample2 ) * w;
+
+					}
+
+					gl_FragColor = vec4( diffuseSum, 1.0 );
+
+				}`
+      )
+    });
+  }
+  _getCompositeMaterial(nMips) {
+    return new ShaderMaterial({
+      defines: {
+        "NUM_MIPS": nMips
+      },
+      uniforms: {
+        "blurTexture1": { value: null },
+        "blurTexture2": { value: null },
+        "blurTexture3": { value: null },
+        "blurTexture4": { value: null },
+        "blurTexture5": { value: null },
+        "bloomStrength": { value: 1 },
+        "bloomFactors": { value: null },
+        "bloomTintColors": { value: null },
+        "bloomRadius": { value: 0 }
+      },
+      vertexShader: (
+        /* glsl */
+        `
+
+				varying vec2 vUv;
+
+				void main() {
+
+					vUv = uv;
+					gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+
+				}`
+      ),
+      fragmentShader: (
+        /* glsl */
+        `
+
+				varying vec2 vUv;
+
+				uniform sampler2D blurTexture1;
+				uniform sampler2D blurTexture2;
+				uniform sampler2D blurTexture3;
+				uniform sampler2D blurTexture4;
+				uniform sampler2D blurTexture5;
+				uniform float bloomStrength;
+				uniform float bloomRadius;
+				uniform float bloomFactors[NUM_MIPS];
+				uniform vec3 bloomTintColors[NUM_MIPS];
+
+				float lerpBloomFactor( const in float factor ) {
+
+					float mirrorFactor = 1.2 - factor;
+					return mix( factor, mirrorFactor, bloomRadius );
+
+				}
+
+				void main() {
+
+					// 3.0 for backwards compatibility with previous alpha-based intensity
+					vec3 bloom = 3.0 * bloomStrength * (
+						lerpBloomFactor( bloomFactors[ 0 ] ) * bloomTintColors[ 0 ] * texture2D( blurTexture1, vUv ).rgb +
+						lerpBloomFactor( bloomFactors[ 1 ] ) * bloomTintColors[ 1 ] * texture2D( blurTexture2, vUv ).rgb +
+						lerpBloomFactor( bloomFactors[ 2 ] ) * bloomTintColors[ 2 ] * texture2D( blurTexture3, vUv ).rgb +
+						lerpBloomFactor( bloomFactors[ 3 ] ) * bloomTintColors[ 3 ] * texture2D( blurTexture4, vUv ).rgb +
+						lerpBloomFactor( bloomFactors[ 4 ] ) * bloomTintColors[ 4 ] * texture2D( blurTexture5, vUv ).rgb
+					);
+
+					float bloomAlpha = max( bloom.r, max( bloom.g, bloom.b ) );
+					gl_FragColor = vec4( bloom, bloomAlpha );
+
+				}`
+      )
+    });
+  }
+}
+UnrealBloomPass.BlurDirectionX = new Vector2(1, 0);
+UnrealBloomPass.BlurDirectionY = new Vector2(0, 1);
+class SplitFrustumPass extends Pass {
+  constructor(scene, camera, ranges, hideInNear) {
+    super();
+    this.scene = scene;
+    this.camera = camera;
+    this.ranges = ranges;
+    this.hideInNear = hideInNear;
+    this.needsSwap = false;
+  }
+  /** 장면만의 비용 — 후처리 풀스크린 쿼드가 섞이기 전 값. 화면이 이것을 말한다. */
+  sceneStats = { drawCalls: 0, triangles: 0 };
+  render(renderer, _write, read) {
+    renderer.setRenderTarget(this.renderToScreen ? null : read);
+    const autoClear = renderer.autoClear;
+    renderer.autoClear = false;
+    try {
+      this.camera.near = this.ranges.farNear;
+      this.camera.far = this.ranges.far;
+      this.camera.updateProjectionMatrix();
+      renderer.clear(true, true, false);
+      renderer.render(this.scene, this.camera);
+      for (const o of this.hideInNear) o.visible = false;
+      try {
+        this.camera.near = this.ranges.near;
+        this.camera.far = this.ranges.nearFar;
+        this.camera.updateProjectionMatrix();
+        renderer.clear(false, true, false);
+        renderer.render(this.scene, this.camera);
+      } finally {
+        for (const o of this.hideInNear) o.visible = true;
+      }
+      const info = renderer.info.render;
+      this.sceneStats = { drawCalls: info.calls, triangles: info.triangles };
+    } finally {
+      renderer.autoClear = autoClear;
+    }
+  }
+}
+function createPost(renderer, scenePass, width, height, opts) {
+  const target = new WebGLRenderTarget(Math.max(width, 1), Math.max(height, 1), {
+    type: HalfFloatType,
+    samples: 4
+  });
+  const composer = new EffectComposer(renderer, target);
+  composer.renderTarget1.samples = 0;
+  composer.addPass(scenePass);
+  const bloom = opts.bloomStrength > 0 ? new UnrealBloomPass(
+    new Vector2(width, height),
+    opts.bloomStrength,
+    opts.bloomRadius,
+    opts.bloomThreshold
+  ) : null;
+  if (bloom) composer.addPass(bloom);
+  const smaa = opts.antialias ? new SMAAPass() : null;
+  if (smaa) {
+    smaa.clear = true;
+    composer.addPass(smaa);
+  }
+  const output = new OutputPass();
+  composer.addPass(output);
+  return {
+    setSize(w2, h, dpr) {
+      composer.setPixelRatio(Math.min(dpr, 2));
+      composer.setSize(w2, h);
+    },
+    render() {
+      composer.render();
+    },
+    sceneStats() {
+      return scenePass.sceneStats;
+    },
+    dispose() {
+      bloom?.dispose();
+      smaa?.dispose();
+      output.dispose();
+      composer.dispose();
+    }
+  };
 }
 function disposeMaterial(mat) {
   const m2 = mat;
@@ -37605,29 +39489,32 @@ function disposeTree(root) {
   });
   root.clear();
 }
-const VERT = `
+const VERT = (
+  /* glsl */
+  `
 varying vec3 vDir;
 void main() {
   vDir = normalize(position);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
-const FRAG = `
+}`
+);
+const FRAG = (
+  /* glsl */
+  `
 varying vec3 vDir;
-uniform vec3 uZenith;
-uniform vec3 uHorizon;
-uniform vec3 uGround;
-uniform vec3 uSunDir;
+uniform vec3 uSunDirWorld;
 uniform float uSunIntensity;
+uniform float uHaze;
+uniform vec3 uGround;
+${ATMOSPHERE_GLSL}
 void main() {
   vec3 dir = normalize(vDir);
-  float h = dir.y;
-  vec3 sky = mix(uHorizon, uZenith, pow(clamp(h, 0.0, 1.0), 0.45));
-  vec3 col = mix(uGround, sky, smoothstep(-0.06, 0.02, h));
-  float cosA = dot(dir, normalize(uSunDir));
-  col += uSunIntensity * vec3(1.0, 0.93, 0.80) * pow(max(cosA, 0.0), 900.0) * 12.0; // 원반
-  col += uSunIntensity * vec3(1.0, 0.85, 0.65) * pow(max(cosA, 0.0), 8.0) * 0.30;   // 둘레 번짐
+  vec3 col = skyRadiance(dir, uSunDirWorld, uSunIntensity, uHaze);
+  // 지평 아래 — 카메라가 낮으면 구의 아래쪽이 보인다. 지면색으로 가라앉힌다(표시용).
+  col = mix(uGround, col, smoothstep(-0.06, 0.02, dir.y));
   gl_FragColor = vec4(col, 1.0);
-}`;
+}`
+);
 function createSky(radius) {
   const material = new ShaderMaterial({
     side: BackSide,
@@ -37637,11 +39524,9 @@ function createSky(radius) {
     vertexShader: VERT,
     fragmentShader: FRAG,
     uniforms: {
-      uZenith: { value: new Color(3108784) },
-      uHorizon: { value: new Color(10466503) },
-      uGround: { value: new Color(6120274) },
-      uSunDir: { value: new Vector3(0.4, 0.6, 0.2) },
-      uSunIntensity: { value: 1 }
+      // **공유 유니폼을 그대로 꽂는다** — 하늘과 에어리얼이 같은 태양·같은 뿌연 정도를 본다.
+      ...atmosphereUniforms,
+      uGround: { value: new Color(6120274) }
     }
   });
   const geometry = new SphereGeometry(radius, 32, 20);
@@ -37650,13 +39535,8 @@ function createSky(radius) {
   mesh.frustumCulled = false;
   return {
     mesh,
-    setSun(dirWorld, elevation) {
-      material.uniforms.uSunDir.value.set(dirWorld[0], dirWorld[1], dirWorld[2]);
-      const low = 1 - Math.min(Math.max(Math.sin(elevation), 0), 1);
-      const horizon = new Color(10466503).lerp(new Color(14262374), low * 0.8);
-      material.uniforms.uHorizon.value.copy(horizon);
-      material.uniforms.uSunIntensity.value = Math.max(Math.sin(elevation), 0.05);
-      return horizon;
+    setGroundColor(hex) {
+      material.uniforms.uGround.value.set(hex);
     },
     dispose() {
       geometry.dispose();
@@ -37665,9 +39545,16 @@ function createSky(radius) {
   };
 }
 const NEAR = 3;
+const NEAR_FAR = 2e3;
+const FAR_NEAR = 1500;
 const FAR = 5e4;
 const SKY_RADIUS = FAR * 0.9;
-const fogDensityForVisibility = (v2) => 1.978 / Math.max(v2, 1);
+const DEFAULT_POST = {
+  bloomStrength: 0.35,
+  bloomRadius: 0.4,
+  bloomThreshold: 2.5,
+  antialias: true
+};
 const RAMP = [
   [0, [0.76, 0.72, 0.58]],
   [60, [0.42, 0.53, 0.32]],
@@ -37694,7 +39581,6 @@ class SceneHost {
   camera = new PerspectiveCamera(55, 1, NEAR, FAR);
   renderer;
   sky;
-  fog;
   sun;
   ambient;
   groups = {
@@ -37704,34 +39590,51 @@ class SceneHost {
   };
   stats = { drawCalls: 0, triangles: 0, ms: 0 };
   disposed = false;
+  post = null;
+  scenePass;
+  size = { w: 1, h: 1, dpr: 1 };
   constructor(canvas, context) {
-    this.renderer = new WebGLRenderer({ canvas, context, logarithmicDepthBuffer: true });
+    this.renderer = new WebGLRenderer({ canvas, context });
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
-    this.fog = new FogExp2(10466503, fogDensityForVisibility(25e3));
-    this.scene.fog = this.fog;
-    this.sun = new DirectionalLight(16774112, 2.4);
+    this.sun = new DirectionalLight(16777215, 1);
     this.ambient = new HemisphereLight(12375792, 7040858, 0.9);
     this.scene.add(this.sun, this.ambient);
     this.sky = createSky(SKY_RADIUS);
     this.scene.add(this.sky.mesh);
     for (const g of Object.values(this.groups)) this.scene.add(g);
+    this.scenePass = new SplitFrustumPass(
+      this.scene,
+      this.camera,
+      { near: NEAR, nearFar: NEAR_FAR, farNear: FAR_NEAR, far: FAR },
+      [this.sky.mesh]
+    );
+    this.setPost(DEFAULT_POST);
+  }
+  /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
+  setPost(opts) {
+    this.post?.dispose();
+    this.post = createPost(this.renderer, this.scenePass, this.size.w, this.size.h, opts);
+    this.post.setSize(this.size.w, this.size.h, this.size.dpr);
   }
   resize(width, height, dpr) {
+    this.size = { w: width, h: height, dpr };
     this.renderer.setPixelRatio(Math.min(dpr, 2));
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(height, 1);
     this.camera.updateProjectionMatrix();
+    this.post?.setSize(width, height, dpr);
   }
   setEnvironment({ sunAzEl, visibility, exposure }) {
     const [az, el2] = sunAzEl;
     const w2 = toWorld(Math.cos(el2) * Math.cos(az), Math.cos(el2) * Math.sin(az), -Math.sin(el2));
-    const horizon = this.sky.setSun(w2, el2);
     this.sun.position.set(w2[0] * 1e3, w2[1] * 1e3, w2[2] * 1e3);
-    this.sun.intensity = 0.6 + 2 * Math.max(Math.sin(el2), 0);
-    this.fog.color.copy(horizon);
-    this.fog.density = fogDensityForVisibility(visibility);
+    const intensity = 2.4;
+    const sunColor = setAtmosphere(w2, el2, intensity, visibility);
+    this.sun.color.setRGB(sunColor[0], sunColor[1], sunColor[2]);
+    this.sun.intensity = intensity;
+    this.ambient.intensity = 0.12 + 0.8 * Math.max(Math.sin(el2), 0);
     this.renderer.toneMappingExposure = exposure;
   }
   /** 지형 — NED 기하를 그대로 받는다. 음영은 **진짜 법선에 조명이 닿아** 생긴다. */
@@ -37759,11 +39662,13 @@ class SceneHost {
       geo.setAttribute("normal", new BufferAttribute(nrm, 3));
       geo.setAttribute("color", new BufferAttribute(col, 3));
       geo.setIndex(new BufferAttribute(p2.indices, 1));
-      this.groups.terrain.add(new Mesh(geo, new MeshStandardMaterial({
+      const mat = new MeshStandardMaterial({
         vertexColors: true,
         roughness: 0.95,
         metalness: 0
-      })));
+      });
+      applyAerialPerspective(mat);
+      this.groups.terrain.add(new Mesh(geo, mat));
     }
   }
   /** 궤적 — `breaks`의 양 끝 중 하나라도 결측이면 그 구간을 그리지 않는다.
@@ -37789,7 +39694,9 @@ class SceneHost {
       if (verts.length === 0) continue;
       const geo = new BufferGeometry();
       geo.setAttribute("position", new BufferAttribute(new Float32Array(verts), 3));
-      this.groups.paths.add(new LineSegments(geo, new LineBasicMaterial({ color: ln.color })));
+      const mat = new LineBasicMaterial({ color: ln.color });
+      applyAerialPerspective(mat);
+      this.groups.paths.add(new LineSegments(geo, mat));
     }
   }
   /** 모델 그룹 — GLB 루트를 넣고 뺀다.
@@ -37802,7 +39709,7 @@ class SceneHost {
     return this.groups.models;
   }
   render(cam) {
-    if (this.disposed) return;
+    if (this.disposed || this.post == null) return;
     const t0 = performance.now();
     const eye = toWorld(cam.eye[0], cam.eye[1], cam.eye[2]);
     const target = toWorld(cam.target[0], cam.target[1], cam.target[2]);
@@ -37811,26 +39718,36 @@ class SceneHost {
     this.camera.up.set(up[0], up[1], up[2]).normalize();
     this.camera.lookAt(new Vector3(target[0], target[1], target[2]));
     this.camera.fov = cam.fovY * 180 / Math.PI;
-    this.camera.updateProjectionMatrix();
     this.sky.mesh.position.copy(this.camera.position);
-    this.renderer.render(this.scene, this.camera);
-    const info = this.renderer.info.render;
-    this.stats = { drawCalls: info.calls, triangles: info.triangles, ms: performance.now() - t0 };
+    this.renderer.info.autoReset = false;
+    this.renderer.info.reset();
+    try {
+      this.post.render();
+    } finally {
+      this.renderer.info.autoReset = true;
+    }
+    const scene = this.post.sceneStats();
+    this.stats = { ...scene, ms: performance.now() - t0 };
   }
   getStats() {
     return this.stats;
   }
   describe() {
     const caps = this.renderer.capabilities;
+    const gl2 = this.renderer.getContext();
     return {
       name: "three WebGL2",
       maxTextureSize: caps.maxTextureSize,
-      maxAnisotropy: caps.getMaxAnisotropy()
+      maxAnisotropy: caps.getMaxAnisotropy(),
+      // 깊이 정책의 전제다 — 24비트를 가정하고 분할 구간을 골랐다(위 주석의 실측표).
+      depthBits: gl2.getParameter(gl2.DEPTH_BITS)
     };
   }
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.post?.dispose();
+    this.post = null;
     for (const g of Object.values(this.groups)) disposeTree(g);
     this.sky.dispose();
     this.scene.clear();
@@ -40658,6 +42575,11 @@ async function loadModel(url, expect, signal) {
     else missing.push(name);
   }
   gltf.scene.matrixAutoUpdate = true;
+  gltf.scene.traverse((o) => {
+    const m2 = o.material;
+    if (!m2) return;
+    for (const one of Array.isArray(m2) ? m2 : [m2]) applyAerialPerspective(one);
+  });
   return {
     model: {
       root: gltf.scene,
@@ -40756,6 +42678,7 @@ const MODEL_SCALE = {
   onboard: 1,
   attitude: 3
 };
+const STATS_INTERVAL_MS = 500;
 const num = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
 class SceneController {
   host;
@@ -40801,6 +42724,7 @@ class SceneController {
   constructor(host, cb2) {
     this.host = host;
     this.cb = cb2;
+    this.depthBits = host.describe().depthBits;
   }
   /** 결과와 무관한 자산 — 한 번만 읽는다. 없으면 **사유를 문장으로** 남긴다. */
   async loadWorld(signal) {
@@ -40955,6 +42879,7 @@ class SceneController {
         `${why} 온보드·자세 관측 시점이 궤도 시점으로 물러섰습니다 — 온보드는 원래 기체 안이라 물러선 것을 알아챌 단서가 없습니다.`
       );
     }
+    notes.push(ATMOSPHERE_NOTES.model, ATMOSPHERE_NOTES.visibility);
     this.cb.onNotes(notes);
   }
   // ---------------------------------------------------------------- 조작
@@ -41084,6 +43009,7 @@ class SceneController {
     const cam = this.cameraFor(pos, q2, dtWall, groundElev);
     this.host.render(cam);
     this.emitReadout(i, groundElev);
+    this.emitStats(performance.now());
     this.prevIdx = i;
   }
   /** 기체 발밑의 지면 표고 [m] — 지형이 있으면 격자에서, 없으면 활주로 표고에서.
@@ -41154,6 +43080,26 @@ class SceneController {
     this.fellBack = v2;
     this.emitNotes();
   }
+  /** **시간 간격으로** 올린다 — 값 비교로는 못 줄인다.
+   *
+   * 처음엔 "바뀔 때만"으로 두었는데, `ms`를 0.1 ms 단위로 비교하니 CPU 제출 시간이 그보다
+   * 훨씬 크게 흔들려 사실상 매 프레임 통과했다. 그리고 그때 적은 사유("매 프레임 setState하면
+   * 프레임을 먹는다")도 틀렸다 — `emitReadout`이 이미 매 프레임 새 객체를 올리고 React 18이
+   * 둘을 한 렌더로 묶는다. 줄여야 하는 진짜 이유는 **읽는 사람**이다: 초당 60번 바뀌는
+   * 숫자는 못 읽는다. */
+  emitStats(now) {
+    if (now - this.lastStatsAt < STATS_INTERVAL_MS) return;
+    this.lastStatsAt = now;
+    const s = this.host.getStats();
+    this.cb.onStats({
+      drawCalls: s.drawCalls,
+      triangles: s.triangles,
+      ms: Math.round(s.ms * 10) / 10,
+      depthBits: this.depthBits
+    });
+  }
+  lastStatsAt = 0;
+  depthBits;
   emitReadout(i, groundElev) {
     const s = this.body?.signals;
     const h = num(s?.h?.[i]);
@@ -41214,6 +43160,7 @@ function WorldTab({ deps }) {
   const [playing, setPlaying] = reactExports.useState(false);
   const [playable, setPlayable] = reactExports.useState(false);
   const [shownId, setShownId] = reactExports.useState(null);
+  const [stats, setStats] = reactExports.useState(null);
   const [speed, setSpeed] = reactExports.useState(5);
   const [cursor, setCursor] = reactExports.useState(0);
   const [count, setCount] = reactExports.useState(0);
@@ -41234,7 +43181,8 @@ function WorldTab({ deps }) {
         setChosen((c) => c ?? first);
       },
       onStatus: setStatus,
-      onPlaying: setPlaying
+      onPlaying: setPlaying,
+      onStats: setStats
     });
     if (made.controller == null) {
       setStatus(made.reason);
@@ -41483,6 +43431,7 @@ function WorldTab({ deps }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("code", { children: shownId.slice(0, 8) }),
       "의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다."
     ] }),
+    stats && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { ...HINT, fontFamily: "var(--mono)" }, children: `장면 삼각형 ${stats.triangles.toLocaleString()} · 드로우콜 ${stats.drawCalls} · CPU 제출 ${stats.ms.toFixed(1)} ms · 깊이 ${stats.depthBits}비트 (분할 프러스텀 — 장면을 두 번 그립니다. 후처리 쿼드는 안 셉니다)` }),
     results.length === 0 && !status && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { style: HINT, children: [
       "시뮬레이션 결과가 없습니다 — ",
       /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "#sim", children: "시뮬레이션 탭" }),

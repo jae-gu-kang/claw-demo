@@ -19,13 +19,14 @@
  * 축 사상은 여전히 `nedToRender` 한 곳이다.
  */
 
-import { Group, Matrix4, type Object3D } from "three";
+import { Group, Matrix4, type Material, type Mesh, type Object3D } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 import type { BodyAxes, Vec3 } from "../lib/attitude.ts";
 import { modelColumnsNed } from "../core/modelaxes.ts";
 import type { LauncherPose } from "../core/launcher.ts";
 import type { SurfacePose } from "../core/surfaces.ts";
+import { applyAerialPerspective } from "./atmosphere.ts";
 import { disposeTree } from "./dispose.ts";
 import { toWorld } from "./axes.ts";
 
@@ -79,6 +80,15 @@ export async function loadModel(
   // `position.set`으로 자리를 옮기므로 꺼 두면 발사관이 원점에 얼어붙는다.
   // 기체 루트만 `setVehiclePose`가 행렬을 직접 쓰면서 그 자리에서 끈다.
   gltf.scene.matrixAutoUpdate = true;
+
+  // **GLB 재질에도 대기를 건다.** 여기서 빠뜨리면 30 km 밖 지형이 하늘로 녹아드는데
+  // 기체만 또렷하게 남아, 배경에서 오려 붙인 것처럼 보인다. 재질은 한 GLB 안에서
+  // 메시끼리 공유되기도 하므로 `applyAerialPerspective`가 중복 호출을 흡수한다.
+  gltf.scene.traverse((o) => {
+    const m = (o as Mesh).material as Material | Material[] | undefined;
+    if (!m) return;
+    for (const one of Array.isArray(m) ? m : [m]) applyAerialPerspective(one);
+  });
 
   return {
     model: {

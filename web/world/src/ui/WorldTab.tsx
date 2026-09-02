@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SimResultRow } from "../data/api.ts";
+import type { FrameStats } from "../scene/SceneController.ts";
 import {
   CAM_MODES, SceneController, createController, type CamMode, type Readout,
 } from "../scene/SceneController.ts";
@@ -47,6 +48,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const [playing, setPlaying] = useState(false);
   const [playable, setPlayable] = useState(false);
   const [shownId, setShownId] = useState<string | null>(null);
+  const [stats, setStats] = useState<FrameStats | null>(null);
   const [speed, setSpeed] = useState(5);
   const [cursor, setCursor] = useState(0);
   const [count, setCount] = useState(0);
@@ -69,6 +71,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
       onResults: (rows, first) => { setResults(rows); setChosen((c) => c ?? first); },
       onStatus: setStatus,
       onPlaying: setPlaying,
+      onStats: setStats,
     });
     if (made.controller == null) {
       setStatus(made.reason);
@@ -273,6 +276,13 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
           지금 보이는 화면과 캡션은 <code>{shownId.slice(0, 8)}</code>의 것입니다 —
           고른 결과를 세우지 못해 직전 것이 그대로 있습니다.
         </p>
+      )}
+      {stats && (
+        <div style={{ ...HINT, fontFamily: "var(--mono)" }}>
+          {`장면 삼각형 ${stats.triangles.toLocaleString()} · 드로우콜 ${stats.drawCalls}`
+            + ` · CPU 제출 ${stats.ms.toFixed(1)} ms · 깊이 ${stats.depthBits}비트`
+            + " (분할 프러스텀 — 장면을 두 번 그립니다. 후처리 쿼드는 안 셉니다)"}
+        </div>
       )}
       {results.length === 0 && !status && (
         <p style={HINT}>

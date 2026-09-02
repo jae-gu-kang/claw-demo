@@ -17,23 +17,77 @@
 
 import {
   ACESFilmicToneMapping, BufferAttribute, BufferGeometry, Color, DirectionalLight,
-  FogExp2, Group, HemisphereLight, LineBasicMaterial, LineSegments, Mesh,
+  Group, HemisphereLight, LineBasicMaterial, LineSegments, Mesh,
   MeshStandardMaterial, PerspectiveCamera, Scene, SRGBColorSpace, Vector3,
   WebGLRenderer,
 } from "three";
 
 import { toWorld } from "./axes.ts";
+import { SplitFrustumPass, createPost, type Post, type PostOptions } from "../post/composer.ts";
 import { disposeTree } from "./dispose.ts";
+import { applyAerialPerspective, setAtmosphere } from "./atmosphere.ts";
 import { createSky, type Sky } from "./sky.ts";
 
-/** 원거리 지형까지 담으려면 near/far 비가 16,000:1이 된다 — 로그 깊이버퍼 없이는
- *  먼 곳에서 z-fighting이 난다. 후처리를 붙일 때 이 선택을 다시 본다(계획 §7). */
+/** 깊이 정책 — **분할 프러스텀**. 로그 깊이버퍼를 쓰지 않는다.
+ *
+ * ## 왜 로그 깊이를 걷었나
+ *
+ * `logarithmicDepthBuffer`를 켜면 three 기본 재질이 프래그먼트에서 `gl_FragDepth`에 로그
+ * 깊이를 써 넣는데, 커스텀 `ShaderMaterial`은 그 청크를 안 내보내 비교가 어긋난다 —
+ * 하늘이 통째로 검게 나온 그 버그다. 바다 셰이더는 지형과 **깊이 비교를 해야** 하므로
+ * 하늘처럼 `depthTest: false`로 피할 수도 없다. 게다가 깊이를 읽는 후처리 패스(SSAO·DOF·
+ * 모션블러)는 표준 깊이 인코딩을 전제하므로 로그 깊이 위에서는 통째로 틀린다.
+ * **역Z는 있다 — 안 쓰는 것이다.** three 0.185.1은 `WebGLRenderer({ reversedDepthBuffer })`를
+ * 받고 `EXT_clip_control` 위에서 구현한다(소스 확인). 다만 역Z가 값을 하는 것은 **부동소수
+ * 깊이버퍼** 위에서다. 우리 컴포저 타깃은 `DEPTH_COMPONENT24` unorm이라(three의
+ * `getInternalDepthFormat` 기본) 역Z를 켜도 눈금 분포가 거의 그대로다 — 32F 깊이 텍스처를
+ * 따로 붙이는 일이 되는데, 그러면 분할 프러스텀보다 손이 더 간다.
+ *
+ * ## 왜 하나로는 안 되나 — 실측
+ *
+ * 표준 24비트에서 한 깊이 눈금이 세계 좌표로 몇 m인가:
+ *
+ *     NEAR    1 km      5 km     12 km     30 km
+ *      3 m    0.02      0.50      2.86     17.88   ← 해안선 스커트(5 m)보다 크다
+ *     10 m   6.0e-3     0.15      0.86      5.36
+ *     30 m   2.0e-3     0.05      0.29      1.79   ← 온보드(기체 안 1.2 m)를 못 쓴다
+ *
+ * 두 번 그리면 양쪽을 다 가진다:
+ *
+ *     near [3, 2000]        1 km에서 0.02 m
+ *     far  [1500, 50000]   30 km에서 0.03 m
+ *
+ * 겹치는 500 m가 이음매를 없앤다. 원거리부터 그리고 **깊이만 지운 뒤** 근거리를 덮는다 —
+ * 근거리 물체는 정의상 더 가까우므로 덮는 것이 옳다.
+ *
+ * ## 겹침 구간은 **불투명에만** 옳다
+ *
+ * [1500, 2000]에 있는 것은 두 번 래스터라이즈된다. 불투명이면 두 번째가 첫 번째를 덮어
+ * 결과가 같지만, **알파 블렌딩은 두 번 섞인다** — 그 띠에서만 색이 진해진다. 곧 올릴
+ * 해면이 반투명이면 폭 500 m의 고리가 눈에 띄게 된다. 해면을 불투명으로 그리거나
+ * (프레넬·심해색을 셰이더 안에서 합성), 그 구간에서 한 패스만 그리게 해야 한다.
+ */
 export const NEAR = 3;
+export const NEAR_FAR = 2000;
+export const FAR_NEAR = 1500;
 export const FAR = 50000;
 const SKY_RADIUS = FAR * 0.9;
 
-/** 가시거리 V [m]에서 투과율이 2%가 되는 FogExp2 밀도. exp(−(dρ)²) = 0.02 → ρ = 1.978/V. */
-export const fogDensityForVisibility = (v: number): number => 1.978 / Math.max(v, 1);
+// 대기 — `FogExp2`를 걷어내고 해석적 단일산란으로 갔다. `scene.fog`는 이제 쓰지 않는다.
+// 시정은 `hazeForVisibility`가 미 소산계수로 옮기고, 재질에 거는 일은
+// `scene/atmosphere.ts`의 `applyAerialPerspective`가 한다. 이유는 그 머리말에 있다.
+
+/** Engineering 기본 — 블룸은 **태양 원반과 윤슬만** 걸리게 문턱을 높게 잡는다.
+ *
+ * 문턱 1.0은 `FogExp2` 시절 값이라 못 쓴다. 대기 산란을 켜면 한낮 지평 하늘이 1.3,
+ * 낮은 해 쪽 하늘은 6~12까지 올라가서 **하늘 전체가 블룸에 걸려** 화면 절반이 하얗게
+ * 뭉갠다(실측). 2.5로 올리면 한낮 하늘은 통째로 빠지고 태양 원반(≈60)만 남는다 —
+ * 곧 올릴 윤슬도 정반사라 이 위에 선다.
+ *
+ * Cinematic이 오면 세기·반경을 올리고 모션블러·DOF가 붙는다(계획 §7). */
+const DEFAULT_POST: PostOptions = {
+  bloomStrength: 0.35, bloomRadius: 0.4, bloomThreshold: 2.5, antialias: true,
+};
 
 export interface CameraPose {
   eye: readonly number[];
@@ -63,8 +117,11 @@ export interface PathLine {
 }
 
 export interface SceneStats {
+  /** **장면만** — 후처리 풀스크린 쿼드는 안 센다. */
   drawCalls: number;
   triangles: number;
+  /** **CPU 제출 시간**이다 — GPU 실행 시간이 아니다. 2 ms에 제출하고도 60 fps를
+   *  놓칠 수 있고 그 반대도 된다. GPU를 재려면 `EXT_disjoint_timer_query_webgl2`가 필요하다. */
   ms: number;
 }
 
@@ -91,7 +148,6 @@ export class SceneHost {
 
   private readonly renderer: WebGLRenderer;
   private readonly sky: Sky;
-  private readonly fog: FogExp2;
   private readonly sun: DirectionalLight;
   private readonly ambient: HemisphereLight;
   private readonly groups = {
@@ -100,45 +156,78 @@ export class SceneHost {
 
   private stats: SceneStats = { drawCalls: 0, triangles: 0, ms: 0 };
   private disposed = false;
+  private post: Post | null = null;
+  private readonly scenePass: SplitFrustumPass;
+  private size = { w: 1, h: 1, dpr: 1 };
 
   constructor(canvas: HTMLCanvasElement, context: WebGL2RenderingContext) {
     // 컨텍스트를 밖에서 만들어 넘긴다 — 같은 캔버스의 두 번째 getContext는 기존 것을
     // 돌려주면서 antialias 같은 속성을 무시하므로, 여기서 다시 만들면 조용히 꺼진다.
-    this.renderer = new WebGLRenderer({ canvas, context, logarithmicDepthBuffer: true });
+    // 로그 깊이버퍼는 쓰지 않는다 — 위 주석. 분할 프러스텀이 그 자리를 대신한다.
+    //
+    // **`autoClear`는 전역으로 끄지 않는다.** 분할 패스가 자기 안에서만 끄고 되돌린다.
+    // 전역으로 끄면 `SMAAPass`가 조용히 망가진다 — 그쪽은 내부 타깃을 `renderer.autoClear`에
+    // 기대어 지우고, 에지 셰이더가 `discard`를 쓰므로 안 지우면 마스크가 누적된다.
+    this.renderer = new WebGLRenderer({ canvas, context });
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
 
-    this.fog = new FogExp2(0x9fb4c7, fogDensityForVisibility(25000));
-    this.scene.fog = this.fog;
-
-    this.sun = new DirectionalLight(0xfff3e0, 2.4);
+    // 색·세기는 `setEnvironment`가 대기 모델에서 정한다. 여기 값은 그전 한 프레임용이다.
+    this.sun = new DirectionalLight(0xffffff, 1);
     this.ambient = new HemisphereLight(0xbcd6f0, 0x6b6f5a, 0.9);
     this.scene.add(this.sun, this.ambient);
 
     this.sky = createSky(SKY_RADIUS);
     this.scene.add(this.sky.mesh);
     for (const g of Object.values(this.groups)) this.scene.add(g);
+
+    this.scenePass = new SplitFrustumPass(
+      this.scene, this.camera,
+      { near: NEAR, nearFar: NEAR_FAR, farNear: FAR_NEAR, far: FAR },
+      [this.sky.mesh],
+    );
+    // **경로를 하나로 둔다.** 컴포저 없는 직접 렌더 경로를 따로 두면 분할 프러스텀 코드가
+    // 두 벌이 되고, 언젠가 한쪽만 고쳐진다(`disposeTree`에서 겪은 그것).
+    this.setPost(DEFAULT_POST);
+  }
+
+  /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
+  setPost(opts: PostOptions): void {
+    this.post?.dispose();
+    this.post = createPost(this.renderer, this.scenePass, this.size.w, this.size.h, opts);
+    this.post.setSize(this.size.w, this.size.h, this.size.dpr);
   }
 
   resize(width: number, height: number, dpr: number): void {
     // dpr 3 기기에서 픽셀 수가 9배가 되는 것을 막는다.
+    this.size = { w: width, h: height, dpr };
     this.renderer.setPixelRatio(Math.min(dpr, 2));
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(height, 1);
     this.camera.updateProjectionMatrix();
+    this.post?.setSize(width, height, dpr);
   }
 
   setEnvironment({ sunAzEl, visibility, exposure }: Environment): void {
     const [az, el] = sunAzEl;
-    // 태양 방향을 NED로 만든 뒤 같은 toWorld를 태운다 — 하늘·직사광·안개가 한 값에서 나온다.
+    // 태양 방향을 NED로 만든 뒤 같은 toWorld를 태운다 — 하늘·직사광·산란이 한 값에서 나온다.
     const w = toWorld(Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), -Math.sin(el));
-    const horizon = this.sky.setSun(w, el);
     this.sun.position.set(w[0] * 1000, w[1] * 1000, w[2] * 1000);
-    this.sun.intensity = 0.6 + 2.0 * Math.max(Math.sin(el), 0);
-    // **안개색 = 지평선 하늘색** — 먼 지형이 회색 띠가 아니라 하늘로 녹아든다.
-    this.fog.color.copy(horizon);
-    this.fog.density = fogDensityForVisibility(visibility);
+    // 대기 밖 세기. 대기를 지나며 붉어지고 어두워지는 몫은 아래 `sunColor`가 맡는다.
+    const intensity = 2.4;
+    // **하늘·지형·모델이 이 한 벌의 유니폼을 공유한다.** 예전에는 `fog.color`를 지평선
+    // 하늘색으로 손수 맞췄는데, 이제는 먼 지형이 그 방향의 하늘색이 되는 것이 산란
+    // 함수에서 저절로 나온다 — 맞춰 줄 색이 없다.
+    const sunColor = setAtmosphere(w, el, intensity, visibility);
+    // 직사광이 **하늘과 같은 태양색**을 쓴다. 저녁에 하늘만 붉고 지형은 하얗게 남는
+    // 어긋남이 여기서 닫힌다. 세기는 대기 밖 값 그대로 두고, 색이 감쇠분을 진다
+    // (three는 색 × 세기를 곱하므로 결과가 같고, 두 수의 뜻이 갈려 있어 읽기 쉽다).
+    this.sun.color.setRGB(sunColor[0], sunColor[1], sunColor[2]);
+    this.sun.intensity = intensity;
+    // 환경광은 하늘의 대역이다 — 해가 지면 같이 죽어야 한다. 상수로 두면 노을에
+    // 지형만 평평한 회색으로 남는다. 표시용 근사이고, 하늘 적분이 아니라 고도의 함수다.
+    this.ambient.intensity = 0.12 + 0.8 * Math.max(Math.sin(el), 0);
     this.renderer.toneMappingExposure = exposure;
   }
 
@@ -165,9 +254,11 @@ export class SceneHost {
       geo.setAttribute("normal", new BufferAttribute(nrm, 3));
       geo.setAttribute("color", new BufferAttribute(col, 3));
       geo.setIndex(new BufferAttribute(p.indices, 1));
-      this.groups.terrain.add(new Mesh(geo, new MeshStandardMaterial({
+      const mat = new MeshStandardMaterial({
         vertexColors: true, roughness: 0.95, metalness: 0,
-      })));
+      });
+      applyAerialPerspective(mat);
+      this.groups.terrain.add(new Mesh(geo, mat));
     }
   }
 
@@ -197,7 +288,10 @@ export class SceneHost {
       if (verts.length === 0) continue;
       const geo = new BufferGeometry();
       geo.setAttribute("position", new BufferAttribute(new Float32Array(verts), 3));
-      this.groups.paths.add(new LineSegments(geo, new LineBasicMaterial({ color: ln.color })));
+      const mat = new LineBasicMaterial({ color: ln.color });
+      // 궤적도 대기를 탄다 — 안 걸면 30 km 밖 선만 또렷해서 지형 위에 떠 보인다.
+      applyAerialPerspective(mat);
+      this.groups.paths.add(new LineSegments(geo, mat));
     }
   }
 
@@ -212,7 +306,7 @@ export class SceneHost {
   }
 
   render(cam: CameraPose): void {
-    if (this.disposed) return;
+    if (this.disposed || this.post == null) return;
     const t0 = performance.now();
     const eye = toWorld(cam.eye[0]!, cam.eye[1]!, cam.eye[2]!);
     const target = toWorld(cam.target[0]!, cam.target[1]!, cam.target[2]!);
@@ -221,30 +315,46 @@ export class SceneHost {
     this.camera.up.set(up[0], up[1], up[2]).normalize();
     this.camera.lookAt(new Vector3(target[0], target[1], target[2]));
     this.camera.fov = (cam.fovY * 180) / Math.PI;
-    this.camera.updateProjectionMatrix();
     // 하늘은 카메라를 따라다닌다 — 반지름이 FAR의 0.9배라 움직이지 않으면 잘린다.
+    // (near/far와 투영행렬은 `SplitFrustumPass`가 패스마다 세운다.)
     this.sky.mesh.position.copy(this.camera.position);
-    this.renderer.render(this.scene, this.camera);
-    const info = this.renderer.info.render;
-    this.stats = { drawCalls: info.calls, triangles: info.triangles, ms: performance.now() - t0 };
+
+    // **한 프레임에 draw call이 두 벌**이라 자동 리셋이면 근거리 것만 남는다.
+    this.renderer.info.autoReset = false;
+    this.renderer.info.reset();
+    try {
+      this.post.render();
+    } finally {
+      // 던지면 자동 리셋이 꺼진 채로 남아 카운터가 영영 누적된다.
+      this.renderer.info.autoReset = true;
+    }
+    // **장면만의 수를 쓴다.** `info`를 그대로 읽으면 후처리 풀스크린 쿼드가 섞여
+    // (블룸 13 · SMAA 3 · Output 1) 드로우콜의 3분의 1쯤이 장면이 아닌 것이 된다.
+    const scene = this.post.sceneStats();
+    this.stats = { ...scene, ms: performance.now() - t0 };
   }
 
   getStats(): SceneStats {
     return this.stats;
   }
 
-  describe(): { name: string; maxTextureSize: number; maxAnisotropy: number } {
+  describe(): { name: string; maxTextureSize: number; maxAnisotropy: number; depthBits: number } {
     const caps = this.renderer.capabilities;
+    const gl = this.renderer.getContext();
     return {
       name: "three WebGL2",
       maxTextureSize: caps.maxTextureSize,
       maxAnisotropy: caps.getMaxAnisotropy(),
+      // 깊이 정책의 전제다 — 24비트를 가정하고 분할 구간을 골랐다(위 주석의 실측표).
+      depthBits: gl.getParameter(gl.DEPTH_BITS) as number,
     };
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.post?.dispose();
+    this.post = null;
     for (const g of Object.values(this.groups)) disposeTree(g);
     this.sky.dispose();
     this.scene.clear();

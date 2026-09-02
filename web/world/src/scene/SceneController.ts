@@ -23,6 +23,7 @@ import { attitudeAt, originsAgree, sampleAt, sceneExtent, trackPoints, velocityA
   from "../lib/world3d.ts";
 import { elevationAt, parseTerrainPack, type TerrainPack } from "../lib/terrainpack.ts";
 import { strideFor } from "../lib/replay.ts";
+import { ATMOSPHERE_NOTES } from "./atmosphere.ts";
 import { launcherCaptionNotes, launcherPose } from "../core/launcher.ts";
 import { SURFACE_NOTES, propellerRate, surfacePose } from "../core/surfaces.ts";
 import type { Replay } from "../core/types.ts";
@@ -56,6 +57,15 @@ export interface Readout {
   theta: number | null;
 }
 
+/** 프레임마다의 비용 — 화면이 계속 말한다. 분할 프러스텀은 장면을 두 번 그리므로
+ *  그 대가가 보여야 판단이 선다(계획 §검증). */
+export interface FrameStats {
+  drawCalls: number;
+  triangles: number;
+  ms: number;
+  depthBits: number;
+}
+
 export interface ControllerCallbacks {
   onNotes(notes: string[]): void;
   /** **시점의 정본은 컨트롤러다.** 끌어서 궤도로 넘어가는 조건이 여기 있으므로,
@@ -66,7 +76,11 @@ export interface ControllerCallbacks {
   onResults(rows: SimResultRow[], chosen: string | null): void;
   onStatus(text: string): void;
   onPlaying(playing: boolean): void;
+  onStats(s: FrameStats): void;
 }
+
+/** 통계를 화면에 올리는 주기 [ms] — 초당 60번 바뀌는 숫자는 읽을 수 없다. */
+const STATS_INTERVAL_MS = 500;
 
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
@@ -121,6 +135,7 @@ export class SceneController {
   constructor(host: SceneHost, cb: ControllerCallbacks) {
     this.host = host;
     this.cb = cb;
+    this.depthBits = host.describe().depthBits;
   }
 
   /** 결과와 무관한 자산 — 한 번만 읽는다. 없으면 **사유를 문장으로** 남긴다. */
@@ -292,6 +307,7 @@ export class SceneController {
         + "온보드는 원래 기체 안이라 물러선 것을 알아챌 단서가 없습니다.",
       );
     }
+    notes.push(ATMOSPHERE_NOTES.model, ATMOSPHERE_NOTES.visibility);
     this.cb.onNotes(notes);
   }
 
@@ -431,6 +447,7 @@ export class SceneController {
     const cam = this.cameraFor(pos, q, dtWall, groundElev);
     this.host.render(cam);
     this.emitReadout(i, groundElev);
+    this.emitStats(performance.now());
     this.prevIdx = i;
   }
 
@@ -506,6 +523,26 @@ export class SceneController {
     this.fellBack = v;
     this.emitNotes();
   }
+
+  /** **시간 간격으로** 올린다 — 값 비교로는 못 줄인다.
+   *
+   * 처음엔 "바뀔 때만"으로 두었는데, `ms`를 0.1 ms 단위로 비교하니 CPU 제출 시간이 그보다
+   * 훨씬 크게 흔들려 사실상 매 프레임 통과했다. 그리고 그때 적은 사유("매 프레임 setState하면
+   * 프레임을 먹는다")도 틀렸다 — `emitReadout`이 이미 매 프레임 새 객체를 올리고 React 18이
+   * 둘을 한 렌더로 묶는다. 줄여야 하는 진짜 이유는 **읽는 사람**이다: 초당 60번 바뀌는
+   * 숫자는 못 읽는다. */
+  private emitStats(now: number): void {
+    if (now - this.lastStatsAt < STATS_INTERVAL_MS) return;
+    this.lastStatsAt = now;
+    const s = this.host.getStats();
+    this.cb.onStats({
+      drawCalls: s.drawCalls, triangles: s.triangles,
+      ms: Math.round(s.ms * 10) / 10, depthBits: this.depthBits,
+    });
+  }
+
+  private lastStatsAt = 0;
+  private readonly depthBits: number;
 
   private emitReadout(i: number, groundElev: number | null): void {
     const s = this.body?.signals;
