@@ -60,6 +60,17 @@ export const H_MIE = 1200;
 /** 대기 밖 태양의 상대 분광 — 표시용 틴트. */
 export const SUN_TINT = [1.0, 0.95, 0.88] as const;
 
+/** 대기 함수가 전제하는 유니폼 선언 — 하늘·해면·(재질 패치)가 **같은 세 줄**을 쓴다.
+ *
+ * `ATMOSPHERE_GLSL`은 이 값들을 함수 인자로만 받으므로 선언은 부르는 쪽 몫이다. 세 벌로
+ * 적으면 이름 하나를 고칠 때 한 곳이 남는데, 그러면 그 셰이더만 컴파일이 깨지거나
+ * (운이 나쁘면) 0으로 읽는다. `scene/atmosphere.ts`의 `atmosphereUniforms`와 **짝이다**. */
+export const ATMOSPHERE_UNIFORM_DECL = /* glsl */`
+uniform vec3 uSunDirWorld;
+uniform float uSunIntensity;
+uniform float uHaze;
+`;
+
 /** GLSL 실수 리터럴 — 소수점을 **반드시** 남긴다.
  *
  * `String(1.0)`은 `"1"`이 되는데 GLSL에서 그건 정수 리터럴이라, `vec3(1, 0.95, 0.88)`

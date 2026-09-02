@@ -40,14 +40,14 @@ E$1.prototype.forceUpdate = function(a) {
 function F() {
 }
 F.prototype = E$1.prototype;
-function G$1(a, b, e) {
+function G$2(a, b, e) {
   this.props = a;
   this.context = b;
   this.refs = D$1;
   this.updater = e || B$1;
 }
-var H$1 = G$1.prototype = new F();
-H$1.constructor = G$1;
+var H$1 = G$2.prototype = new F();
+H$1.constructor = G$2;
 C$1(H$1, E$1.prototype);
 H$1.isPureReactComponent = true;
 var I$1 = Array.isArray, J = Object.prototype.hasOwnProperty, K$1 = { current: null }, L$1 = { key: true, ref: true, __self: true, __source: true };
@@ -157,7 +157,7 @@ react_production_min.Children = { map: S$1, forEach: function(a, b, e) {
 react_production_min.Component = E$1;
 react_production_min.Fragment = p$2;
 react_production_min.Profiler = r;
-react_production_min.PureComponent = G$1;
+react_production_min.PureComponent = G$2;
 react_production_min.StrictMode = q$1;
 react_production_min.Suspense = w;
 react_production_min.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED = W$1;
@@ -2591,7 +2591,7 @@ function Uf(a) {
 function E(a) {
   0 > Tf || (a.current = Sf[Tf], Sf[Tf] = null, Tf--);
 }
-function G(a, b) {
+function G$1(a, b) {
   Tf++;
   Sf[Tf] = a.current;
   a.current = b;
@@ -2617,8 +2617,8 @@ function $f() {
 }
 function ag(a, b, c) {
   if (H.current !== Vf) throw Error(p(168));
-  G(H, b);
-  G(Wf, c);
+  G$1(H, b);
+  G$1(Wf, c);
 }
 function bg(a, b, c) {
   var d = a.stateNode;
@@ -2631,15 +2631,15 @@ function bg(a, b, c) {
 function cg(a) {
   a = (a = a.stateNode) && a.__reactInternalMemoizedMergedChildContext || Vf;
   Xf = H.current;
-  G(H, a);
-  G(Wf, Wf.current);
+  G$1(H, a);
+  G$1(Wf, Wf.current);
   return true;
 }
 function dg(a, b, c) {
   var d = a.stateNode;
   if (!d) throw Error(p(169));
-  c ? (a = bg(a, b, Xf), d.__reactInternalMemoizedMergedChildContext = a, E(Wf), E(H), G(H, a)) : E(Wf);
-  G(Wf, c);
+  c ? (a = bg(a, b, Xf), d.__reactInternalMemoizedMergedChildContext = a, E(Wf), E(H), G$1(H, a)) : E(Wf);
+  G$1(Wf, c);
 }
 var eg = null, fg = false, gg = false;
 function hg(a) {
@@ -3276,9 +3276,9 @@ function xh(a) {
   return a;
 }
 function yh(a, b) {
-  G(wh, b);
-  G(vh, a);
-  G(uh, th);
+  G$1(wh, b);
+  G$1(vh, a);
+  G$1(uh, th);
   a = b.nodeType;
   switch (a) {
     case 9:
@@ -3289,7 +3289,7 @@ function yh(a, b) {
       a = 8 === a ? b.parentNode : b, b = a.namespaceURI || null, a = a.tagName, b = lb(b, a);
   }
   E(uh);
-  G(uh, b);
+  G$1(uh, b);
 }
 function zh() {
   E(uh);
@@ -3300,7 +3300,7 @@ function Ah(a) {
   xh(wh.current);
   var b = xh(uh.current);
   var c = lb(b, a.type);
-  b !== c && (G(vh, a), G(uh, c));
+  b !== c && (G$1(vh, a), G$1(uh, c));
 }
 function Bh(a) {
   vh.current === a && (E(uh), E(vh));
@@ -3983,15 +3983,15 @@ function bj(a, b, c, d, e) {
 }
 function dj(a, b, c) {
   var d = b.pendingProps, e = d.children, f2 = null !== a ? a.memoizedState : null;
-  if ("hidden" === d.mode) if (0 === (b.mode & 1)) b.memoizedState = { baseLanes: 0, cachePool: null, transitions: null }, G(ej, fj), fj |= c;
+  if ("hidden" === d.mode) if (0 === (b.mode & 1)) b.memoizedState = { baseLanes: 0, cachePool: null, transitions: null }, G$1(ej, fj), fj |= c;
   else {
-    if (0 === (c & 1073741824)) return a = null !== f2 ? f2.baseLanes | c : c, b.lanes = b.childLanes = 1073741824, b.memoizedState = { baseLanes: a, cachePool: null, transitions: null }, b.updateQueue = null, G(ej, fj), fj |= a, null;
+    if (0 === (c & 1073741824)) return a = null !== f2 ? f2.baseLanes | c : c, b.lanes = b.childLanes = 1073741824, b.memoizedState = { baseLanes: a, cachePool: null, transitions: null }, b.updateQueue = null, G$1(ej, fj), fj |= a, null;
     b.memoizedState = { baseLanes: 0, cachePool: null, transitions: null };
     d = null !== f2 ? f2.baseLanes : c;
-    G(ej, fj);
+    G$1(ej, fj);
     fj |= d;
   }
-  else null !== f2 ? (d = f2.baseLanes | c, b.memoizedState = null) : d = c, G(ej, fj), fj |= d;
+  else null !== f2 ? (d = f2.baseLanes | c, b.memoizedState = null) : d = c, G$1(ej, fj), fj |= d;
   Xi(a, b, e, c);
   return b.child;
 }
@@ -4086,7 +4086,7 @@ function oj(a, b, c) {
   (h = g) || (h = null !== a && null === a.memoizedState ? false : 0 !== (e & 2));
   if (h) f2 = true, b.flags &= -129;
   else if (null === a || null !== a.memoizedState) e |= 1;
-  G(L, e & 1);
+  G$1(L, e & 1);
   if (null === a) {
     Eg(b);
     a = b.memoizedState;
@@ -4261,7 +4261,7 @@ function xj(a, b, c) {
     }
     d &= 1;
   }
-  G(L, d);
+  G$1(L, d);
   if (0 === (b.mode & 1)) b.memoizedState = null;
   else switch (e) {
     case "forwards":
@@ -4329,19 +4329,19 @@ function yj(a, b, c) {
       break;
     case 10:
       var d = b.type._context, e = b.memoizedProps.value;
-      G(Wg, d._currentValue);
+      G$1(Wg, d._currentValue);
       d._currentValue = e;
       break;
     case 13:
       d = b.memoizedState;
       if (null !== d) {
-        if (null !== d.dehydrated) return G(L, L.current & 1), b.flags |= 128, null;
+        if (null !== d.dehydrated) return G$1(L, L.current & 1), b.flags |= 128, null;
         if (0 !== (c & b.child.childLanes)) return oj(a, b, c);
-        G(L, L.current & 1);
+        G$1(L, L.current & 1);
         a = Zi(a, b, c);
         return null !== a ? a.sibling : null;
       }
-      G(L, L.current & 1);
+      G$1(L, L.current & 1);
       break;
     case 19:
       d = 0 !== (c & b.childLanes);
@@ -4351,7 +4351,7 @@ function yj(a, b, c) {
       }
       e = b.memoizedState;
       null !== e && (e.rendering = null, e.tail = null, e.lastEffect = null);
-      G(L, L.current);
+      G$1(L, L.current);
       if (d) break;
       else return null;
     case 22:
@@ -4757,7 +4757,7 @@ function Ej(a, b, c) {
             b.subtreeFlags = 0;
             d = c;
             for (c = b.child; null !== c; ) f2 = c, a = d, f2.flags &= 14680066, g = f2.alternate, null === g ? (f2.childLanes = 0, f2.lanes = a, f2.child = null, f2.subtreeFlags = 0, f2.memoizedProps = null, f2.memoizedState = null, f2.updateQueue = null, f2.dependencies = null, f2.stateNode = null) : (f2.childLanes = g.childLanes, f2.lanes = g.lanes, f2.child = g.child, f2.subtreeFlags = 0, f2.deletions = null, f2.memoizedProps = g.memoizedProps, f2.memoizedState = g.memoizedState, f2.updateQueue = g.updateQueue, f2.type = g.type, a = g.dependencies, f2.dependencies = null === a ? null : { lanes: a.lanes, firstContext: a.firstContext }), c = c.sibling;
-            G(L, L.current & 1 | 2);
+            G$1(L, L.current & 1 | 2);
             return b.child;
           }
           a = a.sibling;
@@ -4770,7 +4770,7 @@ function Ej(a, b, c) {
         } else 2 * B() - f2.renderingStartTime > Gj && 1073741824 !== c && (b.flags |= 128, d = true, Dj(f2, false), b.lanes = 4194304);
         f2.isBackwards ? (g.sibling = b.child, b.child = g) : (c = f2.last, null !== c ? c.sibling = g : b.child = g, f2.last = g);
       }
-      if (null !== f2.tail) return b = f2.tail, f2.rendering = b, f2.tail = b.sibling, f2.renderingStartTime = B(), b.sibling = null, c = L.current, G(L, d ? c & 1 | 2 : c & 1), b;
+      if (null !== f2.tail) return b = f2.tail, f2.rendering = b, f2.tail = b.sibling, f2.renderingStartTime = B(), b.sibling = null, c = L.current, G$1(L, d ? c & 1 | 2 : c & 1), b;
       S(b);
       return null;
     case 22:
@@ -6385,7 +6385,7 @@ Vk = function(a, b, c) {
         e = b.pendingProps;
         f2 = b.memoizedProps;
         g = e.value;
-        G(Wg, d._currentValue);
+        G$1(Wg, d._currentValue);
         d._currentValue = g;
         if (null !== f2) if (He(f2.value, g)) {
           if (f2.children === e.children && !Wf.current) {
@@ -37488,6 +37488,14 @@ const MIE_G = 0.76;
 const H_RAYLEIGH = 8e3;
 const H_MIE = 1200;
 const SUN_TINT = [1, 0.95, 0.88];
+const ATMOSPHERE_UNIFORM_DECL = (
+  /* glsl */
+  `
+uniform vec3 uSunDirWorld;
+uniform float uSunIntensity;
+uniform float uHaze;
+`
+);
 const glsl = (x2) => Number.isInteger(x2) ? x2.toFixed(1) : String(x2);
 const ATMOSPHERE_GLSL = (
   /* glsl */
@@ -37614,9 +37622,7 @@ const VERT_BODY = `
 `;
 const FRAG_DECL = `
 varying vec3 vAerialView;
-uniform vec3 uSunDirWorld;
-uniform float uSunIntensity;
-uniform float uHaze;
+${ATMOSPHERE_UNIFORM_DECL}
 ${ATMOSPHERE_GLSL}
 `;
 const FRAG_BODY = `
@@ -37772,6 +37778,55 @@ function propellerRate(thrL, thrR, maxRadPerSec = 220) {
   const mean = Math.min(Math.max((l2 + r2) / 2, 0), 1);
   return mean * maxRadPerSec;
 }
+const G = 9.80665;
+function significantWaveHeight(windSpeed) {
+  const u2 = Math.max(windSpeed, 0);
+  return 0.21 * u2 * u2 / G;
+}
+function peakWavelength(windSpeed) {
+  const u2 = Math.max(windSpeed, 0.5);
+  const omegaP = 0.877 * G / u2;
+  return 2 * Math.PI * G / (omegaP * omegaP);
+}
+function coxMunkSlopeVariance(windSpeed) {
+  return 3e-3 + 512e-5 * Math.max(windSpeed, 0);
+}
+const COMPONENTS = [
+  { lengthRatio: 1.9, weight: 1, spreadDeg: 0 },
+  // 너울 — 바람 방향
+  { lengthRatio: 1.15, weight: 0.78, spreadDeg: -22 },
+  { lengthRatio: 0.62, weight: 0.52, spreadDeg: 31 },
+  { lengthRatio: 0.31, weight: 0.34, spreadDeg: -47 },
+  { lengthRatio: 0.15, weight: 0.21, spreadDeg: 58 }
+  // 중파 — 방향이 가장 벌어진다
+];
+const WAVE_COUNT = COMPONENTS.length;
+function gerstnerSet(windSpeed, windDirRad, steepness = 0.65) {
+  const hs = significantWaveHeight(windSpeed);
+  const lp = peakWavelength(windSpeed);
+  const wsum = COMPONENTS.reduce((s2, c) => s2 + c.weight * c.weight, 0);
+  const scale = wsum > 0 ? Math.sqrt(hs * hs / 8 / wsum) : 0;
+  const s = Math.min(Math.max(steepness, 0), 1);
+  return COMPONENTS.map((c) => {
+    const length = Math.max(lp * c.lengthRatio, 0.5);
+    const k2 = 2 * Math.PI / length;
+    const amplitude = scale * c.weight;
+    const a = windDirRad + c.spreadDeg * Math.PI / 180;
+    const q2 = amplitude > 0 ? s / (k2 * amplitude * WAVE_COUNT) : 0;
+    return {
+      dir: [Math.cos(a), Math.sin(a)],
+      length,
+      amplitude,
+      k: k2,
+      omega: Math.sqrt(G * k2),
+      q: q2
+    };
+  });
+}
+const WAVE_NOTES = {
+  displayOnly: "해상 상태(풍속·파고·파향)는 표시 값이며 시뮬 입력이 아닙니다 — 비행동역학은 이 값을 모릅니다.",
+  model: "파면은 게르스트너 성분 5개(심해 분산관계 ω²=gk)이고 파고는 피어슨-모스코비츠 H_s=0.21U²/g입니다. 윤슬 폭은 콕스-먼크 경사분산 σ²=0.003+0.00512U에서 나옵니다."
+};
 const BASE = "/api";
 class ApiError extends Error {
   constructor(status, detail) {
@@ -39489,289 +39544,6 @@ function disposeTree(root) {
   });
   root.clear();
 }
-const VERT = (
-  /* glsl */
-  `
-varying vec3 vDir;
-void main() {
-  vDir = normalize(position);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`
-);
-const FRAG = (
-  /* glsl */
-  `
-varying vec3 vDir;
-uniform vec3 uSunDirWorld;
-uniform float uSunIntensity;
-uniform float uHaze;
-uniform vec3 uGround;
-${ATMOSPHERE_GLSL}
-void main() {
-  vec3 dir = normalize(vDir);
-  vec3 col = skyRadiance(dir, uSunDirWorld, uSunIntensity, uHaze);
-  // 지평 아래 — 카메라가 낮으면 구의 아래쪽이 보인다. 지면색으로 가라앉힌다(표시용).
-  col = mix(uGround, col, smoothstep(-0.06, 0.02, dir.y));
-  gl_FragColor = vec4(col, 1.0);
-}`
-);
-function createSky(radius) {
-  const material = new ShaderMaterial({
-    side: BackSide,
-    depthWrite: false,
-    depthTest: false,
-    fog: false,
-    vertexShader: VERT,
-    fragmentShader: FRAG,
-    uniforms: {
-      // **공유 유니폼을 그대로 꽂는다** — 하늘과 에어리얼이 같은 태양·같은 뿌연 정도를 본다.
-      ...atmosphereUniforms,
-      uGround: { value: new Color(6120274) }
-    }
-  });
-  const geometry = new SphereGeometry(radius, 32, 20);
-  const mesh = new Mesh(geometry, material);
-  mesh.renderOrder = -1;
-  mesh.frustumCulled = false;
-  return {
-    mesh,
-    setGroundColor(hex) {
-      material.uniforms.uGround.value.set(hex);
-    },
-    dispose() {
-      geometry.dispose();
-      material.dispose();
-    }
-  };
-}
-const NEAR = 3;
-const NEAR_FAR = 2e3;
-const FAR_NEAR = 1500;
-const FAR = 5e4;
-const SKY_RADIUS = FAR * 0.9;
-const DEFAULT_POST = {
-  bloomStrength: 0.35,
-  bloomRadius: 0.4,
-  bloomThreshold: 2.5,
-  antialias: true
-};
-const RAMP = [
-  [0, [0.76, 0.72, 0.58]],
-  [60, [0.42, 0.53, 0.32]],
-  [300, [0.28, 0.4, 0.24]],
-  [700, [0.45, 0.42, 0.36]],
-  [1200, [0.72, 0.72, 0.72]]
-];
-function hypsometric(elev, out, i) {
-  let lo = RAMP[0];
-  let hi2 = RAMP[RAMP.length - 1];
-  for (let k2 = 0; k2 + 1 < RAMP.length; k2++) {
-    if (elev <= RAMP[k2 + 1][0]) {
-      lo = RAMP[k2];
-      hi2 = RAMP[k2 + 1];
-      break;
-    }
-  }
-  const span = hi2[0] - lo[0];
-  const t2 = span > 0 ? Math.min(Math.max((elev - lo[0]) / span, 0), 1) : 0;
-  for (let k2 = 0; k2 < 3; k2++) out[i + k2] = lo[1][k2] + (hi2[1][k2] - lo[1][k2]) * t2;
-}
-class SceneHost {
-  scene = new Scene();
-  camera = new PerspectiveCamera(55, 1, NEAR, FAR);
-  renderer;
-  sky;
-  sun;
-  ambient;
-  groups = {
-    terrain: new Group(),
-    paths: new Group(),
-    models: new Group()
-  };
-  stats = { drawCalls: 0, triangles: 0, ms: 0 };
-  disposed = false;
-  post = null;
-  scenePass;
-  size = { w: 1, h: 1, dpr: 1 };
-  constructor(canvas, context) {
-    this.renderer = new WebGLRenderer({ canvas, context });
-    this.renderer.outputColorSpace = SRGBColorSpace;
-    this.renderer.toneMapping = ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.95;
-    this.sun = new DirectionalLight(16777215, 1);
-    this.ambient = new HemisphereLight(12375792, 7040858, 0.9);
-    this.scene.add(this.sun, this.ambient);
-    this.sky = createSky(SKY_RADIUS);
-    this.scene.add(this.sky.mesh);
-    for (const g of Object.values(this.groups)) this.scene.add(g);
-    this.scenePass = new SplitFrustumPass(
-      this.scene,
-      this.camera,
-      { near: NEAR, nearFar: NEAR_FAR, farNear: FAR_NEAR, far: FAR },
-      [this.sky.mesh]
-    );
-    this.setPost(DEFAULT_POST);
-  }
-  /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
-  setPost(opts) {
-    this.post?.dispose();
-    this.post = createPost(this.renderer, this.scenePass, this.size.w, this.size.h, opts);
-    this.post.setSize(this.size.w, this.size.h, this.size.dpr);
-  }
-  resize(width, height, dpr) {
-    this.size = { w: width, h: height, dpr };
-    this.renderer.setPixelRatio(Math.min(dpr, 2));
-    this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / Math.max(height, 1);
-    this.camera.updateProjectionMatrix();
-    this.post?.setSize(width, height, dpr);
-  }
-  setEnvironment({ sunAzEl, visibility, exposure }) {
-    const [az, el2] = sunAzEl;
-    const w2 = toWorld(Math.cos(el2) * Math.cos(az), Math.cos(el2) * Math.sin(az), -Math.sin(el2));
-    this.sun.position.set(w2[0] * 1e3, w2[1] * 1e3, w2[2] * 1e3);
-    const intensity = 2.4;
-    const sunColor = setAtmosphere(w2, el2, intensity, visibility);
-    this.sun.color.setRGB(sunColor[0], sunColor[1], sunColor[2]);
-    this.sun.intensity = intensity;
-    this.ambient.intensity = 0.12 + 0.8 * Math.max(Math.sin(el2), 0);
-    this.renderer.toneMappingExposure = exposure;
-  }
-  /** 지형 — NED 기하를 그대로 받는다. 음영은 **진짜 법선에 조명이 닿아** 생긴다. */
-  setTerrain(patches) {
-    disposeTree(this.groups.terrain);
-    for (const p2 of patches) {
-      const n2 = p2.positions.length;
-      const pos = new Float32Array(n2);
-      const nrm = new Float32Array(n2);
-      const col = new Float32Array(n2);
-      for (let i = 0; i < n2; i += 3) {
-        const d = Number.isFinite(p2.positions[i + 2]) ? p2.positions[i + 2] : 0;
-        const w2 = toWorld(p2.positions[i], p2.positions[i + 1], d);
-        pos[i] = w2[0];
-        pos[i + 1] = w2[1];
-        pos[i + 2] = w2[2];
-        const nw = toWorld(p2.normals[i], p2.normals[i + 1], p2.normals[i + 2]);
-        nrm[i] = nw[0];
-        nrm[i + 1] = nw[1];
-        nrm[i + 2] = nw[2];
-        hypsometric(-d, col, i);
-      }
-      const geo = new BufferGeometry();
-      geo.setAttribute("position", new BufferAttribute(pos, 3));
-      geo.setAttribute("normal", new BufferAttribute(nrm, 3));
-      geo.setAttribute("color", new BufferAttribute(col, 3));
-      geo.setIndex(new BufferAttribute(p2.indices, 1));
-      const mat = new MeshStandardMaterial({
-        vertexColors: true,
-        roughness: 0.95,
-        metalness: 0
-      });
-      applyAerialPerspective(mat);
-      this.groups.terrain.add(new Mesh(geo, mat));
-    }
-  }
-  /** 궤적 — `breaks`의 양 끝 중 하나라도 결측이면 그 구간을 그리지 않는다.
-   *
-   * **NaN도 직접 막는다.** `breaks`는 선택 인자라, 그걸 안 주고 NaN이 섞인 점을 넘기면
-   * 바운딩 스피어가 NaN이 되어 **선 전체가 프러스텀 컬링으로 사라진다** —
-   * `setTerrain`이 같은 이유로 방어하는 그 함정이고, 원인이 전혀 안 보인다. */
-  setPaths(lines) {
-    disposeTree(this.groups.paths);
-    for (const ln of lines) {
-      const count = ln.points.length / 3;
-      if (count < 2) continue;
-      const broken = new Set(ln.breaks ?? []);
-      const ok2 = (k2) => !broken.has(k2) && Number.isFinite(ln.points[3 * k2]) && Number.isFinite(ln.points[3 * k2 + 1]) && Number.isFinite(ln.points[3 * k2 + 2]);
-      const verts = [];
-      for (let i = 0; i + 1 < count; i++) {
-        if (!ok2(i) || !ok2(i + 1)) continue;
-        for (const k2 of [i, i + 1]) {
-          const w2 = toWorld(ln.points[3 * k2], ln.points[3 * k2 + 1], ln.points[3 * k2 + 2]);
-          verts.push(w2[0], w2[1], w2[2]);
-        }
-      }
-      if (verts.length === 0) continue;
-      const geo = new BufferGeometry();
-      geo.setAttribute("position", new BufferAttribute(new Float32Array(verts), 3));
-      const mat = new LineBasicMaterial({ color: ln.color });
-      applyAerialPerspective(mat);
-      this.groups.paths.add(new LineSegments(geo, mat));
-    }
-  }
-  /** 모델 그룹 — GLB 루트를 넣고 뺀다.
-   *
-   * **여기 넣은 것은 `dispose()`가 함께 파괴한다.** `models.ts`가 노드 손잡이를 들고
-   * 있을 뿐 소유권은 이 그룹에 있다는 뜻이다. 장래에 GLTF를 모듈 수준으로 캐시하면
-   * (탭을 오갈 때 다시 안 받으려고) 그 캐시가 내주는 지오메트리를 여기가 파괴하게 되어
-   * 다음 SceneHost가 빈 메시를 받는다 — 캐시를 넣는다면 이 그룹에는 `clone()`을 넣어야 한다. */
-  get modelGroup() {
-    return this.groups.models;
-  }
-  render(cam) {
-    if (this.disposed || this.post == null) return;
-    const t0 = performance.now();
-    const eye = toWorld(cam.eye[0], cam.eye[1], cam.eye[2]);
-    const target = toWorld(cam.target[0], cam.target[1], cam.target[2]);
-    const up = toWorld(cam.up[0], cam.up[1], cam.up[2]);
-    this.camera.position.set(eye[0], eye[1], eye[2]);
-    this.camera.up.set(up[0], up[1], up[2]).normalize();
-    this.camera.lookAt(new Vector3(target[0], target[1], target[2]));
-    this.camera.fov = cam.fovY * 180 / Math.PI;
-    this.sky.mesh.position.copy(this.camera.position);
-    this.renderer.info.autoReset = false;
-    this.renderer.info.reset();
-    try {
-      this.post.render();
-    } finally {
-      this.renderer.info.autoReset = true;
-    }
-    const scene = this.post.sceneStats();
-    this.stats = { ...scene, ms: performance.now() - t0 };
-  }
-  getStats() {
-    return this.stats;
-  }
-  describe() {
-    const caps = this.renderer.capabilities;
-    const gl2 = this.renderer.getContext();
-    return {
-      name: "three WebGL2",
-      maxTextureSize: caps.maxTextureSize,
-      maxAnisotropy: caps.getMaxAnisotropy(),
-      // 깊이 정책의 전제다 — 24비트를 가정하고 분할 구간을 골랐다(위 주석의 실측표).
-      depthBits: gl2.getParameter(gl2.DEPTH_BITS)
-    };
-  }
-  dispose() {
-    if (this.disposed) return;
-    this.disposed = true;
-    this.post?.dispose();
-    this.post = null;
-    for (const g of Object.values(this.groups)) disposeTree(g);
-    this.sky.dispose();
-    this.scene.clear();
-    this.renderer.dispose();
-    this.renderer.forceContextLoss();
-  }
-}
-function createSceneHost(canvas) {
-  if (typeof WebGL2RenderingContext === "undefined") {
-    return { host: null, reason: "이 브라우저가 WebGL2를 지원하지 않습니다." };
-  }
-  const context = canvas.getContext("webgl2", { antialias: true });
-  if (context == null) {
-    return {
-      host: null,
-      reason: "WebGL2 컨텍스트를 만들지 못했습니다 — 하드웨어 가속이 꺼져 있거나 GPU가 차단된 환경일 수 있습니다."
-    };
-  }
-  try {
-    return { host: new SceneHost(canvas, context), reason: null };
-  } catch (e) {
-    return { host: null, reason: `렌더러를 만들지 못했습니다 — ${e.message}` };
-  }
-}
 const CELL = { SEA: 1, MISSING: 2 };
 function seaLevelRaw(tier) {
   if (!(tier.scale > 0)) return null;
@@ -39871,6 +39643,899 @@ function buildSeaMasks(tiers) {
     done.push({ tier, mask });
   }
   return out;
+}
+function edt1d(f2, n2, d, v2, z2) {
+  let k2 = 0;
+  v2[0] = 0;
+  z2[0] = -Infinity;
+  z2[1] = Infinity;
+  for (let q2 = 1; q2 < n2; q2++) {
+    let s = (f2[q2] + q2 * q2 - (f2[v2[k2]] + v2[k2] * v2[k2])) / (2 * q2 - 2 * v2[k2]);
+    while (s <= z2[k2]) {
+      k2--;
+      s = (f2[q2] + q2 * q2 - (f2[v2[k2]] + v2[k2] * v2[k2])) / (2 * q2 - 2 * v2[k2]);
+    }
+    k2++;
+    v2[k2] = q2;
+    z2[k2] = s;
+    z2[k2 + 1] = Infinity;
+  }
+  k2 = 0;
+  for (let q2 = 0; q2 < n2; q2++) {
+    while (z2[k2 + 1] < q2) k2++;
+    const dq = q2 - v2[k2];
+    d[q2] = dq * dq + f2[v2[k2]];
+  }
+}
+function squaredDistanceTransform(seed, w2, h) {
+  const INF = 1e20;
+  const out = new Float64Array(w2 * h);
+  for (let i = 0; i < w2 * h; i++) out[i] = seed[i] === 0 ? 0 : INF;
+  const n2 = Math.max(w2, h);
+  const f2 = new Float64Array(n2);
+  const d = new Float64Array(n2);
+  const v2 = new Int32Array(n2);
+  const z2 = new Float64Array(n2 + 1);
+  for (let x2 = 0; x2 < w2; x2++) {
+    for (let y2 = 0; y2 < h; y2++) f2[y2] = out[y2 * w2 + x2];
+    edt1d(f2, h, d, v2, z2);
+    for (let y2 = 0; y2 < h; y2++) out[y2 * w2 + x2] = d[y2];
+  }
+  for (let y2 = 0; y2 < h; y2++) {
+    const row = y2 * w2;
+    for (let x2 = 0; x2 < w2; x2++) f2[x2] = out[row + x2];
+    edt1d(f2, w2, d, v2, z2);
+    for (let x2 = 0; x2 < w2; x2++) out[row + x2] = d[x2];
+  }
+  return out;
+}
+function domainOf(tiers) {
+  let n0 = Infinity;
+  let e0 = Infinity;
+  let n1 = -Infinity;
+  let e1 = -Infinity;
+  for (const { tier } of tiers) {
+    n0 = Math.min(n0, tier.n0);
+    e0 = Math.min(e0, tier.e0);
+    n1 = Math.max(n1, tier.n0 + (tier.rows - 1) * tier.step);
+    e1 = Math.max(e1, tier.e0 + (tier.cols - 1) * tier.step);
+  }
+  return { n0, e0, nSpan: Math.max(n1 - n0, 1), eSpan: Math.max(e1 - e0, 1) };
+}
+function buildCoastField(tiers, size = 1536) {
+  const fine = [...tiers].sort((a, b) => a.tier.step - b.tier.step);
+  const dom = domainOf(fine.length > 0 ? fine : tiers);
+  const w2 = size;
+  const h = size;
+  const seaSeed = new Float64Array(w2 * h);
+  const landSeed = new Float64Array(w2 * h);
+  const known = new Uint8Array(w2 * h);
+  const isSea = new Uint8Array(w2 * h);
+  for (let r2 = 0; r2 < h; r2++) {
+    const n2 = dom.n0 + dom.nSpan * r2 / (h - 1);
+    for (let c = 0; c < w2; c++) {
+      const e = dom.e0 + dom.eSpan * c / (w2 - 1);
+      const i = r2 * w2 + c;
+      let cell = null;
+      for (const { tier, mask } of fine) {
+        const idx = nedToCell(tier, n2, e);
+        if (idx) {
+          cell = mask.cells[idx[0] * mask.cols + idx[1]];
+          break;
+        }
+      }
+      if (cell === null) cell = CELL.SEA;
+      if (cell === CELL.MISSING) {
+        seaSeed[i] = 1;
+        landSeed[i] = 1;
+        continue;
+      }
+      known[i] = 1;
+      if (cell === CELL.SEA) {
+        isSea[i] = 1;
+        seaSeed[i] = 0;
+        landSeed[i] = 1;
+      } else {
+        seaSeed[i] = 1;
+        landSeed[i] = 0;
+      }
+    }
+  }
+  const toSea = squaredDistanceTransform(seaSeed, w2, h);
+  const toLand = squaredDistanceTransform(landSeed, w2, h);
+  const mpc = Math.min(dom.eSpan / (w2 - 1), dom.nSpan / (h - 1));
+  const dist = new Float32Array(w2 * h);
+  for (let i = 0; i < w2 * h; i++) {
+    dist[i] = isSea[i] === 1 ? Math.sqrt(toLand[i]) * mpc : -Math.sqrt(toSea[i]) * mpc;
+  }
+  return { size, n0: dom.n0, e0: dom.e0, nSpan: dom.nSpan, eSpan: dom.eSpan, dist, known, metersPerCell: mpc };
+}
+const COAST_RANGE_M = 1500;
+function encodeCoastField(f2) {
+  const out = new Uint8Array(f2.size * f2.size * 2);
+  for (let i = 0; i < f2.size * f2.size; i++) {
+    const t2 = Math.max(-1, Math.min(1, f2.dist[i] / COAST_RANGE_M)) * 0.5 + 0.5;
+    out[2 * i] = Math.round(t2 * 255);
+    out[2 * i + 1] = f2.known[i] === 1 ? 255 : 0;
+  }
+  return out;
+}
+const COAST_GLSL = (
+  /* glsl */
+  `
+uniform sampler2D uCoast;
+uniform vec2 uCoastMin;      // (e0, n0) [m]
+uniform vec2 uCoastInvSpan;  // 1/(eSpan, nSpan)
+// 0이면 거리장이 없다. 그때 해면은 scene/ocean.ts가 통째로 숨기므로 이 갈래는 보수적
+// 기본값일 뿐이다 — 지형을 모르면 해안선도 모른다.
+uniform float uHasCoast;
+
+/** 월드 (x, z) → (해안거리 [m], known). 도메인 밖은 열린 바다. */
+vec2 coastAt(vec2 worldXZ) {
+  if (uHasCoast < 0.5) return vec2(${COAST_RANGE_M}.0, 1.0);
+  // 렌더 좌표 x = e, z = −n (scene/axes.ts — 주석 안에서 백틱은 리터럴을 끊는다).
+  vec2 uv = (vec2(worldXZ.x, -worldXZ.y) - uCoastMin) * uCoastInvSpan;
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+    return vec2(${COAST_RANGE_M}.0, 1.0);
+  }
+  vec2 t = textureLod(uCoast, uv, 0.0).rg;
+  return vec2((t.r * 2.0 - 1.0) * ${COAST_RANGE_M}.0, t.g);
+}
+`
+);
+const OCEAN_VERT = (
+  /* glsl */
+  `
+${COAST_GLSL}
+uniform mat4 uGridInvViewProj;
+uniform vec3 uCamPos;
+uniform float uMaxDist;
+uniform float uTime;
+uniform vec2 uGridAngle;       // (세로 한 줄, 가로 한 칸)이 덮는 화각 [rad]
+uniform float uShoreFade;      // 이 거리 안쪽에서 파고가 0으로 잦아든다 [m]
+uniform vec4 uWave[${WAVE_COUNT}];    // dir.x, dir.z, 진폭 A, 파수 k
+uniform vec2 uWaveQ[${WAVE_COUNT}];   // 가파름 Q, 각주파수 ω
+
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying float vDist;
+varying vec2 vCoast;   // (해안거리 [m], known)
+
+/** NDC 한 점 → 해수면 위의 밑점. */
+vec3 seaBase(vec2 ndc) {
+  vec4 a = uGridInvViewProj * vec4(ndc, -1.0, 1.0);
+  vec4 b = uGridInvViewProj * vec4(ndc,  1.0, 1.0);
+  vec3 dir = normalize(b.xyz / b.w - a.xyz / a.w);
+  // 카메라가 해수면 아래면 광선이 뒤로 간다 — 물 밑은 이 모델의 밖이라 위로 붙여 둔다.
+  float h = max(uCamPos.y, 0.05);
+  // 아래로 향하는 광선만 평면과 만난다. 지평선 위쪽은 최대 거리로 밀어 고리로 뭉친다
+  // (그 줄의 삼각형은 넓이가 0이 된다 — 버려지는 것이 맞다).
+  float t = (dir.y < -1.0e-4) ? min(h / -dir.y, uMaxDist) : uMaxDist;
+  vec3 p = uCamPos + dir * t;
+  return vec3(p.x, 0.0, p.z);
+}
+
+void main() {
+  vec3 base = seaBase(position.xy);
+  vDist = length(base.xz - uCamPos.xz);
+
+  // **격자가 못 푸는 파장은 그리지 않는다 (나이퀴스트).**
+  //
+  // 투영 격자의 칸은 **길쭉하다.** 시선 방향으로는 높이 h에서 거리 d일 때 d²·θ_v/h로
+  // 벌어지고(스치는 각일수록 급격히), 가로로는 d·θ_h로 훨씬 촘촘하다. 처음에 시선
+  // 방향만 보고 판정했더니 30 m 상공·300 m 앞에서 칸이 16 m로 잡혀 **20 m 파까지 접혔고
+  // 바다가 유리판이 됐다.** 방향이 정해지지 않은 2차원 파의 표본 밀도를 정하는 것은
+  // 면적이므로 두 간격의 기하평균을 쓴다.
+  //
+  // 고정 거리로 죽이는 것과 갈리는 곳은 고도다: 궤도 시점(20 km 상공)에서는 200 m 파도
+  // 못 풀고, 해면 근처에서는 10 m 파가 살아야 한다. 이 식은 그 둘을 함께 맞춘다.
+  float camH = max(uCamPos.y, 1.0);
+  float along = vDist * vDist * uGridAngle.x / camH;
+  float across = vDist * uGridAngle.y;
+  float cell = max(sqrt(along * across), 0.05);
+
+  // **해안에서 파고를 재운다.** 표고가 정확히 0 m인 땅이 16.5 km² 있어서(간척지·저지대),
+  // 재우지 않으면 파마루가 지형을 뚫고 올라온다 — 실측으로 본 그것이다.
+  // 얕은 곳에서 파도가 부서져 잦아드는 것과 같은 방향이라 물리적으로도 어긋나지 않는다.
+  vCoast = coastAt(base.xz);
+  float shore = smoothstep(0.0, uShoreFade, vCoast.x);
+
+  vec3 disp = vec3(0.0);
+  vec3 n = vec3(0.0, 1.0, 0.0);
+  for (int i = 0; i < ${WAVE_COUNT}; i++) {
+    vec2 d = uWave[i].xy;
+    float k = uWave[i].w;
+    // 파장이 두 칸보다 짧아지면(k·cell > π) 진폭을 0으로 접는다. 잃은 기울기는
+    // 프래그먼트의 거칠기가 통계로 받는다 — 그래서 멀리서도 윤슬이 회색으로 안 죽는다.
+    float nyq = 1.0 - smoothstep(1.4, 3.14159265, k * cell);
+    float A = uWave[i].z * nyq * shore;
+    float Q = uWaveQ[i].x;
+    float w = uWaveQ[i].y;
+    float ph = k * dot(d, base.xz) - w * uTime;
+    float S = sin(ph);
+    float C = cos(ph);
+    disp.x += Q * A * d.x * C;
+    disp.z += Q * A * d.y * C;
+    disp.y += A * S;
+    // GPU Gems 1 §1의 해석 법선 — 변위와 같은 항에서 나오므로 따로 어긋나지 않는다.
+    n.x -= d.x * k * A * C;
+    n.z -= d.y * k * A * C;
+    n.y -= Q * k * A * S;
+  }
+
+  vWorld = base + disp;
+  vNormal = normalize(n);
+  // **투영만 패스별 행렬로 한다.** 위치는 uGridInvViewProj에서 나왔으므로 두 패스가 같다.
+  gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.0);
+}
+`
+);
+const OCEAN_FRAG = (
+  /* glsl */
+  `
+uniform vec3 uCamPos;
+uniform float uRoughness;      // √(콕스-먼크 σ²)
+uniform float uWaveHeight;     // 유의파고 [m] — 마루를 밝히는 데 쓴다
+uniform vec3 uDeepColor;
+uniform vec3 uScatterColor;
+uniform vec3 uShallowColor;
+uniform float uGlitterGain;
+uniform float uFoamAmount;
+uniform float uSpecAA;         // 법선 분산 → 거칠기 변환 계수
+uniform float uRipple;         // 잔물결 기울기 세기 — 풍속에서 나온다
+uniform vec2 uWindDir;         // 바람이 가는 방향 (렌더 x·z 평면 단위벡터)
+uniform float uTime;
+
+/** 그래디언트 노이즈 — 값과 **해석 도함수**를 함께 낸다 (iq 형식).
+ *
+ *  텍스처를 한 장도 안 쓴다는 규칙 때문에 해시로 만든다. 도함수를 수치미분이 아니라
+ *  해석으로 내는 것이 요점이다: 잔물결은 높이가 아니라 **기울기**로만 쓰이므로, 여기서
+ *  나온 도함수가 곧 법선이 된다. 수치미분이면 픽셀마다 두 번 더 뽑아야 하고 그 자체가
+ *  에일리어싱한다. */
+vec2 rippleHash(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+  return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
+}
+
+vec3 rippleNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+  vec2 ga = rippleHash(i);
+  vec2 gb = rippleHash(i + vec2(1.0, 0.0));
+  vec2 gc = rippleHash(i + vec2(0.0, 1.0));
+  vec2 gd = rippleHash(i + vec2(1.0, 1.0));
+  float va = dot(ga, f);
+  float vb = dot(gb, f - vec2(1.0, 0.0));
+  float vc = dot(gc, f - vec2(0.0, 1.0));
+  float vd = dot(gd, f - vec2(1.0, 1.0));
+  float k0 = va;
+  float k1 = vb - va;
+  float k2 = vc - va;
+  float k3 = va - vb - vc + vd;
+  float v = k0 + k1 * u.x + k2 * u.y + k3 * u.x * u.y;
+  vec2 d = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
+         + du * (vec2(k1, k2) + k3 * vec2(u.y, u.x));
+  return vec3(v, d);
+}
+
+/** 잔물결의 기울기 (∂y/∂x, ∂y/∂z).
+ *
+ *  격자가 못 푸는 4 m 아래 파다. 정점을 못 움직이므로 **법선만** 흔든다.
+ *
+ *  **사인 합에서 노이즈로 바꿨다.** 처음에는 방향이 다른 사인 넷을 더했는데, 방향을
+ *  아무리 흩고 위상을 휘어도 간섭이 규칙적인 짜임을 만들었다(실측 — 근거리 해면이
+ *  모눈종이처럼 보였다). 사인 합은 주기적이므로 피할 수 없는 성질이다.
+ *
+ *  **옥타브마다 픽셀 발자국으로 접는다.** px는 이 픽셀이 덮는 세계 거리다. 파장이 그보다
+ *  짧아지면 그리는 순간 에일리어싱이고, 거리로 한꺼번에 접으면 가까운 큰 잔물결까지
+ *  같이 죽는다. 접은 몫의 기울기 분산은 lostVar로 내보내 **거칠기가 이어받는다** —
+ *  에너지가 사라지지 않으므로 멀어져도 윤슬이 회색으로 죽지 않는다.
+ *
+ *  흐름은 바람 방향으로 밀어 준다. 심해 분산관계를 이 규모까지 끌고 가지는 않았다 —
+ *  1 m 이하는 표면장력이 지배해 식이 달라지고, 화면에서 구별되지 않는다. 표시용이다. */
+vec2 rippleSlope(vec2 p, vec2 windDir, float t, float px, out float lostVar) {
+  vec2 g = vec2(0.0);
+  lostVar = 0.0;
+  float L = 4.3;
+  // 기울기 진폭. 네 옥타브를 합친 RMS 기울기가 0.1 안팎이 되도록 잡았다 — 풍속 9 m/s의
+  // 콕스-먼크 전체 경사 RMS가 0.22이므로 절반쯤을 기하로 들고 나머지는 거칠기가 받는다.
+  float amp = 0.16;
+  for (int i = 0; i < 4; i++) {
+    // 파장이 픽셀의 1.3배 아래로 내려가면 다 접힌다.
+    float lod = 1.0 - smoothstep(0.55, 1.3, px / L);
+    vec2 q = (p - windDir * (t * (0.9 + 0.55 * float(i)))) / L;
+    vec2 d = rippleNoise(q).yz / L;
+    g += d * (amp * L * lod);
+    // 옥타브 하나의 기울기 분산 어림 — 접힌 몫만 거칠기로 넘긴다.
+    float dropped = amp * (1.0 - lod);
+    lostVar += 0.5 * dropped * dropped;
+    L *= 0.47;
+    amp *= 0.8;
+  }
+  return g;
+}
+
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying float vDist;
+varying vec2 vCoast;
+
+/** GGX 법선분포 — α는 콕스-먼크 경사분산의 제곱근이다(베크만 경사분산 = α²). */
+float ggxD(float NoH, float a2) {
+  float d = NoH * NoH * (a2 - 1.0) + 1.0;
+  return a2 / (3.14159265 * d * d);
+}
+
+/** 스미스 높이상관 가시성항 — 분모의 4·NoL·NoV까지 품는다. */
+float ggxV(float NoV, float NoL, float a2) {
+  float gv = NoL * sqrt(NoV * NoV * (1.0 - a2) + a2);
+  float gl = NoV * sqrt(NoL * NoL * (1.0 - a2) + a2);
+  return 0.5 / max(gv + gl, 1.0e-5);
+}
+
+void main() {
+  // **뭍 위에는 해면이 없다.** 자료가 없는 칸도 마찬가지다 — 지형 구멍으로 바다가 비치면
+  // 그건 구멍이 아니라 호수로 읽힌다(core/coastfield.ts). 문턱을 뭍 쪽으로 120 m 밀어
+  // 두는 이유는 거리장이 39 m/칸이라 해안선을 이 격자로 그릴 수 없기 때문이다.
+  if (vCoast.y < 0.5 || vCoast.x < -120.0) discard;
+
+  vec3 toEye = uCamPos - vWorld;
+  float dist = length(toEye);
+  vec3 V = toEye / max(dist, 1.0e-4);
+  // **기하 스페큘러 안티에일리어싱 — 게르스트너 법선에만 건다.**
+  //
+  // 한 픽셀 안에서 법선이 많이 흔들리면, 옳은 답은 그 흔들림 위에서 **평균 낸** 반사다.
+  // 법선 하나로 계산하면 픽셀마다 튀어 지글거리고, 밉맵처럼 법선을 뭉개기만 하면 이번엔
+  // 윤슬이 회색 죽으로 죽는다. 그래서 분산을 **거칠기로 옮긴다**(Kaplanyan/Tokuyoshi 계열).
+  //
+  // **잔물결을 더하기 전에 잰다.** 섞어서 재면 잔물결의 분산까지 "에일리어싱"으로 읽혀
+  // 해면이 통째로 눕는다 — 그렇게 만들어 보니 바다가 무늬 없는 판이 됐다. 잔물결은 이미
+  // 픽셀 발자국으로 대역제한돼 있어서 여기서 다시 벌줄 이유가 없다.
+  vec3 Ng = normalize(vNormal);
+  vec3 dNx = dFdx(Ng);
+  vec3 dNy = dFdy(Ng);
+  float varN = dot(dNx, dNx) + dot(dNy, dNy);
+  // 하늘 반사도 같은 이유로 튄다. 법선을 그만큼 눕혀 반사 방향을 안정시킨다.
+  vec3 N = normalize(mix(Ng, vec3(0.0, 1.0, 0.0), clamp(varN * uSpecAA * 0.6, 0.0, 0.6)));
+
+  // 잔물결 — 격자 아래 4 m 파를 법선으로만 되돌린다.
+  // px는 이 픽셀이 덮는 세계 거리. 스치는 각에서 커지므로 수평선 쪽이 저절로 접힌다.
+  float px = max(length(fwidth(vWorld.xz)), 1.0e-4);
+  float lostVar = 0.0;
+  vec2 g = rippleSlope(vWorld.xz, uWindDir, uTime, px, lostVar) * uRipple;
+  N = normalize(N + vec3(-g.x, 0.0, -g.y));
+
+  // 접힌 잔물결의 분산 + 기하 법선의 흔들림. 둘 다 거칠기가 이어받는다.
+  float widen = clamp(varN * uSpecAA + lostVar * uRipple * uRipple * 2.0, 0.0, 0.35);
+  // 스치는 각에서 먼 파도의 뒷면이 보일 수 있다. 뒤집힌 법선을 그대로 쓰면 검은 얼룩이
+  // 되므로 시선 쪽으로 눕힌다 — 표시용 완화다.
+  float NoV = dot(N, V);
+  if (NoV < 0.02) {
+    N = normalize(N + V * (0.02 - NoV) * 1.05);
+    NoV = max(dot(N, V), 0.02);
+  }
+
+  // 프레넬 — 물 n = 1.33 → F0 = ((1.33−1)/(1.33+1))² = 0.020
+  float F = 0.02 + 0.98 * pow(1.0 - NoV, 5.0);
+
+  // 하늘 반사. 지평 아래로 반사되면(파도 뒷면) 지평선 값을 읽는다 —
+  // 실제로 그 방향에 있는 것도 먼바다와 수평선 안개다.
+  vec3 R = reflect(-V, N);
+  R.y = max(R.y, 0.01);
+  vec3 sky = skyRadiance(R, uSunDirWorld, uSunIntensity, uHaze);
+
+  // 물속에서 되나오는 빛 — 마루에서 밝다(빛이 얇은 곳을 지난다).
+  float lift = clamp(vWorld.y / max(uWaveHeight, 0.05) * 0.5 + 0.5, 0.0, 1.0);
+  // 얕은 물은 바닥에서 되비쳐 밝고 푸르다. **수심 자료가 없으므로 해안 거리를 대신 쓴다** —
+  // 표시용 대리값이다(terrarium 타일에 수심이 없다: core/seamask.ts).
+  vec3 deep = mix(uShallowColor, uDeepColor, smoothstep(0.0, 900.0, vCoast.x));
+  vec3 body = deep + uScatterColor * lift * max(uSunDirWorld.y, 0.0);
+
+  vec3 color = mix(body, sky, F);
+
+  // 태양 정반사 — 윤슬. 폭은 uRoughness가 정하고, 그 값은 풍속에서 나온다.
+  vec3 sunCol = sunThroughAtmosphere(uSunDirWorld, uSunIntensity, uHaze);
+  vec3 L = uSunDirWorld;
+  float NoL = max(dot(N, L), 0.0);
+  if (NoL > 0.0) {
+    vec3 H = normalize(L + V);
+    float NoH = max(dot(N, H), 0.0);
+    float a2 = clamp(uRoughness * uRoughness + widen, 1.0e-5, 1.0);
+    color += ggxD(NoH, a2) * ggxV(NoV, NoL, a2) * F * NoL * sunCol * uGlitterGain;
+  }
+
+  // 포말 — 마루와 해안선. 흰 거품은 거의 램버시안이라 하늘빛을 고루 받는다.
+  float crest = smoothstep(0.62, 0.95, lift) * uFoamAmount;
+  float surf = smoothstep(90.0, 0.0, vCoast.x) * step(0.0, vCoast.x);
+  float foam = clamp(crest + surf * 0.8, 0.0, 1.0);
+  vec3 foamLit = (sunCol * max(uSunDirWorld.y, 0.0)
+                  + skyRadiance(vec3(0.0, 1.0, 0.0), uSunDirWorld, uSunIntensity, uHaze)) * 0.28;
+  color = mix(color, foamLit, foam);
+
+  // 대기 — 지형·하늘과 **같은 함수**다.
+  vec3 T, S;
+  atmosphere(-V, uSunDirWorld, uSunIntensity, uHaze, dist, T, S);
+  gl_FragColor = vec4(color * T + S, 1.0);
+}
+`
+);
+const OCEAN_DEFAULTS = {
+  // 1148×570 캔버스에서 칸 하나가 4 px 안팎. 112줄로 시작했다가 176으로 올렸다 —
+  // 성긴 격자에서는 나이퀴스트 판정이 20 m 파까지 접어 버려 바다가 유리처럼 매끈해졌다.
+  cols: 288,
+  rows: 176,
+  margin: 0.06,
+  maxDist: 49e3
+};
+function gridGeometry(o) {
+  const nx = o.cols + 1;
+  const ny = o.rows + 1;
+  const pos = new Float32Array(nx * ny * 3);
+  const lo = -1 - o.margin;
+  const span = 2 * (1 + o.margin);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const k2 = 3 * (j * nx + i);
+      pos[k2] = lo + span * i / o.cols;
+      pos[k2 + 1] = lo + span * j / o.rows;
+      pos[k2 + 2] = 0;
+    }
+  }
+  const idx = new Uint32Array(o.cols * o.rows * 6);
+  let t2 = 0;
+  for (let j = 0; j < o.rows; j++) {
+    for (let i = 0; i < o.cols; i++) {
+      const a = j * nx + i;
+      idx[t2++] = a;
+      idx[t2++] = a + 1;
+      idx[t2++] = a + nx;
+      idx[t2++] = a + 1;
+      idx[t2++] = a + nx + 1;
+      idx[t2++] = a + nx;
+    }
+  }
+  const g = new BufferGeometry();
+  g.setAttribute("position", new BufferAttribute(pos, 3));
+  g.setIndex(new BufferAttribute(idx, 1));
+  return g;
+}
+function createOcean(opts = {}) {
+  const o = { ...OCEAN_DEFAULTS, ...opts };
+  const geometry = gridGeometry(o);
+  const uWave = Array.from({ length: WAVE_COUNT }, () => new Vector4());
+  const uWaveQ = Array.from({ length: WAVE_COUNT }, () => new Vector2());
+  const material = new ShaderMaterial({
+    // **불투명하다** — 분할 프러스텀의 겹침 구간이 두 번 섞이지 않게(머리말).
+    transparent: false,
+    side: DoubleSide,
+    depthWrite: true,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
+    vertexShader: OCEAN_VERT,
+    fragmentShader: `${ATMOSPHERE_UNIFORM_DECL}
+${ATMOSPHERE_GLSL}
+${OCEAN_FRAG}`,
+    uniforms: {
+      ...atmosphereUniforms,
+      uGridInvViewProj: { value: new Matrix4() },
+      uCamPos: { value: new Vector3() },
+      uMaxDist: { value: o.maxDist },
+      uTime: { value: 0 },
+      // 격자 한 칸의 화각 (세로, 가로) [rad] — 나이퀴스트 판정용. `setView`가 채운다.
+      uGridAngle: { value: new Vector2(0.01, 0.01) },
+      // 법선 분산을 거칠기로 옮기는 계수. 눈으로 맞춘다 — 작으면 지글거리고,
+      // 크면 가까운 파도까지 흐려진다.
+      uSpecAA: { value: 150 },
+      // 잔물결 — 세기는 풍속에서, 거리는 화면에서 정한다.
+      uRipple: { value: 1 },
+      uWindDir: { value: new Vector2(1, 0) },
+      uWave: { value: uWave },
+      uWaveQ: { value: uWaveQ },
+      // 해안 거리장 — `setCoast`가 채운다. 없으면 `uHasCoast = 0`이라 전부 열린 바다다.
+      uCoast: { value: null },
+      uCoastMin: { value: new Vector2() },
+      uCoastInvSpan: { value: new Vector2(1, 1) },
+      uHasCoast: { value: 0 },
+      // 이 거리 안쪽에서 파고가 0으로 잦아든다. 얕은 물에서 파도가 부서지는 폭과
+      // 자리수가 맞고, 표고 0 m 땅 위로 마루가 솟는 것을 막는 몫도 한다.
+      uShoreFade: { value: 420 },
+      uRoughness: { value: 0.2 },
+      uWaveHeight: { value: 1 },
+      // 심해색과 상향 산란 — 선형값. 프레넬이 2%(수직)~100%(스침)로 하늘을 섞는다.
+      uDeepColor: { value: new Vector3(8e-4, 45e-4, 75e-4) },
+      // 얕은 물 — 수심 자료가 없어 해안 거리를 대신 쓴다(표시용 대리값).
+      uShallowColor: { value: new Vector3(0.01, 0.045, 0.048) },
+      uScatterColor: { value: new Vector3(4e-3, 0.03, 0.038) },
+      // 포말 양 — 풍속에서 나온다. `setSea`가 채운다.
+      uFoamAmount: { value: 0 },
+      // **표시 보정값이다.** 이 렌더러의 절대 밝기는 물리 단위가 아니다 — 하늘은
+      // 단일산란이 놓치는 다중산란 몫을 4π로 대신 받고, 태양 원반도 60이라는 고른 수다.
+      // 윤슬을 그 눈금 위에 세우는 계수이고, 눈으로 맞춘다.
+      uGlitterGain: { value: 4 }
+    }
+  });
+  const mesh = new Mesh(geometry, material);
+  mesh.frustumCulled = false;
+  mesh.visible = false;
+  let state = { windSpeed: 7, windDir: 0.6 };
+  let coast = null;
+  const apply = () => {
+    const waves = gerstnerSet(state.windSpeed, state.windDir);
+    for (let i = 0; i < WAVE_COUNT; i++) {
+      const w2 = waves[i];
+      uWave[i].set(w2.dir[0], w2.dir[1], w2.amplitude, w2.k);
+      uWaveQ[i].set(w2.q, w2.omega);
+    }
+    material.uniforms.uRoughness.value = Math.sqrt(coxMunkSlopeVariance(state.windSpeed));
+    material.uniforms.uWaveHeight.value = significantWaveHeight(state.windSpeed);
+    material.uniforms.uFoamAmount.value = Math.min(Math.max((state.windSpeed - 5.5) / 9, 0), 1);
+    material.uniforms.uRipple.value = Math.min(state.windSpeed / 5, 1.4);
+    material.uniforms.uWindDir.value.set(Math.cos(state.windDir), Math.sin(state.windDir));
+  };
+  apply();
+  return {
+    mesh,
+    setView(camPos, invViewProj, timeSec, fovYRad, aspect2) {
+      material.uniforms.uCamPos.value.copy(camPos);
+      material.uniforms.uGridInvViewProj.value.copy(invViewProj);
+      material.uniforms.uTime.value = timeSec;
+      material.uniforms.uGridAngle.value.set(fovYRad / o.rows, fovYRad * aspect2 / o.cols);
+    },
+    setSea(sea) {
+      state = sea;
+      apply();
+    },
+    setCoast(field) {
+      coast?.dispose();
+      coast = null;
+      material.uniforms.uCoast.value = null;
+      material.uniforms.uHasCoast.value = 0;
+      mesh.visible = field !== null;
+      if (field === null) return;
+      const tex = new DataTexture(
+        encodeCoastField(field),
+        field.size,
+        field.size,
+        RGFormat,
+        UnsignedByteType
+      );
+      tex.minFilter = LinearFilter;
+      tex.magFilter = LinearFilter;
+      tex.wrapS = ClampToEdgeWrapping;
+      tex.wrapT = ClampToEdgeWrapping;
+      tex.unpackAlignment = 1;
+      tex.needsUpdate = true;
+      coast = tex;
+      material.uniforms.uCoast.value = tex;
+      material.uniforms.uCoastMin.value.set(field.e0, field.n0);
+      material.uniforms.uCoastInvSpan.value.set(1 / field.eSpan, 1 / field.nSpan);
+      material.uniforms.uHasCoast.value = 1;
+    },
+    describe() {
+      return {
+        windSpeed: state.windSpeed,
+        waveHeight: significantWaveHeight(state.windSpeed),
+        slopeVariance: coxMunkSlopeVariance(state.windSpeed)
+      };
+    },
+    dispose() {
+      geometry.dispose();
+      material.dispose();
+      coast?.dispose();
+    }
+  };
+}
+const VERT = (
+  /* glsl */
+  `
+varying vec3 vDir;
+void main() {
+  vDir = normalize(position);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`
+);
+const FRAG = (
+  /* glsl */
+  `
+varying vec3 vDir;
+uniform vec3 uGround;
+${ATMOSPHERE_UNIFORM_DECL}
+${ATMOSPHERE_GLSL}
+void main() {
+  vec3 dir = normalize(vDir);
+  vec3 col = skyRadiance(dir, uSunDirWorld, uSunIntensity, uHaze);
+  // 지평 아래 — 카메라가 낮으면 구의 아래쪽이 보인다. 지면색으로 가라앉힌다(표시용).
+  col = mix(uGround, col, smoothstep(-0.06, 0.02, dir.y));
+  gl_FragColor = vec4(col, 1.0);
+}`
+);
+function createSky(radius) {
+  const material = new ShaderMaterial({
+    side: BackSide,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+    vertexShader: VERT,
+    fragmentShader: FRAG,
+    uniforms: {
+      // **공유 유니폼을 그대로 꽂는다** — 하늘과 에어리얼이 같은 태양·같은 뿌연 정도를 본다.
+      ...atmosphereUniforms,
+      uGround: { value: new Color(6120274) }
+    }
+  });
+  const geometry = new SphereGeometry(radius, 32, 20);
+  const mesh = new Mesh(geometry, material);
+  mesh.renderOrder = -1;
+  mesh.frustumCulled = false;
+  return {
+    mesh,
+    setGroundColor(hex) {
+      material.uniforms.uGround.value.set(hex);
+    },
+    dispose() {
+      geometry.dispose();
+      material.dispose();
+    }
+  };
+}
+const NEAR = 3;
+const NEAR_FAR = 2e3;
+const FAR_NEAR = 1500;
+const FAR = 5e4;
+const SKY_RADIUS = FAR * 0.9;
+const DEFAULT_POST = {
+  bloomStrength: 0.35,
+  bloomRadius: 0.4,
+  bloomThreshold: 2.5,
+  antialias: true
+};
+const RAMP = [
+  [0, [0.76, 0.72, 0.58]],
+  [60, [0.42, 0.53, 0.32]],
+  [300, [0.28, 0.4, 0.24]],
+  [700, [0.45, 0.42, 0.36]],
+  [1200, [0.72, 0.72, 0.72]]
+];
+function hypsometric(elev, out, i) {
+  let lo = RAMP[0];
+  let hi2 = RAMP[RAMP.length - 1];
+  for (let k2 = 0; k2 + 1 < RAMP.length; k2++) {
+    if (elev <= RAMP[k2 + 1][0]) {
+      lo = RAMP[k2];
+      hi2 = RAMP[k2 + 1];
+      break;
+    }
+  }
+  const span = hi2[0] - lo[0];
+  const t2 = span > 0 ? Math.min(Math.max((elev - lo[0]) / span, 0), 1) : 0;
+  for (let k2 = 0; k2 < 3; k2++) out[i + k2] = lo[1][k2] + (hi2[1][k2] - lo[1][k2]) * t2;
+}
+class SceneHost {
+  scene = new Scene();
+  camera = new PerspectiveCamera(55, 1, NEAR, FAR);
+  renderer;
+  sky;
+  ocean;
+  sun;
+  ambient;
+  groups = {
+    terrain: new Group(),
+    paths: new Group(),
+    models: new Group()
+  };
+  stats = { drawCalls: 0, triangles: 0, ms: 0 };
+  disposed = false;
+  post = null;
+  scenePass;
+  size = { w: 1, h: 1, dpr: 1 };
+  /** 프레임마다 다시 채운다 — 매번 새로 만들면 GC가 프레임을 갉는다. */
+  gridInvViewProj = new Matrix4();
+  constructor(canvas, context) {
+    this.renderer = new WebGLRenderer({ canvas, context });
+    this.renderer.outputColorSpace = SRGBColorSpace;
+    this.renderer.toneMapping = ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.95;
+    this.sun = new DirectionalLight(16777215, 1);
+    this.ambient = new HemisphereLight(12375792, 7040858, 0.9);
+    this.scene.add(this.sun, this.ambient);
+    this.sky = createSky(SKY_RADIUS);
+    this.scene.add(this.sky.mesh);
+    this.ocean = createOcean({ maxDist: FAR * 0.98 });
+    this.scene.add(this.ocean.mesh);
+    for (const g of Object.values(this.groups)) this.scene.add(g);
+    this.scenePass = new SplitFrustumPass(
+      this.scene,
+      this.camera,
+      { near: NEAR, nearFar: NEAR_FAR, farNear: FAR_NEAR, far: FAR },
+      [this.sky.mesh]
+    );
+    this.setPost(DEFAULT_POST);
+  }
+  /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
+  setPost(opts) {
+    this.post?.dispose();
+    this.post = createPost(this.renderer, this.scenePass, this.size.w, this.size.h, opts);
+    this.post.setSize(this.size.w, this.size.h, this.size.dpr);
+  }
+  resize(width, height, dpr) {
+    this.size = { w: width, h: height, dpr };
+    this.renderer.setPixelRatio(Math.min(dpr, 2));
+    this.renderer.setSize(width, height, false);
+    this.camera.aspect = width / Math.max(height, 1);
+    this.camera.updateProjectionMatrix();
+    this.post?.setSize(width, height, dpr);
+  }
+  setEnvironment({ sunAzEl, visibility, exposure, sea }) {
+    const [az, el2] = sunAzEl;
+    const w2 = toWorld(Math.cos(el2) * Math.cos(az), Math.cos(el2) * Math.sin(az), -Math.sin(el2));
+    this.sun.position.set(w2[0] * 1e3, w2[1] * 1e3, w2[2] * 1e3);
+    const intensity = 2.4;
+    const sunColor = setAtmosphere(w2, el2, intensity, visibility);
+    this.sun.color.setRGB(sunColor[0], sunColor[1], sunColor[2]);
+    this.sun.intensity = intensity;
+    this.ambient.intensity = 0.12 + 0.8 * Math.max(Math.sin(el2), 0);
+    this.ocean.setSea(sea);
+    this.renderer.toneMappingExposure = exposure;
+  }
+  /** 지형 — NED 기하를 그대로 받는다. 음영은 **진짜 법선에 조명이 닿아** 생긴다. */
+  setTerrain(patches) {
+    disposeTree(this.groups.terrain);
+    for (const p2 of patches) {
+      const n2 = p2.positions.length;
+      const pos = new Float32Array(n2);
+      const nrm = new Float32Array(n2);
+      const col = new Float32Array(n2);
+      for (let i = 0; i < n2; i += 3) {
+        const d = Number.isFinite(p2.positions[i + 2]) ? p2.positions[i + 2] : 0;
+        const w2 = toWorld(p2.positions[i], p2.positions[i + 1], d);
+        pos[i] = w2[0];
+        pos[i + 1] = w2[1];
+        pos[i + 2] = w2[2];
+        const nw = toWorld(p2.normals[i], p2.normals[i + 1], p2.normals[i + 2]);
+        nrm[i] = nw[0];
+        nrm[i + 1] = nw[1];
+        nrm[i + 2] = nw[2];
+        hypsometric(-d, col, i);
+      }
+      const geo = new BufferGeometry();
+      geo.setAttribute("position", new BufferAttribute(pos, 3));
+      geo.setAttribute("normal", new BufferAttribute(nrm, 3));
+      geo.setAttribute("color", new BufferAttribute(col, 3));
+      geo.setIndex(new BufferAttribute(p2.indices, 1));
+      const mat = new MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.95,
+        metalness: 0
+      });
+      applyAerialPerspective(mat);
+      this.groups.terrain.add(new Mesh(geo, mat));
+    }
+  }
+  /** 궤적 — `breaks`의 양 끝 중 하나라도 결측이면 그 구간을 그리지 않는다.
+   *
+   * **NaN도 직접 막는다.** `breaks`는 선택 인자라, 그걸 안 주고 NaN이 섞인 점을 넘기면
+   * 바운딩 스피어가 NaN이 되어 **선 전체가 프러스텀 컬링으로 사라진다** —
+   * `setTerrain`이 같은 이유로 방어하는 그 함정이고, 원인이 전혀 안 보인다. */
+  setPaths(lines) {
+    disposeTree(this.groups.paths);
+    for (const ln of lines) {
+      const count = ln.points.length / 3;
+      if (count < 2) continue;
+      const broken = new Set(ln.breaks ?? []);
+      const ok2 = (k2) => !broken.has(k2) && Number.isFinite(ln.points[3 * k2]) && Number.isFinite(ln.points[3 * k2 + 1]) && Number.isFinite(ln.points[3 * k2 + 2]);
+      const verts = [];
+      for (let i = 0; i + 1 < count; i++) {
+        if (!ok2(i) || !ok2(i + 1)) continue;
+        for (const k2 of [i, i + 1]) {
+          const w2 = toWorld(ln.points[3 * k2], ln.points[3 * k2 + 1], ln.points[3 * k2 + 2]);
+          verts.push(w2[0], w2[1], w2[2]);
+        }
+      }
+      if (verts.length === 0) continue;
+      const geo = new BufferGeometry();
+      geo.setAttribute("position", new BufferAttribute(new Float32Array(verts), 3));
+      const mat = new LineBasicMaterial({ color: ln.color });
+      applyAerialPerspective(mat);
+      this.groups.paths.add(new LineSegments(geo, mat));
+    }
+  }
+  /** 모델 그룹 — GLB 루트를 넣고 뺀다.
+   *
+   * **여기 넣은 것은 `dispose()`가 함께 파괴한다.** `models.ts`가 노드 손잡이를 들고
+   * 있을 뿐 소유권은 이 그룹에 있다는 뜻이다. 장래에 GLTF를 모듈 수준으로 캐시하면
+   * (탭을 오갈 때 다시 안 받으려고) 그 캐시가 내주는 지오메트리를 여기가 파괴하게 되어
+   * 다음 SceneHost가 빈 메시를 받는다 — 캐시를 넣는다면 이 그룹에는 `clone()`을 넣어야 한다. */
+  get modelGroup() {
+    return this.groups.models;
+  }
+  /** 해안 거리장 — 결과가 바뀔 때. `null`이면 해면이 전부 열린 바다가 된다. */
+  setCoast(field) {
+    this.ocean.setCoast(field);
+  }
+  /** 지금의 해상 상태 — 캡션이 수치를 말한다. */
+  seaState() {
+    return this.ocean.describe();
+  }
+  /** @param timeSec 해면 위상에 쓸 시각 [s]. **시뮬 시각**을 넣는다 — 벽시계로 돌리면
+   *  멈춘 화면에서도 파도가 움직여야 하고, 그러면 온디맨드 렌더 루프가 무너진다. */
+  render(cam, timeSec) {
+    if (this.disposed || this.post == null) return;
+    const t0 = performance.now();
+    const eye = toWorld(cam.eye[0], cam.eye[1], cam.eye[2]);
+    const target = toWorld(cam.target[0], cam.target[1], cam.target[2]);
+    const up = toWorld(cam.up[0], cam.up[1], cam.up[2]);
+    this.camera.position.set(eye[0], eye[1], eye[2]);
+    this.camera.up.set(up[0], up[1], up[2]).normalize();
+    this.camera.lookAt(new Vector3(target[0], target[1], target[2]));
+    this.camera.fov = cam.fovY * 180 / Math.PI;
+    this.sky.mesh.position.copy(this.camera.position);
+    this.camera.near = NEAR;
+    this.camera.far = FAR;
+    this.camera.updateProjectionMatrix();
+    this.camera.updateMatrixWorld(true);
+    this.ocean.setView(
+      this.camera.position,
+      this.gridInvViewProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse).invert(),
+      timeSec,
+      cam.fovY,
+      this.camera.aspect
+    );
+    this.renderer.info.autoReset = false;
+    this.renderer.info.reset();
+    try {
+      this.post.render();
+    } finally {
+      this.renderer.info.autoReset = true;
+    }
+    const scene = this.post.sceneStats();
+    this.stats = { ...scene, ms: performance.now() - t0 };
+  }
+  getStats() {
+    return this.stats;
+  }
+  describe() {
+    const caps = this.renderer.capabilities;
+    const gl2 = this.renderer.getContext();
+    return {
+      name: "three WebGL2",
+      maxTextureSize: caps.maxTextureSize,
+      maxAnisotropy: caps.getMaxAnisotropy(),
+      // 깊이 정책의 전제다 — 24비트를 가정하고 분할 구간을 골랐다(위 주석의 실측표).
+      depthBits: gl2.getParameter(gl2.DEPTH_BITS)
+    };
+  }
+  dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.post?.dispose();
+    this.post = null;
+    for (const g of Object.values(this.groups)) disposeTree(g);
+    this.sky.dispose();
+    this.ocean.dispose();
+    this.scene.clear();
+    this.renderer.dispose();
+    this.renderer.forceContextLoss();
+  }
+}
+function createSceneHost(canvas) {
+  if (typeof WebGL2RenderingContext === "undefined") {
+    return { host: null, reason: "이 브라우저가 WebGL2를 지원하지 않습니다." };
+  }
+  const context = canvas.getContext("webgl2", { antialias: true });
+  if (context == null) {
+    return {
+      host: null,
+      reason: "WebGL2 컨텍스트를 만들지 못했습니다 — 하드웨어 가속이 꺼져 있거나 GPU가 차단된 환경일 수 있습니다."
+    };
+  }
+  try {
+    return { host: new SceneHost(canvas, context), reason: null };
+  } catch (e) {
+    return { host: null, reason: `렌더러를 만들지 못했습니다 — ${e.message}` };
+  }
 }
 function seaQuad(mask) {
   const at = (r2, c) => mask.cells[r2 * mask.cols + c];
@@ -42827,8 +43492,17 @@ class SceneController {
       const built = buildTerrain(this.terrain);
       this.host.setTerrain(built.meshes);
       notes.push(...built.notes);
+      const tiers = this.terrain.tiers.map((tier) => ({ tier, mask: built.masks.get(tier.name) })).filter((x2) => x2.mask !== void 0);
+      const t0 = performance.now();
+      const field = buildCoastField(tiers);
+      this.host.setCoast(field);
+      notes.push(
+        `해면: 해안 거리장 ${field.size}² (${field.metersPerCell.toFixed(0)} m/칸, ${(performance.now() - t0).toFixed(0)} ms) — 파고는 해안에서 잦아듭니다.`
+      );
     } else {
       this.host.setTerrain([]);
+      this.host.setCoast(null);
+      notes.push("지형이 없어 해안선을 모릅니다 — 해면도 그리지 않습니다.");
       if (this.pack && agree.reason) notes.push(agree.reason);
     }
     const { points, breaks } = trackPoints(body.signals, this.n);
@@ -42880,6 +43554,14 @@ class SceneController {
       );
     }
     notes.push(ATMOSPHERE_NOTES.model, ATMOSPHERE_NOTES.visibility);
+    const sea = this.host.seaState();
+    notes.push(
+      `해상 상태: 풍속 ${sea.windSpeed.toFixed(1)} m/s · 유의파고 ${sea.waveHeight.toFixed(2)} m · 경사분산 σ² ${sea.slopeVariance.toFixed(4)} (윤슬 폭).`
+    );
+    notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
+    notes.push(
+      "해면은 지형 격자 밖(외곽 티어 30 km 밖)까지 이어 그립니다 — 그 부분은 실측 지리가 아니라 이어 붙인 평면입니다."
+    );
     this.cb.onNotes(notes);
   }
   // ---------------------------------------------------------------- 조작
@@ -42946,9 +43628,15 @@ class SceneController {
     this.host.resize(w2, h, dpr);
     this.dirty = true;
   }
-  setEnvironment(sunEl, sunAz, visibility, exposure) {
-    this.host.setEnvironment({ sunAzEl: [sunAz, sunEl], visibility, exposure });
+  setEnvironment(env) {
+    this.host.setEnvironment({
+      sunAzEl: [env.sunAz, env.sunEl],
+      visibility: env.visibility,
+      exposure: env.exposure,
+      sea: { windSpeed: env.windSpeed, windDir: env.windDir }
+    });
     this.dirty = true;
+    this.emitNotes();
   }
   // ---------------------------------------------------------------- 루프
   start() {
@@ -43007,7 +43695,9 @@ class SceneController {
     }
     const groundElev = this.groundElevationAt(pos);
     const cam = this.cameraFor(pos, q2, dtWall, groundElev);
-    this.host.render(cam);
+    const t2 = body.t[i];
+    if (typeof t2 === "number" && Number.isFinite(t2)) this.lastSeaTime = t2;
+    this.host.render(cam, this.lastSeaTime);
     this.emitReadout(i, groundElev);
     this.emitStats(performance.now());
     this.prevIdx = i;
@@ -43098,6 +43788,7 @@ class SceneController {
       depthBits: this.depthBits
     });
   }
+  lastSeaTime = 0;
   lastStatsAt = 0;
   depthBits;
   emitReadout(i, groundElev) {
@@ -43168,6 +43859,8 @@ function WorldTab({ deps }) {
   const [sunAz, setSunAz] = reactExports.useState(2);
   const [visibility, setVisibility] = reactExports.useState(25e3);
   const [exposure, setExposure] = reactExports.useState(0.95);
+  const [windSpeed, setWindSpeed] = reactExports.useState(7);
+  const [windDir, setWindDir] = reactExports.useState(0.6);
   reactExports.useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas == null) return;
@@ -43241,8 +43934,8 @@ function WorldTab({ deps }) {
     };
   }, [chosen, deps.store]);
   reactExports.useEffect(() => {
-    ctlRef.current?.setEnvironment(sunEl, sunAz, visibility, exposure);
-  }, [sunEl, sunAz, visibility, exposure]);
+    ctlRef.current?.setEnvironment({ sunEl, sunAz, visibility, exposure, windSpeed, windDir });
+  }, [sunEl, sunAz, visibility, exposure, windSpeed, windDir]);
   reactExports.useEffect(() => {
     if (!playing) return;
     let raf = 0;
@@ -43422,6 +44115,34 @@ function WorldTab({ deps }) {
             step: 0.05,
             value: exposure,
             onChange: (e) => setExposure(Number(e.target.value))
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: HINT, children: [
+        "풍속",
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "range",
+            min: 0,
+            max: 20,
+            step: 0.5,
+            value: windSpeed,
+            onChange: (e) => setWindSpeed(Number(e.target.value))
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: HINT, children: [
+        "풍향",
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "range",
+            min: 0,
+            max: 6.28,
+            step: 0.02,
+            value: windDir,
+            onChange: (e) => setWindDir(Number(e.target.value))
           }
         )
       ] })

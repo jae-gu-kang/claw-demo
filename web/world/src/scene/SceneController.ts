@@ -26,12 +26,14 @@ import { strideFor } from "../lib/replay.ts";
 import { ATMOSPHERE_NOTES } from "./atmosphere.ts";
 import { launcherCaptionNotes, launcherPose } from "../core/launcher.ts";
 import { SURFACE_NOTES, propellerRate, surfacePose } from "../core/surfaces.ts";
+import { WAVE_NOTES } from "../core/waves.ts";
 import type { Replay } from "../core/types.ts";
 import {
   fetchReplay, fetchTerrainPack, fetchWorldManifest, listSimResults, modelUrl,
   type SimResultRow, type WorldManifest,
 } from "../data/api.ts";
 import { SceneHost, createSceneHost } from "./SceneHost.ts";
+import { buildCoastField } from "../core/coastfield.ts";
 import { buildTerrain } from "./terrain.ts";
 import {
   LAUNCHER_NODES, VEHICLE_NODES, applySurfaces, hideVehicle, loadModel,
@@ -250,8 +252,24 @@ export class SceneController {
       const built = buildTerrain(this.terrain);
       this.host.setTerrain(built.meshes);
       notes.push(...built.notes);
+      // 해안 거리장은 **지형과 같은 마스크에서** 나온다. 따로 판정하면 해안선이 두 벌이
+      // 되고, 파고가 잦아드는 자리와 지형이 끝나는 자리가 어긋난다.
+      const tiers = this.terrain.tiers
+        .map((tier) => ({ tier, mask: built.masks.get(tier.name) }))
+        .filter((x): x is { tier: typeof x.tier; mask: NonNullable<typeof x.mask> } =>
+          x.mask !== undefined);
+      const t0 = performance.now();
+      const field = buildCoastField(tiers);
+      this.host.setCoast(field);
+      notes.push(
+        `해면: 해안 거리장 ${field.size}² (${field.metersPerCell.toFixed(0)} m/칸, `
+        + `${(performance.now() - t0).toFixed(0)} ms) — 파고는 해안에서 잦아듭니다.`,
+      );
     } else {
       this.host.setTerrain([]);
+      // 지형이 없으면 해안선도 모른다 — 해면을 **그리지 않는다**(`Ocean.setCoast`).
+      this.host.setCoast(null);
+      notes.push("지형이 없어 해안선을 모릅니다 — 해면도 그리지 않습니다.");
       if (this.pack && agree.reason) notes.push(agree.reason);
     }
 
@@ -308,6 +326,16 @@ export class SceneController {
       );
     }
     notes.push(ATMOSPHERE_NOTES.model, ATMOSPHERE_NOTES.visibility);
+    const sea = this.host.seaState();
+    notes.push(
+      `해상 상태: 풍속 ${sea.windSpeed.toFixed(1)} m/s · 유의파고 ${sea.waveHeight.toFixed(2)} m`
+      + ` · 경사분산 σ² ${sea.slopeVariance.toFixed(4)} (윤슬 폭).`,
+    );
+    notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
+    notes.push(
+      "해면은 지형 격자 밖(외곽 티어 30 km 밖)까지 이어 그립니다 — "
+      + "그 부분은 실측 지리가 아니라 이어 붙인 평면입니다.",
+    );
     this.cb.onNotes(notes);
   }
 
@@ -385,9 +413,19 @@ export class SceneController {
     this.dirty = true;
   }
 
-  setEnvironment(sunEl: number, sunAz: number, visibility: number, exposure: number): void {
-    this.host.setEnvironment({ sunAzEl: [sunAz, sunEl], visibility, exposure });
+  setEnvironment(env: {
+    sunEl: number; sunAz: number; visibility: number; exposure: number;
+    windSpeed: number; windDir: number;
+  }): void {
+    this.host.setEnvironment({
+      sunAzEl: [env.sunAz, env.sunEl],
+      visibility: env.visibility,
+      exposure: env.exposure,
+      sea: { windSpeed: env.windSpeed, windDir: env.windDir },
+    });
     this.dirty = true;
+    // 해상 상태가 캡션에 실린다 — 바꿀 때마다 다시 낸다.
+    this.emitNotes();
   }
 
   // ---------------------------------------------------------------- 루프
@@ -445,7 +483,12 @@ export class SceneController {
 
     const groundElev = this.groundElevationAt(pos);
     const cam = this.cameraFor(pos, q, dtWall, groundElev);
-    this.host.render(cam);
+    // **해면 위상은 시뮬 시각으로 돈다.** 벽시계로 돌리면 멈춘 화면에서도 파도가 움직여야
+    // 하고, 그러면 `dirty` 기반 온디맨드 루프가 매 프레임 다시 그려야 한다.
+    // 시각을 모르는 표본이면 마지막 값을 쓴다 — 0으로 되돌리면 바다가 튄다.
+    const t = body.t[i];
+    if (typeof t === "number" && Number.isFinite(t)) this.lastSeaTime = t;
+    this.host.render(cam, this.lastSeaTime);
     this.emitReadout(i, groundElev);
     this.emitStats(performance.now());
     this.prevIdx = i;
@@ -541,6 +584,7 @@ export class SceneController {
     });
   }
 
+  private lastSeaTime = 0;
   private lastStatsAt = 0;
   private readonly depthBits: number;
 

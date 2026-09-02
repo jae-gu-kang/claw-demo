@@ -18,7 +18,9 @@
 
 import { Vector3, type Material } from "three";
 
-import { ATMOSPHERE_GLSL, hazeForVisibility, sunColorRgb } from "../shaders/atmosphere.ts";
+import {
+  ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL, hazeForVisibility, sunColorRgb,
+} from "../shaders/atmosphere.ts";
 
 /** **한 벌만 만든다.** 재질마다 이 객체를 그대로 꽂으므로 `.value`를 바꾸면 전부 따라온다. */
 const shared = {
@@ -66,9 +68,7 @@ const VERT_BODY = `
 
 const FRAG_DECL = `
 varying vec3 vAerialView;
-uniform vec3 uSunDirWorld;
-uniform float uSunIntensity;
-uniform float uHaze;
+${ATMOSPHERE_UNIFORM_DECL}
 ${ATMOSPHERE_GLSL}
 `;
 

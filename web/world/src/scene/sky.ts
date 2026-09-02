@@ -19,7 +19,7 @@
 
 import { BackSide, Color, Mesh, ShaderMaterial, SphereGeometry } from "three";
 
-import { ATMOSPHERE_GLSL } from "../shaders/atmosphere.ts";
+import { ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL } from "../shaders/atmosphere.ts";
 import { atmosphereUniforms } from "./atmosphere.ts";
 
 const VERT = /* glsl */`
@@ -31,10 +31,8 @@ void main() {
 
 const FRAG = /* glsl */`
 varying vec3 vDir;
-uniform vec3 uSunDirWorld;
-uniform float uSunIntensity;
-uniform float uHaze;
 uniform vec3 uGround;
+${ATMOSPHERE_UNIFORM_DECL}
 ${ATMOSPHERE_GLSL}
 void main() {
   vec3 dir = normalize(vDir);

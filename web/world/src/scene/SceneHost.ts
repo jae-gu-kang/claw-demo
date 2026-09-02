@@ -17,7 +17,7 @@
 
 import {
   ACESFilmicToneMapping, BufferAttribute, BufferGeometry, Color, DirectionalLight,
-  Group, HemisphereLight, LineBasicMaterial, LineSegments, Mesh,
+  Group, HemisphereLight, LineBasicMaterial, LineSegments, Matrix4, Mesh,
   MeshStandardMaterial, PerspectiveCamera, Scene, SRGBColorSpace, Vector3,
   WebGLRenderer,
 } from "three";
@@ -26,6 +26,8 @@ import { toWorld } from "./axes.ts";
 import { SplitFrustumPass, createPost, type Post, type PostOptions } from "../post/composer.ts";
 import { disposeTree } from "./dispose.ts";
 import { applyAerialPerspective, setAtmosphere } from "./atmosphere.ts";
+import type { CoastField } from "../core/coastfield.ts";
+import { createOcean, type Ocean, type SeaState } from "./ocean.ts";
 import { createSky, type Sky } from "./sky.ts";
 
 /** 깊이 정책 — **분할 프러스텀**. 로그 깊이버퍼를 쓰지 않는다.
@@ -101,6 +103,7 @@ export interface Environment {
   /** 태양 방위·고각 [rad] */ sunAzEl: readonly [number, number];
   /** 가시거리 [m] */ visibility: number;
   /** 톤매핑 노출 */ exposure: number;
+  /** 해상 상태 — **표시 값**이다(`core/waves.ts` 머리말). */ sea: SeaState;
 }
 
 /** NED 기하 한 덩어리 — `lib/terrainpack.js buildTerrainMesh`가 내는 모양. */
@@ -149,6 +152,7 @@ export class SceneHost {
 
   private readonly renderer: WebGLRenderer;
   private readonly sky: Sky;
+  private readonly ocean: Ocean;
   private readonly sun: DirectionalLight;
   private readonly ambient: HemisphereLight;
   private readonly groups = {
@@ -160,6 +164,8 @@ export class SceneHost {
   private post: Post | null = null;
   private readonly scenePass: SplitFrustumPass;
   private size = { w: 1, h: 1, dpr: 1 };
+  /** 프레임마다 다시 채운다 — 매번 새로 만들면 GC가 프레임을 갉는다. */
+  private readonly gridInvViewProj = new Matrix4();
 
   constructor(canvas: HTMLCanvasElement, context: WebGL2RenderingContext) {
     // 컨텍스트를 밖에서 만들어 넘긴다 — 같은 캔버스의 두 번째 getContext는 기존 것을
@@ -181,6 +187,10 @@ export class SceneHost {
 
     this.sky = createSky(SKY_RADIUS);
     this.scene.add(this.sky.mesh);
+    // 해면은 **두 패스에 다 그린다** — 발밑부터 수평선까지 걸쳐 있어 어느 한쪽에만
+    // 두면 그 구간에서 사라진다. 불투명이라 겹침 구간에서 두 번 그려도 결과가 같다.
+    this.ocean = createOcean({ maxDist: FAR * 0.98 });
+    this.scene.add(this.ocean.mesh);
     for (const g of Object.values(this.groups)) this.scene.add(g);
 
     this.scenePass = new SplitFrustumPass(
@@ -210,7 +220,7 @@ export class SceneHost {
     this.post?.setSize(width, height, dpr);
   }
 
-  setEnvironment({ sunAzEl, visibility, exposure }: Environment): void {
+  setEnvironment({ sunAzEl, visibility, exposure, sea }: Environment): void {
     const [az, el] = sunAzEl;
     // 태양 방향을 NED로 만든 뒤 같은 toWorld를 태운다 — 하늘·직사광·산란이 한 값에서 나온다.
     const w = toWorld(Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), -Math.sin(el));
@@ -229,6 +239,7 @@ export class SceneHost {
     // 환경광은 하늘의 대역이다 — 해가 지면 같이 죽어야 한다. 상수로 두면 노을에
     // 지형만 평평한 회색으로 남는다. 표시용 근사이고, 하늘 적분이 아니라 고도의 함수다.
     this.ambient.intensity = 0.12 + 0.8 * Math.max(Math.sin(el), 0);
+    this.ocean.setSea(sea);
     this.renderer.toneMappingExposure = exposure;
   }
 
@@ -306,7 +317,19 @@ export class SceneHost {
     return this.groups.models;
   }
 
-  render(cam: CameraPose): void {
+  /** 해안 거리장 — 결과가 바뀔 때. `null`이면 해면이 전부 열린 바다가 된다. */
+  setCoast(field: CoastField | null): void {
+    this.ocean.setCoast(field);
+  }
+
+  /** 지금의 해상 상태 — 캡션이 수치를 말한다. */
+  seaState(): { windSpeed: number; waveHeight: number; slopeVariance: number } {
+    return this.ocean.describe();
+  }
+
+  /** @param timeSec 해면 위상에 쓸 시각 [s]. **시뮬 시각**을 넣는다 — 벽시계로 돌리면
+   *  멈춘 화면에서도 파도가 움직여야 하고, 그러면 온디맨드 렌더 루프가 무너진다. */
+  render(cam: CameraPose, timeSec: number): void {
     if (this.disposed || this.post == null) return;
     const t0 = performance.now();
     const eye = toWorld(cam.eye[0]!, cam.eye[1]!, cam.eye[2]!);
@@ -319,6 +342,23 @@ export class SceneHost {
     // 하늘은 카메라를 따라다닌다 — 반지름이 FAR의 0.9배라 움직이지 않으면 잘린다.
     // (near/far와 투영행렬은 `SplitFrustumPass`가 패스마다 세운다.)
     this.sky.mesh.position.copy(this.camera.position);
+
+    // **투영 격자는 전 구간 프러스텀에서 뽑는다.** 패스별 near/far로 뽑으면 두 패스가
+    // 서로 다른 해면 지오메트리를 만들어 겹침 구간에 이음매가 생긴다(`shaders/ocean.ts`).
+    this.camera.near = NEAR;
+    this.camera.far = FAR;
+    this.camera.updateProjectionMatrix();
+    // `lookAt`은 쿼터니언만 고친다 — 월드행렬을 손수 갱신해야 역행렬이 이 프레임 것이 된다.
+    this.camera.updateMatrixWorld(true);
+    this.ocean.setView(
+      this.camera.position,
+      this.gridInvViewProj
+        .multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse)
+        .invert(),
+      timeSec,
+      cam.fovY,
+      this.camera.aspect,
+    );
 
     // **한 프레임에 draw call이 두 벌**이라 자동 리셋이면 근거리 것만 남는다.
     this.renderer.info.autoReset = false;
@@ -358,6 +398,7 @@ export class SceneHost {
     this.post = null;
     for (const g of Object.values(this.groups)) disposeTree(g);
     this.sky.dispose();
+    this.ocean.dispose();
     this.scene.clear();
     this.renderer.dispose();
     // **컨텍스트를 실제로 놓는다.** dispose()만으로는 브라우저가 컨텍스트를 회수하지
