@@ -45,7 +45,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const [readout, setReadout] = useState<Readout | null>(null);
   const [results, setResults] = useState<SimResultRow[]>([]);
   const [chosen, setChosen] = useState<string | null>(null);
-  const [mode, setMode] = useState<CamMode>("chase");
+  const [mode, setMode] = useState<CamMode>("orbit");
   const [playing, setPlaying] = useState(false);
   const [playable, setPlayable] = useState(false);
   const [shownId, setShownId] = useState<string | null>(null);
@@ -53,9 +53,11 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const [speed, setSpeed] = useState(5);
   const [cursor, setCursor] = useState(0);
   const [count, setCount] = useState(0);
-  const [sunEl, setSunEl] = useState(0.6);
-  const [sunAz, setSunAz] = useState(2.0);
-  const [visibility, setVisibility] = useState(25000);
+  // 기본값이 곧 첫인상이다: 태양은 서남서(바다 쪽 — 궤도 시점에서 윤슬이 보인다),
+  // 시정 45 km(25 km는 첫 화면이 우유에 잠겼다).
+  const [sunEl, setSunEl] = useState(0.72);
+  const [sunAz, setSunAz] = useState(3.6);
+  const [visibility, setVisibility] = useState(45000);
   const [exposure, setExposure] = useState(0.95);
   // 해상 상태 — **표시 값**이다. 7 m/s는 남해안의 흔한 바람이고 유의파고 1.0 m가 나온다.
   const [windSpeed, setWindSpeed] = useState(7);

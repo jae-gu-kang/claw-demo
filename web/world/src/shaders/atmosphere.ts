@@ -141,6 +141,12 @@ void atmosphereOD(float c, vec3 tauR, vec3 tauM, vec3 sunCol,
   inscatter = ratio * (sunCol * 4.0 * 3.14159265) * (1.0 - transmittance);
 }
 
+// 원경(유한 경로) in-scatter 절하 — **화면이 뿌옇다는 지적으로 넣었다.**
+// atmosphereOD의 4π는 하늘(무한 기둥)을 한낮에 맞춘 표시 이득인데, 같은 이득을 유한
+// 경로에 그대로 쓰니 10 km 안쪽 지형까지 우유에 잠겼다. 소산(T)은 물리대로 두고
+// 더해지는 빛만 줄인다 — 먼 것이 하늘로 녹아드는 방향은 유지되고 문턱만 멀어진다.
+const float AERIAL_S_GAIN = 0.55;
+
 /** 거리 s를 지난 뒤의 투과율과 in-scattering — 밀도가 일정한 구간용(원경).
  *  haze는 미 산란 배수(시정 슬라이더). dir·sunDir은 정규화된 월드 방향. */
 void atmosphere(vec3 dir, vec3 sunDir, float sunIntensity, float haze, float s,
@@ -148,6 +154,7 @@ void atmosphere(vec3 dir, vec3 sunDir, float sunIntensity, float haze, float s,
   atmosphereOD(dot(dir, sunDir), BETA_R * s, vec3(BETA_M * haze * s),
                sunThroughAtmosphere(sunDir, sunIntensity, haze),
                transmittance, inscatter);
+  inscatter *= AERIAL_S_GAIN;
 }
 
 /** 하늘 한 방향의 복사휘도 — 대기를 끝까지 본 극한. */

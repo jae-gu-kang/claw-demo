@@ -37621,6 +37621,12 @@ void atmosphereOD(float c, vec3 tauR, vec3 tauM, vec3 sunCol,
   inscatter = ratio * (sunCol * 4.0 * 3.14159265) * (1.0 - transmittance);
 }
 
+// 원경(유한 경로) in-scatter 절하 — **화면이 뿌옇다는 지적으로 넣었다.**
+// atmosphereOD의 4π는 하늘(무한 기둥)을 한낮에 맞춘 표시 이득인데, 같은 이득을 유한
+// 경로에 그대로 쓰니 10 km 안쪽 지형까지 우유에 잠겼다. 소산(T)은 물리대로 두고
+// 더해지는 빛만 줄인다 — 먼 것이 하늘로 녹아드는 방향은 유지되고 문턱만 멀어진다.
+const float AERIAL_S_GAIN = 0.55;
+
 /** 거리 s를 지난 뒤의 투과율과 in-scattering — 밀도가 일정한 구간용(원경).
  *  haze는 미 산란 배수(시정 슬라이더). dir·sunDir은 정규화된 월드 방향. */
 void atmosphere(vec3 dir, vec3 sunDir, float sunIntensity, float haze, float s,
@@ -37628,6 +37634,7 @@ void atmosphere(vec3 dir, vec3 sunDir, float sunIntensity, float haze, float s,
   atmosphereOD(dot(dir, sunDir), BETA_R * s, vec3(BETA_M * haze * s),
                sunThroughAtmosphere(sunDir, sunIntensity, haze),
                transmittance, inscatter);
+  inscatter *= AERIAL_S_GAIN;
 }
 
 /** 하늘 한 방향의 복사휘도 — 대기를 끝까지 본 극한. */
@@ -38165,11 +38172,13 @@ const WEAR_BY_MATERIAL = {
   // --- 기체 (전장 3.5 m, 동체 z −1.75…+1.77, 기수 −z) --------------------------
   // 패널: 동체 링 프레임(z 0.42 m 간격)과 날개 리브/스파(x 0.30 m). 그을음은 추진부 —
   // 프로펠러가 z=+1.84이고 엔진이 그 앞이라 +0.9부터 뒤로 짙어진다.
+  // 패널라인은 **뺐다** — 삼면 투영 격자가 곡면 동체에서 이불 누비무늬로 읽혔다
+  // (사용자 지적: "격자무늬는 없는 게 낫다"). 오염도 근접에서 얼룩덜룩해 줄였다.
   Airframe: {
-    panel: [0.3, 0, 0.42],
-    panelDepth: 0.7,
-    edge: 0.5,
-    dirt: 0.35,
+    panel: [0, 0, 0],
+    panelDepth: 0,
+    edge: 0.3,
+    dirt: 0.18,
     soot: [0.9, 1.77],
     mud: NONE,
     seed: 3
@@ -38178,8 +38187,8 @@ const WEAR_BY_MATERIAL = {
   ControlSurface: {
     panel: [0, 0, 0],
     panelDepth: 0,
-    edge: 0.6,
-    dirt: 0.3,
+    edge: 0.35,
+    dirt: 0.18,
     soot: NONE,
     mud: NONE,
     seed: 7
@@ -40999,7 +41008,10 @@ function hypsometric(elev, out, i) {
   }
   const span = hi2[0] - lo[0];
   const t2 = span > 0 ? Math.min(Math.max((elev - lo[0]) / span, 0), 1) : 0;
-  for (let k2 = 0; k2 < 3; k2++) out[i + k2] = lo[1][k2] + (hi2[1][k2] - lo[1][k2]) * t2;
+  for (let k2 = 0; k2 < 3; k2++) {
+    const srgb = lo[1][k2] + (hi2[1][k2] - lo[1][k2]) * t2;
+    out[i + k2] = Math.pow(srgb, 2.2);
+  }
 }
 class SceneHost {
   scene = new Scene();
@@ -41188,7 +41200,7 @@ class SceneHost {
     for (const m2 of marks) {
       const w2 = toWorld(m2.ne[0], m2.ne[1], m2.ne[2]);
       if (m2.kind === "start") {
-        const geo2 = new SphereGeometry(3, 12, 10);
+        const geo2 = new SphereGeometry(0.8, 12, 10);
         const mesh = new Mesh(geo2, new MeshStandardMaterial({ color: 3458905, roughness: 0.7 }));
         mesh.position.set(w2[0], w2[1], w2[2]);
         this.groups.marks.add(mesh);
@@ -44154,12 +44166,7 @@ function showLauncher(model, siteNed, pose2) {
   placeLauncher(model, siteNed);
   return applyLauncher(model, pose2);
 }
-const MODEL_SCALE = {
-  chase: 8,
-  orbit: 8,
-  onboard: 1,
-  attitude: 3
-};
+const MODEL_SCALE = 1;
 const STATS_INTERVAL_MS = 500;
 const num = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
 class SceneController {
@@ -44189,9 +44196,15 @@ class SceneController {
   prevIdx = null;
   chaseEye = null;
   lastFrameMs = performance.now();
-  mode = "chase";
-  orbit = { az: 2.4, el: 0.45 };
+  // 첫 시점은 **자유 궤도** — 추적으로 시작하면 첫 화면이 마른 땅과 발사관뿐이라
+  // 바다·해안이 있는 줄도 모른다(사용자 지적). 카메라를 동쪽(az≈1.4)에 두어 서쪽
+  // 바다를 바라보고, 기본 태양(서남서)의 윤슬이 그 방향에 선다.
+  mode = "orbit";
+  orbit = { az: 1.15, el: 0.25 };
   dist = 400;
+  /** 추적·자세 시점의 근접 거리 [m] — 궤도의 `dist`(장면 규모)와 분리한다.
+   *  하나로 쓰면 궤도에서 한 번 벌린 값이 추적으로 넘어와 기체가 점이 된다. */
+  closeDist = 16;
   playing = false;
   speed = 5;
   fromIdx = 0;
@@ -44396,14 +44409,11 @@ class SceneController {
   }
   /** 결과 캡션 + **지금 시점에 달린** 캡션.
    *
-   * 배율은 시점마다 다른데(추적 8배·온보드 1배) 결과를 읽을 때 한 번만 말하면, 시점을
-   * 바꾼 뒤 캡션이 옛 배율을 말한다. `views/world.js`가 같은 자리에서 겪고
+   * 시점에 달린 캡션(물러섬 사유 등)은 시점이 바뀔 때 다시 만들어야 한다 —
+   * 결과를 읽을 때 한 번만 만들면 옛 문장이 남는다. `views/world.js`가 같은 자리에서 겪고
    * `captionStale` 플래그로 고쳐 둔 것을 여기서는 시점이 바뀔 때 다시 만드는 것으로 푼다. */
   emitNotes() {
     const notes = [...this.resultNotes];
-    if (this.vehicle) {
-      notes.push(`기체를 ${MODEL_SCALE[this.mode]}배로 확대해 그립니다 (실제 스팬 2.5 m).`);
-    }
     if (this.fellBack !== null) {
       const why = this.fellBack === "att" ? "자세가 없어" : "위치가 없어";
       notes.push(
@@ -44421,7 +44431,7 @@ class SceneController {
     const scale = this.host.getRenderScale();
     if (scale < 1) {
       notes.push(
-        `성능: 프레임이 늦어 렌더 배율을 ${scale}로 내렸습니다 — 빨라지면 되돌립니다.`
+        `성능: 프레임이 늦어 렌더 해상도 배율을 ${scale}로 내렸습니다 — 빨라지면 되돌립니다.`
       );
     }
     if (this.style === "cinematic") {
@@ -44461,7 +44471,12 @@ class SceneController {
     this.dirty = true;
   }
   zoom(deltaY) {
-    this.dist = Math.min(Math.max(this.dist * (deltaY > 0 ? 1.1 : 1 / 1.1), 8), 2e4);
+    const k2 = deltaY > 0 ? 1.1 : 1 / 1.1;
+    if (this.mode === "chase" || this.mode === "attitude") {
+      this.closeDist = Math.min(Math.max(this.closeDist * k2, 5), 200);
+    } else {
+      this.dist = Math.min(Math.max(this.dist * k2, 8), 2e4);
+    }
     this.dirty = true;
   }
   setPlaying(playing) {
@@ -44559,7 +44574,7 @@ class SceneController {
     const q2 = attUse ? eulerToQuat(attUse[0], attUse[1], attUse[2]) : null;
     const axes = sample && att && q2 ? bodyAxesNed(q2) : null;
     if (this.vehicle) {
-      if (sample && axes) setVehiclePose(this.vehicle, sample, axes, MODEL_SCALE[this.mode]);
+      if (sample && axes) setVehiclePose(this.vehicle, sample, axes, MODEL_SCALE);
       else hideVehicle(this.vehicle);
       applySurfaces(this.vehicle, surfacePose(
         body.signals.de?.[i],
@@ -44626,7 +44641,7 @@ class SceneController {
     }
     if (mode === "onboard" && q2) return onboardCamera({ pos, q: q2 });
     if (mode === "attitude") {
-      return attitudeCamera({ pos, az: this.orbit.az, el: this.orbit.el, dist: Math.min(this.dist, 40), groundD });
+      return attitudeCamera({ pos, az: this.orbit.az, el: this.orbit.el, dist: this.closeDist * 0.6, groundD });
     }
     if (shouldResetSmoothing(this.prevIdx, this.idx)) this.chaseEye = null;
     const cam = chaseCamera({
@@ -44636,8 +44651,8 @@ class SceneController {
       prevEye: this.chaseEye,
       dtWall,
       groundD,
-      dist: Math.min(this.dist, 400),
-      height: Math.min(this.dist, 400) * 0.28
+      dist: this.closeDist,
+      height: this.closeDist * 0.3
     });
     this.chaseEye = cam.eye;
     return cam;
@@ -44650,7 +44665,7 @@ class SceneController {
     this.fellBack = v2;
     this.emitNotes();
   }
-  /** 품질 자동 강등 — 렌더 배율 사다리 1 → 0.85 → 0.7 → 0.55 (계획 §리스크 7).
+  /** 품질 자동 강등 — 렌더 해상도 배율 사다리 1 → 0.85 → 0.7 → 0.55 (계획 §리스크 7).
    *
    * 신호는 **재생 중의 프레임 간격**이다. CPU 제출 ms는 GPU가 막힌 것을 못 보고
    * (바다·구름·대기가 다 픽셀 셰이더라 병목은 GPU 쪽이다), 재생이 아닐 때는 온디맨드
@@ -44768,7 +44783,7 @@ function WorldTab({ deps }) {
   const [readout, setReadout] = reactExports.useState(null);
   const [results, setResults] = reactExports.useState([]);
   const [chosen, setChosen] = reactExports.useState(null);
-  const [mode, setMode] = reactExports.useState("chase");
+  const [mode, setMode] = reactExports.useState("orbit");
   const [playing, setPlaying] = reactExports.useState(false);
   const [playable, setPlayable] = reactExports.useState(false);
   const [shownId, setShownId] = reactExports.useState(null);
@@ -44776,9 +44791,9 @@ function WorldTab({ deps }) {
   const [speed, setSpeed] = reactExports.useState(5);
   const [cursor, setCursor] = reactExports.useState(0);
   const [count, setCount] = reactExports.useState(0);
-  const [sunEl, setSunEl] = reactExports.useState(0.6);
-  const [sunAz, setSunAz] = reactExports.useState(2);
-  const [visibility, setVisibility] = reactExports.useState(25e3);
+  const [sunEl, setSunEl] = reactExports.useState(0.72);
+  const [sunAz, setSunAz] = reactExports.useState(3.6);
+  const [visibility, setVisibility] = reactExports.useState(45e3);
   const [exposure, setExposure] = reactExports.useState(0.95);
   const [windSpeed, setWindSpeed] = reactExports.useState(7);
   const [windDir, setWindDir] = reactExports.useState(0.6);

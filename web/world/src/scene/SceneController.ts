@@ -41,11 +41,14 @@ import {
   setVehiclePose, showLauncher, spinPropeller, type LoadedModel,
 } from "./models.ts";
 
-/** 기체는 스팬 2.5 m다 — 300 m 밖에서 한 픽셀이라 시점마다 확대해 그린다.
- *  **표시 선택이고 캡션이 밝힌다.** */
-const MODEL_SCALE: Record<CamMode, number> = {
-  chase: 8, orbit: 8, onboard: 1, attitude: 3,
-};
+/** 기체는 **실물 크기(1배)로만** 그린다.
+ *
+ * 처음에는 시점마다 8배·3배로 키웠다(스팬 2.5 m가 300 m 밖에서 한 픽셀이라). 걷어낸
+ * 이유는 발사관이다 — 발사관은 1배인데 기체만 8배면 캐니스터에 들어갈 수 없는 크기로
+ * 보여, 배율을 캡션이 밝혀도 화면 자체가 비례를 거짓말한다(사용자 지적). 대신 추적·자세
+ * 카메라가 실물에 맞게 **가까이** 붙는다(`closeDist`). 궤도 시점에서 기체가 점이 되는
+ * 것은 사실이 그런 것이다 — 휠로 다가가면 된다. */
+const MODEL_SCALE = 1;
 
 export interface Readout {
   t: number | null;
@@ -73,7 +76,7 @@ export interface ControllerCallbacks {
   onNotes(notes: string[]): void;
   /** **시점의 정본은 컨트롤러다.** 끌어서 궤도로 넘어가는 조건이 여기 있으므로,
    *  UI가 스스로 짐작하면 자세 관측에서 끌었을 때 버튼만 "자유 궤도"로 바뀌고
-   *  카메라는 그대로인 상태가 된다(그리고 배율 캡션이 버튼과 어긋난다). */
+   *  카메라는 그대로인 상태가 된다(그리고 시점 캡션이 버튼과 어긋난다). */
   onMode(mode: CamMode): void;
   onReadout(r: Readout): void;
   onResults(rows: SimResultRow[], chosen: string | null): void;
@@ -119,9 +122,15 @@ export class SceneController {
   private chaseEye: Vec3 | null = null;
   private lastFrameMs = performance.now();
 
-  private mode: CamMode = "chase";
-  private orbit = { az: 2.4, el: 0.45 };
+  // 첫 시점은 **자유 궤도** — 추적으로 시작하면 첫 화면이 마른 땅과 발사관뿐이라
+  // 바다·해안이 있는 줄도 모른다(사용자 지적). 카메라를 동쪽(az≈1.4)에 두어 서쪽
+  // 바다를 바라보고, 기본 태양(서남서)의 윤슬이 그 방향에 선다.
+  private mode: CamMode = "orbit";
+  private orbit = { az: 1.15, el: 0.25 };
   private dist = 400;
+  /** 추적·자세 시점의 근접 거리 [m] — 궤도의 `dist`(장면 규모)와 분리한다.
+   *  하나로 쓰면 궤도에서 한 번 벌린 값이 추적으로 넘어와 기체가 점이 된다. */
+  private closeDist = 16;
   private playing = false;
   private speed = 5;
   private fromIdx = 0;
@@ -327,7 +336,7 @@ export class SceneController {
     }
     this.host.setMarkers(marks);
 
-    // --- 기체 형상 --- (확대 배율은 시점마다 다르므로 여기서 말하지 않는다 — emitNotes)
+    // --- 기체 형상 --- (실물 1배 — MODEL_SCALE 주석 참조)
     if (this.vehicle == null) {
       notes.push("기체 모델이 없어 궤적만 그립니다.");
     } else {
@@ -351,14 +360,11 @@ export class SceneController {
 
   /** 결과 캡션 + **지금 시점에 달린** 캡션.
    *
-   * 배율은 시점마다 다른데(추적 8배·온보드 1배) 결과를 읽을 때 한 번만 말하면, 시점을
-   * 바꾼 뒤 캡션이 옛 배율을 말한다. `views/world.js`가 같은 자리에서 겪고
+   * 시점에 달린 캡션(물러섬 사유 등)은 시점이 바뀔 때 다시 만들어야 한다 —
+   * 결과를 읽을 때 한 번만 만들면 옛 문장이 남는다. `views/world.js`가 같은 자리에서 겪고
    * `captionStale` 플래그로 고쳐 둔 것을 여기서는 시점이 바뀔 때 다시 만드는 것으로 푼다. */
   private emitNotes(): void {
     const notes = [...this.resultNotes];
-    if (this.vehicle) {
-      notes.push(`기체를 ${MODEL_SCALE[this.mode]}배로 확대해 그립니다 (실제 스팬 2.5 m).`);
-    }
     if (this.fellBack !== null) {
       const why = this.fellBack === "att" ? "자세가 없어" : "위치가 없어";
       notes.push(
@@ -378,7 +384,7 @@ export class SceneController {
     const scale = this.host.getRenderScale();
     if (scale < 1) {
       notes.push(
-        `성능: 프레임이 늦어 렌더 배율을 ${scale}로 내렸습니다 — 빨라지면 되돌립니다.`,
+        `성능: 프레임이 늦어 렌더 해상도 배율을 ${scale}로 내렸습니다 — 빨라지면 되돌립니다.`,
       );
     }
     if (this.style === "cinematic") {
@@ -420,14 +426,20 @@ export class SceneController {
     if (this.mode !== "orbit" && this.mode !== "attitude") {
       this.mode = "orbit";
       this.cb.onMode("orbit");
-      this.emitNotes(); // 배율이 바뀐다 — 캡션이 옛 값을 말하지 않게
+      this.emitNotes(); // 물러섬 사유가 캡션에 실린다 — 옛 문장이 남지 않게
     }
     this.orbit = rotateBy(this.orbit, dxPx, dyPx);
     this.dirty = true;
   }
 
   zoom(deltaY: number): void {
-    this.dist = Math.min(Math.max(this.dist * (deltaY > 0 ? 1.1 : 1 / 1.1), 8), 20000);
+    // 휠은 지금 시점의 거리를 움직인다 — 추적·자세는 근접 거리, 궤도는 장면 거리.
+    const k = deltaY > 0 ? 1.1 : 1 / 1.1;
+    if (this.mode === "chase" || this.mode === "attitude") {
+      this.closeDist = Math.min(Math.max(this.closeDist * k, 5), 200);
+    } else {
+      this.dist = Math.min(Math.max(this.dist * k, 8), 20000);
+    }
     this.dirty = true;
   }
 
@@ -536,7 +548,7 @@ export class SceneController {
 
     // 기체 — 이 프레임의 위치나 자세를 모르면 **그리지 않는다**(유지한 값으로 그리지 않는다).
     if (this.vehicle) {
-      if (sample && axes) setVehiclePose(this.vehicle, sample, axes, MODEL_SCALE[this.mode]);
+      if (sample && axes) setVehiclePose(this.vehicle, sample, axes, MODEL_SCALE);
       else hideVehicle(this.vehicle);
       // 한계는 결과가 들고 오는 것을 그대로 쓴다 — 없으면 자르지 않는다(§ surfaces.ts).
       applySurfaces(this.vehicle, surfacePose(
@@ -612,12 +624,13 @@ export class SceneController {
     }
     if (mode === "onboard" && q) return onboardCamera({ pos, q });
     if (mode === "attitude") {
-      return attitudeCamera({ pos, az: this.orbit.az, el: this.orbit.el, dist: Math.min(this.dist, 40), groundD });
+      return attitudeCamera({ pos, az: this.orbit.az, el: this.orbit.el, dist: this.closeDist * 0.6, groundD });
     }
     if (shouldResetSmoothing(this.prevIdx, this.idx)) this.chaseEye = null;
+    // 실물 1배라 카메라가 붙는다 — 스팬 2.5 m 기체에 16 m 뒤·5 m 위가 고전적 추적 구도다.
     const cam = chaseCamera({
       pos, vel, q, prevEye: this.chaseEye, dtWall, groundD,
-      dist: Math.min(this.dist, 400), height: Math.min(this.dist, 400) * 0.28,
+      dist: this.closeDist, height: this.closeDist * 0.3,
     });
     this.chaseEye = cam.eye;
     return cam;
@@ -633,7 +646,7 @@ export class SceneController {
     this.emitNotes();
   }
 
-  /** 품질 자동 강등 — 렌더 배율 사다리 1 → 0.85 → 0.7 → 0.55 (계획 §리스크 7).
+  /** 품질 자동 강등 — 렌더 해상도 배율 사다리 1 → 0.85 → 0.7 → 0.55 (계획 §리스크 7).
    *
    * 신호는 **재생 중의 프레임 간격**이다. CPU 제출 ms는 GPU가 막힌 것을 못 보고
    * (바다·구름·대기가 다 픽셀 셰이더라 병목은 GPU 쪽이다), 재생이 아닐 때는 온디맨드

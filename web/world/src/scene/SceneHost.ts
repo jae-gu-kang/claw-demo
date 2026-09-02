@@ -155,7 +155,12 @@ export interface SceneStats {
   ms: number;
 }
 
-/** 고도 램프 — 표시용이다(영상지도 아님). 옛 어댑터에서 그대로 옮겨 왔다. */
+/** 고도 램프 — 표시용이다(영상지도 아님). 값은 **sRGB 감각**으로 적는다(사람이 고르는
+ * 색은 그 공간이다) — 아래 hypsometric이 선형으로 바꿔 넣는다.
+ *
+ * 이 변환이 빠져 있었다: 정점색은 셰이더에서 선형으로 읽히는데 0.76을 그대로 주면
+ * 화면(sRGB)에서는 0.89로 떠서, 지형 전체가 씻긴 듯 뽀얗게 보였다(사용자 지적 "뿌옇다"의
+ * 큰 몫). 옛 어댑터 시절부터 있던 오류라 "그대로 옮겨" 왔었다. */
 const RAMP: [number, [number, number, number]][] = [
   [0, [0.76, 0.72, 0.58]], [60, [0.42, 0.53, 0.32]], [300, [0.28, 0.40, 0.24]],
   [700, [0.45, 0.42, 0.36]], [1200, [0.72, 0.72, 0.72]],
@@ -169,7 +174,10 @@ function hypsometric(elev: number, out: Float32Array, i: number): void {
   }
   const span = hi[0] - lo[0];
   const t = span > 0 ? Math.min(Math.max((elev - lo[0]) / span, 0), 1) : 0;
-  for (let k = 0; k < 3; k++) out[i + k] = lo[1][k]! + (hi[1][k]! - lo[1][k]!) * t;
+  for (let k = 0; k < 3; k++) {
+    const srgb = lo[1][k]! + (hi[1][k]! - lo[1][k]!) * t;
+    out[i + k] = Math.pow(srgb, 2.2); // sRGB → 선형 (위 주석)
+  }
 }
 
 export class SceneHost {
@@ -401,10 +409,10 @@ export class SceneHost {
     for (const m of marks) {
       const w = toWorld(m.ne[0]!, m.ne[1]!, m.ne[2]!);
       if (m.kind === "start") {
-        // 옛 화면은 반지름 14 m였다 — 기체를 12배로 그려 카메라가 멀었기 때문이다.
-        // 지금 자세 관측은 3배 배율이라 카메라가 지점 몇 m 안까지 오고, 14 m 구는
-        // 화면을 통째로 삼킨다(실측). 표지는 눈에 띄면 되지 가릴 이유가 없다.
-        const geo = new SphereGeometry(3, 12, 10);
+        // 옛 화면은 반지름 14 m였다(12배 기체 + 먼 카메라 시절). 실물 1배 + 16 m 추적
+        // 카메라에서는 3 m 구조차 전경을 삼켰다(실측 두 번째) — 기체(스팬 2.5 m)와
+        // 같은 자리에 서는 표지이니 기체보다 작아야 맞다.
+        const geo = new SphereGeometry(0.8, 12, 10);
         const mesh = new Mesh(geo, new MeshStandardMaterial({ color: 0x34c759, roughness: 0.7 }));
         mesh.position.set(w[0], w[1], w[2]);
         this.groups.marks.add(mesh);

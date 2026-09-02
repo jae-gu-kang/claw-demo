@@ -49,13 +49,15 @@ export const WEAR_BY_MATERIAL: Readonly<Record<string, WearConfig>> = {
   // --- 기체 (전장 3.5 m, 동체 z −1.75…+1.77, 기수 −z) --------------------------
   // 패널: 동체 링 프레임(z 0.42 m 간격)과 날개 리브/스파(x 0.30 m). 그을음은 추진부 —
   // 프로펠러가 z=+1.84이고 엔진이 그 앞이라 +0.9부터 뒤로 짙어진다.
+  // 패널라인은 **뺐다** — 삼면 투영 격자가 곡면 동체에서 이불 누비무늬로 읽혔다
+  // (사용자 지적: "격자무늬는 없는 게 낫다"). 오염도 근접에서 얼룩덜룩해 줄였다.
   Airframe: {
-    panel: [0.30, 0, 0.42], panelDepth: 0.7, edge: 0.5, dirt: 0.35,
+    panel: [0, 0, 0], panelDepth: 0, edge: 0.3, dirt: 0.18,
     soot: [0.9, 1.77], mud: NONE, seed: 3,
   },
   // 타면은 별 부품이라 패널 없이 힌지 쪽 마모와 때만.
   ControlSurface: {
-    panel: [0, 0, 0], panelDepth: 0, edge: 0.6, dirt: 0.3,
+    panel: [0, 0, 0], panelDepth: 0, edge: 0.35, dirt: 0.18,
     soot: NONE, mud: NONE, seed: 7,
   },
   // --- 발사관 (지상 장비 — 이야기의 대부분이 진흙과 긁힘) -------------------------
