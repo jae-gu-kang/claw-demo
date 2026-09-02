@@ -33,3 +33,4 @@ web/world/node_modules/
 # **gzip이 한 톨도 안 줄인다**(2.35 MB 실측). 런타임이 쓰는 것은 `.glb` 뿐이다.
 models/*/*.blend
 models/*/preview.png
+*.blend1
