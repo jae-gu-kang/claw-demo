@@ -38313,15 +38313,16 @@ function finite(v2) {
 }
 const LAUNCHER_GEOMETRY = {
   /** 턴테이블 회전축 높이 (트레일러 기준) — GLB `Turntable.translation.y` */
-  turntableY: 0.92,
+  turntableY: 0.8,
   /** 크래들 피벗 높이 (턴테이블 기준) — GLB `Cradle.translation.y` */
-  cradleY: 0.86,
-  /** 캐니스터 포구의 크래들 로컬 Z — GLB `Box_Tubes` bbox 앞끝 (기준축은 −Z) */
-  muzzleZ: -0.94,
-  /** 캐니스터 관 뒤끝 — GLB `Box_Tubes` bbox 뒤끝 */
-  tubeAftZ: 0.78,
+  cradleY: 0.65,
+  /** 캐니스터 포구의 크래들 로컬 Z — GLB `Box_Tubes` bbox 앞끝 (기준축은 −Z).
+   *  트러니언이 관 뒤끝 근처라 포구가 피벗에서 멀다(재개정 내력 참조). */
+  muzzleZ: -3.48,
+  /** 캐니스터 관 뒤끝 — GLB `Box_Tubes` bbox 뒤끝 (피벗 살짝 뒤) */
+  tubeAftZ: 0.13,
   /** 상부 레일 앞끝 — GLB `Box_Rails` bbox */
-  railTipZ: -1.55,
+  railTipZ: -4.7,
   /** 크래들 가동 범위 — `generate_launcher.py`의 `PROPS`(317~319행)와 모델 README 표.
    *
    * **`LIMIT_ROTATION` 컨스트레인트가 아니다.** 그쪽은 크래들 −2~52°, 턴테이블 ±110°로

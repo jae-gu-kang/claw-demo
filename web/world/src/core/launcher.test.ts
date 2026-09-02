@@ -97,17 +97,19 @@ describe("발사관 고각", () => {
 });
 
 describe("포구 높이와 캡션", () => {
-  it("15°에서 포구가 약 4.0 m — 실측 피벗 × 루트 스케일 2.0에서 나온다", () => {
+  it("15°에서 포구가 약 4.7 m — 실측 피벗 × 루트 스케일 2.0에서 나온다", () => {
+    // 트러니언이 관 뒤끝 근처라 |muzzleZ|가 3.48로 길다 — 포구가 피벗에서 멀어
+    // 같은 고각에서도 높이 나간다(2026-09-02 재개정 내력).
     const p = launcherPose(LAUNCH)!;
-    near(p.muzzleHeight, (0.92 + 0.86 + 0.94 * Math.sin(15 * D2R)) * 2.0, "포구 높이", 1e-9);
-    assert.ok(p.muzzleHeight > 3.9 && p.muzzleHeight < 4.1);
+    near(p.muzzleHeight, (0.80 + 0.65 + 3.48 * Math.sin(15 * D2R)) * 2.0, "포구 높이", 1e-9);
+    assert.ok(p.muzzleHeight > 4.6 && p.muzzleHeight < 4.8);
   });
 
-  it("발사 원점 1.2 m와의 2.8 m 차이를 캡션이 말한다 (2.0배 확대 후)", () => {
+  it("발사 원점 1.2 m와의 3.5 m 차이를 캡션이 말한다 (재개정 기하)", () => {
     const notes = launcherCaptionNotes(LAUNCH, launcherPose(LAUNCH)!);
     const line = notes.find((s) => s.includes("높이가"));
     assert.ok(line, "높이 불일치를 숨기면 화면이 거짓말한다");
-    assert.ok(line!.includes("2.8 m"), line);
+    assert.ok(line!.includes("3.5 m"), line);
   });
 
   it("원점 높이가 포구에 맞춰지면 그 줄이 사라진다", () => {
@@ -116,22 +118,28 @@ describe("포구 높이와 캡션", () => {
     assert.ok(!launcherCaptionNotes(fixed, launcherPose(fixed)!).some((s) => s.includes("높이가")));
   });
 
-  it("10 m 가속 구간과 발사관 길이가 다르다는 것도 말한다 — **수치까지** 못박는다", () => {
-    // 처음에는 `|railTipZ − muzzleZ| + |muzzleZ|` 로 1.6 m를 지어내 화면에 찍고 있었다.
-    // 그건 크래들 피벗에서 레일 끝까지일 뿐 발사관 길이가 아니다. 문구만 확인하는
-    // 단정은 그 오류를 통과시켰으므로 여기서는 **숫자를 본다.**
+  it("구조 전장 9.7 m ≈ 가속 구간 10 m — 데모에선 '별개' 캡션이 **안 뜬다**", () => {
+    // 재개정으로 길이가 비슷해졌다. 비슷한데도 뜨면 캡션이 없는 차이를 지어내는 것.
     const line = launcherCaptionNotes(LAUNCH, launcherPose(LAUNCH)!)
       .find((s) => s.includes("가속 모델"));
+    assert.equal(line, undefined, `길이가 비슷한데 별개라고 말한다: ${line}`);
+  });
+
+  it("가속 구간이 구조보다 훨씬 길면(1.5배 초과) 수치까지 말한다", () => {
+    // 처음에는 `|railTipZ − muzzleZ| + |muzzleZ|` 로 길이를 지어내 화면에 찍고 있었다.
+    // 문구만 확인하는 단정은 그 오류를 통과시켰으므로 여기서는 **숫자를 본다.**
+    const l = { ...LAUNCH, length: 30 };
+    const line = launcherCaptionNotes(l, launcherPose(l)!).find((s) => s.includes("가속 모델"));
     assert.ok(line, "이 줄이 있어야 한다");
-    assert.ok(line!.includes("3.4 m"), `캐니스터 길이가 틀렸다: ${line}`);
-    assert.ok(line!.includes("4.7 m"), `상부 레일까지의 길이가 틀렸다: ${line}`);
+    assert.ok(line!.includes("7.2 m"), `캐니스터 길이가 틀렸다: ${line}`);
+    assert.ok(line!.includes("9.7 m"), `상부 레일까지의 길이가 틀렸다: ${line}`);
   });
 
   it("실측 상수가 GLB bbox × 루트 스케일과 맞는다", () => {
-    // Box_Tubes bbox z ∈ [−0.94, 0.78] → 1.72 × 2.0 = 3.44 m,
-    // Box_Rails 앞끝 −1.55 → 전장 2.33 × 2.0 = 4.66 m (루트 스케일은 생성 스크립트가 정본)
-    near(CANISTER_LENGTH, 3.44, "캐니스터", 1e-9);
-    near(LAUNCHER_SPAN, 4.66, "구조 전장", 1e-9);
+    // Box_Tubes bbox z ∈ [−3.48, 0.13] → 3.61 × 2.0 = 7.22 m,
+    // Box_Rails 앞끝 −4.70 → 전장 4.83 × 2.0 = 9.66 m (루트 스케일은 생성 스크립트가 정본)
+    near(CANISTER_LENGTH, 7.22, "캐니스터", 1e-6);
+    near(LAUNCHER_SPAN, 9.66, "구조 전장", 1e-6);
   });
 });
 

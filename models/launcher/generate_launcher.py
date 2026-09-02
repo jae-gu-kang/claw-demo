@@ -195,46 +195,54 @@ MAT_DARK = make_mat("DarkDetail", (0.055, 0.058, 0.062), rough=0.45)       # 타
 MAT_METAL = make_mat("Metal", (0.340, 0.350, 0.330), rough=0.40, metal=0.7)  # 잭·레일
 MAT_TUBE = make_mat("CanisterInner", (0.022, 0.024, 0.028), rough=0.72)    # 발사관 내부(암부)
 
-# 수직 배치 기준값
-BED = 0.92          # 트레일러 상판 높이
-TRUN = 1.78         # 트러니언(고각축) 높이
-TT_PIV = (0.0, -0.10, BED)      # 턴테이블(방위각축) 피벗
-CR_PIV = (0.0, -0.10, TRUN)     # 크래들(고각축) 피벗
-# 잭 = 4모서리 아웃리거. 받침 footprint(x=±1.28)를 바퀴 트랙(±1.12)보다 넓게 잡아 전복 방지.
-JACKS = {"FL": (1.28, 1.70), "FR": (-1.28, 1.70),
-         "RL": (1.28, -2.35), "RR": (-1.28, -2.35)}   # (x, y) 모서리
+# 수직 배치 기준값 — 2026-09-02 개정: 높이는 낮추고 수평은 2배 (사용자 지정)
+# 기체(전장 3.65 m·스팬 2.5 m)가 캐니스터 밖으로 삐져나와, 관 길이·폭을 지면 기준
+# 2배로 늘리고 서 있는 높이는 오히려 낮췄다(축 3.56→2.90 m — 시뮬 발사 원점과의
+# 어긋남도 그만큼 준다). root.scale 2.0은 그대로이므로 로컬 값 = 지면 미터의 절반.
+BED = 0.80          # 트레일러 상판 높이 (0.92에서 낮춤)
+TRUN = 1.45         # 트러니언(고각축) 높이 (1.78에서 낮춤 — 지면 기준 축 2.9 m)
+# 트러니언을 관 뒤끝 근처로 — 관이 7.6 m라 피벗이 중앙이면 고각 15°에서 이미 뒤끝이
+# 상판을 뚫는다(선회 반경 4 m). 뒤끝 0.3 뒤에 두면 48°에서도 상판 위 0.04가 남는다.
+TT_PIV = (0.0, -0.90, BED)      # 턴테이블(방위각축) 피벗 — 트러니언 기둥이 디스크 위에 서게 뒤로
+CR_PIV = (0.0, -1.80, TRUN)     # 크래들(고각축) 피벗
+# 잭 = 4모서리 아웃리거. 받침 footprint(x=±2.56)를 바퀴 트랙(±2.24)보다 넓게 잡아 전복 방지.
+JACKS = {"FL": (2.56, 3.40), "FR": (-2.56, 3.40),
+         "RL": (2.56, -4.70), "RR": (-2.56, -4.70)}   # (x, y) 모서리
 JACK_TOP = 1.00       # 슬리브 상단(레그가 항상 이 안에 물려 있음)
 JACK_TRAVEL = 0.46    # 전개 시 하강량 (레그 상단은 슬리브 안에 남음 → 항상 연결)
 
 # ---------------------------------------------------------------- 트레일러 (정적)
 bm = bmesh.new()
-for sx in (0.92, -0.92):                                   # 세로 대들보
-    beam(bm, (sx, -2.55, BED - 0.15), (sx, 1.85, BED - 0.15), 0.16, 0.30)
-for y in (-2.40, -1.20, 0.0, 1.20, 1.75):                  # 가로 부재
-    beam(bm, (-0.92, y, BED - 0.15), (0.92, y, BED - 0.15), 0.14, 0.20)
-add_box(bm, (-1.02, -2.45, BED - 0.02), (1.02, 1.82, BED + 0.04))   # 상판
-for sx in (1.12, -1.12):                                   # 펜더(흙받이)
-    add_box(bm, (sx - 0.18, -0.72, BED + 0.04), (sx + 0.18, 0.34, BED + 0.16))
+for sx in (1.84, -1.84):                                   # 세로 대들보
+    beam(bm, (sx, -5.10, BED - 0.16), (sx, 3.70, BED - 0.16), 0.20, 0.34)
+for y in (-4.80, -3.30, -1.80, -0.30, 1.20, 2.40, 3.55):   # 가로 부재
+    beam(bm, (-1.84, y, BED - 0.16), (1.84, y, BED - 0.16), 0.16, 0.22)
+add_box(bm, (-2.04, -4.90, BED - 0.02), (2.04, 3.64, BED + 0.04))   # 상판
+for sx in (2.24, -2.24):                                   # 펜더(흙받이) — 2축을 덮는다
+    add_box(bm, (sx - 0.22, -1.85, BED + 0.04), (sx + 0.22, 0.85, BED + 0.12))  # 상단 0.92 < 선회하는 캐니스터 바닥 0.93
 for (jx, jy) in JACKS.values():                            # 아웃리거 암 + 잭 슬리브(레그가 물리는 통)
-    sx = 0.90 if jx > 0 else -0.90
+    sx = 1.80 if jx > 0 else -1.80
     beam(bm, (sx, jy, BED - 0.06), (jx, jy, BED - 0.06), 0.12, 0.16)          # 프레임→모서리 수평 암
     beam(bm, (jx, jy, 0.55), (sx, jy, BED - 0.06), 0.06, 0.09)                # 대각 보강재
     add_box(bm, (jx - 0.09, jy - 0.09, 0.40), (jx + 0.09, jy + 0.09, JACK_TOP))  # 슬리브(통)
 # 드로바(A-프레임) + 커플러 + 러넷
-for sx in (0.52, -0.52):
-    beam(bm, (sx, -2.45, BED - 0.18), (0.0, -3.80, 0.60), 0.12, 0.16)
-add_box(bm, (-0.12, -3.92, 0.52), (0.12, -3.72, 0.70))
-torus(bm, (0.0, -3.99, 0.61), 0.11, 0.035)
+for sx in (1.00, -1.00):
+    beam(bm, (sx, -4.85, BED - 0.18), (0.0, -7.40, 0.60), 0.12, 0.16)
+add_box(bm, (-0.14, -7.55, 0.50), (0.14, -7.30, 0.72))
+torus(bm, (0.0, -7.64, 0.61), 0.12, 0.038)
 trailer = finish("Trailer", bm, MAT_FRAME, col_model)
 
 # ---------------------------------------------------------------- 바퀴 (분리, 정적)
+# 확대는 배치로 푼다 — 트랙·축거를 2배로 벌리고 축을 하나 더 단다(2축 4륜).
+# 바퀴 자체를 수평만 2배 하면 타원이 되므로 반지름은 원형 그대로 둔다.
 wheels = {}
-for sx, tag in ((1.12, "L"), (-1.12, "R")):
-    center = (sx, -0.20, 0.46)
+for sx, tag in ((2.24, "L"), (-2.24, "R")):
     bm = bmesh.new()
-    cylinder(bm, (sx - 0.15, -0.20, 0.46), (sx + 0.15, -0.20, 0.46), 0.46, 0.46, 'x', n=28)  # 타이어
-    cylinder(bm, (sx - 0.16, -0.20, 0.46), (sx + 0.16, -0.20, 0.46), 0.17, 0.17, 'x', n=16)  # 허브
-    wheels[tag] = finish("Wheel_" + tag, bm, MAT_DARK, col_model, pivot=center, smooth=True)
+    for ay in (-1.30, 0.30):                                # 앞·뒤 축
+        cylinder(bm, (sx - 0.16, ay, 0.40), (sx + 0.16, ay, 0.40), 0.40, 0.40, 'x', n=28)  # 타이어
+        cylinder(bm, (sx - 0.17, ay, 0.40), (sx + 0.17, ay, 0.40), 0.15, 0.15, 'x', n=16)  # 허브
+    wheels[tag] = finish("Wheel_" + tag, bm, MAT_DARK, col_model,
+                         pivot=(sx, -0.50, 0.40), smooth=True)
 
 # ---------------------------------------------------------------- 지지대 잭 (분리, 전개)
 # 텔레스코핑 레그: 상단은 늘 슬리브(z 0.40~1.00) 안에 물려 있고, 하단 풋패드가 지면(z=0)에
@@ -249,60 +257,52 @@ for tag, (jx, jy) in JACKS.items():
 
 # ---------------------------------------------------------------- 턴테이블 (방위각) + 고각 지지 기둥
 bm = bmesh.new()
-cylinder(bm, (0.0, -0.10, BED), (0.0, -0.10, BED + 0.24), 0.76, 0.66, 'z', n=32)      # 페데스탈
-cylinder(bm, (0.0, -0.10, BED + 0.24), (0.0, -0.10, BED + 0.30), 0.70, 0.70, 'z', n=32)  # 상판 디스크
-for sx in (0.66, -0.66):                                                              # 트러니언 기둥
-    beam(bm, (sx, -0.10, BED + 0.30), (sx, -0.10, TRUN), 0.18, 0.18)
-    cylinder(bm, (sx - 0.06, -0.10, TRUN), (sx + 0.10, -0.10, TRUN), 0.13, 0.13, 'x', n=16)  # 베어링 보스
+cylinder(bm, (0.0, -0.90, BED), (0.0, -0.90, BED + 0.24), 1.40, 1.24, 'z', n=40)      # 페데스탈
+cylinder(bm, (0.0, -0.90, BED + 0.24), (0.0, -0.90, BED + 0.30), 1.32, 1.32, 'z', n=40)  # 상판 디스크
+for sx in (1.32, -1.32):                                                              # 트러니언 기둥 (피벗 y=-1.80)
+    beam(bm, (sx, -1.80, BED + 0.30), (sx, -1.80, TRUN), 0.22, 0.22)
+    cylinder(bm, (sx - 0.08, -1.80, TRUN), (sx + 0.12, -1.80, TRUN), 0.15, 0.15, 'x', n=16)  # 베어링 보스
 turntable = finish("Turntable", bm, MAT_FRAME, col_model, pivot=TT_PIV, smooth=True)
 
 # ---------------------------------------------------------------- 크래들 + 발사관 본체 (고각)
-BX, BZ = 0.72, 0.62          # 박스 반폭·반높이
-BY0, BY1 = -1.05, 0.85       # 박스 뒤·앞(포구)
-# 단일 대형 캐니스터 개구 — 처음엔 2×2 관 4개였는데, 기체(스팬 2.5 m)가 그 관을 지날 수
-# 없어 발사 순간 앞면을 뚫고 나오는 그림이 됐다. 개구 하나를 면 가득 뚫으면 루트 2.6배
-# 확대 후 개구가 3.1×2.2 m라 기체가 통째로 드나든다(전체 확대는 아래 root.scale 주석).
-TUBE_HX, TUBE_HZ = 0.66, 0.44   # 개구 반폭·반높이 (확대 전 로컬 — ×2.0이 스팬 2.5 m를 넘게)
+BX, BZ = 1.44, 0.52          # 박스 반폭·반높이 — 폭은 2배, 높이는 오히려 슬림하게
+BY0, BY1 = -2.10, 1.70       # 박스 뒤·앞(포구) — 길이 2배 (지면 기준 7.6 m)
+# 단일 대형 캐니스터 개구. 지면 기준 개구 5.3×1.8 m·내부 길이 7.2 m — 기체(스팬 2.5 m·
+# 전장 3.65 m)가 통째로 들어가고도 남는다. 관 뒤끝은 0.15 두께 벽으로 막힌 폐쇄 브리치.
+TUBE_HX, TUBE_HZ = 1.32, 0.42   # 개구 반폭·반높이 (확대 전 로컬)
 
 bm = bmesh.new()
 add_box(bm, (-BX, BY0, TRUN - BZ), (BX, BY1, TRUN + BZ))                     # 외피
 for sx in (1, -1):
     x_in = sx * BX
-    add_box(bm, (x_in, -0.95, TRUN - 0.50), (x_in + sx * 0.08, 0.55, TRUN + 0.55))  # 측면 장갑판
-    cylinder(bm, (sx * BX, -0.10, TRUN), (sx * 0.95, -0.10, TRUN), 0.12, 0.12, 'x', n=16)  # 트러니언 스텁
+    add_box(bm, (x_in, -1.90, TRUN - 0.44), (x_in + sx * 0.08, 1.10, TRUN + 0.48))  # 측면 장갑판
+    cylinder(bm, (sx * BX, -1.80, TRUN), (sx * 1.60, -1.80, TRUN), 0.15, 0.15, 'x', n=16)  # 트러니언 스텁
 cradle = finish("Cradle", bm, MAT_OLIVE, col_model, pivot=CR_PIV, smooth=True)
 
-# 포구(+Y)에 단일 관통구 (불리언)
+# 포구(+Y)에 단일 관통구 (불리언) — 뒤끝(-1.95)은 박스 뒤(-2.10)에 못 미쳐 브리치가 남는다
 bm = bmesh.new()
-add_box(bm, (-TUBE_HX, -0.90, TRUN - TUBE_HZ), (TUBE_HX, 1.20, TRUN + TUBE_HZ))
+add_box(bm, (-TUBE_HX, -1.95, TRUN - TUBE_HZ), (TUBE_HX, 2.05, TRUN + TUBE_HZ))
 cutter = finish("cut_tube", bm, MAT_OLIVE, col_model)
 boolean_diff(cradle, cutter)
 
 # 캐니스터 내부 라이너(암부, 분리 오브젝트)
 bm = bmesh.new()
-add_box(bm, (-TUBE_HX + 0.025, -0.88, TRUN - TUBE_HZ + 0.025),
-        (TUBE_HX - 0.025, 0.84, TRUN + TUBE_HZ - 0.025))
+add_box(bm, (-TUBE_HX + 0.025, -1.93, TRUN - TUBE_HZ + 0.025),
+        (TUBE_HX - 0.025, 1.68, TRUN + TUBE_HZ - 0.025))
 box_tubes = finish("Box_Tubes", bm, MAT_TUBE, col_model, pivot=CR_PIV)
 
 # 상부 발사 레일 2줄 (금속, 포구 앞으로 돌출)
 bm = bmesh.new()
-for sx in (0.34, -0.34):
-    beam(bm, (sx, -0.70, TRUN + BZ + 0.05), (sx, 1.45, TRUN + BZ + 0.05), 0.06, 0.10)
-for y in (-0.4, 0.6):
-    beam(bm, (-0.34, y, TRUN + BZ + 0.05), (0.34, y, TRUN + BZ + 0.05), 0.05, 0.06)
+for sx in (0.68, -0.68):
+    beam(bm, (sx, -1.40, TRUN + BZ + 0.05), (sx, 2.90, TRUN + BZ + 0.05), 0.07, 0.11)
+for y in (-0.8, 0.6, 1.9):
+    beam(bm, (-0.68, y, TRUN + BZ + 0.05), (0.68, y, TRUN + BZ + 0.05), 0.05, 0.06)
 box_rails = finish("Box_Rails", bm, MAT_METAL, col_model, pivot=CR_PIV, smooth=True)
 
 # ---------------------------------------------------------------- 루트 엠프티 + 계층
 root = bpy.data.objects.new("LAUNCHER_Root", None)
 root.empty_display_type = 'PLAIN_AXES'
 root.empty_display_size = 1.0
-# **전체 2.0배** — 기체(전장 3.5 m·스팬 2.5 m)가 캐니스터 박스 안에 들어가는 비례
-# (사용자 지정 2~3배; 길이 3.52/1.9 = 1.85, 스팬 2.5/1.44 = 1.74가 하한이다).
-# 상한을 안 쓰는 이유: 균일 확대는 캐니스터 **바닥도 올려서**(1.16×S), 시뮬 발사
-# 원점(1.2 m)과의 높이 어긋남이 배율에 비례해 커진다 — 필요한 만큼만 키운다.
-# 지오메트리 리터럴 수십 개를 고치는 대신 루트 스케일로 얹고 glTF가 노드 스케일로
-# 내보낸다(export_apply=False). 런타임 관절 값은 전부 로컬(스케일 앞)이라 그대로 맞는다.
-root.scale = (2.0, 2.0, 2.0)
 col_model.objects.link(root)
 bpy.context.view_layer.update()
 
@@ -321,6 +321,14 @@ parent_to(turntable, trailer)
 parent_to(cradle, turntable)
 parent_to(box_tubes, cradle)
 parent_to(box_rails, cradle)
+
+# **전체 2.0배** — 로컬 좌표를 지면 미터의 절반으로 쓰는 규약. 반드시 부모화 **뒤에**
+# 건다: parent_to가 부모 월드행렬의 역을 캡처하므로, 스케일을 먼저 걸면 자식이 0.5를
+# 물려받아 확대가 통째로 상쇄된다 — 실제로 그렇게 구워져 화면의 발사관이 1배로 남은
+# 회귀가 있었다(2026-09-02). 지금 순서면 역행렬이 단위행렬이라 ×2가 전 계층에 산다.
+# 런타임 관절 값(회전·잭 하강 0.46)은 전부 로컬이라 스케일과 무관하게 그대로 맞는다.
+root.scale = (2.0, 2.0, 2.0)
+bpy.context.view_layer.update()
 
 # ---------------------------------------------------------------- 조종 프로퍼티 + 드라이버
 PROPS = [
@@ -393,13 +401,13 @@ world.node_tree.nodes["Background"].inputs[0].default_value = (0.82, 0.83, 0.85,
 scene.world = world
 
 target = bpy.data.objects.new("CamTarget", None)
-target.location = (0.0, 0.05, 1.55)
+target.location = (0.0, 0.10, 1.45)
 col_studio.objects.link(target)
 
 cam_data = bpy.data.cameras.new("Camera")
-cam_data.lens = 40
+cam_data.lens = 32
 cam = bpy.data.objects.new("Camera", cam_data)
-cam.location = (5.8, 5.6, 4.1)                   # 포구(+Y) 쪽 상방 3/4 — 캐니스터 관통구가 보인다
+cam.location = (16.0, 13.0, 9.0)                 # 포구(+Y) 쪽 상방 3/4 — 캐니스터 관통구가 보인다
 col_studio.objects.link(cam)
 tc = cam.constraints.new('TRACK_TO')
 tc.target, tc.track_axis, tc.up_axis = target, 'TRACK_NEGATIVE_Z', 'UP_Y'
