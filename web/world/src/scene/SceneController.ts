@@ -649,7 +649,11 @@ export class SceneController {
 
   zoom(deltaY: number): void {
     // 휠은 지금 시점의 거리를 움직인다 — 추적·자세는 근접 거리, 궤도는 장면 거리.
-    const k = deltaY > 0 ? 1.1 : 1 / 1.1;
+    // 종전 1.1(휠 한 눈금 10%)이 너무 예민하다는 사용자 제기 — 2D 웨이포인트 지도와
+    // 같은 방식(지수를 N으로 나눠 "N배 둔하게")으로 감도 1/5: 1.1^(1/5) ≈ 1.9%/눈금.
+    const WHEEL_DULL = 5;
+    const step = Math.pow(1.1, 1 / WHEEL_DULL);
+    const k = deltaY > 0 ? step : 1 / step;
     if (this.gameOn) {
       this.gameDist = Math.min(Math.max(this.gameDist * k, 8), 120);
       this.dirty = true;

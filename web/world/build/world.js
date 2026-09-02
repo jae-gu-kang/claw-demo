@@ -45622,7 +45622,9 @@ class SceneController {
     this.dirty = true;
   }
   zoom(deltaY) {
-    const k2 = deltaY > 0 ? 1.1 : 1 / 1.1;
+    const WHEEL_DULL = 5;
+    const step = Math.pow(1.1, 1 / WHEEL_DULL);
+    const k2 = deltaY > 0 ? step : 1 / step;
     if (this.gameOn) {
       this.gameDist = Math.min(Math.max(this.gameDist * k2, 8), 120);
       this.dirty = true;
