@@ -33,7 +33,7 @@ import {
   fetchReplay, fetchTerrainPack, fetchWorldManifest, listSimResults, modelUrl,
   type SimResultRow, type WorldManifest,
 } from "../data/api.ts";
-import { SceneHost, createSceneHost } from "./SceneHost.ts";
+import { SceneHost, createSceneHost, type ViewStyle } from "./SceneHost.ts";
 import { buildCoastField } from "../core/coastfield.ts";
 import { buildTerrain } from "./terrain.ts";
 import {
@@ -335,6 +335,12 @@ export class SceneController {
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
     notes.push(CLOUD_NOTES.model);
     if (this.vehicle || this.launcher) notes.push(WEAR_NOTES.model);
+    if (this.style === "cinematic") {
+      notes.push(
+        "시네마틱 모드 — 궤적 오버레이를 숨기고 블룸·비네트·그레이딩을 겁니다. "
+        + "판독 값과 이 캡션은 계속 표시합니다.",
+      );
+    }
     notes.push(
       "해면은 지형 격자 밖(외곽 티어 30 km 밖)까지 이어 그립니다 — "
       + "그 부분은 실측 지리가 아니라 이어 붙인 평면입니다.",
@@ -343,6 +349,15 @@ export class SceneController {
   }
 
   // ---------------------------------------------------------------- 조작
+  /** Engineering ↔ Cinematic — 표시 구성만 바뀐다. 결과·커서·카메라는 그대로다. */
+  setViewStyle(style: ViewStyle): void {
+    if (style === this.style) return;
+    this.style = style;
+    this.host.setViewStyle(style);
+    this.dirty = true;
+    this.emitNotes();
+  }
+
   setCamMode(mode: CamMode): void {
     if (!CAM_MODES.includes(mode) || mode === this.mode) return;
     this.mode = mode;
@@ -588,6 +603,7 @@ export class SceneController {
     });
   }
 
+  private style: ViewStyle = "engineering";
   private lastSeaTime = 0;
   private lastStatsAt = 0;
   private readonly depthBits: number;

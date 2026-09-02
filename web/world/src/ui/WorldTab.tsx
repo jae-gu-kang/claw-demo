@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SimResultRow } from "../data/api.ts";
 import type { FrameStats } from "../scene/SceneController.ts";
+import type { ViewStyle } from "../scene/SceneHost.ts";
 import {
   CAM_MODES, SceneController, createController, type CamMode, type Readout,
 } from "../scene/SceneController.ts";
@@ -60,6 +61,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const [windSpeed, setWindSpeed] = useState(7);
   const [windDir, setWindDir] = useState(0.6);
   const [cloudCover, setCloudCover] = useState(0.35);
+  const [style, setStyle] = useState<ViewStyle>("engineering");
 
   // **생성과 파괴가 대칭인 한 쌍**이다 — 그래야 StrictMode의 이중 실행에서도 컨텍스트가
   // 하나로 유지된다. 의존성이 비어 있는 것은 실수가 아니라 이 규율이다.
@@ -214,6 +216,18 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
             {CAM_LABEL[m]}
           </button>
         ))}
+        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
+          {(["engineering", "cinematic"] as const).map((v) => (
+            <button
+              key={v}
+              className={v === style ? "primary" : ""}
+              onClick={() => { setStyle(v); ctlRef.current?.setViewStyle(v); }}
+              aria-pressed={v === style}
+            >
+              {v === "engineering" ? "엔지니어링" : "시네마틱"}
+            </button>
+          ))}
+        </span>
       </div>
 
       <canvas

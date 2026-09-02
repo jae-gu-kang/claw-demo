@@ -87,10 +87,23 @@ const SKY_RADIUS = FAR * 0.9;
  * 걸려 화면 절반이 하얗게 뭉갰다(고도 8.6°에서 눈으로 확인). 2.5로 올리면 한낮 하늘은
  * 통째로 빠지고 태양 원반만 남는다 — 곧 올릴 윤슬도 정반사라 이 위에 선다.
  *
- * Cinematic이 오면 세기·반경을 올리고 모션블러·DOF가 붙는다(계획 §7). */
-const DEFAULT_POST: PostOptions = {
-  bloomStrength: 0.35, bloomRadius: 0.4, bloomThreshold: 2.5, antialias: true,
+ * Cinematic은 아래 딴 벌이다. */
+const ENGINEERING_POST: PostOptions = {
+  bloomStrength: 0.35, bloomRadius: 0.4, bloomThreshold: 2.5, antialias: true, grade: null,
 };
+
+/** Cinematic — 블룸을 올리고 그레이딩(비네트·채도·대비)을 건다.
+ *
+ * 계획 §7의 SSAO·모션블러·DOF는 **안 넣었다.** 셋 다 깊이버퍼를 읽는데, 분할 프러스텀은
+ * 원거리 깊이를 지우고 근거리를 다시 그리므로 마지막 깊이버퍼가 장면 전체를 말하지
+ * 않는다 — 근거리에만 옳은 효과를 걸면 1.5~2 km 띠에서 갈라진 것이 보인다. 붙이려면
+ * 패스별 깊이를 따로 남겨야 하고, 그건 이 분기가 아니라 컴포저 구조의 일이다. */
+const CINEMATIC_POST: PostOptions = {
+  bloomStrength: 0.6, bloomRadius: 0.55, bloomThreshold: 1.5, antialias: true,
+  grade: { vignette: 0.42, saturation: 1.12, contrast: 1.055 },
+};
+
+export type ViewStyle = "engineering" | "cinematic";
 
 export interface CameraPose {
   eye: readonly number[];
@@ -201,7 +214,16 @@ export class SceneHost {
     );
     // **경로를 하나로 둔다.** 컴포저 없는 직접 렌더 경로를 따로 두면 분할 프러스텀 코드가
     // 두 벌이 되고, 언젠가 한쪽만 고쳐진다(`disposeTree`에서 겪은 그것).
-    this.setPost(DEFAULT_POST);
+    this.setPost(ENGINEERING_POST);
+  }
+
+  /** Engineering ↔ Cinematic.
+   *
+   * 컴포저를 갈아 끼우고 궤적 오버레이를 숨긴다. **결과 선택·재생 커서·카메라는 그대로다**
+   * — 같은 런을 두 얼굴로 보는 것이다(계획 §8). 숨긴 것은 캡션이 말한다(컨트롤러 몫). */
+  setViewStyle(style: ViewStyle): void {
+    this.setPost(style === "cinematic" ? CINEMATIC_POST : ENGINEERING_POST);
+    this.groups.paths.visible = style === "engineering";
   }
 
   /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */

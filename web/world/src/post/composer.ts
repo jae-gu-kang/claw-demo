@@ -29,6 +29,7 @@ import {
   type PerspectiveCamera, type Scene, type WebGLRenderer,
 } from "three";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { Pass } from "three/addons/postprocessing/Pass.js";
 import { SMAAPass } from "three/addons/postprocessing/SMAAPass.js";
@@ -95,7 +96,45 @@ export interface PostOptions {
   /** 이 밝기를 넘는 것만 번진다. 윤슬·태양 원반만 걸리게 높게 잡는다. */
   bloomThreshold: number;
   antialias: boolean;
+  /** 그레이딩 — Cinematic 전용. null이면 패스를 안 만든다(Engineering은 값을 안 만진다:
+   *  이 화면은 판독 도구라, 기본 모드의 색은 조명 계산이 낸 그대로여야 한다). */
+  grade: { vignette: number; saturation: number; contrast: number } | null;
 }
+
+/** 그레이딩 — **선형 HDR에서** 건다(블룸 뒤, SMAA·톤매핑 앞).
+ *
+ * sRGB로 변환된 뒤에 걸면 대비 곡선이 감마와 겹쳐 이중으로 휘고, 톤매핑 전 1.0 초과
+ * 값들(윤슬·태양)이 곡선을 통과하지 못한다. 채도는 휘도 보존 믹스, 대비는 중간 회색
+ * 0.18 기준 거듭제곱 — 둘 다 음수를 만들 수 없어 HDR에서 안전하다. */
+const GRADE_SHADER = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uVignette: { value: 0.4 },
+    uSat: { value: 1.1 },
+    uContrast: { value: 1.05 },
+  },
+  vertexShader: /* glsl */`
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`,
+  fragmentShader: /* glsl */`
+uniform sampler2D tDiffuse;
+uniform float uVignette;
+uniform float uSat;
+uniform float uContrast;
+varying vec2 vUv;
+void main() {
+  vec3 c = texture2D(tDiffuse, vUv).rgb;
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = max(mix(vec3(l), c, uSat), 0.0);
+  c = 0.18 * pow(c / 0.18, vec3(uContrast));
+  vec2 q = vUv - 0.5;
+  c *= 1.0 - uVignette * smoothstep(0.25, 0.72, dot(q, q) * 2.0);
+  gl_FragColor = vec4(c, 1.0);
+}`,
+};
 
 export interface Post {
   setSize(width: number, height: number, dpr: number): void;
@@ -125,11 +164,20 @@ export function createPost(
   composer.renderTarget1.samples = 0;
   composer.addPass(scenePass);
 
+  // 그레이딩은 블룸 **뒤**다 — 번진 빛까지 같은 룩을 입어야 화면이 한 장으로 읽힌다.
   const bloom = opts.bloomStrength > 0
     ? new UnrealBloomPass(
       new Vector2(width, height), opts.bloomStrength, opts.bloomRadius, opts.bloomThreshold)
     : null;
   if (bloom) composer.addPass(bloom);
+
+  const grade = opts.grade ? new ShaderPass(GRADE_SHADER) : null;
+  if (grade && opts.grade) {
+    grade.uniforms.uVignette!.value = opts.grade.vignette;
+    grade.uniforms.uSat!.value = opts.grade.saturation;
+    grade.uniforms.uContrast!.value = opts.grade.contrast;
+    composer.addPass(grade);
+  }
 
   // **SMAA는 `OutputPass` 앞이다.** 그쪽 문서가 명시한다 — "SMAAPass operates in
   // linear-srgb so this pass must be executed before OutputPass"(FXAA는 반대다).
@@ -161,6 +209,7 @@ export function createPost(
     },
     dispose() {
       bloom?.dispose();
+      grade?.dispose();
       smaa?.dispose();
       output.dispose();
       // `composer.dispose()`가 renderTarget1·2와 내부 copyPass까지 놓는다 —

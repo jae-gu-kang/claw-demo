@@ -39812,6 +39812,41 @@ class SplitFrustumPass extends Pass {
     }
   }
 }
+const GRADE_SHADER = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uVignette: { value: 0.4 },
+    uSat: { value: 1.1 },
+    uContrast: { value: 1.05 }
+  },
+  vertexShader: (
+    /* glsl */
+    `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`
+  ),
+  fragmentShader: (
+    /* glsl */
+    `
+uniform sampler2D tDiffuse;
+uniform float uVignette;
+uniform float uSat;
+uniform float uContrast;
+varying vec2 vUv;
+void main() {
+  vec3 c = texture2D(tDiffuse, vUv).rgb;
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = max(mix(vec3(l), c, uSat), 0.0);
+  c = 0.18 * pow(c / 0.18, vec3(uContrast));
+  vec2 q = vUv - 0.5;
+  c *= 1.0 - uVignette * smoothstep(0.25, 0.72, dot(q, q) * 2.0);
+  gl_FragColor = vec4(c, 1.0);
+}`
+  )
+};
 function createPost(renderer, scenePass, width, height, opts) {
   const target = new WebGLRenderTarget(Math.max(width, 1), Math.max(height, 1), {
     type: HalfFloatType,
@@ -39827,6 +39862,13 @@ function createPost(renderer, scenePass, width, height, opts) {
     opts.bloomThreshold
   ) : null;
   if (bloom) composer.addPass(bloom);
+  const grade = opts.grade ? new ShaderPass(GRADE_SHADER) : null;
+  if (grade && opts.grade) {
+    grade.uniforms.uVignette.value = opts.grade.vignette;
+    grade.uniforms.uSat.value = opts.grade.saturation;
+    grade.uniforms.uContrast.value = opts.grade.contrast;
+    composer.addPass(grade);
+  }
   const smaa = opts.antialias ? new SMAAPass() : null;
   if (smaa) {
     smaa.clear = true;
@@ -39847,6 +39889,7 @@ function createPost(renderer, scenePass, width, height, opts) {
     },
     dispose() {
       bloom?.dispose();
+      grade?.dispose();
       smaa?.dispose();
       output.dispose();
       composer.dispose();
@@ -40741,11 +40784,19 @@ const NEAR_FAR = 2e3;
 const FAR_NEAR = 1500;
 const FAR = 5e4;
 const SKY_RADIUS = FAR * 0.9;
-const DEFAULT_POST = {
+const ENGINEERING_POST = {
   bloomStrength: 0.35,
   bloomRadius: 0.4,
   bloomThreshold: 2.5,
-  antialias: true
+  antialias: true,
+  grade: null
+};
+const CINEMATIC_POST = {
+  bloomStrength: 0.6,
+  bloomRadius: 0.55,
+  bloomThreshold: 1.5,
+  antialias: true,
+  grade: { vignette: 0.42, saturation: 1.12, contrast: 1.055 }
 };
 const RAMP = [
   [0, [0.76, 0.72, 0.58]],
@@ -40807,7 +40858,15 @@ class SceneHost {
       { near: NEAR, nearFar: NEAR_FAR, farNear: FAR_NEAR, far: FAR },
       [this.sky.mesh]
     );
-    this.setPost(DEFAULT_POST);
+    this.setPost(ENGINEERING_POST);
+  }
+  /** Engineering ↔ Cinematic.
+   *
+   * 컴포저를 갈아 끼우고 궤적 오버레이를 숨긴다. **결과 선택·재생 커서·카메라는 그대로다**
+   * — 같은 런을 두 얼굴로 보는 것이다(계획 §8). 숨긴 것은 캡션이 말한다(컨트롤러 몫). */
+  setViewStyle(style) {
+    this.setPost(style === "cinematic" ? CINEMATIC_POST : ENGINEERING_POST);
+    this.groups.paths.visible = style === "engineering";
   }
   /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
   setPost(opts) {
@@ -44025,12 +44084,25 @@ class SceneController {
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
     notes.push(CLOUD_NOTES.model);
     if (this.vehicle || this.launcher) notes.push(WEAR_NOTES.model);
+    if (this.style === "cinematic") {
+      notes.push(
+        "시네마틱 모드 — 궤적 오버레이를 숨기고 블룸·비네트·그레이딩을 겁니다. 판독 값과 이 캡션은 계속 표시합니다."
+      );
+    }
     notes.push(
       "해면은 지형 격자 밖(외곽 티어 30 km 밖)까지 이어 그립니다 — 그 부분은 실측 지리가 아니라 이어 붙인 평면입니다."
     );
     this.cb.onNotes(notes);
   }
   // ---------------------------------------------------------------- 조작
+  /** Engineering ↔ Cinematic — 표시 구성만 바뀐다. 결과·커서·카메라는 그대로다. */
+  setViewStyle(style) {
+    if (style === this.style) return;
+    this.style = style;
+    this.host.setViewStyle(style);
+    this.dirty = true;
+    this.emitNotes();
+  }
   setCamMode(mode) {
     if (!CAM_MODES.includes(mode) || mode === this.mode) return;
     this.mode = mode;
@@ -44255,6 +44327,7 @@ class SceneController {
       depthBits: this.depthBits
     });
   }
+  style = "engineering";
   lastSeaTime = 0;
   lastStatsAt = 0;
   depthBits;
@@ -44329,6 +44402,7 @@ function WorldTab({ deps }) {
   const [windSpeed, setWindSpeed] = reactExports.useState(7);
   const [windDir, setWindDir] = reactExports.useState(0.6);
   const [cloudCover, setCloudCover] = reactExports.useState(0.35);
+  const [style, setStyle] = reactExports.useState("engineering");
   reactExports.useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas == null) return;
@@ -44476,7 +44550,20 @@ function WorldTab({ deps }) {
           children: CAM_LABEL[m2]
         },
         m2
-      ))
+      )),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { marginLeft: "auto", display: "inline-flex", gap: 4 }, children: ["engineering", "cinematic"].map((v2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          className: v2 === style ? "primary" : "",
+          onClick: () => {
+            setStyle(v2);
+            ctlRef.current?.setViewStyle(v2);
+          },
+          "aria-pressed": v2 === style,
+          children: v2 === "engineering" ? "엔지니어링" : "시네마틱"
+        },
+        v2
+      )) })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "canvas",
