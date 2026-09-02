@@ -19,7 +19,8 @@ import {
   ACESFilmicToneMapping, BufferAttribute, BufferGeometry, Color, DirectionalLight,
   PCFSoftShadowMap,
   Group, HemisphereLight, LineBasicMaterial, LineSegments, Matrix4, Mesh,
-  MeshStandardMaterial, PerspectiveCamera, Scene, SphereGeometry, SRGBColorSpace, Vector3,
+  MeshStandardMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry,
+  SRGBColorSpace, Vector2, Vector3,
   WebGLRenderer,
 } from "three";
 
@@ -31,6 +32,7 @@ import {
   setClouds,
 } from "./atmosphere.ts";
 import { applyGroundDetail } from "./materials.ts";
+import { gameRamp } from "../core/gamestyle.ts";
 import type { CoastField } from "../core/coastfield.ts";
 import { createOcean, type Ocean, type SeaState } from "./ocean.ts";
 import { createSky, type Sky } from "./sky.ts";
@@ -108,7 +110,14 @@ const CINEMATIC_POST: PostOptions = {
   grade: { vignette: 0.42, saturation: 1.12, contrast: 1.055 },
 };
 
-export type ViewStyle = "engineering" | "cinematic";
+/** Game — 시네마틱 계열 후처리에 채도를 더 올린다. 로우폴리 낱면은 가장자리가 곧
+ *  화질이라 antialias 유지. 블룸 문턱은 둘의 사이 — 설산·윤슬만 걸린다. */
+const GAME_POST: PostOptions = {
+  bloomStrength: 0.5, bloomRadius: 0.5, bloomThreshold: 1.8, antialias: true,
+  grade: { vignette: 0.34, saturation: 1.22, contrast: 1.05 },
+};
+
+export type ViewStyle = "engineering" | "cinematic" | "game";
 
 /** 표지 하나 — NED 지점과 종류. `radius`는 웨이포인트 포획 반경 [m]. */
 export interface Marker {
@@ -191,6 +200,8 @@ export class SceneHost {
   private readonly ambient: HemisphereLight;
   private readonly groups = {
     terrain: new Group(), paths: new Group(), models: new Group(), marks: new Group(),
+    // 게임 모드 두 벌 — 실사 지형과 같은 자리라 스타일이 두 벌 중 하나만 보이게 한다.
+    gameTerrain: new Group(), props: new Group(),
   };
 
   private stats: SceneStats = { drawCalls: 0, triangles: 0, ms: 0 };
@@ -200,6 +211,8 @@ export class SceneHost {
   private size = { w: 1, h: 1, dpr: 1 };
   /** 프레임마다 다시 채운다 — 매번 새로 만들면 GC가 프레임을 갉는다. */
   private readonly gridInvViewProj = new Matrix4();
+  private readonly raycaster = new Raycaster();
+  private readonly ndc = new Vector2();
   private renderScale = 1;
   private readonly sunDirWorld = new Vector3(0.4, 0.6, 0.2);
 
@@ -247,6 +260,9 @@ export class SceneHost {
     this.ocean = createOcean({ maxDist: FAR * 0.98 });
     this.scene.add(this.ocean.mesh);
     for (const g of Object.values(this.groups)) this.scene.add(g);
+    // 게임 자산은 스타일이 "game"일 때만 — setViewStyle이 정본이고 여기는 첫 프레임 몫.
+    this.groups.gameTerrain.visible = false;
+    this.groups.props.visible = false;
 
     this.scenePass = new SplitFrustumPass(
       this.scene, this.camera,
@@ -263,9 +279,17 @@ export class SceneHost {
    * 컴포저를 갈아 끼우고 궤적 오버레이를 숨긴다. **결과 선택·재생 커서·카메라는 그대로다**
    * — 같은 런을 두 얼굴로 보는 것이다(계획 §8). 숨긴 것은 캡션이 말한다(컨트롤러 몫). */
   setViewStyle(style: ViewStyle): void {
-    this.setPost(style === "cinematic" ? CINEMATIC_POST : ENGINEERING_POST);
+    this.setPost(
+      style === "cinematic" ? CINEMATIC_POST : style === "game" ? GAME_POST : ENGINEERING_POST,
+    );
     this.groups.paths.visible = style === "engineering";
-    this.groups.marks.visible = style === "engineering";
+    // 게임에서는 표지를 **보인다** — 찍는 중인 웨이포인트가 화면의 요점이다.
+    this.groups.marks.visible = style === "engineering" || style === "game";
+    // 지형은 두 벌 중 한 벌만 — 같은 자리에 겹치면 z-fighting이 전면에 깔린다.
+    this.groups.terrain.visible = style !== "game";
+    this.groups.gameTerrain.visible = style === "game";
+    this.groups.props.visible = style === "game";
+    this.ocean.setPalette(style === "game");
   }
 
   /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
@@ -329,29 +353,38 @@ export class SceneHost {
     this.renderer.toneMappingExposure = exposure;
   }
 
+  /** NED 기하 → three 지오메트리 — NaN 정점 방어·축 변환·색 굽기를 한 곳에 둔다.
+   *  실사·게임 두 벌이 각자 돌면 언젠가 한쪽만 고쳐진다(disposeTree의 교훈). */
+  private patchGeometry(
+    p: NedMesh, colorAt: (elev: number, out: Float32Array, i: number) => void,
+  ): BufferGeometry {
+    const n = p.positions.length;
+    const pos = new Float32Array(n);
+    const nrm = new Float32Array(n);
+    const col = new Float32Array(n);
+    for (let i = 0; i < n; i += 3) {
+      // 결측 정점은 인덱스가 참조하지 않지만, NaN이 속성 배열에 남으면 바운딩
+      // 스피어가 NaN이 되어 **메시 전체가 프러스텀 컬링으로 사라진다.**
+      const d = Number.isFinite(p.positions[i + 2]!) ? p.positions[i + 2]! : 0;
+      const w = toWorld(p.positions[i]!, p.positions[i + 1]!, d);
+      pos[i] = w[0]; pos[i + 1] = w[1]; pos[i + 2] = w[2];
+      const nw = toWorld(p.normals[i]!, p.normals[i + 1]!, p.normals[i + 2]!);
+      nrm[i] = nw[0]; nrm[i + 1] = nw[1]; nrm[i + 2] = nw[2];
+      colorAt(-d, col, i);
+    }
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new BufferAttribute(nrm, 3));
+    geo.setAttribute("color", new BufferAttribute(col, 3));
+    geo.setIndex(new BufferAttribute(p.indices, 1));
+    return geo;
+  }
+
   /** 지형 — NED 기하를 그대로 받는다. 음영은 **진짜 법선에 조명이 닿아** 생긴다. */
   setTerrain(patches: readonly NedMesh[]): void {
     disposeTree(this.groups.terrain);
     for (const p of patches) {
-      const n = p.positions.length;
-      const pos = new Float32Array(n);
-      const nrm = new Float32Array(n);
-      const col = new Float32Array(n);
-      for (let i = 0; i < n; i += 3) {
-        // 결측 정점은 인덱스가 참조하지 않지만, NaN이 속성 배열에 남으면 바운딩
-        // 스피어가 NaN이 되어 **메시 전체가 프러스텀 컬링으로 사라진다.**
-        const d = Number.isFinite(p.positions[i + 2]!) ? p.positions[i + 2]! : 0;
-        const w = toWorld(p.positions[i]!, p.positions[i + 1]!, d);
-        pos[i] = w[0]; pos[i + 1] = w[1]; pos[i + 2] = w[2];
-        const nw = toWorld(p.normals[i]!, p.normals[i + 1]!, p.normals[i + 2]!);
-        nrm[i] = nw[0]; nrm[i + 1] = nw[1]; nrm[i + 2] = nw[2];
-        hypsometric(-d, col, i);
-      }
-      const geo = new BufferGeometry();
-      geo.setAttribute("position", new BufferAttribute(pos, 3));
-      geo.setAttribute("normal", new BufferAttribute(nrm, 3));
-      geo.setAttribute("color", new BufferAttribute(col, 3));
-      geo.setIndex(new BufferAttribute(p.indices, 1));
+      const geo = this.patchGeometry(p, hypsometric);
       const mat = new MeshStandardMaterial({
         vertexColors: true, roughness: 0.95, metalness: 0,
       });
@@ -364,6 +397,49 @@ export class SceneHost {
       mesh.receiveShadow = true;
       this.groups.terrain.add(mesh);
     }
+  }
+
+  /** 게임 모드 지형 — **같은 실측 표고**를 성긴 면 + 게임 램프로 다시 그린다.
+   *
+   * flatShading은 three가 프래그먼트 도함수로 낱면 법선을 만들므로 정점 법선을
+   * 그대로 둬도 큰 면이 선다. 지면 절차 무늬는 걸지 않는다 — 85 m 식생 얼룩이
+   * 90 m 낱면과 간섭해 "한 면 한 색"의 로우폴리 문법을 깬다. 대기 원근은 건다 —
+   * 안 걸면 이 지형만 수평선에서 하늘과 갈라진다. */
+  setGameTerrain(patches: readonly NedMesh[], relief: number): void {
+    disposeTree(this.groups.gameTerrain);
+    for (const p of patches) {
+      const geo = this.patchGeometry(p, (elev, out, i) => gameRamp(elev, relief, out, i));
+      const mat = new MeshStandardMaterial({
+        vertexColors: true, roughness: 1, metalness: 0, flatShading: true,
+      });
+      applyAerialPerspective(mat);
+      const mesh = new Mesh(geo, mat);
+      mesh.receiveShadow = true;
+      this.groups.gameTerrain.add(mesh);
+    }
+  }
+
+  /** 게임 소품 그룹 교체 — null이면 비운다. 소유권은 이 그룹이 진다(disposeTree). */
+  setProps(group: Group | null): void {
+    disposeTree(this.groups.props);
+    if (group) this.groups.props.add(group);
+  }
+
+  /** 캔버스 NDC → 지면 교점 (NED). 게임 지형이 없으면 기준면 y=planeY와의 교점으로
+   *  물러선다. 하늘을 향하면 **null** — 0으로 메우면 지평선 클릭이 원점 웨이포인트를
+   *  지어낸다. 카메라 행렬은 마지막 render()의 것 — 게임 모드는 매 프레임 그린다. */
+  raycastGround(ndcX: number, ndcY: number, planeY: number): [number, number, number] | null {
+    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), this.camera);
+    const hit = this.raycaster.intersectObjects(this.groups.gameTerrain.children, false)[0];
+    let p = hit?.point ?? null;
+    if (p == null) {
+      const r = this.raycaster.ray;
+      const t = (planeY - r.origin.y) / r.direction.y;
+      p = Number.isFinite(t) && t > 0 ? r.origin.clone().addScaledVector(r.direction, t) : null;
+    }
+    if (p == null) return null;
+    // 월드 → NED — `axes.ts` 사상(x=e, y=−d, z=−n)의 역.
+    return [-p.z, p.x, -p.y];
   }
 
   /** 궤적 — `breaks`의 양 끝 중 하나라도 결측이면 그 구간을 그리지 않는다.

@@ -38,7 +38,7 @@ const fmtSigned = (v: number | null): string => {
 export function WorldTab({ deps }: { deps: MountDeps }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctlRef = useRef<SceneController | null>(null);
-  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const dragRef = useRef<{ x: number; y: number; sx: number; sy: number } | null>(null);
 
   const [status, setStatus] = useState("초기화 중…");
   const [notes, setNotes] = useState<string[]>([]);
@@ -64,6 +64,9 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const [windDir, setWindDir] = useState(0.6);
   const [cloudCover, setCloudCover] = useState(0.35);
   const [style, setStyle] = useState<ViewStyle>("engineering");
+  const [gameWps, setGameWps] = useState<ReadonlyArray<readonly [number, number, number]>>([]);
+  // 마지막 "보내기"의 개수 — 확인 문장을 그린다. 모드를 떠나면 지운다(아래 효과).
+  const [sent, setSent] = useState<number | null>(null);
 
   // **생성과 파괴가 대칭인 한 쌍**이다 — 그래야 StrictMode의 이중 실행에서도 컨텍스트가
   // 하나로 유지된다. 의존성이 비어 있는 것은 실수가 아니라 이 규율이다.
@@ -80,6 +83,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
       onStatus: setStatus,
       onPlaying: setPlaying,
       onStats: setStats,
+      onGameWps: setGameWps,
     });
     if (made.controller == null) {
       setStatus(made.reason);
@@ -168,8 +172,11 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const pickMode = useCallback((m: CamMode) => { ctlRef.current?.setCamMode(m); }, []);
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // 우클릭·중클릭은 컨텍스트 메뉴·자동 스크롤의 몫 — 클릭(웨이포인트)·드래그(회전)
+    // 판별에서 뺀다. 2D 지도 편집기와 같은 관례다(views/wpmap.js "우클릭은 contextmenu 경로").
+    if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { x: e.clientX, y: e.clientY };
+    dragRef.current = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY };
   };
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const d = dragRef.current;
@@ -177,8 +184,22 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
     // **시점을 여기서 짐작하지 않는다.** 끌어서 궤도로 넘어가는 조건은 컨트롤러가 쥐고
     // 있고(자세 관측에서는 안 넘어간다), 넘어가면 `onMode`로 알려 준다. 여기서
     // `setMode("orbit")`을 하면 카메라는 자세 관측인데 버튼만 자유 궤도가 된다.
+    // (게임 모드에서는 rotate가 무시된다 — 클릭 판별만 여기 남는다.)
     ctlRef.current?.rotate(e.clientX - d.x, e.clientY - d.y);
-    dragRef.current = { x: e.clientX, y: e.clientY };
+    dragRef.current = { ...d, x: e.clientX, y: e.clientY };
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    if (d == null || style !== "game") return;
+    // 이동량이 작으면 클릭 — 임계 5 px은 2D 지도(lib/wpmap.js DRAG_PX)와 같은 감각.
+    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 5) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    ctlRef.current?.addGameWaypointAt(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -(((e.clientY - rect.top) / rect.height) * 2 - 1),
+    );
   };
   const endDrag = () => { dragRef.current = null; };
 
@@ -190,6 +211,72 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", onWheel);
   }, []);
+
+  // 게임 조작 — 창 전역 키보드. 눌린 키 집합에서 축을 만든다(키 반복 이벤트 무관).
+  // 입력 칸에 포커스가 있으면 건드리지 않는다 — 환경 슬라이더·결과 선택이 계속 살아야 한다.
+  useEffect(() => {
+    if (style !== "game") return;
+    const keys = new Set<string>();
+    const apply = () => {
+      ctlRef.current?.setGameInput({
+        turn: (keys.has("ArrowRight") ? 1 : 0) - (keys.has("ArrowLeft") ? 1 : 0),
+        pitch: (keys.has("ArrowUp") ? 1 : 0) - (keys.has("ArrowDown") ? 1 : 0),
+        throttle: (keys.has("Shift") ? 1 : 0) - (keys.has("Control") ? 1 : 0),
+      });
+    };
+    const formy = (t: EventTarget | null): boolean =>
+      t instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName);
+    const AXES = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Shift", "Control"];
+    const down = (e: KeyboardEvent) => {
+      if (formy(e.target)) return;
+      // Cmd/Alt 조합은 브라우저·OS 단축키다(Cmd+← 히스토리 등) — 게임 입력으로 삼키면
+      // 단축키가 죽고, macOS는 Cmd가 눌린 동안 비수정자 keyup을 안 주므로 축이 눌린 채
+      // 고착된다(리뷰 확정). Control은 이 게임의 감속 축이라 여기서 거르지 않는다.
+      if (e.metaKey || e.altKey) return;
+      if (e.key === " ") {
+        e.preventDefault(); // 스페이스가 마지막 버튼을 다시 누르는 것도 막는다
+        if (!e.repeat) ctlRef.current?.dropGameWaypoint();
+        return;
+      }
+      if (AXES.includes(e.key)) {
+        e.preventDefault(); // 화살표의 페이지 스크롤 방지
+        keys.add(e.key);
+        apply();
+      }
+    };
+    const up = (e: KeyboardEvent) => { if (keys.delete(e.key)) apply(); };
+    // 탭 전환 중 keyup이 유실되면 축이 눌린 채 남는다 — 창을 떠나면 전부 놓는다.
+    const drop = () => { keys.clear(); apply(); };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", drop);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", drop);
+      ctlRef.current?.setGameInput({ turn: 0, pitch: 0, throttle: 0 });
+    };
+  }, [style]);
+
+  // "보냈습니다" 확인 문장은 게임 모드를 떠나면 치운다 — 남으면 다음 진입에서
+  // 보내지 않은 것을 보냈다고 말한다.
+  useEffect(() => { if (style !== "game") setSent(null); }, [style]);
+
+  const sendToSim = useCallback(() => {
+    // store 없는 마운트(개발 하니스)에서 set이 no-op인데 확인 문장을 그리면
+    // **거짓 성공**이 된다 — 보낼 곳이 없으면 보냈다고 말하지 않는다.
+    if (deps.store == null) return;
+    const wps = ctlRef.current?.getGameWaypoints() ?? [];
+    if (wps.length === 0) return;
+    // 시뮬 탭 웨이포인트 표의 행 형식(문자열 n·e·d, d = 고도[m])을 그대로 만든다 —
+    // 형식의 정본은 views/sim.js wpRows + lib/mission.js buildWaypoints. 소비는
+    // 시뮬 탭 render()가 store "wpDraft"를 읽어서 한다(한 번 읽고 지운다).
+    deps.store.set("wpDraft", {
+      source: "world-game",
+      rows: wps.map(([n, e, h]) => ({ n: String(n), e: String(e), d: String(h) })),
+    });
+    setSent(wps.length);
+  }, [deps.store]);
 
   return (
     <section className="panel">
@@ -208,7 +295,9 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
             </option>
           ))}
         </select>
-        {CAM_MODES.map((m) => (
+        {/* 게임 시점은 체이스 고정 — 이 버튼들을 두면 눌림 상태만 바뀌고 화면은
+            그대로인 어긋남이 된다(컨트롤러 가드와 이중 방어). */}
+        {style !== "game" && CAM_MODES.map((m) => (
           <button
             key={m}
             className={m === mode ? "primary" : ""}
@@ -219,14 +308,14 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
           </button>
         ))}
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
-          {(["engineering", "cinematic"] as const).map((v) => (
+          {(["engineering", "cinematic", "game"] as const).map((v) => (
             <button
               key={v}
               className={v === style ? "primary" : ""}
               onClick={() => { setStyle(v); ctlRef.current?.setViewStyle(v); }}
               aria-pressed={v === style}
             >
-              {v === "engineering" ? "엔지니어링" : "시네마틱"}
+              {v === "engineering" ? "엔지니어링" : v === "cinematic" ? "시네마틱" : "게임"}
             </button>
           ))}
         </span>
@@ -238,11 +327,54 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
         style={{ width: "100%", display: "block", borderRadius: 8, background: "#0d1117", touchAction: "none" }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
+        onPointerUp={onPointerUp}
         onPointerCancel={endDrag}
+        // macOS는 Ctrl+클릭을 보조클릭(contextmenu)으로 합성하는데 Ctrl이 이 게임의
+        // 감속 축이라, 안내된 조작 그대로가 OS 메뉴에 덮인다(리뷰 확정) — 게임에서만 막는다.
+        onContextMenu={(e) => { if (style === "game") e.preventDefault(); }}
       />
 
-      <div style={ROW}>
+      {style === "game" && (
+        <div style={ROW}>
+          <span style={HINT}>웨이포인트 {gameWps.length}개</span>
+          {gameWps.map((w, i) => (
+            <span
+              key={`${i}-${w[0]}-${w[1]}-${w[2]}`}
+              style={{
+                ...HINT, fontFamily: "var(--mono)", border: "1px solid var(--muted)",
+                borderRadius: 6, padding: "1px 6px", display: "inline-flex", gap: 4,
+                alignItems: "center",
+              }}
+            >
+              {`${i + 1}: N${w[0]} E${w[1]} h${w[2]}`}
+              <button
+                style={{ padding: "0 5px" }}
+                aria-label={`웨이포인트 ${i + 1} 삭제`}
+                onClick={() => ctlRef.current?.removeGameWaypoint(i)}
+              >×</button>
+            </span>
+          ))}
+          <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
+            <button disabled={gameWps.length === 0} onClick={sendToSim}>
+              시뮬레이션으로 보내기
+            </button>
+            <button
+              disabled={gameWps.length === 0}
+              onClick={() => ctlRef.current?.clearGameWaypoints()}
+            >
+              비우기
+            </button>
+          </span>
+        </div>
+      )}
+      {style === "game" && sent !== null && (
+        <p style={HINT}>
+          웨이포인트 {sent}개를 보냈습니다 — <a href="#sim">시뮬레이션 탭</a>의 표·지도에서
+          다듬고 실제 엔진으로 실행하세요.
+        </p>
+      )}
+
+      {style !== "game" && <div style={ROW}>
         <button
           onClick={() => { const p = !playing; setPlaying(p); ctlRef.current?.setPlaying(p); }}
           disabled={!playable}
@@ -262,7 +394,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
           style={{ flex: 1, minWidth: 160 }}
           aria-label="재생 위치"
         />
-      </div>
+      </div>}
 
       {/* 판독 — 캔버스가 말하는 것을 **글로도** 남긴다(캔버스는 보조기술에 불투명하다). */}
       <div style={{ ...HINT, fontFamily: "var(--mono)" }}>

@@ -24,12 +24,21 @@ import {
 } from "three";
 
 import { encodeCoastField, type CoastField } from "../core/coastfield.ts";
+import { GAME_SEA } from "../core/gamestyle.ts";
 import { ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL } from "../shaders/atmosphere.ts";
 import { CLOUD_COVER_GLSL, CLOUD_UNIFORM_DECL, cloudGlsl } from "../shaders/clouds.ts";
 import { NOISE_GLSL } from "../shaders/noise.ts";
 import { OCEAN_FRAG, OCEAN_VERT } from "../shaders/ocean.ts";
 import { WAVE_COUNT, coxMunkSlopeVariance, gerstnerSet, significantWaveHeight } from "../core/waves.ts";
 import { atmosphereUniforms, cloudUniforms } from "./atmosphere.ts";
+
+/** 물리 해색 (선형) — 생성 시 uniforms와 setPalette 복귀가 **같은 상수**를 읽는다.
+ *  두 곳에 리터럴을 두면 한쪽만 고쳐진다(리뷰 지적). */
+const PHYS_SEA = {
+  deep: [0.0008, 0.0045, 0.0075],
+  shallow: [0.010, 0.045, 0.048],
+  scatter: [0.004, 0.030, 0.038],
+} as const;
 
 /** 해상 상태 — 전부 **표시 값**이다(`WAVE_NOTES.displayOnly`). */
 export interface SeaState {
@@ -95,6 +104,9 @@ export interface Ocean {
   setCoast(field: CoastField | null): void;
   /** 캡션이 말할 지금의 해상 상태. */
   describe(): { windSpeed: number; waveHeight: number; slopeVariance: number };
+  /** 물리 팔레트 ↔ 게임 모드 청록 — 색 유니폼 세 벌만 바뀐다(파·포말·해안은 그대로).
+   *  게임 값의 정본은 `core/gamestyle.ts GAME_SEA`, 물리 값의 정본은 `PHYS_SEA`다. */
+  setPalette(game: boolean): void;
   dispose(): void;
 }
 
@@ -148,10 +160,10 @@ export function createOcean(opts: Partial<OceanOptions> = {}): Ocean {
       uRoughness: { value: 0.2 },
       uWaveHeight: { value: 1 },
       // 심해색과 상향 산란 — 선형값. 프레넬이 2%(수직)~100%(스침)로 하늘을 섞는다.
-      uDeepColor: { value: new Vector3(0.0008, 0.0045, 0.0075) },
+      uDeepColor: { value: new Vector3(...PHYS_SEA.deep) },
       // 얕은 물 — 수심 자료가 없어 해안 거리를 대신 쓴다(표시용 대리값).
-      uShallowColor: { value: new Vector3(0.010, 0.045, 0.048) },
-      uScatterColor: { value: new Vector3(0.004, 0.030, 0.038) },
+      uShallowColor: { value: new Vector3(...PHYS_SEA.shallow) },
+      uScatterColor: { value: new Vector3(...PHYS_SEA.scatter) },
       // 포말 양 — 풍속에서 나온다. `setSea`가 채운다.
       uFoamAmount: { value: 0 },
       // **표시 보정값이다.** 이 렌더러의 절대 밝기는 물리 단위가 아니다 — 하늘은
@@ -229,6 +241,14 @@ export function createOcean(opts: Partial<OceanOptions> = {}): Ocean {
       (material.uniforms.uCoastInvSpan!.value as Vector2)
         .set(1 / field.eSpan, 1 / field.nSpan);
       material.uniforms.uHasCoast!.value = 1;
+    },
+    setPalette(game) {
+      const p = game ? GAME_SEA : PHYS_SEA;
+      (material.uniforms.uDeepColor!.value as Vector3).set(p.deep[0]!, p.deep[1]!, p.deep[2]!);
+      (material.uniforms.uShallowColor!.value as Vector3)
+        .set(p.shallow[0]!, p.shallow[1]!, p.shallow[2]!);
+      (material.uniforms.uScatterColor!.value as Vector3)
+        .set(p.scatter[0]!, p.scatter[1]!, p.scatter[2]!);
     },
     describe() {
       return {

@@ -7086,7 +7086,7 @@ function liftAboveGround(eye, groundD, minClearance) {
   return [eye[0], eye[1], Math.min(eye[2], groundD - minClearance)];
 }
 function orbitCamera$1({ pivot, az, el: el2, dist, groundD = null, minClearance = 3 }) {
-  const e = clamp$2(el2, EL_MIN, EL_MAX);
+  const e = clamp$3(el2, EL_MIN, EL_MAX);
   const horiz = Math.cos(e) * dist;
   return {
     eye: liftAboveGround([
@@ -7123,7 +7123,7 @@ function attitudeCamera$1({ pos, az = 2.4, el: el2 = 0.35, dist, groundD = null 
 function rotateBy$1(view, dxPx, dyPx) {
   return {
     az: view.az + dxPx * ROT_PER_PX,
-    el: clamp$2(view.el + dyPx * ROT_PER_PX, EL_MIN, EL_MAX)
+    el: clamp$3(view.el + dyPx * ROT_PER_PX, EL_MIN, EL_MAX)
   };
 }
 function shouldResetSmoothing$1(prevIdx, idx) {
@@ -7143,7 +7143,7 @@ function smooth(prev, desired, dtWall, tau) {
     prev[2] + (desired[2] - prev[2]) * alpha
   ];
 }
-function clamp$2(v2, lo, hi2) {
+function clamp$3(v2, lo, hi2) {
   return Math.min(Math.max(v2, lo), hi2);
 }
 const CAM_MODES = CAM_MODES$1;
@@ -7401,12 +7401,12 @@ function cellInside(pos, cols, r2, c, rect) {
   const f2 = ((r2 + 1) * cols + (c + 1)) * 3;
   return pos[a] >= rect.n0 && pos[f2] <= rect.n1 && pos[a + 1] >= rect.e0 && pos[f2 + 1] <= rect.e1;
 }
-function slope(pos, present, rows, cols, r2, c, dr, dc2, axis) {
+function slope(pos, present, rows, cols, r2, c, dr, dc2, axis2) {
   const at = (rr, cc2) => {
     const i = rr * cols + cc2;
     return present[i] ? -pos[3 * i + 2] : null;
   };
-  const coord = (rr, cc2) => pos[(rr * cols + cc2) * 3 + axis];
+  const coord = (rr, cc2) => pos[(rr * cols + cc2) * 3 + axis2];
   const hasBack = r2 - dr >= 0 && c - dc2 >= 0;
   const hasFwd = r2 + dr < rows && c + dc2 < cols;
   const back = hasBack ? at(r2 - dr, c - dc2) : null;
@@ -7443,11 +7443,176 @@ function elevationAt(tier, n2, e) {
   const z2 = elevationAt$1(tier, n2, e);
   return typeof z2 === "number" && Number.isFinite(z2) ? z2 : null;
 }
-function strideFor$1(nTotal, target = 1500) {
-  return Math.max(1, Math.ceil(nTotal / target));
+const ARCADE = {
+  vMin: 22,
+  vMax: 90,
+  accel: 14,
+  // [m/s²]
+  turnRate: 0.75,
+  // [rad/s] 최대 선회율
+  pitchMax: 0.38,
+  // [rad] ≈ 22°
+  bankMax: 0.75,
+  // [rad] 표시 뱅크 한계
+  pitchTau: 0.35,
+  // [s] 피치 응답 시정수
+  bankTau: 0.22,
+  // [s] 뱅크 응답 시정수
+  floor: 8
+  // [m] 지면 위 최저 높이 — 계획 도구라 추락 대신 스침
+};
+const clamp$2 = (v2, lo, hi2) => Math.min(Math.max(v2, lo), hi2);
+const axis = (v2) => Number.isFinite(v2) ? clamp$2(v2, -1, 1) : 0;
+function spawnArcade(runwayHeading, groundElev) {
+  const elev = groundElev ?? 0;
+  return {
+    pos: [0, 0, -(elev + 150)],
+    psi: runwayHeading ?? 0,
+    theta: 0,
+    phi: 0,
+    V: 45
+  };
 }
-function strideFor(nTotal, target = 1500) {
-  return strideFor$1(nTotal, target);
+function stepArcade(s, input, dt, groundElev) {
+  const h = clamp$2(Number.isFinite(dt) ? dt : 0, 0, 0.25);
+  const turn = axis(input.turn);
+  const pitch = axis(input.pitch);
+  const throttle = axis(input.throttle);
+  const V2 = clamp$2(s.V + throttle * ARCADE.accel * h, ARCADE.vMin, ARCADE.vMax);
+  const kPitch = 1 - Math.exp(-h / ARCADE.pitchTau);
+  const kBank = 1 - Math.exp(-h / ARCADE.bankTau);
+  let theta = s.theta + (pitch * ARCADE.pitchMax - s.theta) * kPitch;
+  const phi = s.phi + (turn * ARCADE.bankMax - s.phi) * kBank;
+  let psi = s.psi + turn * ARCADE.turnRate * h;
+  if (psi >= Math.PI) psi -= 2 * Math.PI;
+  if (psi < -Math.PI) psi += 2 * Math.PI;
+  const cosT = Math.cos(theta);
+  const n2 = s.pos[0] + V2 * cosT * Math.cos(psi) * h;
+  const e = s.pos[1] + V2 * cosT * Math.sin(psi) * h;
+  let d = s.pos[2] - V2 * Math.sin(theta) * h;
+  const minD = -((groundElev ?? 0) + ARCADE.floor);
+  if (d > minD) {
+    d = minD;
+    if (theta < 0) theta = 0;
+  }
+  return { pos: [n2, e, d], psi, theta, phi, V: V2 };
+}
+const STOPS = [
+  [0, [0.44, 0.67, 0.31]],
+  // 저지 들판 — 밝은 초록
+  [0.14, [0.35, 0.58, 0.27]],
+  // 숲 지대 초록
+  [0.32, [0.63, 0.48, 0.29]],
+  // 산허리 — 따뜻한 황갈
+  [0.55, [0.48, 0.34, 0.22]],
+  // 능선 갈색
+  [0.76, [0.42, 0.32, 0.24]],
+  // 설선 직전의 어두운 바위
+  [0.84, [0.9, 0.91, 0.93]],
+  // 눈 — 좁은 구간에서 확 바뀌어야 설선으로 읽힌다
+  [1, [0.96, 0.96, 0.98]]
+];
+function reliefOf(tiers) {
+  let top = 0;
+  for (const t2 of tiers) {
+    if (typeof t2.elev_max === "number" && Number.isFinite(t2.elev_max)) {
+      top = Math.max(top, t2.elev_max);
+    }
+  }
+  return top > 10 ? top : 800;
+}
+function gameRamp(elev, relief, out, i) {
+  const t2 = Math.min(Math.max(relief > 0 ? elev / relief : 0, 0), 1);
+  let lo = STOPS[0];
+  let hi2 = STOPS[STOPS.length - 1];
+  for (let k2 = 0; k2 + 1 < STOPS.length; k2++) {
+    if (t2 <= STOPS[k2 + 1][0]) {
+      lo = STOPS[k2];
+      hi2 = STOPS[k2 + 1];
+      break;
+    }
+  }
+  const span = hi2[0] - lo[0];
+  const f2 = span > 0 ? (t2 - lo[0]) / span : 0;
+  for (let k2 = 0; k2 < 3; k2++) {
+    const srgb = lo[1][k2] + (hi2[1][k2] - lo[1][k2]) * f2;
+    out[i + k2] = Math.pow(srgb, 2.2);
+  }
+}
+const GAME_SEA = {
+  deep: [0.01, 0.078, 0.082],
+  shallow: [0.055, 0.3, 0.28],
+  scatter: [0.03, 0.19, 0.2]
+};
+const PROPS = {
+  gridStep: 95,
+  // [m] 후보 격자 — 성긴 격자가 곧 개수 상한이다
+  originClear: 1200,
+  // [m]
+  seaLevel: 2.5,
+  // [m] 이하이면 물가/간척지로 보고 비운다
+  pineSlopeMax: 0.45,
+  // 무차원 경사(수평거리당 표고차)
+  leafSlopeMax: 0.22,
+  cabinSlopeMax: 0.06,
+  maxPines: 4200,
+  maxLeaves: 1600,
+  maxCabins: 42
+};
+function hash2(ix, iy, seed) {
+  let h = ix * 374761393 + iy * 668265263 + seed * 2246822519 | 0;
+  h = Math.imul(h ^ h >>> 13, 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+function slopeAt(sample, n2, e, z0, step) {
+  const zn = sample(n2 + step, e);
+  const zs = sample(n2 - step, e);
+  const ze = sample(n2, e + step);
+  const zw = sample(n2, e - step);
+  if (zn === null || zs === null || ze === null || zw === null) return Infinity;
+  return Math.hypot((zn - zs) / (2 * step), (ze - zw) / (2 * step));
+}
+function placeProps(sample, rect, relief, seed = 1) {
+  const out = { pines: [], leaves: [], cabins: [] };
+  const step = PROPS.gridStep;
+  const treeLine = relief * 0.72;
+  const i0 = Math.ceil(rect.n0 / step);
+  const i1 = Math.floor(rect.n1 / step);
+  const j0 = Math.ceil(rect.e0 / step);
+  const j1 = Math.floor(rect.e1 / step);
+  for (let i = i0; i <= i1; i++) {
+    for (let j = j0; j <= j1; j++) {
+      const jn = (hash2(i, j, seed) - 0.5) * step * 0.9;
+      const je2 = (hash2(i, j, seed + 1) - 0.5) * step * 0.9;
+      const n2 = i * step + jn;
+      const e = j * step + je2;
+      if (Math.hypot(n2, e) < PROPS.originClear) continue;
+      const z2 = sample(n2, e);
+      if (z2 === null || z2 <= PROPS.seaLevel || z2 > treeLine) continue;
+      const slope2 = slopeAt(sample, n2, e, z2, step);
+      const ci2 = Math.floor(n2 / 300);
+      const cj2 = Math.floor(e / 300);
+      const cluster = 0.6 * hash2(ci2, cj2, seed + 2) + 0.4 * hash2(i >> 1, j >> 1, seed + 3);
+      const r2 = hash2(i, j, seed + 4);
+      const base = {
+        n: n2,
+        e,
+        elev: z2,
+        scale: 0.75 + 0.5 * hash2(i, j, seed + 5),
+        rot: hash2(i, j, seed + 6) * Math.PI * 2,
+        tint: hash2(i, j, seed + 7)
+      };
+      if (slope2 < PROPS.cabinSlopeMax && z2 < 130 && r2 > 0.985 && out.cabins.length < PROPS.maxCabins) {
+        out.cabins.push(base);
+      } else if (slope2 < PROPS.leafSlopeMax && z2 < treeLine * 0.45 && cluster > 0.55 && r2 > 0.45 && out.leaves.length < PROPS.maxLeaves) {
+        out.leaves.push(base);
+      } else if (slope2 < PROPS.pineSlopeMax && cluster > 0.42 && r2 > 0.35 && out.pines.length < PROPS.maxPines) {
+        out.pines.push(base);
+      }
+    }
+  }
+  return out;
 }
 /**
  * @license
@@ -9039,11 +9204,11 @@ class Quaternion {
    * @param {number} angle - The angle in radians.
    * @return {Quaternion} A reference to this quaternion.
    */
-  setFromAxisAngle(axis, angle) {
+  setFromAxisAngle(axis2, angle) {
     const halfAngle = angle / 2, s = Math.sin(halfAngle);
-    this._x = axis.x * s;
-    this._y = axis.y * s;
-    this._z = axis.z * s;
+    this._x = axis2.x * s;
+    this._y = axis2.y * s;
+    this._z = axis2.z * s;
     this._w = Math.cos(halfAngle);
     this._onChangeCallback();
     return this;
@@ -9675,8 +9840,8 @@ class Vector3 {
    * @param {number} angle - The angle in radians.
    * @return {Vector3} A reference to this vector.
    */
-  applyAxisAngle(axis, angle) {
-    return this.applyQuaternion(_quaternion$5.setFromAxisAngle(axis, angle));
+  applyAxisAngle(axis2, angle) {
+    return this.applyQuaternion(_quaternion$5.setFromAxisAngle(axis2, angle));
   }
   /**
    * Multiplies this vector with the given 3x3 matrix.
@@ -13243,11 +13408,11 @@ class Matrix4 {
    * @param {number} angle - The rotation in radians.
    * @return {Matrix4} A reference to this matrix.
    */
-  makeRotationAxis(axis, angle) {
+  makeRotationAxis(axis2, angle) {
     const c = Math.cos(angle);
     const s = Math.sin(angle);
     const t2 = 1 - c;
-    const x2 = axis.x, y2 = axis.y, z2 = axis.z;
+    const x2 = axis2.x, y2 = axis2.y, z2 = axis2.z;
     const tx = t2 * x2, ty = t2 * y2;
     this.set(
       tx * x2 + c,
@@ -14136,8 +14301,8 @@ class Object3D extends EventDispatcher {
    * @param {Vector3} axis - The (normalized) axis vector.
    * @param {number} angle - The angle in radians.
    */
-  setRotationFromAxisAngle(axis, angle) {
-    this.quaternion.setFromAxisAngle(axis, angle);
+  setRotationFromAxisAngle(axis2, angle) {
+    this.quaternion.setFromAxisAngle(axis2, angle);
   }
   /**
    * Sets the given rotation represented as Euler angles to the 3D object.
@@ -14171,8 +14336,8 @@ class Object3D extends EventDispatcher {
    * @param {number} angle - The angle in radians.
    * @return {Object3D} A reference to this instance.
    */
-  rotateOnAxis(axis, angle) {
-    _q1.setFromAxisAngle(axis, angle);
+  rotateOnAxis(axis2, angle) {
+    _q1.setFromAxisAngle(axis2, angle);
     this.quaternion.multiply(_q1);
     return this;
   }
@@ -14183,8 +14348,8 @@ class Object3D extends EventDispatcher {
    * @param {number} angle - The angle in radians.
    * @return {Object3D} A reference to this instance.
    */
-  rotateOnWorldAxis(axis, angle) {
-    _q1.setFromAxisAngle(axis, angle);
+  rotateOnWorldAxis(axis2, angle) {
+    _q1.setFromAxisAngle(axis2, angle);
     this.quaternion.premultiply(_q1);
     return this;
   }
@@ -14222,8 +14387,8 @@ class Object3D extends EventDispatcher {
    * @param {number} distance - The distance in world units.
    * @return {Object3D} A reference to this instance.
    */
-  translateOnAxis(axis, distance) {
-    _v1$6.copy(axis).applyQuaternion(this.quaternion);
+  translateOnAxis(axis2, distance) {
+    _v1$6.copy(axis2).applyQuaternion(this.quaternion);
     this.position.add(_v1$6.multiplyScalar(distance));
     return this;
   }
@@ -20052,13 +20217,13 @@ class Mesh extends Object3D {
   }
 }
 function checkIntersection$1(object, material, raycaster, ray, pA, pB, pC, point) {
-  let intersect;
+  let intersect2;
   if (material.side === BackSide) {
-    intersect = ray.intersectTriangle(pC, pB, pA, true, point);
+    intersect2 = ray.intersectTriangle(pC, pB, pA, true, point);
   } else {
-    intersect = ray.intersectTriangle(pA, pB, pC, material.side === FrontSide, point);
+    intersect2 = ray.intersectTriangle(pA, pB, pC, material.side === FrontSide, point);
   }
-  if (intersect === null) return null;
+  if (intersect2 === null) return null;
   _intersectionPointWorld.copy(point);
   _intersectionPointWorld.applyMatrix4(object.matrixWorld);
   const distance = raycaster.ray.origin.distanceTo(_intersectionPointWorld);
@@ -20672,10 +20837,10 @@ class InstancedMesh extends Mesh {
       _mesh$1.matrixWorld = _instanceWorldMatrix;
       _mesh$1.raycast(raycaster, _instanceIntersects);
       for (let i = 0, l2 = _instanceIntersects.length; i < l2; i++) {
-        const intersect = _instanceIntersects[i];
-        intersect.instanceId = instanceId;
-        intersect.object = this;
-        intersects.push(intersect);
+        const intersect2 = _instanceIntersects[i];
+        intersect2.instanceId = instanceId;
+        intersect2.object = this;
+        intersects.push(intersect2);
       }
       _instanceIntersects.length = 0;
     }
@@ -21284,32 +21449,32 @@ class Line extends Object3D {
       for (let i = start, l2 = end - 1; i < l2; i += step) {
         const a = index.getX(i);
         const b = index.getX(i + 1);
-        const intersect = checkIntersection(this, raycaster, _ray$1, localThresholdSq, a, b, i);
-        if (intersect) {
-          intersects.push(intersect);
+        const intersect2 = checkIntersection(this, raycaster, _ray$1, localThresholdSq, a, b, i);
+        if (intersect2) {
+          intersects.push(intersect2);
         }
       }
       if (this.isLineLoop) {
         const a = index.getX(end - 1);
         const b = index.getX(start);
-        const intersect = checkIntersection(this, raycaster, _ray$1, localThresholdSq, a, b, end - 1);
-        if (intersect) {
-          intersects.push(intersect);
+        const intersect2 = checkIntersection(this, raycaster, _ray$1, localThresholdSq, a, b, end - 1);
+        if (intersect2) {
+          intersects.push(intersect2);
         }
       }
     } else {
       const start = Math.max(0, drawRange.start);
       const end = Math.min(positionAttribute.count, drawRange.start + drawRange.count);
       for (let i = start, l2 = end - 1; i < l2; i += step) {
-        const intersect = checkIntersection(this, raycaster, _ray$1, localThresholdSq, i, i + 1, i);
-        if (intersect) {
-          intersects.push(intersect);
+        const intersect2 = checkIntersection(this, raycaster, _ray$1, localThresholdSq, i, i + 1, i);
+        if (intersect2) {
+          intersects.push(intersect2);
         }
       }
       if (this.isLineLoop) {
-        const intersect = checkIntersection(this, raycaster, _ray$1, localThresholdSq, end - 1, start, end - 1);
-        if (intersect) {
-          intersects.push(intersect);
+        const intersect2 = checkIntersection(this, raycaster, _ray$1, localThresholdSq, end - 1, start, end - 1);
+        if (intersect2) {
+          intersects.push(intersect2);
         }
       }
     }
@@ -21829,6 +21994,494 @@ class CircleGeometry extends BufferGeometry {
    */
   static fromJSON(data) {
     return new CircleGeometry(data.radius, data.segments, data.thetaStart, data.thetaLength);
+  }
+}
+class CylinderGeometry extends BufferGeometry {
+  /**
+   * Constructs a new cylinder geometry.
+   *
+   * @param {number} [radiusTop=1] - Radius of the cylinder at the top.
+   * @param {number} [radiusBottom=1] - Radius of the cylinder at the bottom.
+   * @param {number} [height=1] - Height of the cylinder.
+   * @param {number} [radialSegments=32] - Number of segmented faces around the circumference of the cylinder.
+   * @param {number} [heightSegments=1] - Number of rows of faces along the height of the cylinder.
+   * @param {boolean} [openEnded=false] - Whether the base of the cylinder is open or capped.
+   * @param {number} [thetaStart=0] - Start angle for first segment, in radians.
+   * @param {number} [thetaLength=Math.PI*2] - The central angle, often called theta, of the circular sector, in radians.
+   * The default value results in a complete cylinder.
+   */
+  constructor(radiusTop = 1, radiusBottom = 1, height = 1, radialSegments = 32, heightSegments = 1, openEnded = false, thetaStart = 0, thetaLength = Math.PI * 2) {
+    super();
+    this.type = "CylinderGeometry";
+    this.parameters = {
+      radiusTop,
+      radiusBottom,
+      height,
+      radialSegments,
+      heightSegments,
+      openEnded,
+      thetaStart,
+      thetaLength
+    };
+    const scope = this;
+    radialSegments = Math.floor(radialSegments);
+    heightSegments = Math.floor(heightSegments);
+    const indices = [];
+    const vertices = [];
+    const normals = [];
+    const uvs = [];
+    let index = 0;
+    const indexArray = [];
+    const halfHeight = height / 2;
+    let groupStart = 0;
+    generateTorso();
+    if (openEnded === false) {
+      if (radiusTop > 0) generateCap(true);
+      if (radiusBottom > 0) generateCap(false);
+    }
+    this.setIndex(indices);
+    this.setAttribute("position", new Float32BufferAttribute(vertices, 3));
+    this.setAttribute("normal", new Float32BufferAttribute(normals, 3));
+    this.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+    function generateTorso() {
+      const normal = new Vector3();
+      const vertex2 = new Vector3();
+      let groupCount = 0;
+      const slope2 = (radiusBottom - radiusTop) / height;
+      for (let y2 = 0; y2 <= heightSegments; y2++) {
+        const indexRow = [];
+        const v2 = y2 / heightSegments;
+        const radius = v2 * (radiusBottom - radiusTop) + radiusTop;
+        for (let x2 = 0; x2 <= radialSegments; x2++) {
+          const u2 = x2 / radialSegments;
+          const theta = u2 * thetaLength + thetaStart;
+          const sinTheta = Math.sin(theta);
+          const cosTheta = Math.cos(theta);
+          vertex2.x = radius * sinTheta;
+          vertex2.y = -v2 * height + halfHeight;
+          vertex2.z = radius * cosTheta;
+          vertices.push(vertex2.x, vertex2.y, vertex2.z);
+          normal.set(sinTheta, slope2, cosTheta).normalize();
+          normals.push(normal.x, normal.y, normal.z);
+          uvs.push(u2, 1 - v2);
+          indexRow.push(index++);
+        }
+        indexArray.push(indexRow);
+      }
+      for (let x2 = 0; x2 < radialSegments; x2++) {
+        for (let y2 = 0; y2 < heightSegments; y2++) {
+          const a = indexArray[y2][x2];
+          const b = indexArray[y2 + 1][x2];
+          const c = indexArray[y2 + 1][x2 + 1];
+          const d = indexArray[y2][x2 + 1];
+          if (radiusTop > 0 || y2 !== 0) {
+            indices.push(a, b, d);
+            groupCount += 3;
+          }
+          if (radiusBottom > 0 || y2 !== heightSegments - 1) {
+            indices.push(b, c, d);
+            groupCount += 3;
+          }
+        }
+      }
+      scope.addGroup(groupStart, groupCount, 0);
+      groupStart += groupCount;
+    }
+    function generateCap(top) {
+      const centerIndexStart = index;
+      const uv = new Vector2();
+      const vertex2 = new Vector3();
+      let groupCount = 0;
+      const radius = top === true ? radiusTop : radiusBottom;
+      const sign = top === true ? 1 : -1;
+      for (let x2 = 1; x2 <= radialSegments; x2++) {
+        vertices.push(0, halfHeight * sign, 0);
+        normals.push(0, sign, 0);
+        uvs.push(0.5, 0.5);
+        index++;
+      }
+      const centerIndexEnd = index;
+      for (let x2 = 0; x2 <= radialSegments; x2++) {
+        const u2 = x2 / radialSegments;
+        const theta = u2 * thetaLength + thetaStart;
+        const cosTheta = Math.cos(theta);
+        const sinTheta = Math.sin(theta);
+        vertex2.x = radius * sinTheta;
+        vertex2.y = halfHeight * sign;
+        vertex2.z = radius * cosTheta;
+        vertices.push(vertex2.x, vertex2.y, vertex2.z);
+        normals.push(0, sign, 0);
+        uv.x = cosTheta * 0.5 + 0.5;
+        uv.y = sinTheta * 0.5 * sign + 0.5;
+        uvs.push(uv.x, uv.y);
+        index++;
+      }
+      for (let x2 = 0; x2 < radialSegments; x2++) {
+        const c = centerIndexStart + x2;
+        const i = centerIndexEnd + x2;
+        if (top === true) {
+          indices.push(i, i + 1, c);
+        } else {
+          indices.push(i + 1, i, c);
+        }
+        groupCount += 3;
+      }
+      scope.addGroup(groupStart, groupCount, top === true ? 1 : 2);
+      groupStart += groupCount;
+    }
+  }
+  copy(source) {
+    super.copy(source);
+    this.parameters = Object.assign({}, source.parameters);
+    return this;
+  }
+  /**
+   * Factory method for creating an instance of this class from the given
+   * JSON object.
+   *
+   * @param {Object} data - A JSON object representing the serialized geometry.
+   * @return {CylinderGeometry} A new instance.
+   */
+  static fromJSON(data) {
+    return new CylinderGeometry(data.radiusTop, data.radiusBottom, data.height, data.radialSegments, data.heightSegments, data.openEnded, data.thetaStart, data.thetaLength);
+  }
+}
+class ConeGeometry extends CylinderGeometry {
+  /**
+   * Constructs a new cone geometry.
+   *
+   * @param {number} [radius=1] - Radius of the cone base.
+   * @param {number} [height=1] - Height of the cone.
+   * @param {number} [radialSegments=32] - Number of segmented faces around the circumference of the cone.
+   * @param {number} [heightSegments=1] - Number of rows of faces along the height of the cone.
+   * @param {boolean} [openEnded=false] - Whether the base of the cone is open or capped.
+   * @param {number} [thetaStart=0] - Start angle for first segment, in radians.
+   * @param {number} [thetaLength=Math.PI*2] - The central angle, often called theta, of the circular sector, in radians.
+   * The default value results in a complete cone.
+   */
+  constructor(radius = 1, height = 1, radialSegments = 32, heightSegments = 1, openEnded = false, thetaStart = 0, thetaLength = Math.PI * 2) {
+    super(0, radius, height, radialSegments, heightSegments, openEnded, thetaStart, thetaLength);
+    this.type = "ConeGeometry";
+    this.parameters = {
+      radius,
+      height,
+      radialSegments,
+      heightSegments,
+      openEnded,
+      thetaStart,
+      thetaLength
+    };
+  }
+  /**
+   * Factory method for creating an instance of this class from the given
+   * JSON object.
+   *
+   * @param {Object} data - A JSON object representing the serialized geometry.
+   * @return {ConeGeometry} A new instance.
+   */
+  static fromJSON(data) {
+    return new ConeGeometry(data.radius, data.height, data.radialSegments, data.heightSegments, data.openEnded, data.thetaStart, data.thetaLength);
+  }
+}
+class PolyhedronGeometry extends BufferGeometry {
+  /**
+   * Constructs a new polyhedron geometry.
+   *
+   * @param {Array<number>} [vertices] - A flat array of vertices describing the base shape.
+   * @param {Array<number>} [indices] - A flat array of indices describing the base shape.
+   * @param {number} [radius=1] - The radius of the shape.
+   * @param {number} [detail=0] - How many levels to subdivide the geometry. The more detail, the smoother the shape.
+   */
+  constructor(vertices = [], indices = [], radius = 1, detail = 0) {
+    super();
+    this.type = "PolyhedronGeometry";
+    this.parameters = {
+      vertices,
+      indices,
+      radius,
+      detail
+    };
+    const vertexBuffer = [];
+    const uvBuffer = [];
+    subdivide(detail);
+    applyRadius(radius);
+    generateUVs();
+    this.setAttribute("position", new Float32BufferAttribute(vertexBuffer, 3));
+    this.setAttribute("normal", new Float32BufferAttribute(vertexBuffer.slice(), 3));
+    this.setAttribute("uv", new Float32BufferAttribute(uvBuffer, 2));
+    if (detail === 0) {
+      this.computeVertexNormals();
+    } else {
+      this.normalizeNormals();
+    }
+    function subdivide(detail2) {
+      const a = new Vector3();
+      const b = new Vector3();
+      const c = new Vector3();
+      for (let i = 0; i < indices.length; i += 3) {
+        getVertexByIndex(indices[i + 0], a);
+        getVertexByIndex(indices[i + 1], b);
+        getVertexByIndex(indices[i + 2], c);
+        subdivideFace(a, b, c, detail2);
+      }
+    }
+    function subdivideFace(a, b, c, detail2) {
+      const cols = detail2 + 1;
+      const v2 = [];
+      for (let i = 0; i <= cols; i++) {
+        v2[i] = [];
+        const aj2 = a.clone().lerp(c, i / cols);
+        const bj2 = b.clone().lerp(c, i / cols);
+        const rows = cols - i;
+        for (let j = 0; j <= rows; j++) {
+          if (j === 0 && i === cols) {
+            v2[i][j] = aj2;
+          } else {
+            v2[i][j] = aj2.clone().lerp(bj2, j / rows);
+          }
+        }
+      }
+      for (let i = 0; i < cols; i++) {
+        for (let j = 0; j < 2 * (cols - i) - 1; j++) {
+          const k2 = Math.floor(j / 2);
+          if (j % 2 === 0) {
+            pushVertex(v2[i][k2 + 1]);
+            pushVertex(v2[i + 1][k2]);
+            pushVertex(v2[i][k2]);
+          } else {
+            pushVertex(v2[i][k2 + 1]);
+            pushVertex(v2[i + 1][k2 + 1]);
+            pushVertex(v2[i + 1][k2]);
+          }
+        }
+      }
+    }
+    function applyRadius(radius2) {
+      const vertex2 = new Vector3();
+      for (let i = 0; i < vertexBuffer.length; i += 3) {
+        vertex2.x = vertexBuffer[i + 0];
+        vertex2.y = vertexBuffer[i + 1];
+        vertex2.z = vertexBuffer[i + 2];
+        vertex2.normalize().multiplyScalar(radius2);
+        vertexBuffer[i + 0] = vertex2.x;
+        vertexBuffer[i + 1] = vertex2.y;
+        vertexBuffer[i + 2] = vertex2.z;
+      }
+    }
+    function generateUVs() {
+      const vertex2 = new Vector3();
+      for (let i = 0; i < vertexBuffer.length; i += 3) {
+        vertex2.x = vertexBuffer[i + 0];
+        vertex2.y = vertexBuffer[i + 1];
+        vertex2.z = vertexBuffer[i + 2];
+        const u2 = azimuth(vertex2) / 2 / Math.PI + 0.5;
+        const v2 = inclination(vertex2) / Math.PI + 0.5;
+        uvBuffer.push(u2, 1 - v2);
+      }
+      correctUVs();
+      correctSeam();
+    }
+    function correctSeam() {
+      for (let i = 0; i < uvBuffer.length; i += 6) {
+        const x0 = uvBuffer[i + 0];
+        const x1 = uvBuffer[i + 2];
+        const x2 = uvBuffer[i + 4];
+        const max = Math.max(x0, x1, x2);
+        const min = Math.min(x0, x1, x2);
+        if (max > 0.9 && min < 0.1) {
+          if (x0 < 0.2) uvBuffer[i + 0] += 1;
+          if (x1 < 0.2) uvBuffer[i + 2] += 1;
+          if (x2 < 0.2) uvBuffer[i + 4] += 1;
+        }
+      }
+    }
+    function pushVertex(vertex2) {
+      vertexBuffer.push(vertex2.x, vertex2.y, vertex2.z);
+    }
+    function getVertexByIndex(index, vertex2) {
+      const stride = index * 3;
+      vertex2.x = vertices[stride + 0];
+      vertex2.y = vertices[stride + 1];
+      vertex2.z = vertices[stride + 2];
+    }
+    function correctUVs() {
+      const a = new Vector3();
+      const b = new Vector3();
+      const c = new Vector3();
+      const centroid = new Vector3();
+      const uvA = new Vector2();
+      const uvB = new Vector2();
+      const uvC = new Vector2();
+      for (let i = 0, j = 0; i < vertexBuffer.length; i += 9, j += 6) {
+        a.set(vertexBuffer[i + 0], vertexBuffer[i + 1], vertexBuffer[i + 2]);
+        b.set(vertexBuffer[i + 3], vertexBuffer[i + 4], vertexBuffer[i + 5]);
+        c.set(vertexBuffer[i + 6], vertexBuffer[i + 7], vertexBuffer[i + 8]);
+        uvA.set(uvBuffer[j + 0], uvBuffer[j + 1]);
+        uvB.set(uvBuffer[j + 2], uvBuffer[j + 3]);
+        uvC.set(uvBuffer[j + 4], uvBuffer[j + 5]);
+        centroid.copy(a).add(b).add(c).divideScalar(3);
+        const azi = azimuth(centroid);
+        correctUV(uvA, j + 0, a, azi);
+        correctUV(uvB, j + 2, b, azi);
+        correctUV(uvC, j + 4, c, azi);
+      }
+    }
+    function correctUV(uv, stride, vector, azimuth2) {
+      if (azimuth2 < 0 && uv.x === 1) {
+        uvBuffer[stride] = uv.x - 1;
+      }
+      if (vector.x === 0 && vector.z === 0) {
+        uvBuffer[stride] = azimuth2 / 2 / Math.PI + 0.5;
+      }
+    }
+    function azimuth(vector) {
+      return Math.atan2(vector.z, -vector.x);
+    }
+    function inclination(vector) {
+      return Math.atan2(-vector.y, Math.sqrt(vector.x * vector.x + vector.z * vector.z));
+    }
+  }
+  copy(source) {
+    super.copy(source);
+    this.parameters = Object.assign({}, source.parameters);
+    return this;
+  }
+  /**
+   * Factory method for creating an instance of this class from the given
+   * JSON object.
+   *
+   * @param {Object} data - A JSON object representing the serialized geometry.
+   * @return {PolyhedronGeometry} A new instance.
+   */
+  static fromJSON(data) {
+    return new PolyhedronGeometry(data.vertices, data.indices, data.radius, data.detail);
+  }
+}
+class IcosahedronGeometry extends PolyhedronGeometry {
+  /**
+   * Constructs a new icosahedron geometry.
+   *
+   * @param {number} [radius=1] - Radius of the icosahedron.
+   * @param {number} [detail=0] - Setting this to a value greater than `0` adds vertices making it no longer a icosahedron.
+   */
+  constructor(radius = 1, detail = 0) {
+    const t2 = (1 + Math.sqrt(5)) / 2;
+    const vertices = [
+      -1,
+      t2,
+      0,
+      1,
+      t2,
+      0,
+      -1,
+      -t2,
+      0,
+      1,
+      -t2,
+      0,
+      0,
+      -1,
+      t2,
+      0,
+      1,
+      t2,
+      0,
+      -1,
+      -t2,
+      0,
+      1,
+      -t2,
+      t2,
+      0,
+      -1,
+      t2,
+      0,
+      1,
+      -t2,
+      0,
+      -1,
+      -t2,
+      0,
+      1
+    ];
+    const indices = [
+      0,
+      11,
+      5,
+      0,
+      5,
+      1,
+      0,
+      1,
+      7,
+      0,
+      7,
+      10,
+      0,
+      10,
+      11,
+      1,
+      5,
+      9,
+      5,
+      11,
+      4,
+      11,
+      10,
+      2,
+      10,
+      7,
+      6,
+      7,
+      1,
+      8,
+      3,
+      9,
+      4,
+      3,
+      4,
+      2,
+      3,
+      2,
+      6,
+      3,
+      6,
+      8,
+      3,
+      8,
+      9,
+      4,
+      9,
+      5,
+      2,
+      4,
+      11,
+      6,
+      2,
+      10,
+      8,
+      6,
+      7,
+      9,
+      8,
+      1
+    ];
+    super(vertices, indices, radius, detail);
+    this.type = "IcosahedronGeometry";
+    this.parameters = {
+      radius,
+      detail
+    };
+  }
+  /**
+   * Factory method for creating an instance of this class from the given
+   * JSON object.
+   *
+   * @param {Object} data - A JSON object representing the serialized geometry.
+   * @return {IcosahedronGeometry} A new instance.
+   */
+  static fromJSON(data) {
+    return new IcosahedronGeometry(data.radius, data.detail);
   }
 }
 class PlaneGeometry extends BufferGeometry {
@@ -25954,6 +26607,145 @@ PropertyBinding.prototype.SetterByBindingTypeAndVersioning = [
     PropertyBinding.prototype._setValue_fromArray_setMatrixWorldNeedsUpdate
   ]
 ];
+const _matrix = /* @__PURE__ */ new Matrix4();
+class Raycaster {
+  /**
+   * Constructs a new raycaster.
+   *
+   * @param {Vector3} origin - The origin vector where the ray casts from.
+   * @param {Vector3} direction - The (normalized) direction vector that gives direction to the ray.
+   * @param {number} [near=0] - All results returned are further away than near. Near can't be negative.
+   * @param {number} [far=Infinity] - All results returned are closer than far. Far can't be lower than near.
+   */
+  constructor(origin, direction, near = 0, far = Infinity) {
+    this.ray = new Ray(origin, direction);
+    this.near = near;
+    this.far = far;
+    this.camera = null;
+    this.layers = new Layers();
+    this.params = {
+      Mesh: {},
+      Line: { threshold: 1 },
+      LOD: {},
+      Points: { threshold: 1 },
+      Sprite: {}
+    };
+  }
+  /**
+   * Updates the ray with a new origin and direction by copying the values from the arguments.
+   *
+   * @param {Vector3} origin - The origin vector where the ray casts from.
+   * @param {Vector3} direction - The (normalized) direction vector that gives direction to the ray.
+   */
+  set(origin, direction) {
+    this.ray.set(origin, direction);
+  }
+  /**
+   * Uses the given coordinates and camera to compute a new origin and direction for the internal ray.
+   *
+   * @param {Vector2} coords - 2D coordinates of the mouse, in normalized device coordinates (NDC).
+   * X and Y components should be between `-1` and `1`.
+   * @param {Camera} camera - The camera from which the ray should originate.
+   */
+  setFromCamera(coords, camera) {
+    if (camera.isPerspectiveCamera) {
+      this.ray.origin.setFromMatrixPosition(camera.matrixWorld);
+      this.ray.direction.set(coords.x, coords.y, 0.5).unproject(camera).sub(this.ray.origin).normalize();
+      this.camera = camera;
+    } else if (camera.isOrthographicCamera) {
+      this.ray.origin.set(coords.x, coords.y, camera.projectionMatrix.elements[14]).unproject(camera);
+      this.ray.direction.set(0, 0, -1).transformDirection(camera.matrixWorld);
+      this.camera = camera;
+    } else {
+      error("Raycaster: Unsupported camera type: " + camera.type);
+    }
+  }
+  /**
+   * Uses the given WebXR controller to compute a new origin and direction for the internal ray.
+   *
+   * @param {WebXRController} controller - The controller to copy the position and direction from.
+   * @return {Raycaster} A reference to this raycaster.
+   */
+  setFromXRController(controller) {
+    _matrix.identity().extractRotation(controller.matrixWorld);
+    this.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+    this.ray.direction.set(0, 0, -1).applyMatrix4(_matrix);
+    return this;
+  }
+  /**
+   * The intersection point of a raycaster intersection test.
+   * @typedef {Object} Raycaster~Intersection
+   * @property {number} distance - The distance from the ray's origin to the intersection point.
+   * @property {number} distanceToRay -  Some 3D objects e.g. {@link Points} provide the distance of the
+   * intersection to the nearest point on the ray. For other objects it will be `undefined`.
+   * @property {Vector3} point - The intersection point, in world coordinates.
+   * @property {Object} face - The face that has been intersected.
+   * @property {number} faceIndex - The face index.
+   * @property {Object3D} object - The 3D object that has been intersected.
+   * @property {Vector2} uv - U,V coordinates at point of intersection.
+   * @property {Vector2} uv1 - Second set of U,V coordinates at point of intersection.
+   * @property {Vector3} normal - Interpolated normal vector at point of intersection.
+   * @property {number} instanceId - The index number of the instance where the ray
+   * intersects the {@link InstancedMesh}.
+   */
+  /**
+   * Checks all intersection between the ray and the object with or without the
+   * descendants. Intersections are returned sorted by distance, closest first.
+   *
+   * `Raycaster` delegates to the `raycast()` method of the passed 3D object, when
+   * evaluating whether the ray intersects the object or not. This allows meshes to respond
+   * differently to ray casting than lines or points.
+   *
+   * Note that for meshes, faces must be pointed towards the origin of the ray in order
+   * to be detected; intersections of the ray passing through the back of a face will not
+   * be detected. To raycast against both faces of an object, you'll want to set  {@link Material#side}
+   * to `THREE.DoubleSide`.
+   *
+   * @param {Object3D} object - The 3D object to check for intersection with the ray.
+   * @param {boolean} [recursive=true] - If set to `true`, it also checks all descendants.
+   * Otherwise it only checks intersection with the object.
+   * @param {Array<Raycaster~Intersection>} [intersects=[]] The target array that holds the result of the method.
+   * @return {Array<Raycaster~Intersection>} An array holding the intersection points.
+   */
+  intersectObject(object, recursive = true, intersects = []) {
+    intersect(object, this, intersects, recursive);
+    intersects.sort(ascSort);
+    return intersects;
+  }
+  /**
+   * Checks all intersection between the ray and the objects with or without
+   * the descendants. Intersections are returned sorted by distance, closest first.
+   *
+   * @param {Array<Object3D>} objects - The 3D objects to check for intersection with the ray.
+   * @param {boolean} [recursive=true] - If set to `true`, it also checks all descendants.
+   * Otherwise it only checks intersection with the object.
+   * @param {Array<Raycaster~Intersection>} [intersects=[]] The target array that holds the result of the method.
+   * @return {Array<Raycaster~Intersection>} An array holding the intersection points.
+   */
+  intersectObjects(objects, recursive = true, intersects = []) {
+    for (let i = 0, l2 = objects.length; i < l2; i++) {
+      intersect(objects[i], this, intersects, recursive);
+    }
+    intersects.sort(ascSort);
+    return intersects;
+  }
+}
+function ascSort(a, b) {
+  return a.distance - b.distance;
+}
+function intersect(object, raycaster, intersects, recursive) {
+  let propagate = true;
+  if (object.layers.test(raycaster.layers)) {
+    const result = object.raycast(raycaster, intersects);
+    if (result === false) propagate = false;
+  }
+  if (propagate === true && recursive === true) {
+    const children = object.children;
+    for (let i = 0, l2 = children.length; i < l2; i++) {
+      intersect(children[i], raycaster, intersects, true);
+    }
+  }
+}
 class Matrix2 {
   static {
     Matrix2.prototype.isMatrix2 = true;
@@ -37751,6 +38543,98 @@ ${FRAG_BODY}`);
   };
   material.needsUpdate = true;
 }
+function toWorld(n2, e, d) {
+  const v2 = nedToRender(n2, e, d);
+  return [v2[0], v2[1], v2[2]];
+}
+const SINK = 3.2;
+const PARTS = {
+  pines: [
+    {
+      geometry: new CylinderGeometry(0.28, 0.45, 1.8 + SINK, 5).translate(0, 0.9 - SINK / 2, 0),
+      color: "#5b4630",
+      jitter: 0.15
+    },
+    {
+      geometry: new ConeGeometry(2.5, 7.2, 6).translate(0, 1.6 + 3.6, 0),
+      color: "#2e6a3b",
+      jitter: 0.4
+    }
+  ],
+  leaves: [
+    {
+      geometry: new CylinderGeometry(0.32, 0.5, 2.4 + SINK, 5).translate(0, 1.2 - SINK / 2, 0),
+      color: "#6b5238",
+      jitter: 0.15
+    },
+    {
+      geometry: new IcosahedronGeometry(2.7, 0).translate(0, 4.4, 0),
+      color: "#4f8a3c",
+      jitter: 0.45
+    }
+  ],
+  cabins: [
+    // 집은 평지(경사 0.06 미만)에만 서므로 연장 폭이 작아도 된다.
+    {
+      geometry: new BoxGeometry(5.5, 3 + 1.2, 4.2).translate(0, 1.5 - 0.6, 0),
+      color: "#8a6a4a",
+      jitter: 0.2
+    },
+    // 지붕 — 45° 돌린 상자의 위 절반만 벽 밖으로 나온다(마름모 단면). 프리미티브
+    // 둘로 지붕을 읽게 하는 가장 싼 방법이다.
+    {
+      geometry: new BoxGeometry(4.4, 4.4, 4.8).rotateZ(Math.PI / 4).translate(0, 2.6, 0),
+      color: "#7d3b32",
+      jitter: 0.15
+    }
+  ]
+};
+function fillInstances(mesh, places, part) {
+  const m2 = new Matrix4();
+  const p2 = new Vector3();
+  const q2 = new Quaternion();
+  const s = new Vector3();
+  const up = new Vector3(0, 1, 0);
+  const base = new Color(part.color);
+  const c = new Color();
+  for (let i = 0; i < places.length; i++) {
+    const pl2 = places[i];
+    const w2 = toWorld(pl2.n, pl2.e, -pl2.elev);
+    p2.set(w2[0], w2[1], w2[2]);
+    q2.setFromAxisAngle(up, pl2.rot);
+    s.setScalar(pl2.scale);
+    mesh.setMatrixAt(i, m2.compose(p2, q2, s));
+    c.copy(base).multiplyScalar(1 - part.jitter / 2 + part.jitter * pl2.tint);
+    mesh.setColorAt(i, c);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+}
+function buildPropsGroup(field) {
+  const group = new Group();
+  let count = 0;
+  for (const kind of ["pines", "leaves", "cabins"]) {
+    const places = field[kind];
+    if (places.length === 0) continue;
+    count += places.length;
+    for (const part of PARTS[kind]) {
+      const mat = new MeshStandardMaterial({ flatShading: true, roughness: 0.9, metalness: 0 });
+      applyAerialPerspective(mat);
+      const mesh = new InstancedMesh(part.geometry.clone(), mat, places.length);
+      mesh.frustumCulled = false;
+      mesh.castShadow = true;
+      fillInstances(mesh, places, part);
+      group.add(mesh);
+    }
+  }
+  return { group, count };
+}
+function strideFor$1(nTotal, target = 1500) {
+  return Math.max(1, Math.ceil(nTotal / target));
+}
+function strideFor(nTotal, target = 1500) {
+  return strideFor$1(nTotal, target);
+}
 const CLOUD_UNIFORM_DECL = (
   /* glsl */
   `
@@ -38555,10 +39439,6 @@ async function fetchTerrainPack(name, signal) {
 }
 function modelUrl(name) {
   return `/api/world/model/${encodeURIComponent(name)}`;
-}
-function toWorld(n2, e, d) {
-  const v2 = nedToRender(n2, e, d);
-  return [v2[0], v2[1], v2[2]];
 }
 const CopyShader = {
   name: "CopyShader",
@@ -40254,6 +41134,7 @@ function disposeMaterial(mat) {
 function disposeTree(root) {
   root.traverse((o) => {
     const m2 = o;
+    if (m2.isInstancedMesh) m2.dispose?.();
     m2.geometry?.dispose?.();
     const mat = m2.material;
     if (Array.isArray(mat)) mat.forEach(disposeMaterial);
@@ -40750,6 +41631,11 @@ void main() {
 }
 `
 );
+const PHYS_SEA = {
+  deep: [8e-4, 45e-4, 75e-4],
+  shallow: [0.01, 0.045, 0.048],
+  scatter: [4e-3, 0.03, 0.038]
+};
 const OCEAN_DEFAULTS = {
   // 1148×570 캔버스에서 칸 하나가 4 px 안팎. 112줄로 시작했다가 176으로 올렸다 —
   // 성긴 격자에서는 나이퀴스트 판정이 20 m 파까지 접어 버려 바다가 유리처럼 매끈해졌다.
@@ -40843,10 +41729,10 @@ function createOcean(opts = {}) {
       uRoughness: { value: 0.2 },
       uWaveHeight: { value: 1 },
       // 심해색과 상향 산란 — 선형값. 프레넬이 2%(수직)~100%(스침)로 하늘을 섞는다.
-      uDeepColor: { value: new Vector3(8e-4, 45e-4, 75e-4) },
+      uDeepColor: { value: new Vector3(...PHYS_SEA.deep) },
       // 얕은 물 — 수심 자료가 없어 해안 거리를 대신 쓴다(표시용 대리값).
-      uShallowColor: { value: new Vector3(0.01, 0.045, 0.048) },
-      uScatterColor: { value: new Vector3(4e-3, 0.03, 0.038) },
+      uShallowColor: { value: new Vector3(...PHYS_SEA.shallow) },
+      uScatterColor: { value: new Vector3(...PHYS_SEA.scatter) },
       // 포말 양 — 풍속에서 나온다. `setSea`가 채운다.
       uFoamAmount: { value: 0 },
       // **표시 보정값이다.** 이 렌더러의 절대 밝기는 물리 단위가 아니다 — 하늘은
@@ -40911,6 +41797,12 @@ function createOcean(opts = {}) {
       material.uniforms.uCoastMin.value.set(field.e0, field.n0);
       material.uniforms.uCoastInvSpan.value.set(1 / field.eSpan, 1 / field.nSpan);
       material.uniforms.uHasCoast.value = 1;
+    },
+    setPalette(game) {
+      const p2 = game ? GAME_SEA : PHYS_SEA;
+      material.uniforms.uDeepColor.value.set(p2.deep[0], p2.deep[1], p2.deep[2]);
+      material.uniforms.uShallowColor.value.set(p2.shallow[0], p2.shallow[1], p2.shallow[2]);
+      material.uniforms.uScatterColor.value.set(p2.scatter[0], p2.scatter[1], p2.scatter[2]);
     },
     describe() {
       return {
@@ -41011,6 +41903,13 @@ const CINEMATIC_POST = {
   antialias: true,
   grade: { vignette: 0.42, saturation: 1.12, contrast: 1.055 }
 };
+const GAME_POST = {
+  bloomStrength: 0.5,
+  bloomRadius: 0.5,
+  bloomThreshold: 1.8,
+  antialias: true,
+  grade: { vignette: 0.34, saturation: 1.22, contrast: 1.05 }
+};
 const RAMP = [
   [0, [0.76, 0.72, 0.58]],
   [60, [0.42, 0.53, 0.32]],
@@ -41047,7 +41946,10 @@ class SceneHost {
     terrain: new Group(),
     paths: new Group(),
     models: new Group(),
-    marks: new Group()
+    marks: new Group(),
+    // 게임 모드 두 벌 — 실사 지형과 같은 자리라 스타일이 두 벌 중 하나만 보이게 한다.
+    gameTerrain: new Group(),
+    props: new Group()
   };
   stats = { drawCalls: 0, triangles: 0, ms: 0 };
   disposed = false;
@@ -41056,6 +41958,8 @@ class SceneHost {
   size = { w: 1, h: 1, dpr: 1 };
   /** 프레임마다 다시 채운다 — 매번 새로 만들면 GC가 프레임을 갉는다. */
   gridInvViewProj = new Matrix4();
+  raycaster = new Raycaster();
+  ndc = new Vector2();
   renderScale = 1;
   sunDirWorld = new Vector3(0.4, 0.6, 0.2);
   constructor(canvas, context) {
@@ -41085,6 +41989,8 @@ class SceneHost {
     this.ocean = createOcean({ maxDist: FAR * 0.98 });
     this.scene.add(this.ocean.mesh);
     for (const g of Object.values(this.groups)) this.scene.add(g);
+    this.groups.gameTerrain.visible = false;
+    this.groups.props.visible = false;
     this.scenePass = new SplitFrustumPass(
       this.scene,
       this.camera,
@@ -41098,9 +42004,15 @@ class SceneHost {
    * 컴포저를 갈아 끼우고 궤적 오버레이를 숨긴다. **결과 선택·재생 커서·카메라는 그대로다**
    * — 같은 런을 두 얼굴로 보는 것이다(계획 §8). 숨긴 것은 캡션이 말한다(컨트롤러 몫). */
   setViewStyle(style) {
-    this.setPost(style === "cinematic" ? CINEMATIC_POST : ENGINEERING_POST);
+    this.setPost(
+      style === "cinematic" ? CINEMATIC_POST : style === "game" ? GAME_POST : ENGINEERING_POST
+    );
     this.groups.paths.visible = style === "engineering";
-    this.groups.marks.visible = style === "engineering";
+    this.groups.marks.visible = style === "engineering" || style === "game";
+    this.groups.terrain.visible = style !== "game";
+    this.groups.gameTerrain.visible = style === "game";
+    this.groups.props.visible = style === "game";
+    this.ocean.setPalette(style === "game");
   }
   /** 후처리 구성을 세운다 — 모드가 바뀌면 다시 세운다. */
   setPost(opts) {
@@ -41147,31 +42059,37 @@ class SceneHost {
     ]);
     this.renderer.toneMappingExposure = exposure;
   }
+  /** NED 기하 → three 지오메트리 — NaN 정점 방어·축 변환·색 굽기를 한 곳에 둔다.
+   *  실사·게임 두 벌이 각자 돌면 언젠가 한쪽만 고쳐진다(disposeTree의 교훈). */
+  patchGeometry(p2, colorAt) {
+    const n2 = p2.positions.length;
+    const pos = new Float32Array(n2);
+    const nrm = new Float32Array(n2);
+    const col = new Float32Array(n2);
+    for (let i = 0; i < n2; i += 3) {
+      const d = Number.isFinite(p2.positions[i + 2]) ? p2.positions[i + 2] : 0;
+      const w2 = toWorld(p2.positions[i], p2.positions[i + 1], d);
+      pos[i] = w2[0];
+      pos[i + 1] = w2[1];
+      pos[i + 2] = w2[2];
+      const nw = toWorld(p2.normals[i], p2.normals[i + 1], p2.normals[i + 2]);
+      nrm[i] = nw[0];
+      nrm[i + 1] = nw[1];
+      nrm[i + 2] = nw[2];
+      colorAt(-d, col, i);
+    }
+    const geo = new BufferGeometry();
+    geo.setAttribute("position", new BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new BufferAttribute(nrm, 3));
+    geo.setAttribute("color", new BufferAttribute(col, 3));
+    geo.setIndex(new BufferAttribute(p2.indices, 1));
+    return geo;
+  }
   /** 지형 — NED 기하를 그대로 받는다. 음영은 **진짜 법선에 조명이 닿아** 생긴다. */
   setTerrain(patches) {
     disposeTree(this.groups.terrain);
     for (const p2 of patches) {
-      const n2 = p2.positions.length;
-      const pos = new Float32Array(n2);
-      const nrm = new Float32Array(n2);
-      const col = new Float32Array(n2);
-      for (let i = 0; i < n2; i += 3) {
-        const d = Number.isFinite(p2.positions[i + 2]) ? p2.positions[i + 2] : 0;
-        const w2 = toWorld(p2.positions[i], p2.positions[i + 1], d);
-        pos[i] = w2[0];
-        pos[i + 1] = w2[1];
-        pos[i + 2] = w2[2];
-        const nw = toWorld(p2.normals[i], p2.normals[i + 1], p2.normals[i + 2]);
-        nrm[i] = nw[0];
-        nrm[i + 1] = nw[1];
-        nrm[i + 2] = nw[2];
-        hypsometric(-d, col, i);
-      }
-      const geo = new BufferGeometry();
-      geo.setAttribute("position", new BufferAttribute(pos, 3));
-      geo.setAttribute("normal", new BufferAttribute(nrm, 3));
-      geo.setAttribute("color", new BufferAttribute(col, 3));
-      geo.setIndex(new BufferAttribute(p2.indices, 1));
+      const geo = this.patchGeometry(p2, hypsometric);
       const mat = new MeshStandardMaterial({
         vertexColors: true,
         roughness: 0.95,
@@ -41183,6 +42101,48 @@ class SceneHost {
       mesh.receiveShadow = true;
       this.groups.terrain.add(mesh);
     }
+  }
+  /** 게임 모드 지형 — **같은 실측 표고**를 성긴 면 + 게임 램프로 다시 그린다.
+   *
+   * flatShading은 three가 프래그먼트 도함수로 낱면 법선을 만들므로 정점 법선을
+   * 그대로 둬도 큰 면이 선다. 지면 절차 무늬는 걸지 않는다 — 85 m 식생 얼룩이
+   * 90 m 낱면과 간섭해 "한 면 한 색"의 로우폴리 문법을 깬다. 대기 원근은 건다 —
+   * 안 걸면 이 지형만 수평선에서 하늘과 갈라진다. */
+  setGameTerrain(patches, relief) {
+    disposeTree(this.groups.gameTerrain);
+    for (const p2 of patches) {
+      const geo = this.patchGeometry(p2, (elev, out, i) => gameRamp(elev, relief, out, i));
+      const mat = new MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 1,
+        metalness: 0,
+        flatShading: true
+      });
+      applyAerialPerspective(mat);
+      const mesh = new Mesh(geo, mat);
+      mesh.receiveShadow = true;
+      this.groups.gameTerrain.add(mesh);
+    }
+  }
+  /** 게임 소품 그룹 교체 — null이면 비운다. 소유권은 이 그룹이 진다(disposeTree). */
+  setProps(group) {
+    disposeTree(this.groups.props);
+    if (group) this.groups.props.add(group);
+  }
+  /** 캔버스 NDC → 지면 교점 (NED). 게임 지형이 없으면 기준면 y=planeY와의 교점으로
+   *  물러선다. 하늘을 향하면 **null** — 0으로 메우면 지평선 클릭이 원점 웨이포인트를
+   *  지어낸다. 카메라 행렬은 마지막 render()의 것 — 게임 모드는 매 프레임 그린다. */
+  raycastGround(ndcX, ndcY, planeY) {
+    this.raycaster.setFromCamera(this.ndc.set(ndcX, ndcY), this.camera);
+    const hit = this.raycaster.intersectObjects(this.groups.gameTerrain.children, false)[0];
+    let p2 = hit?.point ?? null;
+    if (p2 == null) {
+      const r2 = this.raycaster.ray;
+      const t2 = (planeY - r2.origin.y) / r2.direction.y;
+      p2 = Number.isFinite(t2) && t2 > 0 ? r2.origin.clone().addScaledVector(r2.direction, t2) : null;
+    }
+    if (p2 == null) return null;
+    return [-p2.z, p2.x, -p2.y];
   }
   /** 궤적 — `breaks`의 양 끝 중 하나라도 결측이면 그 구간을 그리지 않는다.
    *
@@ -41390,7 +42350,7 @@ function buildTerrain(pack, strideFor2) {
     const mask = masks.get(tier.name);
     const skipRect = boundingRect(inner.slice(0, i).map(tierRect));
     meshes.push(buildTerrainMesh(tier, {
-      stride: 1,
+      stride: strideFor2?.(tier) ?? 1,
       skipRect,
       skipCell: mask ? seaQuad(mask) : null
     }));
@@ -44190,6 +45150,9 @@ function showLauncher(model, siteNed, pose2) {
   return applyLauncher(model, pose2);
 }
 const MODEL_SCALE = 1;
+const GAME_ACCEPT_RADIUS = 100;
+const GAME_CLICK_CLEARANCE = 150;
+const GAME_FACET_M = 90;
 const STATS_INTERVAL_MS = 500;
 const num = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
 class SceneController {
@@ -44232,6 +45195,22 @@ class SceneController {
   speed = 5;
   fromIdx = 0;
   fromWall = 0;
+  // ---- 게임 모드 상태 — 정본은 컨트롤러다(시점·재생과 같은 사유).
+  arcade = null;
+  gameInput = { turn: 0, pitch: 0, throttle: 0 };
+  /** [n, e, 고도 h] — 시뮬 탭 표와 같은 어휘(고도 상방 +). */
+  gameWps = [];
+  gameEye = null;
+  gameDist = 18;
+  /** 어느 지형 팩으로 게임 자산을 구웠나 — 팩이 바뀌면 다시 굽는다.
+   *  **undefined = 아직 안 구움**, null = "팩 없음" 상태로 구움. 이 둘을 한 값으로
+   *  쓰면 "지형 로드 전에 게임 진입 → 뒤늦게 팩 도착"에서 null === null이 참이 되어
+   *  게임 지형이 영영 안 구워진다(실측 — 조기 클릭 재현). */
+  gameBuiltFor = void 0;
+  replayMarks = [];
+  get gameOn() {
+    return this.style === "game";
+  }
   terrainNotes = [];
   /** 결과에서 나오는 캡션 — 결과가 바뀔 때만 다시 만든다. */
   resultNotes = [];
@@ -44341,6 +45320,10 @@ class SceneController {
     const notes = [...this.terrainNotes];
     const agree = originsAgree(this.pack?.origin, body.meta?.origin);
     this.terrain = this.pack && agree.ok ? this.pack : null;
+    if (this.gameBuiltFor !== void 0 && this.gameBuiltFor !== this.terrain) {
+      this.gameBuiltFor = void 0;
+      if (this.gameOn) this.buildGameWorld();
+    }
     if (this.terrain) {
       const built = buildTerrain(this.terrain);
       this.host.setTerrain(built.meshes);
@@ -44408,7 +45391,8 @@ class SceneController {
         break;
       }
     }
-    this.host.setMarkers(marks);
+    this.replayMarks = marks;
+    this.syncMarkers();
     if (this.vehicle == null) {
       notes.push("기체 모델이 없어 궤적만 그립니다.");
     } else {
@@ -44457,6 +45441,16 @@ class SceneController {
         `성능: 프레임이 늦어 렌더 해상도 배율을 ${scale}로 내렸습니다 — 빨라지면 되돌립니다.`
       );
     }
+    if (this.gameOn) {
+      notes.push(
+        "게임 모드 — 표시·계획 전용 아케이드 비행입니다. 실제 기체 동역학이 아니며, 검증은 웨이포인트를 보낸 뒤 시뮬레이션 탭(실제 엔진)에서 합니다.",
+        `조작: ←→ 선회 · ↑↓ 승강 · Shift 가속 · Ctrl 감속 · Space 현재 위치 웨이포인트 · 지형 클릭 = 그 지점 지면 +${GAME_CLICK_CLEARANCE} m 웨이포인트 · 휠 = 시점 거리.`,
+        "로우폴리 지형·수목·가옥은 같은 실측 지형 팩을 성긴 면과 게임 색으로 다시 그린 표시용 장식입니다 — 실제 식생·건물이 아닙니다."
+      );
+      if (this.terrain == null) {
+        notes.push(this.pack == null ? "지형 팩이 없어 기준면 위를 납니다 — 지면 표고는 활주로 표고로 봅니다." : "지형 팩은 있지만 아직 결과에 얹지 못해(결과 없음 또는 원점 불일치) 기준면 위를 납니다 — 지면 표고는 활주로 표고로 봅니다.");
+      }
+    }
     if (this.style === "cinematic") {
       notes.push(
         "시네마틱 모드 — 궤적 오버레이를 숨기고 블룸·비네트·그레이딩을 겁니다. 판독 값과 이 캡션은 계속 표시합니다."
@@ -44468,15 +45462,148 @@ class SceneController {
     this.cb.onNotes(notes);
   }
   // ---------------------------------------------------------------- 조작
-  /** Engineering ↔ Cinematic — 표시 구성만 바뀐다. 결과·커서·카메라는 그대로다. */
+  /** Engineering ↔ Cinematic은 표시 구성만 바뀐다(결과·커서·카메라 그대로).
+   *  Game은 그 위에 기체의 정본이 바뀐다 — 재생 표본이 아니라 아케이드 상태다. */
   setViewStyle(style) {
     if (style === this.style) return;
+    const wasGame = this.gameOn;
     this.style = style;
     this.host.setViewStyle(style);
+    if (this.gameOn) this.enterGame();
+    else if (wasGame) this.exitGame();
+    this.lastFrameMs = performance.now();
     this.dirty = true;
     this.emitNotes();
   }
+  // ---------------------------------------------------------------- 게임 모드
+  enterGame() {
+    if (this.playing) {
+      this.playing = false;
+      this.cb.onPlaying(false);
+    }
+    this.buildGameWorld();
+    const elev = this.groundElevationAt([0, 0, 0]) ?? num(this.body?.meta?.runway?.elevation) ?? 0;
+    this.arcade = spawnArcade(num(this.body?.meta?.runway?.heading), elev);
+    if (this.vehicle) {
+      applySurfaces(this.vehicle, surfacePose(0, 0, 0, this.body?.meta?.limits ?? {}));
+    }
+    this.gameEye = null;
+    this.gameInput = { turn: 0, pitch: 0, throttle: 0 };
+    this.syncMarkers();
+    this.emitGameWps();
+  }
+  /** 이탈 — 표지를 재생 것으로 되돌린다. 재생 결과가 없으면 기체를 숨기고 중립 궤도
+   *  한 프레임을 그린다(마지막 게임 프레임이 정지화면으로 남지 않게 — draw()는
+   *  body 없이는 아무것도 안 그린다). */
+  exitGame() {
+    this.arcade = null;
+    this.gameInput = { turn: 0, pitch: 0, throttle: 0 };
+    this.syncMarkers();
+    if (this.body == null) {
+      this.cb.onReadout(null);
+      if (this.vehicle) hideVehicle(this.vehicle);
+      const groundD = -(this.groundElevationAt(null) ?? 0);
+      this.host.render(orbitCamera({
+        pivot: [0, 0, groundD],
+        az: this.orbit.az,
+        el: this.orbit.el,
+        dist: this.dist,
+        groundD
+      }), this.lastSeaTime);
+    }
+  }
+  /** 게임 자산(로우폴리 지형·소품) — 같은 팩이면 다시 굽지 않는다(진입 비용은 첫
+   *  한 번). 팩이 없으면 비운다 — 기준면 위를 나는 것도 계획에는 쓸 수 있고,
+   *  캡션이 사유를 말한다. */
+  buildGameWorld() {
+    if (this.gameBuiltFor === this.terrain) return;
+    this.gameBuiltFor = this.terrain;
+    const pack = this.terrain;
+    if (pack == null) {
+      this.host.setGameTerrain([], 800);
+      this.host.setProps(null);
+      return;
+    }
+    const relief = reliefOf(pack.tiers);
+    const built = buildTerrain(pack, (t2) => Math.max(1, Math.round(GAME_FACET_M / t2.step)));
+    this.host.setGameTerrain(built.meshes, relief);
+    const core = [...pack.tiers].sort((a, b) => a.step - b.step)[0];
+    if (core == null) {
+      this.host.setProps(null);
+      return;
+    }
+    const sample = (n2, e) => {
+      for (const tier of pack.tiers) {
+        const z2 = elevationAt(tier, n2, e);
+        if (z2 !== null) return z2;
+      }
+      return null;
+    };
+    this.host.setProps(buildPropsGroup(placeProps(sample, tierRect(core), relief)).group);
+  }
+  /** 게임 입력 축 — WorldTab 키보드가 민다. 게임이 아니면 step이 읽지 않는다. */
+  setGameInput(input) {
+    this.gameInput = input;
+  }
+  /** 현재 기체 위치를 웨이포인트로 — [n, e, 고도]를 미터 정수로 찍는다(표에서 읽는 수). */
+  dropGameWaypoint() {
+    if (!this.gameOn || this.arcade == null) return;
+    const [n2, e, d] = this.arcade.pos;
+    this.pushGameWp(Math.round(n2), Math.round(e), Math.round(-d));
+  }
+  /** 지형 클릭 웨이포인트 — 교점의 지면 표고 + 여유고도. 하늘을 클릭하면 지면 교점이
+   *  없다는 사실 그대로 아무것도 안 찍는다(0으로 메우지 않는다). */
+  addGameWaypointAt(ndcX, ndcY) {
+    if (!this.gameOn) return;
+    const planeY = this.groundElevationAt(null) ?? 0;
+    const hit = this.host.raycastGround(ndcX, ndcY, planeY);
+    if (hit == null) return;
+    const ground = this.groundElevationAt(hit) ?? -hit[2];
+    this.pushGameWp(
+      Math.round(hit[0]),
+      Math.round(hit[1]),
+      Math.round(ground + GAME_CLICK_CLEARANCE)
+    );
+  }
+  removeGameWaypoint(i) {
+    if (!Number.isInteger(i) || i < 0 || i >= this.gameWps.length) return;
+    this.gameWps.splice(i, 1);
+    this.afterWpChange();
+  }
+  clearGameWaypoints() {
+    if (this.gameWps.length === 0) return;
+    this.gameWps = [];
+    this.afterWpChange();
+  }
+  /** 시뮬 탭으로 보낼 사본 — 내부 배열을 그대로 내주지 않는다(밖의 수정이 표지와 갈린다). */
+  getGameWaypoints() {
+    return this.gameWps.map((w2) => [w2[0], w2[1], w2[2]]);
+  }
+  pushGameWp(n2, e, h) {
+    this.gameWps.push([n2, e, h]);
+    this.afterWpChange();
+  }
+  afterWpChange() {
+    this.syncMarkers();
+    this.emitGameWps();
+    this.dirty = true;
+  }
+  emitGameWps() {
+    this.cb.onGameWps(this.getGameWaypoints());
+  }
+  /** 표지의 정본 전환 — 게임 중엔 찍는 중인 웨이포인트, 아니면 재생 결과의 표지. */
+  syncMarkers() {
+    this.host.setMarkers(this.gameOn ? this.gameWps.map(([n2, e, h]) => ({
+      ne: [n2, e, -h],
+      kind: "waypoint",
+      radius: GAME_ACCEPT_RADIUS
+    })) : this.replayMarks);
+  }
   setCamMode(mode) {
+    if (this.gameOn) {
+      this.cb.onMode(this.mode);
+      return;
+    }
     if (!CAM_MODES.includes(mode) || mode === this.mode) return;
     this.mode = mode;
     this.chaseEye = null;
@@ -44485,6 +45612,7 @@ class SceneController {
     this.emitNotes();
   }
   rotate(dxPx, dyPx) {
+    if (this.gameOn) return;
     if (this.mode !== "orbit" && this.mode !== "attitude") {
       this.mode = "orbit";
       this.cb.onMode("orbit");
@@ -44495,6 +45623,11 @@ class SceneController {
   }
   zoom(deltaY) {
     const k2 = deltaY > 0 ? 1.1 : 1 / 1.1;
+    if (this.gameOn) {
+      this.gameDist = Math.min(Math.max(this.gameDist * k2, 8), 120);
+      this.dirty = true;
+      return;
+    }
     if (this.mode === "chase" || this.mode === "attitude") {
       this.closeDist = Math.min(Math.max(this.closeDist * k2, 5), 200);
     } else {
@@ -44504,6 +45637,10 @@ class SceneController {
   }
   setPlaying(playing) {
     if (playing && !this.playable) {
+      this.cb.onPlaying(false);
+      return;
+    }
+    if (playing && this.gameOn) {
       this.cb.onPlaying(false);
       return;
     }
@@ -44569,6 +45706,13 @@ class SceneController {
     const dtWall = Math.min((now - this.lastFrameMs) / 1e3, 0.25);
     this.lastFrameMs = now;
     this.autoQuality(dtWall);
+    if (this.gameOn && this.arcade) {
+      const ground = this.groundElevationAt(this.arcade.pos);
+      this.arcade = stepArcade(this.arcade, this.gameInput, dtWall, ground);
+      this.lastSeaTime += dtWall;
+      this.drawGame(dtWall, ground);
+      return;
+    }
     if (this.playing && this.body && isPlayable(this.body.t)) {
       const next = indexAt(this.fromIdx, this.fromWall, now, this.speed, this.dt, this.n);
       if (next !== this.idx) {
@@ -44583,6 +45727,48 @@ class SceneController {
     if (!this.dirty && !this.playing) return;
     this.dirty = false;
     this.draw(dtWall);
+  }
+  /** 게임 프레임 — 아케이드 상태로 기체·카메라를 세운다. 재생 경로(draw)와 갈라
+   *  둔다: 저쪽은 "결측을 그리지 않는다"가 규율이고 이쪽은 상태가 항상 성하다. */
+  drawGame(dtWall, groundElev) {
+    const a = this.arcade;
+    if (a == null) return;
+    const q2 = eulerToQuat(a.phi, a.theta, a.psi);
+    const axes = q2 ? bodyAxesNed(q2) : null;
+    if (this.vehicle) {
+      if (axes) setVehiclePose(this.vehicle, a.pos, axes, MODEL_SCALE);
+      const thr = 0.5 + 0.5 * this.gameInput.throttle;
+      spinPropeller(this.vehicle, propellerRate(thr, thr), dtWall);
+    }
+    const vel = [
+      a.V * Math.cos(a.theta) * Math.cos(a.psi),
+      a.V * Math.cos(a.theta) * Math.sin(a.psi),
+      -a.V * Math.sin(a.theta)
+    ];
+    const groundD = -(groundElev ?? num(this.body?.meta?.runway?.elevation) ?? 0);
+    const cam = chaseCamera({
+      pos: a.pos,
+      vel,
+      q: q2,
+      prevEye: this.gameEye,
+      dtWall,
+      groundD,
+      dist: this.gameDist,
+      height: this.gameDist * 0.35
+    });
+    this.gameEye = cam.eye;
+    this.host.render(cam, this.lastSeaTime);
+    const alt = -a.pos[2];
+    this.cb.onReadout({
+      t: null,
+      mode: "게임",
+      alt,
+      aboveGround: groundElev !== null ? alt - groundElev : null,
+      speed: a.V,
+      phi: a.phi,
+      theta: a.theta
+    });
+    this.emitStats(performance.now());
   }
   draw(dtWall) {
     const body = this.body;
@@ -44699,7 +45885,7 @@ class SceneController {
    * 내리기는 빠르게(EMA 24 ms 초과가 이어지면), 올리기는 천천히(11 ms 미만이 오래) —
    * 경계에서 오르내리면 해상도가 숨쉬는 것이 눈에 띈다. */
   autoQuality(dtWall) {
-    if (!this.playing || dtWall > 0.25) return;
+    if (!this.playing && !this.gameOn || dtWall >= 0.25) return;
     this.frameEma = this.frameEma === 0 ? dtWall : this.frameEma * 0.9 + dtWall * 0.1;
     if (this.qualityHold > 0) {
       this.qualityHold--;
@@ -44822,6 +46008,8 @@ function WorldTab({ deps }) {
   const [windDir, setWindDir] = reactExports.useState(0.6);
   const [cloudCover, setCloudCover] = reactExports.useState(0.35);
   const [style, setStyle] = reactExports.useState("engineering");
+  const [gameWps, setGameWps] = reactExports.useState([]);
+  const [sent, setSent] = reactExports.useState(null);
   reactExports.useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas == null) return;
@@ -44836,7 +46024,8 @@ function WorldTab({ deps }) {
       },
       onStatus: setStatus,
       onPlaying: setPlaying,
-      onStats: setStats
+      onStats: setStats,
+      onGameWps: setGameWps
     });
     if (made.controller == null) {
       setStatus(made.reason);
@@ -44919,14 +46108,27 @@ function WorldTab({ deps }) {
     ctlRef.current?.setCamMode(m2);
   }, []);
   const onPointerDown = (e) => {
+    if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { x: e.clientX, y: e.clientY };
+    dragRef.current = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY };
   };
   const onPointerMove = (e) => {
     const d = dragRef.current;
     if (d == null) return;
     ctlRef.current?.rotate(e.clientX - d.x, e.clientY - d.y);
-    dragRef.current = { x: e.clientX, y: e.clientY };
+    dragRef.current = { ...d, x: e.clientX, y: e.clientY };
+  };
+  const onPointerUp = (e) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    if (d == null || style !== "game") return;
+    if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 5) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    ctlRef.current?.addGameWaypointAt(
+      (e.clientX - rect.left) / rect.width * 2 - 1,
+      -((e.clientY - rect.top) / rect.height * 2 - 1)
+    );
   };
   const endDrag = () => {
     dragRef.current = null;
@@ -44941,6 +46143,62 @@ function WorldTab({ deps }) {
     canvas.addEventListener("wheel", onWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", onWheel);
   }, []);
+  reactExports.useEffect(() => {
+    if (style !== "game") return;
+    const keys = /* @__PURE__ */ new Set();
+    const apply = () => {
+      ctlRef.current?.setGameInput({
+        turn: (keys.has("ArrowRight") ? 1 : 0) - (keys.has("ArrowLeft") ? 1 : 0),
+        pitch: (keys.has("ArrowUp") ? 1 : 0) - (keys.has("ArrowDown") ? 1 : 0),
+        throttle: (keys.has("Shift") ? 1 : 0) - (keys.has("Control") ? 1 : 0)
+      });
+    };
+    const formy = (t2) => t2 instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(t2.tagName);
+    const AXES = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Shift", "Control"];
+    const down = (e) => {
+      if (formy(e.target)) return;
+      if (e.metaKey || e.altKey) return;
+      if (e.key === " ") {
+        e.preventDefault();
+        if (!e.repeat) ctlRef.current?.dropGameWaypoint();
+        return;
+      }
+      if (AXES.includes(e.key)) {
+        e.preventDefault();
+        keys.add(e.key);
+        apply();
+      }
+    };
+    const up = (e) => {
+      if (keys.delete(e.key)) apply();
+    };
+    const drop = () => {
+      keys.clear();
+      apply();
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", drop);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", drop);
+      ctlRef.current?.setGameInput({ turn: 0, pitch: 0, throttle: 0 });
+    };
+  }, [style]);
+  reactExports.useEffect(() => {
+    if (style !== "game") setSent(null);
+  }, [style]);
+  const sendToSim = reactExports.useCallback(() => {
+    if (deps.store == null) return;
+    const wps = ctlRef.current?.getGameWaypoints() ?? [];
+    if (wps.length === 0) return;
+    deps.store.set("wpDraft", {
+      source: "world-game",
+      rows: wps.map(([n2, e, h]) => ({ n: String(n2), e: String(e), d: String(h) }))
+    });
+    setSent(wps.length);
+  }, [deps.store]);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "panel", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "가상환경" }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: ROW, children: [
@@ -44960,7 +46218,7 @@ function WorldTab({ deps }) {
           ]
         }
       ),
-      CAM_MODES.map((m2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+      style !== "game" && CAM_MODES.map((m2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
           className: m2 === mode ? "primary" : "",
@@ -44970,7 +46228,7 @@ function WorldTab({ deps }) {
         },
         m2
       )),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { marginLeft: "auto", display: "inline-flex", gap: 4 }, children: ["engineering", "cinematic"].map((v2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { marginLeft: "auto", display: "inline-flex", gap: 4 }, children: ["engineering", "cinematic", "game"].map((v2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
           className: v2 === style ? "primary" : "",
@@ -44979,7 +46237,7 @@ function WorldTab({ deps }) {
             ctlRef.current?.setViewStyle(v2);
           },
           "aria-pressed": v2 === style,
-          children: v2 === "engineering" ? "엔지니어링" : "시네마틱"
+          children: v2 === "engineering" ? "엔지니어링" : v2 === "cinematic" ? "시네마틱" : "게임"
         },
         v2
       )) })
@@ -44992,11 +46250,67 @@ function WorldTab({ deps }) {
         style: { width: "100%", display: "block", borderRadius: 8, background: "#0d1117", touchAction: "none" },
         onPointerDown,
         onPointerMove,
-        onPointerUp: endDrag,
-        onPointerCancel: endDrag
+        onPointerUp,
+        onPointerCancel: endDrag,
+        onContextMenu: (e) => {
+          if (style === "game") e.preventDefault();
+        }
       }
     ),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: ROW, children: [
+    style === "game" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: ROW, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { style: HINT, children: [
+        "웨이포인트 ",
+        gameWps.length,
+        "개"
+      ] }),
+      gameWps.map((w2, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "span",
+        {
+          style: {
+            ...HINT,
+            fontFamily: "var(--mono)",
+            border: "1px solid var(--muted)",
+            borderRadius: 6,
+            padding: "1px 6px",
+            display: "inline-flex",
+            gap: 4,
+            alignItems: "center"
+          },
+          children: [
+            `${i + 1}: N${w2[0]} E${w2[1]} h${w2[2]}`,
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                style: { padding: "0 5px" },
+                "aria-label": `웨이포인트 ${i + 1} 삭제`,
+                onClick: () => ctlRef.current?.removeGameWaypoint(i),
+                children: "×"
+              }
+            )
+          ]
+        },
+        `${i}-${w2[0]}-${w2[1]}-${w2[2]}`
+      )),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { style: { marginLeft: "auto", display: "inline-flex", gap: 4 }, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { disabled: gameWps.length === 0, onClick: sendToSim, children: "시뮬레이션으로 보내기" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            disabled: gameWps.length === 0,
+            onClick: () => ctlRef.current?.clearGameWaypoints(),
+            children: "비우기"
+          }
+        )
+      ] })
+    ] }),
+    style === "game" && sent !== null && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { style: HINT, children: [
+      "웨이포인트 ",
+      sent,
+      "개를 보냈습니다 — ",
+      /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "#sim", children: "시뮬레이션 탭" }),
+      "의 표·지도에서 다듬고 실제 엔진으로 실행하세요."
+    ] }),
+    style !== "game" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: ROW, children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {

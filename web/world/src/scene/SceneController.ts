@@ -21,7 +21,11 @@ import {
 } from "../lib/camera.ts";
 import { attitudeAt, originsAgree, sampleAt, sceneExtent, trackPoints, velocityAt }
   from "../lib/world3d.ts";
-import { elevationAt, parseTerrainPack, type TerrainPack } from "../lib/terrainpack.ts";
+import { elevationAt, parseTerrainPack, tierRect, type TerrainPack } from "../lib/terrainpack.ts";
+import { spawnArcade, stepArcade, type ArcadeInput, type ArcadeState } from "../core/arcade.ts";
+import { reliefOf } from "../core/gamestyle.ts";
+import { placeProps } from "../core/propfield.ts";
+import { buildPropsGroup } from "./props.ts";
 import { strideFor } from "../lib/replay.ts";
 import { ATMOSPHERE_NOTES, CLOUD_NOTES } from "./atmosphere.ts";
 import { WEAR_NOTES } from "./materials.ts";
@@ -49,6 +53,15 @@ import {
  * 카메라가 실물에 맞게 **가까이** 붙는다(`closeDist`). 궤도 시점에서 기체가 점이 되는
  * 것은 사실이 그런 것이다 — 휠로 다가가면 된다. */
 const MODEL_SCALE = 1;
+
+/** 게임 웨이포인트의 표시용 포획 반경 [m] — 시뮬레이션 탭 도달반경 **기본값(100)**과
+ *  같은 수다(views/sim.js `f.accept`). 다른 수를 쓰면 게임에서 본 원과 실행에 들어가는
+ *  원이 어긋난다 — 물론 시뮬 탭에서 반경을 고치면 그때부터는 그쪽이 정본이다. */
+const GAME_ACCEPT_RADIUS = 100;
+/** 지형 클릭 웨이포인트의 지면 위 여유 [m] — 계획용 기본값. 캡션·시뮬 탭 표에서 보인다. */
+const GAME_CLICK_CLEARANCE = 150;
+/** 게임 지형의 목표 낱면 크기 [m] — 이보다 촘촘한 티어는 스트라이드로 성기게 한다. */
+const GAME_FACET_M = 90;
 
 export interface Readout {
   t: number | null;
@@ -78,11 +91,14 @@ export interface ControllerCallbacks {
    *  UI가 스스로 짐작하면 자세 관측에서 끌었을 때 버튼만 "자유 궤도"로 바뀌고
    *  카메라는 그대로인 상태가 된다(그리고 시점 캡션이 버튼과 어긋난다). */
   onMode(mode: CamMode): void;
-  onReadout(r: Readout): void;
+  /** null = 판독 없음("표본 없음") — 결과 없이 게임을 나간 뒤 옛 게임 값이 굳지 않게. */
+  onReadout(r: Readout | null): void;
   onResults(rows: SimResultRow[], chosen: string | null): void;
   onStatus(text: string): void;
   onPlaying(playing: boolean): void;
   onStats(s: FrameStats): void;
+  /** 게임 모드 웨이포인트 목록 — 찍고/지울 때마다. UI 목록·보내기 버튼이 이걸 그린다. */
+  onGameWps(wps: ReadonlyArray<readonly [number, number, number]>): void;
 }
 
 /** 통계를 화면에 올리는 주기 [ms] — 초당 60번 바뀌는 숫자는 읽을 수 없다. */
@@ -135,6 +151,21 @@ export class SceneController {
   private speed = 5;
   private fromIdx = 0;
   private fromWall = 0;
+
+  // ---- 게임 모드 상태 — 정본은 컨트롤러다(시점·재생과 같은 사유).
+  private arcade: ArcadeState | null = null;
+  private gameInput: ArcadeInput = { turn: 0, pitch: 0, throttle: 0 };
+  /** [n, e, 고도 h] — 시뮬 탭 표와 같은 어휘(고도 상방 +). */
+  private gameWps: [number, number, number][] = [];
+  private gameEye: Vec3 | null = null;
+  private gameDist = 18;
+  /** 어느 지형 팩으로 게임 자산을 구웠나 — 팩이 바뀌면 다시 굽는다.
+   *  **undefined = 아직 안 구움**, null = "팩 없음" 상태로 구움. 이 둘을 한 값으로
+   *  쓰면 "지형 로드 전에 게임 진입 → 뒤늦게 팩 도착"에서 null === null이 참이 되어
+   *  게임 지형이 영영 안 구워진다(실측 — 조기 클릭 재현). */
+  private gameBuiltFor: TerrainPack | null | undefined = undefined;
+  private replayMarks: Marker[] = [];
+  private get gameOn(): boolean { return this.style === "game"; }
 
   private terrainNotes: string[] = [];
   /** 결과에서 나오는 캡션 — 결과가 바뀔 때만 다시 만든다. */
@@ -258,6 +289,12 @@ export class SceneController {
     // --- 지형 (원점이 맞을 때만 얹는다) ---
     const agree = originsAgree(this.pack?.origin, body.meta?.origin);
     this.terrain = this.pack && agree.ok ? this.pack : null;
+    // 게임 자산은 이 지형에 매여 있다 — 팩이 바뀌면(원점 불합의 포함, 그리고
+    // "없음 → 도착"의 조기 진입 경로 포함) 다시 굽거나 무효화한다.
+    if (this.gameBuiltFor !== undefined && this.gameBuiltFor !== this.terrain) {
+      this.gameBuiltFor = undefined;
+      if (this.gameOn) this.buildGameWorld();
+    }
     if (this.terrain) {
       const built = buildTerrain(this.terrain);
       this.host.setTerrain(built.meshes);
@@ -334,7 +371,9 @@ export class SceneController {
       const s0 = sampleAt(body.signals, i);
       if (s0) { marks.push({ ne: s0, kind: "start", radius: 0 }); break; }
     }
-    this.host.setMarkers(marks);
+    // 게임 모드 중에 결과를 갈아 끼워도 게임 표지를 덮지 않는다 — syncMarkers가 정본.
+    this.replayMarks = marks;
+    this.syncMarkers();
 
     // --- 기체 형상 --- (실물 1배 — MODEL_SCALE 주석 참조)
     if (this.vehicle == null) {
@@ -352,7 +391,6 @@ export class SceneController {
       if (lp == null) notes.push("발사 정보가 없어 발사관을 그리지 않습니다.");
       else notes.push(...launcherCaptionNotes(body.meta?.launch, lp));
     }
-
     this.dist = Math.max(sceneExtent(body.signals) * 0.25, 200);
     this.resultNotes = notes;
     this.emitNotes();
@@ -387,6 +425,24 @@ export class SceneController {
         `성능: 프레임이 늦어 렌더 해상도 배율을 ${scale}로 내렸습니다 — 빨라지면 되돌립니다.`,
       );
     }
+    if (this.gameOn) {
+      notes.push(
+        "게임 모드 — 표시·계획 전용 아케이드 비행입니다. 실제 기체 동역학이 아니며, "
+        + "검증은 웨이포인트를 보낸 뒤 시뮬레이션 탭(실제 엔진)에서 합니다.",
+        "조작: ←→ 선회 · ↑↓ 승강 · Shift 가속 · Ctrl 감속 · Space 현재 위치 웨이포인트 · "
+        + `지형 클릭 = 그 지점 지면 +${GAME_CLICK_CLEARANCE} m 웨이포인트 · 휠 = 시점 거리.`,
+        "로우폴리 지형·수목·가옥은 같은 실측 지형 팩을 성긴 면과 게임 색으로 다시 그린 "
+        + "표시용 장식입니다 — 실제 식생·건물이 아닙니다.",
+      );
+      if (this.terrain == null) {
+        // 사유를 가른다 — 팩 자체가 없는 것과, 팩은 있는데 얹을 결과(원점 합의)가
+        // 없는 것은 다른 사실이다. 뭉뚱그리면 팩이 멀쩡한데 "없다"고 단정하게 된다.
+        notes.push(this.pack == null
+          ? "지형 팩이 없어 기준면 위를 납니다 — 지면 표고는 활주로 표고로 봅니다."
+          : "지형 팩은 있지만 아직 결과에 얹지 못해(결과 없음 또는 원점 불일치) "
+            + "기준면 위를 납니다 — 지면 표고는 활주로 표고로 봅니다.");
+      }
+    }
     if (this.style === "cinematic") {
       notes.push(
         "시네마틱 모드 — 궤적 오버레이를 숨기고 블룸·비네트·그레이딩을 겁니다. "
@@ -401,16 +457,172 @@ export class SceneController {
   }
 
   // ---------------------------------------------------------------- 조작
-  /** Engineering ↔ Cinematic — 표시 구성만 바뀐다. 결과·커서·카메라는 그대로다. */
+  /** Engineering ↔ Cinematic은 표시 구성만 바뀐다(결과·커서·카메라 그대로).
+   *  Game은 그 위에 기체의 정본이 바뀐다 — 재생 표본이 아니라 아케이드 상태다. */
   setViewStyle(style: ViewStyle): void {
     if (style === this.style) return;
+    const wasGame = this.gameOn;
     this.style = style;
+    // 가시성 먼저 — exitGame의 마지막 한 프레임이 게임 그룹을 그리지 않게.
     this.host.setViewStyle(style);
+    if (this.gameOn) this.enterGame();
+    else if (wasGame) this.exitGame();
+    // 모드 전환의 동기 비용(컴포저 재구성·게임 자산 굽기 수십~수백 ms)이 다음 프레임
+    // dtWall에 통째로 들어가면 autoQuality가 일회성 정지를 지속 부하로 오독해 진입마다
+    // 해상도를 내리고 거짓 캡션을 낸다(리뷰 확정) — 기준 시각을 지금으로 되돌린다.
+    this.lastFrameMs = performance.now();
     this.dirty = true;
     this.emitNotes();
   }
 
+  // ---------------------------------------------------------------- 게임 모드
+  private enterGame(): void {
+    if (this.playing) {
+      this.playing = false;
+      this.cb.onPlaying(false);
+    }
+    this.buildGameWorld();
+    const elev = this.groundElevationAt([0, 0, 0])
+      ?? num(this.body?.meta?.runway?.elevation) ?? 0;
+    this.arcade = spawnArcade(num(this.body?.meta?.runway?.heading), elev);
+    // 재생이 마지막으로 적용한 타각이 남으면 게임 내내 그 타각으로 동결 표시된다
+    // (리뷰 확정 — "마지막 값 유지"는 재생 결측 규약이지 게임 규약이 아니다). 게임
+    // 상태는 타면 정보를 갖지 않으므로 중립이 정직하다.
+    if (this.vehicle) {
+      applySurfaces(this.vehicle, surfacePose(0, 0, 0, this.body?.meta?.limits ?? {}));
+    }
+    this.gameEye = null;
+    this.gameInput = { turn: 0, pitch: 0, throttle: 0 };
+    this.syncMarkers();
+    this.emitGameWps();
+  }
+
+  /** 이탈 — 표지를 재생 것으로 되돌린다. 재생 결과가 없으면 기체를 숨기고 중립 궤도
+   *  한 프레임을 그린다(마지막 게임 프레임이 정지화면으로 남지 않게 — draw()는
+   *  body 없이는 아무것도 안 그린다). */
+  private exitGame(): void {
+    this.arcade = null;
+    this.gameInput = { turn: 0, pitch: 0, throttle: 0 };
+    this.syncMarkers();
+    if (this.body == null) {
+      // draw()는 body 없이는 emitReadout에 닿지 않는다 — 여기서 지우지 않으면 화면은
+      // 빈 중립 장면인데 판독 줄만 마지막 게임 값을 영영 말한다(리뷰 확정).
+      this.cb.onReadout(null);
+      if (this.vehicle) hideVehicle(this.vehicle);
+      const groundD = -(this.groundElevationAt(null) ?? 0);
+      this.host.render(orbitCamera({
+        pivot: [0, 0, groundD], az: this.orbit.az, el: this.orbit.el, dist: this.dist, groundD,
+      }), this.lastSeaTime);
+    }
+  }
+
+  /** 게임 자산(로우폴리 지형·소품) — 같은 팩이면 다시 굽지 않는다(진입 비용은 첫
+   *  한 번). 팩이 없으면 비운다 — 기준면 위를 나는 것도 계획에는 쓸 수 있고,
+   *  캡션이 사유를 말한다. */
+  private buildGameWorld(): void {
+    if (this.gameBuiltFor === this.terrain) return;
+    this.gameBuiltFor = this.terrain;
+    const pack = this.terrain;
+    if (pack == null) {
+      this.host.setGameTerrain([], 800);
+      this.host.setProps(null);
+      return;
+    }
+    const relief = reliefOf(pack.tiers);
+    // 낱면이 GAME_FACET_M쯤 되게 촘촘한 티어를 스트라이드로 성기게 한다 — 로우폴리는
+    // 해상도를 버리는 것이 곧 문법이고, 형상 원본은 같은 팩이다(캡션 몫).
+    const built = buildTerrain(pack, (t) => Math.max(1, Math.round(GAME_FACET_M / t.step)));
+    this.host.setGameTerrain(built.meshes, relief);
+    const core = [...pack.tiers].sort((a, b) => a.step - b.step)[0];
+    if (core == null) {
+      this.host.setProps(null);
+      return;
+    }
+    const sample = (n: number, e: number): number | null => {
+      for (const tier of pack.tiers) {
+        const z = elevationAt(tier, n, e);
+        if (z !== null) return z;
+      }
+      return null;
+    };
+    this.host.setProps(buildPropsGroup(placeProps(sample, tierRect(core), relief)).group);
+  }
+
+  /** 게임 입력 축 — WorldTab 키보드가 민다. 게임이 아니면 step이 읽지 않는다. */
+  setGameInput(input: ArcadeInput): void {
+    this.gameInput = input;
+  }
+
+  /** 현재 기체 위치를 웨이포인트로 — [n, e, 고도]를 미터 정수로 찍는다(표에서 읽는 수). */
+  dropGameWaypoint(): void {
+    if (!this.gameOn || this.arcade == null) return;
+    const [n, e, d] = this.arcade.pos;
+    this.pushGameWp(Math.round(n), Math.round(e), Math.round(-d));
+  }
+
+  /** 지형 클릭 웨이포인트 — 교점의 지면 표고 + 여유고도. 하늘을 클릭하면 지면 교점이
+   *  없다는 사실 그대로 아무것도 안 찍는다(0으로 메우지 않는다). */
+  addGameWaypointAt(ndcX: number, ndcY: number): void {
+    if (!this.gameOn) return;
+    const planeY = this.groundElevationAt(null) ?? 0;
+    const hit = this.host.raycastGround(ndcX, ndcY, planeY);
+    if (hit == null) return;
+    // 고도는 성긴 게임 메시의 교점이 아니라 **원본 격자**에서 다시 잰다 — 90 m 낱면의
+    // 중간값이 아니라 그 지점의 표고 위에 여유를 얹어야 계획 값으로 읽힌다.
+    const ground = this.groundElevationAt(hit) ?? -hit[2];
+    this.pushGameWp(
+      Math.round(hit[0]), Math.round(hit[1]), Math.round(ground + GAME_CLICK_CLEARANCE));
+  }
+
+  removeGameWaypoint(i: number): void {
+    if (!Number.isInteger(i) || i < 0 || i >= this.gameWps.length) return;
+    this.gameWps.splice(i, 1);
+    this.afterWpChange();
+  }
+
+  clearGameWaypoints(): void {
+    if (this.gameWps.length === 0) return;
+    this.gameWps = [];
+    this.afterWpChange();
+  }
+
+  /** 시뮬 탭으로 보낼 사본 — 내부 배열을 그대로 내주지 않는다(밖의 수정이 표지와 갈린다). */
+  getGameWaypoints(): [number, number, number][] {
+    return this.gameWps.map((w) => [w[0], w[1], w[2]]);
+  }
+
+  private pushGameWp(n: number, e: number, h: number): void {
+    this.gameWps.push([n, e, h]);
+    this.afterWpChange();
+  }
+
+  private afterWpChange(): void {
+    this.syncMarkers();
+    this.emitGameWps();
+    this.dirty = true;
+  }
+
+  private emitGameWps(): void {
+    this.cb.onGameWps(this.getGameWaypoints());
+  }
+
+  /** 표지의 정본 전환 — 게임 중엔 찍는 중인 웨이포인트, 아니면 재생 결과의 표지. */
+  private syncMarkers(): void {
+    this.host.setMarkers(this.gameOn
+      ? this.gameWps.map(([n, e, h]) => ({
+        ne: [n, e, -h] as const, kind: "waypoint" as const, radius: GAME_ACCEPT_RADIUS,
+      }))
+      : this.replayMarks);
+  }
+
   setCamMode(mode: CamMode): void {
+    // 게임 시점은 체이스 고정 — 받아 두면 버튼만 바뀌고 화면은 그대로인 상태(onMode
+    // 주석이 결함이라 명시한 그것)가 되고, 이탈 시 저장된 모드로 예고 없이 튄다.
+    // 지금 모드를 되쏘아 UI를 되돌린다(조용한 무시 금지).
+    if (this.gameOn) {
+      this.cb.onMode(this.mode);
+      return;
+    }
     if (!CAM_MODES.includes(mode) || mode === this.mode) return;
     this.mode = mode;
     this.chaseEye = null;
@@ -420,6 +632,9 @@ export class SceneController {
   }
 
   rotate(dxPx: number, dyPx: number): void {
+    // 게임 시점은 진행 방향이 정본 — 드래그 회전이 없다. 클릭(웨이포인트)과 드래그를
+    // 가르는 일은 WorldTab이 하고, 여기는 어느 쪽이든 시점을 안 바꾼다.
+    if (this.gameOn) return;
     // **자세 관측에서는 빠져나오지 않는다** — 그 시점도 az·el을 쓰므로 끌면 그 자리에서
     // 돈다. 무조건 궤도로 바꾸면 `attitudeCamera`에 넘기는 각을 영영 못 돌린다.
     // (`views/world.js:228`과 같은 조건.)
@@ -435,6 +650,11 @@ export class SceneController {
   zoom(deltaY: number): void {
     // 휠은 지금 시점의 거리를 움직인다 — 추적·자세는 근접 거리, 궤도는 장면 거리.
     const k = deltaY > 0 ? 1.1 : 1 / 1.1;
+    if (this.gameOn) {
+      this.gameDist = Math.min(Math.max(this.gameDist * k, 8), 120);
+      this.dirty = true;
+      return;
+    }
     if (this.mode === "chase" || this.mode === "attitude") {
       this.closeDist = Math.min(Math.max(this.closeDist * k, 5), 200);
     } else {
@@ -452,6 +672,12 @@ export class SceneController {
     // 조용히 반환하면 UI의 `playing`이 참으로 남아 버튼이 "일시정지"인 채 굳고,
     // UI 쪽 폴링 rAF가 대신 헛돈다 — 막으려던 낭비를 한 층 옮길 뿐이다.
     if (playing && !this.playable) {
+      this.cb.onPlaying(false);
+      return;
+    }
+    // 게임 모드에서 재생은 성립하지 않는다 — 기체의 정본이 아케이드 상태다.
+    // 조용히 무시하지 않고 꺼진 상태를 알린다(위와 같은 사유).
+    if (playing && this.gameOn) {
       this.cb.onPlaying(false);
       return;
     }
@@ -521,6 +747,16 @@ export class SceneController {
     this.lastFrameMs = now;
     this.autoQuality(dtWall);
 
+    if (this.gameOn && this.arcade) {
+      const ground = this.groundElevationAt(this.arcade.pos);
+      this.arcade = stepArcade(this.arcade, this.gameInput, dtWall, ground);
+      // 게임에는 시뮬 시각이 없다 — 해면 위상은 벽시계로 흐른다. 매 프레임 그리므로
+      // 온디맨드 루프(dirty)의 전제와도 충돌하지 않는다.
+      this.lastSeaTime += dtWall;
+      this.drawGame(dtWall, ground);
+      return;
+    }
+
     if (this.playing && this.body && isPlayable(this.body.t)) {
       const next = indexAt(this.fromIdx, this.fromWall, now, this.speed, this.dt, this.n);
       if (next !== this.idx) { this.idx = next; this.dirty = true; }
@@ -529,6 +765,40 @@ export class SceneController {
     if (!this.dirty && !this.playing) return;
     this.dirty = false;
     this.draw(dtWall);
+  }
+
+  /** 게임 프레임 — 아케이드 상태로 기체·카메라를 세운다. 재생 경로(draw)와 갈라
+   *  둔다: 저쪽은 "결측을 그리지 않는다"가 규율이고 이쪽은 상태가 항상 성하다. */
+  private drawGame(dtWall: number, groundElev: number | null): void {
+    const a = this.arcade;
+    if (a == null) return;
+    const q = eulerToQuat(a.phi, a.theta, a.psi);
+    const axes = q ? bodyAxesNed(q) : null;
+    if (this.vehicle) {
+      if (axes) setVehiclePose(this.vehicle, a.pos, axes, MODEL_SCALE);
+      // 프로펠러 — 스로틀 축(−1‥1)을 0‥1로 옮겨 돌린다. 표시 값이다.
+      const thr = 0.5 + 0.5 * this.gameInput.throttle;
+      spinPropeller(this.vehicle, propellerRate(thr, thr), dtWall);
+    }
+    const vel: Vec3 = [
+      a.V * Math.cos(a.theta) * Math.cos(a.psi),
+      a.V * Math.cos(a.theta) * Math.sin(a.psi),
+      -a.V * Math.sin(a.theta),
+    ];
+    const groundD = -(groundElev ?? num(this.body?.meta?.runway?.elevation) ?? 0);
+    const cam = chaseCamera({
+      pos: a.pos, vel, q, prevEye: this.gameEye, dtWall, groundD,
+      dist: this.gameDist, height: this.gameDist * 0.35,
+    });
+    this.gameEye = cam.eye;
+    this.host.render(cam, this.lastSeaTime);
+    const alt = -a.pos[2];
+    this.cb.onReadout({
+      t: null, mode: "게임", alt,
+      aboveGround: groundElev !== null ? alt - groundElev : null,
+      speed: a.V, phi: a.phi, theta: a.theta,
+    });
+    this.emitStats(performance.now());
   }
 
   private draw(dtWall: number): void {
@@ -657,7 +927,10 @@ export class SceneController {
    * 내리기는 빠르게(EMA 24 ms 초과가 이어지면), 올리기는 천천히(11 ms 미만이 오래) —
    * 경계에서 오르내리면 해상도가 숨쉬는 것이 눈에 띈다. */
   private autoQuality(dtWall: number): void {
-    if (!this.playing || dtWall > 0.25) return;
+    // 재생과 게임 — 둘 다 매 프레임 그리는 구간이라 프레임 간격이 부하를 말한다.
+    // 스로틀 표본 폐기는 >=다: dtWall이 step()에서 정확히 0.25로 클램프되므로
+    // 초과(>)는 영영 참이 안 되는 죽은 가드였다(리뷰 확정 — 머리말의 "버린다"가 의도).
+    if ((!this.playing && !this.gameOn) || dtWall >= 0.25) return;
     this.frameEma = this.frameEma === 0 ? dtWall : this.frameEma * 0.9 + dtWall * 0.1;
     if (this.qualityHold > 0) { this.qualityHold--; return; }
     const LADDER = [1, 0.85, 0.7, 0.55];

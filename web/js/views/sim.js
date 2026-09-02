@@ -193,6 +193,28 @@ function groupTitle(text, toggle) {
 export function render() {
   // 탭을 떠났다 돌아오면 이전 DOM은 버려진다 — 그쪽을 밀던 타이머도 같이 정리
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
+
+  // 가상환경 게임 모드가 보낸 웨이포인트 초안 — **한 번 읽고 지운다.** store에 남기면
+  // 탭을 오갈 때마다 이 표의 편집이 초안으로 되돌아간다. 행 형식(문자열 n·e·d,
+  // d = 고도[m])은 이 파일 wpRows가 정본이고, 보낸 쪽(web/world WorldTab)이 그걸 따른다.
+  const wpDraft = store.get("wpDraft");
+  let wpDraftNote = null;
+  if (Array.isArray(wpDraft?.rows) && wpDraft.rows.length > 0) {
+    wpRows = wpDraft.rows.map((r) => ({
+      n: String(r.n ?? ""), e: String(r.e ?? ""),
+      // 빈 고도는 키 자체를 생략한다 — "전부 있거나 전부 없거나"(lib/mission.js) 규칙에
+      // 빈 문자열 d를 섞으면 제출이 거부된다.
+      ...(r.d == null || String(r.d).trim() === "" ? {} : { d: String(r.d) }),
+    }));
+    store.set("wpDraft", null);
+    wpMapView.view = null; // 새 목록에 맞춰 지도 시야를 다시 맞춘다 (fitView)
+    // 고도 추종을 약속하지 않는다 — 기본 미션의 순항 종방향은 "고도 200"이라 세로
+    // 프로파일이 비행에 반영되지 않고, 바로 아래 wpNotice가 그 사실을 경고한다. 여기서
+    // "고도 그대로"라고 말하면 같은 화면의 두 문장이 서로 반대를 말하게 된다(리뷰 확정).
+    wpDraftNote = `가상환경 게임 모드에서 웨이포인트 ${wpRows.length}개를 가져왔습니다 — `
+      + "표·지도에서 다듬은 뒤 실행하세요. 수평 경로는 순항(헤딩 \"path\")이 따라가고, "
+      + "고도까지 따르게 하려면 순항 종방향 축을 '고도'로 두고 값에 \"path\"를 적으세요.";
+  }
   const errBox = el("div");
   const progressBox = el("div");
   const replayBox = el("div");
@@ -533,6 +555,7 @@ export function render() {
       el("h2", {}, "미션 정의 (선언적 모드 테이블 — 01 §3.1)"),
       modeBox,
       el("h2", {}, "웨이포인트 (N, E, 고도) [m]"),
+      wpDraftNote && el("p", { class: "hint" }, wpDraftNote),
       wpNotice,
       // 지도(수평면)와 프로파일(세로면)을 **한 묶음**으로 — 셋을 한 줄에 늘어놓으면
       // 표가 넓어(고도 열) 프로파일만 아래로 밀린다. 묶어 두면 표와 함께 접힐 뿐

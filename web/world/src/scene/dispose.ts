@@ -26,7 +26,13 @@ export function disposeMaterial(mat: unknown): void {
 /** 트리 전체의 지오메트리·재질·텍스처를 놓고 자식을 비운다. */
 export function disposeTree(root: Object3D): void {
   root.traverse((o) => {
-    const m = o as { geometry?: { dispose?: () => void }; material?: unknown };
+    const m = o as {
+      geometry?: { dispose?: () => void }; material?: unknown;
+      isInstancedMesh?: boolean; dispose?: () => void;
+    };
+    // InstancedMesh는 인스턴스 속성(행렬·색)을 **자기 dispose로만** 놓는다 —
+    // 지오메트리·재질만 놓으면 그 버퍼가 남는다 (게임 모드 소품이 이 부류).
+    if (m.isInstancedMesh) m.dispose?.();
     m.geometry?.dispose?.();
     const mat = m.material;
     if (Array.isArray(mat)) mat.forEach(disposeMaterial);
