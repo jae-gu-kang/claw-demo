@@ -11,7 +11,7 @@ import { planeViews, wpMarks } from "../lib/plot.js";
 import { atEnd as cursorAtEnd, dtSample, indexAt, isPlayable } from "../lib/playcursor.js";
 import { flaggedNames, landingSummary, modeSpans, strideFor } from "../lib/replay.js";
 import { GOHEUNG, touchdownWindowM } from "../lib/site.js";
-import { defaultWaypointAlt, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
+import { fillMissingAltitudes, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
 import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
@@ -839,11 +839,10 @@ function renderWpTable(wpBox, wpMap) {
     ),
     el("div", { class: "row", style: "margin-top: 8px" },
       el("button", { onclick: () => {
-        // 새 행은 좌표 (0,0) = 원점이라 고도 있는 목록에서는 "0"(착륙점)이 붙고,
-        // **고도 없는 목록이면 null이라 d 키를 생략**한다. 규칙은 지도 클릭 추가와
-        // 같은 함수다 — 두 곳에 따로 적으면 추가 경로마다 다른 고도가 붙는다
-        const d = defaultWaypointAlt(0, 0, wpRows, { acceptRadius: acceptRadiusOf() });
-        wpRows.push({ n: "0", e: "0", ...(d == null ? {} : { d }) });
+        // 새 행은 좌표 (0,0) = 원점. 지도 클릭 추가와 **같은 함수**로 빈 고도를
+        // 전부 채운다(사용자 요청) — 두 곳에 따로 적으면 추가 경로마다 다른 고도가 붙는다
+        wpRows.push({ n: "0", e: "0" });
+        fillMissingAltitudes(wpRows, { acceptRadius: acceptRadiusOf() });
         sync();
       } }, "웨이포인트 추가"),
       el("span", { class: "hint" }, "지도에서 클릭 추가 · 드래그 이동 · 우클릭 삭제 가능")),

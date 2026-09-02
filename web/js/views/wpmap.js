@@ -8,7 +8,7 @@
 
 import { el } from "../dom.js";
 import {
-  PROFILE_LAYOUT, ZOOM_STEP, defaultWaypointAlt, fitView, fmtMeters, hitTest, isDrag, makeProjection,
+  PROFILE_LAYOUT, ZOOM_STEP, fillMissingAltitudes, fitView, fmtMeters, hitTest, isDrag, makeProjection,
   moveWaypoint, planProfile, profileHitTest, profileScale, rowsToPoints, toCanvasXY,
   trackProfile, zoomAt, panBy,
 } from "../lib/wpmap.js";
@@ -29,7 +29,7 @@ const R_ACCEPT_FLOOR_PX = 5.5;
  * 구간 내내 명령보다 뒤처진 기울기를 그린다(최대 Δalt·r/seg).
  * 실제선이 있으면 겹쳐 그려 둘의 차이를 보게 한다.
  *
- * 고도가 하나도 없으면 그릴 것이 없다 — 빈 축 대신 사유 문장을 낸다(호출측).
+ * 고도가 하나도 없으면 축·눈금만 그린다(빈 프레임) — 사유는 별도로 호출측 캡션이 말한다.
  */
 function drawProfile(ctx, plan, track, scale, width, height, selected) {
   const { mL, mT, mR, mB } = PROFILE_LAYOUT;
@@ -147,16 +147,12 @@ export function createProfileChart({
   function redraw() {
     const { plan, track } = build();
     scale = gesture ? gesture.scale : profileScale(plan, track, width, height);
-    // 그릴 것이 없으면 캔버스를 접는다 — 축·눈금만 있는 빈 프레임에 출발점 점
-    // 하나(트림 고도)가 떠 있으면, 바로 아래 "고도를 입력하면 그립니다" 안내와
-    // 어긋나고 그 주황이 무엇인지 화면에 설명도 없다. 노드는 유지한다 —
-    // 포인터 캡처가 요소에 붙으므로 없앴다 다시 만들면 안 된다
-    const nothing = !plan.some((p) => p.idx >= 0 && p.alt != null) && !track.length;
-    canvas.style.display = nothing ? "none" : "";
-    // 그리기만 조건부다 — 반환은 무조건. 조기 반환으로 두면 "그린 것"과
-    // "그렸을 것"이 한 계약에 섞이고, 나중에 다른 가드가 하나 붙는 순간
-    // 호출측이 조용히 안 그린 것을 설명하게 된다 (그 재파생 탈출구가 §5.5)
-    if (!nothing) drawProfile(ctx, plan, track, scale, width, height, selected);
+    // **항상 그린다**(사용자 요청, 2026-09-04) — 예전엔 계획·실적 선이 하나도 없으면
+    // 캔버스를 통째로 숨겼는데("고도를 입력해야 뜨는" 그 동작), 상자가 나타났다
+    // 사라지는 게 더 헷갈린다는 지적이었다. `drawProfile`은 선이 없으면 축·눈금만
+    // 그리는 빈 프레임으로 이미 안전하다(내부에서 pts.length·track.length로 갈린다) —
+    // 여기서 조건부로 빼야 했던 이유가 없었다.
+    drawProfile(ctx, plan, track, scale, width, height, selected);
     return { plan, track };
   }
 
@@ -420,18 +416,12 @@ export function createWpMap({
         const { toNed } = makeProjection(view(), width, height);
         const p = eventXY(ev);
         const ned = toNed(p.x, p.y);
-        // 고도 기본값은 lib 정본 — 원점(이륙점) 반경 안이면 0, 밖이면 직전 행 상속.
-        // **고도 없는 목록이면 null**이라 d 키를 생략한다: "전부 있거나 전부 없거나"
-        // 규칙(엔진 set_waypoints)을 클릭 한 번으로 깨뜨리지 않는다.
-        // 표의 추가 버튼과 **같은 함수**를 쓴다
+        // 새 점을 먼저 얹고 **빈 고도를 전부** 메운다(사용자 요청) — 새 점만
+        // 채우면 기존 빈 행과 섞여 "전부 있거나 전부 없거나"가 깨지므로, 반대로
+        // 지금까지 비어 있던 행까지 한꺼번에 채운다. 표의 추가 버튼과 **같은 함수**를 쓴다
         const rows = getRows();
-        const d = defaultWaypointAlt(ned.n, ned.e, rows, {
-          acceptRadius: getAcceptRadius?.() || 0,
-        });
-        rows.push({
-          n: fmtMeters(ned.n), e: fmtMeters(ned.e),
-          ...(d == null ? {} : { d }),
-        });
+        rows.push({ n: fmtMeters(ned.n), e: fmtMeters(ned.e) });
+        fillMissingAltitudes(rows, { acceptRadius: getAcceptRadius?.() || 0 });
         selected = rows.length - 1;
         onRowsChanged();
         redraw();

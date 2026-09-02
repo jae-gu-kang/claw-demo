@@ -5,7 +5,7 @@ import { test } from "node:test";
 
 import {
   CRUISE_ALT_DEFAULT, DEFAULT_SPAN, DRAG_PX, SPAN_MAX, SPAN_MIN, WHEEL_ZOOM_DIVISOR,
-  ZOOM_STEP, defaultWaypointAlt,
+  ZOOM_STEP, defaultWaypointAlt, fillMissingAltitudes,
   fitView, fmtMeters, hitTest, isDrag,
   makeProjection, moveWaypoint, panBy, planProfile, profileHitTest, profileScale,
   rowsToPoints, toCanvasXY, trackProfile, zoomAt,
@@ -320,4 +320,54 @@ test("defaultWaypointAlt: 비배열 rows는 던진다 — 빈 목록으로 눙�
   assert.throws(() => defaultWaypointAlt(0, 0, undefined, { acceptRadius: 1500 }), /배열이어야 함/);
   assert.throws(() => defaultWaypointAlt(5000, 3000, { prevAlt: "700" }), /배열이어야 함/);
   assert.throws(() => defaultWaypointAlt(0, 0, null), /배열이어야 함/);
+});
+
+test("fillMissingAltitudes: 새 점 하나 얹은 뒤 부르면 빈 행 전부가 채워진다 (전부 있거나 전부 없거나 회복)", () => {
+  // 실측 재현: 기본 미션의 두 웨이포인트는 고도가 비어 있다. 거기에 지도 클릭으로
+  // 세 번째 점을 얹고 나면(이 함수 호출 전) 세 행이 전부 빈 상태 — 예전엔
+  // defaultWaypointAlt가 새 점도 null을 내 셋 다 계속 비어 있었다(사용자가 매번
+  // 손으로 채워야 했던 그 동작). 이 함수는 반대로 셋 다 채운다.
+  const rows = [{ n: "2600", e: "0" }, { n: "3300", e: "0" }, { n: "4000", e: "0" }];
+  const out = fillMissingAltitudes(rows, { acceptRadius: 200 });
+  assert.equal(out, rows, "제자리 수정 — 사본이 아니다");
+  assert.ok(rows.every((r) => String(r.d).trim() !== ""), "빈 행이 하나도 안 남는다");
+  // 하나씩 순서대로 찍었을 때와 같은 값이어야 한다: 첫 행은 "빈 목록"이라 순항
+  // 기본값, 둘째부터는 직전(양수) 상속 — defaultWaypointAlt 단독 호출과 대조한다
+  const seq = [];
+  for (const r of rows) {
+    const d = defaultWaypointAlt(Number(r.n), Number(r.e), seq, { acceptRadius: 200 });
+    seq.push({ ...r, d });
+  }
+  assert.deepEqual(rows.map((r) => r.d), seq.map((r) => r.d));
+});
+
+test("fillMissingAltitudes: 이미 값이 있는 행은 손대지 않는다 — 사용자가 고친 값을 안 덮는다", () => {
+  const rows = [{ n: "0", e: "0", d: "1234" }, { n: "500", e: "0" }];
+  fillMissingAltitudes(rows, { acceptRadius: 100 });
+  assert.equal(rows[0].d, "1234", "기존 값 보존");
+  assert.equal(rows[1].d, "1234", "직전 값(양수)을 상속 — defaultWaypointAlt와 같은 규칙");
+});
+
+test("fillMissingAltitudes: 원점 반경 안 첫 점은 착륙 고도 0", () => {
+  const rows = [{ n: "0", e: "0" }];
+  fillMissingAltitudes(rows, { acceptRadius: 1500 });
+  assert.equal(rows[0].d, "0");
+});
+
+test("fillMissingAltitudes: 전부 채워진 목록은 그대로 — 새로 계산하지 않는다", () => {
+  const rows = [{ n: "0", e: "0", d: "50" }, { n: "500", e: "0", d: "700" }];
+  const snap = rows.map((r) => ({ ...r }));
+  fillMissingAltitudes(rows, { acceptRadius: 100 });
+  assert.deepEqual(rows, snap);
+});
+
+test("fillMissingAltitudes: 빈 배열은 그대로 빈 배열", () => {
+  const rows = [];
+  assert.equal(fillMissingAltitudes(rows, {}), rows);
+  assert.equal(rows.length, 0);
+});
+
+test("fillMissingAltitudes: 비배열 rows는 던진다", () => {
+  assert.throws(() => fillMissingAltitudes(null), /배열이어야 함/);
+  assert.throws(() => fillMissingAltitudes(undefined), /배열이어야 함/);
 });

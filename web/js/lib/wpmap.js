@@ -270,6 +270,41 @@ export function defaultWaypointAlt(n, e, rows, { acceptRadius, cruiseAlt } = {})
   return String(Number.isFinite(cruise) && cruise > 0 ? cruise : CRUISE_ALT_DEFAULT);
 }
 
+/** 빈 고도를 **전부** 메운다(사용자 요청, 2026-09-04) — 배열을 그 자리에서 고친다.
+ *
+ * `defaultWaypointAlt`는 목록에 고도가 하나도 없으면 새 점도 `null`을 낸다 —
+ * 새 점만 채우면 기존 빈 행과 섞여 "전부 있거나 전부 없거나"가 깨지기 때문이다
+ * (그 함수 자신의 문서 참조). 그런데 그 결과로 "찍을 때마다 고도가 안 들어오고
+ * 매번 손으로 채워야 하는" 쪽으로 기울었다 — 반대로 **채우는 쪽**으로 풀어야
+ * 사용자가 매번 겪지 않는다: 새 점을 얹은 뒤 이 함수를 부르면, 비어 있던 행을
+ * 앞에서부터 순서대로 `defaultWaypointAlt`로 메운다. 첫 행은 그 함수가 원래
+ * "빈 목록"으로 취급해 값을 내고(위 문서 "빈 목록은 첫 점이라 값을 준다"), 그
+ * 다음부터는 방금 메운 행이 "직전 행"이 되어 상속 규칙이 그대로 이어진다 — 즉
+ * 한 번에 다 채워도 "하나씩 순서대로 찍었을 때"와 같은 값이 나온다.
+ *
+ * 이미 값이 있는 행(사용자가 직접 적은 것 포함)은 그대로 둔다 — **찍는 순간에만**
+ * 적용된다는 `defaultWaypointAlt`의 규칙을 그대로 물려받는다(끌어 옮기거나 표에서
+ * 고친 값을 이 함수가 다시 덮지 않는다).
+ */
+export function fillMissingAltitudes(rows, opts = {}) {
+  if (!Array.isArray(rows)) {
+    throw new TypeError(
+      `fillMissingAltitudes: rows는 웨이포인트 행 배열이어야 함 — 받은 것 ${typeof rows}`,
+    );
+  }
+  const filled = [];
+  for (const r of rows) {
+    if (String(r?.d ?? "").trim() === "") {
+      const d = defaultWaypointAlt(Number(r?.n), Number(r?.e), filled, opts);
+      // 위 문서대로 filled는 앞선 행이 이미 다 채워진 채라 여기서 null이 날 일은
+      // 없지만, 원 함수의 계약(null 가능)을 그대로 존중해 방어를 남긴다.
+      if (d != null) r.d = d;
+    }
+    filled.push(r);
+  }
+  return rows;
+}
+
 /** 드래그 판별 — 시작점 대비 이동량이 임계 초과인가. */
 export function isDrag(dx, dy, threshold = DRAG_PX) {
   return Math.hypot(dx, dy) > threshold;
