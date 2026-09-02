@@ -97,21 +97,22 @@ describe("발사관 고각", () => {
 });
 
 describe("포구 높이와 캡션", () => {
-  it("15°에서 포구가 약 2.0 m — 실측 피벗에서 나온다", () => {
+  it("15°에서 포구가 약 4.0 m — 실측 피벗 × 루트 스케일 2.0에서 나온다", () => {
     const p = launcherPose(LAUNCH)!;
-    near(p.muzzleHeight, 0.92 + 0.86 + 0.94 * Math.sin(15 * D2R), "포구 높이", 1e-9);
-    assert.ok(p.muzzleHeight > 1.9 && p.muzzleHeight < 2.1);
+    near(p.muzzleHeight, (0.92 + 0.86 + 0.94 * Math.sin(15 * D2R)) * 2.0, "포구 높이", 1e-9);
+    assert.ok(p.muzzleHeight > 3.9 && p.muzzleHeight < 4.1);
   });
 
-  it("발사 원점 1.2 m와의 0.8 m 차이를 캡션이 말한다", () => {
+  it("발사 원점 1.2 m와의 2.8 m 차이를 캡션이 말한다 (2.0배 확대 후)", () => {
     const notes = launcherCaptionNotes(LAUNCH, launcherPose(LAUNCH)!);
     const line = notes.find((s) => s.includes("높이가"));
     assert.ok(line, "높이 불일치를 숨기면 화면이 거짓말한다");
-    assert.ok(line!.includes("0.8 m"), line);
+    assert.ok(line!.includes("2.8 m"), line);
   });
 
   it("원점 높이가 포구에 맞춰지면 그 줄이 사라진다", () => {
-    const fixed = { ...LAUNCH, origin_height: 2.0 };
+    const p0 = launcherPose(LAUNCH)!;
+    const fixed = { ...LAUNCH, origin_height: p0.muzzleHeight };
     assert.ok(!launcherCaptionNotes(fixed, launcherPose(fixed)!).some((s) => s.includes("높이가")));
   });
 
@@ -122,14 +123,15 @@ describe("포구 높이와 캡션", () => {
     const line = launcherCaptionNotes(LAUNCH, launcherPose(LAUNCH)!)
       .find((s) => s.includes("가속 모델"));
     assert.ok(line, "이 줄이 있어야 한다");
-    assert.ok(line!.includes("1.7 m"), `캐니스터 관 길이가 틀렸다: ${line}`);
-    assert.ok(line!.includes("2.3 m"), `상부 레일까지의 길이가 틀렸다: ${line}`);
+    assert.ok(line!.includes("3.4 m"), `캐니스터 길이가 틀렸다: ${line}`);
+    assert.ok(line!.includes("4.7 m"), `상부 레일까지의 길이가 틀렸다: ${line}`);
   });
 
-  it("실측 상수가 GLB bbox와 맞는다", () => {
-    // Box_Tubes bbox z ∈ [−0.94, 0.78] → 1.72 m,  Box_Rails 앞끝 −1.55 → 전장 2.33 m
-    near(CANISTER_LENGTH, 1.72, "캐니스터 관", 1e-9);
-    near(LAUNCHER_SPAN, 2.33, "구조 전장", 1e-9);
+  it("실측 상수가 GLB bbox × 루트 스케일과 맞는다", () => {
+    // Box_Tubes bbox z ∈ [−0.94, 0.78] → 1.72 × 2.0 = 3.44 m,
+    // Box_Rails 앞끝 −1.55 → 전장 2.33 × 2.0 = 4.66 m (루트 스케일은 생성 스크립트가 정본)
+    near(CANISTER_LENGTH, 3.44, "캐니스터", 1e-9);
+    near(LAUNCHER_SPAN, 4.66, "구조 전장", 1e-9);
   });
 });
 

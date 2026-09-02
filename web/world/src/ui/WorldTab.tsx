@@ -57,7 +57,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   // 시정 45 km(25 km는 첫 화면이 우유에 잠겼다).
   const [sunEl, setSunEl] = useState(0.72);
   const [sunAz, setSunAz] = useState(3.6);
-  const [visibility, setVisibility] = useState(45000);
+  const [visibility, setVisibility] = useState(60000);
   const [exposure, setExposure] = useState(0.95);
   // 해상 상태 — **표시 값**이다. 7 m/s는 남해안의 흔한 바람이고 유의파고 1.0 m가 나온다.
   const [windSpeed, setWindSpeed] = useState(7);

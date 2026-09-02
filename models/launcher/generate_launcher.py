@@ -259,7 +259,10 @@ turntable = finish("Turntable", bm, MAT_FRAME, col_model, pivot=TT_PIV, smooth=T
 # ---------------------------------------------------------------- 크래들 + 발사관 본체 (고각)
 BX, BZ = 0.72, 0.62          # 박스 반폭·반높이
 BY0, BY1 = -1.05, 0.85       # 박스 뒤·앞(포구)
-TUBES = [(sx * 0.36, TRUN + sz * 0.30) for sz in (1, -1) for sx in (1, -1)]  # 2×2 캐니스터 중심 (x,z)
+# 단일 대형 캐니스터 개구 — 처음엔 2×2 관 4개였는데, 기체(스팬 2.5 m)가 그 관을 지날 수
+# 없어 발사 순간 앞면을 뚫고 나오는 그림이 됐다. 개구 하나를 면 가득 뚫으면 루트 2.6배
+# 확대 후 개구가 3.1×2.2 m라 기체가 통째로 드나든다(전체 확대는 아래 root.scale 주석).
+TUBE_HX, TUBE_HZ = 0.66, 0.44   # 개구 반폭·반높이 (확대 전 로컬 — ×2.0이 스팬 2.5 m를 넘게)
 
 bm = bmesh.new()
 add_box(bm, (-BX, BY0, TRUN - BZ), (BX, BY1, TRUN + BZ))                     # 외피
@@ -269,17 +272,16 @@ for sx in (1, -1):
     cylinder(bm, (sx * BX, -0.10, TRUN), (sx * 0.95, -0.10, TRUN), 0.12, 0.12, 'x', n=16)  # 트러니언 스텁
 cradle = finish("Cradle", bm, MAT_OLIVE, col_model, pivot=CR_PIV, smooth=True)
 
-# 포구(+Y)에 캐니스터 관통구 4개 (불리언)
-for i, (cx, cz) in enumerate(TUBES):
-    bm = bmesh.new()
-    add_box(bm, (cx - 0.25, -0.90, cz - 0.21), (cx + 0.25, 1.20, cz + 0.21))
-    cutter = finish("cut_tube_%d" % i, bm, MAT_OLIVE, col_model)
-    boolean_diff(cradle, cutter)
+# 포구(+Y)에 단일 관통구 (불리언)
+bm = bmesh.new()
+add_box(bm, (-TUBE_HX, -0.90, TRUN - TUBE_HZ), (TUBE_HX, 1.20, TRUN + TUBE_HZ))
+cutter = finish("cut_tube", bm, MAT_OLIVE, col_model)
+boolean_diff(cradle, cutter)
 
 # 캐니스터 내부 라이너(암부, 분리 오브젝트)
 bm = bmesh.new()
-for cx, cz in TUBES:
-    add_box(bm, (cx - 0.235, -0.88, cz - 0.195), (cx + 0.235, 0.84, cz + 0.195))
+add_box(bm, (-TUBE_HX + 0.025, -0.88, TRUN - TUBE_HZ + 0.025),
+        (TUBE_HX - 0.025, 0.84, TRUN + TUBE_HZ - 0.025))
 box_tubes = finish("Box_Tubes", bm, MAT_TUBE, col_model, pivot=CR_PIV)
 
 # 상부 발사 레일 2줄 (금속, 포구 앞으로 돌출)
@@ -294,6 +296,13 @@ box_rails = finish("Box_Rails", bm, MAT_METAL, col_model, pivot=CR_PIV, smooth=T
 root = bpy.data.objects.new("LAUNCHER_Root", None)
 root.empty_display_type = 'PLAIN_AXES'
 root.empty_display_size = 1.0
+# **전체 2.0배** — 기체(전장 3.5 m·스팬 2.5 m)가 캐니스터 박스 안에 들어가는 비례
+# (사용자 지정 2~3배; 길이 3.52/1.9 = 1.85, 스팬 2.5/1.44 = 1.74가 하한이다).
+# 상한을 안 쓰는 이유: 균일 확대는 캐니스터 **바닥도 올려서**(1.16×S), 시뮬 발사
+# 원점(1.2 m)과의 높이 어긋남이 배율에 비례해 커진다 — 필요한 만큼만 키운다.
+# 지오메트리 리터럴 수십 개를 고치는 대신 루트 스케일로 얹고 glTF가 노드 스케일로
+# 내보낸다(export_apply=False). 런타임 관절 값은 전부 로컬(스케일 앞)이라 그대로 맞는다.
+root.scale = (2.0, 2.0, 2.0)
 col_model.objects.link(root)
 bpy.context.view_layer.update()
 

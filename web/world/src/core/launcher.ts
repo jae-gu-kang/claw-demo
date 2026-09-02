@@ -20,10 +20,17 @@
  *
  * ## 시뮬은 레일이고 화면은 발사관이다
  *
- * 엔진의 발사 모델은 길이 10 m의 레일이다(`meta.launch.length`). 캐니스터 관은 1.7 m,
- * 상부 레일을 더해도 2.3 m다. 기체 위치는 시뮬이 준 대로 그리므로 사출되어 나오는
- * 그림이 되고, 캡션이 그 둘이 별개임을 밝힌다. 형상을 시뮬에 맞춰 늘이지 않는다 —
- * 그러면 화면이 없는 장비를 그리게 된다.
+ * 엔진의 발사 모델은 길이 10 m의 레일이다(`meta.launch.length`). 캐니스터 박스는 3.4 m,
+ * 상부 레일을 더해도 4.7 m다(전체 2.0배 확대 후). 기체 위치는 시뮬이 준 대로 그리므로
+ * 사출되어 나오는 그림이 되고, 캡션이 그 둘이 별개임을 밝힌다. 형상을 시뮬에 맞춰
+ * 늘이지 않는다 — 그러면 화면이 없는 장비를 그리게 된다.
+ *
+ * ## 2.0배 확대 (2026-09-02, 사용자 지정 2~3배)
+ *
+ * 기체(전장 3.5 m·스팬 2.5 m)가 캐니스터 박스에 들어가는 비례로 GLB를 다시 구웠다 —
+ * 루트 노드 스케일 2.0이고 **노드 로컬 값은 그대로**라, 이 파일의 로컬 상수도 그대로다.
+ * 지면 기준 미터로 말하는 값(포구 높이·캡션 길이)만 `rootScale`을 곱한다. 시뮬 쪽
+ * `origin_height`를 캐니스터 축(≈3.6 m)으로 올리면 기체가 관 속에서 나오는 그림이 된다.
  */
 
 import { finite, type LaunchMeta } from "./types.ts";
@@ -50,14 +57,17 @@ export const LAUNCHER_GEOMETRY = {
   azMin: (-100 * Math.PI) / 180, azMax: (100 * Math.PI) / 180,
   /** 아웃리거 전개 행정 — `generate_launcher.py`의 `JACK_TRAVEL` (GLB에는 안 실린다) */
   jackDrop: 0.46,
+  /** GLB 루트 노드 스케일 — `generate_launcher.py`의 `root.scale`. 로컬 값(위 전부)을
+   *  지면 기준 미터로 바꿀 때만 곱한다. 관절 값은 로컬이라 곱하지 않는다. */
+  rootScale: 2.0,
 } as const;
 
-/** 발사관 구조 전장 [m] — 상부 레일 앞끝에서 캐니스터 관 뒤끝까지. 캡션이 이 수를 쓴다. */
+/** 발사관 구조 전장 [m, 지면 기준] — 상부 레일 앞끝에서 캐니스터 뒤끝까지. 캡션이 쓴다. */
 export const LAUNCHER_SPAN =
-  Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.railTipZ);
-/** 캐니스터 관 자체의 길이 [m]. */
+  Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.railTipZ) * LAUNCHER_GEOMETRY.rootScale;
+/** 캐니스터 박스 자체의 길이 [m, 지면 기준]. */
 export const CANISTER_LENGTH =
-  Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.muzzleZ);
+  Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.muzzleZ) * LAUNCHER_GEOMETRY.rootScale;
 
 export interface LauncherPose {
   /** `Turntable.rotation.y` [rad] */ turntableY: number;
@@ -85,8 +95,10 @@ export function launcherPose(launch: LaunchMeta | null | undefined): LauncherPos
   const clamped = Math.min(Math.max(el, g.elevMin), g.elevMax);
 
   // 포구 높이: 크래들 피벗에서 기준축을 따라 |muzzleZ| 만큼 나간 자리의 높이.
+  // 로컬 값이라 지면 기준 미터로는 rootScale을 곱한다.
   const pivotHeight = g.turntableY + g.cradleY;
-  const muzzleHeight = pivotHeight + Math.abs(g.muzzleZ) * Math.sin(clamped);
+  const muzzleHeight =
+    (pivotHeight + Math.abs(g.muzzleZ) * Math.sin(clamped)) * g.rootScale;
 
   return {
     // **부호가 뒤집히는 자리** — 위 주석의 유도 참조.

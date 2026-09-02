@@ -37625,7 +37625,7 @@ void atmosphereOD(float c, vec3 tauR, vec3 tauM, vec3 sunCol,
 // atmosphereOD의 4π는 하늘(무한 기둥)을 한낮에 맞춘 표시 이득인데, 같은 이득을 유한
 // 경로에 그대로 쓰니 10 km 안쪽 지형까지 우유에 잠겼다. 소산(T)은 물리대로 두고
 // 더해지는 빛만 줄인다 — 먼 것이 하늘로 녹아드는 방향은 유지되고 문턱만 멀어진다.
-const float AERIAL_S_GAIN = 0.55;
+const float AERIAL_S_GAIN = 0.40;  // 0.55로도 "계속 뿌옇다"는 지적 — 한 번 더 내렸다
 
 /** 거리 s를 지난 뒤의 투과율과 in-scattering — 밀도가 일정한 구간용(원경).
  *  haze는 미 산란 배수(시정 슬라이더). dir·sunDir은 정규화된 월드 방향. */
@@ -38331,10 +38331,13 @@ const LAUNCHER_GEOMETRY = {
   elevMax: 48 * Math.PI / 180,
   /** 방위 가동 범위 — 같은 출처. **여기서 자르지 않는다**(아래 캡션 참조) */
   azMin: -100 * Math.PI / 180,
-  azMax: 100 * Math.PI / 180
+  azMax: 100 * Math.PI / 180,
+  /** GLB 루트 노드 스케일 — `generate_launcher.py`의 `root.scale`. 로컬 값(위 전부)을
+   *  지면 기준 미터로 바꿀 때만 곱한다. 관절 값은 로컬이라 곱하지 않는다. */
+  rootScale: 2
 };
-const LAUNCHER_SPAN = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.railTipZ);
-const CANISTER_LENGTH = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.muzzleZ);
+const LAUNCHER_SPAN = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.railTipZ) * LAUNCHER_GEOMETRY.rootScale;
+const CANISTER_LENGTH = Math.abs(LAUNCHER_GEOMETRY.tubeAftZ - LAUNCHER_GEOMETRY.muzzleZ) * LAUNCHER_GEOMETRY.rootScale;
 function boresightNed(azimuth, elevation) {
   const c = Math.cos(elevation);
   return [c * Math.cos(azimuth), c * Math.sin(azimuth), -Math.sin(elevation)];
@@ -38346,7 +38349,7 @@ function launcherPose(launch) {
   const g = LAUNCHER_GEOMETRY;
   const clamped = Math.min(Math.max(el2, g.elevMin), g.elevMax);
   const pivotHeight = g.turntableY + g.cradleY;
-  const muzzleHeight = pivotHeight + Math.abs(g.muzzleZ) * Math.sin(clamped);
+  const muzzleHeight = (pivotHeight + Math.abs(g.muzzleZ) * Math.sin(clamped)) * g.rootScale;
   return {
     // **부호가 뒤집히는 자리** — 위 주석의 유도 참조.
     turntableY: -az,
@@ -44793,7 +44796,7 @@ function WorldTab({ deps }) {
   const [count, setCount] = reactExports.useState(0);
   const [sunEl, setSunEl] = reactExports.useState(0.72);
   const [sunAz, setSunAz] = reactExports.useState(3.6);
-  const [visibility, setVisibility] = reactExports.useState(45e3);
+  const [visibility, setVisibility] = reactExports.useState(6e4);
   const [exposure, setExposure] = reactExports.useState(0.95);
   const [windSpeed, setWindSpeed] = reactExports.useState(7);
   const [windDir, setWindDir] = reactExports.useState(0.6);
