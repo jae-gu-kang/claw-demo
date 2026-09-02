@@ -39,6 +39,19 @@ export const JUMP_RESET_SAMPLES = 25;
  * 따라간다 — **감쇠 계수를 `1 − exp(−dt/τ)`로 잡아 프레임률과 무관**하게 만든다.
  * 프레임당 고정 비율로 섞으면 60 Hz와 25 Hz에서 카메라가 다르게 움직인다.
  */
+/**
+ * @param {object} a
+ * @param {number[]} a.pos NED
+ * @param {number[]|null} a.vel NED 속도 — null이면 기수로 물러선다
+ * @param {number[]|null} a.q 쿼터니언 [w, x, y, z] — null이면 travelDirection이 북으로 물러선다
+ * @param {number[]|null} a.prevEye 직전 시점 — null이면 즉시 목표 위치
+ * @param {number} [a.dtWall] 실시간 경과 [s]
+ * @param {number} a.dist 뒤로 거리 [m]
+ * @param {number} a.height 위로 높이 [m]
+ * @param {number} [a.tau] 지연 시상수 [s]
+ * @param {number|null} [a.groundD] 지면 D [m]
+ * @param {number} [a.minClearance] 지면 여유 [m]
+ */
 export function chaseCamera({
   pos, vel, q, prevEye, dtWall = 0, dist, height, tau = 0.35,
   groundD = null, minClearance = 3,
@@ -64,7 +77,16 @@ export function liftAboveGround(eye, groundD, minClearance) {
   return [eye[0], eye[1], Math.min(eye[2], groundD - minClearance)];
 }
 
-/** 궤도 시점 — 피벗을 중심으로 방위 az·고각 el·거리 dist. */
+/** 궤도 시점 — 피벗을 중심으로 방위 az·고각 el·거리 dist.
+ *
+ * @param {object} a
+ * @param {number[]} a.pivot NED
+ * @param {number} a.az 방위 [rad]
+ * @param {number} a.el 고각 [rad]
+ * @param {number} a.dist 거리 [m]
+ * @param {number|null} [a.groundD] 지면 D [m] — 주면 그 위로 들어 올린다
+ * @param {number} [a.minClearance] 지면 여유 [m]
+ */
 export function orbitCamera({ pivot, az, el, dist, groundD = null, minClearance = 3 }) {
   const e = clamp(el, EL_MIN, EL_MAX);
   const horiz = Math.cos(e) * dist;
@@ -85,6 +107,13 @@ export function orbitCamera({ pivot, az, el, dist, groundD = null, minClearance 
  * `up`이 동체 −z축이라 **롤에 따라 지평선이 기운다**. 이것이 자세가 옳게 적용됐는지의
  * 가장 직접적인 증거 화면이다. offsetFrd는 CG 기준 카메라 위치 [m, FRD].
  */
+/**
+ * @param {object} a
+ * @param {number[]} a.pos NED
+ * @param {number[]} a.q 쿼터니언 [w, x, y, z]
+ * @param {number[]} [a.offsetFrd] 동체축 오프셋 [m]
+ * @param {number} [a.lookAhead] 전방 주시 거리 [m]
+ */
 export function onboardCamera({ pos, q, offsetFrd = [1.2, 0, -0.15], lookAhead = 200 }) {
   const ax = bodyAxesNed(q);
   const eye = [
@@ -104,7 +133,15 @@ export function onboardCamera({ pos, q, offsetFrd = [1.2, 0, -0.15], lookAhead =
   };
 }
 
-/** 자세 관측 근접 시점 — 월드 고정 방향에서 기체를 크게 본다(기체는 회전, 시점은 고정). */
+/** 자세 관측 근접 시점 — 월드 고정 방향에서 기체를 크게 본다(기체는 회전, 시점은 고정).
+ *
+ * @param {object} a
+ * @param {number[]} a.pos NED
+ * @param {number} [a.az] 방위 [rad]
+ * @param {number} [a.el] 고각 [rad]
+ * @param {number} a.dist 거리 [m]
+ * @param {number|null} [a.groundD] 지면 D [m]
+ */
 export function attitudeCamera({ pos, az = 2.4, el = 0.35, dist, groundD = null }) {
   return orbitCamera({ pivot: pos, az, el, dist, groundD, minClearance: 1 });
 }

@@ -67,10 +67,25 @@ export interface Phases {
   td_sink_rate?: number | null; td_speed?: number | null;
 }
 
+/** 작동기·타면 한계 — `simulator._effector_limits`가 **다섯 키를 항상** 낸다.
+ *
+ * **미장착·미상은 0이 아니라 `null`이다**(그쪽 독스트링). `| null`을 지우면 이 파일
+ * 머리말이 금하는 그 거짓말이 되고, `limits.rate_max!`를 쓴 다음 사람이 null로 산술한다.
+ *
+ * 앞의 넷은 위치 한계 [rad]이고 **믹서가 정본**(`fcl/mixer.py`).
+ * `rate_max`는 **작동기**에서 온다(`plant/actuator.py`) — 단위가 rad/s로 다르다.
+ */
+export interface Limits {
+  elevon_lo?: number | null; elevon_hi?: number | null;
+  rudder_lo?: number | null; rudder_hi?: number | null;
+  rate_max?: number | null;
+}
+
 /** `meta`는 **오래된 결과일수록 비어 있다** — 필드마다 없을 수 있고, 화면은 각 부재를
  *  사유 문장으로 말해야 한다(있는 척 기본값을 채우지 않는다). */
 export interface ResultMeta {
   control_hz?: number; dt_plant?: number; t_end?: number;
+  limits?: Limits;
   nav?: string; actuators?: boolean; case?: string; aborted?: string | null;
   geometry?: Geometry;
   runway?: RunwayMeta;

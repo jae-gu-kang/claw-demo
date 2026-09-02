@@ -86,9 +86,21 @@ export function elevationAt(tier, n, e) {
  * `stride`로 솎고, `skipRect`(NED 사각형) 안쪽 셀은 건너뛴다 — 바깥 티어가 안쪽 티어와
  * 겹쳐 z-fighting을 내지 않도록 **빌드 시점에** 잘라 내는 방식이다(폴리곤오프셋 튜닝 없음).
  *
+ * `skipCell(r0, c0, r1, c1)`은 그 위에 얹는 선택 조건이다 — 인자는 **원본 격자 인덱스**로
+ * 준 네 꼭짓점이고(솎기 전 좌표), 참이면 그 칸을 그리지 않는다. 바다를 지형에서 빼고
+ * 해면이 채우게 하는 데 쓴다. 솎기와 무관하게 원본 좌표로 묻는 이유는, 마스크가 원본
+ * 격자 위에서 판정되기 때문이다 — 여기서 좌표계를 바꾸면 호출측이 매번 되돌려야 한다.
+ *
  * 반환 정점은 NED [n, e, d]. 법선은 중앙차분으로 만든다(힐셰이드용).
+ *
+ * @param {object} tier 파싱된 티어
+ * @param {object} [opts]
+ * @param {number} [opts.stride] 격자 솎기 (1 = 전부)
+ * @param {{n0:number, e0:number, n1:number, e1:number}|null} [opts.skipRect] 건너뛸 NED 사각형
+ * @param {((r0:number, c0:number, r1:number, c1:number) => boolean)|null} [opts.skipCell]
+ *        원본 격자 인덱스로 묻는 추가 조건
  */
-export function buildTerrainMesh(tier, { stride = 1, skipRect = null } = {}) {
+export function buildTerrainMesh(tier, { stride = 1, skipRect = null, skipCell = null } = {}) {
   // **마지막 행·열을 반드시 포함한다.** 단순히 stride로 세면 stride가 (rows−1)을
   // 나누어떨어지지 않을 때 가장자리 한 줄이 빠져 티어 경계에 띠가 생긴다 — 격자는
   // tierRect까지 덮는다고 되어 있는데 메시는 못 미치는 상태가 된다.
@@ -136,6 +148,7 @@ export function buildTerrainMesh(tier, { stride = 1, skipRect = null } = {}) {
       const a = r * cols + c, b = a + 1, d = a + cols, f = d + 1;
       if (!(present[a] && present[b] && present[d] && present[f])) { skipped++; continue; }
       if (skipRect && cellInside(positions, cols, r, c, skipRect)) { skipped++; continue; }
+      if (skipCell && skipCell(rIdx[r], cIdx[c], rIdx[r + 1], cIdx[c + 1])) { skipped++; continue; }
       // 감김 방향 주의: NED에서 r은 북(+n), c는 동(+e)인데 렌더러 축은 x=e, y=−d, z=−n이라
       // **n이 커질수록 z가 작아진다.** 그래서 (a,d,b) 순서로 감으면 앞면이 아래를 보고,
       // 위에서 내려다보는 카메라가 지형의 **밑면**을 보게 된다(조명이 위에 있으니 새까맣다).

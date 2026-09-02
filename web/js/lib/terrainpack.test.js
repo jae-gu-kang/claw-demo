@@ -290,3 +290,69 @@ test("stride와 skipRect를 함께 줘도 판정이 실제 좌표를 따른다",
   assert.equal(m.skippedCells, 4);
   assert.ok(m.triangles > 0);
 });
+
+
+/** 평평한 티어 하나짜리 팩 — skipCell 시험용 (표고 10 m 균일). */
+function flatTier(rows, cols, step = 30) {
+  const heights = Array.from({ length: rows }, () => Array.from({ length: cols }, () => 10));
+  return parseTerrainPack(makePack([{ name: "t", step, heights }])).tiers[0];
+}
+
+test("skipCell이 참인 칸은 삼각형을 만들지 않는다 — 바다를 지형에서 뺀다", () => {
+  const tier = flatTier(5, 5);
+  const all = buildTerrainMesh(tier);
+  const half = buildTerrainMesh(tier, { skipCell: (r0, c0) => c0 < 2 });
+  // 5x5 격자의 칸은 4x4 = 16개. c0 ∈ {0,1} 인 칸이 행마다 둘이라 8칸(16 삼각형)이 빠진다.
+  assert.equal(all.triangles, 32);
+  assert.equal(half.triangles, 16);
+});
+
+test("skipCell은 **원본 격자 인덱스**를 받는다 — 솎아도 좌표계가 안 바뀐다", () => {
+  const tier = flatTier(9, 9);
+  const seen = [];
+  buildTerrainMesh(tier, {
+    stride: 4,
+    skipCell: (r0, c0, r1, c1) => { seen.push([r0, c0, r1, c1]); return false; },
+  });
+  // stride 4면 표본이 0·4·8이므로 칸 꼭짓점도 그 값이어야 한다 (0·1·2가 아니라).
+  // 여기서 좌표계가 바뀌면 마스크 조회가 통째로 어긋나는데, 화면에서는 엉뚱한 곳이
+  // 바다가 될 뿐이라 눈으로 잡기 어렵다.
+  assert.deepEqual(seen[0], [0, 0, 4, 4]);
+  assert.ok(seen.some(([r0, c0]) => r0 === 4 && c0 === 4));
+});
+
+test("skipCell의 마지막 칸은 **강제로 포함된 끝 인덱스**를 받는다", () => {
+  // stride가 (rows−1)을 나누어떨어지지 않을 때 `sampleIndices`가 끝 줄을 강제로 넣는다.
+  // rows=10, stride=4 → 표본 [0, 4, 8, 9]. 마지막 칸의 위쪽 꼭짓점은 **9**여야 하고,
+  // `rIdx[r] + stride`(=12)로 계산하면 격자 밖을 가리켜 마스크 조회가 조용히 어긋난다.
+  // 구현은 `rIdx[r + 1]`을 쓰고 있는데, 딱 그 줄을 누가 다시 쓸 때 틀리는 자리다.
+  const tier = flatTier(10, 10);
+  const seen = [];
+  buildTerrainMesh(tier, { stride: 4, skipCell: (r0, c0, r1, c1) => { seen.push([r0, c0, r1, c1]); return false; } });
+  const rows = [...new Set(seen.map(([r0]) => r0))].sort((a, b) => a - b);
+  assert.deepEqual(rows, [0, 4, 8], "칸의 아래 꼭짓점 행");
+  const last = seen.filter(([r0]) => r0 === 8);
+  assert.ok(last.length > 0);
+  for (const [, , r1] of last) assert.equal(r1, 9, "끝 칸의 위쪽은 9 (12가 아니다)");
+});
+
+test("skipCell을 안 주면 아무것도 안 바뀐다 (하위호환)", () => {
+  const tier = flatTier(6, 6);
+  assert.equal(
+    buildTerrainMesh(tier).triangles,
+    buildTerrainMesh(tier, { skipCell: null }).triangles,
+  );
+});
+
+test("skipCell과 skipRect는 함께 걸린다", () => {
+  const tier = flatTier(5, 5);
+  const both = buildTerrainMesh(tier, {
+    skipRect: { n0: -1e9, e0: -1e9, n1: 1e9, e1: 45 }, // 서쪽 일부
+    skipCell: (r0) => r0 >= 3,                          // 북쪽 일부
+  });
+  const onlyRect = buildTerrainMesh(tier, { skipRect: { n0: -1e9, e0: -1e9, n1: 1e9, e1: 45 } });
+  // **각각이 실제로 무언가를 빼야** 이 테스트가 공허해지지 않는다.
+  // step 30이라 c=0 칸만 e ⊆ [0,30] ≤ 45 — 행마다 하나씩 4칸(8 삼각형)이 rect로 빠진다.
+  assert.equal(onlyRect.triangles, 24, "rect가 아무것도 안 빼면 아래 비교가 뜻을 잃는다");
+  assert.equal(both.triangles, 18, "rect(8) + cell(r0≥3 인 나머지 칸) 이 함께 빠진다");
+});
