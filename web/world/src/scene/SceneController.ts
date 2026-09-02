@@ -23,7 +23,7 @@ import { attitudeAt, originsAgree, sampleAt, sceneExtent, trackPoints, velocityA
   from "../lib/world3d.ts";
 import { elevationAt, parseTerrainPack, type TerrainPack } from "../lib/terrainpack.ts";
 import { strideFor } from "../lib/replay.ts";
-import { ATMOSPHERE_NOTES } from "./atmosphere.ts";
+import { ATMOSPHERE_NOTES, CLOUD_NOTES } from "./atmosphere.ts";
 import { launcherCaptionNotes, launcherPose } from "../core/launcher.ts";
 import { SURFACE_NOTES, propellerRate, surfacePose } from "../core/surfaces.ts";
 import { WAVE_NOTES } from "../core/waves.ts";
@@ -332,6 +332,7 @@ export class SceneController {
       + ` · 경사분산 σ² ${sea.slopeVariance.toFixed(4)} (윤슬 폭).`,
     );
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
+    notes.push(CLOUD_NOTES.model);
     notes.push(
       "해면은 지형 격자 밖(외곽 티어 30 km 밖)까지 이어 그립니다 — "
       + "그 부분은 실측 지리가 아니라 이어 붙인 평면입니다.",
@@ -415,13 +416,14 @@ export class SceneController {
 
   setEnvironment(env: {
     sunEl: number; sunAz: number; visibility: number; exposure: number;
-    windSpeed: number; windDir: number;
+    windSpeed: number; windDir: number; cloudCover: number;
   }): void {
     this.host.setEnvironment({
       sunAzEl: [env.sunAz, env.sunEl],
       visibility: env.visibility,
       exposure: env.exposure,
       sea: { windSpeed: env.windSpeed, windDir: env.windDir },
+      cloudCover: env.cloudCover,
     });
     this.dirty = true;
     // 해상 상태가 캡션에 실린다 — 바꿀 때마다 다시 낸다.

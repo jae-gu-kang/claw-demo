@@ -59,6 +59,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   // 해상 상태 — **표시 값**이다. 7 m/s는 남해안의 흔한 바람이고 유의파고 1.0 m가 나온다.
   const [windSpeed, setWindSpeed] = useState(7);
   const [windDir, setWindDir] = useState(0.6);
+  const [cloudCover, setCloudCover] = useState(0.35);
 
   // **생성과 파괴가 대칭인 한 쌍**이다 — 그래야 StrictMode의 이중 실행에서도 컨텍스트가
   // 하나로 유지된다. 의존성이 비어 있는 것은 실수가 아니라 이 규율이다.
@@ -145,8 +146,10 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   }, [chosen, deps.store]);
 
   useEffect(() => {
-    ctlRef.current?.setEnvironment({ sunEl, sunAz, visibility, exposure, windSpeed, windDir });
-  }, [sunEl, sunAz, visibility, exposure, windSpeed, windDir]);
+    ctlRef.current?.setEnvironment({
+      sunEl, sunAz, visibility, exposure, windSpeed, windDir, cloudCover,
+    });
+  }, [sunEl, sunAz, visibility, exposure, windSpeed, windDir, cloudCover]);
 
   // 재생 중에는 커서를 화면이 따라가야 한다 — 컨트롤러가 정본이라 읽어 온다.
   useEffect(() => {
@@ -279,6 +282,10 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
         <label style={HINT}>풍향
           <input type="range" min={0} max={6.28} step={0.02} value={windDir}
             onChange={(e) => setWindDir(Number(e.target.value))} />
+        </label>
+        <label style={HINT}>구름
+          <input type="range" min={0} max={1} step={0.02} value={cloudCover}
+            onChange={(e) => setCloudCover(Number(e.target.value))} />
         </label>
       </div>
 

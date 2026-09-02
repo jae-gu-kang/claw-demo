@@ -25,9 +25,11 @@ import {
 
 import { encodeCoastField, type CoastField } from "../core/coastfield.ts";
 import { ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL } from "../shaders/atmosphere.ts";
+import { CLOUD_UNIFORM_DECL, cloudGlsl } from "../shaders/clouds.ts";
+import { NOISE_GLSL } from "../shaders/noise.ts";
 import { OCEAN_FRAG, OCEAN_VERT } from "../shaders/ocean.ts";
 import { WAVE_COUNT, coxMunkSlopeVariance, gerstnerSet, significantWaveHeight } from "../core/waves.ts";
-import { atmosphereUniforms } from "./atmosphere.ts";
+import { atmosphereUniforms, cloudUniforms } from "./atmosphere.ts";
 
 /** 해상 상태 — 전부 **표시 값**이다(`WAVE_NOTES.displayOnly`). */
 export interface SeaState {
@@ -112,9 +114,15 @@ export function createOcean(opts: Partial<OceanOptions> = {}): Ocean {
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
     vertexShader: OCEAN_VERT,
-    fragmentShader: `${ATMOSPHERE_UNIFORM_DECL}\n${ATMOSPHERE_GLSL}\n${OCEAN_FRAG}`,
+    // 반사의 구름은 거친 적분(3걸음·빛 1걸음)이다 — 파도에 이미 흐트러지고, 바다 픽셀은
+    // 화면의 절반이라 하늘과 같은 10걸음이면 그 비용이 그대로 프레임에 실린다.
+    fragmentShader: [
+      ATMOSPHERE_UNIFORM_DECL, CLOUD_UNIFORM_DECL, ATMOSPHERE_GLSL, NOISE_GLSL,
+      cloudGlsl(3, 1), OCEAN_FRAG,
+    ].join("\n"),
     uniforms: {
       ...atmosphereUniforms,
+      ...cloudUniforms,
       uGridInvViewProj: { value: new Matrix4() },
       uCamPos: { value: new Vector3() },
       uMaxDist: { value: o.maxDist },

@@ -25,7 +25,7 @@ import {
 import { toWorld } from "./axes.ts";
 import { SplitFrustumPass, createPost, type Post, type PostOptions } from "../post/composer.ts";
 import { disposeTree } from "./dispose.ts";
-import { applyAerialPerspective, setAtmosphere } from "./atmosphere.ts";
+import { applyAerialPerspective, setAtmosphere, setCloudTime, setClouds } from "./atmosphere.ts";
 import type { CoastField } from "../core/coastfield.ts";
 import { createOcean, type Ocean, type SeaState } from "./ocean.ts";
 import { createSky, type Sky } from "./sky.ts";
@@ -104,6 +104,7 @@ export interface Environment {
   /** 가시거리 [m] */ visibility: number;
   /** 톤매핑 노출 */ exposure: number;
   /** 해상 상태 — **표시 값**이다(`core/waves.ts` 머리말). */ sea: SeaState;
+  /** 구름 덮임 0~1 — 표시 값. */ cloudCover: number;
 }
 
 /** NED 기하 한 덩어리 — `lib/terrainpack.js buildTerrainMesh`가 내는 모양. */
@@ -220,7 +221,7 @@ export class SceneHost {
     this.post?.setSize(width, height, dpr);
   }
 
-  setEnvironment({ sunAzEl, visibility, exposure, sea }: Environment): void {
+  setEnvironment({ sunAzEl, visibility, exposure, sea, cloudCover }: Environment): void {
     const [az, el] = sunAzEl;
     // 태양 방향을 NED로 만든 뒤 같은 toWorld를 태운다 — 하늘·직사광·산란이 한 값에서 나온다.
     const w = toWorld(Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), -Math.sin(el));
@@ -240,6 +241,10 @@ export class SceneHost {
     // 지형만 평평한 회색으로 남는다. 표시용 근사이고, 하늘 적분이 아니라 고도의 함수다.
     this.ambient.intensity = 0.12 + 0.8 * Math.max(Math.sin(el), 0);
     this.ocean.setSea(sea);
+    // 구름은 바다와 **같은 바람**으로 흐른다 — 표시용 바람은 하나다.
+    setClouds(cloudCover, [
+      sea.windSpeed * Math.cos(sea.windDir), sea.windSpeed * Math.sin(sea.windDir),
+    ]);
     this.renderer.toneMappingExposure = exposure;
   }
 
@@ -350,6 +355,7 @@ export class SceneHost {
     this.camera.updateProjectionMatrix();
     // `lookAt`은 쿼터니언만 고친다 — 월드행렬을 손수 갱신해야 역행렬이 이 프레임 것이 된다.
     this.camera.updateMatrixWorld(true);
+    setCloudTime(timeSec);
     this.ocean.setView(
       this.camera.position,
       this.gridInvViewProj

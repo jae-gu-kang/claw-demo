@@ -16,7 +16,7 @@
  * GLB(`models.ts`). 하늘은 자기 셰이더가 같은 함수를 직접 부른다.
  */
 
-import { Vector3, type Material } from "three";
+import { Vector2, Vector3, type Material } from "three";
 
 import {
   ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL, hazeForVisibility, sunColorRgb,
@@ -30,6 +30,30 @@ const shared = {
 };
 
 export const atmosphereUniforms = shared;
+
+/** 구름 유니폼 — 하늘과 바다(반사)가 같은 벌을 꽂는다. `shaders/clouds.ts`의 선언과 짝. */
+const cloud = {
+  uCloudCover: { value: 0.35 },
+  // 밑면·두께는 표시용 고정값이다. 고흥의 여름 적운 밑면이 대개 1~2 km라 그 안에 뒀다.
+  uCloudBase: { value: 1500 },
+  uCloudThick: { value: 600 },
+  uCloudWind: { value: new Vector2(4, 2) },
+  uCloudTime: { value: 0 },
+  // 표시 보정값 — 윤슬의 `uGlitterGain`과 같은 이유로 있다.
+  uCloudGain: { value: 0.85 },
+};
+
+export const cloudUniforms = cloud;
+
+/** 덮임·바람은 상태가 바뀔 때, 시각은 프레임마다. 둘 다 **표시 값**이다. */
+export function setClouds(cover: number, windXZ: readonly [number, number]): void {
+  cloud.uCloudCover.value = Math.min(Math.max(cover, 0), 1);
+  cloud.uCloudWind.value.set(windXZ[0], windXZ[1]);
+}
+
+export function setCloudTime(timeSec: number): void {
+  cloud.uCloudTime.value = timeSec;
+}
 
 /** 태양 방향(월드, 정규화)·세기·시정을 넣는다. 하늘과 지형이 **같은 값**을 본다.
  *
@@ -57,6 +81,14 @@ export const ATMOSPHERE_NOTES = {
   visibility:
     "가시거리 슬라이더는 미 소산계수를 움직이는 표시 값이며 시뮬 입력이 아닙니다 — "
     + "궤적·자세·타면은 이 값과 무관합니다.",
+} as const;
+
+/** 구름 캡션 원장. */
+export const CLOUD_NOTES = {
+  model:
+    "구름은 절차 노이즈로 만든 2.5D 층운이며 실제 기상이 아닙니다 — 밑면 1,500 m · "
+    + "두께 600 m는 표시용 고정값이고, 덮임 슬라이더는 시뮬 입력이 아닙니다. "
+    + "지형에 그림자를 드리우지 않습니다.",
 } as const;
 
 const VERT_DECL = "varying vec3 vAerialView;\n";

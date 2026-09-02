@@ -34,6 +34,8 @@
 import { COAST_RANGE_M } from "../core/coastfield.ts";
 import { WAVE_COUNT } from "../core/waves.ts";
 
+// 조각 셰이더는 `NOISE_GLSL`(gnoise2)을 앞에 붙여야 한다 — `scene/ocean.ts`가 조립한다.
+
 /** 해안 거리장 조회 — 정점·조각이 **같은 식**을 쓴다.
  *
  * 복호는 `core/coastfield.ts`의 `decodeCoastDistance`와 짝이다. 한쪽만 고치면 해안선이
@@ -147,8 +149,8 @@ void main() {
 
 /** 조각 셰이더 — 프레넬로 하늘과 물속을 섞고, 태양은 마이크로패싯으로 받는다.
  *
- * ATMOSPHERE_GLSL을 앞에 붙여야 한다(하늘과 **같은 함수**를 읽어야 반사색이 갈리지
- * 않는다). scene/ocean.ts가 이어 붙인다. */
+ * `ATMOSPHERE_GLSL` · `NOISE_GLSL` · `cloudGlsl(...)`을 앞에 붙여야 한다(하늘과 **같은
+ * 함수**를 읽어야 반사색이 갈리지 않는다). `scene/ocean.ts`가 이어 붙인다. */
 export const OCEAN_FRAG = /* glsl */`
 uniform vec3 uCamPos;
 uniform float uRoughness;      // √(콕스-먼크 σ²)
@@ -162,40 +164,6 @@ uniform float uSpecAA;         // 법선 분산 → 거칠기 변환 계수
 uniform float uRipple;         // 잔물결 기울기 세기 — 풍속에서 나온다
 uniform vec2 uWindDir;         // 바람이 가는 방향 (렌더 x·z 평면 단위벡터)
 uniform float uTime;
-
-/** 그래디언트 노이즈 — 값과 **해석 도함수**를 함께 낸다 (iq 형식).
- *
- *  텍스처를 한 장도 안 쓴다는 규칙 때문에 해시로 만든다. 도함수를 수치미분이 아니라
- *  해석으로 내는 것이 요점이다: 잔물결은 높이가 아니라 **기울기**로만 쓰이므로, 여기서
- *  나온 도함수가 곧 법선이 된다. 수치미분이면 픽셀마다 두 번 더 뽑아야 하고 그 자체가
- *  에일리어싱한다. */
-vec2 rippleHash(vec2 p) {
-  p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-  return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
-}
-
-vec3 rippleNoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
-  vec2 ga = rippleHash(i);
-  vec2 gb = rippleHash(i + vec2(1.0, 0.0));
-  vec2 gc = rippleHash(i + vec2(0.0, 1.0));
-  vec2 gd = rippleHash(i + vec2(1.0, 1.0));
-  float va = dot(ga, f);
-  float vb = dot(gb, f - vec2(1.0, 0.0));
-  float vc = dot(gc, f - vec2(0.0, 1.0));
-  float vd = dot(gd, f - vec2(1.0, 1.0));
-  float k0 = va;
-  float k1 = vb - va;
-  float k2 = vc - va;
-  float k3 = va - vb - vc + vd;
-  float v = k0 + k1 * u.x + k2 * u.y + k3 * u.x * u.y;
-  vec2 d = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
-         + du * (vec2(k1, k2) + k3 * vec2(u.y, u.x));
-  return vec3(v, d);
-}
 
 /** 잔물결의 기울기 (∂y/∂x, ∂y/∂z).
  *
@@ -223,7 +191,7 @@ vec2 rippleSlope(vec2 p, vec2 windDir, float t, float px, out float lostVar) {
     // 파장이 픽셀의 1.3배 아래로 내려가면 다 접힌다.
     float lod = 1.0 - smoothstep(0.55, 1.3, px / L);
     vec2 q = (p - windDir * (t * (0.9 + 0.55 * float(i)))) / L;
-    vec2 d = rippleNoise(q).yz / L;
+    vec2 d = gnoise2(q).yz / L;
     g += d * (amp * L * lod);
     // 옥타브 하나의 기울기 분산 어림 — 접힌 몫만 거칠기로 넘긴다.
     float dropped = amp * (1.0 - lod);
@@ -302,6 +270,10 @@ void main() {
   vec3 R = reflect(-V, N);
   R.y = max(R.y, 0.01);
   vec3 sky = skyRadiance(R, uSunDirWorld, uSunIntensity, uHaze);
+  // 구름도 비친다 — 하늘과 같은 함수를 거친 적분으로 부른다(scene/ocean.ts가 걸음 수를 정한다).
+  // 반사 광선은 수면에서 출발한다.
+  vec4 cl = cloudLayer(vWorld, R, uSunDirWorld, uSunIntensity, uHaze);
+  sky = sky * cl.a + cl.rgb;
 
   // 물속에서 되나오는 빛 — 마루에서 밝다(빛이 얇은 곳을 지난다).
   float lift = clamp(vWorld.y / max(uWaveHeight, 0.05) * 0.5 + 0.5, 0.0, 1.0);

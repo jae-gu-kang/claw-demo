@@ -2,11 +2,17 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import { ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL } from "./atmosphere.ts";
+import { CLOUD_UNIFORM_DECL, cloudGlsl } from "./clouds.ts";
+import { NOISE_GLSL } from "./noise.ts";
 import { OCEAN_FRAG, OCEAN_VERT } from "./ocean.ts";
 
 const SOURCES: [string, string][] = [
   ["ATMOSPHERE_GLSL", ATMOSPHERE_GLSL],
   ["ATMOSPHERE_UNIFORM_DECL", ATMOSPHERE_UNIFORM_DECL],
+  ["NOISE_GLSL", NOISE_GLSL],
+  ["CLOUD_UNIFORM_DECL", CLOUD_UNIFORM_DECL],
+  ["cloudGlsl(16,3)", cloudGlsl(16, 3)],
+  ["cloudGlsl(3,1)", cloudGlsl(3, 1)],
   ["OCEAN_VERT", OCEAN_VERT],
   ["OCEAN_FRAG", OCEAN_FRAG],
 ];
@@ -20,10 +26,11 @@ describe("GLSL 문자열", () => {
     }
   });
 
-  it("정수처럼 보이는 실수 리터럴이 없다 — GLSL은 1과 1.0을 다르게 본다", () => {
-    // `vec3(1, 0.95, 0.88)`은 엄격한 드라이버에서 깨진다. `glsl()` 포맷터가 막는 것을
-    // 여기서 다시 확인한다 — 상수를 손으로 적었을 때가 위험하다.
-    const bad = /\b(?:vec[234]|float)\s*\(\s*-?\d+\s*[,)]/;
+  it("벡터 생성자에 정수 리터럴이 섞여 있지 않다 — 소수점을 남기는 습관을 지킨다", () => {
+    // GLSL ES 3.00은 `vec3(1, 0.95, 0.88)`을 받아 주지만, 상수를 손으로 적을 때 `1`과
+    // `1.0`이 섞이면 읽는 사람이 정수 산술을 의심하게 된다. `glsl()` 포맷터가 막는 것을
+    // 여기서 다시 확인한다. `float(i)` 같은 변환 호출은 정수를 넣는 것이 **맞으므로** 뺀다.
+    const bad = /\bvec[234]\s*\(\s*-?\d+\s*[,)]/;
     for (const [name, src] of SOURCES) {
       const m = src.match(bad);
       assert.equal(m, null, `${name}: ${m?.[0]}`);
