@@ -16,6 +16,8 @@ from pydantic import BaseModel, field_validator
 import claw
 from claw.params.registry import REGISTRY, RegistryError
 
+from claw_server.routes.world import _terrain_packs
+
 router = APIRouter(tags=["system"])
 
 
@@ -56,12 +58,18 @@ def health(request: Request) -> dict:
     # **재검토 조건은 둘**: ① 리포가 비공개가 되면 (SHA가 안정적 지문이 되어
     # 공개 권고와 대조하면 탐침 없이 미패치 여부가 확정된다) ② 배포 원천이
     # 공개 main이 아니게 되면 (autoDeploy 해제·수동 배포 등)
+    # 지형 팩도 같은 이유로 여기 낸다: 가상환경 탭은 인증 뒤에 있어 "지형이 실제로
+    # 구워졌는가"가 배포 후에도 무인증으로 확인할 길이 없었다(2026-09-02, 빌드 단계에
+    # 지형 생성을 추가한 뒤 실제로 이 질문에 답할 수가 없어서 겪었다). 이름만 내고
+    # 바이트는 안 낸다 — 헬스체크가 지형 다운로드 엔드포인트가 될 이유는 없다.
+    packs = [p["name"] for p in _terrain_packs()]
     return {
         "status": "ok",
         "version": request.app.version,
         "engine": claw.__version__,
         "commit": deployed_commit(),
         "jobs": len(request.app.state.jobs.list()),
+        "world_terrain_packs": packs,
     }
 
 
