@@ -19,7 +19,10 @@
  * 축 사상은 여전히 `nedToRender` 한 곳이다.
  */
 
-import { Group, Matrix4, type Material, type Mesh, type Object3D } from "three";
+import {
+  Box3, CircleGeometry, DoubleSide, Group, Matrix4, Mesh as ThreeMesh, MeshBasicMaterial,
+  Vector3, type Material, type Mesh, type Object3D,
+} from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 import type { BodyAxes, Vec3 } from "../lib/attitude.ts";
@@ -90,6 +93,10 @@ export async function loadModel(
   gltf.scene.traverse((o) => {
     const m = (o as Mesh).material as Material | Material[] | undefined;
     if (!m) return;
+    // 그림자를 드리우고 받는다 — 발사 장면과 착륙 롤아웃에서 기체를 지면에 정박시키는
+    // 가장 싼 단서다. 캐스터가 GLB뿐이라 그림자 패스 비용도 GLB 삼각형만큼이다.
+    o.castShadow = true;
+    o.receiveShadow = true;
     for (const one of Array.isArray(m) ? m : [m]) {
       const wear = WEAR_BY_MATERIAL[one.name];
       if (wear) applyWear(one, wear);
@@ -162,11 +169,44 @@ export function applySurfaces(model: LoadedModel, pose: SurfacePose | null): boo
   return true;
 }
 
-/** 프로펠러 — 각속도 [rad/s]를 적분한다. `null`이면 **돌리지 않는다**(멈춘 채 둔다). */
+/** 프로펠러 — 각속도 [rad/s]를 적분하고, 빠르면 **블러 디스크로 갈아탄다.**
+ *
+ * 실사에서 도는 프로펠러는 블레이드가 아니라 반투명 원반으로 보인다 — 또렷한 블레이드가
+ * 도는 것이 CG 티의 고전이다. 여기는 모션블러가 없으므로(분할 프러스텀 × 깊이) 원반을
+ * 직접 만든다: 60 rad/s부터 원반이 배어 나오고 140에서 블레이드가 꺼진다.
+ * `null`이면 돌리지도 갈아타지도 않는다 — 멈춘 채 둔다.
+ *
+ * 원반은 반투명이라 분할 프러스텀 겹침 구간(1.5~2 km)에서 두 번 섞일 수 있지만,
+ * 그 거리에서 원반은 1 px 미만이다 — 실익이 없어 그대로 둔다. */
 export function spinPropeller(model: LoadedModel, rate: number | null, dt: number): void {
   if (rate === null || !(dt > 0)) return;
   const n = model.nodes.get("Propeller");
-  if (n) n.rotation.z = (n.rotation.z + rate * dt) % (Math.PI * 2);
+  if (!n) return;
+  n.rotation.z = (n.rotation.z + rate * dt) % (Math.PI * 2);
+
+  let disc = n.userData.blurDisc as ThreeMesh | undefined;
+  if (!disc) {
+    // 반경은 지오메트리에서 잰다 — 모델을 다시 구워 프로펠러가 커져도 따라온다.
+    const box = new Box3().setFromObject(n);
+    const size = box.getSize(new Vector3());
+    const r = Math.max(size.x, size.y) / 2;
+    const mat = new MeshBasicMaterial({
+      color: 0x1a1c1f, transparent: true, opacity: 0, side: DoubleSide, depthWrite: false,
+    });
+    applyAerialPerspective(mat);
+    disc = new ThreeMesh(new CircleGeometry(r * 0.96, 48), mat);
+    // 프로펠러의 부모에 단다 — 프로펠러 노드에 달면 rotation.z를 같이 타는데,
+    // 원반은 회전 대칭이라 낭비일 뿐 아니라 z-속도가 블러 계산처럼 오해된다.
+    disc.position.copy(n.position);
+    disc.rotation.copy(n.rotation);
+    disc.rotation.z = 0;
+    n.parent?.add(disc);
+    n.userData.blurDisc = disc;
+  }
+  const a = Math.min(Math.max((Math.abs(rate) - 60) / 80, 0), 1);
+  (disc.material as MeshBasicMaterial).opacity = a * 0.38;
+  disc.visible = a > 0.01;
+  n.visible = a < 1;
 }
 
 /** 발사관 관절 — 방위·고각·아웃리거. 자세를 모르면 **적용하지 않고 false**를 낸다.

@@ -373,7 +373,7 @@ export class SceneController {
       + ` · 경사분산 σ² ${sea.slopeVariance.toFixed(4)} (윤슬 폭).`,
     );
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
-    notes.push(CLOUD_NOTES.model);
+    notes.push(CLOUD_NOTES.model, CLOUD_NOTES.shadows);
     if (this.vehicle || this.launcher) notes.push(WEAR_NOTES.model);
     const scale = this.host.getRenderScale();
     if (scale < 1) {

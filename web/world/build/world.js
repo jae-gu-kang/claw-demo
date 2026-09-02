@@ -21768,6 +21768,69 @@ class BoxGeometry extends BufferGeometry {
     return new BoxGeometry(data.width, data.height, data.depth, data.widthSegments, data.heightSegments, data.depthSegments);
   }
 }
+class CircleGeometry extends BufferGeometry {
+  /**
+   * Constructs a new circle geometry.
+   *
+   * @param {number} [radius=1] - Radius of the circle.
+   * @param {number} [segments=32] - Number of segments (triangles), minimum = `3`.
+   * @param {number} [thetaStart=0] - Start angle for first segment in radians.
+   * @param {number} [thetaLength=Math.PI*2] - The central angle, often called theta,
+   * of the circular sector in radians. The default value results in a complete circle.
+   */
+  constructor(radius = 1, segments = 32, thetaStart = 0, thetaLength = Math.PI * 2) {
+    super();
+    this.type = "CircleGeometry";
+    this.parameters = {
+      radius,
+      segments,
+      thetaStart,
+      thetaLength
+    };
+    segments = Math.max(3, segments);
+    const indices = [];
+    const vertices = [];
+    const normals = [];
+    const uvs = [];
+    const vertex2 = new Vector3();
+    const uv = new Vector2();
+    vertices.push(0, 0, 0);
+    normals.push(0, 0, 1);
+    uvs.push(0.5, 0.5);
+    for (let s = 0, i = 3; s <= segments; s++, i += 3) {
+      const segment = thetaStart + s / segments * thetaLength;
+      vertex2.x = radius * Math.cos(segment);
+      vertex2.y = radius * Math.sin(segment);
+      vertices.push(vertex2.x, vertex2.y, vertex2.z);
+      normals.push(0, 0, 1);
+      uv.x = (vertices[i] / radius + 1) / 2;
+      uv.y = (vertices[i + 1] / radius + 1) / 2;
+      uvs.push(uv.x, uv.y);
+    }
+    for (let i = 1; i <= segments; i++) {
+      indices.push(i, i + 1, 0);
+    }
+    this.setIndex(indices);
+    this.setAttribute("position", new Float32BufferAttribute(vertices, 3));
+    this.setAttribute("normal", new Float32BufferAttribute(normals, 3));
+    this.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+  }
+  copy(source) {
+    super.copy(source);
+    this.parameters = Object.assign({}, source.parameters);
+    return this;
+  }
+  /**
+   * Factory method for creating an instance of this class from the given
+   * JSON object.
+   *
+   * @param {Object} data - A JSON object representing the serialized geometry.
+   * @return {CircleGeometry} A new instance.
+   */
+  static fromJSON(data) {
+    return new CircleGeometry(data.radius, data.segments, data.thetaStart, data.thetaLength);
+  }
+}
 class PlaneGeometry extends BufferGeometry {
   /**
    * Constructs a new plane geometry.
@@ -37491,9 +37554,12 @@ const SUN_TINT = [1, 0.95, 0.88];
 const ATMOSPHERE_UNIFORM_DECL = (
   /* glsl */
   `
+#ifndef ATMO_UNIFORM_DECL
+#define ATMO_UNIFORM_DECL
 uniform vec3 uSunDirWorld;
 uniform float uSunIntensity;
 uniform float uHaze;
+#endif
 `
 );
 const glsl = (x2) => Number.isInteger(x2) ? x2.toFixed(1) : String(x2);
@@ -37633,7 +37699,8 @@ const ATMOSPHERE_NOTES = {
   visibility: "가시거리 슬라이더는 미 소산계수를 움직이는 표시 값이며 시뮬 입력이 아닙니다 — 궤적·자세·타면은 이 값과 무관합니다."
 };
 const CLOUD_NOTES = {
-  model: "구름은 절차 노이즈로 만든 2.5D 층운이며 실제 기상이 아닙니다 — 밑면 1,500 m · 두께 600 m는 표시용 고정값이고, 덮임 슬라이더는 시뮬 입력이 아닙니다. 지형에 그림자를 드리우지 않습니다."
+  model: "구름은 절차 노이즈로 만든 2.5D 층운이며 실제 기상이 아닙니다 — 밑면 1,500 m · 두께 600 m는 표시용 고정값이고, 덮임 슬라이더는 시뮬 입력이 아닙니다. 지형·해면의 구름 그림자는 같은 덮임 함수를 한 표본으로 읽는 표시 근사입니다.",
+  shadows: "그림자 맵은 기체·발사관만 드리웁니다 — 지형 능선의 자체 그림자는 없습니다(30 km 도메인에 2,048 맵이면 텍셀이 15 m라 계단이 됩니다)."
 };
 const VERT_DECL = "varying vec3 vAerialView;\n";
 const VERT_BODY = `
@@ -37677,6 +37744,219 @@ ${FRAG_BODY}`);
   };
   material.needsUpdate = true;
 }
+const CLOUD_UNIFORM_DECL = (
+  /* glsl */
+  `
+#ifndef CLOUD_UNIFORM_DECL_G
+#define CLOUD_UNIFORM_DECL_G
+uniform float uCloudCover;    // 덮임 0~1 (표시 값)
+uniform float uCloudBase;     // 밑면 고도 [m]
+uniform float uCloudThick;    // 두께 [m]
+uniform vec2 uCloudWind;      // 흐름 [m/s] (렌더 x·z)
+uniform float uCloudTime;     // [s] — 시뮬 시각
+uniform float uCloudGain;     // 표시 보정 — 이 렌더러의 절대 밝기는 물리 단위가 아니다
+#endif
+`
+);
+const CLOUD_COVER_GLSL = (
+  /* glsl */
+  `
+/** 한 지점(수평 xz)의 구름 덮임 0~1 — 밀도의 2D 뼈대. */
+float cloudCoverAt(vec2 xz) {
+  vec2 q = (xz + uCloudWind * uCloudTime) * (1.0 / 2600.0);
+  float shape = fbm2(q, 4) * 0.5 + 0.5;
+  float th = 1.0 - uCloudCover;
+  return smoothstep(th - 0.08, th + 0.24, shape);
+}
+
+/** 월드 한 점에 드리우는 구름 그림자 0(그늘)~1(맑음).
+ *
+ *  점에서 태양 쪽으로 올라가 구름 밑면과 만나는 자리의 덮임을 읽는다 — 적분이 아니라
+ *  한 표본이라 반그림자는 덮임 경사가 대신한다(표시용 근사). 해가 지평에 붙으면 직사광
+ *  자체가 없으므로 그림자도 같이 걷는다. */
+float cloudShadowAt(vec3 p, vec3 sunDir) {
+  if (uCloudCover <= 0.001) return 1.0;
+  float up = max(sunDir.y, 0.08);
+  vec2 hit = p.xz + sunDir.xz * ((uCloudBase - p.y) / up);
+  float cover = cloudCoverAt(hit);
+  // 그늘 바닥 0.45 — 실제 구름 그늘도 하늘빛 산란광은 받는다. 우리 근사는 알베도를
+  // 통째로 줄여 주변광까지 어두워지므로, 바닥을 두어 그 과장을 되돌린다.
+  float strength = smoothstep(0.05, 0.35, sunDir.y);
+  return 1.0 - (1.0 - 0.45) * cover * strength;
+}
+`
+);
+function cloudGlsl(steps, lightSteps) {
+  const S2 = Math.max(1, Math.round(steps));
+  const LS = Math.max(1, Math.round(lightSteps));
+  return (
+    /* glsl */
+    `
+const float CLOUD_EARTH_R = 6371000.0;
+const float CLOUD_SIGMA = 0.02;     // 소산계수 [1/m] — 두께 600 m에서 광학두께 12
+
+/** 카메라(고도 camY)에서 방향 d로 반지름 R+alt 구 껍질까지의 두 교점 거리. 없으면 false. */
+bool cloudShell(float camY, vec3 d, float alt, out float tNear, out float tFar) {
+  float oy = CLOUD_EARTH_R + camY;
+  float b = oy * d.y;
+  float r = CLOUD_EARTH_R + alt;
+  float c = oy * oy - r * r;
+  float disc = b * b - c;
+  if (disc < 0.0) { tNear = -1.0; tFar = -1.0; return false; }
+  float s = sqrt(disc);
+  tNear = -b - s;
+  tFar = -b + s;
+  return true;
+}
+
+/** 슬래브 안의 적분 구간 [t0, t1]. 구간이 없으면 false. */
+bool cloudSpan(float camY, vec3 d, out float t0, out float t1) {
+  float base = uCloudBase;
+  float top = uCloudBase + uCloudThick;
+  float bN, bF, tN, tF;
+  bool hitB = cloudShell(camY, d, base, bN, bF);
+  bool hitT = cloudShell(camY, d, top, tN, tF);
+  if (camY < base) {
+    // 아래에서 본다 — 지평 아래로 향하는 시선은 지면이 가린다(평평한 지형이 50 km까지).
+    if (d.y < -0.005 || !hitT) return false;
+    t0 = max(bF, 0.0);
+    t1 = tF;
+  } else if (camY > top) {
+    // 위에서 본다 — 내려가는 시선만 만난다.
+    if (d.y >= 0.0 || !hitT || tN <= 0.0) return false;
+    t0 = tN;
+    t1 = (hitB && bN > 0.0) ? bN : tF;
+  } else {
+    // 슬래브 안 — 여기서 시작한다.
+    t0 = 0.0;
+    t1 = (d.y >= 0.0) ? tF : ((hitB && bN > 0.0) ? bN : tF);
+  }
+  return t1 > t0;
+}
+
+/** 한 점의 구름 밀도 0~1. 2D 뼈대는 cloudCoverAt — 지면 그림자와 같은 함수다. */
+float cloudDensity(vec3 p, vec2 drift) {
+  float hN = clamp((p.y - uCloudBase) / uCloudThick, 0.0, 1.0);
+  float cov = cloudCoverAt(p.xz);
+  if (cov <= 0.001) return 0.0;
+  // 수직 프로파일 — 밑은 평평하게 잘리고, 윗면은 덮임이 짙을수록 높이 솟는다.
+  float top = 0.30 + 0.70 * cov;
+  float prof = smoothstep(0.0, 0.10, hN) * (1.0 - smoothstep(top - 0.30, top, hN));
+  float dens = cov * prof;
+  if (dens <= 0.002) return 0.0;
+  // 가장자리 침식 — 얇은 곳부터 깎여 뭉게구름의 너덜너덜한 윤곽이 된다.
+  float det = fbm2((p.xz + drift * 1.4) * (1.0 / 420.0) + hN * 0.9, 3) * 0.5 + 0.5;
+  return clamp(dens - (1.0 - det) * 0.55 * (1.0 - dens), 0.0, 1.0);
+}
+
+/** 구름 위상 — 두 갈래 HG. 4π를 곱해 무차원(방향 평균 1)으로 둔다. */
+float cloudPhase(float c) {
+  return 4.0 * 3.14159265 * (0.65 * phaseMie(c, 0.55) + 0.35 * phaseMie(c, -0.35));
+}
+
+/** 시선 하나의 구름 — rgb는 복사휘도(대기 감쇠·in-scatter 포함), a는 투과율.
+ *  camPos는 월드, dir·sunDir은 정규화. 구름이 없으면 (0,0,0,1). */
+vec4 cloudLayer(vec3 camPos, vec3 dir, vec3 sunDir, float sunIntensity, float haze) {
+  float t0, t1;
+  if (uCloudCover <= 0.001 || !cloudSpan(camPos.y, dir, t0, t1)) return vec4(0.0, 0.0, 0.0, 1.0);
+  // 스치는 시선은 슬래브를 아주 길게 지난다. 너무 길면 표본이 성겨져 **구름이 층층이
+  // 썬 것처럼** 보이고(14배·10걸음에서 실측), 지평선이 통째로 덮인다. 두께의 8배에서
+  // 자른다 — 그 너머는 어차피 대기가 지운다.
+  t1 = min(t1, t0 + uCloudThick * 8.0);
+
+  vec2 drift = uCloudWind * uCloudTime;
+  vec3 sunCol = sunThroughAtmosphere(sunDir, sunIntensity, haze);
+  // 환경광 — 천정 하늘빛. 밑면은 그늘이라 절반, 윗면은 그대로.
+  vec3 skyUp = skyRadiance(vec3(0.0, 1.0, 0.0), sunDir, sunIntensity, haze);
+  float ph = cloudPhase(dot(dir, sunDir));
+
+  float T = 1.0;
+  vec3 L = vec3(0.0);
+  float dt = (t1 - t0) / float(${S2});
+  float lstep = uCloudThick * 0.7 / float(${LS});
+  // 시작점을 픽셀마다 한 걸음 안에서 흔든다 — 남는 줄무늬가 결이 고운 잡음이 된다.
+  // 시선 방향의 해시라 화면 좌표가 없어도 픽셀마다 다르다.
+  float jitter = hash2(dir.xy * 4096.0 + dir.zz * 1731.0).x * 0.5 + 0.5;
+  for (int i = 0; i < ${S2}; i++) {
+    float t = t0 + (float(i) + jitter) * dt;
+    vec3 p = camPos + dir * t;
+    float rho = cloudDensity(p, drift);
+    if (rho <= 0.002) continue;
+    // 태양 쪽 광학두께 — 몇 걸음이면 밑면이 어둡고 윗면이 밝은 것은 나온다.
+    float od = 0.0;
+    for (int j = 0; j < ${LS}; j++) {
+      od += cloudDensity(p + sunDir * ((float(j) + 0.6) * lstep), drift) * lstep;
+    }
+    float Ts = exp(-CLOUD_SIGMA * od);
+    float hN = clamp((p.y - uCloudBase) / uCloudThick, 0.0, 1.0);
+    vec3 direct = sunCol * Ts * ph;
+    vec3 amb = skyUp * mix(0.45, 1.0, hN);
+    // 이 구간이 산란해 내는 몫(알베도 ≈ 1). 앞에서 뒤로 쌓는다.
+    float a = 1.0 - exp(-CLOUD_SIGMA * rho * dt);
+    L += (direct + amb) * a * T;
+    T *= 1.0 - a;
+    if (T < 0.02) break;
+  }
+  if (T > 0.999) return vec4(0.0, 0.0, 0.0, 1.0);
+
+  // 대기 — 구름까지의 거리로. 지형·하늘·바다와 같은 함수다.
+  vec3 Ta, Sa;
+  atmosphere(dir, sunDir, sunIntensity, haze, t0, Ta, Sa);
+  return vec4(L * uCloudGain * Ta + Sa * (1.0 - T), T);
+}
+`
+  );
+}
+const GROUND_VARYING_DECL = (
+  /* glsl */
+  `
+varying vec3 vGroundWorld;
+varying vec3 vGroundNormal;
+`
+);
+const GROUND_VERT_BODY = (
+  /* glsl */
+  `
+  vGroundWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+  vGroundNormal = normalize(mat3(modelMatrix) * objectNormal);
+`
+);
+const GROUND_FRAG_BODY = (
+  /* glsl */
+  `
+  {
+    vec3 gp = vGroundWorld;
+    vec3 gn = normalize(vGroundNormal);
+    float slope = 1.0 - clamp(gn.y, 0.0, 1.0);
+    vec3 col = diffuseColor.rgb;
+
+    // 식생 얼룩 — 평평한 저지대에서만. 초록을 더하는 게 아니라 **초록 쪽으로 기울인다**
+    // (램프가 이미 고도에 따라 색을 갖고 있다 — 그 위의 변조여야 고도 정보가 산다).
+    float veg = fbm3(gp * (1.0 / 85.0) + 7.3);
+    float flat_ = 1.0 - smoothstep(0.22, 0.45, slope);
+    col = mix(col, col * vec3(0.74, 0.92, 0.58), smoothstep(0.42, 0.72, veg) * flat_ * 0.55);
+
+    // 암반 — 가파른 곳. 채도를 죽이고 데운 회갈색으로.
+    float lum = dot(col, vec3(0.333));
+    vec3 rock = mix(vec3(lum), col, 0.35) * vec3(0.86, 0.80, 0.74);
+    col = mix(col, rock, smoothstep(0.30, 0.60, slope));
+
+    // 매크로 변조(800 m) + 근접 디테일(6 m — 픽셀이 커지면 접는다).
+    float macro = fbm3(gp * (1.0 / 800.0) + 3.1) - 0.44;
+    float pw = length(fwidth(gp));
+    float detFade = 1.0 - smoothstep(2.0, 8.0, pw);
+    float det = detFade > 0.01 ? (vnoise3(gp * (1.0 / 6.0)) - 0.5) * detFade : 0.0;
+    col *= clamp(1.0 + macro * 0.34 + det * 0.26, 0.55, 1.45);
+
+    // 구름 그림자 — 하늘 적분과 같은 덮임 함수를 읽는다.
+    col *= cloudShadowAt(gp, uSunDirWorld);
+
+    diffuseColor.rgb = clamp(col, 0.0, 1.0);
+    // 암반은 매끈한 잔디보다 거칠다 — 거칠기도 경사를 따라간다.
+    roughnessFactor = min(roughnessFactor + slope * 0.05, 1.0);
+  }
+`
+);
 const WEAR_UNIFORM_DECL = (
   /* glsl */
   `
@@ -37810,6 +38090,8 @@ const WEAR_NORMAL_BODY = (
 const NOISE_GLSL = (
   /* glsl */
   `
+#ifndef NOISE_GLSL_G
+#define NOISE_GLSL_G
 vec2 hash2(vec2 p) {
   p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
   return fract(sin(p) * 43758.5453) * 2.0 - 1.0;
@@ -37875,6 +38157,7 @@ float fbm2(vec2 p, int octaves) {
   }
   return v / max(norm, 1.0e-6);
 }
+#endif
 `
 );
 const NONE = [0, 0];
@@ -37940,6 +38223,37 @@ const WEAR_BY_MATERIAL = {
   }
   // CanisterInner는 뺀다 — 관 안쪽은 거의 안 보이고, 보일 때는 어둠이 이야기다.
 };
+function applyGroundDetail(material, uniforms) {
+  const m2 = material;
+  if (m2.__ground) return;
+  m2.__ground = true;
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+  material.onBeforeCompile = function(shader, renderer) {
+    prevCompile.call(this, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader.replace("#include <common>", `#include <common>
+${GROUND_VARYING_DECL}`).replace("#include <fog_vertex>", `#include <fog_vertex>
+${GROUND_VERT_BODY}`);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <common>",
+      `#include <common>
+${GROUND_VARYING_DECL}
+${ATMOSPHERE_UNIFORM_DECL}
+${CLOUD_UNIFORM_DECL}
+${NOISE_GLSL}
+${CLOUD_COVER_GLSL}`
+    ).replace(
+      "#include <metalnessmap_fragment>",
+      `#include <metalnessmap_fragment>
+${GROUND_FRAG_BODY}`
+    );
+  };
+  material.customProgramCacheKey = function() {
+    return `ground-v1|${prevKey.call(this)}`;
+  };
+  material.needsUpdate = true;
+}
 const WEAR_NOTES = {
   model: "기체·발사관의 패널라인·긁힘·오염·그을음·진흙은 절차 생성 표시 효과이며 실제 기체의 상태·도장이 아닙니다."
 };
@@ -38072,7 +38386,7 @@ function launcherCaptionNotes(launch, pose2) {
 const SURFACE_NOTES = {
   innerOuterShared: "엘레본 내측·외측은 같은 각을 씁니다 — 믹서가 1:1 고정이라 시뮬이 둘을 구분하지 않습니다.",
   rudderShared: "러더 두 면은 같은 각을 씁니다 — 시뮬의 러더 채널이 하나입니다.",
-  propellerDisplay: "프로펠러 회전은 좌·우 스로틀 평균에 비례한 표시 값이며, 실제 회전수가 아닙니다.",
+  propellerDisplay: "프로펠러 회전은 좌·우 스로틀 평균에 비례한 표시 값이며, 실제 회전수가 아닙니다 — 빠르면 블레이드 대신 반투명 원반으로 그립니다(모션블러 대용).",
   holdOnMissing: "조종면 각이 결측인 구간에서는 **마지막 각을 유지**합니다 — 중립으로 되돌리면 없는 조종 입력을 그리게 됩니다. 결측이 계속되면 타면이 움직이지 않습니다."
 };
 function clamp(v2, lo, hi2) {
@@ -40132,142 +40446,6 @@ function encodeCoastField(f2) {
   }
   return out;
 }
-const CLOUD_UNIFORM_DECL = (
-  /* glsl */
-  `
-uniform float uCloudCover;    // 덮임 0~1 (표시 값)
-uniform float uCloudBase;     // 밑면 고도 [m]
-uniform float uCloudThick;    // 두께 [m]
-uniform vec2 uCloudWind;      // 흐름 [m/s] (렌더 x·z)
-uniform float uCloudTime;     // [s] — 시뮬 시각
-uniform float uCloudGain;     // 표시 보정 — 이 렌더러의 절대 밝기는 물리 단위가 아니다
-`
-);
-function cloudGlsl(steps, lightSteps) {
-  const S2 = Math.max(1, Math.round(steps));
-  const LS = Math.max(1, Math.round(lightSteps));
-  return (
-    /* glsl */
-    `
-const float CLOUD_EARTH_R = 6371000.0;
-const float CLOUD_SIGMA = 0.02;     // 소산계수 [1/m] — 두께 600 m에서 광학두께 12
-
-/** 카메라(고도 camY)에서 방향 d로 반지름 R+alt 구 껍질까지의 두 교점 거리. 없으면 false. */
-bool cloudShell(float camY, vec3 d, float alt, out float tNear, out float tFar) {
-  float oy = CLOUD_EARTH_R + camY;
-  float b = oy * d.y;
-  float r = CLOUD_EARTH_R + alt;
-  float c = oy * oy - r * r;
-  float disc = b * b - c;
-  if (disc < 0.0) { tNear = -1.0; tFar = -1.0; return false; }
-  float s = sqrt(disc);
-  tNear = -b - s;
-  tFar = -b + s;
-  return true;
-}
-
-/** 슬래브 안의 적분 구간 [t0, t1]. 구간이 없으면 false. */
-bool cloudSpan(float camY, vec3 d, out float t0, out float t1) {
-  float base = uCloudBase;
-  float top = uCloudBase + uCloudThick;
-  float bN, bF, tN, tF;
-  bool hitB = cloudShell(camY, d, base, bN, bF);
-  bool hitT = cloudShell(camY, d, top, tN, tF);
-  if (camY < base) {
-    // 아래에서 본다 — 지평 아래로 향하는 시선은 지면이 가린다(평평한 지형이 50 km까지).
-    if (d.y < -0.005 || !hitT) return false;
-    t0 = max(bF, 0.0);
-    t1 = tF;
-  } else if (camY > top) {
-    // 위에서 본다 — 내려가는 시선만 만난다.
-    if (d.y >= 0.0 || !hitT || tN <= 0.0) return false;
-    t0 = tN;
-    t1 = (hitB && bN > 0.0) ? bN : tF;
-  } else {
-    // 슬래브 안 — 여기서 시작한다.
-    t0 = 0.0;
-    t1 = (d.y >= 0.0) ? tF : ((hitB && bN > 0.0) ? bN : tF);
-  }
-  return t1 > t0;
-}
-
-/** 한 점의 구름 밀도 0~1. */
-float cloudDensity(vec3 p, vec2 drift) {
-  float hN = clamp((p.y - uCloudBase) / uCloudThick, 0.0, 1.0);
-  vec2 q = (p.xz + drift) * (1.0 / 2600.0);
-  float shape = fbm2(q, 4) * 0.5 + 0.5;
-  // 덮임 — 슬라이더가 문턱을 옮긴다. 폭을 두어 가장자리가 부드럽게 얇아진다.
-  float th = 1.0 - uCloudCover;
-  float cov = smoothstep(th - 0.08, th + 0.24, shape);
-  if (cov <= 0.001) return 0.0;
-  // 수직 프로파일 — 밑은 평평하게 잘리고, 윗면은 덮임이 짙을수록 높이 솟는다.
-  float top = 0.30 + 0.70 * cov;
-  float prof = smoothstep(0.0, 0.10, hN) * (1.0 - smoothstep(top - 0.30, top, hN));
-  float dens = cov * prof;
-  if (dens <= 0.002) return 0.0;
-  // 가장자리 침식 — 얇은 곳부터 깎여 뭉게구름의 너덜너덜한 윤곽이 된다.
-  float det = fbm2((p.xz + drift * 1.4) * (1.0 / 420.0) + hN * 0.9, 3) * 0.5 + 0.5;
-  return clamp(dens - (1.0 - det) * 0.55 * (1.0 - dens), 0.0, 1.0);
-}
-
-/** 구름 위상 — 두 갈래 HG. 4π를 곱해 무차원(방향 평균 1)으로 둔다. */
-float cloudPhase(float c) {
-  return 4.0 * 3.14159265 * (0.65 * phaseMie(c, 0.55) + 0.35 * phaseMie(c, -0.35));
-}
-
-/** 시선 하나의 구름 — rgb는 복사휘도(대기 감쇠·in-scatter 포함), a는 투과율.
- *  camPos는 월드, dir·sunDir은 정규화. 구름이 없으면 (0,0,0,1). */
-vec4 cloudLayer(vec3 camPos, vec3 dir, vec3 sunDir, float sunIntensity, float haze) {
-  float t0, t1;
-  if (uCloudCover <= 0.001 || !cloudSpan(camPos.y, dir, t0, t1)) return vec4(0.0, 0.0, 0.0, 1.0);
-  // 스치는 시선은 슬래브를 아주 길게 지난다. 너무 길면 표본이 성겨져 **구름이 층층이
-  // 썬 것처럼** 보이고(14배·10걸음에서 실측), 지평선이 통째로 덮인다. 두께의 8배에서
-  // 자른다 — 그 너머는 어차피 대기가 지운다.
-  t1 = min(t1, t0 + uCloudThick * 8.0);
-
-  vec2 drift = uCloudWind * uCloudTime;
-  vec3 sunCol = sunThroughAtmosphere(sunDir, sunIntensity, haze);
-  // 환경광 — 천정 하늘빛. 밑면은 그늘이라 절반, 윗면은 그대로.
-  vec3 skyUp = skyRadiance(vec3(0.0, 1.0, 0.0), sunDir, sunIntensity, haze);
-  float ph = cloudPhase(dot(dir, sunDir));
-
-  float T = 1.0;
-  vec3 L = vec3(0.0);
-  float dt = (t1 - t0) / float(${S2});
-  float lstep = uCloudThick * 0.7 / float(${LS});
-  // 시작점을 픽셀마다 한 걸음 안에서 흔든다 — 남는 줄무늬가 결이 고운 잡음이 된다.
-  // 시선 방향의 해시라 화면 좌표가 없어도 픽셀마다 다르다.
-  float jitter = hash2(dir.xy * 4096.0 + dir.zz * 1731.0).x * 0.5 + 0.5;
-  for (int i = 0; i < ${S2}; i++) {
-    float t = t0 + (float(i) + jitter) * dt;
-    vec3 p = camPos + dir * t;
-    float rho = cloudDensity(p, drift);
-    if (rho <= 0.002) continue;
-    // 태양 쪽 광학두께 — 몇 걸음이면 밑면이 어둡고 윗면이 밝은 것은 나온다.
-    float od = 0.0;
-    for (int j = 0; j < ${LS}; j++) {
-      od += cloudDensity(p + sunDir * ((float(j) + 0.6) * lstep), drift) * lstep;
-    }
-    float Ts = exp(-CLOUD_SIGMA * od);
-    float hN = clamp((p.y - uCloudBase) / uCloudThick, 0.0, 1.0);
-    vec3 direct = sunCol * Ts * ph;
-    vec3 amb = skyUp * mix(0.45, 1.0, hN);
-    // 이 구간이 산란해 내는 몫(알베도 ≈ 1). 앞에서 뒤로 쌓는다.
-    float a = 1.0 - exp(-CLOUD_SIGMA * rho * dt);
-    L += (direct + amb) * a * T;
-    T *= 1.0 - a;
-    if (T < 0.02) break;
-  }
-  if (T > 0.999) return vec4(0.0, 0.0, 0.0, 1.0);
-
-  // 대기 — 구름까지의 거리로. 지형·하늘·바다와 같은 함수다.
-  vec3 Ta, Sa;
-  atmosphere(dir, sunDir, sunIntensity, haze, t0, Ta, Sa);
-  return vec4(L * uCloudGain * Ta + Sa * (1.0 - T), T);
-}
-`
-  );
-}
 const COAST_GLSL = (
   /* glsl */
   `
@@ -40514,7 +40692,9 @@ void main() {
   vec3 color = mix(body, sky, F);
 
   // 태양 정반사 — 윤슬. 폭은 uRoughness가 정하고, 그 값은 풍속에서 나온다.
-  vec3 sunCol = sunThroughAtmosphere(uSunDirWorld, uSunIntensity, uHaze);
+  // 구름 그림자는 직사광에만 건다 — 하늘 반사(sky)는 구름 낀 하늘 자체가 이미 어둡다.
+  vec3 sunCol = sunThroughAtmosphere(uSunDirWorld, uSunIntensity, uHaze)
+              * cloudShadowAt(vWorld, uSunDirWorld);
   vec3 L = uSunDirWorld;
   float NoL = max(dot(N, L), 0.0);
   if (NoL > 0.0) {
@@ -40600,6 +40780,7 @@ function createOcean(opts = {}) {
       CLOUD_UNIFORM_DECL,
       ATMOSPHERE_GLSL,
       NOISE_GLSL,
+      CLOUD_COVER_GLSL,
       cloudGlsl(3, 1),
       OCEAN_FRAG
     ].join("\n"),
@@ -40736,6 +40917,7 @@ ${ATMOSPHERE_UNIFORM_DECL}
 ${CLOUD_UNIFORM_DECL}
 ${ATMOSPHERE_GLSL}
 ${NOISE_GLSL}
+${CLOUD_COVER_GLSL}
 ${cloudGlsl(SKY_CLOUD_STEPS, SKY_CLOUD_LIGHT_STEPS)}
 void main() {
   vec3 dir = normalize(vDir);
@@ -40841,12 +41023,27 @@ class SceneHost {
   /** 프레임마다 다시 채운다 — 매번 새로 만들면 GC가 프레임을 갉는다. */
   gridInvViewProj = new Matrix4();
   renderScale = 1;
+  sunDirWorld = new Vector3(0.4, 0.6, 0.2);
   constructor(canvas, context) {
     this.renderer = new WebGLRenderer({ canvas, context });
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
     this.sun = new DirectionalLight(16777215, 1);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.camera.left = -70;
+    this.sun.shadow.camera.right = 70;
+    this.sun.shadow.camera.top = 70;
+    this.sun.shadow.camera.bottom = -70;
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 1200;
+    this.sun.shadow.bias = -4e-4;
+    this.sun.shadow.normalBias = 0.5;
+    this.scene.add(this.sun.target);
     this.ambient = new HemisphereLight(12375792, 7040858, 0.9);
     this.scene.add(this.sun, this.ambient);
     this.sky = createSky(SKY_RADIUS);
@@ -40903,7 +41100,7 @@ class SceneHost {
   setEnvironment({ sunAzEl, visibility, exposure, sea, cloudCover }) {
     const [az, el2] = sunAzEl;
     const w2 = toWorld(Math.cos(el2) * Math.cos(az), Math.cos(el2) * Math.sin(az), -Math.sin(el2));
-    this.sun.position.set(w2[0] * 1e3, w2[1] * 1e3, w2[2] * 1e3);
+    this.sunDirWorld.set(w2[0], w2[1], w2[2]);
     const intensity = 2.4;
     const sunColor = setAtmosphere(w2, el2, intensity, visibility);
     this.sun.color.setRGB(sunColor[0], sunColor[1], sunColor[2]);
@@ -40946,8 +41143,11 @@ class SceneHost {
         roughness: 0.95,
         metalness: 0
       });
+      applyGroundDetail(mat, { ...cloudUniforms, uSunDirWorld: atmosphereUniforms.uSunDirWorld });
       applyAerialPerspective(mat);
-      this.groups.terrain.add(new Mesh(geo, mat));
+      const mesh = new Mesh(geo, mat);
+      mesh.receiveShadow = true;
+      this.groups.terrain.add(mesh);
     }
   }
   /** 궤적 — `breaks`의 양 끝 중 하나라도 결측이면 그 구간을 그리지 않는다.
@@ -41048,6 +41248,13 @@ class SceneHost {
     this.camera.lookAt(new Vector3(target[0], target[1], target[2]));
     this.camera.fov = cam.fovY * 180 / Math.PI;
     this.sky.mesh.position.copy(this.camera.position);
+    this.sun.target.position.set(target[0], target[1], target[2]);
+    this.sun.position.set(
+      target[0] + this.sunDirWorld.x * 500,
+      target[1] + this.sunDirWorld.y * 500,
+      target[2] + this.sunDirWorld.z * 500
+    );
+    this.renderer.shadowMap.needsUpdate = true;
     this.camera.near = NEAR;
     this.camera.far = FAR;
     this.camera.updateProjectionMatrix();
@@ -41171,7 +41378,9 @@ function buildTerrain(pack, strideFor2) {
   notes.push(
     "해안선은 표고 0의 **경계 연결 성분**으로 판정했습니다 — 해수면 높이의 간척지·저지대는 육지로 남습니다. 표고만으로는 활주로와 먼바다를 가릴 수 없습니다."
   );
-  notes.push("지형 색은 고도 램프이며 영상지도가 아닙니다.");
+  notes.push(
+    "지형 색은 고도 램프 + 절차 무늬(식생·암반·명암 변조)이며 영상지도가 아닙니다 — 무늬는 표시용이고 실제 지표 피복이 아닙니다."
+  );
   return { meshes, masks, notes };
 }
 function toTrianglesDrawMode(geometry, drawMode) {
@@ -43820,6 +44029,8 @@ async function loadModel(url, expect, signal) {
   gltf.scene.traverse((o) => {
     const m2 = o.material;
     if (!m2) return;
+    o.castShadow = true;
+    o.receiveShadow = true;
     for (const one of Array.isArray(m2) ? m2 : [m2]) {
       const wear = WEAR_BY_MATERIAL[one.name];
       if (wear) applyWear(one, wear);
@@ -43886,7 +44097,32 @@ function applySurfaces(model, pose2) {
 function spinPropeller(model, rate, dt) {
   if (rate === null || !(dt > 0)) return;
   const n2 = model.nodes.get("Propeller");
-  if (n2) n2.rotation.z = (n2.rotation.z + rate * dt) % (Math.PI * 2);
+  if (!n2) return;
+  n2.rotation.z = (n2.rotation.z + rate * dt) % (Math.PI * 2);
+  let disc = n2.userData.blurDisc;
+  if (!disc) {
+    const box = new Box3().setFromObject(n2);
+    const size = box.getSize(new Vector3());
+    const r2 = Math.max(size.x, size.y) / 2;
+    const mat = new MeshBasicMaterial({
+      color: 1711135,
+      transparent: true,
+      opacity: 0,
+      side: DoubleSide,
+      depthWrite: false
+    });
+    applyAerialPerspective(mat);
+    disc = new Mesh(new CircleGeometry(r2 * 0.96, 48), mat);
+    disc.position.copy(n2.position);
+    disc.rotation.copy(n2.rotation);
+    disc.rotation.z = 0;
+    n2.parent?.add(disc);
+    n2.userData.blurDisc = disc;
+  }
+  const a = Math.min(Math.max((Math.abs(rate) - 60) / 80, 0), 1);
+  disc.material.opacity = a * 0.38;
+  disc.visible = a > 0.01;
+  n2.visible = a < 1;
 }
 function applyLauncher(model, pose2) {
   if (pose2 == null) return false;
@@ -44180,7 +44416,7 @@ class SceneController {
       `해상 상태: 풍속 ${sea.windSpeed.toFixed(1)} m/s · 유의파고 ${sea.waveHeight.toFixed(2)} m · 경사분산 σ² ${sea.slopeVariance.toFixed(4)} (윤슬 폭).`
     );
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
-    notes.push(CLOUD_NOTES.model);
+    notes.push(CLOUD_NOTES.model, CLOUD_NOTES.shadows);
     if (this.vehicle || this.launcher) notes.push(WEAR_NOTES.model);
     const scale = this.host.getRenderScale();
     if (scale < 1) {

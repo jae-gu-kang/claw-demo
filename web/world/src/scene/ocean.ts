@@ -25,7 +25,7 @@ import {
 
 import { encodeCoastField, type CoastField } from "../core/coastfield.ts";
 import { ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL } from "../shaders/atmosphere.ts";
-import { CLOUD_UNIFORM_DECL, cloudGlsl } from "../shaders/clouds.ts";
+import { CLOUD_COVER_GLSL, CLOUD_UNIFORM_DECL, cloudGlsl } from "../shaders/clouds.ts";
 import { NOISE_GLSL } from "../shaders/noise.ts";
 import { OCEAN_FRAG, OCEAN_VERT } from "../shaders/ocean.ts";
 import { WAVE_COUNT, coxMunkSlopeVariance, gerstnerSet, significantWaveHeight } from "../core/waves.ts";
@@ -118,7 +118,7 @@ export function createOcean(opts: Partial<OceanOptions> = {}): Ocean {
     // 화면의 절반이라 하늘과 같은 10걸음이면 그 비용이 그대로 프레임에 실린다.
     fragmentShader: [
       ATMOSPHERE_UNIFORM_DECL, CLOUD_UNIFORM_DECL, ATMOSPHERE_GLSL, NOISE_GLSL,
-      cloudGlsl(3, 1), OCEAN_FRAG,
+      CLOUD_COVER_GLSL, cloudGlsl(3, 1), OCEAN_FRAG,
     ].join("\n"),
     uniforms: {
       ...atmosphereUniforms,

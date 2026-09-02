@@ -24,7 +24,7 @@
 import { BackSide, Color, Mesh, ShaderMaterial, SphereGeometry } from "three";
 
 import { ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL } from "../shaders/atmosphere.ts";
-import { CLOUD_UNIFORM_DECL, cloudGlsl } from "../shaders/clouds.ts";
+import { CLOUD_COVER_GLSL, CLOUD_UNIFORM_DECL, cloudGlsl } from "../shaders/clouds.ts";
 import { NOISE_GLSL } from "../shaders/noise.ts";
 import { atmosphereUniforms, cloudUniforms } from "./atmosphere.ts";
 
@@ -48,6 +48,7 @@ ${ATMOSPHERE_UNIFORM_DECL}
 ${CLOUD_UNIFORM_DECL}
 ${ATMOSPHERE_GLSL}
 ${NOISE_GLSL}
+${CLOUD_COVER_GLSL}
 ${cloudGlsl(SKY_CLOUD_STEPS, SKY_CLOUD_LIGHT_STEPS)}
 void main() {
   vec3 dir = normalize(vDir);

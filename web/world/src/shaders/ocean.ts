@@ -285,7 +285,9 @@ void main() {
   vec3 color = mix(body, sky, F);
 
   // 태양 정반사 — 윤슬. 폭은 uRoughness가 정하고, 그 값은 풍속에서 나온다.
-  vec3 sunCol = sunThroughAtmosphere(uSunDirWorld, uSunIntensity, uHaze);
+  // 구름 그림자는 직사광에만 건다 — 하늘 반사(sky)는 구름 낀 하늘 자체가 이미 어둡다.
+  vec3 sunCol = sunThroughAtmosphere(uSunDirWorld, uSunIntensity, uHaze)
+              * cloudShadowAt(vWorld, uSunDirWorld);
   vec3 L = uSunDirWorld;
   float NoL = max(dot(N, L), 0.0);
   if (NoL > 0.0) {

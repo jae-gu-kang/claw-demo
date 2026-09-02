@@ -117,6 +117,9 @@ export function buildTerrain(pack: TerrainPack, strideFor?: (t: Tier) => number)
     "해안선은 표고 0의 **경계 연결 성분**으로 판정했습니다 — 해수면 높이의 간척지·저지대는 "
     + "육지로 남습니다. 표고만으로는 활주로와 먼바다를 가릴 수 없습니다.",
   );
-  notes.push("지형 색은 고도 램프이며 영상지도가 아닙니다.");
+  notes.push(
+    "지형 색은 고도 램프 + 절차 무늬(식생·암반·명암 변조)이며 영상지도가 아닙니다 — "
+    + "무늬는 표시용이고 실제 지표 피복이 아닙니다.",
+  );
   return { meshes, masks, notes };
 }

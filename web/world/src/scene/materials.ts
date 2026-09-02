@@ -18,6 +18,10 @@
 
 import type { Material } from "three";
 
+import { ATMOSPHERE_UNIFORM_DECL } from "../shaders/atmosphere.ts";
+import { CLOUD_COVER_GLSL, CLOUD_UNIFORM_DECL } from "../shaders/clouds.ts";
+import { GROUND_FRAG_BODY, GROUND_VARYING_DECL, GROUND_VERT_BODY } from "../shaders/ground.ts";
+
 import {
   WEAR_FRAG_BODY, WEAR_GLSL, WEAR_NORMAL_BODY, WEAR_UNIFORM_DECL, WEAR_VARYING_DECL,
   WEAR_VERT_BODY,
@@ -73,6 +77,48 @@ export const WEAR_BY_MATERIAL: Readonly<Record<string, WearConfig>> = {
   },
   // CanisterInner는 뺀다 — 관 안쪽은 거의 안 보이고, 보일 때는 어둠이 이야기다.
 };
+
+/** 지형 재질에 절차 무늬 + 구름 그림자를 얹는다 — `shaders/ground.ts` 머리말 참조.
+ *
+ * `applyWear`·`applyAerialPerspective`와 같은 규율: onBeforeCompile을 잇고 캐시 키를
+ * 잇는다. 유니폼은 공유 구름 벌(`cloudUniforms`)을 그대로 꽂아야 한다 — 호출측이
+ * `Object.assign(shader.uniforms, ...)`로 넣도록 uniforms 인자를 받는다. */
+export function applyGroundDetail(
+  material: Material, uniforms: Record<string, { value: unknown }>,
+): void {
+  const m = material as Material & { __ground?: boolean };
+  if (m.__ground) return;
+  m.__ground = true;
+
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+
+  material.onBeforeCompile = function (shader, renderer) {
+    prevCompile.call(this, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", `#include <common>
+${GROUND_VARYING_DECL}`)
+      .replace("#include <fog_vertex>", `#include <fog_vertex>
+${GROUND_VERT_BODY}`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>",
+        `#include <common>
+${GROUND_VARYING_DECL}
+${ATMOSPHERE_UNIFORM_DECL}
+`
+        + `${CLOUD_UNIFORM_DECL}
+${NOISE_GLSL}
+${CLOUD_COVER_GLSL}`)
+      .replace("#include <metalnessmap_fragment>",
+        `#include <metalnessmap_fragment>
+${GROUND_FRAG_BODY}`);
+  };
+  material.customProgramCacheKey = function () {
+    return `ground-v1|${prevKey.call(this)}`;
+  };
+  material.needsUpdate = true;
+}
 
 /** 캡션 원장 — 마모는 표시용이다. */
 export const WEAR_NOTES = {

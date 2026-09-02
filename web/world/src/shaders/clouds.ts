@@ -35,15 +35,49 @@
 
 /** 구름 유니폼 — `scene/atmosphere.ts`의 `cloudUniforms`와 짝이다. */
 export const CLOUD_UNIFORM_DECL = /* glsl */`
+#ifndef CLOUD_UNIFORM_DECL_G
+#define CLOUD_UNIFORM_DECL_G
 uniform float uCloudCover;    // 덮임 0~1 (표시 값)
 uniform float uCloudBase;     // 밑면 고도 [m]
 uniform float uCloudThick;    // 두께 [m]
 uniform vec2 uCloudWind;      // 흐름 [m/s] (렌더 x·z)
 uniform float uCloudTime;     // [s] — 시뮬 시각
 uniform float uCloudGain;     // 표시 보정 — 이 렌더러의 절대 밝기는 물리 단위가 아니다
+#endif
 `;
 
-/** `ATMOSPHERE_GLSL`과 `NOISE_GLSL`을 앞에 붙여야 한다. */
+/** 구름 덮임·그림자 — 하늘 적분과 지면 그림자가 **같은 덮임 함수**를 읽는다.
+ *
+ * NOISE_GLSL(fbm2)과 CLOUD_UNIFORM_DECL을 앞에 붙여야 한다. 그림자를 별도 노이즈로
+ * 만들면 구름과 그림자가 서로 다른 자리에 앉는다 — 하늘을 보고 그림자를 확인하는
+ * 시선을 화면이 배신하게 된다. */
+export const CLOUD_COVER_GLSL = /* glsl */`
+/** 한 지점(수평 xz)의 구름 덮임 0~1 — 밀도의 2D 뼈대. */
+float cloudCoverAt(vec2 xz) {
+  vec2 q = (xz + uCloudWind * uCloudTime) * (1.0 / 2600.0);
+  float shape = fbm2(q, 4) * 0.5 + 0.5;
+  float th = 1.0 - uCloudCover;
+  return smoothstep(th - 0.08, th + 0.24, shape);
+}
+
+/** 월드 한 점에 드리우는 구름 그림자 0(그늘)~1(맑음).
+ *
+ *  점에서 태양 쪽으로 올라가 구름 밑면과 만나는 자리의 덮임을 읽는다 — 적분이 아니라
+ *  한 표본이라 반그림자는 덮임 경사가 대신한다(표시용 근사). 해가 지평에 붙으면 직사광
+ *  자체가 없으므로 그림자도 같이 걷는다. */
+float cloudShadowAt(vec3 p, vec3 sunDir) {
+  if (uCloudCover <= 0.001) return 1.0;
+  float up = max(sunDir.y, 0.08);
+  vec2 hit = p.xz + sunDir.xz * ((uCloudBase - p.y) / up);
+  float cover = cloudCoverAt(hit);
+  // 그늘 바닥 0.45 — 실제 구름 그늘도 하늘빛 산란광은 받는다. 우리 근사는 알베도를
+  // 통째로 줄여 주변광까지 어두워지므로, 바닥을 두어 그 과장을 되돌린다.
+  float strength = smoothstep(0.05, 0.35, sunDir.y);
+  return 1.0 - (1.0 - 0.45) * cover * strength;
+}
+`;
+
+/** `ATMOSPHERE_GLSL`·`NOISE_GLSL`·`CLOUD_COVER_GLSL`을 앞에 붙여야 한다. */
 export function cloudGlsl(steps: number, lightSteps: number): string {
   const S = Math.max(1, Math.round(steps));
   const LS = Math.max(1, Math.round(lightSteps));
@@ -90,14 +124,10 @@ bool cloudSpan(float camY, vec3 d, out float t0, out float t1) {
   return t1 > t0;
 }
 
-/** 한 점의 구름 밀도 0~1. */
+/** 한 점의 구름 밀도 0~1. 2D 뼈대는 cloudCoverAt — 지면 그림자와 같은 함수다. */
 float cloudDensity(vec3 p, vec2 drift) {
   float hN = clamp((p.y - uCloudBase) / uCloudThick, 0.0, 1.0);
-  vec2 q = (p.xz + drift) * (1.0 / 2600.0);
-  float shape = fbm2(q, 4) * 0.5 + 0.5;
-  // 덮임 — 슬라이더가 문턱을 옮긴다. 폭을 두어 가장자리가 부드럽게 얇아진다.
-  float th = 1.0 - uCloudCover;
-  float cov = smoothstep(th - 0.08, th + 0.24, shape);
+  float cov = cloudCoverAt(p.xz);
   if (cov <= 0.001) return 0.0;
   // 수직 프로파일 — 밑은 평평하게 잘리고, 윗면은 덮임이 짙을수록 높이 솟는다.
   float top = 0.30 + 0.70 * cov;

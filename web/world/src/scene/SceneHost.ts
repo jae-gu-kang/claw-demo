@@ -17,6 +17,7 @@
 
 import {
   ACESFilmicToneMapping, BufferAttribute, BufferGeometry, Color, DirectionalLight,
+  PCFSoftShadowMap,
   Group, HemisphereLight, LineBasicMaterial, LineSegments, Matrix4, Mesh,
   MeshStandardMaterial, PerspectiveCamera, Scene, SphereGeometry, SRGBColorSpace, Vector3,
   WebGLRenderer,
@@ -25,7 +26,11 @@ import {
 import { toWorld } from "./axes.ts";
 import { SplitFrustumPass, createPost, type Post, type PostOptions } from "../post/composer.ts";
 import { disposeTree } from "./dispose.ts";
-import { applyAerialPerspective, setAtmosphere, setCloudTime, setClouds } from "./atmosphere.ts";
+import {
+  applyAerialPerspective, atmosphereUniforms, cloudUniforms, setAtmosphere, setCloudTime,
+  setClouds,
+} from "./atmosphere.ts";
+import { applyGroundDetail } from "./materials.ts";
 import type { CoastField } from "../core/coastfield.ts";
 import { createOcean, type Ocean, type SeaState } from "./ocean.ts";
 import { createSky, type Sky } from "./sky.ts";
@@ -188,6 +193,7 @@ export class SceneHost {
   /** 프레임마다 다시 채운다 — 매번 새로 만들면 GC가 프레임을 갉는다. */
   private readonly gridInvViewProj = new Matrix4();
   private renderScale = 1;
+  private readonly sunDirWorld = new Vector3(0.4, 0.6, 0.2);
 
   constructor(canvas: HTMLCanvasElement, context: WebGL2RenderingContext) {
     // 컨텍스트를 밖에서 만들어 넘긴다 — 같은 캔버스의 두 번째 getContext는 기존 것을
@@ -201,9 +207,28 @@ export class SceneHost {
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
+    // 그림자 — 기체·발사관만 드리운다(캐스터는 models.ts가 정한다). autoUpdate를 끄는
+    // 이유: 분할 프러스텀이 한 프레임에 render()를 두 번 부르므로 그대로 두면 그림자
+    // 맵도 두 번 굽는다. render()가 프레임당 한 번 needsUpdate를 켠다.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
 
     // 색·세기는 `setEnvironment`가 대기 모델에서 정한다. 여기 값은 그전 한 프레임용이다.
     this.sun = new DirectionalLight(0xffffff, 1);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    // 상자는 카메라 표적 둘레 ±70 m — 추적 시점의 8배 기체(스팬 28 m)와 발사관이 든다.
+    // 표적을 따라다니므로 프레임마다 render()가 옮긴다.
+    this.sun.shadow.camera.left = -70;
+    this.sun.shadow.camera.right = 70;
+    this.sun.shadow.camera.top = 70;
+    this.sun.shadow.camera.bottom = -70;
+    this.sun.shadow.camera.near = 1;
+    this.sun.shadow.camera.far = 1200;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.5;
+    this.scene.add(this.sun.target);
     this.ambient = new HemisphereLight(0xbcd6f0, 0x6b6f5a, 0.9);
     this.scene.add(this.sun, this.ambient);
 
@@ -273,7 +298,7 @@ export class SceneHost {
     const [az, el] = sunAzEl;
     // 태양 방향을 NED로 만든 뒤 같은 toWorld를 태운다 — 하늘·직사광·산란이 한 값에서 나온다.
     const w = toWorld(Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), -Math.sin(el));
-    this.sun.position.set(w[0] * 1000, w[1] * 1000, w[2] * 1000);
+    this.sunDirWorld.set(w[0], w[1], w[2]);
     // 대기 밖 세기. 대기를 지나며 붉어지고 어두워지는 몫은 아래 `sunColor`가 맡는다.
     const intensity = 2.4;
     // **하늘·지형·모델이 이 한 벌의 유니폼을 공유한다.** 예전에는 `fog.color`를 지평선
@@ -322,8 +347,14 @@ export class SceneHost {
       const mat = new MeshStandardMaterial({
         vertexColors: true, roughness: 0.95, metalness: 0,
       });
+      // 지면 무늬 + 구름 그림자 → 대기. 순서는 무관하다(선언은 가드, 앵커는 서로 다름).
+      applyGroundDetail(mat, { ...cloudUniforms, uSunDirWorld: atmosphereUniforms.uSunDirWorld });
       applyAerialPerspective(mat);
-      this.groups.terrain.add(new Mesh(geo, mat));
+      const mesh = new Mesh(geo, mat);
+      // 기체·발사관의 그림자를 받는다. 지형끼리의 자체 그림자는 없다(캡션 몫) —
+      // 30 km 도메인에 2048 맵이면 텍셀이 15 m라 지형 그림자는 계단이 된다.
+      mesh.receiveShadow = true;
+      this.groups.terrain.add(mesh);
     }
   }
 
@@ -438,6 +469,16 @@ export class SceneHost {
     // 하늘은 카메라를 따라다닌다 — 반지름이 FAR의 0.9배라 움직이지 않으면 잘린다.
     // (near/far와 투영행렬은 `SplitFrustumPass`가 패스마다 세운다.)
     this.sky.mesh.position.copy(this.camera.position);
+
+    // 그림자 상자를 카메라 표적에 앉힌다 — 추적·온보드·자세 시점의 표적이 곧 기체다.
+    // 태양 위치는 그림자에만 쓰인다(조명 방향은 position−target 벡터가 정한다).
+    this.sun.target.position.set(target[0], target[1], target[2]);
+    this.sun.position.set(
+      target[0] + this.sunDirWorld.x * 500,
+      target[1] + this.sunDirWorld.y * 500,
+      target[2] + this.sunDirWorld.z * 500,
+    );
+    this.renderer.shadowMap.needsUpdate = true;
 
     // **투영 격자는 전 구간 프러스텀에서 뽑는다.** 패스별 near/far로 뽑으면 두 패스가
     // 서로 다른 해면 지오메트리를 만들어 겹침 구간에 이음매가 생긴다(`shaders/ocean.ts`).

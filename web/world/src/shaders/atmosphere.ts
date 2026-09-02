@@ -66,10 +66,16 @@ export const SUN_TINT = [1.0, 0.95, 0.88] as const;
  * 적으면 이름 하나를 고칠 때 한 곳이 남는데, 그러면 그 셰이더만 컴파일이 깨지거나
  * (운이 나쁘면) 0으로 읽는다. `scene/atmosphere.ts`의 `atmosphereUniforms`와 **짝이다**. */
 export const ATMOSPHERE_UNIFORM_DECL = /* glsl */`
+#ifndef ATMO_UNIFORM_DECL
+#define ATMO_UNIFORM_DECL
 uniform vec3 uSunDirWorld;
 uniform float uSunIntensity;
 uniform float uHaze;
+#endif
 `;
+// 가드를 두는 이유: 지형은 에어리얼 퍼스펙티브와 지면 무늬 **두 패치**를 받고, 둘 다
+// 태양 방향이 필요하다. 가드 없이 각자 선언하면 재선언으로 컴파일이 깨지고, 한쪽만
+// 선언하게 하면 "이 패치는 저 패치가 먼저 있어야 돈다"는 숨은 순서 의존이 생긴다.
 
 /** GLSL 실수 리터럴 — 소수점을 **반드시** 남긴다.
  *
