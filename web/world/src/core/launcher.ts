@@ -33,8 +33,9 @@
  * 2배·수직은 낮춤(축 3.56→2.90 m)으로 다시 팠다. 비균일 루트 스케일을 안 쓴 이유:
  * 회전 관절(고각·방위)이 축을 섞는 순간 기하가 일그러지고 바퀴가 타원이 된다.
  * 트러니언은 관 뒤끝 근처로 옮겼다 — 7.6 m 관이 중앙 피벗으로 들리면 뒤끝이 상판을
- * 뚫는다. 시뮬 쪽 `origin_height`를 캐니스터 축(≈2.9 m)으로 올리면 기체가 관 속에서
- * 나오는 그림이 된다.
+ * 뚫는다. 시뮬 기본 `origin_height`는 2.9 m로 올려져 있다(엔진 `RAIL_ORIGIN_H`,
+ * 관축 시작점 2.83 m와 정합) — 그 이전에 저장된 결과는 1.2 m를 들고 있으므로
+ * 캡션의 높이 차이 줄이 그 결과에서만 선다.
  */
 
 import { finite, type LaunchMeta } from "./types.ts";
@@ -52,6 +53,10 @@ export const LAUNCHER_GEOMETRY = {
    *  트러니언이 관 뒤끝 근처라 포구가 피벗에서 멀다(재개정 내력 참조). */ muzzleZ: -3.48,
   /** 캐니스터 관 뒤끝 — GLB `Box_Tubes` bbox 뒤끝 (피벗 살짝 뒤) */ tubeAftZ: 0.13,
   /** 상부 레일 앞끝 — GLB `Box_Rails` bbox */ railTipZ: -4.70,
+  /** 루트→턴테이블 축 로컬 Z — GLB `Turntable.translation.z`. 트레일러 프레임이라
+   *  방위와 무관하게 고정이다(트레일러는 선회하지 않는다). */ turntableAftZ: 0.90,
+  /** 턴테이블→크래들 피벗 로컬 Z — GLB `Cradle.translation.z`. 턴테이블의 자식이라
+   *  **방위와 함께 돈다.** */ cradleAftZ: 0.90,
   /** 크래들 가동 범위 — `generate_launcher.py`의 `PROPS`(317~319행)와 모델 README 표.
    *
    * **`LIMIT_ROTATION` 컨스트레인트가 아니다.** 그쪽은 크래들 −2~52°, 턴테이블 ±110°로
@@ -81,6 +86,13 @@ export interface LauncherPose {
   /** 포구 방향의 NED 단위벡터 — 테스트와 캡션이 읽는 검증 가능한 량 */
   boresightNed: [number, number, number];
   /** 지면 기준 포구 높이 [m] */ muzzleHeight: number;
+  /** 지면 기준 관축 시작점(관 뒤끝) 높이 [m] — 발사 원점과 비교하는 기준.
+   *  트러니언이 관 뒤에 있어 고각을 들면 이 점은 오히려 **내려간다**. */
+  breechHeight: number;
+  /** 발사관 루트를 놓을 자리 = 발사 지점 + 이 오프셋 [NED, m]. 관축 시작점이
+   *  시뮬 레일 원점 위에 오도록 수평만 민다 — 시뮬에 발사관 위치는 없으므로
+   *  이 배치는 표시용 선택이고 캡션이 밝힌다. */
+  rootOffsetNed: [number, number, number];
   /** 고각이 가동 범위를 벗어나 잘렸나 */ elevationClamped: boolean;
 }
 
@@ -104,6 +116,18 @@ export function launcherPose(launch: LaunchMeta | null | undefined): LauncherPos
   const pivotHeight = g.turntableY + g.cradleY;
   const muzzleHeight =
     (pivotHeight + Math.abs(g.muzzleZ) * Math.sin(clamped)) * g.rootScale;
+  // 관축 시작점(관 뒤끝, 피벗 뒤 tubeAftZ): 고각을 들면 뒤끝은 **내려간다**.
+  const breechHeight = (pivotHeight - g.tubeAftZ * Math.sin(clamped)) * g.rootScale;
+
+  // 루트 배치 오프셋: 관축 시작점이 시뮬 레일 원점 위(수평)에 오게 루트를 민다.
+  // 루트→턴테이블(트레일러 프레임, 방위 무관) + 턴테이블→크래들·관 뒤끝(방위와
+  // 함께 도는 수평 성분). 수직은 밀지 않는다 — 트레일러는 지면에 선다.
+  const yawR = (g.cradleAftZ + g.tubeAftZ * Math.cos(clamped)) * g.rootScale;
+  const rootOffsetNed: [number, number, number] = [
+    (g.turntableAftZ * g.rootScale) + yawR * Math.cos(az),
+    yawR * Math.sin(az),
+    0,
+  ];
 
   return {
     // **부호가 뒤집히는 자리** — 위 주석의 유도 참조.
@@ -112,6 +136,8 @@ export function launcherPose(launch: LaunchMeta | null | undefined): LauncherPos
     jackOffsetY: -g.jackDrop,
     boresightNed: boresightNed(az, clamped),
     muzzleHeight,
+    breechHeight,
+    rootOffsetNed,
     elevationClamped: clamped !== el,
   };
 }
@@ -126,12 +152,20 @@ export function launcherCaptionNotes(
   if (pose == null || launch == null) return [];
   const notes: string[] = [];
 
+  // 배치는 표시용 선택이다 — 시뮬에 발사관 위치가 없으므로, 관축 시작점이 레일
+  // 원점 위에 오게 트레일러를 밀어 놓았다. 선택인 이상 조건 없이 밝힌다.
+  notes.push("발사관 위치는 시뮬에 없습니다 — 관축 시작점이 발사 원점 위에 오도록 놓은 표시용 배치입니다.");
+
   const originHeight = finite(launch.origin_height);
   if (originHeight !== null) {
-    const dz = pose.muzzleHeight - originHeight;
-    if (Math.abs(dz) > 0.05) {
+    // 비교 기준은 포구가 아니라 **관축 시작점**이다 — 트러니언이 관 뒤에 있어
+    // 포구는 원점에서 관 길이만큼 나간 자리라 높이가 다른 게 정상이다.
+    // 문턱 0.15 m: 4 m급 구조물에서 그보다 작은 차이는 화면에서 식별되지 않는데
+    // 줄이 서면 없는 문제를 지어내는 쪽이 된다.
+    const dz = pose.breechHeight - originHeight;
+    if (Math.abs(dz) > 0.15) {
       notes.push(
-        `발사 원점(${originHeight.toFixed(1)} m)과 발사관 포구(${pose.muzzleHeight.toFixed(1)} m) 높이가 `
+        `발사 원점(${originHeight.toFixed(1)} m)과 발사관 관축 시작점(${pose.breechHeight.toFixed(1)} m) 높이가 `
         + `${Math.abs(dz).toFixed(1)} m 다릅니다 — 트레일러를 지면에 두었고 기체는 시뮬이 준 자리에 있습니다.`,
       );
     }

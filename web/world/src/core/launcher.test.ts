@@ -27,7 +27,7 @@ function nodeBoresightToNed(turntableY: number, cradleX: number): [number, numbe
 
 const LAUNCH = {
   length: 10, elev_angle: 15 * D2R, azimuth: 0,
-  exit_speed: 81.5, accel: null, origin_height: 1.2,
+  exit_speed: 81.5, accel: null, origin_height: 2.9,
 };
 
 describe("발사관 방위 — 부호가 조용히 틀리는 자리", () => {
@@ -105,17 +105,32 @@ describe("포구 높이와 캡션", () => {
     assert.ok(p.muzzleHeight > 4.6 && p.muzzleHeight < 4.8);
   });
 
-  it("발사 원점 1.2 m와의 3.5 m 차이를 캡션이 말한다 (재개정 기하)", () => {
-    const notes = launcherCaptionNotes(LAUNCH, launcherPose(LAUNCH)!);
-    const line = notes.find((s) => s.includes("높이가"));
-    assert.ok(line, "높이 불일치를 숨기면 화면이 거짓말한다");
-    assert.ok(line!.includes("3.5 m"), line);
+  it("관축 시작점 — 고각을 들면 **내려간다** (트러니언이 관 뒤에 있다)", () => {
+    const p = launcherPose(LAUNCH)!;
+    near(p.breechHeight, (0.80 + 0.65 - 0.13 * Math.sin(15 * D2R)) * 2.0, "관축 시작점", 1e-9);
+    const flat = launcherPose({ ...LAUNCH, elev_angle: 0 })!;
+    assert.ok(p.breechHeight < flat.breechHeight, "들었는데 뒤끝이 안 내려가면 피벗이 앞이다");
   });
 
-  it("원점 높이가 포구에 맞춰지면 그 줄이 사라진다", () => {
-    const p0 = launcherPose(LAUNCH)!;
-    const fixed = { ...LAUNCH, origin_height: p0.muzzleHeight };
-    assert.ok(!launcherCaptionNotes(fixed, launcherPose(fixed)!).some((s) => s.includes("높이가")));
+  it("기본 원점 2.9 m ≈ 관축 시작점 2.83 m — 높이 차이 줄이 **안 선다**", () => {
+    // 시뮬 기본(RAIL_ORIGIN_H·sim.py)이 관축과 정합하도록 올라갔다. 0.07 m 차이에
+    // 줄이 서면 없는 문제를 지어내는 쪽이다(문턱 0.15 m의 근거).
+    const notes = launcherCaptionNotes(LAUNCH, launcherPose(LAUNCH)!);
+    assert.ok(!notes.some((s) => s.includes("높이가")), notes.join(" / "));
+  });
+
+  it("옛 결과(원점 1.2 m)에서는 1.6 m 차이를 캡션이 말한다", () => {
+    const legacy = { ...LAUNCH, origin_height: 1.2 };
+    const line = launcherCaptionNotes(legacy, launcherPose(legacy)!)
+      .find((s) => s.includes("높이가"));
+    assert.ok(line, "높이 불일치를 숨기면 화면이 거짓말한다");
+    assert.ok(line!.includes("1.6 m"), line);
+    assert.ok(line!.includes("관축 시작점"), "비교 기준은 포구가 아니라 관축 시작점이다");
+  });
+
+  it("배치가 표시용 선택임을 조건 없이 밝힌다", () => {
+    const notes = launcherCaptionNotes(LAUNCH, launcherPose(LAUNCH)!);
+    assert.ok(notes.some((s) => s.includes("표시용 배치")), notes.join(" / "));
   });
 
   it("구조 전장 9.7 m ≈ 가속 구간 10 m — 데모에선 '별개' 캡션이 **안 뜬다**", () => {
@@ -140,6 +155,26 @@ describe("포구 높이와 캡션", () => {
     // Box_Rails 앞끝 −4.70 → 전장 4.83 × 2.0 = 9.66 m (루트 스케일은 생성 스크립트가 정본)
     near(CANISTER_LENGTH, 7.22, "캐니스터", 1e-6);
     near(LAUNCHER_SPAN, 9.66, "구조 전장", 1e-6);
+  });
+});
+
+describe("루트 배치 오프셋 — 관축 시작점이 레일 원점 위에 온다", () => {
+  const S = LAUNCHER_GEOMETRY.rootScale;
+  const yawR = (0.90 + 0.13 * Math.cos(15 * D2R)) * S; // 방위와 함께 도는 수평 성분
+
+  it("ψ = 0: 북으로 3.85 m", () => {
+    const off = launcherPose(LAUNCH)!.rootOffsetNed;
+    near(off[0], 0.90 * S + yawR, "북", 1e-9);
+    near(off[1], 0, "동", 1e-9);
+    near(off[2], 0, "하 — 수직은 밀지 않는다(트레일러는 지면에 선다)", 1e-9);
+  });
+
+  it("ψ = 90°: 턴테이블 몫은 북에 남고 크래들·관 몫만 동으로 돈다", () => {
+    // 트레일러는 선회하지 않으므로 루트→턴테이블(1.8 m)은 방위와 무관하다 —
+    // 전부를 돌리면 트레일러가 발사 방위를 따라 도는 셈이 된다.
+    const off = launcherPose({ ...LAUNCH, azimuth: 90 * D2R })!.rootOffsetNed;
+    near(off[0], 0.90 * S, "북", 1e-9);
+    near(off[1], yawR, "동", 1e-9);
   });
 });
 

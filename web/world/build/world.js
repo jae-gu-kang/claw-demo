@@ -38323,6 +38323,12 @@ const LAUNCHER_GEOMETRY = {
   tubeAftZ: 0.13,
   /** 상부 레일 앞끝 — GLB `Box_Rails` bbox */
   railTipZ: -4.7,
+  /** 루트→턴테이블 축 로컬 Z — GLB `Turntable.translation.z`. 트레일러 프레임이라
+   *  방위와 무관하게 고정이다(트레일러는 선회하지 않는다). */
+  turntableAftZ: 0.9,
+  /** 턴테이블→크래들 피벗 로컬 Z — GLB `Cradle.translation.z`. 턴테이블의 자식이라
+   *  **방위와 함께 돈다.** */
+  cradleAftZ: 0.9,
   /** 크래들 가동 범위 — `generate_launcher.py`의 `PROPS`(317~319행)와 모델 README 표.
    *
    * **`LIMIT_ROTATION` 컨스트레인트가 아니다.** 그쪽은 크래들 −2~52°, 턴테이블 ±110°로
@@ -38351,6 +38357,13 @@ function launcherPose(launch) {
   const clamped = Math.min(Math.max(el2, g.elevMin), g.elevMax);
   const pivotHeight = g.turntableY + g.cradleY;
   const muzzleHeight = (pivotHeight + Math.abs(g.muzzleZ) * Math.sin(clamped)) * g.rootScale;
+  const breechHeight = (pivotHeight - g.tubeAftZ * Math.sin(clamped)) * g.rootScale;
+  const yawR = (g.cradleAftZ + g.tubeAftZ * Math.cos(clamped)) * g.rootScale;
+  const rootOffsetNed = [
+    g.turntableAftZ * g.rootScale + yawR * Math.cos(az),
+    yawR * Math.sin(az),
+    0
+  ];
   return {
     // **부호가 뒤집히는 자리** — 위 주석의 유도 참조.
     turntableY: -az,
@@ -38358,6 +38371,8 @@ function launcherPose(launch) {
     jackOffsetY: -0.46,
     boresightNed: boresightNed(az, clamped),
     muzzleHeight,
+    breechHeight,
+    rootOffsetNed,
     elevationClamped: clamped !== el2
   };
 }
@@ -38365,12 +38380,13 @@ const deg$1 = (rad) => (rad * 180 / Math.PI).toFixed(0);
 function launcherCaptionNotes(launch, pose2) {
   if (pose2 == null || launch == null) return [];
   const notes = [];
+  notes.push("발사관 위치는 시뮬에 없습니다 — 관축 시작점이 발사 원점 위에 오도록 놓은 표시용 배치입니다.");
   const originHeight = finite(launch.origin_height);
   if (originHeight !== null) {
-    const dz = pose2.muzzleHeight - originHeight;
-    if (Math.abs(dz) > 0.05) {
+    const dz = pose2.breechHeight - originHeight;
+    if (Math.abs(dz) > 0.15) {
       notes.push(
-        `발사 원점(${originHeight.toFixed(1)} m)과 발사관 포구(${pose2.muzzleHeight.toFixed(1)} m) 높이가 ${Math.abs(dz).toFixed(1)} m 다릅니다 — 트레일러를 지면에 두었고 기체는 시뮬이 준 자리에 있습니다.`
+        `발사 원점(${originHeight.toFixed(1)} m)과 발사관 관축 시작점(${pose2.breechHeight.toFixed(1)} m) 높이가 ${Math.abs(dz).toFixed(1)} m 다릅니다 — 트레일러를 지면에 두었고 기체는 시뮬이 준 자리에 있습니다.`
       );
     }
   }
@@ -44154,8 +44170,9 @@ function applyLauncher(model, pose2) {
   }
   return true;
 }
-function placeLauncher(model, siteNed) {
-  const p2 = toWorld(siteNed[0], siteNed[1], siteNed[2]);
+function placeLauncher(model, siteNed, pose2) {
+  const off = pose2.rootOffsetNed;
+  const p2 = toWorld(siteNed[0] + off[0], siteNed[1] + off[1], siteNed[2] + off[2]);
   model.root.position.set(p2[0], p2[1], p2[2]);
   model.root.visible = true;
 }
@@ -44167,7 +44184,7 @@ function showLauncher(model, siteNed, pose2) {
     hideLauncher(model);
     return false;
   }
-  placeLauncher(model, siteNed);
+  placeLauncher(model, siteNed, pose2);
   return applyLauncher(model, pose2);
 }
 const MODEL_SCALE = 1;

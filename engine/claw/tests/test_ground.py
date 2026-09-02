@@ -263,7 +263,7 @@ def test_demo_rail_matches_design_numbers():
 
 def test_rail_state_at_endpoints():
     rail = make_demo_launch_rail()
-    # 레일 원점은 지면이 아니라 발사대 구조물 높이(1.2 m)다 — 0으로 두면 스키드
+    # 레일 원점은 지면이 아니라 발사대 구조물 높이다 — 0으로 두면 스키드
     # 접촉점(CG 아래 0.55 m)이 지면에 박힌 채 출발해 레일 구간 내내 기어 반력이
     # 거짓으로 선다. RAIL_ORIGIN_H가 그 값의 단일 거처다.
     from claw.plant.demo import RAIL_ORIGIN_H

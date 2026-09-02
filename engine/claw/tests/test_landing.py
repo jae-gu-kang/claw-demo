@@ -298,12 +298,14 @@ def test_cruise_elevon_activity_stays_bounded(landed):
 def test_default_nav_lands_but_scatters_the_touchdown_point():
     """기본 항법도 착륙은 한다 — 다만 접지 지점이 흩어진다. 못 하는 것과 다르다."""
     pns = []
-    for seed in (3, 23):
+    for seed in (3, 11, 23):
         res = fly(nav=NavErrorModel(seed=seed))
         assert res.meta["phases"]["touchdown_t"] is not None, "착륙 자체는 한다"
         k = int(round(res.meta["phases"]["touchdown_t"] / DT))
         pns.append(float(res.signals["pn"][k]))
-    # 이 두 시드만으로도 RTK 전체 폭을 훌쩍 넘는다 — 실측 155 m 대 RTK 5시드 12 m.
-    # 문턱은 RTK 폭의 4배 자리에 둔다: 이 테스트가 말하는 것은 "기본 항법이 자릿수
-    # 크게 흩어진다"이지 특정 두 시드의 거리가 아니다 (5시드 전체 폭은 512 m)
-    assert abs(pns[0] - pns[1]) > 50.0
+    # 시드 셋의 전폭이 RTK 전체 폭을 훌쩍 넘는다 — 실측 168 m(원점 2.9 m 기준,
+    # 5시드도 극값이 같다) 대 RTK 5시드 12 m. 문턱은 RTK 폭의 4배 자리에 둔다:
+    # 이 테스트가 말하는 것은 "기본 항법이 자릿수 크게 흩어진다"이지 특정 시드들의
+    # 거리가 아니다. 원래 시드 (3, 23) 둘이었는데, 발사 원점을 1.2→2.9 m로 올리자
+    # 그 쌍만 37 m로 좁아져 깨졌다 — 두 표본은 우연에 볼모다. 셋로 넓혔다.
+    assert max(pns) - min(pns) > 50.0

@@ -207,8 +207,9 @@ class LaunchIn(BaseModel):
     exit_speed: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     accel: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     # 발사대 구조물이 기체를 지면에서 들어 올린 높이 [m]. 0이면 스키드가 지면에
-    # 박힌 채 출발해 레일 구간 내내 기어 반력이 거짓으로 선다
-    origin_height: float = Field(default=1.2, ge=0.0, allow_inf_nan=False)
+    # 박힌 채 출발해 레일 구간 내내 기어 반력이 거짓으로 선다. 기본 2.9는 발사관
+    # 시각화 모델의 캐니스터 축 높이와 맞춘 값 — 엔진 RAIL_ORIGIN_H와 같은 근거
+    origin_height: float = Field(default=2.9, ge=0.0, allow_inf_nan=False)
 
 
 class SimRunIn(BaseModel):

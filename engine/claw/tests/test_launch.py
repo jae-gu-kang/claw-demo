@@ -92,8 +92,12 @@ def test_rail_carries_the_aircraft_not_the_gear(launched):
     _rail, res = launched
     s = res.signals
     assert not s["wow"][s["on_rail"]].any()
-    # 레일 원점 높이가 접촉점을 지면 위에 띄운다 (0으로 두면 0.55 m 파묻힌 채 출발)
-    assert res.signals["h"][0] == pytest.approx(1.2)
+    # 레일 원점 높이가 접촉점을 지면 위에 띄운다 (0으로 두면 0.55 m 파묻힌 채 출발).
+    # 값은 RAIL_ORIGIN_H가 단일 거처다 — 리터럴로 박으면 원점을 옮길 때(1.2→2.9,
+    # 발사관 관축 정렬) 이 단정만 옛 값을 말한다. 실제로 그렇게 한 번 깨졌다.
+    from claw.plant.demo import RAIL_ORIGIN_H
+
+    assert res.signals["h"][0] == pytest.approx(RAIL_ORIGIN_H)
     assert res.envelope["min_alt"] >= 0.0, "지면 아래로 내려간 적 없음"
 
 

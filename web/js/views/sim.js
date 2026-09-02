@@ -27,7 +27,9 @@ import { createProfileChart, createWpMap } from "./wpmap.js";
 //
 // 수치는 엔진 실측으로 정했다. 이탈속도·플레어 개시·미끄럼은 engine test_landing과
 // 같은 값이고, **climb·cruise는 일부러 다르다** — 저쪽은 250/300 m라 다운레인지가
-// 10.8 km인데, 이쪽은 지형 팩 안에 들어오도록 180/200 m로 낮춰 7.9 km로 줄였다:
+// 10.8 km인데, 이쪽은 지형 팩 안에 들어오도록 180/200 m로 낮춰 8.0 km로 줄였다
+// (7.9였다가 cruise 이탈이 time_ge 15 → path_done으로 바뀌며 264 m 늘었다 — 여전히
+//  core ±12 km 안):
 //   이탈 81.5 m/s = 1.15 × 트림 실속속도 70.9 — α_stall 0.40에서 CL 1.40이 나오지만
 //   거기까지 가려면 상향 엘러본이 필요하고 그것이 양력을 깎아 실제 최대 트림 CL은 1.169다
 //   플레어 개시 20 m·kp_vs 0.08 → 접지 −1.0 m/s (5 m에서는 0.9 s뿐이라 −4.6)
@@ -51,8 +53,12 @@ let modeRows = [
     exitKind: "off_rail", exitValue: "", next: "climb" },
   { name: "climb", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH, heading: RUNWAY_HDG,
     exitKind: "alt_ge", exitValue: "180", next: "cruise" },
-  { name: "cruise", speed: "88", lonAxis: "alt", lonValue: "200", heading: RUNWAY_HDG,
-    exitKind: "time_ge", exitValue: "15", next: "approach" },
+  // 순항 헤딩은 "path" — 기본 웨이포인트(아래 wpRows)를 따라 날고, 소진(path_done)이
+  // 접근 진입을 정한다. 종전 time_ge 15는 경로를 15 s만 따르다 시계로 포기하고
+  // 활주로 방위로 되돌아갔다(실측: 왼쪽 −3° WP 열에서 pe −100까지 갔다가 +4로 복귀)
+  // — 웨이포인트를 찍어도 비행이 안 바뀌는 첫 번째 이유였다 (사용자 제기).
+  { name: "cruise", speed: "88", lonAxis: "alt", lonValue: "200", heading: "path",
+    exitKind: "path_done", exitValue: "", next: "approach" },
   // 3° 활공: 88 m/s · sin3° ≈ 4.6 m/s
   { name: "approach", speed: "88", lonAxis: "hdot", lonValue: "-4.8", heading: RUNWAY_HDG,
     exitKind: "alt_le", exitValue: "20", next: "flare" },
@@ -63,9 +69,23 @@ let modeRows = [
   { name: "stopped", speed: "0", lonAxis: "pitch", lonValue: "0", heading: "",
     exitKind: "time_ge", exitValue: "1e9", next: "" },
 ];
-// 기본 미션은 직진 이착륙이라 웨이포인트가 없다 — 경로추종기 없이 헤딩 0으로 난다.
-// 지도에서 점을 찍으면 그때부터 경로가 생기고, 고도를 넣으면 세로 프로파일도 낸다.
-let wpRows = [];
+// 기본 웨이포인트 — 활주로 축 위 2.6·3.3 km. cruise가 heading="path"라 웨이포인트
+// 없이는 엔진이 구성을 거부한다(422: 경로추종기 없음) — 기본 상태가 실행 불가면
+// 안 되므로 직진 이착륙 미션을 **축 위 웨이포인트로** 그대로 재현한다. 좌표를
+// 리터럴 대신 방위에서 계산하는 이유는 RUNWAY_HDG와 같은 상수를 공유하기 위해서다
+// (활주로 방위가 바뀌면 함께 돈다 — 리터럴이면 조용히 축을 벗어난다).
+//
+// 거리 실측 근거: 순항 진입이 t=15.06 s·1,440 m라 2.6 km 첫 점이 즉시 소진되지
+// 않고, path_done이 3,197 m에서 떠 종전 time_ge 15의 이탈 지점(2,921 m)과 비슷하다.
+// 정지 101.4 s·다운레인지 8.0 km — t_end 200 안이고 지형 팩 core(±12 km) 안이다.
+// 고도 칸은 비워 둔다(세로는 cruise의 고도 200이 낸다) — 고도를 넣는 순간
+// "전부 있거나 전부 없거나" 규칙과 alt="path" 전환이 사용자 몫이 된다.
+const axisWp = (dist) => ({
+  n: String(Math.round(dist * Math.cos(GOHEUNG.runwayHeadingRad))),
+  e: String(Math.round(dist * Math.sin(GOHEUNG.runwayHeadingRad))),
+  d: "",
+});
+let wpRows = [axisWp(2600), axisWp(3300)];
 let lastReplay = null; // {body, waypoints, acceptRadius}
 let runningJobId = null;
 // 제출 시점 스냅샷 — 실행 중 편집이 재생 오버레이를 오염시키지 않도록 (리뷰 S3)
@@ -219,10 +239,13 @@ export function render() {
     // **하한은 유도가 실제로 내는 접근 거리가 정한다.** 순항 88 m/s·뱅크 한계
     // 0.7 rad에서 선회 반경이 V²/(g·tanφ) ≈ 940 m라, LOS 추종은 임의로 작은 원을
     // 잡지 못한다 — 목표를 지나쳤다 되돌기를 반복한다(순수추종의 알려진 거동).
-    // 실측(기본 웨이포인트 2개): 20 m는 28.4 m까지 좁혔다가 **바퀴마다 되레
-    // 멀어진다**(28.4 → 36.3 → 47.1 m, 주기 ~70 s) — 수렴이 아니라 발산이라
-    // t_end를 늘려도 못 잡고, 미션이 순항에서 멈춘 채 끝난다. 100 m는 29.4 m까지
-    // 좁히고 완주한다. 300·1,500 m도 완주한다.
+    // 실측(현 기본 미션 — 축 위 WP 2개): 첫 접근 최근접이 13.0 m라 20 m는 첫
+    // 바퀴에 잡고 완주하지만, 13 m로 줄이면 14.4 m로 스친 뒤 **바퀴마다 되레
+    // 멀어진다**(14 → 69 → 81 → 85 m, 주기 ~70 s) — 수렴이 아니라 발산이라
+    // t_end를 늘려도 못 잡고, 미션이 순항에서 멈춘 채 끝난다(touchdown None).
+    // 100 m는 WP 곁 7.8 m를 지나며 완주한다. 90° 선회를 낀 기하도 6.2 m까지
+    // 좁혔다. 종전 기본 웨이포인트(다른 기하)에서는 20 m가 28→36→47로 발산했다
+    // — 같은 값이 기하에 따라 되기도 안 되기도 한다는 실측.
     //
     // 그 하한은 **상수가 아니다** — 웨이포인트 기하 × 기체 선회 성능의 함수라
     // 화면이 미리 판정할 수 없다. 그래서 폼은 값을 막지 않고 사유를 적어 둔다.
@@ -331,8 +354,10 @@ export function render() {
 
   // 웨이포인트를 **쓰는 모드가 있는가**. 없으면 지도·재생은 주황 경로를 그리는데
   // 기체는 그 옆을 직진한다 — 화면이 스스로 모순되는 자리라 말해 준다.
-  // 실측(기본 미션 + WP 2개): 헤딩이 전부 숫자면 pe가 5e-16, cruise만 "path"로
-  // 바꾸면 −1495~+2859. 엔진은 반대 방향만 막는다(path인데 경로 없음 → 422);
+  // 실측(WP 2개): 헤딩이 전부 숫자면 pe가 5e-16, cruise만 "path"로
+  // 바꾸면 −1495~+2859. 기본 미션의 cruise가 "path"가 된 지금도 이 경고는 남는다 —
+  // 헤딩 칸을 숫자로 되돌리거나 "path" 모드가 사슬에서 빠지면 같은 자리가 재발한다.
+  // 엔진은 반대 방향만 막는다(path인데 경로 없음 → 422);
   // 이쪽은 막을 수 없다 — 날지 않고 경로오차(xtrack_rms) 기준선으로만 두는 쓰임이 있다
   const wpNotice = el("div");
   const drawWpNotice = () => {
@@ -633,9 +658,10 @@ export function render() {
             // 마크다운 **는 여기서 글자 그대로 나온다 (텍스트 노드) — 강조는 노드로
             el("b", {}, "너무 작으면 경로가 끝나지 않습니다"),
             ". 데모 기체는 순항 88 m/s·뱅크 한계 0.7 rad에서 선회 반경이 940 m라 ",
-            "임의로 작은 원은 못 잡습니다 — 실측상 20 m로 줄이면 28 m까지 좁혔다가 ",
-            "바퀴마다 되레 멀어져(28 → 36 → 47 m) 끝내 통과하지 못합니다. ",
-            "기본값 100 m는 29 m까지 좁히고 완주합니다. ",
+            "임의로 작은 원은 못 잡습니다 — 기본 미션 실측상 첫 접근 최근접이 13 m라 ",
+            "20 m는 완주하지만, 13 m로 줄이면 14 m로 스친 뒤 바퀴마다 되레 멀어져",
+            "(14 → 69 → 81 m) 끝내 통과하지 못합니다. 그 경계는 웨이포인트 기하마다 ",
+            "다릅니다 — 다른 기하에서는 20 m도 같은 식으로 발산했습니다. ",
             "경로가 안 끝나면(모드 체인이 순항에서 멈추면) 이 값을 먼저 의심하십시오.")),
         el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "계보"),

@@ -428,7 +428,7 @@ def test_landing_mission_runs_over_http(client, wait_job):
     assert body["meta"]["launch"]["length"] == 10.0
     assert body["meta"]["launch"]["exit_speed"] == pytest.approx(81.5)
     assert body["meta"]["launch"]["accel"] is None, "둘 중 준 쪽만 실린다"
-    assert body["meta"]["launch"]["origin_height"] == pytest.approx(1.2)
+    assert body["meta"]["launch"]["origin_height"] == pytest.approx(2.9)
 
 
 def test_longitudinal_axes_are_exclusive_at_submit(client):
