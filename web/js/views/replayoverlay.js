@@ -6,8 +6,11 @@
 
 - 무엇을 어디에 띄울지는 lib/wiresignals.js가 정본 (블록 id ↔ SVG data-sig)
 - 재생 진행 계산은 lib/playback.js (경과 벽시계 기준 — stride 무관 배속 정확)
-- 표시 스타일은 여기서 SVG 속성으로 준다: app.css는 병행 세션 미커밋 상태라
-  건드리지 않는다 (지도 편집기 4dfaaeb와 같은 회피)
+- 값 텍스트의 표시 스타일은 여기서 SVG 속성으로 준다 (app.css에 규칙이 없는 자리라
+  속성으로 충분하다)
+- **리미터 경보는 클래스 토글이다.** 색을 stroke 속성으로 주면 app.css의
+  `.bd .top .blk .body { stroke: ... }`가 항상 이겨(프레젠테이션 속성은 어떤 CSS
+  규칙보다 약하다) 경보가 조용히 안 보인다 — 실제로 그렇게 죽어 있었다
 
 계측되지 않은 신호는 "—"로 나온다. 리미터 미장착 형상에서 θ가 0으로 보이면
 "명령이 0으로 떨어졌다"와 구분되지 않기 때문 (엔진이 NaN으로 채우고 여기서 구분).
@@ -22,7 +25,7 @@ import { store } from "../store.js";
 
 const FRAME_MS = 40; // 25 fps — SVG 텍스트 갱신 8개라 여유롭다
 const BLINK_MS = 220; // 리미터 점멸 주기
-const VAL_FILL = "#0071e3";
+const VAL_FILL = "#2563eb";  // app.css --accent와 같은 값
 const VAL_FILL_OFF = "#aeaeb2";
 
 const reduceMotion = () =>
@@ -39,8 +42,7 @@ export function createTopReplay({ svgRoot }) {
     node.setAttribute("font-family", "ui-monospace, SFMono-Regular, Menlo, monospace");
     node.setAttribute("fill", VAL_FILL_OFF);
   }
-  const limiterBody = svgRoot.querySelector('[data-block="limiter"] .body');
-  const limiterBase = limiterBody?.getAttribute("stroke") ?? null;
+  const limiterBlk = svgRoot.querySelector('[data-block="limiter"]');
 
   const status = el("span", { class: "hint" });
   const readout = el("span", { class: "progress-label" });
@@ -70,14 +72,13 @@ export function createTopReplay({ svgRoot }) {
   };
 
   const paintLimiter = (i) => {
-    if (!limiterBody) return;
+    if (!limiterBlk) return;
     const act = body?.signals?.limiter_active;
     const on = Array.isArray(act) && !!act[i];
     // 점멸은 타이머가 아니라 프레임에서 토글 — 재생이 멈추면 점멸도 멈춘다.
     // 모션 감축 설정에서는 깜박이지 않고 붉게 고정 (정보는 유지, 자극만 제거)
     const show = on && (reduceMotion() || !timer || blinkOn);
-    limiterBody.setAttribute("stroke", show ? "#ff3b30" : (limiterBase ?? "#c7c7cc"));
-    limiterBody.setAttribute("stroke-width", show ? "2.6" : "1");
+    limiterBlk.classList.toggle("alarm", show);
   };
 
   const update = () => {

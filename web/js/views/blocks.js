@@ -84,11 +84,18 @@ function nodeAt(path) {
 }
 
 // 재생 오버레이 핸들 — 재렌더·탭 전환 시 이전 타이머를 확실히 끈다 (버려진 SVG를
-// 계속 갱신하는 타이머가 남지 않게)
+// 계속 갱신하는 타이머가 남지 않게). 재렌더는 render() 진입에서, 탭 이탈은 아래
+// dispose() export로 — main.js는 떠나는 뷰의 dispose()를 부르는데 이 뷰가 그걸
+// 내보내지 않아, 재생 중에 다른 탭으로 나가면 타이머가 떨어져 나간 SVG를 계속 갱신했다
 let topReplay = null;
 
-export function render() {
+/** 탭 이탈 시 자원 반납 (main.js 라우터 규약 — 선택 export). */
+export function dispose() {
   if (topReplay) { topReplay.dispose(); topReplay = null; }
+}
+
+export function render() {
+  dispose();
   const path = currentPath();
   // 절단 폴백 가시화 — 무효 해시(#blocks/scas/PITCH 등)를 실제 렌더 경로로
   // 정규화 (replace: 히스토리 오염 없음, 정규화 후엔 동일 해시라 재발화 안정).
@@ -110,29 +117,37 @@ function renderHome(root) {
   const svg = topDiagramSvg(navigate);
   topReplay = createTopReplay({ svgRoot: svg }); // 블록 값 표시·리미터 점멸
   root.append(
-    el("div", { class: "order" },
-      el("span", { class: "cap" }, "설계 순서"),
-      DESIGN_ORDER.flatMap((s, i) => [
-        el("button", {
-          class: "pill", style: `background:${s.color}`,
-          onclick: () => navigate(s.page),
-        }, s.label),
-        i < DESIGN_ORDER.length - 1 && el("span", { class: "arr" }, "→"),
-      ]),
+    // 제목 줄 + 층 칩. 칩은 보드의 판에서 색·이름을 그대로 받아 오므로(diagram.js
+    // LAYERS가 정본) 칩과 판이 어긋날 수 없다 — 색으로 층을 되짚는 독법의 전제
+    el("div", { class: "pagetop" },
+      el("h1", {}, "구조도"),
+      // 설명과 층 칩은 **같은 줄**이다 — 설명이 길어 두 줄이 되면 칩이 어긋나므로
+      // 여기는 한 줄로 짧게 두고, 자세한 안내는 보드 아래 hint-row가 맡는다
+      el("div", { class: "subline" },
+        el("p", {}, el("b", {}, "안쪽 루프부터"), " 닫는 설계 순서가 곧 판의 높이입니다."),
+        el("div", { class: "layerchips" },
+          DESIGN_ORDER.map((s) => el("button", {
+            class: "lchip",
+            style: `background:${s.tint};border-bottom-color:${s.edge}`,
+            title: `${s.n}단계 — ${s.name} 설계 화면으로`,
+            onclick: () => navigate(s.page),
+          }, el("span", { class: "n", style: `background:${s.color}` }, String(s.n)), s.name)),
+        ),
+      ),
+    ),
+    el("div", { class: "canvas-wrap top" }, svg),
+    // 재생 컨트롤은 보드 바로 밑 — 값이 뜨는 자리(블록 앞 판 위)와 눈이 오가는 거리가 짧다
+    el("div", { class: "boardbar" },
+      topReplay.root,
       el("button", {
         title: "적용된 파라미터·게인 스케줄을 한 파일의 코드로 — 검토·추적성 표 포함",
         onclick: () => showSnapshotCode(snapshotBox),
       }, "🧾 전체 형상 코드"),
-      el("span", { class: "note-line" },
-        "명령은 바깥(유도)에서 안(SCAS)으로 내려가지만, 설계는 플랜트 해석 후 ",
-        el("b", {}, "가장 안쪽 루프부터"), " 닫아 나갑니다. 프레임 라벨을 클릭해도 이동합니다."),
     ),
-    topReplay.root,
-    el("div", { class: "canvas-wrap top" }, svg),
     el("p", { class: "hint-row" },
-      "💡 블록(게인 스케줄링·항법 포함)이나 우상단 범례(①~⑤ 프레임 설명)를 클릭하면 서브시스템 ",
-      "내부 블록도가 열립니다 — 시뮬링크의 서브시스템 더블클릭 대응. 브라우저 뒤로가기로 복귀. ",
-      "구조는 코드(M7 조립)와 1:1 고정 — 자유 배선 없음 [확정 02 §4]."),
+      "💡 블록이나 판 앞면의 층 이름을 클릭하면 서브시스템 내부 블록도가 열립니다 ",
+      "(시뮬링크의 서브시스템 더블클릭 대응 · 브라우저 뒤로가기로 복귀). 신호는 오른쪽에서 ",
+      "왼쪽으로 흐르고, 구조는 코드(M7 조립)와 1:1 고정 — 자유 배선 없음 [확정 02 §4]."),
     snapshotBox, // 비어 있다가 [전체 형상 코드]에서 채워짐
   );
 }

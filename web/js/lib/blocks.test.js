@@ -30,8 +30,10 @@ test("블록: id 유일 + 상세 스펙 완결", () => {
   assert.equal(new Set(ids).size, ids.length);
   for (const b of BLOCKS) {
     assert.ok(b.title, `${b.id} title 없음`);
-    // title/sub는 TOP_SVG 템플릿에 무이스케이프 보간됨 — 마크업 특수문자 금지 (리뷰 S2)
-    assert.ok(!/[&<>]/.test(b.title + (b.sub ?? "")), `${b.id} title/sub에 &<> 금지`);
+    // title/sub는 TOP_SVG 템플릿에 무이스케이프 보간됨 — 마크업 특수문자 금지 (리뷰 S2).
+    // title은 텍스트 노드뿐 아니라 **속성값**으로도 나간다(diagram.js aria-label) —
+    // 큰따옴표 하나면 속성이 깨지므로 함께 막는다
+    assert.ok(!/["&<>]/.test(b.title + (b.sub ?? "")), `${b.id} title/sub에 "&<> 금지`);
     const d = b.detail;
     assert.ok(d && typeof d.desc === "string" && d.desc.length > 0, `${b.id} desc 없음`);
     // 이동 대상 해시는 실제 뷰만 (라우터 폴백으로 무효 링크 은폐 방지)
@@ -90,6 +92,90 @@ test("주 신호 경로 CHAIN = M7 조립 순서, 전 항목이 실존 블록", 
   // 주 경로 밖 블록 = 입력(미션플래너)·공통(게인 스케줄)·피드백(항법)뿐
   const offChain = [...ids].filter((id) => !CHAIN.includes(id)).sort();
   assert.deepEqual(offChain, ["nav", "planner", "schedule"]);
+});
+
+/** #abc·#AABBCC → #aabbcc (CSS 표기 흔들림 흡수). */
+function norm(hex) {
+  const h = hex.slice(1).toLowerCase();
+  return `#${h.length === 3 ? [...h].map((ch) => ch + ch).join("") : h}`;
+}
+
+/** WCAG 2.x 상대휘도 (sRGB 역감마). */
+function relLum(hex) {
+  const h = norm(hex).slice(1);
+  const ch = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const [r, g, b] = ch.map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** 명도대비 — 어느 쪽이 밝은지 몰라도 되게 큰 쪽을 분자로. */
+function contrast(a, b) {
+  const [x, y] = [relLum(a), relLum(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+
+test("층 색이 한 벌이다 — diagram.js LAYERS ↔ app.css --l1~--l5 (색이 곧 층 정체성)", () => {
+  // 판·칩(JS)과 단계 태그·게인 표기(CSS)가 같은 색이어야 "색으로 층을 되짚는" 독법이
+  // 성립한다. 양쪽이 값을 따로 들고 있으므로 여기서 대조한다 (VIEW_HASHES와 같은 관례)
+  const css = read("../../css/app.css");
+  // 대소문자·3자리 축약까지 받는다 — 안 받으면 "--l1~--l5가 다 있어야 함"으로 실패해
+  // 진짜 원인(표기 형식)과 메시지가 어긋난다
+  const vars = Object.fromEntries(
+    [...css.matchAll(/--l([1-5]):\s*(#[0-9a-fA-F]{3,6})\b/g)].map((m) => [Number(m[1]), norm(m[2])]),
+  );
+  assert.equal(Object.keys(vars).length, 5, "app.css에 --l1~--l5가 다 있어야 함");
+  for (const s of DESIGN_ORDER) {
+    assert.equal(s.color, vars[s.n], `층 ${s.n} 색 불일치: JS ${s.color} vs CSS ${vars[s.n]}`);
+    // 사본이 하나 더 있다: 그 단계 페이지의 단계 태그 배경 (인라인 style이라 CSS가 못 닿는다)
+    assert.equal(SUBSYSTEMS[s.page].tagBg, s.color,
+      `층 ${s.n} 단계 태그 색 불일치: ${s.page} ${SUBSYSTEMS[s.page].tagBg} vs ${s.color}`);
+  }
+});
+
+test("작은 글자 색 조합이 WCAG AA(4.5:1)를 넘는다 — 배지·태그·칩", () => {
+  // 층 색은 판 틴트가 아니라 **흰 글자가 얹히는 배지·태그**다. 밝은 초록/주황으로
+  // 잡으면 3.4/2.9까지 떨어진다 — 실제로 그렇게 회귀시킨 적이 있어 테스트로 못박는다.
+  // 전부 11px 안팎이라 large text(18.66px bold) 예외가 안 걸린다
+  const pairs = [
+    ...DESIGN_ORDER.map((s) => [`층 ${s.n} 배지`, s.color, "#ffffff"]),
+    ...Object.entries(SUBSYSTEMS).map(([id, s]) => [`${id} 단계 태그`, s.tagBg, "#ffffff"]),
+  ];
+  // 연한 배경 위 11px 칩·플래그 한 벌 — 색을 여기 적어 두면 CSS만 되돌려도 통과해
+  // 가드가 헛돈다. **규칙 자체를 app.css에서 읽어** 전경·배경을 뽑는다
+  const css = read("../../css/app.css");
+  const cssVar = (name) => norm(css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,6})\\b`))[1]);
+  const resolve = (v) => (v.startsWith("var(") ? cssVar(v.slice(6, -1)) : norm(v));
+  const rulePair = (selector) => {
+    const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const body = css.match(new RegExp(`^${esc}\\s*\\{([^}]*)\\}`, "m"));
+    assert.ok(body, `app.css에서 규칙을 못 찾음: ${selector}`);
+    const pick = (prop) => {
+      // \b는 hex 뒤에만 — var(--ok)의 ')' 뒤에는 단어 경계가 없어 통째로 안 잡힌다
+      const m = body[1].match(new RegExp(`(?:^|;)\\s*${prop}:\\s*(var\\(--\\w+\\)|#[0-9a-fA-F]{3,6}\\b)`));
+      assert.ok(m, `${selector}에 ${prop} 없음`);
+      return resolve(m[1]);
+    };
+    return [selector, pick("color"), pick("background")];
+  };
+  pairs.push(...[
+    ".bd .chip.ok", ".bd .chip.dft", ".bd .chip.tbd", ".bd .chip.note",
+    ".flag.ok", ".flag.bad", ".flag.na",
+  ].map(rulePair));
+  for (const [what, fg, bg] of pairs) {
+    const r = contrast(fg, bg);
+    assert.ok(r >= 4.5, `${what}: ${fg} on ${bg} → ${r.toFixed(2)} < 4.5`);
+  }
+});
+
+test("최상위 SVG 기하가 유한하다 — viewBox NaN은 보드를 통째로 지운다", () => {
+  // 기하는 이제 계산된다(views/diagram.js). BASE_Z·POS 키가 하나만 빠져도
+  // P(u, v, undefined)가 NaN을 흘려 viewBox="NaN …"이 되고 보드가 안 그려지는데,
+  // 아래 배선 가드는 data-block 정규식만 보므로 그대로 통과한다 — 여기서 잡는다
+  const vb = TOP_SVG.match(/viewBox="([^"]+)"/)[1].split(/\s+/).map(Number);
+  assert.equal(vb.length, 4);
+  for (const n of vb) assert.ok(Number.isFinite(n), `viewBox에 비유한값: ${vb.join(" ")}`);
+  assert.ok(vb[2] > 0 && vb[3] > 0, "viewBox 폭·높이가 양수여야 함");
+  assert.ok(!/NaN|undefined/.test(TOP_SVG), "SVG 좌표에 NaN/undefined 유입");
 });
 
 test("최상위 SVG 배선 ↔ 페이지 데이터 드리프트 가드 (리뷰 S1)", () => {

@@ -1,59 +1,140 @@
 /* CLAW 설계툴 — 도구 UI 기본 스타일 (no-build, 의존 0) */
 
+/* 본문 서체 — Pretendard 서브셋을 리포에 동봉(web/fonts/, KS X 1001 2,350자 + 라틴·
+   그리스·기호). 윈도우엔 설치돼 있지 않아 CDN 없이는 맑은 고딕으로 대체되는데,
+   그러면 자간·굵기가 달라져 조밀한 폼과 SVG 라벨의 줄맞춤이 무너진다.
+   설치돼 있으면 local()이 먼저 잡아 내려받지 않는다. 폐쇄망 반입 원칙(이 디렉터리
+   파일이 전부)을 지키려 base64가 아니라 파일 참조 — 캐시가 듣고 CSS가 가볍다. */
+/* 웨이트는 **범위**로 선언한다. 이 스타일시트는 500(nav·부제)과 700(칩·브레드크럼)도
+   쓰는데, 400/600/800만 선언하면 CSS 폰트 매칭이 500은 400으로 내리고 700은 800으로
+   올린다 — 700 자리가 ExtraBold로 튄다. 범위로 묶어 500=Regular, 700=SemiBold로
+   의도대로 떨어지게 한다 (파일은 그대로 3개).
+   ⌂ ▸ ∠ ∧ ∩ ∓ ⊆ ⊗ 는 Pretendard 원본에 아예 없는 글리프라 서브셋으로 넣을 수 없다 —
+   시스템 폰트로 대체된다 (도입 전 스택과 동일). 다시 서브셋해도 안 나오니 찾지 말 것. */
+@font-face {
+  font-family: "Pretendard";
+  font-weight: 400 500;
+  font-style: normal;
+  font-display: swap;
+  src: local("Pretendard Regular"), local("Pretendard-Regular"),
+       url("../fonts/Pretendard-Regular.subset.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Pretendard";
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+  src: local("Pretendard SemiBold"), local("Pretendard-SemiBold"),
+       url("../fonts/Pretendard-SemiBold.subset.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Pretendard";
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: local("Pretendard ExtraBold"), local("Pretendard-ExtraBold"),
+       url("../fonts/Pretendard-ExtraBold.subset.woff2") format("woff2");
+}
+
 :root {
-  --bg: #f5f6f8;
+  --bg: #eef1f6;
   --panel: #ffffff;
-  --line: #d8dce2;
-  --text: #1c2430;
-  --muted: #66707e;
-  --accent: #1a6feb;
-  --ok: #157f3d;
+  --line: #dfe4ec;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --ok: #14713b;
   --bad: #c22f2f;
   --warn: #b57908;
-  --mono: "SF Mono", "Consolas", "D2Coding", monospace;
+  --sans: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo",
+          "Malgun Gothic", sans-serif;
+  --mono: "JetBrains Mono", "SF Mono", "Consolas", "D2Coding", ui-monospace, monospace;
+  /* 설계 순서 ①~⑤ — 구조도의 층 판·칩·단계 태그가 공유하는 한 벌
+     (views/diagram.js LAYERS와 같은 값 — lib/blocks.test.js가 대조한다).
+     이 값들은 **흰 글자가 얹히는 배지·태그 색**이라 전부 흰색 대비 4.5:1 이상이어야
+     한다. 판의 밝은 면 색은 LAYERS[].fill이 따로 들고 있으니 여기를 밝히지 말 것 */
+  --l1: #7c3aed;
+  --l2: #2563eb;
+  --l3: #1f7a4d;
+  --l4: #b45309;
+  --l5: #6b7280;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(31, 41, 55, .06), 0 10px 28px rgba(31, 41, 55, .07);
 }
 
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font: 14px/1.5 -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  font: 14px/1.5 var(--sans);
   color: var(--text);
   background: var(--bg);
+  -webkit-font-smoothing: antialiased;
 }
 
 header {
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 10px 20px;
+  gap: 22px;
+  padding: 12px 24px;
+  background: transparent;
+}
+header h1 { font-size: 24px; font-weight: 800; letter-spacing: .02em; margin: 0; }
+header h1 .sub { font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--muted); margin-left: 10px; }
+/* 탭 — 흰 알약 트레이 위 활성 칩 (구조도 보드와 같은 카드 언어) */
+nav {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
   background: var(--panel);
-  border-bottom: 1px solid var(--line);
+  box-shadow: var(--shadow);
 }
-header h1 { font-size: 17px; margin: 0; }
-header h1 .sub { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 8px; }
-nav { display: flex; gap: 4px; flex: 1; }
 nav a {
-  padding: 6px 14px;
-  border-radius: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
   text-decoration: none;
-  color: var(--text);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
 }
-nav a.active { background: var(--accent); color: #fff; }
-nav a:hover:not(.active) { background: var(--bg); }
-.health { font-size: 12px; color: var(--muted); }
-.health.ok { color: var(--ok); }
+nav a.active { background: var(--text); color: #fff; font-weight: 600; }
+nav a:hover:not(.active) { color: var(--text); background: var(--bg); }
+.health {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--panel);
+  white-space: nowrap;
+}
+.health.ok { color: var(--muted); }
+.health.ok::before,
+.health.bad::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: 0;
+  background: var(--ok);
+}
 .health.bad { color: var(--bad); }
+.health.bad::before { background: var(--bad); }
 
-main { padding: 20px; max-width: 1280px; margin: 0 auto; }
+main { padding: 8px 24px 24px; max-width: 1440px; margin: 0 auto; }
 
 .panel {
   background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 16px;
+  border: none;
+  border-radius: var(--radius);
+  padding: 18px 20px;
   margin-bottom: 16px;
+  box-shadow: var(--shadow);
 }
-.panel h2 { font-size: 15px; margin: 0 0 12px; }
+.panel h2 { font-size: 15px; font-weight: 800; margin: 0 0 12px; }
 .row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
 .grow { flex: 1; }
 
@@ -64,7 +145,7 @@ label.field.check input { width: auto; }
    비활성이라 못 고친다는 것만으로는 "왜"가 안 보여서 자물쇠 줄을 함께 단다 */
 label.field.locked { opacity: 0.75; }
 label.field.locked input { background: #f2f2f7; color: var(--muted); cursor: not-allowed; }
-.lock-note { font-size: 10px; color: #8a5cf6; letter-spacing: -0.2px; }
+.lock-note { font-size: 10px; color: var(--l1); letter-spacing: -0.2px; }
 
 /* 폼 정렬 — 필드 그리드·옵션 그룹 박스 (시뮬 탭 등 조밀 폼) */
 .field-grid { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: stretch; }
@@ -73,25 +154,34 @@ label.field.locked input { background: #f2f2f7; color: var(--muted); cursor: not
 .opt-group .row-inner { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
 input, select, textarea {
   font: inherit;
-  padding: 6px 8px;
+  padding: 6px 9px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: #fff;
   color: var(--text);
   max-width: 100%; /* 고정폭 입력(230px 결과 id, 340px 슬라이더 등)이 폰 폭을 뚫지 않게 */
+}
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .14);
 }
 input:invalid { border-color: var(--bad); }
 input.num { width: 90px; font-family: var(--mono); }
 
 button {
   font: inherit;
-  padding: 7px 16px;
+  font-weight: 600;
+  padding: 7px 15px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--panel);
+  color: var(--text);
   cursor: pointer;
 }
+button:hover:not(:disabled) { background: var(--bg); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: #1d4ed8; }
 button.danger { color: var(--bad); }
 button:disabled { opacity: 0.5; cursor: default; }
 
@@ -125,7 +215,7 @@ table.edit .c-md { width: 130px; }  /* 이름·헤딩·선택 칸 */
 .flag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
 .flag.ok { background: #e0f2e5; color: var(--ok); }
 .flag.bad { background: #fbe2e2; color: var(--bad); }
-.flag.na { background: #eceef1; color: var(--muted); }
+.flag.na { background: #eceef1; color: #5b6673; }
 
 .progress { height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; flex: 1; }
 .progress > div { height: 100%; background: var(--accent); width: 0%; transition: width .2s; }
@@ -193,21 +283,52 @@ canvas.plot { height: auto !important; }
 
 /* 상태 칩 — fcs-context 태그([확정]/[기본값]/[TBD]/[설계 유의])와 동일 의미 */
 .bd .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
-.bd .chip.ok { background: #e3f4ea; color: #1a7f4b; }
+.bd .chip.ok { background: #e3f4ea; color: var(--ok); }
 .bd .chip.dft { background: #fdf2d7; color: #946200; }
 .bd .chip.tbd { background: #fdeae8; color: #b3352b; }
-.bd .chip.note { background: #f1ecfe; color: #8a5cf6; }
+.bd .chip.note { background: #f1ecfe; color: var(--l1); }
 
-/* 설계 순서 배너 */
-.bd .order { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; background: var(--panel); border: 1px solid var(--bd-edge); border-radius: 10px; margin-bottom: 14px; }
-.bd .order .cap { font-size: 12px; font-weight: 800; margin-right: 6px; }
-.bd .order .pill { font-size: 12.5px; font-weight: 800; color: #fff; border: none; border-radius: 8px; padding: 4px 11px; white-space: nowrap; cursor: pointer; }
-.bd .order .pill:hover { filter: brightness(1.12); }
-.bd .order .arr { color: var(--bd-ink-soft); font-weight: 800; }
-.bd .order .note-line { flex-basis: 100%; font-size: 12px; color: var(--bd-ink-soft); margin-top: 2px; }
+/* 제목 줄 + 층 칩 — 보드가 화면의 주인공이라 그 위에 카드를 하나 더 얹지 않는다.
+   칩은 판에서 색을 받아 오고(views/diagram.js LAYERS), 아래 테두리로 판의 옆면 색을
+   깔아 "이 칩 = 저 판"이 색만으로 읽힌다 */
+.bd .pagetop { margin: 2px 0 14px; }
+.bd .pagetop h1 { margin: 0; font-size: 34px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
+/* 설명과 층 칩이 한 줄 — center 정렬이라 칩의 세로 중심이 설명 줄과 맞는다 */
+.bd .subline { display: flex; align-items: center; justify-content: space-between; gap: 10px 24px; flex-wrap: wrap; margin-top: 7px; }
+.bd .subline p { margin: 0; font-size: 13px; font-weight: 500; color: var(--muted); }
+.bd .layerchips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.bd .lchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 5px 7px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+/* filter는 자식 .n 배지(층 정체성 색)까지 같이 밝힌다 — 배경만 눌러 대비를 준다 */
+.bd .lchip:hover { box-shadow: inset 0 0 0 999px rgba(31, 41, 55, .05); }
+.bd .lchip .n {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  display: inline-grid;
+  place-items: center;
+}
+/* 보드 아래 조작 줄 — 재생 컨트롤 + 형상 코드 */
+.bd .boardbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+.bd .boardbar > .row { flex: 1; }
 
 /* 브레드크럼 (시뮬링크 주소창) */
-.bd .crumbbar { display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid #c9d2dc; border-bottom: none; border-radius: 8px 8px 0 0; padding: 8px 12px; font-size: 13px; }
+.bd .crumbbar { display: flex; align-items: center; gap: 6px; background: var(--panel); border-radius: var(--radius) var(--radius) 0 0; padding: 9px 14px; font-size: 13px; box-shadow: var(--shadow); position: relative; z-index: 1; }
 .bd .crumbbar .home-btn { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; cursor: pointer; font-size: 13px; font-weight: 700; color: var(--accent); padding: 2px 6px; border-radius: 6px; }
 .bd .crumbbar .home-btn:hover { background: #e8f1fa; }
 .bd .crumbbar .sep { color: #9aa7b4; }
@@ -215,108 +336,149 @@ canvas.plot { height: auto !important; }
 .bd .crumbbar .up-btn { margin-left: auto; border: 1px solid var(--bd-edge); background: var(--panel); border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; font-weight: 600; }
 .bd .crumbbar .up-btn:hover { background: #eef2f7; }
 
-/* 캔버스 — 애플 스타일 라이트 씬 (거의-백색, 헤어라인, 절제된 그림자) */
+/* 캔버스 — 최상위는 보드가 바닥 그림자를 달고 떠 있어야 하므로 배경·테두리 없이
+   페이지 위에 그대로 놓는다. 서브페이지 블록도는 종전대로 카드 안. */
 .bd .canvas-wrap {
-  background: #fbfbfd;
-  border: 1px solid #d2d2d7;
-  border-radius: 18px;
+  background: var(--panel);
+  border-radius: var(--radius);
   overflow-x: auto;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, .05);
+  box-shadow: var(--shadow);
   padding: 10px 0 16px;
 }
-.bd .canvas-wrap.sub { border-radius: 0 0 18px 18px; }
+.bd .canvas-wrap.top {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+}
+.bd .canvas-wrap.sub { border-radius: 0 0 var(--radius) var(--radius); }
 .bd .canvas-wrap svg { display: block; width: 100%; height: auto; }
-.bd .canvas-wrap.top svg { min-width: 1280px; }
+.bd .canvas-wrap.top svg { min-width: 1180px; overflow: visible; }
 .bd .canvas-wrap.sub svg { min-width: 720px; max-width: 900px; margin: 0 auto; }
 
-/* 최상위↔서브페이지 실표시 크기 통일 — 최상위는 viewBox(1920)가 커서 ≈0.65×로
-축소 렌더되므로 텍스트·선굵기를 ≈1.5× 보정 (서브는 viewBox 900~1000 ≈1×).
-화살촉은 markerUnits=strokeWidth 기본이라 선굵기 보정에 자동 비례. */
-.bd .canvas-wrap.top .ttl { font-size: 18px; }
-.bd .canvas-wrap.top .ttl2 { font-size: 14px; }
-.bd .canvas-wrap.top .bname { font-size: 15px; }
-.bd .canvas-wrap.top .siglabel { font-size: 13px; }
-.bd .canvas-wrap.top .bustag { font-size: 15px; }
-.bd .canvas-wrap.top .canvas-note { font-size: 15px; }
-.bd .canvas-wrap.top .leg-cap { font-size: 17px; }
-.bd .canvas-wrap.top .leglabel { font-size: 18px; }
-.bd .canvas-wrap.top .leg-note { font-size: 15px; }
-.bd .canvas-wrap.top .wire { stroke-width: 2.6; stroke-dasharray: 13 9; animation-name: bd-flow-lg; }
-.bd .canvas-wrap.top .wire.soft { animation-name: none; }
-.bd .canvas-wrap.top .ring { stroke-width: 2; stroke-dasharray: 10 7; }
-.bd .canvas-wrap.top .branch { r: 5px; }
-.bd .canvas-wrap.top .body { stroke-width: 1.8; }
-@keyframes bd-flow-lg { to { stroke-dashoffset: -22; } }
+/* ── 최상위 = 층 보드 (views/diagram.js가 기하를 계산, 여기는 도색만) ────────
+   **반드시 .top 스코프**: .blk/.body/.wire 클래스 이름을 서브시스템 블록도와
+   공유하는데, 보드 규칙(특히 filter: url(#bd-blk))이 그쪽까지 덮으면 그 SVG에는
+   그 filter가 없어 요소가 통째로 안 그려진다. */
+.bd .top .board-shadow { opacity: .17; filter: url(#bd-ground); }
+.bd .top .face { stroke: none; }
+.bd .top .plate-sheen { stroke: #ffffff; stroke-opacity: .55; stroke-width: 1; }
+.bd .top .plate .body { stroke: none; }   /* 판은 외곽선 없이 — 면 색만으로 층이 읽힌다 */
+/* 클릭 대상은 책등 라벨(.plate-tag)뿐 — 판 전체를 대상으로 두면 보드의 빈 배경
+   아무 데나 눌러도 페이지가 넘어간다 (판이 화면을 타일링하므로) */
+.bd .top .plate-tag { cursor: pointer; }
+.bd .top .plate-tag:focus { outline: none; }
+.bd .top .plate-num { font-size: 9px; font-weight: 800; fill: #ffffff; }
+.bd .top .plate-name { font-size: 10.5px; font-weight: 600; letter-spacing: .4px; fill: var(--text); fill-opacity: .82; }
+.bd .top .plate-tag:hover .plate-name,
+.bd .top .plate-tag:focus .plate-name { fill-opacity: 1; text-decoration: underline; }
+.bd .top .plate-tag:focus-visible .plate-name { fill: var(--accent); fill-opacity: 1; }
+.bd .top .plate-tag:focus-visible .plate-badge { stroke: var(--accent); stroke-width: 2.5; }
+
+.bd .top .blk { cursor: pointer; filter: url(#bd-blk); }
+.bd .top .blk.sel { filter: url(#bd-sel); }
+.bd .top .blk:focus { outline: none; }
+.bd .top .blk .body { fill: none; stroke: var(--text); stroke-opacity: .45; stroke-width: .8; stroke-linejoin: round; filter: none; }
+.bd .top .blk.sel .body { stroke-opacity: 0; }
+.bd .top .blk:hover .body, .bd .top .blk:focus .body { stroke: var(--accent); stroke-opacity: 1; stroke-width: 1.6; }
+/* α 리미터 작동 경보 (views/replayoverlay.js가 .alarm을 토글) — 속성이 아니라
+   클래스여야 하는 이유는 그쪽 주석 참조 */
+.bd .top .blk.alarm .body { stroke: #ef4444; stroke-opacity: 1; stroke-width: 2.6; }
+.bd .top .blk .ttl { font-size: 14.5px; font-weight: 800; fill: var(--text); }
+.bd .top .blk .ttl2 { font-size: 9px; fill: #3b4453; }
+.bd .top .blk.sel .ttl { fill: #ffffff; }
+.bd .top .blk.sel .ttl2 { fill: #dbe7ff; }
+
+/* 배선 — 보조 신호(스케줄 주입·피드백)만 흐르는 대시. 주 경로는 실선이라
+   블록 사이 52px 간격에서도 화살촉이 또렷하다 */
+.bd .top .wire {
+  stroke: var(--text);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  animation: none;
+  stroke-dasharray: none;
+}
+/* dasharray 주기(8+5=13)는 @keyframes bd-flow의 -13과 반드시 같아야 한다 —
+   어긋나면 한 주기마다 패턴이 그 차이만큼 되튄다 */
+.bd .top .wire.gs, .bd .top .wire.fb {
+  stroke-dasharray: 8 5;
+  animation: bd-flow 2.2s linear infinite;
+}
+.bd .top marker path { fill: var(--text); }
+.bd .top .branch { fill: var(--text); }
+.bd .top .siglabel {
+  font-size: 10.5px;
+  font-style: normal;
+  fill: #4b5563;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, .94);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+.bd .top .siglabel.gs-ink { fill: var(--l1); }
 .bd .hint-row { margin-top: 10px; font-size: 12px; color: var(--bd-ink-soft); }
 
-/* SVG 블록·배선 — 애플 스타일: 백색 카드·헤어라인·절제된 그림자·시스템 팔레트.
+/* 서브시스템 블록도 (.sub) — 최상위 보드와 같은 카드 언어의 2D판.
 기하(SVG 좌표)는 그대로 — 스타일 계층만으로 전 다이어그램에 일괄 적용.
 rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx로 폴백). */
-.bd .blk .body, .bd .sblk .body {
+.bd .sub .blk .body, .bd .sblk .body {
   fill: #ffffff;
-  stroke: #d2d2d7;
+  stroke: #cfd6e0;
   stroke-width: 1.2;
-  rx: 12px;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .07));
+  rx: 10px;
+  filter: drop-shadow(0 2px 7px rgba(31, 41, 55, .1));
 }
 .bd circle.body { /* 합산점(Σ) — 블록 그룹 밖 단독 원도 동일 처리 */
   fill: #ffffff;
-  stroke: #d2d2d7;
+  stroke: #cfd6e0;
   stroke-width: 1.2;
-  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, .08));
+  filter: drop-shadow(0 1px 4px rgba(31, 41, 55, .1));
 }
-.bd .blk { cursor: pointer; }
-.bd .blk:hover .body, .bd .blk:focus .body {
-  stroke: #0071e3;
-  filter: drop-shadow(0 4px 12px rgba(0, 113, 227, .22));
+.bd .sub .blk { cursor: pointer; }
+.bd .sub .blk:hover .body, .bd .sub .blk:focus .body {
+  stroke: var(--accent);
+  filter: drop-shadow(0 4px 12px rgba(37, 99, 235, .24));
 }
-.bd .blk:focus { outline: none; }
-.bd .blk .ttl { font-size: 15px; font-weight: 700; fill: #1d1d1f; text-anchor: middle; }
-.bd .blk .ttl2 { font-size: 12px; fill: #6e6e73; text-anchor: middle; }
-.bd .sblk .ttl { font-size: 13.5px; font-weight: 700; fill: #1d1d1f; text-anchor: middle; }
-.bd .sblk .ttl2 { font-size: 11px; fill: #6e6e73; text-anchor: middle; }
-.bd .bname { font-size: 11.5px; fill: #6e6e73; text-anchor: middle; }
-.bd .pnum { font-size: 11px; font-weight: 700; fill: #0071e3; text-anchor: middle; }
-.bd .pname { font-size: 11px; fill: #6e6e73; text-anchor: middle; }
+.bd .sub .blk:focus { outline: none; }
+.bd .sub .blk .ttl { font-size: 14px; font-weight: 800; fill: var(--text); text-anchor: middle; }
+.bd .sub .blk .ttl2 { font-size: 11.5px; fill: var(--muted); text-anchor: middle; }
+.bd .sblk .ttl { font-size: 13px; font-weight: 700; fill: var(--text); text-anchor: middle; }
+.bd .sblk .ttl2 { font-size: 10.5px; fill: var(--muted); text-anchor: middle; }
+.bd .bname { font-size: 11px; fill: var(--muted); text-anchor: middle; }
+.bd .pnum { font-size: 11px; font-weight: 800; fill: var(--accent); text-anchor: middle; }
+.bd .pname { font-size: 11px; fill: var(--muted); text-anchor: middle; }
 /* 배선 — 신호 흐름이 보이도록 대시가 진행 방향으로 흐른다 */
-.bd .wire {
-  stroke: #0071e3;
-  stroke-width: 1.8;
+.bd .sub .wire {
+  stroke: var(--text);
+  stroke-width: 1.7;
   stroke-linecap: round;
   fill: none;
-  stroke-dasharray: 9 6;
-  animation: bd-flow 1.9s linear infinite;
+  stroke-dasharray: 8 5;
+  animation: bd-flow 2.2s linear infinite;
 }
-.bd .wire.gs { stroke: #af52de; }
-.bd .wire.soft { stroke: #aeaeb2; animation: none; stroke-dasharray: 6 4; }
-.bd .wire.ff { stroke: #ff9500; }
-@keyframes bd-flow { to { stroke-dashoffset: -15; } }
-@media (prefers-reduced-motion: reduce) { .bd .wire { animation: none; } }
+.bd .sub .wire.gs { stroke: var(--l1); }
+.bd .sub .wire.soft { stroke: #aab2c0; animation: none; stroke-dasharray: 6 4; }
+.bd .sub .wire.ff { stroke: var(--l4); }
+@keyframes bd-flow { to { stroke-dashoffset: -13; } }
+/* 모션 감축 — 애니메이션을 세우는 규칙들(.bd .top .wire.gs 0-4-0, .bd .sub .wire 0-3-0)이
+   이 규칙(0-2-0)보다 특이도가 높아 !important 없이는 진다. 접근성 오버라이드는
+   !important의 정당한 용도다 — 같은 화면에서 replayoverlay.js가 reduceMotion()으로
+   리미터 점멸을 끄는데 배선만 계속 흐르면 설정을 절반만 지키는 셈이 된다 */
+@media (prefers-reduced-motion: reduce) { .bd .wire { animation: none !important; } }
 /* 화살촉·내부 소자 곡선 — 마크업의 프레젠테이션 속성을 CSS로 재도색 (인라인 style 아님) */
-.bd marker path[fill="#3b3b3b"] { fill: #0071e3; }
-.bd marker path[fill="#b45309"] { fill: #ff9500; }
+.bd .sub marker path[fill="#3b3b3b"] { fill: var(--text); }
+.bd .sub marker path[fill="#b45309"] { fill: var(--l4); }
 .bd .canvas-wrap path[stroke="#111"] { stroke: #48484a; }
-.bd .siglabel { font-size: 11.5px; font-style: italic; fill: #6e6e73; text-anchor: middle; }
-/* 버스 태그 — 피드백 버스 위 소비처 표기 (시작 정렬, 분기점 우측 배치 규약) */
-.bd .bustag { font-size: 11.5px; font-style: italic; fill: #6e6e73; }
-.bd .branch { fill: #0071e3; }
-.bd .ring { fill: none; stroke-width: 1.4; stroke-dasharray: 7 5; stroke-opacity: .75; rx: 14px; }
-/* 우상단 범례 — 프레임 설명 전용 (다이어그램과 비겹침) */
-.bd .leg-cap { font-size: 12px; font-weight: 800; fill: #6e6e73; }
-.bd .legend-item { cursor: pointer; }
-.bd .leglabel { font-size: 12.5px; font-weight: 600; fill: #1d1d1f; }
-.bd .legend-item:hover .leglabel, .bd .legend-item:focus .leglabel { text-decoration: underline; fill: #0071e3; }
-.bd .legend-item:focus { outline: none; }
-.bd .leg-note { font-size: 11px; fill: #86868b; }
-.bd .canvas-note { font-size: 11px; fill: #86868b; }
-.bd .sumsign { font-size: 12px; font-weight: 800; fill: #1d1d1f; text-anchor: middle; }
-.bd .annot { font-size: 11.5px; fill: #af52de; }
-/* 게인 스케줄링 블록 — 퍼플 액센트 카드 (주입 배선 .gs와 동색 계열).
-   셀렉터는 베이스 .bd .blk .body / .ttl 계열과 동특이도 + 후순위여야 액센트가 이긴다 */
-.bd .blk .gs-body, .bd .sblk .gs-body { stroke: #af52de; }
-.bd .blk .gs-ink, .bd .sblk .gs-ink { fill: #af52de; }
-.bd .blk .gs-ink2, .bd .sblk .gs-ink2 { fill: #86868b; }
-.bd marker path[fill="#8a5cf6"] { fill: #af52de; }
+.bd .sub .siglabel { font-size: 11px; fill: var(--muted); text-anchor: middle; }
+.bd .sub .branch { fill: var(--text); }
+.bd .canvas-note { font-size: 11px; fill: #8d95a3; }
+.bd .sumsign { font-size: 12px; font-weight: 800; fill: var(--text); text-anchor: middle; }
+/* 게인 스케줄 관련 표기는 층 ①의 보라를 공유한다. 서브시스템 SVG에는 옛 보라
+   (#8a5cf6)가 마크업 속성으로 박혀 있어(주로 점선 프레임), 같은 그림 안에서 두 보라가
+   섞이지 않도록 여기서 한 번에 새 값으로 되돌린다 */
+.bd .annot { font-size: 11px; fill: var(--l1); }
+.bd .sub [stroke="#8a5cf6"] { stroke: var(--l1); }
 
 /* 하위 페이지 헤더 */
 .bd .pagehead { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; flex-wrap: wrap; }
@@ -326,7 +488,7 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd .pagehead .chips { margin-left: auto; display: flex; gap: 5px; }
 
 /* 설계 노트 */
-.bd .notes { background: var(--panel); border: 1px solid var(--bd-edge); border-radius: 10px; margin-top: 12px; padding: 14px 18px 16px; font-size: 13px; }
+.bd .notes { background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); margin-top: 12px; padding: 16px 20px 18px; font-size: 13px; }
 .bd .notes h4 { font-size: 12px; color: var(--bd-ink-soft); text-transform: uppercase; letter-spacing: .04em; margin: 11px 0 6px; }
 .bd .notes h4:first-child { margin-top: 0; }
 .bd .notes ul { list-style: none; margin: 0; padding: 0; }
@@ -352,8 +514,16 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
    이 뷰가 마운트된 동안만 어둡다(라우터가 뷰를 떼면 셀렉터도 함께 풀린다).
    color-scheme: dark — 네이티브 위젯(스핀버튼·스크롤바·자동완성)까지 다크로. */
 body:has(.inf-dark) { background: #0b0b0d; color-scheme: dark; } /* color-scheme: 문서 스크롤바는 body 소유 */
+/* 헤더는 배경이 투명해 페이지 색을 그대로 입는다 — 다크에서는 제목이 묻히므로
+   글자만 밝게 되돌린다 (탭 트레이·헬스 칩은 자체 배경이 있어 그대로 둔다) */
+body:has(.inf-dark) header h1 { color: rgba(255, 255, 255, .92); }
+body:has(.inf-dark) header h1 .sub { color: rgba(235, 235, 245, .6); }
 .inf-dark { color: rgba(255, 255, 255, .92); color-scheme: dark; }
-.inf-dark .panel { background: #1c1c1e; border-color: rgba(255, 255, 255, .09); }
+.inf-dark .panel {
+  background: #1c1c1e;
+  border: 1px solid rgba(255, 255, 255, .09);
+  box-shadow: none; /* 어두운 바닥에서는 그림자가 테를 흐리기만 한다 */
+}
 .inf-dark .hint, .inf-dark .legend, .inf-dark th { color: rgba(235, 235, 245, .6); }
 .inf-dark th, .inf-dark td { border-bottom-color: rgba(255, 255, 255, .08); }
 .inf-dark tr:hover td { background: rgba(255, 255, 255, .045); }

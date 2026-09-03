@@ -72,7 +72,7 @@ export const SUBSYSTEMS = {
   // 층2 = 축 서브시스템 블록 개요 (시뮬링크식) — 축 상세는 children (층3),
   // PI 내부는 층4 (SCAS_PI_PAGE 공유)
   scas: {
-    tag: "설계 ②", tagBg: "#1a6fb5",
+    tag: "설계 ②", tagBg: "#2563eb",
     title: "SCAS — 내측 루프 (자세 안정화)", eng: "축 공통 구조: PI(자세오차) + k_rate·각속도 — LQR 제외",
     chips: ["ok", "dft"],
     svg: `
@@ -299,7 +299,7 @@ export const SUBSYSTEMS = {
 
   // ── 오토파일럿 — 외측 루프 (설계 ③) ──────────────────────────────────
   autopilot: {
-    tag: "설계 ③", tagBg: "#1a7f4b",
+    tag: "설계 ③", tagBg: "#1f7a4d",
     title: "오토파일럿 — 외측 루프", eng: "Autopilot / Outer Loop — 채널별 PI + 명령필터",
     chips: ["ok", "dft"],
     svg: `
@@ -811,7 +811,7 @@ export const SUBSYSTEMS = {
 
   // ── 엘레본 믹싱 (제어 할당) ──────────────────────────────────────────
   mixer: {
-    tag: "배분", tagBg: "#8a97a5",
+    tag: "배분", tagBg: "#5f6b78",
     title: "엘레본 믹싱 (제어 할당)", eng: "Elevon Mixing / Control Allocation — 차동추력 보상 포함",
     chips: ["dft", "tbd"],
     svg: `
@@ -902,7 +902,7 @@ export const SUBSYSTEMS = {
 
   // ── 작동기 ───────────────────────────────────────────────────────────
   actuator: {
-    tag: "HW 모델", tagBg: "#8a97a5",
+    tag: "HW 모델", tagBg: "#5f6b78",
     title: "작동기", eng: "Actuator — 2차계 모델 (파라미터화)",
     chips: ["dft", "tbd"],
     svg: `
@@ -1265,7 +1265,7 @@ export const SUBSYSTEMS = {
 
   // ── 게인 스케줄링 (공통) ─────────────────────────────────────────────
   schedule: {
-    tag: "공통", tagBg: "#8a5cf6",
+    tag: "공통", tagBg: "#7c3aed",
     title: "게인 스케줄링", eng: "오토파일럿 · SCAS 게인에 적용",
     chips: ["ok", "dft", "tbd"],
     svg: `
@@ -1329,7 +1329,7 @@ export const SUBSYSTEMS = {
 
   // ── 미션플래너 (입력) ────────────────────────────────────────────────
   planner: {
-    tag: "입력", tagBg: "#8a97a5",
+    tag: "입력", tagBg: "#5f6b78",
     title: "미션플래너", eng: "Mission Planner",
     chips: ["ok"],
     svg: `
@@ -1369,7 +1369,7 @@ export const SUBSYSTEMS = {
 
   // ── 비선형 시뮬 검증 (설계 ⑤ — 블록 아닌 설계 단계 페이지) ───────────
   verify: {
-    tag: "설계 ⑤", tagBg: "#64748b",
+    tag: "설계 ⑤", tagBg: "#6b7280",
     title: "비선형 시뮬레이션 검증", eng: "임무프로파일 → 모드별 유도 → 폐루프 6DOF",
     chips: ["ok", "dft"],
     svg: `
