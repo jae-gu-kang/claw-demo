@@ -1282,7 +1282,7 @@ export const SUBSYSTEMS = {
     title: "항법 — 등가 오차 모델", eng: "Navigation (M6 · EKF 미구현 — 인터페이스 개방)",
     chips: ["ok", "dft"],
     svg: `
-<svg viewBox="0 0 1000 470" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 1000 760" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-nav" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
   <g class="sblk" data-code="nav/error_model.py:NavErrorModel.step"><rect class="body" x="30" y="128" width="36" height="24" rx="12"/><text class="pnum" x="48" y="144">1</text></g>
   <text class="pname" x="85" y="176">참값 VehicleState</text>
@@ -1320,11 +1320,36 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="820" y="292">다음 릴리스까지 유지 (ZOH)</text>
     <text class="ttl2" x="820" y="310">첫 릴리스 전 valid=False</text></g>
   <path class="wire" d="M920 286 H926" marker-end="url(#aw-nav)"/>
+  <circle class="branch" cx="923" cy="286" r="3.2"/>
   <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="930" y="274" width="36" height="24" rx="12"/><text class="pnum" x="948" y="290">1</text></g>
-  <text class="pname" x="948" y="322">NavOutput</text>
-  <text class="canvas-note" x="24" y="404">※ 측정 = 참값 + 바이어스(위치) + 백색잡음 · 바이어스·잡음 갱신은 측정 틱마다 (T = 갱신주기) · fuel은 참값 통과 (연료 게이지) · 자세는 동체측 δq 곱 — 단위 노름 유지</text>
-  <text class="canvas-note" x="24" y="426">※ 갱신주기가 틱 주기의 정수배 아니면 조립 시점 거부 · 항법이 틱보다 빠르면 틱마다 새 측정 · 릴리스는 배열 복사 — 소비자 훼손이 보관 측정을 오염시키지 않음</text>
-  <text class="canvas-note" x="24" y="448">※ 난수 seed <tspan data-p="seed">0</tspan> 고정 결정적 (몬테카를로 재현성) · 법칙·유도·스케줄은 NavOutput만 소비 [참값 차단 계약 03 §4]</text>
+  <text class="pname" x="948" y="264">NavOutput</text>
+  <!-- 출력 펼침 — NavOutput 버스의 실제 필드와 소비처 병기 (6DOF 페이지와 같은 문법).
+       버스 분기는 도해(nblk)지만 필드는 전부 contracts.py NavOutput 정의에 실존한다 -->
+  <path class="wire" d="M923 286 V380 H387 V396" marker-end="url(#aw-nav)"/>
+  <g class="sblk nblk"><rect class="body" x="360" y="400" width="54" height="250" rx="3"/></g>
+  <text class="bname" x="387" y="423">버스</text>
+  <text class="bname" x="387" y="437">분기</text>
+  <path class="wire" d="M414 430 H646" marker-end="url(#aw-nav)"/>
+  <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="418" width="36" height="24" rx="12"/><text class="pnum" x="668" y="434">2</text></g>
+  <text class="pname a-start" x="694" y="434">pos_n · NED 위치 — 유도 경로추종</text>
+  <path class="wire" d="M414 470 H646" marker-end="url(#aw-nav)"/>
+  <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="458" width="36" height="24" rx="12"/><text class="pnum" x="668" y="474">3</text></g>
+  <text class="pname a-start" x="694" y="474">vel_n · NED 속도 — AP 고도·속도</text>
+  <path class="wire" d="M414 510 H646" marker-end="url(#aw-nav)"/>
+  <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="498" width="36" height="24" rx="12"/><text class="pnum" x="668" y="514">4</text></g>
+  <text class="pname a-start" x="694" y="514">q_nb · 자세 — SCAS·리미터·유도</text>
+  <path class="wire" d="M414 550 H646" marker-end="url(#aw-nav)"/>
+  <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="538" width="36" height="24" rx="12"/><text class="pnum" x="668" y="554">5</text></g>
+  <text class="pname a-start" x="694" y="554">ω_b · 각속도 — SCAS rate 항</text>
+  <path class="wire" d="M414 590 H646" marker-end="url(#aw-nav)"/>
+  <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="578" width="36" height="24" rx="12"/><text class="pnum" x="668" y="594">6</text></g>
+  <text class="pname a-start" x="694" y="594">t_meas · valid — 유효성 게이트</text>
+  <path class="wire" d="M414 630 H646" marker-end="url(#aw-nav)"/>
+  <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="618" width="36" height="24" rx="12"/><text class="pnum" x="668" y="634">7</text></g>
+  <text class="pname a-start" x="694" y="634">fuel — 참값 통과 · 게인 스케줄</text>
+  <text class="canvas-note" x="24" y="700">※ 측정 = 참값 + 바이어스(위치) + 백색잡음 · 바이어스·잡음 갱신은 측정 틱마다 (T = 갱신주기) · fuel은 참값 통과 (연료 게이지) · 자세는 동체측 δq 곱 — 단위 노름 유지</text>
+  <text class="canvas-note" x="24" y="722">※ 갱신주기가 틱 주기의 정수배 아니면 조립 시점 거부 · 항법이 틱보다 빠르면 틱마다 새 측정 · 릴리스는 배열 복사 — 소비자 훼손이 보관 측정을 오염시키지 않음</text>
+  <text class="canvas-note" x="24" y="744">※ 난수 seed <tspan data-p="seed">0</tspan> 고정 결정적 (몬테카를로 재현성) · 법칙·유도·스케줄은 NavOutput만 소비 [참값 차단 계약 03 §4] — 필드 ②~⑦은 VehicleState 동형 + 유효성</text>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
@@ -1448,19 +1473,65 @@ export const SUBSYSTEMS = {
     title: "비선형 시뮬레이션 검증", eng: "임무프로파일 → 모드별 유도 → 폐루프 6DOF",
     chips: ["ok", "dft"],
     svg: `
-<svg viewBox="0 0 950 220" xmlns="http://www.w3.org/2000/svg">
-  <defs><marker id="aw-vf" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk" data-code="guidance/guidance.py:Guidance"><rect class="body" x="30" y="66" width="150" height="68" rx="3"/>
-    <text class="ttl" x="105" y="94">임무프로파일</text><text class="ttl2" x="105" y="114">시나리오 입력</text></g>
-  <path class="wire" d="M180 100 H226" marker-end="url(#aw-vf)"/>
-  <g class="sblk" data-code="sim/simulator.py:Simulator.run"><rect class="body" x="230" y="66" width="180" height="68" rx="3"/>
-    <text class="ttl" x="320" y="94">폐루프 6DOF 시뮬</text><text class="ttl2" x="320" y="114">멀티레이트 · RK4 (기본값)</text></g>
-  <path class="wire" d="M410 100 H456" marker-end="url(#aw-vf)"/>
-  <g class="sblk" data-code="sim/simulator.py:Simulator._envelope"><rect class="body" x="460" y="66" width="170" height="68" rx="3"/>
-    <text class="ttl" x="545" y="94">엔벨로프 감시</text><text class="ttl2" x="545" y="114">실속 마진 · DB 이탈 플래그</text></g>
-  <path class="wire" d="M630 100 H676" marker-end="url(#aw-vf)"/>
-  <g class="sblk nblk"><rect class="body" x="680" y="66" width="220" height="68" rx="3"/>
-    <text class="ttl" x="790" y="94">리포트 · Simulink 대조</text><text class="ttl2" x="790" y="114">허용오차 비교 (폐쇄망)</text></g>
+<svg viewBox="0 0 1000 510" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="aw-vf" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+    <marker id="as-vf" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
+  </defs>
+  <!-- Simulator.run의 실제 폐루프 — 최상위 블록도와 같은 사슬이 코드에서도 이 순서다 -->
+  <g class="sblk" data-code="sim/simulator.py:Simulator.run"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <text class="pname" x="48" y="132">TrimResult ← 트림</text>
+  <path class="wire" d="M66 100 H106" marker-end="url(#aw-vf)"/>
+  <g class="sblk" data-code="guidance/guidance.py:Guidance.step"><rect class="body" x="110" y="64" width="170" height="72" rx="3"/>
+    <text class="ttl" x="195" y="88" style="font-size:13px">유도 — Guidance.step</text>
+    <text class="ttl2" x="195" y="108">모드·경로 → GuidanceCommand</text>
+    <text class="ttl2" x="195" y="124">제어 틱 100 Hz</text></g>
+  <path class="wire" d="M280 100 H316" marker-end="url(#aw-vf)"/>
+  <g class="sblk" data-code="fcl/law.py:FlightControlLaw.step"><rect class="body" x="320" y="64" width="200" height="72" rx="3"/>
+    <text class="ttl" x="420" y="88" style="font-size:13px">제어법칙 — FlightControlLaw</text>
+    <text class="ttl2" x="420" y="108">AP → α리미터 → SCAS → 믹서</text>
+    <text class="ttl2" x="420" y="124">→ SurfaceCommand</text></g>
+  <path class="wire" d="M520 100 H556" marker-end="url(#aw-vf)"/>
+  <g class="sblk" data-code="plant/actuator.py:SecondOrderActuator.step"><rect class="body" x="560" y="64" width="140" height="72" rx="3"/>
+    <text class="ttl" x="630" y="88" style="font-size:13px">작동기 ×5</text>
+    <text class="ttl2" x="630" y="108">2차계 · rate/위치 한계</text></g>
+  <path class="wire" d="M700 100 H736" marker-end="url(#aw-vf)"/>
+  <g class="sblk" data-code="plant/aircraft.py:Aircraft.fm plant/eom.py:RigidBody.step"><rect class="body" x="740" y="52" width="220" height="96" rx="3"/>
+    <text class="ttl" x="850" y="76" style="font-size:13px">플랜트 — RK4 dt 10 ms</text>
+    <text class="ttl2" x="850" y="96">Aircraft.fm → RigidBody.step</text>
+    <text class="ttl2" x="850" y="112">준정적 질량 갱신 · ZOH 제어</text>
+    <text class="ttl2" x="850" y="128">발사 레일 구간은 해석해 전진</text></g>
+  <path class="wire" d="M850 148 V190 H509 V206" marker-end="url(#aw-vf)"/>
+  <text class="siglabel" x="700" y="182">참값 상태 (VehicleState)</text>
+  <circle class="branch" cx="700" cy="190" r="3.2"/>
+  <g class="sblk" data-code="nav/error_model.py:NavErrorModel.step"><rect class="body" x="395" y="210" width="220" height="72" rx="3"/>
+    <text class="ttl" x="505" y="234" style="font-size:13px">항법 — NavErrorModel.step</text>
+    <text class="ttl2" x="505" y="254">잡음·바이어스·지연 → NavOutput</text>
+    <text class="ttl2" x="505" y="270">참값은 항법만 소비 [차단 계약]</text></g>
+  <path class="wire" d="M395 246 H180 V136" marker-end="url(#aw-vf)"/>
+  <circle class="branch" cx="340" cy="246" r="3.2"/>
+  <path class="wire" d="M340 246 V136" marker-end="url(#aw-vf)"/>
+  <text class="siglabel" x="262" y="266">NavOutput — 유도·법칙의 유일한 상태 입력</text>
+  <g class="sblk" data-code="sim/simulator.py:Simulator.run"><rect class="body" x="30" y="156" width="36" height="24" rx="12"/><text class="pnum" x="48" y="172">2</text></g>
+  <text class="pname a-start" x="30" y="212">임무프로파일 (시뮬 탭)</text>
+  <path class="wire soft" d="M66 168 H90 V118 H106" marker-end="url(#as-vf)"/>
+  <g class="sblk" data-code="sim/simulator.py:Simulator.run sim/simulator.py:Simulator._envelope"><rect class="body" x="640" y="210" width="260" height="84" rx="3"/>
+    <text class="ttl" x="770" y="234" style="font-size:13px">신호 로깅 · 엔벨로프 감시</text>
+    <text class="ttl2" x="770" y="254">기본 26 + 명령 사슬 44 신호</text>
+    <text class="ttl2" x="770" y="270">실속 마진 · DB 이탈 플래그 · 페이즈</text></g>
+  <path class="wire soft" d="M700 190 V206" marker-end="url(#as-vf)"/>
+  <path class="wire" d="M900 252 H946" marker-end="url(#aw-vf)"/>
+  <circle class="branch" cx="925" cy="252" r="3.2"/>
+  <g class="sblk" data-code="common/contracts.py:SimResult"><rect class="body" x="950" y="240" width="36" height="24" rx="12"/><text class="pnum" x="968" y="256">1</text></g>
+  <text class="pname" x="962" y="288">SimResult</text>
+  <text class="pname" x="954" y="306">→ 결과 탭</text>
+  <path class="wire note" d="M925 252 V366 H904" marker-end="url(#as-vf)"/>
+  <g class="sblk nblk"><rect class="body" x="640" y="330" width="260" height="72" rx="3"/>
+    <text class="ttl" x="770" y="354">리포트 · Simulink 대조</text>
+    <text class="ttl2" x="770" y="376">허용오차 비교 (폐쇄망 절차)</text></g>
+  <text class="canvas-note" x="24" y="452">※ 멀티레이트 — 유도·법칙은 제어 틱(100 Hz, k % n_ctrl == 0)마다, 플랜트는 dt 10 ms RK4로 매 스텝 (제어는 ZOH) · 발사 레일 구간은 적분하지 않고 등가속 해석해로 전진</text>
+  <text class="canvas-note" x="24" y="474">※ 발산 런은 ISA 범위 이탈 직전 조기 절단 — 부분 결과·엔벨로프 보존 · 접지·레일 상태는 유도 이탈 조건(on_ground·off_rail)이 소비하므로 제어 틱보다 먼저 잰다</text>
+  <text class="canvas-note" x="24" y="496">※ 합격기준(오버슈트·정착시간·경로오차)은 폐쇄망 Simulink 대조 시 확정 [01 §5] — 대조 절차는 엔진 밖(점선)</text>
 </svg>`,
     notes: `
 <h4>설계 노트</h4>
