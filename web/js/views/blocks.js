@@ -35,7 +35,7 @@ import { store } from "../store.js";
 import { renderCodePanel } from "./codegen.js";
 import { DESIGN_ORDER, fromMarkup, topDiagramSvg } from "./diagram.js";
 import { createTopReplay } from "./replayoverlay.js";
-import { CHIP_LABEL, SUBSYSTEMS } from "./subsystems.js";
+import { CHIP_LABEL, SUB_TINT, SUBSYSTEMS } from "./subsystems.js";
 
 const schemaCache = {}; // "cat/name" → schema
 let gainsCatalog = null; // GET /gains/catalog — 스케줄 자리·설계 상수·SCAS 설계 kwargs
@@ -160,6 +160,25 @@ function renderSubPage(root, path) {
   const block = blockById[path[0]] ?? null; // verify는 블록 아님 (설계 단계 페이지)
   const paramBox = el("div");
   const svgWrap = el("div", { class: "canvas-wrap sub" }, fromMarkup(sub.svg));
+  // 2계층 시각 문법 — 코드 대응 블록(data-code)의 틴트는 루트 설계 단계 색에서
+  // (정본 subsystems.js SUB_TINT). 커버리지는 테스트 가드라 여기선 존재를 전제한다
+  const tone = SUB_TINT[rootSub.tagBg];
+  svgWrap.style.setProperty("--sub-tint", tone.tint);
+  svgWrap.style.setProperty("--sub-edge", tone.edge);
+  for (const node of svgWrap.querySelectorAll("[data-code]")) {
+    // 호버 툴팁으로 파일:심볼 노출 — textContent만 넣는다 (마크업 삽입 금지 계약).
+    // SVG 네임스페이스 필수: createElement("title")는 HTMLTitleElement가 되어 안 뜬다
+    const tip = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    tip.textContent = `engine/claw/${node.dataset.code}`;
+    node.append(tip);
+  }
+  // 범례 — crumbbar와 캔버스가 한 카드(radius 절반씩)라 사이에 못 끼운다:
+  // 캔버스 안 최상단에. 클래스명이 legend가 아닌 이유는 app.css .subkey 주석 참조
+  svgWrap.prepend(el("div", { class: "subkey" },
+    el("span", { class: "sw", style: `background:${tone.tint};border-color:${tone.edge}` }),
+    "색 블록 = 코드 대응 (engine/claw — 호버하면 파일:심볼)",
+    el("span", { class: "sw note" }),
+    "점선 = 설명용 도해 (엔진에 없음)"));
   // 하위 진입 배선 — data-child (최상위 data-block과 동일 패턴, 깊이 무제한)
   for (const node of svgWrap.querySelectorAll("[data-child]")) {
     const go = () => navigate([...path, node.dataset.child]);

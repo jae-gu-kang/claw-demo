@@ -2,8 +2,24 @@
 
 각 페이지: pagehead 메타(단계 태그·영문·상태 칩) + 내부 블록도 SVG + 설계 노트.
 SVG·노트는 수작성 정적 마크업 (fromMarkup으로 DOM화 — 사용자 데이터 삽입 금지).
-내부 구조는 엔진 구현(M6~M8)과 1:1 — 코드에 없는 구조를 그리지 않는다.
 페이지 id는 lib/blocks.js 블록 id + "verify"(설계 ⑤ — 블록 아닌 설계 단계 페이지).
+
+## 2계층 시각 문법 — 코드 대응은 색, 설명은 무채색 (02 §4)
+
+시뮬링크에 익숙한 독자가 블록만 보고 이해하도록 그림은 펼치되, **엔진 코드와의
+대응 여부를 색으로 정직하게** 말한다 (lib/blocks.test.js가 실존을 검증):
+
+- **코드 대응**: `data-code="plant/eom.py:RigidBody.deriv"` — engine/claw/ 기준
+  경로:심볼 (`Class` | `Class.method` | `function`, 공백 구분 복수 허용). 면이
+  페이지 설계 단계 색의 밝은 틴트로 칠해진다 (SUB_TINT → CSS --sub-tint).
+  등록명(LOS ≠ LosPath)이 아니라 파일:심볼로 지목 — 테스트가 원문과 대조한다.
+  포트 배지도 시그니처의 인자/반환이므로 코드 대응이다.
+- **설명용**: 수정자 클래스 `nblk` (`class="sblk nblk"`, Σ원은 `class="body nblk"`,
+  배선은 `class="wire note"`) — 흰 면 + 회색 점선. 엔진에 없는 도해 요소
+  (버스 분기, 미구현 출력 등). data-code·data-child·data-p 금지 (테스트 가드).
+
+구조 자체는 여전히 엔진과 1:1이고 자유 배선은 없다 (01 §3 유지) — 완화된 것은
+"그리는 범위"뿐이며, 그린 것이 코드인지 도해인지는 색이 구분한다.
 
 드릴다운 트리(깊이 무제한): 페이지의 children = { childId: {crumb, title, eng,
 chips, svg, notes, children?} } — tag/tagBg는 루트 상속. 페이지 SVG 안의
@@ -16,10 +32,25 @@ SVG 안의 <tspan data-p="이름">은 파라미터 연동 표시값 — views/bl
 초기 텍스트는 참고용 폴백일 뿐 정본이 아님 (정본 = 엔진 레지스트리 스키마).
 data-p 이름은 **루트 블록** 스키마의 파라미터명만 허용 — children 포함
 (lib/blocks.test.js 가드). 스키마 폼 없는 루트(scas 등) 아래에서는 사용 금지.
+data-code는 별개 축이다 — data-p 금지 루트에도 data-code는 붙는다.
 */
+
+import { DESIGN_ORDER } from "./diagram.js"; // 순환 없음: subsystems → diagram → lib/blocks
 
 // 상태 칩 종류 → 라벨 (fcs-context 문서 태그와 동일 의미)
 export const CHIP_LABEL = { ok: "확정", dft: "기본값", tbd: "TBD", note: "설계 유의" };
+
+/** 코드 대응 블록의 면 틴트 — 루트 tagBg → {tint(면), edge(테두리)}.
+설계 단계 ①~⑤의 5색은 최상위 보드 판 색(diagram.js LAYERS[].fill)이 정본이라
+여기서 복사하지 않고 DESIGN_ORDER에서 뽑는다 (어긋나면 삼중 사본 — 테스트가 판다).
+비층 3색(보호·배분/HW/입력·피드백)만 여기가 정본. 틴트 위에는 --text와 #4b5563
+글자가 얹히므로 대비 4.5:1 이상이어야 한다 (lib/blocks.test.js가 계산). */
+export const SUB_TINT = {
+  ...Object.fromEntries(DESIGN_ORDER.map((s) => [s.color, { tint: s.tint, edge: s.edge }])),
+  "#b3352b": { tint: "#f8ded9", edge: "#dd9a90" }, // α 리미터 — 보호
+  "#5f6b78": { tint: "#e0e5eb", edge: "#aeb8c4" }, // 믹서·작동기·플래너 — 슬레이트
+  "#0e7c86": { tint: "#d5edef", edge: "#86c2c8" }, // 항법 — 청록
+};
 
 // SCAS 축 공용 층4 — 엔진 blocks/controllers.py PID(kd=0)와 1:1.
 // 세 축이 동일 구조라 정의 하나를 공유 (게인 값만 축별 상이 — 정본은 게인 탭).
@@ -40,7 +71,7 @@ const SCAS_PI_PAGE = {
     <text class="ttl2" x="275" y="100">비례항</text></g>
   <path class="wire" d="M350 86 H480 V132" marker-end="url(#aw-pi)"/>
   <path class="wire" d="M150 150 V222 H196" marker-end="url(#aw-pi)"/>
-  <g class="sblk"><rect class="body" x="200" y="190" width="250" height="64" rx="3"/>
+  <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="200" y="190" width="250" height="64" rx="3"/>
     <text class="ttl" x="325" y="214" style="font-size:13px">적분기 (클램프 AW)</text>
     <text class="ttl2" x="325" y="236">I ← clip(I + dt·ki·e, out_lo~hi)</text></g>
   <path class="wire" d="M450 222 H480 V168" marker-end="url(#aw-pi)"/>
@@ -100,17 +131,17 @@ export const SUBSYSTEMS = {
   <text class="siglabel" x="296" y="250">φ·p</text>
   <text class="siglabel" x="296" y="360">β·r</text>
   <!-- 축 서브시스템 블록 (클릭 → 층3) -->
-  <g class="blk" data-child="pitch" tabindex="0">
+  <g class="blk" data-child="pitch" data-code="fcl/scas.py:ScasAxis" tabindex="0">
     <rect class="body" x="330" y="84" width="300" height="76" rx="3"/>
     <text class="ttl" x="480" y="116">피치축 (ScasAxis)</text>
     <text class="ttl2" x="480" y="140">PI + k_rate·q → δe · 클릭 → 내부</text>
   </g>
-  <g class="blk" data-child="roll" tabindex="0">
+  <g class="blk" data-child="roll" data-code="fcl/scas.py:ScasAxis" tabindex="0">
     <rect class="body" x="330" y="194" width="300" height="76" rx="3"/>
     <text class="ttl" x="480" y="226">롤축 (ScasAxis)</text>
     <text class="ttl2" x="480" y="250">wrap ±π 오차 PI + k_rate·p → δa · 클릭 → 내부</text>
   </g>
-  <g class="blk" data-child="yaw" tabindex="0">
+  <g class="blk" data-child="yaw" data-code="fcl/scas.py:ScasAxis" tabindex="0">
     <rect class="body" x="330" y="304" width="300" height="76" rx="3"/>
     <text class="ttl" x="480" y="336">요축 (ScasAxis + 워시아웃)</text>
     <text class="ttl2" x="480" y="360">−β PI + k_rate·washout(r) → δr · 클릭 → 내부</text>
@@ -149,7 +180,7 @@ export const SUBSYSTEMS = {
   <circle class="body" cx="140" cy="100" r="14"/>
   <text class="sumsign" x="131" y="104">+</text><text class="sumsign" x="140" y="113">−</text>
   <path class="wire" d="M154 100 H186" marker-end="url(#aw-scp)"/>
-  <g class="blk" data-child="pi" tabindex="0">
+  <g class="blk" data-child="pi" data-code="blocks/controllers.py:PID" tabindex="0">
     <rect class="body" x="190" y="64" width="190" height="72" rx="3"/>
     <text class="ttl" x="285" y="94" style="font-size:14px">PI — 클램프 AW</text>
     <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
@@ -201,7 +232,7 @@ export const SUBSYSTEMS = {
   <text class="sumsign" x="131" y="104">+</text><text class="sumsign" x="140" y="113">−</text>
   <text class="siglabel" x="140" y="72">wrap ±π</text>
   <path class="wire" d="M154 100 H186" marker-end="url(#aw-scr)"/>
-  <g class="blk" data-child="pi" tabindex="0">
+  <g class="blk" data-child="pi" data-code="blocks/controllers.py:PID" tabindex="0">
     <rect class="body" x="190" y="64" width="190" height="72" rx="3"/>
     <text class="ttl" x="285" y="94" style="font-size:14px">PI — 클램프 AW</text>
     <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
@@ -253,7 +284,7 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="135" y="96" style="font-size:13px">× −1</text>
     <text class="ttl2" x="135" y="114">명령 없음</text></g>
   <path class="wire" d="M170 100 H186" marker-end="url(#aw-scy)"/>
-  <g class="blk" data-child="pi" tabindex="0">
+  <g class="blk" data-child="pi" data-code="blocks/controllers.py:PID" tabindex="0">
     <rect class="body" x="190" y="64" width="190" height="72" rx="3"/>
     <text class="ttl" x="285" y="94" style="font-size:14px">PI — 클램프 AW</text>
     <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
@@ -330,17 +361,17 @@ export const SUBSYSTEMS = {
   <text class="siglabel" x="302" y="250">h·ḣ</text>
   <text class="siglabel" x="302" y="360">V</text>
   <!-- 채널 서브시스템 블록 (클릭 → 층3) -->
-  <g class="blk" data-child="hdg" tabindex="0">
+  <g class="blk" data-child="hdg" data-code="fcl/autopilot.py:Autopilot.step" tabindex="0">
     <rect class="body" x="330" y="84" width="300" height="76" rx="3"/>
     <text class="ttl" x="480" y="116">헤딩 채널</text>
     <text class="ttl2" x="480" y="140">필터 wrap τ <tspan data-p="tau_hdg">1</tspan> s · PI · 클립 ±phi_max · 클릭 → 내부</text>
   </g>
-  <g class="blk" data-child="alt" tabindex="0">
+  <g class="blk" data-child="alt" data-code="fcl/autopilot.py:Autopilot.step" tabindex="0">
     <rect class="body" x="330" y="194" width="300" height="76" rx="3"/>
     <text class="ttl" x="480" y="226">고도 채널</text>
     <text class="ttl2" x="480" y="250">필터 τ <tspan data-p="tau_alt">5</tspan> s · PI + k_hdot·ḣ · θ 클립 · 클릭 → 내부</text>
   </g>
-  <g class="blk" data-child="spd" tabindex="0">
+  <g class="blk" data-child="spd" data-code="fcl/autopilot.py:Autopilot.step" tabindex="0">
     <rect class="body" x="330" y="304" width="300" height="76" rx="3"/>
     <text class="ttl" x="480" y="336">속도 채널</text>
     <text class="ttl2" x="480" y="360">필터 τ <tspan data-p="tau_spd">2</tspan> s · PI · 0~1 클립 · 클릭 → 내부</text>
@@ -395,7 +426,7 @@ export const SUBSYSTEMS = {
   <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
   <text class="siglabel" x="258" y="70">wrap ±π</text>
   <path class="wire" d="M272 100 H296" marker-end="url(#aw-aph)"/>
-  <g class="sblk"><rect class="body" x="300" y="74" width="150" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="300" y="74" width="150" height="52" rx="3"/>
     <text class="ttl" x="375" y="93" style="font-size:13px">헤딩 PI — 클램프 AW</text>
     <text class="ttl2" x="375" y="111">kp <tspan data-p="kp_hdg">4</tspan> · ki <tspan data-p="ki_hdg">0</tspan></text></g>
   <path class="wire" d="M450 100 H478" marker-end="url(#aw-aph)"/>
@@ -442,7 +473,7 @@ export const SUBSYSTEMS = {
   <circle class="body" cx="258" cy="100" r="14"/>
   <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
   <path class="wire" d="M272 100 H296" marker-end="url(#aw-apa)"/>
-  <g class="sblk"><rect class="body" x="300" y="74" width="140" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="300" y="74" width="140" height="52" rx="3"/>
     <text class="ttl" x="370" y="93" style="font-size:13px">고도 PI — 클램프 AW</text>
     <text class="ttl2" x="370" y="111">kp <tspan data-p="kp_alt">0.004</tspan> · ki <tspan data-p="ki_alt">0.0004</tspan></text></g>
   <path class="wire" d="M440 100 H446" marker-end="url(#aw-apa)"/>
@@ -505,7 +536,7 @@ export const SUBSYSTEMS = {
   <circle class="body" cx="258" cy="100" r="14"/>
   <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
   <path class="wire" d="M272 100 H296" marker-end="url(#aw-aps)"/>
-  <g class="sblk"><rect class="body" x="300" y="74" width="140" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="300" y="74" width="140" height="52" rx="3"/>
     <text class="ttl" x="370" y="93" style="font-size:13px">속도 PI — 클램프 AW</text>
     <text class="ttl2" x="370" y="111">kp <tspan data-p="kp_spd">0.15</tspan> · ki <tspan data-p="ki_spd">0.03</tspan></text></g>
   <path class="wire" d="M440 100 H492" marker-end="url(#aw-aps)"/>
@@ -568,7 +599,7 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M330 280 V190 H356" marker-end="url(#aw-guid)"/>
   <path class="wire" d="M330 280 V350 H356" marker-end="url(#aw-guid)"/>
   <!-- 경로추종 (레지스트리 교체 가능) -->
-  <g class="blk" data-child="path" tabindex="0"><rect class="body" x="360" y="150" width="200" height="80" rx="3"/>
+  <g class="blk" data-child="path" data-code="guidance/path.py:LosPath" tabindex="0"><rect class="body" x="360" y="150" width="200" height="80" rx="3"/>
     <text class="ttl" x="460" y="172" style="font-size:13px">경로추종 — LOS [기본값]</text>
     <text class="ttl2" x="460" y="190">현위치→활성 WP 방위각</text>
     <text class="ttl2" x="460" y="204">도달반경 진입 → 다음 WP (연쇄 스킵)</text>
@@ -578,7 +609,7 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M560 215 H590 V270 H480 V296" marker-end="url(#aw-guid)"/>
   <text class="siglabel" x="540" y="262">path_done</text>
   <!-- 모드 시퀀서 -->
-  <g class="blk" data-child="modes" tabindex="0"><rect class="body" x="360" y="300" width="200" height="100" rx="3"/>
+  <g class="blk" data-child="modes" data-code="guidance/modes.py:ModeSequencer" tabindex="0"><rect class="body" x="360" y="300" width="200" height="100" rx="3"/>
     <text class="ttl" x="460" y="324" style="font-size:13px">모드 시퀀서</text>
     <text class="ttl2" x="460" y="344">선언 테이블 {명령·이탈·next}</text>
     <text class="ttl2" x="460" y="360">이탈: time·alt·speed·path_done</text>
@@ -639,7 +670,7 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="185" y="101" style="font-size:13px">위치 추출</text>
     <text class="ttl2" x="185" y="119">(n, e) = pos_n 수평면</text></g>
   <path class="wire" d="M270 108 H316" marker-end="url(#aw-gpath)"/>
-  <g class="sblk"><rect class="body" x="320" y="72" width="260" height="72" rx="3"/>
+  <g class="sblk" data-code="guidance/path.py:LosPath.step"><rect class="body" x="320" y="72" width="260" height="72" rx="3"/>
     <text class="ttl" x="450" y="94" style="font-size:13px">도달 판정 — 연쇄 스킵 (while)</text>
     <text class="ttl2" x="450" y="112">dn·de = 활성 WP − (n, e)</text>
     <text class="ttl2" x="450" y="130">√(dn²+de²) ≤ 도달반경 → 다음 WP</text></g>
@@ -699,7 +730,7 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="285" y="169" style="font-size:13px">활성 모드 name</text>
     <text class="ttl2" x="285" y="187">t_entry 보관</text></g>
   <path class="wire" d="M360 176 H396" marker-end="url(#aw-gmod)"/>
-  <g class="sblk"><rect class="body" x="400" y="170" width="270" height="110" rx="3"/>
+  <g class="sblk" data-code="guidance/modes.py:ModeSequencer.step"><rect class="body" x="400" y="170" width="270" height="110" rx="3"/>
     <text class="ttl" x="535" y="194" style="font-size:13px">이탈 판정 — 스텝당 1회</text>
     <text class="ttl2" x="535" y="214">next 없으면 종단 — 평가 생략·유지</text>
     <text class="ttl2" x="535" y="232">eval_condition(exit_when, nav, ctx)</text>
@@ -760,7 +791,7 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="30" y="218" width="36" height="24" rx="12"/><text class="pnum" x="48" y="234">2</text></g>
   <text class="pname" x="48" y="262">Mach</text>
   <path class="wire" d="M66 230 H96" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="100" y="200" width="190" height="60" rx="3"/>
+  <g class="sblk" data-code="fcl/limiter.py:AlphaLimiter.alpha_max"><rect class="body" x="100" y="200" width="190" height="60" rx="3"/>
     <path d="M112 246 L128 246 L142 224 L158 236 L172 218" stroke="#8a97a5" stroke-width="1.6" fill="none"/>
     <text class="ttl" x="234" y="224" style="font-size:13px">α_stall(mach)</text>
     <text class="ttl2" x="234" y="242">1D · 외삽 clip 강제</text></g>
@@ -828,7 +859,7 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M66 194 H246" marker-end="url(#aw-mix)"/>
   <circle class="branch" cx="110" cy="194" r="3.2"/>
   <path class="wire" d="M110 194 V102 H246" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="250" y="64" width="150" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="250" y="64" width="150" height="52" rx="3"/>
     <text class="ttl" x="325" y="86" style="font-size:13px">좌측 = δe + δa</text>
     <text class="ttl2" x="325" y="104">내좌 = 외좌 (1:1 고정)</text></g>
   <g class="sblk"><rect class="body" x="250" y="156" width="150" height="52" rx="3"/>
@@ -911,7 +942,7 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="128">δ_cmd</text>
   <path class="wire" d="M66 100 H136" marker-end="url(#aw-act)"/>
-  <g class="sblk"><rect class="body" x="140" y="64" width="190" height="72" rx="3"/>
+  <g class="sblk" data-code="plant/actuator.py:SecondOrderActuator.step"><rect class="body" x="140" y="64" width="190" height="72" rx="3"/>
     <text class="ttl2" x="235" y="90" style="font-size:13px">ωn²</text>
     <line x1="170" y1="98" x2="300" y2="98" stroke="#111" stroke-width="1.4"/>
     <text class="ttl2" x="235" y="118" style="font-size:12px">s² + 2ζωn·s + ωn²</text></g>
@@ -952,7 +983,7 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
   <text class="pname" x="48" y="140">타면 변위</text>
   <path class="wire" d="M66 108 H146" marker-end="url(#aw-pl)"/>
-  <g class="blk" data-child="aero" tabindex="0"><rect class="body" x="150" y="60" width="290" height="96" rx="3"/>
+  <g class="blk" data-child="aero" data-code="plant/aero.py:AeroModel" tabindex="0"><rect class="body" x="150" y="60" width="290" height="96" rx="3"/>
     <text class="ttl" x="295" y="82" style="font-size:13px">공력 — AeroModel</text>
     <text class="ttl2" x="295" y="100">DB 계수 → 동체축 {CX·CY·CZ·Cl·Cm·Cn}</text>
     <text class="ttl2" x="295" y="116">무차원 p̂·q̂·r̂ = pb/2V · qc̄/2V · rb/2V</text>
@@ -961,7 +992,7 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="30" y="208" width="36" height="24" rx="12"/><text class="pnum" x="48" y="224">2</text></g>
   <text class="pname" x="48" y="252">스로틀 ×2</text>
   <path class="wire" d="M66 220 H146" marker-end="url(#aw-pl)"/>
-  <g class="blk" data-child="prop" tabindex="0"><rect class="body" x="150" y="184" width="290" height="72" rx="3"/>
+  <g class="blk" data-child="prop" data-code="plant/prop.py:TwinEngine" tabindex="0"><rect class="body" x="150" y="184" width="290" height="72" rx="3"/>
     <text class="ttl" x="295" y="206" style="font-size:13px">추진 — TwinEngine</text>
     <text class="ttl2" x="295" y="226">추력 맵 [기본 max_thrust·δt] · 0~1 클립</text>
     <text class="ttl2" x="295" y="244">M = r_L×F_L + r_R×F_R · 클릭 → 내부</text></g>
@@ -976,7 +1007,7 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="545" y="192">Σ F_b</text>
     <text class="ttl" x="545" y="214">· M_b</text></g>
   <path class="wire" d="M600 200 H656" marker-end="url(#aw-pl)"/>
-  <g class="blk" data-child="eom" tabindex="0"><rect class="body" x="660" y="96" width="270" height="140" rx="3"/>
+  <g class="blk" data-child="eom" data-code="plant/eom.py:RigidBody" tabindex="0"><rect class="body" x="660" y="96" width="270" height="140" rx="3"/>
     <text class="ttl" x="795" y="120" style="font-size:13px">6DOF 강체 — RigidBody · RK4</text>
     <text class="ttl2" x="795" y="142">x(13) = [p_n · v_b · q_nb · ω_b]</text>
     <text class="ttl2" x="795" y="160">ṗ = C_nb·v · v̇ = F/m − ω×v</text>
@@ -989,7 +1020,7 @@ export const SUBSYSTEMS = {
   <circle class="branch" cx="938" cy="166" r="3.2"/>
   <path class="wire soft" d="M938 166 V36 H295 V56" marker-end="url(#as-pl)"/>
   <text class="siglabel" x="610" y="28">상태 피드백 (참값): v_b · ω_b · q_nb · h</text>
-  <g class="blk" data-child="mass" tabindex="0"><rect class="body" x="660" y="340" width="280" height="72" rx="3"/>
+  <g class="blk" data-child="mass" data-code="plant/mass.py:FuelMass" tabindex="0"><rect class="body" x="660" y="340" width="280" height="72" rx="3"/>
     <text class="ttl" x="800" y="362" style="font-size:13px">질량특성 — FuelMass.at(fuel)</text>
     <text class="ttl2" x="800" y="382">m · cg · J — 잔여 연료 선형 보간</text>
     <text class="ttl2" x="800" y="400">스텝 사이 갱신 [준정적] · 클릭 → 내부</text></g>
@@ -1051,7 +1082,7 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="745" y="120">출력 동체축 {CX·CY·CZ·Cl·Cm·Cn}</text>
     <text class="ttl2" x="745" y="138">부호·기준점은 DB 정의 — 코드 무가정</text></g>
   <path class="wire" d="M745 156 V196" marker-end="url(#aw-paero)"/>
-  <g class="sblk"><rect class="body" x="610" y="200" width="270" height="76" rx="3"/>
+  <g class="sblk" data-code="plant/aero.py:AeroModel.forces"><rect class="body" x="610" y="200" width="270" height="76" rx="3"/>
     <text class="ttl" x="745" y="222" style="font-size:13px">차원화 — q̄ = ½ρV²</text>
     <text class="ttl2" x="745" y="242">F_b = q̄S·[CX, CY, CZ]</text>
     <text class="ttl2" x="745" y="258">M_b = q̄S·[b·Cl, c̄·Cm, b·Cn]</text></g>
@@ -1091,7 +1122,7 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="180" y="97" style="font-size:13px">0~1 클립</text>
     <text class="ttl2" x="180" y="115">좌·우 각각 (규약)</text></g>
   <path class="wire" d="M250 104 H286" marker-end="url(#aw-pprop)"/>
-  <g class="sblk"><rect class="body" x="290" y="78" width="220" height="52" rx="3"/>
+  <g class="sblk" data-code="plant/prop.py:TwinEngine.forces"><rect class="body" x="290" y="78" width="220" height="52" rx="3"/>
     <text class="ttl" x="400" y="97" style="font-size:13px">추력 맵 thrust_map(δt)</text>
     <text class="ttl2" x="400" y="115">기본 max_thrust·δt 선형 [기본값]</text></g>
   <path class="wire" d="M510 104 H546" marker-end="url(#aw-pprop)"/>
@@ -1128,7 +1159,7 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
   <text class="pname" x="48" y="140">F_b · M_b ← Σ</text>
   <path class="wire" d="M66 108 H106" marker-end="url(#aw-peom)"/>
-  <g class="sblk"><rect class="body" x="110" y="52" width="290" height="112" rx="3"/>
+  <g class="sblk" data-code="plant/eom.py:RigidBody.deriv"><rect class="body" x="110" y="52" width="290" height="112" rx="3"/>
     <text class="ttl" x="255" y="76" style="font-size:13px">상태미분 — RigidBody.deriv</text>
     <text class="ttl2" x="255" y="96">ṗ_n = C_nb·v_b</text>
     <text class="ttl2" x="255" y="112">v̇_b = F_b/m − ω×v_b</text>
@@ -1178,7 +1209,7 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="195" y="97" style="font-size:13px">범위 클립</text>
     <text class="ttl2" x="195" y="115">0 ~ fuel_max</text></g>
   <path class="wire" d="M280 104 H316" marker-end="url(#aw-pmass)"/>
-  <g class="sblk"><rect class="body" x="320" y="60" width="300" height="96" rx="3"/>
+  <g class="sblk" data-code="plant/mass.py:FuelMass.at"><rect class="body" x="320" y="60" width="300" height="96" rx="3"/>
     <text class="ttl" x="470" y="84" style="font-size:13px">선형 보간 [기본값]</text>
     <text class="ttl2" x="470" y="104">r = f / fuel_max · m = m_empty + f</text>
     <text class="ttl2" x="470" y="122">cg = cg_e + r·(cg_f − cg_e)</text>
@@ -1218,7 +1249,7 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M310 140 H362" marker-end="url(#aw-nav)"/>
   <circle class="body" cx="380" cy="140" r="14"/>
   <text class="sumsign" x="371" y="144">+</text><text class="sumsign" x="380" y="131">+</text><text class="sumsign" x="380" y="153">+</text>
-  <g class="sblk"><rect class="body" x="250" y="16" width="260" height="70" rx="3"/>
+  <g class="sblk" data-code="nav/error_model.py:NavErrorModel.step"><rect class="body" x="250" y="16" width="260" height="70" rx="3"/>
     <text class="ttl" x="380" y="38" style="font-size:13px">1차 마르코프 바이어스 — 위치축</text>
     <text class="ttl2" x="380" y="56">σ 수평 <tspan data-p="bias_std_h">1</tspan> · 수직 <tspan data-p="bias_std_v">1.5</tspan> m · τ <tspan data-p="bias_tau">60</tspan> s</text>
     <text class="ttl2" x="380" y="74">b ← p·b + σ√(1−p²)·w · p=e^(−T/τ)</text></g>
@@ -1293,7 +1324,7 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M310 90 H396" marker-end="url(#aw-gs2)"/>
   <path class="wire" d="M310 170 H396" marker-end="url(#aw-gs2)"/>
   <path class="wire" d="M310 250 H396" marker-end="url(#aw-gs2)"/>
-  <g class="sblk"><rect class="body" x="400" y="64" width="240" height="212" rx="3"/>
+  <g class="sblk" data-code="fcl/schedule.py:GainSchedule.step"><rect class="body" x="400" y="64" width="240" height="212" rx="3"/>
     <path d="M418 140 L436 140 L452 112 L470 126 L486 100" stroke="#8a97a5" stroke-width="1.8" fill="none"/>
     <text class="ttl" x="520" y="170" style="font-size:13px">게인 테이블 (M3 Table)</text>
     <text class="ttl2" x="520" y="190">축 ⊆ {mach·alt·fuel} · 1D~3D 보간</text>
@@ -1341,13 +1372,13 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="155" y="120">웨이포인트 (N,E) · 도달반경</text>
     <text class="ttl2" x="155" y="136">NED 평면 지도 편집 (클릭·드래그·줌)</text></g>
   <path class="wire" d="M270 104 H306" marker-end="url(#aw-mp)"/>
-  <g class="sblk"><rect class="body" x="310" y="60" width="250" height="88" rx="3"/>
+  <g class="sblk" data-code="guidance/modes.py:validate_condition"><rect class="body" x="310" y="60" width="250" height="88" rx="3"/>
     <text class="ttl" x="435" y="84" style="font-size:13px">검증 — 서버 · 엔진</text>
     <text class="ttl2" x="435" y="104">이탈 DSL: time · alt · speed · path_done</text>
     <text class="ttl2" x="435" y="120">heading: 숫자 | "path" | 없음(null)</text>
     <text class="ttl2" x="435" y="136">next 참조 · 초기 모드 존재 검사</text></g>
   <path class="wire" d="M560 104 H596" marker-end="url(#aw-mp)"/>
-  <g class="sblk"><rect class="body" x="600" y="60" width="230" height="88" rx="3"/>
+  <g class="sblk" data-code="guidance/guidance.py:Guidance"><rect class="body" x="600" y="60" width="230" height="88" rx="3"/>
     <text class="ttl" x="715" y="84" style="font-size:13px">임무프로파일 조립</text>
     <text class="ttl2" x="715" y="104">ModeSpec 목록 (모드 시퀀스)</text>
     <text class="ttl2" x="715" y="120">+ LosPath (웨이포인트 · 반경)</text>
@@ -1378,7 +1409,7 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="30" y="66" width="150" height="68" rx="3"/>
     <text class="ttl" x="105" y="94">임무프로파일</text><text class="ttl2" x="105" y="114">시나리오 입력</text></g>
   <path class="wire" d="M180 100 H226" marker-end="url(#aw-vf)"/>
-  <g class="sblk"><rect class="body" x="230" y="66" width="180" height="68" rx="3"/>
+  <g class="sblk" data-code="sim/simulator.py:Simulator.run"><rect class="body" x="230" y="66" width="180" height="68" rx="3"/>
     <text class="ttl" x="320" y="94">폐루프 6DOF 시뮬</text><text class="ttl2" x="320" y="114">멀티레이트 · RK4 (기본값)</text></g>
   <path class="wire" d="M410 100 H456" marker-end="url(#aw-vf)"/>
   <g class="sblk"><rect class="body" x="460" y="66" width="170" height="68" rx="3"/>

@@ -520,6 +520,41 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd .annot { font-size: 11px; fill: var(--l1); }
 .bd .sub [stroke="#8a5cf6"] { stroke: var(--l1); }
 
+/* ── 2계층 시각 문법 — 코드 대응(틴트) vs 설명용(점선) (02 §4) ──────────────
+   틴트는 views/blocks.js renderSubPage가 .canvas-wrap.sub 인라인 --sub-tint /
+   --sub-edge로 주입한다 (정본 = views/subsystems.js SUB_TINT ← diagram.js 판 색).
+   전부 .bd .sub 스코프 — .blk/.body를 최상위 보드(.bd .top)와 공유하므로
+   넓히면 358행의 filter 사고가 재현된다 (lib/blocks.test.js가 스코프를 판다).
+   틴트 규칙(0-4-0)은 기존 .bd .sub .blk .body(457행, 동률)보다 **뒤라서** 이긴다.
+   hover(0-5-0)는 계속 이겨 accent 테두리가 유지된다 (면은 틴트 그대로 — 의도). */
+.bd .sub [data-code] .body, .bd .sub .body[data-code] {
+  fill: var(--sub-tint, #ffffff);
+  stroke: var(--sub-edge, #cfd6e0);
+}
+/* 틴트 위 보조 잉크 — --muted(#6b7280)는 파랑 틴트 위 3.83:1로 AA 미달,
+   --accent(.pnum)도 4.09:1 미달. 실측으로 정한 대체 잉크 (테스트가 대비를 잰다) */
+.bd .sub [data-code] .ttl2 { fill: #4b5563; }
+.bd .sub [data-code] .pnum { fill: var(--text); }
+/* 설명용(nblk) — 엔진에 없는 도해 요소: 흰 면 + 회색 점선, 그림자 없음 */
+.bd .sub .nblk .body, .bd .sub .body.nblk {
+  fill: #ffffff;
+  stroke: #9aa5b4;
+  stroke-dasharray: 6 4;
+  filter: none;
+}
+.bd .sub .nblk .ttl { fill: var(--muted); }
+/* 설명용 배선 — 점 대시. soft(구성 입력·피드백, 실존 신호)와 다른 어휘다 */
+.bd .sub .wire.note { stroke: #b6bec9; stroke-dasharray: 2 5; stroke-linecap: round; animation: none; }
+
+/* 캔버스 상단 범례 — 클래스명이 legend가 아닌 이유: 전역 .legend .chip(240행)이
+   10×10 정사각형을 강제해 뭉개진다 */
+.bd .subkey {
+  display: flex; align-items: center; gap: 6px 16px; flex-wrap: wrap;
+  padding: 12px 16px 0; font-size: 11px; color: var(--bd-ink-soft);
+}
+.bd .subkey .sw { width: 16px; height: 11px; border: 1.2px solid; border-radius: 3px; flex: none; }
+.bd .subkey .sw.note { background: #ffffff; border: 1.4px dashed #9aa5b4; }
+
 /* 하위 페이지 헤더 */
 .bd .pagehead { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; flex-wrap: wrap; }
 .bd .pagehead .step-tag { font-size: 11.5px; font-weight: 800; color: #fff; border-radius: 6px; padding: 2px 9px; white-space: nowrap; }

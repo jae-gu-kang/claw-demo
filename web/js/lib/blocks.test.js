@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { BLOCKS, CHAIN, codegenTargets, resolvePath } from "./blocks.js";
 // 뷰 모듈이지만 모듈 스코프에서 DOM을 안 건드려 node import 가능 — 배선 드리프트 가드
 import { DESIGN_ORDER, TOP_SVG } from "../views/diagram.js";
-import { CHIP_LABEL, SUBSYSTEMS } from "../views/subsystems.js";
+import { CHIP_LABEL, SUB_TINT, SUBSYSTEMS } from "../views/subsystems.js";
 
 // main.js는 모듈 스코프에서 DOM을 건드려 import할 수 없다 — 대신 **원문에서 읽는다**.
 // 수동 사본을 두면 뷰가 늘 때 조용히 낡아 무효 링크·죽은 탭을 못 잡는다
@@ -315,6 +315,137 @@ test("resolvePath: 트리 하강·절단 폴백 (해시 → 드릴다운 경로 
   // 프로토타입 상속 키는 페이지가 아님 — 렌더 크래시 방지 (hasOwn 가드)
   assert.deepEqual(resolvePath(["constructor"], s), []);
   assert.deepEqual(resolvePath(["scas", "constructor"], s), ["scas"]);
+});
+
+// ── 2계층 시각 문법 가드 — 코드 대응(data-code·틴트) vs 설명용(nblk·점선) ──────
+
+/** 엔진 소스 캐시 — data-code 검증은 원문 대조다 (VIEW_HASHES와 같은 관례:
+수동 심볼 목록을 두면 엔진이 바뀔 때 조용히 낡는다). */
+const engineSrc = (() => {
+  const cache = new Map();
+  return (p) => {
+    if (!cache.has(p)) {
+      cache.set(p, readFileSync(new URL(`../../../engine/claw/${p}`, import.meta.url), "utf8"));
+    }
+    return cache.get(p);
+  };
+})();
+const CODE_RE = /^([\w/]+\.py):([A-Za-z_]\w*)(?:\.([A-Za-z_]\w*))?$/;
+
+/** 파이썬 심볼 실존 — 정규식 기반의 실용적 타협.
+클래스 슬라이스는 "class X부터 다음 최상위 class/def 전까지"이고, 메서드는 그 안의
+`^    def m(`이다. 엔진이 PEP8 4칸 들여쓰기 고정이라 성립한다 (중첩 클래스·탭
+들여쓰기가 들어오면 여기부터 갱신할 것). */
+function hasPySymbol(src, name, meth) {
+  if (!meth) return new RegExp(`^(?:class|def) ${name}\\b`, "m").test(src);
+  const at = src.search(new RegExp(`^class ${name}\\b`, "m"));
+  if (at < 0) return false;
+  const rest = src.slice(at + 1); // +1: 자기 선언 줄은 다음 ^ 매치에서 제외
+  const end = rest.search(/^(?:class |def )/m);
+  return new RegExp(`^    (?:async )?def ${meth}\\(`, "m")
+    .test(end < 0 ? rest : rest.slice(0, end));
+}
+
+test("data-code가 실존 엔진 심볼을 가리킨다 — 색은 '코드에 있다'는 주장이다", () => {
+  // 형식: "plant/eom.py:RigidBody.deriv" (engine/claw/ 기준, 공백 구분 복수 허용).
+  // 레지스트리 등록명(LOS ≠ LosPath)이 아니라 파일:심볼인 이유 — 여기서 원문 대조가 된다
+  let n = 0;
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    for (const { node, path } of walk(id, s)) {
+      const p = path.join("/");
+      for (const m of node.svg.matchAll(/data-code="([^"]+)"/g)) {
+        for (const ref of m[1].trim().split(/\s+/)) {
+          n += 1;
+          const parts = ref.match(CODE_RE);
+          assert.ok(parts, `${p} data-code 형식 오류: "${ref}"`);
+          let src;
+          try {
+            src = engineSrc(parts[1]);
+          } catch {
+            assert.fail(`${p} 미실존 엔진 파일: ${parts[1]}`);
+          }
+          assert.ok(hasPySymbol(src, parts[2], parts[3]), `${p} 엔진에 없는 심볼: ${ref}`);
+        }
+      }
+    }
+  }
+  assert.ok(n > 0, "data-code가 하나도 없음 — 2계층 문법이 비어 있다");
+});
+
+test("2계층 규율 — 진입 블록은 코드, nblk는 무표식, 페이지마다 코드가 있다", () => {
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    for (const { node, path } of walk(id, s)) {
+      const p = path.join("/");
+      // 진입 블록(data-child)은 정의상 코드 서브시스템으로 내려간다 — data-code 필수
+      for (const m of node.svg.matchAll(/<g[^>]*data-child="([^"]+)"[^>]*>/g)) {
+        assert.ok(/data-code="/.test(m[0]), `${p} 진입 블록 ${m[1]}에 data-code 없음`);
+      }
+      // 설명용(nblk)에 코드·진입·파라미터 표식이 붙으면 "엔진에 없음"이라는 주장과 모순
+      for (const m of node.svg.matchAll(/<[^>]*class="[^"]*\bnblk\b[^"]*"[^>]*>/g)) {
+        assert.ok(!/data-(?:code|child|p)=/.test(m[0]),
+          `${p} nblk에 data 표식: ${m[0].slice(0, 90)}`);
+      }
+      // 페이지마다 코드 대응 ≥ 1 — 전부 회색이면 "엔진과 1:1" 주장이 그 페이지에서 죽는다
+      assert.ok(/data-code="/.test(node.svg), `${p}에 data-code가 하나도 없음`);
+    }
+  }
+});
+
+test("코드 틴트가 한 벌이다 — SUB_TINT 커버리지·판 색 재사용·틴트 위 잉크 대비", () => {
+  // ① 커버리지: 루트 tagBg마다 틴트가 있어야 renderSubPage가 undefined를 안 만난다
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    assert.ok(SUB_TINT[s.tagBg], `SUB_TINT에 없는 루트 색: ${id} ${s.tagBg}`);
+  }
+  // ② 층 5색 틴트 = 최상위 보드 판 색 재사용 (하드코딩으로 갈라지면 층 독법이 깨진다)
+  for (const s of DESIGN_ORDER) {
+    assert.deepEqual(SUB_TINT[s.color], { tint: s.tint, edge: s.edge },
+      `층 ${s.n} 틴트가 판 색(diagram.js LAYERS)과 다름`);
+  }
+  // ③ 틴트 위 잉크 대비 — 잉크는 CSS에서 읽는다 (하드코딩하면 CSS만 되돌려도 통과)
+  const css = read("../../css/app.css");
+  const cssVar = (name) => norm(css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,6})\\b`))[1]);
+  const fillOf = (selector) => {
+    const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const body = css.match(new RegExp(`^${esc}[^{]*\\{([^}]*)\\}`, "m"));
+    assert.ok(body, `app.css 규칙 없음: ${selector}`);
+    const m = body[1].match(/(?:^|;)\s*fill:\s*(var\(--\w+\)|#[0-9a-fA-F]{3,6})/);
+    assert.ok(m, `${selector}에 fill 없음`);
+    return m[1].startsWith("var(") ? cssVar(m[1].slice(6, -1)) : norm(m[1]);
+  };
+  const inks = [
+    ["제목(--text)", cssVar("text")],
+    ["보조 잉크", fillOf(".bd .sub [data-code] .ttl2")], // --muted는 파랑 틴트 위 3.83:1이라 못 쓴다
+    ["포트 번호", fillOf(".bd .sub [data-code] .pnum")],
+  ];
+  for (const [bg, { tint }] of Object.entries(SUB_TINT)) {
+    for (const [what, ink] of inks) {
+      const r = contrast(ink, tint);
+      assert.ok(r >= 4.5, `${what} ${ink} on 틴트 ${tint}(${bg}) → ${r.toFixed(2)} < 4.5`);
+    }
+  }
+  const nblkInk = fillOf(".bd .sub .nblk .ttl");
+  assert.ok(contrast(nblkInk, "#ffffff") >= 4.5, `nblk 제목 ${nblkInk} on #fff 미달`);
+});
+
+test("marker id는 페이지 안에서 유일하다 — 중복은 뒤 정의를 조용히 무시한다", () => {
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    for (const { node, path } of walk(id, s)) {
+      const ids = [...node.svg.matchAll(/<marker[^>]*\bid="([^"]+)"/g)].map((m) => m[1]);
+      assert.equal(new Set(ids).size, ids.length,
+        `${path.join("/")} marker id 중복: ${ids.join(", ")}`);
+    }
+  }
+});
+
+test("2계층 CSS는 .bd .sub 스코프 안에만 — 새면 최상위 보드 filter 사고가 재현된다", () => {
+  const css = read("../../css/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const [, selector] of css.matchAll(/([^{}]+)\{[^}]*\}/g)) {
+    for (const one of selector.split(",")) {
+      const sel = one.trim();
+      if (!/\[data-code\]|\.nblk\b|\.wire\.note\b|\.subkey\b/.test(sel)) continue;
+      assert.match(sel, /^\.bd \.sub(?: |key)/, `스코프 밖 2계층 규칙: "${sel}"`);
+    }
+  }
 });
 
 test("드릴다운 범위 스냅샷: SCAS 3축+공유 PI(층4) · AP 3채널 · 유도 2 · 플랜트 4", () => {
