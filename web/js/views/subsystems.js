@@ -980,7 +980,7 @@ export const SUBSYSTEMS = {
     <marker id="aw-pl" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
     <marker id="as-pl" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
   </defs>
-  <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
+  <g class="sblk" data-code="plant/aircraft.py:Aircraft.fm"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
   <text class="pname" x="48" y="140">타면 변위</text>
   <path class="wire" d="M66 108 H146" marker-end="url(#aw-pl)"/>
   <g class="blk" data-child="aero" data-code="plant/aero.py:AeroModel" tabindex="0"><rect class="body" x="150" y="60" width="290" height="96" rx="3"/>
@@ -989,21 +989,21 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="295" y="116">무차원 p̂·q̂·r̂ = pb/2V · qc̄/2V · rb/2V</text>
     <text class="ttl2" x="295" y="132">F = q̄S·C · M = q̄S·[b·Cl, c̄·Cm, b·Cn]</text>
     <text class="ttl2" x="295" y="148">ρ·a ← ISA(h) — q̄=½ρV² · 클릭 → 내부</text></g>
-  <g class="sblk"><rect class="body" x="30" y="208" width="36" height="24" rx="12"/><text class="pnum" x="48" y="224">2</text></g>
+  <g class="sblk" data-code="plant/aircraft.py:Aircraft.fm"><rect class="body" x="30" y="208" width="36" height="24" rx="12"/><text class="pnum" x="48" y="224">2</text></g>
   <text class="pname" x="48" y="252">스로틀 ×2</text>
   <path class="wire" d="M66 220 H146" marker-end="url(#aw-pl)"/>
   <g class="blk" data-child="prop" data-code="plant/prop.py:TwinEngine" tabindex="0"><rect class="body" x="150" y="184" width="290" height="72" rx="3"/>
     <text class="ttl" x="295" y="206" style="font-size:13px">추진 — TwinEngine</text>
     <text class="ttl2" x="295" y="226">추력 맵 [기본 max_thrust·δt] · 0~1 클립</text>
     <text class="ttl2" x="295" y="244">M = r_L×F_L + r_R×F_R · 클릭 → 내부</text></g>
-  <g class="sblk"><rect class="body" x="150" y="286" width="290" height="64" rx="3"/>
+  <g class="sblk" data-code="env/atmosphere.py:isa_atmosphere plant/eom.py:gravity_body"><rect class="body" x="150" y="286" width="290" height="64" rx="3"/>
     <text class="ttl" x="295" y="308" style="font-size:13px">환경 — ISA 대기 · 중력</text>
     <text class="ttl2" x="295" y="328">f_grav = C_bn·[0, 0, m·g] (동체축)</text>
     <text class="ttl2" x="295" y="344">ρ · 음속 a — 고도 h로 조회 (공력 소비)</text></g>
   <path class="wire" d="M440 108 H460 V150 H486" marker-end="url(#aw-pl)"/>
   <path class="wire" d="M440 220 H486" marker-end="url(#aw-pl)"/>
   <path class="wire" d="M440 318 H460 V250 H486" marker-end="url(#aw-pl)"/>
-  <g class="sblk"><rect class="body" x="490" y="120" width="110" height="160" rx="3"/>
+  <g class="sblk" data-code="plant/aircraft.py:Aircraft.fm"><rect class="body" x="490" y="120" width="110" height="160" rx="3"/>
     <text class="ttl" x="545" y="192">Σ F_b</text>
     <text class="ttl" x="545" y="214">· M_b</text></g>
   <path class="wire" d="M600 200 H656" marker-end="url(#aw-pl)"/>
@@ -1014,7 +1014,7 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="795" y="178">q̇ = ½ q⊗(0,ω) · ω̇ = J⁻¹(M − ω×Jω)</text>
     <text class="ttl2" x="795" y="196">RK4 dt 10 ms · q 재정규화 · 클릭 → 내부</text></g>
   <path class="wire" d="M930 166 H948" marker-end="url(#aw-pl)"/>
-  <g class="sblk"><rect class="body" x="952" y="154" width="36" height="24" rx="12"/><text class="pnum" x="970" y="170">1</text></g>
+  <g class="sblk" data-code="common/contracts.py:VehicleState"><rect class="body" x="952" y="154" width="36" height="24" rx="12"/><text class="pnum" x="970" y="170">1</text></g>
   <text class="pname" x="952" y="202">참값 상태</text>
   <text class="pname" x="925" y="220">→ 항법만 (참값 차단)</text>
   <circle class="branch" cx="938" cy="166" r="3.2"/>
@@ -1063,20 +1063,20 @@ export const SUBSYSTEMS = {
     <marker id="aw-paero" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
     <marker id="as-paero" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
   </defs>
-  <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
+  <g class="sblk" data-code="plant/aero.py:AeroModel.forces"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
   <text class="pname" x="48" y="140">v_b · ω_b</text>
   <path class="wire" d="M66 108 H106" marker-end="url(#aw-paero)"/>
-  <g class="sblk"><rect class="body" x="110" y="72" width="200" height="72" rx="3"/>
+  <g class="sblk" data-code="common/frames.py:wind_angles"><rect class="body" x="110" y="72" width="200" height="72" rx="3"/>
     <text class="ttl" x="210" y="94" style="font-size:13px">바람각 — wind_angles</text>
     <text class="ttl2" x="210" y="114">V · α · β 산출 (바람 0: v_air = v_b)</text>
     <text class="ttl2" x="210" y="132">V = 0 → 힘·모멘트 0 (가드)</text></g>
   <path class="wire" d="M310 108 H336" marker-end="url(#aw-paero)"/>
-  <g class="sblk"><rect class="body" x="340" y="72" width="220" height="72" rx="3"/>
+  <g class="sblk" data-code="plant/aero.py:AeroModel.forces"><rect class="body" x="340" y="72" width="220" height="72" rx="3"/>
     <text class="ttl" x="450" y="94" style="font-size:13px">무차원 각속도</text>
     <text class="ttl2" x="450" y="114">p̂ = pb/2V · q̂ = qc̄/2V</text>
     <text class="ttl2" x="450" y="132">r̂ = rb/2V</text></g>
   <path class="wire" d="M560 108 H606" marker-end="url(#aw-paero)"/>
-  <g class="sblk"><rect class="body" x="610" y="60" width="270" height="96" rx="3"/>
+  <g class="sblk" data-code="plant/aero.py:AeroModel"><rect class="body" x="610" y="60" width="270" height="96" rx="3"/>
     <text class="ttl" x="745" y="82" style="font-size:13px">coef_fn — 공력 DB 조회</text>
     <text class="ttl2" x="745" y="102">입력 α·β·V·mach·p̂·q̂·r̂ + 타면각</text>
     <text class="ttl2" x="745" y="120">출력 동체축 {CX·CY·CZ·Cl·Cm·Cn}</text>
@@ -1087,12 +1087,12 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="745" y="242">F_b = q̄S·[CX, CY, CZ]</text>
     <text class="ttl2" x="745" y="258">M_b = q̄S·[b·Cl, c̄·Cm, b·Cn]</text></g>
   <path class="wire" d="M745 276 V316" marker-end="url(#aw-paero)"/>
-  <g class="sblk"><rect class="body" x="727" y="320" width="36" height="24" rx="12"/><text class="pnum" x="745" y="336">1</text></g>
+  <g class="sblk" data-code="plant/aero.py:AeroModel.forces"><rect class="body" x="727" y="320" width="36" height="24" rx="12"/><text class="pnum" x="745" y="336">1</text></g>
   <text class="pname" x="745" y="364">F_b · M_b → Σ</text>
-  <g class="sblk"><rect class="body" x="30" y="196" width="36" height="24" rx="12"/><text class="pnum" x="48" y="212">2</text></g>
+  <g class="sblk" data-code="plant/aero.py:AeroModel.forces"><rect class="body" x="30" y="196" width="36" height="24" rx="12"/><text class="pnum" x="48" y="212">2</text></g>
   <text class="pname" x="95" y="240">타면각 (작동기 후)</text>
   <path class="wire" d="M66 208 H590 V102 H606" marker-end="url(#aw-paero)"/>
-  <g class="sblk"><rect class="body" x="110" y="290" width="200" height="52" rx="3"/>
+  <g class="sblk" data-code="plant/aircraft.py:Aircraft.fm env/atmosphere.py:isa_atmosphere"><rect class="body" x="110" y="290" width="200" height="52" rx="3"/>
     <text class="ttl2" x="210" y="312" style="font-weight:700">ISA(h) — ρ · mach</text>
     <text class="ttl2" x="210" y="330">플랜트 조립(fm)이 주입</text></g>
   <path class="wire soft" d="M310 316 H560 V240 H606" marker-end="url(#as-paero)"/>
@@ -1115,10 +1115,10 @@ export const SUBSYSTEMS = {
         svg: `
 <svg viewBox="0 0 960 250" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-pprop" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="92" width="36" height="24" rx="12"/><text class="pnum" x="48" y="108">1</text></g>
+  <g class="sblk" data-code="plant/prop.py:TwinEngine.forces"><rect class="body" x="30" y="92" width="36" height="24" rx="12"/><text class="pnum" x="48" y="108">1</text></g>
   <text class="pname" x="48" y="136">스로틀 [좌, 우]</text>
   <path class="wire" d="M66 104 H106" marker-end="url(#aw-pprop)"/>
-  <g class="sblk"><rect class="body" x="110" y="78" width="140" height="52" rx="3"/>
+  <g class="sblk" data-code="plant/prop.py:TwinEngine.forces"><rect class="body" x="110" y="78" width="140" height="52" rx="3"/>
     <text class="ttl" x="180" y="97" style="font-size:13px">0~1 클립</text>
     <text class="ttl2" x="180" y="115">좌·우 각각 (규약)</text></g>
   <path class="wire" d="M250 104 H286" marker-end="url(#aw-pprop)"/>
@@ -1126,13 +1126,13 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="400" y="97" style="font-size:13px">추력 맵 thrust_map(δt)</text>
     <text class="ttl2" x="400" y="115">기본 max_thrust·δt 선형 [기본값]</text></g>
   <path class="wire" d="M510 104 H546" marker-end="url(#aw-pprop)"/>
-  <g class="sblk"><rect class="body" x="550" y="66" width="260" height="88" rx="3"/>
+  <g class="sblk" data-code="plant/prop.py:TwinEngine.forces"><rect class="body" x="550" y="66" width="260" height="88" rx="3"/>
     <text class="ttl" x="680" y="88" style="font-size:13px">엔진 배치 모멘트</text>
     <text class="ttl2" x="680" y="108">r_L = (x, −y, z) · r_R = (x, +y, z)</text>
     <text class="ttl2" x="680" y="126">M = r_L×F_L + r_R×F_R</text>
     <text class="ttl2" x="680" y="142">좌 추력 우세 → +N (기수 우측)</text></g>
   <path class="wire" d="M810 104 H846" marker-end="url(#aw-pprop)"/>
-  <g class="sblk"><rect class="body" x="850" y="92" width="36" height="24" rx="12"/><text class="pnum" x="868" y="108">1</text></g>
+  <g class="sblk" data-code="plant/prop.py:TwinEngine.forces"><rect class="body" x="850" y="92" width="36" height="24" rx="12"/><text class="pnum" x="868" y="108">1</text></g>
   <text class="pname" x="868" y="136">F_b · M_b → Σ</text>
   <text class="canvas-note" x="24" y="204">※ 요축 보조 차동추력의 부호 기준 [확정 01 §2.4] — 믹서의 d = k_diff_thr·러더 배분이 이 모멘트를 소비 · 추력은 동체 +X 정렬</text>
   <text class="canvas-note" x="24" y="224">※ thrust_map 콜러블 주입 가능 — 실기체 추력 맵 데이터 [TBD] 대비 · y_offset 음수는 생성 거부</text>
@@ -1151,12 +1151,12 @@ export const SUBSYSTEMS = {
         title: "6DOF 강체 — RigidBody · RK4", eng: "13-상태 쿼터니언 운동방정식 · 고정스텝 RK4 (M5.eom)",
         chips: ["ok", "dft"],
         svg: `
-<svg viewBox="0 0 960 350" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 1000 700" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <marker id="aw-peom" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
     <marker id="as-peom" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
   </defs>
-  <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
+  <g class="sblk" data-code="plant/eom.py:RigidBody.deriv"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
   <text class="pname" x="48" y="140">F_b · M_b ← Σ</text>
   <path class="wire" d="M66 108 H106" marker-end="url(#aw-peom)"/>
   <g class="sblk" data-code="plant/eom.py:RigidBody.deriv"><rect class="body" x="110" y="52" width="290" height="112" rx="3"/>
@@ -1166,25 +1166,69 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="255" y="128">q̇ = ½ q ⊗ (0, ω)</text>
     <text class="ttl2" x="255" y="144">ω̇ = J⁻¹(M_b − ω×Jω)</text></g>
   <path class="wire" d="M400 108 H436" marker-end="url(#aw-peom)"/>
-  <g class="sblk"><rect class="body" x="440" y="64" width="250" height="88" rx="3"/>
+  <g class="sblk" data-code="plant/eom.py:rk4_step plant/eom.py:RigidBody.step"><rect class="body" x="440" y="64" width="250" height="88" rx="3"/>
     <text class="ttl" x="565" y="86" style="font-size:13px">RK4 고정스텝 — dt 10 ms</text>
     <text class="ttl2" x="565" y="106">k1~k4 — fm(x) 부단계마다 재평가</text>
     <text class="ttl2" x="565" y="124">x⁺ = x + dt/6·(k1+2k2+2k3+k4)</text>
     <text class="ttl2" x="565" y="140">[확정 02 §6]</text></g>
   <path class="wire" d="M690 108 H726" marker-end="url(#aw-peom)"/>
-  <g class="sblk"><rect class="body" x="730" y="72" width="180" height="64" rx="3"/>
+  <g class="sblk" data-code="common/attitude.py:quat_normalize"><rect class="body" x="730" y="72" width="180" height="64" rx="3"/>
     <text class="ttl" x="820" y="94" style="font-size:13px">쿼터니언 재정규화</text>
     <text class="ttl2" x="820" y="114">스텝마다 — 드리프트 방지</text></g>
-  <path class="wire" d="M910 104 H912" marker-end="url(#aw-peom)"/>
-  <g class="sblk"><rect class="body" x="916" y="92" width="36" height="24" rx="12"/><text class="pnum" x="934" y="108">1</text></g>
-  <text class="pname" x="916" y="136">상태 x(13)</text>
-  <g class="sblk"><rect class="body" x="110" y="220" width="330" height="72" rx="3"/>
+  <path class="wire" d="M910 104 H926" marker-end="url(#aw-peom)"/>
+  <circle class="branch" cx="930" cy="104" r="3.2"/>
+  <path class="wire" d="M934 104 H941" marker-end="url(#aw-peom)"/>
+  <g class="sblk" data-code="plant/eom.py:RigidBody.step"><rect class="body" x="945" y="92" width="36" height="24" rx="12"/><text class="pnum" x="963" y="108">1</text></g>
+  <text class="pname" x="963" y="136">상태 x(13)</text>
+  <g class="sblk" data-code="plant/eom.py:RigidBody.set_mass_inertia"><rect class="body" x="110" y="220" width="330" height="72" rx="3"/>
     <text class="ttl" x="275" y="242" style="font-size:13px">준정적 질량 — set_mass_inertia</text>
     <text class="ttl2" x="275" y="262">FuelMass.at(fuel) 결과 소비 · J⁻¹ 캐시 재계산</text>
     <text class="ttl2" x="275" y="280">스텝 사이 갱신 — J 직접 대입 금지</text></g>
   <path class="wire soft" d="M275 220 V168" marker-end="url(#as-peom)"/>
-  <text class="canvas-note" x="24" y="320">※ 상태 x(13) = [p_n(3) · v_b(3) · q_nb(4) · ω_b(3)] — NED · 동체 FRD · scalar-first Hamilton [conventions.md] · 중력 포함 여부는 조립자 몫 (플랜트 fm이 포함)</text>
-  <text class="canvas-note" x="24" y="340">※ 질량 양수 · J 3×3 대칭 · 주대각 양수 아니면 생성 거부 · 오일러 12-상태 미분(deriv_euler)은 트림·수치섭동 선형화 전용 — θ=±π/2 특이점 근방 금지</text>
+  <!-- 출력 펼침 — MathWorks 6DOF (Quaternion) 블록의 출력 8종 병기.
+       버스 분기 자체는 코드에 없는 도해(nblk)지만, 각 갈래는 실존한다:
+       ③⑥⑦은 x의 원소(unpack), ②④⑤는 소비 측 파생 함수(색 블록), ⑧⑨는 엔진
+       미구현이라 상태미분 블록에서 회색 점선으로만 나온다(계산 후 폐기와 부합) -->
+  <path class="wire" d="M930 104 V250 H547 V281" marker-end="url(#aw-peom)"/>
+  <g class="sblk nblk"><rect class="body" x="520" y="285" width="54" height="275" rx="3"/></g>
+  <text class="bname" x="547" y="308">버스</text>
+  <text class="bname" x="547" y="322">분기</text>
+  <path class="wire" d="M574 310 H606" marker-end="url(#aw-peom)"/>
+  <g class="sblk" data-code="common/frames.py:body_to_ned"><rect class="body" x="610" y="293" width="190" height="34" rx="3"/>
+    <text class="ttl" x="705" y="314" style="font-size:12px">body_to_ned — C_nb·v_b</text></g>
+  <path class="wire" d="M800 310 H846" marker-end="url(#aw-peom)"/>
+  <g class="sblk" data-code="common/contracts.py:VehicleState.vel_n"><rect class="body" x="850" y="298" width="36" height="24" rx="12"/><text class="pnum" x="868" y="314">2</text></g>
+  <text class="pname a-start" x="894" y="314">V_e · 관성계 속도</text>
+  <path class="wire" d="M574 355 H846" marker-end="url(#aw-peom)"/>
+  <g class="sblk" data-code="plant/eom.py:unpack"><rect class="body" x="850" y="343" width="36" height="24" rx="12"/><text class="pnum" x="868" y="359">3</text></g>
+  <text class="pname a-start" x="894" y="359">X_e · pos_n (NED)</text>
+  <path class="wire" d="M574 400 H606" marker-end="url(#aw-peom)"/>
+  <g class="sblk" data-code="common/attitude.py:quat_to_euler"><rect class="body" x="610" y="383" width="190" height="34" rx="3"/>
+    <text class="ttl" x="705" y="404" style="font-size:12px">quat_to_euler</text></g>
+  <path class="wire" d="M800 400 H846" marker-end="url(#aw-peom)"/>
+  <g class="sblk" data-code="common/contracts.py:VehicleState.euler"><rect class="body" x="850" y="388" width="36" height="24" rx="12"/><text class="pnum" x="868" y="404">4</text></g>
+  <text class="pname a-start" x="894" y="404">φ θ ψ · 오일러각</text>
+  <path class="wire" d="M574 445 H606" marker-end="url(#aw-peom)"/>
+  <g class="sblk" data-code="common/attitude.py:quat_to_dcm"><rect class="body" x="610" y="428" width="190" height="34" rx="3"/>
+    <text class="ttl" x="705" y="449" style="font-size:12px">quat_to_dcm — C_bn</text></g>
+  <path class="wire" d="M800 445 H846" marker-end="url(#aw-peom)"/>
+  <g class="sblk" data-code="common/attitude.py:quat_to_dcm"><rect class="body" x="850" y="433" width="36" height="24" rx="12"/><text class="pnum" x="868" y="449">5</text></g>
+  <text class="pname a-start" x="894" y="449">DCM_be (3×3)</text>
+  <path class="wire" d="M574 490 H846" marker-end="url(#aw-peom)"/>
+  <g class="sblk" data-code="plant/eom.py:unpack"><rect class="body" x="850" y="478" width="36" height="24" rx="12"/><text class="pnum" x="868" y="494">6</text></g>
+  <text class="pname a-start" x="894" y="494">V_b · vel_b (동체)</text>
+  <path class="wire" d="M574 535 H846" marker-end="url(#aw-peom)"/>
+  <g class="sblk" data-code="plant/eom.py:unpack"><rect class="body" x="850" y="523" width="36" height="24" rx="12"/><text class="pnum" x="868" y="539">7</text></g>
+  <text class="pname a-start" x="894" y="539">ω_b · omega_b</text>
+  <path class="wire note" d="M320 164 V196 H466 V580 H846" marker-end="url(#as-peom)"/>
+  <g class="sblk nblk"><rect class="body" x="850" y="568" width="36" height="24" rx="12"/><text class="pnum" x="868" y="584">8</text></g>
+  <text class="pname a-start" x="894" y="584">dω_b/dt — 표시 전용</text>
+  <path class="wire note" d="M360 164 V208 H480 V620 H846" marker-end="url(#as-peom)"/>
+  <g class="sblk nblk"><rect class="body" x="850" y="608" width="36" height="24" rx="12"/><text class="pnum" x="868" y="624">9</text></g>
+  <text class="pname a-start" x="894" y="624">A_bb — 표시 전용</text>
+  <text class="canvas-note" x="24" y="652">※ 출력 ②~⑨ = MathWorks 6DOF (Quaternion) 블록 출력 병기 — ③⑥⑦은 상태 원소, ②④⑤는 소비 측 파생 함수(색 블록), ⑧⑨(각가속도·동체 가속도)는 엔진 미구현: RK4 안에서 계산되고 버려진다 (표시 전용)</text>
+  <text class="canvas-note" x="24" y="672">※ 상태 x(13) = [p_n(3) · v_b(3) · q_nb(4) · ω_b(3)] — NED · 동체 FRD · scalar-first Hamilton [conventions.md] · 중력 포함 여부는 조립자 몫 (플랜트 fm이 포함)</text>
+  <text class="canvas-note" x="24" y="692">※ 질량 양수 · J 3×3 대칭 · 주대각 양수 아니면 생성 거부 · 오일러 12-상태 미분(deriv_euler)은 트림·수치섭동 선형화 전용 — θ=±π/2 특이점 근방 금지</text>
 </svg>`,
         notes: `
 <h4>설계 노트</h4>
@@ -1202,10 +1246,10 @@ export const SUBSYSTEMS = {
         svg: `
 <svg viewBox="0 0 960 230" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-pmass" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="92" width="36" height="24" rx="12"/><text class="pnum" x="48" y="108">1</text></g>
+  <g class="sblk" data-code="plant/mass.py:FuelMass.at"><rect class="body" x="30" y="92" width="36" height="24" rx="12"/><text class="pnum" x="48" y="108">1</text></g>
   <text class="pname" x="52" y="136">fuel [kg]</text>
   <path class="wire" d="M66 104 H106" marker-end="url(#aw-pmass)"/>
-  <g class="sblk"><rect class="body" x="110" y="78" width="170" height="52" rx="3"/>
+  <g class="sblk" data-code="plant/mass.py:FuelMass.at"><rect class="body" x="110" y="78" width="170" height="52" rx="3"/>
     <text class="ttl" x="195" y="97" style="font-size:13px">범위 클립</text>
     <text class="ttl2" x="195" y="115">0 ~ fuel_max</text></g>
   <path class="wire" d="M280 104 H316" marker-end="url(#aw-pmass)"/>
@@ -1215,7 +1259,7 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="470" y="122">cg = cg_e + r·(cg_f − cg_e)</text>
     <text class="ttl2" x="470" y="140">J = J_e + r·(J_f − J_e)</text></g>
   <path class="wire" d="M620 104 H846" marker-end="url(#aw-pmass)"/>
-  <g class="sblk"><rect class="body" x="850" y="92" width="36" height="24" rx="12"/><text class="pnum" x="868" y="108">1</text></g>
+  <g class="sblk" data-code="plant/mass.py:FuelMass.at"><rect class="body" x="850" y="92" width="36" height="24" rx="12"/><text class="pnum" x="868" y="108">1</text></g>
   <text class="pname" x="868" y="136">m · cg · J</text>
   <text class="pname" x="850" y="154">→ RigidBody · 중력</text>
   <text class="canvas-note" x="24" y="200">※ 준정적(quasi-static) 취급 [확정 02 §5.5] — 시뮬 루프가 스텝 사이에 at(fuel) 조회 → RigidBody.set_mass_inertia 갱신 (운동방정식 내 ṁ 항 없음)</text>
