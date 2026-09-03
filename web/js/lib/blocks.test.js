@@ -34,6 +34,10 @@ test("블록: id 유일 + 상세 스펙 완결", () => {
     // title은 텍스트 노드뿐 아니라 **속성값**으로도 나간다(diagram.js aria-label) —
     // 큰따옴표 하나면 속성이 깨지므로 함께 막는다
     assert.ok(!/["&<>]/.test(b.title + (b.sub ?? "")), `${b.id} title/sub에 "&<> 금지`);
+    // 블록도는 구조를 말하는 지도다 — 일정(마일스톤 M5~M14)은 여기 붙지 않는다.
+    // "유도 (M8)" 하나만 붙어 있어서 그 블록만 뭔가 다른 것처럼 읽혔다.
+    // 어느 엔진 모듈이 구현하는지는 서브시스템 페이지 부제(eng)가 말하는 자리다
+    assert.ok(!/\(M\d/.test(b.title), `${b.id} 제목에 마일스톤 번호: "${b.title}"`);
     const d = b.detail;
     assert.ok(d && typeof d.desc === "string" && d.desc.length > 0, `${b.id} desc 없음`);
     // 이동 대상 해시는 실제 뷰만 (라우터 폴백으로 무효 링크 은폐 방지)

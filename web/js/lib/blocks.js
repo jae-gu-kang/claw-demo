@@ -98,7 +98,10 @@ export const BLOCKS = [
   },
   {
     id: "guidance",
-    title: "유도 (M8)", sub: "모드 실행기 · 경로 추종",
+    // 제목은 부품 이름만 — 마일스톤 번호는 일정이지 구조가 아니다. 어느 엔진
+    // 모듈이 이걸 구현하는지는 서브시스템 페이지 부제(views/subsystems.js eng)가
+    // 일관되게 말한다 ("Guidance (M8)", "Navigation (M6 …)", "RigidBody (M5.eom)")
+    title: "유도", sub: "모드 실행기 · 경로 추종",
     detail: {
       desc: "선언적 모드 테이블 + LOS 경로추종 → 속도·고도·헤딩 명령. "
         + "미션(모드·웨이포인트·도달반경)은 시뮬레이션 탭이 편집처.",
