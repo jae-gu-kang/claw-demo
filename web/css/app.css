@@ -651,6 +651,57 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd .man-gtext .g-sym .lb { color: #b3352b; }
 @media (max-width: 760px) { .bd .man-gtext p, .bd .man-gtext .g-sym { grid-template-columns: 1fr; } }
 
+/* ── 페이지 매뉴얼 (블록도 하위 페이지) ────────────────────────────────────
+   .manual을 그대로 쓴다 — 위 .man-* 규칙과 읽는 폭 68ch를 통째로 물려받으려고.
+   .inpage는 홈 카드보다 여백이 좁다: 그림 바로 밑에 붙는 판이라 그림과의 거리가
+   멀어지면 "이 그림의 설명"으로 안 읽힌다 */
+.bd .manual.inpage { margin-top: 12px; padding: 16px 20px 18px; }
+.bd .manual.inpage > .man-flow:first-child { margin-top: 0; }
+
+/* 이 그림 읽기 — 항상 펼침. 설계 노트(.notes)와 같은 목소리로 보이게 맞춘다:
+   한 페이지에 판이 둘인데 서로 다른 서식이면 어느 쪽이 본문인지 헷갈린다 */
+.bd .man-flow h4 { font-size: 12px; color: var(--bd-ink-soft); text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 6px; }
+.bd .man-flow h4:first-child { margin-top: 0; }
+.bd .man-flow-lead { font-family: var(--mono); font-size: 12px; color: var(--accent); background: #eef4ff; border-radius: 6px; padding: 6px 10px; margin: 0 0 10px; max-width: none; }
+/* 번호가 곧 그림의 읽는 순서라 눈에 걸려야 한다 — 기본 마커보다 진하게 */
+.bd .man-flow-steps { margin: 0; padding-left: 22px; font-size: 13px; color: #38414f; }
+.bd .man-flow-steps li { padding: 3px 0; }
+.bd .man-flow-steps li::marker { font-weight: 800; color: var(--bd-ink-soft); }
+.bd .man-flow p { margin: 0 0 6px; font-size: 13px; color: #38414f; }
+
+/* 하위 페이지의 루트 띠 — 같은 글을 되풀이하는 대신 한 줄로 가리킨다 */
+.bd .man-parent { border-top: 1px solid var(--bd-edge); margin-top: 14px; padding-top: 12px; font-size: 13px; }
+
+/* 홈 목차 — .man-head를 본문 없이 쓴 카드. 층은 색으로, 지원은 회색으로 갈린다 */
+.bd .man-idx { margin-top: 14px; }
+.bd .man-idx h4 { font-size: 12px; color: var(--bd-ink-soft); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
+.bd .man-idx-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 8px; }
+.bd .man-card { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 10px 12px; background: var(--panel); border: 1px solid var(--bd-edge); border-radius: 10px; cursor: pointer; font: inherit; color: inherit; }
+.bd .man-card:hover { border-color: var(--accent); }
+.bd .man-card-head { display: flex; align-items: center; gap: 7px; }
+.bd .man-card-head b { font-size: 13.5px; }
+.bd .man-card-role { font-size: 12px; color: var(--muted); }
+.bd .man-card-n { font-size: 11px; color: var(--bd-ink-soft); background: #f1f4f8; border-radius: 4px; padding: 1px 6px; }
+.bd .man-nodraw { font-size: 11px; color: var(--warn); background: #fdf6e7; border-radius: 4px; padding: 1px 6px; }
+.bd .man-find { margin-left: auto; font-size: 11px; padding: 2px 8px; }
+
+/* 3겹의 셋째 — 그림 속 게인 이름이 눌린다.
+   **이름표 텍스트에만** 준다: 색 블록 전체를 누르게 하면 틴트(= 엔진 코드에 있다)와
+   뜻이 겹쳐 "색칠된 건 다 눌린다"는 오독이 생긴다. 스코프가 .bd .sub인 것은 2계층
+   시각 문법 규칙 (blocks.test.js가 스코프 이탈을 막는다) */
+.bd .sub .gain-anchor { cursor: pointer; text-decoration: underline dotted 1.5px; text-underline-offset: 2.5px; }
+.bd .sub .gain-anchor:hover { fill: var(--accent); }
+.bd .sub .gain-anchor:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bd .sub .gain-hit { fill: var(--accent); font-weight: 800; }
+.bd .man-gain.hit { background: #eef4ff; border-radius: 6px; }
+.bd .man-gain:focus { outline: none; }
+/* 강조는 잠깐 번쩍이고 사라진다 — 모션을 끈 사용자에게는 색만 남긴다 */
+@media (prefers-reduced-motion: no-preference) {
+  .bd .man-gain.hit { animation: man-flash 1.2s ease-out; }
+  .bd .sub .gain-hit { animation: man-flash 1.2s ease-out; }
+  @keyframes man-flash { from { background: #cfe0ff; } to { background: transparent; } }
+}
+
 /* ── 영향성 탭 — 전면 다크 스킨 (.inf-dark 스코프) ─────────────────────────
    검은 캔버스가 이 화면의 중심이라 패널만 밝으면 경계마다 스킨이 끊긴다 — 탭
    전체를 Apple 다크 팔레트(js/lib/influence.js SKIN과 동일 값)로 통일한다.

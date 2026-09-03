@@ -30,11 +30,13 @@ import { BLOCKS, resolvePath } from "../lib/blocks.js";
 import {
   designCoord, designValue, lockedParams, scasKwargs, selectedSlots, slotIndex,
 } from "../lib/gainsync.js";
+// 이 페이지에 어느 게인이 붙는가의 정본 — 뷰가 다시 정하지 않는다
+import { gainsFor } from "../lib/manualdoc.js";
 import { groupFields, parseFieldValue, schemaFields } from "../lib/schemaform.js";
 import { store } from "../store.js";
 import { renderCodePanel } from "./codegen.js";
 import { DESIGN_ORDER, fromMarkup, topDiagramSvg } from "./diagram.js";
-import { renderManual } from "./manual.js";
+import { renderHomeManual, renderPageManual } from "./manual.js";
 import { createTopReplay } from "./replayoverlay.js";
 import { CHIP_LABEL, SUB_TINT, SUBSYSTEMS } from "./subsystems.js";
 
@@ -144,10 +146,13 @@ function renderHome(root) {
       "(시뮬링크의 서브시스템 더블클릭 대응 · 브라우저 뒤로가기로 복귀). 신호는 오른쪽에서 ",
       "왼쪽으로 흐르고, 구조는 코드(M7 조립)와 1:1 고정 — 자유 배선 없음 [확정 02 §4]."),
     // 매뉴얼은 접히지 않고 항상 붙는다 — 블록도가 "무엇이 있나"를 말하고 매뉴얼이
-    // "왜 있고 어떻게 튜닝하나"를 말한다. 버튼 뒤에 숨기면 후자를 아무도 안 읽는다
+    // "왜 있고 어떻게 튜닝하나"를 말한다. 버튼 뒤에 숨기면 후자를 아무도 안 읽는다.
+    // 다만 **홈에는 공통분만** 둔다: 블록 상세와 게인 설명은 그 블록의 내부 블록도
+    // 페이지로 내려갔다 (그림과 글이 다른 페이지에 있으면 둘 다 안 읽힌다).
+    // 여기 남는 것은 배경 Q&A·목차·튜닝 순서 — 정본은 lib/manualdoc.js HOME_SECTIONS
     manualBox,
   );
-  renderManual(manualBox);
+  renderHomeManual(manualBox);
 }
 
 // ── 서브시스템 하위 페이지 ─────────────────────────────────────────────
@@ -157,6 +162,7 @@ function renderSubPage(root, path) {
   const sub = nodeAt(path); // 리프 노드 (children 재귀)
   const block = blockById[path[0]] ?? null; // verify는 블록 아님 (설계 단계 페이지)
   const paramBox = el("div");
+  const manualBox = el("div");
   const svgWrap = el("div", { class: "canvas-wrap sub" }, fromMarkup(sub.svg));
   // 2계층 시각 문법 — 코드 대응 블록(data-code)의 틴트는 루트 설계 단계 색에서
   // (정본 subsystems.js SUB_TINT). 커버리지는 테스트 가드라 여기선 존재를 전제한다
@@ -220,10 +226,76 @@ function renderSubPage(root, path) {
       }, "↑ 상위로"),
     ),
     svgWrap,
+    // 그림 → 흐름 → 설계 노트 → 게인 → 파라미터. 흐름이 그림 바로 밑인 이유는
+    // 그게 그림을 읽는 법이라서다 — 노트(결정 사항 대장)보다 먼저 와야 한다
+    manualBox,
     fromMarkup(`<div class="notes">${sub.notes}</div>`),
     el("div", { class: "notes" }, paramBox),
   );
+  // 3겹의 셋째 — 그림 속 게인 이름과 아래 카드를 양방향으로 잇는다
+  const anchors = collectGainAnchors(svgWrap, path);
+  const revealGain = renderPageManual(manualBox, path, sub.flow, {
+    anchored: new Set(anchors.keys()),
+    onShowInDiagram: (key) => flashNode(svgWrap, anchors.get(key)),
+  });
+  wireGainAnchors(anchors, revealGain);
   renderParams(paramBox, sub, block, svgWrap, path);
+}
+
+/** 그림 속 게인 앵커 — 이름 → SVG 요소.
+ *
+ * 앵커는 대부분 __이미 있다__: data-p(값 동기용 표시값)가 곧 게인 이름이라 nav 13개·
+ * AP 15개·작동기 3개가 그대로 걸린다. 값이 안 그려진 자리(SCAS 축 게인·클립·러더
+ * 한계)만 data-gain을 따로 붙인다.
+ *
+ * __그 페이지 게인만__ 앵커가 된다: 지도(lib/manualdoc.js PAGE_GAINS)에 없는 이름이
+ * 눌리면 열 카드가 없어 클릭이 죽은 것처럼 보인다. 판정의 정본은 gainsFor 하나다. */
+function collectGainAnchors(svgWrap, path) {
+  const mine = new Set(gainsFor(path).flatMap((g) => g.rows.map((r) => r.key)));
+  const found = new Map();
+  for (const node of svgWrap.querySelectorAll("[data-gain], [data-p]")) {
+    const key = node.dataset.gain ?? node.dataset.p;
+    if (!mine.has(key) || found.has(key)) continue;
+    found.set(key, node);
+  }
+  return found;
+}
+
+/** 게인 앵커 배선 — 클릭·Enter/Space로 아래 카드를 연다 ([data-child]와 같은 형).
+ *
+ * 클릭 대상을 블록 전체가 아니라 __이름표 텍스트__로 좁힌 이유: 이 그림에는 이미
+ * 두 겹의 시각 문법이 있다 (틴트 = 엔진 코드에 있다, data-child = 들어갈 수 있다).
+ * 색칠된 블록을 통째로 누르게 하면 "색칠된 건 다 눌린다"는 오독이 생겨, 아무 일도
+ * 안 일어나는 블록을 누르게 된다. */
+function wireGainAnchors(anchors, revealGain) {
+  for (const [key, node] of anchors) {
+    node.classList.add("gain-anchor");
+    node.setAttribute("tabindex", "0");
+    node.setAttribute("role", "button");
+    // aria-label은 기존 이름을 **덮어쓴다**. 앵커 여덟 중 셋은 이름이 아니라 수식·문장이라
+    // (ki = "I ← clip(...)", washout_tau = "워시아웃 τs/(τs+1)") 그냥 덮으면 스크린리더
+    // 사용자에게서 그림의 내용이 사라진다 — 원문을 앞에 두고 역할을 뒤에 붙인다
+    node.setAttribute("aria-label", `${node.textContent.trim()} — 게인 ${key} 설명 열기`);
+    const go = () => revealGain(key);
+    node.addEventListener("click", go);
+    node.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+    });
+  }
+}
+
+/** 역방향 — 카드에서 그림으로. 스크롤해서 그 노드를 잠깐 강조한다.
+ *
+ * __이전 강조를 먼저 지운다__: .gain-hit의 fill·font-weight는 애니메이션이 아니라 정적
+ * 선언이라 저절로 안 돌아온다. 안 지우면 누른 자리마다 굵은 파란 글씨가 쌓여
+ * "지금 이것"이 아니라 "여기까지 봤음"이 되고, 굵기가 바뀐 채 남아 문장 배치도 밀린다. */
+function flashNode(svgWrap, node) {
+  if (!node) return;
+  for (const n of svgWrap.querySelectorAll(".gain-hit")) n.classList.remove("gain-hit");
+  // behavior 기본값 — smooth는 모션 축소 설정을 무시하게 된다
+  node.scrollIntoView({ block: "center" });
+  void node.getBoundingClientRect(); // 리플로우 강제 — 연달아 눌러도 다시 번쩍인다
+  node.classList.add("gain-hit");
 }
 
 /** SVG 내 data-p 표시값 갱신 — 블록도 수치를 파라미터 값과 동기화.
@@ -263,6 +335,22 @@ function renderParams(box, sub, block, svgWrap, path = []) {
         onclick: () => { location.hash = e.hash; },
       }, `→ ${e.label}`))),
   ));
+  // 하위 페이지가 스스로 스키마를 지목하면 그것이 이긴다. 루트 블록의 스키마는 루트가
+  // 무엇인지만 말하므로, plant처럼 루트에 스키마가 없는 나무에서는 하위(추진)의
+  // 파라미터가 영영 안 보인다. **하위 스키마는 언제나 읽기 전용**이다 — 편집은 시뮬
+  // 요청 주입 경로가 있는 블록만이라는 계약(lib/blocks.js 헤더)이고 하위 페이지에는
+  // 그 경로가 없다. 주입 없는 폼을 열면 "적용했는데 안 나는" 값이 생긴다.
+  //
+  // **`!block.detail.editable`을 조건에 넣는 이유**: 이 분기는 축 처리·loadSchema보다
+  // 먼저 return한다. 편집 가능 블록(AP·SCAS·작동기·항법)의 하위 페이지에 schema를
+  // 붙이면 게인 잠금·store 주입·코드 생성을 갖춘 폼이 조용히 읽기 전용 표로 바뀐다.
+  // 주석으로만 막으면 다음 사람이 모르고 붙인다 — 조건이 막게 둔다 (리뷰)
+  if (sub.schema && !block?.detail.editable) {
+    const subBox = el("div");
+    box.append(subBox);
+    loadSubSchema(subBox, sub.schema, svgWrap);
+    return;
+  }
   if (!block?.detail.schema) {
     if (!block) return; // verify — 이동 버튼만
     box.append(el("p", { class: "hint" },
@@ -277,6 +365,25 @@ function renderParams(box, sub, block, svgWrap, path = []) {
   const schemaBox = el("div");
   box.append(schemaBox);
   loadSchema(schemaBox, block, svgWrap, axis);
+}
+
+/** 하위 페이지 스키마 — 읽기 전용 표 전용 경로 (renderParams 주석 참조).
+ *
+ * 편집 경로(폼·게인 잠금·store 주입)를 통째로 건너뛴다: 잠금은 편집이 있을 때만
+ * 뜻이 있고, 여기에는 편집이 없다. */
+async function loadSubSchema(schemaBox, ref, svgWrap) {
+  let key, fields;
+  try {
+    ({ key, fields } = await fetchSchemaFields(ref));
+  } catch (e) {
+    clear(schemaBox).append(el("div", { class: "error-box" }, errorText(e)));
+    return;
+  }
+  bindSvgParams(svgWrap, Object.fromEntries(fields.map((f) => [f.name, f.default])));
+  renderReadonlyTable(schemaBox, key, fields);
+  schemaBox.append(el("p", { class: "hint" },
+    "엔진 레지스트리 기본값입니다 — 이 페이지에서는 열람만 합니다. 시뮬 요청에 주입 "
+    + "경로가 있는 블록만 편집을 엽니다."));
 }
 
 async function loadSchema(schemaBox, block, svgWrap, axis = null) {
@@ -597,13 +704,17 @@ async function codegenMeta() {
   };
 }
 
-/** 스키마 → 폼·코드가 공유하는 필드 목록 (omit 적용). */
-async function fetchFields(block) {
-  const { category, name } = block.detail.schema;
+/** 레지스트리 스키마 → 필드 목록 (omit 적용) — 폼·코드 생성·하위 페이지 표의 공통 원천. */
+async function fetchSchemaFields({ category, name }, omit = []) {
   const key = `${category}/${name}`;
   schemaCache[key] ??= await api.get(`/registry/${category}/${name}/schema`);
-  const omit = new Set(block.detail.omit ?? []);
-  return { key, fields: schemaFields(schemaCache[key]).filter((f) => !omit.has(f.name)) };
+  const drop = new Set(omit);
+  return { key, fields: schemaFields(schemaCache[key]).filter((f) => !drop.has(f.name)) };
+}
+
+/** 스키마 → 폼·코드가 공유하는 필드 목록 (omit 적용). */
+async function fetchFields(block) {
+  return fetchSchemaFields(block.detail.schema, block.detail.omit ?? []);
 }
 
 /** 블록 + 값 → {spec, validation}. values=null이면 엔진 기본값 형상.

@@ -44,6 +44,22 @@ export function resolvePath(segs, tree) {
   return path;
 }
 
+/** 드릴다운 트리 전수 순회 — 루트 + children 재귀, 경로 배열과 함께.
+
+resolvePath의 짝이다: 저쪽이 "이 해시가 가리키는 페이지"를 정한다면 이쪽은 "페이지가
+전부 몇 개인가"를 정한다. 매뉴얼 커버리지 가드(모든 페이지에 흐름 설명이 있는가)와
+서브시스템 스펙 가드가 같은 순회를 쓰므로 여기 한 곳에 둔다.
+
+**경로가 26개인데 노드 객체는 24개다** — SCAS_PI_PAGE 하나가 scas/{pitch,roll,yaw}/pi
+세 경로에 걸려 있다. 그래서 노드가 아니라 **경로**를 세는 순회다. */
+export function* walkPages(tree, path = []) {
+  for (const [id, node] of Object.entries(tree)) {
+    const here = [...path, id];
+    yield { id, node, path: here, key: here.join("/") };
+    if (node.children) yield* walkPages(node.children, here);
+  }
+}
+
 /** 코드 표현 대상 — 축이 여럿인 블록(SCAS)은 **축마다 한 줄**이다.
  *
  * lib/codegen.js의 spec은 변수 하나를 그리는 물건이라 `scas = ScasAxis(...)` 한 줄로는
@@ -151,9 +167,10 @@ export const BLOCKS = [
   },
   {
     id: "mixer",
-    title: "엘레본 믹싱", sub: "제어 할당 · 차동추력",
+    title: "엘레본 믹싱", sub: "제어 할당 · 타면 한계",
     detail: {
-      desc: "엘레본4 고정 믹싱(내/외측 1:1) + 러더 + 차동추력 보상 [기본값 01 §2.2] — "
+      desc: "엘레본4 고정 믹싱(내/외측 1:1) + 러더 + 차동추력 배분 [기본값 01 §2.2] — "
+        + "차동추력 계수는 이 기체가 단발이라 0이다(중심선 1기는 좌우 추력차를 못 낸다). "
         + "여유자유도 최적 배분(제어 할당)으로의 확장은 추후. "
         + "여기만 폼이 없는 이유: 타면 한계·믹싱 비율은 값 튜닝이 아니라 **형상 결정**이라 "
         + "기체 데이터 확인 시 정해진다 [TBD 01 §2.2]. 같은 블록의 k_diff_thr는 성격이 "
