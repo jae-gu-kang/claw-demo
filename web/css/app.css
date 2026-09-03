@@ -624,6 +624,33 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd .man-order { margin: 0; padding-left: 20px; font-size: 13px; color: #38414f; }
 .bd .man-order li { padding: 3px 0; }
 
+/* 게인 사전 — 이름줄(코드·단위·기본값)과 설명 다섯 줄.
+   각 줄이 다른 질문에 답하므로 라벨을 왼쪽에 고정폭으로 세워 훑기 쉽게 한다 */
+.bd .man-gset { margin-top: 8px; border: 1px solid var(--bd-edge); border-radius: 10px; padding: 0 14px; }
+.bd .man-gset > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; cursor: pointer; padding: 11px 0; list-style-position: inside; }
+.bd .man-gset > summary::marker { color: var(--bd-ink-soft); }
+.bd .man-gset[open] > summary { border-bottom: 1px solid var(--bd-edge); }
+.bd .man-gtitle { font-size: 14px; font-weight: 700; }
+.bd .man-gcount { margin-left: auto; font-size: 11px; color: var(--bd-ink-soft); }
+.bd .man-ref { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.bd .man-lead { margin: 10px 0 2px; font-size: 12.5px; color: #38414f; }
+.bd .man-ggo { margin: 0 0 4px; }
+.bd .man-gain { border-top: 1px dashed var(--bd-edge); padding: 9px 0 3px; }
+.bd .man-gname { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 3px; }
+.bd .man-gname code { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--accent); background: #eef4ff; padding: 1px 7px; border-radius: 5px; }
+.bd .man-unit { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.bd .man-def { font-size: 11px; color: var(--bd-ink-soft); background: #f1f4f8; border-radius: 4px; padding: 1px 6px; }
+/* 라벨과 본문을 **격자 두 칸**으로 — inline-block + min-width로 하면 본문이
+   두 줄째부터 라벨 아래로 흘러들어 어느 줄이 어느 질문의 답인지 안 보인다 */
+.bd .man-gtext p { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 0 10px;
+  margin: 2px 0; font-size: 12.5px; color: #38414f; max-width: 104ch; }
+.bd .man-gtext .lb { font-weight: 700; font-size: 11.5px; color: var(--bd-ink-soft); }
+.bd .man-gtext .g-chain .lb { color: var(--l3); }
+.bd .man-gtext .g-sym { grid-template-columns: 178px minmax(0, 1fr);
+  background: #fdf7f6; border-radius: 5px; padding: 4px 8px; margin: 4px 0; }
+.bd .man-gtext .g-sym .lb { color: #b3352b; }
+@media (max-width: 760px) { .bd .man-gtext p, .bd .man-gtext .g-sym { grid-template-columns: 1fr; } }
+
 /* ── 영향성 탭 — 전면 다크 스킨 (.inf-dark 스코프) ─────────────────────────
    검은 캔버스가 이 화면의 중심이라 패널만 밝으면 경계마다 스킨이 끊긴다 — 탭
    전체를 Apple 다크 팔레트(js/lib/influence.js SKIN과 동일 값)로 통일한다.
