@@ -624,12 +624,25 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd .man-order { margin: 0; padding-left: 20px; font-size: 13px; color: #38414f; }
 .bd .man-order li { padding: 3px 0; }
 
+/* ── 접히는 매뉴얼 섹션 (.man-fold) ───────────────────────────────────────
+   매뉴얼은 전부 접힌 채로 시작한다 — 그림을 보러 온 사람이 글을 스크롤로 밀어내지
+   않게. 대신 **닫힌 줄이 내용을 말한다**: 요약 자리에 신호 사슬 한 줄·한 줄 역할·
+   개수를 실어, 열지 않아도 여기 뭐가 있는지는 알게 한다.
+   (게인 사전이 쓰던 네 줄을 그대로 일반화한 것 — 저장소에서 스타일이 붙은
+   details는 여기 하나뿐이라 새 장치를 만들 이유가 없었다) */
+.bd .man-fold { margin-top: 8px; border: 1px solid var(--bd-edge); border-radius: 10px; padding: 0 14px; }
+.bd .man-fold > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; cursor: pointer; padding: 11px 0; list-style-position: inside; }
+.bd .man-fold > summary::marker { color: var(--bd-ink-soft); }
+.bd .man-fold[open] > summary { border-bottom: 1px solid var(--bd-edge); }
+.bd .man-fold > summary:hover { color: var(--accent); }
+/* 요약은 오른쪽으로 밀어 라벨과 갈라 둔다 — 훑을 때 왼쪽 열만 보면 목차가 된다.
+   좁아지면 flex-wrap이 줄을 바꾸므로 그때는 라벨 아래로 내려온다 */
+.bd .man-brief { margin-left: auto; font-size: 11.5px; color: var(--bd-ink-soft); text-align: right; }
+.bd .man-brief.chain { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+.bd .man-fold > :last-child { margin-bottom: 12px; }
+
 /* 게인 사전 — 이름줄(코드·단위·기본값)과 설명 다섯 줄.
    각 줄이 다른 질문에 답하므로 라벨을 왼쪽에 고정폭으로 세워 훑기 쉽게 한다 */
-.bd .man-gset { margin-top: 8px; border: 1px solid var(--bd-edge); border-radius: 10px; padding: 0 14px; }
-.bd .man-gset > summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; cursor: pointer; padding: 11px 0; list-style-position: inside; }
-.bd .man-gset > summary::marker { color: var(--bd-ink-soft); }
-.bd .man-gset[open] > summary { border-bottom: 1px solid var(--bd-edge); }
 .bd .man-gtitle { font-size: 14px; font-weight: 700; }
 .bd .man-gcount { margin-left: auto; font-size: 11px; color: var(--bd-ink-soft); }
 .bd .man-ref { font-family: var(--mono); font-size: 11px; color: var(--muted); }
@@ -656,18 +669,26 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
    .inpage는 홈 카드보다 여백이 좁다: 그림 바로 밑에 붙는 판이라 그림과의 거리가
    멀어지면 "이 그림의 설명"으로 안 읽힌다 */
 .bd .manual.inpage { margin-top: 12px; padding: 16px 20px 18px; }
-.bd .manual.inpage > .man-flow:first-child { margin-top: 0; }
+.bd .manual.inpage > .man-fold:first-child { margin-top: 0; }
 
 /* 이 그림 읽기 — 항상 펼침. 설계 노트(.notes)와 같은 목소리로 보이게 맞춘다:
    한 페이지에 판이 둘인데 서로 다른 서식이면 어느 쪽이 본문인지 헷갈린다 */
-.bd .man-flow h4 { font-size: 12px; color: var(--bd-ink-soft); text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 6px; }
-.bd .man-flow h4:first-child { margin-top: 0; }
-.bd .man-flow-lead { font-family: var(--mono); font-size: 12px; color: var(--accent); background: #eef4ff; border-radius: 6px; padding: 6px 10px; margin: 0 0 10px; max-width: none; }
+/* 소제목은 이제 summary가 맡고(fold), 신호 사슬은 닫힌 줄의 .man-brief.chain으로
+   올라갔다 — 여기 남는 것은 펼친 뒤의 본문 서식뿐이다 */
 /* 번호가 곧 그림의 읽는 순서라 눈에 걸려야 한다 — 기본 마커보다 진하게 */
 .bd .man-flow-steps { margin: 0; padding-left: 22px; font-size: 13px; color: #38414f; }
 .bd .man-flow-steps li { padding: 3px 0; }
 .bd .man-flow-steps li::marker { font-weight: 800; color: var(--bd-ink-soft); }
 .bd .man-flow p { margin: 0 0 6px; font-size: 13px; color: #38414f; }
+
+/* 라벨에 단계 배지가 붙는 경우(블록 설명) — 배지와 제목을 한 줄에 세운다 */
+.bd .man-gtitle { display: inline-flex; align-items: center; gap: 8px; }
+.bd .man-gtitle .step-tag { font-size: 10.5px; font-weight: 700; color: #fff; border-radius: 999px; padding: 2px 9px; }
+
+/* fold 안의 설계 노트 — .notes는 스스로 판(배경·그림자·여백)이라 그대로 넣으면
+   판 안의 판이 된다. fold가 이미 테두리를 가지므로 .plain이 안쪽 판을 벗긴다.
+   파라미터 폼을 감싼 .notes는 .plain이 없어 판을 그대로 유지한다 */
+.bd .notes.plain { background: none; box-shadow: none; border-radius: 0; margin-top: 0; padding: 0 0 6px; }
 
 /* 하위 페이지의 루트 띠 — 같은 글을 되풀이하는 대신 한 줄로 가리킨다 */
 .bd .man-parent { border-top: 1px solid var(--bd-edge); margin-top: 14px; padding-top: 12px; font-size: 13px; }

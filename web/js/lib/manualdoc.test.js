@@ -10,7 +10,8 @@ import { readFileSync } from "node:fs";
 
 import {
   BACKGROUND, BLOCK_DOCS, GAIN_GROUPS, HEADINGS, HOME_SECTIONS, PAGE_DOCS, PAGE_GAINS,
-  TUNING_ORDER, UNDRAWN_GAINS, docFor, gainCountFor, gainCoverage, gainsFor,
+  FLOW_HEADINGS, FOLD_KINDS, TUNING_ORDER, UNDRAWN_GAINS,
+  docFor, gainCountFor, gainCoverage, gainsFor,
 } from "./manualdoc.js";
 import { resolvePath, walkPages } from "./blocks.js";
 // 뷰 모듈이지만 순수 데이터라 node import 가능 (blocks.test.js와 같은 근거)
@@ -84,7 +85,7 @@ test("소제목 문자열은 manualdoc.js 한 곳에만 (요구: 한 줄로 바�
   // 있느냐이므로, JS 문자열 리터럴 통째와 <h1~h6> 안쪽만 본다
   const sources = ["../views/manual.js", "../views/blocks.js", "../views/subsystems.js",
     "../../css/app.css"];
-  for (const [field, label] of Object.entries(HEADINGS)) {
+  for (const [field, label] of [...Object.entries(HEADINGS), ...Object.entries(FLOW_HEADINGS)]) {
     const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const asLiteral = new RegExp(`["']${esc}["']`);
     const asHeading = new RegExp(`<h[1-6][^>]*>\\s*${esc}\\s*</h[1-6]>`);
@@ -296,4 +297,15 @@ test("그림 앵커: 게인인 data-p도 페이지 안에서 유일해야 한다
     assert.equal(new Set(names).size, names.length,
       `${key}: 게인을 겸하는 data-p가 중복 — ${names}`);
   }
+});
+
+test("접는 섹션 종류는 데이터로 고정 — 늘리고 줄이는 것이 명시적 편집이 되게", () => {
+  // 열림 상태를 기억하는 키이자 "무엇을 접는가"의 계약. 화면 쪽에서 문자열을 새로
+  // 지어내면 그 섹션만 기억이 안 되는데, 그건 눌러 보기 전엔 안 보인다
+  assert.deepEqual(FOLD_KINDS,
+    ["flow", "why", "doc", "gains", "notes", "background", "order"]);
+  assert.equal(new Set(FOLD_KINDS).size, FOLD_KINDS.length, "종류 중복");
+  // 흐름 소제목은 두 fold(flow·why)의 라벨이라 짝이 맞아야 한다
+  assert.deepEqual(Object.keys(FLOW_HEADINGS), ["reads", "why"]);
+  for (const label of Object.values(FLOW_HEADINGS)) assert.ok(label.trim());
 });

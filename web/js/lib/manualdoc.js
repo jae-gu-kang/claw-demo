@@ -38,6 +38,22 @@ export const HEADINGS = {
   effect: "비행 영향",
 };
 
+/** 흐름 섹션의 두 소제목 — HEADINGS와 __같은 계약__(정본은 여기 한 곳).
+ *
+ * 맵을 따로 두는 이유: HEADINGS는 BLOCK_DOCS의 필드명(what·why·effect)에 묶여 있어
+ * 거기 끼워 넣으면 블록 문서에 없는 키가 섞인다. 검사(원문 스캔)는 같은 순회가 판다. */
+export const FLOW_HEADINGS = {
+  reads: "신호 흐름",
+  why: "구조 근거",
+};
+
+/** 접히는 매뉴얼 섹션의 종류 — 열림 상태를 기억하는 키이자 "무엇을 접는가"의 계약.
+ *
+ * 페이지가 아니라 __섹션 종류__가 키다: 축을 오가며 게인만 비교하는 사용이 26번
+ * 클릭이 되지 않게 (views/manual.js openKinds).
+ * 목록을 데이터로 못박아 두면 섹션을 늘리거나 빼는 일이 명시적인 편집이 된다. */
+export const FOLD_KINDS = ["flow", "why", "doc", "gains", "notes", "background", "order"];
+
 /** 게인 사전 — 손잡이 하나하나가 무엇을 움직이는가.
  *
  * 단위·기본값·범위는 **레지스트리 스키마에서 읽는다** (엔진 ParamDef가 정본).

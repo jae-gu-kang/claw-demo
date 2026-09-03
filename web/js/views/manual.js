@@ -14,11 +14,11 @@
 import { api } from "../api.js";
 import { el } from "../dom.js";
 import {
-  BACKGROUND, BLOCK_DOCS, GAIN_GROUPS, HEADINGS, TUNING_ORDER, UNDRAWN_GAINS,
-  docFor, gainCountFor, gainsFor,
+  BACKGROUND, BLOCK_DOCS, FLOW_HEADINGS, GAIN_GROUPS, HEADINGS, TUNING_ORDER,
+  UNDRAWN_GAINS, docFor, gainCountFor, gainsFor,
 } from "../lib/manualdoc.js";
 import { schemaFields } from "../lib/schemaform.js";
-import { DESIGN_ORDER } from "./diagram.js";
+import { DESIGN_ORDER, fromMarkup } from "./diagram.js";
 
 const para = (html) => { const p = el("p"); p.innerHTML = html; return p; };
 const list = (items) => el("ul", {}, items.map((t) => {
@@ -37,10 +37,38 @@ function stepTag(page) {
 
 const goto = (page) => () => { location.hash = `#blocks/${page}`; };
 
-/** 게인 카드를 펴 두는 상한. 접기의 근거는 성격이 아니라 __길이__였다 — 홈에 49개를
-펴면 13000px이라 못 훑는다는 관측. 한 페이지 몫은 그 근거가 성립하지 않는 크기라
-펴 두고, nav(13개)처럼 여전히 긴 곳만 접는다. */
-const OPEN_MAX = 8;
+/** 열어 둔 섹션 종류 — 페이지를 옮겨도 열린 채로 둔다.
+ *
+ * 키가 페이지가 아니라 __종류__(FOLD_KINDS)인 이유: 축 셋을 오가며 게인만 비교하는
+ * 사용이 26번 클릭이 되면 "필요할 때 연다"가 "매번 연다"가 된다.
+ *
+ * localStorage가 아니라 __모듈 변수__인 이유: 라우터는 해시가 바뀌면 뷰를 재렌더할
+ * 뿐 재적재가 아니라 이걸로 충분하고(views/gains.js fitCfg와 같은 수법), 이 저장소엔
+ * Web Storage 사용례가 0건이라 키 규약·예외 처리·사생활 창 대응을 새로 들이게 된다.
+ * 새로고침하면 전부 닫힘 — "기본은 닫힘"이라는 요구와도 맞는다. */
+const openKinds = new Set();
+
+/** 접히는 매뉴얼 섹션 — __닫힌 줄이 내용을 말하게__ 한다.
+ *
+ * 전부 접는 것이 요구지만 "버튼 뒤에 숨기면 아무도 안 읽는다"(views/blocks.js 홈 주석)는
+ * 위험은 그대로다. 그래서 summary 오른쪽에 __이미 있는 한 줄__(신호 사슬·한 줄 역할·
+ * 개수)을 실어, 열지 않아도 여기 뭐가 있는지는 알게 한다.
+ *
+ * label·brief: 문자열이면 기본 서식으로 감싸고, 노드면 그대로 쓴다
+ * (라벨에 단계 배지를 붙이거나, 요약에 모노 사슬을 쓸 때). */
+function fold(kind, label, brief, ...kids) {
+  const box = el("details", { class: "man-fold", open: openKinds.has(kind) },
+    el("summary", {},
+      label.nodeType ? label : el("span", { class: "man-gtitle" }, label),
+      brief == null ? null
+        : (brief.nodeType ? brief : el("span", { class: "man-brief" }, brief))),
+    ...kids);
+  // 사용자가 연 것도, revealGain이 연 것도 같은 자리에 기록된다 (toggle은 둘 다 뛴다)
+  box.addEventListener("toggle", () => {
+    if (box.open) openKinds.add(kind); else openKinds.delete(kind);
+  });
+  return box;
+}
 
 // ── 홈 (#blocks) ───────────────────────────────────────────────────────
 
@@ -57,17 +85,19 @@ export function renderHomeManual(box) {
         "블록마다의 설명·게인은 그 블록의 내부 블록도 페이지에 있습니다 — 아래 목차에서 여세요. ",
         "여기는 어느 한 블록에도 속하지 않는 것만 답니다."),
 
-      sec("먼저 알아야 할 것",
+      fold("background", "먼저 알아야 할 것", `${BACKGROUND.length}가지`,
         el("div", { class: "man-bg" }, BACKGROUND.map((b) =>
           el("div", { class: "man-q" }, el("h4", {}, b.q), b.a.map((t) => para(t)))))),
 
+      // 목차는 __접지 않는다__: 글이 아니라 "어디로 갈지" 지도이고, 상세를 페이지로
+      // 내려보낸 뒤 홈에 남긴 이유 자체가 이것이다. 이것까지 접으면 홈이 빈 화면이 된다
       sec("어디에 무엇이 있나",
         para("설계 순서대로 다섯 층, 그리고 그 사이를 채우는 지원 블록들입니다. "
-          + "각 페이지에 <b>그 그림의 흐름·설계 근거·게인 설명</b>이 함께 있습니다."),
+          + "각 페이지에 <b>그 그림의 신호 흐름·구조 근거·게인 설명</b>이 함께 있습니다."),
         indexGrid((page) => stepOf()[page], "층 — 설계 순서"),
         indexGrid((page) => !stepOf()[page], "지원 블록")),
 
-      sec("튜닝 순서 요약",
+      fold("order", "튜닝 순서 요약", `${TUNING_ORDER.length}단계`,
         para("막혔을 때 돌아올 자리입니다. <b>안쪽에서 바깥으로, 감쇠에서 적분으로.</b>"),
         el("ol", { class: "man-order" },
           TUNING_ORDER.map((t) => { const li = el("li"); li.innerHTML = t; return li; })))));
@@ -103,7 +133,8 @@ function indexGrid(keep, label) {
  *
  * 반환값의 revealGain을 뷰가 SVG 배선에 쓴다 — 이 모듈이 카드를 갖고 있으므로
  * "어느 카드로 갈 것인가"도 여기가 안다. */
-export function renderPageManual(box, path, flow, diagram = {}) {
+export function renderPageManual(box, path, sub, diagram = {}) {
+  const { flow, notes } = sub;
   const { doc, isRoot, root } = docFor(path);
   const groups = gainsFor(path);
   const wrap = el("div", { class: "manual inpage" });
@@ -112,22 +143,25 @@ export function renderPageManual(box, path, flow, diagram = {}) {
   // flow가 없는 페이지도 있다 (아직 안 쓴 자리) — 그 칸만 비고 나머지는 그대로 뜬다.
   // 어느 페이지가 비었는지는 lib/manualdoc.test.js가 명시 목록으로 붙들고 있다
   if (flow) {
-    wrap.append(el("section", { class: "man-flow" },
-      el("h4", {}, "이 그림 읽기"),
-      el("p", { class: "man-flow-lead" }, flow.lead),
+    // 흐름과 근거를 __따로__ 접는다: 답하는 질문이 다르고 되읽는 시점도 다르다.
+    // 흐름은 처음 한 번, 근거는 "왜 이렇게 했지"가 떠올랐을 때다 — 쪼개야 후자만 연다.
+    // 흐름의 요약은 신호 사슬 그 자체다. 닫힌 채로도 이 한 줄이면 그림이 대충 읽힌다
+    wrap.append(fold("flow", FLOW_HEADINGS.reads,
+      el("span", { class: "man-brief chain" }, flow.lead),
       el("ol", { class: "man-flow-steps" }, flow.reads.map((t) => {
         const li = el("li"); li.innerHTML = t; return li;
-      })),
-      el("h4", {}, "왜 이 구조인가"),
-      flow.why.map((t) => para(t))));
+      }))));
+    wrap.append(fold("why", FLOW_HEADINGS.why, `${flow.why.length}가지`,
+      el("div", { class: "man-flow" }, flow.why.map((t) => para(t)))));
   }
 
   if (doc && isRoot) {
     // 루트 페이지에만 블록 설명을 붙인다 — "왜 있나"는 블록이 아키텍처에서 차지하는
     // 자리에 대한 진술이라 루트의 사실이고, 하위 넷에 되풀이하면 분량이지 설명이 아니다
-    wrap.append(el("section", { class: "man-blk" },
-      el("div", { class: "man-head" }, stepTag(doc.page), el("h3", {}, doc.title),
-        el("span", { class: "man-role" }, doc.role)),
+    // 요약은 블록의 한 줄 역할 — 닫힌 채로도 "이 블록이 뭘 하는 자리인지"는 보인다
+    wrap.append(fold("doc",
+      // 단계 배지는 제목 옆에 — 아래 줄에 홀로 두면 떨어져 나온 것처럼 보인다
+      el("span", { class: "man-gtitle" }, stepTag(doc.page), doc.title), doc.role,
       el("div", { class: "man-body" },
         el("div", { class: "man-col" },
           Object.entries(HEADINGS).flatMap(([field, label]) =>
@@ -150,6 +184,17 @@ export function renderPageManual(box, path, flow, diagram = {}) {
   // 카드는 스키마 응답 뒤에 채워진다 — 그때까지의 클릭을 삼키지 않으려고 약속을 들고 있는다.
   // 이걸 안 기다리면 페이지를 열자마자 그림의 게인을 누른 사용자에게 **아무 일도 안 일어난다**
   // (느린 서버·폐쇄망에서 더 길어지는 창이다)
+  // 설계 노트도 같은 카드 안, 같은 fold 문법으로. 밖에 두면 판이 둘로 갈려
+  // "매뉴얼"이 어디까지인지 화면이 말해 주지 못한다.
+  // 노트는 subsystems.js가 마크업 문자열로 갖고 있어(수작성 정적, fromMarkup 계약)
+  // 조립이 아니라 감싸는 방식이다. <h4>설계 노트</h4>는 summary가 대신하므로 뺀다 —
+  // 안 빼면 접힌 줄과 펼친 첫 줄이 같은 말이 된다
+  if (notes) {
+    const n = (notes.match(/<li>/g) ?? []).length;
+    wrap.append(fold("notes", "설계 노트", n ? `${n}가지` : null,
+      fromMarkup(`<div class="notes plain">${notes.replace(/<h4>[^<]*<\/h4>/, "")}</div>`)));
+  }
+
   const cards = new Map();
   // 약속이 거부되면 __이후 모든 클릭이__ 같이 죽는다. 카드 렌더 실패는 클릭을 못 살릴
   // 뿐이지, 클릭 자체를 영구히 망가뜨릴 일은 아니다.
@@ -185,7 +230,7 @@ export function renderPageManual(box, path, flow, diagram = {}) {
     await ready; // 스키마가 아직이면 기다린다 (실패해도 글 카드는 만들어진다)
     const hit = cards.get(key);
     if (!hit) return false;
-    hit.set.open = true;
+    hit.set.open = true; // fold의 toggle 리스너가 openKinds에 반영한다
     for (const n of wrap.querySelectorAll(".man-gain.hit")) n.classList.remove("hit");
     // behavior 기본값 — smooth로 하면 모션 축소 설정을 무시하게 된다
     hit.card.scrollIntoView({ block: "center" });
@@ -207,13 +252,10 @@ async function renderGainCards(box, groups, cards, diagram = {}) {
     return String(Number(v.toPrecision(4)));
   };
   for (const g of groups) {
-    // 길면 접고 짧으면 편다. 접기의 근거는 길이였다 — 한 페이지 몫이 몇 개뿐이면
-    // 접을 이유가 없고, 열어 두어야 그림 옆에서 바로 읽힌다
-    const set = el("details", { class: "man-gset", open: g.rows.length <= OPEN_MAX },
-      el("summary", {},
-        el("span", { class: "man-gtitle" }, "이 페이지의 게인"),
-        el("span", { class: "man-ref" }, g.ref),
-        el("span", { class: "man-gcount" }, `${g.rows.length}개`)));
+    // 다른 섹션과 같은 fold를 쓴다 — 길이로 여닫던 기준(OPEN_MAX)은 없앴다.
+    // 이제 기본은 전부 닫힘이고, 닫힌 줄에 ref와 개수가 남아 뭐가 있는지는 보인다
+    const set = fold("gains", "이 페이지의 게인",
+      el("span", { class: "man-brief" }, `${g.ref} · ${g.rows.length}개`));
     const lead = el("p", { class: "man-lead" }); lead.innerHTML = g.lead;
     set.append(lead);
     box.append(set);

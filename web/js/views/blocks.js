@@ -226,15 +226,17 @@ function renderSubPage(root, path) {
       }, "↑ 상위로"),
     ),
     svgWrap,
-    // 그림 → 흐름 → 설계 노트 → 게인 → 파라미터. 흐름이 그림 바로 밑인 이유는
-    // 그게 그림을 읽는 법이라서다 — 노트(결정 사항 대장)보다 먼저 와야 한다
+    // 그림 → 흐름 → 근거 → 설계 노트 → 게인 → 파라미터. 매뉴얼은 전부 접힌 채로
+    // 시작하고(필요할 때 연다), 닫힌 줄에 한 줄 요약이 남는다 — 흐름이 그림 바로
+    // 밑인 이유는 그게 그림을 읽는 법이라서다 (노트=결정 사항 대장보다 먼저)
     manualBox,
-    fromMarkup(`<div class="notes">${sub.notes}</div>`),
+    // 파라미터 폼은 __접지 않는다__ — 글이 아니라 값을 고치는 작업 화면이다.
+    // (설계 노트는 매뉴얼 카드 안으로 들어갔다 — renderPageManual)
     el("div", { class: "notes" }, paramBox),
   );
   // 3겹의 셋째 — 그림 속 게인 이름과 아래 카드를 양방향으로 잇는다
   const anchors = collectGainAnchors(svgWrap, path);
-  const revealGain = renderPageManual(manualBox, path, sub.flow, {
+  const revealGain = renderPageManual(manualBox, path, sub, {
     anchored: new Set(anchors.keys()),
     onShowInDiagram: (key) => flashNode(svgWrap, anchors.get(key)),
   });
