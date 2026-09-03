@@ -137,22 +137,32 @@ function hull(ps) {
   return [...half(s), ...half([...s].reverse())];
 }
 
+/** 상자의 화면 실루엣(볼록 껍질) — 외곽선이자 **고정 히트 도형**의 좌표. */
+const boxHull = (x, y, w, h, z, t) => {
+  const cs = [];
+  for (const [cu, cv] of [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]) {
+    cs.push(at(cu, cv, z), at(cu, cv, z + t));
+  }
+  return hull(cs);
+};
+
 /** 직육면체 — 보이는 옆면은 시점이 정한다(화면 오른쪽에 오는 세로 모서리).
-반대쪽 면을 그리면 성립하지 않는 입체가 된다. */
+반대쪽 면을 그리면 성립하지 않는 입체가 된다.
+
+면마다 f-top/f-front/f-side를 붙인다 — 세 면의 명암이 달라 한꺼번에 도색할 수
+없기 때문. app.css가 이 이름으로 호버 색을 준다(fill 속성보다 CSS가 언제나
+이긴다). 이름이 어긋나면 호버 반응이 조용히 죽어 lib/blocks.test.js가 짝을 판다. */
 function slab(x, y, w, h, z, t, fill, cls = "") {
   const zt = z + t;
   const su = P(x, y, z)[0] > P(x + w, y, z)[0] ? x : x + w;
   const side = [P(su, y, z), P(su, y + h, z), P(su, y + h, zt), P(su, y, zt)];
   const front = [P(x, y + h, z), P(x + w, y + h, z), P(x + w, y + h, zt), P(x, y + h, zt)];
   const top = [P(x, y, zt), P(x + w, y, zt), P(x + w, y + h, zt), P(x, y + h, zt)];
-  const corners = [];
-  for (const [cu, cv] of [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]) {
-    corners.push(at(cu, cv, z), at(cu, cv, zt));
-  }
-  return poly(side, fill.side, `class="face ${cls}"`)
-    + poly(front, fill.front, `class="face ${cls}"`)
-    + poly(top, fill.top, `class="face ${cls}"`)
-    + `<polygon class="body" points="${pts(hull(corners))}" fill="none"/>`;
+  const fc = (k) => `class="face f-${k}${cls ? ` ${cls}` : ""}"`;
+  return poly(side, fill.side, fc("side"))
+    + poly(front, fill.front, fc("front"))
+    + poly(top, fill.top, fc("top"))
+    + `<polygon class="body" points="${pts(boxHull(x, y, w, h, z, t))}" fill="none"/>`;
 }
 
 /** 배선 — (u, v, z) 꼭짓점 목록. dash는 보조 신호(스케줄 주입·피드백)용. */
@@ -235,17 +245,27 @@ function buildTopSvg() {
     const z = BASE_Z[id];
     const x = cu - BW / 2;
     const y = cv - HB;
-    const sel = id === "scas";
-    const fill = sel
-      ? { top: "#2563eb", side: "#1e3a8a", front: "#3b82f6" }
-      : { top: "#ffffff", side: "#bfc7d3", front: "#d9dee6" };
+    // 블록은 전부 같은 흰색이다. 소속(설계 단계)은 블록 색이 아니라 **앉은 판**이
+    // 말하므로, 한 블록만 다른 색이면 "이 블록만 무슨 상태다"로 잘못 읽힌다.
+    // 파란색은 가리키는 동안에만 — 떠오르며 물든다 (app.css .blk:hover)
+    const fill = { top: "#ffffff", side: "#bfc7d3", front: "#d9dee6" };
     const [tx, ty] = P(cu, cv, z + BT);           // 윗면 중심 — 제목
     const [fu, fv] = P(cu, cv + HB, z + BT / 2);  // 앞면 중심 — 세부 설명
-    s += `<g class="blk${sel ? " sel" : ""}" data-block="${id}" tabindex="0" role="button"`
+    // **떠오르는 것(.lift)과 판정되는 것(.blk-hit)을 분리한다.** 히트 도형 자신을
+    // translate하면 두 가지가 실제로 깨진다 (둘 다 재현 확인):
+    //  - 아랫변 근처에 포인터를 두면 들리면서 포인터가 밖으로 나가 호버가 풀리고,
+    //    내려오면 다시 걸려 마우스를 안 움직여도 무한 진동한다.
+    //  - 윗변 근처에서 누르면 블록이 포인터 밖으로 빠져 mouseup이 판 위에서 나고,
+    //    click이 공통 조상(<svg>)에 발사돼 이동이 조용히 씹힌다.
+    // plate-tag가 쓰는 것과 같은 수법이다 — 투명 도형 하나를 고정해 둔다
+    s += `<g class="blk" data-block="${id}" tabindex="0" role="button"`
       + ` aria-label="${B[id].title} — 서브시스템 내부 블록도 열기">`;
-    s += slab(x, y, BW, 2 * HB, z, BT, fill, sel ? "sel" : "");
+    s += `<g class="lift">`;
+    s += slab(x, y, BW, 2 * HB, z, BT, fill);
     s += `<text class="ttl" x="${fx(tx)}" y="${fx(ty + 5)}" text-anchor="middle">${B[id].title}</text>`;
     s += `<text class="ttl2" x="${fx(fu)}" y="${fx(fv + 3.4)}" text-anchor="middle">${B[id].sub}</text>`;
+    s += "</g>";
+    s += `<polygon class="blk-hit" points="${pts(boxHull(x, y, BW, 2 * HB, z, BT))}" fill="transparent"/>`;
     s += "</g>";
     // 재생 값 슬롯 — 블록 바로 앞 판 위 (블록 간격 52로는 배선 사이에 값이 안 들어간다).
     // 뒷줄의 +14는 간격 조절이 아니라 **DROP 절벽(172) 회피**다: 120+36.5+14 = 170.5로

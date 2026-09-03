@@ -178,6 +178,68 @@ test("최상위 SVG 기하가 유한하다 — viewBox NaN은 보드를 통째�
   assert.ok(!/NaN|undefined/.test(TOP_SVG), "SVG 좌표에 NaN/undefined 유입");
 });
 
+test("블록 강조는 '가리키는 동안'뿐 — diagram.js 면 클래스 ↔ app.css :hover 도색", () => {
+  const css = read("../../css/app.css").replace(/\/\*[\s\S]*?\*\//g, ""); // 주석 안의 선택자 문구 제외
+  // ① 고정 강조 금지: 예전엔 SCAS 한 블록만 영원히 파랬다(시안 잔재). 상태가 없는데
+  //    상태처럼 읽혀서 뺐다 — 되살아나면 여기서 걸린다
+  assert.ok(!/\bblk sel\b/.test(TOP_SVG), "블록에 고정 강조 클래스(.sel)가 다시 붙음");
+  assert.ok(!/\.blk\.sel\b/.test(css), "app.css에 고정 강조 규칙(.blk.sel)이 남음");
+  // ② 두 파일이 같은 면 이름을 써야 호버 반응이 산다. 한쪽만 이름을 바꾸면 색이
+  //    조용히 안 바뀌고(에러 없음) 블록이 죽은 그림처럼 느껴진다
+  for (const k of ["top", "front", "side"]) {
+    assert.match(TOP_SVG, new RegExp(`class="face f-${k}[ "]`), `TOP_SVG에 f-${k} 면이 없음`);
+    assert.match(css, new RegExp(`\\.blk:hover \\.f-${k}[^{]*\\{[^}]*fill:`),
+      `app.css에 .blk:hover .f-${k} 도색 규칙이 없음`);
+  }
+  // ③ 떠오르는 연출 — 변위와 그 전환이 둘 다 있어야 "둥둥"이 된다
+  assert.match(css, /\.bd \.top \.blk:hover \.lift[^{]*\{[^}]*transform: translateY\(-\d/,
+    "호버 시 블록이 떠오르지 않음(transform 없음)");
+  assert.match(css, /\.bd \.top \.blk \.lift \{[^}]*transition:[^}]*transform/,
+    ".lift에 transform 전환이 없어 즉시 튄다");
+  // ④ 순서 의존(명시도 동률 0-5-0): 경보는 호버보다 뒤 = 마우스가 지나가도 안 지워진다.
+  //    두 규칙이 **존재하는지부터** 본다 — indexOf(-1)로 공회전하면 가드가 헛돈다
+  const iAlarm = css.indexOf(".bd .top .blk.alarm .body");
+  const iHover = css.indexOf(".bd .top .blk:hover .body");
+  assert.ok(iAlarm >= 0 && iHover >= 0, `호버/경보 테두리 규칙이 사라짐 (${iHover}, ${iAlarm})`);
+  assert.ok(iAlarm > iHover, ".alarm .body가 :hover .body보다 앞에 있음 — 호버가 리미터 경보를 덮는다");
+  // ⑤ 모션 감축: 미디어 블록 **본문을 떼어내서** 판다. 바깥에 있는 같은 규칙이
+  //    통과시켜 주면(= 모든 사용자에게 전환이 죽어도 초록불) 가드가 헛돈다
+  const rm = css.match(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/);
+  assert.ok(rm, "prefers-reduced-motion 블록을 못 찾음");
+  assert.match(rm[1], /\.blk \.lift \{[^}]*transition:\s*none\s*!important/,
+    "모션 감축에서 블록 전환이 안 꺼진다");
+});
+
+test("떠오르는 것과 눌리는 것이 분리돼 있다 — 히트 도형을 움직이면 클릭이 씹힌다", () => {
+  const css = read("../../css/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  // 실제로 두 가지가 깨졌었다(헤드리스 크롬 재현): 아랫변 근처에서 호버가 무한 진동,
+  // 윗변 근처에서 mouseup이 블록 밖에 떨어져 click이 <svg>에 발사되고 이동이 씹힘.
+  // 원인은 하나 — 움직이는 요소와 판정되는 요소가 같은 <g class="blk">였다.
+  const groups = TOP_SVG.split('<g class="blk"').slice(1);
+  assert.equal(groups.length, BLOCKS.length, "블록 그룹 수가 안 맞음");
+  for (const g of groups) {
+    const id = g.match(/data-block="([^"]+)"/)[1];
+    // 변위를 받는 .lift가 먼저 닫히고, 고정 히트 도형이 그 **형제**로 뒤따라야 한다
+    assert.match(g, /<g class="lift">[\s\S]*?<\/g><polygon class="blk-hit"[^>]*fill="transparent"/,
+      `${id}: 고정 히트 도형이 .lift 밖 형제로 없음 — 들리면 클릭이 씹힌다`);
+  }
+  // transform은 .lift로 끝나는 선택자에만 걸려야 한다. .blk(=히트 타깃 자신)에
+  // 걸리면 위 두 증상이 그대로 돌아온다.
+  // - 규칙을 **전부** 훑는다: `.bd .top` 접두를 뺀 `.bd .blk:hover`도 후손 선택자라
+  //   최상위 블록에 걸리므로, 접두가 붙은 규칙만 보면 그 형태로 버그가 부활한다.
+  // - `transform:`은 앞이 줄머리/공백/세미콜론이어야 한다. 안 그러면 지극히 평범한
+  //   `text-transform: uppercase` 한 줄이 "변위가 히트 타깃에 걸렸다"는 **틀린**
+  //   메시지로 빌드를 깬다 (이 파일은 이미 .bd .notes h4에서 text-transform을 쓴다)
+  for (const [, selector, decls] of css.matchAll(/([^{}]*)\{([^}]*)\}/g)) {
+    if (!/(?:^|[\s;])transform:/.test(decls)) continue;
+    for (const one of selector.split(",")) {
+      const sel = one.trim();
+      if (!/\.blk\b/.test(sel)) continue; // 블록을 겨냥하지 않는 규칙은 남의 일
+      assert.match(sel, /\.lift$/, `변위가 히트 타깃에 걸렸다: "${sel}"`);
+    }
+  }
+});
+
 test("최상위 SVG 배선 ↔ 페이지 데이터 드리프트 가드 (리뷰 S1)", () => {
   // 오타 id는 currentPage()가 조용히 홈으로 폴백해 무반응이 됨 — 여기서 잡는다
   const refs = [...TOP_SVG.matchAll(/data-(?:block|page)="([^"]+)"/g)].map((m) => m[1]);
