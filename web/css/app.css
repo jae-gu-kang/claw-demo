@@ -49,7 +49,7 @@
   --sans: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo",
           "Malgun Gothic", sans-serif;
   --mono: "JetBrains Mono", "SF Mono", "Consolas", "D2Coding", ui-monospace, monospace;
-  /* 설계 순서 ①~⑤ — 구조도의 층 판·칩·단계 태그가 공유하는 한 벌
+  /* 설계 순서 ①~⑤ — 블록도의 층 판·칩·단계 태그가 공유하는 한 벌
      (views/diagram.js LAYERS와 같은 값 — lib/blocks.test.js가 대조한다).
      이 값들은 **흰 글자가 얹히는 배지·태그 색**이라 전부 흰색 대비 4.5:1 이상이어야
      한다. 판의 밝은 면 색은 LAYERS[].fill이 따로 들고 있으니 여기를 밝히지 말 것 */
@@ -80,7 +80,7 @@ header {
 }
 header h1 { font-size: 24px; font-weight: 800; letter-spacing: .02em; margin: 0; }
 header h1 .sub { font-size: 12px; font-weight: 500; letter-spacing: 0; color: var(--muted); margin-left: 10px; }
-/* 탭 — 흰 알약 트레이 위 활성 칩 (구조도 보드와 같은 카드 언어) */
+/* 탭 — 흰 알약 트레이 위 활성 칩 (블록도 보드와 같은 카드 언어) */
 nav {
   display: flex;
   gap: 2px;
@@ -277,7 +277,7 @@ canvas.plot { background: #fff; border: 1px solid #d2d2d7; border-radius: 12px; 
    측정: 뷰포트 380에서 306×320(직사각) → 306×306(정사각). */
 canvas.plot { height: auto !important; }
 
-/* ── 구조도(블록 다이어그램 허브) — 시뮬링크 스타일, .bd 스코프 ───────────
+/* ── 블록도(블록 다이어그램 허브) — 시뮬링크 스타일, .bd 스코프 ───────────
    레퍼런스 디자인(control_law_block_diagram)을 이식 — 다른 뷰와 충돌 방지 */
 .bd { --bd-ink-soft: #5a6b7d; --bd-edge: #d6dde6; }
 
@@ -448,6 +448,10 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd .bname { font-size: 11px; fill: var(--muted); text-anchor: middle; }
 .bd .pnum { font-size: 11px; font-weight: 800; fill: var(--accent); text-anchor: middle; }
 .bd .pname { font-size: 11px; fill: var(--muted); text-anchor: middle; }
+/* 포트 라벨 정렬 수정자 — 배지 **옆**에 붙는 라벨은 좌표가 배지 오른쪽 끝 바로
+   뒤라 중앙정렬이면 자기 폭 절반만큼 왼쪽으로 밀려 배지를 덮는다(실측 29px).
+   마크업에 text-anchor 속성을 써도 위 규칙이 이기므로 클래스여야 한다 */
+.bd .pname.a-start { text-anchor: start; }
 /* 배선 — 신호 흐름이 보이도록 대시가 진행 방향으로 흐른다 */
 .bd .sub .wire {
   stroke: var(--text);

@@ -218,7 +218,7 @@ test("resumeBlockedText — 재개 불가면 사유가 있고, 가능하면 null
 test("adoptable — 판정이 난 자리가 있어야 게인을 확정한다", () => {
   // failures=0은 통과의 근거가 못 된다: 트림 전량 미수렴·빈 격자·엔벨로프 밖 격자는
   // 실패 목록도 비어 있다(engine judged_count). 그 게인을 확정하면 아무것도 검증하지
-  // 않은 게인이 시뮬·Autocode·구조도의 정본이 된다
+  // 않은 게인이 시뮬·Autocode·블록도의 정본이 된다
   assert.equal(adoptable({ judged: 12, failures: 0 }), true);
   assert.equal(adoptable({ judged: 0, failures: 0 }), false);
   assert.equal(adoptable({ failures: 0 }), false); // judged 없는 구형 결과

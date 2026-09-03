@@ -1,5 +1,5 @@
 // 배선별 신호 표시 — 어떤 배선에 어떤 신호를 얹고 어떻게 포맷하는지.
-// 여기서 지키는 것: ① 배선 id가 구조도 SVG와 어긋나지 않는다 ② 각은 표시 전용
+// 여기서 지키는 것: ① 배선 id가 블록도 SVG와 어긋나지 않는다 ② 각은 표시 전용
 // deg 변환(내부 규약은 SI+rad) ③ 계측 안 된 항목이 0으로 위장되지 않는다
 import { test } from "node:test";
 import assert from "node:assert/strict";

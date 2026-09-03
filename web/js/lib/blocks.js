@@ -53,7 +53,7 @@ export function resolvePath(segs, tree) {
  * stored = 그 블록의 store 값 (SCAS는 {축: kwargs}), design = 축별 설계 kwargs
  * (/gains/catalog scas_design). **설계값을 모르는 축은 대상에서 뺀다** — ScasAxis의
  * 스키마 기본값은 전부 0이라, 카탈로그를 못 받은 채 내보내면 게인이 죽은 형상을
- * "지금 형상"이라고 보여 주게 된다. 구조도 축 폼이 같은 이유로 편집을 안 여는 것과
+ * "지금 형상"이라고 보여 주게 된다. 블록도 축 폼이 같은 이유로 편집을 안 여는 것과
  * 같은 규칙이다 (views/blocks.js loadSchema).
  *
  * applied는 values와 따로다: 설계값으로 채운 줄은 값이 있어도 "편집값"이 아니다

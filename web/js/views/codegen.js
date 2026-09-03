@@ -1,4 +1,4 @@
-/** 코드 생성 패널 — 생성 코드(Python·C) + 검토·설명 (구조도 탭에서 호출).
+/** 코드 생성 패널 — 생성 코드(Python·C) + 검토·설명 (블록도 탭에서 호출).
 
 수치·문자열 생성은 lib/codegen.js — 여기는 DOM 조립과 표시 상태만.
 생성 텍스트는 반드시 textContent 경로로만 넣는다(fromMarkup은 정적 마크업 전용 계약).
@@ -42,7 +42,7 @@ export function renderCodePanel(host, {
 }) {
   // 어떤 형식 탭을 노출할지는 부르는 쪽이 정한다 — Autocode 탭은 종류(형상/탑재)를
   // 이미 위에서 고르게 하므로 여기서 다시 세 개를 늘어놓으면 선택지가 흩어진다.
-  // 구조도의 블록별 패널은 인자를 안 주므로 예전처럼 셋 다 나온다
+  // 블록도의 블록별 패널은 인자를 안 주므로 예전처럼 셋 다 나온다
   const allow = LANGS.filter((l) => langs.includes(l[0]));
   if (!langs.includes(cfg.lang)) cfg.lang = allow[0][0];
   const snapshot = specs.length > 1 || gainTables != null;

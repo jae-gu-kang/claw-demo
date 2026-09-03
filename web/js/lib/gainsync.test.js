@@ -1,4 +1,4 @@
-// 상수 ↔ 스케줄 테이블 동기화 — 구조도 폼과 게인 탭이 같은 값을 쓰는지
+// 상수 ↔ 스케줄 테이블 동기화 — 블록도 폼과 게인 탭이 같은 값을 쓰는지
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -77,7 +77,7 @@ test("스케줄 대상이 아닌 파라미터는 덧대기에서 살아남는다
 });
 
 test("SCAS 상수 편집이 워시아웃·클램프를 떨구지 않는다 — 게인 자리만 채우면 안 된다", () => {
-  // 구조도에서 아무것도 안 고친 상태에서 게인 탭이 요축 kp만 바꾼 경우
+  // 블록도에서 아무것도 안 고친 상태에서 게인 탭이 요축 kp만 바꾼 경우
   const after = withConstant(CATD, S("yaw.kp"), 0.9, {});
   assert.equal(after.scas.yaw.kp, 0.9);
   assert.equal(after.scas.yaw.washout_tau, 2.0, "워시아웃이 사라졌다 (서버가 0으로 채운다)");

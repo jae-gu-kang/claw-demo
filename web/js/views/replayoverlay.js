@@ -1,7 +1,7 @@
-/** 구조도 재생 오버레이 — 마지막 시뮬을 최상위 블록도 위에서 재생한다.
+/** 블록도 재생 오버레이 — 마지막 시뮬을 최상위 블록도 위에서 재생한다.
 
 블록마다 그 시각의 실제 신호값을 띄우고, α 리미터가 물리는 순간 그 블록을 붉게
-점멸시킨다. 구조도가 "무엇이 어떻게 연결됐나"(지도)에 더해 "지금 무슨 값이
+점멸시킨다. 블록도가 "무엇이 어떻게 연결됐나"(지도)에 더해 "지금 무슨 값이
 흐르나"(계기판)를 함께 말하게 하는 것이 목적.
 
 - 무엇을 어디에 띄울지는 lib/wiresignals.js가 정본 (블록 id ↔ SVG data-sig)
@@ -31,7 +31,7 @@ const VAL_FILL_OFF = "#aeaeb2";
 const reduceMotion = () =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/** 구조도 SVG에 재생을 붙인다 — {root: 컨트롤 줄, dispose}. */
+/** 블록도 SVG에 재생을 붙인다 — {root: 컨트롤 줄, dispose}. */
 export function createTopReplay({ svgRoot }) {
   const slots = new Map(); // 블록 id → <text data-sig>
   for (const node of svgRoot.querySelectorAll("[data-sig]")) {

@@ -90,7 +90,7 @@ export const SUBSYSTEMS = {
   <text class="pname" x="48" y="264">φ_cmd ← AP</text>
   <path class="wire" d="M66 232 H326" marker-end="url(#aw-scas)"/>
   <g class="sblk"><rect class="body" x="30" y="392" width="36" height="24" rx="12"/><text class="pnum" x="48" y="408">3</text></g>
-  <text class="pname" x="48" y="444">NavOutput (θ·φ·β · p·q·r)</text>
+  <text class="pname a-start" x="30" y="444">NavOutput (θ·φ·β · p·q·r)</text>
   <path class="wire" d="M66 404 H120 V146 H326" marker-end="url(#aw-scas)"/>
   <circle class="branch" cx="120" cy="366" r="3.2"/>
   <path class="wire" d="M120 366 H326" marker-end="url(#aw-scas)"/>
@@ -118,13 +118,13 @@ export const SUBSYSTEMS = {
   <!-- 출력 포트 -->
   <path class="wire" d="M630 122 H806" marker-end="url(#aw-scas)"/>
   <g class="sblk"><rect class="body" x="810" y="110" width="36" height="24" rx="12"/><text class="pnum" x="828" y="126">1</text></g>
-  <text class="pname" x="856" y="126">δe → 믹서</text>
+  <text class="pname a-start" x="856" y="126">δe → 믹서</text>
   <path class="wire" d="M630 232 H806" marker-end="url(#aw-scas)"/>
   <g class="sblk"><rect class="body" x="810" y="220" width="36" height="24" rx="12"/><text class="pnum" x="828" y="236">2</text></g>
-  <text class="pname" x="856" y="236">δa → 믹서</text>
+  <text class="pname a-start" x="856" y="236">δa → 믹서</text>
   <path class="wire" d="M630 342 H806" marker-end="url(#aw-scas)"/>
   <g class="sblk"><rect class="body" x="810" y="330" width="36" height="24" rx="12"/><text class="pnum" x="828" y="346">3</text></g>
-  <text class="pname" x="856" y="346">δr → 믹서</text>
+  <text class="pname a-start" x="856" y="346">δr → 믹서</text>
   <text class="canvas-note" x="24" y="462">※ 축 블록 클릭 → 내부 진입 (시뮬링크 더블클릭 대응) · 축 공통 평탄형 구조 [확정 M7] — 캐스케이드 아님 · θ·φ·β·p·q·r는 NavOutput 추출 — 참값 차단 계약</text>
 </svg>`,
     notes: `
@@ -165,13 +165,13 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">δe → 믹서</text>
   <g class="sblk"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
-  <text class="pname" x="164" y="186">θ (NavOutput)</text>
+  <text class="pname a-start" x="164" y="186">θ (NavOutput)</text>
   <path class="wire" d="M140 170 V118" marker-end="url(#aw-scp)"/>
   <g class="sblk"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
     <text class="ttl2" x="430" y="178" style="font-weight:700">× k_rate</text></g>
   <path class="wire" d="M430 156 V118" marker-end="url(#aw-scp)"/>
   <g class="sblk"><rect class="body" x="412" y="212" width="36" height="24" rx="12"/><text class="pnum" x="430" y="228">3</text></g>
-  <text class="pname" x="454" y="228">q (NavOutput)</text>
+  <text class="pname a-start" x="454" y="228">q (NavOutput)</text>
   <path class="wire" d="M430 212 V192" marker-end="url(#aw-scp)"/>
   <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text class="annot" x="786" y="204" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
@@ -217,13 +217,13 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">δa → 믹서</text>
   <g class="sblk"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
-  <text class="pname" x="164" y="186">φ (NavOutput)</text>
+  <text class="pname a-start" x="164" y="186">φ (NavOutput)</text>
   <path class="wire" d="M140 170 V118" marker-end="url(#aw-scr)"/>
   <g class="sblk"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
     <text class="ttl2" x="430" y="178" style="font-weight:700">× k_rate</text></g>
   <path class="wire" d="M430 156 V118" marker-end="url(#aw-scr)"/>
   <g class="sblk"><rect class="body" x="412" y="212" width="36" height="24" rx="12"/><text class="pnum" x="430" y="228">3</text></g>
-  <text class="pname" x="454" y="228">p (NavOutput)</text>
+  <text class="pname a-start" x="454" y="228">p (NavOutput)</text>
   <path class="wire" d="M430 212 V192" marker-end="url(#aw-scr)"/>
   <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text class="annot" x="786" y="204" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
@@ -320,7 +320,7 @@ export const SUBSYSTEMS = {
   <text class="pname" x="48" y="374">V_cmd ← 유도</text>
   <path class="wire" d="M66 342 H326" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="30" y="398" width="36" height="24" rx="12"/><text class="pnum" x="48" y="414">4</text></g>
-  <text class="pname" x="48" y="446">NavOutput (ψ · h·ḣ · V)</text>
+  <text class="pname a-start" x="30" y="446">NavOutput (ψ · h·ḣ · V)</text>
   <path class="wire" d="M66 410 H120 V146 H326" marker-end="url(#aw-ap)"/>
   <circle class="branch" cx="120" cy="366" r="3.2"/>
   <path class="wire" d="M120 366 H326" marker-end="url(#aw-ap)"/>
@@ -348,13 +348,13 @@ export const SUBSYSTEMS = {
   <!-- 출력 포트 -->
   <path class="wire" d="M630 122 H806" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="810" y="110" width="36" height="24" rx="12"/><text class="pnum" x="828" y="126">2</text></g>
-  <text class="pname" x="856" y="126">φ_cmd → SCAS 롤</text>
+  <text class="pname a-start" x="856" y="126">φ_cmd → SCAS 롤</text>
   <path class="wire" d="M630 232 H806" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="810" y="220" width="36" height="24" rx="12"/><text class="pnum" x="828" y="236">1</text></g>
-  <text class="pname" x="856" y="236">θ_cmd → α 리미터</text>
+  <text class="pname a-start" x="856" y="236">θ_cmd → α 리미터</text>
   <path class="wire" d="M630 342 H806" marker-end="url(#aw-ap)"/>
   <g class="sblk"><rect class="body" x="810" y="330" width="36" height="24" rx="12"/><text class="pnum" x="828" y="346">3</text></g>
-  <text class="pname" x="856" y="346">δt_cmd (0~1)</text>
+  <text class="pname a-start" x="856" y="346">δt_cmd (0~1)</text>
   <!-- 선회 FF — 주석 프레임 (실 배선·재클립은 채널 내부, 층3) -->
   <rect x="330" y="400" width="600" height="44" rx="8" fill="none" stroke="#b45309" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text class="annot" x="630" y="427" text-anchor="middle" fill="#b45309">선회 피드포워드 — |φ_cmd| 분기 → 고도(θ)·속도(δt) 채널 내부 가산 · 상세는 채널 클릭</text>
@@ -407,7 +407,7 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">φ_cmd → SCAS 롤</text>
   <g class="sblk"><rect class="body" x="240" y="158" width="36" height="24" rx="12"/><text class="pnum" x="258" y="174">2</text></g>
-  <text class="pname" x="282" y="174">ψ (NavOutput)</text>
+  <text class="pname a-start" x="282" y="174">ψ (NavOutput)</text>
   <path class="wire" d="M258 158 V118" marker-end="url(#aw-aph)"/>
   <path class="wire ff" d="M640 100 V180" marker-end="url(#af-aph)"/>
   <text class="siglabel" x="640" y="200">→ 선회 FF (고도·속도 채널 가산)</text>
@@ -463,14 +463,14 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="136">θ_cmd → α 리미터</text>
   <g class="sblk"><rect class="body" x="240" y="162" width="36" height="24" rx="12"/><text class="pnum" x="258" y="178">2</text></g>
-  <text class="pname" x="282" y="178">h = −z_n</text>
+  <text class="pname a-start" x="282" y="178">h = −z_n</text>
   <path class="wire" d="M258 162 V118" marker-end="url(#aw-apa)"/>
   <g class="sblk"><rect class="body" x="414" y="148" width="100" height="38" rx="3"/>
     <text class="ttl2" x="464" y="164" style="font-weight:700">× k_hdot</text>
     <text class="ttl2" x="464" y="180"><tspan data-p="k_hdot">−0.008</tspan> 승강률 댐핑</text></g>
   <path class="wire" d="M464 148 V118" marker-end="url(#aw-apa)"/>
   <g class="sblk"><rect class="body" x="446" y="210" width="36" height="24" rx="12"/><text class="pnum" x="464" y="226">3</text></g>
-  <text class="pname" x="490" y="226">ḣ = −v_z</text>
+  <text class="pname a-start" x="490" y="226">ḣ = −v_z</text>
   <path class="wire" d="M464 210 V186" marker-end="url(#aw-apa)"/>
   <path class="wire ff" d="M630 190 V118" marker-end="url(#af-apa)"/>
   <text class="siglabel" x="630" y="210">선회 FF 피치 — <tspan data-p="k_pitch_turn">0.05</tspan>·(1/cosφ−1)</text>
@@ -523,7 +523,7 @@ export const SUBSYSTEMS = {
   <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">δt_cmd (0~1)</text>
   <g class="sblk"><rect class="body" x="240" y="162" width="36" height="24" rx="12"/><text class="pnum" x="258" y="178">2</text></g>
-  <text class="pname" x="282" y="178">V = |v_n| — 바람 0</text>
+  <text class="pname a-start" x="282" y="178">V = |v_n| — 바람 0</text>
   <path class="wire" d="M258 162 V118" marker-end="url(#aw-aps)"/>
   <path class="wire ff" d="M630 190 V118" marker-end="url(#af-aps)"/>
   <text class="siglabel" x="560" y="210">선회 FF 스로틀 — <tspan data-p="k_thr_turn">0</tspan>·(1/cos²φ−1)</text>

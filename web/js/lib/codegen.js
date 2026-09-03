@@ -149,7 +149,7 @@ const ENTITIES = {
 };
 
 /** 설계 노트 HTML → 코드 주석 줄 목록.
-구조도 노트는 수작성 마크업이라 그대로 주석에 넣으면 태그가 코드에 샌다. */
+블록도 노트는 수작성 마크업이라 그대로 주석에 넣으면 태그가 코드에 샌다. */
 export function notesToComment(html) {
   if (!html) return [];
   return String(html)

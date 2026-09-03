@@ -7,7 +7,7 @@
 수치의 정본은 서버 /design/defaults(← 엔진 AutoDesignConfig) — 폼은 채운 칸만
 config 덮어쓰기로 보낸다. "게인 확정"은 결과의 호환 반출(재샘플 테이블)을 기존
 스토어 계약(`gainTables` + 출처 `gainTablesSource`)으로 주입한다 — 시뮬·Autocode·
-구조도·영향성이 그대로 소비하고, 게인 탭은 그것을 **되읽어** 표·차트로 보여 준다
+블록도·영향성이 그대로 소비하고, 게인 탭은 그것을 **되읽어** 표·차트로 보여 준다
 (자리마다 다른 breakpoint는 합집합 축으로 정렬 — lib/gainsched alignTables).
 
 스타일은 app.css 비접촉 — 심각도 색은 값으로 지정 (duty.js 선례).
@@ -476,7 +476,7 @@ function renderResult(box, body, resultId, ctx) {
       }
     }
     clear(adoptMsg).append(el("span", { class: "hint" },
-      " 확정됨 — 게인 탭·시뮬레이션·Autocode·구조도·영향성이 이 스케줄을 소비한다"
+      " 확정됨 — 게인 탭·시뮬레이션·Autocode·블록도·영향성이 이 스케줄을 소비한다"
       + " (Autocode 형상 지문이 바뀌는 것으로 확인된다)."
       + constNote
       + " 게인 탭은 자리마다 다른 breakpoint를 합집합 축으로 정렬해 보여 주며,"
@@ -548,7 +548,7 @@ function renderResult(box, body, resultId, ctx) {
       // 확정 버튼만 있고 그다음이 없으면 "자동 설계를 돌린 뒤 무엇을 하라는 건지"가
       // 화면 어디에도 없다 — 소비 순서를 여기서 밝힌다
       el("p", { class: "hint" },
-        "확정하면 이 스케줄이 게인 탭·시뮬레이션·마진·Autocode·구조도·영향성의 정본이 된다. "
+        "확정하면 이 스케줄이 게인 탭·시뮬레이션·마진·Autocode·블록도·영향성의 정본이 된다. "
         + "권장 순서: ① 게인 탭에서 곡선과 breakpoint를 확인한다(필요하면 편집 후 "
         + "[시뮬·코드에 적용] — 이 확정을 덮어쓴다) → ② 시뮬레이션 탭에서 비선형 응답을 "
         + "본다 → ③ 마진 탭에서 스케줄 게인으로 재검증한다 → ④ Autocode로 탑재 C를 "

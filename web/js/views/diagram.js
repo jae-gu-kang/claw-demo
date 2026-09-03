@@ -281,7 +281,7 @@ function buildTopSvg() {
   // P(u, v, undefined) → NaN → viewBox="NaN …" → 보드가 통째로 안 그려지는데
   // 테스트는 data-block 정규식만 보므로 전부 통과한다
   if (!vb.every(Number.isFinite)) {
-    throw new Error(`구조도 viewBox 계산 실패 (${vb.join(" ")}) — POS·BASE_Z 키 누락 의심`);
+    throw new Error(`블록도 viewBox 계산 실패 (${vb.join(" ")}) — POS·BASE_Z 키 누락 의심`);
   }
 
   // role="img"를 루트에 두면 하위가 presentational이 되어 블록·층 라벨의 role/label이

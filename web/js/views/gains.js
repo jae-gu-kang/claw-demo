@@ -9,7 +9,7 @@
 표현할 수 없어(서버가 422) store("gainScheduleOff")를 함께 쓴다 — 판단은
 lib/gainsched.js. 검증(그룹·키·형상·유한성)은 제출 시 서버/엔진이 수행.
 
-**끈 자리의 상수도 여기서 고친다.** 그 값은 구조도 폼과 같은 스토어
+**끈 자리의 상수도 여기서 고친다.** 그 값은 블록도 폼과 같은 스토어
 (scasParams·autopilotParams)에 살고, 어느 쪽에서 고쳐도 다른 쪽에 그대로 보여야
 한다 — 같은 게인이 화면마다 다르면 "지금 형상"이라는 말이 성립하지 않는다.
 켜고 끌 때도 값이 이어진다: 켜면 그 상수에서 출발하는 표가 서고, 끄면 그 표의
@@ -43,7 +43,7 @@ let seenOff;
 // 상수 드래프트의 '밖에서 바뀌었나' 판정 기준 (테이블과 같은 규약)
 let seenScas;
 let seenAp;
-// 끈 자리의 상수 드래프트 {scas, autopilot} — 구조도 폼과 같은 스토어를 쓰는 값이라
+// 끈 자리의 상수 드래프트 {scas, autopilot} — 블록도 폼과 같은 스토어를 쓰는 값이라
 // 테이블과 함께 '적용'에서 커밋한다 (여기만 즉시 반영되면 적용 전후가 갈린다)
 let constants = null;
 
@@ -58,7 +58,7 @@ export function render() {
 
   // 상수 드래프트를 **밖에서 바뀐 경우에만** 다시 읽는다 (테이블 드래프트와 같은 규약).
   //
-  // 그 사이 구조도에서 고친 값을 안 읽으면 여기서 '적용'하는 순간 옛 드래프트가 그
+  // 그 사이 블록도에서 고친 값을 안 읽으면 여기서 '적용'하는 순간 옛 드래프트가 그
   // 편집을 조용히 되돌린다 — 없애려던 이중 정본이 드래프트 층에서 되살아난다. 반대로
   // 매번 무조건 덮으면 여기서 고친 끈 자리 상수가 탭을 한 번 나갔다 오는 것만으로
   // 사라진다. 셀 편집은 살아남는데 상수만 되돌아가는 그 비대칭이 특히 혼란스럽다
@@ -103,7 +103,7 @@ export function render() {
     store.set("gainTablesSource", { kind: "gains" });
     markSeen();
     adopted = null; // 이제 이 화면이 곧 적용된 형상이다 — 되읽기 배너를 내린다
-    // 끈 자리의 상수 — 구조도 폼이 읽는 바로 그 스토어. 여기서 고친 값이 저기 보인다
+    // 끈 자리의 상수 — 블록도 폼이 읽는 바로 그 스토어. 여기서 고친 값이 저기 보인다
     if (constants?.scas) store.set("scasParams", constants.scas);
     if (constants?.autopilot) store.set("autopilotParams", constants.autopilot);
     statusLine.textContent = scheduleOff
@@ -118,7 +118,7 @@ export function render() {
     el("div", { class: "panel" },
       el("h2", {}, "게인 스케줄 (동압 스케일 1D mach — 설계점 M0.6)"),
       el("p", { class: "hint" },
-        "신호흐름 구조는 구조도 탭 — SCAS·게인 스케줄 블록에서 여기로 진입한다. ",
+        "신호흐름 구조는 블록도 탭 — SCAS·게인 스케줄 블록에서 여기로 진입한다. ",
         "스케줄 대상은 형상의 일부다 — 바꾸면 탑재 코드 구조와 형상 지문이 함께 바뀐다."),
       el("div", { class: "row" },
         el("button", {
@@ -169,7 +169,7 @@ function storeChanged() {
 /** 적용해 둔 형상(스토어)을 편집 상태로 **되읽는다** — 자동 설계 확정본 포함.
  *
  * 이 탭은 지금까지 스토어에 쓰기만 했다: 자동 설계가 확정한 스케줄이 시뮬·Autocode
- * ·구조도에는 걸려 있는데 정작 게인 화면만 서버 제안을 보여 줬다. 적용된 형상과
+ * ·블록도에는 걸려 있는데 정작 게인 화면만 서버 제안을 보여 줬다. 적용된 형상과
  * 보이는 형상이 다르면 "지금 형상"이라는 말이 성립하지 않는다.
  *
  * 확정본은 자리마다 breakpoint가 다르므로(적합이 자리별 독립) 합집합 축으로 정렬해
@@ -224,7 +224,7 @@ function adoptedText(a) {
 
 /** 스케줄 자리 격자 — 켜고/끄기 + **끈 자리의 상수 편집**.
  *
- * 끈 자리의 숫자는 표시가 아니라 값이다 — 구조도 폼과 같은 스토어에 살고, 여기서
+ * 끈 자리의 숫자는 표시가 아니라 값이다 — 블록도 폼과 같은 스토어에 살고, 여기서
  * 고치면 저기 보인다. 켠 자리는 아래 표가 정본이라 설계점 값만 읽기로 보여 준다
  * (여기서도 고칠 수 있으면 한 게인에 편집처가 둘이 된다).
  * 불가 자리는 빈칸이 아니라 사유를 단 "—"다 (빈칸은 버그로 읽힌다). */
@@ -262,7 +262,7 @@ function slotGrid(box, statusLine) {
       return el("label", { title: `${title}\n켠 자리 — 표가 정본. 끄면 표의 설계점 값으로 굳는다` },
         toggle, el("span", { class: "hint" }, ` ${fmt(cur, 3)} ▸표`));
     }
-    return el("label", { title: `${title}\n끈 자리 — 이 상수가 값이다 (구조도 폼과 같은 값)` },
+    return el("label", { title: `${title}\n끈 자리 — 이 상수가 값이다 (블록도 폼과 같은 값)` },
       toggle,
       el("input", {
         class: "num-sm", type: "text", value: String(cur),
@@ -293,7 +293,7 @@ function slotGrid(box, statusLine) {
         ))))),
     el("p", { class: "hint" },
       `${schedSummary(catalog, selected)}. 칸의 수치는 설계점(${axisLabel()}) 값이다 — `,
-      "끈 자리는 입력칸이고 그 값이 곧 상수다 — 구조도 폼과 같은 값이다. ",
+      "끈 자리는 입력칸이고 그 값이 곧 상수다 — 블록도 폼과 같은 값이다. ",
       "켠 자리는 아래 표가 정본이라 읽기 전용 — 끄면 표의 설계점 값으로 굳고 ",
       "탑재 코드에서 룩업이 사라진다. 속도·헤딩의 k_rate는 그 축에 rate 입력이 없어 구조상 불가."),
     zeros.length

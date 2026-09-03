@@ -1,11 +1,11 @@
-/** 상수 ↔ 스케줄 테이블 — 같은 게인을 구조도 폼과 게인 탭이 함께 쓰게 하는 층.
+/** 상수 ↔ 스케줄 테이블 — 같은 게인을 블록도 폼과 게인 탭이 함께 쓰게 하는 층.
 
 한 게인 자리는 두 상태 중 하나다.
 
 - **스케줄 OFF** — 값은 스칼라 상수이고, 정본은 컴포넌트 kwargs 스토어
-  (`scasParams` / `autopilotParams`)다. 구조도 폼과 게인 탭 자리 격자가 **같은
+  (`scasParams` / `autopilotParams`)다. 블록도 폼과 게인 탭 자리 격자가 **같은
   값을 읽고 쓴다** — 어느 쪽에서 고쳐도 다른 쪽에 그대로 보여야 한다.
-- **스케줄 ON** — 값은 테이블이고 정본은 `gainTables`다. 구조도는 그 자리를 잠그고
+- **스케줄 ON** — 값은 테이블이고 정본은 `gainTables`다. 블록도는 그 자리를 잠그고
   설계점 값만 보여 준다. 안 잠그면 폼 상수와 룩업이 둘 다 "값"인 척하는데
   실행 시점에는 룩업이 이긴다 (fcl/graphs.py — 스케줄 포트가 있으면 상수 Gain
   대신 Product 노드가 선다).
@@ -66,7 +66,7 @@ export function withConstant(catalog, slot, value, params) {
  *
  * 카탈로그가 아는 것은 게인 자리뿐이다 — washout_tau·클램프·명령필터처럼 스케줄
  * 대상이 아닌 파라미터는 스토어에 있으면 그대로 살아남고, 없으면 여기서도 비어
- * 있다(그 자리는 구조도 폼이 스키마 기본값으로 채운다). */
+ * 있다(그 자리는 블록도 폼이 스키마 기본값으로 채운다). */
 export function fullConstants(catalog, params) {
   // SCAS는 게인 자리(kp·ki·k_rate)만 채우면 모자란다 — washout_tau·클램프가 빠진 채
   // 주입되면 서버 ParamDef 기본값(0·±무제한)이 들어차서 워시아웃과 출력 한계가
@@ -115,7 +115,7 @@ export function scasKwargs(catalog, stored) {
 
 /** 그 블록·그룹에서 **스케줄이 덮고 있는** 파라미터 이름 → 자리 이름.
  *
- * 구조도 폼이 잠글 입력을 고르는 데 쓴다. group을 안 주면 블록 전체(AP는 그룹이
+ * 블록도 폼이 잠글 입력을 고르는 데 쓴다. group을 안 주면 블록 전체(AP는 그룹이
  * 셋이지만 kwargs는 한 벌이라 group 구분이 없다). */
 export function lockedParams(catalog, selected, block, group = null) {
   const want = new Set(selected ?? []);

@@ -21,7 +21,7 @@ export const AP_KEY = "fcl/Autopilot";
 export const SCAS_KEY = "fcl/ScasAxis";
 
 /** SCAS 축 — 서버 req.scas가 **세 축 전부**를 요구한다(부분 주입은 422). 그래서
- * 한 축만 띄운 패널(구조도 축 페이지의 [코드 생성])은 scas를 아예 안 보내고 설계
+ * 한 축만 띄운 패널(블록도 축 페이지의 [코드 생성])은 scas를 아예 안 보내고 설계
  * 기본 형상을 보여 준다 — 422를 띄우는 것보다 낫고, 그 패널이 말할 수 있는 것도
  * 그 축 하나뿐이다. 축 이름의 정본은 엔진(fcl/graphs.py SCHEDULABLE)이고 서버가
  * 최종 판정한다 — 여기 목록이 낡으면 스냅샷이 조용히 scas를 빼먹는다. */

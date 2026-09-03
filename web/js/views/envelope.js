@@ -243,7 +243,7 @@ export function render() {
   return root;
 }
 
-// 애플 시스템 팔레트 — 존은 옅은 틴트, 경계선은 시스템 컬러 (구조도와 동일 언어)
+// 애플 시스템 팔레트 — 존은 옅은 틴트, 경계선은 시스템 컬러 (블록도와 동일 언어)
 const C = {
   ok: "#e4f8ea", stallZone: "#f2f2f7", caution: "#fdf7e0",
   damage: "#ffefdd", failure: "#fdeaea",

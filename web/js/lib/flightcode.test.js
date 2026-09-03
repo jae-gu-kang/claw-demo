@@ -35,7 +35,7 @@ test("SCAS는 세 축이 다 있을 때만 실린다 — 부분 주입은 서버
   const full = flightRequest(SCAS_SPECS, null);
   assert.deepEqual(Object.keys(full.scas).sort(), [...SCAS_GROUPS].sort());
   assert.deepEqual(full.scas.pitch, { kp: 1, ki: 0.0 });
-  // 축 하나짜리 패널(구조도 축 페이지 [코드 생성])은 설계 기본 형상을 보여 준다
+  // 축 하나짜리 패널(블록도 축 페이지 [코드 생성])은 설계 기본 형상을 보여 준다
   assert.ok(!("scas" in flightRequest([scasSpec("pitch", 1)], null)));
   assert.ok(!("scas" in flightRequest([AP_SPEC], null)));
 });

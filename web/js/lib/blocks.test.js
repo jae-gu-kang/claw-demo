@@ -367,7 +367,7 @@ test("서브시스템 SVG data-p는 루트 블록 스키마 파라미터명만 (
 test("헤더 탭이 전부 실제 라우트다 — 죽은 탭 금지", () => {
   assert.ok(NAV_HASHES.length >= 8, `nav 링크 ${NAV_HASHES.length}개 — 파싱 실패?`);
   for (const h of NAV_HASHES) {
-    assert.ok(VIEW_HASHES.has(h), `#${h} 탭이 main.js VIEWS에 없다 (누르면 구조도로 폴백)`);
+    assert.ok(VIEW_HASHES.has(h), `#${h} 탭이 main.js VIEWS에 없다 (누르면 블록도로 폴백)`);
   }
   assert.ok(VIEW_HASHES.has("autocode"), "AUTO CODE 라우트 누락");
 });

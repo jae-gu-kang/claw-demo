@@ -221,7 +221,7 @@ export function render() {
   const modeBox = el("div");
   const wpBox = el("div");
 
-  // 구조도 탭 '시뮬에 적용' 값 — 작동기는 필드에 프리필(최종 편집권은 여기),
+  // 블록도 탭 '시뮬에 적용' 값 — 작동기는 필드에 프리필(최종 편집권은 여기),
   // 항법은 제출 시 병합 (시드만 이 탭이 우선, 나머지 미지정분은 엔진 기본값)
   const actApplied = store.get("actuatorParams");
   const f = {
@@ -516,7 +516,7 @@ export function render() {
         if (f.rtkOn.checked) req.nav_grade = "rtk";
       }
       if (f.actOn.checked) {
-        // 구조도 작동기 블록 적용값(pos 한계·initial 포함) 위에 이 탭 필드가 최종 덮어씀
+        // 블록도 작동기 블록 적용값(pos 한계·initial 포함) 위에 이 탭 필드가 최종 덮어씀
         req.actuators = { ...(store.get("actuatorParams") ?? {}),
                           wn: Number(f.wn.value), zeta: Number(f.zeta.value),
                           rate_max: Number(f.rate.value) };
@@ -528,14 +528,14 @@ export function render() {
         else missing.push("편집 게인 (게인 탭 '시뮬에 적용' 필요)");
       }
       if (f.useAp.checked) {
-        // 구조도 AP 블록 편집값 (전체 kwargs)
+        // 블록도 AP 블록 편집값 (전체 kwargs)
         if (store.get("autopilotParams")) req.autopilot = store.get("autopilotParams");
-        else missing.push("편집 AP (구조도 탭 오토파일럿 블록 '시뮬에 적용' 필요)");
+        else missing.push("편집 AP (블록도 탭 오토파일럿 블록 '시뮬에 적용' 필요)");
       }
       if (f.useScas.checked) {
-        // 구조도 SCAS 축 편집값 — 세 축이 한 벌이다 (서버가 부분 주입을 거부한다)
+        // 블록도 SCAS 축 편집값 — 세 축이 한 벌이다 (서버가 부분 주입을 거부한다)
         if (store.get("scasParams")) req.scas = store.get("scasParams");
-        else missing.push("편집 SCAS (구조도 탭 SCAS 축 페이지 '시뮬에 적용' 필요)");
+        else missing.push("편집 SCAS (블록도 탭 SCAS 축 페이지 '시뮬에 적용' 필요)");
       }
       if (missing.length) {
         errBox.append(el("div", { class: "error-box" },
@@ -630,8 +630,8 @@ export function render() {
           el("div", { class: "row-inner", style: INNER_ST },
             el("label", { class: "chk" }, f.rtkOn, " RTK 고정해")),
           el("p", { class: "hint", style: HINT_ST }, store.get("navParams")
-            ? "구조도 적용값 사용 중 (시드만 여기서 우선). "
-            : "미지정 항목은 엔진 기본값 — 편집은 구조도 탭 항법 블록. ",
+            ? "블록도 적용값 사용 중 (시드만 여기서 우선). "
+            : "미지정 항목은 엔진 기본값 — 편집은 블록도 탭 항법 블록. ",
             "RTK는 접지를 부드럽게 하지 않습니다 — 접지 지점을 반복 가능하게 합니다. ",
             `활주로 ${GOHEUNG.runwayLengthM} m라도 미끄럼 ${GOHEUNG.rolloutM} m는 `,
             `굴러가므로, 활주로 안에 서려면 ${touchdownWindowM()} m 안에 접지해야 `,
@@ -653,8 +653,8 @@ export function render() {
             field("ζ", f.zeta),
             field("rate [rad/s]", f.rate)),
           el("p", { class: "hint", style: HINT_ST }, actApplied
-            ? "구조도 적용값 프리필됨 — 여기 값이 최종"
-            : "구조도 탭에서 '시뮬에 적용' 시 프리필")),
+            ? "블록도 적용값 프리필됨 — 여기 값이 최종"
+            : "블록도 탭에서 '시뮬에 적용' 시 프리필")),
         el("div", { class: "opt-group", style: GROUP_ST },
           el("div", { class: "g-title" }, "유도 · 연료 · 게인"),
           el("div", { class: "row-inner", style: INNER_ST },
@@ -695,7 +695,7 @@ export function render() {
         el("button", { class: "primary", onclick: run }, "시뮬 실행"),
         el("span", { class: "hint" },
           "작동기 rate ≥ 10 rad/s 요구 [도출 사양] (01 v0.13) · 편집 게인은 게인 탭, ",
-          "편집 AP는 구조도 탭 오토파일럿 블록에서 '시뮬에 적용' 후 사용")),
+          "편집 AP는 블록도 탭 오토파일럿 블록에서 '시뮬에 적용' 후 사용")),
       progressBox, errBox,
     ),
     el("div", { class: "panel" }, el("h2", {}, "재생 + 엔벨로프 감시"), replayBox),

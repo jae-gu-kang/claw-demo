@@ -5,7 +5,7 @@
 
 게인 채택은 기존 스토어 계약(gains 탭 storePayload — {tables, scheduleOff})으로
 낸다. v1은 **재샘플 테이블**(gain_export.tables_resampled)을 주입한다 — 다항
-정본(kind='poly')은 서버 sim/codegen이 직접 받지만, 웹 스토어 소비자(구조도
+정본(kind='poly')은 서버 sim/codegen이 직접 받지만, 웹 스토어 소비자(블록도
 표시·influence·웹 코드 미리보기)가 테이블 형상을 전제하므로 스토어 경유는
 호환 반출을 쓴다 (다항 스토어 채택은 [백로그] — docs -01 §3.4).
 

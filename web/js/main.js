@@ -15,7 +15,7 @@ import * as sim from "./views/sim.js";
 import * as trim from "./views/trim.js";
 import * as world from "./views/world.js";
 
-// 구조도(블록 다이어그램 허브)가 진입점 — 블록 클릭으로 각 편집 화면 진입 (02 §4)
+// 블록도(블록 다이어그램 허브)가 진입점 — 블록 클릭으로 각 편집 화면 진입 (02 §4)
 const VIEWS = {
   blocks, envelope, trim, gains, margins, autodesign, sim, duty, world, autocode,
   influence, results,
