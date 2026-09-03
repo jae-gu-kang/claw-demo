@@ -61,12 +61,12 @@ const SCAS_PI_PAGE = {
   svg: `
 <svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-pi" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="138" width="36" height="24" rx="12"/><text class="pnum" x="48" y="154">1</text></g>
+  <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="30" y="138" width="36" height="24" rx="12"/><text class="pnum" x="48" y="154">1</text></g>
   <text class="pname" x="48" y="182">e (자세 오차)</text>
   <path class="wire" d="M66 150 H146"/>
   <circle class="branch" cx="150" cy="150" r="3.2"/>
   <path class="wire" d="M150 150 V86 H196" marker-end="url(#aw-pi)"/>
-  <g class="sblk"><rect class="body" x="200" y="60" width="150" height="52" rx="3"/>
+  <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="200" y="60" width="150" height="52" rx="3"/>
     <text class="ttl" x="275" y="82" style="font-size:13px">× kp</text>
     <text class="ttl2" x="275" y="100">비례항</text></g>
   <path class="wire" d="M350 86 H480 V132" marker-end="url(#aw-pi)"/>
@@ -75,14 +75,14 @@ const SCAS_PI_PAGE = {
     <text class="ttl" x="325" y="214" style="font-size:13px">적분기 (클램프 AW)</text>
     <text class="ttl2" x="325" y="236">I ← clip(I + dt·ki·e, out_lo~hi)</text></g>
   <path class="wire" d="M450 222 H480 V168" marker-end="url(#aw-pi)"/>
-  <circle class="body" cx="480" cy="150" r="14"/>
+  <circle class="body" data-code="blocks/controllers.py:PID.step" cx="480" cy="150" r="14"/>
   <text class="sumsign" x="480" y="143">+</text><text class="sumsign" x="480" y="163">+</text>
   <path class="wire" d="M494 150 H526" marker-end="url(#aw-pi)"/>
-  <g class="sblk"><rect class="body" x="530" y="124" width="110" height="52" rx="3"/>
+  <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="530" y="124" width="110" height="52" rx="3"/>
     <path d="M542 166 H558 L612 134 H628" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="585" y="194">출력 클립 out_lo~hi</text>
   <path class="wire" d="M640 150 H726" marker-end="url(#aw-pi)"/>
-  <g class="sblk"><rect class="body" x="730" y="138" width="36" height="24" rx="12"/><text class="pnum" x="748" y="154">1</text></g>
+  <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="730" y="138" width="36" height="24" rx="12"/><text class="pnum" x="748" y="154">1</text></g>
   <text class="pname" x="748" y="182">u_PI → k_rate 합산</text>
   <text class="canvas-note" x="24" y="290">※ 안티와인드업 = 적분 '상태' 자체를 out_lo~hi로 클램프 — 포화 해제 시 즉시 복귀 · 이산화: 전진 오일러, dt는 제어주기에서 자동 [확정 §3.5]</text>
   <text class="canvas-note" x="24" y="308">※ kp·ki는 게인 스케줄이 스텝 인자로 덮어씀 (생성 후 게인 변경은 이 경로만) · 재관여 시 reset(state) 적분 웜스타트 [범프리스 계약]</text>
@@ -114,13 +114,13 @@ export const SUBSYSTEMS = {
   <text class="annot" x="786" y="42" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
   <text class="annot" x="786" y="62" text-anchor="middle">스텝별 덮어쓰기 (정본 = 게인 탭 테이블)</text>
   <!-- 입력 포트 -->
-  <g class="sblk"><rect class="body" x="30" y="110" width="36" height="24" rx="12"/><text class="pnum" x="48" y="126">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="30" y="110" width="36" height="24" rx="12"/><text class="pnum" x="48" y="126">1</text></g>
   <text class="pname" x="48" y="154">θ_cmd ← α 리미터</text>
   <path class="wire" d="M66 122 H326" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="30" y="220" width="36" height="24" rx="12"/><text class="pnum" x="48" y="236">2</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="30" y="220" width="36" height="24" rx="12"/><text class="pnum" x="48" y="236">2</text></g>
   <text class="pname" x="48" y="264">φ_cmd ← AP</text>
   <path class="wire" d="M66 232 H326" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="30" y="392" width="36" height="24" rx="12"/><text class="pnum" x="48" y="408">3</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="30" y="392" width="36" height="24" rx="12"/><text class="pnum" x="48" y="408">3</text></g>
   <text class="pname a-start" x="30" y="444">NavOutput (θ·φ·β · p·q·r)</text>
   <path class="wire" d="M66 404 H120 V146 H326" marker-end="url(#aw-scas)"/>
   <circle class="branch" cx="120" cy="366" r="3.2"/>
@@ -148,13 +148,13 @@ export const SUBSYSTEMS = {
   </g>
   <!-- 출력 포트 -->
   <path class="wire" d="M630 122 H806" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="810" y="110" width="36" height="24" rx="12"/><text class="pnum" x="828" y="126">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="810" y="110" width="36" height="24" rx="12"/><text class="pnum" x="828" y="126">1</text></g>
   <text class="pname a-start" x="856" y="126">δe → 믹서</text>
   <path class="wire" d="M630 232 H806" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="810" y="220" width="36" height="24" rx="12"/><text class="pnum" x="828" y="236">2</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="810" y="220" width="36" height="24" rx="12"/><text class="pnum" x="828" y="236">2</text></g>
   <text class="pname a-start" x="856" y="236">δa → 믹서</text>
   <path class="wire" d="M630 342 H806" marker-end="url(#aw-scas)"/>
-  <g class="sblk"><rect class="body" x="810" y="330" width="36" height="24" rx="12"/><text class="pnum" x="828" y="346">3</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="810" y="330" width="36" height="24" rx="12"/><text class="pnum" x="828" y="346">3</text></g>
   <text class="pname a-start" x="856" y="346">δr → 믹서</text>
   <text class="canvas-note" x="24" y="462">※ 축 블록 클릭 → 내부 진입 (시뮬링크 더블클릭 대응) · 축 공통 평탄형 구조 [확정 M7] — 캐스케이드 아님 · θ·φ·β·p·q·r는 NavOutput 추출 — 참값 차단 계약</text>
 </svg>`,
@@ -174,10 +174,10 @@ export const SUBSYSTEMS = {
         svg: `
 <svg viewBox="0 0 960 320" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-scp" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="132">θ_cmd ← α 리미터</text>
   <path class="wire" d="M66 100 H122" marker-end="url(#aw-scp)"/>
-  <circle class="body" cx="140" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/scas.py:ScasAxis.step" cx="140" cy="100" r="14"/>
   <text class="sumsign" x="131" y="104">+</text><text class="sumsign" x="140" y="113">−</text>
   <path class="wire" d="M154 100 H186" marker-end="url(#aw-scp)"/>
   <g class="blk" data-child="pi" data-code="blocks/controllers.py:PID" tabindex="0">
@@ -186,22 +186,22 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
   </g>
   <path class="wire" d="M380 100 H412" marker-end="url(#aw-scp)"/>
-  <circle class="body" cx="430" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/scas.py:ScasAxis.step" cx="430" cy="100" r="14"/>
   <text class="sumsign" x="421" y="104">+</text><text class="sumsign" x="430" y="113">+</text>
   <path class="wire" d="M444 100 H476" marker-end="url(#aw-scp)"/>
-  <g class="sblk"><rect class="body" x="480" y="74" width="110" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="480" y="74" width="110" height="52" rx="3"/>
     <path d="M492 116 H508 L562 84 H578" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="535" y="144">최종 클립 out_lo~hi</text>
   <path class="wire" d="M590 100 H806" marker-end="url(#aw-scp)"/>
-  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">δe → 믹서</text>
-  <g class="sblk"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
   <text class="pname a-start" x="164" y="186">θ (NavOutput)</text>
   <path class="wire" d="M140 170 V118" marker-end="url(#aw-scp)"/>
-  <g class="sblk"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
     <text class="ttl2" x="430" y="178" style="font-weight:700">× k_rate</text></g>
   <path class="wire" d="M430 156 V118" marker-end="url(#aw-scp)"/>
-  <g class="sblk"><rect class="body" x="412" y="212" width="36" height="24" rx="12"/><text class="pnum" x="430" y="228">3</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="412" y="212" width="36" height="24" rx="12"/><text class="pnum" x="430" y="228">3</text></g>
   <text class="pname a-start" x="454" y="228">q (NavOutput)</text>
   <path class="wire" d="M430 212 V192" marker-end="url(#aw-scp)"/>
   <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
@@ -225,10 +225,10 @@ export const SUBSYSTEMS = {
         svg: `
 <svg viewBox="0 0 960 320" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-scr" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="132">φ_cmd ← AP</text>
   <path class="wire" d="M66 100 H122" marker-end="url(#aw-scr)"/>
-  <circle class="body" cx="140" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/scas.py:ScasAxis.step" cx="140" cy="100" r="14"/>
   <text class="sumsign" x="131" y="104">+</text><text class="sumsign" x="140" y="113">−</text>
   <text class="siglabel" x="140" y="72">wrap ±π</text>
   <path class="wire" d="M154 100 H186" marker-end="url(#aw-scr)"/>
@@ -238,22 +238,22 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
   </g>
   <path class="wire" d="M380 100 H412" marker-end="url(#aw-scr)"/>
-  <circle class="body" cx="430" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/scas.py:ScasAxis.step" cx="430" cy="100" r="14"/>
   <text class="sumsign" x="421" y="104">+</text><text class="sumsign" x="430" y="113">+</text>
   <path class="wire" d="M444 100 H476" marker-end="url(#aw-scr)"/>
-  <g class="sblk"><rect class="body" x="480" y="74" width="110" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="480" y="74" width="110" height="52" rx="3"/>
     <path d="M492 116 H508 L562 84 H578" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="535" y="144">최종 클립 out_lo~hi</text>
   <path class="wire" d="M590 100 H806" marker-end="url(#aw-scr)"/>
-  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">δa → 믹서</text>
-  <g class="sblk"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
   <text class="pname a-start" x="164" y="186">φ (NavOutput)</text>
   <path class="wire" d="M140 170 V118" marker-end="url(#aw-scr)"/>
-  <g class="sblk"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
     <text class="ttl2" x="430" y="178" style="font-weight:700">× k_rate</text></g>
   <path class="wire" d="M430 156 V118" marker-end="url(#aw-scr)"/>
-  <g class="sblk"><rect class="body" x="412" y="212" width="36" height="24" rx="12"/><text class="pnum" x="430" y="228">3</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="412" y="212" width="36" height="24" rx="12"/><text class="pnum" x="430" y="228">3</text></g>
   <text class="pname a-start" x="454" y="228">p (NavOutput)</text>
   <path class="wire" d="M430 212 V192" marker-end="url(#aw-scr)"/>
   <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
@@ -277,10 +277,10 @@ export const SUBSYSTEMS = {
         svg: `
 <svg viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-scy" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="132">β (사이드슬립)</text>
   <path class="wire" d="M66 100 H96" marker-end="url(#aw-scy)"/>
-  <g class="sblk"><rect class="body" x="100" y="74" width="70" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="100" y="74" width="70" height="52" rx="3"/>
     <text class="ttl" x="135" y="96" style="font-size:13px">× −1</text>
     <text class="ttl2" x="135" y="114">명령 없음</text></g>
   <path class="wire" d="M170 100 H186" marker-end="url(#aw-scy)"/>
@@ -290,23 +290,23 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
   </g>
   <path class="wire" d="M380 100 H412" marker-end="url(#aw-scy)"/>
-  <circle class="body" cx="430" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/scas.py:ScasAxis.step" cx="430" cy="100" r="14"/>
   <text class="sumsign" x="421" y="104">+</text><text class="sumsign" x="430" y="113">+</text>
   <path class="wire" d="M444 100 H476" marker-end="url(#aw-scy)"/>
-  <g class="sblk"><rect class="body" x="480" y="74" width="110" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="480" y="74" width="110" height="52" rx="3"/>
     <path d="M492 116 H508 L562 84 H578" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="535" y="144">최종 클립 out_lo~hi</text>
   <path class="wire" d="M590 100 H806" marker-end="url(#aw-scy)"/>
-  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">δr → 믹서</text>
-  <g class="sblk"><rect class="body" x="30" y="196" width="36" height="24" rx="12"/><text class="pnum" x="48" y="212">2</text></g>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="30" y="196" width="36" height="24" rx="12"/><text class="pnum" x="48" y="212">2</text></g>
   <text class="pname" x="48" y="240">r (NavOutput)</text>
   <path class="wire" d="M66 208 H96" marker-end="url(#aw-scy)"/>
-  <g class="sblk"><rect class="body" x="100" y="182" width="170" height="52" rx="3"/>
+  <g class="sblk" data-code="blocks/filters.py:Washout"><rect class="body" x="100" y="182" width="170" height="52" rx="3"/>
     <text class="ttl" x="185" y="204" style="font-size:13px">워시아웃 τs/(τs+1)</text>
     <text class="ttl2" x="185" y="222">정상 r 제거 — 선회 유지</text></g>
   <path class="wire" d="M270 208 H294" marker-end="url(#aw-scy)"/>
-  <g class="sblk"><rect class="body" x="298" y="190" width="84" height="36" rx="3"/>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="298" y="190" width="84" height="36" rx="3"/>
     <text class="ttl2" x="340" y="212" style="font-weight:700">× k_rate</text></g>
   <path class="wire" d="M382 208 H430 V118" marker-end="url(#aw-scy)"/>
   <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
@@ -341,16 +341,16 @@ export const SUBSYSTEMS = {
   <text class="annot" x="776" y="38" text-anchor="middle">게인 스케줄링 주입 — speed·alt·heading 그룹</text>
   <text class="annot" x="776" y="58" text-anchor="middle">kp·ki 스텝별 덮어쓰기 (정본 = 게인 탭)</text>
   <!-- 입력 포트 (헤딩이 위 — φ_cmd를 선회 FF가 소비) -->
-  <g class="sblk"><rect class="body" x="30" y="110" width="36" height="24" rx="12"/><text class="pnum" x="48" y="126">3</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="30" y="110" width="36" height="24" rx="12"/><text class="pnum" x="48" y="126">3</text></g>
   <text class="pname" x="48" y="154">ψ_cmd ← 유도</text>
   <path class="wire" d="M66 122 H326" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="30" y="220" width="36" height="24" rx="12"/><text class="pnum" x="48" y="236">2</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="30" y="220" width="36" height="24" rx="12"/><text class="pnum" x="48" y="236">2</text></g>
   <text class="pname" x="48" y="264">h_cmd ← 유도</text>
   <path class="wire" d="M66 232 H326" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="30" y="330" width="36" height="24" rx="12"/><text class="pnum" x="48" y="346">1</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="30" y="330" width="36" height="24" rx="12"/><text class="pnum" x="48" y="346">1</text></g>
   <text class="pname" x="48" y="374">V_cmd ← 유도</text>
   <path class="wire" d="M66 342 H326" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="30" y="398" width="36" height="24" rx="12"/><text class="pnum" x="48" y="414">4</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="30" y="398" width="36" height="24" rx="12"/><text class="pnum" x="48" y="414">4</text></g>
   <text class="pname a-start" x="30" y="446">NavOutput (ψ · h·ḣ · V)</text>
   <path class="wire" d="M66 410 H120 V146 H326" marker-end="url(#aw-ap)"/>
   <circle class="branch" cx="120" cy="366" r="3.2"/>
@@ -378,13 +378,13 @@ export const SUBSYSTEMS = {
   </g>
   <!-- 출력 포트 -->
   <path class="wire" d="M630 122 H806" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="810" y="110" width="36" height="24" rx="12"/><text class="pnum" x="828" y="126">2</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="810" y="110" width="36" height="24" rx="12"/><text class="pnum" x="828" y="126">2</text></g>
   <text class="pname a-start" x="856" y="126">φ_cmd → SCAS 롤</text>
   <path class="wire" d="M630 232 H806" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="810" y="220" width="36" height="24" rx="12"/><text class="pnum" x="828" y="236">1</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="810" y="220" width="36" height="24" rx="12"/><text class="pnum" x="828" y="236">1</text></g>
   <text class="pname a-start" x="856" y="236">θ_cmd → α 리미터</text>
   <path class="wire" d="M630 342 H806" marker-end="url(#aw-ap)"/>
-  <g class="sblk"><rect class="body" x="810" y="330" width="36" height="24" rx="12"/><text class="pnum" x="828" y="346">3</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="810" y="330" width="36" height="24" rx="12"/><text class="pnum" x="828" y="346">3</text></g>
   <text class="pname a-start" x="856" y="346">δt_cmd (0~1)</text>
   <!-- 선회 FF — 주석 프레임 (실 배선·재클립은 채널 내부, 층3) -->
   <rect x="330" y="400" width="600" height="44" rx="8" fill="none" stroke="#b45309" stroke-width="1.4" stroke-dasharray="6 4"/>
@@ -414,15 +414,15 @@ export const SUBSYSTEMS = {
     <marker id="aw-aph" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
     <marker id="af-aph" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b45309"/></marker>
   </defs>
-  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="132">ψ_cmd ← 유도</text>
   <path class="wire" d="M66 100 H96" marker-end="url(#aw-aph)"/>
-  <g class="sblk"><rect class="body" x="100" y="74" width="118" height="52" rx="3"/>
+  <g class="sblk" data-code="blocks/filters.py:CommandFilter"><rect class="body" x="100" y="74" width="118" height="52" rx="3"/>
     <text class="ttl" x="159" y="93" style="font-size:13px">명령필터 wrap</text>
     <text class="ttl2" x="159" y="111">τ <tspan data-p="tau_hdg">1</tspan> s · 최단경로</text></g>
   <text class="siglabel" x="159" y="144">off: ψ 추적 · 적분 소거 · φ_cmd=0</text>
   <path class="wire" d="M218 100 H240" marker-end="url(#aw-aph)"/>
-  <circle class="body" cx="258" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/autopilot.py:Autopilot.step" cx="258" cy="100" r="14"/>
   <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
   <text class="siglabel" x="258" y="70">wrap ±π</text>
   <path class="wire" d="M272 100 H296" marker-end="url(#aw-aph)"/>
@@ -430,14 +430,14 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="375" y="93" style="font-size:13px">헤딩 PI — 클램프 AW</text>
     <text class="ttl2" x="375" y="111">kp <tspan data-p="kp_hdg">4</tspan> · ki <tspan data-p="ki_hdg">0</tspan></text></g>
   <path class="wire" d="M450 100 H478" marker-end="url(#aw-aph)"/>
-  <g class="sblk"><rect class="body" x="482" y="74" width="96" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="482" y="74" width="96" height="52" rx="3"/>
     <path d="M492 116 H506 L554 84 H568" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="530" y="144">클립 ±<tspan data-p="phi_max">0.7</tspan> rad</text>
   <path class="wire" d="M578 100 H806" marker-end="url(#aw-aph)"/>
   <circle class="branch" cx="640" cy="100" r="3.2"/>
-  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">φ_cmd → SCAS 롤</text>
-  <g class="sblk"><rect class="body" x="240" y="158" width="36" height="24" rx="12"/><text class="pnum" x="258" y="174">2</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="240" y="158" width="36" height="24" rx="12"/><text class="pnum" x="258" y="174">2</text></g>
   <text class="pname a-start" x="282" y="174">ψ (NavOutput)</text>
   <path class="wire" d="M258 158 V118" marker-end="url(#aw-aph)"/>
   <path class="wire ff" d="M640 100 V180" marker-end="url(#af-aph)"/>
@@ -462,45 +462,45 @@ export const SUBSYSTEMS = {
     <marker id="aw-apa" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
     <marker id="af-apa" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b45309"/></marker>
   </defs>
-  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="132">h_cmd ← 유도</text>
   <path class="wire" d="M66 100 H96" marker-end="url(#aw-apa)"/>
-  <g class="sblk"><rect class="body" x="100" y="74" width="118" height="52" rx="3"/>
+  <g class="sblk" data-code="blocks/filters.py:CommandFilter"><rect class="body" x="100" y="74" width="118" height="52" rx="3"/>
     <text class="ttl" x="159" y="93" style="font-size:13px">명령필터</text>
     <text class="ttl2" x="159" y="111">τ <tspan data-p="tau_alt">5</tspan> s</text></g>
   <text class="siglabel" x="159" y="144">off: h 추적 — 활성화 시 램프</text>
   <path class="wire" d="M218 100 H240" marker-end="url(#aw-apa)"/>
-  <circle class="body" cx="258" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/autopilot.py:Autopilot.step" cx="258" cy="100" r="14"/>
   <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
   <path class="wire" d="M272 100 H296" marker-end="url(#aw-apa)"/>
   <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="300" y="74" width="140" height="52" rx="3"/>
     <text class="ttl" x="370" y="93" style="font-size:13px">고도 PI — 클램프 AW</text>
     <text class="ttl2" x="370" y="111">kp <tspan data-p="kp_alt">0.004</tspan> · ki <tspan data-p="ki_alt">0.0004</tspan></text></g>
   <path class="wire" d="M440 100 H446" marker-end="url(#aw-apa)"/>
-  <circle class="body" cx="464" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/autopilot.py:Autopilot.step" cx="464" cy="100" r="14"/>
   <text class="sumsign" x="455" y="104">+</text><text class="sumsign" x="464" y="113">+</text>
   <path class="wire" d="M478 100 H492" marker-end="url(#aw-apa)"/>
-  <g class="sblk"><rect class="body" x="496" y="74" width="90" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="496" y="74" width="90" height="52" rx="3"/>
     <path d="M506 116 H518 L564 84 H576" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="541" y="64">클립 <tspan data-p="theta_lo">−0.3</tspan>~<tspan data-p="theta_hi">0.3</tspan> rad</text>
   <path class="wire" d="M586 100 H612" marker-end="url(#aw-apa)"/>
-  <circle class="body" cx="630" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/autopilot.py:Autopilot.step" cx="630" cy="100" r="14"/>
   <text class="sumsign" x="621" y="104">+</text><text class="sumsign" x="630" y="93">+</text>
   <path class="wire" d="M644 100 H700" marker-end="url(#aw-apa)"/>
-  <g class="sblk"><rect class="body" x="704" y="74" width="82" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="704" y="74" width="82" height="52" rx="3"/>
     <path d="M712 116 H724 L766 84 H778" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="745" y="64">재클립 θ 한계</text>
   <path class="wire" d="M786 100 H806" marker-end="url(#aw-apa)"/>
-  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="136">θ_cmd → α 리미터</text>
-  <g class="sblk"><rect class="body" x="240" y="162" width="36" height="24" rx="12"/><text class="pnum" x="258" y="178">2</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="240" y="162" width="36" height="24" rx="12"/><text class="pnum" x="258" y="178">2</text></g>
   <text class="pname a-start" x="282" y="178">h = −z_n</text>
   <path class="wire" d="M258 162 V118" marker-end="url(#aw-apa)"/>
-  <g class="sblk"><rect class="body" x="414" y="148" width="100" height="38" rx="3"/>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="414" y="148" width="100" height="38" rx="3"/>
     <text class="ttl2" x="464" y="164" style="font-weight:700">× k_hdot</text>
     <text class="ttl2" x="464" y="180"><tspan data-p="k_hdot">−0.008</tspan> 승강률 댐핑</text></g>
   <path class="wire" d="M464 148 V118" marker-end="url(#aw-apa)"/>
-  <g class="sblk"><rect class="body" x="446" y="210" width="36" height="24" rx="12"/><text class="pnum" x="464" y="226">3</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="446" y="210" width="36" height="24" rx="12"/><text class="pnum" x="464" y="226">3</text></g>
   <text class="pname a-start" x="490" y="226">ḣ = −v_z</text>
   <path class="wire" d="M464 210 V186" marker-end="url(#aw-apa)"/>
   <path class="wire ff" d="M630 190 V118" marker-end="url(#af-apa)"/>
@@ -525,35 +525,35 @@ export const SUBSYSTEMS = {
     <marker id="aw-aps" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
     <marker id="af-aps" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#b45309"/></marker>
   </defs>
-  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="132">V_cmd ← 유도</text>
   <path class="wire" d="M66 100 H96" marker-end="url(#aw-aps)"/>
-  <g class="sblk"><rect class="body" x="100" y="74" width="118" height="52" rx="3"/>
+  <g class="sblk" data-code="blocks/filters.py:CommandFilter"><rect class="body" x="100" y="74" width="118" height="52" rx="3"/>
     <text class="ttl" x="159" y="93" style="font-size:13px">명령필터</text>
     <text class="ttl2" x="159" y="111">τ <tspan data-p="tau_spd">2</tspan> s</text></g>
   <text class="siglabel" x="159" y="144">off: V 추적 · 트림 스로틀 홀드</text>
   <path class="wire" d="M218 100 H240" marker-end="url(#aw-aps)"/>
-  <circle class="body" cx="258" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/autopilot.py:Autopilot.step" cx="258" cy="100" r="14"/>
   <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
   <path class="wire" d="M272 100 H296" marker-end="url(#aw-aps)"/>
   <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="300" y="74" width="140" height="52" rx="3"/>
     <text class="ttl" x="370" y="93" style="font-size:13px">속도 PI — 클램프 AW</text>
     <text class="ttl2" x="370" y="111">kp <tspan data-p="kp_spd">0.15</tspan> · ki <tspan data-p="ki_spd">0.03</tspan></text></g>
   <path class="wire" d="M440 100 H492" marker-end="url(#aw-aps)"/>
-  <g class="sblk"><rect class="body" x="496" y="74" width="90" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="496" y="74" width="90" height="52" rx="3"/>
     <path d="M506 116 H518 L564 84 H576" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="541" y="144">클립 0~1</text>
   <path class="wire" d="M586 100 H612" marker-end="url(#aw-aps)"/>
-  <circle class="body" cx="630" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/autopilot.py:Autopilot.step" cx="630" cy="100" r="14"/>
   <text class="sumsign" x="621" y="104">+</text><text class="sumsign" x="630" y="93">+</text>
   <path class="wire" d="M644 100 H700" marker-end="url(#aw-aps)"/>
-  <g class="sblk"><rect class="body" x="704" y="74" width="82" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="704" y="74" width="82" height="52" rx="3"/>
     <path d="M712 116 H724 L766 84 H778" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="745" y="144">재클립 0~1</text>
   <path class="wire" d="M786 100 H806" marker-end="url(#aw-aps)"/>
-  <g class="sblk"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">δt_cmd (0~1)</text>
-  <g class="sblk"><rect class="body" x="240" y="162" width="36" height="24" rx="12"/><text class="pnum" x="258" y="178">2</text></g>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="240" y="162" width="36" height="24" rx="12"/><text class="pnum" x="258" y="178">2</text></g>
   <text class="pname a-start" x="282" y="178">V = |v_n| — 바람 0</text>
   <path class="wire" d="M258 162 V118" marker-end="url(#aw-aps)"/>
   <path class="wire ff" d="M630 190 V118" marker-end="url(#af-aps)"/>
@@ -778,17 +778,17 @@ export const SUBSYSTEMS = {
 <svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-lim" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
   <!-- 피치 명령 경로 — 상한 단방향 클램프 -->
-  <g class="sblk"><rect class="body" x="30" y="68" width="36" height="24" rx="12"/><text class="pnum" x="48" y="84">1</text></g>
+  <g class="sblk" data-code="fcl/limiter.py:AlphaLimiter.step"><rect class="body" x="30" y="68" width="36" height="24" rx="12"/><text class="pnum" x="48" y="84">1</text></g>
   <text class="pname" x="56" y="112">θ_cmd ← AP</text>
   <path class="wire" d="M66 80 H556" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="560" y="50" width="120" height="60" rx="3"/>
+  <g class="sblk" data-code="fcl/limiter.py:AlphaLimiter.step"><rect class="body" x="560" y="50" width="120" height="60" rx="3"/>
     <path d="M572 96 L620 66 H648" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="620" y="134">min(θ_cmd, cap) — 상한만</text>
   <path class="wire" d="M680 80 H746" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="750" y="68" width="36" height="24" rx="12"/><text class="pnum" x="768" y="84">1</text></g>
+  <g class="sblk" data-code="fcl/limiter.py:AlphaLimiter.step"><rect class="body" x="750" y="68" width="36" height="24" rx="12"/><text class="pnum" x="768" y="84">1</text></g>
   <text class="pname" x="768" y="112">θ_cmd′ → SCAS</text>
   <!-- 동적 상한: cap = θ + (α_stall(mach) − margin − α) -->
-  <g class="sblk"><rect class="body" x="30" y="218" width="36" height="24" rx="12"/><text class="pnum" x="48" y="234">2</text></g>
+  <g class="sblk" data-code="fcl/limiter.py:AlphaLimiter.step"><rect class="body" x="30" y="218" width="36" height="24" rx="12"/><text class="pnum" x="48" y="234">2</text></g>
   <text class="pname" x="48" y="262">Mach</text>
   <path class="wire" d="M66 230 H96" marker-end="url(#aw-lim)"/>
   <g class="sblk" data-code="fcl/limiter.py:AlphaLimiter.alpha_max"><rect class="body" x="100" y="200" width="190" height="60" rx="3"/>
@@ -796,29 +796,29 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="234" y="224" style="font-size:13px">α_stall(mach)</text>
     <text class="ttl2" x="234" y="242">1D · 외삽 clip 강제</text></g>
   <path class="wire" d="M290 230 H316" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="320" y="200" width="130" height="60" rx="3"/>
+  <g class="sblk" data-code="fcl/limiter.py:AlphaLimiter.alpha_max"><rect class="body" x="320" y="200" width="130" height="60" rx="3"/>
     <text class="ttl" x="385" y="224" style="font-size:13px">− 보호마진</text>
     <text class="ttl2" x="385" y="242">0.05 rad ≈ 2.9°</text></g>
   <path class="wire" d="M450 230 H476" marker-end="url(#aw-lim)"/>
   <text class="siglabel" x="460" y="212">α_max</text>
-  <circle class="body" cx="494" cy="230" r="14"/>
+  <circle class="body" data-code="fcl/limiter.py:AlphaLimiter.step" cx="494" cy="230" r="14"/>
   <text class="sumsign" x="485" y="234">+</text><text class="sumsign" x="494" y="243">−</text>
   <path class="wire" d="M508 230 H602" marker-end="url(#aw-lim)"/>
   <text class="siglabel" x="554" y="212">Δα 실속 마진</text>
   <circle class="branch" cx="560" cy="230" r="3.2"/>
-  <circle class="body" cx="620" cy="230" r="14"/>
+  <circle class="body" data-code="fcl/limiter.py:AlphaLimiter.step" cx="620" cy="230" r="14"/>
   <text class="sumsign" x="611" y="234">+</text><text class="sumsign" x="629" y="234">+</text>
   <path class="wire" d="M620 216 V114" marker-end="url(#aw-lim)"/>
   <text class="siglabel" x="556" y="170">cap = θ + Δα</text>
   <!-- 실속 마진 출력 — 엔벨로프 감시 -->
   <path class="wire" d="M560 230 V380 H700" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="704" y="368" width="36" height="24" rx="12"/><text class="pnum" x="722" y="384">2</text></g>
+  <g class="sblk" data-code="fcl/limiter.py:AlphaLimiter.step"><rect class="body" x="704" y="368" width="36" height="24" rx="12"/><text class="pnum" x="722" y="384">2</text></g>
   <text class="pname" x="722" y="412">실속 마진 Δα → 엔벨로프 감시</text>
   <!-- NavOutput 추출 -->
-  <g class="sblk"><rect class="body" x="30" y="298" width="36" height="24" rx="12"/><text class="pnum" x="48" y="314">3</text></g>
+  <g class="sblk" data-code="fcl/limiter.py:AlphaLimiter.step"><rect class="body" x="30" y="298" width="36" height="24" rx="12"/><text class="pnum" x="48" y="314">3</text></g>
   <text class="pname" x="52" y="342">NavOutput</text>
   <path class="wire" d="M66 310 H136" marker-end="url(#aw-lim)"/>
-  <g class="sblk"><rect class="body" x="140" y="282" width="220" height="56" rx="3"/>
+  <g class="sblk" data-code="fcl/airdata.py:airdata_from_nav common/attitude.py:quat_to_euler"><rect class="body" x="140" y="282" width="220" height="56" rx="3"/>
     <text class="ttl" x="250" y="304" style="font-size:13px">airdata · quat→euler</text>
     <text class="ttl2" x="250" y="324">α · θ 추출 — NavOutput만 소비</text></g>
   <path class="wire" d="M360 298 H450 V244" marker-end="url(#aw-lim)"/>
@@ -849,12 +849,12 @@ export const SUBSYSTEMS = {
 <svg viewBox="0 0 940 516" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-mix" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
   <!-- 엘레본 좌/우 — 교차 결합 (X자 1회 교차는 믹싱의 본질) -->
-  <g class="sblk"><rect class="body" x="30" y="66" width="36" height="24" rx="12"/><text class="pnum" x="48" y="82">1</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="30" y="66" width="36" height="24" rx="12"/><text class="pnum" x="48" y="82">1</text></g>
   <text class="pname" x="48" y="112">피치 δe</text>
   <path class="wire" d="M66 78 H246" marker-end="url(#aw-mix)"/>
   <circle class="branch" cx="150" cy="78" r="3.2"/>
   <path class="wire" d="M150 78 V170 H246" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="30" y="182" width="36" height="24" rx="12"/><text class="pnum" x="48" y="198">2</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="30" y="182" width="36" height="24" rx="12"/><text class="pnum" x="48" y="198">2</text></g>
   <text class="pname" x="48" y="232">롤 δa</text>
   <path class="wire" d="M66 194 H246" marker-end="url(#aw-mix)"/>
   <circle class="branch" cx="110" cy="194" r="3.2"/>
@@ -862,61 +862,61 @@ export const SUBSYSTEMS = {
   <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="250" y="64" width="150" height="52" rx="3"/>
     <text class="ttl" x="325" y="86" style="font-size:13px">좌측 = δe + δa</text>
     <text class="ttl2" x="325" y="104">내좌 = 외좌 (1:1 고정)</text></g>
-  <g class="sblk"><rect class="body" x="250" y="156" width="150" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="250" y="156" width="150" height="52" rx="3"/>
     <text class="ttl" x="325" y="178" style="font-size:13px">우측 = δe − δa</text>
     <text class="ttl2" x="325" y="196">내우 = 외우 (1:1 고정)</text></g>
   <path class="wire" d="M400 90 H426" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="430" y="64" width="110" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="430" y="64" width="110" height="52" rx="3"/>
     <path d="M442 106 H458 L512 74 H528" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="485" y="134">elevon_lo~hi</text>
   <path class="wire" d="M540 90 H610"/>
   <circle class="branch" cx="614" cy="90" r="3.2"/>
   <path class="wire" d="M614 90 V78 H796" marker-end="url(#aw-mix)"/>
   <path class="wire" d="M614 90 V106 H796" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="800" y="66" width="36" height="24" rx="12"/><text class="pnum" x="818" y="82">1</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="800" y="66" width="36" height="24" rx="12"/><text class="pnum" x="818" y="82">1</text></g>
   <text class="pname" x="864" y="82">내좌</text>
-  <g class="sblk"><rect class="body" x="800" y="94" width="36" height="24" rx="12"/><text class="pnum" x="818" y="110">2</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="800" y="94" width="36" height="24" rx="12"/><text class="pnum" x="818" y="110">2</text></g>
   <text class="pname" x="864" y="110">외좌</text>
   <path class="wire" d="M400 182 H426" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="430" y="156" width="110" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="430" y="156" width="110" height="52" rx="3"/>
     <path d="M442 198 H458 L512 166 H528" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="485" y="226">elevon_lo~hi</text>
   <path class="wire" d="M540 182 H610"/>
   <circle class="branch" cx="614" cy="182" r="3.2"/>
   <path class="wire" d="M614 182 V170 H796" marker-end="url(#aw-mix)"/>
   <path class="wire" d="M614 182 V198 H796" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="800" y="158" width="36" height="24" rx="12"/><text class="pnum" x="818" y="174">3</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="800" y="158" width="36" height="24" rx="12"/><text class="pnum" x="818" y="174">3</text></g>
   <text class="pname" x="864" y="174">내우</text>
-  <g class="sblk"><rect class="body" x="800" y="186" width="36" height="24" rx="12"/><text class="pnum" x="818" y="202">4</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="800" y="186" width="36" height="24" rx="12"/><text class="pnum" x="818" y="202">4</text></g>
   <text class="pname" x="864" y="202">외우</text>
   <!-- 러더 + 차동추력 (클램프된 실 러더 기준) -->
-  <g class="sblk"><rect class="body" x="30" y="270" width="36" height="24" rx="12"/><text class="pnum" x="48" y="286">3</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="30" y="270" width="36" height="24" rx="12"/><text class="pnum" x="48" y="286">3</text></g>
   <text class="pname" x="48" y="316">요 δr</text>
   <path class="wire" d="M66 282 H246" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="250" y="256" width="110" height="52" rx="3"/>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="250" y="256" width="110" height="52" rx="3"/>
     <path d="M262 298 H278 L332 266 H348" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="305" y="326">rudder_lo~hi</text>
   <path class="wire" d="M360 282 H796" marker-end="url(#aw-mix)"/>
   <circle class="branch" cx="470" cy="282" r="3.2"/>
-  <g class="sblk"><rect class="body" x="800" y="270" width="36" height="24" rx="12"/><text class="pnum" x="818" y="286">5</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="800" y="270" width="36" height="24" rx="12"/><text class="pnum" x="818" y="286">5</text></g>
   <text class="pname" x="818" y="314">러더</text>
   <path class="wire" d="M470 282 V326" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="410" y="330" width="120" height="46" rx="3"/>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="410" y="330" width="120" height="46" rx="3"/>
     <text class="ttl" x="470" y="349" style="font-size:13px">× k_diff_thr</text>
     <text class="ttl2" x="470" y="366">클램프된 실 러더 기준</text></g>
   <path class="wire" d="M530 353 H620 V384" marker-end="url(#aw-mix)"/>
   <text class="siglabel" x="575" y="345">d</text>
-  <g class="sblk"><rect class="body" x="30" y="408" width="36" height="24" rx="12"/><text class="pnum" x="48" y="424">4</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="30" y="408" width="36" height="24" rx="12"/><text class="pnum" x="48" y="424">4</text></g>
   <text class="pname" x="48" y="454">집합 스로틀 δt</text>
   <path class="wire" d="M66 420 H556" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="560" y="388" width="160" height="64" rx="3"/>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="560" y="388" width="160" height="64" rx="3"/>
     <text class="ttl" x="640" y="408" style="font-size:13px">차동 분배</text>
     <text class="ttl2" x="640" y="426">좌 = δt − d · 우 = δt + d</text>
     <text class="ttl2" x="640" y="442">출력 0~1 클립</text></g>
   <path class="wire" d="M720 406 H796" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="800" y="394" width="36" height="24" rx="12"/><text class="pnum" x="818" y="410">6</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="800" y="394" width="36" height="24" rx="12"/><text class="pnum" x="818" y="410">6</text></g>
   <path class="wire" d="M720 434 H796" marker-end="url(#aw-mix)"/>
-  <g class="sblk"><rect class="body" x="800" y="422" width="36" height="24" rx="12"/><text class="pnum" x="818" y="438">7</text></g>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="800" y="422" width="36" height="24" rx="12"/><text class="pnum" x="818" y="438">7</text></g>
   <text class="pname" x="818" y="470">스로틀 ×2 (좌·우)</text>
   <text class="canvas-note" x="24" y="502">※ 재구성 항등: 평균 = δe · (좌−우)/2 = δa — 믹싱이 정보를 잃지 않음 · rate 한계는 작동기(M5) 소관 · SurfaceCommand 순서 [내좌, 외좌, 내우, 외우]</text>
 </svg>`,
@@ -939,7 +939,7 @@ export const SUBSYSTEMS = {
     svg: `
 <svg viewBox="0 0 900 220" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-act" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <g class="sblk" data-code="plant/actuator.py:SecondOrderActuator.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="128">δ_cmd</text>
   <path class="wire" d="M66 100 H136" marker-end="url(#aw-act)"/>
   <g class="sblk" data-code="plant/actuator.py:SecondOrderActuator.step"><rect class="body" x="140" y="64" width="190" height="72" rx="3"/>
@@ -948,15 +948,15 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="235" y="118" style="font-size:12px">s² + 2ζωn·s + ωn²</text></g>
   <text class="bname" x="235" y="156">2차계 — wn <tspan data-p="wn">30</tspan> rad/s · ζ <tspan data-p="zeta">0.7</tspan></text>
   <path class="wire" d="M330 100 H396" marker-end="url(#aw-act)"/>
-  <g class="sblk"><rect class="body" x="400" y="70" width="100" height="60" rx="3"/>
+  <g class="sblk" data-code="plant/actuator.py:SecondOrderActuator.step"><rect class="body" x="400" y="70" width="100" height="60" rx="3"/>
     <path d="M412 118 L438 82 L488 82" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="450" y="150">rate_max <tspan data-p="rate_max">10</tspan> rad/s (≥ 10 요구)</text>
   <path class="wire" d="M500 100 H566" marker-end="url(#aw-act)"/>
-  <g class="sblk"><rect class="body" x="570" y="70" width="100" height="60" rx="3"/>
+  <g class="sblk" data-code="plant/actuator.py:SecondOrderActuator.step"><rect class="body" x="570" y="70" width="100" height="60" rx="3"/>
     <path d="M580 116 H598 L642 84 H660" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="620" y="150">위치 한계 = 믹서 타면 한계</text>
   <path class="wire" d="M670 100 H736" marker-end="url(#aw-act)"/>
-  <g class="sblk"><rect class="body" x="740" y="88" width="36" height="24" rx="12"/><text class="pnum" x="758" y="104">1</text></g>
+  <g class="sblk" data-code="plant/actuator.py:SecondOrderActuator.step"><rect class="body" x="740" y="88" width="36" height="24" rx="12"/><text class="pnum" x="758" y="104">1</text></g>
   <text class="pname" x="758" y="128">δ (타면 변위)</text>
 </svg>`,
     notes: `
@@ -1349,19 +1349,19 @@ export const SUBSYSTEMS = {
     <marker id="aw-gs2" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
     <marker id="as-gs2" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
   </defs>
-  <g class="sblk"><rect class="body" x="30" y="78" width="36" height="24" rx="12"/><text class="pnum" x="48" y="94">1</text></g>
+  <g class="sblk" data-code="fcl/schedule.py:GainSchedule.step"><rect class="body" x="30" y="78" width="36" height="24" rx="12"/><text class="pnum" x="48" y="94">1</text></g>
   <text class="pname" x="48" y="122">Mach</text>
   <text class="siglabel" x="52" y="138">V / a(h_ISA)</text>
   <path class="wire" d="M66 90 H126" marker-end="url(#aw-gs2)"/>
-  <g class="sblk"><rect class="body" x="30" y="158" width="36" height="24" rx="12"/><text class="pnum" x="48" y="174">2</text></g>
+  <g class="sblk" data-code="fcl/schedule.py:GainSchedule.step"><rect class="body" x="30" y="158" width="36" height="24" rx="12"/><text class="pnum" x="48" y="174">2</text></g>
   <text class="pname" x="48" y="202">고도 h</text>
   <text class="siglabel" x="48" y="218">−z_n</text>
   <path class="wire" d="M66 170 H126" marker-end="url(#aw-gs2)"/>
-  <g class="sblk"><rect class="body" x="30" y="238" width="36" height="24" rx="12"/><text class="pnum" x="48" y="254">3</text></g>
+  <g class="sblk" data-code="fcl/schedule.py:GainSchedule.step"><rect class="body" x="30" y="238" width="36" height="24" rx="12"/><text class="pnum" x="48" y="254">3</text></g>
   <text class="pname" x="48" y="282">연료 fuel</text>
   <text class="siglabel" x="52" y="298">항법 게이지</text>
   <path class="wire" d="M66 250 H126" marker-end="url(#aw-gs2)"/>
-  <g class="sblk"><rect class="body" x="130" y="64" width="180" height="212" rx="3"/>
+  <g class="sblk" data-code="fcl/schedule.py:GainSchedule.step"><rect class="body" x="130" y="64" width="180" height="212" rx="3"/>
     <text class="ttl" x="220" y="150" style="font-size:13px">1차 필터 ×3</text>
     <text class="ttl2" x="220" y="170">τ 0.5 s — 채터링 방지</text>
     <text class="ttl2" x="220" y="188">첫 스텝 측정 시드 · τ=0 통과</text></g>
@@ -1375,14 +1375,14 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="520" y="208">외삽 clip 강제 [생성 시 검증]</text>
     <text class="ttl2" x="520" y="226">데모: 동압 스케일 1D mach</text></g>
   <path class="wire" d="M640 170 H666" marker-end="url(#aw-gs2)"/>
-  <g class="sblk"><rect class="body" x="670" y="112" width="170" height="116" rx="3"/>
+  <g class="sblk" data-code="fcl/schedule.py:GainSchedule.step"><rect class="body" x="670" y="112" width="170" height="116" rx="3"/>
     <text class="ttl" x="755" y="136" style="font-size:13px">그룹.게인 분배</text>
     <text class="ttl2" x="755" y="156">"pitch.kp" → {pitch:{kp}}</text>
     <text class="ttl2" x="755" y="174">그룹: 피치·롤·요 ·</text>
     <text class="ttl2" x="755" y="190">속도·고도·헤딩</text>
     <text class="ttl2" x="755" y="208">키: kp·ki·k_rate (조립 검증)</text></g>
   <path class="wire" d="M840 170 H854" marker-end="url(#aw-gs2)"/>
-  <g class="sblk"><rect class="body" x="858" y="158" width="36" height="24" rx="12"/><text class="pnum" x="876" y="174">1</text></g>
+  <g class="sblk" data-code="fcl/schedule.py:GainSchedule.step"><rect class="body" x="858" y="158" width="36" height="24" rx="12"/><text class="pnum" x="876" y="174">1</text></g>
   <text class="pname" x="838" y="210">→ AP · SCAS</text>
   <text class="pname" x="838" y="228">스텝별 게인 덮어쓰기</text>
   <rect x="400" y="320" width="240" height="64" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
