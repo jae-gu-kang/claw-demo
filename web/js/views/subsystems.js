@@ -65,14 +65,14 @@ const SCAS_PI_PAGE = {
   <text class="pname" x="48" y="182">e (자세 오차)</text>
   <path class="wire" d="M66 150 H146"/>
   <circle class="branch" cx="150" cy="150" r="3.2"/>
-  <path class="wire" d="M150 150 V86 H196" marker-end="url(#aw-pi)"/>
-  <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="200" y="60" width="150" height="52" rx="3"/>
-    <text class="ttl" x="275" y="82" style="font-size:13px">× kp</text>
-    <text class="ttl2" x="275" y="100">비례항</text></g>
-  <path class="wire" d="M350 86 H480 V132" marker-end="url(#aw-pi)"/>
+  <path class="wire" d="M150 150 V86 H226" marker-end="url(#aw-pi)"/>
+  <g class="sblk" data-code="blocks/controllers.py:PID.step"><polygon class="body" points="230,58 230,114 320,86"/>
+    <text class="ttl2" x="258" y="90" style="font-weight:700">kp</text></g>
+  <text class="bname" x="262" y="132">비례항</text>
+  <path class="wire" d="M320 86 H480 V132" marker-end="url(#aw-pi)"/>
   <path class="wire" d="M150 150 V222 H196" marker-end="url(#aw-pi)"/>
   <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="200" y="190" width="250" height="64" rx="3"/>
-    <text class="ttl" x="325" y="214" style="font-size:13px">적분기 (클램프 AW)</text>
+    <text class="ttl" x="325" y="214" style="font-size:13px">적분기 1/s — 클램프 AW</text>
     <text class="ttl2" x="325" y="236">I ← clip(I + dt·ki·e, out_lo~hi)</text></g>
   <path class="wire" d="M450 222 H480 V168" marker-end="url(#aw-pi)"/>
   <circle class="body" data-code="blocks/controllers.py:PID.step" cx="480" cy="150" r="14"/>
@@ -198,12 +198,12 @@ export const SUBSYSTEMS = {
   <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
   <text class="pname a-start" x="164" y="186">θ (NavOutput)</text>
   <path class="wire" d="M140 170 V118" marker-end="url(#aw-scp)"/>
-  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
-    <text class="ttl2" x="430" y="178" style="font-weight:700">× k_rate</text></g>
-  <path class="wire" d="M430 156 V118" marker-end="url(#aw-scp)"/>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><polygon class="body" points="398,198 462,198 430,154"/>
+    <text class="ttl2" x="430" y="190" style="font-weight:700">k_rate</text></g>
+  <path class="wire" d="M430 154 V118" marker-end="url(#aw-scp)"/>
   <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="412" y="212" width="36" height="24" rx="12"/><text class="pnum" x="430" y="228">3</text></g>
   <text class="pname a-start" x="454" y="228">q (NavOutput)</text>
-  <path class="wire" d="M430 212 V192" marker-end="url(#aw-scp)"/>
+  <path class="wire" d="M430 212 V200" marker-end="url(#aw-scp)"/>
   <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text class="annot" x="786" y="204" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
   <text class="annot" x="786" y="224" text-anchor="middle">스텝별 덮어쓰기 (정본 = 게인 탭)</text>
@@ -250,12 +250,12 @@ export const SUBSYSTEMS = {
   <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
   <text class="pname a-start" x="164" y="186">φ (NavOutput)</text>
   <path class="wire" d="M140 170 V118" marker-end="url(#aw-scr)"/>
-  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
-    <text class="ttl2" x="430" y="178" style="font-weight:700">× k_rate</text></g>
-  <path class="wire" d="M430 156 V118" marker-end="url(#aw-scr)"/>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><polygon class="body" points="398,198 462,198 430,154"/>
+    <text class="ttl2" x="430" y="190" style="font-weight:700">k_rate</text></g>
+  <path class="wire" d="M430 154 V118" marker-end="url(#aw-scr)"/>
   <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="412" y="212" width="36" height="24" rx="12"/><text class="pnum" x="430" y="228">3</text></g>
   <text class="pname a-start" x="454" y="228">p (NavOutput)</text>
-  <path class="wire" d="M430 212 V192" marker-end="url(#aw-scr)"/>
+  <path class="wire" d="M430 212 V200" marker-end="url(#aw-scr)"/>
   <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text class="annot" x="786" y="204" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
   <text class="annot" x="786" y="224" text-anchor="middle">스텝별 덮어쓰기 (정본 = 게인 탭)</text>
@@ -280,10 +280,10 @@ export const SUBSYSTEMS = {
   <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="132">β (사이드슬립)</text>
   <path class="wire" d="M66 100 H96" marker-end="url(#aw-scy)"/>
-  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="100" y="74" width="70" height="52" rx="3"/>
-    <text class="ttl" x="135" y="96" style="font-size:13px">× −1</text>
-    <text class="ttl2" x="135" y="114">명령 없음</text></g>
-  <path class="wire" d="M170 100 H186" marker-end="url(#aw-scy)"/>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><polygon class="body" points="100,76 100,124 166,100"/>
+    <text class="ttl2" x="122" y="104" style="font-weight:700">−1</text></g>
+  <text class="bname" x="130" y="142">명령 없음</text>
+  <path class="wire" d="M166 100 H186" marker-end="url(#aw-scy)"/>
   <g class="blk" data-child="pi" data-code="blocks/controllers.py:PID" tabindex="0">
     <rect class="body" x="190" y="64" width="190" height="72" rx="3"/>
     <text class="ttl" x="285" y="94" style="font-size:14px">PI — 클램프 AW</text>
@@ -305,10 +305,10 @@ export const SUBSYSTEMS = {
   <g class="sblk" data-code="blocks/filters.py:Washout"><rect class="body" x="100" y="182" width="170" height="52" rx="3"/>
     <text class="ttl" x="185" y="204" style="font-size:13px">워시아웃 τs/(τs+1)</text>
     <text class="ttl2" x="185" y="222">정상 r 제거 — 선회 유지</text></g>
-  <path class="wire" d="M270 208 H294" marker-end="url(#aw-scy)"/>
-  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="298" y="190" width="84" height="36" rx="3"/>
-    <text class="ttl2" x="340" y="212" style="font-weight:700">× k_rate</text></g>
-  <path class="wire" d="M382 208 H430 V118" marker-end="url(#aw-scy)"/>
+  <path class="wire" d="M270 208 H298" marker-end="url(#aw-scy)"/>
+  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><polygon class="body" points="302,188 302,228 368,208"/></g>
+  <text class="bname" x="334" y="248">k_rate</text>
+  <path class="wire" d="M368 208 H430 V118" marker-end="url(#aw-scy)"/>
   <rect x="640" y="180" width="292" height="56" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text class="annot" x="786" y="204" text-anchor="middle">게인 스케줄링 주입 — kp·ki·k_rate</text>
   <text class="annot" x="786" y="224" text-anchor="middle">스텝별 덮어쓰기 (정본 = 게인 탭)</text>
@@ -496,13 +496,13 @@ export const SUBSYSTEMS = {
   <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="240" y="162" width="36" height="24" rx="12"/><text class="pnum" x="258" y="178">2</text></g>
   <text class="pname a-start" x="282" y="178">h = −z_n</text>
   <path class="wire" d="M258 162 V118" marker-end="url(#aw-apa)"/>
-  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="414" y="148" width="100" height="38" rx="3"/>
-    <text class="ttl2" x="464" y="164" style="font-weight:700">× k_hdot</text>
-    <text class="ttl2" x="464" y="180"><tspan data-p="k_hdot">−0.008</tspan> 승강률 댐핑</text></g>
-  <path class="wire" d="M464 148 V118" marker-end="url(#aw-apa)"/>
+  <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><polygon class="body" points="426,192 502,192 464,152"/>
+    <text class="ttl2" x="464" y="186" style="font-weight:700">k_hdot</text></g>
+  <text class="bname" x="384" y="216"><tspan data-p="k_hdot">−0.008</tspan> · 승강률 댐핑</text>
+  <path class="wire" d="M464 152 V118" marker-end="url(#aw-apa)"/>
   <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="446" y="210" width="36" height="24" rx="12"/><text class="pnum" x="464" y="226">3</text></g>
   <text class="pname a-start" x="490" y="226">ḣ = −v_z</text>
-  <path class="wire" d="M464 210 V186" marker-end="url(#aw-apa)"/>
+  <path class="wire" d="M464 210 V196" marker-end="url(#aw-apa)"/>
   <path class="wire ff" d="M630 190 V118" marker-end="url(#af-apa)"/>
   <text class="siglabel" x="630" y="210">선회 FF 피치 — <tspan data-p="k_pitch_turn">0.05</tspan>·(1/cosφ−1)</text>
   <text class="canvas-note" x="24" y="300">※ 선회 FF는 축 클립 후 가산 → 재클립 (이중 제한) · 트림 웜스타트: 고도 적분기 = 트림 θ [범프리스] · 비활성 시 필터가 h 추적 — 활성화 순간 현재값부터 램프</text>
@@ -897,14 +897,14 @@ export const SUBSYSTEMS = {
     <path d="M262 298 H278 L332 266 H348" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="305" y="326">rudder_lo~hi</text>
   <path class="wire" d="M360 282 H796" marker-end="url(#aw-mix)"/>
-  <circle class="branch" cx="470" cy="282" r="3.2"/>
+  <circle class="branch" cx="400" cy="282" r="3.2"/>
   <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="800" y="270" width="36" height="24" rx="12"/><text class="pnum" x="818" y="286">5</text></g>
   <text class="pname" x="818" y="314">러더</text>
-  <path class="wire" d="M470 282 V326" marker-end="url(#aw-mix)"/>
-  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="410" y="330" width="120" height="46" rx="3"/>
-    <text class="ttl" x="470" y="349" style="font-size:13px">× k_diff_thr</text>
-    <text class="ttl2" x="470" y="366">클램프된 실 러더 기준</text></g>
-  <path class="wire" d="M530 353 H620 V384" marker-end="url(#aw-mix)"/>
+  <path class="wire" d="M400 282 V353 H416" marker-end="url(#aw-mix)"/>
+  <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><polygon class="body" points="420,330 420,376 500,353"/></g>
+  <text class="bname" x="460" y="322">× k_diff_thr</text>
+  <text class="bname" x="460" y="394">클램프된 실 러더 기준</text>
+  <path class="wire" d="M500 353 H620 V384" marker-end="url(#aw-mix)"/>
   <text class="siglabel" x="575" y="345">d</text>
   <g class="sblk" data-code="fcl/mixer.py:Mixer.step"><rect class="body" x="30" y="408" width="36" height="24" rx="12"/><text class="pnum" x="48" y="424">4</text></g>
   <text class="pname" x="48" y="454">집합 스로틀 δt</text>
@@ -1322,7 +1322,7 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M920 286 H926" marker-end="url(#aw-nav)"/>
   <circle class="branch" cx="923" cy="286" r="3.2"/>
   <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="930" y="274" width="36" height="24" rx="12"/><text class="pnum" x="948" y="290">1</text></g>
-  <text class="pname" x="948" y="264">NavOutput</text>
+  <text class="pname" x="952" y="264">NavOutput</text>
   <!-- 출력 펼침 — NavOutput 버스의 실제 필드와 소비처 병기 (6DOF 페이지와 같은 문법).
        버스 분기는 도해(nblk)지만 필드는 전부 contracts.py NavOutput 정의에 실존한다 -->
   <path class="wire" d="M923 286 V380 H387 V396" marker-end="url(#aw-nav)"/>
@@ -1331,19 +1331,19 @@ export const SUBSYSTEMS = {
   <text class="bname" x="387" y="437">분기</text>
   <path class="wire" d="M414 430 H646" marker-end="url(#aw-nav)"/>
   <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="418" width="36" height="24" rx="12"/><text class="pnum" x="668" y="434">2</text></g>
-  <text class="pname a-start" x="694" y="434">pos_n · NED 위치 — 유도 경로추종</text>
+  <text class="pname a-start" x="694" y="434">pos_n · NED 위치 — 유도 경로추종·AP 고도</text>
   <path class="wire" d="M414 470 H646" marker-end="url(#aw-nav)"/>
   <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="458" width="36" height="24" rx="12"/><text class="pnum" x="668" y="474">3</text></g>
-  <text class="pname a-start" x="694" y="474">vel_n · NED 속도 — AP 고도·속도</text>
+  <text class="pname a-start" x="694" y="474">vel_n · NED 속도 — AP·airdata (α β V)</text>
   <path class="wire" d="M414 510 H646" marker-end="url(#aw-nav)"/>
   <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="498" width="36" height="24" rx="12"/><text class="pnum" x="668" y="514">4</text></g>
-  <text class="pname a-start" x="694" y="514">q_nb · 자세 — SCAS·리미터·유도</text>
+  <text class="pname a-start" x="694" y="514">q_nb · 자세 — SCAS·AP·리미터</text>
   <path class="wire" d="M414 550 H646" marker-end="url(#aw-nav)"/>
   <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="538" width="36" height="24" rx="12"/><text class="pnum" x="668" y="554">5</text></g>
   <text class="pname a-start" x="694" y="554">ω_b · 각속도 — SCAS rate 항</text>
   <path class="wire" d="M414 590 H646" marker-end="url(#aw-nav)"/>
   <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="578" width="36" height="24" rx="12"/><text class="pnum" x="668" y="594">6</text></g>
-  <text class="pname a-start" x="694" y="594">t_meas · valid — 유효성 게이트</text>
+  <text class="pname a-start" x="694" y="594">valid · t_meas — 유효성 게이트·지연 메타</text>
   <path class="wire" d="M414 630 H646" marker-end="url(#aw-nav)"/>
   <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="650" y="618" width="36" height="24" rx="12"/><text class="pnum" x="668" y="634">7</text></g>
   <text class="pname a-start" x="694" y="634">fuel — 참값 통과 · 게인 스케줄</text>
@@ -1480,7 +1480,7 @@ export const SUBSYSTEMS = {
   </defs>
   <!-- Simulator.run의 실제 폐루프 — 최상위 블록도와 같은 사슬이 코드에서도 이 순서다 -->
   <g class="sblk" data-code="sim/simulator.py:Simulator.run"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
-  <text class="pname" x="48" y="132">TrimResult ← 트림</text>
+  <text class="pname" x="48" y="132">TrimResult</text>
   <path class="wire" d="M66 100 H106" marker-end="url(#aw-vf)"/>
   <g class="sblk" data-code="guidance/guidance.py:Guidance.step"><rect class="body" x="110" y="64" width="170" height="72" rx="3"/>
     <text class="ttl" x="195" y="88" style="font-size:13px">유도 — Guidance.step</text>
@@ -1508,16 +1508,16 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="505" y="234" style="font-size:13px">항법 — NavErrorModel.step</text>
     <text class="ttl2" x="505" y="254">잡음·바이어스·지연 → NavOutput</text>
     <text class="ttl2" x="505" y="270">참값은 항법만 소비 [차단 계약]</text></g>
-  <path class="wire" d="M395 246 H180 V136" marker-end="url(#aw-vf)"/>
-  <circle class="branch" cx="340" cy="246" r="3.2"/>
-  <path class="wire" d="M340 246 V136" marker-end="url(#aw-vf)"/>
+  <path class="wire" d="M395 246 H90 V124 H106" marker-end="url(#aw-vf)"/>
+  <circle class="branch" cx="300" cy="246" r="3.2"/>
+  <path class="wire" d="M300 246 V124 H316" marker-end="url(#aw-vf)"/>
   <text class="siglabel" x="262" y="266">NavOutput — 유도·법칙의 유일한 상태 입력</text>
-  <g class="sblk" data-code="sim/simulator.py:Simulator.run"><rect class="body" x="30" y="156" width="36" height="24" rx="12"/><text class="pnum" x="48" y="172">2</text></g>
-  <text class="pname a-start" x="30" y="212">임무프로파일 (시뮬 탭)</text>
-  <path class="wire soft" d="M66 168 H90 V118 H106" marker-end="url(#as-vf)"/>
+  <g class="sblk" data-code="sim/simulator.py:Simulator.run"><rect class="body" x="118" y="10" width="36" height="24" rx="12"/><text class="pnum" x="136" y="26">2</text></g>
+  <text class="pname a-start" x="162" y="26">임무프로파일 (시뮬 탭)</text>
+  <path class="wire soft" d="M136 34 V60" marker-end="url(#as-vf)"/>
   <g class="sblk" data-code="sim/simulator.py:Simulator.run sim/simulator.py:Simulator._envelope"><rect class="body" x="640" y="210" width="260" height="84" rx="3"/>
     <text class="ttl" x="770" y="234" style="font-size:13px">신호 로깅 · 엔벨로프 감시</text>
-    <text class="ttl2" x="770" y="254">기본 26 + 명령 사슬 44 신호</text>
+    <text class="ttl2" x="770" y="254">기본 26 + 명령 사슬 50 신호</text>
     <text class="ttl2" x="770" y="270">실속 마진 · DB 이탈 플래그 · 페이즈</text></g>
   <path class="wire soft" d="M700 190 V206" marker-end="url(#as-vf)"/>
   <path class="wire" d="M900 252 H946" marker-end="url(#aw-vf)"/>

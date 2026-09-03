@@ -433,6 +433,20 @@ test("코드 틴트가 한 벌이다 — SUB_TINT 커버리지·판 색 재사�
   assert.ok(contrast(nblkInk, "#ffffff") >= 4.5, `nblk 제목 ${nblkInk} on #fff 미달`);
 });
 
+test("검증 페이지 신호 개수 = 엔진 정본 — _CHAIN_SIGNALS 계수 대조", () => {
+  // 그림에 적은 "명령 사슬 N 신호"는 엔진에 신호가 추가되면 조용히 낡는다 (리뷰 —
+  // 실제로 44라고 적었는데 50이었다). 정본을 세서 대조한다
+  const sim = engineSrc("sim/simulator.py");
+  const m = sim.match(/_CHAIN_SIGNALS\s*=\s*\(([\s\S]*?)\n\)/);
+  assert.ok(m, "simulator.py에서 _CHAIN_SIGNALS를 못 찾음");
+  const count = (m[1].match(/"[^"]+"/g) ?? []).length;
+  assert.ok(count > 0, "_CHAIN_SIGNALS 계수 실패");
+  const svg = SUBSYSTEMS.verify.svg.match(/명령 사슬 (\d+) 신호/);
+  assert.ok(svg, "검증 페이지에 명령 사슬 신호 개수 표기가 없음");
+  assert.equal(Number(svg[1]), count,
+    `명령 사슬 신호 수 드리프트: 그림 ${svg[1]} vs 엔진 ${count}`);
+});
+
 test("marker id는 페이지 안에서 유일하다 — 중복은 뒤 정의를 조용히 무시한다", () => {
   for (const [id, s] of Object.entries(SUBSYSTEMS)) {
     for (const { node, path } of walk(id, s)) {
