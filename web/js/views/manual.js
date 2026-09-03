@@ -14,8 +14,8 @@
 import { api } from "../api.js";
 import { el } from "../dom.js";
 import {
-  BACKGROUND, BLOCK_DOCS, FLOW_HEADINGS, GAIN_GROUPS, HEADINGS, TUNING_ORDER,
-  UNDRAWN_GAINS, docFor, gainCountFor, gainsFor,
+  BLOCK_DOCS, FLOW_HEADINGS, GAIN_GROUPS, HEADINGS, PAGE_ASIDES, TUNING_ORDER,
+  TUNING_ORDER_PAGE, UNDRAWN_GAINS, docFor, gainCountFor, gainsFor,
 } from "../lib/manualdoc.js";
 import { schemaFields } from "../lib/schemaform.js";
 import { DESIGN_ORDER, fromMarkup } from "./diagram.js";
@@ -70,57 +70,9 @@ function fold(kind, label, brief, ...kids) {
   return box;
 }
 
-// ── 홈 (#blocks) ───────────────────────────────────────────────────────
-
-/** 홈 매뉴얼 — __어느 한 블록에도 속하지 않는 것만__ (정본 manualdoc.js HOME_SECTIONS).
- *
- * 블록 11개 상세와 게인 49개는 각자의 블록 페이지로 내려갔다. 여기 다 쌓으면 게인
- * 사전만 펴도 13000px이라 훑을 수가 없었고, 무엇보다 그림을 보는 자리와 그 그림의
- * 설명이 다른 페이지에 있었다. 대신 __목차__를 두어 무엇이 어디 있는지 보이게 한다. */
-export function renderHomeManual(box) {
-  box.append(
-    el("div", { class: "manual" },
-      el("h2", {}, "블록도 매뉴얼"),
-      el("p", { class: "hint" },
-        "블록마다의 설명·게인은 그 블록의 내부 블록도 페이지에 있습니다 — 아래 목차에서 여세요. ",
-        "여기는 어느 한 블록에도 속하지 않는 것만 답니다."),
-
-      fold("background", "먼저 알아야 할 것", `${BACKGROUND.length}가지`,
-        el("div", { class: "man-bg" }, BACKGROUND.map((b) =>
-          el("div", { class: "man-q" }, el("h4", {}, b.q), b.a.map((t) => para(t)))))),
-
-      // 목차는 __접지 않는다__: 글이 아니라 "어디로 갈지" 지도이고, 상세를 페이지로
-      // 내려보낸 뒤 홈에 남긴 이유 자체가 이것이다. 이것까지 접으면 홈이 빈 화면이 된다
-      sec("어디에 무엇이 있나",
-        para("설계 순서대로 다섯 층, 그리고 그 사이를 채우는 지원 블록들입니다. "
-          + "각 페이지에 <b>그 그림의 신호 흐름·구조 근거·게인 설명</b>이 함께 있습니다."),
-        indexGrid((page) => stepOf()[page], "층 — 설계 순서"),
-        indexGrid((page) => !stepOf()[page], "지원 블록")),
-
-      fold("order", "튜닝 순서 요약", `${TUNING_ORDER.length}단계`,
-        para("막혔을 때 돌아올 자리입니다. <b>안쪽에서 바깥으로, 감쇠에서 적분으로.</b>"),
-        el("ol", { class: "man-order" },
-          TUNING_ORDER.map((t) => { const li = el("li"); li.innerHTML = t; return li; })))));
-}
-
-/** 목차 한 묶음 — 카드는 .man-head 재사용(본문 없는 머리줄)이라 새 CSS가 거의 없다. */
-function indexGrid(keep, label) {
-  // 층은 설계 순서(①→⑤)로, 지원은 신호 흐름 순서(BLOCK_DOCS 배열)로 — 각 묶음이
-  // 읽히는 순서가 다르다. 층은 "무엇을 먼저 닫나", 지원은 "신호가 어디를 지나나"
-  const order = stepOf();
-  const rows = BLOCK_DOCS.filter((d) => keep(d.page));
-  rows.sort((a, b) => (order[a.page]?.n ?? 0) - (order[b.page]?.n ?? 0));
-  return el("div", { class: "man-idx" },
-    el("h4", {}, label),
-    el("div", { class: "man-idx-grid" }, rows.map((d) => {
-      // 블록 전체 몫을 센다 — gainsFor(루트)는 잔여분만이라 SCAS가 0개로 뜬다
-      const n = gainCountFor(d.page);
-      return el("button", { class: "man-card", onclick: goto(d.page) },
-        el("span", { class: "man-card-head" }, stepTag(d.page), el("b", {}, d.title)),
-        el("span", { class: "man-card-role" }, d.role),
-        n ? el("span", { class: "man-card-n" }, `게인 ${n}`) : null);
-    })));
-}
+// 홈(#blocks)에는 매뉴얼이 없다 — 블록도 첫 화면은 __그림만__ 둔다.
+// 배경 Q&A 넷 중 둘은 답이 되는 블록 페이지로 옮겼고(PAGE_ASIDES), 튜닝 순서는
+// SCAS로 갔다. 목차는 층 칩과 그림이 이미 하는 일이라 지웠다.
 
 // ── 서브시스템 페이지 (#blocks/<경로>) ─────────────────────────────────
 
@@ -184,6 +136,19 @@ export function renderPageManual(box, path, sub, diagram = {}) {
   // 카드는 스키마 응답 뒤에 채워진다 — 그때까지의 클릭을 삼키지 않으려고 약속을 들고 있는다.
   // 이걸 안 기다리면 페이지를 열자마자 그림의 게인을 누른 사용자에게 **아무 일도 안 일어난다**
   // (느린 서버·폐쇄망에서 더 길어지는 창이다)
+  // 홈에서 옮겨 온 배경 — 답이 되는 그림 앞에서 읽어야 뜻이 사는 것들.
+  // 블록 설명 뒤에 두는 이유: 이 블록이 무엇인지 안 다음에 읽을 넓은 이야기다
+  for (const a of PAGE_ASIDES) {
+    if (a.page !== path[0] || !isRoot) continue;
+    wrap.append(fold("aside", a.q, `${a.a.length}단락`, ...a.a.map((t) => para(t))));
+  }
+  if (isRoot && path[0] === TUNING_ORDER_PAGE) {
+    wrap.append(fold("order", "튜닝 순서 요약", `${TUNING_ORDER.length}단계`,
+      para("막혔을 때 돌아올 자리입니다. <b>안쪽에서 바깥으로, 감쇠에서 적분으로.</b>"),
+      el("ol", { class: "man-order" },
+        TUNING_ORDER.map((t) => { const li = el("li"); li.innerHTML = t; return li; }))));
+  }
+
   // 설계 노트도 같은 카드 안, 같은 fold 문법으로. 밖에 두면 판이 둘로 갈려
   // "매뉴얼"이 어디까지인지 화면이 말해 주지 못한다.
   // 노트는 subsystems.js가 마크업 문자열로 갖고 있어(수작성 정적, fromMarkup 계약)

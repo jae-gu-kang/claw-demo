@@ -36,7 +36,7 @@ import { groupFields, parseFieldValue, schemaFields } from "../lib/schemaform.js
 import { store } from "../store.js";
 import { renderCodePanel } from "./codegen.js";
 import { DESIGN_ORDER, fromMarkup, topDiagramSvg } from "./diagram.js";
-import { renderHomeManual, renderPageManual } from "./manual.js";
+import { renderPageManual } from "./manual.js";
 import { createTopReplay } from "./replayoverlay.js";
 import { CHIP_LABEL, SUB_TINT, SUBSYSTEMS } from "./subsystems.js";
 
@@ -116,7 +116,6 @@ export function render() {
 // ── 최상위 (홈) ────────────────────────────────────────────────────────
 
 function renderHome(root) {
-  const manualBox = el("div");
   const svg = topDiagramSvg(navigate);
   topReplay = createTopReplay({ svgRoot: svg }); // 블록 값 표시·리미터 점멸
   root.append(
@@ -145,14 +144,10 @@ function renderHome(root) {
       "💡 블록이나 판 앞면의 층 이름을 클릭하면 서브시스템 내부 블록도가 열립니다 ",
       "(시뮬링크의 서브시스템 더블클릭 대응 · 브라우저 뒤로가기로 복귀). 신호는 오른쪽에서 ",
       "왼쪽으로 흐르고, 구조는 코드(M7 조립)와 1:1 고정 — 자유 배선 없음 [확정 02 §4]."),
-    // 매뉴얼은 접히지 않고 항상 붙는다 — 블록도가 "무엇이 있나"를 말하고 매뉴얼이
-    // "왜 있고 어떻게 튜닝하나"를 말한다. 버튼 뒤에 숨기면 후자를 아무도 안 읽는다.
-    // 다만 **홈에는 공통분만** 둔다: 블록 상세와 게인 설명은 그 블록의 내부 블록도
-    // 페이지로 내려갔다 (그림과 글이 다른 페이지에 있으면 둘 다 안 읽힌다).
-    // 여기 남는 것은 배경 Q&A·목차·튜닝 순서 — 정본은 lib/manualdoc.js HOME_SECTIONS
-    manualBox,
   );
-  renderHomeManual(manualBox);
+  // 홈에는 매뉴얼을 붙이지 않는다 — 첫 화면은 **그림만** 둔다. 설명은 전부 그 블록의
+  // 내부 블록도 페이지에 있고(블록 클릭), 홈에 있던 배경 Q&A 둘은 답이 되는 페이지로
+  // 옮겼다: 참값 차단 → 항법, 설계 순서·튜닝 순서 → SCAS (lib/manualdoc.js PAGE_ASIDES)
 }
 
 // ── 서브시스템 하위 페이지 ─────────────────────────────────────────────

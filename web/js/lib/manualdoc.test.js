@@ -9,8 +9,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
-  BACKGROUND, BLOCK_DOCS, GAIN_GROUPS, HEADINGS, HOME_SECTIONS, PAGE_DOCS, PAGE_GAINS,
-  FLOW_HEADINGS, FOLD_KINDS, TUNING_ORDER, UNDRAWN_GAINS,
+  BLOCK_DOCS, GAIN_GROUPS, HEADINGS, PAGE_ASIDES, PAGE_DOCS, PAGE_GAINS,
+  FLOW_HEADINGS, FOLD_KINDS, TUNING_ORDER, TUNING_ORDER_PAGE, UNDRAWN_GAINS,
   docFor, gainCountFor, gainCoverage, gainsFor,
 } from "./manualdoc.js";
 import { resolvePath, walkPages } from "./blocks.js";
@@ -30,7 +30,7 @@ const REGISTRY_REFS = new Set([
 
 /** 매뉴얼의 모든 본문 문자열 — innerHTML 계약 검사의 대상. */
 function* allProse() {
-  for (const b of BACKGROUND) {
+  for (const b of PAGE_ASIDES) {
     yield [`배경 "${b.q}"`, b.q];
     for (const a of b.a) yield [`배경 "${b.q}" 본문`, a];
   }
@@ -130,12 +130,19 @@ test("본문 문자열: innerHTML 계약 (스크립트·핸들러·마크다운 
   }
 });
 
-test("홈 구성은 데이터로 고정 — 상세는 블록 페이지 소관", () => {
-  // 코드 모양이 아니라 계약으로 못박는다: 홈에 블록 상세·게인 사전을 되돌리려면
-  // 이 목록을 명시적으로 고쳐야 한다 (실수로 되돌아가지 않게)
-  assert.deepEqual(HOME_SECTIONS, ["background", "index", "order"]);
-  assert.ok(BACKGROUND.length > 0 && TUNING_ORDER.length > 0);
-  for (const b of BACKGROUND) assert.ok(b.q?.trim() && b.a?.length > 0, `배경 "${b.q}" 불완전`);
+test("옮겨 온 배경은 답이 되는 페이지에 붙는다 (홈에는 매뉴얼이 없다)", () => {
+  // 블록도 첫 화면은 그림만 둔다 — 홈 매뉴얼을 되살리려면 이 계약을 명시적으로
+  // 고쳐야 한다. 배경 넷 중 둘만 남겼고, 그 둘은 각자 답이 되는 그림 앞에 있다
+  assert.deepEqual(PAGE_ASIDES.map((a) => [a.page, a.q.split(" (")[0]]),
+    [["scas", "왜 안쪽부터 닫는가"], ["nav", "왜 참값을 못 쓰나"]]);
+  for (const a of PAGE_ASIDES) {
+    assert.ok(a.page in SUBSYSTEMS, `배경 "${a.q}"의 page ${a.page} 미실존`);
+    assert.ok(a.q?.trim() && a.a?.length > 0, `배경 "${a.q}" 불완전`);
+  }
+  // 튜닝 순서는 "안쪽부터 바깥으로"라 그 안쪽이 보이는 자리에 있어야 한다
+  assert.equal(TUNING_ORDER_PAGE, "scas");
+  assert.ok(TUNING_ORDER_PAGE in SUBSYSTEMS);
+  assert.ok(TUNING_ORDER.length > 0);
 });
 
 test("게인 배치: 49개 전부가 어느 페이지엔가 닿는다 (잔여 규칙 포함)", () => {
@@ -303,7 +310,7 @@ test("접는 섹션 종류는 데이터로 고정 — 늘리고 줄이는 것이
   // 열림 상태를 기억하는 키이자 "무엇을 접는가"의 계약. 화면 쪽에서 문자열을 새로
   // 지어내면 그 섹션만 기억이 안 되는데, 그건 눌러 보기 전엔 안 보인다
   assert.deepEqual(FOLD_KINDS,
-    ["flow", "why", "doc", "gains", "notes", "background", "order"]);
+    ["flow", "why", "doc", "gains", "notes", "aside", "order"]);
   assert.equal(new Set(FOLD_KINDS).size, FOLD_KINDS.length, "종류 중복");
   // 흐름 소제목은 두 fold(flow·why)의 라벨이라 짝이 맞아야 한다
   assert.deepEqual(Object.keys(FLOW_HEADINGS), ["reads", "why"]);
