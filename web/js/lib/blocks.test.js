@@ -433,6 +433,83 @@ test("코드 틴트가 한 벌이다 — SUB_TINT 커버리지·판 색 재사�
   assert.ok(contrast(nblkInk, "#ffffff") >= 4.5, `nblk 제목 ${nblkInk} on #fff 미달`);
 });
 
+test("화살촉이 무언가에 닿는다 — 허공을 가리키는 배선 금지", () => {
+  // 실제로 α 입력 배선이 합산점 44px 앞에서 끝나 화살표가 엉뚱한 블록 모서리를
+  // 가리키고 있었다. 리뷰로는 안 잡히고 렌더도 "그럴듯하게" 나오는 종류라 잰다.
+  // 서브시스템 배선은 M/H/V 절대명령만 쓰므로(확인함) 끝점 계산이 결정적이다.
+  const attr = (tag, name) => {
+    const m = tag.match(new RegExp(`\\b${name}="(-?[\\d.]+)"`));
+    return m ? Number(m[1]) : null;
+  };
+  const endOf = (d) => {
+    let x = 0, y = 0;
+    for (const m of d.matchAll(/([MHV])\s*(-?[\d.]+)(?:[ ,]+(-?[\d.]+))?/g)) {
+      if (m[1] === "M") { x = Number(m[2]); y = Number(m[3]); }
+      else if (m[1] === "H") x = Number(m[2]);
+      else y = Number(m[2]);
+    }
+    return [x, y];
+  };
+  // 끝점의 **진행 방향 앞**을 본다. 단순 근접으로 재면 끊긴 배선이 엉뚱한 블록의
+  // 모서리 선에 얹혀 거리 0으로 통과한다 — 실제 α 버그가 정확히 그 모양이었다.
+  // 경계선 위(=변을 따라 흐르는 배선)는 안쪽으로 치지 않으려 부등호가 강하다
+  const lastDir = (d) => {
+    const seg = [...d.matchAll(/([MHV])\s*(-?[\d.]+)(?:[ ,]+(-?[\d.]+))?/g)];
+    const last = seg[seg.length - 1];
+    if (seg.length < 2) return [0, 0];
+    if (last[1] === "H") {
+      let prevX = 0;
+      for (const m of seg.slice(0, -1)) if (m[1] === "M" || m[1] === "H") prevX = Number(m[2]);
+      return [Math.sign(Number(last[2]) - prevX), 0];
+    }
+    if (last[1] === "V") {
+      let prevY = 0;
+      for (const m of seg.slice(0, -1)) if (m[1] === "M") prevY = Number(m[3]);
+        else if (m[1] === "V") prevY = Number(m[2]);
+      return [0, Math.sign(Number(last[2]) - prevY)];
+    }
+    return [0, 0];
+  };
+  const inside = (px, py, b) => px > b.x && px < b.x + b.w && py > b.y && py < b.y + b.h;
+
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    for (const { node, path } of walk(id, s)) {
+      const svg = node.svg;
+      const targets = [];
+      for (const m of svg.matchAll(/<rect\b[^>]*>/g)) {
+        const [x, y, w, h] = ["x", "y", "width", "height"].map((k) => attr(m[0], k));
+        if ([x, y, w, h].every((v) => v !== null)) targets.push({ x, y, w, h });
+      }
+      for (const m of svg.matchAll(/<circle\b[^>]*>/g)) {
+        const [cx, cy, r] = ["cx", "cy", "r"].map((k) => attr(m[0], k));
+        if ([cx, cy, r].every((v) => v !== null)) targets.push({ x: cx - r, y: cy - r, w: 2 * r, h: 2 * r });
+      }
+      for (const m of svg.matchAll(/<polygon\b[^>]*points="([^"]+)"/g)) {
+        const pts = m[1].trim().split(/\s+/).map((p) => p.split(",").map(Number));
+        const xs = pts.map((p) => p[0]); const ys = pts.map((p) => p[1]);
+        targets.push({ x: Math.min(...xs), y: Math.min(...ys),
+          w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) });
+      }
+      // 주석·라벨로 나가는 화살표는 정상 — 텍스트 기준점도 목표로 친다
+      for (const m of svg.matchAll(/<text\b[^>]*>/g)) {
+        const [x, y] = ["x", "y"].map((k) => attr(m[0], k));
+        if (x !== null && y !== null) targets.push({ x: x - 30, y: y - 26, w: 60, h: 30 });
+      }
+      for (const m of svg.matchAll(/<path\b[^>]*class="wire[^"]*"[^>]*>/g)) {
+        if (!/marker-end=/.test(m[0])) continue;
+        const d = m[0].match(/\bd="([^"]+)"/);
+        if (!d) continue;
+        const [ex, ey] = endOf(d[1]);
+        const [ux, uy] = lastDir(d[1]);
+        // 화살촉 길이(8) + 여유 — 이만큼 나아간 자리가 어떤 도형 **안**이어야 한다
+        const [tx, ty] = [ex + ux * 10, ey + uy * 10];
+        assert.ok(targets.some((t) => inside(tx, ty, t)),
+          `${path.join("/")} 화살촉이 허공을 가리킴 — 끝점 (${ex},${ey}) 방향 (${ux},${uy})`);
+      }
+    }
+  }
+});
+
 test("검증 페이지 신호 개수 = 엔진 정본 — _CHAIN_SIGNALS 계수 대조", () => {
   // 그림에 적은 "명령 사슬 N 신호"는 엔진에 신호가 추가되면 조용히 낡는다 (리뷰 —
   // 실제로 44라고 적었는데 50이었다). 정본을 세서 대조한다

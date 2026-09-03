@@ -800,7 +800,7 @@ export const SUBSYSTEMS = {
     <text class="ttl" x="385" y="224" style="font-size:13px">− 보호마진</text>
     <text class="ttl2" x="385" y="242">0.05 rad ≈ 2.9°</text></g>
   <path class="wire" d="M450 230 H476" marker-end="url(#aw-lim)"/>
-  <text class="siglabel" x="460" y="212">α_max</text>
+  <text class="siglabel" x="468" y="210">α_max</text>
   <circle class="body" data-code="fcl/limiter.py:AlphaLimiter.step" cx="494" cy="230" r="14"/>
   <text class="sumsign" x="485" y="234">+</text><text class="sumsign" x="494" y="243">−</text>
   <path class="wire" d="M508 230 H602" marker-end="url(#aw-lim)"/>
@@ -821,10 +821,10 @@ export const SUBSYSTEMS = {
   <g class="sblk" data-code="fcl/airdata.py:airdata_from_nav common/attitude.py:quat_to_euler"><rect class="body" x="140" y="282" width="220" height="56" rx="3"/>
     <text class="ttl" x="250" y="304" style="font-size:13px">airdata · quat→euler</text>
     <text class="ttl2" x="250" y="324">α · θ 추출 — NavOutput만 소비</text></g>
-  <path class="wire" d="M360 298 H450 V244" marker-end="url(#aw-lim)"/>
-  <text class="siglabel" x="436" y="268">α</text>
-  <path class="wire" d="M360 322 H680 V244 H634" marker-end="url(#aw-lim)"/>
-  <text class="siglabel" x="666" y="268">θ</text>
+  <path class="wire" d="M360 298 H494 V244" marker-end="url(#aw-lim)"/>
+  <text class="siglabel" x="478" y="290">α</text>
+  <path class="wire" d="M360 322 H680 V230 H634" marker-end="url(#aw-lim)"/>
+  <text class="siglabel" x="666" y="256">θ</text>
   <text class="canvas-note" x="24" y="442">※ 반환 = (제한 θ_cmd′ · 작동 플래그 · 실속 마진 Δα) — 플래그·마진은 law 로깅 속성 → 엔벨로프 감시(02 §6.1) 소비 · mach는 law가 항법 고도의 ISA 음속으로 산출</text>
   <text class="canvas-note" x="24" y="462">※ 상한만 개입 — 하한 없음 · 근거: θ = γ + α 근사 (θ 증분 = α 증분 · γ 변화는 여유 회복 방향) · 1D (mach,) 외 테이블·clip 외 외삽은 생성 시 거부</text>
 </svg>`,
@@ -1016,7 +1016,7 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M930 166 H948" marker-end="url(#aw-pl)"/>
   <g class="sblk" data-code="common/contracts.py:VehicleState"><rect class="body" x="952" y="154" width="36" height="24" rx="12"/><text class="pnum" x="970" y="170">1</text></g>
   <text class="pname" x="952" y="202">참값 상태</text>
-  <text class="pname" x="925" y="220">→ 항법만 (참값 차단)</text>
+  <text class="pname" x="925" y="250">→ 항법만 (참값 차단)</text>
   <circle class="branch" cx="938" cy="166" r="3.2"/>
   <path class="wire soft" d="M938 166 V36 H295 V56" marker-end="url(#as-pl)"/>
   <text class="siglabel" x="610" y="28">상태 피드백 (참값): v_b · ω_b · q_nb · h</text>
@@ -1026,7 +1026,7 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="800" y="400">스텝 사이 갱신 [준정적] · 클릭 → 내부</text></g>
   <path class="wire soft" d="M800 340 V240" marker-end="url(#as-pl)"/>
   <text class="siglabel" x="836" y="300">m · J</text>
-  <path class="wire soft" d="M660 376 H470 V318 H444" marker-end="url(#as-pl)"/>
+  <path class="wire soft" d="M660 376 H470 V340 H444" marker-end="url(#as-pl)"/>
   <text class="siglabel" x="556" y="368">m (중력)</text>
   <rect x="150" y="470" width="520" height="56" rx="8" fill="none" stroke="#7c3aed" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text class="annot" x="410" y="494" text-anchor="middle" fill="#7c3aed">① 이 플랜트 기반 설계 1단계 — 트림 (100+ 케이스 배치)</text>
@@ -1175,7 +1175,7 @@ export const SUBSYSTEMS = {
   <g class="sblk" data-code="common/attitude.py:quat_normalize"><rect class="body" x="730" y="72" width="180" height="64" rx="3"/>
     <text class="ttl" x="820" y="94" style="font-size:13px">쿼터니언 재정규화</text>
     <text class="ttl2" x="820" y="114">스텝마다 — 드리프트 방지</text></g>
-  <path class="wire" d="M910 104 H926" marker-end="url(#aw-peom)"/>
+  <path class="wire" d="M910 104 H930"/>
   <circle class="branch" cx="930" cy="104" r="3.2"/>
   <path class="wire" d="M934 104 H941" marker-end="url(#aw-peom)"/>
   <g class="sblk" data-code="plant/eom.py:RigidBody.step"><rect class="body" x="945" y="92" width="36" height="24" rx="12"/><text class="pnum" x="963" y="108">1</text></g>
@@ -1320,12 +1320,11 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="820" y="292">다음 릴리스까지 유지 (ZOH)</text>
     <text class="ttl2" x="820" y="310">첫 릴리스 전 valid=False</text></g>
   <path class="wire" d="M920 286 H926" marker-end="url(#aw-nav)"/>
-  <circle class="branch" cx="923" cy="286" r="3.2"/>
   <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="930" y="274" width="36" height="24" rx="12"/><text class="pnum" x="948" y="290">1</text></g>
   <text class="pname" x="952" y="264">NavOutput</text>
   <!-- 출력 펼침 — NavOutput 버스의 실제 필드와 소비처 병기 (6DOF 페이지와 같은 문법).
        버스 분기는 도해(nblk)지만 필드는 전부 contracts.py NavOutput 정의에 실존한다 -->
-  <path class="wire" d="M923 286 V380 H387 V396" marker-end="url(#aw-nav)"/>
+  <path class="wire" d="M820 322 V380 H387 V396" marker-end="url(#aw-nav)"/>
   <g class="sblk nblk"><rect class="body" x="360" y="400" width="54" height="250" rx="3"/></g>
   <text class="bname" x="387" y="423">버스</text>
   <text class="bname" x="387" y="437">분기</text>
@@ -1369,7 +1368,7 @@ export const SUBSYSTEMS = {
     title: "게인 스케줄링", eng: "오토파일럿 · SCAS 게인에 적용",
     chips: ["ok", "dft", "tbd"],
     svg: `
-<svg viewBox="0 0 900 440" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 1000 440" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <marker id="aw-gs2" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
     <marker id="as-gs2" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker>
@@ -1408,8 +1407,8 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="755" y="208">키: kp·ki·k_rate (조립 검증)</text></g>
   <path class="wire" d="M840 170 H854" marker-end="url(#aw-gs2)"/>
   <g class="sblk" data-code="fcl/schedule.py:GainSchedule.step"><rect class="body" x="858" y="158" width="36" height="24" rx="12"/><text class="pnum" x="876" y="174">1</text></g>
-  <text class="pname" x="838" y="210">→ AP · SCAS</text>
-  <text class="pname" x="838" y="228">스텝별 게인 덮어쓰기</text>
+  <text class="pname a-start" x="902" y="166">→ AP · SCAS</text>
+  <text class="pname a-start" x="902" y="184">스텝별 게인 덮어쓰기</text>
   <rect x="400" y="320" width="240" height="64" rx="8" fill="none" stroke="#8a5cf6" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text class="annot" x="520" y="344" text-anchor="middle">설계 점검 — max_adjacent_jump</text>
   <text class="annot" x="520" y="364" text-anchor="middle">축별 인접 격자 최대 |Δ게인| (불연속 검출)</text>
