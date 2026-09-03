@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 
 import { BLOCKS } from "./blocks.js";
 import { FIELD_GROUPS, groupFields, parseFieldValue, schemaFields } from "./schemaform.js";
+import { SUBSYSTEMS } from "../views/subsystems.js";
 
 // ParamSet.to_json_schema 출력 형태 그대로 (엔진 paramset.py가 정본)
 const SCHEMA = {
@@ -106,9 +107,18 @@ test("groupFields: 스키마에 없는 스펙 이름은 무시, 미지 컴포넌
   assert.deepEqual(plain, [{ title: "", fields: [{ name: "accept_radius" }] }]);
 });
 
+/** 하위 페이지 스키마도 폼 원천이다 (views/blocks.js loadSubSchema) — 트리 재귀. */
+function* subSchemas(node) {
+  if (node.schema) yield `${node.schema.category}/${node.schema.name}`;
+  for (const child of Object.values(node.children ?? {})) yield* subSchemas(child);
+}
+
 test("FIELD_GROUPS 키는 전부 블록 스키마 참조에 실존 (오타 → 조용한 폴백 방지)", () => {
-  const refs = new Set(BLOCKS.filter((b) => b.detail.schema)
-    .map((b) => `${b.detail.schema.category}/${b.detail.schema.name}`));
+  const refs = new Set([
+    ...BLOCKS.filter((b) => b.detail.schema)
+      .map((b) => `${b.detail.schema.category}/${b.detail.schema.name}`),
+    ...Object.values(SUBSYSTEMS).flatMap((s) => [...subSchemas(s)]),
+  ]);
   for (const key of Object.keys(FIELD_GROUPS)) {
     assert.ok(refs.has(key), `FIELD_GROUPS 고아 키: ${key}`);
   }
@@ -129,6 +139,10 @@ const SCHEMA_NAMES = {
   "fcl/ScasAxis": ["kp", "ki", "k_rate", "washout_tau", "out_lo", "out_hi"],
   "fcl/Mixer": ["elevon_lo", "elevon_hi", "rudder_lo", "rudder_hi", "k_diff_thr"],
   "actuator/SecondOrderActuator": ["wn", "zeta", "rate_max", "pos_lo", "pos_hi", "initial"],
+  // x_offset·thrust_map은 스키마에 없다 — 죽은 인자와 콜러블이라 의도적 제외
+  // (engine claw/plant/prop.py, test_plant_models가 그 목록을 핀한다)
+  "propulsion/SingleEngine": ["max_thrust", "z_offset"],
+  "propulsion/TwinEngine": ["max_thrust", "y_offset", "z_offset"],
   "nav/ErrorModel": ["pos_std_h", "pos_std_v", "vel_std_h", "vel_std_v",
     "att_std", "psi_std", "rate_std",
     "bias_std_h", "bias_std_v", "bias_tau", "delay_s", "update_hz", "seed"],

@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : ba6323a1825a7740
+ * 지문    : a1a24ddcaf2e9fe3
  * 엔진    : claw 0.1.0
  * 파라미터 데이터 (MATLAB _data.c 대응)
  */
@@ -68,7 +68,7 @@ const fcl_params_t fcl_params = {
     .mix_elevon_r_hi          = 0.35,                  /* 상한 */
     .mix_rudder_lo            = -0.35,                 /* 하한 */
     .mix_rudder_hi            = 0.35,                  /* 상한 */
-    .mix_diff_k               = 0.1,                   /* 게인 */
+    .mix_diff_k               = 0.0,                   /* 게인 */
     .mix_thr_l_lo             = 0.0,                   /* 하한 */
     .mix_thr_l_hi             = 1.0,                   /* 상한 */
     .mix_thr_r_lo             = 0.0,                   /* 하한 */

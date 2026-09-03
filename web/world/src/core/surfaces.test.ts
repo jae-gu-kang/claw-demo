@@ -130,7 +130,7 @@ describe("프로펠러 — 표시 값", () => {
     assert.equal(propellerRate(2, 2, 200), 200);
   });
 
-  it("한쪽만 결측이면 null — 쌍발의 한쪽만 보고 회전을 지어내지 않는다", () => {
+  it("한쪽만 결측이면 null — 반쪽만 보고 집합 스로틀을 지어내지 않는다", () => {
     assert.equal(propellerRate(0.8, null), null);
     assert.equal(propellerRate(null, 0.8), null);
   });

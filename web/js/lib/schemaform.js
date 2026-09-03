@@ -49,6 +49,10 @@ export const FIELD_GROUPS = {
     ["동특성", ["wn", "zeta", "rate_max"]],
     ["위치·초기", ["pos_lo", "pos_hi", "initial"]],
   ],
+  "propulsion/SingleEngine": [
+    ["추력", ["max_thrust"]],
+    ["추력선 오프셋", ["z_offset"]],
+  ],
   "nav/ErrorModel": [
     ["측정 잡음 σ — 수평", ["pos_std_h", "vel_std_h"]],
     ["측정 잡음 σ — 수직", ["pos_std_v", "vel_std_v"]],

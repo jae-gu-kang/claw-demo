@@ -151,6 +151,25 @@ def nonadditivity(m0, mA, mB, mAB) -> dict:
     return out
 
 
+def plan_shapes(shape: Shape, plan) -> dict:
+    """계획 → {런 라벨: 형상}. run_sweep이 실행 전에 쓰고, **서버가 제출 시점 검증에도 쓴다**.
+
+    분리해 둔 이유: 잡 안에서 형상을 만들다 터지면 이미 돌린 런이 통째로 버려진다.
+    파라미터 id 오타·기체와 안 맞는 형상은 202를 주기 전에 알 수 있어야 한다
+    (routes/influence.py의 "무의미 구성은 제출 시점 422" 계약).
+    """
+    universe = {r.id: r for r in param_universe(shape)}
+    shapes = {}
+    for spec in plan["runs"]:
+        s = shape
+        for pid, v in spec.overrides.items():
+            if pid not in universe:
+                raise ValueError(f"알 수 없는 파라미터 id: {pid}")
+            s = apply_param(s, universe[pid], float(v))
+        shapes[spec.label] = s
+    return shapes
+
+
 def run_sweep(aircraft, trs, shape: Shape, plan, *, dt_plant=0.01,
               t_settle=5.0, t_step=30.0, dv=PROBE_DV, dh=PROBE_DH,
               dpsi=PROBE_DPSI, on_progress=None) -> dict:
@@ -160,16 +179,8 @@ def run_sweep(aircraft, trs, shape: Shape, plan, *, dt_plant=0.01,
     형상의 수치인지가 계보다. on_progress(done, total): 런 단위, truthy 반환은
     협조적 취소로 완료 런을 보존한다 (margin-map 패턴).
     """
-    universe = {r.id: r for r in param_universe(shape)}
     runs = list(plan["runs"])
-    shapes = {}
-    for spec in runs:
-        s = shape
-        for pid, v in spec.overrides.items():
-            if pid not in universe:
-                raise ValueError(f"알 수 없는 파라미터 id: {pid}")
-            s = apply_param(s, universe[pid], float(v))
-        shapes[spec.label] = s
+    shapes = plan_shapes(shape, plan)
 
     stall = make_demo_stall_table()
     db_ranges = make_demo_db_ranges()

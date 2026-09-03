@@ -23,6 +23,7 @@ const NAV_HASHES = [...read("../../index.html").matchAll(/data-view="([\w-]+)"/g
 const REGISTRY_REFS = new Set([
   "fcl/Autopilot", "fcl/ScasAxis", "fcl/Mixer",
   "actuator/SecondOrderActuator", "guidance/LOS", "nav/ErrorModel",
+  "propulsion/SingleEngine", "propulsion/TwinEngine",
 ]);
 
 test("블록: id 유일 + 상세 스펙 완결", () => {
@@ -623,6 +624,54 @@ test("허브 계약: 시뮬 주입 경로 보유 블록(AP·SCAS·작동기·항
   assert.equal(byId.plant.edit.hash, "trim");
 });
 
+// 하위 페이지가 스스로 지목한 스키마(sub.schema)의 파라미터명 사본 — 루트와 달리
+// 이 페이지들은 편집이 아니라 열람이라 목록도 따로다 (views/blocks.js loadSubSchema)
+const SUB_PARAM_NAMES = {
+  "propulsion/SingleEngine": new Set(["max_thrust", "z_offset"]),
+};
+
+const subRef = (node) => (node.schema ? `${node.schema.category}/${node.schema.name}` : null);
+
+test("하위 페이지 스키마는 실존 컴포넌트 + 편집 불가 루트 아래에만", () => {
+  const byId = Object.fromEntries(BLOCKS.map((b) => [b.id, b]));
+  let found = 0;
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    for (const { node, path } of walk(id, s)) {
+      const ref = subRef(node);
+      if (!ref) continue;
+      found += 1;
+      const p = path.join("/");
+      assert.ok(REGISTRY_REFS.has(ref), `${p}: 미등록 하위 스키마 참조 ${ref}`);
+      // data-p 가드가 채울 목록 — 없으면 그 페이지 수치는 영영 갱신되지 않는다
+      assert.ok(SUB_PARAM_NAMES[ref], `${p}: SUB_PARAM_NAMES에 ${ref} 없음`);
+      // **진짜 위험은 여기다.** renderParams의 하위 스키마 분기는 축 처리·loadSchema보다
+      // 먼저 return하므로, 편집 가능 블록(AP·SCAS·작동기·항법)의 페이지에 schema가
+      // 붙으면 게인 잠금·store 주입·코드 생성을 갖춘 폼이 조용히 읽기 전용 표로 바뀐다.
+      // (종전에는 node.editable/injectKey를 봤는데 그건 BLOCKS[].detail의 키라
+      // SUBSYSTEMS 노드에는 존재한 적이 없다 — 아무것도 안 고정하는 단정이었다. 리뷰)
+      assert.ok(!byId[path[0]]?.detail.editable,
+        `${p}: 편집 가능 블록의 페이지에 하위 스키마 — 폼이 표로 바뀐다`);
+    }
+  }
+  assert.ok(found > 0, "하위 페이지 스키마가 하나도 없다 — 경로가 조용히 사라졌나?");
+});
+
+test("추진 페이지 스키마 = 데모 기체가 실제로 쓰는 엔진 클래스 (엔진 원문 대조)", () => {
+  // 목록 대조만 하면 SUB_PARAM_NAMES에 항목 하나 더 얹어 뚫린다 — data-code 가드와
+  // 같은 방식으로 **엔진 소스를 읽어** plant/demo.py가 조립하는 클래스와 직접 묶는다.
+  // 어긋나면 화면이 안 나는 형상의 추력·배치를 "이 기체 값"이라고 보여 준다
+  const demo = readFileSync(
+    new URL("../../../engine/claw/plant/demo.py", import.meta.url), "utf8",
+  );
+  const ms = [...demo.matchAll(/^\s*engine = (\w+)\(/gm)];
+  assert.ok(ms.length > 0, "plant/demo.py에서 엔진 조립 줄을 못 찾음 (형식이 바뀌었나?)");
+  // 팩토리가 둘이 되면 첫 매치가 파일 내 순서에 좌우된다 — 조용히 엉뚱한 쪽을
+  // 가리키느니 여기서 터지는 편이 낫다 (리뷰)
+  assert.equal(ms.length, 1, `엔진 조립 줄이 ${ms.length}개 — 어느 쪽이 정본인지 모호`);
+  assert.equal(SUBSYSTEMS.plant.children.prop.schema.name, ms[0][1],
+    `추진 페이지가 ${SUBSYSTEMS.plant.children.prop.schema.name}인데 데모는 ${ms[0][1]}`);
+});
+
 // 편집 가능 블록 스키마의 파라미터명 사본 — 정본은 엔진 레지스트리
 // (engine claw/fcl·plant·nav 생성자 kwargs). 이름 변경 시 이 목록도 갱신할 것.
 const SVG_PARAM_NAMES = {
@@ -640,19 +689,23 @@ const SVG_PARAM_NAMES = {
   ]),
 };
 
-test("서브시스템 SVG data-p는 루트 블록 스키마 파라미터명만 (children 포함 — 오타 = 영구 미갱신 수치)", () => {
+test("서브시스템 SVG data-p는 그 페이지 바인딩 소스의 파라미터명만 (children 포함 — 오타 = 영구 미갱신 수치)", () => {
   for (const [id, s] of Object.entries(SUBSYSTEMS)) {
     // 바인딩 소스는 루트 블록 스키마 — children도 같은 스키마로 채워짐 (views/blocks.js)
     const allowed = SVG_PARAM_NAMES[id];
     for (const { node, path } of walk(id, s)) {
       const p = path.join("/");
       const names = [...node.svg.matchAll(/data-p="([^"]+)"/g)].map((m) => m[1]);
-      if (!allowed) {
+      // 하위 페이지가 스스로 스키마를 지목하면 그 페이지의 바인딩 소스는 그것이다
+      // (loadSubSchema가 그 스키마 기본값으로 bindSvgParams를 부른다) — 루트 목록으로
+      // 재면 맞는 이름을 "스키마에 없다"고 거절하게 된다
+      const here = SUB_PARAM_NAMES[subRef(node)] ?? allowed;
+      if (!here) {
         // 스키마 폼 없는 루트 아래의 data-p는 아무도 채우지 않음 — 도입 시 목록 등록
         assert.equal(names.length, 0, `${p}: 바인딩 소스 없는 페이지에 data-p ${names}`);
         continue;
       }
-      for (const n of names) assert.ok(allowed.has(n), `${p}: 스키마에 없는 data-p "${n}"`);
+      for (const n of names) assert.ok(here.has(n), `${p}: 스키마에 없는 data-p "${n}"`);
     }
     if (allowed) {
       const rootNames = [...s.svg.matchAll(/data-p="([^"]+)"/g)].map((m) => m[1]);

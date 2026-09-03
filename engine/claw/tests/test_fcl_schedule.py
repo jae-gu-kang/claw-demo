@@ -131,10 +131,11 @@ def test_기본_테이블은_예전과_같다():
         assert tab.axis_names == ("mach",)
         # 설계점 M0.6에서는 어느 자리든 설계 상수 그대로
         assert float(tab.interp(mach=0.6)) == pytest.approx(design[name])
-    # 지문은 이륙·착륙 도입에서 갱신됐다 — 종방향 축(pitch·hdot)과 θ 출처 Switch가
-    # 그래프에 들어가 탑재 코드가 실제로 달라졌다(flight/gen 재생성 동반). 지문이
-    # 움직이는 것이 곧 설계 변경이고, 안 움직였다면 그게 이상한 것이다.
-    assert _module().fingerprint == "ba6323a1825a7740"
+    # 지문은 기체를 단발로 맞추면서 갱신됐다 — 차동추력 계수를 0으로 내린 설계 변경이
+    # 믹서 파라미터를 바꿨다(fcl/demo.py DEMO_K_DIFF_THR, flight/gen 재생성 동반).
+    # 지문이 움직이는 것이 곧 설계 변경이고, 안 움직였다면 그게 이상한 것이다.
+    # (직전 갱신은 이륙·착륙 도입 — 종방향 축과 θ 출처 Switch가 그래프에 들어갔다.)
+    assert _module().fingerprint == "a1a24ddcaf2e9fe3"
 
 
 def test_없는_자리를_요구하면_거부한다():

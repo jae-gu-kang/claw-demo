@@ -56,6 +56,35 @@ _CHAIN_SIGNALS = (
 )
 
 
+def check_law_plant_pairing(aircraft, fcl) -> None:
+    """기체와 법칙의 조립 교차조건 — 성립하지 않으면 ValueError.
+
+    Simulator.__init__이 부르고, **서버가 제출 시점에도 부른다** — 잡 안에서 터지면
+    이미 돌린 런이 통째로 버려지기 때문이다 (routes/influence.py의 "무의미 구성은
+    제출 시점 422" 계약).
+
+    지금 보는 것: 차동추력을 못 내는 기체에 그 계수가 켜져 있는가. 그 조합은 **조용히
+    아무 일도 안 하는 것보다 나쁘다** — 법칙은 요축을 돕는다고 믿는데 기체는 모멘트를
+    안 내고, 스로틀이 상·하한에 붙은 구간에서는 좌우 클립이 비대칭이라 평균이 밀려
+    러더가 추력을 깎는다 (plant/prop.py SingleEngine).
+
+    isinstance가 아니라 **능력 플래그**로 묻는다: plant가 fcl을 알 필요도, 그 반대도
+    없다. 플래그가 없는 기체는 낼 수 있다고 본다(덕타이핑 기체를 깨지 않는다) —
+    못 내는 기체가 스스로 False를 선언하는 쪽이 계약이다.
+    """
+    mixer = getattr(fcl, "mixer", None)
+    # 법칙이 **실제로 돌리는** 값은 cfg 쪽이다 (fcl/law.py가 mixer.cfg를 그래프에 넣는다).
+    # 속성 사본(mixer.k_diff_thr)이 아니라 이쪽을 봐야 검사와 실행이 같은 값을 본다
+    cfg = getattr(mixer, "cfg", None)
+    k_diff = float((cfg or {}).get("k_diff_thr", 0.0) if cfg is not None else 0.0)
+    if k_diff != 0.0 and not getattr(aircraft.engine, "differential_thrust", True):
+        raise ValueError(
+            f"이 기체는 차동추력을 낼 수 없는데 k_diff_thr={k_diff}로 켜져 있음 "
+            f"({type(aircraft.engine).__name__} — 중심선 1기). "
+            "믹서 k_diff_thr를 0으로 두거나 쌍발 기체(TwinEngine)를 물려야 함"
+        )
+
+
 class Simulator:
     def __init__(
         self,
@@ -129,6 +158,7 @@ class Simulator:
             raise ValueError(
                 "off_rail 이탈 조건이 있으나 발사 레일이 없음 — launch=를 주거나 조건을 바꿔야 함"
             )
+        check_law_plant_pairing(aircraft, fcl)
         self.dt_plant = dt_plant
         self.control_hz = control_hz
         self.n_ctrl = int(n)

@@ -4,6 +4,6 @@ plant + nav + guidance + fcl을 03 §4 계약으로만 연결한다. 몬테카�
 분산 대상 [TBD 02 §6] 확정 후 (백로그).
 """
 
-from claw.sim.simulator import Simulator
+from claw.sim.simulator import Simulator, check_law_plant_pairing
 
-__all__ = ["Simulator"]
+__all__ = ["Simulator", "check_law_plant_pairing"]

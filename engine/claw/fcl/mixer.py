@@ -25,7 +25,7 @@ class Mixer(Block):
         ParamDef("elevon_hi", 0.35, "rad", "엘레본 상한"),
         ParamDef("rudder_lo", -0.35, "rad", "러더 하한"),
         ParamDef("rudder_hi", 0.35, "rad", "러더 상한"),
-        ParamDef("k_diff_thr", 0.0, "1/rad", "차동추력 보상 계수 (0=미사용)"),
+        ParamDef("k_diff_thr", 0.0, "1/rad", "차동추력 보상 계수 (0=미사용) — 단발 기체는 0만 가능"),
     )
 
     def __init__(

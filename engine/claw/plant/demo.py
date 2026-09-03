@@ -13,7 +13,7 @@ from claw.plant.aero import AeroModel, wind_to_body_coeffs
 from claw.plant.aircraft import Aircraft
 from claw.plant.ground import LaunchRail, SkidGear
 from claw.plant.mass import FuelMass
-from claw.plant.prop import TwinEngine
+from claw.plant.prop import SingleEngine
 from claw.tables import Table
 
 # 스키드 접촉 [기본값] — 강성은 "정지 침투량"으로 정한다. 총중량 10.8 kN을 5 cm에서
@@ -102,7 +102,13 @@ def make_demo_aircraft(ground=None) -> Aircraft:
         cg_empty=np.zeros(3),
         cg_full=np.zeros(3),
     )
-    engine = TwinEngine(max_thrust=4000.0, y_offset=0.5)
+    # 추진 [기본값] — **단발 중심선 8 kN**. 시각화 모델(models/shahed-136: 2엽 푸셔
+    # 1기)이 정본이고 동역학을 거기 맞췄다. 총추력은 종전 쌍발(4 kN×2)과 같게 두어
+    # 종방향은 한 톨도 안 바뀐다 — 바뀌는 것은 **차동추력 요 모멘트가 사라지는 것
+    # 하나뿐**이고, 그래서 믹서의 k_diff_thr도 0이다(fcl/demo.py DEMO_K_DIFF_THR).
+    # 요축 재튜닝은 하지 않았다: 실측상 필요가 없다 (그 근거는 fcl/demo.py에).
+    # 값을 고칠 곳은 여기 하나다 (plant/prop.py 스키마 기본값도 이 값과 같게 유지).
+    engine = SingleEngine(max_thrust=8000.0)
     return Aircraft(fuel_mass, aero, engine, ground=ground)
 
 

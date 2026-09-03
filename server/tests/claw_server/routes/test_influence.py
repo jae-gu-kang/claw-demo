@@ -269,3 +269,26 @@ def test_diagnose_fingerprint_mismatch_warns(client, wait_job):
     rid2 = _run_sim(client, wait_job)
     body2 = client.post("/api/influence/diagnose", json={"result_id": rid2}).json()
     assert not any("계보 불일치" in w for w in body2["warnings"])
+
+
+def test_sweep_rejects_impossible_shape_at_submit_not_mid_job(client):
+    """기체가 낼 수 없는 손잡이는 **제출 시점 422** — 잡 안에서 터지면 안 된다.
+
+    k_diff_thr는 param_universe에 실존하는 손잡이라 계획은 세워진다. 그런데 데모
+    기체는 단발이라 그 조합은 예외 없이 실수다. 잡 안에서 터뜨리면 202를 준 뒤
+    트림 배치와 base 런을 다 돌리고 나서 **완료된 행이 통째로 버려진다** — 이
+    라우트가 독스트링에 적어 둔 "무의미 구성은 제출 시점 422" 계약이 그것이다.
+    """
+    cases = [{"name": "c", "mach": 0.6, "alt": 1000.0, "fuel": 300.0}]
+    r = client.post("/api/influence/sweep",
+                    json={"cases": cases, "knobs": ["fcl/Mixer.k_diff_thr"]})
+    assert r.status_code == 422
+    assert "차동추력" in r.json()["detail"]
+    # 형상에 직접 실어 보내는 경로(scan)도 같은 자리에서 걸린다
+    r2 = client.post("/api/influence/scan",
+                     json={"cases": cases, "mixer": {"k_diff_thr": 0.1}})
+    assert r2.status_code == 422
+    # 정상 손잡이는 그대로 202 — 가드가 전체를 막아 버리지 않는다
+    r3 = client.post("/api/influence/sweep",
+                     json={"cases": cases, "knobs": ["fcl/Autopilot.kp_alt"]})
+    assert r3.status_code == 202

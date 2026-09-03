@@ -16,9 +16,10 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import Field, field_validator
 
 from claw.pipeline.diagnose import diagnose_grid, diagnose_run
-from claw.pipeline.influence import Shape, param_universe, structural_payload
+from claw.pipeline.influence import Shape, make_law, param_universe, structural_payload
 from claw.pipeline.openloop import openloop_delta
-from claw.pipeline.sweep import nonadditivity, run_sweep, sweep_plan
+from claw.pipeline.sweep import nonadditivity, plan_shapes, run_sweep, sweep_plan
+from claw.sim import check_law_plant_pairing
 from claw.plant import make_demo_aircraft
 from claw.trim import trim_batch
 from claw_server.routes.codegen import FlightCodeIn
@@ -258,6 +259,10 @@ def submit_sweep(req: SweepIn, request: Request, response: Response) -> dict:
             if req.span is not None
             else sweep_plan(shape, req.knobs, [tuple(p) for p in req.pairs])
         )
+        # 잡 안에서 터지면 이미 돌린 런이 통째로 버려진다 — 기체와 안 맞는 형상은
+        # 202를 주기 전에 여기서 걸러 위 except가 422로 바꾼다 (독스트링의 계약)
+        for s in plan_shapes(shape, plan).values():
+            check_law_plant_pairing(ac, make_law(s))
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=str(e))
     store = request.app.state.store
@@ -347,6 +352,10 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
     try:
         shape = to_shape(req)
         plan = sweep_plan(shape, [], ())
+        # 잡 안에서 터지면 이미 돌린 런이 통째로 버려진다 — 기체와 안 맞는 형상은
+        # 202를 주기 전에 여기서 걸러 위 except가 422로 바꾼다 (독스트링의 계약)
+        for s in plan_shapes(shape, plan).values():
+            check_law_plant_pairing(ac, make_law(s))
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=str(e))
     store = request.app.state.store

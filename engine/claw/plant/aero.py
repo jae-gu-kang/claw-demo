@@ -13,7 +13,8 @@ p·b/2V, q·c̄/2V, r·b/2V) + controls로 전달한 타면각. 실제 CFD DB �
 [TBD — 책임 소재 기록] 모멘트 기준점 이전: conventions.md [확정] "DB 기준점의 모멘트를
 현재 CG 기준으로 이전"은 아직 미구현 — DB 규격 확정 시 플랜트 조립자(Phase 3~4)가
 FuelMass.at의 cg와 DB 메타 기준점으로 M += r×F 이전을 수행해야 한다.
-TwinEngine 엔진 위치도 같은 지점에서 CG 이동을 반영할 것.
+추진 엔진 위치(prop.py SingleEngine.r · TwinEngine.r_left/r_right)도 같은 지점에서
+CG 이동을 반영할 것.
 """
 
 import math

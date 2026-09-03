@@ -5,13 +5,16 @@ import importlib
 
 def test_registry_index_lists_engine_components(client):
     reg = client.get("/api/registry").json()
-    assert {"actuator", "blocks", "guidance", "fcl", "nav"} <= set(reg)
+    assert {"actuator", "blocks", "guidance", "fcl", "nav", "propulsion"} <= set(reg)
     assert "SecondOrderActuator" in reg["actuator"]
     assert "LOS" in reg["guidance"]
     assert "PID" in reg["blocks"]
     # 법칙 컴포넌트 (블록 파라미터 폼 원천 — 02 §2.3)
     assert {"Autopilot", "ScasAxis", "Mixer"} <= set(reg["fcl"])
     assert "ErrorModel" in reg["nav"]
+    # 추진 — 블록도 하위 페이지(#blocks/plant/prop)가 **SingleEngine**으로 표를 그린다
+    # (데모 정본 형상). TwinEngine은 쌍발 스터디용으로 함께 등록돼 있다
+    assert {"SingleEngine", "TwinEngine"} <= set(reg["propulsion"])
 
 
 def test_registry_schema_for_form_autogen(client):
