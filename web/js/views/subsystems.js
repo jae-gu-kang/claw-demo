@@ -581,17 +581,17 @@ export const SUBSYSTEMS = {
   <defs><marker id="aw-guid" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
   <marker id="as-guid" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker></defs>
   <!-- 구성 입력 (점선) — 모드 테이블·웨이포인트는 임무프로파일이 정의 -->
-  <g class="sblk"><rect class="body" x="30" y="48" width="36" height="24" rx="12"/><text class="pnum" x="48" y="64">1</text></g>
+  <g class="sblk" data-code="guidance/guidance.py:Guidance"><rect class="body" x="30" y="48" width="36" height="24" rx="12"/><text class="pnum" x="48" y="64">1</text></g>
   <text class="pname" x="48" y="92">임무프로파일</text>
   <path class="wire soft" d="M66 60 H430 V146" marker-end="url(#as-guid)"/>
   <circle class="branch" cx="110" cy="60" r="3.2"/>
   <path class="wire soft" d="M110 60 V316 H356" marker-end="url(#as-guid)"/>
   <text class="siglabel" x="260" y="48">웨이포인트 열 · 모드 테이블 (편집: 시뮬 탭)</text>
   <!-- 항법 입력 → 유효성 게이트 -->
-  <g class="sblk"><rect class="body" x="30" y="268" width="36" height="24" rx="12"/><text class="pnum" x="48" y="284">2</text></g>
+  <g class="sblk" data-code="guidance/guidance.py:Guidance.step"><rect class="body" x="30" y="268" width="36" height="24" rx="12"/><text class="pnum" x="48" y="284">2</text></g>
   <text class="pname" x="48" y="312">NavOutput</text>
   <path class="wire" d="M66 280 H136" marker-end="url(#aw-guid)"/>
-  <g class="sblk"><rect class="body" x="140" y="254" width="160" height="52" rx="3"/>
+  <g class="sblk" data-code="guidance/guidance.py:Guidance.step"><rect class="body" x="140" y="254" width="160" height="52" rx="3"/>
     <text class="ttl" x="220" y="276" style="font-size:13px">유효성 게이트</text>
     <text class="ttl2" x="220" y="294">invalid → 동결 · 명령 유지</text></g>
   <path class="wire" d="M300 280 H326"/>
@@ -619,19 +619,19 @@ export const SUBSYSTEMS = {
   <circle class="branch" cx="610" cy="350" r="3.2"/>
   <path class="wire" d="M610 350 V240 H690 V214" marker-end="url(#aw-guid)"/>
   <!-- heading 선택 · 명령 구성 -->
-  <g class="sblk"><rect class="body" x="640" y="150" width="130" height="60" rx="3"/>
+  <g class="sblk" data-code="guidance/guidance.py:Guidance.step"><rect class="body" x="640" y="150" width="130" height="60" rx="3"/>
     <text class="ttl" x="705" y="170" style="font-size:13px">heading 선택</text>
     <text class="ttl2" x="705" y="186">"path" → ψ_wp</text>
     <text class="ttl2" x="705" y="200">그 외 → 모드값</text></g>
   <path class="wire" d="M770 180 H786 V296" marker-end="url(#aw-guid)"/>
   <text class="siglabel" x="810" y="176">ψ_cmd</text>
-  <g class="sblk"><rect class="body" x="640" y="300" width="160" height="90" rx="3"/>
+  <g class="sblk" data-code="guidance/guidance.py:Guidance.step common/contracts.py:GuidanceCommand"><rect class="body" x="640" y="300" width="160" height="90" rx="3"/>
     <text class="ttl" x="720" y="322" style="font-size:13px">GuidanceCommand</text>
     <text class="ttl2" x="720" y="342">speed · alt · heading 구성</text>
     <text class="ttl2" x="720" y="358">None → 축 비활성 플래그</text>
     <text class="ttl2" x="720" y="374">mode 이름 포함</text></g>
   <path class="wire" d="M800 345 H866" marker-end="url(#aw-guid)"/>
-  <g class="sblk"><rect class="body" x="870" y="333" width="36" height="24" rx="12"/><text class="pnum" x="888" y="349">1</text></g>
+  <g class="sblk" data-code="guidance/guidance.py:Guidance.step"><rect class="body" x="870" y="333" width="36" height="24" rx="12"/><text class="pnum" x="888" y="349">1</text></g>
   <text class="pname" x="886" y="377">→ AP</text>
   <text class="canvas-note" x="24" y="440">※ 모드 전환 순간의 명령 점프는 오토파일럿 명령필터가 완충 [기본값] — Fader 페이딩은 백로그 · 경로추종은 헤딩만 담당 (고도·속도는 모드 테이블 소관)</text>
   <text class="canvas-note" x="24" y="462">모드 시퀀스 예: 이륙 → 상승 → (순항 · 고도유지 · 디센트 · 임무수행 · 웨이포인트 항법) → 착륙 · Stateflow 미사용 [확정]</text>
@@ -663,10 +663,10 @@ export const SUBSYSTEMS = {
         svg: `
 <svg viewBox="0 0 960 380" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-gpath" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
+  <g class="sblk" data-code="guidance/path.py:LosPath.step"><rect class="body" x="30" y="96" width="36" height="24" rx="12"/><text class="pnum" x="48" y="112">1</text></g>
   <text class="pname" x="52" y="140">NavOutput</text>
   <path class="wire" d="M66 108 H96" marker-end="url(#aw-gpath)"/>
-  <g class="sblk"><rect class="body" x="100" y="82" width="170" height="52" rx="3"/>
+  <g class="sblk" data-code="guidance/path.py:LosPath.step"><rect class="body" x="100" y="82" width="170" height="52" rx="3"/>
     <text class="ttl" x="185" y="101" style="font-size:13px">위치 추출</text>
     <text class="ttl2" x="185" y="119">(n, e) = pos_n 수평면</text></g>
   <path class="wire" d="M270 108 H316" marker-end="url(#aw-gpath)"/>
@@ -676,20 +676,20 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="450" y="130">√(dn²+de²) ≤ 도달반경 → 다음 WP</text></g>
   <path class="wire" d="M580 108 H636" marker-end="url(#aw-gpath)"/>
   <text class="siglabel" x="608" y="96">미도달</text>
-  <g class="sblk"><rect class="body" x="640" y="82" width="180" height="52" rx="3"/>
+  <g class="sblk" data-code="guidance/path.py:LosPath.step"><rect class="body" x="640" y="82" width="180" height="52" rx="3"/>
     <text class="ttl" x="730" y="101" style="font-size:13px">LOS 방위각</text>
     <text class="ttl2" x="730" y="119">ψ_wp = atan2(de, dn)</text></g>
   <path class="wire" d="M820 108 H866" marker-end="url(#aw-gpath)"/>
-  <g class="sblk"><rect class="body" x="870" y="96" width="36" height="24" rx="12"/><text class="pnum" x="888" y="112">1</text></g>
+  <g class="sblk" data-code="guidance/path.py:LosPath.step"><rect class="body" x="870" y="96" width="36" height="24" rx="12"/><text class="pnum" x="888" y="112">1</text></g>
   <text class="pname" x="884" y="140">ψ_wp → heading 선택</text>
   <path class="wire" d="M450 144 V196" marker-end="url(#aw-gpath)"/>
   <text class="siglabel" x="540" y="176">잔여 WP 없음 (소진)</text>
-  <g class="sblk"><rect class="body" x="340" y="200" width="220" height="72" rx="3"/>
+  <g class="sblk" data-code="guidance/path.py:LosPath.step"><rect class="body" x="340" y="200" width="220" height="72" rx="3"/>
     <text class="ttl" x="450" y="222" style="font-size:13px">웨이포인트 소진</text>
     <text class="ttl2" x="450" y="242">done=True · 마지막 헤딩 유지</text>
     <text class="ttl2" x="450" y="260">미계산 소진 → 현재 침로 시드</text></g>
   <path class="wire" d="M560 236 H700" marker-end="url(#aw-gpath)"/>
-  <g class="sblk"><rect class="body" x="704" y="224" width="36" height="24" rx="12"/><text class="pnum" x="722" y="240">2</text></g>
+  <g class="sblk" data-code="guidance/path.py:LosPath.step"><rect class="body" x="704" y="224" width="36" height="24" rx="12"/><text class="pnum" x="722" y="240">2</text></g>
   <text class="pname" x="726" y="268">alt·done → 모드 시퀀서</text>
   <text class="canvas-note" x="24" y="320">※ 반경 내 연쇄 스킵 — 붙은 웨이포인트 여러 개를 한 스텝에 통과 · done 후 heading은 마지막 값 유지, alt는 마지막 웨이포인트 고도로 정착 — 계약은 (heading, alt, done)</text>
   <text class="canvas-note" x="24" y="340">※ 소진 안전: 첫 헤딩 계산 전 소진(빈 목록·반경 내 시작)이면 정북(0) 아닌 현재 침로 명령 — 조용한 급선회 방지 · 도달반경 엔진 기본 200 m [기본값] / 시뮬 탭 폼 1500 m — 편집: 시뮬 탭</text>
@@ -720,13 +720,13 @@ export const SUBSYSTEMS = {
   <text class="annot" x="180" y="72" text-anchor="middle">이탈조건 DSL — 직렬화 튜플 (웹 편집 대상)</text>
   <text class="annot" x="180" y="92" text-anchor="middle">(always) (time_ge s) (alt_ge m) (alt_le m)</text>
   <text class="annot" x="180" y="112" text-anchor="middle">(speed_ge) (speed_le) (path_done)</text>
-  <g class="sblk"><rect class="body" x="370" y="36" width="330" height="80" rx="3"/>
+  <g class="sblk" data-code="guidance/modes.py:ModeSpec"><rect class="body" x="370" y="36" width="330" height="80" rx="3"/>
     <text class="ttl" x="535" y="58" style="font-size:13px">모드 테이블 {name → ModeSpec}</text>
     <text class="ttl2" x="535" y="78">speed·alt·heading — None = 축 비활성</text>
     <text class="ttl2" x="535" y="94">heading: 숫자 | "path" | None</text>
     <text class="ttl2" x="535" y="110">구성 검증: 이름 중복·next 참조·조건 arity</text></g>
   <path class="wire soft" d="M535 116 V166" marker-end="url(#as-gmod)"/>
-  <g class="sblk"><rect class="body" x="210" y="150" width="150" height="52" rx="3"/>
+  <g class="sblk" data-code="guidance/modes.py:ModeSequencer.step"><rect class="body" x="210" y="150" width="150" height="52" rx="3"/>
     <text class="ttl" x="285" y="169" style="font-size:13px">활성 모드 name</text>
     <text class="ttl2" x="285" y="187">t_entry 보관</text></g>
   <path class="wire" d="M360 176 H396" marker-end="url(#aw-gmod)"/>
@@ -738,20 +738,20 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="535" y="268">충족 → 전환 · 미충족 → 현행 유지</text></g>
   <path class="wire" d="M670 200 H726" marker-end="url(#aw-gmod)"/>
   <text class="siglabel" x="698" y="192">충족</text>
-  <g class="sblk"><rect class="body" x="730" y="170" width="190" height="64" rx="3"/>
+  <g class="sblk" data-code="guidance/modes.py:ModeSequencer.step"><rect class="body" x="730" y="170" width="190" height="64" rx="3"/>
     <text class="ttl" x="825" y="192" style="font-size:13px">전환</text>
     <text class="ttl2" x="825" y="212">name ← next</text>
     <text class="ttl2" x="825" y="228">t_entry ← t (체류 리셋)</text></g>
   <path class="wire" d="M820 234 V330 H285 V206" marker-end="url(#aw-gmod)"/>
-  <g class="sblk"><rect class="body" x="30" y="218" width="36" height="24" rx="12"/><text class="pnum" x="48" y="234">1</text></g>
+  <g class="sblk" data-code="guidance/modes.py:eval_condition"><rect class="body" x="30" y="218" width="36" height="24" rx="12"/><text class="pnum" x="48" y="234">1</text></g>
   <text class="pname" x="52" y="262">NavOutput</text>
   <path class="wire" d="M66 230 H396" marker-end="url(#aw-gmod)"/>
-  <g class="sblk"><rect class="body" x="30" y="288" width="36" height="24" rx="12"/><text class="pnum" x="48" y="304">2</text></g>
+  <g class="sblk" data-code="guidance/modes.py:ModeSequencer.step"><rect class="body" x="30" y="288" width="36" height="24" rx="12"/><text class="pnum" x="48" y="304">2</text></g>
   <text class="pname" x="95" y="332">path_done ← 경로추종</text>
   <path class="wire" d="M66 300 H370 V262 H396" marker-end="url(#aw-gmod)"/>
   <path class="wire" d="M535 280 V360 H866" marker-end="url(#aw-gmod)"/>
   <text class="siglabel" x="620" y="352">cur — 전환 반영 후</text>
-  <g class="sblk"><rect class="body" x="870" y="348" width="36" height="24" rx="12"/><text class="pnum" x="888" y="364">1</text></g>
+  <g class="sblk" data-code="guidance/modes.py:ModeSequencer.step"><rect class="body" x="870" y="348" width="36" height="24" rx="12"/><text class="pnum" x="888" y="364">1</text></g>
   <text class="pname" x="870" y="392">활성 ModeSpec</text>
   <text class="pname" x="860" y="410">→ GuidanceCommand 구성</text>
   <text class="canvas-note" x="24" y="424">※ Stateflow 미사용 [확정 01 §3.3.1] — 순차 체인: 진입 = 이전 모드의 이탈 → next [기본값] · 초기 모드 진입 시각 = 첫 스텝 t · 항법 무효 시 상류 유효성 게이트가 동결</text>
@@ -1284,43 +1284,43 @@ export const SUBSYSTEMS = {
     svg: `
 <svg viewBox="0 0 1000 470" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-nav" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="128" width="36" height="24" rx="12"/><text class="pnum" x="48" y="144">1</text></g>
+  <g class="sblk" data-code="nav/error_model.py:NavErrorModel.step"><rect class="body" x="30" y="128" width="36" height="24" rx="12"/><text class="pnum" x="48" y="144">1</text></g>
   <text class="pname" x="85" y="176">참값 VehicleState</text>
   <path class="wire" d="M66 140 H126" marker-end="url(#aw-nav)"/>
-  <g class="sblk"><rect class="body" x="130" y="112" width="180" height="56" rx="3"/>
+  <g class="sblk" data-code="nav/error_model.py:NavErrorModel.step"><rect class="body" x="130" y="112" width="180" height="56" rx="3"/>
     <text class="ttl" x="220" y="134" style="font-size:13px">갱신 데시메이션</text>
     <text class="ttl2" x="220" y="152"><tspan data-p="update_hz">100</tspan> Hz · 틱 정수배 강제</text></g>
   <path class="wire" d="M310 140 H362" marker-end="url(#aw-nav)"/>
-  <circle class="body" cx="380" cy="140" r="14"/>
+  <circle class="body" data-code="nav/error_model.py:NavErrorModel.step" cx="380" cy="140" r="14"/>
   <text class="sumsign" x="371" y="144">+</text><text class="sumsign" x="380" y="131">+</text><text class="sumsign" x="380" y="153">+</text>
   <g class="sblk" data-code="nav/error_model.py:NavErrorModel.step"><rect class="body" x="250" y="16" width="260" height="70" rx="3"/>
     <text class="ttl" x="380" y="38" style="font-size:13px">1차 마르코프 바이어스 — 위치축</text>
     <text class="ttl2" x="380" y="56">σ 수평 <tspan data-p="bias_std_h">1</tspan> · 수직 <tspan data-p="bias_std_v">1.5</tspan> m · τ <tspan data-p="bias_tau">60</tspan> s</text>
     <text class="ttl2" x="380" y="74">b ← p·b + σ√(1−p²)·w · p=e^(−T/τ)</text></g>
   <path class="wire" d="M380 86 V122" marker-end="url(#aw-nav)"/>
-  <g class="sblk"><rect class="body" x="250" y="196" width="260" height="70" rx="3"/>
+  <g class="sblk" data-code="nav/error_model.py:NavErrorModel.step"><rect class="body" x="250" y="196" width="260" height="70" rx="3"/>
     <text class="ttl" x="380" y="212" style="font-size:13px">백색잡음 (상태별 σ · 수평↔수직 분리)</text>
     <text class="ttl2" x="380" y="230">pos 수평 <tspan data-p="pos_std_h">3</tspan> · 수직 <tspan data-p="pos_std_v">4.5</tspan> m</text>
     <text class="ttl2" x="380" y="246">vel 수평 <tspan data-p="vel_std_h">0.3</tspan> · 수직 <tspan data-p="vel_std_v">0.45</tspan> m/s</text>
     <text class="ttl2" x="380" y="262">각속도 <tspan data-p="rate_std">0.001</tspan> rad/s</text></g>
   <path class="wire" d="M380 196 V158" marker-end="url(#aw-nav)"/>
   <path class="wire" d="M394 140 H426" marker-end="url(#aw-nav)"/>
-  <g class="sblk"><rect class="body" x="430" y="104" width="260" height="72" rx="3"/>
+  <g class="sblk" data-code="nav/error_model.py:NavErrorModel.step"><rect class="body" x="430" y="104" width="260" height="72" rx="3"/>
     <text class="ttl" x="560" y="126" style="font-size:13px">자세 — q_nb ⊗ δq (노름 유지)</text>
     <text class="ttl2" x="560" y="146">δq = (1, ½ε) 소각 오차</text>
     <text class="ttl2" x="560" y="164">ε: 롤·피치 <tspan data-p="att_std">0.002</tspan> · 방위 <tspan data-p="psi_std">0.005</tspan> rad</text></g>
   <path class="wire" d="M690 140 H716" marker-end="url(#aw-nav)"/>
-  <g class="sblk"><rect class="body" x="720" y="104" width="200" height="72" rx="3"/>
+  <g class="sblk" data-code="nav/error_model.py:NavErrorModel.step"><rect class="body" x="720" y="104" width="200" height="72" rx="3"/>
     <text class="ttl" x="820" y="126" style="font-size:13px">지연 큐 (deque)</text>
     <text class="ttl2" x="820" y="146">릴리스 지연 <tspan data-p="delay_s">0.03</tspan> s</text>
     <text class="ttl2" x="820" y="164">t_meas ≤ t − 지연 → 릴리스</text></g>
   <path class="wire" d="M820 176 V246" marker-end="url(#aw-nav)"/>
-  <g class="sblk"><rect class="body" x="720" y="250" width="200" height="72" rx="3"/>
+  <g class="sblk" data-code="nav/error_model.py:NavErrorModel.step"><rect class="body" x="720" y="250" width="200" height="72" rx="3"/>
     <text class="ttl" x="820" y="272" style="font-size:13px">홀드 · valid 게이트</text>
     <text class="ttl2" x="820" y="292">다음 릴리스까지 유지 (ZOH)</text>
     <text class="ttl2" x="820" y="310">첫 릴리스 전 valid=False</text></g>
   <path class="wire" d="M920 286 H926" marker-end="url(#aw-nav)"/>
-  <g class="sblk"><rect class="body" x="930" y="274" width="36" height="24" rx="12"/><text class="pnum" x="948" y="290">1</text></g>
+  <g class="sblk" data-code="common/contracts.py:NavOutput"><rect class="body" x="930" y="274" width="36" height="24" rx="12"/><text class="pnum" x="948" y="290">1</text></g>
   <text class="pname" x="948" y="322">NavOutput</text>
   <text class="canvas-note" x="24" y="404">※ 측정 = 참값 + 바이어스(위치) + 백색잡음 · 바이어스·잡음 갱신은 측정 틱마다 (T = 갱신주기) · fuel은 참값 통과 (연료 게이지) · 자세는 동체측 δq 곱 — 단위 노름 유지</text>
   <text class="canvas-note" x="24" y="426">※ 갱신주기가 틱 주기의 정수배 아니면 조립 시점 거부 · 항법이 틱보다 빠르면 틱마다 새 측정 · 릴리스는 배열 복사 — 소비자 훼손이 보관 측정을 오염시키지 않음</text>
@@ -1410,7 +1410,7 @@ export const SUBSYSTEMS = {
     svg: `
 <svg viewBox="0 0 900 250" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-mp" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="40" y="60" width="230" height="88" rx="3"/>
+  <g class="sblk nblk"><rect class="body" x="40" y="60" width="230" height="88" rx="3"/>
     <text class="ttl" x="155" y="84" style="font-size:13px">미션 편집 — 시뮬 탭</text>
     <text class="ttl2" x="155" y="104">모드 테이블 {명령 · 이탈 · next}</text>
     <text class="ttl2" x="155" y="120">웨이포인트 (N,E) · 도달반경</text>
@@ -1428,7 +1428,7 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="715" y="120">+ LosPath (웨이포인트 · 반경)</text>
     <text class="ttl2" x="715" y="136">→ Guidance(modes, path, initial)</text></g>
   <path class="wire" d="M830 104 H846" marker-end="url(#aw-mp)"/>
-  <g class="sblk"><rect class="body" x="848" y="92" width="36" height="24" rx="12"/><text class="pnum" x="866" y="108">1</text></g>
+  <g class="sblk" data-code="guidance/guidance.py:Guidance"><rect class="body" x="848" y="92" width="36" height="24" rx="12"/><text class="pnum" x="866" y="108">1</text></g>
   <text class="pname" x="864" y="148">→ 유도</text>
   <text class="canvas-note" x="24" y="204">※ 속도·고도 '경로 프로파일' 생성 없음 — 명령은 모드 테이블이 직접 보유 (경로추종은 헤딩만 담당) · 엔진에 별도 플래너 모듈 없음 — 시뮬 요청이 조립</text>
   <text class="canvas-note" x="24" y="226">※ 상세 임무 로직은 별도 설계 범위 [확정 01 §3.3.1] · 미션 편집처는 시뮬레이션 탭 미션 그룹</text>
@@ -1450,16 +1450,16 @@ export const SUBSYSTEMS = {
     svg: `
 <svg viewBox="0 0 950 220" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-vf" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk"><rect class="body" x="30" y="66" width="150" height="68" rx="3"/>
+  <g class="sblk" data-code="guidance/guidance.py:Guidance"><rect class="body" x="30" y="66" width="150" height="68" rx="3"/>
     <text class="ttl" x="105" y="94">임무프로파일</text><text class="ttl2" x="105" y="114">시나리오 입력</text></g>
   <path class="wire" d="M180 100 H226" marker-end="url(#aw-vf)"/>
   <g class="sblk" data-code="sim/simulator.py:Simulator.run"><rect class="body" x="230" y="66" width="180" height="68" rx="3"/>
     <text class="ttl" x="320" y="94">폐루프 6DOF 시뮬</text><text class="ttl2" x="320" y="114">멀티레이트 · RK4 (기본값)</text></g>
   <path class="wire" d="M410 100 H456" marker-end="url(#aw-vf)"/>
-  <g class="sblk"><rect class="body" x="460" y="66" width="170" height="68" rx="3"/>
+  <g class="sblk" data-code="sim/simulator.py:Simulator._envelope"><rect class="body" x="460" y="66" width="170" height="68" rx="3"/>
     <text class="ttl" x="545" y="94">엔벨로프 감시</text><text class="ttl2" x="545" y="114">실속 마진 · DB 이탈 플래그</text></g>
   <path class="wire" d="M630 100 H676" marker-end="url(#aw-vf)"/>
-  <g class="sblk"><rect class="body" x="680" y="66" width="220" height="68" rx="3"/>
+  <g class="sblk nblk"><rect class="body" x="680" y="66" width="220" height="68" rx="3"/>
     <text class="ttl" x="790" y="94">리포트 · Simulink 대조</text><text class="ttl2" x="790" y="114">허용오차 비교 (폐쇄망)</text></g>
 </svg>`,
     notes: `
