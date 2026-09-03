@@ -26,7 +26,7 @@ SUBSYSTEMS[id].children 재귀 (subsystems.js 규약). 브레드크럼 중간 �
 
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
-import { BLOCKS, codegenTargets, resolvePath } from "../lib/blocks.js";
+import { BLOCKS, resolvePath } from "../lib/blocks.js";
 import {
   designCoord, designValue, lockedParams, scasKwargs, selectedSlots, slotIndex,
 } from "../lib/gainsync.js";
@@ -34,6 +34,7 @@ import { groupFields, parseFieldValue, schemaFields } from "../lib/schemaform.js
 import { store } from "../store.js";
 import { renderCodePanel } from "./codegen.js";
 import { DESIGN_ORDER, fromMarkup, topDiagramSvg } from "./diagram.js";
+import { renderManual } from "./manual.js";
 import { createTopReplay } from "./replayoverlay.js";
 import { CHIP_LABEL, SUB_TINT, SUBSYSTEMS } from "./subsystems.js";
 
@@ -113,7 +114,7 @@ export function render() {
 // ── 최상위 (홈) ────────────────────────────────────────────────────────
 
 function renderHome(root) {
-  const snapshotBox = el("div");
+  const manualBox = el("div");
   const svg = topDiagramSvg(navigate);
   topReplay = createTopReplay({ svgRoot: svg }); // 블록 값 표시·리미터 점멸
   root.append(
@@ -137,19 +138,16 @@ function renderHome(root) {
     ),
     el("div", { class: "canvas-wrap top" }, svg),
     // 재생 컨트롤은 보드 바로 밑 — 값이 뜨는 자리(블록 앞 판 위)와 눈이 오가는 거리가 짧다
-    el("div", { class: "boardbar" },
-      topReplay.root,
-      el("button", {
-        title: "적용된 파라미터·게인 스케줄을 한 파일의 코드로 — 검토·추적성 표 포함",
-        onclick: () => showSnapshotCode(snapshotBox),
-      }, "🧾 전체 형상 코드"),
-    ),
+    el("div", { class: "boardbar" }, topReplay.root),
     el("p", { class: "hint-row" },
       "💡 블록이나 판 앞면의 층 이름을 클릭하면 서브시스템 내부 블록도가 열립니다 ",
       "(시뮬링크의 서브시스템 더블클릭 대응 · 브라우저 뒤로가기로 복귀). 신호는 오른쪽에서 ",
       "왼쪽으로 흐르고, 구조는 코드(M7 조립)와 1:1 고정 — 자유 배선 없음 [확정 02 §4]."),
-    snapshotBox, // 비어 있다가 [전체 형상 코드]에서 채워짐
+    // 매뉴얼은 접히지 않고 항상 붙는다 — 블록도가 "무엇이 있나"를 말하고 매뉴얼이
+    // "왜 있고 어떻게 튜닝하나"를 말한다. 버튼 뒤에 숨기면 후자를 아무도 안 읽는다
+    manualBox,
   );
+  renderManual(manualBox);
 }
 
 // ── 서브시스템 하위 페이지 ─────────────────────────────────────────────
@@ -656,29 +654,3 @@ async function showBlockCode(box, block, values, cgOverride = null) {
   }
 }
 
-/** 전체 형상 — 편집 블록의 적용값(없으면 설계 기본값) + 게인 스케줄 테이블.
- *
- * SCAS는 축마다 한 줄로 펴고, 편집이 없어도 **카탈로그 설계 kwargs**로 채운다 —
- * ScasAxis의 스키마 기본값은 0이라 그대로 내면 게인 없는 형상 코드가 나온다. */
-async function showSnapshotCode(box) {
-  busy(box, "전체 형상 코드 생성 중…");
-  try {
-    const catalog = await loadGainsCatalog();
-    const blocks = BLOCKS.filter((b) => b.detail.editable && b.detail.codegen);
-    const targets = blocks.flatMap((b) =>
-      codegenTargets(b, store.get(b.detail.injectKey), catalog?.scas_design)
-        .map((t) => ({ block: b, ...t })));
-    const [built, meta] = await Promise.all([
-      Promise.all(targets.map((t) => buildSpec(t.block, t.values, t.cg, t.applied))),
-      codegenMeta(),
-    ]);
-    renderCodePanel(box, {
-      specs: built.map((r) => r.spec),
-      validation: built.map((r) => r.validation),
-      gainTables: store.get("gainTables") ?? null,
-      meta,
-    });
-  } catch (e) {
-    clear(box).append(el("div", { class: "error-box" }, errorText(e)));
-  }
-}

@@ -582,6 +582,48 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
    편집 폼 입력과 실시간 동기 (views/blocks.js bindSvgParams) */
 .bd svg [data-p] { font-weight: 800; fill: #0071e3; }
 
+/* ── 블록도 매뉴얼 (views/manual.js) ────────────────────────────────────────
+   읽는 글이라 본문 폭을 문자수로 묶는다 — 보드는 가로로 넓어야 하지만 문장은
+   한 줄이 길면 다음 줄 첫 글자를 못 찾는다 (70~80자가 통설, 여기선 68ch) */
+.bd .manual { background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); margin-top: 14px; padding: 22px 26px 26px; }
+.bd .manual > h2 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.02em; }
+.bd .manual > .hint { margin: 0 0 4px; max-width: 68ch; }
+.bd .manual p, .bd .manual li, .bd .manual dd { max-width: 68ch; line-height: 1.65; }
+.bd .man-sec { border-top: 1px solid var(--bd-edge); margin-top: 20px; padding-top: 16px; }
+.bd .man-sec > h3 { font-size: 15px; margin: 0 0 10px; }
+/* 배경 Q&A와 블록 본문은 넓은 화면에서 2단 — 읽는 폭(68ch)을 지키면서 세로 스크롤을
+   절반으로 줄인다. 좁아지면 자동으로 1단 (auto-fit + minmax) */
+.bd .man-bg { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 4px 32px; }
+.bd .man-q { margin-bottom: 14px; }
+.bd .man-q h4 { font-size: 13.5px; margin: 0 0 4px; color: var(--accent); }
+.bd .man-q p { margin: 0 0 6px; font-size: 13px; color: #38414f; }
+
+/* 블록 항목 — 머리줄(단계 배지·이름·한 줄 역할·이동 버튼)과 본문 */
+.bd .man-blk { border-top: 1px solid var(--bd-edge); margin-top: 18px; padding-top: 14px; }
+.bd .man-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.bd .man-head h3 { font-size: 16px; margin: 0; }
+.bd .man-head .step-tag { font-size: 10.5px; font-weight: 700; color: #fff; border-radius: 999px; padding: 2px 9px; }
+.bd .man-role { font-size: 12.5px; color: var(--muted); }
+.bd .man-go { margin-left: auto; font-size: 12px; padding: 4px 10px; }
+/* 본문 2단: 왼쪽 = 무엇/왜/기체에(설명), 오른쪽 = 튜닝·증상(찾아 쓰는 것).
+   설명은 처음 한 번 읽고, 튜닝·증상은 막혔을 때 되돌아온다 — 성격이 달라 나눈다 */
+.bd .man-body { margin-top: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr)); gap: 0 32px; align-items: start; }
+.bd .man-body h5 { font-size: 11.5px; color: var(--bd-ink-soft); text-transform: uppercase; letter-spacing: .05em; margin: 12px 0 4px; }
+.bd .man-body > h5:first-child { margin-top: 4px; }
+.bd .man-col > h5:first-child { margin-top: 4px; }
+.bd .man-body p { margin: 0; font-size: 13px; color: #38414f; }
+.bd .man-body ul { margin: 0; padding-left: 18px; font-size: 13px; color: #38414f; }
+.bd .man-body li { padding: 2px 0; }
+
+/* 증상 → 대처. dt가 증상이라 눈에 먼저 걸려야 한다 */
+.bd .man-tr { margin: 0; }
+.bd .man-tr dt { font-size: 13px; font-weight: 700; color: var(--text); margin-top: 9px; padding-left: 17px; position: relative; }
+.bd .man-tr dt::before { content: "!"; position: absolute; left: 0; top: 0; width: 13px; height: 13px; line-height: 13px; text-align: center; font-size: 10px; border-radius: 4px; background: #fdeae8; color: #b3352b; }
+.bd .man-tr dt:first-child { margin-top: 2px; }
+.bd .man-tr dd { margin: 2px 0 0 17px; font-size: 13px; color: #38414f; }
+.bd .man-order { margin: 0; padding-left: 20px; font-size: 13px; color: #38414f; }
+.bd .man-order li { padding: 3px 0; }
+
 /* ── 영향성 탭 — 전면 다크 스킨 (.inf-dark 스코프) ─────────────────────────
    검은 캔버스가 이 화면의 중심이라 패널만 밝으면 경계마다 스킨이 끊긴다 — 탭
    전체를 Apple 다크 팔레트(js/lib/influence.js SKIN과 동일 값)로 통일한다.
