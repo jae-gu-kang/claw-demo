@@ -340,8 +340,12 @@ function hasPySymbol(src, name, meth) {
   if (!meth) return new RegExp(`^(?:class|def) ${name}\\b`, "m").test(src);
   const at = src.search(new RegExp(`^class ${name}\\b`, "m"));
   if (at < 0) return false;
-  const rest = src.slice(at + 1); // +1: 자기 선언 줄은 다음 ^ 매치에서 제외
-  const end = rest.search(/^(?:class |def )/m);
+  const rest = src.slice(src.indexOf("\n", at) + 1); // 선언 **줄 끝**부터 — 줄 중간에서
+  // 자르면 ^가 문자열 첫 위치에 걸려 본문이 빈 슬라이스가 된다.
+  // 클래스 본문은 열0 비공백에서 끝난다 — class/def만 보면 최상위 상수·데코레이터·
+  // try:/if TYPE_CHECKING: 블록 안의 4칸 def가 앞 클래스 메서드로 오탐된다 (리뷰).
+  // 열0 주석(#)은 클래스 본문 중간에 합법이라 종료로 치지 않는다
+  const end = rest.search(/^[^\s#]/m);
   return new RegExp(`^    (?:async )?def ${meth}\\(`, "m")
     .test(end < 0 ? rest : rest.slice(0, end));
 }
@@ -401,12 +405,14 @@ test("코드 틴트가 한 벌이다 — SUB_TINT 커버리지·판 색 재사�
     assert.deepEqual(SUB_TINT[s.color], { tint: s.tint, edge: s.edge },
       `층 ${s.n} 틴트가 판 색(diagram.js LAYERS)과 다름`);
   }
-  // ③ 틴트 위 잉크 대비 — 잉크는 CSS에서 읽는다 (하드코딩하면 CSS만 되돌려도 통과)
-  const css = read("../../css/app.css");
+  // ③ 틴트 위 잉크 대비 — 잉크는 CSS에서 읽는다 (하드코딩하면 CSS만 되돌려도 통과).
+  // 주석은 벗기고(주석 속 셀렉터 문구 오매치 방지), 셀렉터는 `{` 직전까지 정확히
+  // 일치시킨다 — 접두 매치를 허용하면 .ttl 조회가 .ttl2 규칙에 걸린다 (리뷰)
+  const css = read("../../css/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
   const cssVar = (name) => norm(css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,6})\\b`))[1]);
   const fillOf = (selector) => {
     const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const body = css.match(new RegExp(`^${esc}[^{]*\\{([^}]*)\\}`, "m"));
+    const body = css.match(new RegExp(`^${esc}\\s*\\{([^}]*)\\}`, "m"));
     assert.ok(body, `app.css 규칙 없음: ${selector}`);
     const m = body[1].match(/(?:^|;)\s*fill:\s*(var\(--\w+\)|#[0-9a-fA-F]{3,6})/);
     assert.ok(m, `${selector}에 fill 없음`);
@@ -438,7 +444,10 @@ test("marker id는 페이지 안에서 유일하다 — 중복은 뒤 정의를 
 });
 
 test("2계층 CSS는 .bd .sub 스코프 안에만 — 새면 최상위 보드 filter 사고가 재현된다", () => {
-  const css = read("../../css/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  // @media 전문(prelude)을 벗긴다 — 안 벗기면 미디어 블록의 **첫 규칙**이 전문과
+  // 한 덩어리로 잡혀 스코프 검사를 건너뛴다 (리뷰). 남는 고아 `}`는 무해
+  const css = read("../../css/app.css").replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/@media[^{]*\{/g, "");
   for (const [, selector] of css.matchAll(/([^{}]+)\{[^}]*\}/g)) {
     for (const one of selector.split(",")) {
       const sel = one.trim();

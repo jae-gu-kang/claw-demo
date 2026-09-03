@@ -167,18 +167,21 @@ function renderSubPage(root, path) {
   svgWrap.style.setProperty("--sub-edge", tone.edge);
   for (const node of svgWrap.querySelectorAll("[data-code]")) {
     // 호버 툴팁으로 파일:심볼 노출 — textContent만 넣는다 (마크업 삽입 금지 계약).
-    // SVG 네임스페이스 필수: createElement("title")는 HTMLTitleElement가 되어 안 뜬다
+    // SVG 네임스페이스 필수: createElement("title")는 HTMLTitleElement가 되어 안 뜬다.
+    // prepend인 이유: SVG2가 <title>을 첫 자식으로 권장 — 보조기술 호환
     const tip = document.createElementNS("http://www.w3.org/2000/svg", "title");
     tip.textContent = `engine/claw/${node.dataset.code}`;
-    node.append(tip);
+    node.prepend(tip);
   }
   // 범례 — crumbbar와 캔버스가 한 카드(radius 절반씩)라 사이에 못 끼운다:
-  // 캔버스 안 최상단에. 클래스명이 legend가 아닌 이유는 app.css .subkey 주석 참조
+  // 캔버스 안 최상단에. 클래스명이 legend가 아닌 이유는 app.css .subkey 주석 참조.
+  // 점선의 정의는 "엔진 코드에 없음"이다 — 미구현 표시 전용(dω/dt)과 엔진 밖
+  // 실존(웹 UI·폐쇄망 절차)을 다 덮는 표현 (리뷰)
   svgWrap.prepend(el("div", { class: "subkey" },
     el("span", { class: "sw", style: `background:${tone.tint};border-color:${tone.edge}` }),
     "색 블록 = 코드 대응 (engine/claw — 호버하면 파일:심볼)",
     el("span", { class: "sw note" }),
-    "점선 = 설명용 도해 (엔진에 없음)"));
+    "점선 = 엔진 코드에 없음 (도해 · 표시 전용 · 엔진 밖 절차)"));
   // 하위 진입 배선 — data-child (최상위 data-block과 동일 패턴, 깊이 무제한)
   for (const node of svgWrap.querySelectorAll("[data-child]")) {
     const go = () => navigate([...path, node.dataset.child]);

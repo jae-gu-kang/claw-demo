@@ -174,10 +174,10 @@ export const SUBSYSTEMS = {
         svg: `
 <svg viewBox="0 0 960 320" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-scp" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="132">θ_cmd ← α 리미터</text>
   <path class="wire" d="M66 100 H122" marker-end="url(#aw-scp)"/>
-  <circle class="body" data-code="fcl/scas.py:ScasAxis.step" cx="140" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/scas.py:Scas.step" cx="140" cy="100" r="14"/>
   <text class="sumsign" x="131" y="104">+</text><text class="sumsign" x="140" y="113">−</text>
   <path class="wire" d="M154 100 H186" marker-end="url(#aw-scp)"/>
   <g class="blk" data-child="pi" data-code="blocks/controllers.py:PID" tabindex="0">
@@ -195,7 +195,7 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M590 100 H806" marker-end="url(#aw-scp)"/>
   <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">δe → 믹서</text>
-  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
   <text class="pname a-start" x="164" y="186">θ (NavOutput)</text>
   <path class="wire" d="M140 170 V118" marker-end="url(#aw-scp)"/>
   <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
@@ -225,10 +225,10 @@ export const SUBSYSTEMS = {
         svg: `
 <svg viewBox="0 0 960 320" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-scr" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="132">φ_cmd ← AP</text>
   <path class="wire" d="M66 100 H122" marker-end="url(#aw-scr)"/>
-  <circle class="body" data-code="fcl/scas.py:ScasAxis.step" cx="140" cy="100" r="14"/>
+  <circle class="body" data-code="fcl/scas.py:Scas.step" cx="140" cy="100" r="14"/>
   <text class="sumsign" x="131" y="104">+</text><text class="sumsign" x="140" y="113">−</text>
   <text class="siglabel" x="140" y="72">wrap ±π</text>
   <path class="wire" d="M154 100 H186" marker-end="url(#aw-scr)"/>
@@ -247,7 +247,7 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M590 100 H806" marker-end="url(#aw-scr)"/>
   <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="810" y="88" width="36" height="24" rx="12"/><text class="pnum" x="828" y="104">1</text></g>
   <text class="pname" x="828" y="132">δa → 믹서</text>
-  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="122" y="170" width="36" height="24" rx="12"/><text class="pnum" x="140" y="186">2</text></g>
   <text class="pname a-start" x="164" y="186">φ (NavOutput)</text>
   <path class="wire" d="M140 170 V118" marker-end="url(#aw-scr)"/>
   <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="388" y="156" width="84" height="36" rx="3"/>
@@ -277,7 +277,7 @@ export const SUBSYSTEMS = {
         svg: `
 <svg viewBox="0 0 960 360" xmlns="http://www.w3.org/2000/svg">
   <defs><marker id="aw-scy" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk" data-code="fcl/scas.py:ScasAxis.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
+  <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="30" y="88" width="36" height="24" rx="12"/><text class="pnum" x="48" y="104">1</text></g>
   <text class="pname" x="48" y="132">β (사이드슬립)</text>
   <path class="wire" d="M66 100 H96" marker-end="url(#aw-scy)"/>
   <g class="sblk" data-code="fcl/scas.py:Scas.step"><rect class="body" x="100" y="74" width="70" height="52" rx="3"/>
@@ -720,7 +720,7 @@ export const SUBSYSTEMS = {
   <text class="annot" x="180" y="72" text-anchor="middle">이탈조건 DSL — 직렬화 튜플 (웹 편집 대상)</text>
   <text class="annot" x="180" y="92" text-anchor="middle">(always) (time_ge s) (alt_ge m) (alt_le m)</text>
   <text class="annot" x="180" y="112" text-anchor="middle">(speed_ge) (speed_le) (path_done)</text>
-  <g class="sblk" data-code="guidance/modes.py:ModeSpec"><rect class="body" x="370" y="36" width="330" height="80" rx="3"/>
+  <g class="sblk" data-code="guidance/modes.py:ModeSpec guidance/modes.py:ModeSequencer"><rect class="body" x="370" y="36" width="330" height="80" rx="3"/>
     <text class="ttl" x="535" y="58" style="font-size:13px">모드 테이블 {name → ModeSpec}</text>
     <text class="ttl2" x="535" y="78">speed·alt·heading — None = 축 비활성</text>
     <text class="ttl2" x="535" y="94">heading: 숫자 | "path" | None</text>
@@ -1220,10 +1220,10 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M574 535 H846" marker-end="url(#aw-peom)"/>
   <g class="sblk" data-code="plant/eom.py:unpack"><rect class="body" x="850" y="523" width="36" height="24" rx="12"/><text class="pnum" x="868" y="539">7</text></g>
   <text class="pname a-start" x="894" y="539">ω_b · omega_b</text>
-  <path class="wire note" d="M320 164 V196 H466 V580 H846" marker-end="url(#as-peom)"/>
+  <path class="wire note" d="M360 164 V196 H480 V580 H846" marker-end="url(#as-peom)"/>
   <g class="sblk nblk"><rect class="body" x="850" y="568" width="36" height="24" rx="12"/><text class="pnum" x="868" y="584">8</text></g>
   <text class="pname a-start" x="894" y="584">dω_b/dt — 표시 전용</text>
-  <path class="wire note" d="M360 164 V208 H480 V620 H846" marker-end="url(#as-peom)"/>
+  <path class="wire note" d="M320 164 V208 H466 V620 H846" marker-end="url(#as-peom)"/>
   <g class="sblk nblk"><rect class="body" x="850" y="608" width="36" height="24" rx="12"/><text class="pnum" x="868" y="624">9</text></g>
   <text class="pname a-start" x="894" y="624">A_bb — 표시 전용</text>
   <text class="canvas-note" x="24" y="652">※ 출력 ②~⑨ = MathWorks 6DOF (Quaternion) 블록 출력 병기 — ③⑥⑦은 상태 원소, ②④⑤는 소비 측 파생 함수(색 블록), ⑧⑨(각가속도·동체 가속도)는 엔진 미구현: RK4 안에서 계산되고 버려진다 (표시 전용)</text>
@@ -1416,7 +1416,7 @@ export const SUBSYSTEMS = {
     <text class="ttl2" x="155" y="120">웨이포인트 (N,E) · 도달반경</text>
     <text class="ttl2" x="155" y="136">NED 평면 지도 편집 (클릭·드래그·줌)</text></g>
   <path class="wire" d="M270 104 H306" marker-end="url(#aw-mp)"/>
-  <g class="sblk" data-code="guidance/modes.py:validate_condition"><rect class="body" x="310" y="60" width="250" height="88" rx="3"/>
+  <g class="sblk" data-code="guidance/modes.py:validate_condition guidance/modes.py:ModeSequencer"><rect class="body" x="310" y="60" width="250" height="88" rx="3"/>
     <text class="ttl" x="435" y="84" style="font-size:13px">검증 — 서버 · 엔진</text>
     <text class="ttl2" x="435" y="104">이탈 DSL: time · alt · speed · path_done</text>
     <text class="ttl2" x="435" y="120">heading: 숫자 | "path" | 없음(null)</text>
