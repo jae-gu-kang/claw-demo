@@ -188,52 +188,65 @@ const finiteNum = (v) => typeof v === "number" && Number.isFinite(v);
  *
  * 고정 자릿수로 반올림하면 상대 1% 섭동이 「4.0e−4 → 4.0e−4」가 되어 화면이
  * "안 변했다"고 말한다 — 이 화면의 주 질문이 정확히 그 자리에서 죽는다.
- * 7자리까지 가도 같으면 **정말 같은 값**이다(섭동 실패·범위 클립).
+ * 7자리까지 가도 같으면 **이 표기로는 못 갈린다**(섭동 클립이거나 차이가 7자리 밑).
+ * `expo`를 주면 그 표기로 판정한다 — 열 표기가 정해진 뒤 그 안에서 재야 답이 맞다.
  */
-export function pairDigits(from, to) {
+export function pairDigits(from, to, expo) {
   if (!finiteNum(from) || !finiteNum(to)) return PAIR_MIN_DIGITS;
   for (let d = PAIR_MIN_DIGITS; d < PAIR_MAX_DIGITS; d += 1) {
-    const [a, b] = fmtPair(from, to, d);
+    const [a, b] = fmtPair(from, to, { digits: d, expo });
     if (a !== b) return d;
   }
   return PAIR_MAX_DIGITS;
 }
 
+/** 이 값이 지수 표기로 찍혀야 하는가 (0은 어느 쪽으로도 안 민다). */
+const wantsExpo = (v) => v !== 0 && (Math.abs(v) >= 1e4 || Math.abs(v) < 1e-3);
+
 /** 전이 한 쌍의 표기 — `[from, to]`.
  *
- * `digits`를 주면 그 자릿수로 찍고, 안 주면 `pairDigits`가 정한다. **표에서는 주는
- * 것이 맞다**: 행마다 따로 정하면 같은 기준값이 한 열 안에서 40.8·40.847·40.85로
- * 세 번 다르게 찍혀, 값이 다른 것처럼 읽힌다(같은 base 런의 같은 수인데도).
+ * `fmt`(= `columnFormat`의 결과 `{digits, expo}`)를 주면 그대로 찍고, 안 주면 이 쌍만
+ * 보고 정한다. **표에서는 주는 것이 맞다**: 행마다 따로 정하면 같은 기준값이 한 열
+ * 안에서 40.8·40.847·40.85로 세 번 다르게 찍히고(자릿수), 0.00105가 어떤 행에서는
+ * `1.05e-3`으로 어떤 행에서는 `0.00105`로 찍힌다(표기) — 같은 base 런의 같은 수인데도.
  */
-export function fmtPair(from, to, digits) {
+export function fmtPair(from, to, fmt) {
   if (!finiteNum(from) || !finiteNum(to)) return [fmtDelta(from), fmtDelta(to)];
-  const d = digits ?? pairDigits(from, to);
+  const d = fmt?.digits ?? pairDigits(from, to);
   // 표기 방식은 둘이 **같아야** 한다 — 한쪽만 지수로 찍히면 크기 비교가 안 된다
-  const expo = [from, to].some((v) => v !== 0 && (Math.abs(v) >= 1e4 || Math.abs(v) < 1e-3));
+  const expo = fmt?.expo ?? [from, to].some(wantsExpo);
   return [from, to].map((v) =>
     (expo ? v.toExponential(d - 1) : String(Number(v.toPrecision(d)))));
 }
 
-/** 한 열(같은 지표)의 전이들을 **같은 자릿수**로 찍기 위한 공통 자릿수.
+/** 한 열(같은 지표)의 전이들을 **같은 방식**으로 찍기 위한 표기 — `{digits, expo}`.
  *
- * 행별 최소 자릿수의 **최댓값이 아니다.** 자릿수를 올리면 반올림 경계가 옮겨 가서,
+ * 자릿수는 행별 최소의 **최댓값이 아니다.** 자릿수를 올리면 반올림 경계가 옮겨 가서,
  * 낮은 자릿수에서는 갈리던 쌍이 높은 자릿수에서 새로 뭉개질 수 있다
  * (40.847→40.853은 3자리에서 40.8/40.9로 갈리지만 4자리에서 둘 다 40.85다).
- * 그래서 **모든 행이 동시에 갈리는** 가장 작은 자릿수를 찾는다. 값이 정말 같은
- * 행(섭동 클립)은 어느 자릿수에서도 못 갈리므로 탐색을 막지 않는다.
+ * 그래서 **모든 행이 동시에 갈리는** 가장 작은 자릿수를 찾는다.
+ *
+ * 어느 자릿수로도 못 갈리는 행은 탐색에서 **뺀다**. 빼지 않으면 그 행 하나가 열
+ * 전체를 7자리로 끌어올리는데, 정작 그 행은 7자리로도 여전히 안 갈린다 — 아무도
+ * 못 얻는 정밀도를 위해 나머지 행이 전부 `40.847000` 같은 거짓 정밀도를 뒤집어쓴다.
+ * 섭동이 범위에 클립돼 값이 정확히 같아진 행과, 차이가 7자리 밑인 행은 화면에서
+ * 같은 처지다(둘 다 "이 표기로는 안 갈린다") — 같이 뺀다.
  */
-export function columnDigits(pairs) {
+export function columnFormat(pairs) {
   const usable = (pairs ?? []).filter(([f, t]) => finiteNum(f) && finiteNum(t));
-  if (!usable.length) return PAIR_MIN_DIGITS;
-  const splits = (d) => usable.every(([f, t]) => {
-    if (f === t) return true;
-    const [a, b] = fmtPair(f, t, d);
-    return a !== b;
-  });
+  // 표기는 **열 안 모든 값**을 보고 한 번 정한다 (from·to 양쪽 다)
+  const expo = usable.some(([f, t]) => wantsExpo(f) || wantsExpo(t));
+  const splittable = usable.filter(([f, t]) =>
+    f !== t && pairDigits(f, t, expo) < PAIR_MAX_DIGITS);
+  if (!splittable.length) return { digits: PAIR_MIN_DIGITS, expo };
   for (let d = PAIR_MIN_DIGITS; d < PAIR_MAX_DIGITS; d += 1) {
-    if (splits(d)) return d;
+    const fmt = { digits: d, expo };
+    if (splittable.every(([f, t]) => {
+      const [a, b] = fmtPair(f, t, fmt);
+      return a !== b;
+    })) return fmt;
   }
-  return PAIR_MAX_DIGITS;
+  return { digits: PAIR_MAX_DIGITS, expo };
 }
 
 /** 상대 변화 (to−from)/|from| — 기준이 0이면 **없다**(null).
@@ -278,6 +291,16 @@ export function fmtChange(delta, rel, unit = "") {
 export function impactRank(t) {
   if (!t || !t.delta) return -1;
   return t.rel == null ? Infinity : Math.abs(t.rel);
+}
+
+/** 전이 둘의 정렬 비교자 (눈에 띄는 것 먼저). **뺄셈으로 쓰지 말 것**:
+ *  0에서 벗어난 지표가 둘이면 `Infinity - Infinity`가 NaN이라 비교자 계약이 깨진다
+ *  (엔진마다 다르게 처리한다 — V8은 지금 동률로 넘기지만 기댈 값이 아니다). */
+export function byImpact(a, b) {
+  const ra = impactRank(a);
+  const rb = impactRank(b);
+  if (ra === rb) return 0;
+  return rb > ra ? 1 : -1;
 }
 
 /** 1단 탐침 전이 — 이 파라미터가 「얼마에서 얼마로」 흔들렸는가.
@@ -493,8 +516,10 @@ export function worstTransitions(rows) {
     for (const [k, v] of Object.entries(r.delta)) {
       if (v == null) continue;
       if (entry[k] && Math.abs(v) <= Math.abs(entry[k].delta)) continue;
-      // from·to는 **있으면** 싣는다 — base 런이 취소로 잘린 케이스에서도 Δ는
-      // 유효하므로(서버가 같은 케이스 base 대비로 이미 계산했다) 요약에서 빼지 않는다
+      // from·to는 **있으면** 싣는다. 서버 계약상 Δ가 있으면 그 케이스의 base 런도
+      // 있으므로(routes/influence.py — base가 없으면 delta를 통째로 None으로 둔다)
+      // 실제로는 from이 항상 찬다. 그래도 없는 경우를 0으로 메우지 않는 것이 규약이라
+      // null로 남긴다 — 화면은 「—」를 찍고, 있지도 않은 기준을 지어내지 않는다
       const from = base.get(r.case)?.[k];
       const to = r.metrics?.[k];
       entry[k] = {

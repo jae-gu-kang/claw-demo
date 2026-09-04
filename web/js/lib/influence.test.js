@@ -4,8 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  KNOB_CLASS, columnDigits, coneOf, diagnoseRequest, edgeVia, fmtDelta, fmtPair,
-  fmtChange, fmtPercent, fmtSigned, impactRank, logScale, pairDigits,
+  KNOB_CLASS, byImpact, columnFormat, coneOf, diagnoseRequest, edgeVia, fmtChange,
+  fmtDelta, fmtPair, fmtPercent, fmtSigned, impactRank, logScale, pairDigits,
   nodeDetail, normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor,
   paramState, probeTransition, radiusOf, rampColor, relOf, scanRequest,
   scanSummary, structuralRequest, sweepCases, sweepRequest, worstTransitions,
@@ -304,27 +304,50 @@ test("fmtPair: 3자리로 안 갈리면 갈릴 때까지 늘린다 — 스윕 Δ
   assert.deepEqual(fmtPair(12.3456, 12.3459), ["12.3456", "12.3459"]);
 });
 
-test("columnDigits: 한 열은 가장 촘촘한 전이에 맞춘다 — 같은 기준값이 다르게 찍히지 않게", () => {
+test("columnFormat: 한 열은 가장 촘촘한 전이에 맞춘다 — 같은 기준값이 다르게 찍히지 않게", () => {
   // 라이브에서 나온 회귀: 같은 base 런의 40.847이 한 열 안에서 40.8·40.847·40.85로
   // 세 번 다르게 찍혀 다른 수처럼 읽혔다
   const col = [[40.847, 40.853], [40.847, 40.85], [40.847, 40.84]];
-  const d = columnDigits(col);
-  const lefts = new Set(col.map(([f, t]) => fmtPair(f, t, d)[0]));
+  const f = columnFormat(col);
+  const lefts = new Set(col.map(([a, b]) => fmtPair(a, b, f)[0]));
   assert.equal(lefts.size, 1, `같은 기준값은 한 열에서 한 표기: ${[...lefts]}`);
   // 그러면서도 가장 촘촘한 행이 뭉개지지 않아야 한다
-  for (const [f, t] of col) {
-    const [a, b] = fmtPair(f, t, d);
-    assert.notEqual(a, b, `${f} → ${t}가 뭉개졌다`);
+  for (const [a, b] of col) {
+    const [x, y] = fmtPair(a, b, f);
+    assert.notEqual(x, y, `${a} → ${b}가 뭉개졌다`);
   }
-  assert.equal(columnDigits([]), 3);            // 셀 것이 없으면 최소 자릿수
-  assert.equal(columnDigits([[null, 3]]), 3);   // 미계측은 자릿수를 끌어올리지 않는다
+  assert.deepEqual(columnFormat([]), { digits: 3, expo: false });          // 셀 것 없음
+  assert.deepEqual(columnFormat([[null, 3]]), { digits: 3, expo: false }); // 미계측
   // 행별 최소의 **최댓값**이면 안 된다: 40.847→40.853은 3자리(40.8/40.9)에서 갈리지만
   // 4자리에서 둘 다 40.85로 새로 뭉개진다. 이 열의 답은 5자리다
   assert.equal(pairDigits(40.847, 40.853), 3);
   assert.equal(pairDigits(40.847, 40.84), 4);
-  assert.equal(d, 5, "행별 최댓값(4)을 쓰면 첫 행이 뭉개진다");
+  assert.equal(f.digits, 5, "행별 최댓값(4)을 쓰면 첫 행이 뭉개진다");
   // 정말 같은 값인 행은 탐색을 막지 않는다 (섭동이 범위에 클립된 자리)
-  assert.equal(columnDigits([[1.5, 1.5], [2.0, 2.1]]), 3);
+  assert.equal(columnFormat([[1.5, 1.5], [2.0, 2.1]]).digits, 3);
+});
+
+test("columnFormat: 어느 자릿수로도 못 갈리는 행이 열 전체를 끌어올리지 않는다", () => {
+  // 리뷰가 잡은 것: 차이가 7자리 밑인 행 하나가 splits()를 영원히 막아 열 전체가
+  // 7자리로 간다. 정작 그 행은 7자리로도 안 갈리므로 아무도 못 얻는 정밀도를 위해
+  // 나머지가 전부 거짓 정밀도를 뒤집어썼다
+  const unsplittable = [2.2938472847, 2.2938472851];
+  assert.equal(pairDigits(...unsplittable), 7, "전제: 7자리로도 못 갈린다");
+  const f = columnFormat([unsplittable, [40.847, 40.853]]);
+  assert.equal(f.digits, 3, "못 갈리는 행은 탐색에서 빠진다");
+  assert.deepEqual(fmtPair(40.847, 40.853, f), ["40.8", "40.9"]);
+});
+
+test("columnFormat: 표기(지수/소수)도 열마다 하나 — 같은 수가 두 모습으로 찍히지 않게", () => {
+  // 리뷰가 잡은 것: 자릿수는 통일했는데 지수/소수 결정이 행마다여서, 같은 base 런의
+  // 0.00105가 한 행에서는 1.05e-3, 기준 행에서는 0.00105로 찍혔다
+  const col = [[0.00105, 0.00098], [0.0020, 0.0021]];
+  const f = columnFormat(col);
+  assert.equal(f.expo, true, "열에 1e-3 미만 값이 있으면 열 전체가 지수 표기다");
+  const shapes = new Set(col.flatMap(([a, b]) => fmtPair(a, b, f)).map((s) => s.includes("e")));
+  assert.equal(shapes.size, 1, "한 열 안에서 표기가 갈리면 크기 비교가 안 된다");
+  // 기준 행이 찍는 같은 0.00105도 같은 모습이어야 한다
+  assert.equal(fmtPair(0.00105, 0.00105, f)[0], fmtPair(0.00105, 0.00098, f)[0]);
 });
 
 test("fmtPair: 정말 같은 값이면 같은 문자열 — 없는 차이를 만들지 않는다", () => {
@@ -361,9 +384,21 @@ test("impactRank: 안 움직인 지표가 움직인 지표보다 앞에 서지 �
   assert.ok(impactRank(appeared) > impactRank(moved));
   assert.equal(impactRank(null), -1);
   // 정렬 결과로도 확인 (뷰가 하는 그대로)
-  assert.deepEqual(
-    [dead, moved, appeared].sort((a, b) => impactRank(b) - impactRank(a)),
-    [appeared, moved, dead]);
+  assert.deepEqual([dead, moved, appeared].sort(byImpact), [appeared, moved, dead]);
+});
+
+test("byImpact: 0에서 벗어난 지표가 둘이어도 비교자가 NaN을 내지 않는다", () => {
+  // 리뷰가 잡은 것: impactRank를 뺄셈으로 쓰면 Infinity − Infinity = NaN이라
+  // 비교자 계약이 깨진다(엔진마다 다르게 처리한다)
+  const a = { from: 0, to: 0.04, delta: 0.04, rel: null };
+  const b = { from: 0, to: 0.09, delta: 0.09, rel: null };
+  assert.ok(Number.isNaN(impactRank(a) - impactRank(b)), "전제: 뺄셈은 NaN이다");
+  assert.equal(byImpact(a, b), 0);
+  assert.ok(Number.isFinite(byImpact(a, b)));
+  // 순서 자체는 그대로 (큰 것이 앞)
+  const dead = { from: 0, to: 0, delta: 0, rel: null };
+  const moved = { from: 2, to: 2.1, delta: 0.1, rel: 0.05 };
+  assert.deepEqual([dead, a, moved].sort(byImpact), [a, moved, dead]);
 });
 
 test("relOf: 기준이 0이면 비율이 **없다** — ∞도 0도 거짓말이다", () => {
