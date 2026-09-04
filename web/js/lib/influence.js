@@ -17,6 +17,10 @@
 #1c1c1e 위 소형 텍스트 기준(4.5:1)에 아슬하게 걸린다. 그 변형이 STATE_INK다.
 */
 
+// 케이스 이름의 격자 좌표는 grid.js가 부여했으므로 되읽는 것도 그쪽이다 —
+// 구간 경향 표의 행 순서가 그 좌표를 쓴다 (trendMatrix)
+import { orderCaseNames } from "./grid.js";
+
 export const TIER = { STRUCT: "struct", OPEN: "open", CLOSED: "closed" };
 
 export const SKIN = {
@@ -263,6 +267,16 @@ export function relOf(from, to) {
 // 비율이 이보다 작으면 "+0.0%"로 반올림된다 — 소수 1자리 표기의 바닥
 const REL_FLOOR = 0.001;
 
+/** 이 비율을 퍼센트로 찍어도 되는가 — 기준이 0이면 비율이 없고(relOf), 0.1% 미만은
+ *  「+0.0%」로 반올림돼 "안 변했다"고 거짓말한다.
+ *
+ * 아래 `fmtChange`가 절대 Δ로 갈아타는 문턱과 **같은 하나**여야 한다. 퍼센트를 손으로
+ * 다시 찍는 자리(구간 경향의 감도 칸)가 이 문턱만 빠뜨려 같은 거짓말이 되살아났다. */
+export const relReadable = (rel) => rel != null && Math.abs(rel) >= REL_FLOOR;
+
+/** 비율 한 조각 — 부호는 U+2212, 0은 여기 오지 않는다(relReadable이 먼저 막는다). */
+export const fmtRel = (rel) => `${rel > 0 ? "+" : "−"}${fmtPercent(Math.abs(rel))}`;
+
 /** 변화량 한 조각 — 비율이 읽히면 비율로, 아니면 절대 Δ로.
  *
  * 두 자리에서 비율이 거짓말한다: 기준이 0이면 비율이 아예 없고(relOf), 비율이
@@ -270,8 +284,7 @@ const REL_FLOOR = 0.001;
  * "안 변했다"고 말한다(0.16969 → 0.16972가 그랬다). 둘 다 절대 Δ로 넘긴다.
  */
 export function fmtChange(delta, rel, unit = "") {
-  const readable = rel != null && Math.abs(rel) >= REL_FLOOR;
-  if (readable) return `${rel > 0 ? "+" : "−"}${fmtPercent(Math.abs(rel))}`;
+  if (relReadable(rel)) return fmtRel(rel);
   return `${fmtSigned(delta)}${unit ? ` ${unit}` : ""}`;
 }
 
@@ -531,6 +544,240 @@ export function worstTransitions(rows) {
     }
   }
   return out;
+}
+
+// ── 구간 경향 (3단 C) — 손잡이 하나를 흔들었을 때 **전 구간**이 어느 쪽으로 가는가 ──
+//
+// 3단 B의 요약(worstTransitions)은 런별 **최악 한 칸**만 낸다: "가장 나쁜 데가
+// 어디냐"에는 답하지만 "엔벨로프를 따라 어느 쪽으로 기우느냐"에는 답하지 못한다.
+// 케이스×런 전체 표는 사실을 전부 갖고 있지만 15케이스 × 9런 = 135행이라 경향이
+// 행 사이에 흩어진다 — 사람이 눈으로 피벗해야 했다. 여기서 그 135행을
+// **(구간 × 지표) 한 장**으로 접는다.
+//
+// 접는 축은 **스팬**이다: 한 케이스에서 손잡이를 −20·−10·기준·+10·+20%로 놓은
+// 다섯 점을 스팬 순으로 세우면 그것이 그 구간의 응답 곡선이고, 곡선의 부호가 경향이다.
+
+const SLOPE_SPAN = 0.1;  // 감도의 단위 — "게인 +10%당 Δ" (스팬 기본 간격과 같다)
+
+// 표 칸에 들어가는 것은 기호이고 문장은 툴팁·범례가 받는다. 기호가 **색과 별도로**
+// 경향을 말해야 한다 — 색만으로 구분하면 색각 이상·흑백 인쇄에서 표가 무의미해진다
+export const TREND_MARK = { up: "↑", down: "↓", mixed: "∿", flat: "=", none: "—" };
+export const TREND_LABEL = {
+  up: "단조 증가", down: "단조 감소", mixed: "비단조 (스팬 안에 극점)",
+  // eps 문턱이 생긴 뒤로 flat은 "정확히 같다"가 아니라 "이 분해능에서는 안 움직인다"다
+  flat: "평탄 (분해능 아래)", none: "판정 불가",
+};
+
+// 다크 접근성 변형 — 좁은 텍스트에 쓰이므로 순수 시스템 색이 아니다.
+// 악화는 「섭동 불가」와 같은 빨강이다(리터럴을 네 번째로 적지 않는다)
+export const GOOD_INK = "#32d74b";
+export const BAD_INK = STATE_INK.error;
+
+/** 경향의 잉크 — 색은 **방향이 아니라 좋고 나쁨**을 말한다.
+ *
+ * 같은 「↑」가 실속마진에서는 개선이고 추종 RMS에서는 악화다. 방향에 색을 물리면
+ * 화면이 절반의 지표에서 거짓말한다 — 극성은 서버 선언(MetricDef.better)이 정본이고,
+ * 선언이 없는 지표는 **판단하지 않는다**(중립 잉크: 모르는 것을 색으로 단언하지 않는다).
+ */
+export function trendInk(trend, better) {
+  if (trend === "none") return SKIN.inkFaint;
+  if (trend === "flat") return SKIN.inkDim;
+  if (trend === "mixed") return WARN_INK;  // 스팬 안에 극점 — 한쪽으로 밀 수 없다
+  if (better !== "lower" && better !== "higher") return SKIN.ink;
+  return (better === "lower" ? trend === "down" : trend === "up") ? GOOD_INK : BAD_INK;
+}
+
+/** 단독 런 라벨에서 상대 스팬 — `{pid}@{s:+g}` (engine sweep.py `single`의 자구).
+ *  기준(0)은 스팬 점이 아니다: base 런은 라벨이 "base"라 애초에 여기 안 온다. */
+function spanOf(label, knob) {
+  if (typeof label !== "string" || !label.startsWith(`${knob}@`)) return null;
+  const s = Number(label.slice(knob.length + 1));
+  return Number.isFinite(s) && s !== 0 ? s : null;
+}
+
+/** 스윕 결과에서 **단독 런이 있는** 손잡이들 — 구간 경향의 주어가 될 수 있는 것.
+ *
+ * 쌍 런(A&B)은 제외한다: 두 손잡이가 같이 움직인 Δ를 한쪽의 경향으로 읽으면 귀속이
+ * 틀린다(sweepFor의 규약과 같다). 쌍의 단독 점(a@+0.1)은 단독 런이므로 포함된다.
+ * 순서는 런 순서 그대로 — 처방 카드가 손잡이를 세운 순서다.
+ */
+export function sweepKnobs(rows) {
+  const out = [];
+  for (const r of rows ?? []) {
+    const keys = Object.keys(r.overrides ?? {});
+    if (keys.length !== 1) continue;
+    const pid = keys[0];
+    if (spanOf(r.label, pid) == null || out.includes(pid)) continue;
+    out.push(pid);
+  }
+  return out;
+}
+
+// 차분이 이 상대 크기 밑이면 **안 움직인 것**으로 본다. 순수한 부호 판정은 1 ulp에
+// 갈리는데, 6DOF 적분을 5천 스텝 돌린 지표에서 마지막 자리는 신호가 아니라 반올림
+// 잡음이다 — 그 잡음 하나로 이 표의 **가장 센 판정**(「비단조 — 한쪽으로 밀면 안 된다」)이
+// 서면 안 된다. 배정밀도 상대오차 2.2e−16의 1만 배로, 실제 신호(관측된 최소가 상대
+// 1e−4대)와는 여덟 자리 떨어져 있다
+const TREND_EPS_REL = 1e-12;
+
+/** 스팬 순 점열 `[[스팬, 값], …]` → 경향 한 칸. 기준(스팬 0)도 한 점이다.
+ *
+ * 단조 판정은 **연속 차분의 부호**로 한다. 회귀 기울기의 부호로 하면 −20%에서 튀고
+ * +20%에서 돌아오는 곡선이 "단조"로 접혀, 스팬 안에 극점이 있다는 사실 — 이 손잡이를
+ * 한쪽으로 밀면 안 된다는 사실 — 이 화면에서 사라진다.
+ *
+ * 곡선을 못 세울 때의 **사유는 여기서만 만든다.** 부르는 쪽이 나중에 덮어쓰면 맞는
+ * 문장이 틀린 문장으로 바뀐다 — `nonfinite`(어딘가 ∞)만 보고 "점이 없다"로 갈아
+ * 끼웠더니, 기준은 멀쩡하고 섭동만 발산한 칸(이 기능이 겨냥하는 바로 그 시나리오)에서
+ * 「기준」열에 값이 찍혀 있는데 사유는 세울 점이 없다고 말했다. 그래서 문장을 가르는
+ * 사실 셋을 전부 인자로 받는다: 기준이 있었는가 · 기준이 ∞였는가 · 섭동이 ∞였는가.
+ */
+function trendOf(pts, { hasBase = true, divBase = false, divSpan = false } = {}) {
+  if (pts.length < 2) {
+    let reason;
+    if (!pts.length) {
+      reason = divBase || divSpan
+        ? "곡선에 세울 점이 없다 — 지표가 ∞/비수치다(발산한 런의 자리). 값은 그대로 낸다"
+        : "유효 점 없음 — 이 구간에서 이 지표를 재지 못했다";
+    } else if (hasBase) {
+      reason = divSpan
+        ? "유효 점이 기준 하나뿐 — 흔든 런의 지표가 ∞다(발산). 기준값은 그대로 낸다"
+        : "유효 점이 기준 하나뿐 — 흔든 런에서 이 지표가 판정 불가다";
+    } else {
+      reason = divBase
+        ? "기준(base) 런의 지표가 ∞다(발산) — 섭동 한 점만으로는 어느 쪽으로 갔는지 모른다"
+        : "기준(base) 런의 값이 없다 — 섭동 한 점만으로는 어느 쪽으로 갔는지 모른다";
+    }
+    return { trend: "none", slope: null, swing: null, reason };
+  }
+  const scale = Math.max(...pts.map((p) => Math.abs(p[1])));
+  const eps = scale * TREND_EPS_REL;
+  let up = false;
+  let down = false;
+  for (let i = 1; i < pts.length; i += 1) {
+    const d = pts[i][1] - pts[i - 1][1];
+    if (d > eps) up = true;
+    else if (d < -eps) down = true;
+  }
+  const trend = up && down ? "mixed" : up ? "up" : down ? "down" : "flat";
+  const n = pts.length;
+  const mx = pts.reduce((s, p) => s + p[0], 0) / n;
+  const my = pts.reduce((s, p) => s + p[1], 0) / n;
+  let num = 0;
+  let den = 0;
+  for (const [x, y] of pts) {
+    num += (x - mx) * (y - my);
+    den += (x - mx) * (x - mx);
+  }
+  const vals = pts.map((p) => p[1]);
+  return {
+    trend,
+    // 평탄이면 기울기는 **정확히 0**이다. 회귀식에 맡기면 값이 전부 같아도 평균
+    // 뺄셈의 반올림이 남아 7.7e−34 같은 수가 나오고(실측), 화면은 안 움직인 지표를
+    // 「+7.70e−34」로 찍어 움직였다고 말한다. 스팬이 하나뿐이면 기울기가 **없다**
+    // (0이 아니다) — bySpan이 중복을 접으므로 n≥2면 den>0이지만 규약을 코드에 남긴다
+    slope: trend === "flat" ? 0 : den > 0 ? (num / den) * SLOPE_SPAN : null,
+    swing: Math.max(...vals) - Math.min(...vals),
+    reason: null,
+  };
+}
+
+/** 스윕 행 → 구간 경향 표. 손잡이 하나에 대해 (구간 × 지표) 한 장.
+ *
+ * 반환:
+ * - `points`  스팬 점 (오름차순) — 라벨과 그때 손잡이가 놓인 **절대값**.
+ *             두 점의 knobValue가 같으면 범위 클립이다(엔진 notes가 사유를 낸다).
+ * - `cases`   구간 — 격자 순서(fuel, alt, mach)로 세운다. 실행 순서(서펜타인)는
+ *             인접 트림 시드용이라 표에서는 마하가 줄마다 뒤집혀 읽힌다.
+ * - `cells`   구간 하나의 지표 한 칸. `base`·`values`는 **곡선에 세울 수 있는**
+ *             유한값만이고(없으면 null), `rawBase`·`raw`는 서버가 준 그대로다
+ *             (∞는 "inf" 문자열) — 판정에서 빼는 것과 화면에서 지우는 것은 다르다.
+ * - `metrics` 한 구간에서라도 잰 값이 있던 지표. 전 구간 전부 없는 지표는
+ *             `unmeasured`로 따로 낸다 — 숨기는 것이 아니라, 「—」 열다섯 줄로 표를
+ *             채우는 대신 **왜 없는지 한 줄**로 말하는 자리를 만드는 것이다
+ *             (이 기동에는 접지도 웨이포인트도 없다).
+ */
+export function trendMatrix(rows, knob) {
+  const all = rows ?? [];
+  const bySpan = new Map();
+  for (const r of all) {
+    const keys = Object.keys(r.overrides ?? {});
+    if (keys.length !== 1 || keys[0] !== knob) continue;
+    const s = spanOf(r.label, knob);
+    if (s == null || bySpan.has(s)) continue;
+    bySpan.set(s, { span: s, label: r.label, knobValue: Number(r.overrides[knob]) });
+  }
+  const points = [...bySpan.values()].sort((a, b) => a.span - b.span);
+  const spans = points.map((p) => p.span);
+
+  // 케이스 이름·런 라벨 어느 쪽에도 개행이 없으므로(둘 다 엔진·grid.js가 만든
+  // 식별자) 줄바꿈을 구분자로 쓰면 키가 겹칠 수 없다
+  const byKey = new Map(all.map((r) => [`${r.case}\n${r.label}`, r]));
+  const names = orderCaseNames([...new Set(all.map((r) => r.case))]);
+  const keys = [...new Set(all.flatMap((r) => Object.keys(r.metrics ?? {})))];
+
+  const cases = names.map((name) => {
+    const at = (label) => byKey.get(`${name}\n${label}`);
+    const labels = ["base", ...points.map((p) => p.label)];
+    const runs = labels.map(at);
+    const cells = {};
+    for (const k of keys) {
+      // `raw`는 서버가 준 그대로다 — ∞는 "inf" 문자열로 온다(serialize 정책).
+      // 곡선에는 못 세우지만(차분이 NaN·±∞다) **없는 값이 아니다**: 발산한 런이
+      // 정확히 그 자리라, 화면이 "재지 못했다"로 접으면 같은 행의 「발산」 배지와
+      // 정반대를 말한다. 판정에서 빼는 것과 화면에서 지우는 것은 다른 일이다
+      const rawBase = runs[0]?.metrics?.[k] ?? null;
+      const raw = points.map((p) => at(p.label)?.metrics?.[k] ?? null);
+      const base = finiteNum(rawBase) ? rawBase : null;
+      const values = raw.map((v) => (finiteNum(v) ? v : null));
+      const pts = base == null ? [] : [[0, base]];
+      values.forEach((v, i) => { if (v != null) pts.push([spans[i], v]); });
+      pts.sort((a, b) => a[0] - b[0]);
+      // "안 쟀다"와 "쟀는데 ∞였다"는 다른 사실이다 — 후자를 전자로 적으면 같은 행의
+      // 「발산」 배지와 정반대를 말한다 (판독대의 사유 분기와 같은 규약).
+      // 어느 쪽이 발산했는지까지 갈라서 넘긴다 — 사유 문장은 trendOf가 만든다
+      const div = (v) => v != null && !finiteNum(v);
+      const divBase = div(rawBase);
+      const divSpan = raw.some(div);
+      const t = trendOf(pts, { hasBase: base != null, divBase, divSpan });
+      cells[k] = {
+        ...t, base, values, rawBase, raw, nonfinite: divBase || divSpan,
+        // 기준이 0이면 비율이 없다 — relOf와 같은 이유로 ∞·0으로 위장하지 않는다
+        rel: t.slope != null && base ? t.slope / Math.abs(base) : null,
+      };
+    }
+    return {
+      name,
+      // 잘린 런의 지표는 **잘린 구간만의** 값이다 — 스팬 점마다 잰 구간이 다르면
+      // 그 구간의 곡선은 곡선이 아니라 서로 다른 실험의 나열이다. 경향을 지우지는
+      // 않되(그 안에서는 사실이다) 행에 표시해 읽는 쪽이 할인하게 한다
+      aborted: runs.map((r, i) => (r?.aborted ? labels[i] : null)).filter(Boolean),
+      // 취소로 잘린 스윕은 케이스마다 돈 런 수가 다르다 — 없는 런을 0으로 치면
+      // 경향이 조용히 달라진다(빠진 점은 곡선에서 빠질 뿐이다)
+      missing: runs.map((r, i) => (r ? null : labels[i])).filter(Boolean),
+      cells,
+    };
+  });
+
+  // 열이 서는 기준은 **잰 값이 있는가**이지 곡선에 세울 수 있는가가 아니다 —
+  // ∞만 나온 지표는 "이 기동이 못 재는 지표"가 아니라 발산한 지표다
+  const has = (k) => cases.some((c) =>
+    c.cells[k].rawBase != null || c.cells[k].raw.some((v) => v != null));
+  const metrics = keys.filter(has);
+  const counts = {};
+  const total = { up: 0, down: 0, mixed: 0, flat: 0, none: 0 };
+  for (const k of metrics) {
+    const c = { up: 0, down: 0, mixed: 0, flat: 0, none: 0 };
+    for (const cs of cases) {
+      c[cs.cells[k].trend] += 1;
+      total[cs.cells[k].trend] += 1;
+    }
+    counts[k] = c;
+  }
+  return {
+    knob, points, cases, metrics, counts, total,
+    unmeasured: keys.filter((k) => !has(k)),
+  };
 }
 
 /** 2단 다중 케이스 요약 — (knob, 루프)별로 케이스 전체에서 |ΔPM|·|ΔGM|가 가장

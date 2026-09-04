@@ -54,3 +54,33 @@ export function parseNumberList(text) {
   }
   return vals;
 }
+
+/** 케이스 이름 → 격자 좌표 — `nameCases`의 역함수. 형식이 아니면 null.
+ *
+ * 이름이 값 그대로라(위 nameCases) 되돌릴 수 있다. 되돌리는 쪽이 필요한 이유는
+ * **표의 행 순서**다: 실행 순서는 서펜타인(인접 트림 시드)이라 마하가 줄마다
+ * 뒤집혀 있고, 그 순서로 세로 표를 그리면 마하가 0.4→0.8→0.8→0.4로 왕복해
+ * "고도가 오르면 이쪽으로 간다" 같은 경향이 눈에 안 잡힌다.
+ */
+export function parseCaseName(name) {
+  const m = /^M(-?[\d.]+(?:[eE][+-]?\d+)?)_h(-?[\d.]+(?:[eE][+-]?\d+)?)_f(-?[\d.]+(?:[eE][+-]?\d+)?)$/
+    .exec(String(name ?? ""));
+  if (!m) return null;
+  const [mach, alt, fuel] = m.slice(1).map(Number);
+  if (![mach, alt, fuel].every(Number.isFinite)) return null;
+  return { mach, alt, fuel };
+}
+
+/** 표 행 순서 — (fuel, alt, mach) 오름차순. **하나라도 못 읽으면 원래 순서 그대로**:
+ *  절반만 정렬하면 비교자가 비일관(a=b, b=c인데 a≠c)이 되어 순서가 엔진 재량이 된다. */
+export function orderCaseNames(names) {
+  const list = [...(names ?? [])];
+  const coords = list.map(parseCaseName);
+  if (coords.some((c) => c === null)) return list;
+  const key = new Map(list.map((n, i) => [n, coords[i]]));
+  return list.sort((a, b) => {
+    const pa = key.get(a);
+    const pb = key.get(b);
+    return pa.fuel - pb.fuel || pa.alt - pb.alt || pa.mach - pb.mach;
+  });
+}

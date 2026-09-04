@@ -10,8 +10,19 @@
 블록도 최상위와 같은 규약이다: **주 그림은 카드에 넣지 않는다.** 종전에는 패널
 다섯 장이 세로로 쌓여 그래프가 그중 한 칸이었고, 첫 화면에서 그래프 아래로 표
 넷이 동시에 펼쳐져 무엇이 이 탭의 답인지가 흐렸다. 지금은 그래프가 페이지 위에
-그대로 놓이고, 파라미터 표·진단·개루프·스윕·범례는 **칩을 눌러야** 열린다
-(한 번에 하나 — 두 개를 동시에 여는 것은 다시 쌓기다).
+그대로 놓이고, 파라미터 표·진단·개루프·스윕·구간 경향은 **칩을 눌러야** 열린다
+(한 번에 하나 — 두 개를 동시에 여는 것은 다시 쌓기다). 범례만 예외로 그림 바로
+아래에 남는다 — 색이 칠해진 그래프가 늘 떠 있는데 범례를 클릭 뒤로 숨기면 화면이
+자기 문법을 설명하지 않게 된다.
+
+## 구간 경향 (3단 C) — "전 구간에서 어느 쪽으로" (v0.52)
+
+3단 B가 답하지 못하던 자리다. B의 요약은 런별 **최악 한 칸**만 내고(엔벨로프를
+접는다), 케이스×런 전체 표는 15케이스 × 9런 = 135행이라 경향이 행 사이에 흩어진다.
+같은 행들을 손잡이 하나 기준 (구간 × 지표) 한 장으로 접은 것이 이 서랍이고, 행이
+구간이라 세로로 한 번 훑으면 "저고도에서만 좋아지고 고고도에서는 나빠진다"가
+그대로 읽힌다. **새로 재지 않는다** — 저장된 런의 순수 변환(`trendMatrix`)이라
+잡도 엔드포인트도 없다.
 
 ## 판독대 — "얼마에서 얼마로"
 
@@ -37,13 +48,13 @@ wpmap.js가 웨이포인트 표에 접근성을 맡긴 것과 같은 규약. 서
 import { api, errorText, watchJob } from "../api.js";
 import { clear, el } from "../dom.js";
 import {
-  BAND_COLOR, DIRECTION_LABEL, KNOB_CLASS, SKIN, STATE_COLOR, STATE_INK,
-  STATE_LABEL, STATE_NOTE, WARN_INK,
+  BAND_COLOR, DIRECTION_LABEL, GOOD_INK, KNOB_CLASS, SKIN, STATE_COLOR, STATE_INK,
+  STATE_LABEL, STATE_NOTE, TREND_LABEL, TREND_MARK, WARN_INK,
   byImpact, columnFormat, coneOf, diagnoseRequest, edgeVia, fmtChange, fmtDelta,
   fmtPair, fmtPercent, fmtSigned, nodeDetail,
   normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor, probeTransition,
-  radiusOf, relOf, scanRequest, scanSummary, structuralRequest, sweepCases,
-  sweepRequest, worstTransitions,
+  radiusOf, relOf, relReadable, fmtRel, scanRequest, scanSummary, structuralRequest,
+  sweepCases, sweepKnobs, sweepRequest, trendInk, trendMatrix, worstTransitions,
 } from "../lib/influence.js";
 import { machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { conePlayback, summaryOf } from "../lib/influenceplay.js";
@@ -67,6 +78,9 @@ const state = {
   // 진단(2단 앞의 "무엇을") · 스캔(3단 A "어느 케이스가") · 스윕(3단 B "얼마나")
   // — 탭을 떠났다 와도 결과 유지
   diag: null, openloop: null, scan: null, sweep: null,
+  // 구간 경향(3단 C)이 보고 있는 손잡이·지표 — 결과가 아니라 **보는 자리**라
+  // 스윕과 수명이 다르다(같은 스윕을 손잡이별로 훑는 것이 이 표의 용법이다)
+  trendKnob: null, trendMetric: null,
   // 케이스 격자 입력 — 결과(scan.selected)와 수명이 같아야 한다. 입력만 기본값으로
   // 되돌아가면 재진입 직후 3단 B가 "격자가 바뀌었다"고 거절한다(사용자는 안 건드렸다)
   gridForm: { machFrom: "0.4", machTo: "0.8", machStep: "0.1",
@@ -83,7 +97,7 @@ const LAYOUT_FN = { layered: layeredLayout, cascade: cascadeLayout };
 // 정렬한다 (국소 → 스케줄 셀, 전역 → 루프 게인 수준). ok만 별도 초록.
 const VERDICT_LABEL = { ok: "정상", local: "국소", global: "전역" };
 const VERDICT_INK = {
-  ok: "#32d74b", local: KNOB_CLASS.schedule.ink, global: KNOB_CLASS.loop_gain.ink,
+  ok: GOOD_INK, local: KNOB_CLASS.schedule.ink, global: KNOB_CLASS.loop_gain.ink,
 };
 
 export function render() {
@@ -380,8 +394,13 @@ export function render() {
   }
 
   /** 변화량 칩 — 표기 규칙은 lib(fmtChange)이 쥔다. 색은 칠하지 않는다:
-   *  지표마다 좋은 방향이 달라(MetricDef.better) 초록/빨강을 입히면 화면이 판정을
-   *  참칭한다. 판정은 진단(2·3단 문턱)이 한다. */
+   *  **이 값 하나가 좋은지 나쁜지는 문턱이 정하는데 판독대는 문턱을 모른다** —
+   *  초록/빨강을 입히면 화면이 진단(2·3단 문턱)의 판정을 참칭한다.
+   *
+   *  구간 경향 표(trendInk)는 같은 `MetricDef.better`로 색을 칠하는데 모순이 아니다:
+   *  저기서 색이 붙는 대상은 값이 아니라 **부호**이고(문턱과 무관하다), "이 손잡이를
+   *  올리면 이 지표는 나빠지는 쪽으로 간다"는 선언된 극성 그대로다. 여기는 값,
+   *  저기는 방향 — 문턱을 아는 척하는 쪽만 금지다. */
   function chgChip(delta, rel, unit) {
     return el("span", { class: "inf-chg" }, fmtChange(delta, rel, unit));
   }
@@ -1188,7 +1207,11 @@ export function render() {
       // 대상 결정은 순수 로직 — lib이 쥔다 (격자·스캔·선택 → 케이스 목록)
       cases = sweepCases(gridCases(), state.scan);
     } catch (e) {
-      state.sweep = { card, status: "제출 불가", result: null,
+      // submitted는 **표시 문자열과 분리된 판정**이다 — 구간 경향의 빈 상태가
+      // "재지 않았다"와 "돌다가 깨졌다"를 갈라야 하는데, status 리터럴로 가르면
+      // 문구에 사유 한 조각만 덧붙여도(「제출 불가 — 격자 불일치」) 조용히 반대편
+      // 문장으로 떨어진다. 구분해야 할 사실은 "잡이 뜬 적이 있는가" 하나뿐이다
+      state.sweep = { card, status: "제출 불가", result: null, submitted: false,
         error: errorText(e) };
       renderSweep();
       runStatus("스윕 제출 불가", { open: "sweep", bad: true });
@@ -1199,7 +1222,7 @@ export function render() {
     const nRuns = 1 + card.knobs.length * 4 + pairsFor(card).length * 2;
     state.sweep = { card,
       status: `제출 중 — 케이스 ${cases.length}건 × 런 ~${nRuns}`,
-      result: null, error: null };
+      result: null, error: null, submitted: true };
     renderSweep();
     runStatus(state.sweep.status);
     try {
@@ -1214,6 +1237,10 @@ export function render() {
           `스윕 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`;
         sweepStatusLine.textContent = state.sweep.status;
         runStatus(state.sweep.status);
+        // 구간 경향의 빈 상태가 그 status를 문장에 끼워 넣는다 — 여기서 안 부르면
+        // 5분짜리 스윕이 도는 내내 제출 시점 문구를 붙들고 있고 옆 서랍만 움직인다.
+        // (돌고 있는 동안 이 서랍은 항상 빈 갈래라 텍스트 한 줄 교체가 전부다)
+        renderTrend();
       });
       if (done.status !== "done") {
         state.sweep.status = `스윕 ${done.status} — 완료 런은 보존된다`;
@@ -1236,6 +1263,9 @@ export function render() {
 
   function renderSweep() {
     renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
+    // 같은 런에서 나오는 두 표면 — 한쪽만 갱신하면 서로 다른 스윕을 말한다.
+    // 아래에 여러 조기 반환(오류·결과 없음)이 있으므로 **맨 앞**이어야 전부 덮는다
+    renderTrend();
     clear(sweepBox);
     const s = state.sweep;
     sweepStatusLine.textContent = s?.status ?? "";
@@ -1312,7 +1342,8 @@ export function render() {
     sweepBox.append(
       el("p", { class: "hint", style: "margin:6px 0 0" },
         "기준은 같은 케이스의 base 런이고 괄호 안이 Δ다 — " +
-        "행마다 형상 지문이 계보로 저장되어 있다."),
+        "행마다 형상 지문이 계보로 저장되어 있다. " +
+        "이 행들을 구간 × 지표 한 장으로 접은 것이 「구간 경향」 칩이다."),
     );
     if (res.nonadditivity?.length) {
       sweepBox.append(
@@ -1338,6 +1369,277 @@ export function render() {
     for (const w of [...(res.warnings ?? []), ...(res.notes ?? [])]) {
       sweepBox.append(el("p", { style: `margin:4px 0;font-size:12px;color:${WARN_INK}` }, `⚠ ${w}`));
     }
+  }
+
+  // ── 구간 경향 (3단 C) — 손잡이 하나가 **전 구간**을 어느 쪽으로 미는가 ────
+  //
+  // 3단 B는 이 질문에 답하지 못했다. 요약 표는 런별 **최악 한 칸**만 내고(어디가
+  // 제일 나쁜지는 알지만 엔벨로프를 따라 어느 쪽으로 기우는지는 모른다), 케이스×런
+  // 전체 표는 사실을 다 갖고도 15케이스 × 9런 = 135행이라 경향이 행 사이에 흩어진다
+  // — 사람이 눈으로 피벗해야 했다. 여기서는 **행이 구간**이라 세로로 한 번 훑으면
+  // "이 게인을 올리면 저고도에서만 좋아지고 고고도에서는 나빠진다"가 그대로 읽힌다.
+  //
+  // 새로 재지 않는다: 3단 B가 이미 돈 런을 다시 세울 뿐이라 잡도 비용도 없다.
+  // 그래서 서랍을 열기만 하면 즉시 뜬다(스캔·스윕과 달리 실행 버튼이 없다).
+  const trendHead = el("div");
+  const trendKnobRow = el("div", {
+    class: "row", style: "gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px",
+  });
+  const trendMetricRow = el("div", {
+    class: "row", style: "gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px",
+  });
+  // 서랍 안 순서: 머리 · 손잡이 칩 · ①구간×지표 · 지표 칩 · ②구간×스팬.
+  // 지표 칩이 ①보다 위에 서면 "무엇을 고르는 칩인지"가 그 아래 표와 어긋난다
+  const trendMatrixBox = el("div");
+  const trendSpanBox = el("div");
+  const trendKnobBtns = new Map();
+  const trendMetricBtns = new Map();
+
+  /** 선택 칩 줄 — 목록이 그대로면 **제자리에서** 눌림만 고친다.
+   *
+   * 다시 만들면 방금 누른 버튼이 DOM에서 들려 나가 포커스가 <body>로 떨어지고,
+   * aria-pressed가 바뀌어도 낭독되지 않는다 — 프로세스 뷰 버튼과 같은 이유다.
+   * 이 표는 손잡이·지표를 연달아 눌러 가며 읽는 화면이라 그 손실이 매번 일어난다.
+   */
+  function syncChips(row, btns, items, current, { caption, label, style, onPick }) {
+    const same = btns.size === items.length && items.every((k) => btns.has(k));
+    if (!same) {
+      btns.clear();
+      clear(row);
+      if (items.length) row.append(el("span", { class: "hint" }, caption));
+      for (const k of items) {
+        const b = el("button", { style, onclick: () => onPick(k) }, label(k));
+        btns.set(k, b);
+        row.append(b);
+      }
+    }
+    for (const [k, b] of btns) {
+      const on = k === current;
+      b.className = on ? "primary" : "";
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  }
+
+  // 스팬 라벨 — 「+10%」. 0.1 미만 스팬(사용자 지정)은 한 자리 더 낸다:
+  // 0.5%가 「1%」로 뭉개지면 두 열이 같은 이름을 달고 선다
+  const spanLabel = (s) =>
+    `${s > 0 ? "+" : "−"}${fmtPercent(Math.abs(s), Math.abs(s) < 0.1 ? 1 : 0)}`;
+
+  function renderTrend() {
+    clear(trendHead);
+    clear(trendMatrixBox);
+    clear(trendSpanBox);
+    const res = state.sweep?.result;
+    const knobs = res?.rows?.length ? sweepKnobs(res.rows) : [];
+    const noChips = { caption: "", label: (k) => k, style: "", onPick: () => {} };
+    if (!knobs.length) {
+      syncChips(trendKnobRow, trendKnobBtns, [], null, noChips);
+      syncChips(trendMetricRow, trendMetricBtns, [], null, noChips);
+      // 빈 이유 다섯은 **다른 사실**이다 — 뭉치면 지금 도는 스윕을 두고 "돌리면
+      // 채워진다"고 하고, 실패한 스윕을 두고 "아직 없다"고 한다(v0.50이 판독대에서
+      // 이미 한 번 고친 거짓말이다: 실패는 안 잰 것이 아니다).
+      //
+      // 마지막 갈래는 **상태를 단언하지 않는다.** "도는 중이다"라고 쓰면 종료된
+      // 스윕까지 덮는다: 전 케이스 트림 미수렴은 `rows: []`로 **완료**되고, 제출
+      // 직후 취소는 result_id 없이 끝난다 — 둘 다 error도 result도 없는 자리라
+      // 「스윕이 도는 중이다 (완료)」 같은 자기모순이 나온다. 상태 문자열은 그대로
+      // 보여 주되 그 해석은 status에 맡긴다
+      const sw = state.sweep;
+      const why = res?.rows?.length
+        // 쌍 런만 돈 스윕 — 사실이 없는 것이 아니라 **이 표의 주어가 없는** 것이다
+        ? "단독 런이 없다 — 이 스윕은 쌍 런(A&B)만 돌았다. 두 손잡이가 같이 움직인 Δ를 "
+          + "한쪽의 경향으로 읽으면 귀속이 틀리므로 여기서는 세우지 않는다."
+        // 제출 불가는 **정말 안 잰 것**이다 — 잡이 뜬 적이 없다. 돌다가 깨진 것과
+        // 같은 문장으로 묶으면 "안 잰 것이 아니다"가 거짓말이 된다
+        : sw?.error
+          ? (sw.submitted
+            ? "스윕이 돌다가 실패했다 — 안 잰 것이 아니다. 사유는 「스캔·스윕 Δ」 서랍에 "
+              + "있고, 다시 돌리면 여기가 채워진다."
+            : "스윕이 제출되지 않았다 — 아직 재지 않았다. 사유는 「스캔·스윕 Δ」 서랍에 "
+              + "있고, 고쳐서 다시 누르면 여기가 채워진다.")
+          : res
+            ? "스윕은 끝났는데 행이 0건이다 — 케이스가 하나도 안 돌았다(전 케이스 트림 "
+              + "미수렴 등). 사유는 「스캔·스윕 Δ」 서랍의 경고에 있다."
+            : sw
+              ? `스윕 상태: ${sw.status} — 결과가 저장되면 여기가 채워진다. `
+                + "이 표는 새로 재지 않는다: 그 런을 구간별로 다시 세울 뿐이다."
+              : "아직 없다 — 「진단·처방」에서 [이 부분공간 스윕 (3단 B)]을 돌리면 여기가 "
+                + "채워진다. 이 표는 새로 재지 않는다: 3단 B가 이미 돈 런을 구간별로 "
+                + "다시 세울 뿐이다.";
+      trendHead.append(el("p", { class: "hint", style: "margin:0" }, why));
+      return;
+    }
+    const knob = knobs.includes(state.trendKnob) ? state.trendKnob : knobs[0];
+    state.trendKnob = knob;
+    const tm = trendMatrix(res.rows, knob);
+    syncChips(trendKnobRow, trendKnobBtns, knobs, knob, {
+      caption: "손잡이", label: (k) => k, style: mono(),
+      onPick: (k) => { state.trendKnob = k; renderTrend(); },
+    });
+
+    const stale = staleOf(res);
+    trendHead.append(
+      el("h3", { style: "margin:0 0 4px;font-size:14px" },
+        `구간 경향 (3단 C) — 구간 ${tm.cases.length}건 × 스팬 ${tm.points.length}점 `
+        + `(${tm.points.map((p) => spanLabel(p.span)).join(" · ")})`),
+      el("p", { class: "hint", style: "margin:0" },
+        "행이 구간이고 열이 지표다. 색은 방향이 아니라 **좋고 나쁨**이다 — 같은 ↑가 "
+        + "실속마진에서는 개선이고 추종 RMS에서는 악화다. 기호는 색과 별도로 읽힌다."),
+      el("p", { class: "hint", style: "margin:4px 0 0" },
+        "이 표의 구간은 스윕이 **실제로 돈** 케이스뿐이다 — 3단 A에서 결함 케이스로 "
+        + "좁혔다면 격자 전체가 아니다. 격자 전체의 base 지표는 스캔 표가 들고 있다."),
+    );
+    // el()과 달리 Node.append는 null을 **문자열 "null"로 붙인다** — 조건부 줄은
+    // 삼항으로 넘기지 말고 여기서 가른다 (라이브에서 머리에 "null"이 찍혔다)
+    if (stale) {
+      trendHead.append(el("p", { style: `margin:4px 0 0;font-size:12px;color:${WARN_INK}` },
+        `⚠ 이 수치는 형상 ${stale}에서 잰 것이다 — 지금 형상(${state.model?.fingerprint})과 `
+        + "다르므로 다시 재야 한다."));
+    }
+
+    // 세울 지표가 **하나도 없으면** 여기서 끝낸다. 두 가지가 걸려 있다:
+    // ① 없는 지표로 아래 ②를 지으려 들면 TypeError인데, renderTrend는 마운트에서
+    //    불리므로 그 예외가 renderTabCounts·renderDrawer를 건너뛰어 **탭 전체가 안
+    //    그려진다**(이 서랍만 비는 것이 아니다) ② 표를 먼저 짓고 나서 막으면 데이터
+    //    열 0개에 합계 꼬리만 달린 껍데기가 남는다. 일부 지표가 판정 불가인 경우는
+    //    아래 unmeasured가 이미 사유로 내고 있었고, 전부인 경우만 무방비였다
+    if (!tm.metrics.length) {
+      syncChips(trendMetricRow, trendMetricBtns, [], null, noChips);
+      trendMatrixBox.append(el("p", { class: "hint", style: "margin:12px 0 0" },
+        "이 손잡이로 세울 지표가 하나도 없다 — 전 구간에서 잰 값이 없다. "
+        + "스윕이 케이스를 하나도 못 끝냈거나(취소·발산) 저장된 런에 지표가 없다."
+        + (tm.unmeasured.length
+          ? ` 값이 없는 지표: ${tm.unmeasured.map(metricLabel).join(", ")}.` : "")));
+      return;
+    }
+
+    // ① 구간 × 지표 — 이 서랍의 「한눈에」. 칸 하나가 그 구간에서 이 지표가 어느
+    //    쪽으로 가는지(기호·색)와 얼마나 가는지(+10%당 변화)를 함께 낸다
+    const better = (k) => metricDef(k)?.better;
+    const markCell = (t, k, text, title) => el("span", {
+      style: `white-space:nowrap;color:${trendInk(t, better(k))}`, title,
+    }, el("strong", {}, TREND_MARK[t]), text ? ` ${text}` : "");
+    trendMatrixBox.append(
+      el("div", { class: "scroll-x", style: "margin-top:12px" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            [el("th", {}, "구간"),
+             tm.metrics.map((k) => el("th", { title: metricDef(k)?.desc ?? null },
+               metricLabel(k),
+               // 단위는 장식이 아니라 이 열의 수를 읽는 법이다 — inkFaint(30%)로
+               // 두면 헤더가 「+10%당」만 읽히고 [rad]·[m]이 사라진다
+               el("div", { style: `font-weight:400;color:${SKIN.inkDim}` },
+                 `+10%당${metricUnit(k) ? ` [${metricUnit(k)}]` : ""}`)))])),
+          el("tbody", {}, tm.cases.map((c) =>
+            el("tr", {},
+              el("td", { style: "white-space:nowrap" },
+                el("code", { style: mono() }, c.name),
+                // 잘린 런·안 돈 런이 섞인 구간은 곡선이 아니라 서로 다른 실험의
+                // 나열이다 — 경향은 그대로 내되 그 사실을 행에 붙인다
+                c.aborted.length
+                  ? el("span", { style: `color:${WARN_INK};font-size:11px;margin-left:6px`,
+                      title: `발산으로 잘린 런: ${c.aborted.join(", ")}` },
+                      `발산 ${c.aborted.length}`)
+                  : null,
+                c.missing.length
+                  ? el("span", { style: `color:${SKIN.inkFaint};font-size:11px;margin-left:6px`,
+                      title: `안 돈 런: ${c.missing.join(", ")}` },
+                      `미실행 ${c.missing.length}`)
+                  : null),
+              tm.metrics.map((k) => {
+                const cell = c.cells[k];
+                return el("td", { class: "num" }, markCell(cell.trend, k,
+                  cell.slope == null ? "" : fmtChange(cell.slope, cell.rel, metricUnit(k)),
+                  cell.reason ?? `${TREND_LABEL[cell.trend]} · +10%당 `
+                    + `${fmtSigned(cell.slope)}${metricUnit(k) ? ` ${metricUnit(k)}` : ""}`
+                    + ` · 폭 ${fmtDelta(cell.swing)}`));
+              }),
+            ))),
+          // 열 하나를 세로로 다 훑지 않아도 그 지표의 전 구간 판정이 여기 선다
+          el("tfoot", {}, el("tr", {},
+            [el("th", {}, `합계 (구간 ${tm.cases.length})`),
+             tm.metrics.map((k) => el("td", { class: "num" },
+               Object.entries(tm.counts[k]).filter(([, n]) => n).map(([t, n]) =>
+                 el("span", { style: `margin-left:8px;color:${trendInk(t, better(k))}`,
+                   title: TREND_LABEL[t] }, `${TREND_MARK[t]}${n}`))))])),
+        )),
+    );
+    if (tm.unmeasured.length) {
+      trendMatrixBox.append(el("p", { class: "hint", style: "margin:6px 0 0" },
+        `전 구간 판정 불가라 열에서 뺀 지표: ${tm.unmeasured.map(metricLabel).join(", ")} — `
+        + "표준 진단 기동에는 접지도 웨이포인트도 없다. 「—」 열로 표를 채우는 대신 "
+        + "여기 이름으로 남긴다(없는 지표가 아니라 이 기동이 못 재는 지표다)."));
+    }
+
+    // ② 지표 하나의 구간 × 스팬 — ①이 접은 곡선을 그대로 펼친 자리.
+    //    ①은 기울기 한 수라 "어디서 꺾이는지"를 말할 수 없다
+    const rank = (k) => Math.max(0, ...tm.cases.map((c) => Math.abs(c.cells[k].rel ?? 0)));
+    const metric = tm.metrics.includes(state.trendMetric)
+      ? state.trendMetric
+      // 기본은 이 손잡이가 **가장 세게 미는** 지표 — 첫 화면이 곧 답인 경우가 많다
+      : tm.metrics.reduce((a, b) => (rank(b) > rank(a) ? b : a), tm.metrics[0]);
+    state.trendMetric = metric;
+    syncChips(trendMetricRow, trendMetricBtns, tm.metrics, metric, {
+      caption: "펼쳐 볼 지표", label: metricLabel, style: "",
+      onPick: (k) => { state.trendMetric = k; renderTrend(); },
+    });
+    // 자릿수·표기는 **표마다 하나**다 (열마다 하나인 스윕 표의 확장) — 열이 전부
+    // 같은 지표라, 열마다 따로 정하면 같은 값이 스팬 열마다 다르게 찍힌다
+    const fmt = columnFormat(tm.cases.flatMap((c) =>
+      c.cells[metric].values.map((v) => [c.cells[metric].base, v])));
+    const unit = metricUnit(metric);
+    trendSpanBox.append(
+      el("h3", { style: "margin:14px 0 4px;font-size:14px" },
+        `${metricLabel(metric)} — 구간 × 스팬${unit ? ` [${unit}]` : ""}`),
+      el("div", { class: "scroll-x" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            [el("th", {}, "구간"),
+             el("th", {}, "기준"),
+             tm.points.map((p) => el("th", {},
+               spanLabel(p.span),
+               // 손잡이가 그때 실제로 놓인 값 — 두 열의 값이 같으면 범위 클립이다
+               // (사유는 아래 스윕 서랍의 엔진 notes가 낸다)
+               el("div", { style: `font-weight:400;color:${SKIN.inkDim};${mono()}` },
+                 `=${fmtDelta(p.knobValue)}`))),
+             el("th", {}, "경향"),
+             el("th", {}, "감도 (+10%당)")])),
+          el("tbody", {}, tm.cases.map((c) => {
+            const cell = c.cells[metric];
+            return el("tr", {},
+              el("td", {}, el("code", { style: mono() }, c.name)),
+              el("td", { class: "num", style: `color:${SKIN.inkDim}` },
+                cell.base == null
+                  ? fmtDelta(cell.rawBase) : fmtPair(cell.base, cell.base, fmt)[0]),
+              // 유한값이 없으면 **서버가 준 것**을 그대로 낸다 — fmtDelta가 "inf"를
+              // ∞로 찍는다. 발산한 런의 자리를 「—」로 적으면 같은 행의 「발산」
+              // 배지와 정반대를 말한다(값이 없는 것과 ∞인 것은 다른 사실이다)
+              cell.values.map((v, i) => el("td", { class: "num" },
+                v == null ? fmtDelta(cell.raw[i]) : el("span", {},
+                  fmtPair(cell.base ?? v, v, fmt)[1],
+                  cell.base == null ? null
+                    : el("div", { style: `font-size:11px;color:${SKIN.inkDim}` },
+                        fmtSigned(v - cell.base))))),
+              el("td", {}, markCell(cell.trend, metric, TREND_LABEL[cell.trend],
+                cell.reason)),
+              // 퍼센트 줄은 **읽힐 때만** 붙인다 — 0은 「−0.0%」로 찍혀 0에 방향이
+              // 생기고, 0.1% 미만은 「±0.0%」로 뭉개져 "안 변했다"고 거짓말한다
+              // (fmtChange가 절대 Δ로 갈아타는 바로 그 문턱 — 손으로 다시 찍으면서
+              // 그 규칙만 빠져 있었다). 절대값은 바로 위 줄이 이미 낸다
+              el("td", { class: "num" }, cell.slope == null ? "—" : el("span", {},
+                `${fmtSigned(cell.slope)}${unit ? ` ${unit}` : ""}`,
+                relReadable(cell.rel)
+                  ? el("div", { style: `font-size:11px;color:${SKIN.inkDim}` },
+                      fmtRel(cell.rel))
+                  : null)),
+            );
+          })),
+        )),
+      el("p", { class: "hint", style: "margin:6px 0 0" },
+        "값 아래 작은 수는 같은 구간 기준(base 런) 대비 Δ다. 감도는 기준을 포함한 "
+        + "점들의 최소제곱 기울기라 **비단조 행에서는 평균일 뿐**이다 — 그 행은 "
+        + "위 스팬 값을 직접 읽어야 어디서 꺾이는지가 보인다."),
+    );
   }
 
   // ── 서랍 — 그래프 아래는 전부 여기 들어간다 (한 번에 하나) ────────────────
@@ -1413,6 +1715,13 @@ export function render() {
           : el("p", { class: "hint", style: "margin:0" },
               "아직 없다 — 「진단·처방」에서 [전 케이스 스캔]으로 결함 케이스를 좁힌 뒤 " +
               "처방 카드의 [이 부분공간 스윕]을 누른다. 여기가 폐루프 실측이다.")] },
+    // 같은 스윕의 두 표면이지만 **묻는 것이 다르다**: 위는 "얼마나"(런별 최악 한 칸),
+    // 여기는 "전 구간에서 어느 쪽으로". 한 서랍에 붙이면 표 넷이 다시 세로로 쌓인다
+    { key: "trend", label: "구간 경향",
+      count: () => (state.sweep?.result?.rows?.length
+        ? sweepKnobs(state.sweep.result.rows).length || null : null),
+      build: () => [trendHead, trendKnobRow, trendMatrixBox,
+        trendMetricRow, trendSpanBox] },
     // 경고는 **있을 때만** 칩이 선다 — 항상 서 있으면 0을 세는 칩이 되고,
     // 그러면 경고가 생겼다는 사실 자체가 화면에서 안 보인다.
     // 범례는 여기 없다: 색이 칠해진 그래프가 늘 떠 있는데 범례를 클릭 뒤로 숨기면
@@ -1489,7 +1798,10 @@ export function render() {
   if (state.diag) renderDiag();
   if (state.openloop?.result) renderOpenloop();
   if (state.scan) renderScan();
+  // 스윕이 있으면 renderSweep이 renderTrend까지 부른다. 없어도 한 번은 불러야
+  // 서랍이 **왜 비었는지**를 말한다 (안 부르면 첫 방문에 빈 서랍이 열린다)
   if (state.sweep) renderSweep();
+  else renderTrend();
   renderTabCounts();
   renderDrawer();
 

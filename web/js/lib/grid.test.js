@@ -2,7 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { machRange, nameCases, parseNumberList, serpentineCases } from "./grid.js";
+import {
+  machRange, nameCases, orderCaseNames, parseCaseName, parseNumberList, serpentineCases,
+} from "./grid.js";
 
 test("machRange: 부동소수 오차 없는 등간격", () => {
   assert.deepEqual(machRange(0.4, 0.8, 0.1), [0.4, 0.5, 0.6, 0.7, 0.8]);
@@ -50,6 +52,37 @@ test("nameCases: 중복 이름은 던진다 — 겹친 이름은 Δ의 base 귀�
   assert.throws(
     () => nameCases(serpentineCases([0.5], [1000, 1000], [200])),
     /케이스 이름 중복/);
+});
+
+test("parseCaseName: nameCases의 역함수 — 형식이 아니면 null", () => {
+  assert.deepEqual(parseCaseName("M0.5_h1000_f200"), { mach: 0.5, alt: 1000, fuel: 200 });
+  assert.deepEqual(parseCaseName("M0.005_h-50_f200"), { mach: 0.005, alt: -50, fuel: 200 });
+  // 왕복 — 이름이 값 그대로라는 nameCases의 계약이 되읽기에서도 성립해야 한다
+  for (const c of nameCases(serpentineCases(machRange(0.4, 0.8, 0.005), [100, 3000], [200]))) {
+    assert.deepEqual(parseCaseName(c.name), { mach: c.mach, alt: c.alt, fuel: c.fuel });
+  }
+  for (const bad of ["", "base", "M0.5_h1000", "손으로_지은_이름", null]) {
+    assert.equal(parseCaseName(bad), null);
+  }
+});
+
+test("orderCaseNames: 표는 (fuel, alt, mach) 순 — 서펜타인은 실행 순서지 읽는 순서가 아니다", () => {
+  const names = nameCases(serpentineCases([0.4, 0.5, 0.6], [100, 1000], [200])).map((c) => c.name);
+  // 실행 순서는 둘째 줄이 뒤집혀 있다 (인접 트림 시드)
+  assert.equal(names[3], "M0.6_h1000_f200");
+  assert.deepEqual(orderCaseNames(names), [
+    "M0.4_h100_f200", "M0.5_h100_f200", "M0.6_h100_f200",
+    "M0.4_h1000_f200", "M0.5_h1000_f200", "M0.6_h1000_f200",
+  ]);
+  // 원본은 건드리지 않는다 — 부른 쪽의 실행 순서가 정렬로 사라지면 안 된다
+  assert.equal(names[3], "M0.6_h1000_f200");
+});
+
+test("orderCaseNames: 하나라도 못 읽으면 **전부** 원래 순서 — 절반 정렬은 비일관 비교자다", () => {
+  const mixed = ["M0.6_h100_f200", "손으로_지은_이름", "M0.4_h100_f200"];
+  assert.deepEqual(orderCaseNames(mixed), mixed);
+  assert.deepEqual(orderCaseNames([]), []);
+  assert.deepEqual(orderCaseNames(undefined), []);
 });
 
 test("parseNumberList: 콤마·공백 구분, 비수치 거부", () => {

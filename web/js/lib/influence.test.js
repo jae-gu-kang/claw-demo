@@ -7,8 +7,10 @@ import {
   KNOB_CLASS, byImpact, columnFormat, coneOf, diagnoseRequest, edgeVia, fmtChange,
   fmtDelta, fmtPair, fmtPercent, fmtSigned, impactRank, logScale, pairDigits,
   nodeDetail, normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor,
-  paramState, probeTransition, radiusOf, rampColor, relOf, scanRequest,
-  scanSummary, structuralRequest, sweepCases, sweepRequest, worstTransitions,
+  paramState, probeTransition, radiusOf, rampColor, relOf, relReadable, fmtRel,
+  scanRequest, scanSummary, structuralRequest, sweepCases, sweepKnobs, sweepRequest,
+  trendInk, trendMatrix, worstTransitions,
+  BAD_INK, GOOD_INK, SKIN, TREND_LABEL, TREND_MARK, WARN_INK,
 } from "./influence.js";
 
 const payload = {
@@ -371,6 +373,20 @@ test("fmtChange: 「+0.0%」로 반올림될 변화는 절대 Δ로 말한다", 
   assert.equal(fmtChange(0, null, ""), "0");
 });
 
+test("relReadable: 퍼센트를 손으로 찍는 자리가 같은 문턱을 쓰게 — 0에 「−」가 붙지 않게", () => {
+  // 0은 방향이 없다 — `rel > 0 ? "+" : "−"`를 그냥 쓰면 「−0.0%」가 찍힌다
+  assert.equal(relReadable(0), false);
+  assert.equal(relReadable(null), false);
+  assert.equal(relReadable(0.0009), false);   // 「+0.0%」로 뭉개지는 구간
+  assert.equal(relReadable(-0.0232), true);
+  assert.equal(fmtRel(0.0232), "+2.3%");
+  assert.equal(fmtRel(-0.0232), "−2.3%");     // U+2212
+  // fmtChange가 갈아타는 문턱과 **같은 하나**여야 한다 (두 곳이 갈리면 안 된다)
+  for (const r of [0, 0.0005, 0.0009, 0.001, 0.02, -0.0009, -0.001]) {
+    assert.equal(fmtChange(1, r, "").includes("%"), relReadable(r), `rel=${r}`);
+  }
+});
+
 test("impactRank: 안 움직인 지표가 움직인 지표보다 앞에 서지 않는다", () => {
   // 라이브 회귀: relOf가 null(기준 0 → 0)을 내는데 Math.abs(null ?? -1)이 1이라,
   // 0→0인 엔벨로프 이탈·타면 포화·리미터 작동이 상위 3줄을 차지하고 실제로 움직인
@@ -532,4 +548,211 @@ test("nodeDetail: 서버가 실어 준 것부터 — 블록 파라미터 값이 
   assert.match(nodeDetail({ kind: "output" }), /법칙 출력/);
   assert.equal(nodeDetail({ kind: "input" }), "법칙 입력");
   assert.equal(nodeDetail(null), "");
+});
+
+// ── 구간 경향 (3단 C) ──────────────────────────────────────────────────────
+
+const close = (a, b) => Math.abs(a - b) < 1e-9;
+
+/** 스윕 런 한 행 — 서버 저장본(routes/influence.py)의 모양 그대로. */
+const row = (caseName, label, knobValue, metrics, extra = {}) => ({
+  case: caseName, label,
+  role: label === "base" ? "base" : "single",
+  overrides: label === "base" ? {} : { k: knobValue },
+  metrics, aborted: false, ...extra,
+});
+
+/** 한 구간의 다섯 점 — 기준 뒤 −20·−10·+10·+20% (스팬 순이 아니라 실행 순으로 싣는다). */
+const caseRows = (name, alt, spd, lim) => [
+  row(name, "base", null, { alt_rms: alt[2], spd_rms: spd[2], limiter_frac: lim, xtrack_rms: null }),
+  row(name, "k@-0.2", 0.8, { alt_rms: alt[0], spd_rms: spd[0], limiter_frac: lim, xtrack_rms: null }),
+  row(name, "k@-0.1", 0.9, { alt_rms: alt[1], spd_rms: spd[1], limiter_frac: lim, xtrack_rms: null }),
+  row(name, "k@+0.1", 1.1, { alt_rms: alt[3], spd_rms: spd[3], limiter_frac: lim, xtrack_rms: null }),
+  row(name, "k@+0.2", 1.2, { alt_rms: alt[4], spd_rms: spd[4], limiter_frac: lim, xtrack_rms: null }),
+];
+
+const NIL = [null, null, null, null, null];
+
+test("trendMatrix: 단조·비단조·평탄·판정 불가를 구분한다 — 넷을 뭉치면 표가 답을 못 낸다", () => {
+  const rows = [
+    ...caseRows("M0.4_h100_f200", [12, 11, 10, 9, 8], [null, null, 5, null, null], 0),
+    ...caseRows("M0.6_h100_f200", [9, 9.5, 10, 9.5, 9], [null, null, 5, null, null], 0),
+  ];
+  const tm = trendMatrix(rows, "k");
+  assert.deepEqual(tm.points.map((p) => p.span), [-0.2, -0.1, 0.1, 0.2]);
+  assert.deepEqual(tm.points.map((p) => p.knobValue), [0.8, 0.9, 1.1, 1.2]);
+
+  const [c1, c2] = tm.cases;
+  // 스팬이 커질수록 줄어든다 — 게인을 올리면 이 구간의 고도 RMS가 내려간다
+  assert.equal(c1.cells.alt_rms.trend, "down");
+  assert.ok(close(c1.cells.alt_rms.slope, -1)); // +10%당 −1 m (최소제곱)
+  assert.ok(close(c1.cells.alt_rms.rel, -0.1)); // 기준 10 m 대비 −10%
+  assert.ok(close(c1.cells.alt_rms.swing, 4));
+  assert.deepEqual(c1.cells.alt_rms.values, [12, 11, 9, 8]);
+  assert.equal(c1.cells.alt_rms.base, 10);
+
+  // 양끝이 내려가고 가운데가 솟았다 — 스팬 안에 극점이 있다는 사실이 "단조"로
+  // 접히면 안 된다 (회귀 기울기 부호로 판정하면 여기서 0에 가까워 '평탄'이 된다)
+  assert.equal(c2.cells.alt_rms.trend, "mixed");
+  assert.ok(close(c2.cells.alt_rms.swing, 1));
+
+  // 기준만 있고 흔든 런의 값이 전부 없다 — "안 변했다"가 아니라 판정 불가다
+  assert.equal(c1.cells.spd_rms.trend, "none");
+  assert.equal(c1.cells.spd_rms.slope, null);
+  assert.match(c1.cells.spd_rms.reason, /기준 하나뿐/);
+
+  // 전 점이 같은 값 — 이건 판정 불가가 아니라 "이 손잡이가 이 지표를 안 움직인다"
+  assert.equal(c1.cells.limiter_frac.trend, "flat");
+  assert.equal(c1.cells.limiter_frac.slope, 0);
+  assert.equal(c1.cells.limiter_frac.swing, 0);
+  assert.equal(c1.cells.limiter_frac.rel, null); // 기준 0 — 비율이 없다(relOf 규약)
+
+  // 전 구간 전부 없는 지표는 「—」 열로 표를 채우지 않고 따로 이름을 낸다
+  assert.deepEqual(tm.metrics, ["alt_rms", "spd_rms", "limiter_frac"]);
+  assert.deepEqual(tm.unmeasured, ["xtrack_rms"]);
+
+  assert.deepEqual(tm.counts.alt_rms, { up: 0, down: 1, mixed: 1, flat: 0, none: 0 });
+  assert.deepEqual(tm.counts.spd_rms, { up: 0, down: 0, mixed: 0, flat: 0, none: 2 });
+  assert.deepEqual(tm.total, { up: 0, down: 1, mixed: 1, flat: 2, none: 2 });
+});
+
+test("trendMatrix: 평탄한 지표의 기울기는 **정확히 0** — 회귀 반올림이 안 움직인 값을 움직였다고 말하지 않게", () => {
+  // 실측(server_data/0bdf5c4be9f6): 실속마진이 네 스팬에서 전부 같은데 회귀가
+  // 7.7e−34를 냈고, 화면은 그 수를 그대로 찍었다 — 0이 아닌 수는 "움직였다"로 읽힌다
+  const v = 0.23790136464742842;
+  const rows = caseRows("M0.5_h1000_f200", [v, v, v, v, v], NIL, 0);
+  const cell = trendMatrix(rows, "k").cases[0].cells.alt_rms;
+  assert.equal(cell.trend, "flat");
+  assert.equal(cell.slope, 0);
+  assert.equal(cell.rel, 0);
+});
+
+test("trendMatrix: 1 ulp 차이로 판정이 뒤집히지 않는다 — 반올림 잡음은 신호가 아니다", () => {
+  const v = 31.234567890123;
+  const up1 = v + Number.EPSILON * v;   // 마지막 자리 하나
+  // 순수 부호 판정이면 [v, v+1ulp, v] 는 「비단조」 — 이 표에서 가장 센 판정이
+  // 부동소수 끝자리로 선다. 가운데만 솟은 모양이라 단조로도 못 접힌다
+  const noisy = trendMatrix(
+    caseRows("M0.5_h1000_f200", [v, up1, v, up1, v], NIL, 0), "k").cases[0];
+  assert.equal(noisy.cells.alt_rms.trend, "flat");
+  assert.equal(noisy.cells.alt_rms.slope, 0);
+  // 문턱은 **상대**다 — 값이 작아도 실제 신호는 그대로 잡힌다 (상대 1e-4대)
+  const real = trendMatrix(
+    caseRows("M0.5_h1000_f200",
+      [0.2102, 0.2096, 0.2091, 0.2088, 0.2085], NIL, 0), "k").cases[0];
+  assert.equal(real.cells.alt_rms.trend, "down");
+});
+
+test("trendMatrix: 문턱은 **상대**다 — 절대 상수면 큰 값에서 잡음을, 작은 값에서 신호를 잘못 읽는다", () => {
+  const trend = (vals) =>
+    trendMatrix(caseRows("M0.5_h1000_f200", vals, NIL, 0), "k").cases[0].cells.alt_rms.trend;
+  // **변형을 잡는 줄은 이쪽이다**: 1e6대에서 1e-7 차이는 상대 1e-13(잡음)이지만
+  // 절대값으로는 1e-12보다 크다 — `scale *`를 떼면 여기가 「비단조」로 빨개진다
+  assert.equal(trend([1e6, 1e6 + 1e-7, 1e6, 1e6 - 1e-7, 1e6]), "flat");
+  // 아래 줄은 반대 방향의 가드다 — 상대 1e-3짜리 **신호**가 문턱에 삼켜지지 않는지.
+  // 다만 이 줄이 막는 것은 큰 절대 상수(≥5e-7)뿐이다: 절대 1e-12로 바꿔도 5e-7
+  // 차분은 그대로 잡히므로, 이 줄만으로 상대성이 고정된다고 읽으면 안 된다
+  assert.equal(trend([3e-6, 2.5e-6, 2e-6, 1.5e-6, 1e-6]), "down");
+});
+
+test("trendMatrix: ∞는 곡선에서 빼되 **화면에서는 지우지 않는다** — 발산과 미계측은 다르다", () => {
+  // 서버는 ±inf를 "inf"/"-inf" 문자열로 준다 (serialize 정책, fmtDelta가 ∞로 찍는다)
+  const rows = caseRows("M0.5_h1000_f200", [12, "inf", 10, 9, 8], NIL, 0);
+  const cell = trendMatrix(rows, "k").cases[0].cells.alt_rms;
+  // 곡선 점에서는 빠진다 — 차분이 ±∞·NaN이라 세울 수 없다
+  assert.deepEqual(cell.values, [12, null, 9, 8]);
+  // 그러나 서버가 준 값은 그대로 남는다 (화면이 「—」 대신 ∞를 찍는 근거)
+  assert.deepEqual(cell.raw, [12, "inf", 9, 8]);
+  assert.equal(cell.nonfinite, true);
+  assert.equal(cell.trend, "down");
+
+  // 기준은 멀쩡하고 섭동만 발산 — 이 기능이 겨냥하는 바로 그 시나리오다.
+  // 「기준」열에 값이 찍혀 있는데 사유가 "세울 점이 없다"면 표가 자기와 어긋난다
+  const soloBase = trendMatrix(
+    caseRows("M0.5_h1000_f200", ["inf", "inf", 10, "inf", "inf"], NIL, 0), "k")
+    .cases[0].cells.alt_rms;
+  assert.equal(soloBase.base, 10);
+  assert.match(soloBase.reason, /기준 하나뿐/);
+  assert.match(soloBase.reason, /∞/);       // 어느 쪽이 발산했는지까지 말한다
+  assert.ok(!/세울 점이 없다/.test(soloBase.reason));
+
+  // 전 점이 ∞면 곡선은 없지만 **잰 지표다** — "이 기동이 못 재는 지표" 목록이 아니다
+  const all = trendMatrix(
+    caseRows("M0.5_h1000_f200", ["inf", "inf", "inf", "inf", "inf"], NIL, 0), "k");
+  assert.ok(all.metrics.includes("alt_rms"));
+  assert.ok(!all.unmeasured.includes("alt_rms"));
+  const c = all.cases[0].cells.alt_rms;
+  assert.equal(c.trend, "none");
+  assert.match(c.reason, /∞/);          // "재지 못했다"가 아니다
+  assert.equal(c.base, null);
+  assert.equal(c.rawBase, "inf");
+});
+
+test("trendMatrix: base 런이 없는 구간의 사유는 「기준이 없다」다 — 「기준 하나뿐」이 아니다", () => {
+  const rows = caseRows("M0.5_h1000_f200", [null, null, 10, 9, null], NIL, 0);
+  rows.shift();  // base 런을 통째로 뺀다 (취소로 잘린 스윕에서 실재한다)
+  const c = trendMatrix(rows, "k").cases[0];
+  assert.deepEqual(c.missing, ["base"]);
+  const cell = c.cells.alt_rms;
+  assert.equal(cell.base, null);
+  assert.equal(cell.trend, "none");     // 섭동 한 점만으로는 방향이 없다
+  assert.match(cell.reason, /기준\(base\) 런의 값이 없다/);
+  assert.equal(cell.rel, null);
+});
+
+test("trendMatrix: 행은 격자 순 — 서펜타인 실행 순서로는 마하가 줄마다 뒤집힌다", () => {
+  const rows = [
+    ...caseRows("M0.4_h100_f200", [1, 1, 1, 1, 1], NIL, 0),
+    ...caseRows("M0.6_h100_f200", [1, 1, 1, 1, 1], NIL, 0),
+    ...caseRows("M0.6_h1000_f200", [1, 1, 1, 1, 1], NIL, 0),  // 둘째 줄은 역순 실행
+    ...caseRows("M0.4_h1000_f200", [1, 1, 1, 1, 1], NIL, 0),
+  ];
+  assert.deepEqual(trendMatrix(rows, "k").cases.map((c) => c.name), [
+    "M0.4_h100_f200", "M0.6_h100_f200", "M0.4_h1000_f200", "M0.6_h1000_f200",
+  ]);
+});
+
+test("trendMatrix: 잘린 런·빠진 런은 행에 남는다 — 없는 점을 0으로 치면 경향이 달라진다", () => {
+  const full = caseRows("M0.6_h100_f200", [12, 11, 10, 9, 8], NIL, 0);
+  const partial = caseRows("M0.4_h100_f200", [12, 11, 10, 9, 8], NIL, 0);
+  partial[1].aborted = true;            // 발산으로 잘린 런
+  const rows = [...partial.slice(0, 4), ...full];  // +0.2는 취소로 아예 안 돌았다
+  const [c1] = trendMatrix(rows, "k").cases;
+  assert.equal(c1.name, "M0.4_h100_f200");
+  assert.deepEqual(c1.aborted, ["k@-0.2"]);
+  assert.deepEqual(c1.missing, ["k@+0.2"]);
+  // 빠진 점은 곡선에서 빠질 뿐 — 남은 네 점(12·11·10·9)으로 판정한다
+  assert.deepEqual(c1.cells.alt_rms.values, [12, 11, 9, null]);
+  assert.equal(c1.cells.alt_rms.trend, "down");
+});
+
+test("sweepKnobs: 단독 런이 있는 손잡이만 — 쌍 런은 한쪽의 경향으로 읽으면 귀속이 틀린다", () => {
+  const rows = [
+    { case: "c1", label: "base", overrides: {}, metrics: {} },
+    { case: "c1", label: "kp@+0.1", overrides: { kp: 1.1 }, metrics: {} },
+    { case: "c1", label: "kp@+0.2", overrides: { kp: 1.2 }, metrics: {} },
+    { case: "c1", label: "ki@+0.1", overrides: { ki: 0.2 }, metrics: {} },
+    { case: "c1", label: "kp&ki@+0.1", overrides: { kp: 1.1, ki: 0.2 }, metrics: {} },
+  ];
+  assert.deepEqual(sweepKnobs(rows), ["kp", "ki"]);  // 런 순서 = 처방 카드 순서
+  assert.deepEqual(sweepKnobs([]), []);
+  assert.deepEqual(sweepKnobs(undefined), []);
+  // 손잡이 이름이 다른 단독 런은 그 손잡이의 스팬 점이 아니다
+  assert.deepEqual(trendMatrix(rows, "kp").points.map((p) => p.span), [0.1, 0.2]);
+});
+
+test("TREND_MARK: 색과 별도로 기호가 경향을 말한다 — 색만이면 흑백에서 표가 무의미해진다", () => {
+  assert.deepEqual(Object.keys(TREND_MARK).sort(), Object.keys(TREND_LABEL).sort());
+  assert.equal(new Set(Object.values(TREND_MARK)).size, Object.keys(TREND_MARK).length);
+});
+
+test("trendInk: 색은 방향이 아니라 좋고 나쁨 — 극성이 없으면 단언하지 않는다", () => {
+  assert.equal(trendInk("up", "lower"), BAD_INK);     // 추종 RMS가 오르면 악화
+  assert.equal(trendInk("up", "higher"), GOOD_INK);   // 실속마진이 오르면 개선
+  assert.equal(trendInk("down", "lower"), GOOD_INK);
+  assert.equal(trendInk("down", "higher"), BAD_INK);
+  assert.equal(trendInk("mixed", "lower"), WARN_INK);
+  assert.equal(trendInk("flat", "lower"), SKIN.inkDim);
+  assert.equal(trendInk("none", "lower"), SKIN.inkFaint);
+  assert.equal(trendInk("up", undefined), SKIN.ink);  // 극성 미상 — 중립
 });
