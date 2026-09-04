@@ -113,11 +113,23 @@ def test_자리를_빼면_상수로_접히고_지문이_바뀐다():
 
 
 def test_전부_끄면_스케줄_파일_자체가_사라진다():
-    """'전부 끔'은 with_schedule=False와 같은 형상 — 룩업도 필터 상태도 남지 않는다."""
+    """'전부 끔'은 with_schedule=False와 같은 형상 — 스케줄 흔적이 남지 않는다.
+
+    종전에는 "fcl_scas.c에 claw_lookup1d가 없다"로 봤다. 그때는 SCAS에 룩업을
+    넣을 수 있는 것이 스케줄뿐이라 정확한 대리 지표였지만, 제어권한 배분의 트림
+    테이블(plant/demo.py)이 **정당하게** 거기 룩업을 하나 넣으면서 어긋났다.
+    스케줄 자체를 본다 — 대리 지표가 아니라.
+
+    이 단정이 초록인 것은 배분이 스케줄과 독립이라는 증거이기도 하다: 배분은
+    필터된 mach가 아니라 원 mach를 읽으므로 스케줄을 꺼도 그대로 산다
+    (fcl/graphs.py `_roll_budget_nodes` 참조).
+    """
     off = _module(with_schedule=False)
     assert "fcl_sched.c" not in off.files
     assert "fcl_sched.h" not in off.files
-    assert "claw_lookup1d" not in off.files["fcl_scas.c"]
+    assert "sched_" not in off.files["fcl_scas.c"], "스케줄 흔적이 SCAS에 남았다"
+    # 배분의 룩업은 남아야 한다 — 없으면 배분이 스케줄에 딸려 꺼진 것이다
+    assert "scas_alloc_trim" in off.files["fcl_scas.c"]
     assert off.fingerprint != _module().fingerprint
 
 
@@ -136,7 +148,9 @@ def test_기본_테이블은_예전과_같다():
     # 감쇠항이 PID의 둘째 입력이 되었다(graphs.py scas_axis_nodes).
     # 앞선 갱신은 단발 전환(DEMO_K_DIFF_THR = 0)이었고, 프로펠러 추력 모델은
     # 순수 플랜트 변경이라 지문을 안 움직였다.
-    assert _module().fingerprint == "8e68f79356f5ef8b"
+    # 이번 갱신은 엘레본 제어권한 배분 — 선회 하중으로 피치 몫을 먼저 떼고 롤이
+    # 나머지를 가져간다. 축 순서가 롤→피치로 바뀌었다 (graphs.py scas3_nodes).
+    assert _module().fingerprint == "3e032f9003b7cc9f"
 
 
 def test_없는_자리를_요구하면_거부한다():

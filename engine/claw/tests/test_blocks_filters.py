@@ -295,3 +295,35 @@ def test_pid_anti_windup_judges_the_axis_output_not_its_own():
     out = PID(**kw).init(0.1); out.reset()
     out.step(-0.2, u_ext)   # 축 = 0.1로 안쪽 → 정상 적분
     assert out._i == pytest.approx(-0.02)
+
+
+def test_pid_dynamic_limits_reach_output_clamp_and_judgement_together():
+    """포트로 받은 한계가 **출력·적분 클램프·안티와인드업 판정 셋 다**에 닿는다.
+
+    엘레본 제어권한 배분이 축 한계를 스텝마다 바꾸는데(fcl/graphs.py), 한쪽만
+    동적이면 출력은 배분을 따르는데 적분 판정은 안 따라 와인드업이 되살아난다 —
+    이 저장소가 이미 한 번 고친 결함이라 그 재발을 여기서 막는다.
+    """
+    pid = PID(kp=1.0, ki=1.0, out_lo=-0.35, out_hi=0.35).init(0.1)
+    pid.reset()
+    # 좁힌 한계(±0.05)로: 출력이 거기 잘리고, 적분도 그 방향으로 안 큰다
+    y = pid.step(0.3, out_lo=-0.05, out_hi=0.05)
+    assert y == pytest.approx(0.05), "출력이 포트 한계를 안 따랐다"
+    assert pid._i == pytest.approx(0.0), "포화인데 적분이 살아남았다 — 판정이 정적 한계를 봤다"
+    # 포트를 안 주면 생성자 값 — 같은 입력이 안 잘린다
+    plain = PID(kp=1.0, ki=1.0, out_lo=-0.35, out_hi=0.35).init(0.1)
+    plain.reset()
+    assert plain.step(0.3) == pytest.approx(0.3)
+    assert plain._i == pytest.approx(0.03)
+
+    # **적분 클램프**도 포트를 봐야 한다 — 위 두 확인은 _i = 0에서 출발하므로
+    # 클램프가 정적 한계를 봐도 안 걸린다. 배분이 만드는 피해는 정확히 이 모양이다:
+    # 예산이 **넓을 때 채워 둔** 적분기를 예산이 좁아진 뒤에도 그대로 들고 있는 것.
+    full = PID(kp=0.0, ki=1.0, out_lo=-0.35, out_hi=0.35).init(0.1)
+    full.reset()
+    for _ in range(40):
+        full.step(1.0)                      # 생성자 한계까지 채운다
+    assert full._i == pytest.approx(0.35), "선행 조건이 안 만들어졌다"
+    full.step(0.0, out_lo=-0.05, out_hi=0.05)   # 예산이 좁아진 순간 (e = 0: 증분 없음)
+    assert full._i == pytest.approx(0.05), (
+        "좁아진 한계로 적분기가 안 내려왔다 — 클램프가 정적 한계를 보고 있다")

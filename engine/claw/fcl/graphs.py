@@ -88,6 +88,7 @@ def scas_axis_nodes(
     gain_ports=None,
     enable=None,
     pid_on_disable=None,
+    limit_ports=None,
 ):
     """SCAS 한 축(`fcl/scas.py:26`)의 노드 목록 → (nodes, 출력 노드 id).
 
@@ -152,7 +153,8 @@ def scas_axis_nodes(
             PID,
             inputs=(err_src,) if damp is None else (err_src, damp),
             params={"kp": kp, "ki": ki, "kd": 0.0, "out_lo": out_lo, "out_hi": out_hi},
-            gains={g: ports[g] for g in ("kp", "ki") if g in ports},
+            gains={**{g: ports[g] for g in ("kp", "ki") if g in ports},
+                   **(limit_ports or {})},
             on_disable=pid_on_disable,
             **common,
         )
@@ -167,9 +169,14 @@ def scas_axis_nodes(
         )
         last = nm("sum")
 
+    # 축 최종 클립. 한계 포트가 붙으면 PID와 **같은 값**을 받는다 — 한쪽만 동적이면
+    # 출력은 배분을 따르는데 적분 판정은 안 따라, 고치려던 와인드업이 되살아난다
     nodes.append(
         Node(nm("sat"), Saturation, inputs=(last,),
-             params={"lo": out_lo, "hi": out_hi}, **common)
+             params={"lo": out_lo, "hi": out_hi},
+             gains={"lo": limit_ports["out_lo"], "hi": limit_ports["out_hi"]}
+             if limit_ports else {},
+             **common)
     )
     return nodes, nm("sat")
 
@@ -189,7 +196,111 @@ def scas_axis_graph(name, *, kp, ki, k_rate, out_lo, out_hi, washout_tau=0.0, sc
 # ── SCAS 3축 ──────────────────────────────────────────────────────────────
 
 
-def scas3_nodes(prefix, *, pitch, roll, yaw, srcs, gain_ports=None):
+# ── 엘레본 제어권한 배분 ──────────────────────────────────────────────────
+#
+# 델타윙은 피치와 롤이 **같은 네 면을 나눠 쓴다**. 배분이 없으면 믹서가 δe ± δa를
+# 자르고, 잘린 사실을 두 축 모두 모른 채 적분한다 — 명령이 기체에 안 닿는데 적분기는
+# 계속 찬다. 실측(스트레스 트레이스): 클립 12254건이 **전부 한쪽 면만** 잘렸고
+# (좌우 동시 0건), 그때 |δe| 평균 19.93°(한계 20.05°)에 |δa| 평균 1.39°였다.
+# 대등한 경합이 아니라 피치가 예산을 다 쓰고 롤의 1.4°가 밀려나는 모양이다.
+#
+# 배분 원칙은 **실속방지 몫을 먼저, 남은 것을 롤 수요에 따라**:
+#
+#     R        = clip(k · n(φ_cmd), 0, f·B)       피치 몫을 먼저 뗀다 (n = 1/cos φ_cmd)
+#     δa_eff   = clip(δa, ±(B − R))               롤은 그 몫을 못 건드린다
+#     δe_lim   = B − |δa_eff|                     피치는 롤이 **실제로 쓴** 나머지 전부
+#
+# 이 배분 뒤에는 |δe_eff| + |δa_eff| ≤ B가 항상 성립해 믹서 클립이 구조적으로 안
+# 걸린다. 믹서의 Saturation은 최종 가드로 남긴다 — 죽은 코드가 되는 것이 곧 배분이
+# 제 일을 했다는 뜻이다.
+#
+# **실속 마진으로 재지 않는다.** 마진은 이미 닿고 나서 움직이는 늦은 지표다 —
+# 마진 기반으로 뒀더니 선회 순간 롤이 19°를 가져가 피치에 1°만 남았고, 마진이
+# 음수(−0.88°)가 된 뒤에야 되찾아 순항 중 59 m까지 내려갔다(test_landing 회귀).
+# 뱅크 **명령**은 하중이 실제로 걸리기 전에 알 수 있어 늦지 않다.
+#
+# **하중 증분(n−1)이 아니라 하중(n)에 비례한다.** 증분으로 뒀을 때 R은 φ_cmd에
+# 대해 2차라 선회 진입(φ_cmd가 아직 작을 때 롤 수요가 최대)에서 사실상 0이었다.
+# 실측: 데모 미션에서 최악 스텝의 피치 권한이 0.192°였고 롤이 19.862°를 가져갔다
+# — 배분을 넣기 전 믹서 클립이 부족분을 반반 나누던 것(10.03° / 10.03°)보다도
+# 피치에 나쁘다. 원칙("실속방지 몫을 **먼저**")과 반대로 동작한 것이다.
+# 수평비행의 하중은 0이 아니라 1이므로 n으로 재면 바닥이 저절로 생긴다.
+#
+# abs·max 연산이 IR에 없지만 필요 없다 — |a| = −min2(a, −a)로 기존 연산만 쓴다.
+
+
+def _roll_budget_nodes(prefix, *, phi_cmd_src, mach_src, elevon_hi, trim_table,
+                       resv_frac):
+    """선회 하중 → 피치 몫(R)을 먼저 떼고 남은 것이 롤 예산 [rad].
+
+    R = clip(δe_trim(mach) · n, 0, resv_frac · B),  n = 1/cos φ_cmd (선회 하중배수)
+
+    **하중으로 잰다 — 마진이 아니라.** 마진은 닿고 나서 움직이는 늦은 지표다
+    (모듈 주석의 59 m 회귀).
+
+    **증분(n−1)이 아니라 하중(n)이다.** 수평비행의 하중은 0이 아니라 1이다.
+    증분으로 두면 R이 φ_cmd에 2차라 선회 진입에서 0이 되는데, 롤 수요가 최대인
+    지점이 바로 거기다 — 실측 최악값이 피치 0.192° / 롤 19.862°였다.
+
+    **1g 몫은 상수가 아니라 mach 테이블이다.** 트림 승강타 요구는 동압에 반비례해
+    포락선 안에서 0.68°(M0.6) ~ 14.88°(M0.23)로 22배 움직인다. 어떤 상수도
+    양 끝을 동시에 못 만족한다 — 저속을 덮으면 M0.6에서 피치가 0.68°만 쓰는데
+    14.66°를 묶어 롤 권한 12.2°를 버리고, 고속에 맞추면 저속에서 1g를 못 버틴다.
+    표는 α 리미터의 실속 테이블과 같은 취급이다(도메인 표, 게인 슬롯 아님) —
+    `SCHEDULABLE`은 손대지 않는다.
+
+    mach는 **필터 없는 원신호**를 쓴다. 게인 스케줄의 필터된 mach를 쓰면 스케줄을
+    껐을 때 배분 거동까지 달라진다 — 두 기능이 조용히 엮인다. α 리미터가 실속
+    테이블에 원 mach를 쓰는 것과 같은 이유다.
+
+    resv_frac = 예산 중 R이 가져갈 수 있는 최대 비율. 롤에 (1 − resv_frac)·B가
+    **항상** 남는다. 이게 없으면 R이 예산 전체를 먹어 롤 권한이 0이 되고, 뱅크를
+    되돌릴 수도 없어 하중이 유지되는 자기지속 상태가 된다 — φ_cmd가 크면(예:
+    phi_max = 1.2 rad, 생성자가 허용하는 값) 실제로 닿는다.
+
+    φ_cmd는 ±phi_max로 잘려 있고 그 한계가 π/2 미만으로 강제되므로 sec가 발산하지
+    않는다 (autopilot_nodes 선회 FF가 기대는 같은 가드).
+    """
+    def nm(s):
+        return _pre(prefix, s)
+
+    if not elevon_hi > 0.0:
+        raise ValueError(f"elevon_hi는 양수여야 한다: {elevon_hi}")
+    if not 0.0 < resv_frac < 1.0:
+        raise ValueError(f"resv_frac은 (0, 1) 필요 — 1이면 롤 권한이 0이 된다: {resv_frac}")
+    nodes = [
+        Op(nm("load"), "sec_minus_1", inputs=(phi_cmd_src,)),
+        Op(nm("n"), "add_const", inputs=(nm("load"),), value=1.0),
+        Node(nm("trim"), LookupBlock, inputs=(mach_src,), params={"table": trim_table}),
+        Node(nm("resv_raw"), Product, inputs=(nm("trim"), nm("n"))),
+        Node(nm("resv"), Saturation, inputs=(nm("resv_raw"),),
+             params={"lo": 0.0, "hi": resv_frac * elevon_hi}),
+        Node(nm("resv_neg"), Gain, inputs=(nm("resv"),), params={"k": -1.0}),
+        Op(nm("roll_hi"), "add_const", inputs=(nm("resv_neg"),), value=elevon_hi),
+        Node(nm("roll_lo"), Gain, inputs=(nm("roll_hi"),), params={"k": -1.0}),
+    ]
+    return nodes, {"out_lo": nm("roll_lo"), "out_hi": nm("roll_hi")}
+
+
+def _pitch_budget_nodes(prefix, *, da_src, elevon_hi):
+    """롤이 **실제로 쓴** δa → 피치에 남는 권한 = elevon_hi − |δa|.
+
+    수요(δa 명령)가 아니라 배분 후 값을 쓴다 — 롤이 못 쓴 몫까지 피치가 갖는다.
+    """
+    def nm(s):
+        return _pre(prefix, s)
+
+    nodes = [
+        Node(nm("da_neg"), Gain, inputs=(da_src,), params={"k": -1.0}),
+        # −|δa| = min(δa, −δa) — IR에 abs가 없어 min2로 만든다
+        Op(nm("da_nabs"), "min2", inputs=(da_src, nm("da_neg"))),
+        Op(nm("pitch_hi"), "add_const", inputs=(nm("da_nabs"),), value=elevon_hi),
+        Node(nm("pitch_lo"), Gain, inputs=(nm("pitch_hi"),), params={"k": -1.0}),
+    ]
+    return nodes, {"out_lo": nm("pitch_lo"), "out_hi": nm("pitch_hi")}
+
+
+def scas3_nodes(prefix, *, pitch, roll, yaw, srcs, gain_ports=None, alloc=None):
     """`fcl/scas.py:102` — (θ_cmd, φ_cmd, 측정) → 믹싱 전 축 명령 (de, da, dr).
 
     피치는 θ 오차 + q, 롤은 wrap(φ 오차) + p, 요는 **−β** + washout(r)이다
@@ -209,18 +320,31 @@ def scas3_nodes(prefix, *, pitch, roll, yaw, srcs, gain_ports=None):
         Op(nm("roll_err"), "wrap_pi", inputs=(nm("roll_diff"),)),
         Node(nm("yaw_err"), Sum, inputs=(srcs["beta"],), params={"signs": (-1.0,)}),
     ]
+    # 배분이 붙으면 **롤을 피치보다 먼저** 선언한다 — 피치 한계가 롤이 실제로 쓴 δa에서
+    # 나오는데 IR이 전방 참조를 금지하므로, 순서를 바꾸는 것이 루프 없이 그 값을 얻는
+    # 유일한 길이다. 축끼리는 독립이라 순서가 결과를 바꾸지 않는다(배분 자체를 빼면).
+    limits = {}
+    if alloc is not None:
+        budget_nodes, limits["roll"] = _roll_budget_nodes(nm("alloc"), **alloc)
+        nodes += budget_nodes
+    order = (("roll", roll, nm("roll_err"), srcs["p"]),
+             ("pitch", pitch, nm("pitch_err"), srcs["q"]),
+             ("yaw", yaw, nm("yaw_err"), srcs["r"]))
+    if alloc is None:
+        order = (order[1], order[0], order[2])  # 종전 순서 (피치·롤·요)
+
     outs = {}
-    for group, cfg, err, rate in (
-        ("pitch", pitch, nm("pitch_err"), srcs["q"]),
-        ("roll", roll, nm("roll_err"), srcs["p"]),
-        ("yaw", yaw, nm("yaw_err"), srcs["r"]),
-    ):
+    for group, cfg, err, rate in order:
         axis_nodes, out = scas_axis_nodes(
             nm(group), err_src=err, rate_src=rate,
-            gain_ports=ports.get(group), **cfg,
+            gain_ports=ports.get(group), limit_ports=limits.get(group), **cfg,
         )
         nodes += axis_nodes
         outs[group] = out
+        if group == "roll" and alloc is not None:
+            pitch_nodes, limits["pitch"] = _pitch_budget_nodes(
+                nm("alloc"), da_src=out, elevon_hi=alloc["elevon_hi"])
+            nodes += pitch_nodes
     return nodes, outs
 
 
@@ -600,6 +724,8 @@ def fcl_graph(
     mixer,
     stall_table=None,
     alpha_margin=0.05,
+    alloc_trim_table=None,
+    alloc_resv_frac=0.7,
     gain_tables=None,
     filter_tau=0.5,
 ):
@@ -641,10 +767,35 @@ def fcl_graph(
         nodes += grouped(lim_nodes, "lim")
         theta_cmd = lim_out["theta_cmd"]
 
+    # 엘레본 제어권한 배분 — 선회 하중만큼 피치 몫을 먼저 떼고 나머지를 롤에.
+    # alloc_trim_table = None이면 배분이 없다(종전 구조 그대로)
+    alloc = None
+    if alloc_trim_table is not None:
+        # 배분은 예산을 **크기 하나**로 나눈다(하한은 Gain(−1)로 만든다). 그래서
+        # 형상이 비대칭이면 그 하나를 어느 쪽에 맞출지가 문제가 된다. 가장 좁은
+        # 쪽으로 맞춘다 — 그러면 넘겨준 한계가 어느 축의 설정 한계도 넘지 않고
+        # (권한이 조용히 늘어나지 않는다), |δe|+|δa| ≤ B ≤ min(|lo|, hi)라서
+        # 믹서 클립도 여전히 구조적으로 안 걸린다. 대칭 형상(현행 ±0.35)에서는
+        # B = elevon_hi라 거동이 그대로다.
+        #
+        # 비대칭을 거부하지 않는 이유: 영향성 해석은 out_hi 하나만 흔들어 보는데
+        # (pipeline/influence.py), 거부하면 그 정당한 사용이 조립 예외로 죽는다.
+        # 엘레본 축에만 붙는다 — 러더·스로틀은 전용 효과기라 이 배분과 무관하다.
+        budget = min(mixer["elevon_hi"], -mixer["elevon_lo"],
+                     *(scas_axes[ax]["out_hi"] for ax in ("pitch", "roll")),
+                     *(-scas_axes[ax]["out_lo"] for ax in ("pitch", "roll")))
+        if not budget > 0.0:
+            raise ValueError(
+                f"{name}: 배분 예산이 0 이하다 ({budget}) — 엘레본·SCAS 한계를 확인하라")
+        alloc = {"phi_cmd_src": ap_out["phi_cmd"], "mach_src": src["mach"],
+                 "elevon_hi": budget, "trim_table": alloc_trim_table,
+                 "resv_frac": alloc_resv_frac}
+
     scas_nodes, scas_out = scas3_nodes(
         "scas",
         srcs={**src, "theta_cmd": theta_cmd, "phi_cmd": ap_out["phi_cmd"]},
         gain_ports=scas_ports,
+        alloc=alloc,
         **scas_axes,
     )
     nodes += grouped(scas_nodes, "scas")

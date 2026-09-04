@@ -108,16 +108,22 @@ def test_trace_exercises_the_hard_paths(trace):
     hits = {"free": 0, "blocked": 0}
     orig = controllers.PID.step
 
-    def counting_step(self, e, u_ext=0.0, kp=None, ki=None, kd=None):
+    def counting_step(self, e, u_ext=0.0, kp=None, ki=None, kd=None,
+                      out_lo=None, out_hi=None):
         # 조건식을 **복사하지 않는다** — 복사하면 구현이 바뀔 때 가드가 옛 공식으로
         # 세면서 "양쪽 다 밟았다"고 계속 통과한다. 대신 클램프-온리였다면 나왔을
         # 상태와 비교한다: 갈라졌으면 곧 조건부 적분이 일한 스텝이다.
         # u_ext(축 외부항)는 그대로 넘긴다 — 판정이 축 출력 기준이라 이걸 빠뜨리면
         # 가드가 세는 대상이 실제 구현과 달라진다
         ki_ = self.ki if ki is None else ki
+        # 한계도 포트로 덮일 수 있다(제어권한 배분) — 클램프-온리 비교가 **같은 한계**를
+        # 써야 한다. 정적 한계로 비교하면 배분이 걸린 스텝을 전부 "갈라졌다"고 세어
+        # 가드가 거짓으로 통과한다
+        lo_ = self.out_lo if out_lo is None else out_lo
+        hi_ = self.out_hi if out_hi is None else out_hi
         before = self._i
-        y = orig(self, e, u_ext, kp, ki, kd)
-        clamp_only = min(max(before + self.dt * ki_ * e, self.out_lo), self.out_hi)
+        y = orig(self, e, u_ext, kp, ki, kd, out_lo, out_hi)
+        clamp_only = min(max(before + self.dt * ki_ * e, lo_), hi_)
         hits["blocked" if self._i != clamp_only else "free"] += 1
         return y
 
@@ -130,6 +136,49 @@ def test_trace_exercises_the_hard_paths(trace):
         controllers.PID.step = orig
     assert hits["free"] > 0 and hits["blocked"] > 0, (
         f"조건부 적분 분기가 한쪽만 실행됨: {hits} — C 대조가 반쪽이다")
+
+    # 제어권한 배분도 같은 이유로 밟혀야 한다. 대조 미션에서 선회 기동이 빠지면
+    # φ_cmd ≡ 0 → R이 상수 → 동적 한계가 한 번도 안 움직이고, 그래도 비트 일치는
+    # 초록으로 통과한다 — 새 C 경로가 검증 없이 탑재되는 것이다.
+    env_runner = _ir_runner(_warm)
+    roll_his = []
+    bound_roll = bound_pitch = 0
+    integ_over = -math.inf
+    for row in inputs:
+        env_runner.step_all(**row)
+        e = env_runner.last_env
+        if "scas_alloc_roll_hi" not in e:
+            continue  # 항법 무효 = 그래프 동결
+        roll_his.append(e["scas_alloc_roll_hi"])
+        if abs(abs(e["scas_roll_sat"]) - e["scas_alloc_roll_hi"]) < 1e-12:
+            bound_roll += 1
+        if abs(abs(e["scas_pitch_sat"]) - e["scas_alloc_pitch_hi"]) < 1e-12:
+            bound_pitch += 1
+        # 적분기가 **현재** 배분 한계 안에 갇혀 있어야 한다. 저장된 와인드업이
+        # 0이라는 뜻이고, 한계가 줄어드는 순간이 그 시험대다 — 클램프가 포트가
+        # 아니라 생성자 한계를 보면 여기서 넘친다. 실측: 두 축 모두 초과 0.
+        #
+        # "포화 중 적분기가 자랐나"로 세면 안 된다: 한계가 줄면 클램프가 범위 밖
+        # 적분기를 되당기는데(크기는 줄지만 부호에 따라 값은 커진다) 그게 포화
+        # 방향 증가로 잡힌다. 실제로 그 방식으로는 피치 4건이 걸렸고 전부
+        # 와인드업이 아니라 복원이었다.
+        for ax, lim in (("roll", "scas_alloc_roll_hi"),
+                        ("pitch", "scas_alloc_pitch_hi")):
+            integ = env_runner.instances[f"scas_{ax}_pid"]._i
+            integ_over = max(integ_over, abs(integ) - e[lim])
+    # **한계가 움직여야** 한다 — "0보다 크다"류는 단정이 못 된다. R ≥ k_load > 0이
+    # 항상 성립하도록 설계했으므로 "예산이 좁혀졌다"는 전 스텝에서 참이고, 선회가
+    # 빠져 φ_cmd ≡ 0이 돼도 그대로 통과한다. 봐야 할 것은 폭이다.
+    spread = max(roll_his) - min(roll_his)
+    assert spread > 1e-6, (
+        f"롤 예산이 상수다 (폭 {spread:.3e} rad) — φ_cmd가 안 움직였나. "
+        "동적 한계 경로의 C 대조가 반쪽이다")
+    assert integ_over <= 0.0, (
+        f"적분기가 배분 한계를 넘어섰다 (최대 초과 {integ_over:+.3e} rad) — "
+        "클램프가 포트 한계가 아니라 생성자 한계를 보고 있다")
+    assert bound_roll > 0 and bound_pitch > 0, (
+        f"동적 한계에 실제로 걸린 스텝이 없다 (롤 {bound_roll}, 피치 {bound_pitch}) "
+        "— 배분 경로의 C 대조가 반쪽이다")
 
 
 @needs_cc
@@ -251,6 +300,27 @@ def test_mixer_reference_actually_splits_throttle():
         "배분이 한 방향으로만 났다 — 좌우 맞바꿈을 못 잡는 격자다")
 
 
+def test_mixer_harness_argument_order_matches_the_generated_header():
+    """하네스가 넘기는 순서 = 생성 헤더가 선언한 순서.
+
+    전부 double이라 순서가 어긋나도 **컴파일이 통과한다**. 실제로 어긋났다: 제어권한
+    배분으로 축 선언이 롤→피치가 되면서 fcl_mix_step의 인자 순서도 뒤바뀌었는데,
+    하네스는 옛 순서로 넘겨 δe와 δa를 맞바꾼 채 대조하고 있었다(패리티가 잡았다).
+    다음엔 이 테스트가 먼저 잡는다 — 컴파일러도 패리티도 아닌 **이름**이 근거다.
+    """
+    hdr = (GEN_DIR / "fcl_mix.h").read_text(encoding="utf-8")
+    sig = hdr[hdr.index("void fcl_mix_step"):hdr.index(");", hdr.index("void fcl_mix_step"))]
+    # ap_spd_sat_y(집합 스로틀)도 _sat_y로 끝난다 — SCAS 축만 고른다
+    axes = [a.split()[-1] for a in sig.split(",") if "scas_" in a and a.strip().endswith("_sat_y")]
+    harness = (GEN_DIR.parent / "tests" / "harness.c").read_text(encoding="utf-8")
+    line = next(ln for ln in harness.splitlines() if "fcl_mix_step(&prm" in ln)
+    order = [a.strip() for a in line[line.index("(") + 1:].split(",")][2:6]
+    want = {"scas_pitch_sat_y": "de", "scas_roll_sat_y": "da", "scas_yaw_sat_y": "dr"}
+    assert order[0] == "thr", f"첫 인자는 집합 스로틀이어야 한다: {order}"
+    assert [want[a] for a in axes] == order[1:], (
+        f"헤더 순서 {axes} 인데 하네스는 {order[1:]} — δe·δa가 뒤바뀐 채 대조된다")
+
+
 @needs_cc
 def test_generated_mixer_matches_ir_with_diff_thrust(tmp_path):
     """차동추력을 켠 채 생성 C ↔ 설계가 비트 일치 — 단발 형상이 가리는 경로."""
@@ -343,4 +413,7 @@ def test_분할해도_지문은_그대로다():
     # 안 바뀌지만, 적분 궤적이 달라지므로 지문은 정직하게 움직여야 한다.
     # (앞선 갱신은 차동추력 계수 0 — 단발 전환. 프로펠러 추력 모델은 순수 플랜트
     # 변경이라 지문을 안 움직였다.)
-    assert fps == {"8e68f79356f5ef8b"}, f"형상 지문이 움직였다: {fps}"
+    # 이번 갱신은 **엘레본 제어권한 배분**이다 — 선회 하중만큼 피치 몫을 먼저 떼고
+    # 남은 것을 롤이 수요만큼 가져간다(graphs.py _roll_budget_nodes). 축 순서가
+    # 롤→피치로 바뀌고 배분 노드 12개가 늘어 그래프 위상이 달라졌다.
+    assert fps == {"3e032f9003b7cc9f"}, f"형상 지문이 움직였다: {fps}"

@@ -27,7 +27,7 @@ from claw.fcl.limiter import AlphaLimiter
 from claw.fcl.mixer import Mixer
 from claw.fcl.scas import Scas, ScasAxis
 from claw.fcl.schedule import GainSchedule, design_gains
-from claw.plant import make_demo_stall_table
+from claw.plant import make_demo_stall_table, make_demo_trim_elevator_table
 from claw.tables import Table
 
 # 설계점 M0.6 h1000 fuel200 SCAS 게인 (증분 A 설계 스캔 — 그 점은 이제 엔벨로프 밖)
@@ -172,6 +172,35 @@ DEMO_K_DIFF_THR = 0.0
 DEMO_ALPHA_MARGIN = 0.05  # α 리미터 실속 마진 [rad] (01 §3.6)
 
 
+# 엘레본 제어권한 배분 — 선회 하중 n = 1/cos φ_cmd 에 비례해 피치 몫을 먼저 뗀다.
+# R = clip(δe_trim(mach) · n, 0, frac · B). (유도는 fcl/graphs.py 모듈 주석)
+#
+# 1g 몫은 **상수가 아니라 mach 테이블**이다 — plant/demo.py
+# make_demo_trim_elevator_table. 트림 승강타 요구가 포락선 안에서 0.68°(M0.6) ~
+# 14.88°(M0.23)로 22배 움직여 어떤 상수도 양 끝을 동시에 못 만족한다. 실측 비교
+# (선회 착륙 시나리오, 순항 최저고도 / 최악 실속마진 / |φ|max):
+#   상수  7.16°  247.1 m  0.0473  41.21°   ← 근거가 틀렸다(격자가 포락선 하단 누락)
+#   상수 12.91°  248.7 m  0.0461  40.71°
+#   상수 14.66°  250.4 m  0.0498  40.57°   ← 안전하지만 M0.6에서 롤 12.2°를 버린다
+# 셋 다 나는 데는 문제가 없다 — 차이는 안전이 아니라 **버리는 롤 권한의 양**이고,
+# 표는 그걸 안 버린다.
+DEMO_ALLOC_TRIM_TABLE = make_demo_trim_elevator_table
+
+# 예산 중 피치 예약이 가져갈 수 있는 최대 비율 — 롤에 (1 − frac)·B가 항상 남는다.
+# 이 상한이 없으면 φ_cmd가 클 때 R이 예산 전체를 먹어 롤이 뱅크를 되돌리지도
+# 못하는 자기지속 상태가 된다.
+#
+# **하한이 있다**: frac·B는 표의 최댓값(15.24°, M0.25)을 덮어야 한다. 안 그러면
+# 상한이 1g 트림 요구 자체를 잘라, 예약이 "피치 몫을 먼저"라면서 정작 그 몫을
+# 못 준다. 0.7로 뒀다가 M0.15~0.25에서 상한 14.04° < 요구 14.78°로 걸렸다.
+# 0.76 이상이 필요하고 0.80을 쓴다 — 상한 16.04°, 롤 바닥 4.01°.
+#
+# 롤 바닥이 4.01°까지 내려가는 것은 **저속에서 기체에 타면이 모자라기 때문**이다:
+# M0.25의 1g 트림만 15.24°로 예산 20.05°의 76%를 쓴다. 배분이 만든 부족이 아니라
+# 원래 있던 것을 드러낸 것이고, 이 상한이 그 지점을 명시적으로 만든다.
+DEMO_ALLOC_RESV_FRAC = 0.80
+
+
 def make_demo_fcl(
     with_schedule: bool = True,
     with_limiter: bool = True,
@@ -220,4 +249,6 @@ def make_demo_fcl(
         if with_limiter
         else None
     )
-    return FlightControlLaw(scas, ap, mixer, schedule=schedule, alpha_limiter=limiter)
+    return FlightControlLaw(scas, ap, mixer, schedule=schedule, alpha_limiter=limiter,
+                            alloc_trim_table=DEMO_ALLOC_TRIM_TABLE(),
+                            alloc_resv_frac=DEMO_ALLOC_RESV_FRAC)

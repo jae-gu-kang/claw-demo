@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : 8e68f79356f5ef8b
+ * 지문    : 3e032f9003b7cc9f
  * 엔진    : claw 0.2.0
  * 파라미터 데이터 (MATLAB _data.c 대응)
  */
@@ -45,14 +45,12 @@ const fcl_params_t fcl_params = {
     .ap_spd_pid_out_hi        = 1.0,                   /* 출력·적분기 클램프 상한 (안티와인드업) */
     .ap_spd_sat_lo            = 0.0,                   /* 하한 */
     .ap_spd_sat_hi            = 1.0,                   /* 상한 */
-    .scas_pitch_pid_out_lo    = -0.35,                 /* 출력·적분기 클램프 하한 (안티와인드업) */
-    .scas_pitch_pid_out_hi    = 0.35,                  /* 출력·적분기 클램프 상한 (안티와인드업) */
-    .scas_pitch_sat_lo        = -0.35,                 /* 하한 */
-    .scas_pitch_sat_hi        = 0.35,                  /* 상한 */
-    .scas_roll_pid_out_lo     = -0.35,                 /* 출력·적분기 클램프 하한 (안티와인드업) */
-    .scas_roll_pid_out_hi     = 0.35,                  /* 출력·적분기 클램프 상한 (안티와인드업) */
-    .scas_roll_sat_lo         = -0.35,                 /* 하한 */
-    .scas_roll_sat_hi         = 0.35,                  /* 상한 */
+    .scas_alloc_resv_lo       = 0.0,                   /* 하한 */
+    .scas_alloc_resv_hi       = 0.27999999999999997,   /* 상한 */
+    .scas_alloc_resv_neg_k    = -1.0,                  /* 게인 */
+    .scas_alloc_roll_lo_k     = -1.0,                  /* 게인 */
+    .scas_alloc_da_neg_k      = -1.0,                  /* 게인 */
+    .scas_alloc_pitch_lo_k    = -1.0,                  /* 게인 */
     .scas_yaw_wo_p            = 0.9950124791926823,    /* exp(-dt/tau), tau=2.0 s — FCL_DT로 구움 */
     .scas_yaw_wo_one_minus_p  = 0.00498752080731768,   /* 1 − p */
     .scas_yaw_damp_k          = 0.8,                   /* 게인 */
@@ -135,5 +133,11 @@ const fcl_params_t fcl_params = {
     },
     .lim_stall_val = {  /* alpha_stall 값 */
         0.4, 0.35, 0.33, 0.3, 0.27
+    },
+    .scas_alloc_trim_bp = {  /* mach 격자점 */
+        0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6
+    },
+    .scas_alloc_trim_val = {  /* de_trim 값 */
+        0.25794, 0.26597, 0.19588, 0.13622, 0.10063, 0.06368, 0.01828
     },
 };

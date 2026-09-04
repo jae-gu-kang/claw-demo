@@ -100,8 +100,11 @@ def test_signature_is_stable_across_independent_builds(base_shape):
     assert a == b
     # 59 → 66: 종방향 축 도입으로 노드 7개가 늘었다 (ap_fvs·ap_vs_err·ap_vs_pid·
     # ap_vs_sat = 승강률 축, ap_pitch_sat = 피치 직접 지령, ap_theta_vs·ap_theta_src
-    # = θ 출처 Switch 2단). 이 수가 움직이는 것이 곧 법칙 구조 변경이다.
-    assert len([k for k in a if not k.startswith("__")]) == 66
+    # = θ 출처 Switch 2단).
+    # 66 → 78: 엘레본 제어권한 배분 12개 (scas_alloc_* — 선회 하중과 트림 테이블에서
+    # 롤 예산을 내는 8개, 롤이 쓴 δa에서 피치 권한을 내는 4개). 이 수가 움직이는
+    # 것이 곧 법칙 구조 변경이다.
+    assert len([k for k in a if not k.startswith("__")]) == 78
 
 
 # ── 구조적 영향: 관측된 매핑 ───────────────────────────────────────────────
@@ -151,7 +154,21 @@ def test_scheduled_gain_is_flagged_overridden(impacts):
 def test_unscheduled_axis_is_not_overridden(impacts):
     """요축은 스케줄이 없어 상수가 그대로 먹는다 — 축마다 다른 것이 정상이다."""
     assert impacts["fcl/ScasAxis.yaw.kp"].overridden == ()
-    assert impacts["fcl/ScasAxis.pitch.out_hi"].overridden == ()
+    # 요축 한계는 여전히 상수다 — 러더는 전용 면이라 엘레본 배분과 무관하다
+    assert impacts["fcl/ScasAxis.yaw.out_hi"].overridden == ()
+
+
+def test_elevon_axes_have_their_limits_overridden_by_allocation(impacts):
+    """피치·롤의 out_hi는 **상수가 아니다** — 제어권한 배분이 스텝마다 덮어쓴다.
+
+    게인 스케줄이 kp·ki를 덮는 것과 같은 포트 규약이다(blocks/controllers.py).
+    덮이는 자리는 PID와 축 Saturation 둘 다여야 한다 — 한쪽만 동적이면 출력은
+    배분을 따르는데 적분 판정은 안 따라 와인드업이 되살아난다.
+    """
+    for ax in ("pitch", "roll"):
+        got = impacts[f"fcl/ScasAxis.{ax}.out_hi"].overridden
+        assert set(got) == {f"scas_{ax}_pid", f"scas_{ax}_sat"}, (
+            f"{ax}.out_hi를 덮는 자리가 {got} — PID·Saturation 둘 다여야 한다")
 
 
 def test_override_disappears_when_schedule_is_off():
@@ -166,7 +183,7 @@ def test_control_rate_touches_every_stateful_node(impacts):
     """dt는 fcl_graph의 인자가 아니라 러너의 인자다 — 노드 인자만 보면 '아무것도
     안 건드린다'는 거짓말이 나온다. 이산 계수가 형상의 일부라는 것(02 §2.2)의 시각화."""
     imp = impacts["rate.control_hz"]
-    assert len(imp.reach) == 66
+    assert len(imp.reach) == 78  # 배분 12개 포함 (test_signature_is_stable 주석 참조)
     assert "sched_f_mach" in imp.seeds
 
 
@@ -188,7 +205,10 @@ def test_node_depths_satisfy_the_recurrence(base_shape):
     d = node_depths(graph)
     for node in graph.nodes:
         assert d[node.id] == 1 + max((d[r] for r in node.refs), default=0)
-    assert max(d[n.id] for n in graph.nodes) == 16
+    # 16 → 24: 배분이 사슬을 길게 만든다 — 롤 예산(하중→n→예약→예산) 뒤에 롤 축이 서고,
+    # 그 출력에서 피치 권한을 낸 뒤에야 피치 축이 선다. 전방 참조를 금지하는 IR에서
+    # "피치가 롤이 쓴 양을 본다"는 요구가 깊이로 나타난 것이다
+    assert max(d[n.id] for n in graph.nodes) == 24
 
 
 def test_forward_reach_matches_brute_force(base_shape):
@@ -243,7 +263,8 @@ def test_structural_payload_shape(base_shape):
     p = structural_payload(base_shape)
     kinds = Counter(n["kind"] for n in p["nodes"])
     # 입력 19 → 23: cmd_pitch·cmd_hdot·pitch_on·hdot_on
-    assert kinds["ir"] == 66 and kinds["input"] == 23 and kinds["output"] == 7
+    # ir 66 → 78: 엘레본 제어권한 배분 (입력은 안 는다 — φ_cmd·mach를 그래프 안에서 받는다)
+    assert kinds["ir"] == 78 and kinds["input"] == 23 and kinds["output"] == 7
     assert kinds["metric"] == len(p["metrics"]) and kinds["plant"] == 1
     assert p["topological_order"] is True
     assert "rank" not in p["nodes"][0]  # 층 번호는 소비자가 계산 — 두 곳에 정의하지 않는다

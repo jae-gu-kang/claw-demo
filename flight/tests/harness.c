@@ -73,7 +73,11 @@ int main(void)
     if (scanf("%lf", &prm.mix_diff_k) != 1) { return 1; }
     fcl_reset(&s);
     while (scanf("%lf %lf %lf %lf", &thr, &de, &da, &dr) == 4) {
-        fcl_mix_step(&prm, &s, thr, de, da, dr, &el, &er, &rud, &tl, &tr);
+        /* 인자 순서는 **생성기가 정한다** — 축 선언 순서가 바뀌면 여기 순서도 바뀐다
+         * (제어권한 배분으로 롤이 피치보다 먼저 선언되면서 실제로 뒤바뀌었다).
+         * 전부 double이라 컴파일러가 안 잡아 주므로, 헤더의 인자 이름을 그대로
+         * 옮겨 적어 사람이 보게 둔다: (thr, roll, pitch, yaw) */
+        fcl_mix_step(&prm, &s, thr, da, de, dr, &el, &er, &rud, &tl, &tr);
         printf("%.17g %.17g %.17g %.17g %.17g\n", el, er, rud, tl, tr);
     }
     return 0;

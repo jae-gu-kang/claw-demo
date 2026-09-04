@@ -76,5 +76,12 @@ class Saturation(Block):
             raise ValueError(f"lo({lo}) > hi({hi})")
         self.lo, self.hi = lo, hi
 
-    def step(self, u):
-        return min(max(u, self.lo), self.hi)
+    def step(self, u, lo=None, hi=None):
+        """한계는 스텝마다 덮어쓸 수 있다 — PID와 같은 포트 규약.
+
+        엘레본 제어권한 배분이 축 한계를 시간에 따라 바꾸는 자리에서 쓴다
+        (fcl/graphs.py). 안 넘기면 생성자 값이라 포트를 안 붙인 자리는 거동이 같다.
+        """
+        lo = self.lo if lo is None else lo
+        hi = self.hi if hi is None else hi
+        return min(max(u, lo), hi)

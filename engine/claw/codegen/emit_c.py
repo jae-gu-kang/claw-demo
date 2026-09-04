@@ -203,8 +203,12 @@ def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
     u_ext = ins[1] if len(ins) > 1 else None
     kp = gains.get("kp") or ctx.param(nid, "kp", inst.kp, "비례 게인")
     ki = gains.get("ki") or ctx.param(nid, "ki", inst.ki, "적분 게인")
-    lo = ctx.param(nid, "out_lo", inst.out_lo, "출력·적분기 클램프 하한 (안티와인드업)")
-    hi = ctx.param(nid, "out_hi", inst.out_hi, "출력·적분기 클램프 상한 (안티와인드업)")
+    # 한계도 게인과 같은 포트 규약이다 — 붙으면 신호, 안 붙으면 파라미터 상수.
+    # 제어권한 배분이 축 한계를 스텝마다 바꾸는 자리에서 쓴다 (fcl/graphs.py)
+    lo = gains.get("out_lo") or ctx.param(nid, "out_lo", inst.out_lo,
+                                          "출력·적분기 클램프 하한 (안티와인드업)")
+    hi = gains.get("out_hi") or ctx.param(nid, "out_hi", inst.out_hi,
+                                          "출력·적분기 클램프 상한 (안티와인드업)")
     i_st = ctx.st(nid, "i", 0.0, "적분기 상태")
     clip = ctx.helper("claw_clip")
 
@@ -283,8 +287,9 @@ def _disable_command_filter(ctx, node, inst, field, value_expr):
 @_emitter(Saturation)
 def _emit_saturation(ctx, node, inst, ins, gains, dt_macro):
     nid = node.id
-    lo = ctx.param(nid, "lo", inst.lo, "하한")
-    hi = ctx.param(nid, "hi", inst.hi, "상한")
+    # 한계 포트 — 붙으면 신호, 안 붙으면 파라미터 상수 (PID와 같은 규약)
+    lo = gains.get("lo") or ctx.param(nid, "lo", inst.lo, "하한")
+    hi = gains.get("hi") or ctx.param(nid, "hi", inst.hi, "상한")
     clip = ctx.helper("claw_clip")
     return ctx.declare(f"{nid}_y", f"{clip}({ins[0]}, {lo}, {hi})")
 

@@ -33,6 +33,7 @@ from claw.plant.demo import (
     make_demo_launch_rail,
     make_demo_skid_gear,
     make_demo_stall_table,
+    make_demo_trim_elevator_table,
     make_demo_structural_limits,
 )
 from claw.plant.eom import (
@@ -96,6 +97,7 @@ __all__ = [
     "make_demo_launch_rail",
     "make_demo_skid_gear",
     "make_demo_stall_table",
+    "make_demo_trim_elevator_table",
     "make_demo_structural_limits",
     "XE_NAMES",
     "XE_U",

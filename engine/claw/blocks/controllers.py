@@ -46,13 +46,21 @@ class PID(Block):
         self._i = 0.0 if state is None else float(state)
         self._e_prev = 0.0
 
-    def step(self, e, u_ext=0.0, kp=None, ki=None, kd=None):
+    def step(self, e, u_ext=0.0, kp=None, ki=None, kd=None, out_lo=None, out_hi=None):
         kp = self.kp if kp is None else kp
         ki = self.ki if ki is None else ki
         kd = self.kd if kd is None else kd
+        # 한계도 스텝마다 덮어쓸 수 있다 — 게인(kp·ki)과 **같은 규약**이다.
+        # 엘레본 제어권한 배분이 축 한계를 시간에 따라 바꾸는데(fcl/graphs.py), 그
+        # 한계는 출력 클립만이 아니라 __적분 클램프와 안티와인드업 판정에도__ 닿아야
+        # 한다. 판정만 원래 한계로 두면 배분으로 잘린 구간에서 적분기가 계속 차서,
+        # u_ext가 없앤 것과 같은 종류의 와인드업이 되살아난다.
+        # 안 넘기면 생성자 값 — 포트를 안 붙인 축은 거동이 완전히 같다.
+        lo = self.out_lo if out_lo is None else out_lo
+        hi = self.out_hi if out_hi is None else out_hi
         d = (e - self._e_prev) / self.dt
         raw = kp * e + self._i + kd * d
-        y = min(max(raw, self.out_lo), self.out_hi)
+        y = min(max(raw, lo), hi)
         inc = self.dt * ki * e
         # **조건부 적분** — 출력이 포화한 채 그 방향으로 더 미는 증분은 버린다.
         # 클램프만으로는 부족하다: 클램프는 적분기가 쌓이는 **크기**를 출력범위로
@@ -77,9 +85,9 @@ class PID(Block):
         # 있었다는 뜻이다. u_ext를 받는 것은 출력을 바꾸기 위해서가 아니라 **포화를
         # 제대로 보기 위해서**다 — y는 그대로 clip(raw)이라 제어법칙은 안 바뀐다.
         axis = raw + u_ext
-        if (axis > self.out_hi and inc > 0.0) or (axis < self.out_lo and inc < 0.0):
+        if (axis > hi and inc > 0.0) or (axis < lo and inc < 0.0):
             inc = 0.0
-        self._i = min(max(self._i + inc, self.out_lo), self.out_hi)
+        self._i = min(max(self._i + inc, lo), hi)
         self._e_prev = e
         return y
 

@@ -21,9 +21,12 @@ def test_structural_node_census(client):
     from collections import Counter
 
     kinds = Counter(n["kind"] for n in _post(client)["nodes"])
-    # 66/23 — 이륙·착륙 도입으로 종방향 축(승강률 4노드·피치 1노드·θ 출처 Switch 2단)과
-    # 그 입력 4개(cmd_pitch·cmd_hdot·pitch_on·hdot_on)가 늘었다 (엔진 test_influence와 한 쌍)
-    assert kinds["ir"] == 66 and kinds["input"] == 23 and kinds["output"] == 7
+    # 66 → 78: 엘레본 제어권한 배분 12노드. 델타윙은 피치·롤이 같은 네 면을 나눠 쓰는데
+    # 믹서가 δe ± δa를 자른 사실을 두 축 다 몰라 적분기가 찼다 — 선회 하중만큼을 피치에
+    # 먼저 떼어 두고 남은 것을 롤에 주는 배분으로 클립 자체를 없앴다.
+    # 입력·출력은 안 늘었다(뱅크 명령을 재활용한다) — 늘었으면 계약이 바뀐 것이다.
+    # (엔진 test_influence와 한 쌍 — 한쪽만 고치면 다른 쪽이 깨진다)
+    assert kinds["ir"] == 78 and kinds["input"] == 23 and kinds["output"] == 7
     # 지표 8 → 12: 이착륙 4종(접지 강하율·접지 속도·미끄럼 거리·사출 하중) 추가
     assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 12
 

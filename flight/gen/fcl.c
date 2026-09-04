@@ -23,8 +23,8 @@ void fcl_reset(fcl_state_t *sta)
     sta->ap_fv_x = 0.0;
     sta->ap_fv_seeded = 0;
     sta->ap_spd_pid_i = 0.0;
-    sta->scas_pitch_pid_i = 0.0;
     sta->scas_roll_pid_i = 0.0;
+    sta->scas_pitch_pid_i = 0.0;
     sta->scas_yaw_wo_x = 0.0;
     sta->scas_yaw_pid_i = 0.0;
     sta->hold.elevon_l = 0.0;
@@ -73,14 +73,14 @@ void fcl_step(const fcl_params_t *prm, fcl_state_t *sta, fcl_out_t *out,
     fcl_lim_step(prm, sta, theta, alpha, mach, ap_theta_out_y, &lim_a_margin_y, &lim_theta_lim_y,
                  &lim_active_y);
 
-    /* ── scas — 17개 블록 ── */
-    double scas_pitch_sat_y;
+    /* ── scas — 29개 블록 ── */
     double scas_roll_sat_y;
+    double scas_pitch_sat_y;
     double scas_yaw_sat_y;
-    fcl_scas_step(prm, sta, theta, phi, p, q, r, beta, sched_pitch_k_rate_y, sched_pitch_ki_y,
-                  sched_pitch_kp_y, sched_roll_k_rate_y, sched_roll_ki_y, sched_roll_kp_y,
-                  ap_hdg_sat_y, lim_theta_lim_y, &scas_pitch_sat_y, &scas_roll_sat_y,
-                  &scas_yaw_sat_y);
+    fcl_scas_step(prm, sta, theta, phi, p, q, r, beta, mach, sched_pitch_k_rate_y,
+                  sched_pitch_ki_y, sched_pitch_kp_y, sched_roll_k_rate_y, sched_roll_ki_y,
+                  sched_roll_kp_y, ap_hdg_sat_y, lim_theta_lim_y, &scas_roll_sat_y,
+                  &scas_pitch_sat_y, &scas_yaw_sat_y);
 
     /* ── mix — 10개 블록 ── */
     double mix_elevon_l_y;
@@ -88,7 +88,7 @@ void fcl_step(const fcl_params_t *prm, fcl_state_t *sta, fcl_out_t *out,
     double mix_rudder_y;
     double mix_thr_l_y;
     double mix_thr_r_y;
-    fcl_mix_step(prm, sta, ap_spd_sat_y, scas_pitch_sat_y, scas_roll_sat_y, scas_yaw_sat_y,
+    fcl_mix_step(prm, sta, ap_spd_sat_y, scas_roll_sat_y, scas_pitch_sat_y, scas_yaw_sat_y,
                  &mix_elevon_l_y, &mix_elevon_r_y, &mix_rudder_y, &mix_thr_l_y, &mix_thr_r_y);
 
     out->elevon_l = mix_elevon_l_y;

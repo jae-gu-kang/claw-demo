@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : 8e68f79356f5ef8b
+ * 지문    : 3e032f9003b7cc9f
  * 엔진    : claw 0.2.0
  * mix — 기능축 분할, 10개 블록
  */
@@ -9,7 +9,7 @@
 #include "claw_rt.h"
 
 void fcl_mix_step(const fcl_params_t *prm, fcl_state_t *sta,
-                  double ap_spd_sat_y, double scas_pitch_sat_y, double scas_roll_sat_y,
+                  double ap_spd_sat_y, double scas_roll_sat_y, double scas_pitch_sat_y,
                   double scas_yaw_sat_y, double *out_mix_elevon_l, double *out_mix_elevon_r,
                   double *out_mix_rudder, double *out_mix_thr_l, double *out_mix_thr_r)
 {
