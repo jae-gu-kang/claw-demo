@@ -4,10 +4,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  KNOB_CLASS, coneOf, diagnoseRequest, edgeVia, fmtDelta, logScale, nodeDetail,
-  normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor, paramState,
-  radiusOf, rampColor, scanRequest, scanSummary, structuralRequest,
-  sweepCases, sweepRequest, worstDeltas,
+  KNOB_CLASS, columnDigits, coneOf, diagnoseRequest, edgeVia, fmtDelta, fmtPair,
+  fmtChange, fmtPercent, fmtSigned, impactRank, logScale, pairDigits,
+  nodeDetail, normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor,
+  paramState, probeTransition, radiusOf, rampColor, relOf, scanRequest,
+  scanSummary, structuralRequest, sweepCases, sweepRequest, worstTransitions,
 } from "./influence.js";
 
 const payload = {
@@ -245,25 +246,160 @@ test("sweepCases: 전부 해제·격자 어긋남은 던진다 — 조용히 일
     /c9/);
 });
 
-test("worstDeltas: 런별 |Δ| 최대와 그 케이스 — base와 null은 세지 않는다", () => {
-  const w = worstDeltas([
-    { label: "base", case: "c1", metrics: { a: 1 }, delta: null },
-    { label: "k@+0.1", case: "c1", delta: { a: -0.5, b: null } },
-    { label: "k@+0.1", case: "c2", delta: { a: 0.2, b: 3 } },
+test("worstTransitions: 런별 |Δ| 최대와 그 케이스 — base와 null은 세지 않는다", () => {
+  const w = worstTransitions([
+    { label: "base", case: "c1", metrics: { a: 1, b: 2 }, delta: null },
+    { label: "base", case: "c2", metrics: { a: 10, b: 20 }, delta: null },
+    { label: "k@+0.1", case: "c1", metrics: { a: 0.5 }, delta: { a: -0.5, b: null } },
+    { label: "k@+0.1", case: "c2", metrics: { a: 10.2, b: 23 }, delta: { a: 0.2, b: 3 } },
   ]);
-  assert.deepEqual(w["k@+0.1"].a, { delta: -0.5, case: "c1" }); // |−0.5| > |0.2|
-  assert.deepEqual(w["k@+0.1"].b, { delta: 3, case: "c2" });    // null은 후보가 아니다
+  assert.deepEqual(w["k@+0.1"].a, // |−0.5| > |0.2|
+    { delta: -0.5, case: "c1", from: 1, to: 0.5, rel: -0.5 });
+  assert.deepEqual(w["k@+0.1"].b, // null은 후보가 아니다
+    { delta: 3, case: "c2", from: 20, to: 23, rel: 0.15 });
   assert.ok(!("base" in w));
+});
+
+test("worstTransitions: 기준값은 **같은 케이스**의 base 런에서 온다", () => {
+  // 케이스를 섞어 잡으면 "12.4 → 11.1"이 서로 다른 비행 조건의 두 수가 된다 —
+  // 화면이 가장 그럴듯하게 거짓말하는 자리라 케이스 짝짓기를 못박는다
+  const w = worstTransitions([
+    { label: "base", case: "저속", metrics: { alt_rms: 100 }, delta: null },
+    { label: "base", case: "고속", metrics: { alt_rms: 1 }, delta: null },
+    { label: "k@+0.1", case: "고속", metrics: { alt_rms: 1.5 }, delta: { alt_rms: 0.5 } },
+  ]);
+  assert.equal(w["k@+0.1"].alt_rms.from, 1);   // 100(저속의 기준)이 아니다
+  assert.equal(w["k@+0.1"].alt_rms.rel, 0.5);
+});
+
+test("worstTransitions: base 런이 없는 케이스도 Δ는 남는다 — from만 없음", () => {
+  // 취소로 base가 잘린 케이스. Δ는 서버가 같은 케이스 base 대비로 이미 계산했으므로
+  // 유효하다 — 요약에서 통째로 빼면 "영향 없음"으로 읽힌다
+  const w = worstTransitions([
+    { label: "k@+0.1", case: "c1", metrics: { a: 2 }, delta: { a: 0.4 } },
+  ]);
+  assert.deepEqual(w["k@+0.1"].a, { delta: 0.4, case: "c1", from: null, to: 2, rel: null });
+});
+
+test("fmtPair: 미세 지수값이 같은 표기로 뭉개지지 않는다 — fmtDelta로는 죽는 자리", () => {
+  // kp_alt 실측값. fmtDelta는 1e-3 미만을 toExponential(1)로 찍어 둘 다 "4.0e-4"였다 —
+  // 판독대가 "4.0e−4 → 4.0e−4"라고, 즉 "안 변했다"고 말하던 화면
+  assert.equal(fmtDelta(4.0e-4), fmtDelta(4.04e-4), "회귀의 전제: fmtDelta로는 구분이 없다");
+  const [a, b] = fmtPair(4.0e-4, 4.04e-4);
+  assert.notEqual(a, b, "두 표기가 같으면 판독대가 거짓말한다");
+  assert.deepEqual([a, b], ["4.00e-4", "4.04e-4"]);
+  // 표기 방식은 둘이 같아야 크기 비교가 된다 — 한쪽만 지수로 찍히면 안 된다
+  assert.ok(a.includes("e") === b.includes("e"));
+  // 자릿수가 넉넉한 자리는 늘리지 않는다 (3자리에서 이미 갈린다)
+  assert.deepEqual(fmtPair(100, 101), ["100", "101"]);
+});
+
+test("fmtPair: 3자리로 안 갈리면 갈릴 때까지 늘린다 — 스윕 Δ는 3자리보다 작을 수 있다", () => {
+  // 12.3456 vs 12.3459 — 3·4·5자리 전부 같고 6자리에서 처음 갈린다.
+  // 고정 자릿수 구현은 여기서 "12.3 → 12.3"을 찍는다
+  for (const d of [3, 4, 5]) {
+    assert.equal((12.3456).toPrecision(d), (12.3459).toPrecision(d),
+      `전제: ${d}자리로는 구분이 없다`);
+  }
+  assert.deepEqual(fmtPair(12.3456, 12.3459), ["12.3456", "12.3459"]);
+});
+
+test("columnDigits: 한 열은 가장 촘촘한 전이에 맞춘다 — 같은 기준값이 다르게 찍히지 않게", () => {
+  // 라이브에서 나온 회귀: 같은 base 런의 40.847이 한 열 안에서 40.8·40.847·40.85로
+  // 세 번 다르게 찍혀 다른 수처럼 읽혔다
+  const col = [[40.847, 40.853], [40.847, 40.85], [40.847, 40.84]];
+  const d = columnDigits(col);
+  const lefts = new Set(col.map(([f, t]) => fmtPair(f, t, d)[0]));
+  assert.equal(lefts.size, 1, `같은 기준값은 한 열에서 한 표기: ${[...lefts]}`);
+  // 그러면서도 가장 촘촘한 행이 뭉개지지 않아야 한다
+  for (const [f, t] of col) {
+    const [a, b] = fmtPair(f, t, d);
+    assert.notEqual(a, b, `${f} → ${t}가 뭉개졌다`);
+  }
+  assert.equal(columnDigits([]), 3);            // 셀 것이 없으면 최소 자릿수
+  assert.equal(columnDigits([[null, 3]]), 3);   // 미계측은 자릿수를 끌어올리지 않는다
+  // 행별 최소의 **최댓값**이면 안 된다: 40.847→40.853은 3자리(40.8/40.9)에서 갈리지만
+  // 4자리에서 둘 다 40.85로 새로 뭉개진다. 이 열의 답은 5자리다
+  assert.equal(pairDigits(40.847, 40.853), 3);
+  assert.equal(pairDigits(40.847, 40.84), 4);
+  assert.equal(d, 5, "행별 최댓값(4)을 쓰면 첫 행이 뭉개진다");
+  // 정말 같은 값인 행은 탐색을 막지 않는다 (섭동이 범위에 클립된 자리)
+  assert.equal(columnDigits([[1.5, 1.5], [2.0, 2.1]]), 3);
+});
+
+test("fmtPair: 정말 같은 값이면 같은 문자열 — 없는 차이를 만들지 않는다", () => {
+  // 섭동이 범위에 클립돼 기준과 같아진 자리. 7자리까지 가도 같으면 같은 것이다
+  assert.deepEqual(fmtPair(0.35, 0.35), ["0.35", "0.35"]);
+  // 미계측은 fmtDelta 규약 그대로 (0이 아니라 —)
+  assert.deepEqual(fmtPair(null, 3), ["—", "3.00"]);
+  assert.deepEqual(fmtPair(1, "inf"), ["1.00", "∞"]);
+});
+
+test("fmtChange: 「+0.0%」로 반올림될 변화는 절대 Δ로 말한다", () => {
+  assert.equal(fmtChange(0.053, 0.0232, "m/s"), "+2.3%");
+  assert.equal(fmtChange(-0.053, -0.0232, "m/s"), "−2.3%");
+  // 라이브 회귀: 0.16969 → 0.16972는 값이 눈에 띄게 움직였는데 비율은 "+0.0%"였다
+  const rel = (0.16972 - 0.16969) / 0.16969;
+  assert.ok(fmtPercent(rel) === "0.0%", "회귀의 전제: 비율이 0.0%로 반올림된다");
+  assert.ok(!fmtChange(3e-5, rel, "rad").includes("%"), "그때는 비율로 말하지 않는다");
+  assert.equal(fmtChange(3e-5, rel, "rad"), "+3.0e-5 rad");
+  // 기준이 0이라 비율이 아예 없는 자리도 절대 Δ (리미터 작동률이 0에서 벗어난 자리)
+  assert.equal(fmtChange(0.04, null, ""), "+0.0400");
+  assert.equal(fmtChange(0, null, ""), "0");
+});
+
+test("impactRank: 안 움직인 지표가 움직인 지표보다 앞에 서지 않는다", () => {
+  // 라이브 회귀: relOf가 null(기준 0 → 0)을 내는데 Math.abs(null ?? -1)이 1이라,
+  // 0→0인 엔벨로프 이탈·타면 포화·리미터 작동이 상위 3줄을 차지하고 실제로 움직인
+  // 속도 RMS(+2.3%)가 「외 지표 4개」로 접혀 들어갔다
+  const dead = { from: 0, to: 0, delta: 0, rel: null };
+  const moved = { from: 2.29, to: 2.34, delta: 0.053, rel: 0.0232 };
+  assert.ok(impactRank(moved) > impactRank(dead), "움직인 쪽이 위다");
+  assert.equal(impactRank(dead), -1);
+  // 기준 0에서 벗어난 것은 질적 변화라 맨 앞 — 리미터가 처음 걸리기 시작한 자리
+  const appeared = { from: 0, to: 0.04, delta: 0.04, rel: null };
+  assert.ok(impactRank(appeared) > impactRank(moved));
+  assert.equal(impactRank(null), -1);
+  // 정렬 결과로도 확인 (뷰가 하는 그대로)
+  assert.deepEqual(
+    [dead, moved, appeared].sort((a, b) => impactRank(b) - impactRank(a)),
+    [appeared, moved, dead]);
+});
+
+test("relOf: 기준이 0이면 비율이 **없다** — ∞도 0도 거짓말이다", () => {
+  assert.equal(relOf(2, 3), 0.5);
+  assert.equal(relOf(-2, -3), -0.5); // 분모는 |from| — 부호는 방향이 갖는다
+  assert.equal(relOf(0, 0.01), null); // k_diff_thr·ki_hdg가 실제로 0인 자리
+  assert.equal(relOf(1, undefined), null);
+});
+
+test("fmtSigned: +를 붙이고 음수는 U+2212 — 0과 미계측은 부호가 없다", () => {
+  assert.equal(fmtSigned(1.25), "+1.25");
+  assert.equal(fmtSigned(-1.25), "−1.25");
+  assert.ok(!fmtSigned(-1.25).includes("-"), "하이픈이 남으면 글머리표로 읽힌다");
+  assert.equal(fmtSigned(0), "0");
+  assert.equal(fmtSigned(null), "—");
+});
+
+test("probeTransition: 섭동을 못 만든 자리는 전이가 **없다**", () => {
+  assert.deepEqual(probeTransition({ value: 1, probe_to: 1.01, unit: "s" }),
+    { from: 1, to: 1.01, delta: 1.01 - 1, rel: 1.01 - 1, unit: "s" });
+  // 무단위 센티널 "-"는 단위가 아니다 (엔진 규약)
+  assert.equal(probeTransition({ value: 1, probe_to: 1.01, unit: "-" }).unit, "");
+  assert.equal(probeTransition({ value: 1, probe_to: null }), null);
+  assert.equal(probeTransition(null), null);
 });
 
 test("openloopWorst: (knob, 루프)별 |ΔPM|·|ΔGM| 최악 — delta 없는 항목 제외", () => {
   const rows = openloopWorst({
     k1: {
-      status: "ok",
+      status: "ok", value: 0.8, probe_to: 0.808,
       loops: {
         pitch_rate: {
-          c1: { delta: { pm_deg: -2, gm_db: 0.5 } },
-          c2: { delta: { pm_deg: 1, gm_db: -3 } },
+          c1: { base: { pm_deg: 48.3, gm_db: 9 }, perturbed: { pm_deg: 46.3, gm_db: 9.5 },
+                delta: { pm_deg: -2, gm_db: 0.5 } },
+          c2: { base: { pm_deg: 50, gm_db: 12 }, perturbed: { pm_deg: 51, gm_db: 9 },
+                delta: { pm_deg: 1, gm_db: -3 } },
           c3: { note: "no_loop" }, // delta 없음 — 케이스 수에 안 들어간다
         },
       },
@@ -272,8 +408,13 @@ test("openloopWorst: (knob, 루프)별 |ΔPM|·|ΔGM| 최악 — delta 없는 �
   }, ["k1", "k2"]);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].nCases, 2);
-  assert.deepEqual(rows[0].pm, { value: -2, case: "c1" });
-  assert.deepEqual(rows[0].gm, { value: -3, case: "c2" });
+  // 마진 전이는 **그 Δ가 나온 케이스의** base·perturbed다 — PM 최악은 c1, GM 최악은 c2라
+  // 두 줄의 케이스가 갈린다. 한쪽 케이스로 뭉뚱그리면 없는 조합을 화면에 세운다
+  assert.deepEqual(rows[0].pm, { value: -2, case: "c1", from: 48.3, to: 46.3 });
+  assert.deepEqual(rows[0].gm, { value: -3, case: "c2", from: 12, to: 9 });
+  // 손잡이 자신의 전이 — "무엇을 얼마로 바꿨을 때"가 빠지면 마진 전이가 뜻을 잃는다
+  assert.equal(rows[0].knobFrom, 0.8);
+  assert.equal(rows[0].knobTo, 0.808);
 });
 
 test("pairsFor: 카드의 joint_with → (대표 knob, 동반 knob) 쌍", () => {

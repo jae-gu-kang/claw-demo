@@ -5,9 +5,29 @@
 앞에는 진단이 선다 — "얼마나"를 재기 전에 "무엇을 만질지"(필터/게인/클램프/리미터/
 스케줄, 단독/동시)를 저장된 런에서 귀속하고, 처방 카드의 손잡이만 스윕한다.
 
+## 배치 — 그래프가 화면이고 나머지는 서랍이다 (v0.49)
+
+블록도 최상위와 같은 규약이다: **주 그림은 카드에 넣지 않는다.** 종전에는 패널
+다섯 장이 세로로 쌓여 그래프가 그중 한 칸이었고, 첫 화면에서 그래프 아래로 표
+넷이 동시에 펼쳐져 무엇이 이 탭의 답인지가 흐렸다. 지금은 그래프가 페이지 위에
+그대로 놓이고, 파라미터 표·진단·개루프·스윕·범례는 **칩을 눌러야** 열린다
+(한 번에 하나 — 두 개를 동시에 여는 것은 다시 쌓기다).
+
+## 판독대 — "얼마에서 얼마로"
+
+그래프 바로 아래가 **정량 판독대**다. 고른 파라미터 하나에 대해 세 단이 각각
+한 줄씩, 큰 숫자로 `기준 → 섭동`을 낸다. 종전 화면은 세 단이 전부 Δ만 냈고(2단은
+기준과 Δ가 다른 열에 있어 눈으로 더해야 했다) "48.3°에서 47.1°로"라는 문장이
+화면 어디에도 없었다. 재는 값은 셋 다 서버가 이미 주던 것이다 — 짝짓기(`from`·`to`)는
+`lib/influence.js`가 하고 여기서는 그리기만 한다.
+
+없는 단은 빈칸이 아니라 **사유**를 낸다 (판정 불가를 0으로 위장하지 않는 이 화면의
+규약과 같다) — "아직 안 쟀다"와 "재 봤는데 영향이 없다"는 다른 사실이다.
+
 **표가 정본 표면이고 캔버스는 보조다.** 캔버스는 보조기술에 불투명하므로, 화면이
-말하는 모든 사실(상태·도달 개수·도달 출력)은 아래 표에도 반드시 있다 — wpmap.js가
-웨이포인트 표에 접근성을 맡긴 것과 같은 규약.
+말하는 모든 사실(상태·도달 개수·도달 출력)은 파라미터 표에도 반드시 있다 —
+wpmap.js가 웨이포인트 표에 접근성을 맡긴 것과 같은 규약. 서랍에 넣었어도 표는
+그대로 있고 칩 하나로 열린다.
 
 이 탭은 **전면 다크**다: 검은 캔버스가 화면의 중심이라 패널만 밝으면 경계마다
 스킨이 끊긴다. DOM 쪽 다크는 app.css의 `.inf-dark` 스코프가 담당하고(루트에
@@ -19,10 +39,11 @@ import { clear, el } from "../dom.js";
 import {
   BAND_COLOR, DIRECTION_LABEL, KNOB_CLASS, SKIN, STATE_COLOR, STATE_INK,
   STATE_LABEL, STATE_NOTE, WARN_INK,
-  coneOf, diagnoseRequest, edgeVia, fmtDelta, fmtPercent, nodeDetail,
-  normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor, radiusOf,
-  scanRequest, scanSummary, structuralRequest, sweepCases, sweepRequest,
-  worstDeltas,
+  columnDigits, coneOf, diagnoseRequest, edgeVia, fmtChange, fmtDelta, fmtPair,
+  fmtPercent, fmtSigned, impactRank, nodeDetail,
+  normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor, probeTransition,
+  radiusOf, relOf, scanRequest, scanSummary, structuralRequest, sweepCases,
+  sweepRequest, worstTransitions,
 } from "../lib/influence.js";
 import { machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { conePlayback, summaryOf } from "../lib/influenceplay.js";
@@ -30,7 +51,10 @@ import { cascadeLayout, layeredLayout } from "../lib/influencelayout.js";
 import { createInfluenceCanvas } from "./influencecanvas.js";
 import { store } from "../store.js";
 
-const CANVAS_W = 1180;
+// 그래프가 카드 밖으로 나오면서 폭이 늘었다 (app.css가 이 탭만 main을 1580까지
+// 연다). 캔버스는 `width:논리폭 + max-width:100%`라 좁은 화면에서는 비율을 지킨
+// 채 줄어든다 — 논리폭을 키우는 것은 확대가 아니라 **배치에 주는 가로 여유**다
+const CANVAS_W = 1500;
 const CANVAS_H = 660;
 const ROW_GAP = 19;
 
@@ -38,9 +62,11 @@ const ROW_GAP = 19;
 const state = {
   variant: "cascade", selection: null, model: null, layout: null,
   cone: null, play: null,
+  // 열린 서랍 하나 (null = 전부 닫힘) — 탭을 떠났다 와도 보던 자리로 돌아온다
+  drawer: null,
   // 진단(2단 앞의 "무엇을") · 스캔(3단 A "어느 케이스가") · 스윕(3단 B "얼마나")
   // — 탭을 떠났다 와도 결과 유지
-  diag: null, scan: null, sweep: null,
+  diag: null, openloop: null, scan: null, sweep: null,
   // 케이스 격자 입력 — 결과(scan.selected)와 수명이 같아야 한다. 입력만 기본값으로
   // 되돌아가면 재진입 직후 3단 B가 "격자가 바뀌었다"고 거절한다(사용자는 안 건드렸다)
   gridForm: { machFrom: "0.4", machTo: "0.8", machStep: "0.1",
@@ -75,7 +101,7 @@ export function render() {
   // 소비처가 없어지면 layout의 meta.conserved 계약이 공중에 뜬다(influencelayout.js)
   const conservedNote = el("p", { style: "margin:6px 0 0" });
   const tableBox = el("div");
-  const detailBox = el("div");
+  const readoutBox = el("div", { class: "inf-readout" });
   // 재생 상태 줄 — 캔버스가 시계를 쥐고 있으므로 캔버스가 문자열을 밀어 준다.
   // `aria-live`는 쓰지 않는다: 이 캔버스는 보조 표면이고 정본은 아래 표인데,
   // 무한 반복이라 6초마다 층 문구 십수 개를 영구히 읽어 정본을 덮는다.
@@ -145,7 +171,7 @@ export function render() {
         "⚠ 흐름 굵기는 보존량이 아니다 — 파라미터 하나가 여러 노드를 흔들고 하류 합은 상류와 같지 않다"));
     }
     renderTable();
-    renderDetail();
+    renderReadout();
   }
 
   // 원뿔과 재생 일정은 (모델, 선택)에만 의존한다 — **배치와 무관**하므로 배치를
@@ -170,7 +196,7 @@ export function render() {
     recompute();
     if (!state.cone) playLine.textContent = "";
     renderPath();
-    renderDetail();
+    renderReadout();
     renderTable();
     // 동작 축소 설정에서는 타이머가 아예 없다 — frame()이 선택을 읽는 유일한 자리이므로
     // 여기서 직접 다시 그리지 않으면 캔버스가 "선택 없음"에 영원히 얼어 있고,
@@ -338,51 +364,178 @@ export function render() {
     }
   }
 
-  function renderDetail() {
-    clear(detailBox);
+  // ── 정량 판독대 — 「얼마에서 얼마로」 (이 화면의 주 표면) ─────────────────
+  // 세 단이 각각 한 줄씩. 값은 전부 서버가 이미 주던 것이고, 짝짓기(from·to)는
+  // lib이 한다 — 여기서는 고르고 그리기만 한다.
+
+  /** 큰 숫자 한 줄: `기준 → 섭동 단위`. 이 화면에서 제일 큰 글자가 여기다.
+   *  자릿수는 fmtPair가 정한다 — 두 값이 같은 표기로 뭉개지면 판독대가 죽는다. */
+  function numLine(from, to, unit) {
+    const [a, b] = fmtPair(from, to);
+    return el("span", { class: "inf-num" },
+      el("span", { class: "from" }, a),
+      el("span", { class: "arrow" }, "→"),
+      el("span", { class: "to" }, b),
+      unit ? el("span", { class: "unit" }, unit) : null);
+  }
+
+  /** 변화량 칩 — 표기 규칙은 lib(fmtChange)이 쥔다. 색은 칠하지 않는다:
+   *  지표마다 좋은 방향이 달라(MetricDef.better) 초록/빨강을 입히면 화면이 판정을
+   *  참칭한다. 판정은 진단(2·3단 문턱)이 한다. */
+  function chgChip(delta, rel, unit) {
+    return el("span", { class: "inf-chg" }, fmtChange(delta, rel, unit));
+  }
+
+  function roRow(tier, ink, what, from, to, unit, delta, rel, at) {
+    return el("div", { class: "inf-rorow" },
+      el("span", { class: "inf-tier", style: `color:${ink}` }, tier),
+      el("span", { class: "inf-what" }, what),
+      numLine(from, to, unit),
+      el("span", {}, chgChip(delta, rel, unit),
+        at ? el("span", { class: "inf-at" }, ` @${at}`) : null));
+  }
+
+  /** 단이 답을 못 내는 이유 — 빈칸으로 두면 "영향 없음"으로 읽힌다. */
+  function roWhy(tier, ink, text) {
+    return el("div", { class: "inf-rorow" },
+      el("span", { class: "inf-tier", style: `color:${ink}` }, tier),
+      el("span", { class: "inf-what" }, "—"),
+      el("span", { class: "inf-why" }, text));
+  }
+
+  /** 2단 — 이 손잡이의 (루프별) 마진 전이 중 |ΔPM|이 가장 큰 루프 하나. */
+  function openloopFor(pid) {
+    const params = state.openloop?.result?.params;
+    if (!params?.[pid]) return null;
+    const rows = openloopWorst(params, [pid]);
+    if (!rows.length) return { rows: [], reason: params[pid].reason ?? params[pid].status };
+    const best = rows.reduce((a, b) =>
+      (Math.abs(b.pm?.value ?? 0) > Math.abs(a.pm?.value ?? 0) ? b : a));
+    return { best, reason: null };
+  }
+
+  /** 3단 — 이 손잡이 **단독** 런들만 모아 지표별 최악 전이. 쌍 런(A&B)은 제외한다:
+   *  두 손잡이가 같이 움직인 Δ를 한 손잡이의 영향으로 읽으면 귀속이 틀린다. */
+  function sweepFor(pid) {
+    const rows = state.sweep?.result?.rows;
+    if (!rows?.length) return null;
+    const solo = rows.filter((r) => r.label === "base"
+      || (Object.keys(r.overrides ?? {}).length === 1 && r.overrides[pid] != null));
+    if (!solo.some((r) => r.label !== "base")) return null;
+    const knobTo = new Map(solo.map((r) => [r.label, r.overrides?.[pid]]));
+    const best = new Map();
+    for (const [label, byMetric] of Object.entries(worstTransitions(solo))) {
+      for (const [k, t] of Object.entries(byMetric)) {
+        const cur = best.get(k);
+        if (!cur || Math.abs(t.delta) > Math.abs(cur.t.delta)) {
+          best.set(k, { label, t, knobTo: knobTo.get(label) });
+        }
+      }
+    }
+    // 단위가 제각각이라 |Δ|로는 줄을 못 세운다 — 순위 규칙은 lib이 쥔다(impactRank)
+    return [...best.entries()]
+      .map(([metric, v]) => ({ metric, ...v }))
+      .sort((a, b) => impactRank(b.t) - impactRank(a.t));
+  }
+
+  function renderReadout() {
+    clear(readoutBox);
     const m = state.model;
     if (!m) return;
     const sel = state.selection ? m.byId.get(state.selection) : null;
     if (!sel) {
-      detailBox.append(el("p", { class: "hint" },
-        "왼쪽 파라미터 열에서 하나를 고르면 그 값이 건드리는 노드에서 시작해 " +
-        "층을 타고 파급이 번진다. 층 번호는 IR 실행 순서이자 생성 C의 문장 순서다."));
+      readoutBox.append(el("p", { class: "hint", style: "margin:0" },
+        "그래프의 왼쪽 파라미터 열에서 하나를 고르면 여기에 " +
+        "「얼마에서 얼마로」가 뜬다 — 1단은 즉시, 2·3단은 재 둔 결과가 있을 때. " +
+        "층 번호는 IR 실행 순서이자 생성 C의 문장 순서다."));
       return;
     }
     const note = STATE_NOTE[sel.state];
-    detailBox.append(
-      el("div", { class: "row", style: "gap:10px;align-items:center" },
-        badge(sel.state),
-        el("strong", {}, sel.label),
-        el("code", { style: mono() }, sel.param_id),
-        el("span", { class: "hint" }, `${fmtNum(sel.value)} ${sel.unit}`),
-        el("button", { onclick: () => select(null) }, "선택 해제"),
-      ),
-      el("p", { class: "hint", style: "margin:6px 0 0" }, sel.desc),
-      note ? el("p", { style: `margin:6px 0 0;color:${STATE_INK[sel.state]};font-size:12px` }, note) : el("span"),
-      el("div", { class: "row", style: "gap:18px;margin-top:8px;font-size:12px" },
-        stat("건드리는 노드", (sel.seeds ?? []).join(", ") || "—"),
-        stat("도달 노드", String(sel.n_reach ?? 0)),
-        stat("도달 출력", (sel.outputs ?? []).join(", ") || "—"),
-        stat("탐침", sel.probe_to == null ? "—"
-          : `${fmtNum(sel.value)} → ${fmtNum(sel.probe_to)} (유한 차분, 미분 아님)`),
-      ),
-      // 재생이 보여 주는 순서를 **글로도** 남긴다 — 캔버스만 아는 사실을 만들지 않는다.
-      // 캔버스 아래 줄은 재생 중 흘러가지만 이쪽은 선택마다 한 번 갱신되는 정적 사실이라
-      // 스크린리더가 요청할 때 읽는다(그래서 저쪽이 aria-hidden이어도 손실이 없다)
-      state.play
-        ? el("p", { class: "hint", style: "margin:6px 0 0" },
-            summaryOf(state.play, (id) => m.byId.get(id)?.label ?? id))
-        : el("span"),
-      sel.added?.length
-        ? el("p", { style: `margin:6px 0 0;color:${WARN_INK};font-size:12px` },
-            `이 값을 올리면 생기는 노드: ${sel.added.join(", ")} — 탑재 C도 달라진다`)
-        : el("span"),
-      el("p", { class: "hint", style: "margin:8px 0 0" },
-        "기체 → 지표 구간은 점선이다 — 폐루프가 IR 밖에서 닫히므로 도달은 " +
-        "선언이고, 「얼마나」는 폐루프 스윕(3단)에서만 나온다. " +
-        "지금 화면은 1단(구조 도달성)이라 굵기는 영향의 크기가 아니다."),
-    );
+    readoutBox.append(el("div", { class: "inf-rohead" },
+      badge(sel.state),
+      el("span", { class: "name" }, sel.param_id),
+      el("span", { class: "hint", style: "font-size:12px" },
+        m.bands?.[sel.band]?.label ?? sel.band),
+      el("span", { class: "grow" }),
+      el("button", { onclick: () => select(null) }, "선택 해제")));
+
+    const rows = el("div", { class: "inf-rorows" });
+    // ① 1단 — 파라미터 자신이 얼마에서 얼마로. 유한 차분이지 미분이 아니다
+    const probe = probeTransition(sel);
+    rows.append(probe
+      ? roRow("1단 구조", STATE_INK.live, `${sel.label} · 탐침 (유한 차분)`,
+          probe.from, probe.to, probe.unit, probe.delta, probe.rel,
+          `도달 노드 ${sel.n_reach ?? 0}`)
+      : roWhy("1단 구조", STATE_INK.live,
+          sel.error ?? "섭동값을 만들 수 없다 — 범위·교차조건이 막는다"));
+
+    // ② 2단 — 개루프 마진 전이
+    const ol = openloopFor(sel.param_id);
+    if (!ol) {
+      rows.append(roWhy("2단 개루프", "#409cff",
+        "아직 안 쟀다 — 아래 「진단·처방」 서랍의 [개루프 근거]가 이 자리를 채운다."));
+    } else if (!ol.best) {
+      rows.append(roWhy("2단 개루프", "#409cff",
+        `유효한 Δ 없음 — ${ol.reason ?? "선언된 SISO 루프가 없다"}`));
+    } else {
+      const b = ol.best;
+      const what = `${b.loop} 위상여유 (PM)`;
+      if (b.pm) {
+        rows.append(roRow("2단 개루프", "#409cff", what,
+          b.pm.from, b.pm.to, "°", b.pm.value, relOf(b.pm.from, b.pm.to), b.pm.case));
+      }
+      if (b.gm) {
+        rows.append(roRow("", "#409cff", `${b.loop} 이득여유 (GM)`,
+          b.gm.from, b.gm.to, "dB", b.gm.value, relOf(b.gm.from, b.gm.to), b.gm.case));
+      }
+    }
+
+    // ③ 3단 — 설계 지표 전이 (상위 3개). 폐루프 재시뮬 실측이라 이 화면의 최종 답이다
+    const sw = sweepFor(sel.param_id);
+    if (!sw) {
+      rows.append(roWhy("3단 폐루프", "#ffb340",
+        "아직 안 쟀다 — 「진단·처방」의 [이 부분공간 스윕]이 이 자리를 채운다. " +
+        "여기가 폐루프 실측이고, 위 두 단은 그 전에 범위를 좁히는 근사다."));
+    } else {
+      for (const s of sw.slice(0, 3)) {
+        // 손잡이를 **얼마로** 놓았을 때인지가 함께 있어야 지표 전이가 뜻을 갖는다.
+        // 1단 탐침(상대 1%)과 다른 값인 것이 맞다 — 스윕 스팬은 ±10·20%다
+        const at = s.knobTo == null ? s.t.case
+          : `${s.t.case} · ${sel.label} ${fmtPair(sel.value, s.knobTo).join(" → ")}`;
+        rows.append(roRow("3단 폐루프", "#ffb340", metricLabel(s.metric),
+          s.t.from, s.t.to, metricUnit(s.metric), s.t.delta, s.t.rel, at));
+      }
+      if (sw.length > 3) {
+        rows.append(el("div", { class: "inf-rorow" },
+          el("span", { class: "inf-why" },
+            `… 외 지표 ${sw.length - 3}개 — 「스윕 Δ」 서랍에 전부 있다`)));
+      }
+    }
+    readoutBox.append(rows);
+
+    // 꼬리 — 상태 주석·설명·전파 요약. 숫자가 아니라 문장이라 아래에 작게 둔다
+    const foot = el("div", { style: "margin-top:10px" });
+    if (note) {
+      foot.append(el("p", {
+        style: `margin:0 0 4px;color:${STATE_INK[sel.state]};font-size:12px`,
+      }, note));
+    }
+    foot.append(el("p", { class: "hint", style: "margin:0;font-size:12px" }, sel.desc));
+    if (sel.added?.length) {
+      foot.append(el("p", { style: `margin:4px 0 0;color:${WARN_INK};font-size:12px` },
+        `이 값을 올리면 생기는 노드: ${sel.added.join(", ")} — 탑재 C도 달라진다`));
+    }
+    foot.append(el("div", { class: "row", style: "gap:18px;margin-top:6px;font-size:12px" },
+      stat("건드리는 노드", (sel.seeds ?? []).join(", ") || "—"),
+      stat("도달 출력", (sel.outputs ?? []).join(", ") || "—")));
+    // 재생이 보여 주는 순서를 **글로도** 남긴다 — 캔버스만 아는 사실을 만들지 않는다.
+    // 캔버스 아래 줄은 재생 중 흘러가지만 이쪽은 선택마다 한 번 갱신되는 정적 사실이라
+    // 스크린리더가 요청할 때 읽는다(그래서 저쪽이 aria-hidden이어도 손실이 없다)
+    if (state.play) {
+      foot.append(el("p", { class: "hint", style: "margin:4px 0 0;font-size:12px" },
+        summaryOf(state.play, (id) => m.byId.get(id)?.label ?? id)));
+    }
+    readoutBox.append(foot);
   }
 
   function renderTable() {
@@ -392,28 +545,35 @@ export function render() {
     const rows = [...m.params].sort((a, b) =>
       (b.n_reach ?? 0) - (a.n_reach ?? 0) || a.param_id.localeCompare(b.param_id));
     tableBox.append(
-      el("div", { class: "scroll-x", style: "max-height:340px;overflow-y:auto" },
+      el("div", { class: "scroll-x", style: "max-height:420px;overflow-y:auto" },
         el("table", {},
           el("thead", {}, el("tr", {},
-            ["파라미터", "묶음", "값", "단위", "상태", "도달 노드", "도달 출력"].map((h) =>
-              el("th", {}, h)))),
-          el("tbody", {}, rows.map((p) =>
-            el("tr", {
+            ["파라미터", "묶음", "값 → 탐침", "단위", "상태", "도달 노드", "도달 출력"]
+              .map((h) => el("th", {}, h)))),
+          el("tbody", {}, rows.map((p) => {
+            const t = probeTransition(p);
+            return el("tr", {
               // 선택 강조 .25 — 라이트 시절의 .09는 #1c1c1e 위에서 식별 불가
               style: `cursor:pointer${p.id === state.selection ? ";background:rgba(10,132,255,.25)" : ""}`,
               onclick: () => select(p.id),
             },
               el("td", {}, el("code", { style: mono() }, p.param_id)),
               el("td", {}, m.bands?.[p.band]?.label ?? p.band),
-              el("td", { class: "num" }, fmtNum(p.value)),
+              // 값만 있던 열을 전이로 바꾼다 — 이 표에서도 "얼마에서 얼마로"가
+              // 읽혀야 판독대와 같은 사실을 말하는 표가 된다
+              el("td", { class: "num" }, t
+                ? transCell(t.from, t.to, t.delta, "")
+                : fmtNum(p.value)),
               el("td", {}, p.unit),
               el("td", {}, badge(p.state)),
               el("td", { class: "num" }, String(p.n_reach ?? 0)),
               el("td", {}, (p.outputs ?? []).join(", ") || "—"),
-            ))),
+            );
+          })),
         )),
       el("p", { class: "hint", style: "margin:6px 0 0" },
         "표가 이 화면의 정본이다 — 캔버스가 말하는 것은 전부 여기에도 있다. " +
+        "탐침은 상대 1% 유한 차분이지 미분이 아니다. " +
         "「도달 노드」는 영향의 크기가 아니라 영향이 있을 수 있는 범위다 — " +
         "포화된 가지나 0 게인을 지나는 경로도 도달로 잡힌다."),
     );
@@ -473,6 +633,8 @@ export function render() {
       recompute();
       renderPath();
       renderLegend(m);
+      renderTabCounts();  // 파라미터 개수·경고 개수가 여기서 정해진다
+      renderDrawer();     // 열려 있던 서랍이 새 모델의 내용으로 다시 그려진다
       rebuild();
       canvas.invalidate();
     } catch (e) {
@@ -538,8 +700,13 @@ export function render() {
   }
   renderCaseCount();
 
-  const metricLabel = (key) =>
-    (state.model?.metrics ?? []).find((m) => m.key === key)?.label ?? key;
+  const metricDef = (key) => (state.model?.metrics ?? []).find((m) => m.key === key);
+  const metricLabel = (key) => metricDef(key)?.label ?? key;
+  // 무단위 센티널 "-"는 단위가 아니다 (엔진 규약 — 판독대가 "0.12 -"를 찍지 않게)
+  const metricUnit = (key) => {
+    const u = metricDef(key)?.unit;
+    return u && u !== "-" ? u : "";
+  };
 
   async function runDiagnose() {
     const rid = resultInput.value.trim() || store.get("simResult")?.id;
@@ -563,6 +730,7 @@ export function render() {
   }
 
   function renderDiag() {
+    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
     clear(diagBox);
     const d = state.diag;
     if (!d) return;
@@ -674,40 +842,66 @@ export function render() {
         return;
       }
       const res = await api.get(`/results/${done.result_id}`);
+      state.openloop = { card, result: res, status: "" };
       olStatusLine.textContent = "";
-      renderOpenloop(card, res);
+      renderOpenloop();
+      // 판독대의 2단 줄이 여기서 채워진다 — 결과를 안 알리면 방금 잰 수치가
+      // 서랍 안에만 있고 화면의 주 표면은 여전히 "아직 안 쟀다"라고 말한다
+      renderReadout();
     } catch (e) {
+      state.openloop = { card, result: null, status: "개루프 실패", error: errorText(e) };
       olStatusLine.textContent = "개루프 실패";
       clear(olBox).append(el("div", { class: "error-box" }, errorText(e)));
     }
   }
 
-  function renderOpenloop(card, res) {
+  /** 전이 셀 — `기준 → 섭동 (Δ)`. 종전에는 기준과 Δ가 다른 열에 있어 "얼마로
+   *  가는지"를 사용자가 눈으로 더해야 했다. inf 문자열은 fmtDelta가 ∞로 받는다. */
+  function transCell(from, to, delta, unit, digits) {
+    if (from == null && to == null) return "—";
+    const [a, b] = fmtPair(from, to, digits);
+    return el("span", { style: "white-space:nowrap" },
+      el("span", { style: `color:${SKIN.inkDim}` }, a),
+      " → ",
+      el("strong", {}, b),
+      unit ? ` ${unit}` : "",
+      el("span", { style: `color:${SKIN.inkDim};margin-left:6px` },
+        `(${fmtSigned(delta)})`));
+  }
+
+  function renderOpenloop() {
+    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
     clear(olBox);
+    const s = state.openloop;
+    const res = s?.result;
+    if (!res) return;
+    const card = s.card;
     const rows = [];
     for (const pid of card.knobs) {
       const p = res.params?.[pid];
       if (!p) continue;
       if (p.status !== "ok") {
-        rows.push([pid, "—", "—", "—", "—", p.reason ?? p.status]);
+        rows.push({ pid, reason: p.reason ?? p.status });
         continue;
       }
       for (const [loopName, byCase] of Object.entries(p.loops ?? {})) {
         for (const [caseName, e] of Object.entries(byCase)) {
-          rows.push([pid, loopName, caseName,
-            e?.base ? `${fmtDelta(e.base.pm_deg)}° / ${fmtDelta(e.base.gm_db)} dB` : "—",
-            e?.delta ? `${fmtDelta(e.delta.pm_deg)}° / ${fmtDelta(e.delta.gm_db)} dB` : "—",
-            e?.note ?? ""]);
+          rows.push({ pid, loop: loopName, case: caseName, e });
         }
       }
     }
     // 요약이 정본 표면이다 — 케이스 격자에서 답할 질문은 "최악이 어디서 얼마나"이고,
     // 케이스별 전체 표는 접힌 근거로 남는다 (전 행을 펼치면 15케이스 × 루프 수가 된다)
     const worst = openloopWorst(res.params, card.knobs);
+    // 자릿수는 열마다 하나 (스윕 표와 같은 이유 — 같은 수가 다르게 찍히면 다른 수다)
+    const dKnob = columnDigits(worst.map((w) => [w.knobFrom, w.knobTo]));
+    const dPm = columnDigits(worst.map((w) => [w.pm?.from, w.pm?.to]));
+    const dGm = columnDigits(worst.map((w) => [w.gm?.from, w.gm?.to]));
+    const dRowPm = columnDigits(rows.map((r) => [r.e?.base?.pm_deg, r.e?.perturbed?.pm_deg]));
+    const dRowGm = columnDigits(rows.map((r) => [r.e?.base?.gm_db, r.e?.perturbed?.gm_db]));
     olBox.append(
-      el("h3", { style: "margin:12px 0 4px;font-size:14px" },
-        `개루프 마진 근거 (2단) — 섭동 ${fmtPercent(res.probe_rel)} · ` +
-        "케이스 전체에서 최악 Δ"),
+      el("h3", { style: "margin:0 0 4px;font-size:14px" },
+        `개루프 마진 (2단) — 섭동 ${fmtPercent(res.probe_rel)} · 케이스 전체에서 최악`),
       // 요약 대상이 없으면 표 대신 사유 — 빈 표는 버그로 읽힌다
       !worst.length
         ? el("p", { class: "hint", style: "margin:4px 0 0" },
@@ -716,17 +910,25 @@ export function render() {
         : el("div", { class: "scroll-x" },
             el("table", {},
               el("thead", {}, el("tr", {},
-                ["손잡이", "루프", "케이스 수", "최악 ΔPM (케이스)", "최악 ΔGM (케이스)"]
-                  .map((h) => el("th", {}, h)))),
+                ["손잡이 (얼마→얼마)", "루프", "케이스 수", "최악 PM (기준→섭동)",
+                 "최악 GM (기준→섭동)"].map((h) => el("th", {}, h)))),
               el("tbody", {}, worst.map((w) =>
                 el("tr", {},
-                  el("td", {}, el("code", { style: `${mono()};white-space:nowrap` }, w.param)),
+                  el("td", {},
+                    el("code", { style: `${mono()};white-space:nowrap` }, w.param),
+                    // 같은 전이를 판독대와 여기가 다른 자릿수로 찍으면 두 수로 읽힌다
+                    el("div", { style: `font-size:11px;color:${SKIN.inkDim}` },
+                      fmtPair(w.knobFrom, w.knobTo, dKnob).join(" → "))),
                   el("td", {}, el("code", { style: mono() }, w.loop)),
                   el("td", { class: "num" }, String(w.nCases)),
-                  el("td", { class: "num", style: "white-space:nowrap" },
-                    w.pm ? `${fmtDelta(w.pm.value)}° @ ${w.pm.case}` : "—"),
-                  el("td", { class: "num", style: "white-space:nowrap" },
-                    w.gm ? `${fmtDelta(w.gm.value)} dB @ ${w.gm.case}` : "—"),
+                  el("td", { class: "num" },
+                    w.pm ? transCell(w.pm.from, w.pm.to, w.pm.value, "°", dPm) : "—",
+                    w.pm ? el("div", { style: `font-size:11px;color:${SKIN.inkDim}` },
+                      `@${w.pm.case}`) : null),
+                  el("td", { class: "num" },
+                    w.gm ? transCell(w.gm.from, w.gm.to, w.gm.value, "dB", dGm) : "—",
+                    w.gm ? el("div", { style: `font-size:11px;color:${SKIN.inkDim}` },
+                      `@${w.gm.case}`) : null),
                 ))),
             )),
       el("details", { style: "margin-top:8px" },
@@ -735,12 +937,23 @@ export function render() {
         el("div", { class: "scroll-x", style: "margin-top:6px" },
           el("table", {},
             el("thead", {}, el("tr", {},
-              ["손잡이", "루프", "케이스", "기준 PM/GM", "Δ PM/GM", "비고"].map((h) =>
-                el("th", {}, h)))),
+              ["손잡이", "루프", "케이스", "PM (기준→섭동)", "GM (기준→섭동)", "비고"]
+                .map((h) => el("th", {}, h)))),
             el("tbody", {}, rows.map((r) =>
-              el("tr", {}, r.map((c, i) =>
-                el("td", i < 2 ? {} : { class: "num" },
-                  i < 2 ? el("code", { style: mono() }, c) : c))))),
+              el("tr", {},
+                el("td", {}, el("code", { style: mono() }, r.pid)),
+                el("td", {}, r.loop ? el("code", { style: mono() }, r.loop) : "—"),
+                el("td", {}, r.case ?? "—"),
+                el("td", { class: "num" }, r.e?.delta
+                  ? transCell(r.e.base?.pm_deg, r.e.perturbed?.pm_deg, r.e.delta.pm_deg,
+                      "°", dRowPm)
+                  : "—"),
+                el("td", { class: "num" }, r.e?.delta
+                  ? transCell(r.e.base?.gm_db, r.e.perturbed?.gm_db, r.e.delta.gm_db,
+                      "dB", dRowGm)
+                  : "—"),
+                el("td", { class: "hint" }, r.reason ?? r.e?.note ?? ""),
+              ))),
           ))),
       el("p", { class: "hint", style: "margin:6px 0 0" },
         "개루프는 피드백이 얼어 있는 근사다 — 스케줄이 덮는 자리·루프 선언이 없는 " +
@@ -830,6 +1043,7 @@ export function render() {
   }
 
   function renderScan() {
+    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
     clear(scanBox);
     const s = state.scan;
     scanStatusLine.textContent = s?.status ?? "";
@@ -958,6 +1172,7 @@ export function render() {
       }
       if (done.result_id) state.sweep.result = await api.get(`/results/${done.result_id}`);
       renderSweep();
+      renderReadout();  // 판독대 3단 줄 — 서랍 안에만 두면 주 표면이 계속 "안 쟀다"다
     } catch (e) {
       state.sweep.status = "실패";
       state.sweep.error = errorText(e);
@@ -966,6 +1181,7 @@ export function render() {
   }
 
   function renderSweep() {
+    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
     clear(sweepBox);
     const s = state.sweep;
     sweepStatusLine.textContent = s?.status ?? "";
@@ -978,11 +1194,19 @@ export function render() {
     if (!res) return;
     const keys = [...new Set(res.rows.flatMap((r) => Object.keys(r.metrics ?? {})))];
     const caseNames = [...new Set(res.rows.map((r) => r.case))];
+    // 케이스별 기준값 — 전체 표의 각 행이 "얼마에서 얼마로"를 스스로 말하게 한다
+    const baseOf = new Map(res.rows.filter((r) => r.label === "base")
+      .map((r) => [r.case, r.metrics ?? {}]));
+    // 자릿수는 **열마다 하나**다 — 행마다 정하면 같은 기준값이 40.8·40.847·40.85로
+    // 세 번 다르게 찍혀, 한 열 안에서 다른 수처럼 읽힌다 (라이브에서 그렇게 나왔다)
+    const fullDigits = Object.fromEntries(keys.map((k) => [k, columnDigits(
+      res.rows.filter((r) => r.label !== "base")
+        .map((r) => [baseOf.get(r.case)?.[k], r.metrics?.[k]]))]));
     const fullTable = el("div", { class: "scroll-x", style: "margin-top:8px" },
       el("table", {},
         el("thead", {}, el("tr", {},
           [el("th", {}, "런"), el("th", {}, "케이스"),
-           keys.map((k) => el("th", {}, `Δ ${metricLabel(k)}`))])),
+           keys.map((k) => el("th", {}, metricLabel(k)))])),
         el("tbody", {}, res.rows.map((r) =>
           el("tr", {},
             el("td", {},
@@ -990,29 +1214,37 @@ export function render() {
             el("td", { style: "white-space:nowrap" }, r.case),
             keys.map((k) => el("td", { class: "num" },
               r.label === "base"
-                ? `기준 ${fmtDelta(r.metrics?.[k])}`
-                : fmtDelta(r.delta?.[k]))),
+                // 기준 행도 같은 자릿수 — 아래 행들의 왼쪽 수와 글자 그대로 같아야 한다
+                ? `기준 ${fmtPair(r.metrics?.[k], r.metrics?.[k], fullDigits[k])[0]}`
+                : transCell(baseOf.get(r.case)?.[k], r.metrics?.[k], r.delta?.[k], "",
+                    fullDigits[k]))),
           ))),
       ));
     if (caseNames.length > 1) {
-      // 다중 케이스 — 런별 최악 Δ 요약이 정본 표면, 케이스×런 전체 표는 접힌 근거
-      const worst = worstDeltas(res.rows);
+      // 다중 케이스 — 런별 최악 전이 요약이 정본 표면, 케이스×런 전체 표는 접힌 근거
+      const worst = worstTransitions(res.rows);
+      const worstDigits = Object.fromEntries(keys.map((k) => [k, columnDigits(
+        Object.values(worst).map((m) => m[k]).filter(Boolean)
+          .map((t) => [t.from, t.to]))]));
       sweepBox.append(
-        el("h3", { style: "margin:12px 0 4px;font-size:14px" },
-          `폐루프 스윕 (3단 B) — 케이스 ${caseNames.length}건 · 런별 최악 Δ (@케이스)`),
+        el("h3", { style: "margin:0 0 4px;font-size:14px" },
+          `폐루프 스윕 (3단 B) — 케이스 ${caseNames.length}건 · 런별 최악 (기준→섭동)`),
         el("div", { class: "scroll-x" },
           el("table", {},
             el("thead", {}, el("tr", {},
               [el("th", {}, "런"),
-               keys.map((k) => el("th", {}, `Δ ${metricLabel(k)}`))])),
+               keys.map((k) => el("th", {},
+                 `${metricLabel(k)}${metricUnit(k) ? ` [${metricUnit(k)}]` : ""}`))])),
             el("tbody", {}, Object.entries(worst).map(([label, m]) =>
               el("tr", {},
-                // nowrap — 좁은 셀에서 라벨·"Δ @ 케이스"가 세로로 꺾이면 행이
-                // 비대해진다. 넘침은 scroll-x 컨테이너가 받는다
+                // nowrap — 좁은 셀에서 라벨이 세로로 꺾이면 행이 비대해진다.
+                // 넘침은 scroll-x 컨테이너가 받는다
                 el("td", {},
                   el("code", { style: `${mono()};white-space:nowrap` }, label)),
-                keys.map((k) => el("td", { class: "num", style: "white-space:nowrap" },
-                  m[k] ? `${fmtDelta(m[k].delta)} @ ${m[k].case}` : "—")),
+                keys.map((k) => el("td", { class: "num" },
+                  m[k] ? transCell(m[k].from, m[k].to, m[k].delta, "", worstDigits[k]) : "—",
+                  m[k] ? el("div", { style: `font-size:11px;color:${SKIN.inkDim}` },
+                    `@${m[k].case}`) : null)),
               ))),
           )),
         el("details", { style: "margin-top:8px" },
@@ -1025,7 +1257,8 @@ export function render() {
     }
     sweepBox.append(
       el("p", { class: "hint", style: "margin:6px 0 0" },
-        "Δ는 같은 케이스의 base 런 대비다 — 행마다 형상 지문이 계보로 저장되어 있다."),
+        "기준은 같은 케이스의 base 런이고 괄호 안이 Δ다 — " +
+        "행마다 형상 지문이 계보로 저장되어 있다."),
     );
     if (res.nonadditivity?.length) {
       sweepBox.append(
@@ -1053,6 +1286,114 @@ export function render() {
     }
   }
 
+  // ── 서랍 — 그래프 아래는 전부 여기 들어간다 (한 번에 하나) ────────────────
+  // 두 개를 동시에 열 수 있게 하면 결국 다시 세로로 쌓인 패널 다섯 장이 된다.
+  // 내용 박스(tableBox·diagBox…)는 **재사용**한다: 매번 새로 만들면 진단·스캔
+  // 결과를 그린 DOM이 서랍을 닫을 때마다 버려져 다시 그려야 한다
+
+  const drawerBox = el("div", { class: "inf-drawer" });
+
+  const DRAWERS = [
+    { key: "params", label: "파라미터",
+      count: () => state.model?.params.length ?? 0,
+      build: () => [el("h2", {}, "파라미터 — 이 형상에서 흔들 수 있는 전부"), tableBox] },
+    { key: "diag", label: "진단·처방",
+      count: () => state.diag?.prescriptions.length ?? null,
+      build: () => [
+        el("h2", {}, "진단 → 처방 → 스윕 — 무엇을 만질지, 그다음 얼마나 (2·3단)"),
+        el("p", { class: "hint", style: "margin:0 0 8px" },
+          "저장된 폐루프 런에서 결함을 귀속한다: 필터 병목인지 게인 미달인지, " +
+          "포화를 어느 항이 주도하는지, 적분이 얼마나 막혀 있었는지. 처방 카드의 " +
+          "손잡이(스케줄이 덮는 자리는 table.* 배율로 자동 승격)가 그대로 3단 스윕의 " +
+          "입력이 된다 — 전 게인 공간이 아니라 처방 부분공간만 흔든다."),
+        el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
+          resultInput,
+          el("button", { class: "primary", onclick: runDiagnose }, "진단 실행")),
+        el("div", {
+          class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px",
+        },
+          el("span", { class: "hint" }, "케이스 격자"),
+          el("label", { class: "hint" }, "mach ", machFromIn, " ~ ", machToIn),
+          el("label", { class: "hint" }, "간격 ", machStepIn),
+          el("label", { class: "hint" }, "alt[m] ", altsIn),
+          el("label", { class: "hint" }, "fuel[kg] ", fuelsIn),
+          el("label", { class: "hint" }, "스텝 s ", stepIn),
+          caseCountHint,
+          el("span", { class: "grow" }),
+          el("button", { onclick: runScan }, "전 케이스 스캔 (3단 A)")),
+        el("div", { class: "row", style: "margin-top:6px" }, diagStatus),
+        diagBox,
+      ] },
+    { key: "openloop", label: "개루프 Δ",
+      count: () => (state.openloop?.result ? 1 : null),
+      build: () => [olStatusLine, olBox, state.openloop?.result ? null
+        : el("p", { class: "hint", style: "margin:0" },
+            "아직 없다 — 「진단·처방」에서 진단을 돌린 뒤 처방 카드의 " +
+            "[개루프 근거 (2단)]를 누르면 여기 채워진다.")] },
+    { key: "sweep", label: "스캔·스윕 Δ",
+      count: () => (state.sweep?.result ? 1 : null),
+      build: () => [scanStatusLine, scanBox, sweepStatusLine, sweepBox,
+        state.scan || state.sweep ? null
+          : el("p", { class: "hint", style: "margin:0" },
+              "아직 없다 — 「진단·처방」에서 [전 케이스 스캔]으로 결함 케이스를 좁힌 뒤 " +
+              "처방 카드의 [이 부분공간 스윕]을 누른다. 여기가 폐루프 실측이다.")] },
+    // 경고는 **있을 때만** 칩이 선다 — 항상 서 있으면 0을 세는 칩이 되고,
+    // 그러면 경고가 생겼다는 사실 자체가 화면에서 안 보인다.
+    // 범례는 여기 없다: 색이 칠해진 그래프가 늘 떠 있는데 범례를 클릭 뒤로 숨기면
+    // 화면이 자기가 쓴 색을 설명하지 않는 상태가 된다 (캔버스 바로 아래에 둔다)
+    { key: "warn", label: "⚠ 경고", hidden: () => !state.model?.warnings.length,
+      count: () => (state.model?.warnings.length || null),
+      build: () => [warnBox] },
+  ];
+
+  const drawerTabs = new Map();
+
+  function renderDrawer() {
+    for (const [key, btn] of drawerTabs) {
+      btn.setAttribute("aria-expanded", state.drawer === key ? "true" : "false");
+    }
+    clear(drawerBox);
+    const d = DRAWERS.find((x) => x.key === state.drawer);
+    if (!d) return;
+    for (const node of d.build()) if (node) drawerBox.append(node);
+  }
+
+  const tabBar = el("div", { class: "inf-tabs" },
+    DRAWERS.map((d) => {
+      const btn = el("button", {
+        class: "inf-tab", "aria-expanded": "false", "aria-controls": "inf-drawer",
+        onclick: () => {
+          state.drawer = state.drawer === d.key ? null : d.key;
+          renderDrawer();
+        },
+      }, d.label);
+      drawerTabs.set(d.key, btn);
+      return btn;
+    }));
+  drawerBox.id = "inf-drawer";
+
+  /** 칩의 개수 배지 — 결과가 생겼는데 서랍이 닫혀 있으면 무슨 일이 있었는지가
+   *  화면에서 사라진다. 셀 것이 없는 칩(count가 null)은 배지 자체가 없다.
+   *  숨은 칩이 열려 있던 상태로 남으면 서랍만 떠 있고 여는 버튼이 없다 — 같이 닫는다. */
+  function renderTabCounts() {
+    let closed = false;
+    for (const d of DRAWERS) {
+      const btn = drawerTabs.get(d.key);
+      const hidden = d.hidden?.() ?? false;
+      btn.hidden = hidden;
+      if (hidden && state.drawer === d.key) {
+        state.drawer = null;
+        closed = true;
+      }
+      const n = d.count();
+      clear(btn).append(d.label);
+      if (n) btn.append(el("span", { class: "n" }, String(n)));
+    }
+    // 여는 버튼이 사라졌으면 서랍도 여기서 닫는다 — 호출부에 맡기면 어느 한 곳이
+    // 잊는 순간 닫을 수 없는 서랍이 남는다 (renderDrawer는 여기를 안 부르므로 재귀 없음)
+    if (closed) renderDrawer();
+  }
+
   canvas = createInfluenceCanvas({
     width: CANVAS_W,
     height: CANVAS_H,
@@ -1068,68 +1409,37 @@ export function render() {
   canvasBox.append(canvas.root);
 
   load();
-  // 탭을 떠났다 와도 진단·스캔·스윕 결과는 다시 그린다 (모듈 스코프 state 유지 규약)
+  // 탭을 떠났다 와도 진단·개루프·스캔·스윕 결과는 다시 그린다 (모듈 스코프 state 규약)
   if (state.diag) renderDiag();
+  if (state.openloop?.result) renderOpenloop();
   if (state.scan) renderScan();
   if (state.sweep) renderSweep();
+  renderTabCounts();
+  renderDrawer();
 
   return el("div", { class: "inf-dark" },
-    el("div", { class: "panel" },
-      el("h2", {}, "영향성 — 설계값 연계·정량 영향성 평가 (02 §2.4)"),
-      el("div", { class: "row", style: "gap:14px;align-items:center" },
-        el("span", { class: "grow" }),
-        processBtn,
-        el("button", { onclick: load }, "다시 계산"),
-      ),
+    // 카드 없는 머리 — 블록도 최상위(.bd .pagetop)와 같은 자리
+    el("div", { class: "inf-top" },
+      el("h1", {}, "영향성"),
+      el("div", { class: "inf-subline" },
+        el("p", {}, "값 하나를 고르면 ", el("b", {}, "얼마에서 얼마로"),
+          " 가는지, 그때 마진과 설계 지표가 얼마에서 얼마로 가는지."),
+        el("div", { class: "row", style: "gap:8px" },
+          processBtn,
+          el("button", { onclick: load }, "다시 계산"))),
       el("div", { class: "row", style: "margin-top:6px" }, statusLine),
-      warnBox,
       errBox,
     ),
-    el("div", { class: "panel" },  // 다크 표면은 .inf-dark 스코프가 준다 — 인라인 중복 금지
-      canvasBox,
-      playLine,
-      pathBox,
+    // 그래프 — 카드 밖, 페이지 위에 그대로 (캔버스가 자기 테두리를 갖는다).
+    // 범례·보존 캐비앳은 그림 바로 아래: 그림이 쓴 색과 굵기를 설명하는 자리라
+    // 클릭 뒤로 숨기면 화면이 자기 문법을 말하지 않게 된다
+    el("div", { class: "inf-stage" },
+      canvasBox, playLine, pathBox,
       el("div", { style: "margin-top:10px" }, legendBox),
-      conservedNote,
-    ),
-    el("div", { class: "panel" }, detailBox),
-    el("div", { class: "panel" },
-      el("h2", {}, "파라미터"),
-      tableBox,
-    ),
-    el("div", { class: "panel" },
-      el("h2", {}, "진단 → 처방 → 스윕 — 무엇을 만질지, 그다음 얼마나 (2·3단)"),
-      el("p", { class: "hint", style: "margin:0 0 8px" },
-        "저장된 폐루프 런에서 결함을 귀속한다: 필터 병목인지 게인 미달인지, " +
-        "포화를 어느 항이 주도하는지, 적분기가 클램프에 주차했는지. 처방 카드의 " +
-        "손잡이(스케줄이 덮는 자리는 table.* 배율로 자동 승격)가 그대로 3단 스윕의 " +
-        "입력이 된다 — 전 게인 공간이 아니라 처방 부분공간만 흔든다."),
-      el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
-        resultInput,
-        el("button", { class: "primary", onclick: runDiagnose }, "진단 실행"),
-      ),
-      el("div", {
-        class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px",
-      },
-        el("span", { class: "hint" }, "케이스 격자"),
-        el("label", { class: "hint" }, "mach ", machFromIn, " ~ ", machToIn),
-        el("label", { class: "hint" }, "간격 ", machStepIn),
-        el("label", { class: "hint" }, "alt[m] ", altsIn),
-        el("label", { class: "hint" }, "fuel[kg] ", fuelsIn),
-        el("label", { class: "hint" }, "스텝 s ", stepIn),
-        caseCountHint,
-        el("span", { class: "grow" }),
-        el("button", { onclick: runScan }, "전 케이스 스캔 (3단 A)"),
-      ),
-      el("div", { class: "row", style: "margin-top:6px" }, diagStatus),
-      diagBox,
-      olStatusLine,
-      olBox,
-      scanStatusLine,
-      scanBox,
-      sweepStatusLine,
-      sweepBox,
-    ),
+      conservedNote),
+    readoutBox,
+    tabBar,
+    drawerBox,
   );
 }
 

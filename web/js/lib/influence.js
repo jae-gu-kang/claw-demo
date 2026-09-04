@@ -171,6 +171,127 @@ export function fmtPercent(v, digits = 1) {
   return `${(v * 100).toFixed(digits)}%`;
 }
 
+/** 부호를 항상 붙인 값 — Δ는 방향이 뜻의 절반이라 +를 생략하면 읽는 쪽이 뺀다.
+ *  음수는 하이픈이 아니라 U+2212(−): 고정폭 숫자 옆에서 하이픈은 글머리표로 읽힌다. */
+export function fmtSigned(v, digits = 3) {
+  const s = fmtDelta(v, digits);
+  if (typeof v !== "number" || !Number.isFinite(v) || v === 0) return s;
+  return v > 0 ? `+${s}` : s.replace("-", "−");
+}
+
+const PAIR_MIN_DIGITS = 3;
+const PAIR_MAX_DIGITS = 7; // 그 이상은 읽히지 않는다 — 정밀한 차이는 Δ가 따로 말한다
+
+const finiteNum = (v) => typeof v === "number" && Number.isFinite(v);
+
+/** 이 전이를 구분해 찍는 데 필요한 최소 유효숫자 (3~7).
+ *
+ * 고정 자릿수로 반올림하면 상대 1% 섭동이 「4.0e−4 → 4.0e−4」가 되어 화면이
+ * "안 변했다"고 말한다 — 이 화면의 주 질문이 정확히 그 자리에서 죽는다.
+ * 7자리까지 가도 같으면 **정말 같은 값**이다(섭동 실패·범위 클립).
+ */
+export function pairDigits(from, to) {
+  if (!finiteNum(from) || !finiteNum(to)) return PAIR_MIN_DIGITS;
+  for (let d = PAIR_MIN_DIGITS; d < PAIR_MAX_DIGITS; d += 1) {
+    const [a, b] = fmtPair(from, to, d);
+    if (a !== b) return d;
+  }
+  return PAIR_MAX_DIGITS;
+}
+
+/** 전이 한 쌍의 표기 — `[from, to]`.
+ *
+ * `digits`를 주면 그 자릿수로 찍고, 안 주면 `pairDigits`가 정한다. **표에서는 주는
+ * 것이 맞다**: 행마다 따로 정하면 같은 기준값이 한 열 안에서 40.8·40.847·40.85로
+ * 세 번 다르게 찍혀, 값이 다른 것처럼 읽힌다(같은 base 런의 같은 수인데도).
+ */
+export function fmtPair(from, to, digits) {
+  if (!finiteNum(from) || !finiteNum(to)) return [fmtDelta(from), fmtDelta(to)];
+  const d = digits ?? pairDigits(from, to);
+  // 표기 방식은 둘이 **같아야** 한다 — 한쪽만 지수로 찍히면 크기 비교가 안 된다
+  const expo = [from, to].some((v) => v !== 0 && (Math.abs(v) >= 1e4 || Math.abs(v) < 1e-3));
+  return [from, to].map((v) =>
+    (expo ? v.toExponential(d - 1) : String(Number(v.toPrecision(d)))));
+}
+
+/** 한 열(같은 지표)의 전이들을 **같은 자릿수**로 찍기 위한 공통 자릿수.
+ *
+ * 행별 최소 자릿수의 **최댓값이 아니다.** 자릿수를 올리면 반올림 경계가 옮겨 가서,
+ * 낮은 자릿수에서는 갈리던 쌍이 높은 자릿수에서 새로 뭉개질 수 있다
+ * (40.847→40.853은 3자리에서 40.8/40.9로 갈리지만 4자리에서 둘 다 40.85다).
+ * 그래서 **모든 행이 동시에 갈리는** 가장 작은 자릿수를 찾는다. 값이 정말 같은
+ * 행(섭동 클립)은 어느 자릿수에서도 못 갈리므로 탐색을 막지 않는다.
+ */
+export function columnDigits(pairs) {
+  const usable = (pairs ?? []).filter(([f, t]) => finiteNum(f) && finiteNum(t));
+  if (!usable.length) return PAIR_MIN_DIGITS;
+  const splits = (d) => usable.every(([f, t]) => {
+    if (f === t) return true;
+    const [a, b] = fmtPair(f, t, d);
+    return a !== b;
+  });
+  for (let d = PAIR_MIN_DIGITS; d < PAIR_MAX_DIGITS; d += 1) {
+    if (splits(d)) return d;
+  }
+  return PAIR_MAX_DIGITS;
+}
+
+/** 상대 변화 (to−from)/|from| — 기준이 0이면 **없다**(null).
+ *
+ * 0에서의 비율을 ∞나 0으로 적으면 화면이 "무한히 나빠졌다"거나 "안 변했다"고
+ * 거짓말한다. 기준값이 정확히 0인 자리는 실재한다(k_diff_thr·ki_hdg·k_thr_turn) —
+ * 그때는 비율을 접고 절대 Δ로만 말하는 것이 맞다.
+ */
+export function relOf(from, to) {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === 0) return null;
+  return (to - from) / Math.abs(from);
+}
+
+// 비율이 이보다 작으면 "+0.0%"로 반올림된다 — 소수 1자리 표기의 바닥
+const REL_FLOOR = 0.001;
+
+/** 변화량 한 조각 — 비율이 읽히면 비율로, 아니면 절대 Δ로.
+ *
+ * 두 자리에서 비율이 거짓말한다: 기준이 0이면 비율이 아예 없고(relOf), 비율이
+ * 0.1% 미만이면 「+0.0%」로 반올림돼 값은 눈에 띄게 움직였는데 변화량은
+ * "안 변했다"고 말한다(0.16969 → 0.16972가 그랬다). 둘 다 절대 Δ로 넘긴다.
+ */
+export function fmtChange(delta, rel, unit = "") {
+  const readable = rel != null && Math.abs(rel) >= REL_FLOOR;
+  if (readable) return `${rel > 0 ? "+" : "−"}${fmtPercent(Math.abs(rel))}`;
+  return `${fmtSigned(delta)}${unit ? ` ${unit}` : ""}`;
+}
+
+/** 전이의 눈에 띄는 정도 — 판독대가 지표 12개 중 **무엇을 먼저 보일지** 정하는 순위.
+ *
+ * 지표마다 단위가 달라 |Δ|로는 줄을 세울 수 없으므로 상대 변화를 쓴다. 다만 두
+ * 자리가 상대 변화로 표현되지 않는다:
+ *
+ *  - Δ가 0이면 **안 움직인 것**이라 맨 뒤다. `relOf`가 여기서 null을 내는데
+ *    (기준 0 → 0), 그 null을 큰 수로 접으면 아무 일도 없던 지표가 맨 앞에 선다
+ *    (실제로 그랬다: 엔벨로프 이탈·타면 포화·리미터 작동이 전부 0→0인 채 상위 3줄을
+ *    차지하고, 실제로 움직인 속도 RMS가 접혀 들어갔다).
+ *  - 기준이 0인데 Δ가 있으면 **없던 일이 생긴 것**이다. 비율은 정의되지 않지만
+ *    질적 변화라 맨 앞이 맞다 — 리미터가 한 번도 안 걸리던 형상에서 걸리기 시작했다면
+ *    그것이 이 화면이 가장 먼저 말해야 할 사실이다.
+ */
+export function impactRank(t) {
+  if (!t || !t.delta) return -1;
+  return t.rel == null ? Infinity : Math.abs(t.rel);
+}
+
+/** 1단 탐침 전이 — 이 파라미터가 「얼마에서 얼마로」 흔들렸는가.
+ *  섭동을 못 만든 자리(범위가 막힌 자리)는 to가 없으므로 null이다. */
+export function probeTransition(param) {
+  if (!param || param.probe_to == null || !Number.isFinite(param.value)) return null;
+  return {
+    from: param.value, to: param.probe_to,
+    delta: param.probe_to - param.value,
+    rel: relOf(param.value, param.probe_to),
+    unit: param.unit && param.unit !== "-" ? param.unit : "",
+  };
+}
+
 /** 로그 스케일 굵기 매핑 — 기준값이 미소한 노드에서 상대 Δ가 폭주하기 때문.
  *
  * 실측 사례: tau_hdg +10%에 scas_roll_sum의 상대 Δ가 341%였다(기준값이 미소해서다).
@@ -353,26 +474,47 @@ export function sweepCases(grid, scan) {
   return grid.filter((c) => sel.has(c.name));
 }
 
-/** 다중 케이스 스윕 요약 — base 제외 런 label별로, 지표마다 |Δ| 최대와 그 케이스.
- *  케이스 하나뿐이어도 형태는 같다 (요약 표가 곧 그 케이스). */
-export function worstDeltas(rows) {
+/** 다중 케이스 스윕 요약 — base 제외 런 label별로, 지표마다 |Δ| 최대인 **전이**와
+ *  그 케이스. 케이스 하나뿐이어도 형태는 같다 (요약 표가 곧 그 케이스).
+ *
+ * Δ만 내던 종전 형태로는 이 화면의 주 질문("얼마에서 얼마로")에 답할 수 없었다.
+ * 기준값은 **같은 케이스의 base 런**이 들고 있으므로 여기서 짝지어 from·to를 함께
+ * 낸다 — 화면이 base 행을 따로 뒤지면 같은 짝짓기가 두 곳에 적힌다.
+ */
+export function worstTransitions(rows) {
+  const base = new Map();
+  for (const r of rows ?? []) {
+    if (r.label === "base") base.set(r.case, r.metrics ?? {});
+  }
   const out = {};
   for (const r of rows ?? []) {
     if (r.label === "base" || !r.delta) continue;
     const entry = (out[r.label] ??= {});
     for (const [k, v] of Object.entries(r.delta)) {
       if (v == null) continue;
-      if (!entry[k] || Math.abs(v) > Math.abs(entry[k].delta)) {
-        entry[k] = { delta: v, case: r.case };
-      }
+      if (entry[k] && Math.abs(v) <= Math.abs(entry[k].delta)) continue;
+      // from·to는 **있으면** 싣는다 — base 런이 취소로 잘린 케이스에서도 Δ는
+      // 유효하므로(서버가 같은 케이스 base 대비로 이미 계산했다) 요약에서 빼지 않는다
+      const from = base.get(r.case)?.[k];
+      const to = r.metrics?.[k];
+      entry[k] = {
+        delta: v, case: r.case,
+        from: from == null ? null : from,
+        to: to == null ? null : to,
+        rel: relOf(from, to),
+      };
     }
   }
   return out;
 }
 
 /** 2단 다중 케이스 요약 — (knob, 루프)별로 케이스 전체에서 |ΔPM|·|ΔGM|가 가장
- *  큰 값과 그 케이스. delta가 없는 항목(no_loop·overridden 등)은 세지 않는다 —
- *  판정 불가를 0으로 위장하지 않는 renderOpenloop 규약과 같다. */
+ *  큰 전이와 그 케이스. delta가 없는 항목(no_loop·overridden 등)은 세지 않는다 —
+ *  판정 불가를 0으로 위장하지 않는 renderOpenloop 규약과 같다.
+ *
+ * 기준·섭동 마진은 서버가 이미 `base`·`perturbed`로 준다 — Δ만 그리면 "48.3°에서
+ * 47.1°로"가 화면에 없어 사용자가 두 열을 눈으로 더해야 했다. 여기서 함께 싣는다.
+ */
 export function openloopWorst(params, knobs) {
   const rows = [];
   for (const pid of knobs ?? []) {
@@ -385,16 +527,17 @@ export function openloopWorst(params, knobs) {
       for (const [caseName, e] of Object.entries(byCase ?? {})) {
         if (!e?.delta) continue;
         n += 1;
-        const dpm = e.delta.pm_deg;
-        const dgm = e.delta.gm_db;
-        if (dpm != null && (!pm || Math.abs(dpm) > Math.abs(pm.value))) {
-          pm = { value: dpm, case: caseName };
-        }
-        if (dgm != null && (!gm || Math.abs(dgm) > Math.abs(gm.value))) {
-          gm = { value: dgm, case: caseName };
-        }
+        const at = (key, cur, v) => (v != null && (!cur || Math.abs(v) > Math.abs(cur.value))
+          ? { value: v, case: caseName,
+              from: e.base?.[key] ?? null, to: e.perturbed?.[key] ?? null }
+          : cur);
+        pm = at("pm_deg", pm, e.delta.pm_deg);
+        gm = at("gm_db", gm, e.delta.gm_db);
       }
-      if (n) rows.push({ param: pid, loop, nCases: n, pm, gm });
+      // 손잡이 자신의 전이(value → probe_to)도 함께 — 마진이 얼마에서 얼마로 갔는지는
+      // **무엇을 얼마로 바꿨을 때**인지와 짝이어야 읽힌다
+      if (n) rows.push({ param: pid, loop, nCases: n, pm, gm,
+        knobFrom: p.value ?? null, knobTo: p.probe_to ?? null });
     }
   }
   return rows;

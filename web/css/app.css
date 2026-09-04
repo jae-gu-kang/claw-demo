@@ -768,6 +768,80 @@ body:has(.inf-dark) header h1 .sub { color: rgba(235, 235, 245, .6); }
   padding: 0 6px;
 }
 
+/* ── 그래프 전면 배치 (v0.49) ──────────────────────────────────────────────
+   블록도 최상위와 같은 규약: 주 그림은 **카드에 넣지 않는다**(.bd .canvas-wrap.top).
+   이 탭의 주 질문은 그래프가 답하므로 그래프가 화면이고, 나머지는 서랍에 넣어
+   눌렀을 때만 나온다. 그래서 폭도 이 탭에서만 넓힌다 — 카드가 없으니 1440에
+   묶어 둘 이유가 없고, 캔버스 논리폭(CANVAS_W)이 그대로 들어가는 폭이 필요하다. */
+body:has(.inf-dark) main { max-width: 1580px; }
+
+.inf-dark .inf-top { margin: 2px 0 12px; }
+.inf-dark .inf-top h1 { margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
+.inf-dark .inf-subline { display: flex; align-items: center; justify-content: space-between; gap: 10px 24px; flex-wrap: wrap; margin-top: 7px; }
+.inf-dark .inf-subline p { margin: 0; font-size: 13px; font-weight: 500; color: rgba(235, 235, 245, .6); }
+
+/* `.inf-stage`에는 규칙이 없다 — 그것이 이 배치의 요지다. 캔버스는 자기 테두리·
+   그림자를 이미 갖고 있고(influencecanvas.js), 그 바깥에 배경도 테두리도 두지
+   않는 것이 "칸 없이 페이지 위에"다. 클래스는 구조 표식으로만 남긴다. */
+
+/* ── 정량 판독대 — 이 화면의 주 질문("얼마에서 얼마로")이 사는 자리 ─────────
+   선택한 파라미터 하나에 대해 세 단이 각각 한 줄씩. 없는 단은 빈칸이 아니라
+   **사유**를 낸다 (판정 불가를 0으로 위장하지 않는 이 화면의 규약과 같다). */
+.inf-dark .inf-readout {
+  margin-top: 12px;
+  background: #1c1c1e;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.inf-dark .inf-rohead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.inf-dark .inf-rohead .name { font-family: var(--mono); font-size: 13px; font-weight: 700; }
+.inf-dark .inf-rorows { display: grid; gap: 8px; margin-top: 10px; }
+.inf-dark .inf-rorow {
+  display: grid;
+  /* 단 이름 · 무엇을 잰 것인가 · 큰 숫자 · Δ — 숫자 열이 세로로 줄 맞아야 훑힌다.
+     남는 폭은 **끝에서** 흡수한다(justify-content:start): 가운데 열을 1fr로 두면
+     넓은 화면에서 라벨과 숫자가 화면 양끝으로 갈라져 한 줄로 안 읽힌다 */
+  grid-template-columns: 76px minmax(130px, 220px) minmax(230px, 300px) minmax(150px, auto);
+  justify-content: start;
+  gap: 4px 16px;
+  align-items: baseline;
+}
+.inf-dark .inf-tier { font-size: 11px; font-weight: 700; letter-spacing: .3px; white-space: nowrap; }
+.inf-dark .inf-what { font-size: 12px; color: rgba(235, 235, 245, .6); }
+/* 큰 숫자 — 이 화면에서 제일 크다. 눈이 먼저 닿아야 하는 사실이 여기 있다 */
+.inf-dark .inf-num { font-family: var(--mono); font-size: 21px; font-weight: 700; line-height: 1.25; white-space: nowrap; }
+.inf-dark .inf-num .to { color: #ffffff; }
+.inf-dark .inf-num .from { color: rgba(235, 235, 245, .55); }
+.inf-dark .inf-num .arrow { color: rgba(235, 235, 245, .4); margin: 0 7px; font-weight: 400; }
+.inf-dark .inf-num .unit { font-size: 12px; font-weight: 600; color: rgba(235, 235, 245, .5); margin-left: 4px; }
+.inf-dark .inf-chg { font-family: var(--mono); font-size: 13px; font-weight: 700; white-space: nowrap; }
+.inf-dark .inf-at { font-size: 11px; color: rgba(235, 235, 245, .45); }
+.inf-dark .inf-why { font-size: 12px; color: rgba(235, 235, 245, .45); grid-column: 3 / -1; }
+
+/* ── 서랍 — 나머지는 전부 눌렀을 때만 ──────────────────────────────────── */
+.inf-dark .inf-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; align-items: center; }
+.inf-dark .inf-tab {
+  padding: 6px 13px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(255, 255, 255, .12);
+  color: rgba(235, 235, 245, .75);
+}
+.inf-dark .inf-tab:hover { background: rgba(255, 255, 255, .1); }
+.inf-dark .inf-tab[aria-expanded="true"] { background: #0a84ff; border-color: #0a84ff; color: #fff; }
+.inf-dark .inf-tab .n { font-family: var(--mono); opacity: .75; margin-left: 5px; }
+.inf-dark .inf-drawer:not(:empty) {
+  margin-top: 10px;
+  background: #1c1c1e;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
 /* 처방 카드("게인 박스") — min()으로 좁은 컨테이너에서는 카드가 먼저 줄어든다
    (280px 고정 하한이면 카드가 패널 밖으로 나간다). 내용은 위 code 규칙이 가둔다 */
 .inf-dark .knob-card {
@@ -807,4 +881,17 @@ body:has(.inf-dark) header h1 .sub { color: rgba(235, 235, 245, .6); }
      .scroll-x/.panel 가로 스크롤로 돌린다. 카드 안 칩은 그대로 꺾인다(폭이
      잠긴 곳의 넘침 방지가 원래 목적). 데스크톱은 두 줄 칩이 낫다 — 미디어 한정 */
   .inf-dark table code { white-space: nowrap; }
+
+  /* 판독대는 4열 최소폭이 ~634px이라 폰에서 그대로는 넘친다. 여기만은 가로
+     스크롤로 돌릴 수 없다 — 이 화면의 주 표면이라 큰 숫자가 화면 밖에 있으면
+     안 보이는 것과 같다. 단 이름만 왼쪽에 두고 나머지를 세로로 쌓는다 */
+  body:has(.inf-dark) main { max-width: none; }
+  .inf-dark .inf-top h1 { font-size: 24px; }
+  .inf-dark .inf-rorow {
+    grid-template-columns: 68px minmax(0, 1fr);
+    row-gap: 1px;
+  }
+  .inf-dark .inf-rorow > :nth-child(n + 3), .inf-dark .inf-why { grid-column: 2; }
+  .inf-dark .inf-num { font-size: 18px; white-space: normal; }
+  .inf-dark .inf-readout { padding: 10px 12px; }
 }
