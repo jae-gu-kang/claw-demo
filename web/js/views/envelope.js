@@ -1,12 +1,27 @@
-/** 엔벨로프 뷰 (01 §2.6) — 제어법칙 설계 엔벨로프: 필요값 입력 → 합성 + 구성 선도.
+/** 엔벨로프 뷰 (01 §2.6) — 제어법칙 설계 엔벨로프를 **6계층**으로.
 
-설계 엔벨로프 = 구조 ∧ 공력 ∧ 추진 ∧ 운용 ∧ 제어 가능 영역 — V-n 선도는
-설계점 선정표가 아니라 상위 constraint 하나다. 패널: 필요값 폼 → M-h 합성
-(경계별 색 귀속 + 스케줄 격자점 + 트림 스캔 판정) → 구조(V-n, 교과서형)
-→ 공력(α–Mach) → 추진(스로틀 소요 히트맵 — 프로펠러 추력 곡선 기준) → 운용(입력 한계 박스).
+Envelope는 하나가 아니다. 목적에 따라 층이 갈리고, 그 순서가 곧 설계 순서다 —
+"어디서 날 수 있나 → 각 점이 트림되나 → 그 점의 동특성이 무엇인가 → 어디를 설계점
+으로 삼고 게인을 어떻게 배치하나 → 어디를 넘으면 안 되나 → 설계점 **사이**에서도
+지켜지나". 그래서 이 탭의 서랍은 기능 묶음이 아니라 **계층 파이프라인**이다:
 
-수치는 전부 엔진(vn_envelope·design_envelope·envelope_verdict) — 여기서는
-표시만. 표현 변환(다각형·세그먼트·셀 분류·프리필)은 lib/envelope.js(테스트).
+    ① 운용·비행 → ② 트림 → ③ 선형 모델 → ④ 제어 설계·스케줄링
+                              → ⑤ 한계·보호 → ⑥ 검증·마진
+
+    Flight Envelope → Trim Point → Linear Model A,B,C,D → Control Design/LPV
+                    → Limit/Protection → Dense Sweep → Validation
+
+화면의 주인공은 ①이다 — M-h 합성 선도가 카드 밖 전면에 놓이고(블록도 최상위·
+영향성과 같은 규약, views/stage.js), 나머지 층은 눌렀을 때만 나온다.
+
+**이 탭이 계산하지 않는 층도 층으로 세운다.** ③ 선형 모델과 ⑥ 검증·마진의 수치는
+마진 맵 탭이 낸다. 그렇다고 목록에서 빼면 파이프라인에 구멍이 뚫린 채 "엔벨로프는
+다섯 층"이라고 말하게 된다 — 대신 그 서랍은 **그 층이 무엇이고 어디서 나오는지**와
+지금 저장된 산출물이 몇 건인지를 낸다. 없는 그림을 지어내지 않는 것과, 층이 없는
+척하는 것은 다르다.
+
+수치는 전부 엔진(vn_envelope·design_envelope·envelope_verdict) — 여기서는 표시만.
+표현 변환(다각형·세그먼트·셀 분류·프리필)은 lib/envelope.js(테스트).
 구조 한계 프리필은 응답 echo 자기 정렬(02 §5.5 — 기본값 재기술 금지):
 손대지 않은 필드만 echo로 갱신, 값을 보내는 건 손댄 필드뿐.
 */
@@ -23,6 +38,7 @@ import { machRange, nameCases, parseNumberList, serpentineCases } from "../lib/g
 import { fuelsOf, linScale, niceTicks, pivotCases } from "../lib/plot.js";
 import { heatmapCanvas, makeCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
+import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
 
 let lastVn = null;
 let lastMh = null;
@@ -39,6 +55,11 @@ const touched = new Set(); // 구조 필드 중 사용자가 손댄 것 — 이�
 // 레이어 토글 — 겹쳐 그릴 것이 아홉 가지라 토글 없이는 읽히지 않는다.
 // 응답을 다시 받지 않고 다시 그리기만 하므로 서버 계약과 무관한 순수 표시 상태.
 const layers = { isoQbar: true, isoTas: false, maneuver: true, scan: true, thrust: true };
+// 탭을 떠났다 와도 열어 둔 계층은 그대로 (모듈 스코프 규약)
+let openLayer = null;
+// /results 색인 — ③·⑥ 층이 "이 격자를 실제로 잰 산출물이 몇 건인가"를 말하는 데만 쓴다.
+// 없으면 없다고 하지, 0건을 "아직 안 불러옴"과 같은 얼굴로 내지 않는다
+let stored = null;
 
 // [폼 키, 서버 파라미터] — 구조 한계 오버라이드 5종 (vn·design-envelope 공유 계약)
 const STRUCT_FIELDS = [
@@ -51,6 +72,66 @@ const LAYER_FIELDS = [
   ["scan", "스캔 판정"], ["thrust", "추력 한계 경계"],
 ];
 
+/** 6계층 — 서랍의 순서가 곧 설계 순서다 (파이프라인). 각 층의 정의는 여기 한 곳.
+ *  칩 라벨의 번호를 지우지 말 것: 이 목록은 묶음이 아니라 **차례**라, 번호가 없으면
+ *  같은 칩 여덟 개가 나란히 선 화면이 된다. */
+const LAYER_DEF = {
+  L1: {
+    label: "① 운용·비행",
+    what: "항공기가 운용 가능한 비행조건의 전체 영역. 축은 (M, h)로 그리지만 실제 "
+      + "운용점은 다차원이다 — x_op = [M, h, W, CG, 형상(flap·gear·store), …].",
+  },
+  L2: {
+    label: "② 트림",
+    what: "그 영역 안에서 실제로 trim이 잡히는 부분과, 각 점의 α_trim·δe_trim·"
+      + "T_trim. 공력 DB(C_L·C_D·C_m …)와 안정·조종 미계수가 여기서 쓰이고, "
+      + "이 값들이 다음 층의 선형화 입력이 된다.",
+  },
+  L3: {
+    label: "③ 선형 모델",
+    what: "각 트림점에서 뽑은 ẋ = A_i x + B_i u — 그리고 그 모드(단주기·장주기·"
+      + "더치롤·롤·나선)의 ω_n·ζ와 조종 효율.",
+  },
+  L4: {
+    label: "④ 제어 설계·스케줄링",
+    what: "전 영역에서 대표 설계점을 고르고(P1, P2, …), 그 점들에 게인을 배치한다 — "
+      + "K = f(M, q̄) 또는 f(V)·f(q̄)·f(M, h). LPV라면 스케줄링 파라미터 ρ가 "
+      + "영역 안에서 연속으로 움직인다.",
+  },
+  L5: {
+    label: "⑤ 한계·보호",
+    what: "물리적으로 넘어가면 안 되는 경계 — V-n 선도, V_S·V_A·V_NO·V_D, 하중배수 "
+      + "한계, 동압 한계. 제어법칙의 Envelope Protection(α ≤ α_lim, n_z ≤ n_z,max, "
+      + "q̄ ≤ q̄_max)이 여기서 나온다. 조종권(타면 위치·rate·힌지모멘트) 한계도 같은 층이다.",
+  },
+  L6: {
+    label: "⑥ 검증·마진",
+    what: "설계점만 보면 안 된다. 설계점 사이까지 촘촘히 sweep해서 GM(M,h)·PM(M,h)·"
+      + "ζ(M,h)·ω_n(M,h)를 맵으로 만든다 — 게인 스케줄 경계점 사이에서 마진이 "
+      + "떨어지는 현상을 찾는 것이 목적이다.",
+  },
+};
+
+/** 층 머리 — 정의 한 문단 + "이 도구에서는" 한 줄. 여섯 서랍이 같은 얼굴이어야
+ *  사용자가 층을 옮겨 다니며 같은 자리에서 같은 것을 읽는다. */
+function layerHead(key, here) {
+  const d = LAYER_DEF[key];
+  return [
+    el("h2", {}, `${d.label} 엔벨로프`),
+    // 마크다운 별표는 텍스트 노드에서 글자 그대로 나온다 — 강조가 필요하면 노드를
+    // 쓰고, 이 문장은 칩 title(속성)로도 쓰이므로 애초에 표식 없는 글로 적는다
+    el("p", { class: "hint", style: "margin:0 0 4px; max-width:96ch" }, d.what),
+    el("p", { class: "hint", style: "margin:0 0 12px; max-width:96ch" },
+      el("b", {}, "이 도구에서 — "), here),
+  ];
+}
+
+/** 다른 탭으로 보내는 줄. 링크 없이 "마진 맵 탭에서 봅니다"라고만 쓰면 사용자가
+ *  탭 이름을 눈으로 찾아야 한다 — 갈 곳이 있으면 갈 수 있게 한다. */
+const goTo = (hash, label, tail) =>
+  el("p", { class: "hint", style: "margin:8px 0 0" },
+    "→ ", el("a", { href: hash }, label), tail ? ` ${tail}` : null);
+
 export function render() {
   const errBox = el("div");
   const progressBox = el("div");
@@ -59,6 +140,27 @@ export function render() {
   const aeroBox = el("div");
   const propBox = el("div");
   const opsBox = el("div");
+  const scanBox = el("div");
+  // 스캔 격자 칸은 **한 번만** 만들고 다시 그리지 않는다 — 담는 상자째로.
+  // renderScanTable이 매번 새로 만들면(또는 담긴 상자를 비우면) 「그리기」를 누르는
+  // 순간 편집 중이던 칸이 DOM에서 들려 나가 포커스가 <body>로 떨어진다. 값은 form에
+  // 남으니 잃지 않지만, 타이핑하다 다른 버튼을 누르면 커서가 사라지는 화면이 된다
+  // (영향성 칩이 겪고 고친 그 자리와 같은 종류다). 그래서 격자는 서랍이 직접 들고,
+  // renderScanTable은 **그 아래 결과만** 갈아 끼운다
+  const scanGrid = el("div", { class: "opt-group" },
+    el("div", { class: "g-title" }, "제어 가능 스캔 격자 (트림 잡 — 점당 트림 1회)"),
+    el("div", { class: "row-inner" },
+      el("label", { class: "field" }, "마하 시작", scanInput("scanFrom", "num-sm")),
+      el("label", { class: "field" }, "끝", scanInput("scanTo", "num-sm")),
+      el("label", { class: "field" }, "간격", scanInput("scanStep", "num-sm")),
+      el("label", { class: "field grow" }, "고도 목록 [m]", scanInput("scanAlts", ""))));
+  const formBox = el("div");
+  const l1Box = el("div");
+  const l3Box = el("div");
+  const l4Box = el("div");
+  const l6Box = el("div");
+  const limitsBox = el("div");
+  const layerBar = el("div", { class: "tab-actions" });
 
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -130,6 +232,7 @@ export function render() {
         }
         lastScan = await api.get(`/results/${job.result_id}`);
         renderAll();
+        drawers.open("L2"); // 결과가 사는 층을 열어 준다 — 찾아 헤매게 하지 않는다
       } catch (e) {
         showErr(e);
       }
@@ -182,64 +285,421 @@ export function render() {
     renderAero(aeroBox);
     renderProp(propBox);
     renderOps(opsBox);
+    renderScanTable(scanBox);
+    renderL1(l1Box);
+    renderL3(l3Box);
+    renderL4(l4Box);
+    renderL6(l6Box);
+    renderLimits(limitsBox);
+    drawers.refresh();
   };
 
-  const root = el("div", {},
-    el("div", { class: "panel" },
-      el("h2", {}, "설계 엔벨로프 — 필요값 입력"),
-      el("div", { class: "row" },
-        el("label", { class: "field" }, "고도 [m] (V-n)", bind("alt")),
-        el("label", { class: "field" }, "연료 [kg]", bind("fuel")),
-        el("label", { class: "field" }, "보호 마진 [rad]", bind("margin")),
-        el("button", { class: "primary", onclick: draw }, "그리기"),
-      ),
-      el("div", { class: "field-grid", style: "margin-top: 10px" },
-        el("div", { class: "opt-group" },
-          el("div", { class: "g-title" }, "구조 한계 — 빈칸/미수정 = 데모 자리표시 (응답이 채움)"),
-          el("div", { class: "row-inner" },
-            el("label", { class: "field" }, "+제한 [g]", bindStruct("nPos")),
-            el("label", { class: "field" }, "−제한 [g]", bindStruct("nNeg")),
-            el("label", { class: "field" }, "안전계수", bindStruct("sf")),
-            el("label", { class: "field" }, "M_NO", bindStruct("machNo")),
-            el("label", { class: "field" }, "M_D", bindStruct("machD")))),
-        el("div", { class: "opt-group" },
-          el("div", { class: "g-title" }, "운용·동압 — 실기체 값: 미입력이면 경계 없음 (기본값 없음)"),
-          el("div", { class: "row-inner" },
-            el("label", { class: "field" }, "q̄_max [Pa]", bind("qMax")),
-            el("label", { class: "field" }, "운용 하한 [m]", bind("altMin")),
-            el("label", { class: "field" }, "운용 상한 [m]", bind("altMax")),
-            el("label", { class: "field" }, "실속 여유 ×", bind("machMargin")),
-            el("label", { class: "field" }, "기동 n_z [g]", bind("nz")))),
-        el("div", { class: "opt-group" },
-          el("div", { class: "g-title" }, "제어 가능 스캔 격자 (트림 잡 — 점당 트림 1회)"),
-          el("div", { class: "row-inner" },
-            el("label", { class: "field" }, "마하 시작", bind("scanFrom", { class: "num-sm" })),
-            el("label", { class: "field" }, "끝", bind("scanTo", { class: "num-sm" })),
-            el("label", { class: "field" }, "간격", bind("scanStep", { class: "num-sm" })),
-            el("label", { class: "field grow" }, "고도 목록 [m]", bind("scanAlts", { class: "" })),
-            el("button", { onclick: runScan }, "제어 가능 판정 (트림 스캔)"))),
-      ),
-      el("div", { class: "row", style: "margin-top: 10px" },
-        el("span", { class: "g-title" }, "M-h 레이어"),
-        ...LAYER_FIELDS.map(([key, label]) => layerToggle(key, label)),
-      ),
-      el("p", { class: "hint" },
-        "설계 엔벨로프 = 구조 ∧ 공력 ∧ 추진 ∧ 운용 ∧ 제어 가능 영역 (01 §2.6) — ",
-        "V-n은 상위 constraint 하나. 구조 필드는 손댄 것만 서버로 보내고(02 §5.5), ",
-        "빈칸으로 되돌리면 데모 자리표시로 복귀. 실속 여유 빈칸 = 엔진 기본값. ",
-        "기동 n_z는 그 하중배수를 낼 수 있는 영역(1g 영역의 안쪽) — 빈칸이면 안 그린다."),
-      progressBox, errBox,
+  // ── 필요값 입력 — 서랍 안. 한 번 정하면 잘 안 바뀌는 값들이라 늘 펴 둘 자리가
+  //    아니다. 다만 「그리기」만은 머리줄에 남긴다: 값을 고친 뒤 눌러야 하는 버튼이
+  //    같은 서랍 안에만 있으면 서랍을 닫는 순간 다시 그릴 방법이 사라진다.
+  clear(formBox).append(
+    el("div", { class: "row" },
+      el("label", { class: "field" }, "고도 [m] (V-n)", bind("alt")),
+      el("label", { class: "field" }, "연료 [kg]", bind("fuel")),
+      el("label", { class: "field" }, "보호 마진 [rad]", bind("margin")),
+      el("button", { class: "primary", onclick: draw }, "그리기"),
     ),
-    el("div", { class: "panel" }, el("h2", {}, "설계 엔벨로프 합성 (M-h)"), mhBox),
-    el("div", { class: "panel" }, el("h2", {}, "구조 엔벨로프 — V-n 선도"), vnBox),
-    el("div", { class: "panel" }, el("h2", {}, "공력 엔벨로프 — α–Mach"), aeroBox),
-    el("div", { class: "panel" }, el("h2", {}, "추진 엔벨로프 — 스로틀 소요"), propBox),
-    el("div", { class: "panel" }, el("h2", {}, "운용 엔벨로프"), opsBox),
+    el("div", { class: "field-grid", style: "margin-top: 10px" },
+      el("div", { class: "opt-group" },
+        el("div", { class: "g-title" }, "구조 한계 — 빈칸/미수정 = 데모 자리표시 (응답이 채움)"),
+        el("div", { class: "row-inner" },
+          el("label", { class: "field" }, "+제한 [g]", bindStruct("nPos")),
+          el("label", { class: "field" }, "−제한 [g]", bindStruct("nNeg")),
+          el("label", { class: "field" }, "안전계수", bindStruct("sf")),
+          el("label", { class: "field" }, "M_NO", bindStruct("machNo")),
+          el("label", { class: "field" }, "M_D", bindStruct("machD")))),
+      el("div", { class: "opt-group" },
+        el("div", { class: "g-title" }, "운용·동압 — 실기체 값: 미입력이면 경계 없음 (기본값 없음)"),
+        el("div", { class: "row-inner" },
+          el("label", { class: "field" }, "q̄_max [Pa]", bind("qMax")),
+          el("label", { class: "field" }, "운용 하한 [m]", bind("altMin")),
+          el("label", { class: "field" }, "운용 상한 [m]", bind("altMax")),
+          el("label", { class: "field" }, "실속 여유 ×", bind("machMargin")),
+          el("label", { class: "field" }, "기동 n_z [g]", bind("nz")))),
+    ),
+    el("p", { class: "hint" },
+      "설계 엔벨로프 = 구조 ∧ 공력 ∧ 추진 ∧ 운용 ∧ 제어 가능 영역 (01 §2.6) — ",
+      "V-n은 상위 constraint 하나. 구조 필드는 손댄 것만 서버로 보내고(02 §5.5), ",
+      "빈칸으로 되돌리면 데모 자리표시로 복귀. 실속 여유 빈칸 = 엔진 기본값. ",
+      "기동 n_z는 그 하중배수를 낼 수 있는 영역(1g 영역의 안쪽) — 빈칸이면 안 그린다."),
   );
-  if (lastVn || lastMh) renderAll();
-  else draw();
+
+  clear(layerBar).append(
+    el("span", { class: "hint" }, "M-h 층"),
+    ...LAYER_FIELDS.map(([key, label]) => layerToggle(key, label)),
+  );
+
+  const scanCount = () => (lastScan ? lastScan.cases.length : null);
+  const marginCount = () => (stored ? stored.filter((m) => m.kind === "margin_map").length : null);
+
+  const drawers = createDrawers({
+    id: "envelope-drawer",
+    initial: openLayer,
+    onOpen: (k) => { openLayer = k; },
+    defs: [
+      { key: "form", label: "필요값 입력", group: "입력",
+        title: "형상·구조 한계·운용 한계 — 여기 값이 전 층의 입력이다",
+        build: () => formBox },
+      { key: "L1", label: LAYER_DEF.L1.label, group: "설계 엔벨로프 6계층",
+        title: LAYER_DEF.L1.what,
+        count: () => (lastMh ? `${lastMh.region.alt.filter((_, i) => !lastMh.region.empty[i]).length}행` : null),
+        build: () => l1Box },
+      { key: "L2", label: LAYER_DEF.L2.label, group: "설계 엔벨로프 6계층",
+        title: LAYER_DEF.L2.what, count: scanCount,
+        build: () => [
+          ...layerHead("L2", [
+            "격자 트림 스캔이 점마다 trim 가능 여부와 사유를 판정하고(엔진 ",
+            el("code", {}, "envelope_verdict"),
+            "), 그 결과가 ① 합성 선도 위에 판정 점으로 덧그려진다. ",
+            "α–Mach 선도가 공력 경계를, 스로틀 소요 히트맵이 추진 소요를 낸다.",
+          ]),
+          scanGrid,
+          scanBox,
+          drawerSection("공력 경계 — α–Mach",
+            "설계 엔벨로프의 저속 경계는 이 곡선의 V_S 역산(×실속 여유)에서 온다.",
+            aeroBox),
+          drawerSection("추진 소요 — 트림 스로틀",
+            "T_trim을 스로틀 소요로 표면화한 것. 상한 포화가 곧 추진 한계다.",
+            propBox),
+          goTo("#trim", "트림 탭", "— 같은 격자를 배치로 돌려 θ·δe·스로틀과 판정 플래그를 표로 봅니다."),
+        ] },
+      { key: "L3", label: LAYER_DEF.L3.label, group: "설계 엔벨로프 6계층",
+        title: LAYER_DEF.L3.what, build: () => l3Box },
+      { key: "L4", label: LAYER_DEF.L4.label, group: "설계 엔벨로프 6계층",
+        title: LAYER_DEF.L4.what,
+        count: () => lastMh?.schedule_grid?.points?.length ?? null,
+        build: () => l4Box },
+      { key: "L5", label: LAYER_DEF.L5.label, group: "설계 엔벨로프 6계층",
+        title: LAYER_DEF.L5.what,
+        build: () => [
+          ...layerHead("L5", [
+            "V-n 선도가 구조 한계를, 운용 박스가 입력한 고도·마하 한계를 낸다. ",
+            "이 층의 값이 그대로 제어법칙의 보호 한계(α 리미터·n_z·q̄)가 된다 — ",
+            "지금 구조 한계는 데모 프로파일 자리표시이고, 위 「필요값 입력」에 실기체 값을 "
+            + "넣으면 그 값으로 다시 계산한다.",
+          ]),
+          limitsBox,
+          drawerSection("V-n 선도 (교과서형)", null, vnBox),
+          drawerSection("운용 엔벨로프 — 입력 한계 박스", null, opsBox),
+          goTo("#duty", "타면 사용 탭",
+            "— 조종권(타면 위치·rate) 한계 쪽 층입니다. 다만 이 도구는 아직 "
+            + "δ_max(M, q̄)처럼 비행조건별로 갈리는 조종권 한계를 관리하지 않습니다 — "
+            + "타면 한계는 조건과 무관한 상수입니다."),
+        ] },
+      { key: "L6", label: LAYER_DEF.L6.label, group: "설계 엔벨로프 6계층",
+        title: LAYER_DEF.L6.what, count: marginCount, build: () => l6Box },
+    ],
+  });
+
+  // 먼저 한 번 그린다 — 응답이 아직 없어도 각 층이 **왜 비었는지**를 말해야 한다
+  renderAll();
+  loadStored().then(() => drawers.refresh());
+  if (!lastVn && !lastMh) draw(); // 재진입이면 받아 둔 응답 그대로 (다시 부르지 않는다)
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착
-  return root;
+
+  return el("div", { class: "tab-page" },
+    tabTop({
+      title: "엔벨로프",
+      lead: "설계 엔벨로프는 한 장이 아니라 여섯 층이다 — "
+        + "운용·비행 → 트림 → 선형 모델 → 제어 설계·스케줄링 → 한계·보호 → 검증·마진. "
+        + "화면의 그림은 그중 ①이고, 나머지 층은 아래 칩에 있다.",
+      actions: [
+        el("button", { class: "primary", onclick: draw }, "그리기"),
+        el("button", { onclick: runScan }, "제어 가능 판정 (트림 스캔)"),
+      ],
+      extra: [progressBox, errBox],
+    }),
+    layerBar,
+    // ① 합성 선도 — 카드 밖, 페이지 위에 그대로 (캔버스가 자기 테두리를 갖는다)
+    tabStage(mhBox),
+    drawers.root,
+  );
+}
+
+/** /results 색인 — ③·⑥ 층의 "몇 건 있나"에만 쓴다. 실패해도 화면은 그대로 뜬다
+ *  (건수를 못 세는 것과 그림이 안 뜨는 것은 무게가 다르다). */
+async function loadStored() {
+  try {
+    stored = await api.get("/results");
+  } catch {
+    stored = null; // null = 못 물어봤다. 0건과 같은 얼굴로 내지 않는다
+  }
+}
+
+/** 구조·운용 한계 표 — ⑤ 층. 값이 어디서 왔는지(자리표시/사용자 입력)가 값만큼 중요하다.
+ *
+ *  **지속 노드에 그린다.** build() 안에서 만들면 서랍을 열어 둔 채 「그리기」를 눌렀을 때
+ *  표가 옛 상태("그리기 실행 시 표시됩니다")에 얼어붙는다 — 서랍 갱신은 칩만 고치므로. */
+function renderLimits(box) {
+  if (!lastMh?.limits) {
+    clear(box).append(el("p", { class: "hint" }, "그리기 실행 시 표시됩니다."));
+    return;
+  }
+  const L = lastMh.limits;
+  const b = lastMh.bounds;
+  const over = new Set(lastMh.limits_overridden ?? []);
+  const src = (param) => (over.has(param)
+    ? el("span", { class: "flag ok" }, "사용자 입력")
+    : el("span", { class: "flag na" }, "데모 자리표시"));
+  const rows = [
+    ["n_limit_pos", "+제한하중 n", "g", L.n_limit_pos],
+    ["n_limit_neg", "−제한하중 n", "g", L.n_limit_neg],
+    ["safety_factor", "안전계수 (극한/제한)", "—", L.safety_factor],
+    ["mach_no", "M_NO 최대 구조 순항", "—", L.mach_no],
+    ["mach_d", "M_D 급강하 한계", "—", L.mach_d],
+  ];
+  clear(box).append(el("div", { class: "scroll-x" }, el("table", {},
+    el("thead", {}, el("tr", {},
+      el("th", {}, "한계"), el("th", {}, "값"), el("th", {}, "단위"), el("th", {}, "출처"))),
+    el("tbody", {},
+      rows.map(([param, name, unit, v]) => el("tr", {},
+        el("td", {}, name),
+        el("td", { class: "num" }, fmt(v, 4)),
+        el("td", {}, unit),
+        el("td", {}, src(param)))),
+      // 운용·동압은 구조와 출처가 다르다 — 미입력이면 **경계 자체가 없다**
+      [["q̄_max 동압 한계", "Pa", b.q_max], ["운용 고도 하한", "m", b.alt_min],
+       ["운용 고도 상한", "m", b.alt_max]].map(([name, unit, v]) => el("tr", {},
+        el("td", {}, name),
+        el("td", { class: "num" }, v == null ? "—" : fmt(v, 5)),
+        el("td", {}, unit),
+        el("td", {}, v == null
+          ? el("span", { class: "flag na" }, "미입력 — 경계 없음")
+          : el("span", { class: "flag ok" }, "사용자 입력")))),
+    ))));
+}
+
+// ── ① 운용·비행 — 경계 귀속과, 이 도구가 아직 축으로 쓰지 않는 것 ────────────
+
+function renderL1(box) {
+  const kids = layerHead("L1", [
+    "M-h 합성 선도가 이 층이고, 화면 위에 이미 떠 있다. 여기 표는 그 영역의 ",
+    el("b", {}, "경계를 무엇이 정했는지"),
+    "를 고도 구간별로 나눠 적는다 — 같은 테두리라도 실속이 정한 변과 M_D가 정한 변은 "
+    + "설계에서 하는 일이 다르다.",
+  ]);
+  if (!lastMh) {
+    clear(box).append(...kids, el("p", { class: "hint" }, "그리기 실행 시 표시됩니다."));
+    return;
+  }
+  const r = lastMh.region;
+  const live = r.alt.map((_, i) => i).filter((i) => !r.empty[i]);
+  // 귀속이 바뀌는 지점에서만 행을 낸다 — 41행을 그대로 내면 표가 아니라 목록이다
+  const runs = [];
+  for (const i of live) {
+    const key = `${r.lo_source[i]}|${r.hi_source[i]}`;
+    const last = runs[runs.length - 1];
+    if (last && last.key === key && last.end + 1 === i) { last.end = i; }
+    else runs.push({ key, start: i, end: i, lo: r.lo_source[i], hi: r.hi_source[i] });
+  }
+  kids.push(
+    el("div", { class: "scroll-x" }, el("table", {},
+      el("thead", {}, el("tr", {},
+        el("th", {}, "고도 구간 [m]"), el("th", {}, "저속 경계 (하한)"),
+        el("th", {}, "고속 경계 (상한)"), el("th", {}, "마하 폭"))),
+      el("tbody", {}, runs.map((run) => el("tr", {},
+        el("td", { class: "num" },
+          `${fmt(r.alt[run.start], 5)} ~ ${fmt(r.alt[run.end], 5)}`),
+        el("td", {},
+          el("span", { class: "chip", style: `background:${boundColor(run.lo)}` }),
+          " ", boundLabel(run.lo)),
+        el("td", {},
+          el("span", { class: "chip", style: `background:${boundColor(run.hi)}` }),
+          " ", boundLabel(run.hi)),
+        el("td", { class: "num" },
+          `M ${fmt(r.mach_lo[run.start], 3)} ~ ${fmt(r.mach_hi[run.start], 3)}`),
+      )))),
+    ),
+    // 위·아래 변은 좌우 변과 성격이 다르다 — 셋 중 하나가 "운용 한계가 아닌 것"이다
+    el("h3", {}, "위·아래 변 (닫힌 곡선의 나머지 두 변)"),
+    el("div", { class: "legend" },
+      ...[...new Set(outlineCaps(r, lastMh.bounds).map((c) => c.source))].map((code) =>
+        el("span", {},
+          el("span", { class: "chip", style: `background:${capColor(code)}` }),
+          capLabel(code)))),
+    el("p", { class: "hint" },
+      "천장이 세 종류인 이유: 운용 상한(실기체 값)·표시 상한([기본값]이라 운용 한계가 "
+      + "아니다)·자연 천장(실속 하한이 마하 상한을 만나 영역이 사라진 지점). 셋을 같은 "
+      + "선으로 그리면 화면이 없는 상승한도를 있는 것처럼 말한다."),
+    el("h3", {}, "이 도구가 축으로 쓰는 것 · 아직 쓰지 않는 것"),
+    el("p", { class: "hint" },
+      "운용점은 ", el("code", {}, "[M, h, 연료]"), " 세 축이다. ",
+      el("b", {}, "무게중심(CG)·형상(flap·gear·store)은 축이 아니다"),
+      " — 데모 기체가 형상 변화를 갖지 않고 CG는 연료 소모로만 움직인다. "
+      + "실기체로 갈 때 이 층이 가장 먼저 넓어지는 자리이고, 그때 아래 층 전부가 "
+      + "축 하나씩을 더 받는다(트림도 선형화도 설계점도 CG별로 갈린다)."),
+  );
+  clear(box).append(...kids);
+}
+
+// ── ② 트림 — 스캔 판정 표 ─────────────────────────────────────────────────
+
+function renderScanTable(box) {
+  const kids = [];
+  if (!lastScan) {
+    kids.push(el("p", { class: "hint" },
+      "아직 스캔하지 않았습니다 — 머리줄의 [제어 가능 판정 (트림 스캔)]을 누르면 "
+      + "격자 점마다 트림을 풀고 판정이 여기와 ① 선도에 함께 나옵니다. "
+      + "연료는 「필요값 입력」의 값을 씁니다."));
+    clear(box).append(...kids);
+    return;
+  }
+  const cells = scanCells(lastScan.cases);
+  const s = scanSummary(cells);
+  kids.push(
+    el("div", { class: "legend" },
+      el("span", {}, el("span", { class: "chip", style: `background:${kindColor("ok")}` }),
+        `${kindLabel("ok")} ${s.ok}/${s.total}`),
+      ...s.byKind.map(({ kind, n }) => el("span", {},
+        el("span", { class: "chip", style: `background:${kindColor(kind)}` }),
+        `${kindLabel(kind)} ${n}건`))),
+    el("div", { class: "scroll-x" }, el("table", {},
+      el("thead", {}, el("tr", {},
+        el("th", {}, "마하"), el("th", {}, "고도 [m]"), el("th", {}, "연료 [kg]"),
+        el("th", {}, "판정"), el("th", {}, "사유 (엔진 우선순위 순)"))),
+      el("tbody", {}, cells.map((c) => el("tr", {},
+        el("td", { class: "num" }, fmt(c.mach, 4)),
+        el("td", { class: "num" }, fmt(c.alt, 5)),
+        el("td", { class: "num" }, fmt(c.fuel, 4)),
+        el("td", {}, el("span", {
+          class: "chip",
+          style: `background:${kindColor(c.kind)}; width:auto; padding:1px 8px; border-radius:999px`,
+        }, c.ok ? "가능" : "불가")),
+        // 사유는 전량을 낸다 — 대표 하나만 내면 스로틀 포화가 미수렴에 가려진다
+        el("td", {}, c.ok ? "—" : c.reasons.map(kindLabel).join(" · ")),
+      )))),
+    ),
+    el("p", { class: "hint" },
+      "판정은 엔진 envelope_verdict가 낸다 — 웹은 사유 코드를 라벨로만 바꾼다. "
+      + "격자를 촘촘히 할수록 경계가 정확해지고, 스캔 격자 해상도가 곧 경계 해상도다."),
+  );
+  clear(box).append(...kids);
+}
+
+/** 스캔 격자 입력 한 칸 — 폼 상태(form)를 직접 물고, 만든 노드가 화면의 수명 내내
+ *  그대로 산다(위 scanGrid 참조). 값의 정본은 form이라 탭을 떠났다 와도 남는다. */
+function scanInput(key, cls) {
+  const inp = el("input", { class: cls, value: form[key] });
+  inp.oninput = () => { form[key] = inp.value; };
+  return inp;
+}
+
+// ── ③ 선형 모델 · ⑥ 검증·마진 — 이 탭이 계산하지 않는 층 ─────────────────
+
+/** 저장된 산출물 줄 — "몇 건 있나"까지만. 못 물어봤으면 0건이라고 하지 않는다. */
+function storedLine(kind, label) {
+  if (stored == null) {
+    return el("p", { class: "hint", style: "margin:8px 0 0" },
+      `저장 산출물 목록을 불러오지 못했습니다 — ${label} 건수를 세지 못했습니다.`);
+  }
+  const n = stored.filter((m) => m.kind === kind).length;
+  const last = stored.filter((m) => m.kind === kind)[0];
+  return el("p", { class: "hint", style: "margin:8px 0 0" },
+    n === 0
+      ? `저장된 ${label} 산출물 없음 — 아직 이 층을 실측하지 않았습니다.`
+      : `저장된 ${label} 산출물 ${n}건`
+        + (last?.created ? ` · 최근 ${new Date(last.created * 1000).toLocaleString()}` : "")
+        + ".");
+}
+
+function renderL3(box) {
+  clear(box).append(
+    ...layerHead("L3", [
+      el("b", {}, "이 탭은 선형 모델을 만들지 않는다"),
+      " — 트림점에서 A, B, C, D를 뽑고 모드를 분류하는 것은 마진 맵 탭의 잡(엔진 ",
+      el("code", {}, "linearize"), " · ", el("code", {}, "classify"),
+      ")이다. 여기서는 그 층이 파이프라인의 어디인지와, 지금 실측이 있는지만 말한다.",
+    ]),
+    el("p", { class: "hint", style: "max-width:96ch" },
+      "② 트림이 낸 각 점의 (α_trim, δe_trim, T_trim)이 이 층의 입력이고, 나온 A_i·B_i가 "
+      + "④ 설계점의 제어기 설계 대상이 된다. 그래서 ②가 실패한 점에는 ③이 없다 — "
+      + "선형화할 평형점 자체가 없기 때문이다."),
+    storedLine("margin_map", "마진 맵(선형화·고유치)"),
+    goTo("#margins", "마진 맵 탭",
+      "— 케이스 격자 × 개루프로 고유치 맵·감쇠비 표·보드선도를 냅니다."),
+  );
+}
+
+function renderL6(box) {
+  const kids = layerHead("L6", [
+    el("b", {}, "설계점 격자와 검증 격자는 같을 필요가 없다"),
+    " — 오히려 달라야 한다. 게인을 마하 몇 점에서 설계했더라도, 검증은 그 사이를 "
+    + "훨씬 촘촘히 훑어야 스케줄 경계점 사이에서 마진이 꺼지는 곳을 찾는다.",
+  ]);
+  if (lastMh?.schedule_grid) {
+    const g = lastMh.schedule_grid;
+    kids.push(el("p", { class: "hint", style: "max-width:96ch" },
+      `지금 설계(스케줄) 격자는 고도당 마하 ${g.n_mach}점 · 고도 ${g.alts.length}단이다. `
+      + "검증 격자는 마진 맵 탭에서 따로 정한다 — 같은 수를 쓰면 설계점만 통과하는 "
+      + "게인이 통과로 보이고, 그것이 이 층을 따로 두는 이유다."));
+  }
+  kids.push(
+    storedLine("margin_map", "마진 맵(GM·PM 스윕)"),
+    goTo("#margins", "마진 맵 탭", "— GM/PM 히트맵·고유치 맵·감쇠비 표."),
+    goTo("#autodesign", "자동 설계 탭",
+      "— 설계 → 검증 → 처방 루프를 한 잡으로 돌리고, 검증점 판정을 원장으로 남깁니다."),
+    goTo("#influence", "영향성 탭",
+      "— 게인 하나를 흔들었을 때 전 구간 마진이 어느 쪽으로 가는지를 표로 냅니다."),
+  );
+  clear(box).append(...kids);
+}
+
+// ── ④ 제어 설계·스케줄링 — 설계점 격자 ───────────────────────────────────
+
+function renderL4(box) {
+  const kids = layerHead("L4", [
+    "① 합성 선도 위의 속 빈 사각형이 이 층이다 — 게인 스케줄 격자점. "
+    + "그 점마다 ③ 선형 모델을 뽑아 제어기를 설계하고, 점 사이는 스케줄이 잇는다.",
+  ]);
+  if (!lastMh?.schedule_grid) {
+    clear(box).append(...kids, el("p", { class: "hint" }, "그리기 실행 시 표시됩니다."));
+    return;
+  }
+  const g = lastMh.schedule_grid;
+  const out = g.points.filter((p) => outsideRegion(p, lastMh.region));
+  // 고도별 한 줄 — 20점을 세로로 늘어놓으면 격자라는 사실이 표에서 사라진다
+  const byAlt = g.alts.map((alt) => ({
+    alt,
+    pts: g.points.filter((p) => p.alt === alt),
+  }));
+  kids.push(
+    el("div", { class: "scroll-x" }, el("table", {},
+      el("thead", {}, el("tr", {},
+        el("th", {}, "고도 [m]"),
+        ...Array.from({ length: g.n_mach }, (_, i) => el("th", {}, `P${i + 1}`)),
+        el("th", {}, "영역 밖"))),
+      el("tbody", {}, byAlt.map(({ alt, pts }) => el("tr", {},
+        el("td", { class: "num" }, fmt(alt, 5)),
+        ...pts.map((p) => el("td", { class: "num" },
+          outsideRegion(p, lastMh.region)
+            ? el("span", { style: `color:${C.limitLine}` }, `M ${fmt(p.mach, 4)} ×`)
+            : `M ${fmt(p.mach, 4)}`)),
+        el("td", { class: "num" },
+          pts.filter((p) => outsideRegion(p, lastMh.region)).length || "—"),
+      )))),
+    ),
+    out.length
+      ? el("p", { class: "hint", style: `color:${C.limitLine}` },
+        `⚠ ${out.length}점이 합성 영역 밖(×)입니다 — 격자 좌표는 coarse 격자(design.grid)와 `
+        + "맞추려고 q̄를 보지 않고 만들어지므로, 이것이 실제 설계점 위치입니다. "
+        + "좌표를 옮기지 않고 표시만 합니다.")
+      : el("p", { class: "hint" }, "설계점 전부가 합성 영역 안입니다."),
+    el("h3", {}, "게인을 무엇의 함수로 둘 것인가"),
+    el("p", { class: "hint", style: "max-width:96ch" },
+      "지금 스케줄은 ", el("code", {}, "K = f(M)"),
+      " 1D(동압 스케일)다. 기체에 따라 ", el("code", {}, "f(V)"), " · ",
+      el("code", {}, "f(q̄)"), " · ", el("code", {}, "f(M, h)"),
+      "가 낫고, LPV라면 ρ = [M, q̄, α, …]를 정해 영역 안에서 플랜트·제어기가 "
+      + "연속으로 변하게 한다. 어느 쪽이든 이 층의 결정이고, 아래 ⑥이 그 결정을 검증한다."),
+    goTo("#gains", "게인 탭", "— 스케줄 자리(어느 게인에 표를 붙일지)와 셀 값을 고칩니다."),
+    goTo("#autodesign", "자동 설계 탭", "— 설계점 선정·튜닝·스케줄 적합을 잡 하나로 돌립니다."),
+  );
+  clear(box).append(...kids);
 }
 
 // 애플 시스템 팔레트 — 존은 옅은 틴트, 경계선은 시스템 컬러 (블록도와 동일 언어)

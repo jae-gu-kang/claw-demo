@@ -773,25 +773,122 @@ body:has(.tab-dark) header h1 .sub { color: rgba(235, 235, 245, .6); }
   padding: 0 6px;
 }
 
-/* ── 전면 배치 뼈대 (v0.49 영향성 → v0.51 가상환경 공용) ────────────────────
+/* ── 전면 배치 뼈대 (v0.49 영향성 → v0.51 가상환경 → v0.53 전 탭 공용) ─────
    블록도 최상위와 같은 규약: 주 그림은 **카드에 넣지 않는다**(.bd .canvas-wrap.top).
    이 탭들의 주 질문은 그림이 답하므로 그림이 화면이고, 나머지는 서랍에 넣어
    눌렀을 때만 나온다. 그래서 폭도 이 탭들에서만 넓힌다 — 카드가 없으니 1440에
-   묶어 둘 이유가 없고, 캔버스 논리폭이 그대로 들어가는 폭이 필요하다. */
-body:has(.tab-dark) main { max-width: 1580px; }
+   묶어 둘 이유가 없고, 캔버스 논리폭이 그대로 들어가는 폭이 필요하다.
 
-.tab-dark .tab-top { margin: 2px 0 12px; }
-.tab-dark .tab-top h1 { margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
-.tab-dark .tab-subline { display: flex; align-items: center; justify-content: space-between; gap: 10px 24px; flex-wrap: wrap; margin-top: 7px; }
-.tab-dark .tab-subline p { margin: 0; font-size: 13px; font-weight: 500; color: rgba(235, 235, 245, .6); }
+   **뼈대에는 색이 없다.** v0.52까지 이 규칙들은 전부 `.tab-dark` 안에 있었는데,
+   그 스코프는 "주 그림이 검은 캔버스인 탭"이라는 뜻이지 배치의 이름이 아니다.
+   밝은 탭(엔벨로프·시뮬·트림·마진·게인·자동설계·타면·결과)도 같은 배치를 쓰게
+   되면서 여기를 밝은 팔레트 기준으로 되돌리고, 어두운 값은 아래 .tab-dark 절이
+   덮는다. 배치 클래스는 `.tab-page` — 폭도 여기서 넓힌다. */
+body:has(.tab-page) main { max-width: 1580px; }
 
-/* `.inf-stage`에는 규칙이 없다 — 그것이 이 배치의 요지다. 캔버스는 자기 테두리·
-   그림자를 이미 갖고 있고(influencecanvas.js), 그 바깥에 배경도 테두리도 두지
-   않는 것이 "칸 없이 페이지 위에"다. 클래스는 구조 표식으로만 남긴다. */
+.tab-top { margin: 2px 0 12px; }
+.tab-top h1 { margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
+.tab-subline { display: flex; align-items: center; justify-content: space-between; gap: 10px 24px; flex-wrap: wrap; margin-top: 7px; }
+.tab-subline p { margin: 0; font-size: 13px; font-weight: 500; color: var(--muted); max-width: 92ch; }
 
-/* ── 정량 판독대 — 이 화면의 주 질문("얼마에서 얼마로")이 사는 자리 ─────────
-   선택한 파라미터 하나에 대해 세 단이 각각 한 줄씩. 없는 단은 빈칸이 아니라
-   **사유**를 낸다 (판정 불가를 0으로 위장하지 않는 이 화면의 규약과 같다). */
+/* `.tab-stage`에는 규칙이 없다 — 그것이 이 배치의 요지다. 캔버스·SVG는 자기 테두리·
+   그림자를 이미 갖고 있고, 그 바깥에 배경도 테두리도 두지 않는 것이 "칸 없이 페이지
+   위에"다. 클래스는 구조 표식으로만 남긴다 (영향성의 .inf-stage와 같은 자리). */
+
+/* 무대를 둘로 — 지도와 세로 프로파일처럼 **같이 봐야 뜻이 서는** 그림 두 장.
+   좁아지면 접힌다(자동 배치): 억지로 2열을 유지하면 둘 다 못 읽는 폭이 된다 */
+.tab-stage .stage-pair { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+.tab-stage .stage-pair > * { flex: 0 1 auto; min-width: 0; }
+
+/* 전면 조작줄 — 주 그림 바로 위/아래. 실행 버튼이 서랍 안에 들어가면 "이 탭에서
+   무엇을 하는가"가 클릭 뒤로 숨는다 (시뮬 실행·그리기·격자 생성이 그 자리다) */
+.tab-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 0; }
+.tab-actions .grow { flex: 1; }
+.tab-actions .hint { margin: 0; }
+.tab-status { margin: 8px 0 0; min-height: 18px; font-size: 12px; color: var(--muted); }
+
+/* 판독 시트 — 무대 바로 아래, 늘 보이는 표·수치판.
+   그림은 자기 테두리를 갖지만 표는 갖지 않는다 — 회색 바닥에 표를 그대로 얹으면
+   덜 만든 화면으로 읽힌다. 그렇다고 서랍에 넣으면 편집이 클릭 뒤로 숨는다(게인
+   탭의 셀 편집이 그 자리다). 그래서 무대와 서랍 사이에 한 층을 둔다 — 영향성의
+   정량 판독대(.inf-readout)가 하던 일을 이름만 일반화한 것이다. */
+.tab-sheet:not(:empty) {
+  margin-top: 12px;
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow);
+}
+.tab-dark .tab-sheet {
+  background: #1c1c1e;
+  border: 1px solid rgba(255, 255, 255, .09);
+  box-shadow: none;
+}
+
+/* ── 서랍 — 나머지는 전부 눌렀을 때만 ──────────────────────────────────── */
+.tab-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; align-items: center; }
+/* 분류 라벨 — 칩이 여덟 개를 넘으면 순서만으로는 묶음이 안 읽힌다. 라벨은 묶음이
+   바뀌는 지점에만 선다 (lib/stage.js chipModels.startsGroup) */
+.tab-chipgroup {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--muted);
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.tab-chipgroup:first-child { margin-left: 0; }
+.tab-chip {
+  padding: 6px 13px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(31, 41, 55, .04);
+}
+.tab-chip:hover { background: #f4f6fa; }
+.tab-chip[aria-expanded="true"] { background: var(--text); border-color: var(--text); color: #fff; }
+.tab-chip .n { font-family: var(--mono); opacity: .7; margin-left: 5px; }
+.tab-drawer:not(:empty) {
+  margin-top: 10px;
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+}
+/* 서랍 하나에 여러 덩이가 들어갈 때만 — 첫 덩이는 위 여백 없이 시작한다 */
+.tab-sect + .tab-sect { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+.tab-sect h2 { font-size: 15px; font-weight: 800; margin: 0 0 8px; }
+.tab-sect h3 { font-size: 13px; font-weight: 700; margin: 14px 0 6px; }
+
+/* 어두운 탭에서의 같은 뼈대 — 값만 덮는다 (배치는 위가 정본) */
+.tab-dark .tab-subline p { color: rgba(235, 235, 245, .6); }
+.tab-dark .tab-chipgroup { color: rgba(235, 235, 245, .5); }
+.tab-dark .tab-chip {
+  background: rgba(255, 255, 255, .05);
+  border-color: rgba(255, 255, 255, .12);
+  color: rgba(235, 235, 245, .75);
+  box-shadow: none;
+}
+.tab-dark .tab-chip:hover { background: rgba(255, 255, 255, .1); }
+.tab-dark .tab-chip[aria-expanded="true"] { background: #0a84ff; border-color: #0a84ff; color: #fff; }
+.tab-dark .tab-drawer:not(:empty) {
+  background: #1c1c1e;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: none;
+}
+.tab-dark .tab-sect + .tab-sect { border-top-color: rgba(255, 255, 255, .09); }
+.tab-dark .tab-status { color: rgba(235, 235, 245, .6); }
+
+/* ── 영향성 탭 — 정량 판독대 (v0.49) ──────────────────────────────────────
+   위 뼈대 위에 이 탭만 얹는 것. 선택한 파라미터 하나에 대해 세 단이 각각 한 줄씩.
+   없는 단은 빈칸이 아니라 **사유**를 낸다 (판정 불가를 0으로 위장하지 않는 이 화면의
+   규약과 같다). `.inf-stage`는 규칙이 없다 — 위 `.tab-stage`와 같은 이유다. */
 .inf-dark .inf-readout {
   margin-top: 12px;
   background: #1c1c1e;
@@ -823,29 +920,6 @@ body:has(.tab-dark) main { max-width: 1580px; }
 .inf-dark .inf-chg { font-family: var(--mono); font-size: 13px; font-weight: 700; white-space: nowrap; }
 .inf-dark .inf-at { font-size: 11px; color: rgba(235, 235, 245, .45); }
 .inf-dark .inf-why { font-size: 12px; color: rgba(235, 235, 245, .45); grid-column: 3 / -1; }
-
-/* ── 서랍 — 나머지는 전부 눌렀을 때만 ──────────────────────────────────── */
-.tab-dark .tab-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; align-items: center; }
-.tab-dark .tab-chip {
-  padding: 6px 13px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  background: rgba(255, 255, 255, .05);
-  border: 1px solid rgba(255, 255, 255, .12);
-  color: rgba(235, 235, 245, .75);
-}
-.tab-dark .tab-chip:hover { background: rgba(255, 255, 255, .1); }
-.tab-dark .tab-chip[aria-expanded="true"] { background: #0a84ff; border-color: #0a84ff; color: #fff; }
-.tab-dark .tab-chip .n { font-family: var(--mono); opacity: .75; margin-left: 5px; }
-.tab-dark .tab-drawer:not(:empty) {
-  margin-top: 10px;
-  background: #1c1c1e;
-  border: 1px solid rgba(255, 255, 255, .09);
-  border-radius: 14px;
-  padding: 14px 16px;
-}
 
 /* ── 가상환경 탭 (v0.51) — 3D 세계가 화면이다 ──────────────────────────────
    위 뼈대(.tab-top·.tab-chips·.tab-drawer)를 그대로 쓰고, 여기는 캔버스와 그 위에
@@ -913,6 +987,127 @@ body:has(.tab-dark) main { max-width: 1580px; }
   border-radius: 12px;
 }
 
+/* ── 코드 표면 — VS Code 언어 (views/codeview.js) ──────────────────────────
+   Autocode 탭이 내는 것은 FCC에 그대로 실릴 코드다. 회색 판에 통짜로 부으면 주석과
+   실행문이 같은 무게로 읽히므로 편집기와 같은 문법 색을 입힌다. 색값은 VS Code
+   Dark+ 계열 — 개발자가 이미 그 대응(초록=주석, 주황=문자열, 파랑=키워드)을 몸으로
+   알고 있어서, 다른 팔레트를 새로 만드는 것은 학습만 늘린다.
+
+   본문은 절대 줄바꿈하지 않는다(white-space: pre) — 줄바꿈하면 거터의 줄 수와
+   본문의 줄 수가 갈려 줄번호가 통째로 거짓이 된다. 넘치면 가로 스크롤이고,
+   거터는 sticky라 가로로 밀어도 왼쪽에 남는다. */
+.cv {
+  --cv-bg: #1e1e1e;
+  --cv-fg: #d4d4d4;
+  --cv-gut: #858585;
+  margin: 0;
+}
+.cv-scroll {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  margin: 0;
+  max-height: min(72vh, 900px);
+  overflow: auto;
+  background: var(--cv-bg);
+  color: var(--cv-fg);
+  border-radius: var(--radius);
+  border: 1px solid #2b2b2b;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04), 0 18px 44px rgba(0, 0, 0, .3);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  tab-size: 4;
+  -webkit-user-select: text;
+  user-select: text;
+  color-scheme: dark;
+}
+.cv-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cv-gut {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  padding: 14px 12px 14px 16px;
+  text-align: right;
+  white-space: pre;
+  color: var(--cv-gut);
+  background: var(--cv-bg);
+  border-right: 1px solid #2b2b2b;
+  /* 줄번호는 읽는 대상이 아니라 좌표다 — 드래그 복사에 섞이면 코드가 오염된다 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+.cv-code {
+  display: block;
+  flex: 1 0 auto;
+  padding: 14px 18px;
+  white-space: pre;
+  font: inherit;
+}
+.cv-note { margin: 6px 2px 0; }
+
+/* 토큰 — lib/highlight.js의 종류 이름이 그대로 클래스가 된다 */
+.cv-com { color: #6a9955; }
+.cv-str { color: #ce9178; }
+.cv-num { color: #b5cea8; }
+.cv-kw  { color: #569cd6; }
+.cv-typ { color: #4ec9b0; }
+.cv-fn  { color: #dcdcaa; }
+.cv-pre { color: #c586c0; }
+.cv-op  { color: #d4d4d4; }
+
+/* 편집기 탭줄 — 파일이 열여섯 개라 버튼 열여섯 개를 늘어놓으면 무엇이 무엇인지
+   안 보인다. 역할 라벨로 묶고, 열린 파일만 위로 튀어나온 탭이 된다 */
+.cv-tabs {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 0;
+  margin: 10px 0 0;
+  border-bottom: 1px solid var(--line);
+}
+.cv-tabs .role {
+  display: flex;
+  align-items: center;
+  padding: 0 10px 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.cv-tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: none;
+  border-radius: 8px 8px 0 0;
+  padding: 6px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cv-tab:hover { color: var(--text); background: rgba(31, 41, 55, .05); }
+.cv-tab[aria-selected="true"] {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--text);
+  font-weight: 700;
+  margin-bottom: -1px;
+}
+.tab-dark .cv-tabs { border-bottom-color: rgba(255, 255, 255, .12); }
+.tab-dark .cv-tabs .role { color: rgba(235, 235, 245, .5); }
+.tab-dark .cv-tab { color: rgba(235, 235, 245, .6); }
+.tab-dark .cv-tab:hover { color: #fff; background: rgba(255, 255, 255, .06); }
+.tab-dark .cv-tab[aria-selected="true"] {
+  background: #1e1e1e;
+  border-color: #2b2b2b;
+  color: #fff;
+}
+/* 어두운 탭에서는 코드판이 페이지와 같은 결이라 그림자를 걷는다 */
+.tab-dark .cv-scroll { box-shadow: none; }
+
 /* ── 좁은 화면 (폰, ≤759px) ────────────────────────────────────────────────
    원칙: 레이아웃을 새로 설계하지 않는다 — 넘치는 것을 제자리에서 가두거나
    스크롤로 돌린다. 759는 .triview의 2열 하한(760) 바로 아래 — 겹치지 않는
@@ -933,6 +1128,9 @@ body:has(.tab-dark) main { max-width: 1580px; }
      패널 밖(둥근 모서리 밖)으로는 못 나간다. 데스크톱에는 걸지 않는다:
      넓을 때는 애초에 넘칠 일이 없고, 불필요한 스크롤 컨테이너만 는다 */
   .panel { overflow-x: auto; }
+  /* 판독 시트도 같은 마지막 방어선 — .scroll-x 없이 놓인 넓은 표(자동 설계 운영점
+     표 등)가 있어도 둥근 모서리 밖으로는 못 나간다 */
+  .tab-sheet { overflow-x: auto; }
   .progress-label { min-width: 0; }
 
   /* 표 안 칩은 폰에서 꺾지 않는다 — anywhere가 표의 min-content를 줄여 id가
@@ -944,8 +1142,10 @@ body:has(.tab-dark) main { max-width: 1580px; }
   /* 판독대는 4열 최소폭이 ~634px이라 폰에서 그대로는 넘친다. 여기만은 가로
      스크롤로 돌릴 수 없다 — 이 화면의 주 표면이라 큰 숫자가 화면 밖에 있으면
      안 보이는 것과 같다. 단 이름만 왼쪽에 두고 나머지를 세로로 쌓는다 */
-  body:has(.tab-dark) main { max-width: none; }
-  .tab-dark .tab-top h1 { font-size: 24px; }
+  body:has(.tab-page) main { max-width: none; }
+  .tab-top h1 { font-size: 24px; }
+  .tab-chips { gap: 6px; }
+  .tab-drawer:not(:empty) { padding: 12px; }
   /* HUD가 폰에서는 캔버스를 절반 넘게 덮는다 — 전폭으로 눕혀 아래에 붙인다 */
   .wv-hud { left: 8px; right: 8px; bottom: 8px; max-width: none; font-size: 11px; }
   .inf-dark .inf-rorow {

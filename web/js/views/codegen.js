@@ -1,8 +1,18 @@
-/** 코드 생성 패널 — 생성 코드(Python·C) + 검토·설명 (블록도 탭에서 호출).
+/** 코드 생성 패널 — 생성 코드(Python·C) + 검토·설명.
 
 수치·문자열 생성은 lib/codegen.js — 여기는 DOM 조립과 표시 상태만.
-생성 텍스트는 반드시 textContent 경로로만 넣는다(fromMarkup은 정적 마크업 전용 계약).
-스타일은 인라인 — app.css는 병행 세션 작업 중이라 건드리지 않는다 (커밋 오염 방지).
+생성 텍스트는 반드시 textContent 경로로만 넣는다(views/codeview.js가 그 계약을
+지킨다 — fromMarkup은 정적 마크업 전용).
+
+## 두 가지 배치
+
+같은 패널이 두 자리에 선다.
+
+  블록도 하위 페이지 — 카드 안에 통째로 (`renderCodePanel`, 종전 계약 그대로)
+  Autocode 탭       — **코드는 카드 밖 전면**, 검토·추적성은 서랍 (`createCodePanel`)
+
+그래서 조립은 조각으로 만들고(bar·stage·review·trace·foot), 늘어놓는 순서는 부르는
+쪽이 정한다. 조각을 나누지 않으면 Autocode가 같은 패널을 한 벌 더 갖게 된다.
 */
 
 import { api } from "../api.js";
@@ -15,6 +25,7 @@ import {
   excludedSpecs, flightRequest, groupByRole, mergeFiles, pickFile, summarize,
 } from "../lib/flightcode.js";
 import { store } from "../store.js";
+import { createCodeView, langOfFile } from "./codeview.js";
 
 // 뷰는 라우팅마다 재생성되므로 표시 상태는 모듈 스코프 (views/gains.js fitCfg 관행)
 const cfg = { lang: "python", verbose: false, traceOpen: false, file: null };
@@ -28,17 +39,21 @@ const LANGS = [
   ["flight", "탑재 코드", "FCC에 통합되어 그대로 실릴 제어법칙 코드 — 구조·로직·파라미터 전부"],
 ];
 
-const PRE_STYLE = "font-family: var(--mono); font-size: 12px; line-height: 1.5;"
-  + " white-space: pre; background: #f7f8fa; border: 1px solid var(--line);"
-  + " border-radius: 6px; padding: 10px 12px; margin: 8px 0; max-height: 420px;"
-  + " overflow: auto; -webkit-user-select: text; user-select: text;";
-
-/** 코드 패널 렌더 — host를 비우고 다시 채운다.
+/** 코드 패널을 **조각으로** 만든다 — 늘어놓는 순서는 부르는 쪽이 정한다.
 specs: lib/codegen 스펙 배열 (1개면 단일 블록, 여러 개면 전체 형상 스냅샷)
-meta: {generatedAt, server, engine} · validation: [{key, ok, detail}] · gainTables: store 값 */
-export function renderCodePanel(host, {
+meta: {generatedAt, server, engine} · validation: [{key, ok, detail}] · gainTables: store 값
+
+돌려주는 조각:
+  bar    — 형식·복사·상세 주석 (코드 바로 위에 붙는 조작줄)
+  tabs   — 탑재 코드 파일 탭 (다른 형식에서는 비어 있다)
+  stage  — 코드 표면 그 자체 (Autocode 탭에서는 이것만 카드 밖으로 나간다)
+  review — 검토 (엔진 검증 → 기본값 대비 Δ → 주의)
+  trace  — 추적성 체크리스트 (파라미터 → 코드 줄)
+  foot   — 이 코드가 무엇인지에 대한 설명
+  hasTrace() — 추적성 표가 지금 형식에서 성립하는가 (칩 배지·숨김 판정용) */
+export function createCodePanel({
   specs, meta, validation = [], gainTables = null, scheduleOff = null,
-  langs = LANGS.map((l) => l[0]), flightMerged = false,
+  langs = LANGS.map((l) => l[0]), flightMerged = false, onPaint = null,
 }) {
   // 어떤 형식 탭을 노출할지는 부르는 쪽이 정한다 — Autocode 탭은 종류(형상/탑재)를
   // 이미 위에서 고르게 하므로 여기서 다시 세 개를 늘어놓으면 선택지가 흩어진다.
@@ -46,9 +61,9 @@ export function renderCodePanel(host, {
   const allow = LANGS.filter((l) => langs.includes(l[0]));
   if (!langs.includes(cfg.lang)) cfg.lang = allow[0][0];
   const snapshot = specs.length > 1 || gainTables != null;
-  const pre = el("pre", { style: PRE_STYLE });
+  const view = createCodeView({ ariaLabel: "생성 코드" });
   const copyNote = el("span", { class: "hint" });
-  const fileBar = el("div", { class: "row", style: "margin: 8px 0 0; flex-wrap: wrap" });
+  const fileBar = el("div", { class: "cv-tabs" });
 
   // 탑재 C는 엔진이 생성한다(웹이 C를 조립하지 않는다) — 받아 둔 응답과 그 상태.
   // 게인 스케줄은 형상 전체의 것이라 스냅샷이 아니어도 적용값을 읽는다:
@@ -69,12 +84,23 @@ export function renderCodePanel(host, {
   };
 
   const flightView = () => {
-    if (flight.loading) return { code: "탑재 코드 생성 중…", lineOf: null };
-    if (flight.error) return { code: `생성 실패 — ${flight.error}`, lineOf: null };
-    if (!flight.data) return { code: "", lineOf: null };
+    if (flight.loading) return { code: "탑재 코드 생성 중…", lineOf: null, plain: true };
+    if (flight.error) return { code: `생성 실패 — ${flight.error}`, lineOf: null, plain: true };
+    if (!flight.data) return { code: "", lineOf: null, plain: true };
     if (flightMerged) return { code: mergeFiles(flight.data), lineOf: null, file: null };
     const file = pickFile(flight.data.files, cfg.file, flight.data.artifact);
-    return { code: file ? file.text : "생성된 파일이 없습니다.", lineOf: null, file };
+    if (!file) return { code: "생성된 파일이 없습니다.", lineOf: null, plain: true };
+    return { code: file.text, lineOf: null, file };
+  };
+
+  /** 지금 화면의 코드가 무슨 언어인가 — 색칠은 이 답에 달려 있다.
+   *  탑재 코드는 파일마다 다르고(.c/.h), 통합본은 C 주석으로 이어붙인 한 문서다.
+   *  코드가 아닌 자리표시("생성 중…"·실패 문구)는 **색칠하지 않는다** — 안내 문장에
+   *  키워드 색이 박히면 그것도 코드처럼 읽힌다. */
+  const langOf = (cur) => {
+    if (cur.plain) return "text";
+    if (cfg.lang !== "flight") return cfg.lang;
+    return cur.file ? langOfFile(cur.file.name) : "c";
   };
 
   const loadFlight = async () => {
@@ -105,7 +131,7 @@ export function renderCodePanel(host, {
   let current = build();
   const paint = () => {
     current = build();
-    pre.textContent = current.code; // 마크업 삽입 없음
+    view.setCode(current.code, langOf(current)); // 마크업 삽입 없음 (codeview 계약)
     clear(copyNote);
     langBtns.forEach((b) => b.classList.toggle("primary", b.dataset.lang === cfg.lang));
     clear(fileBar).append(...fileTabs(flight, current.file, (name) => {
@@ -119,6 +145,7 @@ export function renderCodePanel(host, {
     if (current.lineOf) traceBox.append(traceTable(specs, current.lineOf, snapshot));
     clear(footHost).append(
       footNote(flight, specs, { tables: flightTables(), off: flightOff() }));
+    onPaint?.();
   };
 
   const langBtns = allow.map(([id, label, title]) => el("button", {
@@ -140,11 +167,7 @@ export function renderCodePanel(host, {
       // 클립보드 차단(비보안 컨텍스트·권한 거부·API 부재) — 선택 상태로 만들고 단축키 안내.
       // 선택마저 실패해도 코드는 화면에 그대로 있으므로 안내만 바꾸고 넘어간다.
       try {
-        const range = document.createRange();
-        range.selectNodeContents(pre);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
+        view.selectAll();
         copyNote.textContent = "클립보드 권한 없음 — 선택해 두었습니다. ⌘C(Ctrl+C)로 복사하세요.";
       } catch {
         copyNote.textContent = "클립보드를 쓸 수 없습니다 — 위 코드를 직접 선택해 복사하세요.";
@@ -155,26 +178,38 @@ export function renderCodePanel(host, {
   const reviewHost = el("div");
   const traceBox = el("div");
   const footHost = el("div");
-  clear(host).append(
-    el("div", { class: "row", style: "margin-top: 12px" },
-      // 형식 선택지가 하나뿐이면 줄을 만들지 않는다 — 고를 게 없는 버튼은 잡음이다
-      ...(langBtns.length > 1 ? [el("span", { class: "hint" }, "형식"), ...langBtns] : []),
-      el("button", { onclick: copy }, "복사"),
-      el("label", { class: "field check", title: "설명·단위·허용범위를 코드 주석에 포함" },
-        el("input", {
-          type: "checkbox", checked: cfg.verbose,
-          onchange: (ev) => { cfg.verbose = ev.target.checked; paint(); },
-        }), "상세 주석"),
-      copyNote,
-    ),
-    fileBar,
-    pre,
-    reviewHost,
-    traceBox,
-    footHost,
+  const bar = el("div", { class: "row", style: "margin-top: 12px" },
+    // 형식 선택지가 하나뿐이면 줄을 만들지 않는다 — 고를 게 없는 버튼은 잡음이다
+    ...(langBtns.length > 1 ? [el("span", { class: "hint" }, "형식"), ...langBtns] : []),
+    el("button", { onclick: copy }, "복사"),
+    el("label", { class: "field check", title: "설명·단위·허용범위를 코드 주석에 포함" },
+      el("input", {
+        type: "checkbox", checked: cfg.verbose,
+        onchange: (ev) => { cfg.verbose = ev.target.checked; paint(); },
+      }), "상세 주석"),
+    copyNote,
   );
+
   if (cfg.lang === "flight" && !flight.data && !flight.loading) loadFlight();
   else paint();
+
+  return {
+    bar,
+    tabs: fileBar,
+    stage: view.root,
+    review: reviewHost,
+    trace: traceBox,
+    foot: footHost,
+    hasTrace: () => !!current.lineOf,
+    lines: () => (current.code ? current.code.split("\n").length : 0),
+  };
+}
+
+/** 종전 계약 — host를 비우고 조각을 읽는 순서대로 채운다 (블록도 하위 페이지). */
+export function renderCodePanel(host, opts) {
+  const p = createCodePanel(opts);
+  clear(host).append(p.bar, p.tabs, p.stage, p.review, p.trace, p.foot);
+  return p;
 }
 
 /** 탑재 C 파일 탭 — 서버가 정한 읽는 순서 그대로 (진입점 → 자료형 → 조립부 → …). */
@@ -184,16 +219,19 @@ function fileTabs(flight, selected, onPick, merged) {
   const { count, lines } = summarize(flight.data.files);
   // 파일 16개를 한 줄에 늘어놓으면 무엇이 무엇인지 안 보인다 — 역할이 읽는 단위다
   const groups = groupByRole(flight.data.files).flatMap(({ role, files }) => [
-    el("span", { class: "hint", style: "margin: 0 2px 0 10px" }, role),
+    el("span", { class: "role" }, role),
     ...files.map((f) => el("button", {
-      class: f.name === selected?.name ? "primary" : "",
+      class: "cv-tab",
+      type: "button",
+      role: "tab",
+      "aria-selected": f.name === selected?.name ? "true" : "false",
       title: `${f.role} · ${f.lines}줄`,
       onclick: () => onPick(f.name),
     }, f.name)),
   ]);
   return [
     ...groups,
-    el("span", { class: "hint", style: "margin-left: 10px" },
+    el("span", { class: "role", style: "margin-left: 10px" },
       selected ? `— ${selected.lines}줄 / 전체 ${count}개 ${lines}줄`
         : `${count}개 파일 ${lines}줄`),
   ];

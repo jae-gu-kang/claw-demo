@@ -16,6 +16,7 @@ import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
 import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
+import { createDrawers, tabStage, tabTop } from "./stage.js";
 import { createProfileChart, createWpMap } from "./wpmap.js";
 
 // 기본 미션 = **발사대에서 떠서 활주로에 선다** (01 §3.3.1 이륙~착륙).
@@ -107,6 +108,12 @@ let view3dRef = { view: null };
 // 자동 재생 타이머 — 모듈 스코프에 두어야 재렌더·탭 전환에서 확실히 끌 수 있다.
 // (뷰 안에만 두면 떨어져 나간 DOM을 향해 계속 도는 타이머가 남는다)
 let playTimer = null;
+// 탭을 떠났다 와도 열어 둔 서랍은 그대로 (모듈 스코프 규약)
+let openDrawer = null;
+// 잡이 끝나면 결과가 사는 서랍을 열어 준다 — 화면에 결과가 있는데 서랍이 닫혀
+// 있으면 "돌긴 돌았나"만 남고 무슨 일이 있었는지가 안 보인다 (영향성 runStatus 선례)
+let simDrawers = null;
+
 const PLAY_FRAME_MS = 40; // 25 fps — 캔버스 3장 재그리기에 무리 없는 간격
 
 /* 실행 조건 폼 정렬 — 캡션 1줄(14px) + 컨트롤 1줄(30px) 고정.
@@ -151,6 +158,10 @@ const HINT_ST = "margin:auto 0 0; padding-top:8px; max-width:360px;";
 // 폭(760px)도 같이 올리는 게 좋다 — 안 올리면 깨지지는 않고, 좁은 구간에서 캔버스가
 // 균일 축소되어 흐려질 뿐이다 (축척은 .triview canvas.plot 규칙이 지킨다)
 const PLANE_PX = 320;
+// 전면 무대 크기 — 지도는 **정사각이어야 한다**(N-E 등축). 프로파일은 거리축이
+// 길어야 읽히므로 가로로 넓다. 좁은 화면에서는 canvas.plot의 max-width가 줄인다
+const STAGE_MAP_PX = 520;
+const STAGE_PROFILE_W = 640;
 
 /** 캡션+컨트롤 2줄 고정 필드. caption "" 이면 자리만 차지 (체크박스 줄맞춤용). */
 function field(caption, ...control) {
@@ -319,9 +330,10 @@ export function render() {
     getTrack: () => lastReplay && lastReplay.body.signals,
     onRowsChanged: () => { renderWpTable(wpBox, wpMap); wpMap.refresh(); drawProfile(); },
     onSelect: (idx) => wpMap.select(idx), // 지도와 같은 점을 가리키게
+    width: STAGE_PROFILE_W, height: STAGE_MAP_PX,
   });
   // 지도와 같은 폭 규약 — 두 면이 나란히 서고 좁아지면 함께 접힌다
-  const profileBox = el("div", { style: "flex: 0 1 396px; min-width: 240px" },
+  const profileBox = el("div", { style: `flex: 0 1 ${STAGE_PROFILE_W + 16}px; min-width: 240px` },
     profileChart.root, profileHints);
   const drawProfile = () => {
     // 차트가 **그린 것**을 그대로 받아 캡션을 고른다 — 같은 계산을 여기서 다시
@@ -421,6 +433,7 @@ export function render() {
     onRowsChanged: () => { renderWpTable(wpBox, wpMap); drawProfile(); },
     onSelect: (idx) => profileChart.refresh(idx), // 프로파일도 같은 점을 가리키게
     viewRef: wpMapView,
+    width: STAGE_MAP_PX, height: STAGE_MAP_PX,
   });
   f.accept.addEventListener("input", () => wpMap.refresh()); // 도달반경 원 즉시 갱신
   // 시작 트림 고도가 계획선의 출발점이다 — 바꾸면 프로파일도 따라 움직여야 한다
@@ -446,6 +459,7 @@ export function render() {
         renderReplay(replayBox);
         wpMap.refresh(); // 지도 궤적 오버레이 갱신
         drawProfile(); // 세로 프로파일에 실제 고도 겹치기
+        simDrawers?.open("replay"); // 결과를 찾아 헤매게 하지 않는다
       } catch (e) {
         showErr(e);
       }
@@ -550,163 +564,195 @@ export function render() {
     }
   };
 
-  const root = el("div", {},
-    el("div", { class: "panel" },
-      el("h2", {}, "미션 정의 (선언적 모드 테이블 — 01 §3.1)"),
-      modeBox,
-      el("h2", {}, "웨이포인트 (N, E, 고도) [m]"),
-      wpDraftNote && el("p", { class: "hint" }, wpDraftNote),
-      wpNotice,
-      // 지도(수평면)와 프로파일(세로면)을 **한 묶음**으로 — 셋을 한 줄에 늘어놓으면
-      // 표가 넓어(고도 열) 프로파일만 아래로 밀린다. 묶어 두면 표와 함께 접힐 뿐
-      // 둘은 끝까지 나란히 선다 (라이브 확인)
-      el("div", { class: "row" }, wpBox,
-        el("div", { class: "row", style: "gap: 12px; align-items: flex-start" },
-          wpMap.root, profileBox)),
-    ),
-    el("div", { class: "panel" },
-      el("h2", {}, "실행 조건"),
-      el("div", { class: "field-grid" },
-        el("div", { class: "opt-group", style: GROUP_ST },
-          el("div", { class: "g-title" }, "시작 트림점 · 시간"),
-          el("div", { class: "row-inner", style: INNER_ST },
-            field("마하", f.mach),
-            field("고도 [m]", f.alt),
-            field("연료 [kg]", f.fuel),
-            field("t_end [s]", f.tEnd)),
-          // t_end가 완주 시간과 묶여 있다는 사실이 소스에만 있으면 편집이 조용한
-          // 미완주로 끝난다 — 짧으면 서기 전에 끊긴다
-          el("p", { class: "hint", style: HINT_ST },
-            "활주로를 켜면 발사대·활주로 위 정지에서 출발합니다 — 그때 마하는 0이고 ",
-            "고도는 비행 고도가 아니라 활주로 표고입니다(지상 평형해). 끄면 종전처럼 ",
-            "수평비행 트림에서 출발하고 마하 > 0이 필요합니다. ",
-            "t_end는 정지까지 덮어야 합니다 — 기본 미션은 100 s 안팎에 서므로 ",
-            "200 s면 여유가 남습니다. 실제 접지·정지 시각은 실행 후 착륙 요약에 나옵니다.")),
-        el("div", { class: "opt-group", style: GROUP_ST },
-          groupTitle("활주로 · 지면", f.groundOn),
-          el("div", { class: "row-inner", style: INNER_ST },
-            field("방위 [rad]", f.rwHeading),
-            field("길이 [m]", f.rwLength)),
-          el("p", { class: "hint", style: HINT_ST },
-            "이걸 켜야 스키드가 달립니다 — 끄면 지면 자체가 없어 기체가 지면을 ",
-            "그대로 통과하고, 접지·정지 판정(on_ground·speed_le)도 성립하지 않습니다. ",
-            "지면은 표고 하나짜리 평면입니다 — 지형·파고는 미모델입니다. ",
-            "표고는 위 '고도' 칸이고 기준면 감시도 그 값을 씁니다. ",
-            `방위 ${RUNWAY_HDG} rad(3.417°)·길이 ${GOHEUNG.runwayLengthM} m는 고흥 `,
-            "활주로를 항공영상에서 잰 값입니다 — 공표 제원 1.2 km와 0.4% 안에서 맞습니다. ",
-            `접지 후 미끄럼이 ${GOHEUNG.rolloutM} m라, 활주로 안에 서려면 `,
-            `${touchdownWindowM()} m 안에 접지해야 합니다. `,
-            "아래 착륙 요약은 접지→정지 ", el("strong", {}, "거리"), "만 이 길이와 ",
-            "견주고 접지 ", el("strong", {}, "위치"), "는 보지 않습니다 — ",
-            "활주로에 내렸는지는 판정하지 않습니다.")),
-        el("div", { class: "opt-group", style: GROUP_ST },
-          groupTitle("측지 원점", f.originOn),
-          el("div", { class: "row-inner", style: INNER_ST },
-            field("위도 [deg]", f.originLat),
-            field("경도 [deg]", f.originLon)),
-          el("p", { class: "hint", style: HINT_ST },
-            "NED 원점 (0,0)이 지구상 어디인지 적습니다. 엔진은 이 값을 보지 않고 ",
-            "결과에만 실립니다 — 가상환경이 지형을 얹으려면 지형 팩과 이 원점이 같아야 ",
-            "합니다. 기본값은 고흥 시험장 활주로 ",
-            el("strong", {}, "남단 임계"),
-            "를 항공영상에서 측정한 값입니다(34.601303 / 127.212067). 측정 방법과 ",
-            "공표 제원 대조는 data/geo/goheung-runway.json에 있습니다.")),
-        el("div", { class: "opt-group", style: GROUP_ST },
-          groupTitle("발사 레일", f.launchOn),
-          el("div", { class: "row-inner", style: INNER_ST },
-            field("길이 [m]", f.railLen),
-            field("앙각 [rad]", f.railAngle),
-            field("이탈속도 [m/s]", f.railExit)),
-          el("p", { class: "hint", style: HINT_ST },
-            "레일 구간은 힘이 아니라 구속이라, 자세가 고정된 등가속 운동입니다 ",
-            "— 해석해로 정확히 적분하므로 스텝 수와 무관합니다. ",
-            "이탈속도 81.5 m/s는 트림 실속속도 70.9의 1.15배이고, 레일 10 m에서 ",
-            "그 속도는 33.9 g를 요구합니다 — 종방향 발사하중 한계가 아직 없어 ",
-            "(구조 한계표의 6.0은 Nz입니다) 결과에 '미판정'으로 표시됩니다.")),
-        el("div", { class: "opt-group", style: GROUP_ST },
-          groupTitle("항법 오차 모델", f.navOn),
-          el("div", { class: "row-inner", style: INNER_ST },
-            field("시드", f.seed)),
-          el("div", { class: "row-inner", style: INNER_ST },
-            el("label", { class: "chk" }, f.rtkOn, " RTK 고정해")),
-          el("p", { class: "hint", style: HINT_ST }, store.get("navParams")
-            ? "블록도 적용값 사용 중 (시드만 여기서 우선). "
-            : "미지정 항목은 엔진 기본값 — 편집은 블록도 탭 항법 블록. ",
-            "RTK는 접지를 부드럽게 하지 않습니다 — 접지 지점을 반복 가능하게 합니다. ",
-            `활주로 ${GOHEUNG.runwayLengthM} m라도 미끄럼 ${GOHEUNG.rolloutM} m는 `,
-            `굴러가므로, 활주로 안에 서려면 ${touchdownWindowM()} m 안에 접지해야 `,
-            "합니다 — 산포를 활주로 전장과 견주면 안 됩니다. ",
-            // **수치를 옮겨 적지 않는다.** 산포는 항법 등급·접근 프로파일·게인
-            // 스케줄의 함수라 여기 적으면 낡는데, 웹은 엔진을 읽지 않고 엔진은
-            // 여기를 읽지 않아 **낡아도 아무것도 빨개지지 않는다**. 실제로 이번에
-            // 게인 스케줄 상한을 내리면서 874/92가 512/12가 됐고, 그때 출처만
-            // 덧붙였더니 낡음을 기록만 하고 해결하지는 못했다(리뷰 지적).
-            // UI 결정(RTK 토글)에 필요한 것은 정밀한 수가 아니라 **순서**이고,
-            // 그것은 재측정을 견딘다. 현재 수치가 필요하면 엔진이 집이다
-            "기본 항법의 접지 산포는 그 창을 넘고 RTK는 그 안에 듭니다 — ",
-            "현재 수치는 엔진 test_landing이 5시드로 잽니다. ",
-            "fix 유지가 전제입니다 — 보정 링크가 끊겨 강등되는 상황은 미모델입니다.")),
-        el("div", { class: "opt-group", style: GROUP_ST },
-          groupTitle("작동기 (2차계)", f.actOn),
-          el("div", { class: "row-inner", style: INNER_ST },
-            field("wn [rad/s]", f.wn),
-            field("ζ", f.zeta),
-            field("rate [rad/s]", f.rate)),
-          el("p", { class: "hint", style: HINT_ST }, actApplied
-            ? "블록도 적용값 프리필됨 — 여기 값이 최종"
-            : "블록도 탭에서 '시뮬에 적용' 시 프리필")),
-        el("div", { class: "opt-group", style: GROUP_ST },
-          el("div", { class: "g-title" }, "유도 · 연료 · 게인"),
-          el("div", { class: "row-inner", style: INNER_ST },
-            field("도달반경 [m]", f.accept),
-            field("연료유량 [kg/s]", f.fuelFlow),
-            checkField(f.useGains, "편집 게인"),
-            checkField(f.useAp, "편집 AP"),
-            checkField(f.useScas, "편집 SCAS")),
-          // 반경이 너무 작으면 경로가 안 끝나는데, 그때 화면에 뜨는 것은 오류가
-          // 아니라 "순항에서 멈춘 모드 체인"뿐이라 성공처럼 읽힌다 — 그 사실이
-          // 소스 주석에만 있었다.
-          //
-          // **선회 반경을 문턱으로 적지 않는다.** 처음엔 "선회 반경보다 작으면
-          // 끝나지 않는다"고 굵게 적었는데, 바로 다음 문장의 100 m가 940 m보다
-          // 작으면서 완주하므로 **자기 예시가 반증한다**(리뷰 지적). 게다가 틀린
-          // 방향이 비싸다 — 그 말을 따르면 필요보다 한 자릿수 헐거운 940 m를 잡게
-          // 되고, 그건 사용자가 20 m를 요청한 이유(정밀한 통과)를 되돌리는 것이다.
-          // 선회 반경은 **왜 임의로 작은 원을 못 잡는지**를 설명할 뿐 문턱이 아니고,
-          // 실제 문턱은 유도가 내는 접근 거리(이 미션 28.5 m)이며 그것은 상수가
-          // 아니라 웨이포인트 기하 × 기체 선회 성능의 함수다. 그래서 수를 단정하지
-          // 않고 실측만 늘어놓는다.
-          el("p", { class: "hint", style: HINT_ST },
-            "다음 웨이포인트로 넘어가는 통과 판정 반경입니다 — ",
-            // 마크다운 **는 여기서 글자 그대로 나온다 (텍스트 노드) — 강조는 노드로
-            el("b", {}, "너무 작으면 경로가 끝나지 않습니다"),
-            ". 데모 기체는 순항 88 m/s·뱅크 한계 0.7 rad에서 선회 반경이 940 m라 ",
-            "임의로 작은 원은 못 잡습니다 — 기본 미션 실측상 첫 접근 최근접이 13 m라 ",
-            "20 m는 완주하지만, 13 m로 줄이면 14 m로 스친 뒤 바퀴마다 되레 멀어져",
-            "(14 → 69 → 81 m) 끝내 통과하지 못합니다. 그 경계는 웨이포인트 기하마다 ",
-            "다릅니다 — 다른 기하에서는 20 m도 같은 식으로 발산했습니다. ",
-            "경로가 안 끝나면(모드 체인이 순항에서 멈추면) 이 값을 먼저 의심하십시오.")),
-        el("div", { class: "opt-group", style: GROUP_ST },
-          el("div", { class: "g-title" }, "계보"),
-          el("div", { class: "row-inner", style: INNER_ST },
-            wideField("지문", f.fp))),
-      ),
-      el("div", { class: "row", style: "margin-top: 12px" },
+  // ── 실행 조건 — 여덟 묶음을 넷으로 다시 묶는다 ────────────────────────────
+  // 종전에는 여덟 개가 한 카드 안에 격자로 늘어서 있었다. 그 배치의 문제는 개수가
+  // 아니라 **위계가 없다**는 것이다: 매 실행마다 만지는 칸(시작점·t_end)과 한 번
+  // 정하면 안 건드리는 칸(측지 원점·계보)이 같은 크기로 나란히 서 있었다.
+  // 여기서는 "얼마나 자주 만지나"로 묶어 서랍에 넣고, 실행 버튼만 전면에 남긴다.
+  const optGroup = (title, toggle, fields, hint) =>
+    el("div", { class: "opt-group", style: GROUP_ST },
+      toggle ? groupTitle(title, toggle) : el("div", { class: "g-title" }, title),
+      el("div", { class: "row-inner", style: INNER_ST }, ...fields),
+      hint ? el("p", { class: "hint", style: HINT_ST }, ...hint) : null);
+
+  const startGroup = () => optGroup("시작 트림점 · 시간", null, [
+    field("마하", f.mach), field("고도 [m]", f.alt),
+    field("연료 [kg]", f.fuel), field("t_end [s]", f.tEnd),
+  ], [
+    // t_end가 완주 시간과 묶여 있다는 사실이 소스에만 있으면 편집이 조용한
+    // 미완주로 끝난다 — 짧으면 서기 전에 끊긴다
+    "활주로를 켜면 발사대·활주로 위 정지에서 출발합니다 — 그때 마하는 0이고 ",
+    "고도는 비행 고도가 아니라 활주로 표고입니다(지상 평형해). 끄면 종전처럼 ",
+    "수평비행 트림에서 출발하고 마하 > 0이 필요합니다. ",
+    "t_end는 정지까지 덮어야 합니다 — 기본 미션은 100 s 안팎에 서므로 ",
+    "200 s면 여유가 남습니다. 실제 접지·정지 시각은 실행 후 착륙 요약에 나옵니다.",
+  ]);
+
+  const groundGroups = () => [
+    optGroup("활주로 · 지면", f.groundOn,
+      [field("방위 [rad]", f.rwHeading), field("길이 [m]", f.rwLength)], [
+        "이걸 켜야 스키드가 달립니다 — 끄면 지면 자체가 없어 기체가 지면을 ",
+        "그대로 통과하고, 접지·정지 판정(on_ground·speed_le)도 성립하지 않습니다. ",
+        "지면은 표고 하나짜리 평면입니다 — 지형·파고는 미모델입니다. ",
+        "표고는 위 '고도' 칸이고 기준면 감시도 그 값을 씁니다. ",
+        `방위 ${RUNWAY_HDG} rad(3.417°)·길이 ${GOHEUNG.runwayLengthM} m는 고흥 `,
+        "활주로를 항공영상에서 잰 값입니다 — 공표 제원 1.2 km와 0.4% 안에서 맞습니다. ",
+        `접지 후 미끄럼이 ${GOHEUNG.rolloutM} m라, 활주로 안에 서려면 `,
+        `${touchdownWindowM()} m 안에 접지해야 합니다. `,
+        "아래 착륙 요약은 접지→정지 ", el("strong", {}, "거리"), "만 이 길이와 ",
+        "견주고 접지 ", el("strong", {}, "위치"), "는 보지 않습니다 — ",
+        "활주로에 내렸는지는 판정하지 않습니다.",
+      ]),
+    optGroup("발사 레일", f.launchOn,
+      [field("길이 [m]", f.railLen), field("앙각 [rad]", f.railAngle),
+       field("이탈속도 [m/s]", f.railExit)], [
+        "레일 구간은 힘이 아니라 구속이라, 자세가 고정된 등가속 운동입니다 ",
+        "— 해석해로 정확히 적분하므로 스텝 수와 무관합니다. ",
+        "이탈속도 81.5 m/s는 트림 실속속도 70.9의 1.15배이고, 레일 10 m에서 ",
+        "그 속도는 33.9 g를 요구합니다 — 종방향 발사하중 한계가 아직 없어 ",
+        "(구조 한계표의 6.0은 Nz입니다) 결과에 '미판정'으로 표시됩니다.",
+      ]),
+    optGroup("측지 원점", f.originOn,
+      [field("위도 [deg]", f.originLat), field("경도 [deg]", f.originLon)], [
+        "NED 원점 (0,0)이 지구상 어디인지 적습니다. 엔진은 이 값을 보지 않고 ",
+        "결과에만 실립니다 — 가상환경이 지형을 얹으려면 지형 팩과 이 원점이 같아야 ",
+        "합니다. 기본값은 고흥 시험장 활주로 ",
+        el("strong", {}, "남단 임계"),
+        "를 항공영상에서 측정한 값입니다(34.601303 / 127.212067). 측정 방법과 ",
+        "공표 제원 대조는 data/geo/goheung-runway.json에 있습니다.",
+      ]),
+  ];
+
+  const sensorGroups = () => [
+    optGroup("항법 오차 모델", f.navOn, [
+      field("시드", f.seed),
+      el("label", { class: "chk" }, f.rtkOn, " RTK 고정해"),
+    ], [
+      store.get("navParams")
+        ? "블록도 적용값 사용 중 (시드만 여기서 우선). "
+        : "미지정 항목은 엔진 기본값 — 편집은 블록도 탭 항법 블록. ",
+      "RTK는 접지를 부드럽게 하지 않습니다 — 접지 지점을 반복 가능하게 합니다. ",
+      `활주로 ${GOHEUNG.runwayLengthM} m라도 미끄럼 ${GOHEUNG.rolloutM} m는 `,
+      `굴러가므로, 활주로 안에 서려면 ${touchdownWindowM()} m 안에 접지해야 `,
+      "합니다 — 산포를 활주로 전장과 견주면 안 됩니다. ",
+      // **수치를 옮겨 적지 않는다.** 산포는 항법 등급·접근 프로파일·게인
+      // 스케줄의 함수라 여기 적으면 낡는데, 웹은 엔진을 읽지 않고 엔진은
+      // 여기를 읽지 않아 **낡아도 아무것도 빨개지지 않는다**. UI 결정(RTK 토글)에
+      // 필요한 것은 정밀한 수가 아니라 **순서**이고, 그것은 재측정을 견딘다
+      "기본 항법의 접지 산포는 그 창을 넘고 RTK는 그 안에 듭니다 — ",
+      "현재 수치는 엔진 test_landing이 5시드로 잽니다. ",
+      "fix 유지가 전제입니다 — 보정 링크가 끊겨 강등되는 상황은 미모델입니다.",
+    ]),
+    optGroup("작동기 (2차계)", f.actOn,
+      [field("wn [rad/s]", f.wn), field("ζ", f.zeta), field("rate [rad/s]", f.rate)],
+      [actApplied
+        ? "블록도 적용값 프리필됨 — 여기 값이 최종"
+        : "블록도 탭에서 '시뮬에 적용' 시 프리필",
+       " · 작동기 rate ≥ 10 rad/s 요구 [도출 사양] (01 v0.13)"]),
+  ];
+
+  const guideGroups = () => [
+    optGroup("유도 · 연료 · 게인", null, [
+      field("도달반경 [m]", f.accept), field("연료유량 [kg/s]", f.fuelFlow),
+      checkField(f.useGains, "편집 게인"), checkField(f.useAp, "편집 AP"),
+      checkField(f.useScas, "편집 SCAS"),
+    ], [
+      // 반경이 너무 작으면 경로가 안 끝나는데, 그때 화면에 뜨는 것은 오류가
+      // 아니라 "순항에서 멈춘 모드 체인"뿐이라 성공처럼 읽힌다.
+      // **선회 반경을 문턱으로 적지 않는다** — 바로 다음 문장의 100 m가 940 m보다
+      // 작으면서 완주하므로 자기 예시가 반증한다. 선회 반경은 왜 임의로 작은 원을
+      // 못 잡는지를 설명할 뿐 문턱이 아니고, 실제 문턱은 유도가 내는 접근 거리이며
+      // 그것은 상수가 아니라 웨이포인트 기하 × 기체 선회 성능의 함수다
+      "다음 웨이포인트로 넘어가는 통과 판정 반경입니다 — ",
+      el("b", {}, "너무 작으면 경로가 끝나지 않습니다"),
+      ". 데모 기체는 순항 88 m/s·뱅크 한계 0.7 rad에서 선회 반경이 940 m라 ",
+      "임의로 작은 원은 못 잡습니다 — 기본 미션 실측상 첫 접근 최근접이 13 m라 ",
+      "20 m는 완주하지만, 13 m로 줄이면 14 m로 스친 뒤 바퀴마다 되레 멀어져",
+      "(14 → 69 → 81 m) 끝내 통과하지 못합니다. 그 경계는 웨이포인트 기하마다 ",
+      "다릅니다 — 다른 기하에서는 20 m도 같은 식으로 발산했습니다. ",
+      "경로가 안 끝나면(모드 체인이 순항에서 멈추면) 이 값을 먼저 의심하십시오. ",
+      "편집 게인은 게인 탭, 편집 AP는 블록도 탭 오토파일럿 블록에서 '시뮬에 적용' 후 사용.",
+    ]),
+    optGroup("계보", null, [wideField("지문", f.fp)], null),
+  ];
+
+  const fieldGrid = (...groups) => el("div", { class: "field-grid" }, ...groups);
+
+  // ── 서랍 ─────────────────────────────────────────────────────────────────
+  const drawers = createDrawers({
+    id: "sim-drawer",
+    initial: openDrawer,
+    onOpen: (k) => { openDrawer = k; },
+    defs: [
+      { key: "wp", label: "웨이포인트 표", group: "미션",
+        title: "지도·프로파일과 같은 목록 — 숫자로 정확히 찍을 때",
+        count: () => wpRows.length,
+        build: () => [
+          el("h2", {}, "웨이포인트 (N, E, 고도) [m]"),
+          wpDraftNote ? el("p", { class: "hint" }, wpDraftNote) : null,
+          wpNotice,
+          wpBox,
+        ] },
+      { key: "modes", label: "비행 모드 표", group: "미션",
+        title: "선언적 모드 테이블 — 무엇을 잡고, 언제 다음 모드로 넘어가나",
+        count: () => modeRows.length,
+        build: () => [
+          el("h2", {}, "미션 정의 (선언적 모드 테이블 — 01 §3.1)"),
+          el("p", { class: "hint", style: "margin:0 0 10px" },
+            "종방향 축은 모드마다 하나다 — 피치(자세 구간)·강하율(내려가는 속도를 잡는 "
+            + "구간)·고도(순항) 중 하나. 헤딩에 \"path\"를 적은 모드만 웨이포인트를 따른다."),
+          modeBox,
+        ] },
+      { key: "start", label: "시작·시간", group: "실행 조건",
+        title: "매 실행마다 만지는 칸 — 시작 트림점과 t_end",
+        build: () => fieldGrid(startGroup()) },
+      { key: "ground", label: "활주로·발사·측지", group: "실행 조건",
+        title: "지면이 있나, 어디서 뜨나, NED 원점이 지구상 어디인가",
+        build: () => fieldGrid(...groundGroups()) },
+      { key: "sensors", label: "항법·작동기", group: "실행 조건",
+        title: "무엇으로 재고 무엇으로 움직이나",
+        build: () => fieldGrid(...sensorGroups()) },
+      { key: "guide", label: "유도·연료·게인·계보", group: "실행 조건",
+        title: "도달반경·연료유량·편집값 주입·지문",
+        build: () => fieldGrid(...guideGroups()) },
+      { key: "replay", label: "재생 + 엔벨로프 감시", group: "결과",
+        title: "시계열·3면도·3D 궤적·모드 밴드·착륙 요약",
+        count: () => (lastReplay ? 1 : null),
+        build: () => [replayBox, lastReplay ? null : el("p", { class: "hint" },
+          "아직 결과가 없습니다 — 위 [시뮬 실행]을 누르면 끝난 뒤 이 서랍이 열립니다.")] },
+    ],
+  });
+  simDrawers = drawers;
+
+  const root = el("div", { class: "tab-page" },
+    tabTop({
+      title: "시뮬레이션",
+      lead: "웨이포인트를 지도(수평면)와 프로파일(세로면) 두 면에서 편집하고, "
+        + "그대로 폐루프로 날린다. 실행 조건과 결과는 아래 서랍에 있다.",
+      actions: [
         el("button", { class: "primary", onclick: run }, "시뮬 실행"),
-        el("span", { class: "hint" },
-          "작동기 rate ≥ 10 rad/s 요구 [도출 사양] (01 v0.13) · 편집 게인은 게인 탭, ",
-          "편집 AP는 블록도 탭 오토파일럿 블록에서 '시뮬에 적용' 후 사용")),
-      progressBox, errBox,
-    ),
-    el("div", { class: "panel" }, el("h2", {}, "재생 + 엔벨로프 감시"), replayBox),
+        el("button", {
+          onclick: () => { drawers.open("replay"); },
+          title: "마지막 실행 결과 서랍을 연다",
+        }, "결과 보기"),
+      ],
+      extra: [progressBox, errBox],
+    }),
+    // 지도와 프로파일 — 카드 밖, 페이지 위에 그대로. 둘은 **한 벌**이다:
+    // 같은 웨이포인트를 수평면·세로면으로 나눠 본 것이라 떨어뜨리면 뜻이 반쪽이 된다
+    tabStage(el("div", { class: "stage-pair" }, wpMap.root, profileBox)),
+    drawers.root,
   );
 
   renderModeTable(modeBox);
   renderWpTable(wpBox, wpMap);
   drawProfile();
+  drawWpNotice();
   if (lastReplay) renderReplay(replayBox);
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
+  drawers.refresh();
   return root;
+
 }
 
 function renderModeTable(modeBox) {

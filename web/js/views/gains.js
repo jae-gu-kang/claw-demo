@@ -1,5 +1,9 @@
 /** 게인 스케줄 뷰 (02 §8 4단계) — 스케줄 자리 선택 → 셀 편집 → 시뮬 주입 준비.
 
+배치는 다른 탭과 같은 규약이다(views/stage.js): **곡선과 편집 표가 카드 밖 전면**,
+자리 선택 격자와 근사 곡선 설정은 서랍. 곡선과 표는 한 벌이라 떨어뜨리지 않는다 —
+칸을 고치면 곡선이 그 자리에서 움직이는 것이 이 화면의 피드백 전부다.
+
 두 층이다. **자리 선택**(어떤 게인에 테이블을 붙이나)은 형상을 바꾸고 — 켠 자리는
 탑재 C에 룩업이 생기고 뺀 자리는 설계점 상수로 접힌다 — **값 편집**은 그 안에서
 게인을 바꾼다. 그래서 화면도 위(자리 격자)·아래(켠 것만 표·차트)로 나눈다.
@@ -30,10 +34,14 @@ import { gainPlotGroups } from "../lib/plot.js";
 import { piecewisePolyfit, rawCoeffs, sampleFit } from "../lib/polyfit.js";
 import { store } from "../store.js";
 import { lineChartCanvas } from "./plots.js";
+import { createDrawers, tabStage, tabTop } from "./stage.js";
 
 let catalog = null; // GET /gains/catalog — 자리 목록·설계 상수·제안 테이블
 let selected = []; // 켠 자리 이름 (카탈로그 기본 = 서버가 지금 스케줄하는 6자리)
 let tables = null; // 켠 자리만 추린 {name: {axes:{mach}, data, extrapolate}} — 편집 대상
+let openDrawer = null; // 탭 재진입에도 열어 둔 서랍 유지 (모듈 스코프 규약)
+// 자리를 켜고 끄면 칩 배지의 수가 바뀐다 — 그린 쪽(renderTables)에서 칩에 알린다
+let gainsDrawers = null;
 let adopted = null; // 되읽은 형상 요약 {source, slots, aligned, points, unknown} | null
 // 이 탭이 마지막으로 보거나 적용한 스토어 값 — **밖에서 바뀌었는지**만 판정한다.
 // 매 재진입마다 되읽으면 미적용 편집 드래프트가 날아가고, 아예 안 읽으면 자동
@@ -52,9 +60,15 @@ let constants = null;
 const fitCfg = { show: true, degree: 3, boundaries: "0.3", detailsOpen: false };
 
 export function render() {
-  const box = el("div");
+  // 조각으로 갈라 둔다 — 어느 것이 전면이고 어느 것이 서랍인지는 아래 배치가 정한다
+  const slots = {
+    chart: el("div"),   // 전면 — 스케줄 곡선
+    table: el("div", { class: "tab-sheet" }), // 전면 — 셀 편집 (곡선과 한 벌)
+    grid: el("div"),    // 서랍 — 자리 선택 격자 (형상을 바꾸는 조작)
+    fit: el("div"),     // 서랍 — 근사 곡선 설정
+  };
   const errBox = el("div");
-  const statusLine = el("p", { class: "hint" });
+  const statusLine = el("p", { class: "tab-status" });
 
   // 상수 드래프트를 **밖에서 바뀐 경우에만** 다시 읽는다 (테이블 드래프트와 같은 규약).
   //
@@ -85,7 +99,7 @@ export function render() {
       adopted = fresh ? null : adoptStored();
       if (fresh) markSeen();
       syncFromStore({ force: fresh });
-      renderTables(box, statusLine);
+      renderTables(slots, statusLine);
       statusLine.textContent = fresh
         ? "서버 설계 제안으로 되돌렸습니다 (미적용) — '시뮬·코드에 적용'을 눌러야 형상이 바뀝니다."
         : adoptedText(adopted);
@@ -114,22 +128,54 @@ export function render() {
         + "'편집 게인 사용'을 켜면 주입되고, Autocode 탑재코드에 바로 반영됩니다.";
   };
 
-  const root = el("div", {},
-    el("div", { class: "panel" },
-      el("h2", {}, "게인 스케줄 (동압 스케일 1D mach — 설계점 M0.6)"),
-      el("p", { class: "hint" },
-        "신호흐름 구조는 블록도 탭 — SCAS·게인 스케줄 블록에서 여기로 진입한다. ",
-        "스케줄 대상은 형상의 일부다 — 바꾸면 탑재 코드 구조와 형상 지문이 함께 바뀐다."),
-      el("div", { class: "row" },
+  const drawers = createDrawers({
+    id: "gains-drawer",
+    initial: openDrawer,
+    onOpen: (k) => { openDrawer = k; },
+    defs: [
+      { key: "slots", label: "스케줄 자리", group: "형상",
+        title: "어느 게인에 표를 붙일 것인가 — 켜면 탑재 C에 룩업이 생기고 빼면 상수로 접힌다",
+        count: () => (catalog ? selected.length : null),
+        build: () => [
+          el("h2", {}, "스케줄 자리 — 어디에 표를 붙일 것인가"),
+          el("p", { class: "hint", style: "margin:0 0 10px" },
+            "이건 값이 아니라 형상을 바꾸는 조작이다 — 켠 자리는 탑재 C에 룩업이 생기고, "
+            + "뺀 자리는 설계점 상수로 접힌다. 끈 자리의 상수도 여기서 고칠 수 있고, "
+            + "그 값은 블록도 폼과 같은 스토어에 산다."),
+          slots.grid,
+        ] },
+      { key: "fit", label: "근사 곡선", group: "표시",
+        title: "구간 다항 근사 — 표의 점을 몇 차 곡선으로 볼 것인가",
+        build: () => [
+          el("h2", {}, "근사 곡선 (점선)"),
+          el("p", { class: "hint", style: "margin:0 0 10px" },
+            "표의 점은 그대로 두고 읽는 보조선만 얹는다 — 구간 경계에서 곡선이 "
+            + "튀면 그 자리에 breakpoint를 하나 더 두어야 한다는 신호다."),
+          slots.fit,
+        ] },
+    ],
+  });
+
+  const root = el("div", { class: "tab-page" },
+    tabTop({
+      title: "게인",
+      lead: "설계점에서 정한 게인을 비행조건의 함수로 편다 — 표의 칸을 고치면 곡선이 "
+        + "그 자리에서 움직인다. 자리 선택(형상)과 근사 곡선 설정은 아래 서랍에.",
+      actions: [
         el("button", {
           onclick: () => load({ fresh: true }),
           title: "적용해 둔 형상을 버리고 서버 설계 제안(동압 스케일)으로 되돌린다",
         }, "설계값 다시 불러오기"),
         el("button", { class: "primary", onclick: apply }, "시뮬·코드에 적용"),
-      ),
-      statusLine, errBox,
-    ),
-    el("div", { class: "panel" }, box),
+      ],
+      extra: [statusLine, errBox],
+    }),
+    // 곡선은 카드 밖(자기 테두리를 갖는 캔버스), 편집 표는 그 바로 아래 판독 시트.
+    // 둘은 한 벌이다 — 칸을 고치면 곡선이 그 자리에서 움직이는 것이 이 화면의 피드백
+    // 전부라 표를 서랍에 넣으면 그 되먹임이 끊긴다
+    tabStage(slots.chart),
+    slots.table,
+    drawers.root,
   );
 
   if (catalog) {
@@ -142,10 +188,13 @@ export function render() {
       statusLine.textContent = adoptedText(adopted);
     }
     syncFromStore();
-    renderTables(box, statusLine);
+    renderTables(slots, statusLine);
   } else {
+    clear(slots.chart).append(el("p", { class: "hint" }, "게인 카탈로그를 불러오는 중…"));
     load();
   }
+  gainsDrawers = drawers;
+  drawers.refresh();
   return root;
 }
 
@@ -228,7 +277,7 @@ function adoptedText(a) {
  * 고치면 저기 보인다. 켠 자리는 아래 표가 정본이라 설계점 값만 읽기로 보여 준다
  * (여기서도 고칠 수 있으면 한 게인에 편집처가 둘이 된다).
  * 불가 자리는 빈칸이 아니라 사유를 단 "—"다 (빈칸은 버그로 읽힌다). */
-function slotGrid(box, statusLine) {
+function slotGrid(slots, statusLine) {
   const rows = slotRows(catalog);
   const zeros = zeroTables(catalog, selected);
   const draft = "스케줄 대상 변경됨 (미적용) — '시뮬·코드에 적용'을 누르세요.";
@@ -253,7 +302,7 @@ function slotGrid(box, statusLine) {
           slot.table = seedTable(catalog, slot, constantOf(slot, constants));
         }
         selected = toggleSlot(catalog, selected, slot.name);
-        renderTables(box, statusLine);
+        renderTables(slots, statusLine);
         statusLine.textContent = draft;
       },
     });
@@ -393,7 +442,10 @@ function drawCharts(chartBox, fitStatus) {
   ));
 }
 
-function renderTables(box, statusLine) {
+function renderTables(slots, statusLine) {
+  // 칩 배지는 여기 머리에서 갱신한다 — 자리를 끄면 아래에 조기 반환 경로가 둘 있고,
+  // 끝에서 부르면 그 두 경로가 옛 수를 들고 남는다 (selected는 이미 갱신된 뒤다)
+  gainsDrawers?.refresh();
   // 편집 대상은 **켠 자리만**. 카탈로그의 표를 참조로 들고 있어 셀 편집이 그대로
   // 남는다 — 자리를 껐다 켜도 고쳐 둔 값이 살아 있어야 비교가 성립한다
   tables = appliedTables(catalog, selected);
@@ -403,9 +455,12 @@ function renderTables(box, statusLine) {
   // 짧은 열은 화면 밖으로 사라진다. 되읽기에서만 맞추면 그 이후 토글이 어긋난다
   const aligned = alignTables(tables, catalog.axis);
   if (aligned === null) {
-    clear(box).append(slotGrid(box, statusLine),
-      el("p", { class: "error-box" },
-        `축 '${catalog.axis}'가 없는 표가 섞여 있어 편집 표를 세울 수 없습니다.`));
+    clear(slots.grid).append(slotGrid(slots, statusLine));
+    clear(slots.chart);
+    clear(slots.fit).append(el("p", { class: "hint" },
+      "축이 어긋나 곡선을 세우지 못했습니다 — 아래 사유를 먼저 해결하세요."));
+    clear(slots.table).append(el("p", { class: "error-box" },
+      `축 '${catalog.axis}'가 없는 표가 섞여 있어 편집 표를 세울 수 없습니다.`));
     return;
   }
   if (aligned.aligned) {
@@ -414,17 +469,21 @@ function renderTables(box, statusLine) {
     for (const [name, t] of Object.entries(aligned.tables)) idx.get(name).table = t;
     tables = appliedTables(catalog, selected);
   }
-  const grid = slotGrid(box, statusLine);
+  clear(slots.grid).append(slotGrid(slots, statusLine));
   const names = Object.keys(tables);
   if (names.length === 0) {
-    clear(box).append(grid,
-      el("p", { class: "hint" },
-        "스케줄된 자리가 없습니다 — 전 게인이 설계점 상수로 고정된 형상입니다. ",
-        "탑재 코드에서 게인 스케줄 서브시스템(fcl_sched.c)이 통째로 사라집니다."));
+    clear(slots.chart);
+    // 빈 서랍을 남기지 않는다 — 왜 비었는지가 화면에 없으면 고장으로 읽힌다
+    clear(slots.fit).append(el("p", { class: "hint" },
+      "켠 자리가 없어 근사할 곡선이 없습니다 — 「스케줄 자리」에서 자리를 켜세요."));
+    clear(slots.table).append(el("p", { class: "hint" },
+      "스케줄된 자리가 없습니다 — 전 게인이 설계점 상수로 고정된 형상입니다. ",
+      "탑재 코드에서 게인 스케줄 서브시스템(fcl_sched.c)이 통째로 사라집니다. ",
+      "「스케줄 자리」 서랍에서 자리를 켜면 여기에 표와 곡선이 섭니다."));
     return;
   }
   const machs = tables[names[0]].axes[catalog.axis];
-  const chartBox = el("div");
+  const chartBox = clear(slots.chart);
   const fitStatus = el("span", { class: "hint" });
   const redraw = () => drawCharts(chartBox, fitStatus);
   // 컨트롤은 redraw 대상 밖 — 입력 도중 재그리기로 포커스를 잃지 않게
@@ -449,12 +508,10 @@ function renderTables(box, statusLine) {
     fitStatus,
   );
   redraw();
+  clear(slots.fit).append(fitControls);
   // 전치 배열: 행 = 마하(비행조건), 열 = 게인 6개 — 폭이 패널에 들어오고
   // 한 비행조건의 게인 세트를 한 줄에서 편집
-  clear(box).append(
-    grid,
-    fitControls,
-    chartBox,
+  clear(slots.table).append(
     el("div", { class: "scroll-x" },
       el("table", {},
         el("thead", {}, el("tr", {},

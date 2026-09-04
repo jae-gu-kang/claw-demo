@@ -1805,7 +1805,7 @@ export function render() {
   renderTabCounts();
   renderDrawer();
 
-  return el("div", { class: "inf-dark tab-dark" },
+  return el("div", { class: "inf-dark tab-dark tab-page" },
     // 카드 없는 머리 — 블록도 최상위(.bd .pagetop)와 같은 자리
     el("div", { class: "tab-top" },
       el("h1", {}, "영향성"),

@@ -14,7 +14,14 @@
   누적 초과   — |δ| ≥ x인 시간이 얼마 (P95 같은 사양 수치가 여기서 나온다)
   밀도+상자   — 타각·타율 조합이 작동기 능력 안에 있었나
 
-스타일은 app.css가 아니라 여기서 지정한다 (병행 세션 미커밋 — 4dfaaeb 선례).
+## 배치
+
+다른 탭과 같은 규약(views/stage.js): **요약 표가 전면**, 타면별 그림은 서랍이다.
+요약 표가 전 타면을 한 줄씩 세워 "어디가 문제인가"를 먼저 답하고, 그 타면의 세 그림이
+"왜 그런가"를 답한다. 종전에는 채널마다 카드가 세로로 쌓여 있어 타면이 넷이면
+화면 네 장을 스크롤해야 요약 다음 줄이 나왔다.
+
+심각도 색은 클래스가 아니라 값으로 지정한다 — 이 색은 판정이지 테마가 아니다.
 */
 
 import { api, errorText } from "../api.js";
@@ -25,6 +32,7 @@ import {
 } from "../lib/duty.js";
 import { store } from "../store.js";
 import { densityCanvas, histogramCanvas, lineChartCanvas } from "./plots.js";
+import { createDrawers, tabStage, tabTop } from "./stage.js";
 
 const BINS = 32;
 const RATE_BINS = 24;
@@ -37,19 +45,63 @@ const SEV_COLOR = { ok: "#34c759", warn: "#ff9500", bad: "#ff3b30", na: "#8e8e93
 let lastReport = null;
 let selectedId = null;
 let selectedMode = "";
+let openDrawer = null; // 탭 재진입에도 열어 둔 서랍 유지 (모듈 스코프 규약)
 
 export function render() {
   const errBox = el("div");
-  const statusBox = el("span", { class: "hint" });
-  const bodyBox = el("div");
+  const statusBox = el("p", { class: "tab-status" });
+  const summaryBox = el("div", { class: "tab-sheet" }); // 전면 — 전 타면 한 줄씩
+  const noteBox = el("div");   // 서랍 — 읽는 법
+  const chanBoxes = new Map(); // 타면 id → 서랍 내용 (그린 것을 재사용)
   const idSel = el("select", { "aria-label": "시뮬 결과 선택" });
   const modeSel = el("select", { "aria-label": "비행 모드 선택" });
+
+  // 서랍 정의는 **결과가 도착한 뒤** 정해진다(타면 수·이름이 결과에 달렸다).
+  // defs 배열을 통째로 갈아 끼우면 열어 둔 서랍이 매번 닫히므로, 배열은 유지하고
+  // 안의 항목만 갈아 끼운다 — createDrawers는 이 배열을 참조로 들고 있다
+  const defs = [];
+  const drawers = createDrawers({
+    id: "duty-drawer",
+    defs,
+    initial: openDrawer,
+    onOpen: (k) => { openDrawer = k; },
+  });
+
+  const rebuildDefs = (report) => {
+    defs.length = 0;
+    for (const c of report?.channels ?? []) {
+      const key = `ch:${c.label}`;
+      defs.push({
+        key, label: c.label, group: "타면별 — 왜 그런가",
+        title: "체류 시간 히스토그램 · 누적 초과 · 타각–타율 밀도",
+        build: () => {
+          // 그려 둔 것을 재사용한다 — 캔버스 세 장을 서랍을 여닫을 때마다 다시
+          // 그리면 결과가 클수록 여는 순간이 눈에 띄게 늦다
+          if (!chanBoxes.has(key)) chanBoxes.set(key, el("div"));
+          const box = chanBoxes.get(key);
+          if (!box.firstChild) box.append(channelBody(c, selectedMode, report));
+          return box;
+        },
+      });
+    }
+    defs.push({
+      key: "howto", label: "읽는 법", group: "설명",
+      title: "판정 색·포화의 뜻·타율 반전의 불감대",
+      build: () => noteBox,
+    });
+    // repaint — 결과가 바뀌면 열려 있던 서랍의 **내용**도 옛 채널 것이다
+    drawers.repaint();
+  };
 
   const draw = () => {
     if (!lastReport) return;
     clear(modeSel).append(...modeOptions(lastReport).map((o) =>
       el("option", { value: o.value, selected: o.value === selectedMode }, o.label)));
-    renderReport(bodyBox, lastReport, selectedMode);
+    chanBoxes.clear(); // 구간이 바뀌면 그림도 바뀐다 — 그려 둔 것을 버린다
+    renderSummary(summaryBox, lastReport);
+    renderNotes(noteBox);
+    rebuildDefs(lastReport);
+    drawers.repaint();
   };
 
   const load = async (id) => {
@@ -66,7 +118,8 @@ export function render() {
       draw();
     } catch (e) {
       lastReport = null;
-      clear(bodyBox);
+      clear(summaryBox);
+      rebuildDefs(null);
       statusBox.textContent = "";
       clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
     }
@@ -78,7 +131,7 @@ export function render() {
       const items = (await api.get("/results")).filter((m) => m.kind === "sim");
       if (!items.length) {
         // 조용한 빈 화면 금지 — 무엇을 해야 하는지와 갈 곳을 같이 준다
-        clear(bodyBox).append(el("p", { class: "hint" },
+        clear(summaryBox).append(el("p", { class: "hint" },
           "시뮬 결과가 없습니다 — ", el("a", { href: "#sim" }, "시뮬레이션 탭"),
           "에서 한 번 실행하면 여기서 타면 사용 통계를 볼 수 있습니다."));
         return;
@@ -98,20 +151,29 @@ export function render() {
   idSel.addEventListener("change", () => load(idSel.value));
   modeSel.addEventListener("change", () => {
     selectedMode = modeSel.value;
-    renderReport(bodyBox, lastReport, selectedMode);
+    chanBoxes.clear();
+    renderSummary(summaryBox, lastReport);
+    drawers.repaint();
   });
 
+  clear(summaryBox).append(el("p", { class: "hint" }, "불러오는 중…"));
   loadList();
-  return el("div", {},
-    el("div", { class: "panel" },
-      el("h2", {}, "타면 사용 (타각 범위별 체류 시간·포화)"),
-      el("div", { class: "row" },
+  return el("div", { class: "tab-page" },
+    tabTop({
+      title: "타면 사용",
+      lead: "같은 런을 «체류 시간의 언어»로 다시 읽는다 — 작동기 사이징·힌지모멘트 "
+        + "듀티·리밋사이클 판정이 쓰는 언어다. 요약이 어디가 문제인지를, 타면별 "
+        + "그림이 왜 그런지를 답한다.",
+      actions: [
         el("label", { class: "field" }, "시뮬 결과", idSel),
         el("label", { class: "field" }, "구간", modeSel),
         el("button", { onclick: loadList }, "새로고침"),
-        statusBox),
-      errBox),
-    bodyBox);
+      ],
+      extra: [statusBox, errBox],
+    }),
+    tabStage(summaryBox),
+    drawers.root,
+  );
 }
 
 function sevCell(cell) {
@@ -136,10 +198,12 @@ function summaryTable(report) {
       el("td", { class: "num", title: r.reversalsHint }, r.reversals))))));
 }
 
-function channelCard(channel, mode, report) {
+/** 타면 한 장 — 세 그림과 그 그림들이 기대는 전제. 카드(.panel)를 두르지 않는다:
+ *  이미 서랍 안이라 판이 겹치면 상자 속 상자가 된다. */
+function channelBody(channel, mode, report) {
   const v = viewOf(channel, mode);
   if (!v) {
-    return el("div", { class: "panel" },
+    return el("div", {},
       el("h2", {}, channel.label),
       el("p", { class: "hint" }, `이 결과에 ${mode} 구간이 없습니다.`));
   }
@@ -172,7 +236,7 @@ function channelCard(channel, mode, report) {
   }
 
   const oor = v.hist?.out_of_range ?? 0;
-  return el("div", { class: "panel" },
+  return el("div", {},
     el("h2", {}, channel.label,
       el("span", { class: "hint", style: "margin-left:10px; font-weight:400" },
         `${limitText} · ${rateText}`)),
@@ -192,28 +256,45 @@ function channelCard(channel, mode, report) {
       : null);
 }
 
-function renderReport(bodyBox, report, mode) {
-  if (!report) return;
-  clear(bodyBox).append(
-    el("div", { class: "panel" },
-      el("h2", {}, "요약"),
-      summaryTable(report),
-      report.warnings?.length
-        ? el("p", { class: "hint", style: `color:${SEV_COLOR.warn}` },
-          report.warnings.join(" "))
-        : null,
-      el("p", { class: "hint" },
-        "각은 표시 전용 deg 변환 (내부·전송은 rad). 포화 '판정 불가'는 0초가 아니라 ",
-        "한계값을 모르는 상태입니다 — 작동기 미장착이거나 판정 기준선이 없는 옛 결과. ",
-        "포화는 시간·비율과 함께 **구간 수·최장 구간**을 봅니다: 짧게 여러 번이면 ",
-        "리밋사이클 징후, 길게 한 번이면 조종권 부족으로 처방이 다릅니다. ",
-        "타율 반전은 불감대(rate 한계의 2%) 초과분만 세므로 rate 한계가 다른 런끼리 ",
-        "횟수를 직접 비교하면 안 됩니다 — 쓰인 불감대는 칸에 마우스를 올리면 나옵니다."),
-      el("div", { class: "legend" },
-        el("span", {}, el("span", { class: "chip", style: `background:${SEV_COLOR.ok}` }), "포화 없음"),
-        el("span", {}, el("span", { class: "chip", style: `background:${SEV_COLOR.warn}` }), "포화 1% 미만"),
-        el("span", {}, el("span", { class: "chip", style: `background:${SEV_COLOR.bad}` }), "포화 1% 이상"),
-        el("span", {}, el("span", { class: "chip", style: `background:${SEV_COLOR.na}` }), "판정 불가"))),
-    ...report.channels.map((c) => channelCard(c, mode, report)),
+/** 전면 — 전 타면 한 줄씩. "어디가 문제인가"를 여기서 먼저 답한다. */
+function renderSummary(box, report) {
+  if (!report) {
+    clear(box).append(el("p", { class: "hint" }, "결과가 없습니다."));
+    return;
+  }
+  // el()로 감싼다 — clear(box).append(...)는 **네이티브** append라 null을 "null"
+  // 텍스트로 붙인다(el은 걸러 낸다). 실제로 경고가 없는 런에서 표 밑에 "null"이
+  // 한 줄 찍혔다 (이 리포의 상습 함정군)
+  clear(box).append(el("div", {},
+    summaryTable(report),
+    report.warnings?.length
+      ? el("p", { class: "hint", style: `color:${SEV_COLOR.warn}` },
+        report.warnings.join(" "))
+      : null,
+    // 범례는 **표와 같은 화면**에 둔다 — 색이 판정인데 뜻을 클릭 뒤로 숨기면
+    // 화면이 자기가 쓴 색을 설명하지 않는 상태가 된다 (영향성 범례와 같은 규약)
+    el("div", { class: "legend" },
+      el("span", {}, el("span", { class: "chip", style: `background:${SEV_COLOR.ok}` }), "포화 없음"),
+      el("span", {}, el("span", { class: "chip", style: `background:${SEV_COLOR.warn}` }), "포화 1% 미만"),
+      el("span", {}, el("span", { class: "chip", style: `background:${SEV_COLOR.bad}` }), "포화 1% 이상"),
+      el("span", {}, el("span", { class: "chip", style: `background:${SEV_COLOR.na}` }), "판정 불가")),
+  ));
+}
+
+/** 서랍 — 읽는 법. 표를 보다 막히는 자리들의 뜻. */
+function renderNotes(box) {
+  clear(box).append(
+    el("h2", {}, "읽는 법"),
+    el("p", { class: "hint", style: "max-width:96ch" },
+      "각은 표시 전용 deg 변환 (내부·전송은 rad). 포화 '판정 불가'는 0초가 아니라 ",
+      "한계값을 모르는 상태입니다 — 작동기 미장착이거나 판정 기준선이 없는 옛 결과. ",
+      "포화는 시간·비율과 함께 ", el("b", {}, "구간 수·최장 구간"), "을 봅니다: 짧게 여러 번이면 ",
+      "리밋사이클 징후, 길게 한 번이면 조종권 부족으로 처방이 다릅니다. ",
+      "타율 반전은 불감대(rate 한계의 2%) 초과분만 세므로 rate 한계가 다른 런끼리 ",
+      "횟수를 직접 비교하면 안 됩니다 — 쓰인 불감대는 칸에 마우스를 올리면 나옵니다."),
+    el("p", { class: "hint", style: "max-width:96ch" },
+      "수치는 전부 엔진이 ", el("b", {}, "저장된 전 해상도"), "에서 냅니다 — 재생과 달리 ",
+      "stride 다운샘플을 쓰지 않는 이유는 최대 타율과 짧은 포화 구간이 통째로 ",
+      "사라지기 때문입니다."),
   );
 }

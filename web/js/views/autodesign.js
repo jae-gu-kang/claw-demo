@@ -1,5 +1,10 @@
 /** 자동 설계 뷰 — 트림 자동화→게인 튜닝→스케줄 적합→마진 검증→원인별 처방 루프.
 
+배치는 다른 탭과 같은 규약이다(views/stage.js): **보고서가 전면**이고 실행 설정·요구
+조정은 서랍이다. 이 탭의 답은 "이 형상이 전 구간에서 합격하는가, 아니면 무엇을
+승인해야 하는가"이고 그건 보고서가 낸다 — 설정 폼이 그 위를 덮고 있으면 매 실행마다
+답을 찾아 스크롤해야 한다.
+
 설계 루프 전체(M17 DesignSession)를 잡 하나로 돌리고, gated(기본)면 처방 카드에서
 멈춘다 — 승인한 처방만 반영해 재개한다. 에스컬레이션(상위 설계 변경)은 어느
 모드에서도 자동 적용되지 않고 보고 패널에만 남는다.
@@ -24,6 +29,7 @@ import {
 import { slotIndex, withConstant } from "../lib/gainsync.js";
 import { store } from "../store.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
+import { createDrawers, tabStage, tabTop } from "./stage.js";
 
 const SEV_COLOR = { ok: "#34c759", warn: "#ff9500", fail: "#ff3b30", na: "#8e8e93" };
 // 무효 처방은 "미달"이면서 동시에 "예산을 태운 처방"이라 다른 미달과 같은 색으로
@@ -38,6 +44,7 @@ const LEDGER_TOP_N = 20;
 // 탭 이탈·재진입에도 실행 중 잡·최근 결과를 잃지 않는다 (progress.js 재부착 규약)
 let runningJobId = null;
 let lastResultId = null;
+let openDrawer = null; // 탭 재진입에도 열어 둔 서랍 유지 (모듈 스코프 규약)
 // /design/defaults 응답 전체 — 폼 placeholder와 사유 코드 사전(reason_text)의 출처.
 // 사전은 서버가 정본이고 웹 폴백은 lib/autodesign.REASON_TEXT다
 let designDefaults = null;
@@ -45,7 +52,7 @@ let designDefaults = null;
 export function render() {
   const errBox = el("div");
   const progressBox = el("div");
-  const resultBox = el("div");
+  const resultBox = el("div", { class: "tab-sheet" }); // 전면 — 이 탭의 답
   const defaultsBox = el("p", { class: "hint" }, "기본값 불러오는 중…");
 
   const form = {
@@ -164,49 +171,80 @@ export function render() {
   const fieldRow = (fields, inputs) => el("div", { class: "form-row" },
     fields.map(([k, label]) => el("label", {}, `${label} `, inputs[k])));
 
-  // 서버는 이 중첩 덮어쓰기를 이미 받는다(routes/design.py _build_config) — 화면만
-  // 안 내주고 있었다. 접어 두는 이유는 기본값이 정본이고 조정이 예외이기 때문이다
-  const tuningBox = el("details", {},
-    el("summary", { class: "hint" },
-      "요구 조정 — 합격기준·튜닝 목표·작동기·지연 (비우면 서버 기본값)"),
-    el("p", { class: "hint" },
-      "채운 칸만 config 덮어쓰기로 나간다. 회색 수치가 서버 기본값이다. "
-      + "튜닝 목표가 합격선보다 낮으면 서버가 422로 거절한다 — 튜닝이 성공한 점이 "
-      + "곧바로 fail로 찍히기 때문이다(PM은 목표 ≥ 합격선, GM은 목표 ≥ 목표선). "
-      + "여기서 바꾼 합격기준은 결과에 동봉되어 마진 탭 색과 판정어 설명에도 그대로 쓰인다."),
-    el("p", { class: "hint" }, "합격기준 (판정선)"),
-    fieldRow(CRITERIA_FIELDS, form.criteria),
-    el("p", { class: "hint" }, "튜닝 목표 (설계선)"),
-    fieldRow(TARGET_FIELDS, form.targets),
-    el("p", { class: "hint" }, "작동기·지연 예산 (마진의 병목이 되는 상위 설계값)"),
-    el("div", { class: "form-row" },
-      el("label", {}, "작동기 wn [rad/s] ", form.actuatorWn),
-      el("label", {}, " 작동기 ζ ", form.actuatorZeta),
-      el("label", {}, " 총 지연 [s] ", form.delayS),
-    ),
-  );
-
   const listBox = el("span");
-  const root = el("div",
-    {},
-    el("h2", {}, "자동 설계"),
-    el("p", { class: "hint" },
-      "엔벨로프에서 coarse 트림 격자를 유도하고, 플랜트 변화량으로 격자를 세분화한 뒤 "
-      + "운영점별 게인을 자동 튜닝·다항 적합하고, 보간 실효 게인으로 마진을 검증한다. "
-      + "마진 부족은 원인별 처방(검증점 추가/앵커·breakpoint 승격/상위 설계 에스컬레이션)으로 순환한다."),
-    defaultsBox,
-    el("div", { class: "form-row" },
-      el("label", {}, "모드 ", form.mode),
-      el("label", {}, " 점 예산 ", form.budgetPoints),
-      el("label", {}, " 이터 상한 ", form.budgetIters),
-      el("label", {}, " mach 점수 ", form.nMach),
-      el("label", {}, " 고도[m] ", form.altsText),
-      el("label", {}, " 연료[kg] ", form.fuelsText),
-      el("button", { onclick: start }, "자동 설계 시작"),
-      " ", listBox,
-    ),
-    tuningBox,
-    errBox, progressBox, resultBox,
+
+  const drawers = createDrawers({
+    id: "autodesign-drawer",
+    initial: openDrawer,
+    onOpen: (k) => { openDrawer = k; },
+    defs: [
+      { key: "run", label: "실행 설정", group: "입력",
+        title: "모드·예산·격자 — 매 실행 전에 정하는 것",
+        build: () => [
+          el("h2", {}, "실행 설정"),
+          defaultsBox,
+          el("div", { class: "form-row" },
+            el("label", {}, "모드 ", form.mode),
+            el("label", {}, " 점 예산 ", form.budgetPoints),
+            el("label", {}, " 이터 상한 ", form.budgetIters),
+            el("label", {}, " mach 점수 ", form.nMach),
+            el("label", {}, " 고도[m] ", form.altsText),
+            el("label", {}, " 연료[kg] ", form.fuelsText)),
+          el("p", { class: "hint" },
+            "승인 게이트(gated)는 처방 카드에서 멈춘다 — 승인한 처방만 반영해 재개한다. "
+            + "전자동(auto)은 예산이 다할 때까지 스스로 순환한다. "
+            + "에스컬레이션(상위 설계 변경)은 어느 모드에서도 자동 적용되지 않는다."),
+        ] },
+      { key: "tuning", label: "요구 조정", group: "입력",
+        title: "합격기준·튜닝 목표·작동기·지연 (비우면 서버 기본값)",
+        build: () => [
+          el("h2", {}, "요구 조정 — 합격기준·튜닝 목표·작동기·지연"),
+          // 서버는 이 중첩 덮어쓰기를 이미 받는다(routes/design.py _build_config).
+          // 서랍에 넣는 이유는 기본값이 정본이고 조정이 예외이기 때문이다
+          el("p", { class: "hint" },
+            "채운 칸만 config 덮어쓰기로 나간다. 회색 수치가 서버 기본값이다. "
+            + "튜닝 목표가 합격선보다 낮으면 서버가 422로 거절한다 — 튜닝이 성공한 점이 "
+            + "곧바로 fail로 찍히기 때문이다(PM은 목표 ≥ 합격선, GM은 목표 ≥ 목표선). "
+            + "여기서 바꾼 합격기준은 결과에 동봉되어 마진 탭 색과 판정어 설명에도 그대로 쓰인다."),
+          el("p", { class: "hint" }, "합격기준 (판정선)"),
+          fieldRow(CRITERIA_FIELDS, form.criteria),
+          el("p", { class: "hint" }, "튜닝 목표 (설계선)"),
+          fieldRow(TARGET_FIELDS, form.targets),
+          el("p", { class: "hint" }, "작동기·지연 예산 (마진의 병목이 되는 상위 설계값)"),
+          el("div", { class: "form-row" },
+            el("label", {}, "작동기 wn [rad/s] ", form.actuatorWn),
+            el("label", {}, " 작동기 ζ ", form.actuatorZeta),
+            el("label", {}, " 총 지연 [s] ", form.delayS)),
+        ] },
+      { key: "pipeline", label: "이 탭이 하는 일", group: "설명",
+        build: () => [
+          el("h2", {}, "설계 루프 한 바퀴"),
+          el("p", { class: "hint", style: "max-width:96ch" },
+            "엔벨로프에서 coarse 트림 격자를 유도하고, 플랜트 변화량으로 격자를 세분화한 뒤 "
+            + "운영점별 게인을 자동 튜닝·다항 적합하고, 보간 실효 게인으로 마진을 검증한다. "
+            + "마진 부족은 원인별 처방(검증점 추가/앵커·breakpoint 승격/상위 설계 "
+            + "에스컬레이션)으로 순환한다."),
+          el("p", { class: "hint", style: "max-width:96ch" },
+            "엔벨로프 탭의 ④ 제어 설계·스케줄링과 ⑥ 검증·마진 층을 한 잡으로 잇는 것이 "
+            + "이 탭이다 — 설계점을 고르고, 게인을 배치하고, 그 사이를 다시 재는 순환."),
+        ] },
+    ],
+  });
+
+  const root = el("div", { class: "tab-page" },
+    tabTop({
+      title: "자동 설계",
+      lead: "설계 루프 전체를 잡 하나로 돈다 — 트림 자동화 → 게인 튜닝 → 스케줄 적합 "
+        + "→ 마진 검증 → 원인별 처방. 실행 설정과 요구 조정은 아래 서랍에.",
+      actions: [
+        el("button", { class: "primary", onclick: start }, "자동 설계 시작"),
+        listBox,
+      ],
+      extra: [progressBox, errBox],
+    }),
+    // 보고서 — 무대 바로 아래 판독 시트. 표·칩·처방 카드라 자기 테두리가 없다
+    tabStage(resultBox),
+    drawers.root,
   );
 
   if (runningJobId) {
@@ -215,6 +253,9 @@ export function render() {
       onError: (e) => clear(errBox).append(el("div", { class: "error-box" }, errorText(e))),
     });
   }
+  clear(resultBox).append(el("p", { class: "hint" },
+    "아직 결과가 없습니다 — [자동 설계 시작]을 누르거나 위 목록에서 지난 결과를 "
+    + "열면 운영점 판정·처방 카드·게인 확정이 여기 채워집니다."));
   loadDefaults();
   loadList();
   return root;
