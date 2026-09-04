@@ -300,3 +300,43 @@ def test_설계_천장이_적어_둔_수치_근방이다(ac, fuel):
         return False
     assert flies(below), f"연료 {fuel:.0f} kg: {below:.0f} m에서 난다고 적어 뒀는데 못 난다"
     assert not flies(above), f"연료 {fuel:.0f} kg: {above:.0f} m는 천장 위여야 하는데 난다"
+
+
+# 게인 **설계점**도 같은 부류다. 프로펠러 추력 모델 이후 M0.6 h1000 fuel200이
+# 엔벨로프 **밖**으로 나갔고, 그 사실과 스로틀 수치를 여섯 군데가 문장으로 인용한다:
+# fcl/demo.py 머리말과 _M_DESIGN 주석, tests/test_design_schedmap.py 둘,
+# server/tests/.../test_analysis.py 둘.
+#
+# 여기 못박는 이유는 **여백이 0.04%p뿐**이어서다. 기체 기본값(질량·공력·프로펠러)을
+# 그만큼만 건드리면 판정이 뒤집히는데, 그때 빨개지는 테스트가 하나도 없었다 —
+# 조성 판정(test_design_point_composition_is_sane)은 트림 **수렴**만 요구하므로
+# 뒤집혀도 그대로 초록이고, 여섯 인용은 조용히 거짓이 된다.
+#
+# 해면·연료 300도 함께 둔다: 인용문이 "고도를 바꿔 재면 안심되는 숫자가 나온다"는
+# 함정을 경고하는 근거가 그 둘이라, 셋이 같이 움직여야 그 문장이 성립한다.
+DESIGN_POINT = {  # (mach, alt[m], fuel[kg]): (인용 스로틀 문자열, 엔벨로프 안인가)
+    (0.6, 1000.0, 200.0): ("95.04%", False),  # ← 게인 설계점. SAT_FRAC 0.95를 0.04%p 넘긴다
+    (0.6, 0.0, 200.0): ("94.06%", True),      # 해면이면 아슬하게 안 — 설계점은 해면이 아니다
+    (0.6, 1000.0, 300.0): ("99.12%", False),  # 연료 100 kg만 더 실어도 이만큼 간다
+}
+
+
+@pytest.mark.parametrize("key", sorted(DESIGN_POINT))
+def test_설계점_스로틀이_인용한_수치와_같고_판정도_그대로다(ac, key):
+    """인용한 스로틀 문자열과 엔벨로프 판정을 **함께** 못박는다.
+
+    판정만 걸면 수치가 95.04 → 95.9로 흘러도 초록이라 인용문이 낡는다. 수치만 걸면
+    SAT_FRAC이 바뀔 때 "엔벨로프 밖"이라는 인용문이 조용히 거짓이 된다. 둘 다 건다.
+    """
+    mach, alt, fuel = key
+    cited, want_ok = DESIGN_POINT[key]
+    tr = trim_level(ac, TrimCase("design", mach=mach, alt=alt, fuel=fuel))
+    # 수렴은 한다 — "수렴하지만 포화"가 인용문 전체의 전제다(못 푸는 점이 아니다)
+    assert tr.converged, f"M{mach} h{alt:.0f} f{fuel:.0f}이 수렴하지 않는다 — 인용문의 전제가 깨졌다"
+    thr = float(tr.control.throttle[0])
+    assert f"{thr:.2%}" == cited, (
+        f"M{mach} h{alt:.0f} f{fuel:.0f} 스로틀이 {thr:.2%} — 인용은 {cited}다. "
+        f"여섯 군데 인용문을 같이 고쳐야 한다 (이 상수 위 주석에 목록이 있다)")
+    assert envelope_ok(tr) is want_ok, (
+        f"M{mach} h{alt:.0f} f{fuel:.0f}의 엔벨로프 판정이 뒤집혔다 — "
+        f"'설계점은 엔벨로프 밖'이라고 적은 문장들이 거짓이 됐다")

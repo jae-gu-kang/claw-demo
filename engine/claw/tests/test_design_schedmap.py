@@ -103,7 +103,10 @@ def test_design_point_composition_is_sane(setup):
 
     **"설계점"이라 부르지 않는다**: 프로펠러 추력 모델 이후 M0.6 h1000 fuel200은
     스로틀 95.04%로 엔벨로프 밖이고(fcl/demo.py 머리말), 설계 파이프라인은 이 점을
-    trimmable=False로 걸러낸다. 여기서 계속 쓰는 이유는 게인이 실제로 그 조건에서
+    trimmable=False로 걸러낸다. 그 수치와 판정은 **test_trim.py DESIGN_POINT**가
+    못박는다 — 이 테스트는 트림 **수렴**만 요구하므로 판정이 뒤집혀도 초록이고,
+    그래서 여기 적은 문장이 조용히 거짓이 될 수 있는 자리였다.
+    여기서 계속 쓰는 이유는 게인이 실제로 그 조건에서
     선정됐고 조성 판정이 트림 수렴만 요구하기 때문이다 — 수렴은 한다(포화일 뿐).
     엔벨로프 밖 점을 지도가 어떻게 다루는지는
     test_outside_envelope_point_is_measured_but_not_prescribed가 따로 본다.
@@ -178,8 +181,14 @@ def test_margin_map_end_to_end_and_cancel(setup):
     ac, tables, design = setup
     ps = PointSet([
         OperatingPoint(case=_case(m), role=ROLE_ANCHOR, origin="coarse")
-        # 0.6은 엔벨로프 밖이다(스로틀 95.04% — fcl/demo.py 머리말). 여기 남기는 이유는
-        # 지도가 밖의 점도 **측정은 한다**는 것이 이 테스트의 대상이기 때문이다
+        # 0.6은 엔벨로프 밖이다(스로틀 95.04% — test_trim.py DESIGN_POINT가 못박는다).
+        # **이 테스트가 그 사실을 검사하지는 않는다**: 아래 단언은 중단 없음·케이스 집합·
+        # M0.5 검증점의 loops·지문·취소뿐이라, 0.6이 안쪽으로 흘러도 하나도 안 바뀐다.
+        # 밖 점의 처리(측정은 하되 처방은 안 한다)를 실제로 핀하는 것은
+        # test_outside_envelope_point_is_measured_but_not_prescribed이고, 거기서는
+        # trimmable=False를 손으로 세워 실제 엔벨로프와 무관하게 건다.
+        # 여기서 0.6을 남기는 이유는 밖 점이 섞여도 지도가 **끝까지 돈다**는 것이고,
+        # 그건 aborted is None이 본다
         for m in (0.4, 0.6)
     ])
     for mid in midpoint_validation_points(ps):
