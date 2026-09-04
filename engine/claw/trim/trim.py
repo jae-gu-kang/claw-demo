@@ -41,8 +41,10 @@ _Z0_DEFAULT = np.array([0.05, 0.0, 0.3])
 def _saturation_channels(de, thr) -> dict:
     """포화 채널별 판정 — saturation_ok의 부정과 동치인 세 갈래 (상수 단일 거처).
 
-    throttle_high가 추진 한계의 대리 지표다 — 전용 추력 모델 [TBD] 확보 전까지
-    수평비행 추력 부족은 스로틀 상한 포화로만 드러난다 (01 §2.6).
+    throttle_high는 이제 **진짜 추진 한계**다 — 프로펠러 추력 모델
+    (plant/prop.py PropEngine)이 들어오면서 T(δ, V, ρ)가 실제 곡선이 됐기 때문이다.
+    종전 상수 추력에서는 이 플래그가 "전용 추력 모델 [TBD]이 없어 쓰는 대리 지표"였다
+    (01 §2.6). 수평비행 추력 부족은 여전히 스로틀 상한 포화로 드러난다.
     """
     return {
         "de": bool(abs(de) >= SAT_FRAC * DE_BOUNDS[1]),

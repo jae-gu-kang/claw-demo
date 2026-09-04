@@ -12,9 +12,10 @@ def test_registry_index_lists_engine_components(client):
     # 법칙 컴포넌트 (블록 파라미터 폼 원천 — 02 §2.3)
     assert {"Autopilot", "ScasAxis", "Mixer"} <= set(reg["fcl"])
     assert "ErrorModel" in reg["nav"]
-    # 추진 — 블록도 하위 페이지(#blocks/plant/prop)가 **SingleEngine**으로 표를 그린다
-    # (데모 정본 형상). TwinEngine은 쌍발 스터디용으로 함께 등록돼 있다
-    assert {"SingleEngine", "TwinEngine"} <= set(reg["propulsion"])
+    # 추진 — 블록도 하위 페이지(#blocks/plant/prop)가 **PropEngine**으로 표를 그린다
+    # (데모 정본 형상 — 속도·밀도 의존 프로펠러 곡선). SingleEngine·TwinEngine은
+    # 상수 추력 형태로 함께 등록돼 있다
+    assert {"PropEngine", "SingleEngine", "TwinEngine"} <= set(reg["propulsion"])
 
 
 def test_registry_schema_for_form_autogen(client):

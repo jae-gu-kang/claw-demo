@@ -13,7 +13,7 @@ from claw.plant.aero import AeroModel, wind_to_body_coeffs
 from claw.plant.aircraft import Aircraft
 from claw.plant.ground import LaunchRail, SkidGear
 from claw.plant.mass import FuelMass
-from claw.plant.prop import SingleEngine
+from claw.plant.prop import PropEngine
 from claw.tables import Table
 
 # 스키드 접촉 [기본값] — 강성은 "정지 침투량"으로 정한다. 총중량 10.8 kN을 5 cm에서
@@ -102,13 +102,24 @@ def make_demo_aircraft(ground=None) -> Aircraft:
         cg_empty=np.zeros(3),
         cg_full=np.zeros(3),
     )
-    # 추진 [기본값] — **단발 중심선 8 kN**. 시각화 모델(models/shahed-136: 2엽 푸셔
-    # 1기)이 정본이고 동역학을 거기 맞췄다. 총추력은 종전 쌍발(4 kN×2)과 같게 두어
-    # 종방향은 한 톨도 안 바뀐다 — 바뀌는 것은 **차동추력 요 모멘트가 사라지는 것
-    # 하나뿐**이고, 그래서 믹서의 k_diff_thr도 0이다(fcl/demo.py DEMO_K_DIFF_THR).
-    # 요축 재튜닝은 하지 않았다: 실측상 필요가 없다 (그 근거는 fcl/demo.py에).
+    # 추진 [기본값] — **단발 중심선 프로펠러 500 kW**. 시각화 모델(models/shahed-136:
+    # 2엽 푸셔 1기)이 정본이고 동역학을 거기 맞췄다.
+    #
+    # 상수 추력(T = T_max·δ)에서 프로펠러 곡선(T = δσ·min(T_static, ηP/V))으로 옮기면서
+    # **엔벨로프 상단이 실제로 잘린다** — 상수 모델은 고속에서 추력이 남아돈다고 말하지만
+    # 프로펠러는 정확히 거기서 힘이 빠진다. 그게 이 전환의 목적이다: 엔벨로프 탭의
+    # 스로틀 포화 전선이 "추력 대리"가 아니라 진짜 추력 한계가 된다.
+    #
+    # 축동력 500 kW는 **실측으로 정했다**. 사용자가 처음 고른 300 kW는 "프로펠러답게
+    # 작게"의 뜻이었는데, 재 보니 3000 m 트림이 아예 안 되고 전 구간 스로틀 78~95%라
+    # 상승·선회 여력이 없었다 — 이 기체가 1200 kg에 날개 3 m²(실속 71 m/s)로 프로펠러가
+    # 밀기에 무거운 탓이다. 500 kW에서 최대 스로틀 0.74로 여유가 서고, 프로펠러 성격
+    # (순항 M0.3~0.4 · 상단이 추력으로 막힘 — 해면 M0.60@연료200, M0.58@만재)은 그대로 남는다.
+    # 종전 상수 8 kN은 M0.8에서도 여유가 있었지만(해면 환산 소요 축동력 1,012 kW)
+    # 그건 프로펠러가 낼 수 있는 값이 아니었다.
+    # 수치는 데모 프로파일용 라운드 값 — 실기체 값 아님.
     # 값을 고칠 곳은 여기 하나다 (plant/prop.py 스키마 기본값도 이 값과 같게 유지).
-    engine = SingleEngine(max_thrust=8000.0)
+    engine = PropEngine(power_max=500_000.0, eta=0.8, static_thrust=6000.0)
     return Aircraft(fuel_mass, aero, engine, ground=ground)
 
 

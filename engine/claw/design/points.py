@@ -47,8 +47,9 @@ def envelope_verdict(tr) -> dict:
 
     ok는 반드시 envelope_ok() 호출 — 판정 정본(01 §4.1)을 재기술하지 않는다.
     reasons는 해당되는 사유 전부, 우선순위 순(첫 항목이 표시 대표):
-    not_converged → alpha_margin → saturated_throttle_high(추진 한계 대리,
-    전용 추력 모델 [TBD] — 01 §2.6) → saturated_de → saturated_throttle_low.
+    not_converged → alpha_margin → saturated_throttle_high(**진짜 추진 한계** —
+    프로펠러 추력 곡선 plant/prop.py PropEngine. 다만 SAT_FRAC 0.95 등고선이라
+    한계보다 설계 여유만큼 안쪽이다) → saturated_de → saturated_throttle_low.
     """
     reasons = []
     if not tr.converged:

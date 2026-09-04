@@ -418,9 +418,11 @@ def test_landing_mission_runs_over_http(client, wait_job):
     # 단계 시각 — 없으면 화면이 "언제 접지했나"를 말할 수 없다
     ph = body["meta"]["phases"]
     assert ph["launch_exit_t"] == pytest.approx(0.245, abs=0.001)
-    # 엔진 test_landing과 같은 값 — 동압 스케줄 상한을 2.0으로 내리며 앞당겨졌다
-    assert ph["touchdown_t"] == pytest.approx(107.3, abs=2.0)
-    assert ph["stop_t"] == pytest.approx(129.9, abs=3.0)
+    # 엔진 test_landing과 같은 값 — 프로펠러 전환으로 뒤로 밀렸다(107.3→115.4,
+    # 129.9→137.9). 여유추력이 5,840 N → 1,320 N으로 줄어 상승·가속이 느려진 것이지
+    # 접지 품질이 나빠진 게 아니다(엔진 쪽이 접지 속도 −0.96 m/s를 따로 못박는다).
+    assert ph["touchdown_t"] == pytest.approx(115.4, abs=2.0)
+    assert ph["stop_t"] == pytest.approx(137.9, abs=3.0)
 
     # 기준선은 결과와 함께 다닌다 — 엔진이 소비하지 않는 heading·length도 실려야
     # 재생 화면이 활주로 띠를 그린다 (웨이포인트 동봉과 같은 규약)

@@ -7,7 +7,8 @@
 import pytest
 
 
-def _margin_map_request(machs=(0.5, 0.6, 0.7)):
+# 프로펠러 전환으로 수평비행 상단이 1000 m에서 M0.58까지 내려왔다 (plant/prop.py)
+def _margin_map_request(machs=(0.35, 0.4, 0.45)):
     return {
         "cases": [{"mach": m, "alt": 1000.0, "fuel": 200.0} for m in machs],
         "loops": [
@@ -228,10 +229,16 @@ def test_iso_value_count_is_bounded(client):
 
 def test_envelope_scan_round_trip(client, wait_job):
     """제어 가능 영역 스캔 (01 §2.6) — 트림 잡 + envelope_ok 정본 판정·사유 귀속."""
+    # 앞 둘은 엔벨로프 **안**(1000 m는 M0.22~0.595), 뒤 둘은 밖이어야 이 테스트가
+    # 성립한다. 밖을 **두 사유로** 넣는 것이 요점이다 — 귀속이 실제로 갈리는지 본다.
     cases = [
-        {"mach": 0.6, "alt": 1000.0, "fuel": 200.0},
-        {"mach": 0.7, "alt": 1000.0, "fuel": 200.0},
-        {"name": "slow", "mach": 0.12, "alt": 100.0, "fuel": 400.0},  # 저속 저동압 — 비성립
+        {"mach": 0.4, "alt": 1000.0, "fuel": 200.0},
+        {"mach": 0.45, "alt": 1000.0, "fuel": 200.0},
+        {"name": "slow", "mach": 0.12, "alt": 100.0, "fuel": 400.0},  # 미수렴 + α 여유
+        # M0.60은 thr 0.950438 — 문턱 0.95에서 **0.04%** 떨어진 칼날 위다. 기본값이나
+        # ISA 보간이 조금만 움직여도 사유가 뒤집히고, 그때 실패는 "엔벨로프가 움직였다"로
+        # 읽힌다. M0.605(thr 0.968)는 포화 문턱 0.596과 미수렴 0.615에서 거의 등거리다.
+        {"name": "fast", "mach": 0.605, "alt": 1000.0, "fuel": 200.0},  # 수렴하지만 스로틀 포화
     ]
     r = client.post("/api/analysis/design-envelope-scan",
                     json={"cases": cases, "fingerprint": "fp-env"})
@@ -239,13 +246,21 @@ def test_envelope_scan_round_trip(client, wait_job):
     j = wait_job(r.json()["id"])
     assert j["status"] == "done"
     body = client.get(f"/api/results/{j['result_id']}").json()
-    assert body["kind"] == "envelope_scan" and body["n_requested"] == 3
+    assert body["kind"] == "envelope_scan" and body["n_requested"] == 4
     entries = body["cases"]
-    assert len(entries) == 3
-    ok0, ok1, bad = entries
-    assert ok0["verdict"]["ok"] is True and ok0["verdict"]["reasons"] == []
-    assert bad["trim"]["case"]["name"] == "slow"
-    assert bad["verdict"]["ok"] is False and len(bad["verdict"]["reasons"]) > 0
+    assert len(entries) == 4
+    ok0, ok1, slow, fast = entries
+    for e in (ok0, ok1):
+        assert e["verdict"]["ok"] is True and e["verdict"]["reasons"] == []
+    assert slow["trim"]["case"]["name"] == "slow"
+    assert slow["verdict"]["ok"] is False
+    assert slow["verdict"]["reasons"] == ["not_converged", "alpha_margin"]
+    # 수렴 여부로 밖을 판정하면 이 케이스가 통과해 버린다 — 프로펠러 상단은 **수렴하는데
+    # 포화하는** 자리라 사유가 갈려야 한다 (engine design/points.py envelope_verdict)
+    assert fast["trim"]["case"]["name"] == "fast"
+    assert fast["trim"]["converged"] is True, "상단 밖은 미수렴이 아니라 포화다"
+    assert fast["verdict"]["ok"] is False
+    assert fast["verdict"]["reasons"] == ["saturated_throttle_high"]
     # 스로틀 소요가 페이로드에 있음 — 추진 선도(스로틀 히트맵)의 데이터 근거
     assert 0.0 <= ok0["trim"]["control"]["throttle"][0] <= 1.0
     meta = client.get("/api/results").json()[0]
@@ -399,7 +414,9 @@ def test_bode_opens_every_converged_cell_and_agrees_with_it(client, wait_job):
     냉간 트림을 해서 이 결함이 안 보인다 — 격자를 여럿으로 두는 것이 이 테스트의 요점.
     """
     act = {"wn": 30.0, "zeta": 0.7}
-    cases = [{"name": "", "mach": m, "alt": 0.0, "fuel": 200.0} for m in (0.65, 0.75, 0.85)]
+    # 해면 상단이 M0.60(연료 200 kg)까지 내려와 종전 격자(0.65·0.75·0.85)는 전부
+    # 엔벨로프 밖이다 — 수렴한 칸이 없으면 이 테스트가 볼 것이 없다 (plant/prop.py)
+    cases = [{"name": "", "mach": m, "alt": 0.0, "fuel": 200.0} for m in (0.35, 0.45, 0.55)]
     mm = client.post("/api/analysis/margin-map", json={
         "cases": cases, "loops": [_PITCH_LOOP], "actuator": act, "delay_s": 0.035})
     assert mm.status_code == 202

@@ -139,6 +139,7 @@ const SCHEMA_NAMES = {
   "fcl/ScasAxis": ["kp", "ki", "k_rate", "washout_tau", "out_lo", "out_hi"],
   "fcl/Mixer": ["elevon_lo", "elevon_hi", "rudder_lo", "rudder_hi", "k_diff_thr"],
   "actuator/SecondOrderActuator": ["wn", "zeta", "rate_max", "pos_lo", "pos_hi", "initial"],
+  "propulsion/PropEngine": ["power_max", "eta", "static_thrust", "z_offset"],
   // x_offset·thrust_map은 스키마에 없다 — 죽은 인자와 콜러블이라 의도적 제외
   // (engine claw/plant/prop.py, test_plant_models가 그 목록을 핀한다)
   "propulsion/SingleEngine": ["max_thrust", "z_offset"],

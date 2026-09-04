@@ -30,9 +30,12 @@ export function render() {
   const resultBox = el("div");
   const errBox = el("div");
 
-  const fMachFrom = el("input", { class: "num", value: "0.4" });
-  const fMachTo = el("input", { class: "num", value: "0.8" });
-  const fMachStep = el("input", { class: "num", value: "0.1" });
+  // 기본 격자는 **비행 가능 범위 안**이어야 한다 — 프로펠러 전환 전의 0.4~0.8/0.1은
+  // 15칸 중 8칸이 밖이 됐고(고도 1000·3000 m에서 M0.6·0.7·0.8, 100 m에서 0.7·0.8), 0.10 간격은 thr 변화가 연속성 문턱(0.15)을
+  // 넘어 시드 연쇄까지 끊겼다. 0.30~0.55/0.05는 세 고도(100·1000·3000 m) 전부 안이다.
+  const fMachFrom = el("input", { class: "num", value: "0.3" });
+  const fMachTo = el("input", { class: "num", value: "0.55" });
+  const fMachStep = el("input", { class: "num", value: "0.05" });
   const fAlts = el("input", { value: "100, 1000, 3000" });
   const fFuels = el("input", { class: "num", value: "200" });
   const fFp = el("input", { value: "web-trim-v1" });
@@ -109,7 +112,7 @@ function renderCases(caseBox, progressBox, errBox, resultBox) {
   caseBox.append(el("div", { class: "row" },
     el("button", {
       onclick: () => {
-        cases.push({ mach: 0.6, alt: 1000, fuel: 200 });
+        cases.push({ mach: 0.45, alt: 1000, fuel: 200 });  // 엔벨로프 안 (스로틀 0.58)
         renderCases(caseBox, progressBox, errBox, resultBox);
       },
     }, "행 추가"),

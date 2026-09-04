@@ -7,9 +7,9 @@
 
 전제 하나를 명시한다 — **RTK 고정해**. 다만 그 이유는 처음 적었던 것과 다르다:
 실측해 보니 접지 강하율은 항법 등급과 거의 무관하고, 갈리는 것은
-**접지 지점**이다 — 기본 GNSS 512 m 폭, RTK 12 m 폭. 활주로가 1,500 m이므로
-그 산포가 곧 "활주로에 내리느냐"를 가른다. (두 수치는 동압 스케줄 상한을 2.0으로
-내리면서 874 / 92 m에서 함께 좁아졌다 — 아래 테스트 독스트링에 경위가 있다.)
+**접지 지점**이다 — RTK 5시드 폭 7.9 m이고 기본 GNSS는 그보다 두 자릿수 크다.
+활주로가 1,500 m이므로 그 산포가 곧 "활주로에 내리느냐"를 가른다.
+(수치는 프로펠러 전환으로 재측정했다 — 아래 테스트 독스트링에 경위가 있다.)
 test_rtk_buys_a_repeatable_touchdown_point_not_a_softer_one이 그 대비를 담는다.
 """
 
@@ -104,11 +104,13 @@ def test_phase_times_are_recorded(landed):
     """이탈·접지·정지 시각 — 실측 회귀. 셋 다 None이 아니어야 '착륙했다'가 성립한다."""
     ph = landed.meta["phases"]
     assert ph["launch_exit_t"] == pytest.approx(0.245, abs=0.001)
-    # 접지·정지가 앞당겨진 것은 동압 스케줄 상한을 2.0으로 내리면서다 — 승강타
-    # 리밋사이클이 잦아들어 접근 궤적이 덜 흔들린다 (110.1→107.3, 132.8→129.9).
-    # 레일 이탈은 구속 적분이라 게인과 무관하게 그대로다
-    assert ph["touchdown_t"] == pytest.approx(107.3, abs=1.0)
-    assert ph["stop_t"] == pytest.approx(129.9, abs=2.0)
+    # 접지·정지가 **뒤로 밀린 것은 프로펠러 전환**이다 (107.3→115.4, 129.9→137.9):
+    # 여유추력이 5,840 N → 1,320 N으로 줄어 상승·가속이 느려졌다. 접지 자체는 그대로
+    # 부드럽다(−0.96 m/s) — 느려진 것은 거기까지 가는 시간이지 접지 품질이 아니다.
+    # (직전 갱신은 동압 스케줄 상한 4.0→2.0 — 승강타 리밋사이클 수정이었다.)
+    # 레일 이탈은 구속 적분이라 추진과 무관하게 그대로다
+    assert ph["touchdown_t"] == pytest.approx(115.4, abs=1.5)
+    assert ph["stop_t"] == pytest.approx(137.9, abs=2.0)
     assert ph["touchdown_t"] < ph["stop_t"]
 
 
@@ -185,21 +187,21 @@ def test_rtk_buys_a_repeatable_touchdown_point_not_a_softer_one(seed):
     갈리는 것은 **어디에 내리는가**다 — 플레어 개시가 alt_le 20이므로 고도 오차가
     곧 개시 시점 오차이고, 88 m/s에서 그것이 접지 지점으로 증폭된다:
 
-        기본 GNSS   접지 지점 폭 512 m (σ 175 m)
-        RTK 고정해  접지 지점 폭  12 m (σ   4 m)
+        기본 GNSS   두 시드(3·7)가 수백 m 차이 (2시드 표본 — 폭이 아니라 하한)
+        RTK 고정해  5시드 폭 7.9 m
 
-    두 수치는 동압 스케줄 상한을 2.0으로 내리면서 **함께 좁아졌다**(종전 874 / 92 m)
-    — 승강타 리밋사이클이 접근 궤적에 얹던 흔들림이 줄어든 결과다. 대비 자체는
-    오히려 커졌다(9.5배 → 43배). 활주로 길이가 1,500 m인데 ±256 m가 흔들리면
-    활주로에 못 내린다. 그래서 RTK가 전제이고, **fix 상실은 미모델**이다 [TBD].
+    수치는 프로펠러 전환으로 다시 재측정한 것이다 — 접지점 자체가 9,700 → 10,237 m로
+    멀어졌다(추력이 줄어 상승이 길어진 만큼 더 나아간 뒤 내려온다). **대비는 그대로
+    30배 이상**이고, 그것이 이 테스트가 지키는 명제다. 기본 GNSS는 2시드만 재서
+    폭이 아니라 하한이다 — 5시드 폭은 그보다 크다.
+    활주로 길이가 1,500 m인데 수백 m가 흔들리면 활주로에 못 내린다.
+    그래서 RTK가 전제이고, **fix 상실은 미모델**이다 [TBD].
     """
     rtk = fly(nav=NavErrorModel.rtk_fixed(seed=seed))
     k = int(round(rtk.meta["phases"]["touchdown_t"] / DT))
-    # RTK면 시드가 바뀌어도 같은 자리에 내린다 (5시드 실측 9694~9707 m).
-    # 스케줄 상한을 내리면서 접지점이 9957 → 9700 언저리로 옮겼고 **폭은 더 좁아졌다**
-    # (93 m → 12 m) — 승강타 진동이 접근 궤적에 얹던 흔들림이 줄어든 결과다
-    assert float(rtk.signals["pn"][k]) == pytest.approx(9700.0, abs=150.0)
-    assert climb_rate(rtk.signals, k) == pytest.approx(-0.91, abs=0.25)
+    # RTK면 시드가 바뀌어도 같은 자리에 내린다 (5시드 폭 7.9 m)
+    assert float(rtk.signals["pn"][k]) == pytest.approx(10237.0, abs=150.0)
+    assert climb_rate(rtk.signals, k) == pytest.approx(-0.96, abs=0.25)
 
 
 def _turning_path_modes():
@@ -212,7 +214,9 @@ def _turning_path_modes():
     return modes
 
 
-def fly_path(wps, accept=300.0, t_end=200.0):
+# t_end 200 → 240: 프로펠러 전환으로 상승·순항이 느려져 200 s 안에 경로를
+# 못 끝냈다 (모드 체인이 cruise에서 멈춘다). 궤적이 나빠진 게 아니라 길어졌다
+def fly_path(wps, accept=300.0, t_end=240.0):
     ac = make_demo_aircraft(ground=make_demo_skid_gear())
     tr = trim_ground(ac, TrimCase("pad", mach=0.0, alt=0.0, fuel=300.0, condition="ground"))
     assert tr.converged
@@ -240,7 +244,7 @@ def test_following_a_turning_path_does_not_fly_into_the_ground():
     직진 미션은 그 진동을 안고도 착륙했기 때문에 **기존 회귀 전부가 통과했다** —
     선회를 시키는 시나리오가 없어서 안 걸린 것이다. 그래서 여기에 하나 세운다.
     """
-    res = fly_path(((3000.0, 2000.0, 600.0), (6000.0, -1000.0, 400.0)), t_end=120.0)
+    res = fly_path(((3000.0, 2000.0, 600.0), (6000.0, -1000.0, 400.0)), t_end=150.0)  # 프로펠러 전환으로 상승이 느려져 120 s로는 순항을 못 벗어난다
     s = res.signals
     # 진단이 먼저다 — 회귀하면 실제로 일어나는 일은 **추락**(접지 36 s·h −1.4 m·
     # 마진 −2.73)인데, 모드 체인 단정이 먼저 터지면 실패가 "순항을 못 벗어남"으로만

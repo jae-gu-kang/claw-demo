@@ -101,6 +101,33 @@ def test_trace_exercises_the_hard_paths(trace):
         assert vals == {0.0, 1.0}, f"{flag}가 두 상태를 모두 밟지 않음: {vals}"
     assert len({row["mach"] for row in inputs}) > 100, "게인 스케줄이 움직이지 않음"
     assert any(abs(r[0]) >= 0.349 for r in refs), "엘레본 포화를 밟지 않음"
+    # PID 조건부 적분의 **포화 가지**를 밟아야 C 대조가 반쪽이 아니다. 분기가 한쪽만
+    # 실행되면 비트 일치는 통과하면서 나머지 가지는 검증되지 않은 채 탑재된다
+    import claw.blocks.controllers as controllers
+
+    hits = {"free": 0, "blocked": 0}
+    orig = controllers.PID.step
+
+    def counting_step(self, e, kp=None, ki=None, kd=None):
+        # 조건식을 **복사하지 않는다** — 복사하면 구현이 바뀔 때 가드가 옛 공식으로
+        # 세면서 "양쪽 다 밟았다"고 계속 통과한다. 대신 클램프-온리였다면 나왔을
+        # 상태와 비교한다: 갈라졌으면 곧 조건부 적분이 일한 스텝이다
+        ki_ = self.ki if ki is None else ki
+        before = self._i
+        y = orig(self, e, kp, ki, kd)
+        clamp_only = min(max(before + self.dt * ki_ * e, self.out_lo), self.out_hi)
+        hits["blocked" if self._i != clamp_only else "free"] += 1
+        return y
+
+    runner = _ir_runner(_warm)
+    controllers.PID.step = counting_step
+    try:
+        for row in inputs:
+            runner.step(**row)
+    finally:
+        controllers.PID.step = orig
+    assert hits["free"] > 0 and hits["blocked"] > 0, (
+        f"조건부 적분 분기가 한쪽만 실행됨: {hits} — C 대조가 반쪽이다")
 
 
 @needs_cc
@@ -250,9 +277,9 @@ def test_분할해도_지문은_그대로다():
     for name in ("fcl.h", "fcl_types.h", "fcl_data.c", *(f"fcl_{g}.h" for g in GROUPS)):
         line = next(ln for ln in _gen(name).splitlines() if "지문" in ln)
         fps.add(line.split(":")[1].strip())
-    # 지문은 기체를 단발로 맞추면서 갱신됐다 — 정본 형상이 중심선 프로펠러 1기라
-    # (models/shahed-136) 좌우 추력차로 요를 못 내고, 그래서 믹서의 차동추력 계수를
-    # 0으로 내렸다(fcl/demo.py DEMO_K_DIFF_THR). 구조는 그대로고 값만 바뀌었으므로
-    # 탑재 코드도 fcl_data.c의 mix_diff_k 한 줄만 달라진다.
+    # 지문은 기체를 단발로 맞추면서 갱신됐다 — 차동추력 계수를 0으로 내린 설계 변경이
+    # 믹서 파라미터를 바꿨다. **프로펠러 추력 모델(단계 C)은 이 지문을 안 움직인다**:
+    # 순수 플랜트 변경이라 법칙 그래프에 닿지 않는다. 그것이 이 변경이 탑재 코드에
+    # 아무 영향이 없다는 근거다.
     # (직전 갱신은 동압 스케줄 상한 4.0 → 2.0 — 저속 피치 리밋사이클 수정이었다.)
     assert fps == {"a1a24ddcaf2e9fe3"}, f"형상 지문이 움직였다: {fps}"

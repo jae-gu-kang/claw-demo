@@ -49,12 +49,18 @@ from claw.plant.eom import (
 )
 from claw.plant.ground import LaunchRail, SkidGear
 from claw.plant.mass import FuelMass
-from claw.plant.prop import SingleEngine, TwinEngine
+from claw.plant.prop import PropEngine, SingleEngine, TwinEngine
 
 SecondOrderActuator.register(REGISTRY, category="actuator")  # 교체 가능 컴포넌트 (02 §2.3)
 # 추진도 같은 자리다. 이 클래스들은 신호 블록(init→step→reset)이 아니라 힘·모멘트
 # 모델이라 Block을 상속하지 않는다 — nav/ErrorModel과 같은 형태로 직접 등록한다.
-# 데모 기체의 정본은 SingleEngine이고 TwinEngine은 쌍발 스터디용이다 (plant/prop.py).
+# 데모 기체의 정본은 PropEngine(단발 프로펠러)이다. SingleEngine·TwinEngine은
+# 상수 추력(속도·밀도 무관) 형태로 남아 있다 — 추력 맵 [TBD]의 자리표시이자
+# 쌍발 차동추력 스터디의 자리다 (plant/prop.py).
+REGISTRY.register(
+    "propulsion", PropEngine.NAME,
+    lambda ps: PropEngine(**ps.as_dict()), PropEngine.PARAM_DEFS,
+)
 REGISTRY.register(
     "propulsion", SingleEngine.NAME,
     lambda ps: SingleEngine(**ps.as_dict()), SingleEngine.PARAM_DEFS,
@@ -78,6 +84,7 @@ __all__ = [
     "FuelMass",
     "TwinEngine",
     "SingleEngine",
+    "PropEngine",
     "SkidGear",
     "LaunchRail",
     "SecondOrderActuator",

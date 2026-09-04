@@ -194,7 +194,7 @@ class _Ctx:
 
 @_emitter(PID)
 def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
-    """controllers.py:46 — y = clip(kp·e + I + kd·d), I ← clip(I + dt·ki·e)."""
+    """controllers.py PID — y = clip(kp·e + I + kd·d), I ← 조건부 적분 + clip."""
     nid, e = node.id, ins[0]
     kp = gains.get("kp") or ctx.param(nid, "kp", inst.kp, "비례 게인")
     ki = gains.get("ki") or ctx.param(nid, "ki", inst.ki, "적분 게인")
@@ -215,8 +215,15 @@ def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
         # 매 스텝 나눗셈까지 함께 사라진다 (0.0 곱은 합에 영향이 없다)
         ctx.line(f"/* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */")
 
-    out = ctx.declare(f"{nid}_y", f"{clip}({terms}, {lo}, {hi})")
-    ctx.line(f"{i_st} = {clip}({i_st} + {dt_macro} * {ki} * {e}, {lo}, {hi});")
+    raw = ctx.declare(f"{nid}_raw", terms)
+    out = ctx.declare(f"{nid}_y", f"{clip}({raw}, {lo}, {hi})")
+    # 조건부 적분 — 포화한 방향으로 더 미는 증분만 버린다. 클램프는 **무조건**이다
+    # (범위 밖 웜스타트를 가두는 불변식 — controllers.py PID.step 주석 참조)
+    ctx.line(f"double {nid}_inc = {dt_macro} * {ki} * {e};")
+    ctx.line(f"if (({raw} > {hi} && {nid}_inc > 0.0) || ({raw} < {lo} && {nid}_inc < 0.0)) {{")
+    ctx.line(f"    {nid}_inc = 0.0;")
+    ctx.line("}")
+    ctx.line(f"{i_st} = {clip}({i_st} + {nid}_inc, {lo}, {hi});")
     if has_d:
         ctx.line(f"{ctx.st(nid, 'e_prev', 0.0)} = {e};")
     return out

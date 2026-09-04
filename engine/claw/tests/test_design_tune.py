@@ -26,7 +26,7 @@ ACT = dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2)
 def setup():
     ac = make_demo_aircraft()
     design = demo_design_gains()
-    tr = trim_level(ac, TrimCase("t", mach=0.6, alt=1000.0, fuel=200.0), fingerprint="fp")
+    tr = trim_level(ac, TrimCase("t", mach=0.45, alt=1000.0, fuel=200.0), fingerprint="fp")
     assert tr.converged
     return ac, design, tr, linearize(ac, tr)
 
@@ -187,7 +187,7 @@ def test_tune_points_skips_untrimmable(setup):
     ac, design, _, _ = setup
     points = PointSet()
     trims = {}
-    for m in (0.5, 0.7):
+    for m in (0.35, 0.45):
         case = TrimCase(name=case_name(m, 1000.0, 200.0), mach=m, alt=1000.0, fuel=200.0)
         tr = trim_level(ac, case, fingerprint="fp")
         trims[case.name] = tr
@@ -202,7 +202,7 @@ def test_tune_points_skips_untrimmable(setup):
     points.add(bad)
     out = tune_points(ac, points, LinearModelSet(), trims, design=design, **ACT)
     assert out["skipped"] == [bad.case.name]
-    assert set(out["results"]) == {case_name(0.5, 1000.0, 200.0), case_name(0.7, 1000.0, 200.0)}
+    assert set(out["results"]) == {case_name(0.35, 1000.0, 200.0), case_name(0.45, 1000.0, 200.0)}
     # gain surface 샘플 형식 — 자리별 {이름: 값}
     assert set(out["gains"]["pitch.kp"]) == set(out["results"])
 
@@ -395,27 +395,39 @@ def test_cap_finds_conditionally_stable_window(monkeypatch):
 
 @pytest.fixture(scope="module")
 def bandwidth_collapse():
-    """M0.7/h0 — 마진은 통과하는데 교차가 하한 아래로 내려가던 점."""
+    """마진은 통과하는데 교차가 하한 아래로 내려가는 점 — **지연을 키워 만든다.**
+
+    종전에는 M0.7/h0이 그 자리였다. 프로펠러 전환으로 그 조건이 못 나게 됐고
+    (해면 상단 M0.60), 더 중요하게는 **엔벨로프 안 어디에서도 기본 작동기 설정
+    (delay 0.035)으로는 이 현상이 안 난다** — 비행 가능 범위가 좁아지면서 동압 폭이
+    줄어 게인 스케줄의 롤오프가 1.03배까지만 가기 때문이다(격자 전수 탐색으로 확인:
+    fuel 40·200·400 × alt 0~4000 × M0.25~0.55에서 0건).
+
+    이 테스트가 보는 것은 기체가 아니라 **튜너의 구제 경로**이므로, 조건을 억지로
+    찾는 대신 지연을 0.1 s로 키워 현상을 만든다 — 같은 성격(마진은 남는데 교차가
+    하한에 걸림)이고 그 편이 정직하다. 실측: PM 104.4° · GM 8.2 dB · 교차 0.219배.
+    """
     ac = make_demo_aircraft()
     design = demo_design_gains()
-    tr = trim_level(ac, TrimCase("bw", mach=0.7, alt=0.0, fuel=40.0), fingerprint="fp")
+    tr = trim_level(ac, TrimCase("bw", mach=0.4, alt=1000.0, fuel=200.0), fingerprint="fp")
     assert tr.converged
-    return design, linearize(ac, tr)
+    act = {**ACT, "delay_s": 0.1}
+    return design, linearize(ac, tr), act
 
 
 def test_rescue_polish_recovers_bandwidth_collapse(bandwidth_collapse):
     """백오프가 대역폭만 버려서 놓친 해를 마무리가 되찾는다.
 
     이 점의 자세 루프는 **마진이 모자라서** infeasible이던 게 아니다: 백오프 해가
-    PM 103°·GM 9.6 dB로 목표를 크게 넘겼는데 교차가 목표의 0.168배까지 내려가
+    PM 104°·GM 8.2 dB로 목표를 크게 넘겼는데 교차가 목표의 0.219배까지 내려가
     대역폭 하한(0.2)에 걸렸다. 백오프는 ωc를 버려 마진을 사는 한 방향 탐색이라
     "마진은 남는데 대역폭이 없는" 해에서 멈춘다 — (kp, ki)를 함께 흔들면
     같은 마진에서 대역폭이 돌아온다.
     """
     from claw.design.tune import REASON_CAPPED, REASON_RESCUED
 
-    design, lm = bandwidth_collapse
-    out = tune_point(lm, design, **ACT)
+    design, lm, act = bandwidth_collapse
+    out = tune_point(lm, design, **act)
     slot = out["slots"]["pitch_att"]
     assert slot["status"] == "ok", f"구제되지 않았다 — {out['notes']}"
     assert slot["reason"] == REASON_RESCUED

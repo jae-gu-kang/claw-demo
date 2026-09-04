@@ -1,4 +1,4 @@
-"""제어기 블록 — PID (게인 스케줄 가능, 클램프 안티와인드업), StateSpace, TransferFunction (구현 문서 §2.2).
+"""제어기 블록 — PID (게인 스케줄 가능, 조건부 적분 안티와인드업), StateSpace, TransferFunction (구현 문서 §2.2).
 
 병렬형 y = kp·e + I + kd·(e - e_prev)/dt. 적분은 Integrator 기본과 동일한
 forward Euler(출력 계산 후 I ← clip(I + dt·ki·e)) — 상수 오차 e에서
@@ -21,8 +21,8 @@ class PID(Block):
         ParamDef("kp", 1.0, "-", "비례 게인"),
         ParamDef("ki", 0.0, "-", "적분 게인"),
         ParamDef("kd", 0.0, "-", "미분 게인"),
-        ParamDef("out_lo", -UNBOUNDED, "-", "출력 하한(안티와인드업 클램프)"),
-        ParamDef("out_hi", UNBOUNDED, "-", "출력 상한(안티와인드업 클램프)"),
+        ParamDef("out_lo", -UNBOUNDED, "-", "출력 하한(안티와인드업 — 조건부 적분 + 클램프)"),
+        ParamDef("out_hi", UNBOUNDED, "-", "출력 상한(안티와인드업 — 조건부 적분 + 클램프)"),
     )
 
     def __init__(
@@ -48,8 +48,26 @@ class PID(Block):
         ki = self.ki if ki is None else ki
         kd = self.kd if kd is None else kd
         d = (e - self._e_prev) / self.dt
-        y = min(max(kp * e + self._i + kd * d, self.out_lo), self.out_hi)
-        self._i = min(max(self._i + self.dt * ki * e, self.out_lo), self.out_hi)
+        raw = kp * e + self._i + kd * d
+        y = min(max(raw, self.out_lo), self.out_hi)
+        inc = self.dt * ki * e
+        # **조건부 적분** — 출력이 포화한 채 그 방향으로 더 미는 증분은 버린다.
+        # 클램프만으로는 부족하다: 클램프는 적분기가 쌓이는 **크기**를 출력범위로
+        # 제한할 뿐 쌓이는 것 자체를 막지 않는다. 속도축은 출력범위가 [0,1]이라
+        # 적분기가 "스로틀 100% 분량"까지 차고, 그걸 푸는 데 수십 초가 걸린다
+        # (fcl/autopilot.py tau_spd 주석의 실측 참조).
+        #
+        # **증분을 버리는 것과 상태를 가두는 것은 별개 판단이다.** 둘을 한 덩어리로
+        # 건너뛰면 범위 밖 웜스타트가 영영 안 잘린다 — reset(state=…)은 트림값을
+        # 그대로 받는데(law.py·simulator.py 범프리스 계약) 트림 θ의 상한(0.35,
+        # trim.py ALPHA_BOUNDS)이 AP의 theta_hi(0.3)보다 커서 실제로 도달한다.
+        # 그러면 이 변경이 없애려던 증상이 되레 길어진다: 범위 밖 0.05 rad는 음의
+        # 오차로만 방전되는데 클램프가 없어 종전보다 오래 걸린다.
+        # 아래 형태는 _i가 범위 안이면 clip(i + 0.0) == i라 동작이 같고, 범위 밖일
+        # 때만 불변식("_i는 항상 축 클램프 안")을 되돌린다.
+        if (raw > self.out_hi and inc > 0.0) or (raw < self.out_lo and inc < 0.0):
+            inc = 0.0
+        self._i = min(max(self._i + inc, self.out_lo), self.out_hi)
         self._e_prev = e
         return y
 

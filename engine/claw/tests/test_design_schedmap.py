@@ -215,7 +215,7 @@ def test_rate_wc_is_measured_on_the_prior_closed_plant(setup):
     idx = 1  # 롤 = 두 번째 (요를 먼저 닫는다 — 유일하게 prior가 비지 않는 자리)
     group, x_rate, u_in = spec["rates"][idx]
     act = dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2)
-    for mach in (0.3, 0.6, 0.8):
+    for mach in (0.3, 0.45, 0.8):  # 0.8은 새 엔벨로프 밖 — 의도된 '바깥' 점
         case = _case(mach)
         lm = linearize(ac, trim_level(ac, case))
         reported = scheduled_margin_point(lm, tables, design, case, **act)["roll_rate"]["wc"]
@@ -242,7 +242,7 @@ def test_outside_envelope_point_is_measured_but_not_prescribed(setup):
     ac, tables, design = setup
     ps = PointSet([
         OperatingPoint(case=_case(m), role=ROLE_ANCHOR, origin="coarse")
-        for m in (0.4, 0.6)
+        for m in (0.4, 0.45)  # 0.6은 새 엔벨로프 밖 — 비교 대상이 둘 다 밖이면 안 된다
     ])
     # 한 점을 엔벨로프 밖으로 표시 — 격자·리파인이 포화/α 여유로 세우는 플래그와 같다
     ps.get(case_name(0.4, 1000.0, 200.0)).trimmable = False
@@ -251,7 +251,7 @@ def test_outside_envelope_point_is_measured_but_not_prescribed(setup):
         actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035,
     )
     marked = out["cases"][case_name(0.4, 1000.0, 200.0)]
-    other = out["cases"][case_name(0.6, 1000.0, 200.0)]
+    other = out["cases"][case_name(0.45, 1000.0, 200.0)]
     assert marked["outside_envelope"] is True
     assert marked["loops"], "마진 수치까지 없애면 왜 경계인지 볼 자료가 사라진다"
     assert "outside_envelope" not in other

@@ -1,7 +1,7 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : scas_yaw
  * 지문    : 19a1c5a4102ee3c3
- * 엔진    : claw 0.1.0
+ * 엔진    : claw 0.2.0
  * 자료형 (MATLAB _types.h 대응)
  */
 #ifndef CLAW_SCAS_YAW_TYPES_H

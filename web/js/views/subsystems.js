@@ -65,11 +65,12 @@ export const SUB_TINT = {
 // 세 축이 동일 구조라 정의 하나를 공유 (게인 값만 축별 상이 — 정본은 게인 탭).
 const SCAS_PI_PAGE = {
   crumb: "PI",
-  title: "PI — 클램프 안티와인드업", eng: "blocks.PID (kd=0) · y = clip(kp·e + I) · I ← clip(I + dt·ki·e)",
+  title: "PI — 조건부 적분 안티와인드업", eng: "blocks.PID (kd=0) · y = clip(kp·e + I) · inc = dt·ki·e (포화 방향이면 버림) · I ← clip(I + inc)",
   chips: ["ok", "dft"],
   svg: `
 <svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">
-  <defs><marker id="aw-pi" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
+  <defs><marker id="aw-pi" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+    <marker id="as-pi" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker></defs>
   <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="30" y="138" width="36" height="24" rx="12"/><text class="pnum" x="48" y="154">1</text></g>
   <text class="pname" x="48" y="182">e (자세 오차)</text>
   <path class="wire" d="M66 150 H146"/>
@@ -81,8 +82,9 @@ const SCAS_PI_PAGE = {
   <path class="wire" d="M320 86 H480 V132" marker-end="url(#aw-pi)"/>
   <path class="wire" d="M150 150 V222 H196" marker-end="url(#aw-pi)"/>
   <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="200" y="190" width="250" height="64" rx="3"/>
-    <text class="ttl" x="325" y="214" style="font-size:13px">적분기 1/s — 클램프 AW</text>
-    <text class="ttl2" x="325" y="236" data-gain="ki">I ← clip(I + dt·ki·e, out_lo~hi)</text></g>
+    <text class="ttl" x="325" y="210" style="font-size:13px">적분기 1/s — 조건부 적분</text>
+    <text class="ttl2" x="325" y="230" data-gain="ki">inc = dt·ki·e</text>
+    <text class="ttl2" x="325" y="248" style="font-size:11px">포화 방향이면 inc 버림 · I ← clip(I + inc)</text></g>
   <path class="wire" d="M450 222 H480 V168" marker-end="url(#aw-pi)"/>
   <circle class="body" data-code="blocks/controllers.py:PID.step" cx="480" cy="150" r="14"/>
   <text class="sumsign" x="480" y="143">+</text><text class="sumsign" x="480" y="163">+</text>
@@ -91,9 +93,11 @@ const SCAS_PI_PAGE = {
     <path d="M542 166 H558 L612 134 H628" stroke="#111" stroke-width="2" fill="none"/></g>
   <text class="bname" x="585" y="194">출력 클립 out_lo~hi</text>
   <path class="wire" d="M640 150 H726" marker-end="url(#aw-pi)"/>
+  <path class="wire soft" d="M635 176 V278 H325 V252" marker-end="url(#as-pi)"/>
+  <text class="bname" x="452" y="268" style="font-size:11px">출력이 한계에 붙었나 (그 방향이면 증분 버림)</text>
   <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="730" y="138" width="36" height="24" rx="12"/><text class="pnum" x="748" y="154">1</text></g>
   <text class="pname" x="748" y="182">u_PI → k_rate 합산</text>
-  <text class="canvas-note" x="24" y="290">※ 안티와인드업 = 적분 '상태' 자체를 out_lo~hi로 클램프 — 포화 해제 시 즉시 복귀 · 이산화: 전진 오일러, dt는 제어주기에서 자동 [확정 §3.5]</text>
+  <text class="canvas-note" x="24" y="292">※ 안티와인드업 = 포화 중 증분을 버린다 (상태 클램프는 웜스타트 방어로 남는다) · 이산화: 전진 오일러, dt는 제어주기에서 자동 [확정 §3.5]</text>
   <text class="canvas-note" x="24" y="308">※ kp·ki는 게인 스케줄이 스텝 인자로 덮어씀 (생성 후 게인 변경은 이 경로만) · 재관여 시 reset(state) 적분 웜스타트 [범프리스 계약]</text>
 </svg>`,
   flow: {
@@ -101,11 +105,12 @@ const SCAS_PI_PAGE = {
     reads: [
       "축이 만든 자세 오차 e가 ①로 들어와 곧바로 <b>두 갈래로</b> 갈린다 (분기점이 그 점이다).",
       "위쪽은 kp 삼각형 — 지금 이 순간의 오차에 비례해 친다.",
-      "아래쪽은 적분기다. I ← clip(I + dt·ki·e, out_lo~hi) — 더한 뒤 <b>상태 자체를</b> 잘라 둔다.",
+      "아래쪽은 적분기다. 증분 dt·ki·e를 만들되, 출력이 이미 한계에 붙어 있고 증분이 <b>그 방향</b>이면 버린다 (되돌아오는 점선이 그 판정이다). 남은 증분만 더하고 상태를 out_lo~hi로 잘라 둔다.",
       "둘을 더하고(+ +) 다시 out_lo~hi로 클립한 것이 u_PI이고, 축으로 돌아가 k_rate 항과 합쳐진다.",
     ],
     why: [
-      "이 그림에서 볼 것은 안티와인드업이 출력이 아니라 <b>적분 상태</b>를 클램프한다는 점이다. 출력만 자르면 포화 중에도 적분기는 계속 쌓이고, 포화가 풀린 뒤 그 쌓인 값을 게워낼 때까지 응답이 안 돌아온다. 상태를 잘라 두면 해제되는 순간 바로 복귀한다.",
+      "이 그림에서 볼 것은 <b>되돌아오는 점선</b>이다. 종전에는 적분 상태를 클램프하기만 했는데, 클램프는 쌓이는 <b>크기</b>를 제한할 뿐 쌓이는 것 자체를 막지 않는다 — 속도축은 포화 중에도 적분기가 스로틀 100% 분량까지 찼고, 풀린 뒤 그걸 게워낼 때까지 응답이 안 돌아왔다. 조건부 적분은 포화 방향의 증분을 아예 버려서 그 축적을 막는다.",
+      "상태 클램프는 그래도 남아 있다. 그건 와인드업 방어가 아니라 <b>웜스타트</b> 방어다 — 재관여 때 트림 θ가 out_lo~hi 밖으로 들어오는 경우를 자른다.",
       "미분항이 없다(kd=0). 감쇠는 축의 k_rate가 항법 각속도로 직접 하는 편이 낫다 — 오차를 미분하면 명령이 바뀌는 순간 킥이 생기고 잡음이 두 번 증폭된다.",
       "세 축이 이 <b>한 페이지</b>를 공유한다. 구조가 같고 값만 다르기 때문이고, 그래서 여기 설명도 한 벌이다.",
     ],
@@ -113,7 +118,7 @@ const SCAS_PI_PAGE = {
   notes: `
 <h4>설계 노트</h4>
 <ul>
-  <li>안티와인드업: <b>적분 상태 자체를 클램프</b> — 출력 클립과 같은 한계(out_lo~hi) 사용 <span class="chip dft">기본값 M7</span>. 포화 중 적분이 한계 밖으로 누적되지 않아 해제 시 즉시 응답</li>
+  <li>안티와인드업: <b>조건부 적분 + 상태 클램프</b> <span class="chip dft">기본값 M7</span>. 출력이 한계에 붙은 채 증분이 그 방향이면 증분을 버린다 — 포화 중 적분이 <b>아예 안 쌓여</b> 해제 시 즉시 응답. 클램프(out_lo~hi)는 웜스타트가 범위 밖으로 들어오는 경우를 막는 몫으로 남는다</li>
   <li>이산화: 전진 오일러 — 계수는 제어주기(100 Hz)로부터 자동 계산 <span class="chip ok">확정 §3.5</span>, 미분항은 SCAS에서 미사용(kd=0)</li>
   <li>게인 kp·ki의 정본은 게인 탭 테이블 — 스케줄이 <b>스텝별 인자 덮어쓰기</b>로 주입 (생성자 게인은 스케줄 미사용 시 폴백)</li>
   <li>재관여(reset) 시 적분기 <b>웜스타트</b>(state 인자) — 모드 전환 킥 방지 <span class="chip ok">범프리스 계약</span></li>
@@ -220,8 +225,8 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M154 100 H186" marker-end="url(#aw-scp)"/>
   <g class="blk" data-child="pi" data-code="blocks/controllers.py:PID" tabindex="0">
     <rect class="body" x="190" y="64" width="190" height="72" rx="3"/>
-    <text class="ttl" x="285" y="94" style="font-size:14px">PI — 클램프 AW</text>
-    <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
+    <text class="ttl" x="285" y="94" style="font-size:14px">PI — 조건부 적분 AW</text>
+    <text class="ttl2" x="285" y="116">조건부 적분 · 한계 out_lo~hi · 클릭 → 내부</text>
   </g>
   <path class="wire" d="M380 100 H412" marker-end="url(#aw-scp)"/>
   <circle class="body" data-code="fcl/scas.py:ScasAxis.step" cx="430" cy="100" r="14"/>
@@ -267,7 +272,7 @@ export const SUBSYSTEMS = {
 <ul>
   <li><span class="mono">δe = clip( PI(θ_cmd − θ) + k_rate·q, out_lo~hi )</span> — 명령은 α 리미터를 거친 θ_cmd <span class="chip ok">확정 M7</span></li>
   <li>데모 설계값: kp −2.0 · ki −0.5 · k_rate 0.4 (설계점 M0.6·h1000·fuel200) — 동압 스케일 1D mach 스케줄 적용 <span class="chip dft">기본값</span></li>
-  <li>PI 내부(비례·적분기 클램프 AW·출력 클립)는 PI 블록 클릭 — 층4</li>
+  <li>PI 내부(비례·조건부 적분 AW·출력 클립)는 PI 블록 클릭 — 층4</li>
 </ul>`,
         children: { pi: SCAS_PI_PAGE },
       },
@@ -287,8 +292,8 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M154 100 H186" marker-end="url(#aw-scr)"/>
   <g class="blk" data-child="pi" data-code="blocks/controllers.py:PID" tabindex="0">
     <rect class="body" x="190" y="64" width="190" height="72" rx="3"/>
-    <text class="ttl" x="285" y="94" style="font-size:14px">PI — 클램프 AW</text>
-    <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
+    <text class="ttl" x="285" y="94" style="font-size:14px">PI — 조건부 적분 AW</text>
+    <text class="ttl2" x="285" y="116">조건부 적분 · 한계 out_lo~hi · 클릭 → 내부</text>
   </g>
   <path class="wire" d="M380 100 H412" marker-end="url(#aw-scr)"/>
   <circle class="body" data-code="fcl/scas.py:ScasAxis.step" cx="430" cy="100" r="14"/>
@@ -352,8 +357,8 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M166 100 H186" marker-end="url(#aw-scy)"/>
   <g class="blk" data-child="pi" data-code="blocks/controllers.py:PID" tabindex="0">
     <rect class="body" x="190" y="64" width="190" height="72" rx="3"/>
-    <text class="ttl" x="285" y="94" style="font-size:14px">PI — 클램프 AW</text>
-    <text class="ttl2" x="285" y="116">적분 한계 out_lo~hi · 클릭 → 내부</text>
+    <text class="ttl" x="285" y="94" style="font-size:14px">PI — 조건부 적분 AW</text>
+    <text class="ttl2" x="285" y="116">조건부 적분 · 한계 out_lo~hi · 클릭 → 내부</text>
   </g>
   <path class="wire" d="M380 100 H412" marker-end="url(#aw-scy)"/>
   <circle class="body" data-code="fcl/scas.py:ScasAxis.step" cx="430" cy="100" r="14"/>
@@ -470,7 +475,7 @@ export const SUBSYSTEMS = {
   <!-- 선회 FF — 주석 프레임 (실 배선·재클립은 채널 내부, 층3) -->
   <rect x="330" y="400" width="600" height="44" rx="8" fill="none" stroke="#b45309" stroke-width="1.4" stroke-dasharray="6 4"/>
   <text class="annot" x="630" y="427" text-anchor="middle" fill="#b45309">선회 피드포워드 — |φ_cmd| 분기 → 고도(θ)·속도(δt) 채널 내부 가산 · 상세는 채널 클릭</text>
-  <text class="canvas-note" x="24" y="470">※ 채널 블록 클릭 → 내부 진입 (시뮬링크 더블클릭 대응) · 전 채널이 SCAS와 동일한 ScasAxis 재사용 (PI 클램프 AW) · V·h·ḣ·ψ는 NavOutput 추출 — 참값 차단 계약</text>
+  <text class="canvas-note" x="24" y="470">※ 채널 블록 클릭 → 내부 진입 (시뮬링크 더블클릭 대응) · 전 채널이 SCAS와 동일한 ScasAxis 재사용 (PI 조건부 적분 AW) · V·h·ḣ·ψ는 NavOutput 추출 — 참값 차단 계약</text>
 </svg>`,
     flow: {
       lead: "V·h·ψ 명령 + NavOutput → 채널 셋 → δt_cmd · θ_cmd · φ_cmd",
@@ -490,7 +495,7 @@ export const SUBSYSTEMS = {
     notes: `
 <h4>설계 노트</h4>
 <ul>
-  <li>속도 / 고도 / 헤딩 <b>독립 PI 채널</b> — 고도→θ_cmd, 속도→δt_cmd, 헤딩→φ_cmd <span class="chip ok">확정</span> · 전 채널이 SCAS와 동일한 <b>ScasAxis</b>(PI 클램프 AW + 출력 클립) 재사용</li>
+  <li>속도 / 고도 / 헤딩 <b>독립 PI 채널</b> — 고도→θ_cmd, 속도→δt_cmd, 헤딩→φ_cmd <span class="chip ok">확정</span> · 전 채널이 SCAS와 동일한 <b>ScasAxis</b>(PI 조건부 적분 AW + 출력 클립) 재사용</li>
   <li>명령 경로 <b>1차 명령필터</b> — 급명령의 타면 포화·과도 하중 방지 · 첫 스텝 현재 측정 시드(캡처) · 헤딩 필터는 wrap 최단경로 보간 · τ 속도 2 · 고도 5 · 헤딩 1 s <span class="chip dft">기본값 M7</span></li>
   <li>비활성 축: 필터는 측정 추적(reset_to) — 활성화 순간 현재값부터 램프 · 오차 0 적분 → <b>트림 홀드</b> · 헤딩 off는 적분 소거 + φ_cmd=0 (재관여 시 잔존 뱅크 킥 방지)</li>
   <li>선회 <b>피드포워드 보상</b>(델타윙 유도항력) — θ += k_pitch_turn·(1/cosφ−1), δt += k_thr_turn·(1/cos²φ−1) · 축 클립 후 합산 → 재클립 (이중 제한) · 데모 튜닝: 피치 0.05, 스로틀 0(역효과) <span class="chip dft">기본값</span></li>
@@ -523,7 +528,7 @@ export const SUBSYSTEMS = {
   <text class="siglabel" x="258" y="70">wrap ±π</text>
   <path class="wire" d="M272 100 H296" marker-end="url(#aw-aph)"/>
   <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="300" y="74" width="150" height="52" rx="3"/>
-    <text class="ttl" x="375" y="93" style="font-size:13px">헤딩 PI — 클램프 AW</text>
+    <text class="ttl" x="375" y="93" style="font-size:13px">헤딩 PI — 조건부 적분 AW</text>
     <text class="ttl2" x="375" y="111">kp <tspan data-p="kp_hdg">4</tspan> · ki <tspan data-p="ki_hdg">0</tspan></text></g>
   <path class="wire" d="M450 100 H478" marker-end="url(#aw-aph)"/>
   <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="482" y="74" width="96" height="52" rx="3"/>
@@ -586,7 +591,7 @@ export const SUBSYSTEMS = {
   <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
   <path class="wire" d="M272 100 H296" marker-end="url(#aw-apa)"/>
   <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="300" y="74" width="140" height="52" rx="3"/>
-    <text class="ttl" x="370" y="93" style="font-size:13px">고도 PI — 클램프 AW</text>
+    <text class="ttl" x="370" y="93" style="font-size:13px">고도 PI — 조건부 적분 AW</text>
     <text class="ttl2" x="370" y="111">kp <tspan data-p="kp_alt">0.004</tspan> · ki <tspan data-p="ki_alt">0.0004</tspan></text></g>
   <path class="wire" d="M440 100 H446" marker-end="url(#aw-apa)"/>
   <circle class="body" data-code="fcl/autopilot.py:Autopilot.step" cx="464" cy="100" r="14"/>
@@ -666,7 +671,7 @@ export const SUBSYSTEMS = {
   <text class="sumsign" x="249" y="104">+</text><text class="sumsign" x="258" y="113">−</text>
   <path class="wire" d="M272 100 H296" marker-end="url(#aw-aps)"/>
   <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="300" y="74" width="140" height="52" rx="3"/>
-    <text class="ttl" x="370" y="93" style="font-size:13px">속도 PI — 클램프 AW</text>
+    <text class="ttl" x="370" y="93" style="font-size:13px">속도 PI — 조건부 적분 AW</text>
     <text class="ttl2" x="370" y="111">kp <tspan data-p="kp_spd">0.15</tspan> · ki <tspan data-p="ki_spd">0.03</tspan></text></g>
   <path class="wire" d="M440 100 H492" marker-end="url(#aw-aps)"/>
   <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="496" y="74" width="90" height="52" rx="3"/>
@@ -1236,9 +1241,9 @@ export const SUBSYSTEMS = {
   <g class="sblk" data-code="plant/aircraft.py:Aircraft.fm"><rect class="body" x="30" y="208" width="36" height="24" rx="12"/><text class="pnum" x="48" y="224">2</text></g>
   <text class="pname" x="48" y="252">스로틀 [좌, 우]</text>
   <path class="wire" d="M66 220 H146" marker-end="url(#aw-pl)"/>
-  <g class="blk" data-child="prop" data-code="plant/prop.py:SingleEngine" tabindex="0"><rect class="body" x="150" y="184" width="290" height="72" rx="3"/>
-    <text class="ttl" x="295" y="206" style="font-size:13px">추진 — SingleEngine</text>
-    <text class="ttl2" x="295" y="226">단발 중심선 · 추력 맵 [기본 max_thrust·δt]</text>
+  <g class="blk" data-child="prop" data-code="plant/prop.py:PropEngine" tabindex="0"><rect class="body" x="150" y="184" width="290" height="72" rx="3"/>
+    <text class="ttl" x="295" y="206" style="font-size:13px">추진 — PropEngine</text>
+    <text class="ttl2" x="295" y="226">단발 중심선 프로펠러 · T(δ, V, ρ)</text>
     <text class="ttl2" x="295" y="244">M = r×F (요 없음) · 클릭 → 내부</text></g>
   <g class="sblk" data-code="env/atmosphere.py:isa_atmosphere plant/eom.py:gravity_body"><rect class="body" x="150" y="286" width="290" height="64" rx="3"/>
     <text class="ttl" x="295" y="308" style="font-size:13px">환경 — ISA 대기 · 중력</text>
@@ -1375,7 +1380,7 @@ export const SUBSYSTEMS = {
             "각속도를 무차원화하는 이유: 동미계수는 무차원 각속도의 함수로 정의된다. 그대로 넣으면 같은 회전이 속도에 따라 다른 계수를 부르고 DB의 축과 어긋난다.",
             "V = 0 가드가 필요한 것은 그 무차원화에 V가 <b>분모로</b> 들어가기 때문이다 — 지상 정지 상태에서 0으로 나눈다.",
             "인터페이스가 동체축 계수를 <b>직접</b> 받는 것이 이 블록의 계약이다. 부호와 기준점은 DB가 정의하고 코드는 가정하지 않는다. 풍축(CL·CD) 형태의 DB를 위한 변환 헬퍼는 따로 두었다 — 기본 경로에 넣으면 그 변환이 곧 가정이 된다.",
-            "ρ를 주입받는 이유: 같은 ISA 모델에서 나온 값을 제어법칙도 쓴다(고도 → 음속 → mach로 리미터·게인 스케줄이 소비). 블록마다 따로 조회하면 같은 고도에서 서로 다른 대기를 쓰는 일이 생긴다 — 추진은 지금 속도·밀도에 의존하지 않아 이 값을 안 쓴다.",
+            "ρ를 주입받는 이유: 같은 ISA 모델에서 나온 값을 제어법칙도 쓴다(고도 → 음속 → mach로 리미터·게인 스케줄이 소비). 블록마다 따로 조회하면 같은 고도에서 서로 다른 대기를 쓰는 일이 생긴다 — <b>추진도 같은 V·ρ를 받는다</b>: 프로펠러 추력이 T = δσ·min(T_static, ηP/V)라 둘 다 같은 대기를 봐야 한다.",
           ],
         },
         notes: `
@@ -1389,53 +1394,64 @@ export const SUBSYSTEMS = {
       },
       prop: {
         crumb: "추진",
-        title: "추진 — SingleEngine", eng: "단발 중심선 · 스로틀-추력 맵 + 추력선 오프셋 모멘트 (M5.prop)",
+        title: "추진 — PropEngine", eng: "단발 중심선 프로펠러 · T = δσ·min(T_static, ηP/V) (M5.prop)",
         chips: ["ok", "dft", "tbd"],
         // 하위 페이지 스키마 — 루트(plant)는 스키마가 없어서, 여기 안 걸면 추력·엔진
         // 배치가 화면 어디에도 안 나온다. 읽기 전용이다 (views/blocks.js renderParams)
-        schema: { category: "propulsion", name: "SingleEngine" },
+        schema: { category: "propulsion", name: "PropEngine" },
         svg: `
-<svg viewBox="0 0 960 270" xmlns="http://www.w3.org/2000/svg">
-  <defs><marker id="aw-pprop" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker></defs>
-  <g class="sblk" data-code="plant/prop.py:SingleEngine.forces"><rect class="body" x="30" y="92" width="36" height="24" rx="12"/><text class="pnum" x="48" y="108">1</text></g>
+<svg viewBox="0 0 960 310" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="aw-pprop" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#3b3b3b"/></marker>
+    <marker id="as-pprop" markerWidth="9" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8a97a5"/></marker></defs>
+  <g class="sblk" data-code="plant/prop.py:PropEngine.forces"><rect class="body" x="30" y="92" width="36" height="24" rx="12"/><text class="pnum" x="48" y="108">1</text></g>
   <text class="pname" x="48" y="136">스로틀 [좌, 우]</text>
   <path class="wire" d="M66 104 H106" marker-end="url(#aw-pprop)"/>
-  <g class="sblk" data-code="plant/prop.py:SingleEngine.forces"><rect class="body" x="110" y="78" width="150" height="52" rx="3"/>
+  <g class="sblk" data-code="plant/prop.py:PropEngine.forces"><rect class="body" x="110" y="78" width="150" height="52" rx="3"/>
     <text class="ttl" x="185" y="97" style="font-size:13px">0~1 클립</text>
     <text class="ttl2" x="185" y="115">좌·우 각각 (규약)</text></g>
   <path class="wire" d="M260 104 H296" marker-end="url(#aw-pprop)"/>
-  <g class="sblk" data-code="plant/prop.py:SingleEngine.forces"><rect class="body" x="300" y="78" width="150" height="52" rx="3"/>
+  <g class="sblk" data-code="plant/prop.py:PropEngine.forces"><rect class="body" x="300" y="78" width="150" height="52" rx="3"/>
     <text class="ttl" x="375" y="97" style="font-size:13px">평균 (집합)</text>
     <text class="ttl2" x="375" y="115">중심선 1기 — 차분은 버린다</text></g>
   <path class="wire" d="M450 104 H486" marker-end="url(#aw-pprop)"/>
-  <g class="sblk" data-code="plant/prop.py:SingleEngine.forces"><rect class="body" x="490" y="78" width="210" height="52" rx="3"/>
-    <text class="ttl" x="595" y="97" style="font-size:13px">추력 맵 thrust_map(δt)</text>
-    <text class="ttl2" x="595" y="115">기본 <tspan data-p="max_thrust">8000</tspan> N · δt 선형 [기본값]</text></g>
+  <g class="sblk" data-code="plant/prop.py:PropEngine.available_thrust"><rect class="body" x="490" y="66" width="210" height="76" rx="3"/>
+    <text class="ttl" x="595" y="85" style="font-size:13px">프로펠러 추력 곡선</text>
+    <text class="ttl2" x="595" y="103">T = δ·σ·min(T_static, ηP/V)</text>
+    <text class="ttl2" x="595" y="119">P <tspan data-p="power_max">500000</tspan> W · η <tspan data-p="eta">0.8</tspan></text>
+    <text class="ttl2" x="595" y="135">T_static <tspan data-p="static_thrust">6000</tspan> N</text></g>
+  <g class="sblk" data-code="plant/aircraft.py:Aircraft.fm env/atmosphere.py:isa_atmosphere"><rect class="body" x="490" y="186" width="210" height="44" rx="3"/>
+    <text class="ttl2" x="595" y="204">V · ρ — 플랜트 조립(fm)이 주입</text>
+    <text class="ttl2" x="595" y="220">공력이 쓰는 것과 같은 값</text></g>
+  <path class="wire soft" d="M595 186 V142" marker-end="url(#as-pprop)"/>
   <path class="wire" d="M700 104 H736" marker-end="url(#aw-pprop)"/>
-  <g class="sblk" data-code="plant/prop.py:SingleEngine.forces"><rect class="body" x="740" y="70" width="170" height="68" rx="3"/>
+  <g class="sblk" data-code="plant/prop.py:PropEngine.forces"><rect class="body" x="740" y="70" width="170" height="68" rx="3"/>
     <text class="ttl" x="825" y="90" style="font-size:13px">추력선 오프셋</text>
     <text class="ttl2" x="825" y="110">r = (0, 0, <tspan data-p="z_offset">0</tspan>) · M = r×F</text>
     <text class="ttl2" x="825" y="128">요 모멘트 없음</text></g>
   <path class="wire" d="M825 138 V166" marker-end="url(#aw-pprop)"/>
-  <g class="sblk" data-code="plant/prop.py:SingleEngine.forces"><rect class="body" x="807" y="170" width="36" height="24" rx="12"/><text class="pnum" x="825" y="186">1</text></g>
+  <g class="sblk" data-code="plant/prop.py:PropEngine.forces"><rect class="body" x="807" y="170" width="36" height="24" rx="12"/><text class="pnum" x="825" y="186">1</text></g>
   <text class="pname" x="825" y="214">F_b · M_b → Σ</text>
-  <text class="canvas-note" x="24" y="224">※ 정본 형상은 <tspan style="font-weight:700">중심선 1기</tspan>(models/shahed-136: 2엽 푸셔) — 좌우 추력차로 요를 못 내므로 믹서의 차동추력 계수 k_diff_thr = 0이다</text>
-  <text class="canvas-note" x="24" y="244">※ 입력은 SurfaceCommand 규약 (2,)를 그대로 받되 <tspan style="font-weight:700">평균만</tspan> 쓴다 · thrust_map 콜러블 주입 가능 — 실기체 추력 맵 [TBD] 대비 · 속도·밀도 의존 없음</text>
+  <text class="canvas-note" x="24" y="264">※ 정본 형상은 <tspan style="font-weight:700">중심선 1기</tspan>(models/shahed-136: 2엽 푸셔) — 좌우 추력차로 요를 못 내므로 믹서의 차동추력 계수 k_diff_thr = 0이다</text>
+  <text class="canvas-note" x="24" y="284">※ 입력은 SurfaceCommand 규약 (2,)를 그대로 받되 <tspan style="font-weight:700">평균만</tspan> 쓴다 · 교차속도 V_c = ηP/T_static = 66.7 m/s — 그 아래는 정지추력 상한, 위는 1/V</text>
 </svg>`,
         flow: {
-          lead: "스로틀 [좌, 우] → 0~1 클립 → 평균 → 추력 맵 → 추력선 오프셋 → F_b · M_b",
+          lead: "스로틀 [좌, 우] → 0~1 클립 → 평균 → 프로펠러 추력 곡선(V·ρ) → 추력선 오프셋 → F_b · M_b",
           reads: [
             "입력은 SurfaceCommand 규약대로 스로틀 <b>[좌, 우] 두 칸</b>이다(①) — 엔진이 하나인데도 계약 폭이 (2,)로 고정이다.",
             "좌·우 각각 0~1로 클립한다 (규약).",
             "<b>평균을 낸다.</b> 중심선 1기라 좌우 차분은 낼 데가 없어 여기서 버려진다 — 이 한 칸이 단발 형상의 전부다.",
-            "집합 스로틀을 추력 맵 thrust_map(δt)에 넣는다. 기본은 max_thrust·δt 선형(8000 N)이고, <b>속도·밀도에 의존하지 않는다</b>.",
+            "집합 스로틀을 <b>프로펠러 추력 곡선</b>에 넣는다: T = δ·σ·min(T_static, ηP/V). 프로펠러는 축동력을 추력으로 바꾸는 물건이라 <b>T ≈ ηP/V</b>이고, V→0에서 발산하므로 정지추력이 상한을 준다.",
+            "V와 ρ는 이 블록이 조회하지 않고 <b>플랜트 조립부가 주입</b>한다 — 공력이 쓰는 것과 같은 값이라 두 모델이 서로 다른 대기를 볼 수 없다.",
             "추력선 오프셋으로 모멘트를 만든다 — M = r×F. 지금 r = (0, 0, 0)이라 <b>모멘트가 0</b>이고, 요 모멘트는 특히 없다.",
             "F_b·M_b가 Σ로 나가 공력·중력과 합쳐진다(①).",
           ],
           why: [
             "두 칸을 받아 <b>평균만 쓰는</b> 것이 이 그림에서 볼 것이다. 계약 폭 (2,)를 그대로 두는 이유는 믹서·작동기·로깅이 전부 그 폭에 맞춰져 있어 쌍발로 되돌릴 때 배선을 다시 그리지 않아도 되기 때문이다. 대신 <b>차분이 조용히 사라진다</b> — 믹서의 k_diff_thr = 0이 그 사실을 위층에서 못박는 짝이다. 계수를 켜면 법칙은 요축을 돕는다고 믿는데 기체는 아무것도 안 한다.",
-            "총추력을 종전 쌍발과 같게(4 kN × 2 = 8 kN) 둔 것은 <b>전환의 영향을 한 가지로 좁히려는</b> 선택이다. 종방향은 그대로이고 달라진 것은 차동추력 요 모멘트가 사라진 것 하나뿐이라, 무엇을 재튜닝해야 하는지 판단이 선다. 실측에서 러더 변위가 +2~7% 늘었을 뿐(한계 0.35의 30% 이내)이라 요축 재튜닝은 필요 없었다.",
-            "속도·밀도 의존이 <b>없다는 것이 이 그림에서 빠져 있는 것</b>이다. 프로펠러는 T ≈ ηP/V라 고속에서 추력이 급감하는데 이 모델은 어느 속도에서나 같은 추력을 낸다 — 고속 구간이 낙관적으로 나온다는 뜻이고, 전용 추력 모델이 들어와야 맞는다.",
+            "단발 전환 <b>그때는</b> 총추력을 종전 쌍발과 같게(4 kN × 2 = 8 kN) 둬서 영향을 한 가지로 좁혔다 — 종방향은 그대로이고 차동추력 요 모멘트만 사라졌다(러더 변위 +2~7%로 요축 재튜닝 불필요). <b>지금 추력은 그 상수가 아니라 위의 프로펠러 곡선</b>이고, 엔벨로프를 바꾼 것은 그쪽이다.",
+            "<b>1/V가 이 그림의 요점이다.</b> 상수 추력 모델은 고속에서 추력이 남아돈다고 말하지만 프로펠러는 정확히 거기서 힘이 빠진다. 그래서 엔벨로프 상단을 정하는 것이 항력이 아니라 <b>추력</b>이 되고, 이 기체의 수평비행 범위가 해면 M0.21~0.60(연료 200 kg — 만재 400 kg면 M0.23~0.58)로 닫힌다(설계 천장 연료 200 kg ~5.5 km · 만재 ~3.8 km · 공허 ~7.5 km). 엔벨로프 탭의 스로틀 포화 전선이 대리 지표가 아니라 추력 한계인 이유가 이것이다 — 다만 그 선은 스로틀 <b>95%</b> 등고선이라(trim.py SAT_FRAC) 진짜 한계보다 설계 여유만큼 안쪽이다.",
+            "정지추력 6 kN은 임의 값이 아니라 <b>시각화 모델의 프로펠러 반경 0.45 m</b>를 원판이론(T³ = 2ρA·P_ideal²)에 넣은 6.3 kN을 라운드한 값이다. 교차속도 V_c = ηP/T_static = 66.7 m/s — 그 아래가 정지추력 상한 구간이고 위가 1/V 구간이다.",
+            "축동력 500 kW는 <b>실측으로 정했다</b>. 프로펠러답게 300 kW로 잡았더니 3000 m 트림이 아예 안 되고 전 구간 스로틀 78~95%라 상승 여력이 없었다 — 1200 kg에 날개 3 m²(실속 71 m/s)는 프로펠러가 밀기에 무거운 기체다.",
+            "여전히 <b>없는 것</b>: 프로펠러 효율 η가 전진비의 함수가 아니라 상수라 고속을 낙관하고, 반토크·자이로·P-factor·후류가 없다. 실기체 추력 맵도 아직 [TBD]다.",
             "r = (0, 0, 0)이라 오프셋 블록이 지금은 아무 일도 안 하는데도 남겨 두었다. 추력선이 CG에서 위아래로 어긋나면 <b>스로틀이 피치 모멘트를 만들어</b> 속도 채널과 고도 채널이 커플링되는데, 그 커플링이 생기는 자리가 여기뿐이기 때문이다. 쌍발(TwinEngine)도 같은 이유로 레지스트리에 남아 있다.",
           ],
         },
@@ -1443,9 +1459,10 @@ export const SUBSYSTEMS = {
 <h4>설계 노트</h4>
 <ul>
   <li><b>단발 중심선</b>이 정본 형상이다 — 시각화 모델(2엽 푸셔 1기)이 기준이고 동역학을 거기 맞췄다. 중심선 1기는 <b>요 모멘트를 못 낸다</b> → 믹서의 차동추력 계수 <span class="mono">k_diff_thr</span> = 0 <span class="chip ok">확정</span></li>
-  <li>총추력은 종전 쌍발(4 kN×2)과 같게 뒀다(값은 위 블록도의 추력 맵 — 스키마 연동) — 전환으로 <b>종방향은 바뀌지 않는다</b>. 달라진 것은 차동추력 요 모멘트가 사라진 것 하나다. 실측상 요축 재튜닝은 불필요했다(러더 변위 +2~7%, 한계 0.35의 30% 이내) <span class="chip dft">기본값</span></li>
+  <li>단발 전환 자체는 <b>종방향을 안 바꿨다</b> — 그때는 총추력을 종전 쌍발(4 kN×2)과 같게 뒀고, 달라진 것은 차동추력 요 모멘트가 사라진 것 하나였다(요축 재튜닝은 실측상 불필요 — 러더 변위 +2~7%). <b>엔벨로프를 바꾼 것은 그 다음의 프로펠러 추력 곡선</b>이다 <span class="chip dft">기본값</span></li>
   <li>입력은 SurfaceCommand 규약 [좌, 우] 0~1 (범위 밖 클립) — 계약 폭이 (2,)로 고정이라 그대로 받되 <b>평균(집합 스로틀)만</b> 쓴다. 갈린 명령의 차분은 중심선 1기가 낼 데가 없다</li>
-  <li>스로틀-추력: <span class="mono">thrust_map(δt)</span> 콜러블 주입 가능 — 실기체 추력 맵 데이터 <span class="chip tbd">TBD</span> 대비 · 기본은 max_thrust·δt 선형 <span class="chip dft">기본값</span>. <b>속도·밀도 의존은 없다</b> — 프로펠러는 T ≈ ηP/V로 고속에서 추력이 급감하므로 전용 추력 모델 <span class="chip tbd">TBD 01 §2.6</span>이 들어와야 맞는다</li>
+  <li>스로틀-추력: <span class="mono">T = δ·σ·min(T_static, ηP/V)</span>, σ = ρ/ρ_SL <span class="chip dft">기본값</span>. 프로펠러는 축동력을 추력으로 바꾸므로 <b>고속에서 추력이 1/V로 빠진다</b> — 엔벨로프 상단을 정하는 것이 항력이 아니라 추력이 되고, 이 기체의 수평비행 범위가 해면 M0.21~0.60(연료 200 kg — 만재 400 kg면 M0.23~0.58)로 닫힌다(설계 천장 연료 200 kg ~5.5 km · 만재 ~3.8 km · 공허 ~7.5 km). 정지추력 6 kN은 시각화 모델 프로펠러 반경 0.45 m를 원판이론에 넣은 값(6.3 kN)의 라운드다</li>
+  <li>축동력 500 kW는 <b>실측 결정</b> — 300 kW에서는 3000 m 트림 불가·전 구간 스로틀 78~95%로 상승 여력이 없었다. 실기체 추력 맵은 여전히 <span class="chip tbd">TBD 01 §2.6</span>이고, η가 전진비 함수가 아니라 상수라 <b>고속을 낙관한다</b></li>
   <li>추력은 동체 +X 정렬 — 추력선 경사(cant)·반토크·자이로·P-factor·후류는 <b>없다</b> (프로펠러 2차 효과 <span class="chip tbd">TBD</span>)</li>
   <li>추력선 오프셋 z는 CG 기준 동체축 — CG 이동 반영은 모멘트 기준점 이전과 같은 조립 지점에서 <span class="chip tbd">TBD</span></li>
   <li>쌍발(<span class="mono">TwinEngine</span>)은 레지스트리에 남아 있다 — 차동추력 요축 보조라는 설계 선택지를 코드에서 지우면 다시 세우는 비용이 크다</li>

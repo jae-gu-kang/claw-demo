@@ -3,8 +3,7 @@
 설계 엔벨로프 = 구조 ∧ 공력 ∧ 추진 ∧ 운용 ∧ 제어 가능 영역 — V-n 선도는
 설계점 선정표가 아니라 상위 constraint 하나다. 패널: 필요값 폼 → M-h 합성
 (경계별 색 귀속 + 스케줄 격자점 + 트림 스캔 판정) → 구조(V-n, 교과서형)
-→ 공력(α–Mach) → 추진(스로틀 소요 히트맵 — 전용 추력 모델 [TBD] 전까지
-트림 스로틀이 대리) → 운용(입력 한계 박스).
+→ 공력(α–Mach) → 추진(스로틀 소요 히트맵 — 프로펠러 추력 곡선 기준) → 운용(입력 한계 박스).
 
 수치는 전부 엔진(vn_envelope·design_envelope·envelope_verdict) — 여기서는
 표시만. 표현 변환(다각형·세그먼트·셀 분류·프리필)은 lib/envelope.js(테스트).
@@ -49,7 +48,7 @@ const STRUCT_FIELDS = [
 
 const LAYER_FIELDS = [
   ["isoQbar", "등동압선"], ["isoTas", "등속선"], ["maneuver", "기동 엔벨로프"],
-  ["scan", "스캔 판정"], ["thrust", "추력 대리 경계"],
+  ["scan", "스캔 판정"], ["thrust", "추력 한계 경계"],
 ];
 
 export function render() {
@@ -458,7 +457,7 @@ function mhEnvelopeCanvas(mh, cells) {
   }
   // 닫힌 경계의 위·아래 캡 — 운용 한계는 위 hline이 이미 전 폭에 그렸으므로
   // 여기서는 **모호한 모서리만**: 자연 천장/바닥과 표시 한계. 셋을 구분하지 않으면
-  // 화면이 "여기가 상승한도"라고 말해버린다 (추력 모델은 없다, 01 §2.6 [TBD])
+  // 화면이 "여기가 상승한도"라고 말해버린다 (진짜 천장은 추력 한계 경계가 그린다 — thrustFrontier)
   const caps = outlineCaps(r, b).filter((c) => !c.source.startsWith("ops_"));
   for (const cap of caps) {
     ctx.strokeStyle = capColor(cap.source);
@@ -484,8 +483,8 @@ function mhEnvelopeCanvas(mh, cells) {
   }
   ctx.textAlign = "left";
 
-  // 추력 대리 경계 — 스캔의 스로틀 상한 포화 전선. 해석 곡선이 아니라 측정점이라
-  // 격자 해상도가 곧 경계 해상도다 (전용 추력 모델 [TBD] — 대체가 아니다)
+  // 추력 한계 경계 — 스캔의 스로틀 상한 포화 전선. 프로펠러 추력 모델이 들어와
+  // 포화가 곧 진짜 한계다. 해석 곡선이 아니라 측정점이라 격자 해상도가 곧 경계 해상도
   // 저속(backside)·고속 전선은 서로 다른 곡선이다 — 한 줄로 이으면 평면을 가로지른다
   const frontier = layers.thrust && cells ? thrustFrontier(cells) : [];
   for (const side of ["lo", "hi"]) {
@@ -513,7 +512,7 @@ function mhEnvelopeCanvas(mh, cells) {
     const mid = pts[Math.floor(pts.length / 2)];
     ctx.font = FONT_LABEL;
     ctx.textAlign = side === "lo" ? "right" : "left";
-    haloText(side === "lo" ? "추력 대리 (저속)" : "추력 대리 (고속)",
+    haloText(side === "lo" ? "추력 한계 (저속)" : "추력 한계 (고속)",
       px(mid.mach) + (side === "lo" ? -8 : 8), py(mid.alt) + 4, C.thrustLine);
     ctx.textAlign = "left";
   }
@@ -687,7 +686,7 @@ function renderMh(box) {
       "게인 스케줄 격자점 (coarse [기본값] — trimmable 미판정)"),
     // 꺼진 층은 범례에서도 뺀다 — 화면에 없는 표시를 설명하면 범례가 거짓말이 된다
     ...(layers.thrust ? [el("span", {}, el("span", { class: "chip", style: `background:${C.thrustLine}` }),
-      "추력 대리 경계 (스로틀 상한 포화)")] : []),
+      "추력 한계 경계 (스로틀 상한 포화)")] : []),
   );
   const kids = [el("div", { class: "scroll-x" }, mhEnvelopeCanvas(lastMh, cells)), legend];
   // 상단 kt 축의 기준과 오차 폭 — 축은 자기가 놓인 윗변에서만 참이므로, 아래로
@@ -833,11 +832,12 @@ function renderMh(box) {
       const nLo = frontier.filter((p) => p.side === "lo").length;
       const nProv = frontier.filter((p) => p.provisional).length;
       kids.push(el("p", { class: "hint" }, frontier.length
-        ? `추력 대리 경계 — 고속 전이 ${frontier.length - nLo}점 · 저속(항력곡선 backside) 전이 ${nLo}점`
+        ? `추력 한계 경계 — 고속 전이 ${frontier.length - nLo}점 · 저속(항력곡선 backside) 전이 ${nLo}점`
           + (nProv ? `, 그중 ${nProv}점은 미수렴 셀이라 잠정(속 빈 원) — 그 스로틀은 해가 아니라 솔버의 마지막 반복값입니다. ` : ". ")
-          + "전용 추력 모델이 아니라 트림이 스로틀 상한에 닿은 지점입니다(01 §2.6 [TBD]). "
+          + "프로펠러 추력 곡선 T = δσ·min(T_static, ηP/V)에서 트림이 스로틀 상한에 닿은 지점입니다 — "
+          + "다만 그 상한은 100%가 아니라 스로틀 95% 등고선입니다(trim.py SAT_FRAC). 설계 여유만큼 진짜 한계보다 안쪽입니다. "
           + "해석 곡선이 아니므로 스캔 격자 해상도가 곧 경계 해상도이고, 격자를 촘촘히 하면 경계가 움직입니다."
-        : "추력 대리 경계 없음 — 스캔 격자 안에서 스로틀 상한 포화가 나오지 않았습니다. "
+        : "추력 한계 경계 없음 — 스캔 격자 안에서 스로틀 상한 포화가 나오지 않았습니다. "
           + "상한이 없다는 뜻이 아니라 격자가 거기 닿지 않았다는 뜻입니다."));
     }
   } else if (allCells) {
@@ -1174,7 +1174,7 @@ function renderAero(box) {
 function renderProp(box) {
   if (!lastScan) {
     clear(box).append(el("p", { class: "hint" },
-      "전용 추진 모델이 없어 추진 엔벨로프는 트림 스로틀 소요로 표면화합니다 [TBD] — ",
+      "추진 엔벨로프는 프로펠러 추력 곡선에 대한 트림 스로틀 소요로 표면화합니다 — ",
       "폼의 트림 스캔을 실행하면 격자별 n=1 수평비행 스로틀 소요와 포화 경계가 표시됩니다."));
     return;
   }
@@ -1187,8 +1187,10 @@ function renderProp(box) {
         { title: `스로틀 소요 — n=1 수평비행 트림, 연료 ${fmt(fuel, 4)} kg` })));
   }
   kids.push(el("p", { class: "hint" },
-    "⚠ 전용 추력 모델 부재 [TBD] — 추진 한계는 트림 스로틀 상한 포화",
-    "(saturated_throttle_high, 엔진 판정)로만 드러납니다. 셀 % = 트림 스로틀 소요, ",
+    "추진 한계는 프로펠러 추력 곡선 T = δσ·min(T_static, ηP/V)이 정하고, 화면에는 ",
+    "트림 스로틀 상한 포화(saturated_throttle_high, 엔진 판정)로 드러납니다 — 그 선은 ",
+    "스로틀 95% 등고선이라(SAT_FRAC) 진짜 한계보다 설계 여유만큼 안쪽입니다. ",
+    "셀 % = 트림 스로틀 소요, ",
     "적색 = 포화(그 점은 수평비행 유지 불가 — 설계 영역 밖), 회색 = 트림 미수렴."));
   clear(box).append(...kids);
 }

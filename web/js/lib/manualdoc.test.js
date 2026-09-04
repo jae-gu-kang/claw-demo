@@ -25,7 +25,7 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 const REGISTRY_REFS = new Set([
   "fcl/Autopilot", "fcl/ScasAxis", "fcl/Mixer",
   "actuator/SecondOrderActuator", "guidance/LOS", "nav/ErrorModel",
-  "propulsion/SingleEngine", "propulsion/TwinEngine",
+  "propulsion/PropEngine", "propulsion/SingleEngine", "propulsion/TwinEngine",
 ]);
 
 /** 매뉴얼의 모든 본문 문자열 — innerHTML 계약 검사의 대상. */

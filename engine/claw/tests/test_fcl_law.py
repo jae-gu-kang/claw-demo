@@ -228,7 +228,7 @@ def test_fcl_schedule_scales_gain_off_design(trim_design):
 
 
 def test_fcl_alpha_limiter_prevents_stall_closed_loop():
-    """M0.3 급피치업 (θ_cmd≈0.45): 리미터 없으면 α>0.34(경계 초과),
+    """M0.3 급피치업 (θ_cmd≈0.45): 리미터 없으면 α>0.33(경계 근접),
     있으면 α≤0.31 (α_max=0.30) — 리미터가 실제 하중을 지는지 검증."""
     ac = make_demo_aircraft()
     tr = trim_level(ac, TrimCase("slow", mach=0.3, alt=500.0, fuel=300.0))
@@ -265,7 +265,12 @@ def test_fcl_alpha_limiter_prevents_stall_closed_loop():
 
     a_off, _ = alpha_max_closed_loop(False)
     a_on, engaged = alpha_max_closed_loop(True)
-    assert a_off > 0.34  # 리미터 없으면 실속 경계(0.35) 급접근
+    # 0.34 → 0.33: PID 안티와인드업을 **조건부 적분**으로 바꾸면서 리미터 없는 쪽의
+    # 피치 오버슈트가 줄어 α 정점이 0.3365로 내려왔다(종전 0.34 초과). 리미터가 지는
+    # 하중 자체는 그대로다 — 무리미터 0.3365 vs 리미터 0.2729(α_max 0.30)로 여전히
+    # 실속 경계 0.35에 0.014 rad까지 붙는다. 문턱을 내린 것이 아니라 **와인드업이
+    # 실어 주던 여분이 빠진 것**이다 (blocks/controllers.py PID)
+    assert a_off > 0.33  # 리미터 없으면 실속 경계(0.35) 급접근
     assert a_on <= 0.31 and engaged  # α_max=0.30 + 소량 오버슈트 허용
 
 

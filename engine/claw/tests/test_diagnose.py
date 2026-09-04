@@ -34,6 +34,7 @@ def _payload():
         "yaw_pi": z.copy(), "yaw_damp": z.copy(), "yaw_raw": z.copy(),
         "pitch": z.copy(), "roll": z.copy(), "yaw": z.copy(),
         "ap_alt_pi": z.copy(), "ap_alt_damp": z.copy(), "ap_alt_raw": z.copy(),
+        "ap_spd_pi": np.full(N, 0.5), "ap_hdg_pi": z.copy(),
         "ap_pitch_ff": z.copy(), "ap_theta_raw": z.copy(),
         "theta_cmd": z.copy(), "theta_lim": z.copy(), "lim_cap": np.full(N, 0.3),
         "i_pitch": z.copy(), "i_roll": z.copy(), "i_yaw": z.copy(),
@@ -46,6 +47,7 @@ def _payload():
     envelope = {"worst_margin": 0.25, "flags": {"alpha": np.zeros(N, dtype=bool)}}
     meta = {
         "dt_plant": DT,
+        "control_hz": 1.0 / DT,  # 실제 sim meta에는 항상 있다 — 규칙 3의 ZOH 보정이 쓴다
         "limits": {"elevon_lo": -0.35, "elevon_hi": 0.35,
                    "rudder_lo": -0.2, "rudder_hi": 0.2, "rate_max": None},
         "clamps": {
@@ -243,3 +245,157 @@ def test_규칙4_잘린_런은_판정에서_빠진다():
 
     # 전부 잘리면 잰 케이스가 없다 — 지표 자체가 판정에서 빠진다 (ok가 아니다)
     assert diagnose_grid([case(0.4, rms=2.0, aborted=True)])["metrics"] == {}
+
+
+def _saturating_run(control_hz):
+    """스로틀을 실제로 포화시키는 런 — 규칙 3의 시그니처 ②가 밟히는 유일한 형상.
+
+    합성 페이로드로는 ②를 재현할 수 없다(적분기 동결 + 출력 포화가 동시에, 실제
+    제어 틱 간격으로 일어나야 한다). `control_hz`는 스윕 노브라 이 함수를 여러
+    주기로 부른다.
+    """
+    import numpy as np
+
+    from claw.common.contracts import TrimCase
+    from claw.fcl import make_demo_fcl
+    from claw.guidance import Guidance, ModeSpec
+    from claw.plant import make_demo_aircraft, make_demo_db_ranges, make_demo_stall_table
+    from claw.sim import Simulator
+    from claw.trim import trim_level
+
+    ac = make_demo_aircraft()
+    tr = trim_level(ac, TrimCase("d", mach=0.4, alt=1000.0, fuel=200.0))
+    assert tr.converged
+    v0 = float(np.linalg.norm(tr.state.vel_b))
+    # 큰 속도 스텝 + 상승 — 프로펠러 여유추력으로는 못 내는 명령이라 스로틀이 포화한다
+    modes = [ModeSpec(name="fast", speed=v0 + 30.0, alt=1400.0, heading=0.0,
+                      exit_when=("time_ge", 1e9))]
+    res = Simulator(aircraft=ac, fcl=make_demo_fcl(), guidance=Guidance(modes),
+                    stall_table=make_demo_stall_table(), db_ranges=make_demo_db_ranges(),
+                    dt_plant=0.01, control_hz=control_hz).run(tr, t_end=60.0)
+    out = diagnose_run(
+        {"t": list(res.t), "envelope": res.envelope,
+         "signals": {k: list(np.asarray(v)) for k, v in res.signals.items()},
+         "meta": res.meta},
+        Shape(),
+    )
+    return res, out
+
+
+def test_windup_rule_sees_conditional_integration_in_a_real_run():
+    """규칙 3이 **실제 런**에서 살아 있는지 — 신호 주입이 아니라.
+
+    다른 와인드업 테스트들은 `i_alt`를 직접 채워 규칙을 부른다. 그러면 시그니처가
+    낡아도 통과한다: PID가 조건부 적분으로 바뀌면서 적분기는 클램프까지 못 가고
+    그 **직전에서 얼어붙는데**, 종전 규칙은 "클램프에 주차"만 봤다. 실측으로는
+    i_spd가 0.51~0.77에 머물러(클램프 0/1) 주차 판정이 0%였다 — 규칙이 조용히
+    죽은 상태였고 주입 테스트는 그걸 못 봤다.
+
+    여기서는 스로틀을 실제로 포화시키는 런을 돌려 규칙이 경고를 내는지 본다.
+    """
+    res, out = _saturating_run(100.0)
+    i_spd = np.asarray(res.signals["i_spd"])
+    assert np.mean(np.asarray(res.signals["thr_l"]) >= 0.999) > 0.5, "포화를 안 밟았다"
+    # 적분기는 클램프(0/1) 근처에 가지 않는다 — 종전 시그니처가 못 잡던 이유
+    assert 0.05 < i_spd.min() and i_spd.max() < 0.95
+    wind = [f for f in out["findings"] if f["rule"] == "windup" and f["axis"] == "spd"]
+    assert wind, "실제 포화 런에서 와인드업 규칙이 아무것도 안 냈다 — 시그니처가 낡았다"
+    sev = wind[0]["severity"]
+    assert sev == "warn", f"경고가 아니라 {sev}"
+
+
+def test_와인드업_판정량은_제어주기에_안_매인다():
+    """규칙 3이 재는 것은 **물리 시간**이지 제어 틱 수가 아니다.
+
+    계측 신호는 제어 틱마다만 갱신되므로(ZOH) 틱 사이를 "동결"로 읽으면 오탐이
+    난다. 그래서 틱만 판정하는데, **틱 표본 하나로만 세면** 이번엔 판정량이
+    제어주기에 매인다: 같은 물리 사건이 100 Hz에서 frac 0.853·최장 51 s,
+    20 Hz에서 frac 0.171·최장 0.01 s로 읽혔다. 후자가 더 나쁘다 — 51초 연속
+    막힘이 "무시해도 되는 것"으로 화면에 나간다. 그래서 틱 판정을 그 틱이
+    대표하는 ZOH 구간 전체로 펼친다.
+
+    control_hz는 스윕 노브라(pipeline/influence.py) 이 왜곡은 실제로 밟힌다.
+    """
+    ev = {}
+    for hz in (100.0, 20.0):
+        _, out = _saturating_run(hz)
+        w = [f for f in out["findings"] if f["rule"] == "windup" and f["axis"] == "spd"]
+        assert w and w[0]["severity"] == "warn", f"control_hz={hz}에서 경고가 안 났다"
+        ev[hz] = w[0]["evidence"]
+    a, b = ev[100.0], ev[20.0]
+    # 같은 사건이므로 세 지표가 전부 같은 크기여야 한다 (틱 수가 5배 다르다)
+    assert abs(a["parked_frac"] - b["parked_frac"]) < 0.05, (
+        f"막힘 비율이 제어주기에 매였다: {a['parked_frac']:.3f} vs {b['parked_frac']:.3f}")
+    assert abs(a["longest"] - b["longest"]) < 1.0, (
+        f"최장 지속이 제어주기에 매였다: {a['longest']:.2g} s vs {b['longest']:.2g} s")
+    assert a["longest"] > 10.0 and b["longest"] > 10.0, "연속 막힘이 한 칸으로 쪼개졌다"
+    assert a["events"] == b["events"] == 1
+
+
+def test_ki가_0인_축은_와인드업으로_잡지_않는다():
+    """요축은 설계상 ki = 0인 댐퍼다(fcl/demo.py DEMO_YAW). 적분기가 구조적으로
+    안 움직이므로 "동결 + 출력 포화"가 **항상** 참이 되어 100% 오탐이 나고,
+    처방은 이미 0인 게인을 줄이라고 말한다 — 진단이 낼 수 있는 최악의 종류다.
+
+    실측 런으로는 이 가지가 안 열린다(β가 작아 yaw_pi가 한계에 안 붙는다).
+    그래서 여기서 직접 만든다: 출력은 한계에 붙고 적분기는 상수.
+    """
+    p = _payload()
+    s = p["signals"]
+    s["yaw_pi"][:] = 0.35  # 출력이 상한에 붙어 있다
+    s["i_yaw"][:] = 0.1  # 적분기는 상수 — ki = 0의 서명 (클램프 ±0.35 근처도 아니다)
+    out = diagnose_run(p, Shape())
+    wind = [f for f in out["findings"] if f["rule"] == "windup" and f["axis"] == "yaw"]
+    assert not wind, f"ki=0 축에 와인드업 오탐: {wind}"
+    # 그리고 살아 있는 적분기라면 같은 형상에서 반드시 잡아야 한다 (가드가 공허하지 않다)
+    s["i_yaw"][:] = np.linspace(0.1, 0.1002, N)  # 미세하지만 움직인다 → 적분기 있음
+    s["i_yaw"][40:] = 0.1002  # 그 뒤 동결 — 출력은 계속 포화 (80%)
+    out2 = diagnose_run(p, Shape())
+    wind2 = [f for f in out2["findings"] if f["rule"] == "windup" and f["axis"] == "yaw"]
+    assert wind2 and wind2[0]["severity"] == "warn", "살아 있는 적분기의 동결을 놓쳤다"
+
+
+def test_규칙3이_판정을_접을_때는_조용히_넘기지_않는다():
+    """②(조건부 적분 시그니처)를 못 볼 때마다 **경고가 남아야** 한다.
+
+    세 경로가 있고 셋 다 이유가 다르다: control_hz 미상(ZOH 보정 불가) · 적분기가
+    런 내내 정지(ki=0인지 전 구간 막힘인지 신호로 구분 불가) · 런이 제어 틱보다 짧음.
+    조용히 ①만 낸 값은 조건부 적분에서 죽은 시그니처라 **근거 없는 0%**가 된다 —
+    이 모듈의 규약이 "판정 불가를 0으로 위장하지 않는다"이다.
+    """
+    # ㉠ control_hz 미상 — 구버전 결과. **①은 그대로 내고 ②만 접는다**가 계약이므로
+    # ②로만 잡히는 형상(출력 포화 중 적분기 동결, 클램프 주차는 없음)을 넣어 갈린다
+    def _frozen_while_saturated():
+        q = _payload()
+        q["signals"]["ap_alt_pi"][:] = 0.3  # 출력이 클램프(±0.3) 상한에 붙어 있다
+        i = np.linspace(0.0, 0.2, N)
+        i[40:] = i[39]  # 살아 있다가 동결 — 클램프 0.3에는 안 닿는다(②의 형상)
+        q["signals"]["i_alt"] = i
+        return q
+
+    p = _frozen_while_saturated()
+    p["meta"].pop("control_hz")
+    out = diagnose_run(p, Shape())
+    assert any("control_hz 미상" in w for w in out["warnings"]), out["warnings"]
+    assert not [f for f in out["findings"] if f["rule"] == "windup"], "②를 접었어야 한다"
+    # 대조군 — 같은 신호에 control_hz만 있으면 잡힌다 (위 단정이 공허하지 않다)
+    got = [f for f in diagnose_run(_frozen_while_saturated(), Shape())["findings"]
+           if f["rule"] == "windup"]
+    assert got and got[0]["axis"] == "alt", f"②가 이 형상을 못 본다: {got}"
+
+    # ㉡ 적분기 정지 — 출력은 한계에 붙어 있는데 적분기가 상수 (ki=0의 서명)
+    p = _payload()
+    p["signals"]["yaw_pi"][:] = 0.35
+    p["signals"]["i_yaw"][:] = 0.1
+    out = diagnose_run(p, Shape())
+    assert any("적분기가 런 내내 정지" in w and "yaw" in w for w in out["warnings"]), out["warnings"]
+    wu = [w for w in out["warnings"] if "와인드업" in w]
+    assert len(wu) == 1, f"포화도 안 한 축까지 경고했다: {wu}"
+
+    # ㉢ 런이 제어 틱보다 짧다 — step > N. 적분기가 **살아 있어야** 이 가지에 닿는다
+    p = _payload()
+    p["signals"]["ap_alt_pi"][:] = 0.3  # 출력 포화 (클램프 ±0.3)
+    p["signals"]["i_alt"][:] = np.linspace(0.0, 0.2, N)  # 적분기는 살아 있다
+    p["meta"]["control_hz"] = 1.0 / (DT * (N + 10))
+    out = diagnose_run(p, Shape())
+    assert any("제어주기보다 짧다" in w for w in out["warnings"]), out["warnings"]

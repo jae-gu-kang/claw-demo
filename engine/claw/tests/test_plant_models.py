@@ -7,7 +7,13 @@ import pytest
 
 from claw.blocks.base import UNBOUNDED
 from claw.params.registry import REGISTRY
-from claw.plant import FuelMass, SecondOrderActuator, SingleEngine, TwinEngine
+from claw.plant import (
+    FuelMass,
+    PropEngine,
+    SecondOrderActuator,
+    SingleEngine,
+    TwinEngine,
+)
 
 DT = 1e-3
 
@@ -150,12 +156,14 @@ def test_demo_profile_is_single_engine_and_differential_thrust_is_off():
     from claw.plant.demo import make_demo_aircraft
 
     eng = make_demo_aircraft().engine
-    assert isinstance(eng, SingleEngine), "데모 정본은 단발 중심선 (models/shahed-136)"
+    assert isinstance(eng, PropEngine), "데모 정본은 단발 중심선 프로펠러 (models/shahed-136)"
     assert DEMO_K_DIFF_THR == 0.0, "단발인데 차동추력이 켜져 있다"
     assert make_demo_fcl().mixer.k_diff_thr == 0.0
     # 스키마 기본값 == 데모가 실제로 쓰는 값 — 다르면 폼이 안 나는 형상을 보여 준다
-    defs = {d.name: d.default for d in SingleEngine.PARAM_DEFS}
-    assert eng.thrust_map(1.0) == pytest.approx(defs["max_thrust"])
+    defs = {d.name: d.default for d in PropEngine.PARAM_DEFS}
+    assert eng.power_max == pytest.approx(defs["power_max"])
+    assert eng.eta == pytest.approx(defs["eta"])
+    assert eng.static_thrust == pytest.approx(defs["static_thrust"])
     assert eng.r[2] == pytest.approx(defs["z_offset"])
 
 
@@ -165,6 +173,8 @@ def test_demo_profile_is_single_engine_and_differential_thrust_is_off():
 @pytest.mark.parametrize(
     ("cls", "values", "keys"),
     [
+        (PropEngine, {"power_max": 500_000.0},
+         {"power_max", "eta", "static_thrust", "z_offset"}),
         (SingleEngine, {"max_thrust": 8000.0}, {"max_thrust", "z_offset"}),
         (TwinEngine, {"max_thrust": 4000.0, "y_offset": 0.5},
          {"max_thrust", "y_offset", "z_offset"}),
@@ -179,7 +189,9 @@ def test_propulsion_registered_and_factory_matches_direct(cls, values, keys):
     schema = REGISTRY.schema("propulsion", cls.NAME)
     assert schema["title"] == f"propulsion/{cls.NAME}"
     assert set(schema["properties"]) == keys
-    assert schema["properties"]["max_thrust"]["description"].endswith("[N]")  # 단위 메타
+    unit_key = "power_max" if "power_max" in schema["properties"] else "max_thrust"
+    assert schema["properties"][unit_key]["description"].endswith(  # 단위 메타
+        "[W]" if unit_key == "power_max" else "[N]")
     # 등록되는 추진은 능력을 **선언**해야 한다 — 철자를 틀리면(differential_thust)
     # getattr 기본값이 True라 조용히 "낼 수 있음"이 된다 (sim 조립 가드가 안 걸린다)
     assert isinstance(cls.differential_thrust, bool), "차동추력 능력 미선언 (오타?)"
@@ -191,7 +203,8 @@ def test_propulsion_registered_and_factory_matches_direct(cls, values, keys):
 
 @pytest.mark.parametrize(
     ("cls", "excluded"),
-    [(SingleEngine, {"thrust_map"}), (TwinEngine, {"x_offset", "thrust_map"})],
+    [(PropEngine, set()), (SingleEngine, {"thrust_map"}),
+     (TwinEngine, {"x_offset", "thrust_map"})],
 )
 def test_propulsion_param_defaults_match_ctor(cls, excluded):
     """ParamDef 기본값 == 생성자 기본값 (test_fcl_law의 같은 규약).
@@ -309,3 +322,84 @@ def test_single_engine_rejects_differential_thrust_law_at_assembly():
     ac.engine = TwinEngine(max_thrust=4000.0, y_offset=0.5)
     Simulator(aircraft=ac, fcl=make_demo_fcl(mixer=Mixer(k_diff_thr=0.1)),
               guidance=Guidance(modes), dt_plant=0.01, control_hz=100.0)
+
+
+# ---- PropEngine (속도·밀도 의존 추력) ----
+
+
+def test_prop_thrust_falls_as_one_over_speed_above_crossover():
+    """프로펠러의 본질 — 고속에서 추력이 빠진다. 상수 모델과 갈리는 지점이다."""
+    eng = PropEngine(power_max=500_000.0, eta=0.8, static_thrust=6000.0)
+    assert eng.crossover_speed == pytest.approx(0.8 * 500_000.0 / 6000.0)  # 66.7 m/s
+    # 교차속도 아래는 정지추력이 상한 (V→0에서 P/V가 발산하는 것을 막는다)
+    for V in (0.0, 30.0, eng.crossover_speed):
+        assert eng.available_thrust(V) == pytest.approx(6000.0)
+    # 위쪽은 1/V — 두 배 빠르면 절반이다
+    t100 = eng.available_thrust(100.0)
+    assert t100 == pytest.approx(0.8 * 500_000.0 / 100.0)
+    assert eng.available_thrust(200.0) == pytest.approx(t100 / 2.0)
+
+
+def test_prop_thrust_lapses_with_density_and_scales_with_throttle():
+    from claw.env import isa_atmosphere
+
+    eng = PropEngine(power_max=500_000.0, eta=0.8, static_thrust=6000.0)
+    rho3k = isa_atmosphere(3000.0).rho
+    sigma = rho3k / 1.225
+    assert eng.available_thrust(100.0, rho3k) == pytest.approx(
+        eng.available_thrust(100.0) * sigma)
+    # 스로틀은 선형 배율 — 좌우 평균이 집합 스로틀 (단발 계약)
+    F, M = eng.forces(np.array([0.5, 0.5]), 100.0, 1.225)
+    assert F[0] == pytest.approx(0.5 * eng.available_thrust(100.0))
+    assert M == pytest.approx([0.0, 0.0, 0.0], abs=1e-12)  # 중심선 — 요 모멘트 없음
+    assert eng.forces(np.array([0.2, 0.8]), 100.0)[0] == pytest.approx(F)  # 평균만 쓴다
+
+
+def test_prop_engine_z_offset_and_validation():
+    eng = PropEngine(power_max=100_000.0, eta=0.5, static_thrust=1000.0, z_offset=0.3)
+    F, M = eng.forces(np.array([1.0, 1.0]), 10.0)  # 교차속도 아래 → 정지추력
+    assert F[0] == pytest.approx(1000.0)
+    assert M[1] == pytest.approx(0.3 * 1000.0)  # 하방 오프셋 → 기수 상승
+    with pytest.raises(ValueError, match="eta"):
+        PropEngine(eta=0.0)
+    with pytest.raises(ValueError, match="eta"):
+        PropEngine(eta=1.5)
+
+
+def test_constant_thrust_models_ignore_speed_and_density():
+    """SingleEngine·TwinEngine은 계약 폭만 맞춘다 — 받고 쓰지 않는다.
+
+    이 무시가 **의도**임을 고정한다. 나중에 누가 이 클래스들에 속도 의존을 넣으면
+    여기가 울고, 그때 데모 정본(PropEngine)과의 역할 분담을 다시 보게 된다."""
+    for eng in (SingleEngine(max_thrust=8000.0), TwinEngine(max_thrust=4000.0, y_offset=0.5)):
+        base = eng.forces(np.array([0.5, 0.5]))[0]
+        for V, rho in ((0.0, 1.225), (300.0, 0.4), (100.0, 1.0)):
+            assert eng.forces(np.array([0.5, 0.5]), V, rho)[0] == pytest.approx(base)
+
+
+def test_aircraft_hands_the_same_airspeed_and_density_to_propulsion_as_to_aero():
+    """`Aircraft.fm`이 추진에 V·ρ를 **실제로** 넘긴다 — 안 넘기면 조용히 정지추력이 난다.
+
+    PropEngine.forces의 기본값이 V=0이라 인자를 빠뜨려도 예외가 아니라 **최대추력**이
+    나온다(순항에서 2배 오차). 지금은 트림 수치가 간접적으로 잡지만, 그건 우연이라
+    여기서 직접 못박는다. 밀도도 같이 본다 — 공력과 추진이 다른 대기를 보면 안 된다.
+    """
+    from claw.common.attitude import euler_to_quat
+    from claw.env import isa_atmosphere
+    from claw.plant.demo import make_demo_aircraft as demo
+
+    seen = {}
+
+    class Spy(PropEngine):
+        def forces(self, throttle, V=0.0, rho=None):
+            seen["V"], seen["rho"] = float(V), float(rho)
+            return super().forces(throttle, V, rho)
+
+    ac = demo()
+    ac.engine = Spy(power_max=500_000.0)
+    vel_b = np.array([120.0, 0.0, 6.0])
+    h = 2000.0
+    ac.fm(vel_b, np.zeros(3), euler_to_quat(0.0, 0.0, 0.0), h,
+          {"de": 0.0, "da": 0.0, "dr": 0.0, "throttle": (0.5, 0.5)}, 200.0)
+    assert seen["V"] == pytest.approx(float(np.linalg.norm(vel_b)))
+    assert seen["rho"] == pytest.approx(isa_atmosphere(h).rho)

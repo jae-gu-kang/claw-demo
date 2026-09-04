@@ -161,3 +161,22 @@ def test_reset_determinism(blk):
     blk.reset()
     outs2 = [blk.step(u) for u in seq]
     assert outs1 == outs2
+
+
+def test_engine_version_literals_agree():
+    """`claw.__version__`과 pyproject의 version이 같아야 한다.
+
+    생성 C 헤더("엔진 : claw X.Y.Z")는 앞의 것만 읽는다. 한쪽만 올리면 배포 메타와
+    산출물 기록이 조용히 갈린다 — 이 버전은 **형상 지문이 못 잡는 의미 변경**을
+    기록하는 자리라(claw/__init__.py 주석) 어긋나면 그 기록이 무의미해진다.
+    """
+    import re
+    from pathlib import Path
+
+    import claw
+
+    toml = Path(claw.__file__).resolve().parents[1] / "pyproject.toml"
+    m = re.search(r'^version = "([^"]+)"', toml.read_text(), re.M)
+    assert m, "pyproject.toml에서 version을 못 찾음"
+    assert m.group(1) == claw.__version__, (
+        f"버전 불일치: pyproject {m.group(1)} vs claw.__version__ {claw.__version__}")

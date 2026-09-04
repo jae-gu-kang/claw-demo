@@ -134,7 +134,9 @@ def _fake_tr(converged=True, alpha_ok=True, de=0.0, thr=0.3):
 def test_envelope_verdict_reasons_priority():
     """envelope_verdict — ok는 envelope_ok 정본, reasons는 우선순위 순 전체 귀속.
 
-    saturated_throttle_high가 추진 한계의 대리 지표 (01 §2.6, 전용 추력 모델 [TBD]).
+    saturated_throttle_high는 이제 **대리 지표가 아니라 추진 한계 그 자체**다 —
+    프로펠러 추력 모델(plant/prop.py PropEngine)이 들어오면서 포화가 곧 "이 조건에서
+    프로펠러가 더 못 낸다"가 됐다 (trim.py SAT_FRAC 95% 등고선 기준).
     """
     from claw.design.points import envelope_ok, envelope_verdict
 

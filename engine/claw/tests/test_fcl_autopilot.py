@@ -25,7 +25,7 @@ YAW = dict(kp=0.5, ki=0.0, k_rate=0.8, washout_tau=2.0, out_lo=-0.35, out_hi=0.3
 @pytest.fixture(scope="module")
 def design_point():
     ac = make_demo_aircraft()
-    tr = trim_level(ac, TrimCase("design", mach=0.6, alt=1000.0, fuel=200.0))
+    tr = trim_level(ac, TrimCase("design", mach=0.4, alt=1000.0, fuel=200.0))
     assert tr.converged
     return ac, tr
 

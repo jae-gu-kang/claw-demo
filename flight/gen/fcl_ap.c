@@ -1,7 +1,7 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
  * 지문    : a1a24ddcaf2e9fe3
- * 엔진    : claw 0.1.0
+ * 엔진    : claw 0.2.0
  * ap — 기능축 분할, 26개 블록
  */
 #include "fcl_ap.h"
@@ -37,10 +37,14 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
 
         /* ap_hdg_pid — PID */
         /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
-        ap_hdg_pid_y = claw_clip(prm->ap_hdg_pid_kp * ap_hdg_err_y + sta->ap_hdg_pid_i,
-                                 prm->ap_hdg_pid_out_lo, prm->ap_hdg_pid_out_hi);
-        sta->ap_hdg_pid_i = claw_clip(sta->ap_hdg_pid_i + FCL_DT * prm->ap_hdg_pid_ki * ap_hdg_err_y,
-                                      prm->ap_hdg_pid_out_lo, prm->ap_hdg_pid_out_hi);
+        const double ap_hdg_pid_raw = prm->ap_hdg_pid_kp * ap_hdg_err_y + sta->ap_hdg_pid_i;
+        ap_hdg_pid_y = claw_clip(ap_hdg_pid_raw, prm->ap_hdg_pid_out_lo, prm->ap_hdg_pid_out_hi);
+        double ap_hdg_pid_inc = FCL_DT * prm->ap_hdg_pid_ki * ap_hdg_err_y;
+        if ((ap_hdg_pid_raw > prm->ap_hdg_pid_out_hi && ap_hdg_pid_inc > 0.0) || (ap_hdg_pid_raw < prm->ap_hdg_pid_out_lo && ap_hdg_pid_inc < 0.0)) {
+            ap_hdg_pid_inc = 0.0;
+        }
+        sta->ap_hdg_pid_i = claw_clip(sta->ap_hdg_pid_i + ap_hdg_pid_inc, prm->ap_hdg_pid_out_lo,
+                                      prm->ap_hdg_pid_out_hi);
 
         /* ap_hdg_sat — Saturation */
         ap_hdg_sat_y = claw_clip(ap_hdg_pid_y, prm->ap_hdg_sat_lo, prm->ap_hdg_sat_hi);
@@ -75,10 +79,15 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
 
     /* ap_alt_pid — PID */
     /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
-    const double ap_alt_pid_y = claw_clip(prm->ap_alt_pid_kp * ap_alt_err_y + sta->ap_alt_pid_i,
-                                          prm->ap_alt_pid_out_lo, prm->ap_alt_pid_out_hi);
-    sta->ap_alt_pid_i = claw_clip(sta->ap_alt_pid_i + FCL_DT * prm->ap_alt_pid_ki * ap_alt_err_y,
-                                  prm->ap_alt_pid_out_lo, prm->ap_alt_pid_out_hi);
+    const double ap_alt_pid_raw = prm->ap_alt_pid_kp * ap_alt_err_y + sta->ap_alt_pid_i;
+    const double ap_alt_pid_y = claw_clip(ap_alt_pid_raw, prm->ap_alt_pid_out_lo,
+                                          prm->ap_alt_pid_out_hi);
+    double ap_alt_pid_inc = FCL_DT * prm->ap_alt_pid_ki * ap_alt_err_y;
+    if ((ap_alt_pid_raw > prm->ap_alt_pid_out_hi && ap_alt_pid_inc > 0.0) || (ap_alt_pid_raw < prm->ap_alt_pid_out_lo && ap_alt_pid_inc < 0.0)) {
+        ap_alt_pid_inc = 0.0;
+    }
+    sta->ap_alt_pid_i = claw_clip(sta->ap_alt_pid_i + ap_alt_pid_inc, prm->ap_alt_pid_out_lo,
+                                  prm->ap_alt_pid_out_hi);
 
     /* ap_alt_sum — Sum */
     const double ap_alt_sum_y = ap_alt_pid_y + ap_alt_damp_y;
@@ -106,10 +115,15 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
 
     /* ap_vs_pid — PID */
     /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
-    const double ap_vs_pid_y = claw_clip(prm->ap_vs_pid_kp * ap_vs_err_y + sta->ap_vs_pid_i,
-                                         prm->ap_vs_pid_out_lo, prm->ap_vs_pid_out_hi);
-    sta->ap_vs_pid_i = claw_clip(sta->ap_vs_pid_i + FCL_DT * prm->ap_vs_pid_ki * ap_vs_err_y,
-                                 prm->ap_vs_pid_out_lo, prm->ap_vs_pid_out_hi);
+    const double ap_vs_pid_raw = prm->ap_vs_pid_kp * ap_vs_err_y + sta->ap_vs_pid_i;
+    const double ap_vs_pid_y = claw_clip(ap_vs_pid_raw, prm->ap_vs_pid_out_lo,
+                                         prm->ap_vs_pid_out_hi);
+    double ap_vs_pid_inc = FCL_DT * prm->ap_vs_pid_ki * ap_vs_err_y;
+    if ((ap_vs_pid_raw > prm->ap_vs_pid_out_hi && ap_vs_pid_inc > 0.0) || (ap_vs_pid_raw < prm->ap_vs_pid_out_lo && ap_vs_pid_inc < 0.0)) {
+        ap_vs_pid_inc = 0.0;
+    }
+    sta->ap_vs_pid_i = claw_clip(sta->ap_vs_pid_i + ap_vs_pid_inc, prm->ap_vs_pid_out_lo,
+                                 prm->ap_vs_pid_out_hi);
 
     /* ap_vs_sat — Saturation */
     const double ap_vs_sat_y = claw_clip(ap_vs_pid_y, prm->ap_vs_sat_lo, prm->ap_vs_sat_hi);
@@ -157,10 +171,15 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
 
     /* ap_spd_pid — PID */
     /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
-    const double ap_spd_pid_y = claw_clip(prm->ap_spd_pid_kp * ap_spd_err_y + sta->ap_spd_pid_i,
-                                          prm->ap_spd_pid_out_lo, prm->ap_spd_pid_out_hi);
-    sta->ap_spd_pid_i = claw_clip(sta->ap_spd_pid_i + FCL_DT * prm->ap_spd_pid_ki * ap_spd_err_y,
-                                  prm->ap_spd_pid_out_lo, prm->ap_spd_pid_out_hi);
+    const double ap_spd_pid_raw = prm->ap_spd_pid_kp * ap_spd_err_y + sta->ap_spd_pid_i;
+    const double ap_spd_pid_y = claw_clip(ap_spd_pid_raw, prm->ap_spd_pid_out_lo,
+                                          prm->ap_spd_pid_out_hi);
+    double ap_spd_pid_inc = FCL_DT * prm->ap_spd_pid_ki * ap_spd_err_y;
+    if ((ap_spd_pid_raw > prm->ap_spd_pid_out_hi && ap_spd_pid_inc > 0.0) || (ap_spd_pid_raw < prm->ap_spd_pid_out_lo && ap_spd_pid_inc < 0.0)) {
+        ap_spd_pid_inc = 0.0;
+    }
+    sta->ap_spd_pid_i = claw_clip(sta->ap_spd_pid_i + ap_spd_pid_inc, prm->ap_spd_pid_out_lo,
+                                  prm->ap_spd_pid_out_hi);
 
     /* ap_spd_sat — Saturation */
     const double ap_spd_sat_y = claw_clip(ap_spd_pid_y, prm->ap_spd_sat_lo, prm->ap_spd_sat_hi);

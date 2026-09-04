@@ -1,7 +1,7 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
  * 지문    : a1a24ddcaf2e9fe3
- * 엔진    : claw 0.1.0
+ * 엔진    : claw 0.2.0
  * scas — 기능축 분할, 17개 블록
  */
 #include "fcl_scas.h"
@@ -29,10 +29,14 @@ void fcl_scas_step(const fcl_params_t *prm, fcl_state_t *sta,
 
     /* scas_pitch_pid — PID */
     /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
-    const double scas_pitch_pid_y = claw_clip(sched_pitch_kp_y * scas_pitch_err_y + sta->scas_pitch_pid_i,
-                                              prm->scas_pitch_pid_out_lo,
+    const double scas_pitch_pid_raw = sched_pitch_kp_y * scas_pitch_err_y + sta->scas_pitch_pid_i;
+    const double scas_pitch_pid_y = claw_clip(scas_pitch_pid_raw, prm->scas_pitch_pid_out_lo,
                                               prm->scas_pitch_pid_out_hi);
-    sta->scas_pitch_pid_i = claw_clip(sta->scas_pitch_pid_i + FCL_DT * sched_pitch_ki_y * scas_pitch_err_y,
+    double scas_pitch_pid_inc = FCL_DT * sched_pitch_ki_y * scas_pitch_err_y;
+    if ((scas_pitch_pid_raw > prm->scas_pitch_pid_out_hi && scas_pitch_pid_inc > 0.0) || (scas_pitch_pid_raw < prm->scas_pitch_pid_out_lo && scas_pitch_pid_inc < 0.0)) {
+        scas_pitch_pid_inc = 0.0;
+    }
+    sta->scas_pitch_pid_i = claw_clip(sta->scas_pitch_pid_i + scas_pitch_pid_inc,
                                       prm->scas_pitch_pid_out_lo, prm->scas_pitch_pid_out_hi);
 
     /* scas_pitch_damp — Product */
@@ -47,10 +51,14 @@ void fcl_scas_step(const fcl_params_t *prm, fcl_state_t *sta,
 
     /* scas_roll_pid — PID */
     /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
-    const double scas_roll_pid_y = claw_clip(sched_roll_kp_y * scas_roll_err_y + sta->scas_roll_pid_i,
-                                             prm->scas_roll_pid_out_lo,
+    const double scas_roll_pid_raw = sched_roll_kp_y * scas_roll_err_y + sta->scas_roll_pid_i;
+    const double scas_roll_pid_y = claw_clip(scas_roll_pid_raw, prm->scas_roll_pid_out_lo,
                                              prm->scas_roll_pid_out_hi);
-    sta->scas_roll_pid_i = claw_clip(sta->scas_roll_pid_i + FCL_DT * sched_roll_ki_y * scas_roll_err_y,
+    double scas_roll_pid_inc = FCL_DT * sched_roll_ki_y * scas_roll_err_y;
+    if ((scas_roll_pid_raw > prm->scas_roll_pid_out_hi && scas_roll_pid_inc > 0.0) || (scas_roll_pid_raw < prm->scas_roll_pid_out_lo && scas_roll_pid_inc < 0.0)) {
+        scas_roll_pid_inc = 0.0;
+    }
+    sta->scas_roll_pid_i = claw_clip(sta->scas_roll_pid_i + scas_roll_pid_inc,
                                      prm->scas_roll_pid_out_lo, prm->scas_roll_pid_out_hi);
 
     /* scas_roll_damp — Product */
@@ -69,9 +77,14 @@ void fcl_scas_step(const fcl_params_t *prm, fcl_state_t *sta,
 
     /* scas_yaw_pid — PID */
     /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
-    const double scas_yaw_pid_y = claw_clip(prm->scas_yaw_pid_kp * scas_yaw_err_y + sta->scas_yaw_pid_i,
-                                            prm->scas_yaw_pid_out_lo, prm->scas_yaw_pid_out_hi);
-    sta->scas_yaw_pid_i = claw_clip(sta->scas_yaw_pid_i + FCL_DT * prm->scas_yaw_pid_ki * scas_yaw_err_y,
+    const double scas_yaw_pid_raw = prm->scas_yaw_pid_kp * scas_yaw_err_y + sta->scas_yaw_pid_i;
+    const double scas_yaw_pid_y = claw_clip(scas_yaw_pid_raw, prm->scas_yaw_pid_out_lo,
+                                            prm->scas_yaw_pid_out_hi);
+    double scas_yaw_pid_inc = FCL_DT * prm->scas_yaw_pid_ki * scas_yaw_err_y;
+    if ((scas_yaw_pid_raw > prm->scas_yaw_pid_out_hi && scas_yaw_pid_inc > 0.0) || (scas_yaw_pid_raw < prm->scas_yaw_pid_out_lo && scas_yaw_pid_inc < 0.0)) {
+        scas_yaw_pid_inc = 0.0;
+    }
+    sta->scas_yaw_pid_i = claw_clip(sta->scas_yaw_pid_i + scas_yaw_pid_inc,
                                     prm->scas_yaw_pid_out_lo, prm->scas_yaw_pid_out_hi);
 
     /* scas_yaw_damp — Gain */

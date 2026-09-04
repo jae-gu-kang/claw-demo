@@ -283,20 +283,57 @@ def _rule_saturation(signals, metrics, findings, pres, warnings):
                 joint_with=(km["rate"],), recheck=COUPLING["loop_gain"]))
 
 
+# 와인드업 시그니처가 **PID의 안티와인드업 형태를 따라간다** — 조건부 적분(현행)에서는
+# 적분기가 클램프까지 못 가고 그 직전에서 얼어붙는다. 종전의 "클램프에 주차"만 보면
+# 규칙이 조용히 죽는다 (blocks/controllers.py PID). 그래서 두 시그니처를 함께 본다:
+#   ① 주차 — 적분기가 클램프에 붙어 있다 (클램프형에서 나오던 형태, 여전히 유효)
+#   ② 동결 — PID **출력이 한계에 붙은 채** 적분기가 안 움직인다 (조건부 적분의 형태)
+# 둘 중 하나면 "적분이 막힌 시간"이고, 그 비율이 곧 이 규칙이 재던 값이다.
+_FROZEN_TOL = 1e-12  # 조건부 적분에서 막힌 스텝의 증분은 정확히 0이다
+
+
+def _pid_integrator_is_live(i) -> bool:
+    """그 축에 **적분기가 실제로 있는가** — ki = 0이면 ②의 전제가 성립하지 않는다.
+
+    요축은 설계상 ki = 0인 댐퍼다(fcl/demo.py). 적분기가 구조적으로 안 움직이므로
+    "동결 + 출력 포화"가 항상 참이 되어 100% 오탐이 나고, 처방은 **이미 0인 게인을
+    줄이라**고 말하게 된다 — 진단이 낼 수 있는 최악의 종류다.
+
+    판정은 적분기 신호 자체로 한다: 런 전체에서 한 번도 안 움직였으면 적분기가 없는
+    것과 구분할 수 없고, 어느 쪽이든 ②로 할 말이 없다. (게인은 스케줄 조회값일 수
+    있어 형상 상수보다 실측 신호가 정확하다.)
+    """
+    fin = i[np.isfinite(i)]
+    return fin.size > 1 and float(np.max(fin) - np.min(fin)) > _FROZEN_TOL
+
 def _rule_windup(signals, meta, dt, t, findings, pres, warnings):
-    """규칙 3 — 내부 클램프형 PID의 와인드업 시그니처는 "클램프에 주차"다.
-    주차 지속을 run_stats(duty)로 집계한다. 처방은 ki 감소가 1차, 클램프 완화
+    """규칙 3 — 적분이 막힌 시간을 잰다 (주차 또는 출력 포화 중 동결).
+    지속을 run_stats(duty)로 집계한다. 처방은 ki 감소가 1차, 클램프 완화
     (joint_with)가 동시 후보다."""
     clamps = (meta or {}).get("clamps") or {}
+    # (축, 적분기 신호, PID 출력 신호, ki id, 클램프 id) — 출력은 시그니처 ②가 쓴다
     axes = (
-        ("pitch", "i_pitch", _SCAS_AXIS["pitch"]["ki"], _SCAS_AXIS["pitch"]["clamp"]),
-        ("roll", "i_roll", _SCAS_AXIS["roll"]["ki"], _SCAS_AXIS["roll"]["clamp"]),
-        ("yaw", "i_yaw", _SCAS_AXIS["yaw"]["ki"], _SCAS_AXIS["yaw"]["clamp"]),
-        ("alt", "i_alt", _AP_AXIS["alt"]["ki"], _AP_AXIS["alt"]["clamp"]),
-        ("spd", "i_spd", _AP_AXIS["spd"]["ki"], _AP_AXIS["spd"]["clamp"]),
-        ("hdg", "i_hdg", _AP_AXIS["hdg"]["ki"], _AP_AXIS["hdg"]["clamp"]),
+        ("pitch", "i_pitch", "pitch_pi", _SCAS_AXIS["pitch"]["ki"], _SCAS_AXIS["pitch"]["clamp"]),
+        ("roll", "i_roll", "roll_pi", _SCAS_AXIS["roll"]["ki"], _SCAS_AXIS["roll"]["clamp"]),
+        ("yaw", "i_yaw", "yaw_pi", _SCAS_AXIS["yaw"]["ki"], _SCAS_AXIS["yaw"]["clamp"]),
+        ("alt", "i_alt", "ap_alt_pi", _AP_AXIS["alt"]["ki"], _AP_AXIS["alt"]["clamp"]),
+        ("spd", "i_spd", "ap_spd_pi", _AP_AXIS["spd"]["ki"], _AP_AXIS["spd"]["clamp"]),
+        ("hdg", "i_hdg", "ap_hdg_pi", _AP_AXIS["hdg"]["ki"], _AP_AXIS["hdg"]["clamp"]),
     )
-    for axis, i_k, ki_id, clamp_ids in axes:
+    # 계측 신호는 **제어 틱마다만 갱신되고 사이 스텝은 직전 값이 유지된다**
+    # (sim/simulator.py). 그 사이 스텝을 "동결"로 읽으면 자유롭게 적분 중인 축이
+    # 막힌 것으로 잡힌다 — control_hz는 스윕 노브라(pipeline/influence.py) 제어주기를
+    # 낮추면 "와인드업이니 ki를 줄여라"가 나오는 오도가 생긴다. duty.py와 같은
+    # 방식으로 제어 틱만 본다.
+    control_hz = float((meta or {}).get("control_hz") or 0.0)
+    if control_hz > 0 and dt > 0:
+        step = max(1, int(round(1.0 / (control_hz * dt))))
+    else:
+        # step=1로 조용히 되돌아가면 ZOH 구간이 전부 "동결"로 잡혀 오탐이 돌아온다.
+        # 지금은 clamps가 있으면 control_hz도 반드시 있지만(둘 다 sim meta), 그건
+        # 커밋 순서에 기댄 안전이다 — 없으면 ②를 접고 경고를 남긴다.
+        step = 0
+    for axis, i_k, out_k, ki_id, clamp_ids in axes:
         i = _arr(signals, i_k)
         cl = clamps.get(axis)
         if i is None or cl is None:
@@ -305,6 +342,44 @@ def _rule_windup(signals, meta, dt, t, findings, pres, warnings):
         tol = max(PARK_TOL_FRAC * (hi - lo), 1e-12)
         ok = np.isfinite(i)
         parked = ok & ((i >= hi - tol) | (i <= lo + tol))
+        # ② 조건부 적분의 형태 — 출력이 한계에 붙은 채 적분기가 안 움직인다.
+        y = _arr(signals, out_k)
+        if y is None or not np.isfinite(y).any():
+            # 신호 부재·전량 NaN(미장착 형상의 프로브 규약)이면 ②를 못 본다.
+            # ①만 낸 값은 조건부 적분에서 죽은 시그니처라 **근거 없는 0%**가 된다 —
+            # 규칙 2와 같은 규약으로 경고를 남긴다 (0으로 위장하지 않는다)
+            warnings.append(f"와인드업(규칙 3) {axis}: PID 출력 계측 채널 없음 — 주차만 판정")
+        elif step == 0:
+            warnings.append(f"와인드업(규칙 3) {axis}: control_hz 미상 — 주차만 판정")
+        elif not (np.isfinite(y) & ((y >= hi - tol) | (y <= lo + tol))).any():
+            pass  # 출력이 한 번도 한계에 안 닿았다 — ②의 전제가 없다, 할 말도 없다
+        elif not _pid_integrator_is_live(i):
+            # 출력은 포화했는데 적분기가 런 내내 한 칸도 안 움직였다. 대개 ki = 0인
+            # 축이지만(요축), **런 전체가 100% 막힌 축**도 같은 모습이다 — 후자가 이
+            # 규칙이 잡아야 할 최악인데 신호만으로는 구분이 안 된다. 조용히 넘기지 않는다.
+            warnings.append(
+                f"와인드업(규칙 3) {axis}: 출력 포화 중 적분기가 런 내내 정지 — "
+                f"ki=0이거나 전 구간 막힘, 신호로는 구분 불가라 판정 보류")
+        else:
+            frozen = np.abs(np.diff(i)) <= _FROZEN_TOL
+            saturated = np.isfinite(y) & ((y >= hi - tol) | (y <= lo + tol))
+            blocked = np.zeros(i.shape, dtype=bool)
+            # 제어 틱 표본만 판정한다 — 틱 사이는 ZOH 유지 구간이지 동결이 아니다.
+            # 첫 틱은 직전 틱이 없어 증분을 못 재므로 제외한다.
+            idx = np.arange(step, i.size, step)
+            if idx.size == 0:
+                # 런이 제어 틱 하나보다 짧다 — 증분을 잴 구간이 없다
+                warnings.append(
+                    f"와인드업(규칙 3) {axis}: 런이 제어주기보다 짧다 — 주차만 판정")
+            else:
+                verdict = frozen[idx - 1] & saturated[idx] & ok[idx]
+                # 그리고 **그 구간 전체로 펼친다.** 틱 표본 하나로만 세면 판정량이
+                # 제어주기에 매인다 — frac이 1/step로 희석되고(문턱 0.02는 step≥50에서
+                # 구조적으로 도달 불가), events가 틱 수로 폭증하고, longest가 항상
+                # dt_plant 한 칸이 되어 "51 s 연속 막힘"이 "최장 0.01 s"로 나간다.
+                spread = np.repeat(verdict, step)[: i.size - step]
+                blocked[step : step + spread.size] = spread
+            parked = parked | blocked
         stats = run_stats(parked, dt, t)
         if stats["frac"] == 0.0:
             continue
@@ -314,11 +389,11 @@ def _rule_windup(signals, meta, dt, t, findings, pres, warnings):
         if stats["frac"] <= WINDUP_FRAC:
             findings.append(Finding(
                 "windup", axis, "info",
-                f"{axis} 적분기 클램프 주차 {stats['frac']:.1%} — 문턱 안", ev))
+                f"{axis} 적분 막힘 {stats['frac']:.1%} — 문턱 안", ev))
             continue
         findings.append(Finding(
             "windup", axis, "warn",
-            f"{axis} 적분기가 클램프에 {stats['frac']:.1%} 주차 (최장 "
+            f"{axis} 적분이 {stats['frac']:.1%} 막혀 있었다 (최장 "
             f"{stats['longest']:.2g} s) — ki·출력 한계 상호작용", ev))
         pres.append(Prescription(
             knobs=(ki_id,), knob_class="loop_gain", direction="decrease",

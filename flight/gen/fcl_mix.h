@@ -1,7 +1,7 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
  * 지문    : a1a24ddcaf2e9fe3
- * 엔진    : claw 0.1.0
+ * 엔진    : claw 0.2.0
  * mix — 기능축 분할, 10개 블록
  */
 #ifndef CLAW_FCL_MIX_H

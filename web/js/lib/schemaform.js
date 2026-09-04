@@ -49,8 +49,9 @@ export const FIELD_GROUPS = {
     ["동특성", ["wn", "zeta", "rate_max"]],
     ["위치·초기", ["pos_lo", "pos_hi", "initial"]],
   ],
-  "propulsion/SingleEngine": [
-    ["추력", ["max_thrust"]],
+  "propulsion/PropEngine": [
+    ["축동력", ["power_max", "eta"]],
+    ["정지추력 상한", ["static_thrust"]],
     ["추력선 오프셋", ["z_offset"]],
   ],
   "nav/ErrorModel": [

@@ -132,9 +132,11 @@ def test_기본_테이블은_예전과_같다():
         # 설계점 M0.6에서는 어느 자리든 설계 상수 그대로
         assert float(tab.interp(mach=0.6)) == pytest.approx(design[name])
     # 지문은 기체를 단발로 맞추면서 갱신됐다 — 차동추력 계수를 0으로 내린 설계 변경이
-    # 믹서 파라미터를 바꿨다(fcl/demo.py DEMO_K_DIFF_THR, flight/gen 재생성 동반).
+    # 믹서 파라미터를 바꿨다(fcl/demo.py DEMO_K_DIFF_THR).
+    # **프로펠러 추력 모델(단계 C)은 이 지문을 안 움직인다** — 순수 플랜트 변경이라
+    # 법칙 그래프에 닿지 않는다. 한때 tau_spd를 2→6으로 올려 움직였다가 실측으로
+    # 되돌렸다(fcl/autopilot.py 주석 참조).
     # 지문이 움직이는 것이 곧 설계 변경이고, 안 움직였다면 그게 이상한 것이다.
-    # (직전 갱신은 이륙·착륙 도입 — 종방향 축과 θ 출처 Switch가 그래프에 들어갔다.)
     assert _module().fingerprint == "a1a24ddcaf2e9fe3"
 
 
@@ -163,3 +165,29 @@ def test_스케줄된_자리는_주입_테이블을_그대로_쓴다():
     tab = Table({"mach": (0.2, 0.8)}, (-4.0, -1.0), name="pitch.kp", extrapolate="clip")
     fcl = make_demo_fcl(gain_tables={"pitch.kp": tab}).init(DT)
     assert fcl.schedule.step(0.2, 1000.0, 200.0)["pitch"]["kp"] == pytest.approx(-4.0)
+
+
+def test_게인_격자_범위는_자르면_안_된다():
+    """상단 절단이 조용히 게인을 **올린다** — 이 가드가 없어서 실제로 한 번 놓쳤다.
+
+    Table이 extrapolate="clip"이라 격자 밖은 경계값으로 고정된다. 프로펠러 전환으로
+    수평비행 상단이 M0.60으로 내려왔다고 격자를 M0.6에서 끊으면, 그 위에서 1/q̄ 롤오프가
+    사라지고 게인이 설계값에 붙박인다 — _F_CAP이 리밋사이클을 만든다고 실측한 바로 그
+    방향이다. 게다가 M0.6 위는 **강하로 도달한다**(3000 m에서 스로틀 0으로도 M0.73).
+
+    하단은 반대다: M0.424 아래는 _F_CAP이 이미 평평하게 만들어 잘라도 값이 같다.
+    그래서 이 가드는 **상단만** 못박는다.
+    """
+    import numpy as np
+
+    from claw.fcl.demo import _F_CAP, _M_DESIGN
+    from claw.plant import make_demo_structural_limits
+
+    tab = next(iter(make_demo_gain_tables().values()))
+    machs = np.asarray(tab.axes[0])
+    # 구조 급강하 한계(V_D 상당)까지는 격자가 있어야 한다 — 거기가 실제 도달 상한이다
+    assert machs[-1] >= make_demo_structural_limits()["mach_d"] - 1e-9, (
+        f"격자 상단 {machs[-1]}이 mach_d 아래 — 그 위에서 스케줄이 clip으로 굳는다")
+    # 그리고 상단 부근이 실제로 롤오프 중이어야 한다 (평평하면 자른 것과 같다)
+    f = np.minimum((_M_DESIGN / machs) ** 2, _F_CAP)
+    assert f[-1] < f[-2] < f[-3], "격자 상단이 평평하다 — 1/q̄ 법칙이 죽었다"

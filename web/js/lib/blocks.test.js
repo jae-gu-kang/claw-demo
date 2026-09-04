@@ -23,7 +23,7 @@ const NAV_HASHES = [...read("../../index.html").matchAll(/data-view="([\w-]+)"/g
 const REGISTRY_REFS = new Set([
   "fcl/Autopilot", "fcl/ScasAxis", "fcl/Mixer",
   "actuator/SecondOrderActuator", "guidance/LOS", "nav/ErrorModel",
-  "propulsion/SingleEngine", "propulsion/TwinEngine",
+  "propulsion/PropEngine", "propulsion/SingleEngine", "propulsion/TwinEngine",
 ]);
 
 test("블록: id 유일 + 상세 스펙 완결", () => {
@@ -627,7 +627,7 @@ test("허브 계약: 시뮬 주입 경로 보유 블록(AP·SCAS·작동기·항
 // 하위 페이지가 스스로 지목한 스키마(sub.schema)의 파라미터명 사본 — 루트와 달리
 // 이 페이지들은 편집이 아니라 열람이라 목록도 따로다 (views/blocks.js loadSubSchema)
 const SUB_PARAM_NAMES = {
-  "propulsion/SingleEngine": new Set(["max_thrust", "z_offset"]),
+  "propulsion/PropEngine": new Set(["power_max", "eta", "static_thrust", "z_offset"]),
 };
 
 const subRef = (node) => (node.schema ? `${node.schema.category}/${node.schema.name}` : null);
@@ -670,6 +670,34 @@ test("추진 페이지 스키마 = 데모 기체가 실제로 쓰는 엔진 클�
   assert.equal(ms.length, 1, `엔진 조립 줄이 ${ms.length}개 — 어느 쪽이 정본인지 모호`);
   assert.equal(SUBSYSTEMS.plant.children.prop.schema.name, ms[0][1],
     `추진 페이지가 ${SUBSYSTEMS.plant.children.prop.schema.name}인데 데모는 ${ms[0][1]}`);
+});
+
+test("추진 페이지의 교차속도 V_c는 엔진 기본값에서 유도된 값과 같다 (엔진 원문 대조)", () => {
+  // V_c만 **죽은 문자열**이다 — 바로 옆 P·η·T_static은 data-p로 살아 있는데, 셋에서
+  // 유도한 이 수치는 아니다. 기본값을 한 번만 바꾸면 화면이 그 자리에서 앞뒤가 안 맞고,
+  // 그걸 아무도 안 본다. 렌더 시 계산하는 대신 여기서 못박는다 (기계 장치 없이).
+  const src = readFileSync(
+    new URL("../../../engine/claw/plant/prop.py", import.meta.url), "utf8",
+  );
+  const cls = src.slice(src.indexOf("class PropEngine"));
+  const def = (name) => {
+    const m = cls.match(new RegExp(`ParamDef\\("${name}",\\s*([0-9_.eE+-]+)`));
+    assert.ok(m, `prop.py PropEngine에서 ${name} 기본값을 못 찾음 (형식이 바뀌었나?)`);
+    return Number(m[1].replace(/_/g, ""));
+  };
+  // PropEngine.crossover_speed와 같은 식 — 그 아래는 정지추력 상한, 위는 1/V
+  const vc = (def("eta") * def("power_max")) / def("static_thrust");
+  const want = vc.toFixed(1);
+  assert.equal(want, "66.7", `엔진 기본값이 바뀌었다 — V_c = ${want} m/s`);
+
+  const prop = SUBSYSTEMS.plant.children.prop;
+  const texts = [prop.svg, ...(prop.flow?.why ?? []), prop.notes ?? ""].join("\n");
+  const cited = [...texts.matchAll(/V_c = ηP\/T_static = ([\d.]+) m\/s/g)].map((m) => m[1]);
+  assert.ok(cited.length > 0, "추진 페이지에 V_c 인용이 하나도 없다 — 문구가 바뀌었나?");
+  for (const c of cited) {
+    assert.equal(c, want,
+      `V_c 인용 ${c}가 엔진 기본값 유도값 ${want}와 다르다 (prop.py PARAM_DEFS)`);
+  }
 });
 
 // 편집 가능 블록 스키마의 파라미터명 사본 — 정본은 엔진 레지스트리

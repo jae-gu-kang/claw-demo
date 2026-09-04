@@ -42,7 +42,11 @@ class Aircraft:
         V = float(np.linalg.norm(vel_b))
         mach = V / atm.a
         f_aero, m_aero = self.aero.forces(atm.rho, vel_b, omega_b, controls, mach)
-        f_eng, m_eng = self.engine.forces(controls.get("throttle", (0.0, 0.0)))
+        # 추진에 V·rho를 넘긴다 — 프로펠러는 T = ηP/V라 속도를 타고, 축동력은
+        # 밀도를 탄다 (plant/prop.py PropEngine). 상수 추력 모델은 받고 무시한다.
+        f_eng, m_eng = self.engine.forces(
+            controls.get("throttle", (0.0, 0.0)), V, atm.rho
+        )
         f_grav = ned_to_body(q_nb, np.array([0.0, 0.0, m * G0]))
         force_b = f_aero + f_eng + f_grav
         moment_b = m_aero + m_eng

@@ -5,6 +5,7 @@ import pytest
 
 from claw.common.contracts import TrimCase
 from claw.plant import XE_H, XE_Q, XE_THETA, XE_U, XE_W, make_demo_aircraft
+from claw.design.points import envelope_ok
 from claw.trim import trim_batch, trim_level
 
 
@@ -14,15 +15,24 @@ def ac():
 
 
 def test_level_trim_converges_and_balances(ac):
-    tr = trim_level(ac, TrimCase("cruise", mach=0.7, alt=1000.0, fuel=200.0))
+    tr = trim_level(ac, TrimCase("cruise", mach=0.4, alt=1000.0, fuel=200.0))
     assert tr.converged
     alpha = tr.state.euler()[1]  # 수평비행 θ = α
     de = tr.control.elevon[0]
     thr = tr.control.throttle[0]
-    # 해석 근사 (선형 계수 손계산): α≈0.0302, δe≈-0.004, thr≈0.27
-    assert alpha == pytest.approx(0.0302, abs=0.005)
-    assert de == pytest.approx(-0.004, abs=0.005)
-    assert thr == pytest.approx(0.27, abs=0.05)
+    # 해석 근사 (선형 계수 손계산) — 기준 순항을 M0.7에서 **M0.4로 옮겼다**.
+    # 프로펠러 추력 모델(T = δσ·min(T_static, ηP/V))로 가면서 비행 가능 상단이
+    # 해면 M0.60으로 내려와 M0.7이 못 나는 조건이 됐기 때문이다 (plant/prop.py).
+    #
+    #   q̄ = ½ρV² = 10,074 Pa (V = 134.6 m/s, ρ_1000 = 1.112)
+    #   CL = W/(q̄S) = 9,807/(10,074·3.0) = 0.3247
+    #   Cm = 0 ⇒ δe = 0.02 − 0.8α, CL = 3.5α + 0.4δe ⇒ α = 0.0996, δe = −0.0597
+    #   CD = 0.02 + 0.25·CL² = 0.0464 ⇒ D = 1,400 N
+    #   T_avail(V, σ=0.908) = 0.908·0.8·500 kW/134.6 = 2,697 N ⇒ thr = 0.519
+    # 실측 α 0.0982 · δe −0.0586 · thr 0.5134 (손계산과 1.4% 이내)
+    assert alpha == pytest.approx(0.0996, abs=0.005)
+    assert de == pytest.approx(-0.0597, abs=0.005)
+    assert thr == pytest.approx(0.519, abs=0.05)
     # 잔차 직접 확인: 트림 상태에서 u̇·ẇ·q̇ ≈ 0, ḣ = 0 (구성상)
     xe = np.zeros(12)
     xe[XE_U], xe[XE_W] = tr.state.vel_b[0], tr.state.vel_b[2]
@@ -41,9 +51,13 @@ def test_infeasible_case_flagged(ac):
 
 def test_trim_batch_seed_and_continuity(ac):
     # 서펜타인 순서 — 리스트상 인접 케이스가 물리적으로도 인접하도록 (시드·연속성 판정 전제)
-    machs = (0.4, 0.5, 0.6, 0.7, 0.8)
-    cases = [TrimCase(f"m{m:.1f}_h100", mach=m, alt=100.0, fuel=200.0) for m in machs] + [
-        TrimCase(f"m{m:.1f}_h3000", mach=m, alt=3000.0, fuel=200.0) for m in reversed(machs)
+    # 격자는 **비행 가능 범위** 안이다 — 프로펠러 전환으로 상단이 해면 M0.60,
+    # 3000 m M0.55로 내려왔다 (plant/prop.py PropEngine). 저마하 끝을 피한 것은
+    # α ∝ 1/V²라 M0.25~0.30 사이에서 해가 급하게 움직여(0.222 → 0.156) 연속성
+    # 판정이 걸리기 때문이다 — 격자 간격이 물리보다 성긴 것이지 해가 틀린 게 아니다
+    machs = (0.35, 0.4, 0.45, 0.5, 0.55)
+    cases = [TrimCase(f"m{m:.2f}_h100", mach=m, alt=100.0, fuel=200.0) for m in machs] + [
+        TrimCase(f"m{m:.2f}_h3000", mach=m, alt=3000.0, fuel=200.0) for m in reversed(machs)
     ]
     results = trim_batch(ac, cases, fingerprint="abc123")
     assert all(r.converged for r in results)
@@ -70,8 +84,8 @@ def test_flag_false_paths(ac):
     from claw.plant import TwinEngine
 
     ac_weak = make_demo_aircraft()
-    ac_weak.engine = TwinEngine(max_thrust=800.0, y_offset=0.5)
-    tr2 = trim_level(ac_weak, TrimCase("weak", mach=0.7, alt=1000.0, fuel=200.0))
+    ac_weak.engine = TwinEngine(max_thrust=400.0, y_offset=0.5)  # 명백히 부족 — 700은 thr 0.989로 칼날 위
+    tr2 = trim_level(ac_weak, TrimCase("weak", mach=0.4, alt=1000.0, fuel=200.0))
     assert tr2.flags["saturation_ok"] is False
 
 
@@ -126,9 +140,11 @@ def test_saturation_detail_matches_saturation_ok(ac):
     from claw.trim import saturation_detail
 
     cases = [
-        TrimCase("cruise", mach=0.7, alt=1000.0, fuel=200.0),
-        TrimCase("slow", mach=0.12, alt=100.0, fuel=400.0),  # 저속 저동압 — 포화 유도
-        TrimCase("high", mach=0.4, alt=5000.0, fuel=400.0),
+        TrimCase("cruise", mach=0.4, alt=1000.0, fuel=200.0),
+        # 포화는 이제 **고고도**에서 온다 — 프로펠러 축동력이 밀도비로 빠지기
+        # 때문이다(P ∝ σ). 종전 상수 추력에서는 저속 저동압이 포화 유도점이었다.
+        TrimCase("high_alt", mach=0.5, alt=3500.0, fuel=400.0),  # 스로틀 상한 포화 유도
+        TrimCase("high", mach=0.4, alt=3000.0, fuel=400.0),  # 설계 천장(만재 ~3.8 km, CEILING) 아래로
     ]
     for tr in trim_batch(ac, cases):
         det = saturation_detail(tr)
@@ -208,10 +224,79 @@ def test_trim_dispatcher_reads_the_condition_field(ac, ac_ground):
     """condition이 실제로 갈린다 — 그 전까지 계약에만 있고 아무도 안 읽던 필드."""
     from claw.trim import trim
 
-    lvl = trim(ac, TrimCase("cruise", mach=0.7, alt=1000.0, fuel=200.0))
+    lvl = trim(ac, TrimCase("cruise", mach=0.4, alt=1000.0, fuel=200.0))
     assert lvl.converged and np.linalg.norm(lvl.state.vel_b) > 100.0
     gnd = trim(ac_ground, _ground_case())
     assert gnd.converged and np.allclose(gnd.state.vel_b, 0.0)
     # 모르는 조건을 조용히 level로 떨어뜨리면 지상 케이스가 비행 트림으로 풀린다
     with pytest.raises(ValueError, match="모르는 트림 조건"):
         trim(ac, TrimCase("x", mach=0.5, alt=0.0, fuel=200.0, condition="hover"))
+
+
+# 코드·주석·웹 매뉴얼 세 군데가 이 숫자를 문장으로 인용한다(fcl/demo.py,
+# web/js/lib/manualdoc.js, web/js/views/subsystems.js). 인용은 스윕에서 빠지기
+# 마련이라 **한 자리에서 못박는다** — 여기가 그 자리다.
+#
+# 반올림은 **안쪽으로** 한다. 실측 하한 0.205를 "M0.20"으로 적으면 화면이 못 나는
+# 점을 난다고 말하게 된다 — 이 저장소가 계속 걸러 온 방향의 오류다. 상한도 같은
+# 이유로 내림이다(0.602 → 0.60).
+SEA_LEVEL_BAND = {  # 연료(kg): (하한, 상한) — 0.001 격자 실측을 안쪽으로 반올림
+    0.0: (0.19, 0.61),    # 실측 0.184 ~ 0.617
+    200.0: (0.21, 0.60),  # 실측 0.205 ~ 0.602  ← 앱 기본값
+    300.0: (0.22, 0.59),  # 실측 0.215 ~ 0.593
+    400.0: (0.23, 0.58),  # 실측 0.225 ~ 0.582
+}
+
+
+@pytest.mark.parametrize("fuel", sorted(SEA_LEVEL_BAND))
+def test_해면_수평비행_범위가_적어_둔_수치와_같다(ac, fuel):
+    """적어 둔 두 끝은 **안에** 있고, 한 칸 밖은 **밖에** 있어야 한다.
+
+    양쪽을 다 보는 것이 요점이다: 안쪽만 보면 범위를 넓게 적어도 통과하고,
+    바깥쪽만 보면 좁게 적어도 통과한다. 둘을 함께 걸면 M0.01 해상도로 고정된다.
+    """
+    lo, hi = SEA_LEVEL_BAND[fuel]
+    inside = [(lo, True), (hi, True), (round(lo - 0.01, 2), False),
+              (round(hi + 0.01, 2), False)]
+    for mach, want in inside:
+        got = envelope_ok(trim_level(ac, TrimCase(f"m{mach:.2f}", mach=mach, alt=0.0, fuel=fuel)))
+        assert got is want, (
+            f"연료 {fuel:.0f} kg 해면 M{mach:.2f}: 적어 둔 범위는 M{lo:.2f}~M{hi:.2f}인데 "
+            f"실제로는 {'난다' if got else '못 난다'} — 인용한 문장들을 같이 고쳐야 한다")
+
+
+# 설계 천장도 같은 문제였다 — 문서·웹·테스트가 각자 인용하다 **세 벌**로 갈렸다
+# (공허 7 / 7.25 / 7.45 km). 격자 해상도에 따라 답이 달라지는 양이라 더 그렇다.
+#
+# 이분법 실측(마하 0.005 격자): 공허 7488~7506 · 연료 200 kg 5502~5520 · 만재 3797~3814 m.
+# 인용은 **0.1 km 반올림**으로 ~7.5 / ~5.5 / ~3.8 km이고, 가드는 그보다 한 칸 보수적인
+# 쌍을 못박는다 — 인용값 자체를 핀하면 연료 200 kg가 천장에서 2 m 떨어진 칼날 위가 된다.
+# 인용값도 **데이터로** 둔다 — 주석에 두면 테스트가 안 읽어서, 문서가 ~5.4든 ~5.6이든
+# 괄호 안이라 초록이다. 이 상수를 만든 이유가 정확히 그 상황(세 벌로 갈림)이었다.
+CEILING = {  # 연료(kg): (인용값, 여기서는 난다, 여기서는 못 난다) [m]
+    0.0: (7500.0, 7400.0, 7600.0),
+    200.0: (5500.0, 5400.0, 5700.0),  # ← 앱 기본값
+    400.0: (3800.0, 3700.0, 3900.0),
+}
+
+
+@pytest.mark.parametrize("fuel", sorted(CEILING))
+def test_설계_천장이_적어_둔_수치_근방이다(ac, fuel):
+    """천장 아래에서는 나는 마하가 **하나라도** 있고, 위에서는 하나도 없다.
+
+    이 천장은 스로틀 95% 등고선(SAT_FRAC) 기준이라 서비스 실링 정의와 같지 않다 —
+    문서·웹이 그 단서를 같이 말한다(01 §2.6).
+    """
+    cited, below, above = CEILING[fuel]
+    # 인용과 가드가 갈리지 않는다 — 괄호는 칼날을 피하려 인용값보다 넓지만 **포함**해야 한다
+    assert below < cited < above, (
+        f"인용 {cited:.0f} m가 실측 괄호 [{below:.0f}, {above:.0f}] 밖 — 인용과 가드가 갈렸다")
+    def flies(alt):
+        m = 0.15
+        while m <= 0.70001:
+            if envelope_ok(trim_level(ac, TrimCase(f"c{m:.3f}", mach=m, alt=alt, fuel=fuel))):
+                return True
+            m = round(m + 0.005, 4)
+        return False
+    assert flies(below), f"연료 {fuel:.0f} kg: {below:.0f} m에서 난다고 적어 뒀는데 못 난다"
+    assert not flies(above), f"연료 {fuel:.0f} kg: {above:.0f} m는 천장 위여야 하는데 난다"

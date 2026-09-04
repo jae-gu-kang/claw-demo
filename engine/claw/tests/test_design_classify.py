@@ -53,13 +53,17 @@ def _fail_cases(v, lo, hi, loop="pitch_att"):
 
 def test_structural_limit_with_excess_delay():
     """과대 지연 — 자유 게인으로도 미달 → escalate (보고 전용) + 병목 수치."""
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     design = demo_design_gains()
     out = classify_margin_deficit(
         ac, v, "pitch_att", points, lms, trims, {}, design, _fail_cases(v, lo, hi),
         criteria=MarginCriteria(),
-        actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.6, pade_order=2,
+        # 0.6 → 0.9: 프로펠러 전환으로 설계 조건이 M0.6 → M0.4로 내려오면서 플랜트가
+        # 느려져, 0.6 s는 더 이상 "레이트 필터로도 못 푸는" 과대 지연이 아니게 됐다
+        # (실측 0.6에서는 rate_filter_fc가 푼다). 0.9부터 의도한 패턴이 돌아온다:
+        # 지연 제거만 통과 · 작동기 3배도 · 필터 코너 훑기도 못 푼다
+        actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.9, pade_order=2,
     )
     assert out["verdict"] == "structural_limit"
     assert out["action"]["type"] == "escalate"
@@ -76,7 +80,7 @@ def test_structural_limit_with_excess_delay():
         "이 병목(과대 지연)은 레이트 필터로 안 풀린다 — 코너를 훑어도 통과 구간이 없다"
     )
     assert by_change["delay_s"]["resolves"] is True
-    assert by_change["delay_s"]["from"] == 0.6 and by_change["delay_s"]["to"] == 0.0
+    assert by_change["delay_s"]["from"] == 0.9 and by_change["delay_s"]["to"] == 0.0
     assert by_change["actuator_wn"]["resolves"] is False
     assert bn["resolved_by"] == ["지연 제거"]
     # 결론 문장은 "지연 제거"가 아니라 **얼마까지 줄이면 되는지**를 말한다
@@ -96,8 +100,8 @@ def test_structural_limit_reports_no_relief_when_nothing_helps():
     실측됐다는 전제 위에서만 뜻을 갖는다 — 완화값이 미달인데도 숫자를 내면 그건 실측이
     아니라 이분의 마지막 좌표일 뿐이고, 결론 문장이 없는 예산을 있다고 말하게 된다.
     """
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     out = classify_margin_deficit(
         ac, v, "pitch_att", points, lms, trims, {}, demo_design_gains(),
         _fail_cases(v, lo, hi), criteria=MarginCriteria(pm_min_deg=179.0), **ACT,
@@ -122,11 +126,13 @@ def test_design_target_miss_alone_is_not_a_structural_limit():
     처방(승격·재적합)이 사라진다. 한 카드 안에서 evidence의 judged=="ok"와 verdict가
     서로를 부정하는 것도 그 증상이다.
 
-    재현: 데모 M0.6/h1000 yaw_rate에 ζ_dr 목표 0.95(플랜트가 못 내는 값)를 준다.
+    재현: 데모 M0.45/h1000 yaw_rate에 ζ_dr 목표 0.95(플랜트가 못 내는 값)를 준다.
+    (프로펠러 전환으로 설계 조건이 내려오면서 M0.6은 못 나는 조건이 됐다. 달성값도
+     0.923 → 0.906으로 옮겼다 — 목표에 못 가면서도 합격선을 크게 넘는 성격은 같다.)
     달성 0.923 — 합격선 0.30의 3배인데 사유는 target_unreached다.
     """
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.4, 0.45, 0.5), v_mach=0.45)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.45, 0.4, 0.5))
     cases = _fail_cases(v, lo, hi, loop="yaw_rate")
     cases[v]["loops"]["yaw_rate"] = {"kind": "damping", "zeta": 0.2, "status": "fail"}
     out = classify_margin_deficit(
@@ -156,8 +162,8 @@ def test_structural_gate_keeps_both_of_its_halves():
     """
     from claw.design.classify import _slot_passes, _tuned_judgement
 
-    ac, _points, lms, trims = _setup((0.6,), v_mach=None)
-    lm = lms.get(ac, trims[case_name(0.6, 1000.0, 200.0)])
+    ac, _points, lms, trims = _setup((0.4,), v_mach=None)
+    lm = lms.get(ac, trims[case_name(0.4, 1000.0, 200.0)])
     design = demo_design_gains()
 
     fail_judged = tune_point(lm, design, **ACT)
@@ -190,8 +196,8 @@ def test_plant_variation_promotes_to_anchor():
 
 def test_gain_interp_valley_promotes_to_breakpoint():
     """이웃 통과 + 보간 게인 괴리 큼 (plant 분기는 tol 완화로 배제) → breakpoint 승격."""
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     design = demo_design_gains()
     opt = tune_point(lms.get(ac, trims[v]), design, **ACT)["gains"]
     # 보간 게인을 최적의 3배로 — 괴리 200% > tol_gain 10%
@@ -212,8 +218,8 @@ def test_gain_interp_valley_promotes_to_breakpoint():
 
 def test_simple_deficit_adds_validation():
     """괴리 작고 플랜트 완만 — 검증점 추가 처방."""
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     design = demo_design_gains()
     opt = tune_point(lms.get(ac, trims[v]), design, **ACT)["gains"]
     tables = {
@@ -266,8 +272,8 @@ def test_valley_on_anchor_is_a_fit_failure_not_a_sample_failure():
 
     남은 손잡이는 적합 자체다 (허용치·구간 수).
     """
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=None)  # 전부 anchor
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=None)  # 전부 anchor
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     design = demo_design_gains()
     opt = tune_point(lms.get(ac, trims[v]), design, **ACT)["gains"]
     tables = {
@@ -292,8 +298,8 @@ def test_valley_on_breakpoint_still_injects_the_optimum():
     """
     from claw.design import ROLE_BREAKPOINT
 
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     points.promote(v, ROLE_BREAKPOINT, reason="test")
     design = demo_design_gains()
     opt = tune_point(lms.get(ac, trims[v]), design, **ACT)["gains"]
@@ -316,8 +322,8 @@ def test_sign_flip_gets_its_own_verdict_not_promotion():
     실제로 겪었다: plant_variation으로 분류돼 앵커 승격을 반영했는데 다항이 다시
     0을 가로질러 실패가 유지됐다.
     """
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     design = demo_design_gains()
     cases = _fail_cases(v, lo, hi)
     # 검증이 부호 뒤집힘을 표시한 상태 (schedmap._apply_sign_check가 하는 일)
@@ -345,8 +351,8 @@ def test_failing_sibling_axis_does_not_escalate_this_slot():
     지연 0.6 s에서 이 점의 자리별 상태: pitch_att infeasible / roll_att ok.
     """
     act = {**ACT, "delay_s": 0.6}
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     design = demo_design_gains()
     out_t = tune_point(lms.get(ac, trims[v]), design, **act)
     assert out_t["status"] == "infeasible", "점 단위로는 실패인 상황이어야 한다"
@@ -415,14 +421,17 @@ def test_relief_threshold_is_measured_not_the_probe_value():
     확인한다. 폭이 초기 브래킷의 1/256임도 같이 고정한다 — 이분을 지우고 완화값(×3)을
     그대로 내면 "그 값에서 통과"는 여전히 참이지만 폭과 "완화값보다 작다"가 무너진다.
 
-    시나리오: 작동기 18 rad/s(데모 30보다 짠 예산)에서 M0.6/h1000 pitch_att는 대역폭
+    시나리오: 작동기 8 rad/s(데모 30보다 짠 예산)에서 M0.4/h1000 pitch_att는 대역폭
     붕괴로 구조 한계다. 두 축이 모두 통과하므로 전/후 달성값도 여기서 함께 잰다.
     """
     from claw.design.classify import _slot_passes
 
-    act = {**ACT, "actuator_wn": 18.0}
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    # 18 → 8 rad/s: 프로펠러 전환으로 설계 조건이 M0.4로 내려와 플랜트가 느려졌다.
+    # 18에서는 더 이상 대역폭 붕괴가 아니라 plant_variation으로 갈린다(실측 18·14·12·10
+    # 전부). 8부터 구조 한계가 돌아온다 — 시나리오(짠 작동기 예산)는 그대로다
+    act = {**ACT, "actuator_wn": 8.0}
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     design = demo_design_gains()
     out = classify_margin_deficit(
         ac, v, "pitch_att", points, lms, trims, {}, design, _fail_cases(v, lo, hi),
@@ -434,15 +443,15 @@ def test_relief_threshold_is_measured_not_the_probe_value():
     assert probe["resolves"] is True, "이 시나리오는 작동기 완화가 통해야 성립한다"
     th = probe["threshold"]
     assert th["name"] == "min_actuator_wn" and th["unit"] == "rad/s"
-    assert th["direction"] == ">=" and th["current"] == 18.0
+    assert th["direction"] == ">=" and th["current"] == 8.0
     assert bn["thresholds"]["min_actuator_wn"] == th["value"]
 
     # 1) 배수가 아니라 경계다 — ×3(54)보다 한참 아래에서 이미 통과한다
-    assert 18.0 < th["value"] < th["probe_value"]
+    assert 8.0 < th["value"] < th["probe_value"]
     # 2) 폭 = 초기 브래킷 ÷ 2^8. 이분을 지우면 여기서 걸린다
     passed, failed = th["bracket"]
     assert passed == th["value"]
-    assert abs(failed - passed) == pytest.approx((54.0 - 18.0) / 2**8)
+    assert abs(failed - passed) == pytest.approx((24.0 - 8.0) / 2**8)
 
     # 3) **실측 확인** — 그 값이면 통과하고, 한 걸음 아래면 통과하지 않는다.
     #    술어는 게이트와 같은 함수라 "이분이 찾은 경계 = 구조 한계 경계"다
@@ -461,7 +470,7 @@ def test_relief_threshold_is_measured_not_the_probe_value():
     assert set(ach["after"]) == set(ach["before"])
     assert ach["after"]["wc_att"] > ach["before"]["wc_att"]
     assert bn["note"].startswith("자유 게인으로도 기준 미달 — ")
-    assert f"작동기 대역폭 ≥ {th['value']:.3g} rad/s면 통과 (현재 18)" in bn["note"]
+    assert f"작동기 대역폭 ≥ {th['value']:.3g} rad/s면 통과 (현재 8)" in bn["note"]
 
 
 def test_relief_probe_carries_the_achieved_numbers_it_already_paid_for(monkeypatch):
@@ -517,8 +526,8 @@ def test_gate_and_relief_probe_read_one_predicate(monkeypatch):
     """
     from claw.design import classify as C
 
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     kw = dict(criteria=MarginCriteria(), tol_plant=99.0)
 
     # 술어가 "미달"이라 하면 멀쩡한 점도 구조 한계다 — 게이트가 이 함수를 읽는다는 증거
@@ -565,8 +574,8 @@ def test_nan_crossover_does_not_leak_into_the_bottleneck_numbers(monkeypatch):
         }
 
     monkeypatch.setattr(C, "tune_point", fake_tune_point)
-    ac, points, lms, trims = _setup((0.55, 0.6, 0.65), v_mach=0.6)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.6, 0.55, 0.65))
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     cases = _fail_cases(v, lo, hi)
     cases[v]["loops"]["pitch_att"]["wcp"] = float("nan")
     out = classify_margin_deficit(ac, v, "pitch_att", points, lms, trims, {},

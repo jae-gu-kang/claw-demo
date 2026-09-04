@@ -8,7 +8,7 @@
 않는다 (conventions.md: 부호는 공력 DB가 정의). 게인 스케줄은 step() 인자
 덮어쓰기로 주입 (PID와 동일 패턴 — M7 상위 조립이 테이블 조회값을 스텝마다 전달).
 
-안티와인드업: 적분기는 PID 내부 클램프(out_lo/out_hi). rate 항은 클램프 밖에서
+안티와인드업: **조건부 적분**(포화 방향 증분 버림) + 클램프 (blocks/controllers.py). rate 항은 클램프 밖에서
 더해지므로 축 출력은 최종 clip으로 한 번 더 제한한다.
 
 3축 조립 Scas: (θ·φ 명령, NavOutput) → 믹싱 전 축 명령 (de, da, dr).

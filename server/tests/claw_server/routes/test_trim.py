@@ -6,7 +6,9 @@
 
 
 def test_trim_batch_end_to_end(client, wait_job):
-    cases = [{"mach": m, "alt": 1000.0, "fuel": 200.0} for m in (0.5, 0.6, 0.7)]
+    # 프로펠러 추력 모델로 수평비행 상단이 1000 m에서 M0.58까지 내려왔다 —
+    # 종전 격자(0.5·0.6·0.7)의 위 둘은 이제 수렴하지 않는다 (plant/prop.py)
+    cases = [{"mach": m, "alt": 1000.0, "fuel": 200.0} for m in (0.40, 0.45, 0.50)]
     r = client.post(
         "/api/trim/batch", json={"cases": cases, "fingerprint": "fp-web"}
     )
@@ -24,7 +26,7 @@ def test_trim_batch_end_to_end(client, wait_job):
     results = body["results"]
     assert len(results) == 3
     assert all(res["converged"] for res in results)
-    assert results[0]["case"]["name"] == "M0.50_h1000_f200"  # 이름 자동 생성
+    assert results[0]["case"]["name"] == "M0.40_h1000_f200"  # 이름 자동 생성
     assert results[0]["flags"]["continuity_ok"] is None  # 첫 케이스 미판정
     assert results[1]["flags"]["continuity_ok"] is True  # 인접 시드 연속성 (엔진 판정)
     assert all(res["params_fingerprint"] == "fp-web" for res in results)

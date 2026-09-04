@@ -1,6 +1,6 @@
 [project]
 name = "claw-engine"
-version = "0.1.0"
+version = "0.2.0"
 description = "비행제어/유도법칙 설계툴 엔진 — MATLAB 없는 CLAW 설계·해석·시뮬레이션"
 requires-python = ">=3.10"
 dependencies = [

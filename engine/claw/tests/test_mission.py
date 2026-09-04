@@ -27,7 +27,10 @@ DB_RANGES = make_demo_db_ranges()
 @pytest.fixture(scope="module")
 def trim_design():
     ac = make_demo_aircraft()
-    tr = trim_level(ac, TrimCase("design", mach=0.6, alt=1000.0, fuel=300.0))
+    # 설계점을 M0.6 → M0.4로 옮겼다 — 프로펠러 전환으로 M0.6은 thr 0.991로
+    # 스로틀이 포화한 채 겨우 트림되는 조건이 됐다(saturation_ok=False).
+    # 포화한 트림에서 미션을 시작하면 여유 없는 출발점을 기준선으로 삼게 된다
+    tr = trim_level(ac, TrimCase("design", mach=0.4, alt=1000.0, fuel=300.0))
     assert tr.converged
     return ac, tr
 
@@ -86,11 +89,19 @@ def test_full_mission_closed_loop(trim_design):
         assert not res.envelope["flags"][var].any(), f"{var} DB 유효범위 이탈"
     assert res.envelope["worst_margin"] > 0.1
     assert not np.any(res.signals["limiter_active"])
-    # 고도 플래그는 현재 뜬다 — descent가 강하율을 세우지 않은 채(−25 m/s) mission으로
-    # 넘어가고 플레어가 없어 해수면 아래까지 내려간다 (01 §7 [백로그]). 감추지 않고
-    # 현상을 고정해 둔다: 플레어가 들어오면 이 단정이 깨져 갱신 대상임을 알린다.
-    assert res.envelope["flags"]["altitude"].any(), "고도 플래그 미발생 — 개선됐다면 갱신"
-    assert -60.0 < res.envelope["min_alt"] < 0.0
+    # **고도 플래그가 이제 안 뜬다 — 그 단정이 예고한 갱신이 왔다.**
+    #
+    # 종전에는 descent가 강하율을 세우지 않은 채(−25 m/s) mission으로 넘어가 해수면
+    # 아래 약 40 m까지 내려갔고, 그것을 감추지 않고 현상으로 고정해 뒀었다(01 §7 [백로그]).
+    # 두 변경이 함께 그것을 없앴다: ① 프로펠러 추력 모델로 여유추력이 줄어 강하 구간의
+    # 잉여 속도가 작아졌고(plant/prop.py), ② PID 안티와인드업이 조건부 적분이 되어
+    # 고도 루프의 오버슈트가 줄었다(blocks/controllers.py). 실측 min_alt −40 m → +15.9 m.
+    #
+    # **플레어가 들어온 것은 아니다** — 백로그 항목 자체는 남아 있고, 사라진 것은
+    # 이 미션에서 해수면을 뚫던 증상이다. 그래서 "> 0"으로만 못박는다: 여유를 숫자로
+    # 고정하면 다음 개선에서 또 갱신 대상이 된다.
+    assert not res.envelope["flags"]["altitude"].any(), "해수면 아래로 다시 내려갔다"
+    assert res.envelope["min_alt"] > 0.0
     # 연료 소모 반영
     assert res.signals["fuel"][-1] < 300.0
     assert res.params_fingerprint == "mission-demo"

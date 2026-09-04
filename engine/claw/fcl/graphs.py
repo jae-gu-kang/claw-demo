@@ -126,7 +126,11 @@ def scas_axis_nodes(
         )
         rate_ref = nm("wo")
 
-    # 적분기 클램프가 곧 축 출력 한계 — 안티와인드업은 PID 내부 클램프(scas.py:11)
+    # PID의 out_lo/hi와 축 Saturation이 **같은 수치**다. 레이트 경로가 있는 축에서는
+    # 같은 사건이 아니다 — 감쇠항이 PID 밖에서 더해져 다시 clip되므로 축 출력이 한계에
+    # 붙은 것과 PID 출력이 한계에 붙은 것이 갈린다. k_rate가 없는 축(속도·헤딩·승강률)에서는
+    # 축 Saturation이 PID 출력에 직접 걸려 둘이 같은 사건이다. 안티와인드업은 PID 안의 조건부 적분이고(controllers.py)
+    # 그 판정은 PID 출력을 본다 — 진단 규칙 3이 기대는 구분이 이것이다
     nodes.append(
         Node(
             nm("pid"),

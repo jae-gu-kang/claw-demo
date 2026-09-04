@@ -337,7 +337,7 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
     """설계 엔벨로프의 제어 가능 영역 — 격자 트림 잡 (마진 맵과 같은 202 골격).
 
     점별 판정은 엔진 envelope_verdict(envelope_ok 정본 + 사유 귀속) —
-    saturated_throttle_high가 추진 한계의 대리 지표 (전용 추력 모델 [TBD]).
+    saturated_throttle_high는 대리 지표가 아니라 추진 한계 자체다 (plant/prop.py PropEngine).
     취소는 trim_batch 협조적 중단 — 완료분 보존.
     """
     ac = make_demo_aircraft()
