@@ -108,13 +108,15 @@ def test_trace_exercises_the_hard_paths(trace):
     hits = {"free": 0, "blocked": 0}
     orig = controllers.PID.step
 
-    def counting_step(self, e, kp=None, ki=None, kd=None):
+    def counting_step(self, e, u_ext=0.0, kp=None, ki=None, kd=None):
         # 조건식을 **복사하지 않는다** — 복사하면 구현이 바뀔 때 가드가 옛 공식으로
         # 세면서 "양쪽 다 밟았다"고 계속 통과한다. 대신 클램프-온리였다면 나왔을
-        # 상태와 비교한다: 갈라졌으면 곧 조건부 적분이 일한 스텝이다
+        # 상태와 비교한다: 갈라졌으면 곧 조건부 적분이 일한 스텝이다.
+        # u_ext(축 외부항)는 그대로 넘긴다 — 판정이 축 출력 기준이라 이걸 빠뜨리면
+        # 가드가 세는 대상이 실제 구현과 달라진다
         ki_ = self.ki if ki is None else ki
         before = self._i
-        y = orig(self, e, kp, ki, kd)
+        y = orig(self, e, u_ext, kp, ki, kd)
         clamp_only = min(max(before + self.dt * ki_ * e, self.out_lo), self.out_hi)
         hits["blocked" if self._i != clamp_only else "free"] += 1
         return y
@@ -335,9 +337,10 @@ def test_분할해도_지문은_그대로다():
     for name in ("fcl.h", "fcl_types.h", "fcl_data.c", *(f"fcl_{g}.h" for g in GROUPS)):
         line = next(ln for ln in _gen(name).splitlines() if "지문" in ln)
         fps.add(line.split(":")[1].strip())
-    # 지문은 기체를 단발로 맞추면서 갱신됐다 — 차동추력 계수를 0으로 내린 설계 변경이
-    # 믹서 파라미터를 바꿨다. **프로펠러 추력 모델(단계 C)은 이 지문을 안 움직인다**:
-    # 순수 플랜트 변경이라 법칙 그래프에 닿지 않는다. 그것이 이 변경이 탑재 코드에
-    # 아무 영향이 없다는 근거다.
-    # (직전 갱신은 동압 스케줄 상한 4.0 → 2.0 — 저속 피치 리밋사이클 수정이었다.)
-    assert fps == {"a1a24ddcaf2e9fe3"}, f"형상 지문이 움직였다: {fps}"
+    # 지문이 움직이는 것이 곧 설계 변경이다. 이번 갱신은 **안티와인드업 판정을 축
+    # 출력 기준으로 바꾼 구조 변경**이다 — 감쇠항이 PID의 둘째 입력이 되어 그래프
+    # 위상이 달라졌다(graphs.py scas_axis_nodes). 출력식은 그대로라 제어법칙 자체는
+    # 안 바뀌지만, 적분 궤적이 달라지므로 지문은 정직하게 움직여야 한다.
+    # (앞선 갱신은 차동추력 계수 0 — 단발 전환. 프로펠러 추력 모델은 순수 플랜트
+    # 변경이라 지문을 안 움직였다.)
+    assert fps == {"8e68f79356f5ef8b"}, f"형상 지문이 움직였다: {fps}"

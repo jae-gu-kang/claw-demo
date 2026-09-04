@@ -126,16 +126,31 @@ def scas_axis_nodes(
         )
         rate_ref = nm("wo")
 
-    # PID의 out_lo/hi와 축 Saturation이 **같은 수치**다. 레이트 경로가 있는 축에서는
-    # 같은 사건이 아니다 — 감쇠항이 PID 밖에서 더해져 다시 clip되므로 축 출력이 한계에
-    # 붙은 것과 PID 출력이 한계에 붙은 것이 갈린다. k_rate가 없는 축(속도·헤딩·승강률)에서는
-    # 축 Saturation이 PID 출력에 직접 걸려 둘이 같은 사건이다. 안티와인드업은 PID 안의 조건부 적분이고(controllers.py)
-    # 그 판정은 PID 출력을 본다 — 진단 규칙 3이 기대는 구분이 이것이다
+    # 감쇠항을 **PID보다 먼저** 만든다 — PID가 안티와인드업 판정에 쓸 수 있어야 한다.
+    damp = None
+    if has_rate:
+        damp = damp_src
+        if damp is None:
+            damp = nm("damp")
+            if "k_rate" in ports:
+                nodes.append(Node(damp, Product, inputs=(ports["k_rate"], rate_ref), **common))
+            else:
+                nodes.append(Node(damp, Gain, inputs=(rate_ref,), params={"k": k_rate}, **common))
+
+    # PID의 out_lo/hi와 축 Saturation은 **같은 수치**이고, 이제 __같은 사건__이다.
+    #
+    # 종전에는 갈렸다: 감쇠항이 PID 뒤에서 더해져 다시 clip되므로 축이 한계에 붙어도
+    # PID는 안쪽일 수 있었고, 조건부 적분이 PID 출력만 봐서 그 구간을 통째로 놓쳤다.
+    # 데모 미션 실측으로 **전 스텝의 50.2%**가 그 상태였다 — 안티와인드업을 넣고도
+    # 절반은 종전대로 와인드업했다. 그래서 감쇠항을 PID의 둘째 입력으로 넣는다.
+    # 그 입력은 **판정에만** 쓰인다(controllers.py: y는 그대로 clip(raw)) — 출력이
+    # 바뀌면 제어법칙이 바뀌고 기록된 폐루프 수치가 전부 이동하기 때문이다.
+    # k_rate가 없는 축(속도·헤딩·승강률)은 외부항이 없어 종전과 완전히 같다.
     nodes.append(
         Node(
             nm("pid"),
             PID,
-            inputs=(err_src,),
+            inputs=(err_src,) if damp is None else (err_src, damp),
             params={"kp": kp, "ki": ki, "kd": 0.0, "out_lo": out_lo, "out_hi": out_hi},
             gains={g: ports[g] for g in ("kp", "ki") if g in ports},
             on_disable=pid_on_disable,
@@ -145,13 +160,6 @@ def scas_axis_nodes(
     last = nm("pid")
 
     if has_rate:
-        damp = damp_src
-        if damp is None:
-            damp = nm("damp")
-            if "k_rate" in ports:
-                nodes.append(Node(damp, Product, inputs=(ports["k_rate"], rate_ref), **common))
-            else:
-                nodes.append(Node(damp, Gain, inputs=(rate_ref,), params={"k": k_rate}, **common))
         # rate 항은 PID 클램프 밖에서 더해지므로 축 출력을 한 번 더 제한한다 (scas.py:11)
         nodes.append(
             Node(nm("sum"), Sum, inputs=(nm("pid"), damp),

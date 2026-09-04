@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : scas_yaw
- * 지문    : 19a1c5a4102ee3c3
+ * 지문    : 2ae2d9d4dbd690e7
  * 엔진    : claw 0.2.0
  * 자료형 (MATLAB _types.h 대응)
  */
@@ -16,11 +16,11 @@
 typedef struct {
     double wo_p;            /* exp(-dt/tau), tau=2.0 s — SCAS_YAW_DT로 구움 */
     double wo_one_minus_p;  /* 1 − p */
+    double damp_k;          /* 게인 */
     double pid_kp;          /* 비례 게인 */
     double pid_ki;          /* 적분 게인 */
     double pid_out_lo;      /* 출력·적분기 클램프 하한 (안티와인드업) */
     double pid_out_hi;      /* 출력·적분기 클램프 상한 (안티와인드업) */
-    double damp_k;          /* 게인 */
     double sat_lo;          /* 하한 */
     double sat_hi;          /* 상한 */
 } scas_yaw_params_t;

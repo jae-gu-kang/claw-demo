@@ -1,7 +1,7 @@
 """제어기 블록 — PID (게인 스케줄 가능, 조건부 적분 안티와인드업), StateSpace, TransferFunction (구현 문서 §2.2).
 
 병렬형 y = kp·e + I + kd·(e - e_prev)/dt. 적분은 forward Euler(출력 계산 후 갱신)
-이되 **무조건이 아니다**: 출력이 이미 포화한 방향으로 더 미는 증분은 버리고,
+이되 **무조건이 아니다**: 축 출력이 이미 포화한 방향으로 더 미는 증분은 버리고,
 빠져나오는 방향은 그대로 받는다(조건부 적분). 포화하지 않는 동안에는 Integrator
 기본과 같아 상수 오차 e에서 y_k = kp·e + ki·e·k·dt 의 정확 수열이다.
 증분을 버린 뒤에도 상태는 축 클램프 안으로 한 번 더 가둔다 — 범위 밖 웜스타트를
@@ -46,7 +46,7 @@ class PID(Block):
         self._i = 0.0 if state is None else float(state)
         self._e_prev = 0.0
 
-    def step(self, e, kp=None, ki=None, kd=None):
+    def step(self, e, u_ext=0.0, kp=None, ki=None, kd=None):
         kp = self.kp if kp is None else kp
         ki = self.ki if ki is None else ki
         kd = self.kd if kd is None else kd
@@ -68,7 +68,16 @@ class PID(Block):
         # 오차로만 방전되는데 클램프가 없어 종전보다 오래 걸린다.
         # 아래 형태는 _i가 범위 안이면 clip(i + 0.0) == i라 동작이 같고, 범위 밖일
         # 때만 불변식("_i는 항상 축 클램프 안")을 되돌린다.
-        if (raw > self.out_hi and inc > 0.0) or (raw < self.out_lo and inc < 0.0):
+        #
+        # 판정 기준은 PID 출력이 아니라 **축 출력**이다 (u_ext = PID 밖에서 더해지는
+        # 항, 없으면 0). 레이트 경로가 있는 축은 감쇠항이 PID 뒤에서 더해진 뒤 다시
+        # clip되므로, PID만 보면 "축은 한계에 붙어 있는데 PID는 안쪽"이라 계속 적분한다.
+        # 데모 미션 실측: 피치축이 **전 스텝의 50.2%**에서 그 상태였다(축 포화 65%,
+        # 그중 PID 안쪽 9039/17998). 조건부 적분을 넣고도 절반은 종전대로 와인드업하고
+        # 있었다는 뜻이다. u_ext를 받는 것은 출력을 바꾸기 위해서가 아니라 **포화를
+        # 제대로 보기 위해서**다 — y는 그대로 clip(raw)이라 제어법칙은 안 바뀐다.
+        axis = raw + u_ext
+        if (axis > self.out_hi and inc > 0.0) or (axis < self.out_lo and inc < 0.0):
             inc = 0.0
         self._i = min(max(self._i + inc, self.out_lo), self.out_hi)
         self._e_prev = e

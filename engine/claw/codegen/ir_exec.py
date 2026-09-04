@@ -110,8 +110,12 @@ class GraphRunner:
             inst = self.instances[node.id]
             args = [env[r] for r in node.inputs]
             gains = {port: env[ref] for port, ref in node.gains.items()}
-            if CALL_STYLE.get(type(inst)) == "positional":
+            style = CALL_STYLE.get(type(inst))
+            if style == "positional":
                 env[node.id] = inst.step(*args)  # CommandFilter.step(cmd, current)
+            elif style == "positional+gains":
+                # PID.step(e, u_ext, kp=, ki=) — 입력이 하나면 u_ext는 기본 0
+                env[node.id] = inst.step(*args, **gains)
             else:
                 u = tuple(args) if type(inst) in SEQ_INPUT else args[0]
                 env[node.id] = inst.step(u, **gains)

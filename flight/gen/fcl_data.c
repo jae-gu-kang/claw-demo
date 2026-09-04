@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : a1a24ddcaf2e9fe3
+ * 지문    : 8e68f79356f5ef8b
  * 엔진    : claw 0.2.0
  * 파라미터 데이터 (MATLAB _data.c 대응)
  */
@@ -55,11 +55,11 @@ const fcl_params_t fcl_params = {
     .scas_roll_sat_hi         = 0.35,                  /* 상한 */
     .scas_yaw_wo_p            = 0.9950124791926823,    /* exp(-dt/tau), tau=2.0 s — FCL_DT로 구움 */
     .scas_yaw_wo_one_minus_p  = 0.00498752080731768,   /* 1 − p */
+    .scas_yaw_damp_k          = 0.8,                   /* 게인 */
     .scas_yaw_pid_kp          = 0.5,                   /* 비례 게인 */
     .scas_yaw_pid_ki          = 0.0,                   /* 적분 게인 */
     .scas_yaw_pid_out_lo      = -0.35,                 /* 출력·적분기 클램프 하한 (안티와인드업) */
     .scas_yaw_pid_out_hi      = 0.35,                  /* 출력·적분기 클램프 상한 (안티와인드업) */
-    .scas_yaw_damp_k          = 0.8,                   /* 게인 */
     .scas_yaw_sat_lo          = -0.35,                 /* 하한 */
     .scas_yaw_sat_hi          = 0.35,                  /* 상한 */
     .mix_elevon_l_lo          = -0.35,                 /* 하한 */

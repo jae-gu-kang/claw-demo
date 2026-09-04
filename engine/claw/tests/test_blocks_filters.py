@@ -267,3 +267,31 @@ def test_pid_integrates_while_saturated_low_when_the_increment_releases():
     pid.reset()
     assert pid.step(0.5) == pytest.approx(-0.3)  # 출력은 하한에 붙는다
     assert pid._i == pytest.approx(0.05), "포화 중 해제 방향 증분을 버렸다 — 축이 래치된다"
+
+
+def test_pid_anti_windup_judges_the_axis_output_not_its_own():
+    """레이트 경로가 있는 축은 감쇠항이 PID **뒤에서** 더해진 뒤 다시 clip된다.
+
+    그래서 PID 출력만 보면 "축은 한계에 붙어 있는데 PID는 안쪽"이라 계속 적분한다 —
+    조건부 적분을 넣고도 데모 미션의 **전 스텝 50.2%**가 그 상태였고, 축이 포화한
+    동안 적분기가 그 방향으로 더 쌓인 스텝이 22.3%였다(실측). u_ext를 받아 판정을
+    축 출력 기준으로 바꾼 뒤 그 수치가 0이 됐다.
+
+    u_ext는 **판정에만** 들어간다 — y는 그대로 clip(raw)라 제어법칙은 안 바뀐다.
+    그 두 성질을 한 자리에서 못박는다: 출력 불변 + 포화 시 적분 정지.
+    """
+    kw = dict(kp=1.0, ki=1.0, out_lo=-0.35, out_hi=0.35)
+    e, u_ext = 0.2, 0.3   # raw = 0.2(PID는 안쪽) + 감쇠 0.3 → 축은 0.5로 상한 초과
+
+    plain = PID(**kw).init(0.1); plain.reset()
+    with_ext = PID(**kw).init(0.1); with_ext.reset()
+    y0, y1 = plain.step(e), with_ext.step(e, u_ext)
+
+    assert y0 == y1 == pytest.approx(0.2), "u_ext가 출력에 새어 들어갔다 — 제어법칙이 바뀐다"
+    assert plain._i == pytest.approx(0.02), "축을 모르면 종전대로 쌓인다 (이 테스트의 대조군)"
+    assert with_ext._i == pytest.approx(0.0), "축이 포화인데 적분이 멈추지 않았다"
+
+    # 빠져나오는 방향은 그대로 받는다 — 축 기준으로도 방향 판정이 살아 있어야 한다
+    out = PID(**kw).init(0.1); out.reset()
+    out.step(-0.2, u_ext)   # 축 = 0.1로 안쪽 → 정상 적분
+    assert out._i == pytest.approx(-0.02)

@@ -131,13 +131,12 @@ def test_기본_테이블은_예전과_같다():
         assert tab.axis_names == ("mach",)
         # 설계점 M0.6에서는 어느 자리든 설계 상수 그대로
         assert float(tab.interp(mach=0.6)) == pytest.approx(design[name])
-    # 지문은 기체를 단발로 맞추면서 갱신됐다 — 차동추력 계수를 0으로 내린 설계 변경이
-    # 믹서 파라미터를 바꿨다(fcl/demo.py DEMO_K_DIFF_THR).
-    # **프로펠러 추력 모델(단계 C)은 이 지문을 안 움직인다** — 순수 플랜트 변경이라
-    # 법칙 그래프에 닿지 않는다. 한때 tau_spd를 2→6으로 올려 움직였다가 실측으로
-    # 되돌렸다(fcl/autopilot.py 주석 참조).
     # 지문이 움직이는 것이 곧 설계 변경이고, 안 움직였다면 그게 이상한 것이다.
-    assert _module().fingerprint == "a1a24ddcaf2e9fe3"
+    # 이번 갱신은 안티와인드업 판정을 축 출력 기준으로 바꾼 구조 변경 —
+    # 감쇠항이 PID의 둘째 입력이 되었다(graphs.py scas_axis_nodes).
+    # 앞선 갱신은 단발 전환(DEMO_K_DIFF_THR = 0)이었고, 프로펠러 추력 모델은
+    # 순수 플랜트 변경이라 지문을 안 움직였다.
+    assert _module().fingerprint == "8e68f79356f5ef8b"
 
 
 def test_없는_자리를_요구하면_거부한다():

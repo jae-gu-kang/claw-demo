@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : a1a24ddcaf2e9fe3
+ * 지문    : 8e68f79356f5ef8b
  * 엔진    : claw 0.2.0
  * ap — 기능축 분할, 26개 블록
  */
@@ -83,7 +83,8 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
     const double ap_alt_pid_y = claw_clip(ap_alt_pid_raw, prm->ap_alt_pid_out_lo,
                                           prm->ap_alt_pid_out_hi);
     double ap_alt_pid_inc = FCL_DT * prm->ap_alt_pid_ki * ap_alt_err_y;
-    if ((ap_alt_pid_raw > prm->ap_alt_pid_out_hi && ap_alt_pid_inc > 0.0) || (ap_alt_pid_raw < prm->ap_alt_pid_out_lo && ap_alt_pid_inc < 0.0)) {
+    const double ap_alt_pid_axis = ap_alt_pid_raw + ap_alt_damp_y;
+    if ((ap_alt_pid_axis > prm->ap_alt_pid_out_hi && ap_alt_pid_inc > 0.0) || (ap_alt_pid_axis < prm->ap_alt_pid_out_lo && ap_alt_pid_inc < 0.0)) {
         ap_alt_pid_inc = 0.0;
     }
     sta->ap_alt_pid_i = claw_clip(sta->ap_alt_pid_i + ap_alt_pid_inc, prm->ap_alt_pid_out_lo,

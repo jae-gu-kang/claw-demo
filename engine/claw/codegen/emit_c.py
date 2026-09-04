@@ -194,8 +194,13 @@ class _Ctx:
 
 @_emitter(PID)
 def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
-    """controllers.py PID — y = clip(kp·e + I + kd·d), I ← 조건부 적분 + clip."""
+    """controllers.py PID — y = clip(kp·e + I + kd·d), I ← 조건부 적분 + clip.
+
+    입력이 둘이면 ins[1]은 축 외부항(감쇠)이고 **판정에만** 들어간다 — y에는 안 더한다.
+    """
     nid, e = node.id, ins[0]
+    # 둘째 입력이 있으면 축 외부항(감쇠) — 안티와인드업 **판정에만** 쓴다 (출력은 불변)
+    u_ext = ins[1] if len(ins) > 1 else None
     kp = gains.get("kp") or ctx.param(nid, "kp", inst.kp, "비례 게인")
     ki = gains.get("ki") or ctx.param(nid, "ki", inst.ki, "적분 게인")
     lo = ctx.param(nid, "out_lo", inst.out_lo, "출력·적분기 클램프 하한 (안티와인드업)")
@@ -220,7 +225,10 @@ def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
     # 조건부 적분 — 포화한 방향으로 더 미는 증분만 버린다. 클램프는 **무조건**이다
     # (범위 밖 웜스타트를 가두는 불변식 — controllers.py PID.step 주석 참조)
     ctx.line(f"double {nid}_inc = {dt_macro} * {ki} * {e};")
-    ctx.line(f"if (({raw} > {hi} && {nid}_inc > 0.0) || ({raw} < {lo} && {nid}_inc < 0.0)) {{")
+    # 판정 기준은 PID 출력이 아니라 축 출력이다 — 감쇠항이 PID 뒤에서 더해져 다시
+    # clip되는 축에서 PID만 보면 포화를 절반쯤 놓친다 (controllers.py 실측 주석)
+    axis = raw if u_ext is None else ctx.declare(f"{nid}_axis", f"{raw} + {u_ext}")
+    ctx.line(f"if (({axis} > {hi} && {nid}_inc > 0.0) || ({axis} < {lo} && {nid}_inc < 0.0)) {{")
     ctx.line(f"    {nid}_inc = 0.0;")
     ctx.line("}")
     ctx.line(f"{i_st} = {clip}({i_st} + {nid}_inc, {lo}, {hi});")

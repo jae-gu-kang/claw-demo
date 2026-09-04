@@ -8,11 +8,14 @@
 """
 
 from claw.blocks.basic import Divide, Product, Sum, Switch
+from claw.blocks.controllers import PID
 from claw.blocks.filters import CommandFilter
 
 # step(u) 계약을 따르지 않는 블록. CommandFilter는 step(cmd, current)이라
 # 입력 두 개를 시퀀스가 아니라 위치 인자로 받는다 (autopilot.py:60)
-CALL_STYLE = {CommandFilter: "positional"}
+# PID는 위치 인자(오차, 축 외부항)와 게인 키워드를 **함께** 받는다 — 외부항은
+# 출력이 아니라 안티와인드업 판정에만 쓰인다 (controllers.py PID.step)
+CALL_STYLE = {CommandFilter: "positional", PID: "positional+gains"}
 
 # 가변 입력 블록 — 입력이 하나여도 **시퀀스**로 받는다 (basic.py:22).
 # 입력 개수로 판별하면 단일 입력 Sum(부호 반전 −β 등)에서 조용히 깨진다.
