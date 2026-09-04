@@ -386,7 +386,7 @@ export function render() {
           limitsBox,
           drawerSection("V-n 선도 (교과서형)", null, vnBox),
           drawerSection("운용 엔벨로프 — 입력 한계 박스", null, opsBox),
-          goTo("#duty", "타면 사용 탭",
+          goTo("#sim", "시뮬레이션 탭 → 「타면 사용」 서랍",
             "— 조종권(타면 위치·rate) 한계 쪽 층입니다. 다만 이 도구는 아직 "
             + "δ_max(M, q̄)처럼 비행조건별로 갈리는 조종권 한계를 관리하지 않습니다 — "
             + "타면 한계는 조건과 무관한 상수입니다."),

@@ -1,28 +1,33 @@
-/** 타면 사용 뷰 — 조종면이 어느 타각 범위에 얼마나 오래 머물렀나.
-
-시계열(시뮬 탭)은 "언제 무슨 일이 있었나"를 말한다. 여기는 같은 런을 **체류
-시간의 언어**로 다시 읽는다 — 작동기 사이징·힌지모멘트 듀티·리밋사이클 판정이
-쓰는 언어다. 특히 "작동기 rate ≥ 10 rad/s" 요구 사양(01 v0.13)이 이 런에서
-지켜졌는지가 타각–타율 밀도의 능력 상자로 바로 읽힌다.
-
-수치는 전부 엔진(claw/analysis/duty.py)이 **저장된 전 해상도**에서 낸다. 재생과
-달리 stride 다운샘플을 쓰지 않는 이유는 최대 타율과 짧은 포화 구간이 통째로
-사라지기 때문 — 서버가 집계를 끝내고 요약만 보낸다.
-
-세 그림이 서로 다른 질문에 답한다:
-  히스토그램 — 어느 타각에 얼마나 있었나 (빈 칸 = 쓰지 않은 조종권)
-  누적 초과   — |δ| ≥ x인 시간이 얼마 (P95 같은 사양 수치가 여기서 나온다)
-  밀도+상자   — 타각·타율 조합이 작동기 능력 안에 있었나
-
-## 배치
-
-다른 탭과 같은 규약(views/stage.js): **요약 표가 전면**, 타면별 그림은 서랍이다.
-요약 표가 전 타면을 한 줄씩 세워 "어디가 문제인가"를 먼저 답하고, 그 타면의 세 그림이
-"왜 그런가"를 답한다. 종전에는 채널마다 카드가 세로로 쌓여 있어 타면이 넷이면
-화면 네 장을 스크롤해야 요약 다음 줄이 나왔다.
-
-심각도 색은 클래스가 아니라 값으로 지정한다 — 이 색은 판정이지 테마가 아니다.
-*/
+/** 타면 사용 — 조종면이 어느 타각 범위에 얼마나 오래 머물렀나.
+ *
+ * 시계열(시뮬 재생)은 "언제 무슨 일이 있었나"를 말한다. 여기는 **같은 런**을 체류
+ * 시간의 언어로 다시 읽는다 — 작동기 사이징·힌지모멘트 듀티·리밋사이클 판정이
+ * 쓰는 언어다. 특히 "작동기 rate ≥ 10 rad/s" 요구 사양(01 v0.13)이 이 런에서
+ * 지켜졌는지가 타각–타율 밀도의 능력 상자로 바로 읽힌다.
+ *
+ * 수치는 전부 엔진(claw/analysis/duty.py)이 **저장된 전 해상도**에서 낸다. 재생과
+ * 달리 stride 다운샘플을 쓰지 않는 이유는 최대 타율과 짧은 포화 구간이 통째로
+ * 사라지기 때문 — 서버가 집계를 끝내고 요약만 보낸다.
+ *
+ * 세 그림이 서로 다른 질문에 답한다:
+ *   히스토그램 — 어느 타각에 얼마나 있었나 (빈 칸 = 쓰지 않은 조종권)
+ *   누적 초과   — |δ| ≥ x인 시간이 얼마 (P95 같은 사양 수치가 여기서 나온다)
+ *   밀도+상자   — 타각·타율 조합이 작동기 능력 안에 있었나
+ *
+ * ## 탭이 아니라 시뮬레이션 탭의 서랍이다 (v0.54)
+ *
+ * 종전에는 최상위 탭이었는데 **층위가 맞지 않았다**(사용자 지적). 나머지 탭은 전부
+ * 설계 단계 하나씩이고(엔벨로프 → 트림 → 게인 → 마진 → 자동 설계 → 시뮬), 이것은
+ * 단계가 아니라 **시뮬 런 하나를 다시 읽는 한 가지 방법**이다 — 재생·엔벨로프 감시와
+ * 같은 층이다. 최상위에 두면 사용자는 시뮬을 돌린 뒤 탭을 옮겨 같은 결과를 다시
+ * 고르게 되고, 그 선택이 방금 돌린 런과 어긋날 수 있다.
+ *
+ * 그래서 이 파일은 라우트 뷰가 아니라 **컴포넌트**를 내보낸다(`createDutyPanel`).
+ * 서랍 안이라 층을 한 겹 더 파지 않는다 — 요약 표가 위, 타면 선택 버튼이 아래,
+ * 고른 타면의 세 그림이 그 밑. 요약이 "어디가 문제인가"를, 그림이 "왜 그런가"를 답한다.
+ *
+ * 심각도 색은 클래스가 아니라 값으로 지정한다 — 이 색은 판정이지 테마가 아니다.
+ */
 
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
@@ -32,7 +37,6 @@ import {
 } from "../lib/duty.js";
 import { store } from "../store.js";
 import { densityCanvas, histogramCanvas, lineChartCanvas } from "./plots.js";
-import { createDrawers, tabStage, tabTop } from "./stage.js";
 
 const BINS = 32;
 const RATE_BINS = 24;
@@ -41,67 +45,56 @@ const CHART_H = 196;
 // 심각도 색은 클래스가 아니라 값으로 — app.css 비접촉 (ok/경고/판정불가 3단 + 주의)
 const SEV_COLOR = { ok: "#34c759", warn: "#ff9500", bad: "#ff3b30", na: "#8e8e93" };
 
-// 탭을 떠났다 와도 고른 결과·모드를 잃지 않는다 (sim.js lastReplay와 동렬)
+// 탭을 떠났다 와도 고른 결과·구간·타면을 잃지 않는다 (sim.js lastReplay와 동렬)
 let lastReport = null;
 let selectedId = null;
 let selectedMode = "";
-let openDrawer = null; // 탭 재진입에도 열어 둔 서랍 유지 (모듈 스코프 규약)
+let selectedChannel = null; // 타면 라벨 — 결과가 바뀌어도 같은 이름이면 그대로 따라간다
+let stale = true;           // 새 런이 끝나면 서면 — 다음에 열 때 다시 집계한다
 
-export function render() {
+/** 시뮬 런이 새로 끝났다 — 다음에 서랍을 열 때 다시 집계한다.
+ *  즉시 부르지 않는 이유: 서랍이 닫혀 있으면 아무도 안 보는 집계에 서버를 쓴다. */
+export function invalidate() {
+  stale = true;
+}
+
+/** 타면 사용 패널 — 시뮬레이션 탭의 서랍 하나가 그대로 이것이다.
+ *
+ *  `ensure()`는 **열릴 때** 불린다(지연 로드). 탭에 들어올 때마다 집계하면 이 서랍을
+ *  한 번도 안 여는 사람에게 매번 서버 왕복이 생긴다 — 20000 표본 집계는 공짜가 아니다. */
+export function createDutyPanel() {
   const errBox = el("div");
-  const statusBox = el("p", { class: "tab-status" });
-  const summaryBox = el("div", { class: "tab-sheet" }); // 전면 — 전 타면 한 줄씩
-  const noteBox = el("div");   // 서랍 — 읽는 법
-  const chanBoxes = new Map(); // 타면 id → 서랍 내용 (그린 것을 재사용)
+  const statusBox = el("span", { class: "hint" });
+  const summaryBox = el("div");
+  const chanBar = el("div", { class: "row", style: "gap:6px; margin-top:12px" });
+  const chanBox = el("div");
   const idSel = el("select", { "aria-label": "시뮬 결과 선택" });
   const modeSel = el("select", { "aria-label": "비행 모드 선택" });
 
-  // 서랍 정의는 **결과가 도착한 뒤** 정해진다(타면 수·이름이 결과에 달렸다).
-  // defs 배열을 통째로 갈아 끼우면 열어 둔 서랍이 매번 닫히므로, 배열은 유지하고
-  // 안의 항목만 갈아 끼운다 — createDrawers는 이 배열을 참조로 들고 있다
-  const defs = [];
-  const drawers = createDrawers({
-    id: "duty-drawer",
-    defs,
-    initial: openDrawer,
-    onOpen: (k) => { openDrawer = k; },
-  });
-
-  const rebuildDefs = (report) => {
-    defs.length = 0;
-    for (const c of report?.channels ?? []) {
-      const key = `ch:${c.label}`;
-      defs.push({
-        key, label: c.label, group: "타면별 — 왜 그런가",
-        title: "체류 시간 히스토그램 · 누적 초과 · 타각–타율 밀도",
-        build: () => {
-          // 그려 둔 것을 재사용한다 — 캔버스 세 장을 서랍을 여닫을 때마다 다시
-          // 그리면 결과가 클수록 여는 순간이 눈에 띄게 늦다
-          if (!chanBoxes.has(key)) chanBoxes.set(key, el("div"));
-          const box = chanBoxes.get(key);
-          if (!box.firstChild) box.append(channelBody(c, selectedMode, report));
-          return box;
-        },
-      });
+  const drawChannel = () => {
+    clear(chanBar);
+    clear(chanBox);
+    const chans = lastReport?.channels ?? [];
+    if (!chans.length) return;
+    // 고른 타면이 이 결과에 없으면 첫 타면으로 — 빈 화면 대신 무엇이든 보여 준다
+    if (!chans.some((c) => c.label === selectedChannel)) selectedChannel = chans[0].label;
+    chanBar.append(el("span", { class: "hint" }, "타면"));
+    for (const c of chans) {
+      chanBar.append(el("button", {
+        class: c.label === selectedChannel ? "primary" : "",
+        onclick: () => { selectedChannel = c.label; drawChannel(); },
+      }, c.label));
     }
-    defs.push({
-      key: "howto", label: "읽는 법", group: "설명",
-      title: "판정 색·포화의 뜻·타율 반전의 불감대",
-      build: () => noteBox,
-    });
-    // repaint — 결과가 바뀌면 열려 있던 서랍의 **내용**도 옛 채널 것이다
-    drawers.repaint();
+    const chan = chans.find((c) => c.label === selectedChannel);
+    chanBox.append(channelBody(chan, selectedMode, lastReport));
   };
 
   const draw = () => {
     if (!lastReport) return;
     clear(modeSel).append(...modeOptions(lastReport).map((o) =>
       el("option", { value: o.value, selected: o.value === selectedMode }, o.label)));
-    chanBoxes.clear(); // 구간이 바뀌면 그림도 바뀐다 — 그려 둔 것을 버린다
     renderSummary(summaryBox, lastReport);
-    renderNotes(noteBox);
-    rebuildDefs(lastReport);
-    drawers.repaint();
+    drawChannel();
   };
 
   const load = async (id) => {
@@ -112,14 +105,16 @@ export function render() {
         `/sim/${id}/duty?bins=${BINS}&rate_bins=${RATE_BINS}`);
       selectedId = id;
       selectedMode = "";
+      stale = false;
       statusBox.textContent =
-        `${id} · ${lastReport.n}표본 · ${lastReport.t_total.toFixed(1)} s`
+        `${lastReport.n}표본 · ${lastReport.t_total.toFixed(1)} s`
         + ` · dt ${lastReport.dt}s (전 해상도)`;
       draw();
     } catch (e) {
       lastReport = null;
       clear(summaryBox);
-      rebuildDefs(null);
+      clear(chanBar);
+      clear(chanBox);
       statusBox.textContent = "";
       clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
     }
@@ -130,18 +125,19 @@ export function render() {
       clear(errBox);
       const items = (await api.get("/results")).filter((m) => m.kind === "sim");
       if (!items.length) {
-        // 조용한 빈 화면 금지 — 무엇을 해야 하는지와 갈 곳을 같이 준다
+        // 조용한 빈 화면 금지 — 무엇을 해야 하는지를 말한다
         clear(summaryBox).append(el("p", { class: "hint" },
-          "시뮬 결과가 없습니다 — ", el("a", { href: "#sim" }, "시뮬레이션 탭"),
-          "에서 한 번 실행하면 여기서 타면 사용 통계를 볼 수 있습니다."));
+          "시뮬 결과가 없습니다 — 위 [시뮬 실행]을 한 번 누르면 그 런의 타면 사용 "
+          + "통계가 여기 채워집니다."));
         return;
       }
       clear(idSel).append(...items.map((m) => el("option", { value: m.id },
         `${m.id} · ${m.n ?? "?"}표본${m.aborted ? ` · 절단 ${m.aborted}` : ""}`)));
-      const prefer = selectedId ?? store.get("simResult")?.id;
+      // 방금 돌린 런이 기본이다 — 이 서랍은 그 런을 다시 읽는 자리다
+      const prefer = store.get("simResult")?.id ?? selectedId;
       const pick = items.some((m) => m.id === prefer) ? prefer : items[0].id;
       idSel.value = pick;
-      if (lastReport && selectedId === pick) draw();
+      if (lastReport && selectedId === pick && !stale) draw();
       else await load(pick);
     } catch (e) {
       clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -151,29 +147,35 @@ export function render() {
   idSel.addEventListener("change", () => load(idSel.value));
   modeSel.addEventListener("change", () => {
     selectedMode = modeSel.value;
-    chanBoxes.clear();
     renderSummary(summaryBox, lastReport);
-    drawers.repaint();
+    drawChannel();
   });
 
-  clear(summaryBox).append(el("p", { class: "hint" }, "불러오는 중…"));
-  loadList();
-  return el("div", { class: "tab-page" },
-    tabTop({
-      title: "타면 사용",
-      lead: "같은 런을 «체류 시간의 언어»로 다시 읽는다 — 작동기 사이징·힌지모멘트 "
-        + "듀티·리밋사이클 판정이 쓰는 언어다. 요약이 어디가 문제인지를, 타면별 "
-        + "그림이 왜 그런지를 답한다.",
-      actions: [
-        el("label", { class: "field" }, "시뮬 결과", idSel),
-        el("label", { class: "field" }, "구간", modeSel),
-        el("button", { onclick: loadList }, "새로고침"),
-      ],
-      extra: [statusBox, errBox],
-    }),
-    tabStage(summaryBox),
-    drawers.root,
+  const root = el("div", {},
+    el("h2", {}, "타면 사용 — 타각 범위별 체류 시간·포화"),
+    el("p", { class: "hint", style: "margin:0 0 10px; max-width:96ch" },
+      "재생이 «언제 무슨 일이 있었나»를 말한다면 여기는 같은 런을 체류 시간의 "
+      + "언어로 다시 읽는다 — 작동기 사이징·힌지모멘트 듀티·리밋사이클 판정이 쓰는 언어다."),
+    el("div", { class: "row" },
+      el("label", { class: "field" }, "시뮬 결과", idSel),
+      el("label", { class: "field" }, "구간", modeSel),
+      el("button", { onclick: loadList }, "새로고침"),
+      statusBox),
+    errBox,
+    summaryBox,
+    chanBar,
+    chanBox,
+    noteBox(),
   );
+
+  return {
+    root,
+    /** 서랍이 열릴 때 — 아직 없거나 새 런이 끝났으면 그때 집계한다. */
+    ensure() {
+      if (!lastReport || stale) loadList();
+      else draw();
+    },
+  };
 }
 
 function sevCell(cell) {
@@ -281,10 +283,11 @@ function renderSummary(box, report) {
   ));
 }
 
-/** 서랍 — 읽는 법. 표를 보다 막히는 자리들의 뜻. */
-function renderNotes(box) {
-  clear(box).append(
-    el("h2", {}, "읽는 법"),
+/** 읽는 법 — 표를 보다 막히는 자리들의 뜻. 서랍 안이라 층을 하나 더 파지 않고
+ *  `<details>` 하나로 접는다(칩 안의 칩은 어디를 눌러야 하는지를 흐린다). */
+function noteBox() {
+  return el("details", { style: "margin-top:14px" },
+    el("summary", { class: "hint" }, "읽는 법 — 판정 색·포화의 뜻·타율 반전의 불감대"),
     el("p", { class: "hint", style: "max-width:96ch" },
       "각은 표시 전용 deg 변환 (내부·전송은 rad). 포화 '판정 불가'는 0초가 아니라 ",
       "한계값을 모르는 상태입니다 — 작동기 미장착이거나 판정 기준선이 없는 옛 결과. ",

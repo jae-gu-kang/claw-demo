@@ -5,7 +5,6 @@ import { clear } from "./dom.js";
 import * as autocode from "./views/autocode.js";
 import * as autodesign from "./views/autodesign.js";
 import * as blocks from "./views/blocks.js";
-import * as duty from "./views/duty.js";
 import * as envelope from "./views/envelope.js";
 import * as gains from "./views/gains.js";
 import * as influence from "./views/influence.js";
@@ -16,8 +15,10 @@ import * as trim from "./views/trim.js";
 import * as world from "./views/world.js";
 
 // 블록도(블록 다이어그램 허브)가 진입점 — 블록 클릭으로 각 편집 화면 진입 (02 §4)
+// 타면 사용은 탭이 아니다 — 설계 단계가 아니라 시뮬 런 하나를 다시 읽는 방법이라
+// 시뮬레이션 탭의 서랍으로 들어갔다 (v0.54, views/duty.js 머리말)
 const VIEWS = {
-  blocks, envelope, trim, gains, margins, autodesign, sim, duty, world, autocode,
+  blocks, envelope, trim, gains, margins, autodesign, sim, world, autocode,
   influence, results,
 };
 

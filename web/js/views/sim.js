@@ -16,6 +16,7 @@ import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
 import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
+import { createDutyPanel, invalidate as dutyInvalidate } from "./duty.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
 import { createProfileChart, createWpMap } from "./wpmap.js";
 
@@ -459,6 +460,7 @@ export function render() {
         renderReplay(replayBox);
         wpMap.refresh(); // 지도 궤적 오버레이 갱신
         drawProfile(); // 세로 프로파일에 실제 고도 겹치기
+        dutyInvalidate(); // 새 런이다 — 타면 서랍을 다음에 열 때 다시 집계한다
         simDrawers?.open("replay"); // 결과를 찾아 헤매게 하지 않는다
       } catch (e) {
         showErr(e);
@@ -679,6 +681,7 @@ export function render() {
   const fieldGrid = (...groups) => el("div", { class: "field-grid" }, ...groups);
 
   // ── 서랍 ─────────────────────────────────────────────────────────────────
+  const dutyPanel = createDutyPanel();
   const drawers = createDrawers({
     id: "sim-drawer",
     initial: openDrawer,
@@ -715,6 +718,14 @@ export function render() {
       { key: "guide", label: "유도·연료·게인·계보", group: "실행 조건",
         title: "도달반경·연료유량·편집값 주입·지문",
         build: () => fieldGrid(...guideGroups()) },
+      // 타면 사용은 **이 층이 맞다** — 설계 단계가 아니라 시뮬 런 하나를 다시 읽는
+      // 한 가지 방법이라 재생·엔벨로프 감시와 같은 줄이다. 최상위 탭이던 시절에는
+      // 시뮬을 돌린 뒤 탭을 옮겨 같은 결과를 다시 골라야 했고, 그 선택이 방금 돌린
+      // 런과 어긋날 수 있었다 (v0.54, 사용자 지적 "레벨이 맞는 것 같다")
+      { key: "duty", label: "타면 사용", group: "결과",
+        title: "조종면을 어느 타각에 얼마나 오래 썼나 — 포화·타율 반전·작동기 능력",
+        // 서랍이 열릴 때 집계한다 — 한 번도 안 여는 사람에게 20000표본 왕복을 물리지 않는다
+        build: () => { dutyPanel.ensure(); return dutyPanel.root; } },
       { key: "replay", label: "재생 + 엔벨로프 감시", group: "결과",
         title: "시계열·3면도·3D 궤적·모드 밴드·착륙 요약",
         count: () => (lastReplay ? 1 : null),
@@ -728,7 +739,7 @@ export function render() {
     tabTop({
       title: "시뮬레이션",
       lead: "웨이포인트를 지도(수평면)와 프로파일(세로면) 두 면에서 편집하고, "
-        + "그대로 폐루프로 날린다. 실행 조건과 결과는 아래 서랍에 있다.",
+        + "그대로 폐루프로 날린다. 실행 조건과 결과(재생·타면 사용)는 아래 서랍에 있다.",
       actions: [
         el("button", { class: "primary", onclick: run }, "시뮬 실행"),
         el("button", {
