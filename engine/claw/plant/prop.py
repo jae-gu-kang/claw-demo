@@ -162,15 +162,25 @@ class PropEngine:
     NAME = "PropEngine"
     differential_thrust = False
     PARAM_DEFS = (
-        ParamDef("power_max", 500_000.0, "W", "최대 축동력 (해면·스로틀 1)", lo=0.0),
+        ParamDef("power_max", 500_000.0, "W", "최대 축동력 (해면·스로틀 1)", lo=1e-9),
         ParamDef("eta", 0.8, "-", "프로펠러 효율 (전진비 무관 상수 [기본값])", lo=1e-9, hi=1.0),
-        ParamDef("static_thrust", 6000.0, "N", "정지추력 상한 (V→0 발산 방지)", lo=0.0),
+        ParamDef("static_thrust", 6000.0, "N", "정지추력 상한 (V→0 발산 방지)", lo=1e-9),
         ParamDef("z_offset", 0.0, "m", "추력선 CG 대비 하방 오프셋 (+면 기수 상승 모멘트)"),
     )
 
     def __init__(self, power_max=500_000.0, eta=0.8, static_thrust=6000.0, z_offset=0.0):
         if not 0.0 < eta <= 1.0:
             raise ValueError(f"eta는 (0, 1] 범위: {eta}")
+        # 0을 거부한다 — "상한 없음"으로 읽히지만 실제로는 엔진이 **모든 속도에서**
+        # 죽는다: min(0, ηP/V) = 0이라 1/V 가지까지 같이 0이 된다. 그러면
+        # crossover_speed도 0.0을 내놓아 "정지 가지가 없다"로 읽히고, 추력이
+        # 0이라는 사실은 화면 어디에도 안 뜬다. power_max = 0도 같은 이유다
+        # (V=0에서만 정지추력이 나오고 V>0에서 0으로 떨어지는 불연속).
+        if not power_max > 0.0:
+            raise ValueError(f"power_max는 양수여야 한다 (0은 전 속도 추력 0): {power_max}")
+        if not static_thrust > 0.0:
+            raise ValueError(
+                f"static_thrust는 양수여야 한다 (0은 전 속도 추력 0): {static_thrust}")
         self.power_max = float(power_max)
         self.eta = float(eta)
         self.static_thrust = float(static_thrust)
@@ -179,9 +189,7 @@ class PropEngine:
     @property
     def crossover_speed(self) -> float:
         """정지추력 상한과 1/V 구간이 만나는 속도 [m/s] — 설계 검토용 조회."""
-        if self.static_thrust <= 0.0:
-            return 0.0
-        return self.eta * self.power_max / self.static_thrust
+        return self.eta * self.power_max / self.static_thrust  # 생성자가 양수를 보증
 
     def available_thrust(self, V, rho=RHO_SL) -> float:
         """스로틀 1에서 낼 수 있는 추력 [N] — 엔벨로프 추력 한계의 정본.
@@ -189,8 +197,14 @@ class PropEngine:
         해석·표시가 "여기서 최대 얼마 나오나"를 물을 때 forces()를 두 번 부르는
         대신 이걸 부른다 (같은 식을 두 곳에 적지 않는다).
         """
+        # NaN을 삼키지 않는다: max(nan, 0)은 nan인데 nan <= 0이 False라 1/V 가지로
+        # 내려가고, min(6000, nan)이 6000을 돌려준다 — 발산한 시뮬이 "정상 추력"으로
+        # 보인다. 이 모듈은 다른 자리에서 조용한 실패를 안 만드는 쪽을 택했다
+        v = float(V)
+        if np.isnan(v):
+            return float("nan")
         sigma = float(rho) / RHO_SL
-        v = max(float(V), 0.0)
+        # V ≤ 0(정지·후진)은 1/V 가지가 뜻이 없어 정지추력 가지로 본다
         if v <= 0.0:
             return self.static_thrust * sigma
         return sigma * min(self.static_thrust, self.eta * self.power_max / v)

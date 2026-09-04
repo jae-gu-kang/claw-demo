@@ -1,8 +1,11 @@
 """제어기 블록 — PID (게인 스케줄 가능, 조건부 적분 안티와인드업), StateSpace, TransferFunction (구현 문서 §2.2).
 
-병렬형 y = kp·e + I + kd·(e - e_prev)/dt. 적분은 Integrator 기본과 동일한
-forward Euler(출력 계산 후 I ← clip(I + dt·ki·e)) — 상수 오차 e에서
-y_k = kp·e + ki·e·k·dt 의 정확 수열.
+병렬형 y = kp·e + I + kd·(e - e_prev)/dt. 적분은 forward Euler(출력 계산 후 갱신)
+이되 **무조건이 아니다**: 출력이 이미 포화한 방향으로 더 미는 증분은 버리고,
+빠져나오는 방향은 그대로 받는다(조건부 적분). 포화하지 않는 동안에는 Integrator
+기본과 같아 상수 오차 e에서 y_k = kp·e + ki·e·k·dt 의 정확 수열이다.
+증분을 버린 뒤에도 상태는 축 클램프 안으로 한 번 더 가둔다 — 범위 밖 웜스타트를
+되돌리기 위해서다 (아래 step 주석에 근거).
 
 게인 스케줄: step(e, kp=, ki=, kd=) 덮어쓰기 — M7 fcl이 게인 테이블(M3) 조회값을
 스텝마다 주입하는 방식으로 "게인 스케줄 가능 PID" 요구를 충족한다.

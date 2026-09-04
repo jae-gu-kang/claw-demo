@@ -19,7 +19,7 @@ import mission_trace
 import pytest
 from generate import DT, GEN_DIR, build, fcl_demo_runner, manifest, scas_yaw_runner
 
-from claw.fcl.demo import DEMO_YAW
+from claw.fcl.demo import DEMO_YAW, make_demo_fcl
 from claw.fcl.scas import ScasAxis
 
 CC = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
@@ -204,6 +204,64 @@ def test_generated_yaw_axis_matches_ir(tmp_path):
     got = [float(x) for x in run.stdout.split()]
     assert _first_diff(ref, got, "u") is None
     assert _first_diff(ir, got, "u") is None
+
+
+# ── 믹서: 차동추력 배분 ───────────────────────────────────────────────────
+#
+# 이 기체는 단발이라 mix_diff_k = 0이고, 그러면 배분식이 항상 ±0.0이라 좌우 스로틀이
+# 같은 값으로 무너진다. 미션 대조는 그 형상만 밟으므로 **배분 경로를 전혀 못 본다** —
+# 부호를 뒤집거나 좌우 출력을 맞바꿔도 비트 일치가 통과한다(리뷰에서 변이 주입으로
+# 확인). 구조를 일부러 남겨 두었고 쌍발을 다시 켤 수 있게 해 둔 이상, 그때 탑재 C가
+# 반대쪽 엔진을 올려도 "비트 일치"로 보고되면 안 된다.
+#
+# 믹서는 무상태라 미션 재생이 필요 없다 — 계수를 켜고 입력 격자만 쓸어도 충분하다.
+
+MIX_K = 0.4  # 0이 아니기만 하면 된다 — 배분식이 실제로 값을 내는지가 요점
+
+
+def _mixer_reference():
+    """(oracle, IR, C 입력줄) — 데모 믹서에서 계수만 켠 형상."""
+    from claw.fcl.mixer import Mixer
+
+    cfg = dict(make_demo_fcl().mixer.cfg, k_diff_thr=MIX_K)
+    oracle = Mixer(**cfg)
+    ref, lines = [], [repr(MIX_K)]
+    # 클립 안·상한·하한을 모두 밟는 격자. dr은 반드시 양·음 둘 다 — 배분이 좌우
+    # 어느 쪽으로 가는지는 부호로만 드러난다
+    for thr in (0.0, 0.3, 0.7, 1.0):
+        for de in (-0.4, -0.1, 0.2):
+            for da in (-0.3, 0.05, 0.3):
+                for dr in (-0.35, -0.1, 0.0, 0.15, 0.4):
+                    o = oracle.step(de, da, dr, thr)
+                    ref.append((o.elevon[0], o.elevon[2], o.rudder,
+                                o.throttle[0], o.throttle[1]))
+                    lines.append(f"{thr!r} {de!r} {da!r} {dr!r}")
+    return ref, "\n".join(lines) + "\n"
+
+
+def test_mixer_reference_actually_splits_throttle():
+    """대조 전에 격자가 배분을 실제로 켰는지부터 — 안 켜졌으면 대조가 무의미하다."""
+    ref, _ = _mixer_reference()
+    assert any(tl != tr for *_, tl, tr in ref), "좌우 스로틀이 갈린 적이 없다"
+    # 좌우 어느 쪽이 올라가는지가 dr 부호를 따라 **뒤집혀야** 한다 — 한 방향만
+    # 밟으면 좌우를 맞바꾼 구현이 그대로 통과한다
+    assert any(tl > tr for *_, tl, tr in ref) and any(tl < tr for *_, tl, tr in ref), (
+        "배분이 한 방향으로만 났다 — 좌우 맞바꿈을 못 잡는 격자다")
+
+
+@needs_cc
+def test_generated_mixer_matches_ir_with_diff_thrust(tmp_path):
+    """차동추력을 켠 채 생성 C ↔ 설계가 비트 일치 — 단발 형상이 가리는 경로."""
+    exe = _build("fcl", "HARNESS_FCL_MIX", tmp_path)
+    ref, stdin = _mixer_reference()
+    run = subprocess.run([str(exe)], input=stdin, capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    got = [tuple(float(x) for x in line.split()) for line in run.stdout.split("\n") if line]
+    assert len(got) == len(ref), f"출력 줄 수 불일치: {len(got)} vs {len(ref)}"
+    names = ("elevon_l", "elevon_r", "rudder", "throttle_l", "throttle_r")
+    for i, name in enumerate(names):
+        diff = _first_diff([r[i] for r in ref], [g[i] for g in got], name)
+        assert diff is None, f"믹서 차동추력 경로가 어긋남 — {diff}"
 
 
 # ── 산출물 관리 ───────────────────────────────────────────────────────────

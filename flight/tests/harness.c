@@ -50,6 +50,35 @@ int main(void)
     return 0;
 }
 
+#elif defined(HARNESS_FCL_MIX)
+#include "fcl.h"      /* fcl_reset·fcl_params — 파티션 헤더는 타입만 준다 */
+#include "fcl_mix.h"
+
+/* 믹서만 떼어 돌린다 — 차동추력 배분(mix_diff_k)을 **켠 채로** 대조하기 위해서다.
+ *
+ * 이 기체는 단발이라 mix_diff_k = 0이고, 그러면 배분식이 항상 ±0.0이라 좌우 스로틀이
+ * 같은 값으로 무너진다. 그 상태에서는 배분의 부호를 뒤집거나 좌우 출력을 맞바꿔도
+ * 비트 일치가 그대로 통과한다(리뷰에서 변이 주입으로 재현). 쌍발 형상을 다시 물리는
+ * 순간 그 결함이 탑재 코드에 그대로 실린다.
+ *
+ * 계수는 컴파일 상수가 아니라 파라미터 필드라, 재생성 없이 사본에 써 넣으면 된다.
+ * 첫 줄이 mix_diff_k, 이후 각 줄이 (thr de da dr). */
+int main(void)
+{
+    fcl_params_t prm = fcl_params;   /* 사본 — 원본은 const */
+    fcl_state_t s;
+    double thr, de, da, dr;
+    double el, er, rud, tl, tr;
+
+    if (scanf("%lf", &prm.mix_diff_k) != 1) { return 1; }
+    fcl_reset(&s);
+    while (scanf("%lf %lf %lf %lf", &thr, &de, &da, &dr) == 4) {
+        fcl_mix_step(&prm, &s, thr, de, da, dr, &el, &er, &rud, &tl, &tr);
+        printf("%.17g %.17g %.17g %.17g %.17g\n", el, er, rud, tl, tr);
+    }
+    return 0;
+}
+
 #elif defined(HARNESS_SCAS_YAW)
 #include "scas_yaw.h"
 
@@ -66,5 +95,5 @@ int main(void)
 }
 
 #else
-#error "그래프 선택 매크로가 필요하다 (-DHARNESS_FCL 또는 -DHARNESS_SCAS_YAW)"
+#error "그래프 선택 매크로가 필요하다 (-DHARNESS_FCL / -DHARNESS_FCL_MIX / -DHARNESS_SCAS_YAW)"
 #endif

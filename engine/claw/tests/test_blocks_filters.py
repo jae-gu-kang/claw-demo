@@ -248,3 +248,22 @@ def test_pid_integrates_while_saturated_when_the_increment_releases():
     pid.reset()
     assert pid.step(-0.5) == pytest.approx(0.3)  # 출력은 상한에 붙는다
     assert pid._i == pytest.approx(-0.05), "포화 중 해제 방향 증분을 버렸다 — 축이 래치된다"
+
+
+def test_pid_integrates_while_saturated_low_when_the_increment_releases():
+    """위 테스트의 **하한 쪽 짝** — 이 가지도 따로 잡아야 한다.
+
+    상한만 잡아 두면 `or (raw < self.out_lo and inc < 0.0)`에서 방향 판정만 지운
+    변이(`or (raw < self.out_lo)`)가 엔진 전 스위트를 통과한다 — 리뷰에서 실제로
+    확인됐다(blocks·filters 68건, law·autopilot·mission·diagnose·landing 71건 전부 통과).
+    데모 형상에서 안 열리는 것은 kd = 0이고 sign(kp) == sign(ki)라 raw < out_lo가
+    inc < 0을 함의하기 때문인데, 그것은 상한 가지를 남긴 근거와 정확히 같은 이유로
+    근거가 못 된다. 이 가지가 죽으면 축이 **하한에** 영영 물린다.
+
+    kp = −2로 raw = −1.0(하한 −0.3 아래 = 포화)인데 ki = +1이라 증분은 +0.05
+    (포화에서 빠져나오는 방향)다.
+    """
+    pid = PID(kp=-2.0, ki=1.0, out_lo=-0.3, out_hi=0.35).init(0.1)
+    pid.reset()
+    assert pid.step(0.5) == pytest.approx(-0.3)  # 출력은 하한에 붙는다
+    assert pid._i == pytest.approx(0.05), "포화 중 해제 방향 증분을 버렸다 — 축이 래치된다"

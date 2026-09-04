@@ -327,6 +327,26 @@ def test_single_engine_rejects_differential_thrust_law_at_assembly():
 # ---- PropEngine (속도·밀도 의존 추력) ----
 
 
+def test_prop_rejects_zero_thrust_scales_and_does_not_swallow_nan():
+    """0은 "상한 없음"이 아니라 **전 속도 추력 0**이다 — 생성 시점에 거부한다.
+
+    min(0, ηP/V) = 0이라 정지 가지만이 아니라 1/V 가지까지 같이 죽는데, 화면에는
+    그 사실이 안 뜬다: crossover_speed가 0.0을 내놓아 "정지 가지가 없다"로 읽힌다.
+    스키마가 lo=0.0으로 허용하고 있었고 설명이 "정지추력 **상한**"이라 0을 넣어 보는
+    것이 자연스러운 오독이었다. eta가 이미 같은 대접을 받고 있다.
+
+    NaN도 삼키지 않는다: max(nan, 0)은 nan인데 nan <= 0이 False라 1/V 가지로
+    내려가고 min(6000, nan)이 6000을 돌려준다 — 발산한 시뮬이 정상 추력으로 보인다.
+    """
+    for kw in ({"static_thrust": 0.0}, {"power_max": 0.0}):
+        with pytest.raises(ValueError):
+            PropEngine(**kw)
+    assert math.isnan(PropEngine().available_thrust(float("nan")))
+    # 스키마도 같은 말을 해야 한다 — 폼이 0을 받아 놓고 생성에서 터지면 안 된다
+    lo = {d.name: d.lo for d in PropEngine.PARAM_DEFS}
+    assert lo["static_thrust"] > 0.0 and lo["power_max"] > 0.0
+
+
 def test_prop_thrust_falls_as_one_over_speed_above_crossover():
     """프로펠러의 본질 — 고속에서 추력이 빠진다. 상수 모델과 갈리는 지점이다."""
     eng = PropEngine(power_max=500_000.0, eta=0.8, static_thrust=6000.0)

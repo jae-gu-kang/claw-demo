@@ -228,7 +228,7 @@ def test_scan_job_round_trip(client, wait_job):
     """전 케이스 base 스캔 — 케이스마다 base 런 1개 + 국소성 판정(grid)이 온다."""
     r = client.post("/api/influence/scan", json={
         # M0.7은 프로펠러 전환으로 수평비행 불가 — 두 케이스 다 엔벨로프 안이어야
-        # base 행이 둘 나온다 (plant/prop.py, 1000 m 상단 M0.58)
+        # base 행이 둘 나온다 (plant/prop.py, 1000 m·연료 200 kg 상단 M0.595)
         "cases": [{"name": "c1", "mach": 0.4, "alt": 1000.0, "fuel": 200.0},
                   {"name": "c2", "mach": 0.5, "alt": 1000.0, "fuel": 200.0}],
         "t_settle": 2.0, "t_step": 4.0,

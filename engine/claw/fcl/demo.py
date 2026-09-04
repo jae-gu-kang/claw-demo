@@ -3,6 +3,10 @@
 "비행체 프로파일" 교체 단위(03 §7.2)의 법칙 측 절반 — plant.demo와 짝.
 SCAS·AP 게인은 설계점 M0.6 h1000 fuel200에서 선형모델 고유치 스캔 + 비선형
 폐루프 확인으로 선정한 설계값 (증분 A·B 테스트가 성능 회귀 고정).
+**주의**: 프로펠러 추력 모델 이후 그 설계점은 엔벨로프 밖이다(스로틀 95.04% >
+SAT_FRAC 0.95). 게인의 출처는 그대로 유효하지만 — 선정 당시의 플랜트가 그 조건에서
+성립했다 — 지금 그 점으로 설계 파이프라인을 돌리면 trimmable=False로 걸러진다.
+재튜닝은 별건이다 (_M_DESIGN 주석의 스케줄 정규화 논거 참조).
 
 게인 스케줄 [기본값]: 동압 역비 스케일 f = min((M_design/M)², _F_CAP) — 저속에서
 루프 강성 유지(피치·롤 PI·레이트 게인 공통). **상한은 저속 타면 포화 억제가 아니라
@@ -26,7 +30,7 @@ from claw.fcl.schedule import GainSchedule, design_gains
 from claw.plant import make_demo_stall_table
 from claw.tables import Table
 
-# 설계점 M0.6 h1000 fuel200 SCAS 게인 (증분 A 설계 스캔)
+# 설계점 M0.6 h1000 fuel200 SCAS 게인 (증분 A 설계 스캔 — 그 점은 이제 엔벨로프 밖)
 DEMO_PITCH = dict(kp=-2.0, ki=-0.5, k_rate=0.4, out_lo=-0.35, out_hi=0.35)
 DEMO_ROLL = dict(kp=1.0, ki=0.1, k_rate=-0.2, out_lo=-0.35, out_hi=0.35)
 DEMO_YAW = dict(kp=0.5, ki=0.0, k_rate=0.8, washout_tau=2.0, out_lo=-0.35, out_hi=0.35)
@@ -34,8 +38,12 @@ DEMO_YAW = dict(kp=0.5, ki=0.0, k_rate=0.8, washout_tau=2.0, out_lo=-0.35, out_h
 # 동압 스케일의 **정규화 상수** — 비행조건이 아니다.
 #
 # 프로펠러 추력 모델로 옮기면서 비행 가능 범위가 해면 M0.21~0.60(연료 200 kg — 만재
-# 400 kg면 M0.23~0.58)으로 좁아졌다. M0.6은 이제 **범위의 끝**이다 — 연료 200 kg
-# 해면에서 스로틀 94.1%로 겨우 서고, 연료를 실으면 못 나는 조건이 된다. 그렇다고
+# 400 kg면 M0.23~0.58)으로 좁아졌다. **설계점 M0.6 h1000 fuel200은 이제 엔벨로프
+# 밖이다**: 스로틀 95.04%로 SAT_FRAC(0.95, trim.py)을 0.04%p 넘겨 envelope_ok가
+# False이고, 그래서 design/grid.py가 이 점을 trimmable=False로 걸러 튜닝에서 뺀다.
+# (해면이면 94.06%로 아슬하게 안이지만 설계점은 해면이 아니다 — 고도를 바꿔 재면
+# 안심되는 숫자가 나오므로 여기 적는 값은 반드시 설계 고도의 것이어야 한다.)
+# 연료를 300 kg만 실어도 99.1%다. 그렇다고
 # 이 값을 0.4로 내리면 안 된다: 스케줄이
 # K(M) = K0·min((M_design/M)², cap)이라 M_design을 내리면 **전 구간의 실효 게인이
 # (0.6/0.4)² = 2.25배 낮아진다**. K0는 M0.6에서 고른 값이지만 여기 쓰이는 방식은

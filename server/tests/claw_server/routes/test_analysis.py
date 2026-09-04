@@ -7,7 +7,11 @@
 import pytest
 
 
-# 프로펠러 전환으로 수평비행 상단이 1000 m에서 M0.58까지 내려왔다 (plant/prop.py)
+# 프로펠러 전환으로 수평비행 상단이 1000 m·연료 200 kg에서 M0.595까지 내려왔다
+# (plant/prop.py). M0.58은 **해면·연료 400 kg** 값이라 다른 줄이다.
+# 이 파일의 기준 수치는 test_envelope_scan_round_trip의 "1000 m는 M0.22~0.595"이고,
+# 그 0.595는 실측(경계 ~0.5995)을 house 관례대로 **안쪽으로 반올림**한 값이다
+# (test_trim.py SEA_LEVEL_BAND와 같은 방식) — 경계 자체가 아니다
 def _margin_map_request(machs=(0.35, 0.4, 0.45)):
     return {
         "cases": [{"mach": m, "alt": 1000.0, "fuel": 200.0} for m in machs],
@@ -325,7 +329,11 @@ def test_margin_map_loop_spec_validation_422(client):
 def test_margin_map_actuator_and_delay_included_reduce_margins(client, wait_job):
     """actuator·delay_s 지정 시 엔진 pi_loop로 전달되어 마진이 낮아짐 (01 §4.2
     [기본값] — 제외 마진은 낙관적). 결과에 적용값이 echo되어 열람 시 재확인 가능."""
-    base = _margin_map_request(machs=(0.6,))
+    # M0.6은 h1000·f200에서 스로틀 95.04%로 엔벨로프 밖이다(수렴은 한다).
+    # test_margin_map_cancel_preserves_trim_results가 같은 이유로 격자를 옮겼으므로
+    # 여기도 안쪽 점으로 둔다 — 지금은 통과하지만 엔벨로프가 더 조여지면 마진
+    # 회귀처럼 보이는 실패가 난다
+    base = _margin_map_request(machs=(0.5,))
     j0 = wait_job(client.post("/api/analysis/margin-map", json=base).json()["id"])
     base_pm = client.get(f"/api/results/{j0['result_id']}").json()["cases"][0]["margins"]["pitch_q"]["pm_deg"]
 
@@ -397,7 +405,9 @@ def test_margin_map_cancel_preserves_trim_results(client, wait_job, monkeypatch)
     assert entry["lon"] is None and entry["margins"] == {}
 
 
-_BODE_CASE = {"name": "", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}
+# 마진맵 쪽과 같은 이유로 안쪽 점이다 — M0.6 h1000 f200은 스로틀 95.04%로 엔벨로프
+# 밖이고, Bode는 수렴만 요구해 통과하지만 엔벨로프가 더 조여지면 실패가 난다
+_BODE_CASE = {"name": "", "mach": 0.5, "alt": 1000.0, "fuel": 200.0}
 _YAW_LOOP = {"name": "yaw_rate", "axis": "lat", "x_out": "r", "u_in": "dr",
              "kp": 0.8, "ki": 0.0, "sign": -1.0}
 _PITCH_LOOP = {"name": "pitch_rate", "axis": "lon", "x_out": "q", "u_in": "de",

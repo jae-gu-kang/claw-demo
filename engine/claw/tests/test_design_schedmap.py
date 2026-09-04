@@ -96,13 +96,20 @@ def test_margin_point_matches_direct_composition(setup):
 
 
 def test_design_point_composition_is_sane(setup):
-    """설계점(M0.6)에서 설계 게인의 조성 판정이 정상 범위 — 자세 마진 PM>0, 댐퍼 감쇠 개선.
+    """게인 출처점(M0.6 h1000)에서 조성 판정이 정상 범위 — 자세 마진 PM>0, 댐퍼 감쇠 개선.
 
-    평탄 SISO 선언(GROUP_LOOPS)으로 절대 판정하면 설계점조차 PM 12°/−168°가 나온다
+    평탄 SISO 선언(GROUP_LOOPS)으로 절대 판정하면 이 점조차 PM 12°/−168°가 나온다
     (closure.py 머리말) — successive closure 조성이 그 병리를 벗어났는지 핀한다.
+
+    **"설계점"이라 부르지 않는다**: 프로펠러 추력 모델 이후 M0.6 h1000 fuel200은
+    스로틀 95.04%로 엔벨로프 밖이고(fcl/demo.py 머리말), 설계 파이프라인은 이 점을
+    trimmable=False로 걸러낸다. 여기서 계속 쓰는 이유는 게인이 실제로 그 조건에서
+    선정됐고 조성 판정이 트림 수렴만 요구하기 때문이다 — 수렴은 한다(포화일 뿐).
+    엔벨로프 밖 점을 지도가 어떻게 다루는지는
+    test_outside_envelope_point_is_measured_but_not_prescribed가 따로 본다.
     """
     ac, tables, design = setup
-    case = _case(0.6)
+    case = _case(0.6)  # h1000 f200 — 수렴하지만 포화(설계 영역 밖)
     tr = trim_level(ac, case)
     lm = linearize(ac, tr)
     out = scheduled_margin_point(lm, tables, design, case)
@@ -171,6 +178,8 @@ def test_margin_map_end_to_end_and_cancel(setup):
     ac, tables, design = setup
     ps = PointSet([
         OperatingPoint(case=_case(m), role=ROLE_ANCHOR, origin="coarse")
+        # 0.6은 엔벨로프 밖이다(스로틀 95.04% — fcl/demo.py 머리말). 여기 남기는 이유는
+        # 지도가 밖의 점도 **측정은 한다**는 것이 이 테스트의 대상이기 때문이다
         for m in (0.4, 0.6)
     ])
     for mid in midpoint_validation_points(ps):
@@ -215,7 +224,13 @@ def test_rate_wc_is_measured_on_the_prior_closed_plant(setup):
     idx = 1  # 롤 = 두 번째 (요를 먼저 닫는다 — 유일하게 prior가 비지 않는 자리)
     group, x_rate, u_in = spec["rates"][idx]
     act = dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2)
-    for mach in (0.3, 0.45, 0.8):  # 0.8은 새 엔벨로프 밖 — 의도된 '바깥' 점
+    # 0.8은 **미수렴** 트림이다(엔벨로프 밖 정도가 아니라 평형이 아니다 — thr 1.000,
+    # residual_ok=False). LinearModelSet.get은 이런 점을 거부하지만 여기서는
+    # linearize()를 직접 불러 우회한다. 그래도 이 단정이 성립하는 이유는 판정이
+    # **구조적**이기 때문이다: 보고 ωc가 prior-닫은 플랜트에서 나왔는지만 보므로
+    # 그 플랜트가 평형점의 것이든 아니든 양쪽이 같은 플랜트를 쓰면 된다.
+    # 물리적 의미를 읽는 단정을 여기 추가하려면 0.8을 먼저 빼야 한다
+    for mach in (0.3, 0.45, 0.8):
         case = _case(mach)
         lm = linearize(ac, trim_level(ac, case))
         reported = scheduled_margin_point(lm, tables, design, case, **act)["roll_rate"]["wc"]
@@ -345,7 +360,7 @@ def test_roll_rate_is_judged_against_its_target(setup):
     from claw.design import TuneTargets
 
     ac, tables, design = setup
-    case = _case(0.6)
+    case = _case(0.6)  # 엔벨로프 밖 — 수렴은 하므로 선형화·조성 판정은 성립한다
     lm = linearize(ac, trim_level(ac, case))
     crit, tg = MarginCriteria(), TuneTargets()
 

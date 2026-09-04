@@ -672,6 +672,47 @@ test("추진 페이지 스키마 = 데모 기체가 실제로 쓰는 엔진 클�
     `추진 페이지가 ${SUBSYSTEMS.plant.children.prop.schema.name}인데 데모는 ${ms[0][1]}`);
 });
 
+test("웹이 인용한 엔벨로프·천장·SAT_FRAC이 엔진 정본과 같다 (엔진 원문 대조)", () => {
+  // V_c와 같은 종류의 **죽은 문자열**이다: 매뉴얼과 블록도가 "해면 M0.21~0.60",
+  // "천장 ~5.5 km", "스로틀 95% 등고선"을 본문에 적어 두었는데 어느 것도 계산해서
+  // 넣은 값이 아니다. 엔진에서 SEA_LEVEL_BAND·CEILING·SAT_FRAC을 한 번 고치면
+  // 엔진 테스트만 빨개지고, 그걸 고친 사람은 웹 문장이 있는 줄도 모른다.
+  const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8");
+  const trimSrc = read("../../../engine/claw/trim/trim.py");
+  const trimTest = read("../../../engine/claw/tests/test_trim.py");
+  const table = (name) => {
+    const body = trimTest.slice(trimTest.indexOf(`${name} = {`));
+    return Object.fromEntries([...body.slice(0, body.indexOf("\n}")).matchAll(
+      /^\s*([\d.]+):\s*\(([^)]*)\)/gm,
+    )].map((m) => [Number(m[1]), m[2].split(",").map((v) => Number(v.trim()))]));
+  };
+  const band = table("SEA_LEVEL_BAND");
+  const ceil = table("CEILING");
+  // 반올림 필수 — 0.55·0.57·0.28 같은 값이면 *100이 55.00000000000001로 떨어져
+  // 아무도 본문에 쓸 수 없는 리터럴을 요구하는 빨간 테스트가 된다 (0.95는 우연히 정확)
+  const satPct = Math.round(Number(trimSrc.match(/^SAT_FRAC = ([\d.]+)/m)[1]) * 100);
+  // 웹이 인용하는 조합 — 앱 기본값(200 kg)과 만재(400 kg), 그리고 천장 셋
+  const want = [
+    `M${band[200][0].toFixed(2)}~${band[200][1].toFixed(2)}`,
+    `M${band[400][0].toFixed(2)}~${band[400][1].toFixed(2)}`,
+    `${(ceil[200][0] / 1000).toFixed(1)} km`,
+    `${(ceil[400][0] / 1000).toFixed(1)} km`,
+    `${(ceil[0][0] / 1000).toFixed(1)} km`,
+  ];
+  const quoters = ["./manualdoc.js", "../views/subsystems.js"];
+  for (const rel of quoters) {
+    const text = read(rel);
+    for (const w of want) {
+      assert.ok(text.includes(w), `${rel}에 엔진 정본 수치 "${w}"가 없다 — 낡았거나 표기가 바뀌었다`);
+    }
+  }
+  // 95% 등고선을 말하는 자리들도 같은 상수를 인용해야 한다
+  for (const rel of ["./envelope.js", "../views/envelope.js", "../views/subsystems.js"]) {
+    assert.ok(read(rel).includes(`${satPct}%`),
+      `${rel}에 SAT_FRAC(${satPct}%) 인용이 없다`);
+  }
+});
+
 test("추진 페이지의 교차속도 V_c는 엔진 기본값에서 유도된 값과 같다 (엔진 원문 대조)", () => {
   // V_c만 **죽은 문자열**이다 — 바로 옆 P·η·T_static은 data-p로 살아 있는데, 셋에서
   // 유도한 이 수치는 아니다. 기본값을 한 번만 바꾸면 화면이 그 자리에서 앞뒤가 안 맞고,

@@ -160,11 +160,21 @@ export function scanCells(entries) {
  * T = δσ·min(T_static, ηP/V))이 들어오면서 포화가 곧 "이 조건에서 프로펠러가 더
  * 못 낸다"가 됐다.
  *
- * **다만 이 함수가 내는 것은 상단(hi) 전선뿐이다.** 저마하 쪽 경계는 지금 형상에서
- * 포화가 아니라 실속(alpha_margin)이 그리므로 여기서 점이 안 나온다 — lo 코드경로는
- * 추력을 낮춘 형상에서 포화가 전부 저마하 쪽에 몰렸던 이력이 있어 남긴다. 그리고
  * 전선은 스로틀 100%가 아니라 **95% 등고선**이다(trim.py SAT_FRAC): 진짜 한계보다
  * 설계 여유만큼 안쪽이다.
+ *
+ * **행마다 바깥쪽 포화 구간의 가장자리만** 낸다 — lo 하나, hi 하나가 최대다.
+ * 전이를 전부 내면 행 가운데 고립된 포화 셀 하나가 같은 좌표에 lo와 hi를 __둘 다__
+ * 내고, 그 hi가 다른 고도의 hi와 한 줄로 이어져 평면을 가로지르는 가짜 전선이 된다
+ * (기본 스캔 0.2~0.7/0.05에서 실제로 났다: 5000 m의 M0.25 한 칸이 M0.55 전선을
+ * M0.25까지 끌어내렸다). 전선은 정의상 포화 영역의 __바깥 경계__이므로 안쪽 섬은
+ * 전선이 아니다.
+ *
+ * __다만 그 대가를 정확히 적어 둔다__: 안쪽 섬의 포화는 이제 화면 어디에도 안 뜬다.
+ * 셀 색이 대신 말해 주지 않는다 — kind는 우선순위 첫 사유뿐이라(위 scanCells) 그
+ * 섬이 미수렴을 겸하면 회색으로만 보이고, 실제로 기본 스캔의 그 칸이 그렇다
+ * (not_converged·alpha_margin·saturated_throttle_high). 가짜 전선을 지우는 값이
+ * 더 크다고 봤을 뿐이고, 섬까지 드러내려면 전선이 아니라 별도 표시가 필요하다 [TBD].
  *
  * 그리고 **해석 곡선이 아니라 측정점**이다: 트림이 실제로 스로틀 상한에 부딪힌
  * 지점을 잇는 것이라 스캔 격자 해상도가 곧 경계 해상도다. 추력 곡선에서 직접
@@ -174,7 +184,8 @@ export function scanCells(entries) {
  * 모자란 것(유도항력이 커지는 항력곡선 backside). 형상에 따라 둘 다 나오므로 한쪽을
  * 가정하면 안 된다 — lo만 나오는 형상에서 "최저 포화 마하"를 경계라 부르면 스캔의
  * 왼쪽 끝을 경계라고 우기게 된다.
- * 전이가 없는 행(전부 포화/전부 비포화)은 낸다 — 가장자리를 경계로 지어내지 않는다.
+ * 전이가 없는 행(전부 포화/전부 비포화)은 __안 낸다__ — 스캔 가장자리를 경계로
+ * 지어내지 않는다 (아래 구현의 row.every(sat) 가지).
  *
  * provisional은 그 전이점의 포화 셀이 **트림 미수렴**이라는 뜻이다. 미수렴 트림의
  * 스로틀은 해가 아니라 솔버의 마지막 반복값이므로 "수평비행에 이만큼 필요하다"는
@@ -191,16 +202,21 @@ export function thrustFrontier(cells) {
   const out = [];
   for (const alt of [...byAlt.keys()].sort((a, b) => a - b)) {
     const row = byAlt.get(alt).sort((a, b) => a.mach - b.mach);
-    for (let i = 0; i + 1 < row.length; i += 1) {
-      const a = row[i], c = row[i + 1];
-      if (sat(a) === sat(c)) continue;
-      const at = sat(a) ? a : c;               // 전이의 포화 쪽 셀이 경계점
-      out.push({
-        alt,
-        mach: at.mach,
-        side: sat(a) ? "lo" : "hi",            // 느린 쪽 포화면 저속, 빠른 쪽이면 고속 한계
-        provisional: unconverged(at),
-      });
+    // 행 전체가 포화면 전이가 없다 — 가장자리를 경계로 지어내지 않는다
+    if (row.every(sat)) continue;
+    const point = (at, side) => ({ alt, mach: at.mach, side, provisional: unconverged(at) });
+    // 저속 쪽: 행 앞머리의 연속 포화 구간, 그 안쪽 가장자리가 경계
+    if (sat(row[0])) {
+      let i = 0;
+      while (i + 1 < row.length && sat(row[i + 1])) i += 1;
+      out.push(point(row[i], "lo"));
+    }
+    // 고속 쪽: 행 꼬리의 연속 포화 구간
+    const last = row.length - 1;
+    if (sat(row[last])) {
+      let i = last;
+      while (i > 0 && sat(row[i - 1])) i -= 1;
+      out.push(point(row[i], "hi"));
     }
   }
   return out;

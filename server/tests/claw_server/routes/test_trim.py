@@ -6,8 +6,10 @@
 
 
 def test_trim_batch_end_to_end(client, wait_job):
-    # 프로펠러 추력 모델로 수평비행 상단이 1000 m에서 M0.58까지 내려왔다 —
-    # 종전 격자(0.5·0.6·0.7)의 위 둘은 이제 수렴하지 않는다 (plant/prop.py)
+    # 프로펠러 추력 모델로 수평비행 상단이 1000 m·연료 200 kg에서 M0.595까지
+    # 내려왔다 (plant/prop.py). 종전 격자(0.5·0.6·0.7)의 위 둘을 뺀 이유는 서로
+    # 다르다: M0.6은 **수렴하지만 포화**(saturated_throttle_high)라 설계 영역 밖이고,
+    # M0.7만 진짜 미수렴이다. 둘을 뭉뚱그리면 회귀 케이스를 잘못 고른다
     cases = [{"mach": m, "alt": 1000.0, "fuel": 200.0} for m in (0.40, 0.45, 0.50)]
     r = client.post(
         "/api/trim/batch", json={"cases": cases, "fingerprint": "fp-web"}

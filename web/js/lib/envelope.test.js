@@ -302,6 +302,35 @@ test("outsideRegion — 행 이산화만큼의 어긋남은 이탈이 아니다 
   assert.equal(outsideRegion({ mach: 0.3080 - 5e-3, alt: 5000 }, r), true); // 진짜 이탈은 잡는다
 });
 
+test("thrustFrontier — 행 가운데 고립 포화 섬은 전선이 아니다 (가짜 가로 전선 방지)", () => {
+  const sat = ["saturated_throttle_high"];
+  // 기본 스캔(0.2~0.7/0.05)의 5000 m 행에서 실제로 났던 모양: M0.25 한 칸만 포화이고
+  // 진짜 고속 한계는 M0.55다. 전이를 전부 내면 이 한 칸이 같은 좌표에 hi·lo를 둘 다
+  // 내고, 그 hi(M0.25)가 다른 고도의 hi와 이어져 평면을 가로지르는 줄이 그려졌다
+  const 섬 = [
+    { mach: 0.20, alt: 5000, reasons: ["not_converged", "alpha_margin"] },
+    { mach: 0.25, alt: 5000, reasons: ["not_converged", "alpha_margin", ...sat] },
+    { mach: 0.30, alt: 5000, reasons: [] },
+    { mach: 0.50, alt: 5000, reasons: [] },
+    { mach: 0.55, alt: 5000, reasons: sat },
+  ];
+  assert.deepEqual(thrustFrontier(섬), [
+    { alt: 5000, mach: 0.55, side: "hi", provisional: false },
+  ]);
+  // 양쪽 끝이 다 포화면 lo·hi 하나씩 — 가운데 섬이 있어도 개수는 그대로다
+  const 양끝 = [
+    { mach: 0.20, alt: 0, reasons: sat }, { mach: 0.25, alt: 0, reasons: sat },
+    { mach: 0.30, alt: 0, reasons: [] },
+    { mach: 0.40, alt: 0, reasons: sat },                 // 가운데 섬 — 무시된다
+    { mach: 0.50, alt: 0, reasons: [] },
+    { mach: 0.60, alt: 0, reasons: sat },
+  ];
+  assert.deepEqual(thrustFrontier(양끝), [
+    { alt: 0, mach: 0.25, side: "lo", provisional: false },
+    { alt: 0, mach: 0.60, side: "hi", provisional: false },
+  ]);
+});
+
 test("thrustFrontier — 미수렴 셀의 전이점은 잠정 (해가 아니라 솔버 마지막 반복값)", () => {
   const sat = ["saturated_throttle_high"];
   const pts = thrustFrontier([
