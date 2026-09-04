@@ -7,13 +7,22 @@ import {
   CAM_MODES, SceneController, createController, type CamMode, type Readout,
 } from "../scene/SceneController.ts";
 import type { MountDeps } from "../main.tsx";
+import { canvasHeight } from "./layout.ts";
 
 const HINT: React.CSSProperties = { fontSize: 12, color: "var(--muted)", lineHeight: 1.6 };
-const ROW: React.CSSProperties = { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" };
 
 const CAM_LABEL: Record<CamMode, string> = {
   chase: "추적", orbit: "자유 궤도", onboard: "온보드 1인칭", attitude: "자세 관측",
 };
+
+const STYLE_LABEL = { engineering: "엔지니어링", cinematic: "시네마틱", game: "게임" } as const;
+
+/** 서랍 하나 — 이름은 칩에, 내용은 열렸을 때만. 배치 뼈대는 app.css의 `.tab-*`가 준다
+ *  (영향성 탭과 같은 것을 쓴다 — 같은 레이아웃을 두 벌 두지 않는다). */
+type DrawerKey = "env" | "perf" | "notes";
+
+// 캔버스 높이 규칙은 `./layout.ts` — 이 파일은 JSX라 node --test가 못 읽어서,
+// 판정이 되는 값은 순수 모듈로 빼고 거기서 테스트한다.
 
 const fmt = (v: number | null, digits = 1, unit = ""): string =>
   v === null ? "—" : `${v.toFixed(digits)}${unit}`;
@@ -67,6 +76,8 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const [gameWps, setGameWps] = useState<ReadonlyArray<readonly [number, number, number]>>([]);
   // 마지막 "보내기"의 개수 — 확인 문장을 그린다. 모드를 떠나면 지운다(아래 효과).
   const [sent, setSent] = useState<number | null>(null);
+  // 열린 서랍 하나 (null = 전부 닫힘). 첫 화면은 세계만 보인다 — 그것이 이 배치의 요지다.
+  const [drawer, setDrawer] = useState<DrawerKey | null>(null);
 
   // **생성과 파괴가 대칭인 한 쌍**이다 — 그래야 StrictMode의 이중 실행에서도 컨텍스트가
   // 하나로 유지된다. 의존성이 비어 있는 것은 실수가 아니라 이 규율이다.
@@ -74,6 +85,15 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
     const canvas = canvasRef.current;
     if (canvas == null) return;
     const abort = new AbortController();
+
+    // 높이는 **컨트롤러보다 먼저** 정한다. 아래 실패 경로(WebGL 컨텍스트를 못 얻는
+    // 자리)에서도 자리를 지켜야 하기 때문이다 — 안 그러면 캔버스가 고유비 300×150으로
+    // 눌려 납작한 띠가 되고, 사유가 상태줄에 있는데도 "화면이 깨졌다"로 읽힌다.
+    const setH = () => {
+      const w = canvas.clientWidth;
+      if (w > 0) canvas.style.height = `${canvasHeight(w, window.innerHeight)}px`;
+    };
+    setH();
 
     const made = createController(canvas, {
       onNotes: setNotes,
@@ -87,22 +107,26 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
     });
     if (made.controller == null) {
       setStatus(made.reason);
-      return;
+      window.addEventListener("resize", setH);
+      return () => window.removeEventListener("resize", setH);
     }
     const ctl = made.controller;
     ctlRef.current = ctl;
     ctl.start();
 
-    const ro = new ResizeObserver(() => {
+    const fit = () => {
       const w = canvas.clientWidth;
-      // 2:1 로 고정한다 — 캔버스 비율이 화면 폭에 따라 흔들리면 시야각이 같이 흔들린다.
-      const h = Math.max(Math.round(w * 0.5), 240);
-      canvas.style.height = `${h}px`;
+      if (w <= 0) return; // 탭을 떠나는 중 — 0으로 리사이즈하면 카메라 aspect가 NaN이 된다
+      setH();
       // **백킹스토어는 여기서 안 건드린다.** `renderer.setSize(w, h, false)`와
       // `setPixelRatio`가 그 일을 하고, 여기서 또 쓰면 DPR 클램프가 두 파일에 갈린다.
-      ctl.resize(w, h, devicePixelRatio);
-    });
+      ctl.resize(w, canvasHeight(w, window.innerHeight), devicePixelRatio);
+    };
+    const ro = new ResizeObserver(fit);
     ro.observe(canvas);
+    // 높이가 뷰포트에도 걸리므로 **창 높이 변화도 받아야** 한다 — ResizeObserver는
+    // 캔버스 폭만 보므로 창을 세로로만 줄이면 캔버스가 화면 밖으로 남는다
+    window.addEventListener("resize", fit);
 
     void (async () => {
       setStatus("자산을 불러오는 중…");
@@ -119,6 +143,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
     return () => {
       abort.abort();
       ro.disconnect();
+      window.removeEventListener("resize", fit);
       ctlRef.current = null;
       ctl.dispose();
     };
@@ -278,11 +303,43 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
     setSent(wps.length);
   }, [deps.store]);
 
-  return (
-    <section className="panel">
-      <h2>가상환경</h2>
+  // 화면이 지금 말해야 하는 한 줄 — 화면 밖에 두면 사용자가 사유를 못 본다.
+  // 순서가 곧 급한 순이다: 실패 > 화면과 선택이 갈림 > 결과 없음.
+  const alert = status !== "" ? status
+    : shownId !== null && chosen !== null && shownId !== chosen
+      ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.`
+      : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다."
+        : null;
 
-      <div style={ROW}>
+  const drawers: ReadonlyArray<{ key: DrawerKey; label: string; n: number | null }> = [
+    { key: "env", label: "환경", n: null },
+    { key: "perf", label: "성능", n: null },
+    { key: "notes", label: "캡션", n: notes.length || null },
+  ];
+
+  return (
+    <section className="wv tab-dark">
+      <div className="tab-top">
+        <h1>가상환경</h1>
+        <div className="tab-subline">
+          <p>비행한 결과를 3D 세계에 세워 봅니다. 게임 모드에서는 직접 날며 웨이포인트를 찍습니다.</p>
+          <span style={{ display: "inline-flex", gap: 4 }}>
+            {(["engineering", "cinematic", "game"] as const).map((v) => (
+              <button
+                key={v}
+                className={v === style ? "primary" : ""}
+                onClick={() => { setStyle(v); ctlRef.current?.setViewStyle(v); }}
+                aria-pressed={v === style}
+              >
+                {STYLE_LABEL[v]}
+              </button>
+            ))}
+          </span>
+        </div>
+      </div>
+
+      {/* 조작줄은 캔버스 **위**다 — 시점·결과를 바꾸면 눈이 곧장 화면으로 돌아온다 */}
+      <div className="wv-bar top">
         <select
           value={chosen ?? ""}
           onChange={(e) => setChosen(e.target.value)}
@@ -307,160 +364,163 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
             {CAM_LABEL[m]}
           </button>
         ))}
-        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
-          {(["engineering", "cinematic", "game"] as const).map((v) => (
-            <button
-              key={v}
-              className={v === style ? "primary" : ""}
-              onClick={() => { setStyle(v); ctlRef.current?.setViewStyle(v); }}
-              aria-pressed={v === style}
-            >
-              {v === "engineering" ? "엔지니어링" : v === "cinematic" ? "시네마틱" : "게임"}
-            </button>
-          ))}
-        </span>
+        {style === "game" && (
+          <span style={HINT}>← → 선회 · ↑ ↓ 피치 · Shift/Ctrl 가감속 · Space 웨이포인트</span>
+        )}
       </div>
 
-      <canvas
-        ref={canvasRef}
-        aria-label="가상환경 3D 캔버스"
-        style={{ width: "100%", display: "block", borderRadius: 8, background: "#0d1117", touchAction: "none" }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={endDrag}
-        // macOS는 Ctrl+클릭을 보조클릭(contextmenu)으로 합성하는데 Ctrl이 이 게임의
-        // 감속 축이라, 안내된 조작 그대로가 OS 메뉴에 덮인다(리뷰 확정) — 게임에서만 막는다.
-        onContextMenu={(e) => { if (style === "game") e.preventDefault(); }}
-      />
-
-      {style === "game" && (
-        <div style={ROW}>
-          <span style={HINT}>웨이포인트 {gameWps.length}개</span>
-          {gameWps.map((w, i) => (
-            <span
-              key={`${i}-${w[0]}-${w[1]}-${w[2]}`}
-              style={{
-                ...HINT, fontFamily: "var(--mono)", border: "1px solid var(--muted)",
-                borderRadius: 6, padding: "1px 6px", display: "inline-flex", gap: 4,
-                alignItems: "center",
-              }}
-            >
-              {`${i + 1}: N${w[0]} E${w[1]} h${w[2]}`}
-              <button
-                style={{ padding: "0 5px" }}
-                aria-label={`웨이포인트 ${i + 1} 삭제`}
-                onClick={() => ctlRef.current?.removeGameWaypoint(i)}
-              >×</button>
-            </span>
-          ))}
-          <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
-            <button disabled={gameWps.length === 0} onClick={sendToSim}>
-              시뮬레이션으로 보내기
-            </button>
-            <button
-              disabled={gameWps.length === 0}
-              onClick={() => ctlRef.current?.clearGameWaypoints()}
-            >
-              비우기
-            </button>
-          </span>
-        </div>
-      )}
-      {style === "game" && sent !== null && (
-        <p style={HINT}>
-          웨이포인트 {sent}개를 보냈습니다 — <a href="#sim">시뮬레이션 탭</a>의 표·지도에서
-          다듬고 실제 엔진으로 실행하세요.
-        </p>
-      )}
-
-      {style !== "game" && <div style={ROW}>
-        <button
-          onClick={() => { const p = !playing; setPlaying(p); ctlRef.current?.setPlaying(p); }}
-          disabled={!playable}
-        >
-          {playing ? "일시정지" : playable ? "재생" : "재생 (표본 부족)"}
-        </button>
-        <select
-          value={speed}
-          onChange={(e) => { const v = Number(e.target.value); setSpeed(v); ctlRef.current?.setSpeed(v); }}
-          aria-label="재생 배속"
-        >
-          {[1, 2, 5, 10, 20].map((v) => <option key={v} value={v}>{v}×</option>)}
-        </select>
-        <input
-          type="range" min={0} max={Math.max(count - 1, 0)} value={cursor}
-          onChange={(e) => { const v = Number(e.target.value); setCursor(v); ctlRef.current?.setCursor(v); }}
-          style={{ flex: 1, minWidth: 160 }}
-          aria-label="재생 위치"
+      {/* 세계 — 카드 밖, 페이지 위에 그대로 (블록도 보드·영향성 그래프와 같은 규약) */}
+      <div className="wv-stage">
+        <canvas
+          ref={canvasRef}
+          aria-label="가상환경 3D 캔버스"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={endDrag}
+          // macOS는 Ctrl+클릭을 보조클릭(contextmenu)으로 합성하는데 Ctrl이 이 게임의
+          // 감속 축이라, 안내된 조작 그대로가 OS 메뉴에 덮인다(리뷰 확정) — 게임에서만 막는다.
+          onContextMenu={(e) => { if (style === "game") e.preventDefault(); }}
         />
-      </div>}
-
-      {/* 판독 — 캔버스가 말하는 것을 **글로도** 남긴다(캔버스는 보조기술에 불투명하다). */}
-      <div style={{ ...HINT, fontFamily: "var(--mono)" }}>
-        {readout
-          ? `t ${fmt(readout.t, 1, " s")} · ${readout.mode ?? "—"}`
-            + ` · h ${fmt(readout.alt, 0, " m")}`
-            + ` (지면 ${fmtSigned(readout.aboveGround)})`
-            + ` · V ${fmt(readout.speed, 1, " m/s")} · φ ${deg(readout.phi)} θ ${deg(readout.theta)}`
-          : "표본 없음"}
+        {/* 판독 — 캔버스가 말하는 것을 **글로도** 남긴다(캔버스는 보조기술에 불투명하다).
+            3D 위에 얹는 이유는 보면서 읽는 값이기 때문이다. */}
+        <div className="wv-hud">
+          {readout ? (
+            <>
+              <span className="k">t</span><span className="v">{fmt(readout.t, 1, " s")}</span>
+              <span className="k">고도</span><span className="v">{fmt(readout.alt, 0, " m")} (지면 {fmtSigned(readout.aboveGround)})</span>
+              <span className="k">V</span><span className="v">{fmt(readout.speed, 1, " m/s")}</span>
+              <span className="k">φ</span><span className="v">{deg(readout.phi)}</span>
+              <span className="k">θ</span><span className="v">{deg(readout.theta)}</span>
+              {readout.mode !== null && <><span className="k">모드</span><span className="v">{readout.mode}</span></>}
+            </>
+          ) : "표본 없음"}
+        </div>
       </div>
 
-      <div style={ROW}>
-        <label style={HINT}>태양 고도
-          <input type="range" min={0.03} max={1.53} step={0.01} value={sunEl}
-            onChange={(e) => setSunEl(Number(e.target.value))} />
-        </label>
-        <label style={HINT}>태양 방위
-          <input type="range" min={0} max={6.28} step={0.02} value={sunAz}
-            onChange={(e) => setSunAz(Number(e.target.value))} />
-        </label>
-        <label style={HINT}>가시거리
-          <input type="range" min={2000} max={60000} step={1000} value={visibility}
-            onChange={(e) => setVisibility(Number(e.target.value))} />
-        </label>
-        <label style={HINT}>노출
-          <input type="range" min={0.4} max={2} step={0.05} value={exposure}
-            onChange={(e) => setExposure(Number(e.target.value))} />
-        </label>
-        <label style={HINT}>풍속
-          <input type="range" min={0} max={20} step={0.5} value={windSpeed}
-            onChange={(e) => setWindSpeed(Number(e.target.value))} />
-        </label>
-        <label style={HINT}>풍향
-          <input type="range" min={0} max={6.28} step={0.02} value={windDir}
-            onChange={(e) => setWindDir(Number(e.target.value))} />
-        </label>
-        <label style={HINT}>구름
-          <input type="range" min={0} max={1} step={0.02} value={cloudCover}
-            onChange={(e) => setCloudCover(Number(e.target.value))} />
-        </label>
-      </div>
-
-      {shownId !== null && chosen !== null && shownId !== chosen && (
-        <p style={HINT}>
-          지금 보이는 화면과 캡션은 <code>{shownId.slice(0, 8)}</code>의 것입니다 —
-          고른 결과를 세우지 못해 직전 것이 그대로 있습니다.
-        </p>
-      )}
-      {stats && (
-        <div style={{ ...HINT, fontFamily: "var(--mono)" }}>
-          {`장면 삼각형 ${stats.triangles.toLocaleString()} · 드로우콜 ${stats.drawCalls}`
-            + ` · CPU 제출 ${stats.ms.toFixed(1)} ms · 깊이 ${stats.depthBits}비트`
-            + " (분할 프러스텀 — 장면을 두 번 그립니다. 후처리 쿼드는 안 셉니다)"}
+      {style === "game" ? (
+        <>
+          <div className="wv-bar">
+            <span style={HINT}>웨이포인트 {gameWps.length}개</span>
+            {gameWps.map((w, i) => (
+              <span key={`${i}-${w[0]}-${w[1]}-${w[2]}`} className="wv-wp">
+                {`${i + 1}: N${w[0]} E${w[1]} h${w[2]}`}
+                <button
+                  aria-label={`웨이포인트 ${i + 1} 삭제`}
+                  onClick={() => ctlRef.current?.removeGameWaypoint(i)}
+                >×</button>
+              </span>
+            ))}
+            <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
+              <button className="primary" disabled={gameWps.length === 0} onClick={sendToSim}>
+                시뮬레이션으로 보내기
+              </button>
+              <button
+                disabled={gameWps.length === 0}
+                onClick={() => ctlRef.current?.clearGameWaypoints()}
+              >
+                비우기
+              </button>
+            </span>
+          </div>
+          {sent !== null && (
+            <p style={HINT}>
+              웨이포인트 {sent}개를 보냈습니다 — <a href="#sim">시뮬레이션 탭</a>의 표·지도에서
+              다듬고 실제 엔진으로 실행하세요.
+            </p>
+          )}
+        </>
+      ) : (
+        <div className="wv-bar">
+          <button
+            className={playing ? "" : "primary"}
+            onClick={() => { const p = !playing; setPlaying(p); ctlRef.current?.setPlaying(p); }}
+            disabled={!playable}
+          >
+            {playing ? "일시정지" : playable ? "재생" : "재생 (표본 부족)"}
+          </button>
+          <select
+            value={speed}
+            onChange={(e) => { const v = Number(e.target.value); setSpeed(v); ctlRef.current?.setSpeed(v); }}
+            aria-label="재생 배속"
+          >
+            {[1, 2, 5, 10, 20].map((v) => <option key={v} value={v}>{v}×</option>)}
+          </select>
+          <input
+            type="range" min={0} max={Math.max(count - 1, 0)} value={cursor}
+            onChange={(e) => { const v = Number(e.target.value); setCursor(v); ctlRef.current?.setCursor(v); }}
+            style={{ flex: 1, minWidth: 160 }}
+            aria-label="재생 위치"
+          />
         </div>
       )}
-      {results.length === 0 && !status && (
-        <p style={HINT}>
-          시뮬레이션 결과가 없습니다 — <a href="#sim">시뮬레이션 탭</a>에서 한 번 실행하면
-          여기에 나타납니다.
-        </p>
-      )}
-      {status && <p style={HINT}>{status}</p>}
 
-      {/* 캡션 — 표시 전용 선택은 전부 여기서 밝힌다 (이 저장소의 규약). */}
-      <div style={HINT}>
-        {notes.map((n, i) => <div key={i}>· {n}</div>)}
+      {alert !== null && <p style={HINT}>{alert}</p>}
+
+      {/* 나머지는 눌렀을 때만 — 한 번에 하나 (영향성 탭과 같은 뼈대) */}
+      <div className="tab-chips">
+        {drawers.map((d) => (
+          <button
+            key={d.key}
+            className="tab-chip"
+            aria-expanded={drawer === d.key}
+            aria-controls="world-drawer"
+            onClick={() => setDrawer((cur) => (cur === d.key ? null : d.key))}
+          >
+            {d.label}{d.n !== null && <span className="n">{d.n}</span>}
+          </button>
+        ))}
+      </div>
+
+      <div className="tab-drawer" id="world-drawer">
+        {drawer === "env" && (
+          <div className="wv-env">
+            <label>태양 고도
+              <input type="range" min={0.03} max={1.53} step={0.01} value={sunEl}
+                onChange={(e) => setSunEl(Number(e.target.value))} />
+            </label>
+            <label>태양 방위
+              <input type="range" min={0} max={6.28} step={0.02} value={sunAz}
+                onChange={(e) => setSunAz(Number(e.target.value))} />
+            </label>
+            <label>가시거리
+              <input type="range" min={2000} max={60000} step={1000} value={visibility}
+                onChange={(e) => setVisibility(Number(e.target.value))} />
+            </label>
+            <label>노출
+              <input type="range" min={0.4} max={2} step={0.05} value={exposure}
+                onChange={(e) => setExposure(Number(e.target.value))} />
+            </label>
+            <label>풍속
+              <input type="range" min={0} max={20} step={0.5} value={windSpeed}
+                onChange={(e) => setWindSpeed(Number(e.target.value))} />
+            </label>
+            <label>풍향
+              <input type="range" min={0} max={6.28} step={0.02} value={windDir}
+                onChange={(e) => setWindDir(Number(e.target.value))} />
+            </label>
+            <label>구름
+              <input type="range" min={0} max={1} step={0.02} value={cloudCover}
+                onChange={(e) => setCloudCover(Number(e.target.value))} />
+            </label>
+          </div>
+        )}
+        {drawer === "perf" && (
+          <div style={{ ...HINT, fontFamily: "var(--mono)" }}>
+            {stats
+              ? `장면 삼각형 ${stats.triangles.toLocaleString()} · 드로우콜 ${stats.drawCalls}`
+                + ` · CPU 제출 ${stats.ms.toFixed(1)} ms · 깊이 ${stats.depthBits}비트`
+                + " (분할 프러스텀 — 장면을 두 번 그립니다. 후처리 쿼드는 안 셉니다)"
+              : "아직 프레임 통계가 없습니다 — 장면이 한 번 그려지면 채워집니다."}
+          </div>
+        )}
+        {drawer === "notes" && (
+          <div style={HINT}>
+            {notes.length === 0
+              ? "표시 전용 선택이 아직 없습니다 — 결과를 세우면 여기에 그 단서가 모입니다."
+              : notes.map((n, i) => <div key={i}>· {n}</div>)}
+          </div>
+        )}
       </div>
     </section>
   );

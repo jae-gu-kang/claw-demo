@@ -39301,7 +39301,7 @@ function launcherCaptionNotes(launch, pose2) {
 const SURFACE_NOTES = {
   innerOuterShared: "엘레본 내측·외측은 같은 각을 씁니다 — 믹서가 1:1 고정이라 시뮬이 둘을 구분하지 않습니다.",
   rudderShared: "러더 두 면은 같은 각을 씁니다 — 시뮬의 러더 채널이 하나입니다.",
-  propellerDisplay: "프로펠러 회전은 좌·우 스로틀 평균에 비례한 표시 값이며, 실제 회전수가 아닙니다 — 빠르면 블레이드 대신 반투명 원반으로 그립니다(모션블러 대용).",
+  propellerDisplay: "프로펠러 회전은 집합 스로틀에 비례한 표시 값이며, 실제 회전수가 아닙니다 — 빠르면 블레이드 대신 반투명 원반으로 그립니다(모션블러 대용).",
   holdOnMissing: "조종면 각이 결측인 구간에서는 **마지막 각을 유지**합니다 — 중립으로 되돌리면 없는 조종 입력을 그리게 됩니다. 결측이 계속되면 타면이 움직이지 않습니다."
 };
 function clamp(v2, lo, hi2) {
@@ -45966,14 +45966,22 @@ function createController(canvas, cb2) {
   if (made.host == null) return { controller: null, reason: made.reason };
   return { controller: new SceneController(made.host, cb2), reason: null };
 }
+const VIEWPORT_FRAC = 0.62;
+const WIDTH_FRAC = 0.5;
+const MIN_H = 360;
+function canvasHeight(width, viewportHeight) {
+  const byWidth = Math.round(width * WIDTH_FRAC);
+  const byViewport = Math.round(viewportHeight * VIEWPORT_FRAC);
+  return Math.max(MIN_H, Math.min(byWidth, byViewport));
+}
 const HINT = { fontSize: 12, color: "var(--muted)", lineHeight: 1.6 };
-const ROW = { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" };
 const CAM_LABEL = {
   chase: "추적",
   orbit: "자유 궤도",
   onboard: "온보드 1인칭",
   attitude: "자세 관측"
 };
+const STYLE_LABEL = { engineering: "엔지니어링", cinematic: "시네마틱", game: "게임" };
 const fmt = (v2, digits = 1, unit = "") => v2 === null ? "—" : `${v2.toFixed(digits)}${unit}`;
 const deg = (rad) => {
   if (rad === null) return "—";
@@ -46012,10 +46020,16 @@ function WorldTab({ deps }) {
   const [style, setStyle] = reactExports.useState("engineering");
   const [gameWps, setGameWps] = reactExports.useState([]);
   const [sent, setSent] = reactExports.useState(null);
+  const [drawer, setDrawer] = reactExports.useState(null);
   reactExports.useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas == null) return;
     const abort = new AbortController();
+    const setH = () => {
+      const w2 = canvas.clientWidth;
+      if (w2 > 0) canvas.style.height = `${canvasHeight(w2, window.innerHeight)}px`;
+    };
+    setH();
     const made = createController(canvas, {
       onNotes: setNotes,
       onMode: setMode,
@@ -46031,18 +46045,21 @@ function WorldTab({ deps }) {
     });
     if (made.controller == null) {
       setStatus(made.reason);
-      return;
+      window.addEventListener("resize", setH);
+      return () => window.removeEventListener("resize", setH);
     }
     const ctl = made.controller;
     ctlRef.current = ctl;
     ctl.start();
-    const ro = new ResizeObserver(() => {
+    const fit = () => {
       const w2 = canvas.clientWidth;
-      const h = Math.max(Math.round(w2 * 0.5), 240);
-      canvas.style.height = `${h}px`;
-      ctl.resize(w2, h, devicePixelRatio);
-    });
+      if (w2 <= 0) return;
+      setH();
+      ctl.resize(w2, canvasHeight(w2, window.innerHeight), devicePixelRatio);
+    };
+    const ro = new ResizeObserver(fit);
     ro.observe(canvas);
+    window.addEventListener("resize", fit);
     void (async () => {
       setStatus("자산을 불러오는 중…");
       await ctl.loadWorld(abort.signal);
@@ -46057,6 +46074,7 @@ function WorldTab({ deps }) {
     return () => {
       abort.abort();
       ro.disconnect();
+      window.removeEventListener("resize", fit);
       ctlRef.current = null;
       ctl.dispose();
     };
@@ -46201,9 +46219,33 @@ function WorldTab({ deps }) {
     });
     setSent(wps.length);
   }, [deps.store]);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "panel", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "가상환경" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: ROW, children: [
+  const alert = status !== "" ? status : shownId !== null && chosen !== null && shownId !== chosen ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.` : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다." : null;
+  const drawers = [
+    { key: "env", label: "환경", n: null },
+    { key: "perf", label: "성능", n: null },
+    { key: "notes", label: "캡션", n: notes.length || null }
+  ];
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "wv tab-dark", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tab-top", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "가상환경" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tab-subline", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "비행한 결과를 3D 세계에 세워 봅니다. 게임 모드에서는 직접 날며 웨이포인트를 찍습니다." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { display: "inline-flex", gap: 4 }, children: ["engineering", "cinematic", "game"].map((v2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            className: v2 === style ? "primary" : "",
+            onClick: () => {
+              setStyle(v2);
+              ctlRef.current?.setViewStyle(v2);
+            },
+            "aria-pressed": v2 === style,
+            children: STYLE_LABEL[v2]
+          },
+          v2
+        )) })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wv-bar top", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "select",
         {
@@ -46230,92 +46272,87 @@ function WorldTab({ deps }) {
         },
         m2
       )),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { marginLeft: "auto", display: "inline-flex", gap: 4 }, children: ["engineering", "cinematic", "game"].map((v2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "button",
-        {
-          className: v2 === style ? "primary" : "",
-          onClick: () => {
-            setStyle(v2);
-            ctlRef.current?.setViewStyle(v2);
-          },
-          "aria-pressed": v2 === style,
-          children: v2 === "engineering" ? "엔지니어링" : v2 === "cinematic" ? "시네마틱" : "게임"
-        },
-        v2
-      )) })
+      style === "game" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: HINT, children: "← → 선회 · ↑ ↓ 피치 · Shift/Ctrl 가감속 · Space 웨이포인트" })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "canvas",
-      {
-        ref: canvasRef,
-        "aria-label": "가상환경 3D 캔버스",
-        style: { width: "100%", display: "block", borderRadius: 8, background: "#0d1117", touchAction: "none" },
-        onPointerDown,
-        onPointerMove,
-        onPointerUp,
-        onPointerCancel: endDrag,
-        onContextMenu: (e) => {
-          if (style === "game") e.preventDefault();
-        }
-      }
-    ),
-    style === "game" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: ROW, children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { style: HINT, children: [
-        "웨이포인트 ",
-        gameWps.length,
-        "개"
-      ] }),
-      gameWps.map((w2, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "span",
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wv-stage", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "canvas",
         {
-          style: {
-            ...HINT,
-            fontFamily: "var(--mono)",
-            border: "1px solid var(--muted)",
-            borderRadius: 6,
-            padding: "1px 6px",
-            display: "inline-flex",
-            gap: 4,
-            alignItems: "center"
-          },
-          children: [
-            `${i + 1}: N${w2[0]} E${w2[1]} h${w2[2]}`,
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "button",
-              {
-                style: { padding: "0 5px" },
-                "aria-label": `웨이포인트 ${i + 1} 삭제`,
-                onClick: () => ctlRef.current?.removeGameWaypoint(i),
-                children: "×"
-              }
-            )
-          ]
-        },
-        `${i}-${w2[0]}-${w2[1]}-${w2[2]}`
-      )),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { style: { marginLeft: "auto", display: "inline-flex", gap: 4 }, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { disabled: gameWps.length === 0, onClick: sendToSim, children: "시뮬레이션으로 보내기" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            disabled: gameWps.length === 0,
-            onClick: () => ctlRef.current?.clearGameWaypoints(),
-            children: "비우기"
+          ref: canvasRef,
+          "aria-label": "가상환경 3D 캔버스",
+          onPointerDown,
+          onPointerMove,
+          onPointerUp,
+          onPointerCancel: endDrag,
+          onContextMenu: (e) => {
+            if (style === "game") e.preventDefault();
           }
-        )
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "wv-hud", children: readout ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "k", children: "t" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "v", children: fmt(readout.t, 1, " s") }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "k", children: "고도" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "v", children: [
+          fmt(readout.alt, 0, " m"),
+          " (지면 ",
+          fmtSigned(readout.aboveGround),
+          ")"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "k", children: "V" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "v", children: fmt(readout.speed, 1, " m/s") }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "k", children: "φ" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "v", children: deg(readout.phi) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "k", children: "θ" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "v", children: deg(readout.theta) }),
+        readout.mode !== null && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "k", children: "모드" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "v", children: readout.mode })
+        ] })
+      ] }) : "표본 없음" })
+    ] }),
+    style === "game" ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wv-bar", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { style: HINT, children: [
+          "웨이포인트 ",
+          gameWps.length,
+          "개"
+        ] }),
+        gameWps.map((w2, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "wv-wp", children: [
+          `${i + 1}: N${w2[0]} E${w2[1]} h${w2[2]}`,
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              "aria-label": `웨이포인트 ${i + 1} 삭제`,
+              onClick: () => ctlRef.current?.removeGameWaypoint(i),
+              children: "×"
+            }
+          )
+        ] }, `${i}-${w2[0]}-${w2[1]}-${w2[2]}`)),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { style: { marginLeft: "auto", display: "inline-flex", gap: 4 }, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { className: "primary", disabled: gameWps.length === 0, onClick: sendToSim, children: "시뮬레이션으로 보내기" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              disabled: gameWps.length === 0,
+              onClick: () => ctlRef.current?.clearGameWaypoints(),
+              children: "비우기"
+            }
+          )
+        ] })
+      ] }),
+      sent !== null && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { style: HINT, children: [
+        "웨이포인트 ",
+        sent,
+        "개를 보냈습니다 — ",
+        /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "#sim", children: "시뮬레이션 탭" }),
+        "의 표·지도에서 다듬고 실제 엔진으로 실행하세요."
       ] })
-    ] }),
-    style === "game" && sent !== null && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { style: HINT, children: [
-      "웨이포인트 ",
-      sent,
-      "개를 보냈습니다 — ",
-      /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "#sim", children: "시뮬레이션 탭" }),
-      "의 표·지도에서 다듬고 실제 엔진으로 실행하세요."
-    ] }),
-    style !== "game" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: ROW, children: [
+    ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wv-bar", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
+          className: playing ? "" : "primary",
           onClick: () => {
             const p2 = !playing;
             setPlaying(p2);
@@ -46358,123 +46395,128 @@ function WorldTab({ deps }) {
         }
       )
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { ...HINT, fontFamily: "var(--mono)" }, children: readout ? `t ${fmt(readout.t, 1, " s")} · ${readout.mode ?? "—"} · h ${fmt(readout.alt, 0, " m")} (지면 ${fmtSigned(readout.aboveGround)}) · V ${fmt(readout.speed, 1, " m/s")} · φ ${deg(readout.phi)} θ ${deg(readout.theta)}` : "표본 없음" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: ROW, children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: HINT, children: [
-        "태양 고도",
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "input",
-          {
-            type: "range",
-            min: 0.03,
-            max: 1.53,
-            step: 0.01,
-            value: sunEl,
-            onChange: (e) => setSunEl(Number(e.target.value))
-          }
-        )
+    alert !== null && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: HINT, children: alert }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "tab-chips", children: drawers.map((d) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        className: "tab-chip",
+        "aria-expanded": drawer === d.key,
+        "aria-controls": "world-drawer",
+        onClick: () => setDrawer((cur) => cur === d.key ? null : d.key),
+        children: [
+          d.label,
+          d.n !== null && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "n", children: d.n })
+        ]
+      },
+      d.key
+    )) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tab-drawer", id: "world-drawer", children: [
+      drawer === "env" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wv-env", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { children: [
+          "태양 고도",
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "range",
+              min: 0.03,
+              max: 1.53,
+              step: 0.01,
+              value: sunEl,
+              onChange: (e) => setSunEl(Number(e.target.value))
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { children: [
+          "태양 방위",
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "range",
+              min: 0,
+              max: 6.28,
+              step: 0.02,
+              value: sunAz,
+              onChange: (e) => setSunAz(Number(e.target.value))
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { children: [
+          "가시거리",
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "range",
+              min: 2e3,
+              max: 6e4,
+              step: 1e3,
+              value: visibility,
+              onChange: (e) => setVisibility(Number(e.target.value))
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { children: [
+          "노출",
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "range",
+              min: 0.4,
+              max: 2,
+              step: 0.05,
+              value: exposure,
+              onChange: (e) => setExposure(Number(e.target.value))
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { children: [
+          "풍속",
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "range",
+              min: 0,
+              max: 20,
+              step: 0.5,
+              value: windSpeed,
+              onChange: (e) => setWindSpeed(Number(e.target.value))
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { children: [
+          "풍향",
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "range",
+              min: 0,
+              max: 6.28,
+              step: 0.02,
+              value: windDir,
+              onChange: (e) => setWindDir(Number(e.target.value))
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { children: [
+          "구름",
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "range",
+              min: 0,
+              max: 1,
+              step: 0.02,
+              value: cloudCover,
+              onChange: (e) => setCloudCover(Number(e.target.value))
+            }
+          )
+        ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: HINT, children: [
-        "태양 방위",
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "input",
-          {
-            type: "range",
-            min: 0,
-            max: 6.28,
-            step: 0.02,
-            value: sunAz,
-            onChange: (e) => setSunAz(Number(e.target.value))
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: HINT, children: [
-        "가시거리",
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "input",
-          {
-            type: "range",
-            min: 2e3,
-            max: 6e4,
-            step: 1e3,
-            value: visibility,
-            onChange: (e) => setVisibility(Number(e.target.value))
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: HINT, children: [
-        "노출",
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "input",
-          {
-            type: "range",
-            min: 0.4,
-            max: 2,
-            step: 0.05,
-            value: exposure,
-            onChange: (e) => setExposure(Number(e.target.value))
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: HINT, children: [
-        "풍속",
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "input",
-          {
-            type: "range",
-            min: 0,
-            max: 20,
-            step: 0.5,
-            value: windSpeed,
-            onChange: (e) => setWindSpeed(Number(e.target.value))
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: HINT, children: [
-        "풍향",
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "input",
-          {
-            type: "range",
-            min: 0,
-            max: 6.28,
-            step: 0.02,
-            value: windDir,
-            onChange: (e) => setWindDir(Number(e.target.value))
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { style: HINT, children: [
-        "구름",
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "input",
-          {
-            type: "range",
-            min: 0,
-            max: 1,
-            step: 0.02,
-            value: cloudCover,
-            onChange: (e) => setCloudCover(Number(e.target.value))
-          }
-        )
-      ] })
-    ] }),
-    shownId !== null && chosen !== null && shownId !== chosen && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { style: HINT, children: [
-      "지금 보이는 화면과 캡션은 ",
-      /* @__PURE__ */ jsxRuntimeExports.jsx("code", { children: shownId.slice(0, 8) }),
-      "의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다."
-    ] }),
-    stats && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { ...HINT, fontFamily: "var(--mono)" }, children: `장면 삼각형 ${stats.triangles.toLocaleString()} · 드로우콜 ${stats.drawCalls} · CPU 제출 ${stats.ms.toFixed(1)} ms · 깊이 ${stats.depthBits}비트 (분할 프러스텀 — 장면을 두 번 그립니다. 후처리 쿼드는 안 셉니다)` }),
-    results.length === 0 && !status && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { style: HINT, children: [
-      "시뮬레이션 결과가 없습니다 — ",
-      /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "#sim", children: "시뮬레이션 탭" }),
-      "에서 한 번 실행하면 여기에 나타납니다."
-    ] }),
-    status && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { style: HINT, children: status }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: HINT, children: notes.map((n2, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-      "· ",
-      n2
-    ] }, i)) })
+      drawer === "perf" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { ...HINT, fontFamily: "var(--mono)" }, children: stats ? `장면 삼각형 ${stats.triangles.toLocaleString()} · 드로우콜 ${stats.drawCalls} · CPU 제출 ${stats.ms.toFixed(1)} ms · 깊이 ${stats.depthBits}비트 (분할 프러스텀 — 장면을 두 번 그립니다. 후처리 쿼드는 안 셉니다)` : "아직 프레임 통계가 없습니다 — 장면이 한 번 그려지면 채워집니다." }),
+      drawer === "notes" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: HINT, children: notes.length === 0 ? "표시 전용 선택이 아직 없습니다 — 결과를 세우면 여기에 그 단서가 모입니다." : notes.map((n2, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        "· ",
+        n2
+      ] }, i)) })
+    ] })
   ] });
 }
 function mount(container, deps = {}) {

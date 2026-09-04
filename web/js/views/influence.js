@@ -1345,7 +1345,7 @@ export function render() {
   // 내용 박스(tableBox·diagBox…)는 **재사용**한다: 매번 새로 만들면 진단·스캔
   // 결과를 그린 DOM이 서랍을 닫을 때마다 버려져 다시 그려야 한다
 
-  const drawerBox = el("div", { class: "inf-drawer" });
+  const drawerBox = el("div", { class: "tab-drawer" });
 
   // ── 실행 상태 — **서랍 밖**에 산다 ───────────────────────────────────────
   // 잡 셋(스캔·개루프·스윕)은 전부 진단 서랍의 버튼에서 출발하는데 결과는 다른
@@ -1434,10 +1434,10 @@ export function render() {
     for (const node of d.build()) if (node) drawerBox.append(node);
   }
 
-  const tabBar = el("div", { class: "inf-tabs" },
+  const tabBar = el("div", { class: "tab-chips" },
     DRAWERS.map((d) => {
       const btn = el("button", {
-        class: "inf-tab", "aria-expanded": "false", "aria-controls": "inf-drawer",
+        class: "tab-chip", "aria-expanded": "false", "aria-controls": "influence-drawer",
         onclick: () => {
           state.drawer = state.drawer === d.key ? null : d.key;
           renderDrawer();
@@ -1446,7 +1446,7 @@ export function render() {
       drawerTabs.set(d.key, btn);
       return btn;
     }));
-  drawerBox.id = "inf-drawer";
+  drawerBox.id = "influence-drawer";
 
   /** 칩의 개수 배지 — 결과가 생겼는데 서랍이 닫혀 있으면 무슨 일이 있었는지가
    *  화면에서 사라진다. 셀 것이 없는 칩(count가 null)은 배지 자체가 없다.
@@ -1493,11 +1493,11 @@ export function render() {
   renderTabCounts();
   renderDrawer();
 
-  return el("div", { class: "inf-dark" },
+  return el("div", { class: "inf-dark tab-dark" },
     // 카드 없는 머리 — 블록도 최상위(.bd .pagetop)와 같은 자리
-    el("div", { class: "inf-top" },
+    el("div", { class: "tab-top" },
       el("h1", {}, "영향성"),
-      el("div", { class: "inf-subline" },
+      el("div", { class: "tab-subline" },
         el("p", {}, "값 하나를 고르면 ", el("b", {}, "얼마에서 얼마로"),
           " 가는지, 그때 마진과 설계 지표가 얼마에서 얼마로 가는지."),
         el("div", { class: "row", style: "gap:8px" },

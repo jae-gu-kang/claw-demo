@@ -34,8 +34,12 @@ export function dispose() {
 
 export function render() {
   dispose();
-  const root = el("section", { class: "panel" },
-    el("h2", {}, "가상환경"),
+  // **루트에 `.panel`을 두지 않는다** — 번들이 자기 루트(`section.wv.tab-dark`)를
+  // 그리고, 3D 세계는 카드 안이 아니라 페이지 위에 그대로 놓인다(블록도 보드·영향성
+  // 그래프와 같은 규약). 로딩·실패 자리에만 카드를 씌우면 마운트 순간에 배경이
+  // 밝→어둡으로 튀므로, 여기도 같은 다크 스코프를 미리 입혀 둔다.
+  const root = el("div", { class: "tab-dark" },
+    el("div", { class: "tab-top" }, el("h1", {}, "가상환경")),
     el("p", { class: "hint", style: HINT }, "불러오는 중…"));
 
   const session = {};
@@ -68,6 +72,6 @@ export function render() {
 
 function fail(root, message) {
   clear(root).append(
-    el("h2", {}, "가상환경"),
+    el("div", { class: "tab-top" }, el("h1", {}, "가상환경")),
     el("p", { class: "hint", style: HINT }, message));
 }
