@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : 3e032f9003b7cc9f
+ * 지문    : 8e540717b28eea23
  * 엔진    : claw 0.2.0
  * scas — 기능축 분할, 29개 블록
  */
@@ -122,16 +122,10 @@ void fcl_scas_step(const fcl_params_t *prm, fcl_state_t *sta,
 
     /* scas_yaw_pid — PID */
     /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
-    const double scas_yaw_pid_raw = prm->scas_yaw_pid_kp * scas_yaw_err_y + sta->scas_yaw_pid_i;
+    /* 적분항 없음 (ki = 0) — i 상태·증분·안티와인드업 가드 제거됨 */
+    const double scas_yaw_pid_raw = prm->scas_yaw_pid_kp * scas_yaw_err_y;
     const double scas_yaw_pid_y = claw_clip(scas_yaw_pid_raw, prm->scas_yaw_pid_out_lo,
                                             prm->scas_yaw_pid_out_hi);
-    double scas_yaw_pid_inc = FCL_DT * prm->scas_yaw_pid_ki * scas_yaw_err_y;
-    const double scas_yaw_pid_axis = scas_yaw_pid_raw + scas_yaw_damp_y;
-    if ((scas_yaw_pid_axis > prm->scas_yaw_pid_out_hi && scas_yaw_pid_inc > 0.0) || (scas_yaw_pid_axis < prm->scas_yaw_pid_out_lo && scas_yaw_pid_inc < 0.0)) {
-        scas_yaw_pid_inc = 0.0;
-    }
-    sta->scas_yaw_pid_i = claw_clip(sta->scas_yaw_pid_i + scas_yaw_pid_inc,
-                                    prm->scas_yaw_pid_out_lo, prm->scas_yaw_pid_out_hi);
 
     /* scas_yaw_sum — Sum */
     const double scas_yaw_sum_y = scas_yaw_pid_y + scas_yaw_damp_y;

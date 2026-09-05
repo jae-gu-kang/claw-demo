@@ -6,7 +6,6 @@
 void scas_yaw_reset(scas_yaw_state_t *sta)
 {
     sta->wo_x = 0.0;
-    sta->pid_i = 0.0;
 }
 
 double scas_yaw_step(const scas_yaw_params_t *prm, scas_yaw_state_t *sta,
@@ -21,14 +20,9 @@ double scas_yaw_step(const scas_yaw_params_t *prm, scas_yaw_state_t *sta,
 
     /* pid — PID */
     /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
-    const double pid_raw = prm->pid_kp * att_err + sta->pid_i;
+    /* 적분항 없음 (ki = 0) — i 상태·증분·안티와인드업 가드 제거됨 */
+    const double pid_raw = prm->pid_kp * att_err;
     const double pid_y = claw_clip(pid_raw, prm->pid_out_lo, prm->pid_out_hi);
-    double pid_inc = SCAS_YAW_DT * prm->pid_ki * att_err;
-    const double pid_axis = pid_raw + damp_y;
-    if ((pid_axis > prm->pid_out_hi && pid_inc > 0.0) || (pid_axis < prm->pid_out_lo && pid_inc < 0.0)) {
-        pid_inc = 0.0;
-    }
-    sta->pid_i = claw_clip(sta->pid_i + pid_inc, prm->pid_out_lo, prm->pid_out_hi);
 
     /* sum — Sum */
     const double sum_y = pid_y + damp_y;

@@ -12,6 +12,7 @@ import * as margins from "./views/margins.js";
 import * as results from "./views/results.js";
 import * as sim from "./views/sim.js";
 import * as trim from "./views/trim.js";
+import * as verify from "./views/verify.js";
 import * as world from "./views/world.js";
 
 // 블록도(블록 다이어그램 허브)가 진입점 — 블록 클릭으로 각 편집 화면 진입 (02 §4)
@@ -19,7 +20,7 @@ import * as world from "./views/world.js";
 // 시뮬레이션 탭의 서랍으로 들어갔다 (v0.54, views/duty.js 머리말)
 const VIEWS = {
   blocks, envelope, trim, gains, margins, autodesign, sim, world, autocode,
-  influence, results,
+  verify, influence, results,
 };
 
 // 떠나는 뷰가 자원을 쥐고 있으면 반납시킨다. 지금은 3D 월드뿐인데, WebGL 컨텍스트는

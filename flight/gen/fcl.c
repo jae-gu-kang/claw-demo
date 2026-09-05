@@ -13,7 +13,6 @@ void fcl_reset(fcl_state_t *sta)
     sta->sched_f_mach_seeded = 0;
     sta->ap_fpsi_x = 0.0;
     sta->ap_fpsi_seeded = 0;
-    sta->ap_hdg_pid_i = 0.0;
     sta->ap_fh_x = 0.0;
     sta->ap_fh_seeded = 0;
     sta->ap_alt_pid_i = 0.0;
@@ -26,7 +25,6 @@ void fcl_reset(fcl_state_t *sta)
     sta->scas_roll_pid_i = 0.0;
     sta->scas_pitch_pid_i = 0.0;
     sta->scas_yaw_wo_x = 0.0;
-    sta->scas_yaw_pid_i = 0.0;
     sta->hold.elevon_l = 0.0;
     sta->hold.elevon_r = 0.0;
     sta->hold.rudder = 0.0;

@@ -35,6 +35,7 @@ uvicorn --factory claw_server:create_app --port 8000   # 모노레포 루트에�
 | `GET /api/sim/{id}/replay?stride=n` | 시뮬 재생 다운샘플 뷰 (엔벨로프 포함) |
 | `GET /api/jobs`, `GET /api/jobs/{id}`, `POST /api/jobs/{id}/cancel` | 작업 조회·협조적 취소 (부분 결과 보존) |
 | `WS /api/ws/jobs/{id}` | 작업 진행률 푸시 (변화 시·종단 시 종료) |
+| `POST /api/verify/flight` | 탑재 C DAL A 검증 (202 + job) — 정적 규율·엄격 컴파일·유닛(파티션)+통합 비트 대조·라인/분기/MC/DC 커버리지·DO-178C 대응표, 판정 문구·표는 엔진 정본. 리포트는 소스 동봉 자립 증적 |
 | `GET /api/results`, `GET /api/results/{id}` | 저장 산출물 목록(메타)·본문 |
 
 직렬화 정책: NaN→`null`, ±inf→`"inf"`/`"-inf"`, 복소 고유치→`[re, im]`.

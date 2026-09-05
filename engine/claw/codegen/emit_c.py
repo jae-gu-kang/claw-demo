@@ -192,6 +192,18 @@ class _Ctx:
 # 목표이므로 `a + b + c`의 결합 순서까지 어긋나면 안 된다.
 
 
+def _pid_has_integrator(node, inst):
+    """적분 경로를 방출하는가 — 게인이 포트(신호)거나 상수가 0이 아닐 때만.
+
+    ki가 상수 0이면 `inc = dt·0·e ≡ ±0.0`이라 적분기는 영원히 0이고, 안티와인드업
+    가드의 `inc > 0.0`·`inc < 0.0`은 **영구 도달 불가 분기**다 — 탑재 코드의 죽은
+    코드(DO-178C 논점)이자 구조적 커버리지가 100%가 될 수 없는 자리다. kd = 0
+    미분항 제거와 같은 판단이고, ±0.0 합 제거가 결과에 무영향인 논거도 같다.
+    에미터와 비활성 대입(_disable_pid)이 같은 판정을 써야 하므로 한 곳에 둔다.
+    """
+    return "ki" in node.gains or inst.ki != 0.0
+
+
 @_emitter(PID)
 def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
     """controllers.py PID — y = clip(kp·e + I + kd·d), I ← 조건부 적분 + clip.
@@ -202,17 +214,19 @@ def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
     # 둘째 입력이 있으면 축 외부항(감쇠) — 안티와인드업 **판정에만** 쓴다 (출력은 불변)
     u_ext = ins[1] if len(ins) > 1 else None
     kp = gains.get("kp") or ctx.param(nid, "kp", inst.kp, "비례 게인")
-    ki = gains.get("ki") or ctx.param(nid, "ki", inst.ki, "적분 게인")
     # 한계도 게인과 같은 포트 규약이다 — 붙으면 신호, 안 붙으면 파라미터 상수.
     # 제어권한 배분이 축 한계를 스텝마다 바꾸는 자리에서 쓴다 (fcl/graphs.py)
     lo = gains.get("out_lo") or ctx.param(nid, "out_lo", inst.out_lo,
                                           "출력·적분기 클램프 하한 (안티와인드업)")
     hi = gains.get("out_hi") or ctx.param(nid, "out_hi", inst.out_hi,
                                           "출력·적분기 클램프 상한 (안티와인드업)")
-    i_st = ctx.st(nid, "i", 0.0, "적분기 상태")
     clip = ctx.helper("claw_clip")
+    has_i = _pid_has_integrator(node, inst)
 
-    terms = f"{kp} * {e} + {i_st}"
+    terms = f"{kp} * {e}"
+    if has_i:
+        i_st = ctx.st(nid, "i", 0.0, "적분기 상태")
+        terms += f" + {i_st}"
     has_d = "kd" in gains or inst.kd != 0.0
     if has_d:
         kd = gains.get("kd") or ctx.param(nid, "kd", inst.kd, "미분 게인")
@@ -223,22 +237,46 @@ def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
         # kd = 0 이고 스케줄도 아니면 미분항 전체가 죽은 코드다 — 상태(e_prev)와
         # 매 스텝 나눗셈까지 함께 사라진다 (0.0 곱은 합에 영향이 없다)
         ctx.line(f"/* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */")
+    if not has_i:
+        # ki = 0 이고 스케줄도 아니면 적분 경로 전체가 죽은 코드다 — 상태(i)·증분·
+        # 안티와인드업 가드까지 함께 사라진다. 가드의 `inc > 0`·`inc < 0`은 이
+        # 형상에서 **영구 거짓**이라, 남겨 두면 도달 불가 분기가 탑재 코드에 실리고
+        # 구조적 커버리지(DAL A: MC/DC 100%)가 원리적으로 닫히지 않는다.
+        # 웜스타트 주의: 이 축은 상태 필드가 없으므로 적분기 웜스타트도 없다 —
+        # kd = 0의 e_prev와 같은 계약이다.
+        ctx.line(f"/* 적분항 없음 (ki = 0) — i 상태·증분·안티와인드업 가드 제거됨 */")
 
     raw = ctx.declare(f"{nid}_raw", terms)
     out = ctx.declare(f"{nid}_y", f"{clip}({raw}, {lo}, {hi})")
-    # 조건부 적분 — 포화한 방향으로 더 미는 증분만 버린다. 클램프는 **무조건**이다
-    # (범위 밖 웜스타트를 가두는 불변식 — controllers.py PID.step 주석 참조)
-    ctx.line(f"double {nid}_inc = {dt_macro} * {ki} * {e};")
-    # 판정 기준은 PID 출력이 아니라 축 출력이다 — 감쇠항이 PID 뒤에서 더해져 다시
-    # clip되는 축에서 PID만 보면 포화를 절반쯤 놓친다 (controllers.py 실측 주석)
-    axis = raw if u_ext is None else ctx.declare(f"{nid}_axis", f"{raw} + {u_ext}")
-    ctx.line(f"if (({axis} > {hi} && {nid}_inc > 0.0) || ({axis} < {lo} && {nid}_inc < 0.0)) {{")
-    ctx.line(f"    {nid}_inc = 0.0;")
-    ctx.line("}")
-    ctx.line(f"{i_st} = {clip}({i_st} + {nid}_inc, {lo}, {hi});")
+    if has_i:
+        ki = gains.get("ki") or ctx.param(nid, "ki", inst.ki, "적분 게인")
+        # 조건부 적분 — 포화한 방향으로 더 미는 증분만 버린다. 클램프는 **무조건**이다
+        # (범위 밖 웜스타트를 가두는 불변식 — controllers.py PID.step 주석 참조)
+        ctx.line(f"double {nid}_inc = {dt_macro} * {ki} * {e};")
+        # 판정 기준은 PID 출력이 아니라 축 출력이다 — 감쇠항이 PID 뒤에서 더해져 다시
+        # clip되는 축에서 PID만 보면 포화를 절반쯤 놓친다 (controllers.py 실측 주석)
+        axis = raw if u_ext is None else ctx.declare(f"{nid}_axis", f"{raw} + {u_ext}")
+        ctx.line(f"if (({axis} > {hi} && {nid}_inc > 0.0) || ({axis} < {lo} && {nid}_inc < 0.0)) {{")
+        ctx.line(f"    {nid}_inc = 0.0;")
+        ctx.line("}")
+        ctx.line(f"{i_st} = {clip}({i_st} + {nid}_inc, {lo}, {hi});")
     if has_d:
         ctx.line(f"{ctx.st(nid, 'e_prev', 0.0)} = {e};")
     return out
+
+
+@_disabler(PID)
+def _disable_pid(ctx, node, inst, field, value_expr):
+    """비활성 대입 — 적분기가 폴딩된 노드에는 쓸 상태 필드가 없다.
+
+    hdg 축의 `on_disable={"i": 0.0}`(재관여 시 잔존 뱅크 킥 방지)이 이 경우다:
+    ki = 0 폴딩으로 `sta->{node}_i`가 존재하지 않으므로 대입을 내면 컴파일이
+    깨진다. 적분기가 영원히 0인 형상에서 0 대입은 의미도 없다 — 주석만 남긴다.
+    """
+    if field == "i" and not _pid_has_integrator(node, inst):
+        ctx.line(f"/* {node.id}: 적분기 폴딩(ki = 0) — 소거할 상태가 없다 */")
+        return
+    ctx.line(f"sta->{node.id}_{field} = {value_expr};")
 
 
 @_emitter(Washout)

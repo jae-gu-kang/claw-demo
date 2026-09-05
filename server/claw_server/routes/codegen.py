@@ -107,16 +107,16 @@ def _order_key(name: str, base: str, groups: list[str]) -> tuple:
     return (rank, sub, 0 if name.endswith(".h") else 1, name)
 
 
-@router.post("/codegen/flight")
-def flight_code(req: FlightCodeIn) -> dict:
-    """현재 형상의 탑재 제어법칙 C — {파일명, 역할, 줄수, 본문} 목록.
+def build_flight_law(req: FlightCodeIn):
+    """요청 형상 → 초기화된 법칙 — 이 라우트와 /verify/flight가 같은 조립을 쓴다.
 
     구성 오류(미정의 게인 키·범위 이탈 등)는 엔진이 ValueError로 내고 422가 된다.
+    조립이 두 곳에 적히면 "화면에 보인 코드"와 "검증한 코드"가 갈라진다 (02 §5.5).
     """
     dt = 1.0 / req.control_hz
     try:
         gain_tables = build_gain_tables(req.gain_tables)  # 구간 검증도 엔진 → 422
-        law = make_demo_fcl(
+        return make_demo_fcl(
             with_schedule=req.with_schedule,
             with_limiter=req.with_limiter,
             autopilot=(
@@ -127,6 +127,13 @@ def flight_code(req: FlightCodeIn) -> dict:
         ).init(dt)
     except (ValueError, TypeError) as e:  # 엔진 구성 검증 → 422 (sim.py와 같은 정책)
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/codegen/flight")
+def flight_code(req: FlightCodeIn) -> dict:
+    """현재 형상의 탑재 제어법칙 C — {파일명, 역할, 줄수, 본문} 목록."""
+    dt = 1.0 / req.control_hz
+    law = build_flight_law(req)
 
     runner = law.runner
     module = emit_c(runner.graph, runner)

@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : 3e032f9003b7cc9f
+ * 지문    : 8e540717b28eea23
  * 엔진    : claw 0.2.0
  * 자료형 (MATLAB _types.h 대응)
  */
@@ -17,7 +17,6 @@ typedef struct {
     double sched_f_mach_one_minus_p;    /* 1 − exp(-dt/tau), tau=0.5 s */
     double ap_fpsi_one_minus_p;         /* 1 − exp(-dt/tau), tau=1.0 s */
     double ap_hdg_pid_kp;               /* 비례 게인 */
-    double ap_hdg_pid_ki;               /* 적분 게인 */
     double ap_hdg_pid_out_lo;           /* 출력·적분기 클램프 하한 (안티와인드업) */
     double ap_hdg_pid_out_hi;           /* 출력·적분기 클램프 상한 (안티와인드업) */
     double ap_hdg_sat_lo;               /* 하한 */
@@ -25,16 +24,16 @@ typedef struct {
     double ap_fh_one_minus_p;           /* 1 − exp(-dt/tau), tau=5.0 s */
     double ap_alt_damp_k;               /* 게인 */
     double ap_alt_pid_kp;               /* 비례 게인 */
-    double ap_alt_pid_ki;               /* 적분 게인 */
     double ap_alt_pid_out_lo;           /* 출력·적분기 클램프 하한 (안티와인드업) */
     double ap_alt_pid_out_hi;           /* 출력·적분기 클램프 상한 (안티와인드업) */
+    double ap_alt_pid_ki;               /* 적분 게인 */
     double ap_alt_sat_lo;               /* 하한 */
     double ap_alt_sat_hi;               /* 상한 */
     double ap_fvs_one_minus_p;          /* 1 − exp(-dt/tau), tau=2.0 s */
     double ap_vs_pid_kp;                /* 비례 게인 */
-    double ap_vs_pid_ki;                /* 적분 게인 */
     double ap_vs_pid_out_lo;            /* 출력·적분기 클램프 하한 (안티와인드업) */
     double ap_vs_pid_out_hi;            /* 출력·적분기 클램프 상한 (안티와인드업) */
+    double ap_vs_pid_ki;                /* 적분 게인 */
     double ap_vs_sat_lo;                /* 하한 */
     double ap_vs_sat_hi;                /* 상한 */
     double ap_pitch_sat_lo;             /* 하한 */
@@ -46,9 +45,9 @@ typedef struct {
     double ap_theta_out_hi;             /* 상한 */
     double ap_fv_one_minus_p;           /* 1 − exp(-dt/tau), tau=2.0 s */
     double ap_spd_pid_kp;               /* 비례 게인 */
-    double ap_spd_pid_ki;               /* 적분 게인 */
     double ap_spd_pid_out_lo;           /* 출력·적분기 클램프 하한 (안티와인드업) */
     double ap_spd_pid_out_hi;           /* 출력·적분기 클램프 상한 (안티와인드업) */
+    double ap_spd_pid_ki;               /* 적분 게인 */
     double ap_spd_sat_lo;               /* 하한 */
     double ap_spd_sat_hi;               /* 상한 */
     double scas_alloc_resv_lo;          /* 하한 */
@@ -61,7 +60,6 @@ typedef struct {
     double scas_yaw_wo_one_minus_p;     /* 1 − p */
     double scas_yaw_damp_k;             /* 게인 */
     double scas_yaw_pid_kp;             /* 비례 게인 */
-    double scas_yaw_pid_ki;             /* 적분 게인 */
     double scas_yaw_pid_out_lo;         /* 출력·적분기 클램프 하한 (안티와인드업) */
     double scas_yaw_pid_out_hi;         /* 출력·적분기 클램프 상한 (안티와인드업) */
     double scas_yaw_sat_lo;             /* 하한 */
@@ -112,7 +110,6 @@ typedef struct {
     int sched_f_mach_seeded;  /* 시드 완료 여부 — 첫 스텝은 측정에서 출발 */
     double ap_fpsi_x;         /* 필터 상태(= 출력) */
     int ap_fpsi_seeded;       /* 시드 완료 여부 — 첫 스텝은 측정에서 출발 */
-    double ap_hdg_pid_i;      /* 적분기 상태 */
     double ap_fh_x;           /* 필터 상태(= 출력) */
     int ap_fh_seeded;         /* 시드 완료 여부 — 첫 스텝은 측정에서 출발 */
     double ap_alt_pid_i;      /* 적분기 상태 */
@@ -125,7 +122,6 @@ typedef struct {
     double scas_roll_pid_i;   /* 적분기 상태 */
     double scas_pitch_pid_i;  /* 적분기 상태 */
     double scas_yaw_wo_x;     /* 워시아웃 상태 */
-    double scas_yaw_pid_i;    /* 적분기 상태 */
     fcl_out_t hold;           /* nav_valid=0일 때 그대로 내보낼 직전 출력 */
 } fcl_state_t;
 

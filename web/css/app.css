@@ -1156,3 +1156,114 @@ body:has(.tab-page) main { max-width: 1580px; }
   .inf-dark .inf-num { font-size: 18px; white-space: normal; }
   .inf-dark .inf-readout { padding: 10px 12px; }
 }
+
+/* ── 검증 탭 — 판정판 (views/verify.js) ─────────────────────────────────
+   무대 위 카드들: 캔버스가 자기 테두리를 갖듯 판정 카드도 자기 판을 갖는다.
+   판정 어휘는 기존 .flag 3-상태 그대로 — 새 색을 만들지 않는다. */
+.vf-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.vf-verdict { font-size: 14px; padding: 4px 14px; font-weight: 700; }
+.vf-ident { margin: 6px 0 12px; font-family: var(--mono); }
+.vf-cards { display: flex; gap: 12px; flex-wrap: wrap; align-items: stretch; }
+.vf-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 18px;
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+.vf-card h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.vf-card .vf-sub { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+.vf-card .vf-detail { margin: 8px 0 0; font-size: 12px; }
+.vf-code { font-family: var(--mono); font-size: 12px; }
+.vf-log {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  max-height: 260px;
+}
+
+/* ── 검증 탭 v2 — 유닛 그리드·커버리지 소스 뷰어·MC/DC 진리표·증적 보고서 ── */
+.vf-h { font-size: 15px; font-weight: 800; margin: 0 0 8px; }
+.vf-unitrow { cursor: pointer; }
+.vf-unitrow:hover td { background: #f4f6fa; }
+
+.vf-viewer { margin-top: 16px; }
+.vf-src {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  background: #1e1e1e;            /* 코드판은 어둡다 — Autocode 편집기와 같은 규약 */
+  color: #d4d4d4;
+  border-radius: 10px;
+  padding: 8px 0;
+  overflow-x: auto;
+  max-height: 520px;
+  overflow-y: auto;
+}
+.vf-ln { display: flex; white-space: pre; }
+.vf-no {
+  width: 46px; flex: none; text-align: right; padding-right: 8px;
+  color: rgba(235, 235, 245, .35); user-select: none;
+}
+.vf-cnt {
+  width: 64px; flex: none; text-align: right; padding-right: 10px;
+  color: rgba(235, 235, 245, .5); border-right: 1px solid rgba(255,255,255,.12);
+  user-select: none;
+}
+.vf-codeln { padding-left: 12px; }
+.vf-ln.hit  .vf-codeln { background: rgba(52, 199, 89, .13); }
+.vf-ln.miss .vf-codeln { background: rgba(255, 69, 58, .25); }
+.vf-ln.part .vf-codeln { background: rgba(255, 159, 10, .22); }
+.vf-ln.jus  .vf-codeln { background: rgba(191, 90, 242, .20); }
+.vf-ln.miss .vf-cnt, .vf-ln.miss .vf-no { color: #ff6961; }
+
+.vf-tt {
+  margin: 6px 8px 10px 122px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-family: var(--sans);
+  white-space: normal;
+  max-width: 640px;
+}
+.vf-tt summary { cursor: pointer; font-size: 12px; font-weight: 700; }
+.vf-tt table { width: auto; }
+.vf-tt td, .vf-tt th { padding: 2px 10px; }
+.vf-conds { margin: 8px 0 8px 18px; padding: 0; }
+.vf-tt-T { color: var(--ok); font-weight: 700; }
+.vf-tt-F { color: var(--bad); font-weight: 700; }
+.vf-tt-x { color: var(--muted); }
+
+.vf-report { max-width: 900px; }
+.vf-report h1 { font-size: 22px; margin: 6px 0 4px; }
+.vf-report h2 { font-size: 15px; font-weight: 800; margin: 22px 0 8px; }
+.vf-report table { margin: 6px 0; }
+.vf-report .vf-tt { margin: 6px 0 10px; }
+.vf-doc-tt { page-break-inside: avoid; }
+
+/* 인쇄 — 전용 오버레이(.vf-printonly)만 낸다. 화면에서는 숨김 */
+.vf-printonly { display: none; }
+@media print {
+  body.vf-printing > *:not(.vf-printonly) { display: none !important; }
+  body.vf-printing .vf-printonly {
+    display: block;
+    padding: 24px;
+    background: #fff;
+  }
+  .vf-printonly .vf-tt { border: 1px solid #ccc; }
+  .vf-printonly .vf-src { max-height: none; }
+}

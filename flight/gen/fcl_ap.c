@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : 3e032f9003b7cc9f
+ * 지문    : 8e540717b28eea23
  * 엔진    : claw 0.2.0
  * ap — 기능축 분할, 26개 블록
  */
@@ -37,14 +37,9 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
 
         /* ap_hdg_pid — PID */
         /* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */
-        const double ap_hdg_pid_raw = prm->ap_hdg_pid_kp * ap_hdg_err_y + sta->ap_hdg_pid_i;
+        /* 적분항 없음 (ki = 0) — i 상태·증분·안티와인드업 가드 제거됨 */
+        const double ap_hdg_pid_raw = prm->ap_hdg_pid_kp * ap_hdg_err_y;
         ap_hdg_pid_y = claw_clip(ap_hdg_pid_raw, prm->ap_hdg_pid_out_lo, prm->ap_hdg_pid_out_hi);
-        double ap_hdg_pid_inc = FCL_DT * prm->ap_hdg_pid_ki * ap_hdg_err_y;
-        if ((ap_hdg_pid_raw > prm->ap_hdg_pid_out_hi && ap_hdg_pid_inc > 0.0) || (ap_hdg_pid_raw < prm->ap_hdg_pid_out_lo && ap_hdg_pid_inc < 0.0)) {
-            ap_hdg_pid_inc = 0.0;
-        }
-        sta->ap_hdg_pid_i = claw_clip(sta->ap_hdg_pid_i + ap_hdg_pid_inc, prm->ap_hdg_pid_out_lo,
-                                      prm->ap_hdg_pid_out_hi);
 
         /* ap_hdg_sat — Saturation */
         ap_hdg_sat_y = claw_clip(ap_hdg_pid_y, prm->ap_hdg_sat_lo, prm->ap_hdg_sat_hi);
@@ -52,7 +47,7 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
         /* 비활성 — 상태만 정리한다 (실행하지 않는다) */
         sta->ap_fpsi_x = psi;
         sta->ap_fpsi_seeded = 1;
-        sta->ap_hdg_pid_i = 0.0;
+        /* ap_hdg_pid: 적분기 폴딩(ki = 0) — 소거할 상태가 없다 */
     }
 
     /* ── alt_on 영역 (3개 노드) ── */

@@ -19,6 +19,7 @@ const KIND_LABEL = {
   envelope_scan: "엔벨로프 스캔",
   sim: "시뮬레이션",
   auto_design: "자동 설계",
+  verify_flight: "검증 — 탑재 C 신뢰성",
   influence_scan: "영향성 — 전 케이스 스캔",
   influence_sweep: "영향성 — 부분 풀 스윕",
   influence_openloop: "영향성 — 개루프 Δ",

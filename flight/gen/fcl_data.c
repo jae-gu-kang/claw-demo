@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : 3e032f9003b7cc9f
+ * 지문    : 8e540717b28eea23
  * 엔진    : claw 0.2.0
  * 파라미터 데이터 (MATLAB _data.c 대응)
  */
@@ -11,7 +11,6 @@ const fcl_params_t fcl_params = {
     .sched_f_mach_one_minus_p = 0.019801326693244747,  /* 1 − exp(-dt/tau), tau=0.5 s */
     .ap_fpsi_one_minus_p      = 0.009950166250831893,  /* 1 − exp(-dt/tau), tau=1.0 s */
     .ap_hdg_pid_kp            = 4.0,                   /* 비례 게인 */
-    .ap_hdg_pid_ki            = 0.0,                   /* 적분 게인 */
     .ap_hdg_pid_out_lo        = -0.7,                  /* 출력·적분기 클램프 하한 (안티와인드업) */
     .ap_hdg_pid_out_hi        = 0.7,                   /* 출력·적분기 클램프 상한 (안티와인드업) */
     .ap_hdg_sat_lo            = -0.7,                  /* 하한 */
@@ -19,16 +18,16 @@ const fcl_params_t fcl_params = {
     .ap_fh_one_minus_p        = 0.001998001332666921,  /* 1 − exp(-dt/tau), tau=5.0 s */
     .ap_alt_damp_k            = -0.008,                /* 게인 */
     .ap_alt_pid_kp            = 0.004,                 /* 비례 게인 */
-    .ap_alt_pid_ki            = 0.0004,                /* 적분 게인 */
     .ap_alt_pid_out_lo        = -0.3,                  /* 출력·적분기 클램프 하한 (안티와인드업) */
     .ap_alt_pid_out_hi        = 0.3,                   /* 출력·적분기 클램프 상한 (안티와인드업) */
+    .ap_alt_pid_ki            = 0.0004,                /* 적분 게인 */
     .ap_alt_sat_lo            = -0.3,                  /* 하한 */
     .ap_alt_sat_hi            = 0.3,                   /* 상한 */
     .ap_fvs_one_minus_p       = 0.00498752080731768,   /* 1 − exp(-dt/tau), tau=2.0 s */
     .ap_vs_pid_kp             = 0.08,                  /* 비례 게인 */
-    .ap_vs_pid_ki             = 0.02,                  /* 적분 게인 */
     .ap_vs_pid_out_lo         = -0.3,                  /* 출력·적분기 클램프 하한 (안티와인드업) */
     .ap_vs_pid_out_hi         = 0.3,                   /* 출력·적분기 클램프 상한 (안티와인드업) */
+    .ap_vs_pid_ki             = 0.02,                  /* 적분 게인 */
     .ap_vs_sat_lo             = -0.3,                  /* 하한 */
     .ap_vs_sat_hi             = 0.3,                   /* 상한 */
     .ap_pitch_sat_lo          = -0.3,                  /* 하한 */
@@ -40,9 +39,9 @@ const fcl_params_t fcl_params = {
     .ap_theta_out_hi          = 0.3,                   /* 상한 */
     .ap_fv_one_minus_p        = 0.00498752080731768,   /* 1 − exp(-dt/tau), tau=2.0 s */
     .ap_spd_pid_kp            = 0.15,                  /* 비례 게인 */
-    .ap_spd_pid_ki            = 0.03,                  /* 적분 게인 */
     .ap_spd_pid_out_lo        = 0.0,                   /* 출력·적분기 클램프 하한 (안티와인드업) */
     .ap_spd_pid_out_hi        = 1.0,                   /* 출력·적분기 클램프 상한 (안티와인드업) */
+    .ap_spd_pid_ki            = 0.03,                  /* 적분 게인 */
     .ap_spd_sat_lo            = 0.0,                   /* 하한 */
     .ap_spd_sat_hi            = 1.0,                   /* 상한 */
     .scas_alloc_resv_lo       = 0.0,                   /* 하한 */
@@ -55,7 +54,6 @@ const fcl_params_t fcl_params = {
     .scas_yaw_wo_one_minus_p  = 0.00498752080731768,   /* 1 − p */
     .scas_yaw_damp_k          = 0.8,                   /* 게인 */
     .scas_yaw_pid_kp          = 0.5,                   /* 비례 게인 */
-    .scas_yaw_pid_ki          = 0.0,                   /* 적분 게인 */
     .scas_yaw_pid_out_lo      = -0.35,                 /* 출력·적분기 클램프 하한 (안티와인드업) */
     .scas_yaw_pid_out_hi      = 0.35,                  /* 출력·적분기 클램프 상한 (안티와인드업) */
     .scas_yaw_sat_lo          = -0.35,                 /* 하한 */

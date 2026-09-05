@@ -34,6 +34,43 @@ _OP_FN = {
 assert set(_OP_FN) == set(OPS), "OPS와 Python 구현 목록이 어긋남"
 
 
+def execute_node(instances, env, node) -> None:
+    """노드 하나 실행 — env[node.id]를 채우고 필요하면 인스턴스 상태를 갱신한다.
+
+    GraphRunner.step_all의 본문이던 것을 함수로 뺀 것뿐이다(동작 불변) — 유닛
+    검증(claw.verify.units)이 **파티션 노드 부분열**을 같은 의미론으로 실행해야
+    해서다. 실행 규칙이 두 곳에 적히면 유닛 오라클과 전체 실행이 갈라진다.
+    """
+    enable = getattr(node, "enable", None)
+    if enable is not None and not env[enable]:
+        for field, value in node.on_disable.items():
+            set_state(
+                instances[node.id],
+                field,
+                env[value] if isinstance(value, str) else value,
+            )
+        env[node.id] = node.disabled_output
+        return
+    if node.kind == "op":
+        args = [env[r] for r in node.inputs]
+        if node.value is not None:
+            args.append(node.value)
+        env[node.id] = float(_OP_FN[node.op](*args))
+        return
+    inst = instances[node.id]
+    args = [env[r] for r in node.inputs]
+    gains = {port: env[ref] for port, ref in node.gains.items()}
+    style = CALL_STYLE.get(type(inst))
+    if style == "positional":
+        env[node.id] = inst.step(*args)  # CommandFilter.step(cmd, current)
+    elif style == "positional+gains":
+        # PID.step(e, u_ext, kp=, ki=) — 입력이 하나면 u_ext는 기본 0
+        env[node.id] = inst.step(*args, **gains)
+    else:
+        u = tuple(args) if type(inst) in SEQ_INPUT else args[0]
+        env[node.id] = inst.step(u, **gains)
+
+
 class GraphRunner:
     """IR + 샘플주기 → 실행 가능한 제어법칙 한 덩이."""
 
@@ -70,6 +107,16 @@ class GraphRunner:
                 raise KeyError(f"미정의 출력 홀드: {name!r}")
             self._hold[name] = float(value)
 
+    @property
+    def last_outputs(self) -> dict:
+        """직전 스텝의 그래프 출력 {출력명: 값} — 계측 전용 (읽기만 할 것).
+
+        홀드 스텝(enable=0)을 포함해 "마지막으로 내보낸 값"이다 — 생성 C의
+        `sta->hold`와 같은 의미라, 대조 기록(claw.verify.trace)이 출력 개수·이름에
+        관계없이 같은 것을 읽을 수 있다. 법칙 경로는 읽지 않는다.
+        """
+        return dict(self._hold)
+
     def _result(self, values):
         return next(iter(values.values())) if len(values) == 1 else dict(values)
 
@@ -91,34 +138,7 @@ class GraphRunner:
 
         env = dict(inputs)
         for node in self.graph.nodes:
-            enable = getattr(node, "enable", None)
-            if enable is not None and not env[enable]:
-                for field, value in node.on_disable.items():
-                    set_state(
-                        self.instances[node.id],
-                        field,
-                        env[value] if isinstance(value, str) else value,
-                    )
-                env[node.id] = node.disabled_output
-                continue
-            if node.kind == "op":
-                args = [env[r] for r in node.inputs]
-                if node.value is not None:
-                    args.append(node.value)
-                env[node.id] = float(_OP_FN[node.op](*args))
-                continue
-            inst = self.instances[node.id]
-            args = [env[r] for r in node.inputs]
-            gains = {port: env[ref] for port, ref in node.gains.items()}
-            style = CALL_STYLE.get(type(inst))
-            if style == "positional":
-                env[node.id] = inst.step(*args)  # CommandFilter.step(cmd, current)
-            elif style == "positional+gains":
-                # PID.step(e, u_ext, kp=, ki=) — 입력이 하나면 u_ext는 기본 0
-                env[node.id] = inst.step(*args, **gains)
-            else:
-                u = tuple(args) if type(inst) in SEQ_INPUT else args[0]
-                env[node.id] = inst.step(u, **gains)
+            execute_node(self.instances, env, node)
 
         # 중간 노드 값 공개 — 계측 전용 창구 (읽기만 할 것). 그래프 출력(=생성 C의
         # 인터페이스)은 그대로이므로 코드 생성에 영향이 없다. 법칙 경로는 읽지 않는다.
