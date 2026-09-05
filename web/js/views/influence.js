@@ -60,6 +60,9 @@ import {
   STATUS_LABEL, caseGrid, checksSummary, evaluateRequest, hardFailLines, jLine,
   normalizeEvalReport, normalizeVerifyReport, statusInk, verifyRequest,
 } from "../lib/evaluate.js";
+import {
+  applyExport, jointLines, normalizePrescribe, prescribeRequest, singleRows,
+} from "../lib/prescribe.js";
 import { EVAL_MARK, renderEvalCards } from "./evalcards.js";
 import {
   DEFAULT_GRID, machRange, nameCases, parseNumberList, serpentineCases,
@@ -88,6 +91,8 @@ const state = {
   // A/B/C 평가 — 어휘·기준(서버 정본 echo), 카드 강조(null = 전체 — 표시 전용:
   // 비용 게이트는 depth·verify가 대신한다), 마지막 평가 런·검증 런
   evalMeta: null, evalSel: null, evalRun: null, verifyRun: null,
+  // 정량 처방 — "얼마나"의 답 (스윕 결과 참조 + 확인 런)
+  prescribe: null,
   // 구간 경향(3단 C)이 보고 있는 손잡이·지표 — 결과가 아니라 **보는 자리**라
   // 스윕과 수명이 다르다(같은 스윕을 손잡이별로 훑는 것이 이 표의 용법이다)
   trendKnob: null, trendMetric: null,
@@ -960,6 +965,147 @@ export function render() {
     }
   }
 
+  // ── 정량 처방 — "얼마나 고쳐야 넘나" (풀이는 엔진 pipeline/prescribe) ─────
+
+  const prescribeStatus = el("p", { class: "hint", style: "margin:10px 0 0" });
+  const prescribeBox = el("div");
+
+  async function runPrescribe(card) {
+    const rid = state.sweep?.resultId;
+    if (!rid) {
+      runStatus("수정안: 먼저 [이 부분공간 스윕 (3단 B)]이 돌아 있어야 한다 — "
+        + "필요 변화량은 저장된 스윕의 감도에서 나온다", { open: "diag", bad: true });
+      return;
+    }
+    let cases;
+    try {
+      cases = sweepCases(gridCases(), state.scan);
+    } catch (e) {
+      state.prescribe = { status: "제출 불가", result: null, error: errorText(e) };
+      renderPrescribe();
+      runStatus("수정안: 격자 입력 오류", { open: "diag", bad: true });
+      return;
+    }
+    state.prescribe = { status: "제출됨", result: null, error: null };
+    renderPrescribe();
+    runStatus(`수정안 계산 제출 — 풀이는 즉시, 확인 런 ${cases.length}케이스`);
+    try {
+      const job = await api.post("/influence/prescribe",
+        prescribeRequest(shapeState(), {
+          resultId: rid, cases, knobs: card.knobs, confirm: "full",
+          tSettle: 5, tStep: Number(stepIn.value) || 15,
+          fingerprint: state.diag?.fingerprint,
+        }));
+      const done = await watchJob(job.id, (j) => {
+        state.prescribe.status = j.message ?? j.status;
+        runStatus(`수정안 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
+      });
+      if (done.status !== "done" || !done.result_id) {
+        state.prescribe.status = done.status;
+        state.prescribe.error = done.error ?? `수정안 ${done.status}`;
+        renderPrescribe();
+        runStatus(`수정안 ${done.status}`, { open: "diag", bad: true });
+        return;
+      }
+      const res = await api.get(`/results/${done.result_id}`);
+      state.prescribe = { status: "완료", result: normalizePrescribe(res),
+                          error: null };
+      renderPrescribe();
+      runStatus("수정안 계산 완료", { open: "diag" });
+    } catch (e) {
+      state.prescribe = { status: "실패", result: null, error: errorText(e) };
+      renderPrescribe();
+      runStatus("수정안 실패", { open: "diag", bad: true });
+    }
+  }
+
+  function renderPrescribe() {
+    renderTabCounts();
+    clear(prescribeBox);
+    const pr = state.prescribe;
+    prescribeStatus.textContent = !pr
+      ? "수정안 없음 — 처방 카드의 [수정안 계산 (얼마나)]이 여기를 채운다 "
+        + "(스윕이 먼저 돌아 있어야 한다)"
+      : `수정안 ${pr.status}`;
+    if (!pr) return;
+    if (pr.error) prescribeBox.append(el("div", { class: "error-box" }, pr.error));
+    const m = pr.result;
+    if (!m) return;
+
+    // 단일 — 손잡이 하나씩의 필요 변화량 (사유가 값 자리다)
+    const rows = singleRows(m);
+    if (rows.length) {
+      prescribeBox.append(
+        el("h3", { style: "margin:10px 0 4px;font-size:14px" },
+          "단일 손잡이 — 이 하나만 고친다면 얼마나"),
+        el("div", { class: "scroll-x" },
+          el("table", {},
+            el("thead", {}, el("tr", {},
+              ["손잡이", "지표", "필요 변화"].map((h) => el("th", {}, h)))),
+            el("tbody", {}, rows.map((r) => el("tr", {},
+              el("td", {}, el("code", { style: mono() }, r.knob)),
+              el("td", { style: "white-space:nowrap" }, metricLabel(r.metric)),
+              el("td", {
+                style: r.solvable ? "" : `color:${WARN_INK};max-width:460px`,
+              }, r.text)))))));
+    }
+
+    // 조합 — 여러 개를 조금씩 (선형 후보 + 실측 확인)
+    const j = m.joint;
+    prescribeBox.append(
+      el("h3", { style: "margin:12px 0 4px;font-size:14px" },
+        "조합 — 여러 개를 조금씩 (최소 변화, 선형 후보)"),
+      el("p", {
+        style: `margin:0;${mono()}`
+          + (j?.solvable ? "" : `;color:${WARN_INK}`),
+      }, jointLines(j).join(" · ")));
+    for (const w of [...m.proposalNotes, ...m.warnings]) {
+      prescribeBox.append(el("p", {
+        style: `margin:4px 0;font-size:12px;color:${WARN_INK}`,
+      }, `⚠ ${w}`));
+    }
+
+    // 확인 런 — 최종 판정자 (제안이 좋아 보여도 실측이 답이다)
+    if (m.confirm) {
+      const agg = m.confirm.aggregate;
+      prescribeBox.append(el("h3", { style: "margin:12px 0 4px;font-size:14px" },
+        "확인 런 — 제안 형상 실측"));
+      const confirmCards = el("div");
+      renderEvalCards(confirmCards, m.confirm.cards);
+      prescribeBox.append(confirmCards);
+      const fails = hardFailLines(agg);
+      prescribeBox.append(el("p", {
+        style: `margin:6px 0 0;font-weight:600`
+          + `;color:${agg?.hard_fail === false ? GOOD_INK : WARN_INK}`,
+      },
+        agg?.hard_fail === false
+          ? "확인 런 통과 — 하드 게이트 전부 만족"
+          : `확인 런에서 하드 위반 ${fails.length}건 — 제안은 선형 근사였다`),
+      el("p", { style: `margin:4px 0 0;${mono()};font-size:12px` },
+        `${checksSummary(m.confirm.checks)} · ${jLine(agg)}`));
+      if (fails.length) {
+        prescribeBox.append(el("ul", { style: "margin:4px 0 0;padding-left:18px" },
+          fails.map((t) => el("li", { style: `${mono()};margin:2px 0` }, t))));
+      }
+      if (m.gainExport) {
+        const applied = el("p", { class: "hint", style: "margin:4px 0 0" });
+        prescribeBox.append(
+          el("div", { class: "row", style: "gap:10px;margin-top:8px" },
+            el("button", {
+              class: agg?.hard_fail === false ? "primary" : "",
+              onclick: () => {
+                applied.textContent = applyExport(store, m.gainExport,
+                  { sourceId: m.sweepResultId });
+              },
+            }, "이 수정안 적용"),
+            agg?.hard_fail === false ? null
+              : el("span", { style: `font-size:12px;color:${WARN_INK}` },
+                  "확인 런이 Fail이다 — 적용은 되지만 기준 미달 형상이 된다")),
+          applied);
+      }
+    }
+  }
+
   function evalFlag(status) {
     const ink = statusInk(status);
     return el("span", {
@@ -1092,6 +1238,153 @@ export function render() {
           style: `margin:4px 0;font-size:12px;color:${WARN_INK}`,
         }, `⚠ ${w}`));
       }
+    }
+  }
+
+
+  function renderDiag() {
+    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
+    clear(diagBox);
+    const d = state.diag;
+    if (!d) return;
+    // 지표 줄 — 진단의 입력이자 스윕 Δ의 기준. 순서·묶음은 METRICS echo의
+    // group(서버 정본)을 따른다 — A/B/C 재편의 묶음이 표면마다 갈리지 않게
+    const groupOf = (k) => metricDef(k)?.group ?? "기타";
+    const orderedKeys = (state.model?.metrics ?? [])
+      .map((mm) => mm.key).filter((k) => k in d.metrics);
+    const extraKeys = Object.keys(d.metrics).filter((k) => !orderedKeys.includes(k));
+    const metricGroups = [];
+    for (const k of [...orderedKeys, ...extraKeys]) {
+      const g = groupOf(k);
+      const last = metricGroups[metricGroups.length - 1];
+      if (last && last.name === g) last.keys.push(k);
+      else metricGroups.push({ name: g, keys: [k] });
+    }
+    diagBox.append(el("div", { style: "margin-top:8px" },
+      metricGroups.map((g) => el("div", {
+        class: "row", style: "gap:14px;flex-wrap:wrap;font-size:12px;margin:2px 0",
+      },
+        el("span", { class: "hint", style: "min-width:88px" }, g.name),
+        g.keys.map((k) => stat(metricLabel(k),
+          k.endsWith("_frac") ? fmtPercent(d.metrics[k]) : fmtDelta(d.metrics[k])))))));
+    for (const w of d.warnings) {
+      diagBox.append(el("p", { style: `margin:4px 0;font-size:12px;color:${WARN_INK}` }, `⚠ ${w}`));
+    }
+    // 판정 표 — 처방이 없어도 "왜 없는지"(evidence)가 남아야 한다
+    diagBox.append(
+      el("div", { class: "scroll-x", style: "margin-top:8px" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            ["규칙", "축", "판정", "근거"].map((h) => el("th", {}, h)))),
+          el("tbody", {}, d.findings.map((f) =>
+            el("tr", {},
+              el("td", {}, el("code", { style: mono() }, f.rule)),
+              el("td", {}, f.axis),
+              el("td", {}, el("span", {
+                class: "flag",
+                style: f.severity === "warn"
+                  ? `background:${WARN_INK}26;color:${WARN_INK};font-weight:600`
+                  : "",
+              }, f.severity === "warn" ? "처방" : "정상")),
+              el("td", { style: "max-width:520px" },
+                f.verdict,
+                el("span", { class: "hint", style: "margin-left:8px;font-size:11px" },
+                  Object.entries(f.evidence)
+                    .filter(([, v]) => typeof v === "number")
+                    .map(([k, v]) => `${k}=${fmtDelta(v)}`).join(" · ")),
+              ),
+            ))),
+        )),
+    );
+    if (!d.prescriptions.length) {
+      diagBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
+        "처방 없음 — 모든 지표가 문턱 안이다. 문턱은 서버 응답(thresholds)이 들고 있다."));
+      return;
+    }
+    // 처방 카드 — knobs가 곧 3단 스윕의 입력이다.
+    // stretch: .row 기본(align-items:end)은 카드 아래를 맞춰 위가 들쭉날쭉해진다
+    diagBox.append(el("div", {
+      class: "row", style: "gap:12px;flex-wrap:wrap;margin-top:10px;align-items:stretch",
+    },
+      d.prescriptions.map((p) => {
+        const cls = KNOB_CLASS[p.knob_class] ?? { label: p.knob_class, ink: "#98989d" };
+        return el("div", { class: "knob-card" },
+          el("div", { class: "row", style: "gap:8px;align-items:center" },
+            el("span", {
+              class: "flag",
+              style: `background:${cls.ink}26;color:${cls.ink};font-weight:600`,
+            }, cls.label),
+            el("span", { style: "font-size:12px" }, DIRECTION_LABEL[p.direction] ?? ""),
+          ),
+          el("p", { style: "margin:6px 0 0" },
+            p.knobs.map((k) => el("code", { style: `${mono()};margin-right:6px` }, k))),
+          p.joint_with.length
+            ? el("p", { class: "hint", style: "margin:4px 0 0;font-size:12px" },
+                "동시 수정 후보: ", p.joint_with.map((k) =>
+                  el("code", { style: `${mono()};margin-right:6px` }, k)))
+            : null,
+          p.recheck.length
+            ? el("p", { class: "hint", style: "margin:4px 0 0;font-size:12px" },
+                `움직인 뒤 재확인: ${p.recheck.map(metricLabel).join(", ")}`)
+            : null,
+          p.notes.map((n) =>
+            el("p", { style: `margin:4px 0 0;font-size:12px;color:${WARN_INK}` }, n)),
+          el("p", { class: "hint", style: "margin:4px 0 0;font-size:11px" },
+            `근거: ${p.findings.map((i) => d.findings[i]?.rule ?? i).join(", ")}`),
+          el("div", { class: "row", style: "gap:8px;margin-top:8px;flex-wrap:wrap" },
+            el("button", { onclick: () => runOpenloop(p) }, "개루프 근거 (2단)"),
+            el("button", {
+              class: "primary", onclick: () => runSweep(p),
+            }, "이 부분공간 스윕 (3단 B)"),
+            el("button", {
+              onclick: () => runPrescribe(p),
+              title: "저장된 스윕에서 필요 변화량·최소 조합을 풀고 확인 런까지 — "
+                + "먼저 [이 부분공간 스윕]이 돌아 있어야 한다",
+            }, "수정안 계산 (얼마나)"),
+          ),
+        );
+      })));
+  }
+
+  const olStatusLine = el("p", { class: "hint", style: "margin:6px 0 0" });
+  const olBox = el("div");
+
+  async function runOpenloop(card) {
+    let cases;
+    try {
+      cases = gridCases();
+    } catch (e) {
+      state.openloop = { card, result: null, error: errorText(e) };
+      renderOpenloop();
+      runStatus("개루프: 격자 입력 오류", { open: "openloop", bad: true });
+      return;
+    }
+    runStatus(`개루프 Δ 계산 중 — 케이스 ${cases.length}건…`);
+    clear(olBox);
+    try {
+      const job = await api.post("/influence/openloop", {
+        ...structuralRequest(shapeState()),
+        cases, params: card.knobs, fingerprint: state.diag?.fingerprint,
+      });
+      const done = await watchJob(job.id, (j) => {
+        runStatus(`개루프 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
+      });
+      if (done.status !== "done" || !done.result_id) {
+        runStatus(`개루프 ${done.status}`, { bad: true });
+        return;
+      }
+      const res = await api.get(`/results/${done.result_id}`);
+      state.openloop = { card, result: res, error: null };
+      renderOpenloop();
+      // 판독대의 2단 줄이 여기서 채워진다 — 결과를 안 알리면 방금 잰 수치가
+      // 서랍 안에만 있고 화면의 주 표면은 여전히 "아직 안 쟀다"라고 말한다
+      renderReadout();
+      runStatus("개루프 Δ 완료", { open: "openloop" });
+    } catch (e) {
+      state.openloop = { card, result: null, error: errorText(e) };
+      renderOpenloop();
+      renderReadout();  // 실패했는데 판독대가 "아직 안 쟀다"로 남으면 거짓말이다
+      runStatus("개루프 실패", { open: "openloop", bad: true });
     }
   }
 
@@ -1429,7 +1722,10 @@ export function render() {
       } else {
         state.sweep.status = "완료";
       }
-      if (done.result_id) state.sweep.result = await api.get(`/results/${done.result_id}`);
+      if (done.result_id) {
+        state.sweep.result = await api.get(`/results/${done.result_id}`);
+        state.sweep.resultId = done.result_id;  // 정량 처방이 이 스윕을 참조한다
+      }
       renderSweep();
       renderReadout();  // 판독대 3단 줄 — 서랍 안에만 두면 주 표면이 계속 "안 쟀다"다
       runStatus(`폐루프 스윕 ${state.sweep.status}`,
@@ -1930,6 +2226,8 @@ export function render() {
           el("button", { onclick: runScan }, "전 케이스 스캔 (3단 A)")),
         el("div", { class: "row", style: "margin-top:6px" }, diagStatus),
         diagBox,
+        prescribeStatus,
+        prescribeBox,
       ] },
     { key: "openloop", label: "개루프 Δ",
       count: () => (state.openloop?.result ? 1 : null),
@@ -2036,6 +2334,7 @@ export function render() {
   // 평가도 재진입 규약을 따른다 — 결과·선택·기준이 모듈 스코프에 남아 있다
   renderEvalChips();
   renderEval();
+  renderPrescribe();
   renderTabCounts();
   renderDrawer();
 

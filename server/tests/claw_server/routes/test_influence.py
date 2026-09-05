@@ -432,3 +432,61 @@ def test_verify_guards(client):
     })
     assert r.status_code == 422
     assert "상한" in r.json()["detail"]
+
+
+# ---------- 정량 처방 (prescribe) ----------
+
+
+def _small_sweep(client, wait_job, span=None):
+    r = client.post("/api/influence/sweep", json={
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "knobs": ["table.pitch.kp"],
+        **({"span": span} if span else {}),
+        "t_settle": 2.0, "t_step": 4.0,
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    return j["result_id"]
+
+
+def test_prescribe_round_trip(client, wait_job):
+    """저장 스윕 → 단일 필요 변화량 + 조합 + 확인 런(evaluate) + 적용 페이로드."""
+    rid = _small_sweep(client, wait_job, span=[-0.1, 0.1])
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid,
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "confirm": "linear",
+        "t_settle": 2.0, "t_step": 4.0,
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    assert res["kind"] == "influence_prescribe"
+    assert res["knobs"] == ["table.pitch.kp"]
+    s = res["singles"]["table.pitch.kp"]
+    # 대상 지표마다 solvable 아니면 사유가 있다 — 빈칸 없음
+    for metric, rec in s.items():
+        assert rec["solvable"] in (True, False)
+        if not rec["solvable"]:
+            assert rec["reason"]
+    assert "spans" in res["joint"]
+    # 확인 런은 evaluate v2 페이로드다 — 카드가 실린다
+    assert [c["key"] for c in res["confirm"]["cards"]][:2] == ["mode_stability", "gm"]
+    # 적용 페이로드 — 배율이 이미 곱힌 실효 테이블 (웹은 다시 곱하지 않는다)
+    assert res["gain_export"]["tables"]["pitch.kp"]["axes"]["mach"]
+    json.dumps(res, allow_nan=False)
+
+
+def test_prescribe_guards(client, wait_job):
+    base = {"cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}]}
+    assert client.post("/api/influence/prescribe", json={
+        **base, "result_id": "nope"}).status_code == 404
+    # sim 결과를 넘기면 409 — 종류가 다른 저장물로 처방을 풀면 조용한 오답이 된다
+    sim_rid = _run_sim(client, wait_job)
+    assert client.post("/api/influence/prescribe", json={
+        **base, "result_id": sim_rid}).status_code == 409
+    rid = _small_sweep(client, wait_job)
+    assert client.post("/api/influence/prescribe", json={
+        **base, "result_id": rid, "knobs": ["없는.자리"]}).status_code == 422

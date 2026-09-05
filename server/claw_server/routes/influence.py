@@ -25,6 +25,14 @@ from claw.pipeline.evaluate import (
 )
 from claw.pipeline.influence import Shape, make_law, param_universe, structural_payload
 from claw.pipeline.openloop import openloop_delta
+from claw.pipeline.prescribe import (
+    _targets as prescribe_targets,
+    nonadditivity_warnings,
+    proposal_export,
+    proposal_shape,
+    solve_joint,
+    solve_single_knob,
+)
 from claw.pipeline.sweep import nonadditivity, plan_shapes, run_sweep, sweep_plan
 from claw.sim import check_law_plant_pairing
 from claw.plant import make_demo_aircraft
@@ -591,5 +599,133 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
         job.result_id = job.id
 
     job = request.app.state.jobs.submit("influence_verify", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()
+
+
+class PrescribeIn(InfluenceIn):
+    """정량 처방 요청 — 저장된 스윕(result_id)에서 "얼마나"를 풀고 확인 런까지.
+
+    knobs가 없으면 스윕이 실제로 흔든 단독 손잡이 전부가 대상이다. cases는 확인
+    런(evaluate)의 격자다 — 스윕 저장물에는 케이스 좌표가 없어(이름뿐) 클라이언트가
+    같은 격자를 다시 싣는 계약(3단 B와 동일).
+    """
+
+    fingerprint: str = ""
+    result_id: str = Field(min_length=1)
+    knobs: list[str] | None = None
+    cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
+    criteria: dict | None = None
+    confirm: Literal["none", "linear", "full"] = "full"
+    t_settle: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
+    t_step: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
+    t_hold: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
+    dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
+
+
+@router.post("/influence/prescribe", status_code=202)
+def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> dict:
+    """정량 처방 — 단일 필요 변화량 + 복수 소폭 조합 + 확인 런 (잡 202).
+
+    풀이는 저장 스윕의 순수 변환이라 즉시고, 비용은 확인 런(트림 + evaluate)뿐이다.
+    확정은 실측이다: 제안이 좋아 보여도 confirm 결과의 하드 게이트가 판정자다.
+    """
+    store = request.app.state.store
+    try:
+        payload = store.load(req.result_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"결과 없음: {req.result_id}")
+    if payload.get("kind") != "influence_sweep":
+        raise HTTPException(
+            status_code=409,
+            detail=f"influence_sweep 결과가 아니다: kind={payload.get('kind')}")
+    rows = payload.get("rows") or []
+
+    ac = make_demo_aircraft()
+    cases = build_cases(req.cases)
+    try:
+        shape = to_shape(req)
+        criteria = GainEvalCriteria.from_dict(req.criteria)
+        check_law_plant_pairing(ac, make_law(shape))
+        knobs = req.knobs
+        if not knobs:
+            knobs = sorted({k for r in rows
+                            if r.get("role") == "single"
+                            for k in (r.get("overrides") or {})})
+        if not knobs:
+            raise ValueError("이 스윕에는 단독 런이 없다 — 처방을 풀 손잡이가 없다")
+        universe = {r.id for r in param_universe(shape)}
+        unknown = [k for k in knobs if k not in universe]
+        if unknown:
+            raise ValueError(f"알 수 없는 파라미터 id: {unknown}")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    n = len(cases)
+    per_case = 0 if req.confirm == "none" else (1 if req.confirm == "linear" else 3)
+    total = 1 + (n + n * per_case if per_case else 0)
+
+    def work(job):
+        job.report(0, total, message="처방 풀이(저장 스윕 재계산)")
+        singles = {}
+        for knob in knobs:
+            singles[knob] = {}
+            for metric, limit, above in prescribe_targets(criteria):
+                singles[knob][metric] = solve_single_knob(
+                    rows, knob, metric, limit, above_is_bad=above)
+        joint = solve_joint(rows, knobs, criteria)
+        warnings = list(nonadditivity_warnings(payload, knobs))
+        sweep_fp = payload.get("fingerprint") or ""
+        shape_fp = shape.fingerprint()
+        if sweep_fp and sweep_fp != shape_fp:
+            warnings.append(
+                f"계보 불일치: 스윕 지문 {sweep_fp} ≠ 현재 형상 지문 {shape_fp} — "
+                "필요 변화량이 다른 형상의 감도에서 나왔다. 스윕을 다시 돌릴 것")
+        job.report(1, total, message="처방 풀이 완료")
+
+        confirm_report = None
+        gain_export = None
+        proposal_notes: list = []
+        spans = joint.get("spans") or {}
+        # 제안 변화가 사실상 0이면 확인 런은 base 재평가일 뿐이다 — 돌리지 않고
+        # 그 사실을 말한다 (조용한 낭비는 "확인했다"는 착각을 만든다)
+        if all(abs(v) < 1e-6 for v in spans.values()) and spans:
+            warnings.append("제안 변화가 0 — 확인 런 생략(확인할 새 형상이 없다)")
+            spans = {}
+        if req.confirm != "none" and spans:
+            shape2, proposal_notes = proposal_shape(shape, spans)
+            trs = trim_batch(
+                ac, cases, fingerprint=req.fingerprint,
+                on_progress=lambda done, _t, tr: job.report(
+                    1 + done, total, message=f"확인 트림: {tr.case.name}"))
+            confirm_report = evaluate(
+                ac, trs, shape2, criteria, depth=req.confirm,
+                dt_plant=req.dt_plant, t_settle=req.t_settle,
+                t_step=req.t_step, t_hold=req.t_hold,
+                on_progress=lambda done, ev_total, msg: job.report(
+                    1 + n + done, 1 + n + ev_total, message=f"확인: {msg}"))
+            gain_export = proposal_export(shape2)
+
+        out = to_jsonable({
+            "kind": "influence_prescribe",
+            "sweep_result_id": req.result_id,
+            "knobs": knobs,
+            "singles": singles,
+            "joint": joint,
+            "confirm": confirm_report,
+            "gain_export": gain_export,
+            "proposal_notes": proposal_notes,
+            "fingerprint": shape_fp,
+            "sweep_fingerprint": sweep_fp,
+            "criteria_fingerprint": criteria.fingerprint(),
+            "warnings": warnings,
+        })
+        store.save(job.id, out,
+                   meta={"kind": "influence_prescribe", "created": job.created,
+                         "n": len(knobs), "fingerprint": req.fingerprint,
+                         "criteria_fingerprint": criteria.fingerprint()})
+        job.result_id = job.id
+
+    job = request.app.state.jobs.submit("influence_prescribe", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"
     return job.to_dict()
