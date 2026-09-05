@@ -240,13 +240,22 @@ def slope_matrix(rows, knobs, metrics):
 
 
 def solve_joint(rows, knobs, criteria: GainEvalCriteria, *,
-                span_bound: float = 0.2) -> dict:
+                span_bound: float = 0.2, metrics=None) -> dict:
     """복수 손잡이 소폭 조합 — 하드 지표를 전 케이스에서 만족하는 최소 변화(min Σx²).
 
     선형 국소 모델(slope_matrix) 위의 SLSQP다. 결과는 **후보**다 — 합격 선언은
     확인 런(evaluate)의 몫이고, 비가산성(쌍 런)이 크면 경고가 그 신뢰도를 깎는다.
+
+    metrics: 풀 지표를 좁힌다(평가가 실패라고 한 것만 — 승계). None이면 기준의
+    하드 지표 전부. 통과한 지표까지 제약으로 세우면 이미 만족하는 부등식이 해를
+    좁혀 "고칠 수 있는데 못 고친다"가 나올 수 있다.
     """
     targets = _targets(criteria)
+    if metrics:
+        want = set(metrics)
+        focused = [t for t in targets if t[0] in want]
+        if focused:
+            targets = focused
     metrics = [m for m, _t, _a in targets]
     S, excluded = slope_matrix(rows, knobs, metrics)
     bases: dict = {}

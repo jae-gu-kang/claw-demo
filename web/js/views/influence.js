@@ -57,8 +57,9 @@ import {
   sweepCases, sweepKnobs, sweepRequest, trendInk, trendMatrix, worstTransitions,
 } from "../lib/influence.js";
 import {
-  STATUS_LABEL, caseGrid, checksSummary, evaluateRequest, hardFailLines, jLine,
-  normalizeEvalReport, normalizeVerifyReport, statusInk, verifyRequest,
+  STATUS_LABEL, attributionRows, cardDeltas, caseGrid, checksSummary,
+  evaluateRequest, hardFailLines, jLine, localityLines, normalizeEvalReport,
+  normalizeVerifyReport, statusInk, verifyRequest,
 } from "../lib/evaluate.js";
 import {
   applyExport, jointLines, normalizePrescribe, prescribeRequest, singleRows,
@@ -91,6 +92,8 @@ const state = {
   // A/B/C 평가 — 어휘·기준(서버 정본 echo), 카드 강조(null = 전체 — 표시 전용:
   // 비용 게이트는 depth·verify가 대신한다), 마지막 평가 런·검증 런
   evalMeta: null, evalSel: null, evalRun: null, verifyRun: null,
+  // 직전 평가 — 재측정하면 카드가 얼마에서 얼마로 갔는지 낸다(판독대 문법)
+  evalPrev: null,
   // 정량 처방 — "얼마나"의 답 (스윕 결과 참조 + 확인 런)
   prescribe: null,
   // 구간 경향(3단 C)이 보고 있는 손잡이·지표 — 결과가 아니라 **보는 자리**라
@@ -891,6 +894,9 @@ export function render() {
       runStatus("평가: 격자 입력 오류", { open: "eval", bad: true });
       return;
     }
+    // 직전 결과는 여기서 잡는다 — 아래 제출이 state.evalRun을 갈아 끼우므로
+    // 완료 시점에 읽으면 이미 null이다(델타가 영영 안 나오던 자리)
+    const prevResult = state.evalRun?.result ?? null;
     runStatus(`평가 제출 중 — 케이스 ${cases.length}건`
       + (depth === "linear" ? " · 선형만(시뮬 0)" : " · 표준+동시명령 런"));
     try {
@@ -912,8 +918,13 @@ export function render() {
         return;
       }
       const res = await api.get(`/results/${done.result_id}`);
-      state.evalRun = { status: "완료", submitted: true,
-                        result: normalizeEvalReport(res), error: null };
+      // 직전 결과가 델타의 기준이다 — 같은 깊이끼리만 비교한다(선형 카드와
+      // 비선형 카드를 짝지으면 "못 잰 것"이 개선으로 보인다)
+      const next = normalizeEvalReport(res);
+      state.evalPrev =
+        (prevResult && prevResult.depth === next.depth) ? prevResult : null;
+      state.evalRun = { status: "완료", submitted: true, result: next, error: null,
+                        resultId: done.result_id };
       renderEval();
       runStatus("평가 완료", { open: "eval" });
     } catch (e) {
@@ -970,11 +981,11 @@ export function render() {
   const prescribeStatus = el("p", { class: "hint", style: "margin:10px 0 0" });
   const prescribeBox = el("div");
 
-  async function runPrescribe(card) {
+  async function runPrescribe(card, { open = "diag" } = {}) {
     const rid = state.sweep?.resultId;
     if (!rid) {
       runStatus("수정안: 먼저 [이 부분공간 스윕 (3단 B)]이 돌아 있어야 한다 — "
-        + "필요 변화량은 저장된 스윕의 감도에서 나온다", { open: "diag", bad: true });
+        + "필요 변화량은 저장된 스윕의 감도에서 나온다", { open, bad: true });
       return;
     }
     let cases;
@@ -983,7 +994,7 @@ export function render() {
     } catch (e) {
       state.prescribe = { status: "제출 불가", result: null, error: errorText(e) };
       renderPrescribe();
-      runStatus("수정안: 격자 입력 오류", { open: "diag", bad: true });
+      runStatus("수정안: 격자 입력 오류", { open, bad: true });
       return;
     }
     state.prescribe = { status: "제출됨", result: null, error: null };
@@ -993,6 +1004,8 @@ export function render() {
       const job = await api.post("/influence/prescribe",
         prescribeRequest(shapeState(), {
           resultId: rid, cases, knobs: card.knobs, confirm: "full",
+          // 평가가 실패라고 한 지표만 푼다 — 통과 지표까지 풀면 표에 답이 묻힌다
+          evalResultId: state.evalRun?.resultId,
           tSettle: 5, tStep: Number(stepIn.value) || 15,
           fingerprint: state.diag?.fingerprint,
         }));
@@ -1004,18 +1017,18 @@ export function render() {
         state.prescribe.status = done.status;
         state.prescribe.error = done.error ?? `수정안 ${done.status}`;
         renderPrescribe();
-        runStatus(`수정안 ${done.status}`, { open: "diag", bad: true });
+        runStatus(`수정안 ${done.status}`, { open, bad: true });
         return;
       }
       const res = await api.get(`/results/${done.result_id}`);
       state.prescribe = { status: "완료", result: normalizePrescribe(res),
                           error: null };
       renderPrescribe();
-      runStatus("수정안 계산 완료", { open: "diag" });
+      runStatus("수정안 계산 완료", { open });
     } catch (e) {
       state.prescribe = { status: "실패", result: null, error: errorText(e) };
       renderPrescribe();
-      runStatus("수정안 실패", { open: "diag", bad: true });
+      runStatus("수정안 실패", { open, bad: true });
     }
   }
 
@@ -1106,6 +1119,53 @@ export function render() {
     }
   }
 
+  /** 소견의 [얼마나 →] — 평가가 지목한 자리를 그대로 물려 감도와 해를 푼다.
+   *
+   * 그 손잡이를 흔든 스윕이 없으면 **먼저 스윕을 돌린다**. 사용자가 "스윕부터
+   * 돌리세요"라는 말을 듣고 다른 서랍으로 가서 카드를 찾아 누르는 단계가 이
+   * 연계의 이유라, 여기서 그 단계를 대신한다.
+   */
+  async function runPrescribeFromEval(knobs) {
+    if (!knobs?.length) return;
+    let cases;
+    try {
+      cases = gridCases();
+    } catch (e) {
+      runStatus(`얼마나: 격자 입력 오류 — ${errorText(e)}`,
+        { open: "eval", bad: true });
+      return;
+    }
+    const swept = new Set(
+      (state.sweep?.result?.rows ?? [])
+        .filter((r) => r.role === "single")
+        .flatMap((r) => Object.keys(r.overrides ?? {})));
+    const need = knobs.filter((k) => !swept.has(k));
+    try {
+      if (need.length || !state.sweep?.resultId) {
+        runStatus(`감도 측정 중 — 손잡이 ${knobs.length}개 × 케이스 ${cases.length}건`);
+        const sj = await api.post("/influence/sweep", sweepRequest(shapeState(), {
+          cases, knobs, pairs: [],
+          tSettle: 5, tStep: Number(stepIn.value) || 15,
+          fingerprint: state.diag?.fingerprint,
+        }));
+        const sdone = await watchJob(sj.id, (j) => {
+          runStatus(`감도 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
+        });
+        if (sdone.status !== "done" || !sdone.result_id) {
+          runStatus(`감도 측정 ${sdone.status}`, { open: "eval", bad: true });
+          return;
+        }
+        state.sweep = { card: { knobs }, status: "완료", submitted: true,
+                        result: await api.get(`/results/${sdone.result_id}`),
+                        resultId: sdone.result_id, error: null };
+        renderSweep();
+      }
+      await runPrescribe({ knobs }, { open: "eval" });
+    } catch (e) {
+      runStatus(`얼마나: 실패 — ${errorText(e)}`, { open: "eval", bad: true });
+    }
+  }
+
   function evalFlag(status) {
     const ink = statusInk(status);
     return el("span", {
@@ -1139,6 +1199,20 @@ export function render() {
       renderEvalCards(evalCardsBox, m.cards, {
         emphasis: state.evalSel == null ? null : new Set(state.evalSel),
       });
+      // 재측정이면 카드마다 얼마에서 얼마로 — 개선만 보여 주지 않는다
+      const deltas = state.evalPrev
+        ? cardDeltas(state.evalPrev.cards, m.cards) : [];
+      if (deltas.length) {
+        evalCardsBox.append(el("div", {
+          class: "row", style: "gap:12px;flex-wrap:wrap;margin-top:8px;font-size:12px",
+        },
+          el("span", { class: "hint" }, "직전 대비:"),
+          deltas.map((d) => el("span", {
+            style: `${mono()};color:${
+              d.improved === null ? SKIN.inkDim
+                : d.improved ? GOOD_INK : WARN_INK}`,
+          }, `${d.label} ${d.text}`))));
+      }
       evalBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
         `케이스 ${agg?.n_cases ?? 0}건 · depth=${m.depth}`
         + ` · 형상 지문 ${m.fingerprint} · 기준 지문 ${m.criteriaFingerprint}`
@@ -1163,6 +1237,41 @@ export function render() {
                   ? `${fmtNum(Number(c.value.value))} `
                   : "",
                 c.note ?? "")))))));
+      }
+
+      // 국소성 — 격자 재기의 부수 산출(스캔이 하던 일). 어디서 나쁜지와 그래서
+      // 어느 층(스케줄 셀 vs 설계점 게인)을 만질 것인지가 다음 단계의 입력이다
+      const locLines = localityLines(agg?.locality);
+      if (locLines.length) {
+        evalBox.append(
+          el("h3", { style: "margin:12px 0 4px;font-size:14px" },
+            "어디서 나쁜가 — 국소성"),
+          el("ul", { style: "margin:0;padding-left:18px" },
+            locLines.map((t) => el("li", { style: "margin:2px 0" }, t))));
+      } else if (agg?.locality) {
+        evalBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
+          "국소성: 문턱을 넘은 지표가 없다 — 격자 전체가 판정선 안"));
+      }
+
+      // 소견 — 실패 케이스의 원인이 **같은 런에서** 나온다 (별도 진단 실행 없음)
+      const attrs = attributionRows(m).filter((r) => r.solvable);
+      if (attrs.length) {
+        evalBox.append(
+          el("h3", { style: "margin:12px 0 4px;font-size:14px" },
+            "왜 그런가 — 소견 (같은 런의 귀속)"),
+          el("div", { class: "scroll-x" },
+            el("table", {},
+              el("thead", {}, el("tr", {},
+                ["케이스", "귀속된 자리", ""].map((h) => el("th", {}, h)))),
+              el("tbody", {}, attrs.map((r) => el("tr", {},
+                el("td", { style: "white-space:nowrap" }, r.case),
+                el("td", { style: `max-width:520px;${mono()};font-size:12px` },
+                  r.text),
+                el("td", {},
+                  el("button", {
+                    onclick: () => runPrescribeFromEval(r.knobs),
+                    title: "이 자리들을 스윕해 필요 변화량과 조합을 푼다",
+                  }, "얼마나 →"))))))));
       }
 
       const fails = hardFailLines(agg);
@@ -2195,6 +2304,10 @@ export function render() {
             el("button", { onclick: runVerify }, "검증 실행 (C급)")),
           verifyStatus,
           verifyBox,
+          // 처방(얼마나)은 이 깔때기의 다음 칸이다 — 소견의 [얼마나 →]가 여기를
+          // 채운다. 진단 서랍의 카드에서 눌러도 같은 박스라 결과가 갈리지 않는다
+          prescribeStatus,
+          prescribeBox,
         ];
       } },
     { key: "params", label: "파라미터",

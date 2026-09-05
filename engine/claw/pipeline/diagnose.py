@@ -136,7 +136,7 @@ def _rms(x):
     return None if x.size == 0 else float(np.sqrt(np.mean(x * x)))
 
 
-def _rule_error_split(signals, metrics, findings, pres, warnings):
+def _rule_error_split(signals, metrics, findings, pres, warnings, th):
     """규칙 1 — 추종 오차를 (원본−필터)와 (필터−응답)으로 분해해 귀속.
 
     필터 지배 자체는 결함이 아니다(명령 성형이 목적) — 해당 축 추종 RMS 지표가
@@ -161,12 +161,13 @@ def _rule_error_split(signals, metrics, findings, pres, warnings):
             e_f, e_l = wrap_pi(e_f), wrap_pi(e_l)
         r_f, r_l = _rms(e_f), _rms(e_l)
         metric = metrics.get(f"{axis}_rms")
-        bad = metric is not None and metric > RMS_THRESH[axis]
-        filter_led = r_f is not None and r_l is not None and r_f > FILTER_DOMINANCE * r_l
+        bad = metric is not None and metric > th["rms"][axis]
+        filter_led = (r_f is not None and r_l is not None
+                      and r_f > FILTER_DOMINANCE * r_l)
         ev = {"rms_filter": r_f, "rms_loop": r_l,
               "ratio": None if not r_l else r_f / r_l,
               "active_frac": float(mask.mean()), "metric": metric,
-              "threshold": RMS_THRESH[axis]}
+              "threshold": th["rms"][axis]}
         if not bad:
             findings.append(Finding(
                 "error_split", axis, "info",
@@ -191,7 +192,7 @@ def _rule_error_split(signals, metrics, findings, pres, warnings):
                 recheck=COUPLING["loop_gain"]))
 
 
-def _rule_saturation(signals, metrics, findings, pres, warnings):
+def _rule_saturation(signals, metrics, findings, pres, warnings, th):
     """규칙 2 — 포화 틱 판정은 기록값 비교(|포화 전 − 후| > tol)다: 클램프 값을
     재기술하지 않아도 두 채널의 괴리가 곧 포화다. 그 틱에서 기여항 평균을 비교해
     지배 게인 그룹을 귀속한다."""
@@ -243,10 +244,10 @@ def _rule_saturation(signals, metrics, findings, pres, warnings):
             if v.size:
                 means.append((float(np.mean(np.abs(v))), sig_k, knobs, klass))
         means.sort(reverse=True)
-        ev = {"sat_frac": frac, "threshold": SAT_FRAC_WARN}
+        ev = {"sat_frac": frac, "threshold": th["sat_frac"]}
         for m, sig_k, _kn, _kl in means:
             ev[f"mean_{sig_k.split('_')[-1]}"] = m
-        if frac <= SAT_FRAC_WARN or not means:
+        if frac <= th["sat_frac"] or not means:
             findings.append(Finding(
                 "sat_attrib", axis, "info",
                 f"{axis} 축 포화 {frac:.1%} — 문턱 안", ev))
@@ -266,13 +267,13 @@ def _rule_saturation(signals, metrics, findings, pres, warnings):
     # 믹서(물리 타면) 포화 — 축 명령이 아니라 타면 예산의 문제. de·da 기여로
     # 피치/롤 어느 축이 예산을 먹는지 귀속한다 (엘레본은 두 축이 예산을 공유)
     frac = metrics.get("surf_sat_frac")
-    if frac is not None and frac > SAT_FRAC_WARN:
+    if frac is not None and frac > th["sat_frac"]:
         de, da = _arr(signals, "de"), _arr(signals, "da")
         if de is not None and da is not None:
             m_de, m_da = float(np.mean(np.abs(de))), float(np.mean(np.abs(da)))
             axis = "pitch" if m_de >= m_da else "roll"
             ev = {"surf_sat_frac": frac, "mean_de": m_de, "mean_da": m_da,
-                  "threshold": SAT_FRAC_WARN}
+                  "threshold": th["sat_frac"]}
             findings.append(Finding(
                 "mix_sat", axis, "warn",
                 f"타면 포화 {frac:.1%} — 엘레본 예산을 {axis} 축이 주도", ev))
@@ -306,7 +307,7 @@ def _pid_integrator_is_live(i) -> bool:
     fin = i[np.isfinite(i)]
     return fin.size > 1 and float(np.max(fin) - np.min(fin)) > _FROZEN_TOL
 
-def _rule_windup(signals, meta, dt, t, findings, pres, warnings):
+def _rule_windup(signals, meta, dt, t, findings, pres, warnings, th):
     """규칙 3 — 적분이 막힌 시간을 잰다 (주차 또는 출력 포화 중 동결).
     지속을 run_stats(duty)로 집계한다. 처방은 ki 감소가 1차, 클램프 완화
     (joint_with)가 동시 후보다."""
@@ -385,8 +386,8 @@ def _rule_windup(signals, meta, dt, t, findings, pres, warnings):
             continue
         ev = {"parked_frac": stats["frac"], "events": stats["events"],
               "longest": stats["longest"], "first_t": stats["first_t"],
-              "clamp": [lo, hi], "threshold": WINDUP_FRAC}
-        if stats["frac"] <= WINDUP_FRAC:
+              "clamp": [lo, hi], "threshold": th["windup_frac"]}
+        if stats["frac"] <= th["windup_frac"]:
             findings.append(Finding(
                 "windup", axis, "info",
                 f"{axis} 적분 막힘 {stats['frac']:.1%} — 문턱 안", ev))
@@ -403,7 +404,7 @@ def _rule_windup(signals, meta, dt, t, findings, pres, warnings):
                    "정상상태 수렴이 느려진다",)))
 
 
-def _rule_limiter(signals, dt, t, findings, pres, warnings):
+def _rule_limiter(signals, dt, t, findings, pres, warnings, th):
     """규칙 5 — 리미터 작동 구간의 귀속: α 마진 침투 동반이면 피치 응답이 경계를
     넘는 것(감쇠 문제), 침투 없이 지속이면 margin이 임무 대비 보수적이거나 임무가
     경계에 붙어 있는 것(margin/임무 문제)."""
@@ -421,8 +422,8 @@ def _rule_limiter(signals, dt, t, findings, pres, warnings):
         min_margin = float(v.min()) if v.size else None
     ev = {"active_frac": stats["frac"], "events": stats["events"],
           "longest": stats["longest"], "min_alpha_margin_while_active": min_margin,
-          "threshold": LIMITER_FRAC}
-    if stats["frac"] <= LIMITER_FRAC:
+          "threshold": th["limiter_frac"]}
+    if stats["frac"] <= th["limiter_frac"]:
         findings.append(Finding(
             "limiter", "pitch", "info",
             f"리미터 작동 {stats['frac']:.1%} — 문턱 안", ev))
@@ -528,13 +529,20 @@ def _cross_check(shape, pres, warnings, probe_rel):
                     (*b.joint_with, *(k for k in a.knobs if k not in b.knobs))))
 
 
-def diagnose_run(payload, shape: Shape, *, probe_rel: float = 0.01) -> dict:
+def diagnose_run(payload, shape: Shape, *, probe_rel: float = 0.01,
+                 thresholds=None) -> dict:
     """폐루프 런 하나 → 진단(findings) + 처방 카드(prescriptions).
 
     payload는 SimResult의 (t, signals, envelope, meta) — JSON 왕복본 수용
     (duty_report와 같은 계약: 저장된 원본을 쥔 서버가 부른다). shape는 이 런을
     만든 형상 — 처방 승격(스케줄 자리 판정)과 스윕 계보의 기준이다.
+
+    thresholds: 평가 기준 정본에서 파생한 문턱(GainEvalCriteria.to_diagnose_thresholds).
+    주지 않으면 모듈 기본값이다 — 기본값은 그 정본의 시드와 같은 값이라 판정이
+    달라지지 않는다. **이 인자가 있는 이유**: 사용자가 기준을 바꿨는데 진단만 옛
+    숫자로 판정하면 같은 런이 화면마다 다른 소견을 받는다 (02 §5.5 이중 정의).
     """
+    th = {**THRESHOLDS, **(thresholds or {})}
     t = np.asarray(payload["t"], dtype=float)
     signals = payload.get("signals") or {}
     envelope = payload.get("envelope") or {}
@@ -546,10 +554,10 @@ def diagnose_run(payload, shape: Shape, *, probe_rel: float = 0.01) -> dict:
     pres: list[Prescription] = []
     warnings: list[str] = []
 
-    _rule_error_split(signals, metrics, findings, pres, warnings)
-    _rule_saturation(signals, metrics, findings, pres, warnings)
-    _rule_windup(signals, meta, dt, t, findings, pres, warnings)
-    _rule_limiter(signals, dt, t, findings, pres, warnings)
+    _rule_error_split(signals, metrics, findings, pres, warnings, th)
+    _rule_saturation(signals, metrics, findings, pres, warnings, th)
+    _rule_windup(signals, meta, dt, t, findings, pres, warnings, th)
+    _rule_limiter(signals, dt, t, findings, pres, warnings, th)
     _cross_check(shape, pres, warnings, probe_rel)
 
     return {
@@ -558,7 +566,7 @@ def diagnose_run(payload, shape: Shape, *, probe_rel: float = 0.01) -> dict:
         "findings": [f.as_dict() for f in findings],
         "prescriptions": [p.as_dict() for p in pres],
         "warnings": warnings,
-        "thresholds": THRESHOLDS,
+        "thresholds": th,
     }
 
 
@@ -575,7 +583,7 @@ _GRID_CHECKS = {
 }
 
 
-def diagnose_grid(per_case, thresholds=None) -> dict:
+def diagnose_grid(per_case, thresholds=None, local_frac=None) -> dict:
     """규칙 4 — 케이스 격자별 지표의 국소성 판정.
 
     per_case: [{"case": {...}, "metrics": {...}, "aborted": ...}]. 결함이 격자
@@ -588,6 +596,7 @@ def diagnose_grid(per_case, thresholds=None) -> dict:
     만의 값이라 문턱 안으로 보일 수 있고, 그러면 판정 불가가 "정상"으로 위장된다.
     n_cases는 실제로 잰 케이스 수다.
     """
+    local = LOCAL_FRAC if local_frac is None else float(local_frac)
     checks = dict(_GRID_CHECKS)
     if thresholds:
         for k, v in thresholds.items():
@@ -606,7 +615,7 @@ def diagnose_grid(per_case, thresholds=None) -> dict:
         frac = len(bad) / len(known)
         if not bad:
             verdict, klass = "ok", None
-        elif frac <= LOCAL_FRAC:
+        elif frac <= local:
             verdict, klass = "local", "schedule"
         else:
             verdict, klass = "global", "loop_gain"
@@ -615,4 +624,4 @@ def diagnose_grid(per_case, thresholds=None) -> dict:
             "bad_frac": frac, "bad_cases": bad, "verdict": verdict,
             "knob_class": klass,
         }
-    return {"metrics": out, "local_frac": LOCAL_FRAC}
+    return {"metrics": out, "local_frac": local}

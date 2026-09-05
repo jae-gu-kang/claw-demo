@@ -12,10 +12,11 @@
 import { normalizeEvalReport } from "./evaluate.js";
 import { fmtPercent, structuralRequest } from "./influence.js";
 
-export function prescribeRequest(state, { resultId, cases, knobs, criteria,
-                                          confirm, tSettle, tStep, tHold,
-                                          fingerprint } = {}) {
+export function prescribeRequest(state, { resultId, evalResultId, cases,
+                                          knobs, criteria, confirm, tSettle,
+                                          tStep, tHold, fingerprint } = {}) {
   const body = { ...structuralRequest(state), result_id: resultId, cases };
+  if (evalResultId) body.eval_result_id = evalResultId;
   if (knobs != null) body.knobs = knobs;
   if (criteria != null) body.criteria = criteria;
   if (confirm != null) body.confirm = confirm;

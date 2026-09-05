@@ -109,3 +109,20 @@ def test_대역폭_창은_tuple_list_왕복에도_지문이_같다():
     a = GainEvalCriteria.from_dict(d)
     b = GainEvalCriteria.from_dict(a.to_dict())
     assert a.fingerprint() == b.fingerprint()
+
+
+def test_파생_문턱은_진단_상수와_같은_값이다():
+    """규칙 3의 이행 — 기준이 진단·격자 판정의 정본이 되되, 기본값에서는 종전과
+    한 글자도 다르지 않아야 한다(정본화가 조용한 판정 변화가 되면 안 된다)."""
+    c = GainEvalCriteria()
+    th = c.to_diagnose_thresholds()
+    assert th["rms"] == diagnose.RMS_THRESH
+    assert th["sat_frac"] == diagnose.SAT_FRAC_WARN
+    assert th["windup_frac"] == diagnose.WINDUP_FRAC
+    assert th["limiter_frac"] == diagnose.LIMITER_FRAC
+    assert abs(th["local_frac"] - diagnose.LOCAL_FRAC) < 1e-15
+    grid = c.to_grid_thresholds()
+    for key, (value, _above) in diagnose._GRID_CHECKS.items():
+        assert abs(grid[key] - value) < 1e-15, key
+    # 반대 방향 — 진단이 모르는 지표를 격자에 넣지 않는다
+    assert set(grid) == set(diagnose._GRID_CHECKS)

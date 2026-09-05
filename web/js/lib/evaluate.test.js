@@ -11,9 +11,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
-  STATUS_LABEL, cardLines, caseGrid, checksSummary, evaluateRequest,
-  hardFailLines, jLine, normalizeEvalReport, normalizeVerifyReport,
-  statusInk, verifyRequest,
+  STATUS_LABEL, attributionRows, cardDeltas, cardLines, caseGrid, checksSummary,
+  evaluateRequest, hardFailLines, jLine, localityLines, normalizeEvalReport,
+  normalizeVerifyReport, statusInk, verifyRequest,
 } from "./evaluate.js";
 
 const payload = {
@@ -187,4 +187,81 @@ test("카드 값의 문자열 필드는 수로 위장되지 않는다 (라이브
   assert.ok(!joined.includes("−∞") && !joined.includes("NaN"), joined);
   // case 키는 worst_case 줄이 싣는다 — 같은 이름이 두 번 찍히지 않는다
   assert.equal(joined.split("M0.4_h3000_f200").length - 1, 1);
+});
+
+test("소견(원인 귀속)은 판정 옆에 선다 — 별도 실행 표면이 아니다", () => {
+  const m = normalizeEvalReport({
+    ...payload,
+    cases: [{ ...payload.cases[0],
+      attribution: { status: "ok",
+        findings: [{ rule: "error_split", axis: "alt", severity: "warn",
+                     verdict: "필터 병목", evidence: { rms_filter: 3.1 } }],
+        prescriptions: [{ knobs: ["fcl/Autopilot.tau_alt"], knob_class: "filter",
+                          direction: "decrease", findings: [0], joint_with: [],
+                          recheck: ["surf_sat_frac"], notes: [] }] } }],
+  });
+  const rows = attributionRows(m);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].case, "M0.5");
+  assert.match(rows[0].text, /tau_alt/);
+  assert.match(rows[0].text, /줄인다|↓/);
+  assert.deepEqual(rows[0].knobs, ["fcl/Autopilot.tau_alt"]);
+});
+
+test("귀속이 없으면 사유가 자리를 지킨다 (빈칸 금지)", () => {
+  const m = normalizeEvalReport({
+    ...payload,
+    cases: [{ ...payload.cases[0],
+      attribution: { status: "na", note: "전 항목 통과 — 귀속할 결함이 없다" } }],
+  });
+  const rows = attributionRows(m);
+  assert.equal(rows[0].solvable, false);
+  assert.match(rows[0].text, /귀속할 결함이 없다/);
+  assert.deepEqual(rows[0].knobs, []);
+});
+
+test("국소성 줄 — 어디서 나쁜지와 처방 층을 함께 낸다", () => {
+  const lines = localityLines({
+    metrics: {
+      alt_rms: { verdict: "local", n_bad: 2, n_cases: 6, bad_frac: 0.33,
+                 bad_cases: ["M0.4", "M0.45"], knob_class: "schedule",
+                 threshold: 10.0 },
+      spd_rms: { verdict: "ok", n_bad: 0, n_cases: 6, bad_cases: [],
+                 knob_class: null, threshold: 2.0 },
+    },
+    local_frac: 1 / 3,
+  });
+  const joined = lines.join(" | ");
+  assert.match(joined, /alt_rms/);
+  assert.match(joined, /국소/);
+  assert.match(joined, /2\/6/);
+  assert.match(joined, /M0\.4/);
+  assert.ok(!/spd_rms/.test(joined), "통과 지표는 줄을 차지하지 않는다");
+  assert.deepEqual(localityLines(null), []);
+});
+
+test("재측정 델타 — 대표 스칼라끼리 짝지어 좋아졌는지 말한다", () => {
+  const before = [{ key: "gm", label: "이득여유 GM", status: "fail",
+                    primary: { value: 4.2, unit: "dB", better: "higher" } }];
+  const after = [{ key: "gm", label: "이득여유 GM", status: "ok",
+                   primary: { value: 7.1, unit: "dB", better: "higher" } }];
+  const [d] = cardDeltas(before, after);
+  assert.equal(d.key, "gm");
+  assert.equal(d.improved, true);
+  assert.match(d.text, /4\.2/);
+  assert.match(d.text, /7\.1/);
+  assert.match(d.text, /dB/);
+  // 나빠진 쪽도 같은 문법으로 — 개선만 보여 주면 화면이 낙관 편향이 된다
+  const [w] = cardDeltas(after, before);
+  assert.equal(w.improved, false);
+});
+
+test("델타 — 한쪽이 못 잰 카드는 사유가 값 자리다", () => {
+  const [d] = cardDeltas(
+    [{ key: "pm", label: "PM", status: "na", primary: null }],
+    [{ key: "pm", label: "PM", status: "ok",
+       primary: { value: 61, unit: "deg", better: "higher" } }]);
+  assert.equal(d.improved, null);
+  assert.match(d.text, /이전 값 없음|판정 불가/);
+  assert.ok(!/NaN|null|undefined/.test(d.text));
 });

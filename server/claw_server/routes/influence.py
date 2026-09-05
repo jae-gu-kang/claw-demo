@@ -48,6 +48,15 @@ router = APIRouter(tags=["influence"])
 # (예: 간격 0.001) 하나가 단일 워커를 시간 단위로 점유하는 것을 제출 시점에 막는다
 MAX_CASES = 200
 
+# 하드 게이트 검사 이름 → 그 검사가 말하는 스윕 지표. 처방 승계가 "무엇을 풀지"를
+# 정하는 표다 — 마진·ζ류는 선형 단계의 판정이라 스윕 지표로 대응이 없다(빈 튜플).
+_HARD_CHECK_METRICS = {
+    "envelope.stall_margin": ("worst_stall_margin",),
+    "actuator.sat_frac": ("surf_sat_frac",),
+    "coupling.stall_margin": ("worst_stall_margin",),
+    "coupling.sat_frac": ("surf_sat_frac",),
+}
+
 
 class InfluenceIn(FlightCodeIn):
     """형상(FlightCodeIn) + 법칙 밖 컴포넌트 + 탐침 설정.
@@ -140,6 +149,7 @@ class DiagnoseIn(InfluenceIn):
     """진단 요청 — 형상(InfluenceIn) + 저장된 sim 결과 id."""
 
     result_id: str = Field(min_length=1)
+    criteria: dict | None = None
 
 
 @router.post("/influence/diagnose")
@@ -154,7 +164,9 @@ def influence_diagnose(req: DiagnoseIn, request: Request) -> dict:
     t0 = time.perf_counter()
     payload = _load_sim(request, req.result_id)
     try:
-        out = diagnose_run(payload, to_shape(req), probe_rel=req.probe_rel)
+        criteria = GainEvalCriteria.from_dict(req.criteria)
+        out = diagnose_run(payload, to_shape(req), probe_rel=req.probe_rel,
+                           thresholds=criteria.to_diagnose_thresholds())
     except (ValueError, TypeError) as e:  # 엔진 판정 → 422 (structural과 같은 정책)
         raise HTTPException(status_code=422, detail=str(e))
     fp = payload.get("params_fingerprint") or ""
@@ -348,6 +360,7 @@ class ScanIn(InfluenceIn):
 
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
+    criteria: dict | None = None
     t_settle: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
     t_step: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
     dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
@@ -366,6 +379,7 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
     cases = build_cases(req.cases)
     try:
         shape = to_shape(req)
+        criteria = GainEvalCriteria.from_dict(req.criteria)
         plan = sweep_plan(shape, [], ())
         # 잡 안에서 터지면 이미 돌린 런이 통째로 버려진다 — 기체와 안 맞는 형상은
         # 202를 주기 전에 여기서 걸러 위 except가 422로 바꾼다 (독스트링의 계약)
@@ -401,7 +415,11 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
                 f"발산으로 잘린 케이스 {n_aborted}건 — 국소성 판정에서 제외")
         payload = to_jsonable(out)
         payload["kind"] = "influence_scan"
-        payload["grid"] = to_jsonable(diagnose_grid(per_case))
+        # 문턱은 평가 기준 정본에서 — 진단·평가·스캔이 각자 상수를 들면 같은 런이
+        # 화면마다 다른 판정을 받는다 (02 §5.5)
+        payload["grid"] = to_jsonable(diagnose_grid(
+            per_case, thresholds=criteria.to_grid_thresholds(),
+            local_frac=criteria.schedule.local_frac))
         store.save(
             job.id, payload,
             meta={"kind": "influence_scan", "created": job.created,
@@ -613,6 +631,9 @@ class PrescribeIn(InfluenceIn):
 
     fingerprint: str = ""
     result_id: str = Field(min_length=1)
+    # 평가 결과 id — 주면 실패 지표·손잡이를 **승계**한다(사용자가 다시 고르지 않는다).
+    # 없으면 기준의 하드 지표 전부를 푼다(종전 동작)
+    eval_result_id: str = ""
     knobs: list[str] | None = None
     cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
     criteria: dict | None = None
@@ -647,7 +668,55 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
         shape = to_shape(req)
         criteria = GainEvalCriteria.from_dict(req.criteria)
         check_law_plant_pairing(ac, make_law(shape))
-        knobs = req.knobs
+        # ── 승계 — 평가가 좁혀 준 것을 사용자가 다시 고르지 않는다 ──────────
+        inherited = {"metrics": None, "knobs": None, "cases": None,
+                     "from": req.eval_result_id or None}
+        if req.eval_result_id:
+            try:
+                ev = store.load(req.eval_result_id)
+            except KeyError:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"평가 결과 없음: {req.eval_result_id}")
+            if ev.get("kind") != "influence_evaluate":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"influence_evaluate 결과가 아니다: kind={ev.get('kind')}")
+            # 실패 지표 — 하드 위반이 지목한 지표 + 국소성 판정이 나쁜 지표
+            metrics = set()
+            for f in (ev.get("aggregate") or {}).get("hard_fails") or []:
+                check = f.get("check") or ""
+                metrics.update(_HARD_CHECK_METRICS.get(check, ()))
+            for key, v in (((ev.get("aggregate") or {}).get("locality")
+                            or {}).get("metrics") or {}).items():
+                if v.get("verdict") in ("local", "global"):
+                    metrics.add(key)
+            # 귀속 손잡이 — 케이스별 소견의 처방 카드가 지목한 자리
+            aknobs = []
+            bad_cases = []
+            for c in ev.get("cases") or []:
+                if c.get("hard_fails"):
+                    bad_cases.append(c["case"])
+                for pr in ((c.get("attribution") or {}).get("prescriptions") or []):
+                    aknobs.extend(pr.get("knobs") or [])
+            inherited = {
+                "metrics": sorted(metrics) or None,
+                "knobs": sorted(dict.fromkeys(aknobs)) or None,
+                "cases": sorted(dict.fromkeys(bad_cases)) or None,
+                "from": req.eval_result_id,
+            }
+
+        knobs = req.knobs or inherited["knobs"]
+        if knobs:
+            # 승계 손잡이 중 이 스윕이 실제로 흔든 것만 — 감도가 없으면 못 푼다
+            swept = {k for r in rows if r.get("role") == "single"
+                     for k in (r.get("overrides") or {})}
+            missing = [k for k in knobs if k not in swept]
+            knobs = [k for k in knobs if k in swept]
+            if missing and not knobs:
+                raise ValueError(
+                    f"승계한 손잡이를 이 스윕이 흔들지 않았다: {missing} — "
+                    "그 손잡이로 스윕을 먼저 돌릴 것")
         if not knobs:
             knobs = sorted({k for r in rows
                             if r.get("role") == "single"
@@ -667,13 +736,22 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
 
     def work(job):
         job.report(0, total, message="처방 풀이(저장 스윕 재계산)")
+        targets = prescribe_targets(criteria)
+        want = inherited["metrics"]
+        if want:
+            # 평가가 실패라고 한 지표만 — 통과한 지표까지 풀면 표의 절반이
+            # "이미 문턱 안"으로 채워져 답이 묻힌다
+            focused = [t for t in targets if t[0] in set(want)]
+            if focused:
+                targets = focused
         singles = {}
         for knob in knobs:
             singles[knob] = {}
-            for metric, limit, above in prescribe_targets(criteria):
+            for metric, limit, above in targets:
                 singles[knob][metric] = solve_single_knob(
                     rows, knob, metric, limit, above_is_bad=above)
-        joint = solve_joint(rows, knobs, criteria)
+        joint = solve_joint(rows, knobs, criteria,
+                            metrics=[t[0] for t in targets])
         warnings = list(nonadditivity_warnings(payload, knobs))
         sweep_fp = payload.get("fingerprint") or ""
         shape_fp = shape.fingerprint()
@@ -710,6 +788,7 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
             "kind": "influence_prescribe",
             "sweep_result_id": req.result_id,
             "knobs": knobs,
+            "inherited": inherited,
             "singles": singles,
             "joint": joint,
             "confirm": confirm_report,

@@ -242,3 +242,89 @@ def test_J_v2_발산근_대역폭은_inf고_스텝_없는_축은_항_불성립()
     assert terms["bw"] == math.inf  # 발산근의 |Re|를 달성으로 위장하지 않는다
     assert terms["mp"] is None and j is None
     assert "스텝" in reason
+
+
+# ── ① 판정과 소견이 한 몸 (인라인 귀속) ──────────────────────────────────────
+
+
+def test_실패_케이스에는_원인이_같은_런에서_붙는다(report):
+    """진단이 필요로 하는 입력을 평가가 이미 만들었다 — 새 시뮬 없이 소견이 선다."""
+    c = report["cases"][0]
+    a = c["attribution"]
+    assert a["status"] == "ok"
+    assert a["findings"] and a["prescriptions"]
+    # 지표는 카드·원자료가 이미 낸다 — 같은 수를 두 벌로 싣지 않는다
+    assert "metrics" not in a
+    for p in a["prescriptions"]:
+        assert p["knobs"] and p["direction"] in ("increase", "decrease", None)
+
+
+def test_선형_깊이는_귀속을_사유와_함께_비운다(rig):
+    ac, trs = rig
+    out = evaluate(ac, trs, Shape(), GainEvalCriteria(), depth="linear")
+    a = out["cases"][0]["attribution"]
+    assert a["status"] == "na"
+    assert "런" in a["note"]  # 안 잰 것과 잴 수 없는 것은 다른 문장이다
+
+
+def test_기준을_바꾸면_소견도_따라간다(rig):
+    """규칙 3 — 판정선은 한 곳. 종전에는 진단이 자기 상수를 들어, 사용자가 기준을
+    바꿔도 같은 런에 옛 숫자로 소견을 냈다(평가는 fail, 진단은 정상)."""
+    ac, trs = rig
+    loose = GainEvalCriteria.from_dict(
+        {"response": {"rms_max": {"alt": 1e6, "spd": 1e6, "hdg": 1e6}}})
+    strict = evaluate(ac, trs, Shape(), GainEvalCriteria(),
+                      t_settle=1.0, t_step=2.0)["cases"][0]["attribution"]
+    relaxed = evaluate(ac, trs, Shape(), loose,
+                       t_settle=1.0, t_step=2.0)["cases"][0]["attribution"]
+    # 규칙은 문턱과 무관하게 근거(info)를 늘 남긴다 — 바뀌는 것은 **처방 여부**다
+    warned = lambda a: [f["rule"] for f in a["findings"] if f["severity"] == "warn"]
+    assert "error_split" in warned(strict)
+    assert "error_split" not in warned(relaxed)
+    assert len(relaxed["prescriptions"]) < len(strict["prescriptions"])
+    # 응답이 그 판정에 쓴 문턱을 동봉한다 — 화면이 "무슨 기준으로"를 말할 수 있게
+    assert strict["thresholds"]["rms"]["alt"] != relaxed["thresholds"]["rms"]["alt"]
+
+
+# ── ② 격자 재기가 곧 국소성 판정 (스캔 흡수) ─────────────────────────────────
+
+
+def test_격자_재기가_국소성을_함께_낸다(rig):
+    """같은 표준 기동을 스캔이 한 번 평가가 또 한 번 돌던 중복을 없앤 자리."""
+    ac, _trs = rig
+    cases = [_CASE, TrimCase(name="M0.55", mach=0.55, alt=1000.0, fuel=200.0)]
+    trs = trim_batch(ac, cases)
+    out = evaluate(ac, trs, Shape(), GainEvalCriteria(), t_settle=1.0, t_step=2.0)
+    loc = out["aggregate"]["locality"]
+    assert loc and "metrics" in loc
+    for key, v in loc["metrics"].items():
+        assert v["verdict"] in ("ok", "local", "global")
+        assert v["n_cases"] >= 1
+        if v["verdict"] != "ok":
+            assert v["bad_cases"]  # 어느 케이스가 나쁜지가 곧 다음 단계의 입력
+    assert loc["local_frac"] == GainEvalCriteria().schedule.local_frac
+
+
+def test_선형_깊이는_국소성을_내지_않는다(rig):
+    ac, trs = rig
+    out = evaluate(ac, trs, Shape(), GainEvalCriteria(), depth="linear")
+    assert out["aggregate"]["locality"] is None  # 잰 지표가 없다 — 0으로 위장 금지
+
+
+# ── 카드 대표 스칼라 (재측정 델타의 근거) ────────────────────────────────────
+
+
+def test_카드마다_대표_스칼라가_있거나_사유가_있다(report):
+    for c in report["cases"] and report["cards"]:
+        if c["primary"] is None:
+            assert c["status"] == "na" and c["note"]
+        else:
+            assert isinstance(c["primary"]["value"], float)
+            assert c["primary"]["better"] in ("higher", "lower")
+            assert c["primary"]["unit"]
+
+
+def test_대표_스칼라는_카드_값과_같은_수다(report):
+    gm = next(c for c in report["cards"] if c["key"] == "gm")
+    if gm["primary"]:
+        assert gm["primary"]["value"] == gm["value"]["gm_db"]

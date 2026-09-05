@@ -127,12 +127,14 @@ class EnvelopeCriteria:
     """
 
     alpha_margin_min: float = 0.0  # worst_stall_margin 하한 (기존 판정선과 동일)
+    limiter_frac_max: float = 0.02  # α리미터 작동 시간비 (diagnose.LIMITER_FRAC 시드)
     nz_limit: float | None = None  # [TBD] 수직하중배수 상한 — V-n n_lim에서 시드 예정
     q_rate_limit: float | None = None  # [TBD] 피치레이트 상한 [rad/s]
 
     def __post_init__(self):
         if not math.isfinite(float(self.alpha_margin_min)):
             raise ValueError(f"alpha_margin_min은 유한값: {self.alpha_margin_min}")
+        _frac("limiter_frac_max", self.limiter_frac_max)
         for n in ("nz_limit", "q_rate_limit"):
             v = getattr(self, n)
             if v is not None:
@@ -216,9 +218,13 @@ class ScheduleCriteria:
     rel_step_max: float = 0.5  # 인접 격자점 |ΔK|/max(|K|) 상한 [기본값]
     per_table: dict = field(default_factory=dict)
     midpoints: bool = True  # 격자점 사이 중간점 케이스를 평가에 포함할지
+    # 결함 케이스 비율이 이 이하면 국소(스케줄 셀 형상), 넘으면 전역(설계점 게인).
+    # "어느 층을 만질 것인가"의 분기라 스케줄 기준과 한 몸이다 (diagnose.LOCAL_FRAC 시드)
+    local_frac: float = 1.0 / 3.0
 
     def __post_init__(self):
         _pos("rel_step_max", self.rel_step_max)
+        _frac("local_frac", self.local_frac, lo=1e-6, hi=1.0)
         for k, v in self.per_table.items():
             _pos(f"per_table[{k}]", v)
 
@@ -364,6 +370,34 @@ class GainEvalCriteria:
                 # dataclass가 모르는 필드는 TypeError로 나온다 — 사유를 사람 말로
                 raise ValueError(f"기준 그룹 '{name}' 필드 오류: {e}") from None
         return cls(**kwargs)
+
+    def to_diagnose_thresholds(self) -> dict:
+        """단일런 진단(diagnose_run)이 쓰는 문턱 — **이 정본에서 파생**한다.
+
+        진단과 평가가 각자 상수를 들면 같은 런이 화면마다 다른 판정을 받는다
+        (사용자가 기준을 바꿔도 진단만 옛 숫자로 판정하는 자리였다). 귀속 비율
+        (filter_dominance·contrib_dominance)은 여기 없다 — 그건 합격선이 아니라
+        "어느 항이 주도했나"를 가르는 **방법 파라미터**라 진단 모듈이 보유한다.
+        """
+        return {
+            "rms": dict(self.response.rms_max),
+            "sat_frac": self.actuator.sat_frac_max,
+            "windup_frac": self.recovery.windup_frac_max,
+            "limiter_frac": self.envelope.limiter_frac_max,
+            "local_frac": self.schedule.local_frac,
+        }
+
+    def to_grid_thresholds(self) -> dict:
+        """격자 국소성 판정(diagnose_grid)이 쓰는 지표별 문턱 — 같은 정본에서."""
+        rms = self.response.rms_max
+        out = {}
+        for axis, key in (("alt", "alt_rms"), ("spd", "spd_rms"), ("hdg", "hdg_rms")):
+            if axis in rms:
+                out[key] = float(rms[axis])
+        out["surf_sat_frac"] = float(self.actuator.sat_frac_max)
+        out["limiter_frac"] = float(self.envelope.limiter_frac_max)
+        out["worst_stall_margin"] = float(self.envelope.alpha_margin_min)
+        return out
 
     def fingerprint(self) -> str:
         """판정 기준의 계보 지문 — 평가 저장물에 동봉 (02 §5.4)."""

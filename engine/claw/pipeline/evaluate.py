@@ -55,7 +55,7 @@ from claw.guidance import Guidance, ModeSpec
 from claw.nav import NavErrorModel
 from claw.pipeline.criteria import GainEvalCriteria
 # 적분기 "주차" 허용오차의 정본은 진단이다 — 회복(B급)과 진단 규칙 3이 같은 판정
-from claw.pipeline.diagnose import PARK_TOL_FRAC
+from claw.pipeline.diagnose import PARK_TOL_FRAC, diagnose_grid, diagnose_run
 from claw.pipeline.influence import Shape, make_law
 from claw.pipeline.metrics import metric_values
 from claw.pipeline.openloop import GROUP_LOOPS, _effective_filter, _effective_gain
@@ -818,6 +818,7 @@ def _eval_case(aircraft, tr, shape, law, criteria, *, depth, stall, db_ranges,
 
     # ── 단계 2 비선형 — 표준 기동 런 + 동시명령 런 (depth=full) ──────────────
     aborted_run = None
+    res = None
     if depth == "full" and not cancelled:
         modes, t_end = probe_mission(tr, dv=dv, dh=dh, dpsi=dpsi,
                                      t_settle=t_settle, t_step=t_step)
@@ -850,6 +851,34 @@ def _eval_case(aircraft, tr, shape, law, criteria, *, depth, stall, db_ranges,
     stages["authority"], f = _authority_stage(tr, metrics, criteria)
     hard_fails += f
 
+    # ── 소견(원인 귀속) — **같은 런의 후처리다** ─────────────────────────────
+    # 진단이 필요로 하는 입력(t·signals·envelope·meta)을 이 함수가 방금 만들었고
+    # 지표만 뽑은 뒤 버리고 있었다. 실패한 케이스에 한해 그 런으로 귀속까지 내면
+    # 새 시뮬 0회로 "무엇이 원인인가"가 판정 옆에 선다 — 사용자가 시뮬 탭에서
+    # 같은 케이스를 손으로 다시 만들 이유가 없어진다.
+    # 통과 케이스는 귀속하지 않는다: 고칠 것이 없는 자리의 처방은 소음이다.
+    attribution = None
+    if res is not None:
+        worst_stage = _worst([v["status"] for v in stages.values()])
+        if hard_fails or worst_stage in ("fail", "warn"):
+            try:
+                attribution = diagnose_run(
+                    {"t": res.t, "signals": res.signals,
+                     "envelope": res.envelope, "meta": res.meta},
+                    shape, thresholds=criteria.to_diagnose_thresholds())
+                # 지표는 이미 위에서 냈다 — 같은 수를 두 벌로 싣지 않는다
+                attribution.pop("metrics", None)
+                attribution["status"] = "ok"
+            except (ValueError, TypeError, KeyError) as e:
+                attribution = {"status": "na", "note": f"귀속 실패: {e}"}
+        else:
+            attribution = {"status": "na",
+                           "note": "전 항목 통과 — 귀속할 결함이 없다"}
+    else:
+        attribution = {"status": "na",
+                       "note": "비선형 런 없음(depth=linear) — 원인 귀속은 런의 "
+                               "내부 기여항에서 나온다"}
+
     # 안 돌린 단계는 사유를 든 na — "안 잰 것"과 "잴 수 없는 것"은 다른 문장이다
     why = ("취소로 건너뜀 — 완료 단계는 보존" if cancelled and depth == "full"
            else "비선형 런 없음(depth=linear) — 단계 2에서 잰다")
@@ -871,7 +900,9 @@ def _eval_case(aircraft, tr, shape, law, criteria, *, depth, stall, db_ranges,
         "case": tr.case.name,
         "aborted": aborted_run,
         "stages": stages,
+        "attribution": attribution,
         "hard_fails": hard_fails,
+        "metrics_raw": metrics or {},
         "J": j, "J_terms": j_terms, "J_reason": j_reason,
     }, cancelled
 
@@ -894,11 +925,21 @@ def _min_over(cases, pick):
     return best
 
 
-def _card(key, status, value, threshold, worst_case, note=None):
+def _card(key, status, value, threshold, worst_case, note=None, primary=None):
+    """카드 하나. primary는 **이 카드를 대표하는 스칼라 하나**다 — 큰 숫자로 찍고
+    재측정 델타(얼마에서 얼마로)를 그 위에서 잰다. 값 사전의 모양은 카드마다
+    다르므로, 대표를 카드 자신이 선언하지 않으면 소비자가 카드별 분기를 또 짠다.
+    """
     no, label = CARD_META[key]
     return {"key": key, "card": no, "label": label, "status": status,
-            "value": value, "threshold": threshold,
+            "value": value, "threshold": threshold, "primary": primary,
             "worst_case": worst_case, "note": note}
+
+
+def _primary(value, unit, better):
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    return {"value": float(value), "unit": unit, "better": better}
 
 
 def _build_cards(cases, criteria):
@@ -927,7 +968,8 @@ def _build_cards(cases, criteria):
         worst["judged"] if worst else "na",
         worst, {"zeta_min": cr.margin.zeta_min, "zeta_good": cr.margin.zeta_good},
         worst["case"] if worst else None,
-        note=None if worst else "폐쇄 모드 감쇠를 잰 케이스가 없다"))
+        note=None if worst else "폐쇄 모드 감쇠를 잰 케이스가 없다",
+        primary=_primary(worst["zeta"] if worst else None, "-", "higher")))
 
     # ②③ GM·PM — 루프 전체 최솟값 (inf GM은 그 루프에 이득 교차가 없다는 사실)
     def margins_pick(metric):
@@ -955,7 +997,8 @@ def _build_cards(cases, criteria):
         None if gm is None else {"gm_db": gm[0], **gm[1]},
         {"gm_min_db": cr.margin.gm_min_db, "gm_good_db": cr.margin.gm_good_db},
         gm[2] if gm else None,
-        note=None if gm else "판정할 루프 마진이 없다"))
+        note=None if gm else "판정할 루프 마진이 없다",
+        primary=_primary(gm[0] if gm else None, "dB", "higher")))
 
     pm = _min_over(cases, margins_pick("pm_deg"))
     # PM의 보조 — 같은 교차점의 시간지연 환산 (B delay_margin 체크와 같은 수)
@@ -973,7 +1016,8 @@ def _build_cards(cases, criteria):
                                  "delay_margin_s": None if dm is None else dm[0]},
         {"pm_min_deg": cr.margin.pm_min_deg},
         pm[2] if pm else None,
-        note=None if pm else "판정할 루프 마진이 없다"))
+        note=None if pm else "판정할 루프 마진이 없다",
+        primary=_primary(pm[0] if pm else None, "deg", "higher")))
 
     # ④ 응답속도 — λ_roll(관례 판정이 있는 유일한 자리) + 교차 주파수 상세
     rl = _min_over(cases, lambda c: (
@@ -1008,7 +1052,8 @@ def _build_cards(cases, criteria):
          "lam_min_frac": cr.margin.lam_min_frac},
         rl[2] if rl else None,
         note=None if rl else "롤 대역폭 판정 불가 — 실근 없음·참여도 부족·선형화 실패. "
-                             "피치 BW 목표는 [TBD]"))
+                             "피치 BW 목표는 [TBD]",
+        primary=_primary(rl[0] if rl else None, "rad/s", "higher")))
 
     # ⑤ 과도응답 — Ts·Mp 최악 (∞ 포함 — 정착 실패가 카드에서 사라지면 안 된다)
     def step_pick(sk):
@@ -1039,7 +1084,9 @@ def _build_cards(cases, criteria):
          {"value": -mp[0], "axis": mp[1]["axis"], "case": mp[2]}},
         {"ts_max": cr.response.ts_max or None, "mp_max": cr.response.mp_max or None},
         (ts or mp)[2] if (ts or mp) else None,
-        note=None if (ts or mp) else "스텝 응답을 잰 런이 없다(depth=linear)"))
+        note=None if (ts or mp) else "스텝 응답을 잰 런이 없다(depth=linear)",
+        # 대표는 Mp다 — J에 들어가는 항이 그쪽이고 Ts는 표시 전용(사용자 정의)
+        primary=_primary(-mp[0] if mp else None, "-", "lower")))
 
     # ⑥ 추종 RMS — 판정선 대비 최악 비율
     rms = _min_over(cases, lambda c: min(
@@ -1056,7 +1103,9 @@ def _build_cards(cases, criteria):
         None if rms is None else {"rel_worst": -rms[0], **rms[1]},
         {"rms_max": cr.response.rms_max},
         rms[2] if rms else None,
-        note=None if rms else "추종을 잰 런이 없다(depth=linear)"))
+        note=None if rms else "추종을 잰 런이 없다(depth=linear)",
+        # 판정선 대비 비율 — 축마다 단위가 달라 절대값으로는 한 카드에 못 세운다
+        primary=_primary(-rms[0] if rms else None, "×기준", "lower")))
 
     # ⑦ 제어권한 — 사용률 최악 + 트림 소모 최악 + 잔여 권한 최악
     usage = _min_over(cases, lambda c: min(
@@ -1089,7 +1138,10 @@ def _build_cards(cases, criteria):
         {"sat_frac_max": cr.actuator.sat_frac_max,
          "de_frac_max": cr.authority.de_frac_max,
          "b_min_frac": cr.authority.b_min_frac},
-        (rem or usage or trim)[2] if (rem or usage or trim) else None))
+        (rem or usage or trim)[2] if (rem or usage or trim) else None,
+        # 대표는 **남은 여유**다 — 잔여 권한이 계측되면 그것, 아니면 사용률의 여집합
+        primary=_primary(rem[0] if rem else (1.0 + usage[0] if usage else None),
+                         "-", "higher")))
     return cards
 
 
@@ -1246,6 +1298,19 @@ def evaluate(aircraft, trs, shape: Shape, criteria: GainEvalCriteria, *,
     for c in cases:
         c["stages"]["schedule"] = schedule
 
+    # ── 국소성 (어디서 나쁜가) — 격자 재기의 부수 산출 ──────────────────────
+    # 종전에는 같은 표준 기동을 스캔이 한 번, 평가가 또 한 번 돌았다(케이스당 95초
+    # 시뮬 한 벌이 통째로 중복). 격자를 재는 것이 곧 국소성 판정이므로 여기서 낸다:
+    # 결함이 일부 구간에 몰리면 스케줄 셀, 전반이면 설계점 게인 수준이 처방 층이다.
+    locality = None
+    if cases and depth == "full":
+        per_case = [{"case": c["case"], "aborted": c["aborted"],
+                     "metrics": c.get("metrics_raw") or {}} for c in cases]
+        if any(pc["metrics"] for pc in per_case):
+            locality = diagnose_grid(
+                per_case, thresholds=criteria.to_grid_thresholds(),
+                local_frac=criteria.schedule.local_frac)
+
     def stage_agg(key):
         stats = [c["stages"][key]["status"] for c in cases]
         counts = {s: stats.count(s) for s in ("fail", "warn", "na", "ok")}
@@ -1292,6 +1357,7 @@ def evaluate(aircraft, trs, shape: Shape, criteria: GainEvalCriteria, *,
             "hard_fails": all_fails,
             "stages": agg_stages,
             "J": agg_j, "J_reason": agg_j_reason,
+            "locality": locality,
             "n_cases": len(cases),
             "n_midpoint": sum(1 for c in cases if c["midpoint"]),
         },

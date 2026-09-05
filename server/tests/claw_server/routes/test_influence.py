@@ -490,3 +490,68 @@ def test_prescribe_guards(client, wait_job):
     rid = _small_sweep(client, wait_job)
     assert client.post("/api/influence/prescribe", json={
         **base, "result_id": rid, "knobs": ["없는.자리"]}).status_code == 422
+
+
+def test_prescribe_inherits_from_evaluate(client, wait_job):
+    """② 승계 — 평가가 좁혀 준 지표·손잡이를 사용자가 다시 고르지 않는다."""
+    case = {"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}
+    ev = client.post("/api/influence/evaluate", json={
+        "cases": [case], "t_settle": 2.0, "t_step": 4.0})
+    j = wait_job(ev.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    eval_rid = j["result_id"]
+    ev_res = client.get(f"/api/results/{eval_rid}").json()
+    # ① 평가가 소견까지 같은 런에서 냈다 — 별도 진단 실행이 없다
+    att = ev_res["cases"][0]["attribution"]
+    assert att["status"] == "ok" and att["prescriptions"]
+    # 격자 재기가 국소성 판정을 함께 낸다 (스캔 흡수)
+    assert ev_res["aggregate"]["locality"]["metrics"]
+    knob = att["prescriptions"][0]["knobs"][0]
+
+    # 승계한 손잡이를 실제로 흔든 스윕이라야 감도가 있다
+    sw = client.post("/api/influence/sweep", json={
+        "cases": [case], "knobs": [knob], "span": [-0.1, 0.1],
+        "t_settle": 2.0, "t_step": 4.0})
+    js = wait_job(sw.json()["id"], timeout=300.0)
+    assert js["status"] == "done"
+
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": js["result_id"], "eval_result_id": eval_rid,
+        "cases": [case], "confirm": "none",
+    })
+    assert r.status_code == 202, r.text
+    j2 = wait_job(r.json()["id"], timeout=300.0)
+    assert j2["status"] == "done"
+    res = client.get(f"/api/results/{j2['result_id']}").json()
+    inh = res["inherited"]
+    assert inh["from"] == eval_rid
+    assert knob in inh["knobs"] and res["knobs"] == [knob]
+    # 승계한 지표만 푼다 — 통과한 지표까지 풀면 표의 절반이 "이미 문턱 안"이 된다
+    solved = set(res["singles"][knob].keys())
+    if inh["metrics"]:
+        assert solved <= set(inh["metrics"])
+    json.dumps(res, allow_nan=False)
+
+
+def test_prescribe_승계_손잡이가_스윕에_없으면_거절(client, wait_job):
+    """감도가 없는 손잡이의 필요 변화량을 지어내지 않는다 — 사유와 함께 422."""
+    case = {"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}
+    ev = client.post("/api/influence/evaluate", json={
+        "cases": [case], "t_settle": 2.0, "t_step": 4.0})
+    eval_rid = wait_job(ev.json()["id"], timeout=300.0)["result_id"]
+    # 평가가 지목하지 않을 자리만 흔든 스윕
+    rid = _small_sweep(client, wait_job, span=[0.1])
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "eval_result_id": eval_rid, "cases": [case]})
+    assert r.status_code == 422
+    assert "스윕이 흔들지 않았다" in r.json()["detail"]
+
+
+def test_prescribe_inherit_guards(client, wait_job):
+    base = {"cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}]}
+    rid = _small_sweep(client, wait_job)
+    assert client.post("/api/influence/prescribe", json={
+        **base, "result_id": rid, "eval_result_id": "nope"}).status_code == 404
+    # 종류가 다른 저장물을 승계원으로 주면 409 — 조용히 무시하면 승계한 척이 된다
+    assert client.post("/api/influence/prescribe", json={
+        **base, "result_id": rid, "eval_result_id": rid}).status_code == 409

@@ -14,7 +14,9 @@ B급 요약("추가 판정 n/n PASS")의 규칙은 checksSummary 한 곳에 산�
   "9건 중 2건은 잴 수도 없었다"가 화면에서 사라진다
 */
 
-import { BAD_INK, GOOD_INK, WARN_INK, structuralRequest } from "./influence.js";
+import {
+  BAD_INK, DIRECTION_LABEL, GOOD_INK, KNOB_CLASS, WARN_INK, structuralRequest,
+} from "./influence.js";
 
 // 상태 어휘 — 엔진 evaluate._RANK와 한 벌 (드리프트는 evaluate.test.js가 핀)
 export const STATUS_LABEL = { ok: "통과", warn: "주의", fail: "실패", na: "판정 불가" };
@@ -169,6 +171,81 @@ export function cardLines(card) {
   if (card.worst_case) lines.push(`최악 운용점 ${card.worst_case}`);
   if (card.note) lines.push(card.note);
   return lines;
+}
+
+/** 케이스별 소견(원인 귀속) 행 — **판정 옆에 서는 표면**이지 별도 실행이 아니다.
+ *
+ * 서버가 실패 케이스의 같은 런에서 귀속까지 내므로(엔진 evaluate 인라인 귀속),
+ * 화면은 그것을 케이스마다 한 줄로 옮긴다. 귀속이 없으면 사유가 값 자리다.
+ */
+export function attributionRows(model) {
+  return model.cases.map((c) => {
+    const a = c.attribution;
+    if (!a || a.status !== "ok") {
+      return { case: c.case, solvable: false, knobs: [],
+               text: a?.note ?? "소견 없음 — 사유 미상" };
+    }
+    const pres = a.prescriptions ?? [];
+    if (!pres.length) {
+      return { case: c.case, solvable: false, knobs: [],
+               text: "결함은 있으나 처방 가능한 자리를 못 찾았다" };
+    }
+    const knobs = [...new Set(pres.flatMap((p) => p.knobs ?? []))];
+    const text = pres.map((p) => {
+      const cls = KNOB_CLASS[p.knob_class]?.label ?? p.knob_class;
+      const dir = DIRECTION_LABEL[p.direction] ?? "";
+      return `${(p.knobs ?? []).join(", ")} ${dir} [${cls}]`;
+    }).join(" · ");
+    return { case: c.case, solvable: true, knobs, text,
+             findings: a.findings ?? [], prescriptions: pres };
+  });
+}
+
+/** 국소성 — 어디서 나쁜가와 그래서 어느 층을 만질 것인가. 통과 지표는 줄을
+ *  차지하지 않는다(전부 통과면 빈 목록이고, 그건 요약 한 줄이 이미 말한다). */
+export function localityLines(locality) {
+  const metrics = locality?.metrics ?? null;
+  if (!metrics) return [];
+  const VERDICT = { local: "국소", global: "전역" };
+  const out = [];
+  for (const [key, v] of Object.entries(metrics)) {
+    if (v.verdict === "ok") continue;
+    const cls = KNOB_CLASS[v.knob_class]?.label ?? v.knob_class ?? "—";
+    const cases = (v.bad_cases ?? []).slice(0, 3).join(", ")
+      + ((v.bad_cases ?? []).length > 3 ? " 외" : "");
+    out.push(`${key} ${VERDICT[v.verdict] ?? v.verdict}`
+      + ` ${v.n_bad}/${v.n_cases} · 처방 층 ${cls} · ${cases}`);
+  }
+  return out;
+}
+
+/** 재측정 델타 — 카드 대표 스칼라끼리 짝지어 "얼마에서 얼마로"를 낸다.
+ *
+ * 좋아졌는지는 카드가 선언한 극성(primary.better)이 정한다 — 화면이 부호로
+ * 추측하면 실속마진처럼 클수록 좋은 지표에서 정반대를 말한다. 한쪽이라도 못 잰
+ * 카드는 improved=null이고 사유가 값 자리다(개선만 보여 주면 낙관 편향이 된다).
+ */
+export function cardDeltas(beforeCards, afterCards) {
+  const before = new Map((beforeCards ?? []).map((c) => [c.key, c]));
+  return (afterCards ?? []).map((a) => {
+    const b = before.get(a.key);
+    const pb = b?.primary;
+    const pa = a.primary;
+    if (!pb || !pa) {
+      return { key: a.key, label: a.label, improved: null,
+               text: !pb ? "이전 값 없음 — 비교 불가" : "이번 값 판정 불가" };
+    }
+    const d = pa.value - pb.value;
+    const improved = d === 0 ? null
+      : (pa.better === "higher" ? d > 0 : d < 0);
+    const u = pa.unit && pa.unit !== "-" ? ` ${pa.unit}` : "";
+    return {
+      key: a.key, label: a.label, improved,
+      delta: d,
+      text: `${fmt(pb.value)} → ${fmt(pa.value)}${u}`
+        + ` (${d >= 0 ? "+" : "−"}${fmt(Math.abs(d))})`,
+    };
+  });
 }
 
 /** 케이스 × 항목 상태 격자 — 상세 표용. 행이 케이스, 열이 stage_order(원자료). */
