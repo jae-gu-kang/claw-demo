@@ -84,3 +84,20 @@ export function orderCaseNames(names) {
     return pa.fuel - pb.fuel || pa.alt - pb.alt || pa.mach - pb.mach;
   });
 }
+
+
+// ── 기본 케이스 격자 — **한 곳 정의** (02 §5.5) ──────────────────────────────
+// 영향성 탭의 격자 폼 기본값과 게인 탭 지표 카드의 격자가 같은 값이어야 한다 —
+// 두 화면이 "기본 격자"라며 다른 격자를 돌리면 최악 운용점이 화면마다 달라진다.
+// 값 자체는 마진 맵 시연 격자(15케이스)와 같은 데모 기본이다.
+export const DEFAULT_GRID = {
+  machFrom: 0.4, machTo: 0.8, machStep: 0.1,
+  alts: [100, 1000, 3000], fuels: [200],
+};
+
+/** 기본 격자의 이름 붙은 케이스 15건 — 실행 순서는 서펜타인(인접 트림 시드). */
+export function defaultGridCases() {
+  return nameCases(serpentineCases(
+    machRange(DEFAULT_GRID.machFrom, DEFAULT_GRID.machTo, DEFAULT_GRID.machStep),
+    DEFAULT_GRID.alts, DEFAULT_GRID.fuels));
+}

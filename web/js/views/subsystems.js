@@ -1920,7 +1920,7 @@ export const SUBSYSTEMS = {
   <path class="wire soft" d="M136 34 V60" marker-end="url(#as-vf)"/>
   <g class="sblk" data-code="sim/simulator.py:Simulator.run sim/simulator.py:Simulator._envelope"><rect class="body" x="640" y="210" width="260" height="84" rx="3"/>
     <text class="ttl" x="770" y="234" style="font-size:13px">신호 로깅 · 엔벨로프 감시</text>
-    <text class="ttl2" x="770" y="254">기본 26 + 명령 사슬 50 신호</text>
+    <text class="ttl2" x="770" y="254">기본 26 + 명령 사슬 53 신호</text>
     <text class="ttl2" x="770" y="270">실속 마진 · DB 이탈 플래그 · 페이즈</text></g>
   <path class="wire soft" d="M700 190 V206" marker-end="url(#as-vf)"/>
   <path class="wire" d="M900 252 H946" marker-end="url(#aw-vf)"/>

@@ -265,3 +265,137 @@ def test_nan_samples_do_not_pass_as_metric_values():
     assert out["td_speed"] is None
     assert out["rollout_dist"] is None
     assert out["td_sink_rate"] is not None, "온전한 신호는 그대로 나온다"
+
+
+# ── 스텝 응답 특성 (step_metrics — A⑤·B급 지표의 계산부) ────────────────────
+
+
+def _step_series(y_unit, dt=0.001, t_pre=1.0):
+    """단위 스텝 응답 y(t) → (t, cmd, y) — 스텝 전 구간을 붙여 변화점 감지를 시험."""
+    n0 = int(round(t_pre / dt))
+    cmd = np.concatenate([np.zeros(n0), np.ones(len(y_unit))])
+    y = np.concatenate([np.zeros(n0), np.asarray(y_unit, dtype=float)])
+    return np.arange(cmd.size) * dt, cmd, y
+
+
+def test_step_metrics_2차계_오버슈트는_닫힌형과_일치한다():
+    from claw.pipeline.metrics import step_metrics
+
+    z, wn, dt = 0.5, 2.0, 0.001
+    t = np.arange(0.0, 12.0, dt)
+    wd = wn * math.sqrt(1 - z * z)
+    y = 1 - np.exp(-z * wn * t) / math.sqrt(1 - z * z) * np.sin(
+        wd * t + math.acos(z))
+    tt, cmd, resp = _step_series(y, dt=dt)
+    m = step_metrics(tt, cmd, resp, None)
+    assert abs(m["mp"] - math.exp(-math.pi * z / math.sqrt(1 - z * z))) < 5e-3
+    assert 0.0 < m["tr"] < m["ts"] < math.inf  # 10→90이 정착보다 빠르다
+    assert m["sse"] < 1e-3  # 잔차 없는 응답
+
+
+def test_step_metrics_1차계는_오버슈트_0과_ln9_상승시간():
+    from claw.pipeline.metrics import step_metrics
+
+    a, dt = 1.0, 0.001
+    t = np.arange(0.0, 15.0, dt)
+    y = 1 - np.exp(-a * t)
+    tt, cmd, resp = _step_series(y, dt=dt)
+    m = step_metrics(tt, cmd, resp, None)
+    assert m["mp"] == 0.0
+    assert abs(m["tr"] - math.log(9.0) / a) < 5e-3  # t90−t10 = ln9/a
+    # Ts(±2 %) = ln50/a
+    assert abs(m["ts"] - math.log(50.0) / a) < 5e-3
+
+
+def test_step_metrics_창_안에서_안_일어난_일은_inf다():
+    """미도달·미정착은 None(못 쟀다)이 아니라 ∞(느리다의 극한)이다 — None이면
+    판정이 na로 빠져 정착 실패가 조용히 넘어간다."""
+    from claw.pipeline.metrics import step_metrics
+
+    tt, cmd, resp = _step_series(np.zeros(3000))  # 전혀 안 움직이는 응답
+    m = step_metrics(tt, cmd, resp, None)
+    assert m["tr"] == math.inf and m["ts"] == math.inf
+    assert m["mp"] == 0.0
+
+
+def test_step_metrics_스텝이_없으면_전부_None():
+    from claw.pipeline.metrics import step_metrics
+
+    t = np.arange(0.0, 3.0, 0.01)
+    flat = np.ones_like(t)
+    m = step_metrics(t, flat, flat, None)
+    assert m == {"tr": None, "ts": None, "mp": None, "sse": None}
+
+
+def test_step_metrics_발산_창은_전부_inf():
+    """NaN은 비교에서 False라 그대로 두면 발산이 「정착」으로 위장된다."""
+    from claw.pipeline.metrics import step_metrics
+
+    y = np.concatenate([np.linspace(0, 1, 500), np.full(500, np.nan)])
+    tt, cmd, resp = _step_series(y)
+    m = step_metrics(tt, cmd, resp, None)
+    assert all(m[k] == math.inf for k in ("tr", "ts", "mp", "sse"))
+
+
+def test_step_metrics_하강_스텝도_같은_축이다():
+    """진행률은 스텝 방향으로 접힌다 — 하강 스텝의 오버슈트(아래로 지나침)가
+    음수나 0으로 뭉개지면 안 된다."""
+    from claw.pipeline.metrics import step_metrics
+
+    dt = 0.001
+    t = np.arange(0.0, 10.0, dt)
+    z, wn = 0.5, 2.0
+    wd = wn * math.sqrt(1 - z * z)
+    yu = 1 - np.exp(-z * wn * t) / math.sqrt(1 - z * z) * np.sin(
+        wd * t + math.acos(z))
+    n0 = 1000
+    cmd = np.concatenate([np.ones(n0), np.zeros(t.size)])  # 1 → 0 하강
+    y = np.concatenate([np.ones(n0), 1.0 - yu])
+    m = step_metrics(np.arange(cmd.size) * dt, cmd, y, None)
+    assert abs(m["mp"] - math.exp(-math.pi * z / math.sqrt(1 - z * z))) < 5e-3
+
+
+def test_step_metrics_헤딩은_랩을_넘는_스텝을_바르게_잰다():
+    from claw.pipeline.metrics import step_metrics
+
+    dt = 0.01
+    # 3.0 rad → −3.0 rad: 랩 경유 실제 스텝은 +0.2832 rad (2π−6)
+    h = 2.0 * math.pi - 6.0
+    n0, n1 = 100, 400
+    cmd = np.concatenate([np.full(n0, 3.0), np.full(n1, -3.0)])
+    # 응답: 짧은 랩 방향으로 지수 수렴 (각도는 wrap 영역을 지난다)
+    t1 = np.arange(n1) * dt
+    y1 = 3.0 + h * (1 - np.exp(-3.0 * t1))
+    y1 = np.mod(y1 + math.pi, 2 * math.pi) - math.pi
+    y = np.concatenate([np.full(n0, 3.0), y1])
+    m = step_metrics(np.arange(cmd.size) * dt, cmd, y, None, angular=True)
+    assert m["mp"] is not None and m["mp"] < 0.05  # 지수 수렴 — 사실상 무초과
+    assert m["ts"] < math.inf
+
+
+def test_잔여_권한은_배분_신호와_예산으로_잰다():
+    from claw.pipeline.metrics import _authority_metrics
+
+    meta = {"limits": {"elevon_hi": 0.35}}
+    sig = {"alloc_pitch_hi": [0.35, 0.20, 0.28], "alloc_roll_hi": [0.30, 0.25, 0.35]}
+    out = _authority_metrics(sig, meta)
+    assert abs(out["min_pitch_authority_frac"] - 0.20 / 0.35) < 1e-12
+    assert abs(out["min_roll_authority_frac"] - 0.25 / 0.35) < 1e-12
+    # 배분 미장착(신호 없음·NaN뿐)은 0이 아니라 None — "다 썼다"와 "계측 없다"는 다르다
+    assert _authority_metrics({}, meta)["min_pitch_authority_frac"] is None
+    assert _authority_metrics(
+        {"alloc_pitch_hi": [float("nan")]}, meta)["min_pitch_authority_frac"] is None
+
+
+def test_포화_최장_지속은_채널_최악의_연속_구간이다():
+    from claw.pipeline.metrics import _sat_longest
+
+    n = 100
+    dt = 0.01
+    meta = {"limits": {"elevon_lo": -0.35, "elevon_hi": 0.35,
+                       "rudder_lo": -0.3, "rudder_hi": 0.3},
+            "dt_plant": dt}
+    de = np.zeros(n)
+    de[10:30] = 0.35  # 좌·우 엘레본 모두 20표본 = 0.2 s 포화
+    sig = {"de": de, "da": np.zeros(n), "dr": np.zeros(n)}
+    assert abs(_sat_longest(sig, meta, np.arange(n) * dt) - 0.2) < 1e-9

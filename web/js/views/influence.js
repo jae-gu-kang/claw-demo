@@ -56,7 +56,14 @@ import {
   radiusOf, relOf, relReadable, fmtRel, scanRequest, scanSummary, structuralRequest,
   sweepCases, sweepKnobs, sweepRequest, trendInk, trendMatrix, worstTransitions,
 } from "../lib/influence.js";
-import { machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
+import {
+  STATUS_LABEL, caseGrid, checksSummary, evaluateRequest, hardFailLines, jLine,
+  normalizeEvalReport, normalizeVerifyReport, statusInk, verifyRequest,
+} from "../lib/evaluate.js";
+import { EVAL_MARK, renderEvalCards } from "./evalcards.js";
+import {
+  DEFAULT_GRID, machRange, nameCases, parseNumberList, serpentineCases,
+} from "../lib/grid.js";
 import { conePlayback, summaryOf } from "../lib/influenceplay.js";
 import { cascadeLayout, layeredLayout } from "../lib/influencelayout.js";
 import { createInfluenceCanvas } from "./influencecanvas.js";
@@ -78,13 +85,20 @@ const state = {
   // 진단(2단 앞의 "무엇을") · 스캔(3단 A "어느 케이스가") · 스윕(3단 B "얼마나")
   // — 탭을 떠났다 와도 결과 유지
   diag: null, openloop: null, scan: null, sweep: null,
+  // A/B/C 평가 — 어휘·기준(서버 정본 echo), 카드 강조(null = 전체 — 표시 전용:
+  // 비용 게이트는 depth·verify가 대신한다), 마지막 평가 런·검증 런
+  evalMeta: null, evalSel: null, evalRun: null, verifyRun: null,
   // 구간 경향(3단 C)이 보고 있는 손잡이·지표 — 결과가 아니라 **보는 자리**라
   // 스윕과 수명이 다르다(같은 스윕을 손잡이별로 훑는 것이 이 표의 용법이다)
   trendKnob: null, trendMetric: null,
   // 케이스 격자 입력 — 결과(scan.selected)와 수명이 같아야 한다. 입력만 기본값으로
   // 되돌아가면 재진입 직후 3단 B가 "격자가 바뀌었다"고 거절한다(사용자는 안 건드렸다)
-  gridForm: { machFrom: "0.4", machTo: "0.8", machStep: "0.1",
-    alts: "100, 1000, 3000", fuels: "200", tStep: "15" },
+  // 격자 기본값의 정본은 lib/grid.js DEFAULT_GRID다 — 게인 탭 지표 카드와 같은
+  // 격자여야 "최악 운용점"이 탭마다 다른 말을 하지 않는다
+  gridForm: { machFrom: String(DEFAULT_GRID.machFrom),
+    machTo: String(DEFAULT_GRID.machTo), machStep: String(DEFAULT_GRID.machStep),
+    alts: DEFAULT_GRID.alts.join(", "), fuels: DEFAULT_GRID.fuels.join(", "),
+    tStep: "15" },
 };
 let canvas = null;
 
@@ -787,132 +801,300 @@ export function render() {
     }
   }
 
-  function renderDiag() {
-    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
-    clear(diagBox);
-    const d = state.diag;
-    if (!d) return;
-    // 지표 줄 — 진단의 입력이자 스윕 Δ의 기준
-    diagBox.append(
-      el("div", { class: "row", style: "gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12px" },
-        Object.entries(d.metrics).map(([k, v]) =>
-          stat(metricLabel(k), k.endsWith("_frac") ? fmtPercent(v) : fmtDelta(v)))),
-    );
-    for (const w of d.warnings) {
-      diagBox.append(el("p", { style: `margin:4px 0;font-size:12px;color:${WARN_INK}` }, `⚠ ${w}`));
-    }
-    // 판정 표 — 처방이 없어도 "왜 없는지"(evidence)가 남아야 한다
-    diagBox.append(
-      el("div", { class: "scroll-x", style: "margin-top:8px" },
-        el("table", {},
-          el("thead", {}, el("tr", {},
-            ["규칙", "축", "판정", "근거"].map((h) => el("th", {}, h)))),
-          el("tbody", {}, d.findings.map((f) =>
-            el("tr", {},
-              el("td", {}, el("code", { style: mono() }, f.rule)),
-              el("td", {}, f.axis),
-              el("td", {}, el("span", {
-                class: "flag",
-                style: f.severity === "warn"
-                  ? `background:${WARN_INK}26;color:${WARN_INK};font-weight:600`
-                  : "",
-              }, f.severity === "warn" ? "처방" : "정상")),
-              el("td", { style: "max-width:520px" },
-                f.verdict,
-                el("span", { class: "hint", style: "margin-left:8px;font-size:11px" },
-                  Object.entries(f.evidence)
-                    .filter(([, v]) => typeof v === "number")
-                    .map(([k, v]) => `${k}=${fmtDelta(v)}`).join(" · ")),
-              ),
-            ))),
-        )),
-    );
-    if (!d.prescriptions.length) {
-      diagBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
-        "처방 없음 — 모든 지표가 문턱 안이다. 문턱은 서버 응답(thresholds)이 들고 있다."));
+  // ── A/B/C 평가 — A급 카드 7 + B급 요약 + C급 검증 (어휘 정본은 서버) ──────
+  //
+  // 이 표면은 판독대와 달리 **문턱을 아는** 표면이다 — 기준이 응답에 동봉되므로
+  // 판정색이 참칭이 아니다(lib/evaluate.js 머리말). 기호(○△✕—)가 색과 별도로
+  // 판정을 말한다 — 색 하나에만 기대지 않는 이 탭의 접근성 규약.
+
+  const evalStatus = el("p", { class: "hint", style: "margin:6px 0 0" });
+  const evalChipRow = el("div", {
+    class: "row", style: "gap:8px;flex-wrap:wrap;align-items:center",
+  });
+  const evalCardsBox = el("div", { style: "margin-top:10px" });
+  const evalBox = el("div");
+  const verifyStatus = el("p", { class: "hint", style: "margin:6px 0 0" });
+  const verifyBox = el("div");
+  const evalChipBtns = new Map();
+
+  async function ensureEvalMeta() {
+    if (state.evalMeta) return;
+    evalStatus.textContent = "기준·어휘 불러오는 중…";
+    try {
+      state.evalMeta = await api.get("/influence/criteria/defaults");
+    } catch (e) {
+      evalStatus.textContent = `기준을 불러오지 못했다 — ${errorText(e)}`;
       return;
     }
-    // 처방 카드 — knobs가 곧 3단 스윕의 입력이다.
-    // stretch: .row 기본(align-items:end)은 카드 아래를 맞춰 위가 들쭉날쭉해진다
-    diagBox.append(el("div", {
-      class: "row", style: "gap:12px;flex-wrap:wrap;margin-top:10px;align-items:stretch",
-    },
-      d.prescriptions.map((p) => {
-        const cls = KNOB_CLASS[p.knob_class] ?? { label: p.knob_class, ink: "#98989d" };
-        return el("div", { class: "knob-card" },
-          el("div", { class: "row", style: "gap:8px;align-items:center" },
-            el("span", {
-              class: "flag",
-              style: `background:${cls.ink}26;color:${cls.ink};font-weight:600`,
-            }, cls.label),
-            el("span", { style: "font-size:12px" }, DIRECTION_LABEL[p.direction] ?? ""),
-          ),
-          el("p", { style: "margin:6px 0 0" },
-            p.knobs.map((k) => el("code", { style: `${mono()};margin-right:6px` }, k))),
-          p.joint_with.length
-            ? el("p", { class: "hint", style: "margin:4px 0 0;font-size:12px" },
-                "동시 수정 후보: ", p.joint_with.map((k) =>
-                  el("code", { style: `${mono()};margin-right:6px` }, k)))
-            : null,
-          p.recheck.length
-            ? el("p", { class: "hint", style: "margin:4px 0 0;font-size:12px" },
-                `움직인 뒤 재확인: ${p.recheck.map(metricLabel).join(", ")}`)
-            : null,
-          p.notes.map((n) =>
-            el("p", { style: `margin:4px 0 0;font-size:12px;color:${WARN_INK}` }, n)),
-          el("p", { class: "hint", style: "margin:4px 0 0;font-size:11px" },
-            `근거: ${p.findings.map((i) => d.findings[i]?.rule ?? i).join(", ")}`),
-          el("div", { class: "row", style: "gap:8px;margin-top:8px" },
-            el("button", { onclick: () => runOpenloop(p) }, "개루프 근거 (2단)"),
-            el("button", {
-              class: "primary", onclick: () => runSweep(p),
-            }, "이 부분공간 스윕 (3단 B)"),
-          ),
-        );
-      })));
+    renderEvalChips();
+    renderEval();
   }
 
-  const olStatusLine = el("p", { class: "hint", style: "margin:6px 0 0" });
-  const olBox = el("div");
+  const evalCardKeys = () => (state.evalMeta?.cards ?? []).map((c) => c.key);
 
-  async function runOpenloop(card) {
+  function toggleEvalCard(key) {
+    const order = evalCardKeys();
+    const sel = new Set(state.evalSel == null ? order : state.evalSel);
+    if (sel.has(key)) sel.delete(key);
+    else sel.add(key);
+    state.evalSel = sel.size === order.length ? null : order.filter((k) => sel.has(k));
+    renderEvalChips();
+    renderEval();
+  }
+
+  /** 카드 강조 칩 — **표시 전용**이다(안 고른 카드도 계산·표시되고 흐려질 뿐).
+   *  목록이 그대로면 제자리에서 눌림만 고친다 (syncChips와 같은 이유). */
+  function renderEvalChips() {
+    const cards = state.evalMeta?.cards ?? [];
+    const same = evalChipBtns.size === cards.length
+      && cards.every((c) => evalChipBtns.has(c.key));
+    if (!same) {
+      evalChipBtns.clear();
+      clear(evalChipRow);
+      if (!cards.length) return;
+      evalChipRow.append(el("span", { class: "hint" }, "카드 강조(표시 전용):"));
+      for (const c of cards) {
+        const b = el("button", {
+          style: "font-size:12px",
+          onclick: () => toggleEvalCard(c.key),
+        }, `${c.card} ${c.label}`);
+        evalChipBtns.set(c.key, b);
+        evalChipRow.append(b);
+      }
+      evalChipRow.append(
+        el("span", { class: "grow" }),
+        el("button", {
+          onclick: () => { state.evalSel = null; renderEvalChips(); renderEval(); },
+        }, "전체"));
+    }
+    const sel = new Set(state.evalSel == null ? evalCardKeys() : state.evalSel);
+    for (const [k, b] of evalChipBtns) {
+      const on = sel.has(k);
+      b.className = on ? "primary" : "";
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  }
+
+  async function runEvaluate(depth) {
     let cases;
     try {
       cases = gridCases();
     } catch (e) {
-      state.openloop = { card, result: null, error: errorText(e) };
-      renderOpenloop();
-      runStatus("개루프: 격자 입력 오류", { open: "openloop", bad: true });
+      state.evalRun = { status: "제출 불가", submitted: false,
+                        result: null, error: errorText(e) };
+      renderEval();
+      runStatus("평가: 격자 입력 오류", { open: "eval", bad: true });
       return;
     }
-    runStatus(`개루프 Δ 계산 중 — 케이스 ${cases.length}건…`);
-    clear(olBox);
+    runStatus(`평가 제출 중 — 케이스 ${cases.length}건`
+      + (depth === "linear" ? " · 선형만(시뮬 0)" : " · 표준+동시명령 런"));
     try {
-      const job = await api.post("/influence/openloop", {
-        ...structuralRequest(shapeState()),
-        cases, params: card.knobs, fingerprint: state.diag?.fingerprint,
-      });
+      const job = await api.post("/influence/evaluate",
+        evaluateRequest(shapeState(), {
+          cases, depth, tSettle: 5, tStep: Number(stepIn.value) || 15,
+          fingerprint: state.diag?.fingerprint,
+        }));
+      state.evalRun = { status: "제출됨", submitted: true, result: null, error: null };
       const done = await watchJob(job.id, (j) => {
-        runStatus(`개루프 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
+        state.evalRun.status = j.message ?? j.status;
+        runStatus(`평가 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
       });
       if (done.status !== "done" || !done.result_id) {
-        runStatus(`개루프 ${done.status}`, { bad: true });
+        state.evalRun.status = done.status;
+        state.evalRun.error = done.error ?? `평가 ${done.status}`;
+        renderEval();
+        runStatus(`평가 ${done.status}`, { open: "eval", bad: true });
         return;
       }
       const res = await api.get(`/results/${done.result_id}`);
-      state.openloop = { card, result: res, error: null };
-      renderOpenloop();
-      // 판독대의 2단 줄이 여기서 채워진다 — 결과를 안 알리면 방금 잰 수치가
-      // 서랍 안에만 있고 화면의 주 표면은 여전히 "아직 안 쟀다"라고 말한다
-      renderReadout();
-      runStatus("개루프 Δ 완료", { open: "openloop" });
+      state.evalRun = { status: "완료", submitted: true,
+                        result: normalizeEvalReport(res), error: null };
+      renderEval();
+      runStatus("평가 완료", { open: "eval" });
     } catch (e) {
-      state.openloop = { card, result: null, error: errorText(e) };
-      renderOpenloop();
-      renderReadout();  // 실패했는데 판독대가 "아직 안 쟀다"로 남으면 거짓말이다
-      runStatus("개루프 실패", { open: "openloop", bad: true });
+      state.evalRun = { status: "실패", submitted: state.evalRun?.submitted ?? false,
+                        result: null, error: errorText(e) };
+      renderEval();
+      runStatus("평가 실패", { open: "eval", bad: true });
     }
   }
+
+  async function runVerify() {
+    let cases;
+    try {
+      cases = gridCases();
+    } catch (e) {
+      state.verifyRun = { status: "제출 불가", result: null, error: errorText(e) };
+      renderEval();
+      runStatus("검증: 격자 입력 오류", { open: "eval", bad: true });
+      return;
+    }
+    runStatus(`검증 제출 중 — 코너 × ${cases.length}케이스 재트림(비쌈)`);
+    try {
+      const job = await api.post("/influence/verify",
+        verifyRequest(shapeState(), {
+          cases, tSettle: 5, tStep: Number(stepIn.value) || 15,
+          fingerprint: state.diag?.fingerprint,
+        }));
+      state.verifyRun = { status: "제출됨", result: null, error: null };
+      const done = await watchJob(job.id, (j) => {
+        state.verifyRun.status = j.message ?? j.status;
+        runStatus(`검증 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
+      });
+      if (done.status !== "done" || !done.result_id) {
+        state.verifyRun.status = done.status;
+        state.verifyRun.error = done.error ?? `검증 ${done.status}`;
+        renderEval();
+        runStatus(`검증 ${done.status}`, { open: "eval", bad: true });
+        return;
+      }
+      const res = await api.get(`/results/${done.result_id}`);
+      state.verifyRun = { status: "완료", result: normalizeVerifyReport(res),
+                          error: null };
+      renderEval();
+      runStatus("검증 완료", { open: "eval" });
+    } catch (e) {
+      state.verifyRun = { status: "실패", result: null, error: errorText(e) };
+      renderEval();
+      runStatus("검증 실패", { open: "eval", bad: true });
+    }
+  }
+
+  function evalFlag(status) {
+    const ink = statusInk(status);
+    return el("span", {
+      class: "flag",
+      style: `background:${ink}26;color:${ink};font-weight:600;white-space:nowrap`,
+    }, `${EVAL_MARK[status] ?? ""} ${STATUS_LABEL[status] ?? status}`);
+  }
+
+  function renderEval() {
+    renderTabCounts();  // PASS/FAIL 배지가 서랍이 닫혀 있어도 먼저 보인다
+    clear(evalCardsBox);
+    clear(evalBox);
+    clear(verifyBox);
+    const metaLine = state.evalMeta
+      ? `기준 지문 ${state.evalMeta.fingerprint} (서버 기본값 v${
+          state.evalMeta.criteria?.schema_version ?? "?"})`
+      : "기준 미로드 — 서랍을 열면 불러온다";
+    const run = state.evalRun;
+    if (!run) {
+      evalStatus.textContent =
+        `${metaLine} · 아직 안 돌렸다 — [평가 실행]`;
+    } else {
+      evalStatus.textContent = `${metaLine} · ${run.status}`;
+      if (run.error) evalBox.append(el("div", { class: "error-box" }, run.error));
+    }
+
+    const m = run?.result;
+    if (m) {
+      const agg = m.aggregate;
+      // A급 카드 — 강조 선택은 표시 전용(안 고른 카드는 흐려질 뿐 사라지지 않는다)
+      renderEvalCards(evalCardsBox, m.cards, {
+        emphasis: state.evalSel == null ? null : new Set(state.evalSel),
+      });
+      evalBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
+        `케이스 ${agg?.n_cases ?? 0}건 · depth=${m.depth}`
+        + ` · 형상 지문 ${m.fingerprint} · 기준 지문 ${m.criteriaFingerprint}`
+        + (m.aborted ? " · 취소됨 — 완료 단계만" : "")));
+
+      // B급 — 요약 한 줄이 정본 표면, 문제 항목만 전개 (na도 병기·전개)
+      const ch = m.checks;
+      evalBox.append(el("p", { style: `margin:10px 0 0;font-weight:600` },
+        checksSummary(ch)));
+      const open = (ch?.list ?? []).filter((c) => c.status !== "ok");
+      if (open.length) {
+        evalBox.append(el("div", { class: "scroll-x", style: "margin-top:6px" },
+          el("table", {},
+            el("thead", {}, el("tr", {},
+              ["체크", "판정", "최악 케이스", "비고"].map((h) => el("th", {}, h)))),
+            el("tbody", {}, open.map((c) => el("tr", {},
+              el("td", { style: "white-space:nowrap" }, c.label),
+              el("td", {}, evalFlag(c.status)),
+              el("td", { style: "white-space:nowrap" }, c.worst_case ?? "—"),
+              el("td", { style: "max-width:420px;font-size:12px" },
+                c.value != null && c.value.value != null
+                  ? `${fmtNum(Number(c.value.value))} `
+                  : "",
+                c.note ?? "")))))));
+      }
+
+      const fails = hardFailLines(agg);
+      if (fails.length) {
+        evalBox.append(
+          el("h3", { style: `margin:12px 0 4px;font-size:14px;color:${WARN_INK}` },
+            `하드 게이트 위반 ${fails.length}건 — 이 형상은 Fail`),
+          el("ul", { style: "margin:0;padding-left:18px" },
+            fails.map((t) => el("li", { style: `${mono()};margin:2px 0` }, t))));
+      } else if (agg?.hard_fail === false) {
+        evalBox.append(el("p", { style: `margin:10px 0 0;color:${GOOD_INK}` },
+          "하드 게이트 전부 통과 — J로 후보 서열을 매길 수 있는 상태다"));
+      }
+      evalBox.append(el("p", { style: `margin:6px 0 0;${mono()}` }, jLine(agg)));
+
+      for (const w of m.warnings) {
+        evalBox.append(el("p", {
+          style: `margin:4px 0;font-size:12px;color:${WARN_INK}`,
+        }, `⚠ ${w}`));
+      }
+
+      const grid = caseGrid(m);
+      if (grid.length) {
+        evalBox.append(el("details", { style: "margin-top:8px" },
+          el("summary", { class: "hint", style: "cursor:pointer" },
+            `케이스 × 항목 원자료 격자 (${grid.length}행 — 카드·체크의 근거)`),
+          el("div", { class: "scroll-x", style: "margin-top:6px" },
+            el("table", {},
+              el("thead", {}, el("tr", {},
+                [el("th", {}, "케이스"),
+                 m.stageOrder.map((k) => el("th", {
+                   title: m.items[k]?.label ?? k,
+                 }, String(m.items[k]?.item ?? "")))])),
+              el("tbody", {}, grid.map((gr) => el("tr", {},
+                el("td", { style: "white-space:nowrap" }, gr.case,
+                  gr.midpoint ? el("span", { class: "hint" }, " · 중간점") : null,
+                  gr.aborted
+                    ? el("span", { style: `color:${WARN_INK}` }, " · 발산 중단") : null),
+                gr.statuses.map((s2) => el("td", {
+                  class: "num", title: STATUS_LABEL[s2] ?? s2,
+                  style: `color:${statusInk(s2)}`,
+                }, EVAL_MARK[s2] ?? s2)))))))));
+      }
+    }
+
+    // ── C급 검증 결과 — 별도 실행의 별도 표면 ────────────────────────────────
+    const vr = state.verifyRun;
+    verifyStatus.textContent = !vr
+      ? "아직 안 돌렸다 — 후보 게인이 A·B급을 통과한 뒤 돌리는 것이 비용 구조다"
+      : vr.status;
+    if (vr?.error) verifyBox.append(el("div", { class: "error-box" }, vr.error));
+    const v = vr?.result;
+    if (v) {
+      verifyBox.append(el("div", { class: "scroll-x", style: "margin-top:6px" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            ["검증", "판정", "내용"].map((h) => el("th", {}, h)))),
+          el("tbody", {}, v.blocks.map((b) => el("tr", {},
+            el("td", { style: "white-space:nowrap" }, b.label),
+            el("td", {}, evalFlag(b.status)),
+            el("td", { style: "max-width:520px;font-size:12px" },
+              b.corners?.length
+                ? `코너 ${b.n_pass}/${b.n_judged} PASS — `
+                  + b.corners.map((c) =>
+                      `${c.label}${c.hard_fail ? "✕" : c.hard_fail === false ? "○" : "—"}`)
+                    .join(" · ")
+                : null,
+              b.n_cases != null && !b.corners
+                ? `케이스 ${b.n_cases}건${b.hard_fail ? " · 하드 위반" : ""} ` : null,
+              b.note ?? ""))))))); 
+      for (const w of v.warnings) {
+        verifyBox.append(el("p", {
+          style: `margin:4px 0;font-size:12px;color:${WARN_INK}`,
+        }, `⚠ ${w}`));
+      }
+    }
+  }
+
 
   /** 전이 셀 — `기준 → 섭동 (Δ)`. 종전에는 기준과 Δ가 다른 열에 있어 "얼마로
    *  가는지"를 사용자가 눈으로 더해야 했다. inf 문자열은 fmtDelta가 ∞로 받는다. */
@@ -1670,6 +1852,55 @@ export function render() {
   }
 
   const DRAWERS = [
+    // 평가가 맨 앞이다 — "이 형상이 기준을 넘나"가 이 서랍 줄의 첫 질문이고,
+    // 그 답(PASS/FAIL 배지)은 서랍이 닫혀 있어도 칩에 보인다. 케이스 0건은
+    // 배지가 없다 — 통과도 실패도 아닌 것을 PASS로 위장하지 않는다
+    { key: "eval", label: "평가",
+      count: () => {
+        const agg = state.evalRun?.result?.aggregate;
+        if (!agg || agg.hard_fail == null) return null;
+        return agg.hard_fail ? `FAIL ${agg.hard_fails.length}` : "PASS";
+      },
+      build: () => {
+        ensureEvalMeta();  // 카드·체크 어휘와 기준은 서버 정본 — 처음 열 때 받아 온다
+        let caseText;
+        try {
+          caseText = `케이스 ${gridCases().length}건 (격자 입력은 「진단·처방」 서랍)`;
+        } catch {
+          caseText = "격자 입력 오류 — 「진단·처방」 서랍에서 고친다";
+        }
+        return [
+          el("h2", {}, "게인 평가 — A급 카드 · B급 자동 판정 · C급 검증"),
+          el("p", { class: "hint", style: "margin:0 0 8px" },
+            "A급 7카드(모드 안정성·GM·PM·응답속도·과도응답·추종·제어권한)는 값/기준/" +
+            "최악 운용점을 상시로 낸다 — GM·PM은 각각이다(이득류와 지연류 불확실성은 " +
+            "다른 위험이다). B급 9건은 항상 계산하되 한 줄 요약으로 서고 문제 항목만 " +
+            "전개된다. 하드 게이트(불안정·ζ·포화·실속·잔여권한·GM/PM) 위반이 하나라도 " +
+            "있으면 Fail이고 J는 매기지 않는다 — GM/PM은 목적함수가 아니라 제약이다."),
+          evalChipRow,
+          el("div", {
+            class: "row", style: "gap:10px;align-items:center;margin-top:8px",
+          },
+            el("button", { class: "primary", onclick: () => runEvaluate("full") },
+              "평가 실행 (단계 1+2)"),
+            el("button", { onclick: () => runEvaluate("linear") },
+              "선형만 (단계 1 — 시뮬 0)"),
+            el("span", { class: "hint" }, caseText)),
+          evalStatus,
+          evalCardsBox,
+          evalBox,
+          el("h3", { style: "margin:14px 0 4px;font-size:14px" },
+            "C급 검증 — 후보 확정 후 (강건성 코너·격자 중간점)"),
+          el("p", { class: "hint", style: "margin:0 0 6px" },
+            "코너(질량·Cmα·Cmq ±)마다 기체를 다시 만들어 **재트림**하고 전 단계를 " +
+            "다시 잰다 — 매 게인 변경마다 돌리기엔 비싸서 따로 선다. 지연 섭동·" +
+            "Monte Carlo·미션 프로파일·worst-case 탐색은 어휘와 자리만 있다."),
+          el("div", { class: "row", style: "gap:10px;align-items:center" },
+            el("button", { onclick: runVerify }, "검증 실행 (C급)")),
+          verifyStatus,
+          verifyBox,
+        ];
+      } },
     { key: "params", label: "파라미터",
       count: () => state.model?.params.length ?? 0,
       build: () => [el("h2", {}, "파라미터 — 이 형상에서 흔들 수 있는 전부"), tableBox] },
@@ -1802,6 +2033,9 @@ export function render() {
   // 서랍이 **왜 비었는지**를 말한다 (안 부르면 첫 방문에 빈 서랍이 열린다)
   if (state.sweep) renderSweep();
   else renderTrend();
+  // 평가도 재진입 규약을 따른다 — 결과·선택·기준이 모듈 스코프에 남아 있다
+  renderEvalChips();
+  renderEval();
   renderTabCounts();
   renderDrawer();
 

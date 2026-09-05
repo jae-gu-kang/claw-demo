@@ -584,46 +584,102 @@ class MetricDef:
     signals: tuple  # 이 지표가 읽는 SimResult 신호·엔벨로프 키
     better: str  # 'lower' | 'higher'
     desc: str
+    # A/B/C 등급 재편(02 §4)의 표시 메타 — **키는 계보라 불변**이고 이 둘은 화면
+    # 문법(그래프 지표 열의 그룹 정렬·진단 지표 줄 묶음)만 정한다.
+    # tier: 'A'(튜닝 중 상시 카드) | 'B'(항상 계산·요약 판정) | 'C'(확정 후 검증)
+    tier: str = "B"
+    group: str = "기타"
 
     def as_dict(self) -> dict:
         return {
             "key": self.key, "label": self.label, "unit": self.unit,
             "signals": list(self.signals), "better": self.better, "desc": self.desc,
+            "tier": self.tier, "group": self.group,
         }
 
 
+# 선언 순서 = 그래프 지표 열의 표시 순서다 (배치가 declIdx로 폴백) — A/B/C 재편의
+# 그룹 순서(추종·응답 → 타면·권한 → 엔벨로프·보호 → 임무·이착륙)로 묶어 둔다.
+# **키는 계보라 불변** — 이번 재편은 전부 추가·재정렬이고 rename이 없다.
 METRICS = (
-    MetricDef("worst_stall_margin", "최악 실속마진", "rad", ("alpha_margin",), "higher",
-              "임무 전체에서 α_stall−α의 최솟값 (02 §6.1)"),
-    MetricDef("envelope_flags", "엔벨로프 이탈 틱", "-", ("alpha", "beta", "mach", "h"),
-              "lower", "공력 DB 유효범위·고도 하한 이탈 표본 수"),
+    # ── 추종·응답 (A: RMS·Ts·Mp / B: Tr·sse — Tr은 BW의 보조, 02 §4 대표/보조) ──
     MetricDef("alt_rms", "고도 추종 RMS", "m", ("h", "cmd_alt"), "lower",
-              "|h − cmd_alt|의 RMS"),
+              "|h − cmd_alt|의 RMS", tier="A", group="추종·응답"),
     MetricDef("spd_rms", "속도 추종 RMS", "m/s", ("V", "cmd_speed"), "lower",
-              "|V − cmd_speed|의 RMS"),
+              "|V − cmd_speed|의 RMS", tier="A", group="추종·응답"),
     MetricDef("hdg_rms", "헤딩 추종 RMS", "rad", ("psi", "cmd_heading"), "lower",
-              "각도 랩을 고려한 헤딩 오차 RMS"),
+              "각도 랩을 고려한 헤딩 오차 RMS", tier="A", group="추종·응답"),
+    # 스텝 응답 특성 — 스텝이 없으면 None, 창 안에서 안 일어났으면(미정착·미도달·
+    # 발산) inf다: "느리다"의 극한이지 측정 불가가 아니다 (pipeline.metrics.step_metrics)
+    MetricDef("alt_ts", "고도 정착시간", "s", ("h", "cmd_alt"), "lower",
+              "스텝 후 ±2 % 밴드 재진입까지 — 미정착이면 ∞", tier="A", group="추종·응답"),
+    MetricDef("spd_ts", "속도 정착시간", "s", ("V", "cmd_speed"), "lower",
+              "스텝 후 ±2 % 밴드 재진입까지 — 미정착이면 ∞", tier="A", group="추종·응답"),
+    MetricDef("hdg_ts", "헤딩 정착시간", "s", ("psi", "cmd_heading"), "lower",
+              "스텝 후 ±2 % 밴드 재진입까지 — 미정착이면 ∞", tier="A", group="추종·응답"),
+    MetricDef("alt_mp", "고도 오버슈트", "-", ("h", "cmd_alt"), "lower",
+              "스텝 방향 목표 초과분 최대 / 스텝 크기", tier="A", group="추종·응답"),
+    MetricDef("spd_mp", "속도 오버슈트", "-", ("V", "cmd_speed"), "lower",
+              "스텝 방향 목표 초과분 최대 / 스텝 크기", tier="A", group="추종·응답"),
+    MetricDef("hdg_mp", "헤딩 오버슈트", "-", ("psi", "cmd_heading"), "lower",
+              "스텝 방향 목표 초과분 최대 / 스텝 크기", tier="A", group="추종·응답"),
+    MetricDef("alt_tr", "고도 상승시간", "s", ("h", "cmd_alt"), "lower",
+              "스텝 10→90 % 도달 시간 — 대역폭의 보조 지표", tier="B", group="추종·응답"),
+    MetricDef("spd_tr", "속도 상승시간", "s", ("V", "cmd_speed"), "lower",
+              "스텝 10→90 % 도달 시간 — 대역폭의 보조 지표", tier="B", group="추종·응답"),
+    MetricDef("hdg_tr", "헤딩 상승시간", "s", ("psi", "cmd_heading"), "lower",
+              "스텝 10→90 % 도달 시간 — 대역폭의 보조 지표", tier="B", group="추종·응답"),
+    MetricDef("alt_sse", "고도 정상상태 오차", "m", ("h", "cmd_alt"), "lower",
+              "스텝 창 꼬리 평균 잔차", tier="B", group="추종·응답"),
+    MetricDef("spd_sse", "속도 정상상태 오차", "m/s", ("V", "cmd_speed"), "lower",
+              "스텝 창 꼬리 평균 잔차", tier="B", group="추종·응답"),
+    MetricDef("hdg_sse", "헤딩 정상상태 오차", "rad", ("psi", "cmd_heading"), "lower",
+              "스텝 창 꼬리 평균 잔차", tier="B", group="추종·응답"),
+    # ── 타면·권한 (A⑦ — 사용률·잔여 권한 / B — 포화 지속) ──────────────────
     MetricDef("surf_sat_frac", "타면 포화율", "-", ("de", "da", "dr"), "lower",
-              "믹서 한계에 닿은 표본 비율 — 한계값은 법칙에서 읽는다"),
+              "믹서 한계에 닿은 표본 비율 — 한계값은 법칙에서 읽는다",
+              tier="A", group="타면·권한"),
+    MetricDef("sat_longest", "타면 포화 최장 지속", "s", ("de", "da", "dr"), "lower",
+              "위치 포화의 최장 연속 시간(채널 최악) — 비율과 다른 질문이다: 짧게 "
+              "여러 번은 리밋사이클, 길게 한 번은 조종권 부족",
+              tier="B", group="타면·권한"),
+    MetricDef("min_pitch_authority_frac", "최소 피치 잔여권한", "-",
+              ("alloc_pitch_hi",), "higher",
+              "엘레본 예산 배분의 피치 동적 한계 최솟값 / 예산 — 배분 미장착이면 없음",
+              tier="A", group="타면·권한"),
+    MetricDef("min_roll_authority_frac", "최소 롤 잔여권한", "-",
+              ("alloc_roll_hi",), "higher",
+              "엘레본 예산 배분의 롤 동적 한계 최솟값 / 예산 — 배분 미장착이면 없음",
+              tier="A", group="타면·권한"),
+    # ── 엔벨로프·보호 (B — 하드 게이트의 문턱은 criteria가 쥔다) ────────────
+    MetricDef("worst_stall_margin", "최악 실속마진", "rad", ("alpha_margin",), "higher",
+              "임무 전체에서 α_stall−α의 최솟값 (02 §6.1)",
+              tier="B", group="엔벨로프·보호"),
+    MetricDef("envelope_flags", "엔벨로프 이탈 틱", "-", ("alpha", "beta", "mach", "h"),
+              "lower", "공력 DB 유효범위·고도 하한 이탈 표본 수",
+              tier="B", group="엔벨로프·보호"),
     MetricDef("limiter_frac", "α리미터 작동률", "-", ("limiter_active",), "lower",
-              "리미터가 피치 명령을 잘라낸 표본 비율"),
+              "리미터가 피치 명령을 잘라낸 표본 비율", tier="B", group="엔벨로프·보호"),
+    # ── 임무·이착륙 (C — 미션 프로파일 검증의 지표, 01 §3.3.1) ──────────────
+    # 그 단계가 없는 런에서는 **None**이다. 0으로 채우면 착륙하지 않은 런이
+    # "접지 강하율 0 = 완벽한 착륙"으로 읽힌다. 부호가 아니라 **크기**다 —
+    # better가 'lower'|'higher' 둘뿐이라 부호 있는 값으로는 어느 쪽도 참이 아니다.
     MetricDef("xtrack_rms", "경로오차 RMS", "m", ("pn", "pe"), "lower",
-              "웨이포인트 폴리라인까지의 최근접 거리 RMS (사후 기하)"),
-    # ── 이착륙 (01 §3.3.1) — 그 단계가 없는 런에서는 **None**이다.
-    # 0으로 채우면 착륙하지 않은 런이 "접지 강하율 0 = 완벽한 착륙"으로 읽힌다.
-    # 부호가 아니라 **크기**다 — better가 'lower'|'higher' 둘뿐이라 부호 있는 값으로는
-    # 어느 쪽도 참이 아니다(위로 튄 접지가 소프트 랜딩보다 좋게 랭크된다).
+              "웨이포인트 폴리라인까지의 최근접 거리 RMS (사후 기하)",
+              tier="C", group="임무·이착륙"),
     MetricDef("td_sink_rate", "접지 수직속도", "m/s",
               ("u", "v", "w", "phi", "theta", "wow"), "lower",
               "접지 순간 |ḣ| — 작을수록 부드럽다. 부호(오르는 중인지)가 필요하면 "
-              "pipeline.metrics.climb_rate. 접지 없으면 없음"),
+              "pipeline.metrics.climb_rate. 접지 없으면 없음",
+              tier="C", group="임무·이착륙"),
     MetricDef("td_speed", "접지 속도", "m/s", ("V", "wow"), "lower",
-              "접지 순간의 대기속도. 접지 없으면 없음"),
+              "접지 순간의 대기속도. 접지 없으면 없음", tier="C", group="임무·이착륙"),
     MetricDef("rollout_dist", "접지→정지 직선거리", "m", ("pn", "pe", "wow"), "lower",
               "접지점과 정지점의 직선거리(경로장 아님) — 활주로 길이 요구의 근거. "
-              "정지 전이면 없음"),
+              "정지 전이면 없음", tier="C", group="임무·이착륙"),
     MetricDef("launch_gx", "사출 하중", "g", ("launch_gx", "on_rail"), "lower",
-              "발사 레일 축 가속도 — 판정 기준(구조 한계 n_x_launch)은 아직 없다 [TBD]"),
+              "발사 레일 축 가속도 — 판정 기준(구조 한계 n_x_launch)은 아직 없다 [TBD]",
+              tier="C", group="임무·이착륙"),
 )
 
 

@@ -135,13 +135,17 @@ def wn_reference(lm_axis) -> float:
 
 
 def lon_metrics(A, wn_floor) -> dict:
-    """종축 폐쇄 A′ → {"zeta_sp"} — wn ≥ floor 모드의 최소 ζ.
+    """종축 폐쇄 A′ → {"zeta_sp", "wn_sp"} — wn ≥ floor 모드의 최소 ζ와 **그 모드의** wn.
 
     댐퍼가 세지면 단주기가 실근으로 갈라진다(ζ→1 취급) — classify_lon의 비정형
-    예외를 데이터로 흡수한다. floor 위 모드가 없으면 1.0 (과감쇠).
+    예외를 데이터로 흡수한다. floor 위 모드가 없으면 ζ 1.0 (과감쇠), wn은 None —
+    "판정한 모드가 없다"를 0 rad/s로 위장하지 않는다 (A① 카드가 ζ·ωn을 한 쌍으로
+    내므로 wn을 버리면 카드가 절반만 말한다).
     """
     fast = [m for m in damp(A) if m["wn"] >= wn_floor]
-    return {"zeta_sp": min((m["zeta"] for m in fast), default=1.0)}
+    worst = min(fast, key=lambda m: m["zeta"], default=None)
+    return {"zeta_sp": 1.0 if worst is None else worst["zeta"],
+            "wn_sp": None if worst is None else worst["wn"]}
 
 
 def roll_real_mode(A, p_index):
@@ -177,9 +181,10 @@ def roll_real_mode(A, p_index):
 
 
 def lat_metrics(A, wn_floor, p_index=1) -> dict:
-    """횡축 폐쇄 A′ → {"zeta_dr", "roll_lambda", "roll_unstable", "roll_participation"}.
+    """횡축 폐쇄 A′ → {"zeta_dr", "wn_dr", "roll_lambda", "roll_unstable", "roll_participation"}.
 
     zeta_dr: floor 위 진동쌍의 최소 ζ (없으면 1.0 — 모드가 실근으로 교환된 상태).
+    wn_dr: 그 ζ를 낸 모드의 wn (판정한 모드가 없으면 None — 0으로 위장하지 않는다).
     roll_lambda: **p 참여도로 지목한** 실근의 |Re| — 롤 수렴 모드 대역폭 [rad/s].
     roll_unstable: 그 근이 발산근인가. |Re|는 부호를 지우므로(+12가 "목표 12 달성"으로
       보인다) 따로 낸다 — 튜너는 댐퍼 안정 캡이 걸러 주지만 검증에는 그 게이트가 없다.
@@ -192,8 +197,11 @@ def lat_metrics(A, wn_floor, p_index=1) -> dict:
     modes = damp(A)
     pairs = [m for m in modes if m["eig"].imag > 1e-9 and m["wn"] >= wn_floor]
     lam_mode, part = roll_real_mode(A, p_index)
+    worst = min(pairs, key=lambda m: m["zeta"], default=None)
     return {
-        "zeta_dr": min((m["zeta"] for m in pairs), default=1.0),
+        "zeta_dr": 1.0 if worst is None else worst["zeta"],
+        # 판정한 그 모드의 wn — lon_metrics.wn_sp와 같은 이유 (없으면 None ≠ 0)
+        "wn_dr": None if worst is None else worst["wn"],
         # 지목 실패(실근이 없거나 고유벡터 행렬이 특이)는 **0.0이 아니라 nan**이다.
         # 0.0을 내면 판정이 "목표의 0배 → fail"로 흘러 못 잰 것이 실패로 둔갑한다 —
         # nan은 judge_bandwidth가 na로 받는다 (loop_margins가 nan을 유지하는 원칙과 동일)

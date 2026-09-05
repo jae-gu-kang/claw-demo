@@ -20,8 +20,12 @@ lib/gainsched.js. 검증(그룹·키·형상·유한성)은 제출 시 서버/�
 설계점 값으로 굳는다 (lib/gainsync.js — 스케일 규칙은 서버 제안 표에서 온다).
 */
 
-import { api, errorText } from "../api.js";
+import { api, errorText, watchJob } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
+import {
+  checksSummary, evaluateRequest, normalizeEvalReport,
+} from "../lib/evaluate.js";
+import { defaultGridCases } from "../lib/grid.js";
 import {
   GAIN_KEYS, alignTables, appliedTables, defaultSelection, schedSummary, slotRows,
   storePayload, toggleSlot, zeroTables,
@@ -33,6 +37,7 @@ import {
 import { gainPlotGroups } from "../lib/plot.js";
 import { piecewisePolyfit, rawCoeffs, sampleFit } from "../lib/polyfit.js";
 import { store } from "../store.js";
+import { renderEvalCards } from "./evalcards.js";
 import { lineChartCanvas } from "./plots.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
 
@@ -59,6 +64,15 @@ let constants = null;
 // 상한 클립 경계와 일치하는 시연 기본값, 검증은 piecewisePolyfit이 수행)
 const fitCfg = { show: true, degree: 3, boundaries: "0.3", detailsOpen: false };
 
+// A급 지표 카드(평가 어휘·값은 서버 정본) — 마지막 계산 결과와 신선도.
+// 편집이 생기면 **stale 배지만** 켠다: 자동 재계산은 없다(서버 왕복 비용 — 버튼이
+// 명시적 트리거다). 격자는 lib/grid.js DEFAULT_GRID 한 곳 정의(영향성 폼과 동일)라
+// "최악 운용점"이 탭마다 다른 격자를 말하지 않는다.
+let evalStrip = { status: null, result: null, error: null, stale: false, depth: null };
+// 형상·값 편집 핸들러(모듈 함수)에서 카드 stale을 켜는 통로 — render()가 실제
+// 구현으로 갈아 끼운다 (핸들러가 렌더 클로저 밖에 살기 때문)
+let markStale = () => {};
+
 export function render() {
   // 조각으로 갈라 둔다 — 어느 것이 전면이고 어느 것이 서랍인지는 아래 배치가 정한다
   const slots = {
@@ -69,6 +83,89 @@ export function render() {
   };
   const errBox = el("div");
   const statusLine = el("p", { class: "tab-status" });
+
+  // ── 튜닝 지표 카드 (A급 — 평가와 같은 카드, views/evalcards.js 공용) ──────
+  const stripStatus = el("span", { class: "hint" });
+  const stripCards = el("div", { style: "margin-top:8px" });
+
+  function paintStrip() {
+    clear(stripCards);
+    const stale = evalStrip.stale
+      ? " · 이후 편집 있음 — 카드는 이전 형상 기준" : "";
+    if (!evalStrip.status) {
+      stripStatus.textContent =
+        "아직 안 쟀다 — 기본 격자 15케이스(영향성 탭과 동일), 미적용 편집 포함 "
+        + "형상으로 잰다" + stale;
+      return;
+    }
+    stripStatus.textContent = evalStrip.status + stale;
+    if (evalStrip.error) {
+      stripCards.append(el("div", { class: "error-box" }, evalStrip.error));
+    }
+    const m = evalStrip.result;
+    if (!m) return;
+    renderEvalCards(stripCards, m.cards);
+    const agg = m.aggregate;
+    stripCards.append(el("p", { class: "hint", style: "margin:8px 0 0" },
+      (agg?.hard_fail == null ? "하드 게이트 판정 보류(케이스 0건)"
+        : agg.hard_fail ? `하드 게이트 위반 ${agg.hard_fails.length}건 — Fail`
+        : "하드 게이트 전부 통과")
+      + ` · ${checksSummary(m.checks)} · depth=${m.depth}`
+      + " · 상세는 영향성 탭 「평가」 서랍"));
+  }
+
+  async function runGainEval(depth) {
+    if (!catalog) return;
+    const cases = defaultGridCases();
+    evalStrip = { status: `제출 중 — 케이스 ${cases.length}건`, result: null,
+                  error: null, stale: false, depth };
+    paintStrip();
+    try {
+      const job = await api.post("/influence/evaluate",
+        evaluateRequest(editedShapeState(), { cases, depth }));
+      const done = await watchJob(job.id, (j) => {
+        evalStrip.status = `${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`;
+        // 진행 중엔 상태 한 줄만 — 카드를 다시 세우면 버튼 포커스가 들려 나간다
+        stripStatus.textContent = evalStrip.status;
+      });
+      if (done.status !== "done" || !done.result_id) {
+        evalStrip.status = `평가 ${done.status}`;
+        evalStrip.error = done.error ?? null;
+        paintStrip();
+        return;
+      }
+      const res = await api.get(`/results/${done.result_id}`);
+      evalStrip.status = "완료";
+      evalStrip.result = normalizeEvalReport(res);
+      paintStrip();
+    } catch (e) {
+      evalStrip.status = "실패";
+      evalStrip.error = errorText(e);
+      paintStrip();
+    }
+  }
+
+  markStale = () => {
+    if (evalStrip.result || evalStrip.status) {
+      evalStrip.stale = true;
+      paintStrip();
+    }
+  };
+
+  /** 지표 계산용 형상 — **미적용 편집 포함**(지금 화면의 표·상수 그대로).
+   *  적용된 store가 아니라 편집 버퍼를 실어야 카드가 "지금 만지는 게인"을 말한다 —
+   *  대신 그 사실을 상태줄이 명시한다. */
+  function editedShapeState() {
+    const { tables: applied, scheduleOff } = storePayload(catalog, selected);
+    return {
+      autopilot: constants?.autopilot ?? store.get("autopilotParams"),
+      scas: constants?.scas ?? store.get("scasParams"),
+      nav: store.get("navParams"),
+      actuators: store.get("actuatorParams"),
+      gainTables: applied && JSON.parse(JSON.stringify(applied)),
+      withSchedule: scheduleOff ? false : undefined,
+    };
+  }
 
   // 상수 드래프트를 **밖에서 바뀐 경우에만** 다시 읽는다 (테이블 드래프트와 같은 규약).
   //
@@ -170,6 +267,18 @@ export function render() {
       ],
       extra: [statusLine, errBox],
     }),
+    // 튜닝 지표 카드 — 게인을 만지는 화면에 상시로 서는 A급 표면(값·기준·최악
+    // 운용점). 계산은 버튼 트리거(비용)고, 편집이 생기면 stale 배지가 먼저 말한다
+    el("div", { class: "tab-sheet" },
+      el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
+        el("strong", {}, "튜닝 지표 — A급 카드"),
+        el("button", { class: "primary", onclick: () => runGainEval("linear") },
+          "지표 재계산 (선형 — 수 초)"),
+        el("button", { onclick: () => runGainEval("full"),
+                       title: "표준 기동 + 동시명령 런 포함 — 케이스당 수십 초" },
+          "정밀 (단계 2)"),
+        stripStatus),
+      stripCards),
     // 곡선은 카드 밖(자기 테두리를 갖는 캔버스), 편집 표는 그 바로 아래 판독 시트.
     // 둘은 한 벌이다 — 칸을 고치면 곡선이 그 자리에서 움직이는 것이 이 화면의 피드백
     // 전부라 표를 서랍에 넣으면 그 되먹임이 끊긴다
@@ -195,6 +304,7 @@ export function render() {
   }
   gainsDrawers = drawers;
   drawers.refresh();
+  paintStrip();  // 재진입 — 모듈 스코프 결과·stale 상태 복원
   return root;
 }
 
@@ -304,6 +414,7 @@ function slotGrid(slots, statusLine) {
         selected = toggleSlot(catalog, selected, slot.name);
         renderTables(slots, statusLine);
         statusLine.textContent = draft;
+        markStale();
       },
     });
     const title = `${slot.param} = ${fmt(cur, 6)} ${slot.unit ?? ""} · ${slot.desc ?? ""}`;
@@ -327,6 +438,7 @@ function slotGrid(slots, statusLine) {
           }
           constants = withConstant(catalog, slot, v, constants);
           statusLine.textContent = draft; // 재그리기 없음 — 입력 포커스를 잃지 않는다
+          markStale();
         },
       }));
   };
@@ -538,6 +650,7 @@ function renderTables(slots, statusLine) {
                 tables[name].data[i] = num;
                 redraw(); // 편집값 즉시 반영 (data 참조 공유) — 근사 곡선 포함
                 statusLine.textContent = "편집됨 (미적용) — '시뮬·코드에 적용'을 누르세요.";
+                markStale();
               },
             }))),
         ))),

@@ -70,6 +70,25 @@ def surface_positions(signals) -> dict:
     return {"elevon_l": de + da, "elevon_r": de - da, "rudder": dr}
 
 
+def zoh_decimate(meta, dt) -> tuple:
+    """타율 차분의 솎음 폭 — (decimate, 경고문 | None). duty_report·평가 공용.
+
+    작동기 미장착이면 명령 직결 ZOH라 제어주기만큼 솎아야 차분이 임펄스 열이 되지
+    않는다(그때 타율은 실현값이 아니라 요구 slew이고 rate 한계도 없다 — 경고문이
+    그 사실을 든다). 이 판정이 두 곳에 복사되면 ZOH 미묘함이 따로 낡는다.
+    """
+    if bool((meta or {}).get("actuators")):
+        return 1, None
+    decimate = 1
+    control_hz = float((meta or {}).get("control_hz") or 0.0)
+    if control_hz > 0 and dt > 0:
+        decimate = max(1, int(round(1.0 / (control_hz * dt))))
+    return decimate, (
+        "작동기 미장착 — 명령이 직결되어 타율은 실현값이 아니라 요구 slew이고, "
+        "rate 한계가 없어 타율 포화는 판정하지 않는다."
+    )
+
+
 def rate_series(x, dt, decimate: int = 1):
     """(위치 정렬본, 타율) — decimate만큼 솎아 dt·decimate 기준 차분.
 
@@ -284,16 +303,10 @@ def duty_report(t, signals, meta, bins: int = 32, rate_bins: int = 24,
     has_act = bool(meta.get("actuators"))
     warnings = []
 
-    # 작동기 미장착 = 명령 직결 ZOH — 제어주기만큼 솎아야 차분이 임펄스 열이 되지 않는다
-    decimate = 1
-    if not has_act:
-        control_hz = float(meta.get("control_hz") or 0.0)
-        if control_hz > 0 and dt > 0:
-            decimate = max(1, int(round(1.0 / (control_hz * dt))))
-        warnings.append(
-            "작동기 미장착 — 명령이 직결되어 타율은 실현값이 아니라 요구 slew이고, "
-            "rate 한계가 없어 타율 포화는 판정하지 않는다."
-        )
+    # 작동기 미장착 = 명령 직결 ZOH — 판정은 zoh_decimate 한 곳 (평가와 공용)
+    decimate, zoh_warning = zoh_decimate(meta, dt)
+    if zoh_warning:
+        warnings.append(zoh_warning)
     dt_rate = dt * decimate
     td = t[::decimate]
     t_rate = 0.5 * (td[:-1] + td[1:]) if td.size > 1 else td[:0]

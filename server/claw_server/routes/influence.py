@@ -11,11 +11,18 @@ sim에서 `TableIn`을 가져다 쓰는 것과 같은 선례다.
 
 import math
 import time
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import Field, field_validator
 
+from claw.analysis.schedule import mach_midpoints
+from claw.pipeline.criteria import GainEvalCriteria
 from claw.pipeline.diagnose import diagnose_grid, diagnose_run
+from claw.pipeline.evaluate import (
+    CARD_META, CARDS, CHECK_META, CHECKS, ITEMS, STAGE_ORDER, VERIFY_META,
+    evaluate, verify,
+)
 from claw.pipeline.influence import Shape, make_law, param_universe, structural_payload
 from claw.pipeline.openloop import openloop_delta
 from claw.pipeline.sweep import nonadditivity, plan_shapes, run_sweep, sweep_plan
@@ -395,5 +402,194 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
         job.result_id = job.id
 
     job = request.app.state.jobs.submit("influence_scan", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()
+
+
+@router.get("/influence/criteria/defaults")
+def criteria_defaults() -> dict:
+    """평가기준 기본값 + A/B/C 어휘 — 웹이 이 값을 받아 그린다 (재기술 금지, 02 §5.5).
+
+    `/design/defaults`와 분리한 이유: 소비자가 다르고(오토디자인 vs A/B/C 평가),
+    그쪽 config에 얹으면 AutoDesignConfig.__post_init__의 목표-기준 정합 검사에
+    또 얽힌다. 마진 판정선 자체는 둘 다 MarginCriteria 한 정의를 쓴다.
+
+    cards/checks/verify가 화면 어휘의 정본이다 — 웹이 카드 이름·순서를 하드코딩하면
+    엔진 재편 날 화면이 옛 순서를 말한다. items는 원자료(케이스 × 항목 격자)의 라벨.
+    """
+    c = GainEvalCriteria()
+    return {
+        "criteria": c.to_dict(),
+        "fingerprint": c.fingerprint(),
+        "cards": [{"key": k, "card": CARD_META[k][0], "label": CARD_META[k][1]}
+                  for k in CARDS],
+        "checks": [{"key": k, "label": CHECK_META[k]} for k in CHECKS],
+        "verify": [{"key": k, "label": v} for k, v in VERIFY_META.items()],
+        "items": [{"key": k, "item": ITEMS[k][0], "label": ITEMS[k][1]}
+                  for k in STAGE_ORDER],
+    }
+
+
+class EvaluateIn(InfluenceIn):
+    """A/B급 평가 요청 — 형상 + 케이스 격자 + 기준(없으면 기본값) + 깊이.
+
+    depth="linear"는 트림+선형화만(시뮬 0 — 전 게인 후보에 돌리는 단계 1),
+    "full"은 표준 기동 런 + 동시명령 런 포함(단계 2). B급 교차축이 필수라 full에서
+    동시명령은 상시다. C급(강건성 코너·격자 중간점 등)은 `/influence/verify`가
+    따로 받는다 — 요청 형상이 다르고, 사용자 확정 실행 단계 분리가 그 경계다.
+    """
+
+    fingerprint: str = ""
+    cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
+    criteria: dict | None = None
+    depth: Literal["linear", "full"] = "full"
+    t_settle: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
+    t_step: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
+    t_hold: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
+    dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
+
+
+@router.post("/influence/evaluate", status_code=202)
+def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> dict:
+    """A급 카드 7 + B급 체크 9 + 원자료 — 잡 기반 202.
+
+    케이스당 비용: 트림 + (depth=full일 때) 표준 기동 런·동시명령 런 + 선형화·마진.
+    기준 오류·기체와 안 맞는 형상은 제출 시점 422 (sweep과 같은 계약). 결과에
+    형상·기준 지문이 함께 실린다 — 무슨 기준으로 판정했는지가 계보다.
+    """
+    ac = make_demo_aircraft()
+    cases = build_cases(req.cases)
+    try:
+        shape = to_shape(req)
+        criteria = GainEvalCriteria.from_dict(req.criteria)
+        check_law_plant_pairing(ac, make_law(shape))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    store = request.app.state.store
+    n = len(cases)
+    per_case = 1 if req.depth == "linear" else 3
+    total = n + n * per_case
+
+    def work(job):
+        trs = trim_batch(
+            ac, cases, fingerprint=req.fingerprint,
+            on_progress=lambda done, _t, tr: job.report(
+                done, total, message=f"트림: {tr.case.name}"
+            ),
+        )
+        out = evaluate(
+            ac, trs, shape, criteria,
+            depth=req.depth, dt_plant=req.dt_plant,
+            t_settle=req.t_settle, t_step=req.t_step, t_hold=req.t_hold,
+            on_progress=lambda done, ev_total, msg: job.report(
+                n + done, n + ev_total, message=msg
+            ),
+        )
+        payload = to_jsonable(out)
+        payload["kind"] = "influence_evaluate"
+        store.save(
+            job.id, payload,
+            meta={"kind": "influence_evaluate", "created": job.created,
+                  "n": len(out["cases"]), "fingerprint": req.fingerprint,
+                  "criteria_fingerprint": out["criteria_fingerprint"]},
+        )
+        job.result_id = job.id
+
+    job = request.app.state.jobs.submit("influence_evaluate", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()
+
+
+class VerifyIn(InfluenceIn):
+    """C급 검증 요청 — 후보 게인 스케줄 확정 **후** 별도 실행 (실행 단계 3).
+
+    강건성 코너(질량·Cmα·Cmq — 축·문턱은 criteria.robustness)와 격자 중간점을
+    돌린다. 지연 섭동·MC·미션·worst-case 탐색은 어휘와 자리만 있다(엔진 verify
+    참조). 코너마다 재트림하므로 비용이 코너 수 × 케이스로 곱해진다 — 제출 시점에
+    총량을 상한으로 막는다.
+    """
+
+    fingerprint: str = ""
+    cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
+    criteria: dict | None = None
+    depth: Literal["linear", "full"] = "full"
+    midpoints: bool = True
+    t_settle: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
+    t_step: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
+    t_hold: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
+    dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
+
+
+@router.post("/influence/verify", status_code=202)
+def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
+    """C급 검증 — 강건성 코너 + 격자 중간점 (잡 기반 202, kind influence_verify).
+
+    중간점 케이스 이름은 mach·alt·fuel **전체**를 싣는다 — 연료만 다른 격자에서
+    이름이 겹치면 귀속이 조용히 다른 케이스로 바뀐다(웹 nameCases와 같은 계약).
+    "mid/"는 예약 접두사다: 사용자 케이스가 그 이름을 쓰면 중간점 집계에 섞인다.
+    """
+    ac = make_demo_aircraft()
+    cases = build_cases(req.cases)
+    reserved = [c.name for c in cases if c.name.startswith("mid/")]
+    if reserved:
+        raise HTTPException(
+            status_code=422,
+            detail=f"'mid/'는 중간점 예약 접두사다 — 케이스 이름 변경 필요: {reserved}")
+    try:
+        shape = to_shape(req)
+        criteria = GainEvalCriteria.from_dict(req.criteria)
+        check_law_plant_pairing(ac, make_law(shape))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # 격자 중간점 부가 — 이름은 전체 정밀도 mach·alt·fuel (겹침 금지 계약)
+    mids: list = []
+    if req.midpoints and criteria.schedule.midpoints:
+        law = make_law(shape)
+        tables = law.schedule.tables if law.schedule is not None else {}
+        if tables:
+            machs = [c.mach for c in cases]
+            mvals = mach_midpoints(tables, lo=min(machs), hi=max(machs))
+            combos = list(dict.fromkeys((c.alt, c.fuel) for c in cases))
+            mids = [type(cases[0])(name=f"mid/M{m:g}_h{alt:g}_f{fuel:g}",
+                                   mach=m, alt=alt, fuel=fuel)
+                    for m in mvals for alt, fuel in combos]
+
+    from claw.pipeline.evaluate import _corner_dispersions
+
+    n_corner = len(_corner_dispersions(criteria))
+    expected = n_corner * len(cases) + len(mids)
+    if expected > MAX_CASES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"검증 총량 {expected}케이스(코너 {n_corner}×{len(cases)} + "
+                   f"중간점 {len(mids)})가 상한 {MAX_CASES}를 넘는다 — 격자를 "
+                   "줄이거나 강건성 축을 좁히세요")
+
+    store = request.app.state.store
+    per_case = (1 if req.depth == "linear" else 3) + 1
+    total = expected * per_case
+
+    def work(job):
+        out = verify(
+            make_demo_aircraft, cases, shape, criteria,
+            depth=req.depth, midpoint_cases=mids, dt_plant=req.dt_plant,
+            t_settle=req.t_settle, t_step=req.t_step, t_hold=req.t_hold,
+            on_progress=lambda done, v_total, msg: job.report(
+                done, max(v_total, total), message=msg
+            ),
+        )
+        payload = to_jsonable(out)
+        payload["kind"] = "influence_verify"
+        store.save(
+            job.id, payload,
+            meta={"kind": "influence_verify", "created": job.created,
+                  "n": expected, "fingerprint": req.fingerprint,
+                  "criteria_fingerprint": out["criteria_fingerprint"]},
+        )
+        job.result_id = job.id
+
+    job = request.app.state.jobs.submit("influence_verify", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"
     return job.to_dict()

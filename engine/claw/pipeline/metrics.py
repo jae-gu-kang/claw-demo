@@ -19,8 +19,17 @@ import math
 
 import numpy as np
 
-from claw.analysis.duty import CHANNELS, POS_TOL, surface_positions
+from claw.analysis.duty import (
+    CHANNELS, POS_TOL, _limits_for, saturation, surface_positions,
+)
 from claw.pipeline.influence import METRICS
+
+# ── 응답특성의 **정의** 상수 — 문턱이 아니라 측정 규약이라 criteria가 아니라
+# 여기 산다 (측정과 정의는 한 몸 — criteria.ResponseCriteria 참조 주석의 짝).
+SETTLE_BAND_FRAC = 0.02  # Ts 정착 밴드: 스텝 크기의 ±2 % (고전 관례)
+TR_LO, TR_HI = 0.10, 0.90  # Tr: 10→90 % 도달 시간
+SSE_TAIL_FRAC = 0.10  # sse: 창 마지막 10 % 평균 잔차
+_STEP_TOL = 1e-9  # 명령 변화 감지 — 유도 목표는 조각상수라 부동소수 왕복분이면 충분
 
 
 def wrap_pi(a):
@@ -181,6 +190,142 @@ def _landing_metrics(t, signals, meta) -> dict:
     return out
 
 
+def step_metrics(t, cmd, y, on, *, angular=False) -> dict:
+    """축 하나의 스텝 응답 특성 — {"tr", "ts", "mp", "sse"} (A⑤·B급 지표의 계산부).
+
+    스텝 경계는 **명령 신호 자체**에서 찾는다: 유도 목표는 조각상수라(모드가 목표를
+    홀드) cmd의 변화점이 곧 스텝 시각이다 — 모드 시각표를 meta에 따로 실으면 같은
+    사실이 두 곳에 적힌다. 창은 그 스텝부터 같은 축의 다음 변화(또는 런 끝)까지.
+
+    값의 삼분법(0으로 위장 금지의 세 갈래):
+    - **None**: 스텝이 없다(축이 꺼져 있거나 명령이 안 움직였다) — 잰 것이 없다
+    - **inf**: 스텝이 있는데 창 안에서 그 일이 안 일어났다(90 % 미도달·미정착) —
+      "느리다"의 극한이지 측정 불가가 아니다. 직렬화는 "inf"로 살아남고("inf" 규약)
+      판정은 어떤 유한 상한보다도 크므로 자연히 fail이 된다
+    - 유한값: 측정된 사실
+
+    여러 스텝이면 **최악**(max)을 낸다 — 지표는 보증이지 평균이 아니다.
+    Mp는 스텝 방향 기준 초과분/스텝 크기(무차원), sse는 창 꼬리 평균 잔차(절대 단위).
+    """
+    cmd_a, y_a = _arr({"c": cmd}, "c"), _arr({"y": y}, "y")
+    if cmd_a is None or y_a is None or cmd_a.size < 2:
+        return {"tr": None, "ts": None, "mp": None, "sse": None}
+    t_a = np.asarray(t, dtype=float)
+    mask = np.ones(cmd_a.shape, dtype=bool) if on is None else np.asarray(on) > 0.5
+
+    diff = np.abs(np.diff(cmd_a))
+    if angular:
+        diff = np.abs(wrap_pi(np.diff(cmd_a)))
+    starts = [int(k) + 1 for k in np.flatnonzero(diff > _STEP_TOL)
+              if mask[int(k) + 1]]
+    if not starts:
+        return {"tr": None, "ts": None, "mp": None, "sse": None}
+    bounds = starts + [cmd_a.size]
+
+    worst = {"tr": None, "ts": None, "mp": None, "sse": None}
+
+    def keep(key, v):
+        if v is not None and (worst[key] is None or v > worst[key]):
+            worst[key] = v
+
+    for k0, k1 in zip(starts, bounds[1:]):
+        if k1 - k0 < 2:
+            continue
+        y0, y1 = float(y_a[k0 - 1]), float(cmd_a[k0])
+        e0 = (y1 - y0)
+        if angular:
+            e0 = float(wrap_pi(np.array([e0]))[0])
+        h = abs(e0)
+        if h <= _STEP_TOL:
+            continue
+        seg_t = t_a[k0:k1] - t_a[k0]
+        err = y_a[k0:k1] - y1
+        if angular:
+            err = wrap_pi(err)
+        if not np.isfinite(err).all():
+            # 발산으로 잘린 창 — NaN은 비교에서 False라 그대로 두면 "정착"으로
+            # 위장된다. 네 값 모두 inf: "그 일이 창 안에서 안 일어났다"의 극한이고
+            # 발산한 런이 초록이 되는 일은 없다
+            for key in ("tr", "ts", "mp", "sse"):
+                keep(key, math.inf)
+            continue
+        # 진행률 = (y − y0)/e0. err = y − y1 = (진행률 − 1)·e0 이므로 1 + err/e0.
+        # 시작(err = −e0)에서 0, 목표 도달에서 1, 초과에서 1 초과 — 부호가 스텝
+        # 방향으로 접혀 하강 스텝에서도 같은 축이다
+        travel = 1.0 + err / e0
+
+        # Tr — 10 %·90 % 최초 도달. 90 % 미도달이면 inf (창 안에서 안 일어난 일)
+        i10 = np.flatnonzero(travel >= TR_LO)
+        i90 = np.flatnonzero(travel >= TR_HI)
+        if i90.size:
+            k10 = int(i10[0]) if i10.size else 0
+            keep("tr", float(seg_t[int(i90[0])] - seg_t[k10]))
+        else:
+            keep("tr", math.inf)
+
+        # Ts — 밴드(스텝 크기의 ±2 %) 밖 마지막 시각. 끝까지 밖이면 inf
+        out = np.abs(err) > SETTLE_BAND_FRAC * h
+        if not out.any():
+            keep("ts", 0.0)
+        elif bool(out[-1]):
+            keep("ts", math.inf)
+        else:
+            keep("ts", float(seg_t[int(np.flatnonzero(out)[-1])]))
+
+        # Mp — 목표 초과분(스텝 방향)의 최대 / 스텝 크기 = max(0, travel − 1)
+        keep("mp", float(np.maximum(0.0, travel - 1.0).max()))
+
+        # sse — 창 꼬리 평균 잔차 (절대 단위)
+        tail = max(1, int(round(SSE_TAIL_FRAC * (k1 - k0))))
+        keep("sse", float(np.mean(np.abs(err[-tail:]))))
+    return worst
+
+
+def _authority_metrics(signals, meta) -> dict:
+    """비행 중 잔여 권한 — min(배분 한계)/엘레본 예산 (A⑦, 커밋 0e56bcf 배분 신호).
+
+    배분 미장착 형상(신호 없음)·예산 미상이면 None — "권한을 다 썼다(0)"와
+    "계측이 없다"는 다른 사실이다.
+    """
+    hi = ((meta or {}).get("limits") or {}).get("elevon_hi")
+    out = {}
+    for key, sig_name in (("min_pitch_authority_frac", "alloc_pitch_hi"),
+                          ("min_roll_authority_frac", "alloc_roll_hi")):
+        a = _arr(signals, sig_name)
+        if a is None or hi is None or not float(hi) > 0.0:
+            out[key] = None
+            continue
+        f = a[np.isfinite(a)]
+        out[key] = None if f.size == 0 else float(f.min() / float(hi))
+    return out
+
+
+def _sat_longest(signals, meta, t) -> float | None:
+    """타면 위치 포화의 최장 연속 시간 [s] — 채널 최악 (B급 포화 지속).
+
+    surf_sat_frac(시간비)과 다른 질문이다: 짧게 여러 번(리밋사이클 징후)과 길게
+    한 번(조종권 부족)은 비율이 같아도 다른 사고다. 한계 미상이면 None.
+    """
+    limits = dict((meta or {}).get("limits") or {})
+    try:
+        surfaces = surface_positions(signals)
+    except KeyError:
+        return None
+    t_a = np.asarray(t, dtype=float)
+    dt = float((meta or {}).get("dt_plant") or
+               (t_a[1] - t_a[0] if t_a.size > 1 else 0.0))
+    if dt <= 0.0:
+        return None
+    longest = None
+    for key, _label, prefix in CHANNELS:
+        lo, hi = _limits_for(limits, prefix)
+        s = saturation(surfaces[key], dt, lo, hi)
+        if s is None:
+            continue
+        longest = s["longest"] if longest is None else max(longest, s["longest"])
+    return longest
+
+
 def metric_values(t, signals, envelope, meta, waypoints=None) -> dict:
     """설계 지표 전부 — 키 집합은 METRICS 선언과 일치한다 (test_metrics 핀).
 
@@ -201,6 +346,18 @@ def metric_values(t, signals, envelope, meta, waypoints=None) -> dict:
     worst = envelope.get("worst_margin")
     la = signals.get("limiter_active")
 
+    # 축별 스텝 응답 특성 (A⑤ Ts·Mp + B급 Tr·sse) — 접두사 = 추종 RMS와 동일 축
+    steps = {}
+    for axis, cmd_key, y_key, on_key, ang in (
+        ("alt", "cmd_alt", "h", "alt_on", False),
+        ("spd", "cmd_speed", "V", "speed_on", False),
+        ("hdg", "cmd_heading", "psi", "heading_on", True),
+    ):
+        sm = step_metrics(t, signals.get(cmd_key), signals.get(y_key),
+                          signals.get(on_key), angular=ang)
+        for name, v in sm.items():
+            steps[f"{axis}_{name}"] = v
+
     out = {
         "worst_stall_margin": None if worst is None else float(worst),
         "envelope_flags": None if any_arr is None else int(any_arr.sum()),
@@ -208,10 +365,13 @@ def metric_values(t, signals, envelope, meta, waypoints=None) -> dict:
         "spd_rms": _tracking_rms(signals, "cmd_speed", "V", "speed_on"),
         "hdg_rms": _tracking_rms(signals, "cmd_heading", "psi", "heading_on",
                                  angular=True),
+        **steps,
         "surf_sat_frac": _surf_sat_frac(signals, meta),
+        "sat_longest": _sat_longest(signals, meta, t),
         "limiter_frac": (
             None if la is None else float(np.mean(np.asarray(la, dtype=bool)))
         ),
+        **_authority_metrics(signals, meta),
         "xtrack_rms": _xtrack_rms(signals, waypoints),
         **_landing_metrics(t, signals, meta),
     }

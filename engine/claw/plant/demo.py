@@ -6,6 +6,7 @@ CFD DB 반입 전의 대역(placeholder) 프로파일이며 "비행체 프로파
 """
 
 import math
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -74,7 +75,30 @@ def make_demo_launch_rail() -> LaunchRail:
     )
 
 
-def make_demo_aircraft(ground=None) -> Aircraft:
+@dataclass(frozen=True)
+class DispersionSet:
+    """강건성 검증(C급)용 결정적 섭동 — 비율 스케일 (0.2 = +20 %).
+
+    조립 함수에 손잡이를 단다(M7 주입 인자와 같은 성격 — 해석 모듈이 정본을
+    우회하지 않게). **CG는 여기 없다** — cg_empty=cg_full=0 고정 + 모멘트 기준점
+    이전 [TBD]라(아래 FuelMass 주석) CG를 흔들어도 동역학이 안 변한다. 흔드는
+    시늉을 하면 "CG ±20 % 통과"가 조용한 거짓 합격이 된다.
+    """
+
+    mass: float = 0.0  # 공허중량 배율 Δ (연료는 케이스 변수라 그대로)
+    cmalpha: float = 0.0  # 정적 안정 미계수 Cmα 배율 Δ
+    cmq: float = 0.0  # 피치 댐핑 Cmq 배율 Δ
+
+    def label(self) -> str:
+        parts = [f"{n}{v:+.0%}" for n, v in
+                 (("mass", self.mass), ("cmα", self.cmalpha), ("cmq", self.cmq))
+                 if v != 0.0]
+        return "·".join(parts) or "nominal"
+
+
+def make_demo_aircraft(ground=None, dispersion: DispersionSet | None = None) -> Aircraft:
+    d = dispersion or DispersionSet()
+
     def coef(inp):
         a, b_ = inp["alpha"], inp["beta"]
         de = inp.get("de", 0.0)
@@ -88,13 +112,16 @@ def make_demo_aircraft(ground=None) -> Aircraft:
             "CY": cy_d - 0.8 * b_ + 0.10 * dr,
             "CZ": cz,
             "Cl": -0.05 * b_ - 0.30 * inp["phat"] + 0.15 * da,
-            "Cm": 0.02 - 0.8 * a - 1.0 * de - 6.0 * inp["qhat"],
+            # 섭동은 해당 항에만 배율로 얹는다 — 다른 항까지 스케일하면 "Cmα ±20 %"가
+            # 아니라 "피칭 전부 ±20 %"가 되어 검증이 말하는 것과 다른 것을 잰다
+            "Cm": (0.02 - 0.8 * (1.0 + d.cmalpha) * a - 1.0 * de
+                   - 6.0 * (1.0 + d.cmq) * inp["qhat"]),
             "Cn": 0.12 * b_ - 0.15 * inp["rhat"] - 0.08 * dr,
         }
 
     aero = AeroModel(S=3.0, cbar=1.5, b=2.5, coef_fn=coef)
     fuel_mass = FuelMass(
-        m_empty=800.0,
+        m_empty=800.0 * (1.0 + d.mass),
         fuel_max=400.0,
         J_empty=np.diag([300.0, 900.0, 1100.0]),
         J_full=np.diag([350.0, 1100.0, 1350.0]),

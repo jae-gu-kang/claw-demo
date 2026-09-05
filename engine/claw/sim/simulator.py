@@ -52,6 +52,7 @@ _CHAIN_SIGNALS = (
     "pitch_pi", "pitch_damp", "pitch_raw",  # SCAS 축 기여항 (포화 전)
     "roll_pi", "roll_damp", "roll_raw",
     "yaw_pi", "yaw_damp", "yaw_raw", "yaw_wo",
+    "alloc_roll_hi", "alloc_pitch_hi", "alloc_resv",  # 엘레본 배분 예산 (평가 A⑦ 잔여 권한)
     "i_pitch", "i_roll", "i_yaw", "i_alt", "i_spd", "i_hdg", "i_vs",  # 적분기 (와인드업)
 )
 

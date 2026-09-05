@@ -27,8 +27,9 @@ def test_structural_node_census(client):
     # 입력·출력은 안 늘었다(뱅크 명령을 재활용한다) — 늘었으면 계약이 바뀐 것이다.
     # (엔진 test_influence와 한 쌍 — 한쪽만 고치면 다른 쪽이 깨진다)
     assert kinds["ir"] == 78 and kinds["input"] == 23 and kinds["output"] == 7
-    # 지표 8 → 12: 이착륙 4종(접지 강하율·접지 속도·미끄럼 거리·사출 하중) 추가
-    assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 12
+    # 지표 12 → 27: A/B/C 재편이 응답특성(축별 Tr·Ts·Mp·sse 12종)·잔여 권한 2종·
+    # 포화 최장 지속을 추가 (키는 전부 신규 — 기존 키 rename 없음)
+    assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 27
 
 
 def test_structural_is_json_safe(client):
@@ -297,3 +298,137 @@ def test_sweep_rejects_impossible_shape_at_submit_not_mid_job(client):
     r3 = client.post("/api/influence/sweep",
                      json={"cases": cases, "knobs": ["fcl/Autopilot.kp_alt"]})
     assert r3.status_code == 202
+
+
+# ---------- A/B/C 평가 (evaluate·verify) ----------
+
+
+def test_criteria_defaults_echo(client):
+    """웹은 문턱·어휘를 재기술하지 않는다 — 기준·카드·체크·검증 어휘 전부 echo."""
+    r = client.get("/api/influence/criteria/defaults")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["criteria"]["schema_version"] == 2
+    assert body["criteria"]["actuator"]["sat_frac_max"] == 0.05
+    assert [c["key"] for c in body["cards"]][:3] == ["mode_stability", "gm", "pm"]
+    assert len(body["cards"]) == 7 and len(body["checks"]) == 9
+    assert len(body["items"]) == 11 and len(body["verify"]) == 7
+    json.dumps(body, allow_nan=False)
+
+
+def test_evaluate_job_round_trip(client, wait_job):
+    """카드 7 + 체크 9 + 원자료 — 지문 계보와 J·하드 게이트 규약."""
+    r = client.post("/api/influence/evaluate", json={
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "t_settle": 2.0, "t_step": 4.0,
+        "fingerprint": "fp-eval",
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    assert res["kind"] == "influence_evaluate"
+    assert [c["key"] for c in res["cards"]][:3] == ["mode_stability", "gm", "pm"]
+    ch = res["checks"]
+    assert ch["n_pass"] + ch["n_warn"] + ch["n_fail"] + ch["n_na"] == 9
+    c = res["cases"][0]
+    assert set(c["stages"]) == set(res["stage_order"])
+    if c["hard_fails"]:
+        assert c["J"] is None and c["J_reason"]
+    assert res["criteria_fingerprint"]
+    assert res["aggregate"]["hard_fail"] in (True, False)
+    json.dumps(res, allow_nan=False)
+
+
+def test_evaluate_depth_linear_is_sim_free(client, wait_job):
+    """단계 1 — 시뮬 0. 비선형 항목은 사유를 들고 na, 선형 항목은 판정된다."""
+    r = client.post("/api/influence/evaluate", json={
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "depth": "linear",
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=120.0)
+    assert j["status"] == "done"
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    st = res["cases"][0]["stages"]
+    assert st["tracking"]["status"] == "na" and "linear" in st["tracking"]["note"]
+    assert st["margins"]["status"] != "na"
+    gm = next(c for c in res["cards"] if c["key"] == "gm")
+    assert gm["value"] is not None  # 선형 카드가 실제 값을 낸다
+
+
+def test_evaluate_validation_is_at_submit(client):
+    """기준 오타·구 스키마·모르는 depth는 202가 아니라 제출 시점 422다."""
+    base = {"cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}]}
+    assert client.post("/api/influence/evaluate", json={
+        **base, "criteria": {"actuator": {"sat_frac_maxx": 0.1}},
+    }).status_code == 422
+    assert client.post("/api/influence/evaluate", json={
+        **base, "criteria": {"schema_version": 1},
+    }).status_code == 422
+    assert client.post("/api/influence/evaluate", json={
+        **base, "criteria": {"trim": {"de_frac_warn": 0.4}},  # v1 그룹명
+    }).status_code == 422
+    assert client.post("/api/influence/evaluate", json={
+        **base, "depth": "quick",
+    }).status_code == 422
+
+
+def test_verify_midpoints_multi_fuel_names_are_unique(client, wait_job):
+    """중간점 이름은 mach·alt·fuel 전체를 싣는다 — 연료만 다른 격자에서 이름이
+    겹치면 귀속이 조용히 다른 케이스로 바뀐다(리뷰 must-fix)."""
+    r = client.post("/api/influence/verify", json={
+        "cases": [
+            {"name": "a1", "mach": 0.5, "alt": 1000.0, "fuel": 100.0},
+            {"name": "a2", "mach": 0.5, "alt": 1000.0, "fuel": 200.0},
+            {"name": "b1", "mach": 0.55, "alt": 1000.0, "fuel": 100.0},
+        ],
+        "depth": "linear",
+        # 코너 없이 중간점만 — 축이 0이면 코너를 만들지 않는다(흔드는 시늉 금지)
+        "criteria": {"robustness": {"mass_frac": 0.0, "cmalpha_frac": 0.0,
+                                    "cmq_frac": 0.0}},
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    gm = res["verify"]["grid_midpoints"]
+    names = [c["case"] for c in gm["cases"]]
+    assert len(names) == len(set(names))  # 겹침 금지
+    assert "mid/M0.525_h1000_f100" in names and "mid/M0.525_h1000_f200" in names
+    assert res["verify"]["mass_cg"]["status"] == "na"  # 코너 0건 — na지 PASS가 아니다
+    json.dumps(res, allow_nan=False)
+
+
+def test_verify_corner_round_trip(client, wait_job):
+    """강건성 코너 — 섭동 기체 재트림 + 하드 판정. CG [TBD]는 문장으로 남는다."""
+    r = client.post("/api/influence/verify", json={
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "depth": "linear", "midpoints": False,
+        "criteria": {"robustness": {"mass_frac": 0.2, "cmalpha_frac": 0.0,
+                                    "cmq_frac": 0.0}},
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    corners = res["verify"]["mass_cg"]["corners"]
+    assert [c["label"] for c in corners] == ["mass+20%", "mass-20%"]
+    assert "[TBD]" in res["verify"]["mass_cg"]["note"]
+    assert res["kind"] == "influence_verify"
+
+
+def test_verify_guards(client):
+    """예약 접두사·총량 상한은 제출 시점 422다."""
+    assert client.post("/api/influence/verify", json={
+        "cases": [{"name": "mid/M0.5_h1000_f200", "mach": 0.5, "alt": 1000.0,
+                   "fuel": 200.0}],
+    }).status_code == 422
+    # 코너 6 × 40케이스 = 240 > 200 상한
+    cases = [{"name": f"c{i}", "mach": 0.4 + i * 1e-3, "alt": 1000.0,
+              "fuel": 200.0} for i in range(40)]
+    r = client.post("/api/influence/verify", json={
+        "cases": cases, "midpoints": False,
+    })
+    assert r.status_code == 422
+    assert "상한" in r.json()["detail"]
