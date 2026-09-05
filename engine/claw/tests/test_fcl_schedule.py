@@ -148,9 +148,13 @@ def test_기본_테이블은_예전과_같다():
     # 감쇠항이 PID의 둘째 입력이 되었다(graphs.py scas_axis_nodes).
     # 앞선 갱신은 단발 전환(DEMO_K_DIFF_THR = 0)이었고, 프로펠러 추력 모델은
     # 순수 플랜트 변경이라 지문을 안 움직였다.
-    # 이번 갱신은 엘레본 제어권한 배분 — 선회 하중으로 피치 몫을 먼저 떼고 롤이
+    # 앞선 갱신은 엘레본 제어권한 배분 — 선회 하중으로 피치 몫을 먼저 떼고 롤이
     # 나머지를 가져간다. 축 순서가 롤→피치로 바뀌었다 (graphs.py scas3_nodes).
-    assert _module().fingerprint == "3e032f9003b7cc9f"
+    # 이번 갱신은 ki = 0 적분 경로 폴딩(emit_c.py _pid_has_integrator) — 헤딩·요축
+    # 가드가 영구 도달 불가 분기라 방출을 멈췄고(DAL A 죽은 코드 논점), 출력식은
+    # +0.0 소거뿐이라 법칙은 그대로지만 파라미터 목록(*_pid_ki)이 줄어 지문이
+    # 움직였다. 정본 사슬은 test_parity.py::test_분할해도_지문은_그대로다와 같다.
+    assert _module().fingerprint == "8e540717b28eea23"
 
 
 def test_없는_자리를_요구하면_거부한다():
