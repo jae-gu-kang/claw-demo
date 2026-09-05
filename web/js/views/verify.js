@@ -358,7 +358,11 @@ function renderEquiv(box, report) {
       + "허용오차를 두면 진짜 어긋남이 그 아래 숨는다.",
       eq?.status === "skip"
         ? el("p", { class: "hint" }, eq.reason ?? "생략")
-        : table(["출력", "스텝", "일치", "최대 |오차|", "첫 불일치"], outRows)),
+        // 실행 실패·행 수 불일치는 note에만 사유가 있다 — 안 그리면 빈 표만 남아
+        // "왜 실패했는지"가 화면에서 사라진다 (rc·stderr가 여기 실린다)
+        : [eq?.note ? el("div", { class: "error-box" }, eq.note) : null,
+           outRows.length ? table(["출력", "스텝", "일치", "최대 |오차|", "첫 불일치"],
+                                  outRows) : null]),
     drawerSection("대조 입력이 밟은 경로",
       "대조가 통과해도 그 경로를 안 밟았으면 의미가 없다 — 안 밟은 경로의 일치는 검증이 아니다.",
       table(["경로", "판정", "근거"], pathRows)),

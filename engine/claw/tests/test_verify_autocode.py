@@ -14,7 +14,9 @@ import pytest
 from claw.fcl.demo import make_demo_fcl
 from claw.fcl.graphs import FCL_INPUTS
 from claw.verify import mcdc, vectors
-from claw.verify.autocode import find_cc, make_harness, verify_flight
+from claw.verify.autocode import (
+    _coupled_guards, find_cc, make_harness, verify_flight, warm_start_lines,
+)
 from claw.verify.static_c import analyze, cyclomatic, functions_of, strip_comments_strings
 from claw.verify.units import make_unit_harness, run_unit_oracle, unit_specs
 
@@ -268,6 +270,106 @@ def test_전체_파이프라인은_기본_형상에서_DAL_A_목표를_닫는다
     # DO-178C 대응표 — 범위 밖 항목이 명시돼 있어야 한다 (조용한 누락 금지)
     dal = {r["ref"]: r["status"] for r in rep["dal"]}
     assert dal["DO-330"] == "out" and dal["A-7 obj."] == "out"
+
+
+# ── 리뷰 대응 — 폴딩 조건·정당화 조건·하네스·인벤토리 (거짓 통과 방지) ──
+
+
+def _pid_graph(**kw):
+    """PID 하나짜리 그래프 — 폴딩 판정을 형상별로 흔들어 보는 최소 단위."""
+    from claw.blocks.controllers import PID
+    from claw.codegen import GraphRunner
+    from claw.codegen.ir import Graph, Node
+
+    params = dict(kp=1.0, ki=0.0, out_lo=-1.0, out_hi=1.0)
+    params.update(kw)
+    g = Graph("g", inputs=("e",),
+              nodes=[Node("pid", PID, inputs=("e",), params=params)],
+              outputs={"y": "pid"})
+    return GraphRunner(g, DT)
+
+
+def _emit(runner):
+    from claw.codegen import emit_c
+
+    return emit_c(runner.graph, runner).files["g.c"]
+
+
+def test_한계가_0을_품을_때만_적분기를_접는다():
+    """ki=0이어도 Python은 매 스텝 무조건 클램프한다 — 0 ∉ [lo,hi]면 적분기가
+    한계로 끌려가 출력에 실리므로, 접으면 비트 동등성이 깨진다."""
+    assert "pid_i" not in _emit(_pid_graph())                  # 0 ∈ [-1, 1] → 접는다
+    assert "pid_i" in _emit(_pid_graph(out_lo=0.5, out_hi=1.0))  # 0 ∉ [0.5, 1]
+    assert "pid_i" in _emit(_pid_graph(out_lo=-1.0, out_hi=-0.5))
+    assert "pid_i" in _emit(_pid_graph(ki=0.1))                  # ki ≠ 0
+
+    # 실제로 값이 달라지는지 — 접었다면 여기서 Python↔C가 갈렸을 자리다
+    r = _pid_graph(out_lo=0.5, out_hi=1.0)
+    r.reset()
+    assert r.step(e=0.0) == pytest.approx(0.5)  # i가 lo로 끌려가 출력에 실린다
+
+
+def test_한계가_포트면_접지_않는다():
+    """시변 한계는 0을 품는지 정적으로 알 수 없다 — 모르면 접지 않는 쪽이다."""
+    from claw.blocks.basic import Gain
+    from claw.blocks.controllers import PID
+    from claw.codegen import GraphRunner
+    from claw.codegen.ir import Graph, Node
+
+    g = Graph("g", inputs=("e", "hi"),
+              nodes=[Node("lo", Gain, inputs=("hi",), params={"k": -1.0}),
+                     Node("pid", PID, inputs=("e",),
+                          params=dict(kp=1.0, ki=0.0, out_lo=-1.0, out_hi=1.0),
+                          gains={"out_lo": "lo", "out_hi": "hi"})],
+              outputs={"y": "pid"})
+    assert "pid_i" in _emit(GraphRunner(g, DT))
+
+
+def test_정당화는_kd가_있으면_적용되지_않는다(demo_law):
+    """kd ≠ 0이면 미분항이 raw를 밀어 e < 0에서도 hi를 넘는다 — 독립쌍이 실제로
+    존재하므로 '수학적 부재' 정당화는 거짓이 된다 (MC/DC 거짓 100% 방지)."""
+    from claw.verify.mcdc import find_decisions
+    from claw.codegen import emit_c, emit_runtime
+
+    def guards(runner):
+        module = emit_c(runner.graph, runner)
+        files = dict(module.files)
+        files.update(emit_runtime(module.helpers))
+        return _coupled_guards(find_decisions(files), runner)
+
+    base = _pid_graph(ki=0.5)          # u_ext 없음·kd 0·ki·kp 동부호 → 정당화 대상
+    assert guards(base), "정당화 대상이어야 할 형상이 안 잡혔다"
+    assert guards(_pid_graph(ki=0.5, kd=0.2)) == {}, "kd가 있는데 정당화됐다"
+    assert guards(_pid_graph(ki=-0.5)) == {}, "ki·kp 이부호인데 정당화됐다"
+
+
+def test_웜스타트는_접힌_축을_건너뛴다(demo_law):
+    """ki=0으로 편집한 형상이 '빌드 실패'로 뜨면 안 된다 — 없는 필드에 대입하면
+    컴파일이 깨진다. 판정이 정체성인 탭에서 그건 틀린 판정이다."""
+    from claw.fcl.autopilot import Autopilot
+    from claw.fcl.demo import make_demo_fcl
+
+    lines = "\n".join(warm_start_lines(demo_law.runner))
+    assert "s.ap_alt_pid_i = th0;" in lines  # 기본 형상은 ki ≠ 0이라 그대로 대입
+
+    off = make_demo_fcl(autopilot=Autopilot(ki_alt=0.0)).init(DT)
+    off_lines = "\n".join(warm_start_lines(off.runner))
+    assert "s.ap_alt_pid_i" not in off_lines
+    assert "폴딩" in off_lines  # 침묵이 아니라 사유가 남는다
+    if find_cc():
+        rep = verify_flight(off, t_end=4.0, with_vectors=False)
+        assert rep["compile"]["status"] == "pass", rep["compile"]["log"][:400]
+
+
+def test_인벤토리는_못_잡은_다조건을_시끄럽게_거부한다(demo_files):
+    """놓친 결정은 분모에서도 빠져 MC/DC가 100%로 남는다 — 최악의 실패다."""
+    from claw.verify import mcdc
+
+    assert mcdc.find_decisions(demo_files)  # 실제 산출물은 전부 잡힌다
+    sneaky = dict(demo_files)
+    sneaky["x.c"] = "void f(void)\n{\n    if (a > 0.0 && b < 1.0 && c) { g(); }\n}\n"
+    with pytest.raises(ValueError, match="못 잡은 다조건"):
+        mcdc.find_decisions(sneaky)
 
 
 def test_취소는_결과를_내지_않는다(demo_law):

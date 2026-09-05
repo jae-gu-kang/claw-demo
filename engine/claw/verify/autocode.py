@@ -32,6 +32,7 @@ from pathlib import Path
 
 import claw
 from claw.codegen import emit_c, emit_runtime
+from claw.codegen.emit_c import _pid_has_integrator
 from claw.verify import mcdc as mcdc_mod
 from claw.verify import vectors
 from claw.verify.static_c import analyze as static_analyze
@@ -41,6 +42,10 @@ from claw.verify.units import make_unit_harness, run_unit_oracle, unit_specs, un
 
 # test_parity.py CFLAGS와 같은 정신 — -Werror 대신 경고를 세어 근거로 남긴다.
 # -ffp-contract=off는 장식이 아니다: FMA 축약은 중간 반올림을 없애 2.8e-16 어긋난다.
+# 외부 도구 타임아웃 [s] — 협조적 취소는 subprocess **사이**에서만 듣는다.
+# 툴이 멈추면 잡이 영구 블록되므로 상한을 둔다: 컴파일·판독은 넉넉히, 하네스
+# 실행은 18,000스텝 재생이 로컬 1초 안쪽이라 여유를 크게 잡아도 충분하다.
+TOOL_TIMEOUT = 300.0
 STRICT_FLAGS = ["-std=c99", "-O2", "-Wall", "-Wextra", "-pedantic", "-ffp-contract=off"]
 COVER_FLAGS = ["-std=c99", "-O0", "-ffp-contract=off",
                "-fprofile-instr-generate", "-fcoverage-mapping"]
@@ -56,16 +61,46 @@ def find_llvm_tool(name):
     if path:
         return path
     if sys.platform == "darwin" and shutil.which("xcrun"):
-        r = subprocess.run(["xcrun", "-f", name], capture_output=True, text=True)
+        r = subprocess.run(["xcrun", "-f", name], capture_output=True, text=True,
+                           timeout=TOOL_TIMEOUT)
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout.strip()
     return None
 
 
-def make_harness(graph) -> str:
-    """통합(SIL) 하네스 — 입출력 목록을 그래프 선언에서 만든다.
+def warm_start_lines(runner) -> list:
+    """트림 웜스타트 대입 줄 — **적분기가 방출된 축만**.
 
     웜스타트 계약은 생성 코드와 같다(fcl.h 주석): 리셋 후 상태 필드 직접 대입.
+    그런데 ki = 0인 축은 적분 경로가 접혀 상태 필드가 없다(emit_c
+    `_pid_has_integrator`) — 무조건 대입하면 **정당한 형상이 컴파일 실패로 뜬다**.
+    게인을 편집해 ki = 0으로 두는 것은 흔한 시험이고, 그때 검증 탭이 내야 할
+    답은 "빌드 실패"가 아니라 그 형상의 판정이다.
+
+    접힌 축의 웜스타트는 생략해도 대조가 어긋나지 않는다: Python 쪽 적분기도
+    ki = 0이고 한계가 0을 품어(폴딩 조건) 첫 스텝의 무조건 클램프가 웜스타트 값을
+    그대로 유지하지 못한다 — 애초에 그 값이 출력에 실리지 않는다.
+    """
+    warm = {"scas_pitch_pid": ("de0", "scas.pitch 적분기 = 트림 δe"),
+            "ap_alt_pid": ("th0", "AP 고도 적분기 = 트림 θ"),
+            "ap_spd_pid": ("thr0", "AP 속도 적분기 = 트림 스로틀")}
+    lines = []
+    for nid, (var, note) in warm.items():
+        try:
+            node = runner.graph.node(nid)
+        except KeyError:
+            continue  # 이 형상에 없는 축 — 조립이 다르면 웜스타트도 다르다
+        inst = runner.instances.get(nid)
+        if inst is None or not _pid_has_integrator(node, inst):
+            lines.append(f"    /* {nid}: 적분기 폴딩(ki = 0) — 웜스타트할 상태가 없다 */")
+            continue
+        lines.append(f"    s.{nid}_i = {var};   /* law.py reset — {note} */")
+    return lines
+
+
+def make_harness(graph, runner) -> str:
+    """통합(SIL) 하네스 — 입출력 목록을 그래프 선언에서 만든다.
+
     필드 이름은 데모 형상 조립 규약(law.py reset)에 매여 있고, 컴파일이 그 실존을
     검사한다 — 이름이 낡으면 조용히 틀리는 게 아니라 빌드가 깨진다.
     """
@@ -75,6 +110,7 @@ def make_harness(graph) -> str:
     outs = list(graph.outputs)
     fmt = " ".join(["%.17g"] * len(outs))
     prints = ", ".join(f"out.{name}" for name in outs)
+    warm = "\n".join(warm_start_lines(runner))
     return f"""/* CLAW 검증 하네스 — 표준입력 시퀀스를 생성 코드에 흘려 %.17g로 낸다 (왕복 무손실). */
 #include <stdio.h>
 #include "{base}.h"
@@ -89,9 +125,7 @@ int main(void)
 
     if (scanf("%lf %lf %lf", &de0, &th0, &thr0) != 3) {{ return 1; }}
     {base}_reset(&s);
-    s.scas_pitch_pid_i = de0;   /* law.py reset — scas.pitch 적분기 = 트림 δe */
-    s.ap_alt_pid_i = th0;       /* AP 고도 적분기 = 트림 θ */
-    s.ap_spd_pid_i = thr0;      /* AP 속도 적분기 = 트림 스로틀 */
+{warm}
     s.hold.elevon_l = de0;
     s.hold.elevon_r = de0;
     s.hold.rudder = 0.0;
@@ -131,13 +165,13 @@ def _compile(cc, flags, sources, dirpath, exe_name):
     exe = dirpath / exe_name
     cmd = [cc, *flags, f"-I{dirpath}", *(str(dirpath / s) for s in sources),
            "-lm", "-o", str(exe)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=TOOL_TIMEOUT)
     return exe, r
 
 
 def _run(exe, stdin, env=None):
     return subprocess.run([str(exe)], input=stdin, capture_output=True, text=True,
-                          env={**os.environ, **(env or {})})
+                          env={**os.environ, **(env or {})}, timeout=TOOL_TIMEOUT)
 
 
 def _data_rows(stdout):
@@ -244,7 +278,7 @@ def _line_counts(cov_tool, exe, prof, dirpath, names):
         r = subprocess.run(
             [cov_tool, "show", str(exe), f"-instr-profile={prof}",
              str(dirpath / name)],
-            capture_output=True, text=True)
+            capture_output=True, text=True, timeout=TOOL_TIMEOUT)
         if r.returncode != 0:
             continue
         rows = []
@@ -575,7 +609,7 @@ def verify_flight(law, *, t_end=180.0, control_hz=100.0, on_progress=None,
     files = dict(module.files)
     files.update(emit_runtime(module.helpers))
     specs = unit_specs(graph) if with_vectors else []
-    harnesses = {"verify_harness.c": make_harness(graph)}
+    harnesses = {"verify_harness.c": make_harness(graph, runner)}
     for spec in specs:
         harnesses[f"unit_{spec['group']}.c"] = make_unit_harness(graph.name, spec)
 
@@ -742,6 +776,11 @@ def verify_flight(law, *, t_end=180.0, control_hz=100.0, on_progress=None,
             report["coverage"], report["mcdc"] = _measure_coverage(
                 cc, files, harnesses, specs, rec, unit_stdins, strict_out,
                 runner, root / "cov", tick)
+            # 커버리지 단계 **안에서** 취소되면 그 사유는 skip 문구로만 남는다 —
+            # 그대로 반환하면 반쪽 판정이 완료 리포트로 저장된다 (서버는 None만
+            # 취소로 읽는다). 취소는 결과를 내지 않는 것이 계약이다
+            if cancelled:
+                return None
 
         report["units"] = _unit_rows(specs, files, report["coverage"].get("files", []),
                                      report["mcdc"], case_rows)
@@ -759,18 +798,25 @@ def verify_flight(law, *, t_end=180.0, control_hz=100.0, on_progress=None,
 
 _COUPLED_REASON = (
     "구조적 종속 — 적분기 클램프 불변식(i ∈ [lo, hi])에서 raw > hi ⇒ kp·e > 0이고, "
-    "ki·kp 동부호 상수라 inc > 0이 반드시 함께 참이다(하한 대칭). 감쇠항(u_ext)이 "
-    "없는 축이라 함의를 깨는 항이 없어 독립쌍이 수학적으로 존재하지 않는다 — "
-    "측정이 아니라 분석으로 정당화한다 (DO-178C 커버 대체)."
+    "ki·kp 동부호 상수라 inc > 0이 반드시 함께 참이다(하한 대칭). 감쇠항(u_ext)도 "
+    "미분항(kd)도 없는 축이라 함의를 깨는 항이 없어 독립쌍이 수학적으로 존재하지 "
+    "않는다 — 측정이 아니라 분석으로 정당화한다 (DO-178C 커버 대체)."
 )
 
 
 def _coupled_guards(decisions, runner):
     """독립쌍이 수학적으로 부재한 가드 조건 — {결정 id: {cis, reason}}.
 
-    대상: u_ext(감쇠항) 없는 축의 PID 가드에서 c1·c3(`inc` 부호 조건).
-    근거는 그래프·인스턴스에서 직접 판정한다 — 텍스트 추측이 아니라 조립 정본이
-    말하게 한다. 게인·한계가 포트(신호)면 함의가 시변이라 대상에서 뺀다.
+    대상: PID 가드의 c1·c3(`inc` 부호 조건). 근거는 그래프·인스턴스에서 직접
+    판정한다 — 텍스트 추측이 아니라 조립 정본이 말하게 한다.
+
+    **정당화는 측정의 대체이므로 조건을 좁게 잡는다.** 하나라도 함의를 깰 수 있는
+    항이 있으면 정당화하지 않고 미커버로 남긴다 — 거짓 정당화는 이 기능의 존재
+    이유를 정면으로 거스르고, 놓친 정당화는 그저 fail 한 줄이다:
+      · `_axis`형(감쇠항 u_ext) — raw > hi가 kp·e > 0을 함의하지 않는다
+      · kd ≠ 0 (상수·포트 무관) — 미분항이 raw를 밀어 e < 0에서도 hi를 넘을 수 있다
+      · ki·kp·한계가 포트(신호) — 함의가 시변이라 정적으로 못 박는다
+      · ki·kp 이부호 — inc 부호가 kp·e 부호를 따르지 않는다
     """
     graph = runner.graph
     out = {}
@@ -785,10 +831,10 @@ def _coupled_guards(decisions, runner):
             node = graph.node(nid)
         except KeyError:
             continue
-        if {"ki", "kp", "out_lo", "out_hi"} & set(node.gains):
+        if {"ki", "kp", "kd", "out_lo", "out_hi"} & set(node.gains):
             continue
         inst = runner.instances.get(nid)
-        if inst is None or inst.ki * inst.kp <= 0:
+        if inst is None or inst.ki * inst.kp <= 0 or inst.kd != 0.0:
             continue
         out[d["id"]] = {"cis": (1, 3), "reason": _COUPLED_REASON}
     return out
@@ -879,12 +925,13 @@ def _measure_coverage(cc, files, harnesses, specs, rec, unit_stdins, strict_out,
         [profdata_tool, "merge", "-sparse",
          *(str(d / f"{name}.profraw") for name, _ in runs
            if name in cov_run["outs"]), "-o", str(prof)],
-        capture_output=True, text=True)
+        capture_output=True, text=True, timeout=TOOL_TIMEOUT)
     if m.returncode != 0:
         return skip(f"프로파일 병합 실패: {m.stderr[:400]}")
     int_exe = cov_run["exes"]["verify_harness"]
     e = subprocess.run([cov_tool, "export", "-format=text", str(int_exe),
-                        f"-instr-profile={prof}"], capture_output=True, text=True)
+                        f"-instr-profile={prof}"], capture_output=True, text=True,
+                       timeout=TOOL_TIMEOUT)
     if e.returncode != 0:
         return skip(f"커버리지 판독 실패: {e.stderr[:400]}")
     try:

@@ -89,13 +89,22 @@ void claw_mcdc_dump(void)
 """ % MAX_DECISIONS
 
 
+#: 다조건 결정을 만드는 C 연산자 — 이 중 하나라도 있는 줄은 인벤토리에 잡혀야 한다
+_MULTI = re.compile(r"&&|\|\|")
+
+
 def find_decisions(files) -> list:
     """생성 산출물에서 다조건 결정 추출 — [{id, file, line, kind, conditions, label}].
 
     순서는 (파일명, 줄) 사전순으로 못박는다 — id가 곧 계측 배열 첨자라 결정적이어야
     실행 간 병합이 가능하다.
+
+    **놓친 결정은 조용히 사라지지 않는다.** 인벤토리에서 빠지면 분모에도 안 들어가
+    MC/DC가 100%로 남는다 — 측정 누락이 만점으로 보이는 최악의 실패다. 그래서
+    `&&`·`||`가 있는 줄을 세어 두 패턴이 전부 잡았는지 대조하고, 못 잡은 줄이
+    하나라도 있으면 시끄럽게 터진다(에미터가 새 형태를 내기 시작했다는 뜻).
     """
-    out = []
+    out, unmatched = [], []
     for name in sorted(n for n in files if n.endswith(".c")):
         for lineno, text in enumerate(files[name].split("\n"), start=1):
             m = _GUARD.match(text)
@@ -109,6 +118,15 @@ def find_decisions(files) -> list:
                 conds = [m.group(k).strip() for k in ("c0", "c1")]
                 out.append({"file": name, "line": lineno, "kind": "and2",
                             "conditions": conds, "label": conds[1].split()[0]})
+                continue
+            # 주석은 제외한다 — 설명문의 `&&`가 결정은 아니다
+            code = text.split("/*", 1)[0]
+            if _MULTI.search(code):
+                unmatched.append(f"{name}:L{lineno} {code.strip()[:100]}")
+    if unmatched:
+        raise ValueError(
+            "인벤토리가 못 잡은 다조건 줄 — MC/DC 분모가 조용히 줄어든다:\n  "
+            + "\n  ".join(unmatched[:10]))
     for i, d in enumerate(out):
         d["id"] = i
     if len(out) > MAX_DECISIONS:

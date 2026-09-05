@@ -89,8 +89,14 @@ def integration_cases():
 
 # ── 유닛 케이스 (파티션 임포트) ───────────────────────────────────────────
 
-# 임포트 이름 → (저, 고, 격자) 값 정책. 없는 이름은 _DEFAULT — 파티션 경계 신호
-# (…_y)는 대부분 타면·명령 스케일이라 ±0.5가 안전한 극단이다.
+# 임포트 이름 → (극단 A, 극단 B, 격자) 값 정책. 없는 이름은 _DEFAULT — 파티션 경계
+# 신호(…_y)는 대부분 타면·명령 스케일이라 ±0.5가 안전한 극단이다.
+#
+# **A·B는 "저·고"가 아니라 서로 반대편이라는 뜻뿐이다.** 어느 쪽이 큰 값인지는
+# 항목마다 다르고(게인 신호는 A가 +3), 그래야 하는 이유가 있다: 상태 있는 유닛은
+# 악장 **순서가 곧 궤적**이라 조합에 따라 밟는 분기가 달라진다. 지금 순서는
+# 커버리지 실측으로 고른 것이고(뒤집으면 가드 분기 하나가 닫히지 않는다),
+# 순서를 바꾸려면 커버리지를 다시 재야 한다.
 _POLICY = {
     "mach": (0.05, 0.95, (0.05, 0.2, 0.45, 0.7, 0.95)),
     "h": (0.0, 8000.0, (0.0, 1000.0, 5000.0)),
@@ -135,8 +141,8 @@ def unit_cases(group, imports, n_wind=220, n_grid=260):
     상태 있는 유닛(적분기·필터)은 앞 두 악장의 지속 시간이 곧 와인드업 깊이다.
     """
     g = group.upper()
-    hi_row = {u: _policy(u)[0] for u in imports}
-    lo_row = {u: _policy(u)[1] for u in imports}
+    a_row = {u: _policy(u)[0] for u in imports}
+    b_row = {u: _policy(u)[1] for u in imports}
     off_row = {u: (0.0 if _policy(u) is _FLAG else _policy(u)[2][0]) for u in imports}
     grid = []
     for k in range(n_grid):
@@ -146,10 +152,10 @@ def unit_cases(group, imports, n_wind=220, n_grid=260):
             row[u] = vals[(k // _STRIDES[i % len(_STRIDES)]) % len(vals)]
         grid.append(row)
     return [
-        {"id": f"TC-U-{g}-WIND", "title": f"{group} 유닛 — 고값 지속 (와인드업·상한)",
-         "rows": [dict(hi_row) for _ in range(n_wind)]},
-        {"id": f"TC-U-{g}-UNWIND", "title": f"{group} 유닛 — 저값 지속 (언와인드·하한)",
-         "rows": [dict(lo_row) for _ in range(n_wind)]},
+        {"id": f"TC-U-{g}-WIND", "title": f"{group} 유닛 — 극단 A 지속 (와인드업·한계 도달)",
+         "rows": [dict(a_row) for _ in range(n_wind)]},
+        {"id": f"TC-U-{g}-UNWIND", "title": f"{group} 유닛 — 극단 B 지속 (반대 방향 언와인드)",
+         "rows": [dict(b_row) for _ in range(n_wind)]},
         {"id": f"TC-U-{g}-OFF", "title": f"{group} 유닛 — 비활성 (on_disable 경로)",
          "rows": [dict(off_row) for _ in range(30)]},
         {"id": f"TC-U-{g}-GRID", "title": f"{group} 유닛 — 값 격자 순환 (조합 훑기)",

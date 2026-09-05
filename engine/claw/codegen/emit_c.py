@@ -200,8 +200,24 @@ def _pid_has_integrator(node, inst):
     코드(DO-178C 논점)이자 구조적 커버리지가 100%가 될 수 없는 자리다. kd = 0
     미분항 제거와 같은 판단이고, ±0.0 합 제거가 결과에 무영향인 논거도 같다.
     에미터와 비활성 대입(_disable_pid)이 같은 판정을 써야 하므로 한 곳에 둔다.
+
+    **한계가 0을 품어야 폴딩한다.** Python 정본은 ki = 0이어도 매 스텝 무조건
+    `_i = clip(_i + inc, lo, hi)`를 수행하므로(controllers.py PID.step — 범위 밖
+    웜스타트를 가두는 불변식), 0 ∉ [lo, hi]인 축에서는 `_i`가 ±0.0에 머물지 않고
+    가까운 한계로 끌려가 **출력에 실린다**. 그 형상까지 접으면 ±0.0 소거가 아니라
+    값이 달라진다 — 비대칭 한계는 실제로 허용되고(fcl/graphs.py 배분 예산 주석,
+    영향성 해석이 out_hi만 흔든다) 웹 검증 요청도 한계를 편집할 수 있다.
+    한계가 포트(신호)면 런타임 값을 정적으로 알 수 없으므로 역시 접지 않는다.
+
+    웜스타트는 조용히 깨지지 않는다 — 접힌 축에는 상태 필드가 아예 없으므로 통합
+    계층이 `sta->{id}_i`에 대입하면 **컴파일이 깨진다**(kd = 0의 e_prev와 같은
+    계약). 검증 하네스도 이 판정을 그대로 읽어 대입을 낸다.
     """
-    return "ki" in node.gains or inst.ki != 0.0
+    if "ki" in node.gains or inst.ki != 0.0:
+        return True
+    if "out_lo" in node.gains or "out_hi" in node.gains:
+        return True  # 시변 한계 — 0을 품는지 정적으로 판정할 수 없다
+    return not (inst.out_lo <= 0.0 <= inst.out_hi)
 
 
 @_emitter(PID)
