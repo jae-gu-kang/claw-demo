@@ -328,3 +328,63 @@ def test_대표_스칼라는_카드_값과_같은_수다(report):
     gm = next(c for c in report["cards"] if c["key"] == "gm")
     if gm["primary"]:
         assert gm["primary"]["value"] == gm["value"]["gm_db"]
+
+
+# ── 마진 조성 — 자동설계와 같은 플랜트에서 판정한다 ──────────────────────────
+
+
+def test_마진은_작동기_지연을_포함해_잰다(report):
+    """조성을 빼면 −180° 교차가 의미 없는 자리로 가고 GM이 아티팩트가 된다.
+
+    실측(데모 설계점): 작동기·지연 없이 재면 롤 자세 GM −70 dB(교차 0.012 rad/s)·
+    피치 304 dB(교차 5.5e8 rad/s)로 **거짓 하드 실패**가 났다. 넣으면 9.5·10.9 dB로
+    둘 다 합격선을 넘는다. 이 테스트가 그 회귀를 막는다.
+    """
+    st = report["cases"][0]["stages"]["margins"]
+    comp = st["composition"]
+    assert comp["actuator_wn"] > 0 and comp["delay_s"] > 0
+    for name in ("pitch_att", "roll_att"):
+        lp = st["loops"][name]
+        if lp.get("margins") is None:
+            continue
+        gm = lp["margins"]["gm_db"]
+        # 아티팩트 교차의 서명 — 물리적으로 말이 되는 범위 안에 있어야 한다
+        assert -20.0 < gm < 60.0, f"{name} GM {gm} — 조성 누락의 아티팩트 서명"
+        assert 0.1 < lp["margins"]["wcg"] < 1e4, f"{name} 위상교차가 비물리 자리"
+
+
+def test_설계점_마진은_자동설계와_같은_수다(rig):
+    """겹치는 항목(A②③)에서 두 화면이 다른 수를 말하면 어느 쪽이 정본인지 사라진다.
+
+    같은 조성·같은 게인이므로 마진은 **일치**해야 한다 — 자동설계 경로로 직접
+    조성해 대조한다.
+    """
+    from claw.design.closure import att_margin_loop, oriented_margins
+    from claw.pipeline.evaluate import _case_gains
+    from claw.pipeline.influence import make_law
+    from claw.trim import linearize, split_axes
+
+    ac, trs = rig
+    tr = trs[0]
+    crit = GainEvalCriteria()
+    out = evaluate(ac, trs, Shape(), crit, depth="linear")
+    law = make_law(Shape())
+    rate_gains, rate_filters, att, _spd = _case_gains(law, tr.case)
+    lon, lat = split_axes(linearize(ac, tr))
+    for group, axis, model in (("pitch", "lon", lon), ("roll", "lat", lat)):
+        m, _o = oriented_margins(att_margin_loop(
+            model, rate_gains, att[group]["kp"], att[group]["ki"],
+            rate_filters=rate_filters, **crit.composition.act_kw()))
+        got = out["cases"][0]["stages"]["margins"]["loops"][f"{group}_att"]["margins"]
+        assert abs(got["pm_deg"] - m["pm_deg"]) < 1e-9
+        assert abs(got["gm_db"] - m["gm_db"]) < 1e-9
+
+
+def test_형상_작동기가_기준_기본값을_이긴다():
+    """판정은 실제로 날 플랜트에서 — 사용자가 작동기를 설정하면 그 값이 쓰인다."""
+    comp = GainEvalCriteria().composition
+    assert comp.act_kw()["actuator_wn"] == comp.actuator_wn
+    assert comp.act_kw({"wn": 12.0})["actuator_wn"] == 12.0
+    assert comp.act_kw({"zeta": 0.4})["actuator_zeta"] == 0.4
+    # 지연은 형상에 없다 — 기준이 정본이다
+    assert comp.act_kw({"wn": 12.0})["delay_s"] == comp.delay_s

@@ -58,6 +58,7 @@ import {
 } from "../lib/influence.js";
 import {
   STATUS_LABEL, attributionRows, cardDeltas, caseGrid, checksSummary,
+  compositionLine,
   evaluateRequest, hardFailLines, jLine, localityLines, normalizeEvalReport,
   normalizeVerifyReport, statusInk, verifyRequest,
 } from "../lib/evaluate.js";
@@ -1212,6 +1213,11 @@ export function render() {
               d.improved === null ? SKIN.inkDim
                 : d.improved ? GOOD_INK : WARN_INK}`,
           }, `${d.label} ${d.text}`))));
+      }
+      const comp = compositionLine(m);
+      if (comp) {
+        evalCardsBox.append(el("p", { class: "hint", style: "margin:6px 0 0" },
+          `마진 조성 — ${comp}`));
       }
       evalBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
         `케이스 ${agg?.n_cases ?? 0}건 · depth=${m.depth}`

@@ -173,6 +173,22 @@ export function cardLines(card) {
   return lines;
 }
 
+/** 마진 조성 한 줄 — **무슨 플랜트에서 판정했나**. 마진 맵이 판정선을 늘 말하는
+ *  것과 같은 규약이고, 조성이 갈리면 같은 설계가 화면마다 다른 마진을 받는다
+ *  (작동기·지연을 빼면 −180° 교차가 비물리 자리로 가 GM이 아티팩트가 된다). */
+export function compositionLine(model) {
+  const c = model.cases?.[0]?.stages?.margins?.composition;
+  if (!c) return null;
+  if (typeof c === "string") return c;  // 구버전 저장물 — 문장 그대로
+  const bits = [];
+  if (c.actuator_wn != null) {
+    bits.push(`작동기 ωn ${fmt(c.actuator_wn)} rad/s · ζ ${fmt(c.actuator_zeta)}`);
+  }
+  if (c.delay_s != null) bits.push(`지연 ${fmt(c.delay_s * 1000)} ms`);
+  if (c.pade_order != null) bits.push(`Padé ${c.pade_order}차`);
+  return [c.text, bits.join(" · ")].filter(Boolean).join(" — ");
+}
+
 /** 케이스별 소견(원인 귀속) 행 — **판정 옆에 서는 표면**이지 별도 실행이 아니다.
  *
  * 서버가 실패 케이스의 같은 런에서 귀속까지 내므로(엔진 evaluate 인라인 귀속),

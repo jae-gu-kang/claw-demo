@@ -126,3 +126,17 @@ def test_파생_문턱은_진단_상수와_같은_값이다():
         assert abs(grid[key] - value) < 1e-15, key
     # 반대 방향 — 진단이 모르는 지표를 격자에 넣지 않는다
     assert set(grid) == set(diagnose._GRID_CHECKS)
+
+
+def test_마진_조성은_자동설계와_같은_값이다():
+    """두 화면이 같은 점에서 다른 마진을 말하면 어느 쪽이 정본인지가 사라진다."""
+    from claw.design.orchestrator import AutoDesignConfig
+    from claw.pipeline.criteria import MarginComposition
+
+    c, a = GainEvalCriteria().composition, AutoDesignConfig()
+    assert c.actuator_wn == a.actuator_wn and c.actuator_zeta == a.actuator_zeta
+    assert c.delay_s == a.delay_s and c.pade_order == a.pade_order
+    with pytest.raises(ValueError):
+        MarginComposition(actuator_wn=0.0)
+    with pytest.raises(ValueError):
+        MarginComposition(delay_s=-0.01)

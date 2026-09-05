@@ -12,7 +12,8 @@ import test from "node:test";
 
 import {
   STATUS_LABEL, attributionRows, cardDeltas, cardLines, caseGrid, checksSummary,
-  evaluateRequest, hardFailLines, jLine, localityLines, normalizeEvalReport,
+  compositionLine, evaluateRequest, hardFailLines, jLine, localityLines,
+  normalizeEvalReport,
   normalizeVerifyReport, statusInk, verifyRequest,
 } from "./evaluate.js";
 
@@ -264,4 +265,24 @@ test("델타 — 한쪽이 못 잰 카드는 사유가 값 자리다", () => {
   assert.equal(d.improved, null);
   assert.match(d.text, /이전 값 없음|판정 불가/);
   assert.ok(!/NaN|null|undefined/.test(d.text));
+});
+
+test("마진 조성 줄 — 무슨 플랜트에서 판정했는지 화면이 말한다", () => {
+  const m = normalizeEvalReport({
+    ...payload,
+    cases: [{ ...payload.cases[0], stages: { ...payload.cases[0].stages,
+      margins: { status: "ok", composition: {
+        text: "레이트 폐쇄 플랜트 + 작동기·지연 포함", actuator_wn: 30.0,
+        actuator_zeta: 0.7, delay_s: 0.035, pade_order: 2 } } } }],
+  });
+  const line = compositionLine(m);
+  assert.match(line, /작동기/);
+  assert.match(line, /30/);
+  assert.match(line, /35 ms/);
+  assert.ok(!/NaN|undefined/.test(line));
+  // 구버전 저장물(문장 하나)도 그대로 읽는다 — 조용히 빈칸이 되지 않게
+  const old = normalizeEvalReport({ ...payload,
+    cases: [{ ...payload.cases[0], stages: { margins: { composition: "옛 문장" } } }] });
+  assert.equal(compositionLine(old), "옛 문장");
+  assert.equal(compositionLine(normalizeEvalReport(null)), null);
 });

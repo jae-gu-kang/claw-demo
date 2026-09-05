@@ -55,6 +55,51 @@ def _pos(name, v):
 
 
 @dataclass(frozen=True)
+class MarginComposition:
+    """항목 3의 **조성** — 마진을 어느 플랜트에서 재는가.
+
+    문턱이 아니라 "무엇을 재는가"의 정의라 판정선과 구분되지만, 판정과 한 몸이라
+    기준 데이터에 산다(지문에 실려 "무슨 조성으로 판정했나"가 계보에 남는다).
+
+    **작동기와 지연은 반드시 들어간다.** 빼면 고주파 롤오프가 없어 −180° 교차가
+    물리적으로 의미 없는 자리로 가고, 거기서 읽은 이득여유는 설계의 성질이 아니라
+    수치 아티팩트다 — 데모 설계점 실측: 작동기·지연 없이 재면 피치 GM 304 dB
+    (교차 5.5e8 rad/s)·롤 GM −70 dB(교차 0.012 rad/s)가 나오고, 넣으면 각각
+    10.9 dB(15.5 rad/s)·9.5 dB(11.5 rad/s)로 둘 다 합격선을 넘는다. closure.py
+    머리말이 경고하는 그 병리이고, 자동설계가 늘 작동기·지연을 넣는 이유다.
+
+    기본값은 **자동설계(AutoDesignConfig)와 같은 값**이다 — 두 화면이 같은 점에서
+    다른 마진을 말하면 어느 쪽이 정본인지가 사라진다(드리프트는 테스트가 지킨다).
+    형상이 작동기를 갖고 있으면(shape.actuators의 wn·zeta) 그 값이 이긴다: 판정은
+    실제로 날 플랜트에서 해야 한다.
+    """
+
+    actuator_wn: float = 30.0  # [rad/s] — AutoDesignConfig와 같은 값
+    actuator_zeta: float = 0.7
+    delay_s: float = 0.035  # 제어 경로 지연 [s]
+    pade_order: int = 2
+
+    def __post_init__(self):
+        _pos("actuator_wn", self.actuator_wn)
+        _pos("actuator_zeta", self.actuator_zeta)
+        if not (0.0 <= float(self.delay_s) < 1.0):
+            raise ValueError(f"delay_s는 [0, 1) 필요: {self.delay_s}")
+        if int(self.pade_order) < 1:
+            raise ValueError(f"pade_order는 1 이상: {self.pade_order}")
+
+    def act_kw(self, actuators=None) -> dict:
+        """마진 조성 인자 — 형상 작동기가 있으면 그 wn·zeta가 이긴다."""
+        wn, zeta = self.actuator_wn, self.actuator_zeta
+        a = actuators or {}
+        if a.get("wn") is not None:
+            wn = float(a["wn"])
+        if a.get("zeta") is not None:
+            zeta = float(a["zeta"])
+        return {"actuator_wn": wn, "actuator_zeta": zeta,
+                "delay_s": float(self.delay_s), "pade_order": int(self.pade_order)}
+
+
+@dataclass(frozen=True)
 class StabilityCriteria:
     """항목 1 — 폐루프 안정성. 발산 실근은 배진폭 시간으로 허용선을 긋는다.
 
@@ -292,6 +337,7 @@ class JWeights:
 
 _SUBS = {
     "margin": MarginCriteria,
+    "composition": MarginComposition,
     "stability": StabilityCriteria,
     "authority": AuthorityCriteria,
     "actuator": ActuatorCriteria,
@@ -316,6 +362,7 @@ class GainEvalCriteria:
     """
 
     margin: MarginCriteria = field(default_factory=MarginCriteria)  # A②③ + ζ 하드
+    composition: MarginComposition = field(default_factory=MarginComposition)  # A③ 조성
     stability: StabilityCriteria = field(default_factory=StabilityCriteria)  # B 극점
     authority: AuthorityCriteria = field(default_factory=AuthorityCriteria)  # A⑦
     actuator: ActuatorCriteria = field(default_factory=ActuatorCriteria)  # A⑦(사용률)

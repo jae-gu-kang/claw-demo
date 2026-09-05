@@ -271,7 +271,8 @@ def _damping_stage(models, rate_gains, rate_filters, crit, notes):
     ), fails
 
 
-def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit):
+def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit,
+                   act_kw):
     """A②③ 카드의 근거 — 자세 PI 마진은 **레이트 폐쇄** 플랜트에서
     (closure.att_margin_loop), 속도 PI는 평탄 선언(GROUP_LOOPS) 그대로. 방향은
     oriented_margins가 정한다(자리마다 설계 게인 부호가 달라 고정 sign으로는
@@ -283,7 +284,12 @@ def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit):
     않는다 — 순수 P 레이트 루프의 SISO 마진은 병리적이고(closure 머리말) 고전
     기준은 모드 감쇠(A①)다. 대신 **레이트 교차 주파수**(BW의 근거)를 낸다.
 
-    작동기·지연은 미포함 [기본값] — 마진 맵의 중립 계약과 같다.
+    **작동기·지연을 포함한다**(criteria.composition — 자동설계와 같은 값). 빼면
+    고주파 롤오프가 없어 −180° 교차가 의미 없는 자리로 가고, 거기서 읽은 GM은
+    설계의 성질이 아니라 아티팩트다: 데모 설계점에서 롤 자세 GM이 −70 dB(교차
+    0.012 rad/s)로 나와 **거짓 하드 실패**를 만들었고, 조성을 맞추면 9.5 dB로
+    통과한다. 마진 맵의 "중립 계약"을 여기 가져온 것이 그 오류였다 — 탐색 화면은
+    사용자가 조건을 고르지만 **판정은 실제로 날 플랜트에서** 해야 한다.
     """
     loops = {}
     judged = []
@@ -314,7 +320,7 @@ def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit):
                                      "note": "이 케이스 자세 실효 게인이 전부 0"}
             continue
         loop = att_margin_loop(models[axis], rate_gains, kp, ki,
-                               rate_filters=rate_filters)
+                               rate_filters=rate_filters, **act_kw)
         m, direction = oriented_margins(loop)
         put(f"{group}_att", m, direction=direction)
 
@@ -322,7 +328,10 @@ def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit):
     if any(v != 0.0 for v in spd.values()):
         m, direction = oriented_margins(pi_loop(
             models[spd_sp["axis"]], x_out=spd_sp["x_out"], u_in=spd_sp["u_in"],
-            kp=spd.get("kp", 0.0), ki=spd.get("ki", 0.0), sign=1.0))
+            kp=spd.get("kp", 0.0), ki=spd.get("ki", 0.0), sign=1.0,
+            actuator_wn=act_kw["actuator_wn"],
+            actuator_zeta=act_kw["actuator_zeta"],
+            delay_s=act_kw["delay_s"], pade_order=act_kw["pade_order"]))
         put(spd_sp["name"], m, direction=direction)
     else:
         loops[spd_sp["name"]] = {"status": "zero", "margins": None,
@@ -336,13 +345,16 @@ def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit):
         group, x_rate, u_in = spec
         k = rate_gains.get(f"{group}.k_rate", 0.0)
         wc = rate_loop_crossover(models[axis], group, x_rate, u_in, k,
-                                 rate_filters=rate_filters)
+                                 rate_filters=rate_filters, **act_kw)
         crossovers[f"{group}_rate"] = None if math.isnan(wc) else float(wc)
 
     status = _worst(judged) if judged else "na"
     return _stage(status, "margins", loops=loops, crossovers=crossovers,
-                  composition="자세 PI는 레이트 폐쇄 플랜트, 작동기·지연 미포함 "
-                              "[기본값] — 레이트 자리는 모드 감쇠(A①)로 판정",
+                  composition={
+                      "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 "
+                              "(자동설계와 같은 조성) — 레이트 자리는 모드 "
+                              "감쇠(A①)로 판정",
+                      **act_kw},
                   note=None if judged else "판정할 루프가 없다"), fails
 
 
@@ -806,8 +818,9 @@ def _eval_case(aircraft, tr, shape, law, criteria, *, depth, stall, db_ranges,
                                     criteria, notes)
         stages["damping"] = damping
         hard_fails += f
-        stages["margins"], f = _margins_stage(law, tr, models, rate_gains,
-                                              rate_filters, att, spd, criteria)
+        stages["margins"], f = _margins_stage(
+            law, tr, models, rate_gains, rate_filters, att, spd, criteria,
+            criteria.composition.act_kw(shape.actuators))
         hard_fails += f
     else:
         reason = " · ".join(notes) or "선형화 실패"
