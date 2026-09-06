@@ -1039,3 +1039,56 @@ test("스윕이 쟀는데 아무것도 안 움직였으면 지표 0개라고 말
   assert.equal(c.fan.ids.size, 0);
   assert.match(fanLine(c.fan), /넘긴 지표가 없다/);
 });
+
+// 자가 둘인 이유 — 판정선이 있는 지표는 **판정 예산**으로 재야 지표 간 비교가 선다.
+// 자기 값 대비 %는 한계 10 m인 지표와 0.1 rad인 지표에서 무게가 전혀 달라진다.
+const SCALES = { alt_rms: 10.0, spd_rms: 2.0 };
+
+test("판정 예산으로 재면 자기 값 대비가 부풀리던 잡음이 걸러진다", () => {
+  // spd_rms 8 → 8.016: 자기 값 대비 0.2 %(문턱 0.1 % 초과)지만
+  // 판정 예산(2.0) 대비로는 0.8 %라 문턱 1 %에 못 미친다
+  const rows = [
+    { case: "c1", label: "base", overrides: {}, metrics: { spd_rms: 8 } },
+    { case: "c1", label: "K@+0.2", overrides: { K: 1.2 }, metrics: { spd_rms: 8.016 } },
+  ];
+  assert.ok(coneOf(fanModel(), "param:K", { sweepRows: rows }).fan.ids
+    .has("metric:spd_rms"), "자기 값 대비로는 켜진다");
+  const c = coneOf(fanModel(), "param:K", { sweepRows: rows, scales: SCALES });
+  assert.ok(!c.fan.ids.has("metric:spd_rms"), "판정 예산 대비로는 안 켜진다");
+  assert.equal(c.fan.nScaled, 1);
+});
+
+test("판정 예산으로 재면 자기 값 대비가 놓치던 변화를 잡는다", () => {
+  // alt_rms 1000 → 1000.5: 자기 값 대비 0.05 %라 문턱 미달이지만, 판정선이 10 m라
+  // 0.5 m는 **예산의 5 %**다 — 판정에서는 큰 변화다
+  const rows = [
+    { case: "c1", label: "base", overrides: {}, metrics: { alt_rms: 1000 } },
+    { case: "c1", label: "K@+0.2", overrides: { K: 1.2 }, metrics: { alt_rms: 1000.5 } },
+  ];
+  assert.ok(!coneOf(fanModel(), "param:K", { sweepRows: rows }).fan.ids
+    .has("metric:alt_rms"), "자기 값 대비로는 놓친다");
+  assert.ok(coneOf(fanModel(), "param:K", { sweepRows: rows, scales: SCALES })
+    .fan.ids.has("metric:alt_rms"), "판정 예산 대비로는 잡는다");
+});
+
+test("척도가 없는 지표는 자기 값 대비로 물러선다 — 한 부채꼴에 자가 섞인다", () => {
+  // spd_ts에는 판정선이 없다(ts_max는 [TBD]) — 자기 값 대비 자를 쓴다
+  const rows = [
+    { case: "c1", label: "base", overrides: {},
+      metrics: { alt_rms: 20, spd_ts: 4.0 } },
+    { case: "c1", label: "K@+0.2", overrides: { K: 1.2 },
+      metrics: { alt_rms: 20, spd_ts: 4.4 } },
+  ];
+  const c = coneOf(fanModel(), "param:K", { sweepRows: rows, scales: SCALES });
+  assert.ok(c.fan.ids.has("metric:spd_ts"));
+  assert.equal(c.fan.nScaled, 1, "척도가 붙은 것은 alt_rms 하나뿐이다");
+  assert.match(fanLine(c.fan), /판정선 있는 1개/);
+  assert.match(fanLine(c.fan), /나머지는 자기 값/);
+});
+
+test("척도가 하나도 없으면 자막이 자를 하나만 말한다", () => {
+  const c = coneOf(fanModel(), "param:K", { sweepRows });
+  assert.equal(c.fan.nScaled, 0);
+  assert.doesNotMatch(fanLine(c.fan), /판정선 있는/);
+  assert.match(fanLine(c.fan), /자기 값의/);
+});

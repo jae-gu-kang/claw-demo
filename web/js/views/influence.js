@@ -258,6 +258,13 @@ export function render() {
     const opts = {};
     if (rows?.length) opts.sweepRows = rows;
     if (runMetrics) opts.runMetrics = runMetrics;
+    // 판정 척도는 **엔진이 기준에서 파생한 것**을 그대로 쓴다 (재기술 금지, 02 §5.5).
+    // 기준 dict에서 웹이 직접 척도를 만들면 그 매핑이 두 곳에 살게 된다.
+    // 이 탭은 사용자 기준을 보내지 않으므로(서버 기본값으로 평가한다) 기본값
+    // echo가 곧 이 런의 척도다 — 사용자 기준을 보내게 되면 그 응답에 척도를
+    // 실어 받아야 한다. 없으면 안 넘긴다: 자기 값 대비로 물러서고 자막이 말한다
+    const scales = state.evalMeta?.metric_scales;
+    if (scales && Object.keys(scales).length) opts.scales = scales;
     return opts;
   }
 
@@ -746,6 +753,10 @@ export function render() {
           style: `margin:4px 0;font-size:12px;color:${WARN_INK}`,
         }, `⚠ ${w}`));
       }
+      // 기준·척도는 평가 패널을 열어야 받아 오던 것인데, 지표 부채꼴의 자가
+      // 여기 들어 있다 — 패널을 안 연 사람은 자막이 "판정선 대비"라고 못 말한다.
+      // 기다리지는 않는다(그래프가 먼저 서야 한다) — 도착하면 다음 선택부터 쓴다
+      ensureEvalMeta();
       recompute();
       renderPath();
       renderLegend(m);

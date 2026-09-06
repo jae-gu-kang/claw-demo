@@ -140,3 +140,41 @@ def test_마진_조성은_자동설계와_같은_값이다():
         MarginComposition(actuator_wn=0.0)
     with pytest.raises(ValueError):
         MarginComposition(delay_s=-0.01)
+
+
+def test_판정_척도는_지표_키만_낸다():
+    """영향성 그래프가 이 자를 지표 노드에 붙인다 — 키가 어긋나면 조용히 못 붙는다."""
+    from claw.pipeline.influence import METRICS
+
+    scales = GainEvalCriteria().to_metric_scales()
+    assert set(scales) <= {m.key for m in METRICS}
+    assert scales["alt_rms"] == 10.0 and scales["hdg_rms"] == 0.1
+
+
+def test_판정선이_0이면_척도가_되지_않는다():
+    """alpha_margin_min 0.0은 "여유가 없어지는 지점"이지 크기가 아니다 — 0으로 나눈다."""
+    c = GainEvalCriteria()
+    assert c.envelope.alpha_margin_min == 0.0
+    assert "worst_stall_margin" not in c.to_metric_scales()
+
+
+def test_기준이_비어_있으면_척도도_비운다():
+    """tr/ts/mp/sse 상한은 [TBD]다 — 억지 기본값은 없는 판정선을 있다고 말하는 것이다."""
+    scales = GainEvalCriteria().to_metric_scales()
+    for key in ("alt_tr", "spd_ts", "hdg_mp", "alt_sse"):
+        assert key not in scales
+
+
+def test_기준을_채우면_척도가_따라온다():
+    c = GainEvalCriteria.from_dict({"response": {"ts_max": {"alt": 8.0}}})
+    scales = c.to_metric_scales()
+    assert scales["alt_ts"] == 8.0
+    assert "spd_ts" not in scales  # 채운 축만
+
+
+def test_척도가_양수인_것은_기준이_먼저_막기_때문이다():
+    """0 이하 상한은 **기준 생성에서** 걷힌다 — 척도가 뒤늦게 거를 일이 없다.
+    그래도 to_metric_scales가 양수만 내는 계약은 유지한다(기준이 늘어날 때의 방어)."""
+    with pytest.raises(ValueError):
+        GainEvalCriteria.from_dict({"response": {"mp_max": {"alt": 0.0}}})
+    assert all(v > 0 for v in GainEvalCriteria().to_metric_scales().values())

@@ -156,8 +156,18 @@ export function normalizeGraph(payload) {
 
 /** 지표 부채꼴의 잡음 문턱 — 이보다 작게 움직인 지표는 "안 움직였다"로 친다.
  *  기체를 거치면 **모든 것이 조금씩** 이어져 있어서(속도 P 게인 +20 %가 고도 RMS를
- *  7 ppm 흔든다) 0을 기준으로 삼으면 전부 켜지고 그림이 아무 말도 안 하게 된다. */
-export const FAN_REL = 1e-3;
+ *  7 ppm 흔든다) 0을 기준으로 삼으면 전부 켜지고 그림이 아무 말도 안 하게 된다.
+ *
+ * 자가 둘인 이유: 판정선이 있는 지표는 **판정 예산**으로 재는 것이 맞다. 자기 값
+ * 대비 0.1 %는 지표마다 무게가 달라진다 — 한계 10 m인 고도 RMS의 0.1 %(0.02 m)와
+ * 한계 0.1 rad인 헤딩 RMS의 0.1 %(0.0001 rad)는 판정에서 전혀 다른 크기다. 척도는
+ * 엔진이 기준에서 파생해 준다(`criteria.to_metric_scales` → `/influence/criteria/
+ * defaults`의 `metric_scales`). 척도가 없는 지표(tr·ts·mp·sse 상한은 아직 [TBD])는
+ * 자기 값 대비로 물러서고, **그 사실을 자막이 말한다** — 자를 섞어 쓰면서 하나로
+ * 보이게 하면 그것도 거짓말이다.
+ */
+export const FAN_REL = 1e-3;   // 척도 없음 — 자기 값 대비
+export const FAN_FRAC = 0.01;  // 척도 있음 — 판정 예산 대비
 
 const metricKey = (id) => (id.startsWith("metric:") ? id.slice(7) : id);
 
@@ -168,7 +178,7 @@ const metricKey = (id) => (id.startsWith("metric:") ? id.slice(7) : id);
  * 한 일 중 가장 큰 것이다. 둘 다 ∞면 변화 없음이고, 어느 한쪽이 없으면(null)
  * 판정 자체를 안 한다("안 잰 것"을 0으로 위장하지 않는다).
  */
-function sweptDeltas(rows, knob) {
+function sweptDeltas(rows, knob, scales = null) {
   const all = rows ?? [];
   const singles = all.filter((r) => {
     const k = Object.keys(r.overrides ?? {});
@@ -186,16 +196,20 @@ function sweptDeltas(rows, knob) {
     for (const [k, v] of Object.entries(r.metrics ?? {})) {
       const b = base[k];
       if (b == null || v == null) continue;
+      // 자는 지표마다 다르다 — 판정 척도가 있으면 그 예산 대비, 없으면 자기 값 대비.
+      // 어느 자를 썼는지는 `scaled`로 남긴다(자막이 둘을 갈라 말해야 한다)
+      const scale = scales?.[k];
+      const useScale = finiteNum(scale) && scale > 0;
       let d;
       if (finiteNum(b) && finiteNum(v)) {
-        d = Math.abs(v - b) / Math.max(Math.abs(b), 1e-9);
+        d = Math.abs(v - b) / (useScale ? scale : Math.max(Math.abs(b), 1e-9));
       } else if (finiteNum(b) !== finiteNum(v)) {
         d = Infinity;  // 발산 진입·이탈
       } else {
         continue;      // 둘 다 비유한 — 같은 사실
       }
       const prev = worst.get(k);
-      if (prev === undefined || d > prev) worst.set(k, d);
+      if (prev === undefined || d > prev.d) worst.set(k, { d, scaled: useScale });
     }
   }
   return worst.size ? worst : null;
@@ -231,15 +245,20 @@ export function metricFan(model, paramId, opts = {}) {
 
   // ② 스윕이 이 설계변수를 흔들었다
   const knob = paramId.startsWith("param:") ? paramId.slice(6) : paramId;
-  const deltas = sweptDeltas(opts.sweepRows, knob);
+  const scales = opts.scales ?? null;
+  const frac = opts.frac ?? FAN_FRAC;
+  const deltas = sweptDeltas(opts.sweepRows, knob, scales);
   if (deltas) {
+    // 자가 둘이라 문턱도 둘이다 — 판정 예산 대비 1 %와 자기 값 대비 0.1 %를
+    // 하나로 뭉치면, 자를 섞어 쓰면서 섞은 사실만 감추는 꼴이 된다
     const ranked = [...deltas.entries()]
-      .filter(([, d]) => d > rel)
-      .sort((a, b) => b[1] - a[1])
-      .map(([k, d]) => ({ id: `metric:${k}`, rel: d }))
+      .filter(([, m]) => m.d > (m.scaled ? frac : rel))
+      .sort((a, b) => b[1].d - a[1].d)
+      .map(([k, m]) => ({ id: `metric:${k}`, rel: m.d, scaled: m.scaled }))
       .filter((r) => has(r.id));
+    const nScaled = [...deltas.values()].filter((m) => m.scaled).length;
     return { ids: new Set(ranked.map((r) => r.id)), basis: "measured", ranked,
-             rel, nTotal: all.length, nJudged: deltas.size };
+             rel, frac, nScaled, nTotal: all.length, nJudged: deltas.size };
   }
 
   // ③ 런은 있다 — 값이 나온 지표까지가 상한이다
@@ -259,10 +278,15 @@ export function fanLine(fan) {
   if (!fan) return "";
   const n = fan.ids.size, tot = fan.nTotal;
   if (fan.basis === "measured") {
-    const pct = fmtPercent(fan.rel, fan.rel < 0.01 ? 2 : 0);
+    // 자를 둘 다 밝힌다 — 판정선이 있는 지표가 몇 개인지가 곧 "이 판정을 얼마나
+    // 믿을 수 있나"다(나머지는 상한이 아직 [TBD]라 자기 값 대비로 물러섰다)
+    const yard = fan.nScaled
+      ? `판정선 있는 ${fan.nScaled}개는 그 ${fmtPercent(fan.frac ?? FAN_FRAC, 0)}`
+        + `, 나머지는 자기 값의 ${fmtPercent(fan.rel, 2)}`
+      : `자기 값의 ${fmtPercent(fan.rel, 2)}`;
     return n
-      ? `지표 ${n}/${tot} — 스윕이 잰 결과 ${pct}를 넘겨 움직인 것만 켠다`
-      : `지표 0/${tot} — 스윕이 쟀지만 ${fmtPercent(fan.rel, 2)}를 넘긴 지표가 없다`;
+      ? `지표 ${n}/${tot} — 스윕이 잰 결과 움직인 것만 켠다 (${yard})`
+      : `지표 0/${tot} — 스윕이 쟀지만 문턱을 넘긴 지표가 없다 (${yard})`;
   }
   if (fan.basis === "supported") {
     return `지표 ${n}/${tot} — 이 설계변수의 감도는 아직 안 쟀다.`
