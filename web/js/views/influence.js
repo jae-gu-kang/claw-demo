@@ -542,7 +542,7 @@ export function render() {
     const ol = openloopFor(sel.param_id);
     if (!ol) {
       rows.append(roWhy("2단 개루프", "#409cff",
-        "아직 안 쟀다 — 아래 「진단·처방」 서랍의 [개루프 근거]가 이 자리를 채운다."));
+        "아직 안 쟀다 — 「감도」 서랍의 마진 민감도가 이 자리를 채운다."));
     } else if (ol.missing) {
       rows.append(roWhy("2단 개루프", "#409cff",
         "이 손잡이는 잰 적이 없다 — 개루프는 처방 카드가 고른 손잡이만 잰다. " +
@@ -567,7 +567,7 @@ export function render() {
     const sw = sweepFor(sel.param_id);
     if (!sw) {
       rows.append(roWhy("3단 폐루프", "#ffb340",
-        "아직 안 쟀다 — 「진단·처방」의 [이 부분공간 스윕]이 이 자리를 채운다. " +
+        "아직 안 쟀다 — 「평가·처방」의 [얼마나 →]가 스윕을 돌리면 채워진다. " +
         "여기가 폐루프 실측이고, 위 두 단은 그 전에 범위를 좁히는 근사다."));
     } else if (sw.missing) {
       rows.append(roWhy("3단 폐루프", "#ffb340",
@@ -982,10 +982,10 @@ export function render() {
   const prescribeStatus = el("p", { class: "hint", style: "margin:10px 0 0" });
   const prescribeBox = el("div");
 
-  async function runPrescribe(card, { open = "diag" } = {}) {
+  async function runPrescribe(card, { open = "eval" } = {}) {
     const rid = state.sweep?.resultId;
     if (!rid) {
-      runStatus("수정안: 먼저 [이 부분공간 스윕 (3단 B)]이 돌아 있어야 한다 — "
+      runStatus("수정안: 먼저 감도(스윕)가 돌아 있어야 한다 — "
         + "필요 변화량은 저장된 스윕의 감도에서 나온다", { open, bad: true });
       return;
     }
@@ -1447,10 +1447,10 @@ export function render() {
           el("p", { class: "hint", style: "margin:4px 0 0;font-size:11px" },
             `근거: ${p.findings.map((i) => d.findings[i]?.rule ?? i).join(", ")}`),
           el("div", { class: "row", style: "gap:8px;margin-top:8px;flex-wrap:wrap" },
-            el("button", { onclick: () => runOpenloop(p) }, "개루프 근거 (2단)"),
+            el("button", { onclick: () => runOpenloop(p) }, "마진 민감도"),
             el("button", {
               class: "primary", onclick: () => runSweep(p),
-            }, "이 부분공간 스윕 (3단 B)"),
+            }, "이 부분공간 스윕"),
             el("button", {
               onclick: () => runPrescribe(p),
               title: "저장된 스윕에서 필요 변화량·최소 조합을 풀고 확인 런까지 — "
@@ -1471,7 +1471,7 @@ export function render() {
     } catch (e) {
       state.openloop = { card, result: null, error: errorText(e) };
       renderOpenloop();
-      runStatus("개루프: 격자 입력 오류", { open: "openloop", bad: true });
+      runStatus("개루프: 격자 입력 오류", { open: "sens", bad: true });
       return;
     }
     runStatus(`개루프 Δ 계산 중 — 케이스 ${cases.length}건…`);
@@ -1494,12 +1494,12 @@ export function render() {
       // 판독대의 2단 줄이 여기서 채워진다 — 결과를 안 알리면 방금 잰 수치가
       // 서랍 안에만 있고 화면의 주 표면은 여전히 "아직 안 쟀다"라고 말한다
       renderReadout();
-      runStatus("개루프 Δ 완료", { open: "openloop" });
+      runStatus("개루프 Δ 완료", { open: "sens" });
     } catch (e) {
       state.openloop = { card, result: null, error: errorText(e) };
       renderOpenloop();
       renderReadout();  // 실패했는데 판독대가 "아직 안 쟀다"로 남으면 거짓말이다
-      runStatus("개루프 실패", { open: "openloop", bad: true });
+      runStatus("개루프 실패", { open: "sens", bad: true });
     }
   }
 
@@ -1619,7 +1619,7 @@ export function render() {
       state.scan = { status: "격자 입력 오류", result: null,
         error: errorText(e), selected: null };
       renderScan();
-      runStatus("스캔: 격자 입력 오류", { open: "sweep", bad: true });
+      runStatus("스캔: 격자 입력 오류", { open: "sens", bad: true });
       return;
     }
     state.scan = { status: `전 케이스 스캔 제출 — 케이스 ${cases.length}건`,
@@ -1646,12 +1646,12 @@ export function render() {
       }
       renderScan();
       runStatus(`전 케이스 스캔 ${state.scan.status}`,
-        { open: "sweep", bad: done.status !== "done" });
+        { open: "sens", bad: done.status !== "done" });
     } catch (e) {
       state.scan.status = "실패";
       state.scan.error = errorText(e);
       renderScan();
-      runStatus("전 케이스 스캔 실패", { open: "sweep", bad: true });
+      runStatus("전 케이스 스캔 실패", { open: "sens", bad: true });
     }
   }
 
@@ -1804,7 +1804,7 @@ export function render() {
       state.sweep = { card, status: "제출 불가", result: null, submitted: false,
         error: errorText(e) };
       renderSweep();
-      runStatus("스윕 제출 불가", { open: "sweep", bad: true });
+      runStatus("스윕 제출 불가", { open: "sens", bad: true });
       return;
     }
     // 런 수 추정: base + knob당 스팬 4점 + 쌍당 (동반 단독 + AB) 2점 — 실수로
@@ -1844,13 +1844,13 @@ export function render() {
       renderSweep();
       renderReadout();  // 판독대 3단 줄 — 서랍 안에만 두면 주 표면이 계속 "안 쟀다"다
       runStatus(`폐루프 스윕 ${state.sweep.status}`,
-        { open: "sweep", bad: done.status !== "done" });
+        { open: "sens", bad: done.status !== "done" });
     } catch (e) {
       state.sweep.status = "실패";
       state.sweep.error = errorText(e);
       renderSweep();
       renderReadout();  // 실패했는데 판독대가 "아직 안 쟀다"로 남으면 거짓말이다
-      runStatus("폐루프 스윕 실패", { open: "sweep", bad: true });
+      runStatus("폐루프 스윕 실패", { open: "sens", bad: true });
     }
   }
 
@@ -2266,7 +2266,7 @@ export function render() {
     // 평가가 맨 앞이다 — "이 형상이 기준을 넘나"가 이 서랍 줄의 첫 질문이고,
     // 그 답(PASS/FAIL 배지)은 서랍이 닫혀 있어도 칩에 보인다. 케이스 0건은
     // 배지가 없다 — 통과도 실패도 아닌 것을 PASS로 위장하지 않는다
-    { key: "eval", label: "평가",
+    { key: "eval", label: "평가·처방",
       count: () => {
         const agg = state.evalRun?.result?.aggregate;
         if (!agg || agg.hard_fail == null) return null;
@@ -2281,21 +2281,23 @@ export function render() {
           caseText = "격자 입력 오류 — 「진단·처방」 서랍에서 고친다";
         }
         return [
-          el("h2", {}, "게인 평가 — A급 카드 · B급 자동 판정 · C급 검증"),
+          el("h2", {}, "평가 → 처방 → 확정 — 이 탭의 주 흐름"),
           el("p", { class: "hint", style: "margin:0 0 8px" },
-            "A급 7카드(모드 안정성·GM·PM·응답속도·과도응답·추종·제어권한)는 값/기준/" +
-            "최악 운용점을 상시로 낸다 — GM·PM은 각각이다(이득류와 지연류 불확실성은 " +
-            "다른 위험이다). B급 9건은 항상 계산하되 한 줄 요약으로 서고 문제 항목만 " +
-            "전개된다. 하드 게이트(불안정·ζ·포화·실속·잔여권한·GM/PM) 위반이 하나라도 " +
-            "있으면 Fail이고 J는 매기지 않는다 — GM/PM은 목적함수가 아니라 제약이다."),
+            "위에서 아래로 좁혀진다: 카드 7장이 값·기준·최악 운용점을 내고, 추가 " +
+            "판정 9건이 한 줄로 서고, 실패가 있으면 어디서 나쁜지(국소성)와 왜 " +
+            "그런지(소견)가 같은 화면에 붙고, 소견의 [얼마나 →]가 감도·처방·확인 " +
+            "런까지 이어진다. 통과하면 적용하고 C급 검증으로 굳힌다. " +
+            "GM·PM은 각각의 카드다(이득류와 지연류 불확실성은 다른 위험이다). " +
+            "하드 게이트(불안정·ζ·포화·실속·잔여권한·GM/PM) 위반이 하나라도 있으면 " +
+            "Fail이고 J는 매기지 않는다 — GM/PM은 목적함수가 아니라 제약이다."),
           evalChipRow,
           el("div", {
             class: "row", style: "gap:10px;align-items:center;margin-top:8px",
           },
             el("button", { class: "primary", onclick: () => runEvaluate("full") },
-              "평가 실행 (단계 1+2)"),
+              "평가 실행 (선형 + 6DOF)"),
             el("button", { onclick: () => runEvaluate("linear") },
-              "선형만 (단계 1 — 시뮬 0)"),
+              "선형만 (시뮬 0 — 수 초)"),
             el("span", { class: "hint" }, caseText)),
           evalStatus,
           evalCardsBox,
@@ -2310,66 +2312,71 @@ export function render() {
             el("button", { onclick: runVerify }, "검증 실행 (C급)")),
           verifyStatus,
           verifyBox,
-          // 처방(얼마나)은 이 깔때기의 다음 칸이다 — 소견의 [얼마나 →]가 여기를
-          // 채운다. 진단 서랍의 카드에서 눌러도 같은 박스라 결과가 갈리지 않는다
+          // 처방(얼마나)은 이 깔때기의 다음 칸이다 — 소견의 [얼마나 →]가 여기를 채운다
           prescribeStatus,
           prescribeBox,
+          // ── 수동 진단 — 사용자가 **실제로 돌린 자기 미션**을 귀속한다 ────────
+          // 평가의 소견은 표준 기동 런의 귀속이라 "그 미션에서 무슨 일이 있었나"는
+          // 못 본다. 주 흐름 아래 접어 두되 없애지는 않는 이유가 그것이다
+          el("details", { style: "margin-top:14px" },
+            el("summary", { class: "hint", style: "cursor:pointer" },
+              "내가 돌린 시뮬 런 진단하기 (표준 기동이 아닌 자기 미션)"),
+            el("p", { class: "hint", style: "margin:6px 0" },
+              "평가의 소견은 표준 진단 기동에서 나온다. 시뮬레이션 탭에서 돌린 " +
+              "임의 미션의 결함을 귀속하려면 그 결과 id로 여기서 진단한다."),
+            el("div", {
+              class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap",
+            },
+              resultInput,
+              el("button", { onclick: runDiagnose }, "진단 실행"),
+              el("button", { onclick: runScan }, "전 케이스 스캔")),
+            el("div", { class: "row", style: "margin-top:6px" }, diagStatus),
+            diagBox),
         ];
       } },
     { key: "params", label: "파라미터",
       count: () => state.model?.params.length ?? 0,
       build: () => [el("h2", {}, "파라미터 — 이 형상에서 흔들 수 있는 전부"), tableBox] },
-    { key: "diag", label: "진단·처방",
-      count: () => state.diag?.prescriptions.length ?? null,
+    // 감도 — "흔들면 얼마나 움직이나"를 묻는 셋이 한 묶음이다. 개루프는 마진,
+    // 스윕은 지표, 구간 경향은 그 방향이 구간마다 어떻게 가는지를 잰다. 종전에는
+    // 옛 단계 번호(2단·3단 A/B/C)로 서랍 셋이 따로 서서 위에서 아래로 눌러야
+    // 하는 순서처럼 보였는데, 주 흐름은 평가·처방이고 **이 셋은 처방이 거절했을
+    // 때 왜인지 보는 자리**다: 처방은 방향 상충을 "국소 문제"라고 거절만 하고
+    // 그 패턴은 구간 경향만 보여 주며, 마진 민감도는 처방이 아예 다루지 않는다
+    // (처방이 푸는 지표는 추종 RMS·포화율·실속마진뿐).
+    { key: "sens", label: "감도 (보조 진단)",
+      count: () => {
+        const n = (state.openloop?.result ? 1 : 0)
+          + (state.scan?.result ? 1 : 0) + (state.sweep?.result ? 1 : 0);
+        return n || null;
+      },
       build: () => [
-        el("h2", {}, "진단 → 처방 → 스윕 — 무엇을 만질지, 그다음 얼마나 (2·3단)"),
-        el("p", { class: "hint", style: "margin:0 0 8px" },
-          "저장된 폐루프 런에서 결함을 귀속한다: 필터 병목인지 게인 미달인지, " +
-          "포화를 어느 항이 주도하는지, 적분이 얼마나 막혀 있었는지. 처방 카드의 " +
-          "손잡이(스케줄이 덮는 자리는 table.* 배율로 자동 승격)가 그대로 3단 스윕의 " +
-          "입력이 된다 — 전 게인 공간이 아니라 처방 부분공간만 흔든다."),
-        el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
-          resultInput,
-          el("button", { class: "primary", onclick: runDiagnose }, "진단 실행")),
-        el("div", {
-          class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px",
-        },
-          el("span", { class: "hint" }, "케이스 격자"),
-          el("label", { class: "hint" }, "mach ", machFromIn, " ~ ", machToIn),
-          el("label", { class: "hint" }, "간격 ", machStepIn),
-          el("label", { class: "hint" }, "alt[m] ", altsIn),
-          el("label", { class: "hint" }, "fuel[kg] ", fuelsIn),
-          el("label", { class: "hint" }, "스텝 s ", stepIn),
-          caseCountHint,
-          el("span", { class: "grow" }),
-          el("button", { onclick: runScan }, "전 케이스 스캔 (3단 A)")),
-        el("div", { class: "row", style: "margin-top:6px" }, diagStatus),
-        diagBox,
-        prescribeStatus,
-        prescribeBox,
-      ] },
-    { key: "openloop", label: "개루프 Δ",
-      count: () => (state.openloop?.result ? 1 : null),
-      build: () => [olStatusLine, olBox, state.openloop?.result ? null
-        : el("p", { class: "hint", style: "margin:0" },
-            "아직 없다 — 「진단·처방」에서 진단을 돌린 뒤 처방 카드의 " +
-            "[개루프 근거 (2단)]를 누르면 여기 채워진다.")] },
-    { key: "sweep", label: "스캔·스윕 Δ",
-      // 스캔도 센다 — 스윕만 세면 스캔 15케이스를 돌려도 칩에 아무 표시가 없어,
-      // 서랍 밖에서는 그 일이 일어났다는 사실 자체가 안 보인다
-      count: () => ((state.scan?.result ? 1 : 0) + (state.sweep?.result ? 1 : 0)) || null,
-      build: () => [scanStatusLine, scanBox, sweepStatusLine, sweepBox,
+        el("h2", {}, "감도 — 흔들면 얼마나 움직이나 (보조 진단)"),
+        el("p", { class: "hint", style: "margin:0 0 10px" },
+          "주 흐름은 「평가·처방」이다. 여기는 처방이 못 풀었을 때 그 이유를 보는 " +
+          "자리다: 처방은 케이스마다 요구 방향이 갈리면 「국소 문제」라고 거절만 " +
+          "하는데 그 패턴은 구간 경향이 보여 주고, 게인이 마진을 얼마나 움직이는지는 " +
+          "처방이 아예 다루지 않는다(추종 RMS·포화율·실속마진만 푼다)."),
+        el("h3", { style: "margin:10px 0 4px;font-size:14px" },
+          "마진 민감도 — 게인 Δ가 PM·GM을 얼마나 움직이나"),
+        el("p", { class: "hint", style: "margin:0 0 6px" },
+          "케이스당 선형화 한 번이면 나머지는 밀리초다 — 시뮬을 안 돈다."),
+        olStatusLine, olBox,
+        state.openloop?.result ? null
+          : el("p", { class: "hint", style: "margin:0" },
+              "아직 없다 — 「평가·처방」 소견의 처방 카드에서 [마진 민감도]를 누르면 " +
+              "여기 채워진다."),
+        el("h3", { style: "margin:14px 0 4px;font-size:14px" },
+          "지표 감도 — 폐루프 실측 (스캔·스윕)"),
+        scanStatusLine, scanBox, sweepStatusLine, sweepBox,
         state.scan || state.sweep ? null
           : el("p", { class: "hint", style: "margin:0" },
-              "아직 없다 — 「진단·처방」에서 [전 케이스 스캔]으로 결함 케이스를 좁힌 뒤 " +
-              "처방 카드의 [이 부분공간 스윕]을 누른다. 여기가 폐루프 실측이다.")] },
-    // 같은 스윕의 두 표면이지만 **묻는 것이 다르다**: 위는 "얼마나"(런별 최악 한 칸),
-    // 여기는 "전 구간에서 어느 쪽으로". 한 서랍에 붙이면 표 넷이 다시 세로로 쌓인다
-    { key: "trend", label: "구간 경향",
-      count: () => (state.sweep?.result?.rows?.length
-        ? sweepKnobs(state.sweep.result.rows).length || null : null),
-      build: () => [trendHead, trendKnobRow, trendMatrixBox,
-        trendMetricRow, trendSpanBox] },
+              "아직 없다 — 「평가·처방」의 [얼마나 →]가 이 스윕을 알아서 돌린다. " +
+              "여기는 그 원자료(런별 지표가 얼마에서 얼마로)다."),
+        el("h3", { style: "margin:14px 0 4px;font-size:14px" },
+          "구간 경향 — 전 구간에서 어느 쪽으로"),
+        trendHead, trendKnobRow, trendMatrixBox, trendMetricRow, trendSpanBox,
+      ] },
     // 경고는 **있을 때만** 칩이 선다 — 항상 서 있으면 0을 세는 칩이 되고,
     // 그러면 경고가 생겼다는 사실 자체가 화면에서 안 보인다.
     // 범례는 여기 없다: 색이 칠해진 그래프가 늘 떠 있는데 범례를 클릭 뒤로 숨기면
@@ -2478,6 +2485,26 @@ export function render() {
       el("div", { style: "margin-top:10px" }, legendBox),
       conservedNote),
     readoutBox,
+    // 케이스 격자·실행 줄은 **무대**다 — 평가·검증·처방·감도가 전부 이 격자를
+    // 쓰는데 서랍 안에 있으면, 서랍을 닫는 순간 "지금 무엇을 대상으로 도는지"가
+    // 화면에서 사라진다(v0.53 전 탭 규약: 실행 버튼과 상태는 무대에 남긴다).
+    // 종전에는 이것이 「진단·처방」 서랍 안에 있어 평가 버튼 옆에 "격자 입력은
+    // 「진단·처방」 서랍" 같은 길 안내가 붙어 있었다
+    el("div", { class: "tab-sheet" },
+      el("div", {
+        class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap",
+      },
+        el("strong", {}, "케이스 격자"),
+        el("label", { class: "hint" }, "mach ", machFromIn, " ~ ", machToIn),
+        el("label", { class: "hint" }, "간격 ", machStepIn),
+        el("label", { class: "hint" }, "alt[m] ", altsIn),
+        el("label", { class: "hint" }, "fuel[kg] ", fuelsIn),
+        el("label", { class: "hint" }, "스텝 s ", stepIn),
+        caseCountHint),
+      el("p", { class: "hint", style: "margin:6px 0 0" },
+        "이 격자가 평가·검증·감도의 공통 대상이다 — 기본값은 게인 탭 지표 카드와 "
+        + "같은 격자라(lib/grid.js DEFAULT_GRID) 「최악 운용점」이 탭마다 다른 "
+        + "격자를 말하지 않는다.")),
     tabBar,
     runLine,  // 잡 상태는 서랍 밖 — 버튼이 있는 서랍과 결과가 사는 서랍이 다르다
     drawerBox,
