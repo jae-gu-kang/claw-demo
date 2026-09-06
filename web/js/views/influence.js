@@ -98,6 +98,9 @@ const state = {
   // 평가 결과의 그림 몫 — 귀속된 설계변수가 문턱 넘은 지표까지 어떻게 닿는지.
   // 파라미터를 직접 고르면 그쪽이 이긴다(사용자 조작이 자동 강조보다 위다)
   evalCone: null, evalPlay: null, evalCaption: null,
+  // 지렛대 보기 — 기본은 꺼짐(그림의 기본 질문은 「영향 관계」다).
+  // 처방이 없으면 토글 자체가 서지 않고, 사라질 때 자동으로 꺼진다
+  fanLever: false,
   // 직전 평가 — 재측정하면 카드가 얼마에서 얼마로 갔는지 낸다(판독대 문법)
   evalPrev: null,
   // 정량 처방 — "얼마나"의 답 (스윕 결과 참조 + 확인 런)
@@ -256,10 +259,11 @@ export function render() {
         .map((c) => c.metrics_raw).find((m) => m && Object.keys(m).length)
       ?? null;
     const opts = {};
-    // 처방이 있으면 그것이 가장 센 근거다 — "움직이나"가 아니라 "고칠 수 있나"를
-    // 이미 풀어 놓았고, 그 판정에는 우리가 고를 잡음 문턱이 없다
+    // 처방은 **토글을 켰을 때만** 근거가 된다 — 질문이 "영향을 주나"에서 "얼마나
+    // 고쳐야 하나"로 바뀌는 자리라 기본 그림이 될 수 없다(lib/influence metricFan)
     const singles = state.prescribe?.result?.singles;
     if (singles && Object.keys(singles).length) opts.prescribeSingles = singles;
+    if (state.fanLever) opts.lever = true;
     if (rows?.length) opts.sweepRows = rows;
     if (runMetrics) opts.runMetrics = runMetrics;
     // 판정 척도는 **엔진이 기준에서 파생한 것**을 그대로 쓴다 (재기술 금지, 02 §5.5).
@@ -761,6 +765,8 @@ export function render() {
       // 여기 들어 있다 — 패널을 안 연 사람은 자막이 "판정선 대비"라고 못 말한다.
       // 기다리지는 않는다(그래프가 먼저 서야 한다) — 도착하면 다음 선택부터 쓴다
       ensureEvalMeta();
+      // 탭을 떠났다 와도 처방은 모듈 스코프에 남아 있다 — 토글도 같이 서야 한다
+      renderLeverBtn();
       recompute();
       renderPath();
       renderLegend(m);
@@ -1081,6 +1087,7 @@ export function render() {
       // 부채꼴의 근거가 방금 바뀌었다(감도 → 지렛대) — 다시 세우지 않으면 그림은
       // 옛 근거로 켜져 있으면서 자막만 새 말을 하게 된다
       recompute();
+      renderLeverBtn();
       canvas?.invalidate();
       renderPrescribe();
       runStatus("수정안 계산 완료", { open });
@@ -2367,6 +2374,35 @@ export function render() {
   const fanNote = el("p", {
     class: "hint", style: "margin:4px 0 0;min-height:16px",
   });
+  /** 지렛대 보기 토글 — **처방이 있을 때만 선다**(없으면 누를 것이 없다).
+   *
+   *  기본이 아닌 이유는 질문이 다르기 때문이다: 이 탭의 그림은 「영향 관계」이고
+   *  지렛대는 「얼마나 고쳐야 하나」다. required_span은 감도와 **지금 설계가
+   *  판정선에서 얼마나 떨어졌는가**를 섞은 값이라, 같은 세기로 미는 설계변수라도
+   *  지표가 한계의 3배면 꺼진다 — 영향 관계로 쓰면 거짓말이 된다. 그래서 끄고
+   *  켜는 두 질문으로 갈라 둔다. */
+  const leverBtn = el("button", {
+    class: "chip", type: "button", hidden: true,
+    style: "margin:6px 0 0;font-size:12px",
+    onclick: () => {
+      state.fanLever = !state.fanLever;
+      recompute();
+      renderLeverBtn();
+      canvas?.invalidate();
+    },
+  });
+  function renderLeverBtn() {
+    const has = !!state.prescribe?.result?.singles
+      && Object.keys(state.prescribe.result.singles).length > 0;
+    // 조건부 컨트롤이 사라질 때 켜진 상태로 두면, 처방을 다시 돌린 순간
+    // 사용자가 켠 적 없는 보기가 되살아난다
+    if (!has && state.fanLever) state.fanLever = false;
+    leverBtn.hidden = !has;
+    clear(leverBtn);
+    leverBtn.append(state.fanLever
+      ? "← 영향 관계로 돌아가기"
+      : "지렛대 보기 — 문턱까지 끌 수 있는 지표만");
+  }
 
   /** 잡 한 건의 상태 — text는 패널 밖 한 줄, open은 끝난 뒤 열어 줄 패널. */
   function runStatus(text, { open = null, bad = false } = {}) {
@@ -2601,7 +2637,7 @@ export function render() {
     // 범례·보존 캐비앳은 그림 바로 아래: 그림이 쓴 색과 굵기를 설명하는 자리라
     // 클릭 뒤로 숨기면 화면이 자기 문법을 말하지 않게 된다
     el("div", { class: "inf-stage" },
-      canvasBox, playLine, evalFocusLine, fanNote, pathBox,
+      canvasBox, playLine, evalFocusLine, fanNote, leverBtn, pathBox,
       el("div", { style: "margin-top:10px" }, legendBox),
       conservedNote),
     readoutBox,

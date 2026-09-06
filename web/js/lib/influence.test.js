@@ -1107,7 +1107,7 @@ const SINGLES = {
 };
 
 test("처방이 있으면 잰 범위 안에서 문턱을 넘길 수 있는 지표만 켠다", () => {
-  const c = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES, sweepRows });
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES, sweepRows, lever: true });
   assert.equal(c.fan.basis, "lever", "처방이 스윕보다 센 근거다");
   assert.deepEqual([...c.fan.ids].sort(), ["metric:alt_rms", "metric:spd_rms"]);
   assert.ok(!c.fan.ids.has("metric:spd_ts"), "스팬 밖은 못 푼 것이다");
@@ -1115,38 +1115,61 @@ test("처방이 있으면 잰 범위 안에서 문턱을 넘길 수 있는 지�
 });
 
 test("지렛대는 적게 고쳐도 되는 것이 앞에 온다", () => {
-  const c = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES });
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES, lever: true });
   assert.equal(c.fan.ranked[0].id, "metric:spd_rms");  // |−6 %| < |+18 %|
   assert.equal(c.fan.ranked[0].span, -0.06);
 });
 
 test("처방이 이 설계변수를 안 풀었으면 스윕 근거로 물러선다", () => {
   const c = coneOf(fanModel(), "param:K",
-    { prescribeSingles: { J: SINGLES.K }, sweepRows });
+    { prescribeSingles: { J: SINGLES.K }, sweepRows, lever: true });
   assert.equal(c.fan.basis, "measured");
 });
 
-test("전부 스팬 밖이면 그 사실을 말하되 그림은 「움직이는가」로 세운다", () => {
+test("전부 스팬 밖이면 그 사실을 말하되 그림은 영향으로 되돌린다", () => {
   // 하나도 못 넘긴다는 것 자체가 발견이다. 다만 그림까지 비우면 오른쪽이 통째로
   // 꺼져 "이 설계변수는 지표와 무관"으로 읽힌다 — 사실은 자막이 이고 간다
   const none = { K: { alt_rms: { solvable: false, required_span: null } } };
-  const c = coneOf(fanModel(), "param:K", { prescribeSingles: none, sweepRows });
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: none, sweepRows, lever: true });
   assert.equal(c.fan.basis, "measured", "지렛대가 비면 아래 근거로 물러선다");
   assert.ok(c.fan.ids.size > 0, "그림이 통째로 꺼지면 안 된다");
-  assert.match(fanLine(c.fan), /문턱을 못 넘긴다/);
-  assert.match(fanLine(c.fan), /움직이는가/);
+  assert.match(fanLine(c.fan), /문턱까지\n?\s*못 끈다/);
+  assert.match(fanLine(c.fan), /영향으로 되돌렸다/);
 });
 
 test("지렛대가 비어도 잰 것이 없으면 선언 상한으로 물러선다", () => {
   const none = { K: { alt_rms: { solvable: false, required_span: null } } };
-  const c = coneOf(fanModel(), "param:K", { prescribeSingles: none });
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: none, lever: true });
   assert.equal(c.fan.basis, "declared");
-  assert.match(fanLine(c.fan), /문턱을 못 넘긴다/);
+  assert.match(fanLine(c.fan), /못 끈다/);
 });
 
 test("지렛대 자막에는 문턱 숫자가 없다 — 그것이 이 근거의 값어치다", () => {
   const line = fanLine(coneOf(fanModel(), "param:K",
-    { prescribeSingles: SINGLES }).fan);
+    { prescribeSingles: SINGLES, lever: true }).fan);
   assert.match(line, /잰 범위 안에서/);
   assert.doesNotMatch(line, /%/, "고른 문턱이 문장에 남아 있으면 안 된다");
+});
+
+test("지렛대는 기본이 아니다 — 처방이 있어도 켜야 쓴다", () => {
+  // 이 탭의 기본 질문은 「영향 관계」다. required_span은 감도와 지금 설계가
+  // 판정선에서 얼마나 떨어졌는가를 섞은 값이라 기본 그림이 되면 거짓말이 된다
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES, sweepRows });
+  assert.equal(c.fan.basis, "measured");
+  assert.equal(c.fan.lever ?? null, null, "안 켰으면 지렛대 사실도 안 실린다");
+});
+
+test("지렛대를 켜면 같은 입력에서 그림이 바뀐다 — 두 질문이 갈린다", () => {
+  const off = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES, sweepRows });
+  const on = coneOf(fanModel(), "param:K",
+    { prescribeSingles: SINGLES, sweepRows, lever: true });
+  assert.equal(on.fan.basis, "lever");
+  assert.notDeepEqual([...on.fan.ids].sort(), [...off.fan.ids].sort());
+});
+
+test("지렛대 자막은 그것이 다른 질문임을 밝힌다", () => {
+  const line = fanLine(coneOf(fanModel(), "param:K",
+    { prescribeSingles: SINGLES, lever: true }).fan);
+  assert.match(line, /지렛대 보기/);
+  assert.match(line, /영향 관계가 아니라/);
 });
