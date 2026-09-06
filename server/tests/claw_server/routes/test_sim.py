@@ -109,7 +109,12 @@ def test_sim_duty_report(client, wait_job):
 
     ch = body["channels"][0]
     assert len(ch["hist"]["edges"]) == 17 and len(ch["hist"]["time"]) == 16
-    assert sum(ch["hist"]["time"]) == 20.0
+    # 빈 시간의 합은 t_total과 같아야 한다 — 다만 **완전 일치로 묻지 않는다**:
+    # 빈마다 count × dt(0.01)를 더하므로 16개를 합치면 마지막 자리에 반올림이 남고
+    # (여기서는 20.000000000000004), 그 4e-15는 집계가 틀린 것이 아니라 이진
+    # 부동소수의 사정이다. 완전 일치를 걸어 두면 빈 수·플랫폼이 바뀔 때마다
+    # 없는 결함을 신고한다 — 판정선은 "빠뜨린 시간이 없나"이지 비트 일치가 아니다
+    assert sum(ch["hist"]["time"]) == pytest.approx(20.0)
     # 판정 기준선이 결과 meta를 타고 넘어와야 포화가 판정된다
     assert ch["rate_max"] == 6.0 and ch["pos_hi"] == 0.35
     assert ch["pos_sat"] is not None and ch["rate_sat"] is not None
