@@ -101,6 +101,11 @@ const state = {
   // 지렛대 보기 — 기본은 꺼짐(그림의 기본 질문은 「영향 관계」다).
   // 처방이 없으면 토글 자체가 서지 않고, 사라질 때 자동으로 꺼진다
   fanLever: false,
+  // 「얼마나 →」가 도는 동안 칩 자리에 세울 진행 문구 (null = 안 돌고 있다).
+  // 이 자리가 비어 있으면 사용자는 **아무 일도 안 일어난 화면**을 보게 된다:
+  // 스윕 → 수정안 → 확인 런이 이어 도느라 몇 분이 걸리는데 칩은 그 뒤에야 서고,
+  // 그동안 진행은 무대 밖 한 줄(runLine)에만 있어 그래프를 보는 눈에는 안 들어온다
+  leverBusy: null,
   // 직전 평가 — 재측정하면 카드가 얼마에서 얼마로 갔는지 낸다(판독대 문법)
   evalPrev: null,
   // 정량 처방 — "얼마나"의 답 (스윕 결과 참조 + 확인 런)
@@ -1092,6 +1097,7 @@ export function render() {
     }
     state.prescribe = { status: "제출됨", result: null, error: null };
     renderPrescribe();
+    setLeverBusy("수정안 계산 중…");
     runStatus(`수정안 계산 제출 — 풀이는 즉시, 확인 런 ${cases.length}케이스`);
     try {
       const job = await api.post("/influence/prescribe",
@@ -1104,11 +1110,14 @@ export function render() {
         }));
       const done = await watchJob(job.id, (j) => {
         state.prescribe.status = j.message ?? j.status;
-        runStatus(`수정안 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
+        const pct = Math.round((j.progress ?? 0) * 100);
+        setLeverBusy(`수정안 ${pct}%`);
+        runStatus(`수정안 ${pct}% — ${j.message ?? ""}`);
       });
       if (done.status !== "done" || !done.result_id) {
         state.prescribe.status = done.status;
         state.prescribe.error = done.error ?? `수정안 ${done.status}`;
+        setLeverBusy(null);  // 끝났다 — 결과가 없으면 칩도 자리를 접는다
         renderPrescribe();
         runStatus(`수정안 ${done.status}`, { open, bad: true });
         return;
@@ -1119,12 +1128,14 @@ export function render() {
       // 부채꼴의 근거가 방금 바뀌었다(감도 → 지렛대) — 다시 세우지 않으면 그림은
       // 옛 근거로 켜져 있으면서 자막만 새 말을 하게 된다
       recompute();
+      state.leverBusy = null;  // renderLeverBtn이 곧 이어지므로 여기서는 값만 지운다
       renderLeverBtn();
       canvas?.invalidate();
       renderPrescribe();
       runStatus("수정안 계산 완료", { open });
     } catch (e) {
       state.prescribe = { status: "실패", result: null, error: errorText(e) };
+      setLeverBusy(null);
       renderPrescribe();
       runStatus("수정안 실패", { open, bad: true });
     }
@@ -1217,6 +1228,26 @@ export function render() {
     }
   }
 
+  /** [얼마나 →] 버튼의 툴팁 — **무엇을 얼마나 돌리는지**를 지금 화면의 수로 낸다.
+   *
+   *  이 버튼 하나가 잡 셋을 이어 돌린다(감도 스윕 → 수정안 풀이 → 확인 런). 케이스
+   *  하나짜리 격자에서도 9분 넘게 걸린 적이 있어(계측), 규모를 안 밝히면 누른 사람은
+   *  화면이 멈춘 줄 안다. 정확한 시간은 형상·격자에 따라 달라지므로 **약속하지
+   *  않는다** — 무엇이 도는지와 몇 건인지만 말하고, 진행은 지렛대 칩과 실행 상태
+   *  줄이 낸다. 격자 입력이 깨져 있으면 케이스 수를 셀 수 없으니 그 사실을 그대로 낸다. */
+  function howMuchTitle(knobs) {
+    let n;
+    try {
+      n = gridCases().length;
+    } catch {
+      return "감도 스윕 → 수정안 → 확인 런까지 이어 돈다 — 지금은 격자 입력이 "
+        + "오류라 규모를 셀 수 없다 (무대의 「케이스 격자」를 고친다)";
+    }
+    return `감도 스윕 → 수정안 풀이 → 확인 런까지 이어 돈다 — `
+      + `설계변수 ${knobs?.length ?? 0}개 × 케이스 ${n}건. 6DOF 런이 곱으로 붙어 `
+      + `수 분 걸린다(진행은 그래프 아래 칩과 위 실행 줄에 뜬다)`;
+  }
+
   /** 소견의 [얼마나 →] — 평가가 지목한 자리를 그대로 물려 감도와 해를 푼다.
    *
    * 그 설계변수를 흔든 스윕이 없으면 **먼저 스윕을 돌린다**. 사용자가 "스윕부터
@@ -1240,6 +1271,9 @@ export function render() {
     const need = knobs.filter((k) => !swept.has(k));
     try {
       if (need.length || !state.sweep?.resultId) {
+        // 이 체인은 스윕 → 수정안 → 확인 런이라 몇 분이 걸린다. 그동안 칩 자리가
+        // 비어 있으면 「지렛대는 어디 있나」가 된다 — 첫 걸음부터 자리를 세운다
+        setLeverBusy("감도 측정 중…");
         runStatus(`감도 측정 중 — 설계변수 ${knobs.length}개 × 케이스 ${cases.length}건`);
         const sj = await api.post("/influence/sweep", sweepRequest(shapeState(), {
           cases, knobs, pairs: [],
@@ -1247,9 +1281,12 @@ export function render() {
           fingerprint: state.diag?.fingerprint,
         }));
         const sdone = await watchJob(sj.id, (j) => {
-          runStatus(`감도 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
+          const pct = Math.round((j.progress ?? 0) * 100);
+          setLeverBusy(`감도 ${pct}%`);
+          runStatus(`감도 ${pct}% — ${j.message ?? ""}`);
         });
         if (sdone.status !== "done" || !sdone.result_id) {
+          setLeverBusy(null);
           runStatus(`감도 측정 ${sdone.status}`, { open: "eval", bad: true });
           return;
         }
@@ -1260,6 +1297,7 @@ export function render() {
       }
       await runPrescribe({ knobs }, { open: "eval" });
     } catch (e) {
+      setLeverBusy(null);
       runStatus(`얼마나: 실패 — ${errorText(e)}`, { open: "eval", bad: true });
     }
   }
@@ -1423,7 +1461,10 @@ export function render() {
                 el("td", {},
                   el("button", {
                     onclick: () => runPrescribeFromEval(r.knobs),
-                    title: "이 자리들을 스윕해 필요 변화량과 조합을 푼다",
+                    // 이 버튼은 **세 잡을 이어 돈다** — 눌러 놓고 몇 분을 기다리게
+                    // 되는데 종전 문구("스윕해 … 푼다")는 그 규모를 말하지 않아
+                    // 누른 사람이 화면이 멈춘 줄 안다. 규모를 수로 낸다
+                    title: howMuchTitle(r.knobs),
                   }, "얼마나 →"))))))));
       }
 
@@ -2432,11 +2473,27 @@ export function render() {
     // 조건부 컨트롤이 사라질 때 켜진 상태로 두면, 처방을 다시 돌린 순간
     // 사용자가 켠 적 없는 보기가 되살아난다
     if (!has && state.fanLever) state.fanLever = false;
-    leverBtn.hidden = !has;
+    // 도는 중에는 **자리를 지킨다** — 결과가 나와야 서는 칩이라 그 전까지 화면이
+    // 비어 있었고, 그래서 「토글이 어디 있냐」가 됐다. 누를 것은 아직 없으므로
+    // 비활성이고, 문구가 무엇을 기다리는 중인지 말한다 (조용한 대기 금지)
+    const busy = !has && state.leverBusy;
+    leverBtn.hidden = !has && !busy;
+    leverBtn.disabled = !!busy;
+    leverBtn.style.opacity = busy ? "0.6" : "";
+    leverBtn.style.cursor = busy ? "default" : "";
     clear(leverBtn);
-    leverBtn.append(state.fanLever
-      ? "← 영향 관계로 돌아가기"
-      : "지렛대 보기 — 문턱까지 끌 수 있는 지표만");
+    leverBtn.append(busy
+      ? `지렛대 보기 — ${state.leverBusy}`
+      : state.fanLever
+        ? "← 영향 관계로 돌아가기"
+        : "지렛대 보기 — 문턱까지 끌 수 있는 지표만");
+  }
+
+  /** 「얼마나 →」 진행 문구 — 칩 자리에 그대로 나간다. null이면 자리를 접는다. */
+  function setLeverBusy(text) {
+    if (state.leverBusy === text) return;
+    state.leverBusy = text;
+    renderLeverBtn();
   }
 
   /** 잡 한 건의 상태 — text는 패널 밖 한 줄, open은 끝난 뒤 열어 줄 패널. */
