@@ -752,7 +752,7 @@ export function render() {
     { label: "가상환경에서 보기 →", title: "이 런의 궤적을 3D 지형 위에서 확인한다",
       go: () => { location.hash = "#world"; } },
     { label: "영향성에서 진단 →",
-      title: "이 런의 결함을 설계변수에 귀속한다 (영향성 「평가·처방」 수동 진단)",
+      title: "이 런의 결함을 설계변수에 귀속한다 (영향성 「감도 (보조 진단)」 수동 진단)",
       go: (id) => {
         store.set("influenceHandoff", { resultId: id, from: "sim" });
         location.hash = "#influence";

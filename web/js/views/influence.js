@@ -249,6 +249,8 @@ export function render() {
       ? coneOf(state.model, state.selection, fanOpts()) : null;
     state.play = state.cone ? conePlayback(state.model, state.cone) : null;
     paintCaptions();
+    // 감도의 대상은 선택을 물려받는다 — 패널이 열려 있으면 그 줄도 같이 간다
+    if (state.drawer === "sens") renderSensRow();
   }
 
   /** 자막 둘의 우선순위 — 파라미터를 직접 고르면 **그쪽이 그림을 차지하므로**
@@ -610,8 +612,8 @@ export function render() {
         "아직 안 쟀다 — 「감도」 패널의 마진 민감도가 이 자리를 채운다."));
     } else if (ol.missing) {
       rows.append(roWhy("개루프 마진", "#409cff",
-        "이 설계변수는 잰 적이 없다 — 개루프는 처방 카드가 고른 설계변수만 잰다. " +
-        "이 값을 재려면 이 설계변수를 포함하는 카드에서 [개루프 근거]를 누른다."));
+        "이 설계변수는 잰 적이 없다 — 개루프는 지목된 설계변수만 잰다. " +
+        "이 파라미터를 고른 채 「감도」 패널의 [마진 민감도 재기]를 누르면 잰다."));
     } else if (!ol.best) {
       rows.append(roWhy("개루프 마진", "#409cff",
         `유효한 Δ 없음 — ${ol.reason ?? "선언된 SISO 루프가 없다"}`));
@@ -636,8 +638,8 @@ export function render() {
         "여기가 폐루프 실측이고, 위 두 단은 그 전에 범위를 좁히는 근사다."));
     } else if (sw.missing) {
       rows.append(roWhy("폐루프 실측", "#ffb340",
-        "이 설계변수는 흔든 적이 없다 — 스윕은 처방 부분공간만 흔든다(전 게인 공간이 " +
-        "아니다). 이 값을 재려면 이 설계변수를 포함하는 카드에서 [이 부분공간 스윕]을 누른다."));
+        "이 설계변수는 흔든 적이 없다 — 스윕은 지목된 부분공간만 흔든다(전 게인 " +
+        "공간이 아니다). 이 파라미터를 고른 채 「감도」 패널의 [지표 감도 재기]를 누르면 흔든다."));
     } else {
       for (const s of sw.list.slice(0, 3)) {
         // 설계변수를 **얼마로** 놓았을 때인지가 함께 있어야 지표 전이가 뜻을 갖는다.
@@ -653,7 +655,7 @@ export function render() {
       if (sw.list.length > 3) {
         rows.append(el("div", { class: "inf-rorow" },
           el("span", { class: "inf-why" },
-            `… 외 지표 ${sw.list.length - 3}개 — 「스윕 Δ」 패널에 전부 있다`)));
+            `… 외 지표 ${sw.list.length - 3}개 — 「감도」 패널의 지표 감도에 전부 있다`)));
       }
     }
     if (sw?.stale) rows.append(roWhy("", WARN_INK, staleNote(sw.stale)));
@@ -828,14 +830,15 @@ export function render() {
     el("p", { class: "hint", style: "margin:6px 0" },
       "평가의 소견은 표준 진단 기동에서 나온다. 시뮬레이션 탭에서 돌린 " +
       "임의 미션의 결함을 귀속하려면 그 결과 id로 여기서 진단한다 — " +
-      "시뮬 탭의 [영향성에서 진단]으로 넘어오면 그 런이 아래 칸에 이미 들어 있다."),
+      "시뮬 탭의 [영향성에서 진단]으로 넘어오면 그 런이 아래 칸에 이미 들어 있다. " +
+      "진단이 세우는 처방 카드에는 위 실행 줄과 같은 버튼이 달린다(그 카드가 " +
+      "고른 설계변수로 돈다)."),
     handoffNote,
     el("div", {
       class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px",
     },
       resultInput,
-      el("button", { onclick: runDiagnose }, "진단 실행"),
-      el("button", { onclick: runScan }, "전 케이스 스캔")),
+      el("button", { onclick: runDiagnose }, "진단 실행")),
     el("div", { class: "row", style: "margin-top:6px" }, diagStatus),
     diagBox);
   const numIn = (val, width = 70) =>
@@ -1089,7 +1092,8 @@ export function render() {
   const prescribeStatus = el("p", { class: "hint", style: "margin:10px 0 0" });
   const prescribeBox = el("div");
 
-  async function runPrescribe(card, { open = "eval" } = {}) {
+  async function runPrescribe(card, { open = state.drawer === "sens" ? "sens" : "eval" }
+                              = {}) {
     const rid = state.sweep?.resultId;
     if (!rid) {
       runStatus("수정안: 먼저 감도(스윕)가 돌아 있어야 한다 — "
@@ -1657,6 +1661,79 @@ export function render() {
           ),
         );
       })));
+    // 진단이 방금 세운 처방 카드가 감도의 **대상 출처**다 — 여기서 안 부르면
+    // 실행 줄이 바로 위에서 "대상 없음"인 채로 남는다(인계 경로가 정확히 그렇다:
+    // 시뮬 탭에서 넘어와 [진단 실행]을 눌러도 위 버튼 둘이 계속 꺼져 있었다)
+    renderSensRow();
+  }
+
+  /** 감도를 돌릴 대상 설계변수 — **어디서 온 것인지까지** 낸다.
+   *
+   *  이 판에 버튼을 두려면 "무엇을 흔들까"가 있어야 하는데, 감도는 결과를 받는
+   *  자리라 자기 입력이 없었다(그래서 실행이 전부 다른 패널에 흩어져 있었다).
+   *  우선순위는 **사용자가 방금 좁힌 순서**다: 그래프에서 고른 파라미터 →
+   *  평가가 귀속한 설계변수 → 진단의 처방 카드. 출처를 화면에 밝히지 않으면
+   *  "무엇을 잰 건지"가 결과표에서 사라진다.
+   */
+  function sensKnobs() {
+    const bare = (id) => id.replace(/^param:/, "");
+    if (state.selection) {
+      return { knobs: [bare(state.selection)], source: "그래프에서 고른 것" };
+    }
+    const focus = state.evalRun?.result ? evalFocus(state.evalRun.result) : null;
+    if (focus?.paramIds?.length) {
+      return { knobs: focus.paramIds.map(bare), source: "평가가 귀속한 것" };
+    }
+    const fromDiag = [...new Set(
+      (state.diag?.prescriptions ?? []).flatMap((p) => p.knobs ?? []))];
+    if (fromDiag.length) return { knobs: fromDiag, source: "진단의 처방 카드" };
+    return { knobs: [], source: null };
+  }
+
+  const sensTargetLine = el("p", { class: "hint", style: "margin:6px 0 0" });
+  const sensRow = el("div", {
+    class: "row", style: "gap:8px;margin:8px 0 0;flex-wrap:wrap",
+  });
+  /** 감도 패널의 실행 줄 — 세 칸을 **여기서** 채운다.
+   *
+   *  종전에는 이 판을 채우는 버튼이 전부 「평가·처방」 안에 있었다(마진 민감도는
+   *  접힌 수동 진단 안의 처방 카드에만). 패널 이름은 「감도」인데 감도를 만드는
+   *  것이 하나도 없어서 "감도를 어떻게 켜냐"가 매번 물음이 됐다. 구간 경향은
+   *  버튼이 없다 — 스윕이 돈 런을 다시 세우는 표라 새로 잴 것이 없다.
+   */
+  function renderSensRow() {
+    const { knobs, source } = sensKnobs();
+    clear(sensRow);
+    clear(sensTargetLine);
+    // 끄면 title을 **사유로** 갈아 끼운다 — 비용 설명이 그대로 남아 있으면
+    // 왜 못 누르는지가 화면에 없다 (views/sim.js syncHandoff와 같은 규약)
+    const mk = (label, title, fn) => el("button", {
+      onclick: fn, disabled: !knobs.length,
+      title: knobs.length ? title
+        : "흔들 설계변수가 없다 — 그래프에서 파라미터를 고르거나 평가·진단을 먼저 돌린다",
+    }, label);
+    sensRow.append(
+      mk("마진 민감도 재기", "케이스당 선형화 한 번 — 시뮬을 안 돈다",
+        () => runOpenloop({ knobs })),
+      mk("지표 감도 재기 (폐루프 스윕)",
+        "케이스 × 스팬 4점만큼 6DOF 런 — 구간 경향도 이 런으로 선다",
+        () => runSweep({ knobs })),
+      el("button", {
+        onclick: runScan,
+        title: "격자 전 케이스의 base 지표 — 설계변수 없이 돈다",
+      }, "전 케이스 스캔"),
+    );
+    sensTargetLine.append(knobs.length
+      ? `대상 ${knobs.length}개 (${source}) — ${knobs.join(" · ")}`
+        // 여기서 도는 스윕은 **단독 점만** 낸다(쌍 런 없음) — 처방의 「조합」
+        // 제안에 상호작용 경고가 안 붙는데, 그것이 "재 봤더니 가산적이었다"와
+        // 화면에서 같아지면 안 된다. 쌍은 처방 카드의 스윕이 돈다(joint_with)
+        + (knobs.length > 1
+          ? " · 이 스윕은 단독 점만 돈다 — 설계변수끼리의 상호작용(비가산성)"
+            + " 경고는 처방 카드의 스윕에서만 나온다"
+          : "")
+      : "대상 없음 — 그래프에서 파라미터를 고르거나 평가·진단을 먼저 돌리면 잡힌다"
+        + " (전 케이스 스캔은 대상 없이 돈다)");
   }
 
   const olStatusLine = el("p", { class: "hint", style: "margin:6px 0 0" });
@@ -2254,7 +2331,7 @@ export function render() {
             : sw
               ? `스윕 상태: ${sw.status} — 결과가 저장되면 여기가 채워진다. `
                 + "이 표는 새로 재지 않는다: 그 런을 구간별로 다시 세울 뿐이다."
-              : "아직 없다 — 이 패널 위 「지표 감도」 절에서 [이 부분공간 스윕]을 돌리면 "
+              : "아직 없다 — 이 판 맨 위 [지표 감도 재기]를 돌리면 "
                 + "여기가 채워진다. 이 표는 새로 재지 않는다: 그 스윕이 이미 돈 런을 "
                 + "구간별로 다시 세울 뿐이다.";
       trendHead.append(el("p", { class: "hint", style: "margin:0" }, why));
@@ -2573,12 +2650,12 @@ export function render() {
     store.set("influenceHandoff", null);
     resultInput.value = h.resultId;
     diagDetails.open = true;
-    state.drawer = "eval";
+    state.drawer = "sens";
     handoffNote.style.display = "";
     clear(handoffNote).append(
       `시뮬레이션 탭에서 넘어온 런이다 — 아래 칸의 ${h.resultId}가 그것이다. `
       + "[진단 실행]이 이 런의 결함을 설계변수에 귀속한다. 격자 전체 판정은 "
-      + "위 「평가 실행」이 따로 돈다(이 런이 아니라 무대의 케이스 격자로).");
+      + "「평가·처방」의 평가 실행이 따로 돈다(이 런이 아니라 무대의 케이스 격자로).");
   }
 
   const DRAWERS = [
@@ -2592,7 +2669,7 @@ export function render() {
     // 정본을 두 번째 칩 뒤에 두고 있었다.
     //
     // 선후 **의존**은 아니다 — 평가는 고른 파라미터를 안 쓰고(state.selection은
-    // 그래프·전파 경로·판독대만 움직인다) 카드의 설계변수와 무대의 격자로 돈다.
+    // 그래프·전파 경로·판독대·감도 실행 줄을 움직인다) 무대의 격자로 돈다.
     // 그래서 순서만 바꾼다: 기본 열림은 여전히 없으므로(state.drawer = null)
     // 첫 화면 인상은 그대로고 **읽는 순서**만 업무 순서에 맞는다.
     { key: "params", label: "파라미터",
@@ -2600,9 +2677,9 @@ export function render() {
       build: () => [
         el("h2", {}, "파라미터 — 이 형상에서 흔들 수 있는 전부"),
         el("p", { class: "hint", style: "margin:0 0 8px" },
-          "행을 누르면 그 파라미터가 그래프·전파 경로·판독대의 대상이 된다 — " +
-          "이 탭의 첫 동작이 그것이다. 판정(「평가·처방」)은 이 선택을 쓰지 않는다: " +
-          "카드의 설계변수와 무대의 케이스 격자로 돈다."),
+          "행을 누르면 그 파라미터가 그래프·전파 경로·판독대의 대상이 되고, " +
+          "「감도」 실행 줄도 이것을 흔든다 — 이 탭의 첫 동작이 그것이다. " +
+          "판정(「평가·처방」)은 이 선택을 쓰지 않는다: 무대의 케이스 격자로 돈다."),
         tableBox,
       ] },
     // 평가는 두 번째다 — "이 형상이 기준을 넘나"가 이 탭의 **주 흐름**이고,
@@ -2680,11 +2757,9 @@ export function render() {
           // 처방(얼마나)은 이 깔때기의 다음 칸이다 — 소견의 [얼마나 →]가 여기를 채운다
           prescribeStatus,
           prescribeBox,
-          // ── 수동 진단 — 사용자가 **실제로 돌린 자기 미션**을 귀속한다 ────────
-          // 평가의 소견은 표준 기동 런의 귀속이라 "그 미션에서 무슨 일이 있었나"는
-          // 못 본다. 주 흐름 아래 접어 두되 없애지는 않는 이유가 그것이다.
-          // 시뮬 탭에서 인계돼 오면 이 자리가 **펼쳐진 채** 선다 (receiveHandoff)
-          diagDetails,
+          // 수동 진단(자기 미션 귀속)과 전 케이스 스캔은 **감도로 갔다**(v0.69):
+          // 평가는 무대의 케이스 격자를 판정하고 끝나고, 설계변수를 골라 흔들거나
+          // 전 케이스 경향을 보는 일은 보조 진단의 몫이다
         ];
       } },
     // 감도 — "흔들면 얼마나 움직이나"를 묻는 셋이 한 묶음이다. 개루프는 마진,
@@ -2707,24 +2782,41 @@ export function render() {
           "자리다: 처방은 케이스마다 요구 방향이 갈리면 「국소 문제」라고 거절만 " +
           "하는데 그 패턴은 구간 경향이 보여 주고, 게인이 마진을 얼마나 움직이는지는 " +
           "처방이 아예 다루지 않는다(추종 RMS·포화율·실속마진만 푼다)."),
-        el("h3", { style: "margin:10px 0 4px;font-size:14px" },
+        // 실행 줄이 판 맨 위에 선다 — 종전에는 이 판을 채우는 버튼이 전부 다른
+        // 패널에 있어서(마진 민감도는 접힌 수동 진단 안에만) "감도를 어떻게
+        // 켜냐"가 매번 물음이었다. 대상은 위에서 이미 좁혀 온 것을 물려받는다
+        sensRow, sensTargetLine,
+        el("p", { class: "hint", style: "margin:6px 0 0" },
+          "「평가·처방」의 [얼마나 →]는 아래 둘(지표 감도·구간 경향)을 처방과 함께 " +
+          "한 번에 돌리는 지름길이다. 여기 버튼은 그 한 조각씩을 따로 돌린다."),
+        diagDetails,
+        // 처방 표는 **두 패널에 같은 노드**로 얹는다 (한 번에 하나만 열리므로
+        // 실제로는 열린 쪽으로 옮겨 간다). 처방 카드가 이 패널로 온 뒤에도 표만
+        // 평가 쪽에 있으면, 방금 [수정안 계산]을 누른 화면에서는 아무것도 안
+        // 보인다 — v0.58에 똑같이 겪고 고친 자리다
+        prescribeStatus, prescribeBox,
+        el("h3", { style: "margin:14px 0 4px;font-size:14px" },
           "마진 민감도 — 게인 Δ가 PM·GM을 얼마나 움직이나"),
         el("p", { class: "hint", style: "margin:0 0 6px" },
           "케이스당 선형화 한 번이면 나머지는 밀리초다 — 시뮬을 안 돈다."),
         olStatusLine, olBox,
         state.openloop?.result ? null
           : el("p", { class: "hint", style: "margin:0" },
-              "아직 없다 — 「평가·처방」 소견의 처방 카드에서 [마진 민감도]를 누르면 " +
-              "여기 채워진다."),
+              "아직 없다 — 위 [마진 민감도 재기]를 누르면 여기 채워진다. " +
+              "아래 「내가 돌린 시뮬 런 진단하기」가 세우는 처방 카드에도 같은 " +
+              "버튼이 있다(그 카드가 고른 설계변수로 돈다)."),
         el("h3", { style: "margin:14px 0 4px;font-size:14px" },
           "지표 감도 — 폐루프 실측 (스캔·스윕)"),
         scanStatusLine, scanBox, sweepStatusLine, sweepBox,
         state.scan || state.sweep ? null
           : el("p", { class: "hint", style: "margin:0" },
-              "아직 없다 — 「평가·처방」의 [얼마나 →]가 이 스윕을 알아서 돌린다. " +
-              "여기는 그 원자료(런별 지표가 얼마에서 얼마로)다."),
+              "아직 없다 — 위 [지표 감도 재기]나 「평가·처방」의 [얼마나 →]가 이 " +
+              "스윕을 돌린다. 여기는 그 원자료(런별 지표가 얼마에서 얼마로)다."),
         el("h3", { style: "margin:14px 0 4px;font-size:14px" },
           "구간 경향 — 전 구간에서 어느 쪽으로"),
+        el("p", { class: "hint", style: "margin:0 0 6px" },
+          "여기만 버튼이 없다 — 새로 재는 표가 아니라 위 스윕이 이미 돈 런을 " +
+          "구간별로 다시 세운 것이라, 스윕이 돌면 저절로 선다."),
         trendHead, trendKnobRow, trendMatrixBox, trendMetricRow, trendSpanBox,
       ] },
     // 경고는 **있을 때만** 칩이 선다 — 항상 서 있으면 0을 세는 칩이 되고,
@@ -2745,6 +2837,9 @@ export function render() {
     clear(drawerBox);
     const d = DRAWERS.find((x) => x.key === state.drawer);
     if (!d) return;
+    // 감도 실행 줄은 **열 때마다** 다시 판정한다 — 대상(선택·평가·진단)이 그
+    // 사이에 바뀌었을 수 있고, 낡은 대상으로 돌면 결과표가 딴 것을 말한다
+    if (d.key === "sens") renderSensRow();
     for (const node of d.build()) if (node) drawerBox.append(node);
   }
 
