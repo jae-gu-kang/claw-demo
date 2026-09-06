@@ -462,6 +462,7 @@ export function render() {
         drawProfile(); // 세로 프로파일에 실제 고도 겹치기
         dutyInvalidate(); // 새 런이다 — 타면 패널을 다음에 열 때 다시 집계한다
         simDrawers?.open("replay"); // 결과를 찾아 헤매게 하지 않는다
+        syncHandoff(); // 넘길 런이 생겼다 — 다음 단계 버튼이 살아난다
       } catch (e) {
         showErr(e);
       }
@@ -735,17 +736,63 @@ export function render() {
   });
   simDrawers = drawers;
 
+  // ── 인계 — 이 런을 다음 단계로 넘긴다 (v0.63) ─────────────────────────────
+  // 상단 탭이 자동 설계 → **시뮬레이션 → 가상환경 → 영향성**이 된 이상, 그 순서는
+  // 화면에서 넘어갈 수단을 함께 줘야 한다. 순서만 바꾸고 배선이 없으면 "돌려서
+  // 확인은 했는데 판정은 딴 런"이 되고, 그때 탭 줄은 하지 않는 일을 말하게 된다.
+  //
+  // 넘기는 것은 **런 하나**고 그 지목은 store `simResult` 하나로 통일돼 있다 —
+  // 가상환경이 목록에서 다른 런을 고르면 그쪽도 같은 키를 갱신하므로
+  // (web/world WorldTab.tsx), 영향성은 "마지막으로 본 런"을 이어받는다.
+  // 영향성행만 별도 키(`influenceHandoff`)를 더 싣는다: 그 탭은 넘어온 런을
+  // 칸에 채우는 데 그치지 않고 **패널을 열어 보여 줘야** 하는데, 그 열림은 명시
+  // 인계일 때만 옳다(그냥 탭을 누른 사람의 화면을 바꾸면 안 된다). 받는 쪽이
+  // 한 번 읽고 지운다 — 가상환경 → 시뮬 `wpDraft`와 같은 규약(이 파일 위쪽).
+  const handoffBtns = [
+    { label: "가상환경에서 보기 →", title: "이 런의 궤적을 3D 지형 위에서 확인한다",
+      go: () => { location.hash = "#world"; } },
+    { label: "영향성에서 진단 →",
+      title: "이 런의 결함을 설계변수에 귀속한다 (영향성 「평가·처방」 수동 진단)",
+      go: (id) => {
+        store.set("influenceHandoff", { resultId: id, from: "sim" });
+        location.hash = "#influence";
+      } },
+  ].map((d) => {
+    const btn = el("button", {
+      title: d.title,
+      onclick: () => {
+        const id = store.get("simResult")?.id;
+        if (!id) return; // disabled와 같은 조건 — 방어만, 사유는 title이 낸다
+        d.go(id);
+      },
+    }, d.label);
+    btn.dataset.baseTitle = d.title;
+    return btn;
+  });
+  // 넘길 런이 없으면 **끈다** — 눌리는데 아무 일도 안 일어나는 버튼은 고장으로 읽힌다.
+  // 끈 이유는 title로 낸다(조용한 비활성 금지 — 이 탭의 이중 제출 안내와 같은 규약)
+  function syncHandoff() {
+    const id = store.get("simResult")?.id;
+    for (const btn of handoffBtns) {
+      btn.disabled = !id;
+      btn.title = id ? btn.dataset.baseTitle
+        : "넘길 런이 없습니다 — 먼저 [시뮬 실행]으로 하나 만듭니다";
+    }
+  }
+
   const root = el("div", { class: "tab-page" },
     tabTop({
       title: "시뮬레이션",
       lead: "웨이포인트를 지도(수평면)와 프로파일(세로면) 두 면에서 편집하고, "
-        + "그대로 폐루프로 날린다. 실행 조건과 결과(재생·타면 사용)는 아래 패널에 있다.",
+        + "그대로 폐루프로 날린다. 실행 조건과 결과(재생·타면 사용)는 아래 패널에 있다. "
+        + "여기서 나온 런 하나가 가상환경(3D 확인)과 영향성(귀속 진단)으로 그대로 넘어간다.",
       actions: [
         el("button", { class: "primary", onclick: run }, "시뮬 실행"),
         el("button", {
           onclick: () => { drawers.open("replay"); },
           title: "마지막 실행 결과 패널을 연다",
         }, "결과 보기"),
+        ...handoffBtns,
       ],
       extra: [progressBox, errBox],
     }),
@@ -761,6 +808,7 @@ export function render() {
   drawWpNotice();
   if (lastReplay) renderReplay(replayBox);
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
+  syncHandoff(); // 재진입 — 이전 런이 남아 있으면 인계 버튼이 켜진 채로 선다
   drawers.refresh();
   return root;
 

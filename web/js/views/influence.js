@@ -773,6 +773,35 @@ export function render() {
     value: store.get("simResult")?.id ?? "",
     style: `${mono()};width:230px`,
   });
+  // 인계 안내 — **넘어온 런일 때만** 선다. 칸이 저절로 채워져 있는데 어디서 온
+  // 값인지가 화면에 없으면, 사용자는 그것이 방금 본 런인지 옛날 것인지 모른다
+  const handoffNote = el("p", {
+    class: "hint", style: "margin:6px 0 0;display:none",
+  });
+  // 칸을 손으로 고치면 안내는 **거짓말이 된다** — "아래 칸의 X가 그것이다"라고
+  // 써 놓고 칸에는 Y가 있게 된다. 그때는 문장을 고치는 게 아니라 치운다
+  // (인계로 온 런이 더는 화면의 대상이 아니다)
+  resultInput.addEventListener("input", () => {
+    handoffNote.style.display = "none";
+  });
+  // 패널을 다시 그릴 때마다 새로 만들면 인계가 펼쳐 둔 상태가 닫힌다 — 다른
+  // 내용 박스(tableBox·diagBox…)와 같은 이유로 **재사용**한다
+  const diagDetails = el("details", { style: "margin-top:14px" },
+    el("summary", { class: "hint", style: "cursor:pointer" },
+      "내가 돌린 시뮬 런 진단하기 (표준 기동이 아닌 자기 미션)"),
+    el("p", { class: "hint", style: "margin:6px 0" },
+      "평가의 소견은 표준 진단 기동에서 나온다. 시뮬레이션 탭에서 돌린 " +
+      "임의 미션의 결함을 귀속하려면 그 결과 id로 여기서 진단한다 — " +
+      "시뮬 탭의 [영향성에서 진단]으로 넘어오면 그 런이 아래 칸에 이미 들어 있다."),
+    handoffNote,
+    el("div", {
+      class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px",
+    },
+      resultInput,
+      el("button", { onclick: runDiagnose }, "진단 실행"),
+      el("button", { onclick: runScan }, "전 케이스 스캔")),
+    el("div", { class: "row", style: "margin-top:6px" }, diagStatus),
+    diagBox);
   const numIn = (val, width = 70) =>
     el("input", { type: "number", value: val, step: "any", style: `width:${width}px` });
   // 케이스 격자 — margins 탭과 같은 기본값(15케이스). 2단은 케이스당 ~10 ms라
@@ -2135,19 +2164,19 @@ export function render() {
         // 같은 문장으로 묶으면 "안 잰 것이 아니다"가 거짓말이 된다
         : sw?.error
           ? (sw.submitted
-            ? "스윕이 돌다가 실패했다 — 안 잰 것이 아니다. 사유는 「스캔·스윕 Δ」 패널에 "
-              + "있고, 다시 돌리면 여기가 채워진다."
-            : "스윕이 제출되지 않았다 — 아직 재지 않았다. 사유는 「스캔·스윕 Δ」 패널에 "
-              + "있고, 고쳐서 다시 누르면 여기가 채워진다.")
+            ? "스윕이 돌다가 실패했다 — 안 잰 것이 아니다. 사유는 이 패널 위 「지표 감도」 "
+              + "절에 있고, 다시 돌리면 여기가 채워진다."
+            : "스윕이 제출되지 않았다 — 아직 재지 않았다. 사유는 이 패널 위 「지표 감도」 "
+              + "절에 있고, 고쳐서 다시 누르면 여기가 채워진다.")
           : res
             ? "스윕은 끝났는데 행이 0건이다 — 케이스가 하나도 안 돌았다(전 케이스 트림 "
-              + "미수렴 등). 사유는 「스캔·스윕 Δ」 패널의 경고에 있다."
+              + "미수렴 등). 사유는 이 패널 위 「지표 감도」 절의 경고에 있다."
             : sw
               ? `스윕 상태: ${sw.status} — 결과가 저장되면 여기가 채워진다. `
                 + "이 표는 새로 재지 않는다: 그 런을 구간별로 다시 세울 뿐이다."
-              : "아직 없다 — 「진단·처방」에서 [이 부분공간 스윕 (3단 B)]을 돌리면 여기가 "
-                + "채워진다. 이 표는 새로 재지 않는다: 3단 B가 이미 돈 런을 구간별로 "
-                + "다시 세울 뿐이다.";
+              : "아직 없다 — 이 패널 위 「지표 감도」 절에서 [이 부분공간 스윕]을 돌리면 "
+                + "여기가 채워진다. 이 표는 새로 재지 않는다: 그 스윕이 이미 돈 런을 "
+                + "구간별로 다시 세울 뿐이다.";
       trendHead.append(el("p", { class: "hint", style: "margin:0" }, why));
       return;
     }
@@ -2361,8 +2390,54 @@ export function render() {
     }
   }
 
+  // ── 인계 수신 — 시뮬 탭이 넘긴 런 (v0.63) ────────────────────────────────
+  // **한 번 읽고 지운다** (가상환경 → 시뮬 `wpDraft`와 같은 규약, views/sim.js):
+  // store에 남기면 다음에 그냥 탭을 눌러 들어와도 패널이 저절로 열리고, 그때 화면은
+  // 사용자가 하지 않은 조작을 한 것처럼 보인다.
+  //
+  // 인계가 **없어도** 칸은 이미 store simResult로 채워져 있다(resultInput 기본값) —
+  // 가상환경에서 다른 런을 골라도 그쪽이 같은 키를 갱신하므로 "마지막으로 본 런"이
+  // 그대로 이어진다. 인계가 더 하는 일은 그 런을 **화면에서 찾을 수 있게** 하는
+  // 것뿐이다: 패널을 열고, 접혀 있는 수동 진단을 펼치고, 어디서 온 값인지 밝힌다.
+  function receiveHandoff() {
+    const h = store.get("influenceHandoff");
+    if (!h?.resultId) return;
+    store.set("influenceHandoff", null);
+    resultInput.value = h.resultId;
+    diagDetails.open = true;
+    state.drawer = "eval";
+    handoffNote.style.display = "";
+    clear(handoffNote).append(
+      `시뮬레이션 탭에서 넘어온 런이다 — 아래 칸의 ${h.resultId}가 그것이다. `
+      + "[진단 실행]이 이 런의 결함을 설계변수에 귀속한다. 격자 전체 판정은 "
+      + "위 「평가 실행」이 따로 돈다(이 런이 아니라 무대의 케이스 격자로).");
+  }
+
   const DRAWERS = [
-    // 평가가 맨 앞이다 — "이 형상이 기준을 넘나"가 이 패널 줄의 첫 질문이고,
+    // **파라미터가 맨 앞이다** (v0.63, 사용자 지적 "파라미터 확인이 평가보다
+    // 먼저 일어나야 되지 않아?"). 종전에는 평가가 앞이었고 근거는 "주 흐름이
+    // 먼저"였는데, 그러면 한 화면이 문법 둘을 쓴다 — 상단 탭 줄은 업무 순서인데
+    // 그 바로 아래 칩 줄만 중요도 순이다. 이 탭에서 먼저 하는 일은 **무엇을
+    // 흔들 수 있나**를 보는 것이고, 무대에 늘 떠 있는 그래프와 판독대는 그중
+    // 하나를 골라야 뜻이 생기며, 그 고르는 자리가 바로 이 표다(행 클릭 = select).
+    // 이 탭 스스로 "표가 정본 표면이고 캔버스는 보조"라고 적어 두고도(머리말)
+    // 정본을 두 번째 칩 뒤에 두고 있었다.
+    //
+    // 선후 **의존**은 아니다 — 평가는 고른 파라미터를 안 쓰고(state.selection은
+    // 그래프·전파 경로·판독대만 움직인다) 카드의 설계변수와 무대의 격자로 돈다.
+    // 그래서 순서만 바꾼다: 기본 열림은 여전히 없으므로(state.drawer = null)
+    // 첫 화면 인상은 그대로고 **읽는 순서**만 업무 순서에 맞는다.
+    { key: "params", label: "파라미터",
+      count: () => state.model?.params.length ?? 0,
+      build: () => [
+        el("h2", {}, "파라미터 — 이 형상에서 흔들 수 있는 전부"),
+        el("p", { class: "hint", style: "margin:0 0 8px" },
+          "행을 누르면 그 파라미터가 그래프·전파 경로·판독대의 대상이 된다 — " +
+          "이 탭의 첫 동작이 그것이다. 판정(「평가·처방」)은 이 선택을 쓰지 않는다: " +
+          "카드의 설계변수와 무대의 케이스 격자로 돈다."),
+        tableBox,
+      ] },
+    // 평가는 두 번째다 — "이 형상이 기준을 넘나"가 이 탭의 **주 흐름**이고,
     // 그 답(PASS/FAIL 배지)은 패널이 닫혀 있어도 칩에 보인다. 케이스 0건은
     // 배지가 없다 — 통과도 실패도 아닌 것을 PASS로 위장하지 않는다
     { key: "eval", label: "평가·처방",
@@ -2375,9 +2450,9 @@ export function render() {
         ensureEvalMeta();  // 카드·체크 어휘와 기준은 서버 정본 — 처음 열 때 받아 온다
         let caseText;
         try {
-          caseText = `케이스 ${gridCases().length}건 (격자 입력은 「진단·처방」 패널)`;
+          caseText = `케이스 ${gridCases().length}건 (격자는 바로 위 무대에서 고친다)`;
         } catch {
-          caseText = "격자 입력 오류 — 「진단·처방」 패널에서 고친다";
+          caseText = "격자 입력 오류 — 바로 위 무대의 「케이스 격자」에서 고친다";
         }
         return [
           el("h2", {}, "평가 → 처방 → 확정 — 이 탭의 주 흐름"),
@@ -2416,26 +2491,11 @@ export function render() {
           prescribeBox,
           // ── 수동 진단 — 사용자가 **실제로 돌린 자기 미션**을 귀속한다 ────────
           // 평가의 소견은 표준 기동 런의 귀속이라 "그 미션에서 무슨 일이 있었나"는
-          // 못 본다. 주 흐름 아래 접어 두되 없애지는 않는 이유가 그것이다
-          el("details", { style: "margin-top:14px" },
-            el("summary", { class: "hint", style: "cursor:pointer" },
-              "내가 돌린 시뮬 런 진단하기 (표준 기동이 아닌 자기 미션)"),
-            el("p", { class: "hint", style: "margin:6px 0" },
-              "평가의 소견은 표준 진단 기동에서 나온다. 시뮬레이션 탭에서 돌린 " +
-              "임의 미션의 결함을 귀속하려면 그 결과 id로 여기서 진단한다."),
-            el("div", {
-              class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap",
-            },
-              resultInput,
-              el("button", { onclick: runDiagnose }, "진단 실행"),
-              el("button", { onclick: runScan }, "전 케이스 스캔")),
-            el("div", { class: "row", style: "margin-top:6px" }, diagStatus),
-            diagBox),
+          // 못 본다. 주 흐름 아래 접어 두되 없애지는 않는 이유가 그것이다.
+          // 시뮬 탭에서 인계돼 오면 이 자리가 **펼쳐진 채** 선다 (receiveHandoff)
+          diagDetails,
         ];
       } },
-    { key: "params", label: "파라미터",
-      count: () => state.model?.params.length ?? 0,
-      build: () => [el("h2", {}, "파라미터 — 이 형상에서 흔들 수 있는 전부"), tableBox] },
     // 감도 — "흔들면 얼마나 움직이나"를 묻는 셋이 한 묶음이다. 개루프는 마진,
     // 스윕은 지표, 구간 경향은 그 방향이 구간마다 어떻게 가는지를 잰다. 종전에는
     // 옛 단계 번호(2단·3단 A/B/C)로 패널 셋이 따로 서서 위에서 아래로 눌러야
@@ -2562,6 +2622,7 @@ export function render() {
   renderEvalChips();
   renderEval();
   renderPrescribe();
+  receiveHandoff();  // 인계로 왔으면 패널·펼침을 정한다 — renderDrawer보다 먼저
   renderTabCounts();
   renderDrawer();
 

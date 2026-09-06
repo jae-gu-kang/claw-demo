@@ -790,3 +790,37 @@ test("헤더 탭이 전부 실제 라우트다 — 죽은 탭 금지", () => {
   }
   assert.ok(VIEW_HASHES.has("autocode"), "AUTO CODE 라우트 누락");
 });
+
+// 탭 **순서**는 업무 순서다 (v0.63, 02 §4 확정 블록) — 집합 비교(위 테스트)로는
+// 순서 드리프트가 안 잡힌다. 원문 둘(index.html nav · main.js VIEWS)이 같은 순서를
+// 말하는지, 그리고 그 순서가 파이프라인인지를 여기서 못박는다. 배열을 손으로 적어
+// 두는 이유: 순서가 뜻을 갖는 지금은 "조용히 바뀌었다"가 곧 화면이 거짓말하는 것이다
+const PIPELINE = [
+  "blocks", "envelope", "trim",          // 구조와 영역
+  "gains", "margins", "autodesign",      // 선형 설계
+  "sim", "world",                        // 한 번 날려 보고 눈으로 확인
+  "influence",                           // 격자 전체로 판정
+  "autocode", "verify",                  // 코드 생성 → 코드 대조
+  "results",                             // 열람 — 단계가 아니다 (맨 끝)
+];
+
+test("탭 순서가 업무 순서다 — nav ↔ VIEWS ↔ 파이프라인", () => {
+  assert.deepEqual(NAV_HASHES, PIPELINE, "index.html nav 순서가 파이프라인과 다르다");
+  // VIEWS는 라우팅용 객체라 순서가 동작에 영향을 주지 않는다 — 그래서 더더욱
+  // 조용히 어긋난다. 사람이 두 원문을 나란히 읽을 수 있어야 한다
+  const viewOrder = read("../main.js").match(/const VIEWS = \{([^}]*)\}/)[1]
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  assert.deepEqual(viewOrder, PIPELINE, "main.js VIEWS 나열 순서가 nav와 다르다");
+});
+
+test("시뮬 → 가상환경 → 영향성 인계가 실제로 배선돼 있다", () => {
+  // 탭 순서가 "시뮬 다음 영향성"이라고 말하면 화면에도 넘어갈 수단이 있어야 한다.
+  // 순서만 바꾸고 배선이 없으면 탭 줄이 하지 않는 일을 말하게 된다 (v0.63)
+  const sim = read("../views/sim.js");
+  assert.match(sim, /가상환경에서 보기/, "시뮬 탭에 가상환경 인계 버튼이 없다");
+  assert.match(sim, /store\.set\("influenceHandoff"/, "시뮬 탭에 영향성 인계가 없다");
+  const inf = read("../views/influence.js");
+  assert.match(inf, /store\.get\("influenceHandoff"\)/, "영향성이 인계를 안 받는다");
+  // 한 번 읽고 지운다 — 안 지우면 그냥 탭을 눌러 들어와도 패널이 저절로 열린다
+  assert.match(inf, /store\.set\("influenceHandoff", null\)/, "인계를 소비하지 않는다");
+});

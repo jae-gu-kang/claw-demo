@@ -18,9 +18,12 @@ import * as world from "./views/world.js";
 // 블록도(블록 다이어그램 허브)가 진입점 — 블록 클릭으로 각 편집 화면 진입 (02 §4)
 // 타면 사용은 탭이 아니다 — 설계 단계가 아니라 시뮬 런 하나를 다시 읽는 방법이라
 // 시뮬레이션 탭의 패널로 들어갔다 (v0.54, views/duty.js 머리말)
+// 나열 순서는 index.html nav와 **같아야 한다** — 순서가 업무 순서를 뜻하게 된
+// 뒤로는(v0.63) 한쪽만 고치면 원문 둘이 다른 순서를 말한다. 드리프트 가드는
+// lib/blocks.test.js가 두 원문을 나란히 읽어 대조한다 (집합이 아니라 배열로)
 const VIEWS = {
-  blocks, envelope, trim, gains, margins, autodesign, sim, world, autocode,
-  verify, influence, results,
+  blocks, envelope, trim, gains, margins, autodesign, sim, world, influence,
+  autocode, verify, results,
 };
 
 // 떠나는 뷰가 자원을 쥐고 있으면 반납시킨다. 지금은 3D 월드뿐인데, WebGL 컨텍스트는
