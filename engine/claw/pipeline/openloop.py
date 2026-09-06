@@ -157,7 +157,7 @@ def openloop_delta(aircraft, trs, shape: Shape, param_ids=None, *,
         params[pid] = entry
         if group not in GROUP_LOOPS:
             entry["status"] = "no_loop"
-            entry["reason"] = "선언된 SISO 루프가 없는 자리 — 3단(폐루프)에서만 보인다"
+            entry["reason"] = "선언된 SISO 루프가 없는 자리 — 폐루프 실측에서만 보인다"
             continue
         if pid.startswith("fcl/") and f"{group}.{key}" in tables:
             entry["status"] = "overridden"

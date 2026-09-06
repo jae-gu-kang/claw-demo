@@ -15,6 +15,16 @@
 아래에 남는다 — 색이 칠해진 그래프가 늘 떠 있는데 범례를 클릭 뒤로 숨기면 화면이
 자기 문법을 설명하지 않게 된다.
 
+## 단 이름 (v0.68) — 화면에서 번호를 뺐다
+
+판독대 세 줄과 스캔·스윕·구간 경향은 「1단/2단/3단 A·B·C」로 불렸는데, 평가 실행이
+「1단계 · 선형 훑기 / 2단계 · 평가 실행 / 3단계 · C급 검증」을 갖게 되면서 같은 탭에
+**3이 두 뜻**이 됐다(판독대의 3단은 폐루프 스윕, 평가의 3단계는 C급 검증 — 감도를
+채우는 것은 앞의 것뿐이다). 번호는 순서만 말하고 무엇인지는 말하지 않으니, 화면
+문자열에서는 **이름**을 쓴다: 구조 · 개루프 마진 · 폐루프 실측, 그리고 스캔 · 스윕 ·
+구간 경향. 아래 주석의 단 번호는 코드 안 호칭으로 남겨 둔다(파이프라인 순서를 말할
+때 여전히 짧다) — 화면에 나가는 문자열에만 이름을 쓴다.
+
 ## 구간 경향 (3단 C) — "전 구간에서 어느 쪽으로" (v0.52)
 
 3단 B가 답하지 못하던 자리다. B의 요약은 런별 **최악 한 칸**만 내고(엔벨로프를
@@ -560,7 +570,7 @@ export function render() {
     if (!sel) {
       readoutBox.append(el("p", { class: "hint", style: "margin:0" },
         "그래프의 왼쪽 파라미터 열에서 하나를 고르면 여기에 " +
-        "「얼마에서 얼마로」가 뜬다 — 1단은 즉시, 2·3단은 재 둔 결과가 있을 때. " +
+        "「얼마에서 얼마로」가 뜬다 — 구조는 즉시, 개루프·폐루프는 재 둔 결과가 있을 때. " +
         "층 번호는 IR 실행 순서이자 생성 C의 문장 순서다."));
       return;
     }
@@ -577,10 +587,10 @@ export function render() {
     // ① 1단 — 파라미터 자신이 얼마에서 얼마로. 유한 차분이지 미분이 아니다
     const probe = probeTransition(sel);
     rows.append(probe
-      ? roRow("1단 구조", STATE_INK.live, `${sel.label} · 탐침 (유한 차분)`,
+      ? roRow("구조", STATE_INK.live, `${sel.label} · 탐침 (유한 차분)`,
           probe.from, probe.to, probe.unit, probe.delta, probe.rel,
           `도달 노드 ${sel.n_reach ?? 0}`)
-      : roWhy("1단 구조", STATE_INK.live,
+      : roWhy("구조", STATE_INK.live,
           sel.error ?? "섭동값을 만들 수 없다 — 범위·교차조건이 막는다"));
 
     // 저장된 결과가 다른 형상의 것이면 수치보다 그 사실이 먼저다
@@ -591,19 +601,19 @@ export function render() {
     // ② 2단 — 개루프 마진 전이
     const ol = openloopFor(sel.param_id);
     if (!ol) {
-      rows.append(roWhy("2단 개루프", "#409cff",
+      rows.append(roWhy("개루프 마진", "#409cff",
         "아직 안 쟀다 — 「감도」 패널의 마진 민감도가 이 자리를 채운다."));
     } else if (ol.missing) {
-      rows.append(roWhy("2단 개루프", "#409cff",
+      rows.append(roWhy("개루프 마진", "#409cff",
         "이 설계변수는 잰 적이 없다 — 개루프는 처방 카드가 고른 설계변수만 잰다. " +
         "이 값을 재려면 이 설계변수를 포함하는 카드에서 [개루프 근거]를 누른다."));
     } else if (!ol.best) {
-      rows.append(roWhy("2단 개루프", "#409cff",
+      rows.append(roWhy("개루프 마진", "#409cff",
         `유효한 Δ 없음 — ${ol.reason ?? "선언된 SISO 루프가 없다"}`));
     } else {
       const b = ol.best;
       if (b.pm) {
-        rows.append(roRow("2단 개루프", "#409cff", `${b.loop} 위상여유 (PM)`,
+        rows.append(roRow("개루프 마진", "#409cff", `${b.loop} 위상여유 (PM)`,
           b.pm.from, b.pm.to, "°", b.pm.value, relOf(b.pm.from, b.pm.to), b.pm.case));
       }
       if (b.gm) {
@@ -616,11 +626,11 @@ export function render() {
     // ③ 3단 — 설계 지표 전이 (상위 3개). 폐루프 재시뮬 실측이라 이 화면의 최종 답이다
     const sw = sweepFor(sel.param_id);
     if (!sw) {
-      rows.append(roWhy("3단 폐루프", "#ffb340",
+      rows.append(roWhy("폐루프 실측", "#ffb340",
         "아직 안 쟀다 — 「평가·처방」의 [얼마나 →]가 스윕을 돌리면 채워진다. " +
         "여기가 폐루프 실측이고, 위 두 단은 그 전에 범위를 좁히는 근사다."));
     } else if (sw.missing) {
-      rows.append(roWhy("3단 폐루프", "#ffb340",
+      rows.append(roWhy("폐루프 실측", "#ffb340",
         "이 설계변수는 흔든 적이 없다 — 스윕은 처방 부분공간만 흔든다(전 게인 공간이 " +
         "아니다). 이 값을 재려면 이 설계변수를 포함하는 카드에서 [이 부분공간 스윕]을 누른다."));
     } else {
@@ -632,7 +642,7 @@ export function render() {
         // 런이 쓴 값 하나만 사실이다 — 형상이 어긋나면 위 stale 줄이 말한다
         const at = s.knobTo == null ? s.t.case
           : `${s.t.case} · ${sel.label}=${fmtNum(s.knobTo)}`;
-        rows.append(roRow("3단 폐루프", "#ffb340", metricLabel(s.metric),
+        rows.append(roRow("폐루프 실측", "#ffb340", metricLabel(s.metric),
           s.t.from, s.t.to, metricUnit(s.metric), s.t.delta, s.t.rel, at));
       }
       if (sw.list.length > 3) {
@@ -1698,7 +1708,7 @@ export function render() {
     const fRowGm = columnFormat(rows.map((r) => [r.e?.base?.gm_db, r.e?.perturbed?.gm_db]));
     olBox.append(
       el("h3", { style: "margin:0 0 4px;font-size:14px" },
-        `개루프 마진 (2단) — 섭동 ${fmtPercent(res.probe_rel)} · 케이스 전체에서 최악`),
+        `개루프 마진 — 섭동 ${fmtPercent(res.probe_rel)} · 케이스 전체에서 최악`),
       // 요약 대상이 없으면 표 대신 사유 — 빈 표는 버그로 읽힌다
       !worst.length
         ? el("p", { class: "hint", style: "margin:4px 0 0" },
@@ -1754,7 +1764,7 @@ export function render() {
           ))),
       el("p", { class: "hint", style: "margin:6px 0 0" },
         "개루프는 피드백이 얼어 있는 근사다 — 스케줄이 덮는 자리·루프 선언이 없는 " +
-        "자리는 Δ=0으로 위장하지 않고 사유로 남는다. 폐루프 확증은 스윕(3단) 몫이다."),
+        "자리는 Δ=0으로 위장하지 않고 사유로 남는다. 폐루프 확증은 스윕 몫이다."),
     );
   }
 
@@ -1812,15 +1822,15 @@ export function render() {
       scanBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
         sum.verdicts.length
           ? "전 케이스 정상 — 부분 스윕으로 좁힐 결함 케이스가 없다. " +
-            "3단 B는 격자 전체로 제출된다."
+            "폐루프 스윕은 격자 전체로 제출된다."
           : "고를 결함 케이스가 없다 — 판정이 없어 좁힐 근거도 없다. " +
-            "3단 B는 격자 전체로 제출된다."));
+            "폐루프 스윕은 격자 전체로 제출된다."));
       return;
     }
     const aborted = new Set(sum.abortedCases);
     scanBox.append(
       el("p", { class: "hint", style: "margin:8px 0 0" },
-        "결함 케이스 — 체크된 케이스만 3단 B(부분 풀 스윕)에 들어간다" +
+        "결함 케이스 — 체크된 케이스만 폐루프 스윕에 들어간다" +
         (aborted.size ? " (발산으로 잘린 케이스 포함 — 판정은 못 냈지만 확인 대상이다)" : "") +
         ":"),
       el("div", { class: "row", style: "gap:12px;flex-wrap:wrap;margin-top:4px" },
@@ -1871,9 +1881,9 @@ export function render() {
       scanBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
         sum.abortedCases.length
           ? `판정 없음 — 잰 케이스가 전부 발산으로 잘렸다 (${sum.abortedCases.length}건). ` +
-            "지표가 잘린 구간만의 값이라 국소성을 낼 수 없다 — 아래 케이스를 3단 B로 확인한다."
+            "지표가 잘린 구간만의 값이라 국소성을 낼 수 없다 — 아래 케이스를 폐루프 스윕으로 확인한다."
           : "판정 없음 — 완료된 케이스가 없다 (스캔이 케이스 완료 전에 취소·실패). " +
-            "다시 스캔해야 3단 B 대상을 좁힐 수 있다."));
+            "다시 스캔해야 스윕 대상을 좁힐 수 있다."));
       appendCaseSelect(sum, s);
       appendWarnings();
       return;
@@ -1881,7 +1891,7 @@ export function render() {
     // ① 지표별 국소성 판정 — 서버 diagnose_grid 판정을 그대로 그린다 (재계산 금지)
     scanBox.append(
       el("h3", { style: "margin:12px 0 4px;font-size:14px" },
-        `전 케이스 스캔 (3단 A) — base 지표 케이스 ${res.rows?.length ?? 0}건 · ` +
+        `전 케이스 스캔 — base 지표 케이스 ${res.rows?.length ?? 0}건 · ` +
         "국소성 판정"),
       el("div", { class: "scroll-x" },
         el("table", {},
@@ -1907,7 +1917,7 @@ export function render() {
         )),
       el("p", { class: "hint", style: "margin:6px 0 0" },
         `국소(결함 ≤ ${fmtPercent(sum.localFrac)})면 스케줄 셀이, 전역이면 설계점 ` +
-        "게인 수준이 처방 클래스다 — 어느 자리를 얼마나는 3단 B가 정량으로 답한다."),
+        "게인 수준이 처방 클래스다 — 어느 자리를 얼마나는 폐루프 스윕이 정량으로 답한다."),
     );
     // ② 케이스 × 지표 표 — 결함 셀 강조 (판정 소속은 서버 bad_cases가 정본)
     const keys = sum.verdicts.map((v) => v.metric);
@@ -2052,7 +2062,7 @@ export function render() {
           .map((t) => [t.from, t.to]))]));
       sweepBox.append(
         el("h3", { style: "margin:0 0 4px;font-size:14px" },
-          `폐루프 스윕 (3단 B) — 케이스 ${caseNames.length}건 · 런별 최악 (기준→섭동)`),
+          `폐루프 스윕 — 케이스 ${caseNames.length}건 · 런별 최악 (기준→섭동)`),
         el("div", { class: "scroll-x" },
           el("table", {},
             el("thead", {}, el("tr", {},
@@ -2220,14 +2230,14 @@ export function render() {
     const stale = staleOf(res);
     trendHead.append(
       el("h3", { style: "margin:0 0 4px;font-size:14px" },
-        `구간 경향 (3단 C) — 구간 ${tm.cases.length}건 × 스팬 ${tm.points.length}점 `
+        `구간 경향 — 구간 ${tm.cases.length}건 × 스팬 ${tm.points.length}점 `
         + `(${tm.points.map((p) => spanLabel(p.span)).join(" · ")})`),
       el("p", { class: "hint", style: "margin:0" },
         "행이 구간이고 열이 지표다. 색은 방향이 아니라 ", el("b", {}, "좋고 나쁨"),
         "이다 — 같은 ↑가 실속마진에서는 개선이고 추종 RMS에서는 악화다. "
         + "기호는 색과 별도로 읽힌다."),
       el("p", { class: "hint", style: "margin:4px 0 0" },
-        "이 표의 구간은 스윕이 ", el("b", {}, "실제로 돈"), " 케이스뿐이다 — 3단 A에서 "
+        "이 표의 구간은 스윕이 ", el("b", {}, "실제로 돈"), " 케이스뿐이다 — 스캔에서 "
         + "결함 케이스로 좁혔다면 격자 전체가 아니다. 격자 전체의 base 지표는 스캔 "
         + "표가 들고 있다."),
     );
