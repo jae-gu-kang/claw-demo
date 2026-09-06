@@ -154,32 +154,156 @@ export function normalizeGraph(payload) {
   };
 }
 
+/** 지표 부채꼴의 잡음 문턱 — 이보다 작게 움직인 지표는 "안 움직였다"로 친다.
+ *  기체를 거치면 **모든 것이 조금씩** 이어져 있어서(속도 P 게인 +20 %가 고도 RMS를
+ *  7 ppm 흔든다) 0을 기준으로 삼으면 전부 켜지고 그림이 아무 말도 안 하게 된다. */
+export const FAN_REL = 1e-3;
+
+const metricKey = (id) => (id.startsWith("metric:") ? id.slice(7) : id);
+
+/** 스윕에서 이 설계변수 **단독** 런만 모아 지표별 최대 상대 변화 — 없으면 null.
+ *
+ * 쌍 런은 뺀다(둘이 같이 움직인 Δ를 한쪽 몫으로 읽으면 귀속이 틀린다). 유한↔∞
+ * 전이는 **최대 변화**로 친다 — 정착하던 것이 발산했다면 그것이 이 설계변수가
+ * 한 일 중 가장 큰 것이다. 둘 다 ∞면 변화 없음이고, 어느 한쪽이 없으면(null)
+ * 판정 자체를 안 한다("안 잰 것"을 0으로 위장하지 않는다).
+ */
+function sweptDeltas(rows, knob) {
+  const all = rows ?? [];
+  const singles = all.filter((r) => {
+    const k = Object.keys(r.overrides ?? {});
+    return k.length === 1 && k[0] === knob;
+  });
+  if (!singles.length) return null;
+  const baseOf = new Map();
+  for (const r of all) if (r.label === "base") baseOf.set(r.case, r.metrics ?? {});
+  if (!baseOf.size) return null;
+
+  const worst = new Map();
+  for (const r of singles) {
+    const base = baseOf.get(r.case);
+    if (!base) continue;
+    for (const [k, v] of Object.entries(r.metrics ?? {})) {
+      const b = base[k];
+      if (b == null || v == null) continue;
+      let d;
+      if (finiteNum(b) && finiteNum(v)) {
+        d = Math.abs(v - b) / Math.max(Math.abs(b), 1e-9);
+      } else if (finiteNum(b) !== finiteNum(v)) {
+        d = Infinity;  // 발산 진입·이탈
+      } else {
+        continue;      // 둘 다 비유한 — 같은 사실
+      }
+      const prev = worst.get(k);
+      if (prev === undefined || d > prev) worst.set(k, d);
+    }
+  }
+  return worst.size ? worst : null;
+}
+
+/** 이 설계변수가 어느 지표까지 닿는가 — **무엇을 켤지와 그 근거**를 한곳에서 정한다.
+ *
+ * 제어법칙 IR은 조종면에서 끝나고 폐루프는 그 밖(6자유도 기체)에서 닫힌다. 그래서
+ * 구조만으로는 **어느 지표가 움직일지 못 자른다** — 종전에는 그 사실을 "전부 켜기"로
+ * 표현했는데, 그러면 잰 것과 못 자른 것이 화면에서 같아진다. 근거를 셋으로 갈라
+ * 각각 다른 말을 하게 한다:
+ *
+ *   measured  — 스윕이 이 설계변수를 흔들어 봤다. 문턱을 넘겨 움직인 지표만 켠다
+ *   supported — 런은 있으나 이 설계변수의 감도는 없다. **값이 나온** 지표만 켠다
+ *   declared  — 아무것도 없다. 전부 켜되 그것이 상한임을 자막이 말한다
+ *
+ * supported에서 ∞는 **빼지 않는다**. ∞는 "쟀는데 창 안에 안 일어났다"는 사실이고
+ * (미정착), 게인을 바꾸면 유한해질 수 있는 자리다. 빼야 할 것은 값 자체가 없는
+ * None뿐이다 — 그 기동에 해당 구간이 아예 없었다는 뜻이라(이·착륙 지표) 어떤
+ * 게인을 흔들어도 나오지 않는다.
+ */
+export function metricFan(model, paramId, opts = {}) {
+  const rel = opts.rel ?? FAN_REL;
+  const all = model.nodes.filter((n) => n.kind === "metric").map((n) => n.id);
+  const has = (id) => model.byId.has(id);
+
+  // ① 부르는 쪽이 이미 측정으로 정했다 (평가 초점 — 문턱 넘은 지표)
+  if (opts.metricIds) {
+    const ids = opts.metricIds.filter(has);
+    return { ids: new Set(ids), basis: "measured", ranked: ids.map((id) => ({ id })),
+             rel, nTotal: all.length };
+  }
+
+  // ② 스윕이 이 설계변수를 흔들었다
+  const knob = paramId.startsWith("param:") ? paramId.slice(6) : paramId;
+  const deltas = sweptDeltas(opts.sweepRows, knob);
+  if (deltas) {
+    const ranked = [...deltas.entries()]
+      .filter(([, d]) => d > rel)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, d]) => ({ id: `metric:${k}`, rel: d }))
+      .filter((r) => has(r.id));
+    return { ids: new Set(ranked.map((r) => r.id)), basis: "measured", ranked,
+             rel, nTotal: all.length, nJudged: deltas.size };
+  }
+
+  // ③ 런은 있다 — 값이 나온 지표까지가 상한이다
+  if (opts.runMetrics) {
+    const ids = all.filter((id) => (opts.runMetrics[metricKey(id)] ?? null) !== null);
+    return { ids: new Set(ids), basis: "supported", ranked: ids.map((id) => ({ id })),
+             rel, nTotal: all.length };
+  }
+
+  // ④ 아무것도 없다
+  return { ids: new Set(all), basis: "declared", ranked: all.map((id) => ({ id })),
+           rel, nTotal: all.length };
+}
+
+/** 부채꼴 근거 한 줄 — 그림이 무엇을 말하는지(그리고 **말하지 않는지**). */
+export function fanLine(fan) {
+  if (!fan) return "";
+  const n = fan.ids.size, tot = fan.nTotal;
+  if (fan.basis === "measured") {
+    const pct = fmtPercent(fan.rel, fan.rel < 0.01 ? 2 : 0);
+    return n
+      ? `지표 ${n}/${tot} — 스윕이 잰 결과 ${pct}를 넘겨 움직인 것만 켠다`
+      : `지표 0/${tot} — 스윕이 쟀지만 ${fmtPercent(fan.rel, 2)}를 넘긴 지표가 없다`;
+  }
+  if (fan.basis === "supported") {
+    return `지표 ${n}/${tot} — 이 설계변수의 감도는 아직 안 쟀다.`
+      + " 이 기동에서 값이 나온 것까지가 상한이다(영향이 아니다)";
+  }
+  return `지표 ${n}/${tot} — 선언된 상한이다. 폐루프는 그래프 밖에서 닫혀`
+    + " 구조로는 못 자른다 — 실제 영향은 스윕이 잰다";
+}
+
 /** 파라미터 하나의 영향 원뿔 — 노드 집합과 그 안에 완전히 들어가는 간선 집합.
  *
  * 도달 노드는 서버가 이미 계산해 `reach`로 준다. 화면이 다시 그래프를 훑으면 같은
  * 답을 두 곳에서 정의하는 꼴이 되고, 어긋나면 어느 쪽이 맞는지 알 수 없게 된다.
+ *
+ * 지표 쪽은 `metricFan`이 정한다 — 그 근거가 `fan`으로 함께 나온다.
  */
-export function coneOf(model, paramId) {
+export function coneOf(model, paramId, opts = {}) {
   const p = model.byId.get(paramId);
-  if (!p || p.kind !== "param") return { nodes: new Set(), seeds: new Set(), edges: new Set() };
+  if (!p || p.kind !== "param") {
+    return { nodes: new Set(), seeds: new Set(), edges: new Set(), fan: null };
+  }
   const seeds = new Set(p.seeds ?? []);
   const nodes = new Set(p.reach ?? []);
   for (const s of seeds) nodes.add(s);
   nodes.add(paramId);
   for (const g of p.added ?? []) nodes.add(g);
   for (const o of p.outputs ?? []) nodes.add(`out:${o}`);
-  // 타면이 움직이면 기체도 지표도 움직인다 — 출력에서 끊으면 화면이 "지표는 영향
-  // 없음"으로 읽힌다. 다만 이 구간은 **유도된 것이 아니라 선언된 것**이라(폐루프는
-  // IR 밖에서 닫힌다) 점선 'declared' 스타일로 그려지고, 정량 대응은 3단에서만 나온다
+  // 타면이 움직이면 기체도 움직인다 — 출력에서 끊으면 화면이 "지표는 영향 없음"으로
+  // 읽힌다. 다만 이 구간은 **유도된 것이 아니라 선언된 것**이라(폐루프는 IR 밖에서
+  // 닫힌다) 점선 'declared' 스타일로 그려진다. 어느 지표까지 켤지는 metricFan 몫이다
+  let fan = null;
   if (!p.in_law || (p.outputs ?? []).length) {
     nodes.add("sys:plant");
-    for (const n of model.nodes) if (n.kind === "metric") nodes.add(n.id);
+    fan = metricFan(model, paramId, opts);
+    for (const id of fan.ids) nodes.add(id);
   }
   const edges = new Set();
   model.edges.forEach((e, i) => {
     if (e.src === paramId || (nodes.has(e.src) && nodes.has(e.dst))) edges.add(i);
   });
-  return { nodes, seeds, edges };
+  return { nodes, seeds, edges, fan };
 }
 
 /** 노드 반지름 — 하류 도달 개수가 클수록 크게. 층 그림에서 "허브"가 눈에 띈다.
@@ -205,17 +329,26 @@ export function measuringCone(model) {
  * 평가가 귀속한 설계변수가 여럿일 때 하나만 켜면 그림이 사실을 줄인다. 원뿔 계산
  * 자체는 coneOf 그대로이고 여기서는 합칠 뿐이다 — 도달 판정을 다시 적지 않는다.
  */
-export function unionCone(model, paramIds) {
+export function unionCone(model, paramIds, opts = {}) {
   const nodes = new Set();
   const seeds = new Set();
   const edges = new Set();
+  // 근거는 **가장 약한 것**을 따른다 — 하나라도 못 자른 채 켰으면 그림 전체가
+  // 그만큼만 믿을 수 있다. 합집합에 "잰 것"이라는 이름을 붙이면 과장이 된다
+  const rank = { measured: 0, supported: 1, declared: 2 };
+  let fan = null;
   for (const id of paramIds ?? []) {
-    const c = coneOf(model, id);
+    const c = coneOf(model, id, opts);
     for (const n of c.nodes) nodes.add(n);
     for (const s of c.seeds) seeds.add(s);
     for (const e of c.edges) edges.add(e);
+    if (c.fan && (fan === null || rank[c.fan.basis] > rank[fan.basis])) fan = c.fan;
   }
-  return { nodes, seeds, edges };
+  if (fan) {
+    const ids = new Set([...nodes].filter((id) => id.startsWith("metric:")));
+    fan = { ...fan, ids, ranked: [...ids].map((id) => ({ id })) };
+  }
+  return { nodes, seeds, edges, fan };
 }
 
 

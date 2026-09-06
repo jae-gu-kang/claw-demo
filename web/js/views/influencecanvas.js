@@ -284,7 +284,10 @@ export function createInfluenceCanvas(opts = {}) {
       if (!cone.edges.has(e.idx)) continue;
       const s = edgeProgress(play, e.idx, t);
       if (s === null || s <= 0) continue;
-      g.strokeStyle = edgeColor(e, model, 0.62 * fade, tint);
+      // 잰 것이 없어 **못 자른 채** 켠 부채꼴은 더 눕힌다 — 같은 굵기로 그리면
+      // "구조로는 모른다"가 "다 영향받는다"로 읽힌다 (근거는 cone.fan이 들고 온다)
+      const weak = e.kind === "declared" && cone.fan?.basis === "declared" ? 0.45 : 1;
+      g.strokeStyle = edgeColor(e, model, 0.62 * fade * weak, tint);
       g.lineWidth = e.kind === "ghost" ? 1 : 1.3;
       if (e.kind === "ghost" || e.kind === "declared") g.setLineDash([4, 4]);
       else if (e.kind === "offgraph") g.setLineDash([2, 5]);
@@ -314,10 +317,16 @@ export function createInfluenceCanvas(opts = {}) {
       const c = STATE_COLOR[st] ?? SKIN.blue;
       return withAlpha(c, alpha * (st === "inert" ? 0.5 : 1));
     }
-    if (e.kind === "ghost") return withAlpha(SKIN.orange, alpha);
-    if (e.kind === "offgraph") return withAlpha(SKIN.gray, alpha * 0.8);
-    if (e.kind === "declared") return withAlpha(SKIN.orange, alpha * 0.65);
-    if (e.kind === "boundary") return withAlpha(SKIN.indigo, alpha);
+    // 유령·경계·선언 간선도 노드와 **같은 팔레트**를 쓴다 — 시스템 색을 그대로
+    // 두면 노드는 새 배색인데 배선만 옛 색이라 한 화면에 두 벌이 섞인다
+    // 유령 간선의 색은 **가리키는 유령의 묶음**이다 (간선에는 band가 없다)
+    if (e.kind === "ghost") {
+      const b = model.byId.get(e.dst)?.band;
+      return withAlpha(BAND_COLOR[b] ?? SKIN.gray, alpha);
+    }
+    if (e.kind === "offgraph") return withAlpha(BAND_COLOR.guidance, alpha * 0.8);
+    if (e.kind === "declared") return withAlpha(NODE_COLOR.metric, alpha * 0.6);
+    if (e.kind === "boundary") return withAlpha(NODE_COLOR.plant, alpha);
     // 쉬고 있는 IR 배선은 무채색 헤어라인이다 — 파랗게 물들여 두면 넓은 면이 전부
     // 채도를 갖고, 정작 선택했을 때 켜지는 색이 대비를 못 얻는다
     return tint ? withAlpha(tint, alpha * 0.8) : `rgba(${WIRE}, ${alpha * 0.4})`;

@@ -50,7 +50,8 @@ import { clear, el } from "../dom.js";
 import {
   BAND_COLOR, DIRECTION_LABEL, GOOD_INK, KNOB_CLASS, SKIN, STATE_COLOR, STATE_INK,
   STATE_LABEL, STATE_NOTE, TREND_LABEL, TREND_MARK, WARN_INK,
-  byImpact, columnFormat, coneOf, diagnoseRequest, edgeVia, fmtChange, fmtDelta,
+  byImpact, columnFormat, coneOf, diagnoseRequest, edgeVia, fanLine, fmtChange,
+  fmtDelta,
   fmtPair, fmtPercent, fmtSigned, nodeDetail,
   normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor, probeTransition,
   measuringCone, radiusOf, relOf, relReadable, fmtRel, scanRequest, scanSummary,
@@ -226,8 +227,38 @@ export function render() {
       state.play = null;
       return;
     }
-    state.cone = state.selection ? coneOf(state.model, state.selection) : null;
+    state.cone = state.selection
+      ? coneOf(state.model, state.selection, fanOpts()) : null;
     state.play = state.cone ? conePlayback(state.model, state.cone) : null;
+    paintCaptions();
+  }
+
+  /** 자막 둘의 우선순위 — 파라미터를 직접 고르면 **그쪽이 그림을 차지하므로**
+   *  (getCone: state.cone ?? state.evalCone) 평가 초점 자막은 물러난다. 안 그리는
+   *  것을 설명하는 문장이 화면에 남으면 사용자는 두 자막 중 어느 것이 지금 그림을
+   *  가리키는지 알 수 없다. */
+  function paintCaptions() {
+    evalFocusLine.textContent = state.cone ? "" : (state.evalCaption ?? "");
+    fanNote.textContent = state.cone?.fan ? fanLine(state.cone.fan) : "";
+  }
+
+  /** 지표 부채꼴이 기댈 측정 — 이 세션이 실제로 돌린 것만 준다.
+   *
+   * 스윕이 있으면 그 설계변수의 감도가 있고(metricFan이 골라 쓴다), 없으면 아무
+   * 런의 지표 dict라도 주어 **값이 나온 지표**까지로 상한을 좁힌다. 둘 다 없으면
+   * 넘기지 않는다 — 없는 근거를 지어내느니 "선언된 상한"이라고 말하는 편이 낫다.
+   */
+  function fanOpts() {
+    const rows = state.sweep?.result?.rows ?? null;
+    const runMetrics =
+      rows?.find((r) => r.label === "base")?.metrics
+      ?? (state.evalRun?.result?.cases ?? [])
+        .map((c) => c.metrics_raw).find((m) => m && Object.keys(m).length)
+      ?? null;
+    const opts = {};
+    if (rows?.length) opts.sweepRows = rows;
+    if (runMetrics) opts.runMetrics = runMetrics;
+    return opts;
   }
 
   function select(id) {
@@ -1191,7 +1222,7 @@ export function render() {
         state.evalCone = null;
         state.evalPlay = null;
         state.evalCaption = null;
-        evalFocusLine.textContent = "";
+        paintCaptions();
       }
     } else {
       const cone = measuringCone(state.model);
@@ -1202,7 +1233,7 @@ export function render() {
         ? "평가 중 — 지금 재고 있는 것(기체와 지표). 어느 설계변수가 원인인지는 "
           + "런이 끝나야 나온다"
         : null;
-      evalFocusLine.textContent = state.evalCaption ?? "";
+      paintCaptions();
     }
     canvas?.invalidate();
   }
@@ -1217,12 +1248,11 @@ export function render() {
       state.evalCaption = null;
     } else {
       const known = focus.paramIds.filter((id) => state.model.byId.has(id));
-      const cone = unionCone(state.model, known);
-      // 문턱 넘은 지표는 원뿔에 없더라도 켠다 — 실패한 지표가 그림에서 꺼져 있으면
-      // 표는 실패라는데 그림은 무관하다고 말한다
-      for (const id of focus.metricIds) {
-        if (state.model.byId.has(id)) cone.nodes.add(id);
-      }
+      // 지표는 **평가가 지목한 것만** — 자막이 "문턱을 넘은 지표 3개"라고 말하는데
+      // 그림이 27개를 켜면 표와 그림이 서로 다른 말을 한다. 기체를 거치면 모든
+      // 지표가 조금씩은 움직이지만(속도 게인 → 고도 RMS 7 ppm) 그것은 결합이지
+      // 이 평가가 지목한 원인이 아니다
+      const cone = unionCone(state.model, known, { metricIds: focus.metricIds });
       state.evalCone = cone.nodes.size ? cone : null;
       // 원뿔만으로는 아무것도 안 켜진다 — paintCone이 재생 진행도로 노드·간선을
       // 켜므로(edgeProgress·nodeOn) 재생을 함께 만들어야 그림이 나타난다
@@ -1230,7 +1260,7 @@ export function render() {
         ? conePlayback(state.model, state.evalCone) : null;
       state.evalCaption = state.evalCone ? focus.caption : null;
     }
-    evalFocusLine.textContent = state.evalCaption ?? "";
+    paintCaptions();
     canvas?.invalidate();
   }
 
@@ -2313,6 +2343,11 @@ export function render() {
   const evalFocusLine = el("p", {
     class: "hint", style: "margin:6px 0 0;min-height:16px",
   });
+  // 지표 부채꼴의 근거 — 그림이 켠 지표가 **잰 것인지 못 자른 것인지**를 말한다.
+  // 이 줄이 없으면 "구조로는 못 자른다"가 화면에서 "다 영향받는다"로 읽힌다
+  const fanNote = el("p", {
+    class: "hint", style: "margin:4px 0 0;min-height:16px",
+  });
 
   /** 잡 한 건의 상태 — text는 패널 밖 한 줄, open은 끝난 뒤 열어 줄 패널. */
   function runStatus(text, { open = null, bad = false } = {}) {
@@ -2547,7 +2582,7 @@ export function render() {
     // 범례·보존 캐비앳은 그림 바로 아래: 그림이 쓴 색과 굵기를 설명하는 자리라
     // 클릭 뒤로 숨기면 화면이 자기 문법을 말하지 않게 된다
     el("div", { class: "inf-stage" },
-      canvasBox, playLine, evalFocusLine, pathBox,
+      canvasBox, playLine, evalFocusLine, fanNote, pathBox,
       el("div", { style: "margin-top:10px" }, legendBox),
       conservedNote),
     readoutBox,

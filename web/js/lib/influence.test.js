@@ -4,7 +4,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  KNOB_CLASS, byImpact, columnFormat, coneOf, diagnoseRequest, edgeVia, fmtChange,
+  KNOB_CLASS, byImpact, columnFormat, coneOf, diagnoseRequest, edgeVia, fanLine,
+  fmtChange,
   measuringCone, unionCone,
   fmtDelta, fmtPair, fmtPercent, fmtSigned, impactRank, logScale, pairDigits,
   nodeDetail, normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor,
@@ -906,4 +907,135 @@ test("모든 노드 색은 캔버스 바탕(#0b0b0d)에 3:1 이상", () => {
     const cr = (lum(v) + 0.05) / (bg + 0.05);
     assert.ok(cr >= 3, `${k} ${v} 대비 ${cr.toFixed(2)}:1`);
   }
+});
+
+// ── 지표 부채꼴 ────────────────────────────────────────────────────────────
+// 제어법칙 IR은 조종면에서 끝나고 폐루프는 기체에서 닫힌다 — 구조로는 어느 지표가
+// 움직일지 못 자른다. 종전에는 그 사실을 "전부 켜기"로 표현했는데, 그러면 잰 것과
+// 못 자른 것이 화면에서 같아진다. 여기 테스트가 지키는 것은 **그 구분**이다.
+const fanPayload = {
+  fingerprint: "f", dt: 0.01, control_hz: 100, probe_rel: 0.01,
+  graph: { name: "fcl", n_nodes: 2 }, bands: {}, metrics: [], warnings: [],
+  nodes: [
+    { id: "a", kind: "ir", band: "ap", n_reach: 1 },
+    { id: "out:elevon_l", kind: "output", band: "io" },
+    { id: "sys:plant", kind: "plant", band: "io" },
+    { id: "metric:alt_rms", kind: "metric", band: "metric", key: "alt_rms" },
+    { id: "metric:spd_rms", kind: "metric", band: "metric", key: "spd_rms" },
+    { id: "metric:spd_ts", kind: "metric", band: "metric", key: "spd_ts" },
+    { id: "metric:td_speed", kind: "metric", band: "metric", key: "td_speed" },
+    { id: "param:K", kind: "param", band: "ap", in_law: true, seeds: ["a"],
+      reach: ["a"], outputs: ["elevon_l"], added: [], overridden: [],
+      structural: false, inert: false, error: null },
+  ],
+  edges: [
+    { src: "a", dst: "out:elevon_l", kind: "ir" },
+    { src: "param:K", dst: "a", kind: "param" },
+    { src: "out:elevon_l", dst: "sys:plant", kind: "boundary" },
+    { src: "sys:plant", dst: "metric:alt_rms", kind: "declared" },
+    { src: "sys:plant", dst: "metric:spd_rms", kind: "declared" },
+    { src: "sys:plant", dst: "metric:spd_ts", kind: "declared" },
+    { src: "sys:plant", dst: "metric:td_speed", kind: "declared" },
+  ],
+};
+const fanModel = () => normalizeGraph(fanPayload);
+// base 대비: spd_rms 크게(10 %) · alt_rms 잡음(0.02 %) · spd_ts는 ∞ 그대로
+const sweepRows = [
+  { case: "c1", label: "base", overrides: {},
+    metrics: { alt_rms: 20, spd_rms: 8, spd_ts: "inf", td_speed: null } },
+  { case: "c1", label: "K@+0.2", overrides: { "K": 1.2 },
+    metrics: { alt_rms: 20.004, spd_rms: 8.8, spd_ts: "inf", td_speed: null } },
+];
+
+test("잰 것이 없으면 지표를 전부 켜되 근거는 「선언」이다", () => {
+  const c = coneOf(fanModel(), "param:K");
+  assert.equal(c.fan.basis, "declared");
+  assert.equal(c.fan.ids.size, 4);
+  assert.ok(c.nodes.has("metric:td_speed"));
+});
+
+test("스윕이 있으면 문턱을 넘겨 움직인 지표만 켠다", () => {
+  const c = coneOf(fanModel(), "param:K", { sweepRows });
+  assert.equal(c.fan.basis, "measured");
+  assert.deepEqual([...c.fan.ids], ["metric:spd_rms"]);
+  // 0.02 %만 움직인 것은 결합이지 영향이 아니다 — 켜면 그림이 아무 말도 안 한다
+  assert.ok(!c.nodes.has("metric:alt_rms"));
+});
+
+test("문턱을 낮추면 잡음도 켜진다 — 문턱이 판단이라는 뜻", () => {
+  const c = coneOf(fanModel(), "param:K", { sweepRows, rel: 1e-5 });
+  assert.ok(c.fan.ids.has("metric:alt_rms"));
+});
+
+test("스윕이 이 설계변수를 안 흔들었으면 감도로 쓰지 않는다", () => {
+  const other = sweepRows.map((r) => (r.label === "base" ? r
+    : { ...r, label: "J@+0.2", overrides: { J: 1.2 } }));
+  const c = coneOf(fanModel(), "param:K", { sweepRows: other });
+  assert.equal(c.fan.basis, "declared");
+});
+
+test("쌍 런은 감도가 아니다 — 둘이 같이 움직인 Δ를 한쪽 몫으로 읽으면 귀속이 틀린다", () => {
+  const pair = [sweepRows[0],
+    { case: "c1", label: "K&J@+0.1", overrides: { K: 1.1, J: 1.1 },
+      metrics: { alt_rms: 30, spd_rms: 20, spd_ts: "inf", td_speed: null } }];
+  const c = coneOf(fanModel(), "param:K", { sweepRows: pair });
+  assert.equal(c.fan.basis, "declared", "쌍만 있으면 단독 감도가 없는 것이다");
+});
+
+test("유한 → ∞ 전이는 최대 변화다 — 정착하던 것이 발산했다는 뜻", () => {
+  const rows = [
+    { case: "c1", label: "base", overrides: {}, metrics: { spd_ts: 4.0, alt_rms: 20 } },
+    { case: "c1", label: "K@+0.2", overrides: { K: 1.2 },
+      metrics: { spd_ts: "inf", alt_rms: 20 } },
+  ];
+  const c = coneOf(fanModel(), "param:K", { sweepRows: rows });
+  assert.ok(c.fan.ids.has("metric:spd_ts"));
+  assert.equal(c.fan.ranked[0].id, "metric:spd_ts", "발산이 순위 맨 앞이다");
+});
+
+test("런만 있으면 값이 없는 지표만 뺀다 — ∞는 사실이라 남긴다", () => {
+  // None = 그 기동에 해당 구간이 아예 없었다(이·착륙) → 어떤 게인도 못 움직인다
+  // inf = 쟀는데 창 안에 안 일어났다(미정착) → 게인을 바꾸면 유한해질 수 있다
+  const c = coneOf(fanModel(), "param:K",
+    { runMetrics: { alt_rms: 20, spd_rms: 8, spd_ts: "inf", td_speed: null } });
+  assert.equal(c.fan.basis, "supported");
+  assert.ok(c.fan.ids.has("metric:spd_ts"), "∞를 빼면 「미정착」이 화면에서 사라진다");
+  assert.ok(!c.fan.ids.has("metric:td_speed"));
+});
+
+test("부르는 쪽이 지표를 정하면 그것만 — 자막의 개수와 그림이 어긋나지 않게", () => {
+  const c = coneOf(fanModel(), "param:K",
+    { metricIds: ["metric:spd_rms"], sweepRows });
+  assert.equal(c.fan.basis, "measured");
+  assert.deepEqual([...c.fan.ids], ["metric:spd_rms"]);
+});
+
+test("합집합의 근거는 가장 약한 쪽을 따른다 — 과장하지 않는다", () => {
+  const m = fanModel();
+  const two = { ...fanPayload, nodes: [...fanPayload.nodes,
+    { id: "param:Q", kind: "param", band: "ap", in_law: true, seeds: ["a"],
+      reach: ["a"], outputs: ["elevon_l"], added: [], overridden: [],
+      structural: false, inert: false, error: null }] };
+  const u = unionCone(normalizeGraph(two), ["param:K", "param:Q"], { sweepRows });
+  // K는 잰 것이 있고 Q는 없다 → 합집합은 「선언」이다
+  assert.equal(u.fan.basis, "declared");
+  assert.ok(u.fan.ids.size >= 1);
+  assert.ok(m.byId.has("param:K"));
+});
+
+test("부채꼴 근거 줄이 셋을 다른 말로 낸다", () => {
+  const say = (opts) => fanLine(coneOf(fanModel(), "param:K", opts).fan);
+  assert.match(say({}), /선언된 상한/);
+  assert.match(say({ runMetrics: { alt_rms: 1, spd_rms: 1 } }), /상한/);
+  assert.match(say({ sweepRows }), /스윕이 잰/);
+  assert.equal(fanLine(null), "");
+});
+
+test("스윕이 쟀는데 아무것도 안 움직였으면 지표 0개라고 말한다", () => {
+  const flat = [sweepRows[0],
+    { case: "c1", label: "K@+0.2", overrides: { K: 1.2 },
+      metrics: { alt_rms: 20.0001, spd_rms: 8.0001, spd_ts: "inf", td_speed: null } }];
+  const c = coneOf(fanModel(), "param:K", { sweepRows: flat });
+  assert.equal(c.fan.ids.size, 0);
+  assert.match(fanLine(c.fan), /넘긴 지표가 없다/);
 });
