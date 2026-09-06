@@ -1092,3 +1092,61 @@ test("척도가 하나도 없으면 자막이 자를 하나만 말한다", () =>
   assert.doesNotMatch(fanLine(c.fan), /판정선 있는/);
   assert.match(fanLine(c.fan), /자기 값의/);
 });
+
+// 처방 기반 부채꼴 — 자가 "움직이나"에서 **"고칠 수 있나"**로 바뀐다. 이 판정에는
+// 사람이 고를 숫자가 없다: solvable이 "잰 스팬 안에서 문턱을 넘는다"는 뜻이다.
+const SINGLES = {
+  K: {
+    alt_rms: { solvable: true, required_span: 0.18 },
+    spd_rms: { solvable: true, required_span: -0.06 },
+    // 스팬 밖 — 참고 추정만 있고 못 푼다
+    spd_ts: { solvable: false, required_span: null, extrapolated_span: 1.4 },
+    // 이미 문턱 안이라 고칠 것이 없다
+    td_speed: { solvable: true, required_span: 0.0 },
+  },
+};
+
+test("처방이 있으면 잰 범위 안에서 문턱을 넘길 수 있는 지표만 켠다", () => {
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES, sweepRows });
+  assert.equal(c.fan.basis, "lever", "처방이 스윕보다 센 근거다");
+  assert.deepEqual([...c.fan.ids].sort(), ["metric:alt_rms", "metric:spd_rms"]);
+  assert.ok(!c.fan.ids.has("metric:spd_ts"), "스팬 밖은 못 푼 것이다");
+  assert.ok(!c.fan.ids.has("metric:td_speed"), "이미 문턱 안이면 고칠 것이 없다");
+});
+
+test("지렛대는 적게 고쳐도 되는 것이 앞에 온다", () => {
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES });
+  assert.equal(c.fan.ranked[0].id, "metric:spd_rms");  // |−6 %| < |+18 %|
+  assert.equal(c.fan.ranked[0].span, -0.06);
+});
+
+test("처방이 이 설계변수를 안 풀었으면 스윕 근거로 물러선다", () => {
+  const c = coneOf(fanModel(), "param:K",
+    { prescribeSingles: { J: SINGLES.K }, sweepRows });
+  assert.equal(c.fan.basis, "measured");
+});
+
+test("전부 스팬 밖이면 그 사실을 말하되 그림은 「움직이는가」로 세운다", () => {
+  // 하나도 못 넘긴다는 것 자체가 발견이다. 다만 그림까지 비우면 오른쪽이 통째로
+  // 꺼져 "이 설계변수는 지표와 무관"으로 읽힌다 — 사실은 자막이 이고 간다
+  const none = { K: { alt_rms: { solvable: false, required_span: null } } };
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: none, sweepRows });
+  assert.equal(c.fan.basis, "measured", "지렛대가 비면 아래 근거로 물러선다");
+  assert.ok(c.fan.ids.size > 0, "그림이 통째로 꺼지면 안 된다");
+  assert.match(fanLine(c.fan), /문턱을 못 넘긴다/);
+  assert.match(fanLine(c.fan), /움직이는가/);
+});
+
+test("지렛대가 비어도 잰 것이 없으면 선언 상한으로 물러선다", () => {
+  const none = { K: { alt_rms: { solvable: false, required_span: null } } };
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: none });
+  assert.equal(c.fan.basis, "declared");
+  assert.match(fanLine(c.fan), /문턱을 못 넘긴다/);
+});
+
+test("지렛대 자막에는 문턱 숫자가 없다 — 그것이 이 근거의 값어치다", () => {
+  const line = fanLine(coneOf(fanModel(), "param:K",
+    { prescribeSingles: SINGLES }).fan);
+  assert.match(line, /잰 범위 안에서/);
+  assert.doesNotMatch(line, /%/, "고른 문턱이 문장에 남아 있으면 안 된다");
+});

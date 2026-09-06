@@ -609,8 +609,24 @@ export function createInfluenceCanvas(opts = {}) {
     // 찍히고(「scas_scas_alloc_da_neg」처럼) **둘 다 못 읽는다**. 하나를 접으면
     // 하나는 읽힌다. 이름 확인은 hover가 맡으므로 접힌 이름이 사라지는 것도 아니다
     const placed = [];
-    const collides = (x, y, w, h) => placed.some((r) =>
-      x < r.x + r.w + 2 && x + w + 2 > r.x && y < r.y + r.h + 2 && y + h + 2 > r.y);
+    const hit = (a, b) => a.x < b.x + b.w + 2 && a.x + a.w + 2 > b.x
+      && a.y < b.y + b.h + 2 && a.y + a.h + 2 > b.y;
+    // **노드도 장애물이다.** 라벨끼리만 피하면 글자가 옆 부열의 노드 위에 얹혀
+    // (지표 열에서 「최소 피치 잔여권한」이 이웃 링을 덮었다) 노드도 이름도 못 읽는다.
+    // 자기 노드는 뺀다 — 라벨은 자기 노드 바깥에서 시작하므로 부딪칠 일이 없고,
+    // 넣어 두면 자기 자신 때문에 자리를 못 잡는다
+    const nodeBoxes = [];
+    for (const nd of model.nodes) {
+      const p = layout.pos.get(nd.id);
+      if (!p) continue;
+      const hx = halfExtent(nd.kind, p.r);
+      nodeBoxes.push({ id: nd.id, x: p.x - hx, y: p.y - p.r, w: 2 * hx, h: 2 * p.r });
+    }
+    const collides = (x, y, w, h, selfId = null) => {
+      const box = { x, y, w, h };
+      return placed.some((r) => hit(box, r))
+        || nodeBoxes.some((r) => r.id !== selfId && hit(box, r));
+    };
     const claim = (x, y, w, h) => { placed.push({ x, y, w, h }); };
 
     // 지표 라벨은 **열 오른쪽 한 줄로** 모은다. 지표 열은 27개라 부열로 갈라지는데
@@ -688,29 +704,39 @@ export function createInfluenceCanvas(opts = {}) {
         const w = g.measureText(text).width;
         // 출력 캡슐은 r보다 넓다(1.45r) — r로만 띄우면 라벨이 노드 모양에 물린다
         const hx = halfExtent(nd.kind, p.r);
-        // 오른쪽에 붙이되 캔버스를 넘치면 왼쪽으로 — 상시 라벨과 같은 자기교정.
-        // 오른쪽이 이미 찬 경우에도 왼쪽을 한 번 더 본다: 접기 전에 반대쪽을
-        // 시도해야 부열 둘이 나란히 켜져도 이름이 하나만 남지 않는다
-        const rx = nd.kind === "metric" && metricLabelX !== null
-          ? metricLabelX : p.x + hx + 5;
-        const lx = p.x - hx - 5 - w;
-        let x = null;
-        if (rx + w + 4 <= width - 2 && !collides(rx - 3, p.y - 7, w + 6, 14)) x = rx;
-        else if (lx - 3 >= 2 && !collides(lx - 3, p.y - 7, w + 6, 14)) x = lx;
-        if (x === null) continue;  // 양쪽 다 차 있다 — 이름은 hover로
-        claim(x - 3, p.y - 7, w + 6, 14);
+        // 자리 후보. **지표는 왼쪽으로 넘기지 않는다** — 지표 열은 부열 둘이
+        // 반 칸씩 엇갈려 서 있어서 왼쪽으로 넘긴 이름이 이웃 부열의 링을 그대로
+        // 덮는다(노드도 이름도 못 읽는다). 대신 같은 x에서 위아래로 반 칸까지
+        // 비킨다 — 켜지는 지표는 한 줌이라 대개 첫 후보에서 앉는다.
+        // 나머지 종류는 종전대로 오른쪽 → 왼쪽 순으로 본다
+        const cands = [];
+        if (nd.kind === "metric" && metricLabelX !== null) {
+          for (const dy of [0, -9, 9, -18, 18]) cands.push([metricLabelX, p.y + dy]);
+        } else {
+          cands.push([p.x + hx + 5, p.y], [p.x - hx - 5 - w, p.y]);
+        }
+        let put = null;
+        for (const [cx, cy] of cands) {
+          if (cx - 3 < 2 || cx + w + 4 > width - 2) continue;
+          if (collides(cx - 3, cy - 7, w + 6, 14, nd.id)) continue;
+          put = [cx, cy];
+          break;
+        }
+        if (put === null) continue;  // 어디에도 못 앉는다 — 이름은 hover로
+        const [x, ly] = put;
+        claim(x - 3, ly - 7, w + 6, 14);
         // fade를 같이 곱는다 — 주기 끝 페이드아웃에서 원뿔은 꺼지는데 라벨만
         // 불투명하게 떠 있으면 되감기 이음새에서 글자 60개가 툭 사라진다
         g.globalAlpha = on * fade;
         g.beginPath();
-        roundRect(g, x - 3, p.y - 7, w + 6, 14, 7);
+        roundRect(g, x - 3, ly - 7, w + 6, 14, 7);
         // 밑판을 조금 더 덮는다 — 지표 라벨 일부는 기체→지표 부채꼴(간선 27가닥)
         // 위에 놓이는데 .55로는 글자 뒤로 점선이 비쳐 읽기가 나빠진다
         g.fillStyle = "rgba(0,0,0,.72)";
         g.fill();
         g.textAlign = "left";
         g.fillStyle = SKIN.ink;
-        g.fillText(text, x, p.y);
+        g.fillText(text, x, ly);
         g.globalAlpha = 1;
       }
       g.font = FONT;  // 되돌린다 — 상시 라벨의 measureText가 이 상태를 이어받는다

@@ -256,6 +256,10 @@ export function render() {
         .map((c) => c.metrics_raw).find((m) => m && Object.keys(m).length)
       ?? null;
     const opts = {};
+    // 처방이 있으면 그것이 가장 센 근거다 — "움직이나"가 아니라 "고칠 수 있나"를
+    // 이미 풀어 놓았고, 그 판정에는 우리가 고를 잡음 문턱이 없다
+    const singles = state.prescribe?.result?.singles;
+    if (singles && Object.keys(singles).length) opts.prescribeSingles = singles;
     if (rows?.length) opts.sweepRows = rows;
     if (runMetrics) opts.runMetrics = runMetrics;
     // 판정 척도는 **엔진이 기준에서 파생한 것**을 그대로 쓴다 (재기술 금지, 02 §5.5).
@@ -1074,6 +1078,10 @@ export function render() {
       const res = await api.get(`/results/${done.result_id}`);
       state.prescribe = { status: "완료", result: normalizePrescribe(res),
                           error: null };
+      // 부채꼴의 근거가 방금 바뀌었다(감도 → 지렛대) — 다시 세우지 않으면 그림은
+      // 옛 근거로 켜져 있으면서 자막만 새 말을 하게 된다
+      recompute();
+      canvas?.invalidate();
       renderPrescribe();
       runStatus("수정안 계산 완료", { open });
     } catch (e) {

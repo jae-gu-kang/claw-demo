@@ -222,9 +222,14 @@ function sweptDeltas(rows, knob, scales = null) {
  * 표현했는데, 그러면 잰 것과 못 자른 것이 화면에서 같아진다. 근거를 셋으로 갈라
  * 각각 다른 말을 하게 한다:
  *
- *   measured  — 스윕이 이 설계변수를 흔들어 봤다. 문턱을 넘겨 움직인 지표만 켠다
+ *   lever     — 처방이 풀었다. **잰 범위 안에서 문턱을 넘길 수 있는** 지표만 켠다
+ *   measured  — 스윕만 있다. 문턱을 넘겨 움직인 지표만 켠다
  *   supported — 런은 있으나 이 설계변수의 감도는 없다. **값이 나온** 지표만 켠다
  *   declared  — 아무것도 없다. 전부 켜되 그것이 상한임을 자막이 말한다
+ *
+ * lever가 제일 위인 이유: 나머지 셋은 "움직이나"를 묻는데 lever는 **"고칠 수
+ * 있나"**를 묻는다. 그리고 그 판정에는 사람이 고를 숫자가 없다 — 처방의
+ * `solvable`이 "잰 스팬 안에서 문턱을 넘는다"이고 그것이 곧 실현 가능성이다.
  *
  * supported에서 ∞는 **빼지 않는다**. ∞는 "쟀는데 창 안에 안 일어났다"는 사실이고
  * (미정착), 게인을 바꾸면 유한해질 수 있는 자리다. 빼야 할 것은 값 자체가 없는
@@ -243,8 +248,34 @@ export function metricFan(model, paramId, opts = {}) {
              rel, nTotal: all.length };
   }
 
-  // ② 스윕이 이 설계변수를 흔들었다
   const knob = paramId.startsWith("param:") ? paramId.slice(6) : paramId;
+
+  // ② 처방이 풀었다 — 자가 **"문턱을 넘길 수 있는가"**로 바뀐다. 여기엔 고를 숫자가
+  //    없다: `solvable`은 "잰 스팬 안에서 문턱 교차가 일어난다"는 뜻이고(밖이면
+  //    참고 추정만 남기고 못 푼다고 적는다), 그것이 곧 실현 가능성이다. 잡음 문턱을
+  //    사람이 정하던 자리를 처방의 계산이 대신한다
+  let lever = null;  // 처방이 풀었지만 넘길 수 없었다 — 사실은 남기고 그림은 물러선다
+  const singles = opts.prescribeSingles?.[knob];
+  if (singles && Object.keys(singles).length) {
+    const ranked = Object.entries(singles)
+      // required_span 0 = 이미 문턱 안이다 — 고칠 것이 없으니 "넘길 수 있는"이 아니다
+      .filter(([, r]) => r.solvable && Number(r.required_span) !== 0
+        && Number.isFinite(Number(r.required_span)))
+      // 적게 고쳐도 되는 것이 앞 — 가장 싼 지렛대가 먼저 읽혀야 한다
+      .sort((a, b) => Math.abs(a[1].required_span) - Math.abs(b[1].required_span))
+      .map(([k, r]) => ({ id: `metric:${k}`, span: Number(r.required_span) }))
+      .filter((r) => has(r.id));
+    if (ranked.length) {
+      return { ids: new Set(ranked.map((r) => r.id)), basis: "lever", ranked,
+               rel, nTotal: all.length, nJudged: Object.keys(singles).length };
+    }
+    // 풀었는데 하나도 못 넘긴다 — **그것 자체가 발견**이지만 그림까지 비우면
+    // 오른쪽이 통째로 꺼져 "이 설계변수는 지표와 무관"으로 읽힌다. 사실은 자막이
+    // 이고 가고, 그림은 아래 근거("움직이는가")로 세운다
+    lever = { nJudged: Object.keys(singles).length, none: true };
+  }
+
+  // ③ 스윕이 이 설계변수를 흔들었다
   const scales = opts.scales ?? null;
   const frac = opts.frac ?? FAN_FRAC;
   const deltas = sweptDeltas(opts.sweepRows, knob, scales);
@@ -258,25 +289,38 @@ export function metricFan(model, paramId, opts = {}) {
       .filter((r) => has(r.id));
     const nScaled = [...deltas.values()].filter((m) => m.scaled).length;
     return { ids: new Set(ranked.map((r) => r.id)), basis: "measured", ranked,
-             rel, frac, nScaled, nTotal: all.length, nJudged: deltas.size };
+             rel, frac, nScaled, nTotal: all.length, nJudged: deltas.size, lever };
   }
 
-  // ③ 런은 있다 — 값이 나온 지표까지가 상한이다
+  // ④ 런은 있다 — 값이 나온 지표까지가 상한이다
   if (opts.runMetrics) {
     const ids = all.filter((id) => (opts.runMetrics[metricKey(id)] ?? null) !== null);
     return { ids: new Set(ids), basis: "supported", ranked: ids.map((id) => ({ id })),
-             rel, nTotal: all.length };
+             rel, nTotal: all.length, lever };
   }
 
-  // ④ 아무것도 없다
+  // ⑤ 아무것도 없다
   return { ids: new Set(all), basis: "declared", ranked: all.map((id) => ({ id })),
-           rel, nTotal: all.length };
+           rel, nTotal: all.length, lever };
 }
 
 /** 부채꼴 근거 한 줄 — 그림이 무엇을 말하는지(그리고 **말하지 않는지**). */
 export function fanLine(fan) {
   if (!fan) return "";
   const n = fan.ids.size, tot = fan.nTotal;
+  // 처방이 풀었는데 하나도 못 넘겼으면 그 사실이 먼저다 — 그림은 아래 근거로 섰다
+  const head = fan.lever?.none
+    ? `처방이 푼 지표 ${fan.lever.nJudged}개는 잰 범위 안에서 문턱을 못 넘긴다`
+      + "(더 크게 고쳐야 하거나 이 설계변수가 아니다) · 아래 그림은 「움직이는가」다 — "
+    : "";
+  if (fan.basis === "lever") {
+    // 여기엔 문턱 숫자를 적을 것이 없다 — 그것이 이 근거의 값어치다
+    const of = `처방이 푼 지표 ${fan.nJudged}개 중`;
+    return n
+      ? `지표 ${n}/${tot} — 잰 범위 안에서 이 설계변수로 문턱을 넘길 수 있는 것 (${of})`
+      : `지표 0/${tot} — ${of} 잰 범위 안에서 문턱을 넘길 수 있는 것이 없다`
+        + " (더 크게 고쳐야 하거나 이 설계변수가 아니다)";
+  }
   if (fan.basis === "measured") {
     // 자를 둘 다 밝힌다 — 판정선이 있는 지표가 몇 개인지가 곧 "이 판정을 얼마나
     // 믿을 수 있나"다(나머지는 상한이 아직 [TBD]라 자기 값 대비로 물러섰다)
@@ -284,15 +328,15 @@ export function fanLine(fan) {
       ? `판정선 있는 ${fan.nScaled}개는 그 ${fmtPercent(fan.frac ?? FAN_FRAC, 0)}`
         + `, 나머지는 자기 값의 ${fmtPercent(fan.rel, 2)}`
       : `자기 값의 ${fmtPercent(fan.rel, 2)}`;
-    return n
+    return head + (n
       ? `지표 ${n}/${tot} — 스윕이 잰 결과 움직인 것만 켠다 (${yard})`
-      : `지표 0/${tot} — 스윕이 쟀지만 문턱을 넘긴 지표가 없다 (${yard})`;
+      : `지표 0/${tot} — 스윕이 쟀지만 문턱을 넘긴 지표가 없다 (${yard})`);
   }
   if (fan.basis === "supported") {
-    return `지표 ${n}/${tot} — 이 설계변수의 감도는 아직 안 쟀다.`
+    return head + `지표 ${n}/${tot} — 이 설계변수의 감도는 아직 안 쟀다.`
       + " 이 기동에서 값이 나온 것까지가 상한이다(영향이 아니다)";
   }
-  return `지표 ${n}/${tot} — 선언된 상한이다. 폐루프는 그래프 밖에서 닫혀`
+  return head + `지표 ${n}/${tot} — 선언된 상한이다. 폐루프는 그래프 밖에서 닫혀`
     + " 구조로는 못 자른다 — 실제 영향은 스윕이 잰다";
 }
 
