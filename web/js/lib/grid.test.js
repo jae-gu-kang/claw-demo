@@ -94,10 +94,42 @@ test("parseNumberList: 콤마·공백 구분, 비수치 거부", () => {
 });
 
 
-test("기본 격자는 한 곳 정의 — 15케이스·이름 유일", () => {
+test("기본 격자는 한 곳 정의 — 18케이스·이름 유일", () => {
   const cases = defaultGridCases();
-  assert.equal(cases.length, 15);
-  assert.equal(new Set(cases.map((c) => c.name)).size, 15);
+  assert.equal(cases.length, 18);
+  assert.equal(new Set(cases.map((c) => c.name)).size, 18);
   // 영향성 폼 기본값과 게인 카드가 같은 격자를 쓴다는 계약의 최소 핀
-  assert.equal(DEFAULT_GRID.machFrom, 0.4);
+  assert.equal(DEFAULT_GRID.machFrom, 0.3);
+});
+
+// 격자가 **비행 가능 범위 안**에 있다는 계약 — 값이 아니라 성질을 못박는다.
+// 엔벨로프(engine trim_level 실측, 연료 200 kg): h100 M0.21~0.60 · h1000
+// M0.22~0.59 · h3000 M0.25~0.58 → 세 고도 공통 M0.25~0.58. 이 밖으로 나가면
+// 트림이 안 풀려 평가가 「판정 불가」로 빠지는데, 화면은 그 원인을 게인처럼
+// 보여 준다(v0.72 이전 15칸 중 7칸이 그랬다). 엔진 엔벨로프가 바뀌면 이 상수도
+// 같이 고치라고 여기서 죽는다.
+test("기본 격자는 세 고도 공통 엔벨로프 안이다 — 트림 실패 케이스를 기본값으로 주지 않는다", () => {
+  const ENVELOPE = { lo: 0.25, hi: 0.58 };   // engine/claw/trim/trim.py 실측
+  // **위 숫자의 전제부터 못박는다** — 엔벨로프는 이 고도·연료에서 잰 값이다.
+  // 무게가 α 여유(아래 끝)를, 고도가 양 끝을 정하므로 둘 중 하나만 바뀌어도
+  // ENVELOPE는 무효인데, 케이스 수 대조는 고도를 **바꾸는** 변이를 못 잡는다
+  // (h3000 → h6000은 18케이스 그대로다).
+  assert.deepEqual(DEFAULT_GRID.alts, [100, 1000, 3000], "엔벨로프를 잰 고도가 아니다");
+  assert.deepEqual(DEFAULT_GRID.fuels, [200], "엔벨로프를 잰 연료가 아니다");
+
+  const machs = machRange(DEFAULT_GRID.machFrom, DEFAULT_GRID.machTo, DEFAULT_GRID.machStep);
+  for (const m of machs) {
+    assert.ok(m >= ENVELOPE.lo && m <= ENVELOPE.hi,
+      `M${m}이 공통 엔벨로프 M${ENVELOPE.lo}~${ENVELOPE.hi} 밖 — 트림이 안 풀린다`);
+  }
+  // 경계에 붙이지도 않는다: 양 끝 칸이 여유 +0.5°/+0.006로 사실상 경계였다
+  assert.ok(machs[0] > ENVELOPE.lo, "아래 끝이 경계에 붙었다 — α 여유가 없다");
+  assert.ok(machs[machs.length - 1] < ENVELOPE.hi, "위 끝이 경계에 붙었다 — 스로틀 여유가 없다");
+
+  // **두 물리 코너를 실제로 잡는지**를 본다 — 개수만 세면 안쪽으로 뭉친 격자가
+  // 통과한다(0.30~0.45/0.03도 6칸·18케이스·전부 엔벨로프 안이면서 위 코너가
+  // 통째로 없다). 아래 끝은 실속 여유, 위 끝은 추력 여유(v0.72 판정)가 걸리는
+  // 자리라 하나를 버리면 그 판정이 기본 격자에서 영영 안 걸린다.
+  assert.ok(machs[0] <= 0.30, "아래 코너를 안 잡는다 — 실속 여유가 걸리는 자리가 격자에 없다");
+  assert.ok(machs[machs.length - 1] >= 0.55, "위 코너를 안 잡는다 — 추력 여유가 걸리는 자리가 격자에 없다");
 });

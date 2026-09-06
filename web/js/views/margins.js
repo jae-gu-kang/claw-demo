@@ -13,7 +13,7 @@ PM·GM 맵이 카드 밖 전면에 놓이고(블록도 최상위·영향성과 �
 
 import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
-import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
+import { DEFAULT_GRID, machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { AXIS_NAMES, DEFAULT_LOOPS, validateActuatorDelay, validateLoops } from "../lib/loops.js";
 import {
   FALLBACK_CRITERIA, STATUS, fuelsOf, gmColor, heatmapCanvasHeight, heatmapCellAt, marginColor,
@@ -57,11 +57,13 @@ export function render() {
     damp: el("div"),   // 패널 — 감쇠비 표
   };
 
-  const fMachFrom = el("input", { class: "num", value: "0.4" });
-  const fMachTo = el("input", { class: "num", value: "0.8" });
-  const fMachStep = el("input", { class: "num", value: "0.1" });
-  const fAlts = el("input", { value: "100, 1000, 3000" });
-  const fFuels = el("input", { class: "num", value: "200" });
+  // 격자 기본값의 정본은 lib/grid.js DEFAULT_GRID다 — 여기 숫자를 다시 적으면
+  // 마진 맵만 엔벨로프 밖 격자로 되돌아간다(v0.44에서 실제로 그렇게 남았다).
+  const fMachFrom = el("input", { class: "num", value: String(DEFAULT_GRID.machFrom) });
+  const fMachTo = el("input", { class: "num", value: String(DEFAULT_GRID.machTo) });
+  const fMachStep = el("input", { class: "num", value: String(DEFAULT_GRID.machStep) });
+  const fAlts = el("input", { value: DEFAULT_GRID.alts.join(", ") });
+  const fFuels = el("input", { class: "num", value: DEFAULT_GRID.fuels.join(", ") });
   const fFp = el("input", { value: "web-margin-v1" });
   // 작동기·지연 포함 — [기본값 01 §4.2] 체크 ON으로 시작, 꺼서 영향 분리 비교 가능
   const fUseAct = el("input", { type: "checkbox", checked: true });

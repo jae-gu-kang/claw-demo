@@ -93,9 +93,11 @@ export function render() {
     const stale = evalStrip.stale
       ? " · 이후 편집 있음 — 카드는 이전 형상 기준" : "";
     if (!evalStrip.status) {
+      // 케이스 수는 세어서 쓴다 — 손으로 적으면 DEFAULT_GRID가 바뀔 때
+      // 화면만 옛 수를 말한다(v0.72까지 「15케이스」로 남아 있었다)
       stripStatus.textContent =
-        "아직 안 쟀다 — 기본 격자 15케이스(영향성 탭과 동일), 미적용 편집 포함 "
-        + "형상으로 잰다" + stale;
+        `아직 안 쟀다 — 기본 격자 ${defaultGridCases().length}케이스(영향성 탭과 동일), `
+        + "미적용 편집 포함 형상으로 잰다" + stale;
       return;
     }
     stripStatus.textContent = evalStrip.status + stale;

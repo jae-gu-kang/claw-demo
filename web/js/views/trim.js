@@ -9,7 +9,7 @@ DOM 조립 전용 (얇게) — 격자 로직은 lib/grid.js, 수치·판정은 �
 
 import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
-import { machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
+import { DEFAULT_GRID, machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { STATUS, fuelsOf, pivotCases, trimEnvelopeCell } from "../lib/plot.js";
 import { store } from "../store.js";
 import { heatmapCanvas } from "./plots.js";
@@ -38,14 +38,15 @@ export function render() {
   const errBox = el("div");
   const summaryLine = el("p", { class: "tab-status" });
 
-  // 기본 격자는 **비행 가능 범위 안**이어야 한다 — 프로펠러 전환 전의 0.4~0.8/0.1은
-  // 15칸 중 8칸이 밖이 됐고(고도 1000·3000 m에서 M0.6·0.7·0.8, 100 m에서 0.7·0.8), 0.10 간격은 thr 변화가 연속성 문턱(0.15)을
-  // 넘어 시드 연쇄까지 끊겼다. 0.30~0.55/0.05는 세 고도(100·1000·3000 m) 전부 안이다.
-  const fMachFrom = el("input", { class: "num", value: "0.3" });
-  const fMachTo = el("input", { class: "num", value: "0.55" });
-  const fMachStep = el("input", { class: "num", value: "0.05" });
-  const fAlts = el("input", { value: "100, 1000, 3000" });
-  const fFuels = el("input", { class: "num", value: "200" });
+  // 기본 격자는 **비행 가능 범위 안**이어야 한다 — 근거·실측 여유·칸 수는
+  // lib/grid.js DEFAULT_GRID 주석이 정본이고 여기서는 그 값을 읽기만 한다.
+  // 숫자를 여기 다시 적으면 안 된다: v0.44가 이 탭만 고치고 상수는 옛 값으로
+  // 남겨 둔 것이 v0.44~v0.72 내내 평가 격자를 엔벨로프 밖에 묶어 두었다.
+  const fMachFrom = el("input", { class: "num", value: String(DEFAULT_GRID.machFrom) });
+  const fMachTo = el("input", { class: "num", value: String(DEFAULT_GRID.machTo) });
+  const fMachStep = el("input", { class: "num", value: String(DEFAULT_GRID.machStep) });
+  const fAlts = el("input", { value: DEFAULT_GRID.alts.join(", ") });
+  const fFuels = el("input", { class: "num", value: DEFAULT_GRID.fuels.join(", ") });
   const fFp = el("input", { value: "web-trim-v1" });
 
   // 실행 버튼은 **전면**이다 — 격자를 고치는 패널 안에만 있으면 패널을 닫는 순간
