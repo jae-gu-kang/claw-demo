@@ -901,6 +901,9 @@ export function render() {
     }
     renderEvalChips();
     renderEval();
+    // 등급표의 항목 이름도 이 응답에서 온다 — 패널을 다시 그리지 않으면 처음
+    // 연 사람에게는 「…」인 채로 남는다. 재귀는 위 이른 반환이 막는다
+    renderDrawer();
   }
 
   const evalCardKeys = () => (state.evalMeta?.cards ?? []).map((c) => c.key);
@@ -2194,11 +2197,13 @@ export function render() {
         `구간 경향 (3단 C) — 구간 ${tm.cases.length}건 × 스팬 ${tm.points.length}점 `
         + `(${tm.points.map((p) => spanLabel(p.span)).join(" · ")})`),
       el("p", { class: "hint", style: "margin:0" },
-        "행이 구간이고 열이 지표다. 색은 방향이 아니라 **좋고 나쁨**이다 — 같은 ↑가 "
-        + "실속마진에서는 개선이고 추종 RMS에서는 악화다. 기호는 색과 별도로 읽힌다."),
+        "행이 구간이고 열이 지표다. 색은 방향이 아니라 ", el("b", {}, "좋고 나쁨"),
+        "이다 — 같은 ↑가 실속마진에서는 개선이고 추종 RMS에서는 악화다. "
+        + "기호는 색과 별도로 읽힌다."),
       el("p", { class: "hint", style: "margin:4px 0 0" },
-        "이 표의 구간은 스윕이 **실제로 돈** 케이스뿐이다 — 3단 A에서 결함 케이스로 "
-        + "좁혔다면 격자 전체가 아니다. 격자 전체의 base 지표는 스캔 표가 들고 있다."),
+        "이 표의 구간은 스윕이 ", el("b", {}, "실제로 돈"), " 케이스뿐이다 — 3단 A에서 "
+        + "결함 케이스로 좁혔다면 격자 전체가 아니다. 격자 전체의 base 지표는 스캔 "
+        + "표가 들고 있다."),
     );
     // el()과 달리 Node.append는 null을 **문자열 "null"로 붙인다** — 조건부 줄은
     // 삼항으로 넘기지 말고 여기서 가른다 (라이브에서 머리에 "null"이 찍혔다)
@@ -2348,7 +2353,8 @@ export function render() {
         )),
       el("p", { class: "hint", style: "margin:6px 0 0" },
         "값 아래 작은 수는 같은 구간 기준(base 런) 대비 Δ다. 감도는 기준을 포함한 "
-        + "점들의 최소제곱 기울기라 **비단조 행에서는 평균일 뿐**이다 — 그 행은 "
+        + "점들의 최소제곱 기울기라 ", el("b", {}, "비단조 행에서는 평균일 뿐"),
+        "이다 — 그 행은 "
         + "위 스팬 값을 직접 읽어야 어디서 꺾이는지가 보인다."),
     );
   }
@@ -2388,6 +2394,46 @@ export function render() {
       renderTabCounts();
       renderDrawer();
     }
+  }
+
+  /** A·B·C 등급 한 장 (v0.64) — 화면이 「C급 검증」이라 부르면서 A·B가 무엇인지는
+   *  어디서도 말하지 않고 있었다. 카드 칩에 A①…A⑦이 떠 있는데 그 A가 무슨 뜻인지도
+   *  없었고, 그래서 "C급"이 갑자기 튀어나온 낱말로 읽혔다.
+   *
+   *  등급은 등수가 아니라 **비용 구조**다: A·B는 같은 계산에서 함께 나오고(그래서
+   *  한 버튼), C만 따로 도는 이유는 코너마다 **재트림**이라 비용이 곱이기 때문이다.
+   *  이 표가 그 사실을 말하면 버튼이 셋인 이유가 화면에서 설명된다 (02 §4 A/B/C 체계).
+   *
+   *  항목 이름은 여기서 **다시 적지 않는다** — 서버 정본(`criteria/defaults`의
+   *  cards·checks)이 준 label을 그대로 쓴다. 손으로 베끼면 기준이 바뀔 때 표만 낡는다. */
+  function gradeTable() {
+    const m = state.evalMeta;
+    const names = (list) => (list ?? []).map((c) => c.label).join(" · ") || "…";
+    const rows = [
+      ["A급 카드 7장", names(m?.cards),
+        "각각 값·기준·최악 운용점을 낸다 — 게인을 만지는 내내 보는 상시 지표",
+        "2단계"],
+      ["B급 체크 9건", names(m?.checks),
+        "「B급 체크 n/n PASS」 한 줄로 서고 문제 항목만 펼쳐진다 — A급의 보조이거나 " +
+        "A급이 안 보는 나머지",
+        "2단계 (A급과 같은 실행)"],
+      ["C급 검증", "강건성 코너(질량·Cmα·Cmq ±) · 격자 중간점",
+        "코너마다 기체를 다시 만들어 재트림하고 A·B급을 통째로 다시 잰다",
+        "3단계 (후보 확정 후)"],
+    ];
+    return el("div", {},
+      el("div", { class: "scroll-x" }, el("table", {},
+        el("thead", {}, el("tr", {},
+          ["등급", "항목", "무엇을 말하나", "언제 도나"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, rows.map(([g, items, what, when]) => el("tr", {},
+          el("td", {}, el("strong", {}, g)),
+          el("td", { class: "hint" }, items),
+          el("td", { class: "hint" }, what),
+          el("td", {}, when)))))),
+      el("p", { class: "hint", style: "margin:6px 0 0" },
+        "A·B는 등수가 아니라 ", el("b", {}, "같은 실행의 두 표면"),
+        "이다 — 한 번 돌면 카드 7장과 체크 9건이 함께 나온다. C만 따로 도는 것은 " +
+        "코너마다 재트림이라 비용이 코너 수 × 케이스로 곱해지기 때문이다."));
   }
 
   // ── 인계 수신 — 시뮬 탭이 넘긴 런 (v0.63) ────────────────────────────────
@@ -2456,34 +2502,57 @@ export function render() {
         }
         return [
           el("h2", {}, "평가 → 처방 → 확정 — 이 탭의 주 흐름"),
-          el("p", { class: "hint", style: "margin:0 0 8px" },
-            "위에서 아래로 좁혀진다: 카드 7장이 값·기준·최악 운용점을 내고, 추가 " +
-            "판정 9건이 한 줄로 서고, 실패가 있으면 어디서 나쁜지(국소성)와 왜 " +
+          el("p", { class: "hint", style: "margin:0 0 10px" },
+            "위에서 아래로 좁혀진다: A급 카드 7장이 값·기준·최악 운용점을 내고, " +
+            "B급 체크 9건이 한 줄로 서고, 실패가 있으면 어디서 나쁜지(국소성)와 왜 " +
             "그런지(소견)가 같은 화면에 붙고, 소견의 [얼마나 →]가 감도·처방·확인 " +
             "런까지 이어진다. 통과하면 적용하고 C급 검증으로 굳힌다. " +
-            "GM·PM은 각각의 카드다(이득류와 지연류 불확실성은 다른 위험이다). " +
             "하드 게이트(불안정·ζ·포화·실속·잔여권한·GM/PM) 위반이 하나라도 있으면 " +
             "Fail이고 J는 매기지 않는다 — GM/PM은 목적함수가 아니라 제약이다."),
-          evalChipRow,
+          gradeTable(),
+          el("h3", { style: "margin:16px 0 4px;font-size:14px" },
+            "실행 — 1 훑기 → 2 판정 → 3 확정 후 검증"),
+          el("p", { class: "hint", style: "margin:0 0 8px" },
+            "왼쪽에서 오른쪽이 도는 순서이고, 오른쪽으로 갈수록 비싸다. " +
+            "셋 다 위 무대의 같은 케이스 격자를 대상으로 돈다."),
           el("div", {
-            class: "row", style: "gap:10px;align-items:center;margin-top:8px",
+            class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap",
           },
-            el("button", { class: "primary", onclick: () => runEvaluate("full") },
-              "평가 실행 (선형 + 6DOF)"),
-            el("button", { onclick: () => runEvaluate("linear") },
-              "선형만 (시뮬 0 — 수 초)"),
+            el("button", {
+              onclick: () => runEvaluate("linear"),
+              title: "트림 + 선형화만 — 시뮬 0, 케이스당 수십 ms",
+            }, "1단계 · 선형 훑기"),
+            el("button", {
+              class: "primary", onclick: () => runEvaluate("full"),
+              title: "케이스마다 표준 기동 런 + 동시명령 런 — 이 탭의 판정",
+            }, "2단계 · 평가 실행 (A·B급)"),
+            el("button", {
+              onclick: runVerify,
+              title: "강건성 코너마다 재트림 + 격자 중간점 — 후보 확정 후 한 번",
+            }, "3단계 · C급 검증"),
             el("span", { class: "hint" }, caseText)),
+          el("p", { class: "hint", style: "margin:8px 0 0" },
+            el("b", {}, "1단계"), "는 시뮬을 한 번도 안 돈다 — 폐루프 안정성·감쇠비·" +
+            "GM/PM·스케줄 전이와 제어권한의 트림 소모분까지 값이 나오고, 추종·과도·" +
+            "타면·포화 회복·교차축과 총점 J는 「비선형 런 없음」으로 미판정이다. " +
+            "게인 후보를 싸게 거를 때 쓴다. ",
+            el("b", {}, "2단계"), "라야 A급 7장·B급 9건이 전부 값을 갖는다. ",
+            el("b", {}, "3단계"), "는 2단계를 통과한 형상에만 의미가 있다 — 같은 " +
+            "형상을 코너에서 다시 재는 것이라, 통과 못 한 형상에 돌리면 이미 아는 " +
+            "실패를 다시 본다."),
           evalStatus,
+          // 카드 강조 칩은 **결과의 표시 옵션**이라 실행 줄 위가 아니라 여기 선다 —
+          // 버튼 위에 있으면 "무엇을 계산할지 고르는 칸"으로 읽힌다(아니다)
+          evalChipRow,
           evalCardsBox,
           evalBox,
-          el("h3", { style: "margin:14px 0 4px;font-size:14px" },
-            "C급 검증 — 후보 확정 후 (강건성 코너·격자 중간점)"),
+          el("h3", { style: "margin:16px 0 4px;font-size:14px" },
+            "3단계 결과 — C급 검증 (강건성 코너·격자 중간점)"),
           el("p", { class: "hint", style: "margin:0 0 6px" },
-            "코너(질량·Cmα·Cmq ±)마다 기체를 다시 만들어 **재트림**하고 전 단계를 " +
-            "다시 잰다 — 매 게인 변경마다 돌리기엔 비싸서 따로 선다. 지연 섭동·" +
+            "코너(질량·Cmα·Cmq ±)마다 기체를 다시 만들어 ", el("b", {}, "재트림"),
+            "하고 A·B급 전 단계를 다시 잰다 — 코너 수 × 케이스라 비용이 곱이고, " +
+            "그래서 매 게인 변경마다가 아니라 후보를 확정한 뒤 한 번 선다. 지연 섭동·" +
             "Monte Carlo·미션 프로파일·worst-case 탐색은 어휘와 자리만 있다."),
-          el("div", { class: "row", style: "gap:10px;align-items:center" },
-            el("button", { onclick: runVerify }, "검증 실행 (C급)")),
           verifyStatus,
           verifyBox,
           // 처방(얼마나)은 이 깔때기의 다음 칸이다 — 소견의 [얼마나 →]가 여기를 채운다

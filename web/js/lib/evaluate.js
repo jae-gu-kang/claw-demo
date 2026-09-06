@@ -8,7 +8,7 @@
 색은 좋고 나쁨(판정)을 말한다 — 이 표면은 판독대와 달리 **문턱을 아는** 표면이라
 (기준이 응답에 동봉된다) 판정색이 참칭이 아니다. na는 판정색이 아니라 회색이다.
 
-B급 요약("추가 판정 n/n PASS")의 규칙은 checksSummary 한 곳에 산다:
+B급 요약("B급 체크 n/n PASS")의 규칙은 checksSummary 한 곳에 산다:
 - PASS 분자는 ok만이다 — warn은 "통과했지만 주의"지 정상이 아니다
 - na는 분모에서 빠지되 **반드시 병기**된다 — 요약이 판정 불가를 숨기면
   "9건 중 2건은 잴 수도 없었다"가 화면에서 사라진다
@@ -91,10 +91,14 @@ export function normalizeVerifyReport(payload) {
   };
 }
 
-/** B급 요약 한 줄 — 머리말의 규칙이 전부 여기 산다 (재기술 방지). */
+/** B급 요약 한 줄 — 머리말의 규칙이 전부 여기 산다 (재기술 방지).
+ *
+ *  이름이 「추가 판정」이었다(v0.64에 고침): 화면이 이 줄을 B급이라 부르지 않으니
+ *  등급표의 「B급 체크 9건」과 결과 줄이 같은 것을 말하는지 알 수 없었고, "추가"는
+ *  덤처럼 읽혀 하드 게이트가 여기 들어 있다는 사실과 어긋났다. */
 export function checksSummary(checks) {
-  if (!checks) return "추가 판정 — 아직 없다";
-  const parts = [`추가 판정 ${checks.n_pass}/${checks.n_judged} PASS`];
+  if (!checks) return "B급 체크 — 아직 없다";
+  const parts = [`B급 체크 ${checks.n_pass}/${checks.n_judged} PASS`];
   if (checks.n_fail) parts.push(`실패 ${checks.n_fail}`);
   if (checks.n_warn) parts.push(`주의 ${checks.n_warn}`);
   if (checks.n_na) parts.push(`판정 불가 ${checks.n_na}`);
