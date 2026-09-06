@@ -82,7 +82,7 @@ test("verdictModel — 실패는 무엇이 실패했는지를 한 줄로", () =>
   assert.ok(s.line.includes("생략 1건"));
 });
 
-test("firstFailKey — 잡이 끝나면 열어 줄 서랍", () => {
+test("firstFailKey — 잡이 끝나면 열어 줄 패널", () => {
   assert.equal(firstFailKey({ summary: [{ key: "a", status: "pass" }, { key: "b", status: "fail" }] }), "b");
   assert.equal(firstFailKey({ summary: [{ key: "a", status: "pass" }] }), null);
   assert.equal(firstFailKey(null), null);

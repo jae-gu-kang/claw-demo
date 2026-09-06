@@ -173,6 +173,36 @@ export function cardLines(card) {
   return lines;
 }
 
+/** 그래프 초점 — 평가 결과가 그래프에서 **어디를 켤 것인가**.
+ *
+ * 소견이 귀속한 설계변수(파라미터 노드)와 문턱을 넘은 지표(지표 노드)를 뽑는다.
+ * 카드·표에 있는 사실을 그림에도 같이 세우는 것이고, 새로 판정하지 않는다 —
+ * 판정은 엔진이 이미 했고 여기는 id로 옮길 뿐이다.
+ *
+ * 귀속도 실패도 없으면 **null**이다. 빈 초점을 내면 캔버스가 전부를 흐린 채
+ * 아무것도 안 켜서, 통과한 형상이 "모두 무관"처럼 보인다.
+ */
+export function evalFocus(model) {
+  const knobs = [];
+  for (const c of model.cases ?? []) {
+    for (const p of (c.attribution?.prescriptions ?? [])) {
+      for (const k of (p.knobs ?? [])) if (!knobs.includes(k)) knobs.push(k);
+    }
+  }
+  const metrics = [];
+  const loc = model.aggregate?.locality?.metrics ?? {};
+  for (const [key, v] of Object.entries(loc)) {
+    if (v.verdict && v.verdict !== "ok" && !metrics.includes(key)) metrics.push(key);
+  }
+  if (!knobs.length && !metrics.length) return null;
+  return {
+    paramIds: knobs.map((k) => `param:${k}`),
+    metricIds: metrics.map((k) => `metric:${k}`),
+    caption: `평가 결과 — 귀속된 설계변수 ${knobs.length}개가 문턱을 넘은 `
+      + `지표 ${metrics.length}개까지 어떻게 닿는지`,
+  };
+}
+
 /** 마진 조성 한 줄 — **무슨 플랜트에서 판정했나**. 마진 맵이 판정선을 늘 말하는
  *  것과 같은 규약이고, 조성이 갈리면 같은 설계가 화면마다 다른 마진을 받는다
  *  (작동기·지연을 빼면 −180° 교차가 비물리 자리로 가 GM이 아티팩트가 된다). */

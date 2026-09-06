@@ -15,7 +15,7 @@ p←da·yaw r←dr, sign −1)와 정합이며 test_openloop이 핀한다. 선�
 
 스케줄이 덮는 상수(그 자리에 테이블이 붙어 있는 fcl/* 게인)는 "1단은 잡는데
 2단이 0인 자리"(influence 머리말) — **overridden으로 분리 보고**하고, 실효
-손잡이인 `table.그룹.게인` 배율은 케이스 실효 게인(테이블@케이스 × 배율)으로
+설계변수인 `table.그룹.게인` 배율은 케이스 실효 게인(테이블@케이스 × 배율)으로
 루프에 잡는다.
 """
 
@@ -162,7 +162,7 @@ def openloop_delta(aircraft, trs, shape: Shape, param_ids=None, *,
         if pid.startswith("fcl/") and f"{group}.{key}" in tables:
             entry["status"] = "overridden"
             entry["reason"] = (f"게인 스케줄 {group}.{key}가 매 스텝 덮어쓴다 — "
-                               f"실효 손잡이는 table.{group}.{key}")
+                               f"실효 설계변수는 table.{group}.{key}")
             continue
         loops = [sp for sp in GROUP_LOOPS[group] if key in sp["gains"].values()]
         if not loops:

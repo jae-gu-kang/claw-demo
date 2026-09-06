@@ -9,7 +9,7 @@
 같은 패널이 두 자리에 선다.
 
   블록도 하위 페이지 — 카드 안에 통째로 (`renderCodePanel`, 종전 계약 그대로)
-  Autocode 탭       — **코드는 카드 밖 전면**, 검토·추적성은 서랍 (`createCodePanel`)
+  Autocode 탭       — **코드는 카드 밖 전면**, 검토·추적성은 패널 (`createCodePanel`)
 
 그래서 조립은 조각으로 만들고(bar·stage·review·trace·foot), 늘어놓는 순서는 부르는
 쪽이 정한다. 조각을 나누지 않으면 Autocode가 같은 패널을 한 벌 더 갖게 된다.

@@ -14,7 +14,7 @@
  *   누적 초과   — |δ| ≥ x인 시간이 얼마 (P95 같은 사양 수치가 여기서 나온다)
  *   밀도+상자   — 타각·타율 조합이 작동기 능력 안에 있었나
  *
- * ## 탭이 아니라 시뮬레이션 탭의 서랍이다 (v0.54)
+ * ## 탭이 아니라 시뮬레이션 탭의 패널이다 (v0.54)
  *
  * 종전에는 최상위 탭이었는데 **층위가 맞지 않았다**(사용자 지적). 나머지 탭은 전부
  * 설계 단계 하나씩이고(엔벨로프 → 트림 → 게인 → 마진 → 자동 설계 → 시뮬), 이것은
@@ -23,7 +23,7 @@
  * 고르게 되고, 그 선택이 방금 돌린 런과 어긋날 수 있다.
  *
  * 그래서 이 파일은 라우트 뷰가 아니라 **컴포넌트**를 내보낸다(`createDutyPanel`).
- * 서랍 안이라 층을 한 겹 더 파지 않는다 — 요약 표가 위, 타면 선택 버튼이 아래,
+ * 패널 안이라 층을 한 겹 더 파지 않는다 — 요약 표가 위, 타면 선택 버튼이 아래,
  * 고른 타면의 세 그림이 그 밑. 요약이 "어디가 문제인가"를, 그림이 "왜 그런가"를 답한다.
  *
  * 심각도 색은 클래스가 아니라 값으로 지정한다 — 이 색은 판정이지 테마가 아니다.
@@ -52,15 +52,15 @@ let selectedMode = "";
 let selectedChannel = null; // 타면 라벨 — 결과가 바뀌어도 같은 이름이면 그대로 따라간다
 let stale = true;           // 새 런이 끝나면 서면 — 다음에 열 때 다시 집계한다
 
-/** 시뮬 런이 새로 끝났다 — 다음에 서랍을 열 때 다시 집계한다.
- *  즉시 부르지 않는 이유: 서랍이 닫혀 있으면 아무도 안 보는 집계에 서버를 쓴다. */
+/** 시뮬 런이 새로 끝났다 — 다음에 패널을 열 때 다시 집계한다.
+ *  즉시 부르지 않는 이유: 패널이 닫혀 있으면 아무도 안 보는 집계에 서버를 쓴다. */
 export function invalidate() {
   stale = true;
 }
 
-/** 타면 사용 패널 — 시뮬레이션 탭의 서랍 하나가 그대로 이것이다.
+/** 타면 사용 패널 — 시뮬레이션 탭의 패널 하나가 그대로 이것이다.
  *
- *  `ensure()`는 **열릴 때** 불린다(지연 로드). 탭에 들어올 때마다 집계하면 이 서랍을
+ *  `ensure()`는 **열릴 때** 불린다(지연 로드). 탭에 들어올 때마다 집계하면 이 패널을
  *  한 번도 안 여는 사람에게 매번 서버 왕복이 생긴다 — 20000 표본 집계는 공짜가 아니다. */
 export function createDutyPanel() {
   const errBox = el("div");
@@ -133,7 +133,7 @@ export function createDutyPanel() {
       }
       clear(idSel).append(...items.map((m) => el("option", { value: m.id },
         `${m.id} · ${m.n ?? "?"}표본${m.aborted ? ` · 절단 ${m.aborted}` : ""}`)));
-      // 방금 돌린 런이 기본이다 — 이 서랍은 그 런을 다시 읽는 자리다
+      // 방금 돌린 런이 기본이다 — 이 패널은 그 런을 다시 읽는 자리다
       const prefer = store.get("simResult")?.id ?? selectedId;
       const pick = items.some((m) => m.id === prefer) ? prefer : items[0].id;
       idSel.value = pick;
@@ -170,7 +170,7 @@ export function createDutyPanel() {
 
   return {
     root,
-    /** 서랍이 열릴 때 — 아직 없거나 새 런이 끝났으면 그때 집계한다. */
+    /** 패널이 열릴 때 — 아직 없거나 새 런이 끝났으면 그때 집계한다. */
     ensure() {
       if (!lastReport || stale) loadList();
       else draw();
@@ -201,7 +201,7 @@ function summaryTable(report) {
 }
 
 /** 타면 한 장 — 세 그림과 그 그림들이 기대는 전제. 카드(.panel)를 두르지 않는다:
- *  이미 서랍 안이라 판이 겹치면 상자 속 상자가 된다. */
+ *  이미 패널 안이라 판이 겹치면 상자 속 상자가 된다. */
 function channelBody(channel, mode, report) {
   const v = viewOf(channel, mode);
   if (!v) {
@@ -283,7 +283,7 @@ function renderSummary(box, report) {
   ));
 }
 
-/** 읽는 법 — 표를 보다 막히는 자리들의 뜻. 서랍 안이라 층을 하나 더 파지 않고
+/** 읽는 법 — 표를 보다 막히는 자리들의 뜻. 패널 안이라 층을 하나 더 파지 않고
  *  `<details>` 하나로 접는다(칩 안의 칩은 어디를 눌러야 하는지를 흐린다). */
 function noteBox() {
   return el("details", { style: "margin-top:14px" },

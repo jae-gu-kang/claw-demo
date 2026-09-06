@@ -66,12 +66,12 @@ export function verdictModel(report) {
   return { cls: "ok", label: "통과", line: "전 검사군 통과 · 생략 0건" };
 }
 
-/** 처음 실패한 요약 행의 key — 잡이 끝나면 그 상세 서랍을 열어 준다. 없으면 null. */
+/** 처음 실패한 요약 행의 key — 잡이 끝나면 그 상세 패널을 열어 준다. 없으면 null. */
 export function firstFailKey(report) {
   return (report?.summary ?? []).find((r) => r.status === "fail")?.key ?? null;
 }
 
-/** 서랍 배지 수 — 셀 수 없으면 null (badgeOf 규약: 0도 못 센 것도 배지 없음). */
+/** 패널 배지 수 — 셀 수 없으면 null (badgeOf 규약: 0도 못 센 것도 배지 없음). */
 export function failedRuleCount(report) {
   const rules = report?.static?.rules;
   return rules ? rules.filter((r) => r.status === "fail").length : null;

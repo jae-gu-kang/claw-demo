@@ -4,7 +4,7 @@
 판정판(대시보드)이 전면에, 유닛 그리드(파티션·통합·런타임 × TC·라인·분기·MC/DC)가
 판독 시트에 늘 서고, 행을 누르면 **바로 아래에 커버리지 색칠 소스 뷰어**가 열린다
 (마진 맵 칸→보드선도 드릴다운 선례). 다조건 결정 줄에는 MC/DC 진리표가 인라인으로
-붙는다. 시험 케이스·대조·DO-178C 대응표·인쇄용 전체 보고서는 서랍이다.
+붙는다. 시험 케이스·대조·DO-178C 대응표·인쇄용 전체 보고서는 패널이다.
 
 검사는 서버 202 잡이다: 생성 → 정적 규율 → 엄격 컴파일 → 대조 미션(패리티와 같은
 180 s) + 보강 벡터 + 유닛 시험 비트 대조 → 라인·분기·MC/DC 커버리지 → DAL A 판정.
@@ -160,7 +160,7 @@ export function render() {
         selFile = firstMissFile(lastReport);
         paintResult();
         const open = drawerOf(firstFailKey(lastReport));
-        if (open) drawers.open(open); // 실패의 근거가 사는 서랍부터
+        if (open) drawers.open(open); // 실패의 근거가 사는 패널부터
       } catch (e) {
         showError(errBox, e);
       }

@@ -431,7 +431,15 @@ export function cascadeLayout(graph, opts = {}) {
   // 못 받았으면 노드에서 유도한다 (둘 다 없으면 그때만 빈 목록)
   const seen = (key) => [...new Set(nodes.map((n) => n[key]).filter(Boolean))];
   const bandOrder = opts.bandOrder?.length ? opts.bandOrder : seen("band");
-  const groups = [...new Set([...(opts.groups ?? []), ...seen("group")])];
+  // **그룹 열은 IR 노드의 것만 센다.** `group`은 두 뜻으로 쓰인다: IR 노드에서는
+  // 파티션 이름(scas·ap…)이고 지표 노드에서는 화면 묶음(추종·응답…)이다. 후자를
+  // 열로 세면 colOf가 지표를 마지막 열로 보내므로 **영원히 빈 열**이 생긴다 —
+  // 실측으로 nCol 10→14, 화면 중앙에 450 px 죽은 구간이 났다(v0.56 회귀).
+  const COLUMN_KINDS = new Set(["param", "input", "output", "plant", "metric"]);
+  const groupSeen = [...new Set(nodes
+    .filter((n) => !COLUMN_KINDS.has(n.kind))
+    .map((n) => n.group).filter(Boolean))];
+  const groups = [...new Set([...(opts.groups ?? []), ...groupSeen])];
   const nCol = groups.length + 5;
   const colOf = (n) => {
     if (n.kind === "param") return 0;
@@ -449,7 +457,22 @@ export function cascadeLayout(graph, opts = {}) {
     return i < 0 ? bandOrder.length : i;  // 모르는 묶음은 맨 뒤 — 앞으로 끼어들지 않게
   };
   for (const n of nodes) cols[colOf(n)].push(n);
-  for (const c of cols) c.sort((a, b) => bandRank(a) - bandRank(b));
+  // 지표 열은 표시 묶음(group)으로 묶어 세운다 — 진단 지표 줄이 같은 묶음으로
+  // 서므로(v0.56) 열도 같은 순서여야 두 표면이 같은 문법을 쓴다. 순서의 정본은
+  // 서버가 준 METRICS 선언 순이라 여기서 이름 목록을 적지 않는다(첫 등장 순).
+  const metricGroupOrder = [...new Set(nodes
+    .filter((n) => n.kind === "metric").map((n) => n.group ?? ""))];
+  const metricRank = (n) => {
+    const i = metricGroupOrder.indexOf(n.group ?? "");
+    return i < 0 ? metricGroupOrder.length : i;
+  };
+  for (const [ci, c] of cols.entries()) {
+    if (ci === nCol - 1 && c.length && c[0].kind === "metric") {
+      c.sort((a, b) => metricRank(a) - metricRank(b));
+    } else {
+      c.sort((a, b) => bandRank(a) - bandRank(b));
+    }
+  }
 
   // 파라미터 열만 65개다 — 접지 않으면 그 열 하나가 화면 높이를 1000 px 넘게 끌어올려
   // 나머지 열이 전부 실선 한 줄로 보인다. 다른 열은 12개 이하라 접을 필요가 없다
@@ -457,16 +480,41 @@ export function cascadeLayout(graph, opts = {}) {
   const sub = cols.map((c) => Math.max(1, Math.ceil(c.length / maxPerCol)));
   const maxRows = Math.max(1, ...cols.map((c, i) => Math.ceil(c.length / sub[i])));
   const usableW = Math.max(1, width - pad - padRight);
+  // 열 간격(pitch)에서 **하위 열이 쓸 폭을 먼저 뗀다.** 종전에는 하위 열 오프셋이
+  // 고정 26 px이라 파라미터 열(3벌)이 옆 열 영역까지 52 px 밀고 들어와 왼쪽이
+  // 뭉치고 오른쪽이 비어 보였다. 하위 열은 자기 열 폭의 절반 안에서만 벌어진다
+  const pitch = usableW / Math.max(1, nCol - 1);
+  const maxSub = Math.max(...sub);
+  const subGap = Math.max(12, Math.min(26, (pitch * 0.5) / Math.max(1, maxSub - 1)));
+  // 세로는 **모든 열이 같은 자를 쓴다** — 열마다 촘촘함이 다르면(듬성한 열은
+  // 가운데 몇 점, 빽빽한 열은 화면 전체) 같은 그래프가 열마다 다른 축척으로 읽힌다.
+  // 가장 빽빽한 열이 화면에 들어가는 간격을 정하고 나머지가 그 간격을 따른다
+  const maxRowsAny = Math.max(1, ...cols.map((c, i) => Math.ceil(c.length / sub[i])));
+  const gap = Math.min(rowGap, (height - 2 * pad) / Math.max(1, maxRowsAny - 1));
   const pos = new Map();
   cols.forEach((ids, c) => {
-    const x = pad + (c / (nCol - 1)) * usableW;
+    const x = pad + c * pitch;
     const perCol = Math.ceil(ids.length / sub[c]) || 1;
     const rows = Math.min(perCol, ids.length);
-    const y0 = (height - (rows - 1) * rowGap) / 2;
+    // 열 안에서 묶음이 바뀌는 자리에 한 칸을 띄운다 — 파라미터는 묶음(band),
+    // 지표는 표시 묶음(group)으로 이미 정렬돼 있으므로 경계가 보이면 열이
+    // 자기 분류를 스스로 말한다. 띄운 만큼 열 전체가 다시 가운데로 온다
+    const keyOf = (n) => (n.kind === "param" ? (n.band ?? "")
+      : n.kind === "metric" ? (n.group ?? "") : null);
+    const slot = [];
+    let extra = 0;
+    ids.forEach((n, i) => {
+      const r = i % perCol;
+      if (r === 0) extra = 0;
+      else if (keyOf(n) !== null && keyOf(n) !== keyOf(ids[i - 1])) extra += 0.5;
+      slot.push(r + extra);
+    });
+    const span = Math.max(0, ...slot.slice(0, rows));
+    const y0 = (height - span * gap) / 2;
     ids.forEach((n, i) => {
       pos.set(n.id, {
-        x: x + Math.floor(i / perCol) * 26,
-        y: y0 + (i % perCol) * rowGap,
+        x: x + Math.floor(i / perCol) * subGap,
+        y: y0 + slot[i] * gap,
         r: opts.radiusOf ? opts.radiusOf(n) : 4.5,
       });
     });
@@ -486,8 +534,8 @@ export function cascadeLayout(graph, opts = {}) {
     variant: "cascade", nodes, edges: eout, pos,
     ranks: { rank: colIdx, byRank: cols.map((c) => c.map((n) => n.id)), maxRank: nCol - 1 },
     order: new Map(nodes.map((n) => [n.id, 0])), crossings: null,
-    rankX: cols.map((_, c) => pad + (c / (nCol - 1)) * usableW),
-    bounds: { w: width, h: Math.max(height, maxRows * rowGap + 80), maxRows },
+    rankX: cols.map((_, c) => pad + c * pitch),
+    bounds: { w: width, h: Math.max(height, maxRows * gap + 80), maxRows },
     // 영향은 보존량이 아니다 — 화면이 이 사실을 말하지 않으면 리본 폭이 유량으로 읽힌다
     // 열 이름 중 그룹 부분은 엔진이 준 이름 그대로 — 여기서 한글 라벨을 지어내면
     // 그것도 재기술이다. 나머지 다섯은 종류(kind)라 구조적으로 고정이다

@@ -732,7 +732,7 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
    color-scheme: dark — 네이티브 위젯(스핀버튼·스크롤바·자동완성)까지 다크로.
 
    탭별 규칙은 자기 접두를 쓴다(.inf-* / .wv-*). 여기 있는 것은 **둘 다 쓰는 것**만:
-   팔레트·폼 위젯·표, 그리고 아래 「전면 배치 뼈대」(머리·칩·서랍). 그 뼈대를 탭마다
+   팔레트·폼 위젯·표, 그리고 아래 「전면 배치 뼈대」(머리·칩·패널). 그 뼈대를 탭마다
    베끼면 같은 레이아웃이 두 벌이 된다(02 §5.5). */
 body:has(.tab-dark) { background: #0b0b0d; color-scheme: dark; } /* color-scheme: 문서 스크롤바는 body 소유 */
 /* 헤더는 배경이 투명해 페이지 색을 그대로 입는다 — 다크에서는 제목이 묻히므로
@@ -760,7 +760,7 @@ body:has(.tab-dark) header h1 .sub { color: rgba(235, 235, 245, .6); }
 .tab-dark button.primary { background: #0a84ff; border-color: #0a84ff; color: #fff; }
 .tab-dark .error-box { background: rgba(255, 69, 58, .16); color: #ff6961; }
 
-/* 게인 칩(code) — 손잡이 id·런 라벨의 시각 단위. max-width로 컨테이너 폭을 절대
+/* 게인 칩(code) — 설계변수 id·런 라벨의 시각 단위. max-width로 컨테이너 폭을 절대
    못 넘고, 폭이 잠긴 곳(처방 카드 등)에서는 anywhere가 id 중간에서라도 꺾는다 —
    쌍 스윕 런 라벨(a@+0.10+b@+0.10)이 박스 밖으로 밀려 나가던 자리 */
 .tab-dark code {
@@ -775,7 +775,7 @@ body:has(.tab-dark) header h1 .sub { color: rgba(235, 235, 245, .6); }
 
 /* ── 전면 배치 뼈대 (v0.49 영향성 → v0.51 가상환경 → v0.53 전 탭 공용) ─────
    블록도 최상위와 같은 규약: 주 그림은 **카드에 넣지 않는다**(.bd .canvas-wrap.top).
-   이 탭들의 주 질문은 그림이 답하므로 그림이 화면이고, 나머지는 서랍에 넣어
+   이 탭들의 주 질문은 그림이 답하므로 그림이 화면이고, 나머지는 패널에 넣어
    눌렀을 때만 나온다. 그래서 폭도 이 탭들에서만 넓힌다 — 카드가 없으니 1440에
    묶어 둘 이유가 없고, 캔버스 논리폭이 그대로 들어가는 폭이 필요하다.
 
@@ -800,7 +800,7 @@ body:has(.tab-page) main { max-width: 1580px; }
 .tab-stage .stage-pair { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
 .tab-stage .stage-pair > * { flex: 0 1 auto; min-width: 0; }
 
-/* 전면 조작줄 — 주 그림 바로 위/아래. 실행 버튼이 서랍 안에 들어가면 "이 탭에서
+/* 전면 조작줄 — 주 그림 바로 위/아래. 실행 버튼이 패널 안에 들어가면 "이 탭에서
    무엇을 하는가"가 클릭 뒤로 숨는다 (시뮬 실행·그리기·격자 생성이 그 자리다) */
 .tab-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0 0; }
 .tab-actions .grow { flex: 1; }
@@ -809,8 +809,8 @@ body:has(.tab-page) main { max-width: 1580px; }
 
 /* 판독 시트 — 무대 바로 아래, 늘 보이는 표·수치판.
    그림은 자기 테두리를 갖지만 표는 갖지 않는다 — 회색 바닥에 표를 그대로 얹으면
-   덜 만든 화면으로 읽힌다. 그렇다고 서랍에 넣으면 편집이 클릭 뒤로 숨는다(게인
-   탭의 셀 편집이 그 자리다). 그래서 무대와 서랍 사이에 한 층을 둔다 — 영향성의
+   덜 만든 화면으로 읽힌다. 그렇다고 패널에 넣으면 편집이 클릭 뒤로 숨는다(게인
+   탭의 셀 편집이 그 자리다). 그래서 무대와 패널 사이에 한 층을 둔다 — 영향성의
    정량 판독대(.inf-readout)가 하던 일을 이름만 일반화한 것이다. */
 .tab-sheet:not(:empty) {
   margin-top: 12px;
@@ -825,7 +825,7 @@ body:has(.tab-page) main { max-width: 1580px; }
   box-shadow: none;
 }
 
-/* ── 서랍 — 나머지는 전부 눌렀을 때만 ──────────────────────────────────── */
+/* ── 패널 — 나머지는 전부 눌렀을 때만 ──────────────────────────────────── */
 .tab-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; align-items: center; }
 /* 분류 라벨 — 칩이 여덟 개를 넘으면 순서만으로는 묶음이 안 읽힌다. 라벨은 묶음이
    바뀌는 지점에만 선다 (lib/stage.js chipModels.startsGroup) */
@@ -859,7 +859,7 @@ body:has(.tab-page) main { max-width: 1580px; }
   padding: 16px 18px;
   box-shadow: var(--shadow);
 }
-/* 서랍 하나에 여러 덩이가 들어갈 때만 — 첫 덩이는 위 여백 없이 시작한다 */
+/* 패널 하나에 여러 덩이가 들어갈 때만 — 첫 덩이는 위 여백 없이 시작한다 */
 .tab-sect + .tab-sect { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
 .tab-sect h2 { font-size: 15px; font-weight: 800; margin: 0 0 8px; }
 .tab-sect h3 { font-size: 13px; font-weight: 700; margin: 14px 0 6px; }
@@ -959,7 +959,7 @@ body:has(.tab-page) main { max-width: 1580px; }
 .wv-hud .v { font-weight: 700; margin-right: 10px; }
 .wv-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 .wv-bar.top { margin: 0 0 10px; }
-/* 환경 슬라이더 — 서랍 안. 라벨과 슬라이더가 세로로 붙어야 7개가 한눈에 훑힌다 */
+/* 환경 슬라이더 — 패널 안. 라벨과 슬라이더가 세로로 붙어야 7개가 한눈에 훑힌다 */
 .wv-env { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 18px; }
 .wv-env label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: rgba(235, 235, 245, .6); }
 .wv-env input { width: 100%; }

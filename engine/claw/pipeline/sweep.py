@@ -2,7 +2,7 @@
 설계 지표(pipeline.metrics)의 Δ를 잰다. influence.py 머리말의 `closedloop_sweep`
 이름 계약을 이 파일이 구현한다.
 
-전 게인 공간이 아니라 **진단(pipeline.diagnose)이 처방한 손잡이만** 흔든다 —
+전 게인 공간이 아니라 **진단(pipeline.diagnose)이 처방한 설계변수만** 흔든다 —
 케이스 × 런 비용은 곱이라, "무엇을"이 먼저 좁혀져야 "얼마나"가 감당된다.
 
 표준 진단 기동(probe_mission)의 수치는 fcl/autopilot.py 설계 스캔 기동
@@ -88,7 +88,7 @@ def _value_at(ref, s, notes):
 
 def sweep_plan(shape: Shape, knobs, pairs=(), *, span=DEFAULT_SPAN,
                pair_step=PAIR_STEP) -> dict:
-    """처방 손잡이 → 스윕 계획: base + 단독 스팬 + 쌍(A, B, A+B) 3점.
+    """처방 설계변수 → 스윕 계획: base + 단독 스팬 + 쌍(A, B, A+B) 3점.
 
     쌍의 단독 점이 스팬과 겹치면 라벨을 공유해 재실행하지 않는다 — 런 수가 곧
     비용이다. 반환: {"runs": [RunSpec], "pairs": [{a, b, ab, knobs}], "notes"}.
@@ -136,7 +136,7 @@ def sweep_plan(shape: Shape, knobs, pairs=(), *, span=DEFAULT_SPAN,
 
 
 def nonadditivity(m0, mA, mB, mAB) -> dict:
-    """지표별 dAB − (dA + dB) — 0이면 두 손잡이는 이 지표에 독립, 크면 상호작용.
+    """지표별 dAB − (dA + dB) — 0이면 두 설계변수는 이 지표에 독립, 크면 상호작용.
 
     네 값 중 하나라도 없으면 None — 판정 불가를 0(독립)으로 위장하지 않는다.
     """

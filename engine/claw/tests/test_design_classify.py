@@ -270,7 +270,7 @@ def test_valley_on_anchor_is_a_fit_failure_not_a_sample_failure():
     (orchestrator._stage_fit setdefault). 종전에는 그런 처방을 refit_at으로 내고
     applied로 기록해 이터 예산만 태웠다 — 반영해도 다음 판정이 그대로였다.
 
-    남은 손잡이는 적합 자체다 (허용치·구간 수).
+    남은 설계변수는 적합 자체다 (허용치·구간 수).
     """
     ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=None)  # 전부 anchor
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))

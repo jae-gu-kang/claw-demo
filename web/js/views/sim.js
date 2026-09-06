@@ -109,9 +109,9 @@ let view3dRef = { view: null };
 // 자동 재생 타이머 — 모듈 스코프에 두어야 재렌더·탭 전환에서 확실히 끌 수 있다.
 // (뷰 안에만 두면 떨어져 나간 DOM을 향해 계속 도는 타이머가 남는다)
 let playTimer = null;
-// 탭을 떠났다 와도 열어 둔 서랍은 그대로 (모듈 스코프 규약)
+// 탭을 떠났다 와도 열어 둔 패널은 그대로 (모듈 스코프 규약)
 let openDrawer = null;
-// 잡이 끝나면 결과가 사는 서랍을 열어 준다 — 화면에 결과가 있는데 서랍이 닫혀
+// 잡이 끝나면 결과가 사는 패널을 열어 준다 — 화면에 결과가 있는데 패널이 닫혀
 // 있으면 "돌긴 돌았나"만 남고 무슨 일이 있었는지가 안 보인다 (영향성 runStatus 선례)
 let simDrawers = null;
 
@@ -460,7 +460,7 @@ export function render() {
         renderReplay(replayBox);
         wpMap.refresh(); // 지도 궤적 오버레이 갱신
         drawProfile(); // 세로 프로파일에 실제 고도 겹치기
-        dutyInvalidate(); // 새 런이다 — 타면 서랍을 다음에 열 때 다시 집계한다
+        dutyInvalidate(); // 새 런이다 — 타면 패널을 다음에 열 때 다시 집계한다
         simDrawers?.open("replay"); // 결과를 찾아 헤매게 하지 않는다
       } catch (e) {
         showErr(e);
@@ -570,7 +570,7 @@ export function render() {
   // 종전에는 여덟 개가 한 카드 안에 격자로 늘어서 있었다. 그 배치의 문제는 개수가
   // 아니라 **위계가 없다**는 것이다: 매 실행마다 만지는 칸(시작점·t_end)과 한 번
   // 정하면 안 건드리는 칸(측지 원점·계보)이 같은 크기로 나란히 서 있었다.
-  // 여기서는 "얼마나 자주 만지나"로 묶어 서랍에 넣고, 실행 버튼만 전면에 남긴다.
+  // 여기서는 "얼마나 자주 만지나"로 묶어 패널에 넣고, 실행 버튼만 전면에 남긴다.
   const optGroup = (title, toggle, fields, hint) =>
     el("div", { class: "opt-group", style: GROUP_ST },
       toggle ? groupTitle(title, toggle) : el("div", { class: "g-title" }, title),
@@ -680,7 +680,7 @@ export function render() {
 
   const fieldGrid = (...groups) => el("div", { class: "field-grid" }, ...groups);
 
-  // ── 서랍 ─────────────────────────────────────────────────────────────────
+  // ── 패널 ─────────────────────────────────────────────────────────────────
   const dutyPanel = createDutyPanel();
   const drawers = createDrawers({
     id: "sim-drawer",
@@ -724,13 +724,13 @@ export function render() {
       // 런과 어긋날 수 있었다 (v0.54, 사용자 지적 "레벨이 맞는 것 같다")
       { key: "duty", label: "타면 사용", group: "결과",
         title: "조종면을 어느 타각에 얼마나 오래 썼나 — 포화·타율 반전·작동기 능력",
-        // 서랍이 열릴 때 집계한다 — 한 번도 안 여는 사람에게 20000표본 왕복을 물리지 않는다
+        // 패널이 열릴 때 집계한다 — 한 번도 안 여는 사람에게 20000표본 왕복을 물리지 않는다
         build: () => { dutyPanel.ensure(); return dutyPanel.root; } },
       { key: "replay", label: "재생 + 엔벨로프 감시", group: "결과",
         title: "시계열·3면도·3D 궤적·모드 밴드·착륙 요약",
         count: () => (lastReplay ? 1 : null),
         build: () => [replayBox, lastReplay ? null : el("p", { class: "hint" },
-          "아직 결과가 없습니다 — 위 [시뮬 실행]을 누르면 끝난 뒤 이 서랍이 열립니다.")] },
+          "아직 결과가 없습니다 — 위 [시뮬 실행]을 누르면 끝난 뒤 이 패널이 열립니다.")] },
     ],
   });
   simDrawers = drawers;
@@ -739,12 +739,12 @@ export function render() {
     tabTop({
       title: "시뮬레이션",
       lead: "웨이포인트를 지도(수평면)와 프로파일(세로면) 두 면에서 편집하고, "
-        + "그대로 폐루프로 날린다. 실행 조건과 결과(재생·타면 사용)는 아래 서랍에 있다.",
+        + "그대로 폐루프로 날린다. 실행 조건과 결과(재생·타면 사용)는 아래 패널에 있다.",
       actions: [
         el("button", { class: "primary", onclick: run }, "시뮬 실행"),
         el("button", {
           onclick: () => { drawers.open("replay"); },
-          title: "마지막 실행 결과 서랍을 연다",
+          title: "마지막 실행 결과 패널을 연다",
         }, "결과 보기"),
       ],
       extra: [progressBox, errBox],

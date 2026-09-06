@@ -1,8 +1,8 @@
-"""정량 처방 — "어떤 손잡이를 **얼마나** 고쳐야 문턱을 넘는가" (02 §2.4의 마지막 조각).
+"""정량 처방 — "어떤 설계변수를 **얼마나** 고쳐야 문턱을 넘는가" (02 §2.4의 마지막 조각).
 
 진단(diagnose — 무엇을·어느 방향)과 스윕(sweep — 흔들면 얼마나 변하나) 위에
-얹히는 세 번째 답이다: 저장된 스윕 행을 **다시 세워**(새 시뮬 없음) 단일 손잡이의
-필요 변화량과 복수 손잡이의 최소 조합을 낸다. 확정은 언제나 실측 1회다 — 제안
+얹히는 세 번째 답이다: 저장된 스윕 행을 **다시 세워**(새 시뮬 없음) 단일 설계변수의
+필요 변화량과 복수 설계변수의 최소 조합을 낸다. 확정은 언제나 실측 1회다 — 제안
 형상(proposal_shape)을 evaluate()에 넣어 확인하는 것은 호출자(서버 라우트)의 몫.
 
 **제안 생성기와 채점기의 분리가 계약이다**: 이 모듈은 후보(스팬 조합)를 만들 뿐
@@ -10,7 +10,7 @@
 (AI든 탐색이든)는 이 모듈을 갈아끼우고 evaluate를 그대로 쓴다.
 
 외삽의 규율 (웹 trendMatrix와 같은 규칙 — lib/influence.js trendOf):
-- 단조 판정은 **연속 차분의 부호**다. 스팬 안에 극점이 있는(mixed) 손잡이는
+- 단조 판정은 **연속 차분의 부호**다. 스팬 안에 극점이 있는(mixed) 설계변수는
   "한쪽으로 밀면 안 된다"가 답이라 필요 변화량을 내지 않는다
 - 표본 스팬(±20 %) 밖 교차는 참고 추정치만 내고 solvable=False를 유지한다 —
   "20 % 안에서 못 잡는다"는 사실을 흐리지 않는다
@@ -76,7 +76,7 @@ def _solo_points(rows, knob, metric):
             continue
         ov = r.get("overrides") or {}
         if list(ov.keys()) != [knob]:
-            continue  # 쌍 런·다른 손잡이 — 단독 귀속만 (웹 sweepKnobs와 같은 규칙)
+            continue  # 쌍 런·다른 설계변수 — 단독 귀속만 (웹 sweepKnobs와 같은 규칙)
         label = r["label"]
         if "@" not in label:
             continue
@@ -142,7 +142,7 @@ def _first_crossing(pts, threshold, above_is_bad):
 
 
 def solve_single_knob(rows, knob, metric, threshold, *, above_is_bad) -> dict:
-    """저장된 스윕에서 손잡이 하나의 필요 변화량 — {"solvable", "required_span", …}.
+    """저장된 스윕에서 설계변수 하나의 필요 변화량 — {"solvable", "required_span", …}.
 
     반환 스팬은 상대 변화(0.1 = +10 %, |값| 기준 — sweep._value_at과 같은 의미)다.
     전 결함 케이스를 고치는 값(방향 공통·크기 최댓값)이고, binding_case가 그 크기를
@@ -152,7 +152,7 @@ def solve_single_knob(rows, knob, metric, threshold, *, above_is_bad) -> dict:
     by_case = _solo_points(rows, knob, metric)
     if not by_case:
         return {"solvable": False, "required_span": None,
-                "reason": "이 손잡이·지표의 단독 런이 없다 — 스윕이 흔든 적 없다"}
+                "reason": "이 설계변수·지표의 단독 런이 없다 — 스윕이 흔든 적 없다"}
 
     def passes(v):
         return v <= threshold if above_is_bad else v >= threshold
@@ -171,7 +171,7 @@ def solve_single_knob(rows, knob, metric, threshold, *, above_is_bad) -> dict:
                               "안 된다는 사실이 답이라 외삽하지 않는다"}
         if tr == "flat":
             return {"solvable": False, "required_span": None,
-                    "reason": f"{case}: 이 손잡이는 이 지표를 사실상 안 움직인다(평탄)"}
+                    "reason": f"{case}: 이 설계변수는 이 지표를 사실상 안 움직인다(평탄)"}
         s = _first_crossing(pts, threshold, above_is_bad)
         if s is None:
             # 참고 추정 — 0 주변 기울기로 선형 외삽 (참고일 뿐 solvable은 아니다)
@@ -241,7 +241,7 @@ def slope_matrix(rows, knobs, metrics):
 
 def solve_joint(rows, knobs, criteria: GainEvalCriteria, *,
                 span_bound: float = 0.2, metrics=None) -> dict:
-    """복수 손잡이 소폭 조합 — 하드 지표를 전 케이스에서 만족하는 최소 변화(min Σx²).
+    """복수 설계변수 소폭 조합 — 하드 지표를 전 케이스에서 만족하는 최소 변화(min Σx²).
 
     선형 국소 모델(slope_matrix) 위의 SLSQP다. 결과는 **후보**다 — 합격 선언은
     확인 런(evaluate)의 몫이고, 비가산성(쌍 런)이 크면 경고가 그 신뢰도를 깎는다.
@@ -334,7 +334,7 @@ def nonadditivity_warnings(payload, knobs, rel_floor: float = 0.2) -> list:
             v = _num(v)
             if v is None or v == 0.0:
                 continue
-            out.append(f"{'·'.join(pair)}의 {metric} 비가산성 {v:+.3g} — 두 손잡이가 "
+            out.append(f"{'·'.join(pair)}의 {metric} 비가산성 {v:+.3g} — 두 설계변수가 "
                        "상호작용한다: 조합 예측은 선형 근사이고 확인 런이 판정한다")
             break  # 쌍당 한 문장이면 충분
     return out

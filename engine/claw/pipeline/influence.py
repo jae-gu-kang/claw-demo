@@ -271,7 +271,7 @@ def param_universe(shape: Shape, *, include_offgraph: bool = True) -> list[Param
         for name in sorted(law.schedule.tables):
             # 테이블은 절점 17개짜리 곡선이다. 절점 하나하나를 파라미터로 세우면
             # 화면이 테이블 하나로 덮이므로(6×17=102) **곡선 전체 배율**을 탐침으로
-            # 쓴다 — 실제 설계 수치가 아니라 곡선 수준을 흔드는 손잡이임을 label에 밝힌다
+            # 쓴다 — 실제 설계 수치가 아니라 곡선 수준을 흔드는 설계변수임을 label에 밝힌다
             refs.append(ParamRef(
                 id=f"table.{name}", band="sched", label=f"{name} (곡선 배율)", unit="-",
                 desc=f"게인 스케줄 곡선 {name} 전체 배율 — 절점 개별값이 아님",
@@ -293,7 +293,7 @@ def param_universe(shape: Shape, *, include_offgraph: bool = True) -> list[Param
                 if isinstance(v, bool) or not isinstance(v, (int, float)):
                     continue  # 비수치 — 섭동 의미가 없다
                 if key == "seed":
-                    continue  # 재현성 손잡이지 설계값이 아니다. 시드를 흔든 결과는
+                    continue  # 재현성 인자지 설계변수가 아니다. 시드를 흔든 결과는
                     # "영향"이 아니라 **잡음 바닥**이고, 3단 스윕의 대조군이 그 몫이다
                 refs.append(ParamRef(
                     id=f"{prefix}.{key}", band=band, label=key, unit=d.unit,

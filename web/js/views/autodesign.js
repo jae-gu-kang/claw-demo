@@ -1,7 +1,7 @@
 /** 자동 설계 뷰 — 트림 자동화→게인 튜닝→스케줄 적합→마진 검증→원인별 처방 루프.
 
 배치는 다른 탭과 같은 규약이다(views/stage.js): **보고서가 전면**이고 실행 설정·요구
-조정은 서랍이다. 이 탭의 답은 "이 형상이 전 구간에서 합격하는가, 아니면 무엇을
+조정은 패널이다. 이 탭의 답은 "이 형상이 전 구간에서 합격하는가, 아니면 무엇을
 승인해야 하는가"이고 그건 보고서가 낸다 — 설정 폼이 그 위를 덮고 있으면 매 실행마다
 답을 찾아 스크롤해야 한다.
 
@@ -44,7 +44,7 @@ const LEDGER_TOP_N = 20;
 // 탭 이탈·재진입에도 실행 중 잡·최근 결과를 잃지 않는다 (progress.js 재부착 규약)
 let runningJobId = null;
 let lastResultId = null;
-let openDrawer = null; // 탭 재진입에도 열어 둔 서랍 유지 (모듈 스코프 규약)
+let openDrawer = null; // 탭 재진입에도 열어 둔 패널 유지 (모듈 스코프 규약)
 // /design/defaults 응답 전체 — 폼 placeholder와 사유 코드 사전(reason_text)의 출처.
 // 사전은 서버가 정본이고 웹 폴백은 lib/autodesign.REASON_TEXT다
 let designDefaults = null;
@@ -200,7 +200,7 @@ export function render() {
         build: () => [
           el("h2", {}, "요구 조정 — 합격기준·튜닝 목표·작동기·지연"),
           // 서버는 이 중첩 덮어쓰기를 이미 받는다(routes/design.py _build_config).
-          // 서랍에 넣는 이유는 기본값이 정본이고 조정이 예외이기 때문이다
+          // 패널에 넣는 이유는 기본값이 정본이고 조정이 예외이기 때문이다
           el("p", { class: "hint" },
             "채운 칸만 config 덮어쓰기로 나간다. 회색 수치가 서버 기본값이다. "
             + "튜닝 목표가 합격선보다 낮으면 서버가 422로 거절한다 — 튜닝이 성공한 점이 "
@@ -235,7 +235,7 @@ export function render() {
     tabTop({
       title: "자동 설계",
       lead: "설계 루프 전체를 잡 하나로 돈다 — 트림 자동화 → 게인 튜닝 → 스케줄 적합 "
-        + "→ 마진 검증 → 원인별 처방. 실행 설정과 요구 조정은 아래 서랍에.",
+        + "→ 마진 검증 → 원인별 처방. 실행 설정과 요구 조정은 아래 패널에.",
       actions: [
         el("button", { class: "primary", onclick: start }, "자동 설계 시작"),
         listBox,

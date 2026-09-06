@@ -17,7 +17,7 @@ const CAM_LABEL: Record<CamMode, string> = {
 
 const STYLE_LABEL = { engineering: "엔지니어링", cinematic: "시네마틱", game: "게임" } as const;
 
-/** 서랍 하나 — 이름은 칩에, 내용은 열렸을 때만. 배치 뼈대는 app.css의 `.tab-*`가 준다
+/** 패널 하나 — 이름은 칩에, 내용은 열렸을 때만. 배치 뼈대는 app.css의 `.tab-*`가 준다
  *  (영향성 탭과 같은 것을 쓴다 — 같은 레이아웃을 두 벌 두지 않는다). */
 type DrawerKey = "env" | "perf" | "notes";
 
@@ -76,7 +76,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const [gameWps, setGameWps] = useState<ReadonlyArray<readonly [number, number, number]>>([]);
   // 마지막 "보내기"의 개수 — 확인 문장을 그린다. 모드를 떠나면 지운다(아래 효과).
   const [sent, setSent] = useState<number | null>(null);
-  // 열린 서랍 하나 (null = 전부 닫힘). 첫 화면은 세계만 보인다 — 그것이 이 배치의 요지다.
+  // 열린 패널 하나 (null = 전부 닫힘). 첫 화면은 세계만 보인다 — 그것이 이 배치의 요지다.
   const [drawer, setDrawer] = useState<DrawerKey | null>(null);
 
   // **생성과 파괴가 대칭인 한 쌍**이다 — 그래야 StrictMode의 이중 실행에서도 컨텍스트가

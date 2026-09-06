@@ -458,7 +458,7 @@ def test_polish_initial_simplex_is_explicit(setup):
 
     x0 = [0, 0]이라 scipy는 0 성분에 zdelt = 0.00025를 써서 **변 길이 0.025%**인
     simplex를 만든다. 종전 코드는 polish=True로 켜도 Δlog kp = 0.00025 그대로
-    끝났다 — 켜져 있으나 없는 손잡이였다.
+    끝났다 — 켜져 있으나 없는 설계변수였다.
     """
     from claw.design.closure import AXIS_SPECS
     from claw.design.tune import _polish_att, _tune_att, _tune_rates

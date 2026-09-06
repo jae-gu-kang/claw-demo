@@ -1,14 +1,14 @@
 /** Autocode 탭 — 생성 코드가 화면이다 (02 §4).
 
 이 탭에 온 사람의 주 질문은 하나다: **"지금 형상에서 무슨 코드가 실리나."**
-그 답은 코드 본문이므로 코드가 화면이고, 나머지(검토·추적성·설명)는 서랍에 넣어
+그 답은 코드 본문이므로 코드가 화면이고, 나머지(검토·추적성·설명)는 패널에 넣어
 눌렀을 때만 나온다 — 블록도 최상위·영향성과 같은 규약(views/stage.js).
 
 **페이지는 밝고 코드판만 어둡다.** 처음엔 탭 전체에 다크 스킨을 입혔는데, 다른 탭과
 나란히 보면 이 탭만 페이지째 뒤집혀 보인다(사용자 지적) — 어두워야 하는 것은 편집기이지
 탭이 아니다. 블록도 하위 페이지의 코드 패널이 이미 같은 모습이다.
 
-선택은 세 단이고 **전부 코드 위에 남는다**. 서랍에 넣으면 "무엇을 보고 있는지"가
+선택은 세 단이고 **전부 코드 위에 남는다**. 패널에 넣으면 "무엇을 보고 있는지"가
 클릭 뒤로 숨어, 화면의 코드가 어느 형상의 것인지 알 수 없게 된다:
 
     종류   [형상코드] [탑재코드]
@@ -73,16 +73,16 @@ export function render() {
   const kindRow = el("div", { class: "row", style: "gap:8px" });
   const subRow = el("div", { class: "tab-actions" });
   const stageBox = el("div");   // 파일 탭 + 코드 표면 — 카드 밖 전면
-  const reviewBox = el("div");  // 서랍 ①
-  const traceBox = el("div");   // 서랍 ②
-  const footBox = el("div");    // 서랍 ③
+  const reviewBox = el("div");  // 패널 ①
+  const traceBox = el("div");   // 패널 ②
+  const footBox = el("div");    // 패널 ③
   const errBox = el("div");
   const lead = el("p", {}, KIND_NOTE[state.kind]);
 
   // hidden 콜백은 createDrawers 안에서 **즉시** 불린다 — 선언이 아래 있으면 TDZ다
   let panel = null;
 
-  // 서랍은 **한 번만** 만든다. 코드 형식을 바꿀 때마다 다시 만들면 열어 둔 서랍이
+  // 패널은 **한 번만** 만든다. 코드 형식을 바꿀 때마다 다시 만들면 열어 둔 패널이
   // 매번 닫히고, 사용자는 검토를 보려고 형식을 못 바꾸게 된다
   const drawers = createDrawers({
     id: "autocode-drawer",
@@ -94,7 +94,7 @@ export function render() {
         build: () => reviewBox },
       { key: "trace", label: "추적성", group: "이 코드가 맞나",
         title: "파라미터 → 코드 줄 대응 (산출물에 그대로 옮기는 표)",
-        // 탑재 코드에는 파라미터→줄 대응이 없다 — 없는 표의 빈 서랍을 열게 두지 않는다
+        // 탑재 코드에는 파라미터→줄 대응이 없다 — 없는 표의 빈 패널을 열게 두지 않는다
         hidden: () => !panel?.hasTrace(),
         build: () => traceBox },
       { key: "about", label: "이 코드는 무엇인가", group: "설명",

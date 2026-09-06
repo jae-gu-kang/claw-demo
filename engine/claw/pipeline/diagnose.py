@@ -1,4 +1,4 @@
-"""진단 — "어떤 손잡이를 만질 것인가"를 폐루프 기록에서 판별한다 (처방 카드).
+"""진단 — "어떤 설계변수를 만질 것인가"를 폐루프 기록에서 판별한다 (처방 카드).
 
 정량("얼마나")보다 먼저 "무엇을"이 와야 한다: 같은 추종 미달이라도 명령필터가
 병목이면 게인을 올려도 소용없고, 포화를 레이트항이 주도하면 kp가 아니라 k_rate를
@@ -58,7 +58,7 @@ THRESHOLDS = {
     "local_frac": LOCAL_FRAC,
 }
 
-# 손잡이 클래스별 재확인 지표 (METRICS 키) — "이걸 움직이면 함께 봐야 하는 것".
+# 설계변수 클래스별 재확인 지표 (METRICS 키) — "이걸 움직이면 함께 봐야 하는 것".
 # kp/ki↑는 포화·마진을, tau↓는 급해진 명령의 포화를, 클램프 완화는 추종을 재확인.
 COUPLING = {
     "loop_gain": ("surf_sat_frac", "worst_stall_margin"),
@@ -69,7 +69,7 @@ COUPLING = {
     "schedule": ("surf_sat_frac", "worst_stall_margin"),
 }
 
-# 축 → 손잡이 id (ParamRef id 문법). 철자는 param_universe와 맞아야 하며
+# 축 → 설계변수 id (ParamRef id 문법). 철자는 param_universe와 맞아야 하며
 # test_diagnose가 실재를 검증한다 — 여기가 낡으면 스윕이 시작조차 못 한다.
 _AP_AXIS = {
     "alt": {"tau": "fcl/Autopilot.tau_alt", "kp": "fcl/Autopilot.kp_alt",
@@ -111,7 +111,7 @@ class Finding:
 class Prescription:
     """처방 카드 — knobs는 ParamRef id 그대로 3단 스윕의 입력이 된다."""
 
-    knobs: tuple  # 만질 손잡이 (승격 반영 후)
+    knobs: tuple  # 만질 설계변수 (승격 반영 후)
     knob_class: str  # 'filter'|'loop_gain'|'rate_gain'|'clamp'|'limiter'|'schedule'
     direction: str | None  # 'increase'|'decrease' — |값| 기준
     findings: tuple  # 근거 Finding 인덱스
@@ -452,7 +452,7 @@ def _rule_limiter(signals, dt, t, findings, pres, warnings, th):
 
 
 def _table_id(pid):
-    """손잡이 id → 스케줄 곡선 배율 id (승격 대상). 없으면 None."""
+    """설계변수 id → 스케줄 곡선 배율 id (승격 대상). 없으면 None."""
     if pid.startswith("fcl/ScasAxis."):
         _, axis, key = pid.split(".", 2)
         return f"table.{axis}.{key}"
@@ -465,7 +465,7 @@ def _table_id(pid):
 def _cross_check(shape, pres, warnings, probe_rel):
     """교차 규칙 — 승격(overridden/inert → table.*) + 도달 원뿔 교집합(joint_with).
 
-    param_impacts는 처방에 등장한 손잡이(+승격 후보)만 계산한다 — 전 우주를 다시
+    param_impacts는 처방에 등장한 설계변수(+승격 후보)만 계산한다 — 전 우주를 다시
     돌리면 진단이 1단 전체 비용을 지불한다.
     """
     universe = {r.id: r for r in param_universe(shape)}
@@ -483,14 +483,14 @@ def _cross_check(shape, pres, warnings, probe_rel):
         out, notes = [], []
         for pid in ids:
             if pid not in universe:
-                warnings.append(f"처방 손잡이가 이 형상에 없다: {pid} — 무시")
+                warnings.append(f"처방 설계변수가 이 형상에 없다: {pid} — 무시")
                 continue
             imp = impacts.get(pid)
             if imp is not None and (imp.overridden or imp.inert):
                 promo = _table_id(pid)
                 if promo and promo in universe:
                     notes.append(f"{pid} → {promo} 승격 — 스케줄이 덮는 자리라 "
-                                 "곡선 배율이 실효 손잡이다")
+                                 "곡선 배율이 실효 설계변수다")
                     out.append(promo)
                     continue
                 warnings.append(
@@ -505,7 +505,7 @@ def _cross_check(shape, pres, warnings, probe_rel):
         p.knobs, p.joint_with = knobs, tuple(k for k in joint if k not in knobs)
         p.notes = (*p.notes, *notes, *jnotes)
 
-    # 도달 원뿔 교집합 — 서로 다른 처방의 손잡이가 같은 하류를 크게 공유하면
+    # 도달 원뿔 교집합 — 서로 다른 처방의 설계변수가 같은 하류를 크게 공유하면
     # 한쪽만 움직이는 것은 반쪽 처방이다 (동시 수정 후보로 표시만 한다)
     reach = {}
     for pid in {k for p in pres for k in p.knobs}:

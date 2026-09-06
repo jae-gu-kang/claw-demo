@@ -2,7 +2,7 @@
 
 이 탭의 답은 표가 아니라 **지도**다: "이 격자에서 어디가 날 수 있고 어디가 안 되나."
 그래서 비행 엔벨로프 맵이 카드 밖 전면에 놓이고(블록도 최상위·영향성과 같은 규약,
-views/stage.js), 격자 조건·케이스 목록·케이스별 수치는 서랍에 들어간다.
+views/stage.js), 격자 조건·케이스 목록·케이스별 수치는 패널에 들어간다.
 
 DOM 조립 전용 (얇게) — 격자 로직은 lib/grid.js, 수치·판정은 전부 서버(엔진) 산출.
 */
@@ -34,7 +34,7 @@ export function render() {
   const caseBox = el("div");
   const progressBox = el("div");
   const mapBox = el("div");     // 전면 — 비행 엔벨로프 맵
-  const tableBox = el("div");   // 서랍 — 케이스별 수치·판정
+  const tableBox = el("div");   // 패널 — 케이스별 수치·판정
   const errBox = el("div");
   const summaryLine = el("p", { class: "tab-status" });
 
@@ -48,7 +48,7 @@ export function render() {
   const fFuels = el("input", { class: "num", value: "200" });
   const fFp = el("input", { value: "web-trim-v1" });
 
-  // 실행 버튼은 **전면**이다 — 격자를 고치는 서랍 안에만 있으면 서랍을 닫는 순간
+  // 실행 버튼은 **전면**이다 — 격자를 고치는 패널 안에만 있으면 패널을 닫는 순간
   // 실행할 방법이 사라진다. 라벨이 케이스 수를 들고 있어 상태 표시도 겸한다
   const runBtn = el("button", { class: "primary" }, "배치 실행");
   const syncRunBtn = () => {
@@ -105,7 +105,7 @@ export function render() {
         lastBody = body;
         store.set("trimResult", { id: job.result_id, fingerprint: runningFp, cases: [...cases] });
         renderResults();
-        drawers.open("rows"); // 수치가 사는 서랍을 열어 준다
+        drawers.open("rows"); // 수치가 사는 패널을 열어 준다
       } catch (e) {
         showError(errBox, e);
       }

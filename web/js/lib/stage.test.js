@@ -23,7 +23,7 @@ test("badgeOf: 셀 수 없는 것과 0은 배지가 없다 — '0건'은 안 센
   assert.equal(badgeOf(""), null);
 });
 
-test("resolveOpen: 없는 키·숨은 키는 열리지 않는다 (여는 버튼 없는 서랍 방지)", () => {
+test("resolveOpen: 없는 키·숨은 키는 열리지 않는다 (여는 버튼 없는 패널 방지)", () => {
   assert.equal(resolveOpen(DEFS, "a"), "a");
   assert.equal(resolveOpen(DEFS, "없음"), null);
   assert.equal(resolveOpen(DEFS, "w"), null); // hidden
@@ -43,7 +43,7 @@ test("toggleOpen: 같은 칩이면 닫고 다른 칩이면 그쪽 — 한 번에
   assert.equal(toggleOpen(DEFS, null, "a"), "a");
   assert.equal(toggleOpen(DEFS, "a", "a"), null);
   assert.equal(toggleOpen(DEFS, "a", "c"), "c");
-  // 숨은 칩으로는 못 넘어간다 — 넘어가면 서랍만 뜨고 누를 버튼이 없다
+  // 숨은 칩으로는 못 넘어간다 — 넘어가면 패널만 뜨고 누를 버튼이 없다
   assert.equal(toggleOpen(DEFS, "a", "w"), null);
 });
 
@@ -87,7 +87,7 @@ test("chipModels: count·hidden은 값으로도 받는다 (함수가 아닌 정�
   assert.equal(m[0].hidden, false);
 });
 
-test("openDef: 열린 서랍의 정의 — 숨은 것은 돌려주지 않는다", () => {
+test("openDef: 열린 패널의 정의 — 숨은 것은 돌려주지 않는다", () => {
   assert.equal(openDef(DEFS, "a").label, "가");
   assert.equal(openDef(DEFS, "w"), null);
   assert.equal(openDef(DEFS, null), null);

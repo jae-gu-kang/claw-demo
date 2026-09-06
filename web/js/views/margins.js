@@ -2,7 +2,7 @@
 
 이 탭의 답은 **히트맵**이다: "전 구간에서 마진이 서는가, 어디가 얇은가." 그래서
 PM·GM 맵이 카드 밖 전면에 놓이고(블록도 최상위·영향성과 같은 규약, views/stage.js),
-격자·루프 편집과 고유치 맵·감쇠비 표는 서랍에 들어간다 — 매번 보는 것과 가끔 보는
+격자·루프 편집과 고유치 맵·감쇠비 표는 패널에 들어간다 — 매번 보는 것과 가끔 보는
 것을 같은 크기로 늘어놓으면 어느 것이 답인지가 화면에서 사라진다.
 
 수치는 전부 서버(엔진 linearize/classify/pi_loop) 산출 — 여기서는 표시만.
@@ -41,20 +41,20 @@ let criteriaErr = null;
 // /design/defaults 응답 뒤와 탭 재진입 둘 다 있다. 인스턴스는 동시에 하나뿐이라
 // 모듈로 올려도 서로 간섭하지 않는다
 let bodeSeq = 0;
-// 탭을 떠났다 와도 열어 둔 서랍은 그대로 (모듈 스코프 규약)
+// 탭을 떠났다 와도 열어 둔 패널은 그대로 (모듈 스코프 규약)
 let openDrawer = null;
 
 export function render() {
   const errBox = el("div");
   const progressBox = el("div");
   const loopBox = el("div");
-  // 결과를 한 덩이(resultBox)로 내면 어느 조각이 전면이고 어느 조각이 서랍인지를
+  // 결과를 한 덩이(resultBox)로 내면 어느 조각이 전면이고 어느 조각이 패널인지를
   // 부르는 쪽이 정할 수 없다 — 슬롯으로 갈라 renderResults가 각각 채운다
   const slots = {
     head: el("div"),   // 전면 — 몇 건·무엇을 포함했나·연료 선택
     plots: el("div"),  // 전면 — PM·GM 히트맵 (이 탭의 답)
-    eig: el("div"),    // 서랍 — 고유치 맵
-    damp: el("div"),   // 서랍 — 감쇠비 표
+    eig: el("div"),    // 패널 — 고유치 맵
+    damp: el("div"),   // 패널 — 감쇠비 표
   };
 
   const fMachFrom = el("input", { class: "num", value: "0.4" });
@@ -115,10 +115,10 @@ export function render() {
         lastBody = await api.get(`/results/${job.result_id}`);
         store.set("marginMap", { id: job.result_id });
         renderResults(slots, lastBody);
-        // refresh(칩만)가 아니라 repaint — 서랍이 열린 채였다면 "실행 후 표시됩니다"
+        // refresh(칩만)가 아니라 repaint — 패널이 열린 채였다면 "실행 후 표시됩니다"
         // 줄이 방금 채워진 캔버스 밑에 그대로 남는다
         drawers.repaint();
-        // 결과는 **전면**이라 스크롤이 필요 없다 — 폼이 서랍으로 들어가면서
+        // 결과는 **전면**이라 스크롤이 필요 없다 — 폼이 패널로 들어가면서
         // 히트맵이 항상 화면 위쪽에 온다 (종전의 scrollIntoView는 그 자리의 흔적)
       } catch (e) {
         showErr(e);
@@ -242,9 +242,9 @@ export function render() {
     tabTop({
       title: "마진 맵",
       lead: "격자의 점마다 선형화해 개루프 마진을 잰다 — 설계점만이 아니라 그 사이까지 "
-        + "훑어야 스케줄 경계에서 마진이 꺼지는 곳이 보인다. 격자·루프·조건은 아래 서랍에.",
+        + "훑어야 스케줄 경계에서 마진이 꺼지는 곳이 보인다. 격자·루프·조건은 아래 패널에.",
       actions: [el("button", { class: "primary", onclick: run }, "실행")],
-      // 판정선은 **서랍에 넣지 않는다** — 히트맵 색이 무엇을 기준으로 갈리는지이고,
+      // 판정선은 **패널에 넣지 않는다** — 히트맵 색이 무엇을 기준으로 갈리는지이고,
       // 폴백을 쓰는 중이라면 그 사실이 색과 같은 화면에 있어야 한다
       extra: [criteriaBox, progressBox, errBox],
     }),
@@ -519,7 +519,7 @@ function renderResults(slots, body) {
         el("span", {}, el("span", { class: "chip", style: `background:${STATUS.bad}` }), "부족"),
         el("span", {}, el("span", { class: "chip", style: `background:${STATUS.na}` }), "트림 불가/판정 불가")),
     );
-    // 고유치·감쇠비는 서랍이다 — 같은 연료로 함께 갈아 끼운다
+    // 고유치·감쇠비는 패널이다 — 같은 연료로 함께 갈아 끼운다
     clear(slots.eig).append(
       el("div", { class: "scroll-x" },
         scatterCanvas(points, { title: "고유치 맵 (파랑=종축, 주황=횡축) — 허수축 좌측이 안정" })),

@@ -264,3 +264,50 @@ test("간선의 idx는 **모델 간선 인덱스** — 좌표 없는 간선이 �
     }
   }
 });
+
+test("그룹 열은 **IR 노드의 그룹만** 센다 — 지표의 표시 묶음이 빈 열을 만들지 않는다", async () => {
+  // v0.56이 MetricDef에 tier/group(화면 묶음 메타)을 붙이면서, 배치가 그걸 IR
+  // 파티션 이름으로 오인해 **빈 열 넷**을 만들었다(실측: nCol 10→14, 화면 중앙에
+  // 450 px 죽은 구간). 지표는 colOf가 마지막 열로 보내므로 그 열들은 영원히 빈다.
+  const { cascadeLayout } = await import("./influencelayout.js");
+  const g = {
+    nodes: [
+      { id: "p1", kind: "param", band: "ap" },
+      { id: "i1", kind: "input" },
+      { id: "n1", kind: "ir", group: "scas" },
+      { id: "o1", kind: "output" },
+      { id: "sys:plant", kind: "plant" },
+      { id: "m1", kind: "metric", group: "추종·응답" },
+      { id: "m2", kind: "metric", group: "타면·권한" },
+    ],
+    edges: [{ src: "p1", dst: "n1" }, { src: "n1", dst: "o1" }],
+  };
+  const L = cascadeLayout(g, { width: 800, height: 400 });
+  assert.deepEqual(L.meta.columns,
+    ["파라미터", "입력", "scas", "출력", "기체", "지표"]);
+  // 빈 열이 하나도 없어야 한다 — 열마다 최소 하나
+  const counts = L.ranks.byRank.map((ids) => ids.length);
+  assert.ok(counts.every((c) => c > 0), `빈 열: ${counts.join(",")}`);
+});
+
+test("지표 열은 표시 묶음(group)으로 정렬된다 — 진단 지표 줄과 같은 순서", async () => {
+  const { cascadeLayout } = await import("./influencelayout.js");
+  const g = {
+    nodes: [
+      { id: "i1", kind: "input" },
+      { id: "a", kind: "metric", group: "타면·권한" },
+      { id: "b", kind: "metric", group: "추종·응답" },
+      { id: "c", kind: "metric", group: "타면·권한" },
+      { id: "d", kind: "metric", group: "추종·응답" },
+    ],
+    edges: [],
+  };
+  const L = cascadeLayout(g, { width: 600, height: 400 });
+  const col = L.ranks.byRank[L.ranks.maxRank];
+  const groupOf = new Map(g.nodes.map((n) => [n.id, n.group]));
+  const seq = col.map((id) => groupOf.get(id));
+  // 같은 묶음이 붙어 있어야 한다 — 흩어지면 열이 묶음을 말하지 않는다
+  assert.deepEqual(seq, [...seq].sort((x, y) => seq.indexOf(x) - seq.indexOf(y)));
+  const firstIdx = seq.map((x) => seq.indexOf(x));
+  assert.deepEqual(firstIdx, firstIdx.slice().sort((a, b) => a - b));
+});

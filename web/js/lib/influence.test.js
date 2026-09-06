@@ -5,12 +5,14 @@ import assert from "node:assert/strict";
 
 import {
   KNOB_CLASS, byImpact, columnFormat, coneOf, diagnoseRequest, edgeVia, fmtChange,
+  measuringCone, unionCone,
   fmtDelta, fmtPair, fmtPercent, fmtSigned, impactRank, logScale, pairDigits,
   nodeDetail, normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor,
   paramState, probeTransition, radiusOf, rampColor, relOf, relReadable, fmtRel,
   scanRequest, scanSummary, structuralRequest, sweepCases, sweepKnobs, sweepRequest,
   trendInk, trendMatrix, worstTransitions,
-  BAD_INK, GOOD_INK, SKIN, TREND_LABEL, TREND_MARK, WARN_INK,
+  BAD_INK, BAND_COLOR, GOOD_INK, NODE_COLOR, SKIN, STATE_COLOR, TREND_LABEL,
+  TREND_MARK, WARN_INK,
 } from "./influence.js";
 
 const payload = {
@@ -463,7 +465,7 @@ test("openloopWorst: (knob, 루프)별 |ΔPM|·|ΔGM| 최악 — delta 없는 �
   // 두 줄의 케이스가 갈린다. 한쪽 케이스로 뭉뚱그리면 없는 조합을 화면에 세운다
   assert.deepEqual(rows[0].pm, { value: -2, case: "c1", from: 48.3, to: 46.3 });
   assert.deepEqual(rows[0].gm, { value: -3, case: "c2", from: 12, to: 9 });
-  // 손잡이 자신의 전이 — "무엇을 얼마로 바꿨을 때"가 빠지면 마진 전이가 뜻을 잃는다
+  // 설계변수 자신의 전이 — "무엇을 얼마로 바꿨을 때"가 빠지면 마진 전이가 뜻을 잃는다
   assert.equal(rows[0].knobFrom, 0.8);
   assert.equal(rows[0].knobTo, 0.808);
 });
@@ -601,7 +603,7 @@ test("trendMatrix: 단조·비단조·평탄·판정 불가를 구분한다 — 
   assert.equal(c1.cells.spd_rms.slope, null);
   assert.match(c1.cells.spd_rms.reason, /기준 하나뿐/);
 
-  // 전 점이 같은 값 — 이건 판정 불가가 아니라 "이 손잡이가 이 지표를 안 움직인다"
+  // 전 점이 같은 값 — 이건 판정 불가가 아니라 "이 설계변수가 이 지표를 안 움직인다"
   assert.equal(c1.cells.limiter_frac.trend, "flat");
   assert.equal(c1.cells.limiter_frac.slope, 0);
   assert.equal(c1.cells.limiter_frac.swing, 0);
@@ -726,7 +728,7 @@ test("trendMatrix: 잘린 런·빠진 런은 행에 남는다 — 없는 점을 
   assert.equal(c1.cells.alt_rms.trend, "down");
 });
 
-test("sweepKnobs: 단독 런이 있는 손잡이만 — 쌍 런은 한쪽의 경향으로 읽으면 귀속이 틀린다", () => {
+test("sweepKnobs: 단독 런이 있는 설계변수만 — 쌍 런은 한쪽의 경향으로 읽으면 귀속이 틀린다", () => {
   const rows = [
     { case: "c1", label: "base", overrides: {}, metrics: {} },
     { case: "c1", label: "kp@+0.1", overrides: { kp: 1.1 }, metrics: {} },
@@ -737,7 +739,7 @@ test("sweepKnobs: 단독 런이 있는 손잡이만 — 쌍 런은 한쪽의 경
   assert.deepEqual(sweepKnobs(rows), ["kp", "ki"]);  // 런 순서 = 처방 카드 순서
   assert.deepEqual(sweepKnobs([]), []);
   assert.deepEqual(sweepKnobs(undefined), []);
-  // 손잡이 이름이 다른 단독 런은 그 손잡이의 스팬 점이 아니다
+  // 설계변수 이름이 다른 단독 런은 그 설계변수의 스팬 점이 아니다
   assert.deepEqual(trendMatrix(rows, "kp").points.map((p) => p.span), [0.1, 0.2]);
 });
 
@@ -755,4 +757,153 @@ test("trendInk: 색은 방향이 아니라 좋고 나쁨 — 극성이 없으면
   assert.equal(trendInk("flat", "lower"), SKIN.inkDim);
   assert.equal(trendInk("none", "lower"), SKIN.inkFaint);
   assert.equal(trendInk("up", undefined), SKIN.ink);  // 극성 미상 — 중립
+});
+
+test("합집합 원뿔 — 여러 설계변수의 도달을 한 초점으로 (평가 연동)", () => {
+  const model = normalizeGraph(payload);
+  const ids = model.params.slice(0, 2).map((p) => p.id);
+  const merged = unionCone(model, ids);
+  const each = ids.map((id) => coneOf(model, id));
+  // 합집합은 각 원뿔을 전부 담는다 — 하나라도 빠지면 그림이 사실을 줄인다
+  for (const c of each) {
+    for (const n of c.nodes) assert.ok(merged.nodes.has(n), `노드 누락: ${n}`);
+    for (const e of c.edges) assert.ok(merged.edges.has(e), `간선 누락: ${e}`);
+  }
+  assert.ok(merged.nodes.size >= Math.max(...each.map((c) => c.nodes.size)));
+  // 모르는 id는 조용히 무시하지 않고 그냥 기여가 없다 (빈 원뿔과 같은 규약)
+  assert.equal(unionCone(model, []).nodes.size, 0);
+  assert.equal(unionCone(model, ["param:없는.자리"]).nodes.size, 0);
+});
+
+test("측정 원뿔 — 평가가 도는 동안 「지금 재는 것」을 켠다", () => {
+  // 픽스처를 직접 세운다 — 이 계약은 "기체와 지표만, 파라미터는 아니다"이고
+  // 공용 payload는 지표·기체 간선을 갖지 않아 계약을 못 핀한다
+  const model = normalizeGraph({
+    fingerprint: "fp", control_hz: 100, elapsed_ms: 1,
+    graph: { n_nodes: 4, n_edges: 2 }, warnings: [], metrics: [],
+    nodes: [
+      { id: "param:a", kind: "param", band: "ap", label: "a", state: "ok" },
+      { id: "sys:plant", kind: "plant", label: "기체" },
+      { id: "metric:alt_rms", kind: "metric", label: "고도 RMS" },
+      { id: "metric:spd_rms", kind: "metric", label: "속도 RMS" },
+    ],
+    edges: [
+      { src: "param:a", dst: "sys:plant", kind: "declared" },
+      { src: "sys:plant", dst: "metric:alt_rms", kind: "declared" },
+      { src: "sys:plant", dst: "metric:spd_rms", kind: "declared" },
+    ],
+  });
+  const c = measuringCone(model);
+  // 기체와 지표 열이 켜진다 — 재는 대상이지 원인이 아니다(원인은 끝나야 안다)
+  assert.ok(c.nodes.has("sys:plant"));
+  assert.ok(c.nodes.has("metric:alt_rms") && c.nodes.has("metric:spd_rms"));
+  assert.ok(!c.nodes.has("param:a"), "파라미터가 켜지면 「범인」으로 읽힌다");
+  // 기체→지표 간선만 — 파라미터→기체는 이 초점의 주어가 아니다
+  assert.equal(c.edges.size, 2);
+  for (const i of c.edges) {
+    const e = model.edges[i];
+    assert.ok(c.nodes.has(e.src) && c.nodes.has(e.dst));
+  }
+});
+
+// ── 배색 계약 ──────────────────────────────────────────────────────────────
+// 색은 이 화면의 유일한 묶음 표시라 "비슷해 보인다"가 곧 기능 상실이다. 눈으로
+// 고르면 반드시 무너지므로 거리로 못박는다. 산술은 dataviz 검증기와 같은
+// OKLab ΔE×100 · Machado 2009 색각이상 시뮬레이션이고, **여기서 독립적으로**
+// 계산한다 — lib이 쓰는 상수를 되읽으면 그 상수가 틀렸을 때 같이 틀린다.
+const _lin = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+};
+const _oklab = ([r, g, b]) => {
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+          1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+          0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+};
+const _CVD = {
+  protan: [[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216],
+           [-0.003882, -0.048116, 1.051998]],
+  deutan: [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413],
+           [-0.011820, 0.042940, 0.968881]],
+};
+const _sim = (hex, kind) => {
+  const [r, g, b] = _lin(hex), m = _CVD[kind];
+  const cl = (c) => Math.max(0, Math.min(1, c));
+  return [cl(m[0][0] * r + m[0][1] * g + m[0][2] * b),
+          cl(m[1][0] * r + m[1][1] * g + m[1][2] * b),
+          cl(m[2][0] * r + m[2][1] * g + m[2][2] * b)];
+};
+const dE = (a, b, kind) => {
+  const x = _oklab(kind ? _sim(a, kind) : _lin(a));
+  const y = _oklab(kind ? _sim(b, kind) : _lin(b));
+  return 100 * Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]);
+};
+/** 한 묶음 안 최악 쌍 — [거리, "a↔b"]. 인접이 아니라 **전체 쌍**이다:
+ *  노드 그래프에서는 어느 둘이든 옆에 설 수 있다. */
+function worstPair(map, kind) {
+  const k = Object.keys(map);
+  let worst = [Infinity, ""];
+  for (let i = 0; i < k.length; i++) {
+    for (let j = i + 1; j < k.length; j++) {
+      const d = dE(map[k[i]], map[k[j]], kind);
+      if (d < worst[0]) worst = [d, `${k[i]}↔${k[j]}`];
+    }
+  }
+  return worst;
+}
+
+test("법칙 안 묶음 여섯은 전체 쌍이 정상시야 ΔE 15 이상", () => {
+  const inLaw = ["ap", "scas", "mix", "lim", "sched", "rate"];
+  const map = Object.fromEntries(inLaw.map((k) => [k, BAND_COLOR[k]]));
+  for (const k of inLaw) assert.ok(map[k], `묶음 ${k}에 색이 없다`);
+  const [d, pair] = worstPair(map);
+  assert.ok(d >= 15, `정상시야 최악 ${pair} ΔE ${d.toFixed(1)} — 바닥 15`);
+});
+
+test("법칙 안 묶음 여섯은 색각이상에서도 ΔE 8 이상", () => {
+  const inLaw = ["ap", "scas", "mix", "lim", "sched", "rate"];
+  const map = Object.fromEntries(inLaw.map((k) => [k, BAND_COLOR[k]]));
+  for (const kind of ["protan", "deutan"]) {
+    const [d, pair] = worstPair(map, kind);
+    assert.ok(d >= 8, `${kind} 최악 ${pair} ΔE ${d.toFixed(1)} — 목표 8`);
+  }
+});
+
+test("법칙 밖 셋은 같은 회색이 아니다 — 범례에서 나란히 선다", () => {
+  const out = { nav: BAND_COLOR.nav, actuator: BAND_COLOR.actuator,
+                guidance: BAND_COLOR.guidance };
+  const [d, pair] = worstPair(out);
+  assert.ok(d >= 15, `무채색 3단 최악 ${pair} ΔE ${d.toFixed(1)}`);
+});
+
+test("파라미터 상태 여섯은 서로 구별된다 — 「덮임」과 「오류」가 같은 색이면 끝이다", () => {
+  const [d, pair] = worstPair(STATE_COLOR);
+  assert.ok(d >= 15, `상태색 최악 ${pair} ΔE ${d.toFixed(1)}`);
+  for (const kind of ["protan", "deutan"]) {
+    const [c, p] = worstPair(STATE_COLOR, kind);
+    assert.ok(c >= 6, `${kind} 최악 ${p} ΔE ${c.toFixed(1)} — 바닥 6`);
+  }
+});
+
+test("기체·지표는 서로 다른 색이다 — 종전에는 유령과 지표가 같은 주황이었다", () => {
+  assert.notEqual(NODE_COLOR.plant, NODE_COLOR.metric);
+  assert.ok(dE(NODE_COLOR.plant, NODE_COLOR.metric) >= 15);
+});
+
+test("모든 노드 색은 캔버스 바탕(#0b0b0d)에 3:1 이상", () => {
+  const lum = (hex) => {
+    const [r, g, b] = _lin(hex);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const bg = lum(SKIN.bg1);
+  for (const [k, v] of Object.entries({ ...BAND_COLOR, ...STATE_COLOR, ...NODE_COLOR })) {
+    const cr = (lum(v) + 0.05) / (bg + 0.05);
+    assert.ok(cr >= 3, `${k} ${v} 대비 ${cr.toFixed(2)}:1`);
+  }
 });

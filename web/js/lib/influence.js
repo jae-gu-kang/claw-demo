@@ -39,13 +39,39 @@ export const SKIN = {
   red: "#ff453a", pink: "#ff375f", gray: "#8e8e93", gray2: "#636366",
 };
 
-// 파라미터 묶음 색 — 화면의 세로 그룹과 1:1. 법칙 밖 묶음은 무채색으로 묶어
-// "여기는 제어법칙이 아니다"를 색 없음으로 말한다
+/** 파라미터 묶음 색 — 화면의 세로 그룹과 1:1. 법칙 밖 묶음은 무채색으로 묶어
+ *  "여기는 제어법칙이 아니다"를 색 없음으로 말한다.
+ *
+ * **시스템 색을 그대로 쓰지 않는다.** SKIN은 Apple 다크 시스템 색이라 배지·글자
+ * 용으로는 맞지만 묶음 여섯을 거기서 고르면 mint(#66d4cf)와 teal(#64d2ff)처럼
+ * 이름만 다른 짝이 섞이고, 밝기가 제각각이라 어느 것이 앞이고 뒤인지가 색으로
+ * 읽힌다(묶음에는 순서가 없다). 그래서 여섯은 OKLCH 공간에서 직접 골랐고, 조건은
+ * 이 캔버스 바탕(#0b0b0d) 기준으로 **전체 쌍**이다 — 노드 그래프에서는 어느 두
+ * 묶음이든 옆에 설 수 있어 인접 쌍만 보면 거짓말이 된다:
+ *   · 밝기대 L 0.48~0.67 안(전원) — 밝기가 묶음의 등급으로 읽히지 않게
+ *   · 채도 0.115~0.175 — 바닥은 "회색으로 읽힘" 방지, 상한은 네온 방지
+ *   · 전체 쌍 정상시야 ΔE 17.4 (바닥 15) · 색각이상(protan/deutan) ΔE 8.1 (목표 8)
+ *   · 전원 바탕 대비 3:1 이상
+ * 검증은 dataviz의 `scripts/validate_palette.js`(OKLab ΔE×100 · Machado 2009)로
+ * 했고 여섯 검사 전부 all-pairs 통과다. **값을 손대면 그 검사를 다시 돌릴 것** —
+ * 눈으로 고른 색은 색각이상에서 무너지는 쪽이 정상이다.
+ *
+ * 무채색 셋(법칙 밖)은 같은 회색 하나가 아니라 밝기 3단이다 — 종전에는 셋이
+ * 전부 SKIN.gray라 범례에서 "항법·작동기·유도"가 같은 칩을 달고 있었다.
+ */
 export const BAND_COLOR = {
-  ap: SKIN.blue, scas: SKIN.mint, mix: SKIN.indigo, lim: SKIN.red,
-  sched: SKIN.purple, rate: SKIN.yellow, nav: SKIN.gray, actuator: SKIN.gray,
-  guidance: SKIN.gray, io: SKIN.teal, metric: SKIN.orange, top: SKIN.teal,
+  // 제어법칙 안 — 여섯 묶음
+  ap: "#5e90ea", scas: "#c28412", mix: "#794cb8",
+  lim: "#b43c43", sched: "#2aa776", rate: "#d363b4",
+  // 법칙 밖 — 무채색 3단 (상호 ΔE 15 이상)
+  nav: "#babac6", actuator: "#8b8b97", guidance: "#5f5f6a",
+  // 경계 — 입·출력 포트와 묶음 없는 법칙 노드. 색을 주지 않는 것이 뜻이다
+  io: "#6d7484", top: "#6d7484",
 };
+
+/** 묶음이 아닌 노드 종류의 색 — 기체는 물리, 지표는 결과. 둘 다 법칙이 아니라서
+ *  무채색 계열이되 밝기로 갈린다(ΔE 16.5). 지표는 속 빈 링이라 모양도 다르다. */
+export const NODE_COLOR = { plant: "#a2a9b8", metric: "#d7dee9" };
 
 /** 파라미터의 상태 — 화면이 반드시 구분해야 하는 다섯 가지.
  *
@@ -76,16 +102,26 @@ export const STATE_NOTE = {
 };
 
 // 캔버스(검은 면)용 — Apple 다크 시스템 색
+/** 상태색은 **상태 팔레트**다 — 묶음색(BAND_COLOR)과 역할이 다르므로 값도 따로
+ *  둔다. 묶음은 채도를 눌러 구조를 뒤로 물리고, 상태는 시스템 색 그대로 앞에
+ *  세운다(사용자가 편집하는 것이 파라미터다). 파라미터 노드는 자기 열에 모여
+ *  있어 묶음색과 섞이지 않는다.
+ *
+ * 두 자리를 고쳤다: ①「덮임」이 분홍이라 「오류」 빨강과 ΔE 5.0이었다 — 상태가
+ * 여섯인데 둘이 같은 색이면 그 화면의 값어치가 없어진다. 연보라로 옮겨 정상시야
+ * 17.6·색각이상 13.8이 됐다(진보라 #bf5af2는 색각이상에서 파랑과 ΔE 4.3이라
+ * 탈락). ②무채색 둘의 간격을 넓혔다(14.8 → 21.2, 둘 다 바탕 대비 3:1은 유지).
+ * 최악 쌍은 이제 「위상」↔「오류」 18.4(색각이상 12.1)다. */
 export const STATE_COLOR = {
-  live: SKIN.blue, structural: SKIN.orange, overridden: SKIN.pink,
-  inert: SKIN.gray2, offgraph: SKIN.gray, error: SKIN.red,
+  live: SKIN.blue, structural: SKIN.orange, overridden: "#e0a6ff",
+  inert: "#63636b", offgraph: "#a2a2aa", error: SKIN.red,
 };
 
 /** 다크 패널(배지·주석)용 — Apple이 어두운 바탕 대비를 맞추려고 내놓은 접근성 변형.
  *  캔버스용 STATE_COLOR를 그대로 배지 텍스트에 쓰면 그레이 계열이 #1c1c1e 위
  *  3:1 밑으로 떨어진다(캔버스 노드는 면이라 되지만 12px 텍스트는 안 된다). */
 export const STATE_INK = {
-  live: "#409cff", structural: "#ffb340", overridden: "#ff6482",
+  live: "#409cff", structural: "#ffb340", overridden: "#e0a6ff",
   // 무채색 둘도 다크 바탕 기준으로 잡는다 — 캔버스용 #636366은 배지에서 2:1대다.
   // 「법칙 밖」이 더 밝은 이유: 설명이 가장 필요한 상태라 문장으로도 읽혀야 한다
   inert: "#98989d", offgraph: "#aeaeb2", error: "#ff6961",
@@ -148,6 +184,41 @@ export function coneOf(model, paramId) {
 
 /** 노드 반지름 — 하류 도달 개수가 클수록 크게. 층 그림에서 "허브"가 눈에 띈다.
  *  모양이 종류마다 다르므로(스퀘어클·캡슐·링) 여기서는 **반크기**로 읽는다. */
+/** 측정 원뿔 — 평가가 **도는 동안** 켜 둘 것. 기체와 지표 열이다.
+ *
+ * 실행 중에는 무엇이 원인인지 아직 모른다(귀속은 런이 끝나야 나온다). 그래서
+ * 여기서 켜는 것은 「지금 재고 있는 대상」이지 「범인」이 아니다 — 자막이 그
+ * 구분을 말한다. 끝나면 귀속 초점(unionCone)으로 갈아탄다.
+ */
+export function measuringCone(model) {
+  const nodes = new Set(["sys:plant"]);
+  for (const n of model.nodes) if (n.kind === "metric") nodes.add(n.id);
+  const edges = new Set();
+  model.edges.forEach((e, i) => {
+    if (nodes.has(e.src) && nodes.has(e.dst)) edges.add(i);
+  });
+  return { nodes, seeds: new Set(["sys:plant"]), edges };
+}
+
+/** 여러 설계변수의 도달을 한 초점으로 — 평가 결과 연동의 그림 몫.
+ *
+ * 평가가 귀속한 설계변수가 여럿일 때 하나만 켜면 그림이 사실을 줄인다. 원뿔 계산
+ * 자체는 coneOf 그대로이고 여기서는 합칠 뿐이다 — 도달 판정을 다시 적지 않는다.
+ */
+export function unionCone(model, paramIds) {
+  const nodes = new Set();
+  const seeds = new Set();
+  const edges = new Set();
+  for (const id of paramIds ?? []) {
+    const c = coneOf(model, id);
+    for (const n of c.nodes) nodes.add(n);
+    for (const s of c.seeds) seeds.add(s);
+    for (const e of c.edges) edges.add(e);
+  }
+  return { nodes, seeds, edges };
+}
+
+
 export function radiusOf(node, { maxReach = 60 } = {}) {
   if (node.kind === "param") return 4.4;
   if (node.kind === "metric") return 7.5;
@@ -546,7 +617,7 @@ export function worstTransitions(rows) {
   return out;
 }
 
-// ── 구간 경향 (3단 C) — 손잡이 하나를 흔들었을 때 **전 구간**이 어느 쪽으로 가는가 ──
+// ── 구간 경향 (3단 C) — 설계변수 하나를 흔들었을 때 **전 구간**이 어느 쪽으로 가는가 ──
 //
 // 3단 B의 요약(worstTransitions)은 런별 **최악 한 칸**만 낸다: "가장 나쁜 데가
 // 어디냐"에는 답하지만 "엔벨로프를 따라 어느 쪽으로 기우느냐"에는 답하지 못한다.
@@ -554,7 +625,7 @@ export function worstTransitions(rows) {
 // 행 사이에 흩어진다 — 사람이 눈으로 피벗해야 했다. 여기서 그 135행을
 // **(구간 × 지표) 한 장**으로 접는다.
 //
-// 접는 축은 **스팬**이다: 한 케이스에서 손잡이를 −20·−10·기준·+10·+20%로 놓은
+// 접는 축은 **스팬**이다: 한 케이스에서 설계변수를 −20·−10·기준·+10·+20%로 놓은
 // 다섯 점을 스팬 순으로 세우면 그것이 그 구간의 응답 곡선이고, 곡선의 부호가 경향이다.
 
 const SLOPE_SPAN = 0.1;  // 감도의 단위 — "게인 +10%당 Δ" (스팬 기본 간격과 같다)
@@ -595,11 +666,11 @@ function spanOf(label, knob) {
   return Number.isFinite(s) && s !== 0 ? s : null;
 }
 
-/** 스윕 결과에서 **단독 런이 있는** 손잡이들 — 구간 경향의 주어가 될 수 있는 것.
+/** 스윕 결과에서 **단독 런이 있는** 설계변수들 — 구간 경향의 주어가 될 수 있는 것.
  *
- * 쌍 런(A&B)은 제외한다: 두 손잡이가 같이 움직인 Δ를 한쪽의 경향으로 읽으면 귀속이
+ * 쌍 런(A&B)은 제외한다: 두 설계변수가 같이 움직인 Δ를 한쪽의 경향으로 읽으면 귀속이
  * 틀린다(sweepFor의 규약과 같다). 쌍의 단독 점(a@+0.1)은 단독 런이므로 포함된다.
- * 순서는 런 순서 그대로 — 처방 카드가 손잡이를 세운 순서다.
+ * 순서는 런 순서 그대로 — 처방 카드가 설계변수를 세운 순서다.
  */
 export function sweepKnobs(rows) {
   const out = [];
@@ -623,7 +694,7 @@ const TREND_EPS_REL = 1e-12;
 /** 스팬 순 점열 `[[스팬, 값], …]` → 경향 한 칸. 기준(스팬 0)도 한 점이다.
  *
  * 단조 판정은 **연속 차분의 부호**로 한다. 회귀 기울기의 부호로 하면 −20%에서 튀고
- * +20%에서 돌아오는 곡선이 "단조"로 접혀, 스팬 안에 극점이 있다는 사실 — 이 손잡이를
+ * +20%에서 돌아오는 곡선이 "단조"로 접혀, 스팬 안에 극점이 있다는 사실 — 이 설계변수를
  * 한쪽으로 밀면 안 된다는 사실 — 이 화면에서 사라진다.
  *
  * 곡선을 못 세울 때의 **사유는 여기서만 만든다.** 부르는 쪽이 나중에 덮어쓰면 맞는
@@ -682,10 +753,10 @@ function trendOf(pts, { hasBase = true, divBase = false, divSpan = false } = {})
   };
 }
 
-/** 스윕 행 → 구간 경향 표. 손잡이 하나에 대해 (구간 × 지표) 한 장.
+/** 스윕 행 → 구간 경향 표. 설계변수 하나에 대해 (구간 × 지표) 한 장.
  *
  * 반환:
- * - `points`  스팬 점 (오름차순) — 라벨과 그때 손잡이가 놓인 **절대값**.
+ * - `points`  스팬 점 (오름차순) — 라벨과 그때 설계변수가 놓인 **절대값**.
  *             두 점의 knobValue가 같으면 범위 클립이다(엔진 notes가 사유를 낸다).
  * - `cases`   구간 — 격자 순서(fuel, alt, mach)로 세운다. 실행 순서(서펜타인)는
  *             인접 트림 시드용이라 표에서는 마하가 줄마다 뒤집혀 읽힌다.
@@ -806,7 +877,7 @@ export function openloopWorst(params, knobs) {
         pm = at("pm_deg", pm, e.delta.pm_deg);
         gm = at("gm_db", gm, e.delta.gm_db);
       }
-      // 손잡이 자신의 전이(value → probe_to)도 함께 — 마진이 얼마에서 얼마로 갔는지는
+      // 설계변수 자신의 전이(value → probe_to)도 함께 — 마진이 얼마에서 얼마로 갔는지는
       // **무엇을 얼마로 바꿨을 때**인지와 짝이어야 읽힌다
       if (n) rows.push({ param: pid, loop, nCases: n, pm, gm,
         knobFrom: p.value ?? null, knobTo: p.probe_to ?? null });

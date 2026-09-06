@@ -3,9 +3,9 @@
 이 화면의 주 질문은 "이 값을 바꾸면 무엇이 얼마나 달라지나"이고, 답을 세 단으로 낸다:
 구조 도달성(즉시) · 개루프 Δ(잡) · 폐루프 스윕(잡). 세 단이 다 붙어 있고, 2·3단
 앞에는 진단이 선다 — "얼마나"를 재기 전에 "무엇을 만질지"(필터/게인/클램프/리미터/
-스케줄, 단독/동시)를 저장된 런에서 귀속하고, 처방 카드의 손잡이만 스윕한다.
+스케줄, 단독/동시)를 저장된 런에서 귀속하고, 처방 카드의 설계변수만 스윕한다.
 
-## 배치 — 그래프가 화면이고 나머지는 서랍이다 (v0.49)
+## 배치 — 그래프가 화면이고 나머지는 패널이다 (v0.49)
 
 블록도 최상위와 같은 규약이다: **주 그림은 카드에 넣지 않는다.** 종전에는 패널
 다섯 장이 세로로 쌓여 그래프가 그중 한 칸이었고, 첫 화면에서 그래프 아래로 표
@@ -19,7 +19,7 @@
 
 3단 B가 답하지 못하던 자리다. B의 요약은 런별 **최악 한 칸**만 내고(엔벨로프를
 접는다), 케이스×런 전체 표는 15케이스 × 9런 = 135행이라 경향이 행 사이에 흩어진다.
-같은 행들을 손잡이 하나 기준 (구간 × 지표) 한 장으로 접은 것이 이 서랍이고, 행이
+같은 행들을 설계변수 하나 기준 (구간 × 지표) 한 장으로 접은 것이 이 패널이고, 행이
 구간이라 세로로 한 번 훑으면 "저고도에서만 좋아지고 고고도에서는 나빠진다"가
 그대로 읽힌다. **새로 재지 않는다** — 저장된 런의 순수 변환(`trendMatrix`)이라
 잡도 엔드포인트도 없다.
@@ -37,7 +37,7 @@
 
 **표가 정본 표면이고 캔버스는 보조다.** 캔버스는 보조기술에 불투명하므로, 화면이
 말하는 모든 사실(상태·도달 개수·도달 출력)은 파라미터 표에도 반드시 있다 —
-wpmap.js가 웨이포인트 표에 접근성을 맡긴 것과 같은 규약. 서랍에 넣었어도 표는
+wpmap.js가 웨이포인트 표에 접근성을 맡긴 것과 같은 규약. 패널에 넣었어도 표는
 그대로 있고 칩 하나로 열린다.
 
 이 탭은 **전면 다크**다: 검은 캔버스가 화면의 중심이라 패널만 밝으면 경계마다
@@ -53,12 +53,13 @@ import {
   byImpact, columnFormat, coneOf, diagnoseRequest, edgeVia, fmtChange, fmtDelta,
   fmtPair, fmtPercent, fmtSigned, nodeDetail,
   normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor, probeTransition,
-  radiusOf, relOf, relReadable, fmtRel, scanRequest, scanSummary, structuralRequest,
+  measuringCone, radiusOf, relOf, relReadable, fmtRel, scanRequest, scanSummary,
+  structuralRequest, unionCone,
   sweepCases, sweepKnobs, sweepRequest, trendInk, trendMatrix, worstTransitions,
 } from "../lib/influence.js";
 import {
   STATUS_LABEL, attributionRows, cardDeltas, caseGrid, checksSummary,
-  compositionLine,
+  compositionLine, evalFocus,
   evaluateRequest, hardFailLines, jLine, localityLines, normalizeEvalReport,
   normalizeVerifyReport, statusInk, verifyRequest,
 } from "../lib/evaluate.js";
@@ -85,7 +86,7 @@ const ROW_GAP = 19;
 const state = {
   variant: "cascade", selection: null, model: null, layout: null,
   cone: null, play: null,
-  // 열린 서랍 하나 (null = 전부 닫힘) — 탭을 떠났다 와도 보던 자리로 돌아온다
+  // 열린 패널 하나 (null = 전부 닫힘) — 탭을 떠났다 와도 보던 자리로 돌아온다
   drawer: null,
   // 진단(2단 앞의 "무엇을") · 스캔(3단 A "어느 케이스가") · 스윕(3단 B "얼마나")
   // — 탭을 떠났다 와도 결과 유지
@@ -93,12 +94,15 @@ const state = {
   // A/B/C 평가 — 어휘·기준(서버 정본 echo), 카드 강조(null = 전체 — 표시 전용:
   // 비용 게이트는 depth·verify가 대신한다), 마지막 평가 런·검증 런
   evalMeta: null, evalSel: null, evalRun: null, verifyRun: null,
+  // 평가 결과의 그림 몫 — 귀속된 설계변수가 문턱 넘은 지표까지 어떻게 닿는지.
+  // 파라미터를 직접 고르면 그쪽이 이긴다(사용자 조작이 자동 강조보다 위다)
+  evalCone: null, evalPlay: null, evalCaption: null,
   // 직전 평가 — 재측정하면 카드가 얼마에서 얼마로 갔는지 낸다(판독대 문법)
   evalPrev: null,
   // 정량 처방 — "얼마나"의 답 (스윕 결과 참조 + 확인 런)
   prescribe: null,
-  // 구간 경향(3단 C)이 보고 있는 손잡이·지표 — 결과가 아니라 **보는 자리**라
-  // 스윕과 수명이 다르다(같은 스윕을 손잡이별로 훑는 것이 이 표의 용법이다)
+  // 구간 경향(3단 C)이 보고 있는 설계변수·지표 — 결과가 아니라 **보는 자리**라
+  // 스윕과 수명이 다르다(같은 스윕을 설계변수별로 훑는 것이 이 표의 용법이다)
   trendKnob: null, trendMetric: null,
   // 케이스 격자 입력 — 결과(scan.selected)와 수명이 같아야 한다. 입력만 기본값으로
   // 되돌아가면 재진입 직후 3단 B가 "격자가 바뀌었다"고 거절한다(사용자는 안 건드렸다)
@@ -421,7 +425,7 @@ export function render() {
    *  초록/빨강을 입히면 화면이 진단(2·3단 문턱)의 판정을 참칭한다.
    *
    *  구간 경향 표(trendInk)는 같은 `MetricDef.better`로 색을 칠하는데 모순이 아니다:
-   *  저기서 색이 붙는 대상은 값이 아니라 **부호**이고(문턱과 무관하다), "이 손잡이를
+   *  저기서 색이 붙는 대상은 값이 아니라 **부호**이고(문턱과 무관하다), "이 설계변수를
    *  올리면 이 지표는 나빠지는 쪽으로 간다"는 선언된 극성 그대로다. 여기는 값,
    *  저기는 방향 — 문턱을 아는 척하는 쪽만 금지다. */
   function chgChip(delta, rel, unit) {
@@ -456,9 +460,9 @@ export function render() {
     return res?.fingerprint && fp && res.fingerprint !== fp ? res.fingerprint : null;
   };
 
-  /** 2단 — 이 손잡이의 (루프별) 마진 전이 중 |ΔPM|이 가장 큰 루프 하나.
+  /** 2단 — 이 설계변수의 (루프별) 마진 전이 중 |ΔPM|이 가장 큰 루프 하나.
    *
-   * "안 쟀다"와 "쟀는데 이 손잡이가 대상이 아니었다"는 **다른 사실**이다 — 뭉치면
+   * "안 쟀다"와 "쟀는데 이 설계변수가 대상이 아니었다"는 **다른 사실**이다 — 뭉치면
    * 화면이 방금 돌린 계산을 다시 돌리라고 시키고, 다시 돌려도 문구가 안 바뀐다. */
   function openloopFor(pid) {
     const res = state.openloop?.result;
@@ -475,8 +479,8 @@ export function render() {
     return { best, stale };
   }
 
-  /** 3단 — 이 손잡이 **단독** 런들만 모아 지표별 최악 전이. 쌍 런(A&B)은 제외한다:
-   *  두 손잡이가 같이 움직인 Δ를 한 손잡이의 영향으로 읽으면 귀속이 틀린다. */
+  /** 3단 — 이 설계변수 **단독** 런들만 모아 지표별 최악 전이. 쌍 런(A&B)은 제외한다:
+   *  두 설계변수가 같이 움직인 Δ를 한 설계변수의 영향으로 읽으면 귀속이 틀린다. */
   function sweepFor(pid) {
     const res = state.sweep?.result;
     const rows = res?.rows;
@@ -542,11 +546,11 @@ export function render() {
     const ol = openloopFor(sel.param_id);
     if (!ol) {
       rows.append(roWhy("2단 개루프", "#409cff",
-        "아직 안 쟀다 — 「감도」 서랍의 마진 민감도가 이 자리를 채운다."));
+        "아직 안 쟀다 — 「감도」 패널의 마진 민감도가 이 자리를 채운다."));
     } else if (ol.missing) {
       rows.append(roWhy("2단 개루프", "#409cff",
-        "이 손잡이는 잰 적이 없다 — 개루프는 처방 카드가 고른 손잡이만 잰다. " +
-        "이 값을 재려면 이 손잡이를 포함하는 카드에서 [개루프 근거]를 누른다."));
+        "이 설계변수는 잰 적이 없다 — 개루프는 처방 카드가 고른 설계변수만 잰다. " +
+        "이 값을 재려면 이 설계변수를 포함하는 카드에서 [개루프 근거]를 누른다."));
     } else if (!ol.best) {
       rows.append(roWhy("2단 개루프", "#409cff",
         `유효한 Δ 없음 — ${ol.reason ?? "선언된 SISO 루프가 없다"}`));
@@ -571,11 +575,11 @@ export function render() {
         "여기가 폐루프 실측이고, 위 두 단은 그 전에 범위를 좁히는 근사다."));
     } else if (sw.missing) {
       rows.append(roWhy("3단 폐루프", "#ffb340",
-        "이 손잡이는 흔든 적이 없다 — 스윕은 처방 부분공간만 흔든다(전 게인 공간이 " +
-        "아니다). 이 값을 재려면 이 손잡이를 포함하는 카드에서 [이 부분공간 스윕]을 누른다."));
+        "이 설계변수는 흔든 적이 없다 — 스윕은 처방 부분공간만 흔든다(전 게인 공간이 " +
+        "아니다). 이 값을 재려면 이 설계변수를 포함하는 카드에서 [이 부분공간 스윕]을 누른다."));
     } else {
       for (const s of sw.list.slice(0, 3)) {
-        // 손잡이를 **얼마로** 놓았을 때인지가 함께 있어야 지표 전이가 뜻을 갖는다.
+        // 설계변수를 **얼마로** 놓았을 때인지가 함께 있어야 지표 전이가 뜻을 갖는다.
         // 기준값은 붙이지 않는다: 여기 있는 sel.value는 **지금** 모델의 값이고
         // knobTo는 저장된 런의 값이라, 둘을 화살표로 이으면 실제로 일어난 적 없는
         // 전이가 만들어진다(게인 탭에서 값을 바꾸고 돌아오면 바로 그렇게 된다).
@@ -588,7 +592,7 @@ export function render() {
       if (sw.list.length > 3) {
         rows.append(el("div", { class: "inf-rorow" },
           el("span", { class: "inf-why" },
-            `… 외 지표 ${sw.list.length - 3}개 — 「스윕 Δ」 서랍에 전부 있다`)));
+            `… 외 지표 ${sw.list.length - 3}개 — 「스윕 Δ」 패널에 전부 있다`)));
       }
     }
     if (sw?.stale) rows.append(roWhy("", WARN_INK, staleNote(sw.stale)));
@@ -715,7 +719,7 @@ export function render() {
       renderPath();
       renderLegend(m);
       renderTabCounts();  // 파라미터 개수·경고 개수가 여기서 정해진다
-      renderDrawer();     // 열려 있던 서랍이 새 모델의 내용으로 다시 그려진다
+      renderDrawer();     // 열려 있던 패널이 새 모델의 내용으로 다시 그려진다
       rebuild();
       canvas.invalidate();
     } catch (e) {
@@ -898,6 +902,7 @@ export function render() {
     // 직전 결과는 여기서 잡는다 — 아래 제출이 state.evalRun을 갈아 끼우므로
     // 완료 시점에 읽으면 이미 null이다(델타가 영영 안 나오던 자리)
     const prevResult = state.evalRun?.result ?? null;
+    setMeasuringFocus(true);  // 도는 동안 재는 대상을 켠다
     runStatus(`평가 제출 중 — 케이스 ${cases.length}건`
       + (depth === "linear" ? " · 선형만(시뮬 0)" : " · 표준+동시명령 런"));
     try {
@@ -914,6 +919,7 @@ export function render() {
       if (done.status !== "done" || !done.result_id) {
         state.evalRun.status = done.status;
         state.evalRun.error = done.error ?? `평가 ${done.status}`;
+        setMeasuringFocus(false);  // 결과가 없으면 켜 둘 근거도 없다
         renderEval();
         runStatus(`평가 ${done.status}`, { open: "eval", bad: true });
         return;
@@ -926,11 +932,13 @@ export function render() {
         (prevResult && prevResult.depth === next.depth) ? prevResult : null;
       state.evalRun = { status: "완료", submitted: true, result: next, error: null,
                         resultId: done.result_id };
+      applyEvalFocus(next);
       renderEval();
       runStatus("평가 완료", { open: "eval" });
     } catch (e) {
       state.evalRun = { status: "실패", submitted: state.evalRun?.submitted ?? false,
                         result: null, error: errorText(e) };
+      setMeasuringFocus(false);
       renderEval();
       runStatus("평가 실패", { open: "eval", bad: true });
     }
@@ -1046,16 +1054,16 @@ export function render() {
     const m = pr.result;
     if (!m) return;
 
-    // 단일 — 손잡이 하나씩의 필요 변화량 (사유가 값 자리다)
+    // 단일 — 설계변수 하나씩의 필요 변화량 (사유가 값 자리다)
     const rows = singleRows(m);
     if (rows.length) {
       prescribeBox.append(
         el("h3", { style: "margin:10px 0 4px;font-size:14px" },
-          "단일 손잡이 — 이 하나만 고친다면 얼마나"),
+          "단일 설계변수 — 이 하나만 고친다면 얼마나"),
         el("div", { class: "scroll-x" },
           el("table", {},
             el("thead", {}, el("tr", {},
-              ["손잡이", "지표", "필요 변화"].map((h) => el("th", {}, h)))),
+              ["설계변수", "지표", "필요 변화"].map((h) => el("th", {}, h)))),
             el("tbody", {}, rows.map((r) => el("tr", {},
               el("td", {}, el("code", { style: mono() }, r.knob)),
               el("td", { style: "white-space:nowrap" }, metricLabel(r.metric)),
@@ -1122,8 +1130,8 @@ export function render() {
 
   /** 소견의 [얼마나 →] — 평가가 지목한 자리를 그대로 물려 감도와 해를 푼다.
    *
-   * 그 손잡이를 흔든 스윕이 없으면 **먼저 스윕을 돌린다**. 사용자가 "스윕부터
-   * 돌리세요"라는 말을 듣고 다른 서랍으로 가서 카드를 찾아 누르는 단계가 이
+   * 그 설계변수를 흔든 스윕이 없으면 **먼저 스윕을 돌린다**. 사용자가 "스윕부터
+   * 돌리세요"라는 말을 듣고 다른 패널로 가서 카드를 찾아 누르는 단계가 이
    * 연계의 이유라, 여기서 그 단계를 대신한다.
    */
   async function runPrescribeFromEval(knobs) {
@@ -1143,7 +1151,7 @@ export function render() {
     const need = knobs.filter((k) => !swept.has(k));
     try {
       if (need.length || !state.sweep?.resultId) {
-        runStatus(`감도 측정 중 — 손잡이 ${knobs.length}개 × 케이스 ${cases.length}건`);
+        runStatus(`감도 측정 중 — 설계변수 ${knobs.length}개 × 케이스 ${cases.length}건`);
         const sj = await api.post("/influence/sweep", sweepRequest(shapeState(), {
           cases, knobs, pairs: [],
           tSettle: 5, tStep: Number(stepIn.value) || 15,
@@ -1175,15 +1183,66 @@ export function render() {
     }, `${EVAL_MARK[status] ?? ""} ${STATUS_LABEL[status] ?? status}`);
   }
 
+  /** 실행 중 초점 — **재고 있는 대상**을 켠다. 귀속은 런이 끝나야 나오므로
+   *  여기서 설계변수를 켜면 아직 모르는 것을 범인으로 지목하는 셈이다. */
+  function setMeasuringFocus(on) {
+    if (!on || !state.model) {
+      if (!state.evalRun?.result) {
+        state.evalCone = null;
+        state.evalPlay = null;
+        state.evalCaption = null;
+        evalFocusLine.textContent = "";
+      }
+    } else {
+      const cone = measuringCone(state.model);
+      state.evalCone = cone.nodes.size ? cone : null;
+      state.evalPlay = state.evalCone
+        ? conePlayback(state.model, state.evalCone) : null;
+      state.evalCaption = state.evalCone
+        ? "평가 중 — 지금 재고 있는 것(기체와 지표). 어느 설계변수가 원인인지는 "
+          + "런이 끝나야 나온다"
+        : null;
+      evalFocusLine.textContent = state.evalCaption ?? "";
+    }
+    canvas?.invalidate();
+  }
+
+  /** 평가 결과 → 그래프 초점. 판정을 다시 하지 않는다(lib/evaluate evalFocus가
+   *  카드·국소성·소견에서 id만 뽑고, 도달은 lib/influence unionCone이 낸다). */
+  function applyEvalFocus(model) {
+    const focus = model ? evalFocus(model) : null;
+    if (!focus || !state.model) {
+      state.evalCone = null;
+      state.evalPlay = null;
+      state.evalCaption = null;
+    } else {
+      const known = focus.paramIds.filter((id) => state.model.byId.has(id));
+      const cone = unionCone(state.model, known);
+      // 문턱 넘은 지표는 원뿔에 없더라도 켠다 — 실패한 지표가 그림에서 꺼져 있으면
+      // 표는 실패라는데 그림은 무관하다고 말한다
+      for (const id of focus.metricIds) {
+        if (state.model.byId.has(id)) cone.nodes.add(id);
+      }
+      state.evalCone = cone.nodes.size ? cone : null;
+      // 원뿔만으로는 아무것도 안 켜진다 — paintCone이 재생 진행도로 노드·간선을
+      // 켜므로(edgeProgress·nodeOn) 재생을 함께 만들어야 그림이 나타난다
+      state.evalPlay = state.evalCone
+        ? conePlayback(state.model, state.evalCone) : null;
+      state.evalCaption = state.evalCone ? focus.caption : null;
+    }
+    evalFocusLine.textContent = state.evalCaption ?? "";
+    canvas?.invalidate();
+  }
+
   function renderEval() {
-    renderTabCounts();  // PASS/FAIL 배지가 서랍이 닫혀 있어도 먼저 보인다
+    renderTabCounts();  // PASS/FAIL 배지가 패널이 닫혀 있어도 먼저 보인다
     clear(evalCardsBox);
     clear(evalBox);
     clear(verifyBox);
     const metaLine = state.evalMeta
       ? `기준 지문 ${state.evalMeta.fingerprint} (서버 기본값 v${
           state.evalMeta.criteria?.schema_version ?? "?"})`
-      : "기준 미로드 — 서랍을 열면 불러온다";
+      : "기준 미로드 — 패널을 열면 불러온다";
     const run = state.evalRun;
     if (!run) {
       evalStatus.textContent =
@@ -1358,7 +1417,7 @@ export function render() {
 
 
   function renderDiag() {
-    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
+    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (패널이 닫혀 있어도)
     clear(diagBox);
     const d = state.diag;
     if (!d) return;
@@ -1492,7 +1551,7 @@ export function render() {
       state.openloop = { card, result: res, error: null };
       renderOpenloop();
       // 판독대의 2단 줄이 여기서 채워진다 — 결과를 안 알리면 방금 잰 수치가
-      // 서랍 안에만 있고 화면의 주 표면은 여전히 "아직 안 쟀다"라고 말한다
+      // 패널 안에만 있고 화면의 주 표면은 여전히 "아직 안 쟀다"라고 말한다
       renderReadout();
       runStatus("개루프 Δ 완료", { open: "sens" });
     } catch (e) {
@@ -1519,7 +1578,7 @@ export function render() {
   }
 
   function renderOpenloop() {
-    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
+    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (패널이 닫혀 있어도)
     clear(olBox);
     const s = state.openloop;
     if (s?.error) olBox.append(el("div", { class: "error-box" }, s.error));
@@ -1555,12 +1614,12 @@ export function render() {
       // 요약 대상이 없으면 표 대신 사유 — 빈 표는 버그로 읽힌다
       !worst.length
         ? el("p", { class: "hint", style: "margin:4px 0 0" },
-            "요약 없음 — 이 손잡이에는 선언된 루프의 유효한 Δ가 없다 " +
+            "요약 없음 — 이 설계변수에는 선언된 루프의 유효한 Δ가 없다 " +
             "(스케줄이 덮거나 루프 미선언). 사유는 케이스별 전체 표에 있다.")
         : el("div", { class: "scroll-x" },
             el("table", {},
               el("thead", {}, el("tr", {},
-                ["손잡이 (얼마→얼마)", "루프", "케이스 수", "최악 PM (기준→섭동)",
+                ["설계변수 (얼마→얼마)", "루프", "케이스 수", "최악 PM (기준→섭동)",
                  "최악 GM (기준→섭동)"].map((h) => el("th", {}, h)))),
               el("tbody", {}, worst.map((w) =>
                 el("tr", {},
@@ -1587,7 +1646,7 @@ export function render() {
         el("div", { class: "scroll-x", style: "margin-top:6px" },
           el("table", {},
             el("thead", {}, el("tr", {},
-              ["손잡이", "루프", "케이스", "PM (기준→섭동)", "GM (기준→섭동)", "비고"]
+              ["설계변수", "루프", "케이스", "PM (기준→섭동)", "GM (기준→섭동)", "비고"]
                 .map((h) => el("th", {}, h)))),
             el("tbody", {}, rows.map((r) =>
               el("tr", {},
@@ -1699,7 +1758,7 @@ export function render() {
   }
 
   function renderScan() {
-    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
+    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (패널이 닫혀 있어도)
     clear(scanBox);
     const s = state.scan;
     scanStatusLine.textContent = s?.status ?? "";
@@ -1828,8 +1887,8 @@ export function render() {
         sweepStatusLine.textContent = state.sweep.status;
         runStatus(state.sweep.status);
         // 구간 경향의 빈 상태가 그 status를 문장에 끼워 넣는다 — 여기서 안 부르면
-        // 5분짜리 스윕이 도는 내내 제출 시점 문구를 붙들고 있고 옆 서랍만 움직인다.
-        // (돌고 있는 동안 이 서랍은 항상 빈 갈래라 텍스트 한 줄 교체가 전부다)
+        // 5분짜리 스윕이 도는 내내 제출 시점 문구를 붙들고 있고 옆 패널만 움직인다.
+        // (돌고 있는 동안 이 패널은 항상 빈 갈래라 텍스트 한 줄 교체가 전부다)
         renderTrend();
       });
       if (done.status !== "done") {
@@ -1842,7 +1901,7 @@ export function render() {
         state.sweep.resultId = done.result_id;  // 정량 처방이 이 스윕을 참조한다
       }
       renderSweep();
-      renderReadout();  // 판독대 3단 줄 — 서랍 안에만 두면 주 표면이 계속 "안 쟀다"다
+      renderReadout();  // 판독대 3단 줄 — 패널 안에만 두면 주 표면이 계속 "안 쟀다"다
       runStatus(`폐루프 스윕 ${state.sweep.status}`,
         { open: "sens", bad: done.status !== "done" });
     } catch (e) {
@@ -1855,7 +1914,7 @@ export function render() {
   }
 
   function renderSweep() {
-    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (서랍이 닫혀 있어도)
+    renderTabCounts();  // 결과 유무가 칩 배지로 먼저 보인다 (패널이 닫혀 있어도)
     // 같은 런에서 나오는 두 표면 — 한쪽만 갱신하면 서로 다른 스윕을 말한다.
     // 아래에 여러 조기 반환(오류·결과 없음)이 있으므로 **맨 앞**이어야 전부 덮는다
     renderTrend();
@@ -1955,7 +2014,7 @@ export function render() {
               ))),
           )),
         el("p", { class: "hint", style: "margin:6px 0 0" },
-          "0에 가까우면 두 손잡이는 독립(따로 튜닝 가능), 크면 상호작용(같이 움직여야 한다). " +
+          "0에 가까우면 두 설계변수는 독립(따로 튜닝 가능), 크면 상호작용(같이 움직여야 한다). " +
           "판정 불가는 0이 아니라 —다."),
       );
     }
@@ -1964,7 +2023,7 @@ export function render() {
     }
   }
 
-  // ── 구간 경향 (3단 C) — 손잡이 하나가 **전 구간**을 어느 쪽으로 미는가 ────
+  // ── 구간 경향 (3단 C) — 설계변수 하나가 **전 구간**을 어느 쪽으로 미는가 ────
   //
   // 3단 B는 이 질문에 답하지 못했다. 요약 표는 런별 **최악 한 칸**만 내고(어디가
   // 제일 나쁜지는 알지만 엔벨로프를 따라 어느 쪽으로 기우는지는 모른다), 케이스×런
@@ -1973,7 +2032,7 @@ export function render() {
   // "이 게인을 올리면 저고도에서만 좋아지고 고고도에서는 나빠진다"가 그대로 읽힌다.
   //
   // 새로 재지 않는다: 3단 B가 이미 돈 런을 다시 세울 뿐이라 잡도 비용도 없다.
-  // 그래서 서랍을 열기만 하면 즉시 뜬다(스캔·스윕과 달리 실행 버튼이 없다).
+  // 그래서 패널을 열기만 하면 즉시 뜬다(스캔·스윕과 달리 실행 버튼이 없다).
   const trendHead = el("div");
   const trendKnobRow = el("div", {
     class: "row", style: "gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px",
@@ -1981,7 +2040,7 @@ export function render() {
   const trendMetricRow = el("div", {
     class: "row", style: "gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px",
   });
-  // 서랍 안 순서: 머리 · 손잡이 칩 · ①구간×지표 · 지표 칩 · ②구간×스팬.
+  // 패널 안 순서: 머리 · 설계변수 칩 · ①구간×지표 · 지표 칩 · ②구간×스팬.
   // 지표 칩이 ①보다 위에 서면 "무엇을 고르는 칩인지"가 그 아래 표와 어긋난다
   const trendMatrixBox = el("div");
   const trendSpanBox = el("div");
@@ -1992,7 +2051,7 @@ export function render() {
    *
    * 다시 만들면 방금 누른 버튼이 DOM에서 들려 나가 포커스가 <body>로 떨어지고,
    * aria-pressed가 바뀌어도 낭독되지 않는다 — 프로세스 뷰 버튼과 같은 이유다.
-   * 이 표는 손잡이·지표를 연달아 눌러 가며 읽는 화면이라 그 손실이 매번 일어난다.
+   * 이 표는 설계변수·지표를 연달아 눌러 가며 읽는 화면이라 그 손실이 매번 일어난다.
    */
   function syncChips(row, btns, items, current, { caption, label, style, onPick }) {
     const same = btns.size === items.length && items.every((k) => btns.has(k));
@@ -2040,19 +2099,19 @@ export function render() {
       const sw = state.sweep;
       const why = res?.rows?.length
         // 쌍 런만 돈 스윕 — 사실이 없는 것이 아니라 **이 표의 주어가 없는** 것이다
-        ? "단독 런이 없다 — 이 스윕은 쌍 런(A&B)만 돌았다. 두 손잡이가 같이 움직인 Δ를 "
+        ? "단독 런이 없다 — 이 스윕은 쌍 런(A&B)만 돌았다. 두 설계변수가 같이 움직인 Δ를 "
           + "한쪽의 경향으로 읽으면 귀속이 틀리므로 여기서는 세우지 않는다."
         // 제출 불가는 **정말 안 잰 것**이다 — 잡이 뜬 적이 없다. 돌다가 깨진 것과
         // 같은 문장으로 묶으면 "안 잰 것이 아니다"가 거짓말이 된다
         : sw?.error
           ? (sw.submitted
-            ? "스윕이 돌다가 실패했다 — 안 잰 것이 아니다. 사유는 「스캔·스윕 Δ」 서랍에 "
+            ? "스윕이 돌다가 실패했다 — 안 잰 것이 아니다. 사유는 「스캔·스윕 Δ」 패널에 "
               + "있고, 다시 돌리면 여기가 채워진다."
-            : "스윕이 제출되지 않았다 — 아직 재지 않았다. 사유는 「스캔·스윕 Δ」 서랍에 "
+            : "스윕이 제출되지 않았다 — 아직 재지 않았다. 사유는 「스캔·스윕 Δ」 패널에 "
               + "있고, 고쳐서 다시 누르면 여기가 채워진다.")
           : res
             ? "스윕은 끝났는데 행이 0건이다 — 케이스가 하나도 안 돌았다(전 케이스 트림 "
-              + "미수렴 등). 사유는 「스캔·스윕 Δ」 서랍의 경고에 있다."
+              + "미수렴 등). 사유는 「스캔·스윕 Δ」 패널의 경고에 있다."
             : sw
               ? `스윕 상태: ${sw.status} — 결과가 저장되면 여기가 채워진다. `
                 + "이 표는 새로 재지 않는다: 그 런을 구간별로 다시 세울 뿐이다."
@@ -2066,7 +2125,7 @@ export function render() {
     state.trendKnob = knob;
     const tm = trendMatrix(res.rows, knob);
     syncChips(trendKnobRow, trendKnobBtns, knobs, knob, {
-      caption: "손잡이", label: (k) => k, style: mono(),
+      caption: "설계변수", label: (k) => k, style: mono(),
       onPick: (k) => { state.trendKnob = k; renderTrend(); },
     });
 
@@ -2093,20 +2152,20 @@ export function render() {
     // 세울 지표가 **하나도 없으면** 여기서 끝낸다. 두 가지가 걸려 있다:
     // ① 없는 지표로 아래 ②를 지으려 들면 TypeError인데, renderTrend는 마운트에서
     //    불리므로 그 예외가 renderTabCounts·renderDrawer를 건너뛰어 **탭 전체가 안
-    //    그려진다**(이 서랍만 비는 것이 아니다) ② 표를 먼저 짓고 나서 막으면 데이터
+    //    그려진다**(이 패널만 비는 것이 아니다) ② 표를 먼저 짓고 나서 막으면 데이터
     //    열 0개에 합계 꼬리만 달린 껍데기가 남는다. 일부 지표가 판정 불가인 경우는
     //    아래 unmeasured가 이미 사유로 내고 있었고, 전부인 경우만 무방비였다
     if (!tm.metrics.length) {
       syncChips(trendMetricRow, trendMetricBtns, [], null, noChips);
       trendMatrixBox.append(el("p", { class: "hint", style: "margin:12px 0 0" },
-        "이 손잡이로 세울 지표가 하나도 없다 — 전 구간에서 잰 값이 없다. "
+        "이 설계변수로 세울 지표가 하나도 없다 — 전 구간에서 잰 값이 없다. "
         + "스윕이 케이스를 하나도 못 끝냈거나(취소·발산) 저장된 런에 지표가 없다."
         + (tm.unmeasured.length
           ? ` 값이 없는 지표: ${tm.unmeasured.map(metricLabel).join(", ")}.` : "")));
       return;
     }
 
-    // ① 구간 × 지표 — 이 서랍의 「한눈에」. 칸 하나가 그 구간에서 이 지표가 어느
+    // ① 구간 × 지표 — 이 패널의 「한눈에」. 칸 하나가 그 구간에서 이 지표가 어느
     //    쪽으로 가는지(기호·색)와 얼마나 가는지(+10%당 변화)를 함께 낸다
     const better = (k) => metricDef(k)?.better;
     const markCell = (t, k, text, title) => el("span", {
@@ -2169,7 +2228,7 @@ export function render() {
     const rank = (k) => Math.max(0, ...tm.cases.map((c) => Math.abs(c.cells[k].rel ?? 0)));
     const metric = tm.metrics.includes(state.trendMetric)
       ? state.trendMetric
-      // 기본은 이 손잡이가 **가장 세게 미는** 지표 — 첫 화면이 곧 답인 경우가 많다
+      // 기본은 이 설계변수가 **가장 세게 미는** 지표 — 첫 화면이 곧 답인 경우가 많다
       : tm.metrics.reduce((a, b) => (rank(b) > rank(a) ? b : a), tm.metrics[0]);
     state.trendMetric = metric;
     syncChips(trendMetricRow, trendMetricBtns, tm.metrics, metric, {
@@ -2191,8 +2250,8 @@ export function render() {
              el("th", {}, "기준"),
              tm.points.map((p) => el("th", {},
                spanLabel(p.span),
-               // 손잡이가 그때 실제로 놓인 값 — 두 열의 값이 같으면 범위 클립이다
-               // (사유는 아래 스윕 서랍의 엔진 notes가 낸다)
+               // 설계변수가 그때 실제로 놓인 값 — 두 열의 값이 같으면 범위 클립이다
+               // (사유는 아래 스윕 패널의 엔진 notes가 낸다)
                el("div", { style: `font-weight:400;color:${SKIN.inkDim};${mono()}` },
                  `=${fmtDelta(p.knobValue)}`))),
              el("th", {}, "경향"),
@@ -2235,22 +2294,27 @@ export function render() {
     );
   }
 
-  // ── 서랍 — 그래프 아래는 전부 여기 들어간다 (한 번에 하나) ────────────────
+  // ── 패널 — 그래프 아래는 전부 여기 들어간다 (한 번에 하나) ────────────────
   // 두 개를 동시에 열 수 있게 하면 결국 다시 세로로 쌓인 패널 다섯 장이 된다.
   // 내용 박스(tableBox·diagBox…)는 **재사용**한다: 매번 새로 만들면 진단·스캔
-  // 결과를 그린 DOM이 서랍을 닫을 때마다 버려져 다시 그려야 한다
+  // 결과를 그린 DOM이 패널을 닫을 때마다 버려져 다시 그려야 한다
 
   const drawerBox = el("div", { class: "tab-drawer" });
 
-  // ── 실행 상태 — **서랍 밖**에 산다 ───────────────────────────────────────
-  // 잡 셋(스캔·개루프·스윕)은 전부 진단 서랍의 버튼에서 출발하는데 결과는 다른
-  // 서랍에 산다. 한 번에 하나만 열리므로, 진행률·실패를 그 서랍 안에만 쓰면 사용자가
+  // ── 실행 상태 — **패널 밖**에 산다 ───────────────────────────────────────
+  // 잡 셋(스캔·개루프·스윕)은 전부 진단 패널의 버튼에서 출발하는데 결과는 다른
+  // 패널에 산다. 한 번에 하나만 열리므로, 진행률·실패를 그 패널 안에만 쓰면 사용자가
   // 방금 누른 화면에서는 **아무것도 안 보인다** (스캔은 칩 배지도 안 붙어서 15케이스가
-  // 통째로 무음이었다 — 재배치가 만든 회귀다). 그래서 여기 한 줄을 서랍 밖에 두고,
-  // 끝나면 결과가 있는 서랍을 **열어 준다**: 결과를 찾아 헤매게 하지 않는다.
+  // 통째로 무음이었다 — 재배치가 만든 회귀다). 그래서 여기 한 줄을 패널 밖에 두고,
+  // 끝나면 결과가 있는 패널을 **열어 준다**: 결과를 찾아 헤매게 하지 않는다.
   const runLine = el("p", { class: "hint", style: "margin:8px 0 0;min-height:18px" });
+  // 평가 초점 자막 — 재생 자막(playLine)은 캔버스가 매 프레임 덮어쓰므로
+  // 같은 줄을 쓰면 "무엇을 켜 놓았나"가 재생 문구에 지워진다
+  const evalFocusLine = el("p", {
+    class: "hint", style: "margin:6px 0 0;min-height:16px",
+  });
 
-  /** 잡 한 건의 상태 — text는 서랍 밖 한 줄, open은 끝난 뒤 열어 줄 서랍. */
+  /** 잡 한 건의 상태 — text는 패널 밖 한 줄, open은 끝난 뒤 열어 줄 패널. */
   function runStatus(text, { open = null, bad = false } = {}) {
     clear(runLine);
     if (!text) return;
@@ -2263,8 +2327,8 @@ export function render() {
   }
 
   const DRAWERS = [
-    // 평가가 맨 앞이다 — "이 형상이 기준을 넘나"가 이 서랍 줄의 첫 질문이고,
-    // 그 답(PASS/FAIL 배지)은 서랍이 닫혀 있어도 칩에 보인다. 케이스 0건은
+    // 평가가 맨 앞이다 — "이 형상이 기준을 넘나"가 이 패널 줄의 첫 질문이고,
+    // 그 답(PASS/FAIL 배지)은 패널이 닫혀 있어도 칩에 보인다. 케이스 0건은
     // 배지가 없다 — 통과도 실패도 아닌 것을 PASS로 위장하지 않는다
     { key: "eval", label: "평가·처방",
       count: () => {
@@ -2276,9 +2340,9 @@ export function render() {
         ensureEvalMeta();  // 카드·체크 어휘와 기준은 서버 정본 — 처음 열 때 받아 온다
         let caseText;
         try {
-          caseText = `케이스 ${gridCases().length}건 (격자 입력은 「진단·처방」 서랍)`;
+          caseText = `케이스 ${gridCases().length}건 (격자 입력은 「진단·처방」 패널)`;
         } catch {
-          caseText = "격자 입력 오류 — 「진단·처방」 서랍에서 고친다";
+          caseText = "격자 입력 오류 — 「진단·처방」 패널에서 고친다";
         }
         return [
           el("h2", {}, "평가 → 처방 → 확정 — 이 탭의 주 흐름"),
@@ -2339,7 +2403,7 @@ export function render() {
       build: () => [el("h2", {}, "파라미터 — 이 형상에서 흔들 수 있는 전부"), tableBox] },
     // 감도 — "흔들면 얼마나 움직이나"를 묻는 셋이 한 묶음이다. 개루프는 마진,
     // 스윕은 지표, 구간 경향은 그 방향이 구간마다 어떻게 가는지를 잰다. 종전에는
-    // 옛 단계 번호(2단·3단 A/B/C)로 서랍 셋이 따로 서서 위에서 아래로 눌러야
+    // 옛 단계 번호(2단·3단 A/B/C)로 패널 셋이 따로 서서 위에서 아래로 눌러야
     // 하는 순서처럼 보였는데, 주 흐름은 평가·처방이고 **이 셋은 처방이 거절했을
     // 때 왜인지 보는 자리**다: 처방은 방향 상충을 "국소 문제"라고 거절만 하고
     // 그 패턴은 구간 경향만 보여 주며, 마진 민감도는 처방이 아예 다루지 않는다
@@ -2412,9 +2476,9 @@ export function render() {
     }));
   drawerBox.id = "influence-drawer";
 
-  /** 칩의 개수 배지 — 결과가 생겼는데 서랍이 닫혀 있으면 무슨 일이 있었는지가
+  /** 칩의 개수 배지 — 결과가 생겼는데 패널이 닫혀 있으면 무슨 일이 있었는지가
    *  화면에서 사라진다. 셀 것이 없는 칩(count가 null)은 배지 자체가 없다.
-   *  숨은 칩이 열려 있던 상태로 남으면 서랍만 떠 있고 여는 버튼이 없다 — 같이 닫는다. */
+   *  숨은 칩이 열려 있던 상태로 남으면 패널만 떠 있고 여는 버튼이 없다 — 같이 닫는다. */
   function renderTabCounts() {
     let closed = false;
     for (const d of DRAWERS) {
@@ -2429,8 +2493,8 @@ export function render() {
       clear(btn).append(d.label);
       if (n) btn.append(el("span", { class: "n" }, String(n)));
     }
-    // 여는 버튼이 사라졌으면 서랍도 여기서 닫는다 — 호출부에 맡기면 어느 한 곳이
-    // 잊는 순간 닫을 수 없는 서랍이 남는다 (renderDrawer는 여기를 안 부르므로 재귀 없음)
+    // 여는 버튼이 사라졌으면 패널도 여기서 닫는다 — 호출부에 맡기면 어느 한 곳이
+    // 잊는 순간 닫을 수 없는 패널이 남는다 (renderDrawer는 여기를 안 부르므로 재귀 없음)
     if (closed) renderDrawer();
   }
 
@@ -2440,8 +2504,10 @@ export function render() {
     getModel: () => state.model,
     getLayout: () => state.layout,
     getSelection: () => state.selection,
-    getCone: () => state.cone,
-    getPlay: () => state.play,
+    // 선택이 이기고, 없을 때만 평가 초점 — 사용자가 고른 것을 자동 강조가
+    // 덮으면 클릭이 안 먹는 것처럼 보인다
+    getCone: () => state.cone ?? state.evalCone,
+    getPlay: () => state.play ?? state.evalPlay,
     onSelect: select,
     onCaption: (text) => { playLine.textContent = text; },
     onLayer: setActiveLayer,
@@ -2454,7 +2520,7 @@ export function render() {
   if (state.openloop?.result) renderOpenloop();
   if (state.scan) renderScan();
   // 스윕이 있으면 renderSweep이 renderTrend까지 부른다. 없어도 한 번은 불러야
-  // 서랍이 **왜 비었는지**를 말한다 (안 부르면 첫 방문에 빈 서랍이 열린다)
+  // 패널이 **왜 비었는지**를 말한다 (안 부르면 첫 방문에 빈 패널이 열린다)
   if (state.sweep) renderSweep();
   else renderTrend();
   // 평가도 재진입 규약을 따른다 — 결과·선택·기준이 모듈 스코프에 남아 있다
@@ -2481,15 +2547,15 @@ export function render() {
     // 범례·보존 캐비앳은 그림 바로 아래: 그림이 쓴 색과 굵기를 설명하는 자리라
     // 클릭 뒤로 숨기면 화면이 자기 문법을 말하지 않게 된다
     el("div", { class: "inf-stage" },
-      canvasBox, playLine, pathBox,
+      canvasBox, playLine, evalFocusLine, pathBox,
       el("div", { style: "margin-top:10px" }, legendBox),
       conservedNote),
     readoutBox,
     // 케이스 격자·실행 줄은 **무대**다 — 평가·검증·처방·감도가 전부 이 격자를
-    // 쓰는데 서랍 안에 있으면, 서랍을 닫는 순간 "지금 무엇을 대상으로 도는지"가
+    // 쓰는데 패널 안에 있으면, 패널을 닫는 순간 "지금 무엇을 대상으로 도는지"가
     // 화면에서 사라진다(v0.53 전 탭 규약: 실행 버튼과 상태는 무대에 남긴다).
-    // 종전에는 이것이 「진단·처방」 서랍 안에 있어 평가 버튼 옆에 "격자 입력은
-    // 「진단·처방」 서랍" 같은 길 안내가 붙어 있었다
+    // 종전에는 이것이 「진단·처방」 패널 안에 있어 평가 버튼 옆에 "격자 입력은
+    // 「진단·처방」 패널" 같은 길 안내가 붙어 있었다
     el("div", { class: "tab-sheet" },
       el("div", {
         class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap",
@@ -2506,7 +2572,7 @@ export function render() {
         + "같은 격자라(lib/grid.js DEFAULT_GRID) 「최악 운용점」이 탭마다 다른 "
         + "격자를 말하지 않는다.")),
     tabBar,
-    runLine,  // 잡 상태는 서랍 밖 — 버튼이 있는 서랍과 결과가 사는 서랍이 다르다
+    runLine,  // 잡 상태는 패널 밖 — 버튼이 있는 패널과 결과가 사는 패널이 다르다
     drawerBox,
   );
 }

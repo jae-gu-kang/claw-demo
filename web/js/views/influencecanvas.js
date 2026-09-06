@@ -25,7 +25,8 @@
 애니메이션은 setInterval 40 ms(25 fps) + 벽시계 기준 — 이 리포에 rAF는 한 군데도 없다.
 */
 
-import { SKIN, BAND_COLOR, STATE_COLOR, logScale, radiusOf } from "../lib/influence.js";
+import { SKIN, BAND_COLOR, NODE_COLOR, STATE_COLOR, logScale, radiusOf }
+  from "../lib/influence.js";
 import { arcPrefix, hitTestNodes, pointAtArc } from "../lib/influencelayout.js";
 import { PLAY, captionAt, cycleAt, layerIndexAt } from "../lib/influenceplay.js";
 
@@ -336,10 +337,12 @@ export function createInfluenceCanvas(opts = {}) {
 
   function nodeColor(n) {
     if (n.kind === "param") return STATE_COLOR[n.state] ?? SKIN.blue;
-    if (n.kind === "ghost") return SKIN.orange;
-    if (n.kind === "metric") return SKIN.orange;
-    if (n.kind === "plant") return SKIN.indigo;
-    return BAND_COLOR[n.band] ?? SKIN.blue;
+    if (n.kind === "plant") return NODE_COLOR.plant;
+    if (n.kind === "metric") return NODE_COLOR.metric;
+    // 유령은 **자기 묶음 색**을 그대로 쓴다 — 점선 테두리가 "그래프에 없다"를 이미
+    // 말하므로 색까지 뺏으면 어느 묶음의 구멍인지가 사라진다. 종전에는 유령과 지표가
+    // 둘 다 주황이라 서로 구별되지 않았다
+    return BAND_COLOR[n.band] ?? SKIN.gray;
   }
 
   function drawNode(g, n, p, alpha, boost = 0) {
@@ -592,6 +595,28 @@ export function createInfluenceCanvas(opts = {}) {
     // measureText도 같은 자간을 쓰므로 칩 폭은 저절로 맞는다
     if ("letterSpacing" in g) g.letterSpacing = "-0.01em";
     g.textBaseline = "middle";
+    // 이미 놓인 라벨 상자들 — 겹치면 그리지 않는다. 같은 묶음의 부열은 12~26 px
+    // 간격인데 라벨은 그보다 훨씬 넓어서, 안 막으면 이름 둘이 한 자리에 겹쳐
+    // 찍히고(「scas_scas_alloc_da_neg」처럼) **둘 다 못 읽는다**. 하나를 접으면
+    // 하나는 읽힌다. 이름 확인은 hover가 맡으므로 접힌 이름이 사라지는 것도 아니다
+    const placed = [];
+    const collides = (x, y, w, h) => placed.some((r) =>
+      x < r.x + r.w + 2 && x + w + 2 > r.x && y < r.y + r.h + 2 && y + h + 2 > r.y);
+    const claim = (x, y, w, h) => { placed.push({ x, y, w, h }); };
+
+    // 지표 라벨은 **열 오른쪽 한 줄로** 모은다. 지표 열은 27개라 부열로 갈라지는데
+    // 이름을 노드마다 제자리에 붙이면 왼쪽 부열의 글자가 오른쪽 부열의 노드를 덮는다
+    // (부열 간격은 26 px 이하이고 이름은 그보다 훨씬 길다). 한 줄로 모으면 덮지도
+    // 않고 목록으로도 읽힌다 — 지표는 순서가 아니라 **목록**이라 그 편이 맞다
+    let metricLabelX = null;
+    for (const nd of model.nodes) {
+      if (nd.kind !== "metric") continue;
+      const p = layout.pos.get(nd.id);
+      if (!p) continue;
+      const rx = p.x + halfExtent(nd.kind, p.r) + 5;
+      if (metricLabelX === null || rx > metricLabelX) metricLabelX = rx;
+    }
+
     const show = new Set();
     if (sel) show.add(sel);
     if (hover) show.add(hover);
@@ -620,6 +645,9 @@ export function createInfluenceCanvas(opts = {}) {
       // 캡슐 칩 — 애플이 지도·비디오 위에 글자를 얹을 때 쓰는 반투명 재질.
       // 각진 상자는 배선 위에서 '오려붙인' 티가 난다
       const bx = side === 1 ? x - 6 : side === -1 ? x - w - 6 : x - w / 2 - 6;
+      // 선택·hover·기체는 **양보하지 않는다** — 사용자가 지목한 이름이라 자리를
+      // 먼저 잡고, 점등 라벨 쪽이 비켜 간다
+      claim(bx, y - 9, w + 12, 18);
       g.beginPath();
       roundRect(g, bx, y - 9, w + 12, 18, 9);
       g.fillStyle = withAlpha(SKIN.raised, 0.82);
@@ -651,15 +679,25 @@ export function createInfluenceCanvas(opts = {}) {
         const w = g.measureText(text).width;
         // 출력 캡슐은 r보다 넓다(1.45r) — r로만 띄우면 라벨이 노드 모양에 물린다
         const hx = halfExtent(nd.kind, p.r);
-        // 오른쪽에 붙이되 캔버스를 넘치면 왼쪽으로 — 상시 라벨과 같은 자기교정
-        const right = p.x + hx + 5 + w + 4 <= width - 2;
-        const x = right ? p.x + hx + 5 : p.x - hx - 5 - w;
+        // 오른쪽에 붙이되 캔버스를 넘치면 왼쪽으로 — 상시 라벨과 같은 자기교정.
+        // 오른쪽이 이미 찬 경우에도 왼쪽을 한 번 더 본다: 접기 전에 반대쪽을
+        // 시도해야 부열 둘이 나란히 켜져도 이름이 하나만 남지 않는다
+        const rx = nd.kind === "metric" && metricLabelX !== null
+          ? metricLabelX : p.x + hx + 5;
+        const lx = p.x - hx - 5 - w;
+        let x = null;
+        if (rx + w + 4 <= width - 2 && !collides(rx - 3, p.y - 7, w + 6, 14)) x = rx;
+        else if (lx - 3 >= 2 && !collides(lx - 3, p.y - 7, w + 6, 14)) x = lx;
+        if (x === null) continue;  // 양쪽 다 차 있다 — 이름은 hover로
+        claim(x - 3, p.y - 7, w + 6, 14);
         // fade를 같이 곱는다 — 주기 끝 페이드아웃에서 원뿔은 꺼지는데 라벨만
         // 불투명하게 떠 있으면 되감기 이음새에서 글자 60개가 툭 사라진다
         g.globalAlpha = on * fade;
         g.beginPath();
         roundRect(g, x - 3, p.y - 7, w + 6, 14, 7);
-        g.fillStyle = "rgba(0,0,0,.55)";
+        // 밑판을 조금 더 덮는다 — 지표 라벨 일부는 기체→지표 부채꼴(간선 27가닥)
+        // 위에 놓이는데 .55로는 글자 뒤로 점선이 비쳐 읽기가 나빠진다
+        g.fillStyle = "rgba(0,0,0,.72)";
         g.fill();
         g.textAlign = "left";
         g.fillStyle = SKIN.ink;

@@ -12,7 +12,7 @@ import test from "node:test";
 
 import {
   STATUS_LABEL, attributionRows, cardDeltas, cardLines, caseGrid, checksSummary,
-  compositionLine, evaluateRequest, hardFailLines, jLine, localityLines,
+  compositionLine, evalFocus, evaluateRequest, hardFailLines, jLine, localityLines,
   normalizeEvalReport,
   normalizeVerifyReport, statusInk, verifyRequest,
 } from "./evaluate.js";
@@ -285,4 +285,47 @@ test("마진 조성 줄 — 무슨 플랜트에서 판정했는지 화면이 말
     cases: [{ ...payload.cases[0], stages: { margins: { composition: "옛 문장" } } }] });
   assert.equal(compositionLine(old), "옛 문장");
   assert.equal(compositionLine(normalizeEvalReport(null)), null);
+});
+
+test("그래프 초점 — 소견이 귀속한 설계변수와 실패한 지표를 뽑는다", () => {
+  const m = normalizeEvalReport({
+    ...payload,
+    cards: [
+      { key: "gm", label: "GM", status: "fail", value: null, primary: null },
+      { key: "pm", label: "PM", status: "ok", value: null, primary: null },
+    ],
+    aggregate: { ...payload.aggregate, locality: { metrics: {
+      alt_rms: { verdict: "global", bad_cases: ["M0.5"] },
+      spd_rms: { verdict: "ok", bad_cases: [] },
+      surf_sat_frac: { verdict: "local", bad_cases: ["M0.6"] },
+    } } },
+    cases: [{ ...payload.cases[0], attribution: { status: "ok", findings: [],
+      prescriptions: [
+        { knobs: ["fcl/Autopilot.tau_alt"], knob_class: "filter",
+          direction: "decrease", findings: [], joint_with: [], recheck: [], notes: [] },
+        { knobs: ["table.pitch.kp", "fcl/Autopilot.tau_alt"], knob_class: "loop_gain",
+          direction: "increase", findings: [], joint_with: [], recheck: [], notes: [] },
+      ] } }],
+  });
+  const f = evalFocus(m);
+  // 설계변수는 중복 없이, 파라미터 노드 id로
+  assert.deepEqual(f.paramIds,
+    ["param:fcl/Autopilot.tau_alt", "param:table.pitch.kp"]);
+  // 문턱을 넘은 지표만 — 통과 지표는 초점이 아니다
+  assert.deepEqual(f.metricIds, ["metric:alt_rms", "metric:surf_sat_frac"]);
+  assert.match(f.caption, /설계변수 2/);
+  assert.match(f.caption, /지표 2/);
+});
+
+test("그래프 초점 — 귀속도 실패도 없으면 초점을 만들지 않는다", () => {
+  const clean = normalizeEvalReport({
+    ...payload,
+    aggregate: { ...payload.aggregate, hard_fail: false, hard_fails: [],
+                 locality: { metrics: { alt_rms: { verdict: "ok", bad_cases: [] } } } },
+    cases: [{ ...payload.cases[0], hard_fails: [],
+              attribution: { status: "na", note: "전 항목 통과" } }],
+  });
+  const f = evalFocus(clean);
+  assert.equal(f, null);  // 초점 없음은 빈 초점이 아니다 — 그래프를 흐리지 않는다
+  assert.equal(evalFocus(normalizeEvalReport(null)), null);
 });

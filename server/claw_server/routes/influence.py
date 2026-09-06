@@ -154,7 +154,7 @@ class DiagnoseIn(InfluenceIn):
 
 @router.post("/influence/diagnose")
 def influence_diagnose(req: DiagnoseIn, request: Request) -> dict:
-    """진단 — 저장된 폐루프 런에서 "어떤 손잡이를 만질 것인가"의 처방 카드.
+    """진단 — 저장된 폐루프 런에서 "어떤 설계변수를 만질 것인가"의 처방 카드.
 
     duty와 같은 이유로 동기·서버 계산이다: 전 해상도 원본을 쥔 쪽이 집계해야
     짧은 포화·주차 구간이 다운샘플에 지워지지 않는다. 형상은 요청이 들고 온다
@@ -239,7 +239,7 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
 
 
 class SweepIn(InfluenceIn):
-    """3단 요청 — 형상 + 케이스 + 처방 손잡이(knobs)·동시 수정 쌍(pairs).
+    """3단 요청 — 형상 + 케이스 + 처방 설계변수(knobs)·동시 수정 쌍(pairs).
 
     knobs·pairs는 진단 응답의 처방 카드에서 그대로 온다 — 전 게인 공간이 아니라
     처방 부분공간만 흔드는 것이 3단의 비용 구조다.
@@ -624,14 +624,14 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
 class PrescribeIn(InfluenceIn):
     """정량 처방 요청 — 저장된 스윕(result_id)에서 "얼마나"를 풀고 확인 런까지.
 
-    knobs가 없으면 스윕이 실제로 흔든 단독 손잡이 전부가 대상이다. cases는 확인
+    knobs가 없으면 스윕이 실제로 흔든 단독 설계변수 전부가 대상이다. cases는 확인
     런(evaluate)의 격자다 — 스윕 저장물에는 케이스 좌표가 없어(이름뿐) 클라이언트가
     같은 격자를 다시 싣는 계약(3단 B와 동일).
     """
 
     fingerprint: str = ""
     result_id: str = Field(min_length=1)
-    # 평가 결과 id — 주면 실패 지표·손잡이를 **승계**한다(사용자가 다시 고르지 않는다).
+    # 평가 결과 id — 주면 실패 지표·설계변수를 **승계**한다(사용자가 다시 고르지 않는다).
     # 없으면 기준의 하드 지표 전부를 푼다(종전 동작)
     eval_result_id: str = ""
     knobs: list[str] | None = None
@@ -691,7 +691,7 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
                             or {}).get("metrics") or {}).items():
                 if v.get("verdict") in ("local", "global"):
                     metrics.add(key)
-            # 귀속 손잡이 — 케이스별 소견의 처방 카드가 지목한 자리
+            # 귀속 설계변수 — 케이스별 소견의 처방 카드가 지목한 자리
             aknobs = []
             bad_cases = []
             for c in ev.get("cases") or []:
@@ -708,21 +708,21 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
 
         knobs = req.knobs or inherited["knobs"]
         if knobs:
-            # 승계 손잡이 중 이 스윕이 실제로 흔든 것만 — 감도가 없으면 못 푼다
+            # 승계 설계변수 중 이 스윕이 실제로 흔든 것만 — 감도가 없으면 못 푼다
             swept = {k for r in rows if r.get("role") == "single"
                      for k in (r.get("overrides") or {})}
             missing = [k for k in knobs if k not in swept]
             knobs = [k for k in knobs if k in swept]
             if missing and not knobs:
                 raise ValueError(
-                    f"승계한 손잡이를 이 스윕이 흔들지 않았다: {missing} — "
-                    "그 손잡이로 스윕을 먼저 돌릴 것")
+                    f"승계한 설계변수를 이 스윕이 흔들지 않았다: {missing} — "
+                    "그 설계변수로 스윕을 먼저 돌릴 것")
         if not knobs:
             knobs = sorted({k for r in rows
                             if r.get("role") == "single"
                             for k in (r.get("overrides") or {})})
         if not knobs:
-            raise ValueError("이 스윕에는 단독 런이 없다 — 처방을 풀 손잡이가 없다")
+            raise ValueError("이 스윕에는 단독 런이 없다 — 처방을 풀 설계변수가 없다")
         universe = {r.id for r in param_universe(shape)}
         unknown = [k for k in knobs if k not in universe]
         if unknown:

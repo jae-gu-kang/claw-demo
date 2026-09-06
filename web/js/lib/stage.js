@@ -1,4 +1,4 @@
-/** 전면 배치 뼈대의 판단부 — 칩·서랍의 상태 계산 (DOM 없음).
+/** 전면 배치 뼈대의 판단부 — 칩·패널의 상태 계산 (DOM 없음).
  *
  * 이 앱의 탭 규약은 하나다: **주 그림은 카드 밖 전면에, 나머지는 눌렀을 때만.**
  * 블록도 최상위(.bd .canvas-wrap.top)가 먼저 그렇게 했고 영향성·가상환경이 따랐다.
@@ -6,11 +6,11 @@
  * 조립은 views/stage.js 한 곳에 둔다.
  *
  * 여기 있는 것은 **DOM이 없어도 답이 정해지는 질문**들이다:
- *   - 지금 열려야 하는 서랍은 무엇인가 (숨은 칩이 열려 있으면?)
+ *   - 지금 열려야 하는 패널은 무엇인가 (숨은 칩이 열려 있으면?)
  *   - 칩에 배지를 달아야 하는가, 단다면 몇인가
  *   - 칩을 분류로 묶으면 어떤 줄이 서는가
  * 그래서 테스트가 가능하고, 실제로 이 파일이 막는 사고는 전부 **눌러도 안 열리거나
- * 여는 버튼 없이 열려 있는 서랍**이다 — 화면에서는 원인이 안 보이는 종류다.
+ * 여는 버튼 없이 열려 있는 패널**이다 — 화면에서는 원인이 안 보이는 종류다.
  */
 
 /** 셀 수 없는 것을 0으로 위장하지 않는다 — null·undefined·NaN은 배지 자체가 없다.
@@ -27,10 +27,10 @@ export function badgeOf(count) {
 const isHidden = (d) => (typeof d.hidden === "function" ? !!d.hidden() : !!d.hidden);
 const countOf = (d) => (typeof d.count === "function" ? d.count() : d.count ?? null);
 
-/** 실제로 열려야 하는 서랍 키.
+/** 실제로 열려야 하는 패널 키.
  *
  *  **없는 키·숨은 키는 열지 않는다.** 조건부 칩(경고 등)은 조건이 사라지면 사라지는데,
- *  그때 서랍만 남으면 화면에 여는 버튼도 닫는 버튼도 없는 판이 떠 있게 된다. */
+ *  그때 패널만 남으면 화면에 여는 버튼도 닫는 버튼도 없는 판이 떠 있게 된다. */
 export function resolveOpen(defs, want) {
   if (want == null) return null;
   const d = (defs ?? []).find((x) => x.key === want);
@@ -69,7 +69,7 @@ export function chipModels(defs, open) {
   });
 }
 
-/** 지금 열린 서랍의 정의 (없으면 null) — 조립부가 build()를 부를 대상. */
+/** 지금 열린 패널의 정의 (없으면 null) — 조립부가 build()를 부를 대상. */
 export function openDef(defs, open) {
   const live = resolveOpen(defs, open);
   return live == null ? null : (defs ?? []).find((d) => d.key === live) ?? null;

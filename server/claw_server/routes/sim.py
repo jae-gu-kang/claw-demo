@@ -384,7 +384,7 @@ def _build(req: SimRunIn):
         control_hz=req.control_hz,
         actuator_params=req.actuators,
         fuel_flow=req.fuel_flow,
-        # 기준면은 **활주로 표고다** — 따로 손잡이를 두면 둘이 어긋날 수 있다.
+        # 기준면은 **활주로 표고다** — 따로 설계변수를 두면 둘이 어긋날 수 있다.
         # 활주로가 없으면 엔진 기본값(해수면 0)이 그대로다.
         ground_elev=req.runway.elevation if req.runway else 0.0,
         min_altitude=req.runway.elevation if req.runway else 0.0,

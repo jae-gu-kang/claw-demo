@@ -278,9 +278,9 @@ def test_diagnose_fingerprint_mismatch_warns(client, wait_job):
 
 
 def test_sweep_rejects_impossible_shape_at_submit_not_mid_job(client):
-    """기체가 낼 수 없는 손잡이는 **제출 시점 422** — 잡 안에서 터지면 안 된다.
+    """기체가 낼 수 없는 설계변수는 **제출 시점 422** — 잡 안에서 터지면 안 된다.
 
-    k_diff_thr는 param_universe에 실존하는 손잡이라 계획은 세워진다. 그런데 데모
+    k_diff_thr는 param_universe에 실존하는 설계변수라 계획은 세워진다. 그런데 데모
     기체는 단발이라 그 조합은 예외 없이 실수다. 잡 안에서 터뜨리면 202를 준 뒤
     트림 배치와 base 런을 다 돌리고 나서 **완료된 행이 통째로 버려진다** — 이
     라우트가 독스트링에 적어 둔 "무의미 구성은 제출 시점 422" 계약이 그것이다.
@@ -294,7 +294,7 @@ def test_sweep_rejects_impossible_shape_at_submit_not_mid_job(client):
     r2 = client.post("/api/influence/scan",
                      json={"cases": cases, "mixer": {"k_diff_thr": 0.1}})
     assert r2.status_code == 422
-    # 정상 손잡이는 그대로 202 — 가드가 전체를 막아 버리지 않는다
+    # 정상 설계변수는 그대로 202 — 가드가 전체를 막아 버리지 않는다
     r3 = client.post("/api/influence/sweep",
                      json={"cases": cases, "knobs": ["fcl/Autopilot.kp_alt"]})
     assert r3.status_code == 202
@@ -493,7 +493,7 @@ def test_prescribe_guards(client, wait_job):
 
 
 def test_prescribe_inherits_from_evaluate(client, wait_job):
-    """② 승계 — 평가가 좁혀 준 지표·손잡이를 사용자가 다시 고르지 않는다."""
+    """② 승계 — 평가가 좁혀 준 지표·설계변수를 사용자가 다시 고르지 않는다."""
     case = {"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}
     ev = client.post("/api/influence/evaluate", json={
         "cases": [case], "t_settle": 2.0, "t_step": 4.0})
@@ -508,7 +508,7 @@ def test_prescribe_inherits_from_evaluate(client, wait_job):
     assert ev_res["aggregate"]["locality"]["metrics"]
     knob = att["prescriptions"][0]["knobs"][0]
 
-    # 승계한 손잡이를 실제로 흔든 스윕이라야 감도가 있다
+    # 승계한 설계변수를 실제로 흔든 스윕이라야 감도가 있다
     sw = client.post("/api/influence/sweep", json={
         "cases": [case], "knobs": [knob], "span": [-0.1, 0.1],
         "t_settle": 2.0, "t_step": 4.0})
@@ -533,8 +533,8 @@ def test_prescribe_inherits_from_evaluate(client, wait_job):
     json.dumps(res, allow_nan=False)
 
 
-def test_prescribe_승계_손잡이가_스윕에_없으면_거절(client, wait_job):
-    """감도가 없는 손잡이의 필요 변화량을 지어내지 않는다 — 사유와 함께 422."""
+def test_prescribe_승계_설계변수가_스윕에_없으면_거절(client, wait_job):
+    """감도가 없는 설계변수의 필요 변화량을 지어내지 않는다 — 사유와 함께 422."""
     case = {"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}
     ev = client.post("/api/influence/evaluate", json={
         "cases": [case], "t_settle": 2.0, "t_step": 4.0})

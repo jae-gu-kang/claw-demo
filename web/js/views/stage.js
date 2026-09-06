@@ -1,11 +1,11 @@
-/** 전면 배치 뼈대 — 머리줄 + 전면 무대 + 칩·서랍 (조립 전용).
+/** 전면 배치 뼈대 — 머리줄 + 전면 무대 + 칩·패널 (조립 전용).
  *
  * 이 앱의 탭 규약(02 §4): **주 그림은 카드 밖 전면에, 나머지는 눌렀을 때만.**
  * 블록도 최상위가 먼저 그렇게 했고(.bd .canvas-wrap.top — 보드가 화면의 주인공이라
  * 그 위에 카드를 하나 더 얹지 않는다) 영향성·가상환경이 따랐다. 그 배치를 탭마다
  * 베끼면 같은 레이아웃이 열 벌이 되므로 여기 한 벌만 둔다.
  *
- * 판단(어느 서랍이 열리나·배지·분류 줄)은 lib/stage.js에 있고 여기는 DOM뿐이다.
+ * 판단(어느 패널이 열리나·배지·분류 줄)은 lib/stage.js에 있고 여기는 DOM뿐이다.
  *
  * ## 밝은 탭과 어두운 탭
  *
@@ -39,16 +39,16 @@ export function tabStage(...kids) {
   return el("div", { class: "tab-stage" }, ...kids);
 }
 
-/** 칩 줄 + 서랍 한 벌.
+/** 칩 줄 + 패널 한 벌.
  *
  * defs: [{key, label, group?, title?, count?, hidden?, build()}] — lib/stage.js 계약.
  * `build()`는 **열 때마다** 불린다. 내용 박스를 모듈/클로저에 잡아 두고 그것을
- * 돌려주면(영향성 관행) 서랍을 닫을 때마다 다시 그리는 비용이 없다.
+ * 돌려주면(영향성 관행) 패널을 닫을 때마다 다시 그리는 비용이 없다.
  *
  * 돌려주는 것:
- *   root    — 칩 줄 + 서랍을 담은 조각 (그대로 append)
- *   refresh — 배지·숨김만 다시 (결과가 생겼는데 서랍이 닫혀 있어도 개수는 보여야 한다)
- *   open(key) — 서랍을 열어 준다. 잡이 끝난 뒤 결과가 사는 서랍을 여는 자리
+ *   root    — 칩 줄 + 패널을 담은 조각 (그대로 append)
+ *   refresh — 배지·숨김만 다시 (결과가 생겼는데 패널이 닫혀 있어도 개수는 보여야 한다)
+ *   open(key) — 패널을 열어 준다. 잡이 끝난 뒤 결과가 사는 패널을 여는 자리
  *   current() — 지금 열린 키
  */
 export function createDrawers({ id, defs, initial = null, onOpen = null } = {}) {
@@ -57,10 +57,10 @@ export function createDrawers({ id, defs, initial = null, onOpen = null } = {}) 
   const btns = new Map(); // key → 버튼 노드 (**재사용**한다 — 아래 참조)
   let open = initial;
 
-  /** 칩 줄만 갱신한다 — 서랍 내용은 건드리지 않는다.
+  /** 칩 줄만 갱신한다 — 패널 내용은 건드리지 않는다.
    *
    *  **버튼을 다시 만들지 않는 것이 요지다.** 배지 하나 바뀌었다고 줄을 새로 조립하면
-   *  방금 누른 버튼이 DOM에서 들려 나가 포커스가 `<body>`로 떨어지고, 열려 있던 서랍
+   *  방금 누른 버튼이 DOM에서 들려 나가 포커스가 `<body>`로 떨어지고, 열려 있던 패널
    *  안에서 타이핑 중이던 칸도 같이 사라진다(영향성 `syncChips`가 겪고 고친 그 자리).
    *  키 집합이 그대로면 제자리에서 라벨·배지·눌림만 고친다. */
   const paintChips = () => {
@@ -120,10 +120,10 @@ export function createDrawers({ id, defs, initial = null, onOpen = null } = {}) 
     root: el("div", {}, chipRow, box),
     chipRow,
     box,
-    /** 배지·숨김만 — **서랍 내용은 그대로 둔다.** 결과가 생겼는데 서랍이 닫혀 있어도
-     *  개수는 보여야 하고, 열려 있는 서랍에서 편집 중이면 그 편집이 살아 있어야 한다. */
+    /** 배지·숨김만 — **패널 내용은 그대로 둔다.** 결과가 생겼는데 패널이 닫혀 있어도
+     *  개수는 보여야 하고, 열려 있는 패널에서 편집 중이면 그 편집이 살아 있어야 한다. */
     refresh: paintChips,
-    /** 내용까지 다시 — 열린 서랍이 그리는 것 자체가 바뀌었을 때만. */
+    /** 내용까지 다시 — 열린 패널이 그리는 것 자체가 바뀌었을 때만. */
     repaint() {
       paintChips();
       paintDrawer();
@@ -137,7 +137,7 @@ export function createDrawers({ id, defs, initial = null, onOpen = null } = {}) 
   };
 }
 
-/** 서랍 안의 소제목 — 서랍 하나에 여러 덩이가 들어갈 때만 쓴다. */
+/** 패널 안의 소제목 — 패널 하나에 여러 덩이가 들어갈 때만 쓴다. */
 export function drawerSection(title, hint, ...kids) {
   return el("section", { class: "tab-sect" },
     el("h2", {}, title),

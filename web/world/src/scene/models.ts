@@ -54,7 +54,7 @@ export interface LoadedModel {
   dispose(): void;
 }
 
-/** GLB 하나를 읽어 노드 손잡이를 만든다. 실패는 **던지지 않고** 사유를 낸다. */
+/** GLB 하나를 읽어 노드 핸들을 만든다. 실패는 **던지지 않고** 사유를 낸다. */
 export async function loadModel(
   url: string,
   expect: readonly string[],

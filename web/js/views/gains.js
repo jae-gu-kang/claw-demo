@@ -1,7 +1,7 @@
 /** 게인 스케줄 뷰 (02 §8 4단계) — 스케줄 자리 선택 → 셀 편집 → 시뮬 주입 준비.
 
 배치는 다른 탭과 같은 규약이다(views/stage.js): **곡선과 편집 표가 카드 밖 전면**,
-자리 선택 격자와 근사 곡선 설정은 서랍. 곡선과 표는 한 벌이라 떨어뜨리지 않는다 —
+자리 선택 격자와 근사 곡선 설정은 패널. 곡선과 표는 한 벌이라 떨어뜨리지 않는다 —
 칸을 고치면 곡선이 그 자리에서 움직이는 것이 이 화면의 피드백 전부다.
 
 두 층이다. **자리 선택**(어떤 게인에 테이블을 붙이나)은 형상을 바꾸고 — 켠 자리는
@@ -44,7 +44,7 @@ import { createDrawers, tabStage, tabTop } from "./stage.js";
 let catalog = null; // GET /gains/catalog — 자리 목록·설계 상수·제안 테이블
 let selected = []; // 켠 자리 이름 (카탈로그 기본 = 서버가 지금 스케줄하는 6자리)
 let tables = null; // 켠 자리만 추린 {name: {axes:{mach}, data, extrapolate}} — 편집 대상
-let openDrawer = null; // 탭 재진입에도 열어 둔 서랍 유지 (모듈 스코프 규약)
+let openDrawer = null; // 탭 재진입에도 열어 둔 패널 유지 (모듈 스코프 규약)
 // 자리를 켜고 끄면 칩 배지의 수가 바뀐다 — 그린 쪽(renderTables)에서 칩에 알린다
 let gainsDrawers = null;
 let adopted = null; // 되읽은 형상 요약 {source, slots, aligned, points, unknown} | null
@@ -74,12 +74,12 @@ let evalStrip = { status: null, result: null, error: null, stale: false, depth: 
 let markStale = () => {};
 
 export function render() {
-  // 조각으로 갈라 둔다 — 어느 것이 전면이고 어느 것이 서랍인지는 아래 배치가 정한다
+  // 조각으로 갈라 둔다 — 어느 것이 전면이고 어느 것이 패널인지는 아래 배치가 정한다
   const slots = {
     chart: el("div"),   // 전면 — 스케줄 곡선
     table: el("div", { class: "tab-sheet" }), // 전면 — 셀 편집 (곡선과 한 벌)
-    grid: el("div"),    // 서랍 — 자리 선택 격자 (형상을 바꾸는 조작)
-    fit: el("div"),     // 서랍 — 근사 곡선 설정
+    grid: el("div"),    // 패널 — 자리 선택 격자 (형상을 바꾸는 조작)
+    fit: el("div"),     // 패널 — 근사 곡선 설정
   };
   const errBox = el("div");
   const statusLine = el("p", { class: "tab-status" });
@@ -111,7 +111,7 @@ export function render() {
         : agg.hard_fail ? `하드 게이트 위반 ${agg.hard_fails.length}건 — Fail`
         : "하드 게이트 전부 통과")
       + ` · ${checksSummary(m.checks)} · depth=${m.depth}`
-      + " · 상세는 영향성 탭 「평가」 서랍"));
+      + " · 상세는 영향성 탭 「평가」 패널"));
   }
 
   async function runGainEval(depth) {
@@ -257,7 +257,7 @@ export function render() {
     tabTop({
       title: "게인",
       lead: "설계점에서 정한 게인을 비행조건의 함수로 편다 — 표의 칸을 고치면 곡선이 "
-        + "그 자리에서 움직인다. 자리 선택(형상)과 근사 곡선 설정은 아래 서랍에.",
+        + "그 자리에서 움직인다. 자리 선택(형상)과 근사 곡선 설정은 아래 패널에.",
       actions: [
         el("button", {
           onclick: () => load({ fresh: true }),
@@ -281,7 +281,7 @@ export function render() {
       stripCards),
     // 곡선은 카드 밖(자기 테두리를 갖는 캔버스), 편집 표는 그 바로 아래 판독 시트.
     // 둘은 한 벌이다 — 칸을 고치면 곡선이 그 자리에서 움직이는 것이 이 화면의 피드백
-    // 전부라 표를 서랍에 넣으면 그 되먹임이 끊긴다
+    // 전부라 표를 패널에 넣으면 그 되먹임이 끊긴다
     tabStage(slots.chart),
     slots.table,
     drawers.root,
@@ -585,13 +585,13 @@ function renderTables(slots, statusLine) {
   const names = Object.keys(tables);
   if (names.length === 0) {
     clear(slots.chart);
-    // 빈 서랍을 남기지 않는다 — 왜 비었는지가 화면에 없으면 고장으로 읽힌다
+    // 빈 패널을 남기지 않는다 — 왜 비었는지가 화면에 없으면 고장으로 읽힌다
     clear(slots.fit).append(el("p", { class: "hint" },
       "켠 자리가 없어 근사할 곡선이 없습니다 — 「스케줄 자리」에서 자리를 켜세요."));
     clear(slots.table).append(el("p", { class: "hint" },
       "스케줄된 자리가 없습니다 — 전 게인이 설계점 상수로 고정된 형상입니다. ",
       "탑재 코드에서 게인 스케줄 서브시스템(fcl_sched.c)이 통째로 사라집니다. ",
-      "「스케줄 자리」 서랍에서 자리를 켜면 여기에 표와 곡선이 섭니다."));
+      "「스케줄 자리」 패널에서 자리를 켜면 여기에 표와 곡선이 섭니다."));
     return;
   }
   const machs = tables[names[0]].axes[catalog.axis];
