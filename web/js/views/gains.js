@@ -271,7 +271,7 @@ export function render() {
     // 운용점). 계산은 버튼 트리거(비용)고, 편집이 생기면 stale 배지가 먼저 말한다
     el("div", { class: "tab-sheet" },
       el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
-        el("strong", {}, "튜닝 지표 — A급 카드"),
+        el("strong", {}, "튜닝 지표 — 대표 카드"),
         el("button", { class: "primary", onclick: () => runGainEval("linear") },
           "지표 재계산 (선형 — 수 초)"),
         el("button", { onclick: () => runGainEval("full"),

@@ -537,8 +537,8 @@ function renderResult(box, body, resultId, ctx) {
     // 원장·조치 카드가 곧 "B급: 항상 판정하되 문제일 때만 전개"의 자동설계판이고,
     // 판정선(pm·gm·ζ)은 같은 MarginCriteria 한 정의를 쓴다 (pipeline/criteria.py 합성)
     el("p", { class: "hint", style: "margin:4px 0 0" },
-      "판정 체계는 평가(A/B/C)와 한 벌이다 — 아래 미달 원장·조치 카드가 B급 "
-      + "「문제 시 전개」에 해당하고, 확정한 게인의 A급 카드는 게인 탭 상단에서 "
+      "판정 체계는 영향성 평가와 한 벌이다 — 아래 미달 원장·조치 카드가 평가의 "
+      + "「문제 시 전개」에 해당하고, 확정한 게인의 대표 카드는 게인 탭 상단에서 "
       + "[지표 재계산]으로 본다."),
     // 영어 토큰만 찍으면 상태를 말하되 뜻과 다음 행동을 말하지 않는다
     el("p", { class: "hint" }, statusText(report.status)),

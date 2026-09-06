@@ -86,7 +86,7 @@ test("B급 요약 — na는 분모에서 빠지되 반드시 병기, warn은 PAS
 test("B급 요약 — 전부 통과·na 0이면 짧은 한 줄", () => {
   const line = checksSummary({ n_pass: 9, n_warn: 0, n_fail: 0, n_na: 0,
                                n_judged: 9, list: [] });
-  assert.equal(line, "B급 체크 9/9 PASS");
+  assert.equal(line, "나머지 판정 9/9 PASS");
 });
 
 test("B급 요약 — 체크가 하나도 없으면 판정 불가 문장", () => {

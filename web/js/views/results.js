@@ -23,8 +23,8 @@ const KIND_LABEL = {
   influence_scan: "영향성 — 전 케이스 스캔",
   influence_sweep: "영향성 — 부분 풀 스윕",
   influence_openloop: "영향성 — 개루프 Δ",
-  influence_evaluate: "평가 — A급 카드·B급 판정",
-  influence_verify: "검증 — C급 (강건성·중간점)",
+  influence_evaluate: "평가 — 대표 카드·나머지 판정",
+  influence_verify: "검증 — 3단계 (강건성·중간점)",
   influence_prescribe: "정량 처방 — 얼마나·조합·확인",
 };
 const kindLabel = (k) => KIND_LABEL[k] ?? k ?? "—";
