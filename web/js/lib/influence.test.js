@@ -1039,3 +1039,137 @@ test("스윕이 쟀는데 아무것도 안 움직였으면 지표 0개라고 말
   assert.equal(c.fan.ids.size, 0);
   assert.match(fanLine(c.fan), /넘긴 지표가 없다/);
 });
+
+// 자가 둘인 이유 — 판정선이 있는 지표는 **판정 예산**으로 재야 지표 간 비교가 선다.
+// 자기 값 대비 %는 한계 10 m인 지표와 0.1 rad인 지표에서 무게가 전혀 달라진다.
+const SCALES = { alt_rms: 10.0, spd_rms: 2.0 };
+
+test("판정 예산으로 재면 자기 값 대비가 부풀리던 잡음이 걸러진다", () => {
+  // spd_rms 8 → 8.016: 자기 값 대비 0.2 %(문턱 0.1 % 초과)지만
+  // 판정 예산(2.0) 대비로는 0.8 %라 문턱 1 %에 못 미친다
+  const rows = [
+    { case: "c1", label: "base", overrides: {}, metrics: { spd_rms: 8 } },
+    { case: "c1", label: "K@+0.2", overrides: { K: 1.2 }, metrics: { spd_rms: 8.016 } },
+  ];
+  assert.ok(coneOf(fanModel(), "param:K", { sweepRows: rows }).fan.ids
+    .has("metric:spd_rms"), "자기 값 대비로는 켜진다");
+  const c = coneOf(fanModel(), "param:K", { sweepRows: rows, scales: SCALES });
+  assert.ok(!c.fan.ids.has("metric:spd_rms"), "판정 예산 대비로는 안 켜진다");
+  assert.equal(c.fan.nScaled, 1);
+});
+
+test("판정 예산으로 재면 자기 값 대비가 놓치던 변화를 잡는다", () => {
+  // alt_rms 1000 → 1000.5: 자기 값 대비 0.05 %라 문턱 미달이지만, 판정선이 10 m라
+  // 0.5 m는 **예산의 5 %**다 — 판정에서는 큰 변화다
+  const rows = [
+    { case: "c1", label: "base", overrides: {}, metrics: { alt_rms: 1000 } },
+    { case: "c1", label: "K@+0.2", overrides: { K: 1.2 }, metrics: { alt_rms: 1000.5 } },
+  ];
+  assert.ok(!coneOf(fanModel(), "param:K", { sweepRows: rows }).fan.ids
+    .has("metric:alt_rms"), "자기 값 대비로는 놓친다");
+  assert.ok(coneOf(fanModel(), "param:K", { sweepRows: rows, scales: SCALES })
+    .fan.ids.has("metric:alt_rms"), "판정 예산 대비로는 잡는다");
+});
+
+test("척도가 없는 지표는 자기 값 대비로 물러선다 — 한 부채꼴에 자가 섞인다", () => {
+  // spd_ts에는 판정선이 없다(ts_max는 [TBD]) — 자기 값 대비 자를 쓴다
+  const rows = [
+    { case: "c1", label: "base", overrides: {},
+      metrics: { alt_rms: 20, spd_ts: 4.0 } },
+    { case: "c1", label: "K@+0.2", overrides: { K: 1.2 },
+      metrics: { alt_rms: 20, spd_ts: 4.4 } },
+  ];
+  const c = coneOf(fanModel(), "param:K", { sweepRows: rows, scales: SCALES });
+  assert.ok(c.fan.ids.has("metric:spd_ts"));
+  assert.equal(c.fan.nScaled, 1, "척도가 붙은 것은 alt_rms 하나뿐이다");
+  assert.match(fanLine(c.fan), /판정선 있는 1개/);
+  assert.match(fanLine(c.fan), /나머지는 자기 값/);
+});
+
+test("척도가 하나도 없으면 자막이 자를 하나만 말한다", () => {
+  const c = coneOf(fanModel(), "param:K", { sweepRows });
+  assert.equal(c.fan.nScaled, 0);
+  assert.doesNotMatch(fanLine(c.fan), /판정선 있는/);
+  assert.match(fanLine(c.fan), /자기 값의/);
+});
+
+// 처방 기반 부채꼴 — 자가 "움직이나"에서 **"고칠 수 있나"**로 바뀐다. 이 판정에는
+// 사람이 고를 숫자가 없다: solvable이 "잰 스팬 안에서 문턱을 넘는다"는 뜻이다.
+const SINGLES = {
+  K: {
+    alt_rms: { solvable: true, required_span: 0.18 },
+    spd_rms: { solvable: true, required_span: -0.06 },
+    // 스팬 밖 — 참고 추정만 있고 못 푼다
+    spd_ts: { solvable: false, required_span: null, extrapolated_span: 1.4 },
+    // 이미 문턱 안이라 고칠 것이 없다
+    td_speed: { solvable: true, required_span: 0.0 },
+  },
+};
+
+test("처방이 있으면 잰 범위 안에서 문턱을 넘길 수 있는 지표만 켠다", () => {
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES, sweepRows, lever: true });
+  assert.equal(c.fan.basis, "lever", "처방이 스윕보다 센 근거다");
+  assert.deepEqual([...c.fan.ids].sort(), ["metric:alt_rms", "metric:spd_rms"]);
+  assert.ok(!c.fan.ids.has("metric:spd_ts"), "스팬 밖은 못 푼 것이다");
+  assert.ok(!c.fan.ids.has("metric:td_speed"), "이미 문턱 안이면 고칠 것이 없다");
+});
+
+test("지렛대는 적게 고쳐도 되는 것이 앞에 온다", () => {
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES, lever: true });
+  assert.equal(c.fan.ranked[0].id, "metric:spd_rms");  // |−6 %| < |+18 %|
+  assert.equal(c.fan.ranked[0].span, -0.06);
+});
+
+test("처방이 이 설계변수를 안 풀었으면 스윕 근거로 물러선다", () => {
+  const c = coneOf(fanModel(), "param:K",
+    { prescribeSingles: { J: SINGLES.K }, sweepRows, lever: true });
+  assert.equal(c.fan.basis, "measured");
+});
+
+test("전부 스팬 밖이면 그 사실을 말하되 그림은 영향으로 되돌린다", () => {
+  // 하나도 못 넘긴다는 것 자체가 발견이다. 다만 그림까지 비우면 오른쪽이 통째로
+  // 꺼져 "이 설계변수는 지표와 무관"으로 읽힌다 — 사실은 자막이 이고 간다
+  const none = { K: { alt_rms: { solvable: false, required_span: null } } };
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: none, sweepRows, lever: true });
+  assert.equal(c.fan.basis, "measured", "지렛대가 비면 아래 근거로 물러선다");
+  assert.ok(c.fan.ids.size > 0, "그림이 통째로 꺼지면 안 된다");
+  assert.match(fanLine(c.fan), /문턱까지\n?\s*못 끈다/);
+  assert.match(fanLine(c.fan), /영향으로 되돌렸다/);
+});
+
+test("지렛대가 비어도 잰 것이 없으면 선언 상한으로 물러선다", () => {
+  const none = { K: { alt_rms: { solvable: false, required_span: null } } };
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: none, lever: true });
+  assert.equal(c.fan.basis, "declared");
+  assert.match(fanLine(c.fan), /못 끈다/);
+});
+
+test("지렛대 자막에는 문턱 숫자가 없다 — 그것이 이 근거의 값어치다", () => {
+  const line = fanLine(coneOf(fanModel(), "param:K",
+    { prescribeSingles: SINGLES, lever: true }).fan);
+  assert.match(line, /잰 범위 안에서/);
+  assert.doesNotMatch(line, /%/, "고른 문턱이 문장에 남아 있으면 안 된다");
+});
+
+test("지렛대는 기본이 아니다 — 처방이 있어도 켜야 쓴다", () => {
+  // 이 탭의 기본 질문은 「영향 관계」다. required_span은 감도와 지금 설계가
+  // 판정선에서 얼마나 떨어졌는가를 섞은 값이라 기본 그림이 되면 거짓말이 된다
+  const c = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES, sweepRows });
+  assert.equal(c.fan.basis, "measured");
+  assert.equal(c.fan.lever ?? null, null, "안 켰으면 지렛대 사실도 안 실린다");
+});
+
+test("지렛대를 켜면 같은 입력에서 그림이 바뀐다 — 두 질문이 갈린다", () => {
+  const off = coneOf(fanModel(), "param:K", { prescribeSingles: SINGLES, sweepRows });
+  const on = coneOf(fanModel(), "param:K",
+    { prescribeSingles: SINGLES, sweepRows, lever: true });
+  assert.equal(on.fan.basis, "lever");
+  assert.notDeepEqual([...on.fan.ids].sort(), [...off.fan.ids].sort());
+});
+
+test("지렛대 자막은 그것이 다른 질문임을 밝힌다", () => {
+  const line = fanLine(coneOf(fanModel(), "param:K",
+    { prescribeSingles: SINGLES, lever: true }).fan);
+  assert.match(line, /지렛대 보기/);
+  assert.match(line, /영향 관계가 아니라/);
+});

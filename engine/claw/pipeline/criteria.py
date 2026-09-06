@@ -446,6 +446,44 @@ class GainEvalCriteria:
         out["worst_stall_margin"] = float(self.envelope.alpha_margin_min)
         return out
 
+    def to_metric_scales(self) -> dict:
+        """지표 키 → **판정 척도**. "이만큼 움직이면 판정에 의미가 있다"의 자다.
+
+        문턱과 다른 물건이다. 문턱은 합격선(넘으면 fail)이고 척도는 **변화량을
+        재는 자**다. 영향성 그래프가 "이 설계변수가 이 지표를 움직이나"를 가를 때
+        자기 값 대비 비율을 쓰면 자가 지표마다 달라진다 — 한계 10 m인 고도 RMS의
+        0.1 %(0.02 m)와 한계 0.1 rad인 헤딩 RMS의 0.1 %(0.0001 rad)가 판정에서
+        갖는 무게가 전혀 다르다. 같은 자(판정 예산)로 재야 비교가 선다.
+
+        **판정선이 0인 것은 자로 못 쓴다** — `envelope.alpha_margin_min`의 하한
+        0.0은 "여유가 없어지는 지점"이지 크기가 아니라, 자로 삼으면 0으로 나눈다.
+        비어 있는 자리도 **비운다**: tr/ts/mp/sse 상한은 아직 [TBD]라 억지 기본값을
+        넣으면 없는 판정선을 있다고 말하는 꼴이 된다. 화면은 자가 있는 지표와 없는
+        지표를 **갈라서** 말해야 한다(없는 쪽은 자기 값 대비로 물러선다).
+        """
+        out: dict[str, float] = {}
+
+        def put(key: str, value) -> None:
+            if value is None:
+                return
+            v = float(value)
+            if math.isfinite(v) and v > 0:
+                out[key] = v
+
+        r = self.response
+        for axis in ("alt", "spd", "hdg"):
+            put(f"{axis}_rms", r.rms_max.get(axis))
+            put(f"{axis}_tr", r.tr_max.get(axis))
+            put(f"{axis}_ts", r.ts_max.get(axis))
+            put(f"{axis}_mp", r.mp_max.get(axis))
+            put(f"{axis}_sse", r.sse_max.get(axis))
+        put("surf_sat_frac", self.actuator.sat_frac_max)
+        put("limiter_frac", self.envelope.limiter_frac_max)
+        # 잔여 권한은 하드 하한이 곧 예산이다 — 두 축이 같은 자를 쓴다
+        put("min_pitch_authority_frac", self.authority.b_min_frac)
+        put("min_roll_authority_frac", self.authority.b_min_frac)
+        return out
+
     def fingerprint(self) -> str:
         """판정 기준의 계보 지문 — 평가 저장물에 동봉 (02 §5.4)."""
         return canonical_hash(self.to_dict())

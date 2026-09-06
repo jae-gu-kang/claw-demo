@@ -313,6 +313,12 @@ def test_criteria_defaults_echo(client):
     assert [c["key"] for c in body["cards"]][:3] == ["mode_stability", "gm", "pm"]
     assert len(body["cards"]) == 7 and len(body["checks"]) == 9
     assert len(body["items"]) == 11 and len(body["verify"]) == 7
+    # 지표 척도 — 영향성 그래프의 "유의미하게 움직였나"가 이 자를 쓴다.
+    # 판정선이 없는 지표는 **빠져 있어야** 한다: 있다고 말하면 화면이 없는
+    # 기준으로 판정한 것처럼 보인다 (tr/ts/mp/sse는 아직 [TBD])
+    scales = body["metric_scales"]
+    assert scales["alt_rms"] == 10.0 and scales["hdg_rms"] == 0.1
+    assert "alt_ts" not in scales and "worst_stall_margin" not in scales
     json.dumps(body, allow_nan=False)
 
 

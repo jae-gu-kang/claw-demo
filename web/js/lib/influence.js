@@ -156,8 +156,18 @@ export function normalizeGraph(payload) {
 
 /** 지표 부채꼴의 잡음 문턱 — 이보다 작게 움직인 지표는 "안 움직였다"로 친다.
  *  기체를 거치면 **모든 것이 조금씩** 이어져 있어서(속도 P 게인 +20 %가 고도 RMS를
- *  7 ppm 흔든다) 0을 기준으로 삼으면 전부 켜지고 그림이 아무 말도 안 하게 된다. */
-export const FAN_REL = 1e-3;
+ *  7 ppm 흔든다) 0을 기준으로 삼으면 전부 켜지고 그림이 아무 말도 안 하게 된다.
+ *
+ * 자가 둘인 이유: 판정선이 있는 지표는 **판정 예산**으로 재는 것이 맞다. 자기 값
+ * 대비 0.1 %는 지표마다 무게가 달라진다 — 한계 10 m인 고도 RMS의 0.1 %(0.02 m)와
+ * 한계 0.1 rad인 헤딩 RMS의 0.1 %(0.0001 rad)는 판정에서 전혀 다른 크기다. 척도는
+ * 엔진이 기준에서 파생해 준다(`criteria.to_metric_scales` → `/influence/criteria/
+ * defaults`의 `metric_scales`). 척도가 없는 지표(tr·ts·mp·sse 상한은 아직 [TBD])는
+ * 자기 값 대비로 물러서고, **그 사실을 자막이 말한다** — 자를 섞어 쓰면서 하나로
+ * 보이게 하면 그것도 거짓말이다.
+ */
+export const FAN_REL = 1e-3;   // 척도 없음 — 자기 값 대비
+export const FAN_FRAC = 0.01;  // 척도 있음 — 판정 예산 대비
 
 const metricKey = (id) => (id.startsWith("metric:") ? id.slice(7) : id);
 
@@ -168,7 +178,7 @@ const metricKey = (id) => (id.startsWith("metric:") ? id.slice(7) : id);
  * 한 일 중 가장 큰 것이다. 둘 다 ∞면 변화 없음이고, 어느 한쪽이 없으면(null)
  * 판정 자체를 안 한다("안 잰 것"을 0으로 위장하지 않는다).
  */
-function sweptDeltas(rows, knob) {
+function sweptDeltas(rows, knob, scales = null) {
   const all = rows ?? [];
   const singles = all.filter((r) => {
     const k = Object.keys(r.overrides ?? {});
@@ -186,16 +196,20 @@ function sweptDeltas(rows, knob) {
     for (const [k, v] of Object.entries(r.metrics ?? {})) {
       const b = base[k];
       if (b == null || v == null) continue;
+      // 자는 지표마다 다르다 — 판정 척도가 있으면 그 예산 대비, 없으면 자기 값 대비.
+      // 어느 자를 썼는지는 `scaled`로 남긴다(자막이 둘을 갈라 말해야 한다)
+      const scale = scales?.[k];
+      const useScale = finiteNum(scale) && scale > 0;
       let d;
       if (finiteNum(b) && finiteNum(v)) {
-        d = Math.abs(v - b) / Math.max(Math.abs(b), 1e-9);
+        d = Math.abs(v - b) / (useScale ? scale : Math.max(Math.abs(b), 1e-9));
       } else if (finiteNum(b) !== finiteNum(v)) {
         d = Infinity;  // 발산 진입·이탈
       } else {
         continue;      // 둘 다 비유한 — 같은 사실
       }
       const prev = worst.get(k);
-      if (prev === undefined || d > prev) worst.set(k, d);
+      if (prev === undefined || d > prev.d) worst.set(k, { d, scaled: useScale });
     }
   }
   return worst.size ? worst : null;
@@ -208,9 +222,20 @@ function sweptDeltas(rows, knob) {
  * 표현했는데, 그러면 잰 것과 못 자른 것이 화면에서 같아진다. 근거를 셋으로 갈라
  * 각각 다른 말을 하게 한다:
  *
- *   measured  — 스윕이 이 설계변수를 흔들어 봤다. 문턱을 넘겨 움직인 지표만 켠다
+ *   measured  — 스윕이 쟀다. 감도가 유의미한 지표만 켠다
  *   supported — 런은 있으나 이 설계변수의 감도는 없다. **값이 나온** 지표만 켠다
  *   declared  — 아무것도 없다. 전부 켜되 그것이 상한임을 자막이 말한다
+ *
+ * 그리고 **요청했을 때만**(`opts.lever`) 넷째가 앞에 선다:
+ *
+ *   lever     — 처방이 푼 결과 **잰 범위 안에서 문턱까지 끌 수 있는** 지표만 켠다
+ *
+ * lever가 기본이 아닌 이유는 이 탭이 묻는 것이 **영향 관계**이기 때문이다.
+ * `required_span`은 감도와 **지금 설계가 판정선에서 얼마나 떨어져 있는가**를 섞은
+ * 값이라, 같은 세기로 미는 설계변수라도 지표가 한계의 3배면 꺼지고 한계 근처면
+ * 켜진다 — 영향 관계는 설계가 좋든 나쁘든 그대로여야 한다. 그래서 그것은 기본
+ * 그림이 아니라 **다른 질문("얼마나 고쳐야 하나")의 토글**이고, 정량 답은 처방
+ * 표가 이미 갖고 있다.
  *
  * supported에서 ∞는 **빼지 않는다**. ∞는 "쟀는데 창 안에 안 일어났다"는 사실이고
  * (미정착), 게인을 바꾸면 유한해질 수 있는 자리다. 빼야 할 것은 값 자체가 없는
@@ -229,46 +254,94 @@ export function metricFan(model, paramId, opts = {}) {
              rel, nTotal: all.length };
   }
 
-  // ② 스윕이 이 설계변수를 흔들었다
   const knob = paramId.startsWith("param:") ? paramId.slice(6) : paramId;
-  const deltas = sweptDeltas(opts.sweepRows, knob);
-  if (deltas) {
-    const ranked = [...deltas.entries()]
-      .filter(([, d]) => d > rel)
-      .sort((a, b) => b[1] - a[1])
-      .map(([k, d]) => ({ id: `metric:${k}`, rel: d }))
+
+  // ② 지렛대 보기 — **사용자가 켰을 때만**. 질문이 "영향을 주나"에서 "얼마나
+  //    고쳐야 하나"로 바뀌는 자리라 기본값이 아니다(위 머리말). 켜면 고를 숫자가
+  //    없어진다: `solvable`은 "잰 스팬 안에서 문턱 교차가 일어난다"는 뜻이고
+  //    (밖이면 참고 추정만 남기고 못 푼다고 적는다) 그것이 곧 실현 가능성이다
+  let lever = null;  // 켰지만 넘길 수 없었다 — 사실은 남기고 그림은 물러선다
+  const singles = opts.lever ? opts.prescribeSingles?.[knob] : null;
+  if (singles && Object.keys(singles).length) {
+    const ranked = Object.entries(singles)
+      // required_span 0 = 이미 문턱 안이다 — 고칠 것이 없으니 "넘길 수 있는"이 아니다
+      .filter(([, r]) => r.solvable && Number(r.required_span) !== 0
+        && Number.isFinite(Number(r.required_span)))
+      // 적게 고쳐도 되는 것이 앞 — 가장 싼 지렛대가 먼저 읽혀야 한다
+      .sort((a, b) => Math.abs(a[1].required_span) - Math.abs(b[1].required_span))
+      .map(([k, r]) => ({ id: `metric:${k}`, span: Number(r.required_span) }))
       .filter((r) => has(r.id));
-    return { ids: new Set(ranked.map((r) => r.id)), basis: "measured", ranked,
-             rel, nTotal: all.length, nJudged: deltas.size };
+    if (ranked.length) {
+      return { ids: new Set(ranked.map((r) => r.id)), basis: "lever", ranked,
+               rel, nTotal: all.length, nJudged: Object.keys(singles).length };
+    }
+    // 풀었는데 하나도 못 넘긴다 — **그것 자체가 발견**이지만 그림까지 비우면
+    // 오른쪽이 통째로 꺼져 "이 설계변수는 지표와 무관"으로 읽힌다. 사실은 자막이
+    // 이고 가고, 그림은 아래 근거("움직이는가")로 세운다
+    lever = { nJudged: Object.keys(singles).length, none: true };
   }
 
-  // ③ 런은 있다 — 값이 나온 지표까지가 상한이다
+  // ③ 스윕이 이 설계변수를 흔들었다
+  const scales = opts.scales ?? null;
+  const frac = opts.frac ?? FAN_FRAC;
+  const deltas = sweptDeltas(opts.sweepRows, knob, scales);
+  if (deltas) {
+    // 자가 둘이라 문턱도 둘이다 — 판정 예산 대비 1 %와 자기 값 대비 0.1 %를
+    // 하나로 뭉치면, 자를 섞어 쓰면서 섞은 사실만 감추는 꼴이 된다
+    const ranked = [...deltas.entries()]
+      .filter(([, m]) => m.d > (m.scaled ? frac : rel))
+      .sort((a, b) => b[1].d - a[1].d)
+      .map(([k, m]) => ({ id: `metric:${k}`, rel: m.d, scaled: m.scaled }))
+      .filter((r) => has(r.id));
+    const nScaled = [...deltas.values()].filter((m) => m.scaled).length;
+    return { ids: new Set(ranked.map((r) => r.id)), basis: "measured", ranked,
+             rel, frac, nScaled, nTotal: all.length, nJudged: deltas.size, lever };
+  }
+
+  // ④ 런은 있다 — 값이 나온 지표까지가 상한이다
   if (opts.runMetrics) {
     const ids = all.filter((id) => (opts.runMetrics[metricKey(id)] ?? null) !== null);
     return { ids: new Set(ids), basis: "supported", ranked: ids.map((id) => ({ id })),
-             rel, nTotal: all.length };
+             rel, nTotal: all.length, lever };
   }
 
-  // ④ 아무것도 없다
+  // ⑤ 아무것도 없다
   return { ids: new Set(all), basis: "declared", ranked: all.map((id) => ({ id })),
-           rel, nTotal: all.length };
+           rel, nTotal: all.length, lever };
 }
 
 /** 부채꼴 근거 한 줄 — 그림이 무엇을 말하는지(그리고 **말하지 않는지**). */
 export function fanLine(fan) {
   if (!fan) return "";
   const n = fan.ids.size, tot = fan.nTotal;
+  // 처방이 풀었는데 하나도 못 넘겼으면 그 사실이 먼저다 — 그림은 아래 근거로 섰다
+  const head = fan.lever?.none
+    ? `지렛대 보기: 처방이 푼 지표 ${fan.lever.nJudged}개는 잰 범위 안에서 문턱까지`
+      + " 못 끈다(더 크게 고쳐야 하거나 이 설계변수가 아니다) ·"
+      + " 그림은 영향으로 되돌렸다 — "
+    : "";
+  if (fan.basis === "lever") {
+    // 여기엔 문턱 숫자를 적을 것이 없다 — 그것이 이 근거의 값어치다
+    const of = `처방이 푼 지표 ${fan.nJudged}개 중`;
+    return `지표 ${n}/${tot} — 지렛대 보기: 잰 범위 안에서 이 설계변수로 문턱까지`
+      + ` 끌 수 있는 것 (${of}). 영향 관계가 아니라 「얼마나 고쳐야 하나」의 답이다`;
+  }
   if (fan.basis === "measured") {
-    const pct = fmtPercent(fan.rel, fan.rel < 0.01 ? 2 : 0);
-    return n
-      ? `지표 ${n}/${tot} — 스윕이 잰 결과 ${pct}를 넘겨 움직인 것만 켠다`
-      : `지표 0/${tot} — 스윕이 쟀지만 ${fmtPercent(fan.rel, 2)}를 넘긴 지표가 없다`;
+    // 자를 둘 다 밝힌다 — 판정선이 있는 지표가 몇 개인지가 곧 "이 판정을 얼마나
+    // 믿을 수 있나"다(나머지는 상한이 아직 [TBD]라 자기 값 대비로 물러섰다)
+    const yard = fan.nScaled
+      ? `판정선 있는 ${fan.nScaled}개는 그 ${fmtPercent(fan.frac ?? FAN_FRAC, 0)}`
+        + `, 나머지는 자기 값의 ${fmtPercent(fan.rel, 2)}`
+      : `자기 값의 ${fmtPercent(fan.rel, 2)}`;
+    return head + (n
+      ? `지표 ${n}/${tot} — 스윕이 잰 감도로 영향이 잡히는 것만 켠다 (${yard})`
+      : `지표 0/${tot} — 스윕이 쟀지만 문턱을 넘긴 지표가 없다 (${yard})`);
   }
   if (fan.basis === "supported") {
-    return `지표 ${n}/${tot} — 이 설계변수의 감도는 아직 안 쟀다.`
+    return head + `지표 ${n}/${tot} — 이 설계변수의 감도는 아직 안 쟀다.`
       + " 이 기동에서 값이 나온 것까지가 상한이다(영향이 아니다)";
   }
-  return `지표 ${n}/${tot} — 선언된 상한이다. 폐루프는 그래프 밖에서 닫혀`
+  return head + `지표 ${n}/${tot} — 선언된 상한이다. 폐루프는 그래프 밖에서 닫혀`
     + " 구조로는 못 자른다 — 실제 영향은 스윕이 잰다";
 }
 

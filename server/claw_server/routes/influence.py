@@ -453,6 +453,12 @@ def criteria_defaults() -> dict:
         "verify": [{"key": k, "label": v} for k, v in VERIFY_META.items()],
         "items": [{"key": k, "item": ITEMS[k][0], "label": ITEMS[k][1]}
                   for k in STAGE_ORDER],
+        # 지표별 판정 척도 — 영향성 그래프가 "이 설계변수가 이 지표를 유의미하게
+        # 움직이나"를 **판정 예산 대비**로 가른다. 자기 값 대비 비율로 재면 한계
+        # 10 m인 고도 RMS와 0.1 rad인 헤딩 RMS가 같은 %에서 전혀 다른 무게를
+        # 갖는다. 키가 없는 지표는 판정선이 아직 [TBD]라는 뜻이고, 화면은 그
+        # 사실을 감추지 않고 다른 자(자기 값 대비)를 썼다고 말한다
+        "metric_scales": c.to_metric_scales(),
     }
 
 
