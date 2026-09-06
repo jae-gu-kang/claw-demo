@@ -190,7 +190,7 @@ def solve_single_knob(rows, knob, metric, threshold, *, above_is_bad) -> dict:
     if len(signs) > 1:
         return {"solvable": False, "required_span": None,
                 "reason": "케이스마다 요구 방향이 상충 — 단일 배율이 아니라 스케줄 "
-                          "셀(국소) 문제다. 3단 A 국소성 판정과 대조할 것"}
+                          "셀(국소) 문제다. 스캔의 국소성 판정과 대조할 것"}
     binding = max(needs, key=lambda c: abs(needs[c]))
     span = needs[binding]
     return {"solvable": True, "required_span": span,

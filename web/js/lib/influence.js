@@ -774,7 +774,7 @@ export function sweepCases(grid, scan) {
   if (!bad.length) return grid;
   const sel = scan.selected ?? new Set();
   if (!sel.size) {
-    throw new Error("결함 케이스 체크가 전부 해제됨 — 3단 B 대상이 없다. " +
+    throw new Error("결함 케이스 체크가 전부 해제됨 — 폐루프 스윕 대상이 없다. " +
       "체크를 되돌리거나, 격자 전체로 돌리려면 다시 스캔한다.");
   }
   const names = new Set(grid.map((c) => c.name));
