@@ -399,3 +399,73 @@ def test_포화_최장_지속은_채널_최악의_연속_구간이다():
     de[10:30] = 0.35  # 좌·우 엘레본 모두 20표본 = 0.2 s 포화
     sig = {"de": de, "da": np.zeros(n), "dr": np.zeros(n)}
     assert abs(_sat_longest(sig, meta, np.arange(n) * dt) - 0.2) < 1e-9
+
+
+# ── 추력 포화·여유 (v0.72) ────────────────────────────────────────────────────
+# 이 둘은 "추종 오차가 게인으로 안 고쳐지는 이유"를 화면에 세우려고 만든 지표라,
+# **거짓 안심**(못 잰 것을 0으로, NaN을 포화 아님으로)이 곧 기능 상실이다.
+
+def _thr(*chans):
+    return {k: np.asarray(v, dtype=float) for k, v in chans}
+
+
+def test_추력_포화는_상한만_센다_아이들_강하는_포화가_아니다():
+    """강하에서 스로틀 0은 정상이고 「에너지를 못 낸다」가 아니다 — 둘을 한 수로
+    합치면 종말 강하 런이 포화 100 %로 찍혀 지표의 문장과 정면으로 어긋난다."""
+    from claw.pipeline.metrics import _thr_margin_min, _thr_sat_frac
+
+    idle = _thr(("thr_l", [0.0, 0.0, 0.0, 0.0]), ("thr_r", [0.0, 0.0, 0.0, 0.0]))
+    assert _thr_sat_frac(idle) == 0.0
+    assert _thr_margin_min(idle) == pytest.approx(1.0)  # 여유는 가득
+    full = _thr(("thr_l", [1.0, 1.0, 0.5, 0.5]), ("thr_r", [0.5, 0.5, 0.5, 0.5]))
+    assert _thr_sat_frac(full) == pytest.approx(0.5)  # 한 채널이라도 붙으면 센다
+    assert _thr_margin_min(full) == pytest.approx(0.0)
+
+
+def test_추력_지표는_못_잰_것을_0으로_위장하지_않는다():
+    from claw.pipeline.metrics import _thr_margin_min, _thr_sat_frac
+
+    assert _thr_sat_frac({}) is None and _thr_margin_min({}) is None
+    # 채널 하나만 있는 형상도 잰다 (단발 추력)
+    one = _thr(("thr_l", [1.0, 0.5]))
+    assert _thr_sat_frac(one) == pytest.approx(0.5)
+    # 전부 비유한이면 None — 0이 아니다
+    nans = _thr(("thr_l", [float("nan"), float("nan")]))
+    assert _thr_sat_frac(nans) is None and _thr_margin_min(nans) is None
+
+
+def test_NaN은_포화_아님으로_희석되지_않는다():
+    """NaN은 두 비교를 모두 False로 만들어 조용히 「포화가 아니었다」가 된다 —
+    발산해 끊긴 런이 가장 건강한 런으로 보이는 자리다."""
+    from claw.pipeline.metrics import _thr_margin_min, _thr_sat_frac
+
+    x = _thr(("thr_l", [1.0, float("nan"), float("nan"), float("nan")]))
+    # 유한 표본은 하나뿐이고 그것이 포화 — 1.0이지 0.25가 아니다
+    assert _thr_sat_frac(x) == pytest.approx(1.0)
+    # min에 NaN이 섞이면 결과가 NaN이 되어 판정이 거짓 실패가 된다
+    assert _thr_margin_min(x) == pytest.approx(0.0)
+
+
+def test_한_채널이_NaN이어도_다른_채널의_포화는_세어진다():
+    """`&=`면 한 채널의 NaN이 그 표본을 통째로 버려, 다른 채널이 최대치에 붙어
+    있었는데도 「포화 아님」으로 희석된다 — 이 지표가 막으려던 바로 그 병이다."""
+    from claw.pipeline.metrics import _thr_sat_frac
+
+    x = _thr(("thr_l", [float("nan"), float("nan"), 0.5, 0.5]),
+             ("thr_r", [1.0, 1.0, 0.5, 0.5]))
+    assert _thr_sat_frac(x) == pytest.approx(0.5)
+
+
+def test_추력_천장은_조립된_법칙의_포화_한계와_같다():
+    """진짜 정의역은 **법칙의 포화 블록**이다 — metrics가 편의상 trim.THR_BOUNDS를
+    쓰는 것은 값이 같아서다. 법칙 쪽 hi가 바뀌면(애프터버너·디레이트) metrics가
+    조용히 틀린 천장으로 재므로, 그 방향을 여기서 잡는다.
+
+    종전 단언(`THR_HI == THR_BOUNDS[1]`)은 정의상 참이라 그 방향을 못 잡았다."""
+    from claw.pipeline.influence import Shape, make_law
+    from claw.pipeline.metrics import THR_HI
+
+    law = make_law(Shape())
+    his = {n.params["hi"] for n in law.runner.graph.nodes
+           if n.id in ("mix_thr_l", "mix_thr_r")}
+    assert his == {THR_HI}, f"법칙 포화 한계 {his} ≠ metrics 천장 {THR_HI}"

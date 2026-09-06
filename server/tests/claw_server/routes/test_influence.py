@@ -27,9 +27,9 @@ def test_structural_node_census(client):
     # 입력·출력은 안 늘었다(뱅크 명령을 재활용한다) — 늘었으면 계약이 바뀐 것이다.
     # (엔진 test_influence와 한 쌍 — 한쪽만 고치면 다른 쪽이 깨진다)
     assert kinds["ir"] == 78 and kinds["input"] == 23 and kinds["output"] == 7
-    # 지표 12 → 27: A/B/C 재편이 응답특성(축별 Tr·Ts·Mp·sse 12종)·잔여 권한 2종·
-    # 포화 최장 지속을 추가 (키는 전부 신규 — 기존 키 rename 없음)
-    assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 27
+    # 지표 12 → 29: 응답특성(축별 Tr·Ts·Mp·sse 12종)·잔여 권한 2종·포화 최장 지속
+    # (v0.56), 추력 포화율·최소 여유 2종(v0.72) — 키는 전부 신규, rename 없음
+    assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 29
 
 
 def test_structural_is_json_safe(client):
@@ -311,7 +311,7 @@ def test_criteria_defaults_echo(client):
     assert body["criteria"]["schema_version"] == 2
     assert body["criteria"]["actuator"]["sat_frac_max"] == 0.05
     assert [c["key"] for c in body["cards"]][:3] == ["mode_stability", "gm", "pm"]
-    assert len(body["cards"]) == 7 and len(body["checks"]) == 9
+    assert len(body["cards"]) == 7 and len(body["checks"]) == 10
     assert len(body["items"]) == 11 and len(body["verify"]) == 7
     # 지표 척도 — 영향성 그래프의 "유의미하게 움직였나"가 이 자를 쓴다.
     # 판정선이 없는 지표는 **빠져 있어야** 한다: 있다고 말하면 화면이 없는
@@ -323,7 +323,7 @@ def test_criteria_defaults_echo(client):
 
 
 def test_evaluate_job_round_trip(client, wait_job):
-    """카드 7 + 체크 9 + 원자료 — 지문 계보와 J·하드 게이트 규약."""
+    """카드 7 + 체크 10 + 원자료 — 지문 계보와 J·하드 게이트 규약."""
     r = client.post("/api/influence/evaluate", json={
         "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
         "t_settle": 2.0, "t_step": 4.0,
@@ -336,7 +336,7 @@ def test_evaluate_job_round_trip(client, wait_job):
     assert res["kind"] == "influence_evaluate"
     assert [c["key"] for c in res["cards"]][:3] == ["mode_stability", "gm", "pm"]
     ch = res["checks"]
-    assert ch["n_pass"] + ch["n_warn"] + ch["n_fail"] + ch["n_na"] == 9
+    assert ch["n_pass"] + ch["n_warn"] + ch["n_fail"] + ch["n_na"] == 10
     c = res["cases"][0]
     assert set(c["stages"]) == set(res["stage_order"])
     if c["hard_fails"]:

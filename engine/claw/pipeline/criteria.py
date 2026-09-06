@@ -153,10 +153,17 @@ class ActuatorCriteria:
     rate_margin_min_frac: float = 0.10
     near_limit_band: float = 0.90  # 한계의 이 배율 위를 "근접"으로 본다
     near_limit_frac_max: float = 0.10  # 근접 체류 시간비 이 위면 warn
+    # 추력 여유 하한 — 타면 여유와 **같은 질문이되 물건이 다르다**: 타면은 자세를
+    # 못 만드는 것이고 추력은 에너지를 못 내는 것이다. 여기가 0이면 추종 오차는
+    # 게인으로 안 고쳐진다(포화된 액추에이터 뒤에서 루프 게인은 아무 일도 안 한다).
+    # [가정 — 교정 전 임시값] 0.05: "기동 중 최소 5 %는 남아 있어야 한다"는 첫 선.
+    # 요구도가 정해지면 그 값으로 갈아탄다
+    thr_margin_min_frac: float = 0.05
 
     def __post_init__(self):
         for n in ("sat_frac_max", "rate_sat_frac_max", "pos_margin_min_frac",
-                  "rate_margin_min_frac", "near_limit_frac_max"):
+                  "rate_margin_min_frac", "near_limit_frac_max",
+                  "thr_margin_min_frac"):
             _frac(n, getattr(self, n))
         if not 0.0 < self.near_limit_band < 1.0:
             raise ValueError(f"near_limit_band는 (0, 1) 필요: {self.near_limit_band}")
@@ -195,6 +202,24 @@ class ResponseCriteria:
     여기 산다(±2 %가 관례).
     """
 
+    # RMS 판정선은 **스텝 크기와 짝**이라야 뜻이 생긴다 — 절대값이라 기동이 바뀌면
+    # 엄격도가 따라 움직인다. v0.72에서 표준 기동을 권한 안으로 줄이면서(dh 100→30,
+    # dv 10→3, dpsi 0.5→0.3) 같은 판정선이 상대적으로 느슨해졌다:
+    #
+    #        스텝 대비   종전(dh100·dv10)   현행(dh30·dv3)   현행 계측(M0.4~0.6)
+    #   alt      10 m         10 %              33 %          6.65 ~ 7.02
+    #   spd       2 m/s       20 %              67 %          0.52 ~ 1.29
+    #   hdg     0.1 rad       20 %              33 %          0.046 ~ 0.053
+    #
+    # 오른쪽 계측은 **t_step 30**에서 잰 것이다. 화면 기본값 15에서는 설계점
+    # 속도 RMS가 1.94로 기준 2에 여유 3 %뿐이다 — 「여유가 넉넉하다」는 30을
+    # 말하는 것이지 기본 경로를 말하는 게 아니다 (sweep.PROBE_* 주석 참조)
+    #
+    # 그럼에도 **값을 바꾸지 않는다.** 이 셋의 출처는 diagnose.RMS_THRESH 시드이고,
+    # 조이는 것은 요구도(설계 목표)의 문제이지 기동을 바꿨다고 따라 정할 일이 아니다 —
+    # 여기서 임의로 조이면 "왜 이 숫자인가"의 근거가 사라진다. 요구도가 정해지면
+    # 그 값으로 갈아탄다 [TBD]. 지금 상태는 "전 격자 통과, 다만 여유가 넉넉하다"이고
+    # 그 사실은 카드의 값·기준이 나란히 서서 그대로 읽힌다.
     rms_max: dict = field(default_factory=lambda: {"alt": 10.0, "spd": 2.0, "hdg": 0.1})
     tr_max: dict = field(default_factory=dict)  # {"alt": s, ...} [TBD]
     ts_max: dict = field(default_factory=dict)
@@ -219,7 +244,12 @@ class CouplingCriteria:
     부족하다 — 롤이 권한을 소모한 상태의 피치업에서 실속·포화 마진이 남는지가 질문.
     """
 
-    dh: float = 100.0  # 동시 기동 고도 스텝 [m] (표준 기동과 같은 값 시드)
+    # 표준 기동(sweep.PROBE_*)은 v0.72에서 제어권한 안으로 줄었지만 **여기는 안
+    # 줄인다.** 동시명령의 목적이 다르기 때문이다: 표준 기동은 축을 하나씩 밟아
+    # 추종 품질을 재고, 여기는 피치·롤을 **일부러 경합시켜** 엘레본 예산이 바닥나는
+    # 자리를 찾는다. 요구가 크지 않으면 그 경합이 안 만들어진다. 그래서 두 수치가
+    # 갈라진 것은 드리프트가 아니라 의도다(판정 항목도 다르다 — 여기는 실속마진·포화)
+    dh: float = 100.0  # 동시 기동 고도 스텝 [m]
     dpsi: float = 0.5  # 동시 기동 헤딩 스텝 [rad] — 뱅크(롤 예산 소모) 유도
     alpha_margin_min: float = 0.0  # 동시 기동 중 실속마진 하한
     sat_frac_max: float = 0.05  # 동시 기동 중 위치 포화 시간비 상한
@@ -478,6 +508,12 @@ class GainEvalCriteria:
             put(f"{axis}_mp", r.mp_max.get(axis))
             put(f"{axis}_sse", r.sse_max.get(axis))
         put("surf_sat_frac", self.actuator.sat_frac_max)
+        # 추력 여유는 자기 판정선을 갖는다 — 빠뜨리면 웹이 자기 값 대비로 물러서는데,
+        # 이 지표가 존재하는 바로 그 자리(여유 0)에서 분모가 0이 돼 1e-6 흔들림이
+        # 1000배로 찍힌다(lib/influence.js의 max(|base|, 1e-9)).
+        # `thr_sat_frac`은 **넣지 않는다** — 고유 판정선이 없다(타면 예산을 빌리면
+        # 위 규칙을 깬다). 그쪽은 base가 0 근처가 아니라 자기 값 대비로 충분하다
+        put("thr_margin_min", self.actuator.thr_margin_min_frac)
         put("limiter_frac", self.envelope.limiter_frac_max)
         # 잔여 권한은 하드 하한이 곧 예산이다 — 두 축이 같은 자를 쓴다
         put("min_pitch_authority_frac", self.authority.b_min_frac)

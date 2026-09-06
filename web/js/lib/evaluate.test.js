@@ -15,6 +15,9 @@ import {
   compositionLine, evalFocus, evaluateRequest, hardFailLines, jLine, localityLines,
   normalizeEvalReport,
   normalizeVerifyReport, statusInk, verifyRequest,
+  maneuverLine,
+  sameManeuver,
+  MANEUVER_KEYS,
 } from "./evaluate.js";
 
 const payload = {
@@ -171,11 +174,11 @@ test("상태 어휘는 엔진 evaluate.py와 한 벌이다 (드리프트 가드)
   }
   assert.notEqual(statusInk("na"), statusInk("ok"));
   assert.notEqual(statusInk("na"), statusInk("fail"));
-  // 카드 7·체크 9 — 웹은 목록을 하드코딩하지 않지만 개수 계약은 화면 배치의 전제다
+  // 카드 7·체크 10 — 웹은 목록을 하드코딩하지 않지만 개수 계약은 화면 배치의 전제다
   assert.equal((src.match(/CARDS = \(([^)]+)\)/) || [])[1].split(",")
     .filter((x) => x.trim()).length, 7);
   assert.equal((src.match(/CHECKS = \(([^)]+)\)/) || [])[1].split(",")
-    .filter((x) => x.trim()).length, 9);
+    .filter((x) => x.trim()).length, 10);
 });
 
 test("카드 값의 문자열 필드는 수로 위장되지 않는다 (라이브에서 case가 −∞로 찍혔다)", () => {
@@ -328,4 +331,68 @@ test("그래프 초점 — 귀속도 실패도 없으면 초점을 만들지 않
   const f = evalFocus(clean);
   assert.equal(f, null);  // 초점 없음은 빈 초점이 아니다 — 그래프를 흐리지 않는다
   assert.equal(evalFocus(normalizeEvalReport(null)), null);
+});
+
+test("기동 기록 — 옛 결과는 「미기록」이지 기본값이 아니다", () => {
+  // 스텝이 바뀌면 같은 지문으로도 RMS·J가 다른 뜻이 된다. 없는 것을 현행 값으로
+  // 채우면 옛 결과가 새 자로 잰 것처럼 읽힌다 — 「없음」과 「값」을 섞지 않는다
+  assert.equal(normalizeEvalReport({}).maneuver, null);
+  const m = normalizeEvalReport({ maneuver: { dv: 3, dh: 30, dpsi: 0.3, t_step: 30 } });
+  assert.equal(m.maneuver.dv, 3);
+  assert.equal(m.maneuver.t_step, 30);
+});
+
+test("기동 줄 — 선형은 침묵, 기록 없으면 「미기록」, 있으면 단위까지", () => {
+  // 선형은 시뮬을 한 번도 안 돈다 — 결과에 기동이 적혀 있어도 찍으면 안 돈 것을
+  // 돈 것처럼 읽힌다. 이 가드를 지우면 바로 그 오독이 되는데 종전에는 무증상이었다
+  const man = { dh: 30, dv: 3, dpsi: 0.3, t_step: 15 };
+  assert.equal(maneuverLine({ depth: "linear", maneuver: man }), "");
+  assert.equal(maneuverLine({ depth: "full", maneuver: null }),
+    "기동 미기록 — 옛 결과라 스텝이 지금과 다를 수 있다");
+  const line = maneuverLine({ depth: "full", maneuver: man });
+  // 단위가 없으면 dψ가 rad인지 deg인지 화면만 보고 못 정한다 (17배 차이다)
+  assert.match(line, /dh 30 m/);
+  assert.match(line, /dv 3 m\/s/);
+  assert.match(line, /dψ 0\.3 rad/);
+  assert.match(line, /간격 15 s/);
+  assert.equal(maneuverLine(null), "");
+});
+
+test("기동이 다르면 「직전 대비」를 비교하지 않는다 — 개선이 아니라 자가 바뀐 것", () => {
+  const man = { dv: 3, dh: 30, dpsi: 0.3, t_settle: 5, t_step: 15, t_hold: 15 };
+  const run = (m) => ({ depth: "full", maneuver: m });
+  assert.ok(sameManeuver(run(man), run({ ...man })));
+  // 옛 결과는 스텝을 모른다 — 「같다」로 넘기면 그 오독이 그대로 남는다
+  assert.ok(!sameManeuver(run(null), run(man)));
+  assert.ok(!sameManeuver(run(man), { depth: "full" }));
+  // **여섯 키가 전부 판정에 든다.** 하나라도 빠지면 그 축의 변경이 조용히
+  // 「같은 기동」이 된다 — dh 100→30이 v0.72가 실제로 한 일이라 남 얘기가 아니다.
+  // 목록은 **여기 손으로 적는다**: MANEUVER_KEYS를 순회하면 키를 빼는 변이가
+  // 테스트의 순회 대상까지 같이 줄여 자기참조로 통과한다(실제로 그랬다)
+  for (const k of ["dv", "dh", "dpsi", "t_settle", "t_step", "t_hold"]) {
+    const other = { ...man, [k]: man[k] + 1 };
+    assert.ok(!sameManeuver(run(man), run(other)), `${k}가 판정에서 빠졌다`);
+  }
+});
+
+test("기동 키 목록이 엔진 evaluate.py와 한 벌이다 (드리프트 가드)", () => {
+  // 엔진이 키를 늘리면 웹의 비교가 그 축을 못 보고 조용히 「같다」고 답한다 —
+  // 상태 어휘 가드와 같은 방식으로 정본을 직접 읽어 대조한다
+  const src = readFileSync(
+    new URL("../../../engine/claw/pipeline/evaluate.py", import.meta.url),
+    "utf8");
+  const m = src.match(/"maneuver": \{([\s\S]*?)\},/);
+  assert.ok(m, "엔진 maneuver 선언을 찾지 못했다");
+  const engineKeys = [...m[1].matchAll(/"(\w+)":/g)].map((x) => x[1]);
+  assert.deepEqual(new Set(engineKeys), new Set(MANEUVER_KEYS));
+});
+
+test("선형끼리는 기동과 무관하게 비교된다 — 없는 비교 불가를 지어내지 않는다", () => {
+  // 선형은 시뮬을 한 번도 안 돌아 기동이 쓰이지 않는다. 스텝만 바꿔 다시 돌렸다고
+  // ζ·GM·PM 델타를 막으면, 이 함수가 막으려던 것과 **정반대** 거짓말이 된다
+  const a = { depth: "linear", maneuver: { dv: 3, dh: 30, dpsi: 0.3, t_step: 15 } };
+  const b = { depth: "linear", maneuver: { dv: 3, dh: 30, dpsi: 0.3, t_step: 60 } };
+  assert.ok(sameManeuver(a, b));
+  // 깊이가 다르면 애초에 비교 대상이 아니다
+  assert.ok(!sameManeuver(a, { depth: "full", maneuver: a.maneuver }));
 });

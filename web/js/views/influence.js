@@ -71,7 +71,7 @@ import {
 } from "../lib/influence.js";
 import {
   STATUS_LABEL, attributionRows, cardDeltas, caseGrid, checksSummary,
-  compositionLine, evalFocus,
+  compositionLine, evalFocus, maneuverLine, sameManeuver,
   evaluateRequest, hardFailLines, jLine, localityLines, normalizeEvalReport,
   normalizeVerifyReport, statusInk, verifyRequest,
 } from "../lib/evaluate.js";
@@ -1401,8 +1401,16 @@ export function render() {
         emphasis: state.evalSel == null ? null : new Set(state.evalSel),
       });
       // 재측정이면 카드마다 얼마에서 얼마로 — 개선만 보여 주지 않는다
-      const deltas = state.evalPrev
+      // 기동이 다르면 델타는 개선이 아니라 **자가 바뀐 것**이다 — t_step은 화면에서
+      // 고치는 값이라 한 세션 안에서도 바뀐다. 비교 불가를 침묵으로 두지 않고 말한다
+      const comparable = sameManeuver(state.evalPrev, m);
+      const deltas = state.evalPrev && comparable
         ? cardDeltas(state.evalPrev.cards, m.cards) : [];
+      if (state.evalPrev && !comparable) {
+        evalCardsBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
+          "직전 대비 — 비교하지 않는다: 두 런의 기동이 다르거나 기록이 없다"
+          + "(스텝이 바뀌면 같은 게인이라도 RMS가 달라진다)"));
+      }
       if (deltas.length) {
         evalCardsBox.append(el("div", {
           class: "row", style: "gap:12px;flex-wrap:wrap;margin-top:8px;font-size:12px",
@@ -1422,6 +1430,9 @@ export function render() {
       evalBox.append(el("p", { class: "hint", style: "margin:8px 0 0" },
         `케이스 ${agg?.n_cases ?? 0}건 · depth=${m.depth}`
         + ` · 형상 지문 ${m.fingerprint} · 기준 지문 ${m.criteriaFingerprint}`
+        // 기동은 lib이 문장으로 만든다 — 세 갈래(선형/기록 있음/없음)를 여기
+        // 인라인으로 두면 테스트가 못 묶는다 (compositionLine·checksSummary 선례)
+        + (maneuverLine(m) ? ` · ${maneuverLine(m)}` : "")
         + (m.aborted ? " · 취소됨 — 완료 단계만" : "")));
 
       // B급 — 요약 한 줄이 정본 표면, 문제 항목만 전개 (na도 병기·전개)
@@ -2649,7 +2660,7 @@ export function render() {
       el("p", { class: "hint", style: "margin:6px 0 0" },
         "1·2단계 결과는 한 화면에 함께 선다: 대표 ",
         String((m?.cards ?? []).length || 7), "장은 값·기준·최악 운용점을 각각 낸 카드로, " +
-        "나머지 ", String((m?.checks ?? []).length || 9),
+        "나머지 ", String((m?.checks ?? []).length || 10),
         "건은 「n/n PASS」 한 줄로 접히고 문제 항목만 펼쳐진다. 이것은 비용이 아니라 " +
         "화면 밀도의 구분이다 — 둘 다 2단계 한 번에 나온다."),
       el("p", { class: "hint", style: "margin:6px 0 0" },
@@ -2724,7 +2735,7 @@ export function render() {
           el("h2", {}, "평가 → 처방 → 확정 — 이 탭의 주 흐름"),
           el("p", { class: "hint", style: "margin:0 0 10px" },
             "위에서 아래로 좁혀진다: 대표 카드 7장이 값·기준·최악 운용점을 내고, " +
-            "나머지 판정 9건이 한 줄로 서고, 실패가 있으면 어디서 나쁜지(국소성)와 왜 " +
+            "나머지 판정이 한 줄로 서고, 실패가 있으면 어디서 나쁜지(국소성)와 왜 " +
             "그런지(소견)가 같은 화면에 붙고, 소견의 [얼마나 →]가 감도·처방·확인 " +
             "런까지 이어진다. 통과하면 적용하고 3단계 검증으로 굳힌다. " +
             "하드 게이트(불안정·ζ·포화·실속·잔여권한·GM/PM) 위반이 하나라도 있으면 " +

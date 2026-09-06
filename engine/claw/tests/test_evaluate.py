@@ -3,7 +3,7 @@
 실행 비용이 케이스×런이므로 6DOF는 초소형 설정(t_settle 1 s·t_step 2 s) 한 벌을
 모듈 픽스처로 공유한다 — 이 설정에서 추종 판정은 당연히 나쁘게 나온다(스텝이
 정착할 시간이 없다). 그래서 테스트는 **수치가 아니라 구조·규약**을 핀한다:
-카드 7·체크 9의 완결성, 원자료(11항목) 보존, J v2의 None 전파(0 위장 금지),
+카드 7·체크 10의 완결성, 원자료(11항목) 보존, J v2의 None 전파(0 위장 금지),
 케이스 0건의 판정 보류, depth 게이트의 사유, verify의 코너·중간점.
 """
 
@@ -49,9 +49,10 @@ def report(rig):
                     t_settle=1.0, t_step=2.0)
 
 
-def test_카드는_7장_체크는_9건이고_어휘가_완결이다():
+def test_카드는_7장_체크는_10건이고_어휘가_완결이다():
     assert len(CARDS) == 7 and set(CARDS) == set(CARD_META)
-    assert len(CHECKS) == 9 and set(CHECKS) == set(CHECK_META)
+    # 10건 — v0.72에서 추력 여유가 늘었다(타면 여유와 같은 질문이되 물건이 다르다)
+    assert len(CHECKS) == 10 and set(CHECKS) == set(CHECK_META)
     assert set(STAGE_ORDER) == set(ITEMS)  # 원자료 11항목은 그대로 산다
 
 
@@ -388,3 +389,88 @@ def test_형상_작동기가_기준_기본값을_이긴다():
     assert comp.act_kw({"zeta": 0.4})["actuator_zeta"] == 0.4
     # 지연은 형상에 없다 — 기준이 정본이다
     assert comp.act_kw({"wn": 12.0})["delay_s"] == comp.delay_s
+
+
+def test_추력_여유는_문턱_경계에서_뒤집히고_최악_케이스를_고른다(report):
+    """판정 자체를 못박는다 — 종전 경계 테스트는 `lo >= lo`를 확인하는 동어반복이라
+    `>=`를 `>`로 바꾸거나 판정을 통째로 지워도 살아남았다(리뷰가 잡았다).
+
+    셋을 죽인다: 경계 포함(`>` 변이) · 방향(`<=` 변이) · 최악 케이스 선택(min→max).
+    """
+    import dataclasses
+
+    from claw.pipeline.evaluate import _build_checks
+
+    base = report["cases"][0]
+    m = base["metrics_raw"]["thr_margin_min"]
+    # 여유가 더 넉넉한 합성 케이스를 하나 붙인다 — 최악을 **작은 쪽**에서 골라야 한다
+    roomy = dict(base, case="roomy",
+                 metrics_raw=dict(base["metrics_raw"],
+                                  thr_margin_min=m + 0.5, thr_sat_frac=0.0))
+    cases = [roomy, base]
+
+    def judged(lo):
+        cr = GainEvalCriteria()
+        cr = dataclasses.replace(
+            cr, actuator=dataclasses.replace(cr.actuator, thr_margin_min_frac=lo))
+        return next(c for c in _build_checks(cases, cr, "ok")["list"]
+                    if c["key"] == "thr_margin")
+
+    assert judged(m)["status"] == "ok"          # 경계는 포함 (`>`면 죽는다)
+    assert judged(m + 0.01)["status"] == "fail"  # 방향 (`<=`면 죽는다)
+    assert judged(m)["worst_case"] == base["case"]  # 최악은 작은 쪽 (max면 죽는다)
+
+
+def test_추력_여유는_NaN을_거르고_사유를_반드시_낸다(report):
+    """두 변이가 살아 있던 자리 — NaN 가드 삭제와 else 분기 삭제 (리뷰가 잡았다).
+
+    NaN이 들면 `nan >= lo`가 False라 **거짓 실패**가 되고 뒤 케이스와의 비교도
+    전부 False라 진짜 최악이 안 올라온다. 그리고 사유 없는 실패는 이 판정이
+    존재하는 이유(원인을 화면에 세운다)를 통째로 지운다.
+    """
+    from claw.pipeline.evaluate import _build_checks
+
+    base = report["cases"][0]
+
+    def judged(raw):
+        c = dict(base, case="c", metrics_raw=dict(base["metrics_raw"], **raw))
+        return next(x for x in _build_checks([c], GainEvalCriteria(), "ok")["list"]
+                    if x["key"] == "thr_margin")
+
+    # NaN 케이스는 판정에서 빠진다 — 「못 잰 것」이지 실패가 아니다
+    nan_only = judged({"thr_margin_min": float("nan")})
+    assert nan_only["status"] == "na" and nan_only["value"] is None
+
+    # 체류를 못 실은 원자료라도 사유는 반드시 있다
+    no_frac = judged({"thr_margin_min": 0.0, "thr_sat_frac": None})
+    assert no_frac["status"] == "fail"
+    assert no_frac["note"] and "여유 하한" in no_frac["note"]
+
+
+def test_추력_여유_판정이_원인을_화면에_세운다(report):
+    """추종 RMS가 실패해도 원인(추력 포화)이 어느 판정에도 없던 자리 — v0.72.
+
+    판정은 값만이 아니라 **사유 문장**까지 낸다: 화면은 value의 대표 수 하나와
+    note만 그리므로, 여유 0만 찍히면 "얼마나 오래 붙어 있었나"가 사라진다.
+    """
+    ch = next(c for c in report["checks"]["list"] if c["key"] == "thr_margin")
+    assert ch["label"] == "추력 여유"
+    assert ch["status"] in ("ok", "fail", "na")
+    if ch["status"] != "na":
+        assert math.isfinite(ch["value"]["value"])  # NaN이 판정에 들면 거짓 실패다
+        assert ch["note"] and "체류" in ch["note"]
+
+
+def test_추력_여유는_하드_게이트가_아니다(report):
+    """하드에 넣으면 J가 안 매겨진다 — 이 판정은 **원인을 말하는 자리**이지
+    후보를 탈락시키는 자리가 아니다(하드 목록은 evaluate의 코드 상수다)."""
+    assert "thr_margin" not in report["hard_checks"]
+
+
+def test_결과가_어느_기동으로_쟀는지_적는다(report):
+    """형상·기준 지문만으로는 두 결과가 같은 자로 잰 것인지 알 수 없다 — 스텝이
+    바뀌면 RMS·J가 통째로 다른 뜻이 되는데 지문은 그대로다(v0.72가 그랬다)."""
+    m = report["maneuver"]
+    assert set(m) == {"dv", "dh", "dpsi", "t_settle", "t_step", "t_hold"}
+    assert m["dv"] > 0 and m["dh"] > 0 and m["dpsi"] > 0
+    assert m["t_step"] == 2.0  # report 픽스처가 넘긴 값이 그대로 적힌다

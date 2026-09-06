@@ -1,13 +1,13 @@
 """게인 평가 — A/B/C 등급 채점 (02 §2.4 확장, 사용자 확정 재편).
 
 표면 셋이 한 계산에서 나온다:
-- **A급 카드 7장**(CARDS) — 게인 튜닝 중 상시 표시: ①모드 안정성 ζ·ωn ②GM ③PM
+- **대표 카드 7장**(CARDS) — 게인 튜닝 중 상시 표시: ①모드 안정성 ζ·ωn ②GM ③PM
   ④응답속도 BW·ω_gc ⑤과도응답 Ts·Mp ⑥추종 RMS ⑦제어권한(사용률·잔여).
   GM·PM은 **각각** 카드다 — GM은 이득류(공력효율·동압·제어이득) 불확실성 여유,
   PM은 지연류(필터·전송·고주파) 여유라 하나로 접으면 다른 위험이 섞인다.
-- **B급 체크 9건**(CHECKS) — 항상 계산하고 "n/n PASS" 한 줄로 요약, 문제 시만
+- **나머지 판정 10건**(CHECKS) — 항상 계산하고 "n/n PASS" 한 줄로 요약, 문제 시만
   전개: 전체 극점 · Tr · 정상상태 오차 · 시간지연 여유 · 교차축(동시명령) ·
-  실속·엔벨로프 · 포화 지속 · 포화 회복 · 스케줄 전이.
+  실속·엔벨로프 · 포화 지속 · **추력 여유** · 포화 회복 · 스케줄 전이.
 - **원자료**(cases[].stages, 구 11항목 어휘 그대로) — 케이스 × 항목 격자와 상세
   전개의 근거. 카드·체크는 이 원자료의 집계이지 별도 계산이 아니다.
 
@@ -102,7 +102,7 @@ CARD_META = {
 
 # ── B급 체크 — 항상 계산, 요약 한 줄 (문제 시만 전개) ────────────────────────
 CHECKS = ("poles_all", "tr", "sse", "delay_margin", "coupling",
-          "envelope", "sat_duration", "recovery", "schedule_bump")
+          "envelope", "sat_duration", "thr_margin", "recovery", "schedule_bump")
 CHECK_META = {
     "poles_all": "전체 극점",
     "tr": "상승시간 Tr",
@@ -111,6 +111,7 @@ CHECK_META = {
     "coupling": "교차축·동시명령",
     "envelope": "실속·엔벨로프 마진",
     "sat_duration": "포화 지속",
+    "thr_margin": "추력 여유",
     "recovery": "포화 회복·안티와인드업",
     "schedule_bump": "스케줄 전이",
 }
@@ -148,8 +149,13 @@ _WINDUP_CLAMPS = {"i_pitch": "pitch", "i_roll": "roll", "i_yaw": "yaw",
                   "i_alt": "alt", "i_spd": "spd", "i_hdg": "hdg"}
 
 
-def combined_probe(tr, *, dh=PROBE_DH, dpsi=PROBE_DPSI, t_settle=5.0, t_hold=30.0):
+def combined_probe(tr, *, dh, dpsi, t_settle=5.0, t_hold=30.0):
     """동시명령 기동 — 정착 → (고도 스텝 + 헤딩 스텝 **동시**) 유지 → (modes, t_end).
+
+    **dh·dpsi에 기본값을 두지 않는다.** 종전에는 표준 기동의 PROBE_DH·PROBE_DPSI를
+    기본값으로 물려받았는데, v0.72에서 표준 기동을 제어권한 안으로 줄이자(dh 100→30,
+    dpsi 0.5→0.3) 이 기동까지 조용히 같이 줄어들 뻔했다 — 목적이 정반대인데도.
+    정본은 `CouplingCriteria.dh·dpsi`이고 부르는 쪽이 그것을 명시한다.
 
     표준 기동(probe_mission)은 축을 하나씩 밟아 경합이 없다. 델타익은 피치·롤이
     같은 엘레본 예산을 나눠 쓰므로(fcl/graphs.py 배분 — 헤딩 스텝이 뱅크를 만들어
@@ -1176,7 +1182,7 @@ def _stage_check(cases, key, stage_key, value_of=None):
 
 
 def _build_checks(cases, criteria, pm_card_status):
-    """B급 체크 9건 + 요약 카운트. na는 PASS 분모에서 빠지되 **반드시 병기**된다 —
+    """나머지 판정 10건 + 요약 카운트. na는 PASS 분모에서 빠지되 **반드시 병기**된다 —
     "숨기지 않는다"(웹 checksSummary가 이 규칙의 표시 정본)."""
     checks = []
     checks.append(_stage_check(cases, "poles_all", "stability"))
@@ -1242,6 +1248,51 @@ def _build_checks(cases, criteria, pm_card_status):
         "na" if sat is None else ("ok" if sat["value"] == 0.0 else "warn"),
         worst_case=sat["case"] if sat else None, value=sat,
         note=None if sat else "잰 런이 없다"))
+
+    # 추력 여유 — 타면 여유와 같은 질문이되 **물건이 다르다**: 타면은 자세를 못
+    # 만드는 것이고 추력은 에너지를 못 내는 것이다. 이 자리가 없어서, 추종 RMS가
+    # 실패해도 원인이 화면 어디에도 없었다 — 사용자는 게인을 고치려 처방을 돌리고
+    # 처방은 "스팬 안에 교차 없음"이라고만 답했다(포화 뒤에서 게인은 무력하다)
+    # 이 판정이 보는 것은 **표준 기동 런뿐**이다(metrics_raw). 동시명령 런(metrics_c)은
+    # 여기 안 온다 — 그쪽이 dh 100·dpsi 0.5로 더 크게 요구해 추력이 더 마를 자리인데도
+    # 안 보인다. 원자료를 여기까지 끌어오는 것은 별건이라 [TBD]로 남긴다
+    #
+    # NaN을 거른다 — 섞이면 `nan >= lo`가 False라 **거짓 실패**가 되고, 뒤 케이스와의
+    # 비교(`v < worst`)도 전부 False라 진짜 최악 케이스가 영영 안 올라온다
+    # (_min_over·_rms·_actuator_stage가 같은 이유로 같은 가드를 둔다)
+    thr = None
+    for c in cases:
+        m = c.get("metrics_raw") or {}
+        v, f = m.get("thr_margin_min"), m.get("thr_sat_frac")
+        if v is None or not math.isfinite(float(v)):
+            continue
+        if thr is None or float(v) < thr["value"]:
+            thr = {"value": float(v),
+                   "sat_frac": (float(f) if f is not None
+                                and math.isfinite(float(f)) else None),
+                   "case": c["case"]}
+    lo = criteria.actuator.thr_margin_min_frac
+    # 포화 비율은 **사유 문장으로도** 낸다 — 화면은 value의 대표 수 하나와 note만
+    # 그리므로(views/influence.js), 여유 0만 찍히면 "얼마나 오래 붙어 있었나"가
+    # 사라진다. 원인을 화면에 세우자는 것이 이 판정의 목적이다
+    note = None
+    if thr is None:
+        note = "추력 채널이 없거나 잰 런이 없다"
+    elif thr["sat_frac"] is not None:
+        note = (f"최대 추력 체류 {thr['sat_frac'] * 100:.1f} % · "
+                f"여유 하한 {lo:.2f} — 여기가 0이면 추종 오차는 게인이 아니라 "
+                "에너지가 원인이다")
+    else:
+        # 여유는 있는데 체류가 없다 — 두 지표는 같은 조건에서 함께 None이 되므로
+        # (둘 다 유한 표본이 없을 때) 이 갈래에 닿는 길은 **한쪽 키만 실린
+        # 원자료**뿐이다(낡거나 외부에서 온 페이로드). 그래도 사유 없는 실패는
+        # 남기지 않는다 — 이 판정이 있는 이유가 "원인을 화면에 세우는 것"이다
+        note = (f"여유 하한 {lo:.2f} — 최대 추력 체류가 결과에 없다"
+                "(여유만 실린 원자료)")
+    checks.append(_check(
+        "thr_margin",
+        "na" if thr is None else ("ok" if thr["value"] >= lo else "fail"),
+        worst_case=thr["case"] if thr else None, value=thr, note=note))
 
     checks.append(_stage_check(cases, "recovery", "recovery"))
     checks.append(_stage_check(cases, "schedule_bump", "schedule"))
@@ -1357,6 +1408,12 @@ def evaluate(aircraft, trs, shape: Shape, criteria: GainEvalCriteria, *,
         "fingerprint": shape.fingerprint(),
         "criteria_fingerprint": criteria.fingerprint(),
         "criteria": criteria.to_dict(),
+        # **기동을 결과에 적는다** — 형상 지문과 기준 지문만으로는 두 결과가 같은
+        # 자로 잰 것인지 알 수 없다. 스텝이 바뀌면(v0.72가 그랬다) RMS·J가 통째로
+        # 다른 뜻이 되는데 지문은 똑같아, 저장된 옛 결과와 새 결과가 화면에서
+        # 구별되지 않는다. 결과는 디스크에 남고 /results로 다시 열린다
+        "maneuver": {"dv": dv, "dh": dh, "dpsi": dpsi,
+                     "t_settle": t_settle, "t_step": t_step, "t_hold": t_hold},
         "depth": depth,
         "cards": cards,
         "checks": checks,

@@ -11,6 +11,9 @@ import pytest
 from claw.common.contracts import TrimCase
 from claw.pipeline.influence import Shape
 from claw.pipeline.sweep import (
+    PROBE_DH,
+    PROBE_DPSI,
+    PROBE_DV,
     nonadditivity,
     probe_mission,
     run_sweep,
@@ -28,16 +31,32 @@ def design_trim():
     return ac, tr
 
 
-def test_표준_진단_기동은_설계_스캔_기동의_정본화다(design_trim):
-    """수치(고도 +100 m·속도 +10 m/s·헤딩 0.5 rad)는 autopilot.py 설계 스캔
-    기동에서 왔다 — 다른 수치로 재면 설계 성능 문구와 비교가 안 된다."""
+def test_표준_진단_기동의_스텝은_계측으로_정해진다(design_trim):
+    """스텝은 **제어권한 안**이어야 한다 (v0.72).
+
+    종전 수치(고도 +100 m·속도 +10 m/s·헤딩 0.5 rad)는 autopilot.py 설계 스캔
+    기동에서 왔고 "다른 수치로 재면 설계 성능 문구와 비교가 안 된다"가 이 테스트의
+    근거였다. 그 비교는 **이미 깨져 있었다** — fcl/demo.py 머리말이 적어 둔 대로
+    프로펠러 추력 모델 이후 그 설계점(M0.6 h1000 f200)은 엔벨로프 밖이고(스로틀
+    95.04 % > SAT_FRAC 0.95), 계측하면 스로틀이 전 구간의 93.6 %를 최대치에 붙어
+    +10 m/s를 60초에 2.5 m/s밖에 못 따라간다. 그 상태의 추종 RMS는 제어 품질이
+    아니라 물리 한계를 재는 값이다.
+
+    그래서 스텝을 줄여 오차가 제어 품질을 재게 했다(sweep.PROBE_* 주석에 계측표).
+    능력을 넘었다는 사실은 지우지 않는다 — CHECKS의 「추력 여유」가 계속 fail로
+    보고한다. **축 겹침은 이 변경으로 안 고쳐진다**: 고도 정착은 70.4 → 71.0 s로
+    그대로이고, 그것은 스텝 크기가 아니라 상승 능력이 정한다(t_step [TBD]).
+    """
     _, tr = design_trim
     modes, t_end = probe_mission(tr)
     assert [m.name for m in modes] == ["settle", "alt_step", "spd_step", "hdg_step"]
     V0 = float(np.linalg.norm(tr.state.vel_b))
-    assert modes[1].alt == pytest.approx(1000.0 + 100.0)
-    assert modes[2].speed == pytest.approx(V0 + 10.0)
-    assert modes[3].heading == pytest.approx(0.5)
+    assert modes[1].alt == pytest.approx(1000.0 + PROBE_DH)
+    assert modes[2].speed == pytest.approx(V0 + PROBE_DV)
+    assert modes[3].heading == pytest.approx(PROBE_DPSI)
+    # 스텝은 상수에서 오고, 그 상수는 계측으로 정해졌다 — 값이 다시 커지면
+    # 이 단언이 아니라 sweep.PROBE_* 주석의 계측표를 다시 돌려야 한다
+    assert (PROBE_DH, PROBE_DV, PROBE_DPSI) == (30.0, 3.0, 0.3)
     assert modes[3].next is None  # 종단 모드
     assert t_end > 0
     # 체인이 끊기지 않는다

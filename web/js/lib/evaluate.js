@@ -40,6 +40,46 @@ export function evaluateRequest(state, { cases, criteria, depth, tSettle, tStep,
   return body;
 }
 
+/** 두 결과를 **같은 자로 잰 것인가** — 다르면 델타는 개선이 아니라 기동 차이다.
+ *
+ * `t_step`은 사용자가 화면에서 고치는 값이라(기본 15) 한 세션 안에서도 바뀐다.
+ * 15로 돌리고 30으로 바꿔 다시 돌리면 추종 RMS가 9.17 → 6.65로 찍히는데 게인은
+ * 한 글자도 안 바뀌었다 — 「직전 대비 개선」이 정면으로 거짓말이 되는 자리다.
+ * 기록이 한쪽이라도 없으면 **모른다**(false)로 둔다: 옛 결과는 스텝을 알 수 없다.
+ *
+ * **선형끼리는 기동과 무관하게 비교된다.** 선형은 시뮬을 한 번도 안 돌아 기동이
+ * 결과에 쓰이지 않는데(결과에 적히기만 한다), 스텝만 바꿔 다시 돌렸다고 ζ·GM·PM
+ * 델타를 막으면 **없는 비교 불가를 지어내는** 반대 방향 거짓말이 된다.
+ * `maneuverLine`이 같은 이유로 선형에서 침묵하는 것과 한 벌이다.
+ */
+export const MANEUVER_KEYS = ["dv", "dh", "dpsi", "t_settle", "t_step", "t_hold"];
+
+export function sameManeuver(a, b) {
+  if (a?.depth !== b?.depth) return false;
+  if (a?.depth === "linear") return true;  // 기동이 쓰이지 않았다
+  const x = a?.maneuver, y = b?.maneuver;
+  if (!x || !y) return false;
+  return MANEUVER_KEYS.every((k) => x[k] === y[k]);
+}
+
+/** 결과가 **어느 기동으로** 쟀는가 — 결과 메타 줄의 한 조각.
+ *
+ * 형상·기준 지문만으로는 두 결과가 같은 자로 잰 것인지 알 수 없다: 스텝이 바뀌면
+ * RMS·J가 통째로 다른 뜻이 되는데 지문은 그대로다. 셋을 가른다.
+ *
+ *   linear   — 빈 문자열. 시뮬을 한 번도 안 돌았으므로 기동을 찍으면 **안 돈
+ *              기동을 돈 것처럼** 읽힌다(결과에는 적혀 있어도 쓰이지 않았다)
+ *   기록 있음 — 값과 단위. 단위를 빼면 dψ가 rad인지 deg인지 화면만으로 못 정한다
+ *   기록 없음 — 옛 결과다. 현행 기본값으로 채우지 않는다(「없음」과 「값」을 섞지 않는다)
+ */
+export function maneuverLine(model) {
+  if (!model || model.depth === "linear") return "";
+  const m = model.maneuver;
+  if (!m) return "기동 미기록 — 옛 결과라 스텝이 지금과 다를 수 있다";
+  return `기동 dh ${m.dh} m · dv ${m.dv} m/s · dψ ${m.dpsi} rad`
+    + ` · 간격 ${m.t_step} s`;
+}
+
 /** 형상 + 케이스 → /influence/verify 본문 (C급 — 후보 확정 후 별도 실행). */
 export function verifyRequest(state, { cases, criteria, depth, midpoints,
                                        tSettle, tStep, tHold,
@@ -59,6 +99,10 @@ export function verifyRequest(state, { cases, criteria, depth, midpoints,
 export function normalizeEvalReport(payload) {
   return {
     depth: payload?.depth ?? null,
+    // 어느 기동으로 쟀는가 — 형상·기준 지문만으로는 두 결과가 같은 자로 잰
+    // 것인지 알 수 없다(스텝이 바뀌면 RMS·J가 통째로 다른 뜻이 되는데 지문은
+    // 그대로다). 옛 결과에는 없으므로 null이고, 화면은 그 사실을 그대로 낸다
+    maneuver: payload?.maneuver ?? null,
     cards: payload?.cards ?? [],
     checks: payload?.checks ?? null,
     stageOrder: payload?.stage_order ?? [],

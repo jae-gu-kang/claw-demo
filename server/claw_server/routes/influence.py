@@ -463,7 +463,7 @@ def criteria_defaults() -> dict:
 
 
 class EvaluateIn(InfluenceIn):
-    """A/B급 평가 요청 — 형상 + 케이스 격자 + 기준(없으면 기본값) + 깊이.
+    """평가 요청 — 형상 + 케이스 격자 + 기준(없으면 기본값) + 깊이.
 
     depth="linear"는 트림+선형화만(시뮬 0 — 전 게인 후보에 돌리는 단계 1),
     "full"은 표준 기동 런 + 동시명령 런 포함(단계 2). B급 교차축이 필수라 full에서
@@ -483,7 +483,7 @@ class EvaluateIn(InfluenceIn):
 
 @router.post("/influence/evaluate", status_code=202)
 def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> dict:
-    """A급 카드 7 + B급 체크 9 + 원자료 — 잡 기반 202.
+    """대표 카드 7 + 나머지 판정 10 + 원자료 — 잡 기반 202.
 
     케이스당 비용: 트림 + (depth=full일 때) 표준 기동 런·동시명령 런 + 선형화·마진.
     기준 오류·기체와 안 맞는 형상은 제출 시점 422 (sweep과 같은 계약). 결과에

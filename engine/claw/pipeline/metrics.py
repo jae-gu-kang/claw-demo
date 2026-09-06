@@ -23,6 +23,7 @@ from claw.analysis.duty import (
     CHANNELS, POS_TOL, _limits_for, saturation, surface_positions,
 )
 from claw.pipeline.influence import METRICS
+from claw.trim.trim import THR_BOUNDS
 
 # ── 응답특성의 **정의** 상수 — 문턱이 아니라 측정 규약이라 criteria가 아니라
 # 여기 산다 (측정과 정의는 한 몸 — criteria.ResponseCriteria 참조 주석의 짝).
@@ -84,6 +85,79 @@ def _surf_sat_frac(signals, meta):
     if not masks:
         return None
     return float(np.mean(np.any(masks, axis=0)))
+
+
+# 추력 채널 — 타면과 달리 `limits` 메타가 없다(법칙이 [0,1]로 클립한다).
+# 한계를 여기 적는 것이 재기술처럼 보이지만 아니다: 이 값은 **신호의 정의역**이고
+# 형상 파라미터가 아니다(게인으로 바뀌지 않는다). 바뀔 여지가 생기면 그때 meta로
+# 올린다 — 지금 meta에 없는 것을 있는 척 읽으면 조용히 None이 된다
+THR_CHANNELS = ("thr_l", "thr_r")
+# 이 신호의 **진짜 정의역은 법칙의 포화 블록**(fcl/graphs.py의 Saturation(0, 1))
+# 이고, 거기는 리터럴이라 import로 묶을 정본이 없다. trim.THR_BOUNDS는 트림
+# 최적화의 탐색 상자인데 **값이 같아서** 그것을 쓴다 — 우연의 일치이므로, 둘이
+# 갈라지면 테스트가 먼저 깨지게 묶어 둔다(test_metrics의 정의역 대조)
+THR_HI = THR_BOUNDS[1]
+THR_TOL = 1e-3
+
+
+def _thr_arrays(signals):
+    out = [_arr(signals, k) for k in THR_CHANNELS]
+    out = [x for x in out if x is not None]
+    return out or None
+
+
+def _thr_sat_frac(signals):
+    """**상한** 추력 포화 시간비 — 한 채널이라도 최대 추력에 붙어 있던 표본의 비율.
+
+    타면 포화와 **같은 뜻이되 물건이 다르다**: 타면은 자세를 못 만드는 것이고
+    추력은 **에너지를 못 내는 것**이다. 추종 오차가 커도 게인으로 안 고쳐지는
+    자리가 여기다 — 포화된 액추에이터 뒤에서는 루프 게인이 아무 일도 안 한다.
+
+    **하한(아이들)은 세지 않는다.** 강하에서는 스로틀 0이 정상이고 그것은 "에너지를
+    못 낸다"가 아니다 — 둘을 한 수로 합치면 종말 강하 런이 포화 100 %로 찍히면서
+    이 지표의 문장("여기가 크면 에너지가 원인이다")과 정면으로 어긋난다. 하한 체류는
+    별개 사실이고 아직 안 잰다 [TBD] (trim.py도 throttle_high·throttle_low를 둘로
+    나눠 본다). `_thr_margin_min`이 상한만 재는 것과 이 정의가 짝이다.
+
+    비유한 표본은 **판정에서 뺀다** — NaN은 두 비교를 모두 False로 만들어 "포화가
+    아니었다"로 조용히 희석된다(_actuator_stage가 같은 함정을 주석으로 경고한다).
+    전부 비유한이면 None: 못 잰 것을 0으로 위장하지 않는다.
+    """
+    arrs = _thr_arrays(signals)
+    if arrs is None:
+        return None
+    # **채널 하나가 NaN이라고 그 표본을 통째로 버리지 않는다**(`&=`였다) — 다른
+    # 채널이 최대치에 붙어 있었는데도 「포화 아님」으로 희석됐다. 유한한 채널이
+    # 하나라도 있으면 그 표본은 판정한다(_thr_margin_min의 채널별 필터와 같은 규칙)
+    ok = np.zeros(arrs[0].shape, dtype=bool)
+    sat = np.zeros(arrs[0].shape, dtype=bool)
+    for x in arrs:
+        f = np.isfinite(x)
+        ok |= f
+        sat |= f & (x >= THR_HI - THR_TOL)
+    if not ok.any():
+        return None
+    return float(np.mean(sat[ok]))
+
+
+def _thr_margin_min(signals):
+    """최소 추력 여유 = min(1 − thr) — 이 기동에서 남아 있던 가장 얇은 여유.
+
+    0이면 그 순간 더 낼 것이 없었다는 뜻이다. 트림값만으로는 안 보이는데,
+    상승·선회가 여유를 먹는 것은 기동 중에 일어나기 때문이다.
+
+    비유한 표본은 뺀다 — NaN이 min에 섞이면 결과가 NaN이 되고, 그 NaN은 판정에서
+    `nan >= lo`가 False라 **거짓 실패**가 되며 뒤 케이스와의 비교(`v < worst`)도
+    전부 False라 진짜 최악 케이스를 가린다.
+    """
+    arrs = _thr_arrays(signals)
+    if arrs is None:
+        return None
+    vals = [THR_HI - x[np.isfinite(x)] for x in arrs]
+    vals = [v for v in vals if v.size]
+    if not vals:
+        return None
+    return float(min(float(np.min(v)) for v in vals))
 
 
 def _xtrack_rms(signals, waypoints):
@@ -367,6 +441,8 @@ def metric_values(t, signals, envelope, meta, waypoints=None) -> dict:
                                  angular=True),
         **steps,
         "surf_sat_frac": _surf_sat_frac(signals, meta),
+        "thr_sat_frac": _thr_sat_frac(signals),
+        "thr_margin_min": _thr_margin_min(signals),
         "sat_longest": _sat_longest(signals, meta, t),
         "limiter_frac": (
             None if la is None else float(np.mean(np.asarray(la, dtype=bool)))
