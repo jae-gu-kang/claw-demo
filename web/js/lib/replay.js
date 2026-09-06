@@ -1,4 +1,4 @@
-/** 재생 유틸 (02 §8 5단계) — stride 산정·모드 구간·극값 (순수 로직, 테스트 대상). */
+/** 재생 유틸 (02 §8 7단계) — stride 산정·모드 구간·극값 (순수 로직, 테스트 대상). */
 
 export function strideFor(nTotal, target = 1500) {
   return Math.max(1, Math.ceil(nTotal / target));

@@ -813,6 +813,53 @@ test("탭 순서가 업무 순서다 — nav ↔ VIEWS ↔ 파이프라인", () 
   assert.deepEqual(viewOrder, PIPELINE, "main.js VIEWS 나열 순서가 nav와 다르다");
 });
 
+// 02 §8(사용자 워크플로우)은 상단 탭 줄과 **같은 순서**여야 한다 (v0.63). 종전에는
+// §8이 6단계짜리 옛 목록이라 엔벨로프·자동 설계·가상환경·영향성·Autocode가 통째로
+// 빠져 있었고, 그 상태로 코드 주석 열아홉 곳이 "02 §8 5단계"처럼 번호를 인용하고
+// 있었다 — 문서가 낡으면 인용이 조용히 딴 단계를 가리킨다. 여기서 대조한다
+const DOC2 = read("../../../docs/fcs-context-02-implementation.md");
+const WORKFLOW = (() => {
+  const body = DOC2.split("## 8. 사용자 워크플로우")[1].split("## 9.")[0];
+  const steps = new Map();
+  // 단계 하나 = "N. …" 줄 + 이어지는 들여쓴 줄들. 탭 이름은 그 안 첫 [태그]다.
+  // 정규식 한 방으로 자르지 않는 이유: 여러 줄로 접힌 단계가 절반이라 게으른
+  // 매칭이 첫 줄에서 멈추고, 그러면 태그 없는 단계가 조용히 빠진다
+  let cur = null;
+  for (const line of body.split("\n")) {
+    const head = line.match(/^(\d+)\. /);
+    if (head) cur = { n: Number(head[1]), text: line };
+    else if (cur) cur.text += ` ${line}`;
+    if (cur && !steps.has(cur.n)) {
+      const tag = cur.text.match(/\[([^\]]+)\]/);
+      if (tag) steps.set(cur.n, tag[1]);
+    }
+  }
+  return steps;
+})();
+
+test("02 §8 워크플로우가 탭 줄과 같은 순서다", () => {
+  const navLabels = [...read("../../index.html").matchAll(/data-view="[\w-]+">([^<]+)</g)]
+    .map((m) => m[1]);
+  assert.equal(WORKFLOW.size, navLabels.length,
+    `§8 단계 ${WORKFLOW.size}개 ↔ 탭 ${navLabels.length}개 — 한쪽이 낡았다`);
+  const stepTabs = [...WORKFLOW.keys()].sort((a, b) => a - b).map((k) => WORKFLOW.get(k));
+  assert.deepEqual(stepTabs, navLabels, "§8 순서가 nav 순서와 다르다");
+});
+
+test("코드가 인용한 02 §8 단계 번호가 그 탭을 가리킨다", () => {
+  // 파일 이름이 곧 탭인 뷰만 본다 — lib/*.js는 이름으로 탭을 못 정한다
+  for (const [file, tab] of [
+    ["../views/trim.js", "트림"], ["../views/gains.js", "게인"],
+    ["../views/margins.js", "마진 맵"], ["../views/sim.js", "시뮬레이션"],
+    ["../views/results.js", "결과"],
+  ]) {
+    const cited = read(file).match(/§8 (?:워크플로우 )?(\d+)단계/);
+    assert.ok(cited, `${file}: §8 인용이 사라졌다`);
+    assert.equal(WORKFLOW.get(Number(cited[1])), tab,
+      `${file}: §8 ${cited[1]}단계는 「${WORKFLOW.get(Number(cited[1]))}」인데 이 파일은 「${tab}」이다`);
+  }
+});
+
 test("시뮬 → 가상환경 → 영향성 인계가 실제로 배선돼 있다", () => {
   // 탭 순서가 "시뮬 다음 영향성"이라고 말하면 화면에도 넘어갈 수단이 있어야 한다.
   // 순서만 바꾸고 배선이 없으면 탭 줄이 하지 않는 일을 말하게 된다 (v0.63)

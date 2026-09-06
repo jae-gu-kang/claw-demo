@@ -28,10 +28,10 @@ uvicorn --factory claw_server:create_app --port 8000   # 모노레포 루트에�
 |---|---|
 | `GET /api/health` | 헬스체크 |
 | `GET /api/registry`, `GET /api/registry/{cat}/{name}/schema` | 컴포넌트 목록·파라미터 JSON 스키마 (폼 자동 생성) |
-| `POST /api/trim/batch` | 2단계: 트림 케이스 매트릭스 → 배치 작업 (202 + job, 판정 플래그 포함) |
-| `POST /api/analysis/margin-map` | 3단계: 케이스 격자 + PI 루프 스펙 → 선형화·모드 분류·마진 맵 |
+| `POST /api/trim/batch` | 3단계: 트림 케이스 매트릭스 → 배치 작업 (202 + job, 판정 플래그 포함) |
+| `POST /api/analysis/margin-map` | 5단계: 케이스 격자 + PI 루프 스펙 → 선형화·모드 분류·마진 맵 |
 | `GET /api/gains/demo` | 4단계: 설계 게인 테이블 조회 (편집 후 시뮬 `gain_tables`로 주입) |
-| `POST /api/sim/run` | 5단계: 미션 스펙 → 폐루프 시뮬 (항법 오차·작동기·게인/AP 오버라이드 옵션) |
+| `POST /api/sim/run` | 7단계: 미션 스펙 → 폐루프 시뮬 (항법 오차·작동기·게인/AP 오버라이드 옵션) |
 | `GET /api/sim/{id}/replay?stride=n` | 시뮬 재생 다운샘플 뷰 (엔벨로프 포함) |
 | `GET /api/jobs`, `GET /api/jobs/{id}`, `POST /api/jobs/{id}/cancel` | 작업 조회·협조적 취소 (부분 결과 보존) |
 | `WS /api/ws/jobs/{id}` | 작업 진행률 푸시 (변화 시·종단 시 종료) |
