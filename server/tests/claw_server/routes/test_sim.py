@@ -485,7 +485,7 @@ def test_rail_needs_exactly_one_of_speed_or_accel(client):
 
 
 def test_nav_grade_picks_rtk_without_the_web_restating_numbers():
-    """등급은 **이름으로** 고른다 — 웹이 RTK 수치를 재기술하면 §5.5 위반이다.
+    """등급은 **이름으로** 고른다 — 웹이 RTK 수치를 재기술하면 02 §5.5 위반이다.
 
     요청은 seed만 담고, 값은 엔진 RTK_FIXED에서 온다. nav의 덮어쓰기가 등급 위에
     얹히는 것도 함께 고정한다(등급이 바탕, nav가 위).

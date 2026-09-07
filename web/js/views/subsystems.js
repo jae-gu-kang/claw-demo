@@ -97,7 +97,7 @@ const SCAS_PI_PAGE = {
   <text class="bname" x="452" y="268" style="font-size:11px">출력이 한계에 붙었나 (그 방향이면 증분 버림)</text>
   <g class="sblk" data-code="blocks/controllers.py:PID.step"><rect class="body" x="730" y="138" width="36" height="24" rx="12"/><text class="pnum" x="748" y="154">1</text></g>
   <text class="pname" x="748" y="182">u_PI → k_rate 합산</text>
-  <text class="canvas-note" x="24" y="292">※ 안티와인드업 = 포화 중 증분을 버린다 (상태 클램프는 웜스타트 방어로 남는다) · 이산화: 전진 오일러, dt는 제어주기에서 자동 [확정 §3.5]</text>
+  <text class="canvas-note" x="24" y="292">※ 안티와인드업 = 포화 중 증분을 버린다 (상태 클램프는 웜스타트 방어로 남는다) · 이산화: 전진 오일러, dt는 제어주기에서 자동 [확정 01 §3.5]</text>
   <text class="canvas-note" x="24" y="308">※ kp·ki는 게인 스케줄이 스텝 인자로 덮어씀 (생성 후 게인 변경은 이 경로만) · 재관여 시 reset(state) 적분 웜스타트 [범프리스 계약]</text>
 </svg>`,
   flow: {
@@ -119,7 +119,7 @@ const SCAS_PI_PAGE = {
 <h4>설계 노트</h4>
 <ul>
   <li>안티와인드업: <b>조건부 적분 + 상태 클램프</b> <span class="chip dft">기본값 M7</span>. 출력이 한계에 붙은 채 증분이 그 방향이면 증분을 버린다 — 포화 중 적분이 <b>아예 안 쌓여</b> 해제 시 즉시 응답. 클램프(out_lo~hi)는 웜스타트가 범위 밖으로 들어오는 경우를 막는 몫으로 남는다</li>
-  <li>이산화: 전진 오일러 — 계수는 제어주기(100 Hz)로부터 자동 계산 <span class="chip ok">확정 §3.5</span>, 미분항은 SCAS에서 미사용(kd=0)</li>
+  <li>이산화: 전진 오일러 — 계수는 제어주기(100 Hz)로부터 자동 계산 <span class="chip ok">확정 01 §3.5</span>, 미분항은 SCAS에서 미사용(kd=0)</li>
   <li>게인 kp·ki의 정본은 게인 탭 테이블 — 스케줄이 <b>스텝별 인자 덮어쓰기</b>로 주입 (생성자 게인은 스케줄 미사용 시 폴백)</li>
   <li>재관여(reset) 시 적분기 <b>웜스타트</b>(state 인자) — 모드 전환 킥 방지 <span class="chip ok">범프리스 계약</span></li>
 </ul>`,
@@ -1958,7 +1958,7 @@ export const SUBSYSTEMS = {
     notes: `
 <h4>설계 노트</h4>
 <ul>
-  <li>합격기준: 오버슈트 · 정착시간 · 정상상태 오차 · 경로오차 한계 <span class="chip dft">기본값</span> — 수치는 폐쇄망 Simulink 대조 시 확정, 파라미터 관리 계층으로 관리 <span class="chip ok">확정 01 §5</span></li>
+  <li>합격기준: 오버슈트 · 정착시간 · 정상상태 오차 · 경로오차 한계 <span class="chip dft">기본값</span> — 수치는 폐쇄망 Simulink 대조 시 확정, 파라미터 관리 계층으로 관리 <span class="chip ok">확정 04 §1</span></li>
   <li>엔벨로프 감시: 실속 마진(α_stall − α) 시계열 · 임무 전체 최악 마진 요약 · DB 유효범위 이탈 플래그 <span class="chip ok">확정</span></li>
   <li>멀티레이트: 플랜트 적분 주기(dt 10 ms)와 제어기 이산 주기(100 Hz) 분리 <span class="chip ok">확정</span> · 고정스텝 RK4 <span class="chip dft">기본값</span></li>
   <li>최종 검증: 기존 Simulink 모델과 대조 (완성 후 폐쇄망에서) <span class="chip ok">확정</span> · 몬테카를로 분산 대상 <span class="chip tbd">TBD 02 §6</span></li>

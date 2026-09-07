@@ -20,6 +20,19 @@
 04·05·06은 **주제 축**이라 01/02/03의 도메인·구현·모듈 축을 가로지른다. 판정선 하나를
 바꾸려고 네 문서를 열던 것을 없애기 위해 그렇게 갈랐다 — 그 주제는 그 파일 하나가 정본이다.
 
+## 저장소의 다른 문서
+
+설계 정본은 위 표가 전부다. 아래는 **그 디렉터리 안에서만 쓰는 사실**을 담은 README이며,
+정본과 겹치는 내용을 두지 않는다 — 겹치면 한쪽이 반드시 낡는다(위 「결정은 한 곳에만」).
+
+| 파일 | 담당 |
+|---|---|
+| [`../README.md`](../README.md) | 저장소 첫 화면 — 빠른 시작(데모·로컬·Codespaces), 탭 개요, 테스트, 알려진 제약 |
+| [`../server/README.md`](../server/README.md) | M13 설치·기동·API 개요 (02 §8 워크플로우 단계 대응) |
+| [`../web/README.md`](../web/README.md) | M14 디렉터리 구조·탭 배치 규약·표시 한계 |
+| [`../data/README.md`](../data/README.md) | 예제·검증 데이터, 측지 고정점, 지형 팩 재생성 |
+| [`../models/README.md`](../models/README.md) | 3D 모델 공통 규약(커밋 대상·블렌더 numpy) — 모델별 상세는 각 하위 README |
+
 ## 상태 표기
 
 | 표기 | 뜻 |
@@ -38,8 +51,8 @@
 특히 `web/js/lib/blocks.test.js`는 02 §8을 **리터럴 제목으로 파싱**하므로 그 절의 제목
 문자열은 테스트가 지킨다.
 
-**2. 참조에는 항상 문서 번호를 붙인다.** `02 §1 · 02 §2.2`라 쓰고 `02§1·§2.2`라 쓰지 않는다
-— 둘째부터 번호를 생략하면 사람은 읽어도 아래 검사기가 못 푼다.
+**2. 참조에는 항상 문서 번호를 붙인다.** `02 §1 · 02 §2.2`라 쓰고, 둘째부터 번호를
+생략한 `02§1·§2.2` 꼴로 쓰지 않는다 — 사람은 읽어도 검사기가 못 푼다. <!-- refcheck:ignore -->
 
 **3. [개정]은 원문을 고친 뒤 그 사실만 남긴다.** 철회된 [확정] 문장을 살려 두지 않는다.
 위에서부터 읽는 사람이 틀린 문장을 먼저 만나기 때문이다. 어떤 결정이 왜 뒤집혔는지의
@@ -49,22 +62,34 @@
 코드의 어느 상수가 정본인지 가리킨다. 문서에 값을 적었다면 코드가 바뀔 때 같이 바뀌어야
 한다는 뜻이므로, 자주 바뀌는 값은 적지 말고 가리킨다.
 
+**5. 본문은 표시폭 96열에서 접는다** (한글 = 2열). 표·코드블록·헤딩은 예외다. 폭이 문서마다
+다르면 한 낱말만 고쳐도 diff가 문단 통째로 떠서 무엇이 바뀌었는지가 안 보인다.
+
 ## 검사기
 
-문서·코드의 모든 `NN §X.Y` 참조가 실재하는 절을 가리키는지 확인한다. **0건이 정상이다.**
+문서·코드의 모든 `NN §X.Y` 참조가 실재하는 절을 가리키는지 확인한다. **두 수 모두 0이
+정상**이고, 아니면 exit 1이라 훅·CI에 그대로 걸 수 있다.
+
+- **끊김** — 가리키는 절이 없다
+- **번호 없음** — 어느 문서인지 못 푼다. 규약 2 위반이다 — 연쇄 표기의 둘째,
+  코드의 맨 `§5.5`. <!-- refcheck:ignore -->
+  이쪽을 세지 않으면 「끊김 0건」이 검사하지 **않은** 참조에까지 안전을 뜻하게 된다
 
 ```bash
 python3 - <<'EOF'
-import re, glob
+import re, glob, sys
 head, docs = {}, {}
-for p in sorted(glob.glob("docs/fcs-context-*.md")):
-    d = re.search(r"-(\d\d)-", p).group(1); docs[p] = d
+for p in sorted(glob.glob("docs/fcs-context-*.md")) + ["docs/conventions.md"]:
+    d = "cv" if p.endswith("conventions.md") else re.search(r"-(\d\d)-", p).group(1)
+    docs[p] = d
     for line in open(p, encoding="utf-8"):
         m = re.match(r"^#{2,4}\s+(\d+(?:\.\d+)*)\.?\s+", line)
         if m: head[(d, m.group(1))] = 1
-PRE = {"구현 문서":"02","모듈 문서":"03","도메인 문서":"01",
-       "01":"01","02":"02","03":"03","04":"04","05":"05","06":"06"}
-bad = []
+PRE = {"구현 문서":"02", "모듈 문서":"03", "도메인 문서":"01", "conventions.md":"cv",
+       "conventions":"cv", "규약":"cv", "01":"01", "02":"02", "03":"03", "04":"04",
+       "05":"05", "06":"06"}
+CHAIN = re.compile(r"§\s?\d+(?:\.\d+)*\s*[·,]\s*$")   # 규약 2 위반: 둘째부터 번호 생략
+bad, vague = [], []
 src = [*glob.glob("docs/*.md"), *glob.glob("engine/**/*.py", recursive=True),
        *glob.glob("server/**/*.py", recursive=True),
        *glob.glob("web/js/**/*.js", recursive=True), "README.md", "web/README.md"]
@@ -72,14 +97,17 @@ for p in src:
     if "node_modules" in p or ".venv" in p: continue
     own = docs.get(p)
     for n, line in enumerate(open(p, encoding="utf-8", errors="ignore"), 1):
+        if "refcheck:ignore" in line: continue        # 반례를 적는 줄
         for m in re.finditer(r"§\s?(\d+(?:\.\d+)*)", line):
-            ctx = line[max(0, m.start()-12):m.start()]
-            d = own
-            for k, v in PRE.items():
-                if re.search(re.escape(k) + r"\s*$", ctx): d = v; break
-            if d and (d, m.group(1)) not in head:
-                bad.append(f"{p}:{n}  →  {d} §{m.group(1)}")
-print("\n".join(bad) if bad else "OK — 끊긴 참조 없음")
-print(f"({len(bad)}건)")
+            ctx = line[:m.start()][-20:]
+            d = next((v for k, v in PRE.items() if re.search(re.escape(k) + r"\s*$", ctx)), None)
+            if d is None and (own is None or CHAIN.search(ctx)):
+                vague.append(f"{p}:{n}  §{m.group(1)}")
+            elif (d or own, m.group(1)) not in head:
+                bad.append(f"{p}:{n}  →  {d or own} §{m.group(1)}")
+print("\n".join(bad) or "끊긴 참조 없음")
+print("\n".join(vague) or "문서 번호 없는 참조 없음")
+print(f"— 끊김 {len(bad)}건 · 번호 없음 {len(vague)}건 (규약 2)")
+sys.exit(1 if bad or vague else 0)
 EOF
 ```

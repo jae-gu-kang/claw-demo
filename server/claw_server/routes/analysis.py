@@ -233,7 +233,7 @@ def vn_envelope_endpoint(
     mach_no: float | None = Query(default=None, allow_inf_nan=False),
     mach_d: float | None = Query(default=None, allow_inf_nan=False),
 ) -> dict:
-    """V-n 선도 (01 §2.6·§3.6) — 실속·보호 곡선 + 구조 한계선 + 특성 속도 (동기 계산).
+    """V-n 선도 (01 §2.6 · 01 §3.6) — 실속·보호 곡선 + 구조 한계선 + 특성 속도 (동기 계산).
 
     구조 한계는 비행체 프로파일의 자리표시 [기본값](실기체 값 아님)에 사용자
     오버라이드를 얹는다(필요값 입력, 01 §2.6) — limits_source·limits_overridden

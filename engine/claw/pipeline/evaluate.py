@@ -247,10 +247,10 @@ def _stability_stage(closed, crit):
 
 
 def _damping_stage(models, rate_gains, rate_filters, crit, notes):
-    """A① 카드의 근거 — 레이트 폐쇄 모드 지표 (closure.axis_metrics 정본).
+    """카드 ①의 근거 — 레이트 폐쇄 모드 지표 (closure.axis_metrics 정본).
 
     ζ_sp·ζ_dr을 judge_damping에 세우고, **ζ < ζ_min은 하드다**(v2 — 사용자 확정).
-    롤 대역폭(λ)은 A④ 카드가 targets 대비로 판정한다(judge_bandwidth).
+    롤 대역폭(λ)은 카드 ④가 targets 대비로 판정한다(judge_bandwidth).
     """
     if not models:
         return _stage("na", "damping", note=" · ".join(notes) or "선형화 실패"), []
@@ -279,16 +279,16 @@ def _damping_stage(models, rate_gains, rate_filters, crit, notes):
 
 def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit,
                    act_kw):
-    """A②③ 카드의 근거 — 자세 PI 마진은 **레이트 폐쇄** 플랜트에서
+    """카드 ②③의 근거 — 자세 PI 마진은 **레이트 폐쇄** 플랜트에서
     (closure.att_margin_loop), 속도 PI는 평탄 선언(GROUP_LOOPS) 그대로. 방향은
     oriented_margins가 정한다(자리마다 설계 게인 부호가 달라 고정 sign으로는
     절반이 음의 DC 루프다).
 
     루프마다 **시간지연 여유**를 환산해 싣는다: DM = PM[rad] / ω_gc(wcp) — PM과
     같은 교차점의 같은 사실을 지연 언어로 낸 것이라 별도 판정선을 지어내지 않는다
-    (B delay_margin 체크는 PM 판정을 따른다). 레이트 자리는 마진으로 판정하지
+    (판정 delay_margin은 PM 판정을 따른다). 레이트 자리는 마진으로 판정하지
     않는다 — 순수 P 레이트 루프의 SISO 마진은 병리적이고(closure 머리말) 고전
-    기준은 모드 감쇠(A①)다. 대신 **레이트 교차 주파수**(BW의 근거)를 낸다.
+    기준은 모드 감쇠(카드 ①)다. 대신 **레이트 교차 주파수**(BW의 근거)를 낸다.
 
     **작동기·지연을 포함한다**(criteria.composition — 자동설계와 같은 값). 빼면
     고주파 롤오프가 없어 −180° 교차가 의미 없는 자리로 가고, 거기서 읽은 GM은
@@ -344,7 +344,7 @@ def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit,
                                  "delay_margin_s": None,
                                  "note": "속도 실효 게인이 전부 0"}
 
-    # 레이트 교차 주파수 — A④ 카드의 상세 (판정은 A④가 λ_roll로, 관례가 있는 자리만)
+    # 레이트 교차 주파수 — 카드 ④의 상세 (판정은 카드 ④가 λ_roll로, 관례가 있는 자리만)
     crossovers = {}
     for axis, spec in (("lon", ("pitch", "q", "de")), ("lat", ("roll", "p", "da")),
                        ("lat", ("yaw", "r", "dr"))):
@@ -359,7 +359,7 @@ def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit,
                   composition={
                       "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 "
                               "(자동설계와 같은 조성) — 레이트 자리는 모드 "
-                              "감쇠(A①)로 판정",
+                              "감쇠(카드 ①)로 판정",
                       **act_kw},
                   note=None if judged else "판정할 루프가 없다"), fails
 
@@ -370,7 +370,7 @@ _STEP_KEYS = ("tr", "ts", "mp", "sse")
 def _tracking_stage(metrics, crit):
     """카드 ⑤⑥·판정 tr/sse의 근거 — RMS + 스텝 응답 특성(축별).
 
-    RMS는 판정선이 있고(A⑥), Ts·Mp·Tr·sse는 판정선이 비어 있으면 값만 낸다 —
+    RMS는 판정선이 있고(카드 ⑥), Ts·Mp·Tr·sse는 판정선이 비어 있으면 값만 낸다 —
     판정선을 지어내지 않는다. 단 **∞(미정착·미도달)는 판정선 없이도 warn**이다:
     "창 안에서 그 일이 안 일어났다"는 사실 자체가 이상 신호다.
     """
@@ -415,11 +415,11 @@ def _tracking_stage(metrics, crit):
     return _stage(
         _worst(judged) if judged else "na", "tracking", axes=axes,
         note="대역폭 상한은 [TBD](구조모드 이격 근거가 데모에 없다) — "
-             "응답속도는 A④ 카드가 λ_roll·교차 주파수로 낸다")
+             "응답속도는 카드 ④가 λ_roll·교차 주파수로 낸다")
 
 
 def _envelope_stage(metrics, crit):
-    """B envelope 체크의 근거 — 실속마진(하드) + 엔벨로프 이탈 틱. Nz·q는 계측 전 na."""
+    """판정 envelope의 근거 — 실속마진(하드) + 엔벨로프 이탈 틱. Nz·q는 계측 전 na."""
     worst = metrics.get("worst_stall_margin")
     fails = []
     if worst is None:
@@ -440,7 +440,7 @@ def _envelope_stage(metrics, crit):
 
 
 def _actuator_stage(signals, meta, dt_plant, crit):
-    """A⑦ 카드(사용률)·B sat_duration의 근거 — 채널별 위치/레이트 **여유**.
+    """카드 ⑦(사용률)·판정 sat_duration의 근거 — 채널별 위치/레이트 **여유**.
 
     포화는 하드, 여유 잠식은 warn. 작동기 미장착이면 로그가 명령 직결이라 타율이
     요구 slew다(zoh_decimate — 판정 정본은 duty와 공용). rate 한계 자체가 없으므로
@@ -528,7 +528,7 @@ def _actuator_stage(signals, meta, dt_plant, crit):
 
 
 def _authority_stage(tr, metrics, crit):
-    """A⑦ 카드의 근거 — 트림 소모(선형 단계에서도 가능) + 비행 중 잔여 권한(런 필요).
+    """카드 ⑦의 근거 — 트림 소모(선형 단계에서도 가능) + 비행 중 잔여 권한(런 필요).
 
     잔여 권한 < b_min_frac은 **하드**다(v2 신규). 배분 미계측(신호 없음)·미실행
     (depth=linear)은 하드 판정에서 빠진다 — envelope.nz 패턴.
@@ -577,7 +577,7 @@ def _authority_stage(tr, metrics, crit):
 
 
 def _coupling_stage(metrics_c, crit):
-    """B coupling 체크의 근거 — 동시명령 런의 실속마진·포화 (둘 다 하드)."""
+    """판정 coupling의 근거 — 동시명령 런의 실속마진·포화 (둘 다 하드)."""
     fails = []
     judged = []
     worst = metrics_c.get("worst_stall_margin")
@@ -605,7 +605,7 @@ def _coupling_stage(metrics_c, crit):
 
 
 def _recovery_stage(signals, meta, crit):
-    """B recovery 체크의 근거 — 안티와인드업(적분기 클램프 주차 시간비).
+    """판정 recovery의 근거 — 안티와인드업(적분기 클램프 주차 시간비).
 
     주차 판정의 허용오차는 진단 규칙 3과 같은 상수(PARK_TOL_FRAC)다 — 두 표면이
     같은 사실을 다르게 판정하면 어느 쪽이 정본인지가 사라진다. 포화 **해제 후**
@@ -644,7 +644,7 @@ def _recovery_stage(signals, meta, crit):
 
 
 def _schedule_stage(law, crit, midpoint_rollup):
-    """B schedule_bump 체크의 근거 — dK/dV(테이블만, 시뮬 0) + 중간점 롤업.
+    """판정 schedule_bump의 근거 — dK/dV(테이블만, 시뮬 0) + 중간점 롤업.
 
     중간점 실측은 3단계 검증(verify)의 몫이다 — 여기서는 verify가 돌았을 때만 롤업이 찬다.
     """
@@ -1020,7 +1020,7 @@ def _build_cards(cases, criteria):
         primary=_primary(gm[0] if gm else None, "dB", "higher")))
 
     pm = _min_over(cases, margins_pick("pm_deg"))
-    # PM의 보조 — 같은 교차점의 시간지연 환산 (B delay_margin 체크와 같은 수)
+    # PM의 보조 — 같은 교차점의 시간지연 환산 (판정 delay_margin과 같은 수)
     dm = _min_over(cases, lambda c: min(
         ((lp["delay_margin_s"], {"loop": n})
          for n, lp in (c["stages"]["margins"].get("loops") or {}).items()
@@ -1356,7 +1356,7 @@ def evaluate(aircraft, trs, shape: Shape, criteria: GainEvalCriteria, *,
             aborted = "cancelled"
             break
 
-    # 스케줄 전이(B) — 테이블은 케이스와 무관하다. 중간점 롤업은 verify의 몫이라
+    # 스케줄 전이(판정 schedule_bump) — 테이블은 케이스와 무관하다. 중간점 롤업은 verify의 몫이라
     # evaluate에서는 항상 None(사유는 _schedule_stage가 든다)
     schedule = _schedule_stage(law, criteria, None)
     for c in cases:

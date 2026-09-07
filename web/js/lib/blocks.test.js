@@ -814,7 +814,7 @@ test("탭 순서가 업무 순서다 — nav ↔ VIEWS ↔ 파이프라인", () 
 });
 
 // 02 §8(사용자 워크플로우)은 상단 탭 줄과 **같은 순서**여야 한다 (v0.66). 종전에는
-// §8이 6단계짜리 옛 목록이라 엔벨로프·자동 설계·가상환경·영향성·Autocode가 통째로
+// 02 §8이 6단계짜리 옛 목록이라 엔벨로프·자동 설계·가상환경·영향성·Autocode가 통째로
 // 빠져 있었고, 그 상태로 코드 주석 열아홉 곳이 "02 §8 5단계"처럼 번호를 인용하고
 // 있었다 — 문서가 낡으면 인용이 조용히 딴 단계를 가리킨다. 여기서 대조한다
 const DOC2 = read("../../../docs/fcs-context-02-implementation.md");
@@ -841,9 +841,9 @@ test("02 §8 워크플로우가 탭 줄과 같은 순서다", () => {
   const navLabels = [...read("../../index.html").matchAll(/data-view="[\w-]+">([^<]+)</g)]
     .map((m) => m[1]);
   assert.equal(WORKFLOW.size, navLabels.length,
-    `§8 단계 ${WORKFLOW.size}개 ↔ 탭 ${navLabels.length}개 — 한쪽이 낡았다`);
+    `02 §8 단계 ${WORKFLOW.size}개 ↔ 탭 ${navLabels.length}개 — 한쪽이 낡았다`);
   const stepTabs = [...WORKFLOW.keys()].sort((a, b) => a - b).map((k) => WORKFLOW.get(k));
-  assert.deepEqual(stepTabs, navLabels, "§8 순서가 nav 순서와 다르다");
+  assert.deepEqual(stepTabs, navLabels, "02 §8 순서가 nav 순서와 다르다");
 });
 
 test("코드가 인용한 02 §8 단계 번호가 그 탭을 가리킨다", () => {
@@ -853,10 +853,10 @@ test("코드가 인용한 02 §8 단계 번호가 그 탭을 가리킨다", () =
     ["../views/margins.js", "마진 맵"], ["../views/sim.js", "시뮬레이션"],
     ["../views/results.js", "결과"],
   ]) {
-    const cited = read(file).match(/§8 (?:워크플로우 )?(\d+)단계/);
-    assert.ok(cited, `${file}: §8 인용이 사라졌다`);
+    const cited = read(file).match(/02 §8 (?:워크플로우 )?(\d+)단계/);
+    assert.ok(cited, `${file}: 02 §8 인용이 사라졌다`);
     assert.equal(WORKFLOW.get(Number(cited[1])), tab,
-      `${file}: §8 ${cited[1]}단계는 「${WORKFLOW.get(Number(cited[1]))}」인데 이 파일은 「${tab}」이다`);
+      `${file}: 02 §8 ${cited[1]}단계는 「${WORKFLOW.get(Number(cited[1]))}」인데 이 파일은 「${tab}」이다`);
   }
 });
 

@@ -1,8 +1,8 @@
 """ParamSet — 값 스냅샷 + 검증 + YAML 입출력 + 지문(fingerprint)·diff.
 
-- 정의(ParamDef)는 코드가 소유, 값은 YAML 파일이 소유 (구현 문서 §5.4·§5.5)
+- 정의(ParamDef)는 코드가 소유, 값은 YAML 파일이 소유 (02 §5.4 · 02 §5.5)
 - YAML은 점 네임스페이스를 중첩 맵으로 저장 (사람 편집·diff 친화)
-- fingerprint()는 값 스냅샷의 SHA-256 지문 — 산출물 계보·무효화·영향성 평가(§2.4)의 키
+- fingerprint()는 값 스냅샷의 SHA-256 지문 — 산출물 계보·무효화·영향성 평가(02 §2.4)의 키
 """
 
 import hashlib

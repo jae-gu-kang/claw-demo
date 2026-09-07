@@ -1,8 +1,9 @@
 # web — M14 프론트엔드 (Phase 5)
 
-**바닐라 ES 모듈 + no-build** [확정 02 §4]. 외부 의존은 3D 월드 렌더링 **1건뿐**이고, 그것도 반입물은 커밋된 빌드 산출물 `world/build/world.js` 하나다(three는 `world/`의 npm devDependency — 개발 머신 전용, 06 §6). 나머지 반입물은 이 디렉터리 파일 전부이며, 현지 수정은 텍스트 에디터로 가능하다. eval-free
-디렉터리 파일 전부이며, 현지 수정은 텍스트 에디터로 가능하다. eval-free
-(엄격 CSP 호환), 플롯은 자체 Canvas.
+**바닐라 ES 모듈 + no-build** [확정 02 §4]. 외부 의존은 3D 월드 렌더링 **1건뿐**이고,
+그것도 반입물은 커밋된 빌드 산출물 `world/build/world.js` 하나다(three는 `world/`의 npm
+devDependency — 개발 머신 전용, 06 §6). 나머지 반입물은 이 디렉터리 파일 전부이며, 현지
+수정은 텍스트 에디터로 가능하다. eval-free(엄격 CSP 호환), 플롯은 자체 Canvas.
 
 ## 실행
 

@@ -529,7 +529,7 @@ export function render() {
         // 미장착은 nav 필드 자체를 생략하는 경우뿐 (routes/sim.py::_build)
         req.nav = { ...(store.get("navParams") ?? {}), seed: Number(f.seed.value) };
         // 등급은 **이름으로** 고른다 — RTK 수치를 여기 적으면 엔진 RTK_FIXED와
-        // 조용히 어긋난다(§5.5, 항법 기본값 7개가 어긋난 채 돌던 전례와 같은 자리)
+        // 조용히 어긋난다(02 §5.5, 항법 기본값 7개가 어긋난 채 돌던 전례와 같은 자리)
         if (f.rtkOn.checked) req.nav_grade = "rtk";
       }
       if (f.actOn.checked) {

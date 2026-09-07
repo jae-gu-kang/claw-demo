@@ -537,7 +537,7 @@ export function reliefLines(relief, reasonMap) {
       ? "" : ` (${p.change ?? "?"} ${from} → ${num(p.to)})`;
     const why = p.resolves ? null : reasonText(p.reason, reasonMap);
     // 임계값이 이 카드의 실질이다 — "×3이면 통과"가 아니라 "≥ 47 rad/s면 통과"가
-    // 사용자가 바로 쓸 수 있는 답이고, docs §7의 "작동기 대역폭 요구 사양"이
+    // 사용자가 바로 쓸 수 있는 답이고, 01 §7의 "작동기 대역폭 요구 사양"이
     // 요구하던 수치다. 통과한 축에만 붙는다 (미달 축에 숫자를 지어내면 안 된다)
     const th = p.threshold?.text;
     return {

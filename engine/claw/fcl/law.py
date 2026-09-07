@@ -75,7 +75,7 @@ INSTRUMENT_NODES = {
     "yaw_wo": "scas_yaw_wo",  # 워시아웃 통과 r — 지속 선회의 정상 r 제거 확인
     # ── 리미터 (귀속: 감쇠 문제 vs margin 문제, 진단 규칙 5) ──
     "lim_cap": "lim_cap",  # θ 상한 = θ + (α_max − α) — theta_cmd−cap 지속이 margin 문제 신호
-    # ── 엘레본 제어권한 배분 (평가 A⑦ 잔여 권한 — fcl/graphs.py 예산 노드) ──
+    # ── 엘레본 제어권한 배분 (평가 카드 ⑦ 잔여 권한 — fcl/graphs.py 예산 노드) ──
     # 배분 미장착 형상(alloc_trim_table=None)은 노드 자체가 조립되지 않으므로
     # `if nid in env` 가드가 자동 생략한다 — 선택 경로 계측의 기존 관례(ap_ff_* 등).
     # lo는 −hi라 계측하지 않는다(같은 수를 두 번 싣지 않는다).

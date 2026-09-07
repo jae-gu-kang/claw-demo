@@ -182,11 +182,13 @@ uvicorn --factory claw_server:create_app --port 8000   # 리포 루트에서
 | `server/` | FastAPI REST + 웹소켓 진행률. 엔진 API만 호출하고 도메인 로직 없음 |
 | `web/` | 바닐라 ES 모듈, 빌드 없음. 외부 의존은 3D 월드 1건뿐이며 반입물은 커밋된 `web/world/build/world.js`다(three는 `web/world/`의 npm devDependency — 06 §6). 서버가 정적 서빙 |
 | `flight/` | 탑재 SW용 C 코드 생성기와 생성물, 파이썬↔C 패리티 테스트 |
-| `docs/` | 설계 확정 문서 (제어법칙·구현·모듈) |
+| `docs/` | 설계 정본 문서 6편(도메인·구현·모듈·판정·자동 설계·웹 UI) + 규약·폐쇄망 반입 절차·변경 이력 |
 | `data/` | 예제·검증 데이터 (F-16 공개 공력테이블 등 — 반입 예정) |
+| `models/` | 가상환경이 쓰는 3D 모델 (무인기·발사관) — 생성 스크립트가 정본 |
 | `scripts/` | 설치·기동 스크립트 + 폐쇄망 반입 꾸러미 생성·리허설 |
 
-일부 디렉터리(`server/`, `web/`, `data/`)에는 자체 README가 있다.
+일부 디렉터리(`server/`, `web/`, `data/`, `models/`)에는 자체 README가 있다 — 그 디렉터리
+안에서만 쓰는 사실이 거기 있고, 문서 지도는 [`docs/README.md`](docs/README.md)다.
 
 ## 테스트
 
@@ -217,9 +219,9 @@ uvicorn --factory claw_server:create_app --port 8000   # 리포 루트에서
   없으면 자동으로 skip된다. 웹 UI·엔진·서버 구동에는 컴파일러가 필요 없다.
 - **시뮬 재생은 다운샘플 뷰다.** 모드 밴드 경계가 최대 `stride×dt` 이동할 수
   있다. 수치 판정의 정본은 항상 서버에 저장된 전 해상도 원본이다.
-- **폐쇄망 반입은 별도 절차다.** 위 설치 절차는 모두 PyPI 접속을 전제한다.
-  오프라인 설치는 `scripts/bundle.sh`로 꾸러미를 만들고 `scripts/setup.sh
-  --offline`으로 설치한다 — 절차와 주의사항은 [docs/deploy-airgap.md](docs/deploy-airgap.md).
+- **폐쇄망 반입은 별도 절차다.** 위 설치 절차는 모두 PyPI 접속을 전제한다. 오프라인 설치는
+  `scripts/bundle.sh`로 꾸러미를 만들고 `scripts/setup.sh --offline`으로 설치한다 — 절차와
+  주의사항은 [docs/deploy-airgap.md](docs/deploy-airgap.md).
 
 ## 문서
 

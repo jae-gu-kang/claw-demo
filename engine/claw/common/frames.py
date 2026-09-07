@@ -1,4 +1,4 @@
-"""좌표 변환·바람각 (conventions.md §1·§4). WGS-84 측지 변환은 env 모듈(M4) 소관."""
+"""좌표 변환·바람각 (conventions.md §1 · conventions.md §4). WGS-84 측지 변환은 env 모듈(M4) 소관."""
 
 import numpy as np
 

@@ -1,4 +1,4 @@
-"""M2 blocks 공통 프로토콜 — init(dt) → step(u)->y → reset(state) → schema() (구현 문서 §2.2·§2.3).
+"""M2 blocks 공통 프로토콜 — init(dt) → step(u)->y → reset(state) → schema() (02 §2.2 · 02 §2.3).
 
 샘플레이트 최상위 파라미터화 원칙: 생성자는 연속시간 파라미터만 받고, 이산화 계수는
 init(dt)가 주기로부터 자동 계산·캐시한다. 같은 인스턴스에 다른 dt로 init()을 다시

@@ -68,9 +68,10 @@ GLB로 내보낼 때 각 가동부의 모션을 프레임별로 샘플해 **노�
 | `Cradle` | `rotation.x` | 고각(포구 상승) |
 | `Jack_FL`,`Jack_FR`,`Jack_RL`,`Jack_RR` | `position.y` | 전개(하강 = −y) |
 
-계층: `LAUNCHER_Root › Trailer › { Wheel_L/R, Jack_×4, Turntable › Cradle › {Box_Tubes, Box_Rails} }`.
-(오브젝트 이름에 점을 안 쓰고 밑줄을 쓴 이유는 glTF/three.js가 노드 이름의 점을
-지우기 때문 — Blender·three.js에서 같은 이름으로 조회된다.)
+계층:
+`LAUNCHER_Root › Trailer › { Wheel_L/R, Jack_×4, Turntable › Cradle › {Box_Tubes, Box_Rails} }`.
+(오브젝트 이름에 점을 안 쓰고 밑줄을 쓴 이유는 glTF/three.js가 노드 이름의 점을 지우기 때문 —
+Blender·three.js에서 같은 이름으로 조회된다.)
 
 ### 1) 데모 클립 재생
 

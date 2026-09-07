@@ -356,7 +356,7 @@ def step_metrics(t, cmd, y, on, *, angular=False) -> dict:
 
 
 def _authority_metrics(signals, meta) -> dict:
-    """비행 중 잔여 권한 — min(배분 한계)/엘레본 예산 (A⑦, 커밋 0e56bcf 배분 신호).
+    """비행 중 잔여 권한 — min(배분 한계)/엘레본 예산 (카드 ⑦, 커밋 0e56bcf 배분 신호).
 
     배분 미장착 형상(신호 없음)·예산 미상이면 None — "권한을 다 썼다(0)"와
     "계측이 없다"는 다른 사실이다.

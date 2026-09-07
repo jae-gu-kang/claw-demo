@@ -1,4 +1,4 @@
-"""엔벨로프 수치 (01 §2.6·§3.6) — V-n 경계 n(V) + 제어법칙 설계 엔벨로프 합성.
+"""엔벨로프 수치 (01 §2.6 · 01 §3.6) — V-n 경계 n(V) + 제어법칙 설계 엔벨로프 합성.
 
 V-n 선도의 공력쪽 절반: n = L(α경계)/W, α경계 = α_stall(M) − alpha_margin.
 alpha_margin=0이면 실속 경계, α 리미터 마진(0.05 [기본값])을 주면 보호 경계.
@@ -441,7 +441,7 @@ def design_envelope(
 def aero_envelope(stall_table, db_ranges, *, alpha_margin=0.0, trim_alpha_bounds=None, n_mach=81) -> dict:
     """공력 엔벨로프 선도 데이터 (01 §2.6) — α–Mach 평면의 경계 일습.
 
-    실속 경계 α_stall(M)·보호선(α_stall − alpha_margin, §3.6 α 리미터와 같은
+    실속 경계 α_stall(M)·보호선(α_stall − alpha_margin, 01 §3.6 α 리미터와 같은
     마진 의미)·공력 DB 유효범위. trim_alpha_bounds는 트림 탐색 α 범위(trim
     상수 정본 — trim은 같은 계층이라 호출자가 주입, 미주입 시 null)."""
     if not float(alpha_margin) >= 0.0:

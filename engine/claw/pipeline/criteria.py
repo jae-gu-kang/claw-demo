@@ -116,7 +116,7 @@ class StabilityCriteria:
 
 @dataclass(frozen=True)
 class AuthorityCriteria:
-    """A⑦ 제어권한 — 트림 소모 + 비행 중 잔여 권한(엘레본 예산). 수렴 게이트와 별개.
+    """카드 ⑦ 제어권한 — 트림 소모 + 비행 중 잔여 권한(엘레본 예산). 수렴 게이트와 별개.
 
     trim/trim.py SAT_FRAC(0.95)은 "트림 해가 경계에 앉았나"(수렴 판정)이고, 여기는
     "트림 뒤·기동 중 여유가 남나"다 — 트림에서 이미 85 %를 쓰면 동특성 게인이
@@ -391,13 +391,13 @@ class GainEvalCriteria:
     "튜닝 성공 = 좋은 J"가 성립한다).
     """
 
-    margin: MarginCriteria = field(default_factory=MarginCriteria)  # A②③ + ζ 하드
-    composition: MarginComposition = field(default_factory=MarginComposition)  # A③ 조성
+    margin: MarginCriteria = field(default_factory=MarginCriteria)  # 카드 ②③ + ζ 하드
+    composition: MarginComposition = field(default_factory=MarginComposition)  # 카드 ③ 조성
     stability: StabilityCriteria = field(default_factory=StabilityCriteria)  # B 극점
-    authority: AuthorityCriteria = field(default_factory=AuthorityCriteria)  # A⑦
-    actuator: ActuatorCriteria = field(default_factory=ActuatorCriteria)  # A⑦(사용률)
+    authority: AuthorityCriteria = field(default_factory=AuthorityCriteria)  # 카드 ⑦
+    actuator: ActuatorCriteria = field(default_factory=ActuatorCriteria)  # 카드 ⑦(사용률)
     envelope: EnvelopeCriteria = field(default_factory=EnvelopeCriteria)  # B 엔벨로프
-    response: ResponseCriteria = field(default_factory=ResponseCriteria)  # A④⑤⑥·B
+    response: ResponseCriteria = field(default_factory=ResponseCriteria)  # 카드 ④⑤⑥·판정
     coupling: CouplingCriteria = field(default_factory=CouplingCriteria)  # B 교차축
     recovery: RecoveryCriteria = field(default_factory=RecoveryCriteria)  # B 회복
     schedule: ScheduleCriteria = field(default_factory=ScheduleCriteria)  # B 전이

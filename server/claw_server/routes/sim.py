@@ -42,7 +42,7 @@ class ModeIn(BaseModel):
     speed: FiniteFloat | None = None  # null = 축 off
     # 종방향은 alt·pitch·hdot 셋 중 **최대 하나**만 켤 수 있다 — 셋 다 θ_cmd로 가기
     # 때문이다. 배타 판정은 엔진 guidance.validate_longitudinal이 정본이라
-    # 여기서 다시 적지 않는다(§5.5) — 위반은 구성 오류로 422가 된다.
+    # 여기서 다시 적지 않는다(02 §5.5) — 위반은 구성 오류로 422가 된다.
     alt: FiniteFloat | str | None = None  # 숫자 | "path"(경로 세로 프로파일) | null
     heading: FiniteFloat | str | None = None  # 숫자 | "path"(LOS) | null
     pitch: FiniteFloat | None = None  # [rad] θ 직접 지령 (발사 이탈 자세·지상 자세)
@@ -220,7 +220,7 @@ class SimRunIn(BaseModel):
     initial_mode: str | None = None
     # (N, E) 또는 (N, E, 고도) [m] — 빈 리스트는 무의미 구성이라 거부.
     # 고도를 주면 경로가 세로 프로파일도 낸다(alt="path" 모드가 소비, 01 §3.3).
-    # 섞인 목록 거부는 엔진 set_waypoints가 정본 — 여기서 다시 적지 않는다(§5.5)
+    # 섞인 목록 거부는 엔진 set_waypoints가 정본 — 여기서 다시 적지 않는다(02 §5.5)
     waypoints: list[
         tuple[FiniteFloat, FiniteFloat] | tuple[FiniteFloat, FiniteFloat, FiniteFloat]
     ] | None = Field(default=None, min_length=1)
@@ -234,7 +234,7 @@ class SimRunIn(BaseModel):
     runway: RunwayIn | None = None
     launch: LaunchIn | None = None  # 발사 레일 — 있으면 레일 위 정지에서 출발
     nav: dict | None = None  # NavErrorModel kwargs — 파라미터 정의는 엔진이 정본
-    # 항법 등급 — 수치를 웹이 재기술하지 않도록 **이름으로** 고른다(§5.5).
+    # 항법 등급 — 수치를 웹이 재기술하지 않도록 **이름으로** 고른다(02 §5.5).
     # "rtk"는 엔진 RTK_FIXED를 바탕에 깔고 nav가 그 위를 덮는다.
     nav_grade: Literal["default", "rtk"] = "default"
     actuators: dict | None = None  # SecondOrderActuator kwargs (wn·zeta·rate_max 등)
@@ -444,7 +444,7 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
         )
         # 기체 형상 치수 — 3D 월드가 기체를 그리려면 실제 기준량이 필요하다.
         #
-        # 이것을 화면이 상수로 들고 있으면 안 된다(§5.5 "엔진 기본값 재기술 금지"). 데모
+        # 이것을 화면이 상수로 들고 있으면 안 된다(02 §5.5 "엔진 기본값 재기술 금지"). 데모
         # 기체는 스팬 2.5 m·MAC 1.5 m·S 3.0 m²의 **엘레본 4면 델타**인데, 화면이 임의로
         # 여객기 모양을 그리면 기체를 잘못 말하는 것이 된다. 접촉점까지 실어야 착륙 장면의
         # 스키드가 실제 위치(CG 기준 x·y ±0.6 m, 0.55 m 아래)에 붙는다.

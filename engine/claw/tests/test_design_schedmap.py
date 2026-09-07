@@ -124,7 +124,7 @@ def test_design_point_composition_is_sane(setup):
 def test_scheduled_differs_from_constant_gain_map(setup):
     """저마하에서 스케줄 실효 게인(동압 스케일 ×배)의 판정은 설계 상수와 유의미하게 다르다.
 
-    기존 마진맵(상수 게인) 경로가 §3.4 검증 요구를 대신할 수 없다는 실증.
+    기존 마진맵(상수 게인) 경로가 01 §3.4 검증 요구를 대신할 수 없다는 실증.
     """
     ac, tables, design = setup
     # 배수를 **상수로 적지 않는다.** M0.3의 1/q̄ 스케일은 (0.6/0.3)² = 4를 부르지만

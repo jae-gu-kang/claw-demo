@@ -70,8 +70,9 @@ def close_rates(lm_axis, rate_gains: dict, rate_filters: dict | None = None) -> 
     (x_names.index("p") 등)를 쓰는 소비자가 전부 그대로 동작한다.
 
     노치는 **거부한다**: f0에 복소쌍을 만들고 그 쌍이 `_WN_FLOOR_FRAC` 위에 들어와
-    lat_metrics의 zeta_dr 최소값을 오염시킨다 (01 §7 "작동기·Padé 극이 강체 모드와
-    섞인다"와 같은 문제 — 모드 선별 규칙을 새로 설계해야 한다). 조용히 무시하면
+    lat_metrics의 zeta_dr 최소값을 오염시킨다 (05 §9 "레이트 자리 판정에 작동기·지연
+    포함"의 "작동기·Padé 극이 강체 모드와 섞인다"와 같은 문제 — 모드 선별 규칙을 새로
+    설계해야 한다). 조용히 무시하면
     지표가 필터를 반영한 척하므로 예외로 막는다. 노치의 마진 평가는 pi_loop 경유.
     """
     A = lm_axis.A.copy()
@@ -139,7 +140,7 @@ def lon_metrics(A, wn_floor) -> dict:
 
     댐퍼가 세지면 단주기가 실근으로 갈라진다(ζ→1 취급) — classify_lon의 비정형
     예외를 데이터로 흡수한다. floor 위 모드가 없으면 ζ 1.0 (과감쇠), wn은 None —
-    "판정한 모드가 없다"를 0 rad/s로 위장하지 않는다 (A① 카드가 ζ·ωn을 한 쌍으로
+    "판정한 모드가 없다"를 0 rad/s로 위장하지 않는다 (카드 ①이 ζ·ωn을 한 쌍으로
     내므로 wn을 버리면 카드가 절반만 말한다).
     """
     fast = [m for m in damp(A) if m["wn"] >= wn_floor]

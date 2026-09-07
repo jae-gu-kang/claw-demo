@@ -2,7 +2,7 @@
 
 입력 규격: 각 행이 (축1, 축2, …, 값) 한 조합인 long-format 표. 전체 축 조합
 (Cartesian product)이 정확히 한 번씩 있어야 정규격자로 인정 — 누락·중복은
-TableError (조용한 결손 금지, 검증 원칙 §7).
+TableError (조용한 결손 금지, 검증 원칙 02 §7).
 
 stdlib csv + numpy만 사용 — pandas 미도입(의존성 최소화 원칙, tables/__init__ 참조).
 Excel 로더는 openpyxl 도입 시점에 같은 검증 경로를 재사용해 추가한다 [TBD].

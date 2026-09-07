@@ -44,7 +44,7 @@ let lastVn = null;
 let lastMh = null;
 let lastScan = null; // /results 페이로드 {kind: "envelope_scan", cases, n_requested}
 let runningJobId = null;
-// 폼 문자열 — 재진입 유지. 구조 5종은 첫 응답 echo로 프리필(§5.5 자기 정렬)
+// 폼 문자열 — 재진입 유지. 구조 5종은 첫 응답 echo로 프리필(02 §5.5 자기 정렬)
 const form = {
   alt: "1000", fuel: "200", margin: "0.05",
   nPos: "", nNeg: "", sf: "", machNo: "", machD: "",
@@ -178,7 +178,7 @@ export function render() {
     return inp;
   };
 
-  // 손대지 않은 구조 필드를 응답 echo로 채운다/맞춘다 (§5.5 자기 정렬)
+  // 손대지 않은 구조 필드를 응답 echo로 채운다/맞춘다 (02 §5.5 자기 정렬)
   const syncStructural = (limits) => {
     for (const [key, param] of STRUCT_FIELDS) {
       form[key] = prefillValue(form[key], touched.has(key), limits?.[param]);
