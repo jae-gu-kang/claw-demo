@@ -77,7 +77,7 @@ def make_demo_launch_rail() -> LaunchRail:
 
 @dataclass(frozen=True)
 class DispersionSet:
-    """강건성 검증(C급)용 결정적 섭동 — 비율 스케일 (0.2 = +20 %).
+    """강건성 검증(3단계)용 결정적 섭동 — 비율 스케일 (0.2 = +20 %).
 
     조립 함수에 설계변수를 단다(M7 주입 인자와 같은 성격 — 해석 모듈이 정본을
     우회하지 않게). **CG는 여기 없다** — cg_empty=cg_full=0 고정 + 모멘트 기준점

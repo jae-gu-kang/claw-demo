@@ -65,7 +65,7 @@ let constants = null;
 // 균일 상한 시절에는 어느 축과도 안 맞았다. 검증은 piecewisePolyfit이 수행)
 const fitCfg = { show: true, degree: 3, boundaries: "0.3", detailsOpen: false };
 
-// A급 지표 카드(평가 어휘·값은 서버 정본) — 마지막 계산 결과와 신선도.
+// 지표 카드(평가 어휘·값은 서버 정본) — 마지막 계산 결과와 신선도.
 // 편집이 생기면 **stale 배지만** 켠다: 자동 재계산은 없다(서버 왕복 비용 — 버튼이
 // 명시적 트리거다). 격자는 lib/grid.js DEFAULT_GRID 한 곳 정의(영향성 폼과 동일)라
 // "최악 운용점"이 탭마다 다른 격자를 말하지 않는다.
@@ -85,7 +85,7 @@ export function render() {
   const errBox = el("div");
   const statusLine = el("p", { class: "tab-status" });
 
-  // ── 튜닝 지표 카드 (A급 — 평가와 같은 카드, views/evalcards.js 공용) ──────
+  // ── 튜닝 지표 카드 (평가와 같은 카드, views/evalcards.js 공용) ──────
   const stripStatus = el("span", { class: "hint" });
   const stripCards = el("div", { style: "margin-top:8px" });
 
@@ -270,7 +270,7 @@ export function render() {
       ],
       extra: [statusLine, errBox],
     }),
-    // 튜닝 지표 카드 — 게인을 만지는 화면에 상시로 서는 A급 표면(값·기준·최악
+    // 튜닝 지표 카드 — 게인을 만지는 화면에 상시로 서는 카드 표면(값·기준·최악
     // 운용점). 계산은 버튼 트리거(비용)고, 편집이 생기면 stale 배지가 먼저 말한다
     el("div", { class: "tab-sheet" },
       el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },

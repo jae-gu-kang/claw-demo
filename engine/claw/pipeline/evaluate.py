@@ -1,4 +1,4 @@
-"""게인 평가 — A/B/C 등급 채점 (02 §2.4 확장, 사용자 확정 재편).
+"""게인 평가 — 1·2·3단계 채점 (02 §2.4 확장, 사용자 확정 재편).
 
 표면 셋이 한 계산에서 나온다:
 - **대표 카드 7장**(CARDS) — 게인 튜닝 중 상시 표시: ①모드 안정성 ζ·ωn ②GM ③PM
@@ -11,13 +11,13 @@
 - **원자료**(cases[].stages, 구 11항목 어휘 그대로) — 케이스 × 항목 격자와 상세
   전개의 근거. 카드·체크는 이 원자료의 집계이지 별도 계산이 아니다.
 
-C급(강건성 코너·격자 중간점·지연 섭동·MC·미션·worst-case 탐색)은 `verify()`가
+3단계 검증(강건성 코너·격자 중간점·지연 섭동·MC·미션·worst-case 탐색)은 `verify()`가
 따로 돈다 — 후보 게인 스케줄을 걸러낸 **뒤** 실행하는 것이 비용 구조다(사용자
 확정 "실행 단계 분리"). 격자 중간점 부가도 evaluate가 아니라 verify의 몫이다.
 
 **실행 깊이(depth)**: "linear"는 트림+선형화만(시뮬 0 — 극점·ζ/ωn·GM/PM·BW,
 전 게인 후보에 돌리는 단계 1), "full"은 표준 기동 런 + 동시명령 런까지(단계 2).
-B급 교차축이 필수라 full에서 동시명령 런은 상시다.
+교차축 판정이 필수라 full에서 동시명령 런은 상시다.
 
 **판정 구조**: 하드 게이트(HARD_CHECKS — 무엇이 하드인지는 이 코드 상수가 고정,
 문턱값만 criteria가 보유) 위반이 하나라도 있으면 Fail이고 J는 None이다. 통과
@@ -54,7 +54,7 @@ from claw.design.closure import (
 from claw.guidance import Guidance, ModeSpec
 from claw.nav import NavErrorModel
 from claw.pipeline.criteria import GainEvalCriteria
-# 적분기 "주차" 허용오차의 정본은 진단이다 — 회복(B급)과 진단 규칙 3이 같은 판정
+# 적분기 "주차" 허용오차의 정본은 진단이다 — 회복 판정과 진단 규칙 3이 같은 판정
 from claw.pipeline.diagnose import PARK_TOL_FRAC, diagnose_grid, diagnose_run
 from claw.pipeline.influence import Shape, make_law
 from claw.pipeline.metrics import metric_values
@@ -87,7 +87,7 @@ ITEMS = {
     "schedule": (11, "스케줄 전이"),
 }
 
-# ── A급 카드 — 순서 = 화면 순서 정본 (게인 튜닝 중 상시 표시) ────────────────
+# ── 카드 7장 — 순서 = 화면 순서 정본 (게인 튜닝 중 상시 표시) ────────────────
 CARDS = ("mode_stability", "gm", "pm", "response_speed", "transient",
          "tracking_rms", "control_authority")
 CARD_META = {
@@ -100,7 +100,7 @@ CARD_META = {
     "control_authority": (7, "제어권한"),
 }
 
-# ── B급 체크 — 항상 계산, 요약 한 줄 (문제 시만 전개) ────────────────────────
+# ── 판정 10건 — 항상 계산, 요약 한 줄 (문제 시만 전개) ────────────────────────
 CHECKS = ("poles_all", "tr", "sse", "delay_margin", "coupling",
           "envelope", "sat_duration", "thr_margin", "recovery", "schedule_bump")
 CHECK_META = {
@@ -116,7 +116,7 @@ CHECK_META = {
     "schedule_bump": "스케줄 전이",
 }
 
-# ── C급 검증 어휘 — verify()의 표면 (후보 확정 후 별도 실행) ─────────────────
+# ── 3단계 검증 어휘 — verify()의 표면 (후보 확정 후 별도 실행) ─────────────────
 VERIFY_META = {
     "mass_cg": "질량·CG 섭동",
     "aero_coeff": "공력계수 섭동",
@@ -144,7 +144,7 @@ HARD_CHECKS = (
 
 _RANK = {"fail": 3, "warn": 2, "na": 1, "ok": 0}
 _RMS_KEYS = {"alt": "alt_rms", "spd": "spd_rms", "hdg": "hdg_rms"}
-# 회복(B급) 와인드업 — 적분기 논리 이름 → 클램프 메타 키 (sim _command_clamps)
+# 회복 판정 와인드업 — 적분기 논리 이름 → 클램프 메타 키 (sim _command_clamps)
 _WINDUP_CLAMPS = {"i_pitch": "pitch", "i_roll": "roll", "i_yaw": "yaw",
                   "i_alt": "alt", "i_spd": "spd", "i_hdg": "hdg"}
 
@@ -368,7 +368,7 @@ _STEP_KEYS = ("tr", "ts", "mp", "sse")
 
 
 def _tracking_stage(metrics, crit):
-    """A⑤⑥ 카드·B tr/sse 체크의 근거 — RMS + 스텝 응답 특성(축별).
+    """카드 ⑤⑥·판정 tr/sse의 근거 — RMS + 스텝 응답 특성(축별).
 
     RMS는 판정선이 있고(A⑥), Ts·Mp·Tr·sse는 판정선이 비어 있으면 값만 낸다 —
     판정선을 지어내지 않는다. 단 **∞(미정착·미도달)는 판정선 없이도 warn**이다:
@@ -646,7 +646,7 @@ def _recovery_stage(signals, meta, crit):
 def _schedule_stage(law, crit, midpoint_rollup):
     """B schedule_bump 체크의 근거 — dK/dV(테이블만, 시뮬 0) + 중간점 롤업.
 
-    중간점 실측은 C급(verify)의 몫이다 — 여기서는 verify가 돌았을 때만 롤업이 찬다.
+    중간점 실측은 3단계 검증(verify)의 몫이다 — 여기서는 verify가 돌았을 때만 롤업이 찬다.
     """
     tables = law.schedule.tables if law.schedule is not None else {}
     if not tables:
@@ -670,7 +670,7 @@ def _schedule_stage(law, crit, midpoint_rollup):
                   midpoints=midpoint_rollup
                   if midpoint_rollup is not None else
                   {"status": "na",
-                   "note": "중간점 실측은 C급 검증(verify)의 몫 — 여기는 테이블 "
+                   "note": "중간점 실측은 3단계 검증(verify)의 몫 — 여기는 테이블 "
                            "점프만 본다"})
 
 
@@ -904,7 +904,7 @@ def _eval_case(aircraft, tr, shape, law, criteria, *, depth, stall, db_ranges,
     for key in ("tracking", "envelope", "actuator", "recovery", "coupling"):
         stages.setdefault(key, _na(key, why))
     stages["robustness"] = _na(
-        "robustness", "C급 검증(verify)의 몫 — 후보 확정 후 별도 실행")
+        "robustness", "3단계 검증(verify)의 몫 — 후보 확정 후 별도 실행")
 
     if metrics is not None and damping is not None:
         j, j_terms, j_reason = _j_for(metrics, actuator, damping, criteria)
@@ -962,7 +962,7 @@ def _primary(value, unit, better):
 
 
 def _build_cards(cases, criteria):
-    """A급 카드 7장 — 케이스 전체의 **최악 운용점**으로 집계한다 (값·기준·자리).
+    """카드 7장 — 케이스 전체의 **최악 운용점**으로 집계한다 (값·기준·자리).
 
     카드는 원자료(stages)의 집계이지 재계산이 아니다 — 케이스 상세와 카드가 다른
     수를 말하면 화면 신뢰가 무너진다.
@@ -1313,7 +1313,7 @@ def evaluate(aircraft, trs, shape: Shape, criteria: GainEvalCriteria, *,
              depth="full", dt_plant=0.01, t_settle=5.0, t_step=30.0, t_hold=None,
              dv=PROBE_DV, dh=PROBE_DH, dpsi=PROBE_DPSI,
              midpoint_names=(), on_progress=None) -> dict:
-    """트림해 목록 + 형상 + 기준 → A급 카드 + B급 체크 + 원자료 (케이스별 + 집계).
+    """트림해 목록 + 형상 + 기준 → 카드 7 + 판정 10 + 원자료 (케이스별 + 집계).
 
     depth: "linear"(단계 1 — 시뮬 0, 전 후보용) | "full"(단계 2 포함 — 표준·동시명령
     런). on_progress(done, total, msg) truthy → 협조적 취소(완료 단계 보존).
@@ -1436,7 +1436,7 @@ def evaluate(aircraft, trs, shape: Shape, criteria: GainEvalCriteria, *,
     }
 
 
-# ═══ C급 검증 (verify) — 후보 확정 후 별도 실행 ══════════════════════════════
+# ═══ 3단계 검증 (verify) — 후보 확정 후 별도 실행 ══════════════════════════════
 
 
 def _corner_dispersions(crit):
@@ -1464,7 +1464,7 @@ def _corner_dispersions(crit):
 def verify(aircraft_factory, cases, shape: Shape, criteria: GainEvalCriteria, *,
            depth="full", midpoint_cases=(), dt_plant=0.01,
            t_settle=5.0, t_step=30.0, t_hold=None, on_progress=None) -> dict:
-    """C급 검증 — 강건성 코너(질량·Cmα·Cmq) + 격자 중간점. 코너마다 **재트림**한다
+    """3단계 검증 — 강건성 코너(질량·Cmα·Cmq) + 격자 중간점. 코너마다 **재트림**한다
     (기체가 다르면 트림해도 다르다 — 명목 트림해로 섭동 기체를 평가하면 시작부터
     비평형이라 전 지표가 과도응답에 오염된다).
 
@@ -1511,7 +1511,7 @@ def verify(aircraft_factory, cases, shape: Shape, criteria: GainEvalCriteria, *,
             if cancelled:
                 aborted = "cancelled"
                 break
-        # 스케줄 전이 — 중간점 블록에서는 **실측 롤업**이 찬다(여기가 C급의 정의)
+        # 스케줄 전이 — 중간점 블록에서는 **실측 롤업**이 찬다(여기가 3단계 검증의 정의)
         rollup = None
         if midpoint_names:
             mrows = [r for r in rows if r["midpoint"]]

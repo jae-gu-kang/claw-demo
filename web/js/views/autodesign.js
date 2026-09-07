@@ -533,8 +533,8 @@ function renderResult(box, body, resultId, ctx) {
       "상태 ", sevChip(statusSeverity(report.status)), ` ${report.status ?? "?"} · `,
       // 계산해 놓고 안 내던 수치들 — 특히 판정 수가 없으면 "실패 0"의 뜻이 갈리지 않는다
       reportLine(report, rows.length).join(" · ")),
-    // A/B/C 평가 체계(영향성 탭 「평가」·게인 탭 카드)와의 정렬 — 이 화면의 미달
-    // 원장·조치 카드가 곧 "B급: 항상 판정하되 문제일 때만 전개"의 자동설계판이고,
+    // 평가 체계(영향성 탭 「평가」·게인 탭 카드)와의 정렬 — 이 화면의 미달
+    // 원장·조치 카드가 곧 "나머지 판정: 항상 판정하되 문제일 때만 전개"의 자동설계판이고,
     // 판정선(pm·gm·ζ)은 같은 MarginCriteria 한 정의를 쓴다 (pipeline/criteria.py 합성)
     el("p", { class: "hint", style: "margin:4px 0 0" },
       "판정 체계는 영향성 평가와 한 벌이다 — 아래 미달 원장·조치 카드가 평가의 "

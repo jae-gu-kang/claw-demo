@@ -434,9 +434,9 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
 
 @router.get("/influence/criteria/defaults")
 def criteria_defaults() -> dict:
-    """평가기준 기본값 + A/B/C 어휘 — 웹이 이 값을 받아 그린다 (재기술 금지, 02 §5.5).
+    """평가기준 기본값 + 평가 어휘 — 웹이 이 값을 받아 그린다 (재기술 금지, 02 §5.5).
 
-    `/design/defaults`와 분리한 이유: 소비자가 다르고(오토디자인 vs A/B/C 평가),
+    `/design/defaults`와 분리한 이유: 소비자가 다르고(오토디자인 vs 게인 평가),
     그쪽 config에 얹으면 AutoDesignConfig.__post_init__의 목표-기준 정합 검사에
     또 얽힌다. 마진 판정선 자체는 둘 다 MarginCriteria 한 정의를 쓴다.
 
@@ -466,8 +466,8 @@ class EvaluateIn(InfluenceIn):
     """평가 요청 — 형상 + 케이스 격자 + 기준(없으면 기본값) + 깊이.
 
     depth="linear"는 트림+선형화만(시뮬 0 — 전 게인 후보에 돌리는 단계 1),
-    "full"은 표준 기동 런 + 동시명령 런 포함(단계 2). B급 교차축이 필수라 full에서
-    동시명령은 상시다. C급(강건성 코너·격자 중간점 등)은 `/influence/verify`가
+    "full"은 표준 기동 런 + 동시명령 런 포함(단계 2). 교차축 판정이 필수라 full에서
+    동시명령은 상시다. 3단계 검증(강건성 코너·격자 중간점 등)은 `/influence/verify`가
     따로 받는다 — 요청 형상이 다르고, 사용자 확정 실행 단계 분리가 그 경계다.
     """
 
@@ -534,7 +534,7 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
 
 
 class VerifyIn(InfluenceIn):
-    """C급 검증 요청 — 후보 게인 스케줄 확정 **후** 별도 실행 (실행 단계 3).
+    """3단계 검증 요청 — 후보 게인 스케줄 확정 **후** 별도 실행 (실행 단계 3).
 
     강건성 코너(질량·Cmα·Cmq — 축·문턱은 criteria.robustness)와 격자 중간점을
     돌린다. 지연 섭동·MC·미션·worst-case 탐색은 어휘와 자리만 있다(엔진 verify
@@ -555,7 +555,7 @@ class VerifyIn(InfluenceIn):
 
 @router.post("/influence/verify", status_code=202)
 def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
-    """C급 검증 — 강건성 코너 + 격자 중간점 (잡 기반 202, kind influence_verify).
+    """3단계 검증 — 강건성 코너 + 격자 중간점 (잡 기반 202, kind influence_verify).
 
     중간점 케이스 이름은 mach·alt·fuel **전체**를 싣는다 — 연료만 다른 격자에서
     이름이 겹치면 귀속이 조용히 다른 케이스로 바뀐다(웹 nameCases와 같은 계약).

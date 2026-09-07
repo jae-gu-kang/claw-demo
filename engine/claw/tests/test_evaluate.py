@@ -1,4 +1,4 @@
-"""pipeline.evaluate 검증 — A/B/C 채점의 계약.
+"""pipeline.evaluate 검증 — 1·2·3단계 채점의 계약.
 
 실행 비용이 케이스×런이므로 6DOF는 초소형 설정(t_settle 1 s·t_step 2 s) 한 벌을
 모듈 픽스처로 공유한다 — 이 설정에서 추종 판정은 당연히 나쁘게 나온다(스텝이
@@ -168,7 +168,7 @@ def test_잔여_권한이_실측되고_하드_문턱과_비교된다(report):
 
 
 def test_verify는_코너마다_재트림하고_중간점을_따로_잰다(rig):
-    """C급 — 강건성 축이 전부 0이면 코너가 없고(흔드는 시늉 금지), 중간점만 돈다."""
+    """3단계 — 강건성 축이 전부 0이면 코너가 없고(흔드는 시늉 금지), 중간점만 돈다."""
     _ac, _trs = rig
     crit = GainEvalCriteria.from_dict({
         "robustness": {"mass_frac": 0.0, "cmalpha_frac": 0.0, "cmq_frac": 0.0}})

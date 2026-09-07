@@ -267,7 +267,7 @@ def test_nan_samples_do_not_pass_as_metric_values():
     assert out["td_sink_rate"] is not None, "온전한 신호는 그대로 나온다"
 
 
-# ── 스텝 응답 특성 (step_metrics — A⑤·B급 지표의 계산부) ────────────────────
+# ── 스텝 응답 특성 (step_metrics — 카드 ⑤·판정 지표의 계산부) ────────────────────
 
 
 def _step_series(y_unit, dt=0.001, t_pre=1.0):

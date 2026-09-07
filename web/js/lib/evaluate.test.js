@@ -1,7 +1,7 @@
-/** lib/evaluate v2 계약 — A급 카드·B급 요약·C급 검증 모델의 판단.
+/** lib/evaluate v2 계약 — 카드 7·판정 요약·3단계 검증 모델의 판단.
 
 핵심 규약: ① 카드·체크 어휘는 서버가 준다(웹 재기술 금지 — 빈 응답에서도 죽지
-않되 지어내지 않는다) ② B급 요약에서 na는 PASS 분모에서 빠지되 **반드시 병기**
+않되 지어내지 않는다) ② 판정 요약에서 na는 PASS 분모에서 빠지되 **반드시 병기**
 된다, warn은 PASS가 아니다 ③ J null은 빈칸이 아니라 사유 문장이다 ④ 상태 어휘는
 엔진 evaluate.py와 한 벌이다(드리프트 가드).
 */
@@ -78,7 +78,7 @@ test("정규화 — 카드·체크·깊이가 그대로 실린다", () => {
   assert.equal(m.checks.n_pass, 1);
 });
 
-test("B급 요약 — na는 분모에서 빠지되 반드시 병기, warn은 PASS가 아니다", () => {
+test("판정 요약 — na는 분모에서 빠지되 반드시 병기, warn은 PASS가 아니다", () => {
   const m = normalizeEvalReport(payload);
   const line = checksSummary(m.checks);
   assert.match(line, /1\/2 PASS/);  // ok 1 / judged 2 — warn은 pass가 아니다
@@ -86,13 +86,13 @@ test("B급 요약 — na는 분모에서 빠지되 반드시 병기, warn은 PAS
   assert.match(line, /판정 불가 1/);  // na>0이면 생략 불가
 });
 
-test("B급 요약 — 전부 통과·na 0이면 짧은 한 줄", () => {
+test("판정 요약 — 전부 통과·na 0이면 짧은 한 줄", () => {
   const line = checksSummary({ n_pass: 9, n_warn: 0, n_fail: 0, n_na: 0,
                                n_judged: 9, list: [] });
   assert.equal(line, "나머지 판정 9/9 PASS");
 });
 
-test("B급 요약 — 체크가 하나도 없으면 판정 불가 문장", () => {
+test("판정 요약 — 체크가 하나도 없으면 판정 불가 문장", () => {
   const line = checksSummary({ n_pass: 0, n_warn: 0, n_fail: 0, n_na: 9,
                                n_judged: 0, list: [] });
   assert.match(line, /0\/0/);

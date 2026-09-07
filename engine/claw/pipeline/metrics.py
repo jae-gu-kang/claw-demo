@@ -265,7 +265,7 @@ def _landing_metrics(t, signals, meta) -> dict:
 
 
 def step_metrics(t, cmd, y, on, *, angular=False) -> dict:
-    """축 하나의 스텝 응답 특성 — {"tr", "ts", "mp", "sse"} (A⑤·B급 지표의 계산부).
+    """축 하나의 스텝 응답 특성 — {"tr", "ts", "mp", "sse"} (카드 ⑤·판정 지표의 계산부).
 
     스텝 경계는 **명령 신호 자체**에서 찾는다: 유도 목표는 조각상수라(모드가 목표를
     홀드) cmd의 변화점이 곧 스텝 시각이다 — 모드 시각표를 meta에 따로 실으면 같은
@@ -375,7 +375,7 @@ def _authority_metrics(signals, meta) -> dict:
 
 
 def _sat_longest(signals, meta, t) -> float | None:
-    """타면 위치 포화의 최장 연속 시간 [s] — 채널 최악 (B급 포화 지속).
+    """타면 위치 포화의 최장 연속 시간 [s] — 채널 최악 (포화 지속 판정).
 
     surf_sat_frac(시간비)과 다른 질문이다: 짧게 여러 번(리밋사이클 징후)과 길게
     한 번(조종권 부족)은 비율이 같아도 다른 사고다. 한계 미상이면 None.
@@ -420,7 +420,7 @@ def metric_values(t, signals, envelope, meta, waypoints=None) -> dict:
     worst = envelope.get("worst_margin")
     la = signals.get("limiter_active")
 
-    # 축별 스텝 응답 특성 (A⑤ Ts·Mp + B급 Tr·sse) — 접두사 = 추종 RMS와 동일 축
+    # 축별 스텝 응답 특성 (카드 ⑤ Ts·Mp + 판정 Tr·sse) — 접두사 = 추종 RMS와 동일 축
     steps = {}
     for axis, cmd_key, y_key, on_key, ang in (
         ("alt", "cmd_alt", "h", "alt_on", False),

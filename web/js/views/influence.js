@@ -103,7 +103,7 @@ const state = {
   // 진단(2단 앞의 "무엇을") · 스캔(3단 A "어느 케이스가") · 스윕(3단 B "얼마나")
   // — 탭을 떠났다 와도 결과 유지
   diag: null, openloop: null, scan: null, sweep: null,
-  // A/B/C 평가 — 어휘·기준(서버 정본 echo), 카드 강조(null = 전체 — 표시 전용:
+  // 게인 평가 — 어휘·기준(서버 정본 echo), 카드 강조(null = 전체 — 표시 전용:
   // 비용 게이트는 depth·verify가 대신한다), 마지막 평가 런·검증 런
   evalMeta: null, evalSel: null, evalRun: null, verifyRun: null,
   // 평가 결과의 그림 몫 — 귀속된 설계변수가 문턱 넘은 지표까지 어떻게 닿는지.
@@ -914,7 +914,7 @@ export function render() {
     }
   }
 
-  // ── A/B/C 평가 — A급 카드 7 + B급 요약 + C급 검증 (어휘 정본은 서버) ──────
+  // ── 게인 평가 — 카드 7 + 판정 요약 + 3단계 검증 (어휘 정본은 서버) ────────
   //
   // 이 표면은 판독대와 달리 **문턱을 아는** 표면이다 — 기준이 응답에 동봉되므로
   // 판정색이 참칭이 아니다(lib/evaluate.js 머리말). 기호(○△✕—)가 색과 별도로
@@ -1396,7 +1396,7 @@ export function render() {
     const m = run?.result;
     if (m) {
       const agg = m.aggregate;
-      // A급 카드 — 강조 선택은 표시 전용(안 고른 카드는 흐려질 뿐 사라지지 않는다)
+      // 카드 7 — 강조 선택은 표시 전용(안 고른 카드는 흐려질 뿐 사라지지 않는다)
       renderEvalCards(evalCardsBox, m.cards, {
         emphasis: state.evalSel == null ? null : new Set(state.evalSel),
       });
@@ -1435,7 +1435,7 @@ export function render() {
         + (maneuverLine(m) ? ` · ${maneuverLine(m)}` : "")
         + (m.aborted ? " · 취소됨 — 완료 단계만" : "")));
 
-      // B급 — 요약 한 줄이 정본 표면, 문제 항목만 전개 (na도 병기·전개)
+      // 나머지 판정 — 요약 한 줄이 정본 표면, 문제 항목만 전개 (na도 병기·전개)
       const ch = m.checks;
       evalBox.append(el("p", { style: `margin:10px 0 0;font-weight:600` },
         checksSummary(ch)));
@@ -1537,7 +1537,7 @@ export function render() {
       }
     }
 
-    // ── C급 검증 결과 — 별도 실행의 별도 표면 ────────────────────────────────
+    // ── 3단계 검증 결과 — 별도 실행의 별도 표면 ────────────────────────────────
     const vr = state.verifyRun;
     verifyStatus.textContent = !vr
       ? "아직 안 돌렸다 — 후보 게인이 1·2단계를 통과한 뒤 돌리는 것이 비용 구조다"
@@ -1577,7 +1577,7 @@ export function render() {
     const d = state.diag;
     if (!d) return;
     // 지표 줄 — 진단의 입력이자 스윕 Δ의 기준. 순서·묶음은 METRICS echo의
-    // group(서버 정본)을 따른다 — A/B/C 재편의 묶음이 표면마다 갈리지 않게
+    // group(서버 정본)을 따른다 — 평가 항목 재편의 묶음이 표면마다 갈리지 않게
     const groupOf = (k) => metricDef(k)?.group ?? "기타";
     const orderedKeys = (state.model?.metrics ?? [])
       .map((mm) => mm.key).filter((k) => k in d.metrics);

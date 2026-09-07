@@ -34,7 +34,7 @@ from claw.design.criteria import MarginCriteria
 from claw.design.tune import TuneTargets
 from claw.params.paramset import canonical_hash
 
-# 기준 스키마 버전 — v2: A/B/C 등급 재편(J 5항 재정의·권한 하드·트림→권한 그룹).
+# 기준 스키마 버전 — v2: 평가 항목 재편(J 5항 재정의·권한 하드·트림→권한 그룹).
 # 지문이 v1과 달라지는 것은 의도된 단절이고, 화면은 이 번호로 "구버전 스키마"를
 # 지문 불일치와 구분해 말한다.
 SCHEMA_VERSION = 2
@@ -384,7 +384,7 @@ _SUBS = {
 
 @dataclass(frozen=True)
 class GainEvalCriteria:
-    """A/B/C 등급 평가기준 한 벌 — evaluate()·verify()의 판정 입력이자 계보 데이터.
+    """1·2·3단계 평가기준 한 벌 — evaluate()·verify()의 판정 입력이자 계보 데이터.
 
     targets는 J_ζ·J_BW의 목표값 정본이다 — 오토디자인 튜너의 TuneTargets를 그대로
     합성한다(재기술 금지: 튜너가 겨냥한 목표와 평가가 재는 목표가 같은 수여야
