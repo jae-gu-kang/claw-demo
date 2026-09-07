@@ -2,7 +2,7 @@
 
 docs -02의 "자동 PID 튜닝 스코프 제외 [확정]"을 번복하는 구현 (사용자 확정).
 LQR 제외는 유지 — PI 구조 불변, 튜닝 방식만 자동화한다. 대상은 SCAS 내측
-7자리(pitch/roll kp·ki·k_rate + yaw.k_rate)이고 AP 외측(고도·속도·헤딩)은 v1
+**게인** 7자리(pitch/roll kp·ki·k_rate + yaw.k_rate)이고 AP 외측(고도·속도·헤딩)은 v1
 제외 — 분리모델에 h·ψ 상태가 없다는 openloop.py GROUP_LOOPS의 정직성과 같은 이유.
 
 2단 구조 (closure.py의 successive closure 조성과 같은 정의 — 튜닝과 검증이 같은
@@ -528,10 +528,11 @@ def tune_point(
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
     rate_filters=None, polish=False, max_evals=60,
 ) -> dict:
-    """한 운영점의 SCAS 7자리 자동 튜닝 — {"gains", "achieved", "slots", "status", ...}.
+    """한 운영점의 SCAS **게인** 7자리 자동 튜닝 — {"gains", "achieved", "slots", ...}.
 
     slots: {자리 이름: {"status", "reason", "target", "achieved"}} — **판정의 단위**.
-    자리는 5개(pitch_rate·yaw_rate·roll_rate·pitch_att·roll_att)이고 이름은 검증
+    **게인 자리(7)와 판정 자리(5)는 다른 것을 센다** — 손잡이가 7개고 그것으로 성형하는
+    SISO 루프가 5개다. 판정 자리는 pitch_rate·yaw_rate·roll_rate·pitch_att·roll_att이고 이름은 검증
     쪽(openloop.GROUP_LOOPS·schedmap)과 같다. status는 "ok"(설계 목표 달성) |
     "infeasible"(미달) | "na"(잴 수 없음 — 설계값 0), reason은 그 사유다.
 
