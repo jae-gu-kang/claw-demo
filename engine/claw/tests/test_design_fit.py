@@ -18,7 +18,11 @@ from claw.design import (
 from claw.tables import PolyTable
 
 MACHS = np.round(np.arange(0.15, 0.951, 0.05), 4)
-DP = np.minimum((0.6 / MACHS) ** 2, 4.0)  # 데모 동압 역비 스케일 (상한 4)
+# 동압 역비 스케일 꼴의 **합성** 곡선. 상한 4는 임의 선택이지만 **knot 위치(M0.3)를
+# 정하므로** 아래 knot 단정과 한 벌이다 — 2.0으로 바꾸면 joints가 [0.4, 0.45]가 되어
+# 단정이 깨진다(실측). 데모 형상의 상한과는 무관하다: 상한 4·경계 M0.3이 우연히 롤과
+# 같을 뿐이고, 진폭 -2.0은 pitch.kp의 설계값이라 어느 자리와도 짝이 아니다.
+DP = np.minimum((0.6 / MACHS) ** 2, 4.0)
 
 
 def _points_1d(machs, alt=1000.0, fuel=200.0):
@@ -32,7 +36,13 @@ def _points_1d(machs, alt=1000.0, fuel=200.0):
 
 
 def test_dynamic_pressure_law_fit():
-    """1/M²·상한 4 곡선 — 캡 경계(M0.3)를 knot로 찾고 소수 구간·저차로 tol 내 적합."""
+    """1/M²·상한 4 곡선 — 캡 경계(M0.3)를 knot로 찾고 소수 구간·저차로 tol 내 적합.
+
+    **상한을 바꾸면 이 테스트가 깨진다.** 곡선이 꺾이는 자리가 곧 상한이 물리는
+    자리라 knot 단정(M0.3)이 상한 4에 묶여 있다 — 상한 2.0에서는 joints가
+    [0.4, 0.45]로 옮겨 가 아래 단정이 실패한다. 데모 형상을 따라가라는 뜻이 아니다
+    (그쪽 상한은 축별이다): 바꿀 거면 곡선과 단정을 **함께** 바꾸라는 뜻이다.
+    """
     out = fit_gain_surface(MACHS, -2.0 * DP, tol_fit=0.02, max_degree=4, max_segments=4)
     assert out["n_segments"] <= 3
     assert out["max_residual"] <= 0.02 * out["scale"]

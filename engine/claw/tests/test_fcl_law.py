@@ -205,7 +205,9 @@ def test_fcl_invalid_nav_holds_last_command(trim_design):
 def test_fcl_schedule_scales_gain_off_design(trim_design):
     """M0.4에서 P항 응답이 스케줄 배수만큼 — 1/q̄ 법칙이 아니라 **상한**이 정한다.
 
-    (0.6/0.4)² = 2.25지만 상한 _F_CAP=2.0이 물려 2.0이다. 상한을 4.0에서 내린
+    (0.6/0.4)² = 2.25지만 상한 _F_CAP=2.0이 물려 2.0이다 — 이 테스트는 θ만 흔들어
+    엘레본을 읽으므로 **피치 자리**이고, 그래서 기본 상한이 맞다(롤은 4.0, _cap_for).
+    상한을 4.0에서 내린
     것은 저속에서 내측 피치 루프가 리밋사이클에 들었기 때문이다(fcl/demo.py 주석).
     이 테스트가 보는 것은 "스케줄이 P항을 배수로 민다"이지 배수 자체가 아니므로,
     상한이 물리는 자리라는 사실과 함께 그 값을 그대로 못박는다.
@@ -223,7 +225,7 @@ def test_fcl_schedule_scales_gain_off_design(trim_design):
         fcl.reset(state={"theta": e, "throttle": 0.3, "de": 0.0})
         return float(fcl.step(cmd, nav).elevon[0])
 
-    # 상한이 물리는 자리 — M0.4는 0.6/√2.0 = 0.424보다 아래다
+    # 상한이 물리는 자리 — M0.4는 피치 경계 0.6/√2.0 = 0.424보다 아래다
     assert first_de(True) == pytest.approx(2.0 * first_de(False), rel=1e-6)
 
 

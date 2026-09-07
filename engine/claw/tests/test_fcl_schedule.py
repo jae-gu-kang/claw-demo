@@ -154,7 +154,10 @@ def test_기본_테이블은_예전과_같다():
     # 가드가 영구 도달 불가 분기라 방출을 멈췄고(DAL A 죽은 코드 논점), 출력식은
     # +0.0 소거뿐이라 법칙은 그대로지만 파라미터 목록(*_pid_ki)이 줄어 지문이
     # 움직였다. 정본 사슬은 test_parity.py::test_분할해도_지문은_그대로다와 같다.
-    assert _module().fingerprint == "8e540717b28eea23"
+    # 이번 갱신은 **축별 동압 상한**(fcl/demo.py _cap_for) — 롤 3자리만 상한 4.0이라
+    # M0.42 아래 룩업 |값|이 커졌다(roll.k_rate는 −0.4 → −0.8로 부호가 음이다). 법칙도 자리 구성도 그대로이므로 구조가 아니라
+    # **데이터** 변경이고, 그래도 지문은 움직인다(룩업 표가 탑재 C에 박힌다).
+    assert _module().fingerprint == "2dd6835e50ae5869"
 
 
 def test_없는_자리를_요구하면_거부한다():
@@ -192,7 +195,8 @@ def test_게인_격자_범위는_자르면_안_된다():
     사라지고 게인이 설계값에 붙박인다 — _F_CAP이 리밋사이클을 만든다고 실측한 바로 그
     방향이다. 게다가 M0.6 위는 **강하로 도달한다**(3000 m에서 스로틀 0으로도 M0.73).
 
-    하단은 반대다: M0.424 아래는 _F_CAP이 이미 평평하게 만들어 잘라도 값이 같다.
+    하단은 반대다: 상한이 이미 평평하게 만드는 구간이라 잘라도 값이 같다(평평해지는
+    자리는 축별 상한을 따라 갈린다 — 피치 M0.424 아래, 롤 M0.300 아래).
     그래서 이 가드는 **상단만** 못박는다.
     """
     import numpy as np
@@ -200,7 +204,8 @@ def test_게인_격자_범위는_자르면_안_된다():
     from claw.fcl.demo import _F_CAP, _M_DESIGN
     from claw.plant import make_demo_structural_limits
 
-    tab = next(iter(make_demo_gain_tables().values()))
+    # 자리를 **명시**한다 — 임의 테이블을 뽑아 기본 상한과 맞추면 축이 어긋난다
+    tab = make_demo_gain_tables()["pitch.kp"]
     machs = np.asarray(tab.axes[0])
     # 구조 급강하 한계(V_D 상당)까지는 격자가 있어야 한다 — 거기가 실제 도달 상한이다
     assert machs[-1] >= make_demo_structural_limits()["mach_d"] - 1e-9, (
@@ -208,3 +213,107 @@ def test_게인_격자_범위는_자르면_안_된다():
     # 그리고 상단 부근이 실제로 롤오프 중이어야 한다 (평평하면 자른 것과 같다)
     f = np.minimum((_M_DESIGN / machs) ** 2, _F_CAP)
     assert f[-1] < f[-2] < f[-3], "격자 상단이 평평하다 — 1/q̄ 법칙이 죽었다"
+
+
+def test_상한은_축별이고_모르는_축은_기본값을_따른다():
+    """스케일 **법칙**은 자리마다 같고 **상한**만 축별이다 (fcl/demo.py _cap_for).
+
+    롤이 예외인 것은 롤을 재 봤기 때문이지 롤이라서가 아니다 — 리밋사이클을 만든
+    것은 pitch.kp·pitch.k_rate였고 롤 3개는 σ 3.3°(= 부스트 없음)로 무관했다.
+    측정이 없는 축을 관대하게 열면 근거 없이 여는 것이라 **기본 상한**을 따른다.
+
+    실측 근거 (18칸 기본 격자, 롤 자세 PM 합격선 45°):
+      균일 2.0 → 39.6°(3칸 미달) · 피치2·롤3 → 44.8°(1칸) · 피치2·롤4 → 48.4°(통과)
+    대가는 직진 순항 정착 de σ 1.1° → 1.7°(리밋사이클 문턱 6.0°의 28 %)다.
+    """
+    import numpy as np
+
+    from claw.fcl.demo import (_F_CAP, _F_CAP_ROLL, _M_DESIGN, _cap_for,
+                               demo_design_gains)
+
+    # **값을 못박는다.** 아래 배분 단정은 전부 _F_CAP·_F_CAP_ROLL로 쓰여 있어
+    # 상한을 어떤 값으로 바꿔도 자기들끼리는 일관된다 — 그래서 「축별」이라는
+    # 이름이 지키는 것(균일로 되돌리지 않기)을 이 두 줄이 따로 지킨다. 값을
+    # 고치려면 위 docstring의 PM·σ 표를 다시 재고 함께 고쳐야 한다.
+    assert _F_CAP == 2.0, "기본(피치) 상한이 바뀌었다 — 리밋사이클 실측을 다시 하라"
+    assert _F_CAP_ROLL == 4.0, "롤 상한이 바뀌었다 — 롤 PM·승강타 σ를 다시 재라"
+
+    assert _cap_for("roll.kp") == _F_CAP_ROLL
+    # 미측정 축은 기본값 — 이 단정이 죽으면 근거 없이 상한을 연 것이다
+    for name in ("pitch.kp", "yaw.k_rate", "alt.kp", "무슨자리"):
+        assert _cap_for(name) == _F_CAP, f"{name}이 기본 상한을 안 따른다"
+
+    # 상한이 실제로 테이블에 반영된다. 표본은 **경계를 피한다** — 롤 상한이 물리기
+    # 시작하는 M0.300에서는 이상 배수가 마침 4.0이라 min(ideal, cap)이 cap ≥ 4인
+    # 어떤 값에서도 같아져, 그 자리만 보면 「상한 4」와 「상한 없음」이 구조적으로
+    # 구분되지 않는다. M0.25는 이상 5.76이라 갈린다.
+    tabs = make_demo_gain_tables()
+    design = demo_design_gains()
+    machs = np.asarray(tabs["roll.kp"].axes[0])
+    i = int(np.argmin(np.abs(machs - 0.25)))
+    assert machs[i] == pytest.approx(0.25)
+    ideal = (_M_DESIGN / 0.25) ** 2
+    assert ideal == pytest.approx(5.76)
+    for name, tab in tabs.items():
+        got = np.asarray(tab.data)[i]
+        assert got / design[name] == pytest.approx(min(ideal, _cap_for(name))), name
+
+
+def test_롤_상한이_저속_코너_위상여유를_지킨다():
+    """이 변경이 **존재하는 이유**를 못박는다 — 값이 아니라 결과를.
+
+    위 test는 상한 숫자를 못박지만 "그래서 무엇이 좋아지나"는 안 본다. 그 답이
+    여기다: 저속 코너(M0.3/h3000)에서 롤 자세 위상여유가 합격선을 넘는가.
+    균일 상한으로 되돌리면 39.6°로 떨어져 **실패한다** — 상한 값을 몰래 바꾸거나
+    _cap_for를 무력화하면 이 단정이 먼저 죽는다.
+
+    싸다: 트림 1점 + 선형화뿐이라 두 형상 합쳐 ~0.03 s다(리밋사이클을 보려면
+    6DOF 미션이 필요하지만 **위상여유는 선형이라** 그럴 필요가 없다 — 실제로
+    피치 리밋사이클은 선형 마진에 안 잡힌다, fcl/demo.py _F_CAP 주석).
+
+    이 표를 다시 만들 때 쓰는 도구는 `evaluate(depth="linear")`다. 설계측
+    `scheduled_margin_point`는 루프 조성(작동기·지연·레이트 폐쇄)이 달라 같은
+    점에서 ~19° 높게 나온다 — 둘 다 맞지만 **같은 자가 아니다**.
+    """
+    # 상위 계층(pipeline)을 M7 테스트에서 부르는 **의도된 역전**이다 — 위 test가
+    # 값을, 이 test가 그 값의 결과를 못박아 둘이 한 이야기라 갈라 두면 결과 쪽이
+    # 고아가 된다. 함수 안에서 import해 나머지 테스트는 가볍게 둔다(이 파일 규약)
+    import numpy as np
+
+    from claw.common.contracts import TrimCase
+    from claw.fcl.demo import (DEFAULT_SCHEDULED, _F_CAP, _M_DESIGN,
+                               demo_design_gains)
+    from claw.pipeline.criteria import GainEvalCriteria
+    from claw.pipeline.evaluate import evaluate
+    from claw.pipeline.influence import Shape
+    from claw.plant.demo import make_demo_aircraft
+    from claw.trim import trim_batch
+
+    ac = make_demo_aircraft()
+    trs = trim_batch(ac, [TrimCase(name="M0.3_h3000", mach=0.3, alt=3000.0, fuel=200.0)])
+    assert trs[0].converged, "저속 코너가 트림이 안 된다 — 엔벨로프가 바뀌었다"
+
+    def roll_pm(shape):
+        out = evaluate(ac, trs, shape, GainEvalCriteria(), depth="linear")
+        loops = out["cases"][0]["stages"]["margins"]["loops"]
+        # roll_att가 없거나 마진이 없는 것은 **실재하는 상태**다(실효 게인이 전부 0이면
+        # 자리가 zero로 보고된다 — design/schedmap.py). 그때 KeyError로 죽으면 "왜"가
+        # 사라지므로 사유를 남긴다 (test_landing.py의 빈 순항 구간 가드와 같은 규약)
+        lp = (loops or {}).get("roll_att")
+        assert lp and lp.get("margins"), f"roll_att 마진을 못 쟀다 — 자리 상태 {lp}"
+        return float(lp["margins"]["pm_deg"])
+
+    limit = GainEvalCriteria().margin.pm_min_deg
+    assert roll_pm(Shape()) > limit, "출하 형상이 저속 코너 위상여유를 못 지킨다"
+
+    # 균일 상한(= 이 변경 이전)으로 되돌리면 떨어진다 — 그것이 이 상한의 이유다
+    machs = np.round(np.arange(0.15, 0.951, 0.05), 4)
+    design = demo_design_gains()
+    uniform = {n: Table({"mach": machs},
+                        design[n] * np.minimum((_M_DESIGN / machs) ** 2, _F_CAP),
+                        name=n, extrapolate="clip")
+               for n in DEFAULT_SCHEDULED}
+    assert roll_pm(Shape(gain_tables=uniform)) < limit, (
+        "균일 상한에서도 합격선을 넘는다 — 그렇다면 축별 상한의 근거가 사라진 것이라\n"
+        "        _F_CAP_ROLL을 지우는 것이 맞다. 단 판정선(pm_min_deg)을 낮췄다면\n"
+        "        상한이 아니라 그쪽부터 보라 — 이 단정은 둘 다에 반응한다.")

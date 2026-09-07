@@ -12,6 +12,9 @@ from claw.fcl.schedule import GainSchedule
 from claw.tables import PolyTable, Table
 
 MACHS = np.round(np.arange(0.15, 0.951, 0.05), 4)
+# 합성 곡선. 상한 4는 임의 선택이지만 **꺾이는 자리를 M0.3에 놓으므로** 아래 스윕
+# 점(0.3·0.30001·0.31 등 knot를 걸치는 값)과 한 벌이다 — 바꾸면 그 점들이 경계를
+# 안 걸쳐 **조용히** 무의미해진다(초록인 채로). 데모 형상의 축별 상한과는 무관하다.
 DP = np.minimum((0.6 / MACHS) ** 2, 4.0)
 
 
