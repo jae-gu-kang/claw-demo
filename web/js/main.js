@@ -15,7 +15,7 @@ import * as trim from "./views/trim.js";
 import * as verify from "./views/verify.js";
 import * as world from "./views/world.js";
 
-// 블록도(블록 다이어그램 허브)가 진입점 — 블록 클릭으로 각 편집 화면 진입 (02 §4)
+// 블록도(블록 다이어그램 허브)가 진입점 — 블록 클릭으로 각 편집 화면 진입 (06 §1)
 // 타면 사용은 탭이 아니다 — 설계 단계가 아니라 시뮬 런 하나를 다시 읽는 방법이라
 // 시뮬레이션 탭의 패널로 들어갔다 (v0.54, views/duty.js 머리말)
 // 나열 순서는 index.html nav와 **같아야 한다** — 순서가 업무 순서를 뜻하게 된

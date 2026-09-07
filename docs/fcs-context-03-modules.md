@@ -1,8 +1,10 @@
-# 컨텍스트 문서 3/3 — 모듈 분할 (소프트웨어 구조)
+# 컨텍스트 문서 03 — 모듈 분할 (소프트웨어 구조)
 
 > 비행제어/유도법칙 설계툴 프로젝트의 **소프트웨어 모듈 분할** 컨텍스트.
 > 도메인·설계 결정은 `fcs-context-01-control-law.md`, 구현 결정은 `fcs-context-02-implementation.md` 참조.
 > 상태 표기: **[확정]** 결정 완료 / **[기본값]** 잠정 채택, 변경 가능 / **[TBD]** 미결
+> 문서 지도는 [`README.md`](README.md) — 어느 주제가 어느 파일에 있는지, 상태 표기와
+> 절 번호 규약이 거기 있다.
 
 ---
 
@@ -29,12 +31,12 @@
 
 ## 3. 모듈 정의
 
-**[확정]** 총 16개 모듈. 구현 문서 §3의 기능 6모듈(Flight Control, Guidance, Navigation, Actuator, Sensor, Aircraft Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브패키지).
+**[확정]** **엔진 16 모듈 + M13 `server` · M14 `web` = 18**. 16은 `engine/claw/` 패키지 수다. 구현 문서 §3의 기능 6모듈(Flight Control, Guidance, Navigation, Actuator, Sensor, Aircraft Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브패키지).
 
 | # | 모듈 | 담당 | 근거 문서 |
 |---|---|---|---|
 | M0 | `common` | 규약·단위·상수, 쿼터니언/DCM/오일러, 좌표변환 | 01§6, 02§2.2 |
-| M1 | `params` | 파라미터 관리 계층(Data Dictionary 대체) + 컴포넌트 레지스트리·JSON 스키마 | 02§5.5, §2.3 |
+| M1 | `params` | 파라미터 관리 계층(Data Dictionary 대체) + 컴포넌트 레지스트리·JSON 스키마 | 02 §5.5 · 02 §2.3 |
 | M2 | `blocks` | 제어 요소 라이브러리 (Primitive Block Set) | 02§2.2 |
 | M3 | `tables` | nD 보간 엔진, 공력 DB 로더, 실속 경계 테이블 | 02§5.1~5.3 |
 | M4 | `env` | ISA 대기, 중력, WGS-84, 바람/난류(확장) | 01§2.5 |
@@ -49,7 +51,7 @@
 | M13 | `server` | FastAPI 백엔드 (REST, 웹소켓 진행률, 작업 실행, 결과 저장) | 02§2.3 |
 | M14 | `web` | 프론트엔드 (대시보드, 테이블 편집, 지도, 재생) | 02§4 |
 | M15 | `pipeline` | 설계 산출물 의존 DAG, 증분 재계산, 정량 Δ리포트·민감도 스윕 | 02§2.4 |
-| M16 | `codegen` | 제어법칙 구조 IR + Python 실행 백엔드 + 탑재 C 생성 백엔드 | 02§1·§2.2 |
+| M16 | `codegen` | 제어법칙 구조 IR + Python 실행 백엔드 + 탑재 C 생성 백엔드 | 02 §1 · 02 §2.2 |
 | M17 | `design` | 자동 설계 루프 — 트림 격자 자동화, 게인 자동 튜닝, 다항 스케줄 적합, 스케줄 인지 검증, 원인 분류, 이터레이션 오케스트레이터 | 01§3.4·§4, 02§2.1 번복 |
 
 ### M0 `common` — 기반 규약
@@ -73,7 +75,7 @@
 
 ### M3 `tables` — 보간·데이터
 - 1D/2D/nD Lookup(보간·외삽 옵션), 공력 DB 로더(CSV/Excel→pandas→내부 포맷), 실속 경계 테이블(공력팀 정본), DB 유효범위 질의(엔벨로프 플래그의 근거), DB 뷰어용 슬라이스 추출(CL–α 곡선 등)
-- **[TBD]** 보간 방식·외삽 정책·테이블 규격 (02§5.1, §5.3)
+- **[TBD]** 보간 방식·외삽 정책·테이블 규격 (02 §5.1 · 02 §5.3)
 - 의존: M0
 
 ### M4 `env` — 환경 모델
@@ -81,7 +83,7 @@
 - 의존: M0. 검증: 표준대기표 대조
 
 ### M5 `plant` — 비행체 모델
-- 서브패키지: `eom`(6DOF 운동방정식+적분기), `aero`(공력, M3 소비), `prop`(프로펠러 추력 T = δσ·min(T_static, ηP/V) — 단발 중심선이 정본, 상수추력·쌍발도 레지스트리 선택 가능: 01 §2.1 개정·§2.4), `mass`(연료 의존 질량·CG·관성), `ground`(스키드 접촉·발사 레일 — 01 §3.3.1), `actuator`(2차계 가정값 시작, rate/position limit·backlash), `sensor`(초기 이상센서 → 노이즈·지연)
+- 서브패키지: `eom`(6DOF 운동방정식+적분기), `aero`(공력, M3 소비), `prop`(프로펠러 추력 T = δσ·min(T_static, ηP/V) — 단발 중심선이 정본, 상수추력·쌍발도 레지스트리 선택 가능: 01 §2.1 개정 · 01 §2.4), `mass`(연료 의존 질량·CG·관성), `ground`(스키드 접촉·발사 레일 — 01 §3.3.1), `actuator`(2차계 가정값 시작, rate/position limit·backlash), `sensor`(초기 이상센서 → 노이즈·지연)
 - `ground`는 **힘과 구속 둘 다** 낸다: 스키드 접촉은 `aircraft.fm`의 네 번째 항(공력+추진+중력에 이어)이고, 발사 레일은 힘이 아니라 구속이라 sim이 별도 경로로 적분한다(등가속 해석해). 접촉은 불연속 대신 스프링-댐퍼 연속 근사 — RK4가 스텝당 힘을 4번 평가하므로 h=0에서 끊기는 힘은 부단계가 지면 안팎을 오가며 적분 차수를 무너뜨린다. `Aircraft(ground=None)`이 기본이라 미장착 경로는 도입 전과 완전히 동일하다
 - 서브패키지 단위로 독립 개발 가능 — 각각이 구현 문서 §3의 모듈 4·5·6
 - 의존: M0, M1, M3, M4. 검증: 물리검증(에너지 보존, 스텝 반분 수렴 차수) + F-16 공개 모델
@@ -140,32 +142,27 @@
 - **정량 Δ리포트**: 변경 전/후 스냅샷 비교 — 트림 이동, 고유치·감쇠비·마진 변화, 응답지표·경로오차·실속마진 변화. 100 vs 50 Hz 비교(02§2.3)는 특수 사례
 - 파라미터 스윕/민감도 스터디 (배치 실행 재사용)
 - 구현됨(`pipeline/pipeline.py`): 부분집합 지문 캐시·선택적 무효화·`delta_report`
-- 구현됨(`pipeline/influence.py`, v0.19): **영향성 해석 1단** — 편집 가능 파라미터 목록(레지스트리에서 읽어 유도, 데모 형상 65개), 파라미터→IR 노드 매핑(**재조립 후 서명 diff** — 손으로 적은 표를 두지 않는다), 전방 도달 원뿔, 설계 지표 선언 8종. 서명은 노드 인자 + **러너 인스턴스**까지 본다(dt가 이산 계수만 바꾸므로). 세 상태를 구분한다: 스케줄에 **덮임**(상수는 있으나 게인 포트가 매 스텝 덮어씀) · **미방출**(스케줄 경로가 상수를 아예 안 낸다) · **법칙 밖**(IR 바깥이라 개루프가 못 봄 — 영향 없음이 아니다)
-- 구현됨(`pipeline/criteria.py`·`pipeline/evaluate.py`·`analysis/schedule.py`·`plant DispersionSet`, v0.55~v0.56): **게인 평가** — 카드 7(ζ·ωn/GM/PM/BW·ω_gc/Ts·Mp/RMS/제어권한) · 판정 10(요약, 추력 여유 포함) · 검증(`verify()` — 강건성 코너 재트림·격자 중간점). 기준은 GainEvalCriteria(schema v2, MarginCriteria+TuneTargets 합성, 지문 발급 — 02 §5.4 "합격기준을 파라미터로"의 결선), 하드 게이트는 코드 상수(문턱만 데이터). METRICS 12→29(tier/group 메타 — 키 불변). 절대 판정 조성은 M17 closure 재사용(§M17 의도적 이탈 기록 참조), 평가 프리미티브가 복수 게인 최적화기의 적합도 함수 이음새다. 상세·결정 근거는 02 §4 확정 블록과 v0.55~v0.56 이력
-- 구현됨(`pipeline/prescribe.py`, v0.57): **정량 처방** — 저장 스윕 재계산으로 단일 필요 변화량(교차 보간·mixed 외삽 금지·방향 상충=국소 거절)과 조합 최소 변화(SLSQP·mixed 제외·비가산 경고), proposal_shape(_value_at 재사용)+proposal_export(실효 테이블). 확정은 evaluate 확인 런 — 제안 생성기·채점기 분리가 복수 게인 최적화기 이음새
-- 구현됨(v0.58 연계): `evaluate`가 실패 케이스의 같은 런으로 `diagnose_run`을 인라인 호출(판정+소견 한 몸, 새 시뮬 0)하고 케이스 지표를 `diagnose_grid`에 넣어 국소성을 함께 낸다(스캔 중복 제거). 판정선은 `GainEvalCriteria.to_diagnose_thresholds/to_grid_thresholds` 파생이 정본 — 진단·스캔이 각자 상수를 들던 이중 정의 해소(기본값 불변)
+- 구현됨(`pipeline/influence.py`, v0.19): **영향성 해석 1단** — 편집 가능 파라미터 목록(레지스트리에서 읽어 유도, 데모 형상 68개), 파라미터→IR 노드 매핑(**재조립 후 서명 diff** — 손으로 적은 표를 두지 않는다), 전방 도달 원뿔, 설계 지표 선언 29종. 서명은 노드 인자 + **러너 인스턴스**까지 본다(dt가 이산 계수만 바꾸므로). 세 상태를 구분한다: 스케줄에 **덮임**(상수는 있으나 게인 포트가 매 스텝 덮어씀) · **미방출**(스케줄 경로가 상수를 아예 안 낸다) · **법칙 밖**(IR 바깥이라 개루프가 못 봄 — 영향 없음이 아니다)
+- 구현됨(`pipeline/criteria.py`·`evaluate.py`·`prescribe.py`·`diagnose.py`·`analysis/schedule.py`·`plant DispersionSet`): **게인 평가 · 진단 · 정량 처방**. 기준은 `GainEvalCriteria`(schema v2, 지문 발급), 하드 게이트는 코드 상수(문턱만 데이터), METRICS 29종(tier/group 메타 — 키 불변). `evaluate`가 실패 케이스의 같은 런으로 `diagnose_run`을 인라인 호출해 판정과 소견이 한 몸이고(새 시뮬 0), 판정선은 `GainEvalCriteria.to_diagnose_thresholds/to_grid_thresholds` 파생이 정본이다
+- **카드 7 · 판정 10 · 하드 게이트 · J v2 · 진단 규칙 · 처방의 정본은 [`fcs-context-04-criteria.md`](fcs-context-04-criteria.md)다.** 절대 판정 조성은 M17 `closure` 재사용(아래 「의도적 이탈」), 평가 프리미티브가 복수 게인 최적화기의 적합도 함수 이음새다
 - 후속: 2단 개루프 Δ(기록된 법칙 입력 재생 — `GraphRunner.last_env`가 입력까지 담고 있어 프록시만으로 트레이스를 뽑을 수 있음이 확인됨, 2,000틱 0.36 s/파라미터), 3단 폐루프 스윕(재시뮬 ~2.2 s/파라미터 → 작업+진행률), 잡음 바닥 대조군
 - 의존: M1, M3, M7, M9~M11. 검증: 무효화 정확성(의존 그래프 단위테스트), Δ리포트 수치 회귀, 매핑 회귀(관측된 파라미터→노드 쌍·구조 추가·덮임/미방출 판정)
 
 ### M16 `codegen` — 제어법칙 IR과 백엔드들
-- **구조의 정본은 IR 하나**이고 Python 실행(`ir_exec`)과 탑재 C 생성(`emit_c`)은 그 백엔드다 (02 §1·§2.2). 제어법칙 구조가 명령형 Python 안에 있으면 프로그램이 읽을 수 없어 C를 뽑을 수 없다 — IR은 그 연결을 데이터로 적은 것(Simulink `.slx`가 맡는 자리)
+- **구조의 정본은 IR 하나**이고 Python 실행(`ir_exec`)과 탑재 C 생성(`emit_c`)은 그 백엔드다 (02 §1 · 02 §2.2). 제어법칙 구조가 명령형 Python 안에 있으면 프로그램이 읽을 수 없어 C를 뽑을 수 없다 — IR은 그 연결을 데이터로 적은 것(Simulink `.slx`가 맡는 자리)
 - **C 생성 가능 제약을 IR 단계에서 강제**: 선언 순서 = 실행 순서(전방 참조 금지 → 대수 루프 원천 차단), 정적 크기, 출력에 도달하지 않는 노드 금지(생성 C에 dead code 없음). "Python으로는 되는데 C로는 안 되는" 그래프를 만들 수 없어야 C 전환이 재작업이 아니라 백엔드 추가가 된다
 - 생성물 구성은 MATLAB Embedded Coder를 **두 축으로** 따른다. 역할축: `.c`(알고리즘) / `_data.c`(파라미터=rtP) / `_types.h`(상태=rtDW·dt 매크로) / `.h`(진입점·빌드 요구). 기능축: IR 노드 이름표(`grouped`)별로 `{base}_{group}.c`·`.h`가 떨어져 나오고 `{base}.c`에는 조립부만 남는다(`Nonreusable function` + `Use subsystem name` 대응). 블록 id와 신호 이름은 **파티션 경계를 넘어서도** 보존해 FCC팀이 읽고 시험할 수 있게 한다. 공용 헬퍼는 `claw_rt.c`·`.h` 한 벌(`_sharedutils` 대응, `emit_runtime`) — 산출물 전체의 헬퍼 합집합으로 한 번 만든다
 - **모드 분기 = enable 영역**(Simulink Enabled Subsystem 대응): 같은 enable의 연속 노드가 `if/else` 한 덩이가 되고, 비활성 스텝에는 실행 대신 `on_disable` 상태 대입만 한다(비활성 축 필터의 측정 추적·헤딩 적분기 소거). 최상위의 항법 무효 홀드는 **그래프 전체 enable** — 직전 출력 유지 + 상태 동결
 - 입력 경계는 **이미 계산된 공학량**(θ·φ·ψ·p·q·r·V·α·β·h·ḣ·mach) — 원시 상태에서의 변환은 항법·ADC 몫이라 생성 코드 밖이다 (02 §2.2)
-- 구현됨(`engine/claw/codegen`, 산출물 `flight/gen`): IR(Graph/Node/Op·제약 검증·enable 영역·다중 출력), Python 실행기, C 생성기(PID·Washout·CommandFilter·Saturation·Gain·Product·Sum·Lookup1D 에미터 + wrap_pi·min2·gt·add_const·선회 FF 연산). 그래프: SCAS 축·3축, 오토파일럿, α 리미터, 게인 스케줄, 엘레본 믹서, **최상위 `fcl` 전체**. 게인 스케줄 유무가 구조에 드러나고(상수→Gain, 신호→Product+포트), 쓰이지 않는 경로는 생기지 않는다(kd=0 미분항, 미사용 스케줄 축 필터). 지문은 M1 `canonical_hash` 재사용. 기능축 분할 적용: `fcl`이 `sched`(7블록)·`ap`(19)·`lim`(6)·`scas`(17)·`mix`(10) 다섯 파일로 나뉘고 `fcl.c`는 339줄→97줄 조립부만 남았다
+- 구현됨(`engine/claw/codegen`, 산출물 `flight/gen`): IR(Graph/Node/Op·제약 검증·enable 영역·다중 출력), Python 실행기, C 생성기(PID·Washout·CommandFilter·Saturation·Gain·Product·Sum·Switch·LookupBlock·PolyBlock 에미터 10종 + wrap_pi·min2·gt·add_const·선회 FF 연산). 그래프: SCAS 축·3축, 오토파일럿, α 리미터, 게인 스케줄, 엘레본 믹서, **최상위 `fcl` 전체**. 게인 스케줄 유무가 구조에 드러나고(상수→Gain, 신호→Product+포트), 쓰이지 않는 경로는 생기지 않는다(kd=0 미분항, 미사용 스케줄 축 필터). 지문은 M1 `canonical_hash` 재사용. 기능축 분할 적용: `fcl`이 `sched`(7블록)·`ap`(26)·`lim`(6)·`scas`(29)·`mix`(10) 다섯 파일로 나뉘고 `fcl.c`는 339줄→100줄 조립부만 남았다
 - 검증: **IR 실행 ↔ 생성 C 대조**. 손으로 쓴 오라클은 v0.13 정본 이관과 함께 사라졌으므로(그 이관의 근거는 당시 회귀 전부가 통과했다는 사실이고 git 이력에 남아 있다), 지금 남은 이중 구현은 같은 IR의 두 백엔드뿐이다. 전부 배정밀도·동일 연산 순서라 목표는 근사가 아니라 **비트 일치**. 최상위는 **실제 데모 미션 18,000 제어 틱**을 재생해 대조하며(모드 4개 전환·게인 스케줄 이동·리미터 작동·타면 포화·항법 무효 홀드 포함), 그 경로들을 실제로 밟았는지도 함께 단정한다. 커밋된 산출물과 즉석 생성본 동일성도 검사(`flight/tests`)
 - 기능축 분할은 **IR을 계층화하지 않는다** — 연속 노드 묶음에 이름표만 붙이고(`ir.grouped`), 경계를 넘는 신호를 인자로 만드는 일은 에미터가 IR에서 계산한다(`_interfaces`). IR이 평탄한 채로 남아 Python 실행기는 이름표를 읽지 않고, 분할이 실행 결과를 바꿀 수 없다. 배치가 바뀌어도 **형상 지문은 그대로**다(지문은 파라미터·dt·구조의 신원이므로)
 - **조립 정본은 M7이다** — 생성기(`flight/generate.py`)도 서버 라우트도 `make_demo_fcl().init(dt).runner`를 쓴다. v0.14까지는 generate.py가 `fcl_graph(...)`를 따로 불러 게인·타면 한계·마진을 재기술하고 있었고(02 §5.5 위반), 통합 후 산출물이 **바이트 단위로 동일**함이 등가성 증거다
 - 의존: M0~M3, M7(조립). 후속: 원시 블록 나머지 에미터, 블록도 SVG를 IR에서 렌더, C 백엔드 시뮬 전환(02 §2.3 [TBD] — 제어법칙 구조가 굳은 뒤)
 
 ### M17 `design` — 자동 설계 루프
-- **역할 있는 운영점 집합(PointSet)이 단일 정본 상태**: anchor(트림·선형화점) > breakpoint(게인 격자점) > validation(검증점), 승격은 단방향 래칫 — 이터레이션 종료 보장의 한 겹. M15 `pipeline`(반자동 진단·스윕 보조)과 층이 다르다 — 여기는 산출물(트림 격자·게인 테이블·마진 판정)을 **생성**하는 루프다
-- 스테이지: COARSE(엔벨로프 유도 coarse 격자, `grid`) → REFINE(플랜트 거리 adaptive 삽입, `refine` — 거리 정본 `linmodels.model_distance`는 분류기와 공유) → TUNE(결정론 2단 튜닝, `tune`) → FIT(차수 에스컬레이션 + greedy knot 다항 적합, `fit` → M3 `PolyTable`) → VERIFY(스케줄 인지 검증, `schedmap` — successive closure 조성 `closure`) → CLASSIFY(6-verdict 원인 분류, `classify`) → 처방 반영 재진입 (`orchestrator.DesignSession`, 기본 gated)
-- **판정의 단위는 (점, 자리)다** — `tune.tune_point`이 자리 5개(pitch/yaw/roll_rate·pitch/roll_att, 이름은 `schedmap`·`openloop.GROUP_LOOPS`와 동일)마다 {status, reason, target, achieved}를 내고 사유 코드 **10종**의 안내 문구(`REASON_TEXT`)가 엔진 정본이다(화면·원장이 이 표를 소비 — `na_no_crossover`는 "판정 불가"를 `margin_floor`에서 갈라낸 신설 코드다). 그 자리별 레코드는 `tune_meta["slots"]`로 세션 저장물에 **실린다** — 종전에는 점 단위 status와 산문 notes뿐이라 자동 튜닝의 달성치가 결과 JSON에 없었고, 미달 원장의 `tune` 행이 그것을 소비한다. `classify`의 structural_limit·완화 프로브 판정과 `orchestrator`의 처방 효과 채점이 모두 이 단위를 쓴다 — 점 단위로 재면 오귀속으로 실행 가능한 처방이 사라진다(01 §4.2). 처방은 반영 후 다음 VERIFY에서 채점되고 연속 2회 무효면 (점, 자리, verdict) 단위로 봉인된다
-- 합격기준은 `criteria.MarginCriteria`(01 §5 엔진 이관 1차) — canonical 지문 동봉. 판정어 옆의 **부족량·심각도 정본**도 여기다(`shortfall`·`severity` — 부족 비율 축, 내림차순이 곧 분류기의 작업 목록 순서). 롤 자리만 절대 합격선이 없어 `judge_bandwidth`가 **그 실행의 튜닝 목표 대비 비율**로 재고(`lam_min_frac` 0.5 / `lam_good_frac` 0.8 [기본값]), 그래서 `schedmap`·`classify`가 판정할 때 entry에 `target`을 함께 실어야 성립한다. 선형모델은 `linmodels.LinearModelSet`이 (케이스, 지문) 키로 캐시·직렬화 (A/B가 처음으로 세션 저장물에 실린다)
-- **실행이 무엇을 안 봤는지도 산출물이다** — `report()`의 `coverage`{validation_points·validation_missing·refine_remaining·refine_tol·refine_aborted·not_trimmed}·`coverage_gaps`(한국어 문장 — **엔진이 정본**, 화면이 다시 적지 않는다)·`ledger_size`, 그리고 `shortfall_ledger()`가 7종(verify·tune·unjudged·outside_envelope·not_trimmed·skipped·ineffective)을 **측정 불가 맨 앞 → 부족 비율 내림차순**으로 낸다(정렬 규약은 `criteria.severity`와 같은 자). 검증점 수는 스테이지 카운터가 아니라 **점집합 실물**(`origin`이 `midpoint:`)로 세고, VERIFY 몫은 REFINE 예산에서 `_VALIDATION_RESERVE_FRAC` 0.25만큼 예약한다 [기본값] — 근거 실측은 01 §4.1·§5. 엔벨로프 판정은 `points.envelope_ok`(수렴 ∧ 포화 여유 ∧ α 여유) 하나만 부른다(grid·refine·schedmap이 각자 적으면 갈린다 — schedmap이 `converged`만 보던 결함)
-- **지표 계산(`closure`)과 판정(`criteria`)은 분리한다** — `lat_metrics`는 `roll_lambda`·`roll_unstable`·`roll_participation` 셋을 내기만 하고 문턱은 모른다. 롤 실근 지목은 `roll_real_mode`의 participation factor이고(빠른 실근 휴리스틱은 요 댐퍼 실근을 잘못 뽑거나 존재하지 않는 모드를 잰다 — 01 §4.2), 참여도가 `lam_part_min`(0.5 [기본값]) 미만이면 판정은 **na**다. `roll_unstable`은 `max|Re|`가 지운 부호를 되살리는 유일한 방어다 — 튜너에는 댐퍼 안정 캡이 있지만 검증에는 그 게이트가 없다. p 자리는 `x_names` 이름 조회(M9 `LAT_STATES`가 정본)
+- **루프의 정본은 [`fcs-context-05-autodesign.md`](fcs-context-05-autodesign.md)다** — 스테이지(COARSE→REFINE→TUNE→FIT→VERIFY→CLASSIFY), 역할 있는 운영점 집합(anchor > breakpoint > validation, 단방향 래칫), 판정의 단위 (점, 자리), 사유 코드 10종·verdict 6종, 완화 임계값이 거기 있다. 합격기준은 04가 정본이다
+- M15 `pipeline`(반자동 진단·스윕 보조)과 **층이 다르다** — 여기는 산출물(트림 격자·게인 테이블·마진 판정)을 **생성**하는 루프다. 지표 계산(`closure`)과 판정(`criteria`)은 분리한다
 - 계약: `DesignSession.to_dict/from_dict` 완전 왕복(취소·gated 재개·store 저장의 전제), 협조적 취소는 스테이지 완료분 보존. **세션 저장 스키마**(라우트가 `to_dict()` 위에 얹는 것): `report`(그 안에 **`coverage`·`coverage_gaps`·`ledger_size`** — 최상위가 아니다) · `proposed_actions` · `gain_export` · 봉투 최상위 **`ledger`**(500행 초과 시 **`ledger_truncated`**{`kept`, `total`}를 함께 — 조용히 자르지 않으며 `total`은 `report.ledger_size`와 같다) · `to_dict()`가 싣는 **`tune_meta`**(그 안의 **`slots`**가 자리별 판정 레코드). 원장 결합은 `to_jsonable` **안쪽**에서 한다 — `severity`·`deficit`이 ±inf·nan이 될 수 있어 비유한값 정책을 우회한 원시 float가 하나라도 있으면 `allow_nan=False`인 저장 시점에 터진다. 행 조립·정렬은 엔진 몫이고 라우트는 상한에서 **앞부분만** 남긴다(엔진이 심각도 순으로 주므로 잘린 뒤에도 최악 행이 남는다). 서버 소비: `POST /api/design/auto`(202)·`/design/{id}/resume`·`GET /design/defaults`(criteria·targets 기본값 + **사유 코드 문구** `reason_text` ← `tune.REASON_TEXT` — 웹이 문구를 다시 적지 않는다: 마진 탭·설계 탭의 판정선 단일 정본이다). 결과의 `gain_export`는 다항 정본(`tables`)·재샘플 테이블(`tables_resampled`)에 더해 실제로 쓴 허용치(`resample_tol`)와 자리별 **실측** 어긋남(`resample_error`)을 함께 실어 "확정이 주입하는 형상 ≠ 검증한 형상"을 수치로 말한다 (01 §3.4)
 - **의도적 이탈 기록**: M15 Pipeline DAG 캐시는 파라미터 지문 축이라 점집합 상태와 결이 달라 직접 채택하지 않음(경량 dict 캐시 + params_fingerprint 계보 승계). openloop GROUP_LOOPS(평탄 SISO Δ-민감도 선언)와 절대 판정 조성(closure)이 다른 이유는 실측 병리(레이트 루프 DC 0 아티팩트·자세 루프 레이트 피드백 누락) — `design/closure.py` 머리말이 정본 설명
 - 의존: M0, M3(Table·PolyTable), M7(design_gains·SCHEDULABLE), M9(trim·linearize), M10(margins·modes·envelope), M15(openloop._effective_gain 패턴 참조). 후속: AP 외측 루프 튜닝(폐루프 경로), 다차원 다항, 비선형 폐루프 스모크 옵션
@@ -177,7 +174,7 @@
 - 탑재 C 생성(`POST /codegen/flight`, v0.24): 현재 편집 형상의 제어법칙 C를 {파일명·역할·줄수·본문} 목록으로 회신하고 **읽는 순서까지 정해** 준다. **조립을 재현하지 않는다** — `make_demo_fcl` → `law.init(dt)` → `law.runner`가 `flight/generate.py`와 같은 경로이고, 그래서 응답이 커밋 산출물과 바이트 단위로 같다(테스트가 대조). 구성 오류는 엔진 판정 → 422
 - 게인 스케줄 자리(`GET /gains/catalog`, v0.27): 켤 수 있는 자리·현재 켜진 자리·**끄면 굳는 설계 상수**·불가 사유·단위/설명을 18칸 격자로 회신하고, 켜지 않은 자리에도 제안 테이블(설계 상수 × 같은 동압 스케일)을 붙여 준다 — 체크하는 순간 곡선이 뜨고 설계점에서는 원래 상수와 같은 값에서 출발한다. 목록을 서버가 다시 적지 않는다(M7 SCHEDULABLE) — 적으면 웹이 "켤 수 있다"고 보여 준 자리가 실행 시점에 터진다. 기존 `GET /gains/demo`는 응답 형상 그대로 유지
 - 레지스트리 검증(`POST /registry/{category}/{name}/validate`): 편집값을 엔진으로 실제 구성해 범위·교차 조건까지 판정하고, 생성 코드가 명명할 파이썬 심볼(클래스·최단 임포트 경로)을 인스턴스에서 회신 — 웹 코드 생성이 이름을 추론하지 않게 하는 원천 (02 v0.17)
-- 영향성 1단(`POST /influence/structural`, v0.19): 현재 편집 형상의 구조 + 도달성 한 덩이(노드 165·간선 264·~70 ms라 동기). 요청 모델은 `codegen.py`의 `FlightCodeIn`을 **상속**한다 — 같은 "현재 편집 형상"을 받는 자리라 필드와 유한성 검증을 다시 적으면 두 곳이 갈라진다. **랭크(층 번호)는 보내지 않는다** — `refs`에서 전방 1회 주행이면 나오는 값이라 서버와 화면이 각각 계산하면 같은 수를 두 곳에서 정의하게 된다. 도메인 판단은 전부 엔진 몫(구성 오류→422)
+- 영향성 1단(`POST /influence/structural`, v0.19): 현재 편집 형상의 구조 + 도달성 한 덩이(노드 212·간선 359·~70 ms라 동기). 요청 모델은 `codegen.py`의 `FlightCodeIn`을 **상속**한다 — 같은 "현재 편집 형상"을 받는 자리라 필드와 유한성 검증을 다시 적으면 두 곳이 갈라진다. **랭크(층 번호)는 보내지 않는다** — `refs`에서 전방 1회 주행이면 나오는 값이라 서버와 화면이 각각 계산하면 같은 수를 두 곳에서 정의하게 된다. 도메인 판단은 전부 엔진 몫(구성 오류→422)
 - 후속: Δ리포트 API(M15 결선 — 영향성 1단으로 부분 해소, 2·3단 잔여), 검증 리포트(M12 구축 시), 공력 DB 뷰어 API(DB 규격 확정 시), 파라미터 관리 계층(02§5.5) 결선 — fingerprint 현재 클라이언트 자기신고
 
 ### M14 `web` — 프론트엔드
@@ -185,7 +182,7 @@
 - 트림 케이스 매트릭스 편집·진행률, 마진 맵/고유치/보드 대시보드, 지도 웨이포인트 편집(오프라인 타일/벡터 폴백), 시뮬 재생+엔벨로프 표시, 게인 테이블 편집, 스키마 기반 폼 자동 생성, DB 뷰어, 리포트
 - 의존: M13 (HTTP만)
 - 구현됨(`web/`): 워크플로우 2~5단계 + 6단계 열람 — 트림 매트릭스 편집(서펜타인 격자)·배치·판정 플래그 결과표, PM/GM 히트맵·고유치 맵·감쇠비 테이블, 게인 탭(스케줄 자리 격자 16칸 켜고/끄기 + 켠 자리만 셀 편집·차트·근사식 → 시뮬·탑재 C 주입), 모드 테이블·웨이포인트 편집(표 + NED 평면 캔버스 지도 — 클릭 추가·드래그 이동·우클릭 삭제·휠 줌/팬·▲▼ 재배열·궤적 오버레이, 오프라인 폴백 기본)→재생(시계열 모드 밴드·지상 궤적·시각 커서)+엔벨로프 요약, 엔벨로프 탭(02 §4 v0.33 — 설계 엔벨로프 합성 M-h + 구성 선도 5종·필요값 입력·제어 가능 트림 스캔), 산출물 목록·계보 열람, **Autocode 탭**(상단 내비 — 종류[형상코드·탑재코드] → 대상/보기 → 파일의 3단 계층, 기본은 탑재코드·통합 이어보기) + 코드 형식 탭(Python·C 헤더 = 파라미터 표현 + **탑재 C** = 엔진이 IR에서 생성한 제어법칙 코드 전체, 파일별 서브탭·읽는 순서는 서버가 결정, 형상 지문 표시, 제어법칙이 아닌 블록은 없다고 명시 — 02 §1·§4, v0.17·v0.24) + 변경 Δ·주의·추적성 표. WS 진행률+취소 전 화면 공통. 로직은 js/lib(공존 테스트, node 내장 러너), 뷰는 DOM 조립 전용
-- 구현됨(`#influence` 탭, v0.19 · 순차 재생 v0.20): Apple 다크모드 캔버스에 파라미터→IR→출력→지표를 층으로 펼치고, 파라미터를 고르면 **모두 어두워지고 원뿔이 한 줄씩 순차로 연결된다**(층 슬롯 + 층 안 시차, 자동 반복 · 유지 구간엔 완성된 원뿔에 입자만 흐른다). **재생 시각은 배치와 무관한 위상 랭크**다(`lib/influenceplay.js`) — 전파 폭포의 `ranks`는 열 인덱스라 시간축으로 쓸 수 없다. 기본 배치는 폭포, 「프로세스 뷰」 버튼이 레이어 활성망으로 전환(`lib/influencelayout.js` — 두 배치가 **같은 Layout 형태**를 내므로 렌더러가 하나다. 성운(radial)은 이 성질 덕에 함수 몇 개를 지우는 것으로 삭제됐다). 캔버스 아래 **전파 경로 패널**: 파라미터를 고르면 층 칩(층 번호·대표 노드·파라미터 값)이 재생과 같은 박자로 켜지고(캔버스 `onLayer` — 자막처럼 층이 바뀌는 프레임에만 DOM을 만진다), 층 상세(도달 노드 전부 + 들어온 간선의 포트(`edgeVia`) + 노드 설명(`nodeDetail`: 블록·실측 파라미터 값·연산·지표 정의))는 **칩을 클릭했을 때만** 열린다 — 재생을 따라 자동 갱신하면 설명 길이 차이로 아래 내용이 출렁인다. 캔버스는 원뿔 노드가 켜지는 순간 이름 라벨을 함께 띄우고, 좁은 화면에서는 `max-width:100%` + `aspect-ratio`로 비율을 지킨 채 통째로 줄어 전체가 보인다. 판단·수학은 `lib/influence.js`·`lib/influencelayout.js`·**`lib/influenceplay.js`**(콜로케이트 테스트 58건), 캔버스·DOM은 `views/`. **표가 정본 표면**(캔버스는 보조기술에 불투명) · 발광은 절반 해상도 레이어를 한 번만 blur+lighter 합성(간선마다 shadowBlur를 걸면 프레임 예산이 그것만으로 사라진다) · `setInterval` 40 ms + 벽시계(앵커 하나 + 매 프레임 차분) · `prefers-reduced-motion`이면 **완료 프레임**에 착지(최대치가 아니다 — 정지 프레임이 애니메이션의 정점이면 lighter 합성이 흰색으로 포화한다)
+- 구현됨(`#influence` 탭): 파라미터→IR→출력→지표를 층으로 펼치는 캔버스 + 순차 재생 + 전파 경로 패널. 판단·수학은 `lib/influence.js`·`influencelayout.js`·`influenceplay.js`(콜로케이트 테스트 129건), 캔버스·DOM은 `views/`. **표가 정본 표면**(캔버스는 보조기술에 불투명). 화면 규약·배치의 정본은 06 §5
 - 후속: 스키마 기반 폼 자동 생성(레지스트리 스키마 API는 준비됨), 영향성 2·3단(개루프 Δ·폐루프 스윕) 결선 — 배치 후보 확정 후, 공력 DB 뷰어(DB 규격 [TBD] 대기), 보드선도(M10 데이터 API 후속), 검증 리포트 생성(M12 대기), 실지도 타일(측지 원점은 도입됨 — 타일·지형 자산 반입 대기, 02 §4)
 
 ## 4. 인터페이스 계약 (모듈 간 데이터 구조)
@@ -253,35 +250,4 @@ CLAW_DEMO/
 - → 도메인 문서 v0.9에 방침 기록
 
 ---
-*문서 이력:*
-- *v0.1 — 최초 작성: 15개 모듈·6계층 분할, 인터페이스 계약, Phase 계획. 언어 전략·멀티콥터 조율 항목 등재*
-- *v0.2 — §7.1(Python 레퍼런스 우선)·§7.2(비행체 프로파일) 채택 확정. 영향성 평가 요구 반영: M15 pipeline 신설, 계약에 Lineage(파라미터 지문) 추가. 포맷 YAML 확정 반영*
-- *v0.3 — TrimResult 계약에 자동 판정 플래그 반영 (도메인 문서 §4.1 — dataclass 필드 추가는 Phase 3 M9 구현 시)*
-- *v0.4 — Lineage 계약에 입력 데이터(공력 DB·실속 경계) 해시 포함 (구현 문서 §2.4). 구현 문서 절 번호 정리 반영(사용자 워크플로우 02§7→02§8)*
-- *v0.5 — M7 의존을 M0~M4로 갱신 (env: 스케줄 마하 산출). NavOutput에 fuel(참값 통과) 필드 — 게인 스케줄 변수 소비처, "VehicleState 동형" 계약 정합*
-- *v0.6 — M13 구현 반영: 구현 현황·후속 항목 기재. 엔진 배치 API(trim_batch·Simulator.run)에 on_progress 진행 콜백+협조적 취소 추가 (M13 진행률 경로), analysis에 pi_loop(마진 맵 표준 루프)·params 레지스트리에 categories() 추가*
-- *v0.7 — M14 스택 확정 반영 (바닐라 ESM no-build — 02 v0.12)*
-- *v0.8 — M14 구현 현황 반영 (워크플로우 2~5단계 + 6단계 열람 웹 수행, 후속: 폼 자동 생성·DB 뷰어·보드선도·검증 리포트·실지도). Phase 5 완료 기준에 현황·잔여 조건 명기*
-- *v0.9 — 비행모드 예시 문구를 도메인 문서 v0.15(왕복 운행 체계 재구성)와 동기화(§M8). §7.2 비행체 정의에서 편도 한정 문구 제거*
-- *v0.10 — 코드 생성 반영: M13에 레지스트리 검증 라우트(엔진 구성 판정 + 생성 코드용 심볼 회신), M14 구현 현황에 코드 생성(Python·C 헤더 + 검토·추적성) 등재 (02 v0.17)*
-- *v0.11 — **M16 `codegen` 신설**: 제어법칙 구조의 IR + Python 실행 백엔드 + 탑재 C 생성 백엔드 (02 v0.20 스코프 확대). 구조 정본이 IR 하나가 되고 블록 구현(M2)이 백엔드가 된다. C 생성 가능 제약(정적 순서·대수 루프 금지·dead code 금지)을 IR 단계에서 강제하며, 검증은 손으로 쓴 `fcl/scas.py`(oracle) ↔ IR 실행 ↔ 생성 C의 **3자 비트 일치 대조**. 증분 A 범위는 SCAS 축 두 개(`flight/gen`) — 나머지 제어법칙과 원시 블록 에미터는 후속*
-- *v0.12 — M16 증분 B: `fcl/` 전체가 IR로 표현됨(오토파일럿·리미터·믹서·스케줄·최상위). IR에 다중 출력·enable 영역(모드 분기)·그래프 enable(항법 무효 홀드)·1D 테이블 조회 추가. 최상위 검증은 실제 데모 미션 18,000 제어 틱 재생 비트 일치 대조 (02 v0.21)*
-- *v0.13 — M7이 M16 IR 백엔드로 이관됨: 구조 정본이 `fcl/graphs.py` 하나로 합쳐지고 클래스는 어댑터가 됐다. `CommandFilter`가 M2로 이동(codegen이 blocks만 의존하도록 계층 정리, §1). 대기속도 이중 계산 통일 (02 v0.22)*
-- *v0.14 — M16 기능축 분할: IR에 `group` 이름표(`grouped`)와 `partitions` 추가, 에미터가 경계 인터페이스를 IR에서 계산해 서브시스템별 `.c/.h`를 낸다. 공용 헬퍼는 `emit_runtime`이 합집합으로 `claw_rt.c/.h` 한 벌만 생성(외부 링키지). `emit_c`는 `CModule(files, helpers)`를 돌려주고 `flight/generate.py`에 `manifest()`(산출물별 컴파일 단위) 추가. `{BASE}_DT`가 `.h`→`_types.h`로 이동(파티션 헤더가 진입점을 물지 않도록). 비트 일치·형상 지문 모두 불변 (02 v0.23)*
-- *v0.15 — M13에 탑재 C 생성 라우트(`POST /codegen/flight`), M14 코드 패널에 [탑재 C] 탭(파일별 서브탭·읽는 순서는 서버 결정·형상 지문 표시), 웹 로직은 `lib/flightcode.js`(뷰 테스트 면제 규칙대로 판단은 lib에). M16의 "웹 탑재 C 탭" 후속 항목 해소. 조립 정본을 M7 `make_demo_fcl` 하나로 통합 — generate.py의 중복 조립 제거, 산출물 바이트 동일 (02 v0.24)*
-- *v0.16 — M14에 `AUTO CODE` 탭(`views/autocode.js`, 라우트 `#autocode`) — 진입 기본은 통합 형상 + 탑재 C. 스펙 조립·추적성 메타를 `lib/specs.js`로 분리(통신 주입식이라 DOM·네트워크 없이 테스트). 헤더 탭↔라우터 정합을 index.html·main.js 원문 대조 가드로 승격 (02 v0.25)*
-- *v0.17 — M14 Autocode 3단 계층(종류→대상/보기→파일) + 탑재코드 통합 열람본. `lib/flightcode.js`에 `mergeFiles`(전 파일 이어보기, 빌드 단위 아님 명시)·`groupByRole`(역할 묶음) 추가, `renderCodePanel`에 `langs`·`flightMerged` 옵션. 생성 응답은 요청 본문 키 캐시 (02 v0.26)*
-- *v0.18 — 게인 스케줄 **자리 선택**: M7에 `SCHEDULABLE`(자리 정본 16개)·`design_gains`(자리 → 설계점 상수, AP 이름 차이 흡수)·`make_demo_gain_tables(names)`, M13에 `GET /gains/catalog`, M14 게인 탭에 자리 격자 + 웹 판단부 `lib/gainsched.js`. 게인 이름 규칙이 M7 안에서 세 군데(`graphs.py` 상수·`autopilot_nodes` 하드코딩·`law.py` 재선언)로 갈라져 있던 것을 한 표로 합쳤다 — 그 결과 구조상 불가한 자리가 조립 시점에 "무엇을 잘못 골랐는지"로 걸린다(종전에는 `init(dt)`까지 가서 내부 사정으로 터졌다). 기본 형상 불변: `flight/generate.py` 0개 갱신·지문 유지 (01 v0.22, 02 v0.27)*
-- *v0.20 — **영향성 탭 순차 재생** (02 v0.29): 원뿔이 통째로 켜지던 것을 층 슬롯 + 층 안 시차로 한 줄씩 연결되게. 신설 `lib/influenceplay.js`(`conePlayback`·`cycleAt`·`captionAt`·`summaryOf`·`graphDepth`, 테스트 17건), `lib/influencelayout.js`에 `arcPrefix`(호길이 0..s 부분 스트로크) + 간선 `idx` + `wavefrontSchedule` 삭제. 시간축을 기하에서 분리해 세 배치가 같은 재생을 쓴다*
-- *v0.19 — **M15 영향성 해석 1단 + M14 `#influence` 탭**: 파라미터 하나가 제어법칙과 설계 지표에 어디까지 번지는지를 딥러닝 레이어 그림처럼 보이는 화면 (02 v0.28). 02 §2.4가 v0.8에 [확정]으로 적힌 뒤 M15에 캐시·Δ리포트만 있고 **화면이 없던** 미결의 첫 조각이다. 신설 `pipeline/influence.py`(파라미터 목록·재조립 diff 매핑·전방 원뿔·지표 선언), `routes/influence.py`(`POST /influence/structural`), `lib/influence.js`·`lib/influencelayout.js`·`views/influence.js`·`views/influencecanvas.js`. M7 `make_demo_fcl`에 `scas`·`mixer`·`alpha_margin` 주입 인자(조립 정본을 우회하지 않으려면 해석 모듈이 아니라 조립 함수에 설계변수를 단다 — 02 v0.24의 통합을 되돌리지 않는다), M1 레지스트리에 `param_defs()`. 배치 3안은 사용자 선택 대기 — 고르면 나머지 둘을 지운다*
-- *v0.21 — **M17 `design` 신설**: 자동 설계 루프(트림 격자 자동화 → 게인 자동 튜닝 → 다항 스케줄 적합 → 스케줄 인지 검증 → 원인 분류 → gated 이터레이션). M3에 `PolyTable`(구간별 다항 1D 테이블 — Table과 같은 소비 계약), M2/M16에 `PolyBlock`·`claw_polyeval1d`(C 패리티 비트 일치), M13에 `/design/*` 라우트 + 게인 페이로드 태그드 유니언, M14에 `#autodesign` 탭. 근거 결정은 01 v0.23·02 v0.30*
-- *v0.22 — **M17 판정 단위를 (점, 자리)로** + verdict 6종: `tune`이 자리별 {status, reason, target, achieved}와 사유 코드 9종을 내고, `classify`·`orchestrator`가 점 단위 대신 그것을 소비한다(종전에는 점 단위 status 하나를 자리별 분류에 써서 피치가 안 되는 점의 롤 실패까지 에스컬레이션이 됐다). `classify`에 `fit_residual`(앵커 괴리 → tighten_fit) 추가 — 문서에 없던 `gain_sign_flip`까지 세어 verdict는 6종. `criteria`에 `shortfall`·`severity`·`judge_bandwidth` 신설(부족 비율 축 — 지표 단위가 섞여도 한 줄에 정렬된다), `orchestrator`에 처방 효과 채점·봉인·적합 조이기 래칫. 근거 수치는 01 v0.26*
-- *v0.23 — **M17 롤 지표를 참여도 지목으로** + 판정선·재양자화 오차의 서버 정본화: `closure`에 `roll_real_mode`(participation factor로 롤 실근 지목)를 신설하고 `lat_metrics`가 `roll_unstable`·`roll_participation`을 함께 낸다 — 지표 계산과 판정의 분리는 유지(문턱은 `criteria.lam_part_min`). `schedmap`의 roll_rate가 상수 "ok" 대신 `judge_bandwidth` 판정을 내고(entry에 target·participation 동반), `classify`도 롤에서 `zeta_dr`을 찾아 항상 na이던 것을 같은 판정으로 고쳤다. M13 `GET /design/defaults`에 `reason_text`(← `tune.REASON_TEXT`)를 싣고 `gain_export`에 `resample_tol`·`resample_error`(knot 구간 401점 실측)를 추가 — M14 마진 탭이 판정선을 실제로 fetch해 설계 탭과 같은 선을 쓴다. M10 `classify_lat`은 미변경 [백로그]. 근거 수치는 01 v0.27*
-- *v0.24 — **M17이 "안 본 것"과 "못 맞춘 것"을 산출물로 낸다** + 판정 술어·조성·엔벨로프 판정의 단일화: `orchestrator`에 `coverage`(검증점은 점집합 실물 `origin: midpoint:`로 센다 — 스테이지 카운터는 마지막 패스만 남긴다)·`coverage_gaps`(한국어 문장, 엔진 정본)·`shortfall_ledger`(7종을 측정 불가 맨 앞 → 부족 비율 내림차순으로)를 신설하고, 점 예산에서 VERIFY 몫을 `_VALIDATION_RESERVE_FRAC` 0.25만큼 예약하며(REFINE 예산 = `max(현재 점수+1, int(budget_points×0.75))`), 원장의 `tune` 행이 소비할 `tune_meta["slots"]`를 저장물에 싣는다. `points.envelope_ok`(수렴 ∧ 포화 여유 ∧ α 여유)가 엔벨로프 판정의 유일한 정의로 grid·refine·**schedmap**이 공유하고(schedmap이 `converged`만 보던 갈림 봉쇄), `tune._att_margin_verdict`가 `ok|short|na`로 nan(판정 불가)과 inf(무한 여유)를 갈라 신규 사유 `na_no_crossover`를 낸다(코드 9종 → 10종). `classify._slot_passes`가 구조 한계 게이트·완화 프로브·이분의 **단일 술어**이고(`judged=="fail"` ∨ `SLOT_DESIGN_FAILED` — 튜너와 목록 공유), `_min_relief`(고정 8회 이분, 통과 쪽 끝 반환)가 배수 대신 임계값을 낸다. `tune._report_rates_on_final_composition`이 레이트 지표를 탐색 프리픽스가 아니라 **최종 조성**에서 다시 재 보고·판정한다. M13 `routes/design.py`에 `_ledger_payload`(`MAX_LEDGER_ROWS` 500 + `ledger_truncated`{kept,total}, `to_jsonable` 안쪽 결합), M14 설계 탭에 미달 원장 표(상위 20행)·커버리지 줄·절단 고지. 근거 수치는 01 v0.28*
-- *v0.25 — M10에 설계 엔벨로프 수치 등재(01 §2.6 신설과 한 세트): `design_envelope`·`aero_envelope` + mach 경계 정본 이동(`stall_mach_lo`·`row_machs` ← M17 grid `_mach_lo`, 계층 방향 유지 — design→analysis 호출). M14 구현됨 목록에 엔벨로프 탭 추가(종전 문서 공백 보수 — 탭은 v0.18부터 있었다)*
-- *v0.26 — M10에 레이트 경로 필터 등재(01 §4.2 v0.30과 한 세트): `filter_tf` + `pi_loop` 캐스케이드, M17 `close_rates` 상태 증강. 어휘 정본은 M2 `blocks/filters.py RATE_FILTERS` — M10과 (향후) M7이 같은 표를 읽는다*
-- *v0.27 — M10 엔벨로프 수치에 하중배수 축과 등고선 등재(01 §2.6 v0.31과 한 세트): `stall_mach_lo(n_target=)` + 귀속 `n_reach`, `iso_curves`(등동압선은 `mach_qbar_limit` 재사용 — q̄ 경계선과 산식 공유). M14 웹 lib에 `outlineCaps`·`thrustFrontier`·`spreadLabels`·`outsideRegion` 표현 변환 추가*
-- *v0.28 — M10에 보드선도 등재(01 §4.2 v0.32와 한 세트): `bode_data`(교차점 전량 — `control.margin`이 고른 하나와 나머지를 화면이 구분할 수 있게)·`omega_covering`(두 조립을 겹쳐 비교하기 위한 공통 log 격자). M14 웹 lib에 `heatmapCellAt`·`heatmapCanvasHeight`·`logScale`·`decadeTicks`·`bodeSeries`, 뷰에 `bodeCanvas` 추가*
-- *v0.29 — M10 `design_envelope`에 `bounds.speed_of_sound` echo(01 §2.6 v0.33과 한 세트) — 상단 대기속도 보조축이 자기가 놓인 모서리에서 정확하고, 반대 모서리에서 얼마나 어긋나는지 소비자가 지어내지 않고 말하도록 두 값을 다 싣는다. M14 웹 lib에 `msToKt`·`ftToM`·`tasAxisTicks`·`machWindow`·`isoOffWindow`·`machSpan` 추가*
-- *v0.30 — M8 경로추종이 세로 프로파일도 낸다(01 §3.3 v0.40과 한 세트): 웨이포인트 3열 + `step` 3튜플 + `has_alt`, 모드 `alt="path"`. M14 웹 lib에 `planProfile`·`trackProfile`·`ZOOM_STEP`, 뷰에 `altProfileCanvas`. M11 `_xtrack_rms`는 고도 열을 버린다(3열을 `reshape(-1, 2)`로 뭉개면 좌표가 조용히 엉킨다)*
-- *v0.31 — M5에 `ground` 신설(01 §3.3.1 v0.41과 한 세트): 스키드 4점 접촉(스프링-댐퍼 + 정칙화 마찰 + **M += r×F**)과 발사 레일 구속. 착륙장치의 모멘트 기준점 이전이 여기서 처음 실제로 구현되고 **공력 DB 쪽은 규격 미확정이라 그대로 [TBD]다**(절반만 된 상태 — 양쪽 주석에 명기). M9에 `trim_ground`·`trim` 디스패처(계약에만 있고 아무도 안 읽던 `TrimCase.condition`을 살렸다), M6에 `NavErrorModel.rtk_fixed`, M8에 종방향 2축·이탈 조건 5종, M7에 승강률 축과 θ 출처 Switch 2단, M11에 레일 phase·접지 신호·단계 시각, M15에 이착륙 지표 4종. 이 과정에서 `Switch`의 **C 에미터가 비어 있다는 것이 드러났다** — 블록·IR·blockspec에는 진작 있었는데 emit_c만 없어 그래프에 쓰는 순간 코드젠이 터지던 자리다. IR 노드 59→66·입력 19→23, 형상 지문이 두 번 움직였다(구조 변경 + 승강률 게인 실측 확정)*
+*문서 이력은 [`CHANGELOG.md`](CHANGELOG.md)로 옮겼다 — 저장소 단일 카운터.*

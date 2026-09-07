@@ -18,7 +18,7 @@ closure 조성(closure.py) × pi_loop 전체 조성(작동기 2차계 + Padé �
 스케줄 항목은 Table이든 다항(PolySchedule spec)이든 `axis_names` + `interp(**좌표)`
 덕 타이핑으로 소비한다 (blocks/lookup.py의 Table 소비와 같은 원칙).
 
-검증점 생성 기본값(01 §3.4 [TBD] "보간 구간 검증점 밀도"의 확정): breakpoint 이상
+검증점 생성 기본값(05 §3 — 01 §3.4 [TBD] "보간 구간 검증점 밀도"의 확정): breakpoint 이상
 역할 점의 축정렬 인접쌍마다 중점 1개. anchor는 breakpoint 역할을 겸하므로
 (points.at_least 서열) 트림 앵커 인접 구간의 중점도 함께 나온다.
 
@@ -89,7 +89,7 @@ def scheduled_margin_point(
     act_kw = dict(
         actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
         delay_s=delay_s, pade_order=pade_order,
-        # 법칙에 있는 레이트 필터 — 검증이 튜닝과 같은 플랜트를 봐야 한다 (01 §4.2)
+        # 법칙에 있는 레이트 필터 — 검증이 튜닝과 같은 플랜트를 봐야 한다 (05 §6)
         rate_filters=dict(rate_filters or {}),
     )
     out = {}

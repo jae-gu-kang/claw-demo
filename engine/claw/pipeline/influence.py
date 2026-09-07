@@ -584,7 +584,7 @@ class MetricDef:
     signals: tuple  # 이 지표가 읽는 SimResult 신호·엔벨로프 키
     better: str  # 'lower' | 'higher'
     desc: str
-    # A/B/C 등급 재편(02 §4)의 표시 메타 — **키는 계보라 불변**이고 이 둘은 화면
+    # 평가 항목 재편(04 §5)의 표시 메타 — **키는 계보라 불변**이고 이 둘은 화면
     # 문법(그래프 지표 열의 그룹 정렬·진단 지표 줄 묶음)만 정한다.
     # tier: 'A'(튜닝 중 상시 카드) | 'B'(항상 계산·요약 판정) | 'C'(확정 후 검증)
     tier: str = "B"
@@ -602,7 +602,7 @@ class MetricDef:
 # 그룹 순서(추종·응답 → 타면·권한 → 엔벨로프·보호 → 임무·이착륙)로 묶어 둔다.
 # **키는 계보라 불변** — 이번 재편은 전부 추가·재정렬이고 rename이 없다.
 METRICS = (
-    # ── 추종·응답 (A: RMS·Ts·Mp / B: Tr·sse — Tr은 BW의 보조, 02 §4 대표/보조) ──
+    # ── 추종·응답 (카드: RMS·Ts·Mp / 판정: Tr·sse — Tr은 BW의 보조, 04 §5 대표/보조) ──
     MetricDef("alt_rms", "고도 추종 RMS", "m", ("h", "cmd_alt"), "lower",
               "|h − cmd_alt|의 RMS", tier="A", group="추종·응답"),
     MetricDef("spd_rms", "속도 추종 RMS", "m/s", ("V", "cmd_speed"), "lower",

@@ -7,7 +7,7 @@
 적용을 거부한다 (상위 설계 변경 자동 적용 금지).
 
 기본값의 정본은 엔진 AutoDesignConfig — /design/defaults가 그대로 내려 주고 웹은
-수치를 재기술하지 않는다 (합격기준 하드코딩 이관, 01 §5).
+수치를 재기술하지 않는다 (합격기준 하드코딩 이관, 04 §1).
 
 저장물에는 세션 직렬화 외에 report·proposed_actions·gain_export와 **미달 원장**
 (`ledger`, 상한 초과 시 `ledger_truncated`)이 함께 실린다 — 엔진이 계산하고 정렬한
@@ -265,7 +265,7 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
     db = make_demo_db_ranges()
     design = demo_design_gains()
     # 법칙의 레이트 필터도 프로파일이 준다 — 안 넘기면 튜닝·검증이 출하되지 않는
-    # 조성(요축 워시아웃 없는 A′)을 본다 (01 §4.2)
+    # 조성(요축 워시아웃 없는 A′)을 본다 (05 §6)
     rate_filters = demo_rate_filters()
 
     def work(job):

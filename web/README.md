@@ -1,6 +1,6 @@
 # web — M14 프론트엔드 (Phase 5)
 
-**바닐라 ES 모듈 + no-build** [확정 02 §4]. 외부 의존은 3D 월드용 vendored three.js **1건뿐**이며 CDN이 아니라 `js/vendor/` 아래 파일이다(출처·해시·`eval` 0건 검사 결과는 `js/vendor/three/VERSION`). 폐쇄망 반입물은 이
+**바닐라 ES 모듈 + no-build** [확정 02 §4]. 외부 의존은 3D 월드 렌더링 **1건뿐**이고, 그것도 반입물은 커밋된 빌드 산출물 `world/build/world.js` 하나다(three는 `world/`의 npm devDependency — 개발 머신 전용, 06 §6). 나머지 반입물은 이 디렉터리 파일 전부이며, 현지 수정은 텍스트 에디터로 가능하다. eval-free
 디렉터리 파일 전부이며, 현지 수정은 텍스트 에디터로 가능하다. eval-free
 (엄격 CSP 호환), 플롯은 자체 Canvas.
 
@@ -16,7 +16,7 @@ scripts/run.sh          # 모노레포 루트에서 (설치까지 겸함)
 ## 구조
 
 ```
-index.html            # 탭 네비 — **왼쪽에서 오른쪽이 업무 순서**다 (02 §4 v0.66):
+index.html            # 탭 네비 — **왼쪽에서 오른쪽이 업무 순서**다 (06 §3, 순서 정본은 02 §8):
                       #   블록도·엔벨로프·트림 → 게인·마진 맵·자동 설계 →
                       #   시뮬레이션·가상환경 → 영향성 → Autocode·검증 | 결과
                       #   탭은 **설계 단계**만. 런 하나를 다시 읽는 화면(타면 사용)은
@@ -28,46 +28,42 @@ js/
 ├── api.js            # REST 래퍼·ApiError·watchJob(WS 우선, 폴링 폴백)
 ├── dom.js            # el() 조립·fmt(비유한값 정책)·flagBadge(3-상태)
 ├── store.js          # 탭 간 공유 상태 (게인·AP 편집본 전달 등)
-├── lib/              # 순수 로직 (공존 *.test.js로 테스트)
-│   ├── blocks.js     #   블록 계약 데이터 — 주 경로 CHAIN·스키마·편집 경로 (허브 계약)
-│   ├── manualdoc.js  #   매뉴얼 내용·색인 — 블록 문서·게인 사전 49개·페이지별 배치
-│   ├── schemaform.js #   레지스트리 JSON 스키마 → 폼 필드·입력 검증
-│   ├── grid.js       #   트림 격자 — 서펜타인 순서 (인접 시드 전제 01 §4.1)
-│   ├── stage.js      #   탭 배치 뼈대의 판단부 — 칩·패널 상태 (전 탭 공용)
-│   ├── highlight.js  #   코드 색칠 토크나이저 (Python·C) — 무손실이 계약
-│   ├── verify.js     #   검증 탭 — 요청 조립·유닛 그리드·소스 뷰어 줄 분류·MC/DC 진리표 모델
-│   ├── plot.js       #   스케일·눈금·마진 상태색·격자 피벗
-│   ├── mission.js    #   편집 행 → 미션 스펙 (조건 인자수 = 엔진 _COND_ARITY)
-│   ├── replay.js     #   stride 산정·모드 구간·극값
-│   ├── playcursor.js #   재생 커서 정본 — 벽시계 경과 → 샘플 인덱스 (시뮬·3D 월드 공유)
-│   ├── geo.js        #   NED↔위경도↔타일 (엔진 claw.env.geodesy의 짝, 공유 고정점으로 대조)
-│   ├── attitude.js   #   3-2-1 오일러 → 쿼터니언 → 동체축의 NED 성분 (규약 §2)
-│   ├── uavmesh.js    #   기체 형상 — 엔진 기준량(S·c̄·b)에서 만드는 절차적 메시
-│   └── camera.js     #   시점 4종 (추적·궤도·온보드·자세) + 지면 클램프
-└── views/            # DOM 조립 전용 (얇게 유지)
-    ├── stage.js      #   탭 배치 한 벌 — 머리줄·전면 무대·판독 시트·칩/패널 (02 §4)
-    ├── codeview.js   #   VS Code 스타일 코드 표면 — 거터 + 문법 색 (Autocode)
-    ├── blocks.js     #   구조도 허브: 블록 클릭 → 서브시스템 페이지 #blocks/<id> (02 §4)
-    ├── diagram.js    #   최상위 SVG 블록도 (설계순서 프레임·피드백 — 시뮬링크 스타일)
-    ├── subsystems.js #   서브시스템 내부 블록도 SVG·흐름 설명·설계 노트 (엔진 구현과 1:1)
-    ├── manual.js     #   매뉴얼 DOM — 블록 페이지에만, 섹션마다 접힘(닫힌 줄에 한 줄 요약)
-    ├── trim.js       #   2단계: 케이스 매트릭스 → 배치 → 판정 플래그 결과표
-    ├── margins.js    #   3단계: PM/GM 히트맵·고유치 맵·감쇠비 테이블
-    ├── envelope.js   #   설계 엔벨로프 6계층 — ①이 전면, ②~⑥은 패널 (02 §4)
-    ├── gains.js      #   4단계: 게인 테이블 편집 → 시뮬 주입 (전체 교체)
-    ├── sim.js        #   5단계: 모드 테이블·웨이포인트 편집 → 재생+엔벨로프
-    ├── results.js    #   6단계 열람: 산출물 목록·계보 지문
-    ├── plots.js      #   캔버스 렌더러 (히트맵·산점도·시계열·NED 궤적)
-    ├── duty.js       #   타면 사용 — 시뮬 탭의 패널 컴포넌트 (탭이 아니다, 02 §4)
-    ├── autocode.js   #   생성 코드가 화면 — 종류·대상·형식은 코드 위에 남는다
-    ├── verify.js     #   검증 — 판정판+유닛 그리드 전면, 커버리지 소스·진리표 드릴다운, 증적 보고서 패널
-    ├── codegen.js    #   코드 패널 조각 (bar·stage·review·trace·foot)
-    └── world.js      #   가상환경 — web/world 번들로 넘기는 얇은 어댑터
+├── lib/              # 순수 로직 37개 (공존 *.test.js로 테스트)
+│   ├── 블록도·매뉴얼   blocks · manualdoc · schemaform · wiresignals
+│   ├── 격자·배치      grid · stage · specs · loops
+│   ├── 엔벨로프·트림   envelope
+│   ├── 게인·자동설계   gainsched · gainsync · autodesign · polyfit
+│   ├── 평가·진단      evaluate · prescribe · duty
+│   ├── 영향성        influence · influencelayout · influenceplay
+│   ├── 시뮬·재생      mission · replay · playback · playcursor
+│   ├── 지도·지형      geo · wpmap · terrainpack · site
+│   ├── 3D·기하       world3d · attitude · uavmesh · camera · plot3d
+│   ├── 코드·검증      highlight · flightcode · codegen · verify
+│   └── 플롯          plot
+└── views/            # DOM 조립 전용 26개 (얇게 유지)
+    ├── 뼈대·공용      stage · plots · progress · evalcards · codeview
+    ├── 블록도        blocks · diagram · subsystems · manual
+    ├── 엔벨로프      envelope
+    ├── 트림 (3단계)   trim
+    ├── 게인 (4단계)   gains
+    ├── 마진 맵 (5단계) margins
+    ├── 자동 설계 (6단계) autodesign
+    ├── 시뮬 (7단계)   sim · wpmap · duty · replayoverlay
+    ├── 가상환경 (8단계) world           ← world/ 번들로 넘기는 얇은 어댑터
+    ├── 영향성 (9단계)  influence · influencecanvas · plot3d
+    ├── Autocode (10단계) autocode · codegen
+    ├── 검증 (11단계)  verify
+    └── 결과 (12단계)  results
+world/                # 가상환경 번들 (별도 빌드 — 반입물은 build/world.js)
+├── src/core/         #   판단: 자세·카메라·해수면·지형 좌표 (순수 함수, 테스트)
+├── src/scene|shaders|post/  #   three를 아는 층
+├── src/ui|data|lib/  #   화면 조립·자산
+└── build/world.js    #   커밋된 산출물 (비-미니파이드 ESM)
 ```
 
 ## 탭 배치 규약
 
-**주 그림은 카드 밖 전면, 나머지는 패널** (02 §4). 그 탭의 주 질문에 답하는 것이
+**주 그림은 카드 밖 전면, 나머지는 패널** (06 §2). 그 탭의 주 질문에 답하는 것이
 카드 없이 페이지 위에 놓이고(`tabStage`), 표·수치판처럼 테두리가 없으면서 늘 보여야
 하는 것은 판독 시트(`.tab-sheet`), 나머지는 분류로 묶인 칩을 눌러야 열린다
 (`createDrawers` — 한 번에 하나). 실행 버튼과 잡 상태는 무대에 남기고, 잡이 끝나면

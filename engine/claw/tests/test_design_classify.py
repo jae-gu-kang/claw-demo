@@ -1,4 +1,4 @@
-"""M17 classify 검증 — 4-verdict 분기·evidence 수치·완화 임계값·supersede (합성 시나리오)."""
+"""M17 classify 검증 — 6-verdict 분기·evidence 수치·완화 임계값·supersede (합성 시나리오)."""
 
 import math
 

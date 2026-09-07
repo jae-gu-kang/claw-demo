@@ -180,7 +180,7 @@ uvicorn --factory claw_server:create_app --port 8000   # 리포 루트에서
 |---|---|
 | `engine/` | 도메인 엔진 — 블록·공력·EOM·트림·선형화·해석·시뮬. 순수 파이썬 |
 | `server/` | FastAPI REST + 웹소켓 진행률. 엔진 API만 호출하고 도메인 로직 없음 |
-| `web/` | 바닐라 ES 모듈, 빌드 없음. 외부 의존은 3D 월드용 vendored three.js **1건뿐**(`js/vendor/`, 02 §4 예외). 서버가 정적 서빙 |
+| `web/` | 바닐라 ES 모듈, 빌드 없음. 외부 의존은 3D 월드 1건뿐이며 반입물은 커밋된 `web/world/build/world.js`다(three는 `web/world/`의 npm devDependency — 06 §6). 서버가 정적 서빙 |
 | `flight/` | 탑재 SW용 C 코드 생성기와 생성물, 파이썬↔C 패리티 테스트 |
 | `docs/` | 설계 확정 문서 (제어법칙·구현·모듈) |
 | `data/` | 예제·검증 데이터 (F-16 공개 공력테이블 등 — 반입 예정) |
@@ -223,8 +223,15 @@ uvicorn --factory claw_server:create_app --port 8000   # 리포 루트에서
 
 ## 문서
 
-- `docs/fcs-context-01-control-law.md` — 제어법칙 확정 사항
-- `docs/fcs-context-02-implementation.md` — 구현 확정 사항
-- `docs/fcs-context-03-modules.md` — 모듈 구성
+[`docs/README.md`](docs/README.md)가 문서 지도다 — 어느 주제가 어느 파일에 있는지,
+상태 표기와 절 번호 규약, 참조 검사기가 거기 있다.
+
+- `docs/fcs-context-01-control-law.md` — 도메인·설계 결정 (기체·아키텍처·엔벨로프·트림·선형화)
+- `docs/fcs-context-02-implementation.md` — 툴 구현 결정 (스코프·데이터 인터페이스·워크플로우)
+- `docs/fcs-context-03-modules.md` — 모듈 분할
+- `docs/fcs-context-04-criteria.md` — **평가·판정 기준** (합격선·카드·하드 게이트·진단·처방)
+- `docs/fcs-context-05-autodesign.md` — **자동 설계 루프** (격자·튜닝·적합·검증·분류)
+- `docs/fcs-context-06-webui.md` — **웹 UI** (탭 구성·배치 규약·영향성 화면)
 - `docs/conventions.md` — 코드 규약
 - `docs/deploy-airgap.md` — 폐쇄망 반입·운영 절차
+- `docs/CHANGELOG.md` — 변경 이력 (저장소 단일 카운터)

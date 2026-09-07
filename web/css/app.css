@@ -520,7 +520,7 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
 .bd .annot { font-size: 11px; fill: var(--l1); }
 .bd .sub [stroke="#8a5cf6"] { stroke: var(--l1); }
 
-/* ── 2계층 시각 문법 — 코드 대응(틴트) vs 설명용(점선) (02 §4) ──────────────
+/* ── 2계층 시각 문법 — 코드 대응(틴트) vs 설명용(점선) (06 §1) ──────────────
    틴트는 views/blocks.js renderSubPage가 .canvas-wrap.sub 인라인 --sub-tint /
    --sub-edge로 주입한다 (정본 = views/subsystems.js SUB_TINT ← diagram.js 판 색).
    전부 .bd .sub 스코프 — .blk/.body를 최상위 보드(.bd .top)와 공유하므로
