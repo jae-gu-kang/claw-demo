@@ -3,7 +3,7 @@
 > 트림 격자 자동화 → 게인 자동 튜닝 → 다항 스케줄 적합 → 스케줄 인지 검증 → 원인 분류 →
 > 이터레이션. 산출물(트림 격자·게인 테이블·마진 판정)을 **생성**하는 루프의 정본.
 > 판정선·합격기준은 `fcs-context-04-criteria.md`, 선형화·마진 해석 자체는
-> `fcs-context-01-control-law.md` §4.2, 모듈 계약은 `fcs-context-03-modules.md` M17 참조.
+> `fcs-context-01-control-law.md` 01 §4.2, 모듈 계약은 `fcs-context-03-modules.md` M17 참조.
 > 상태 표기: **[확정]** 결정 완료 / **[기본값]** 잠정 채택, 변경 가능 / **[TBD]** 미결
 > 문서 지도는 [`README.md`](README.md) — 어느 주제가 어느 파일에 있는지, 상태 표기와
 > 절 번호 규약이 거기 있다.

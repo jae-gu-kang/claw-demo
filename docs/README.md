@@ -46,10 +46,11 @@
 
 ## 규약 — 문서를 고칠 때
 
-**1. 절 번호를 함부로 바꾸지 않는다.** 소스 코드 주석이 문서 절 번호를 **524곳** 인용한다
+**1. 절 번호를 함부로 바꾸지 않는다.** 소스 코드 주석이 문서 절 번호를 **500곳 넘게** 인용한다
 (`01 §4.2`·`02 §5.5`·`02 §8` 등). 절을 옮기거나 번호를 바꾸면 그 인용들을 같이 고쳐야 한다.
 특히 `web/js/lib/blocks.test.js`는 02 §8을 **리터럴 제목으로 파싱**하므로 그 절의 제목
-문자열은 테스트가 지킨다.
+문자열은 테스트가 지킨다. 절을 통째로 **옮긴** 경우는 규약 6이 절차를 정한다 — 번호를
+지우는 것이 답이 아니다.
 
 **2. 참조에는 항상 문서 번호를 붙인다.** `02 §1 · 02 §2.2`라 쓰고, 둘째부터 번호를
 생략한 `02§1·§2.2` 꼴로 쓰지 않는다 — 사람은 읽어도 검사기가 못 푼다. <!-- refcheck:ignore -->
@@ -65,6 +66,26 @@
 **5. 본문은 표시폭 96열에서 접는다** (한글 = 2열). 표·코드블록·헤딩은 예외다. 폭이 문서마다
 다르면 한 낱말만 고쳐도 diff가 문단 통째로 떠서 무엇이 바뀌었는지가 안 보인다.
 
+**6. 절을 통째로 옮겼으면 제목에 `[이관 → NN]`을 남긴다.** 본문은 지우되 **번호는 살려
+둔다** — 그 자리에 새 내용을 쓰면 옛 인용이 엉뚱한 것을 가리키기 때문이다. 이 표기가 없으면
+검사기에게 그 절은 여전히 실재하는 절이라, **끊긴 참조(시끄러운 실패)가 조용히 틀린 참조로
+바뀐다** (v0.75가 실제로 그랬다 — `01 §5`를 가리키던 화면 칩이 "정본은 04"만 있는 절로 <!-- refcheck:ignore -->
+안내하고 있었다). 표기가 있으면 검사기가 그 절을 가리키는 참조를 **끊긴 참조와 같이
+거부하고 새 목적지를 알려 준다**. 아무도 안 가리키게 돼도 **지우지 않는다** — 지우는 순간
+번호가 재사용 가능해지고, 그러면 저장소 밖에 남은 옛 인용(커밋 메시지·메모)이 엉뚱한 곳을
+가리킨다. 묘비 여섯 줄의 값이 그것보다 싸다. 하위 번호(`01 §5.1`)도 함께 얼어 검사기가 <!-- refcheck:ignore -->
+막는다 — 번호가 얼었다는 것은 그 아래도 얼었다는 뜻이다.
+
+**표기가 어긋나면 검사기가 그것부터 실패로 낸다** — 제목에 「이관」이 있는데 `[이관 → NN]`으로
+안 읽히면 그 절은 다시 평범한 절이 되고 규약 6이 통째로 무력해지기 때문이다. 조용히
+넘어가는 것이 이 규약이 없애려는 병 그 자체다. 판정은 **대괄호 안의 「이관」**만 보므로
+`### 5.2 데이터 이관 절차` 같은 보통 낱말은 걸리지 않는다 — 헤딩에는 탈출구를 두지
+않는다. 묘비를 조용히 끄는 스위치가 되기 때문이다. 목적지가 없는 문서면 그것도 실패다.
+
+**`<!-- refcheck:ignore -->`는 반례와 묘비 자기언급에만 쓴다.** 그 줄의 **모든** `§`가 함께
+꺼지므로, 살아 있는 참조를 같은 줄에 두지 않는다. 검사기를 조용히 시키려고 쓰기 시작하면
+가드가 아니라 장식이 된다.
+
 ## 검사기
 
 문서·코드의 모든 `NN §X.Y` 참조가 실재하는 절을 가리키는지 확인한다. **두 수 모두 0이
@@ -74,40 +95,92 @@
 - **번호 없음** — 어느 문서인지 못 푼다. 규약 2 위반이다 — 연쇄 표기의 둘째,
   코드의 맨 `§5.5`. <!-- refcheck:ignore -->
   이쪽을 세지 않으면 「끊김 0건」이 검사하지 **않은** 참조에까지 안전을 뜻하게 된다
+- **이관된 절** — 규약 6의 `[이관 → NN]` 묘비를 가리킨다. 절은 실재하지만 내용은
+  거기 없다 — 새 목적지를 함께 낸다
+- **묘비 이상** — 제목에 「이관」이 있는데 표기로 안 읽힌다. 가드 자신이 고장 난 것이라
+  가장 먼저 낸다
+- **문맥과 어긋난 해석** — 앞 문맥이 다른 문서를 말하는데 **읽는 쪽 문서**로 풀린다.
+  네 건의 결함이 전부 이 자리에서 났다 — 형태를 늘려 잡는 대신 *불일치 자체*를 잡는다
+
+파일명(`fcs-context-01-….md`)도 문서 번호로 읽고, 규약 5의 줄바꿈이 번호와 `§`를 갈라놓은
+경우 앞 줄 꼬리를 이어 푼다 — 규약 2를 어긴 자리를 **틀리게 푸는 대신** 바르게 푼다.
+
+훑는 범위는 `docs` · `engine` · `server` · `flight` · `scripts` · `models` · `web/js` ·
+`web/world/src`와 각 README·`web/index.html`이다. **범위 밖은 「0건」의 뜻을 줄인다** —
+이 문서가 검사하지 않은 참조까지 안전하다고 읽히면 안 된다. `web/world`의 `계획 §N` ·
+`GPU Gems 1 §1`은 이 저장소 문서가 아니라 건너뛴다(건너뛴 수를 함께 낸다). <!-- refcheck:ignore -->
 
 ```bash
 python3 - <<'EOF'
 import re, glob, sys
-head, docs = {}, {}
+TOMB = re.compile(r"\[\s*이관\s*(?:→|->)\s*([^\]]*?)\s*\]")
+TOMBISH = re.compile(r"\[[^\]]*이관")            # 묘비를 쓰려다 어긋난 자리 (보통 낱말은 안 걸린다)
+head, moved, docs, sick = {}, {}, {}, []
 for p in sorted(glob.glob("docs/fcs-context-*.md")) + ["docs/conventions.md"]:
     d = "cv" if p.endswith("conventions.md") else re.search(r"-(\d\d)-", p).group(1)
     docs[p] = d
-    for line in open(p, encoding="utf-8"):
-        m = re.match(r"^#{2,4}\s+(\d+(?:\.\d+)*)\.?\s+", line)
-        if m: head[(d, m.group(1))] = 1
-PRE = {"구현 문서":"02", "모듈 문서":"03", "도메인 문서":"01", "conventions.md":"cv",
-       "conventions":"cv", "규약":"cv", "01":"01", "02":"02", "03":"03", "04":"04",
-       "05":"05", "06":"06"}
+    for n, line in enumerate(open(p, encoding="utf-8"), 1):
+        m = re.match(r"^#{2,4}\s+(\d+(?:\.\d+)*)\.?\s+(.*)", line)
+        if not m: continue
+        head[(d, m.group(1))] = 1
+        t = TOMB.search(m.group(2))                       # 묘비 — 규약 6
+        if t and t.group(1): moved[(d, m.group(1))] = t.group(1)
+        elif TOMBISH.search(m.group(2)):
+            sick.append(f"{p}:{n}  제목의 「이관」이 `[이관 → NN]`으로 안 읽힌다: {line.strip()}")
+KNOWN = {d for _, d in docs.items()}
+for (d, n), to in moved.items():
+    if to.split()[0] not in KNOWN:
+        sick.append(f"docs: {d} §{n} 의 이관 목적지 「{to}」는 없는 문서다")
+# 문서 지시자 — 끝에서 가장 가까운 것이 이긴다. **파일명도 문서 번호다**(사람만 읽던 것).
+# named group 필수: 위치 번호로 매기면 대안 하나만 끼워도 조용히 밀린다
+DOCTOK = re.compile(r"(?:fcs-context-(?P<num>0[1-6])-[a-z0-9-]*\.md"
+                    r"|(?P<impl>구현 문서)|(?P<mod>모듈 문서)|(?P<dom>도메인 문서)"
+                    r"|(?P<cv>conventions(?:\.md)?|규약)"
+                    r"|(?<![0-9A-Za-z.])(?P<bare>0[1-6]))\s*[)\]`»】]*\s*$")
+NAMED = {"impl": "02", "mod": "03", "dom": "01", "cv": "cv"}
+FOREIGN = re.compile(r"(계획|GPU Gems \d+)\s*$")   # 이 저장소 문서가 아닌 §
+STRONG = re.compile(r"fcs-context-(0[1-6])-|(?<![0-9A-Za-z.])(0[1-6])(?![0-9])")
 CHAIN = re.compile(r"§\s?\d+(?:\.\d+)*\s*[·,]\s*$")   # 규약 2 위반: 둘째부터 번호 생략
-bad, vague = [], []
+def doc_of(ctx):
+    m = DOCTOK.search(ctx)
+    if not m: return None
+    return m["num"] or m["bare"] or next(v for k, v in NAMED.items() if m[k])
+def tomb(d, sec):                                     # 묘비 자신과 그 하위 번호
+    return next((((dd, n), v) for (dd, n), v in moved.items()
+                 if dd == d and (sec == n or sec.startswith(n + "."))), None)
+bad, vague, gone, odd, seen = [], [], [], [], set()
 src = [*glob.glob("docs/*.md"), *glob.glob("engine/**/*.py", recursive=True),
-       *glob.glob("server/**/*.py", recursive=True),
-       *glob.glob("web/js/**/*.js", recursive=True), "README.md", "web/README.md"]
+       *glob.glob("server/**/*.py", recursive=True), *glob.glob("flight/**/*.py", recursive=True),
+       *glob.glob("scripts/**/*.py", recursive=True), *glob.glob("models/**/*.py", recursive=True),
+       *glob.glob("models/**/*.md", recursive=True), *glob.glob("web/js/**/*.js", recursive=True),
+       *glob.glob("web/world/src/**/*.ts", recursive=True),
+       "README.md", "web/README.md", "server/README.md", "web/index.html"]
 for p in src:
     if "node_modules" in p or ".venv" in p: continue
-    own = docs.get(p)
+    own, prev = docs.get(p), ""
     for n, line in enumerate(open(p, encoding="utf-8", errors="ignore"), 1):
-        if "refcheck:ignore" in line: continue        # 반례를 적는 줄
+        if "refcheck:ignore" in line: prev = line.rstrip(); continue
         for m in re.finditer(r"§\s?(\d+(?:\.\d+)*)", line):
-            ctx = line[:m.start()][-20:]
-            d = next((v for k, v in PRE.items() if re.search(re.escape(k) + r"\s*$", ctx)), None)
+            # 규약 5의 줄바꿈이 번호와 §를 갈라놓는다 — 앞 줄 꼬리를 이어 푼다
+            ctx = (prev + " " + line[:m.start()] if not line[:m.start()].strip()
+                   else line[:m.start()])[-64:]
+            if FOREIGN.search(ctx): continue
+            d, sec = doc_of(ctx), m.group(1)
             if d is None and (own is None or CHAIN.search(ctx)):
-                vague.append(f"{p}:{n}  §{m.group(1)}")
-            elif (d or own, m.group(1)) not in head:
-                bad.append(f"{p}:{n}  →  {d or own} §{m.group(1)}")
-print("\n".join(bad) or "끊긴 참조 없음")
-print("\n".join(vague) or "문서 번호 없는 참조 없음")
-print(f"— 끊김 {len(bad)}건 · 번호 없음 {len(vague)}건 (규약 2)")
-sys.exit(1 if bad or vague else 0)
+                vague.append(f"{p}:{n}  §{sec}"); continue
+            if d is None and STRONG.search(ctx):   # own으로 되돌아가는데 앞에 다른 문서가 있다
+                odd.append(f"{p}:{n}  §{sec} — 앞 문맥이 다른 문서를 말하는데 {own}로 풀린다")
+            d = d or own
+            t = tomb(d, sec)
+            if t: gone.append(f"{p}:{n}  {d} §{sec} 는 이관됐다 → {t[1]}"); seen.add(t[0])
+            elif (d, sec) not in head: bad.append(f"{p}:{n}  →  {d} §{sec}")
+        prev = line.rstrip()
+for name, rows in [("묘비 표기 이상", sick), ("끊긴 참조", bad), ("문서 번호 없는 참조", vague),
+                   ("이관된 절을 가리키는 참조", gone), ("문맥과 어긋난 해석", odd)]:
+    print("\n".join(rows) or f"{name} 없음")
+for k, to in sorted(moved.items()):
+    if k not in seen: print(f"i {k[0]} §{k[1]} [이관 → {to}] 가리키는 참조 없음 (번호는 계속 예약)")
+print(f"— 묘비 {len(sick)} · 끊김 {len(bad)} · 번호 없음 {len(vague)} · 이관됨 {len(gone)} · 어긋남 {len(odd)}")
+sys.exit(1 if sick or bad or vague or gone or odd else 0)
 EOF
 ```

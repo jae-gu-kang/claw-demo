@@ -389,7 +389,7 @@
   런타임 표현이다** — M3 `PolyTable` → M7 `PolyBlock` → 탑재 C `claw_polyeval1d`(Python↔C 비트
   일치 패리티). 자리별로 Table(격자 보간)과 다항 중 택일하며 **선택이 곧 형상**이다. 적합
   절차(차수 에스컬레이션·greedy knot·C0 보장)와 재샘플 어긋남 보고는
-  [`fcs-context-05-autodesign.md`](fcs-context-05-autodesign.md) §5가 정본이다
+  [`fcs-context-05-autodesign.md`](fcs-context-05-autodesign.md) 05 §5가 정본이다
 - **[기본값] 설계점 격자·검증점 밀도**는 05 §3이 정본이다 (종전 [TBD]의 1차 확정값)
 - **[기본값]** 게인 테이블 **근사식 피팅**(웹 수동 탐색·표시 전용으로 존치): 구간별 최소제곱
   다항식 회귀(차수 1~6, 센터·스케일 정규화) — 자동 경로의 적합 정본은 엔진 `design/fit.py`이고
@@ -525,10 +525,13 @@
   [`fcs-context-05-autodesign.md`](fcs-context-05-autodesign.md)가 정본이다 — 이 절은 **선형화와
   마진 해석 자체**를 다룬다.
 
-## 5. 검증 기준 — 정본은 04
+## 5. 검증 기준 [이관 → 04]
 
-합격기준·목표선·부족량·롤 판정선·검증 커버리지·미달 원장·엔벨로프 감시는
-[`fcs-context-04-criteria.md`](fcs-context-04-criteria.md)가 정본이다. 여기서 다시 적지 않는다.
+**이 절은 비어 있다.** 합격기준·목표선·부족량·롤 판정선·검증 커버리지·미달 원장·엔벨로프
+감시는 [`fcs-context-04-criteria.md`](fcs-context-04-criteria.md)가 정본이다.
+
+번호는 비워 둔 채 예약이고 하위 번호도 함께 얼어 있다 — 이유와 검사기 동작은
+[`README.md`](README.md) 규약 6이 정본이다.
 
 ## 6. 규약 (Conventions) — 구현 착수 시 확정, `conventions.md`로 기록
 
@@ -546,7 +549,7 @@
 
 각 항목은 **항목 (관련 절) — 상태 · 결정 시점** 꼴이다.
 
-- **좌표계·단위·부호 규약** (§6) — 완료 — conventions.md v0.1 ([기본값], 실데이터 확인 시
+- **좌표계·단위·부호 규약** (01 §6) — 완료 — conventions.md v0.1 ([기본값], 실데이터 확인 시
   재검토)
 - **엘레본 4면 배치·믹싱 비율** (§2.2) — 기체 데이터 확인 시
 - **작동기 특성 데이터** (§2.4) — 데이터 확보 시 (그 전엔 가정값 wn 30 rad/s·ζ 0.7·rate 10 rad/s
