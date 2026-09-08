@@ -707,6 +707,74 @@ def test_분할은_지문을_바꾸지_않는다():
     assert fp(flat) == fp(split)
 
 
+_DETERMINISM_PROBE = """
+import hashlib, os, sys
+from claw.codegen import GraphRunner, emit_c, emit_runtime
+from claw.fcl.demo import make_demo_fcl
+
+law = make_demo_fcl()
+law.init(0.01)
+g = law.runner.graph
+m = emit_c(g, GraphRunner(g, 0.01))
+# **공용 런타임도 함께 본다.** `emit_runtime`은 집합을 받는 유일한 공개 함수이고,
+# 커밋 산출물 20개 중 `claw_rt.c`·`claw_rt.h` 둘이 여기서 나온다 — 처음엔 이 자리를
+# 빼놓아서, 헬퍼 순서를 집합에서 뽑는 변이가 검사를 그대로 통과했다
+files = {**m.files, **emit_runtime(m.helpers)}
+assert "claw_rt.c" in files, sorted(files)
+blob = "".join(f"{k}\\n{v}" for k, v in sorted(files.items()))
+print(os.environ.get("PYTHONHASHSEED"))
+print(hashlib.sha256(blob.encode()).hexdigest())
+print(m.fingerprint)
+print(len(blob))
+# 카나리아: 시드가 실제로 달라졌는지. 문자열 해시는 시드마다 다르다
+print(hash("결정성"))
+"""
+
+
+def test_생성은_해시_시드에_무관하다():
+    """07 §6 [확정] 「생성은 결정적이다」 — 그 확정에 지킴이가 없었다.
+
+    파이썬은 프로세스마다 문자열 해시 시드를 바꾸므로, 방출 순서가 어디선가
+    **집합 순회**에서 나오면 산출물이 기계마다·실행마다 달라진다. 그런데 기존
+    `test_committed_artifacts_match_generator`는 **한 프로세스·한 시드**에서 돌아
+    그 어긋남을 못 본다 — CI와 개발자 기계가 다른 시드로 돌면 「20개 중 N개 갱신」이
+    산발적으로 뜨고, 지문이 형상의 신원인 저장소에서 그것은 「형상이 바뀌었다」로
+    오진된다.
+
+    지금은 결정적이고 그 근거는 07 §6이 정본이다. 이 테스트는 그것이 우연이 아니라
+    성질임을 지킨다 — `emit_c`와 `emit_runtime`을 **함께** 미는 것이 요점이다.
+    집합을 받는 공개 함수가 후자뿐이라 거기가 제일 새기 쉽다.
+    """
+    import os
+    import subprocess
+    import sys
+
+    runs = []
+    for seed in ("0", "1", "424242"):
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        # timeout이 없으면 자식이 멈출 때 스위트가 출력 없이 걸리고, CI에서 「멈춤」과
+        # 「느림」이 구별되지 않는다. stderr는 실패 경로에만 읽는데 거기 한글이 섞이므로
+        # 로케일이 UTF-8이 아닌 기계에서 디코딩이 뒤집히지 않게 대체로 받는다
+        r = subprocess.run([sys.executable, "-c", _DETERMINISM_PROBE], env=env,
+                           capture_output=True, text=True, errors="replace", timeout=120)
+        assert r.returncode == 0, f"seed={seed} 방출 실패:\n{r.stderr}"
+        toks = r.stdout.split()
+        assert len(toks) == 5, f"seed={seed} 출력이 예상과 다르다:\n{r.stdout}"
+        got_seed, digest, fp, size, canary = toks
+        assert got_seed == seed, f"환경변수가 안 먹었다: {got_seed} != {seed}"
+        runs.append((digest, fp, int(size), canary))
+
+    digests, fps, sizes, canaries = zip(*runs)
+    assert len(set(digests)) == 1, f"시드마다 산출물이 다르다: {digests}"
+    assert len(set(fps)) == 1, f"시드마다 지문이 다르다: {fps}"
+    assert sizes[0] > 10_000, f"산출물이 {sizes[0]}바이트뿐이다 — 방출이 반쪽이다"
+    # **카나리아**: 시드가 실제로 달랐는지. 셋 다 같으면 이 테스트는 아무것도 안 본
+    # 것이다(누가 PYTHONHASHSEED를 전역으로 고정했을 때가 그렇다)
+    assert len(set(canaries)) == 3, (
+        f"시드가 안 달라졌다 — 이 검사가 공허하다: {canaries}"
+    )
+
+
 def test_공용_런타임은_쓰는_것만_낸다():
     """안 쓰는 헬퍼를 탑재 코드에 두지 않는다 — IR이 dead code를 막는 것과 같은 이유."""
     only_clip = emit_runtime({"claw_clip"})
