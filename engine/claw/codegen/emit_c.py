@@ -42,6 +42,7 @@ from claw.blocks.basic import Gain, Product, Saturation, Sum, Switch
 from claw.blocks.controllers import PID
 from claw.blocks.filters import CommandFilter, Washout
 from claw.blocks.lookup import LookupBlock, PolyBlock
+from claw.codegen.ir import OPS
 from claw.params.paramset import canonical_hash
 
 _EMITTERS = {}
@@ -75,6 +76,30 @@ def _cnum(v):
         raise ValueError(f"비유한 파라미터는 탑재 코드로 낼 수 없다: {v}")
     s = repr(v)
     return s if ("." in s or "e" in s or "E" in s) else s + ".0"
+
+
+def _cint(v):
+    """C 정수 리터럴 — 정수가 아닌 값을 **조용히 절삭하지 않는다**.
+
+    `str(int(3.7))`은 `3`을 내며 오설정을 통과시킨다. `_cnum`이 비유한 값을 거부하는
+    것과 같은 자리다 — 리터럴 포매터는 못 내는 값을 만나면 죽어야 한다.
+    """
+    if isinstance(v, int):
+        # float 왕복을 거치면 2^53 위에서 조용히 반올림된다. int()로 한 번 접는 것은
+        # bool 때문이다 — isinstance(True, int)라 str(True)가 `True`를 낸다.
+        return str(int(v))
+    f = float(v)
+    if not math.isfinite(f) or f != int(f):
+        raise ValueError(f"정수 자료형에 정수가 아닌 값은 탑재 코드로 낼 수 없다: {v}")
+    return str(int(f))
+
+
+# 자료형 → C 리터럴. 지금은 둘뿐이지만 표로 두는 이유는, 타입이 늘 때 여기가 가장 먼저
+# 깨지는 자리이기 때문이다 — 분기로 두면 새 타입이 조용히 double 취급을 받는다.
+_CTYPE_LITERAL = {
+    "double": _cnum,
+    "int": _cint,
+}
 
 
 def _wrap_stmt(text, width=98):
@@ -125,8 +150,8 @@ class _Ctx:
     """
 
     def __init__(self):
-        self.params = []  # (field, c_literal, comment)
-        self.arrays = []  # (field, [literal], comment)
+        self.params = []  # (field, c_type, c_literal, comment)
+        self.arrays = []  # (field, c_type, [literal], comment)
         self.state = []  # (field, c_type, c_init, comment)
         self.body = []
         self.helpers = set()
@@ -143,24 +168,29 @@ class _Ctx:
         self.body, self.helpers, self.hoisted = [], set(), set()
 
     # ── 등록 ──
-    def param(self, node_id, field, value, comment=""):
+    def param(self, node_id, field, value, comment="", ctype="double"):
         name = f"{node_id}_{field}"
-        lit = _cnum(value)
+        lit = _CTYPE_LITERAL[ctype](value)
         if name in self._seen_param:
-            if self._seen_param[name] != lit:
-                raise ValueError(f"파라미터 {name} 중복 등록에 값 불일치")
+            # 값뿐 아니라 자료형도 본다 — 타입만 다른 중복은 먼저 등록된 쪽이 조용히
+            # 이기고, 그러면 구조체 레이아웃이 등록 순서에 달리게 된다
+            if self._seen_param[name] != (ctype, lit):
+                raise ValueError(f"파라미터 {name} 중복 등록에 값·자료형 불일치")
         else:
-            self._seen_param[name] = lit
-            self.params.append((name, lit, comment))
+            self._seen_param[name] = (ctype, lit)
+            self.params.append((name, ctype, lit, comment))
         return f"prm->{name}"
 
-    def array(self, node_id, field, values, comment=""):
+    def array(self, node_id, field, values, comment="", ctype="double"):
         name = f"{node_id}_{field}"
-        if all(n != name for n, _, _ in self.arrays):
-            self.arrays.append((name, [_cnum(v) for v in values], comment))
+        if all(n != name for n, _, _, _ in self.arrays):
+            self.arrays.append(
+                (name, ctype, [_CTYPE_LITERAL[ctype](v) for v in values], comment)
+            )
         return f"prm->{name}"
 
     def st(self, node_id, field, init, comment="", ctype="double"):
+        _CTYPE_LITERAL[ctype](init)  # 키·값 모두 등록 시점에 거른다 (init은 raw로 둔다)
         name = f"{node_id}_{field}"
         if all(n != name for n, _, _, _ in self.state):
             self.state.append((name, ctype, init, comment))
@@ -451,6 +481,12 @@ _OP_C = {
     "sec2_minus_1": lambda a: (f"1.0 / pow(cos({a}), 2.0) - 1.0", ("math",)),
 }
 
+# 어휘가 늘면 여기서 죽는다 — ir_exec.py의 `assert set(_OP_FN) == set(OPS)`와 같은 가드다.
+# 없으면 새 연산이 Python으로는 돌고 C 생성에서만 KeyError로 터진다.
+assert set(_OP_C) == set(OPS), (
+    f"IR 연산 어휘와 C 구현 목록이 어긋남: {sorted(set(OPS) ^ set(_OP_C))}"
+)
+
 # 공용 런타임 — 산출물마다 복제하지 않고 claw_rt.c/.h 한 벌로 낸다 (emit_runtime).
 # "math"는 진짜 헬퍼가 아니라 <math.h>가 필요하다는 표시다. wrap_pi의 fmod 의존은
 # claw_rt.c 안에서 끝나므로, wrap_pi를 **부르는** 파티션은 math.h가 필요 없다.
@@ -559,8 +595,15 @@ def emit_runtime(helpers):
 
 def _fingerprint(graph, runner, ctx):
     """형상 지문 — 파라미터 값 + dt + 구조. 구조가 바뀌어도 지문이 바뀐다."""
-    payload = {f"param.{n}": lit for n, lit, _ in ctx.params}
-    payload.update({f"array.{n}": ",".join(v) for n, v, _ in ctx.arrays})
+    # 자료형은 구조체 레이아웃이라 형상의 일부다. 기본형은 접두를 붙이지 않아
+    # double뿐인 산출물의 지문이 움직이지 않는다 (07 §6).
+    def _typed(t, lit):
+        return lit if t == "double" else f"{t}:{lit}"
+
+    payload = {f"param.{n}": _typed(t, lit) for n, t, lit, _c in ctx.params}
+    payload.update(
+        {f"array.{n}": _typed(t, ",".join(v)) for n, t, v, _c in ctx.arrays}
+    )
     payload["dt"] = runner.dt
     payload["structure"] = " ".join(
         f"{n.id}:{n.block.__name__ if n.kind == 'block' else n.op}"
@@ -812,8 +855,8 @@ def _types_h(base, guard, ctx, graph, fp, single, dt_macro, runner):
     lines.append("/* 파라미터 (MATLAB rtP 대응) — 실제로 참조되는 것만 있다:")
     lines.append(" * 게인 스케줄로 신호가 된 값은 여기 남지 않는다. */")
     lines.append("typedef struct {")
-    rows = [(f"    double {n};", c) for n, _v, c in ctx.params]
-    rows += [(f"    double {n}[{len(v)}];", c) for n, v, c in ctx.arrays]
+    rows = [(f"    {t} {n};", c) for n, t, _v, c in ctx.params]
+    rows += [(f"    {t} {n}[{len(v)}];", c) for n, t, v, c in ctx.arrays]
     lines += _tail_align(rows) if rows else ["    char _unused;  /* 파라미터 없는 그래프 */"]
     lines.append(f"}} {base}_params_t;")
     lines.append("")
@@ -873,11 +916,11 @@ def _data_c(base, ctx, fp):
     lines = _banner(base, fp, ["파라미터 데이터 (MATLAB _data.c 대응)"])
     lines += ["", f'#include "{base}.h"', "", f"const {base}_params_t {base}_params = {{"]
     if ctx.params:
-        wn = max(len(n) for n, _, _ in ctx.params)
+        wn = max(len(n) for n, _, _, _ in ctx.params)
         lines += _tail_align(
-            [(f"    .{n.ljust(wn)} = {v},", c) for n, v, c in ctx.params]
+            [(f"    .{n.ljust(wn)} = {v},", c) for n, _t, v, c in ctx.params]
         )
-    for name, values, comment in ctx.arrays:
+    for name, _ctype, values, comment in ctx.arrays:
         lines.append(f"    .{name} = {{" + (f"  /* {comment} */" if comment else ""))
         lines += _wrap_array(name, values)
         lines.append("    },")
@@ -987,7 +1030,7 @@ def _impl_c(base, ctx, sig, graph, env, unused, single, includes, body):
     lines.append("{")
     if ctx.state or graph.enable is not None:
         for name, ctype, init, _c in ctx.state:
-            lines.append(f"    sta->{name} = {_cnum(init) if ctype == 'double' else int(init)};")
+            lines.append(f"    sta->{name} = {_CTYPE_LITERAL[ctype](init)};")
         if graph.enable is not None:
             if single:
                 lines.append("    sta->hold = 0.0;")

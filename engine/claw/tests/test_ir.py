@@ -20,7 +20,8 @@ from claw.blocks.controllers import PID
 from claw.blocks.dynamics import Integrator
 from claw.blocks.filters import CommandFilter, Washout
 from claw.codegen import GraphRunner, emit_c, emit_runtime, grouped
-from claw.codegen.ir import Graph, Node, Op
+from claw.codegen.emit_c import _CTYPE_LITERAL, _OP_C, _Ctx
+from claw.codegen.ir import OPS, Graph, Node, Op
 from claw.fcl.demo import DEMO_PITCH, DEMO_YAW
 from claw.fcl.graphs import (
     alpha_limiter_graph,
@@ -166,6 +167,92 @@ def _emit_module(graph):
 def _emit(graph):
     runner = GraphRunner(graph, DT)
     return emit_c(graph, runner).files, runner
+
+
+def test_자료형_슬롯이_저장되고_리터럴까지_따라간다():
+    """param·array·st가 같은 4항이고, **리터럴도 그 타입을 탄다**.
+
+    슬롯만 열고 리터럴을 `_cnum` 고정으로 두면 `int` 파라미터가 `3.0`으로 나가
+    구조체는 int인데 초기화자는 double이 된다 — 「조용히 double 취급」이 바로 그것이다.
+    지금은 전부 double이라 생성 C가 바이트로 불변이고, 슬롯을 미리 여는 이유는
+    타입이 늘 때 고칠 자리를 하나로 모으기 위해서다 (07 §8 · 07 §10).
+    """
+    ctx = _Ctx()
+    ctx.param("n", "k", 1.5, "게인")
+    ctx.array("n", "bp", [0.0, 1.0], "격자점")
+    ctx.st("n", "x", 0.0, "상태")
+    for name, rows in (("params", ctx.params), ("arrays", ctx.arrays), ("state", ctx.state)):
+        assert len(rows) == 1 and len(rows[0]) == 4, f"{name}이 4항이 아니다: {rows}"
+        assert rows[0][1] == "double", f"{name} 기본 자료형이 double이 아니다"
+
+    # 인자를 받아서 버리지 않는지 — 받은 타입이 저장되고 리터럴에도 반영돼야 한다
+    ctx.param("m", "n_seg", 3, ctype="int")
+    ctx.array("m", "idx", [1, 2], ctype="int")
+    assert ctx.params[-1] == ("m_n_seg", "int", "3", ""), ctx.params[-1]
+    assert ctx.arrays[-1] == ("m_idx", "int", ["1", "2"], ""), ctx.arrays[-1]
+
+
+def test_모르는_자료형은_등록_시점에_죽는다():
+    """표는 KeyError로 죽고 2분기는 조용히 double로 흘린다 — 그 차이를 못박는다.
+
+    세 축 모두 **등록 시점**이어야 한다. 방출까지 끌고 가면 터질 때 어느 노드가
+    등록했는지 문맥이 없다.
+    """
+    for register in (
+        lambda c: c.param("n", "k", 1.0, ctype="bool"),
+        lambda c: c.array("n", "bp", [1.0], ctype="bool"),
+        lambda c: c.st("n", "x", 0.0, ctype="bool"),
+    ):
+        with pytest.raises(KeyError):
+            register(_Ctx())
+
+    # 자료형뿐 아니라 **값**도 등록 시점에 걸려야 한다 — 표를 조회만 하고 부르지 않으면
+    # 키는 걸러도 값은 방출까지 살아남는다
+    for register in (
+        lambda c: c.param("n", "k", 3.7, ctype="int"),
+        lambda c: c.array("n", "bp", [3.7], ctype="int"),
+        lambda c: c.st("n", "x", 3.7, ctype="int"),
+    ):
+        with pytest.raises(ValueError):
+            register(_Ctx())
+
+
+def test_정수_자료형은_정수가_아닌_값을_거부한다():
+    """`str(int(3.7))`은 `3`을 내며 오설정을 통과시킨다 — `_cnum`의 비유한값 거부와 같은 자리."""
+    lit = _CTYPE_LITERAL["int"]
+    assert lit(1.0) == "1" and lit(-0.0) == "0"
+    assert lit(True) == "1" and lit(False) == "0", "bool은 int의 부분형이라 str(v)면 `True`가 나간다"
+    assert lit(2**53 + 1) == "9007199254740993", "float 왕복을 거치면 2^53 위에서 조용히 반올림된다"
+    for bad in (3.7, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            lit(bad)
+
+
+def test_int_상태는_int_리터럴로_리셋된다():
+    """리셋 방출이 자료형별 리터럴을 탄다 — CommandFilter의 `seeded`가 유일한 실사례다."""
+    from claw.fcl.autopilot import Autopilot
+    from claw.fcl.graphs import autopilot_graph
+
+    cfg = {d.name: d.default for d in Autopilot.PARAM_DEFS}
+    files, _ = _emit(autopilot_graph("ap", **cfg))
+    # 0열 닫는 중괄호까지 — `split("}")`는 리셋에 한 줄 블록이 생기면 조용히 잘린다
+    reset = files["ap.c"].split("_reset")[1].split("\n}")[0]
+    seeded = [ln.strip() for ln in reset.split("\n") if "_seeded" in ln]
+    assert seeded, "int 상태(seeded)가 리셋에 없다 — 픽스처가 바뀌었다"
+    for ln in seeded:
+        assert ln.endswith("= 0;"), f"int 상태가 double 리터럴로 리셋된다: {ln}"
+
+
+def test_IR_연산_어휘가_늘면_두_표를_함께_고치게_한다():
+    """어휘 자체를 못박는다 — 연산을 더하면 여기서 먼저 걸려 C 짝도 보게 된다.
+
+    `emit_c`의 모듈 최상위 assert가 진짜 가드이고(어긋나면 import가 죽는다) 이 테스트는
+    **어휘가 늘었다는 사실**을 알린다. 둘은 잡는 것이 다르다.
+    """
+    assert set(OPS) == {
+        "wrap_pi", "min2", "gt", "add_const", "sec_minus_1", "sec2_minus_1",
+    }, "연산 어휘가 바뀌었다 — ir_exec._OP_FN과 emit_c._OP_C를 함께 고쳤는지 확인할 것"
+    assert set(_OP_C) == set(OPS)
 
 
 def test_이산계수는_엔진이_계산한_값을_그대로_굽는다():

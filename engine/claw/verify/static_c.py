@@ -34,7 +34,14 @@ BANNED = {
 
 _COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
 _STRING = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'')
-_FN_DEF = re.compile(r"^(?:double|void|int)\s+(\w+)\s*\(", re.M)
+# 인식하는 반환형. 여기 없는 형으로 나온 함수는 **인벤토리에서 조용히 사라지고**,
+# 그러면 복잡도·재귀 콜그래프·커버리지 함수 행이 그 함수를 통째로 빼먹는다.
+_RETURN_TYPES = ("double", "void", "int")
+# 교대는 **왼쪽 우선**이라 긴 것부터 세운다 — `("long", "long long")` 순이면 `long long f(`가
+# `long`에 물려 `\s*\(`에서 실패하고, 그 함수가 인벤토리에서 사라진다(위 사고의 재발이다).
+_FN_DEF = re.compile(
+    rf"^(?:{'|'.join(sorted(_RETURN_TYPES, key=len, reverse=True))})\s+(\w+)\s*\(", re.M
+)
 # 판정 지점: if/while/for + 단락 논리 + 3항 (case는 switch 금지라 없다)
 _DECISION = re.compile(r"\b(?:if|while|for)\b|&&|\|\||\?")
 _CALL = re.compile(r"\b(\w+)\s*\(")

@@ -9,6 +9,9 @@
   ⑤ 협조적 취소가 결과를 내지 않는가
 """
 
+import re
+from pathlib import Path
+
 import pytest
 
 from claw.fcl.demo import make_demo_fcl
@@ -17,7 +20,13 @@ from claw.verify import mcdc, vectors
 from claw.verify.autocode import (
     _coupled_guards, find_cc, make_harness, verify_flight, warm_start_lines,
 )
-from claw.verify.static_c import analyze, cyclomatic, functions_of, strip_comments_strings
+from claw.verify.static_c import (
+    _RETURN_TYPES,
+    analyze,
+    cyclomatic,
+    functions_of,
+    strip_comments_strings,
+)
 from claw.verify.units import make_unit_harness, run_unit_oracle, unit_specs
 
 DT = 0.01
@@ -67,6 +76,35 @@ def test_함수_추출은_프로토타입을_세지_않는다():
     src = "double f(double x);\ndouble f(double x)\n{\n    return x;\n}\n"
     fns = functions_of(src)
     assert [f["name"] for f in fns] == ["f"] and fns[0]["line"] == 2
+
+
+def test_생성_산출물의_함수를_하나도_빠뜨리지_않는다():
+    """반환형이 `_RETURN_TYPES`에 없으면 그 함수는 **인벤토리에서 조용히 사라진다**.
+
+    사라지면 복잡도·재귀 콜그래프·커버리지 함수 행이 그 함수를 통째로 빼먹은 채
+    검증 리포트가 통과한다 — 검사기가 조용히 틀리는 자리다. 그래서 방출된 정의 수와
+    추출된 수를 맞대 둔다. Phase 3에서 `bool`이 붙으면 이 테스트가 먼저 죽는다.
+    """
+    gen = Path(__file__).resolve().parents[3] / "flight" / "gen"
+    seen = 0
+    for path in sorted(gen.glob("*.c")):
+        src = path.read_text(encoding="utf-8")
+        names = {f["name"] for f in functions_of(src)}
+        # 정의부는 `타입 이름(` 로 시작하고 그 줄이 `;`로 끝나지 않는다 (프로토타입 제외)
+        defined = {
+            m.group(1)
+            for m in re.finditer(r"(?m)^[A-Za-z_][\w ]*?\b(\w+)\s*\([^;]*$",
+                                 strip_comments_strings(src))
+        }
+        assert names == defined, f"{path.name}: 추출 {sorted(names)} ≠ 정의 {sorted(defined)}"
+        seen += len(names)
+    assert seen >= 12, f"생성 산출물에서 함수를 {seen}개만 찾았다 — 너무 적다"
+
+    # 산출물에 int 반환 함수가 없어서 위 대조만으로는 "int" 항목이 못박히지 않는다.
+    # 세 형 중 둘만 지키면 나머지 하나가 조용히 빠져도 초록이다.
+    for ctype in ("double", "void", "int"):
+        assert ctype in _RETURN_TYPES, f"{ctype} 반환형이 인식 목록에서 빠졌다"
+    assert functions_of("int f(void)\n{\n    return 0;\n}\n")[0]["name"] == "f"
 
 
 # ── 공용 픽스처 ───────────────────────────────────────────────────────────
