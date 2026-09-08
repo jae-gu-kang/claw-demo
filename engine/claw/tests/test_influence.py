@@ -181,7 +181,7 @@ def test_override_disappears_when_schedule_is_off():
 
 def test_control_rate_touches_every_stateful_node(impacts):
     """dt는 fcl_graph의 인자가 아니라 러너의 인자다 — 노드 인자만 보면 '아무것도
-    안 건드린다'는 거짓말이 나온다. 이산 계수가 형상의 일부라는 것(02 §2.2)의 시각화."""
+    안 건드린다'는 거짓말이 나온다. 이산 계수가 형상의 일부라는 것(07 §5)의 시각화."""
     imp = impacts["rate.control_hz"]
     assert len(imp.reach) == 78  # 배분 12개 포함 (test_signature_is_stable 주석 참조)
     assert "sched_f_mach" in imp.seeds

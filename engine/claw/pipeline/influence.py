@@ -280,7 +280,7 @@ def param_universe(shape: Shape, *, include_offgraph: bool = True) -> list[Param
 
     refs.append(ParamRef(
         id="rate.control_hz", band="rate", label="control_hz", unit="Hz",
-        desc="제어 주기 — 이산 계수가 여기서 나오므로 형상의 일부다 (02 §2.2)",
+        desc="제어 주기 — 이산 계수가 여기서 나오므로 형상의 일부다 (07 §5)",
         value=float(shape.control_hz), lo=1.0, hi=1000.0,
     ))
 
@@ -397,7 +397,7 @@ def law_signature(law) -> dict:
 
     인스턴스까지 보는 이유: 제어주기(dt)는 `fcl_graph`의 인자가 아니라 `GraphRunner`의
     인자라서 노드 서명이 전혀 안 움직인다. 그런데 dt는 Washout·CommandFilter·적분기의
-    이산 계수를 전부 바꾼다 (02 §2.2 — "dt는 형상의 일부"). 노드만 보면 "제어주기는
+    이산 계수를 전부 바꾼다 (07 §5 — "dt는 형상의 일부"). 노드만 보면 "제어주기는
     아무것도 안 건드린다"는 거짓말이 나온다. init(dt) 직후 상태는 결정적이므로 그대로
     비교하면 된다.
     """
