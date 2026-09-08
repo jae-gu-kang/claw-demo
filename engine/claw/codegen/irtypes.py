@@ -20,9 +20,42 @@
 같은 철자를 쓴다 — 갈라지면 테스트가 시끄럽게 죽는다.
 """
 
+import math
+import numbers
 from dataclasses import dataclass, field
 
 KINDS = ("real", "bool", "enum", "vector")
+
+
+def _finite(value, what):
+    """수치 자리에 수치만 앉힌다 — 아니면 **뒤의 가드가 조용히 의미를 잃는다**.
+
+    문자열을 받아 주면 `lo > hi` 검사가 문자열 비교로 바뀌어 `lo="10", hi="9"`가
+    통과한다("10" < "9"). 즉 나쁜 것은 통과 자체가 아니라 그다음 가드가 뜻을 잃는
+    것이다. `bool`을 막는 것도 같은 이유다 — `isinstance(True, int)`가 참이라
+    `n=True`가 벡터 길이로 앉는다(v0.82의 `_cint`가 같은 계열로 물렸다).
+
+    비유한 값도 막는다. 기대 범위는 나중에 고정소수점 하강이 **스케일을 정하는 입력**으로
+    읽을 값이라(07 §10 「표현형 lowering」) NaN·무한이 앉으면 그 계산이 조용히 망가진다.
+    저장소가 번호로 정의한 Phase는 03 §6의 것이고 거기 Phase 4는 이미 끝난 단계라, 여기서
+    그 번호를 쓰면 따라간 독자가 엉뚱한 곳에 닿는다.
+    """
+    # `numbers.Real`로 본다 — 파이썬 구상 타입만 보면 `np.float32`·`np.int64`가
+    # 「수치가 아니다」로 거부되는데, 그건 **틀린 말**이라 읽는 사람을 엉뚱한 곳으로
+    # 보낸다. 이 저장소는 `frames`·`tables`가 numpy 투성이고, 이 값들이 리터럴을
+    # 벗어나는 순간(`Type(lo=arr.min(), …)`) 바로 밟는다. 같은 계보라고 적어 둔
+    # `emit_c._cint`도 `float(v)` 오리 타이핑으로 같은 답을 낸다.
+    # `bool`은 `Integral`이라 여기서도 명시적으로 뺀다 — 그것이 이 함수의 이유다.
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise ValueError(f"{what}이 수치가 아니다: {value!r}")
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        # `10**400`은 유한한 int인데 float 범위를 넘는다 — 이 함수가 막으려는 바로 그
+        # 경우인데 `OverflowError`로 새면 ValueError를 받는 호출자가 못 본다
+        finite = False
+    if not finite:
+        raise ValueError(f"{what}에 비유한 값이 앉았다: {value!r}")
 
 # 물리량 → SI 단위 철자. 이 표가 단위의 정본이다 (conventions §3).
 QUANTITY_UNIT = {
@@ -81,7 +114,18 @@ class Type:
             raise ValueError("enum은 choices가 있어야 한다")
         if self.choices and self.kind != "enum":
             raise ValueError(f"choices는 enum 전용인데 kind={self.kind!r}")
-        if self.kind == "vector" and not (isinstance(self.n, int) and self.n > 0):
+        if self.n is not None and (
+            isinstance(self.n, bool) or not isinstance(self.n, numbers.Integral)
+        ):
+            raise ValueError(f"길이 n은 정수여야 한다: {self.n!r}")
+        if self.n is not None:
+            # 저장 시 파이썬 정수로 굳힌다 — `choices`를 튜플로 굳히는 것과 같은 이유다
+            object.__setattr__(self, "n", int(self.n))
+        # 위 문이 `n`을 Integral로 좁혀 뒀다. 여기 `isinstance`가 남는 것은 `n=None`
+        # 때문이고, 같은 어휘를 써야 한 쪽만 넓혀질 때 조용히 갈라지지 않는다
+        if self.kind == "vector" and not (
+            isinstance(self.n, numbers.Integral) and self.n > 0
+        ):
             raise ValueError(f"vector는 양의 길이 n이 있어야 한다: {self.n!r}")
         if self.n is not None and self.kind != "vector":
             # 이게 없으면 `Type(kind="real", n=4)`가 vector 금지를 그대로 통과해
@@ -98,6 +142,19 @@ class Type:
         object.__setattr__(self, "choices", tuple(self.choices))
         if (self.lo is not None or self.hi is not None) and self.kind not in ("real", "vector"):
             raise ValueError(f"기대 범위는 수치 신호 전용인데 kind={self.kind!r}")
+        for bound, what in ((self.lo, "기대 범위 하한 lo"), (self.hi, "기대 범위 상한 hi")):
+            if bound is not None:
+                _finite(bound, what)
+        # **저장 시 float으로 굳힌다.** `numbers.Real`로 넓힌 대가다: `np.float32(0.1)`을
+        # 그대로 들면 `==`는 float32 정밀도로 참인데 해시는 float64를 지나 달라진다 —
+        # 같은 타입인데 dict·set에서 못 찾는다. 이 모듈은 `frozen`이고 머리말이 통일을
+        # `==`·dict 키로 구현한다고 적어 뒀으며 `desc`를 비교에서 뺀 것도 그 전제를 지키려는
+        # 것이라, 여기서 계약이 깨지면 그 전제가 통째로 무너진다. `choices`를 튜플로 굳히는
+        # 것과 같은 처방이고, 덤으로 오류 문구에 `np.int64(4)` 같은 표기가 안 샌다.
+        for field_name in ("lo", "hi"):
+            bound = getattr(self, field_name)
+            if bound is not None:
+                object.__setattr__(self, field_name, float(bound))
         if self.lo is not None and self.hi is not None and self.lo > self.hi:
             raise ValueError(f"기대 범위가 뒤집혔다: [{self.lo}, {self.hi}]")
 

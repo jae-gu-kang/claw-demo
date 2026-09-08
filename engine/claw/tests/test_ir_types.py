@@ -52,6 +52,16 @@ def test_단위는_저장하지_않고_물리량에서_파생한다():
 
 
 def test_모순되는_타입은_만들_수_없다():
+    for bad_n in ("3", 1.5):
+        # 순서가 뒤면 「vector는 양의 길이 n이…」가 먼저 나와 원인을 안 짚는다
+        with pytest.raises(ValueError, match="정수여야 한다"):
+            t.Type(kind="vector", n=bad_n)
+    with pytest.raises(ValueError, match="비유한 값"):
+        t.Type(quantity="angle", lo=float("inf"))
+    # float 범위를 넘는 **유한한** 정수 — 이 함수가 막으려는 바로 그 경우인데
+    # `math.isfinite`가 `OverflowError`로 새면 ValueError를 받는 호출자가 못 본다
+    with pytest.raises(ValueError, match="비유한 값"):
+        t.Type(quantity="angle", lo=10**400)
     for bad in (
         dict(kind="bool", quantity="angle"),  # quantity는 real 전용
         dict(quantity="furlong"),             # 모르는 물리량
@@ -66,6 +76,21 @@ def test_모순되는_타입은_만들_수_없다():
         dict(kind="enum", choices="hold"),    # 문자열은 4멤버로 조용히 굳는다
         dict(kind="real", choices=None),      # falsy도 같은 문으로 걸려야 한다
         dict(kind="real", choices=""),        # 조건부였다면 조용히 ()가 됐다
+        # 수치 자리의 비수치 — 통과 자체보다 **뒤의 가드가 뜻을 잃는 것**이 나쁘다
+        dict(quantity="angle", lo="0", hi="1"),   # 문자열
+        # `lo="10", hi="9"`는 아래 `match=` 판이 진단까지 본다 — 여기 또 두지 않는다
+        dict(quantity="angle", lo=True, hi=2.0),  # isinstance(True, int)가 참이다
+        # falsy 쪽 문 — `if bound is not None`을 `if bound`로 무르면 그대로 앉는다.
+        # 이 파일이 choices에 대해 이미 못박아 둔 병이 새 가드에서 재발할 자리다
+        dict(quantity="angle", lo=False, hi=2.0),
+        dict(quantity="angle", lo=-1.0, hi=False),
+
+        dict(quantity="angle", lo=0.0, hi=float("nan")),  # 스케일 근거가 될 값이다
+        dict(quantity="angle", lo=float("-inf"), hi=0.0),
+        # `n="3"`·`n=1.5`는 이 diff 이전에도 「vector는 양의 길이」로 거부됐다 —
+        # 여기 두면 새 검사를 밟는 것처럼 보이지만 아무것도 안 지킨다. 그 둘은 위에서
+        # `match=`로 진단까지 본다. **새 검사만이 잡는 것은 `n=True`다**
+        dict(kind="vector", n=True),
     ):
         with pytest.raises(ValueError):
             t.Type(**bad)
@@ -131,6 +156,35 @@ def test_미지정_실수는_하나다():
     assert len({hash(x) for x in tops}) == 1, "같은 타입인데 해시가 다르다"
     assert all(x.desc for x in tops[1:]), "미지정으로 둔 이유는 선언에 남아야 한다"
     assert t.Type(desc="아무 말") == t.REAL
+
+
+def test_단위_철자가_conventions_3절_안에_있다():
+    """`irtypes` 머리말이 `conventions.md` §3를 정본이라 선언하는데, 그 정본 관계만
+    지킴이가 없었다.
+
+    무차원 계열 셋(`dimensionless`·`mach`·`normalized`)은 여기서도 대조되지 **않는다** —
+    `conventions.md` §3에 무차원 철자가 아예 없기 때문이고, `"-"`가 저장소 안에서만 통하는 표기인 이유가
+    그것이다. 그 사실 자체를 아래에서 단언한다. 이 테스트가 더하는 값은 「같은 다섯 철자를
+    ParamDef가 아니라 **문서 정본**과 대조한다」이다.
+    """
+    conv = (Path(__file__).resolve().parents[3] / "docs" / "conventions.md").read_text(
+        encoding="utf-8"
+    )
+    marker = "## 3. 단위계"
+    # 없으면 맨 IndexError로 죽는다 — 문서 번호는 실제로 바뀐 적이 있다(v0.75)
+    assert marker in conv, f"conventions.md에 {marker!r}가 없다 — 절이 바뀌었으면 여기부터"
+    section = conv.split(marker, 1)[1].split("\n## ", 1)[0]
+    m = re.search(r"내부 계산.*?\(([^)]+)\)", section)
+    assert m, "conventions.md §3에서 단위 목록을 못 찾았다 — 정본이 바뀌었으면 여기부터 본다"
+    allowed = {u.strip() for u in m.group(1).split(",")}
+    assert len(allowed) >= 6, f"conventions.md §3 목록이 너무 짧다 — 파싱이 반쪽이다: {allowed}"
+    assert "-" not in allowed, (
+        "conventions.md §3이 무차원 철자를 갖게 됐다 — `\"-\"`가 저장소 표기인 근거가 사라졌으니 다시 볼 것"
+    )
+    unknown = {u for u in t.QUANTITY_UNIT.values() if u != "-"} - allowed
+    assert not unknown, (
+        f"conventions.md §3에 없는 단위 철자: {sorted(unknown)} (허용: {sorted(allowed)})"
+    )
 
 
 def test_choices는_튜플로_굳는다():
@@ -459,12 +513,28 @@ def test_스케줄_축_셋이_다_선언된다():
         # `desc`가 신원에서 빠졌으므로 `==`는 「미지정이기만 하면」 통과한다 — 그
         # 미지정이 **결론이라는 근거**까지 같은지 봐야 지킴이가 된다
         assert graph.signal_types["pitch_kp"] is g_.SCHEDULED_GAIN
+        # 여기서는 게인이 **경계 출력**이다 (07 §8의 「경계이기도 내부이기도」)
+        assert set(graph.outputs.values()) == {"pitch_kp"}
     # 선언했다고 아무 물리량이나 붙이면 안 된다 — 「빠짐없이」가 「아무거나」가 되는 자리다
     assert g_.SIGNAL_TYPES["alt"] is t.ALTITUDE, "고도 축은 `h`와 같은 물리량이다"
     assert g_.SIGNAL_TYPES["fuel"].quantity is None, (
         "연료는 질량인데 어휘에 질량이 없다 — 다른 물리량을 지어내면 거짓 선언이다"
     )
     assert g_.SIGNAL_TYPES["fuel"].desc, "미지정으로 둔 이유가 선언에 남아야 한다"
+
+
+def test_같은_게인이_최상위에서는_내부_노드다():
+    """07 §8의 「같은 신호가 그래프에 따라 경계이기도 내부이기도 하다」를 지킨다.
+
+    스케줄이 낳는 게인은 `gain_schedule_graph`에서는 경계 출력이지만 `fcl_graph`에서는
+    내부 노드다 — 최상위 출력으로 새어 나가면 그 이중성이 깨진 것이다. 선언 집합만
+    보면 이 사고가 안 잡힌다: 새어 나가도 선언은 돼 있으니 통과한다.
+    """
+    g = _all_graphs()["fcl"]
+    leaked = [k for k, nid in g.outputs.items() if nid.startswith("sched_")]
+    assert not leaked, f"스케줄 게인이 최상위 출력으로 새어 나갔다: {leaked}"
+    inner = [n.id for n in g.nodes if n.id.startswith("sched_")]
+    assert len(inner) >= 6, f"내부 스케줄 노드를 못 찾았다 — 검사가 공허하다: {inner}"
 
 
 def test_게인_차원표가_ParamDef와_맞는다():
@@ -523,6 +593,11 @@ def test_정본_표에_죽은_항목이_없다():
     """`check_declarations`가 그래프마다 막는 「선언했는데 아무도 안 보는 것」을
     정본 표 자신에도 건다. 두 표가 겹치지 않는 것도 함께 본다 — 겹치면 병합에서
     뒤가 조용히 이겨 앞의 선언이 흔적 없이 사라진다.
+
+    **어휘(`irtypes` 카탈로그)에는 이 규칙을 걸지 않는다.** 신호 표의 죽은 항목은
+    「아무도 안 보는 선언」이라 결함이지만, 카탈로그의 안 쓴 낱말은 그냥 아직 안 쓴
+    낱말이다 — 사전이 안 쓴 단어를 담았다고 고장 난 것이 아니다. 규칙이 한쪽에만
+    걸리는 이유가 이것이고, 적어 두지 않으면 다음 사람이 빠진 검사로 읽는다.
     """
     from claw.fcl.schedule import SCHED_VARS
     from claw.tables import Table
@@ -629,8 +704,13 @@ def test_동체_각속도_셋과_자세각_셋은_각각_한_타입이다():
     law_src = (Path(__file__).resolve().parents[1] / "fcl" / "law.py").read_text(
         encoding="utf-8"
     )
-    assert "p, q, r = nav.omega_b" in law_src, "각속도 경계가 바뀌었다 — 근거를 다시 볼 것"
-    assert "phi, theta, psi = quat_to_euler(nav.q_nb)" in law_src, "자세 경계가 바뀌었다"
+    # 공백까지 고정하면 무해한 서식 변경에 「각속도 경계가 바뀌었다」는 엉뚱한 진단으로 죽는다
+    assert re.search(r"p\s*,\s*q\s*,\s*r\s*=\s*nav\.omega_b", law_src), (
+        "각속도 경계가 바뀌었다 — 근거를 다시 볼 것"
+    )
+    assert re.search(
+        r"phi\s*,\s*theta\s*,\s*psi\s*=\s*quat_to_euler\(\s*nav\.q_nb\s*\)", law_src
+    ), "자세 경계가 바뀌었다"
 
     rates = {g_.SIGNAL_TYPES[x] for x in ("p", "q", "r")}
     atts = {g_.SIGNAL_TYPES[x] for x in ("theta", "phi", "psi")}
@@ -749,10 +829,16 @@ def test_공력각_둘은_같은_타입이다():
     둘 다 각도이므로 하나만 다르게 적히면 그것이 거짓이다. `alpha`는 리미터 사슬이
     독립으로 잡으므로, 이 한 줄이 `beta`까지 끌고 온다.
     """
-    src = (Path(__file__).resolve().parents[1] / "fcl" / "airdata.py").read_text(
-        encoding="utf-8"
-    )
-    assert "α = atan2(w,u), β = asin(v/V)" in src, "공력각 정의가 바뀌었다 — 근거를 다시 볼 것"
+    # 근거를 **산문이 아니라 계산**에 둔다. 예전에는 `airdata.py` 독스트링의 철자를
+    # 고정했는데, 그 철자(`atan2(w,u)`)가 정본인 conventions §4(`atan2(w, u)`)와 이미
+    # 갈라져 있었다 — 고정한 것이 정본이 아니면 대조가 아니라 사본이다.
+    import math
+
+    from claw.common.frames import wind_angles
+
+    V, alpha, beta = wind_angles((10.0, 2.0, 3.0))
+    assert alpha == pytest.approx(math.atan2(3.0, 10.0)), "α가 atan2(w, u)가 아니다"
+    assert beta == pytest.approx(math.asin(2.0 / V)), "β가 asin(v/V)가 아니다"
     assert g_.SIGNAL_TYPES["alpha"] == g_.SIGNAL_TYPES["beta"], "공력각 둘이 다른 타입이다"
     assert str(g_.SIGNAL_TYPES["alpha"]) == "angle"
 
@@ -760,7 +846,11 @@ def test_공력각_둘은_같은_타입이다():
 def test_마하는_속도의_비라서_무차원이다():
     """`mach = V / a` — 같은 물리량의 비다. 단위가 붙으면 그것이 거짓이다."""
     src = (Path(__file__).resolve().parents[1] / "fcl" / "law.py").read_text(encoding="utf-8")
-    assert "mach=float(V / isa_atmosphere(h_isa).a)" in src, "마하 계산이 바뀌었다"
+    # `.a`(음속)까지 고정한다 — 「같은 물리량의 비」라는 주장의 무게가 전부 거기 있다.
+    # 여는 괄호에서 멈추면 `isa_atmosphere(...).rho`로 바뀌어도 아무도 말하지 않는다
+    assert re.search(
+        r"mach\s*=\s*float\(\s*V\s*/\s*isa_atmosphere\([^)]*\)\.a\s*\)", src
+    ), "마하 계산이 바뀌었다 — 근거를 다시 볼 것"
     assert g_.SIGNAL_TYPES["mach"] is t.MACH, "마하가 다른 무차원 타입으로 바뀌었다"
     assert g_.SIGNAL_TYPES["mach"].unit == "-", "속도의 비에 단위가 붙었다"
     assert (t.MACH.lo, t.MACH.hi) == (None, None), "마하에 없는 범위가 붙었다"
@@ -818,3 +908,156 @@ def test_출력표는_정본에서_파생한다():
         assert g_.SCAS3_OUTPUT_TYPES[key] is g_.SIGNAL_TYPES[key], f"{key}가 두 벌 적혔다"
     assert set(g_.AP_OUTPUT_TYPES) == {"theta_cmd", "phi_cmd", "throttle"}
     assert set(g_.SCAS3_OUTPUT_TYPES) == {"de", "da", "dr"}
+
+
+def test_뒤집힌_범위_가드가_수치_위에서만_돈다():
+    """이 검사의 요지는 「문자열이 통과한다」가 아니라 **그다음 가드가 뜻을 잃는다**이다.
+
+    `lo="10", hi="9"`는 문자열 비교로 `"10" < "9"`가 참이라 뒤집힘을 못 잡는다.
+
+    수치 검사는 뒤집힘 검사보다 **먼저** 서야 한다. 순서를 드러내려면 두 검사가 서로
+    다른 답을 내는 입력이 필요하다 — `lo="9", hi="1"`이 그것이다: 문자열끼리는
+    `"9" > "1"`이 참이라, 순서가 뒤면 「뒤집혔다」는 **엉뚱한 진단**이 먼저 나온다.
+    범위가 뒤집힌 게 아니라 애초에 수치가 아닌데도.
+    """
+    with pytest.raises(ValueError, match="수치가 아니다"):
+        t.Type(quantity="angle", lo="10", hi="9")
+    with pytest.raises(ValueError, match="수치가 아니다"):
+        t.Type(quantity="angle", lo="9", hi="1")
+    # 수치 위에서는 제대로 잡는다
+    with pytest.raises(ValueError, match="뒤집혔다"):
+        t.Type(quantity="angle", lo=10.0, hi=9.0)
+    # 정수도 정상 수치다 — 과하게 좁히지 않았는지 함께 본다
+    assert t.Type(quantity="angle", lo=0, hi=1).lo == 0
+    # numpy 스칼라도 수치다. 파이썬 구상 타입만 보면 `np.float32`가 「수치가 아니다」로
+    # 거부되는데 그건 틀린 말이고, 이 값들은 리터럴을 벗어나는 순간(`lo=arr.min()`)
+    # 바로 온다 — 이 저장소는 `frames`·`tables`가 numpy 투성이다
+    import numpy as np
+
+    assert t.Type(quantity="angle", lo=np.float32(-1.0), hi=np.float64(1.0)).hi == 1.0
+    assert t.Type(kind="vector", n=np.int64(4)).n == 4
+    assert t.Type(quantity="angle", lo=np.int32(0), hi=1).lo == 0
+    # numpy 불리언은 파이썬 `bool`이 아니라 명시적 배제가 안 잡는다 — 지금은 numpy가
+    # ABC에 등록을 안 해서 거부되는데, 그건 계약이 아니라 구현 선택이라 못박아 둔다.
+    # `(arr > 0).any()`가 그 값을 낸다
+    with pytest.raises(ValueError, match="정수여야 한다"):
+        t.Type(kind="vector", n=np.bool_(True))
+    with pytest.raises(ValueError, match="수치가 아니다"):
+        t.Type(quantity="angle", lo=np.bool_(True), hi=2.0)
+
+
+def test_범위는_저장_시_굳어서_값_의미론이_안_깨진다():
+    """`numbers.Real`로 넓힌 대가를 닫는 자리 — `choices`를 튜플로 굳히는 것과 같다.
+
+    지키는 것은 **`==`와 해시가 같은 답을 낸다**이다. 굳히지 않으면
+    `np.float32(0.1)`은 `==`가 float32 정밀도로 「같다」고 하는데 해시는 float64를
+    지나 달라진다 — 같은 타입인데 dict·set에서 못 찾는다. 이 모듈 머리말이 통일을
+    `==`·dict 키로 구현한다고 적어 뒀고 `desc`를 비교에서 뺀 것도 그 전제를 지키려는
+    것이므로, 여기서 깨지면 그 전제가 통째로 무너진다.
+
+    굳힌 뒤 `float32`가 파이썬 `0.1`과 **갈라지는 것이 옳다** — 실제로 다른 수다
+    (0.10000000149011612). 이전의 「같다」가 거짓말이었지 지금이 과한 것이 아니다.
+    """
+    import numpy as np
+
+    same = [t.Type(quantity="angle", lo=np.float64(0.1), hi=np.int32(1)),
+            t.Type(quantity="angle", lo=0.1, hi=1.0),
+            t.Type(quantity="angle", lo=0.1, hi=1)]
+    for other in same[1:]:
+        assert same[0] == other and hash(same[0]) == hash(other)
+    assert len(set(same)) == 1, "같은 수인데 여럿으로 갈라졌다"
+    assert {same[1]: "정본"}.get(same[0]) == "정본", "통일을 dict 키로 구현하면 빗나간다"
+
+    # 정밀도가 낮은 쪽은 **다른 수**이므로 갈라지고, 갈라지는 답이 둘 다 일치한다
+    narrow = t.Type(quantity="angle", lo=np.float32(0.1), hi=1.0)
+    assert narrow != same[1], "float32 값이 파이썬 0.1과 같은 수로 굳었다"
+    assert narrow.lo == float(np.float32(0.1))
+    # **굳히기도 뒤집힘 검사보다 먼저 서야 한다.** 두 검사가 서로 다른 답을 내는 입력이
+    # 이것이다: NEP 50은 float32 정밀도로 비교해 `np.float32(0.1) > 0.1`을 거짓이라 하는데
+    # 굳으면 참이다. 순서가 뒤면 **뒤집힌 범위가 그대로 저장된다** — 이 판이 없애려던
+    # 결함이 한 층 위에서 그대로 재현된다
+    with pytest.raises(ValueError, match="뒤집혔다"):
+        t.Type(quantity="angle", lo=np.float32(0.1), hi=0.1)
+    # 계약 자체 — 같다면 해시도 같다. 굳히지 않으면 이 줄이 깨진다
+    for x in (*same, narrow):
+        for y in (*same, narrow):
+            assert (x == y) <= (hash(x) == hash(y)), f"{x.lo} vs {y.lo}: ==는 참인데 해시가 다르다"
+    # 굳은 결과는 파이썬 구상 타입이다 — 오류 문구에 numpy 표기가 새지 않는다
+    assert type(narrow.lo) is float
+    assert type(t.Type(kind="vector", n=np.int64(4)).n) is int
+
+
+def test_범위를_든_선언은_하나뿐이다():
+    """살아 있는 `Type`을 다시 만들어 보는 것은 **원리적으로 못 죽는다** — 이미 생성자를
+    통과한 것이라서다. 실물을 거부하는 좁히기는 이 테스트가 아니라 import가 잡는다
+    (모듈 수집이 통째로 실패한다). 그래서 여기서는 **수를 못박는다**.
+
+    범위가 힘을 얻는 것은 고정소수점 하강에서다(07 §10). 그때 스케일 근거가 될 자리가
+    지금 몇 개인지가 곧 그 작업의 크기이므로, 늘거나 줄면 눈에 띄어야 한다.
+    """
+    import claw.fcl.graphs as graphs
+
+    merged = {**graphs.SIGNAL_TYPES, **graphs.GAIN_PORT_TYPES}
+    assert len(merged) == 52, (
+        f"실물 선언 수가 바뀌었다({len(merged)}) — 신호를 늘렸다면 그 신호에 기대 범위가"
+        " 필요한지 함께 보라는 뜻이다. 필요 없으면 이 수만 고치면 된다"
+    )
+    ranged = {n: ty for n, ty in merged.items() if ty.lo is not None or ty.hi is not None}
+    assert set(ranged) == {"thr"}, f"범위를 든 선언이 바뀌었다: {sorted(ranged)}"
+    assert ranged["thr"] is t.NORMALIZED
+    assert (t.NORMALIZED.lo, t.NORMALIZED.hi) == (0.0, 1.0)
+    # 카탈로그 쪽도 함께 — 범위를 든 이름 있는 타입은 `NORMALIZED` 하나다
+    cat = {n: v for n, v in vars(t).items()
+           if isinstance(v, t.Type) and (v.lo is not None or v.hi is not None)}
+    assert set(cat) == {"NORMALIZED"}, f"카탈로그의 범위 항목이 바뀌었다: {sorted(cat)}"
+
+
+def test_축_출력_선언의_근거는_생산_호출부다():
+    """`AXIS_OUTPUT_TYPES = {"u": ANGLE}`의 근거는 「이 빌더를 부르는 생산 경로가 전부
+    rad」인데, 그 **호출부 집합**은 아무도 안 보고 있었다.
+
+    누가 `scas_axis_graph(..., out_lo=0.0, out_hi=1.0)`으로 부르면(오토파일럿 속도축이
+    노드 함수에 실제로 넘기는 값이다) 그 선언이 거짓이 되는데 스위트는 초록이다.
+    셋째 호출부가 생기면 여기서 죽어 `AXIS_OUTPUT_TYPES`를 다시 보게 된다.
+    """
+    # **git이 아는 파일만** 본다. `rglob`는 `.venv`뿐 아니라 `.claude/worktrees/`의
+    # 병렬 체크아웃(이 저장소의 또 다른 사본)까지 훑어서, 거기서 `git checkout` 한 번이면
+    # 초록 스위트가 「호출부가 바뀌었다」로 죽는다 — 게다가 그 메시지가 엉뚱한 곳을 가리킨다.
+    # 「생산 호출부」의 뜻도 이쪽이 정확하다: 이 저장소에 커밋된 것.
+    import subprocess
+
+    root = Path(__file__).resolve().parents[3]
+    # `--others --exclude-standard`가 **아직 add 안 된** 파일까지 본다. 인덱스만 읽으면
+    # 「호출부를 쓰고 → 스위트 초록 → git add -A」 순서가 회귀를 그대로 통과시킨다.
+    # `.gitignore`는 그대로 존중되므로 `.claude/worktrees/`·`.venv`는 여전히 안 보인다.
+    # `-z`로 받는다 — 공백 든 경로가 `split()`에서 두 조각이 되면 진단이 엉뚱해진다.
+    listed = [
+        rel for rel in subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "*.py"],
+            cwd=root, capture_output=True, text=True, check=True,
+        ).stdout.split("\0") if rel
+    ]
+    assert len(listed) > 100, f"git 목록이 {len(listed)}건뿐이다 — 훑기가 안 돌았다"
+    callers = set()
+    for rel in listed:
+        if "/tests/" in rel or Path(rel).name.startswith("test_"):
+            continue
+        text = (root / rel).read_text(encoding="utf-8", errors="ignore")
+        if re.search(r"(?<!def )scas_axis_graph\s*\(", text):
+            callers.add(rel)
+    assert callers == {"engine/claw/fcl/scas.py", "flight/generate.py"}, (
+        f"생산 호출부가 바뀌었다 — AXIS_OUTPUT_TYPES의 근거를 다시 볼 것: {sorted(callers)}"
+    )
+    # 그 둘이 rad라는 근거 자체도 함께 (ScasAxis의 한계 단위 · 데모 형상의 실제 값)
+    from claw.fcl.demo import DEMO_YAW
+    from claw.fcl.scas import ScasAxis
+
+    units = {d.name: d.unit for d in ScasAxis.PARAM_DEFS}
+    assert units["out_lo"] == "rad" and units["out_hi"] == "rad"
+    # 크기만 보면 위 독스트링이 든 위협(0~1 정규화)을 **그대로 통과시킨다**(|1.0| < 1.6).
+    # 판별하는 사실은 부호다: 타면각 한계는 0을 사이에 두고 양쪽으로 벌어지고,
+    # 정규화 한계는 0에서 시작한다
+    assert DEMO_YAW["out_lo"] < 0 < DEMO_YAW["out_hi"], (
+        f"데모 축 한계가 0을 사이에 두지 않는다 — 타면각이 아닐 수 있다: {DEMO_YAW}"
+    )
+    assert abs(DEMO_YAW["out_hi"]) < 1.6, "데모 축 한계가 rad로 보기 어려운 값이다"
