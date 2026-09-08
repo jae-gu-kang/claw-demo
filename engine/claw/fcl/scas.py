@@ -17,8 +17,7 @@
 
 from claw.blocks.base import UNBOUNDED, Block
 from claw.codegen.ir_exec import GraphRunner
-from claw.common.attitude import quat_to_euler
-from claw.fcl.airdata import airdata_from_nav
+from claw.fcl.boundary import nav_derived
 from claw.fcl.graphs import _SCHEDULABLE, scas3_graph, scas_axis_graph
 from claw.params.param import ParamDef
 
@@ -112,9 +111,9 @@ class Scas:
     def step(self, theta_cmd, phi_cmd, nav, gains=None):
         """구조는 fcl/graphs.py scas3_nodes가 정본 — 여기서는 항법 상태에서
         공학량(θ·φ·β·p·q·r)을 뽑아 넘긴다. nav.valid 처리는 상위 조립 소관."""
-        phi, theta, _psi = quat_to_euler(nav.q_nb)
-        p, q, r = nav.omega_b
-        _V, _alpha, beta = airdata_from_nav(nav)
+        # 파생 공학량은 `fcl/boundary.py`가 정본 — 여기서 또 뽑으면 언패킹 순서가
+        # 갈려도 아무도 안 본다(07 §7)
+        d = nav_derived(nav)
         g = gains or {}
         ports = {
             f"g_{grp}_{key}": g.get(grp, {}).get(key, ax.cfg[key])
@@ -123,7 +122,6 @@ class Scas:
         }
         o = self._runner.step(
             theta_cmd=theta_cmd, phi_cmd=phi_cmd,
-            theta=float(theta), phi=float(phi), beta=float(beta),
-            p=float(p), q=float(q), r=float(r), **ports,
+            **{k: d[k] for k in ("theta", "phi", "beta", "p", "q", "r")}, **ports,
         )
         return o["de"], o["da"], o["dr"]

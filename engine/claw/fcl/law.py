@@ -17,11 +17,8 @@ import numpy as np
 
 from claw.codegen.blockspec import get_state
 from claw.codegen.ir_exec import GraphRunner
-from claw.common.attitude import quat_to_euler
 from claw.common.contracts import SurfaceCommand
-from claw.env import isa_atmosphere
-from claw.env.constants import ISA_MIN_ALT, ISA_STRATO1_TOP_ALT
-from claw.fcl.airdata import airdata_from_nav
+from claw.fcl.boundary import graph_inputs
 from claw.fcl.graphs import SCHEDULABLE, fcl_graph
 
 
@@ -197,24 +194,9 @@ class FlightControlLaw:
     def step(self, cmd, nav) -> SurfaceCommand:
         """법칙 구조는 fcl/graphs.py가 정본 — 여기서는 원시 항법 상태를 그래프가
         받는 공학량으로 바꾸고(실기에선 항법·ADC 몫) 결과를 계약으로 포장한다."""
-        V, alpha, beta = airdata_from_nav(nav)
-        phi, theta, psi = quat_to_euler(nav.q_nb)
-        h = -float(nav.pos_n[2])
-        h_isa = min(max(h, ISA_MIN_ALT), ISA_STRATO1_TOP_ALT)
-        p, q, r = nav.omega_b
-        o = self._runner.step(
-            nav_valid=float(bool(nav.valid)),
-            theta=float(theta), phi=float(phi), psi=float(psi),
-            p=float(p), q=float(q), r=float(r),
-            V=float(V), alpha=float(alpha), beta=float(beta),
-            h=h, hdot=-float(nav.vel_n[2]), mach=float(V / isa_atmosphere(h_isa).a),
-            cmd_speed=float(cmd.speed), cmd_alt=float(cmd.alt),
-            cmd_heading=float(cmd.heading),
-            cmd_pitch=float(cmd.pitch), cmd_hdot=float(cmd.hdot),
-            speed_on=float(bool(cmd.speed_on)), alt_on=float(bool(cmd.alt_on)),
-            heading_on=float(bool(cmd.heading_on)),
-            pitch_on=float(bool(cmd.pitch_on)), hdot_on=float(bool(cmd.hdot_on)),
-        )
+        # 23키와 불리언 접기 규약은 `fcl/boundary.py`가 정본이다 — 여기와 `verify/trace.py`가
+        # 같은 것을 손으로 두 벌 적고 있었고, 접기가 한쪽만 바뀌면 아무도 못 봤다
+        o = self._runner.step(**graph_inputs(cmd, nav))
         # 항법 무효 스텝은 아무것도 실행되지 않았다 — 로깅 속성도 직전 값을 유지한다
         if nav.valid:
             env = self._runner.last_env

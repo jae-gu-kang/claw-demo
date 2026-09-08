@@ -20,11 +20,9 @@
 
 import numpy as np
 
-from claw.common.attitude import quat_to_euler
 from claw.common.contracts import TrimCase
-from claw.env import isa_atmosphere
-from claw.env.constants import ISA_MIN_ALT, ISA_STRATO1_TOP_ALT
-from claw.fcl.airdata import airdata_from_nav
+from claw.fcl.boundary import graph_inputs
+from claw.fcl.graphs import FCL_INPUTS
 from claw.guidance import Guidance, LosPath, ModeSpec
 from claw.nav import NavErrorModel
 from claw.plant import make_demo_aircraft, make_demo_stall_table
@@ -32,12 +30,10 @@ from claw.sim import Simulator
 from claw.trim import trim_level
 
 # fcl_graph의 입력 순서 — 대조 하네스가 한 줄에 이 순서로 읽는다
-INPUT_ORDER = (
-    "nav_valid", "theta", "phi", "psi", "p", "q", "r", "V", "alpha", "beta",
-    "h", "hdot", "mach", "cmd_speed", "cmd_alt", "cmd_heading",
-    "cmd_pitch", "cmd_hdot",
-    "speed_on", "alt_on", "heading_on", "pitch_on", "hdot_on",
-)
+# **그래프 입력 순서가 곧 이 순서다.** 손으로 적은 사본이면 순서가 갈릴 수 있는데,
+# 이 순서는 C 하네스의 stdin 배열을 정하고 인자 순서는 `graph.inputs`가 정하므로,
+# 갈리는 순간 값이 자리를 바꿔 실린다 — `verify/units.py`가 기록한 믹서 사고와 같은 병이다.
+INPUT_ORDER = FCL_INPUTS
 
 
 def _mission_modes(V0):
@@ -85,26 +81,12 @@ def record_mission(law, *, t_end=180.0, control_hz=100.0, on_progress=None) -> d
     orig_step = law.step
 
     def spy(cmd, nav):
-        V, alpha, beta = airdata_from_nav(nav)
-        phi, theta, psi = quat_to_euler(nav.q_nb)
-        h = -float(nav.pos_n[2])
-        h_isa = min(max(h, ISA_MIN_ALT), ISA_STRATO1_TOP_ALT)
-        p, q, r = (float(x) for x in nav.omega_b)
+        # 조립은 `fcl/boundary.py`가 정본 — 법칙이 실제로 받는 값과 **같은 함수**로 만든다.
+        # 두 벌로 적혀 있을 때는 불리언 접기가 한쪽만 바뀌어도 대조가 통과했다.
+        # **스텝보다 먼저** 조립한다: 뒤에 두면 「법칙이 cmd·nav를 안 건드린다」는 가정에
+        # 기대게 되고, 그 가정이 깨지는 날 기록과 실행이 다른 값을 보면서도 조용하다
+        inputs.append(graph_inputs(cmd, nav))
         out = orig_step(cmd, nav)
-        inputs.append({
-            "nav_valid": float(bool(nav.valid)),
-            "theta": float(theta), "phi": float(phi), "psi": float(psi),
-            "p": p, "q": q, "r": r, "V": float(V),
-            "alpha": float(alpha), "beta": float(beta),
-            "h": h, "hdot": -float(nav.vel_n[2]),
-            "mach": float(V / isa_atmosphere(h_isa).a),
-            "cmd_speed": float(cmd.speed), "cmd_alt": float(cmd.alt),
-            "cmd_heading": float(cmd.heading),
-            "cmd_pitch": float(cmd.pitch), "cmd_hdot": float(cmd.hdot),
-            "speed_on": float(bool(cmd.speed_on)), "alt_on": float(bool(cmd.alt_on)),
-            "heading_on": float(bool(cmd.heading_on)),
-            "pitch_on": float(bool(cmd.pitch_on)), "hdot_on": float(bool(cmd.hdot_on)),
-        })
         # 그래프 출력을 이름 그대로 — SurfaceCommand로 접으면 limiter_active처럼
         # 계약 밖 출력이 빠지고, 형상이 바뀔 때마다 여기를 고치게 된다
         outputs.append({k: float(v) for k, v in law.runner.last_outputs.items()})

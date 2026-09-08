@@ -429,7 +429,7 @@ def test_fcl_입력_23개가_전부_선언된다():
     """경계는 빠짐없이 선언된다 — 하나만 빠져도 그 그래프가 조립되지 않는다."""
     missing = set(g_.FCL_INPUTS) - set(g_.SIGNAL_TYPES)
     assert not missing, f"FCL 입력인데 정본 표에 없다: {sorted(missing)}"
-    assert len(g_.FCL_INPUTS) == 23, "경계가 바뀌었다 — law.py·verify/trace.py와 함께 볼 것"
+    assert len(g_.FCL_INPUTS) == 23, "경계가 바뀌었다 — fcl/boundary.py와 함께 볼 것"
 
 
 def test_실제_fcl_그래프도_생성_C를_한_바이트도_바꾸지_않는다():
@@ -643,16 +643,23 @@ def _contract_units(cls_name):
 
 def test_명령_경계가_계약의_단위와_같다():
     """`GuidanceCommand`의 `# [m/s]`·`# [rad]`와 선언이 같은 말을 하는지 본다."""
+    from claw.fcl.boundary import DIRECT
+
     units = _contract_units("GuidanceCommand")
-    expect = {"speed": "cmd_speed", "alt": "cmd_alt", "heading": "cmd_heading",
-              "pitch": "cmd_pitch", "hdot": "cmd_hdot"}
-    assert set(expect) <= set(units), (
-        f"계약에서 단위 주석이 사라졌다: {sorted(set(expect) - set(units))}"
+    # **짝은 손으로 적지 않는다** — v0.86의 `DIRECT`가 「어느 계약 필드에서 오는가」의
+    # 정본이다. 여기 또 적으면 네 번째 사본이 되고, 그 사본이 맞는지는 아무도 안 본다.
+    # 덕분에 `DIRECT`에서 `cmd_pitch`와 `cmd_hdot`의 필드를 맞바꾸면 여기서 죽는다:
+    # 각도(rad)와 승강률(m/s)의 단위가 다르기 때문이다
+    pairs = {sig: field for sig, (obj, field, fold) in DIRECT.items()
+             if obj == "cmd" and not fold}
+    assert len(pairs) == 5, f"명령 경계가 바뀌었다: {sorted(pairs)}"
+    assert set(pairs.values()) <= set(units), (
+        f"계약에서 단위 주석이 사라졌다: {sorted(set(pairs.values()) - set(units))}"
     )
-    for field, signal in expect.items():
+    for signal, field in pairs.items():
         declared = g_.SIGNAL_TYPES[signal].unit
         assert declared == units[field].split(",")[0].strip(), (
-            f"{signal}: 선언 {declared!r} vs 계약 {units[field]!r}"
+            f"{signal}: 선언 {declared!r} vs 계약 {field} {units[field]!r}"
         )
 
 
@@ -701,16 +708,23 @@ def test_동체_각속도_셋과_자세각_셋은_각각_한_타입이다():
     셋 중 하나만 다른 타입으로 적히면 그것이 거짓이다. 두 묶음이 **서로 달라야**
     하는 것도 함께 본다 — 안 그러면 전부 각도로 적어도 통과한다.
     """
-    law_src = (Path(__file__).resolve().parents[1] / "fcl" / "law.py").read_text(
-        encoding="utf-8"
+    # 근거를 **소스 텍스트가 아니라 경계 표**에서 읽는다. 전에는 `law.py`의 한 줄을
+    # 정규식으로 고정했는데, v0.86이 그 조립을 `fcl/boundary.py`로 옮기자 「각속도 경계가
+    # 바뀌었다」는 **엉뚱한 진단**으로 죽었다 — 경계는 그대로였고 파일만 바뀌었다.
+    # `DERIVED`가 출처를 기계 판독 가능하게 적고, 그 표가 실제 계산과 맞는지는
+    # `test_boundary.py`가 따로 지킨다.
+    from claw.fcl.boundary import DERIVED
+
+    def source(name):
+        return DERIVED[name].split("[")[0]  # 슬롯을 떼면 「어느 벡터에서 나왔나」가 남는다
+
+    assert len({source(x) for x in ("p", "q", "r")}) == 1, (
+        f"각속도 셋의 출처가 갈라졌다: {[DERIVED[x] for x in ('p', 'q', 'r')]}"
     )
-    # 공백까지 고정하면 무해한 서식 변경에 「각속도 경계가 바뀌었다」는 엉뚱한 진단으로 죽는다
-    assert re.search(r"p\s*,\s*q\s*,\s*r\s*=\s*nav\.omega_b", law_src), (
-        "각속도 경계가 바뀌었다 — 근거를 다시 볼 것"
-    )
-    assert re.search(
-        r"phi\s*,\s*theta\s*,\s*psi\s*=\s*quat_to_euler\(\s*nav\.q_nb\s*\)", law_src
-    ), "자세 경계가 바뀌었다"
+    assert len({source(x) for x in ("theta", "phi", "psi")}) == 1, "자세각 셋의 출처가 갈라졌다"
+    assert source("p") != source("theta"), "두 묶음이 같은 출처가 됐다"
+    # 슬롯이 셋 다 다른지 — 같은 슬롯을 세 번 적으면 위가 통과한다
+    assert len({DERIVED[x] for x in ("p", "q", "r")}) == 3
 
     rates = {g_.SIGNAL_TYPES[x] for x in ("p", "q", "r")}
     atts = {g_.SIGNAL_TYPES[x] for x in ("theta", "phi", "psi")}
@@ -845,12 +859,14 @@ def test_공력각_둘은_같은_타입이다():
 
 def test_마하는_속도의_비라서_무차원이다():
     """`mach = V / a` — 같은 물리량의 비다. 단위가 붙으면 그것이 거짓이다."""
-    src = (Path(__file__).resolve().parents[1] / "fcl" / "law.py").read_text(encoding="utf-8")
-    # `.a`(음속)까지 고정한다 — 「같은 물리량의 비」라는 주장의 무게가 전부 거기 있다.
-    # 여는 괄호에서 멈추면 `isa_atmosphere(...).rho`로 바뀌어도 아무도 말하지 않는다
-    assert re.search(
-        r"mach\s*=\s*float\(\s*V\s*/\s*isa_atmosphere\([^)]*\)\.a\s*\)", src
-    ), "마하 계산이 바뀌었다 — 근거를 다시 볼 것"
+    # 출처는 경계 표가 든다. `.a`(음속)까지 봐야 한다 — 「같은 물리량의 비」라는 주장의
+    # 무게가 전부 거기 있고, `.rho`로 바뀌면 무차원이 아니게 된다
+    from claw.fcl.boundary import DERIVED
+
+    assert DERIVED["mach"] == "V / isa_atmosphere(h).a", (
+        f"마하의 출처가 바뀌었다 — 근거를 다시 볼 것: {DERIVED['mach']!r}"
+    )
+    assert DERIVED["V"] != DERIVED["mach"], "마하가 속도와 같은 출처면 비가 아니다"
     assert g_.SIGNAL_TYPES["mach"] is t.MACH, "마하가 다른 무차원 타입으로 바뀌었다"
     assert g_.SIGNAL_TYPES["mach"].unit == "-", "속도의 비에 단위가 붙었다"
     assert (t.MACH.lo, t.MACH.hi) == (None, None), "마하에 없는 범위가 붙었다"
