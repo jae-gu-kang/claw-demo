@@ -54,7 +54,9 @@
 지우는 것이 답이 아니다.
 
 **2. 참조에는 항상 문서 번호를 붙인다.** `02 §1 · 02 §2.2`라 쓰고, 둘째부터 번호를
-생략한 `02§1·§2.2` 꼴로 쓰지 않는다 — 사람은 읽어도 검사기가 못 푼다. <!-- refcheck:ignore -->
+생략한 꼴로 쓰지 않는다 — 사람은 읽어도 검사기가 못 푼다.
+
+금하는 형태는 이것이다: `02§1·§2.2` <!-- refcheck:ignore=02§1, §2.2 -->
 
 **3. [개정]은 원문을 고친 뒤 그 사실만 남긴다.** 철회된 [확정] 문장을 살려 두지 않는다.
 위에서부터 읽는 사람이 틀린 문장을 먼저 만나기 때문이다. 어떤 결정이 왜 뒤집혔는지의
@@ -70,11 +72,11 @@
 **6. 절을 통째로 옮겼으면 제목에 `[이관 → NN]`을 남긴다.** 본문은 지우되 **번호는 살려 둔다** —
 그 자리에 새 내용을 쓰면 옛 인용이 엉뚱한 것을 가리키기 때문이다. 이 표기가 없으면 검사기에게 그
 절은 여전히 실재하는 절이라, **끊긴 참조(시끄러운 실패)가 조용히 틀린 참조로 바뀐다** (v0.75가
-실제로 그랬다 — `01 §5`를 가리키던 화면 칩이 "정본은 04"만 있는 절로 <!-- refcheck:ignore -->
+실제로 그랬다 — `01 §5`를 가리키던 화면 칩이 "정본은 04"만 있는 절로 <!-- refcheck:ignore=01 §5 -->
 안내하고 있었다). 표기가 있으면 검사기가 그 절을 가리키는 참조를 **끊긴 참조와 같이 거부하고 새
 목적지를 알려 준다**. 아무도 안 가리키게 돼도 **지우지 않는다** — 지우는 순간 번호가 재사용
 가능해지고, 그러면 저장소 밖에 남은 옛 인용(커밋 메시지·메모)이 엉뚱한 곳을 가리킨다. 묘비 여섯
-줄의 값이 그것보다 싸다. 하위 번호(`01 §5.1`)도 함께 얼어 검사기가 <!-- refcheck:ignore -->
+줄의 값이 그것보다 싸다. 하위 번호(`01 §5.1`)도 함께 얼어 검사기가 <!-- refcheck:ignore=01 §5.1 -->
 막는다 — 번호가 얼었다는 것은 그 아래도 얼었다는 뜻이다.
 
 **표기가 어긋나면 검사기가 그것부터 실패로 낸다** — 제목에 「이관」이 있는데 `[이관 → NN]`으로
@@ -83,9 +85,35 @@
 `### 5.2 데이터 이관 절차` 같은 보통 낱말은 걸리지 않는다 — 헤딩에는 탈출구를 두지
 않는다. 묘비를 조용히 끄는 스위치가 되기 때문이다. 목적지가 없는 문서면 그것도 실패다.
 
-**`<!-- refcheck:ignore -->`는 반례와 묘비 자기언급에만 쓴다.** 그 줄의 **모든** `§`가 함께
-꺼지므로, 살아 있는 참조를 같은 줄에 두지 않는다. 검사기를 조용히 시키려고 쓰기 시작하면
-가드가 아니라 장식이 된다.
+**7. 반례를 적을 때는 끌 토큰을 지정한다.** 문서가 「이렇게 쓰면 안 된다」를 보이거나 묘비가
+자기 옛 번호를 예로 들면 그 `§`는 검사 대상이 아니다. 그런 자리는 표식으로 끄되 **무엇을
+끄는지 적는다**:
+
+```
+… 옛 `NN §X` 인용이 엉뚱한 것을 가리킨다. <!-- refcheck:ignore=NN §X -->
+```
+
+예시에 `NN §X` 자리표시자를 쓰는 것은 규약이다 — 코드블록 안의 **참조**는 여전히
+검사되는데(안 그러면 코드블록이 조용한 사각이 된다) 그 안의 **표식**은 인용이라 안 걸리므로,
+진짜 번호를 예로 들면 끌 수 없는 참조가 하나 생긴다.
+
+- **토큰을 지정한다** — 그 토큰만 꺼지므로 같은 줄의 살아 있는 참조가 덤으로 죽지 않는다.
+  쉼표로 여럿 적을 수 있다
+- **효력은 문단이다**(빈 줄까지) — 규약 5로 문단을 다시 감아도 표식이 참조와 갈라지지
+  않는다. 줄 단위로 걸면 재감기 한 번에 조용히 풀린다
+- **끄려던 토큰이 그 문단에 없으면 실패다** — 오타나 문장 삭제로 표식만 남는 것을 막는다.
+  가드를 끄는 장치가 조용히 죽으면 가드가 죽은 것과 같다
+- **맨 토큰(`§X`) 선언은 맨 참조만 끈다.** 문서 번호를 붙인 `NN §X` 선언이라야 풀린 참조를
+  끈다 — 안 그러면 문단 스무 줄 건너의 살아 있는 `05 §5`를 `§5` 선언 하나가 먹는다. <!-- refcheck:ignore=§5 -->
+  맨 토큰은 규약 2가 금하는 형태 그 자체라, 그것으로 끄는 것도 맨 참조뿐이어야 한다
+- **코드블록은 문단을 끊는다** — 블록 앞의 선언이 블록 너머 산문까지 미치지 않는다
+- 코드블록 안과 **백틱이 감싼**(공백이 끼어도) 표식은 선언이 아니라 인용이다 — 이 문서가
+  검사기 본문과 표기법 예시를 함께 싣기 때문이다. 백틱 **쌍을 통째로** 지우면 안 된다:
+  표식이 우연히 백틱 span 안에 놓이면 진짜 선언이 지워진다
+- **바른 예시와 반례는 다른 문단에 둔다** — `norm()`이 공백을 지워 `02 §1`과 `02§1`이 같은
+  토큰이 된다. 규약 2가 가르치는 차이를 선언 언어가 구분하지 못하므로, 문단으로 가른다
+
+검사기를 조용히 시키려고 쓰기 시작하면 가드가 아니라 장식이 된다. 끈 수는 출력에 나온다.
 
 ## 검사기
 
@@ -94,7 +122,7 @@
 
 - **끊김** — 가리키는 절이 없다
 - **번호 없음** — 어느 문서인지 못 푼다. 규약 2 위반이다 — 연쇄 표기의 둘째,
-  코드의 맨 `§5.5`. <!-- refcheck:ignore -->
+  코드의 맨 `§5.5`. <!-- refcheck:ignore=§5.5 -->
   이쪽을 세지 않으면 「끊김 0건」이 검사하지 **않은** 참조에까지 안전을 뜻하게 된다
 - **이관된 절** — 규약 6의 `[이관 → NN]` 묘비를 가리킨다. 절은 실재하지만 내용은
   거기 없다 — 새 목적지를 함께 낸다
@@ -102,6 +130,8 @@
   가장 먼저 낸다
 - **문맥과 어긋난 해석** — 앞 문맥이 다른 문서를 말하는데 **읽는 쪽 문서**로 풀린다.
   네 건의 결함이 전부 이 자리에서 났다 — 형태를 늘려 잡는 대신 *불일치 자체*를 잡는다
+- **죽은 표식** — 규약 7의 표식이 끄려던 토큰이 그 문단에 없다. 표식을 끄는 장치가
+  조용히 죽는 것을 막는다
 
 파일명(`fcs-context-01-….md`)도 문서 번호로 읽고, 규약 5의 줄바꿈이 번호와 `§`를 갈라놓은
 경우 앞 줄 꼬리를 이어 푼다 — 규약 2를 어긴 자리를 **틀리게 푸는 대신** 바르게 푼다.
@@ -109,7 +139,7 @@
 훑는 범위는 `docs` · `engine` · `server` · `flight` · `scripts` · `models` · `web/js` ·
 `web/world/src`와 각 README·`web/index.html`이다. **범위 밖은 「0건」의 뜻을 줄인다** — 이
 문서가 검사하지 않은 참조까지 안전하다고 읽히면 안 된다. `web/world`의 `계획 §N` ·
-`GPU Gems 1 §1`은 건너뛴다 — 이 저장소 문서가 아니다. <!-- refcheck:ignore -->
+`GPU Gems 1 §1`은 건너뛴다 — 이 저장소 문서가 아니다. <!-- refcheck:ignore=§1 -->
 건너뛴 수는 함께 낸다.
 
 ```bash
@@ -129,20 +159,55 @@ for p in sorted(glob.glob("docs/fcs-context-*.md")) + ["docs/conventions.md"]:
         if t and t.group(1): moved[(d, m.group(1))] = t.group(1)
         elif TOMBISH.search(m.group(2)):
             sick.append(f"{p}:{n}  제목의 「이관」이 `[이관 → NN]`으로 안 읽힌다: {line.strip()}")
-KNOWN = {d for _, d in docs.items()}
-for (d, n), to in moved.items():
-    if to.split()[0] not in KNOWN:
-        sick.append(f"docs: {d} §{n} 의 이관 목적지 「{to}」는 없는 문서다")
 # 문서 지시자 — 끝에서 가장 가까운 것이 이긴다. **파일명도 문서 번호다**(사람만 읽던 것).
 # named group 필수: 위치 번호로 매기면 대안 하나만 끼워도 조용히 밀린다
+VOCAB = {"구현 문서": "02", "모듈 문서": "03", "도메인 문서": "01",
+         "conventions.md": "cv", "conventions": "cv", "규약": "cv"}
 DOCTOK = re.compile(r"(?:fcs-context-(?P<num>0[1-7])-[a-z0-9-]*\.md"
                     r"|(?P<impl>구현 문서)|(?P<mod>모듈 문서)|(?P<dom>도메인 문서)"
                     r"|(?P<cv>conventions(?:\.md)?|규약)"
                     r"|(?<![0-9A-Za-z.])(?P<bare>0[1-7]))\s*[)\]`»】]*\s*$")
 NAMED = {"impl": "02", "mod": "03", "dom": "01", "cv": "cv"}
-FOREIGN = re.compile(r"(계획|GPU Gems \d+)\s*$")   # 이 저장소 문서가 아닌 §
-STRONG = re.compile(r"fcs-context-(0[1-7])-|(?<![0-9A-Za-z.])(0[1-7])(?![0-9])")
+# 앵커에 닿지 않은 문서 단서 — 조사 하나에 밀려나는 자리를 잡는다 (「규약」만 300회 넘는다)
+STRONG = re.compile(r"fcs-context-0[1-7]-|conventions|규약|구현 문서|모듈 문서|도메인 문서"
+                    r"|(?<![0-9A-Za-z.])0[1-7](?![0-9])")
+FOREIGN = re.compile(r"(계획|GPU Gems \d+)\s*$")   # web/world 가 쓰는 **다른 문서**의 §
 CHAIN = re.compile(r"§\s?\d+(?:\.\d+)*\s*[·,]\s*$")   # 규약 2 위반: 둘째부터 번호 생략
+# 반례·묘비 자기언급을 끄는 표식 — **토큰 지정 · 문단 범위**다 (규약 7). 줄 단위·무차별이면
+# 재감기 한 번에 표식이 참조와 갈라지고 같은 줄의 살아 있는 참조까지 덤으로 꺼진다.
+# 끄려던 토큰이 그 문단에 없으면 그것도 실패다 — 표식 자신이 조용히 죽지 않게.
+DECL = re.compile(r"refcheck:ignore=([^>]*?)(?:\s*-->|$)")
+def norm(t): return re.sub(r"\s+", "", t)
+def hush_map(lines):
+    """줄번호 → (문단 id, 그 문단이 끄기로 한 토큰들). 빈 줄과 코드블록 경계로 끊는다.
+
+    코드블록 안과 **백틱이 직접 감싼**(공백 포함) 표식은 선언이 아니라 인용이다 — 이
+    스크립트 자신이 문서에 실려 있기 때문이다. 백틱 **쌍을 통째로** 지우면 안 된다:
+    표식이 우연히 백틱 span 안에 놓이면 진짜 선언이 지워진다(재감기로 실제로 겪었다).
+    """
+    out, cur, span, fence, pid, firsts = {}, [], [], False, 0, {}
+    def flush():
+        nonlocal cur, span, pid
+        if span:
+            toks = set()
+            for l in cur:
+                for m in DECL.finditer(re.sub(r"`\s*<!--.*?-->\s*`", "", l)):
+                    toks |= {norm(t) for t in m.group(1).split(",") if norm(t)}
+            for i in span: out[i] = (pid, toks)
+            firsts[pid] = span[0]; pid += 1
+        cur, span = [], []
+    for i, l in enumerate(lines, 1):
+        if l.lstrip().startswith("```"): flush(); fence = not fence; continue
+        if fence: continue
+        if l.strip(): cur.append(l); span.append(i)
+        else: flush()
+    flush()
+    return out, firsts
+
+DEST = set(docs.values()) | set(VOCAB)
+for (d, n), to in moved.items():
+    if to.split()[0] not in DEST:
+        sick.append(f"docs: {d} §{n} 의 이관 목적지 「{to}」는 없는 문서다")
 def doc_of(ctx):
     m = DOCTOK.search(ctx)
     if not m: return None
@@ -150,7 +215,8 @@ def doc_of(ctx):
 def tomb(d, sec):                                     # 묘비 자신과 그 하위 번호
     return next((((dd, n), v) for (dd, n), v in moved.items()
                  if dd == d and (sec == n or sec.startswith(n + "."))), None)
-bad, vague, gone, odd, seen = [], [], [], [], set()
+bad, vague, gone, odd, stale = [], [], [], [], []
+seen, skipped, hushed = set(), 0, 0
 src = [*glob.glob("docs/*.md"), *glob.glob("engine/**/*.py", recursive=True),
        *glob.glob("server/**/*.py", recursive=True), *glob.glob("flight/**/*.py", recursive=True),
        *glob.glob("scripts/**/*.py", recursive=True), *glob.glob("models/**/*.py", recursive=True),
@@ -160,15 +226,26 @@ src = [*glob.glob("docs/*.md"), *glob.glob("engine/**/*.py", recursive=True),
 for p in src:
     if "node_modules" in p or ".venv" in p: continue
     own, prev = docs.get(p), ""
-    for n, line in enumerate(open(p, encoding="utf-8", errors="ignore"), 1):
-        if "refcheck:ignore" in line: prev = line.rstrip(); continue
+    lines = open(p, encoding="utf-8", errors="ignore").read().split("\n")
+    hush, firsts = hush_map(lines); used = set()
+    for n, raw in enumerate(lines, 1):
+        line = DECL.sub("", raw)          # 선언 자신은 참조로 세지 않는다
         for m in re.finditer(r"§\s?(\d+(?:\.\d+)*)", line):
             # 규약 5의 줄바꿈이 번호와 §를 갈라놓는다 — 앞 줄 꼬리를 이어 푼다
             ctx = (prev + " " + line[:m.start()] if not line[:m.start()].strip()
                    else line[:m.start()])[-64:]
-            if FOREIGN.search(ctx): continue
+            # 외부 문서의 § — **web/world 안에서만** 건너뛴다(「계획」은 docs에서 보통 낱말이다)
+            if p.startswith("web/world/") and FOREIGN.search(ctx): skipped += 1; continue
             d, sec = doc_of(ctx), m.group(1)
-            if d is None and (own is None or CHAIN.search(ctx)):
+            unresolved = d is None and (own is None or CHAIN.search(ctx))
+            # **맨 토큰 선언은 맨 참조만 끈다** (규약 7). 맨 토큰은 규약 2가 금하는 형태
+            # 그 자체라, 그것으로 풀린 참조까지 끄면 문단 건너의 살아 있는 참조가 죽는다
+            cands = ({norm(f"§{sec}")} if unresolved else set())
+            if d or own: cands.add(norm(f"{d or own}§{sec}"))
+            pid, toks = hush.get(n, (None, set()))
+            hit = cands & toks
+            if hit: used |= {(pid, t) for t in hit}; hushed += 1; continue
+            if unresolved:
                 vague.append(f"{p}:{n}  §{sec}"); continue
             if d is None and STRONG.search(ctx):   # own으로 되돌아가는데 앞에 다른 문서가 있다
                 odd.append(f"{p}:{n}  §{sec} — 앞 문맥이 다른 문서를 말하는데 {own}로 풀린다")
@@ -177,12 +254,18 @@ for p in src:
             if t: gone.append(f"{p}:{n}  {d} §{sec} 는 이관됐다 → {t[1]}"); seen.add(t[0])
             elif (d, sec) not in head: bad.append(f"{p}:{n}  →  {d} §{sec}")
         prev = line.rstrip()
+    for pid, toks in {v[0]: v[1] for v in hush.values()}.items():   # **문단마다** 따진다
+        for t in sorted(toks - {t for (q, t) in used if q == pid}):
+            stale.append(f"{p}:{firsts[pid]}  표식이 끄려던 「{t}」가 그 문단에 없다")
 for name, rows in [("묘비 표기 이상", sick), ("끊긴 참조", bad), ("문서 번호 없는 참조", vague),
-                   ("이관된 절을 가리키는 참조", gone), ("문맥과 어긋난 해석", odd)]:
+                   ("이관된 절을 가리키는 참조", gone), ("문맥과 어긋난 해석", odd),
+                   ("죽은 표식", stale)]:
     print("\n".join(rows) or f"{name} 없음")
 for k, to in sorted(moved.items()):
     if k not in seen: print(f"i {k[0]} §{k[1]} [이관 → {to}] 가리키는 참조 없음 (번호는 계속 예약)")
-print(f"— 묘비 {len(sick)} · 끊김 {len(bad)} · 번호 없음 {len(vague)} · 이관됨 {len(gone)} · 어긋남 {len(odd)}")
-sys.exit(1 if sick or bad or vague or gone or odd else 0)
+print(f"— 묘비 {len(sick)} · 끊김 {len(bad)} · 번호 없음 {len(vague)} · 이관됨 {len(gone)}"
+      f" · 어긋남 {len(odd)} · 죽은 표식 {len(stale)}"
+      f" · 표식으로 끔 {hushed} · 외부 {skipped}건 건너뜀")
+sys.exit(1 if sick or bad or vague or gone or odd or stale else 0)
 EOF
 ```
