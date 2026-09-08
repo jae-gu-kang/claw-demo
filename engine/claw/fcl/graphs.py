@@ -27,6 +27,7 @@ from claw.blocks.controllers import PID
 from claw.blocks.filters import CommandFilter, Washout
 from claw.blocks.lookup import LookupBlock, PolyBlock
 from claw.blocks.base import Block
+from claw.codegen import irtypes as it
 from claw.codegen.ir import Graph, Node, Op, grouped
 from claw.tables import PolyTable
 from claw.codegen.ir_exec import GraphRunner
@@ -48,6 +49,79 @@ SCHEDULABLE = {
     "alt": _SCHEDULABLE,  # k_rate는 승강률 댐핑 k_hdot 자리다 (autopilot_nodes)
     "speed": ("kp", "ki"), "heading": ("kp", "ki"),
 }
+
+
+# ── 신호 타입 정본 ────────────────────────────────────────────────────────
+# **이름 하나에 타입 하나.** 그래프별 표를 손으로 따로 적으면 같은 `theta`가 그래프마다
+# 다른 타입을 갖는 것이 표현 가능해진다 — 일곱 그래프가 이 표를 부분집합으로 뽑아 쓴다.
+# 사람 주석에만 있던 단위 지식을 기계가 읽을 수 있게 옮긴 것이고, 단위 철자 자체는
+# `irtypes.QUANTITY_UNIT`이 정본이라 여기 다시 적지 않는다 (07 §8).
+SIGNAL_TYPES = {
+    "nav_valid": it.BOOL,
+    # 자세·공력각. 셋을 각도 하나로 묶는 것은 의도적이다 — `lim_cap = Sum(theta,
+    # a_margin)`처럼 자세각과 공력 마진을 더하는 정당한 자리가 있다 (07 §10)
+    "theta": it.ANGLE, "phi": it.ANGLE, "psi": it.ANGLE,
+    "alpha": it.ANGLE, "beta": it.ANGLE,
+    "p": it.ANGULAR_RATE, "q": it.ANGULAR_RATE, "r": it.ANGULAR_RATE,
+    "V": it.AIRSPEED, "h": it.ALTITUDE, "hdot": it.CLIMB_RATE, "mach": it.MACH,
+    # 스케줄 변수 — `schedule.SCHED_VARS`가 축으로 허용하는 셋이다. 여기 빠지면 그 축을
+    # 쓴 **정당한 설계**가 그래프 조립에서 죽는다(거짓 양성 = 화면의 500). `alt`는 `h`와
+    # 같은 물리량이고 이름만 다르다. `fuel`은 질량인데 질량은 아직 어휘에 없다 — 지어내지
+    # 않고 미지정으로 두되 그 이유를 선언에 남긴다
+    "alt": it.ALTITUDE,
+    "fuel": it.Type(desc="연료 질량 [kg] — 질량 물리량이 아직 어휘에 없다"),
+    # 명령은 그것이 명령하는 양과 같은 타입이다 — 오토파일럿이 실제로 빼는 짝이다
+    "cmd_speed": it.AIRSPEED, "cmd_alt": it.ALTITUDE, "cmd_heading": it.ANGLE,
+    "cmd_pitch": it.ANGLE, "cmd_hdot": it.CLIMB_RATE,
+    "speed_on": it.BOOL, "alt_on": it.BOOL, "heading_on": it.BOOL,
+    "pitch_on": it.BOOL, "hdot_on": it.BOOL,
+    # 축 내부 신호 — 상위 그래프에서는 노드지만 단독 그래프에서는 입력이 된다
+    "theta_cmd": it.ANGLE, "phi_cmd": it.ANGLE,
+    "att_err": it.ANGLE, "rate": it.ANGULAR_RATE,
+    # 타면 명령은 각도, 스로틀은 0~1 정규화 (conventions §5)
+    "de": it.ANGLE, "da": it.ANGLE, "dr": it.ANGLE, "thr": it.NORMALIZED,
+}
+
+
+# 게인은 **물리량 미지정(top)이 정답이다** — 하나로 묶으면 거짓이 되기 때문이다.
+# 자리마다 차원이 다르고, `kp` 하나만 봐도 셋이다(오차→출력의 비이므로 축이 결정한다):
+#
+#     축              오차     출력      kp        ki           rate 항
+#     SCAS 자세 3축   rad      rad       -         1/s          k_rate: s
+#     속도            m/s      0~1       s/m       1/m          (경로 없음)
+#     고도            m        rad       rad/m     rad/(m·s)    k_hdot: rad·s/m
+#     헤딩            rad      rad       -         1/s          (경로 없음)
+#
+# 그렇다고 **미선언으로 두면 "아무도 안 봤다"와 구분이 안 된다.** 그래서 물리량 없는
+# 실수라고 명시적으로 적는다 — 미지정은 누락이 아니라 결론이라는 것이 선언에 남는다.
+# top이라 무엇과도 통일되므로 검사에 거짓 양성을 만들지 않는다 (07 §8).
+SCHEDULED_GAIN = it.Type(desc="스케줄 게인 — 자리마다 차원이 달라 물리량을 정할 수 없다")
+
+# 이름은 **`SCHEDULABLE` 정본에서 파생한다** — 자리 목록을 두 벌 적지 않는다.
+# 단독 축 그래프는 접두 없이 `kp`·`ki`·`k_rate`를 그대로 포트로 쓴다.
+GAIN_PORT_TYPES = (
+    {f"g_{g}_{k}": SCHEDULED_GAIN for g, keys in SCHEDULABLE.items() for k in keys}
+    | {k: SCHEDULED_GAIN for k in _SCHEDULABLE}
+)
+
+
+def _types_for(names):
+    """**그래프 입력은 빠짐없이 선언된다** — 빠지면 이름을 대며 죽는다.
+
+    조용히 건너뛰면 오타 하나가 「선언했는데 아무도 안 보는」 상태로 굳는다. 새 신호를
+    들일 때 여기서 막히는 것이 그 앞을 통과해 검사만 반쪽이 되는 것보다 낫다.
+
+    이것은 이 파일의 일곱 그래프에만 거는 규칙이다. **모든** 그래프의 경계를 필수로
+    승격하는 것(= `Graph.__init__`이 미선언 입력을 거부)은 저장소 전체가 걸리는 별건이다.
+    """
+    table = SIGNAL_TYPES | GAIN_PORT_TYPES
+    missing = [n for n in names if n not in table]
+    if missing:
+        raise KeyError(
+            f"타입 선언이 없는 신호 {missing} — 정당한 신호면 SIGNAL_TYPES에 적고, "
+            "아니면 그래프 입력 쪽이 틀렸다(스케줄 축은 schedule.SCHED_VARS가 정본)"
+        )
+    return {n: table[n] for n in names}
 
 
 def _pre(prefix, suffix):
@@ -181,6 +255,14 @@ def scas_axis_nodes(
     return nodes, nm("sat")
 
 
+# 범용인 것은 **노드 함수**(`scas_axis_nodes`)지 이 빌더가 아니다 — 오토파일럿 속도축은
+# 노드 함수를 직접 쓰고 여기를 지나지 않는다. 이 빌더의 생산 소비자는 `fcl/scas.py`의
+# `ScasAxis`뿐이고, 그 `PARAM_DEFS`의 `out_lo`·`out_hi` 단위가 **rad**다. 그래서 산출물은
+# 타면각이다 — 같은 그래프의 입력 둘을 이미 각도·각속도로 적어 놓고 출력만 비우면
+# 앞뒤가 안 맞는다.
+AXIS_OUTPUT_TYPES = {"u": it.ANGLE}
+
+
 def scas_axis_graph(name, *, kp, ki, k_rate, out_lo, out_hi, washout_tau=0.0, scheduled=()):
     """SCAS 한 축을 단독 그래프로 — 증분 A의 수직 슬라이스."""
     sched = tuple(g for g in _SCHEDULABLE if g in scheduled)
@@ -190,7 +272,10 @@ def scas_axis_graph(name, *, kp, ki, k_rate, out_lo, out_hi, washout_tau=0.0, sc
         washout_tau=washout_tau, err_src="att_err", rate_src="rate",
         gain_ports={g: g for g in sched},
     )
-    return Graph(name, inputs=("att_err", "rate") + sched, nodes=nodes, outputs={"u": out})
+    outputs = {"u": out}
+    return Graph(name, inputs=("att_err", "rate") + sched, nodes=nodes, outputs=outputs,
+                 signal_types=_types_for(("att_err", "rate") + sched)
+                 | _typed_outputs(outputs, AXIS_OUTPUT_TYPES))
 
 
 # ── SCAS 3축 ──────────────────────────────────────────────────────────────
@@ -578,6 +663,19 @@ def ap_port_inputs():
     return tuple(f"g_{g}_{k}" for g, keys in AP_PORTS.items() for k in keys)
 
 
+# 오토파일럿·SCAS3의 산출물도 그래프 밖으로 나가는 값이다 — 게인에서 없앤 「낳는
+# 자리에선 무명, 받는 자리에선 유명」을 여기서도 닫는다.
+#
+# **값은 정본에서 파생한다.** 출력명은 신호명의 별칭일 뿐이라 타입을 다시 적으면 같은
+# `de`가 그래프마다 다른 타입을 갖는 것이 도로 표현 가능해진다 — 이 파일 머리말이
+# 금지한 바로 그 상태다. 표가 하는 일은 **철자가 어긋나는 자리를 잇는 것**뿐이다
+# (출력명 `throttle` ↔ 신호명 `thr`).
+AP_OUTPUT_TYPES = {"theta_cmd": SIGNAL_TYPES["theta_cmd"],
+                   "phi_cmd": SIGNAL_TYPES["phi_cmd"],
+                   "throttle": SIGNAL_TYPES["thr"]}
+SCAS3_OUTPUT_TYPES = {k: SIGNAL_TYPES[k] for k in ("de", "da", "dr")}
+
+
 def autopilot_graph(name="autopilot", *, ports=False, **params):
     """오토파일럿 단독 그래프. ports=True면 게인이 신호(스텝별 덮어쓰기 가능)."""
     inputs = AP_INPUTS + (ap_port_inputs() if ports else ())
@@ -589,7 +687,8 @@ def autopilot_graph(name="autopilot", *, ports=False, **params):
     nodes, outs = autopilot_nodes(
         "", srcs={u: u for u in inputs}, gain_ports=gain_ports, **params
     )
-    return Graph(name, inputs=inputs, nodes=nodes, outputs=outs)
+    return Graph(name, inputs=inputs, nodes=nodes, outputs=outs,
+                 signal_types=_types_for(inputs) | _typed_outputs(outs, AP_OUTPUT_TYPES))
 
 
 SCAS3_INPUTS = ("theta_cmd", "phi_cmd", "theta", "phi", "beta", "p", "q", "r")
@@ -611,8 +710,15 @@ def scas3_graph(name="scas", *, pitch, roll, yaw, ports=False):
         "", pitch=pitch, roll=roll, yaw=yaw,
         srcs={u: u for u in inputs}, gain_ports=gain_ports,
     )
-    return Graph(name, inputs=inputs, nodes=nodes,
-                 outputs={"de": outs["pitch"], "da": outs["roll"], "dr": outs["yaw"]})
+    outputs = {"de": outs["pitch"], "da": outs["roll"], "dr": outs["yaw"]}
+    return Graph(name, inputs=inputs, nodes=nodes, outputs=outputs,
+                 signal_types=_types_for(inputs)
+                 | _typed_outputs(outputs, SCAS3_OUTPUT_TYPES))
+
+
+def _sched_gain_types(groups):
+    """스케줄이 낳은 게인 노드 — 받는 포트와 같은 `SCHEDULED_GAIN`이다."""
+    return {nid: SCHEDULED_GAIN for keys in groups.values() for nid in keys.values()}
 
 
 def gain_schedule_graph(name="gain_schedule", *, tables, filter_tau):
@@ -622,7 +728,10 @@ def gain_schedule_graph(name="gain_schedule", *, tables, filter_tau):
         "", tables=tables, filter_tau=filter_tau, srcs={ax: ax for ax in used}
     )
     outputs = {f"{g}_{k}": nid for g, keys in groups.items() for k, nid in keys.items()}
-    return Graph(name, inputs=tuple(used), nodes=nodes, outputs=outputs)
+    # 게인을 **낳는 쪽**도 받는 쪽(`GAIN_PORT_TYPES`)과 같은 타입이다 — 안 붙이면 같은
+    # 게인이 낳는 자리에선 무명, 받는 자리에선 유명해진다
+    return Graph(name, inputs=tuple(used), nodes=nodes, outputs=outputs,
+                 signal_types=_types_for(used) | _sched_gain_types(groups))
 
 
 # ── α 리미터 ──────────────────────────────────────────────────────────────
@@ -656,11 +765,29 @@ def alpha_limiter_nodes(prefix, *, stall_table, margin, srcs):
 LIMITER_INPUTS = ("theta_cmd", "theta", "alpha", "mach")
 
 
+def _limiter_types(prefix):
+    """α 리미터 **내부** 신호 — 전부 각도이고 `active` 하나만 불리언이다.
+
+    두 가지를 선언으로 못박는 자리다.
+
+    첫째, `cap = Sum(theta, a_margin)`는 **자세각 + 공력 마진**이다. ANGLE을
+    자세각/공력각/타면각으로 쪼개고 싶은 유혹의 정당한 반례이고(07 §10), 쪼개는
+    순간 이 한 줄이 거부된다 — 카탈로그가 거친 이유가 주석이 아니라 선언이 된다.
+
+    둘째, `active`는 `gt`가 낳은 **진짜 불리언**인데 `limiter_active` 출력으로
+    `double`에 실려 나간다(07 §7). Phase 3에서 native 타입으로 내릴 때 어느 신호를
+    내리는지가 여기 이미 적혀 있다 — 그때 찾아다니지 않는다.
+    """
+    angles = ("stall", "alpha_max", "a_margin", "cap", "theta_lim")
+    return {_pre(prefix, s): it.ANGLE for s in angles} | {_pre(prefix, "active"): it.BOOL}
+
+
 def alpha_limiter_graph(name="alpha_limiter", *, stall_table, margin):
     nodes, outs = alpha_limiter_nodes(
         "", stall_table=stall_table, margin=margin, srcs={u: u for u in LIMITER_INPUTS}
     )
-    return Graph(name, inputs=LIMITER_INPUTS, nodes=nodes, outputs=outs)
+    return Graph(name, inputs=LIMITER_INPUTS, nodes=nodes, outputs=outs,
+                 signal_types=_types_for(LIMITER_INPUTS) | _limiter_types(""))
 
 
 # ── 엘레본 믹싱 (순수·무상태) ────────────────────────────────────────────
@@ -701,9 +828,36 @@ def mixer_nodes(prefix, *, elevon_lo, elevon_hi, rudder_lo, rudder_hi, k_diff_th
 MIXER_INPUTS = ("de", "da", "dr", "thr")
 
 
+# 믹서 산출물은 **그래프 밖으로 나가는 값**이다(`SurfaceCommand`, 07 §7). 내부 노드와
+# 달리 추론으로 얻는 것보다 선언으로 못박는 쪽이 맞다 — 그리고 여기가 `verify/units.py`가
+# 기록한 사고 자리다: 믹서 인자 순서가 뒤집혔는데 "전부 double이라" 컴파일이 통과해
+# δe·δa를 맞바꾼 채 대조했다. 타입 시스템을 만든 동기가 된 경계가 미선언이면 앞뒤가 안 맞는다.
+MIXER_OUTPUT_TYPES = {
+    "elevon_l": it.ANGLE, "elevon_r": it.ANGLE, "rudder": it.ANGLE,
+    "throttle_l": it.NORMALIZED, "throttle_r": it.NORMALIZED,
+}
+
+
+def _typed_outputs(out_map, types):
+    """출력 이름표를 **노드 id 선언**으로 옮긴다 — 접두가 붙어도 그대로 따라간다.
+
+    선언은 노드 id에 붙는다(출력명은 별칭일 뿐이다). 그래서 이름표 하나를 두고
+    단독 그래프와 최상위 조립이 함께 쓴다 — 접두마다 표를 새로 적지 않는다.
+
+    입력(`_types_for`)과 **같은 규약으로 죽는다**. 관대하게 두면 경계 출력이 하나
+    늘었을 때 아무도 말하지 않고 조용히 미선언으로 남는다 — 오늘은 거를 것이 없지만
+    다음 확장이 바로 그 구멍을 밟는다(출력명 `throttle` vs 표의 `thr`처럼).
+    """
+    missing = [n for n in out_map if n not in types]
+    if missing:
+        raise KeyError(f"타입 선언이 없는 경계 출력 {missing} — 그 그래프의 출력표에 적는다")
+    return {nid: types[name] for name, nid in out_map.items()}
+
+
 def mixer_graph(name="mixer", **params):
     nodes, outs = mixer_nodes("", srcs={u: u for u in MIXER_INPUTS}, **params)
-    return Graph(name, inputs=MIXER_INPUTS, nodes=nodes, outputs=outs)
+    return Graph(name, inputs=MIXER_INPUTS, nodes=nodes, outputs=outs,
+                 signal_types=_types_for(MIXER_INPUTS) | _typed_outputs(outs, MIXER_OUTPUT_TYPES))
 
 
 # ── 최상위 조립 ───────────────────────────────────────────────────────────
@@ -814,4 +968,12 @@ def fcl_graph(
         outputs["limiter_active"] = lim_out["active"]
         outputs["alpha_margin"] = lim_out["alpha_margin"]
 
-    return Graph(name, inputs=FCL_INPUTS, nodes=nodes, outputs=outputs, enable="nav_valid")
+    # 리미터가 없으면 그 노드도 없다 — 없는 신호에 타입을 달면 `Graph`가 거부한다
+    types = _types_for(FCL_INPUTS) | _typed_outputs(mix_out, MIXER_OUTPUT_TYPES)
+    if stall_table is not None:
+        types |= _limiter_types("lim")
+    if gain_tables:
+        types |= _sched_gain_types(gains)
+
+    return Graph(name, inputs=FCL_INPUTS, nodes=nodes, outputs=outputs, enable="nav_valid",
+                 signal_types=types)

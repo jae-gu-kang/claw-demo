@@ -189,15 +189,23 @@ class Graph:
 
     노드에 `grouped()`로 이름표가 붙어 있으면 `partitions`가 기능축 분할 단위를
     낸다 — 생성 C가 서브시스템별 파일로 쪼개진다. 실행에는 영향이 없다.
+
+    signal_types: {신호 이름: irtypes.Type} — **경계는 빠짐없이, 내부는 비워 둔다**.
+    그래프 입력과 밖으로 나가는 출력에는 다 붙이고, 내부 노드는 규칙 추론의 몫이라
+    두지 않는다(손으로 적으면 규칙과 두 벌이 되어 갈라진다). 비면 검사가 **아예 안
+    돈다**(기본값 None) — 그래서 그래프 하나씩 점진 도입이 가능하다. 타입은 읽히기만
+    하고 아무것도 만들지 않으므로 생성 C는 이것으로 한 바이트도 바뀌지 않는다
+    (07 §8 — 지문에도 안 들어간다).
     """
 
-    def __init__(self, name, inputs, nodes, outputs, enable=None):
+    def __init__(self, name, inputs, nodes, outputs, enable=None, signal_types=None):
         _check_ident(name, "그래프 이름")
         self.name = name
         self.inputs = tuple(inputs)
         self.nodes = tuple(nodes)
         self.outputs = dict(outputs)
         self.enable = enable
+        self.signal_types = dict(signal_types or {})
 
         for u in self.inputs:
             _check_ident(u, "그래프 입력명")
@@ -243,6 +251,13 @@ class Graph:
             raise ValueError(
                 f"{name}: 출력에 도달하지 않는 노드 {dead} — 생성 C에 dead code가 된다"
             )
+
+        if self.signal_types:
+            # 지연 import — 순환은 없다(irtypes는 dataclasses만 쓴다). 사는 것은 import
+            # 그래프의 모양이다: 선언이 없는 그래프는 이 모듈을 아예 안 만난다.
+            from claw.codegen.irtypes import check_declarations
+
+            check_declarations(name, self.signal_types, set(self.inputs) | node_ids)
 
     def _check_contiguous(self, key, what):
         """같은 값을 가진 노드는 연속이어야 한다 — 생성 C에서 한 덩이가 되기 때문.
