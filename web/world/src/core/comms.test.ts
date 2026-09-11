@@ -133,6 +133,27 @@ describe("nextSpeech", () => {
     assert.deepEqual(r3.action, { kind: "speak", index: 2 });
   });
 
+  it("끝에 닿은 정지는 말하던 대사를 끊지 않는다 — 일시정지와 다르다", () => {
+    const st: SpeechState = { scriptKey: "s1", spokenIdx: 2, lastT: 40, active: true };
+    const r = nextSpeech(st, now({ t: 40, index: 2, playing: false, ended: true }));
+    assert.equal(r.action.kind, "none"); // cancel이면 마지막 교신이 늘 잘린다
+    assert.equal(r.state.active, true);
+    assert.equal(r.state.spokenIdx, 2);
+  });
+
+  it("끝에 닿으며 새 대사에 도달했으면 그것까지 말한다 — 마지막 줄이 통째로 빠지지 않게", () => {
+    const st: SpeechState = { scriptKey: "s1", spokenIdx: 1, lastT: 38, active: false };
+    const r = nextSpeech(st, now({ t: 40, index: 2, playing: false, ended: true }));
+    assert.deepEqual(r.action, { kind: "speak", index: 2 });
+  });
+
+  it("음성이 꺼져 있으면 끝에서도 조용하다 — 끝 분기가 꺼짐을 덮지 않는다", () => {
+    const st: SpeechState = { scriptKey: "s1", spokenIdx: 1, lastT: 38, active: true };
+    const r = nextSpeech(st,
+      now({ t: 40, index: 2, playing: false, ended: true, enabled: false }));
+    assert.equal(r.action.kind, "cancel");
+  });
+
   it("표시 대사가 없으면(홀드 만료) 말하던 문장은 자연히 끝나게 둔다", () => {
     const st: SpeechState = { scriptKey: "s1", spokenIdx: 1, lastT: 25, active: true };
     const r = nextSpeech(st, now({ t: 28, index: null }));

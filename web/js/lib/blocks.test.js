@@ -871,3 +871,17 @@ test("시뮬 → 가상환경 → 영향성 인계가 실제로 배선돼 있다
   // 한 번 읽고 지운다 — 안 지우면 그냥 탭을 눌러 들어와도 패널이 저절로 열린다
   assert.match(inf, /store\.set\("influenceHandoff", null\)/, "인계를 소비하지 않는다");
 });
+
+test("가이드 투어 인계가 실제로 배선돼 있다 — 시뮬 인계는 한 번 읽고 지운다", () => {
+  // 투어(views/tour.js)는 탭을 넘나들며 순서를 쥔다. 배선이 끊기면 투어는 조용히
+  // 다른 미션을 보여 주거나 재생 앞에서 멈춘다 — 그 자리가 여기서 빨개진다.
+  // worldTour만 규약이 다르다: 가상환경은 **읽기만** 하고 수명은 투어가 쥔다
+  // (React effect에서 읽고 지우면 dev StrictMode 이중 마운트가 빈 키를 본다)
+  const tour = read("../views/tour.js");
+  assert.match(tour, /store\.set\("tourSim"/, "투어가 시뮬 탭에 미션을 안 넘긴다");
+  assert.match(tour, /store\.set\("worldTour"/, "투어가 가상환경에 재생을 안 건다");
+  assert.match(tour, /store\.set\("worldTour", null\)/, "투어가 건 재생을 거두지 않는다");
+  const sim = read("../views/sim.js");
+  assert.match(sim, /store\.get\("tourSim"\)/, "시뮬 탭이 투어 인계를 안 받는다");
+  assert.match(sim, /store\.set\("tourSim", null\)/, "인계를 소비하지 않는다");
+});

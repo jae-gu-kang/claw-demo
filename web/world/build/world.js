@@ -7038,6 +7038,18 @@ function nextSpeech(prev, now) {
       active: false
     });
   }
+  if (!now.playing && now.ended) {
+    if (now.index != null && now.index !== prev.spokenIdx) {
+      return {
+        state: { scriptKey: key, spokenIdx: now.index, lastT, active: true },
+        action: { kind: "speak", index: now.index }
+      };
+    }
+    return {
+      state: { scriptKey: key, spokenIdx: prev.spokenIdx, lastT, active: prev.active },
+      action: { kind: "none" }
+    };
+  }
   if (!now.playing) {
     return stop({ scriptKey: key, spokenIdx: prev.spokenIdx, lastT, active: false });
   }
@@ -7051,6 +7063,43 @@ function nextSpeech(prev, now) {
     state: { scriptKey: key, spokenIdx: prev.spokenIdx, lastT, active: prev.active },
     action: { kind: "none" }
   };
+}
+const str = (v2) => typeof v2 === "string" && v2 !== "" ? v2 : null;
+const num$1 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+function readTour(v2) {
+  if (v2 == null || typeof v2 !== "object") return null;
+  const o = v2;
+  const token = str(o.token);
+  const resultId = str(o.resultId);
+  if (token == null || resultId == null) return null;
+  const speed = num$1(o.speed);
+  return {
+    token,
+    resultId,
+    commsId: str(o.commsId),
+    // 0·음수·NaN 배속은 재생이 흐르지 않는다 — 투어가 영영 끝나지 않는다
+    speed: speed != null && speed > 0 ? speed : 1,
+    voice: o.voice === true,
+    endT: num$1(o.endT)
+  };
+}
+function tourReady(tour, s) {
+  if (s.chosen !== tour.resultId || s.shownId !== tour.resultId || !s.playable) return false;
+  return tour.commsId == null || s.commsKey === tour.commsId;
+}
+function tourMismatch(tour, s) {
+  if (s.resultIds.length === 0) return null;
+  if (!s.resultIds.includes(tour.resultId)) {
+    return "투어가 돌린 런이 결과 목록에 없습니다 — 저장소 보존 상한에 밀렸을 수 있습니다.";
+  }
+  if (s.chosen !== tour.resultId) return "다른 결과를 골라 투어를 멈췄습니다.";
+  return null;
+}
+function tourStopped(v2, tour) {
+  return readTour(v2)?.token !== tour.token;
+}
+function tourShouldEnd(tour, t2) {
+  return tour.endT != null && t2 != null && t2 >= tour.endT;
 }
 const BASE = "/api";
 const TERMINAL = /* @__PURE__ */ new Set(["done", "error", "cancelled"]);
@@ -7188,7 +7237,7 @@ async function findCommsFor(resultId) {
   const rows = await rawApi.get("/results");
   return rows.find((r2) => r2.kind === "llm_comms" && r2.parent === resultId)?.id ?? null;
 }
-function makeSpeech() {
+function makeSpeech(opts = {}) {
   const synth = typeof globalThis !== "undefined" && "speechSynthesis" in globalThis ? globalThis.speechSynthesis : null;
   if (synth == null) {
     return {
@@ -7222,8 +7271,10 @@ function makeSpeech() {
       u2.onend = () => {
         active = false;
       };
-      u2.onerror = () => {
+      u2.onerror = (ev) => {
         active = false;
+        const code = ev.error;
+        if (code && code !== "canceled" && code !== "interrupted") opts.onError?.(code);
       };
       pending = setTimeout(() => {
         pending = null;
@@ -45945,6 +45996,7 @@ class SceneController {
       if (atEnd(this.idx, this.n)) {
         this.playing = false;
         this.cb.onPlaying(false);
+        this.cb.onEnded?.();
       }
     }
     if (!this.dirty && !this.playing) return;
@@ -46252,14 +46304,41 @@ function WorldTab({ deps }) {
   const commsKeyRef = reactExports.useRef(null);
   const commsSubmitRef = reactExports.useRef(false);
   const chosenRef = reactExports.useRef(null);
+  const [voiceErr, setVoiceErr] = reactExports.useState(null);
+  const [tourStopNote, setTourStopNote] = reactExports.useState(null);
+  const tourRef = reactExports.useRef(null);
+  const tourReadRef = reactExports.useRef(false);
+  if (!tourReadRef.current) {
+    tourReadRef.current = true;
+    tourRef.current = readTour(deps.store?.get("worldTour"));
+  }
+  const tourPhaseRef = reactExports.useRef("idle");
+  const tourEndedRef = reactExports.useRef(false);
+  const tourEndCursorRef = reactExports.useRef(null);
   const speechRef = reactExports.useRef(null);
-  if (speechRef.current == null) speechRef.current = makeSpeech();
+  if (speechRef.current == null) speechRef.current = makeSpeech({ onError: setVoiceErr });
   const speechStateRef = reactExports.useRef(
     { scriptKey: null, spokenIdx: null, lastT: null, active: false }
   );
+  const emitTour = reactExports.useCallback((phase, reason) => {
+    const t2 = tourRef.current;
+    if (t2 == null) return;
+    deps.store?.set("worldTourState", { token: t2.token, phase, ...reason ? { reason } : {} });
+  }, [deps.store]);
+  const emitTourRef = reactExports.useRef(emitTour);
+  emitTourRef.current = emitTour;
+  const markEnded = reactExports.useCallback(() => {
+    tourPhaseRef.current = "ended";
+    tourEndedRef.current = true;
+    tourEndCursorRef.current = ctlRef.current?.cursor ?? null;
+    emitTourRef.current("ended");
+  }, []);
   reactExports.useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas == null) return;
+    tourPhaseRef.current = "idle";
+    tourEndedRef.current = false;
+    tourEndCursorRef.current = null;
     const abort = new AbortController();
     const setH = () => {
       const w2 = canvas.clientWidth;
@@ -46276,6 +46355,12 @@ function WorldTab({ deps }) {
       },
       onStatus: setStatus,
       onPlaying: setPlaying,
+      // **끝에 닿은 것은 이 신호뿐이다** — onPlaying(false)는 로드·거절·게임 진입·
+      // 일시정지에서도 온다. 투어의 마무리가 여기서 열린다.
+      onEnded: () => {
+        if (tourPhaseRef.current !== "playing") return;
+        markEnded();
+      },
       onStats: setStats,
       onGameWps: setGameWps
     });
@@ -46530,13 +46615,20 @@ function WorldTab({ deps }) {
   reactExports.useEffect(() => {
     const port = speechRef.current;
     if (port == null) return;
+    const ctl = ctlRef.current;
+    const atEndIdx = ctl != null && ctl.sampleCount > 0 && ctl.cursor >= ctl.sampleCount - 1;
+    if (tourEndedRef.current && ctl != null && tourEndCursorRef.current != null && ctl.cursor !== tourEndCursorRef.current) {
+      tourEndedRef.current = false;
+    }
     const { state, action } = nextSpeech(speechStateRef.current, {
       t: tNow,
       playing,
       speed,
       enabled: voiceOn && port.available && style !== "game" && comms != null,
       index: activeIndex,
-      scriptKey: commsKeyRef.current
+      scriptKey: commsKeyRef.current,
+      // 끝은 일시정지와 다르다 — 말하던 마지막 교신을 끊지 않는다
+      ended: !playing && (atEndIdx || tourEndedRef.current)
     });
     speechStateRef.current = state;
     if (action.kind === "speak" && comms != null) {
@@ -46549,7 +46641,69 @@ function WorldTab({ deps }) {
   reactExports.useEffect(() => () => {
     speechRef.current?.cancel();
   }, []);
-  const alert = status !== "" ? status : shownId !== null && chosen !== null && shownId !== chosen ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.` : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다." : null;
+  reactExports.useEffect(() => {
+    if (!playing) return;
+    tourEndedRef.current = false;
+    setTourStopNote(null);
+  }, [playing]);
+  reactExports.useEffect(() => {
+    setTourStopNote(null);
+    const tour = tourRef.current;
+    if (tour != null && tourPhaseRef.current === "ended" && chosen !== tour.resultId) {
+      setVoiceOn(false);
+      tourPhaseRef.current = "aborted";
+    }
+  }, [chosen]);
+  reactExports.useEffect(() => {
+    const tour = tourRef.current;
+    const ctl = ctlRef.current;
+    if (tour == null || ctl == null || tourPhaseRef.current !== "idle") return;
+    if (style === "game") return;
+    if (tourStopped(deps.store?.get("worldTour"), tour)) return;
+    if (!tourReady(tour, { chosen, shownId, playable, commsKey: commsKeyRef.current })) return;
+    tourPhaseRef.current = "playing";
+    const port = speechRef.current;
+    if (tour.voice && port?.available) setVoiceOn(true);
+    setSpeed(tour.speed);
+    ctl.setSpeed(tour.speed);
+    ctl.setCursor(0);
+    ctl.setPlaying(true);
+    emitTour("playing");
+  }, [chosen, shownId, playable, comms, style, emitTour, deps.store]);
+  reactExports.useEffect(() => {
+    const tour = tourRef.current;
+    if (tour == null) return;
+    if (tourPhaseRef.current === "ended" || tourPhaseRef.current === "aborted") return;
+    const reason = style === "game" ? "게임 모드로 바꿔 투어를 멈췄습니다." : tourMismatch(tour, { chosen, resultIds: results.map((r2) => r2.id) });
+    if (reason == null) return;
+    tourPhaseRef.current = "aborted";
+    ctlRef.current?.setPlaying(false);
+    speechRef.current?.cancel();
+    setVoiceOn(false);
+    emitTour("aborted", reason);
+  }, [chosen, results, style, emitTour]);
+  reactExports.useEffect(() => {
+    const tour = tourRef.current;
+    if (tour == null || tourPhaseRef.current !== "playing") return;
+    if (!tourStopped(deps.store?.get("worldTour"), tour)) return;
+    tourPhaseRef.current = "aborted";
+    ctlRef.current?.setPlaying(false);
+    speechRef.current?.cancel();
+    setVoiceOn(false);
+    setTourStopNote("가이드 투어가 중단돼 재생과 음성을 멈췄습니다 — 다시 [재생]을 누르면 이 런을 그대로 볼 수 있습니다.");
+  }, [tNow, deps.store]);
+  reactExports.useEffect(() => {
+    const tour = tourRef.current;
+    if (tour == null || tourPhaseRef.current !== "playing") return;
+    if (!tourShouldEnd(tour, tNow)) return;
+    markEnded();
+    ctlRef.current?.setPlaying(false);
+  }, [tNow, markEnded]);
+  reactExports.useEffect(() => {
+    if (voiceErr == null) return;
+    if (tourPhaseRef.current === "playing") emitTour("voice_error", voiceErr);
+  }, [voiceErr, emitTour]);
+  const alert = status !== "" ? status : tourStopNote !== null ? tourStopNote : shownId !== null && chosen !== null && shownId !== chosen ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.` : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다." : null;
   const drawers = [
     { key: "env", label: "환경", n: null },
     { key: "perf", label: "성능", n: null },
@@ -46746,7 +46900,7 @@ function WorldTab({ deps }) {
           className: voiceOn ? "primary" : "",
           "aria-pressed": voiceOn,
           disabled: comms == null || speechRef.current?.available !== true,
-          title: speechRef.current?.available !== true ? speechRef.current?.reason ?? "음성 합성을 쓸 수 없습니다" : comms == null ? "대본이 없습니다 — [교신 대본]으로 만듭니다" : `교신 음성 (배속 ${SPEECH_MAX_SPEED}× 초과에서는 자막만)`,
+          title: speechRef.current?.available !== true ? speechRef.current?.reason ?? "음성 합성을 쓸 수 없습니다" : voiceErr != null ? `음성이 막혔습니다 (${voiceErr}) — 자막만 흐릅니다` : comms == null ? "대본이 없습니다 — [교신 대본]으로 만듭니다" : `교신 음성 (배속 ${SPEECH_MAX_SPEED}× 초과에서는 자막만)`,
           onClick: () => setVoiceOn((v2) => !v2),
           children: "음성"
         }

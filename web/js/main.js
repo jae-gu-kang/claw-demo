@@ -2,8 +2,9 @@
 
 import { api } from "./api.js";
 import { clear } from "./dom.js";
-// 전역 질문 위젯 — 라우트 뷰가 아니다 (VIEWS 밖: blocks.test.js nav 가드와 무관)
+// 전역 질문 위젯·가이드 투어 — 라우트 뷰가 아니다 (VIEWS 밖: blocks.test.js nav 가드와 무관)
 import * as ask from "./views/ask.js";
+import * as tour from "./views/tour.js";
 import * as autocode from "./views/autocode.js";
 import * as autodesign from "./views/autodesign.js";
 import * as blocks from "./views/blocks.js";
@@ -61,3 +62,4 @@ route();
 refreshHealth();
 setInterval(refreshHealth, 5000);
 ask.mount(); // 전역 질문 위젯 — 탭 전환(#view 교체)에 영향받지 않는 body 크롬
+tour.mount(); // 가이드 투어 — 탭을 넘나들며 순서를 쥐어야 해서 같은 자리에 산다

@@ -6,7 +6,13 @@
 
 import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
-import { buildModes, buildWaypoints, COND_KINDS, LON_AXES, pathUsage } from "../lib/mission.js";
+import { COND_KINDS, LON_AXES, pathUsage } from "../lib/mission.js";
+// 요청 조립·기본 미션·실행 조건 기본값은 lib가 정본 — 가이드 투어(views/tour.js)가
+// **같은 조립**을 쓴다. 두 벌이면 투어가 돌린 미션과 이 표가 조용히 갈린다
+import {
+  applyActuatorSchema, appliedFrom, buildSimRequest, defaultModeRows, defaultWpRows,
+  initialForm, RUNWAY_HDG,
+} from "../lib/simrequest.js";
 import { planeViews, wpMarks } from "../lib/plot.js";
 import { atEnd as cursorAtEnd, dtSample, indexAt, isPlayable } from "../lib/playcursor.js";
 import { dryRun, normalizeDraft } from "../lib/missiondraft.js";
@@ -21,74 +27,12 @@ import { createDutyPanel, invalidate as dutyInvalidate } from "./duty.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
 import { createProfileChart, createWpMap } from "./wpmap.js";
 
-// 기본 미션 = **발사대에서 떠서 활주로에 선다** (01 §3.3.1 이륙~착륙).
-// 발사 → 상승 → 순항 → 접근 → 플레어 → 미끄럼 → 정지.
-//
-// 종방향 축이 단계마다 갈린다 — launch·climb·rollout은 **피치**(고도 루프를 거칠
-// 이유가 없는 자세 구간), approach·flare는 **강하율**(어느 고도가 아니라 내려가는
-// 속도를 잡는 구간), cruise만 **고도**다. 셋은 배타라 한 모드에 하나씩만 들어간다.
-//
-// 수치는 엔진 실측으로 정했다. 이탈속도·플레어 개시·미끄럼은 engine test_landing과
-// 같은 값이고, **climb·cruise는 일부러 다르다** — 저쪽은 250/300 m라 다운레인지가
-// 10.8 km인데, 이쪽은 지형 팩 안에 들어오도록 180/200 m로 낮춰 8.0 km로 줄였다
-// (7.9였다가 cruise 이탈이 time_ge 15 → path_done으로 바뀌며 264 m 늘었다 — 여전히
-//  core ±12 km 안):
-//   이탈 81.5 m/s = 1.15 × 트림 실속속도 70.9 — α_stall 0.40에서 CL 1.40이 나오지만
-//   거기까지 가려면 상향 엘러본이 필요하고 그것이 양력을 깎아 실제 최대 트림 CL은 1.169다
-//   플레어 개시 20 m·kp_vs 0.08 → 접지 −1.0 m/s (5 m에서는 0.9 s뿐이라 −4.6)
-//   접지 후 미끄럼 870 m — 고흥 활주로 실측 1,205 m에서 접지 창은 335 m뿐이다
-//   (기본 미션은 활주로가 아니라 한참 북쪽에 내린다 — 화면이 그것을 숨기지 않도록
-//    착륙 요약이 "접지 지점" 행에 활주로 축 기준 실제 값을 낸다. 여기에 그 수를 적어
-//    두면 프로파일이 바뀔 때마다 조용히 낡는다 — lib/replay.js landingSummary)
-//
-// 이 값들은 엔진 기본값의 사본이 아니라 **미션 시나리오**라 02 §5.5의 "엔진 기본값
-// 재기술" 대상이 아니다 (lib/loops.js DEFAULT_LOOPS와 같은 부류). 엔진 회귀 미션
-// (test_mission — 지면 미장착 순항 시나리오)은 그대로 남아 있다.
-const CLIMB_PITCH = "0.3665"; // [rad] 21° — α 리미터 한계까지 기수를 든다
-// 고흥 활주로 진방위 실측 (lib/site.js ← data/geo/goheung-runway.json). 미션 헤딩과
-// 활주로 칸의 **초기값**이 같은 상수에서 나온다 — 헤딩 0으로 날던 때는 10 km 뒤에
-// 축에서 595 m 벌어져 있었고, 맞추고 나니 29 m다. 다만 렌더 뒤로는 두 칸이 독립이라
-// 한쪽만 고치면 다시 벌어진다. 그때 어긋남을 말해 주는 것은 이 상수가 아니라
-// 착륙 요약의 접지 위치 줄이다.
-const RUNWAY_HDG = String(GOHEUNG.runwayHeadingRad); // [rad] 3.417°
-let modeRows = [
-  { name: "launch", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH, heading: RUNWAY_HDG,
-    exitKind: "off_rail", exitValue: "", next: "climb" },
-  { name: "climb", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH, heading: RUNWAY_HDG,
-    exitKind: "alt_ge", exitValue: "180", next: "cruise" },
-  // 순항 헤딩은 "path" — 기본 웨이포인트(아래 wpRows)를 따라 날고, 소진(path_done)이
-  // 접근 진입을 정한다. 종전 time_ge 15는 경로를 15 s만 따르다 시계로 포기하고
-  // 활주로 방위로 되돌아갔다(실측: 왼쪽 −3° WP 열에서 pe −100까지 갔다가 +4로 복귀)
-  // — 웨이포인트를 찍어도 비행이 안 바뀌는 첫 번째 이유였다 (사용자 제기).
-  { name: "cruise", speed: "88", lonAxis: "alt", lonValue: "200", heading: "path",
-    exitKind: "path_done", exitValue: "", next: "approach" },
-  // 3° 활공: 88 m/s · sin3° ≈ 4.6 m/s
-  { name: "approach", speed: "88", lonAxis: "hdot", lonValue: "-4.8", heading: RUNWAY_HDG,
-    exitKind: "alt_le", exitValue: "20", next: "flare" },
-  { name: "flare", speed: "80", lonAxis: "hdot", lonValue: "-0.8", heading: RUNWAY_HDG,
-    exitKind: "on_ground", exitValue: "", next: "rollout" },
-  { name: "rollout", speed: "0", lonAxis: "pitch", lonValue: "0", heading: RUNWAY_HDG,
-    exitKind: "speed_le", exitValue: "0.5", next: "stopped" },
-  { name: "stopped", speed: "0", lonAxis: "pitch", lonValue: "0", heading: "",
-    exitKind: "time_ge", exitValue: "1e9", next: "" },
-];
-// 기본 웨이포인트 — 활주로 축 위 2.6·3.3 km. cruise가 heading="path"라 웨이포인트
-// 없이는 엔진이 구성을 거부한다(422: 경로추종기 없음) — 기본 상태가 실행 불가면
-// 안 되므로 직진 이착륙 미션을 **축 위 웨이포인트로** 그대로 재현한다. 좌표를
-// 리터럴 대신 방위에서 계산하는 이유는 RUNWAY_HDG와 같은 상수를 공유하기 위해서다
-// (활주로 방위가 바뀌면 함께 돈다 — 리터럴이면 조용히 축을 벗어난다).
-//
-// 거리 실측 근거: 순항 진입이 t=15.06 s·1,440 m라 2.6 km 첫 점이 즉시 소진되지
-// 않고, path_done이 3,197 m에서 떠 종전 time_ge 15의 이탈 지점(2,921 m)과 비슷하다.
-// 정지 101.4 s·다운레인지 8.0 km — t_end 200 안이고 지형 팩 core(±12 km) 안이다.
-// 고도 칸은 비워 둔다(세로는 cruise의 고도 200이 낸다) — 고도를 넣는 순간
-// "전부 있거나 전부 없거나" 규칙과 alt="path" 전환이 사용자 몫이 된다.
-const axisWp = (dist) => ({
-  n: String(Math.round(dist * Math.cos(GOHEUNG.runwayHeadingRad))),
-  e: String(Math.round(dist * Math.sin(GOHEUNG.runwayHeadingRad))),
-  d: "",
-});
-let wpRows = [axisWp(2600), axisWp(3300)];
+// 기본 미션(발사 → 상승 → 순항 → 접근 → 플레어 → 미끄럼 → 정지)과 기본 웨이포인트,
+// 그 수치의 근거는 **lib/simrequest.js가 정본**이다 — 가이드 투어가 폼 없이 같은
+// 미션을 조립해야 해서 옮겼다. 여기서는 표의 초기값으로 사본을 받아 쓴다(표 편집이
+// 행을 제자리에서 고치므로 매번 새 사본이어야 한다).
+let modeRows = defaultModeRows();
+let wpRows = defaultWpRows();
 let lastReplay = null; // {body, waypoints, acceptRadius}
 let runningJobId = null;
 // 제출 시점 스냅샷 — 실행 중 편집이 재생 오버레이를 오염시키지 않도록 (리뷰 S3)
@@ -182,12 +126,6 @@ function checkField(input, label) {
   return field("", input, el("span", { style: "font-size:12px;" }, label));
 }
 
-/** 빈 칸은 0이 아니라 NaN — JSON에서 null이 되어 서버가 422로 답한다.
- *  `Number("")`가 0인 것이 조용한 오답의 통로다. */
-function blankIsNaN(value) {
-  return String(value).trim() === "" ? NaN : Number(value);
-}
-
 /** 수치 입력 — 칸 폭을 채운다 (mono 글꼴은 .num이 준다). */
 function numInput(value) {
   return el("input", { class: "num", style: FILL_ST, value });
@@ -233,6 +171,27 @@ export function render() {
       + "표·지도에서 다듬은 뒤 실행하세요. 수평 경로는 순항(헤딩 \"path\")이 따라가고, "
       + "고도까지 따르게 하려면 순항 종방향 축을 '고도'로 두고 값에 \"path\"를 적으세요.";
   }
+
+  // 가이드 투어 인계 (views/tour.js) — **한 번 읽고 지운다**(wpDraft와 같은 규약).
+  // 투어가 이미 조립·제출한 미션을 이 탭이 같은 표·지도·진행바로 보여 준다:
+  // 조립이 lib 한 벌이라(lib/simrequest.js) 투어가 돌린 것과 이 표가 갈리지 않는다.
+  // jobId가 null이면 초안이 사전 판정에 막힌 것 — 표에만 앉히고 실행하지 않는다
+  // (사유는 투어 카드가 말하고, 고쳐서 [시뮬 실행]하는 것은 여기서).
+  const tourSim = store.get("tourSim");
+  let tourApply = false;
+  let tourTookOver = null; // 투어 인계가 밀어낸 이전 실행 — 화면이 그 사실을 말한다
+  if (tourSim?.draft) {
+    store.set("tourSim", null);
+    lastDraft = tourSim.draft;
+    tourApply = true;
+    if (tourSim.jobId) {
+      // 이 탭에 돌던 잡이 있으면 감시를 놓게 된다 — 이 탭의 [시뮬 실행]은 이중 제출을
+      // 막고 사유를 내는데, 인계 경로가 그것을 조용히 지나치면 안 된다 (리뷰 지적)
+      if (runningJobId && runningJobId !== tourSim.jobId) tourTookOver = runningJobId;
+      runningJobId = tourSim.jobId;
+      runningSnapshot = tourSim.snapshot ?? { waypoints: [], acceptRadius: 0 };
+    }
+  }
   const errBox = el("div");
   const progressBox = el("div");
   const replayBox = el("div");
@@ -242,78 +201,54 @@ export function render() {
   // 블록도 탭 '시뮬에 적용' 값 — 작동기는 필드에 프리필(최종 편집권은 여기),
   // 항법은 제출 시 병합 (시드만 이 탭이 우선, 나머지 미지정분은 엔진 기본값)
   const actApplied = store.get("actuatorParams");
+  // 칸의 초기값은 **lib가 정본**이다(lib/simrequest.js DEFAULT_FORM — 각 값의 근거도
+  // 거기 있다). 가이드 투어가 폼 없이 조립할 때 쓰는 값과 같아야 "투어가 돌린 미션"과
+  // "이 표가 말하는 미션"이 갈리지 않는다. 작동기는 블록도 적용값이 있으면 그것이
+  // 앉는다(최종 편집권은 여기 폼).
+  const init = initialForm(actApplied);
   const f = {
-    // 기본 미션은 **발사대 위 정지**에서 출발한다 — 지상 평형해라 mach는 0이고
-    // alt는 비행 고도가 아니라 활주로 표고다 (엔진 trim_ground)
-    mach: numInput("0"),
-    alt: numInput("0"), // 활주로 표고 — 기준면 감시도 이 값이 된다
-    fuel: numInput("300"),
-    groundOn: el("input", { type: "checkbox", checked: true }),
-    // 방위·길이는 고흥 활주로 실측이다 — data/geo/goheung-runway.json 참조.
-    // 미끄럼 870 m가 1,205 m 안에 들어가지만, 그것은 **미끄럼이 짧다**는 뜻일 뿐
-    // 활주로에 내렸다는 뜻이 아니다 (lib/replay.js landingSummary는 접지 위치를 본다).
-    rwHeading: numInput(RUNWAY_HDG),
-    rwLength: numInput(String(GOHEUNG.runwayLengthM)),
-    launchOn: el("input", { type: "checkbox", checked: true }),
-    railLen: numInput("10"),
-    railAngle: numInput("0.2618"), // [rad] 15°
-    railExit: numInput("81.5"), // 1.15 × 트림 실속속도 70.9 → 33.9 g
-    rtkOn: el("input", { type: "checkbox", checked: true }),
-    // 측지 원점 — NED (0,0)이 지구상 어디인가. 엔진은 보지 않고 결과 meta에만 실린다.
-    // 이것이 없으면 3D 월드가 지형을 얹을 수 없다(같은 N·E가 어디인지 모르므로).
-    // 기본값은 고흥 활주로 **남단 임계** 실측값이다(항공영상에서 측정 —
-    // data/geo/goheung-runway.json에 방법과 검산이 있다). 남단인 이유는 활주로가
-    // 화면·판정 양쪽에서 "원점에서 heading 방향 length 구간"이기 때문이다.
-    // 기본 켜짐 — 끄면 결과에 원점이 없어 3D 월드가 지형을 얹지 못한다.
-    originOn: el("input", { type: "checkbox", checked: true }),
-    originLat: numInput(String(GOHEUNG.originLatDeg)),
-    originLon: numInput(String(GOHEUNG.originLonDeg)),
-    // 기본 미션은 100 s 안팎에 선다(순항 고도를 낮추며 짧아졌다 — 107/130은 엔진
-    // test_landing 쪽 시각이지 이제 이 미션의 시각이 아니다). 200은 그 두 배 여유다.
-    // 짧으면 서기 전에 끊긴다. **정확한 시각은 실행 후 착륙 요약이 말한다** — 여기에
-    // 적어 두면 프로파일이나 스케줄이 바뀔 때마다 조용히 낡는다
-    tEnd: numInput("200"),
-    // 도달 반경 [기본값] — 100 m. 종전 1,500 m는 선회 반경(940 m)보다 크게 잡아
-    // 확실히 잡히지만 통과 판정이 매우 헐거웠다.
-    //
-    // **하한은 유도가 실제로 내는 접근 거리가 정한다.** 순항 88 m/s·뱅크 한계
-    // 0.7 rad에서 선회 반경이 V²/(g·tanφ) ≈ 940 m라, LOS 추종은 임의로 작은 원을
-    // 잡지 못한다 — 목표를 지나쳤다 되돌기를 반복한다(순수추종의 알려진 거동).
-    // 실측(현 기본 미션 — 축 위 WP 2개): 첫 접근 최근접이 13.0 m라 20 m는 첫
-    // 바퀴에 잡고 완주하지만, 13 m로 줄이면 14.4 m로 스친 뒤 **바퀴마다 되레
-    // 멀어진다**(14 → 69 → 81 → 85 m, 주기 ~70 s) — 수렴이 아니라 발산이라
-    // t_end를 늘려도 못 잡고, 미션이 순항에서 멈춘 채 끝난다(touchdown None).
-    // 100 m는 WP 곁 7.8 m를 지나며 완주한다. 90° 선회를 낀 기하도 6.2 m까지
-    // 좁혔다. 종전 기본 웨이포인트(다른 기하)에서는 20 m가 28→36→47로 발산했다
-    // — 같은 값이 기하에 따라 되기도 안 되기도 한다는 실측.
-    //
-    // 그 하한은 **상수가 아니다** — 웨이포인트 기하 × 기체 선회 성능의 함수라
-    // 화면이 미리 판정할 수 없다. 그래서 폼은 값을 막지 않고 사유를 적어 둔다.
-    // 경로가 안 끝나면(path_done이 안 뜨면) 이 값을 먼저 의심할 것.
-    accept: numInput("100"),
-    navOn: el("input", { type: "checkbox", checked: true }),
-    seed: numInput("11"),
-    actOn: el("input", { type: "checkbox", checked: true }),
-    wn: numInput(String(actApplied?.wn ?? 30)),
-    zeta: numInput(String(actApplied?.zeta ?? 0.7)),
-    rate: numInput(String(actApplied?.rate_max ?? 10)),
-    fuelFlow: numInput("0.3"),
-    useGains: el("input", { type: "checkbox" }),
-    useAp: el("input", { type: "checkbox" }),
-    useScas: el("input", { type: "checkbox" }),
-    fp: el("input", { value: "web-sim-v1", style: FILL_ST }),
+    mach: numInput(init.mach),
+    alt: numInput(init.alt), // 활주로 표고 — 기준면 감시도 이 값이 된다
+    fuel: numInput(init.fuel),
+    groundOn: el("input", { type: "checkbox", checked: init.groundOn }),
+    rwHeading: numInput(init.rwHeading),
+    rwLength: numInput(init.rwLength),
+    launchOn: el("input", { type: "checkbox", checked: init.launchOn }),
+    railLen: numInput(init.railLen),
+    railAngle: numInput(init.railAngle),
+    railExit: numInput(init.railExit),
+    rtkOn: el("input", { type: "checkbox", checked: init.rtkOn }),
+    originOn: el("input", { type: "checkbox", checked: init.originOn }),
+    originLat: numInput(init.originLat),
+    originLon: numInput(init.originLon),
+    tEnd: numInput(init.tEnd),
+    accept: numInput(init.accept),
+    navOn: el("input", { type: "checkbox", checked: init.navOn }),
+    seed: numInput(init.seed),
+    actOn: el("input", { type: "checkbox", checked: init.actOn }),
+    wn: numInput(init.wn),
+    zeta: numInput(init.zeta),
+    rate: numInput(init.rate),
+    fuelFlow: numInput(init.fuelFlow),
+    useGains: el("input", { type: "checkbox", checked: init.useGains }),
+    useAp: el("input", { type: "checkbox", checked: init.useAp }),
+    useScas: el("input", { type: "checkbox", checked: init.useScas }),
+    fp: el("input", { value: init.fp, style: FILL_ST }),
   };
 
-  // 작동기 프리필 폴백(위 30·0.7·10)은 엔진 기본값의 사본 — 폼이 즉시 유효해야 해서
-  // 남기되, 스키마가 도착하면 사용자가 손대지 않은 값만 갱신해 스스로 어긋남을 고친다.
-  // (항법 기본값이 7개나 어긋난 채 돌던 전례 — 01 v0.19. 실패는 무시: 폴백으로 동작)
+  // 폼 DOM → 값 객체 (lib DEFAULT_FORM과 같은 키) — 조립은 lib가 한다.
+  // **제출 순간에** 읽는다: 폼을 연 시점이 아니라.
+  const readForm = () => Object.fromEntries(Object.entries(f).map(
+    ([k, node]) => [k, node.type === "checkbox" ? node.checked : node.value]));
+
+  // 작동기 폴백(lib ACT_FALLBACK)은 엔진 기본값의 사본이라 조용히 어긋날 수 있다 —
+  // 스키마가 도착하면 **손대지 않은 칸만** 갱신한다(판정은 lib, 여기는 DOM 대입).
+  // 실패는 무시: 폴백으로 동작한다 (항법 기본값 7개가 어긋난 채 돌던 전례 — 01 v0.19)
   if (!actApplied) {
     api.get("/registry/actuator/SecondOrderActuator/schema").then((s) => {
-      for (const [key, name, fallback] of
-        [["wn", "wn", 30], ["zeta", "zeta", 0.7], ["rate", "rate_max", 10]]) {
-        const d = s.properties?.[name]?.default;
-        if (d !== undefined && f[key].value === String(fallback)) f[key].value = String(d);
-      }
+      const next = applyActuatorSchema(
+        { wn: f.wn.value, zeta: f.zeta.value, rate: f.rate.value }, s);
+      for (const key of ["wn", "zeta", "rate"]) f[key].value = next[key];
     }).catch(() => {});
   }
 
@@ -488,79 +423,13 @@ export function render() {
     try {
       clear(errBox);
       clear(replayBox);
-      const req = {
-        trim: {
-          name: "start",
-          mach: Number(f.mach.value), alt: Number(f.alt.value), fuel: Number(f.fuel.value),
-          // 지상 평형인지 수평비행인지 — 활주로가 있으면 발사대/활주로 위 정지에서
-          // 출발한다. 엔진이 mach=0을 요구하므로 둘이 어긋나면 서버가 422로 답한다
-          condition: f.groundOn.checked ? "ground" : "level",
-        },
-        modes: buildModes(modeRows),
-        waypoints: buildWaypoints(wpRows),
-        accept_radius: Number(f.accept.value),
-        t_end: Number(f.tEnd.value),
-        // 활주로가 있어야 스키드가 달린다 — 없으면 지면 자체가 없어서 기체가
-        // h<0을 그대로 통과한다(접지·정지 판정도 불가)
-        ...(f.groundOn.checked ? { runway: {
-          elevation: Number(f.alt.value),
-          heading: Number(f.rwHeading.value),
-          length: Number(f.rwLength.value),
-        } } : {}),
-        // 빈 칸을 Number()에 그대로 넘기면 0이 된다 — 오타(NaN→null→422)와 달리
-        // (0,0)은 **유효하고 그럴듯한 틀린 값**이라 기니만 앞바다가 결과 meta에 박힌 채
-        // 저장된다. 다른 칸은 서버 제약(length gt=0 등)이 막아 주지만 원점은 안 막힌다.
-        // 빈 칸은 오타와 같은 길로 보내 서버가 422로 답하게 한다 (리뷰 지적).
-        ...(f.originOn.checked ? { origin: {
-          lat: blankIsNaN(f.originLat.value),
-          lon: blankIsNaN(f.originLon.value),
-        } } : {}),
-        ...(f.launchOn.checked ? { launch: {
-          length: Number(f.railLen.value),
-          elev_angle: Number(f.railAngle.value),
-          exit_speed: Number(f.railExit.value),
-        } } : {}),
-        fuel_flow: Number(f.fuelFlow.value),
-        fingerprint: f.fp.value,
-      };
-      const snapshot = { // 제출 시점 캡처 (리뷰 S3)
-        waypoints: req.waypoints ?? [],
-        acceptRadius: req.accept_radius,
-      };
-      if (req.waypoints === null) delete req.waypoints;
-      if (f.navOn.checked) {
-        // 미지정 파라미터는 엔진 ParamDef 기본값이 채운다 — 여기서 기본값을 다시 적으면
-        // 엔진과 조용히 어긋난다 (실제로 7개가 어긋난 채 돌고 있었다: pos_std·att_std·
-        // psi_std·rate_std·bias_std·delay_s·update_hz). 빈 dict도 오차 모델은 장착 —
-        // 미장착은 nav 필드 자체를 생략하는 경우뿐 (routes/sim.py::_build)
-        req.nav = { ...(store.get("navParams") ?? {}), seed: Number(f.seed.value) };
-        // 등급은 **이름으로** 고른다 — RTK 수치를 여기 적으면 엔진 RTK_FIXED와
-        // 조용히 어긋난다(02 §5.5, 항법 기본값 7개가 어긋난 채 돌던 전례와 같은 자리)
-        if (f.rtkOn.checked) req.nav_grade = "rtk";
-      }
-      if (f.actOn.checked) {
-        // 블록도 작동기 블록 적용값(pos 한계·initial 포함) 위에 이 탭 필드가 최종 덮어씀
-        req.actuators = { ...(store.get("actuatorParams") ?? {}),
-                          wn: Number(f.wn.value), zeta: Number(f.zeta.value),
-                          rate_max: Number(f.rate.value) };
-      }
-      // 편집본 체크됐는데 적용본이 없으면 기본값 실행을 조용히 하지 않고 알림 (리뷰 Nit3)
-      const missing = [];
-      if (f.useGains.checked) {
-        if (store.get("gainTables")) req.gain_tables = store.get("gainTables");
-        else missing.push("편집 게인 (게인 탭 '시뮬에 적용' 필요)");
-      }
-      if (f.useAp.checked) {
-        // 블록도 AP 블록 편집값 (전체 kwargs)
-        if (store.get("autopilotParams")) req.autopilot = store.get("autopilotParams");
-        else missing.push("편집 AP (블록도 탭 오토파일럿 블록 '시뮬에 적용' 필요)");
-      }
-      if (f.useScas.checked) {
-        // 블록도 SCAS 축 편집값 — 세 축이 한 벌이다 (서버가 부분 주입을 거부한다)
-        if (store.get("scasParams")) req.scas = store.get("scasParams");
-        else missing.push("편집 SCAS (블록도 탭 SCAS 축 페이지 '시뮬에 적용' 필요)");
-      }
+      // 조립은 **lib 한 벌**이다 — 가이드 투어(views/tour.js)가 같은 함수로 같은
+      // 요청을 만든다. 표가 틀리면 여기서 던진다(검증 정본 buildModes·buildWaypoints).
+      // 적용값(store 5키)은 **제출 순간에** 읽는다.
+      const { req, snapshot, missing } = buildSimRequest(
+        readForm(), modeRows, wpRows, appliedFrom((k) => store.get(k)));
       if (missing.length) {
+        // 편집본 체크됐는데 적용본이 없으면 기본값 실행을 조용히 하지 않고 알림 (리뷰 Nit3)
         errBox.append(el("div", { class: "error-box" },
           `적용된 편집값 없음 — 기본값으로 실행됨: ${missing.join(", ")}`));
       }
@@ -1003,6 +872,15 @@ export function render() {
   if (lastReplay) renderReplay(replayBox);
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
   paintDraftResult(); // 재진입 — 적용 전 초안이 남아 있으면 미리보기 복원
+  // 투어가 넘긴 미션을 표·지도·폼에 앉힌다 — 위에서 runningJobId도 이어받았으므로
+  // watch() 재부착이 그 잡의 진행바를 그대로 붙인다(같은 런을 두 화면이 말한다)
+  if (tourApply) applyDraft();
+  if (tourTookOver) {
+    // 조용히 놓지 않는다 — 그 잡은 서버에서 계속 돌지만 이 화면은 더 이상 안 본다
+    errBox.append(el("div", { class: "error-box" },
+      `이전 실행(${tourTookOver})의 진행 표시를 놓았습니다 — 투어가 건 런으로 바꿉니다. `
+      + "그 결과는 끝나면 결과 탭에 남습니다."));
+  }
   if (draftJobId) watchDraft(); // 초안 생성 중 재진입 — 같은 재부착 규약
   syncDraftUi();
   syncHandoff(); // 재진입 — 이전 런이 남아 있으면 인계 버튼이 켜진 채로 선다

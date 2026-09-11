@@ -96,6 +96,10 @@ export interface ControllerCallbacks {
   onResults(rows: SimResultRow[], chosen: string | null): void;
   onStatus(text: string): void;
   onPlaying(playing: boolean): void;
+  /** 재생이 **끝에 닿아** 멈췄다 — `onPlaying(false)`는 로드·재생 거절·게임 진입·
+   *  사용자 일시정지에서도 올라와 끝을 구분하지 못한다. 가이드 투어의 마무리가
+   *  이 신호로만 열린다. 선택 콜백이다(안 받아도 재생은 그대로 돈다). */
+  onEnded?(): void;
   onStats(s: FrameStats): void;
   /** 게임 모드 웨이포인트 목록 — 찍고/지울 때마다. UI 목록·보내기 버튼이 이걸 그린다. */
   onGameWps(wps: ReadonlyArray<readonly [number, number, number]>): void;
@@ -764,7 +768,11 @@ export class SceneController {
     if (this.playing && this.body && isPlayable(this.body.t)) {
       const next = indexAt(this.fromIdx, this.fromWall, now, this.speed, this.dt, this.n);
       if (next !== this.idx) { this.idx = next; this.dirty = true; }
-      if (atEnd(this.idx, this.n)) { this.playing = false; this.cb.onPlaying(false); }
+      if (atEnd(this.idx, this.n)) {
+        this.playing = false;
+        this.cb.onPlaying(false);
+        this.cb.onEnded?.(); // **끝에 닿은 것은 여기뿐이다** (투어 마무리의 신호)
+      }
     }
     if (!this.dirty && !this.playing) return;
     this.dirty = false;

@@ -5,6 +5,9 @@ import {
   type CommsLine, type SpeechState,
 } from "../core/comms.ts";
 import {
+  readTour, tourMismatch, tourReady, tourShouldEnd, tourStopped, type WorldTour,
+} from "../core/tour.ts";
+import {
   errorText, fetchCommsBody, fetchLlmStatus, findCommsFor, requestComms, watchJob,
   type LlmStatus, type SimResultRow,
 } from "../data/api.ts";
@@ -97,16 +100,64 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const commsKeyRef = useRef<string | null>(null); // 대본 식별(결과 id) — 발화 상태 리셋 키
   const commsSubmitRef = useRef(false); // await 앞 동기 플래그 — 유료 이중 제출 방지
   const chosenRef = useRef<string | null>(null); // 생성 완료 시점의 stale-run 판정용
+  // ── 가이드 투어 (D1) — 조율자는 호스트(web/js/views/tour.js)다. 여기는 그가 건
+  // `worldTour`를 **읽기만** 하고(수명은 조율자가 쥔다 — effect에서 읽고 지우면 dev
+  // StrictMode 이중 마운트의 두 번째가 빈 키를 본다), 재생을 켜고 끝을 알린다.
+  const [voiceErr, setVoiceErr] = useState<string | null>(null);
+  // 투어가 거둬져 재생을 멈춘 사유 — **이 화면 자신의 문장**으로 남긴다. 조율자 쪽
+  // 카드는 이미 사라졌고 되돌리는 신호도 보내지 않으므로, 여기 없으면 "왜 멈췄지"가
+  // 어디에도 안 남는다 (조용한 실패 금지)
+  const [tourStopNote, setTourStopNote] = useState<string | null>(null);
+  const tourRef = useRef<WorldTour | null>(null);
+  const tourReadRef = useRef(false);
+  if (!tourReadRef.current) {
+    tourReadRef.current = true;
+    tourRef.current = readTour(deps.store?.get("worldTour"));
+  }
+  const tourPhaseRef = useRef<"idle" | "playing" | "ended" | "aborted">("idle");
+  // 끝에 닿아 멈춘 정지 — 일시정지와 달리 말하던 교신을 끊지 않는다 (core/comms.ts).
+  // 끝난 **그 자리**에서만 참이다: 커서가 움직이면(스크럽) 내린다 — 안 그러면
+  // 되감는 동안 지나치는 대사를 하나씩 읽는다 (리뷰 지적)
+  const tourEndedRef = useRef(false);
+  const tourEndCursorRef = useRef<number | null>(null);
   const speechRef = useRef<SpeechPort | null>(null);
-  if (speechRef.current == null) speechRef.current = makeSpeech();
+  // 발화 실패 사유(정책 차단 등)를 화면으로 끌어올린다 — 자막만 흐르는 이유가
+  // 어디에도 안 남으면 "음성이 왜 안 나오지"로 끝난다 (조용한 비표시 금지)
+  if (speechRef.current == null) speechRef.current = makeSpeech({ onError: setVoiceErr });
   const speechStateRef = useRef<SpeechState>(
     { scriptKey: null, spokenIdx: null, lastT: null, active: false });
+
+  /** 투어에게 되돌리는 신호 — 토큰을 실어 지난 투어의 것이 섞이지 않게. */
+  const emitTour = useCallback((phase: string, reason?: string) => {
+    const t = tourRef.current;
+    if (t == null) return;
+    deps.store?.set("worldTourState", { token: t.token, phase, ...(reason ? { reason } : {}) });
+  }, [deps.store]);
+  // 컨트롤러 콜백은 마운트 시 한 번 만들어져 첫 렌더의 클로저를 쥔다 — ref로 잇는다
+  const emitTourRef = useRef(emitTour);
+  emitTourRef.current = emitTour;
+  /** 끝 기장 — 종료 경로 둘(자연 종료·끝 시각)이 같은 넉 줄을 각각 찍고 있었다. 끝에
+   *  할 일이 하나 늘 때 한쪽만 고쳐지지 않게 접는다 (리뷰 지적). 의존성이 없어
+   *  마운트 콜백이 첫 클로저를 쥐어도 같은 함수다. */
+  const markEnded = useCallback(() => {
+    tourPhaseRef.current = "ended";
+    tourEndedRef.current = true; // 말하던 마지막 교신을 끊지 않는다
+    tourEndCursorRef.current = ctlRef.current?.cursor ?? null; // 끝난 자리
+    emitTourRef.current("ended");
+  }, []);
 
   // **생성과 파괴가 대칭인 한 쌍**이다 — 그래야 StrictMode의 이중 실행에서도 컨텍스트가
   // 하나로 유지된다. 의존성이 비어 있는 것은 실수가 아니라 이 규율이다.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas == null) return;
+    // 컨트롤러가 새로 서면 투어 단계도 백지로 — ref는 마운트를 건너 살아남으므로,
+    // dev StrictMode의 재마운트에서 phase가 "playing"인 채 남으면 두 번째 마운트가
+    // 재생을 시작하지 않고 조율자는 90초 워치독을 기다리게 된다
+    tourPhaseRef.current = "idle";
+    tourEndedRef.current = false;
+    // 짝인 셋을 함께 백지로 — 커서만 남기면 스크럽 판정(끝난 자리 비교)이 언젠가 물린다
+    tourEndCursorRef.current = null;
     const abort = new AbortController();
 
     // 높이는 **컨트롤러보다 먼저** 정한다. 아래 실패 경로(WebGL 컨텍스트를 못 얻는
@@ -125,6 +176,12 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
       onResults: (rows, first) => { setResults(rows); setChosen((c) => c ?? first); },
       onStatus: setStatus,
       onPlaying: setPlaying,
+      // **끝에 닿은 것은 이 신호뿐이다** — onPlaying(false)는 로드·거절·게임 진입·
+      // 일시정지에서도 온다. 투어의 마무리가 여기서 열린다.
+      onEnded: () => {
+        if (tourPhaseRef.current !== "playing") return;
+        markEnded();
+      },
       onStats: setStats,
       onGameWps: setGameWps,
     });
@@ -412,10 +469,22 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   useEffect(() => {
     const port = speechRef.current;
     if (port == null) return;
+    const ctl = ctlRef.current;
+    // 끝에 닿아 멈춘 정지인가 — 커서 state는 rAF 폴링이라 끝에서 한 프레임 뒤처진다
+    const atEndIdx = ctl != null && ctl.sampleCount > 0 && ctl.cursor >= ctl.sampleCount - 1;
+    // 끝난 뒤 커서가 움직였으면(스크럽) "끝" 표시를 내린다 — 안 내리면 되감는 동안
+    // 지나치는 대사를 하나씩 읽는다. 자연 종료는 atEndIdx가 스스로 거짓이 되지만
+    // 투어 종료(정지+여유)는 데이터 끝이 아니라 이 플래그만 남는다 (리뷰 지적)
+    if (tourEndedRef.current && ctl != null && tourEndCursorRef.current != null
+      && ctl.cursor !== tourEndCursorRef.current) {
+      tourEndedRef.current = false;
+    }
     const { state, action } = nextSpeech(speechStateRef.current, {
       t: tNow, playing, speed,
       enabled: voiceOn && port.available && style !== "game" && comms != null,
       index: activeIndex, scriptKey: commsKeyRef.current,
+      // 끝은 일시정지와 다르다 — 말하던 마지막 교신을 끊지 않는다
+      ended: !playing && (atEndIdx || tourEndedRef.current),
     });
     speechStateRef.current = state;
     if (action.kind === "speak" && comms != null) {
@@ -428,13 +497,118 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   // 언마운트 — 탭을 떠나도 목소리가 남으면 안 된다 (dispose는 동기 unmount)
   useEffect(() => () => { speechRef.current?.cancel(); }, []);
 
+  // 재생이 다시 시작되면 "끝" 표시를 내린다 — 끝난 뒤의 스크럽·재생에서 발화 규칙이
+  // 일시정지와 같아야 한다
+  useEffect(() => {
+    if (!playing) return;
+    tourEndedRef.current = false;
+    setTourStopNote(null); // 다시 돌기 시작했다 — 멈춤 사유는 지난 이야기다
+  }, [playing]);
+
+  // 고른 런이 바뀌어도 멈춤 사유를 내린다 — 문장이 "**이 런을** 그대로 볼 수 있다"라
+  // 가리키는 런이 화면에서 바뀌면 그대로 거짓말이 되고, 지금 화면을 설명하는 줄
+  // (화면과 선택이 갈림)을 몇 동작 전의 지나간 사건이 가린다 (리뷰 지적)
+  useEffect(() => {
+    setTourStopNote(null);
+    // 투어가 켠 소리도 **투어 런을 떠날 때** 함께 내린다. 자연 종료는 마지막 교신을
+    // 살리려 일부러 끄지 않는데(markEnded), 그 예외를 여기서 닫지 않으면 "그 발화가
+    // 끝날 때까지"가 "투어 뒤 모든 런에 대해 영구히"로 번진다 — 발표자가 다음 런을
+    // 고르는 순간 옵트인한 적 없는 음성이 그 런을 읽기 시작한다 (리뷰 지적)
+    const tour = tourRef.current;
+    if (tour != null && tourPhaseRef.current === "ended" && chosen !== tour.resultId) {
+      setVoiceOn(false);
+      // 국면을 종단으로 옮겨 **떠나는 그 한 번**으로 끝낸다. "ended"는 되돌아오는 자리가
+      // 없어서, 이걸 안 하면 그 뒤 사용자가 직접 켠 음성까지 런을 바꿀 때마다 말없이
+      // 꺼진다 — 버튼이 사유 없이 뒤집히는 것도 조용한 실패의 이웃이다 (리뷰 지적)
+      tourPhaseRef.current = "aborted";
+    }
+  }, [chosen]);
+
+  // 투어 시작 — 투어 런이 **화면에 실제로 서고** 재생 가능하며 대본이 앉은 뒤 한 번만
+  useEffect(() => {
+    const tour = tourRef.current;
+    const ctl = ctlRef.current;
+    if (tour == null || ctl == null || tourPhaseRef.current !== "idle") return;
+    if (style === "game") return; // 게임에는 시뮬 시각이 없다 — 재생이 성립하지 않는다
+    // 스냅샷은 첫 렌더의 것이다 — **재생이 시작되기 전**에 [중단]을 눌러도 이 탭은
+    // 리마운트되지 않아 스냅샷이 그대로 남는다. 아래 멈춤 effect는 phase가 playing이라야
+    // 보므로 그 창은 아무도 안 본다: 그냥 두면 중단한 뒤에 커서가 0으로 되감기고
+    // 배속이 바뀌고 한 프레임 재생·음성이 번쩍인다 (리뷰 지적)
+    if (tourStopped(deps.store?.get("worldTour"), tour)) return;
+    if (!tourReady(tour, { chosen, shownId, playable, commsKey: commsKeyRef.current })) return;
+    tourPhaseRef.current = "playing";
+    const port = speechRef.current;
+    if (tour.voice && port?.available) setVoiceOn(true);
+    setSpeed(tour.speed);
+    ctl.setSpeed(tour.speed);
+    ctl.setCursor(0);
+    ctl.setPlaying(true);
+    emitTour("playing");
+  }, [chosen, shownId, playable, comms, style, emitTour, deps.store]);
+
+  // 투어가 어긋났다 — 목록에 없는 런(화면은 최신으로 조용히 폴백한다)·사용자가 바꾼
+  // 선택·게임 모드 전환. 조용히 다른 런을 투어로 틀지 않고 사유를 돌려준다.
+  useEffect(() => {
+    const tour = tourRef.current;
+    if (tour == null) return;
+    if (tourPhaseRef.current === "ended" || tourPhaseRef.current === "aborted") return;
+    const reason = style === "game"
+      ? "게임 모드로 바꿔 투어를 멈췄습니다."
+      : tourMismatch(tour, { chosen, resultIds: results.map((r) => r.id) });
+    if (reason == null) return;
+    tourPhaseRef.current = "aborted";
+    ctlRef.current?.setPlaying(false);
+    // 투어가 켠 소리는 **여기서도** 되돌린다. 멈춤 경로만 되돌리면, 어긋남으로 멈춘 뒤
+    // 재생 화면으로 돌아왔을 때 옵트인한 적 없는 음성이 다른 런을 말하기 시작한다.
+    // (자연 종료는 마지막 교신을 살리려 일부러 끄지 않는다 — 거기와는 다르다) (리뷰 지적)
+    speechRef.current?.cancel();
+    setVoiceOn(false);
+    emitTour("aborted", reason);
+  }, [chosen, results, style, emitTour]);
+
+  // 조율자가 투어를 거뒀다 — [중단]·실패에서 `worldTour`가 지워진다. 되돌아오는 구독
+  // 창구가 없어(마운트 계약은 get/set뿐) **재생 중 프레임마다** 읽는다. 안 보면 카드는
+  // "멈췄다"고 적어 둔 채 기체는 계속 날고 교신은 계속 말한다 (리뷰 지적)
+  useEffect(() => {
+    const tour = tourRef.current;
+    if (tour == null || tourPhaseRef.current !== "playing") return;
+    if (!tourStopped(deps.store?.get("worldTour"), tour)) return;
+    tourPhaseRef.current = "aborted"; // 시작 effect가 되살리지 않는다
+    ctlRef.current?.setPlaying(false);
+    speechRef.current?.cancel(); // 끝이 아니라 중단이다 — 말하던 줄을 끊는다
+    setVoiceOn(false); // 투어가 켠 소리를 되돌린다 (소리는 옵트인)
+    // 신호는 보내지 않는다 — 거둔 쪽이 조율자이고 그쪽 run은 이미 없다. 대신 **이 화면의
+    // 문장**으로 남긴다: 일시정지 중에 거둬지면 판독이 멈춰 이 effect가 잠들었다가,
+    // 투어와 무관해진 사용자가 혼자 [재생]을 누른 그 순간 깨어나 재생을 뺏는다 —
+    // 사유가 없으면 "눌렀는데 안 된다"로만 남는다 (리뷰 지적)
+    setTourStopNote("가이드 투어가 중단돼 재생과 음성을 멈췄습니다 — "
+      + "다시 [재생]을 누르면 이 런을 그대로 볼 수 있습니다.");
+  }, [tNow, deps.store]);
+
+  // 투어 종료 — 기체가 선 뒤 t_end까지 남은 빈 구간을 청중에게 보이지 않는다
+  // (끝 시각은 조율자가 재생 본문의 meta.phases에서 계산해 준다)
+  useEffect(() => {
+    const tour = tourRef.current;
+    if (tour == null || tourPhaseRef.current !== "playing") return;
+    if (!tourShouldEnd(tour, tNow)) return;
+    markEnded();
+    ctlRef.current?.setPlaying(false); // 자연 종료와 달리 아직 돌고 있다 — 여기서 세운다
+  }, [tNow, markEnded]);
+
+  // 음성이 막혔다(정책 차단 등) — 투어 카드도 그 사유를 말해야 한다
+  useEffect(() => {
+    if (voiceErr == null) return;
+    if (tourPhaseRef.current === "playing") emitTour("voice_error", voiceErr);
+  }, [voiceErr, emitTour]);
+
   // 화면이 지금 말해야 하는 한 줄 — 화면 밖에 두면 사용자가 사유를 못 본다.
-  // 순서가 곧 급한 순이다: 실패 > 화면과 선택이 갈림 > 결과 없음.
+  // 순서가 곧 급한 순이다: 실패 > 투어가 거둬져 멈춤 > 화면과 선택이 갈림 > 결과 없음.
   const alert = status !== "" ? status
-    : shownId !== null && chosen !== null && shownId !== chosen
-      ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.`
-      : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다."
-        : null;
+    : tourStopNote !== null ? tourStopNote
+      : shownId !== null && chosen !== null && shownId !== chosen
+        ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.`
+        : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다."
+          : null;
 
   const drawers: ReadonlyArray<{ key: DrawerKey; label: string; n: number | null }> = [
     { key: "env", label: "환경", n: null },
@@ -600,6 +774,8 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
             disabled={comms == null || speechRef.current?.available !== true}
             title={speechRef.current?.available !== true
               ? (speechRef.current?.reason ?? "음성 합성을 쓸 수 없습니다")
+              // 정책 차단 등으로 실제 발화가 실패했다 — 사유를 여기서도 말한다
+              : voiceErr != null ? `음성이 막혔습니다 (${voiceErr}) — 자막만 흐릅니다`
               : comms == null ? "대본이 없습니다 — [교신 대본]으로 만듭니다"
               : `교신 음성 (배속 ${SPEECH_MAX_SPEED}× 초과에서는 자막만)`}
             onClick={() => setVoiceOn((v) => !v)}

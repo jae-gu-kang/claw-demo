@@ -166,6 +166,44 @@ body:has(.tab-dark) .ask-fab { border: 1px solid rgba(255, 255, 255, .35); }
 .ask-input { flex: 1; min-width: 0; }
 .ask-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
+/* 가이드 투어 (D1) — 질문 위젯과 같은 전역 크롬. 트리거는 [? 질문] 왼쪽에 서고
+   카드는 **반대쪽 아래**다: 투어가 도는 동안 질문 패널을 함께 열 수 있어야 한다.
+   진행 중에는 카드가 낮아(스테퍼 + 한 줄) 가상환경 판독(.wv-hud — 캔버스 안쪽
+   좌하단)보다 아래에 앉지만, **마무리 카드는 길어져 그 위를 덮을 수 있다**
+   (캔버스 바닥이 뷰포트 바닥에서 200 px 안쪽이라 — 리뷰 실측). 재생이 끝난 뒤라
+   가리는 것이 마지막 프레임의 판독뿐이어서 그대로 두되, 높이를 조인다. */
+.tour-fab { right: 116px; }
+.tour-card {
+  position: fixed;
+  left: 22px;
+  bottom: 22px;
+  z-index: 20;
+  width: min(420px, calc(100vw - 44px));
+  max-height: min(420px, calc(100vh - 220px));
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+}
+.tour-head { display: flex; align-items: center; justify-content: space-between; margin: 0 0 8px; }
+.tour-close { border: none; background: none; font-size: 18px; line-height: 1; cursor: pointer; color: var(--muted); }
+.tour-row-input { display: flex; gap: 8px; }
+.tour-input { flex: 1; min-width: 0; }
+/* 진행 스테퍼 — 다섯 단계가 한 줄에. 색이 아니라 **글자 굵기와 바탕**으로도
+   갈린다(색각 이상에서 단계가 통째로 사라지지 않게). */
+.tour-steps { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 8px; }
+.tour-step { font-size: 11px; padding: 3px 9px; border-radius: 999px; background: var(--bg); color: var(--muted); }
+.tour-step.done { background: #e8f3ec; color: var(--ok); }
+.tour-step.active { background: var(--text); color: #fff; font-weight: 600; }
+.tour-step.failed { background: #fdeaea; color: var(--bad); font-weight: 600; }
+.tour-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.tour-rows { display: grid; gap: 5px; }
+.tour-row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 12px; }
+.tour-row .k { color: var(--muted); min-width: 74px; }
+.tour-row .v { font-family: var(--mono); font-weight: 600; }
+
 main { padding: 8px 24px 24px; max-width: 1440px; margin: 0 auto; }
 
 .panel {

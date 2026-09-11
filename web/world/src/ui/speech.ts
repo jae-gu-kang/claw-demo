@@ -2,7 +2,7 @@
  *
  * 브라우저 내장 합성이라 **외부 의존이 0이다** — CSP(`default-src 'self'`)도
  * 폐쇄망도 안 탄다. 지원이 없거나 실패하면 자막만 흐르고 사유를 문장으로
- * 남긴다(reason) — 조용한 비표시 금지 규약.
+ * 남긴다(reason·onError) — 조용한 비표시 금지 규약.
  */
 
 export interface SpeechPort {
@@ -12,7 +12,14 @@ export interface SpeechPort {
   cancel(): void;
 }
 
-export function makeSpeech(): SpeechPort {
+export interface SpeechOptions {
+  /** 발화 실패 사유 — SpeechSynthesisErrorEvent.error("not-allowed" 등). 브라우저
+   *  자동재생 정책에 막히면 자막만 흐르는데, 그 사실이 화면에 남아야 한다.
+   *  "canceled"·"interrupted"는 우리가 스스로 끊은 것이라 올리지 않는다. */
+  onError?: (reason: string) => void;
+}
+
+export function makeSpeech(opts: SpeechOptions = {}): SpeechPort {
   const synth =
     typeof globalThis !== "undefined" && "speechSynthesis" in globalThis
       ? (globalThis as unknown as { speechSynthesis: SpeechSynthesis }).speechSynthesis
@@ -49,7 +56,11 @@ export function makeSpeech(): SpeechPort {
       u.pitch = speaker === "TOWER" ? 0.85 : 1.1;
       active = true;
       u.onend = () => { active = false; };
-      u.onerror = () => { active = false; }; // 실패도 idempotence 가드를 정직하게
+      u.onerror = (ev: SpeechSynthesisErrorEvent) => {
+        active = false; // 실패도 idempotence 가드를 정직하게
+        const code = ev.error;
+        if (code && code !== "canceled" && code !== "interrupted") opts.onError?.(code);
+      };
       // cancel() 직후의 동기 speak는 Chrome에서 간헐적으로 조용히 떨어진다
       // (알려진 결함 패턴) — 한 틱 미뤄 회피한다
       pending = setTimeout(() => {

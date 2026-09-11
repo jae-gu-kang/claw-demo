@@ -106,6 +106,9 @@ export interface SpeechInput {
   enabled: boolean;
   index: number | null; // lineAt 결과 — 지금 화면에 있는 대사
   scriptKey: string | null; // 대본 식별(결과 id) — 바뀌면 백지
+  /** 재생이 **끝에 닿아** 멈췄다(자연 종료·투어 종료) — 일시정지와 다르다.
+   *  미지정 = false. 판정은 nextSpeech의 끝 분기. */
+  ended?: boolean;
 }
 
 export type SpeechAction =
@@ -149,6 +152,21 @@ export function nextSpeech(
       lastT,
       active: false,
     });
+  }
+  // 끝에 닿은 정지(자연 종료·투어 종료) — **끊지 않는다.** 일시정지와 다르다:
+  // 마지막 대사는 보통 "정지" 국면이라 여기서 cancel하면 그 교신이 늘 잘린다.
+  // 막 도달한 대사가 있으면 그것까지는 말한다(마지막 줄이 통째로 빠지지 않게).
+  if (!now.playing && now.ended) {
+    if (now.index != null && now.index !== prev.spokenIdx) {
+      return {
+        state: { scriptKey: key, spokenIdx: now.index, lastT, active: true },
+        action: { kind: "speak", index: now.index },
+      };
+    }
+    return {
+      state: { scriptKey: key, spokenIdx: prev.spokenIdx, lastT, active: prev.active },
+      action: { kind: "none" },
+    };
   }
   // 일시정지 — 끊되 진행은 기억 (재개 시 같은 대사 재발화 금지)
   if (!now.playing) {
