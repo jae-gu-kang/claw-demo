@@ -24,6 +24,31 @@ v0.75부터는 축이 하나뿐이라 이 혼동이 없다.
 
 ## 현행
 
+### v0.92 — 답을 말하는 대신 보여 준다 — 질문이 화면을 연다
+
+어느 탭에서든 우하단 [? 질문]으로 묻는다. 서버가 LLM에 12탭 지도와 최근
+산출물 메타(머리 30건 — "돌린 적 있나"류의 실재 근거)를 주고 `{answer,
+actions}`를 받아, 웹이 답을 띄우면서 **첫 액션으로 화면을 실제로 이동**시킨다
+— 데모의 최대 리스크(예상 밖 질문)를 하이라이트로 뒤집는 자리다. 본문 수치는
+LLM에 없다 — "얼마인가"류는 그 값이 사는 화면을 안내하고 지어내지 않는다
+(프롬프트 규칙, tool-use 루프는 후속).
+
+**탭 목록의 세 번째 사본 둘에 가드를 달았다.** 해시·순서 정본은 index.html
+nav ↔ main.js VIEWS(기존 blocks.test.js 대조)인데, 서버 ASK_SCHEMA의 view
+enum과 웹 lib/ask.js TAB_HASHES가 사본으로 늘었다 — test_ask.py(파이썬판
+정규식 대조)와 ask.test.js(deepEqual)가 각각 index.html 원문과 순서까지
+대조한다. 낡으면 LLM이 죽은 탭으로 안내하면서 아무것도 안 빨개지는 자리라
+가드 없이는 들일 수 없었다. 하위 해시(#blocks/scas/pitch)는 스키마가 자유
+문자열로 받고 웹 normalizeAnswer가 walkPages(SUBSYSTEMS) 전량 목록으로 방어
+검증한다 — 페이지가 틀리면 sub만 버리고 탭은 살린다(블록도 홈이 진입점이다).
+
+전역 위젯은 이 리포 최초가 셋이다: body 상시 크롬(document.body.append —
+verify.js 인쇄 오버레이의 자기완결 규율), window ESC 리스너(열려 있을 때만,
+preventDefault 없음 — 캔버스 스코프 Escape와 공존), position:fixed(z-index
+20 — 경쟁자가 sticky 거터 1뿐). 스킨은 밝다 — 어두운 스킨은 전부 탭 로컬
+접두라는 규약대로, 탭 무관 크롬은 헤더의 알약 언어를 쓴다. main.js import는
+VIEWS 밖이라 nav 정규식 가드에 안 걸린다.
+
 ### v0.91 — 세계가 말이 없었다 — 런 하나가 관제 교신이 된다
 
 가상환경 재생줄에 [교신 대본]이 붙었다. 누르면 서버가 그 sim 런의 **비행

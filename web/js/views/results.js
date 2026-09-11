@@ -30,6 +30,7 @@ const KIND_LABEL = {
   mission_draft: "미션 초안 (LLM)",
   llm_brief: "소견서 (LLM)",
   llm_comms: "교신 대본 (LLM)",
+  llm_ask: "문답 (LLM)",
 };
 const kindLabel = (k) => KIND_LABEL[k] ?? k ?? "—";
 

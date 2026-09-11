@@ -26,6 +26,7 @@ import os
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
+from claw_server.ask import ASK_SCHEMA, ASK_SYSTEM, ask_user
 from claw_server.brief import BRIEF_SCHEMA, BRIEF_SYSTEM, brief_user, prune
 from claw_server.comms import COMMS_SCHEMA, COMMS_SYSTEM, comms_user, flight_log
 
@@ -49,9 +50,9 @@ def _model() -> str:
 
 _UNAVAILABLE = (
     "CLAW_ANTHROPIC_API_KEY가 설정되지 않았습니다 — LLM 기능(미션 초안·결과 "
-    "브리핑·교신 대본)은 Anthropic Messages API를 호출하는, 이 서버의 유일한 "
-    "외부 통신입니다. 키를 넣고 재기동하면 켜지고, 폐쇄망 배포에서는 이 기능만 "
-    "꺼진 것이 정상입니다."
+    "브리핑·교신 대본·화면 질문)은 Anthropic Messages API를 호출하는, 이 서버의 "
+    "유일한 외부 통신입니다. 키를 넣고 재기동하면 켜지고, 폐쇄망 배포에서는 이 "
+    "기능만 꺼진 것이 정상입니다."
 )
 
 # ── LLM 출력 스키마 — 웹 폼 행 계약 (정본은 이 파일, 웹 normalizeDraft는 방어적 수용) ──
@@ -468,5 +469,60 @@ def submit_comms(req: BriefIn, request: Request, response: Response) -> dict:
         job.report(3, 3, message="완료")
 
     job = request.app.state.jobs.submit("llm_comms", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()
+
+
+class AskIn(BaseModel):
+    """전역 질문 — 어느 탭에서든 묻는 한 줄."""
+
+    question: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("question")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("질문이 공백뿐입니다")
+        return v
+
+
+@router.post("/llm/ask", status_code=202)
+def submit_ask(req: AskIn, request: Request, response: Response) -> dict:
+    """질문 → 답 + 화면 이동 액션 (Q&A 내비게이션 — 웹이 첫 액션으로 이동한다)."""
+    key = _api_key()
+    if not key:
+        raise HTTPException(status_code=503, detail=_UNAVAILABLE)
+    model = _model()
+    store = request.app.state.store
+
+    def work(job):
+        if job.report(0, 2, message=f"{model} 호출 중"):
+            return  # 협조적 취소 — 보고 2회 규약은 미션 초안과 같은 이유
+        # 최근 메타 머리 30건 — 건당 ~130B라 유계이고, "돌린 적 있나"류 질문의
+        # 실재 근거가 된다 (본문 수치는 안 준다 — ask.py 규칙 3)
+        metas = store.list()[:30]
+        raw = call_anthropic(api_key=key, model=model, system=ASK_SYSTEM,
+                             user=ask_user(req.question, metas),
+                             schema=ASK_SCHEMA)
+        if job.report(1, 2, message="답 정리 중"):
+            return
+        data = _extract_json(raw)
+        actions = data.get("actions") or []
+        store.save(
+            job.id,
+            {"kind": "llm_ask", "question": req.question,
+             "answer": str(data.get("answer") or ""), "actions": actions,
+             "model": model, "usage": raw.get("usage")},
+            meta={
+                "kind": "llm_ask",
+                "created": job.created,
+                "fingerprint": "",  # 문답은 형상 산출물이 아니다 — 계보 없음 그대로
+                "n": len(actions),
+            },
+        )
+        job.result_id = job.id
+        job.report(2, 2, message="완료")
+
+    job = request.app.state.jobs.submit("llm_ask", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"
     return job.to_dict()

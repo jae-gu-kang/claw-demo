@@ -397,6 +397,84 @@ def test_교신_대본도_키가_없으면_503(client):
     assert "CLAW_ANTHROPIC_API_KEY" in r.json()["detail"]
 
 
+# ── 전역 질문 (/llm/ask) ──────────────────────────────────────────────────
+
+_ANSWER = {"answer": "마진 맵 탭 히트맵에서 봅니다 — 칸을 누르면 보드선도까지.",
+           "actions": [{"view": "margins", "sub": "", "label": "마진 맵",
+                        "why": "PM·GM 히트맵이 전면이다"}]}
+
+
+def test_문답이_저장되고_산출물_메타가_동봉된다(client, wait_job, monkeypatch):
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    _seed(client, "askmeta01", "margin_map", {"kind": "margin_map"})  # 실재 근거
+    calls = {}
+
+    def fake(*, api_key, model, system, user, schema):
+        calls.update(system=system, user=user, schema=schema)
+        return _fake_raw(_ANSWER)
+
+    monkeypatch.setattr(llm_route, "call_anthropic", fake)
+    r = client.post("/api/llm/ask", json={"question": "실속 마진은 어디서 봐?"})
+    assert r.status_code == 202, r.text
+    job = wait_job(r.json()["id"])
+    assert job["status"] == "done", job
+
+    body = client.get(f"/api/results/{job['result_id']}").json()
+    assert body["kind"] == "llm_ask"
+    assert body["question"] == "실속 마진은 어디서 봐?"
+    assert body["answer"] == _ANSWER["answer"]
+    assert body["actions"] == _ANSWER["actions"]
+
+    meta = next(m for m in client.get("/api/results").json()
+                if m["id"] == job["result_id"])
+    assert meta["kind"] == "llm_ask"
+    assert meta["n"] == 1  # 액션 수
+
+    from claw_server.ask import ASK_SCHEMA, ASK_SYSTEM
+    assert calls["system"] is ASK_SYSTEM
+    assert calls["schema"] is ASK_SCHEMA
+    assert "실속 마진은 어디서 봐?" in calls["user"]
+    assert "margin_map" in calls["user"]      # 메타가 실재 근거로 실렸다
+    assert len(calls["user"]) < 20_000        # 유계 — 메타는 머리 30건뿐
+
+
+def test_문답_메타는_최신_30건만_동봉된다(client, wait_job, monkeypatch):
+    """유계가 이 엔드포인트의 명시 설계다 — 상한을 지우면 산출물이 쌓인 배포
+    (개발 서버 실측 232건)에서 프롬프트가 통짜 목록이 된다. 한 건 시딩으로는
+    슬라이스를 지워도 초록이라(리뷰 지적) 35건을 심어 개수를 센다."""
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    store = client.app.state.store
+    for i in range(35):
+        store.save(f"askcap{i:02d}", {"kind": "trim_batch"},
+                   meta={"kind": "trim_batch", "created": float(i),
+                         "fingerprint": "", "n": 1})
+    calls = {}
+
+    def fake(*, api_key, model, system, user, schema):
+        calls.update(user=user)
+        return _fake_raw(_ANSWER)
+
+    monkeypatch.setattr(llm_route, "call_anthropic", fake)
+    r = client.post("/api/llm/ask", json={"question": "뭐 돌렸어?"})
+    job = wait_job(r.json()["id"])
+    assert job["status"] == "done", job
+    assert calls["user"].count("askcap") == 30
+    assert "askcap34" in calls["user"]   # 최신은 실린다 (created 내림차순)
+    assert "askcap04" not in calls["user"]  # 머리 밖은 빠진다
+
+
+def test_빈_질문과_공백_질문은_422(client, monkeypatch):
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    assert client.post("/api/llm/ask", json={"question": ""}).status_code == 422
+    assert client.post("/api/llm/ask", json={"question": "  "}).status_code == 422
+
+
+def test_문답도_키가_없으면_503(client):
+    r = client.post("/api/llm/ask", json={"question": "아무거나"})
+    assert r.status_code == 503
+    assert "CLAW_ANTHROPIC_API_KEY" in r.json()["detail"]
+
+
 def test_상태_조회는_바깥으로_나가지_않는다(client, monkeypatch):
     """아웃바운드는 생성 잡의 call_anthropic 하나뿐이어야 한다 — 상태 조회가
     키 검증 등으로 나가기 시작하면 폐쇄망에서 탭을 여는 것만으로 걸린다
