@@ -20,6 +20,7 @@ from claw_server.routes import design as design_routes
 from claw_server.routes import gains as gains_routes
 from claw_server.routes import influence as influence_routes
 from claw_server.routes import jobs as jobs_routes
+from claw_server.routes import llm as llm_routes
 from claw_server.routes import results as results_routes
 from claw_server.routes import sim as sim_routes
 from claw_server.routes import system as system_routes
@@ -114,6 +115,9 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
         verify_routes.router,
         design_routes.router,
         world_routes.router,
+        # LLM 프록시(미션 초안) — 이 리포의 유일한 런타임 아웃바운드 (routes/llm.py
+        # 머리말). 키가 없으면 기능만 사유와 함께 꺼진다.
+        llm_routes.router,
     ):
         app.include_router(router, prefix="/api")
 

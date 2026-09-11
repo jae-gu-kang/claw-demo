@@ -12,9 +12,14 @@ requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
+    # routes/llm.py(미션 초안 — Anthropic Messages API 호출)의 유일한 아웃바운드
+    # 클라이언트. anthropic SDK 대신 httpx 직접 호출인 이유: 의존 최소·폐쇄망
+    # wheelhouse 부담 최소 (키 없으면 기능만 꺼지고 httpx는 import되지 않는다).
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
+# dev의 httpx는 TestClient용 — 런타임 항목과 하한을 같게 유지할 것 (갈리면 두 뜻이 된다)
 dev = ["pytest>=7", "httpx>=0.27"]
 
 [build-system]

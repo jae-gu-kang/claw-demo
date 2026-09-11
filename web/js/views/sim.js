@@ -9,6 +9,7 @@ import { clear, el, flagBadge, fmt } from "../dom.js";
 import { buildModes, buildWaypoints, COND_KINDS, LON_AXES, pathUsage } from "../lib/mission.js";
 import { planeViews, wpMarks } from "../lib/plot.js";
 import { atEnd as cursorAtEnd, dtSample, indexAt, isPlayable } from "../lib/playcursor.js";
+import { dryRun, normalizeDraft } from "../lib/missiondraft.js";
 import { flaggedNames, landingSummary, modeSpans, strideFor } from "../lib/replay.js";
 import { GOHEUNG, touchdownWindowM } from "../lib/site.js";
 import { fillMissingAltitudes, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
@@ -114,6 +115,11 @@ let openDrawer = null;
 // 잡이 끝나면 결과가 사는 패널을 열어 준다 — 화면에 결과가 있는데 패널이 닫혀
 // 있으면 "돌긴 돌았나"만 남고 무슨 일이 있었는지가 안 보인다 (영향성 runStatus 선례)
 let simDrawers = null;
+// LLM 미션 초안 — 잡·결과·입력 문구를 탭 재진입에도 유지 (runningJobId와 같은 규약).
+// lastDraft는 normalizeDraft 산출(+model) — 적용 전 초안이 탭 이탈로 사라지지 않게
+let draftJobId = null;
+let draftIntent = "";
+let lastDraft = null;
 
 const PLAY_FRAME_MS = 40; // 25 fps — 캔버스 3장 재그리기에 무리 없는 간격
 
@@ -567,6 +573,165 @@ export function render() {
     }
   };
 
+  // ── 미션 초안 (LLM) — 자연어 → 표 드래프트 (서버 routes/llm.py) ────────────
+  // 판단(정규화·사전 판정)은 lib/missiondraft.js. 적용이 이 클로저 안에 있는
+  // 이유: 표·지도·프로파일 재그리기(wpMap·profileChart·f)가 전부 render() 로컬이라
+  // 모듈 스코프에서는 닿지 못한다. 초안은 표에만 앉고 실행·검증 경로는 기존
+  // 그대로다 — [시뮬 실행]과 서버 422가 정본 (wpDraft를 안 쓰는 이유: 그 경로는
+  // 탭 진입 시 1회 소비라 탭 안 즉시 반영에 맞지 않는다).
+  const draftStatusLine = el("p", { class: "hint", style: "margin:0 0 8px" });
+  const draftIntentInput = el("textarea", {
+    rows: 3,
+    style: "width:100%; box-sizing:border-box; resize:vertical",
+    placeholder: "예: 발사 후 북쪽으로 5 km 나가 웨이포인트 둘을 돌고 되돌아와 활주로에 착륙",
+  });
+  draftIntentInput.value = draftIntent;
+  draftIntentInput.oninput = () => { draftIntent = draftIntentInput.value; };
+  const draftRunBtn = el("button", { class: "primary" }, "초안 생성");
+  const draftProgressBox = el("div");
+  const draftErrBox = el("div");
+  const draftResultBox = el("div");
+  const draftAppliedNote = el("span", { class: "hint" });
+  let llmStatus = null; // {available, model, reason} — 패널을 처음 열 때 조회
+
+  const showDraftErr = (e) =>
+    clear(draftErrBox).append(el("div", { class: "error-box" }, errorText(e)));
+
+  const syncDraftUi = () => {
+    const avail = !!llmStatus?.available;
+    draftIntentInput.disabled = !avail || !!draftJobId;
+    draftRunBtn.disabled = !avail || !!draftJobId;
+    clear(draftRunBtn).append(draftJobId ? "생성 중…" : "초안 생성");
+    clear(draftStatusLine);
+    if (llmStatus == null) draftStatusLine.append("서버 상태 확인 중…");
+    // 키 없는 배포 — 숨기지 않고 서버가 준 사유 문장을 그대로 낸다 (조용한 비표시 금지)
+    else if (!avail) draftStatusLine.append(llmStatus.reason ?? "사용할 수 없습니다.");
+    else {
+      draftStatusLine.append(
+        `모델 ${llmStatus.model} — 서버가 대신 호출한다 (이 서버의 유일한 외부 통신).`);
+    }
+  };
+
+  const loadLlmStatus = async () => {
+    try {
+      llmStatus = await api.get("/llm/status");
+    } catch (e) {
+      llmStatus = { available: false, reason: `상태 조회 실패 — ${errorText(e)}` };
+    }
+    syncDraftUi();
+  };
+
+  const applyDraft = () => {
+    const d = lastDraft;
+    if (!d || !d.modeRows.length) return; // 버튼 disabled와 같은 조건 — 방어만
+    modeRows = d.modeRows.map((r) => ({ ...r }));
+    wpRows = d.wpRows.map((r) => ({ ...r }));
+    const rc = d.runConditions;
+    for (const [k, input] of [["mach", f.mach], ["alt", f.alt], ["fuel", f.fuel],
+      ["tEnd", f.tEnd], ["accept", f.accept]]) {
+      if (rc[k] != null) input.value = rc[k];
+    }
+    if (typeof rc.groundOn === "boolean") f.groundOn.checked = rc.groundOn;
+    if (typeof rc.launchOn === "boolean") f.launchOn.checked = rc.launchOn;
+    wpMapView.view = null; // 새 목록에 맞춰 지도 시야 재fit (wpDraft 소비부와 동일)
+    renderModeTable(modeBox);
+    renderWpTable(wpBox, wpMap);
+    // f.accept·f.alt의 프로그램 대입은 input 리스너를 깨우지 않는다 — 지도의
+    // 도달반경 원과 프로파일 출발점을 여기서 직접 갱신한다
+    wpMap.refresh();
+    drawProfile();
+    drawWpNotice();
+    drawers.refresh(); // 웨이포인트·모드 칩의 개수 배지
+    clear(draftAppliedNote).append(
+      "적용됨 — 웨이포인트 표·비행 모드 표에서 다듬은 뒤 [시뮬 실행].");
+  };
+
+  const paintDraftResult = () => {
+    clear(draftResultBox);
+    const d = lastDraft;
+    if (!d) return;
+    // 정규화가 고친 것 + 검증 정본이 거부할 것 — 적용 전에 한자리에서 보인다
+    const problems = [...d.issues, ...dryRun(d)];
+    draftResultBox.append(
+      el("h3", { style: "margin:14px 0 4px; font-size:14px" }, "초안 미리보기",
+        d.model ? el("span", { class: "hint", style: "font-weight:400" }, ` — ${d.model}`) : null),
+      el("p", { style: "margin:0 0 4px" }, d.summary || "(요약 없음)"),
+      el("p", { class: "hint", style: "margin:0 0 4px" },
+        `모드 ${d.modeRows.length}행 (${d.modeRows.map((r) => r.name).join(" → ") || "—"})`
+        + ` · 웨이포인트 ${d.wpRows.length}개`
+        + (Object.keys(d.runConditions).length
+          ? ` · 실행 조건 ${Object.keys(d.runConditions).length}칸` : "")),
+      d.assumptions.length
+        ? el("p", { class: "hint", style: "margin:0 0 4px" },
+            "모델이 채운 가정 — ", d.assumptions.join(" · "))
+        : null,
+      d.warnings.length
+        ? el("p", { class: "hint", style: "margin:0 0 4px" },
+            "⚠ 모델 주의 — ", d.warnings.join(" · "))
+        : null,
+      problems.length
+        ? el("div", { class: "error-box" },
+            el("div", {}, "적용 전 확인 — 일부가 고쳐졌거나 그대로는 실행이 거부된다:"),
+            ...problems.map((m) => el("div", {}, `· ${m}`)))
+        : null,
+      el("div", { class: "row", style: "margin-top:8px; gap:8px; align-items:center" },
+        el("button", {
+          class: "primary",
+          onclick: applyDraft,
+          disabled: !d.modeRows.length,
+          title: d.modeRows.length
+            ? "현재 모드·웨이포인트 표를 이 초안으로 통째로 바꾼다"
+            : "모드 행이 없어 적용할 것이 없다",
+        }, "표에 적용"),
+        draftAppliedNote),
+    );
+  };
+
+  const watchDraft = () => attachProgress(draftProgressBox, draftJobId, {
+    onDone: async (job) => {
+      draftJobId = null;
+      syncDraftUi();
+      try {
+        if (job.status === "error") throw new Error(job.error);
+        if (cancelledWithoutResult(job)) {
+          showDraftErr(new Error("취소됨 — 저장된 초안 없음"));
+          return;
+        }
+        const body = await api.get(`/results/${job.result_id}`);
+        lastDraft = normalizeDraft(body.draft);
+        lastDraft.model = body.model;
+        clear(draftAppliedNote); // 새 초안 — 옛 "적용됨"이 남으면 이 초안을 말하는 것처럼 읽힌다
+        paintDraftResult();
+      } catch (e) {
+        showDraftErr(e);
+      }
+    },
+    onError: (e) => {
+      draftJobId = null;
+      syncDraftUi();
+      showDraftErr(e);
+    },
+  });
+
+  const runDraft = async () => {
+    if (draftJobId) return; // 버튼이 이미 꺼져 있다 — 방어만
+    const intent = draftIntentInput.value.trim();
+    if (!intent) {
+      showDraftErr(new Error("의도 문장을 입력하십시오 — 무엇을 비행할지 한두 문장이면 된다."));
+      return;
+    }
+    try {
+      clear(draftErrBox);
+      const submitted = await api.post("/llm/mission-draft", { intent });
+      draftJobId = submitted.id;
+      syncDraftUi();
+      watchDraft();
+    } catch (e) {
+      showDraftErr(e);
+    }
+  };
+  draftRunBtn.onclick = runDraft;
+
   // ── 실행 조건 — 여덟 묶음을 넷으로 다시 묶는다 ────────────────────────────
   // 종전에는 여덟 개가 한 카드 안에 격자로 늘어서 있었다. 그 배치의 문제는 개수가
   // 아니라 **위계가 없다**는 것이다: 매 실행마다 만지는 칸(시작점·t_end)과 한 번
@@ -707,6 +872,29 @@ export function render() {
             + "구간)·고도(순항) 중 하나. 헤딩에 \"path\"를 적은 모드만 웨이포인트를 따른다."),
           modeBox,
         ] },
+      // 초안은 「미션」 그룹 — wp·modes와 연속 배치여야 그룹 라벨이 한 번만 선다
+      // (stage.js startsGroup이 직전 def와 비교). 키가 없어도 칩은 숨기지 않는다 —
+      // 열면 서버가 준 사유 문장이 뜬다 (기능 부재와 키 부재를 화면이 구분해 말한다)
+      { key: "draft", label: "미션 초안 (AI)", group: "미션",
+        title: "자연어로 미션을 만들어 표에 채운다 — 서버 경유 LLM 호출, 실행은 사람이 한다",
+        build: () => {
+          // 이 render 안에서 한 번 — 탭 재진입이면 다시 조회한다 (서버
+          // 재기동·키 변경을 따라가는 부수 효과라 캐시로 굳히지 않는다)
+          if (llmStatus == null) loadLlmStatus();
+          return [
+            el("h2", {}, "미션 초안 — 자연어로"),
+            draftStatusLine,
+            el("p", { class: "hint", style: "margin:0 0 8px" },
+              "생성된 초안은 검토 후 [표에 적용]을 눌러야 표에 들어가고, 적용은 현재 "
+              + "모드·웨이포인트 표를 통째로 바꾼다. 비행 값의 검증은 기존 그대로다 — "
+              + "표의 검증과 실행 시점 서버 판정(422)이 정본이고 초안은 드래프트일 뿐이다."),
+            draftIntentInput,
+            el("div", { class: "row", style: "margin-top:8px; gap:8px" }, draftRunBtn),
+            draftProgressBox,
+            draftErrBox,
+            draftResultBox,
+          ];
+        } },
       { key: "start", label: "시작·시간", group: "실행 조건",
         title: "매 실행마다 만지는 칸 — 시작 트림점과 t_end",
         build: () => fieldGrid(startGroup()) },
@@ -808,6 +996,9 @@ export function render() {
   drawWpNotice();
   if (lastReplay) renderReplay(replayBox);
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
+  paintDraftResult(); // 재진입 — 적용 전 초안이 남아 있으면 미리보기 복원
+  if (draftJobId) watchDraft(); // 초안 생성 중 재진입 — 같은 재부착 규약
+  syncDraftUi();
   syncHandoff(); // 재진입 — 이전 런이 남아 있으면 인계 버튼이 켜진 채로 선다
   drawers.refresh();
   return root;

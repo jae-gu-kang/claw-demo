@@ -137,6 +137,14 @@ sudo systemctl daemon-reload && sudo systemctl restart claw
 
 ## 운영
 
+### 미션 초안(LLM)은 폐쇄망에서 꺼진 것이 정상이다
+
+서버의 유일한 외부 통신은 시뮬레이션 탭의 미션 초안 생성(`routes/llm.py` —
+Anthropic API 호출) 하나다. `CLAW_ANTHROPIC_API_KEY`가 없으면 **그 기능만**
+사유 문장과 함께 꺼지고 나머지는 전부 그대로 돈다 — 폐쇄망 반입본에서는 키를
+넣지 않는 것이 정상 상태다. 나머지 라우트가 바깥으로 나가지 않는 것은 종전
+그대로이고, `test_world.py`의 소켓 차단 테스트가 그 계약을 못박고 있다.
+
 ### 워커를 늘리지 말 것
 
 ```bash

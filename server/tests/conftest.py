@@ -16,7 +16,10 @@ def _no_deploy_env(monkeypatch):
     for var in ("CLAW_ACCESS_PASSWORD", "CLAW_RESULT_LIMIT",
                 "CLAW_WEB_DIR", "CLAW_SERVER_DATA",
                 # 배포 형상 변수 — 로컬에서 재현하느라 켜 뒀을 수 있다
-                "CLAW_GIT_COMMIT", "RENDER_GIT_COMMIT"):
+                "CLAW_GIT_COMMIT", "RENDER_GIT_COMMIT",
+                # LLM 키 — 셸의 진짜 키로 테스트가 바깥에 나가면 안 되고,
+                # "키 없음" degrade 테스트가 셸 키에 뒤집혀도 안 된다
+                "CLAW_ANTHROPIC_API_KEY", "CLAW_ANTHROPIC_MODEL"):
         monkeypatch.delenv(var, raising=False)
 
 
