@@ -6962,6 +6962,282 @@ var m = reactDomExports;
   createRoot = m.createRoot;
   m.hydrateRoot;
 }
+function speakerLabel(s) {
+  return s === "TOWER" ? "고흥 타워" : s === "UAV" ? "CLAW-01" : s;
+}
+const HOLD_S = 6;
+const SPEECH_MAX_SPEED = 5;
+const REWIND_EPS = 0.25;
+function normalizeScript(raw, tEnd) {
+  const notes = [];
+  if (!Array.isArray(raw)) {
+    notes.push("대본이 배열이 아니다 — 서버 응답을 확인할 것");
+    return { lines: [], notes };
+  }
+  const lines = [];
+  let dropped = 0;
+  for (const item of raw) {
+    const r2 = item;
+    const t2 = typeof r2?.t === "number" && Number.isFinite(r2.t) ? r2.t : null;
+    const text = typeof r2?.text === "string" ? r2.text.trim() : "";
+    const speaker = typeof r2?.speaker === "string" ? r2.speaker : "";
+    const inRange = t2 !== null && t2 >= 0 && (tEnd == null || t2 <= tEnd);
+    if (t2 === null || !inRange || text === "" || speaker === "") {
+      dropped += 1;
+      continue;
+    }
+    lines.push({ t: t2, speaker, text });
+  }
+  lines.sort((a, b) => a.t - b.t);
+  if (dropped > 0) {
+    notes.push(`대사 ${dropped}줄 제외 — 시각이 유한하지 않거나 범위 밖이거나 내용이 비었다`);
+  }
+  return { lines, notes };
+}
+function lineAt(lines, t2, holdS = HOLD_S) {
+  if (t2 == null || lines.length === 0) return null;
+  let lo = 0;
+  let hi2 = lines.length - 1;
+  let idx = -1;
+  while (lo <= hi2) {
+    const mid = lo + hi2 >> 1;
+    const line = lines[mid];
+    if (line == null) break;
+    if (line.t <= t2) {
+      idx = mid;
+      lo = mid + 1;
+    } else {
+      hi2 = mid - 1;
+    }
+  }
+  const hit = idx >= 0 ? lines[idx] : void 0;
+  if (hit == null) return null;
+  return t2 - hit.t > holdS ? null : idx;
+}
+function nextSpeech(prev, now) {
+  const stop = (state) => ({
+    state,
+    action: prev.active ? { kind: "cancel" } : { kind: "none" }
+  });
+  if (now.scriptKey !== prev.scriptKey) {
+    return {
+      state: { scriptKey: now.scriptKey, spokenIdx: null, lastT: now.t, active: false },
+      action: { kind: "cancel" }
+    };
+  }
+  const key = prev.scriptKey;
+  if (now.t != null && prev.lastT != null && now.t < prev.lastT - REWIND_EPS) {
+    return stop({ scriptKey: key, spokenIdx: null, lastT: now.t, active: false });
+  }
+  const lastT = now.t ?? prev.lastT;
+  if (!now.enabled || now.speed > SPEECH_MAX_SPEED) {
+    return stop({
+      scriptKey: key,
+      spokenIdx: now.index ?? prev.spokenIdx,
+      lastT,
+      active: false
+    });
+  }
+  if (!now.playing) {
+    return stop({ scriptKey: key, spokenIdx: prev.spokenIdx, lastT, active: false });
+  }
+  if (now.index != null && now.index !== prev.spokenIdx) {
+    return {
+      state: { scriptKey: key, spokenIdx: now.index, lastT, active: true },
+      action: { kind: "speak", index: now.index }
+    };
+  }
+  return {
+    state: { scriptKey: key, spokenIdx: prev.spokenIdx, lastT, active: prev.active },
+    action: { kind: "none" }
+  };
+}
+const BASE = "/api";
+const TERMINAL = /* @__PURE__ */ new Set(["done", "error", "cancelled"]);
+const sleep = (ms) => new Promise((r2) => setTimeout(r2, ms));
+class ApiError extends Error {
+  constructor(status, detail) {
+    super(typeof detail === "string" ? detail : JSON.stringify(detail));
+    this.status = status;
+    this.detail = detail;
+  }
+}
+async function request(method, path, body) {
+  const opts = { method, headers: {} };
+  if (body !== void 0) {
+    opts.headers["content-type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(BASE + path, opts);
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, data && data.detail !== void 0 ? data.detail : data);
+  }
+  return data;
+}
+const api = {
+  get: (path) => request("GET", path),
+  post: (path, body) => request("POST", path, body)
+};
+function errorText$1(err) {
+  if (!(err instanceof ApiError)) return String(err);
+  if (Array.isArray(err.detail)) {
+    return err.detail.map((e) => `${(e.loc || []).join(".")}: ${e.msg}`).join("\n");
+  }
+  return typeof err.detail === "string" ? err.detail : err.message;
+}
+function watchJob$1(jobId, onUpdate) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (job) => {
+      if (!settled) {
+        settled = true;
+        resolve(job);
+      }
+    };
+    const fail = (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    };
+    const poll = async () => {
+      try {
+        for (; ; ) {
+          const job = await api.get(`/jobs/${jobId}`);
+          onUpdate(job);
+          if (TERMINAL.has(job.status)) return finish(job);
+          await sleep(300);
+        }
+      } catch (err) {
+        fail(err);
+      }
+    };
+    let ws;
+    try {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(`${proto}://${location.host}/api/ws/jobs/${jobId}`);
+    } catch {
+      poll();
+      return;
+    }
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.error) {
+        ws.close();
+        fail(new ApiError(404, msg.error));
+        return;
+      }
+      if (TERMINAL.has(msg.status)) {
+        ws.close();
+        finish(msg);
+      }
+    };
+    ws.onclose = () => {
+      if (!settled) poll();
+    };
+  });
+}
+const rawApi = api;
+async function listSimResults() {
+  const rows = await rawApi.get("/results");
+  return rows.filter((r2) => r2.kind === "sim");
+}
+async function fetchReplay(id2, stride) {
+  return await rawApi.get(`/sim/${id2}/replay?stride=${stride}`);
+}
+async function fetchWorldManifest() {
+  return await rawApi.get("/world/manifest");
+}
+async function fetchTerrainPack(name, signal) {
+  const r2 = await fetch(`/api/world/terrain/${encodeURIComponent(name)}`, {
+    cache: "no-cache",
+    signal
+  });
+  if (!r2.ok) throw new Error(`지형 팩을 받지 못했습니다 (${r2.status})`);
+  return r2.arrayBuffer();
+}
+function modelUrl(name) {
+  return `/api/world/model/${encodeURIComponent(name)}`;
+}
+async function fetchLlmStatus() {
+  return await rawApi.get("/llm/status");
+}
+function watchJob(id2, onUpdate) {
+  return watchJob$1(id2, onUpdate ?? (() => {
+  }));
+}
+function errorText(e) {
+  return errorText$1(e);
+}
+async function requestComms(resultId) {
+  return await rawApi.post("/llm/comms", { result_id: resultId });
+}
+async function fetchCommsBody(id2) {
+  return await rawApi.get(`/results/${id2}`);
+}
+async function findCommsFor(resultId) {
+  const rows = await rawApi.get("/results");
+  return rows.find((r2) => r2.kind === "llm_comms" && r2.parent === resultId)?.id ?? null;
+}
+function makeSpeech() {
+  const synth = typeof globalThis !== "undefined" && "speechSynthesis" in globalThis ? globalThis.speechSynthesis : null;
+  if (synth == null) {
+    return {
+      available: false,
+      reason: "이 브라우저에는 음성 합성(speechSynthesis)이 없습니다 — 자막만 흐릅니다.",
+      speak() {
+      },
+      cancel() {
+      }
+    };
+  }
+  let active = false;
+  let pending = null;
+  const clearPending = () => {
+    if (pending != null) {
+      clearTimeout(pending);
+      pending = null;
+    }
+  };
+  return {
+    available: true,
+    reason: null,
+    speak(text, speaker) {
+      clearPending();
+      synth.cancel();
+      const u2 = new SpeechSynthesisUtterance(text);
+      u2.lang = "ko-KR";
+      u2.rate = 1.05;
+      u2.pitch = speaker === "TOWER" ? 0.85 : 1.1;
+      active = true;
+      u2.onend = () => {
+        active = false;
+      };
+      u2.onerror = () => {
+        active = false;
+      };
+      pending = setTimeout(() => {
+        pending = null;
+        synth.speak(u2);
+      }, 0);
+    },
+    cancel() {
+      clearPending();
+      if (!active && !synth.speaking) return;
+      active = false;
+      synth.cancel();
+    }
+  };
+}
 function dtSample$1(t2) {
   return t2.length > 1 ? t2[1] - t2[0] : 0;
 }
@@ -39385,61 +39661,6 @@ const WAVE_NOTES = {
   displayOnly: "해상 상태(풍속·파고·파향)는 표시 값이며 시뮬 입력이 아닙니다 — 비행동역학은 이 값을 모릅니다.",
   model: "파면은 게르스트너 성분 5개(심해 분산관계 ω²=gk)이고 파고는 피어슨-모스코비츠 H_s=0.21U²/g입니다. 윤슬 폭은 콕스-먼크 경사분산 σ²=0.003+0.00512U에서 나옵니다."
 };
-const BASE = "/api";
-class ApiError extends Error {
-  constructor(status, detail) {
-    super(typeof detail === "string" ? detail : JSON.stringify(detail));
-    this.status = status;
-    this.detail = detail;
-  }
-}
-async function request(method, path, body) {
-  const opts = { method, headers: {} };
-  if (body !== void 0) {
-    opts.headers["content-type"] = "application/json";
-    opts.body = JSON.stringify(body);
-  }
-  const res = await fetch(BASE + path, opts);
-  const text = await res.text();
-  let data = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
-    }
-  }
-  if (!res.ok) {
-    throw new ApiError(res.status, data && data.detail !== void 0 ? data.detail : data);
-  }
-  return data;
-}
-const api = {
-  get: (path) => request("GET", path),
-  post: (path, body) => request("POST", path, body)
-};
-const rawApi = api;
-async function listSimResults() {
-  const rows = await rawApi.get("/results");
-  return rows.filter((r2) => r2.kind === "sim");
-}
-async function fetchReplay(id2, stride) {
-  return await rawApi.get(`/sim/${id2}/replay?stride=${stride}`);
-}
-async function fetchWorldManifest() {
-  return await rawApi.get("/world/manifest");
-}
-async function fetchTerrainPack(name, signal) {
-  const r2 = await fetch(`/api/world/terrain/${encodeURIComponent(name)}`, {
-    cache: "no-cache",
-    signal
-  });
-  if (!r2.ok) throw new Error(`지형 팩을 받지 못했습니다 (${r2.status})`);
-  return r2.arrayBuffer();
-}
-function modelUrl(name) {
-  return `/api/world/model/${encodeURIComponent(name)}`;
-}
 const CopyShader = {
   name: "CopyShader",
   uniforms: {
@@ -42029,7 +42250,7 @@ class SceneHost {
     this.camera.updateProjectionMatrix();
     this.post?.setSize(width, height, dpr * this.renderScale);
   }
-  /** 렌더 배율 — 품질 자동 강등의 한 손잡이.
+  /** 렌더 배율 — 품질 자동 강등의 한 조정 파라미터.
    *
    * 픽셀 수를 배율²로 줄이므로 GPU 픽셀 비용(바다·구름·대기가 다 픽셀 셰이더다)에
    * 정비례로 듣는다. 기하·걸음 수를 줄이는 것보다 이것 하나가 낫다: 셰이더 재컴파일이
@@ -42214,7 +42435,7 @@ class SceneHost {
   }
   /** 모델 그룹 — GLB 루트를 넣고 뺀다.
    *
-   * **여기 넣은 것은 `dispose()`가 함께 파괴한다.** `models.ts`가 노드 손잡이를 들고
+   * **여기 넣은 것은 `dispose()`가 함께 파괴한다.** `models.ts`가 노드 핸들을 들고
    * 있을 뿐 소유권은 이 그룹에 있다는 뜻이다. 장래에 GLTF를 모듈 수준으로 캐시하면
    * (탭을 오갈 때 다시 안 받으려고) 그 캐시가 내주는 지오메트리를 여기가 파괴하게 되어
    * 다음 SceneHost가 빈 메시를 받는다 — 캐시를 넣는다면 이 그룹에는 `clone()`을 넣어야 한다. */
@@ -46021,6 +46242,21 @@ function WorldTab({ deps }) {
   const [gameWps, setGameWps] = reactExports.useState([]);
   const [sent, setSent] = reactExports.useState(null);
   const [drawer, setDrawer] = reactExports.useState(null);
+  const [llm, setLlm] = reactExports.useState(null);
+  const [comms, setComms] = reactExports.useState(null);
+  const [commsNotes, setCommsNotes] = reactExports.useState([]);
+  const [commsErr, setCommsErr] = reactExports.useState(null);
+  const [commsBusy, setCommsBusy] = reactExports.useState(false);
+  const [ccOn, setCcOn] = reactExports.useState(true);
+  const [voiceOn, setVoiceOn] = reactExports.useState(false);
+  const commsKeyRef = reactExports.useRef(null);
+  const commsSubmitRef = reactExports.useRef(false);
+  const chosenRef = reactExports.useRef(null);
+  const speechRef = reactExports.useRef(null);
+  if (speechRef.current == null) speechRef.current = makeSpeech();
+  const speechStateRef = reactExports.useRef(
+    { scriptKey: null, spokenIdx: null, lastT: null, active: false }
+  );
   reactExports.useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas == null) return;
@@ -46219,11 +46455,106 @@ function WorldTab({ deps }) {
     });
     setSent(wps.length);
   }, [deps.store]);
+  reactExports.useEffect(() => {
+    let live = true;
+    fetchLlmStatus().then((s) => {
+      if (live) setLlm(s);
+    }).catch((e) => {
+      if (live) setLlm({ available: false, model: null, reason: `상태 조회 실패 — ${errorText(e)}` });
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  const tEndOf = reactExports.useCallback((id2) => {
+    const v2 = results.find((r2) => r2.id === id2)?.t_end;
+    return typeof v2 === "number" ? v2 : null;
+  }, [results]);
+  reactExports.useEffect(() => {
+    chosenRef.current = chosen;
+    setComms(null);
+    setCommsNotes([]);
+    setCommsErr(null);
+    commsKeyRef.current = null;
+    if (chosen == null) return;
+    let live = true;
+    void (async () => {
+      try {
+        const id2 = await findCommsFor(chosen);
+        if (!live || id2 == null) return;
+        const body = await fetchCommsBody(id2);
+        if (!live) return;
+        const norm = normalizeScript(body.lines, tEndOf(chosen));
+        commsKeyRef.current = id2;
+        setComms(norm.lines);
+        setCommsNotes([...body.warnings ?? [], ...norm.notes]);
+      } catch {
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [chosen, tEndOf]);
+  const makeComms = reactExports.useCallback(async () => {
+    if (chosen == null || commsSubmitRef.current) return;
+    const runId = chosen;
+    commsSubmitRef.current = true;
+    setCommsBusy(true);
+    setCommsErr(null);
+    try {
+      const job = await requestComms(runId);
+      const done = await watchJob(job.id);
+      if (done.status !== "done" || done.result_id == null) {
+        throw new Error(done.error ?? `대본 생성 ${done.status}`);
+      }
+      const body = await fetchCommsBody(done.result_id);
+      if (chosenRef.current !== runId) return;
+      const norm = normalizeScript(body.lines, tEndOf(runId));
+      commsKeyRef.current = done.result_id;
+      setComms(norm.lines);
+      setCommsNotes([...body.warnings ?? [], ...norm.notes]);
+      setDrawer("comms");
+    } catch (e) {
+      if (chosenRef.current !== runId) return;
+      setCommsErr(errorText(e));
+      setDrawer("comms");
+    } finally {
+      commsSubmitRef.current = false;
+      setCommsBusy(false);
+    }
+  }, [chosen, tEndOf]);
+  const tNow = readout?.t ?? null;
+  const activeIndex = style !== "game" && comms != null ? lineAt(comms, tNow) : null;
+  const ccIndex = ccOn ? activeIndex : null;
+  const ccLine = ccIndex != null && comms != null ? comms[ccIndex] : void 0;
+  reactExports.useEffect(() => {
+    const port = speechRef.current;
+    if (port == null) return;
+    const { state, action } = nextSpeech(speechStateRef.current, {
+      t: tNow,
+      playing,
+      speed,
+      enabled: voiceOn && port.available && style !== "game" && comms != null,
+      index: activeIndex,
+      scriptKey: commsKeyRef.current
+    });
+    speechStateRef.current = state;
+    if (action.kind === "speak" && comms != null) {
+      const line = comms[action.index];
+      if (line != null) port.speak(line.text, line.speaker);
+    } else if (action.kind === "cancel") {
+      port.cancel();
+    }
+  }, [tNow, playing, speed, voiceOn, activeIndex, comms, style]);
+  reactExports.useEffect(() => () => {
+    speechRef.current?.cancel();
+  }, []);
   const alert = status !== "" ? status : shownId !== null && chosen !== null && shownId !== chosen ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.` : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다." : null;
   const drawers = [
     { key: "env", label: "환경", n: null },
     { key: "perf", label: "성능", n: null },
-    { key: "notes", label: "캡션", n: notes.length || null }
+    { key: "notes", label: "캡션", n: notes.length || null },
+    { key: "comms", label: "교신", n: comms?.length ?? null }
   ];
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "wv tab-dark", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "tab-top", children: [
@@ -46309,7 +46640,11 @@ function WorldTab({ deps }) {
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "k", children: "모드" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "v", children: readout.mode })
         ] })
-      ] }) : "표본 없음" })
+      ] }) : "표본 없음" }),
+      ccLine != null && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wv-cc", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "spk", children: speakerLabel(ccLine.speaker) }),
+        ccLine.text
+      ] })
     ] }),
     style === "game" ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "wv-bar", children: [
@@ -46392,6 +46727,39 @@ function WorldTab({ deps }) {
           },
           style: { flex: 1, minWidth: 160 },
           "aria-label": "재생 위치"
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          className: ccOn ? "primary" : "",
+          "aria-pressed": ccOn,
+          disabled: comms == null,
+          title: comms == null ? "대본이 없습니다 — [교신 대본]으로 만듭니다" : "교신 자막 표시",
+          onClick: () => setCcOn((v2) => !v2),
+          children: "자막"
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          className: voiceOn ? "primary" : "",
+          "aria-pressed": voiceOn,
+          disabled: comms == null || speechRef.current?.available !== true,
+          title: speechRef.current?.available !== true ? speechRef.current?.reason ?? "음성 합성을 쓸 수 없습니다" : comms == null ? "대본이 없습니다 — [교신 대본]으로 만듭니다" : `교신 음성 (배속 ${SPEECH_MAX_SPEED}× 초과에서는 자막만)`,
+          onClick: () => setVoiceOn((v2) => !v2),
+          children: "음성"
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          disabled: commsBusy || chosen == null || llm?.available !== true,
+          title: llm == null ? "서버 LLM 상태 확인 중…" : !llm.available ? llm.reason ?? "사용할 수 없습니다" : chosen == null ? "결과를 먼저 고릅니다" : "이 런의 비행 로그로 관제 교신 대본을 만듭니다 (서버 경유 LLM 호출)",
+          onClick: () => {
+            void makeComms();
+          },
+          children: commsBusy ? "대본 생성 중…" : comms != null ? "대본 다시 만들기" : "교신 대본"
         }
       )
     ] }),
@@ -46515,7 +46883,27 @@ function WorldTab({ deps }) {
       drawer === "notes" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: HINT, children: notes.length === 0 ? "표시 전용 선택이 아직 없습니다 — 결과를 세우면 여기에 그 단서가 모입니다." : notes.map((n2, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
         "· ",
         n2
-      ] }, i)) })
+      ] }, i)) }),
+      drawer === "comms" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { style: HINT, children: [
+        commsErr != null && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { style: { color: "#ff6b6b" }, children: commsErr }),
+        commsNotes.map((n2, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          "· ",
+          n2
+        ] }, `note${i}`)),
+        comms == null ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: llm != null && !llm.available ? llm.reason : "대본이 없습니다 — 재생줄의 [교신 대본]을 누르면 이 런의 비행 로그로 관제 교신이 생성됩니다. 자막·음성은 재생 커서를 따라 흐릅니다." }) : comms.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: "대본이 비어 있습니다 — [대본 다시 만들기]로 재생성해 보십시오." }) : comms.map((l2, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            style: i === activeIndex ? { color: "rgba(255,255,255,.95)", fontWeight: 600 } : void 0,
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { fontFamily: "var(--mono)" }, children: `t=${l2.t.toFixed(1)}s ` }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("b", { children: speakerLabel(l2.speaker) }),
+              " — ",
+              l2.text
+            ]
+          },
+          i
+        ))
+      ] })
     ] })
   ] });
 }

@@ -325,6 +325,78 @@ def test_소견서도_키가_없으면_503(client):
     assert "CLAW_ANTHROPIC_API_KEY" in r.json()["detail"]
 
 
+# ── 교신 대본 (/llm/comms) ────────────────────────────────────────────────
+
+_COMMS = {"lines": [
+    {"t": 0.5, "speaker": "TOWER", "text": "CLAW-01, 이륙을 허가한다"},
+    {"t": 79.0, "speaker": "UAV", "text": "고흥 타워, CLAW-01 접지"},
+], "warnings": []}
+
+
+def _seed_sim(client, rid="simcomms1"):
+    n = 100
+    return _seed(client, rid, "sim", {
+        "kind": "sim",
+        "t": [i * 0.5 for i in range(n)],
+        "signals": {"mode": ["launch"] * 10 + ["cruise"] * 90,
+                    "h": [100.0] * n, "V": [88.0] * n},
+        "envelope": {"min_alt": 0.5, "min_alt_t": 40.0},
+        "meta": {"case": "c1", "t_end": 49.5,
+                 "phases": {"launch_exit_t": 0.5, "touchdown_t": None,
+                            "stop_t": None, "td_sink_rate": None,
+                            "td_speed": None}},
+        "n_total": n,
+    })
+
+
+def test_교신_대본이_저장되고_비행_로그가_유계다(client, wait_job, monkeypatch):
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    rid = _seed_sim(client)
+    calls = {}
+
+    def fake(*, api_key, model, system, user, schema):
+        calls.update(system=system, user=user, schema=schema)
+        return _fake_raw(_COMMS)
+
+    monkeypatch.setattr(llm_route, "call_anthropic", fake)
+    r = client.post("/api/llm/comms", json={"result_id": rid})
+    assert r.status_code == 202, r.text
+    job = wait_job(r.json()["id"])
+    assert job["status"] == "done", job
+
+    body = client.get(f"/api/results/{job['result_id']}").json()
+    assert body["kind"] == "llm_comms"
+    assert body["parent"] == rid
+    assert body["parent_kind"] == "sim"
+    assert body["lines"] == _COMMS["lines"]
+
+    meta = next(m for m in client.get("/api/results").json()
+                if m["id"] == job["result_id"])
+    assert meta["kind"] == "llm_comms"
+    assert meta["parent"] == rid
+    assert meta["n"] == 2  # 대본 줄 수
+
+    from claw_server.comms import COMMS_SCHEMA, COMMS_SYSTEM
+    assert calls["system"] is COMMS_SYSTEM
+    assert calls["schema"] is COMMS_SCHEMA
+    assert "launch → cruise" in calls["user"]  # 비행 로그가 실제로 실렸다
+    assert len(calls["user"]) < 10_000         # 유계 — 시계열이 새면 여기서 터진다
+
+
+def test_sim이_아닌_결과의_교신_대본은_거부한다(client, monkeypatch):
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    rid = _seed(client, "notasim1", "trim_batch", {"kind": "trim_batch"})
+    r = client.post("/api/llm/comms", json={"result_id": rid})
+    assert r.status_code == 422
+    assert "sim 결과가 아님" in r.json()["detail"]
+
+
+def test_교신_대본도_키가_없으면_503(client):
+    r = client.post("/api/llm/comms", json={"result_id": "whatever1"})
+    assert r.status_code == 503
+    assert "CLAW_ANTHROPIC_API_KEY" in r.json()["detail"]
+
+
 def test_상태_조회는_바깥으로_나가지_않는다(client, monkeypatch):
     """아웃바운드는 생성 잡의 call_anthropic 하나뿐이어야 한다 — 상태 조회가
     키 검증 등으로 나가기 시작하면 폐쇄망에서 탭을 여는 것만으로 걸린다

@@ -957,6 +957,27 @@ body:has(.tab-page) main { max-width: 1580px; }
 }
 .wv-hud .k { color: rgba(235, 235, 245, .5); margin-right: 3px; }
 .wv-hud .v { font-weight: 700; margin-right: 10px; }
+/* 교신 자막 (F1) — 캔버스 상단 중앙. 판독(.wv-hud 좌하단)·조작줄과 겹치지 않는
+   자리이고, pointer-events:none으로 드래그·클릭은 캔버스 몫(.wv-hud와 같은 규율).
+   번들에 CSS를 넣지 않는 이유: build/world.css가 생겨도 호스트가 로드하지 않는다. */
+.wv-cc {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  max-width: min(720px, calc(100% - 28px));
+  background: rgba(10, 10, 12, .62);
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, .95);
+  text-align: center;
+  backdrop-filter: blur(6px);
+}
+.wv-cc .spk { color: #ffd60a; font-weight: 700; margin-right: 8px; font-size: 12px; }
 .wv-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 .wv-bar.top { margin: 0 0 10px; }
 /* 환경 슬라이더 — 패널 안. 라벨과 슬라이더가 세로로 붙어야 7개가 한눈에 훑힌다 */

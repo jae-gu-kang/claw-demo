@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { SimResultRow } from "../data/api.ts";
+import {
+  SPEECH_MAX_SPEED, lineAt, nextSpeech, normalizeScript, speakerLabel,
+  type CommsLine, type SpeechState,
+} from "../core/comms.ts";
+import {
+  errorText, fetchCommsBody, fetchLlmStatus, findCommsFor, requestComms, watchJob,
+  type LlmStatus, type SimResultRow,
+} from "../data/api.ts";
+import { makeSpeech, type SpeechPort } from "./speech.ts";
 import type { FrameStats } from "../scene/SceneController.ts";
 import type { ViewStyle } from "../scene/SceneHost.ts";
 import {
@@ -19,7 +27,7 @@ const STYLE_LABEL = { engineering: "엔지니어링", cinematic: "시네마틱",
 
 /** 패널 하나 — 이름은 칩에, 내용은 열렸을 때만. 배치 뼈대는 app.css의 `.tab-*`가 준다
  *  (영향성 탭과 같은 것을 쓴다 — 같은 레이아웃을 두 벌 두지 않는다). */
-type DrawerKey = "env" | "perf" | "notes";
+type DrawerKey = "env" | "perf" | "notes" | "comms";
 
 // 캔버스 높이 규칙은 `./layout.ts` — 이 파일은 JSX라 node --test가 못 읽어서,
 // 판정이 되는 값은 순수 모듈로 빼고 거기서 테스트한다.
@@ -78,6 +86,21 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const [sent, setSent] = useState<number | null>(null);
   // 열린 패널 하나 (null = 전부 닫힘). 첫 화면은 세계만 보인다 — 그것이 이 배치의 요지다.
   const [drawer, setDrawer] = useState<DrawerKey | null>(null);
+  // ── 교신 대본 (F1) — 판정은 core/comms.ts, 부작용은 ui/speech.ts ─────────
+  const [llm, setLlm] = useState<LlmStatus | null>(null);
+  const [comms, setComms] = useState<CommsLine[] | null>(null);
+  const [commsNotes, setCommsNotes] = useState<string[]>([]);
+  const [commsErr, setCommsErr] = useState<string | null>(null);
+  const [commsBusy, setCommsBusy] = useState(false);
+  const [ccOn, setCcOn] = useState(true);
+  const [voiceOn, setVoiceOn] = useState(false); // 소리는 옵트인 — 갑자기 말하면 놀란다
+  const commsKeyRef = useRef<string | null>(null); // 대본 식별(결과 id) — 발화 상태 리셋 키
+  const commsSubmitRef = useRef(false); // await 앞 동기 플래그 — 유료 이중 제출 방지
+  const chosenRef = useRef<string | null>(null); // 생성 완료 시점의 stale-run 판정용
+  const speechRef = useRef<SpeechPort | null>(null);
+  if (speechRef.current == null) speechRef.current = makeSpeech();
+  const speechStateRef = useRef<SpeechState>(
+    { scriptKey: null, spokenIdx: null, lastT: null, active: false });
 
   // **생성과 파괴가 대칭인 한 쌍**이다 — 그래야 StrictMode의 이중 실행에서도 컨텍스트가
   // 하나로 유지된다. 의존성이 비어 있는 것은 실수가 아니라 이 규율이다.
@@ -303,6 +326,108 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
     setSent(wps.length);
   }, [deps.store]);
 
+  // ── 교신 대본 (F1) — 조달·동기·발화 ──────────────────────────────────────
+  // LLM 가용성 — 키 없는 배포는 사유 문장이 온다 (버튼 title로 그대로 낸다)
+  useEffect(() => {
+    let live = true;
+    fetchLlmStatus().then((s) => { if (live) setLlm(s); }).catch((e) => {
+      if (live) setLlm({ available: false, model: null, reason: `상태 조회 실패 — ${errorText(e)}` });
+    });
+    return () => { live = false; };
+  }, []);
+
+  // 대본이 소화할 런 길이 — normalizeScript가 런 밖 시각을 버릴 수 있게.
+  // 목록이 아직 없으면 null(범위 검사 생략) — 없는 값을 지어내지 않는다.
+  const tEndOf = useCallback((id: string | null): number | null => {
+    const v = results.find((r) => r.id === id)?.t_end;
+    return typeof v === "number" ? v : null;
+  }, [results]);
+
+  // 결과가 바뀌면 대본도 그 런의 것으로 — 기존 대본이 있으면 재사용(유료 재생성 방지)
+  useEffect(() => {
+    chosenRef.current = chosen; // 진행 중인 생성이 stale인지 판정하는 기준
+    setComms(null); setCommsNotes([]); setCommsErr(null);
+    commsKeyRef.current = null;
+    if (chosen == null) return;
+    let live = true;
+    void (async () => {
+      try {
+        const id = await findCommsFor(chosen);
+        if (!live || id == null) return;
+        const body = await fetchCommsBody(id);
+        if (!live) return;
+        const norm = normalizeScript(body.lines, tEndOf(chosen));
+        commsKeyRef.current = id;
+        setComms(norm.lines);
+        setCommsNotes([...(body.warnings ?? []), ...norm.notes]);
+      } catch {
+        // 캐시 조회 실패는 조용히 — [교신 대본] 생성 경로가 사유를 크게 말한다
+      }
+    })();
+    return () => { live = false; };
+  }, [chosen, tEndOf]);
+
+  const makeComms = useCallback(async () => {
+    if (chosen == null || commsSubmitRef.current) return;
+    const runId = chosen; // 완료 시점 대조용 — 생성 중 런을 바꾸면 결과를 버린다
+    commsSubmitRef.current = true; // await 앞 동기 구간 — 더블클릭 이중 과금 방지
+    setCommsBusy(true);
+    setCommsErr(null);
+    try {
+      const job = await requestComms(runId);
+      const done = await watchJob(job.id);
+      if (done.status !== "done" || done.result_id == null) {
+        throw new Error(done.error ?? `대본 생성 ${done.status}`);
+      }
+      const body = await fetchCommsBody(done.result_id);
+      // stale-run 가드 — A런 대본이 B런 재생 위에 흐르면 화면이 거짓말한다
+      // (대본 자체는 서버에 저장돼 있어 그 런을 다시 고르면 재사용된다)
+      if (chosenRef.current !== runId) return;
+      const norm = normalizeScript(body.lines, tEndOf(runId));
+      commsKeyRef.current = done.result_id;
+      setComms(norm.lines);
+      setCommsNotes([...(body.warnings ?? []), ...norm.notes]);
+      setDrawer("comms"); // 결과가 사는 패널을 열어 준다 (전 탭 규약)
+    } catch (e) {
+      if (chosenRef.current !== runId) return; // 옛 런의 실패 사유도 새 런 화면엔 소음이다
+      setCommsErr(errorText(e));
+      setDrawer("comms");
+    } finally {
+      commsSubmitRef.current = false;
+      setCommsBusy(false);
+    }
+  }, [chosen, tEndOf]);
+
+  // 자막 선택 — 시각 정본은 readout.t (매 프레임 emitReadout, 일시정지 스크럽 포함).
+  // 게임 모드는 시뮬 시각이 없어 자막·음성 대상이 아니다 (SceneController 규약).
+  // activeIndex(재생 위치의 대사)와 ccIndex(오버레이 표시)를 가른다 — 자막 토글에
+  // 음성까지 묶이면 자막 끄고 음성만 켠 사람이 사유 없이 침묵을 듣는다 (리뷰 지적).
+  const tNow = readout?.t ?? null;
+  const activeIndex = style !== "game" && comms != null ? lineAt(comms, tNow) : null;
+  const ccIndex = ccOn ? activeIndex : null;
+  const ccLine = ccIndex != null && comms != null ? comms[ccIndex] : undefined;
+
+  // 발화 — 판정(core nextSpeech)이 낸 액션만 실행한다. readout 객체는 매 프레임
+  // 새것이라 의존성은 tNow(수치)만 본다.
+  useEffect(() => {
+    const port = speechRef.current;
+    if (port == null) return;
+    const { state, action } = nextSpeech(speechStateRef.current, {
+      t: tNow, playing, speed,
+      enabled: voiceOn && port.available && style !== "game" && comms != null,
+      index: activeIndex, scriptKey: commsKeyRef.current,
+    });
+    speechStateRef.current = state;
+    if (action.kind === "speak" && comms != null) {
+      const line = comms[action.index];
+      if (line != null) port.speak(line.text, line.speaker);
+    } else if (action.kind === "cancel") {
+      port.cancel();
+    }
+  }, [tNow, playing, speed, voiceOn, activeIndex, comms, style]);
+  // 언마운트 — 탭을 떠나도 목소리가 남으면 안 된다 (dispose는 동기 unmount)
+  useEffect(() => () => { speechRef.current?.cancel(); }, []);
+
   // 화면이 지금 말해야 하는 한 줄 — 화면 밖에 두면 사용자가 사유를 못 본다.
   // 순서가 곧 급한 순이다: 실패 > 화면과 선택이 갈림 > 결과 없음.
   const alert = status !== "" ? status
@@ -315,6 +440,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
     { key: "env", label: "환경", n: null },
     { key: "perf", label: "성능", n: null },
     { key: "notes", label: "캡션", n: notes.length || null },
+    { key: "comms", label: "교신", n: comms?.length ?? null },
   ];
 
   return (
@@ -396,6 +522,14 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
             </>
           ) : "표본 없음"}
         </div>
+        {/* 교신 자막 (F1) — 상단 중앙, 판독(.wv-hud 좌하단)과 안 겹치는 자리.
+            캔버스가 보조기술에 불투명하므로 대본 전문은 「교신」 드로어에도 있다. */}
+        {ccLine != null && (
+          <div className="wv-cc">
+            <span className="spk">{speakerLabel(ccLine.speaker)}</span>
+            {ccLine.text}
+          </div>
+        )}
       </div>
 
       {style === "game" ? (
@@ -452,6 +586,32 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
             style={{ flex: 1, minWidth: 160 }}
             aria-label="재생 위치"
           />
+          {/* 교신 (F1) — 못 누르는 상태는 끄되 사유를 title로 (조용한 비활성 금지) */}
+          <button
+            className={ccOn ? "primary" : ""}
+            aria-pressed={ccOn}
+            disabled={comms == null}
+            title={comms == null ? "대본이 없습니다 — [교신 대본]으로 만듭니다" : "교신 자막 표시"}
+            onClick={() => setCcOn((v) => !v)}
+          >자막</button>
+          <button
+            className={voiceOn ? "primary" : ""}
+            aria-pressed={voiceOn}
+            disabled={comms == null || speechRef.current?.available !== true}
+            title={speechRef.current?.available !== true
+              ? (speechRef.current?.reason ?? "음성 합성을 쓸 수 없습니다")
+              : comms == null ? "대본이 없습니다 — [교신 대본]으로 만듭니다"
+              : `교신 음성 (배속 ${SPEECH_MAX_SPEED}× 초과에서는 자막만)`}
+            onClick={() => setVoiceOn((v) => !v)}
+          >음성</button>
+          <button
+            disabled={commsBusy || chosen == null || llm?.available !== true}
+            title={llm == null ? "서버 LLM 상태 확인 중…"
+              : !llm.available ? (llm.reason ?? "사용할 수 없습니다")
+              : chosen == null ? "결과를 먼저 고릅니다"
+              : "이 런의 비행 로그로 관제 교신 대본을 만듭니다 (서버 경유 LLM 호출)"}
+            onClick={() => { void makeComms(); }}
+          >{commsBusy ? "대본 생성 중…" : comms != null ? "대본 다시 만들기" : "교신 대본"}</button>
         </div>
       )}
 
@@ -519,6 +679,34 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
             {notes.length === 0
               ? "표시 전용 선택이 아직 없습니다 — 결과를 세우면 여기에 그 단서가 모입니다."
               : notes.map((n, i) => <div key={i}>· {n}</div>)}
+          </div>
+        )}
+        {drawer === "comms" && (
+          <div style={HINT}>
+            {commsErr != null && <div style={{ color: "#ff6b6b" }}>{commsErr}</div>}
+            {commsNotes.map((n, i) => <div key={`note${i}`}>· {n}</div>)}
+            {comms == null ? (
+              <div>
+                {llm != null && !llm.available
+                  ? llm.reason
+                  : "대본이 없습니다 — 재생줄의 [교신 대본]을 누르면 이 런의 비행 "
+                    + "로그로 관제 교신이 생성됩니다. 자막·음성은 재생 커서를 따라 흐릅니다."}
+              </div>
+            ) : comms.length === 0 ? (
+              <div>대본이 비어 있습니다 — [대본 다시 만들기]로 재생성해 보십시오.</div>
+            ) : (
+              comms.map((l, i) => (
+                <div
+                  key={i}
+                  style={i === activeIndex
+                    ? { color: "rgba(255,255,255,.95)", fontWeight: 600 }
+                    : undefined}
+                >
+                  <span style={{ fontFamily: "var(--mono)" }}>{`t=${l.t.toFixed(1)}s `}</span>
+                  <b>{speakerLabel(l.speaker)}</b> — {l.text}
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>

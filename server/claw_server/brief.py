@@ -51,8 +51,11 @@ EXCLUDE_PATHS = {
 }
 
 
-def _exceeds(node, budget: int) -> bool:
+def exceeds(node, budget: int) -> bool:
     """직렬화 길이 어림이 예산을 넘는가 — 넘는 순간 멈춘다.
+
+    공개 이름인 이유: comms.py(교신 비행 로그)가 같은 4KB 경계를 공유한다 —
+    "LLM에 싣는 축약은 어디서든 같은 자로 잰다"를 import가 그대로 말하게.
 
     정확한 크기는 필요 없다(경계 판정뿐이다). json.dumps로 재면 상위 노드마다
     아래 전체를 재직렬화해 54MB 본문에서 GIL을 초 단위로 쥔다(리뷰 실측 —
@@ -135,7 +138,7 @@ def _prune(node, path, excl):
         return node[:STR_MAX] + f"… [+{len(node) - STR_MAX}자 생략]"
     if not isinstance(node, (dict, list)):
         return node  # 수치·불리언·None — 400자리 int도 변환 없이 그대로 (실측 함정)
-    if not _exceeds(node, KEEP_WHOLE_BYTES):
+    if not exceeds(node, KEEP_WHOLE_BYTES):
         return node  # 통째 유지 — 판정 행 5~9개짜리 묶음이 여기서 산다
     if isinstance(node, list):
         idx = _pick(list(range(len(node))), lambda i: node[i])

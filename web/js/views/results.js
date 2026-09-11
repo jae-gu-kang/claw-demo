@@ -29,6 +29,7 @@ const KIND_LABEL = {
   influence_prescribe: "정량 처방 — 얼마나·조합·확인",
   mission_draft: "미션 초안 (LLM)",
   llm_brief: "소견서 (LLM)",
+  llm_comms: "교신 대본 (LLM)",
 };
 const kindLabel = (k) => KIND_LABEL[k] ?? k ?? "—";
 

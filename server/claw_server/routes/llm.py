@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
 from claw_server.brief import BRIEF_SCHEMA, BRIEF_SYSTEM, brief_user, prune
+from claw_server.comms import COMMS_SCHEMA, COMMS_SYSTEM, comms_user, flight_log
 
 router = APIRouter(tags=["llm"])
 
@@ -48,9 +49,9 @@ def _model() -> str:
 
 _UNAVAILABLE = (
     "CLAW_ANTHROPIC_API_KEY가 설정되지 않았습니다 — LLM 기능(미션 초안·결과 "
-    "브리핑)은 Anthropic Messages API를 호출하는, 이 서버의 유일한 외부 통신"
-    "입니다. 키를 넣고 재기동하면 켜지고, 폐쇄망 배포에서는 이 기능만 꺼진 "
-    "것이 정상입니다."
+    "브리핑·교신 대본)은 Anthropic Messages API를 호출하는, 이 서버의 유일한 "
+    "외부 통신입니다. 키를 넣고 재기동하면 켜지고, 폐쇄망 배포에서는 이 기능만 "
+    "꺼진 것이 정상입니다."
 )
 
 # ── LLM 출력 스키마 — 웹 폼 행 계약 (정본은 이 파일, 웹 normalizeDraft는 방어적 수용) ──
@@ -400,5 +401,72 @@ def submit_brief(req: BriefIn, request: Request, response: Response) -> dict:
         job.report(3, 3, message="완료")
 
     job = request.app.state.jobs.submit("llm_brief", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()
+
+
+@router.post("/llm/comms", status_code=202)
+def submit_comms(req: BriefIn, request: Request, response: Response) -> dict:
+    """관제 교신 대본 — sim 런 하나의 비행 로그를 뽑아 LLM에 대본을 시킨다.
+
+    요청 형상이 브리핑과 같아 BriefIn을 그대로 쓴다(result_id 하나).
+    대상은 sim뿐이다 — 비행 로그 추출기(comms.flight_log)가 sim 신호 계약
+    위에 서 있다.
+    """
+    key = _api_key()
+    if not key:
+        raise HTTPException(status_code=503, detail=_UNAVAILABLE)
+    model = _model()
+    store = request.app.state.store
+    meta = next((m for m in store.list() if m["id"] == req.result_id), None)
+    if meta is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"결과 없음: {req.result_id} — 저장소 보존 상한에 밀려났거나 "
+                   "지워졌을 수 있습니다. 결과 탭을 새로고침하십시오.")
+    if meta.get("kind") != "sim":
+        raise HTTPException(
+            status_code=422,
+            detail=f"sim 결과가 아님: {req.result_id} ({meta.get('kind')}) — "
+                   "교신 대본은 시뮬레이션 런에서만 만듭니다.")
+
+    def work(job):
+        # 3단계 보고 — 브리핑과 같은 이유 (읽기 구간을 "호출 중"으로 위장하지
+        # 않고, 호출 직전 보고가 돈 쓰기 전 마지막 취소 지점)
+        if job.report(0, 3, message="결과 읽는 중"):
+            return
+        try:
+            payload = store.load(req.result_id)
+        except KeyError:
+            raise RuntimeError(
+                f"결과가 사라졌습니다: {req.result_id} — 저장소 보존 상한에 "
+                "밀려났거나 지워졌을 수 있습니다. 결과 탭을 새로고침하십시오.")
+        log = flight_log(payload)
+        del payload  # sim 54MB — 추출 뒤에는 들고 있지 않는다
+        if job.report(1, 3, message=f"{model} 호출 중"):
+            return  # 돈 쓰기 전 마지막 취소 지점
+        raw = call_anthropic(api_key=key, model=model, system=COMMS_SYSTEM,
+                             user=comms_user(meta, log), schema=COMMS_SCHEMA)
+        if job.report(2, 3, message="대본 정리 중"):
+            return  # 호출 중 취소 — 대본을 버린다
+        data = _extract_json(raw)
+        lines = data.get("lines") or []
+        store.save(
+            job.id,
+            {"kind": "llm_comms", "parent": req.result_id, "parent_kind": "sim",
+             "lines": lines, "warnings": data.get("warnings") or [],
+             "model": model, "usage": raw.get("usage")},
+            meta={
+                "kind": "llm_comms",
+                "created": job.created,
+                "fingerprint": meta.get("fingerprint", ""),  # 대상 지문 승계
+                "parent": req.result_id,
+                "n": len(lines),  # 목록 건수 칸 = 대본 줄 수
+            },
+        )
+        job.result_id = job.id
+        job.report(3, 3, message="완료")
+
+    job = request.app.state.jobs.submit("llm_comms", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"
     return job.to_dict()
