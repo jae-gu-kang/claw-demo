@@ -713,13 +713,17 @@ export function render() {
     },
   });
 
+  // await 앞의 동기 플래그 — draftJobId만 보면 POST 왕복 사이의 더블클릭이
+  // 유료 잡을 두 번 만든다 (결과 탭 브리핑 리뷰가 잡은 같은 모양의 창)
+  let draftSubmitting = false;
   const runDraft = async () => {
-    if (draftJobId) return; // 버튼이 이미 꺼져 있다 — 방어만
+    if (draftJobId || draftSubmitting) return; // 버튼이 이미 꺼져 있다 — 방어만
     const intent = draftIntentInput.value.trim();
     if (!intent) {
       showDraftErr(new Error("의도 문장을 입력하십시오 — 무엇을 비행할지 한두 문장이면 된다."));
       return;
     }
+    draftSubmitting = true;
     try {
       clear(draftErrBox);
       const submitted = await api.post("/llm/mission-draft", { intent });
@@ -728,6 +732,8 @@ export function render() {
       watchDraft();
     } catch (e) {
       showDraftErr(e);
+    } finally {
+      draftSubmitting = false;
     }
   };
   draftRunBtn.onclick = runDraft;

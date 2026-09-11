@@ -1,11 +1,12 @@
-"""미션 초안 생성 라우트 (시뮬레이션 탭 「미션 초안」) — 자연어 의도 → 웹 폼 초안, 202 잡.
+"""LLM 라우트 — 미션 초안(시뮬 탭)·결과 브리핑(결과 탭), 202 잡.
 
 **이 라우터는 이 리포의 유일한 런타임 아웃바운드다.** routes/world.py가 세운
 "서버는 바깥으로 나가지 않는다"는 그대로 자산 계약으로 유지되고, 예외는 여기
-`call_anthropic` 하나뿐이다. 키(`CLAW_ANTHROPIC_API_KEY`)가 없으면 이 기능만
-사유와 함께 꺼지고 서버는 그대로 선다 — 지형 팩 없는 배포와 같은 degrade
-(`/llm/status`가 그 사유를 문장으로 낸다). 폐쇄망 반입본에서는 켜지 않는 것이
-정상 상태다 (docs/deploy-airgap.md).
+`call_anthropic` 하나뿐이다 — LLM 기능이 늘어도 아웃바운드는 이 함수를 거친다.
+키(`CLAW_ANTHROPIC_API_KEY`)가 없으면 LLM 기능만 사유와 함께 꺼지고 서버는
+그대로 선다 — 지형 팩 없는 배포와 같은 degrade(`/llm/status`가 그 사유를
+문장으로 낸다). 폐쇄망 반입본에서는 켜지 않는 것이 정상 상태다
+(docs/deploy-airgap.md). 브리핑의 가지치기·프롬프트는 claw_server/brief.py.
 
 **초안은 웹 폼 행 형식이다** (`modeRows`/`wpRows` — 값 전부 문자열). 서버
 ModeIn(alt/pitch/hdot 3필드)이 아니라 웹 표의 lonAxis+lonValue 형식인 이유:
@@ -24,6 +25,8 @@ import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
+
+from claw_server.brief import BRIEF_SCHEMA, BRIEF_SYSTEM, brief_user, prune
 
 router = APIRouter(tags=["llm"])
 
@@ -44,9 +47,10 @@ def _model() -> str:
 
 
 _UNAVAILABLE = (
-    "CLAW_ANTHROPIC_API_KEY가 설정되지 않았습니다 — 미션 초안 생성은 Anthropic "
-    "Messages API를 호출하는, 이 서버의 유일한 외부 통신 기능입니다. 키를 넣고 "
-    "재기동하면 켜지고, 폐쇄망 배포에서는 이 기능만 꺼진 것이 정상입니다."
+    "CLAW_ANTHROPIC_API_KEY가 설정되지 않았습니다 — LLM 기능(미션 초안·결과 "
+    "브리핑)은 Anthropic Messages API를 호출하는, 이 서버의 유일한 외부 통신"
+    "입니다. 키를 넣고 재기동하면 켜지고, 폐쇄망 배포에서는 이 기능만 꺼진 "
+    "것이 정상입니다."
 )
 
 # ── LLM 출력 스키마 — 웹 폼 행 계약 (정본은 이 파일, 웹 normalizeDraft는 방어적 수용) ──
@@ -188,9 +192,12 @@ _SYSTEM = """너는 CLAW 비행제어 설계툴의 미션 초안 생성기다. �
 "warnings":[]}"""
 
 
-def call_anthropic(intent: str, *, api_key: str, model: str) -> dict:
+def call_anthropic(*, api_key: str, model: str, system: str, user: str,
+                   schema: dict) -> dict:
     """Anthropic Messages API 1회 호출 — 원시 응답 dict를 돌려준다.
 
+    프롬프트·스키마를 인자로 받는 이유: 미션 초안과 결과 브리핑이 이 한 함수를
+    공유해야 "아웃바운드는 하나"라는 머리말 선언이 사실로 남는다.
     **테스트가 이 전역을 monkeypatch로 갈아끼운다** (test_trim의 trim_batch 교체와
     같은 형태). httpx는 이 함수 안에서만 import한다 — 아웃바운드가 이 함수
     하나에 갇혀 있음을 코드 구조가 그대로 말하게.
@@ -209,8 +216,8 @@ def call_anthropic(intent: str, *, api_key: str, model: str) -> dict:
             json={
                 "model": model,
                 "max_tokens": _MAX_TOKENS,
-                "system": _SYSTEM,
-                "messages": [{"role": "user", "content": intent}],
+                "system": system,
+                "messages": [{"role": "user", "content": user}],
                 # 응답 첫 text 블록이 스키마에 맞는 JSON임을 API가 보장한다
                 # (structured outputs GA — 현행 이름은 output_config.format이고
                 #  output_format은 구명칭·폐기, 베타 헤더 불요). 이 페이로드는
@@ -218,7 +225,7 @@ def call_anthropic(intent: str, *, api_key: str, model: str) -> dict:
                 #  테스트가 call_anthropic을 통째로 갈아끼우므로, 그 경계 안쪽이
                 #  틀려도 조용히 초록이 되는 것을 그 테스트 하나가 막는다
                 "output_config": {"format": {"type": "json_schema",
-                                             "schema": _DRAFT_SCHEMA}},
+                                             "schema": schema}},
             },
         )
     except httpx.HTTPError as e:  # 연결·타임아웃 — 원인을 한국어 한 줄로
@@ -232,11 +239,13 @@ def call_anthropic(intent: str, *, api_key: str, model: str) -> dict:
     return r.json()
 
 
-def _extract_draft(raw: dict) -> dict:
-    """원시 응답 → 초안 dict. 형상은 structured output이 보장하지만, 거부
-    (stop_reason refusal)와 텍스트 블록 부재는 여기서 사유를 들어 실패시킨다."""
+def _extract_json(raw: dict) -> dict:
+    """원시 응답 → 구조화 출력 dict (초안·소견서 공용). 형상은 structured
+    output이 보장하지만, 거부(stop_reason refusal)와 텍스트 블록 부재는 여기서
+    사유를 들어 실패시킨다."""
     if raw.get("stop_reason") == "refusal":
-        raise RuntimeError("모델이 요청을 거절했습니다 — 의도 문장을 바꿔 보십시오.")
+        # 초안·소견서 공용 경로다 — 특정 기능의 입력("의도 문장")을 지목하지 않는다
+        raise RuntimeError("모델이 요청을 거절했습니다 — 입력을 바꿔 다시 시도하십시오.")
     text = next(
         (b.get("text") for b in raw.get("content", []) if b.get("type") == "text"),
         None,
@@ -289,10 +298,11 @@ def submit_mission_draft(req: MissionDraftIn, request: Request,
         # (jobs.py _run의 completed 판정)
         if job.report(0, 2, message=f"{model} 호출 중"):
             return  # 협조적 취소 — 저장 없음
-        raw = call_anthropic(req.intent, api_key=key, model=model)
+        raw = call_anthropic(api_key=key, model=model, system=_SYSTEM,
+                             user=req.intent, schema=_DRAFT_SCHEMA)
         if job.report(1, 2, message="응답 정리 중"):
             return  # 호출 중 취소가 눌렸다 — 초안을 버린다
-        draft = _extract_draft(raw)
+        draft = _extract_json(raw)
         store.save(
             job.id,
             {"kind": "mission_draft", "intent": req.intent, "draft": draft,
@@ -311,5 +321,84 @@ def submit_mission_draft(req: MissionDraftIn, request: Request,
         job.report(2, 2, message="완료")
 
     job = request.app.state.jobs.submit("mission_draft", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()
+
+
+class BriefIn(BaseModel):
+    """소견서 요청 — 대상 결과 하나."""
+
+    # store._ID_RE와 같은 문법 — 경로 조작이 여기서 이미 걸린다
+    result_id: str = Field(min_length=1, max_length=64,
+                           pattern=r"^[A-Za-z0-9_-]+$")
+
+
+@router.post("/llm/brief", status_code=202)
+def submit_brief(req: BriefIn, request: Request, response: Response) -> dict:
+    key = _api_key()
+    if not key:
+        raise HTTPException(status_code=503, detail=_UNAVAILABLE)
+    model = _model()
+    store = request.app.state.store
+    # 대상 확인은 메타로 한다 — 본문 로드는 잡 안에서 (sim 최대 54MB를 요청
+    # 스레드에서 열지 않는다). 메타는 건당 ~130B라 전량 조회가 싸다.
+    meta = next((m for m in store.list() if m["id"] == req.result_id), None)
+    if meta is None:
+        # 사유에 복구 단서까지 — design.py resume 404와 같은 규약
+        raise HTTPException(
+            status_code=404,
+            detail=f"결과 없음: {req.result_id} — 저장소 보존 상한에 밀려났거나 "
+                   "지워졌을 수 있습니다. 결과 탭을 새로고침하십시오.")
+    if meta.get("kind") == "llm_brief":
+        raise HTTPException(
+            status_code=422,
+            detail="소견서의 소견서는 만들지 않습니다 — 원 산출물에 브리핑을 거십시오.")
+
+    def work(job):
+        # 보고 최소 2회 규약 — 미션 초안과 같은 이유 (안 하면 취소가 done으로
+        # 위장). 여기는 3단계다: sim 54MB는 읽기·가지치기만 수 초라 그 구간을
+        # "호출 중"이라고 말하면 화면이 거짓말하고, 호출 직전 보고가 돈 쓰기 전
+        # 마지막 취소 지점이 된다 (리뷰 지적).
+        if job.report(0, 3, message="결과 읽는 중"):
+            return
+        try:
+            payload = store.load(req.result_id)
+        except KeyError:
+            # 제출 시점 메타 확인과 이 로드 사이에 보존 상한이 대상을 밀어냈다 —
+            # 트레이스백이 아니라 사유 문장으로 (design.py resume KeyError 선례)
+            raise RuntimeError(
+                f"결과가 사라졌습니다: {req.result_id} — 저장소 보존 상한에 "
+                "밀려났거나 지워졌을 수 있습니다. 결과 탭을 새로고침하십시오.")
+        kind = str(meta.get("kind") or payload.get("kind") or "")
+        pruned = prune(payload, kind)
+        del payload  # sim 54MB — 가지치기 뒤에는 들고 있지 않는다
+        if job.report(1, 3, message=f"{model} 호출 중"):
+            return  # 돈 쓰기 전 마지막 취소 지점
+        raw = call_anthropic(api_key=key, model=model, system=BRIEF_SYSTEM,
+                             user=brief_user(meta, pruned), schema=BRIEF_SCHEMA)
+        if job.report(2, 3, message="소견서 정리 중"):
+            return  # 호출 중 취소 — 소견서를 버린다
+        brief = _extract_json(raw)
+        store.save(
+            job.id,
+            {"kind": "llm_brief", "parent": req.result_id, "parent_kind": kind,
+             "headline": str(brief.get("headline") or ""),
+             "body": str(brief.get("body") or ""),
+             "look_at": brief.get("look_at") or [],
+             "model": model, "usage": raw.get("usage")},
+            meta={
+                "kind": "llm_brief",
+                "created": job.created,
+                # 대상의 지문을 승계 — 목록에서 같은 계보로 묶인다. 대상에
+                # 지문이 없으면 없는 그대로 (위장 금지)
+                "fingerprint": meta.get("fingerprint", ""),
+                # 어느 결과의 소견인지 — auto_design meta.parent 선례
+                "parent": req.result_id,
+            },
+        )
+        job.result_id = job.id
+        job.report(3, 3, message="완료")
+
+    job = request.app.state.jobs.submit("llm_brief", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"
     return job.to_dict()

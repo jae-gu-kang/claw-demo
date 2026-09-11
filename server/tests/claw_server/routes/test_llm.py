@@ -1,12 +1,14 @@
-"""미션 초안 라우트 (LLM, 시뮬레이션 탭) — 202 잡·degrade 계약.
+"""LLM 라우트 (미션 초안 + 결과 브리핑) — 202 잡·degrade 계약.
 
 초안의 의미 검증은 웹(lib/mission.js buildModes·buildWaypoints)과 실행 시점
-/sim/run 422가 정본이다. 여기서 지키는 것은 서버 계약이다:
+/sim/run 422가 정본이고, 브리핑의 가지치기 계약은 test_brief.py가 지킨다.
+여기서 지키는 것은 서버 계약이다:
   ① 키가 없으면 status가 사유 문장을 내고, 생성 POST는 503 + 같은 사유로 거부
-  ② 키가 있으면 202 잡이 돌고 초안·의도·모델·메타(n=모드 수)가 저장소에 실린다
+  ② 키가 있으면 202 잡이 돌고 산출물(초안/소견서)과 메타가 저장소에 실린다
   ③ 호출 실패·모델 거절이 잡 error와 사유로 드러난다 (조용한 실패 금지)
   ④ 상태 조회는 바깥으로 나가지 않는다 — 아웃바운드는 생성 호출 하나뿐
      (routes/world.py "서버는 나가지 않는다" 계약의 명시적 예외 범위 고정)
+  ⑤ 브리핑 대상 검증 — 없는 결과 404 · 소견서의 소견서 422 · 지문 승계
 """
 
 import json
@@ -75,8 +77,9 @@ def test_초안과_의도가_저장되고_메타에_모드_수가_실린다(clie
     monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
     calls = {}
 
-    def fake(intent, *, api_key, model):
-        calls.update(intent=intent, api_key=api_key, model=model)
+    def fake(*, api_key, model, system, user, schema):
+        calls.update(api_key=api_key, model=model, system=system,
+                     user=user, schema=schema)
         return _fake_raw(_DRAFT)
 
     # raising 기본값 유지 — call_anthropic이 개명되면 여기가 시끄럽게 죽어야
@@ -102,9 +105,12 @@ def test_초안과_의도가_저장되고_메타에_모드_수가_실린다(clie
     assert meta["n"] == len(_DRAFT["modeRows"])
     assert meta["fingerprint"] == ""  # 초안은 형상 산출물이 아니다 — 계보 없음을 위장 금지
 
-    assert calls["intent"] == "북쪽 5 km 왕복"
+    assert calls["user"] == "북쪽 5 km 왕복"
     assert calls["api_key"] == "test-key"
     assert calls["model"] == "claude-opus-5"
+    # 초안 경로는 초안 프롬프트·스키마로 부른다 — 브리핑과 갈리는 자리
+    assert calls["system"] is llm_route._SYSTEM
+    assert calls["schema"] is llm_route._DRAFT_SCHEMA
 
 
 def test_나가는_요청은_계약_그대로다(client, wait_job, monkeypatch):
@@ -141,7 +147,7 @@ def test_나가는_요청은_계약_그대로다(client, wait_job, monkeypatch):
     body = sent["body"]
     assert body["model"] == "claude-opus-5"
     assert body["messages"] == [{"role": "user", "content": "계약 고정"}]
-    assert body["system"]  # 규약 프롬프트가 실제로 실린다
+    assert body["system"] == llm_route._SYSTEM  # 초안 규약 프롬프트가 실제로 실린다
     fmt = body["output_config"]["format"]
     assert fmt["type"] == "json_schema"
     assert fmt["schema"] == llm_route._DRAFT_SCHEMA
@@ -155,7 +161,7 @@ def test_호출_중_취소는_cancelled로_남고_저장이_없다(client, wait_
     gate = threading.Event()
     entered = threading.Event()
 
-    def gated(intent, *, api_key, model):
+    def gated(*, api_key, model, system, user, schema):
         entered.set()
         assert gate.wait(timeout=30), "테스트 게이트 시간 초과"
         return _fake_raw(_DRAFT)
@@ -189,7 +195,7 @@ def test_호출_실패는_잡_error와_사유로_남는다(client, wait_job, mon
     """가장 흔한 실패(잘못된 키·요율 한계)가 침묵이 되면 안 된다."""
     monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "bad-key")
 
-    def fake(intent, *, api_key, model):
+    def fake(*, api_key, model, system, user, schema):
         raise RuntimeError("Anthropic API 401 — invalid x-api-key")
 
     monkeypatch.setattr(llm_route, "call_anthropic", fake)
@@ -204,7 +210,7 @@ def test_모델_거절은_사유를_들어_실패한다(client, wait_job, monkey
     monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(
         llm_route, "call_anthropic",
-        lambda intent, *, api_key, model: {"content": [], "stop_reason": "refusal"})
+        lambda **kw: {"content": [], "stop_reason": "refusal"})
     r = client.post("/api/llm/mission-draft", json={"intent": "아무거나"})
     job = wait_job(r.json()["id"])
     assert job["status"] == "error"
@@ -218,6 +224,105 @@ def test_빈_의도는_422(client, monkeypatch):
     # 공백만은 min_length를 통과한다 — 빈 의도로 실 API를 부르지 않는다
     assert client.post("/api/llm/mission-draft",
                        json={"intent": "   "}).status_code == 422
+
+
+# ── 결과 브리핑 (/llm/brief) ──────────────────────────────────────────────
+
+_BRIEF = {"headline": "격자 전 케이스 수렴 — 이상 없음",
+          "body": "트림 배치 1케이스가 수렴했고 판정 플래그 위반이 없다.",
+          "look_at": ["트림 탭 「케이스별 수치·판정」 패널"]}
+
+
+def _seed(client, rid, kind, payload, fingerprint="deadbeefdeadbeef"):
+    """저장소에 브리핑 대상 결과를 직접 심는다 — 라우트 경유 없이 (테스트 전용)."""
+    client.app.state.store.save(
+        rid, payload,
+        meta={"kind": kind, "created": 1.0, "fingerprint": fingerprint, "n": 1})
+    return rid
+
+
+def test_소견서가_저장되고_부모와_지문을_잇는다(client, wait_job, monkeypatch):
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    # sim을 대상으로 — 가지치기(배제 마커)가 실제 경로에서 도는지도 여기서 본다
+    rid = _seed(client, "simres01", "sim", {
+        "kind": "sim",
+        "t": list(range(10000)),
+        "envelope": {"stall_margin": list(range(10000)), "worst_margin": 0.12},
+        "meta": {"phases": {"touchdown_t": 96.9}},
+    })
+    calls = {}
+
+    def fake(*, api_key, model, system, user, schema):
+        calls.update(system=system, user=user, schema=schema)
+        return _fake_raw(_BRIEF)
+
+    monkeypatch.setattr(llm_route, "call_anthropic", fake)
+    r = client.post("/api/llm/brief", json={"result_id": rid})
+    assert r.status_code == 202, r.text
+    job = wait_job(r.json()["id"])
+    assert job["status"] == "done", job
+
+    body = client.get(f"/api/results/{job['result_id']}").json()
+    assert body["kind"] == "llm_brief"
+    assert body["parent"] == rid
+    assert body["parent_kind"] == "sim"
+    assert body["headline"] == _BRIEF["headline"]
+    assert body["look_at"] == _BRIEF["look_at"]
+
+    meta = next(m for m in client.get("/api/results").json()
+                if m["id"] == job["result_id"])
+    assert meta["kind"] == "llm_brief"
+    assert meta["parent"] == rid           # 어느 결과의 소견인지 목록에서 잇는다
+    assert meta["fingerprint"] == "deadbeefdeadbeef"  # 대상의 지문 승계
+
+    # 브리핑 경로는 브리핑 프롬프트·스키마로 부르고, 가지치기가 실제로 돌았다
+    from claw_server.brief import BRIEF_SCHEMA, BRIEF_SYSTEM
+    assert calls["system"] is BRIEF_SYSTEM
+    assert calls["schema"] is BRIEF_SCHEMA
+    assert "[제외" in calls["user"]          # sim 시계열이 마커로 대체됐다
+    assert "worst_margin" in calls["user"]   # 판정 스칼라는 실렸다
+    assert "deadbeefdeadbeef" in calls["user"]  # 메타 동봉
+    assert len(calls["user"]) < 20_000       # 유계 — 시계열이 새면 여기서 터진다
+
+
+def test_없는_결과의_소견서는_404(client, monkeypatch):
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    r = client.post("/api/llm/brief", json={"result_id": "nope404"})
+    assert r.status_code == 404
+    assert "결과 없음" in r.json()["detail"]
+
+
+def test_소견서의_소견서는_만들지_않는다(client, monkeypatch):
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    rid = _seed(client, "briefres1", "llm_brief", {"kind": "llm_brief"})
+    r = client.post("/api/llm/brief", json={"result_id": rid})
+    assert r.status_code == 422
+    assert "소견서" in r.json()["detail"]
+
+
+def test_대상이_사라진_소견서는_사유로_실패한다(client, wait_job, monkeypatch):
+    """제출 시점 메타 확인과 잡 안의 load 사이에 보존 상한이 대상을 밀어낼 수
+    있다(레이스) — 트레이스백이 아니라 사유 문장이어야 한다 (리뷰 지적,
+    design.py resume KeyError 선례)."""
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    rid = _seed(client, "gonesoon1", "trim_batch", {"kind": "trim_batch"})
+
+    def vanished(_result_id):
+        raise KeyError(_result_id)
+
+    monkeypatch.setattr(client.app.state.store, "load", vanished)
+    r = client.post("/api/llm/brief", json={"result_id": rid})
+    assert r.status_code == 202
+    job = wait_job(r.json()["id"])
+    assert job["status"] == "error"
+    assert "사라졌습니다" in job["error"]  # KeyError 원문이 아니라 사유 문장
+    assert "보존 상한" in job["error"]
+
+
+def test_소견서도_키가_없으면_503(client):
+    r = client.post("/api/llm/brief", json={"result_id": "whatever1"})
+    assert r.status_code == 503
+    assert "CLAW_ANTHROPIC_API_KEY" in r.json()["detail"]
 
 
 def test_상태_조회는_바깥으로_나가지_않는다(client, monkeypatch):
