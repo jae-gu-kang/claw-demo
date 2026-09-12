@@ -181,3 +181,51 @@ test("캡션에 마크다운 별표가 새어 나가지 않는다 — hint는 �
     assert.ok(hints.includes(word), `캡션이 ${word}을 설명하지 않는다`);
   }
 });
+
+// ---- 실제 배선 (스텁이 아니라 기본값 그대로) ----
+//
+// 위 테스트들은 `getFlyable`을 **스텁으로** 넘긴다 — "주면 그린다"는 확인이라
+// 지도 안쪽은 지키지만 **시뮬 탭이 실제로 그것을 넘기는가**는 안 본다.
+// 사용자가 "미리보기가 안 뜬다"고 보고했을 때 원인 후보에서 이 틈을 배제할
+// 수단이 없었다(원인은 배포였다). 아래 둘이 그 틈을 막는다.
+
+const { defaultModeRows, defaultWpRows, AP_PHI_MAX_FALLBACK } =
+  await import("../lib/simrequest.js");
+const { rowsToPoints } = await import("../lib/wpmap.js");
+const { flyablePath, pathSpeed } = await import("../lib/wpcheck.js");
+
+test("기본 상태에서 **실제로** 초록 경로가 그려진다 — 스텁 없이", () => {
+  // views/sim.js의 getFlyable 식과 같은 조립. 기본 웨이포인트·기본 모드 표·폴백
+  // 뱅크 한계만으로 그릴 것이 나와야 한다 — 하나라도 어긋나면(순항 모드의 heading이
+  // "path"가 아니게 되거나, 기본 웨이포인트가 퇴화하거나) 화면이 조용히 옛 모습이 된다.
+  const wpRows = defaultWpRows();
+  const modeRows = defaultModeRows();
+  const { map, canvas } = mount({
+    rows: wpRows,
+    flyable: flyablePath(rowsToPoints(wpRows), pathSpeed(modeRows), AP_PHI_MAX_FALLBACK),
+  });
+  assert.ok(map, "지도가 서지 않았다");
+  const fly = strokesOf(canvas, FLY);
+  assert.equal(fly.length, 1, "기본 상태에서 실제 경로가 안 그려진다");
+  // 꼭짓점만 이은 계획선보다 **훨씬 촘촘하다** — 호가 실제로 들어갔다는 뜻이다.
+  // 여기가 계획선과 같은 점 수라면 호 없이 직선만 그린 것이고, 그것이 곧 사용자가
+  // 보고한 "예전처럼 웨이포인트만 이어준다"는 증상이다.
+  const plan = strokesOf(canvas, PLAN);
+  assert.ok(fly[0].path.length > plan[0].path.length * 3,
+    `호가 없다: 실제 ${fly[0].path.length}점 vs 계획 ${plan[0].path.length}점`);
+  // 기본 장주는 전 꺾임이 날 수 있다 — 빨간 고리가 뜨면 기본값이 퇴행한 것이다
+  assert.equal(strokesOf(canvas, TIGHT).length, 0);
+});
+
+test("시뮬 탭이 지도에 getFlyable을 실제로 넘긴다 (원문 대조)", async () => {
+  // 위 테스트는 "이 식이 그릴 것을 낸다"까지다 — `views/sim.js`가 그 식을
+  // createWpMap에 **붙여 두었는지**는 원문을 봐야 안다. 배선이 빠지면 지도는
+  // getFlyable이 undefined라 조용히 옛 모습으로 돌아가고, 위 테스트는 통과한다.
+  // index.html을 정규식으로 대조하는 blocks.test.js와 같은 부류의 가드다.
+  const { readFile } = await import("node:fs/promises");
+  const src = await readFile(new URL("./sim.js", import.meta.url), "utf8");
+  const call = src.match(/createWpMap\(\{[\s\S]*?\n  \}\);/);
+  assert.ok(call, "sim.js에서 createWpMap 호출을 못 찾았다 — 이 가드부터 고칠 것");
+  assert.match(call[0], /getFlyable:\s*\(\)\s*=>\s*flyablePath\(/,
+    "createWpMap에 getFlyable 배선이 없다 — 미리보기가 화면에서 사라진다");
+});
