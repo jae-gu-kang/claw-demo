@@ -41,7 +41,7 @@ js/
 │   ├── 3D·기하       world3d · attitude · uavmesh · camera · plot3d
 │   ├── 코드·검증      highlight · flightcode · codegen · verify
 │   └── 플롯          plot
-└── views/            # DOM 조립 전용 26개 (얇게 유지)
+└── views/            # DOM 조립 전용 (얇게 유지) + testdom.js (테스트 전용 가짜 DOM)
     ├── 뼈대·공용      stage · plots · progress · evalcards · codeview
     ├── 블록도        blocks · diagram · subsystems · manual
     ├── 엔벨로프      envelope
@@ -92,6 +92,25 @@ world/                # 가상환경 번들 (별도 빌드 — 반입물은 buil
 ```bash
 node --test "js/**/*.test.js"   # web/ 에서 — node 내장 러너, npm 의존 0
 ```
+
+push·PR마다 CI가 같은 명령을 돌린다 (`.github/workflows/fast.yml` 빠른 층).
+
+**`lib/`은 소스만큼 테스트가 있고 `views/`는 거의 없다** — 의도한 비대칭이다. 판단을
+`lib/`으로 빼고 `views/`는 얇게 두는 것이 이 디렉터리의 규약이고(`stage.js`가 그렇게
+적어 둔다: "판단은 lib/stage.js에 있고 여기는 DOM뿐이다"), 그래서 시험할 것이 뷰 쪽에
+남지 않는다.
+
+다만 **판단이 실제로 뷰에 남은 자리**는 시험한다. 지금 둘이다:
+
+| 파일 | 무엇이 남아 있나 |
+|---|---|
+| `views/plots.js` | 공유 드로잉 — 퇴화 입력의 축 잡기, 결측에서 붓 떼기, N–E 등축 |
+| `views/wpmap.js` | 미리보기를 그릴지, 못 나는 꺾임에 고리를 칠지, 도달반경 원을 점선으로 낼지 |
+
+가짜 DOM·기록 캔버스는 `views/testdom.js`다(테스트 전용, 앱은 안 들여온다).
+**픽셀을 견주지 않는다** — `stroke()`가 불린 그 순간의 색·굵기·점선과 쌓인 경로를
+적어 두고 "무엇을 그리기로 했나"만 묻는다. 이 뷰 테스트들은 변이시험으로 검증했다
+(가드를 하나씩 지워 실제로 빨개지는지 확인 — 안 잡히면 그 테스트는 장식이다).
 
 ## 알려진 표시 한계
 
