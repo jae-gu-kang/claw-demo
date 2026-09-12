@@ -199,7 +199,19 @@ uvicorn --factory claw_server:create_app --port 8000   # 리포 루트에서
 .venv/bin/python -m pytest models    # 모델 생성 스크립트 유틸 (블렌더 불요)
 (cd web && node --test "js/**/*.test.js")        # 웹 (node 내장 러너, npm 의존 0)
 (cd web/world && node --test "src/**/*.test.ts")  # 가상환경 탭 (별도 스위트 — 위 글로브가 못 닿는다)
+scripts/refcheck.sh                  # 문서·코드의 절 참조 (본문 정본은 docs/README.md)
 ```
+
+### 자동으로 도는 것 — 빠른 층
+
+`.github/workflows/fast.yml`이 push·PR마다 **위 아래 셋**(웹 826 · 가상환경 194 ·
+참조 검사기)을 돌린다. 셋 다 npm 설치가 필요 없어 **3~4초**에 끝난다.
+
+**나머지는 손으로 돌린다.** 파이썬 스위트는 실측으로 engine 24분 · server 28분이라
+이 층에 넣으면 층이 층이 아니게 된다. 그러니 **CI가 초록이라고 탑재 C가 검증된 것이
+아니다** — 생성 C 비트 대조(`flight`)·트림·선형화·MC/DC는 위 pytest 줄의 몫이고,
+커밋된 `web/world/build/world.js`가 `src`와 맞는지도 이 층은 보지 않는다(재빌드에
+npm ci + vite가 든다).
 
 ## 알려진 제약
 
