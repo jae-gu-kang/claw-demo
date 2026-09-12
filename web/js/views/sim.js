@@ -10,14 +10,17 @@ import { COND_KINDS, LON_AXES, pathUsage } from "../lib/mission.js";
 // 요청 조립·기본 미션·실행 조건 기본값은 lib가 정본 — 가이드 투어(views/tour.js)가
 // **같은 조립**을 쓴다. 두 벌이면 투어가 돌린 미션과 이 표가 조용히 갈린다
 import {
-  applyActuatorSchema, appliedFrom, buildSimRequest, defaultModeRows, defaultWpRows,
-  initialForm, RUNWAY_HDG,
+  AP_PHI_MAX_FALLBACK, applyActuatorSchema, appliedFrom, buildSimRequest,
+  defaultModeRows, defaultWpRows, initialForm, RUNWAY_HDG,
 } from "../lib/simrequest.js";
 import { planeViews, wpMarks } from "../lib/plot.js";
 import { atEnd as cursorAtEnd, dtSample, indexAt, isPlayable } from "../lib/playcursor.js";
 import { dryRun, normalizeDraft } from "../lib/missiondraft.js";
-import { flaggedNames, landingSummary, modeSpans, strideFor } from "../lib/replay.js";
+import {
+  flaggedNames, landingSummary, modeSpans, pathEscapeNote, strideFor,
+} from "../lib/replay.js";
 import { GOHEUNG, touchdownWindowM } from "../lib/site.js";
+import { checkWaypoints, flyablePath, pathSpeed } from "../lib/wpcheck.js";
 import { fillMissingAltitudes, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
@@ -47,6 +50,19 @@ let renderWpNotice = () => {};
 // 도달 반경 읽기 — renderWpTable도 모듈 함수라 폼(f)에 닿지 못한다. 새 웨이포인트의
 // 원점 판정에 쓰므로 지도·표 두 추가 경로가 같은 값을 봐야 한다 (redrawProfile과 같은 관례)
 let acceptRadiusOf = () => 0;
+// 뱅크 한계 [rad] — 웨이포인트 기하 판정의 선회 반경 근거. 폼 폴백으로 시작해
+// 레지스트리 스키마가 오면 실값으로 갈아 낀다(작동기 3칸과 같은 자기정렬 — 02 §5.5).
+let apPhiMax = AP_PHI_MAX_FALLBACK;
+/** 지금 쓸 뱅크 한계 — 블록도에서 오토파일럿을 주입했으면 그쪽이 이긴다.
+ *
+ *  **경고(checkWaypoints)와 미리보기(flyablePath)가 반드시 같은 값을 봐야 한다** —
+ *  갈리면 "급하다"고 적어 놓고 호는 멀쩡히 그리는 화면이 된다. 그래서 두 곳이
+ *  각자 읽지 않고 이 한 자리를 거친다. 서버도 같은 phi_max를 경로추종기에 넘긴다
+ *  (routes/sim.py _build) — 화면 둘과 엔진이 한 수를 본다. */
+function bankMaxNow() {
+  const applied = Number(store.get("autopilotParams")?.phi_max);
+  return Number.isFinite(applied) ? applied : apPhiMax;
+}
 // 지도 줌/팬 상태 — 탭 재진입 시 유지 (wpRows·lastReplay와 동렬)
 let wpMapView = { view: null };
 // 3D 시점(방위·고각) — 재렌더·탭 전환에도 돌려놓은 각도를 잃지 않게
@@ -251,6 +267,15 @@ export function render() {
       for (const key of ["wn", "zeta", "rate"]) f[key].value = next[key];
     }).catch(() => {});
   }
+  // 뱅크 한계도 같은 자기정렬 — 실패는 무시(폴백으로 판정한다). 도착하면 경고를
+  // 다시 그린다: 폴백과 실값이 다르면 선회 반경이 달라져 판정이 뒤집힐 수 있다
+  api.get("/registry/fcl/Autopilot/schema").then((s) => {
+    const d = Number(s?.properties?.phi_max?.default);
+    if (Number.isFinite(d) && d > 0 && d !== apPhiMax) {
+      apPhiMax = d;
+      renderWpNotice();
+    }
+  }).catch(() => {});
 
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -355,16 +380,24 @@ export function render() {
       miss.push(["세로 프로파일",
         '세로 프로파일은 종방향 축을 ‘고도’로 두고 값에 "path"를 적어야 따릅니다.']);
     }
-    if (!miss.length) return;
-    clear(wpNotice).append(el("div", { class: "error-box" },
-      `⚠ 웨이포인트 ${pts.length}개 — 비행에 반영되지 않는 축: `,
-      el("b", {}, miss.map((m) => m[0]).join(" · ")),
-      ". ",
-      miss.map((m) => m[1]).join(" "),
-      " 지금 실행해도 그 축은 결과에 기준선으로만 실립니다(경로오차 지표) — ",
-      "기체는 모드 표의 값대로 날아갑니다."));
+    if (miss.length) {
+      wpNotice.append(el("div", { class: "error-box" },
+        `⚠ 웨이포인트 ${pts.length}개 — 비행에 반영되지 않는 축: `,
+        el("b", {}, miss.map((m) => m[0]).join(" · ")),
+        ". ",
+        miss.map((m) => m[1]).join(" "),
+        " 지금 실행해도 그 축은 결과에 기준선으로만 실립니다(경로오차 지표) — ",
+        "기체는 모드 표의 값대로 날아갑니다."));
+    }
+    // 기하 사전 판정 — **선회 성능 안에 드는 배치인가**. 엔진의 예상 전환·궤도 탈출은
+    // 돌고 나서야 아는 사후 장치라, 좌표를 고칠 기회는 제출 전 여기뿐이다.
+    // 속도·뱅크 한계의 출처와 우선순위는 bankMaxNow·pathSpeed가 정본이다 —
+    // 지도의 미리보기도 같은 둘을 읽는다(글과 그림이 한 수를 본다).
+    const geom = checkWaypoints(pts, pathSpeed(modeRows), bankMaxNow(), acceptRadiusOf());
+    for (const w of geom.warnings) {
+      wpNotice.append(el("div", { class: "error-box" }, `⚠ ${w}`));
+    }
   };
-  renderWpNotice = drawWpNotice;
 
   // NED 평면 지도 편집기 — 표와 양방향 동기 (단일 소스 = wpRows)
   const wpMap = createWpMap({
@@ -372,11 +405,19 @@ export function render() {
     getAcceptRadius: () => Number(f.accept.value) || 0,
     getTrack: () => lastReplay &&
       { pn: lastReplay.body.signals.pn, pe: lastReplay.body.signals.pe },
+    // 매번 다시 계산한다(캐시 없음) — 속도는 모드 표, 뱅크 한계는 스토어에서 오므로
+    // 둘 중 어느 쪽을 고쳐도 다음 redraw에서 선이 따라와야 한다
+    getFlyable: () => flyablePath(rowsToPoints(wpRows), pathSpeed(modeRows), bankMaxNow()),
     onRowsChanged: () => { renderWpTable(wpBox, wpMap); drawProfile(); },
     onSelect: (idx) => profileChart.refresh(idx), // 프로파일도 같은 점을 가리키게
     viewRef: wpMapView,
     width: STAGE_MAP_PX, height: STAGE_MAP_PX,
   });
+  // **경고와 미리보기를 함께 갱신한다.** 둘은 같은 입력(웨이포인트·순항 속도·뱅크
+  // 한계)에서 나오므로 따로 부르면 어긋난다 — 모드 표에서 순항 속도만 고쳤을 때
+  // 문장은 "급하다"로 바뀌는데 지도의 호는 옛 반경 그대로 남는 자리가 그것이다.
+  // wpMap이 만들어진 **뒤에** 묶는다(그 전에 걸면 초기화 전 참조가 된다).
+  renderWpNotice = () => { drawWpNotice(); wpMap.refresh(); };
   f.accept.addEventListener("input", () => wpMap.refresh()); // 도달반경 원 즉시 갱신
   // 시작 트림 고도가 계획선의 출발점이다 — 바꾸면 프로파일도 따라 움직여야 한다
   f.alt.addEventListener("input", drawProfile);
@@ -905,8 +946,11 @@ function renderModeTable(modeBox) {
         // 웨이포인트 안내도 다시 판정해야 한다
         el("td", {}, el("input", { value: r.name,
           onchange: (ev) => { r.name = ev.target.value; renderWpNotice(); } })),
+        // 속도는 선회 반경의 **지배 입력**이다(R ∝ V²) — 고치면 경고 문장과 지도의
+        // 선회호가 같이 움직여야 한다. 종전엔 값만 담고 아무것도 다시 그리지 않아,
+        // 순항 88 → 30으로 낮춰도 화면은 "급하다"를 그대로 띄우고 있었다
         el("td", {}, el("input", { value: r.speed,
-          onchange: (ev) => { r.speed = ev.target.value; } })),
+          onchange: (ev) => { r.speed = ev.target.value; renderWpNotice(); } })),
         // 종방향은 **하나를 고르게** 한다 — alt·pitch·hdot이 전부 θ_cmd로 가므로
         // 축마다 칸을 주면 둘을 채운 행이 만들어지고, 그때 화면은 "무엇이 먹었는지"를
         // 말할 수 없다. 배타 규칙이 편집 형태에 그대로 드러난다
@@ -990,11 +1034,11 @@ function renderWpTable(wpBox, wpMap) {
         // sync()를 안 거쳐 안내가 남거나 안 뜨는 상태로 얼어 있었다 (리뷰 지적)
         el("td", {}, el("input", { value: r.n,
           onchange: (ev) => {
-            r.n = ev.target.value; wpMap?.refresh(); redrawProfile(); renderWpNotice();
+            r.n = ev.target.value; redrawProfile(); renderWpNotice();
           } })),
         el("td", {}, el("input", { value: r.e,
           onchange: (ev) => {
-            r.e = ev.target.value; wpMap?.refresh(); redrawProfile(); renderWpNotice();
+            r.e = ev.target.value; redrawProfile(); renderWpNotice();
           } })),
         // 고도는 선택 — 빈 칸은 "고도 없음"이지 0이 아니다. 빈 칸으로 되돌리면
         // 키 자체를 지운다(rowsToPoints·buildWaypoints가 그 규약을 공유한다)
@@ -1149,6 +1193,10 @@ function renderReplay(replayBox) {
       r.note ? " — " : "", r.note ?? "",
       r.unjudged ? " " : "", r.unjudged ? flagBadge(null) : "",
       r.over ? " " : "", r.over ? flagBadge(false, "", r.overLabel ?? "활주로 초과") : "")),
+    // 못 잡고 넘어간 웨이포인트 — **경로가 끝난 것과 계획대로 난 것은 다르다.**
+    // 엔진 안전망이 미션을 끝내 주므로 이 줄이 없으면 사용자는 자기가 찍은 경로를
+    // 날았다고 읽는다 (engine guidance/path.py §궤도 고착 · meta.path_escapes)
+    ...(pathEscapeNote(body) ? [el("div", { class: "error-box" }, `⚠ ${pathEscapeNote(body)}`)] : []),
     el("div", { class: "row" }, playBtn, speedSel, slider, readout),
     // 궤적 뷰 — 입체·평면·측면·정면 순. 배치는 .triview가 폭에 따라 1열/2열로
     // 고르며, 열 수를 4의 약수로만 두어 마지막 줄에 외톨이가 남지 않게 한다.

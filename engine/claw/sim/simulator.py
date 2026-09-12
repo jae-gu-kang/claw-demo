@@ -446,6 +446,10 @@ class Simulator:
                 "limits": self._effector_limits(actuators),
                 "clamps": self._command_clamps(),
                 "phases": phases,
+                # 순수추적으로 못 잡고 넘긴 웨이포인트 (0 기준 인덱스) — 빈 목록이
+                # 정상이다. 경로가 끝난 것과 계획대로 난 것은 다르므로, 화면이
+                # "돌다가 넘어갔다"를 말할 수 있어야 한다 (guidance/path.py §궤도 고착)
+                "path_escapes": list(self.guidance.path_escapes),
             },
         )
 

@@ -51,6 +51,16 @@ class Guidance:
         self._last_cmd = None
         self._alt_on_path = False  # 고도 축이 경로를 잡고 있었는가 (상승엣지 검출)
 
+    @property
+    def path_escapes(self) -> tuple:
+        """순수추적으로 못 잡고 넘긴 웨이포인트 인덱스(0 기준) — 없으면 빈 튜플.
+
+        경로가 없으면 빈 튜플이다(None이 아니라): "경로가 없다"와 "경로는 있는데
+        다 잡았다"의 구분은 `meta["waypoints"]`가 이미 낸다. 여기서까지 세 상태를
+        만들면 소비자가 둘을 같게 다루는 실수를 한다.
+        """
+        return () if self.path is None else tuple(getattr(self.path, "escapes", ()))
+
     def step(self, nav, on_ground=None, on_rail=None) -> GuidanceCommand:
         if not nav.valid:
             if self._last_cmd is not None:

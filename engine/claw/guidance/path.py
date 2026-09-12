@@ -10,14 +10,41 @@ LOS: 현 위치→활성 웨이포인트 방위각을 헤딩 명령으로. 도�
 경로는 헤딩만), 구간마다 고도를 다르게 주려면 구간 수만큼 모드를 적어야 했다 —
 사용자 요청으로 경로가 고도 명령도 내도록 확장했다(01 §3.3).
 
+**순수추적은 선회 반경보다 급한 꺾임을 못 난다** — 엔진에는 그것을 다루는 장치가
+둘 있다. 셋째(제출 전 기하 판정)는 화면 몫이라 여기 없다 —
+01 §3.3 「LOS의 기하 한계」가 셋의 자리를 함께 적는다.
+
+§선회 예상 전환 (fly-by) — `bank_max`
+    도달 반경만으로 전환하면 기체는 꺾임점을 **지나친 뒤** 되돌아온다. 실기
+    오토파일럿처럼 꺾임 **앞에서** 미리 전환한다: 선회 반경 R = V²/(g·tan φ_max)
+    에서 예상 거리 L = R·tan(Δψ/2)이고, 유효 포획 반경은 max(도달 반경, L)이다.
+    `bank_max`가 0(기본)이면 **선회 능력을 모른다는 뜻이라 예상 전환을 하지
+    않는다** — 없는 값을 지어내지 않는 자리다. 서버 `_build`가 오토파일럿의
+    실제 `phi_max`를 그대로 넘겨 실행 경로에서는 늘 켜진다(02 §5.5 — 웹·서버가
+    기본값을 재기술하는 것이 아니라 **두 실값을 잇는다**).
+
+§궤도 고착 탈출 — 안전망
+    그래도 못 잡는 배치가 있다(도달 반경 < 선회 반경인데 꺾임이 급한 경우).
+    순수추적은 목표를 중심으로 **반경 R의 원을 돌며 영영 수렴하지 않는다** —
+    실측: 88 m/s·φ_max 0.7(R≈938 m)에서 1 km 간격 직각 웨이포인트를 주면 400 s
+    동안 5.4바퀴를 돌고 `path_done`이 오지 않아 미션이 끝나지 않았다. 활성
+    웨이포인트의 **방위각 누적 변화**가 한 바퀴(2π)에 닿으면 그 점을 순수추적으로는
+    잡을 수 없다고 판정하고 다음으로 넘긴다. 2π는 건강한 미션에서 절대 나오지
+    않는 값이라 안전망이 정상 비행을 건드리지 않는다.
+
+    **넘긴 사실은 조용히 묻지 않는다** — `escapes`에 웨이포인트 인덱스(0 기준)가
+    쌓이고 시뮬 결과 `meta["path_escapes"]`로 실려 화면이 "이 점은 못 잡고
+    넘어갔다"를 말한다. 미션이 끝나는 것과 계획대로 난 것은 다르다.
+
 **모드 테이블은 여전히 출처를 고르는 쪽이다**: heading과 똑같이 `alt="path"`인
 모드에서만 이 값이 쓰인다(guidance.py). 새 우선순위 규칙을 만들지 않고 기존
 선택 규약을 그대로 한 축 더 쓰는 것이라, "경로와 모드 중 누가 이기나"라는 물음이
 생기지 않는다.
 
 고도 명령은 **구간 선형 보간**이다 — 활성 구간의 시작 고도에서 목표 고도까지
-남은 수평거리 비율로 잇되, 램프는 **도달 반경 경계**에서 끝난다(전환이 그 자리에서
-일어나므로 명령이 연속이고, 도착할 때 이미 목표 고도다 — _leg_alt 참조).
+남은 수평거리 비율로 잇되, 램프는 **유효 포획 반경 경계**에서 끝난다(전환이 그
+자리에서 일어나므로 명령이 연속이고, 도착할 때 이미 목표 고도다 — _leg_alt 참조).
+예상 전환이 켜지면 그 경계가 도달 반경보다 바깥이므로 램프도 함께 앞당겨진다.
 활성 웨이포인트의 고도를 곧바로 명령하면(계단) 화면의 세로 프로파일(거리-고도
 꺾은선)과 실제 명령이 다른 것을 그리게 된다. 첫 구간의 시작 고도는 **첫 스텝의
 기체 고도**다: 출발점은 웨이포인트가 아니므로 계획에 없고, 기체가 실제로 있는
@@ -27,17 +54,42 @@ LOS: 현 위치→활성 웨이포인트 방위각을 헤딩 명령으로. 도�
 import math
 
 from claw.blocks.base import Block
+from claw.common.constants import G0
 from claw.params.param import ParamDef
+
+# 궤도 고착 판정 — 활성 웨이포인트 방위각을 **한 바퀴** 쓸면 순수추적으로는 못 잡는다.
+# 한 바퀴보다 작게 잡으면 정상 선회가 걸린다(급한 꺾임 하나가 π를 넘길 수 있다).
+_ORBIT_SWEEP = 2.0 * math.pi
+# 예상 전환에 쓰는 선회각 상한 — tan(Δψ/2)가 Δψ→π에서 발산한다. 아래 구간 길이
+# 상한이 실제로는 먼저 걸리지만, 유한하지 않은 중간값을 만들지 않는다.
+_TURN_MAX = 0.9 * math.pi
+# 이보다 작은 꺾임은 예상 전환할 것이 없다 (직진 구간의 수치 잡음)
+_TURN_EPS = 1e-6
+
+
+def _wrap_pi(a: float) -> float:
+    """(-π, π] 래핑 — 이 모듈은 numpy를 안 쓴다(common.attitude.wrap_pi의 스칼라 짝)."""
+    return math.remainder(a, 2.0 * math.pi)
 
 
 class LosPath(Block):
     NAME = "LOS"
-    PARAM_DEFS = (ParamDef("accept_radius", 200.0, "m", "웨이포인트 도달 반경", lo=1e-9),)
+    PARAM_DEFS = (
+        ParamDef("accept_radius", 200.0, "m", "웨이포인트 도달 반경", lo=1e-9),
+        # 0 = 선회 능력 미지 → 예상 전환 없음. hi는 Autopilot phi_max와 같은 상한이다
+        # (같은 물리량이라 한쪽만 넓으면 넘겨받을 수 없는 값이 생긴다).
+        ParamDef("bank_max", 0.0, "rad", "선회 예상 전환용 뱅크 한계 (0=예상 전환 끔)",
+                 lo=0.0, hi=1.5),
+    )
 
-    def __init__(self, waypoints=(), accept_radius: float = 200.0):
+    def __init__(self, waypoints=(), accept_radius: float = 200.0,
+                 bank_max: float = 0.0):
         if accept_radius <= 0:
             raise ValueError(f"accept_radius는 양수여야 함: {accept_radius}")
+        if not 0.0 <= bank_max <= 1.5:  # ParamDef hi와 일치 (Autopilot phi_max와 같은 축)
+            raise ValueError(f"bank_max는 [0, 1.5] 필요 (ParamDef hi): {bank_max}")
         self.accept_radius = accept_radius
+        self.bank_max = float(bank_max)
         self.set_waypoints(waypoints)
 
     def set_waypoints(self, waypoints) -> None:
@@ -74,6 +126,12 @@ class LosPath(Block):
         self._last_alt = None  # 고도 명령 미계산 상태 — 소진 시 마지막 값 유지
         # 활성 구간의 시작점 — 첫 구간은 (첫 스텝의 기체 위치·고도)로 채워진다
         self._from = None
+        # 궤도 고착 판정 상태 — 웨이포인트를 넘길 때마다 새로 센다
+        self._sweep = 0.0
+        self._brg_prev = None
+        # 순수추적으로 못 잡고 넘긴 웨이포인트 인덱스(0 기준). 런마다 새로 쌓인다 —
+        # reset이 지우지 않으면 **직전 런의 사고가 이번 결과 meta에 실린다**
+        self.escapes = ()
 
     def step(self, nav):
         """NavOutput → (heading_cmd [rad], alt_cmd [m] | None, done).
@@ -89,17 +147,24 @@ class LosPath(Block):
         if self._from is None:
             # 출발점은 웨이포인트가 아니다 — 기체가 실제로 있는 자리가 첫 구간의 시작
             self._from = (n, e, -float(nav.pos_n[2]))
+        v_h = math.hypot(float(nav.vel_n[0]), float(nav.vel_n[1]))
         while self._idx < len(self._wps):
             wn, we = self._wps[self._idx]
             dn, de = wn - n, we - e
             rem = math.hypot(dn, de)
-            if rem <= self.accept_radius:
-                self._from = (wn, we, self._alts[self._idx] if self._has_alt else None)
-                self._idx += 1
+            brg = math.atan2(de, dn)
+            r_cap = self._capture_radius(v_h)
+            if rem <= r_cap:
+                self._advance()
                 continue
-            self._last_hdg = math.atan2(de, dn)
+            # 방위각 누적은 **활성 웨이포인트마다** 센다 — `_advance`가 리셋하므로
+            # 이 while이 여러 점을 건너뛰어도 다음 점은 새 시드에서 시작한다
+            if self._orbited(brg):
+                self._advance(escaped=True)
+                continue
+            self._last_hdg = brg
             if self._has_alt:
-                self._last_alt = self._leg_alt(rem)
+                self._last_alt = self._leg_alt(rem, r_cap)
             return self._last_hdg, self._last_alt, False
         if self._last_hdg is None:
             self._last_hdg = math.atan2(float(nav.vel_n[1]), float(nav.vel_n[0]))
@@ -110,6 +175,74 @@ class LosPath(Block):
             # 램프의 끝점이 곧 이 값이므로 정착이 곧 계획의 종단이다
             self._last_alt = self._alts[-1]
         return self._last_hdg, self._last_alt, True
+
+    def _advance(self, escaped: bool = False) -> None:
+        """활성 웨이포인트를 마감하고 다음으로 — 포획이든 궤도 탈출이든 같은 자리다.
+
+        `escaped`여도 `_from`은 **그 웨이포인트**로 둔다. 기체가 거기 닿지 않은 것은
+        맞지만 다음 구간의 고도 램프가 기대는 것은 실제 궤적이 아니라 **계획 기하**라,
+        여기서 기체 위치를 쓰면 못 잡은 점을 지나온 척 램프를 다시 긋게 된다 —
+        계획과 실제가 갈렸다는 사실 자체는 `escapes`가 들고 있다.
+        """
+        if escaped:
+            self.escapes = (*self.escapes, self._idx)
+        wn, we = self._wps[self._idx]
+        self._from = (wn, we, self._alts[self._idx] if self._has_alt else None)
+        self._idx += 1
+        self._sweep = 0.0
+        self._brg_prev = None
+
+    def _orbited(self, brg: float) -> bool:
+        """활성 웨이포인트 방위각이 한 바퀴를 쓸었는가 — 누적하며 판정한다.
+
+        누적은 래핑한 **증분의 합**이다. 절대 방위각의 차로 재면 ±π 경계에서 한
+        바퀴가 0으로 접혀 영영 안 걸린다.
+        """
+        if self._brg_prev is not None:
+            self._sweep += _wrap_pi(brg - self._brg_prev)
+        self._brg_prev = brg
+        return abs(self._sweep) >= _ORBIT_SWEEP
+
+    def _capture_radius(self, v_h: float) -> float:
+        """유효 포획 반경 — max(도달 반경, 선회 예상 거리).
+
+        도달 반경이 바닥인 이유: 예상 거리는 꺾임이 완만하면 0에 가까워지는데,
+        그때 사용자가 지정한 도달 반경까지 무시하면 **설정이 조용히 꺼진다**.
+        """
+        return max(self.accept_radius, self._lead(v_h))
+
+    def _lead(self, v_h: float) -> float:
+        """선회 예상 거리 L = R·tan(Δψ/2) — 꺾임 앞에서 미리 트는 fly-by 거리.
+
+        **0을 내는 자리가 넷이다.** ① `bank_max`가 0 — 선회 능력을 모른다 ②
+        마지막 웨이포인트 — 다음 구간이 없으니 꺾임이 없다(fly-over가 맞다)
+        ③ 속도가 0이거나 비유한 — R을 못 잰다 ④ 꺾임각이 0 — 틀 것이 없다.
+        어느 쪽도 "예상 전환이 꺼진 것"이지 오류가 아니므로 조용히 도달 반경으로
+        돌아간다.
+
+        상한이 둘이다. 선회각은 `_TURN_MAX`에서 자른다(tan이 π에서 발산).
+        거리는 **양쪽 구간의 절반**에서 자른다 — 예상 거리가 구간 절반을 넘으면
+        앞뒤 전환이 서로를 삼켜 웨이포인트 하나가 통째로 사라진다. 잘렸다는 것은
+        그 꺾임이 이 속도에서 계획대로는 못 나는 각이라는 뜻이고, 그 판정은
+        화면이 제출 전에 따로 낸다(`web/js/lib/wpcheck.js`).
+        """
+        if self.bank_max <= 0.0 or self._idx + 1 >= len(self._wps):
+            return 0.0
+        if not math.isfinite(v_h) or v_h <= 0.0:
+            return 0.0
+        wn, we = self._wps[self._idx]
+        nn, ne = self._wps[self._idx + 1]
+        fn, fe = self._from[0], self._from[1]
+        leg_in = math.hypot(wn - fn, we - fe)
+        leg_out = math.hypot(nn - wn, ne - we)
+        if leg_in <= 0.0 or leg_out <= 0.0:
+            return 0.0
+        turn = abs(_wrap_pi(math.atan2(ne - we, nn - wn) - math.atan2(we - fe, wn - fn)))
+        if turn < _TURN_EPS:
+            return 0.0
+        radius = v_h * v_h / (G0 * math.tan(self.bank_max))
+        lead = radius * math.tan(min(turn, _TURN_MAX) / 2.0)
+        return min(lead, 0.5 * leg_in, 0.5 * leg_out)
 
     def begin_alt_leg(self, nav) -> None:
         """고도 축이 경로를 잡는 **그 순간**부터 활성 구간의 램프를 다시 잇는다.
@@ -146,10 +279,13 @@ class LosPath(Block):
             float(nav.pos_n[0]), float(nav.pos_n[1]), -float(nav.pos_n[2]),
         )
 
-    def _leg_alt(self, rem: float) -> float:
+    def _leg_alt(self, rem: float, r_cap: float) -> float:
         """활성 구간의 선형 고도 — 시작 고도에서 목표까지 남은 거리 비율로.
 
-        **램프는 도달 반경 경계에서 끝난다** (웨이포인트 중심이 아니라). 전환은
+        **램프는 유효 포획 반경 경계에서 끝난다** (웨이포인트 중심이 아니라).
+        `r_cap`은 도달 반경이거나 그보다 큰 선회 예상 거리다 — 전환이 실제로
+        일어나는 그 자리를 램프의 끝으로 삼아야 "도착할 때 이미 목표 고도"가
+        예상 전환에서도 성립한다. 전환은
         반경 진입 순간에 일어나므로 중심 기준으로 이으면 램프가 목표에 닿기 전에
         끊기고, 다음 구간이 시작 고도를 wa로 잡는 순간 Δalt·r/seg 만큼 튄다 —
         구간 500 m·반경 200 m·Δ500 m에서 201 m 점프였다(리뷰 실측). 경계 기준이면
@@ -169,9 +305,9 @@ class LosPath(Block):
         wn, we = self._wps[self._idx]
         wa = self._alts[self._idx]
         seg = math.hypot(wn - fn, we - fe)
-        denom = seg - self.accept_radius
+        denom = seg - r_cap
         frac = (
             1.0 if denom <= 0.0
-            else min(1.0, max(0.0, 1.0 - (rem - self.accept_radius) / denom))
+            else min(1.0, max(0.0, 1.0 - (rem - r_cap) / denom))
         )
         return fa + (wa - fa) * frac
