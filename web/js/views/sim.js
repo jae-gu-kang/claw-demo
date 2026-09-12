@@ -477,7 +477,7 @@ export function render() {
     else if (!avail) draftStatusLine.append(llmStatus.reason ?? "사용할 수 없습니다.");
     else {
       draftStatusLine.append(
-        `모델 ${llmStatus.model} — 서버가 대신 호출한다 (이 서버의 유일한 외부 통신).`);
+        `모델 ${llmStatus.model} — 서버가 대신 호출한다 (브라우저는 밖으로 나가지 않는다).`);
     }
   };
 

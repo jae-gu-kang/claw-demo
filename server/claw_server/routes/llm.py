@@ -1,12 +1,16 @@
-"""LLM 라우트 — 미션 초안(시뮬 탭)·결과 브리핑(결과 탭), 202 잡.
+"""LLM 라우트 — 미션 초안·결과 브리핑·교신 대본·화면 질문, 202 잡.
 
 **이 라우터는 이 리포의 유일한 런타임 아웃바운드다.** routes/world.py가 세운
 "서버는 바깥으로 나가지 않는다"는 그대로 자산 계약으로 유지되고, 예외는 여기
-`call_anthropic` 하나뿐이다 — LLM 기능이 늘어도 아웃바운드는 이 함수를 거친다.
-키(`CLAW_ANTHROPIC_API_KEY`)가 없으면 LLM 기능만 사유와 함께 꺼지고 서버는
-그대로 선다 — 지형 팩 없는 배포와 같은 degrade(`/llm/status`가 그 사유를
-문장으로 낸다). 폐쇄망 반입본에서는 켜지 않는 것이 정상 상태다
-(docs/deploy-airgap.md). 브리핑의 가지치기·프롬프트는 claw_server/brief.py.
+`call_llm` 하나뿐이다 — LLM 기능이 늘어도 아웃바운드는 이 함수를 거친다.
+목적지는 백엔드 선택(`_backend`)으로 정해진다: Anthropic Messages API
+(`CLAW_ANTHROPIC_API_KEY`) 또는 사내 OpenAI 호환 서버(`CLAW_LLM_BASE_URL` +
+`CLAW_LLM_MODEL`) — 폐쇄망은 후자로 켠다(docs/deploy-airgap.md).
+`CLAW_LLM_BASE_URL`이 있으면 로컬로 **커밋**된다: Anthropic 키가 함께 있어도
+폴백하지 않는다(폐쇄망 의도 구성이 조용히 밖으로 나가면 안 된다). 아무것도
+설정하지 않으면 LLM 기능만 사유와 함께 꺼지고 서버는 그대로 선다 — 지형 팩
+없는 배포와 같은 degrade(`/llm/status`가 그 사유를 문장으로 낸다). 브리핑의
+가지치기·프롬프트는 claw_server/brief.py.
 
 **초안은 웹 폼 행 형식이다** (`modeRows`/`wpRows` — 값 전부 문자열). 서버
 ModeIn(alt/pitch/hdot 3필드)이 아니라 웹 표의 lonAxis+lonValue 형식인 이유:
@@ -17,7 +21,8 @@ lib/mission.js(buildModes·buildWaypoints)와 실행 시점 /sim/run 422다 — 
 JSON 형상만 스키마로 강제하고(structured output) 의미 검증을 재구현하지 않는다.
 
 키를 표준 `ANTHROPIC_API_KEY`가 아니라 CLAW_ 접두로 받는 이유: 개발 셸에
-우연히 있는 키로 기능이 조용히 켜지는 것을 막는 명시적 옵트인이다.
+우연히 있는 키로 기능이 조용히 켜지는 것을 막는 명시적 옵트인이다 — 로컬
+백엔드 변수 셋(`CLAW_LLM_*`)도 같은 이유로 CLAW_ 접두다.
 """
 
 import json
@@ -28,13 +33,15 @@ from pydantic import BaseModel, Field, field_validator
 
 from claw_server.ask import ASK_SCHEMA, ASK_SYSTEM, ask_user
 from claw_server.brief import BRIEF_SCHEMA, BRIEF_SYSTEM, brief_user, prune
-from claw_server.comms import COMMS_SCHEMA, COMMS_SYSTEM, comms_user, flight_log
+from claw_server.comms import (
+    COMMS_SCHEMA, COMMS_SYSTEM, comms_user, flight_log, validate_lines,
+)
 
 router = APIRouter(tags=["llm"])
 
-_API_URL = "https://api.anthropic.com/v1/messages"
+_ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 _DEFAULT_MODEL = "claude-opus-5"
-_TIMEOUT_S = 180.0  # 비스트리밍 1회 호출 — 추론이 길어질 여지를 준다
+_TIMEOUT_S = 180.0  # 비스트리밍 1회 호출 — 추론이 길어질 여지를 준다 (두 백엔드 공유)
 _MAX_TOKENS = 16000
 
 
@@ -48,12 +55,67 @@ def _model() -> str:
     return os.environ.get("CLAW_ANTHROPIC_MODEL", "").strip() or _DEFAULT_MODEL
 
 
+def _local_base_url() -> str:
+    # 사내 OpenAI 호환 서버 — 값 예: http://10.0.0.5:8000/v1 (서버가
+    # /chat/completions를 뒤에 붙인다). **존재 자체가 로컬 백엔드 커밋**이다.
+    return os.environ.get("CLAW_LLM_BASE_URL", "").strip().rstrip("/")
+
+
+def _local_model() -> str:
+    # 로컬 모델 이름에는 지어낼 기본값이 없다 — 비면 불가용 사유가 지목한다
+    return os.environ.get("CLAW_LLM_MODEL", "").strip()
+
+
+def _local_key() -> str:
+    # 게이트웨이용 Bearer — 대부분의 사내 서버는 요구하지 않아 선택이다
+    return os.environ.get("CLAW_LLM_API_KEY", "").strip()
+
+
+def _backend() -> str | None:
+    """백엔드 선택 — 명시 스위치 없이 **설정 존재**로 정한다(CLAW_ 옵트인 철학).
+
+    스위치를 따로 두면 "스위치=로컬인데 URL 없음" 같은 모순 상태가 생겨 사유
+    문장이 하나 더 필요해진다 — 존재=선택이면 모순이 표현 자체가 안 된다.
+    BASE_URL이 있으면 로컬로 **커밋**이다: 모델 이름이 빠졌어도 Anthropic으로
+    폴백하지 않는다(그 불가용 판정은 _require_backend·status가 사유로 낸다 —
+    조용한 폴백 금지는 trim._CONDITIONS와 같은 규율).
+    """
+    if _local_base_url():
+        return "openai"
+    if _api_key():
+        return "anthropic"
+    return None
+
+
 _UNAVAILABLE = (
-    "CLAW_ANTHROPIC_API_KEY가 설정되지 않았습니다 — LLM 기능(미션 초안·결과 "
-    "브리핑·교신 대본·화면 질문)은 Anthropic Messages API를 호출하는, 이 서버의 "
-    "유일한 외부 통신입니다. 키를 넣고 재기동하면 켜지고, 폐쇄망 배포에서는 이 "
-    "기능만 꺼진 것이 정상입니다."
+    "LLM 백엔드가 설정되지 않았습니다 — LLM 기능(미션 초안·결과 브리핑·교신 "
+    "대본·화면 질문·가이드 투어)이 꺼져 있습니다. 인터넷 배포는 "
+    "CLAW_ANTHROPIC_API_KEY를, 폐쇄망은 사내 OpenAI 호환 서버의 "
+    "CLAW_LLM_BASE_URL과 CLAW_LLM_MODEL을 설정하고 재기동하면 켜집니다. "
+    "설정하지 않으면 이 기능만 꺼진 채 서버는 정상 동작합니다."
 )
+_UNAVAILABLE_LOCAL_MODEL = (
+    "CLAW_LLM_BASE_URL은 설정됐으나 CLAW_LLM_MODEL이 없습니다 — 로컬 백엔드가 "
+    "지정된 상태라 Anthropic으로 폴백하지 않습니다(폐쇄망 의도 구성이 조용히 "
+    "밖으로 나가지 않게). 모델 이름을 넣고 재기동하십시오."
+)
+
+
+def _require_backend() -> tuple[str, str]:
+    """생성 라우트 공용 게이트 — (model, api_key)를 주거나 503 사유로 거부한다.
+
+    백엔드 미설정은 202 뒤 잡 오류보다 제출 시점 거부가 낫다(verify.py의 즉시
+    422와 같은 판단). 503인 이유: 요청이 아니라 서버 구성이 원인이다.
+    """
+    b = _backend()
+    if b == "openai":
+        model = _local_model()
+        if not model:
+            raise HTTPException(status_code=503, detail=_UNAVAILABLE_LOCAL_MODEL)
+        return model, _local_key()
+    if b == "anthropic":
+        return _model(), _api_key()
+    raise HTTPException(status_code=503, detail=_UNAVAILABLE)
 
 # ── LLM 출력 스키마 — 웹 폼 행 계약 (정본은 이 파일, 웹 normalizeDraft는 방어적 수용) ──
 # 전부 required + additionalProperties:false (strict). 값은 전부 문자열이고
@@ -194,21 +256,34 @@ _SYSTEM = """너는 CLAW 비행제어 설계툴의 미션 초안 생성기다. �
 "warnings":[]}"""
 
 
-def call_anthropic(*, api_key: str, model: str, system: str, user: str,
-                   schema: dict) -> dict:
-    """Anthropic Messages API 1회 호출 — 원시 응답 dict를 돌려준다.
+def call_llm(*, api_key: str, model: str, system: str, user: str,
+             schema: dict) -> dict:
+    """선택된 백엔드에 1회 호출 — **Anthropic Messages 형상**의 dict를 돌려준다.
 
-    프롬프트·스키마를 인자로 받는 이유: 미션 초안과 결과 브리핑이 이 한 함수를
-    공유해야 "아웃바운드는 하나"라는 머리말 선언이 사실로 남는다.
-    **테스트가 이 전역을 monkeypatch로 갈아끼운다** (test_trim의 trim_batch 교체와
-    같은 형태). httpx는 이 함수 안에서만 import한다 — 아웃바운드가 이 함수
-    하나에 갇혀 있음을 코드 구조가 그대로 말하게.
+    프롬프트·스키마를 인자로 받는 이유: 네 기능이 이 한 함수를 공유해야
+    "아웃바운드는 하나"라는 머리말 선언이 사실로 남는다. **테스트가 이 전역을
+    monkeypatch로 갈아끼운다** (test_trim의 trim_batch 교체와 같은 형태).
+    내부 계약을 Anthropic 형상으로 고정한 이유: 소비자(_extract_json과 라우트의
+    usage 저장)가 형상 하나만 알면 되고, 로컬 응답은 _post_openai가 그 형상으로
+    정규화한다 — 백엔드가 늘어도 라우트·저장·웹은 바뀌지 않는다.
     """
+    if _backend() == "openai":
+        return _post_openai(api_key=api_key, model=model, system=system,
+                            user=user, schema=schema)
+    return _post_anthropic(api_key=api_key, model=model, system=system,
+                           user=user, schema=schema)
+
+
+def _post_anthropic(*, api_key: str, model: str, system: str, user: str,
+                    schema: dict) -> dict:
+    """Anthropic Messages API 와이어. httpx는 _post_* 두 함수 안에서만 import
+    한다 — 아웃바운드가 이 파일의 두 함수에 갇혀 있음을 코드 구조가 그대로
+    말하게."""
     import httpx
 
     try:
         r = httpx.post(
-            _API_URL,
+            _ANTHROPIC_URL,
             timeout=_TIMEOUT_S,
             headers={
                 "x-api-key": api_key,
@@ -224,7 +299,7 @@ def call_anthropic(*, api_key: str, model: str, system: str, user: str,
                 # (structured outputs GA — 현행 이름은 output_config.format이고
                 #  output_format은 구명칭·폐기, 베타 헤더 불요). 이 페이로드는
                 #  테스트가 통짜로 고정한다(test_llm 「나가는 요청」) — 대부분의
-                #  테스트가 call_anthropic을 통째로 갈아끼우므로, 그 경계 안쪽이
+                #  테스트가 call_llm을 통째로 갈아끼우므로, 그 경계 안쪽이
                 #  틀려도 조용히 초록이 되는 것을 그 테스트 하나가 막는다
                 "output_config": {"format": {"type": "json_schema",
                                              "schema": schema}},
@@ -241,12 +316,95 @@ def call_anthropic(*, api_key: str, model: str, system: str, user: str,
     return r.json()
 
 
+def _post_openai(*, api_key: str, model: str, system: str, user: str,
+                 schema: dict) -> dict:
+    """OpenAI 호환(/chat/completions) 와이어 — 폐쇄망 사내 서버(vLLM 등)용.
+
+    구조화 출력은 response_format.json_schema(strict)다 — 이 필드를 무시하는
+    서버·모델이면 응답이 산문일 수 있고, 그때는 _extract_json의 JSON 가드가
+    사유 문장으로 잡는다(트레이스백 금지). 스키마 4벌은 전 키 required +
+    additionalProperties:false라 strict 형과 그대로 맞는다. 이 페이로드도
+    골든 테스트가 통짜로 고정한다(test_llm 「로컬 백엔드로 나가는 요청」).
+    """
+    import httpx
+
+    headers = {"content-type": "application/json"}
+    if api_key:  # 게이트웨이만 요구한다 — 없으면 헤더 자체를 달지 않는다
+        headers["authorization"] = f"Bearer {api_key}"
+    try:
+        r = httpx.post(
+            f"{_local_base_url()}/chat/completions",
+            timeout=_TIMEOUT_S,
+            headers=headers,
+            json={
+                "model": model,
+                "max_tokens": _MAX_TOKENS,
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": user}],
+                "response_format": {"type": "json_schema",
+                                    "json_schema": {"name": "claw_output",
+                                                    "strict": True,
+                                                    "schema": schema}},
+            },
+        )
+    except httpx.HTTPError as e:
+        raise RuntimeError(f"로컬 LLM 서버 연결 실패 — {e}") from e
+    if r.status_code != 200:
+        try:
+            detail = r.json()["error"]["message"]
+        except Exception:
+            detail = r.text[:300]
+        raise RuntimeError(f"로컬 LLM 서버 {r.status_code} — {detail}")
+    return _to_anthropic_shape(r.json())
+
+
+def _to_anthropic_shape(raw: dict) -> dict:
+    """OpenAI 호환 응답 → 내부 계약(Anthropic 형상) 정규화.
+
+    usage까지 옮기는 이유: 라우트가 raw.get("usage")를 그대로 저장한다 — 키
+    이름이 갈리면(prompt_tokens ↔ input_tokens) 저장 형상이 백엔드마다 달라져
+    조용히 깨진다(설계 조사가 찾은 유일한 누수 지점). content_filter는
+    refusal로 옮긴다 — 거절이 백엔드와 무관하게 같은 사유 경로로 나온다.
+    """
+    choices = raw.get("choices") or []
+    first = choices[0] if choices else {}
+    text = (first.get("message") or {}).get("content")
+    finish = first.get("finish_reason")
+    usage = raw.get("usage") or {}
+    return {
+        "content": ([{"type": "text", "text": text}]
+                    if isinstance(text, str) and text else []),
+        # 어휘까지 하나로 옮긴다 — 반만 옮기면(content_filter만) stop_reason을
+        # 보는 분기가 로컬 백엔드에서만 조용히 빠진다. 잘림 사유 분리
+        # (_extract_json의 max_tokens 판정)가 바로 그 소비자다 (리뷰 지적)
+        "stop_reason": {"content_filter": "refusal", "stop": "end_turn",
+                        "length": "max_tokens"}.get(finish, finish),
+        "usage": {"input_tokens": usage.get("prompt_tokens"),
+                  "output_tokens": usage.get("completion_tokens")},
+    }
+
+
+def _strip_fence(text: str) -> str:
+    """```json 펜스 벗기기 — 구조화 출력 강제가 약한 로컬 모델의 흔한 버릇.
+    펜스가 아니면 그대로 돌려준다."""
+    t = text.strip()
+    if not t.startswith("```"):
+        return t
+    t = t.split("\n", 1)[1] if "\n" in t else ""
+    t = t.rstrip()
+    if t.endswith("```"):
+        t = t[:-3]
+    return t.strip()
+
+
 def _extract_json(raw: dict) -> dict:
-    """원시 응답 → 구조화 출력 dict (초안·소견서 공용). 형상은 structured
-    output이 보장하지만, 거부(stop_reason refusal)와 텍스트 블록 부재는 여기서
-    사유를 들어 실패시킨다."""
+    """원시 응답 → 구조화 출력 dict (네 기능 공용). 형상은 structured output이
+    보장하는 것이 정상이지만, 거부(stop_reason refusal)·텍스트 블록 부재·JSON
+    아님은 여기서 사유를 들어 실패시킨다 — 마지막 것은 강제가 약한 로컬
+    백엔드가 처음 밟는 자리이고, 가드가 없으면 파이썬 트레이스백이 그대로
+    화면까지 갔다(이 파일에서 유일하게 사유 문장 규약 밖이던 곳)."""
     if raw.get("stop_reason") == "refusal":
-        # 초안·소견서 공용 경로다 — 특정 기능의 입력("의도 문장")을 지목하지 않는다
+        # 네 기능 공용 경로다 — 특정 기능의 입력("의도 문장")을 지목하지 않는다
         raise RuntimeError("모델이 요청을 거절했습니다 — 입력을 바꿔 다시 시도하십시오.")
     text = next(
         (b.get("text") for b in raw.get("content", []) if b.get("type") == "text"),
@@ -255,7 +413,19 @@ def _extract_json(raw: dict) -> dict:
     if not text:
         raise RuntimeError(
             f"응답에 텍스트가 없습니다 (stop_reason={raw.get('stop_reason')})")
-    return json.loads(text)
+    text = _strip_fence(text)
+    try:
+        return json.loads(text)
+    except ValueError as e:
+        if raw.get("stop_reason") == "max_tokens":
+            # 잘린 JSON을 "모델 탓"으로 오진하지 않는다 — 처방(입력 축소)이
+            # 다르다. 로컬의 length는 _to_anthropic_shape가 이 어휘로 옮겨
+            # 두 백엔드가 같은 길을 탄다 (리뷰 지적)
+            raise RuntimeError(
+                "모델 출력이 토큰 상한에서 잘렸습니다 — 입력(결과·질문)을 "
+                "줄여 다시 시도하십시오.") from e
+        raise RuntimeError(
+            f"모델 응답이 JSON이 아닙니다 ({e}) — 응답 앞부분: {text[:200]}") from e
 
 
 class MissionDraftIn(BaseModel):
@@ -274,24 +444,29 @@ class MissionDraftIn(BaseModel):
 
 @router.get("/llm/status")
 def llm_status() -> dict:
-    """켜져 있는가 — 없으면 404가 아니라 **사유 문장** (world/manifest 규약)."""
-    key = _api_key()
+    """켜져 있는가 — 아니면 404가 아니라 **사유 문장** (world/manifest 규약).
+
+    backend 키는 additive다(웹은 모르는 키를 무시한다) — 둘 다 설정된 배포에서
+    어느 쪽이 이겼는지 화면에서 확인할 수 있게."""
+    b = _backend()
+    if b is None:
+        return {"available": False, "model": None, "backend": None,
+                "reason": _UNAVAILABLE}
+    if b == "openai" and not _local_model():
+        return {"available": False, "model": None, "backend": b,
+                "reason": _UNAVAILABLE_LOCAL_MODEL}
     return {
-        "available": bool(key),
-        "model": _model() if key else None,
-        "reason": None if key else _UNAVAILABLE,
+        "available": True,
+        "model": _local_model() if b == "openai" else _model(),
+        "backend": b,
+        "reason": None,
     }
 
 
 @router.post("/llm/mission-draft", status_code=202)
 def submit_mission_draft(req: MissionDraftIn, request: Request,
                          response: Response) -> dict:
-    # 키 부재는 202 뒤 잡 오류보다 제출 시점 거부가 낫다(verify.py의 즉시 422와
-    # 같은 판단). 503인 이유: 요청이 아니라 서버 구성이 원인이다.
-    key = _api_key()
-    if not key:
-        raise HTTPException(status_code=503, detail=_UNAVAILABLE)
-    model = _model()
+    model, key = _require_backend()  # 백엔드 미설정은 제출 시점 503 + 사유
     store = request.app.state.store
 
     def work(job):
@@ -300,8 +475,8 @@ def submit_mission_draft(req: MissionDraftIn, request: Request,
         # (jobs.py _run의 completed 판정)
         if job.report(0, 2, message=f"{model} 호출 중"):
             return  # 협조적 취소 — 저장 없음
-        raw = call_anthropic(api_key=key, model=model, system=_SYSTEM,
-                             user=req.intent, schema=_DRAFT_SCHEMA)
+        raw = call_llm(api_key=key, model=model, system=_SYSTEM,
+                       user=req.intent, schema=_DRAFT_SCHEMA)
         if job.report(1, 2, message="응답 정리 중"):
             return  # 호출 중 취소가 눌렸다 — 초안을 버린다
         draft = _extract_json(raw)
@@ -337,10 +512,7 @@ class BriefIn(BaseModel):
 
 @router.post("/llm/brief", status_code=202)
 def submit_brief(req: BriefIn, request: Request, response: Response) -> dict:
-    key = _api_key()
-    if not key:
-        raise HTTPException(status_code=503, detail=_UNAVAILABLE)
-    model = _model()
+    model, key = _require_backend()  # 백엔드 미설정은 제출 시점 503 + 사유
     store = request.app.state.store
     # 대상 확인은 메타로 한다 — 본문 로드는 잡 안에서 (sim 최대 54MB를 요청
     # 스레드에서 열지 않는다). 메타는 건당 ~130B라 전량 조회가 싸다.
@@ -376,17 +548,20 @@ def submit_brief(req: BriefIn, request: Request, response: Response) -> dict:
         del payload  # sim 54MB — 가지치기 뒤에는 들고 있지 않는다
         if job.report(1, 3, message=f"{model} 호출 중"):
             return  # 돈 쓰기 전 마지막 취소 지점
-        raw = call_anthropic(api_key=key, model=model, system=BRIEF_SYSTEM,
-                             user=brief_user(meta, pruned), schema=BRIEF_SCHEMA)
+        raw = call_llm(api_key=key, model=model, system=BRIEF_SYSTEM,
+                       user=brief_user(meta, pruned), schema=BRIEF_SCHEMA)
         if job.report(2, 3, message="소견서 정리 중"):
             return  # 호출 중 취소 — 소견서를 버린다
         brief = _extract_json(raw)
+        look_at = brief.get("look_at")
+        if not isinstance(look_at, list):
+            look_at = []  # headline·body의 str() 강제와 같은 결 — 형상만 지킨다
         store.save(
             job.id,
             {"kind": "llm_brief", "parent": req.result_id, "parent_kind": kind,
              "headline": str(brief.get("headline") or ""),
              "body": str(brief.get("body") or ""),
-             "look_at": brief.get("look_at") or [],
+             "look_at": [str(x) for x in look_at],
              "model": model, "usage": raw.get("usage")},
             meta={
                 "kind": "llm_brief",
@@ -414,10 +589,7 @@ def submit_comms(req: BriefIn, request: Request, response: Response) -> dict:
     대상은 sim뿐이다 — 비행 로그 추출기(comms.flight_log)가 sim 신호 계약
     위에 서 있다.
     """
-    key = _api_key()
-    if not key:
-        raise HTTPException(status_code=503, detail=_UNAVAILABLE)
-    model = _model()
+    model, key = _require_backend()  # 백엔드 미설정은 제출 시점 503 + 사유
     store = request.app.state.store
     meta = next((m for m in store.list() if m["id"] == req.result_id), None)
     if meta is None:
@@ -446,12 +618,15 @@ def submit_comms(req: BriefIn, request: Request, response: Response) -> dict:
         del payload  # sim 54MB — 추출 뒤에는 들고 있지 않는다
         if job.report(1, 3, message=f"{model} 호출 중"):
             return  # 돈 쓰기 전 마지막 취소 지점
-        raw = call_anthropic(api_key=key, model=model, system=COMMS_SYSTEM,
-                             user=comms_user(meta, log), schema=COMMS_SCHEMA)
+        raw = call_llm(api_key=key, model=model, system=COMMS_SYSTEM,
+                       user=comms_user(meta, log), schema=COMMS_SCHEMA)
         if job.report(2, 3, message="대본 정리 중"):
             return  # 호출 중 취소 — 대본을 버린다
         data = _extract_json(raw)
-        lines = data.get("lines") or []
+        # 대본에는 웹 정규화가 없다(초안 normalizeDraft·문답 normalizeAnswer와
+        # 달리) — 스키마 강제가 약한 로컬 백엔드에서 어긴 값이 저장되면 그대로
+        # 자막·발화로 흐른다. 여기가 마지막 방어선이다
+        lines = validate_lines(data)
         store.save(
             job.id,
             {"kind": "llm_comms", "parent": req.result_id, "parent_kind": "sim",
@@ -489,10 +664,7 @@ class AskIn(BaseModel):
 @router.post("/llm/ask", status_code=202)
 def submit_ask(req: AskIn, request: Request, response: Response) -> dict:
     """질문 → 답 + 화면 이동 액션 (Q&A 내비게이션 — 웹이 첫 액션으로 이동한다)."""
-    key = _api_key()
-    if not key:
-        raise HTTPException(status_code=503, detail=_UNAVAILABLE)
-    model = _model()
+    model, key = _require_backend()  # 백엔드 미설정은 제출 시점 503 + 사유
     store = request.app.state.store
 
     def work(job):
@@ -501,9 +673,9 @@ def submit_ask(req: AskIn, request: Request, response: Response) -> dict:
         # 최근 메타 머리 30건 — 건당 ~130B라 유계이고, "돌린 적 있나"류 질문의
         # 실재 근거가 된다 (본문 수치는 안 준다 — ask.py 규칙 3)
         metas = store.list()[:30]
-        raw = call_anthropic(api_key=key, model=model, system=ASK_SYSTEM,
-                             user=ask_user(req.question, metas),
-                             schema=ASK_SCHEMA)
+        raw = call_llm(api_key=key, model=model, system=ASK_SYSTEM,
+                       user=ask_user(req.question, metas),
+                       schema=ASK_SCHEMA)
         if job.report(1, 2, message="답 정리 중"):
             return
         data = _extract_json(raw)

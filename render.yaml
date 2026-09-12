@@ -24,6 +24,8 @@ services:
     # JobManager가 갈라져 진행률 조회가 조용히 404가 된다 (README 알려진 제약).
     startCommand: uvicorn --factory claw_server:create_app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /api/health # Basic Auth 면제 경로와 일치 (auth.py)
+    # LLM 백엔드 변수(CLAW_ANTHROPIC_API_KEY 또는 CLAW_LLM_* 계열)는 대시보드에서
+    # 주입한다 — 커밋 금지. 이 데모는 Anthropic 쪽만 쓴다 (routes/llm.py 머리말).
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.4 # devcontainer(3.13)와 맞춤 — 상한 핀 없는 의존성 조합 고정

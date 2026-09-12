@@ -137,13 +137,26 @@ sudo systemctl daemon-reload && sudo systemctl restart claw
 
 ## 운영
 
-### 미션 초안(LLM)은 폐쇄망에서 꺼진 것이 정상이다
+### LLM 기능 — 기본은 꺼짐, 사내 OpenAI 호환 서버로 켤 수 있다
 
-서버의 유일한 외부 통신은 시뮬레이션 탭의 미션 초안 생성(`routes/llm.py` —
-Anthropic API 호출) 하나다. `CLAW_ANTHROPIC_API_KEY`가 없으면 **그 기능만**
-사유 문장과 함께 꺼지고 나머지는 전부 그대로 돈다 — 폐쇄망 반입본에서는 키를
-넣지 않는 것이 정상 상태다. 나머지 라우트가 바깥으로 나가지 않는 것은 종전
-그대로이고, `test_world.py`의 소켓 차단 테스트가 그 계약을 못박고 있다.
+서버에서 밖으로 나가는 통신은 LLM 프록시(`routes/llm.py` — 미션 초안·결과
+브리핑·교신 대본·화면 질문, 웹의 가이드 투어가 이들을 엮는다) 하나뿐이다.
+백엔드를 설정하지 않으면 **그 기능만** 사유 문장과 함께 꺼진 채 나머지는 전부
+그대로 돈다. 나머지 라우트가 바깥으로 나가지 않는 것은 종전 그대로이고,
+`test_world.py`의 소켓 차단 테스트가 그 계약을 못박고 있다.
+
+백엔드는 환경변수 **존재**로 고른다 (명시 스위치 없음 — `routes/llm.py` 머리말):
+
+- **인터넷 배포** — `CLAW_ANTHROPIC_API_KEY` (선택: `CLAW_ANTHROPIC_MODEL`).
+- **폐쇄망** — `CLAW_LLM_BASE_URL`(사내 OpenAI 호환 서버, vLLM 등 — 서버가
+  `/chat/completions`를 붙여 부른다) + `CLAW_LLM_MODEL`. 게이트웨이 인증이
+  필요할 때만 `CLAW_LLM_API_KEY`(Bearer).
+
+`CLAW_LLM_BASE_URL`이 있으면 로컬로 **커밋**된다: Anthropic 키가 함께 있어도
+폴백하지 않는다 — 폐쇄망 의도 구성이 조용히 밖으로 나가면 안 된다. 모델
+이름이 빠지면 그 사실을 사유로 들어 꺼진다(`/api/llm/status`가 문장으로 낸다).
+휠하우스는 변하지 않는다 — 로컬 백엔드도 httpx 하나로 부르고 새 파이썬 의존이
+없다. 사내 LLM 서버 자체(모델 가중치 반입·서빙 운영)는 이 리포 밖이다.
 
 ### 워커를 늘리지 말 것
 

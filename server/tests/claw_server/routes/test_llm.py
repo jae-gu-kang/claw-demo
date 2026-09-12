@@ -1,4 +1,4 @@
-"""LLM 라우트 (미션 초안 + 결과 브리핑) — 202 잡·degrade 계약.
+"""LLM 라우트 (미션 초안·브리핑·교신·질문) — 202 잡·degrade·백엔드 선택 계약.
 
 초안의 의미 검증은 웹(lib/mission.js buildModes·buildWaypoints)과 실행 시점
 /sim/run 422가 정본이고, 브리핑의 가지치기 계약은 test_brief.py가 지킨다.
@@ -15,6 +15,8 @@ import json
 import socket
 import threading
 from pathlib import Path
+
+import pytest
 
 import claw_server.routes.llm as llm_route
 
@@ -55,7 +57,9 @@ def test_키가_없으면_상태가_사유를_말하고_생성은_503(client):
     body = s.json()
     assert body["available"] is False
     assert body["model"] is None
+    assert body["backend"] is None
     assert "CLAW_ANTHROPIC_API_KEY" in body["reason"]  # 사유에 복구 열쇠 이름
+    assert "CLAW_LLM_BASE_URL" in body["reason"]       # 폐쇄망 경로도 함께 안내
 
     r = client.post("/api/llm/mission-draft", json={"intent": "북쪽으로 5 km"})
     assert r.status_code == 503
@@ -67,6 +71,7 @@ def test_키가_있으면_상태가_모델을_말한다(client, monkeypatch):
     body = client.get("/api/llm/status").json()
     assert body["available"] is True
     assert body["model"] == "claude-opus-5"  # 기본 모델
+    assert body["backend"] == "anthropic"
     assert body["reason"] is None
     # 모델 교체는 환경변수 하나 — 배포마다 코드 수정 없이
     monkeypatch.setenv("CLAW_ANTHROPIC_MODEL", "claude-sonnet-5")
@@ -82,9 +87,9 @@ def test_초안과_의도가_저장되고_메타에_모드_수가_실린다(clie
                      user=user, schema=schema)
         return _fake_raw(_DRAFT)
 
-    # raising 기본값 유지 — call_anthropic이 개명되면 여기가 시끄럽게 죽어야
+    # raising 기본값 유지 — call_llm이 개명되면 여기가 시끄럽게 죽어야
     # 테스트가 진짜 경로를 안 건드린 채 통과하는 일이 없다 (test_design 관례)
-    monkeypatch.setattr(llm_route, "call_anthropic", fake)
+    monkeypatch.setattr(llm_route, "call_llm", fake)
 
     r = client.post("/api/llm/mission-draft", json={"intent": "북쪽 5 km 왕복"})
     assert r.status_code == 202, r.text
@@ -114,7 +119,7 @@ def test_초안과_의도가_저장되고_메타에_모드_수가_실린다(clie
 
 
 def test_나가는_요청은_계약_그대로다(client, wait_job, monkeypatch):
-    """다른 테스트는 call_anthropic을 통째로 갈아끼우므로 그 **안쪽**(파라미터
+    """다른 테스트는 call_llm을 통째로 갈아끼우므로 그 **안쪽**(파라미터
     이름·헤더·스키마)이 틀려도 조용히 초록이 된다 — 여기서는 httpx 경계에서
     나가는 것을 통짜로 고정한다 (지킴이 없는 선언 금지 — 리뷰 지적).
     structured outputs 현행 이름은 output_config.format(GA, 베타 헤더 불요)이고
@@ -135,7 +140,7 @@ def test_나가는_요청은_계약_그대로다(client, wait_job, monkeypatch):
         return _Resp()
 
     # TestClient는 httpx.Client 인스턴스를 쓰므로 모듈 함수 httpx.post 교체와
-    # 충돌하지 않는다 — 잡 스레드의 call_anthropic만 이 fake를 만난다
+    # 충돌하지 않는다 — 잡 스레드의 call_llm(_post_anthropic)만 이 fake를 만난다
     monkeypatch.setattr(httpx, "post", fake_post)
     r = client.post("/api/llm/mission-draft", json={"intent": "계약 고정"})
     job = wait_job(r.json()["id"])
@@ -166,7 +171,7 @@ def test_호출_중_취소는_cancelled로_남고_저장이_없다(client, wait_
         assert gate.wait(timeout=30), "테스트 게이트 시간 초과"
         return _fake_raw(_DRAFT)
 
-    monkeypatch.setattr(llm_route, "call_anthropic", gated)
+    monkeypatch.setattr(llm_route, "call_llm", gated)
     r = client.post("/api/llm/mission-draft", json={"intent": "취소 시험"})
     job_id = r.json()["id"]
     assert entered.wait(timeout=30)  # 호출 안에 들어간 뒤에
@@ -198,7 +203,7 @@ def test_호출_실패는_잡_error와_사유로_남는다(client, wait_job, mon
     def fake(*, api_key, model, system, user, schema):
         raise RuntimeError("Anthropic API 401 — invalid x-api-key")
 
-    monkeypatch.setattr(llm_route, "call_anthropic", fake)
+    monkeypatch.setattr(llm_route, "call_llm", fake)
     r = client.post("/api/llm/mission-draft", json={"intent": "아무거나"})
     assert r.status_code == 202
     job = wait_job(r.json()["id"])
@@ -209,7 +214,7 @@ def test_호출_실패는_잡_error와_사유로_남는다(client, wait_job, mon
 def test_모델_거절은_사유를_들어_실패한다(client, wait_job, monkeypatch):
     monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(
-        llm_route, "call_anthropic",
+        llm_route, "call_llm",
         lambda **kw: {"content": [], "stop_reason": "refusal"})
     r = client.post("/api/llm/mission-draft", json={"intent": "아무거나"})
     job = wait_job(r.json()["id"])
@@ -256,7 +261,7 @@ def test_소견서가_저장되고_부모와_지문을_잇는다(client, wait_jo
         calls.update(system=system, user=user, schema=schema)
         return _fake_raw(_BRIEF)
 
-    monkeypatch.setattr(llm_route, "call_anthropic", fake)
+    monkeypatch.setattr(llm_route, "call_llm", fake)
     r = client.post("/api/llm/brief", json={"result_id": rid})
     assert r.status_code == 202, r.text
     job = wait_job(r.json()["id"])
@@ -358,7 +363,7 @@ def test_교신_대본이_저장되고_비행_로그가_유계다(client, wait_j
         calls.update(system=system, user=user, schema=schema)
         return _fake_raw(_COMMS)
 
-    monkeypatch.setattr(llm_route, "call_anthropic", fake)
+    monkeypatch.setattr(llm_route, "call_llm", fake)
     r = client.post("/api/llm/comms", json={"result_id": rid})
     assert r.status_code == 202, r.text
     job = wait_job(r.json()["id"])
@@ -413,7 +418,7 @@ def test_문답이_저장되고_산출물_메타가_동봉된다(client, wait_jo
         calls.update(system=system, user=user, schema=schema)
         return _fake_raw(_ANSWER)
 
-    monkeypatch.setattr(llm_route, "call_anthropic", fake)
+    monkeypatch.setattr(llm_route, "call_llm", fake)
     r = client.post("/api/llm/ask", json={"question": "실속 마진은 어디서 봐?"})
     assert r.status_code == 202, r.text
     job = wait_job(r.json()["id"])
@@ -454,7 +459,7 @@ def test_문답_메타는_최신_30건만_동봉된다(client, wait_job, monkeyp
         calls.update(user=user)
         return _fake_raw(_ANSWER)
 
-    monkeypatch.setattr(llm_route, "call_anthropic", fake)
+    monkeypatch.setattr(llm_route, "call_llm", fake)
     r = client.post("/api/llm/ask", json={"question": "뭐 돌렸어?"})
     job = wait_job(r.json()["id"])
     assert job["status"] == "done", job
@@ -476,7 +481,7 @@ def test_문답도_키가_없으면_503(client):
 
 
 def test_상태_조회는_바깥으로_나가지_않는다(client, monkeypatch):
-    """아웃바운드는 생성 잡의 call_anthropic 하나뿐이어야 한다 — 상태 조회가
+    """아웃바운드는 생성 잡의 call_llm 하나뿐이어야 한다 — 상태 조회가
     키 검증 등으로 나가기 시작하면 폐쇄망에서 탭을 여는 것만으로 걸린다
     (test_world의 소켓 차단 관용구 — client 픽스처가 포털을 먼저 세운 뒤라 안전)."""
     monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
@@ -488,3 +493,217 @@ def test_상태_조회는_바깥으로_나가지_않는다(client, monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", explode)
     monkeypatch.setattr(socket, "create_connection", explode)
     assert client.get("/api/llm/status").status_code == 200
+
+
+# ── 로컬 백엔드 (OpenAI 호환 — 폐쇄망 사내 서버) ─────────────────────────
+
+
+def _fake_raw_openai(draft):
+    """OpenAI 호환(/chat/completions) 원시 응답의 최소 재현."""
+    return {
+        "choices": [{"message": {"role": "assistant",
+                                 "content": json.dumps(draft, ensure_ascii=False)},
+                     "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+    }
+
+
+def test_백엔드_선택은_설정_존재로_정해진다(client, monkeypatch):
+    """명시 스위치가 없다 — "스위치=로컬인데 URL 없음" 같은 모순 상태가 표현
+    자체가 안 되게(존재 = 옵트인, CLAW_ 접두 철학의 연장). BASE_URL 존재는
+    로컬 **커밋**이라 Anthropic 키가 있어도 폴백하지 않는다 — 폐쇄망 의도
+    구성이 조용히 밖으로 나가는 사고 차단."""
+    # anthropic만
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "k")
+    body = client.get("/api/llm/status").json()
+    assert body["available"] is True and body["backend"] == "anthropic"
+    # 둘 다 — 로컬이 이긴다
+    monkeypatch.setenv("CLAW_LLM_BASE_URL", "http://box:8000/v1")
+    monkeypatch.setenv("CLAW_LLM_MODEL", "qwen3-32b")
+    body = client.get("/api/llm/status").json()
+    assert body["backend"] == "openai" and body["model"] == "qwen3-32b"
+    # URL만 있고 모델 없음 — 키가 있어도 불가용, 사유가 빠진 변수를 지목
+    monkeypatch.delenv("CLAW_LLM_MODEL")
+    body = client.get("/api/llm/status").json()
+    assert body["available"] is False and body["backend"] == "openai"
+    assert "CLAW_LLM_MODEL" in body["reason"]
+    r = client.post("/api/llm/ask", json={"question": "?"})
+    assert r.status_code == 503
+    assert "CLAW_LLM_MODEL" in r.json()["detail"]
+    # 로컬만 (키 없음) — 폐쇄망의 정상 구성
+    monkeypatch.delenv("CLAW_ANTHROPIC_API_KEY")
+    monkeypatch.setenv("CLAW_LLM_MODEL", "qwen3-32b")
+    body = client.get("/api/llm/status").json()
+    assert body["available"] is True and body["backend"] == "openai"
+    assert body["reason"] is None
+
+
+def test_로컬_백엔드로_나가는_요청은_계약_그대로다(client, wait_job, monkeypatch):
+    """와이어 골든의 로컬판 — 존재 이유는 Anthropic 골든과 같다(대부분의
+    테스트가 call_llm을 통째로 갈아끼우므로 그 경계 안쪽이 틀려도 조용히
+    초록). 구조화 출력은 response_format.json_schema(strict) — 이 필드를
+    무시하는 서버·모델이면 응답이 산문이 되고, JSON 가드가 사유로 잡는다."""
+    import httpx
+
+    monkeypatch.setenv("CLAW_LLM_BASE_URL", "http://10.0.0.5:8000/v1/")  # 꼬리 / 허용
+    monkeypatch.setenv("CLAW_LLM_MODEL", "qwen3-32b")
+    sent = {}
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return _fake_raw_openai(_DRAFT)
+
+    def fake_post(url, *, timeout, headers, json):
+        sent.update(url=url, timeout=timeout, headers=headers, body=json)
+        return _Resp()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    r = client.post("/api/llm/mission-draft", json={"intent": "계약 고정"})
+    job = wait_job(r.json()["id"])
+    assert job["status"] == "done", job
+
+    assert sent["url"] == "http://10.0.0.5:8000/v1/chat/completions"
+    # 키 없음 = 인증 헤더 자체가 없다 (빈 Bearer는 게이트웨이가 401을 낸다)
+    assert not any(k.lower() == "authorization" for k in sent["headers"])
+    body = sent["body"]
+    assert body["model"] == "qwen3-32b"
+    assert body["messages"] == [
+        {"role": "system", "content": llm_route._SYSTEM},  # system은 첫 메시지로
+        {"role": "user", "content": "계약 고정"},
+    ]
+    js = body["response_format"]
+    assert js["type"] == "json_schema"
+    assert js["json_schema"]["strict"] is True
+    assert js["json_schema"]["schema"] == llm_route._DRAFT_SCHEMA
+
+
+def test_로컬_응답은_내부_계약으로_정규화된다(client, wait_job, monkeypatch):
+    """라우트·저장 형상은 백엔드를 모른다 — usage 키(prompt_tokens ↔
+    input_tokens)까지 옮겨져야 저장 형상이 백엔드마다 갈리지 않는다(설계
+    조사가 찾은 유일한 누수 지점). 키가 있으면 Bearer가 실린다."""
+    import httpx
+
+    monkeypatch.setenv("CLAW_LLM_BASE_URL", "http://box/v1")
+    monkeypatch.setenv("CLAW_LLM_MODEL", "m1")
+    monkeypatch.setenv("CLAW_LLM_API_KEY", "gw-token")
+    sent = {}
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return _fake_raw_openai(_DRAFT)
+
+    def fake_post(url, *, timeout, headers, json):
+        sent.update(headers=headers)
+        return _Resp()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    r = client.post("/api/llm/mission-draft", json={"intent": "정규화"})
+    job = wait_job(r.json()["id"])
+    assert job["status"] == "done", job
+    body = client.get(f"/api/results/{job['result_id']}").json()
+    assert body["draft"] == _DRAFT
+    assert body["model"] == "m1"
+    assert body["usage"] == {"input_tokens": 10, "output_tokens": 20}
+    assert sent["headers"]["authorization"] == "Bearer gw-token"
+
+
+def test_로컬_거절도_같은_사유로_실패한다(client, wait_job, monkeypatch):
+    """content_filter → refusal 매핑 — 거절이 백엔드와 무관하게 한 문장으로
+    나온다 (_to_anthropic_shape)."""
+    import httpx
+
+    monkeypatch.setenv("CLAW_LLM_BASE_URL", "http://box/v1")
+    monkeypatch.setenv("CLAW_LLM_MODEL", "m1")
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": ""},
+                                 "finish_reason": "content_filter"}],
+                    "usage": {}}
+
+    monkeypatch.setattr(httpx, "post",
+                        lambda url, *, timeout, headers, json: _Resp())
+    r = client.post("/api/llm/mission-draft", json={"intent": "아무거나"})
+    job = wait_job(r.json()["id"])
+    assert job["status"] == "error"
+    assert "거절" in job["error"]
+
+
+def test_json_가드는_펜스를_벗기고_산문은_사유로_실패시킨다():
+    """구조화 출력 강제가 약한 로컬 모델의 1차 방어선 — 실패가 파이썬
+    트레이스백이 아니라 사유 문장이어야 한다 (조용한 실패 금지 — 이 파일에서
+    유일하게 규약 밖이던 자리)."""
+    fenced = {"content": [{"type": "text",
+                           "text": "```json\n{\"a\": 1}\n```"}],
+              "stop_reason": "end_turn"}
+    assert llm_route._extract_json(fenced) == {"a": 1}
+    prose = {"content": [{"type": "text",
+                          "text": "네, 알겠습니다. 요청하신 JSON은 다음과 같습니다"}],
+             "stop_reason": "end_turn"}
+    with pytest.raises(RuntimeError, match="JSON이 아닙니다"):
+        llm_route._extract_json(prose)
+
+
+def test_정규화는_stop_reason_어휘까지_하나로_만든다():
+    """반만 옮기면(content_filter만) stop_reason을 보는 분기가 로컬 백엔드에서만
+    조용히 빠진다 — 잘림 판정(아래)이 바로 그 소비자다."""
+    def shape(finish):
+        return llm_route._to_anthropic_shape(
+            {"choices": [{"message": {"content": "{}"},
+                          "finish_reason": finish}]})["stop_reason"]
+    assert shape("stop") == "end_turn"
+    assert shape("length") == "max_tokens"
+    assert shape("content_filter") == "refusal"
+
+
+def test_잘린_출력은_토큰_상한_사유로_실패한다(client, wait_job, monkeypatch):
+    """finish_reason "length"로 잘린 JSON을 "모델 응답이 JSON이 아닙니다"로
+    오진하지 않는다 — 처방(입력 축소)이 다르다. Anthropic의 stop_reason
+    "max_tokens"도 같은 판정을 탄다(어휘 정규화가 술어를 하나로 만든다)."""
+    import httpx
+
+    monkeypatch.setenv("CLAW_LLM_BASE_URL", "http://box/v1")
+    monkeypatch.setenv("CLAW_LLM_MODEL", "m1")
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": "{\"summary\": \"잘렸"},
+                                 "finish_reason": "length"}],
+                    "usage": {}}
+
+    monkeypatch.setattr(httpx, "post",
+                        lambda url, *, timeout, headers, json: _Resp())
+    r = client.post("/api/llm/mission-draft", json={"intent": "긴 미션"})
+    job = wait_job(r.json()["id"])
+    assert job["status"] == "error"
+    assert "토큰 상한" in job["error"]
+
+
+def test_대본이_스키마를_어기면_사유로_실패한다(client, wait_job, monkeypatch):
+    """초안·문답과 달리 대본에는 웹 정규화가 없다 — 서버(validate_lines)가
+    마지막 방어선이다. 어긴 값이 저장되면 그대로 자막·발화로 흐른다."""
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    rid = _seed_sim(client, "simbad001")
+    bad = {"lines": [{"t": "0.5", "speaker": "TOWER", "text": "t가 문자열"}],
+           "warnings": []}
+    monkeypatch.setattr(llm_route, "call_llm", lambda **kw: _fake_raw(bad))
+    job = wait_job(client.post("/api/llm/comms",
+                               json={"result_id": rid}).json()["id"])
+    assert job["status"] == "error"
+    assert "유한한 수" in job["error"]
+
+    bad2 = {"lines": [{"t": 1.0, "speaker": "PILOT", "text": "x"}],
+            "warnings": []}
+    monkeypatch.setattr(llm_route, "call_llm", lambda **kw: _fake_raw(bad2))
+    job = wait_job(client.post("/api/llm/comms",
+                               json={"result_id": rid}).json()["id"])
+    assert job["status"] == "error"
+    assert "PILOT" in job["error"]

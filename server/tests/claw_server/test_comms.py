@@ -13,7 +13,9 @@
 import json
 import math
 
-from claw_server.comms import LOG_BUDGET, flight_log
+import pytest
+
+from claw_server.comms import LOG_BUDGET, flight_log, validate_lines
 
 
 def _sim(n=200, dt=0.5, with_phases=True):
@@ -198,3 +200,34 @@ def test_활주로가_있으면_접지에_축방향_횡편차가_붙는다():
     td = next(e for e in log["events"] if e["kind"] == "touchdown")
     assert "along" in td and "cross" in td
     assert math.isfinite(td["along"]) and math.isfinite(td["cross"])
+
+
+# ── validate_lines — LLM 대본 응답의 마지막 방어선 (routes/llm.py comms 경로) ──
+
+
+def test_validate_lines_멀쩡한_대본은_그대로_통과한다():
+    lines = [{"t": 0.5, "speaker": "TOWER", "text": "이륙을 허가한다"},
+             {"t": 79, "speaker": "UAV", "text": "접지"}]  # int 시각도 수다
+    assert validate_lines({"lines": lines, "warnings": []}) is lines
+    assert validate_lines({"lines": [], "warnings": []}) == []
+
+
+def test_validate_lines_위반은_사유_문장으로_실패한다():
+    """스키마 강제가 약한 로컬 백엔드(OpenAI 호환)에서 어긴 값이 저장되면
+    그대로 자막·발화·정렬로 흐른다 — 첫 위반을 이름 대어 거부한다."""
+    with pytest.raises(RuntimeError, match="lines 배열"):
+        validate_lines({"warnings": []})
+    with pytest.raises(RuntimeError, match="PILOT"):
+        validate_lines({"lines": [{"t": 1.0, "speaker": "PILOT", "text": "x"}]})
+    with pytest.raises(RuntimeError, match="유한한 수"):
+        validate_lines({"lines": [{"t": "1.0", "speaker": "UAV", "text": "x"}]})
+    with pytest.raises(RuntimeError, match="유한한 수"):
+        validate_lines(
+            {"lines": [{"t": float("nan"), "speaker": "UAV", "text": "x"}]})
+    with pytest.raises(RuntimeError, match="유한한 수"):
+        # bool은 int의 하위형이다 — isinstance만 보면 True가 시각 1로 통과한다
+        validate_lines({"lines": [{"t": True, "speaker": "UAV", "text": "x"}]})
+    with pytest.raises(RuntimeError, match="text"):
+        validate_lines({"lines": [{"t": 1.0, "speaker": "UAV", "text": 3}]})
+    with pytest.raises(RuntimeError, match="객체가 아닙"):
+        validate_lines({"lines": ["한 줄"]})

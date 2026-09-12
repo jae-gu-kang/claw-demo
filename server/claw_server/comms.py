@@ -340,6 +340,7 @@ def flight_log(payload: dict) -> dict:
 # speaker가 enum인 이유: 자유 문자열이면 같은 대본에서 "관제탑"/"TOWER"/"Tower"가
 # 섞여 화면이 화자별 표기·정렬을 못 준다 (_LON_AXES·_EXIT_KINDS 선례).
 # t가 number인 이유: 폼 칸이 아니라 시각 정렬 키다 (초안 스키마와 다른 자리).
+SPEAKERS = ("TOWER", "UAV")  # 화자 어휘의 정본 — 스키마와 validate_lines가 공유한다
 COMMS_SCHEMA = {
     "type": "object",
     "properties": {
@@ -349,7 +350,7 @@ COMMS_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "t": {"type": "number"},
-                    "speaker": {"type": "string", "enum": ["TOWER", "UAV"]},
+                    "speaker": {"type": "string", "enum": list(SPEAKERS)},
                     "text": {"type": "string"},
                 },
                 "required": ["t", "speaker", "text"],
@@ -361,6 +362,40 @@ COMMS_SCHEMA = {
     "required": ["lines", "warnings"],
     "additionalProperties": False,
 }
+
+
+def validate_lines(data: dict) -> list:
+    """LLM 응답의 lines 검증 — 첫 위반을 **사유 문장**으로 실패시키고, 통과하면
+    lines를 돌려준다.
+
+    structured output이 형상을 강제하는 것이 정상이지만, 그 강제가 서버·모델에
+    따라 약한 로컬 백엔드(OpenAI 호환)에서는 여기가 마지막 방어선이다 — 초안
+    (normalizeDraft)·문답(normalizeAnswer)과 달리 대본에는 웹 정규화가 없어,
+    어긴 값이 저장되면 그대로 자막·발화·정렬로 흐른다. 스키마의 기계적 재현이
+    아니라 소비자가 실제로 기대는 것만 본다: lines 배열, speaker 어휘(SPEAKERS),
+    t 유한수, text 문자열.
+    """
+    lines = data.get("lines")
+    if not isinstance(lines, list):
+        raise RuntimeError(
+            "대본 응답에 lines 배열이 없습니다 — 모델이 스키마를 지키지 않았습니다.")
+    for i, ln in enumerate(lines):
+        if not isinstance(ln, dict):
+            raise RuntimeError(
+                f"대본 {i}번째 줄이 객체가 아닙니다 — 모델이 스키마를 지키지 않았습니다.")
+        sp = ln.get("speaker")
+        if sp not in SPEAKERS:
+            raise RuntimeError(
+                f"대본 {i}번째 줄의 speaker {sp!r} — 허용: {sorted(SPEAKERS)}")
+        t = ln.get("t")
+        if isinstance(t, bool) or not isinstance(t, (int, float)) \
+                or not math.isfinite(t):
+            raise RuntimeError(
+                f"대본 {i}번째 줄의 t {t!r} — 시각 정렬 키라 유한한 수여야 합니다.")
+        if not isinstance(ln.get("text"), str):
+            raise RuntimeError(f"대본 {i}번째 줄의 text가 문자열이 아닙니다.")
+    return lines
+
 
 COMMS_SYSTEM = """너는 CLAW 비행제어 설계툴 가상환경의 관제 교신 작가다. 무인기
 시뮬레이션 런 하나의 비행 로그를 받아, 그 비행을 따라가는 관제탑–기체 교신

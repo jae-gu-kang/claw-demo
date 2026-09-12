@@ -115,8 +115,9 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
         verify_routes.router,
         design_routes.router,
         world_routes.router,
-        # LLM 프록시(미션 초안) — 이 리포의 유일한 런타임 아웃바운드 (routes/llm.py
-        # 머리말). 키가 없으면 기능만 사유와 함께 꺼진다.
+        # LLM 프록시(초안·브리핑·교신·질문) — 이 리포의 유일한 런타임 아웃바운드
+        # (routes/llm.py 머리말). 목적지는 Anthropic 또는 사내 OpenAI 호환 서버,
+        # 백엔드 미설정이면 기능만 사유와 함께 꺼진다.
         llm_routes.router,
     ):
         app.include_router(router, prefix="/api")
