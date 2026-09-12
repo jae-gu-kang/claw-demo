@@ -10,14 +10,17 @@ import { COND_KINDS, LON_AXES, pathUsage } from "../lib/mission.js";
 // 요청 조립·기본 미션·실행 조건 기본값은 lib가 정본 — 가이드 투어(views/tour.js)가
 // **같은 조립**을 쓴다. 두 벌이면 투어가 돌린 미션과 이 표가 조용히 갈린다
 import {
-  applyActuatorSchema, appliedFrom, buildSimRequest, defaultModeRows, defaultWpRows,
-  initialForm, RUNWAY_HDG,
+  AP_PHI_MAX_FALLBACK, applyActuatorSchema, appliedFrom, buildSimRequest,
+  defaultModeRows, defaultWpRows, initialForm, RUNWAY_HDG,
 } from "../lib/simrequest.js";
 import { planeViews, wpMarks } from "../lib/plot.js";
 import { atEnd as cursorAtEnd, dtSample, indexAt, isPlayable } from "../lib/playcursor.js";
 import { dryRun, normalizeDraft } from "../lib/missiondraft.js";
-import { flaggedNames, landingSummary, modeSpans, strideFor } from "../lib/replay.js";
+import {
+  flaggedNames, landingSummary, modeSpans, pathEscapeNote, strideFor,
+} from "../lib/replay.js";
 import { GOHEUNG, touchdownWindowM } from "../lib/site.js";
+import { checkWaypoints, pathSpeed } from "../lib/wpcheck.js";
 import { fillMissingAltitudes, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
@@ -47,6 +50,10 @@ let renderWpNotice = () => {};
 // 도달 반경 읽기 — renderWpTable도 모듈 함수라 폼(f)에 닿지 못한다. 새 웨이포인트의
 // 원점 판정에 쓰므로 지도·표 두 추가 경로가 같은 값을 봐야 한다 (redrawProfile과 같은 관례)
 let acceptRadiusOf = () => 0;
+// 뱅크 한계 [rad] — 웨이포인트 기하 판정의 선회 반경 근거. 폼 폴백으로 시작해
+// 레지스트리 스키마가 오면 실값으로 갈아 낀다(작동기 3칸과 같은 자기정렬 — 02 §5.5).
+// 블록도에서 오토파일럿을 주입했으면 그쪽이 이긴다(drawWpNotice).
+let apPhiMax = AP_PHI_MAX_FALLBACK;
 // 지도 줌/팬 상태 — 탭 재진입 시 유지 (wpRows·lastReplay와 동렬)
 let wpMapView = { view: null };
 // 3D 시점(방위·고각) — 재렌더·탭 전환에도 돌려놓은 각도를 잃지 않게
@@ -251,6 +258,15 @@ export function render() {
       for (const key of ["wn", "zeta", "rate"]) f[key].value = next[key];
     }).catch(() => {});
   }
+  // 뱅크 한계도 같은 자기정렬 — 실패는 무시(폴백으로 판정한다). 도착하면 경고를
+  // 다시 그린다: 폴백과 실값이 다르면 선회 반경이 달라져 판정이 뒤집힐 수 있다
+  api.get("/registry/fcl/Autopilot/schema").then((s) => {
+    const d = Number(s?.properties?.phi_max?.default);
+    if (Number.isFinite(d) && d > 0 && d !== apPhiMax) {
+      apPhiMax = d;
+      renderWpNotice();
+    }
+  }).catch(() => {});
 
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -355,14 +371,28 @@ export function render() {
       miss.push(["세로 프로파일",
         '세로 프로파일은 종방향 축을 ‘고도’로 두고 값에 "path"를 적어야 따릅니다.']);
     }
-    if (!miss.length) return;
-    clear(wpNotice).append(el("div", { class: "error-box" },
-      `⚠ 웨이포인트 ${pts.length}개 — 비행에 반영되지 않는 축: `,
-      el("b", {}, miss.map((m) => m[0]).join(" · ")),
-      ". ",
-      miss.map((m) => m[1]).join(" "),
-      " 지금 실행해도 그 축은 결과에 기준선으로만 실립니다(경로오차 지표) — ",
-      "기체는 모드 표의 값대로 날아갑니다."));
+    if (miss.length) {
+      wpNotice.append(el("div", { class: "error-box" },
+        `⚠ 웨이포인트 ${pts.length}개 — 비행에 반영되지 않는 축: `,
+        el("b", {}, miss.map((m) => m[0]).join(" · ")),
+        ". ",
+        miss.map((m) => m[1]).join(" "),
+        " 지금 실행해도 그 축은 결과에 기준선으로만 실립니다(경로오차 지표) — ",
+        "기체는 모드 표의 값대로 날아갑니다."));
+    }
+    // 기하 사전 판정 — **선회 성능 안에 드는 배치인가**. 엔진의 예상 전환·궤도 탈출은
+    // 돌고 나서야 아는 사후 장치라, 좌표를 고칠 기회는 제출 전 여기뿐이다.
+    // 뱅크 한계는 오토파일럿 phi_max이고 서버가 그 값을 그대로 경로에 넘긴다
+    // (routes/sim.py _build) — 여기서 쓰는 값도 같은 자리에서 와야 화면과 엔진이
+    // 같은 부등식을 본다. 사용자가 블록도에서 오토파일럿을 주입했으면 그 값이다.
+    const applied = Number(store.get("autopilotParams")?.phi_max);
+    const geom = checkWaypoints(
+      pts, pathSpeed(modeRows), Number.isFinite(applied) ? applied : apPhiMax,
+      acceptRadiusOf(),
+    );
+    for (const w of geom.warnings) {
+      wpNotice.append(el("div", { class: "error-box" }, `⚠ ${w}`));
+    }
   };
   renderWpNotice = drawWpNotice;
 
@@ -1149,6 +1179,10 @@ function renderReplay(replayBox) {
       r.note ? " — " : "", r.note ?? "",
       r.unjudged ? " " : "", r.unjudged ? flagBadge(null) : "",
       r.over ? " " : "", r.over ? flagBadge(false, "", r.overLabel ?? "활주로 초과") : "")),
+    // 못 잡고 넘어간 웨이포인트 — **경로가 끝난 것과 계획대로 난 것은 다르다.**
+    // 엔진 안전망이 미션을 끝내 주므로 이 줄이 없으면 사용자는 자기가 찍은 경로를
+    // 날았다고 읽는다 (engine guidance/path.py §궤도 고착 · meta.path_escapes)
+    ...(pathEscapeNote(body) ? [el("div", { class: "error-box" }, `⚠ ${pathEscapeNote(body)}`)] : []),
     el("div", { class: "row" }, playBtn, speedSel, slider, readout),
     // 궤적 뷰 — 입체·평면·측면·정면 순. 배치는 .triview가 폭에 따라 1열/2열로
     // 고르며, 열 수를 4의 약수로만 두어 마지막 줄에 외톨이가 남지 않게 한다.

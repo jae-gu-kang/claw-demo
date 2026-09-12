@@ -2,7 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { extent, flaggedNames, landingSummary, modeSpans, strideFor } from "./replay.js";
+import {
+  extent, flaggedNames, landingSummary, modeSpans, pathEscapeNote, strideFor,
+} from "./replay.js";
 
 test("strideFor: 목표 점수 이하로 다운샘플", () => {
   assert.equal(strideFor(18000, 1500), 12);
@@ -246,4 +248,51 @@ test("landingSummary: 강하율이 없으면 '미계측' — 0으로 눙치지 �
     } },
   }));
   assert.match(rows[0].note, /강하율 미계측/);
+});
+
+test("landingSummary: 정지 **지점**도 활주로 안팎을 판정한다", () => {
+  // 종전에는 접지→정지 **거리**만 길이와 견주어, 7 km 북쪽 논에 선 기본 미션이
+  // "869 m / 활주로 1205 m"라 통과처럼 읽혔다. 거리가 짧은 것과 활주로에 선 것은 다르다.
+  const far = landingSummary(landingBody({
+    signals: { ...landingBody().signals, pn: [0, 100, 200, 7000, 7400, 7870] },
+  }));
+  const stop = far.find((r) => r.label === "정지");
+  assert.match(stop.note, /870 m/, "거리 비교는 그대로 산다");
+  assert.match(stop.note, /활주로 1500 m/);
+  assert.match(stop.note, /정지 지점이 활주로 구간 밖이다 \(축 \+?7,870 m\)/);
+  assert.equal(stop.over, true, "거리는 짧아도 지점이 밖이면 배지를 단다");
+  assert.equal(stop.overLabel, "활주로 밖 정지");
+  assert.equal(stop.unjudged, undefined, "밖이라고 단정했으면 미판정이 아니다");
+});
+
+test("landingSummary: 활주로 안에 서면 미판정 — 폭을 모르니 통과로 위장하지 않는다", () => {
+  const rows = landingSummary(landingBody()); // pn 300 → 900, 활주로 1500
+  const stop = rows.find((r) => r.label === "정지");
+  assert.equal(stop.over, false);
+  assert.match(stop.note, /구간 안이지만 활주로 폭이 결과에 없어 판정 불가/);
+  assert.equal(stop.unjudged, true);
+});
+
+test("landingSummary: 방위가 없으면 정지 지점 판정도 없다 — 접지 지점과 같은 규약", () => {
+  const rows = landingSummary(landingBody({
+    meta: { ...landingBody().meta, runway: { elevation: 0, length: 1500 } },
+  }));
+  const stop = rows.find((r) => r.label === "정지");
+  assert.doesNotMatch(stop.note, /정지 지점/);
+  assert.match(stop.note, /활주로 1500 m/, "길이 비교는 방위 없이도 성립한다");
+});
+
+// ---- 경로 탈출 안내 ----
+
+test("pathEscapeNote: 넘어간 웨이포인트를 **1 기준**으로 말한다 (표의 행 번호와 같은 어휘)", () => {
+  const note = pathEscapeNote({ meta: { path_escapes: [0, 3] } });
+  assert.match(note, /웨이포인트 1, 4번/);
+  assert.match(note, /한 바퀴/);
+});
+
+test("pathEscapeNote: 넘어간 것이 없으면 null — 조용한 정상이 기본이다", () => {
+  assert.equal(pathEscapeNote({ meta: { path_escapes: [] } }), null);
+  assert.equal(pathEscapeNote({ meta: {} }), null);
+  assert.equal(pathEscapeNote({}), null);
+  assert.equal(pathEscapeNote(undefined), null);
 });

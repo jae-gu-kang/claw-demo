@@ -112,15 +112,25 @@ export function landingSummary(body) {
   // 지어내고 방위를 알 때와 똑같은 확신으로 거리를 찍게 되며, 길이 0은 거의 모든
   // 접지를 "밖"으로 만든다 — 이 파일의 "0으로 채우지 않는다" 규약과 같은 자리다.
   const rw = body?.meta?.runway;
-  if (k !== null && rw) {
+  // 활주로 축 좌표 — 접지와 정지가 **같은 자를 쓴다**. 정지 판정을 따로 적으면
+  // 두 행이 다른 기하를 말하게 된다(한쪽만 고치는 일이 생긴다)
+  const rwFix = (i) => {
+    if (i === null || !rw) return null;
     const hdg = num(rw.heading);
     const len = num(rw.length);
-    const pn = num(sig.pn?.[k]);
-    const pe = num(sig.pe?.[k]);
-    if (hdg !== null && len !== null && len > 0 && pn !== null && pe !== null) {
-      const along = pn * Math.cos(hdg) + pe * Math.sin(hdg);
-      const cross = -pn * Math.sin(hdg) + pe * Math.cos(hdg);
-      const outside = along < 0 || along > len || Math.abs(cross) > len;
+    const pn = num(sig.pn?.[i]);
+    const pe = num(sig.pe?.[i]);
+    if (hdg === null || len === null || len <= 0 || pn === null || pe === null) return null;
+    const along = pn * Math.cos(hdg) + pe * Math.sin(hdg);
+    const cross = -pn * Math.sin(hdg) + pe * Math.cos(hdg);
+    // 폭을 몰라도 단정할 수 있는 둘: 축방향이 구간 밖 · |횡편차| > length
+    // (활주로가 자기 길이보다 넓을 수는 없다). 안쪽은 폭이 없어 미판정이다
+    return { along, cross, len, outside: along < 0 || along > len || Math.abs(cross) > len };
+  };
+  if (k !== null && rw) {
+    const fix = rwFix(k);
+    if (fix !== null) {
+      const { along, cross, len, outside } = fix;
       // 재생 응답은 stride로 솎여 있어 표본 간격이 순항 속도에서 10 m를 넘는다
       // (strideFor 14 → 0.14 s → 88 m/s에서 12.3 m). 1 m 단위로 찍으면 갖지 않은
       // 분해능을 주장한다 — 엔진이 전 해상도에서 재어 meta.phases에 실어 주면
@@ -149,17 +159,54 @@ export function landingSummary(body) {
     const dn = (sig.pn?.[j] ?? 0) - (sig.pn?.[k] ?? 0);
     const de = (sig.pe?.[j] ?? 0) - (sig.pe?.[k] ?? 0);
     const dist = Math.hypot(dn, de);
-    const rw = body?.meta?.runway?.length;
+    const len = body?.meta?.runway?.length;
+    // **미끄럼이 짧은 것과 활주로에 선 것은 다르다.** 종전에는 거리만 견주어,
+    // 7 km 북쪽 논에 내린 기본 미션이 "869 m / 활주로 1205 m"라 통과처럼 읽혔다.
+    // 이제 정지 **지점**을 접지와 같은 자로 재서 그 구분을 낸다.
+    const fix = rwFix(j);
+    const stopped = fix === null
+      ? null
+      : (fix.outside ? "밖" : "안");
     rows.push({
       label: "정지",
       value: `${ph.stop_t.toFixed(2)} s`,
       note: `접지→정지 직선거리 ${Math.round(dist)} m`
-        + (typeof rw === "number"
+        + (typeof len === "number"
           // 마크다운 **는 여기서 글자 그대로 나온다 — note는 텍스트 노드로 들어간다
           // (views/sim.js). 강조는 이 행이 이미 내는 over 배지가 맡는다
-          ? ` / 활주로 ${Math.round(rw)} m${dist > rw ? " — 넘어섰다" : ""}` : ""),
-      over: typeof rw === "number" && dist > rw,
+          ? ` / 활주로 ${Math.round(len)} m${dist > len ? " — 넘어섰다" : ""}` : "")
+        + (stopped === null
+          ? ""
+          : stopped === "밖"
+            // 접지 지점 행과 **같은 자릿수**로 낸다 — 재생 응답이 stride로 솎여 있어
+            // 1 m 단위는 갖지 않은 분해능이다 (위 r10 주석이 정본)
+            ? ` · 정지 지점이 활주로 구간 밖이다 (축 ${(Math.round(fix.along / 10) * 10).toLocaleString("ko-KR")} m)`
+            : " · 정지 지점은 구간 안이지만 활주로 폭이 결과에 없어 판정 불가"),
+      over: (typeof len === "number" && dist > len) || stopped === "밖",
+      // 키를 `undefined`로 두지 않는다 — 있는 키와 없는 키의 구분이 곧 계약이다
+      ...(stopped === "밖" ? { overLabel: "활주로 밖 정지" } : {}),
+      ...(stopped === "안" && !(typeof len === "number" && dist > len)
+        ? { unjudged: true } : {}),
     });
   }
   return rows;
+}
+
+/** 순수추적으로 못 잡고 넘어간 웨이포인트 안내 — 없으면 null.
+ *
+ * 경로가 끝난 것과 **계획대로 난 것**은 다르다. 엔진 안전망(궤도 고착 탈출)이
+ * 미션을 끝내 주지만, 그 점을 실제로는 지나가지 못했다는 사실이 화면에 없으면
+ * 사용자는 자기가 찍은 경로를 날았다고 읽는다 (engine guidance/path.py §궤도 고착).
+ *
+ * 인덱스는 엔진이 0 기준으로 싣고 화면은 **1 기준**으로 말한다 — 웨이포인트 표의
+ * 행 번호와 같은 어휘여야 사용자가 어느 줄인지 바로 찾는다.
+ */
+export function pathEscapeNote(body) {
+  const esc = body?.meta?.path_escapes;
+  if (!Array.isArray(esc) || !esc.length) return null;
+  const names = esc.map((i) => Number(i) + 1).join(", ");
+  return `웨이포인트 ${names}번은 잡지 못하고 넘어갔습니다 — 기체가 그 점을 중심으로 `
+    + "한 바퀴 돈 뒤 다음 점으로 넘어갔다는 뜻입니다(안 넘겼으면 경로가 끝나지 "
+    + "않습니다). 그 꺾임이 이 속도의 선회 성능보다 급합니다 — 웨이포인트를 더 "
+    + "벌리거나 순항 속도를 낮추면 계획대로 지나갑니다.";
 }

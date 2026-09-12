@@ -510,3 +510,169 @@ def test_guidance_declares_what_the_table_needs():
         ModeSpec(name="c", exit_when=("time_ge", 1e9)),
     ])
     assert g.needs_ground is True and g.needs_rail is True
+
+
+# ---------- 선회 예상 전환 (fly-by) · 궤도 고착 탈출 ----------
+
+
+def _orbit_nav(t, center, radius, omega, psi0=0.0):
+    """웨이포인트를 중심으로 반경 `radius`를 도는 궤적 — 순수추적 고착의 기하."""
+    ang = psi0 + omega * t
+    n = center[0] + radius * math.cos(ang)
+    e = center[1] + radius * math.sin(ang)
+    # 접선 방향으로 난다 (속도 벡터가 선회를 만든다 — _lead가 v_h를 본다)
+    psi = ang + math.pi / 2.0
+    return _nav(t=t, n=n, e=e, speed=radius * abs(omega), psi=psi)
+
+
+def test_los_bank_max_zero_keeps_fly_over():
+    """`bank_max` 기본 0 = 선회 능력 미지 → 예상 전환 없음 (종전 동작 보존).
+
+    없는 값을 지어내지 않는 자리다 — 경로추종기는 오토파일럿의 뱅크 한계를
+    누가 넘겨주기 전까지 모른다.
+    """
+    wps = ((3000.0, 0.0), (3000.0, 3000.0))
+    path = LosPath(waypoints=wps, accept_radius=100.0).init(DT)
+    assert path.bank_max == 0.0
+    # 도달 반경 밖(200 m 남음)에서는 아직 첫 웨이포인트를 향한다
+    hdg, _a, done = path.step(_nav(n=2800.0, e=0.0, speed=88.0))
+    assert hdg == pytest.approx(0.0) and not done
+
+
+def test_los_turn_anticipation_switches_before_the_corner():
+    """예상 전환 — 꺾임 **앞에서** 다음 구간으로 넘어간다 (L = R·tan(Δψ/2)).
+
+    88 m/s·뱅크 0.7이면 R≈940 m, 90° 꺾임의 예상 거리는 R·tan45° = R이지만
+    구간 절반(1500 m)과 견주어 작으므로 그대로 산다.
+    """
+    wps = ((3000.0, 0.0), (3000.0, 3000.0))
+    path = LosPath(waypoints=wps, accept_radius=100.0, bank_max=0.7).init(DT)
+    # 첫 스텝이 `_from`을 박는다 — 진입 구간 길이가 여기서 정해지고, 예상 거리는
+    # 그 절반에서 잘린다. 출발점에서 재야 구간이 3000 m라 잘리지 않는다
+    path.step(_nav(n=0.0, e=0.0, speed=88.0))
+    # 첫 웨이포인트까지 800 m 남았다 — 도달 반경 100 m 밖이지만 예상 거리(≈938) 안이다
+    hdg, _a, done = path.step(_nav(n=2200.0, e=0.0, speed=88.0))
+    assert not done
+    # 이미 두 번째 웨이포인트를 향해 틀었다 (fly-over였다면 여전히 정북 0)
+    assert hdg == pytest.approx(math.atan2(3000.0, 800.0))
+    # 같은 자리에서 예상 전환을 끄면 아직 첫 점을 향한다 — 차이를 만드는 것이 bank_max다
+    plain = LosPath(waypoints=wps, accept_radius=100.0).init(DT)
+    plain.step(_nav(n=0.0, e=0.0, speed=88.0))
+    assert plain.step(_nav(n=2200.0, e=0.0, speed=88.0))[0] == pytest.approx(0.0)
+
+
+def test_los_lead_is_capped_by_the_shorter_leg():
+    """예상 거리는 **양쪽 구간의 절반**에서 잘린다 — 전환이 서로를 삼키지 않게.
+
+    구간이 짧으면 R·tan(Δψ/2)가 구간을 통째로 넘어 웨이포인트가 사라진다.
+    """
+    wps = ((600.0, 0.0), (600.0, 600.0), (1200.0, 600.0))
+    path = LosPath(waypoints=wps, accept_radius=10.0, bank_max=0.7).init(DT)
+    # 구간 600 m · 90° 꺾임 → 잘리지 않았다면 예상 거리 940 m로 출발점에서 즉시 전환
+    hdg, _a, done = path.step(_nav(n=0.0, e=0.0, speed=88.0))
+    assert not done
+    # 절반(300 m)에서 잘리므로 300 m 밖인 출발점에서는 아직 첫 점을 향한다
+    assert hdg == pytest.approx(0.0)
+
+
+def test_los_last_waypoint_has_no_anticipation():
+    """마지막 웨이포인트는 다음 구간이 없다 → 예상 거리 0, 도달 반경만 남는다."""
+    path = LosPath(waypoints=((3000.0, 0.0),), accept_radius=100.0, bank_max=0.7).init(DT)
+    _h, _a, done = path.step(_nav(n=2500.0, e=0.0, speed=88.0))
+    assert not done, "500 m 남았는데 예상 전환으로 끝나면 안 된다"
+    _h, _a, done = path.step(_nav(n=2950.0, e=0.0, speed=88.0))
+    assert done
+
+
+def test_los_orbit_escape_releases_an_uncatchable_waypoint():
+    """한 바퀴를 돌면 못 잡는 점으로 판정하고 넘긴다 — 그리고 **기록한다**.
+
+    도달 반경(50 m)보다 선회 반경(400 m)이 커서 순수추적이 영영 수렴하지 않는
+    배치다. 안전망이 없으면 `path_done`이 오지 않아 미션이 끝나지 않는다.
+    """
+    wps = ((1000.0, 0.0), (5000.0, 0.0))
+    path = LosPath(waypoints=wps, accept_radius=50.0).init(DT)
+    done = False
+    omega = 0.05  # [rad/s] — 한 바퀴 ≈ 126 s
+    for k in range(20000):
+        _h, _a, done = path.step(_orbit_nav(k * DT, (1000.0, 0.0), 400.0, omega))
+        if path.escapes:
+            break
+    assert path.escapes == (0,), f"첫 웨이포인트가 탈출로 기록돼야 한다: {path.escapes}"
+    assert not done, "탈출은 소진이 아니다 — 다음 웨이포인트가 남아 있다"
+
+
+def test_los_orbit_escape_needs_a_full_revolution():
+    """정상 선회는 안전망에 안 걸린다 — 문턱이 한 바퀴인 이유.
+
+    반 바퀴를 돌아도(π) 탈출하지 않는다. 급한 꺾임 하나가 π를 넘길 수 있으므로
+    그보다 낮은 문턱은 정상 비행을 자른다.
+    """
+    path = LosPath(waypoints=((1000.0, 0.0), (5000.0, 0.0)), accept_radius=50.0).init(DT)
+    omega = 0.05
+    n_half = int((math.pi / omega) / DT)  # 정확히 반 바퀴
+    for k in range(n_half):
+        path.step(_orbit_nav(k * DT, (1000.0, 0.0), 400.0, omega))
+    assert path.escapes == (), "반 바퀴에서 탈출하면 정상 선회를 자른다"
+
+
+def test_los_escapes_cleared_on_reset():
+    """탈출 기록은 런마다 새로 쌓인다 — 직전 런의 사고가 이번 결과에 실리면 안 된다."""
+    path = LosPath(waypoints=((1000.0, 0.0), (5000.0, 0.0)), accept_radius=50.0).init(DT)
+    for k in range(20000):
+        path.step(_orbit_nav(k * DT, (1000.0, 0.0), 400.0, 0.05))
+        if path.escapes:
+            break
+    assert path.escapes
+    path.reset()
+    assert path.escapes == ()
+
+
+def test_guidance_exposes_path_escapes():
+    """시뮬 meta가 읽는 창구 — 경로가 없으면 None이 아니라 **빈 튜플**이다."""
+    modes = [ModeSpec(name="hold", speed=100.0, exit_when=("time_ge", 1e9))]
+    assert Guidance(modes).init(DT).path_escapes == ()
+    g = Guidance(
+        [ModeSpec(name="nav", speed=100.0, heading="path", exit_when=("path_done",),
+                  next="hold"),
+         ModeSpec(name="hold", speed=100.0, exit_when=("time_ge", 1e9))],
+        path=LosPath(waypoints=((1000.0, 0.0), (5000.0, 0.0)), accept_radius=50.0),
+    ).init(DT)
+    assert g.path_escapes == ()
+    for k in range(20000):
+        g.step(_orbit_nav(k * DT, (1000.0, 0.0), 400.0, 0.05))
+        if g.path_escapes:
+            break
+    assert g.path_escapes == (0,)
+
+
+def test_los_bank_max_range_validated_at_construction():
+    """뱅크 한계 상한은 Autopilot phi_max와 같은 축 — 한쪽만 넓으면 넘길 수 없는 값이 생긴다."""
+    with pytest.raises(ValueError, match="bank_max"):
+        LosPath(waypoints=((100.0, 0.0),), bank_max=1.6)
+    with pytest.raises(ValueError, match="bank_max"):
+        LosPath(waypoints=((100.0, 0.0),), bank_max=-0.1)
+
+
+def test_los_anticipation_keeps_altitude_ramp_ending_at_the_switch():
+    """램프는 **전환이 실제로 일어나는 자리**에서 끝난다 — 예상 전환에서도.
+
+    램프 끝을 도달 반경에 고정해 두면 예상 전환이 그보다 먼저 일어나 도착
+    고도가 목표에 못 미친다(계획보다 높은 채 다음 구간으로 넘어간다).
+    """
+    wps = ((4000.0, 0.0, 1000.0), (4000.0, 4000.0, 1000.0))
+    at = _nav(n=3050.0, e=0.0, h=990.0, speed=88.0)  # 예상 거리(≈938 m) 바로 바깥
+
+    path = LosPath(waypoints=wps, accept_radius=100.0, bank_max=0.7).init(DT)
+    path.step(_nav(n=0.0, e=0.0, h=200.0, speed=88.0))  # 첫 스텝이 _from을 박는다
+    _h, lead_alt, _d = path.step(at)
+
+    plain = LosPath(waypoints=wps, accept_radius=100.0).init(DT)
+    plain.step(_nav(n=0.0, e=0.0, h=200.0, speed=88.0))
+    _h, radius_alt, _d = plain.step(at)
+
+    # 전환 자리에서 목표 고도(1000)에 사실상 닿아 있다 — 남은 것은 12 m뿐이다
+    assert lead_alt == pytest.approx(1000.0, abs=5.0)
+    # 램프 끝을 도달 반경에 고정해 두면 같은 자리에서 170 m 낮다 — 전환 순간
+    # 계획보다 높은 채 다음 구간으로 넘어가고, 거기서 고도가 튄다
+    assert radius_alt < lead_alt - 150.0

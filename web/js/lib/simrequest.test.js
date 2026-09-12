@@ -19,7 +19,7 @@ test("기본 폼 + 기본 미션 → 요청 전체가 골든과 같다 (sim.js r
   // 모드는 **리터럴로** 박는다 — buildModes(defaultModeRows())로 적으면 같은 원본을
   // 양쪽에서 계산해 비교하는 꼴이라 프로파일 수치(속도·이탈 조건·피치)가 바뀌어도
   // 통과한다(리뷰의 변이시험: climb 180→250, cruise 88→95가 안 잡혔다).
-  // 웨이포인트는 아래 「활주로 축 위 2.6·3.3 km」 테스트가 기하로 잡는다.
+  // 웨이포인트는 아래 「장주 패턴」 테스트가 기하로 잡는다.
   const hdg = GOHEUNG.runwayHeadingRad;
   assert.deepEqual(req, {
     trim: { name: "start", mach: 0, alt: 0, fuel: 300, condition: "ground" },
@@ -40,8 +40,8 @@ test("기본 폼 + 기본 미션 → 요청 전체가 골든과 같다 (sim.js r
         heading: null, exit: ["time_ge", 1e9], next: null },
     ],
     waypoints: buildWaypoints(defaultWpRows()),
-    accept_radius: 100,
-    t_end: 200,
+    accept_radius: 300,
+    t_end: 320,
     runway: { elevation: 0, heading: GOHEUNG.runwayHeadingRad, length: GOHEUNG.runwayLengthM },
     origin: { lat: GOHEUNG.originLatDeg, lon: GOHEUNG.originLonDeg },
     launch: { length: 10, elev_angle: 0.2618, exit_speed: 81.5 },
@@ -52,7 +52,7 @@ test("기본 폼 + 기본 미션 → 요청 전체가 골든과 같다 (sim.js r
     actuators: { wn: ACT_FALLBACK.wn, zeta: ACT_FALLBACK.zeta, rate_max: ACT_FALLBACK.rate },
   });
   assert.deepEqual(missing, []);
-  assert.deepEqual(snapshot, { waypoints: req.waypoints, acceptRadius: 100 });
+  assert.deepEqual(snapshot, { waypoints: req.waypoints, acceptRadius: 300 });
 });
 
 test("기본 미션은 발사 → 착륙 정지 사슬이고 순항만 경로를 따른다", () => {
@@ -65,19 +65,28 @@ test("기본 미션은 발사 → 착륙 정지 사슬이고 순항만 경로를
   assert.deepEqual(rows.filter((r) => r.heading === "path").map((r) => r.name), ["cruise"]);
 });
 
-test("기본 웨이포인트는 활주로 축 위 2.6·3.3 km다 — 방위 상수를 공유한다", () => {
+test("기본 웨이포인트는 활주로로 되돌아오는 장주다 — 방위 상수를 공유한다", () => {
+  // 활주로 축 좌표(along = 시단에서 방위 방향, cross = 오른쪽)로 읽는다. 종전
+  // 기본값은 축 위 2.6·3.3 km 둘이라 기체가 그대로 북진해 **시단 7 km 북쪽**에
+  // 내렸다(실측 접지 7,010 m). 장주는 그 자리를 활주로 안으로 되돌린다.
   const h = GOHEUNG.runwayHeadingRad;
   const wps = defaultWpRows();
-  assert.equal(wps.length, 2);
-  for (const [wp, dist] of [[wps[0], 2600], [wps[1], 3300]]) {
+  const plan = [[3500, 0], [3500, 2200], [-5800, 2200], [-5800, 0], [-3600, 0]];
+  assert.equal(wps.length, plan.length);
+  wps.forEach((wp, i) => {
     const n = Number(wp.n);
     const e = Number(wp.e);
     const along = n * Math.cos(h) + e * Math.sin(h);
     const cross = -n * Math.sin(h) + e * Math.cos(h);
-    assert.ok(Math.abs(along - dist) < 1, `축방향 ${along}`);
-    assert.ok(Math.abs(cross) < 1, `횡편차 ${cross}`); // 정수 반올림 오차만 허용
+    assert.ok(Math.abs(along - plan[i][0]) < 1, `WP${i + 1} 축방향 ${along}`);
+    assert.ok(Math.abs(cross - plan[i][1]) < 1, `WP${i + 1} 횡편차 ${cross}`);
     assert.equal(wp.d, ""); // 고도는 비운다 — 세로는 순항 고도 200이 낸다
-  }
+  });
+  // 장주 폭은 180° 되돌기 둘을 담아야 한다 — 88 m/s·뱅크 0.7에서 2R = 1,876 m
+  const R = (88 * 88) / (9.80665 * Math.tan(0.7));
+  assert.ok(plan[1][1] >= 2 * R, `장주 폭 ${plan[1][1]} < 2R ${2 * R}`);
+  // 마지막 점은 활주로 축 위에서 **시단 남쪽**이다 — 거기서 접근이 시작된다
+  assert.ok(plan.at(-1)[0] < 0 && plan.at(-1)[1] === 0);
 });
 
 test("기본 행은 부를 때마다 새 사본이다 — 표 편집이 정본 기본값을 오염시키지 않는다", () => {
@@ -117,7 +126,7 @@ test("웨이포인트가 없으면 키를 지우되 스냅샷은 지우기 전�
   const rows = defaultModeRows().map((r) => (r.heading === "path" ? { ...r, heading: "0" } : r));
   const { req, snapshot } = buildSimRequest(DEFAULT_FORM, rows, [], NONE);
   assert.equal(Object.hasOwn(req, "waypoints"), false);
-  assert.deepEqual(snapshot, { waypoints: [], acceptRadius: 100 });
+  assert.deepEqual(snapshot, { waypoints: [], acceptRadius: 300 });
 });
 
 test("적용값 병합 — 항법은 시드만 폼이, 작동기는 wn·ζ·rate만 폼이 이긴다", () => {

@@ -339,12 +339,6 @@ def _build(req: SimRunIn):
     tr = trim(ac, build_cases([req.trim])[0])
     if not tr.converged:
         raise ValueError(f"시작 트림 미수렴: {req.trim.model_dump()}")
-    path = None
-    if req.waypoints is not None:
-        path = LosPath(
-            waypoints=tuple(tuple(float(v) for v in w) for w in req.waypoints),
-            accept_radius=req.accept_radius,
-        )
     modes = [
         ModeSpec(
             name=m.name, speed=m.speed, alt=m.alt, heading=m.heading,
@@ -353,7 +347,6 @@ def _build(req: SimRunIn):
         )
         for m in req.modes
     ]
-    guidance = Guidance(modes, path=path, initial=req.initial_mode)
     # 빈 dict = 기본 파라미터 오차 모델 장착 (조용한 미장착 금지 — None만 이상 항법)
     if req.nav is None:
         nav_model = None
@@ -373,6 +366,17 @@ def _build(req: SimRunIn):
         scas=build_scas(req.scas),
         gain_tables=gain_tables,
     )
+    # 경로추종은 FCL **뒤에** 세운다 — 선회 예상 전환이 오토파일럿의 실제 뱅크
+    # 한계를 알아야 하기 때문이다(02 §5.5: 기본값을 재기술하는 것이 아니라 두 실값을
+    # 잇는다. 여기서 0.7을 적어 두면 사용자가 phi_max를 바꿔도 경로는 모른 채 남는다).
+    path = None
+    if req.waypoints is not None:
+        path = LosPath(
+            waypoints=tuple(tuple(float(v) for v in w) for w in req.waypoints),
+            accept_radius=req.accept_radius,
+            bank_max=float(fcl.autopilot.cfg["phi_max"]),
+        )
+    guidance = Guidance(modes, path=path, initial=req.initial_mode)
     sim = Simulator(
         aircraft=ac,
         fcl=fcl,
