@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { checkWaypoints, pathSpeed, turnRadius } from "./wpcheck.js";
+import { checkWaypoints, flyablePath, pathSpeed, turnRadius } from "./wpcheck.js";
 
 const ok = (n, e) => ({ n, e, ok: true });
 
@@ -103,4 +103,121 @@ test("checkWaypoints: 미완성 행(ok=false)은 기하에서 빠진다", () => 
     checkWaypoints(withBad, 88, 0.7, 600).corners,
     checkWaypoints(clean, 88, 0.7, 600).corners,
   );
+});
+
+// ---- 경로 미리보기 (선회호) ----
+
+const R88 = (88 * 88) / (9.80665 * Math.tan(0.7)); // ≈ 937.5 m
+const dist = (a, b) => Math.hypot(a.n - b.n, a.e - b.e);
+
+test("flyablePath: 직진이면 호가 없다 — 계획선과 같은 점만 남는다", () => {
+  const pts = [ok(3000, 0), ok(9000, 0)];
+  const r = flyablePath(pts, 88, 0.7);
+  assert.deepEqual(r.tightIdx, []);
+  assert.deepEqual(r.points, [{ n: 0, e: 0 }, { n: 3000, e: 0 }, { n: 9000, e: 0 }]);
+});
+
+test("flyablePath: 90° 우선회 — 접점·중심·호가 기하적으로 맞는다", () => {
+  // 원점 → (3000,0) 북진 → (3000,3000) 동진. 90° 우선회, lead = R·tan45° = R
+  const r = flyablePath([ok(3000, 0), ok(3000, 3000)], 88, 0.7);
+  assert.deepEqual(r.tightIdx, []);
+  assert.ok(Math.abs(r.radius - R88) < 1e-9);
+
+  // 진입 접점: 꺾임점에서 진입 방위(북)로 lead만큼 **뒤**
+  const tIn = r.points[1];
+  assert.ok(Math.abs(tIn.n - (3000 - R88)) < 1e-6, `tIn.n=${tIn.n}`);
+  assert.ok(Math.abs(tIn.e) < 1e-6);
+
+  // 출구 접점 = 호의 끝 = 꺾임점에서 출구 방위(동)로 lead만큼 **앞**.
+  // 폴리라인은 [원점, tIn, 호 16점, 마지막 WP]라 호의 끝은 at(-1)이 아니라 1+16이다
+  assert.equal(r.points.length, 1 + 1 + 16 + 1);
+  const tOut = r.points[17];
+  assert.ok(Math.abs(tOut.n - 3000) < 1e-6, `tOut.n=${tOut.n}`);
+  assert.ok(Math.abs(tOut.e - R88) < 1e-6, `tOut.e=${tOut.e}`);
+  // 마지막 점은 마지막 웨이포인트 그 자체다 (거기엔 다음 구간이 없어 호가 없다)
+  assert.deepEqual(r.points.at(-1), { n: 3000, e: 3000 });
+
+  // 중심은 두 접점에서 모두 R — 그래야 양쪽 구간에 접한다
+  const ctr = { n: 3000 - R88, e: R88 };
+  assert.ok(Math.abs(dist(tIn, ctr) - R88) < 1e-6);
+  assert.ok(Math.abs(dist(tOut, ctr) - R88) < 1e-6);
+  // 호의 모든 표본이 중심에서 R (접점 포함, 마지막 WP는 호가 아니라 제외)
+  for (const p of r.points.slice(1, 18)) {
+    assert.ok(Math.abs(dist(p, ctr) - R88) < 1e-6, `점 ${JSON.stringify(p)}`);
+  }
+  // **모서리를 안쪽으로 자른다** — 호가 꺾임점(3000,0)보다 원점 쪽에 있다
+  const mid = r.points[1 + 8]; // arcSteps 16의 중간
+  assert.ok(mid.n < 3000 && mid.e > 0, `mid=${JSON.stringify(mid)}`);
+  assert.ok(dist(mid, { n: 3000, e: 0 }) > 300, "모서리에 붙어 있으면 자른 것이 아니다");
+});
+
+test("flyablePath: 좌선회는 호가 반대쪽으로 — 부호를 잃지 않는다", () => {
+  const right = flyablePath([ok(3000, 0), ok(3000, 3000)], 88, 0.7); // 동쪽 = 우선회
+  const left = flyablePath([ok(3000, 0), ok(3000, -3000)], 88, 0.7); // 서쪽 = 좌선회
+  const midR = right.points[9];
+  const midL = left.points[9];
+  assert.ok(midR.e > 0, `우선회 중간점 E=${midR.e}`);
+  assert.ok(midL.e < 0, `좌선회 중간점 E=${midL.e}`);
+  // 축 대칭이라 크기는 같다 — 한쪽만 맞게 짠 코드를 잡는다
+  assert.ok(Math.abs(midR.n - midL.n) < 1e-6);
+  assert.ok(Math.abs(midR.e + midL.e) < 1e-6);
+});
+
+test("flyablePath: 못 나는 꺾임은 호를 지어내지 않고 표시만 한다", () => {
+  // 재현했던 그 배치 — 1~2.5 km 간격 직각. checkWaypoints가 경고하는 바로 그 자리다
+  const pts = [ok(2000, 0), ok(2000, 1000), ok(0, 1000), ok(0, 2500)];
+  const chk = checkWaypoints(pts, 88, 0.7, 300);
+  const path = flyablePath(pts, 88, 0.7);
+  // 경고한 꺾임과 표시한 꺾임이 **같은 집합**이다 — 글과 그림이 같은 말을 해야 한다
+  assert.deepEqual(path.tightIdx, chk.corners.filter((c) => c.tight).map((c) => c.idx));
+  assert.ok(path.tightIdx.length > 0);
+  // 그 자리는 계획 꼭짓점이 그대로 폴리라인에 있다 (호로 대체되지 않았다)
+  for (const i of path.tightIdx) {
+    assert.ok(
+      path.points.some((p) => Math.abs(p.n - pts[i].n) < 1e-9 && Math.abs(p.e - pts[i].e) < 1e-9),
+      `WP${i + 1} 꼭짓점이 폴리라인에 없다`,
+    );
+  }
+});
+
+test("flyablePath: 180° 되돌기도 호를 그리지 않는다 — lead가 무한이다", () => {
+  const r = flyablePath([ok(3000, 0), ok(6000, 0), ok(0, 0)], 88, 0.7);
+  assert.deepEqual(r.tightIdx, [1]);
+});
+
+test("flyablePath: 판정 불가면 빈 경로 — 없는 선을 그리지 않는다", () => {
+  for (const r of [
+    flyablePath([ok(3000, 0), ok(3000, 3000)], null, 0.7), // 속도 모름
+    flyablePath([ok(3000, 0), ok(3000, 3000)], 88, 0), // 뱅크 한계 0
+    flyablePath([], 88, 0.7),
+    flyablePath(undefined, 88, 0.7),
+  ]) {
+    assert.deepEqual(r.points, []);
+    assert.deepEqual(r.tightIdx, []);
+  }
+  assert.equal(flyablePath([ok(1, 1)], null, 0.7).radius, null);
+});
+
+test("flyablePath: 미완성 행(ok=false)은 기하에서 빠진다 — 판정과 같은 규약", () => {
+  const withBad = [ok(3000, 0), { n: NaN, e: 0, ok: false }, ok(3000, 3000)];
+  const clean = [ok(3000, 0), ok(3000, 3000)];
+  assert.deepEqual(flyablePath(withBad, 88, 0.7), flyablePath(clean, 88, 0.7));
+});
+
+test("flyablePath: 느리게 날면 같은 배치가 날 수 있게 된다 — 반경이 V²이라", () => {
+  const pts = [ok(2000, 0), ok(2000, 1000), ok(0, 1000), ok(0, 2500)];
+  assert.ok(flyablePath(pts, 88, 0.7).tightIdx.length > 0);
+  assert.deepEqual(flyablePath(pts, 30, 0.7).tightIdx, [], "30 m/s면 R≈109 m라 다 든다");
+});
+
+test("flyablePath: 장주 기본 미션은 전 구간이 날 수 있다 — 경고도 호 누락도 없다", () => {
+  // simrequest.js defaultWpRows()의 장주 (활주로 축 좌표를 NED로 돌린 값)
+  const h = 0.05964;
+  const axis = (a, c) => ok(
+    Math.round(a * Math.cos(h) - c * Math.sin(h)),
+    Math.round(a * Math.sin(h) + c * Math.cos(h)),
+  );
+  const pts = [axis(3500, 0), axis(3500, 2200), axis(-5800, 2200), axis(-5800, 0), axis(-3600, 0)];
+  assert.deepEqual(checkWaypoints(pts, 88, 0.7, 300).warnings, []);
+  assert.deepEqual(flyablePath(pts, 88, 0.7).tightIdx, []);
 });

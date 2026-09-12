@@ -45,6 +45,54 @@ function wrapPi(a) {
   return (x < 0 ? x + 2 * Math.PI : x) - Math.PI;
 }
 
+const TURN_EPS = 1e-6; // 이보다 작은 꺾임은 직진이다 (엔진 _TURN_EPS와 같은 자리)
+
+/** 구간 열 — `legs[i]`는 **`good[i]`에서 끝난다**(legs[0]은 원점 → good[0]).
+ *
+ *  그래서 `legs[i]`와 `legs[i+1]` 사이의 꺾임점이 곧 `good[i]`다. 판정과 미리보기가
+ *  이 인덱스 규약을 공유해야 "경고한 번호"와 "빨갛게 그린 점"이 같은 웨이포인트다.
+ */
+function buildLegs(good) {
+  const legs = [];
+  let prev = { n: 0, e: 0 };
+  for (const p of good) {
+    const dn = p.n - prev.n;
+    const de = p.e - prev.e;
+    legs.push({ len: Math.hypot(dn, de), brg: Math.atan2(de, dn) });
+    prev = p;
+  }
+  return legs;
+}
+
+/** `good[i]`의 꺾임 기하 — 꺾임이 아니면 null.
+ *
+ *  `signed`는 **부호 있는** 선회각이다(+ = 우선회). 판정에는 크기만 필요하지만
+ *  미리보기는 호를 어느 쪽으로 그릴지 알아야 해서 함께 낸다 — 두 소비자가 같은
+ *  함수를 쓰게 하려고 여기 둔다(따로 재면 한쪽만 고치는 일이 생긴다).
+ */
+function cornerAt(legs, i, radius) {
+  const legIn = legs[i];
+  const legOut = legs[i + 1];
+  if (!legIn || !legOut || legIn.len <= 0 || legOut.len <= 0) return null;
+  const signed = wrapPi(legOut.brg - legIn.brg);
+  const turn = Math.abs(signed);
+  if (turn < TURN_EPS) return null;
+  // tan(Δψ/2)는 Δψ→π에서 발산한다 — 180° 되돌기는 예상 거리로 표현되지 않는다
+  const lead = turn >= Math.PI - 1e-9 ? Infinity : radius * Math.tan(turn / 2);
+  const limit = 0.5 * Math.min(legIn.len, legOut.len);
+  return {
+    idx: i, // good[] 기준 꺾임 웨이포인트 번호 (0 기준)
+    signed,
+    turn,
+    turnDeg: (turn * 180) / Math.PI,
+    lead,
+    legIn: legIn.len,
+    legOut: legOut.len,
+    limit,
+    tight: lead > limit,
+  };
+}
+
 /** `"path"` 헤딩을 쓰는 모드의 속도 지령 [m/s] — 없으면 null.
  *
  * 여럿이면 **가장 빠른 것**을 쓴다: 선회 반경은 V²로 커지므로 가장 빠른 구간이
@@ -82,35 +130,10 @@ export function checkWaypoints(pts, speed, bankMax, acceptRadius) {
   if (out.radius === null || good.length < 2) return out;
 
   // 첫 구간의 진입 방위는 원점에서 첫 웨이포인트로 — 위 머리말의 가정이다
-  const legs = [];
-  let prev = { n: 0, e: 0 };
-  for (const p of good) {
-    const dn = p.n - prev.n;
-    const de = p.e - prev.e;
-    legs.push({ len: Math.hypot(dn, de), brg: Math.atan2(de, dn) });
-    prev = p;
-  }
-
+  const legs = buildLegs(good);
   for (let i = 0; i + 1 < legs.length; i += 1) {
-    const legIn = legs[i];
-    const legOut = legs[i + 1];
-    if (legIn.len <= 0 || legOut.len <= 0) continue;
-    const turn = Math.abs(wrapPi(legOut.brg - legIn.brg));
-    if (turn < 1e-6) continue;
-    // tan(Δψ/2)는 Δψ→π에서 발산한다 — 180° 되돌기는 예상 거리로 표현되지 않는다
-    const lead = turn >= Math.PI - 1e-9
-      ? Infinity
-      : out.radius * Math.tan(turn / 2);
-    const limit = 0.5 * Math.min(legIn.len, legOut.len);
-    out.corners.push({
-      idx: i, // good[] 기준 꺾임 웨이포인트 번호 (0 기준)
-      turnDeg: (turn * 180) / Math.PI,
-      lead,
-      legIn: legIn.len,
-      legOut: legOut.len,
-      limit,
-      tight: lead > limit,
-    });
+    const c = cornerAt(legs, i, out.radius);
+    if (c !== null) out.corners.push(c);
   }
 
   const tight = out.corners.filter((c) => c.tight);
@@ -142,6 +165,68 @@ export function checkWaypoints(pts, speed, bankMax, acceptRadius) {
       + "잡아야 하는데, 빗나가면 그 점을 돌기만 하다 경로가 끝나지 않습니다. "
       + `선회 반경의 1/4(${Math.round(0.25 * out.radius).toLocaleString("ko-KR")} m) 이상을 권합니다.`,
     );
+  }
+  return out;
+}
+
+/** 실제로 날 경로 미리보기 — **찍자마자** 보이는 선회호 폴리라인.
+ *
+ * 지도는 종전에도 웨이포인트를 즉시 이었지만 그것은 **직선 꺾은선**이라, 화면은 각을
+ * 딱 꺾어 도는 그림을 보여 주는데 기체는 선회 반경만큼 크게 돌아 나간다. 사용자가
+ * "경로가 꼬인다"고 본 괴리가 그 자리다. 여기서는 엔진이 실제로 쓰는 예상 전환 기하
+ * (`guidance/path.py` §선회 예상 전환)를 그대로 그린다 — 꺾임점 앞뒤 `lead` 지점을
+ * 접점으로 반경 `R`의 원호를 물리고, 그 사이는 직선이다.
+ *
+ * ## 못 나는 꺾임은 **호를 지어내지 않는다**
+ *
+ * `tight`인 꺾임(예상 거리가 구간 절반을 넘는 자리)에서는 접선 원호가 구간 안에
+ * 존재하지 않는다. 그때 기체가 실제로 그리는 궤적은 지나쳤다 되돌아오는 추종
+ * 동역학의 결과라 이 정도 기하로는 예측할 수 없다 — 그래서 **계획 꺾은선을 그대로
+ * 두고 그 점을 `tightIdx`로 표시만 한다**. 그럴듯한 호를 그려 넣으면 화면이 날 수
+ * 없는 경로를 날 수 있는 것처럼 말하게 되고, 그것이 바로 이 기능이 없애려던 거짓말이다.
+ *
+ * 출발점은 원점(0, 0)이다 — `checkWaypoints`의 `firstLegAssumed`와 같은 가정이고,
+ * 지도의 기존 계획 점선도 원점에서 시작하므로 두 선이 같은 자리에서 갈라진다.
+ *
+ * @param arcSteps 호 하나를 쪼갤 선분 수 (기본 16 — 화면 축척에서 각지지 않는 값)
+ * @returns {{radius, points: [{n, e}], tightIdx: number[]}}
+ *   radius가 null이면(속도·뱅크 한계 미지) points는 비어 있다 — 지어내지 않는다.
+ */
+export function flyablePath(pts, speed, bankMax, arcSteps = 16) {
+  const good = (pts ?? []).filter((p) => p && p.ok);
+  const radius = turnRadius(speed, bankMax);
+  const out = { radius, points: [], tightIdx: [] };
+  if (radius === null || !good.length || !(arcSteps >= 1)) return out;
+
+  const legs = buildLegs(good);
+  out.points.push({ n: 0, e: 0 });
+  for (let i = 0; i < good.length; i += 1) {
+    const w = good[i];
+    const c = cornerAt(legs, i, radius);
+    if (c === null || c.tight) {
+      // 꺾임이 아니거나(마지막 점·직진) 계획대로 못 나는 자리 — 계획선 그대로
+      if (c !== null) out.tightIdx.push(i);
+      out.points.push({ n: w.n, e: w.e });
+      continue;
+    }
+    const brgIn = legs[i].brg;
+    const brgOut = legs[i + 1].brg;
+    const tIn = { n: w.n - c.lead * Math.cos(brgIn), e: w.e - c.lead * Math.sin(brgIn) };
+    // 선회 중심은 진입 구간의 **선회 쪽** 법선으로 R만큼 — 우선회(+)면 진행방향 오른쪽,
+    // 즉 brgIn + π/2 방향이다. NED에서 방위가 커지는 쪽이 오른쪽이다(북→동).
+    const s = c.signed >= 0 ? 1 : -1;
+    const ctr = {
+      n: tIn.n + s * radius * -Math.sin(brgIn),
+      e: tIn.e + s * radius * Math.cos(brgIn),
+    };
+    out.points.push(tIn);
+    // 중심에서 본 접점의 각을 **선회각만큼** 돌린다 — 위치 벡터는 기수와 같은 방향으로
+    // 돈다. 끝 각의 점이 곧 출구 접점이라 다음 직선이 거기서 이어진다.
+    const a0 = Math.atan2(tIn.e - ctr.e, tIn.n - ctr.n);
+    for (let k = 1; k <= arcSteps; k += 1) {
+      const a = a0 + c.signed * (k / arcSteps);
+      out.points.push({ n: ctr.n + radius * Math.cos(a), e: ctr.e + radius * Math.sin(a) });
+    }
   }
   return out;
 }

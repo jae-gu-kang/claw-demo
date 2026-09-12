@@ -219,6 +219,11 @@ export function createWpMap({
   getRows, // () => wpRows — 문자열 행 참조 (지도가 직접 변이)
   getAcceptRadius, // () => number [m]
   getTrack, // () => {pn, pe} | null — 최근 시뮬 궤적
+  // () => {points, tightIdx} | null — 실제로 날 경로 미리보기 (lib/wpcheck.flyablePath).
+  // 지도가 직접 계산하지 않는 이유: 근거가 되는 순항 속도(모드 표)와 뱅크 한계
+  // (오토파일럿 phi_max)는 시뮬 탭이 들고 있는 값이라, 지도가 그것을 알려면 표와
+  // 스토어를 같이 봐야 한다 — 그리기만 하는 이 모듈의 경계를 넘는다.
+  getFlyable,
   onRowsChanged, // () => void — 추가·삭제·이동·재배열 후 표 재렌더
   onSelect, // (idx) => void — 선택이 **바뀔 때만** (세로 프로파일이 같은 점을 가리키게)
   viewRef, // {view: {cN,cE,span}|null} — 호출측 스코프 홀더 (탭 재진입 시 줌/팬 유지)
@@ -305,6 +310,35 @@ export function createWpMap({
     }
     ctx.stroke();
     ctx.setLineDash([]);
+
+    // **실제로 날 경로** — 위 점선이 계획이라면 이쪽은 선회 반경이 반영된 궤적이다.
+    // 둘을 나란히 두는 것이 요점이다: 벌어진 폭이 곧 "각을 딱 꺾어 도는 그림"과
+    // 기체가 실제로 도는 길의 차이이고, 사용자가 "경로가 꼬인다"고 본 그 간극이다.
+    // 속도·뱅크 한계를 모르면 `points`가 비어 있어 아무것도 안 그린다 — 지어내지 않는다.
+    const preview = getFlyable?.();
+    if (preview?.points?.length > 1) {
+      ctx.strokeStyle = "rgba(52, 199, 89, .9)"; // 초록 — 주황(계획)·파랑(실측)과 구분
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      preview.points.forEach((p, i) => {
+        const { x, y } = toPx(p.n, p.e);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      // 못 나는 꺾임 — 그 자리는 호가 **없다**(계획 꼭짓점 그대로). 빨간 고리로
+      // 표시해 경고 문장이 지목한 번호와 그림이 같은 점을 가리키게 한다.
+      ctx.strokeStyle = "rgba(255, 59, 48, .95)";
+      ctx.lineWidth = 2;
+      for (const i of preview.tightIdx ?? []) {
+        const w = okPts[i];
+        if (!w) continue;
+        const { x, y } = toPx(w.n, w.e);
+        ctx.beginPath();
+        ctx.arc(x, y, 9, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+    }
 
     // 도달반경 원 + WP 점 + 순서 배지
     const accept = getAcceptRadius?.() || 0;
@@ -519,7 +553,14 @@ export function createWpMap({
     el("p", { class: "hint" },
       "클릭=추가 · 드래그=이동 · 우클릭=삭제 · 휠=줌 · 빈 곳 드래그=팬 · ▲▼=방문 순서. ",
       "새 웨이포인트는 직전 행의 고도를 물려받습니다 — 고도는 전부 채우거나 전부 비워야 하고, ",
-      '그 값을 실제로 날려면 모드 테이블의 고도 칸에 "path"를 적습니다.'),
+      '그 값을 실제로 날려면 모드 테이블의 고도 칸에 "path"를 적습니다. ',
+      // 마크다운 **는 여기서 글자 그대로 나온다 — hint는 텍스트 노드로 들어간다
+      // (replay.js landingSummary의 note와 같은 자리). 강조는 색이 맡는다
+      "주황 점선은 찍은 순서대로 이은 계획, ",
+      "초록 실선은 선회 반경을 반영해 실제로 날 경로입니다 — 둘이 벌어진 폭이 곧 ",
+      "각을 딱 꺾어 도는 그림과 기체가 도는 길의 차이입니다. 빨간 고리는 그 꺾임이 ",
+      "선회 성능보다 급해 계획대로 못 난다는 뜻이라 호를 그리지 않은 자리이고, ",
+      "옅은 파랑은 최근 시뮬의 실제 궤적입니다."),
   );
 
   redraw();
