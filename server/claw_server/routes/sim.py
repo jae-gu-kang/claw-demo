@@ -21,15 +21,14 @@ from claw.params.registry import REGISTRY
 from claw.pipeline.influence import SCAS_AXES
 from claw.plant import (
     LaunchRail,
-    make_demo_aircraft,
     make_demo_db_ranges,
-    make_demo_skid_gear,
     make_demo_stall_table,
 )
 from claw.sim import Simulator
 from claw.tables import PolyTable, Table
 from claw.trim import trim
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
+from claw_server.aircraft import build_aircraft
 from claw_server.serialize import sim_result_dict, to_jsonable
 
 router = APIRouter(tags=["sim"])
@@ -335,7 +334,7 @@ def build_scas(spec: dict | None):
 def _build(req: SimRunIn):
     """미션 스펙 → (Simulator, TrimResult) — 구성 오류는 ValueError/TypeError."""
     # 활주로가 있으면 스키드를 단다 — 없으면 ground=None이라 지면 도입 전과 동일하다
-    ac = make_demo_aircraft(ground=make_demo_skid_gear() if req.runway else None)
+    ac = build_aircraft(ground=req.runway is not None)
     tr = trim(ac, build_cases([req.trim])[0])
     if not tr.converged:
         raise ValueError(f"시작 트림 미수렴: {req.trim.model_dump()}")

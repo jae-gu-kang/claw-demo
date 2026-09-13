@@ -35,11 +35,11 @@ from claw.pipeline.prescribe import (
 )
 from claw.pipeline.sweep import nonadditivity, plan_shapes, run_sweep, sweep_plan
 from claw.sim import check_law_plant_pairing
-from claw.plant import make_demo_aircraft
 from claw.trim import trim_batch
 from claw_server.routes.codegen import FlightCodeIn
 from claw_server.routes.sim import _load_sim, build_gain_tables
 from claw_server.routes.trim import TrimCaseIn, build_cases
+from claw_server.aircraft import build_aircraft
 from claw_server.serialize import to_jsonable
 
 router = APIRouter(tags=["influence"])
@@ -196,7 +196,7 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
     케이스 보존. 파라미터 id 오타는 실행이 아니라 **제출 시점 422**로 잡는다 —
     잡이 돌고 나서 실패하면 오타 하나에 트림 배치 비용을 지불한다.
     """
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     cases = build_cases(req.cases)
     try:
         shape = to_shape(req)
@@ -276,7 +276,7 @@ def submit_sweep(req: SweepIn, request: Request, response: Response) -> dict:
     if not req.knobs and not req.pairs:
         raise HTTPException(status_code=422,
                             detail="흔들 것이 없다 — knobs 또는 pairs가 필요")
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     cases = build_cases(req.cases)
     try:
         shape = to_shape(req)
@@ -375,7 +375,7 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
     소급 활성화다. 취소 시 완료 케이스의 행은 보존되고, 판정은 남은 케이스로만
     낸다 (n_cases가 계보다).
     """
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     cases = build_cases(req.cases)
     try:
         shape = to_shape(req)
@@ -489,7 +489,7 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
     기준 오류·기체와 안 맞는 형상은 제출 시점 422 (sweep과 같은 계약). 결과에
     형상·기준 지문이 함께 실린다 — 무슨 기준으로 판정했는지가 계보다.
     """
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     cases = build_cases(req.cases)
     try:
         shape = to_shape(req)
@@ -561,7 +561,7 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
     이름이 겹치면 귀속이 조용히 다른 케이스로 바뀐다(웹 nameCases와 같은 계약).
     "mid/"는 예약 접두사다: 사용자 케이스가 그 이름을 쓰면 중간점 집계에 섞인다.
     """
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     cases = build_cases(req.cases)
     reserved = [c.name for c in cases if c.name.startswith("mid/")]
     if reserved:
@@ -605,7 +605,7 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
 
     def work(job):
         out = verify(
-            make_demo_aircraft, cases, shape, criteria,
+            build_aircraft, cases, shape, criteria,
             depth=req.depth, midpoint_cases=mids, dt_plant=req.dt_plant,
             t_settle=req.t_settle, t_step=req.t_step, t_hold=req.t_hold,
             on_progress=lambda done, v_total, msg: job.report(
@@ -668,7 +668,7 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
             detail=f"influence_sweep 결과가 아니다: kind={payload.get('kind')}")
     rows = payload.get("rows") or []
 
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     cases = build_cases(req.cases)
     try:
         shape = to_shape(req)

@@ -28,6 +28,7 @@ from claw.plant.aircraft import (
     Aircraft,
 )
 from claw.plant.demo import (
+    MassSpec,
     make_demo_aircraft,
     make_demo_db_ranges,
     make_demo_launch_rail,
@@ -92,6 +93,7 @@ __all__ = [
     "AeroModel",
     "wind_to_body_coeffs",
     "Aircraft",
+    "MassSpec",
     "make_demo_aircraft",
     "make_demo_db_ranges",
     "make_demo_launch_rail",

@@ -10,8 +10,8 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
 from claw.common.contracts import TrimCase
-from claw.plant import make_demo_aircraft
 from claw.trim import trim_batch
+from claw_server.aircraft import build_aircraft
 from claw_server.serialize import trim_result_dict
 
 router = APIRouter(tags=["trim"])
@@ -69,7 +69,7 @@ def build_cases(case_inputs: list[TrimCaseIn]) -> list[TrimCase]:
 
 @router.post("/trim/batch", status_code=202)
 def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) -> dict:
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     cases = build_cases(req.cases)
     store = request.app.state.store
 

@@ -96,8 +96,49 @@ class DispersionSet:
         return "·".join(parts) or "nominal"
 
 
-def make_demo_aircraft(ground=None, dispersion: DispersionSet | None = None) -> Aircraft:
+@dataclass(frozen=True)
+class MassSpec:
+    """기체 질량 제원 — **사업·기체마다 다른 값**이라 리터럴로 두지 않는다.
+
+    종전에는 `m_empty`·`fuel_max`가 조립 함수 안의 리터럴이었고, 서버 라우트 14곳이
+    전부 `make_demo_aircraft()`를 인자 없이 불렀다 — 즉 **어디서도 바꿀 수 없었다.**
+    연료만 케이스 변수로 열려 있었는데 그것도 탭마다 따로라(엔벨로프 200 kg · 시뮬
+    300 kg) 두 화면이 서로 다른 기체를 보고 있었다.
+
+    기본값은 데모 프로파일의 종전 수치 그대로다 — 이 클래스가 들어와도 거동이 바뀌지
+    않는다. 바뀌는 것은 **바꿀 수 있는가**이다.
+
+    관성은 연료 비율로 선형 보간된다(`FuelMass`). **CG는 여기 없다** — `DispersionSet`이
+    적어 둔 것과 같은 이유다: `cg_empty = cg_full = 0` 고정 + 모멘트 기준점 이전 [TBD]라
+    CG를 넣어도 동역학이 안 변한다. 넣는 시늉을 하면 연료-안정성 비교가 **조용한 거짓**이
+    된다 — 연료가 타면서 안정성이 바뀌는 지배적 원인이 바로 CG 이동이기 때문이다.
+    그 [TBD]가 풀리기 전까지 이 spec으로 비교할 수 있는 것은 질량·관성 효과뿐이다.
+    """
+
+    m_empty: float = 800.0  # [kg] 공허중량
+    fuel_max: float = 400.0  # [kg] 최대 연료
+    J_empty: tuple = (300.0, 900.0, 1100.0)  # [kg·m²] 공허 관성 주대각
+    J_full: tuple = (350.0, 1100.0, 1350.0)  # [kg·m²] 만재 관성 주대각
+
+    def __post_init__(self):
+        if not self.m_empty > 0.0:
+            raise ValueError(f"공허중량은 양수여야 함: {self.m_empty}")
+        if not self.fuel_max >= 0.0:
+            raise ValueError(f"최대 연료량은 음수 불가: {self.fuel_max}")
+        for nm_, j in (("J_empty", self.J_empty), ("J_full", self.J_full)):
+            if len(j) != 3 or not all(float(v) > 0.0 for v in j):
+                raise ValueError(f"{nm_}는 양수 3개여야 함: {j}")
+
+    @property
+    def m_full(self) -> float:
+        """만재 질량 [kg] — 화면·판정이 "이 기체의 최대 중량"을 물을 때의 정본."""
+        return self.m_empty + self.fuel_max
+
+
+def make_demo_aircraft(ground=None, dispersion: DispersionSet | None = None,
+                       mass: MassSpec | None = None) -> Aircraft:
     d = dispersion or DispersionSet()
+    ms = mass or MassSpec()
 
     def coef(inp):
         a, b_ = inp["alpha"], inp["beta"]
@@ -121,10 +162,10 @@ def make_demo_aircraft(ground=None, dispersion: DispersionSet | None = None) -> 
 
     aero = AeroModel(S=3.0, cbar=1.5, b=2.5, coef_fn=coef)
     fuel_mass = FuelMass(
-        m_empty=800.0 * (1.0 + d.mass),
-        fuel_max=400.0,
-        J_empty=np.diag([300.0, 900.0, 1100.0]),
-        J_full=np.diag([350.0, 1100.0, 1350.0]),
+        m_empty=ms.m_empty * (1.0 + d.mass),
+        fuel_max=ms.fuel_max,
+        J_empty=np.diag(list(ms.J_empty)),
+        J_full=np.diag(list(ms.J_full)),
         # CG 이동은 모멘트 기준점 이전 [TBD] 구현 전까지 동역학에 무효 — 오해 방지 위해 0
         cg_empty=np.zeros(3),
         cg_full=np.zeros(3),

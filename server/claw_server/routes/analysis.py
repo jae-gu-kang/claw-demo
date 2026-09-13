@@ -29,7 +29,6 @@ from claw.fcl.demo import demo_rate_filters
 from claw.pipeline.openloop import GROUP_LOOPS
 from claw.design.points import envelope_verdict
 from claw.plant import (
-    make_demo_aircraft,
     make_demo_db_ranges,
     make_demo_stall_table,
     make_demo_structural_limits,
@@ -46,6 +45,7 @@ from claw.trim import (
     trim_batch,
 )
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
+from claw_server.aircraft import build_aircraft
 from claw_server.serialize import to_jsonable, trim_result_dict
 
 router = APIRouter(tags=["analysis"])
@@ -240,7 +240,7 @@ def vn_envelope_endpoint(
     echo. 음의 실속 곡선도 자리표시(−ratio×α_stall, 엔진이 ratio echo).
     표기는 웹 소관.
     """
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     limits, source, overridden = _assemble_limits(
         n_limit_pos, n_limit_neg, safety_factor, mach_no, mach_d
     )
@@ -293,7 +293,7 @@ def design_envelope_endpoint(
     nz·iso_qbar·iso_tas도 같은 계약 — 미지정이면 전달하지 않고 엔진이 정한다
     (기동 엔벨로프는 아예 없는 것, 등고선은 엔진 [기본값]).
     """
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     stall = make_demo_stall_table()
     db_ranges = make_demo_db_ranges()
     limits, source, overridden = _assemble_limits(
@@ -340,7 +340,7 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
     saturated_throttle_high는 대리 지표가 아니라 추진 한계 자체다 (plant/prop.py PropEngine).
     취소는 trim_batch 협조적 중단 — 완료분 보존.
     """
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     cases = build_cases(req.cases)
     store = request.app.state.store
 
@@ -408,7 +408,7 @@ def bode_endpoint(req: BodeIn) -> dict:
     주파수 관계가 안 보인다. 이 응답이 같은 주파수축의 이득·위상과 **교차점 전량**을
     줘서 화면이 "보고된 마진이 어느 교차의 것인가"까지 말하게 한다 (엔진 bode_data).
     """
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     (case,) = build_cases([req.case])
     tr = trim_level(ac, case, z0=req.z0, fingerprint=req.fingerprint)
     if not tr.converged:
@@ -483,7 +483,7 @@ def bode_endpoint(req: BodeIn) -> dict:
 
 @router.post("/analysis/margin-map", status_code=202)
 def submit_margin_map(req: MarginMapIn, request: Request, response: Response) -> dict:
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     cases = build_cases(req.cases)
     store = request.app.state.store
     n = len(cases)

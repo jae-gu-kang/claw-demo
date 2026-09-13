@@ -25,12 +25,12 @@ from claw.design import AutoDesignConfig, DesignSession, resample_to_table
 from claw.design.tune import REASON_TEXT
 from claw.fcl.demo import demo_design_gains, demo_rate_filters
 from claw.plant import (
-    make_demo_aircraft,
     make_demo_db_ranges,
     make_demo_stall_table,
     make_demo_structural_limits,
 )
 from claw.tables import PolyTable
+from claw_server.aircraft import build_aircraft
 from claw_server.serialize import to_jsonable
 
 router = APIRouter(tags=["design"])
@@ -259,7 +259,7 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
 def _run_session_job(request, response, session: DesignSession, fingerprint: str,
                      parent: str | None = None) -> dict:
     store = request.app.state.store
-    ac = make_demo_aircraft()
+    ac = build_aircraft()
     stall = make_demo_stall_table()
     limits = make_demo_structural_limits()
     db = make_demo_db_ranges()

@@ -582,8 +582,17 @@ def autopilot_nodes(
     # ── 고도: 필터·오차·댐핑만 영역 안, PI는 밖(적분기 유지 = 트림 θ 홀드) ──
     alt_en = {"enable": srcs["alt_on"]}
     if th_hi_src is not None:
-        nodes.append(Node(th_hi_src, LookupBlock, inputs=(srcs["mach"],),
-                          params={"table": theta_hi_table}))
+        # **표가 스칼라를 덮어쓰지 않는다 — 둘 중 낮은 쪽이 이긴다.**
+        # 덮어쓰면 `theta_hi` 파라미터가 무효가 되어, 블록도에서 값을 고쳐도 아무 일도
+        # 일어나지 않는 손잡이가 된다(실측: 0.3·0.5·0.7이 전부 같은 결과). 둘은 서로
+        # 다른 것을 말한다 — 스칼라는 "무슨 일이 있어도 이 이상은 안 된다"는 운용·구조
+        # 쪽 상한이고, 표는 "게다가 실속 보호경계는 넘지 않는다"는 공력 쪽 상한이다.
+        # 클립 범위를 [theta_lo, theta_hi]로 두면 스칼라 둘이 바깥 상자로 남고 표가
+        # 그 안에서 조인다 — 한계가 하한 아래로 내려가 lo > hi가 되는 일도 막힌다.
+        nodes.append(Node(_pre(prefix, "theta_hi_raw"), LookupBlock,
+                          inputs=(srcs["mach"],), params={"table": theta_hi_table}))
+        nodes.append(Node(th_hi_src, Saturation, inputs=(_pre(prefix, "theta_hi_raw"),),
+                          params={"lo": theta_lo, "hi": theta_hi}))
 
     alt_kr = (ports.get("alt") or {}).get("k_rate")
     nodes += [
