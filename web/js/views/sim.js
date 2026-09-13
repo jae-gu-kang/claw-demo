@@ -10,8 +10,8 @@ import { COND_KINDS, LON_AXES, pathUsage } from "../lib/mission.js";
 // 요청 조립·기본 미션·실행 조건 기본값은 lib가 정본 — 가이드 투어(views/tour.js)가
 // **같은 조립**을 쓴다. 두 벌이면 투어가 돌린 미션과 이 표가 조용히 갈린다
 import {
-  AP_PHI_MAX_FALLBACK, applyActuatorSchema, appliedFrom, buildSimRequest,
-  defaultModeRows, defaultWpRows, initialForm, RUNWAY_HDG,
+  AP_K_HDOT_FALLBACK, AP_PHI_MAX_FALLBACK, AP_THETA_HI_FALLBACK, applyActuatorSchema,
+  appliedFrom, buildSimRequest, defaultModeRows, defaultWpRows, initialForm, RUNWAY_HDG,
 } from "../lib/simrequest.js";
 import { planeViews, wpMarks } from "../lib/plot.js";
 import { atEnd as cursorAtEnd, dtSample, indexAt, isPlayable } from "../lib/playcursor.js";
@@ -20,7 +20,7 @@ import {
   flaggedNames, landingSummary, modeSpans, pathEscapeNote, strideFor,
 } from "../lib/replay.js";
 import { GOHEUNG, touchdownWindowM } from "../lib/site.js";
-import { checkWaypoints, flyablePath, pathSpeed } from "../lib/wpcheck.js";
+import { checkWaypoints, climbGradientMax, flyablePath, pathSpeed } from "../lib/wpcheck.js";
 import { fillMissingAltitudes, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
@@ -62,6 +62,19 @@ let apPhiMax = AP_PHI_MAX_FALLBACK;
 function bankMaxNow() {
   const applied = Number(store.get("autopilotParams")?.phi_max);
   return Number.isFinite(applied) ? applied : apPhiMax;
+}
+// 상승 경사 한계도 **같은 자리에서** 나온다 — 기체가 아니라 오토파일럿 설정이 정하는
+// 값이라(실측: theta_hi 0.3 → 3.56 %, 0.5로 열면 14.75 %) 상수로 박으면 사용자가
+// 블록도에서 그 값을 고쳐도 판정선이 안 따라온다. phi_max와 한 규약으로 읽는다
+function climbMaxNow(speed) {
+  const ap = store.get("autopilotParams");
+  const thetaHi = Number(ap?.theta_hi);
+  const kHdot = Number(ap?.k_hdot);
+  return climbGradientMax(
+    Number.isFinite(thetaHi) ? thetaHi : AP_THETA_HI_FALLBACK,
+    Number.isFinite(kHdot) ? kHdot : AP_K_HDOT_FALLBACK,
+    speed,
+  );
 }
 // 지도 줌/팬 상태 — 탭 재진입 시 유지 (wpRows·lastReplay와 동렬)
 let wpMapView = { view: null };
@@ -393,7 +406,9 @@ export function render() {
     // 돌고 나서야 아는 사후 장치라, 좌표를 고칠 기회는 제출 전 여기뿐이다.
     // 속도·뱅크 한계의 출처와 우선순위는 bankMaxNow·pathSpeed가 정본이다 —
     // 지도의 미리보기도 같은 둘을 읽는다(글과 그림이 한 수를 본다).
-    const geom = checkWaypoints(pts, pathSpeed(modeRows), bankMaxNow(), acceptRadiusOf());
+    const speed = pathSpeed(modeRows);
+    const geom = checkWaypoints(pts, speed, bankMaxNow(), acceptRadiusOf(),
+      climbMaxNow(speed));
     for (const w of geom.warnings) {
       wpNotice.append(el("div", { class: "error-box" }, `⚠ ${w}`));
     }

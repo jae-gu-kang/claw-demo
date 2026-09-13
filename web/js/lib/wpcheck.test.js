@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { checkWaypoints, flyablePath, pathSpeed, turnRadius } from "./wpcheck.js";
+import { readFile } from "node:fs/promises";
+
+import {
+  CLIMB_THRUST_CAP, checkWaypoints, climbGradientMax, flyablePath, pathSpeed, turnRadius,
+} from "./wpcheck.js";
 
 const ok = (n, e) => ({ n, e, ok: true });
 
@@ -235,7 +239,7 @@ test("checkWaypoints: 성능보다 급한 상승을 잡아낸다", () => {
   const c = r.climbs.find((x) => x.idx === 1);
   assert.ok(c, "둘째 구간 판정이 있어야 한다");
   assert.equal(c.steep, true, `grad=${c.grad}`);
-  assert.ok(r.warnings.some((w) => w.includes("상승이 기체 성능보다 급합니다")),
+  assert.ok(r.warnings.some((w) => w.includes("상승이 지금 설정으로는 급합니다")),
     `경고 없음: ${r.warnings.join(" | ")}`);
 });
 
@@ -314,4 +318,68 @@ test("checkWaypoints: tight 꺾임에서도 분모는 **잘린 예상 거리**�
   assert.equal(c.steep, true, `grad=${(c.grad * 100).toFixed(2)} %`);
   // lead를 0으로 뒀다면 분모가 1,400 m라 3.57 %로 통과했을 자리다 — 대조군
   assert.ok(50 / (1500 - 100) < 0.04, "옛 계산으로는 통과한다");
+});
+
+// ── 한계를 **설정에서 유도한다** ────────────────────────────────────────────────
+// 4 %는 기체의 수가 아니라 오토파일럿 `theta_hi`의 수다. 상수로 박으면 사용자가
+// 그 값을 고쳐도 판정선이 안 따라온다 — 그 회귀를 막는 자리다.
+
+test("climbGradientMax: 실측 세 점과 맞는다 — γ=(θ_hi−α)/(1+|k_hdot|·V)", () => {
+  // 실측(engine 폐루프): theta_hi 0.3 → 3.56 % · 0.5 → 14.75 % · 0.7 → 14.52 %
+  assert.ok(Math.abs(climbGradientMax(0.3, -0.008, 88) - 0.0356) < 0.001);
+  // 0.5·0.7은 추력 천장에 잘린다 — 상한을 열어도 더 안 오른다는 사실이 이 단언이다
+  assert.ok(Math.abs(climbGradientMax(0.5, -0.008, 88) - 0.147) < 0.005);
+  assert.equal(climbGradientMax(0.7, -0.008, 88), climbGradientMax(0.5, -0.008, 88));
+});
+
+test("climbGradientMax: 피치 상한을 올리면 한계도 오른다 — 상수였다면 안 움직인다", () => {
+  const lo = climbGradientMax(0.3, -0.008, 88);
+  const hi = climbGradientMax(0.4, -0.008, 88);
+  assert.ok(hi > lo * 2, `0.3→${lo} · 0.4→${hi} — 설정을 따라 움직여야 한다`);
+});
+
+test("climbGradientMax: 추력 천장을 넘지 않는다 — 열어도 안 오르는 자리가 있다", () => {
+  // 이 천장이 없으면 "상한을 40°로 열면 경사 27 %"라는 거짓을 말한다(실측 14.5 %)
+  for (const hi of [0.5, 0.7, 1.0, 1.4]) {
+    assert.ok(climbGradientMax(hi, -0.008, 88) <= CLIMB_THRUST_CAP + 1e-9, `θ=${hi}`);
+  }
+});
+
+test("climbGradientMax: 느리면 α가 커져 상승 여유가 줄어든다 — α ∝ 1/V²", () => {
+  assert.ok(climbGradientMax(0.3, -0.008, 110) > climbGradientMax(0.3, -0.008, 88));
+  // 실속 근처(71 m/s)에서는 순항 α가 상한을 먹어 올라갈 각이 남지 않는다
+  assert.equal(climbGradientMax(0.3, -0.008, 72), 0);
+});
+
+test("climbGradientMax: 판정할 수 없는 입력은 null이지 0이 아니다", () => {
+  // 0을 내면 **모든 상승이 급하다**고 나와 경고가 장식이 된다 — turnRadius와 같은 규약
+  for (const a of [[NaN, -0.008, 88], [0.3, NaN, 88], [0.3, -0.008, 0], [0.3, -0.008, -1]]) {
+    assert.equal(climbGradientMax(...a), null, JSON.stringify(a));
+  }
+});
+
+test("checkWaypoints: 한계를 안 주면 세로를 판정하지 않는다 — 지어내지 않는다", () => {
+  const pts = [okd(4000, 0, 200), okd(6000, 0, 600)]; // 20 % 요구 — 주면 걸린다
+  assert.deepEqual(checkWaypoints(pts, 88, 0.7, 300).climbs, []);
+  assert.deepEqual(checkWaypoints(pts, 88, 0.7, 300).warnings, []);
+  assert.equal(checkWaypoints(pts, 88, 0.7, 300, 0.04).climbs[0].steep, true);
+});
+
+test("checkWaypoints: 추력 천장에 닿았으면 **상한을 열라고 말하지 않는다**", () => {
+  const pts = [okd(4000, 0, 200), okd(6000, 0, 600)];
+  const capped = checkWaypoints(pts, 88, 0.7, 300, CLIMB_THRUST_CAP);
+  assert.ok(capped.warnings[0].includes("추력 한계"), capped.warnings[0]);
+  assert.ok(!capped.warnings[0].includes("그 값을 올리면"), "열어도 소용없는데 열라고 한다");
+  // 천장 아래면 반대로 설계변수를 짚어 준다 — 설계 툴에서 진짜 레버는 그쪽이다
+  const room = checkWaypoints(pts, 88, 0.7, 300, 0.04);
+  assert.ok(room.warnings[0].includes("theta_hi"), room.warnings[0]);
+});
+
+test("**뷰가 한계를 실제로 넘긴다** — 빠지면 경고만 조용히 사라진다", async () => {
+  // 기본값이 없으므로 배선이 빠지면 세로 판정이 통째로 꺼지는데 화면은 멀쩡해 보인다.
+  // v0.99의 getFlyable 원문 대조와 같은 부류다 — 스텁 테스트가 못 잡는 자리
+  const src = await readFile(new URL("../views/sim.js", import.meta.url), "utf8");
+  assert.match(src, /checkWaypoints\(pts, speed, bankMaxNow\(\), acceptRadiusOf\(\),\s*climbMaxNow\(speed\)\)/,
+    "sim.js가 checkWaypoints에 climbMaxNow를 넘기지 않는다");
+  assert.match(src, /climbGradientMax\(/, "sim.js가 climbGradientMax를 부르지 않는다");
 });

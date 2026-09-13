@@ -124,6 +124,13 @@ const ACT_SCHEMA_KEY = Object.freeze({ wn: "wn", zeta: "zeta", rate: "rate_max" 
  *  서버가 오토파일럿의 실제 `phi_max`를 경로추종기에 넘긴다(routes/sim.py _build). */
 export const AP_PHI_MAX_FALLBACK = 0.7;
 
+/** 상승 경사 판정에 드는 오토파일럿 폴백 [rad · rad·s/m] — 위와 **같은 부류**의 사본이다.
+ *
+ *  `lib/wpcheck.js climbGradientMax`가 피치 상한과 승강률 댐핑에서 상승 한계를 유도한다.
+ *  스키마가 도착하면 뷰가 실값으로 갈아 끼우고, 실행 경로에는 이 값이 쓰이지 않는다. */
+export const AP_THETA_HI_FALLBACK = 0.3;
+export const AP_K_HDOT_FALLBACK = -0.008;
+
 /** 실행 조건 기본값 — 폼 칸 이름 그대로(뷰의 f.* 키와 1:1). 수치는 문자열이다:
  *  폼이 문자열을 들고 있고, 빈 칸과 0을 가르는 것이 조립의 계약이기 때문이다. */
 export const DEFAULT_FORM = Object.freeze({
