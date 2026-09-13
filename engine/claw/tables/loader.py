@@ -4,11 +4,16 @@
 (Cartesian product)이 정확히 한 번씩 있어야 정규격자로 인정 — 누락·중복은
 TableError (조용한 결손 금지, 검증 원칙 02 §7).
 
+파일 경로(load_table_csv)와 텍스트(parse_table_csv) 두 입구가 같은 판독을 지난다 — 웹의
+기체 편집기는 파일을 서버에 올리지 않고 CSV 텍스트를 JSON 본문으로 보낸다(02 §5.6,
+python-multipart 미도입).
+
 stdlib csv + numpy만 사용 — pandas 미도입(의존성 최소화 원칙, tables/__init__ 참조).
 Excel 로더는 openpyxl 도입 시점에 같은 검증 경로를 재사용해 추가한다 [TBD].
 """
 
 import csv
+import io
 
 import numpy as np
 
@@ -20,23 +25,31 @@ def load_table_csv(path, axis_cols, value_col, name="", extrapolate="clip") -> T
 
     axis_cols 순서가 그대로 Table의 축 순서가 된다.
     """
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        text = f.read()
+    return parse_table_csv(text, axis_cols, value_col, name=name, extrapolate=extrapolate)
+
+
+def parse_table_csv(text, axis_cols, value_col, name="", extrapolate="clip") -> Table:
+    """long-format CSV **텍스트**를 정규격자 Table로 변환 — load_table_csv와 같은 판독."""
     axis_cols = list(axis_cols)
     label = name or value_col
+    if text.startswith("﻿"):  # 파일 경로의 utf-8-sig와 같은 처리
+        text = text[1:]
 
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        header = reader.fieldnames or []
-        missing = [c for c in axis_cols + [value_col] if c not in header]
-        if missing:
-            raise TableError(f"{label}: CSV에 없는 열 {missing} (헤더: {header})")
-        rows = []
-        for lineno, row in enumerate(reader, start=2):
-            try:
-                key = tuple(float(row[c]) for c in axis_cols)
-                val = float(row[value_col])
-            except (TypeError, ValueError):
-                raise TableError(f"{label}: {lineno}행 수치 변환 실패: {row}") from None
-            rows.append((key, val))
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    header = reader.fieldnames or []
+    missing = [c for c in axis_cols + [value_col] if c not in header]
+    if missing:
+        raise TableError(f"{label}: CSV에 없는 열 {missing} (헤더: {header})")
+    rows = []
+    for lineno, row in enumerate(reader, start=2):
+        try:
+            key = tuple(float(row[c]) for c in axis_cols)
+            val = float(row[value_col])
+        except (TypeError, ValueError):
+            raise TableError(f"{label}: {lineno}행 수치 변환 실패: {row}") from None
+        rows.append((key, val))
 
     if not rows:
         raise TableError(f"{label}: 데이터 행이 없음")

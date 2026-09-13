@@ -1,0 +1,428 @@
+{
+  "schema_version": 1,
+  "id": "example-delta",
+  "name": "예제 델타윙",
+  "description": "구 데모 기체. 검증·예제·튜토리얼용 합성 선형 계수와 라운드 값이며 실기체 값이 아니다. 델타윙·엘레본 4면·러더 1면·단발 중심선 프로펠러. 수치의 근거는 02 §5.6.",
+  "is_example": true,
+  "geometry": {
+    "S": 3.0,
+    "cbar": 1.5,
+    "b": 2.5
+  },
+  "aero": {
+    "form": "lift_drag",
+    "coefficients": {
+      "CL": [
+        {
+          "k": 3.5,
+          "inputs": [
+            "alpha"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": 0.4,
+          "inputs": [
+            "de"
+          ],
+          "dispersion": null
+        }
+      ],
+      "CD": [
+        {
+          "k": 0.02,
+          "inputs": [],
+          "dispersion": null
+        },
+        {
+          "k": 0.25,
+          "inputs": [
+            "CL",
+            "CL"
+          ],
+          "dispersion": null
+        }
+      ],
+      "CY": [
+        {
+          "k": -0.8,
+          "inputs": [
+            "beta"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": 0.1,
+          "inputs": [
+            "dr"
+          ],
+          "dispersion": null
+        }
+      ],
+      "Cl": [
+        {
+          "k": -0.05,
+          "inputs": [
+            "beta"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": -0.3,
+          "inputs": [
+            "phat"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": 0.15,
+          "inputs": [
+            "da"
+          ],
+          "dispersion": null
+        }
+      ],
+      "Cm": [
+        {
+          "k": 0.02,
+          "inputs": [],
+          "dispersion": null
+        },
+        {
+          "k": -0.8,
+          "inputs": [
+            "alpha"
+          ],
+          "dispersion": "cmalpha"
+        },
+        {
+          "k": -1.0,
+          "inputs": [
+            "de"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": -6.0,
+          "inputs": [
+            "qhat"
+          ],
+          "dispersion": "cmq"
+        }
+      ],
+      "Cn": [
+        {
+          "k": 0.12,
+          "inputs": [
+            "beta"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": -0.15,
+          "inputs": [
+            "rhat"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": -0.08,
+          "inputs": [
+            "dr"
+          ],
+          "dispersion": null
+        }
+      ]
+    },
+    "db_ranges": {
+      "alpha": [
+        -0.2,
+        0.45
+      ],
+      "beta": [
+        -0.3,
+        0.3
+      ],
+      "mach": [
+        0.0,
+        0.9
+      ]
+    }
+  },
+  "stall": {
+    "table": {
+      "axes": {
+        "mach": [
+          0.1,
+          0.3,
+          0.5,
+          0.7,
+          0.9
+        ]
+      },
+      "data": [
+        0.4,
+        0.35,
+        0.33,
+        0.3,
+        0.27
+      ],
+      "extrapolate": "clip"
+    },
+    "neg_alpha_ratio": 0.6
+  },
+  "mass": {
+    "m_empty": 800.0,
+    "fuel_max": 400.0,
+    "J_empty": [
+      [
+        300.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        900.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1100.0
+      ]
+    ],
+    "J_full": [
+      [
+        350.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1100.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1350.0
+      ]
+    ],
+    "cg_empty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "cg_full": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "propulsion": {
+    "type": "PropEngine",
+    "params": {
+      "power_max": 500000.0,
+      "eta": 0.8,
+      "static_thrust": 6000.0,
+      "z_offset": 0.0
+    }
+  },
+  "actuator": {
+    "type": "SecondOrderActuator",
+    "params": {
+      "wn": 30.0,
+      "zeta": 0.7,
+      "rate_max": 10.0
+    }
+  },
+  "surfaces": {
+    "layout": "elevon4_rudder1",
+    "elevon": [
+      -0.35,
+      0.35
+    ],
+    "rudder": [
+      -0.35,
+      0.35
+    ]
+  },
+  "structural": {
+    "n_limit_pos": 6.0,
+    "n_limit_neg": -3.0,
+    "safety_factor": 1.5,
+    "mach_no": 0.75,
+    "mach_d": 0.9,
+    "q_max": null,
+    "n_x_launch": null
+  },
+  "operating": {
+    "alt_min": null,
+    "alt_max": null
+  },
+  "ground": {
+    "skid": {
+      "contacts": [
+        [
+          0.6,
+          -0.6,
+          0.55
+        ],
+        [
+          -0.6,
+          -0.6,
+          0.55
+        ],
+        [
+          0.6,
+          0.6,
+          0.55
+        ],
+        [
+          -0.6,
+          0.6,
+          0.55
+        ]
+      ],
+      "k": 54000.0,
+      "c": 5400.0,
+      "mu": 0.35
+    },
+    "rail": {
+      "length": 10.0,
+      "elev_angle": 0.2617993877991494,
+      "exit_speed": 81.5,
+      "origin_height": 2.9
+    }
+  },
+  "trim": {
+    "alpha_bounds": [
+      -0.1,
+      0.35
+    ],
+    "alpha_margin": 0.035
+  },
+  "law": {
+    "template": "delta_elevon_v1",
+    "alpha_margin": 0.05,
+    "filter_tau": 0.5,
+    "design": {
+      "scas": {
+        "pitch": {
+          "kp": -2.0,
+          "ki": -0.5,
+          "k_rate": 0.4,
+          "washout_tau": 0.0
+        },
+        "roll": {
+          "kp": 1.0,
+          "ki": 0.1,
+          "k_rate": -0.2,
+          "washout_tau": 0.0
+        },
+        "yaw": {
+          "kp": 0.5,
+          "ki": 0.0,
+          "k_rate": 0.8,
+          "washout_tau": 2.0
+        }
+      },
+      "autopilot": {
+        "kp_spd": 0.15,
+        "ki_spd": 0.03,
+        "tau_spd": 2.0,
+        "kp_alt": 0.004,
+        "ki_alt": 0.0004,
+        "k_hdot": -0.008,
+        "tau_alt": 5.0,
+        "kp_hdg": 4.0,
+        "ki_hdg": 0.0,
+        "tau_hdg": 1.0,
+        "kp_vs": 0.08,
+        "ki_vs": 0.02,
+        "tau_vs": 2.0,
+        "theta_lo": -0.3,
+        "theta_hi": 0.3,
+        "phi_max": 0.7,
+        "k_pitch_turn": 0.05,
+        "k_thr_turn": 0.0
+      },
+      "k_diff_thr": 0.0,
+      "provenance": {
+        "source": "example",
+        "note": "설계점 M0.6 h1000 fuel200 선형모델 고유치 스캔 + 비선형 폐루프 확인 (구 fcl/demo.py)"
+      }
+    },
+    "schedule": {
+      "rule": "qbar_inverse",
+      "m_design": 0.6,
+      "mach_grid": [
+        0.15,
+        0.2,
+        0.25,
+        0.3,
+        0.35,
+        0.4,
+        0.45,
+        0.5,
+        0.55,
+        0.6,
+        0.65,
+        0.7,
+        0.75,
+        0.8,
+        0.85,
+        0.9,
+        0.95
+      ],
+      "caps": {
+        "default": 2.0,
+        "by_group": {
+          "roll": 4.0
+        }
+      },
+      "scheduled": [
+        "pitch.kp",
+        "pitch.ki",
+        "pitch.k_rate",
+        "roll.kp",
+        "roll.ki",
+        "roll.k_rate"
+      ]
+    },
+    "alloc": {
+      "resv_frac": 0.8,
+      "de_trim": {
+        "source": "explicit",
+        "table": {
+          "axes": {
+            "mach": [
+              0.2,
+              0.25,
+              0.3,
+              0.35,
+              0.4,
+              0.5,
+              0.6
+            ]
+          },
+          "data": [
+            0.25794,
+            0.26597,
+            0.19588,
+            0.13622,
+            0.10063,
+            0.06368,
+            0.01828
+          ],
+          "extrapolate": "clip"
+        },
+        "provenance": {
+          "source": "measured",
+          "note": "trim_level 연료 5점(200~400 kg)×고도 7점(0~3000 m) 마하별 최악 |δe|, 보간 부족분 보정 4회 (구 plant/demo.py)"
+        }
+      }
+    }
+  },
+  "variants": []
+}

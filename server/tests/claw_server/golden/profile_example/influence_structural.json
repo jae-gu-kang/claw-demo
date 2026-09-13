@@ -1,0 +1,1323 @@
+{
+ "golden": "influence_structural",
+ "mode": "full",
+ "captured_at": "6507b94",
+ "value": {
+  "dict": {
+   "fingerprint": "c48da3269a9a8e4c",
+   "dt": "f:0x1.47ae147ae147bp-7",
+   "control_hz": "f:0x1.9000000000000p+6",
+   "topological_order": true,
+   "probe_rel": "f:0x1.47ae147ae147bp-7",
+   "graph": {
+    "dict": {
+     "name": "fcl",
+     "n_nodes": 78,
+     "n_inputs": 23,
+     "n_outputs": 7,
+     "enable": "nav_valid",
+     "groups": [
+      "sched",
+      "ap",
+      "lim",
+      "scas",
+      "mix"
+     ]
+    }
+   },
+   "bands": {
+    "dict": {
+     "ap": {
+      "dict": {
+       "label": "오토파일럿",
+       "in_law": true
+      }
+     },
+     "scas": {
+      "dict": {
+       "label": "SCAS",
+       "in_law": true
+      }
+     },
+     "mix": {
+      "dict": {
+       "label": "엘레본 믹서",
+       "in_law": true
+      }
+     },
+     "lim": {
+      "dict": {
+       "label": "α 리미터",
+       "in_law": true
+      }
+     },
+     "sched": {
+      "dict": {
+       "label": "게인 스케줄",
+       "in_law": true
+      }
+     },
+     "rate": {
+      "dict": {
+       "label": "제어 주기",
+       "in_law": true
+      }
+     },
+     "nav": {
+      "dict": {
+       "label": "항법 오차모델",
+       "in_law": false
+      }
+     },
+     "actuator": {
+      "dict": {
+       "label": "작동기",
+       "in_law": false
+      }
+     },
+     "guidance": {
+      "dict": {
+       "label": "유도",
+       "in_law": false
+      }
+     }
+    }
+   },
+   "nodes": {
+    "dict": {
+     "__digest__": {
+      "dict": {
+       "n": 213,
+       "chunk": 100,
+       "sha": [
+        "6105e12282c4c07c8d5fd64d2c999c6cb0feb8733734298b289bc4fc902a00a1",
+        "0b1d7cfb4ad4da3388c2376c7ee378691c5744ec87eae962b587edddfb8da2f8",
+        "f7ab6709474673cf0b63fd59461531a1a327f072fad5640dc25f604969626de0"
+       ],
+       "samples": {
+        "dict": {
+         "0": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "in:nav_valid",
+             "kind": "input",
+             "label": "nav_valid",
+             "band": "io"
+            }
+           }
+          }
+         },
+         "13": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "in:cmd_speed",
+             "kind": "input",
+             "label": "cmd_speed",
+             "band": "io"
+            }
+           }
+          }
+         },
+         "26": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "sched_pitch_kp",
+             "kind": "ir",
+             "label": "sched_pitch_kp",
+             "band": "sched",
+             "block": "LookupBlock",
+             "op": null,
+             "group": "sched",
+             "enable": null,
+             "params": {
+              "dict": {
+               "dict": {
+                "dict": {
+                 "table": {
+                  "dict": {
+                   "dict": {
+                    "dict": {
+                     "kind": "table",
+                     "name": "pitch.kp",
+                     "axes": {
+                      "dict": {
+                       "dict": {
+                        "dict": {
+                         "mach": 17
+                        }
+                       }
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             },
+             "gains": {
+              "dict": {
+               "dict": {
+                "dict": {}
+               }
+              }
+             }
+            }
+           }
+          }
+         },
+         "39": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "ap_alt_sum",
+             "kind": "ir",
+             "label": "ap_alt_sum",
+             "band": "ap",
+             "block": "Sum",
+             "op": null,
+             "group": "ap",
+             "enable": null,
+             "params": {
+              "dict": {
+               "dict": {
+                "dict": {
+                 "signs": [
+                  "f:0x1.0000000000000p+0",
+                  "f:0x1.0000000000000p+0"
+                 ]
+                }
+               }
+              }
+             },
+             "gains": {
+              "dict": {
+               "dict": {
+                "dict": {}
+               }
+              }
+             }
+            }
+           }
+          }
+         },
+         "52": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "ap_fv",
+             "kind": "ir",
+             "label": "ap_fv",
+             "band": "ap",
+             "block": "CommandFilter",
+             "op": null,
+             "group": "ap",
+             "enable": "speed_on",
+             "params": {
+              "dict": {
+               "dict": {
+                "dict": {
+                 "tau": "f:0x1.0000000000000p+1"
+                }
+               }
+              }
+             },
+             "gains": {
+              "dict": {
+               "dict": {
+                "dict": {}
+               }
+              }
+             }
+            }
+           }
+          }
+         },
+         "65": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "scas_yaw_err",
+             "kind": "ir",
+             "label": "scas_yaw_err",
+             "band": "scas",
+             "block": "Sum",
+             "op": null,
+             "group": "scas",
+             "enable": null,
+             "params": {
+              "dict": {
+               "dict": {
+                "dict": {
+                 "signs": [
+                  "f:-0x1.0000000000000p+0"
+                 ]
+                }
+               }
+              }
+             },
+             "gains": {
+              "dict": {
+               "dict": {
+                "dict": {}
+               }
+              }
+             }
+            }
+           }
+          }
+         },
+         "78": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "scas_alloc_da_neg",
+             "kind": "ir",
+             "label": "scas_alloc_da_neg",
+             "band": "scas",
+             "block": "Gain",
+             "op": null,
+             "group": "scas",
+             "enable": null,
+             "params": {
+              "dict": {
+               "dict": {
+                "dict": {
+                 "k": "f:-0x1.0000000000000p+0"
+                }
+               }
+              }
+             },
+             "gains": {
+              "dict": {
+               "dict": {
+                "dict": {}
+               }
+              }
+             }
+            }
+           }
+          }
+         },
+         "91": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "mix_sum_l",
+             "kind": "ir",
+             "label": "mix_sum_l",
+             "band": "mix",
+             "block": "Sum",
+             "op": null,
+             "group": "mix",
+             "enable": null,
+             "params": {
+              "dict": {
+               "dict": {
+                "dict": {
+                 "signs": [
+                  "f:0x1.0000000000000p+0",
+                  "f:0x1.0000000000000p+0"
+                 ]
+                }
+               }
+              }
+             },
+             "gains": {
+              "dict": {
+               "dict": {
+                "dict": {}
+               }
+              }
+             }
+            }
+           }
+          }
+         },
+         "104": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "out:throttle_l",
+             "kind": "output",
+             "label": "throttle_l",
+             "band": "io",
+             "source": "mix_thr_l"
+            }
+           }
+          }
+         },
+         "117": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "metric:hdg_mp",
+             "kind": "metric",
+             "band": "metric",
+             "key": "hdg_mp",
+             "label": "헤딩 오버슈트",
+             "unit": "-",
+             "signals": [
+              "psi",
+              "cmd_heading"
+             ],
+             "better": "lower",
+             "desc": "스텝 방향 목표 초과분 최대 / 스텝 크기",
+             "tier": "A",
+             "group": "추종·응답"
+            }
+           }
+          }
+         },
+         "130": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "metric:worst_stall_margin",
+             "kind": "metric",
+             "band": "metric",
+             "key": "worst_stall_margin",
+             "label": "최악 실속마진",
+             "unit": "rad",
+             "signals": [
+              "alpha_margin"
+             ],
+             "better": "higher",
+             "desc": "임무 전체에서 α_stall−α의 최솟값 (02 §6.1)",
+             "tier": "B",
+             "group": "엔벨로프·보호"
+            }
+           }
+          }
+         },
+         "143": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "scas_roll_wo",
+             "kind": "ghost",
+             "label": "scas_roll_wo",
+             "band": "scas",
+             "block": "Washout",
+             "op": null,
+             "group": "scas",
+             "appears_with": [
+              "fcl/ScasAxis.roll.washout_tau"
+             ],
+             "note": "지금 형상엔 없는 노드 — 이 파라미터를 올리면 생긴다"
+            }
+           }
+          }
+         },
+         "156": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "param:fcl/Autopilot.tau_vs",
+             "band": "ap",
+             "label": "tau_vs",
+             "unit": "s",
+             "desc": "승강률 명령필터 시정수",
+             "value": "f:0x1.0000000000000p+1",
+             "lo": "f:0x0.0p+0",
+             "hi": null,
+             "in_law": true,
+             "probe_to": "f:0x1.028f5c28f5c29p+1",
+             "clipped_by": null,
+             "changed": [
+              "ap_fvs"
+             ],
+             "added": [],
+             "removed": [],
+             "overridden": [],
+             "seeds": [
+              "ap_fvs"
+             ],
+             "reach": [
+              "ap_fvs",
+              "ap_vs_err",
+              "ap_vs_pid",
+              "ap_vs_sat",
+              "ap_theta_vs",
+              "ap_theta_src",
+              "ap_theta_ff",
+              "ap_theta_out",
+              "lim_theta_lim",
+              "lim_active",
+              "scas_pitch_err",
+              "scas_pitch_pid",
+              "scas_pitch_sum",
+              "scas_pitch_sat",
+              "mix_sum_l",
+              "mix_elevon_l",
+              "mix_sum_r",
+              "mix_elevon_r"
+             ],
+             "n_reach": 18,
+             "outputs": [
+              "elevon_l",
+              "elevon_r",
+              "limiter_active"
+             ],
+             "structural": false,
+             "inert": false,
+             "added_meta": [],
+             "error": null,
+             "kind": "param",
+             "param_id": "fcl/Autopilot.tau_vs"
+            }
+           }
+          }
+         },
+         "169": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "param:fcl/ScasAxis.roll.ki",
+             "band": "scas",
+             "label": "roll.ki",
+             "unit": "1/s",
+             "desc": "자세오차 적분 게인",
+             "value": "f:0x1.999999999999ap-4",
+             "lo": null,
+             "hi": null,
+             "in_law": true,
+             "probe_to": "f:0x1.9db22d0e56042p-4",
+             "clipped_by": null,
+             "changed": [
+              "scas_roll_pid"
+             ],
+             "added": [],
+             "removed": [],
+             "overridden": [
+              "scas_roll_pid"
+             ],
+             "seeds": [
+              "scas_roll_pid"
+             ],
+             "reach": [
+              "scas_roll_pid",
+              "scas_roll_sum",
+              "scas_roll_sat",
+              "scas_alloc_da_neg",
+              "scas_alloc_da_nabs",
+              "scas_alloc_pitch_hi",
+              "scas_alloc_pitch_lo",
+              "scas_pitch_pid",
+              "scas_pitch_sum",
+              "scas_pitch_sat",
+              "mix_sum_l",
+              "mix_elevon_l",
+              "mix_sum_r",
+              "mix_elevon_r"
+             ],
+             "n_reach": 14,
+             "outputs": [
+              "elevon_l",
+              "elevon_r"
+             ],
+             "structural": false,
+             "inert": false,
+             "added_meta": [],
+             "error": null,
+             "kind": "param",
+             "param_id": "fcl/ScasAxis.roll.ki"
+            }
+           }
+          }
+         },
+         "182": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "param:fcl/Mixer.rudder_lo",
+             "band": "mix",
+             "label": "rudder_lo",
+             "unit": "rad",
+             "desc": "러더 하한",
+             "value": "f:-0x1.6666666666666p-2",
+             "lo": null,
+             "hi": null,
+             "in_law": true,
+             "probe_to": "f:-0x1.62d0e56041893p-2",
+             "clipped_by": null,
+             "changed": [
+              "mix_rudder"
+             ],
+             "added": [],
+             "removed": [],
+             "overridden": [],
+             "seeds": [
+              "mix_rudder"
+             ],
+             "reach": [
+              "mix_rudder",
+              "mix_diff",
+              "mix_thr_l_raw",
+              "mix_thr_l",
+              "mix_thr_r_raw",
+              "mix_thr_r"
+             ],
+             "n_reach": 6,
+             "outputs": [
+              "rudder",
+              "throttle_l",
+              "throttle_r"
+             ],
+             "structural": false,
+             "inert": false,
+             "added_meta": [],
+             "error": null,
+             "kind": "param",
+             "param_id": "fcl/Mixer.rudder_lo"
+            }
+           }
+          }
+         },
+         "195": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "param:nav/ErrorModel.vel_std_h",
+             "band": "nav",
+             "label": "vel_std_h",
+             "unit": "m/s",
+             "desc": "수평 속도 백색잡음 표준편차",
+             "value": "f:0x1.3333333333333p-2",
+             "lo": "f:0x0.0p+0",
+             "hi": null,
+             "in_law": false,
+             "probe_to": null,
+             "clipped_by": null,
+             "changed": [],
+             "added": [],
+             "removed": [],
+             "overridden": [],
+             "seeds": [],
+             "reach": [],
+             "n_reach": 0,
+             "outputs": [],
+             "structural": false,
+             "inert": false,
+             "added_meta": [],
+             "error": null,
+             "kind": "param",
+             "param_id": "nav/ErrorModel.vel_std_h"
+            }
+           }
+          }
+         },
+         "208": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "param:actuator/SecondOrderActuator.pos_hi",
+             "band": "actuator",
+             "label": "pos_hi",
+             "unit": "rad",
+             "desc": "위치 상한",
+             "value": "f:0x1.93e5939a08ceap+99",
+             "lo": null,
+             "hi": null,
+             "in_law": false,
+             "probe_to": null,
+             "clipped_by": null,
+             "changed": [],
+             "added": [],
+             "removed": [],
+             "overridden": [],
+             "seeds": [],
+             "reach": [],
+             "n_reach": 0,
+             "outputs": [],
+             "structural": false,
+             "inert": false,
+             "added_meta": [],
+             "error": null,
+             "kind": "param",
+             "param_id": "actuator/SecondOrderActuator.pos_hi"
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "edges": {
+    "dict": {
+     "__digest__": {
+      "dict": {
+       "n": 360,
+       "chunk": 100,
+       "sha": [
+        "1f961517e40a25437e12e2b31eae662c4554bec109e16af8350093dd9059f8c9",
+        "f1459245f6e9c2a95c8f46ef468aeca9c34d28f9321c8697eb7ce8bcba9e57ec",
+        "04b33849182221c0a6bcca476976cc68fa42bb20edd1b1e249608508b10dcbc9",
+        "db3bd2c407ec4ee05054a962cfcafd7478153d9768e2787e816291629b1be122"
+       ],
+       "samples": {
+        "dict": {
+         "0": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "in:mach",
+             "dst": "sched_f_mach",
+             "kind": "ir",
+             "port": "input"
+            }
+           }
+          }
+         },
+         "22": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "in:h",
+             "dst": "ap_fh",
+             "kind": "ir",
+             "port": "input"
+            }
+           }
+          }
+         },
+         "44": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "in:cmd_pitch",
+             "dst": "ap_pitch_sat",
+             "kind": "ir",
+             "port": "input"
+            }
+           }
+          }
+         },
+         "66": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "lim_stall",
+             "dst": "lim_alpha_max",
+             "kind": "ir",
+             "port": "input"
+            }
+           }
+          }
+         },
+         "88": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "scas_alloc_resv_neg",
+             "dst": "scas_alloc_roll_hi",
+             "kind": "ir",
+             "port": "input"
+            }
+           }
+          }
+         },
+         "110": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "scas_pitch_err",
+             "dst": "scas_pitch_pid",
+             "kind": "ir",
+             "port": "input"
+            }
+           }
+          }
+         },
+         "132": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "scas_roll_sat",
+             "dst": "mix_sum_r",
+             "kind": "ir",
+             "port": "input"
+            }
+           }
+          }
+         },
+         "154": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "lim_a_margin",
+             "dst": "out:alpha_margin",
+             "kind": "ir",
+             "port": "output"
+            }
+           }
+          }
+         },
+         "176": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "sys:plant",
+             "dst": "metric:min_roll_authority_frac",
+             "kind": "declared"
+            }
+           }
+          }
+         },
+         "198": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "param:fcl/Autopilot.tau_alt",
+             "dst": "ap_fh",
+             "kind": "param",
+             "effect": "changed"
+            }
+           }
+          }
+         },
+         "220": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "param:fcl/Autopilot.k_thr_turn",
+             "dst": "mix_thr_l_raw",
+             "kind": "param",
+             "effect": "changed"
+            }
+           }
+          }
+         },
+         "242": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "param:fcl/ScasAxis.roll.out_lo",
+             "dst": "scas_alloc_roll_hi",
+             "kind": "param",
+             "effect": "changed"
+            }
+           }
+          }
+         },
+         "264": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "param:fcl/Mixer.rudder_hi",
+             "dst": "mix_rudder",
+             "kind": "param",
+             "effect": "changed"
+            }
+           }
+          }
+         },
+         "286": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "param:rate.control_hz",
+             "dst": "ap_alt_damp",
+             "kind": "param",
+             "effect": "changed"
+            }
+           }
+          }
+         },
+         "308": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "param:rate.control_hz",
+             "dst": "scas_roll_diff",
+             "kind": "param",
+             "effect": "changed"
+            }
+           }
+          }
+         },
+         "330": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "param:rate.control_hz",
+             "dst": "mix_sum_l",
+             "kind": "param",
+             "effect": "changed"
+            }
+           }
+          }
+         },
+         "352": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "src": "param:actuator/SecondOrderActuator.wn",
+             "dst": "sys:plant",
+             "kind": "offgraph"
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "metrics": [
+    {
+     "dict": {
+      "key": "alt_rms",
+      "label": "고도 추종 RMS",
+      "unit": "m",
+      "signals": [
+       "h",
+       "cmd_alt"
+      ],
+      "better": "lower",
+      "desc": "|h − cmd_alt|의 RMS",
+      "tier": "A",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "spd_rms",
+      "label": "속도 추종 RMS",
+      "unit": "m/s",
+      "signals": [
+       "V",
+       "cmd_speed"
+      ],
+      "better": "lower",
+      "desc": "|V − cmd_speed|의 RMS",
+      "tier": "A",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "hdg_rms",
+      "label": "헤딩 추종 RMS",
+      "unit": "rad",
+      "signals": [
+       "psi",
+       "cmd_heading"
+      ],
+      "better": "lower",
+      "desc": "각도 랩을 고려한 헤딩 오차 RMS",
+      "tier": "A",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "alt_ts",
+      "label": "고도 정착시간",
+      "unit": "s",
+      "signals": [
+       "h",
+       "cmd_alt"
+      ],
+      "better": "lower",
+      "desc": "스텝 후 ±2 % 밴드 재진입까지 — 미정착이면 ∞",
+      "tier": "A",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "spd_ts",
+      "label": "속도 정착시간",
+      "unit": "s",
+      "signals": [
+       "V",
+       "cmd_speed"
+      ],
+      "better": "lower",
+      "desc": "스텝 후 ±2 % 밴드 재진입까지 — 미정착이면 ∞",
+      "tier": "A",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "hdg_ts",
+      "label": "헤딩 정착시간",
+      "unit": "s",
+      "signals": [
+       "psi",
+       "cmd_heading"
+      ],
+      "better": "lower",
+      "desc": "스텝 후 ±2 % 밴드 재진입까지 — 미정착이면 ∞",
+      "tier": "A",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "alt_mp",
+      "label": "고도 오버슈트",
+      "unit": "-",
+      "signals": [
+       "h",
+       "cmd_alt"
+      ],
+      "better": "lower",
+      "desc": "스텝 방향 목표 초과분 최대 / 스텝 크기",
+      "tier": "A",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "spd_mp",
+      "label": "속도 오버슈트",
+      "unit": "-",
+      "signals": [
+       "V",
+       "cmd_speed"
+      ],
+      "better": "lower",
+      "desc": "스텝 방향 목표 초과분 최대 / 스텝 크기",
+      "tier": "A",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "hdg_mp",
+      "label": "헤딩 오버슈트",
+      "unit": "-",
+      "signals": [
+       "psi",
+       "cmd_heading"
+      ],
+      "better": "lower",
+      "desc": "스텝 방향 목표 초과분 최대 / 스텝 크기",
+      "tier": "A",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "alt_tr",
+      "label": "고도 상승시간",
+      "unit": "s",
+      "signals": [
+       "h",
+       "cmd_alt"
+      ],
+      "better": "lower",
+      "desc": "스텝 10→90 % 도달 시간 — 대역폭의 보조 지표",
+      "tier": "B",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "spd_tr",
+      "label": "속도 상승시간",
+      "unit": "s",
+      "signals": [
+       "V",
+       "cmd_speed"
+      ],
+      "better": "lower",
+      "desc": "스텝 10→90 % 도달 시간 — 대역폭의 보조 지표",
+      "tier": "B",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "hdg_tr",
+      "label": "헤딩 상승시간",
+      "unit": "s",
+      "signals": [
+       "psi",
+       "cmd_heading"
+      ],
+      "better": "lower",
+      "desc": "스텝 10→90 % 도달 시간 — 대역폭의 보조 지표",
+      "tier": "B",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "alt_sse",
+      "label": "고도 정상상태 오차",
+      "unit": "m",
+      "signals": [
+       "h",
+       "cmd_alt"
+      ],
+      "better": "lower",
+      "desc": "스텝 창 꼬리 평균 잔차",
+      "tier": "B",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "spd_sse",
+      "label": "속도 정상상태 오차",
+      "unit": "m/s",
+      "signals": [
+       "V",
+       "cmd_speed"
+      ],
+      "better": "lower",
+      "desc": "스텝 창 꼬리 평균 잔차",
+      "tier": "B",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "hdg_sse",
+      "label": "헤딩 정상상태 오차",
+      "unit": "rad",
+      "signals": [
+       "psi",
+       "cmd_heading"
+      ],
+      "better": "lower",
+      "desc": "스텝 창 꼬리 평균 잔차",
+      "tier": "B",
+      "group": "추종·응답"
+     }
+    },
+    {
+     "dict": {
+      "key": "surf_sat_frac",
+      "label": "타면 포화율",
+      "unit": "-",
+      "signals": [
+       "de",
+       "da",
+       "dr"
+      ],
+      "better": "lower",
+      "desc": "믹서 한계에 닿은 표본 비율 — 한계값은 법칙에서 읽는다",
+      "tier": "A",
+      "group": "타면·권한"
+     }
+    },
+    {
+     "dict": {
+      "key": "sat_longest",
+      "label": "타면 포화 최장 지속",
+      "unit": "s",
+      "signals": [
+       "de",
+       "da",
+       "dr"
+      ],
+      "better": "lower",
+      "desc": "위치 포화의 최장 연속 시간(채널 최악) — 비율과 다른 질문이다: 짧게 여러 번은 리밋사이클, 길게 한 번은 조종권 부족",
+      "tier": "B",
+      "group": "타면·권한"
+     }
+    },
+    {
+     "dict": {
+      "key": "min_pitch_authority_frac",
+      "label": "최소 피치 잔여권한",
+      "unit": "-",
+      "signals": [
+       "alloc_pitch_hi"
+      ],
+      "better": "higher",
+      "desc": "엘레본 예산 배분의 피치 동적 한계 최솟값 / 예산 — 배분 미장착이면 없음",
+      "tier": "A",
+      "group": "타면·권한"
+     }
+    },
+    {
+     "dict": {
+      "key": "thr_sat_frac",
+      "label": "추력 포화율",
+      "unit": "-",
+      "signals": [
+       "thr_l",
+       "thr_r"
+      ],
+      "better": "lower",
+      "desc": "추력이 「최대치」에 붙어 있던 표본 비율 — 여기가 크면 추종 오차는 게인이 아니라 「에너지」가 원인이다(포화 뒤에서는 루프 게인이 아무 일도 안 한다). 하한(아이들)은 세지 않는다 — 강하에서 스로틀 0은 정상이라 같이 세면 종말 강하가 포화 100 %로 찍힌다",
+      "tier": "A",
+      "group": "타면·권한"
+     }
+    },
+    {
+     "dict": {
+      "key": "thr_margin_min",
+      "label": "최소 추력 여유",
+      "unit": "-",
+      "signals": [
+       "thr_l",
+       "thr_r"
+      ],
+      "better": "higher",
+      "desc": "기동 중 남아 있던 가장 얇은 여유 1 − thr — 트림값만으로는 안 보인다(상승·선회가 여유를 먹는 것은 기동 중에 일어난다)",
+      "tier": "A",
+      "group": "타면·권한"
+     }
+    },
+    {
+     "dict": {
+      "key": "min_roll_authority_frac",
+      "label": "최소 롤 잔여권한",
+      "unit": "-",
+      "signals": [
+       "alloc_roll_hi"
+      ],
+      "better": "higher",
+      "desc": "엘레본 예산 배분의 롤 동적 한계 최솟값 / 예산 — 배분 미장착이면 없음",
+      "tier": "A",
+      "group": "타면·권한"
+     }
+    },
+    {
+     "dict": {
+      "key": "worst_stall_margin",
+      "label": "최악 실속마진",
+      "unit": "rad",
+      "signals": [
+       "alpha_margin"
+      ],
+      "better": "higher",
+      "desc": "임무 전체에서 α_stall−α의 최솟값 (02 §6.1)",
+      "tier": "B",
+      "group": "엔벨로프·보호"
+     }
+    },
+    {
+     "dict": {
+      "key": "envelope_flags",
+      "label": "엔벨로프 이탈 틱",
+      "unit": "-",
+      "signals": [
+       "alpha",
+       "beta",
+       "mach",
+       "h"
+      ],
+      "better": "lower",
+      "desc": "공력 DB 유효범위·고도 하한 이탈 표본 수",
+      "tier": "B",
+      "group": "엔벨로프·보호"
+     }
+    },
+    {
+     "dict": {
+      "key": "limiter_frac",
+      "label": "α리미터 작동률",
+      "unit": "-",
+      "signals": [
+       "limiter_active"
+      ],
+      "better": "lower",
+      "desc": "리미터가 피치 명령을 잘라낸 표본 비율",
+      "tier": "B",
+      "group": "엔벨로프·보호"
+     }
+    },
+    {
+     "dict": {
+      "key": "xtrack_rms",
+      "label": "경로오차 RMS",
+      "unit": "m",
+      "signals": [
+       "pn",
+       "pe"
+      ],
+      "better": "lower",
+      "desc": "웨이포인트 폴리라인까지의 최근접 거리 RMS (사후 기하)",
+      "tier": "C",
+      "group": "임무·이착륙"
+     }
+    },
+    {
+     "dict": {
+      "key": "td_sink_rate",
+      "label": "접지 수직속도",
+      "unit": "m/s",
+      "signals": [
+       "u",
+       "v",
+       "w",
+       "phi",
+       "theta",
+       "wow"
+      ],
+      "better": "lower",
+      "desc": "접지 순간 |ḣ| — 작을수록 부드럽다. 부호(오르는 중인지)가 필요하면 pipeline.metrics.climb_rate. 접지 없으면 없음",
+      "tier": "C",
+      "group": "임무·이착륙"
+     }
+    },
+    {
+     "dict": {
+      "key": "td_speed",
+      "label": "접지 속도",
+      "unit": "m/s",
+      "signals": [
+       "V",
+       "wow"
+      ],
+      "better": "lower",
+      "desc": "접지 순간의 대기속도. 접지 없으면 없음",
+      "tier": "C",
+      "group": "임무·이착륙"
+     }
+    },
+    {
+     "dict": {
+      "key": "rollout_dist",
+      "label": "접지→정지 직선거리",
+      "unit": "m",
+      "signals": [
+       "pn",
+       "pe",
+       "wow"
+      ],
+      "better": "lower",
+      "desc": "접지점과 정지점의 직선거리(경로장 아님) — 활주로 길이 요구의 근거. 정지 전이면 없음",
+      "tier": "C",
+      "group": "임무·이착륙"
+     }
+    },
+    {
+     "dict": {
+      "key": "launch_gx",
+      "label": "사출 하중",
+      "unit": "g",
+      "signals": [
+       "launch_gx",
+       "on_rail"
+      ],
+      "better": "lower",
+      "desc": "발사 레일 축 가속도 — 판정 기준(구조 한계 n_x_launch)은 아직 없다 [TBD]",
+      "tier": "C",
+      "group": "임무·이착륙"
+     }
+    }
+   ],
+   "warnings": [
+    "게인 스케줄이 덮어써 실행에 반영되지 않는 상수 8개: fcl/ScasAxis.pitch.kp, fcl/ScasAxis.pitch.ki, fcl/ScasAxis.pitch.out_lo, fcl/ScasAxis.pitch.out_hi, fcl/ScasAxis.roll.kp, fcl/ScasAxis.roll.ki, fcl/ScasAxis.roll.out_lo, fcl/ScasAxis.roll.out_hi — 실효값은 게인 탭의 테이블이다",
+    "그래프에 방출되지 않는 상수 2개: fcl/ScasAxis.pitch.k_rate, fcl/ScasAxis.roll.k_rate — 스케줄 경로가 상수 대신 조회 노드를 쓰므로 편집해도 아무 일도 일어나지 않는다"
+   ]
+  }
+ }
+}

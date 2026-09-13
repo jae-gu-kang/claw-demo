@@ -1,0 +1,3941 @@
+{
+ "golden": "sim_hold",
+ "mode": "full",
+ "captured_at": "6507b94",
+ "value": {
+  "dict": {
+   "t": {
+    "dict": {
+     "__digest__": {
+      "dict": {
+       "n": 1000,
+       "chunk": 100,
+       "sha": [
+        "409b4dd4cbd12962bf6dd395c0435a91c5c94da73f8ca6ad1ad2d3b5ac1ef3c1",
+        "beb5cee20fe9cba68e1bf388a966575268a00ba0db684dd3ae41dcbd1e3bf431",
+        "aae6755cd093787598cfb2206277138373946b9ae878ed55289a4d1602e7f732",
+        "0d04c1dfdd4a8c67b0842c240e6ed76d57cf0af1f6612df81c0c7489aa16e034",
+        "59c91766b9116d889796a37c3d3f0a1752280030d52f7919b141b6cde82e5d3d",
+        "381ef059ed37c51a8007d335aad2d2cd583a4732ff6a0755644d4940c3cd94bb",
+        "08d4dfca15f85aece06353db5386928376432124eb4fb8b3e0efe04e640fbf37",
+        "84b4b75e8534ea03d7d62f89e648559b27d445f7128cf1d1729451ebd4324537",
+        "06d1718623208ed6ccb629ccff6b1b33254eb67c1c20aa1bf5a21415f2f47f72",
+        "27cc0ee41593d74e401a6885d483c3c9cc60e3bb2714994837ed4e2a50f9aa22"
+       ],
+       "samples": {
+        "dict": {
+         "0": "f:0x0.0p+0",
+         "62": "f:0x1.3d70a3d70a3d7p-1",
+         "124": "f:0x1.3d70a3d70a3d7p+0",
+         "186": "f:0x1.dc28f5c28f5c3p+0",
+         "248": "f:0x1.3d70a3d70a3d7p+1",
+         "310": "f:0x1.8cccccccccccdp+1",
+         "372": "f:0x1.dc28f5c28f5c3p+1",
+         "434": "f:0x1.15c28f5c28f5cp+2",
+         "496": "f:0x1.3d70a3d70a3d7p+2",
+         "558": "f:0x1.651eb851eb852p+2",
+         "620": "f:0x1.8cccccccccccdp+2",
+         "682": "f:0x1.b47ae147ae148p+2",
+         "744": "f:0x1.dc28f5c28f5c3p+2",
+         "806": "f:0x1.01eb851eb851fp+3",
+         "868": "f:0x1.15c28f5c28f5cp+3",
+         "930": "f:0x1.299999999999ap+3",
+         "992": "f:0x1.3d70a3d70a3d7p+3"
+        }
+       }
+      }
+     }
+    }
+   },
+   "signals": {
+    "dict": {
+     "pn": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "f4c4473d821a660ae4a0e2633fe6eca911bffd126ddedf916f7594c000dd4bab",
+          "767729dc080ee129b06887df2acc70262ee7b9167624bba5f7b03652711ef78d",
+          "fb9923ce1ca836f976210197cfdbc25a5be8bbd7ad20058309c330932acc631a",
+          "876f57f453a82071b69a91741acb562f348e396039f1c38abdb27ad9f6959d72",
+          "ea32e45ed05851165414c1d91b7bd952ced21610f510716e526e262ac9792cb3",
+          "ad030e54cd549a3bb122b3f6efaed31ed3a63dcb64310a274a22e479586accc7",
+          "7ffbb08b763bc87e707734e2992282faf190ee261e7bcb9601068188a9320068",
+          "7cde2f185ed1ca2ac920a4103e0c118071eb505bacfdee18020606d2e140c5fb",
+          "cffe8760567d3ad5004579b654b96fe8b4e2248ee5966d13351a04e431276247",
+          "f9b38bec4c3924e29287cb8c310003ed64186ea1762f7edb678dad8624e8b5c8"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.771fd798c1040p+6",
+           "124": "f:0x1.76332d9299da3p+7",
+           "186": "f:0x1.17ae37dffe7dep+8",
+           "248": "f:0x1.7368cfc18fd26p+8",
+           "310": "f:0x1.ce4060e71225fp+8",
+           "372": "f:0x1.141b231dbcdeep+9",
+           "434": "f:0x1.40a908b53fe9ap+9",
+           "496": "f:0x1.6cd23a233e14cp+9",
+           "558": "f:0x1.98a16171a059fp+9",
+           "620": "f:0x1.c4220ac2d79a4p+9",
+           "682": "f:0x1.ef5fdab96dab5p+9",
+           "744": "f:0x1.0d3303b60449dp+10",
+           "806": "f:0x1.229f7fa5584b5p+10",
+           "868": "f:0x1.37fa1990217c0p+10",
+           "930": "f:0x1.4d46fd2a77570p+10",
+           "992": "f:0x1.6289c546d9612p+10"
+          }
+         }
+        }
+       }
+      }
+     },
+     "pe": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "8fba4c1452171e9676db6f2712b56de9f59908dcca61f3effe30253a489d6f48",
+          "eaad96c303e5a39b8cb02b39c7fc541728c45e8e515af2bb7502851209dc40cd",
+          "c7900a2c9e0acc653cae2af811430535f39a96996ba25696777dee32416876d8",
+          "e62428b4dfdce953f6753350968a5a75578542d0c2233cc00509b493fd68419c",
+          "e206a513e414d2bca7766e8aa75878f052f6841e62a3e0d57b409778925bf037",
+          "4a966a5d003baea654b7ea9ef31cbee2d38d12b1729adc783212940b4b480c8c",
+          "5a0df26f5f66ef3d041d7ad1eca69e6c7f07c0c3946b6e8e3cd151c27a27e2ee",
+          "2996dabbb2d3b9808cb09df32593582dde9fb8a0ce97fdf6be8b52d9a7b9941f",
+          "3ba3ea293d4fe790e2ae003bd297e3cb6c7c78e22c5eb114566412e7d8d75de6",
+          "1de31c40e06646e341df46af48d09222a3e2ba2cd5865c483f923fd46673f298"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.6e34ad57b807ep-4",
+           "124": "f:0x1.0a395d7a98b1cp+0",
+           "186": "f:0x1.cfd127812b2a7p+1",
+           "248": "f:0x1.ffc6bb6a878c6p+2",
+           "310": "f:0x1.c07a19f111db2p+3",
+           "372": "f:0x1.579c02555a7c9p+4",
+           "434": "f:0x1.e2c247909a459p+4",
+           "496": "f:0x1.3f5dee8f39358p+5",
+           "558": "f:0x1.94879a708fbecp+5",
+           "620": "f:0x1.efd98727ea252p+5",
+           "682": "f:0x1.283ebee13d9e3p+6",
+           "744": "f:0x1.5ae174ade678ep+6",
+           "806": "f:0x1.8f8b9c8b5fd7ep+6",
+           "868": "f:0x1.c5ffc75dc58f5p+6",
+           "930": "f:0x1.fe09e1df810e8p+6",
+           "992": "f:0x1.1bbea383bd9dfp+7"
+          }
+         }
+        }
+       }
+      }
+     },
+     "h": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "004d62f47e1e16d38b3fa18b82f91132c815b1e5c550d6151804dda039a708a0",
+          "e81d6c6ac9a9977fa12f4097ca063d3cc4dc0b398926ef9a840834ebeb933762",
+          "4966bc2575e03862cb382020259d86ef553ce162ad7116b2a2e413c525c5355e",
+          "00b045577599467924cde0671ec351e759bdb66dfbe78f92254ed34c83e6e978",
+          "311a98a9a41a382957fc046d2ba0120e95a6b8f8ca0400e40b6e9b9c4df78576",
+          "b5ee8fc6407b19d33e89fd45be6776f0606ebac512736a8697bc2c5912d86e04",
+          "4cdd5f487b7149819df1a3efc17323d611ef3acd5fa78e6da74457d4b4ae832f",
+          "b4780e5df66f7a6960f4058d8cc8612544c1c20845760e617ad28f59baeee570",
+          "cb5a03dfe908bbaa8c4d88137772aa8d5e388b2a4ad438f0fd72a0b906d7c517",
+          "c4bf2f4a1de14a0838acd5ad620fcb8588dba85e78edbcfb8df770044a9ed039"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.f400000000000p+9",
+           "62": "f:0x1.f406ff7ce5e4ap+9",
+           "124": "f:0x1.f43cf40afbf0ap+9",
+           "186": "f:0x1.f4c64905fcb9cp+9",
+           "248": "f:0x1.f5b4ea39cd5bcp+9",
+           "310": "f:0x1.f6f7fb23be1ffp+9",
+           "372": "f:0x1.f8746d03c8e65p+9",
+           "434": "f:0x1.fa133fe4fda61p+9",
+           "496": "f:0x1.fbc28b5a8bad5p+9",
+           "558": "f:0x1.fd74bee192dc1p+9",
+           "620": "f:0x1.ff1ffff8a2e20p+9",
+           "682": "f:0x1.005eab74a3a78p+10",
+           "744": "f:0x1.0123f988e221bp+10",
+           "806": "f:0x1.01de4f73801f4p+10",
+           "868": "f:0x1.028cabd082758p+10",
+           "930": "f:0x1.032e7fa53b10cp+10",
+           "992": "f:0x1.03c3918916e16p+10"
+          }
+         }
+        }
+       }
+      }
+     },
+     "u": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "3e6a26b70c5f0fe76ecfbb7ab3074f23a546c62992e3203e2e74198524f9a713",
+          "754e31bc021178fcf173557c71c7195a14c7910df74a0e5b8707654870a716f5",
+          "ccc2b797cf98aad386eee9979bde0e8bfc05fd5cc44c0d63772522f9a2c55147",
+          "436b9e2df24b3e660ba8cfc694f227a899da1e53362cb90ba7c0ee8512385ae5",
+          "88d4e634ce31b45534be5d10488eaca6edb397419b6ee5b0cb4982ced9fd0ca9",
+          "5d3e8fd3008c3abf87b7198a6e91c6555f1b1333ce264dc26365a3943e9f9ac5",
+          "74241d0965e671b76fb6712d2f905ddc1fff6a5936604faf66a3fc2132d3e273",
+          "9350caed21aa91d7cba17af95998203df8c934f8f529dcdc9b7af9fecb9c20dc",
+          "1619220b06abd3331c9bc314bd90fd2069422320ce7920cf01d97d0ae988ed0e",
+          "fa9b01dcb10624fe83cccb354e457be3f86beb30e4e1473c8a602d054fe9079b"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.2de2f4744ef1dp+7",
+           "62": "f:0x1.2cbfa7e0851f6p+7",
+           "124": "f:0x1.2a6a78f81d61ep+7",
+           "186": "f:0x1.27d8c44488b02p+7",
+           "248": "f:0x1.256b66a912631p+7",
+           "310": "f:0x1.231579c10d934p+7",
+           "372": "f:0x1.20ca51e96cd6dp+7",
+           "434": "f:0x1.1e9dba654bfefp+7",
+           "496": "f:0x1.1ca426914fbfcp+7",
+           "558": "f:0x1.1ae664f838392p+7",
+           "620": "f:0x1.19687ca937099p+7",
+           "682": "f:0x1.182a9c98a4878p+7",
+           "744": "f:0x1.172a16f6a1dacp+7",
+           "806": "f:0x1.16624f7755572p+7",
+           "868": "f:0x1.15cd794f6020ep+7",
+           "930": "f:0x1.15652b5a36324p+7",
+           "992": "f:0x1.1522d1655d750p+7"
+          }
+         }
+        }
+       }
+      }
+     },
+     "v": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "d92c5470197b413f588e412d1bd632c85f5e52035e2dc14a69e89b274431ab6b",
+          "f478ba362620724a01c12a3cb2a180c22882247427dcdf7f1ba1e48b7c9c15a0",
+          "60640d79714074ad2aee1061f22c176cc018f5563b9acc3831ed218e8a805d4f",
+          "a4d7a829924e3ff50ce08489d9ddbb414d29af70ebb6ab1a286b65117c721e4a",
+          "0b88df08fd2acfa0dc40461156b36bf087d09872b9fc98da797f20b085ae1a06",
+          "3d628eeec0397a8f2b5bc6f31c4c04f3ee422b3d231fbedc6010873654775c9b",
+          "a7f8a1d9875effb2e2d960685c55fdf3ea4ed6a733f6554537d0addc8cfa144d",
+          "0432e87e1be0e1ac416168df3037443c5dfa41869431fa840cd585507ff0bd13",
+          "adf1cd7cebb3adfe5426c76b62aff8311a65dbe66fc92bfa2ab44562401ad344",
+          "419c4fd928e813ae45475603c10977cc1f7751316ac337fc28b5f9066bb51d98"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.6f27ecf1455ecp+1",
+           "124": "f:0x1.09c108c87ef02p+1",
+           "186": "f:0x1.8f52b6fdef9ccp-3",
+           "248": "f:-0x1.4a2a04f861e82p-3",
+           "310": "f:-0x1.9112fa68c73a7p-3",
+           "372": "f:-0x1.25563c8c216f2p-2",
+           "434": "f:-0x1.44d8d95649e6fp-2",
+           "496": "f:-0x1.3b9784e6f0ddcp-2",
+           "558": "f:-0x1.2d3b2879b9018p-2",
+           "620": "f:-0x1.1caae49816316p-2",
+           "682": "f:-0x1.0955ed05044c4p-2",
+           "744": "f:-0x1.ea128c6677ac2p-3",
+           "806": "f:-0x1.c1b279fdd9cf7p-3",
+           "868": "f:-0x1.9a4e837f86530p-3",
+           "930": "f:-0x1.7478ba04863c8p-3",
+           "992": "f:-0x1.50a6fbd305cffp-3"
+          }
+         }
+        }
+       }
+      }
+     },
+     "w": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "1aed6991707fbbc423ecfbc852078506ce57e147c7bfc284b805ab15e7613596",
+          "bdb5233bbb978bcab8e1f6768c06ea9eee3a03638fd766e7fa2eca9de04ceda9",
+          "108536c95050ad138f326ea4053200c7cf4ba81aa35c6eb800d7d1a5f3f78611",
+          "89340fa3d2d6f2f2f81f29ec5419a7fa92bfc4727c62be11e5b0b07eb9578bcc",
+          "ad11633a3a30a147227551cd0743a92ede1d9addbab17b7e9529f8e3b4ed4c62",
+          "0bef0b44f26f84c29306c6ce4d412d72283599ab8bf6ac251a21d4ff859bee82",
+          "e563a06767a3e5bb8b1262c094112fa9fd5a5acfaf80fe998c03a64b140d1416",
+          "9567399e2cc0e65ec35650363cf85ff7bf70072c5541c06e8fba4c9ef18fdd81",
+          "9d81da26665d93792b58d1b0f49cff16de90a1d7e16ea97b5f6ad4c31eed1dbb",
+          "156d4ec8eab213c71b8ca593eff14d19dd03484688f72473bf8e70e5b420337b"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.76167ccf534dbp+3",
+           "62": "f:0x1.ac68ace8271bdp+3",
+           "124": "f:0x1.e5020812b3875p+3",
+           "186": "f:0x1.fe5cc20b272a3p+3",
+           "248": "f:0x1.ee813b416b80cp+3",
+           "310": "f:0x1.d6490ca54b0c1p+3",
+           "372": "f:0x1.c1601028d3a06p+3",
+           "434": "f:0x1.b06db52bc47c9p+3",
+           "496": "f:0x1.a35cc6b2089e7p+3",
+           "558": "f:0x1.99b9936485f8fp+3",
+           "620": "f:0x1.92c11154b2989p+3",
+           "682": "f:0x1.8dc91a1dcd525p+3",
+           "744": "f:0x1.8a512b1cd01d0p+3",
+           "806": "f:0x1.87f818d0b355cp+3",
+           "868": "f:0x1.86753f1d65c79p+3",
+           "930": "f:0x1.85930b646c30bp+3",
+           "992": "f:0x1.8529fec054f29p+3"
+          }
+         }
+        }
+       }
+      }
+     },
+     "p": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "424e01401aefd0c27c43b144d25e1759f74749022adf0991616426440df91f8f",
+          "103930dd3f20b011174c4464c96c2822821aa9e264b9de6b1daee1bd6591a96e",
+          "4832131dca3d4c4af62134fd52e1a4b19ab0a2488b4a0df364e41e40af0b73cc",
+          "e1268fa93d41b23fbff2122a6862056abc1cf968ffa0a3df18edfddcb0788288",
+          "e0c081dd88cdd94ca5c6e92dc2666fd8701443202dd9d46b494ff90adc261a76",
+          "5fc3556cc49ee22b8554feb08c1d2ee369824c433c60462df9c7e231d4ddd099",
+          "3f23edb8bbf188332202ed35c4be285b2ddcef21e1e79ae6c99f87613e5b5578",
+          "1171a1e99a0d2e73777d118d4ac53d77fadb64df046d16a260d7f6b0c13414a5",
+          "1d44129321fce9299b29ec101a2e10ab3f09fd79901e173c1e89ca9cbae519f4",
+          "7902e109de01c71d76749476a3e5ec6b28ec5b0cad7123b621e6fabeb1ae26d8"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.c75b234d3af0cp-2",
+           "124": "f:0x1.0801803e02d74p-5",
+           "186": "f:-0x1.584b16de1aa5bp-5",
+           "248": "f:-0x1.1269172b0e78ep-5",
+           "310": "f:-0x1.8ecabdeab6db4p-5",
+           "372": "f:-0x1.c7485bb4676a9p-5",
+           "434": "f:-0x1.b270e727beb13p-5",
+           "496": "f:-0x1.92b91aface8c9p-5",
+           "558": "f:-0x1.70222eac859b0p-5",
+           "620": "f:-0x1.4a45d3ef2d063p-5",
+           "682": "f:-0x1.2539626935c17p-5",
+           "744": "f:-0x1.032591d5c6593p-5",
+           "806": "f:-0x1.c8c6e7b858050p-6",
+           "868": "f:-0x1.91deb983e605fp-6",
+           "930": "f:-0x1.614a0d3cb9f38p-6",
+           "992": "f:-0x1.368090cd1bf25p-6"
+          }
+         }
+        }
+       }
+      }
+     },
+     "q": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "f15524d79c10a74a94c6260c4f5b8ed11ebb95b59251a649254e3663bd3f65bb",
+          "4245671243200ceab96d1ffa7c69a1f30393d814aa8b2ff9d67cc01317ecb63d",
+          "329cca7ee58e950cd3a1a254b4ed4bdea357829d379cb3d964458aea18347327",
+          "362bf928b6e2fc0cac6c9e65236753690a86a1445f08419d3c2ece5d88c04ff8",
+          "d199361f893919538d5acbb54398514dba700b3b081f9e6fc34bef623d2b645c",
+          "83bdfdf79bcf5dc7f25895dbd8886c44e11c418b45eb4e78ea50fd9d8b260bbe",
+          "ce3d7f7ffdc33c0c9ab96e2c00df0a044a3bbddb096f10ef288e131fb5b8f92d",
+          "55118d7dc192f303dc064f87ba20749aabc18bd6a22f3c3eec4916f6d7b9197e",
+          "a5f1d041ce3da9b0b8f85c86ca8a371f178ef890ecbd9f4ede166abd5c90dd66",
+          "543c82d4b286395fa2687abc99a4a2024dd7f8635813d7b45cdd43c781a9d2fa"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.349f96de9f3b4p-5",
+           "124": "f:0x1.50f4894c98bd3p-5",
+           "186": "f:0x1.b2cb645aa1398p-6",
+           "248": "f:0x1.ee8c6764ea4d6p-7",
+           "310": "f:0x1.4ee67ee82533ap-7",
+           "372": "f:0x1.c046e979ae036p-8",
+           "434": "f:0x1.0eafffb94f8aep-8",
+           "496": "f:0x1.1ac8b8348e27fp-9",
+           "558": "f:0x1.6240949c030f5p-11",
+           "620": "f:-0x1.ebca5a7630c71p-12",
+           "682": "f:-0x1.5f77ab5e4a338p-10",
+           "744": "f:-0x1.04d38950aa47dp-9",
+           "806": "f:-0x1.425e3bfe7e74dp-9",
+           "868": "f:-0x1.6cbef506338eap-9",
+           "930": "f:-0x1.877eb1c369b2cp-9",
+           "992": "f:-0x1.958ebb30d3785p-9"
+          }
+         }
+        }
+       }
+      }
+     },
+     "r": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "544cf1ab225279bc3e6625c178c1ae883d919ccdac98b9fc77c0bff90d2d6195",
+          "edd69425870c07220c2d1755cd31d4f88a7dc6907de547c8c3d7839ab7425448",
+          "b98bfd15c84ec2ad7c47a15cb929a6e0d1f868d0b725b9c52a80f99a294bedc3",
+          "f51182ee0e81354246d9ab2445e0b4f6a3295d6b95599aa1d298d5e305d1d96a",
+          "8a82117cd25bc88e4b7e22c1ca05b0b12ab092f238c857b1bef232f7754ec615",
+          "f5be931f4173650e430cd894d19e9365cacbcb1c97749ef55a2952bda8992dad",
+          "3d31a834078673882232aae5e113d323d7b0e32bbf614f8a97669b5dbd6a6df2",
+          "b8f60c2dca97fb782128b37a05cb10d21a801e6e151fb883b39f1b854ef7e5da",
+          "c83d09b677d4cacccf929af615656169953cfd67ceb30b7e1c534bf07f6ec88b",
+          "a606afa4aad825f9a9b789c7b19c2c8a16e8bf89938eedd1bb2971429890de67"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.fac5ddd21497ap-6",
+           "124": "f:0x1.a8ba3edde8310p-5",
+           "186": "f:0x1.fa95319c81d7fp-6",
+           "248": "f:0x1.506c9c892c0bdp-6",
+           "310": "f:0x1.315aa00899592p-6",
+           "372": "f:0x1.09d8e7b8dcc29p-6",
+           "434": "f:0x1.c952ac283711ap-7",
+           "496": "f:0x1.94cb14a035e95p-7",
+           "558": "f:0x1.683cb5f875a92p-7",
+           "620": "f:0x1.3f4dd60041062p-7",
+           "682": "f:0x1.1aaa0ead8186dp-7",
+           "744": "f:0x1.f41307db30992p-8",
+           "806": "f:0x1.b9bba00a83947p-8",
+           "868": "f:0x1.85b1a2dbaa436p-8",
+           "930": "f:0x1.5773ffe6ad4d5p-8",
+           "992": "f:0x1.2e770f3b13b99p-8"
+          }
+         }
+        }
+       }
+      }
+     },
+     "phi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "e776d0ba1bf3a590122125ca85782803d81cc18979525030666210a1bedabeed",
+          "afba474d1602cd6f29e99b7ba477e1819758ce5e5758f25d1681c4a8ec8bee85",
+          "d995c53456e86ffaf73c65176271ecc1109725a04d9549009c50534f9faa17c4",
+          "7776ca9932a85bf224817ad9d3796b0e187cd2d8765430d4a1953dae1e669061",
+          "2cb14fc4d381da6185b68e6c389cd1c4027ea144483d0222d626c56778603230",
+          "ef386c7dcde0601ce6139d31a8e428354f3079641c25d4c5af2e527b2d406d1f",
+          "c774b37fcd371afa0e1452adcaaba45bdd86a1263e0d5ea8910c7b1f591e0687",
+          "a854cca98842f7564d1ebd2e9f9234493650a0706669ede75ab86c27d3e97f08",
+          "1937730326e900798a28f8367a7105423249c0d30c9d6ed1953e8e08c05b672c",
+          "642ce94d46d217c5582a34e91970c982d50aa97fdc43b0ad0cdd99b883b8e156"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.0b17e476397cep-2",
+           "124": "f:0x1.95a2016476ba8p-2",
+           "186": "f:0x1.89bcea9d714d6p-2",
+           "248": "f:0x1.755afaa83e6ddp-2",
+           "310": "f:0x1.5d61774329904p-2",
+           "372": "f:0x1.3d0d8e7ce1f8ap-2",
+           "434": "f:0x1.1baae688065b1p-2",
+           "496": "f:0x1.f8a114abf886dp-3",
+           "558": "f:0x1.beb6c37d7d873p-3",
+           "620": "f:0x1.8a32db359464fp-3",
+           "682": "f:0x1.5b4fbf98209eap-3",
+           "744": "f:0x1.31c14df8e7d64p-3",
+           "806": "f:0x1.0d0edb54a15eep-3",
+           "868": "f:0x1.d974ccac5b7dfp-4",
+           "930": "f:0x1.a09056845b011p-4",
+           "992": "f:0x1.6e8816cec9962p-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "theta": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "9d855c3bfc6cb29f268be6d50bf723b0b2ba7a8b482306f4c132b08802fbfb34",
+          "e5d1b02b7352e56b4b2e2568beb93517c1f58a6baf525b99437dd1ddf24e4d02",
+          "55ae8c76587011f6ecc4a4edde2b51f5dfd83131d4f0e9537c97af74c91478b7",
+          "32254947035210ec963bac83f061b6e1aa66e4b31c6ca75230521906875b4141",
+          "775f3b660c589280674209697ce3506ba16d4c66a381252e13d7b9128a16536b",
+          "a9f25fd24b61c44febee8fe87c2700d564dde29151318fba950d156a66a0bd97",
+          "b5411332c798deca9a9be0943da31f694e56a17db9fa5913db8aa5d624510445",
+          "42717b95a9b35c072730b2427d73701e6f4f891eaf30f3414fac48bcfa6d80c3",
+          "6ea92e858f967a3366e4b58fd218660427d63f9ada52d00d7a65aa7bd4b759db",
+          "eb5d2340fc80fad6fc5db622a87ccee8afcc8de82e412706007771a60825957d"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.3c9842757eb1fp-4",
+           "62": "f:0x1.7bab63e6403dfp-4",
+           "124": "f:0x1.b366caea4ac31p-4",
+           "186": "f:0x1.db71827ec027fp-4",
+           "248": "f:0x1.f4209bb86ac8dp-4",
+           "310": "f:0x1.003deadee9885p-3",
+           "372": "f:0x1.0351c48580f53p-3",
+           "434": "f:0x1.04614097b78b2p-3",
+           "496": "f:0x1.03db9e379a768p-3",
+           "558": "f:0x1.022817070056dp-3",
+           "620": "f:0x1.ff245505a0625p-4",
+           "682": "f:0x1.f8a22e4cde483p-4",
+           "744": "f:0x1.f1244d07c2f0bp-4",
+           "806": "f:0x1.e8f6b9e0583e7p-4",
+           "868": "f:0x1.e0592a96cbbc8p-4",
+           "930": "f:0x1.d7811e8de242fp-4",
+           "992": "f:0x1.ce9b5cadc3264p-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "psi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "7496158c586e8d2c7c889aae00d700c23cf296bae94b44b180b0598798572b76",
+          "7ab599845a0a3f47698213c0c71f3fd2557370d75dc97d88f364a5691a2ab6c5",
+          "f5cd8b16a1df99f528bf07fb6d1b44349c6af8eed072afc0a18049e3b64ec96b",
+          "6c90b83dd8887b5bf1abd71e31a586149d4f9b467d52fcebfc5828c25588824c",
+          "1d4ff687e0d6ef143cdb2b90fdd5b3f1d4c13518f114879e20050df950930599",
+          "da3702d45dad56a1e9e9332442b3e99455f1f781134d4ad7f76ab3bcdf381794",
+          "7ef566dd227a4c4de48e95a8f12821611297d80c55e3be69e4bd2c337339869f",
+          "6d6bce0c4b54a0b05a7bab6a5cfbacdcefa19285164c0d1a409f4cbe5974a4e7",
+          "6dff2aac6cd3ae39e12e8ef6175bed7d1bc4dd8d3617742aa2054de0db97fd61",
+          "28e42cec5ceddd8b44e86e8476ed16a105572e4badbb4f1cac55d47ee9150b17"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.0aeb68a2a2be3p-7",
+           "124": "f:0x1.6c25054f93228p-5",
+           "186": "f:0x1.3ad39818c67c8p-4",
+           "248": "f:0x1.8794c7ffbbc3cp-4",
+           "310": "f:0x1.c1585093a4406p-4",
+           "372": "f:0x1.f2bbd57bb7fe9p-4",
+           "434": "f:0x1.0dca8cea12f22p-3",
+           "496": "f:0x1.1f0a27ffc80e3p-3",
+           "558": "f:0x1.2dfaba3d154e0p-3",
+           "620": "f:0x1.3afb334660921p-3",
+           "682": "f:0x1.46514932b7886p-3",
+           "744": "f:0x1.503b890195826p-3",
+           "806": "f:0x1.58ec3d652dab7p-3",
+           "868": "f:0x1.608c84fad176bp-3",
+           "930": "f:0x1.673f80b29a780p-3",
+           "992": "f:0x1.6d2367c7ca467p-3"
+          }
+         }
+        }
+       }
+      }
+     },
+     "V": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "be1ba3a358f0ceb29be3ff567c2f3ba7d1c105b308e83ba71d93413c4a63ac9a",
+          "46672485071ba9edd88238d3a5b2187bffa32e742bda9113d96d4b917b8384d2",
+          "816f6d846b72231f0f7d8aedab1ff563bcac02f0f952755a564bc986a7a54162",
+          "b98f5402debb4d74c70c99a29de3ff91f5f126593ea1175d76e5d734346a11e3",
+          "7df26771631be60351709cef7ee3420771a69b439db51609e002cfb80dcda8d1",
+          "1a82507254280c687a5e6db4c0eef2d35a4f8eaed26e287ddfd3d3d9630139e4",
+          "0b513fec4fad7282054c8b698288f068b2e7051123bf1f84afe3c3c81b048851",
+          "a84121f4db7bc221d06bec6929fbba26aac559215a5ce288f50081f007cf48e8",
+          "6a7b32b18b0f8a6cfa7f98bda5c1a5b7846ffd53435c31716b9a1144b2220ade",
+          "ba2c63685590c66aa36901212e183524730a40ef6a24807f3ff5d65504a40694"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.2eca63146b5ecp+7",
+           "62": "f:0x1.2dfe220bb2952p+7",
+           "124": "f:0x1.2bfaf44de324bp+7",
+           "186": "f:0x1.298fc54b46eadp+7",
+           "248": "f:0x1.270afec9597fap+7",
+           "310": "f:0x1.24907be57e9acp+7",
+           "372": "f:0x1.222744fe9b2a9p+7",
+           "434": "f:0x1.1fe36550f5c2bp+7",
+           "496": "f:0x1.1dd897a79a1d9p+7",
+           "558": "f:0x1.1c0ea5e43dfb6p+7",
+           "620": "f:0x1.1a88440374141p+7",
+           "682": "f:0x1.19449264cd99cp+7",
+           "744": "f:0x1.1840236c1ffeep+7",
+           "806": "f:0x1.1775d0e140e27p+7",
+           "868": "f:0x1.16df6b485e810p+7",
+           "930": "f:0x1.167643cb790c4p+7",
+           "992": "f:0x1.16339517ad4f0p+7"
+          }
+         }
+        }
+       }
+      }
+     },
+     "alpha": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "9104b51408a1063cc868eacc4c03528e70d99230fb8c3f340672f244438fcea0",
+          "771fd66eef471e9cc1b2988fafdeb13a9469af9e3d87afa37827a02881a7e6e6",
+          "b468372a8756d198016d9e8436f2190ea72db6c44b5c4af3d1be8617e4f7e49b",
+          "02a7145730c4d472928f736b2b11409d3c6c08e0e207667d61dad95472ae04a6",
+          "37aedc111de6991c666e8e9f8e3446f0c1cbafd8d6436aad31ac80b17e19361f",
+          "5716081f1493681bfc65826a75832fdc8dc4c5a0b63fcbeaf12ca9458f2b44a1",
+          "65f6d2f5bd332c74efa565beba540e171b68137bda8c3c86207fc60b80bf0d15",
+          "fc95af0fc90f4b42a86bdde6f253a5bf18c4858f71a7bb36c8ffaa9aa772abc3",
+          "5ee94805909c4b1684f6821c23b24c13c6da6e50e9a135977999e62220a73253",
+          "096679fe5f86cde35c5eaebb06fa5c2860392c12dce3854072d7b12a55beb6e4"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.3c9842757eb1fp-4",
+           "62": "f:0x1.6bb4e5c19a3dap-4",
+           "124": "f:0x1.9ea5ecfcb8fd4p-4",
+           "186": "f:0x1.b7ec76e7c6d01p-4",
+           "248": "f:0x1.addb220a9414ep-4",
+           "310": "f:0x1.9c34935116371p-4",
+           "372": "f:0x1.8d1a4aa048dadp-4",
+           "434": "f:0x1.81191f97d8be4p-4",
+           "496": "f:0x1.781acaa526c24p-4",
+           "558": "f:0x1.71c2050689b5ep-4",
+           "620": "f:0x1.6d6aceff643d4p-4",
+           "682": "f:0x1.6a86247c4dfa7p-4",
+           "744": "f:0x1.68a99d1d3a857p-4",
+           "806": "f:0x1.6786a13970b30p-4",
+           "868": "f:0x1.66e482bec3beap-4",
+           "930": "f:0x1.669b9cd4354bcp-4",
+           "992": "f:0x1.6690bc6912e24p-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "beta": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "e7f93951c754f9b533bdfdb0cc4deba68c875bc77b5912d2dbffaae95a6f6505",
+          "c977306ae3ea92d1a1a697849a9e0e3354ae404db7ff191f027e1366a07d4163",
+          "18f84dc6f27b0a5607713ed197f095ccd42822a6f51a1503f043f8daf4c8909c",
+          "ba16df323ad0054daf1df9bf9aa8ae550a4b207ce9edb7686118b0b47121b52f",
+          "f06295cdaa16ab25a22fc1e083bc51c79a891e65c9b3c77c199b2b8171ca56b2",
+          "e920fbc24c4a1211fed8df0b4342fce529539af857f22b346640ab5b551671c7",
+          "f5e1eea8eccae4f0b35d31bae29c54dd7e88f9734458761714505537e06cfc8a",
+          "fc3330d5fc144584be053c2572e6782ba8e9003422be10e93b2631190306864a",
+          "b8d121c2c599fd3f50af28ec6c979a4b5adfcfa37695efaaa0aac9a4f6d44fed",
+          "7f83b0b817028d76e521bf6de9fabb204e6e3fe4d765fa4e440da939d233d9eb"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.3741fde077937p-6",
+           "124": "f:0x1.c5990c971a33fp-7",
+           "186": "f:0x1.578c54c159e0bp-10",
+           "248": "f:-0x1.1e7942522b2eep-10",
+           "310": "f:-0x1.5ef2cb41ed30ap-10",
+           "372": "f:-0x1.02cf14f4f727ap-9",
+           "434": "f:-0x1.20dd8130e54e2p-9",
+           "496": "f:-0x1.1aa3e28d7169dp-9",
+           "558": "f:-0x1.0f7a4d80ec7d4p-9",
+           "620": "f:-0x1.01ef563470b53p-9",
+           "682": "f:-0x1.e2ff97cc35cbcp-10",
+           "744": "f:-0x1.bfaa782eee2e9p-10",
+           "806": "f:-0x1.9bf22e2adc197p-10",
+           "868": "f:-0x1.78a7714f1ca6ep-10",
+           "930": "f:-0x1.566d2dffb9949p-10",
+           "992": "f:-0x1.35c94927d2dbfp-10"
+          }
+         }
+        }
+       }
+      }
+     },
+     "mach": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "d533c55c73fd9ae2fbb239ed637d1565ba40789f65e072abfce5308562626341",
+          "0ce645cd04d893cc379d3ddd3dcaf633a6330fd24164f2300ca84668b396bdd9",
+          "aeca3f4c4ecefe7935b6ba3c9ffb20e1b3406182b10840440e960b4c1c090095",
+          "9e48ff0bc2f3b399af6235380b2bb593b534d5dd6d6d0c3769ba8ef10341b008",
+          "c0960e818f2ca8f1ecb87ec77d8febd5a6a6e97d34caa62520946687468d4fd4",
+          "14631b7ee53b03296beefb7373d1c0c503e24b1f56b92c86b65c447141509363",
+          "4b9e647207011c3d1bcb7af60010aae8d846077984a9196374db49d26c920377",
+          "e454bdc4c4a4532708e43986c34693be96f67e856ce6b989982a401ce358f635",
+          "9f528cd5b70c6e28ccf2938e4d151ade9571ddab49ada73c0e32659dc2a18f70",
+          "ff71227f7f93a593c89f7ee006e23b5192d0f6734e00d40227bf98db44cb4b34"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.ccccccccccccdp-2",
+           "62": "f:0x1.cb96080d44ff3p-2",
+           "124": "f:0x1.c88693efb789ap-2",
+           "186": "f:0x1.c4d9b505f4499p-2",
+           "248": "f:0x1.c106ea3d50e41p-2",
+           "310": "f:0x1.bd4491e7fe8cbp-2",
+           "372": "f:0x1.b99d145855ac5p-2",
+           "434": "f:0x1.b62eb50d8def9p-2",
+           "496": "f:0x1.b3174d728378dp-2",
+           "558": "f:0x1.b062979a90a46p-2",
+           "620": "f:0x1.ae149aab0d21fp-2",
+           "682": "f:0x1.ac2bf3e68f67cp-2",
+           "744": "f:0x1.aaa3627f9641ap-2",
+           "806": "f:0x1.a9730aaa8c23bp-2",
+           "868": "f:0x1.a8917f52eebd5p-2",
+           "930": "f:0x1.a7f49336d6679p-2",
+           "992": "f:0x1.a791f7fb47aa1p-2"
+          }
+         }
+        }
+       }
+      }
+     },
+     "fuel": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "9b5ec26d83ba28bd2c92fffafe518df38a64c86b37b74793ab54155df8245897",
+          "9b5ec26d83ba28bd2c92fffafe518df38a64c86b37b74793ab54155df8245897",
+          "9b5ec26d83ba28bd2c92fffafe518df38a64c86b37b74793ab54155df8245897",
+          "9b5ec26d83ba28bd2c92fffafe518df38a64c86b37b74793ab54155df8245897",
+          "9b5ec26d83ba28bd2c92fffafe518df38a64c86b37b74793ab54155df8245897",
+          "9b5ec26d83ba28bd2c92fffafe518df38a64c86b37b74793ab54155df8245897",
+          "9b5ec26d83ba28bd2c92fffafe518df38a64c86b37b74793ab54155df8245897",
+          "9b5ec26d83ba28bd2c92fffafe518df38a64c86b37b74793ab54155df8245897",
+          "9b5ec26d83ba28bd2c92fffafe518df38a64c86b37b74793ab54155df8245897",
+          "9b5ec26d83ba28bd2c92fffafe518df38a64c86b37b74793ab54155df8245897"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.9000000000000p+7",
+           "62": "f:0x1.9000000000000p+7",
+           "124": "f:0x1.9000000000000p+7",
+           "186": "f:0x1.9000000000000p+7",
+           "248": "f:0x1.9000000000000p+7",
+           "310": "f:0x1.9000000000000p+7",
+           "372": "f:0x1.9000000000000p+7",
+           "434": "f:0x1.9000000000000p+7",
+           "496": "f:0x1.9000000000000p+7",
+           "558": "f:0x1.9000000000000p+7",
+           "620": "f:0x1.9000000000000p+7",
+           "682": "f:0x1.9000000000000p+7",
+           "744": "f:0x1.9000000000000p+7",
+           "806": "f:0x1.9000000000000p+7",
+           "868": "f:0x1.9000000000000p+7",
+           "930": "f:0x1.9000000000000p+7",
+           "992": "f:0x1.9000000000000p+7"
+          }
+         }
+        }
+       }
+      }
+     },
+     "hdot": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "2773f082985bf731fdd5d2c5d9f33d6d69f329177c5914d146f62ac82c971507",
+          "230c25e25751ad376d953b615475b48f97d286ab1f3183867d36894637a7c374",
+          "c710a82e152802eaa795401b94ccdcf4ccc23e2ae44dafa1144bdecd8a2a14ae",
+          "42335ecbbb1a86d72681680824fefa39a0e466bf33cd754bc29c771bf05a2f19",
+          "533b89075dc02075916fe3d3ce70814c11fe266cd566d1a97dd586c0725886b3",
+          "6ba8a31c978c0e89d074f15af44470b3093b776f36662e79b44581cda700c864",
+          "f6355273377d0ccb33004f204e4a663b58e34223eb837ae82b3f9b60ae10b7d3",
+          "232aa6d09edfff2fd1d167797391fddc699cd89cda6ed659a41d8501497a94c4",
+          "2c638efd127df6bd58d66a455a2f8524bb9601a830ea410e2b7259240a0b634c",
+          "1380e20dde56f5ef83461f213c714560ec9c6d435e4359994691124a82ad597e"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:-0x1.8caa599b4a750p-52",
+           "62": "f:0x1.35f6cfc8b614dp-2",
+           "124": "f:0x1.215f7a1e42b4dp+0",
+           "186": "f:0x1.2fe72732da0d7p+1",
+           "248": "f:0x1.cc4c964760441p+1",
+           "310": "f:0x1.1f22584e03791p+2",
+           "372": "f:0x1.43655c9f2ce7ep+2",
+           "434": "f:0x1.5747365aed23ep+2",
+           "496": "f:0x1.5e8b0736f59fep+2",
+           "558": "f:0x1.5c7819b0d0dc8p+2",
+           "620": "f:0x1.53b9564222531p+2",
+           "682": "f:0x1.465014a130974p+2",
+           "744": "f:0x1.35ba9cc5c2b01p+2",
+           "806": "f:0x1.23165fc318948p+2",
+           "868": "f:0x1.0f383798fd4c6p+2",
+           "930": "f:0x1.f57e2698f62dfp+1",
+           "992": "f:0x1.cc44166ccaf4bp+1"
+          }
+         }
+        }
+       }
+      }
+     },
+     "de": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "bbd0f8eb802280c349c6c3a18e51d3e7aff1f63314768b3f936326112c424c53",
+          "0fa9f4d5dda27bc11be09e34dcffa2d9f28ee91d30b3afc212a573b70bb700f1",
+          "784957bfdbd35959c9e342431b8ab89bc1d377b33f9281459920e880468c9196",
+          "cf2dfcb8c8bf41f9a529b36e2e761cea8d810f76dd6eebf76205297be5bdc988",
+          "c5bc352209e02048427a7e5ca8f961c7e1e8c3fdab5aeccea937a6ff913a358f",
+          "bc10b2db87c7e7a2d7d6d07e67b0ecaf713fa89886bdeafa996661cbdd46f887",
+          "ca72f4e3429652517540f03e975c283228a397d2d59ee5c9f2139dd811050b8a",
+          "307ed47e6f4bb59a89dc8a1cbe75699b9bde0ffda3946bf7a3520a82afaca1b6",
+          "cd93f274b0cb51e545dbd971bba08d1692766139d288fcca25f028ed8d753e9a",
+          "180a05776276dd917513cd4b56e7076185db422457c2276f7e17a3ffdacb8d74"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:-0x1.6265a118f25eep-5",
+           "62": "f:-0x1.ac478fcbd6542p-5",
+           "124": "f:-0x1.fc4734b5cd43ep-5",
+           "186": "f:-0x1.0f7e2ddb70f02p-4",
+           "248": "f:-0x1.06ee51aafd22ep-4",
+           "310": "f:-0x1.f1403de8e39a2p-5",
+           "372": "f:-0x1.d86f09f115220p-5",
+           "434": "f:-0x1.c4c07df3eb40cp-5",
+           "496": "f:-0x1.b608b95ab7820p-5",
+           "558": "f:-0x1.ab9c10c7ba297p-5",
+           "620": "f:-0x1.a47369db36d11p-5",
+           "682": "f:-0x1.9fa91203478f2p-5",
+           "744": "f:-0x1.9c9063d2d2fc4p-5",
+           "806": "f:-0x1.9aa9c546648cdp-5",
+           "868": "f:-0x1.99990fafd11f9p-5",
+           "930": "f:-0x1.991d82c04d2b0p-5",
+           "992": "f:-0x1.990a6cffda5e4p-5"
+          }
+         }
+        }
+       }
+      }
+     },
+     "da": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "79b2dd7445656213c2eed419a9d7a922e4521b8275bb7313bed25d81e759334d",
+          "566e45c94422547afceaad7b1b2e35f80b0540b768e58533087f0fd3709089ef",
+          "f5c8630c4415ce052498ad597b280edfb7c313896efedbdd3346d763740f801b",
+          "69876b2835b275c1ffc44f90bc4359eeb5777aca0ea707ba1f6fa1f40a6ba921",
+          "70cd78ba8bc89c7c55373d7caef394dfc2f85c2fe781bb5a64bdd9453dda7d3e",
+          "1e3cd4d1aea6bde48fe2a11a6777c721878d8e953d0fb82471d96d76fc62c9ac",
+          "df9eb49fd29eead52490192212e1aea595357ed87e994bdcee17d4214a1b4a84",
+          "bea34771df25412dc42c9812433f5e813bb81ef85bbab9d652965d99e97852b9",
+          "e9a3e2eff3af3f6b01c3c11f62f3732a833510818e899d78a054d5d8291b4383",
+          "8e893a94a2eeb0f244a123585e278d53d26bbc7e26302238eb632e1555f3c578"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.cfb61b79aaaa9p-7",
+           "62": "f:-0x1.282e0fb8626c0p-8",
+           "124": "f:-0x1.9713eab60d3a8p-9",
+           "186": "f:0x1.731293f51d400p-13",
+           "248": "f:-0x1.428cc83c02100p-10",
+           "310": "f:-0x1.e2e8621feea40p-10",
+           "372": "f:-0x1.a8fbeebe04180p-10",
+           "434": "f:-0x1.895346c3688e0p-10",
+           "496": "f:-0x1.72d4b8fb13d00p-10",
+           "558": "f:-0x1.52fb8a359e600p-10",
+           "620": "f:-0x1.337d16a3968a0p-10",
+           "682": "f:-0x1.1717df0a5ee60p-10",
+           "744": "f:-0x1.f93bb3a4be9c0p-11",
+           "806": "f:-0x1.c7ba6a5d3a880p-11",
+           "868": "f:-0x1.99f19723bd180p-11",
+           "930": "f:-0x1.6fcc93f6a7b00p-11",
+           "992": "f:-0x1.4923885e15480p-11"
+          }
+         }
+        }
+       }
+      }
+     },
+     "dr": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "e0cd4fef0e935d2b50b2e1e40916403310018279595b65e723b120eb33fd4baa",
+          "9a4af011aa71f88686282c4c9c01b514eda80ca2458979c8067199d241f424f1",
+          "40a4a9e3387a3ec8152eda25e159dc0edcb7e93910b057f79c51ee90dbacfd75",
+          "0d85f729cfd6a1cdd9ec092e91d24434db2f6e1e25341feb756d0780d397cf8d",
+          "909a2877e89dc3b40ba828c739613f7e528e5a68602192c5151bc5111490e1b9",
+          "d4dd2ac53f5cc4b0e0ceaed24e560bb836c34b8066e79bb71f740f551ac55ac7",
+          "38a46013a2d8e2a8623c21d0154700afaee386d68f38ed96f41606a1278226a8",
+          "4ba3ae91311d3426eea23ac6a3af09deae24016e05e546af234780356dfa37dc",
+          "943a808f1c77a041b0687f43c04311fa251b3ace942b00523d0e82e9a6a7d049",
+          "cc5af14dd1795db00f69580987535ca1aab87a0f89a184a1e1c8c3171bbb0307"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.ac091f38f1e5dp-7",
+           "124": "f:0x1.75c8e1482a3bap-6",
+           "186": "f:0x1.b1b52fddb51f2p-8",
+           "248": "f:-0x1.03d6079a79865p-10",
+           "310": "f:-0x1.c94be5bbb414ap-10",
+           "372": "f:-0x1.42598c1601ed8p-9",
+           "434": "f:-0x1.863e69506dceap-9",
+           "496": "f:-0x1.8ab6d04ae3704p-9",
+           "558": "f:-0x1.7c0d864217191p-9",
+           "620": "f:-0x1.69f65c650e78ap-9",
+           "682": "f:-0x1.54149a20070d0p-9",
+           "744": "f:-0x1.3bd099e0f53ecp-9",
+           "806": "f:-0x1.22f6a47638e3bp-9",
+           "868": "f:-0x1.0a55aaa95ced1p-9",
+           "930": "f:-0x1.e4c1c2ae016e4p-10",
+           "992": "f:-0x1.b6eef60118ff7p-10"
+          }
+         }
+        }
+       }
+      }
+     },
+     "thr_l": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "0187c928f19e05b5e201049b43ddd2df2ede929426b06489b5751c1192eceb34",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "479def1b90f403a6bdb7778fbb2037071b7575c370a82b8e1beae3ea13503585",
+          "8d8a53a788f343ba8eefa478f5d4f8d7ac92760afe95e8242e38f714cc808bf5",
+          "118e10db9c3016ac36bea2ee80be55290880af5631133341f235254714c3e74c",
+          "68a5994cc2baf754e5d1cd72d45e03db043689e17230a727412181617dfccdca",
+          "b2f220cffcc831c082f91ee47bb186b7e0a0d865bf531c73808336de86f7dec8",
+          "380b2d12c41c612618153ef8b8f519d911279b1e389ec915127addd9db54e9ba",
+          "96ed80237494036816ae93e3b6286b1554927497db3e23bc1012237a986874e6"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.232c76bf7fc89p-1",
+           "62": "f:0x1.2e0eaaf4b62f6p-3",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x1.c77645b72be80p-8",
+           "434": "f:0x1.9ef184d5fb938p-5",
+           "496": "f:0x1.be64090c26520p-4",
+           "558": "f:0x1.6537e9d07d5b3p-3",
+           "620": "f:0x1.eeb895c13bdeap-3",
+           "682": "f:0x1.39f3d68bedd8fp-2",
+           "744": "f:0x1.77c68456094b1p-2",
+           "806": "f:0x1.af388e3a23d6cp-2",
+           "868": "f:0x1.df70de9889a5ap-2",
+           "930": "f:0x1.04135e0c9133ap-1",
+           "992": "f:0x1.14bc96d6ac057p-1"
+          }
+         }
+        }
+       }
+      }
+     },
+     "thr_r": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "0187c928f19e05b5e201049b43ddd2df2ede929426b06489b5751c1192eceb34",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "479def1b90f403a6bdb7778fbb2037071b7575c370a82b8e1beae3ea13503585",
+          "8d8a53a788f343ba8eefa478f5d4f8d7ac92760afe95e8242e38f714cc808bf5",
+          "118e10db9c3016ac36bea2ee80be55290880af5631133341f235254714c3e74c",
+          "68a5994cc2baf754e5d1cd72d45e03db043689e17230a727412181617dfccdca",
+          "b2f220cffcc831c082f91ee47bb186b7e0a0d865bf531c73808336de86f7dec8",
+          "380b2d12c41c612618153ef8b8f519d911279b1e389ec915127addd9db54e9ba",
+          "96ed80237494036816ae93e3b6286b1554927497db3e23bc1012237a986874e6"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.232c76bf7fc89p-1",
+           "62": "f:0x1.2e0eaaf4b62f6p-3",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x1.c77645b72be80p-8",
+           "434": "f:0x1.9ef184d5fb938p-5",
+           "496": "f:0x1.be64090c26520p-4",
+           "558": "f:0x1.6537e9d07d5b3p-3",
+           "620": "f:0x1.eeb895c13bdeap-3",
+           "682": "f:0x1.39f3d68bedd8fp-2",
+           "744": "f:0x1.77c68456094b1p-2",
+           "806": "f:0x1.af388e3a23d6cp-2",
+           "868": "f:0x1.df70de9889a5ap-2",
+           "930": "f:0x1.04135e0c9133ap-1",
+           "992": "f:0x1.14bc96d6ac057p-1"
+          }
+         }
+        }
+       }
+      }
+     },
+     "alpha_margin": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "b4d829dae485255a8abcce13044e6b5742d8135301fb68492a565b6c2ddf4503",
+          "9a420ed50fb13a273eee24f9dd48a4dbc03fba545d652bffd5e51fba10c706c4",
+          "ec95a5c57c2e5da0b85b287c49017bf81c38ae809e4e13e773d3b357197f57f3",
+          "62f5eae2220f59e4a079ce7f92750020a9956d49b41280cd5fc7ec8fb18d8d01",
+          "d3705c1d2bff7db6b71cac85f349c6de1b85c5119f78621298c2aa467d60b8e2",
+          "8702cfa232100c5c32d4b361bcc277d780fd97917ea7dd80a5742c1f87fe7ff3",
+          "06db109b62bbe023537bfab7b55db7772ffa598248bec36fabbe52f57a0fa5e5",
+          "3794cbba78186ee85a3c1e891ff0d19f7799bd2c96e66d920637c95769cae4e9",
+          "55af6bea4f5680c3dceef28302e50583be16dcdcb5c0e98db253c14700dc0837",
+          "c88297ef759bfb4b80c8152150a46b0b681d1e7f4073dcf3f36e5812ab70f6ae"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.a961f34021eecp-3",
+           "62": "f:0x1.9211c8f395b86p-3",
+           "124": "f:0x1.7935f628bc3cep-3",
+           "186": "f:0x1.6d4eddc85c605p-3",
+           "248": "f:0x1.731b4a5f166bdp-3",
+           "310": "f:0x1.7caf09cce5d29p-3",
+           "372": "f:0x1.84f7474207e0ep-3",
+           "434": "f:0x1.8ba7896ece482p-3",
+           "496": "f:0x1.90c4fbd3f62a8p-3",
+           "558": "f:0x1.947be9680edb4p-3",
+           "620": "f:0x1.971d83cebbe4ep-3",
+           "682": "f:0x1.98f19404602b6p-3",
+           "744": "f:0x1.9a2e5b2ee8874p-3",
+           "806": "f:0x1.9afcb77e9c432p-3",
+           "868": "f:0x1.9b7ae29a456b8p-3",
+           "930": "f:0x1.9bbeb7fb9182ep-3",
+           "992": "f:0x1.9bd7e0d6a5aa6p-3"
+          }
+         }
+        }
+       }
+      }
+     },
+     "n_gear": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945"
+         ],
+         "samples": {
+          "dict": {
+           "0": null,
+           "62": null,
+           "124": null,
+           "186": null,
+           "248": null,
+           "310": null,
+           "372": null,
+           "434": null,
+           "496": null,
+           "558": null,
+           "620": null,
+           "682": null,
+           "744": null,
+           "806": null,
+           "868": null,
+           "930": null,
+           "992": null
+          }
+         }
+        }
+       }
+      }
+     },
+     "launch_gx": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "cmd_speed": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "1ac2743dce7bd316b719702b925e1aceeb0f8384feb80669770fea1609a6aafc",
+          "1ac2743dce7bd316b719702b925e1aceeb0f8384feb80669770fea1609a6aafc",
+          "1ac2743dce7bd316b719702b925e1aceeb0f8384feb80669770fea1609a6aafc",
+          "1ac2743dce7bd316b719702b925e1aceeb0f8384feb80669770fea1609a6aafc",
+          "1ac2743dce7bd316b719702b925e1aceeb0f8384feb80669770fea1609a6aafc",
+          "1ac2743dce7bd316b719702b925e1aceeb0f8384feb80669770fea1609a6aafc",
+          "1ac2743dce7bd316b719702b925e1aceeb0f8384feb80669770fea1609a6aafc",
+          "1ac2743dce7bd316b719702b925e1aceeb0f8384feb80669770fea1609a6aafc",
+          "1ac2743dce7bd316b719702b925e1aceeb0f8384feb80669770fea1609a6aafc",
+          "1ac2743dce7bd316b719702b925e1aceeb0f8384feb80669770fea1609a6aafc"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.1800000000000p+7",
+           "62": "f:0x1.1800000000000p+7",
+           "124": "f:0x1.1800000000000p+7",
+           "186": "f:0x1.1800000000000p+7",
+           "248": "f:0x1.1800000000000p+7",
+           "310": "f:0x1.1800000000000p+7",
+           "372": "f:0x1.1800000000000p+7",
+           "434": "f:0x1.1800000000000p+7",
+           "496": "f:0x1.1800000000000p+7",
+           "558": "f:0x1.1800000000000p+7",
+           "620": "f:0x1.1800000000000p+7",
+           "682": "f:0x1.1800000000000p+7",
+           "744": "f:0x1.1800000000000p+7",
+           "806": "f:0x1.1800000000000p+7",
+           "868": "f:0x1.1800000000000p+7",
+           "930": "f:0x1.1800000000000p+7",
+           "992": "f:0x1.1800000000000p+7"
+          }
+         }
+        }
+       }
+      }
+     },
+     "cmd_alt": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "3aa4680d52675a8c5e480b3a4f2d2090f51f174e350ba1bb8a1699009e03021f",
+          "3aa4680d52675a8c5e480b3a4f2d2090f51f174e350ba1bb8a1699009e03021f",
+          "3aa4680d52675a8c5e480b3a4f2d2090f51f174e350ba1bb8a1699009e03021f",
+          "3aa4680d52675a8c5e480b3a4f2d2090f51f174e350ba1bb8a1699009e03021f",
+          "3aa4680d52675a8c5e480b3a4f2d2090f51f174e350ba1bb8a1699009e03021f",
+          "3aa4680d52675a8c5e480b3a4f2d2090f51f174e350ba1bb8a1699009e03021f",
+          "3aa4680d52675a8c5e480b3a4f2d2090f51f174e350ba1bb8a1699009e03021f",
+          "3aa4680d52675a8c5e480b3a4f2d2090f51f174e350ba1bb8a1699009e03021f",
+          "3aa4680d52675a8c5e480b3a4f2d2090f51f174e350ba1bb8a1699009e03021f",
+          "3aa4680d52675a8c5e480b3a4f2d2090f51f174e350ba1bb8a1699009e03021f"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.0680000000000p+10",
+           "62": "f:0x1.0680000000000p+10",
+           "124": "f:0x1.0680000000000p+10",
+           "186": "f:0x1.0680000000000p+10",
+           "248": "f:0x1.0680000000000p+10",
+           "310": "f:0x1.0680000000000p+10",
+           "372": "f:0x1.0680000000000p+10",
+           "434": "f:0x1.0680000000000p+10",
+           "496": "f:0x1.0680000000000p+10",
+           "558": "f:0x1.0680000000000p+10",
+           "620": "f:0x1.0680000000000p+10",
+           "682": "f:0x1.0680000000000p+10",
+           "744": "f:0x1.0680000000000p+10",
+           "806": "f:0x1.0680000000000p+10",
+           "868": "f:0x1.0680000000000p+10",
+           "930": "f:0x1.0680000000000p+10",
+           "992": "f:0x1.0680000000000p+10"
+          }
+         }
+        }
+       }
+      }
+     },
+     "cmd_heading": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "81f743185114a09b1ce9b9b494f3d60264ee9555c701304af2cd5658e657141f",
+          "81f743185114a09b1ce9b9b494f3d60264ee9555c701304af2cd5658e657141f",
+          "81f743185114a09b1ce9b9b494f3d60264ee9555c701304af2cd5658e657141f",
+          "81f743185114a09b1ce9b9b494f3d60264ee9555c701304af2cd5658e657141f",
+          "81f743185114a09b1ce9b9b494f3d60264ee9555c701304af2cd5658e657141f",
+          "81f743185114a09b1ce9b9b494f3d60264ee9555c701304af2cd5658e657141f",
+          "81f743185114a09b1ce9b9b494f3d60264ee9555c701304af2cd5658e657141f",
+          "81f743185114a09b1ce9b9b494f3d60264ee9555c701304af2cd5658e657141f",
+          "81f743185114a09b1ce9b9b494f3d60264ee9555c701304af2cd5658e657141f",
+          "81f743185114a09b1ce9b9b494f3d60264ee9555c701304af2cd5658e657141f"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.999999999999ap-3",
+           "62": "f:0x1.999999999999ap-3",
+           "124": "f:0x1.999999999999ap-3",
+           "186": "f:0x1.999999999999ap-3",
+           "248": "f:0x1.999999999999ap-3",
+           "310": "f:0x1.999999999999ap-3",
+           "372": "f:0x1.999999999999ap-3",
+           "434": "f:0x1.999999999999ap-3",
+           "496": "f:0x1.999999999999ap-3",
+           "558": "f:0x1.999999999999ap-3",
+           "620": "f:0x1.999999999999ap-3",
+           "682": "f:0x1.999999999999ap-3",
+           "744": "f:0x1.999999999999ap-3",
+           "806": "f:0x1.999999999999ap-3",
+           "868": "f:0x1.999999999999ap-3",
+           "930": "f:0x1.999999999999ap-3",
+           "992": "f:0x1.999999999999ap-3"
+          }
+         }
+        }
+       }
+      }
+     },
+     "cmd_pitch": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "cmd_hdot": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "speed_on": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.0000000000000p+0",
+           "62": "f:0x1.0000000000000p+0",
+           "124": "f:0x1.0000000000000p+0",
+           "186": "f:0x1.0000000000000p+0",
+           "248": "f:0x1.0000000000000p+0",
+           "310": "f:0x1.0000000000000p+0",
+           "372": "f:0x1.0000000000000p+0",
+           "434": "f:0x1.0000000000000p+0",
+           "496": "f:0x1.0000000000000p+0",
+           "558": "f:0x1.0000000000000p+0",
+           "620": "f:0x1.0000000000000p+0",
+           "682": "f:0x1.0000000000000p+0",
+           "744": "f:0x1.0000000000000p+0",
+           "806": "f:0x1.0000000000000p+0",
+           "868": "f:0x1.0000000000000p+0",
+           "930": "f:0x1.0000000000000p+0",
+           "992": "f:0x1.0000000000000p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "alt_on": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.0000000000000p+0",
+           "62": "f:0x1.0000000000000p+0",
+           "124": "f:0x1.0000000000000p+0",
+           "186": "f:0x1.0000000000000p+0",
+           "248": "f:0x1.0000000000000p+0",
+           "310": "f:0x1.0000000000000p+0",
+           "372": "f:0x1.0000000000000p+0",
+           "434": "f:0x1.0000000000000p+0",
+           "496": "f:0x1.0000000000000p+0",
+           "558": "f:0x1.0000000000000p+0",
+           "620": "f:0x1.0000000000000p+0",
+           "682": "f:0x1.0000000000000p+0",
+           "744": "f:0x1.0000000000000p+0",
+           "806": "f:0x1.0000000000000p+0",
+           "868": "f:0x1.0000000000000p+0",
+           "930": "f:0x1.0000000000000p+0",
+           "992": "f:0x1.0000000000000p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "heading_on": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd",
+          "9854fb597c8d92b4f213646e7cfb2800e065a10856ab0393042897e3d8f710cd"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.0000000000000p+0",
+           "62": "f:0x1.0000000000000p+0",
+           "124": "f:0x1.0000000000000p+0",
+           "186": "f:0x1.0000000000000p+0",
+           "248": "f:0x1.0000000000000p+0",
+           "310": "f:0x1.0000000000000p+0",
+           "372": "f:0x1.0000000000000p+0",
+           "434": "f:0x1.0000000000000p+0",
+           "496": "f:0x1.0000000000000p+0",
+           "558": "f:0x1.0000000000000p+0",
+           "620": "f:0x1.0000000000000p+0",
+           "682": "f:0x1.0000000000000p+0",
+           "744": "f:0x1.0000000000000p+0",
+           "806": "f:0x1.0000000000000p+0",
+           "868": "f:0x1.0000000000000p+0",
+           "930": "f:0x1.0000000000000p+0",
+           "992": "f:0x1.0000000000000p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "pitch_on": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "hdot_on": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "alt_cmd_filt": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "a1dbdfd2f41ab49d63f21b8af0be36aa2bd483be0dec89d436446589cff4852c",
+          "852be3604a19a1dabbdec32148b9640aff32000c1f90e0e6eb4eda8b1241fccd",
+          "c1d20aab0671cfd784106b9557ee3eefd6fe24adc6622d3077c38fe6591948cf",
+          "6fc578f4815c0cf1c21cbc4f4b74196fa449dbf1e2632dcafa525f72f6f1e800",
+          "cdf59a89508e13f5add37f935cd7232180f3980ff57f48f26f5b18ad8e2cc7e4",
+          "c8e2b8d7a7c71c49365f11d4c7f349bf883aee5e8d372d6ad8855c787dc74a66",
+          "54a35f2a7bb6980db81e562e1818db5dca4739fb43f6659e4155a1b01a129c59",
+          "3038f4a1654d5eb3f7ca01ef159097460a720334a1b2ea2c366848bc7cc7339c",
+          "92b7a2c0779242558d9eaa8fd6e3f6c6d5afd8b8524c62936cf337f8ae359f44",
+          "4ee504ca9d1f5fc083cff42ce863b0d1d0f279a3f25226a56003456f3be152d8"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.f40cc9867f878p+9",
+           "62": "f:0x1.f6f5aa3c2aedep+9",
+           "124": "f:0x1.f987accc093a5p+9",
+           "186": "f:0x1.fbccf2a0ae493p+9",
+           "248": "f:0x1.fdce6eb2db1a8p+9",
+           "310": "f:0x1.ff9408cee7425p+9",
+           "372": "f:0x1.00925e5e93b5bp+10",
+           "434": "f:0x1.01435ae40f293p+10",
+           "496": "f:0x1.01dfb38679b3fp+10",
+           "558": "f:0x1.0269d07b01c7ep+10",
+           "620": "f:0x1.02e3d21a19c6ep+10",
+           "682": "f:0x1.034f9940e61d5p+10",
+           "744": "f:0x1.03aeceb878118p+10",
+           "806": "f:0x1.0402e9c002f0fp+10",
+           "868": "f:0x1.044d35d3d22ccp+10",
+           "930": "f:0x1.048ed7c7c56a1p+10",
+           "992": "f:0x1.04c8d2496fcc2p+10"
+          }
+         }
+        }
+       }
+      }
+     },
+     "spd_cmd_filt": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "6735962796d7cb70e40b4ebdb0f0c9182336d10af60b32888fbfe831c4bf34b3",
+          "0d355c38f0f392a28a05e15549beafeb352599cc420de783edf4f1abe9afca52",
+          "298ef36ae170e16b041f4c2fdddd54c88a9506def01458a15f8e8511c4dd67b1",
+          "f5de7863dbadd769a3dd124e97e311fa20deb0fc59deee30b8aa0d5f136b90c1",
+          "3921d1297ca8a29879caf0ece0bb5e119ac452ad50feb629c7692eedc72783ef",
+          "7cb849ec5d4ec9bab82f39ce0784a08512fd00558e99927cd5ad77526f9b1ed3",
+          "a3fb96f2530a937407e3e7fe2cf971a2d793088736792091991ad10564872d66",
+          "008f4aa80c0a9d76618eaada8a94a903afa2bfc18d31ea26a14334e716b49f21",
+          "9f6f24ec42f610c8d9d3ad56ed7d3a9fe66a6de4191cda7f4c86e9563d2913fe",
+          "0f10b8a411b13f44e9ce4f36a9f403b5a38553ae6504db6572f377d457472132"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.2ead49b40d1dep+7",
+           "62": "f:0x1.28a1dee901e74p+7",
+           "124": "f:0x1.2432ec1e3cc07p+7",
+           "186": "f:0x1.20f27f75344f6p+7",
+           "248": "f:0x1.1e8ff56d5b460p+7",
+           "310": "f:0x1.1cd0291cc1637p+7",
+           "372": "f:0x1.1b87b974c4ca2p+7",
+           "434": "f:0x1.1a96d57cfb41cp+7",
+           "496": "f:0x1.19e6274e0a242p+7",
+           "558": "f:0x1.1964915d5158dp+7",
+           "620": "f:0x1.19058609f9dfap+7",
+           "682": "f:0x1.18bfd04d6397cp+7",
+           "744": "f:0x1.188caf66abe06p+7",
+           "806": "f:0x1.18672f62e38ecp+7",
+           "868": "f:0x1.184bae48e0013p+7",
+           "930": "f:0x1.1837820297255p+7",
+           "992": "f:0x1.1828b649e63f4p+7"
+          }
+         }
+        }
+       }
+      }
+     },
+     "hdg_cmd_filt": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "4af468de6af2cf9ff0be3a6d82dcbb111873c54596050c98eb6ff3a761d0ab15",
+          "42061d585be599d5403173aaead1eb3ac2f421d25cb335892b44761ab6c8cba0",
+          "3c2dde027b2b02264779a424288845e42a5b032bdd1d09301a02e9203dcd4c3b",
+          "7d285b11850da0a2c01799906108cc2dceaacaa8e92a0fa3c5d6ea066afbef74",
+          "8fb696f22d92ccf9507a3e1416ea94882abad3c907e3491ee1d84a870982a4a5",
+          "be03ccac14725fe1ce09efde8c0da0ac4d13b1bfd970a20e878c19bde21a828a",
+          "51583c52b99ab36e4c6ffc813a3d0bc91f4acbdcc9af2c4f6943da5f8bc922f4",
+          "36be27cb385668fb9d4a49c27132792e4fccf90c0128b2d1c5d2ec6f3b3455ea",
+          "ce90582f467de019ac912ebc28dc382509409fc4d081efce3394b233797a54c6",
+          "39dfe71d534d352d2cd20378fc7d17640370b8aff8c5fbbc814f0b52702851d9"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.04d66f7470000p-9",
+           "62": "f:0x1.7ee69a9b62660p-4",
+           "124": "f:0x1.243f650557650p-3",
+           "186": "f:0x1.5a78900e57c00p-3",
+           "248": "f:0x1.77a3dc21aceb0p-3",
+           "310": "f:0x1.8754d9d24f1e0p-3",
+           "372": "f:0x1.8fc5c4d1305a0p-3",
+           "434": "f:0x1.945038fce9ff0p-3",
+           "496": "f:0x1.96c18ee39d7c0p-3",
+           "558": "f:0x1.9811f4358df10p-3",
+           "620": "f:0x1.98c6ea8ae2130p-3",
+           "682": "f:0x1.992843892c5b0p-3",
+           "744": "f:0x1.995ca1a544080p-3",
+           "806": "f:0x1.9978cd6342630p-3",
+           "868": "f:0x1.9987f4e781160p-3",
+           "930": "f:0x1.99901bde61c10p-3",
+           "992": "f:0x1.99947e8a20040p-3"
+          }
+         }
+        }
+       }
+      }
+     },
+     "theta_cmd": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "967d7ab8065f681f81878fd85dc512bb073952d20fe5866af9e9f9e99f585c9b",
+          "0900bb4662df3f306bafb70e37fcc3c817750a742118d9f344a5678dc15231c2",
+          "5149137cfe853e9a1523a2188f71311654e66ce8d9faa6e29388c8c695faba05",
+          "441c9c9c3ef37646c52f2e1d1f197def0b0204800f89b9fc10ffeab57cec1f06",
+          "139b9988f6a12bf3e0b2de32387b151c91acb7b1935c6d4e1c4ead1ce1998ec0",
+          "5cf8c4a87a19b0c8862afca6d0cc2be3cd934c79092f30c8627f23887a61c890",
+          "4e038454d0347919d2688d604584c84b0e759b9a8649e643c603e99ce4dd34a0",
+          "503541049e61894111c647a69fab32f53569e4141e57ada07a90cfa3c8fb4b6a",
+          "11a7fe1defef1bff76df0354d9b27ecef6cee8ad6a35015b6420cc243d322c34",
+          "cf01ae09da47e51dae3d6c27dff43520c083dba28d63ea46e394d0c0c2d6f62f"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.3e3cee93a056ap-4",
+           "62": "f:0x1.a25c1fb5c39dfp-4",
+           "124": "f:0x1.e1550769b4e05p-4",
+           "186": "f:0x1.fbe5567e480bep-4",
+           "248": "f:0x1.02816002a9e30p-3",
+           "310": "f:0x1.03cfcae844516p-3",
+           "372": "f:0x1.038cadca83970p-3",
+           "434": "f:0x1.0259e64ef39d7p-3",
+           "496": "f:0x1.007ebf08c4ca3p-3",
+           "558": "f:0x1.fc360f1524992p-4",
+           "620": "f:0x1.f683a0e0ec19ap-4",
+           "682": "f:0x1.f00b3a656194ep-4",
+           "744": "f:0x1.e8f342d1d6502p-4",
+           "806": "f:0x1.e162b8052a1abp-4",
+           "868": "f:0x1.d9800aa2476d4p-4",
+           "930": "f:0x1.d16fc6e7842a4p-4",
+           "992": "f:0x1.c9537ca486aedp-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "phi_cmd": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "2f90903a9b23eac40ef4a4e09c69b64a96adb6788095c90b3df25e651a069e3a",
+          "62f3dd0523495f1809eacde82c49b8a49025d370b9f91b9a60b2a6423992e4a8",
+          "3e752c09774829448c3e15efe9cfdb50529b6817f1424669da395f60e9bcb3cd",
+          "cab2fa88ea27fcea315e73dfc4a45b4c7ed7e8f2be324f89e45a15af5e66452c",
+          "c42c3d574e0df7d6e9127e34a6cf799cadd74164b47178b2d5933e688a16be6e",
+          "6f5b7065a4805117adf56c9dd2bb4e902b007d1fd5e9231dca3811a78d6cceac",
+          "0a2e14b6f629a41dc1bfc2f3dcfd76830953584d0c6356345a8ff2da1c22b3da",
+          "b464c953bb5bba3bee72a08e7363f3cb4056390644e2c6320bdb202ba52f5742",
+          "ad82278ed0b89e65527f6a56fa927d51b6d7f79613c247d9ee77ded7d1899ba4",
+          "07bd709c7b23ecc46a33809393623da4fd12d16054243ff863139877f0a6a50d"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.04d66f7470000p-7",
+           "62": "f:0x1.5d892d870e0e0p-2",
+           "124": "f:0x1.926c4762e5380p-2",
+           "186": "f:0x1.7a1d8803e9040p-2",
+           "248": "f:0x1.67b2f0439e120p-2",
+           "310": "f:0x1.4d516310f9fc0p-2",
+           "372": "f:0x1.2ccfb426a8b60p-2",
+           "434": "f:0x1.0d0b5825ae1a0p-2",
+           "496": "f:0x1.dedd9b8f55b80p-3",
+           "558": "f:0x1.a85ce7e1e28c0p-3",
+           "620": "f:0x1.772edd1206040p-3",
+           "682": "f:0x1.4b5be959d34c0p-3",
+           "744": "f:0x1.2484628eba180p-3",
+           "806": "f:0x1.02323ff852e00p-3",
+           "868": "f:0x1.c7db7f657cf80p-4",
+           "930": "f:0x1.9284d95e3a480p-4",
+           "992": "f:0x1.6388b612adf00p-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_alt_pi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "d8e1dd2bba30e15e3eef96293794a16a2f492b66592cd35113409b8469deee8a",
+          "6aacc7dff7b6c9a97753ebd15ff852bd79e0d31322a69a3f1fcb1bf3be118aab",
+          "7e21cd159127165faa0646cb68ef6731d44e2b7de009cfd101b6eb9e3719ab16",
+          "0562c231e9f93c8a68a6e370d7f6e539404f2406187820f78accafadb0b244e3",
+          "5d550cf9a78f47dc39022cfe611190f3124f7626a306e19e04159d7627323c09",
+          "b07949573fd67727244d6e0850bee004e02f6ba0bda0b575f43e4456decc5c56",
+          "f3b0df27b007e36cd67c56793beb5c621b776a4c664c7098c12d1bc7f95464ce",
+          "893fcb5ee8f5c50d5fea73386874cdd075927f5c1356cf422ef37954f9c22119",
+          "7ee932c6af3be95beb6e91c237b904fd158281232bc5956368a8f5de4273213e",
+          "56fcc5f70e5338ef0c047ff79094464e8634d398e9a429b42961223b093a3548"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.3e3b4556b6f38p-4",
+           "62": "f:0x1.9fbd4edb3c1eep-4",
+           "124": "f:0x1.f5789bcd43b41p-4",
+           "186": "f:0x1.1d7254ab67ac2p-3",
+           "248": "f:0x1.36c3a0214fa9ap-3",
+           "310": "f:0x1.47a495fae8678p-3",
+           "372": "f:0x1.51c1835709ebep-3",
+           "434": "f:0x1.569763ffc13e4p-3",
+           "496": "f:0x1.575ea419e19f4p-3",
+           "558": "f:0x1.55134b618d86ap-3",
+           "620": "f:0x1.507bd893a9cddp-3",
+           "682": "f:0x1.4a33f25053836p-3",
+           "744": "f:0x1.42b6573b67a17p-3",
+           "806": "f:0x1.3a64586b0e15fp-3",
+           "868": "f:0x1.318b7a5377057p-3",
+           "930": "f:0x1.2869b6909e46ap-3",
+           "992": "f:0x1.1f30ac9949aa9p-3"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_alt_damp": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "face1cd3f5e3e7c9f4776d9cafb12cdff274f017cc6395885df5324819c47b99",
+          "8406e9a1b5e233fed6cc0e23115b08e49cced6b3f89b81965926c638b9720e94",
+          "d82244e837e4ea142c64c7100969329b3990af3bad4660c6a2e8aabdd9ab5e35",
+          "022660bccae9fd39683f0ccfe9b3550109fc82ab57948a3829dcb35781e497a9",
+          "169f20b338dea51cbd179078bd4354591095a41fdad62b5ba7b1903aee005111",
+          "c2d8691d2f9205117df9d1cb0c50a4b1d052d7c7d8301c61d4d9db20bf237e47",
+          "4b2e15827f9858f74abb9542d4a741c84645cefd051a1bba34796dacf80b1908",
+          "737523ca36a35682e7462eba305dc4a1bd3f02bb4f1969eed9315a9fb8e7949b",
+          "aeac11f84b6704e063df18750be7da3ce0f8168249315fac9be6fd6ce4469ef3",
+          "784d0b15fb43994f52c04b013ed3aa728893adc8a12b6c519d6923eeb5f31d6a"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.962f766193ec9p-59",
+           "62": "f:-0x1.3d673b2bbc7fdp-9",
+           "124": "f:-0x1.2851626ccf924p-7",
+           "186": "f:-0x1.373255320632ap-6",
+           "248": "f:-0x1.d758aa44fe397p-6",
+           "310": "f:-0x1.26067f49bdecap-5",
+           "372": "f:-0x1.4b284e75f08b2p-5",
+           "434": "f:-0x1.5f84503c572f0p-5",
+           "496": "f:-0x1.66f4c3cdc851dp-5",
+           "558": "f:-0x1.64d518425f171p-5",
+           "620": "f:-0x1.5be099dd52409p-5",
+           "682": "f:-0x1.4e24f24f0ad85p-5",
+           "744": "f:-0x1.3d29964b87df5p-5",
+           "806": "f:-0x1.2a12d0a702a46p-5",
+           "868": "f:-0x1.15ba9723d4460p-5",
+           "930": "f:-0x1.00c3a944138c4p-5",
+           "992": "f:-0x1.d74ff631f6bd2p-6"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_alt_raw": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "5644d6aff97279327f6c619ed520cb5ac5d9d7f1c462f052e11545a4461c7767",
+          "ebe9ac67cc0b9abeac67202998cd48896ea2f35402a281930a4f1e5fa3c69a94",
+          "ca85f199fb441b9ed2c7be18087c26d2d026b12451caf1f960959a139619c234",
+          "c9bf4e6dec45c9a4e3f0131308141d2a270592b595ff6d9abfddd1d23c8e2412",
+          "2e2eb9f70948146d1cf41c12181cb0b9e9805e10774a43f56c7feacd377c5fe8",
+          "39579fb52d982e355d3e624b7fa04c8143ab51720ddcd05413df23e475be482c",
+          "32e7d7bd6142dc77380e7116186c6ec566390ba53146457982b126cd807d5118",
+          "0bad1121e648e53e31d36d375187ab0418f6832e190ac059b491235670212cea",
+          "59580d7db7db2cc54ac854b62b36a38792db5f0f9de4f4e45fb7b3a9c6e48c02",
+          "f4512db6b7ba128bed3576db321780b4f7f6a4ddf9d220b6eb1847cd84a66dd1"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.3e3b4556b6f38p-4",
+           "62": "f:0x1.95d21501de3aep-4",
+           "124": "f:0x1.d06e6f7fa9c1cp-4",
+           "186": "f:0x1.ed18140a4dcbap-4",
+           "248": "f:0x1.f7b115b15fc4ep-4",
+           "310": "f:0x1.fc45ec50f1d8bp-4",
+           "372": "f:0x1.fdeedf731b923p-4",
+           "434": "f:0x1.fd6c9fe156e50p-4",
+           "496": "f:0x1.fb42e64cdf15ap-4",
+           "558": "f:0x1.f7bc0aa1eb81cp-4",
+           "620": "f:0x1.f3076438aa7b6p-4",
+           "682": "f:0x1.ed556b79219aap-4",
+           "744": "f:0x1.e6d7e3510b534p-4",
+           "806": "f:0x1.dfbf48829ad9bp-4",
+           "868": "f:0x1.d839a91503e7ep-4",
+           "930": "f:0x1.d071987f32c72p-4",
+           "992": "f:0x1.c88d5ba615a5ep-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_spd_pi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "0187c928f19e05b5e201049b43ddd2df2ede929426b06489b5751c1192eceb34",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "479def1b90f403a6bdb7778fbb2037071b7575c370a82b8e1beae3ea13503585",
+          "8d8a53a788f343ba8eefa478f5d4f8d7ac92760afe95e8242e38f714cc808bf5",
+          "118e10db9c3016ac36bea2ee80be55290880af5631133341f235254714c3e74c",
+          "68a5994cc2baf754e5d1cd72d45e03db043689e17230a727412181617dfccdca",
+          "b2f220cffcc831c082f91ee47bb186b7e0a0d865bf531c73808336de86f7dec8",
+          "380b2d12c41c612618153ef8b8f519d911279b1e389ec915127addd9db54e9ba",
+          "96ed80237494036816ae93e3b6286b1554927497db3e23bc1012237a986874e6"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.232c76bf7fc89p-1",
+           "62": "f:0x1.2e0eaaf4b62f6p-3",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x1.c77645b72be80p-8",
+           "434": "f:0x1.9ef184d5fb938p-5",
+           "496": "f:0x1.be64090c26520p-4",
+           "558": "f:0x1.6537e9d07d5b3p-3",
+           "620": "f:0x1.eeb895c13bdeap-3",
+           "682": "f:0x1.39f3d68bedd8fp-2",
+           "744": "f:0x1.77c68456094b1p-2",
+           "806": "f:0x1.af388e3a23d6cp-2",
+           "868": "f:0x1.df70de9889a5ap-2",
+           "930": "f:0x1.04135e0c9133ap-1",
+           "992": "f:0x1.14bc96d6ac057p-1"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_hdg_pi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "2f90903a9b23eac40ef4a4e09c69b64a96adb6788095c90b3df25e651a069e3a",
+          "62f3dd0523495f1809eacde82c49b8a49025d370b9f91b9a60b2a6423992e4a8",
+          "3e752c09774829448c3e15efe9cfdb50529b6817f1424669da395f60e9bcb3cd",
+          "cab2fa88ea27fcea315e73dfc4a45b4c7ed7e8f2be324f89e45a15af5e66452c",
+          "c42c3d574e0df7d6e9127e34a6cf799cadd74164b47178b2d5933e688a16be6e",
+          "6f5b7065a4805117adf56c9dd2bb4e902b007d1fd5e9231dca3811a78d6cceac",
+          "0a2e14b6f629a41dc1bfc2f3dcfd76830953584d0c6356345a8ff2da1c22b3da",
+          "b464c953bb5bba3bee72a08e7363f3cb4056390644e2c6320bdb202ba52f5742",
+          "ad82278ed0b89e65527f6a56fa927d51b6d7f79613c247d9ee77ded7d1899ba4",
+          "07bd709c7b23ecc46a33809393623da4fd12d16054243ff863139877f0a6a50d"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.04d66f7470000p-7",
+           "62": "f:0x1.5d892d870e0e0p-2",
+           "124": "f:0x1.926c4762e5380p-2",
+           "186": "f:0x1.7a1d8803e9040p-2",
+           "248": "f:0x1.67b2f0439e120p-2",
+           "310": "f:0x1.4d516310f9fc0p-2",
+           "372": "f:0x1.2ccfb426a8b60p-2",
+           "434": "f:0x1.0d0b5825ae1a0p-2",
+           "496": "f:0x1.dedd9b8f55b80p-3",
+           "558": "f:0x1.a85ce7e1e28c0p-3",
+           "620": "f:0x1.772edd1206040p-3",
+           "682": "f:0x1.4b5be959d34c0p-3",
+           "744": "f:0x1.2484628eba180p-3",
+           "806": "f:0x1.02323ff852e00p-3",
+           "868": "f:0x1.c7db7f657cf80p-4",
+           "930": "f:0x1.9284d95e3a480p-4",
+           "992": "f:0x1.6388b612adf00p-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_pitch_ff": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "e8c245a12f01419a9e366753e5172eea20bc7a50627055bff1a4ff6262f00ab6",
+          "d15fc57ebe26d55843c36bbe95fb921c10c25b7c18a441f6674f2f2d61be8b6f",
+          "16f93807d59b922038ad29cbd768ce42c0c5f723a1b6a84343bb399c470eb865",
+          "4f7e0fc2c7942c613509137f36a0543881fd7fe4bd1397a72bd11d35b3860aa6",
+          "9a8f324131575e140c2c54d805a6f105411a126abd0ac23b6466283e99eea8a3",
+          "c658e17ab5c5ec4dd215f4dcef1dff03b0a015ba13d7c8936ff37e25dcb14435",
+          "373e836241ec38bf44d2582ef7503d5e9174eb1683c3bbf4c5e50732428520f5",
+          "a7e592edacd25565867eb8d57b0167000953e2bcfb27b0dc7d7765192a2699ed",
+          "d583f356fb44bc71a3e8890936d2bf560b26023a66e48850f12d73685eee1e2f",
+          "c4acec5322e21c6a3993c16822ece70b5e5366274d3d8f6c1cd940dab5a8a7b8"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.a93ce96326667p-20",
+           "62": "f:0x1.9141567cac61ap-9",
+           "124": "f:0x1.0e697ea0b1e8dp-8",
+           "186": "f:0x1.d9a84e7f48080p-9",
+           "248": "f:0x1.aa354a7e8024dp-9",
+           "310": "f:0x1.6b352ff2d9400p-9",
+           "372": "f:0x1.254f843d73780p-9",
+           "434": "f:0x1.d1cb2f2415767p-10",
+           "496": "f:0x1.6ea5f12a9fb00p-10",
+           "558": "f:0x1.1e811cce45d9ap-10",
+           "620": "f:0x1.be1e5420cf200p-11",
+           "682": "f:0x1.5ae7761ffd200p-11",
+           "744": "f:0x1.0dafc0657e6cdp-11",
+           "806": "f:0x1.a36f828f41000p-12",
+           "868": "f:0x1.46618d438559ap-12",
+           "930": "f:0x1.fc5cd0a2c64cdp-13",
+           "992": "f:0x1.8c41fce211e67p-13"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_thr_ff": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945",
+          "8dc04e3207f48ae3e8cbc228c61c12bcd1a489f214b10a715eaf41823d00b945"
+         ],
+         "samples": {
+          "dict": {
+           "0": null,
+           "62": null,
+           "124": null,
+           "186": null,
+           "248": null,
+           "310": null,
+           "372": null,
+           "434": null,
+           "496": null,
+           "558": null,
+           "620": null,
+           "682": null,
+           "744": null,
+           "806": null,
+           "868": null,
+           "930": null,
+           "992": null
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_theta_raw": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "967d7ab8065f681f81878fd85dc512bb073952d20fe5866af9e9f9e99f585c9b",
+          "0900bb4662df3f306bafb70e37fcc3c817750a742118d9f344a5678dc15231c2",
+          "5149137cfe853e9a1523a2188f71311654e66ce8d9faa6e29388c8c695faba05",
+          "441c9c9c3ef37646c52f2e1d1f197def0b0204800f89b9fc10ffeab57cec1f06",
+          "139b9988f6a12bf3e0b2de32387b151c91acb7b1935c6d4e1c4ead1ce1998ec0",
+          "5cf8c4a87a19b0c8862afca6d0cc2be3cd934c79092f30c8627f23887a61c890",
+          "4e038454d0347919d2688d604584c84b0e759b9a8649e643c603e99ce4dd34a0",
+          "503541049e61894111c647a69fab32f53569e4141e57ada07a90cfa3c8fb4b6a",
+          "11a7fe1defef1bff76df0354d9b27ecef6cee8ad6a35015b6420cc243d322c34",
+          "cf01ae09da47e51dae3d6c27dff43520c083dba28d63ea46e394d0c0c2d6f62f"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.3e3cee93a056ap-4",
+           "62": "f:0x1.a25c1fb5c39dfp-4",
+           "124": "f:0x1.e1550769b4e05p-4",
+           "186": "f:0x1.fbe5567e480bep-4",
+           "248": "f:0x1.02816002a9e30p-3",
+           "310": "f:0x1.03cfcae844516p-3",
+           "372": "f:0x1.038cadca83970p-3",
+           "434": "f:0x1.0259e64ef39d7p-3",
+           "496": "f:0x1.007ebf08c4ca3p-3",
+           "558": "f:0x1.fc360f1524992p-4",
+           "620": "f:0x1.f683a0e0ec19ap-4",
+           "682": "f:0x1.f00b3a656194ep-4",
+           "744": "f:0x1.e8f342d1d6502p-4",
+           "806": "f:0x1.e162b8052a1abp-4",
+           "868": "f:0x1.d9800aa2476d4p-4",
+           "930": "f:0x1.d16fc6e7842a4p-4",
+           "992": "f:0x1.c9537ca486aedp-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_vs_pi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_theta_alt": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "5644d6aff97279327f6c619ed520cb5ac5d9d7f1c462f052e11545a4461c7767",
+          "ebe9ac67cc0b9abeac67202998cd48896ea2f35402a281930a4f1e5fa3c69a94",
+          "ca85f199fb441b9ed2c7be18087c26d2d026b12451caf1f960959a139619c234",
+          "c9bf4e6dec45c9a4e3f0131308141d2a270592b595ff6d9abfddd1d23c8e2412",
+          "2e2eb9f70948146d1cf41c12181cb0b9e9805e10774a43f56c7feacd377c5fe8",
+          "39579fb52d982e355d3e624b7fa04c8143ab51720ddcd05413df23e475be482c",
+          "32e7d7bd6142dc77380e7116186c6ec566390ba53146457982b126cd807d5118",
+          "0bad1121e648e53e31d36d375187ab0418f6832e190ac059b491235670212cea",
+          "59580d7db7db2cc54ac854b62b36a38792db5f0f9de4f4e45fb7b3a9c6e48c02",
+          "f4512db6b7ba128bed3576db321780b4f7f6a4ddf9d220b6eb1847cd84a66dd1"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.3e3b4556b6f38p-4",
+           "62": "f:0x1.95d21501de3aep-4",
+           "124": "f:0x1.d06e6f7fa9c1cp-4",
+           "186": "f:0x1.ed18140a4dcbap-4",
+           "248": "f:0x1.f7b115b15fc4ep-4",
+           "310": "f:0x1.fc45ec50f1d8bp-4",
+           "372": "f:0x1.fdeedf731b923p-4",
+           "434": "f:0x1.fd6c9fe156e50p-4",
+           "496": "f:0x1.fb42e64cdf15ap-4",
+           "558": "f:0x1.f7bc0aa1eb81cp-4",
+           "620": "f:0x1.f3076438aa7b6p-4",
+           "682": "f:0x1.ed556b79219aap-4",
+           "744": "f:0x1.e6d7e3510b534p-4",
+           "806": "f:0x1.dfbf48829ad9bp-4",
+           "868": "f:0x1.d839a91503e7ep-4",
+           "930": "f:0x1.d071987f32c72p-4",
+           "992": "f:0x1.c88d5ba615a5ep-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_theta_vs": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_theta_pitch": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "ap_theta_src": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "5644d6aff97279327f6c619ed520cb5ac5d9d7f1c462f052e11545a4461c7767",
+          "ebe9ac67cc0b9abeac67202998cd48896ea2f35402a281930a4f1e5fa3c69a94",
+          "ca85f199fb441b9ed2c7be18087c26d2d026b12451caf1f960959a139619c234",
+          "c9bf4e6dec45c9a4e3f0131308141d2a270592b595ff6d9abfddd1d23c8e2412",
+          "2e2eb9f70948146d1cf41c12181cb0b9e9805e10774a43f56c7feacd377c5fe8",
+          "39579fb52d982e355d3e624b7fa04c8143ab51720ddcd05413df23e475be482c",
+          "32e7d7bd6142dc77380e7116186c6ec566390ba53146457982b126cd807d5118",
+          "0bad1121e648e53e31d36d375187ab0418f6832e190ac059b491235670212cea",
+          "59580d7db7db2cc54ac854b62b36a38792db5f0f9de4f4e45fb7b3a9c6e48c02",
+          "f4512db6b7ba128bed3576db321780b4f7f6a4ddf9d220b6eb1847cd84a66dd1"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.3e3b4556b6f38p-4",
+           "62": "f:0x1.95d21501de3aep-4",
+           "124": "f:0x1.d06e6f7fa9c1cp-4",
+           "186": "f:0x1.ed18140a4dcbap-4",
+           "248": "f:0x1.f7b115b15fc4ep-4",
+           "310": "f:0x1.fc45ec50f1d8bp-4",
+           "372": "f:0x1.fdeedf731b923p-4",
+           "434": "f:0x1.fd6c9fe156e50p-4",
+           "496": "f:0x1.fb42e64cdf15ap-4",
+           "558": "f:0x1.f7bc0aa1eb81cp-4",
+           "620": "f:0x1.f3076438aa7b6p-4",
+           "682": "f:0x1.ed556b79219aap-4",
+           "744": "f:0x1.e6d7e3510b534p-4",
+           "806": "f:0x1.dfbf48829ad9bp-4",
+           "868": "f:0x1.d839a91503e7ep-4",
+           "930": "f:0x1.d071987f32c72p-4",
+           "992": "f:0x1.c88d5ba615a5ep-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "theta_lim": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "967d7ab8065f681f81878fd85dc512bb073952d20fe5866af9e9f9e99f585c9b",
+          "0900bb4662df3f306bafb70e37fcc3c817750a742118d9f344a5678dc15231c2",
+          "5149137cfe853e9a1523a2188f71311654e66ce8d9faa6e29388c8c695faba05",
+          "441c9c9c3ef37646c52f2e1d1f197def0b0204800f89b9fc10ffeab57cec1f06",
+          "139b9988f6a12bf3e0b2de32387b151c91acb7b1935c6d4e1c4ead1ce1998ec0",
+          "5cf8c4a87a19b0c8862afca6d0cc2be3cd934c79092f30c8627f23887a61c890",
+          "4e038454d0347919d2688d604584c84b0e759b9a8649e643c603e99ce4dd34a0",
+          "503541049e61894111c647a69fab32f53569e4141e57ada07a90cfa3c8fb4b6a",
+          "11a7fe1defef1bff76df0354d9b27ecef6cee8ad6a35015b6420cc243d322c34",
+          "cf01ae09da47e51dae3d6c27dff43520c083dba28d63ea46e394d0c0c2d6f62f"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.3e3cee93a056ap-4",
+           "62": "f:0x1.a25c1fb5c39dfp-4",
+           "124": "f:0x1.e1550769b4e05p-4",
+           "186": "f:0x1.fbe5567e480bep-4",
+           "248": "f:0x1.02816002a9e30p-3",
+           "310": "f:0x1.03cfcae844516p-3",
+           "372": "f:0x1.038cadca83970p-3",
+           "434": "f:0x1.0259e64ef39d7p-3",
+           "496": "f:0x1.007ebf08c4ca3p-3",
+           "558": "f:0x1.fc360f1524992p-4",
+           "620": "f:0x1.f683a0e0ec19ap-4",
+           "682": "f:0x1.f00b3a656194ep-4",
+           "744": "f:0x1.e8f342d1d6502p-4",
+           "806": "f:0x1.e162b8052a1abp-4",
+           "868": "f:0x1.d9800aa2476d4p-4",
+           "930": "f:0x1.d16fc6e7842a4p-4",
+           "992": "f:0x1.c9537ca486aedp-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "lim_cap": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "b5b5dc3060d17503f967540177c77b8d4f376017b912a692bd6f8457d0f8ac24",
+          "93064d4baccada71711fd7a17d4ff872b826e262ff56ac52d38bcd087a1ab9be",
+          "7e24b28d549392a8af5a8233606b4ab5335283d6d64e835a3c362255c38b4e9d",
+          "037748d36d6e6d9358969ddd5e022308104aa7c41778099f54f6fa041211d2d5",
+          "53eac7c2a3ae1aa7681481af3120e22b0dc596c03c17b4e2c17f0263eb7a3664",
+          "143e73d18e427da5f24eed7f58c13fd9e26642f6a634af05ad56686ee35f0bba",
+          "dbcfc40a59c99ef5d5b66fd2a7e9b2cd21958a2f66a39562bf11f485271381cd",
+          "982aa04801e41732e45232f1570fe888929f7ba0a5bf021bc10b509d174f924f",
+          "c4af96da88a7dfa7e66cd6b812cfea62079bff1568c314f5bfbe16e50e38832b",
+          "053465c8174a407ecc3615ba22539016902efa033ea9880aaa5e1c00f6215dfd"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.23d70a3d70a3ep-2",
+           "62": "f:0x1.27f3bd735aebbp-2",
+           "124": "f:0x1.2974adcef0cf3p-2",
+           "186": "f:0x1.2d83cf83de3a2p-2",
+           "248": "f:0x1.3695cc1da5e82p-2",
+           "310": "f:0x1.3e767a55e7ad7p-2",
+           "372": "f:0x1.442485e3c46b0p-2",
+           "434": "f:0x1.4804650342e9ap-2",
+           "496": "f:0x1.4a504d05c8508p-2",
+           "558": "f:0x1.4b52003787990p-2",
+           "620": "f:0x1.4b57d728c60b0p-2",
+           "682": "f:0x1.4aa1559567a7cp-2",
+           "744": "f:0x1.496040d964ffdp-2",
+           "806": "f:0x1.47bc0a3764313p-2",
+           "868": "f:0x1.45d3bbf2d5a4ep-2",
+           "930": "f:0x1.43bfa3a141523p-2",
+           "992": "f:0x1.4192c796c39ecp-2"
+          }
+         }
+        }
+       }
+      }
+     },
+     "pitch": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "842616797d6a15b6b715c771105582a526e5502618eede16c96dd4a7d6f5fedd",
+          "7098d376017a8b83197cbba2a6b78a6ecf473aebbddd8f69f71b92776c5e6f3a",
+          "6b4b883e1bd14cf4da302efe0519e15fbdb8edab651949e93b166f33cdb64b2e",
+          "9df5dc7457680c32be8b16364d9ac71a6ab0fb2a28d4861294969f54dfeb4cea",
+          "fa01c040f5d22f38772a8bb992584960ff9106fd20b5415c9f158e155dd0f287",
+          "1ad32e34f986ead64d5d3713a019624ff1bdcf99c2b29fd1f02b3c767821e746",
+          "3a178681f376c2005b3b8898bb077cd7cdd9ee2eec7df1df42209899f3efb251",
+          "f43f7e6f87fefa603d747ab65bc513de07be6750fb316439a073ad6884eadfd1",
+          "0cfd78f22abe1203c0bc187f27b836fdb415b9b159e2eb89db4aad9666ecb07f",
+          "f5767eabd6c30f83966563095d313f815c9b0da141d9de65832552fab2949758"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:-0x1.6265a118f25eep-5",
+           "62": "f:-0x1.ac478fcbd6542p-5",
+           "124": "f:-0x1.fc4734b5cd43ep-5",
+           "186": "f:-0x1.0f7e2ddb70f02p-4",
+           "248": "f:-0x1.06ee51aafd22ep-4",
+           "310": "f:-0x1.f1403de8e39a2p-5",
+           "372": "f:-0x1.d86f09f115220p-5",
+           "434": "f:-0x1.c4c07df3eb40cp-5",
+           "496": "f:-0x1.b608b95ab7820p-5",
+           "558": "f:-0x1.ab9c10c7ba297p-5",
+           "620": "f:-0x1.a47369db36d11p-5",
+           "682": "f:-0x1.9fa91203478f1p-5",
+           "744": "f:-0x1.9c9063d2d2fc4p-5",
+           "806": "f:-0x1.9aa9c546648cdp-5",
+           "868": "f:-0x1.99990fafd11f9p-5",
+           "930": "f:-0x1.991d82c04d2b0p-5",
+           "992": "f:-0x1.990a6cffda5e4p-5"
+          }
+         }
+        }
+       }
+      }
+     },
+     "roll": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "a954087b690556c8297ffc0939228f153677787cce903c4fcd9a6ec62e4660a3",
+          "c472ee69ff7a8e9cf7344c6720edecd36ce870e2b84e99666891ff1f7aed01fa",
+          "ff746afa097e668dc4d378de1b514499dc8a0585bbc43465f0f434d8abb88971",
+          "af666999480988351cd5148c9e6b8536d5060ea135c7c222c9eae2df2df34d1b",
+          "5aa8405e6d7bd2bb5f59b8b8e4f211e51946b907910e17c8dd100ce4d976e2fd",
+          "9e49561ab749395cb902cfd43a440129cbbaa665d8a4766a705e9bcf1d93cdf0",
+          "dd2251430556b383be8fd35beaa8d6a1cf18159560fb5532d45305a2bb12dab1",
+          "4efa432474eb49219916e4bf06574692e38fb58024b1aceb6d5477393384d9ef",
+          "b8bee673b727dfa3549e51b8513cf9746931ffad406ce063e3d0bb9fb0dc7beb",
+          "da2ddfb79ee12f852b13830dcb7f5edcec3975f643fb5006c8b1cac8d4dc98ac"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.cfb61b79aaaaap-7",
+           "62": "f:-0x1.282e0fb8626c0p-8",
+           "124": "f:-0x1.9713eab60d3b0p-9",
+           "186": "f:0x1.731293f51d4c0p-13",
+           "248": "f:-0x1.428cc83c02100p-10",
+           "310": "f:-0x1.e2e8621feea50p-10",
+           "372": "f:-0x1.a8fbeebe04190p-10",
+           "434": "f:-0x1.895346c3688e0p-10",
+           "496": "f:-0x1.72d4b8fb13d00p-10",
+           "558": "f:-0x1.52fb8a359e600p-10",
+           "620": "f:-0x1.337d16a396890p-10",
+           "682": "f:-0x1.1717df0a5ee60p-10",
+           "744": "f:-0x1.f93bb3a4be9b0p-11",
+           "806": "f:-0x1.c7ba6a5d3a890p-11",
+           "868": "f:-0x1.99f19723bd180p-11",
+           "930": "f:-0x1.6fcc93f6a7ae0p-11",
+           "992": "f:-0x1.4923885e15470p-11"
+          }
+         }
+        }
+       }
+      }
+     },
+     "yaw": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "e0cd4fef0e935d2b50b2e1e40916403310018279595b65e723b120eb33fd4baa",
+          "9a4af011aa71f88686282c4c9c01b514eda80ca2458979c8067199d241f424f1",
+          "40a4a9e3387a3ec8152eda25e159dc0edcb7e93910b057f79c51ee90dbacfd75",
+          "0d85f729cfd6a1cdd9ec092e91d24434db2f6e1e25341feb756d0780d397cf8d",
+          "909a2877e89dc3b40ba828c739613f7e528e5a68602192c5151bc5111490e1b9",
+          "d4dd2ac53f5cc4b0e0ceaed24e560bb836c34b8066e79bb71f740f551ac55ac7",
+          "38a46013a2d8e2a8623c21d0154700afaee386d68f38ed96f41606a1278226a8",
+          "4ba3ae91311d3426eea23ac6a3af09deae24016e05e546af234780356dfa37dc",
+          "943a808f1c77a041b0687f43c04311fa251b3ace942b00523d0e82e9a6a7d049",
+          "cc5af14dd1795db00f69580987535ca1aab87a0f89a184a1e1c8c3171bbb0307"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.ac091f38f1e5dp-7",
+           "124": "f:0x1.75c8e1482a3bap-6",
+           "186": "f:0x1.b1b52fddb51f2p-8",
+           "248": "f:-0x1.03d6079a79865p-10",
+           "310": "f:-0x1.c94be5bbb414ap-10",
+           "372": "f:-0x1.42598c1601ed8p-9",
+           "434": "f:-0x1.863e69506dceap-9",
+           "496": "f:-0x1.8ab6d04ae3704p-9",
+           "558": "f:-0x1.7c0d864217191p-9",
+           "620": "f:-0x1.69f65c650e78ap-9",
+           "682": "f:-0x1.54149a20070d0p-9",
+           "744": "f:-0x1.3bd099e0f53ecp-9",
+           "806": "f:-0x1.22f6a47638e3bp-9",
+           "868": "f:-0x1.0a55aaa95ced1p-9",
+           "930": "f:-0x1.e4c1c2ae016e4p-10",
+           "992": "f:-0x1.b6eef60118ff7p-10"
+          }
+         }
+        }
+       }
+      }
+     },
+     "pitch_pi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "afa5ed776324ccb621f961c53ab90401b8cd3852659433ebedc40f040a9086bd",
+          "0670ee311e5fd9dedae1bcc92c49292700f232598c8d7e8b34e0b4d8284dee84",
+          "b926896540f23258ffffcc526e2876dcc4fe31c070ee553b87e6349561dd9b1c",
+          "48ffa2293ea873c1b2b04111275c3ddbb6e90237c8f9718a07c898195bddcbd6",
+          "20a347f6881ce42fee481fd810ccdc38530343f7154c2be8c270f0e8ba81afcc",
+          "732a0d7ffcf998e4f35a09a48ae1b350483444c24fc58b878618acf965798204",
+          "e88b32be1d274777a0898b13575c9983d622e396805d51594cf318b52978a571",
+          "758dc5f79c2ca0c82c3d860431b983a84ce616533d95929de882706f9ae0a5c1",
+          "fb810685d86df3a494fb43be2d01061a5bc7f76677012b0f35c3a464f5322ae7",
+          "da7dd7833919cf9509c37f60e5d139d42cfe8e4c18db4cf0ed871209ab094028"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:-0x1.6265a118f25eep-5",
+           "62": "f:-0x1.43fa3fa1de0cdp-4",
+           "124": "f:-0x1.769976105a80cp-4",
+           "186": "f:-0x1.5dc8182ac9debp-4",
+           "248": "f:-0x1.33d6817667d40p-4",
+           "310": "f:-0x1.174e7fd1116c0p-4",
+           "372": "f:-0x1.00ee5b864d2c7p-4",
+           "434": "f:-0x1.ddfa818d0cbcfp-5",
+           "496": "f:-0x1.c35033a5385c1p-5",
+           "558": "f:-0x1.afcc17cded6b7p-5",
+           "620": "f:-0x1.a186d33922f07p-5",
+           "682": "f:-0x1.97423f6770c6ep-5",
+           "744": "f:-0x1.900acf69ceb5ap-5",
+           "806": "f:-0x1.8b22aca04b122p-5",
+           "868": "f:-0x1.87fbe8f1af2b6p-5",
+           "930": "f:-0x1.862c9554b8378p-5",
+           "992": "f:-0x1.8564d36926396p-5"
+          }
+         }
+        }
+       }
+      }
+     },
+     "pitch_damp": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "656a03d2f2048a8a2e0f86cdffb54d7780c7d3bd920556a3692cee0215321072",
+          "da465c52909cbae55d891e632902657009938fb845c33fdc1e97098a07a7cf90",
+          "307db649fa5be1d90de426e83c5ac8eb7097ea77f2e53665f83d22099aa14f87",
+          "73f389a59e856d523a8bac935517dfd2e01653cfc6711f2c4f1f9fa8497b31bd",
+          "8ece73d4416554211755f68ef4cbd0da44b7675bb0eaf2120a1f5ea91f1fdf54",
+          "06f1e765998dd864523431b727d905b4001f83a111389f381994dc42905b439e",
+          "66ca7758baaf2cda2575267147f5caebfb337223a43097d7cee4fdf33268573f",
+          "48258264c6a5805747508c44e11416ccb0e3589203893592848d590637805c19",
+          "c1c4a50f474e84193c6b0aeb54b6bc553157d6226cf3c91f0c83f981905da602",
+          "6a0ec2083ad916972c2d3efd5c2fe8b810c79743d0b57c62e8ed9cd14a2f1937"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.b759deefcb8b1p-6",
+           "124": "f:0x1.e1d76ed5cf7b5p-6",
+           "186": "f:0x1.3927a93d63ba3p-6",
+           "248": "f:0x1.67417e5b5588cp-7",
+           "310": "f:0x1.eae60dc9f9ef4p-8",
+           "372": "f:0x1.4b6d68dc29b73p-8",
+           "434": "f:0x1.93a0399217c31p-9",
+           "496": "f:0x1.a8ef49501b429p-10",
+           "558": "f:0x1.0c01c18cd07ffp-11",
+           "620": "f:-0x1.764b5109f0513p-12",
+           "682": "f:-0x1.0cda537ad905dp-10",
+           "744": "f:-0x1.90b28d2088d44p-10",
+           "806": "f:-0x1.f0e314c32f559p-10",
+           "868": "f:-0x1.19d26be21f429p-9",
+           "930": "f:-0x1.2f0ed6b94f383p-9",
+           "992": "f:-0x1.3a59996b424d9p-9"
+          }
+         }
+        }
+       }
+      }
+     },
+     "pitch_raw": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "842616797d6a15b6b715c771105582a526e5502618eede16c96dd4a7d6f5fedd",
+          "7098d376017a8b83197cbba2a6b78a6ecf473aebbddd8f69f71b92776c5e6f3a",
+          "6b4b883e1bd14cf4da302efe0519e15fbdb8edab651949e93b166f33cdb64b2e",
+          "9df5dc7457680c32be8b16364d9ac71a6ab0fb2a28d4861294969f54dfeb4cea",
+          "fa01c040f5d22f38772a8bb992584960ff9106fd20b5415c9f158e155dd0f287",
+          "1ad32e34f986ead64d5d3713a019624ff1bdcf99c2b29fd1f02b3c767821e746",
+          "3a178681f376c2005b3b8898bb077cd7cdd9ee2eec7df1df42209899f3efb251",
+          "f43f7e6f87fefa603d747ab65bc513de07be6750fb316439a073ad6884eadfd1",
+          "0cfd78f22abe1203c0bc187f27b836fdb415b9b159e2eb89db4aad9666ecb07f",
+          "f5767eabd6c30f83966563095d313f815c9b0da141d9de65832552fab2949758"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:-0x1.6265a118f25eep-5",
+           "62": "f:-0x1.ac478fcbd6542p-5",
+           "124": "f:-0x1.fc4734b5cd43ep-5",
+           "186": "f:-0x1.0f7e2ddb70f02p-4",
+           "248": "f:-0x1.06ee51aafd22ep-4",
+           "310": "f:-0x1.f1403de8e39a2p-5",
+           "372": "f:-0x1.d86f09f115220p-5",
+           "434": "f:-0x1.c4c07df3eb40cp-5",
+           "496": "f:-0x1.b608b95ab7820p-5",
+           "558": "f:-0x1.ab9c10c7ba297p-5",
+           "620": "f:-0x1.a47369db36d11p-5",
+           "682": "f:-0x1.9fa91203478f1p-5",
+           "744": "f:-0x1.9c9063d2d2fc4p-5",
+           "806": "f:-0x1.9aa9c546648cdp-5",
+           "868": "f:-0x1.99990fafd11f9p-5",
+           "930": "f:-0x1.991d82c04d2b0p-5",
+           "992": "f:-0x1.990a6cffda5e4p-5"
+          }
+         }
+        }
+       }
+      }
+     },
+     "roll_pi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "eb651711abc8dfd5658220eee4f083b0f7ae73d2e8bddbde837e1b077c949594",
+          "a6e5de279316ddd0b3896414244cd2d606aafdbbc1b08f8f292756e44624a8e5",
+          "e218be91ced1de9c7c7e5c1a9de116ce7bfae823c5ec7a8dbadca24adc6e94a3",
+          "f0f18e17c7cf5947022214167d3fcd21caa5318f0bb1a965b0e5943618db277b",
+          "3855a0a5824404b6111b349ddcae1f3536f77e6a2da5cb137845dc6e7cc95716",
+          "4028bc1781aad38494aec1fe600383d4dedbbd25f55cbc1a77f79f38013ee17c",
+          "440ccab54b29275c32de45dc4faaca5b89032553a33001997aabb0575d07b11c",
+          "9abec9395de983a518b727617a3864310814945e9dfd5cfe93f737ac751b901b",
+          "2b4075dbba673536ef3b4fe5d07ec7c0d93664618ce417dd59c195d6f555bc9b",
+          "797b24684be87dcd7ded42e70a4a6118683560fddcbf6a449b88972875902861"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.cfb61b79aaaaap-7",
+           "62": "f:0x1.3b362622770bfp-3",
+           "124": "f:0x1.160fc5b13911ep-7",
+           "186": "f:-0x1.f1376b94b6f28p-7",
+           "248": "f:-0x1.c0759b525d168p-7",
+           "310": "f:-0x1.4c3bdf3e2c07cp-6",
+           "372": "f:-0x1.79a004cb398b2p-6",
+           "434": "f:-0x1.6d5190b3087dcp-6",
+           "496": "f:-0x1.57fc7c68b6168p-6",
+           "558": "f:-0x1.3e82aa0761abap-6",
+           "620": "f:-0x1.2126d29b0d985p-6",
+           "682": "f:-0x1.038060a5dc22dp-6",
+           "744": "f:-0x1.cef0fdac5a61cp-7",
+           "806": "f:-0x1.9b201b06c4cb1p-7",
+           "868": "f:-0x1.6bf3611b0bf4cp-7",
+           "930": "f:-0x1.4181cb0cc4b81p-7",
+           "992": "f:-0x1.1b98f7c3a85adp-7"
+          }
+         }
+        }
+       }
+      }
+     },
+     "roll_damp": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "e79256f5743f11747d79727523f0ef9684fa3d3d0694d31d10cb30e8a92cbccf",
+          "d28e12d50b618c7170947a3a5d4b593554c0d5604640b65206e290af3c1b41bc",
+          "93782d0b9b94a9bc0fc797eb19814b83f9320cce966810f4d12748601c44997c",
+          "26c19cc14629cdd4b50acc42d4642ca7cd2e00f0b5586cd16ef804f9f266cd70",
+          "bee939edc415fbeb53c0ffa72af7af2926c5a9deff2d21d74b510ccd1c4d912a",
+          "1f99baa4b2d55e48feaa9d5c87e8268de9da055a378c50610221c1cd64678cd3",
+          "dd7a09244ac78d777de0808a4d1293801ee03df8ae1b87f9ed3d1735f813429a",
+          "4bd1443d64240a8ac4141e023d9d83e33a509201b47f241f82710b97ae27dc44",
+          "54ee5217bc97d26cafc48f005c6e68f4db0b53155319502800c3336210c70054",
+          "dd07a9a3b0d6e98dd1e9dc433a4b91d02e4c10ded229381d484ae0ad75d1fe79"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:-0x0.0p+0",
+           "62": "f:-0x1.447796a03a1f5p-3",
+           "124": "f:-0x1.7bd4c05ebc60ap-7",
+           "186": "f:0x1.f703b5e48b67bp-7",
+           "248": "f:0x1.9824024adcd48p-7",
+           "310": "f:0x1.2e0d591c2d1d7p-6",
+           "372": "f:0x1.5f1045df59499p-6",
+           "434": "f:0x1.54bc5c46d1f4ep-6",
+           "496": "f:0x1.40cf30d904d98p-6",
+           "558": "f:0x1.2952f16407c5ap-6",
+           "620": "f:0x1.0def0130d42fcp-6",
+           "682": "f:0x1.e41dc56a6c68ep-7",
+           "744": "f:0x1.af5d42720e781p-7",
+           "806": "f:0x1.7ea47460f1228p-7",
+           "868": "f:0x1.525447a8d0234p-7",
+           "930": "f:0x1.2a8501cd5a3d3p-7",
+           "992": "f:0x1.0706bf3dc7066p-7"
+          }
+         }
+        }
+       }
+      }
+     },
+     "roll_raw": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "a954087b690556c8297ffc0939228f153677787cce903c4fcd9a6ec62e4660a3",
+          "c472ee69ff7a8e9cf7344c6720edecd36ce870e2b84e99666891ff1f7aed01fa",
+          "ff746afa097e668dc4d378de1b514499dc8a0585bbc43465f0f434d8abb88971",
+          "af666999480988351cd5148c9e6b8536d5060ea135c7c222c9eae2df2df34d1b",
+          "5aa8405e6d7bd2bb5f59b8b8e4f211e51946b907910e17c8dd100ce4d976e2fd",
+          "9e49561ab749395cb902cfd43a440129cbbaa665d8a4766a705e9bcf1d93cdf0",
+          "dd2251430556b383be8fd35beaa8d6a1cf18159560fb5532d45305a2bb12dab1",
+          "4efa432474eb49219916e4bf06574692e38fb58024b1aceb6d5477393384d9ef",
+          "b8bee673b727dfa3549e51b8513cf9746931ffad406ce063e3d0bb9fb0dc7beb",
+          "da2ddfb79ee12f852b13830dcb7f5edcec3975f643fb5006c8b1cac8d4dc98ac"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.cfb61b79aaaaap-7",
+           "62": "f:-0x1.282e0fb8626c0p-8",
+           "124": "f:-0x1.9713eab60d3b0p-9",
+           "186": "f:0x1.731293f51d4c0p-13",
+           "248": "f:-0x1.428cc83c02100p-10",
+           "310": "f:-0x1.e2e8621feea50p-10",
+           "372": "f:-0x1.a8fbeebe04190p-10",
+           "434": "f:-0x1.895346c3688e0p-10",
+           "496": "f:-0x1.72d4b8fb13d00p-10",
+           "558": "f:-0x1.52fb8a359e600p-10",
+           "620": "f:-0x1.337d16a396890p-10",
+           "682": "f:-0x1.1717df0a5ee60p-10",
+           "744": "f:-0x1.f93bb3a4be9b0p-11",
+           "806": "f:-0x1.c7ba6a5d3a890p-11",
+           "868": "f:-0x1.99f19723bd180p-11",
+           "930": "f:-0x1.6fcc93f6a7ae0p-11",
+           "992": "f:-0x1.4923885e15470p-11"
+          }
+         }
+        }
+       }
+      }
+     },
+     "yaw_pi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "7cf6a716a6596c1628cac5dc798a4dde85608f29951672f83092accf030a3b89",
+          "f20d7dbad2a2c508fb954ec41dec3e2b496a2892192e857d591b5a00cf0dff24",
+          "7845bcdaac702c2cbf6d7f87be460aea032f4fd5a9a681ddcae11f7933d6d4a9",
+          "a2fd9723c501e83e34af0e4f8412b0827ffa23b44ee25f6629e7702d1af37a1a",
+          "816e07f41eab72847aac9ef11639c6539a6ea4855006b88290b57886706794f1",
+          "40d4cd18bec2931e2398ec9e396d57a2a1e1f3beccc33397fd75ab39b5ec5e07",
+          "569cc1cc5a0d12d9e0e96b2ebe60253e3e97b307cc4e9e80f1ebca6dd3604acb",
+          "b0eab19d42e2f82d7b7098a6189883f95e1958574366afec50212b3e6e458fc1",
+          "37377201daa4e6b122ff199ff8d9dfe5b1789372343e98c8afa751b07a04ec8b",
+          "b418351a7d040953b9dff286ae55981ea1b0de1d1f5610ab5103e09039991098"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:-0x1.3741fde077939p-7",
+           "124": "f:-0x1.c5990c971a338p-8",
+           "186": "f:-0x1.578c54c159df2p-11",
+           "248": "f:0x1.1e7942522b350p-11",
+           "310": "f:0x1.5ef2cb41ed354p-11",
+           "372": "f:0x1.02cf14f4f729dp-10",
+           "434": "f:0x1.20dd8130e54d3p-10",
+           "496": "f:0x1.1aa3e28d716cbp-10",
+           "558": "f:0x1.0f7a4d80ec7bap-10",
+           "620": "f:0x1.01ef563470bccp-10",
+           "682": "f:0x1.e2ff97cc35da7p-11",
+           "744": "f:0x1.bfaa782eee2c5p-11",
+           "806": "f:0x1.9bf22e2adc191p-11",
+           "868": "f:0x1.78a7714f1c98dp-11",
+           "930": "f:0x1.566d2dffb9941p-11",
+           "992": "f:0x1.35c94927d2e2ep-11"
+          }
+         }
+        }
+       }
+      }
+     },
+     "yaw_damp": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "e02095db1612a4d1c072c2af40c49a720e3f17af9d068513d6bf35fd4bd41ed7",
+          "46032aff051c3e4e018af1c9dcc2dd0fd771c53338a43186631ea7d1a617e35e",
+          "fb819efeafeccfac252fa7b025c6fc1775aaed6af2dfad043164d030b0b2e070",
+          "6c9b02566bc1885e67eb9e7801e42f4bc29072e369f1526d10e4aaff312a41e2",
+          "a4bea9b3dcf0bd16420efc0a4a23a472a8af114f95b542de1fcda14c89ceee01",
+          "143462c2c557793e332ddce9827c277ab0d0d5255e7f30bd45d57049c77c9481",
+          "0ce2a4cc90c15223469f7f12d15f7cc29fefef9a8d20832c684780058ca8ce3a",
+          "4d265df0d1c1c1b26ae6f8063f692d4533780014a3e5446b192d64c3b886b4ce",
+          "c394b5cea8bd4a73aed87ad3c3e638b4b1ea00fd3fbe87cdbfebb7cf21dcc570",
+          "0f1ee8095df5b9e87a3819106961707b56d4091af6fc05b6034445d72a386331"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.71a58e8cb4bcbp-6",
+           "124": "f:0x1.e72f246df0c88p-6",
+           "186": "f:0x1.dca6ba75e05b0p-8",
+           "248": "f:-0x1.9312a8c38f20dp-10",
+           "310": "f:-0x1.3c62a5ae5557ap-9",
+           "372": "f:-0x1.c3c116907d827p-9",
+           "434": "f:-0x1.0b5694f4703aap-8",
+           "496": "f:-0x1.0c0460c8ce135p-8",
+           "558": "f:-0x1.01e5568146ab7p-8",
+           "620": "f:-0x1.eaee077f46d70p-9",
+           "682": "f:-0x1.ccd480131483ap-9",
+           "744": "f:-0x1.abbb37ecb0c9dp-9",
+           "806": "f:-0x1.89f33000efe9fp-9",
+           "868": "f:-0x1.687f86fd24134p-9",
+           "930": "f:-0x1.47fc2cd6ef1c2p-9",
+           "992": "f:-0x1.28e9cd4a81387p-9"
+          }
+         }
+        }
+       }
+      }
+     },
+     "yaw_raw": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "e0cd4fef0e935d2b50b2e1e40916403310018279595b65e723b120eb33fd4baa",
+          "9a4af011aa71f88686282c4c9c01b514eda80ca2458979c8067199d241f424f1",
+          "40a4a9e3387a3ec8152eda25e159dc0edcb7e93910b057f79c51ee90dbacfd75",
+          "0d85f729cfd6a1cdd9ec092e91d24434db2f6e1e25341feb756d0780d397cf8d",
+          "909a2877e89dc3b40ba828c739613f7e528e5a68602192c5151bc5111490e1b9",
+          "d4dd2ac53f5cc4b0e0ceaed24e560bb836c34b8066e79bb71f740f551ac55ac7",
+          "38a46013a2d8e2a8623c21d0154700afaee386d68f38ed96f41606a1278226a8",
+          "4ba3ae91311d3426eea23ac6a3af09deae24016e05e546af234780356dfa37dc",
+          "943a808f1c77a041b0687f43c04311fa251b3ace942b00523d0e82e9a6a7d049",
+          "cc5af14dd1795db00f69580987535ca1aab87a0f89a184a1e1c8c3171bbb0307"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.ac091f38f1e5dp-7",
+           "124": "f:0x1.75c8e1482a3bap-6",
+           "186": "f:0x1.b1b52fddb51f2p-8",
+           "248": "f:-0x1.03d6079a79865p-10",
+           "310": "f:-0x1.c94be5bbb414ap-10",
+           "372": "f:-0x1.42598c1601ed8p-9",
+           "434": "f:-0x1.863e69506dceap-9",
+           "496": "f:-0x1.8ab6d04ae3704p-9",
+           "558": "f:-0x1.7c0d864217191p-9",
+           "620": "f:-0x1.69f65c650e78ap-9",
+           "682": "f:-0x1.54149a20070d0p-9",
+           "744": "f:-0x1.3bd099e0f53ecp-9",
+           "806": "f:-0x1.22f6a47638e3bp-9",
+           "868": "f:-0x1.0a55aaa95ced1p-9",
+           "930": "f:-0x1.e4c1c2ae016e4p-10",
+           "992": "f:-0x1.b6eef60118ff7p-10"
+          }
+         }
+        }
+       }
+      }
+     },
+     "yaw_wo": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "5d0a46df8f4770a71d8faa5e3e03dd56f5ca0a3c9f88d884f99ed3f9527102d4",
+          "58a8a241ca98123e231bb9cd3c9a15f34944b8046ecf06e7f6f7a20d0119f0da",
+          "c7200e7ce4d715ea24ea9c234536006f9ec5a2146c7ff620a3e684a6e4668558",
+          "77d2d86984f95e45a67bf61950553e294ff04848f97165d7d1f11eb664076292",
+          "96f74eabc8871ffe04a476339899aada325449ab0d81c1de4bd1c6ed0a615fff",
+          "cdcf38cc8a7cc4e7534d8578d816406d86cd7ee5806425c646cf9546847f9307",
+          "301d779a8a04127af35ac1c379ebb6595463f861847b4800b8fc259eb292757a",
+          "a397ab459ebebe20958819446835b71d056948a5b26e617a58420ed8598aabbf",
+          "2cbec17edee8a7c56c31a1d70d53a7569576db0ea4e627a5b5673f4bc162fc22",
+          "83b04aeeb6b5476b30fb4591af37f3bf4592149534e28d9a7c6195996d76c866"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x1.ce0ef22fe1ebdp-6",
+           "124": "f:0x1.307d76c4b67d5p-5",
+           "186": "f:0x1.29e83489ac38ep-7",
+           "248": "f:-0x1.f7d752f472e90p-10",
+           "310": "f:-0x1.8b7b4f19eaad8p-9",
+           "372": "f:-0x1.1a58ae1a4e718p-8",
+           "434": "f:-0x1.4e2c3a318c494p-8",
+           "496": "f:-0x1.4f0578fb01982p-8",
+           "558": "f:-0x1.425eac2198564p-8",
+           "620": "f:-0x1.32d4c4af8c466p-8",
+           "682": "f:-0x1.2004d00becd24p-8",
+           "744": "f:-0x1.0b5502f3ee7e2p-8",
+           "806": "f:-0x1.ec6ffc012be46p-9",
+           "868": "f:-0x1.c29f68bc6d180p-9",
+           "930": "f:-0x1.99fb380caae32p-9",
+           "992": "f:-0x1.7324409d21868p-9"
+          }
+         }
+        }
+       }
+      }
+     },
+     "alloc_roll_hi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "a7127035d8ca028562e9d654a60dc295dfb99f5355af17783b4f4d9d9238cceb",
+          "cbc2122511e33f3040dfd07d6b73b0a03ef4edc2d2ca67b5c32522924d6c4e50",
+          "6437481a007e96c3ef1eeb19909ffdae3c2e19250d4cf56ee1f615f3a259db4c",
+          "e865608e1ee22ca8b52f227b3df7995cebcb403bdcc8103d32c20b1bd4d2894e",
+          "941511a3b92d8ea84dfd8f48770cad84a58ecd783b005e39dfd4312f8b59bf28",
+          "3536f519b8460b4846b37c15c2da60b8d0f5ca4d744a977141657b8ccf1a5cf1",
+          "654505c9ffea1607a757b8529f033a6d145e62ac17e11db87f22a0c7d54fc047",
+          "5d779251808430fd664291f918c04faa41b459096f13481123d616b77ca616ae",
+          "36bd9f1a091b62f3a3ee23761374212c42e1d3840263e4440587c7f6ef7d2a06",
+          "22ad7168532bd218df57537647bd7afb4a8e015c13a0e2bc7b08d0f9e14e5034"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.124547003f5b7p-2",
+           "62": "f:0x1.0ca57ec41ff3ap-2",
+           "124": "f:0x1.099f05d718954p-2",
+           "186": "f:0x1.090b1c9fc73bcp-2",
+           "248": "f:0x1.082b4cc0b0664p-2",
+           "310": "f:0x1.078dbe62a6405p-2",
+           "372": "f:0x1.0719f9b7288f0p-2",
+           "434": "f:0x1.06a12520da3a6p-2",
+           "496": "f:0x1.0627a14d11a81p-2",
+           "558": "f:0x1.05b4a1fd7091ap-2",
+           "620": "f:0x1.054c2de2acb15p-2",
+           "682": "f:0x1.04f1bd8cbc41fp-2",
+           "744": "f:0x1.04a7b944f6fd8p-2",
+           "806": "f:0x1.046f076661736p-2",
+           "868": "f:0x1.044754b7f56e2p-2",
+           "930": "f:0x1.042f71cd06991p-2",
+           "992": "f:0x1.04259f6fc1569p-2"
+          }
+         }
+        }
+       }
+      }
+     },
+     "alloc_pitch_hi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "37cbb56100aad4182d203040f7fe7aad7c0d4b8a71f1256063c6644e122c98f5",
+          "14175b94fb12ec50a8c0fbb8bc212e2d7ee15bc6f6dc464c0f9075fc9dcc7d16",
+          "0573e51852f62d128d90d5d4145d8e6d67aedc3b42511d24df2f786b566b3bfb",
+          "268798d1f7e834748f66ad4d2ac628cb6e65eb26f024dd7847c297f40e2d0cc0",
+          "92dd65e9d1d99ecaf8b48a3bb39a21ab43d6eebf4059c401dbfbe5fa48f3a635",
+          "11eee504baffa198c71e2f4d043ef71a92daaa4179f998384caf4aab736203d7",
+          "7494df065aeab3158cbe1a7126e204de33b8836be490671ab20385c94b6365a3",
+          "b256a790209718fac150950dcb11f7efe12741dc3e609a240dc42dce819b2ccb",
+          "52775f8f6921ca0857357799e3a7081c7f469b496e13bada4ef8ce7e82a62000",
+          "0b6015d81b19aba7ae40f0416a0c11013f429ad643a36540c69618374d35592f"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.57e8b58a99111p-2",
+           "62": "f:0x1.61c5ae2784dcbp-2",
+           "124": "f:0x1.63383e90fa4bfp-2",
+           "186": "f:0x1.66380413e7c2bp-2",
+           "248": "f:0x1.6523d99e2a645p-2",
+           "310": "f:0x1.64837e044677cp-2",
+           "372": "f:0x1.64bd6a77a8624p-2",
+           "434": "f:0x1.64dd131fa2fddp-2",
+           "496": "f:0x1.64f391ad6b529p-2",
+           "558": "f:0x1.65136adc30c80p-2",
+           "620": "f:0x1.6532e94fc2cfdp-2",
+           "682": "f:0x1.654f4e875c078p-2",
+           "744": "f:0x1.6569c88c94071p-2",
+           "806": "f:0x1.6582893137c92p-2",
+           "868": "f:0x1.65996d9ad487dp-2",
+           "930": "f:0x1.65ae801c6b129p-2",
+           "992": "f:0x1.65c1d4a2375bcp-2"
+          }
+         }
+        }
+       }
+      }
+     },
+     "alloc_resv": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "5912ab27e481e3d34a7c15897e5a02333c4945dcd5bef7960b16914176647c8c",
+          "a6b42cd7018274f468dba8bf00e85d515d241aedd6063f758df777ef92bee039",
+          "ed576f3a09be817609612d37a174c482366ad6586f724290934d71e8ca46fc10",
+          "cafa6bbaed5220a05bb3cd819ba3562743084dea7abf9b09b525abe15d727b2a",
+          "d786c11bf267510fc51ead1a3a6a79a00b34c66fc33b8b523d24ca8084298ab3",
+          "fac745b6bd016ee858cf5291d7e910fd98f9fd0e71c95607b7403502cf59c89e",
+          "611d90718e4bfb626d70252f8b84f686dd805af16448be9670a9601c2cd1f9c9",
+          "c2831c076dba979c54c4c94a4db316380edea4102057d78a6fb10f4113a0da39",
+          "37bfe620710ebab40081fecaeb9ade93d7047b1e87d619bc68a15b42430282e1",
+          "44e4a72a4f2c3319801f173a75427feeeb4b0e6fb415035d3d162fa595fcb7b1"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.50847d989c2bdp-4",
+           "62": "f:0x1.67039e8919caep-4",
+           "124": "f:0x1.731d823d37446p-4",
+           "186": "f:0x1.756d271a7caa7p-4",
+           "248": "f:0x1.78ec6696d8007p-4",
+           "310": "f:0x1.7b62a00f00983p-4",
+           "372": "f:0x1.7d31b2bcf75dap-4",
+           "434": "f:0x1.7f15051630b02p-4",
+           "496": "f:0x1.80fb146552f94p-4",
+           "558": "f:0x1.82c711a3d7530p-4",
+           "620": "f:0x1.8468e20ee6d44p-4",
+           "682": "f:0x1.85d2a366a891dp-4",
+           "744": "f:0x1.86fab485bda39p-4",
+           "806": "f:0x1.87dd7c0013cbep-4",
+           "868": "f:0x1.887c46b9c3e11p-4",
+           "930": "f:0x1.88dbd2657f354p-4",
+           "992": "f:0x1.89031bda943f4p-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "i_pitch": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "5280dddda48ad24649396fd10bb4bcd0cafdeadc5bb5c126c86445a89bc43aed",
+          "49693dff9d3e53abd243a356df2dc64a0727eea644e8519a1414d001b04e68bb",
+          "fa101c697a7b6c1ff745686af11a883c0997fd75c7d6716db2f5b9099185601e",
+          "94fdbaca210984e6e16c7e5fd466931e60b0ab3203164b561d316e561a3650b3",
+          "75eeb0d71f33fc8ee2eaed367cb0b7eaa22bd6a18b02b89808f9c13dbd263fe0",
+          "997943a0787473317b28cedaa1e97d2ad6e3f1304d88f15a9e9f941d45d6bd49",
+          "49793f2aadc4f1d1557bbd1e7f72dba049f34c05806e37f9c2054db2ce2a7fa1",
+          "d5a4d74f2e434368de099c5ac67287a9014b49e798ac345b19ce61fb3243db32",
+          "4294c7985dccaf3e4cf62394aaa3dd47534c2fed414d9334b26a44b4b7c5f3ef",
+          "0b047c90cfddff438e4dd8b6956bd625a65c834ed071b9275482437b602b86e1"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:-0x1.56bda9025c796p-5",
+           "62": "f:-0x1.753fb10754358p-5",
+           "124": "f:-0x1.a59e7b6bb3569p-5",
+           "186": "f:-0x1.d269c1e9203d1p-5",
+           "248": "f:-0x1.ed56152fade36p-5",
+           "310": "f:-0x1.fa6adc2624654p-5",
+           "372": "f:-0x1.fe77ca01b9448p-5",
+           "434": "f:-0x1.fc274911e9c7dp-5",
+           "496": "f:-0x1.f5b8086e9ca7cp-5",
+           "558": "f:-0x1.ecf077f529781p-5",
+           "620": "f:-0x1.e306e81d910fcp-5",
+           "682": "f:-0x1.d8ccf28c9e6b6p-5",
+           "744": "f:-0x1.cece8cd03161ap-5",
+           "806": "f:-0x1.c56498a07a7dcp-5",
+           "868": "f:-0x1.bcc39d2b42c9cp-5",
+           "930": "f:-0x1.b50703efd77a7p-5",
+           "992": "f:-0x1.ae391790d029ap-5"
+          }
+         }
+        }
+       }
+      }
+     },
+     "i_roll": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "3a441df737c4dd411711305c929fa3efc2b1382afe3283bf56bbab0deada7e04",
+          "7009711e21e1f00aa8d1857c2ab85782270d76a2be2a0721b191175dbbe18e37",
+          "ce9d75b13f18bce279285009cc9ee6d5f80f797ea22c7606fa3b78e204d28b93",
+          "793b462e7ff9648fd2b68ad45acba0006e350ff082edf3a3acf35a94fa92bc4d",
+          "f70168ea720dcadd019e830c075d83d690f4315d1ba5a8a1e817062e6f56d6c2",
+          "ae2cd76f9681768bc9ddf69e7b675358ac3fcf40deb30b2707641b03b600dc30",
+          "c59ff55a8d62d4fc358e9aa43af691b218735a618d21b0e727de33551ae9829d",
+          "b7e1d4bada4f1db168ff46d652463fdc6a9a7a923d4fc569934829edc29a87e7",
+          "57fe2999251befaee3651b4cba72910b0bd2a14898ec22d09d2ead2cebe104a7",
+          "b340cad2dbd4541ca254a7bf0e639b0fa975adc80bcc4aac7e19bbbd6adf2d45"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.dad7265fea27ap-17",
+           "62": "f:0x1.5c7bdafd1489ap-7",
+           "124": "f:0x1.ce99edfba636ep-7",
+           "186": "f:0x1.9edbd525e7f63p-7",
+           "248": "f:0x1.6b31e60c81b9cp-7",
+           "310": "f:0x1.33dc0a53303d5p-7",
+           "372": "f:0x1.eb4b127970a6cp-8",
+           "434": "f:0x1.73f46c363f7f6p-8",
+           "496": "f:0x1.08463c8bbe3e6p-8",
+           "558": "f:0x1.515303c8db916p-9",
+           "620": "f:0x1.55e4f2f57b3e1p-10",
+           "682": "f:0x1.ce655a325cdeep-13",
+           "744": "f:-0x1.6ace1a29dbe89p-11",
+           "806": "f:-0x1.7c44fb00be7e6p-10",
+           "868": "f:-0x1.0fb07b42f64cdp-9",
+           "930": "f:-0x1.5193354d99064p-9",
+           "992": "f:-0x1.85da2f2739cc1p-9"
+          }
+         }
+        }
+       }
+      }
+     },
+     "i_yaw": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "i_alt": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "c15e768a4fab4f5071469f957db0f2f6518f17c0fc87831825510b1cfb1690c3",
+          "5435f97b29bed6e762d339032a24ebe206dc2188805b0404724acf39a8460521",
+          "a42487e5f398bfb0b02828ff2705c45cc5199d953d23613c6f1039aac78e355b",
+          "22ced95b9995b500917cc5d012b9285a22e9340db293ce85516a3dbee3e745f6",
+          "4a9d5e7bda1d295f36bb5eef869dad6a2d1bdc35d3d631504ddb24420a0daab7",
+          "5e4de2904f483c154d633598b03802df84eede91ba9fee6cb13d37289633b728",
+          "cf8dbd18c291f64911a08d96c68aeaca01634e9f066c2f55e899d11085b2442a",
+          "6194c7c6f98d2f677e2939dbe44816472d1cc93fb8e436e373f1030a42674665",
+          "dad7626262f5c9878e143d35ecdec196ab1a319fd88754572105af72b3e3340d",
+          "fb4301488fa969af1489048910bd548d1dd4dc6175e95239414bb825e81e4fda"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.3c98adb9d0ed6p-4",
+           "62": "f:0x1.3fc00cdd6ac78p-4",
+           "124": "f:0x1.483d7ac6c3cabp-4",
+           "186": "f:0x1.54e506d64c0d3p-4",
+           "248": "f:0x1.64622cee3d801p-4",
+           "310": "f:0x1.7572f8f9bf45ep-4",
+           "372": "f:0x1.8715acf71f51cp-4",
+           "434": "f:0x1.988966634596ep-4",
+           "496": "f:0x1.a9425fefa5212p-4",
+           "558": "f:0x1.b8df0836706c1p-4",
+           "620": "f:0x1.c71e975593a97p-4",
+           "682": "f:0x1.d3d949ec80f78p-4",
+           "744": "f:0x1.defa5be03bd96p-4",
+           "806": "f:0x1.e87b6a5d3230ap-4",
+           "868": "f:0x1.f060e44e51edcp-4",
+           "930": "f:0x1.f6b748718ac46p-4",
+           "992": "f:0x1.fb90ff5fa1ed1p-4"
+          }
+         }
+        }
+       }
+      }
+     },
+     "i_spd": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "e82a8ddcae6438ce917be4e622d54fa8ed180cba67f344f7b14091ac1ecd3ec8",
+          "a9709dc94f0c202df09c5138639972055099d730665c2e968041ec3914f7d6c4",
+          "a9709dc94f0c202df09c5138639972055099d730665c2e968041ec3914f7d6c4",
+          "7921ecf20ed98373456e5312a58d31596d1f65ea36dd74fd49b9914d02f26d17",
+          "336799ae6b6de0a7a1b79d066d9952edfb5aef643073273a95ff75d037697f80",
+          "c75e7ec2ac21c43e817a4c518f816f4d2254102085a08976739acac1fa500ed5",
+          "4b99a962d629f757deabf7f70ecdadefe7110ee64293fb210d3cc042feebb50d",
+          "f401537ae947e2b0a011f804f2b212b9b53565a188929174a13253f684f2cf97",
+          "ec7afcf058854dcca728d9fcc8d89519c7c412207c9d68791922a52e0b6da1de",
+          "9bac1ef9b419f4f4f9320d00962907fa8cbc154998d3a4e5552f22318940244d"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.2787a2b0efd81p-1",
+           "62": "f:0x1.18f125c4d61dcp-1",
+           "124": "f:0x1.092c90602c785p-1",
+           "186": "f:0x1.092c90602c785p-1",
+           "248": "f:0x1.092c90602c785p-1",
+           "310": "f:0x1.092c90602c785p-1",
+           "372": "f:0x1.0161a30c36e44p-1",
+           "434": "f:0x1.ca05c53769a28p-2",
+           "496": "f:0x1.9e1f82a85b955p-2",
+           "558": "f:0x1.7ed2f280177d8p-2",
+           "620": "f:0x1.6b26ae6726967p-2",
+           "682": "f:0x1.61b3461b70003p-2",
+           "744": "f:0x1.60db7b1d4ed74p-2",
+           "806": "f:0x1.66f47a5bb6cd6p-2",
+           "868": "f:0x1.726184ff7c9c9p-2",
+           "930": "f:0x1.81a5dfb7b35f9p-2",
+           "992": "f:0x1.936f64a184d43p-2"
+          }
+         }
+        }
+       }
+      }
+     },
+     "i_hdg": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "i_vs": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033",
+          "aae69efa6e882e5809bb8c0281e256712ef0fc18f4f272788f14ce855c99d033"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x0.0p+0",
+           "62": "f:0x0.0p+0",
+           "124": "f:0x0.0p+0",
+           "186": "f:0x0.0p+0",
+           "248": "f:0x0.0p+0",
+           "310": "f:0x0.0p+0",
+           "372": "f:0x0.0p+0",
+           "434": "f:0x0.0p+0",
+           "496": "f:0x0.0p+0",
+           "558": "f:0x0.0p+0",
+           "620": "f:0x0.0p+0",
+           "682": "f:0x0.0p+0",
+           "744": "f:0x0.0p+0",
+           "806": "f:0x0.0p+0",
+           "868": "f:0x0.0p+0",
+           "930": "f:0x0.0p+0",
+           "992": "f:0x0.0p+0"
+          }
+         }
+        }
+       }
+      }
+     },
+     "limiter_active": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76"
+         ],
+         "samples": {
+          "dict": {
+           "0": false,
+           "62": false,
+           "124": false,
+           "186": false,
+           "248": false,
+           "310": false,
+           "372": false,
+           "434": false,
+           "496": false,
+           "558": false,
+           "620": false,
+           "682": false,
+           "744": false,
+           "806": false,
+           "868": false,
+           "930": false,
+           "992": false
+          }
+         }
+        }
+       }
+      }
+     },
+     "wow": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76"
+         ],
+         "samples": {
+          "dict": {
+           "0": false,
+           "62": false,
+           "124": false,
+           "186": false,
+           "248": false,
+           "310": false,
+           "372": false,
+           "434": false,
+           "496": false,
+           "558": false,
+           "620": false,
+           "682": false,
+           "744": false,
+           "806": false,
+           "868": false,
+           "930": false,
+           "992": false
+          }
+         }
+        }
+       }
+      }
+     },
+     "on_rail": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+          "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76"
+         ],
+         "samples": {
+          "dict": {
+           "0": false,
+           "62": false,
+           "124": false,
+           "186": false,
+           "248": false,
+           "310": false,
+           "372": false,
+           "434": false,
+           "496": false,
+           "558": false,
+           "620": false,
+           "682": false,
+           "744": false,
+           "806": false,
+           "868": false,
+           "930": false,
+           "992": false
+          }
+         }
+        }
+       }
+      }
+     },
+     "mode": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "8accda2d5bfd5f24b661707062042fdb7c3621accca935445df4ff86da294e3b",
+          "8accda2d5bfd5f24b661707062042fdb7c3621accca935445df4ff86da294e3b",
+          "8accda2d5bfd5f24b661707062042fdb7c3621accca935445df4ff86da294e3b",
+          "8accda2d5bfd5f24b661707062042fdb7c3621accca935445df4ff86da294e3b",
+          "8accda2d5bfd5f24b661707062042fdb7c3621accca935445df4ff86da294e3b",
+          "8accda2d5bfd5f24b661707062042fdb7c3621accca935445df4ff86da294e3b",
+          "8accda2d5bfd5f24b661707062042fdb7c3621accca935445df4ff86da294e3b",
+          "8accda2d5bfd5f24b661707062042fdb7c3621accca935445df4ff86da294e3b",
+          "8accda2d5bfd5f24b661707062042fdb7c3621accca935445df4ff86da294e3b",
+          "8accda2d5bfd5f24b661707062042fdb7c3621accca935445df4ff86da294e3b"
+         ],
+         "samples": {
+          "dict": {
+           "0": "climb",
+           "62": "climb",
+           "124": "climb",
+           "186": "climb",
+           "248": "climb",
+           "310": "climb",
+           "372": "climb",
+           "434": "climb",
+           "496": "climb",
+           "558": "climb",
+           "620": "climb",
+           "682": "climb",
+           "744": "climb",
+           "806": "climb",
+           "868": "climb",
+           "930": "climb",
+           "992": "climb"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   "envelope": {
+    "dict": {
+     "stall_margin": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "dc1e14b0f34f080da2bbbe2e476056dfd2982d8dab5b0c5b4a962862b384ee5c",
+          "f61eaf1f68c23d806e46ef6919cbd5da7c8e01255ccda2ffa2f417c424757b6c",
+          "31d1da9707f7bc30f0a26a814c367ee7d4b49bbf2689ea50aa6beb3f4c550d1b",
+          "a34b7a9f830e0d198feb1f39868a96813440da4a94ee4dae773fc07be9e64a88",
+          "a99743637050bb30e2c9384e283bb062b8eeadbd618e130d1c3966707dab649a",
+          "419a22475b8a43d56d5294c62970cf6c76e46481d75fb9376d70affa0130f989",
+          "512cb330da32a34423537b8d3f679878436c9d5c135918e70ea777c2f32adc86",
+          "51d646261c104dda491c4d7475eeb835ec6747947aa01cb8e76f7dbd1d1ab7a1",
+          "2d4f8213a42ee9a8bca90857071d3478cc96e606e071552931ec40e7c76c699c",
+          "eb6be786e3be4db49b9af65814a960ed3e68d232bc073b80f830d3e990ac9711"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.07e42cd3442a9p-2",
+           "62": "f:0x1.f8782f59fc1edp-3",
+           "124": "f:0x1.df9c5c8f22a36p-3",
+           "186": "f:0x1.d3b5442ec2c6cp-3",
+           "248": "f:0x1.d981b0c57cd23p-3",
+           "310": "f:0x1.e31570334c390p-3",
+           "372": "f:0x1.eb5dada86e474p-3",
+           "434": "f:0x1.f20defd534ae6p-3",
+           "496": "f:0x1.f72b623a5c90ep-3",
+           "558": "f:0x1.fae24fce75419p-3",
+           "620": "f:0x1.fd83ea35224b2p-3",
+           "682": "f:0x1.ff57fa6ac691ep-3",
+           "744": "f:0x1.004a60caa776cp-2",
+           "806": "f:0x1.00b18ef28154cp-2",
+           "868": "f:0x1.00f0a48055e8ep-2",
+           "930": "f:0x1.01128f30fbf4ap-2",
+           "992": "f:0x1.011f239e86085p-2"
+          }
+         }
+        }
+       }
+      }
+     },
+     "flags": {
+      "dict": {
+       "alpha": {
+        "dict": {
+         "__digest__": {
+          "dict": {
+           "n": 1000,
+           "chunk": 100,
+           "sha": [
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76"
+           ],
+           "samples": {
+            "dict": {
+             "0": false,
+             "62": false,
+             "124": false,
+             "186": false,
+             "248": false,
+             "310": false,
+             "372": false,
+             "434": false,
+             "496": false,
+             "558": false,
+             "620": false,
+             "682": false,
+             "744": false,
+             "806": false,
+             "868": false,
+             "930": false,
+             "992": false
+            }
+           }
+          }
+         }
+        }
+       },
+       "beta": {
+        "dict": {
+         "__digest__": {
+          "dict": {
+           "n": 1000,
+           "chunk": 100,
+           "sha": [
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76"
+           ],
+           "samples": {
+            "dict": {
+             "0": false,
+             "62": false,
+             "124": false,
+             "186": false,
+             "248": false,
+             "310": false,
+             "372": false,
+             "434": false,
+             "496": false,
+             "558": false,
+             "620": false,
+             "682": false,
+             "744": false,
+             "806": false,
+             "868": false,
+             "930": false,
+             "992": false
+            }
+           }
+          }
+         }
+        }
+       },
+       "mach": {
+        "dict": {
+         "__digest__": {
+          "dict": {
+           "n": 1000,
+           "chunk": 100,
+           "sha": [
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76"
+           ],
+           "samples": {
+            "dict": {
+             "0": false,
+             "62": false,
+             "124": false,
+             "186": false,
+             "248": false,
+             "310": false,
+             "372": false,
+             "434": false,
+             "496": false,
+             "558": false,
+             "620": false,
+             "682": false,
+             "744": false,
+             "806": false,
+             "868": false,
+             "930": false,
+             "992": false
+            }
+           }
+          }
+         }
+        }
+       },
+       "altitude": {
+        "dict": {
+         "__digest__": {
+          "dict": {
+           "n": 1000,
+           "chunk": 100,
+           "sha": [
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76",
+            "25a974161a1660d94720d9b601685d15a22122f588b140d12fbac687a8cd6b76"
+           ],
+           "samples": {
+            "dict": {
+             "0": false,
+             "62": false,
+             "124": false,
+             "186": false,
+             "248": false,
+             "310": false,
+             "372": false,
+             "434": false,
+             "496": false,
+             "558": false,
+             "620": false,
+             "682": false,
+             "744": false,
+             "806": false,
+             "868": false,
+             "930": false,
+             "992": false
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "worst_margin": "f:0x1.d3b2c190b5bacp-3",
+     "worst_margin_t": "f:0x1.e147ae147ae15p+0",
+     "min_alt": "f:0x1.f3fff90f745cep+9",
+     "min_alt_t": "f:0x1.1eb851eb851ecp-3",
+     "any_flag": false,
+     "first_flag_t": null
+    }
+   },
+   "meta": {
+    "dict": {
+     "control_hz": "f:0x1.9000000000000p+6",
+     "dt_plant": "f:0x1.47ae147ae147bp-7",
+     "t_end": "f:0x1.4000000000000p+3",
+     "nav": "ideal",
+     "actuators": false,
+     "case": "design",
+     "aborted": null,
+     "limits": {
+      "dict": {
+       "elevon_lo": "f:-0x1.6666666666666p-2",
+       "elevon_hi": "f:0x1.6666666666666p-2",
+       "rudder_lo": "f:-0x1.6666666666666p-2",
+       "rudder_hi": "f:0x1.6666666666666p-2",
+       "rate_max": null
+      }
+     },
+     "clamps": {
+      "dict": {
+       "pitch": {
+        "dict": {
+         "lo": "f:-0x1.6666666666666p-2",
+         "hi": "f:0x1.6666666666666p-2"
+        }
+       },
+       "roll": {
+        "dict": {
+         "lo": "f:-0x1.6666666666666p-2",
+         "hi": "f:0x1.6666666666666p-2"
+        }
+       },
+       "yaw": {
+        "dict": {
+         "lo": "f:-0x1.6666666666666p-2",
+         "hi": "f:0x1.6666666666666p-2"
+        }
+       },
+       "alt": {
+        "dict": {
+         "lo": "f:-0x1.3333333333333p-2",
+         "hi": "f:0x1.3333333333333p-2"
+        }
+       },
+       "spd": {
+        "dict": {
+         "lo": "f:0x0.0p+0",
+         "hi": "f:0x1.0000000000000p+0"
+        }
+       },
+       "hdg": {
+        "dict": {
+         "lo": "f:-0x1.6666666666666p-1",
+         "hi": "f:0x1.6666666666666p-1"
+        }
+       }
+      }
+     },
+     "phases": {
+      "dict": {
+       "launch_exit_t": null,
+       "touchdown_t": null,
+       "stop_t": null,
+       "td_sink_rate": null,
+       "td_speed": null
+      }
+     },
+     "path_escapes": [],
+     "waypoints": null,
+     "accept_radius": null,
+     "runway": null,
+     "launch": null,
+     "geometry": {
+      "dict": {
+       "s_ref": "f:0x1.8000000000000p+1",
+       "cbar": "f:0x1.8000000000000p+0",
+       "b": "f:0x1.4000000000000p+1",
+       "gear_contacts": null
+      }
+     },
+     "origin": null
+    }
+   },
+   "params_fingerprint": "fp-sim-golden",
+   "n_total": 1000,
+   "stride": 1,
+   "kind": "sim"
+  }
+ }
+}

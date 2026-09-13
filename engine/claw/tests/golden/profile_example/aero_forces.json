@@ -1,0 +1,460 @@
+{
+ "golden": "aero_forces",
+ "mode": "digest",
+ "captured_at": "388cc91",
+ "value": {
+  "n": 450,
+  "chunk": 100,
+  "sha": [
+   "f9922887addfdcba7c26cd1aef46a5ad8e4bf8fd1d96cab3942080a23720b554",
+   "1fe09c20adb7235cb3ea7093f0db8552709053b3dbad9508d266710bce61efde",
+   "a88b049ff07a7359cf91fb02150a8546cae629c8e8c002445df2be5e77f2890e",
+   "b73408ad68ee000e76b1ac1bc8543fe57c1cc41d7e1e1559355c32a89f75205e",
+   "7f0ef130df84e94c098a6b5302ea4c33842e72cb0a6f10aa7ace88c62ce4c13e"
+  ],
+  "samples": {
+   "0": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.f72e45b055b9ep+9",
+       "f:0x1.62d1b66a2a1b2p+9",
+       "f:-0x1.8c587b934d11cp+14"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.63104c23f2d83p+11",
+       "f:-0x1.ef8540db851afp+12",
+       "f:-0x1.2e581d9714d5bp+11"
+      ]
+     }
+    ]
+   },
+   "28": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.7e67bc1cbf44ap+7",
+       "f:-0x1.58682f5d9afcap+9",
+       "f:0x1.bef7c597e545fp+12"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:0x1.a0089a943912bp+8",
+       "f:0x1.b4714aa0b48bfp+11",
+       "f:-0x1.c2d70e1a6905cp+4"
+      ]
+     }
+    ]
+   },
+   "56": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.fe5613692364fp+9",
+       "f:-0x1.baf9276c64faep+10",
+       "f:-0x1.3eba8c1c98605p+13"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.5e12bfc572839p+11",
+       "f:-0x1.c54bb9a43dde9p+12",
+       "f:0x1.dd5941da13bb9p+10"
+      ]
+     }
+    ]
+   },
+   "84": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.64b04514a5f96p+8",
+       "f:-0x1.82e415a140410p+10",
+       "f:0x1.7b68b4f6ebff7p+13"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.833aae8ce5296p+11",
+       "f:0x1.6c052e6cdc39fp+12",
+       "f:0x1.0cd45ee9beb36p+10"
+      ]
+     }
+    ]
+   },
+   "112": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.f45dc81758197p+9",
+       "f:0x1.96c636af3f195p+10",
+       "f:-0x1.8756e8dca179bp+13"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.170362c43ff5ep+12",
+       "f:-0x1.15981bed58e1bp+14",
+       "f:-0x1.f31c04087e8bbp+10"
+      ]
+     }
+    ]
+   },
+   "140": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.7cda211813dc3p+9",
+       "f:0x1.52172135a6969p+10",
+       "f:-0x1.179e05b2d5e06p+13"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:0x1.60ed0532de314p+10",
+       "f:-0x1.99117a647bc81p+12",
+       "f:-0x1.bb58752c20e25p+10"
+      ]
+     }
+    ]
+   },
+   "168": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.1525f244d0ff4p+8",
+       "f:0x1.e80af14efbf0dp+8",
+       "f:0x1.55eb0ad58c5bcp+13"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.26f09aa7f3298p+7",
+       "f:-0x1.523d0c659ed08p+12",
+       "f:0x1.9f92483d96baap+10"
+      ]
+     }
+    ]
+   },
+   "196": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.01d75505da386p+7",
+       "f:0x1.9c32b1a09d876p+8",
+       "f:-0x1.406ef3c36a0d9p+11"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.c55241a8610ddp+8",
+       "f:-0x1.1575793f8b4ccp+11",
+       "f:-0x1.4f09fbca5a448p+8"
+      ]
+     }
+    ]
+   },
+   "224": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:0x1.f01189e59d780p+6",
+       "f:-0x1.e432054c2fc26p+8",
+       "f:0x1.91496eebff83ap+12"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.6b9336b008683p+9",
+       "f:0x1.864a645d90133p+10",
+       "f:-0x1.20174a9e1e496p+7"
+      ]
+     }
+    ]
+   },
+   "252": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.50b5f0a6475d9p+8",
+       "f:0x1.a9fa14c3bd097p+9",
+       "f:-0x1.43f12fccaed30p+13"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:0x1.40685e444c775p+11",
+       "f:0x1.46a9032951436p+12",
+       "f:-0x1.7e1063ce1dff8p+7"
+      ]
+     }
+    ]
+   },
+   "280": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.469c18826fe0dp+11",
+       "f:0x1.63f1404fbfba9p+11",
+       "f:0x1.0379b6c818ee5p+15"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.dbded23b8436cp+10",
+       "f:0x1.9a85a90dfead2p+15",
+       "f:-0x1.04d42e1635fbap+12"
+      ]
+     }
+    ]
+   },
+   "308": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:0x1.23a5165575035p+7",
+       "f:-0x1.71b8070060dd3p+8",
+       "f:0x1.e2bb2ed81fe88p+11"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.7b0897425d42cp+2",
+       "f:0x1.81d68b3b21c33p+7",
+       "f:0x1.f6d7c8bab8a1ep+6"
+      ]
+     }
+    ]
+   },
+   "336": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.1ec90f9f9f602p+8",
+       "f:0x1.c3aa0edf9af5cp+9",
+       "f:-0x1.367928202b134p+12"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:0x1.7cc68ff6c9175p+10",
+       "f:-0x1.ef4b0f831149fp+11",
+       "f:-0x1.9a07477dbbda8p+8"
+      ]
+     }
+    ]
+   },
+   "364": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.2a925433c0b04p+8",
+       "f:-0x1.457deaa9b6028p+9",
+       "f:0x1.1183eeebcbe68p+13"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.caa6c3162f389p+9",
+       "f:-0x1.da30ded7fd762p+11",
+       "f:0x1.5e0cdf7330e9ap+10"
+      ]
+     }
+    ]
+   },
+   "392": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.2b8f90cd8a050p+10",
+       "f:-0x1.24baca0331764p+11",
+       "f:-0x1.c5ca70da72c89p+12"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.81e2769a7cd03p+9",
+       "f:-0x1.adeb255ae7474p+13",
+       "f:0x1.27024764b7650p+11"
+      ]
+     }
+    ]
+   },
+   "420": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:0x1.9b198961ed66cp+9",
+       "f:0x1.1b83912e417e3p+11",
+       "f:-0x1.40179c26604c8p+14"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:0x1.24f1498acaaf7p+10",
+       "f:0x1.24cbedf5cd84ap+12",
+       "f:-0x1.0fcb85d3b2456p+10"
+      ]
+     }
+    ]
+   },
+   "448": {
+    "tuple": [
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:-0x1.0695c38a2b8e6p+10",
+       "f:0x1.f5775ddfaaa5ap+9",
+       "f:0x1.3b203342965fap+14"
+      ]
+     },
+     {
+      "ndarray": [
+       3
+      ],
+      "dtype": "float64",
+      "v": [
+       "f:0x1.74b43d0ca44f6p+10",
+       "f:0x1.c6581dea7af2dp+13",
+       "f:-0x1.2476165a399eep+10"
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

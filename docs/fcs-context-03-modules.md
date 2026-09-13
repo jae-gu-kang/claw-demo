@@ -306,6 +306,19 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
   M10(margins·modes·envelope), M15(openloop._effective_gain 패턴 참조). 후속: AP 외측 루프
   튜닝(폐루프 경로), 다차원 다항, 비선형 폐루프 스모크 옵션
 
+### M18 `profile` — 비행체 프로파일
+
+- 기체 데이터 문서(02 §5.6)의 **검증·정규화·형상 변형·지문·조립**. 값은 문서에만 있고 여기에는
+  산식과 조립 순서만 있다. 03 §7.2 「프로파일 단위 교체」의 구현이다
+- 계약: `validate_document(doc)` → 정규화 문서(실패 시 경로가 붙은 `ProfileError`) ·
+  `build_profile(doc, variant)` → `BuiltProfile`(`aircraft(ground, dispersion)`·`stall_table`·
+  `db_ranges`·`structural_limits`·`skid_gear`·`launch_rail`·`design_gains`·`gain_tables`·
+  `alloc_trim_table`, `fingerprint`·`plant_fingerprint`). 표·배열은 호출마다 새로 만든다
+- 예제 문서는 패키지 데이터(`examples/*.json`, engine pyproject package-data)다 — 폐쇄망 휠에서
+  빠지면 예제 기체가 사라진다
+- 의존: M0, M1(REGISTRY·canonical_hash), M3(Table), M5(조립 부품), M7(design_gains·SCHEDULABLE —
+  순환을 피해 검증·조립 시점에 import)
+
 ### M13 `server` — 백엔드
 
 - FastAPI: REST API, 배치 작업 실행(트림/시뮬), 웹소켓 진행률, 결과 저장. **엔진 Python API만
@@ -385,6 +398,7 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
 | `ParamSet` | params → 전 모듈 | 파라미터 스냅샷 (단위·범위 메타 포함) |
 | `Block` 프로토콜 | blocks → fcl, nav | `init(dt)` / `step(u)→y` / `reset(state)` / `schema()` |
 | Lineage (파라미터 지문) | params → 전 산출물 계약 | 산출물이 계산된 ParamSet의 fingerprint 문자열 + 입력 데이터(공력 DB·실속 경계 테이블) 해시·버전 — 무효화·영향성 평가(M15)·재현성의 키 |
+| `BuiltProfile` | profile → plant·fcl·trim·analysis·sim·pipeline·design·server | 검증된 기체 문서(형상 변형 적용)의 조립 결과 + 계보 지문 `profile_fp`·플랜트 지문 `plant_fp` (02 §5.6) |
 
 ## 5. 저장소 구조
 
@@ -397,7 +411,7 @@ CLAW_DEMO/
 ├── engine/                  # Python 패키지 (M0~M12 · M15~M17)
 │   ├── pyproject.toml
 │   └── claw/
-│       ├── common/  params/  blocks/  tables/  env/
+│       ├── common/  params/  blocks/  tables/  env/  profile/
 │       ├── plant/   nav/     fcl/     guidance/
 │       ├── trim/    analysis/ sim/    verify/  pipeline/  design/  codegen/
 │       └── tests/           # 모듈별 미러 구조
@@ -442,6 +456,7 @@ CLAW_DEMO/
   모델 + 법칙 템플릿 + 모드 테이블) 단위로 레지스트리 교체 가능하게 설계해 두고, 멀티콥터
   프로파일은 확장 항목 **[TBD]** 로 백로그화
 - → 도메인 문서 v0.9에 방침 기록
+- → 구현: M18 `profile`(02 §5.6) — 기체 데이터를 문서로 옮겼다. 멀티콥터는 여전히 [TBD]
 
 ---
 *문서 이력은 [`CHANGELOG.md`](CHANGELOG.md)로 옮겼다 — 저장소 단일 카운터.*

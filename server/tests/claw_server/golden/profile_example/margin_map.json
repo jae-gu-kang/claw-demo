@@ -1,0 +1,683 @@
+{
+ "golden": "margin_map",
+ "mode": "full",
+ "captured_at": "388cc91",
+ "value": {
+  "dict": {
+   "kind": "margin_map",
+   "cases": [
+    {
+     "dict": {
+      "trim": {
+       "dict": {
+        "case": {
+         "dict": {
+          "name": "M0.35_h1000_f200",
+          "mach": "f:0x1.6666666666666p-2",
+          "alt": "f:0x1.f400000000000p+9",
+          "fuel": "f:0x1.9000000000000p+7",
+          "condition": "level"
+         }
+        },
+        "converged": true,
+        "cost": "f:0x1.ffac88bc3115ep-42",
+        "flags": {
+         "dict": {
+          "residual_ok": true,
+          "saturation_ok": true,
+          "alpha_margin_ok": true,
+          "continuity_ok": null
+         }
+        },
+        "euler": [
+         "f:0x0.0p+0",
+         "f:0x1.06c2ad7f1132cp-3",
+         "f:0x0.0p+0"
+        ],
+        "vel_b": [
+         "f:0x1.d322ded146851p+6",
+         "f:0x0.0p+0",
+         "f:0x1.e21ee5dba8c69p+3"
+        ],
+        "control": {
+         "dict": {
+          "elevon": [
+           "f:-0x1.527f2ad2b07e5p-4",
+           "f:-0x1.527f2ad2b07e5p-4",
+           "f:-0x1.527f2ad2b07e5p-4",
+           "f:-0x1.527f2ad2b07e5p-4"
+          ],
+          "rudder": "f:0x0.0p+0",
+          "throttle": [
+           "f:0x1.e9e68e6ce1ed4p-2",
+           "f:0x1.e9e68e6ce1ed4p-2"
+          ]
+         }
+        },
+        "params_fingerprint": "fp-mm"
+       }
+      },
+      "lon": {
+       "dict": {
+        "modes": [
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.035ee18d98534p+0",
+            "f:0x1.50611ba9c1dfap+2"
+           ],
+           "wn": "f:0x1.569273244c6a1p+2",
+           "zeta": "f:0x1.83a62ce5c760dp-3"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.035ee18d98534p+0",
+            "f:-0x1.50611ba9c1dfap+2"
+           ],
+           "wn": "f:0x1.569273244c6a1p+2",
+           "zeta": "f:0x1.83a62ce5c760dp-3"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.262cfd406b26ep-6",
+            "f:0x1.ce01e631b6447p-4"
+           ],
+           "wn": "f:0x1.d3d304997a450p-4",
+           "zeta": "f:0x1.41f444302155dp-3"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.262cfd406b26ep-6",
+            "f:-0x1.ce01e631b6447p-4"
+           ],
+           "wn": "f:0x1.d3d304997a450p-4",
+           "zeta": "f:0x1.41f444302155dp-3"
+          }
+         }
+        ],
+        "classified": {
+         "dict": {
+          "short_period": {
+           "dict": {
+            "eig": [
+             "f:-0x1.035ee18d98534p+0",
+             "f:0x1.50611ba9c1dfap+2"
+            ],
+            "wn": "f:0x1.569273244c6a1p+2",
+            "zeta": "f:0x1.83a62ce5c760dp-3"
+           }
+          },
+          "phugoid": {
+           "dict": {
+            "eig": [
+             "f:-0x1.262cfd406b26ep-6",
+             "f:0x1.ce01e631b6447p-4"
+            ],
+            "wn": "f:0x1.d3d304997a450p-4",
+            "zeta": "f:0x1.41f444302155dp-3"
+           }
+          }
+         }
+        },
+        "note": null
+       }
+      },
+      "lat": {
+       "dict": {
+        "modes": [
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.d2cb579151eeap-4",
+            "f:0x1.4cb1451e7066bp+1"
+           ],
+           "wn": "f:0x1.4d0319747f583p+1",
+           "zeta": "f:0x1.66d805a77bcb5p-5"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.d2cb579151eeap-4",
+            "f:-0x1.4cb1451e7066bp+1"
+           ],
+           "wn": "f:0x1.4d0319747f583p+1",
+           "zeta": "f:0x1.66d805a77bcb5p-5"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.27ca905aa288cp-1",
+            "f:0x0.0p+0"
+           ],
+           "wn": "f:0x1.27ca905aa288cp-1",
+           "zeta": "f:0x1.0000000000000p+0"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.6025e29fdbcd9p-8",
+            "f:0x0.0p+0"
+           ],
+           "wn": "f:0x1.6025e29fdbcd9p-8",
+           "zeta": "f:0x1.0000000000000p+0"
+          }
+         }
+        ],
+        "classified": {
+         "dict": {
+          "dutch_roll": {
+           "dict": {
+            "eig": [
+             "f:-0x1.d2cb579151eeap-4",
+             "f:0x1.4cb1451e7066bp+1"
+            ],
+            "wn": "f:0x1.4d0319747f583p+1",
+            "zeta": "f:0x1.66d805a77bcb5p-5"
+           }
+          },
+          "roll": {
+           "dict": {
+            "eig": [
+             "f:-0x1.27ca905aa288cp-1",
+             "f:0x0.0p+0"
+            ],
+            "wn": "f:0x1.27ca905aa288cp-1",
+            "zeta": "f:0x1.0000000000000p+0"
+           }
+          },
+          "spiral": {
+           "dict": {
+            "eig": [
+             "f:-0x1.6025e29fdbcd9p-8",
+             "f:0x0.0p+0"
+            ],
+            "wn": "f:0x1.6025e29fdbcd9p-8",
+            "zeta": "f:0x1.0000000000000p+0"
+           }
+          }
+         }
+        },
+        "note": null
+       }
+      },
+      "margins": {
+       "dict": {
+        "pitch_q": {
+         "dict": {
+          "gm_db": "inf",
+          "pm_deg": "f:0x1.67854ea8b6158p+6",
+          "wcg": null,
+          "wcp": "f:0x1.2d166f71ca6c0p+4"
+         }
+        }
+       }
+      },
+      "note": null
+     }
+    },
+    {
+     "dict": {
+      "trim": {
+       "dict": {
+        "case": {
+         "dict": {
+          "name": "M0.40_h1000_f200",
+          "mach": "f:0x1.999999999999ap-2",
+          "alt": "f:0x1.f400000000000p+9",
+          "fuel": "f:0x1.9000000000000p+7",
+          "condition": "level"
+         }
+        },
+        "converged": true,
+        "cost": "f:0x1.8793c3b675ca3p-41",
+        "flags": {
+         "dict": {
+          "residual_ok": true,
+          "saturation_ok": true,
+          "alpha_margin_ok": true,
+          "continuity_ok": true
+         }
+        },
+        "euler": [
+         "f:0x0.0p+0",
+         "f:0x1.9231cb27dbf1bp-4",
+         "f:0x0.0p+0"
+        ],
+        "vel_b": [
+         "f:0x1.0bd9c7cc161efp+7",
+         "f:0x0.0p+0",
+         "f:0x1.a62ba6172f618p+3"
+        ],
+        "control": {
+         "dict": {
+          "elevon": [
+           "f:-0x1.dfabd7607f194p-5",
+           "f:-0x1.dfabd7607f194p-5",
+           "f:-0x1.dfabd7607f194p-5",
+           "f:-0x1.dfabd7607f194p-5"
+          ],
+          "rudder": "f:0x0.0p+0",
+          "throttle": [
+           "f:0x1.06e1c0a6ae55dp-1",
+           "f:0x1.06e1c0a6ae55dp-1"
+          ]
+         }
+        },
+        "params_fingerprint": "fp-mm"
+       }
+      },
+      "lon": {
+       "dict": {
+        "modes": [
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.27d646d9f26e6p+0",
+            "f:0x1.807cc466f1a20p+2"
+           ],
+           "wn": "f:0x1.87893d409cbd2p+2",
+           "zeta": "f:0x1.82db71134898ep-3"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.27d646d9f26e6p+0",
+            "f:-0x1.807cc466f1a20p+2"
+           ],
+           "wn": "f:0x1.87893d409cbd2p+2",
+           "zeta": "f:0x1.82db71134898ep-3"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.e84fd2b5f26dap-7",
+            "f:0x1.96770bb491e79p-4"
+           ],
+           "wn": "f:0x1.9b05c8944477cp-4",
+           "zeta": "f:0x1.3023794952765p-3"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.e84fd2b5f26dap-7",
+            "f:-0x1.96770bb491e79p-4"
+           ],
+           "wn": "f:0x1.9b05c8944477cp-4",
+           "zeta": "f:0x1.3023794952765p-3"
+          }
+         }
+        ],
+        "classified": {
+         "dict": {
+          "short_period": {
+           "dict": {
+            "eig": [
+             "f:-0x1.27d646d9f26e6p+0",
+             "f:0x1.807cc466f1a20p+2"
+            ],
+            "wn": "f:0x1.87893d409cbd2p+2",
+            "zeta": "f:0x1.82db71134898ep-3"
+           }
+          },
+          "phugoid": {
+           "dict": {
+            "eig": [
+             "f:-0x1.e84fd2b5f26dap-7",
+             "f:0x1.96770bb491e79p-4"
+            ],
+            "wn": "f:0x1.9b05c8944477cp-4",
+            "zeta": "f:0x1.3023794952765p-3"
+           }
+          }
+         }
+        },
+        "note": null
+       }
+      },
+      "lat": {
+       "dict": {
+        "modes": [
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.087edbf405192p-3",
+            "f:0x1.752fd9f319cefp+1"
+           ],
+           "wn": "f:0x1.758d8929f80e1p+1",
+           "zeta": "f:0x1.6a86082138261p-5"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.087edbf405192p-3",
+            "f:-0x1.752fd9f319cefp+1"
+           ],
+           "wn": "f:0x1.758d8929f80e1p+1",
+           "zeta": "f:0x1.6a86082138261p-5"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.50cdebf0652fap-1",
+            "f:0x0.0p+0"
+           ],
+           "wn": "f:0x1.50cdebf0652fap-1",
+           "zeta": "f:0x1.0000000000000p+0"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.bdfb26ff3b531p-8",
+            "f:0x0.0p+0"
+           ],
+           "wn": "f:0x1.bdfb26ff3b531p-8",
+           "zeta": "f:0x1.0000000000000p+0"
+          }
+         }
+        ],
+        "classified": {
+         "dict": {
+          "dutch_roll": {
+           "dict": {
+            "eig": [
+             "f:-0x1.087edbf405192p-3",
+             "f:0x1.752fd9f319cefp+1"
+            ],
+            "wn": "f:0x1.758d8929f80e1p+1",
+            "zeta": "f:0x1.6a86082138261p-5"
+           }
+          },
+          "roll": {
+           "dict": {
+            "eig": [
+             "f:-0x1.50cdebf0652fap-1",
+             "f:0x0.0p+0"
+            ],
+            "wn": "f:0x1.50cdebf0652fap-1",
+            "zeta": "f:0x1.0000000000000p+0"
+           }
+          },
+          "spiral": {
+           "dict": {
+            "eig": [
+             "f:-0x1.bdfb26ff3b531p-8",
+             "f:0x0.0p+0"
+            ],
+            "wn": "f:0x1.bdfb26ff3b531p-8",
+            "zeta": "f:0x1.0000000000000p+0"
+           }
+          }
+         }
+        },
+        "note": null
+       }
+      },
+      "margins": {
+       "dict": {
+        "pitch_q": {
+         "dict": {
+          "gm_db": "inf",
+          "pm_deg": "f:0x1.6952095d92980p+6",
+          "wcg": null,
+          "wcp": "f:0x1.8242d01599dd9p+4"
+         }
+        }
+       }
+      },
+      "note": null
+     }
+    },
+    {
+     "dict": {
+      "trim": {
+       "dict": {
+        "case": {
+         "dict": {
+          "name": "M0.45_h1000_f200",
+          "mach": "f:0x1.ccccccccccccdp-2",
+          "alt": "f:0x1.f400000000000p+9",
+          "fuel": "f:0x1.9000000000000p+7",
+          "condition": "level"
+         }
+        },
+        "converged": true,
+        "cost": "f:0x1.4d781e04c84a4p-40",
+        "flags": {
+         "dict": {
+          "residual_ok": true,
+          "saturation_ok": true,
+          "alpha_margin_ok": true,
+          "continuity_ok": true
+         }
+        },
+        "euler": [
+         "f:0x0.0p+0",
+         "f:0x1.3c98427579e5ap-4",
+         "f:0x0.0p+0"
+        ],
+        "vel_b": [
+         "f:0x1.2de2f4744ef8dp+7",
+         "f:0x0.0p+0",
+         "f:0x1.76167ccf4da51p+3"
+        ],
+        "control": {
+         "dict": {
+          "elevon": [
+           "f:-0x1.56b62e7b70c6ap-5",
+           "f:-0x1.56b62e7b70c6ap-5",
+           "f:-0x1.56b62e7b70c6ap-5",
+           "f:-0x1.56b62e7b70c6ap-5"
+          ],
+          "rudder": "f:0x0.0p+0",
+          "throttle": [
+           "f:0x1.2789decd74d6fp-1",
+           "f:0x1.2789decd74d6fp-1"
+          ]
+         }
+        },
+        "params_fingerprint": "fp-mm"
+       }
+      },
+      "lon": {
+       "dict": {
+        "modes": [
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.4c759534a634ap+0",
+            "f:0x1.b094bc15958a2p+2"
+           ],
+           "wn": "f:0x1.b87e4c3455922p+2",
+           "zeta": "f:0x1.826daf5b98553p-3"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.4c759534a634ap+0",
+            "f:-0x1.b094bc15958a2p+2"
+           ],
+           "wn": "f:0x1.b87e4c3455922p+2",
+           "zeta": "f:0x1.826daf5b98553p-3"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.b54d56d5e0cbap-7",
+            "f:0x1.6a0fb891ecf27p-4"
+           ],
+           "wn": "f:0x1.6e2a205de810dp-4",
+           "zeta": "f:0x1.31bc2c4800a7cp-3"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.b54d56d5e0cbap-7",
+            "f:-0x1.6a0fb891ecf27p-4"
+           ],
+           "wn": "f:0x1.6e2a205de810dp-4",
+           "zeta": "f:0x1.31bc2c4800a7cp-3"
+          }
+         }
+        ],
+        "classified": {
+         "dict": {
+          "short_period": {
+           "dict": {
+            "eig": [
+             "f:-0x1.4c759534a634ap+0",
+             "f:0x1.b094bc15958a2p+2"
+            ],
+            "wn": "f:0x1.b87e4c3455922p+2",
+            "zeta": "f:0x1.826daf5b98553p-3"
+           }
+          },
+          "phugoid": {
+           "dict": {
+            "eig": [
+             "f:-0x1.b54d56d5e0cbap-7",
+             "f:0x1.6a0fb891ecf27p-4"
+            ],
+            "wn": "f:0x1.6e2a205de810dp-4",
+            "zeta": "f:0x1.31bc2c4800a7cp-3"
+           }
+          }
+         }
+        },
+        "note": null
+       }
+      },
+      "lat": {
+       "dict": {
+        "modes": [
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.293e1185a0297p-3",
+            "f:0x1.9e245934f0d30p+1"
+           ],
+           "wn": "f:0x1.9e8ef702d72c0p+1",
+           "zeta": "f:0x1.6f1be6dce0a32p-5"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.293e1185a0297p-3",
+            "f:-0x1.9e245934f0d30p+1"
+           ],
+           "wn": "f:0x1.9e8ef702d72c0p+1",
+           "zeta": "f:0x1.6f1be6dce0a32p-5"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.79f096453f93ap-1",
+            "f:0x0.0p+0"
+           ],
+           "wn": "f:0x1.79f096453f93ap-1",
+           "zeta": "f:0x1.0000000000000p+0"
+          }
+         },
+         {
+          "dict": {
+           "eig": [
+            "f:-0x1.e7a3e553c83c6p-8",
+            "f:0x0.0p+0"
+           ],
+           "wn": "f:0x1.e7a3e553c83c6p-8",
+           "zeta": "f:0x1.0000000000000p+0"
+          }
+         }
+        ],
+        "classified": {
+         "dict": {
+          "dutch_roll": {
+           "dict": {
+            "eig": [
+             "f:-0x1.293e1185a0297p-3",
+             "f:0x1.9e245934f0d30p+1"
+            ],
+            "wn": "f:0x1.9e8ef702d72c0p+1",
+            "zeta": "f:0x1.6f1be6dce0a32p-5"
+           }
+          },
+          "roll": {
+           "dict": {
+            "eig": [
+             "f:-0x1.79f096453f93ap-1",
+             "f:0x0.0p+0"
+            ],
+            "wn": "f:0x1.79f096453f93ap-1",
+            "zeta": "f:0x1.0000000000000p+0"
+           }
+          },
+          "spiral": {
+           "dict": {
+            "eig": [
+             "f:-0x1.e7a3e553c83c6p-8",
+             "f:0x0.0p+0"
+            ],
+            "wn": "f:0x1.e7a3e553c83c6p-8",
+            "zeta": "f:0x1.0000000000000p+0"
+           }
+          }
+         }
+        },
+        "note": null
+       }
+      },
+      "margins": {
+       "dict": {
+        "pitch_q": {
+         "dict": {
+          "gm_db": "inf",
+          "pm_deg": "f:0x1.6a7178f6a2cd8p+6",
+          "wcg": null,
+          "wcp": "f:0x1.e2b0284c22c79p+4"
+         }
+        }
+       }
+      },
+      "note": null
+     }
+    }
+   ],
+   "loops": [
+    {
+     "dict": {
+      "name": "pitch_q",
+      "axis": "lon",
+      "x_out": "q",
+      "u_in": "de",
+      "kp": "f:0x1.0000000000000p-1",
+      "ki": "f:0x1.999999999999ap-1",
+      "sign": "f:-0x1.0000000000000p+0"
+     }
+    }
+   ],
+   "actuator": null,
+   "delay_s": "f:0x0.0p+0",
+   "pade_order": 2,
+   "n_requested": 3
+  }
+ }
+}

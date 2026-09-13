@@ -1,0 +1,74 @@
+{
+ "golden": "influence_openloop",
+ "mode": "full",
+ "captured_at": "388cc91",
+ "value": {
+  "dict": {
+   "fingerprint": "c48da3269a9a8e4c",
+   "probe_rel": "f:0x1.47ae147ae147bp-7",
+   "cases": [
+    "c45"
+   ],
+   "params": {
+    "dict": {
+     "table.pitch.k_rate": {
+      "dict": {
+       "status": "ok",
+       "reason": null,
+       "value": "f:0x1.0000000000000p+0",
+       "probe_to": "f:0x1.028f5c28f5c29p+0",
+       "loops": {
+        "dict": {
+         "pitch_rate": {
+          "dict": {
+           "c45": {
+            "dict": {
+             "base": {
+              "dict": {
+               "gm_db": "f:0x1.295b9956b54b3p+8",
+               "pm_deg": "f:-0x1.5a9b5343331f8p+5",
+               "wcg": "f:0x0.0p+0",
+               "wcp": "f:0x1.1e99d19eea788p-4"
+              }
+             },
+             "perturbed": {
+              "dict": {
+               "gm_db": "f:0x1.2945793a47e39p+8",
+               "pm_deg": "f:-0x1.58eb3d913bdacp+5",
+               "wcg": "f:0x0.0p+0",
+               "wcp": "f:0x1.1de21651e9f85p-4"
+              }
+             },
+             "delta": {
+              "dict": {
+               "pm_deg": "f:0x1.b015b1f744c00p-3",
+               "gm_db": "f:-0x1.6201c6d67a000p-4"
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     },
+     "fcl/ScasAxis.pitch.kp": {
+      "dict": {
+       "status": "overridden",
+       "reason": "게인 스케줄 pitch.kp가 매 스텝 덮어쓴다 — 실효 설계변수는 table.pitch.kp",
+       "value": "f:-0x1.0000000000000p+1",
+       "probe_to": null,
+       "loops": {
+        "dict": {}
+       }
+      }
+     }
+    }
+   },
+   "warnings": [],
+   "aborted": null,
+   "kind": "influence_openloop"
+  }
+ }
+}

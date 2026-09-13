@@ -1,0 +1,584 @@
+{
+ "golden": "verify_linear",
+ "mode": "full",
+ "captured_at": "388cc91",
+ "value": {
+  "dict": {
+   "corners": [
+    {
+     "dataclass": "DispersionSet",
+     "fields": {
+      "mass": "f:0x1.999999999999ap-3",
+      "cmalpha": "f:0x0.0p+0",
+      "cmq": "f:0x0.0p+0"
+     }
+    },
+    {
+     "dataclass": "DispersionSet",
+     "fields": {
+      "mass": "f:-0x1.999999999999ap-3",
+      "cmalpha": "f:0x0.0p+0",
+      "cmq": "f:0x0.0p+0"
+     }
+    },
+    {
+     "dataclass": "DispersionSet",
+     "fields": {
+      "mass": "f:0x0.0p+0",
+      "cmalpha": "f:0x1.999999999999ap-3",
+      "cmq": "f:0x0.0p+0"
+     }
+    },
+    {
+     "dataclass": "DispersionSet",
+     "fields": {
+      "mass": "f:0x0.0p+0",
+      "cmalpha": "f:-0x1.999999999999ap-3",
+      "cmq": "f:0x0.0p+0"
+     }
+    },
+    {
+     "dataclass": "DispersionSet",
+     "fields": {
+      "mass": "f:0x0.0p+0",
+      "cmalpha": "f:0x0.0p+0",
+      "cmq": "f:0x1.999999999999ap-3"
+     }
+    },
+    {
+     "dataclass": "DispersionSet",
+     "fields": {
+      "mass": "f:0x0.0p+0",
+      "cmalpha": "f:0x0.0p+0",
+      "cmq": "f:-0x1.999999999999ap-3"
+     }
+    }
+   ],
+   "result": {
+    "dict": {
+     "fingerprint": "c48da3269a9a8e4c",
+     "criteria_fingerprint": "7a03cde8df2f59f8",
+     "depth": "linear",
+     "verify_meta": {
+      "dict": {
+       "mass_cg": "질량·CG 섭동",
+       "aero_coeff": "공력계수 섭동",
+       "actuator_sensor_delay": "액추에이터·센서 지연",
+       "grid_midpoints": "격자 중간점",
+       "monte_carlo": "Monte Carlo",
+       "mission_profile": "미션 프로파일",
+       "worst_case_search": "worst-case 탐색"
+      }
+     },
+     "verify": {
+      "dict": {
+       "mass_cg": {
+        "dict": {
+         "status": "ok",
+         "corners": [
+          {
+           "dict": {
+            "label": "mass+20%",
+            "dispersion": {
+             "dict": {
+              "mass": "f:0x1.999999999999ap-3",
+              "cmalpha": "f:0x0.0p+0",
+              "cmq": "f:0x0.0p+0"
+             }
+            },
+            "hard_fail": false,
+            "hard_fails": [],
+            "stage_status": {
+             "dict": {
+              "envelope": "na",
+              "actuator": "na",
+              "authority": "ok",
+              "coupling": "na",
+              "stability": "warn",
+              "damping": "ok",
+              "margins": "ok",
+              "tracking": "na",
+              "recovery": "na",
+              "robustness": "na",
+              "schedule": "ok"
+             }
+            },
+            "n_cases": 2,
+            "unconverged": [],
+            "cases": [
+             {
+              "dict": {
+               "case": "M0.4",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             },
+             {
+              "dict": {
+               "case": "M0.5",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             }
+            ]
+           }
+          },
+          {
+           "dict": {
+            "label": "mass-20%",
+            "dispersion": {
+             "dict": {
+              "mass": "f:-0x1.999999999999ap-3",
+              "cmalpha": "f:0x0.0p+0",
+              "cmq": "f:0x0.0p+0"
+             }
+            },
+            "hard_fail": false,
+            "hard_fails": [],
+            "stage_status": {
+             "dict": {
+              "envelope": "na",
+              "actuator": "na",
+              "authority": "ok",
+              "coupling": "na",
+              "stability": "warn",
+              "damping": "ok",
+              "margins": "ok",
+              "tracking": "na",
+              "recovery": "na",
+              "robustness": "na",
+              "schedule": "ok"
+             }
+            },
+            "n_cases": 2,
+            "unconverged": [],
+            "cases": [
+             {
+              "dict": {
+               "case": "M0.4",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             },
+             {
+              "dict": {
+               "case": "M0.5",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             }
+            ]
+           }
+          }
+         ],
+         "n_pass": 2,
+         "n_judged": 2,
+         "note": "CG축은 [TBD] — 모멘트 기준점 이전 미구현이라 흔들어도 동역학이 안 변한다(plant/demo.py). 질량축만 실측"
+        }
+       },
+       "aero_coeff": {
+        "dict": {
+         "status": "ok",
+         "corners": [
+          {
+           "dict": {
+            "label": "cmα+20%",
+            "dispersion": {
+             "dict": {
+              "mass": "f:0x0.0p+0",
+              "cmalpha": "f:0x1.999999999999ap-3",
+              "cmq": "f:0x0.0p+0"
+             }
+            },
+            "hard_fail": false,
+            "hard_fails": [],
+            "stage_status": {
+             "dict": {
+              "envelope": "na",
+              "actuator": "na",
+              "authority": "ok",
+              "coupling": "na",
+              "stability": "warn",
+              "damping": "ok",
+              "margins": "ok",
+              "tracking": "na",
+              "recovery": "na",
+              "robustness": "na",
+              "schedule": "ok"
+             }
+            },
+            "n_cases": 2,
+            "unconverged": [],
+            "cases": [
+             {
+              "dict": {
+               "case": "M0.4",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             },
+             {
+              "dict": {
+               "case": "M0.5",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             }
+            ]
+           }
+          },
+          {
+           "dict": {
+            "label": "cmα-20%",
+            "dispersion": {
+             "dict": {
+              "mass": "f:0x0.0p+0",
+              "cmalpha": "f:-0x1.999999999999ap-3",
+              "cmq": "f:0x0.0p+0"
+             }
+            },
+            "hard_fail": false,
+            "hard_fails": [],
+            "stage_status": {
+             "dict": {
+              "envelope": "na",
+              "actuator": "na",
+              "authority": "ok",
+              "coupling": "na",
+              "stability": "warn",
+              "damping": "ok",
+              "margins": "ok",
+              "tracking": "na",
+              "recovery": "na",
+              "robustness": "na",
+              "schedule": "ok"
+             }
+            },
+            "n_cases": 2,
+            "unconverged": [],
+            "cases": [
+             {
+              "dict": {
+               "case": "M0.4",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             },
+             {
+              "dict": {
+               "case": "M0.5",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             }
+            ]
+           }
+          },
+          {
+           "dict": {
+            "label": "cmq+20%",
+            "dispersion": {
+             "dict": {
+              "mass": "f:0x0.0p+0",
+              "cmalpha": "f:0x0.0p+0",
+              "cmq": "f:0x1.999999999999ap-3"
+             }
+            },
+            "hard_fail": false,
+            "hard_fails": [],
+            "stage_status": {
+             "dict": {
+              "envelope": "na",
+              "actuator": "na",
+              "authority": "ok",
+              "coupling": "na",
+              "stability": "warn",
+              "damping": "ok",
+              "margins": "ok",
+              "tracking": "na",
+              "recovery": "na",
+              "robustness": "na",
+              "schedule": "ok"
+             }
+            },
+            "n_cases": 2,
+            "unconverged": [],
+            "cases": [
+             {
+              "dict": {
+               "case": "M0.4",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             },
+             {
+              "dict": {
+               "case": "M0.5",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             }
+            ]
+           }
+          },
+          {
+           "dict": {
+            "label": "cmq-20%",
+            "dispersion": {
+             "dict": {
+              "mass": "f:0x0.0p+0",
+              "cmalpha": "f:0x0.0p+0",
+              "cmq": "f:-0x1.999999999999ap-3"
+             }
+            },
+            "hard_fail": false,
+            "hard_fails": [],
+            "stage_status": {
+             "dict": {
+              "envelope": "na",
+              "actuator": "na",
+              "authority": "ok",
+              "coupling": "na",
+              "stability": "warn",
+              "damping": "ok",
+              "margins": "ok",
+              "tracking": "na",
+              "recovery": "na",
+              "robustness": "na",
+              "schedule": "ok"
+             }
+            },
+            "n_cases": 2,
+            "unconverged": [],
+            "cases": [
+             {
+              "dict": {
+               "case": "M0.4",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             },
+             {
+              "dict": {
+               "case": "M0.5",
+               "hard_fails": 0,
+               "stages": {
+                "dict": {
+                 "envelope": "na",
+                 "actuator": "na",
+                 "authority": "ok",
+                 "coupling": "na",
+                 "stability": "warn",
+                 "damping": "ok",
+                 "margins": "ok",
+                 "tracking": "na",
+                 "recovery": "na",
+                 "robustness": "na",
+                 "schedule": "ok"
+                }
+               }
+              }
+             }
+            ]
+           }
+          }
+         ],
+         "n_pass": 4,
+         "n_judged": 4,
+         "note": null
+        }
+       },
+       "grid_midpoints": {
+        "dict": {
+         "status": "na",
+         "note": "중간점 케이스가 요청에 없다"
+        }
+       },
+       "actuator_sensor_delay": {
+        "dict": {
+         "status": "na",
+         "note": "[자리] 지연 섭동은 마진 조성의 delay_s 재계산으로 붙는다 — 후속"
+        }
+       },
+       "monte_carlo": {
+        "dict": {
+         "status": "na",
+         "note": "[자리] monte_carlo_n>0 활성화는 스코프 밖 — 코너가 1차다"
+        }
+       },
+       "mission_profile": {
+        "dict": {
+         "status": "na",
+         "note": "[자리] 미션 프로파일 재생 검증 — 후속"
+        }
+       },
+       "worst_case_search": {
+        "dict": {
+         "status": "na",
+         "note": "[자리] 코너 전수 대신 탐색 — 후속"
+        }
+       }
+      }
+     },
+     "status": "ok",
+     "warnings": [],
+     "aborted": null
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,561 @@
+{
+ "golden": "trim_special",
+ "mode": "full",
+ "captured_at": "388cc91",
+ "value": {
+  "dict": {
+   "ground": {
+    "dataclass": "TrimResult",
+    "fields": {
+     "case": {
+      "dataclass": "TrimCase",
+      "fields": {
+       "name": "ground",
+       "mach": "f:0x0.0p+0",
+       "alt": "f:0x0.0p+0",
+       "fuel": "f:0x1.2c00000000000p+8",
+       "condition": "ground",
+       "extras": {
+        "dict": {}
+       }
+      }
+     },
+     "state": {
+      "dataclass": "VehicleState",
+      "fields": {
+       "t": "f:0x0.0p+0",
+       "pos_n": {
+        "ndarray": [
+         3
+        ],
+        "dtype": "float64",
+        "v": [
+         "f:0x0.0p+0",
+         "f:0x0.0p+0",
+         "f:-0x1.0007b28ad71e8p-1"
+        ]
+       },
+       "vel_b": {
+        "ndarray": [
+         3
+        ],
+        "dtype": "float64",
+        "v": [
+         "f:0x0.0p+0",
+         "f:0x0.0p+0",
+         "f:0x0.0p+0"
+        ]
+       },
+       "q_nb": {
+        "ndarray": [
+         4
+        ],
+        "dtype": "float64",
+        "v": [
+         "f:0x1.0000000000000p+0",
+         "f:-0x1.ce0c3940cb8b2p-35",
+         "f:-0x1.f62e7aedee591p-37",
+         "f:-0x1.c52fee2b4dc8bp-71"
+        ]
+       },
+       "omega_b": {
+        "ndarray": [
+         3
+        ],
+        "dtype": "float64",
+        "v": [
+         "f:0x0.0p+0",
+         "f:0x0.0p+0",
+         "f:0x0.0p+0"
+        ]
+       },
+       "fuel": "f:0x1.2c00000000000p+8"
+      }
+     },
+     "control": {
+      "dataclass": "SurfaceCommand",
+      "fields": {
+       "elevon": {
+        "ndarray": [
+         4
+        ],
+        "dtype": "float64",
+        "v": [
+         "f:0x0.0p+0",
+         "f:0x0.0p+0",
+         "f:0x0.0p+0",
+         "f:0x0.0p+0"
+        ]
+       },
+       "rudder": "f:0x0.0p+0",
+       "throttle": {
+        "ndarray": [
+         2
+        ],
+        "dtype": "float64",
+        "v": [
+         "f:0x0.0p+0",
+         "f:0x0.0p+0"
+        ]
+       }
+      }
+     },
+     "converged": true,
+     "cost": "f:0x1.20a14fa9b15acp-50",
+     "flags": {
+      "dict": {
+       "residual_ok": true,
+       "saturation_ok": null,
+       "alpha_margin_ok": null,
+       "continuity_ok": null,
+       "supported_ok": true
+      }
+     },
+     "params_fingerprint": ""
+    }
+   },
+   "dispersed": [
+    [
+     {
+      "dataclass": "TrimResult",
+      "fields": {
+       "case": {
+        "dataclass": "TrimCase",
+        "fields": {
+         "name": "a",
+         "mach": "f:0x1.999999999999ap-2",
+         "alt": "f:0x1.f400000000000p+9",
+         "fuel": "f:0x1.9000000000000p+7",
+         "condition": "level",
+         "extras": {
+          "dict": {}
+         }
+        }
+       },
+       "state": {
+        "dataclass": "VehicleState",
+        "fields": {
+         "t": "f:0x0.0p+0",
+         "pos_n": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x0.0p+0",
+           "f:0x0.0p+0",
+           "f:-0x1.f400000000000p+9"
+          ]
+         },
+         "vel_b": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.0b77b00d8021ep+7",
+           "f:0x0.0p+0",
+           "f:0x1.e05a4e5f5dafdp+3"
+          ]
+         },
+         "q_nb": {
+          "ndarray": [
+           4
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.ff3358ed51c95p-1",
+           "f:0x0.0p+0",
+           "f:0x1.c99a6b3d4bf1bp-5",
+           "f:0x0.0p+0"
+          ]
+         },
+         "omega_b": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x0.0p+0",
+           "f:0x0.0p+0",
+           "f:0x0.0p+0"
+          ]
+         },
+         "fuel": "f:0x1.9000000000000p+7"
+        }
+       },
+       "control": {
+        "dataclass": "SurfaceCommand",
+        "fields": {
+         "elevon": {
+          "ndarray": [
+           4
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:-0x1.a6327adac1b49p-5",
+           "f:-0x1.a6327adac1b49p-5",
+           "f:-0x1.a6327adac1b49p-5",
+           "f:-0x1.a6327adac1b49p-5"
+          ]
+         },
+         "rudder": "f:0x0.0p+0",
+         "throttle": {
+          "ndarray": [
+           2
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.396ce69a3451fp-1",
+           "f:0x1.396ce69a3451fp-1"
+          ]
+         }
+        }
+       },
+       "converged": true,
+       "cost": "f:0x1.0ebb69094885cp-41",
+       "flags": {
+        "dict": {
+         "residual_ok": true,
+         "saturation_ok": true,
+         "alpha_margin_ok": true,
+         "continuity_ok": null
+        }
+       },
+       "params_fingerprint": ""
+      }
+     },
+     {
+      "dataclass": "TrimResult",
+      "fields": {
+       "case": {
+        "dataclass": "TrimCase",
+        "fields": {
+         "name": "b",
+         "mach": "f:0x1.3333333333333p-2",
+         "alt": "f:0x0.0p+0",
+         "fuel": "f:0x1.9000000000000p+8",
+         "condition": "level",
+         "extras": {
+          "dict": {}
+         }
+        }
+       },
+       "state": {
+        "dataclass": "VehicleState",
+        "fields": {
+         "t": "f:0x0.0p+0",
+         "pos_n": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x0.0p+0",
+           "f:0x0.0p+0",
+           "f:-0x0.0p+0"
+          ]
+         },
+         "vel_b": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.8fe6994ec6f71p+6",
+           "f:0x0.0p+0",
+           "f:0x1.4a9bbabe719bcp+4"
+          ]
+         },
+         "q_nb": {
+          "ndarray": [
+           4
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.fd5802a07ca03p-1",
+           "f:0x0.0p+0",
+           "f:0x1.a0af2fba87e66p-4",
+           "f:0x0.0p+0"
+          ]
+         },
+         "omega_b": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x0.0p+0",
+           "f:0x0.0p+0",
+           "f:0x0.0p+0"
+          ]
+         },
+         "fuel": "f:0x1.9000000000000p+8"
+        }
+       },
+       "control": {
+        "dataclass": "SurfaceCommand",
+        "fields": {
+         "elevon": {
+          "ndarray": [
+           4
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:-0x1.c45c36347d195p-4",
+           "f:-0x1.c45c36347d195p-4",
+           "f:-0x1.c45c36347d195p-4",
+           "f:-0x1.c45c36347d195p-4"
+          ]
+         },
+         "rudder": "f:0x0.0p+0",
+         "throttle": {
+          "ndarray": [
+           2
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.512a1cad690e6p-1",
+           "f:0x1.512a1cad690e6p-1"
+          ]
+         }
+        }
+       },
+       "converged": true,
+       "cost": "f:0x1.9271c335cb5e5p-43",
+       "flags": {
+        "dict": {
+         "residual_ok": true,
+         "saturation_ok": true,
+         "alpha_margin_ok": true,
+         "continuity_ok": false
+        }
+       },
+       "params_fingerprint": ""
+      }
+     }
+    ],
+    [
+     {
+      "dataclass": "TrimResult",
+      "fields": {
+       "case": {
+        "dataclass": "TrimCase",
+        "fields": {
+         "name": "a",
+         "mach": "f:0x1.999999999999ap-2",
+         "alt": "f:0x1.f400000000000p+9",
+         "fuel": "f:0x1.9000000000000p+7",
+         "condition": "level",
+         "extras": {
+          "dict": {}
+         }
+        }
+       },
+       "state": {
+        "dataclass": "VehicleState",
+        "fields": {
+         "t": "f:0x0.0p+0",
+         "pos_n": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x0.0p+0",
+           "f:0x0.0p+0",
+           "f:-0x1.f400000000000p+9"
+          ]
+         },
+         "vel_b": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.0bcc37b8e6675p+7",
+           "f:0x0.0p+0",
+           "f:0x1.aeb053aa9ce75p+3"
+          ]
+         },
+         "q_nb": {
+          "ndarray": [
+           4
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.ff5b9abf83953p-1",
+           "f:0x0.0p+0",
+           "f:0x1.9a2a4644a43b8p-5",
+           "f:0x0.0p+0"
+          ]
+         },
+         "omega_b": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x0.0p+0",
+           "f:0x0.0p+0",
+           "f:0x0.0p+0"
+          ]
+         },
+         "fuel": "f:0x1.9000000000000p+7"
+        }
+       },
+       "control": {
+        "dataclass": "SurfaceCommand",
+        "fields": {
+         "elevon": {
+          "ndarray": [
+           4
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:-0x1.3800d4ab8a8eep-4",
+           "f:-0x1.3800d4ab8a8eep-4",
+           "f:-0x1.3800d4ab8a8eep-4",
+           "f:-0x1.3800d4ab8a8eep-4"
+          ]
+         },
+         "rudder": "f:0x0.0p+0",
+         "throttle": {
+          "ndarray": [
+           2
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.06d9c62771814p-1",
+           "f:0x1.06d9c62771814p-1"
+          ]
+         }
+        }
+       },
+       "converged": true,
+       "cost": "f:0x1.ca3259917d899p-41",
+       "flags": {
+        "dict": {
+         "residual_ok": true,
+         "saturation_ok": true,
+         "alpha_margin_ok": true,
+         "continuity_ok": null
+        }
+       },
+       "params_fingerprint": ""
+      }
+     },
+     {
+      "dataclass": "TrimResult",
+      "fields": {
+       "case": {
+        "dataclass": "TrimCase",
+        "fields": {
+         "name": "b",
+         "mach": "f:0x1.3333333333333p-2",
+         "alt": "f:0x0.0p+0",
+         "fuel": "f:0x1.9000000000000p+8",
+         "condition": "level",
+         "extras": {
+          "dict": {}
+         }
+        }
+       },
+       "state": {
+        "dataclass": "VehicleState",
+        "fields": {
+         "t": "f:0x0.0p+0",
+         "pos_n": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x0.0p+0",
+           "f:0x0.0p+0",
+           "f:-0x0.0p+0"
+          ]
+         },
+         "vel_b": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.9127aa5e3badap+6",
+           "f:0x0.0p+0",
+           "f:0x1.3154df2614634p+4"
+          ]
+         },
+         "q_nb": {
+          "ndarray": [
+           4
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.fdbd22b9f14eap-1",
+           "f:0x0.0p+0",
+           "f:0x1.80874134517f6p-4",
+           "f:0x0.0p+0"
+          ]
+         },
+         "omega_b": {
+          "ndarray": [
+           3
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x0.0p+0",
+           "f:0x0.0p+0",
+           "f:0x0.0p+0"
+          ]
+         },
+         "fuel": "f:0x1.9000000000000p+8"
+        }
+       },
+       "control": {
+        "dataclass": "SurfaceCommand",
+        "fields": {
+         "elevon": {
+          "ndarray": [
+           4
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:-0x1.48bb4a6e87e14p-3",
+           "f:-0x1.48bb4a6e87e14p-3",
+           "f:-0x1.48bb4a6e87e14p-3",
+           "f:-0x1.48bb4a6e87e14p-3"
+          ]
+         },
+         "rudder": "f:0x0.0p+0",
+         "throttle": {
+          "ndarray": [
+           2
+          ],
+          "dtype": "float64",
+          "v": [
+           "f:0x1.1395121697777p-1",
+           "f:0x1.1395121697777p-1"
+          ]
+         }
+        }
+       },
+       "converged": true,
+       "cost": "f:0x1.1c680e3e83ad4p-42",
+       "flags": {
+        "dict": {
+         "residual_ok": true,
+         "saturation_ok": true,
+         "alpha_margin_ok": true,
+         "continuity_ok": false
+        }
+       },
+       "params_fingerprint": ""
+      }
+     }
+    ]
+   ]
+  }
+ }
+}

@@ -1,0 +1,257 @@
+{
+ "golden": "trim_batch",
+ "mode": "full",
+ "captured_at": "388cc91",
+ "value": {
+  "dict": {
+   "kind": "trim_batch",
+   "results": [
+    {
+     "dict": {
+      "case": {
+       "dict": {
+        "name": "M0.40_h1000_f200",
+        "mach": "f:0x1.999999999999ap-2",
+        "alt": "f:0x1.f400000000000p+9",
+        "fuel": "f:0x1.9000000000000p+7",
+        "condition": "level"
+       }
+      },
+      "converged": true,
+      "cost": "f:0x1.a740a1dcdcb33p-41",
+      "flags": {
+       "dict": {
+        "residual_ok": true,
+        "saturation_ok": true,
+        "alpha_margin_ok": true,
+        "continuity_ok": null
+       }
+      },
+      "euler": [
+       "f:0x0.0p+0",
+       "f:0x1.9231cae695fd2p-4",
+       "f:0x0.0p+0"
+      ],
+      "vel_b": [
+       "f:0x1.0bd9c7cc81c36p+7",
+       "f:0x0.0p+0",
+       "f:0x1.a62ba5d2e3e43p+3"
+      ],
+      "control": {
+       "dict": {
+        "elevon": [
+         "f:-0x1.dfabd58f247b3p-5",
+         "f:-0x1.dfabd58f247b3p-5",
+         "f:-0x1.dfabd58f247b3p-5",
+         "f:-0x1.dfabd58f247b3p-5"
+        ],
+        "rudder": "f:0x0.0p+0",
+        "throttle": [
+         "f:0x1.06e1c08de4d47p-1",
+         "f:0x1.06e1c08de4d47p-1"
+        ]
+       }
+      },
+      "params_fingerprint": "fp-golden"
+     }
+    },
+    {
+     "dict": {
+      "case": {
+       "dict": {
+        "name": "M0.45_h1000_f200",
+        "mach": "f:0x1.ccccccccccccdp-2",
+        "alt": "f:0x1.f400000000000p+9",
+        "fuel": "f:0x1.9000000000000p+7",
+        "condition": "level"
+       }
+      },
+      "converged": true,
+      "cost": "f:0x1.4d781e0b4e94fp-40",
+      "flags": {
+       "dict": {
+        "residual_ok": true,
+        "saturation_ok": true,
+        "alpha_margin_ok": true,
+        "continuity_ok": true
+       }
+      },
+      "euler": [
+       "f:0x0.0p+0",
+       "f:0x1.3c98427579e5ap-4",
+       "f:0x0.0p+0"
+      ],
+      "vel_b": [
+       "f:0x1.2de2f4744ef8dp+7",
+       "f:0x0.0p+0",
+       "f:0x1.76167ccf4da51p+3"
+      ],
+      "control": {
+       "dict": {
+        "elevon": [
+         "f:-0x1.56b62e7b70c74p-5",
+         "f:-0x1.56b62e7b70c74p-5",
+         "f:-0x1.56b62e7b70c74p-5",
+         "f:-0x1.56b62e7b70c74p-5"
+        ],
+        "rudder": "f:0x0.0p+0",
+        "throttle": [
+         "f:0x1.2789decd74d6bp-1",
+         "f:0x1.2789decd74d6bp-1"
+        ]
+       }
+      },
+      "params_fingerprint": "fp-golden"
+     }
+    },
+    {
+     "dict": {
+      "case": {
+       "dict": {
+        "name": "M0.50_h1000_f200",
+        "mach": "f:0x1.0000000000000p-1",
+        "alt": "f:0x1.f400000000000p+9",
+        "fuel": "f:0x1.9000000000000p+7",
+        "condition": "level"
+       }
+      },
+      "converged": true,
+      "cost": "f:0x1.f76a1f8e39526p-40",
+      "flags": {
+       "dict": {
+        "residual_ok": true,
+        "saturation_ok": true,
+        "alpha_margin_ok": true,
+        "continuity_ok": true
+       }
+      },
+      "euler": [
+       "f:0x0.0p+0",
+       "f:0x1.fde39eed09131p-5",
+       "f:0x0.0p+0"
+      ],
+      "vel_b": [
+       "f:0x1.4fc85157e9b41p+7",
+       "f:0x0.0p+0",
+       "f:0x1.4ed4a4d5f422dp+3"
+      ],
+      "control": {
+       "dict": {
+        "elevon": [
+         "f:-0x1.e824869cdd4f0p-6",
+         "f:-0x1.e824869cdd4f0p-6",
+         "f:-0x1.e824869cdd4f0p-6",
+         "f:-0x1.e824869cdd4f0p-6"
+        ],
+        "rudder": "f:0x0.0p+0",
+        "throttle": [
+         "f:0x1.57453b002e09ap-1",
+         "f:0x1.57453b002e09ap-1"
+        ]
+       }
+      },
+      "params_fingerprint": "fp-golden"
+     }
+    },
+    {
+     "dict": {
+      "case": {
+       "dict": {
+        "name": "M0.60_h1000_f200",
+        "mach": "f:0x1.3333333333333p-1",
+        "alt": "f:0x1.f400000000000p+9",
+        "fuel": "f:0x1.9000000000000p+7",
+        "condition": "level"
+       }
+      },
+      "converged": true,
+      "cost": "f:0x1.028f53433cf8cp-38",
+      "flags": {
+       "dict": {
+        "residual_ok": true,
+        "saturation_ok": false,
+        "alpha_margin_ok": true,
+        "continuity_ok": false
+       }
+      },
+      "euler": [
+       "f:0x0.0p+0",
+       "f:0x1.5c72f31fbb45bp-5",
+       "f:0x0.0p+0"
+      ],
+      "vel_b": [
+       "f:0x1.935b08ec890dfp+7",
+       "f:0x0.0p+0",
+       "f:0x1.12acd859ac8f4p+3"
+      ],
+      "control": {
+       "dict": {
+        "elevon": [
+         "f:-0x1.cbad4dedef4bbp-7",
+         "f:-0x1.cbad4dedef4bbp-7",
+         "f:-0x1.cbad4dedef4bbp-7",
+         "f:-0x1.cbad4dedef4bbp-7"
+        ],
+        "rudder": "f:0x0.0p+0",
+        "throttle": [
+         "f:0x1.e69fc532cb107p-1",
+         "f:0x1.e69fc532cb107p-1"
+        ]
+       }
+      },
+      "params_fingerprint": "fp-golden"
+     }
+    },
+    {
+     "dict": {
+      "case": {
+       "dict": {
+        "name": "M0.70_h1000_f200",
+        "mach": "f:0x1.6666666666666p-1",
+        "alt": "f:0x1.f400000000000p+9",
+        "fuel": "f:0x1.9000000000000p+7",
+        "condition": "level"
+       }
+      },
+      "converged": false,
+      "cost": "f:0x1.47b8d86959d28p-2",
+      "flags": {
+       "dict": {
+        "residual_ok": false,
+        "saturation_ok": false,
+        "alpha_margin_ok": true,
+        "continuity_ok": true
+       }
+      },
+      "euler": [
+       "f:0x0.0p+0",
+       "f:0x1.f4d80742f76c7p-6",
+       "f:0x0.0p+0"
+      ],
+      "vel_b": [
+       "f:0x1.d6c99a02c95dap+7",
+       "f:0x0.0p+0",
+       "f:0x1.ccac40ca836fep+2"
+      ],
+      "control": {
+       "dict": {
+        "elevon": [
+         "f:-0x1.23fd1cdb474fap-8",
+         "f:-0x1.23fd1cdb474fap-8",
+         "f:-0x1.23fd1cdb474fap-8",
+         "f:-0x1.23fd1cdb474fap-8"
+        ],
+        "rudder": "f:0x0.0p+0",
+        "throttle": [
+         "f:0x1.0000000000000p+0",
+         "f:0x1.0000000000000p+0"
+        ]
+       }
+      },
+      "params_fingerprint": "fp-golden"
+     }
+    }
+   ]
+  }
+ }
+}

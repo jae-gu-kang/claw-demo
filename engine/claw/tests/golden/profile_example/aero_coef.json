@@ -1,0 +1,229 @@
+{
+ "golden": "aero_coef",
+ "mode": "digest",
+ "captured_at": "388cc91",
+ "value": {
+  "n": 4509,
+  "chunk": 100,
+  "sha": [
+   "fe1d2674b077fa822d34bd43df85ea8e55337032524cada89efeb59b5327c3d3",
+   "2f531a58dafecf718ca2783642cec82cc2920a18015cb3d4a0d9692fa1af298d",
+   "d7a281cfb6e06259eb49dd9072e1d9ec414746d31e6afe26411a91cb113bfe8e",
+   "7e4585441135cffbafa213b94069e06cc28a7fffb0147cdfb78e64f3a5046d40",
+   "4abb8d630225d5809d0343d3204605ce62743dc794600dab71e0599d9d0da37d",
+   "90e89b0ab5490542d15bd3e92c41cca4aad55c2aaa9277dbe0aa3f06fb586e34",
+   "0bec59654b4c2044c18f592c39fab48f9b29dd2ed5b427d2c1beee3d09ab87b5",
+   "e070233c32dfdc1459e710121cb27331267feea3fa9cebd00000c0aab0675999",
+   "4503ac1de2875c72c25707611c5861a4f5bdda6bb8554dd3826459f8d02eda8d",
+   "e33f8d0ce193d883390379a1d2bb4bd8782368150af791601332f9ca83ee9481",
+   "d1ab97555b409e758623c03cf3dfc47ce19c5c771ca618f98239f8e0a4c2e889",
+   "b99831f1cccd265dcfd41f3f2ca67bce6993cbce2ccb74b32466b7373758940a",
+   "47ac8f2b828976767d25ad5bc7e5746157f7fd9f6326d1c1924fea8aac2c03c1",
+   "13c4ef14b074f7b212af808d7db5f38e8e87b6c0f1bda66676bcd09a5dc73667",
+   "2ebc396f4c9c1488d986349b509e8fde438a73d5e7b76ddf86522c049e298182",
+   "e3d955f3956a1c5895ea2deb40ea1022f56a99a644e600f01c5c9d1ccd526cc1",
+   "cabe269b02da78f8123e8c399c5b43b46f86317561f5d6f095f417e4bf4a50d2",
+   "f4e720f409586f7b9dd6b272e0c7acaa0b52b998f012e47943ef0553fc9f12de",
+   "94f56501c279bcd41f45d12018c8957359c247fd12db8543ee846acf8f1ca754",
+   "43e1b6824ea5a72f010274af921bc019a6537f9217ccce608701b7910ae935b6",
+   "78e429c39e240a7bb2e101060c08cbe7fdf3dacc5fbb97c819bc02f335dc0cf4",
+   "3a0e70f0b959801d4e200e65b6b1e15ff5a3f63897a3c0da6c8028b3f43a0a70",
+   "93dd0420893bae39730cb94181f6dc34ee292d7591b86936853a4f1291761773",
+   "a5427b38ee0e376ee2dc9ec8c686a4715fedb349d22dc4992d7c9a8055c89813",
+   "e41d2b4c33104b2d1a1231de3c1ec151956695d473f9954e108acd97cc70220b",
+   "5a8e8b92d16636fbcdd08a407919921aa9cfae1194112a33ff4f83ed0e7e63ba",
+   "608f2db987731b4ac14ff3c28d0ac836cf27717c2d1c678cd0c05899a0e3d9fc",
+   "d2dad05b2f1d849a063bf8409a094a07f6bdb3279c229d7b5dd28c7d5da7c8c0",
+   "f3fb3570b0928077b850633bf07cde5ea5577219634e7682e5fc57cd06e19aa2",
+   "c53879579aac749d0b84671251ed0e1c61cae906b67e6525b2cf33d424df0c62",
+   "28b0abd889da5a071a640970746d9c5362488a58988b39fabd15260a8e48753f",
+   "4695fe98b78c3f4cbbc2caa3c64fe0a0e4cf6797d2d2b0a40358b3231bbdfa9f",
+   "c81237d6fa859da5a34bccf6e1b915c985c72a29ff688f6f6ef4418deae998d1",
+   "9987c8930b99f31b096de166114ee9b2903a32902dbb0ae62cf7c5efd85ad5af",
+   "6644ce7e69f4d355d7147d30ecfaa55cdb541e0fc40c42b4c5bd0da24ec8641c",
+   "8b80b72ee6421f1b7cd80066e46dcea35e644eb89364050e79b8bc0f57fcc647",
+   "07bbcac7fdb02cd1c25d347ee7af23cd31ffd4f9db79526aa9e042d557fc9a64",
+   "fe38afb39b26f86580f170dd468ca4717c41f29307e513084da1ba2e32893a68",
+   "37e0c71458f3cf6115b71e04d689cd5cde57166e45867947b52e120d9b632310",
+   "33b3a99b6157c1d774cd806d069ab799105bb81840948938dcef702568bf8945",
+   "3b7bc76d1d8df630e3b914cf8732f38587021ba69f16594fe173eb712b193772",
+   "b69dfccfea6d884236c492ccba14e96b0bf2a87498fd2bffdedc8e58642337d3",
+   "ae68c0cbbe217c5986ef3a2f3d1cfc5966439ed6cc541ca37f665a139a1af448",
+   "8577f624c4798dcffae430c27cef1cc78357778fa73d2deb56570c868633c9e4",
+   "6de9c8201486853803e304abafdfd3dbcb96cf058dddf536d1983bdebe1e9adc",
+   "647a14e95d44f07ee2fbed4aee42ff421e6b7e7a808abdfdd67306f25646accf"
+  ],
+  "samples": {
+   "0": {
+    "dict": {
+     "CX": "f:-0x1.963f90e2503f0p-7",
+     "CY": "f:0x1.a5f813ca8503fp-3",
+     "CZ": "f:-0x1.1d445a719977ap-1",
+     "Cl": "f:0x1.32de609c5d874p-5",
+     "Cm": "f:-0x1.1fb31a4f855eap-1",
+     "Cn": "f:-0x1.a55f68171f72ap-7"
+    }
+   },
+   "281": {
+    "dict": {
+     "CX": "f:-0x1.06aaa84c968f0p-6",
+     "CY": "f:-0x1.ba5431074734dp-4",
+     "CZ": "f:-0x1.46c111ea41536p-2",
+     "Cl": "f:0x1.ae985b8d6be64p-7",
+     "Cm": "f:0x1.49690b13a4194p-3",
+     "Cn": "f:0x1.a47dee8681706p-5"
+    }
+   },
+   "562": {
+    "dict": {
+     "CX": "f:-0x1.59a8b6587b200p-8",
+     "CY": "f:-0x1.27b5b082a865bp-2",
+     "CZ": "f:-0x1.9b828b583e393p-1",
+     "Cl": "f:-0x1.d5fe301dad8b8p-7",
+     "Cm": "f:0x1.9d29ec6c84d38p-1",
+     "Cn": "f:0x1.2047dffe16875p-4"
+    }
+   },
+   "843": {
+    "dict": {
+     "CX": "f:0x1.6c3318444be04p-3",
+     "CY": "f:0x1.85b2961aa4e2ep-4",
+     "CZ": "f:-0x1.ba4ff68bb93c2p+0",
+     "Cl": "f:0x1.0aa478e78d9e4p-5",
+     "Cm": "f:-0x1.d567bada2b888p-1",
+     "Cn": "f:-0x1.c511775d7eb5cp-6"
+    }
+   },
+   "1124": {
+    "dict": {
+     "CX": "f:0x1.27fb23058fd18p-4",
+     "CY": "f:-0x1.9f85c4a9aa278p-5",
+     "CZ": "f:-0x1.277b1e0468459p+0",
+     "Cl": "f:0x1.b2c67a7ff3cb6p-8",
+     "Cm": "f:0x1.7f7834bc6f934p-1",
+     "Cn": "f:0x1.dfdb6d9b628dcp-7"
+    }
+   },
+   "1405": {
+    "dict": {
+     "CX": "f:0x1.0c1ded992a39cp-4",
+     "CY": "f:-0x1.8ad0f2863619ep-3",
+     "CZ": "f:-0x1.41fe962e43ce3p+0",
+     "Cl": "f:0x1.c9309b15d8895p-6",
+     "Cm": "f:-0x1.020618dbdaf72p+0",
+     "Cn": "f:0x1.d9744c955e3d1p-6"
+    }
+   },
+   "1686": {
+    "dict": {
+     "CX": "f:0x1.a6129eba6d7c0p-5",
+     "CY": "f:-0x1.594e9fb252934p-4",
+     "CZ": "f:-0x1.b49f4d3909aefp+0",
+     "Cl": "f:0x1.ce7362846e2cep-6",
+     "Cm": "f:0x1.4f1f032dcc9abp-1",
+     "Cn": "f:0x1.b1bc606cd6324p-7"
+    }
+   },
+   "1967": {
+    "dict": {
+     "CX": "f:0x1.dcc80c91aed80p-9",
+     "CY": "f:-0x1.67f042a384300p-4",
+     "CZ": "f:-0x1.76fb044c00ff3p-1",
+     "Cl": "f:-0x1.faca6a8b6ce27p-5",
+     "Cm": "f:-0x1.091e1f8e70fa4p-1",
+     "Cn": "f:-0x1.6c4a741c6ee95p-6"
+    }
+   },
+   "2248": {
+    "dict": {
+     "CX": "f:-0x1.b1c4b813df9c0p-8",
+     "CY": "f:0x1.32b984c65e2e7p-4",
+     "CZ": "f:0x1.3b9c9685fc1a0p-1",
+     "Cl": "f:-0x1.329eedf7902e0p-6",
+     "Cm": "f:-0x1.0676626217ed7p+0",
+     "Cn": "f:-0x1.83958b27a3032p-6"
+    }
+   },
+   "2529": {
+    "dict": {
+     "CX": "f:0x1.34ad91b9febc0p-6",
+     "CY": "f:-0x1.552bc7b821b96p-3",
+     "CZ": "f:-0x1.73ebea69dfed7p-1",
+     "Cl": "f:0x1.a1a0e6eebf83ap-5",
+     "Cm": "f:-0x1.fe96af2f0e3d9p-2",
+     "Cn": "f:0x1.81355ee15d3a8p-5"
+    }
+   },
+   "2810": {
+    "dict": {
+     "CX": "f:-0x1.66e4eac35d3f0p-8",
+     "CY": "f:-0x1.207b9b3705b9ap-3",
+     "CZ": "f:0x1.db91357f4db77p-2",
+     "Cl": "f:-0x1.3248c4c62f333p-5",
+     "Cm": "f:-0x1.107d49e7100f1p-2",
+     "Cn": "f:0x1.511c1b2b5e0acp-5"
+    }
+   },
+   "3091": {
+    "dict": {
+     "CX": "f:0x1.8686b9e78e450p-4",
+     "CY": "f:-0x1.87617484fe9e4p-2",
+     "CZ": "f:-0x1.b66a4b454e368p+0",
+     "Cl": "f:0x1.73d430e87d866p-4",
+     "Cm": "f:-0x1.55f60bcbaa974p-3",
+     "Cn": "f:0x1.cfe600eecd769p-5"
+    }
+   },
+   "3372": {
+    "dict": {
+     "CX": "f:-0x1.9dab1182253a0p-7",
+     "CY": "f:0x1.052faa23fff4cp-2",
+     "CZ": "f:0x1.f58294048c3fep-1",
+     "Cl": "f:-0x1.656f859b36837p-4",
+     "Cm": "f:0x1.893013f24e000p-14",
+     "Cn": "f:-0x1.5cf612baa028ep-5"
+    }
+   },
+   "3653": {
+    "dict": {
+     "CX": "f:-0x1.5bb24dc7f244cp-7",
+     "CY": "f:-0x1.19a0b6a7010c5p-4",
+     "CZ": "f:-0x1.35a97edd6ee66p-2",
+     "Cl": "f:0x1.64da6d08d885ap-7",
+     "Cm": "f:-0x1.1d477d81d15c6p-1",
+     "Cn": "f:-0x1.7099716367812p-6"
+    }
+   },
+   "3934": {
+    "dict": {
+     "CX": "f:-0x1.7ccb6990efee2p-7",
+     "CY": "f:0x1.89177c3a204c9p-5",
+     "CZ": "f:-0x1.0e5a8bd0f4d60p-2",
+     "Cl": "f:-0x1.b567440c07578p-8",
+     "Cm": "f:-0x1.f113c3da136f1p-3",
+     "Cn": "f:-0x1.70c690a2d27abp-6"
+    }
+   },
+   "4215": {
+    "dict": {
+     "CX": "f:-0x1.83ca67130d0cdp-6",
+     "CY": "f:-0x1.5c0eb374d7e80p-6",
+     "CZ": "f:0x1.0afb9a0cfd943p-2",
+     "Cl": "f:-0x1.a784b55bf09b2p-6",
+     "Cm": "f:0x1.6b8a2932711d2p-2",
+     "Cn": "f:-0x1.0206c8d94ddcbp-5"
+    }
+   },
+   "4496": {
+    "dict": {
+     "CX": "f:0x1.ca7d80d032a44p-4",
+     "CY": "f:-0x1.ce73e5e38d43ap-4",
+     "CZ": "f:-0x1.6517022e65877p+0",
+     "Cl": "f:-0x1.3af29d744f8b2p-8",
+     "Cm": "f:-0x1.a8d2a93b810c7p-3",
+     "Cn": "f:0x1.a1e96fd51700bp-5"
+    }
+   }
+  }
+ }
+}

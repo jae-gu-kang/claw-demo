@@ -1,0 +1,1861 @@
+{
+ "golden": "evaluate_linear",
+ "mode": "full",
+ "captured_at": "388cc91",
+ "value": {
+  "dict": {
+   "fingerprint": "c48da3269a9a8e4c",
+   "criteria_fingerprint": "7a03cde8df2f59f8",
+   "criteria": {
+    "dict": {
+     "schema_version": 2,
+     "margin": {
+      "dict": {
+       "pm_min_deg": "f:0x1.6800000000000p+5",
+       "gm_min_db": "f:0x1.8000000000000p+2",
+       "pm_bad_deg": "f:0x1.e000000000000p+4",
+       "gm_good_db": "f:0x1.0000000000000p+3",
+       "zeta_min": "f:0x1.3333333333333p-2",
+       "zeta_good": "f:0x1.0000000000000p-1",
+       "lam_min_frac": "f:0x1.0000000000000p-1",
+       "lam_good_frac": "f:0x1.999999999999ap-1",
+       "lam_part_min": "f:0x1.0000000000000p-1"
+      }
+     },
+     "composition": {
+      "dict": {
+       "actuator_wn": "f:0x1.e000000000000p+4",
+       "actuator_zeta": "f:0x1.6666666666666p-1",
+       "delay_s": "f:0x1.1eb851eb851ecp-5",
+       "pade_order": 2
+      }
+     },
+     "stability": {
+      "dict": {
+       "t2_min_s": "f:0x1.4000000000000p+4"
+      }
+     },
+     "authority": {
+      "dict": {
+       "de_frac_warn": "f:0x1.0000000000000p-1",
+       "de_frac_max": "f:0x1.b333333333333p-1",
+       "b_min_frac": "f:0x1.999999999999ap-4"
+      }
+     },
+     "actuator": {
+      "dict": {
+       "sat_frac_max": "f:0x1.999999999999ap-5",
+       "rate_sat_frac_max": "f:0x1.999999999999ap-5",
+       "pos_margin_min_frac": "f:0x1.999999999999ap-4",
+       "rate_margin_min_frac": "f:0x1.999999999999ap-4",
+       "near_limit_band": "f:0x1.ccccccccccccdp-1",
+       "near_limit_frac_max": "f:0x1.999999999999ap-4",
+       "thr_margin_min_frac": "f:0x1.999999999999ap-5"
+      }
+     },
+     "envelope": {
+      "dict": {
+       "alpha_margin_min": "f:0x0.0p+0",
+       "limiter_frac_max": "f:0x1.47ae147ae147bp-6",
+       "nz_limit": null,
+       "q_rate_limit": null
+      }
+     },
+     "response": {
+      "dict": {
+       "rms_max": {
+        "dict": {
+         "alt": "f:0x1.4000000000000p+3",
+         "spd": "f:0x1.0000000000000p+1",
+         "hdg": "f:0x1.999999999999ap-4"
+        }
+       },
+       "tr_max": {
+        "dict": {}
+       },
+       "ts_max": {
+        "dict": {}
+       },
+       "mp_max": {
+        "dict": {}
+       },
+       "sse_max": {
+        "dict": {}
+       },
+       "bandwidth_window": null
+      }
+     },
+     "coupling": {
+      "dict": {
+       "dh": "f:0x1.9000000000000p+6",
+       "dpsi": "f:0x1.0000000000000p-1",
+       "alpha_margin_min": "f:0x0.0p+0",
+       "sat_frac_max": "f:0x1.999999999999ap-5",
+       "nz_limit": null
+      }
+     },
+     "recovery": {
+      "dict": {
+       "overshoot_max_frac": "f:0x1.999999999999ap-3",
+       "resettle_max_s": "f:0x1.4000000000000p+2",
+       "windup_frac_max": "f:0x1.47ae147ae147bp-6"
+      }
+     },
+     "schedule": {
+      "dict": {
+       "rel_step_max": "f:0x1.0000000000000p-1",
+       "per_table": {
+        "dict": {}
+       },
+       "midpoints": true,
+       "local_frac": "f:0x1.5555555555555p-2"
+      }
+     },
+     "robustness": {
+      "dict": {
+       "mass_frac": "f:0x1.999999999999ap-3",
+       "cmalpha_frac": "f:0x1.999999999999ap-3",
+       "cmq_frac": "f:0x1.999999999999ap-3",
+       "cg_frac": "f:0x0.0p+0",
+       "corners": "axis",
+       "monte_carlo_n": 0
+      }
+     },
+     "targets": {
+      "dict": {
+       "pm_deg": "f:0x1.9000000000000p+5",
+       "gm_db": "f:0x1.0000000000000p+3",
+       "zeta_sp": "f:0x1.6666666666666p-1",
+       "zeta_dr": "f:0x1.0000000000000p-1",
+       "roll_lambda": "f:0x1.8000000000000p+3",
+       "wc_ratio_att": "f:0x1.8000000000000p+1",
+       "ki_zero_frac": "f:0x1.0000000000000p-3",
+       "backoff": "f:0x1.6666666666666p-1",
+       "wc_att_floor_frac": "f:0x1.999999999999ap-5",
+       "wc_att_ok_frac": "f:0x1.999999999999ap-3"
+      }
+     },
+     "weights": {
+      "dict": {
+       "w_zeta": "f:0x1.3333333333333p-2",
+       "w_bw": "f:0x1.3333333333333p-2",
+       "w_rms": "f:0x1.0000000000000p+0",
+       "w_mp": "f:0x1.0000000000000p-1",
+       "w_delta": "f:0x1.3333333333333p-3"
+      }
+     }
+    }
+   },
+   "maneuver": {
+    "dict": {
+     "dv": "f:0x1.8000000000000p+1",
+     "dh": "f:0x1.e000000000000p+4",
+     "dpsi": "f:0x1.3333333333333p-2",
+     "t_settle": "f:0x1.4000000000000p+2",
+     "t_step": "f:0x1.e000000000000p+4",
+     "t_hold": "f:0x1.e000000000000p+4"
+    }
+   },
+   "depth": "linear",
+   "cards": [
+    {
+     "dict": {
+      "key": "mode_stability",
+      "card": 1,
+      "label": "모드 안정성 ζ·ωn",
+      "status": "ok",
+      "value": {
+       "dict": {
+        "mode": "zeta_dr",
+        "zeta": "f:0x1.82c63087c393dp-1",
+        "wn": "f:0x1.0b27260a85b02p+1",
+        "judged": "ok",
+        "case": "M0.35"
+       }
+      },
+      "threshold": {
+       "dict": {
+        "zeta_min": "f:0x1.3333333333333p-2",
+        "zeta_good": "f:0x1.0000000000000p-1"
+       }
+      },
+      "primary": {
+       "dict": {
+        "value": "f:0x1.82c63087c393dp-1",
+        "unit": "-",
+        "better": "higher"
+       }
+      },
+      "worst_case": "M0.35",
+      "note": null
+     }
+    },
+    {
+     "dict": {
+      "key": "gm",
+      "card": 2,
+      "label": "이득여유 GM",
+      "status": "ok",
+      "value": {
+       "dict": {
+        "gm_db": "f:0x1.27b2a4573f7e8p+3",
+        "loop": "roll_att"
+       }
+      },
+      "threshold": {
+       "dict": {
+        "gm_min_db": "f:0x1.8000000000000p+2",
+        "gm_good_db": "f:0x1.0000000000000p+3"
+       }
+      },
+      "primary": {
+       "dict": {
+        "value": "f:0x1.27b2a4573f7e8p+3",
+        "unit": "dB",
+        "better": "higher"
+       }
+      },
+      "worst_case": "M0.35",
+      "note": null
+     }
+    },
+    {
+     "dict": {
+      "key": "pm",
+      "card": 3,
+      "label": "위상여유 PM",
+      "status": "ok",
+      "value": {
+       "dict": {
+        "pm_deg": "f:0x1.9e8cdd54db814p+5",
+        "loop": "roll_att",
+        "delay_margin_s": "f:0x1.8ec94bd656f1ep-3"
+       }
+      },
+      "threshold": {
+       "dict": {
+        "pm_min_deg": "f:0x1.6800000000000p+5"
+       }
+      },
+      "primary": {
+       "dict": {
+        "value": "f:0x1.9e8cdd54db814p+5",
+        "unit": "deg",
+        "better": "higher"
+       }
+      },
+      "worst_case": "M0.35",
+      "note": null
+     }
+    },
+    {
+     "dict": {
+      "key": "response_speed",
+      "card": 4,
+      "label": "응답속도 BW·ω_gc",
+      "status": "ok",
+      "value": {
+       "dict": {
+        "roll_lambda": "f:0x1.02df8b2bda310p+4",
+        "participation": "f:0x1.00f603d0a64adp+0",
+        "unstable": false,
+        "target": "f:0x1.8000000000000p+3",
+        "min_crossover": {
+         "dict": {
+          "value": "f:0x1.174720cdd4bfbp+2",
+          "loop": "yaw_rate",
+          "case": "M0.35"
+         }
+        }
+       }
+      },
+      "threshold": {
+       "dict": {
+        "roll_lambda_target": "f:0x1.8000000000000p+3",
+        "lam_min_frac": "f:0x1.0000000000000p-1"
+       }
+      },
+      "primary": {
+       "dict": {
+        "value": "f:0x1.02df8b2bda310p+4",
+        "unit": "rad/s",
+        "better": "higher"
+       }
+      },
+      "worst_case": "M0.35",
+      "note": null
+     }
+    },
+    {
+     "dict": {
+      "key": "transient",
+      "card": 5,
+      "label": "과도응답 Ts·Mp",
+      "status": "na",
+      "value": {
+       "dict": {
+        "ts_worst": null,
+        "mp_worst": null
+       }
+      },
+      "threshold": {
+       "dict": {
+        "ts_max": null,
+        "mp_max": null
+       }
+      },
+      "primary": null,
+      "worst_case": null,
+      "note": "스텝 응답을 잰 런이 없다(depth=linear)"
+     }
+    },
+    {
+     "dict": {
+      "key": "tracking_rms",
+      "card": 6,
+      "label": "추종 오차 RMS",
+      "status": "na",
+      "value": null,
+      "threshold": {
+       "dict": {
+        "rms_max": {
+         "dict": {
+          "alt": "f:0x1.4000000000000p+3",
+          "spd": "f:0x1.0000000000000p+1",
+          "hdg": "f:0x1.999999999999ap-4"
+         }
+        }
+       }
+      },
+      "primary": null,
+      "worst_case": null,
+      "note": "추종을 잰 런이 없다(depth=linear)"
+     }
+    },
+    {
+     "dict": {
+      "key": "control_authority",
+      "card": 7,
+      "label": "제어권한",
+      "status": "na",
+      "value": {
+       "dict": {
+        "usage_worst": null,
+        "trim_frac_worst": {
+         "dict": {
+          "value": "f:0x1.e391189ab2fdap-3",
+          "case": "M0.35"
+         }
+        },
+        "remaining_worst": null
+       }
+      },
+      "threshold": {
+       "dict": {
+        "sat_frac_max": "f:0x1.999999999999ap-5",
+        "de_frac_max": "f:0x1.b333333333333p-1",
+        "b_min_frac": "f:0x1.999999999999ap-4"
+       }
+      },
+      "primary": null,
+      "worst_case": "M0.35",
+      "note": null
+     }
+    }
+   ],
+   "checks": {
+    "dict": {
+     "list": [
+      {
+       "dict": {
+        "key": "poles_all",
+        "label": "전체 극점",
+        "status": "warn",
+        "worst_case": "M0.35",
+        "value": null,
+        "note": "허용된 완만한 실근 발산(나선 관례)"
+       }
+      },
+      {
+       "dict": {
+        "key": "tr",
+        "label": "상승시간 Tr",
+        "status": "na",
+        "worst_case": null,
+        "value": null,
+        "note": "잰 런이 없다"
+       }
+      },
+      {
+       "dict": {
+        "key": "sse",
+        "label": "정상상태 오차",
+        "status": "na",
+        "worst_case": null,
+        "value": null,
+        "note": "잰 런이 없다"
+       }
+      },
+      {
+       "dict": {
+        "key": "delay_margin",
+        "label": "시간지연 여유",
+        "status": "ok",
+        "worst_case": "M0.35",
+        "value": {
+         "dict": {
+          "value": "f:0x1.8ec94bd656f1ep-3",
+          "loop": "roll_att",
+          "case": "M0.35"
+         }
+        },
+        "note": "판정은 PM과 한 몸(같은 교차점의 지연 환산) — 별도 판정선을 지어내지 않는다"
+       }
+      },
+      {
+       "dict": {
+        "key": "coupling",
+        "label": "교차축·동시명령",
+        "status": "na",
+        "worst_case": "M0.35",
+        "value": null,
+        "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+       }
+      },
+      {
+       "dict": {
+        "key": "envelope",
+        "label": "실속·엔벨로프 마진",
+        "status": "na",
+        "worst_case": "M0.35",
+        "value": null,
+        "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+       }
+      },
+      {
+       "dict": {
+        "key": "sat_duration",
+        "label": "포화 지속",
+        "status": "na",
+        "worst_case": null,
+        "value": null,
+        "note": "잰 런이 없다"
+       }
+      },
+      {
+       "dict": {
+        "key": "thr_margin",
+        "label": "추력 여유",
+        "status": "na",
+        "worst_case": null,
+        "value": null,
+        "note": "추력 채널이 없거나 잰 런이 없다"
+       }
+      },
+      {
+       "dict": {
+        "key": "recovery",
+        "label": "포화 회복·안티와인드업",
+        "status": "na",
+        "worst_case": "M0.35",
+        "value": null,
+        "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+       }
+      },
+      {
+       "dict": {
+        "key": "schedule_bump",
+        "label": "스케줄 전이",
+        "status": "ok",
+        "worst_case": "M0.35",
+        "value": null,
+        "note": null
+       }
+      }
+     ],
+     "n_pass": 2,
+     "n_warn": 1,
+     "n_fail": 0,
+     "n_na": 7,
+     "n_judged": 3
+    }
+   },
+   "stage_order": [
+    "envelope",
+    "actuator",
+    "authority",
+    "coupling",
+    "stability",
+    "damping",
+    "margins",
+    "tracking",
+    "recovery",
+    "robustness",
+    "schedule"
+   ],
+   "items": {
+    "dict": {
+     "envelope": {
+      "dict": {
+       "item": 5,
+       "label": "실속·엔벨로프 마진"
+      }
+     },
+     "actuator": {
+      "dict": {
+       "item": 6,
+       "label": "타면 위치·레이트 여유"
+      }
+     },
+     "authority": {
+      "dict": {
+       "item": 7,
+       "label": "제어권한·트림 여유"
+      }
+     },
+     "coupling": {
+      "dict": {
+       "item": 8,
+       "label": "교차축·동시명령"
+      }
+     },
+     "stability": {
+      "dict": {
+       "item": 1,
+       "label": "폐루프 안정성"
+      }
+     },
+     "damping": {
+      "dict": {
+       "item": 2,
+       "label": "감쇠비·고유주파수"
+      }
+     },
+     "margins": {
+      "dict": {
+       "item": 3,
+       "label": "이득·위상여유"
+      }
+     },
+     "tracking": {
+      "dict": {
+       "item": 4,
+       "label": "명령 추종·대역폭"
+      }
+     },
+     "recovery": {
+      "dict": {
+       "item": 10,
+       "label": "포화 회복·안티와인드업"
+      }
+     },
+     "robustness": {
+      "dict": {
+       "item": 9,
+       "label": "강건성"
+      }
+     },
+     "schedule": {
+      "dict": {
+       "item": 11,
+       "label": "스케줄 전이"
+      }
+     }
+    }
+   },
+   "hard_checks": [
+    "stability.unstable",
+    "damping.zeta",
+    "envelope.stall_margin",
+    "envelope.nz",
+    "actuator.sat_frac",
+    "actuator.rate_sat_frac",
+    "authority.remaining",
+    "coupling.stall_margin",
+    "coupling.sat_frac",
+    "margins.pm",
+    "margins.gm"
+   ],
+   "cases": [
+    {
+     "dict": {
+      "case": "M0.35",
+      "aborted": null,
+      "stages": {
+       "dict": {
+        "stability": {
+         "dict": {
+          "status": "warn",
+          "item": 1,
+          "label": "폐루프 안정성",
+          "unstable": [
+           {
+            "dict": {
+             "axis": "lat",
+             "eig": [
+              "f:0x1.38f2cd79d676ap-7",
+              "f:0x0.0p+0"
+             ],
+             "t2_s": "f:0x1.224f75fe9ad21p+6",
+             "oscillatory": false,
+             "allowed": true
+            }
+           }
+          ],
+          "note": "허용된 완만한 실근 발산(나선 관례)"
+         }
+        },
+        "damping": {
+         "dict": {
+          "status": "ok",
+          "item": 2,
+          "label": "감쇠비·고유주파수",
+          "zeta_sp": {
+           "dict": {
+            "value": "f:0x1.0000000000000p+0",
+            "wn": "f:0x1.c1f192fa04094p+4",
+            "judged": "ok"
+           }
+          },
+          "zeta_dr": {
+           "dict": {
+            "value": "f:0x1.82c63087c393dp-1",
+            "wn": "f:0x1.0b27260a85b02p+1",
+            "judged": "ok"
+           }
+          },
+          "roll_lambda": {
+           "dict": {
+            "value": "f:0x1.02df8b2bda310p+4",
+            "participation": "f:0x1.00f603d0a64adp+0",
+            "unstable": false
+           }
+          }
+         }
+        },
+        "margins": {
+         "dict": {
+          "status": "ok",
+          "item": 3,
+          "label": "이득·위상여유",
+          "loops": {
+           "dict": {
+            "pitch_att": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "gm_db": "f:0x1.42c70093702e0p+3",
+                "pm_deg": "f:0x1.0deec43bda59ap+6",
+                "wcg": "f:0x1.b9f167034e65cp+3",
+                "wcp": "f:0x1.28c6842b12152p+2"
+               }
+              },
+              "delay_margin_s": "f:0x1.0417371cdacdcp-2",
+              "direction": 1,
+              "note": null
+             }
+            },
+            "roll_att": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "gm_db": "f:0x1.27b2a4573f7e8p+3",
+                "pm_deg": "f:0x1.9e8cdd54db814p+5",
+                "wcg": "f:0x1.6c88872122327p+3",
+                "wcp": "f:0x1.29422b70eba0cp+2"
+               }
+              },
+              "delay_margin_s": "f:0x1.8ec94bd656f1ep-3",
+              "direction": 1,
+              "note": null
+             }
+            },
+            "spd_u": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "gm_db": "f:0x1.02b3123a97040p+5",
+                "pm_deg": "f:0x1.1ef754a08d562p+6",
+                "wcg": "f:0x1.21f83c63cecc0p+4",
+                "wcp": "f:0x1.06f77e5e7c110p-1"
+               }
+              },
+              "delay_margin_s": "f:0x1.380d550a705bfp+1",
+              "direction": 1,
+              "note": null
+             }
+            }
+           }
+          },
+          "crossovers": {
+           "dict": {
+            "pitch_rate": "f:0x1.86e2b6a6607e9p+4",
+            "roll_rate": "f:0x1.ea06440cb9385p+3",
+            "yaw_rate": "f:0x1.174720cdd4bfbp+2"
+           }
+          },
+          "composition": {
+           "dict": {
+            "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 (자동설계와 같은 조성) — 레이트 자리는 모드 감쇠(카드 ①)로 판정",
+            "actuator_wn": "f:0x1.e000000000000p+4",
+            "actuator_zeta": "f:0x1.6666666666666p-1",
+            "delay_s": "f:0x1.1eb851eb851ecp-5",
+            "pade_order": 2
+           }
+          },
+          "note": null
+         }
+        },
+        "authority": {
+         "dict": {
+          "status": "ok",
+          "item": 7,
+          "label": "제어권한·트림 여유",
+          "trim": {
+           "dict": {
+            "de_rad": "f:0x1.527f2ad2b07e5p-4",
+            "frac": "f:0x1.e391189ab2fdap-3",
+            "warn_at": "f:0x1.0000000000000p-1",
+            "fail_at": "f:0x1.b333333333333p-1",
+            "judged": "ok"
+           }
+          },
+          "inflight": {
+           "dict": {
+            "status": "na",
+            "note": "비선형 런 없음(depth=linear) — 잔여 권한은 런에서 잰다"
+           }
+          }
+         }
+        },
+        "tracking": {
+         "dict": {
+          "status": "na",
+          "item": 4,
+          "label": "명령 추종·대역폭",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "envelope": {
+         "dict": {
+          "status": "na",
+          "item": 5,
+          "label": "실속·엔벨로프 마진",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "actuator": {
+         "dict": {
+          "status": "na",
+          "item": 6,
+          "label": "타면 위치·레이트 여유",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "recovery": {
+         "dict": {
+          "status": "na",
+          "item": 10,
+          "label": "포화 회복·안티와인드업",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "coupling": {
+         "dict": {
+          "status": "na",
+          "item": 8,
+          "label": "교차축·동시명령",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "robustness": {
+         "dict": {
+          "status": "na",
+          "item": 9,
+          "label": "강건성",
+          "note": "3단계 검증(verify)의 몫 — 후보 확정 후 별도 실행"
+         }
+        },
+        "schedule": {
+         "dict": {
+          "status": "ok",
+          "item": 11,
+          "label": "스케줄 전이",
+          "tables": {
+           "dict": {
+            "pitch.kp": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.851eb851eb851p-3",
+                  "at": [
+                   "f:0x1.ccccccccccccdp-2",
+                   "f:0x1.0000000000000p-1"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.b05b05b05b05cp+3"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.851eb851eb851p-3",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "pitch.ki": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.851eb851eb851p-3",
+                  "at": [
+                   "f:0x1.ccccccccccccdp-2",
+                   "f:0x1.0000000000000p-1"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.b05b05b05b05cp+1"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.851eb851eb851p-3",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "pitch.k_rate": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.851eb851eb855p-3",
+                  "at": [
+                   "f:0x1.ccccccccccccdp-2",
+                   "f:0x1.0000000000000p-1"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.59e26af37c04dp+1"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.851eb851eb855p-3",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "roll.kp": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.0fac687d6343cp-2",
+                  "at": [
+                   "f:0x1.3333333333333p-2",
+                   "f:0x1.6666666666666p-2"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.5397829cbc14cp+4"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.0fac687d6343cp-2",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "roll.ki": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.0fac687d6343cp-2",
+                  "at": [
+                   "f:0x1.3333333333333p-2",
+                   "f:0x1.6666666666666p-2"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.0fac687d6343dp+1"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.0fac687d6343cp-2",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "roll.k_rate": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.0fac687d6343cp-2",
+                  "at": [
+                   "f:0x1.3333333333333p-2",
+                   "f:0x1.6666666666666p-2"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.0fac687d6343dp+2"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.0fac687d6343cp-2",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            }
+           }
+          },
+          "midpoints": {
+           "dict": {
+            "status": "na",
+            "note": "중간점 실측은 3단계 검증(verify)의 몫 — 여기는 테이블 점프만 본다"
+           }
+          }
+         }
+        }
+       }
+      },
+      "attribution": {
+       "dict": {
+        "status": "na",
+        "note": "비선형 런 없음(depth=linear) — 원인 귀속은 런의 내부 기여항에서 나온다"
+       }
+      },
+      "hard_fails": [],
+      "metrics_raw": {
+       "dict": {}
+      },
+      "J": null,
+      "J_terms": null,
+      "J_reason": "비선형 항(RMS·Mp·δ) 미계측 — depth=linear",
+      "midpoint": false
+     }
+    },
+    {
+     "dict": {
+      "case": "M0.45",
+      "aborted": null,
+      "stages": {
+       "dict": {
+        "stability": {
+         "dict": {
+          "status": "warn",
+          "item": 1,
+          "label": "폐루프 안정성",
+          "unstable": [
+           {
+            "dict": {
+             "axis": "lat",
+             "eig": [
+              "f:0x1.0e280b36fb02bp-8",
+              "f:0x0.0p+0"
+             ],
+             "t2_s": "f:0x1.504b7503afbfap+7",
+             "oscillatory": false,
+             "allowed": true
+            }
+           }
+          ],
+          "note": "허용된 완만한 실근 발산(나선 관례)"
+         }
+        },
+        "damping": {
+         "dict": {
+          "status": "ok",
+          "item": 2,
+          "label": "감쇠비·고유주파수",
+          "zeta_sp": {
+           "dict": {
+            "value": "f:0x1.0000000000000p+0",
+            "wn": "f:0x1.4b5db78134fafp+5",
+            "judged": "ok"
+           }
+          },
+          "zeta_dr": {
+           "dict": {
+            "value": "f:0x1.ead36c2547a22p-1",
+            "wn": "f:0x1.59c65d499e5ccp+1",
+            "judged": "ok"
+           }
+          },
+          "roll_lambda": {
+           "dict": {
+            "value": "f:0x1.058276cab419bp+4",
+            "participation": "f:0x1.00d60a880f615p+0",
+            "unstable": false
+           }
+          }
+         }
+        },
+        "margins": {
+         "dict": {
+          "status": "ok",
+          "item": 3,
+          "label": "이득·위상여유",
+          "loops": {
+           "dict": {
+            "pitch_att": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "gm_db": "f:0x1.50f61dd20e2edp+3",
+                "pm_deg": "f:0x1.1fd56600d0210p+6",
+                "wcg": "f:0x1.e1899182f817cp+3",
+                "wcp": "f:0x1.25300b22e4d37p+2"
+               }
+              },
+              "delay_margin_s": "f:0x1.18bb9554b45f4p-2",
+              "direction": 1,
+              "note": null
+             }
+            },
+            "roll_att": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "gm_db": "f:0x1.2aaf80b41c7d9p+3",
+                "pm_deg": "f:0x1.a275a7bff2638p+5",
+                "wcg": "f:0x1.6db62079bf36ap+3",
+                "wcp": "f:0x1.26f3c7bdd281ep+2"
+               }
+              },
+              "delay_margin_s": "f:0x1.95b1c93b37d8cp-3",
+              "direction": 1,
+              "note": null
+             }
+            },
+            "spd_u": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "gm_db": "f:0x1.1432ba9671aa6p+5",
+                "pm_deg": "f:0x1.0b8d44c222070p+6",
+                "wcg": "f:0x1.21f628508dbe3p+4",
+                "wcp": "f:0x1.a97d6d7acd66bp-2"
+               }
+              },
+              "delay_margin_s": "f:0x1.679f29691aeb0p+1",
+              "direction": 1,
+              "note": null
+             }
+            }
+           }
+          },
+          "crossovers": {
+           "dict": {
+            "pitch_rate": "f:0x1.e4abe9e0471b9p+4",
+            "roll_rate": "f:0x1.e9dca137b4f13p+3",
+            "yaw_rate": "f:0x1.9d43bb248d1d3p+2"
+           }
+          },
+          "composition": {
+           "dict": {
+            "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 (자동설계와 같은 조성) — 레이트 자리는 모드 감쇠(카드 ①)로 판정",
+            "actuator_wn": "f:0x1.e000000000000p+4",
+            "actuator_zeta": "f:0x1.6666666666666p-1",
+            "delay_s": "f:0x1.1eb851eb851ecp-5",
+            "pade_order": 2
+           }
+          },
+          "note": null
+         }
+        },
+        "authority": {
+         "dict": {
+          "status": "ok",
+          "item": 7,
+          "label": "제어권한·트림 여유",
+          "trim": {
+           "dict": {
+            "de_rad": "f:0x1.56b62ee420216p-5",
+            "frac": "f:0x1.e9968c215278ep-4",
+            "warn_at": "f:0x1.0000000000000p-1",
+            "fail_at": "f:0x1.b333333333333p-1",
+            "judged": "ok"
+           }
+          },
+          "inflight": {
+           "dict": {
+            "status": "na",
+            "note": "비선형 런 없음(depth=linear) — 잔여 권한은 런에서 잰다"
+           }
+          }
+         }
+        },
+        "tracking": {
+         "dict": {
+          "status": "na",
+          "item": 4,
+          "label": "명령 추종·대역폭",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "envelope": {
+         "dict": {
+          "status": "na",
+          "item": 5,
+          "label": "실속·엔벨로프 마진",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "actuator": {
+         "dict": {
+          "status": "na",
+          "item": 6,
+          "label": "타면 위치·레이트 여유",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "recovery": {
+         "dict": {
+          "status": "na",
+          "item": 10,
+          "label": "포화 회복·안티와인드업",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "coupling": {
+         "dict": {
+          "status": "na",
+          "item": 8,
+          "label": "교차축·동시명령",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "robustness": {
+         "dict": {
+          "status": "na",
+          "item": 9,
+          "label": "강건성",
+          "note": "3단계 검증(verify)의 몫 — 후보 확정 후 별도 실행"
+         }
+        },
+        "schedule": {
+         "dict": {
+          "status": "ok",
+          "item": 11,
+          "label": "스케줄 전이",
+          "tables": {
+           "dict": {
+            "pitch.kp": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.851eb851eb851p-3",
+                  "at": [
+                   "f:0x1.ccccccccccccdp-2",
+                   "f:0x1.0000000000000p-1"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.b05b05b05b05cp+3"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.851eb851eb851p-3",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "pitch.ki": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.851eb851eb851p-3",
+                  "at": [
+                   "f:0x1.ccccccccccccdp-2",
+                   "f:0x1.0000000000000p-1"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.b05b05b05b05cp+1"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.851eb851eb851p-3",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "pitch.k_rate": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.851eb851eb855p-3",
+                  "at": [
+                   "f:0x1.ccccccccccccdp-2",
+                   "f:0x1.0000000000000p-1"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.59e26af37c04dp+1"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.851eb851eb855p-3",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "roll.kp": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.0fac687d6343cp-2",
+                  "at": [
+                   "f:0x1.3333333333333p-2",
+                   "f:0x1.6666666666666p-2"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.5397829cbc14cp+4"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.0fac687d6343cp-2",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "roll.ki": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.0fac687d6343cp-2",
+                  "at": [
+                   "f:0x1.3333333333333p-2",
+                   "f:0x1.6666666666666p-2"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.0fac687d6343dp+1"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.0fac687d6343cp-2",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "roll.k_rate": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.0fac687d6343cp-2",
+                  "at": [
+                   "f:0x1.3333333333333p-2",
+                   "f:0x1.6666666666666p-2"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.0fac687d6343dp+2"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.0fac687d6343cp-2",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            }
+           }
+          },
+          "midpoints": {
+           "dict": {
+            "status": "na",
+            "note": "중간점 실측은 3단계 검증(verify)의 몫 — 여기는 테이블 점프만 본다"
+           }
+          }
+         }
+        }
+       }
+      },
+      "attribution": {
+       "dict": {
+        "status": "na",
+        "note": "비선형 런 없음(depth=linear) — 원인 귀속은 런의 내부 기여항에서 나온다"
+       }
+      },
+      "hard_fails": [],
+      "metrics_raw": {
+       "dict": {}
+      },
+      "J": null,
+      "J_terms": null,
+      "J_reason": "비선형 항(RMS·Mp·δ) 미계측 — depth=linear",
+      "midpoint": false
+     }
+    },
+    {
+     "dict": {
+      "case": "M0.55",
+      "aborted": null,
+      "stages": {
+       "dict": {
+        "stability": {
+         "dict": {
+          "status": "warn",
+          "item": 1,
+          "label": "폐루프 안정성",
+          "unstable": [
+           {
+            "dict": {
+             "axis": "lat",
+             "eig": [
+              "f:0x1.0006a73c939efp-9",
+              "f:0x0.0p+0"
+             ],
+             "t2_s": "f:0x1.62daf6fd0a9fbp+8",
+             "oscillatory": false,
+             "allowed": true
+            }
+           }
+          ],
+          "note": "허용된 완만한 실근 발산(나선 관례)"
+         }
+        },
+        "damping": {
+         "dict": {
+          "status": "ok",
+          "item": 2,
+          "label": "감쇠비·고유주파수",
+          "zeta_sp": {
+           "dict": {
+            "value": "f:0x1.0000000000000p+0",
+            "wn": "f:0x1.49f3794e24764p+5",
+            "judged": "ok"
+           }
+          },
+          "zeta_dr": {
+           "dict": {
+            "value": "f:0x1.0000000000000p+0",
+            "wn": null,
+            "judged": "ok"
+           }
+          },
+          "roll_lambda": {
+           "dict": {
+            "value": "f:0x1.082c0267cc15ap+4",
+            "participation": "f:0x1.00a1fee534f80p+0",
+            "unstable": false
+           }
+          }
+         }
+        },
+        "margins": {
+         "dict": {
+          "status": "ok",
+          "item": 3,
+          "label": "이득·위상여유",
+          "loops": {
+           "dict": {
+            "pitch_att": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "gm_db": "f:0x1.587b6d452d84dp+3",
+                "pm_deg": "f:0x1.3f3a30b26f038p+6",
+                "wcg": "f:0x1.eb3520a2d7215p+3",
+                "wcp": "f:0x1.11c9f7db25369p+2"
+               }
+              },
+              "delay_margin_s": "f:0x1.4d6983a4f6bc7p-2",
+              "direction": 1,
+              "note": null
+             }
+            },
+            "roll_att": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "gm_db": "f:0x1.2db2868a97098p+3",
+                "pm_deg": "f:0x1.a60d12a80cc38p+5",
+                "wcg": "f:0x1.6ede77244f9edp+3",
+                "wcp": "f:0x1.2471f5129395bp+2"
+               }
+              },
+              "delay_margin_s": "f:0x1.9caf2ad0b6e64p-3",
+              "direction": 1,
+              "note": null
+             }
+            },
+            "spd_u": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "gm_db": "f:0x1.222ab7bcaf244p+5",
+                "pm_deg": "f:0x1.fb3dfcd4e6528p+5",
+                "wcg": "f:0x1.21fa691d9c64dp+4",
+                "wcp": "f:0x1.687e59cb01b66p-2"
+               }
+              },
+              "delay_margin_s": "f:0x1.925c3cb0905f1p+1",
+              "direction": 1,
+              "note": null
+             }
+            }
+           }
+          },
+          "crossovers": {
+           "dict": {
+            "pitch_rate": "f:0x1.ea45fd7d59040p+4",
+            "roll_rate": "f:0x1.e9a36f45cceb6p+3",
+            "yaw_rate": "f:0x1.1ff415f94782ap+3"
+           }
+          },
+          "composition": {
+           "dict": {
+            "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 (자동설계와 같은 조성) — 레이트 자리는 모드 감쇠(카드 ①)로 판정",
+            "actuator_wn": "f:0x1.e000000000000p+4",
+            "actuator_zeta": "f:0x1.6666666666666p-1",
+            "delay_s": "f:0x1.1eb851eb851ecp-5",
+            "pade_order": 2
+           }
+          },
+          "note": null
+         }
+        },
+        "authority": {
+         "dict": {
+          "status": "ok",
+          "item": 7,
+          "label": "제어권한·트림 여유",
+          "trim": {
+           "dict": {
+            "de_rad": "f:0x1.559606bf23679p-6",
+            "frac": "f:0x1.e7fae5110e01bp-5",
+            "warn_at": "f:0x1.0000000000000p-1",
+            "fail_at": "f:0x1.b333333333333p-1",
+            "judged": "ok"
+           }
+          },
+          "inflight": {
+           "dict": {
+            "status": "na",
+            "note": "비선형 런 없음(depth=linear) — 잔여 권한은 런에서 잰다"
+           }
+          }
+         }
+        },
+        "tracking": {
+         "dict": {
+          "status": "na",
+          "item": 4,
+          "label": "명령 추종·대역폭",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "envelope": {
+         "dict": {
+          "status": "na",
+          "item": 5,
+          "label": "실속·엔벨로프 마진",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "actuator": {
+         "dict": {
+          "status": "na",
+          "item": 6,
+          "label": "타면 위치·레이트 여유",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "recovery": {
+         "dict": {
+          "status": "na",
+          "item": 10,
+          "label": "포화 회복·안티와인드업",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "coupling": {
+         "dict": {
+          "status": "na",
+          "item": 8,
+          "label": "교차축·동시명령",
+          "note": "비선형 런 없음(depth=linear) — 단계 2에서 잰다"
+         }
+        },
+        "robustness": {
+         "dict": {
+          "status": "na",
+          "item": 9,
+          "label": "강건성",
+          "note": "3단계 검증(verify)의 몫 — 후보 확정 후 별도 실행"
+         }
+        },
+        "schedule": {
+         "dict": {
+          "status": "ok",
+          "item": 11,
+          "label": "스케줄 전이",
+          "tables": {
+           "dict": {
+            "pitch.kp": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.851eb851eb851p-3",
+                  "at": [
+                   "f:0x1.ccccccccccccdp-2",
+                   "f:0x1.0000000000000p-1"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.b05b05b05b05cp+3"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.851eb851eb851p-3",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "pitch.ki": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.851eb851eb851p-3",
+                  "at": [
+                   "f:0x1.ccccccccccccdp-2",
+                   "f:0x1.0000000000000p-1"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.b05b05b05b05cp+1"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.851eb851eb851p-3",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "pitch.k_rate": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.851eb851eb855p-3",
+                  "at": [
+                   "f:0x1.ccccccccccccdp-2",
+                   "f:0x1.0000000000000p-1"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.59e26af37c04dp+1"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.851eb851eb855p-3",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "roll.kp": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.0fac687d6343cp-2",
+                  "at": [
+                   "f:0x1.3333333333333p-2",
+                   "f:0x1.6666666666666p-2"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.5397829cbc14cp+4"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.0fac687d6343cp-2",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "roll.ki": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.0fac687d6343cp-2",
+                  "at": [
+                   "f:0x1.3333333333333p-2",
+                   "f:0x1.6666666666666p-2"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.0fac687d6343dp+1"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.0fac687d6343cp-2",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            },
+            "roll.k_rate": {
+             "dict": {
+              "per_axis": {
+               "dict": {
+                "mach": {
+                 "dict": {
+                  "max_rel_step": "f:0x1.0fac687d6343cp-2",
+                  "at": [
+                   "f:0x1.3333333333333p-2",
+                   "f:0x1.6666666666666p-2"
+                  ],
+                  "gap": "f:0x1.9999999999998p-5",
+                  "max_grad": "f:0x1.0fac687d6343dp+2"
+                 }
+                }
+               }
+              },
+              "max_rel_step": "f:0x1.0fac687d6343cp-2",
+              "limit": "f:0x1.0000000000000p-1",
+              "judged": "ok"
+             }
+            }
+           }
+          },
+          "midpoints": {
+           "dict": {
+            "status": "na",
+            "note": "중간점 실측은 3단계 검증(verify)의 몫 — 여기는 테이블 점프만 본다"
+           }
+          }
+         }
+        }
+       }
+      },
+      "attribution": {
+       "dict": {
+        "status": "na",
+        "note": "비선형 런 없음(depth=linear) — 원인 귀속은 런의 내부 기여항에서 나온다"
+       }
+      },
+      "hard_fails": [],
+      "metrics_raw": {
+       "dict": {}
+      },
+      "J": null,
+      "J_terms": null,
+      "J_reason": "비선형 항(RMS·Mp·δ) 미계측 — depth=linear",
+      "midpoint": false
+     }
+    }
+   ],
+   "aggregate": {
+    "dict": {
+     "hard_fail": false,
+     "hard_fails": [],
+     "stages": {
+      "dict": {
+       "envelope": {
+        "dict": {
+         "status": "na",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 0,
+           "na": 3,
+           "ok": 0
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       },
+       "actuator": {
+        "dict": {
+         "status": "na",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 0,
+           "na": 3,
+           "ok": 0
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       },
+       "authority": {
+        "dict": {
+         "status": "ok",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 0,
+           "na": 0,
+           "ok": 3
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       },
+       "coupling": {
+        "dict": {
+         "status": "na",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 0,
+           "na": 3,
+           "ok": 0
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       },
+       "stability": {
+        "dict": {
+         "status": "warn",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 3,
+           "na": 0,
+           "ok": 0
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       },
+       "damping": {
+        "dict": {
+         "status": "ok",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 0,
+           "na": 0,
+           "ok": 3
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       },
+       "margins": {
+        "dict": {
+         "status": "ok",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 0,
+           "na": 0,
+           "ok": 3
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       },
+       "tracking": {
+        "dict": {
+         "status": "na",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 0,
+           "na": 3,
+           "ok": 0
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       },
+       "recovery": {
+        "dict": {
+         "status": "na",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 0,
+           "na": 3,
+           "ok": 0
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       },
+       "robustness": {
+        "dict": {
+         "status": "na",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 0,
+           "na": 3,
+           "ok": 0
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       },
+       "schedule": {
+        "dict": {
+         "status": "ok",
+         "counts": {
+          "dict": {
+           "fail": 0,
+           "warn": 0,
+           "na": 0,
+           "ok": 3
+          }
+         },
+         "worst_case": "M0.35"
+        }
+       }
+      }
+     },
+     "J": null,
+     "J_reason": "J 미산정 케이스가 있다 — 사유는 케이스별 J_reason에",
+     "locality": null,
+     "n_cases": 3,
+     "n_midpoint": 0
+    }
+   },
+   "warnings": [],
+   "aborted": null
+  }
+ }
+}

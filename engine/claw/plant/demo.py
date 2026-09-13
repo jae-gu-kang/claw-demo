@@ -6,12 +6,12 @@ CFD DB 반입 전의 대역(placeholder) 프로파일이며 "비행체 프로파
 """
 
 import math
-from dataclasses import dataclass
 
 import numpy as np
 
 from claw.plant.aero import AeroModel, wind_to_body_coeffs
 from claw.plant.aircraft import Aircraft
+from claw.plant.dispersion import DispersionSet  # noqa: F401 — 재수출 (기존 import 경로 유지)
 from claw.plant.ground import LaunchRail, SkidGear
 from claw.plant.mass import FuelMass
 from claw.plant.prop import PropEngine
@@ -73,27 +73,6 @@ def make_demo_launch_rail() -> LaunchRail:
         exit_speed=81.5,
         origin_n=np.array([0.0, 0.0, -RAIL_ORIGIN_H]),
     )
-
-
-@dataclass(frozen=True)
-class DispersionSet:
-    """강건성 검증(3단계)용 결정적 섭동 — 비율 스케일 (0.2 = +20 %).
-
-    조립 함수에 설계변수를 단다(M7 주입 인자와 같은 성격 — 해석 모듈이 정본을
-    우회하지 않게). **CG는 여기 없다** — cg_empty=cg_full=0 고정 + 모멘트 기준점
-    이전 [TBD]라(아래 FuelMass 주석) CG를 흔들어도 동역학이 안 변한다. 흔드는
-    시늉을 하면 "CG ±20 % 통과"가 조용한 거짓 합격이 된다.
-    """
-
-    mass: float = 0.0  # 공허중량 배율 Δ (연료는 케이스 변수라 그대로)
-    cmalpha: float = 0.0  # 정적 안정 미계수 Cmα 배율 Δ
-    cmq: float = 0.0  # 피치 댐핑 Cmq 배율 Δ
-
-    def label(self) -> str:
-        parts = [f"{n}{v:+.0%}" for n, v in
-                 (("mass", self.mass), ("cmα", self.cmalpha), ("cmq", self.cmq))
-                 if v != 0.0]
-        return "·".join(parts) or "nominal"
 
 
 def make_demo_aircraft(ground=None, dispersion: DispersionSet | None = None) -> Aircraft:
