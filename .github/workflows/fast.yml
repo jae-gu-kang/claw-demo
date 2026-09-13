@@ -34,13 +34,17 @@ jobs:
   fast:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # 액션은 **v5**다. v4는 러너의 Node 20에 맞춰 만들어졌는데 그 런타임이 내려가서
+      # GitHub이 Node 24로 강제 실행하며 매 실행 경고를 남겼다 — 지금은 경고지만 강제
+      # 실행이 끝나면 실패다. v5는 Node 24가 정본이라 그 경고가 사라진다. 아래
+      # node-version "22"는 이것과 **무관한 축**이다(러너가 아니라 테스트가 쓸 node).
+      - uses: actions/checkout@v5
 
       # 22로 **고정한다**. web/world 스위트가 `.ts`를 변환 없이 그대로 돌리는데
       # (node --test "src/**/*.test.ts") 그 타입 스트리핑이 22.6+ 기능이라 하한이
       # 있다. devcontainer는 "lts"라 움직이는 값이므로, 그쪽이 올라가면 여기서
       # 먼저 돌려 보고 같이 올릴 것 — 검증한 것만 핀한다 (실측 22.22.2).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
 
