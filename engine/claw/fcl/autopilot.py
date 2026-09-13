@@ -73,17 +73,7 @@ class Autopilot(Block):
         ParamDef("ki_vs", 0.02, "rad/m", "승강률 적분 게인"),
         ParamDef("tau_vs", 2.0, "s", "승강률 명령필터 시정수", lo=0.0),
         ParamDef("theta_lo", -0.3, "rad", "피치 명령 하한"),
-        # 0.40 [확정] — 실측으로 올렸다(v1.03). 종전 0.3(17.2°)은 88 m/s 수평비행에
-        # 드는 α 13.7°를 빼면 상승에 쓸 각이 3.5°뿐이라 경사가 3.56 %에 묶였다.
-        # 그때 스로틀 0.635·α 리미터 작동 0 %로 **기체는 한계 근처에도 없었다**.
-        # 올릴수록 좋기만 한 값이 아니다: 1,200 kg·2,000 m에서 0.45는 리미터 작동률이
-        # 86.8 %로 뛰고 경사가 오히려 0.40보다 낮다(5.08 vs 5.69 %) — 이미 공력 한계에
-        # 있는 기체에 더 큰 권한을 주면 루프가 리미터 안으로 명령을 밀어 속도를 갉는다.
-        # 0.40은 전 연료(0~400 kg)·운용 고도에서 속도 유지 3 % 안, 리미터 지속 포화
-        # 없음을 만족하는 가장 큰 값이다 (1,100 kg·500 m에서 3.56 → 9.13 %).
-        # [TBD] 저고도에서 이득이고 고고도에서 손해라면 상수가 아니라 동압·고도의
-        # 함수여야 한다 — 게인 스케줄(with_schedule) 축에 얹을 자리다.
-        ParamDef("theta_hi", 0.40, "rad", "피치 명령 상한"),
+        ParamDef("theta_hi", 0.3, "rad", "피치 명령 상한"),
         ParamDef("phi_max", 0.7, "rad", "뱅크 명령 한계 (π/2 미만 — 선회 FF 부호 보전)", lo=0.0, hi=1.5),
         ParamDef("k_pitch_turn", 0.05, "rad", "선회 피치 FF 계수 (1/cosφ−1 배)"),
         ParamDef("k_thr_turn", 0.0, "-", "선회 스로틀 FF 계수 (1/cos²φ−1 배)"),
@@ -111,7 +101,7 @@ class Autopilot(Block):
         ki_vs: float = 0.02,
         tau_vs: float = 2.0,
         theta_lo: float = -0.3,
-        theta_hi: float = 0.40,
+        theta_hi: float = 0.3,
         phi_max: float = 0.7,
         k_pitch_turn: float = 0.05,
         k_thr_turn: float = 0.0,

@@ -713,3 +713,94 @@ def test_level_crossings_does_not_multiply_a_tangency():
 
     b = bode_data(control.tf([1.0], [1.0]), n_points=400)  # |L| = 0 dB 전 구간
     assert len(b["crossings"]["gain"]) == 1, len(b["crossings"]["gain"])
+
+# ── 피치 명령 상한을 엔벨로프에서 유도한다 ──────────────────────────────────────
+# 상수로 박으면 기체·사업이 바뀔 때 조용히 틀린다. 여기가 그 유도의 정본이다.
+
+def test_피치_상한은_보호경계를_넘지_않는다():
+    """불변식 θ_hi(M) ≤ α_stall(M) − margin — 이 함수가 지키는 단 하나의 성질."""
+    from claw.analysis.envelope import pitch_command_limit
+    from claw.plant import make_demo_stall_table
+
+    st = make_demo_stall_table()
+    margin = 0.05
+    r = pitch_command_limit(st, alpha_margin=margin, mach_lo=0.2, mach_hi=0.55)
+    for m, th in zip(r["mach"], r["theta_hi"]):
+        assert th <= float(st.interp(mach=m)) - margin + 1e-12, f"M{m}에서 경계를 넘었다"
+    # 단일값은 구간 **전체에서** 안전해야 한다 — 최솟값이라는 뜻이다
+    assert r["scalar"] == pytest.approx(min(r["theta_hi"]))
+    assert r["scalar"] <= min(r["theta_hi"]) + 1e-12
+
+
+def test_피치_상한은_마하의_함수다_상수가_아니다():
+    """저속단과 고속단이 다르다 — 상수 하나로는 한쪽을 버려야 한다.
+
+    이 단언이 깨지면(양 끝이 같아지면) 유도가 마하를 안 보고 있다는 뜻이고,
+    그때 이 모듈은 상수를 돌려주는 비싼 방법일 뿐이다.
+    """
+    from claw.analysis.envelope import pitch_command_limit
+    from claw.plant import make_demo_stall_table
+
+    r = pitch_command_limit(make_demo_stall_table(), alpha_margin=0.05,
+                            mach_lo=0.2, mach_hi=0.55)
+    assert max(r["theta_hi"]) > min(r["theta_hi"]) * 1.1, "마하 의존이 사라졌다"
+    # 느릴수록 높다 — α_stall이 마하에 감소하므로
+    assert r["theta_hi"][0] > r["theta_hi"][-1]
+    assert r["worst_mach"] == pytest.approx(0.55)
+
+
+def test_피치_상한은_기체와_마진을_따라_움직인다():
+    """기체가 바뀌면(실속표) · 사업이 바뀌면(마진) 값도 바뀐다 — 그게 요점이다."""
+    from claw.analysis.envelope import pitch_command_limit
+    from claw.plant import make_demo_stall_table
+    from claw.tables import Table
+
+    base = pitch_command_limit(make_demo_stall_table(), alpha_margin=0.05,
+                               mach_lo=0.2, mach_hi=0.55)
+    # ① 마진을 두 배로 → 상한이 그만큼 내려간다
+    tighter = pitch_command_limit(make_demo_stall_table(), alpha_margin=0.10,
+                                  mach_lo=0.2, mach_hi=0.55)
+    assert tighter["scalar"] == pytest.approx(base["scalar"] - 0.05)
+    # ② 고α 기체로 바꾸면 → 상한이 따라 올라간다
+    high = Table({"mach": (0.1, 0.9)}, (0.60, 0.50), name="alpha_stall",
+                 extrapolate="clip")
+    assert pitch_command_limit(high, alpha_margin=0.05,
+                               mach_lo=0.2, mach_hi=0.55)["scalar"] > base["scalar"]
+
+
+def test_마진이_실속각을_먹으면_거부한다_양수로_위장하지_않는다():
+    """판정 불가를 정상으로 만들지 않는다 — 0으로 클립하면 '아주 얕게는 된다'가 된다."""
+    from claw.analysis.envelope import pitch_command_limit
+    from claw.plant import make_demo_stall_table
+
+    with pytest.raises(ValueError, match="보호경계가 0 이하"):
+        pitch_command_limit(make_demo_stall_table(), alpha_margin=0.5,
+                            mach_lo=0.2, mach_hi=0.55)
+    for bad in [{"mach_lo": 0.5, "mach_hi": 0.2}, {"mach_lo": 0.2, "mach_hi": 0.2}]:
+        with pytest.raises(ValueError, match="운용 마하 구간"):
+            pitch_command_limit(make_demo_stall_table(), alpha_margin=0.05, **bad)
+
+
+def test_현행_기본_상한은_운용_상단에서_경계를_넘는다():
+    """**알려진 결함을 못박는다** (v1.04 [TBD]).
+
+    Autopilot 기본 theta_hi = 0.3은 상수라, 보호경계가 0.3 아래로 내려가는
+    M0.31 위에서 불변식을 깬다 — `test_mission`이 순항하는 140 m/s(M0.41,
+    경계 0.2889)가 그 영역이다. 고치는 길은 둘인데 **단일값을 내리면**(M0.55까지
+    쓰면 0.2725) 저속 상승 성능을 버리고, **스케줄로 가면** 저속단 0.325까지
+    쓰면서 고속단도 지킬 수 있다. 후자가 답이고 그건 그래프 변경이라 별건이다.
+
+    이 테스트는 그 결함이 **사라지면 빨개진다** — 고쳤는데 아무도 모르는 일이
+    없도록. 통과한다는 것은 아직 안 고쳤다는 뜻이다.
+    """
+    from claw.analysis.envelope import pitch_command_limit
+    from claw.fcl import Autopilot
+    from claw.fcl.demo import DEMO_ALPHA_MARGIN
+    from claw.plant import make_demo_stall_table
+
+    r = pitch_command_limit(make_demo_stall_table(), alpha_margin=DEMO_ALPHA_MARGIN,
+                            mach_lo=0.2, mach_hi=0.55)
+    assert Autopilot().cfg["theta_hi"] > r["scalar"], (
+        "기본 theta_hi가 유도된 안전 단일값 이하가 되었다 — 결함이 고쳐졌으면 "
+        "이 테스트를 지우고 불변식 단언으로 바꿀 것"
+    )

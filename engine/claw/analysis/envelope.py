@@ -438,6 +438,65 @@ def design_envelope(
     }
 
 
+def pitch_command_limit(stall_table, *, alpha_margin, mach_lo, mach_hi, n_mach=41) -> dict:
+    """피치 명령 상한 θ_hi를 **엔벨로프에서 유도**한다 — 상수로 박지 않는다.
+
+    ## 불변식
+
+        θ_hi(M) ≤ α_stall(M) − alpha_margin
+
+    이유는 기하 하나다. 준정상 비행에서 α = θ − γ이고 상승은 γ ≥ 0이므로 **α ≤ θ**다.
+    따라서 θ 명령이 보호경계 아래면 그 명령만으로는 α가 경계를 넘을 수 없다. 이 성질이
+    깨지면 외곽 루프가 α 리미터 **안쪽으로** 명령을 밀어 넣고, 리미터는 그것과 싸우느라
+    자세를 눌러 기체가 속도를 갉아먹는다 — 보호가 성능을 지키는 것이 아니라 성능과
+    다투는 상태가 된다(실측: θ_hi 0.40에서 1,200 kg·2,000 m 리미터 작동률 19.8 %,
+    같은 조건 0.45는 86.8 %인데 경사는 오히려 낮다).
+
+    ## 왜 상수여선 안 되나
+
+    α_stall이 마하의 함수이므로 이 상한도 마하의 함수다. 데모 실속표에서 보호경계는
+    M0.21에서 0.322, M0.53에서 0.276이다 — **1.17배 차이**다. 상수 하나를 박으면
+    저속에서는 성능을 버리고 고속에서는 경계를 넘는다. 실제로 종전 상수 0.3은 M0.3
+    위에서 경계를 넘고 있었고(M0.41에서 경계 0.2889), `test_mission`의 순항 140 m/s가
+    바로 그 영역이다.
+
+    기체가 바뀌면 실속표가 바뀌고, 사업이 바뀌면 마진과 운용 마하 범위가 바뀐다.
+    셋 다 **인자**다 — 이 함수에 박힌 수는 없다.
+
+    ## 반환
+
+    - `mach`·`theta_hi`: 마하별 상한 (게인 스케줄 축에 그대로 얹을 수 있는 형태)
+    - `scalar`: 운용 마하 구간 **전체에서 안전한 단일값** = 그 구간의 최솟값.
+      스케줄을 못 쓰는 형상(`with_schedule=False`)의 몫이다 — 가장 빠른 자리에
+      맞추므로 느린 자리에서는 성능을 남긴다. 그 손해가 곧 스케줄을 쓸 이유다.
+    - `worst_mach`: `scalar`를 정한 마하. "왜 이 값인가"를 화면이 말할 수 있게 한다.
+
+    alpha_margin·mach_lo·mach_hi는 **기본값을 두지 않는다** — 이 모듈이 사업의
+    안전 마진이나 운용 범위를 지어낼 수 없다(01 §4.2 「0 위장 금지」와 같은 자리).
+    """
+    if not float(alpha_margin) >= 0.0:
+        raise ValueError(f"alpha_margin은 0 이상: {alpha_margin}")
+    if not float(mach_hi) > float(mach_lo) >= 0.0:
+        raise ValueError(f"운용 마하 구간이 잘못됨: {mach_lo}~{mach_hi}")
+    machs = [float(m) for m in np.linspace(float(mach_lo), float(mach_hi), int(n_mach))]
+    lim = [float(stall_table.interp(mach=m)) - float(alpha_margin) for m in machs]
+    if min(lim) <= 0.0:
+        # 마진이 실속각을 통째로 먹은 구간 — 그 기체·그 마진으로는 날 수 없다는 뜻이라
+        # 양수로 끌어올려 위장하지 않는다 (판정 불가를 정상으로 만들지 않는다)
+        raise ValueError(
+            f"보호경계가 0 이하인 마하가 있다 (마진 {alpha_margin} 과대) — "
+            f"최소 {min(lim):.4f} @ M{machs[int(np.argmin(lim))]:.3f}"
+        )
+    i = int(np.argmin(lim))
+    return {
+        "mach": machs,
+        "theta_hi": lim,
+        "scalar": lim[i],
+        "worst_mach": machs[i],
+        "alpha_margin": float(alpha_margin),
+    }
+
+
 def aero_envelope(stall_table, db_ranges, *, alpha_margin=0.0, trim_alpha_bounds=None, n_mach=81) -> dict:
     """공력 엔벨로프 선도 데이터 (01 §2.6) — α–Mach 평면의 경계 일습.
 

@@ -128,7 +128,7 @@ export const AP_PHI_MAX_FALLBACK = 0.7;
  *
  *  `lib/wpcheck.js climbGradientMax`가 피치 상한과 승강률 댐핑에서 상승 한계를 유도한다.
  *  스키마가 도착하면 뷰가 실값으로 갈아 끼우고, 실행 경로에는 이 값이 쓰이지 않는다. */
-export const AP_THETA_HI_FALLBACK = 0.40;
+export const AP_THETA_HI_FALLBACK = 0.3;
 export const AP_K_HDOT_FALLBACK = -0.008;
 
 /** 실행 조건 기본값 — 폼 칸 이름 그대로(뷰의 f.* 키와 1:1). 수치는 문자열이다:
