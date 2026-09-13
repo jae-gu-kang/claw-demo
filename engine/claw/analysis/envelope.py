@@ -438,6 +438,34 @@ def design_envelope(
     }
 
 
+def pitch_limit_table(stall_table, *, alpha_margin):
+    """피치 상한 **표** θ_hi(M) = α_stall(M) − margin — 그래프가 룩업할 형태.
+
+    `pitch_command_limit`과 같은 유도이고 쓰임만 다르다: 저쪽은 사람·화면이 읽는
+    dict(단일값·최악 마하까지), 이쪽은 `LookupBlock`에 그대로 물릴 `Table`이다.
+    **축은 실속표의 축을 그대로 쓴다** — 다시 샘플링하면 원 표에 없는 중간값이
+    탑재 코드의 룩업에 박히고, 두 표가 같은 물리를 다른 격자로 말하게 된다.
+
+    외삽 정책도 실속표를 따른다(`clip`). 그 정책은 실속표가 **선언한 것**이라
+    (plant/demo.py 「여기서 clip은 외삽 회피가 아니라 선언된 정책이다」) 파생 표가
+    임의로 바꾸면 축 밖에서 두 표의 답이 갈린다.
+    """
+    if not float(alpha_margin) >= 0.0:
+        raise ValueError(f"alpha_margin은 0 이상: {alpha_margin}")
+    axis = stall_table.axes[0]
+    vals = [float(v) - float(alpha_margin) for v in np.asarray(stall_table.data).ravel()]
+    if min(vals) <= 0.0:
+        raise ValueError(
+            f"보호경계가 0 이하인 격자점이 있다 (마진 {alpha_margin} 과대) — 최소 {min(vals):.4f}"
+        )
+    return type(stall_table)(
+        {stall_table.axis_names[0]: tuple(float(m) for m in axis)},
+        tuple(vals),
+        name="theta_hi",
+        extrapolate=stall_table.extrapolate,
+    )
+
+
 def pitch_command_limit(stall_table, *, alpha_margin, mach_lo, mach_hi, n_mach=41) -> dict:
     """피치 명령 상한 θ_hi를 **엔벨로프에서 유도**한다 — 상수로 박지 않는다.
 

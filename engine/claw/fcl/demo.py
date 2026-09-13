@@ -29,6 +29,10 @@ from claw.fcl.limiter import AlphaLimiter
 from claw.fcl.mixer import Mixer
 from claw.fcl.scas import Scas, ScasAxis
 from claw.fcl.schedule import GainSchedule, design_gains
+# θ 상한 유도 — 이 표 하나를 쓰려고 analysis를 끌어온다. fcl 그래프 자체는
+# analysis를 모른다(계층 유지): 표는 **밖에서 만들어 넣는** 규약이고
+# (alloc_trim_table과 같다) 여기가 그 밖이다 — 데모 형상 조립 자리.
+from claw.analysis.envelope import pitch_limit_table
 from claw.plant import make_demo_stall_table, make_demo_trim_elevator_table
 from claw.tables import Table
 
@@ -332,4 +336,15 @@ def make_demo_fcl(
     )
     return FlightControlLaw(scas, ap, mixer, schedule=schedule, alpha_limiter=limiter,
                             alloc_trim_table=DEMO_ALLOC_TRIM_TABLE(),
+                            # θ 상한을 **실속표에서 유도**한다 — 리미터가 보는 그
+                            # 표·마진에서 나오므로 둘이 어긋날 수 없다. 리미터가 없는
+                            # 형상에서는 걸 기준이 없어 스칼라 theta_hi가 백스톱으로 남는다
+                            theta_hi_table=(
+                                pitch_limit_table(
+                                    make_demo_stall_table(),
+                                    alpha_margin=(DEMO_ALPHA_MARGIN if alpha_margin is None
+                                                  else float(alpha_margin)),
+                                )
+                                if with_limiter else None
+                            ),
                             alloc_resv_frac=DEMO_ALLOC_RESV_FRAC)
