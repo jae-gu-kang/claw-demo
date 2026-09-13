@@ -221,3 +221,97 @@ test("flyablePath: 장주 기본 미션은 전 구간이 날 수 있다 — 경�
   assert.deepEqual(checkWaypoints(pts, 88, 0.7, 300).warnings, []);
   assert.deepEqual(flyablePath(pts, 88, 0.7).tightIdx, []);
 });
+
+// ── 상승 경사 판정 ────────────────────────────────────────────────────────────
+// 고도가 있는 점만 판정에 든다 — 위 테스트들의 `ok()`는 d가 없어 조용하다(그 자체가
+// 회귀 방지다: 고도 안 쓰는 미션에 새 경고가 새면 기존 단언이 깨진다).
+
+const okd = (n, e, d) => ({ n, e, ok: true, d });
+
+test("checkWaypoints: 성능보다 급한 상승을 잡아낸다", () => {
+  // 88 m/s 고도 루프의 실측 한계는 약 4 %다. 2 km 안에 400 m는 20 %를 요구한다
+  const pts = [okd(4000, 0, 200), okd(6000, 0, 600)];
+  const r = checkWaypoints(pts, 88, 0.7, 300, 0.04);
+  const c = r.climbs.find((x) => x.idx === 1);
+  assert.ok(c, "둘째 구간 판정이 있어야 한다");
+  assert.equal(c.steep, true, `grad=${c.grad}`);
+  assert.ok(r.warnings.some((w) => w.includes("상승이 기체 성능보다 급합니다")),
+    `경고 없음: ${r.warnings.join(" | ")}`);
+});
+
+test("checkWaypoints: 성능 안에 드는 상승은 조용하다 — 경고가 장식이 되지 않게", () => {
+  // 20 km 안에 400 m = 2 % — 한계의 절반. 엔진 실측에서 따라온 그 경사다
+  const pts = [okd(4000, 0, 200), okd(24000, 0, 600)];
+  const r = checkWaypoints(pts, 88, 0.7, 300, 0.04);
+  assert.equal(r.climbs.find((x) => x.idx === 1).steep, false);
+  assert.deepEqual(r.warnings, []);
+});
+
+test("checkWaypoints: **첫 구간은 판정하지 않는다** — 진입 고도를 모른다", () => {
+  // 첫 구간에 아무리 급한 상승을 넣어도 climbs에 없다. 안전해서가 아니라 못 재서다 —
+  // 이 단언이 깨지면 누군가 진입 고도를 지어낸 것이다
+  const pts = [okd(500, 0, 5000), okd(20000, 0, 5100)];
+  const r = checkWaypoints(pts, 88, 0.7, 300, 0.04);
+  assert.equal(r.climbs.some((c) => c.idx === 0), false);
+  assert.deepEqual(r.warnings, []);
+});
+
+test("checkWaypoints: 강하는 판정하지 않는다 — 다른 물리라 같은 상수로 재면 틀린다", () => {
+  const pts = [okd(4000, 0, 3000), okd(6000, 0, 200)];
+  const r = checkWaypoints(pts, 88, 0.7, 300, 0.04);
+  assert.deepEqual(r.climbs, [], "내려가는 구간은 climbs에 들지 않는다");
+  assert.deepEqual(r.warnings, []);
+});
+
+test("checkWaypoints: 고도 없는 점은 건너뛴다 — 0으로 위장하지 않는다", () => {
+  // d가 null인 점이 끼면 그 구간만 빠지고, 0 m로 읽어 거대한 강하/상승을 지어내지 않는다
+  const pts = [okd(4000, 0, 200), { n: 6000, e: 0, ok: true, d: null }, okd(8000, 0, 240)];
+  const r = checkWaypoints(pts, 88, 0.7, 300, 0.04);
+  assert.deepEqual(r.climbs, []);
+  assert.deepEqual(r.warnings, []);
+});
+
+test("checkWaypoints: 램프 분모는 **선회 예상 거리**까지 뺀다 — 엔진과 같은 분모", () => {
+  // 급한 꺾임은 램프도 앞당겨 짧게 만든다. 도달 반경만으로 재면 통과하는 배치가
+  // 실제 분모(예상 거리 940 m)로는 걸려야 한다 — 여기가 갈리면 못 나는 계획이 통과한다
+  const pts = [okd(8000, 0, 200), okd(16000, 0, 495), okd(16000, 8000, 495)];
+  const r = checkWaypoints(pts, 88, 0.7, 300, 0.04);
+  const c = r.climbs.find((x) => x.idx === 1);
+  // good[1]에서 90° 꺾이므로 lead = R ≈ 940 > 도달 반경 300
+  assert.ok(Math.abs(c.ramp - (8000 - r.radius)) < 1, `ramp=${c.ramp} R=${r.radius}`);
+  assert.equal(c.steep, true, `실제 경사 ${(c.grad * 100).toFixed(2)} %`);
+  // 도달 반경만으로 쟀다면 7,700 m가 분모라 3.83 %로 통과했을 자리다
+  assert.ok(295 / (8000 - 300) < 0.04, "이 배치는 옛 분모로는 통과한다 — 대조군");
+});
+
+test("checkWaypoints: 구간이 포획 반경보다 짧으면 계단이다 — 유한한 경사가 없다", () => {
+  // 엔진 `_leg_alt`의 denom <= 0 분기 — 구간 시작에서 곧바로 목표 고도를 명령한다
+  const pts = [okd(4000, 0, 200), okd(4200, 0, 260)];
+  const r = checkWaypoints(pts, 88, 0.7, 300, 0.04);
+  const c = r.climbs.find((x) => x.idx === 1);
+  assert.equal(c.grad, Infinity);
+  assert.equal(c.steep, true);
+  assert.ok(r.warnings.some((w) => w.includes("계단")), r.warnings.join(" | "));
+});
+
+test("checkWaypoints: 한계를 인자로 덮어쓴다 — 기체가 바뀌면 판정선도 바뀐다", () => {
+  const pts = [okd(4000, 0, 200), okd(14000, 0, 700)];   // 10 km에 500 m ≈ 5.2 %
+  assert.equal(checkWaypoints(pts, 88, 0.7, 300, 0.04).climbs[0].steep, true);
+  assert.equal(checkWaypoints(pts, 88, 0.7, 300, 0.11).climbs[0].steep, false);
+});
+
+test("checkWaypoints: tight 꺾임에서도 분모는 **잘린 예상 거리**를 뺀다 — 0이 아니다", () => {
+  // 엔진 `_lead`는 min(lead, ½legIn, ½legOut)으로 자르지 끄지 않는다. 0으로 두면
+  // 가장 급한 꺾임에서 분모를 가장 크게 낙관해 못 나는 구간이 조용히 통과한다 —
+  // 미리보기가 그 꺾임에 호를 안 그리는 것과는 **다른 물음**이다
+  const pts = [okd(1500, 0, 200), okd(3000, 0, 250), okd(3000, 1500, 250)];
+  const r = checkWaypoints(pts, 88, 0.7, 100, 0.04);
+  const c = r.climbs.find((x) => x.idx === 1);
+  const corner = r.corners.find((x) => x.idx === 1);
+  assert.equal(corner.tight, true, "이 배치의 꺾임은 tight여야 대조가 성립한다");
+  // 잘린 예상 거리 = 구간 절반 = 750 m (도달 반경 100보다 크다)
+  assert.ok(Math.abs(c.ramp - (1500 - corner.limit)) < 1e-9, `ramp=${c.ramp}`);
+  assert.equal(c.steep, true, `grad=${(c.grad * 100).toFixed(2)} %`);
+  // lead를 0으로 뒀다면 분모가 1,400 m라 3.57 %로 통과했을 자리다 — 대조군
+  assert.ok(50 / (1500 - 100) < 0.04, "옛 계산으로는 통과한다");
+});

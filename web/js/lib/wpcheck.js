@@ -10,11 +10,19 @@
 둘 다 *사후*다 — 돌고 나서야 알고, 그 점은 계획대로 지나가지 못한다. 이 모듈은
 같은 기하를 **미리** 재서 사용자가 좌표를 고칠 기회를 준다.
 
-## 무엇을 재는가
+## 무엇을 재는가 — 축이 둘이다
 
-선회 반경 R = V²/(g·tan φ_max)에서 꺾임점마다 예상 거리 L = R·tan(Δψ/2)를 낸다.
-L이 양쪽 구간의 절반을 넘으면 앞뒤 전환이 서로를 삼켜 그 꺾임을 계획대로 날 수
+**수평(선회 반경).** R = V²/(g·tan φ_max)에서 꺾임점마다 예상 거리 L = R·tan(Δψ/2)를
+낸다. L이 양쪽 구간의 절반을 넘으면 앞뒤 전환이 서로를 삼켜 그 꺾임을 계획대로 날 수
 없다 — 엔진이 L을 자르는 바로 그 조건이라 **화면과 엔진이 같은 부등식을 본다**.
+
+**세로(상승 경사).** 구간마다 Δ고도 / 유효 램프 길이를 내어 기체 성능과 견준다.
+램프는 웨이포인트 중심이 아니라 **유효 포획 반경 경계**에서 끝나므로(엔진 `_leg_alt`)
+분모가 구간 길이보다 짧고, 급한 꺾임은 예상 거리만큼 그 분모를 **더** 깎는다 —
+즉 수평으로 급한 자리는 세로 여유까지 같이 잃는다. 두 축이 한 함수에 있는 이유다.
+
+세로가 수평과 **다른 점**: 선회 반경은 공식이 있어 그 자리에서 계산되지만, 상승 경사
+한계는 추력·항력·무게가 함께 내는 창발적 성능이라 **실측 상수**다(`CLIMB_GRADIENT_MAX`).
 
 ## 무엇을 재지 않는가 — 경고이지 거부가 아니다
 
@@ -26,6 +34,21 @@ L이 양쪽 구간의 절반을 넘으면 앞뒤 전환이 서로를 삼켜 그 
   01 §4.2 「0 위장 금지」와 같은 자리).
 - **첫 구간의 시작점은 원점(0, 0)으로 둔다.** 실제로는 순항 진입 지점이라 다르다.
   첫 꺾임의 진입 방위만 영향을 받고, 그 사실을 `firstLegAssumed`로 낸다.
+- **첫 구간의 상승은 아예 판정하지 않는다.** 진입 방위는 원점으로 가정할 수 있지만
+  진입 **고도**는 가정할 자리가 없다. 화면이 아는 출발 고도는 *시작 트림 고도*인데
+  (기본 미션에서 0 m = 활주로 표고), 엔진의 램프는 거기서 시작하지 않는다 —
+  고도 축이 경로를 **잡는 순간** 다시 그어지므로(`begin_alt_leg`) 실제 시작점은
+  순항 진입 고도다(기본 미션 실측 ≈ 180 m). 트림 고도로 재면 0 → 700 m를 요구하는
+  것으로 보여 **없는 경고를 지어낸다**. 그래서 `climbs`는 둘째 구간부터다 —
+  실측에서 그 첫 구간이 12.5 %로 한계의 세 배였던 적이 있으므로, 여기가 비어
+  있다는 것은 안전하다는 뜻이 아니라 **못 쟀다**는 뜻이다.
+  [TBD] 순항 진입 고도를 서버에서 받아 오면 이 구간도 잴 수 있다.
+- **속도를 모르면 세로도 판정하지 않는다.** 램프 분모가 선회 예상 거리를 빼야 하고
+  그 거리가 선회 반경에서 오므로, 속도가 없으면 분모를 못 만든다. `"path"` 헤딩
+  없이 `alt="path"`만 쓰는 미션(웨이포인트를 세로 프로파일로만 쓰는 구성)이 그
+  사각지대다 — `pathSpeed`가 헤딩만 보기 때문이고, 그때는 조용하다.
+- **강하는 판정하지 않는다.** 내려가는 쪽 한계는 추력이 아니라 속도 제어·강하율에서
+  오는 다른 물리라 같은 상수로 재면 틀린 수를 말한다. 올라가는 구간만 본다.
 */
 
 const G0 = 9.80665; // [m/s²] 엔진 common/constants.py G0와 같은 값 — 표준 중력
@@ -109,21 +132,72 @@ export function pathSpeed(modeRows) {
   return best;
 }
 
+/** 상승 경사 한계 [무차원, 예: 0.11 = 11%] — **실측값**이다.
+ *
+ * 선회 반경과 달리 **공식이 없다.** R = V²/(g·tan φ)는 속도와 뱅크 한계 둘 다
+ * 알려진 값이라 화면이 그 자리에서 계산하지만, 상승 경사는 추력·항력·무게가
+ * 함께 내는 창발적 성능이라 **돌려 봐야 안다**. 엔진에 대응하는 파라미터가
+ * 없으므로 "엔진 기본값 재기술"(02 §5.5)이 아니라 웹이 드는 실측 상수다 —
+ * `lib/wpmap.js CRUISE_ALT_DEFAULT`가 같은 부류이고 같은 측정에 기댄다.
+ *
+ * 측정: **4.0 %** — 순항 88 m/s에서 고도 5,000 m를 명령해 루프를 한계까지 밀고
+ * 정상 상승 구간(t 60~240 s)의 평균을 쟀다: hdot 3.55 m/s · V 88.00 m/s →
+ * 경사 4.04 % (고도 337 → 975 m). 보수적으로 4 %로 내려 박는다.
+ *
+ * **속도의 함수다.** `lib/wpmap.js CRUISE_ALT_DEFAULT`가 인용하는 11 %는 `climb`
+ * 모드(110 m/s·피치 21° 직접 지령)의 값이라 이 자리와 조건이 다르다 — 둘 다 맞고,
+ * 섞으면 틀린다. 여기가 재는 것은 `alt="path"`가 실제로 도는 조건, 즉 **순항 속도의
+ * 고도 루프**다. 상수 하나로 곡선을 대신하는 근사이므로 `checkWaypoints`가 인자로도
+ * 받는다(주면 그 값이 이긴다).
+ *
+ * **이 값은 데모 기체의 것이다.** 기체를 바꾸면 틀린 판정선이 된다 — 그래서
+ * `checkWaypoints`가 인자로도 받는다(주면 그 값이 이긴다). 판정이 경고이지
+ * 거부가 아닌 이유도 여기 있다: 근사가 틀려도 사용자의 실행을 막지 않는다.
+ */
+export const CLIMB_GRADIENT_MAX = 0.04;
+
+/** 구간 i의 **유효 램프 길이** [m] — 엔진 `_leg_alt`의 분모와 같은 값.
+ *
+ * 엔진의 고도 램프는 웨이포인트 중심이 아니라 **유효 포획 반경 경계**에서 끝난다
+ * (거기서 다음 구간으로 전환하므로 도착할 때 이미 목표 고도여야 한다). 그 반경은
+ * 도달 반경과 선회 예상 거리 중 **큰 쪽**이다 — 예상 전환이 켜지면 램프도 함께
+ * 앞당겨져 **짧아진다**. 즉 급한 꺾임은 상승 여유까지 같이 깎는다.
+ *
+ * 도달 반경만으로 재면(`lib/wpmap.js planProfile`이 그렇다) 여기서 램프를 실제보다
+ * 길게 봐서 **못 나는 구간을 통과시킨다**. 판정은 엔진과 같은 분모를 써야 한다.
+ *
+ * **tight 꺾임에서도 예상 거리는 0이 아니다.** 엔진은 `min(lead, ½legIn, ½legOut)`으로
+ * **자르지 끄지 않는다**(`_lead` 마지막 줄) — 잘린 값이 그대로 포획 반경에 든다.
+ * 여기서 0으로 두면(미리보기가 호를 안 그리는 것과 헷갈리기 쉬운 자리다) 가장 급한
+ * 꺾임에서 분모를 가장 크게 낙관해, **수평으로도 세로로도 못 나는 구간이 조용히
+ * 통과한다**. 미리보기가 호를 지어내지 않는 것과 분모를 어떻게 재는가는 다른 물음이다.
+ */
+function rampLength(legLen, corner, acceptRadius) {
+  const r = Number.isFinite(acceptRadius) && acceptRadius > 0 ? acceptRadius : 0;
+  // 엔진 `_lead`와 같은 자르기 — 180° 되돌기(lead = Infinity)도 limit으로 떨어진다
+  const lead = corner === null ? 0 : Math.min(corner.lead, corner.limit);
+  return legLen - Math.max(r, Number.isFinite(lead) ? lead : 0);
+}
+
 /** 웨이포인트 기하 판정.
  *
  * @param pts        [{n, e, ok}] — `wpmap.rowsToPoints` 결과 (ok=false는 건너뛴다)
  * @param speed      순항 속도 [m/s] (`pathSpeed`)
  * @param bankMax    뱅크 한계 [rad] (오토파일럿 phi_max)
  * @param acceptRadius 도달 반경 [m]
- * @returns {{radius, corners, warnings, firstLegAssumed}}
+ * @param climbMax   상승 경사 한계 [무차원] — 기본 `CLIMB_GRADIENT_MAX`(데모 기체 실측)
+ * @returns {{radius, corners, climbs, warnings, firstLegAssumed}}
  *   corners: 꺾임점마다 {idx, turnDeg, lead, legIn, legOut, limit, tight}
+ *   climbs:  **둘째 구간부터** {idx, from, to, rise, ramp, grad, steep} (첫 구간은 없다)
  *   warnings: 사람이 읽을 문장 (빈 배열 = 걸릴 것 없음)
  */
-export function checkWaypoints(pts, speed, bankMax, acceptRadius) {
+export function checkWaypoints(pts, speed, bankMax, acceptRadius,
+                               climbMax = CLIMB_GRADIENT_MAX) {
   const good = (pts ?? []).filter((p) => p && p.ok);
   const out = {
     radius: turnRadius(speed, bankMax),
     corners: [],
+    climbs: [],
     warnings: [],
     firstLegAssumed: good.length > 0,
   };
@@ -152,6 +226,48 @@ export function checkWaypoints(pts, speed, bankMax, acceptRadius) {
       + "기체가 그 점을 지나쳤다 되돌아오거나, 한 바퀴 돈 뒤 못 잡고 넘어갑니다 — "
       + "웨이포인트를 더 벌리거나 순항 속도를 낮추면 풀립니다.",
     );
+  }
+
+  // ── 상승 경사 — 계획이 기체 성능 안에 드는가.
+  //
+  // **첫 구간(legs[0])은 판정하지 않는다.** 그 구간의 시작 고도는 "고도 축이 경로를
+  // 잡는 순간의 기체 고도"인데(엔진 `begin_alt_leg`), 그것은 이륙·상승 구간 전체가
+  // 낸 결과라 화면이 알 수 없다. 지어내면 없는 판정선이 된다 — 진입 방위를 원점으로
+  // 가정하는 `firstLegAssumed`와 같은 자리이고, 같은 이유로 조용히 넘기지 않고 적는다.
+  //
+  // **내려가는 쪽도 판정하지 않는다.** 강하 한계는 추력이 아니라 속도 제어·강하율에서
+  // 오는 다른 물리라 같은 상수로 재면 틀린 수를 말한다. rise > 0만 본다.
+  if (Number.isFinite(climbMax) && climbMax > 0) {
+    for (let i = 1; i < good.length; i += 1) {
+      const from = good[i - 1].d;
+      const to = good[i].d;
+      if (from == null || to == null) continue; // 고도 없는 점 — 잴 것이 없다
+      const rise = to - from;
+      if (rise <= 0) continue; // 수평·강하는 이 판정선의 몫이 아니다
+      const corner = cornerAt(legs, i, out.radius);
+      const ramp = rampLength(legs[i].len, corner, acceptRadius);
+      // ramp <= 0이면 엔진은 구간 시작에서 **곧바로** 목표 고도를 명령한다
+      // (`_leg_alt`의 denom <= 0 분기) — 유한한 경사가 없는 계단이라 Infinity다
+      const grad = ramp > 0 ? rise / ramp : Infinity;
+      out.climbs.push({ idx: i, from, to, rise, ramp, grad, steep: grad > climbMax });
+    }
+    const steep = out.climbs.filter((c) => c.steep);
+    if (steep.length) {
+      const names = steep.map((c) => c.idx + 1).join(", ");
+      const worst = steep.reduce((a, b) => (b.grad > a.grad ? b : a));
+      const gradTxt = Number.isFinite(worst.grad)
+        ? `${(worst.grad * 100).toFixed(1)} %`
+        : "램프 구간이 없어(구간이 포획 반경보다 짧다) 계단입니다";
+      out.warnings.push(
+        `웨이포인트 ${names}번까지의 상승이 기체 성능보다 급합니다 — `
+        + `가장 급한 곳은 ${Math.round(worst.ramp).toLocaleString("ko-KR")} m 안에 `
+        + `${Math.round(worst.rise).toLocaleString("ko-KR")} m를 올라야 해서 `
+        + `${gradTxt}가 필요한데 이 기체는 약 ${(climbMax * 100).toFixed(0)} %까지입니다. `
+        + "기체는 명령을 따라가려 하지만 못 올라가 계획보다 낮게 날고, 그 뒤 구간이 "
+        + "그 낮은 고도에서 다시 시작합니다 — 웨이포인트를 더 벌리거나 고도차를 "
+        + "줄이면 풀립니다.",
+      );
+    }
   }
 
   // 도달 반경이 선회 반경보다 훨씬 작으면 **넘어간 뒤 되돌기**가 잦다. 예상 전환이
