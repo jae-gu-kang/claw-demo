@@ -204,7 +204,7 @@ scripts/refcheck.sh                  # 문서·코드의 절 참조 (본문 정�
 
 ### 자동으로 도는 것 — 빠른 층
 
-`.github/workflows/fast.yml`이 push·PR마다 **위 아래 셋**(웹 826 · 가상환경 194 ·
+`.github/workflows/fast.yml`이 push·PR마다 **위 아래 셋**(웹 855 · 가상환경 194 ·
 참조 검사기)을 돌린다. 셋 다 npm 설치가 필요 없어 **3~4초**에 끝난다.
 
 **나머지는 손으로 돌린다.** 파이썬 스위트는 실측으로 engine 24분 · server 28분이라
