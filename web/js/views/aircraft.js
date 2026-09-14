@@ -5,7 +5,8 @@
 다시 적지 않는다: [검증]은 서버 `/profiles/validate`(저장과 같은 규칙)의 답을 경로째 보여 줄 뿐이다.
 
 배치(06 §2): **대표 그림과 목록이 전면**이고 문서·형상 변형·가져오기는 패널이다. 대표 그림은 지금 계산에 쓰는
-기체를 크게 제자리에서 돌린다 — three는 가상환경 번들에만 있어 그 번들의 두 번째 진입점을 부른다(lib/aircrafthero.js). 문서 패널은 절별 폼(views/profileform.js)과
+기체를 크게 제자리에서 돌리고, ‹ ›로 목록의 다른 기체·형상 변형을 그 자리에서 미리 본다 — three는 가상환경 번들에만
+있어 그 번들의 두 번째 진입점을 부른다(lib/aircrafthero.js). 문서 패널은 절별 폼(views/profileform.js)과
 JSON 글이 같은 문서를 고친다.
 
 예제 기체는 엔진 패키지 데이터라 읽기 전용이다. 보여 주되 검증을 부르지 않는다(검증은 저장 규칙이라
@@ -13,13 +14,13 @@ JSON 글이 같은 문서를 고친다.
 */
 
 import { ApiError, api, errorText } from "../api.js";
-import { heroFacts, heroPlan } from "../lib/aircrafthero.js";
+import { heroEntries, heroFacts, heroPlan, stepIndex, variantNote } from "../lib/aircrafthero.js";
 import { clear, el } from "../dom.js";
 import {
   EXAMPLE_ID, cloneDocument, currentSelection, exportFileName, parseDocumentText, profileErrorText,
-  saveSelection, setSelection,
+  sameSelection, saveSelection, setSelection,
 } from "../lib/profile.js";
-import { formUpdate, sliceBody, stallNote } from "../lib/profileform.js";
+import { effectiveOf, formUpdate, sliceBody, stallNote } from "../lib/profileform.js";
 import { lineChartCanvas } from "./plots.js";
 import { renderProfileForm } from "./profileform.js";
 import {
@@ -55,6 +56,8 @@ let seedSimCheck = false;
 // 대표 그림 — 가상환경 번들(three)의 두 번째 진입점을 쓴다. 떠날 때 WebGL 컨텍스트를 반납한다(main.js dispose 규약)
 const BUNDLE = "/world/build/world.js";
 let hero = null; // {session, handle} — 늦게 도착한 문서·번들이 떠난 화면에 렌더러를 만들지 않게 세션으로 대조한다
+let heroPick = null; // ‹ ›로 옮겨 보고 있는 {id, variant} — null이면 지금 계산에 쓰는 기체. 탭을 떠났다 와도 유지
+const heroDocs = new Map(); // 기체 id → 문서 받기 약속 — 오갈 때마다 다시 받지 않는다(목록을 다시 받으면 비운다)
 const AP_SOURCE = { heuristic: "휴리스틱", registry_default: "레지스트리 기본값", document: "문서 값",
   structural_limit: "구조 한계로 깎음" };
 
@@ -78,7 +81,7 @@ export function dispose() {
 
 export function render() {
   dispose(); // 같은 뷰를 다시 그리면 main.js가 dispose를 부르지 않는다 — 옛 렌더러를 여기서 놓는다
-  const heroBox = el("div", { class: "aircraft-hero" });
+  const heroBox = el("div", { class: "hero-block" });
   const statusLine = el("p", { class: "hint", style: "margin:4px 0 0" });
   const errBox = el("div");
   const noticeBox = el("div");
@@ -114,11 +117,12 @@ export function render() {
         api.get("/profiles"), api.get("/health").catch(() => null)]);
       list = items;
       volatile = !!health?.profile_store?.volatile;
-      statusLine.textContent = `${list.length}대 · 지금 계산에 쓰는 기체: ${selectedId()}`
-        + (currentSelection()?.variant ? ` / ${currentSelection().variant}` : "");
+      statusLine.textContent = ""; // 무엇으로 계산하나는 대표 그림 캡션·목록·헤더가 말한다 — 머리줄에 겹쳐 적지 않는다
       paintNotices();
       paintList();
       drawers.refresh();
+      heroDocs.clear(); // 저장·삭제 뒤의 새 리비전을 대표 그림도 보게
+      heroNav();
     } catch (e) {
       statusLine.textContent = "";
       showError(e);
@@ -916,63 +920,169 @@ export function render() {
   };
 
   // ── 대표 그림 (전면) ──────────────────────────────────────────────────────
-  // 지금 계산에 쓰는 기체(헤더 선택·형상 변형 반영)다 — 목록에서 연 문서가 아니다. 무엇을 그리고 무엇이라고
-  // 말할지는 lib/aircrafthero.js, 그리기는 번들의 mountAircraftViewer
+  // 기본은 지금 계산에 쓰는 기체(헤더 선택·형상 변형 반영)다. ‹ ›로 목록의 다른 기체·형상 변형(예: 예제의 EO/IR형)을
+  // **그 자리에서** 미리 본다 — 계산 선택은 바뀌지 않는다. 계산까지 바꾸려면 [이 기체로 계산]을 누르고, 그것은 헤더
+  // 선택과 같은 전환이다(묻고 다시 읽기, 06 §8). 화살표마다 페이지를 다시 읽으면 둘러보기가 안 된다.
+  // 무엇을 그리고 무엇이라고 말할지는 lib/aircrafthero.js, 그리기는 번들의 mountAircraftViewer(한 렌더러에서 show로 바꾼다)
+  let heroNav = () => {}; // 목록을 받은 뒤 화살표를 다시 세운다(load가 부른다)
   const paintHero = () => {
     const session = {};
     hero = { session, handle: null };
     const live = () => hero?.session === session;
+    const selected = () => currentSelection() ?? { id: EXAMPLE_ID, variant: null };
     const stage = el("div", { class: "hero-canvas" });
     const status = el("div", { class: "hero-status" }, "기체를 불러오는 중…");
-    const name = el("div", { class: "hero-name" });
-    const facts = el("div", { class: "hero-facts" });
-    const notes = el("div", { class: "hero-notes" });
+    const name = el("span", { class: "hero-name" });
+    const badge = el("span", { class: "hero-badge" });
+    const counter = el("span", { class: "hero-count" });
+    const facts = el("p", { class: "hero-facts" });
+    const notes = el("div", {});
+    const useBtn = el("button", { class: "hero-use", title: "모든 탭의 계산을 이 기체로 바꾼다 — 헤더 선택과 같다(페이지를 다시 읽는다)" },
+      "이 기체로 계산");
     const spinBtn = el("button", { class: "hero-spin" }, "회전 멈춤");
-    spinBtn.hidden = true;
-    clear(heroBox).append(stage, status,
-      el("div", { class: "hero-head" }, el("div", { class: "hero-kicker" }, "지금 계산에 쓰는 기체"), name),
-      el("div", { class: "hero-foot" }, el("div", {}, facts, notes),
-        el("div", { class: "hero-ctl" }, el("span", { class: "hero-hint" }, "끌거나 화살표 키로 돌려 보기"), spinBtn)));
-    const fail = (what) => (e) => {
+    const prev = el("button", { class: "hero-nav prev" }, "‹");
+    const next = el("button", { class: "hero-nav next" }, "›");
+    prev.setAttribute("aria-label", "이전 기체");
+    next.setAttribute("aria-label", "다음 기체");
+    for (const b of [useBtn, spinBtn, prev, next]) b.hidden = true;
+    // 그림 위에는 조작(‹ ›)만 — 이름·상태·사실은 그림 아래 캡션이다(다른 탭의 그림과 같은 배치, 06 §2)
+    clear(heroBox).append(
+      el("div", { class: "aircraft-hero" }, stage, status, prev, next),
+      el("div", { class: "hero-caption" },
+        el("div", { class: "hero-line" }, name, badge, useBtn, counter, spinBtn), facts, notes));
+    const paintNotes = (lines) => clear(notes).append(...lines.map((t) => el("p", { class: "hero-note" }, t)));
+
+    // 문서·자산 목록·번들 — 번들과 목록은 한 번, 문서는 기체마다
+    const why = (what) => (e) => {
       throw new Error(`${what} — ${e?.message ?? e}`);
     };
-    const docP = selectedDocument();
-    docP.then((doc) => {
-      if (!live()) return;
-      const variant = currentSelection()?.variant;
-      name.textContent = doc.name + (variant ? ` / ${variant}` : "");
-      clear(facts).append(...heroFacts(doc).map((t) => el("span", { class: "hero-fact" }, t)));
-    }, () => {});
-    Promise.all([
-      docP.catch(fail("기체 문서를 받지 못했습니다")),
+    const ready = Promise.all([
       api.get("/world/manifest").catch(() => null),
-      import(BUNDLE).catch(fail("3D 번들을 불러오지 못했습니다 — 빌드가 없으면 web/world에서 npm run build")),
-    ]).then(([doc, manifest, mod]) => {
-      if (!live()) return; // 떠났다 — 고아 렌더러를 만들지 않는다
-      const plan = heroPlan(doc, manifest);
-      const paintNotes = (lines) => clear(notes).append(...lines.map((t) => el("p", { class: "hero-note" }, t)));
-      paintNotes(plan.notes);
-      const handle = mod.mountAircraftViewer(stage, {
-        model: plan.model,
-        schematic: plan.schematic,
-        onStatus: (s) => {
-          if (!live()) return;
-          status.hidden = s.state === "ready";
-          status.textContent = s.state === "failed" ? `그리지 못했습니다 — ${s.reason}` : "모델을 불러오는 중…";
-          // 모델을 못 읽어 도식으로 물러났으면 「화면용 모델」 안내는 틀린 말이다 — 사유로 갈아 끼운다
-          if (s.state === "ready" && s.source === "schematic" && s.reason) paintNotes([s.reason]);
-        },
+      import(BUNDLE).catch(why("3D 번들을 불러오지 못했습니다 — 빌드가 없으면 web/world에서 npm run build")),
+    ]);
+    const baseFor = (id) => {
+      if (!heroDocs.has(id)) {
+        const pending = api.get(path(id)).then((body) => body.document);
+        heroDocs.set(id, pending);
+        pending.catch(() => {
+          if (heroDocs.get(id) === pending) heroDocs.delete(id);
+        });
+      }
+      return heroDocs.get(id);
+    };
+    // {doc: 적용 문서, raw: 기본 문서} — 적용 문서에는 variants가 없다(치환 적용이 뗀다). 변형 이름·덮어쓴 항목은 raw에서 읽는다
+    const docFor = (entry) => {
+      const raw = baseFor(entry.id);
+      const doc = sameSelection(entry, selected())
+        ? selectedDocument() // 계산이 쓰는 그 문서
+        : raw.then((d) => {
+          // 없는 형상 변형을 기본 문서로 조용히 바꿔 그리지 않는다 — 그리면 이름표와 그림이 다른 기체를 말한다
+          if (entry.variant && !(d.variants ?? []).some((v) => v?.id === entry.variant)) {
+            throw new Error(`형상 변형이 없다: ${entry.id} / ${entry.variant}`);
+          }
+          return effectiveOf(d, entry.variant);
+        });
+      return Promise.all([doc, raw]).then(([d, r]) => ({ doc: d, raw: r }));
+    };
+
+    let seq = 0;
+    // 지금 캡션·그림이 말하는 {entry, raw}. heroPick은 문서를 받는 중일 수 있어 [이 기체로 계산]·늦은 도식 알림은 이것을 쓴다
+    let shown = null;
+    const showEntry = (entry) => {
+      heroPick = entry;
+      const my = ++seq;
+      const isSelected = sameSelection(entry, selected());
+      paintNav();
+      useBtn.hidden = true; // 문서가 오기 전 캡션은 옛 기체를 말한다 — 그사이 누르면 캡션과 다른 기체로 바뀐다
+      Promise.all([docFor(entry).catch(why("기체 문서를 받지 못했습니다")), ready]).then(([{ doc, raw }, [manifest, mod]]) => {
+        if (!live() || my !== seq) return; // 떠났거나 그사이 다른 기체로 넘겼다
+        shown = { entry, raw };
+        badge.hidden = false;
+        const vname = entry.variant ? (raw.variants ?? []).find((v) => v?.id === entry.variant)?.name : null;
+        name.textContent = doc.name + (vname ? ` · ${vname}` : "");
+        badge.textContent = isSelected ? "계산에 쓰는 중" : "미리 보기";
+        badge.className = isSelected ? "hero-badge" : "hero-badge preview";
+        badge.title = isSelected ? "모든 탭이 이 기체로 계산한다" : "계산은 아직 헤더에서 고른 기체로 한다";
+        useBtn.hidden = isSelected;
+        facts.textContent = heroFacts(doc).join(" · ");
+        const plan = heroPlan(doc, manifest);
+        stage.title = `끌어서 돌려 보기 — ${plan.title}`;
+        const lines = [variantNote(raw, entry.variant), ...plan.notes].filter(Boolean);
+        paintNotes(lines);
+        const content = { model: plan.model, schematic: plan.schematic };
+        if (hero.handle) {
+          hero.handle.show(content);
+          return;
+        }
+        const handle = mod.mountAircraftViewer(stage, {
+          ...content,
+          onStatus: (s) => {
+            if (!live()) return;
+            status.hidden = s.state === "ready";
+            status.textContent = s.state === "failed" ? `그리지 못했습니다 — ${s.reason}` : "모델을 불러오는 중…";
+            // 모델을 못 읽어 도식으로 물러났으면 「화면용 모델」 안내는 틀린 말이다 — 사유로 갈아 끼운다
+            if (s.state === "ready" && s.source === "schematic" && s.reason) {
+              paintNotes([variantNote(shown?.raw, shown?.entry.variant), s.reason].filter(Boolean));
+            }
+          },
+        });
+        hero.handle = handle;
+        const label = () => { spinBtn.textContent = handle.spinning ? "회전 멈춤" : "회전"; };
+        spinBtn.onclick = () => { handle.setSpin(!handle.spinning); label(); };
+        label();
+        spinBtn.hidden = false;
+      }).catch((e) => {
+        if (!live() || my !== seq) return;
+        // 캡션·그림을 비운다 — 두면 순번은 새 칸인데 이름·그림·[이 기체로 계산]은 옛 기체를 말한다(지워진 기체로 넘긴 경우)
+        shown = null;
+        name.textContent = entry.label ?? entry.id;
+        badge.hidden = true;
+        facts.textContent = "";
+        paintNotes([]);
+        hero?.handle?.show({ model: null, schematic: null }); // 무대도 비운다 — 늦게 온 옛 모델이 이 알림을 덮지 않게
+        status.hidden = false;
+        status.textContent = e?.message ?? String(e);
       });
-      hero.handle = handle;
-      const label = () => { spinBtn.textContent = handle.spinning ? "회전 멈춤" : "회전"; };
-      spinBtn.onclick = () => { handle.setSpin(!handle.spinning); label(); };
-      label();
-      spinBtn.hidden = false;
-    }).catch((e) => {
+    };
+
+    const paintNav = () => {
+      const entries = heroEntries(list);
+      const at = entries.findIndex((e) => sameSelection(e, heroPick ?? selected()));
+      const many = entries.length > 1;
+      prev.hidden = !many;
+      next.hidden = !many;
+      counter.textContent = many && at >= 0 ? `${at + 1} / ${entries.length}` : "";
+      if (!many) return;
+      prev.title = `이전: ${entries[stepIndex(entries.length, at, -1)].label}`;
+      next.title = `다음: ${entries[stepIndex(entries.length, at, +1)].label}`;
+    };
+    const move = (dir) => {
+      const entries = heroEntries(list);
+      if (entries.length < 2) return;
+      const at = entries.findIndex((e) => sameSelection(e, heroPick ?? selected()));
+      showEntry(entries[stepIndex(entries.length, at, dir)]);
+    };
+    prev.onclick = () => move(-1);
+    next.onclick = () => move(+1);
+    useBtn.onclick = () => {
+      if (!shown || sameSelection(shown.entry, selected())) return;
+      const r = switchTo(shown.entry);
+      if (r.reason) showError(r.reason);
+    };
+    let loads = 0;
+    heroNav = () => {
       if (!live()) return;
-      status.hidden = false;
-      status.textContent = e?.message ?? String(e);
-    });
+      loads += 1;
+      // 보던 기체가 목록에서 사라졌으면(지워짐) 계산에 쓰는 기체로 돌아간다 — 없는 문서를 계속 받으려 하지 않게
+      if (heroPick && list && !heroEntries(list).some((e) => sameSelection(e, heroPick))) {
+        showEntry(selected());
+        return;
+      }
+      // 첫 목록은 그림을 막 그린 직후라 화살표만 세운다. 그 뒤(저장·삭제·새로고침)는 받아 둔 문서를 비웠으니 다시 그린다
+      if (loads > 1) showEntry(heroPick ?? selected());
+      else paintNav();
+    };
+    showEntry(heroPick ?? selected());
   };
 
   const drawers = createDrawers({
@@ -1009,8 +1119,7 @@ export function render() {
   return el("div", { class: "tab-page aircraft-page" },
     tabTop({
       title: "기체",
-      lead: "모든 탭의 계산이 헤더에서 고른 기체를 씁니다 — 여기서는 그 기체 문서를 만들고 고칩니다. "
-        + "예제는 읽기 전용이라 복제해서 고칩니다.",
+      lead: "모든 탭이 헤더에서 고른 기체로 계산합니다 — 여기서 기체 문서를 만들고 고칩니다(예제는 복제해서).",
       actions: [el("button", { onclick: load }, "새로고침")],
       extra: [statusLine, errBox, noticeBox],
     }),

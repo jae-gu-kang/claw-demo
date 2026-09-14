@@ -8,6 +8,7 @@ from claw.profile import (
     load_example,
     validate_document,
 )
+from claw.profile.schema import document_warnings, effective_document
 
 
 def _fps(doc, variant=None):
@@ -45,6 +46,16 @@ def test_display_model_does_not_change_either_fingerprint():
     assert _fps(doc) == base
     del doc["display"]  # 이 절이 생기기 전 문서
     assert _fps(doc) == base
+
+
+def test_example_eoir_variant_only_swaps_the_display_model():
+    """예제의 EO/IR형은 표시 모델(기수 대신 짐벌 볼 GLB)만 바꾼다 — 짐벌의 질량·항력 자료가 없어 계산 입력은 기본형 그대로다.
+    그래서 두 지문이 기본형과 같고(같은 기체로 계산된다), 기본형의 문서 알림이 변형 몫으로 겹쳐 나오지 않는다."""
+    doc = validate_document(load_example())
+    assert [(v["id"], v["name"]) for v in doc["variants"]] == [("eoir", "EO/IR형")]
+    assert effective_document(doc, "eoir")["display"] == {"kind": "model", "model": "shahed136_eoir.glb"}
+    assert _fps(load_example(), "eoir") == _fps(load_example())
+    assert [w["variant"] for w in document_warnings(doc)] == [None]
 
 
 def test_fingerprints_are_16_hex():

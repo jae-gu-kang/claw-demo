@@ -447,8 +447,9 @@ def test_derive_de_trim_job_writes_a_derived_table_that_goes_stale_with_the_plan
     heavier = got["document"]
     heavier["mass"]["m_empty"] *= 1.1
     assert client.put("/api/profiles/trimme", json={"base_revision": got["revision"], "document": heavier}).status_code == 200
+    # 예제에서 온 EO/IR형 변형은 표시 모델만 바꿔 플랜트가 기본 문서와 같다 — 기본 문서와 함께 낡는다
     assert {p["id"]: p for p in client.get("/api/profiles").json()}["trimme"]["de_trim"] == {
-        "source": "derived", "stale": True, "stale_variants": []}
+        "source": "derived", "stale": True, "stale_variants": ["eoir"]}
     # 낡은 표로는 법칙을 조립하지 않는다 — 시뮬 제출이 경로째 422 (500도, 조용한 옛 표 사용도 아니다)
     from tests.claw_server.routes.test_sim import _hold_mission
 

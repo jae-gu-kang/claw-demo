@@ -485,5 +485,16 @@
     "kind": "model",
     "model": "shahed136.glb"
   },
-  "variants": []
+  "variants": [
+    {
+      "id": "eoir",
+      "name": "EO/IR형",
+      "patch": {
+        "/display": {
+          "kind": "model",
+          "model": "shahed136_eoir.glb"
+        }
+      }
+    }
+  ]
 }

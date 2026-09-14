@@ -47400,6 +47400,7 @@ function mountAircraftViewer(container, opts) {
     canvas.remove();
     report({ state: "failed", source: null, reason: `WebGL을 열지 못했습니다 — ${e.message}` });
     return { dispose() {
+    }, show() {
     }, setSpin() {
     }, spinning: false };
   }
@@ -47438,6 +47439,10 @@ function mountAircraftViewer(container, opts) {
   let raf = 0;
   let last = 0;
   let drag = null;
+  const loader = new GLTFLoader();
+  const models = /* @__PURE__ */ new Map();
+  let current = null;
+  let showSeq = 0;
   const render = () => {
     turntable.rotation.y = view.yaw;
     const dist = fitDistance(extent, view.elev, camera.fov * Math.PI / 180, camera.aspect);
@@ -47462,15 +47467,32 @@ function mountAircraftViewer(container, opts) {
   const requestFrame = () => {
     if (!raf && !disposed) raf = requestAnimationFrame(tick);
   };
-  const place = (obj) => {
+  const stage = (obj) => {
     const box = new Box3().setFromObject(obj);
     const center = box.getCenter(new Vector3());
     const size = box.getSize(new Vector3());
-    extent = { radial: Math.max(Math.hypot(size.x, size.z) / 2, 1e-3), halfHeight: size.y / 2 };
-    const radius = Math.hypot(extent.radial, extent.halfHeight);
     obj.position.sub(center);
-    turntable.add(obj);
-    ground.position.y = box.min.y - center.y - 0.35 * radius;
+    const pivot = new Group();
+    pivot.add(obj);
+    return {
+      pivot,
+      extent: { radial: Math.max(Math.hypot(size.x, size.z) / 2, 1e-3), halfHeight: size.y / 2 },
+      bottom: box.min.y - center.y
+    };
+  };
+  const clearStage = () => {
+    if (!current) return;
+    turntable.remove(current.staged.pivot);
+    if (current.owned) disposeTree(current.staged.pivot);
+    current = null;
+  };
+  const present = (staged, owned) => {
+    clearStage();
+    current = { staged, owned };
+    turntable.add(staged.pivot);
+    extent = staged.extent;
+    const radius = Math.hypot(extent.radial, extent.halfHeight);
+    ground.position.y = staged.bottom - 0.35 * radius;
     ground.scale.setScalar(radius * 1.8);
     ground.visible = true;
     key.position.set(radius * 2.2, radius * 4.5, radius * 2.6);
@@ -47483,6 +47505,56 @@ function mountAircraftViewer(container, opts) {
     cam.far = 12 * radius;
     cam.updateProjectionMatrix();
     requestFrame();
+  };
+  const loadModel2 = (name) => {
+    let p2 = models.get(name);
+    if (!p2) {
+      p2 = loader.loadAsync(modelUrl(name)).then((gltf) => {
+        gltf.scene.traverse((o) => {
+          if (o.isMesh) {
+            o.castShadow = true;
+            o.receiveShadow = true;
+          }
+        });
+        return stage(gltf.scene);
+      });
+      models.set(name, p2);
+      p2.catch(() => models.delete(name));
+    }
+    return p2;
+  };
+  const show = (next) => {
+    if (disposed) return;
+    const seq = ++showSeq;
+    const stale = () => disposed || seq !== showSeq;
+    const fallback = (reason) => {
+      if (!next.schematic) {
+        clearStage();
+        ground.visible = false;
+        requestFrame();
+        report({ state: "failed", source: null, reason: reason ?? "그릴 형상이 없습니다" });
+        return;
+      }
+      present(stage(schematicObject(next.schematic)), true);
+      report({ state: "ready", source: "schematic", reason });
+    };
+    if (!next.model) {
+      fallback(null);
+      return;
+    }
+    const name = next.model;
+    report({ state: "loading", source: null, reason: null });
+    loadModel2(name).then(
+      (staged) => {
+        if (stale()) return;
+        present(staged, false);
+        report({ state: "ready", source: "model", reason: null });
+      },
+      (e) => {
+        if (stale()) return;
+        fallback(`표시 모델 파일(${name})을 읽지 못해 도식으로 대신 그립니다 — ${e?.message ?? e}`);
+      }
+    );
   };
   const resize = () => {
     const w2 = container.clientWidth;
@@ -47529,40 +47601,7 @@ function mountAircraftViewer(container, opts) {
   canvas.addEventListener("pointerup", onUp);
   canvas.addEventListener("pointercancel", onUp);
   canvas.addEventListener("keydown", onKey);
-  const showSchematic = (reason) => {
-    if (!opts.schematic) {
-      report({ state: "failed", source: null, reason: reason ?? "그릴 형상이 없습니다" });
-      return;
-    }
-    place(schematicObject(opts.schematic));
-    report({ state: "ready", source: "schematic", reason });
-  };
-  report({ state: "loading", source: null, reason: null });
-  if (opts.model) {
-    const name = opts.model;
-    new GLTFLoader().loadAsync(modelUrl(name)).then(
-      (gltf) => {
-        if (disposed) {
-          disposeTree(gltf.scene);
-          return;
-        }
-        gltf.scene.traverse((o) => {
-          if (o.isMesh) {
-            o.castShadow = true;
-            o.receiveShadow = true;
-          }
-        });
-        place(gltf.scene);
-        report({ state: "ready", source: "model", reason: null });
-      },
-      (e) => {
-        if (disposed) return;
-        showSchematic(`표시 모델 파일(${name})을 읽지 못해 도식으로 대신 그립니다 — ${e?.message ?? e}`);
-      }
-    );
-  } else {
-    showSchematic(null);
-  }
+  show(opts);
   resize();
   return {
     dispose() {
@@ -47576,7 +47615,10 @@ function mountAircraftViewer(container, opts) {
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("keydown", onKey);
-      disposeTree(turntable);
+      clearStage();
+      for (const p2 of models.values()) p2.then((staged) => disposeTree(staged.pivot), () => {
+      });
+      models.clear();
       ground.geometry.dispose();
       disposeMaterial(ground.material);
       envTex.dispose();
@@ -47585,6 +47627,7 @@ function mountAircraftViewer(container, opts) {
       renderer.forceContextLoss();
       canvas.remove();
     },
+    show,
     setSpin(on) {
       spin = on;
       last = 0;
