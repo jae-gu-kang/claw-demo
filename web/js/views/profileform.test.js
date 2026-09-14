@@ -243,3 +243,21 @@ test("칸 줄은 경로 표식을 단다 — 모양이 바뀐 뒤 포커스를 �
     assert.ok(paths.includes(p), `${p} 줄에 표식이 없다`);
   }
 });
+
+test("칸마다 「필수」·「선택」을 표시로 붙인다 — 체크박스의 부재로 필수를 읽어 내게 하지 않는다 (v1.13)", () => {
+  const { root } = mount(EXAMPLE);
+  const labelOf = (label) => [...root.find("div")].filter((d) => /\bpf-(row|group)\b/.test(d.className)
+    && d.text.includes(label)).at(-1);
+  const markOf = (label) => labelOf(label).find("span").find((s) => /\bpf-(req|opt)\b/.test(s.className));
+  assert.equal(markOf("공허 질량").text, "필수");
+  assert.equal(markOf("최대 동압").text, "선택");
+  assert.equal(markOf("발사 레일").text, "선택", "선택 묶음 머리");
+  const rail = markOf("레일 길이");
+  assert.equal(rail.text, "필수");
+  assert.match(rail.getAttribute("title"), /묶음을 쓸 때/, "선택 묶음 안의 필수는 설명이 다르다");
+  // 절 머리의 수 — 질량 절은 필수 2(공허 질량·관성 행렬) · 선택 0, 지상 절은 선택 묶음 하나
+  const counts = root.find("span").filter((s) => s.className === "pf-count").map((s) => s.text);
+  assert.equal(counts[0], "필수 2 · 선택 0");
+  assert.ok(counts.includes("필수 0 · 선택 1"), counts.join(" / "));
+  assert.ok(root.text.includes("칸은 비울 수 없고"), "범례가 없다");
+});

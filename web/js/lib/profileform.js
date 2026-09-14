@@ -198,6 +198,29 @@ export function paramsFromDefaults(fields, reserved = []) {
   return Object.fromEntries(fields.filter((f) => !reserved.includes(f.name)).map((f) => [f.name, f.default]));
 }
 
+/** 칸을 비울 수 없는가 — 서술의 `nullable`이 정본이다(검증기가 null을 받는 칸만 nullable). 기본값으로 채워 주지 않으므로
+ *  화면이 「필수」를 **표시로** 말한다 — 「없음」 체크박스가 없다는 부재만으로는 처음 보는 사람이 규칙을 읽어 내지 못한다. */
+export const isRequired = (f) => !f?.nullable;
+
+/** 절 머리의 「필수 N · 선택 M」 — 선택 묶음(nullable group)은 선택 하나로 세고 그 안의 칸은 세지 않는다(묶음을 쓸 때만
+ *  필수라 절의 필수 수에 넣으면 비워 둔 묶음에서 거짓이 된다). 필수 묶음은 머리를 세지 않고 안의 칸을 센다. */
+export function requirementCounts(fields) {
+  let required = 0;
+  let optional = 0;
+  for (const f of fields ?? []) {
+    if (f.kind === "group") {
+      if (f.nullable) optional += 1;
+      else {
+        const inner = requirementCounts(f.fields);
+        required += inner.required;
+        optional += inner.optional;
+      }
+    } else if (isRequired(f)) required += 1;
+    else optional += 1;
+  }
+  return { required, optional };
+}
+
 /** 절 서술의 칸을 평평하게 — 묶음(group) 안까지. */
 export function flattenFields(fields) {
   return (fields ?? []).flatMap((f) => (f.kind === "group" ? [f, ...flattenFields(f.fields)] : [f]));

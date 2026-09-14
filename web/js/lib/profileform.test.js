@@ -211,3 +211,27 @@ test("쓰기 안내(FormNotice)는 문서 모양 오류 문구 없이 사유 그
   const broken = formUpdate({ state, owner: state, fn: () => { throw new Error("x"); } });
   assert.match(broken.error, /JSON 글에서 문서 모양을 확인하세요/);
 });
+
+// ── 필수·선택 표시 (v1.13) ─────────────────────────────────────────────────
+
+import { isRequired, requirementCounts } from "./profileform.js";
+
+test("필수는 nullable이 아닌 칸이다 — 서술이 정본", () => {
+  assert.equal(isRequired({ kind: "number", path: "/mass/m_empty" }), true);
+  assert.equal(isRequired({ kind: "number", path: "/structural/q_max", nullable: true }), false);
+  assert.equal(isRequired({ kind: "number", nullable: false }), true);
+});
+
+test("절의 필수·선택 수 — 선택 묶음은 하나로 세고 안의 칸은 세지 않는다", () => {
+  const fields = [
+    { kind: "number", path: "/a" },
+    { kind: "number", path: "/b", nullable: true },
+    { kind: "group", path: "/rail", nullable: true, fields: [{ kind: "number", path: "/rail/length" }] },
+    { kind: "group", path: "/must", fields: [
+      { kind: "number", path: "/must/x" }, { kind: "range", path: "/must/r", nullable: true },
+    ] },
+  ];
+  assert.deepEqual(requirementCounts(fields), { required: 2, optional: 3 });
+  assert.deepEqual(requirementCounts([]), { required: 0, optional: 0 });
+  assert.deepEqual(requirementCounts(undefined), { required: 0, optional: 0 });
+});

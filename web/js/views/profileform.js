@@ -13,7 +13,8 @@ mousedown에 오므로 그때 다시 그리면 누르던 버튼이 사라지고 
 보는 칸과 형상 변형의 「덮어씀」 표시는 그 자리에서 고친다. 행 추가·없음·형식 변경처럼 모양이 바뀌는 쓰기만
 `{structural: true}`로 넘겨 호출측이 다시 그린다 — 클릭이 끝난 뒤라 잃을 것이 없다.
 
-「없음」(null)은 체크로만 고른다 — 빈 칸을 null로 읽으면 지운 줄 모른다. 비어 있던 묶음을 만들 때와
+「없음」(null)은 체크로만 고른다 — 빈 칸을 null로 읽으면 지운 줄 모른다. 칸마다 「필수」·「선택」을 표시로 붙인다(v1.13,
+사용자 제안) — 필수가 체크박스의 부재로만 드러나면 처음 보는 사람은 그 규칙을 읽어 내지 못한다. 비어 있던 묶음을 만들 때와
 추진·작동기 형식을 바꿀 때는 **누른 뒤에만** 예제·레지스트리 기본값으로 채운다.
 */
 
@@ -21,7 +22,8 @@ import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
 import {
   FormNotice, aeroTableFromParsed, tableSummary,
-  allowedInputs, applyPatch, clearInPatch, effectiveOf, formatNum, getAt, inputsText, isUnder,
+  allowedInputs, applyPatch, clearInPatch, effectiveOf, formatNum, getAt, inputsText, isRequired, isUnder,
+  requirementCounts,
   machTableFromParsed, paramsFromDefaults, parseInputs, parseNum, parseNumList, patchOwner, patchedBelow,
   sectionOverrides, setAt, setMatrixCell, tableFromRows, tableRows, writeValues,
 } from "../lib/profileform.js";
@@ -462,12 +464,22 @@ export function renderProfileForm(ctx) {
     return { cls: "", badge: null };
   };
 
-  const row = (f) => {
-    if (f.kind === "group") return groupRow(f);
+  /** 「필수」·「선택」 표시 — 선택 묶음 안의 필수 칸은 그 묶음을 쓸 때만 필수라 설명이 다르다 */
+  const reqMark = (f, inOptional) => (isRequired(f)
+    ? el("span", {
+      class: "pf-req",
+      title: inOptional
+        ? "이 묶음을 쓸 때 필수 — 비울 수 없다(기본값으로 채워 주지 않는다)"
+        : "필수 — 비울 수 없다. 빠지면 [검증]·[저장]이 경로와 함께 알려 준다(기본값으로 채워 주지 않는다)",
+    }, "필수")
+    : el("span", { class: "pf-opt", title: "선택 — 「없음」으로 비워 둘 수 있다" }, "선택"));
+
+  const row = (f, inOptional = false) => {
+    if (f.kind === "group") return groupRow(f, inOptional);
     const value = getAt(shown, f.path);
     const ov = overrideInfo(f);
     const editor = editors[f.kind];
-    const label = el("div", { class: "pf-label" }, f.label,
+    const label = el("div", { class: "pf-label" }, f.label, reqMark(f, inOptional),
       f.unit && f.unit !== "-" ? el("span", { class: "pf-unit" }, `[${f.unit}]`) : null,
       ov.badge,
       f.help ? el("div", { class: "hint" }, f.help) : null);
@@ -479,27 +491,31 @@ export function renderProfileForm(ctx) {
     return node;
   };
 
-  const groupRow = (f) => {
+  const groupRow = (f, inOptional = false) => {
     const value = getAt(shown, f.path);
     const ov = overrideInfo(f);
     const exampleValue = ctx.example ? getAt(ctx.example, f.path) : undefined;
-    const head = el("div", { class: "pf-group-head" }, f.label, ov.badge,
+    // 필수 묶음은 머리에 표시하지 않는다 — 안의 칸이 저마다 말한다. 선택 묶음만 「선택」
+    const head = el("div", { class: "pf-group-head" }, f.label, f.nullable ? reqMark(f, inOptional) : null, ov.badge,
       f.help ? el("span", { class: "hint" }, f.help) : null);
     if (value === null) {
-      head.append(el("span", { class: "hint" }, "없음"),
+      head.append(...[el("span", { class: "hint" }, "없음"),
         exampleValue != null ? btn("예제 값으로 시작", () => {
           if (globalThis.confirm?.(`「${f.label}」을 예제 기체 값으로 채워 만듭니다 — 실기체 값으로 고치세요. 만들까요?`)) {
             put(f.path, clone(exampleValue), STRUCTURAL);
           }
-        }, "예제 기체의 같은 자리 값으로 채운다 — 누를 때만 채운다") : null);
+        }, "예제 기체의 같은 자리 값으로 채운다 — 누를 때만 채운다") : null].filter(Boolean));
       return el("div", { class: `pf-group${ov.cls}`, "data-pf-path": f.path }, head);
     }
     if (f.nullable) {
-      head.append(btn("없음으로", () => {
+      // 읽기 전용이면 btn이 null이다 — DOM append는 null을 "null" 글자로 찍으므로 거른다(el()과 달리)
+      const none = btn("없음으로", () => {
         if (globalThis.confirm?.(`「${f.label}」을 없음으로 둡니다 — 안의 값이 지워집니다. 둘까요?`)) put(f.path, null, STRUCTURAL);
-      }));
+      });
+      if (none) head.append(none);
     }
-    const node = el("div", { class: `pf-group${ov.cls}`, "data-pf-path": f.path }, head, ...f.fields.map(row));
+    const node = el("div", { class: `pf-group${ov.cls}`, "data-pf-path": f.path }, head,
+      ...f.fields.map((c) => row(c, inOptional || !!f.nullable)));
     rows.set(f.path, { row: node, label: head });
     return node;
   };
@@ -563,16 +579,23 @@ export function renderProfileForm(ctx) {
 
   const sections = spec.sections.map((s) => {
     const n = patch ? sectionOverrides(patch, s).length : 0;
+    const req = requirementCounts(s.fields);
     return el("details", {
       class: "pf-sect", open: openSections.has(s.key) ? "" : undefined,
       ontoggle: (e) => { if (e.target.open) openSections.add(s.key); else openSections.delete(s.key); },
     },
     el("summary", {}, s.title, n ? el("span", { class: "pf-badge" }, `덮어씀 ${n}`) : null,
+      el("span", { class: "pf-count", title: "이 절의 필수 칸 수 · 「없음」으로 비워 둘 수 있는 칸 수 (선택 묶음은 하나로 센다)" },
+        `필수 ${req.required} · 선택 ${req.optional}`),
       el("span", { class: "hint" }, s.help)),
-    ...s.fields.map(row));
+    ...s.fields.map((f) => row(f)));
   });
+  const legend = el("p", { class: "hint pf-legend" },
+    el("span", { class: "pf-req" }, "필수"), " 칸은 비울 수 없고 ",
+    el("span", { class: "pf-opt" }, "선택"), " 칸은 「없음」으로 비워 둘 수 있습니다 — 빠진 필수 칸을 기본값으로 채워 주지 ",
+    "않고 [검증]·[저장]이 경로와 함께 알려 줍니다.");
 
-  return el("div", { class: "pf" }, meta, vbar,
+  return el("div", { class: "pf" }, meta, vbar, legend,
     applied.issues.length
       ? el("div", { class: "error-box" }, "이 형상 변형의 치환 중 적용 못 한 것: ", applied.issues.join(" · "))
       : null,

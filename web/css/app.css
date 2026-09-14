@@ -1439,6 +1439,13 @@ body:has(.tab-page) main { max-width: 1580px; }
 .pf-badge { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 700; background: #fdf2d7; color: #946200; }
 .pf-mini { font-size: 11px; padding: 1px 7px; }
 .pf-null { margin-left: 8px; font-size: 12px; white-space: nowrap; }
+/* 「필수」·「선택」 — 색만으로 가르지 않고 글로 말한다. 필수는 빨간 테 글, 선택은 흐린 테 글 */
+.pf-req, .pf-opt { display: inline-block; margin-left: 6px; padding: 0 5px; border: 1px solid currentColor; border-radius: 4px;
+  font-size: 10px; font-weight: 700; line-height: 15px; vertical-align: 1px; }
+.pf-req { color: var(--bad); }
+.pf-opt { color: var(--muted); border-color: var(--line); font-weight: 600; }
+.pf-legend .pf-req, .pf-legend .pf-opt { margin-left: 0; }
+.pf-count { font-size: 11px; font-weight: 400; color: var(--muted); }
 .pf-edit input.pf-num { width: 104px; }
 .pf-edit input.pf-wide { width: 100%; max-width: 420px; }
 .pf-edit .bad { outline: 2px solid var(--bad); }

@@ -462,7 +462,8 @@ export function render() {
     const status = el("span", { class: "hint" }, opened.dirty ? "저장하지 않은 편집 있음" : "");
     statusEl = status;
     checksBox = el("div", {}, ...(opened.check ? opened.check.lines.map((t) => checkLine(opened.check.ok, t)) : []));
-    clear(docBox).append(head,
+    // DOM append는 null을 "null" 글자로 찍는다(el()과 달리) — 조건부 조각은 걸러서 넘긴다
+    clear(docBox).append(...[head,
       readOnly
         ? el("p", { class: "notice" }, "예제 기체는 읽기 전용입니다 — 엔진에 딸린 문서이고 실기체 값이 아닙니다. ",
           el("button", { onclick: () => clone({ id: b.document.id, name: b.document.name }) }, "복제해서 고치기"))
@@ -481,7 +482,7 @@ export function render() {
           `다른 곳에서 먼저 저장했습니다 — 최신은 리비전 ${opened.conflict}이고 이 편집은 리비전 ${b.revision} 위의 것입니다. `
           + "덮어쓰지 않았습니다. 편집을 복사해 두고 [최신 불러오기] 뒤에 다시 적용하세요.")
         : null,
-      checksBox);
+      checksBox].filter(Boolean));
   };
 
   // ── 형상 변형 (패널) ──────────────────────────────────────────────────────
