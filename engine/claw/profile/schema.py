@@ -23,15 +23,21 @@ MAX_VARIANTS = 64  # 형상 변형 상한 — 읽을 때마다 변형마다 재�
 SECTIONS = (
     "schema_version", "id", "name", "description", "is_example",
     "geometry", "aero", "stall", "mass", "propulsion", "actuator", "surfaces",
-    "structural", "operating", "ground", "trim", "law", "mission_template", "variants",
+    "structural", "operating", "ground", "trim", "law", "mission_template", "display", "variants",
 )
 # 스키마 v1에 나중에 더한 **선택 절** — 문서에 없으면 null(없음)로 채운다. 버전을 올리는 대신 이렇게 한
-# 이유: 이 절은 계산에 쓰이지 않아 지문 밖인데(fingerprint.py), 버전을 올리면 버전 값이 지문에 들어가 옛
+# 이유: 이 절들은 계산에 쓰이지 않아 지문 밖인데(fingerprint.py), 버전을 올리면 버전 값이 지문에 들어가 옛
 # 결과·설계 세션의 계보(스냅숏 지문)가 통째로 끊긴다. 계산에 쓰이는 절이 생기면 그때 버전을 올린다
-OPTIONAL_SECTIONS = ("mission_template",)
+OPTIONAL_SECTIONS = ("mission_template", "display")
 # 미션 템플릿 격자의 케이스 상한 — 서버 스캔·영향성 격자 상한(MAX_SCAN_CASES·MAX_CASES)과 같은 자리.
 # 간격 오타 하나로 수만 케이스가 되면 그 기체를 고른 모든 화면이 격자를 만들다 멈춘다
 MAX_TEMPLATE_CASES = 200
+# 표시 모델 형식 — 지금은 GLB 파일 하나다. 모델이 없는 기체는 절을 없음(null)으로 두고, 화면이 기준량에서 만든
+# 도식을 그리며 그렇다고 말한다(06 §8)
+DISPLAY_KINDS = ("model",)
+# GLB 파일 이름 — 서버 `GET /api/world/model/{이름}`이 models/<모델>/<이름>.glb를 **이름으로** 찾는다. 경로 구분자·
+# 상위 폴더를 받지 않는다: 이름이 곧 조회 키이고, 경로를 받으면 문서가 자산 폴더 밖을 가리킬 수 있다
+DISPLAY_MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.glb")
 AERO_FORMS = {
     "lift_drag": ("CL", "CD", "CY", "Cl", "Cm", "Cn"),
     "body": ("CX", "CY", "CZ", "Cl", "Cm", "Cn"),
@@ -614,7 +620,23 @@ def _body(d, *, with_variants):
         "trim": _trim(d["trim"], "/trim"),
         "law": _law(d["law"], "/law"),
         "mission_template": _mission_template(d["mission_template"], "/mission_template"),
+        "display": _display(d["display"], "/display"),
     }
+
+
+def _display(t, p):
+    """표시 모델 — 화면(기체 탭 대표 그림)이 이 기체를 무엇으로 그리나. **계산에 쓰이지 않는다** — 지문 밖이다.
+    없음(null)이면 모델이 없는 기체다: 화면은 기준량(익폭·기준면적)에서 만든 도식을 그리고 그렇다고 말한다 — 다른
+    기체의 모델을 빌려 그리지 않는다. 파일이 서버에 실제로 있는지는 엔진이 모른다(자산 폴더는 서버 몫) — 화면이
+    서버 자산 목록과 대조해 말한다."""
+    if t is None:
+        return None
+    _keys(t, p, ("kind", "model"))
+    _choice(t["kind"], f"{p}/kind", DISPLAY_KINDS)
+    name = _text(t["model"], f"{p}/model", min_len=1)
+    if not DISPLAY_MODEL_NAME.fullmatch(name):
+        _fail(f"{p}/model", "GLB 파일 이름이어야 함 — 영문·숫자·._-, 확장자 .glb, 경로 없이 (예: shahed136.glb)")
+    return {"kind": t["kind"], "model": name}
 
 
 def table_cells(aero: dict) -> int:

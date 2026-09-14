@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { bodyAxesNed, eulerToQuat } from "../lib/attitude.ts";
 import {
   LOCAL_NOSE, LOCAL_STARBOARD, LOCAL_UP,
-  determinant, localToNed, modelColumnsNed,
+  determinant, frdToModelLocal, localToNed, modelColumnsNed,
 } from "./modelaxes.ts";
 
 const D2R = Math.PI / 180;
@@ -72,5 +72,21 @@ describe("사상 자체", () => {
     assert.deepEqual(c.x, [4, 5, 6]);
     assert.deepEqual(c.y, [-7, -8, -9]);
     assert.deepEqual(c.z, [-1, -2, -3]);
+  });
+});
+
+describe("FRD 메시 → 모델 로컬", () => {
+  it("수평·기수 북 자세에서 로컬로 옮긴 뒤 NED로 되돌리면 FRD 그대로다 — 열 사상과 한 벌이다", () => {
+    const cols = columnsFor(0, 0, 0); // 이 자세에서 FRD 성분 = NED 성분
+    for (const v of [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.3, -1.2, 0.55]] as [number, number, number][]) {
+      const back = localToNed(cols, frdToModelLocal(v));
+      near(back[0], v[0], "n"); near(back[1], v[1], "e"); near(back[2], v[2], "d");
+    }
+  });
+
+  it("기수·우현·위가 GLB 로컬 상수와 같다", () => {
+    assert.deepEqual(frdToModelLocal([1, 0, 0]).map((x) => x + 0), LOCAL_NOSE);
+    assert.deepEqual(frdToModelLocal([0, 1, 0]).map((x) => x + 0), LOCAL_STARBOARD);
+    assert.deepEqual(frdToModelLocal([0, 0, -1]).map((x) => x + 0), LOCAL_UP);
   });
 });

@@ -208,6 +208,12 @@ export function renderProfileForm(ctx) {
       }), ` ${c}${f.choices.includes(c) ? "" : " (목록 밖)"}`)));
     },
 
+    // 짧은 문자열(파일 이름 등) — 앞뒤 공백만 걷는다. 형식 판정은 [검증]의 서버 답이 경로째 말한다
+    text: (f, v) => el("input", {
+      class: "pf-wide", value: typeof v === "string" ? v : "", disabled: dis, spellcheck: "false",
+      onchange: (e) => put(f.path, e.target.value.trim()),
+    }),
+
     numlist: (f, v) => el("input", {
       class: "pf-wide", value: Array.isArray(v) ? v.join(", ") : formatNum(v), disabled: dis, spellcheck: "false",
       onchange: (e) => {

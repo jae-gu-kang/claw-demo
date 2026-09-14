@@ -4,7 +4,8 @@
 문서를 만들고 고치는 자리다. 문서는 서버가 검증해 리비전으로 쌓는다(02 §5.6) — 검증 규칙을 여기서
 다시 적지 않는다: [검증]은 서버 `/profiles/validate`(저장과 같은 규칙)의 답을 경로째 보여 줄 뿐이다.
 
-배치(06 §2): **목록이 전면**이고 문서·형상 변형·가져오기는 패널이다. 문서 패널은 절별 폼(views/profileform.js)과
+배치(06 §2): **대표 그림과 목록이 전면**이고 문서·형상 변형·가져오기는 패널이다. 대표 그림은 지금 계산에 쓰는
+기체를 크게 제자리에서 돌린다 — three는 가상환경 번들에만 있어 그 번들의 두 번째 진입점을 부른다(lib/aircrafthero.js). 문서 패널은 절별 폼(views/profileform.js)과
 JSON 글이 같은 문서를 고친다.
 
 예제 기체는 엔진 패키지 데이터라 읽기 전용이다. 보여 주되 검증을 부르지 않는다(검증은 저장 규칙이라
@@ -12,6 +13,7 @@ JSON 글이 같은 문서를 고친다.
 */
 
 import { ApiError, api, errorText } from "../api.js";
+import { heroFacts, heroPlan } from "../lib/aircrafthero.js";
 import { clear, el } from "../dom.js";
 import {
   EXAMPLE_ID, cloneDocument, currentSelection, exportFileName, parseDocumentText, profileErrorText,
@@ -20,7 +22,9 @@ import {
 import { formUpdate, sliceBody, stallNote } from "../lib/profileform.js";
 import { lineChartCanvas } from "./plots.js";
 import { renderProfileForm } from "./profileform.js";
-import { browserStorage, refresh as refreshPicker, restoredNotice, switchTo } from "./profilepick.js";
+import {
+  browserStorage, refresh as refreshPicker, restoredNotice, selectedDocument, switchTo,
+} from "./profilepick.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
 import { deriveSummary, deTrimStatus, designSource, seedSummary } from "../lib/quickseed.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
@@ -48,6 +52,9 @@ const AXIS_UNIT = { alpha: "rad", beta: "rad", de: "rad", da: "rad", dr: "rad", 
 let seedJob = null; // {id, profileId, kind: "quick_seed"|"derive_de_trim"}
 let seedResult = null; // {profileId, kind, body}
 let seedSimCheck = false;
+// 대표 그림 — 가상환경 번들(three)의 두 번째 진입점을 쓴다. 떠날 때 WebGL 컨텍스트를 반납한다(main.js dispose 규약)
+const BUNDLE = "/world/build/world.js";
+let hero = null; // {session, handle} — 늦게 도착한 문서·번들이 떠난 화면에 렌더러를 만들지 않게 세션으로 대조한다
 const AP_SOURCE = { heuristic: "휴리스틱", registry_default: "레지스트리 기본값", document: "문서 값",
   structural_limit: "구조 한계로 깎음" };
 
@@ -62,7 +69,16 @@ const fresh = (body) => ({
 // 지금 계산에 쓰이는 기체 id — 고르지 않았으면 예제
 const selectedId = () => currentSelection()?.id ?? EXAMPLE_ID;
 
+export function dispose() {
+  if (hero == null) return;
+  const handle = hero.handle;
+  hero = null; // 진행 중인 받기가 스스로 물러나도록 먼저 끊는다
+  handle?.dispose?.();
+}
+
 export function render() {
+  dispose(); // 같은 뷰를 다시 그리면 main.js가 dispose를 부르지 않는다 — 옛 렌더러를 여기서 놓는다
+  const heroBox = el("div", { class: "aircraft-hero" });
   const statusLine = el("p", { class: "hint", style: "margin:4px 0 0" });
   const errBox = el("div");
   const noticeBox = el("div");
@@ -78,7 +94,8 @@ export function render() {
 
   const paintNotices = () => {
     const restored = restoredNotice();
-    clear(noticeBox).append(
+    // 네이티브 append는 null을 글자 "null"로 넣는다(el()과 다르다) — 없는 알림은 목록에서 뺀다
+    clear(noticeBox).append(...[
       restored ? el("p", { class: "notice" }, restored) : null,
       volatile
         ? el("p", { class: "notice" },
@@ -86,7 +103,7 @@ export function render() {
           + "사라집니다. 남겨야 할 기체는 [내보내기]로 JSON을 받아 두고 「가져오기」 패널로 되살립니다. "
           + "예제 기체는 사라지지 않습니다.")
         : null,
-    );
+    ].filter(Boolean));
   };
 
   const load = async () => {
@@ -898,6 +915,66 @@ export function render() {
     }
   };
 
+  // ── 대표 그림 (전면) ──────────────────────────────────────────────────────
+  // 지금 계산에 쓰는 기체(헤더 선택·형상 변형 반영)다 — 목록에서 연 문서가 아니다. 무엇을 그리고 무엇이라고
+  // 말할지는 lib/aircrafthero.js, 그리기는 번들의 mountAircraftViewer
+  const paintHero = () => {
+    const session = {};
+    hero = { session, handle: null };
+    const live = () => hero?.session === session;
+    const stage = el("div", { class: "hero-canvas" });
+    const status = el("div", { class: "hero-status" }, "기체를 불러오는 중…");
+    const name = el("div", { class: "hero-name" });
+    const facts = el("div", { class: "hero-facts" });
+    const notes = el("div", { class: "hero-notes" });
+    const spinBtn = el("button", { class: "hero-spin" }, "회전 멈춤");
+    spinBtn.hidden = true;
+    clear(heroBox).append(stage, status,
+      el("div", { class: "hero-head" }, el("div", { class: "hero-kicker" }, "지금 계산에 쓰는 기체"), name),
+      el("div", { class: "hero-foot" }, el("div", {}, facts, notes),
+        el("div", { class: "hero-ctl" }, el("span", { class: "hero-hint" }, "끌거나 화살표 키로 돌려 보기"), spinBtn)));
+    const fail = (what) => (e) => {
+      throw new Error(`${what} — ${e?.message ?? e}`);
+    };
+    const docP = selectedDocument();
+    docP.then((doc) => {
+      if (!live()) return;
+      const variant = currentSelection()?.variant;
+      name.textContent = doc.name + (variant ? ` / ${variant}` : "");
+      clear(facts).append(...heroFacts(doc).map((t) => el("span", { class: "hero-fact" }, t)));
+    }, () => {});
+    Promise.all([
+      docP.catch(fail("기체 문서를 받지 못했습니다")),
+      api.get("/world/manifest").catch(() => null),
+      import(BUNDLE).catch(fail("3D 번들을 불러오지 못했습니다 — 빌드가 없으면 web/world에서 npm run build")),
+    ]).then(([doc, manifest, mod]) => {
+      if (!live()) return; // 떠났다 — 고아 렌더러를 만들지 않는다
+      const plan = heroPlan(doc, manifest);
+      const paintNotes = (lines) => clear(notes).append(...lines.map((t) => el("p", { class: "hero-note" }, t)));
+      paintNotes(plan.notes);
+      const handle = mod.mountAircraftViewer(stage, {
+        model: plan.model,
+        schematic: plan.schematic,
+        onStatus: (s) => {
+          if (!live()) return;
+          status.hidden = s.state === "ready";
+          status.textContent = s.state === "failed" ? `그리지 못했습니다 — ${s.reason}` : "모델을 불러오는 중…";
+          // 모델을 못 읽어 도식으로 물러났으면 「화면용 모델」 안내는 틀린 말이다 — 사유로 갈아 끼운다
+          if (s.state === "ready" && s.source === "schematic" && s.reason) paintNotes([s.reason]);
+        },
+      });
+      hero.handle = handle;
+      const label = () => { spinBtn.textContent = handle.spinning ? "회전 멈춤" : "회전"; };
+      spinBtn.onclick = () => { handle.setSpin(!handle.spinning); label(); };
+      label();
+      spinBtn.hidden = false;
+    }).catch((e) => {
+      if (!live()) return;
+      status.hidden = false;
+      status.textContent = e?.message ?? String(e);
+    });
+  };
+
   const drawers = createDrawers({
     id: "aircraft-drawer",
     initial: openDrawer,
@@ -926,6 +1003,7 @@ export function render() {
   paintViewer();
   paintSeed();
   paintImport();
+  paintHero();
   load();
 
   return el("div", { class: "tab-page aircraft-page" },
@@ -936,7 +1014,7 @@ export function render() {
       actions: [el("button", { onclick: load }, "새로고침")],
       extra: [statusLine, errBox, noticeBox],
     }),
-    tabStage(listBox),
+    tabStage(heroBox, listBox),
     drawers.root,
   );
 }

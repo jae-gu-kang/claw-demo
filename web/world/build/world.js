@@ -7101,6 +7101,60 @@ function tourStopped(v2, tour) {
 function tourShouldEnd(tour, t2) {
   return tour.endT != null && t2 != null && t2 >= tour.endT;
 }
+const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const COMPUTE_POST = /* @__PURE__ */ new Set([
+  "/trim/batch",
+  "/analysis/margin-map",
+  "/analysis/bode",
+  "/analysis/design-envelope-scan",
+  "/design/auto",
+  "/sim/run",
+  "/codegen/flight",
+  "/verify/flight",
+  "/influence/structural",
+  "/influence/diagnose",
+  "/influence/openloop",
+  "/influence/sweep",
+  "/influence/scan",
+  "/influence/evaluate",
+  "/influence/verify",
+  "/influence/prescribe"
+]);
+const COMPUTE_GET = /* @__PURE__ */ new Set([
+  "/analysis/vn-envelope",
+  "/analysis/design-envelope",
+  "/gains/catalog",
+  "/gains/demo"
+]);
+function normalizeSelection(v2) {
+  if (v2 == null || typeof v2 !== "object" || Array.isArray(v2)) return null;
+  if (typeof v2.id !== "string" || !ID_RE.test(v2.id)) return null;
+  const variant = typeof v2.variant === "string" && ID_RE.test(v2.variant) ? v2.variant : null;
+  return { id: v2.id, variant };
+}
+let selection = null;
+const currentSelection = () => selection;
+function profileRef(sel = selection) {
+  const norm = normalizeSelection(sel);
+  if (!norm) return null;
+  return norm.variant ? { id: norm.id, variant: norm.variant } : { id: norm.id };
+}
+function withProfile(method, path, body, sel = selection) {
+  const ref = profileRef(sel);
+  if (!ref) return { path, body };
+  const q2 = path.indexOf("?");
+  const pathname = q2 < 0 ? path : path.slice(0, q2);
+  if (method === "POST" && COMPUTE_POST.has(pathname) && body != null && typeof body === "object" && !Array.isArray(body) && body.profile == null) {
+    return { path, body: { ...body, profile: ref } };
+  }
+  if (method === "GET" && COMPUTE_GET.has(pathname)) {
+    const query = q2 < 0 ? "" : path.slice(q2 + 1);
+    if (/(^|&)profile_id=/.test(query)) return { path, body };
+    const add = `profile_id=${encodeURIComponent(ref.id)}` + (ref.variant ? `&profile_variant=${encodeURIComponent(ref.variant)}` : "");
+    return { path: q2 < 0 ? `${path}?${add}` : `${path}${query ? "&" : ""}${add}`, body };
+  }
+  return { path, body };
+}
 const BASE = "/api";
 const TERMINAL = /* @__PURE__ */ new Set(["done", "error", "cancelled"]);
 const sleep = (ms) => new Promise((r2) => setTimeout(r2, ms));
@@ -7112,6 +7166,7 @@ class ApiError extends Error {
   }
 }
 async function request(method, path, body) {
+  ({ path, body } = withProfile(method, path, body, currentSelection()));
   const opts = { method, headers: {} };
   if (body !== void 0) {
     opts.headers["content-type"] = "application/json";
@@ -7134,7 +7189,9 @@ async function request(method, path, body) {
 }
 const api = {
   get: (path) => request("GET", path),
-  post: (path, body) => request("POST", path, body)
+  post: (path, body) => request("POST", path, body),
+  put: (path, body) => request("PUT", path, body),
+  del: (path) => request("DELETE", path)
 };
 function errorText$1(err) {
   if (!(err instanceof ApiError)) return String(err);
@@ -22974,6 +23031,32 @@ class SphereGeometry extends BufferGeometry {
     return new SphereGeometry(data.radius, data.widthSegments, data.heightSegments, data.phiStart, data.phiLength, data.thetaStart, data.thetaLength);
   }
 }
+class ShadowMaterial extends Material {
+  /**
+   * Constructs a new shadow material.
+   *
+   * @param {Object} [parameters] - An object with one or more properties
+   * defining the material's appearance. Any property of the material
+   * (including any property from inherited materials) can be passed
+   * in here. Color values can be passed any type of value accepted
+   * by {@link Color#set}.
+   */
+  constructor(parameters) {
+    super();
+    this.isShadowMaterial = true;
+    this.type = "ShadowMaterial";
+    this.color = new Color(0);
+    this.transparent = true;
+    this.fog = true;
+    this.setValues(parameters);
+  }
+  copy(source) {
+    super.copy(source);
+    this.color.copy(source.color);
+    this.fog = source.fog;
+    return this;
+  }
+}
 function cloneUniforms(src) {
   const dst = {};
   for (const u2 in src) {
@@ -23512,6 +23595,89 @@ class MeshPhysicalMaterial extends MeshStandardMaterial {
     this.specularIntensityMap = source.specularIntensityMap;
     this.specularColor.copy(source.specularColor);
     this.specularColorMap = source.specularColorMap;
+    return this;
+  }
+}
+class MeshLambertMaterial extends Material {
+  /**
+   * Constructs a new mesh lambert material.
+   *
+   * @param {Object} [parameters] - An object with one or more properties
+   * defining the material's appearance. Any property of the material
+   * (including any property from inherited materials) can be passed
+   * in here. Color values can be passed any type of value accepted
+   * by {@link Color#set}.
+   */
+  constructor(parameters) {
+    super();
+    this.isMeshLambertMaterial = true;
+    this.type = "MeshLambertMaterial";
+    this.color = new Color(16777215);
+    this.map = null;
+    this.lightMap = null;
+    this.lightMapIntensity = 1;
+    this.aoMap = null;
+    this.aoMapIntensity = 1;
+    this.emissive = new Color(0);
+    this.emissiveIntensity = 1;
+    this.emissiveMap = null;
+    this.bumpMap = null;
+    this.bumpScale = 1;
+    this.normalMap = null;
+    this.normalMapType = TangentSpaceNormalMap;
+    this.normalScale = new Vector2(1, 1);
+    this.displacementMap = null;
+    this.displacementScale = 1;
+    this.displacementBias = 0;
+    this.specularMap = null;
+    this.alphaMap = null;
+    this.envMap = null;
+    this.envMapRotation = new Euler();
+    this.combine = MultiplyOperation;
+    this.reflectivity = 1;
+    this.envMapIntensity = 1;
+    this.refractionRatio = 0.98;
+    this.wireframe = false;
+    this.wireframeLinewidth = 1;
+    this.wireframeLinecap = "round";
+    this.wireframeLinejoin = "round";
+    this.flatShading = false;
+    this.fog = true;
+    this.setValues(parameters);
+  }
+  copy(source) {
+    super.copy(source);
+    this.color.copy(source.color);
+    this.map = source.map;
+    this.lightMap = source.lightMap;
+    this.lightMapIntensity = source.lightMapIntensity;
+    this.aoMap = source.aoMap;
+    this.aoMapIntensity = source.aoMapIntensity;
+    this.emissive.copy(source.emissive);
+    this.emissiveMap = source.emissiveMap;
+    this.emissiveIntensity = source.emissiveIntensity;
+    this.bumpMap = source.bumpMap;
+    this.bumpScale = source.bumpScale;
+    this.normalMap = source.normalMap;
+    this.normalMapType = source.normalMapType;
+    this.normalScale.copy(source.normalScale);
+    this.displacementMap = source.displacementMap;
+    this.displacementScale = source.displacementScale;
+    this.displacementBias = source.displacementBias;
+    this.specularMap = source.specularMap;
+    this.alphaMap = source.alphaMap;
+    this.envMap = source.envMap;
+    this.envMapRotation.copy(source.envMapRotation);
+    this.combine = source.combine;
+    this.reflectivity = source.reflectivity;
+    this.envMapIntensity = source.envMapIntensity;
+    this.refractionRatio = source.refractionRatio;
+    this.wireframe = source.wireframe;
+    this.wireframeLinewidth = source.wireframeLinewidth;
+    this.wireframeLinecap = source.wireframeLinecap;
+    this.wireframeLinejoin = source.wireframeLinejoin;
+    this.flatShading = source.flatShading;
+    this.fog = source.fog;
     return this;
   }
 }
@@ -45255,6 +45421,9 @@ const neg = (v2) => [-v2[0], -v2[1], -v2[2]];
 function modelColumnsNed(axes) {
   return { x: axes.right, y: neg(axes.down), z: neg(axes.forward) };
 }
+function frdToModelLocal(v2) {
+  return [v2[1], -v2[2], -v2[0]];
+}
 const VEHICLE_NODES = [
   "Elevon_In_L",
   "Elevon_Out_L",
@@ -47061,6 +47230,371 @@ function WorldTab({ deps }) {
     ] })
   ] });
 }
+class RoomEnvironment extends Scene {
+  constructor() {
+    super();
+    this.name = "RoomEnvironment";
+    this.position.y = -3.5;
+    const geometry = new BoxGeometry();
+    geometry.deleteAttribute("uv");
+    const roomMaterial = new MeshStandardMaterial({ side: BackSide });
+    const boxMaterial = new MeshStandardMaterial();
+    const mainLight = new PointLight(16777215, 900, 28, 2);
+    mainLight.position.set(0.418, 16.199, 0.3);
+    this.add(mainLight);
+    const room = new Mesh(geometry, roomMaterial);
+    room.position.set(-0.757, 13.219, 0.717);
+    room.scale.set(31.713, 28.305, 28.591);
+    this.add(room);
+    const boxes = new InstancedMesh(geometry, boxMaterial, 6);
+    const transform = new Object3D();
+    transform.position.set(-10.906, 2.009, 1.846);
+    transform.rotation.set(0, -0.195, 0);
+    transform.scale.set(2.328, 7.905, 4.651);
+    transform.updateMatrix();
+    boxes.setMatrixAt(0, transform.matrix);
+    transform.position.set(-5.607, -0.754, -0.758);
+    transform.rotation.set(0, 0.994, 0);
+    transform.scale.set(1.97, 1.534, 3.955);
+    transform.updateMatrix();
+    boxes.setMatrixAt(1, transform.matrix);
+    transform.position.set(6.167, 0.857, 7.803);
+    transform.rotation.set(0, 0.561, 0);
+    transform.scale.set(3.927, 6.285, 3.687);
+    transform.updateMatrix();
+    boxes.setMatrixAt(2, transform.matrix);
+    transform.position.set(-2.017, 0.018, 6.124);
+    transform.rotation.set(0, 0.333, 0);
+    transform.scale.set(2.002, 4.566, 2.064);
+    transform.updateMatrix();
+    boxes.setMatrixAt(3, transform.matrix);
+    transform.position.set(2.291, -0.756, -2.621);
+    transform.rotation.set(0, -0.286, 0);
+    transform.scale.set(1.546, 1.552, 1.496);
+    transform.updateMatrix();
+    boxes.setMatrixAt(4, transform.matrix);
+    transform.position.set(-2.193, -0.369, -5.547);
+    transform.rotation.set(0, 0.516, 0);
+    transform.scale.set(3.875, 3.487, 2.986);
+    transform.updateMatrix();
+    boxes.setMatrixAt(5, transform.matrix);
+    this.add(boxes);
+    const light1 = new Mesh(geometry, createAreaLightMaterial(50));
+    light1.position.set(-16.116, 14.37, 8.208);
+    light1.scale.set(0.1, 2.428, 2.739);
+    this.add(light1);
+    const light2 = new Mesh(geometry, createAreaLightMaterial(50));
+    light2.position.set(-16.109, 18.021, -8.207);
+    light2.scale.set(0.1, 2.425, 2.751);
+    this.add(light2);
+    const light3 = new Mesh(geometry, createAreaLightMaterial(17));
+    light3.position.set(14.904, 12.198, -1.832);
+    light3.scale.set(0.15, 4.265, 6.331);
+    this.add(light3);
+    const light4 = new Mesh(geometry, createAreaLightMaterial(43));
+    light4.position.set(-0.462, 8.89, 14.52);
+    light4.scale.set(4.38, 5.441, 0.088);
+    this.add(light4);
+    const light5 = new Mesh(geometry, createAreaLightMaterial(20));
+    light5.position.set(3.235, 11.486, -12.541);
+    light5.scale.set(2.5, 2, 0.1);
+    this.add(light5);
+    const light6 = new Mesh(geometry, createAreaLightMaterial(100));
+    light6.position.set(0, 20, 0);
+    light6.scale.set(1, 0.1, 1);
+    this.add(light6);
+  }
+  /**
+   * Frees internal resources. This method should be called
+   * when the environment is no longer required.
+   */
+  dispose() {
+    const resources = /* @__PURE__ */ new Set();
+    this.traverse((object) => {
+      if (object.isMesh) {
+        resources.add(object.geometry);
+        resources.add(object.material);
+      }
+    });
+    for (const resource of resources) {
+      resource.dispose();
+    }
+  }
+}
+function createAreaLightMaterial(intensity) {
+  const material = new MeshLambertMaterial({
+    color: 0,
+    emissive: 16777215,
+    emissiveIntensity: intensity
+  });
+  return material;
+}
+const TAU = 2 * Math.PI;
+const SPIN_PERIOD_S = 24;
+const MAX_FRAME_DT_S = 0.1;
+const ELEV_MIN = 0.02;
+const ELEV_MAX = 1.35;
+const RAD_PER_PX = 9e-3;
+const KEY_STEP = 0.2;
+const START_VIEW = { yaw: Math.PI - 0.7, elev: 0.3 };
+function wrapYaw(a) {
+  return (a % TAU + TAU) % TAU;
+}
+function clampElev(e) {
+  return Math.min(ELEV_MAX, Math.max(ELEV_MIN, e));
+}
+function advanceYaw(yaw, dtS, periodS = SPIN_PERIOD_S) {
+  if (!(dtS > 0) || !(periodS > 0)) return wrapYaw(yaw);
+  return wrapYaw(yaw + TAU * Math.min(dtS, MAX_FRAME_DT_S) / periodS);
+}
+function dragView(v2, dxPx, dyPx) {
+  return { yaw: wrapYaw(v2.yaw + dxPx * RAD_PER_PX), elev: clampElev(v2.elev + dyPx * RAD_PER_PX) };
+}
+const FIT_MARGIN = 1.12;
+function fitDistance(ext, elev, vfovRad, aspect2, margin = FIT_MARGIN) {
+  const vHalf = vfovRad / 2;
+  const hHalf = aspect2 > 0 ? Math.atan(Math.tan(vHalf) * aspect2) : vHalf;
+  const vertical = ext.halfHeight * Math.cos(elev) + ext.radial * Math.sin(elev);
+  const dH = ext.radial + ext.radial / Math.tan(hHalf);
+  const dV = ext.radial + vertical / Math.tan(vHalf);
+  return Math.max(dH, dV) * margin;
+}
+function cameraOffset(dist, elev) {
+  return [0, dist * Math.sin(elev), dist * Math.cos(elev)];
+}
+const SCHEMATIC_COLOR = { wing: 12108235, elevon: 14715438, body: 8095121 };
+const prefersReducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+function schematicObject(mesh) {
+  const n2 = mesh.positions.length / 3;
+  const pos = new Float32Array(mesh.positions.length);
+  const nrm = new Float32Array(mesh.normals.length);
+  for (let i = 0; i < n2; i++) {
+    const k2 = 3 * i;
+    pos.set(frdToModelLocal([mesh.positions[k2], mesh.positions[k2 + 1], mesh.positions[k2 + 2]]), k2);
+    nrm.set(frdToModelLocal([mesh.normals[k2], mesh.normals[k2 + 1], mesh.normals[k2 + 2]]), k2);
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new BufferAttribute(nrm, 3));
+  geo.setIndex(new BufferAttribute(new Uint16Array(mesh.indices), 1));
+  const mats = mesh.groups.map((g, i) => {
+    geo.addGroup(g.start, g.count, i);
+    return new MeshStandardMaterial({ color: SCHEMATIC_COLOR[g.name] ?? 11186876, roughness: 0.55, metalness: 0.1 });
+  });
+  const obj = new Mesh(geo, mats);
+  obj.castShadow = true;
+  obj.receiveShadow = true;
+  return obj;
+}
+function mountAircraftViewer(container, opts) {
+  const report = (s) => opts.onStatus?.(s);
+  const canvas = document.createElement("canvas");
+  canvas.tabIndex = 0;
+  canvas.setAttribute("aria-label", "기체 3D 형상 — 끌거나 화살표 키로 돌려 봅니다");
+  canvas.style.touchAction = "pan-y";
+  container.append(canvas);
+  let renderer;
+  try {
+    renderer = new WebGLRenderer({ canvas, antialias: true, alpha: true });
+  } catch (e) {
+    canvas.remove();
+    report({ state: "failed", source: null, reason: `WebGL을 열지 못했습니다 — ${e.message}` });
+    return { dispose() {
+    }, setSpin() {
+    }, spinning: false };
+  }
+  renderer.outputColorSpace = SRGBColorSpace;
+  renderer.toneMapping = ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = PCFShadowMap;
+  renderer.setClearColor(0, 0);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const scene = new Scene();
+  const pmrem = new PMREMGenerator(renderer);
+  const room = new RoomEnvironment();
+  const envTex = pmrem.fromScene(room, 0.04).texture;
+  disposeTree(room);
+  scene.environment = envTex;
+  scene.environmentIntensity = 0.85;
+  const key = new DirectionalLight(16777215, 2.4);
+  key.castShadow = true;
+  key.shadow.mapSize.set(1024, 1024);
+  key.shadow.bias = -5e-4;
+  key.shadow.radius = 4;
+  scene.add(key, key.target, new HemisphereLight(16777215, 10135220, 0.6));
+  const turntable = new Group();
+  scene.add(turntable);
+  const ground = new Mesh(new CircleGeometry(1, 64), new ShadowMaterial({ opacity: 0.16 }));
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  ground.visible = false;
+  scene.add(ground);
+  const camera = new PerspectiveCamera(30, 1, 0.01, 1e3);
+  let view = { ...START_VIEW };
+  let spin = opts.spin ?? !prefersReducedMotion();
+  let extent = { radial: 1, halfHeight: 0.2 };
+  let disposed = false;
+  let raf = 0;
+  let last = 0;
+  let drag = null;
+  const render = () => {
+    turntable.rotation.y = view.yaw;
+    const dist = fitDistance(extent, view.elev, camera.fov * Math.PI / 180, camera.aspect);
+    const [x2, y2, z2] = cameraOffset(dist, view.elev);
+    camera.position.set(x2, y2, z2);
+    camera.near = dist / 100;
+    camera.far = dist * 10;
+    camera.updateProjectionMatrix();
+    camera.lookAt(0, 0, 0);
+    renderer.render(scene, camera);
+  };
+  const tick = (now) => {
+    raf = 0;
+    if (disposed) return;
+    const dt = last ? (now - last) / 1e3 : 0;
+    last = now;
+    if (spin && !drag) view = { ...view, yaw: advanceYaw(view.yaw, dt) };
+    render();
+    if (spin) raf = requestAnimationFrame(tick);
+    else last = 0;
+  };
+  const requestFrame = () => {
+    if (!raf && !disposed) raf = requestAnimationFrame(tick);
+  };
+  const place = (obj) => {
+    const box = new Box3().setFromObject(obj);
+    const center = box.getCenter(new Vector3());
+    const size = box.getSize(new Vector3());
+    extent = { radial: Math.max(Math.hypot(size.x, size.z) / 2, 1e-3), halfHeight: size.y / 2 };
+    const radius = Math.hypot(extent.radial, extent.halfHeight);
+    obj.position.sub(center);
+    turntable.add(obj);
+    ground.position.y = box.min.y - center.y - 0.35 * radius;
+    ground.scale.setScalar(radius * 1.8);
+    ground.visible = true;
+    key.position.set(radius * 2.2, radius * 4.5, radius * 2.6);
+    const cam = key.shadow.camera;
+    cam.left = -2 * radius;
+    cam.right = 2 * radius;
+    cam.top = 2 * radius;
+    cam.bottom = -2 * radius;
+    cam.near = 0.5 * radius;
+    cam.far = 12 * radius;
+    cam.updateProjectionMatrix();
+    requestFrame();
+  };
+  const resize = () => {
+    const w2 = container.clientWidth;
+    const h = container.clientHeight;
+    if (w2 <= 0 || h <= 0) return;
+    renderer.setSize(w2, h, false);
+    camera.aspect = w2 / h;
+    requestFrame();
+  };
+  const ro = new ResizeObserver(resize);
+  ro.observe(container);
+  const onDown = (e) => {
+    if (e.button !== 0) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    canvas.setPointerCapture(e.pointerId);
+  };
+  const onMove = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    view = dragView(view, e.clientX - drag.x, e.clientY - drag.y);
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    requestFrame();
+  };
+  const onUp = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag = null;
+    if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+    requestFrame();
+  };
+  const onKey = (e) => {
+    const step = {
+      ArrowLeft: [-KEY_STEP, 0],
+      ArrowRight: [KEY_STEP, 0],
+      ArrowUp: [0, KEY_STEP],
+      ArrowDown: [0, -KEY_STEP]
+    }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    view = { yaw: wrapYaw(view.yaw + step[0]), elev: clampElev(view.elev + step[1]) };
+    requestFrame();
+  };
+  canvas.addEventListener("pointerdown", onDown);
+  canvas.addEventListener("pointermove", onMove);
+  canvas.addEventListener("pointerup", onUp);
+  canvas.addEventListener("pointercancel", onUp);
+  canvas.addEventListener("keydown", onKey);
+  const showSchematic = (reason) => {
+    if (!opts.schematic) {
+      report({ state: "failed", source: null, reason: reason ?? "그릴 형상이 없습니다" });
+      return;
+    }
+    place(schematicObject(opts.schematic));
+    report({ state: "ready", source: "schematic", reason });
+  };
+  report({ state: "loading", source: null, reason: null });
+  if (opts.model) {
+    const name = opts.model;
+    new GLTFLoader().loadAsync(modelUrl(name)).then(
+      (gltf) => {
+        if (disposed) {
+          disposeTree(gltf.scene);
+          return;
+        }
+        gltf.scene.traverse((o) => {
+          if (o.isMesh) {
+            o.castShadow = true;
+            o.receiveShadow = true;
+          }
+        });
+        place(gltf.scene);
+        report({ state: "ready", source: "model", reason: null });
+      },
+      (e) => {
+        if (disposed) return;
+        showSchematic(`표시 모델 파일(${name})을 읽지 못해 도식으로 대신 그립니다 — ${e?.message ?? e}`);
+      }
+    );
+  } else {
+    showSchematic(null);
+  }
+  resize();
+  return {
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+      ro.disconnect();
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onUp);
+      canvas.removeEventListener("keydown", onKey);
+      disposeTree(turntable);
+      ground.geometry.dispose();
+      disposeMaterial(ground.material);
+      envTex.dispose();
+      pmrem.dispose();
+      renderer.dispose();
+      renderer.forceContextLoss();
+      canvas.remove();
+    },
+    setSpin(on) {
+      spin = on;
+      last = 0;
+      requestFrame();
+    },
+    get spinning() {
+      return spin;
+    }
+  };
+}
 function mount(container, deps = {}) {
   const host = document.createElement("div");
   host.style.cssText = "display:flex; flex-direction:column; gap:10px;";
@@ -47085,5 +47619,6 @@ function mount(container, deps = {}) {
   };
 }
 export {
-  mount
+  mount,
+  mountAircraftViewer
 };

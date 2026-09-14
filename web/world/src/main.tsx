@@ -17,6 +17,12 @@ import { createRoot, type Root } from "react-dom/client";
 
 import { WorldTab } from "./ui/WorldTab.tsx";
 
+// 기체 탭 대표 그림(06 §8) — 같은 번들의 두 번째 진입점. 번들을 나누면 three가 두 벌 실린다
+export { mountAircraftViewer } from "./scene/aircraftViewer.ts";
+export type {
+  AircraftViewerHandle, AircraftViewerOptions, AircraftViewerStatus, SchematicMesh,
+} from "./scene/aircraftViewer.ts";
+
 export interface MountHandle {
   dispose(): void;
 }

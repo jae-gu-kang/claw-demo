@@ -10,13 +10,14 @@
 
 칸 형식(kind):
   number · range([lo,hi]) · vec3 · mat3(3×3, symmetric이면 대칭 칸을 함께 고친다) · rows3(N×3 행)
-  · table_mach(마하 1축 표) · choice · multichoice · numlist · text_json(자유 객체 — 출처 등)
+  · table_mach(마하 1축 표) · choice · multichoice · numlist · text(짧은 문자열 — 파일 이름)
+  · text_json(자유 객체 — 출처 등)
   · terms(공력 계수 항 목록) · registry(레지스트리 파라미터 객체, 형식 고정)
   · component({type, params} — 형식을 고르면 파라미터 칸이 바뀐다) · group(하위 칸 묶음, nullable 가능)
 """
 
 from claw.profile.schema import (
-    ACTUATOR_RESERVED, AERO_FORMS, DE_TRIM_SOURCES, DISPERSION_TAGS, LAYOUTS, SCAS_RESERVED,
+    ACTUATOR_RESERVED, AERO_FORMS, DE_TRIM_SOURCES, DISPERSION_TAGS, DISPLAY_KINDS, LAYOUTS, SCAS_RESERVED,
     SCHEDULE_RULES, SCHEMA_VERSION, TABLE_AXES, TABLE_EXTRAPOLATE, TABLE_POLICIES, TEMPLATES,
     TERM_EXTRA_INPUTS, TERM_INPUTS,
 )
@@ -195,6 +196,16 @@ def form_spec() -> dict:
                     _f("number", "/mission_template/sim/rollout_m", "접지 후 미끄럼 거리 (실측)", "m", nullable=True,
                        help="활주로 안에 서려면 얼마나 앞에 접지해야 하는지를 화면이 재는 값 — 없으면 그 안내를 내지 않는다"),
                 ]),
+            ]),
+        ]),
+        _section("display", "표시 모델",
+                 "기체 탭 대표 그림이 이 기체를 무엇으로 그리나 — 계산에 쓰이지 않고 지문 밖이다. 없음이면 기준량(익폭·"
+                 "기준면적)에서 만든 도식을 그리고 그렇다고 말한다", [
+            _group("/display", "표시 모델", nullable=True, fields=[
+                _f("choice", "/display/kind", "형식", choices=list(DISPLAY_KINDS)),
+                _f("text", "/display/model", "GLB 파일 이름",
+                   help="서버 모델 폴더(models/<모델>/<이름>.glb)의 파일 이름 — 경로 없이. 서버에 없으면 화면이 도식으로 "
+                        "대신 그리고 사유를 말한다"),
             ]),
         ]),
     ]

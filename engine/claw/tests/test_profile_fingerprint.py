@@ -18,7 +18,8 @@ def _fps(doc, variant=None):
 def test_excluded_fields_are_pinned():
     # 이 목록이 넓어지면 "같은 기체"의 정의가 넓어진다 — 조용히 늘면 안 된다
     assert FP_EXCLUDED == ("/id", "/name", "/description", "/is_example", "/variants",
-                           "/law/design/provenance", "/law/alloc/de_trim/provenance", "/mission_template")
+                           "/law/design/provenance", "/law/alloc/de_trim/provenance", "/mission_template",
+                           "/display")
 
 
 def test_mission_template_does_not_change_either_fingerprint():
@@ -31,6 +32,18 @@ def test_mission_template_does_not_change_either_fingerprint():
     del doc["mission_template"]  # 이 절이 생기기 전 문서
     assert _fps(doc) == base
     doc["mission_template"] = None
+    assert _fps(doc) == base
+
+
+def test_display_model_does_not_change_either_fingerprint():
+    """표시 모델은 화면이 기체를 그리는 방법이다 — 바꿔도, 없어도 같은 기체다."""
+    base = _fps(load_example())
+    doc = load_example()
+    doc["display"]["model"] = "other.glb"
+    assert _fps(doc) == base
+    doc["display"] = None
+    assert _fps(doc) == base
+    del doc["display"]  # 이 절이 생기기 전 문서
     assert _fps(doc) == base
 
 

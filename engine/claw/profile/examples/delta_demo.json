@@ -481,5 +481,9 @@
       "rollout_m": 870.0
     }
   },
+  "display": {
+    "kind": "model",
+    "model": "shahed136.glb"
+  },
   "variants": []
 }

@@ -75,6 +75,15 @@ export function localToNed(c: ModelColumnsNed, local: Vec3): Vec3 {
   ];
 }
 
+/** FRD 동체축 성분 → 모델 로컬 성분 — 동체축으로 만든 메시(절차 도식 `lib/uavmesh.js`)를 GLB와 같은 자리에 놓는다.
+ *
+ * 위 열 사상의 역방향 읽기다: 로컬 X = right 성분, 로컬 Y = −down 성분, 로컬 Z = −forward 성분. 행렬식 +1이라
+ * 삼각형 감김·법선 방향이 그대로 산다. 테스트가 `modelColumnsNed`와 대조한다 — 사상이 두 벌로 갈리지 않게.
+ */
+export function frdToModelLocal(v: Vec3): Vec3 {
+  return [v[1], -v[2], -v[0]];
+}
+
 /** 모델 로컬에서 기수가 향하는 방향. **실측으로 확인한 상수**(프로펠러가 +Z에 있다). */
 export const LOCAL_NOSE: Vec3 = [0, 0, -1];
 /** 모델 로컬 우현. */

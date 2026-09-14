@@ -191,6 +191,23 @@ def test_mission_template_grids_are_capped():
     assert e.path == "/mission_template/envelope/scan_mach"
 
 
+def test_display_is_optional_and_takes_only_a_bare_glb_name():
+    """표시 모델 — 없으면 없음(null), 있으면 형식과 경로 없는 GLB 이름만 받는다(서버가 이름으로 자산을 찾는다)."""
+    doc = load_example()
+    del doc["display"]
+    assert validate_document(doc)["display"] is None
+    order = list(validate_document(load_example()))
+    assert order.index("display") == order.index("mission_template") + 1
+    assert validate_document(load_example())["display"] == {"kind": "model", "model": "shahed136.glb"}
+    for bad in ("", "shahed136.gltf", "../secret.glb", "models/shahed136.glb", ".glb", " shahed136.glb"):
+        e = _bad(lambda d, v=bad: d["display"].__setitem__("model", v))
+        assert e.path == "/display/model", bad
+    e = _bad(lambda d: d["display"].__setitem__("kind", "procedural"))
+    assert e.path == "/display/kind"
+    e = _bad(lambda d: d["display"].__setitem__("scale", 1.0))
+    assert e.path == "/display/scale"
+
+
 def test_document_warns_when_the_trim_search_hides_the_low_speed_stall():
     """트림 α 탐색 상한이 실속 표 최대보다 낮으면 경고한다 — 오류가 아니라 알림이다(예제가 그렇다: 0.35 < 0.40)."""
     from claw.profile import load_example

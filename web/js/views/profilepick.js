@@ -88,7 +88,8 @@ function paint(list, error) {
     el("option", { value: "", selected: !sel.variant }, "기본 형상"),
     variants.map((v) => el("option", { value: v.id, selected: v.id === sel.variant }, v.name)))
     : null;
-  clear(box).append(
+  // 네이티브 append는 null을 글자 "null"로 넣는다(el()과 다르다) — 없는 조각은 목록에서 뺀다
+  clear(box).append(...[
     el("a", { href: "#aircraft", title: "기체 탭 — 기체 문서 만들기·고치기" }, "기체"),
     idSelect,
     variantSelect,
@@ -96,7 +97,7 @@ function paint(list, error) {
       ? el("span", { class: "badge example", title: "엔진에 딸린 읽기 전용 예제 — 실기체 값이 아니다" }, "예제")
       : null,
     notice ? el("span", { class: "badge warn", title: notice }, "선택 복원") : null,
-  );
+  ].filter(Boolean));
 }
 
 /** 목록과 저장된 선택을 맞춘다 — 선택이 서버에서 사라졌으면(지워짐·형상 변형 삭제·휘발 저장소 재시작)

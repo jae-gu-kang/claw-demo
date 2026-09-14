@@ -12,7 +12,7 @@ from claw.profile.form import META_KEYS, form_spec
 from claw.profile.patch import get_pointer, parse_pointer
 
 KINDS = {"number", "range", "vec3", "mat3", "rows3", "table_mach", "choice", "multichoice",
-         "numlist", "text_json", "terms", "registry", "component", "group"}
+         "numlist", "text", "text_json", "terms", "registry", "component", "group"}
 
 
 def _walk(items):
@@ -82,6 +82,7 @@ def test_choices_are_the_validator_constants():
     assert by_path["/law/template"]["choices"] == list(schema.TEMPLATES)
     assert by_path["/law/schedule/rule"]["choices"] == list(schema.SCHEDULE_RULES)
     assert by_path["/law/alloc/de_trim/source"]["choices"] == list(schema.DE_TRIM_SOURCES)
+    assert by_path["/display/kind"]["choices"] == list(schema.DISPLAY_KINDS)
     assert by_path["/actuator"]["reserved"] == list(schema.ACTUATOR_RESERVED)
     assert by_path["/law/design/scas/pitch"]["reserved"] == list(schema.SCAS_RESERVED)
     doc = load_example()

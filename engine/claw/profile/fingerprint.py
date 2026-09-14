@@ -17,7 +17,7 @@ from claw.profile.patch import parse_pointer
 PLANT_SECTIONS = ("geometry", "aero", "stall", "mass", "propulsion", "ground", "trim", "surfaces")
 
 # 지문에서 빼는 자리 — 이름표와 자유 텍스트 출처, 그리고 계산에 쓰이지 않는 화면 기본값(미션 템플릿 —
-# 결과는 실제로 보낸 요청을 싣는다). 목록은 테스트가 고정한다
+# 결과는 실제로 보낸 요청을 싣는다)과 표시 모델(화면이 기체를 그리는 방법). 목록은 테스트가 고정한다
 # (항목을 더하면 "같은 기체"의 정의가 넓어지므로 조용히 늘면 안 된다)
 FP_EXCLUDED = (
     "/id",
@@ -28,6 +28,7 @@ FP_EXCLUDED = (
     "/law/design/provenance",
     "/law/alloc/de_trim/provenance",
     "/mission_template",
+    "/display",
 )
 
 

@@ -329,8 +329,8 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
 - 편집 폼 서술 `form.form_spec()` — 칸 이름·단위·형식·선택지(검증기 상수를 그대로 읽는다).
   서버가 `GET /profiles/_form`으로 내고 웹 기체 탭이 그대로 세운다(06 §8). 판정은 여기 없다 —
   검증기 몫이다
-- 선택 절 `mission_template`(화면 기본값) — 계산에 쓰이지 않아 지문 밖이고, 문서에 없으면
-  없음으로 채운다(스키마 버전 불변, 02 §5.6)
+- 선택 절 `mission_template`(화면 기본값) · `display`(표시 모델) — 계산에 쓰이지 않아 지문
+  밖이고, 문서에 없으면 없음으로 채운다(스키마 버전 불변, 02 §5.6)
 - 공력 표 항(k = 표, 02 §5.6)과 공력 DB 뷰어 계산 `aeroview.aero_slice` — 문서의 계수 계산기로
   한 축 곡선·풍축 역변환·실속 표 대조(02 §5.2). 서버 창구는 `POST /profiles/aero-slice`
 - δe_trim 표 도출 `derive.derive_de_trim`(02 §5.6.1) — 마하마다 연료 × 고도 격자의 최악 |δe|를
