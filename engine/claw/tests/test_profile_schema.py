@@ -189,3 +189,15 @@ def test_mission_template_grids_are_capped():
         d["mission_template"]["envelope"]["scan_mach"].update({"to": 1e308, "step": 1e-5})
     e = _bad(huge)
     assert e.path == "/mission_template/envelope/scan_mach"
+
+
+def test_document_warns_when_the_trim_search_hides_the_low_speed_stall():
+    """트림 α 탐색 상한이 실속 표 최대보다 낮으면 경고한다 — 오류가 아니라 알림이다(예제가 그렇다: 0.35 < 0.40)."""
+    from claw.profile import load_example
+    from claw.profile.schema import document_warnings
+
+    doc = validate_document(load_example())
+    warns = document_warnings(doc)
+    assert [w["path"] for w in warns] == ["/trim/alpha_bounds/1"] and "저속 가림" in warns[0]["message"]
+    doc["trim"]["alpha_bounds"] = [-0.1, 0.45]
+    assert document_warnings(validate_document(doc)) == []

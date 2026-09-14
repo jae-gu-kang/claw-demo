@@ -87,6 +87,8 @@ def trim_result_dict(tr) -> dict:
             "throttle": tr.control.throttle,
         },
         "params_fingerprint": tr.params_fingerprint,
+        # 트림 여유 수치(01 §4.1) — 플래그의 근거. 지상 평형·옛 해는 빈 dict(미계산)
+        "reserve": dict(getattr(tr, "reserve", None) or {}),
     })
 
 

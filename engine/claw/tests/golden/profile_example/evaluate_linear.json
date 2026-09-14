@@ -1,11 +1,11 @@
 {
  "golden": "evaluate_linear",
  "mode": "full",
- "captured_at": "388cc91",
+ "captured_at": "654ec14+dirty",
  "value": {
   "dict": {
    "fingerprint": "c48da3269a9a8e4c",
-   "criteria_fingerprint": "7a03cde8df2f59f8",
+   "criteria_fingerprint": "37412a0414d514b9",
    "criteria": {
     "dict": {
      "schema_version": 2,
@@ -39,7 +39,9 @@
       "dict": {
        "de_frac_warn": "f:0x1.0000000000000p-1",
        "de_frac_max": "f:0x1.b333333333333p-1",
-       "b_min_frac": "f:0x1.999999999999ap-4"
+       "b_min_frac": "f:0x1.999999999999ap-4",
+       "dyn_reserve_min_frac": "f:0x1.999999999999ap-5",
+       "thr_trim_reserve_min": "f:0x1.999999999999ap-4"
       }
      },
      "actuator": {
@@ -347,14 +349,16 @@
           "case": "M0.35"
          }
         },
-        "remaining_worst": null
+        "remaining_worst": null,
+        "dyn_reserve_worst": null
        }
       },
       "threshold": {
        "dict": {
         "sat_frac_max": "f:0x1.999999999999ap-5",
         "de_frac_max": "f:0x1.b333333333333p-1",
-        "b_min_frac": "f:0x1.999999999999ap-4"
+        "b_min_frac": "f:0x1.999999999999ap-4",
+        "dyn_reserve_min_frac": "f:0x1.999999999999ap-5"
        }
       },
       "primary": null,
@@ -571,6 +575,7 @@
     "actuator.sat_frac",
     "actuator.rate_sat_frac",
     "authority.remaining",
+    "authority.dynamic_reserve",
     "coupling.stall_margin",
     "coupling.sat_frac",
     "margins.pm",
@@ -727,6 +732,19 @@
            "dict": {
             "status": "na",
             "note": "비선형 런 없음(depth=linear) — 잔여 권한은 런에서 잰다"
+           }
+          },
+          "dynamic": {
+           "dict": {
+            "status": "na",
+            "note": "비선형 런 없음(depth=linear) — 가용 동적 여유는 런에서 잰다"
+           }
+          },
+          "thr_trim": {
+           "dict": {
+            "status": "ok",
+            "value": "f:0x1.0b0cb8c98f096p-1",
+            "warn_below": "f:0x1.999999999999ap-4"
            }
           }
          }
@@ -1097,6 +1115,19 @@
             "status": "na",
             "note": "비선형 런 없음(depth=linear) — 잔여 권한은 런에서 잰다"
            }
+          },
+          "dynamic": {
+           "dict": {
+            "status": "na",
+            "note": "비선형 런 없음(depth=linear) — 가용 동적 여유는 런에서 잰다"
+           }
+          },
+          "thr_trim": {
+           "dict": {
+            "status": "ok",
+            "value": "f:0x1.b0ec42cb3e5ccp-2",
+            "warn_below": "f:0x1.999999999999ap-4"
+           }
           }
          }
         },
@@ -1465,6 +1496,19 @@
            "dict": {
             "status": "na",
             "note": "비선형 런 없음(depth=linear) — 잔여 권한은 런에서 잰다"
+           }
+          },
+          "dynamic": {
+           "dict": {
+            "status": "na",
+            "note": "비선형 런 없음(depth=linear) — 가용 동적 여유는 런에서 잰다"
+           }
+          },
+          "thr_trim": {
+           "dict": {
+            "status": "ok",
+            "value": "f:0x1.a53abb3cbed2cp-3",
+            "warn_below": "f:0x1.999999999999ap-4"
            }
           }
          }

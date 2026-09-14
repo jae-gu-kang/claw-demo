@@ -42,11 +42,14 @@ COARSE  엔벨로프 유도 coarse 격자          (grid)
 보조)과 층이 다르다.
 
 - **[확정] 엔벨로프 판정의 단일 정본은 `points.envelope_ok(tr)`다** —
-  `converged ∧ flags["saturation_ok"] ∧ flags["alpha_margin_ok"]`, 즉 **수렴 ∧ 포화 여유 ∧
-  α 여유** 셋 다. 종전에는 grid·refine이 셋을 보고 **schedmap은 `converged`만** 봐서, 트림은
-  되지만 포화하는 중점 검증점이 `outside_envelope` 표시를 못 받고 판정·승격·튜닝까지 흘러갔다
-  — 같은 조건의 coarse 앵커는 TUNE이 건너뛰는데(§6) 두 경로가 갈린 것이다. 조건을 세 모듈이
-  각자 적으면 다시 갈리므로 **헬퍼 하나만 부른다**(테스트가 재기술 여부까지 본다)
+  `converged ∧ flags["saturation_ok"] ∧ flags["alpha_margin_ok"]`, 즉 **수렴 ∧ 포화 여유 ∧ α
+  여유** 셋 다. 종전에는 grid·refine이 셋을 보고 **schedmap은 `converged`만** 봐서, 트림은
+  되지만 포화하는 중점 검증점이 `outside_envelope` 표시를 못 받고 판정·승격·튜닝까지 흘러갔다 —
+  같은 조건의 coarse 앵커는 TUNE이 건너뛰는데(§6) 두 경로가 갈린 것이다. 조건을 세 모듈이 각자
+  적으면 다시 갈리므로 **헬퍼 하나만 부른다**(테스트가 재기술 여부까지 본다). α 여유 플래그는
+  v1.07부터 **실속 표 기준**이다(α < α_stall(M) − `trim.alpha_margin`, 01 §4.1) — 헬퍼가
+  그대로라 grid·refine·schedmap·초기 게인 탐색이 함께 따라간다. 예제 golden 격자에서 엔벨로프
+  안으로 들어온 점은 M0.20·해면·200 kg과 M0.25·5 km·공허 둘이다
 
 ## 3. 트림 격자 자동화
 

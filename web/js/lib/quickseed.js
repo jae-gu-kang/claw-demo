@@ -68,8 +68,8 @@ export function deTrimStatus(doc, summary) {
     }
     if (variants.length) {
       return { kind: "stale", stale: true, staleVariants: variants,
-        label: `도출한 δe_trim 표가 형상 변형 ${variants.join(", ")}을 덮지 않습니다 — 도출 뒤에 플랜트를 바꾼 변형이라 `
-          + "그 변형으로는 법칙 조립이 거부합니다. 다시 도출합니다" };
+        label: `도출한 δe_trim 표가 덮지 않는 형상 변형이 있습니다(${variants.join(", ")}) — 도출 뒤에 플랜트를 바꾼 `
+          + "변형이라 그 변형으로는 법칙 조립이 거부합니다. 다시 도출합니다" };
     }
     return { kind: "derived", stale: false, staleVariants: [], label: "도출한 δe_trim 표" };
   }

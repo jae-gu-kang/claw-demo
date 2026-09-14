@@ -120,3 +120,18 @@ def test_derivation_keeps_to_the_operating_altitudes_and_trims_at_the_ceiling():
         tr = trim_level(ac, TrimCase(name="ceiling", mach=m, alt=2900.0, fuel=doc["mass"]["fuel_max"]))
         if tr.converged and tr.flags["saturation_ok"]:
             assert have >= abs(float(tr.control.elevon[0])) - 1e-12
+
+
+def test_derivation_drops_unflyable_ends_instead_of_copying_neighbours():
+    """표가 없던 기체의 격자는 DB 마하 범위에서 잡혀 날 수 없는 마하(예: M0.05~0.15)를 포함한다 — 거기에 이웃 값을
+    복사해 두면 없는 요구가 있는 것처럼 보인다. 양 끝의 요구 없는 점은 표에서 빼고 출처에 적는다."""
+    doc = load_example()
+    doc["law"]["alloc"] = None
+    out = derive_de_trim(build_profile(doc), alts=(0.0,), fuel_fracs=(1.0,), check_step=0.05)
+    assert out["ok"], out["reason"]
+    table = out["alloc"]["de_trim"]["table"]
+    prov = out["alloc"]["de_trim"]["provenance"]
+    assert table["axes"]["mach"][0] >= 0.2 and 0.05 in prov["trimmed_machs"] and 0.1 in prov["trimmed_machs"]
+    assert table["axes"]["mach"][-1] <= 0.6 and 0.75 in prov["trimmed_machs"]
+    assert prov["undefined_machs"] == [] and len(set(table["data"])) == len(table["data"])  # 복사한 평탄 구간이 없다
+    assert all(table["axes"]["mach"][0] - 1e-9 <= m <= table["axes"]["mach"][-1] + 1e-9 for m in out["requirement"]["mach"])

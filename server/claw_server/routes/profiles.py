@@ -16,6 +16,7 @@ from claw.profile import ProfileError, build_profile, validate_document
 from claw.profile.derive import CHECK_STEP, derive_de_trim
 from claw.profile.aeroview import MAX_POINTS, aero_slice
 from claw.profile.form import form_spec
+from claw.profile.schema import document_warnings
 from claw.tables import TableError
 from claw.tables.loader import parse_table_csv
 from claw_server.profiles import EXAMPLE_ID, ProfileConflict, ProfileReadOnly, ProfileUnreadable
@@ -75,7 +76,8 @@ def _fingerprints(doc: dict) -> dict:
 
 
 def _body(doc: dict, revision: int) -> dict:
-    return {"document": doc, "revision": revision, "is_example": doc["is_example"], **_fingerprints(doc)}
+    return {"document": doc, "revision": revision, "is_example": doc["is_example"], **_fingerprints(doc),
+            "warnings": document_warnings(doc)}
 
 
 @router.get("/profiles")
@@ -254,7 +256,7 @@ def validate_profile(req: ProfileDocIn, request: Request) -> dict:
         doc = request.app.state.profiles.checked(req.document)
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
-    return {"ok": True, **_fingerprints(doc)}
+    return {"ok": True, **_fingerprints(doc), "warnings": document_warnings(doc)}
 
 
 @router.post("/profiles/aero-slice")

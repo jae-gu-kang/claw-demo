@@ -32,7 +32,7 @@ def _setup(machs, alt=1000.0, fuel=200.0):
 
 def test_refine_concentrates_at_low_mach():
     """같은 Δmach 간격에서 저마하(동압 급변) 구간이 먼저·더 많이 쪼개진다."""
-    # 격자는 새 엔벨로프(해면 M0.21~0.60 @연료200) 안에서 종전 간격 구조를 유지한다
+    # 격자는 새 엔벨로프(해면 M0.20~0.60 @연료200) 안에서 종전 간격 구조를 유지한다
     ac, points, lms, trims = _setup((0.25, 0.40, 0.55))
     report = refine_trim_points(ac, points, lms, trims, tol=0.25, max_points=12)
     assert report["inserted"], "세분화가 한 점도 없다 — tol이 데모 격자에 못 미침"

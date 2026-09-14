@@ -127,9 +127,10 @@ class BuiltProfile:
 
     @property
     def trim_bounds(self) -> dict:
-        """트림 탐색 범위 — α는 trim 섹션, δe는 엘레본 한계(믹서와 같은 값, 중복 정의 금지)."""
+        """트림 탐색 범위·판정 기준 — α는 trim 섹션, δe는 엘레본 한계(믹서와 같은 값, 중복 정의 금지), α 판정은
+        실속 표 기준이라 실속 표를 함께 싣는다(trim.trim_reserve)."""
         return {"alpha": self.trim_alpha_bounds, "de": tuple(self.doc["surfaces"]["elevon"]),
-                "alpha_margin": self.trim_alpha_margin}
+                "alpha_margin": self.trim_alpha_margin, "stall": self.stall_table()}
 
     @property
     def surfaces(self) -> dict:

@@ -680,6 +680,22 @@ def _variants(v, base):
     return out
 
 
+def document_warnings(doc: dict) -> list:
+    """검증된 문서에서 알려야 할 것 — [{"path", "message"}]. 오류가 아니다(저장·계산은 된다).
+
+    - 트림 α 탐색 상한 < 실속 표 최대: 트림 α 판정은 실속 표 기준(α < α_stall(M) − trim.alpha_margin)인데, 해가
+      탐색 상한을 넘을 수 없어 그 차이만큼 저속에서 트림이 실속각이 아니라 탐색 상한에 막힌다(저속 가림)."""
+    out = []
+    hi = float(doc["trim"]["alpha_bounds"][1])
+    stall_max = max(float(v) for v in doc["stall"]["table"]["data"])
+    if hi < stall_max:
+        out.append({"path": "/trim/alpha_bounds/1",
+                    "message": f"트림 α 탐색 상한 {hi:g} rad가 실속 표 최대 {stall_max:g} rad보다 낮다 — 저속에서 트림이 "
+                               "실속각이 아니라 탐색 상한에 막힌다(저속 가림). α 여유 판정은 실속 표 기준이라 탐색 상한은 "
+                               "판정이 아니라 풀이 범위다"})
+    return out
+
+
 def validate_document(doc) -> dict:
     """기체 문서 전체(형상 변형 포함) 검증 → 정규화된 새 문서. 실패 시 ProfileError."""
     base = _body(doc, with_variants=True)

@@ -1,7 +1,7 @@
 {
  "golden": "sim_hold",
  "mode": "full",
- "captured_at": "02e96c7+dirty",
+ "captured_at": "654ec14+dirty",
  "value": {
   "dict": {
    "t": {
@@ -3865,6 +3865,71 @@
        "rudder_lo": "f:-0x1.6666666666666p-2",
        "rudder_hi": "f:0x1.6666666666666p-2",
        "rate_max": null
+      }
+     },
+     "trim": {
+      "dict": {
+       "condition": "level",
+       "mach": "f:0x1.ccccccccccccdp-2",
+       "alt": "f:0x1.f400000000000p+9",
+       "fuel": "f:0x1.9000000000000p+7",
+       "de": "f:-0x1.56b62e7b915a0p-5",
+       "thr": "f:0x1.2789decda31d6p-1",
+       "reserve": {
+        "dict": {
+         "de": {
+          "dict": {
+           "trim": "f:-0x1.56b62e7b915a0p-5",
+           "lo": "f:-0x1.6666666666666p-2",
+           "hi": "f:0x1.6666666666666p-2",
+           "limit": "f:0x1.6666666666666p-2",
+           "reserve_hi": "f:0x1.913d2c35d891ap-2",
+           "reserve_lo": "f:0x1.3b8fa096f43b2p-2",
+           "reserve": "f:0x1.3b8fa096f43b2p-2",
+           "frac": "f:0x1.e9968b8bf4377p-4"
+          }
+         },
+         "thr": {
+          "dict": {
+           "trim": "f:0x1.2789decda31d6p-1",
+           "reserve_hi": "f:0x1.b0ec4264b9c54p-2",
+           "reserve_lo": "f:0x1.2789decda31d6p-1"
+          }
+         },
+         "alpha": {
+          "dict": {
+           "trim": "f:0x1.3c9842757eb1fp-4",
+           "stall": "f:0x1.570a3d70a3d71p-2",
+           "stall_reserve": "f:0x1.07e42cd3442a9p-2",
+           "margin": "f:0x1.1eb851eb851ecp-5",
+           "limit": "f:0x1.3333333333334p-2"
+          }
+         },
+         "elevon_roll_avail": "f:0x1.3b8fa096f43b2p-2"
+        }
+       },
+       "de_table": {
+        "dict": {
+         "mach": [
+          "f:0x1.999999999999ap-3",
+          "f:0x1.0000000000000p-2",
+          "f:0x1.3333333333333p-2",
+          "f:0x1.6666666666666p-2",
+          "f:0x1.999999999999ap-2",
+          "f:0x1.0000000000000p-1",
+          "f:0x1.3333333333333p-1"
+         ],
+         "data": [
+          "f:0x1.08216c61522a7p-2",
+          "f:0x1.105a708ede54bp-2",
+          "f:0x1.9129888f861a6p-3",
+          "f:0x1.16fa82e87d2c8p-3",
+          "f:0x1.9c2e33eff1950p-4",
+          "f:0x1.04d551d68c693p-4",
+          "f:0x1.2b7fe08aefb2bp-6"
+         ]
+        }
+       }
       }
      },
      "clamps": {

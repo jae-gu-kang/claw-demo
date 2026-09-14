@@ -210,6 +210,11 @@ export function cardLines(card) {
       ? `잔여 권한 최악 ${fmt(x.value * 100.0)} % (${x.axis} @${x.case}, `
         + `기준 ≥ ${fmt((th.b_min_frac ?? 0) * 100.0)} %)`
       : null,
+    // 한계 − 트림 몫 − 기동 편차 — 트림은 되지만 기동 여유가 없는 점(하드, 01 §4.1)
+    dyn_reserve_worst: (x) => x
+      ? `가용 동적 여유 최악 ${fmt(x.value * 100.0)} % (${x.run === "combined" ? "동시명령" : "표준"} 런 @${x.case}, `
+        + `기준 ≥ ${fmt((th.dyn_reserve_min_frac ?? 0) * 100.0)} %)`
+      : null,
   };
   for (const [k, val] of Object.entries(v)) {
     const f = known[k];

@@ -143,7 +143,8 @@ def test_envelope_verdict_reasons_priority():
     from claw.design.points import envelope_ok, envelope_verdict
 
     good = _fake_tr()
-    assert envelope_verdict(good, _DE) == {"ok": True, "reasons": []}
+    # 대역에는 트림 여유 수치가 없다 — reserve는 None(미계산)이지 0이 아니다
+    assert envelope_verdict(good, _DE) == {"ok": True, "reasons": [], "reserve": None}
 
     cases = [
         (_fake_tr(converged=False), "not_converged"),

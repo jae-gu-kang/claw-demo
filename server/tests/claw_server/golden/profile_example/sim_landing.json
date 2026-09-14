@@ -1,7 +1,7 @@
 {
  "golden": "sim_landing",
  "mode": "full",
- "captured_at": "02e96c7+dirty",
+ "captured_at": "654ec14+dirty",
  "value": {
   "dict": {
    "t": {
@@ -5645,6 +5645,41 @@
        "rudder_lo": "f:-0x1.6666666666666p-2",
        "rudder_hi": "f:0x1.6666666666666p-2",
        "rate_max": "f:0x1.4000000000000p+3"
+      }
+     },
+     "trim": {
+      "dict": {
+       "condition": "ground",
+       "mach": "f:0x0.0p+0",
+       "alt": "f:0x0.0p+0",
+       "fuel": "f:0x1.2c00000000000p+8",
+       "de": "f:0x0.0p+0",
+       "thr": "f:0x0.0p+0",
+       "reserve": {
+        "dict": {}
+       },
+       "de_table": {
+        "dict": {
+         "mach": [
+          "f:0x1.999999999999ap-3",
+          "f:0x1.0000000000000p-2",
+          "f:0x1.3333333333333p-2",
+          "f:0x1.6666666666666p-2",
+          "f:0x1.999999999999ap-2",
+          "f:0x1.0000000000000p-1",
+          "f:0x1.3333333333333p-1"
+         ],
+         "data": [
+          "f:0x1.08216c61522a7p-2",
+          "f:0x1.105a708ede54bp-2",
+          "f:0x1.9129888f861a6p-3",
+          "f:0x1.16fa82e87d2c8p-3",
+          "f:0x1.9c2e33eff1950p-4",
+          "f:0x1.04d551d68c693p-4",
+          "f:0x1.2b7fe08aefb2bp-6"
+         ]
+        }
+       }
       }
      },
      "clamps": {

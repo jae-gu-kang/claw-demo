@@ -22,8 +22,10 @@ def test_trim_bounds_are_the_former_module_constants():
     p = example_profile()
     assert p.trim_alpha_bounds == (-0.10, 0.35) and p.trim_alpha_margin == 0.035
     assert p.surfaces["elevon"] == (-0.35, 0.35)
-    assert p.aircraft().trim_bounds == {"alpha": (-0.10, 0.35), "de": (-0.35, 0.35),
-                                        "alpha_margin": 0.035}
+    tb = p.aircraft().trim_bounds
+    stall = tb.pop("stall")  # α 판정이 실속 표 기준이라 함께 싣는다 (v1.07)
+    assert tb == {"alpha": (-0.10, 0.35), "de": (-0.35, 0.35), "alpha_margin": 0.035}
+    assert list(stall.data) == list(p.stall_table().data)
 
 
 def test_tables_are_built_fresh_each_call():

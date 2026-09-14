@@ -355,6 +355,82 @@ def step_metrics(t, cmd, y, on, *, angular=False) -> dict:
     return worst
 
 
+# 기동 중 마하가 이만큼 넘게 움직이면 δe 기준선을 시작 트림 상수가 아니라 δe_trim(M) 할당 표로 읽는다 [기본값].
+# 평가 기동(속도 스텝·동시명령)은 마하를 0.01~0.02 움직인다 — 그 런이 표 기준선(연료·고도 최악값)으로 바뀌면 기동
+# 편차가 부풀어 지역 판정이 흐려진다(0.02에서 M0.6 동시명령 런이 넘어가 여유 44 %로 읽혔다). 미션처럼 크게 변하는
+# 런만 표를 쓴다
+TRIM_REF_MACH_SPAN = 0.1
+TRIM_RESERVE_KEYS = ("de_trim_frac", "de_excursion_max", "de_dyn_reserve_min_frac", "thr_trim_reserve",
+                     "alpha_trim_reserve")
+
+
+def _finite_or_none(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def trim_reserve_breakdown(signals, meta) -> dict:
+    """트림 몫과 기동 몫 — 가용 동적 여유 (카드 ⑦, 01 §4.1). 지표 5개 + 기준선 출처(reference).
+
+    δreserve_dynamic = (한계 − |δe_ref|) − |δ(t) − δe_ref| 를 엘레본 좌·우(롤 사용 포함) 표본마다 한계로 나눠 최소를
+    취한다 — δmax − max|δ|의 보수적 하한이다(편차의 방향을 버린다). 지상·레일 구간은 뺀다(바퀴가 하중을 받는 구간에는
+    1g 트림 요구가 없다). δe_ref는 시작 트림 상수이고, 런 중 마하가 TRIM_REF_MACH_SPAN 넘게 움직이면 법칙의 δe_trim(M)
+    할당 표(크기)에 시작 트림의 부호를 붙여 읽는다 — 할당 표는 연료·고도 최악값이라 기준선이 보수적으로 크다.
+
+    트림 여유가 없는 결과(지상 평형 출발·옛 저장물)나 한계 미상은 None — 여유 0으로 위장하지 않는다."""
+    out = dict.fromkeys(TRIM_RESERVE_KEYS)
+    out["reference"] = None
+    out["de_limit"] = None
+    meta = meta or {}
+    trim = meta.get("trim") or {}
+    res = trim.get("reserve") or {}
+    out["de_trim_frac"] = _finite_or_none((res.get("de") or {}).get("frac"))
+    out["thr_trim_reserve"] = _finite_or_none((res.get("thr") or {}).get("reserve_hi"))
+    out["alpha_trim_reserve"] = _finite_or_none((res.get("alpha") or {}).get("stall_reserve"))
+    limits = meta.get("limits") or {}
+    lo, hi = _finite_or_none(limits.get("elevon_lo")), _finite_or_none(limits.get("elevon_hi"))
+    de0 = _finite_or_none(trim.get("de"))
+    if not res or lo is None or hi is None or de0 is None:
+        return out
+    try:
+        surfaces = surface_positions(signals)
+    except KeyError:
+        return out
+    n = len(surfaces["elevon_l"])
+    ground = np.zeros(n, dtype=bool)
+    for name in ("wow", "on_rail"):
+        g = signals.get(name)
+        if g is not None:
+            ground |= np.asarray(g, dtype=bool)[:n]
+    ref = np.full(n, de0)
+    out["reference"] = "start_trim"
+    table = trim.get("de_table")
+    mach = _arr(signals, "mach")
+    if table and mach is not None:
+        span = np.abs(mach[np.isfinite(mach)] - float(trim.get("mach") or 0.0))
+        if span.size and float(span.max()) > TRIM_REF_MACH_SPAN:
+            sign = -1.0 if de0 < 0.0 else 1.0
+            ref = sign * np.interp(mach, np.asarray(table["mach"], float), np.asarray(table["data"], float))
+            out["reference"] = "alloc_table"
+    lim = np.where(ref >= 0.0, hi, -lo)
+    out["de_limit"] = hi if de0 >= 0.0 else -lo  # 시작 트림 부호 쪽 한계 — 화면이 기동 몫을 비율로 그린다
+    exc_max, frac_min = None, None
+    for key in ("elevon_l", "elevon_r"):
+        x = np.asarray(surfaces[key], dtype=float)
+        m = np.isfinite(x) & np.isfinite(ref) & ~ground & (lim > 0.0)
+        if not m.any():
+            continue
+        exc = np.abs(x[m] - ref[m])
+        frac = (lim[m] - np.abs(ref[m]) - exc) / lim[m]
+        exc_max = float(exc.max()) if exc_max is None else max(exc_max, float(exc.max()))
+        frac_min = float(frac.min()) if frac_min is None else min(frac_min, float(frac.min()))
+    out["de_excursion_max"], out["de_dyn_reserve_min_frac"] = exc_max, frac_min
+    return out
+
+
 def _authority_metrics(signals, meta) -> dict:
     """비행 중 잔여 권한 — min(배분 한계)/엘레본 예산 (카드 ⑦, 커밋 0e56bcf 배분 신호).
 
@@ -448,6 +524,7 @@ def metric_values(t, signals, envelope, meta, waypoints=None) -> dict:
             None if la is None else float(np.mean(np.asarray(la, dtype=bool)))
         ),
         **_authority_metrics(signals, meta),
+        **{k: v for k, v in trim_reserve_breakdown(signals, meta).items() if k in TRIM_RESERVE_KEYS},
         "xtrack_rms": _xtrack_rms(signals, waypoints),
         **_landing_metrics(t, signals, meta),
     }

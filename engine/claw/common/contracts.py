@@ -104,6 +104,9 @@ class TrimResult:
     cost: float
     flags: dict = field(default_factory=dict)
     params_fingerprint: str = ""
+    # 트림 여유 수치(trim.trim_reserve) — 플래그(saturation_ok·alpha_margin_ok)가 이 수치에서 나온다.
+    # 비어 있으면 미계산(지상 평형·옛 저장물): 0으로 읽지 않는다
+    reserve: dict = field(default_factory=dict)
 
 
 @dataclass

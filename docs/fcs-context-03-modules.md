@@ -180,6 +180,10 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
 - scipy.optimize(SLSQP/trust-constr) 구속조건 트림, 수평정상비행부터. 케이스
   매트릭스(컨디션×속도×고도×연료) 100+ 배치, 초기값 시드 전략(**[TBD]** 인접 케이스 시드 등)
 - 수치섭동 선형화 → A/B/C/D + 트림점 메타. 종축/횡축 분리 추출
+- 트림 해의 여유 수치 `TrimResult.reserve`(`trim_reserve` — δe·스로틀·α 여유, 판정 플래그의
+  근거, 01 §4.1, v1.07). α 판정 기준은 기체의 실속 표(`Aircraft.trim_bounds["stall"]`)이고, 시뮬
+  결과 meta의 `trim`이 그 기준선을 싣는다 — 검증의 가용 동적 여유(M15
+  `metrics.trim_reserve_breakdown`)가 저장된 결과만으로 잰다
 - 의존: M5 (plant를 함수로 소비). 검증: F-16 공개 트림·선형화 결과 재현 (verify 층1)
 
 ### M10 `analysis` — 안정성 해석
@@ -238,14 +242,14 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
 - 구현됨(`pipeline/pipeline.py`): 부분집합 지문 캐시·선택적 무효화·`delta_report`
 - 구현됨(`pipeline/influence.py`, 03-v0.19): **영향성 해석 1단** — 편집 가능 파라미터
   목록(레지스트리에서 읽어 유도, 데모 형상 68개), 파라미터→IR 노드 매핑(**재조립 후 서명 diff**
-  — 손으로 적은 표를 두지 않는다), 전방 도달 원뿔, 설계 지표 선언 29종. 서명은 노드 인자 +
+  — 손으로 적은 표를 두지 않는다), 전방 도달 원뿔, 설계 지표 선언 34종. 서명은 노드 인자 +
   **러너 인스턴스**까지 본다(dt가 이산 계수만 바꾸므로). 세 상태를 구분한다: 스케줄에
   **덮임**(상수는 있으나 게인 포트가 매 스텝 덮어씀) · **미방출**(스케줄 경로가 상수를 아예 안
   낸다) · **법칙 밖**(IR 바깥이라 개루프가 못 봄 — 영향 없음이 아니다)
 - 구현됨 — **게인 평가 · 진단 · 정량 처방**. 구현은 `pipeline/`의
   `criteria.py`·`evaluate.py`·`prescribe.py`·`diagnose.py`와 `analysis/schedule.py`·plant
   `DispersionSet`이다. 기준은 `GainEvalCriteria`(schema v2, 지문 발급), 하드 게이트는 코드
-  상수(문턱만 데이터), METRICS 29종(tier/group 메타 — 키 불변). `evaluate`가 실패 케이스의 같은
+  상수(문턱만 데이터), METRICS 34종(tier/group 메타 — 키 불변). `evaluate`가 실패 케이스의 같은
   런으로 `diagnose_run`을 인라인 호출해 판정과 소견이 한 몸이고(새 시뮬 0), 판정선은
   `GainEvalCriteria.to_diagnose_thresholds/to_grid_thresholds` 파생이 정본이다
 - **카드 7 · 판정 10 · 하드 게이트 · J v2 · 진단 규칙 · 처방의 정본은
@@ -417,7 +421,7 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
 | `NavOutput` | nav → fcl, guidance | VehicleState 동형 + 타임스탬프·유효 플래그 (오차 포함 출력) |
 | `GuidanceCommand` | guidance → fcl | 속도/고도/헤딩 명령 + 축별 활성화 플래그 (모드가 정의) |
 | `SurfaceCommand` | fcl → plant.actuator | 엘레본×4, 러더, 스로틀×2 명령 |
-| `TrimCase` / `TrimResult` | (UI/파일) → trim → analysis | 비행조건 정의 / 트림 상태·입력·수렴 정보 + 자동 판정 플래그(도메인 문서 §4.1 — 잔차·포화·α 여유·연속성) |
+| `TrimCase` / `TrimResult` | (UI/파일) → trim → analysis | 비행조건 정의 / 트림 상태·입력·수렴 정보 + 자동 판정 플래그(도메인 문서 §4.1 — 잔차·포화·α 여유·연속성) + 여유 수치 `reserve`(v1.07) |
 | `LinearModel` | trim → analysis | A/B/C/D + 트림점 메타 + 종/횡축 분리 정보 |
 | `SimResult` | sim → verify, server | 시계열 로그 + 엔벨로프 플래그·실속 마진 |
 | `ParamSet` | params → 전 모듈 | 파라미터 스냅샷 (단위·범위 메타 포함) |

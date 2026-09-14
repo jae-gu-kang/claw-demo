@@ -129,6 +129,13 @@ class AuthorityCriteria:
     de_frac_warn: float = 0.5  # |δe_trim| / 한계 — 이 위면 warn
     de_frac_max: float = 0.85  # 이 위면 fail (기동 여유 실질 소진)
     b_min_frac: float = 0.10  # 비행 중 최소 잔여 권한 / 엘레본 예산 — 하드 하한
+    # 가용 동적 여유 하한 — min[(한계 − |δe_trim| − |δ(t) − δe_trim|) / 한계]가 이 아래면 **하드** [기본값] (v1.07,
+    # 01 §4.1). 잔여 권한(배분 한계)은 롤 예산의 몫이라 "트림은 되지만 기동 여유가 없는 점"을 못 잡는다 — 예제
+    # M0.3·3 km·만재 동시명령 런은 잔여 권한 24 %인데 가용 동적 여유 3.0 %였다(표준 런 31 %·4.4 %)
+    dyn_reserve_min_frac: float = 0.05
+    # 트림 추력 여유 경고선 — 1 − thr_trim이 이 아래면 warn [기본값]. 트림 성립 판정(SAT_FRAC 0.95)은 여유 5 %까지
+    # 통과시킨다 — 그 사이는 "트림은 되지만 가속·상승 에너지가 얇은" 점이다(기동 몫은 thr_margin_min이 잰다)
+    thr_trim_reserve_min: float = 0.10
 
     def __post_init__(self):
         if not 0.0 < self.de_frac_warn <= self.de_frac_max <= 1.0:
@@ -136,6 +143,8 @@ class AuthorityCriteria:
                 f"0 < de_frac_warn({self.de_frac_warn}) ≤ de_frac_max"
                 f"({self.de_frac_max}) ≤ 1 필요")
         _frac("b_min_frac", self.b_min_frac)
+        _frac("dyn_reserve_min_frac", self.dyn_reserve_min_frac)
+        _frac("thr_trim_reserve_min", self.thr_trim_reserve_min)
 
 
 @dataclass(frozen=True)
@@ -474,6 +483,7 @@ class GainEvalCriteria:
         out["surf_sat_frac"] = float(self.actuator.sat_frac_max)
         out["limiter_frac"] = float(self.envelope.limiter_frac_max)
         out["worst_stall_margin"] = float(self.envelope.alpha_margin_min)
+        out["de_dyn_reserve_min_frac"] = float(self.authority.dyn_reserve_min_frac)
         return out
 
     def to_metric_scales(self) -> dict:
@@ -518,6 +528,8 @@ class GainEvalCriteria:
         # 잔여 권한은 하드 하한이 곧 예산이다 — 두 축이 같은 자를 쓴다
         put("min_pitch_authority_frac", self.authority.b_min_frac)
         put("min_roll_authority_frac", self.authority.b_min_frac)
+        put("de_dyn_reserve_min_frac", self.authority.dyn_reserve_min_frac)
+        put("thr_trim_reserve", self.authority.thr_trim_reserve_min)
         return out
 
     def fingerprint(self) -> str:

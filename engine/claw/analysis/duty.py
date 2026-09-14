@@ -367,7 +367,11 @@ def duty_report(t, signals, meta, bins: int = 32, rate_bins: int = 24,
             }
         channels.append(chan)
 
+    # 트림 몫·기동 몫 — 가용 동적 여유(01 §4.1). 지표 정본(pipeline.metrics)을 그대로 부른다(순환 import를 피해 여기서)
+    from claw.pipeline.metrics import trim_reserve_breakdown
+
     return {
+        "trim_reserve": trim_reserve_breakdown(signals, meta),
         "dt": dt,
         "n": int(t.size),
         "t_total": float(t.size * dt),

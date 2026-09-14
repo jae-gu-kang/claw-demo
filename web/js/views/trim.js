@@ -265,6 +265,11 @@ function renderRows(tableBox, body) {
     el("thead", {}, el("tr", {},
       el("th", {}, "케이스"), el("th", {}, "수렴"),
       el("th", {}, "θ [rad]"), el("th", {}, "δe [rad]"), el("th", {}, "스로틀"),
+      // 트림 여유 — 트림 해가 이미 가져간 몫과 남은 몫(엔진 TrimResult.reserve). 시뮬의 가용 동적 여유가 이 수에서
+      // 기동 편차를 뺀다(01 §4.1). 옛 결과·지상 평형은 수치가 없어 비운다
+      el("th", { title: "|δe| / 부호 쪽 엘레본 한계" }, "δe 소모"),
+      el("th", { title: "1 − 스로틀" }, "추력 여유"),
+      el("th", { title: "α_stall(M) − α — 판정 한계는 여기서 기체의 트림 α 여유를 뺀 것" }, "실속 여유 [rad]"),
       FLAG_COLS.map(([, title]) => el("th", {}, title)))),
     el("tbody", {}, body.results.map((r) => el("tr", {},
       el("td", {}, r.case.name),
@@ -272,6 +277,9 @@ function renderRows(tableBox, body) {
       el("td", { class: "num" }, fmt(r.euler[1], 4)),
       el("td", { class: "num" }, fmt(r.control.elevon[0], 4)),
       el("td", { class: "num" }, fmt(r.control.throttle[0], 3)),
+      el("td", { class: "num" }, r.reserve?.de ? `${fmt(r.reserve.de.frac * 100.0, 1)} %` : "—"),
+      el("td", { class: "num" }, r.reserve?.thr ? `${fmt(r.reserve.thr.reserve_hi * 100.0, 1)} %` : "—"),
+      el("td", { class: "num" }, r.reserve?.alpha ? fmt(r.reserve.alpha.stall_reserve, 4) : "—"),
       FLAG_COLS.map(([key]) => el("td", {}, flagBadge(r.flags[key]))),
     ))),
   )));

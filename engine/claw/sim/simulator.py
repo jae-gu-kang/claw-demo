@@ -444,6 +444,7 @@ class Simulator:
                 "case": tr.case.name,
                 "aborted": aborted,
                 "limits": self._effector_limits(actuators),
+                "trim": self._trim_reference(tr),
                 "clamps": self._command_clamps(),
                 "phases": phases,
                 # 순수추적으로 못 잡고 넘긴 웨이포인트 (0 기준 인덱스) — 빈 목록이
@@ -490,6 +491,23 @@ class Simulator:
                 if slow.size:
                     out["stop_t"] = float(t_arr[i + int(slow[0])])
         return out
+
+    def _trim_reference(self, tr) -> dict:
+        """이 런의 트림 기준선 — `_effector_limits`와 같은 이유로 결과와 함께 다닌다.
+
+        가용 동적 여유(한계 − 트림 몫 − 동적 편차, 01 §4.1)는 "트림이 무엇을 이미 가져갔나"를 알아야 잰다. 시작
+        트림의 해와 여유 수치(TrimResult.reserve), 그리고 조건이 크게 변하는 런을 위한 법칙의 δe_trim(M) 할당 표를
+        싣는다. 지상 평형에서 출발한 런은 reserve가 비어 있다(미계산 — 0이 아니다)."""
+        table = getattr(self.fcl, "alloc_trim_table", None)
+        de_table = None
+        if table is not None:
+            de_table = {"mach": [float(v) for v in np.asarray(table.axes[0]).ravel()],
+                        "data": [float(v) for v in np.asarray(table.data).ravel()]}
+        return {
+            "condition": tr.case.condition, "mach": float(tr.case.mach), "alt": float(tr.case.alt),
+            "fuel": float(tr.case.fuel), "de": float(tr.control.elevon[0]), "thr": float(tr.control.throttle[0]),
+            "reserve": dict(tr.reserve), "de_table": de_table,
+        }
 
     def _effector_limits(self, actuators) -> dict:
         """이 런의 판정 기준선 — 타면 위치 한계와 작동기 rate 한계.

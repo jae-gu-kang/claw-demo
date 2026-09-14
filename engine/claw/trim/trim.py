@@ -12,7 +12,12 @@
 자동 판정 플래그 (01 §4.1 [기본값], TrimResult.flags):
 - residual_ok    : |u̇|,|ẇ| < RESID_TOL, |q̇| < RESID_TOL
 - saturation_ok  : δe·스로틀이 한계의 SAT_FRAC 이내 (스로틀 하한 여유 THR_MARGIN 포함)
-- alpha_margin_ok: α가 탐색 상한 대비 기체의 trim.alpha_margin 이상 여유 (실속 경계 기준은 [백로그])
+- alpha_margin_ok: α < α_stall(M) − 기체의 trim.alpha_margin — **실속 표 기준**(v1.07). 종전에는 α 탐색 상한
+  기준이라(예제 0.35 − 0.035 = 0.315 rad) M0.6 이상에서는 실속각을 넘어도 통과했고, 실속각이 탐색 상한보다 큰
+  저속에서는 실속과 무관한 상수에 막혔다
+
+두 플래그는 **트림 여유 수치**(trim_reserve → TrimResult.reserve)에서 나온다 — 판정과 수치가 갈라지지 않게. 이
+수치는 검증의 가용 동적 여유(한계 − 트림 몫 − 동적 편차, 01 §4.1)의 트림 몫이다.
 - continuity_ok  : 배치에서 인접 케이스 해와의 급변 없음. **None = 미판정**
   (첫 케이스·비교 기준 부재) — 미판정을 합격으로 오인하지 않도록 3-상태
 """
@@ -34,6 +39,28 @@ THR_MARGIN = 0.02  # 스로틀 하한 여유 — 아이들 포화 해 검출
 CONTINUITY_STEP = np.array([0.05, 0.05, 0.15])  # 인접 케이스 허용 Δ[α, δe, thr]
 
 _Z0_DEFAULT = np.array([0.05, 0.0, 0.3])
+
+
+def trim_reserve(alpha, de, thr, mach, tb) -> dict:
+    """트림 해 → 여유 수치 {de, thr, alpha, elevon_roll_avail} (01 §4.1 트림 여유).
+
+    - de: 방향별 여유(reserve_hi·reserve_lo), 크기형 여유 reserve = 한계 − |δe|와 소모율 frac = |δe| / 한계.
+      한계는 **δe 부호 쪽**이다(비대칭 엘레본에서 음의 δe를 상한으로 나누면 소모율이 틀린다)
+    - thr: 상한·하한 여유
+    - alpha: 실속각 α_stall(M), 실속 여유 α_stall − α, 판정 한계 limit = α_stall − trim.alpha_margin
+    - elevon_roll_avail: 엘레본 예산 중 트림이 안 가져간 몫 = 상한 − |δe| (법칙 할당 R의 케이스별 짝)
+    """
+    lo, hi = (float(v) for v in tb["de"])
+    lim = hi if de >= 0.0 else -lo
+    a_stall = float(tb["stall"].interp(mach=float(mach)))
+    return {
+        "de": {"trim": float(de), "lo": lo, "hi": hi, "limit": lim, "reserve_hi": hi - de, "reserve_lo": de - lo,
+               "reserve": lim - abs(de), "frac": abs(de) / lim},
+        "thr": {"trim": float(thr), "reserve_hi": THR_BOUNDS[1] - thr, "reserve_lo": thr - THR_BOUNDS[0]},
+        "alpha": {"trim": float(alpha), "stall": a_stall, "stall_reserve": a_stall - alpha,
+                  "margin": float(tb["alpha_margin"]), "limit": a_stall - float(tb["alpha_margin"])},
+        "elevon_roll_avail": hi - abs(de),
+    }
 
 
 def _saturation_channels(de, thr, de_bounds) -> dict:
@@ -78,6 +105,9 @@ def _trim_bounds(aircraft) -> dict:
     tb = getattr(aircraft, "trim_bounds", None)
     if tb is None:
         raise ValueError("트림 탐색 범위가 없는 기체 — 기체 프로파일로 조립해야 한다 (02 §5.6)")
+    if tb.get("stall") is None:
+        # α 판정의 기준이 실속 표다 — 없으면 탐색 상한으로 되돌아가지 않는다(그 상수는 실속과 무관하다)
+        raise ValueError("트림 범위에 실속 표(stall)가 없는 기체 — 기체 프로파일로 조립해야 한다 (02 §5.6)")
     return tb
 
 
@@ -104,8 +134,9 @@ def trim_level(aircraft, case, z0=None, fingerprint=""):
     r = resid(res.x)
 
     residual_ok = bool(np.all(np.abs(r) < RESID_TOL))
+    reserve = trim_reserve(alpha, de, thr, case.mach, tb)
     saturation_ok = not any(_saturation_channels(de, thr, tb["de"]).values())
-    alpha_margin_ok = bool(alpha < tb["alpha"][1] - tb["alpha_margin"])
+    alpha_margin_ok = bool(alpha < reserve["alpha"]["limit"])
     flags = {
         "residual_ok": residual_ok,
         "saturation_ok": saturation_ok,
@@ -131,6 +162,7 @@ def trim_level(aircraft, case, z0=None, fingerprint=""):
         cost=float(res.fun),
         flags=flags,
         params_fingerprint=fingerprint,
+        reserve=reserve,
     )
 
 

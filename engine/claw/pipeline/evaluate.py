@@ -135,6 +135,7 @@ HARD_CHECKS = (
     "actuator.sat_frac",  # 타면 위치 포화
     "actuator.rate_sat_frac",  # 타율 포화
     "authority.remaining",  # 잔여 권한 < B_min (v2 신규 — 배분 계측 시 활성)
+    "authority.dynamic_reserve",  # 가용 동적 여유 < 하한 (v1.07 — 트림은 되지만 기동 여유가 없는 점)
     "coupling.stall_margin",  # 동시명령 중 실속마진
     "coupling.sat_frac",  # 동시명령 중 포화
     "margins.pm", "margins.gm",  # 위상·이득여유 미달 (목적함수 아닌 제약)
@@ -525,17 +526,26 @@ def _actuator_stage(signals, meta, dt_plant, crit):
                   channels=channels), fails
 
 
-def _authority_stage(tr, metrics, crit, de_bounds):
-    """카드 ⑦의 근거 — 트림 소모(선형 단계에서도 가능) + 비행 중 잔여 권한(런 필요).
+def _authority_stage(tr, metrics, crit, de_bounds, metrics_c=None):
+    """카드 ⑦의 근거 — 트림 소모·트림 추력 여유(선형 단계에서도 가능) + 가용 동적 여유·비행 중 잔여 권한(런 필요).
 
     잔여 권한 < b_min_frac은 **하드**다(v2 신규). 배분 미계측(신호 없음)·미실행
     (depth=linear)은 하드 판정에서 빠진다 — envelope.nz 패턴.
     트림 δe 소모율의 기준 한계는 트림 솔버의 경계(기체의 aircraft.trim_bounds 엘레본 범위)의 δe 부호 쪽이다.
+    트림 해가 여유 수치를 들고 있으면(TrimResult.reserve) 그 수를 읽는다 — 트림 판정과 같은 수다.
+
+    **가용 동적 여유**(v1.07, 01 §4.1) = (한계 − 트림 몫 − 동적 편차) / 한계를 표준·동시명령 런에서 재고, 최악이
+    dyn_reserve_min_frac 아래면 **하드**(authority.dynamic_reserve)다 — 트림은 되지만 기동 여유가 없는 점. 트림 추력
+    여유(1 − thr_trim)가 thr_trim_reserve_min 아래면 warn이다.
     """
     de_signed = float(tr.control.elevon[0])
     de = abs(de_signed)
-    # 부호 쪽 한계로 나눈다 — 비대칭 엘레본에서 음의 δe를 상한으로 나누면 소모율이 틀린다
-    frac = de / (de_bounds[1] if de_signed >= 0.0 else -de_bounds[0])
+    reserve = getattr(tr, "reserve", None) or {}
+    if reserve.get("de"):
+        frac = float(reserve["de"]["frac"])
+    else:
+        # 부호 쪽 한계로 나눈다 — 비대칭 엘레본에서 음의 δe를 상한으로 나누면 소모율이 틀린다
+        frac = de / (de_bounds[1] if de_signed >= 0.0 else -de_bounds[0])
     if frac > crit.authority.de_frac_max:
         trim_status = "fail"
     elif frac > crit.authority.de_frac_warn:
@@ -568,12 +578,39 @@ def _authority_stage(tr, metrics, crit, de_bounds):
                               "limit": crit.authority.b_min_frac,
                               "axis": worst_key})
             statuses = [trim_status, inflight["status"]]
+
+    thr_reserve = (reserve.get("thr") or {}).get("reserve_hi")
+    if thr_reserve is None:
+        thr_trim = {"status": "na", "note": "트림 여유 수치 없음 — 지상 평형이거나 옛 저장물이다"}
+    else:
+        thr_ok = float(thr_reserve) >= crit.authority.thr_trim_reserve_min
+        thr_trim = {"status": "ok" if thr_ok else "warn", "value": float(thr_reserve),
+                    "warn_below": crit.authority.thr_trim_reserve_min}
+        statuses.append(thr_trim["status"])
+
+    runs = [(name, m) for name, m in (("standard", metrics), ("combined", metrics_c)) if m is not None]
+    measured = [(name, m["de_dyn_reserve_min_frac"], m.get("de_excursion_max")) for name, m in runs
+                if m.get("de_dyn_reserve_min_frac") is not None]
+    if not runs:
+        dynamic = {"status": "na", "note": "비선형 런 없음(depth=linear) — 가용 동적 여유는 런에서 잰다"}
+    elif not measured:
+        dynamic = {"status": "na", "note": "트림 여유·엘레본 한계 미상 — 지상 평형 출발 런이거나 옛 저장물이다"}
+    else:
+        run, worst_v, exc = min(measured, key=lambda x: x[1])
+        ok = worst_v >= crit.authority.dyn_reserve_min_frac
+        dynamic = {"status": "ok" if ok else "fail", "value": worst_v, "run": run, "excursion_max": exc,
+                   "trim_frac": frac, "limit": crit.authority.dyn_reserve_min_frac,
+                   "by_run": {name: v for name, v, _ in measured}}
+        if not ok:
+            fails.append({"check": "authority.dynamic_reserve", "value": worst_v,
+                          "limit": crit.authority.dyn_reserve_min_frac, "run": run})
+        statuses.append(dynamic["status"])
     return _stage(_worst(statuses), "authority",
                   trim={"de_rad": de, "frac": frac,
                         "warn_at": crit.authority.de_frac_warn,
                         "fail_at": crit.authority.de_frac_max,
                         "judged": trim_status},
-                  inflight=inflight), fails
+                  inflight=inflight, dynamic=dynamic, thr_trim=thr_trim), fails
 
 
 def _coupling_stage(metrics_c, crit):
@@ -799,6 +836,7 @@ def _eval_case(aircraft, tr, shape, law, criteria, *, depth, stall, db_ranges,
     hard_fails = []
     cancelled = False
     metrics = None
+    metrics_c = None
     damping = None
     actuator = {"channels": {}}
 
@@ -867,7 +905,7 @@ def _eval_case(aircraft, tr, shape, law, criteria, *, depth, stall, db_ranges,
         hard_fails += f
         cancelled = tick(f"동시명령 런: {tr.case.name}")
 
-    stages["authority"], f = _authority_stage(tr, metrics, criteria, aircraft.trim_bounds["de"])
+    stages["authority"], f = _authority_stage(tr, metrics, criteria, aircraft.trim_bounds["de"], metrics_c)
     hard_fails += f
 
     # ── 소견(원인 귀속) — **같은 런의 후처리다** ─────────────────────────────
@@ -1137,6 +1175,10 @@ def _build_cards(cases, criteria):
         (-(c["stages"]["authority"]["trim"]["frac"]),
          {"judged": c["stages"]["authority"]["trim"]["judged"]})
         if isinstance(c["stages"]["authority"].get("trim"), dict) else None))
+    dyn = _min_over(cases, lambda c: (
+        (c["stages"]["authority"]["dynamic"]["value"], {"run": c["stages"]["authority"]["dynamic"]["run"]})
+        if isinstance(c["stages"]["authority"].get("dynamic"), dict)
+        and c["stages"]["authority"]["dynamic"].get("value") is not None else None))
     rem = _min_over(cases, lambda c: (
         (c["stages"]["authority"]["inflight"]["worst"]["value"],
          {"axis": c["stages"]["authority"]["inflight"]["worst"]["key"]})
@@ -1153,10 +1195,13 @@ def _build_cards(cases, criteria):
          "trim_frac_worst": None if trim is None else
          {"value": -trim[0], "case": trim[2]},
          "remaining_worst": None if rem is None else
-         {"value": rem[0], **rem[1], "case": rem[2]}},
+         {"value": rem[0], **rem[1], "case": rem[2]},
+         "dyn_reserve_worst": None if dyn is None else
+         {"value": dyn[0], **dyn[1], "case": dyn[2]}},
         {"sat_frac_max": cr.actuator.sat_frac_max,
          "de_frac_max": cr.authority.de_frac_max,
-         "b_min_frac": cr.authority.b_min_frac},
+         "b_min_frac": cr.authority.b_min_frac,
+         "dyn_reserve_min_frac": cr.authority.dyn_reserve_min_frac},
         (rem or usage or trim)[2] if (rem or usage or trim) else None,
         # 대표는 **남은 여유**다 — 잔여 권한이 계측되면 그것, 아니면 사용률의 여집합
         primary=_primary(rem[0] if rem else (1.0 + usage[0] if usage else None),

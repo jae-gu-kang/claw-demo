@@ -1,7 +1,7 @@
 {
  "golden": "trim_special",
  "mode": "full",
- "captured_at": "388cc91",
+ "captured_at": "654ec14+dirty",
  "value": {
   "dict": {
    "ground": {
@@ -111,7 +111,10 @@
        "supported_ok": true
       }
      },
-     "params_fingerprint": ""
+     "params_fingerprint": "",
+     "reserve": {
+      "dict": {}
+     }
     }
    },
    "dispersed": [
@@ -222,7 +225,40 @@
          "continuity_ok": null
         }
        },
-       "params_fingerprint": ""
+       "params_fingerprint": "",
+       "reserve": {
+        "dict": {
+         "de": {
+          "dict": {
+           "trim": "f:-0x1.a6327adac1b49p-5",
+           "lo": "f:-0x1.6666666666666p-2",
+           "hi": "f:0x1.6666666666666p-2",
+           "limit": "f:0x1.6666666666666p-2",
+           "reserve_hi": "f:0x1.9b2cb5c1be9cfp-2",
+           "reserve_lo": "f:0x1.31a0170b0e2fdp-2",
+           "reserve": "f:0x1.31a0170b0e2fdp-2",
+           "frac": "f:0x1.2d91c577aeeebp-3"
+          }
+         },
+         "thr": {
+          "dict": {
+           "trim": "f:0x1.396ce69a3451fp-1",
+           "reserve_hi": "f:0x1.8d2632cb975c2p-2",
+           "reserve_lo": "f:0x1.396ce69a3451fp-1"
+          }
+         },
+         "alpha": {
+          "dict": {
+           "trim": "f:0x1.c9d76d46ed249p-4",
+           "stall": "f:0x1.5c28f5c28f5c2p-2",
+           "stall_reserve": "f:0x1.d36634e1a8260p-3",
+           "margin": "f:0x1.1eb851eb851ecp-5",
+           "limit": "f:0x1.3851eb851eb84p-2"
+          }
+         },
+         "elevon_roll_avail": "f:0x1.31a0170b0e2fdp-2"
+        }
+       }
       }
      },
      {
@@ -331,7 +367,40 @@
          "continuity_ok": false
         }
        },
-       "params_fingerprint": ""
+       "params_fingerprint": "",
+       "reserve": {
+        "dict": {
+         "de": {
+          "dict": {
+           "trim": "f:-0x1.c45c36347d195p-4",
+           "lo": "f:-0x1.6666666666666p-2",
+           "hi": "f:0x1.6666666666666p-2",
+           "limit": "f:0x1.6666666666666p-2",
+           "reserve_hi": "f:0x1.d77d73f385acbp-2",
+           "reserve_lo": "f:0x1.ea9eb1b28e402p-3",
+           "reserve": "f:0x1.ea9eb1b28e402p-3",
+           "frac": "f:0x1.431d4b4a1036bp-2"
+          }
+         },
+         "thr": {
+          "dict": {
+           "trim": "f:0x1.512a1cad690e6p-1",
+           "reserve_hi": "f:0x1.5dabc6a52de34p-2",
+           "reserve_lo": "f:0x1.512a1cad690e6p-1"
+          }
+         },
+         "alpha": {
+          "dict": {
+           "trim": "f:0x1.a16809743f7dfp-3",
+           "stall": "f:0x1.6666666666666p-2",
+           "stall_reserve": "f:0x1.2b64c3588d4edp-3",
+           "margin": "f:0x1.1eb851eb851ecp-5",
+           "limit": "f:0x1.428f5c28f5c28p-2"
+          }
+         },
+         "elevon_roll_avail": "f:0x1.ea9eb1b28e402p-3"
+        }
+       }
       }
      }
     ],
@@ -442,7 +511,40 @@
          "continuity_ok": null
         }
        },
-       "params_fingerprint": ""
+       "params_fingerprint": "",
+       "reserve": {
+        "dict": {
+         "de": {
+          "dict": {
+           "trim": "f:-0x1.3800d4ab8a8eep-4",
+           "lo": "f:-0x1.6666666666666p-2",
+           "hi": "f:0x1.6666666666666p-2",
+           "limit": "f:0x1.6666666666666p-2",
+           "reserve_hi": "f:0x1.b4669b91490a2p-2",
+           "reserve_lo": "f:0x1.1866313b83c2ap-2",
+           "reserve": "f:0x1.1866313b83c2ap-2",
+           "frac": "f:0x1.bdb80b3e33a79p-3"
+          }
+         },
+         "thr": {
+          "dict": {
+           "trim": "f:0x1.06d9c62771814p-1",
+           "reserve_hi": "f:0x1.f24c73b11cfd8p-2",
+           "reserve_lo": "f:0x1.06d9c62771814p-1"
+          }
+         },
+         "alpha": {
+          "dict": {
+           "trim": "f:0x1.9a5632209f6d9p-4",
+           "stall": "f:0x1.5c28f5c28f5c2p-2",
+           "stall_reserve": "f:0x1.eb26d274cf018p-3",
+           "margin": "f:0x1.1eb851eb851ecp-5",
+           "limit": "f:0x1.3851eb851eb84p-2"
+          }
+         },
+         "elevon_roll_avail": "f:0x1.1866313b83c2ap-2"
+        }
+       }
       }
      },
      {
@@ -551,7 +653,40 @@
          "continuity_ok": false
         }
        },
-       "params_fingerprint": ""
+       "params_fingerprint": "",
+       "reserve": {
+        "dict": {
+         "de": {
+          "dict": {
+           "trim": "f:-0x1.48bb4a6e87e14p-3",
+           "lo": "f:-0x1.6666666666666p-2",
+           "hi": "f:0x1.6666666666666p-2",
+           "limit": "f:0x1.6666666666666p-2",
+           "reserve_hi": "f:0x1.056205ced52b8p-1",
+           "reserve_lo": "f:0x1.8411825e44eb8p-3",
+           "reserve": "f:0x1.8411825e44eb8p-3",
+           "frac": "f:0x1.d59dd80b9d8afp-2"
+          }
+         },
+         "thr": {
+          "dict": {
+           "trim": "f:0x1.1395121697777p-1",
+           "reserve_hi": "f:0x1.d8d5dbd2d1112p-2",
+           "reserve_lo": "f:0x1.1395121697777p-1"
+          }
+         },
+         "alpha": {
+          "dict": {
+           "trim": "f:0x1.81186d27eb760p-3",
+           "stall": "f:0x1.6666666666666p-2",
+           "stall_reserve": "f:0x1.4bb45fa4e156cp-3",
+           "margin": "f:0x1.1eb851eb851ecp-5",
+           "limit": "f:0x1.428f5c28f5c28p-2"
+          }
+         },
+         "elevon_roll_avail": "f:0x1.8411825e44eb8p-3"
+        }
+       }
       }
      }
     ]

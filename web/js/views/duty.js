@@ -269,6 +269,7 @@ function renderSummary(box, report) {
   // 한 줄 찍혔다 (이 리포의 상습 함정군)
   clear(box).append(el("div", {},
     summaryTable(report),
+    reserveBox(report.trim_reserve),
     report.warnings?.length
       ? el("p", { class: "hint", style: `color:${SEV_COLOR.warn}` },
         report.warnings.join(" "))
@@ -281,6 +282,32 @@ function renderSummary(box, report) {
       el("span", {}, el("span", { class: "chip", style: `background:${SEV_COLOR.bad}` }), "포화 1% 이상"),
       el("span", {}, el("span", { class: "chip", style: `background:${SEV_COLOR.na}` }), "판정 불가")),
   ));
+}
+
+/** 엘레본 여유 분해 — 트림 몫·기동 몫·가용 동적 여유 (01 §4.1). 수치는 엔진 보고서(trim_reserve)가 준다.
+ *  막대는 시작 트림 한계를 100 %로 두고 트림 몫·기동 편차 최대·남은 몫을 잇는다 — 기동 편차는 최대값이라 막대의 합이
+ *  시간상 한 순간은 아니다(가용 동적 여유 줄이 표본별 최악이다). */
+function reserveBox(r) {
+  if (!r || r.de_dyn_reserve_min_frac == null) {
+    return el("p", { class: "hint", style: "margin-top:10px" },
+      "가용 동적 여유 — 트림 여유 수치가 없는 결과라(지상 평형 출발·옛 저장물) 판정 불가입니다.");
+  }
+  const pct = (v) => `${fmt(v * 100.0, 1)} %`;
+  const clamp = (v) => Math.max(0, Math.min(100, v * 100.0));
+  const trim = r.de_trim_frac ?? 0;
+  const man = r.de_limit ? r.de_excursion_max / r.de_limit : 0;
+  const rest = Math.max(0, 1 - trim - man);
+  const seg = (w, color, title) => el("span", { title, style: `display:inline-block;height:12px;width:${clamp(w)}%;background:${color}` });
+  return el("div", { style: "margin-top:12px;max-width:640px" },
+    el("h3", { style: "margin:0 0 4px" }, "엘레본 여유 — 트림 몫 · 기동 몫 · 가용 동적 여유"),
+    el("div", { style: "border:1px solid #888;height:12px;white-space:nowrap;overflow:hidden" },
+      seg(trim, "#8e8e93", `트림 몫 ${pct(trim)}`), seg(man, SEV_COLOR.warn, `기동 편차 최대 ${pct(man)}`),
+      seg(rest, SEV_COLOR.ok, `남은 몫 ${pct(rest)}`)),
+    el("p", { class: "hint", style: "margin:4px 0 0" },
+      `트림 ${pct(trim)} · 기동 편차 최대 ${fmt(r.de_excursion_max, 4)} rad (${pct(man)}) · 가용 동적 여유 최악 `
+      + `${pct(r.de_dyn_reserve_min_frac)} · 기준선 ${r.reference === "alloc_table" ? "δe_trim(M) 할당 표" : "시작 트림"}`
+      + (r.thr_trim_reserve != null ? ` · 트림 추력 여유 ${pct(r.thr_trim_reserve)}` : "")
+      + (r.alpha_trim_reserve != null ? ` · 트림 실속 여유 ${fmt(r.alpha_trim_reserve, 3)} rad` : "")));
 }
 
 /** 읽는 법 — 표를 보다 막히는 자리들의 뜻. 패널 안이라 층을 하나 더 파지 않고

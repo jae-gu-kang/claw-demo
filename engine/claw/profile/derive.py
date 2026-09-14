@@ -39,7 +39,7 @@ REASON_NOT_CONVERGED = "de_trim_not_converged"
 REASON_CANCELLED = "de_trim_cancelled"
 REASON_TEXT = {
     REASON_NO_RANGE: "표 마하 격자를 정할 수 없다 — 문서에 δe_trim 표가 없고 공력 DB 마하 범위(aero.db_ranges.mach)도 없다",
-    REASON_NO_REQUIREMENT: "표 격자의 어느 마하에서도 수렴·비포화 트림이 없다 — 트림 탭에서 성립 영역을 먼저 확인한다",
+    REASON_NO_REQUIREMENT: "표 격자에서 수렴·비포화 트림이 있는 마하가 둘 미만이다 — 트림 탭에서 성립 영역을 먼저 확인한다",
     REASON_NOT_CONVERGED: "보정을 다 돌려도 검사 격자에 요구를 밑도는 점이 남았다",
     REASON_CANCELLED: "취소됐다",
 }
@@ -72,7 +72,9 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=DEFA
 
     alloc은 law.alloc 모양({resv_frac, de_trim{source "derived", table, provenance}}) — resv_frac은 문서 값을
     그대로 두고, 할당 섹션이 없던 기체면 법칙 기본값이다. 요구가 없는 표 격자 마하(모든 트림이 미수렴·포화)는
-    이웃 값으로 채우고 출처의 undefined_machs에 적는다. variants는 같은 문서의 형상 변형 BuiltProfile들 — 플랜트
+    **양 끝이면 표에서 뺀다** — 날 수 없는 마하에 이웃 값을 복사해 두면 없는 요구가 있는 것처럼 보인다(룩업은 표 끝에서
+    clip하므로 뺀 쪽이 거동은 같고 표는 정직하다). 가운데 빈 점만 이웃 값으로 채운다. 둘 다 출처에 적는다
+    (trimmed_machs · undefined_machs). variants는 같은 문서의 형상 변형 BuiltProfile들 — 플랜트
     지문이 기본 문서와 같은 변형은 다시 재지 않는다. alts를 주지 않으면 기체마다 운용 범위로 거른 DEFAULT_ALTS."""
     t0 = time.perf_counter()
     grid = _grid(built, machs)
@@ -104,15 +106,17 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=DEFA
                 worst = de if worst is None else max(worst, de)
         need[m] = worst
 
-    values, undefined = [], []
-    for g in grid:
-        values.append(need[round(g, 6)])
-        if values[-1] is None:
-            undefined.append(g)
-    known = [(g, v) for g, v in zip(grid, values) if v is not None]
-    if not known:
+    values = [need[round(g, 6)] for g in grid]
+    defined = [i for i, v in enumerate(values) if v is not None]
+    if len(defined) < 2:
         return {"ok": False, "reason": REASON_NO_REQUIREMENT, "reason_text": REASON_TEXT[REASON_NO_REQUIREMENT],
                 "alloc": None, "requirement": None, "elapsed_s": time.perf_counter() - t0}
+    first, last = defined[0], defined[-1]
+    trimmed = [g for i, g in enumerate(grid) if i < first or i > last]
+    grid, values = grid[first:last + 1], values[first:last + 1]
+    checks = [m for m in checks if grid[0] - 1e-9 <= m <= grid[-1] + 1e-9]
+    undefined = [g for g, v in zip(grid, values) if v is None]
+    known = [(g, v) for g, v in zip(grid, values) if v is not None]
     kg, kv = [g for g, _ in known], [v for _, v in known]
     values = [v if v is not None else float(np.interp(g, kg, kv)) for g, v in zip(grid, values)]
 
@@ -150,7 +154,7 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=DEFA
                     "configurations": [cfg.variant or "base" for cfg, *_ in configs],
                     "fuels": configs[0][2], "alts": configs[0][3], "check_step": check_step,
                     "iterations": iterations, "shortfall": len(short), "excess_max": excess,
-                    "excluded_trims": excluded, "undefined_machs": undefined,
+                    "excluded_trims": excluded, "undefined_machs": undefined, "trimmed_machs": trimmed,
                 },
             },
         },

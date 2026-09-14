@@ -1,7 +1,7 @@
 {
  "golden": "margin_map",
  "mode": "full",
- "captured_at": "02e96c7+dirty",
+ "captured_at": "654ec14+dirty",
  "value": {
   "dict": {
    "kind": "margin_map",
@@ -54,7 +54,40 @@
           ]
          }
         },
-        "params_fingerprint": "fp-mm"
+        "params_fingerprint": "fp-mm",
+        "reserve": {
+         "dict": {
+          "de": {
+           "dict": {
+            "trim": "f:-0x1.527f2ad2b07e5p-4",
+            "lo": "f:-0x1.6666666666666p-2",
+            "hi": "f:0x1.6666666666666p-2",
+            "limit": "f:0x1.6666666666666p-2",
+            "reserve_hi": "f:0x1.bb06311b1285fp-2",
+            "reserve_lo": "f:0x1.11c69bb1ba46dp-2",
+            "reserve": "f:0x1.11c69bb1ba46dp-2",
+            "frac": "f:0x1.e391189ab2fdap-3"
+           }
+          },
+          "thr": {
+           "dict": {
+            "trim": "f:0x1.e9e68e6ce1ed4p-2",
+            "reserve_hi": "f:0x1.0b0cb8c98f096p-1",
+            "reserve_lo": "f:0x1.e9e68e6ce1ed4p-2"
+           }
+          },
+          "alpha": {
+           "dict": {
+            "trim": "f:0x1.06c2ad7f1132bp-3",
+            "stall": "f:0x1.6147ae147ae14p-2",
+            "stall_reserve": "f:0x1.bbccaea9e48fdp-3",
+            "margin": "f:0x1.1eb851eb851ecp-5",
+            "limit": "f:0x1.3d70a3d70a3d6p-2"
+           }
+          },
+          "elevon_roll_avail": "f:0x1.11c69bb1ba46dp-2"
+         }
+        }
        }
       },
       "lon": {
@@ -272,7 +305,40 @@
           ]
          }
         },
-        "params_fingerprint": "fp-mm"
+        "params_fingerprint": "fp-mm",
+        "reserve": {
+         "dict": {
+          "de": {
+           "dict": {
+            "trim": "f:-0x1.dfabd7607f194p-5",
+            "lo": "f:-0x1.6666666666666p-2",
+            "hi": "f:0x1.6666666666666p-2",
+            "limit": "f:0x1.6666666666666p-2",
+            "reserve_hi": "f:0x1.a25be15276498p-2",
+            "reserve_lo": "f:0x1.2a70eb7a56834p-2",
+            "reserve": "f:0x1.2a70eb7a56834p-2",
+            "frac": "f:0x1.569f50b2a3ed8p-3"
+           }
+          },
+          "thr": {
+           "dict": {
+            "trim": "f:0x1.06e1c0a6ae55dp-1",
+            "reserve_hi": "f:0x1.f23c7eb2a3546p-2",
+            "reserve_lo": "f:0x1.06e1c0a6ae55dp-1"
+           }
+          },
+          "alpha": {
+           "dict": {
+            "trim": "f:0x1.9231cb27dbf1bp-4",
+            "stall": "f:0x1.5c28f5c28f5c2p-2",
+            "stall_reserve": "f:0x1.ef3905f130bf6p-3",
+            "margin": "f:0x1.1eb851eb851ecp-5",
+            "limit": "f:0x1.3851eb851eb84p-2"
+           }
+          },
+          "elevon_roll_avail": "f:0x1.2a70eb7a56834p-2"
+         }
+        }
        }
       },
       "lon": {
@@ -490,7 +556,40 @@
           ]
          }
         },
-        "params_fingerprint": "fp-mm"
+        "params_fingerprint": "fp-mm",
+        "reserve": {
+         "dict": {
+          "de": {
+           "dict": {
+            "trim": "f:-0x1.56b62e7b70c6ap-5",
+            "lo": "f:-0x1.6666666666666p-2",
+            "hi": "f:0x1.6666666666666p-2",
+            "limit": "f:0x1.6666666666666p-2",
+            "reserve_hi": "f:0x1.913d2c35d47f3p-2",
+            "reserve_lo": "f:0x1.3b8fa096f84d9p-2",
+            "reserve": "f:0x1.3b8fa096f84d9p-2",
+            "frac": "f:0x1.e9968b8bc5ae1p-4"
+           }
+          },
+          "thr": {
+           "dict": {
+            "trim": "f:0x1.2789decd74d6fp-1",
+            "reserve_hi": "f:0x1.b0ec426516522p-2",
+            "reserve_lo": "f:0x1.2789decd74d6fp-1"
+           }
+          },
+          "alpha": {
+           "dict": {
+            "trim": "f:0x1.3c98427579e58p-4",
+            "stall": "f:0x1.570a3d70a3d71p-2",
+            "stall_reserve": "f:0x1.07e42cd3455dbp-2",
+            "margin": "f:0x1.1eb851eb851ecp-5",
+            "limit": "f:0x1.3333333333334p-2"
+           }
+          },
+          "elevon_roll_avail": "f:0x1.3b8fa096f84d9p-2"
+         }
+        }
        }
       },
       "lon": {

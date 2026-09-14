@@ -527,3 +527,37 @@ def test_verify_공력축은_축마다_판정하고_못_흔든_축은_통과로_
     tagged = verify(example_profile().aircraft, [_CASE], Shape(profile=example_profile()), crit, depth="linear")
     assert tagged["verify"]["aero_coeff"]["note"] is None
     assert tagged["verify"]["aero_coeff"]["axes"]["cmq"]["n_judged"] == 2
+
+
+
+def test_가용_동적_여유는_트림은_되지만_기동_여유가_없는_점을_하드로_잡는다():
+    """⑦ 안의 하드 게이트 authority.dynamic_reserve — 표준·동시명령 런의 최악이 하한 아래면 fail (01 §4.1).
+
+    잔여 권한(배분 한계)이 하한을 넘어도 잡는다 — 예제 M0.3·3 km·만재 동시명령 런이 잔여 권한 24 %·가용 동적 여유 3.0 %였다.
+    트림 소모율은 트림 해의 reserve 수치를 읽고, 트림 추력 여유가 경고선 아래면 warn이다."""
+    from types import SimpleNamespace
+
+    from claw.pipeline.evaluate import HARD_CHECKS, _authority_stage
+
+    assert "authority.dynamic_reserve" in HARD_CHECKS
+    crit = GainEvalCriteria()
+    tr = SimpleNamespace(control=SimpleNamespace(elevon=[-0.188]),
+                         reserve={"de": {"frac": 0.5381}, "thr": {"reserve_hi": 0.1129}})
+    thin = {"de_dyn_reserve_min_frac": 0.0444, "de_excursion_max": 0.146, "min_pitch_authority_frac": 0.61,
+            "min_roll_authority_frac": 0.31}
+    combined = {**thin, "de_dyn_reserve_min_frac": 0.0124, "de_excursion_max": 0.157}
+    stage, fails = _authority_stage(tr, thin, crit, (-0.35, 0.35), combined)
+    assert stage["trim"]["frac"] == 0.5381  # reserve 수치 그대로 — 부호 쪽 한계로 다시 나누지 않는다
+    assert stage["inflight"]["status"] == "ok"  # 잔여 권한 게이트는 통과한다
+    assert stage["dynamic"]["status"] == "fail" and stage["dynamic"]["run"] == "combined"
+    assert stage["dynamic"]["value"] == 0.0124 and stage["status"] == "fail"
+    assert [f["check"] for f in fails] == ["authority.dynamic_reserve"]
+    assert stage["thr_trim"]["status"] == "ok"
+
+    roomy = {**thin, "de_dyn_reserve_min_frac": 0.61}
+    low_thr = SimpleNamespace(control=tr.control, reserve={"de": {"frac": 0.04}, "thr": {"reserve_hi": 0.0496}})
+    stage, fails = _authority_stage(low_thr, roomy, crit, (-0.35, 0.35), None)
+    assert fails == [] and stage["dynamic"]["status"] == "ok" and stage["thr_trim"]["status"] == "warn"
+    # 선형 단계·트림 여유 없는 저장물은 판정 불가 — 통과로 위장하지 않는다
+    stage, fails = _authority_stage(SimpleNamespace(control=tr.control, reserve={}), None, crit, (-0.35, 0.35))
+    assert stage["dynamic"]["status"] == "na" and stage["thr_trim"]["status"] == "na" and fails == []

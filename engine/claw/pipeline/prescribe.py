@@ -47,6 +47,7 @@ def _targets(crit: GainEvalCriteria):
             out.append((mkey, float(limit), True))
     out.append(("surf_sat_frac", float(crit.actuator.sat_frac_max), True))
     out.append(("worst_stall_margin", float(crit.envelope.alpha_margin_min), False))
+    out.append(("de_dyn_reserve_min_frac", float(crit.authority.dyn_reserve_min_frac), False))
     return out
 
 

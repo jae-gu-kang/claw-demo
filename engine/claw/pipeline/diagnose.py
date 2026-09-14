@@ -580,6 +580,8 @@ _GRID_CHECKS = {
     "surf_sat_frac": (SAT_FRAC_WARN, True),
     "limiter_frac": (LIMITER_FRAC, True),
     "worst_stall_margin": (0.0, False),
+    # 가용 동적 여유 — 격자에서 도는 기본 문턱은 AuthorityCriteria 기본값이고 criteria.to_grid_thresholds가 덮는다
+    "de_dyn_reserve_min_frac": (0.05, False),
 }
 
 

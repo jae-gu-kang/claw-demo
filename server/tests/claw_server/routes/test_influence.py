@@ -29,7 +29,7 @@ def test_structural_node_census(client):
     assert kinds["ir"] == 78 and kinds["input"] == 23 and kinds["output"] == 7
     # 지표 12 → 29: 응답특성(축별 Tr·Ts·Mp·sse 12종)·잔여 권한 2종·포화 최장 지속
     # (v0.56), 추력 포화율·최소 여유 2종(v0.72) — 키는 전부 신규, rename 없음
-    assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 29
+    assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 34
 
 
 def test_structural_is_json_safe(client):

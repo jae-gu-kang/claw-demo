@@ -347,3 +347,24 @@ def test_duty_report_accepts_json_roundtrip_payload(trim_design):
     ref = duty_report(res.t, res.signals, res.meta)
     assert rep["channels"][0]["stats"]["max_abs"] == pytest.approx(
         ref["channels"][0]["stats"]["max_abs"])
+
+
+
+def test_duty_report_splits_elevon_use_into_trim_and_maneuver_shares():
+    """타면 사용 보고서가 트림 몫·기동 몫·가용 동적 여유를 싣는다 — 지표 정본(trim_reserve_breakdown)과 같은 수 (01 §4.1)."""
+    from claw.pipeline.metrics import metric_values, trim_reserve_breakdown
+    from claw.profile import example_profile
+    from claw.trim import trim_level
+    from claw.common.contracts import TrimCase
+
+    ac = example_profile().aircraft()
+    tr = trim_level(ac, TrimCase("d", mach=0.45, alt=1000.0, fuel=200.0))
+    res = make_sim(ac, tr, actuator_params={}).run(tr, t_end=3.0)
+    rep = duty_report(res.t, res.signals, res.meta)
+    br = rep["trim_reserve"]
+    assert br == trim_reserve_breakdown(res.signals, res.meta)
+    assert br["reference"] == "start_trim" and br["de_limit"] == 0.35
+    assert br["de_trim_frac"] == tr.reserve["de"]["frac"] and br["thr_trim_reserve"] == tr.reserve["thr"]["reserve_hi"]
+    assert 0.0 < br["de_dyn_reserve_min_frac"] <= 1.0 - br["de_trim_frac"] + 1e-12
+    m = metric_values(res.t, res.signals, res.envelope, res.meta)
+    assert m["de_dyn_reserve_min_frac"] == br["de_dyn_reserve_min_frac"] and "de_limit" not in m

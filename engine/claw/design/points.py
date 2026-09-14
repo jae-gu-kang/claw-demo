@@ -43,7 +43,10 @@ def envelope_ok(tr) -> bool:
 
 
 def envelope_verdict(tr, de_bounds) -> dict:
-    """envelope_ok + 실패 사유 귀속 — {"ok", "reasons"} (설계 엔벨로프 스캔용).
+    """envelope_ok + 실패 사유 귀속 + 여유 수치 — {"ok", "reasons", "reserve"} (설계 엔벨로프 스캔용).
+
+    reserve는 판정의 근거 수치다(TrimResult.reserve 요약 — δe 소모율·트림 추력 여유·실속 여유·α 판정 한계). 트림이
+    여유를 계산하지 않았으면(지상 평형·옛 해) None.
 
     ok는 반드시 envelope_ok() 호출 — 판정 정본(01 §4.1)을 재기술하지 않는다.
     reasons는 해당되는 사유 전부, 우선순위 순(첫 항목이 표시 대표):
@@ -63,7 +66,12 @@ def envelope_verdict(tr, de_bounds) -> dict:
         reasons.append("saturated_de")
     if sat["throttle_low"]:
         reasons.append("saturated_throttle_low")
-    return {"ok": envelope_ok(tr), "reasons": reasons}
+    r = getattr(tr, "reserve", None) or {}
+    reserve = None if not r else {
+        "de_frac": r["de"]["frac"], "thr_reserve": r["thr"]["reserve_hi"],
+        "alpha_stall_reserve": r["alpha"]["stall_reserve"], "alpha_limit": r["alpha"]["limit"],
+    }
+    return {"ok": envelope_ok(tr), "reasons": reasons, "reserve": reserve}
 
 
 def case_name(mach: float, alt: float, fuel: float) -> str:

@@ -77,8 +77,8 @@ def test_flag_false_paths(ac):
         [TrimCase("a", 0.4, 100.0, 200.0), TrimCase("b", 0.8, 100.0, 200.0)],
     )
     assert jump[1].flags["continuity_ok"] is False
-    # α 여유: 저속·최대중량 — 해가 α 상한으로 몰려 여유 침범 (수렴 여부와 무관한 판정)
-    tr = trim_level(ac, TrimCase("higha", mach=0.15, alt=100.0, fuel=400.0))
+    # α 여유: 저속·고고도·최대중량 — 해가 실속각 − 여유 위로 몰린다 (수렴 여부와 무관한 판정)
+    tr = trim_level(ac, TrimCase("higha", mach=0.2, alt=3000.0, fuel=400.0))
     assert tr.flags["alpha_margin_ok"] is False
     # 포화: 약한 엔진 → 스로틀 한계 도달
     from claw.plant import TwinEngine
@@ -237,14 +237,17 @@ def test_trim_dispatcher_reads_the_condition_field(ac, ac_ground):
 # web/js/lib/manualdoc.js, web/js/views/subsystems.js). 인용은 스윕에서 빠지기
 # 마련이라 **한 자리에서 못박는다** — 여기가 그 자리다.
 #
-# 반올림은 **안쪽으로** 한다. 실측 하한 0.205를 "M0.20"으로 적으면 화면이 못 나는
+# v1.07에서 α 판정이 실속 표 기준으로 바뀌어 하한이 M0.01씩 내려왔다(실속각이 트림 탐색 상한보다 큰 저속에서
+# 탐색 상한 상수에 막히던 점이 풀렸다). 상한·천장은 추력이 정해 그대로다.
+#
+# 반올림은 **안쪽으로** 한다. 실측 하한 0.196을 "M0.19"로 적으면 화면이 못 나는
 # 점을 난다고 말하게 된다 — 이 저장소가 계속 걸러 온 방향의 오류다. 상한도 같은
 # 이유로 내림이다(0.602 → 0.60).
 SEA_LEVEL_BAND = {  # 연료(kg): (하한, 상한) — 0.001 격자 실측을 안쪽으로 반올림
-    0.0: (0.19, 0.61),    # 실측 0.184 ~ 0.617
-    200.0: (0.21, 0.60),  # 실측 0.205 ~ 0.602  ← 앱 기본값
-    300.0: (0.22, 0.59),  # 실측 0.215 ~ 0.593
-    400.0: (0.23, 0.58),  # 실측 0.225 ~ 0.582
+    0.0: (0.18, 0.61),    # 실측 0.174 ~ 0.617
+    200.0: (0.20, 0.60),  # 실측 0.196 ~ 0.602  ← 앱 기본값
+    300.0: (0.21, 0.59),  # 실측 0.206 ~ 0.593
+    400.0: (0.22, 0.58),  # 실측 0.217 ~ 0.582
 }
 
 
@@ -352,3 +355,27 @@ def test_saturation_channels_use_the_limit_on_each_side():
     assert _saturation_channels(0.30, 0.5, asym)["de"] is False  # |δe|=0.30 > 0.19여도 양의 쪽은 상한
     assert _saturation_channels(0.34, 0.5, asym)["de"] is True
 
+
+
+def test_트림_여유_수치가_판정의_근거다(ac):
+    """α 판정은 실속 표 기준(α < α_stall(M) − 여유)이고, 플래그는 reserve 수치에서 나온다 (01 §4.1).
+
+    종전 기준(탐색 상한 0.35 − 0.035)이면 M0.20·해면·연료 200 kg(α 0.328)은 α 여유 실패였다 — 실속각 0.375 아래라
+    실속 여유는 남아 있었는데 실속과 무관한 상수에 막혔다."""
+    from claw.profile import example_profile
+
+    stall = example_profile().stall_table()
+    for case in (TrimCase("low", mach=0.2, alt=0.0, fuel=200.0), TrimCase("mid", mach=0.45, alt=1000.0, fuel=200.0),
+                 TrimCase("higha", mach=0.2, alt=3000.0, fuel=400.0)):
+        tr = trim_level(ac, case)
+        r = tr.reserve
+        alpha, de, thr = r["alpha"]["trim"], r["de"]["trim"], r["thr"]["trim"]
+        assert alpha == pytest.approx(float(tr.state.euler()[1]), abs=1e-12) and de == float(tr.control.elevon[0])
+        assert r["alpha"]["stall"] == float(stall.interp(mach=case.mach))
+        assert r["alpha"]["limit"] == r["alpha"]["stall"] - 0.035
+        assert tr.flags["alpha_margin_ok"] is (alpha < r["alpha"]["limit"])
+        lim = 0.35  # 예제 엘레본 ±0.35 — 부호 쪽 한계
+        assert r["de"]["frac"] == abs(de) / lim and r["de"]["reserve"] == lim - abs(de)
+        assert r["thr"]["reserve_hi"] == 1.0 - thr and r["elevon_roll_avail"] == 0.35 - abs(de)
+    low = trim_level(ac, TrimCase("low", mach=0.2, alt=0.0, fuel=200.0))
+    assert low.converged and low.flags["alpha_margin_ok"] is True and low.reserve["alpha"]["trim"] > 0.315

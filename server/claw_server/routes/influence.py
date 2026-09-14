@@ -55,6 +55,7 @@ _HARD_CHECK_METRICS = {
     "actuator.sat_frac": ("surf_sat_frac",),
     "coupling.stall_margin": ("worst_stall_margin",),
     "coupling.sat_frac": ("surf_sat_frac",),
+    "authority.dynamic_reserve": ("de_dyn_reserve_min_frac",),
 }
 
 

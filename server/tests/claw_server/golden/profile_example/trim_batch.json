@@ -1,7 +1,7 @@
 {
  "golden": "trim_batch",
  "mode": "full",
- "captured_at": "02e96c7+dirty",
+ "captured_at": "654ec14+dirty",
  "value": {
   "dict": {
    "kind": "trim_batch",
@@ -52,7 +52,40 @@
         ]
        }
       },
-      "params_fingerprint": "fp-golden"
+      "params_fingerprint": "fp-golden",
+      "reserve": {
+       "dict": {
+        "de": {
+         "dict": {
+          "trim": "f:-0x1.dfabd58f247b3p-5",
+          "lo": "f:-0x1.6666666666666p-2",
+          "hi": "f:0x1.6666666666666p-2",
+          "limit": "f:0x1.6666666666666p-2",
+          "reserve_hi": "f:0x1.a25be1184af5cp-2",
+          "reserve_lo": "f:0x1.2a70ebb481d70p-2",
+          "reserve": "f:0x1.2a70ebb481d70p-2",
+          "frac": "f:0x1.569f4f663ea13p-3"
+         }
+        },
+        "thr": {
+         "dict": {
+          "trim": "f:0x1.06e1c08de4d47p-1",
+          "reserve_hi": "f:0x1.f23c7ee436572p-2",
+          "reserve_lo": "f:0x1.06e1c08de4d47p-1"
+         }
+        },
+        "alpha": {
+         "dict": {
+          "trim": "f:0x1.9231cae695fd2p-4",
+          "stall": "f:0x1.5c28f5c28f5c2p-2",
+          "stall_reserve": "f:0x1.ef390611d3b9bp-3",
+          "margin": "f:0x1.1eb851eb851ecp-5",
+          "limit": "f:0x1.3851eb851eb84p-2"
+         }
+        },
+        "elevon_roll_avail": "f:0x1.2a70ebb481d70p-2"
+       }
+      }
      }
     },
     {
@@ -101,7 +134,40 @@
         ]
        }
       },
-      "params_fingerprint": "fp-golden"
+      "params_fingerprint": "fp-golden",
+      "reserve": {
+       "dict": {
+        "de": {
+         "dict": {
+          "trim": "f:-0x1.56b62e7b70c74p-5",
+          "lo": "f:-0x1.6666666666666p-2",
+          "hi": "f:0x1.6666666666666p-2",
+          "limit": "f:0x1.6666666666666p-2",
+          "reserve_hi": "f:0x1.913d2c35d47f4p-2",
+          "reserve_lo": "f:0x1.3b8fa096f84d8p-2",
+          "reserve": "f:0x1.3b8fa096f84d8p-2",
+          "frac": "f:0x1.e9968b8bc5aefp-4"
+         }
+        },
+        "thr": {
+         "dict": {
+          "trim": "f:0x1.2789decd74d6bp-1",
+          "reserve_hi": "f:0x1.b0ec42651652ap-2",
+          "reserve_lo": "f:0x1.2789decd74d6bp-1"
+         }
+        },
+        "alpha": {
+         "dict": {
+          "trim": "f:0x1.3c98427579e58p-4",
+          "stall": "f:0x1.570a3d70a3d71p-2",
+          "stall_reserve": "f:0x1.07e42cd3455dbp-2",
+          "margin": "f:0x1.1eb851eb851ecp-5",
+          "limit": "f:0x1.3333333333334p-2"
+         }
+        },
+        "elevon_roll_avail": "f:0x1.3b8fa096f84d8p-2"
+       }
+      }
      }
     },
     {
@@ -150,7 +216,40 @@
         ]
        }
       },
-      "params_fingerprint": "fp-golden"
+      "params_fingerprint": "fp-golden",
+      "reserve": {
+       "dict": {
+        "de": {
+         "dict": {
+          "trim": "f:-0x1.e824869cdd4f0p-6",
+          "lo": "f:-0x1.6666666666666p-2",
+          "hi": "f:0x1.6666666666666p-2",
+          "limit": "f:0x1.6666666666666p-2",
+          "reserve_hi": "f:0x1.84e8aed0343b5p-2",
+          "reserve_lo": "f:0x1.47e41dfc98917p-2",
+          "reserve": "f:0x1.47e41dfc98917p-2",
+          "frac": "f:0x1.5cac6026e7387p-4"
+         }
+        },
+        "thr": {
+         "dict": {
+          "trim": "f:0x1.57453b002e09ap-1",
+          "reserve_hi": "f:0x1.517589ffa3eccp-2",
+          "reserve_lo": "f:0x1.57453b002e09ap-1"
+         }
+        },
+        "alpha": {
+         "dict": {
+          "trim": "f:0x1.fde39eed09131p-5",
+          "stall": "f:0x1.51eb851eb851fp-2",
+          "stall_reserve": "f:0x1.122f1141172f9p-2",
+          "margin": "f:0x1.1eb851eb851ecp-5",
+          "limit": "f:0x1.2e147ae147ae2p-2"
+         }
+        },
+        "elevon_roll_avail": "f:0x1.47e41dfc98917p-2"
+       }
+      }
      }
     },
     {
@@ -199,7 +298,40 @@
         ]
        }
       },
-      "params_fingerprint": "fp-golden"
+      "params_fingerprint": "fp-golden",
+      "reserve": {
+       "dict": {
+        "de": {
+         "dict": {
+          "trim": "f:-0x1.cbad4dedef4bbp-7",
+          "lo": "f:-0x1.6666666666666p-2",
+          "hi": "f:0x1.6666666666666p-2",
+          "limit": "f:0x1.6666666666666p-2",
+          "reserve_hi": "f:0x1.74c3d0d5d5e0cp-2",
+          "reserve_lo": "f:0x1.5808fbf6f6ec0p-2",
+          "reserve": "f:0x1.5808fbf6f6ec0p-2",
+          "frac": "f:0x1.485737a9f4118p-5"
+         }
+        },
+        "thr": {
+         "dict": {
+          "trim": "f:0x1.e69fc532cb107p-1",
+          "reserve_hi": "f:0x1.9603acd34ef90p-5",
+          "reserve_lo": "f:0x1.e69fc532cb107p-1"
+         }
+        },
+        "alpha": {
+         "dict": {
+          "trim": "f:0x1.5c72f31fbb45ap-5",
+          "stall": "f:0x1.428f5c28f5c29p-2",
+          "stall_reserve": "f:0x1.1700fdc4fe59ep-2",
+          "margin": "f:0x1.1eb851eb851ecp-5",
+          "limit": "f:0x1.1eb851eb851ecp-2"
+         }
+        },
+        "elevon_roll_avail": "f:0x1.5808fbf6f6ec0p-2"
+       }
+      }
      }
     },
     {
@@ -248,7 +380,40 @@
         ]
        }
       },
-      "params_fingerprint": "fp-golden"
+      "params_fingerprint": "fp-golden",
+      "reserve": {
+       "dict": {
+        "de": {
+         "dict": {
+          "trim": "f:-0x1.23fd1cdb474fap-8",
+          "lo": "f:-0x1.6666666666666p-2",
+          "hi": "f:0x1.6666666666666p-2",
+          "limit": "f:0x1.6666666666666p-2",
+          "reserve_hi": "f:0x1.6af65ad9d383ap-2",
+          "reserve_lo": "f:0x1.61d671f2f9492p-2",
+          "reserve": "f:0x1.61d671f2f9492p-2",
+          "frac": "f:0x1.a120725dd3966p-7"
+         }
+        },
+        "thr": {
+         "dict": {
+          "trim": "f:0x1.0000000000000p+0",
+          "reserve_hi": "f:0x0.0p+0",
+          "reserve_lo": "f:0x1.0000000000000p+0"
+         }
+        },
+        "alpha": {
+         "dict": {
+          "trim": "f:0x1.f4d80742f76c7p-6",
+          "stall": "f:0x1.3333333333333p-2",
+          "stall_reserve": "f:0x1.13e5b2bf03bc7p-2",
+          "margin": "f:0x1.1eb851eb851ecp-5",
+          "limit": "f:0x1.0f5c28f5c28f6p-2"
+         }
+        },
+        "elevon_roll_avail": "f:0x1.61d671f2f9492p-2"
+       }
+      }
      }
     }
    ],
