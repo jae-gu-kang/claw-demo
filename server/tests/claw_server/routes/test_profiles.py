@@ -122,6 +122,26 @@ def test_form_spec_is_served_and_does_not_shadow_profile_ids(client):
     assert client.post("/api/profiles", json={"document": _doc(pid="_form")}).status_code == 422
 
 
+def test_aero_slice_draws_from_the_posted_document(client):
+    """저장하지 않은 문서로도 곡선을 낸다 — 편집기에서 표를 반입한 직후 보는 자리."""
+    doc = _doc()
+    body = {"document": doc, "along": "alpha", "start": -0.1, "stop": 0.4, "n": 11, "fixed": {"mach": 0.4}}
+    r = client.post("/api/profiles/aero-slice", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert len(out["x"]) == 11 and len(out["coefficients"]["CL"]) == 11
+    assert out["stall"]["table_at"] is not None and out["fixed"]["mach"] == 0.4
+    assert client.post("/api/profiles/aero-slice", json={**body, "variant": "full-stores"}).status_code == 200
+    assert client.post("/api/profiles/aero-slice", json={**body, "variant": "nope"}).status_code == 422
+    assert client.post("/api/profiles/aero-slice", json={**body, "along": "qhat"}).status_code == 422
+    assert client.post("/api/profiles/aero-slice", json={**body, "n": 1000}).status_code == 422
+    bad = _doc()
+    bad["aero"]["coefficients"]["CL"][0]["k"] = {"table": {"axes": {"zzz": [0.0, 1.0]}, "data": [1.0, 2.0],
+                                                           "extrapolate": "clip"}}
+    r = client.post("/api/profiles/aero-slice", json={**body, "document": bad})
+    assert r.status_code == 422 and r.json()["detail"]["path"] == "/aero/coefficients/CL/0/k/table/axes/zzz"
+
+
 def test_parse_table_reads_csv_text(client):
     ok = client.post("/api/profiles/parse-table", json={
         "csv_text": "mach,alpha_stall\n0.1,0.4\n0.5,0.33\n",
@@ -326,3 +346,4 @@ def test_resume_snapshot_keeps_the_saved_aircraft_identity(client, wait_job):
     resumed = resolve_snapshot(req, profile_echo(mine))
     assert (resumed.id, resumed.is_example, resumed.revision, resumed.source) == ("my-clone", False, 1, "snapshot")
     assert resolve_snapshot(req, None).source == "legacy-unrecorded"
+

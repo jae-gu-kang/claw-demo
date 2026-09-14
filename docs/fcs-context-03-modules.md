@@ -102,6 +102,8 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
 - 1D/2D/nD Lookup(보간·외삽 옵션), 공력 DB 로더(CSV/Excel→pandas→내부 포맷), 실속 경계
   테이블(공력팀 정본), DB 유효범위 질의(엔벨로프 플래그의 근거), DB 뷰어용 슬라이스 추출(CL–α
   곡선 등)
+- 스칼라 보간 `scalar.ScalarTable`(v1.05) — 점 하나 질의 전용이고 `Table.interp`와 비트 단위로
+  같다. 공력 표 항이 시뮬 스텝마다 부른다(02 §5.6)
 - **[TBD]** 보간 방식·외삽 정책·테이블 규격 (02 §5.1 · 02 §5.3)
 - 의존: M0
 
@@ -319,6 +321,8 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
   검증기 몫이다
 - 선택 절 `mission_template`(화면 기본값) — 계산에 쓰이지 않아 지문 밖이고, 문서에 없으면
   없음으로 채운다(스키마 버전 불변, 02 §5.6)
+- 공력 표 항(k = 표, 02 §5.6)과 공력 DB 뷰어 계산 `aeroview.aero_slice` — 문서의 계수 계산기로
+  한 축 곡선·풍축 역변환·실속 표 대조(02 §5.2). 서버 창구는 `POST /profiles/aero-slice`
 - 예제 문서는 패키지 데이터(`examples/*.json`, engine pyproject package-data)다 — 폐쇄망 휠에서
   빠지면 예제 기체가 사라진다
 - 의존: M0, M1(REGISTRY·canonical_hash), M3(Table), M5(조립 부품), M7(design_gains·SCHEDULABLE —

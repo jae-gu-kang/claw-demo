@@ -231,6 +231,9 @@ export function writeValues(doc, variantId, pairs) {
  *  직후 [행 추가]를 눌러도 방금 친 값이 산다. 받지 않는 것은 폼이 그 편집 기록의 것이 아닐 때뿐이다(그사이
  *  다른 기체를 열었거나 JSON 글로 옮겼다 — 네트워크를 기다린 쓰기가 여기 걸린다).
  *  돌려주는 것: {reject} | {error} | {obj, text}. */
+/** 쓰기 fn이 던지는 **사유 그대로** 보일 알림 — 문서 모양 오류가 아니라 "이 쓰기를 하지 않았다"는 안내. */
+export class FormNotice extends Error {}
+
 export function formUpdate({ state, owner, fn, async = false }) {
   if (!state || state !== owner || state.mode !== "form") {
     return { reject: async
@@ -241,7 +244,67 @@ export function formUpdate({ state, owner, fn, async = false }) {
   try {
     next = fn(state.obj);
   } catch (e) {
+    if (e instanceof FormNotice) return { error: e.message };
     return { error: `값을 쓰지 못했습니다 — ${e.message} (JSON 글에서 문서 모양을 확인하세요)` };
   }
   return { obj: next, text: JSON.stringify(next, null, 1) };
+}
+
+/** 공력 항 k가 표면 한 줄 요약 — "표 alpha×mach · 7×3칸 · clip". 수치면 null. */
+export function tableSummary(k) {
+  const t = k?.table;
+  if (!t?.axes) return null;
+  const names = Object.keys(t.axes);
+  return `표 ${names.join("×")} · ${names.map((n) => t.axes[n].length).join("×")}칸 · ${t.extrapolate}`;
+}
+
+/** `/profiles/parse-table` 응답 → 공력 항 k({table}). 축 이름이 허용 목록 밖이면 사유 — 서버 검증 전에 막는다. */
+export function aeroTableFromParsed(parsed, allowedAxes) {
+  const names = Object.keys(parsed?.axes ?? {});
+  if (!names.length) return { error: "표 축이 없습니다" };
+  const bad = names.filter((n) => !(allowedAxes ?? []).includes(n));
+  if (bad.length) return { error: `허용하지 않는 축: ${bad.join(", ")} — 허용 ${(allowedAxes ?? []).join(", ")}` };
+  return { value: { table: { axes: parsed.axes, data: parsed.data, extrapolate: parsed.extrapolate } } };
+}
+
+/** 뷰어 칸 글 → `/profiles/aero-slice` 본문(document·variant 제외). 틀린 칸은 모아서 사유로. */
+export function sliceBody(form, axes) {
+  const errors = [];
+  const num = (label, raw) => {
+    const r = parseNum(raw);
+    if (r.error) errors.push(`${label}: ${r.error}`);
+    return r.value;
+  };
+  const body = {
+    along: form.along,
+    start: num("시작", form.start),
+    stop: num("끝", form.stop),
+    n: num("점 수", form.n),
+    fixed: {},
+  };
+  for (const a of axes) {
+    if (a !== form.along) body.fixed[a] = num(a, form.fixed?.[a]);
+  }
+  if (!errors.length && !(body.start < body.stop)) errors.push("시작 < 끝이어야 합니다");
+  if (!errors.length && !(Number.isInteger(body.n) && body.n >= 2)) errors.push("점 수는 2 이상 정수입니다");
+  return errors.length ? { error: errors.join(" · ") } : { value: body };
+}
+
+/** 뷰어 응답의 실속 대조 한 줄 — 추출은 참고, 정본은 실속 표다. */
+export function stallNote(slice) {
+  const st = slice?.stall;
+  if (!st) return "";
+  const r = (v) => (v == null ? "—" : `${v.toFixed(4)} rad`);
+  if (slice.along === "alpha") {
+    // 추출은 CL을 만드는 표의 α 격자·DB 유효 범위 안에서만 한다 — 그 밖은 외삽이라 꺾여도 표 끝이다
+    const [lo, hi] = st.window ?? [null, null];
+    const win = lo == null && hi == null ? ""
+      : ` (추출 구간 α [${lo == null ? "−∞" : lo}, ${hi == null ? "∞" : hi}] — 표 격자·DB 유효 범위)`;
+    return st.extracted == null
+      ? `실속 표 α_stall(M=${slice.fixed.mach}) = ${r(st.table_at)} · 곡선 추출: ${st.reason}${win}`
+      : `실속 표 α_stall(M=${slice.fixed.mach}) = ${r(st.table_at)} · 곡선 추출(CL이 오르다 떨어지는 꼭대기) = `
+        + `${r(st.extracted)} · 차이 ${r(st.delta)} (정본은 실속 표)${win}`;
+  }
+  if (slice.along === "mach" && st.table_curve) return "아래 그림은 실속 표 α_stall(M) — 같은 마하 축";
+  return "";
 }

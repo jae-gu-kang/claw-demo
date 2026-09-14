@@ -39,6 +39,19 @@ AERO_FORMS = {
 TERM_INPUTS = ("alpha", "beta", "V", "mach", "phat", "qhat", "rhat", "de", "da", "dr")
 # 형식·계수별로 더 받는 입력 — 양력·항력형 CD의 유도항력 항만 CL을 곱할 수 있다
 TERM_EXTRA_INPUTS = {("lift_drag", "CD"): ("CL",)}
+# 항의 k를 **표**로 줄 때 쓸 수 있는 축 — 공력 DB의 조건 축(01 §2.3). 무차원 각속도·V는 표 축이 아니라 곱하는
+# 입력이고(동미계수), 고도는 입력이 아니라 표 축으로만 들어온다(계수에 고도를 곱할 일은 없다)
+TABLE_AXES = ("alpha", "beta", "mach", "alt", "de", "da", "dr")
+TABLE_POLICIES = ("clip", "linear", "error")  # tables/table.py 외삽 정책
+MAX_TABLE_CELLS = 100_000  # 표 한 장의 칸 상한
+# 문서 한 벌의 표 칸 합 상한 — 기본 문서 칸 × (1 + 형상 변형 수) + 변형이 넣는 표 칸. 한 장 상한만으로는 못 막는다:
+# 저장소가 읽을 때마다 문서를 다시 검증하고 형상 변형마다 **문서 전체**를 다시 검증·지문하므로 칸이 변형 수만큼
+# 곱해진다(실측: 10만 칸 표 10장 + 변형 16개 → 검증 7.6 s + 지문 11.6 s, 요청마다)
+MAX_DOCUMENT_TABLE_CELLS = 400_000
+# 계수 계산 한 번에 도는 표 모서리 합(표마다 2^축 수) 상한 — 시뮬·스캔이 계수를 스텝마다 부르므로 요청 한 번이
+# CPU를 물지 않게(7축 표 60개 → 뷰어 401점 1.7 s). 항 수 상한도 같은 이유다
+MAX_TABLE_CORNERS = 1024
+MAX_TERMS_PER_COEF = 200
 # 섭동 태그 → (허용 계수, 항에 반드시 있어야 할 입력). 태그가 없는 축은 흔들 수 없다
 DISPERSION_TAGS = {"cmalpha": ("Cm", "alpha"), "cmq": ("Cm", "qhat")}
 LAYOUTS = ("elevon4_rudder1",)  # [한계] 법칙 템플릿이 하나라 배치도 하나다
@@ -194,15 +207,57 @@ def _component(v, path, category, *, reserved=()):
                                                   reserved=reserved, type_path=f"{path}/type")}
 
 
+def _nested(v, shape, path):
+    if not shape:
+        return _num(v, path)
+    if not isinstance(v, list) or len(v) != shape[0]:
+        _fail(path, f"길이 {shape[0]} 목록이어야 함 (축을 적은 순서대로 중첩)")
+    return [_nested(x, shape[1:], f"{path}/{i}") for i, x in enumerate(v)]
+
+
+def _aero_table(t, path):
+    """공력 표 — {axes: {축: 순증가 격자}, data: 축을 적은 순서대로 중첩한 수치, extrapolate}.
+
+    축 순서가 data 중첩 순서다 — JSON 객체의 키 순서를 그대로 쓴다(내보내기·가져오기가 순서를 지킨다)."""
+    _keys(t, path, ("axes", "data", "extrapolate"))
+    axes = t["axes"]
+    if not isinstance(axes, dict) or not axes:
+        _fail(f"{path}/axes", "축 이름 → 격자 목록 객체여야 함 (1축 이상)")
+    out_axes = {}
+    for name, grid in axes.items():
+        if name not in TABLE_AXES:
+            _fail(f"{path}/axes/{name}", f"허용 축 {list(TABLE_AXES)} 중 하나여야 함")
+        out_axes[name] = _increasing(grid, f"{path}/axes/{name}")
+    shape = tuple(len(g) for g in out_axes.values())
+    cells = math.prod(shape)
+    if cells > MAX_TABLE_CELLS:
+        _fail(f"{path}/data", f"표 칸 {cells}개 — {MAX_TABLE_CELLS}개까지")
+    return {
+        "axes": out_axes,
+        "data": _nested(t["data"], shape, f"{path}/data"),
+        "extrapolate": _choice(t["extrapolate"], f"{path}/extrapolate", TABLE_POLICIES),
+    }
+
+
+def _term_k(v, path):
+    """항의 k — 수치, 또는 {"table": 공력 표}."""
+    if isinstance(v, dict):
+        _keys(v, path, ("table",))
+        return {"table": _aero_table(v["table"], f"{path}/table")}
+    return _num(v, path)
+
+
 def _terms(v, path, *, coef, form):
     if not isinstance(v, list):
         _fail(path, "항 목록이어야 함")
+    if len(v) > MAX_TERMS_PER_COEF:
+        _fail(path, f"항 {len(v)}개 — 계수마다 {MAX_TERMS_PER_COEF}개까지")
     allowed = TERM_INPUTS + TERM_EXTRA_INPUTS.get((form, coef), ())
     out = []
     for i, t in enumerate(v):
         p = f"{path}/{i}"
         _keys(t, p, ("k", "inputs", "dispersion"))
-        k = _num(t["k"], f"{p}/k")
+        k = _term_k(t["k"], f"{p}/k")
         inputs = t["inputs"]
         if not isinstance(inputs, list):
             _fail(f"{p}/inputs", "입력 이름 목록이어야 함")
@@ -233,6 +288,11 @@ def _aero(a, p):
     _keys(a["coefficients"], f"{p}/coefficients", names)
     coefs = {n: _terms(a["coefficients"][n], f"{p}/coefficients/{n}", coef=n, form=form)
              for n in names}
+    corners = sum(2 ** len(t["k"]["table"]["axes"]) for terms in coefs.values() for t in terms
+                  if isinstance(t["k"], dict))
+    if corners > MAX_TABLE_CORNERS:
+        _fail(f"{p}/coefficients", f"표 항 모서리 합 {corners}개(표마다 2^축 수) — {MAX_TABLE_CORNERS}개까지."
+                                   " 계수를 부를 때마다 이만큼 보간한다")
     _keys(a["db_ranges"], f"{p}/db_ranges", ("alpha", "beta", "mach"))
     ranges = {k: _range(a["db_ranges"][k], f"{p}/db_ranges/{k}", nullable=True)
               for k in ("alpha", "beta", "mach")}
@@ -557,11 +617,39 @@ def _body(d, *, with_variants):
     }
 
 
+def table_cells(aero: dict) -> int:
+    """검증된 aero 섹션의 표 칸 합."""
+    return sum(math.prod(len(g) for g in t["k"]["table"]["axes"].values())
+               for terms in aero["coefficients"].values() for t in terms if isinstance(t["k"], dict))
+
+
+def _raw_table_cells(v) -> int:
+    """검증 전 패치 값 속 표 칸 어림 — 표 모양 객체(axes 객체 + data)의 격자 길이 곱. data 안으로는 내려가지 않는다."""
+    if isinstance(v, dict):
+        axes = v.get("axes")
+        if isinstance(axes, dict) and "data" in v:
+            return math.prod(len(g) if isinstance(g, list) else 1 for g in axes.values())
+        return sum(_raw_table_cells(x) for x in v.values())
+    if isinstance(v, list):
+        return sum(_raw_table_cells(x) for x in v)
+    return 0
+
+
 def _variants(v, base):
     if not isinstance(v, list):
         _fail("/variants", "목록이어야 함")
     if len(v) > MAX_VARIANTS:
         _fail("/variants", f"형상 변형은 {MAX_VARIANTS}개까지: {len(v)}개")
+    base_cells = table_cells(base["aero"])
+    if base_cells > MAX_DOCUMENT_TABLE_CELLS:
+        _fail("/aero/coefficients", f"표 칸 합 {base_cells}개 — 문서 한 벌에 {MAX_DOCUMENT_TABLE_CELLS}개까지")
+    # 변형마다 문서 전체를 다시 검증하기 **전에** 센다 — 세고 나서 거부해야 비용을 막는다
+    extra = sum(_raw_table_cells(item.get("patch")) for item in v if isinstance(item, dict))
+    total = base_cells * (1 + len(v)) + extra
+    if total > MAX_DOCUMENT_TABLE_CELLS:
+        _fail("/variants", f"표 칸 합 {total}개 — 기본 문서 {base_cells}칸 × (1 + 형상 변형 {len(v)}개)"
+                           f" + 변형이 넣는 표 {extra}칸. {MAX_DOCUMENT_TABLE_CELLS}개까지"
+                           " (형상 변형마다 문서 전체를 다시 검증·지문하므로 변형 수가 곱해진다)")
     seen = set()
     out = []
     for i, item in enumerate(v):

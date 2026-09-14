@@ -136,7 +136,7 @@ def vn_stall_boundary(aircraft, stall_table, alt, fuel, machs, alpha_margin=0.0,
         v = mach * atm.a
         a_b = alpha_scale * float(stall_table.interp(mach=mach)) - alpha_margin
         vel_b = np.array([v * math.cos(a_b), 0.0, v * math.sin(a_b)])
-        F, _M = aircraft.aero.forces(atm.rho, vel_b, np.zeros(3), controls, mach=mach)
+        F, _M = aircraft.aero.forces(atm.rho, vel_b, np.zeros(3), controls, mach=mach, alt=alt)
         lift = -float(F[2]) * math.cos(a_b) + float(F[0]) * math.sin(a_b)
         out["mach"].append(mach)
         out["V"].append(v)

@@ -10,13 +10,14 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from claw.profile import ProfileError, build_profile
+from claw.profile import ProfileError, build_profile, validate_document
+from claw.profile.aeroview import MAX_POINTS, aero_slice
 from claw.profile.form import form_spec
 from claw.tables import TableError
 from claw.tables.loader import parse_table_csv
 from claw_server.profiles import ProfileConflict, ProfileReadOnly, ProfileUnreadable
 from claw_server.refs import profile_error_detail
-from claw_server.serialize import table_dict
+from claw_server.serialize import table_dict, to_jsonable
 
 router = APIRouter(tags=["profiles"])
 
@@ -30,6 +31,16 @@ class ProfileDocIn(BaseModel):
 class ProfileUpdateIn(BaseModel):
     base_revision: int = Field(ge=1)
     document: dict
+
+
+class AeroSliceIn(BaseModel):
+    document: dict
+    variant: str | None = Field(default=None, min_length=1, max_length=64)
+    along: str = Field(min_length=1, max_length=16)
+    start: float = Field(allow_inf_nan=False)
+    stop: float = Field(allow_inf_nan=False)
+    n: int = Field(default=121, ge=2, le=MAX_POINTS)
+    fixed: dict[str, float] = Field(default_factory=dict)
 
 
 class ParseTableIn(BaseModel):
@@ -132,6 +143,21 @@ def validate_profile(req: ProfileDocIn, request: Request) -> dict:
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
     return {"ok": True, **_fingerprints(doc)}
+
+
+@router.post("/profiles/aero-slice")
+def profile_aero_slice(req: AeroSliceIn) -> dict:
+    """공력 DB 뷰어 곡선 — 문서의 계수 계산기로 한 축을 따라 CL·CD·동체축 계수와 실속 대조 (02 §5.2).
+
+    기체 id가 아니라 **문서**를 받는다: 편집기에서 표를 반입한 직후 저장하지 않고 곡선을 봐야 하고, 읽기 전용
+    예제도 같은 길로 본다. 문서는 저장 규칙이 아니라 스키마로만 검증한다(보기일 뿐 저장이 아니다)."""
+    try:
+        built = build_profile(validate_document(req.document), req.variant, validated=True)
+        return to_jsonable(aero_slice(built, req.along, req.start, req.stop, req.n, req.fixed))
+    except ProfileError as e:
+        raise HTTPException(status_code=422, detail=profile_error_detail(e))
+    except ValueError as e:  # 인자 판정·표 질의 오류(TableError도 ValueError)
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.post("/profiles/parse-table")

@@ -17,7 +17,8 @@
 
 from claw.profile.schema import (
     ACTUATOR_RESERVED, AERO_FORMS, DE_TRIM_SOURCES, DISPERSION_TAGS, LAYOUTS, SCAS_RESERVED,
-    SCHEDULE_RULES, SCHEMA_VERSION, TABLE_EXTRAPOLATE, TEMPLATES, TERM_EXTRA_INPUTS, TERM_INPUTS,
+    SCHEDULE_RULES, SCHEMA_VERSION, TABLE_AXES, TABLE_EXTRAPOLATE, TABLE_POLICIES, TEMPLATES,
+    TERM_EXTRA_INPUTS, TERM_INPUTS,
 )
 
 # 문서 머리 — 폼 절이 아니라 탭의 이름표·형상 변형 편집이 다룬다
@@ -45,6 +46,7 @@ def _scas(axis, label):
 def form_spec() -> dict:
     """JSON으로 내보낼 폼 서술. 선택지는 검증기·레지스트리에서 읽는다(호출 시점 기준)."""
     from claw.fcl.graphs import SCHEDULABLE
+    from claw.profile.aeroview import COEFFICIENTS, MAX_POINTS, SLICE_AXES
     from claw.profile.schema import _registry
 
     reg = _registry()
@@ -206,4 +208,9 @@ def form_spec() -> dict:
         "term_extra_inputs": [{"form": f, "coef": c, "inputs": list(i)}
                               for (f, c), i in TERM_EXTRA_INPUTS.items()],
         "dispersion_tags": {t: {"coef": c, "input": i} for t, (c, i) in DISPERSION_TAGS.items()},
+        # 공력 항 k를 표로 줄 때 — 축 이름·외삽 정책 (CSV 반입이 이 이름을 머리줄로 쓴다)
+        "table_axes": list(TABLE_AXES),
+        "table_policies": list(TABLE_POLICIES),
+        # 공력 DB 뷰어(POST /profiles/aero-slice)가 받는 축·내는 계수·점 수 상한 — 뷰어 칸이 이것으로 선다
+        "slice": {"axes": list(SLICE_AXES), "coefficients": list(COEFFICIENTS), "max_points": MAX_POINTS},
     }

@@ -47,7 +47,7 @@ class Aircraft:
         atm = isa_atmosphere(h)
         V = float(np.linalg.norm(vel_b))
         mach = V / atm.a
-        f_aero, m_aero = self.aero.forces(atm.rho, vel_b, omega_b, controls, mach)
+        f_aero, m_aero = self.aero.forces(atm.rho, vel_b, omega_b, controls, mach, alt=h)
         # 추진에 V·rho를 넘긴다 — 프로펠러는 T = ηP/V라 속도를 타고, 축동력은
         # 밀도를 탄다 (plant/prop.py PropEngine). 상수 추력 모델은 받고 무시한다.
         f_eng, m_eng = self.engine.forces(

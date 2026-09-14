@@ -62,6 +62,7 @@ export const NOT_AIRCRAFT = {
   "POST /profiles/validate": "기체 문서 자체 — id가 경로·본문에 있다",
   "POST /profiles/parse-table": "CSV 표 판독 — 기체 무관",
   "GET /profiles/_form": "편집 폼 서술(칸 이름·단위·선택지) — 기체 무관",
+  "POST /profiles/aero-slice": "공력 DB 뷰어 — 기체 id가 아니라 편집 중인 문서를 본문으로 받는다",
 };
 
 /** 저장값·입력 → {id, variant} 또는 null. 모양이 틀린 값은 버린다(손상된 저장값이 요청을 망치지 않게). */

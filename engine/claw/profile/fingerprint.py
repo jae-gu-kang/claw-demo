@@ -31,12 +31,27 @@ FP_EXCLUDED = (
 )
 
 
+def _ordered_axes(aero: dict) -> dict:
+    """공력 표 항의 축 순서를 해시 입력에 싣는다 — 축 객체를 [이름, 격자] 쌍 목록으로 바꾼다.
+
+    canonical_hash는 객체 키를 정렬하는데, 공력 표는 axes 키 순서가 data 중첩 순서다. 그대로 두면 격자 점 수가 같은
+    두 축을 맞바꾼 문서(검증도 통과한다)가 물리는 다른데 지문은 같다. 표 항이 없는 문서는 그대로 돌려준다(예제 지문 불변)."""
+    coefs = aero["coefficients"]
+    if not any(isinstance(t["k"], dict) for terms in coefs.values() for t in terms):
+        return aero
+    return {**aero, "coefficients": {
+        name: [{**t, "k": {"table": {**t["k"]["table"], "axes": [[ax, g] for ax, g in t["k"]["table"]["axes"].items()]}}}
+               if isinstance(t["k"], dict) else t for t in terms]
+        for name, terms in coefs.items()}}
+
+
 def plant_fingerprint(effective: dict) -> str:
-    return canonical_hash({k: effective[k] for k in PLANT_SECTIONS})
+    return canonical_hash({k: (_ordered_axes(effective[k]) if k == "aero" else effective[k]) for k in PLANT_SECTIONS})
 
 
 def profile_fingerprint(effective: dict) -> str:
     doc = copy.deepcopy(effective)
+    doc["aero"] = _ordered_axes(doc["aero"])
     for ptr in FP_EXCLUDED:
         tokens = parse_pointer(ptr)
         node = doc

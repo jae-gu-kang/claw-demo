@@ -5,8 +5,9 @@
 양력/항력(풍축) 형태 DB를 위한 wind_to_body_coeffs 헬퍼 제공 [기본값 변환식].
 
 coef_fn 입력(dict): alpha, beta [rad], V [m/s], mach, phat/qhat/rhat(무차원 각속도
-p·b/2V, q·c̄/2V, r·b/2V) + controls로 전달한 타면각. 실제 CFD DB 축 규격은 [TBD]
-(02 §5.1) — 확정 시 M3 Table 조회를 이 인터페이스로 감싼다.
+p·b/2V, q·c̄/2V, r·b/2V) + controls로 전달한 타면각 + alt [m](호출이 넘길 때 — 고도 축
+공력 표용). 표 조회는 기체 문서의 표 항이 이 인터페이스 안에서 한다(profile/aero_terms.py) — 공력팀
+DB 파일 규격은 [TBD] (02 §5.1).
 
     F_b = q̄·S·[CX, CY, CZ],  M_b = q̄·S·[b·Cl, c̄·Cm, b·Cn],  q̄ = ½ρV²
 
@@ -51,8 +52,10 @@ class AeroModel:
         self.S, self.cbar, self.b = float(S), float(cbar), float(b)
         self.coef_fn = coef_fn
 
-    def forces(self, rho, vel_air_b, omega_b, controls=None, mach=None):
-        """(밀도, 공기속도[동체축], 각속도, 타면각 dict, 마하) → (F_b, M_b). V=0이면 0."""
+    def forces(self, rho, vel_air_b, omega_b, controls=None, mach=None, alt=None):
+        """(밀도, 공기속도[동체축], 각속도, 타면각 dict, 마하, 고도) → (F_b, M_b). V=0이면 0.
+
+        alt는 고도 축 공력 표가 읽는다 — 넘기지 않았는데 그런 표가 있으면 계수 계산기가 이유와 함께 거부한다."""
         V, alpha, beta = wind_angles(vel_air_b)
         if V <= 0.0:
             return np.zeros(3), np.zeros(3)
@@ -67,6 +70,8 @@ class AeroModel:
             "qhat": q * self.cbar * inv2v,
             "rhat": r * self.b * inv2v,
         }
+        if alt is not None:
+            inputs["alt"] = alt
         if controls:
             inputs.update(controls)
         c = self.coef_fn(inputs)

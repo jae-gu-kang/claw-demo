@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  FormNotice, aeroTableFromParsed, sliceBody, stallNote, tableSummary,
   allowedInputs, applyPatch, clearInPatch, effectiveOf, flattenFields, formatNum, formUpdate, getAt, inputsText, isUnder, writeValues,
   machTableFromParsed, paramsFromDefaults, parseInputs, parseNum, parseNumList, parsePointer,
   patchOwner, patchedBelow, sectionOverrides, setAt, setInPatch, setMatrixCell, tableFromRows,
@@ -164,4 +165,49 @@ test("폼 쓰기 판단 — 그 순간의 문서에 적용, 다른 기록·JSON 
   assert.ok(formUpdate({ state: { mode: "form", obj: {} }, owner: rec, fn: (c) => c, async: true }).reject.includes("다른 기체"));
   assert.ok(formUpdate({ state: { ...rec, mode: "json" }, owner: rec, fn: (c) => c }).reject);
   assert.match(formUpdate({ state: rec, owner: rec, fn: () => { throw new Error("문서에 없는 경로: /x"); } }).error, /없는 경로/);
+});
+
+test("공력 표 항 — 요약·CSV 응답 변환·허용 축", () => {
+  assert.equal(tableSummary(1.5), null);
+  assert.equal(tableSummary({ table: { axes: { alpha: [0, 1, 2], mach: [0.1, 0.9] }, data: [], extrapolate: "clip" } }),
+    "표 alpha×mach · 3×2칸 · clip");
+  const parsed = { axes: { alpha: [0, 1], mach: [0.1, 0.5] }, data: [[1, 2], [3, 4]], extrapolate: "linear" };
+  assert.deepEqual(aeroTableFromParsed(parsed, ["alpha", "mach"]).value,
+    { table: { axes: parsed.axes, data: parsed.data, extrapolate: "linear" } });
+  assert.match(aeroTableFromParsed({ axes: { qhat: [0, 1] }, data: [1, 2] }, ["alpha"]).error, /qhat/);
+  assert.match(aeroTableFromParsed({ axes: {} }, ["alpha"]).error, /축이 없습니다/);
+});
+
+test("뷰어 본문 — 따라가는 축은 고정값에서 빠지고, 틀린 칸은 모아서 말한다", () => {
+  const axes = ["alpha", "mach", "alt"];
+  const ok = sliceBody({ along: "alpha", start: "-0.1", stop: "0.5", n: "61", fixed: { alpha: "x", mach: "0.4", alt: "1000" } }, axes);
+  assert.deepEqual(ok.value, { along: "alpha", start: -0.1, stop: 0.5, n: 61, fixed: { mach: 0.4, alt: 1000 } });
+  assert.match(sliceBody({ along: "mach", start: "0.5", stop: "0.1", n: "5", fixed: { alpha: "0", alt: "0" } }, axes).error, /시작 < 끝/);
+  const bad = sliceBody({ along: "alpha", start: "", stop: "1", n: "2.5", fixed: { mach: "a", alt: "0" } }, axes).error;
+  assert.match(bad, /시작/);
+  assert.match(bad, /mach/);
+});
+
+test("실속 대조 한 줄 — 추출이 없으면 사유, 있으면 차이", () => {
+  assert.match(stallNote({ along: "alpha", fixed: { mach: 0.4 }, stall: { table_at: 0.3, extracted: null, reason: "꺾이지 않는다" } }), /꺾이지 않는다/);
+  assert.match(stallNote({ along: "alpha", fixed: { mach: 0.4 }, stall: { table_at: 0.3, extracted: 0.28, delta: -0.02 } }), /차이 -0\.0200 rad/);
+  assert.equal(stallNote({ along: "beta", stall: {} }), "");
+});
+
+test("실속 대조 한 줄 — 추출 구간(표 α 격자·DB 유효 범위)을 함께 적는다", () => {
+  const note = stallNote({ along: "alpha", fixed: { mach: 0.4 },
+    stall: { table_at: 0.3, extracted: null, reason: "없다", window: [-0.2, 0.4] } });
+  assert.match(note, /추출 구간 α \[-0\.2, 0\.4\]/);
+  assert.match(stallNote({ along: "alpha", fixed: { mach: 0.4 },
+    stall: { table_at: 0.3, extracted: null, reason: "없다", window: [null, 0.4] } }), /\[−∞, 0\.4\]/);
+  assert.doesNotMatch(stallNote({ along: "alpha", fixed: { mach: 0.4 },
+    stall: { table_at: 0.3, extracted: null, reason: "없다", window: [null, null] } }), /추출 구간/);
+});
+
+test("쓰기 안내(FormNotice)는 문서 모양 오류 문구 없이 사유 그대로 낸다", () => {
+  const state = { mode: "form", obj: { a: 1 } };
+  const notice = formUpdate({ state, owner: state, fn: () => { throw new FormNotice("넣지 않았습니다"); } });
+  assert.deepEqual(notice, { error: "넣지 않았습니다" });
+  const broken = formUpdate({ state, owner: state, fn: () => { throw new Error("x"); } });
+  assert.match(broken.error, /JSON 글에서 문서 모양을 확인하세요/);
 });

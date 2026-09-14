@@ -17,7 +17,8 @@ import {
   EXAMPLE_ID, cloneDocument, currentSelection, exportFileName, parseDocumentText, profileErrorText,
   saveSelection, setSelection,
 } from "../lib/profile.js";
-import { formUpdate } from "../lib/profileform.js";
+import { formUpdate, sliceBody, stallNote } from "../lib/profileform.js";
+import { lineChartCanvas } from "./plots.js";
 import { renderProfileForm } from "./profileform.js";
 import { browserStorage, refresh as refreshPicker, restoredNotice, switchTo } from "./profilepick.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
@@ -33,6 +34,13 @@ let formSpec = null;
 let formAssets = null; // 진행 중인 요청 — 다시 그리기가 겹쳐도 한 번만 받는다
 let exampleDoc = null;
 const schemaCache = new Map();
+// 공력 DB 뷰어 칸·마지막 곡선 — 탭을 떠났다 와도 그대로 (곡선은 그린 기체·문서의 것임을 forId로 대조한다)
+const viewer = {
+  along: "alpha", start: "-0.2", stop: "0.6", n: "81", coef: "CL",
+  fixed: { alpha: "0", beta: "0", mach: "0.5", alt: "0", de: "0", da: "0", dr: "0" },
+  result: null, forId: null, error: null,
+};
+const AXIS_UNIT = { alpha: "rad", beta: "rad", de: "rad", da: "rad", dr: "rad", mach: "", alt: "m" };
 
 const failText = (e) => (e instanceof ApiError && profileErrorText(e.detail)) || errorText(e);
 const path = (id) => `/profiles/${encodeURIComponent(id)}`;
@@ -52,6 +60,7 @@ export function render() {
   const listBox = el("div");
   const docBox = el("div");
   const variantBox = el("div");
+  const viewerBox = el("div");
   const importBox = el("div");
 
   const showError = (e) => clear(errBox).append(
@@ -153,6 +162,7 @@ export function render() {
       // 실패해도 다시 그린다 — 최신 불러오기가 비운 자리에 옛 편집기가 남으면 키 입력마다 오류가 난다
       paintDoc();
       paintVariants();
+      paintViewer();
     }
   };
 
@@ -473,6 +483,107 @@ export function render() {
         }, "폼에서 고치기")))))));
   };
 
+  // ── 공력 DB 뷰어 (패널) ─────────────────────────────────────────────────
+  // 연 문서의 계수 계산기로 한 축을 따라 곡선을 낸다 — 표를 반입한 직후 저장하지 않고도 본다(서버가 본문 문서로
+  // 계산한다). 표를 따로 그리지 않는다: 시뮬·트림이 쓰는 같은 계산기라 곡선이 곧 기체가 느끼는 계수다
+  const paintViewer = () => {
+    if (!opened) {
+      clear(viewerBox).append(el("p", { class: "hint" }, "목록에서 [열기]로 기체를 열면 그 문서의 공력 곡선을 봅니다."));
+      return;
+    }
+    if (!formSpec?.slice) {
+      clear(viewerBox).append(el("p", { class: "hint" }, "뷰어 서술을 불러오는 중…"));
+      ensureFormAssets().then(() => { if (opened) paintViewer(); }).catch((e) => showError(e));
+      return;
+    }
+    const { axes, coefficients, max_points: maxPoints } = formSpec.slice;
+    if (viewer.forId !== opened.id) {
+      viewer.result = null;
+      viewer.error = null;
+    }
+    const input = (value, onValue, cls = "pf-num") => el("input", {
+      class: cls, value, spellcheck: "false", oninput: (e) => onValue(e.target.value),
+    });
+    const chartBox = el("div");
+    const paintChart = () => {
+      const res = viewer.result;
+      if (!res) {
+        clear(chartBox).append(viewer.error ? el("p", { class: "error-box" }, viewer.error)
+          : el("p", { class: "hint" }, "[그리기]를 누르면 곡선이 섭니다."));
+        return;
+      }
+      const range = res.db_ranges?.[res.along];
+      clear(chartBox).append(
+        lineChartCanvas(res.x, [{ data: res.coefficients[viewer.coef], color: "#0a84ff", label: viewer.coef }],
+          { title: `${viewer.coef} — ${res.along}`, xUnit: AXIS_UNIT[res.along] ?? "", width: 640, height: 240 }),
+        res.stall?.table_curve
+          ? lineChartCanvas(res.x, [{ data: res.stall.table_curve, color: "#ff9f0a", label: "α_stall" }],
+            { title: "실속 표 α_stall(M)", xUnit: "", width: 640, height: 160 })
+          : null,
+        el("p", { class: "hint" }, stallNote(res)),
+        el("p", { class: "hint" },
+          `고정: ${Object.entries(res.fixed).map(([k, v]) => `${k} ${v}`).join(" · ")} · 무차원 각속도 0 · V = 마하 × 그 고도 음속`
+          + (range ? ` · DB 유효 범위 ${res.along} [${range[0]}, ${range[1]}]` : "")),
+      );
+    };
+    // 못 그린 사유는 옛 곡선을 지우고 적는다 — 곡선을 남기면 누른 것이 아무 일도 안 한 것처럼 보이고, 글을 고친 뒤라면
+    // 고친 것이 반영되지 않은 것처럼 보인다. 사유도 이 기체의 것으로 묶는다(다른 기체를 열면 지워진다)
+    const fail = (text) => {
+      viewer.result = null;
+      viewer.error = text;
+      viewer.forId = opened?.id ?? null;
+      paintChart();
+    };
+    const draw = async () => {
+      if (!opened) {
+        paintViewer(); // 그사이 연 문서를 지웠다 — 안내로 바꾼다
+        return;
+      }
+      const b = sliceBody(viewer, axes);
+      if (b.error) return fail(b.error);
+      if (b.value.n > maxPoints) return fail(`점 수는 ${maxPoints}까지입니다`);
+      // JSON 글 편집 중이면 글이 정본이다 — 폼 객체는 글에서 폼으로 올 때만 맞춰진다
+      const parsed = opened.mode === "json" ? parseDocumentText(opened.text) : { doc: opened.obj };
+      if (parsed.error) return fail(`JSON 글을 읽을 수 없어 그리지 않았습니다 — ${parsed.error}`);
+      const target = opened;
+      try {
+        const res = await api.post("/profiles/aero-slice", {
+          document: parsed.doc, ...(opened.editVariant ? { variant: opened.editVariant } : {}), ...b.value,
+        });
+        if (opened !== target) return; // 그사이 다른 기체를 열었다
+        viewer.result = res;
+        viewer.forId = target.id;
+        viewer.error = null;
+      } catch (e) {
+        if (opened !== target) return;
+        return fail(failText(e));
+      }
+      paintChart();
+    };
+    clear(viewerBox).append(
+      el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;align-items:flex-end" },
+        el("label", { class: "field" }, "따라갈 축", el("select", {
+          onchange: (e) => { viewer.along = e.target.value; paintViewer(); },
+        }, axes.map((a) => el("option", { value: a, selected: a === viewer.along }, a)))),
+        el("label", { class: "field" }, "시작", input(viewer.start, (v) => { viewer.start = v; })),
+        el("label", { class: "field" }, "끝", input(viewer.stop, (v) => { viewer.stop = v; })),
+        el("label", { class: "field" }, "점 수", input(viewer.n, (v) => { viewer.n = v; })),
+        el("label", { class: "field" }, "계수", el("select", {
+          onchange: (e) => { viewer.coef = e.target.value; paintChart(); },
+        }, coefficients.map((c) => el("option", { value: c, selected: c === viewer.coef }, c)))),
+        el("button", { class: "primary", onclick: draw }, "그리기")),
+      el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" },
+        axes.filter((a) => a !== viewer.along).map((a) => el("label", { class: "field" },
+          `${a}${AXIS_UNIT[a] ? ` [${AXIS_UNIT[a]}]` : ""}`,
+          input(viewer.fixed[a] ?? "0", (v) => { viewer.fixed[a] = v; })))),
+      el("p", { class: "hint", style: "margin:6px 0" },
+        opened.editVariant ? `형상 변형 「${opened.editVariant}」을 적용한 문서로 계산합니다(편집 중인 글 기준). `
+          : "편집 중인 글(저장 전 포함)로 계산합니다. ",
+        "실속 추출은 참고용이고 정본은 공력팀 실속 표다(01 §2.3)."),
+      chartBox);
+    paintChart();
+  };
+
   // ── 복제·내보내기·가져오기·삭제 ─────────────────────────────────────────
   const clone = async (p) => {
     if (!discardOk("복제할까요? (복제한 기체가 문서 패널에 열립니다)")) return;
@@ -490,6 +601,7 @@ export function render() {
       refreshPicker();
       paintDoc();
       paintVariants();
+      paintViewer(); // 옛 기체의 곡선이 새 문서 밑에 남지 않게
       drawers.open("doc");
     } catch (e) {
       showError(e);
@@ -529,6 +641,7 @@ export function render() {
       paintImport();
       paintDoc();
       paintVariants();
+      paintViewer();
       drawers.open("doc");
     } catch (e) {
       const text = e instanceof ApiError && e.status === 409
@@ -586,6 +699,7 @@ export function render() {
       refreshPicker();
       paintDoc();
       paintVariants();
+      paintViewer(); // 지운 문서의 곡선·[그리기]가 남으면 누를 때 빈 문서를 읽는다
     } catch (e) {
       showError(e);
     }
@@ -601,6 +715,8 @@ export function render() {
       { key: "variants", label: "형상 변형", group: "편집",
         title: "연 기체의 형상 변형 — 덮어쓴 경로·지문·고르기",
         count: () => opened?.body.document.variants?.length ?? null, build: () => variantBox },
+      { key: "aero", label: "공력 DB 뷰어", group: "보기",
+        title: "연 문서의 계수 계산기로 한 축을 따라 CL·CD·모멘트 계수 곡선 — 실속 표 대조", build: () => viewerBox },
       { key: "import", label: "가져오기", group: "반입",
         title: "내보내 둔 기체 JSON을 새 기체로", build: () => [
           drawerSection("가져오기", null, importBox)] },
@@ -611,6 +727,7 @@ export function render() {
   paintNotices();
   paintDoc();
   paintVariants();
+  paintViewer();
   paintImport();
   load();
 

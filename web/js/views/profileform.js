@@ -20,6 +20,7 @@ mousedown에 오므로 그때 다시 그리면 누르던 버튼이 사라지고 
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
 import {
+  FormNotice, aeroTableFromParsed, tableSummary,
   allowedInputs, applyPatch, clearInPatch, effectiveOf, formatNum, getAt, inputsText, isUnder,
   machTableFromParsed, paramsFromDefaults, parseInputs, parseNum, parseNumList, patchOwner, patchedBelow,
   sectionOverrides, setAt, setMatrixCell, tableFromRows, tableRows, writeValues,
@@ -28,6 +29,9 @@ import { groupFields, schemaFields } from "../lib/schemaform.js";
 
 // 열어 둔 절 — 모양이 바뀌어 다시 그려도 닫히지 않게 (모듈 스코프 규약)
 const openSections = new Set();
+// 그린 차례 — 응답을 기다리는 쓰기(CSV 표 반입)가 행 번호를 들고 있다. 그사이 폼을 다시 그렸으면(항 추가·삭제 등
+// 모양이 바뀐 쓰기는 반드시 다시 그린다) 그 번호가 다른 항을 가리킬 수 있어 쓰지 않는다
+let renderSeq = 0;
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -36,6 +40,7 @@ const STRUCTURAL = { structural: true };
 /** ctx: {spec, doc, editVariant, example, readOnly, getSchema(category, name),
  *        update(fn, {structural?, async?, editVariant?}), setEditVariant(id)} */
 export function renderProfileForm(ctx) {
+  const seq = ++renderSeq;
   const { spec, doc, readOnly } = ctx;
   const variants = Array.isArray(doc.variants) ? doc.variants : [];
   const variant = ctx.editVariant == null ? null : variants.find((v) => v?.id === ctx.editVariant) ?? null;
@@ -298,7 +303,55 @@ export function renderProfileForm(ctx) {
     }, STRUCTURAL);
   };
 
-  // 공력 계수 항 — 계수마다 [k, 입력들, 섭동 태그] 행
+  // 공력 항 k를 표로 — 긴 형식 CSV(머리줄 = 축 이름들 + 값 열)를 서버가 판독한다(파일을 올리지 않고 글을 보낸다).
+  // 축 이름은 폼 서술의 table_axes 중에서 — 틀리면 반입 전에 사유를 말하고, 격자 누락·중복은 서버가 말한다
+  const tableImport = (coef, onK, label) => {
+    const axesIn = el("input", { class: "pf-wide", value: "alpha, mach",
+      title: `축 열 이름 — ${(spec.table_axes ?? []).join(", ")} 중에서, data 중첩 순서가 된다` });
+    const valueIn = el("input", { class: "pf-num", value: coef, title: "값 열 이름" });
+    const extSel = el("select", {}, (spec.table_policies ?? ["clip"]).map((pol) => el("option", { value: pol }, pol)));
+    const text = el("textarea", { class: "pf-json", placeholder: `alpha,mach,${coef}\n0.0,0.3,0.10\n0.1,0.3,0.45` });
+    const file = el("input", {
+      type: "file", accept: ".csv,text/csv,text/plain",
+      onchange: (e) => {
+        const fl = e.target.files?.[0];
+        if (!fl) return;
+        const r = new FileReader();
+        r.onload = () => { text.value = String(r.result ?? ""); };
+        r.readAsText(fl);
+      },
+    });
+    const out = el("div");
+    const read = async () => {
+      clear(out);
+      try {
+        const parsed = await api.post("/profiles/parse-table", {
+          csv_text: text.value, axis_cols: parseInputs(axesIn.value), value_col: valueIn.value.trim(),
+          extrapolate: extSel.value,
+        });
+        const k = aeroTableFromParsed(parsed, spec.table_axes);
+        if (k.error) {
+          out.append(el("p", { class: "error-box" }, k.error));
+        } else if (seq !== renderSeq) {
+          // 이 칸은 이미 화면에 없다 — 사유는 새로 그린 폼의 오류 줄로 낸다(다른 기체를 열었으면 그 사유가 대신 선다)
+          ctx.update(() => {
+            throw new FormNotice("표를 읽는 사이 폼이 다시 그려져(항 추가·삭제·검증 등) 어느 항인지 확실하지 않아"
+              + " 표를 넣지 않았습니다 — 그 항에서 다시 반입하세요");
+          }, { structural: true, async: true });
+        } else {
+          onK(k.value);
+        }
+      } catch (e) {
+        out.append(el("p", { class: "error-box" }, errorText(e)));
+      }
+    };
+    return el("details", { class: "pf-csv" }, el("summary", {}, label),
+      el("label", { class: "field" }, "축 열", axesIn), el("label", { class: "field" }, "값 열", valueIn),
+      el("label", { class: "field" }, "외삽", extSel), file, text,
+      el("button", { onclick: read }, "표로 읽기"), out);
+  };
+
+  // 공력 계수 항 — 계수마다 [k(수치 또는 표), 입력들, 섭동 태그] 행
   const termsEditor = (f, v) => {
     const form = getAt(shown, "/aero/form");
     const names = spec.aero_forms[form] ?? Object.keys(v ?? {});
@@ -312,10 +365,20 @@ export function renderProfileForm(ctx) {
         el("table", { class: "pf-table" },
           el("thead", {}, el("tr", {}, el("th", {}, "k"), el("th", {}, "입력들(곱)"), el("th", {}, "섭동 태그"), el("th", {}, ""))),
           el("tbody", {}, terms.map((t, i) => {
-            const setTerm = (part) => setCoef(name, (ts) => ts.map((x, k) => (k === i ? { ...x, ...part } : x)));
+            const setTerm = (part, opts) => setCoef(name, (ts) => ts.map((x, k) => (k === i ? { ...x, ...part } : x)), opts);
+            const toTable = (k) => setTerm({ k }, { structural: true, async: true });
             return el("tr", {},
-              el("td", {}, typeof t?.k === "number" ? numInput(t.k, (x) => setTerm({ k: x }))
-                : el("span", { class: "error-box" }, "수치가 아닌 k — JSON 글에서 고친다")),
+              el("td", {}, typeof t?.k === "number"
+                ? el("div", {}, numInput(t.k, (x) => setTerm({ k: x })),
+                  readOnly ? null : tableImport(name, toTable, "표로 반입"))
+                : tableSummary(t?.k)
+                  ? el("div", {}, el("span", { class: "hint" }, tableSummary(t.k)),
+                    readOnly ? null : tableImport(name, toTable, "다시 반입"),
+                    btn("수치로", () => {
+                      const v = parseNum(globalThis.prompt?.("이 항의 표를 수치 k로 바꿉니다 — 값", "0") ?? "");
+                      if (!v.error) setTerm({ k: v.value }, STRUCTURAL);
+                    }, "표를 버리고 상수 k로"))
+                  : el("span", { class: "error-box" }, "알 수 없는 k — JSON 글에서 고친다")),
               el("td", {}, el("input", {
                 class: "pf-wide", value: inputsText(t?.inputs), disabled: dis, spellcheck: "false",
                 title: `허용: ${allowed.join(", ")} — 빈 칸이면 상수항`,

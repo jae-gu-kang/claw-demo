@@ -111,3 +111,8 @@ def test_term_input_rules_come_from_the_validator():
     extra = {(e["form"], e["coef"]): tuple(e["inputs"]) for e in spec["term_extra_inputs"]}
     assert extra == schema.TERM_EXTRA_INPUTS
     assert spec["dispersion_tags"] == {t: {"coef": c, "input": i} for t, (c, i) in schema.DISPERSION_TAGS.items()}
+    assert spec["table_axes"] == list(schema.TABLE_AXES)
+    assert spec["table_policies"] == list(schema.TABLE_POLICIES)
+    from claw.profile import aeroview
+    assert spec["slice"] == {"axes": list(aeroview.SLICE_AXES), "coefficients": list(aeroview.COEFFICIENTS),
+                             "max_points": aeroview.MAX_POINTS}
