@@ -31,6 +31,12 @@ services:
         value: 3.13.4 # devcontainer(3.13)와 맞춤 — 상한 핀 없는 의존성 조합 고정
       - key: CLAW_ACCESS_PASSWORD
         sync: false # 대시보드에서 입력 — 커밋 금지. 빈 값이면 무인증(공개)
+      - key: CLAW_ANTHROPIC_API_KEY
+        # 이름만 선언한다(값은 대시보드) — 선언이 없으면 blueprint 동기화가 대시보드에서 넣은 값을
+        # 어떻게 다루는지에 기대게 된다. 폐쇄망 CLAW_LLM_* 계열은 선언하지 않는다: CLAW_LLM_BASE_URL에
+        # 값이 들어가는 순간 Anthropic으로 폴백 없이 로컬 백엔드로 고정되므로(routes/llm.py _backend —
+        # 빈 값은 무시된다) 이 데모에 채울 자리를 만들어 두지 않는다
+        sync: false # 대시보드에서 입력 — 커밋 금지. 비면 LLM 기능만 사유와 함께 꺼진다
       - key: CLAW_RESULT_LIMIT
         # 결과 크기는 미션 길이에 비례한다 — 기본 미션이 장주 착륙(320 s)이 되면서
         # 1건 ≈ 14MB(200 s) → ≈ 22MB로 늘었다. 상한 280MB를 유지하려고 건수를
