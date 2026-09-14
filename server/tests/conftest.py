@@ -1,11 +1,18 @@
 """M13 서버 테스트 공통 픽스처 — 임시 저장 루트의 앱 + 작업 폴링 헬퍼."""
 
+import os
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from claw.profile.document import EXAMPLE_OVERRIDE_ENV
 from claw_server import create_app
+
+# 서버 테스트·골든도 구 합성 기체(1200 kg 회귀 픽스처) 기준이다 — 엔진 conftest와 같은 문서(02 §5.6.1)
+LEGACY_EXAMPLE = Path(__file__).resolve().parents[2] / "engine" / "claw" / "tests" / "fixtures" / "delta_legacy.json"
+os.environ[EXAMPLE_OVERRIDE_ENV] = str(LEGACY_EXAMPLE)
 
 TERMINAL = ("done", "error", "cancelled")
 

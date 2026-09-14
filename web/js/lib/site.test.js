@@ -51,7 +51,7 @@ test("측정 기록이 공표 제원과 맞는다 — 검출이 옳았다는 독
 test("접지 창은 활주로 전장이 아니라 전장 − 미끄럼이다", () => {
   // 시단에 닿아도 미끄럼만큼은 굴러간다. 이 구별을 놓치면 산포를 1,205 m와 견주어
   // "겨우 들어간다"는 거짓 통과가 나온다 — 실제로 그렇게 쓴 적이 있다.
-  assert.equal(touchdownWindowM(), 335);
+  assert.equal(touchdownWindowM(), 1048); // 1,205 − 미끄럼 157 m (200 kg급 예제 실측)
   assert.ok(touchdownWindowM() < GOHEUNG.runwayLengthM);
 });
 

@@ -23,17 +23,17 @@ test("기본 폼 + 기본 미션 → 요청 전체가 골든과 같다 (sim.js r
   // 웨이포인트는 아래 「장주 패턴」 테스트가 기하로 잡는다.
   const hdg = GOHEUNG.runwayHeadingRad;
   assert.deepEqual(req, {
-    trim: { name: "start", mach: 0, alt: 0, fuel: 300, condition: "ground" },
+    trim: { name: "start", mach: 0, alt: 0, fuel: 37.5, condition: "ground" },
     modes: [
-      { name: "launch", speed: 110, alt: null, pitch: 0.3665, hdot: null,
+      { name: "launch", speed: 44.9, alt: null, pitch: 0.3665, hdot: null,
         heading: hdg, exit: ["off_rail"], next: "climb" },
-      { name: "climb", speed: 110, alt: null, pitch: 0.3665, hdot: null,
+      { name: "climb", speed: 44.9, alt: null, pitch: 0.3665, hdot: null,
         heading: hdg, exit: ["alt_ge", 180], next: "cruise" },
-      { name: "cruise", speed: 88, alt: 200, pitch: null, hdot: null,
+      { name: "cruise", speed: 44, alt: 200, pitch: null, hdot: null,
         heading: "path", exit: ["path_done"], next: "approach" },
-      { name: "approach", speed: 88, alt: null, pitch: null, hdot: -4.8,
+      { name: "approach", speed: 35.9, alt: null, pitch: null, hdot: -1.96,
         heading: hdg, exit: ["alt_le", 20], next: "flare" },
-      { name: "flare", speed: 80, alt: null, pitch: null, hdot: -0.8,
+      { name: "flare", speed: 32.7, alt: null, pitch: null, hdot: -0.33,
         heading: hdg, exit: ["on_ground"], next: "rollout" },
       { name: "rollout", speed: 0, alt: null, pitch: 0, hdot: null,
         heading: hdg, exit: ["speed_le", 0.5], next: "stopped" },
@@ -41,19 +41,19 @@ test("기본 폼 + 기본 미션 → 요청 전체가 골든과 같다 (sim.js r
         heading: null, exit: ["time_ge", 1e9], next: null },
     ],
     waypoints: buildWaypoints(defaultWpRows()),
-    accept_radius: 300,
-    t_end: 320,
+    accept_radius: 75,
+    t_end: 750,
     runway: { elevation: 0, heading: GOHEUNG.runwayHeadingRad, length: GOHEUNG.runwayLengthM },
     origin: { lat: GOHEUNG.originLatDeg, lon: GOHEUNG.originLonDeg },
-    launch: { length: 10, elev_angle: 0.2618, exit_speed: 81.5 },
-    fuel_flow: 0.3,
+    launch: { length: 10, elev_angle: 0.2618, exit_speed: 33.3 },
+    fuel_flow: 0.02,
     fingerprint: "web-sim-v1",
     nav: { seed: 11 },
     nav_grade: "rtk",
     actuators: { wn: ACT_FALLBACK.wn, zeta: ACT_FALLBACK.zeta, rate_max: ACT_FALLBACK.rate },
   });
   assert.deepEqual(missing, []);
-  assert.deepEqual(snapshot, { waypoints: req.waypoints, acceptRadius: 300 });
+  assert.deepEqual(snapshot, { waypoints: req.waypoints, acceptRadius: 75 });
 });
 
 test("기본 미션은 발사 → 착륙 정지 사슬이고 순항만 경로를 따른다", () => {
@@ -72,7 +72,7 @@ test("기본 웨이포인트는 활주로로 되돌아오는 장주다 — 방�
   // 내렸다(실측 접지 7,010 m). 장주는 그 자리를 활주로 안으로 되돌린다.
   const h = GOHEUNG.runwayHeadingRad;
   const wps = defaultWpRows();
-  const plan = [[3500, 0], [3500, 2200], [-5800, 2200], [-5800, 0], [-3600, 0]];
+  const plan = [[3500, 0], [3500, 900], [-5800, 900], [-5800, 0], [-4400, 0]];
   assert.equal(wps.length, plan.length);
   wps.forEach((wp, i) => {
     const n = Number(wp.n);
@@ -83,8 +83,8 @@ test("기본 웨이포인트는 활주로로 되돌아오는 장주다 — 방�
     assert.ok(Math.abs(cross - plan[i][1]) < 1, `WP${i + 1} 횡편차 ${cross}`);
     assert.equal(wp.d, ""); // 고도는 비운다 — 세로는 순항 고도 200이 낸다
   });
-  // 장주 폭은 180° 되돌기 둘을 담아야 한다 — 88 m/s·뱅크 0.7에서 2R = 1,876 m
-  const R = (88 * 88) / (9.80665 * Math.tan(0.7));
+  // 장주 폭은 180° 되돌기 둘을 담아야 한다 — 순항 44 m/s·뱅크 0.7에서 2R = 469 m
+  const R = (44 * 44) / (9.80665 * Math.tan(0.7));
   assert.ok(plan[1][1] >= 2 * R, `장주 폭 ${plan[1][1]} < 2R ${2 * R}`);
   // 마지막 점은 활주로 축 위에서 **시단 남쪽**이다 — 거기서 접근이 시작된다
   assert.ok(plan.at(-1)[0] < 0 && plan.at(-1)[1] === 0);
@@ -127,7 +127,7 @@ test("웨이포인트가 없으면 키를 지우되 스냅샷은 지우기 전�
   const rows = defaultModeRows().map((r) => (r.heading === "path" ? { ...r, heading: "0" } : r));
   const { req, snapshot } = buildSimRequest(DEFAULT_FORM, rows, [], NONE);
   assert.equal(Object.hasOwn(req, "waypoints"), false);
-  assert.deepEqual(snapshot, { waypoints: [], acceptRadius: 300 });
+  assert.deepEqual(snapshot, { waypoints: [], acceptRadius: 75 });
 });
 
 test("적용값 병합 — 항법은 시드만 폼이, 작동기는 wn·ζ·rate만 폼이 이긴다", () => {

@@ -122,8 +122,11 @@ def build_flight_law(req: FlightCodeIn, profile):
             profile,
             with_schedule=req.with_schedule,
             with_limiter=req.with_limiter,
+            # 부분 지정은 이 기체의 설계값 위에 덧댄다 — ParamDef 기본값(구 합성 기체의 설계값)
+            # 위가 아니다. 시뮬 라우트와 같은 규칙이라야 화면의 C와 날린 법칙이 같다
             autopilot=(
-                REGISTRY.create("fcl", "Autopilot", req.autopilot) if req.autopilot else None
+                REGISTRY.create("fcl", "Autopilot", {**profile.autopilot_params(), **req.autopilot})
+                if req.autopilot else None
             ),
             scas=build_scas(req.scas),
             gain_tables=gain_tables,

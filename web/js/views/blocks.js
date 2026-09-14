@@ -411,10 +411,12 @@ async function loadSchema(schemaBox, block, svgWrap, axis = null) {
   // 축 폼은 카탈로그 없이 열지 않는다 — ScasAxis의 스키마 기본값은 전부 0이라,
   // 설계 kwargs를 못 받은 채 열면 0을 설계값인 양 보여 주고 그대로 적용하면 게인이
   // 사라진다. 값을 모를 때는 안 고치는 편이 낫다
-  if (axis && !catalog) {
+  // 자동조종도 같다 — 스키마 기본값은 구 합성 기체(1200 kg)의 설계값이라 다른 기체에
+  // 그대로 띄우면 옛 경로 게인을 이 기체의 값인 양 보여 주고 주입한다(v1.10 리뷰)
+  if ((axis || block.id === "autopilot") && !catalog) {
     renderReadonlyTable(schemaBox, key, fields);
     schemaBox.append(el("p", { class: "hint" },
-      "게인 카탈로그(/gains/catalog)를 못 받아 축 설계값을 모릅니다 — 편집을 열지 "
+      "게인 카탈로그(/gains/catalog)를 못 받아 이 기체의 설계값을 모릅니다 — 편집을 열지 "
       + "않습니다. 위 표의 기본값은 레지스트리 기본값이지 이 기체의 설계값이 아닙니다."));
     return;
   }
@@ -437,7 +439,8 @@ function paramAccess(block, axis, catalog) {
       read: () => store.get(injectKey) ?? null,
       write: (v) => store.set(injectKey, v),
       reset: () => store.set(injectKey, null),
-      defaults: null,
+      // AP 스키마 기본값은 구 합성 기체의 설계값이다 — 선택 기체의 값은 카탈로그가 준다
+      defaults: block.id === "autopilot" ? (catalog?.autopilot_design ?? null) : null,
       lockBlock: block.id === "autopilot" ? "autopilot" : null,
       lockGroup: null,
       codegen: block.detail.codegen,
@@ -654,7 +657,7 @@ function renderForm(schemaBox, block, key, fields, svgWrap, defaults, access, lo
             errBox.append(el("div", { class: "error-box" }, errors.join("\n")));
             return;
           }
-          showBlockCode(codeBox, block, values, access.codegen);
+          showBlockCode(codeBox, block, values, access.codegen, access.defaults);
         },
       }, "코드 생성"),
     ),
@@ -716,7 +719,7 @@ async function fetchFields(block) {
 
 /** 블록 + 값 → {spec, validation}. values=null이면 엔진 기본값 형상.
  * cgOverride는 축이 여럿인 블록의 축별 varName·cPrefix (lib/blocks codegenTargets). */
-async function buildSpec(block, values, cgOverride = null, appliedOverride = null) {
+async function buildSpec(block, values, cgOverride = null, appliedOverride = null, baseline = null) {
   const { key, fields } = await fetchFields(block);
   // 설계값으로 채운 줄은 값이 있어도 "편집값"이 아니다 (lib/blocks codegenTargets)
   const applied = appliedOverride ?? values != null;
@@ -738,7 +741,7 @@ async function buildSpec(block, values, cgOverride = null, appliedOverride = nul
   return {
     validation,
     spec: {
-      key, fields, values: vals, applied,
+      key, fields, values: vals, applied, baseline,
       pyImport: sym.py_import ?? "claw", pyClass: sym.py_class ?? block.detail.schema.name,
       varName: cg.varName, cPrefix: cg.cPrefix, kind: cg.kind, hint: cg.hint ?? "",
       group: cg.group ?? null, // 축이 여럿인 블록의 축 이름 (탑재 C 요청 조립용)
@@ -750,11 +753,11 @@ async function buildSpec(block, values, cgOverride = null, appliedOverride = nul
 const busy = (box, text) => clear(box).append(el("p", { class: "hint" }, text));
 
 /** 블록 1개 — 폼의 현재 값으로 생성 (적용 여부와 무관하게 지금 보이는 형상). */
-async function showBlockCode(box, block, values, cgOverride = null) {
+async function showBlockCode(box, block, values, cgOverride = null, baseline = null) {
   busy(box, "코드 생성 중…");
   try {
     const [{ spec, validation }, meta] = await Promise.all([
-      buildSpec(block, values, cgOverride), codegenMeta(),
+      buildSpec(block, values, cgOverride, null, baseline), codegenMeta(),
     ]);
     renderCodePanel(box, { specs: [spec], meta, validation: [validation] });
   } catch (e) {

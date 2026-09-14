@@ -71,7 +71,8 @@ export function fullConstants(catalog, params) {
   // SCAS는 게인 자리(kp·ki·k_rate)만 채우면 모자란다 — washout_tau·클램프가 빠진 채
   // 주입되면 서버 ParamDef 기본값(0·±무제한)이 들어차서 워시아웃과 출력 한계가
   // 조용히 사라진다. 그래서 축 kwargs 전량을 아는 scas_design에서 출발한다.
-  // AP는 반대다: PARAM_DEFS 기본값이 곧 데모 설계값이라 부분 dict가 안전하다
+  // AP는 반대다: 부분 dict가 안전하다 — 서버가 선택 기체의 설계값(law.design.autopilot) 위에
+  // 덧댄다(routes/sim.py·codegen.py, 영향성은 pipeline/influence.py). PARAM_DEFS 기본값 위가 아니다
   const scas = scasKwargs(catalog, params?.scas) ?? {};
   const autopilot = { ...(params?.autopilot ?? {}) };
   for (const slot of slotIndex(catalog).values()) {
@@ -103,7 +104,7 @@ export function selectedSlots(catalog, gainTables, scheduleOff) {
  *
  * 편집이 없어도 **설계값**이 나와야 한다: ScasAxis는 범용 축 컴포넌트라 스키마
  * 기본값이 전부 0이고, 그대로 쓰면 코드 표현·주입이 게인 없는 형상이 된다
- * (AP는 PARAM_DEFS 기본값이 곧 데모 설계값이라 이 문제가 없다).
+ * (AP는 서버가 선택 기체의 설계값 위에 덧대므로 이 문제가 없다).
  * 카탈로그가 없으면(서버 이탈) 스토어 값만 — 없으면 null로 "주입 없음". */
 export function scasKwargs(catalog, stored) {
   const design = catalog?.scas_design ?? {};

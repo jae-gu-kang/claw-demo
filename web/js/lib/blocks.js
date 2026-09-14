@@ -72,11 +72,17 @@ export function* walkPages(tree, path = []) {
  * "지금 형상"이라고 보여 주게 된다. 블록도 축 폼이 같은 이유로 편집을 안 여는 것과
  * 같은 규칙이다 (views/blocks.js loadSchema).
  *
+ * 축이 없는 블록(자동조종)은 design = 그 블록의 kwargs 한 벌(/gains/catalog autopilot_design)이다.
+ * 없으면 values가 null이라 코드 표현이 레지스트리 기본값으로 떨어지는데, AP의 그 값은 구 합성
+ * 기체(1200 kg)의 설계값이라 다른 기체에서는 옛 경로 게인을 지금 형상인 양 보여 준다(v1.10 리뷰).
+ *
  * applied는 values와 따로다: 설계값으로 채운 줄은 값이 있어도 "편집값"이 아니다
  * — 그렇게 표시하면 아무것도 안 고친 사용자에게 "기본값 대비 5개 변경"이 뜬다. */
 export function codegenTargets(block, stored, design = null) {
   const { axes, codegen } = block.detail;
-  if (!axes) return [{ values: stored ?? null, applied: stored != null, cg: codegen }];
+  if (!axes) {
+    return [{ values: stored ?? design ?? null, applied: stored != null, baseline: design ?? null, cg: codegen }];
+  }
   const out = [];
   for (const ax of Object.values(axes)) {
     const edited = stored?.[ax.group] ?? null;
@@ -85,10 +91,18 @@ export function codegenTargets(block, stored, design = null) {
     out.push({
       values,
       applied: edited != null,
+      baseline: design?.[ax.group] ?? null,
       cg: { ...codegen, varName: ax.varName, cPrefix: ax.cPrefix, group: ax.group },
     });
   }
   return out;
+}
+
+/** 블록의 설계 kwargs — codegenTargets의 design 인자. SCAS는 축별(scas_design), 자동조종은 한 벌
+ *  (autopilot_design), 나머지 블록은 레지스트리 기본값이 곧 기본 형상이라 없다. */
+export function blockDesign(block, catalog) {
+  if (block.detail.axes) return catalog?.scas_design ?? null;
+  return block.id === "autopilot" ? (catalog?.autopilot_design ?? null) : null;
 }
 
 export const BLOCKS = [

@@ -25,7 +25,7 @@
 
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
-import { BLOCKS, codegenTargets } from "../lib/blocks.js";
+import { BLOCKS, blockDesign, codegenTargets } from "../lib/blocks.js";
 import { schemaFields } from "../lib/schemaform.js";
 import { makeMetaSource, makeSpecBuilder } from "../lib/specs.js";
 import { store } from "../store.js";
@@ -119,14 +119,15 @@ export function render() {
       const all = !shape || state.target === ALL;
       const blocks = all ? targets() : targets().filter((b) => b.id === state.target);
       // SCAS는 축마다 한 줄로 편다. 편집이 없어도 카탈로그 설계 kwargs로 채운다 —
-      // ScasAxis의 스키마 기본값은 0이라 그대로 내면 게인 없는 형상이 나온다
+      // ScasAxis의 스키마 기본값은 0이라 그대로 내면 게인 없는 형상이 나오고, 자동조종의
+      // 스키마 기본값은 구 합성 기체의 설계값이라 다른 기체에서는 옛 경로 게인이 나온다
       const catalog = await gainsCatalog();
       const specTargets = blocks.flatMap((b) =>
-        codegenTargets(b, store.get(b.detail.injectKey), catalog?.scas_design)
+        codegenTargets(b, store.get(b.detail.injectKey), blockDesign(b, catalog))
           .map((t) => ({ block: b, ...t })));
       const [built, meta] = await Promise.all([
         Promise.all(specTargets.map((t) =>
-          buildSpec(t.block, t.values, schemaFields, t.cg, t.applied))),
+          buildSpec(t.block, t.values, schemaFields, t.cg, t.applied, t.baseline))),
         codegenMeta(),
       ]);
       panel = createCodePanel({

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 
 import { readFileSync } from "node:fs";
 
-import { BLOCKS, CHAIN, codegenTargets, resolvePath } from "./blocks.js";
+import { BLOCKS, CHAIN, blockDesign, codegenTargets, resolvePath } from "./blocks.js";
 // 뷰 모듈이지만 모듈 스코프에서 DOM을 안 건드려 node import 가능 — 배선 드리프트 가드
 import { DESIGN_ORDER, TOP_SVG } from "../views/diagram.js";
 import { CHIP_LABEL, SUB_TINT, SUBSYSTEMS } from "../views/subsystems.js";
@@ -591,9 +591,23 @@ test("코드 표현 대상: 축 블록은 축마다 한 줄 — 값을 모르는
     ["yaw"]);
 
   // 축이 없는 블록은 한 줄, cg는 블록 것 그대로
-  assert.deepEqual(codegenTargets(ap, null), [{ values: null, applied: false, cg: ap.detail.codegen }]);
+  assert.deepEqual(codegenTargets(ap, null),
+    [{ values: null, applied: false, baseline: null, cg: ap.detail.codegen }]);
+  // 자동조종도 편집이 없으면 선택 기체의 설계값 — 레지스트리 기본값(구 합성 기체 값)으로 떨어지지 않는다
+  assert.deepEqual(codegenTargets(ap, null, { kp_alt: 0.0098 }),
+    [{ values: { kp_alt: 0.0098 }, applied: false, baseline: { kp_alt: 0.0098 }, cg: ap.detail.codegen }]);
+  assert.equal(base[0].baseline, design.pitch); // 축은 그 축의 설계값이 기준
   assert.deepEqual(codegenTargets(ap, { kp_alt: 1 }),
-    [{ values: { kp_alt: 1 }, applied: true, cg: ap.detail.codegen }]);
+    [{ values: { kp_alt: 1 }, applied: true, baseline: null, cg: ap.detail.codegen }]);
+});
+
+test("블록 설계값의 출처: SCAS는 축별, 자동조종은 한 벌, 나머지는 없다", () => {
+  const byId = Object.fromEntries(BLOCKS.map((b) => [b.id, b]));
+  const catalog = { scas_design: { pitch: { kp: -2 } }, autopilot_design: { kp_alt: 0.0098 } };
+  assert.equal(blockDesign(byId.scas, catalog), catalog.scas_design);
+  assert.equal(blockDesign(byId.autopilot, catalog), catalog.autopilot_design);
+  assert.equal(blockDesign(byId.actuator, catalog), null);
+  assert.equal(blockDesign(byId.autopilot, null), null);
 });
 
 test("허브 계약: 시뮬 주입 경로 보유 블록(AP·SCAS·작동기·항법)만 편집 가능", () => {
@@ -677,24 +691,25 @@ test("웹이 인용한 엔벨로프·천장·SAT_FRAC이 엔진 정본과 같다
   // 엔진 테스트만 빨개지고, 그걸 고친 사람은 웹 문장이 있는 줄도 모른다.
   const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8");
   const trimSrc = read("../../../engine/claw/trim/trim.py");
-  const trimTest = read("../../../engine/claw/tests/test_trim.py");
+  // 웹이 인용하는 것은 **제품 예제**(200 kg급)다 — 엔진 test_trim.py의 표는 회귀 픽스처(구 1200 kg) 몫이다
+  const trimTest = read("../../../engine/claw/tests/test_profile_shipped_example.py");
   const table = (name) => {
     const body = trimTest.slice(trimTest.indexOf(`${name} = {`));
     return Object.fromEntries([...body.slice(0, body.indexOf("\n}")).matchAll(
       /^\s*([\d.]+):\s*\(([^)]*)\)/gm,
     )].map((m) => [Number(m[1]), m[2].split(",").map((v) => Number(v.trim()))]));
   };
-  const band = table("SEA_LEVEL_BAND");
-  const ceil = table("CEILING");
+  const band = table("SHIPPED_SEA_LEVEL_BAND");
+  const ceil = table("SHIPPED_CEILING");
   // 반올림 필수 — 0.55·0.57·0.28 같은 값이면 *100이 55.00000000000001로 떨어져
   // 아무도 본문에 쓸 수 없는 리터럴을 요구하는 빨간 테스트가 된다 (0.95는 우연히 정확)
   const satPct = Math.round(Number(trimSrc.match(/^SAT_FRAC = ([\d.]+)/m)[1]) * 100);
-  // 웹이 인용하는 조합 — 앱 기본값(200 kg)과 만재(400 kg), 그리고 천장 셋
+  // 웹이 인용하는 조합 — 앱 기본값(25 kg)과 만재(50 kg), 그리고 천장 셋
   const want = [
-    `M${band[200][0].toFixed(2)}~${band[200][1].toFixed(2)}`,
-    `M${band[400][0].toFixed(2)}~${band[400][1].toFixed(2)}`,
-    `${(ceil[200][0] / 1000).toFixed(1)} km`,
-    `${(ceil[400][0] / 1000).toFixed(1)} km`,
+    `M${band[25][0].toFixed(2)}~${band[25][1].toFixed(2)}`,
+    `M${band[50][0].toFixed(2)}~${band[50][1].toFixed(2)}`,
+    `${(ceil[25][0] / 1000).toFixed(1)} km`,
+    `${(ceil[50][0] / 1000).toFixed(1)} km`,
     `${(ceil[0][0] / 1000).toFixed(1)} km`,
   ];
   const quoters = ["./manualdoc.js", "../views/subsystems.js"];
@@ -709,6 +724,17 @@ test("웹이 인용한 엔벨로프·천장·SAT_FRAC이 엔진 정본과 같다
     assert.ok(read(rel).includes(`${satPct}%`),
       `${rel}에 SAT_FRAC(${satPct}%) 인용이 없다`);
   }
+});
+
+test("블록도가 인용한 예제 기체의 정지추력·축동력이 예제 문서와 같다 (문서 원문 대조)", () => {
+  // 수평비행 범위·천장과 같은 죽은 문자열이다 — 추진을 1.45배로 올릴 때(v1.10) 문장만 고치고 문서를 안 고치거나
+  // 그 반대면 블록도가 다른 기체를 말한다
+  const doc = JSON.parse(readFileSync(
+    new URL("../../../engine/claw/profile/examples/delta_demo.json", import.meta.url), "utf8"));
+  const p = doc.propulsion.params;
+  const want = `정지추력 ${p.static_thrust / 1000} kN·축동력 ${p.power_max / 1000} kW`;
+  const text = readFileSync(new URL("../views/subsystems.js", import.meta.url), "utf8");
+  assert.ok(text.includes(want), `subsystems.js에 예제 문서의 추진 "${want}"가 없다`);
 });
 
 test("추진 페이지의 교차속도 V_c는 엔진 기본값에서 유도된 값과 같다 (엔진 원문 대조)", () => {

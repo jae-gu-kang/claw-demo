@@ -5,11 +5,18 @@
 """
 
 import argparse
+import os
 import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+from claw.profile.document import EXAMPLE_OVERRIDE_ENV, load_example  # noqa: E402 — 예제는 import 시점에 읽지 않는다
+
+# 골든은 구 합성 기체(회귀 픽스처) 기준 — pytest conftest와 같은 문서를 예제 자리에 둔다
+os.environ[EXAMPLE_OVERRIDE_ENV] = str(HERE.parent / "fixtures" / "delta_legacy.json")
+# 변수 이름이 바뀌어 덮어쓰기가 조용히 빗나가면 제품 예제(200 kg급)로 골든을 굳히게 된다 — 캡처 전에 기체를 확인한다
+assert load_example()["mass"]["m_empty"] == 800.0, "골든은 구 합성 기체(1200 kg) 기준이다"
 
 import engine_goldens  # noqa: E402
 import golden_io  # noqa: E402

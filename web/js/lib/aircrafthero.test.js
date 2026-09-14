@@ -90,11 +90,14 @@ test("고리는 끝에서 처음으로 돌고, 목록에 없는 칸에서는 앞
   assert.equal(stepIndex(0, 0, +1), -1);
 });
 
-test("표시 모델만 바꾼 변형은 계산이 기본 형상과 같다고 말하고, 다른 걸 바꾼 변형은 덮어쓴 항목을 센다", () => {
-  assert.match(variantNote(EXAMPLE, "eoir"), /EO\/IR형.*표시 모델만.*기본 형상과 같습니다/);
+test("표시 모델만 바꾼 변형은 계산이 기본 형상과 같다고 말하고, 다른 걸 바꾼 변형은 바뀐 절을 이름으로 댄다", () => {
+  const lookOnly = { variants: [{ id: "l", name: "도색형", patch: { "/display": { kind: "model", model: "x.glb" } } }] };
+  assert.match(variantNote(lookOnly, "l"), /도색형.*표시 모델만.*기본 형상과 같습니다/);
   assert.equal(variantNote(EXAMPLE, null), null);
-  const heavy = { variants: [{ id: "h", name: "무거운형", patch: { "/mass/m_empty": 900, "/display/model": "x.glb" } }] };
-  assert.match(variantNote(heavy, "h"), /덮어쓴 항목 2개: \/mass\/m_empty, \/display\/model/);
+  // 예제의 EO/IR형은 짐벌 무게만큼 질량·관성도 바꾼다 — 계산이 같다고 말하면 안 된다
+  assert.match(variantNote(EXAMPLE, "eoir"), /EO\/IR형.*기본 형상과 다른 것: 표시 모델, 질량·관성$/);
+  const heavy = { variants: [{ id: "h", name: "무거운형", patch: { "/mass/m_empty": 900, "/mass/J_full": [], "/display/model": "x.glb" } }] };
+  assert.match(variantNote(heavy, "h"), /기본 형상과 다른 것: 질량·관성, 표시 모델$/);
   // 막 추가해 치환이 빈 변형 — 「0개:」로 매달리지 않는다
   assert.match(variantNote({ variants: [{ id: "n", name: "새 변형", patch: {} }] }, "n"), /덮어쓴 항목이 없어 기본 형상과 같습니다/);
 });

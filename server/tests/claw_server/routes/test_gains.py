@@ -207,3 +207,20 @@ def test_structurally_impossible_slot_rejected(client):
     for name in ("speed.k_rate", "heading.k_rate"):
         r = client.post("/api/codegen/flight", json={"gain_tables": {name: tab}})
         assert r.status_code == 422, name
+
+
+def test_catalog_carries_autopilot_design_of_the_selected_aircraft(client):
+    """구조도 자동조종 폼의 초기값은 **선택 기체의 설계값**이다 — Autopilot ParamDef 기본값은 구 합성 기체(1200 kg)의
+    설계값이라, 그걸 띄우면 200 kg급 예제에 옛 경로 게인을 보여 주고 한 칸만 고쳐 적용해도 전 필드가 옛 값으로
+    주입된다(v1.10 리뷰)."""
+    from claw.fcl.autopilot import Autopilot
+    from claw.profile import load_shipped_example
+
+    d = load_shipped_example()
+    d.update(id="shipped-delta-gains", name="제품 예제 사본", is_example=False, variants=[])
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    got = client.get("/api/gains/catalog", params={"profile_id": "shipped-delta-gains"}).json()
+    assert got["autopilot_design"] == d["law"]["design"]["autopilot"]
+    assert got["autopilot_design"] != Autopilot().cfg
+    # 예제 자리(테스트에서는 구 합성 기체)는 레지스트리 기본값과 같다 — 둘이 갈리는 것은 기체가 달라서다
+    assert client.get("/api/gains/catalog").json()["autopilot_design"] == Autopilot().cfg

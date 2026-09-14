@@ -363,9 +363,11 @@ def _build(req: SimRunIn, profile):
         with_schedule=req.with_schedule,
         with_limiter=req.with_limiter,
         # 레지스트리 경유 = ParamDef 판정(미정의 키·타입·범위·choices → ParamError
-        # ⊂ ValueError → 422). 부분 지정은 ParamDef 기본값 보충 — 생성자 기본값과
-        # 동일함은 엔진 defaults-match 테스트가 보증
-        autopilot=REGISTRY.create("fcl", "Autopilot", req.autopilot) if req.autopilot else None,
+        # ⊂ ValueError → 422). 부분 지정은 **이 기체의 설계값** 위에 덧댄다 — ParamDef 기본값은
+        # 구 합성 기체(1200 kg)의 설계값이라, 거기에 채우면 다른 기체에서 안 보낸 경로 게인이
+        # 옛 값으로 바뀐다(v1.10 리뷰). 영향성(pipeline/influence.py make_law)과 같은 규칙이다
+        autopilot=(REGISTRY.create("fcl", "Autopilot", {**profile.autopilot_params(), **req.autopilot})
+                   if req.autopilot else None),
         scas=build_scas(req.scas),
         gain_tables=gain_tables,
     )

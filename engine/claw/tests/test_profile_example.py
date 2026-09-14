@@ -8,7 +8,7 @@
 import pytest
 
 from claw.fcl.autopilot import Autopilot
-from claw.profile import EXAMPLE_ID, example_profile
+from claw.profile import EXAMPLE_ID, example_profile, load_shipped_example
 
 
 def test_example_identity_and_dispersion_axes():
@@ -34,10 +34,12 @@ def test_tables_are_built_fresh_each_call():
     assert p.stall_table().data is not p.stall_table().data
 
 
-def test_registry_autopilot_defaults_equal_the_example_design():
-    # 알려진 중복: Autopilot ParamDef 기본값이 예제 기체의 설계값이다. 프로파일은 기본값을 쓰지 않고
-    # 전부 명시하므로 계산에는 영향이 없지만, 둘이 갈리면 폼 초기값이 예제와 달라진다
+def test_registry_autopilot_defaults_are_the_legacy_fixture_design():
+    # 알려진 중복: Autopilot ParamDef 기본값은 구 합성 기체(회귀 픽스처 — conftest가 예제 자리에 둔다)의 설계값이다.
+    # 프로파일은 기본값을 쓰지 않고 전부 명시하므로 계산에는 영향이 없다. 제품 예제(200 kg급)의 설계값은 이와 달라서,
+    # 웹 폼 초기값은 레지스트리 기본값이 아니라 /gains/catalog autopilot_design(선택 기체의 설계값)에서 온다
     assert example_profile().autopilot_params() == Autopilot().cfg
+    assert load_shipped_example()["law"]["design"]["autopilot"] != Autopilot().cfg
 
 
 def test_legacy_constants_keep_their_old_shapes_and_values():

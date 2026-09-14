@@ -8,7 +8,7 @@ views/verify.js가 소비한다. 뷰는 테스트 면제(.claude/verify-fleet-ex
 표시 판단뿐이고, 검사 내용을 다시 적지 않는다.
 */
 
-import { BLOCKS, codegenTargets } from "./blocks.js";
+import { BLOCKS, blockDesign, codegenTargets } from "./blocks.js";
 import { flightRequest } from "./flightcode.js";
 
 /** 현재 편집 형상 → POST /verify/flight 요청 본문.
@@ -20,7 +20,7 @@ import { flightRequest } from "./flightcode.js";
 export function buildVerifyRequest(storeGet, catalog, { tEnd = 180 } = {}) {
   const specs = BLOCKS
     .filter((b) => b.detail.editable && b.detail.codegen)
-    .flatMap((b) => codegenTargets(b, storeGet(b.detail.injectKey), catalog?.scas_design)
+    .flatMap((b) => codegenTargets(b, storeGet(b.detail.injectKey), blockDesign(b, catalog))
       .map((t) => ({
         key: `${b.detail.schema.category}/${b.detail.schema.name}`,
         group: t.cg.group ?? null,

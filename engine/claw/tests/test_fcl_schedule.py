@@ -135,7 +135,10 @@ def test_전부_끄면_스케줄_파일_자체가_사라진다():
 
 
 def test_기본_테이블은_예전과_같다():
-    """자리 선택을 도입해도 **기본 형상은 불변** — flight/gen 커밋 산출물이 걸려 있다."""
+    """자리 선택을 도입해도 **기본 형상은 불변** — 구 합성 기체(회귀 픽스처) 조립의 지문을 핀한다.
+
+    커밋된 flight/gen은 v1.10부터 제품 예제(200 kg급)의 산출물이라 그 지문은 flight/tests/test_parity.py가 따로
+    핀한다. 아래 이력은 이 픽스처 지문이 움직인 까닭들이다."""
     tabs = make_demo_gain_tables()
     assert tuple(tabs) == DEFAULT_SCHEDULED
     design = demo_design_gains()

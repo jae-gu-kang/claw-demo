@@ -195,8 +195,8 @@ _SYSTEM = """너는 CLAW 비행제어 설계툴의 미션 초안 생성기다. �
 그래도 첫 초안이 한 번에 완주 가능해야 이 기능이 뜻이 있다.
 
 ## 기체·무대 (고정 사실)
-- 델타윙 단발 무인기. 트림 실속속도 70.9 m/s, 발사 이탈속도 81.5 m/s(=1.15×Vs),
-  순항 88 m/s 부근, 뱅크 한계 0.7 rad에서 선회 반경 약 940 m.
+- 델타윙 단발 무인기(최대 이륙 200 kg급). 트림 실속속도 28.9 m/s, 발사 이탈속도 33.3 m/s(=1.15×Vs),
+  순항 44 m/s 부근(더 느리면 선회에서 받음각 여유가 모자라 고도를 잃는다), 뱅크 한계 0.7 rad에서 선회 반경 약 234 m.
 - 무대는 고흥 시험장. NED 좌표(미터), 원점 = 활주로 남단 임계
   (위도 34.601303, 경도 127.212067). 활주로는 원점에서 진방위 0.05964 rad
   (3.417°) 방향으로 1205 m. 지형 팩 core가 반경 12 km라 웨이포인트는
@@ -228,7 +228,7 @@ _SYSTEM = """너는 CLAW 비행제어 설계툴의 미션 초안 생성기다. �
 10. 지상 출발(groundOn=true)이면 mach는 반드시 "0"이고 alt는 비행 고도가
     아니라 활주로 표고(기본 "0")다. launchOn=true면 발사대에서 뜬다.
     공중 수평비행에서 시작하려면 groundOn=false·launchOn=false로 두고
-    mach를 양수(예: "0.26"≈88 m/s), alt를 시작 고도로 둔다.
+    mach를 양수(예: "0.13"≈44 m/s), alt를 시작 고도로 둔다.
 11. 착륙(on_ground·접지·활주 정지)이 있는 미션은 groundOn=true여야 한다 —
     지면이 없으면 접지 판정 자체가 성립하지 않는다.
 12. runConditions의 문자열 칸을 ""로 두면 화면의 현재 값이 유지된다. 확신이
@@ -240,19 +240,19 @@ _SYSTEM = """너는 CLAW 비행제어 설계툴의 미션 초안 생성기다. �
   방향 등). warnings에는 요청을 그대로 못 지킨 것·위험한 값을 적는다.
 - 모드 이름은 소문자 영문(launch·climb·cruise 등 관례)을 따른다.
 
-## 검증된 완주 예시 (발사 → 순항(경로 추종) → 접근 → 착륙 정지, 약 101 s)
+## 검증된 완주 예시 (발사 → 순항(경로 추종) → 접근 → 착륙 정지, 약 221 s)
 {"summary":"발사대에서 떠서 활주로 축 웨이포인트를 따라 순항하고 되돌아와 정지",
-"assumptions":["순항 고도 200 m","순항 속도 88 m/s"],
+"assumptions":["순항 고도 200 m","순항 속도 44 m/s"],
 "modeRows":[
-{"name":"launch","speed":"110","lonAxis":"pitch","lonValue":"0.3665","heading":"0.05964","exitKind":"off_rail","exitValue":"","next":"climb"},
-{"name":"climb","speed":"110","lonAxis":"pitch","lonValue":"0.3665","heading":"0.05964","exitKind":"alt_ge","exitValue":"180","next":"cruise"},
-{"name":"cruise","speed":"88","lonAxis":"alt","lonValue":"200","heading":"path","exitKind":"path_done","exitValue":"","next":"approach"},
-{"name":"approach","speed":"88","lonAxis":"hdot","lonValue":"-4.8","heading":"0.05964","exitKind":"alt_le","exitValue":"20","next":"flare"},
-{"name":"flare","speed":"80","lonAxis":"hdot","lonValue":"-0.8","heading":"0.05964","exitKind":"on_ground","exitValue":"","next":"rollout"},
+{"name":"launch","speed":"44.9","lonAxis":"pitch","lonValue":"0.3665","heading":"0.05964","exitKind":"off_rail","exitValue":"","next":"climb"},
+{"name":"climb","speed":"44.9","lonAxis":"pitch","lonValue":"0.3665","heading":"0.05964","exitKind":"alt_ge","exitValue":"180","next":"cruise"},
+{"name":"cruise","speed":"44","lonAxis":"alt","lonValue":"200","heading":"path","exitKind":"path_done","exitValue":"","next":"approach"},
+{"name":"approach","speed":"35.9","lonAxis":"hdot","lonValue":"-1.96","heading":"0.05964","exitKind":"alt_le","exitValue":"20","next":"flare"},
+{"name":"flare","speed":"32.7","lonAxis":"hdot","lonValue":"-0.33","heading":"0.05964","exitKind":"on_ground","exitValue":"","next":"rollout"},
 {"name":"rollout","speed":"0","lonAxis":"pitch","lonValue":"0","heading":"0.05964","exitKind":"speed_le","exitValue":"0.5","next":"stopped"},
 {"name":"stopped","speed":"0","lonAxis":"pitch","lonValue":"0","heading":"","exitKind":"time_ge","exitValue":"1e9","next":""}],
 "wpRows":[{"n":"2596","e":"155","d":""},{"n":"3294","e":"197","d":""}],
-"runConditions":{"mach":"0","alt":"0","fuel":"300","groundOn":true,"launchOn":true,"tEnd":"200","accept":"100"},
+"runConditions":{"mach":"0","alt":"0","fuel":"37.5","groundOn":true,"launchOn":true,"tEnd":"280","accept":"100"},
 "warnings":[]}"""
 
 

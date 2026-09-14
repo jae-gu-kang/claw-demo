@@ -79,10 +79,11 @@ const change = (node, value) => {
 };
 
 test("기본 문서 편집 — 수치 칸은 그 경로로, 대칭 행렬은 마주 보는 칸도 함께", () => {
+  const before = EXAMPLE.mass.m_empty;
   const { root, commits } = mount(EXAMPLE);
   change(inputsOf(root, "공허 질량")[0], "900");
   assert.equal(commits.at(-1).next.mass.m_empty, 900);
-  assert.equal(EXAMPLE.mass.m_empty, 800, "받은 문서를 고치지 않는다");
+  assert.equal(EXAMPLE.mass.m_empty, before, "받은 문서를 고치지 않는다");
   const cells = inputsOf(root, "관성 행렬 (연료 만재)");
   assert.equal(cells.length, 9);
   change(cells[2], "-12.5"); // [0][2]

@@ -27,21 +27,23 @@ import { GOHEUNG } from "./site.js";
 // 이유가 없는 자세 구간), approach·flare는 **강하율**(어느 고도가 아니라 내려가는
 // 속도를 잡는 구간), cruise만 **고도**다. 셋은 배타라 한 모드에 하나씩만 들어간다.
 //
-// 수치는 엔진 실측으로 정했다. 이탈속도·플레어 개시·미끄럼은 engine test_landing과
-// 같은 값이고, **climb·cruise는 일부러 다르다** — 저쪽은 250/300 m라 다운레인지가
-// 10.8 km인데, 이쪽은 지형 팩 안에 들어오도록 180/200 m로 낮춰 8.0 km로 줄였다:
-//   이탈 81.5 m/s = 1.15 × 트림 실속속도 70.9
-//   플레어 개시 20 m·kp_vs 0.08 → 접지 −1.0 m/s (5 m에서는 0.9 s뿐이라 −4.6)
-//   접지 후 미끄럼 870 m — 고흥 활주로 실측 1,205 m에서 접지 창은 335 m뿐이다
+// 수치는 엔진 실측으로 정했다(v1.10 — 200 kg급 예제, 기본 미션을 이 폼 그대로 서버에서 날려 쟀다). 속도·강하율은 구 합성
+// 기체(1200 kg) 값에 √(무게비) = 0.408을 곱한 것이라 활공각·상승 자세는 그대로다 — 순항만 44 m/s다(cruiseSpeed 주석). 고도는 지형 팩 안에 들어오도록
+// 180/200 m다:
+//   이탈 33.3 m/s = 1.15 × 트림 실속속도 28.9
+//   플레어 개시 20 m·kp_vs 0.196 → 접지 −0.35 m/s
+//   접지 후 미끄럼 157 m — 고흥 활주로 실측 1,205 m에서 접지 창은 1,048 m다
 //   (그 창을 실제로 맞추는 것이 아래 장주다. 화면은 여전히 숨기지 않는다 — 착륙
 //    요약이 "접지 지점"·"정지" 행에 활주로 축 기준 실제 값을 내고 구간 밖이면
 //    밖이라고 적는다. 여기에 그 수를 적어 두면 프로파일이 바뀔 때마다 조용히
 //    낡는다 — lib/replay.js landingSummary)
 //
-// 장주 기하는 **실측에서 역산했다**(engine 직접 실행, 도달 반경 300·순항 88 m/s):
-//   접근 시작 → 접지 4,007 m (접근 3,249 + 플레어 758) · 접지 → 정지 863 m
-//   활주로가 0~1,205 m이므로 접지가 ~150 m여야 정지가 구간 안에 든다
-//   → 접근 시작은 활주로 축 −3,860 m, path_done이 도달 반경만큼 먼저 오므로 WP는 −3,600
+// 장주 기하는 **실측에서 역산했다**(서버 실행, 도달 반경 75·순항 44 m/s):
+//   파이널 WP 활주로 축 −3,600(구 기체 값)에서는 접지 1,064 m·정지 1,221 m로 활주로를 넘었다(순항 35.9 때 실측)
+//   → WP를 −4,400으로 당겨 접지 267 m · 정지 422 m (접지→정지 155 m · EO/IR형 246 m · 403 m) — 양쪽 여유가 있다
+//   순항 35.9 m/s·도달 반경 50 m였을 때는 추진 1.45배에서 베이스 선회가 받음각 한계에 막혀 WP를 놓치고 활주로 1.4 km
+//   앞에 내렸다. 순항 35.9에서 장주 폭(1,200·1,500·1,800 m)이나 도달 반경만 바꿔서는 형상마다 결과가 갈렸고, 순항 44에서는
+//   폭 900·1,500·1,800 m × 두 형상 모두 계획 고도로 축에 정대해 활주로 안에 섰다 — 기하가 아니라 선회 속도의 문제였다
 // 이 수들은 프로파일(속도·강하율·플레어)이 바뀌면 함께 움직인다 — 바꿨으면 다시 재라.
 //
 // 이 값들은 엔진 기본값의 사본이 아니라 **미션 시나리오**라 02 §5.5의 "엔진 기본값
@@ -55,10 +57,12 @@ export const RUNWAY_HDG = String(GOHEUNG.runwayHeadingRad); // [rad] 3.417°
 /** 기본 미션의 기체 성능 값 — **예제 기체 사본**(기체 문서 mission_template.sim, missiontemplate.test.js가
  *  대조). 위 주석의 실측 근거는 예제 기체의 것이다. 고른 기체에 템플릿이 있으면 그 값으로 모드 표를 세운다. */
 export const MODE_FALLBACK = Object.freeze({
-  climbSpeed: "110", climbPitch: CLIMB_PITCH, climbExitAlt: "180",
-  cruiseSpeed: "88", cruiseAlt: "200",
-  approachSpeed: "88", approachHdot: "-4.8", approachExitAlt: "20",
-  flareSpeed: "80", flareHdot: "-0.8",
+  climbSpeed: "44.9", climbPitch: CLIMB_PITCH, climbExitAlt: "180",
+  // 순항은 트림 실속속도(28.9)의 1.52배다 — 상사값 35.9(1.24배)에서는 장주 선회(뱅크 0.7, 하중배수 1.31)가 받음각을
+  // α 리미터 한계에 붙여 고도를 잃었고, 흔들린 선회가 겹치면 나선 강하까지 갔다(v1.10 실측). 44에서 선회 중 최소 α 여유 0.09 rad
+  cruiseSpeed: "44", cruiseAlt: "200",
+  approachSpeed: "35.9", approachHdot: "-1.96", approachExitAlt: "20",
+  flareSpeed: "32.7", flareHdot: "-0.33",
 });
 
 /** 기본 모드 표 — **부를 때마다 새 사본**이다. 표 편집이 행을 제자리에서 고치므로
@@ -75,7 +79,7 @@ export function defaultModeRows(v = MODE_FALLBACK) {
     // 활주로 방위로 되돌아갔다 — 웨이포인트를 찍어도 비행이 안 바뀌던 이유였다.
     { name: "cruise", speed: v.cruiseSpeed, lonAxis: "alt", lonValue: v.cruiseAlt, heading: "path",
       exitKind: "path_done", exitValue: "", next: "approach" },
-    // 3° 활공: 88 m/s · sin3° ≈ 4.6 m/s (예제 기체)
+    // 3.1° 활공: 35.9 m/s · sin3.1° ≈ 1.96 m/s (예제 기체)
     { name: "approach", speed: v.approachSpeed, lonAxis: "hdot", lonValue: v.approachHdot,
       heading: RUNWAY_HDG, exitKind: "alt_le", exitValue: v.approachExitAlt, next: "flare" },
     { name: "flare", speed: v.flareSpeed, lonAxis: "hdot", lonValue: v.flareHdot,
@@ -102,9 +106,9 @@ const axisWp = (along, cross = 0) => {
   };
 };
 
-// 장주 폭 [m] — 180° 되돌기 둘을 담아야 한다. 88 m/s·뱅크 0.7에서 선회 반경이
-// 938 m이므로 반전 하나에 2R = 1,876 m가 든다. 2,200은 그 위의 여유다.
-const PATTERN_CROSS = 2200;
+// 장주 폭 [m] — 180° 되돌기 둘을 담아야 한다. 순항 44 m/s·뱅크 0.7에서 선회 반경이
+// 234 m이므로 반전 하나에 2R = 469 m가 든다. 900은 그 위의 여유다(구 기체 88 m/s는 938 m라 2,200이었다).
+const PATTERN_CROSS = 900;
 
 /** 기본 웨이포인트 표 — 모드 표와 같은 이유로 **새 사본**이다.
  *
@@ -118,7 +122,7 @@ export function defaultWpRows() {
     axisWp(3500, PATTERN_CROSS), //  크로스윈드
     axisWp(-5800, PATTERN_CROSS), //  다운윈드 — 활주로를 지나 남쪽으로
     axisWp(-5800, 0), //  베이스 — 축으로 되돌아온다
-    axisWp(-3600, 0), //  파이널 진입 — 여기서 경로가 끝나고 접근이 시작된다
+    axisWp(-4400, 0), //  파이널 진입 — 여기서 경로가 끝나고 접근이 시작된다
   ];
 }
 
@@ -142,7 +146,7 @@ export const DEFAULT_FORM = Object.freeze({
   // alt는 비행 고도가 아니라 활주로 표고다 (엔진 trim_ground)
   mach: "0",
   alt: "0",
-  fuel: "300",
+  fuel: "37.5",
   groundOn: true,
   rwHeading: RUNWAY_HDG,
   rwLength: String(GOHEUNG.runwayLengthM),
@@ -152,30 +156,30 @@ export const DEFAULT_FORM = Object.freeze({
   // radians(15)를 네 자리로 줄인 값이다(0.2617993…)
   railLen: "10",
   railAngle: "0.2618", // [rad] 15°
-  railExit: "81.5", // 1.15 × 트림 실속속도 70.9 → 33.9 g
+  railExit: "33.3", // 1.15 × 트림 실속속도 28.9 → 5.7 g
   rtkOn: true,
   // 측지 원점 — NED (0,0)이 지구상 어디인가. 엔진은 보지 않고 결과 meta에만 실린다.
   // 끄면 3D 월드가 지형을 얹지 못한다(같은 N·E가 어디인지 모르므로).
   originOn: true,
   originLat: String(GOHEUNG.originLatDeg),
   originLon: String(GOHEUNG.originLonDeg),
-  // 장주 미션은 280 s 안팎에 선다(실측). 320은 그 위의 여유다 — 짧으면 서기 전에
+  // 장주 미션은 513 s 안팎에 선다(실측). 750은 그 위의 여유다 — 짧으면 서기 전에
   // 끊긴다. 정확한 시각은 실행 후 착륙 요약이 말한다(여기 적어 두면 조용히 낡는다).
-  tEnd: "320",
-  // 도달 반경 [기본값] — 300 m. **너무 작으면 경로가 끝나지 않는다**: 순항 88 m/s·
-  // 뱅크 한계 0.7 rad에서 선회 반경이 938 m라 LOS 추종이 임의로 작은 원을 못 잡고
+  tEnd: "750",
+  // 도달 반경 [기본값] — 75 m. **너무 작으면 경로가 끝나지 않는다**: 순항 44 m/s·
+  // 뱅크 한계 0.7 rad에서 선회 반경이 234 m라 LOS 추종이 임의로 작은 원을 못 잡고
   // 목표를 지나쳤다 되돌기를 반복한다(선회 예상 전환이 꺾임점은 덮지만 **마지막
   // 웨이포인트**에는 다음 구간이 없어 도달 반경만 남는다). 그 하한은 웨이포인트
   // 기하 × 선회 성능의 함수라 상수가 아니고, 화면이 제출 전에 판정해 사유를 낸다
-  // (lib/wpcheck.js — 선회 반경의 1/4인 235 m 아래를 경고한다. 300은 그 위다).
-  accept: "300",
+  // (lib/wpcheck.js — 선회 반경의 1/4인 59 m 아래를 경고한다. 75는 그 위이고 순항 35.9 때의 50/156과 같은 비율이다).
+  accept: "75",
   navOn: true,
   seed: "11",
   actOn: true,
   wn: String(ACT_FALLBACK.wn),
   zeta: String(ACT_FALLBACK.zeta),
   rate: String(ACT_FALLBACK.rate),
-  fuelFlow: "0.3",
+  fuelFlow: "0.02",
   useGains: false,
   useAp: false,
   useScas: false,

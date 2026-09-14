@@ -12,6 +12,12 @@ GLB를 가리키고 서버 자산 목록에 그 파일이 있으면 모델을, �
 import { uavMesh } from "./uavmesh.js";
 
 const LAYOUT_LABEL = { elevon4_rudder1: "엘레본 4면·러더 1면" };
+// 형상 변형이 덮어쓴 절 → 사람이 읽는 이름 (절 이름은 엔진 schema.SECTIONS)
+const SECTION_LABEL = {
+  geometry: "형상", aero: "공력", stall: "실속", mass: "질량·관성", propulsion: "추진", actuator: "작동기",
+  surfaces: "타면", structural: "구조 한계", operating: "운용 고도", ground: "지상장치", trim: "트림 범위",
+  law: "제어법칙", mission_template: "미션 템플릿", display: "표시 모델",
+};
 
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 const fixed = (v, d) => (finite(v) ? v.toFixed(d) : "—");
@@ -93,10 +99,11 @@ export function variantNote(doc, variantId) {
   if (!v) return null;
   const paths = Object.keys(v.patch ?? {});
   if (paths.length === 0) return `「${v.name}」 — 아직 덮어쓴 항목이 없어 기본 형상과 같습니다.`;
-  if (paths.every((k) => k === "/display" || k.startsWith("/display/"))) {
+  // JSON Pointer를 그대로 보이지 않는다 — 덮어쓴 **절**을 처음 나온 순서대로 사람이 읽는 이름으로
+  const sections = [...new Set(paths.map((k) => k.split("/")[1]))];
+  if (sections.every((s) => s === "display")) {
     return `「${v.name}」 — 표시 모델만 다르고 계산 입력은 기본 형상과 같습니다.`;
   }
-  const shown = paths.slice(0, 4).join(", ");
-  return `「${v.name}」 — 덮어쓴 항목 ${paths.length}개: ${shown}${paths.length > 4 ? " …" : ""}`;
+  return `「${v.name}」 — 기본 형상과 다른 것: ${sections.map((s) => SECTION_LABEL[s] ?? s).join(", ")}`;
 }
 

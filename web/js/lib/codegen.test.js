@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 
 import {
   cLiteral, cMacro, diffParams, genCHeader, genPython, genSnapshotC, genSnapshotPython,
-  notesToComment, numDisplay, paramWarnings, pyLiteral, traceRows, UNBOUNDED, wrapItems,
+  notesToComment, numDisplay, paramWarnings, pyLiteral, refFields, traceRows, UNBOUNDED, wrapItems,
 } from "./codegen.js";
 
 // schemaform.schemaFields() 출력 형태 (엔진 ParamDef가 정본)
@@ -225,4 +225,38 @@ test("traceRows: 파라미터 → 출처 스키마 → 코드 라인 대응 (산
   assert.equal(row.unit, "rad");
   assert.equal(row.line, lineOf.phi_max);
   assert.equal(rows.find((r) => r.param === "seed").unit, ""); // 무차원 "-"는 빈칸
+});
+
+test("기체 설계값이 기준이면 그것과 비교한다 — 안 고친 설계값에 '기본값 대비 변경'·'50% 이탈'이 뜨지 않는다", () => {
+  const design = { ...BASE, kp_spd: 0.4 }; // 레지스트리 기본값 0.15와 167% 다른 기체 설계값
+  const unedited = spec(design, { applied: false, baseline: design });
+  const py = genPython(unedited).code;
+  assert.match(py, /기체 설계값 \(편집 미적용\)/);
+  assert.doesNotMatch(py, /50% 이상 벗어남/);
+  assert.doesNotMatch(py, /← (기본|설계)/);
+  // 설계값에서 한 칸 고치면 기준도 설계값 — 레지스트리 기본값이 아니다
+  const edited = spec({ ...design, phi_max: 0.9 }, { baseline: design });
+  const code = genPython(edited).code;
+  assert.match(code, /편집값 \(기체 설계값 대비 1개 변경\)/);
+  assert.match(code, /phi_max=0\.9,\s+# ← 설계 0\.7/);
+  assert.doesNotMatch(code, /kp_spd=0\.4,\s+#/);
+  assert.deepEqual(refFields(edited).find((f) => f.name === "kp_spd").default, 0.4);
+  // 기준이 없으면 종전대로 레지스트리 기본값과 비교한다
+  assert.match(genPython(spec(design)).code, /편집값 \(기본값 대비 1개 변경\)/);
+});
+
+test("기체 설계값 기준의 나머지 갈래 — 무변경 적용·50% 이탈 문구·C 헤더 표시", () => {
+  const design = { ...BASE, kp_spd: 0.4 };
+  // 폼을 열고 안 고친 채 코드를 뽑은 경우(applied이지만 설계값 그대로)
+  assert.match(genPython(spec({ ...design }, { baseline: design })).code, /기체 설계값과 동일/);
+  // 설계값에서 50% 이상 벗어난 편집은 **설계값 기준**으로 경고한다
+  const warns = paramWarnings(refFields(spec({ ...design, kp_spd: 0.7 }, { baseline: design })),
+    { ...design, kp_spd: 0.7 }, { refLabel: "기체 설계값" });
+  assert.ok(warns.some((w) => /기체 설계값 0\.4에서 50% 이상/.test(w.text)), JSON.stringify(warns));
+  assert.match(genPython(spec({ ...design, kp_spd: 0.7 }, { baseline: design })).code,
+    /기체 설계값 0\.4에서 50% 이상 벗어남/);
+  // C 헤더도 같은 기준·같은 표시
+  const c = genCHeader(spec({ ...design, phi_max: 0.9 }, { baseline: design })).code;
+  assert.match(c, /편집값 \(기체 설계값 대비 1개 변경\)/);
+  assert.match(c, /← 설계 0\.7/);
 });

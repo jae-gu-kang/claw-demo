@@ -69,6 +69,22 @@ export function cMacro(prefix, name) {
   return prefix ? `${prefix}_${body}` : body;
 }
 
+/** 비교 기준 필드 — spec에 기체 설계값(baseline)이 있으면 그 값을 기준(default)으로 쓴다.
+ *
+ * 레지스트리 기본값은 자동조종이면 구 합성 기체(1200 kg)의 설계값, SCAS 축이면 0이다. 편집이 없어
+ * 기체 설계값으로 채운 형상을 그것과 비교하면 아무도 안 고친 값에 "기본값 대비 변경"·"50% 이탈 —
+ * 근거를 남기세요"가 뜬다(v1.10 2차 리뷰). 기준의 이름은 refLabel이 함께 말한다. */
+export function refFields(spec) {
+  const base = spec.baseline;
+  if (!base) return spec.fields;
+  return spec.fields.map((f) => (f.name in base ? { ...f, default: base[f.name] } : f));
+}
+
+/** 비교 기준의 이름 — refFields와 짝. */
+export function refLabel(spec) {
+  return spec.baseline ? "기체 설계값" : "엔진 기본값";
+}
+
 /** 기본값과 다른 항목만 — 무엇을 설계했는지가 형상 관리의 실체. */
 export function diffParams(fields, values) {
   const out = [];
@@ -101,7 +117,7 @@ function boundFraction(f, v) {
 }
 
 /** 검토용 경고·정보 — 값 자체는 유효해도 설계자가 봐야 할 것들. */
-export function paramWarnings(fields, values, { lang = "python" } = {}) {
+export function paramWarnings(fields, values, { lang = "python", refLabel = "엔진 기본값" } = {}) {
   const out = [];
   for (const f of fields) {
     const v = values[f.name];
@@ -126,7 +142,7 @@ export function paramWarnings(fields, values, { lang = "python" } = {}) {
         && f.default !== 0 && Math.abs((v - f.default) / f.default) >= 0.5) {
       out.push({
         name: f.name, level: "info",
-        text: `엔진 기본값 ${numDisplay(f.default)}에서 50% 이상 벗어남 — 근거를 남기세요.`,
+        text: `${refLabel} ${numDisplay(f.default)}에서 50% 이상 벗어남 — 근거를 남기세요.`,
       });
     }
     // float32는 유효자리 약 7 — 그보다 정밀한 입력은 C 헤더에서 반올림된다
@@ -168,9 +184,10 @@ const PURPOSE = "탑재 비행코드가 아니라 현재 설계 형상의 코드
 
 /** 값의 출처 한 줄 — 산출물에서 "무엇을 근거로 이 수치인가"의 답. */
 function originLabel(spec) {
-  if (!spec.applied) return "엔진 기본값 (편집 미적용)";
-  const n = diffParams(spec.fields, spec.values).length;
-  return n === 0 ? "엔진 기본값과 동일" : `편집값 (기본값 대비 ${n}개 변경)`;
+  if (!spec.applied) return `${refLabel(spec)} (편집 미적용)`;
+  const n = diffParams(refFields(spec), spec.values).length;
+  if (n === 0) return `${refLabel(spec)}과 동일`;
+  return spec.baseline ? `편집값 (기체 설계값 대비 ${n}개 변경)` : `편집값 (기본값 대비 ${n}개 변경)`;
 }
 
 /** 헤더 주석 본문 줄 — 생성 메타 + 적용 상태 + 설계 근거·주의. */
@@ -190,7 +207,7 @@ function headerLines(specs, meta, lang) {
     const own = [
       ...notesToComment(s.notes),
       ...(s.hint ? [s.hint] : []),
-      ...paramWarnings(s.fields, s.values, { lang })
+      ...paramWarnings(refFields(s), s.values, { lang, refLabel: refLabel(s) })
         .map((w) => `${w.level === "warn" ? "⚠" : "·"} ${w.name}: ${w.text}`),
     ];
     if (own.length) notes.push(`- ${s.key}`, ...own.map((t) => `  ${t}`));
@@ -200,7 +217,7 @@ function headerLines(specs, meta, lang) {
 }
 
 /** 파라미터 한 줄의 꼬리 주석 — 기본은 변경 표시만, verbose에서 설명·단위·범위. */
-function tailComment(f, v, verbose) {
+function tailComment(f, v, verbose, mark = "기본") {
   const parts = [];
   if (verbose) {
     const unit = f.unit && f.unit !== "-" ? ` [${f.unit}]` : "";
@@ -209,7 +226,7 @@ function tailComment(f, v, verbose) {
       parts.push(`허용 ${numDisplay(f.lo ?? -Infinity)}~${numDisplay(f.hi ?? Infinity)}`);
     }
   }
-  if (v !== f.default) parts.push(`← 기본 ${numDisplay(f.default)}`);
+  if (v !== f.default) parts.push(`← ${mark} ${numDisplay(f.default)}`);
   return parts.join(" · ");
 }
 
@@ -236,11 +253,12 @@ function pyBody(spec, verbose, lines, lineOf, keyPrefix) {
   const { kind = "object", varName, pyClass } = spec;
   lines.push(`# ${spec.key} — ${originLabel(spec)}`);
   lines.push(kind === "dict" ? `${varName} = {` : `${varName} = ${pyClass}(`);
-  for (const f of spec.fields) {
+  const mark = spec.baseline ? "설계" : "기본";
+  for (const f of refFields(spec)) {
     const v = spec.values[f.name];
     if (v === undefined) continue;
     const lhs = kind === "dict" ? `${JSON.stringify(f.name)}: ` : `${f.name}=`;
-    const tail = tailComment(f, v, verbose);
+    const tail = tailComment(f, v, verbose, mark);
     lines.push(`    ${lhs}${pyLiteral(v, f.type)},${tail ? `  # ${tail}` : ""}`);
     lineOf[`${keyPrefix}${f.name}`] = lines.length;
   }
@@ -322,13 +340,14 @@ function alignDefines(rows) {
 function cBlock(spec, verbose, lines, lineOf, keyPrefix) {
   lines.push(`/* ${spec.key} — ${originLabel(spec)} */`);
   const rows = [];
-  for (const f of spec.fields) {
+  const mark = spec.baseline ? "설계" : "기본";
+  for (const f of refFields(spec)) {
     const v = spec.values[f.name];
     if (v === undefined) continue;
     rows.push({
       macro: cMacro(spec.cPrefix, f.name),
       value: cLiteral(v, f.type),
-      tail: tailComment(f, v, verbose),
+      tail: tailComment(f, v, verbose, mark),
       name: f.name,
     });
   }

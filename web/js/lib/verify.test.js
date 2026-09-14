@@ -48,6 +48,12 @@ test("편집값이 설계값을 이긴다 + AP·게인 테이블·t_end가 실�
   assert.equal(req.t_end, 30);
 });
 
+test("편집이 없으면 자동조종은 카탈로그의 기체 설계값으로 실린다 — 레지스트리 기본값(구 기체)이 아니다", () => {
+  const autopilot = { kp_alt: 0.0098, ki_alt: 0.00098, kp_hdg: 1.633 };
+  const req = buildVerifyRequest(storeOf({}), { ...CATALOG, autopilot_design: autopilot });
+  assert.deepEqual(req.autopilot, autopilot);
+});
+
 test("전부 끔(scheduleOff)은 with_schedule:false로 — 테이블은 함께 못 실린다", () => {
   const req = buildVerifyRequest(
     storeOf({ gainScheduleOff: true, gainTables: { "pitch.kp": {} } }), null);

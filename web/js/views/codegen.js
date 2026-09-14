@@ -18,8 +18,8 @@
 import { api } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
-  diffParams, genCHeader, genPython, genSnapshotC, genSnapshotPython, numDisplay,
-  paramWarnings, specLabel, traceRows,
+  diffParams, genCHeader, genPython, genSnapshotC, genSnapshotPython, numDisplay, paramWarnings,
+  refFields, refLabel, specLabel, traceRows,
 } from "../lib/codegen.js";
 import {
   excludedSpecs, flightRequest, groupByRole, mergeFiles, pickFile, summarize,
@@ -288,9 +288,13 @@ function footNote(flight, specs, sched) {
 function reviewBox(specs, validation, snapshot) {
   // 라벨은 specLabel — SCAS 3축처럼 같은 스키마가 여러 줄이면 key로는 구분이 안 된다
   const changes = specs.flatMap((s) =>
-    diffParams(s.fields, s.values).map((d) => ({ ...d, key: specLabel(s) })));
+    diffParams(refFields(s), s.values).map((d) => ({ ...d, key: specLabel(s), ref: refLabel(s) })));
+  // 기준은 줄마다 다르다 — 자동조종·SCAS는 기체 설계값, 작동기·항법은 엔진 기본값이라 한 열 이름으로는
+  // 스냅숏에서 둘 중 하나가 거짓이 된다(2차 리뷰). 기준 이름을 줄에 싣고 머리말은 중립으로 둔다
+  const refs = [...new Set(specs.map(refLabel))];
   const warns = specs.flatMap((s) =>
-    paramWarnings(s.fields, s.values, { lang: cfg.lang }).map((w) => ({ ...w, key: specLabel(s) })));
+    paramWarnings(refFields(s), s.values, { lang: cfg.lang, refLabel: refLabel(s) })
+      .map((w) => ({ ...w, key: specLabel(s) })));
 
   return el("div", {},
     el("h4", { style: "margin: 14px 0 6px" }, "검토"),
@@ -300,17 +304,19 @@ function reviewBox(specs, validation, snapshot) {
       : el("div", { class: "error-box" },
           `엔진 검증 실패 — ${v.key}: ${v.detail}\n`
           + "(코드는 입력한 값 그대로 생성했습니다 — 시뮬 실행 시 같은 사유로 422가 납니다.)")),
-    el("h5", { style: "margin: 12px 0 4px" }, "기본값 대비 변경"),
+    el("h5", { style: "margin: 12px 0 4px" }, "기준값 대비 변경"),
     changes.length === 0
-      ? el("p", { class: "hint" }, "엔진 기본값과 동일 — 변경된 파라미터가 없습니다.")
+      ? el("p", { class: "hint" },
+          `${refs.length === 1 ? refs[0] : "기준값(기체 설계값·엔진 기본값)"}과 동일 — 변경된 파라미터가 없습니다.`)
       : el("div", { class: "scroll-x" }, el("table", {},
           el("thead", {}, el("tr", {},
             snapshot && el("th", {}, "컴포넌트"),
-            el("th", {}, "파라미터"), el("th", {}, "엔진 기본값"), el("th", {}, "현재값"),
+            el("th", {}, "파라미터"), el("th", {}, "기준"), el("th", {}, "기준값"), el("th", {}, "현재값"),
             el("th", {}, "Δ"), el("th", {}, "단위"))),
           el("tbody", {}, changes.map((d) => el("tr", {},
             snapshot && el("td", {}, d.key),
             el("td", { class: "num" }, d.name),
+            el("td", {}, d.ref),
             el("td", { class: "num" }, numDisplay(d.from)),
             el("td", { class: "num" }, numDisplay(d.to)),
             el("td", { class: "num" }, d.deltaPct == null ? "—" : `${fmt(d.deltaPct, 1)} %`),

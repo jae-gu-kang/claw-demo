@@ -107,9 +107,12 @@ def gain_slot_catalog(request: Request,
         # 데모 기체의 SCAS 축 kwargs 전량 — 구조도 축 폼의 초기값이자, 한 축만 고쳐도
         # 세 축을 함께 보내야 하는(req.scas 계약) 나머지 축을 채우는 값이다.
         # ScasAxis의 레지스트리 기본값은 0이라(범용 축 컴포넌트) 스키마로는 대신할 수
-        # 없다 — AP는 PARAM_DEFS 기본값이 곧 데모 설계값이라 이 문제가 없었다.
-        # 게인 자리(kp·ki·k_rate) 밖의 washout_tau·클램프도 여기에 들어 있다.
+        # 없다. 게인 자리(kp·ki·k_rate) 밖의 washout_tau·클램프도 여기에 들어 있다.
         "scas_design": {g: dict(cfg) for g, cfg in law.scas.cfg.items()},
+        # 자동조종 kwargs 전량 — 구조도 AP 폼의 초기값. Autopilot PARAM_DEFS 기본값은 구 합성
+        # 기체(1200 kg)의 설계값이라, 그걸 폼에 띄우면 200 kg급 예제에 옛 경로 게인을 보여 주고
+        # 한 칸만 고쳐 적용해도 전 필드가 옛 값으로 주입된다(v1.10 리뷰). 기체마다 여기서 준다
+        "autopilot_design": dict(law.autopilot.cfg),
         "default": list(scheduled),
         "design_index": _design_index(tables, design),
         "slots": slots,

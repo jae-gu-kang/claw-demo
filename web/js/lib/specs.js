@@ -20,9 +20,10 @@ export function makeSpecBuilder(io, { cache = {} } = {}) {
   };
 
   /** 블록 + 값 → {spec, validation}. values=null이면 엔진 기본값 형상.
-   * cgOverride는 축이 여럿인 블록의 축별 varName·cPrefix·group (lib/blocks codegenTargets). */
+   * cgOverride는 축이 여럿인 블록의 축별 varName·cPrefix·group (lib/blocks codegenTargets).
+   * baseline은 비교 기준인 기체 설계값(codegenTargets) — 없으면 레지스트리 기본값과 비교한다. */
   return async function buildSpec(
-    block, values, schemaFields, cgOverride = null, appliedOverride = null,
+    block, values, schemaFields, cgOverride = null, appliedOverride = null, baseline = null,
   ) {
     const { key, fields: flds } = await fields(block, schemaFields);
     // 설계값으로 채운 줄은 값이 있어도 "편집값"이 아니다 (lib/blocks codegenTargets)
@@ -45,7 +46,7 @@ export function makeSpecBuilder(io, { cache = {} } = {}) {
     return {
       validation,
       spec: {
-        key, fields: flds, values: vals, applied,
+        key, fields: flds, values: vals, applied, baseline,
         pyImport: sym.py_import, pyClass: sym.py_class,
         varName: cg.varName, cPrefix: cg.cPrefix, kind: cg.kind, hint: cg.hint ?? "",
         group: cg.group ?? null, // 축이 여럿인 블록의 축 이름 (탑재 C 요청 조립용)

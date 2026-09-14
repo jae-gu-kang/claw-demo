@@ -1,27 +1,38 @@
 """탑재 제어법칙 C 생성 라우트 (02 §1 · 07 §4, M16).
 
 여기서 지키는 것은 셋이다:
-  ① 커밋된 산출물(`flight/gen/`)과 **같은 코드**가 나오는가 — 조립을 재현하지
+  ① 산출물 정본 경로(`flight/generate.py`)와 **같은 코드**가 나오는가 — 조립을 재현하지
      않는다는 계약의 실질. 서버가 자기 나름대로 조립하면 웹에 보이는 코드와
-     FCC에 넘어가는 코드가 달라진다
+     FCC에 넘어가는 코드가 달라진다. 커밋본(`flight/gen/`)과 정본 경로의 일치는
+     `flight/tests/test_parity.py` 몫이다 — 서버 테스트는 예제 자리에 회귀 픽스처를 두므로
+     커밋본(제품 예제)과 직접 비교하지 않고 같은 예제로 정본 경로를 돌려 비교한다
   ② 편집한 파라미터가 실제로 생성 코드에 반영되는가
   ③ 구성 오류가 422로 나오는가 (판정은 엔진, 매핑만 서버)
 
 C 코드의 정확성(비트 일치·컴파일)은 `flight/tests/test_parity.py` 소관이다.
 """
 
+import importlib.util
 import re
 from pathlib import Path
 
-GEN_DIR = Path(__file__).resolve().parents[4] / "flight" / "gen"
+GENERATE = Path(__file__).resolve().parents[4] / "flight" / "generate.py"
+
+
+def _generated():
+    """flight/generate.py build() — 지금 예제 자리의 문서로 정본 경로를 돌린 {파일: 내용}."""
+    spec = importlib.util.spec_from_file_location("flight_generate", GENERATE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.build()
 
 
 def _post(client, **over):
     return client.post("/api/codegen/flight", json=over)
 
 
-def test_생성_결과가_커밋된_산출물과_같다(client):
-    """기본 형상 = flight/gen/ 정본. 서버가 조립을 따로 재현하지 않는다는 증거."""
+def test_생성_결과가_flight_generate_산출물과_같다(client):
+    """기본 형상 = flight/generate.py 정본 경로. 서버가 조립을 따로 재현하지 않는다는 증거."""
     r = _post(client)
     assert r.status_code == 200, r.text
     body = r.json()
@@ -30,11 +41,11 @@ def test_생성_결과가_커밋된_산출물과_같다(client):
     assert body["groups"] == ["sched", "ap", "lim", "scas", "mix"]
 
     files = {f["name"]: f["text"] for f in body["files"]}
-    committed = {p.name: p.read_text(encoding="utf-8") for p in GEN_DIR.glob("*.[ch]")}
+    committed = _generated()
     for name, text in files.items():
-        assert name in committed, f"{name}이 커밋 산출물에 없다"
+        assert name in committed, f"{name}이 generate.py 산출물에 없다"
         assert text == committed[name], (
-            f"{name}이 커밋본과 다르다 — 서버가 다른 형상을 조립하고 있다"
+            f"{name}이 generate.py 산출물과 다르다 — 서버가 다른 형상을 조립하고 있다"
         )
     # scas_yaw는 이 라우트의 산출물이 아니다(제어법칙 전체만) — 그 차이는 정상
     assert set(committed) - set(files) == {
@@ -200,3 +211,21 @@ def test_다항_구간_불연속은_422(client):
     r = _post(client, gain_tables={"pitch.kp": poly})
     assert r.status_code == 422
     assert "불연속" in r.text
+
+
+def test_부분_자동조종_지정은_이_기체의_설계값_위에_덧댄다(client):
+    """안 보낸 경로 게인은 기체 설계값 그대로여야 한다 — ParamDef 기본값(구 합성 기체의 설계값)으로 채우면 200 kg급
+    기체의 승강률 게인이 0.196 → 0.08로 조용히 바뀐다(v1.10 리뷰, 시뮬 라우트도 같은 규칙). 설계값과 같은 값 하나만
+    보내면 안 보낸 것과 바이트 동일해야 한다."""
+    from claw.profile import load_shipped_example
+
+    d = load_shipped_example()
+    d.update(id="shipped-delta-codegen", name="제품 예제 사본", is_example=False, variants=[])
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    ref = {"id": "shipped-delta-codegen"}
+    base = _post(client, profile=ref)
+    part = _post(client, profile=ref, autopilot={"kp_alt": d["law"]["design"]["autopilot"]["kp_alt"]})
+    assert base.status_code == 200 and part.status_code == 200, part.text
+    assert part.json()["files"] == base.json()["files"]
+    data = {f["name"]: f["text"] for f in part.json()["files"]}["fcl_data.c"]
+    assert re.search(r"\.ap_vs_pid_kp\s+= 0\.196,", data), "승강률 게인이 기체 설계값이 아니다"

@@ -34,25 +34,39 @@ from claw.trim import trim_level
 # 갈리는 순간 값이 자리를 바꿔 실린다 — `verify/units.py`가 기록한 믹서 사고와 같은 병이다.
 INPUT_ORDER = FCL_INPUTS
 
+# 대조 미션의 **모양은 한 벌**이고 크기는 기체가 정한다. 모양을 처음 잡은 기체(구 합성 기체 — 설계 마하 0.6)의 값을
+# 기준으로, 기체의 설계 마하(law.schedule.m_design)와의 비 k만큼 속도·고도 변화는 k배, 경로의 수평 거리(웨이포인트·도달
+# 반경)는 k²배로 줄이거나 늘린다. 수평 거리를 k²로 두는 이유는 선회 반경(V²/g·tanφ)과 같은 비라서다 — k로만 줄이면 느린
+# 기체에게 꺾임이 상대적으로 완만해져 롤 명령이 배분 한계(동적 롤 예산)에 한 번도 닿지 않고, 그러면 그 경로의 C 대조가
+# 반쪽이 된다(flight/tests test_trace_exercises_the_hard_paths). 모드 체류(time_ge)와 t_end는 그대로 둔다 — 빠른 기체(k > 1)는
+# 경로 시간이 k배라 기본 180 s 안에 descent·arrest·hold_att가 안 올 수 있으니 **부르는 쪽이 t_end를 늘린다**(여기서 몰래 늘리면
+# 보고서의 t_end·스팬 id·서버 상한이 실제로 난 시간과 어긋난다 — 밟지 못한 갈래는 exercised가 말한다). 느린 기체에
+# 원래 미션을 그대로 주면 설계점(M0.6)부터 트림이 안 풀린다(200 kg급 예제의 수평비행 상한이 M0.24다). 구 기체는 k = 1이라
+# 기록이 비트 그대로다.
+_REF_M_DESIGN = 0.6
+_START_ALT = 1000.0  # [m] 대조 미션 시작 고도 — 아래 고도들은 이 고도에서의 변화량으로 적는다
 
-def _mission_modes(V0):
+
+def _mission_modes(V0, k=1.0):
     """대조 미션의 모드 체인 — test_mission의 순항 시나리오에 arrest·hold_att를 얹는다.
 
     아래 두 모드는 **C 대조를 위해** 있다 — 종방향 축 선택(θ 출처 Switch)의
     hdot·pitch 갈래를 실제로 밟지 않으면 생성 C의 그 분기가 검증되지 않는다.
+    k: 기준 미션 대비 속도·거리 비(모듈 머리 주석). 각도(pitch)와 시간은 그대로다.
     """
+    spd = 140.0 * k
     return [
-        ModeSpec(name="climb", speed=V0, alt=1300.0, heading=0.0,
-                 exit_when=("alt_ge", 1280.0), next="wpnav"),
-        ModeSpec(name="wpnav", speed=140.0, alt=1300.0, heading="path",
+        ModeSpec(name="climb", speed=V0, alt=_START_ALT + 300.0 * k, heading=0.0,
+                 exit_when=("alt_ge", _START_ALT + 280.0 * k), next="wpnav"),
+        ModeSpec(name="wpnav", speed=spd, alt=_START_ALT + 300.0 * k, heading="path",
                  exit_when=("path_done",), next="descent"),
-        ModeSpec(name="descent", speed=140.0, alt=100.0,
-                 exit_when=("alt_le", 130.0), next="arrest"),
-        ModeSpec(name="arrest", speed=140.0, hdot=-2.0,
+        ModeSpec(name="descent", speed=spd, alt=_START_ALT - 900.0 * k,
+                 exit_when=("alt_le", _START_ALT - 870.0 * k), next="arrest"),
+        ModeSpec(name="arrest", speed=spd, hdot=-2.0 * k,
                  exit_when=("time_ge", 6.0), next="hold_att"),
-        ModeSpec(name="hold_att", speed=140.0, pitch=0.02,
+        ModeSpec(name="hold_att", speed=spd, pitch=0.02,
                  exit_when=("time_ge", 6.0), next="mission"),
-        ModeSpec(name="mission", speed=140.0, alt=30.0, heading=None,
+        ModeSpec(name="mission", speed=spd, alt=_START_ALT - 970.0 * k, heading=None,
                  exit_when=("time_ge", 1e9)),
     ]
 
@@ -60,9 +74,9 @@ def _mission_modes(V0):
 def record_mission(law, *, profile, t_end=180.0, control_hz=100.0, on_progress=None) -> dict:
     """주어진 법칙으로 대조 미션 1회 → 입·출력 기록.
 
-    profile: 미션을 나는 기체 프로파일 — 법칙을 조립한 **그 기체**여야 한다. 대조 미션 자체(시작 트림
-    M0.6·h1000·연료 300, 경로·모드)는 아직 예제 기체에 맞춘 값이다 — 기체별 미션 템플릿은 [백로그]
-    (02 §5.6).
+    profile: 미션을 나는 기체 프로파일 — 법칙을 조립한 **그 기체**여야 한다. 시작 트림은 그 기체의 설계
+    마하(law.schedule.m_design)·1000 m·연료 ¾이고, 모드·경로의 속도·거리·고도 변화는 설계 마하 비로 맞춘다(모듈 머리).
+    작동기·연료 소모율도 그 기체 문서(actuator.params · mission_template.sim.fuel_flow)에서 읽는다.
 
     돌려주는 dict:
       inputs        스텝별 그래프 입력 {이름: float} (INPUT_ORDER의 키 전부)
@@ -74,11 +88,35 @@ def record_mission(law, *, profile, t_end=180.0, control_hz=100.0, on_progress=N
     on_progress(done, total)는 시뮬 스텝 기준 ~1% 주기 — truthy 반환 = 협조적 취소.
     취소·절단되어도 그때까지의 기록을 그대로 돌려준다 (판단은 부르는 쪽 몫).
     """
+    doc = profile.doc
+    schedule = doc["law"]["schedule"]
+    if schedule is None:
+        raise ValueError("대조 미션은 설계 마하(law.schedule.m_design)로 크기를 정한다 — 게인 스케줄이 없는 기체")
+    m_design = float(schedule["m_design"])
+    k = m_design / _REF_M_DESIGN
     ac = profile.aircraft()
-    tr = trim_level(ac, TrimCase("design", mach=0.6, alt=1000.0, fuel=300.0))
-    assert tr.converged
-    path = LosPath(waypoints=((8000.0, 0.0), (8000.0, 8000.0)), accept_radius=1500.0)
+    fuel = 0.75 * doc["mass"]["fuel_max"]
+    # 설계점이 수평비행 상한에 붙은 기체(200 kg급 예제 — 설계 마하 0.245, 1000 m 상한 ~0.24)는 거기서 트림이 안 풀린다.
+    # 설계 마하에서 k·0.01 간격으로 아래·위를 번갈아(0, −1, +1, −2, +2 …칸) 처음 풀리는 자리에서 출발한다 — 상한에 붙은 기체는
+    # 아래에서, 하한에 붙은 기체는 위에서 풀린다. 첫 자리는 설계 마하 그대로라 구 기체(M0.6에서 풀린다)는 기록이 비트 그대로다
+    tried = []
+    for i in range(13):
+        steps = (i + 1) // 2 * (1 if i % 2 == 0 else -1)
+        mach = round(m_design + steps * 0.01 * k, 6)
+        if mach <= 0.0:
+            continue
+        tried.append(mach)
+        tr = trim_level(ac, TrimCase("design", mach=mach, alt=_START_ALT, fuel=fuel))
+        if tr.converged:
+            break
+    else:
+        raise ValueError(f"대조 미션 시작 트림이 안 풀린다 — 설계 마하 M{m_design:g} 둘레 {len(tried)}곳"
+                         f"(M{min(tried):g}~M{max(tried):g})·{_START_ALT:.0f} m (기체의 설계 마하가 수평비행 범위 밖)")
+    kk = k * k  # 수평 거리는 선회 반경과 같은 비(모듈 머리)
+    path = LosPath(waypoints=((8000.0 * kk, 0.0), (8000.0 * kk, 8000.0 * kk)), accept_radius=1500.0 * kk)
     V0 = float(np.linalg.norm(tr.state.vel_b))
+    template = doc.get("mission_template")
+    fuel_flow = float(template["sim"]["fuel_flow"]) if template else 0.0
 
     inputs, outputs = [], []
     orig_step = law.step
@@ -98,10 +136,11 @@ def record_mission(law, *, profile, t_end=180.0, control_hz=100.0, on_progress=N
     law.step = spy
     try:
         sim = Simulator(
-            aircraft=ac, fcl=law, guidance=Guidance(_mission_modes(V0), path=path),
+            aircraft=ac, fcl=law, guidance=Guidance(_mission_modes(V0, k), path=path),
             nav_model=NavErrorModel(delay_s=0.02, update_hz=50.0, seed=11),
             stall_table=profile.stall_table(), dt_plant=0.01, control_hz=control_hz,
-            actuator_params={"wn": 30.0, "zeta": 0.7, "rate_max": 10.0}, fuel_flow=0.3,
+            actuator_params=profile.actuator_params(),
+            fuel_flow=fuel_flow,
         )
         res = sim.run(tr, t_end=t_end, on_progress=on_progress)
     finally:
