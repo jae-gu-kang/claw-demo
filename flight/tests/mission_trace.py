@@ -6,7 +6,7 @@
 (입력 dict 목록, OUTPUT_ORDER 튜플 목록, 웜스타트)로 바꾸는 어댑터뿐이다.
 """
 
-from claw.fcl import make_demo_fcl
+from claw.fcl.assemble import assemble_law
 from claw.profile import example_profile
 from claw.verify import vectors
 from claw.verify.trace import INPUT_ORDER, record_mission  # noqa: F401 — 재수출
@@ -18,7 +18,7 @@ OUTPUT_ORDER = (
 )
 
 
-def run(t_end=180.0):
+def run(t_end=180.0, profile=None):
     """→ (입력 dict 목록, 기준 출력 튜플 목록, 트림 웜스타트 (de0, th0, thr0), 미션 스텝 수).
 
     미션 뒤에 **검증 탭과 같은 통합 보강 벡터**(verify/vectors.py, verify/autocode.py verify_flight와 같은 순서·같은
@@ -29,8 +29,11 @@ def run(t_end=180.0):
     미션 스텝 수를 함께 돌려주는 이유: 벡터가 모드 토글·항법 무효·마하 스윕·포화를 전부 확실히 밟으므로 전체 입력으로
     경로를 단정하면 **미션이 그 경로를 잃어도** 아무것도 안 깨진다. 미션 내용 단정은 앞 구간에서 한다(test_parity).
     """
-    law = make_demo_fcl()
-    rec = record_mission(law, profile=example_profile(), t_end=t_end)
+    # 기준은 기체의 **분석 그래프**다(시뮬이 쓰는 그래프) — C는 표준 템플릿 그래프에서 나오므로 이 기록과의 비트 일치가
+    # 곧 "표준 그래프 = 분석 그래프"의 증명이 된다(v1.12). profile을 주면 그 기체로(구 기체·EO/IR형 패리티)
+    prof = profile if profile is not None else example_profile()
+    law = assemble_law(prof)
+    rec = record_mission(law, profile=prof, t_end=t_end)
     assert rec["meta"]["aborted"] is None, rec["meta"]["aborted"]
     mission_steps = len(rec["inputs"])
     ap_cfg = getattr(getattr(law, "autopilot", None), "cfg", None)

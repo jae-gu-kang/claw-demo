@@ -2,7 +2,8 @@
 
 Autocode 탭이 보여 주는 것과 **같은 조립**(`build_flight_law`)에서 생성한 C를
 엔진 검증기(`claw.verify.verify_flight`)에 태운다: 정적 규율 → 엄격 컴파일 →
-대조 미션 Python↔C 비트 대조 → 밟은 경로 단정 → 라인·분기 커버리지.
+대조 미션 Python↔C 비트 대조 → 밟은 경로 단정 → 라인·분기 커버리지. 파라미터는 이미지로 적재하고
+커버리지는 파라미터 세트(요청 이미지 + 커버리지 이미지) 합산이다(v1.12).
 
 판정 문구·요약 행은 전부 엔진이 낸다 — 서버는 요청 검증·작업 실행·저장만.
 컴파일러·커버리지 툴이 없는 배포(무료 데모 등)에서는 해당 검사가 사유와 함께
@@ -52,7 +53,9 @@ def submit_verify(req: VerifyFlightIn, request: Request, response: Response) -> 
                 "kind": "verify_flight",
                 "profile": profile_echo(profile),
                 "created": job.created,
-                "fingerprint": report["fingerprint"],
+                # 두 지문(v1.12) — 구조 지문이 같으면 검증한 C가 바이트 동일, 파라미터 지문은 그 이미지의 값
+                "structure_fingerprint": report["structure_fingerprint"],
+                "param_fingerprint": report["param_fingerprint"],
                 "verdict": report["verdict"],
                 "steps": report.get("steps"),
             },

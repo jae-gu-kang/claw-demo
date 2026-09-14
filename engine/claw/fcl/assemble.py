@@ -11,6 +11,7 @@
 """
 
 from claw.fcl.autopilot import Autopilot
+from claw.fcl.graphs import STANDARD_TEMPLATE, TemplateError
 from claw.fcl.law import FlightControlLaw
 from claw.fcl.limiter import AlphaLimiter
 from claw.fcl.mixer import Mixer
@@ -28,8 +29,16 @@ def assemble_law(
     scas: Scas | None = None,
     mixer: Mixer | None = None,
     alpha_margin: float | None = None,
+    standard: bool = False,
 ) -> FlightControlLaw:
-    """BuiltProfile → FlightControlLaw (init(dt) 전). alpha_margin은 리미터가 있을 때만 뜻이 있다."""
+    """BuiltProfile → FlightControlLaw (init(dt) 전). alpha_margin은 리미터가 있을 때만 뜻이 있다.
+
+    standard=True는 표준 템플릿 그래프다(fcl/graphs.py 머리말) — 탑재 C 생성(flight/generate.py)과 서버 탑재 C·검증
+    라우트만 쓴다. 프로파일의 `law.template`이 표준 템플릿 id여야 한다.
+    """
+    if standard and profile.law["template"] != STANDARD_TEMPLATE:
+        raise TemplateError(
+            f"표준 템플릿 {STANDARD_TEMPLATE!r}만 탑재 C를 낸다 — 이 기체는 {profile.law['template']!r}")
     if gain_tables is not None and not with_schedule:
         raise ValueError("gain_tables 주입은 with_schedule=True에서만 유효")
     if alpha_margin is not None and not with_limiter:
@@ -54,9 +63,13 @@ def assemble_law(
     # θ 상한은 실속표에서 유도한 마하 표다(v1.11) — 리미터가 있을 때만. 리미터와 **같은 마진**으로 만든다
     # (fcl_graph가 θ_hi(M) ≤ α_stall(M) − margin을 격자점마다 검사한다). 스칼라 theta_hi는 바깥 상자로 남는다
     theta_hi = profile.theta_hi_table(margin) if with_limiter else None
-    return FlightControlLaw(
+    fcl = FlightControlLaw(
         scas, ap, mixer, schedule=schedule, alpha_limiter=limiter,
         alloc_trim_table=profile.alloc_trim_table(),
         theta_hi_table=theta_hi,
+        standard=standard,
         **alloc,
     )
+    if standard:
+        fcl.template = profile.law["template"]
+    return fcl

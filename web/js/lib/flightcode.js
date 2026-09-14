@@ -4,9 +4,29 @@ views/codegen.js가 소비한다. 뷰는 테스트 면제(.claude/verify-fleet-e
 판단이 들어가는 부분은 전부 여기 둔다.
 
 기존 "코드 생성"(파라미터 표현)과 다른 물건이다 — 여기 대상은 **FCC에 통합되어
-그대로 실릴 제어법칙 코드**이고 구조·블록 로직·파라미터가 전부 들어 있다.
+그대로 실릴 제어법칙 코드**다. 구조·블록 로직은 C에, 값은 **파라미터 이미지**에 따로 있다(v1.12) —
+같은 템플릿이면 기체가 바뀌어도 C는 바이트 동일하고(구조 지문) 이미지만 다르다(파라미터 지문).
 생성은 엔진이 한다(POST /codegen/flight) — 웹이 C를 조립하지 않는다.
 */
+
+/** 파일 탭 자리에 서는 파라미터 이미지 목록의 표식 — 실제 파일 이름과 겹치지 않는다. */
+export const IMAGE_TAB = "@image";
+
+/** 신원 한 줄 — 두 지문(v1.12). 옛 응답·결과는 단일 형상 지문이라 "구"로 표시한다(값+구조를 한데 해시한 것). */
+export function fingerprintLine(d) {
+  if (d?.structure_fingerprint) {
+    return `구조 지문 ${d.structure_fingerprint} · 파라미터 지문 ${d.param_fingerprint ?? "—"}`;
+  }
+  return d?.fingerprint ? `형상 지문(구) ${d.fingerprint}` : "지문 —";
+}
+
+/** base64 이미지 → 바이트. 내려받기(Blob)가 쓴다. */
+export function imageBytes(b64) {
+  const bin = atob(b64 ?? "");
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+}
 
 /** 코드 생성 대상이지만 **제어법칙이 아닌** 블록 — 탑재 C에 없는 것이 정상이다.
  * 작동기·센서는 플랜트(M5), 항법은 M6이고 우리가 내는 것은 제어법칙 한 덩이다
@@ -85,7 +105,7 @@ export function pickFile(files, wanted, artifact = "fcl") {
 /** 역할별로 묶은 파일 — [{role, files}]. 서버가 준 읽는 순서를 그대로 유지한다.
  *
  * 파일 16개를 한 줄에 늘어놓으면 무엇이 무엇인지 안 보인다 — 진입점·자료형·
- * 조립부·서브시스템·데이터·런타임이라는 역할이 곧 읽는 단위다. */
+ * 조립부·서브시스템·파라미터 로더·런타임이라는 역할이 곧 읽는 단위다. */
 export function groupByRole(files) {
   const out = [];
   for (const f of files ?? []) {
@@ -108,13 +128,13 @@ export function mergeFiles(data) {
   const head = [
     `/* ${bar}`,
     `   CLAW 탑재 제어법칙 C — 통합 열람본 (${data.artifact})`,
-    `   형상 지문 ${data.fingerprint} · 제어주기 ${data.dt} s`,
+    `   ${fingerprintLine(data)} · 제어주기 ${data.dt} s`,
     `   파일 ${count}개 · ${lines}줄`,
     "",
     "   실제 산출물은 아래 파일들이고, 이 문서는 읽기 편하도록 이어붙인",
     "   열람본이다 — 그대로 컴파일하는 빌드 단위가 아니다.",
     "   순서: 진입점 → 자료형 → 조립부 → 서브시스템(실행 순서)",
-    "         → 파라미터 데이터 → 공용 런타임",
+    "         → 파라미터 로더 → 공용 런타임 → 파라미터 이미지 목록(값)",
     `   ${bar} */`,
   ];
   const body = data.files.flatMap((f) => [
@@ -123,7 +143,16 @@ export function mergeFiles(data) {
     "",
     f.text.replace(/\n+$/, ""),
   ]);
-  return head.concat(body).join("\n") + "\n";
+  // 값은 C에 없다 — 이미지 목록을 C 주석으로 붙여 한 문서에서 코드와 값을 함께 읽게 한다. 목록 안의 `*/`는 주석을
+  // 닫아 버리므로 끊어 둔다
+  const img = data.param_image;
+  const tail = img?.listing ? [
+    "",
+    `/* ${"─".repeat(24)} 파라미터 이미지 ${img.name} · ${img.bytes}바이트 ${"─".repeat(24)}`,
+    ...img.listing.replace(/\n+$/, "").split("\n").map((ln) => ` * ${ln.replaceAll("*/", "* /")}`),
+    " */",
+  ] : [];
+  return head.concat(body, tail).join("\n") + "\n";
 }
 
 /** 파일 목록 요약 — "12개 파일 · 693줄" 같은 한 줄. */

@@ -22,7 +22,8 @@ import {
   refFields, refLabel, specLabel, traceRows,
 } from "../lib/codegen.js";
 import {
-  excludedSpecs, flightRequest, groupByRole, mergeFiles, pickFile, summarize,
+  IMAGE_TAB, excludedSpecs, fingerprintLine, flightRequest, groupByRole, imageBytes, mergeFiles, pickFile,
+  summarize,
 } from "../lib/flightcode.js";
 import { store } from "../store.js";
 import { createCodeView, langOfFile } from "./codeview.js";
@@ -36,7 +37,7 @@ const flightCache = { key: null, data: null };
 const LANGS = [
   ["python", "Python", "설계 형상의 코드 표현 — 엔진에 그대로 붙여 실행 가능"],
   ["c", "C 헤더", "설계 형상의 코드 표현 — 파라미터 매크로"],
-  ["flight", "탑재 코드", "FCC에 통합되어 그대로 실릴 제어법칙 코드 — 구조·로직·파라미터 전부"],
+  ["flight", "탑재 코드", "FCC에 통합되어 그대로 실릴 제어법칙 코드 — 구조·로직, 값은 파라미터 이미지"],
 ];
 
 /** 코드 패널을 **조각으로** 만든다 — 늘어놓는 순서는 부르는 쪽이 정한다.
@@ -88,6 +89,10 @@ export function createCodePanel({
     if (flight.error) return { code: `생성 실패 — ${flight.error}`, lineOf: null, plain: true };
     if (!flight.data) return { code: "", lineOf: null, plain: true };
     if (flightMerged) return { code: mergeFiles(flight.data), lineOf: null, file: null };
+    // 파라미터 이미지 목록 — 값은 C가 아니라 여기 있다 (코드가 아니라 목록이라 색칠하지 않는다)
+    if (cfg.file === IMAGE_TAB && flight.data.param_image) {
+      return { code: flight.data.param_image.listing, lineOf: null, plain: true };
+    }
     const file = pickFile(flight.data.files, cfg.file, flight.data.artifact);
     if (!file) return { code: "생성된 파일이 없습니다.", lineOf: null, plain: true };
     return { code: file.text, lineOf: null, file };
@@ -229,12 +234,39 @@ function fileTabs(flight, selected, onPick, merged) {
       onclick: () => onPick(f.name),
     }, f.name)),
   ]);
+  // 값은 C가 아니라 이미지에 있다(v1.12) — 목록 탭과 내려받기를 파일 탭 끝에 둔다
+  const img = flight.data.param_image;
+  const imageTabs = img ? [
+    el("span", { class: "role" }, "파라미터 이미지"),
+    el("button", {
+      class: "cv-tab", type: "button", role: "tab",
+      "aria-selected": cfg.file === IMAGE_TAB ? "true" : "false",
+      title: `${img.name} · ${img.bytes}바이트 — 비행 전에 장입하는 값의 사람이 읽는 목록`,
+      onclick: () => onPick(IMAGE_TAB),
+    }, "값 목록"),
+    el("button", {
+      type: "button",
+      title: `${img.name} 내려받기 — FCC가 생성 로더(${flight.data.artifact}_params_load)로 적재한다`,
+      onclick: () => downloadImage(img),
+    }, `${img.name} 내려받기`),
+  ] : [];
   return [
     ...groups,
+    ...imageTabs,
     el("span", { class: "role", style: "margin-left: 10px" },
       selected ? `— ${selected.lines}줄 / 전체 ${count}개 ${lines}줄`
         : `${count}개 파일 ${lines}줄`),
   ];
+}
+
+/** 이미지 내려받기 — 응답에 실린 바이트를 그대로 파일로 (서버를 다시 부르지 않는다). */
+function downloadImage(img) {
+  const url = URL.createObjectURL(new Blob([imageBytes(img.base64)], { type: "application/octet-stream" }));
+  const a = el("a", { href: url, download: img.name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** 지금 어떤 게인 스케줄 형상으로 생성했는지 — 게인 탭의 적용값이 말없이 실리면
@@ -243,7 +275,7 @@ function schedNote(tables, off) {
   if (off) {
     return el("p", { class: "hint" },
       "게인 스케줄 없음으로 생성됨 (게인 탭 적용값) — 전 게인이 설계점 상수이고 ",
-      "스케줄 서브시스템이 코드에 없습니다.");
+      "스케줄 서브시스템이 코드에 없습니다. 스케줄 끔은 구조 옵션이라 구조 지문이 달라집니다.");
   }
   const names = tables ? Object.keys(tables) : [];
   if (names.length === 0) {
@@ -253,7 +285,7 @@ function schedNote(tables, off) {
   }
   return el("p", { class: "hint" },
     `게인 탭 적용값으로 생성됨 — 스케줄 ${names.length}자리: ${names.join(" · ")}. `,
-    "나머지 게인은 설계점 상수로 코드에 박힙니다.");
+    "나머지 자리는 설계점 상수의 1점 표로 이미지에 실립니다 — 자리 선택은 코드 구조를 바꾸지 않습니다.");
 }
 
 /** 탭별 안내 — 두 탭이 내는 물건이 근본적으로 다르므로 같은 문구를 쓸 수 없다. */
@@ -269,10 +301,11 @@ function footNote(flight, specs, sched) {
   const d = flight.data;
   return el("div", {},
     el("p", { class: "hint" },
-      "FCC에 통합되어 그대로 실릴 제어법칙 코드입니다 (02 §1) — 구조·블록 로직·",
-      "파라미터가 전부 들어 있고, 구조 정본인 IR에서 엔진이 생성합니다. ",
-      d ? `형상 지문 ${d.fingerprint} · 제어주기 ${d.dt} s.` : "",
-      " 커밋된 산출물 정본은 flight/gen/ 이며, 같은 형상이면 여기 코드와 바이트 단위로 같습니다."),
+      "FCC에 통합되어 그대로 실릴 제어법칙 코드입니다 (02 §1) — 구조·블록 로직이 들어 있고 ",
+      "값은 파라미터 이미지로 따로 나갑니다(비행 전 장입). 구조 정본인 IR에서 엔진이 생성합니다. ",
+      d ? `${fingerprintLine(d)} · 제어주기 ${d.dt} s.` : "",
+      " 구조 지문이 같으면 C 코드는 바이트 동일합니다 — 기체가 바뀌어도 코드는 그대로이고 이미지만 다릅니다.",
+      " 커밋된 산출물 정본은 flight/gen/ 과 flight/params/ 입니다."),
     schedNote(sched.tables, sched.off),
     excluded.length > 0 && el("p", { class: "hint" },
       "이 화면의 블록 중 탑재 C에 없는 것: ",

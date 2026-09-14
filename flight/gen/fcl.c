@@ -13,6 +13,7 @@ void fcl_reset(fcl_state_t *sta)
     sta->sched_f_mach_seeded = 0;
     sta->ap_fpsi_x = 0.0;
     sta->ap_fpsi_seeded = 0;
+    sta->ap_hdg_pid_i = 0.0;
     sta->ap_fh_x = 0.0;
     sta->ap_fh_seeded = 0;
     sta->ap_alt_pid_i = 0.0;
@@ -22,9 +23,12 @@ void fcl_reset(fcl_state_t *sta)
     sta->ap_fv_x = 0.0;
     sta->ap_fv_seeded = 0;
     sta->ap_spd_pid_i = 0.0;
+    sta->scas_roll_wo_x = 0.0;
     sta->scas_roll_pid_i = 0.0;
+    sta->scas_pitch_wo_x = 0.0;
     sta->scas_pitch_pid_i = 0.0;
     sta->scas_yaw_wo_x = 0.0;
+    sta->scas_yaw_pid_i = 0.0;
     sta->hold.elevon_l = 0.0;
     sta->hold.elevon_r = 0.0;
     sta->hold.rudder = 0.0;
@@ -46,23 +50,38 @@ void fcl_step(const fcl_params_t *prm, fcl_state_t *sta, fcl_out_t *out,
         return;
     }
 
-    /* ── sched — 7개 블록 ── */
+    /* ── sched — 17개 블록 ── */
+    double sched_alt_k_rate_y;
+    double sched_alt_ki_y;
+    double sched_alt_kp_y;
+    double sched_heading_ki_y;
+    double sched_heading_kp_y;
     double sched_pitch_k_rate_y;
     double sched_pitch_ki_y;
     double sched_pitch_kp_y;
     double sched_roll_k_rate_y;
     double sched_roll_ki_y;
     double sched_roll_kp_y;
-    fcl_sched_step(prm, sta, mach, &sched_pitch_k_rate_y, &sched_pitch_ki_y, &sched_pitch_kp_y,
-                   &sched_roll_k_rate_y, &sched_roll_ki_y, &sched_roll_kp_y);
+    double sched_speed_ki_y;
+    double sched_speed_kp_y;
+    double sched_yaw_k_rate_y;
+    double sched_yaw_ki_y;
+    double sched_yaw_kp_y;
+    fcl_sched_step(prm, sta, mach, &sched_alt_k_rate_y, &sched_alt_ki_y, &sched_alt_kp_y,
+                   &sched_heading_ki_y, &sched_heading_kp_y, &sched_pitch_k_rate_y,
+                   &sched_pitch_ki_y, &sched_pitch_kp_y, &sched_roll_k_rate_y, &sched_roll_ki_y,
+                   &sched_roll_kp_y, &sched_speed_ki_y, &sched_speed_kp_y, &sched_yaw_k_rate_y,
+                   &sched_yaw_ki_y, &sched_yaw_kp_y);
 
-    /* ── ap — 28개 블록 ── */
+    /* ── ap — 32개 블록 ── */
     double ap_hdg_sat_y;
     double ap_theta_out_y;
-    double ap_spd_sat_y;
+    double ap_thr_out_y;
     fcl_ap_step(prm, sta, psi, V, h, hdot, mach, cmd_speed, cmd_alt, cmd_heading, cmd_pitch,
-                cmd_hdot, speed_on, alt_on, heading_on, pitch_on, hdot_on, &ap_hdg_sat_y,
-                &ap_theta_out_y, &ap_spd_sat_y);
+                cmd_hdot, speed_on, alt_on, heading_on, pitch_on, hdot_on, sched_alt_k_rate_y,
+                sched_alt_ki_y, sched_alt_kp_y, sched_heading_ki_y, sched_heading_kp_y,
+                sched_speed_ki_y, sched_speed_kp_y, &ap_hdg_sat_y, &ap_theta_out_y,
+                &ap_thr_out_y);
 
     /* ── lim — 6개 블록 ── */
     double lim_a_margin_y;
@@ -71,14 +90,15 @@ void fcl_step(const fcl_params_t *prm, fcl_state_t *sta, fcl_out_t *out,
     fcl_lim_step(prm, sta, theta, alpha, mach, ap_theta_out_y, &lim_a_margin_y, &lim_theta_lim_y,
                  &lim_active_y);
 
-    /* ── scas — 29개 블록 ── */
+    /* ── scas — 34개 블록 ── */
     double scas_roll_sat_y;
     double scas_pitch_sat_y;
     double scas_yaw_sat_y;
     fcl_scas_step(prm, sta, theta, phi, p, q, r, beta, mach, sched_pitch_k_rate_y,
                   sched_pitch_ki_y, sched_pitch_kp_y, sched_roll_k_rate_y, sched_roll_ki_y,
-                  sched_roll_kp_y, ap_hdg_sat_y, lim_theta_lim_y, &scas_roll_sat_y,
-                  &scas_pitch_sat_y, &scas_yaw_sat_y);
+                  sched_roll_kp_y, sched_yaw_k_rate_y, sched_yaw_ki_y, sched_yaw_kp_y,
+                  ap_hdg_sat_y, lim_theta_lim_y, &scas_roll_sat_y, &scas_pitch_sat_y,
+                  &scas_yaw_sat_y);
 
     /* ── mix — 10개 블록 ── */
     double mix_elevon_l_y;
@@ -86,7 +106,7 @@ void fcl_step(const fcl_params_t *prm, fcl_state_t *sta, fcl_out_t *out,
     double mix_rudder_y;
     double mix_thr_l_y;
     double mix_thr_r_y;
-    fcl_mix_step(prm, sta, ap_spd_sat_y, scas_roll_sat_y, scas_pitch_sat_y, scas_yaw_sat_y,
+    fcl_mix_step(prm, sta, ap_thr_out_y, scas_roll_sat_y, scas_pitch_sat_y, scas_yaw_sat_y,
                  &mix_elevon_l_y, &mix_elevon_r_y, &mix_rudder_y, &mix_thr_l_y, &mix_thr_r_y);
 
     out->elevon_l = mix_elevon_l_y;

@@ -2,8 +2,8 @@
 
 파일 구성은 MATLAB Embedded Coder를 따라 **두 축**으로 나눈다.
 
-역할축: 알고리즘(`.c`) / 파라미터 데이터(`_data.c`, rtP 대응) / 상태·출력 구조체
-(`_types.h`, rtDW·rtY 대응) / 진입점(`.h`).
+역할축: 알고리즘(`.c`) / 파라미터 로더(`_params.c/.h` — 이미지를 rtP 대응 구조체로 적재) /
+파라미터·상태·출력 구조체(`_types.h`, rtP·rtDW·rtY 대응) / 진입점(`.h`).
 
 기능축: IR 노드에 `grouped()`로 이름표가 붙어 있으면 서브시스템마다 `{base}_{group}.c`
 와 `.h`가 떨어져 나오고 `{base}.c`에는 조립부만 남는다 — Embedded Coder의
@@ -23,7 +23,13 @@
 인스턴스에서 이미 계산된 값(예: `Washout._p = exp(-dt/tau)`)을 그대로 읽어 굽는다 —
 이산화 공식이 Python과 C에 두 번 적히면 그 순간 어긋난다. 사설 속성(`_p`)을 읽는
 것은 그 때문이며, 대신 dt는 런타임 파라미터가 아니라 `#define`으로 낸다:
-계수가 그 dt로 구워졌으므로 dt만 바꾸면 조용히 틀린다.
+계수가 그 dt로 계산됐으므로 dt만 바꾸면 조용히 틀린다. 계수는 파라미터 이미지로 가고, 로더가 이미지
+헤더의 dt를 매크로와 비트로 대조한다.
+
+**구조와 값을 가른다 (v1.12, 07 §6).** 생성 C에는 구조만 있다 — 파라미터 값·표 크기는 C 텍스트에 없고
+파라미터 이미지(`codegen/param_image.py`)에 있으며, 생성 로더(`{base}_params_load`)가 비행 전에 적재한다.
+지문도 둘이다: 구조 지문은 생성 C 텍스트의 해시(같으면 바이트 동일), 파라미터 지문은 이미지 값의 해시.
+표준 템플릿 그래프(`fcl/graphs.py` 머리말)와 함께 쓰면 같은 템플릿의 기체들이 C 한 벌을 나눈다.
 
 생성은 **결정적**이다 — 같은 입력이면 바이트 단위로 같은 출력(생성 시각을 넣지
 않는다). 산출물을 커밋해 두고 "재생성했더니 달라졌다"가 곧 실제 변경임을
@@ -37,6 +43,8 @@ import math
 import re
 from collections import namedtuple
 
+import numpy as np
+
 import claw
 from claw.blocks.basic import Gain, Product, Saturation, Sum, Switch
 from claw.blocks.controllers import PID
@@ -49,8 +57,21 @@ _EMITTERS = {}
 _DISABLERS = {}
 
 # 파일만 돌려주면 공용 런타임을 합집합으로 만들 수 없다 — 쓴 헬퍼를 함께 낸다.
-# 지문은 배너 텍스트에도 있지만, 읽는 쪽이 주석을 파싱하게 두지 않는다
-CModule = namedtuple("CModule", "files helpers fingerprint")
+# 지문은 배너 텍스트에도 있지만, 읽는 쪽이 주석을 파싱하게 두지 않는다.
+#
+# 지문은 둘이다(v1.12, 07 §6): 구조 지문은 생성 C 텍스트의 신원(같으면 바이트 동일), 파라미터 지문은 이미지에 실리는
+# 값의 신원이다. layout·values·dt는 파라미터 이미지(`codegen/param_image.py`)의 재료다.
+CModule = namedtuple(
+    "CModule", "files helpers structure_fingerprint param_fingerprint layout values dt"
+)
+
+# 생성 텍스트에 지문·엔진 버전을 넣을 자리 — 구조 지문은 **이 표식이 든 텍스트**를 해시한 뒤 채운다
+_FP_TOKEN = "@@CLAW_STRUCTURE_FP@@"
+_ENGINE_TOKEN = "@@CLAW_ENGINE@@"
+
+# 파라미터 이미지 형식 — 정본은 07 §6.1이고 C 로더(여기서 생성)와 Python 팩커(param_image.py)가 이 상수를 함께 쓴다
+IMAGE_MAGIC = b"CLAWPRM\0"
+IMAGE_FORMAT = 1
 
 
 def _emitter(cls):
@@ -139,7 +160,7 @@ def _wrap_stmt(text, width=98):
 
 
 class _Ctx:
-    """생성 중 누적 상태 — 파라미터·상태 필드·본문 줄·사용된 헬퍼.
+    """생성 중 누적 상태 — 파라미터·표·상태 필드·본문 줄·사용된 헬퍼.
 
     파라미터와 상태 필드는 **실제로 참조될 때만** 등록된다. 스케줄되는 게인처럼
     신호로 들어오는 값은 파라미터 구조체에 남지 않는다 (dead data 방지).
@@ -147,11 +168,17 @@ class _Ctx:
     기능축으로 쪼개도 `params`·`arrays`·`state`는 **그래프 전체로 공유**한다 —
     구조체는 여전히 `{base}_params_t`·`{base}_state_t` 하나이고 파티션 함수들이
     그 포인터를 함께 받는다. 본문·헬퍼·hoisted만 파티션별로 갈린다.
+
+    **값은 C 텍스트에 들어가지 않는다**(v1.12). 등록 행은 (필드, 자료형, 리터럴, 주석) 4항이고 리터럴은 자료형 검사와
+    이미지 목록을 위한 것이다. 값 자체는 `values`에 모여 파라미터 이미지가 된다. 표는 배열 몇 개의 묶음이라 `tables`가
+    어느 배열이 한 표인지 적는다 — 생성 로더가 표 모양(길이·순증가·다항 정합)을 검사하는 단위다.
     """
 
     def __init__(self):
         self.params = []  # (field, c_type, c_literal, comment)
-        self.arrays = []  # (field, c_type, [literal], comment)
+        self.arrays = []  # (field, c_type, [literal], comment) — C에는 포인터만 남는다
+        self.tables = []  # {"kind": "lookup"|"poly", "id": 노드 id, 역할: 필드명, …}
+        self.values = {}  # field → 값 또는 [값] — 파라미터 이미지의 재료 (등록 순서 = 이미지 순서)
         self.state = []  # (field, c_type, c_init, comment)
         self.body = []
         self.helpers = set()
@@ -179,15 +206,43 @@ class _Ctx:
         else:
             self._seen_param[name] = (ctype, lit)
             self.params.append((name, ctype, lit, comment))
+            self.values[name] = value
         return f"prm->{name}"
 
     def array(self, node_id, field, values, comment="", ctype="double"):
+        """배열 파라미터 — C에는 포인터만 남고 길이는 이미지가 정한다.
+
+        같은 이름에 **다른 값**이 오면 죽는다. 예전에는 이름만 보고 첫 등록을 조용히 남겼다 — 두 표가 한 이름을 나누면
+        한쪽 값이 소리 없이 사라지는 자리였다.
+        """
         name = f"{node_id}_{field}"
-        if all(n != name for n, _, _, _ in self.arrays):
-            self.arrays.append(
-                (name, ctype, [_CTYPE_LITERAL[ctype](v) for v in values], comment)
-            )
+        lits = [_CTYPE_LITERAL[ctype](v) for v in values]
+        for prev_name, prev_type, prev_lits, _c in self.arrays:
+            if prev_name == name:
+                if (prev_type, prev_lits) != (ctype, lits):
+                    raise ValueError(f"배열 {name} 중복 등록에 값·자료형 불일치")
+                return f"prm->{name}"
+        self.arrays.append((name, ctype, lits, comment))
+        self.values[name] = list(values)
         return f"prm->{name}"
+
+    def table(self, kind, node_id, **arrays):
+        """표 하나 = 배열 몇 개(역할=(값, 주석)) + 길이 정수 필드. → {역할: C 식}.
+
+        길이 필드(`n`·`nseg`·`stride`)는 C 코드에 수로 박히지 않는다 — 로더가 이미지의 배열 길이에서 채운다.
+        그래서 표 크기에 코드 상한이 없다(상한은 이미지 길이와 호출자 pool이다).
+        """
+        if any(t["id"] == node_id for t in self.tables):
+            raise ValueError(f"표 {node_id} 중복 등록")
+        entry, refs = {"kind": kind, "id": node_id}, {}
+        for role, (vals, comment) in arrays.items():
+            refs[role] = self.array(node_id, role, vals, comment)
+            entry[role] = f"{node_id}_{role}"
+        for role, _note in _TABLE_INTS[kind]:
+            entry[role] = f"{node_id}_{role}"
+            refs[role] = f"prm->{node_id}_{role}"
+        self.tables.append(entry)
+        return refs
 
     def st(self, node_id, field, init, comment="", ctype="double"):
         _CTYPE_LITERAL[ctype](init)  # 키·값 모두 등록 시점에 거른다 (init은 raw로 둔다)
@@ -216,38 +271,19 @@ class _Ctx:
         return name
 
 
+# 표 종류 → 배열 역할 순서 (이미지의 배열 순서이기도 하다) · 길이 정수 필드
+_TABLE_ARRAYS = {"lookup": ("bp", "val"), "poly": ("kn", "coef", "c", "h")}
+_TABLE_INTS = {
+    "lookup": (("n", "격자점 수 — 이미지의 배열 길이에서 적재"),),
+    "poly": (("nseg", "구간 수 — 이미지의 배열 길이에서 적재"),
+             ("stride", "구간당 계수 수 — 이미지의 배열 길이에서 적재")),
+}
+
+
 # ── 블록별 에미터 ────────────────────────────────────────────────────────
 # 각 함수는 본문 줄을 ctx에 밀어 넣고 이 노드 출력의 C 식을 돌려준다.
 # 연산 순서는 Python 구현과 **문자 그대로** 맞춘다 — 배정밀도끼리 비트 일치가
 # 목표이므로 `a + b + c`의 결합 순서까지 어긋나면 안 된다.
-
-
-def _pid_has_integrator(node, inst):
-    """적분 경로를 방출하는가 — 게인이 포트(신호)거나 상수가 0이 아닐 때만.
-
-    ki가 상수 0이면 `inc = dt·0·e ≡ ±0.0`이라 적분기는 영원히 0이고, 안티와인드업
-    가드의 `inc > 0.0`·`inc < 0.0`은 **영구 도달 불가 분기**다 — 탑재 코드의 죽은
-    코드(DO-178C 논점)이자 구조적 커버리지가 100%가 될 수 없는 자리다. kd = 0
-    미분항 제거와 같은 판단이고, ±0.0 합 제거가 결과에 무영향인 논거도 같다.
-    에미터와 비활성 대입(_disable_pid)이 같은 판정을 써야 하므로 한 곳에 둔다.
-
-    **한계가 0을 품어야 폴딩한다.** Python 정본은 ki = 0이어도 매 스텝 무조건
-    `_i = clip(_i + inc, lo, hi)`를 수행하므로(controllers.py PID.step — 범위 밖
-    웜스타트를 가두는 불변식), 0 ∉ [lo, hi]인 축에서는 `_i`가 ±0.0에 머물지 않고
-    가까운 한계로 끌려가 **출력에 실린다**. 그 형상까지 접으면 ±0.0 소거가 아니라
-    값이 달라진다 — 비대칭 한계는 실제로 허용되고(fcl/graphs.py 배분 예산 주석,
-    영향성 해석이 out_hi만 흔든다) 웹 검증 요청도 한계를 편집할 수 있다.
-    한계가 포트(신호)면 런타임 값을 정적으로 알 수 없으므로 역시 접지 않는다.
-
-    웜스타트는 조용히 깨지지 않는다 — 접힌 축에는 상태 필드가 아예 없으므로 통합
-    계층이 `sta->{id}_i`에 대입하면 **컴파일이 깨진다**(kd = 0의 e_prev와 같은
-    계약). 검증 하네스도 이 판정을 그대로 읽어 대입을 낸다.
-    """
-    if "ki" in node.gains or inst.ki != 0.0:
-        return True
-    if "out_lo" in node.gains or "out_hi" in node.gains:
-        return True  # 시변 한계 — 0을 품는지 정적으로 판정할 수 없다
-    return not (inst.out_lo <= 0.0 <= inst.out_hi)
 
 
 @_emitter(PID)
@@ -255,6 +291,12 @@ def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
     """controllers.py PID — y = clip(kp·e + I + kd·d), I ← 조건부 적분 + clip.
 
     입력이 둘이면 ins[1]은 축 외부항(감쇠)이고 **판정에만** 들어간다 — y에는 안 더한다.
+
+    **적분 경로는 ki 값과 무관하게 항상 낸다**(v1.12). 예전에는 ki가 상수 0이면 적분기·증분·가드를 접었다 — 그러면 값이
+    구조를 바꿔 기체마다 C가 달라진다. Python 정본은 원래 ki = 0이어도 매 스텝 `_i = clip(_i + inc, lo, hi)`를 하므로
+    적분기를 두는 쪽이 정본 그대로다. ki = 0인 이미지에서 가드의 `inc > 0.0`·`inc < 0.0`은 **값으로 꺼진(비활성)
+    분기**다 — 검증 탭이 목록화하고 커버리지는 파라미터 세트 합산으로 닫는다(verify/autocode.py). kd는 그래프가 0.0으로
+    박는 템플릿 상수라 미분항 제거는 여전히 구조다.
     """
     nid, e = node.id, ins[0]
     # 둘째 입력이 있으면 축 외부항(감쇠) — 안티와인드업 **판정에만** 쓴다 (출력은 불변)
@@ -267,12 +309,9 @@ def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
     hi = gains.get("out_hi") or ctx.param(nid, "out_hi", inst.out_hi,
                                           "출력·적분기 클램프 상한 (안티와인드업)")
     clip = ctx.helper("claw_clip")
-    has_i = _pid_has_integrator(node, inst)
 
-    terms = f"{kp} * {e}"
-    if has_i:
-        i_st = ctx.st(nid, "i", 0.0, "적분기 상태")
-        terms += f" + {i_st}"
+    i_st = ctx.st(nid, "i", 0.0, "적분기 상태")
+    terms = f"{kp} * {e} + {i_st}"
     has_d = "kd" in gains or inst.kd != 0.0
     if has_d:
         kd = gains.get("kd") or ctx.param(nid, "kd", inst.kd, "미분 게인")
@@ -281,63 +320,41 @@ def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
         terms += f" + {kd} * {nid}_d"
     else:
         # kd = 0 이고 스케줄도 아니면 미분항 전체가 죽은 코드다 — 상태(e_prev)와
-        # 매 스텝 나눗셈까지 함께 사라진다 (0.0 곱은 합에 영향이 없다)
+        # 매 스텝 나눗셈까지 함께 사라진다 (0.0 곱은 합에 영향이 없다). kd는 그래프가 박는 템플릿 상수다
         ctx.line(f"/* 미분항 없음 (kd = 0) — e_prev 상태·나눗셈 제거됨 */")
-    if not has_i:
-        # ki = 0 이고 스케줄도 아니면 적분 경로 전체가 죽은 코드다 — 상태(i)·증분·
-        # 안티와인드업 가드까지 함께 사라진다. 가드의 `inc > 0`·`inc < 0`은 이
-        # 형상에서 **영구 거짓**이라, 남겨 두면 도달 불가 분기가 탑재 코드에 실리고
-        # 구조적 커버리지(DAL A: MC/DC 100%)가 원리적으로 닫히지 않는다.
-        # 웜스타트 주의: 이 축은 상태 필드가 없으므로 적분기 웜스타트도 없다 —
-        # kd = 0의 e_prev와 같은 계약이다.
-        ctx.line(f"/* 적분항 없음 (ki = 0) — i 상태·증분·안티와인드업 가드 제거됨 */")
 
     raw = ctx.declare(f"{nid}_raw", terms)
     out = ctx.declare(f"{nid}_y", f"{clip}({raw}, {lo}, {hi})")
-    if has_i:
-        ki = gains.get("ki") or ctx.param(nid, "ki", inst.ki, "적분 게인")
-        # 조건부 적분 — 포화한 방향으로 더 미는 증분만 버린다. 클램프는 **무조건**이다
-        # (범위 밖 웜스타트를 가두는 불변식 — controllers.py PID.step 주석 참조)
-        ctx.line(f"double {nid}_inc = {dt_macro} * {ki} * {e};")
-        # 판정 기준은 PID 출력이 아니라 축 출력이다 — 감쇠항이 PID 뒤에서 더해져 다시
-        # clip되는 축에서 PID만 보면 포화를 절반쯤 놓친다 (controllers.py 실측 주석)
-        # 외부항이 있으면 PID 출력(raw)과 축 출력(axis) 중 그 방향으로 더 나간 쪽으로 판정한다(v1.11 — PID 출력이 붙었는데
-        # 감쇠가 축을 안쪽으로 끌어도 적분을 멈춘다). controllers.py와 같은 3항이라 NaN에서도 판정이 같고, 가드 줄은
-        # 그대로 두 조건 쌍이라 MC/DC 판정 형태(verify/mcdc.py _GUARD)가 안 바뀐다
-        if u_ext is None:
-            hi_x = lo_x = raw
-        else:
-            axis = ctx.declare(f"{nid}_axis", f"{raw} + {u_ext}")
-            hi_x = ctx.declare(f"{nid}_hi_x", f"({raw} > {axis}) ? {raw} : {axis}")
-            lo_x = ctx.declare(f"{nid}_lo_x", f"({raw} < {axis}) ? {raw} : {axis}")
-        ctx.line(f"if (({hi_x} > {hi} && {nid}_inc > 0.0) || ({lo_x} < {lo} && {nid}_inc < 0.0)) {{")
-        ctx.line(f"    {nid}_inc = 0.0;")
-        ctx.line("}")
-        ctx.line(f"{i_st} = {clip}({i_st} + {nid}_inc, {lo}, {hi});")
+    ki = gains.get("ki") or ctx.param(nid, "ki", inst.ki, "적분 게인")
+    # 조건부 적분 — 포화한 방향으로 더 미는 증분만 버린다. 클램프는 **무조건**이다
+    # (범위 밖 웜스타트를 가두는 불변식 — controllers.py PID.step 주석 참조)
+    ctx.line(f"double {nid}_inc = {dt_macro} * {ki} * {e};")
+    # 판정 기준은 PID 출력이 아니라 축 출력이다 — 감쇠항이 PID 뒤에서 더해져 다시
+    # clip되는 축에서 PID만 보면 포화를 절반쯤 놓친다 (controllers.py 실측 주석)
+    # 외부항이 있으면 PID 출력(raw)과 축 출력(axis) 중 그 방향으로 더 나간 쪽으로 판정한다(v1.11 — PID 출력이 붙었는데
+    # 감쇠가 축을 안쪽으로 끌어도 적분을 멈춘다). controllers.py와 같은 3항이라 NaN에서도 판정이 같고, 가드 줄은
+    # 그대로 두 조건 쌍이라 MC/DC 판정 형태(verify/mcdc.py _GUARD)가 안 바뀐다
+    if u_ext is None:
+        hi_x = lo_x = raw
+    else:
+        axis = ctx.declare(f"{nid}_axis", f"{raw} + {u_ext}")
+        hi_x = ctx.declare(f"{nid}_hi_x", f"({raw} > {axis}) ? {raw} : {axis}")
+        lo_x = ctx.declare(f"{nid}_lo_x", f"({raw} < {axis}) ? {raw} : {axis}")
+    ctx.line(f"if (({hi_x} > {hi} && {nid}_inc > 0.0) || ({lo_x} < {lo} && {nid}_inc < 0.0)) {{")
+    ctx.line(f"    {nid}_inc = 0.0;")
+    ctx.line("}")
+    ctx.line(f"{i_st} = {clip}({i_st} + {nid}_inc, {lo}, {hi});")
     if has_d:
         ctx.line(f"{ctx.st(nid, 'e_prev', 0.0)} = {e};")
     return out
-
-
-@_disabler(PID)
-def _disable_pid(ctx, node, inst, field, value_expr):
-    """비활성 대입 — 적분기가 폴딩된 노드에는 쓸 상태 필드가 없다.
-
-    hdg 축의 `on_disable={"i": 0.0}`(재관여 시 잔존 뱅크 킥 방지)이 이 경우다:
-    ki = 0 폴딩으로 `sta->{node}_i`가 존재하지 않으므로 대입을 내면 컴파일이
-    깨진다. 적분기가 영원히 0인 형상에서 0 대입은 의미도 없다 — 주석만 남긴다.
-    """
-    if field == "i" and not _pid_has_integrator(node, inst):
-        ctx.line(f"/* {node.id}: 적분기 폴딩(ki = 0) — 소거할 상태가 없다 */")
-        return
-    ctx.line(f"sta->{node.id}_{field} = {value_expr};")
 
 
 @_emitter(Washout)
 def _emit_washout(ctx, node, inst, ins, gains, dt_macro):
     """filters.py:55 — y = u − x, x ← p·x + (1−p)·u.  p는 엔진이 구운 값."""
     nid, u = node.id, ins[0]
-    p = ctx.param(nid, "p", inst._p, f"exp(-dt/tau), tau={inst.tau} s — {dt_macro}로 구움")
+    # 주석에 tau 값을 적지 않는다 — 구조 파일은 기체와 무관하게 바이트 동일해야 한다(값은 이미지 목록에 보인다)
+    p = ctx.param(nid, "p", inst._p, f"exp(-dt/tau) — {dt_macro}로 계산")
     omp = ctx.param(nid, "one_minus_p", 1.0 - inst._p, "1 − p")
     x = ctx.st(nid, "x", 0.0, "워시아웃 상태")
     out = ctx.declare(f"{nid}_y", f"{u} - {x}")
@@ -349,10 +366,7 @@ def _emit_washout(ctx, node, inst, ins, gains, dt_macro):
 def _emit_command_filter(ctx, node, inst, ins, gains, dt_macro):
     """autopilot.py:60 — 첫 스텝은 현재 측정으로 시드(캡처 거동), 이후 1차 램프."""
     nid, cmd, current = node.id, ins[0], ins[1]
-    omp = ctx.param(
-        nid, "one_minus_p", 1.0 - inst._p,
-        f"1 − exp(-dt/tau), tau={inst.tau} s" + (" (0=통과)" if inst.tau == 0 else ""),
-    )
+    omp = ctx.param(nid, "one_minus_p", 1.0 - inst._p, "1 − exp(-dt/tau) (tau = 0이면 1 — 통과)")
     x = ctx.st(nid, "x", 0.0, "필터 상태(= 출력)")
     seeded = ctx.st(nid, "seeded", 0, "시드 완료 여부 — 첫 스텝은 측정에서 출발", ctype="int")
     ctx.line(f"if (!{seeded}) {{ {x} = {current}; {seeded} = 1; }}")
@@ -425,7 +439,11 @@ def _emit_sum(ctx, node, inst, ins, gains, dt_macro):
 
 @_emitter(LookupBlock)
 def _emit_lookup(ctx, node, inst, ins, gains, dt_macro):
-    """1D 테이블 — 격자점·값 배열을 구워 낸다. 외삽은 clip 고정(01 §3.4 [기본값])."""
+    """1D 테이블 — 격자점·값 배열은 이미지에, C에는 포인터와 점 수 필드만. 외삽은 clip 고정(01 §3.4 [기본값]).
+
+    1점 표(`tables/point.py`)도 같은 경로다 — `claw_lookup1d`가 n < 2면 `val[0]`을 그대로 돌려준다(표준 템플릿의 빈 스케줄
+    자리). 점 수가 코드에 없으므로 같은 C가 17점 표와 1점 표를 모두 받는다.
+    """
     table = inst.table
     if len(inst.axis_order) != 1:
         raise NotImplementedError(f"{node.id}: 1D 테이블만 지원 (축 {inst.axis_order})")
@@ -435,39 +453,45 @@ def _emit_lookup(ctx, node, inst, ins, gains, dt_macro):
             "(비행 중 예외를 낼 수 없으므로 외삽 금지가 원칙)"
         )
     nid, axis = node.id, inst.axis_order[0]
-    bp = ctx.array(nid, "bp", table.axes[0], f"{axis} 격자점")
-    val = ctx.array(nid, "val", table.data, f"{table.name or nid} 값")
+    ref = ctx.table(
+        "lookup", nid,
+        bp=([float(v) for v in table.axes[0]], f"{axis} 격자점 (순증가)"),
+        val=([float(v) for v in np.asarray(table.data, dtype=float).ravel()], "값"),
+    )
     lut = ctx.helper("claw_lookup1d")
-    n = len(table.axes[0])
-    return ctx.declare(f"{nid}_y", f"{lut}({bp}, {val}, {n}, {ins[0]})")
+    return ctx.declare(f"{nid}_y", f"{lut}({ref['bp']}, {ref['val']}, {ref['n']}, {ins[0]})")
 
 
 @_emitter(PolyBlock)
 def _emit_poly(ctx, node, inst, ins, gains, dt_macro):
-    """구간별 다항 게인 스케줄 (01 §3.4 다항 런타임) — knot·계수 배열을 구워 낸다.
+    """구간별 다항 게인 스케줄 (01 §3.4 다항 런타임) — knot·계수 배열은 이미지에.
 
     계수는 tables/poly.py와 같은 u-영역 오름차수이고, 구간별로 최고 차수(stride)에
     맞춰 0을 덧대 평평한 배열로 낸다 — 호너가 0 계수를 지나도 결과 비트가 같다
     (0.0·u + 0.0 = 0.0). 외삽은 clip 고정 (비행 중 예외 금지 원칙, Lookup과 동일).
+    구간 수·stride도 C에 수로 박히지 않는다 — 로더가 배열 길이에서 채운다.
     """
     pt = inst.table
     if pt.extrapolate != "clip":
         raise NotImplementedError(
             f"{node.id}: extrapolate='clip'만 지원 — 받음 {pt.extrapolate!r}"
         )
-    nid, axis = node.id, inst.axis_order[0]
-    nseg = len(pt.segments)
+    nid = node.id
     stride = max(len(s["coeffs"]) for s in pt.segments)
     flat = []
     for s in pt.segments:
         flat.extend(list(s["coeffs"]) + [0.0] * (stride - len(s["coeffs"])))
-    kn = ctx.array(nid, "kn", pt.knots, f"{axis} 구간 경계 (n_seg+1)")
-    coef = ctx.array(nid, "coef", flat, f"{pt.name or nid} u-영역 계수 (오름차수, 0 패딩)")
-    cs = ctx.array(nid, "c", [s["c"] for s in pt.segments], "구간 센터")
-    hs = ctx.array(nid, "h", [s["h"] for s in pt.segments], "구간 스케일")
+    ref = ctx.table(
+        "poly", nid,
+        kn=([float(v) for v in pt.knots], "구간 경계 (nseg + 1, 순증가)"),
+        coef=(flat, "u-영역 계수 (오름차수, 구간마다 stride개, 0 패딩)"),
+        c=([s["c"] for s in pt.segments], "구간 센터 (nseg)"),
+        h=([s["h"] for s in pt.segments], "구간 스케일 (nseg, 양수)"),
+    )
     fn = ctx.helper("claw_polyeval1d")
     return ctx.declare(
-        f"{nid}_y", f"{fn}({kn}, {nseg}, {coef}, {stride}, {cs}, {hs}, {ins[0]})"
+        f"{nid}_y",
+        f"{fn}({ref['kn']}, {ref['nseg']}, {ref['coef']}, {ref['stride']}, {ref['c']}, {ref['h']}, {ins[0]})",
     )
 
 
@@ -483,11 +507,19 @@ _OP_C = {
         (f"{a} - {_cnum(-c)}" if c < 0 else f"{a} + {_cnum(c)}"),
         (),
     ),
+    # 값이 이미지에 사는 편차(v1.12) — 둘째 인자는 값이 아니라 _emit_one이 등록한 prm 필드 참조다.
+    # x + (−c)는 IEEE에서 x − c와 같은 비트라 add_const의 뺄셈 표기와 결과가 같다
+    "add_param": lambda a, ref: (f"{a} + {ref}", ()),
+    # 값이 이미지에 사는 선택 — Python `a if c != 0.0 else b`와 같은 판정(NaN 플래그는 첫 입력)
+    "switch_param": lambda a, b, ref: (f"({ref} != 0.0) ? {a} : {b}", ()),
     # autopilot.py:161 — 1.0 / math.cos(φ) - 1.0
     "sec_minus_1": lambda a: (f"1.0 / cos({a}) - 1.0", ("math",)),
     # autopilot.py:170 — 1.0 / math.cos(φ) ** 2 - 1.0 (Python `**2`는 libm pow)
     "sec2_minus_1": lambda a: (f"1.0 / pow(cos({a}), 2.0) - 1.0", ("math",)),
 }
+
+# 값을 이미지에서 읽는 연산 — 이미지 필드 `{id}_c`의 주석
+_OP_PARAM_NOTE = {"add_param": "상수 편차", "switch_param": "선택 — 0이 아니면 첫 입력, 0이면 둘째 입력"}
 
 # 어휘가 늘면 여기서 죽는다 — ir_exec.py의 `assert set(_OP_FN) == set(OPS)`와 같은 가드다.
 # 없으면 새 연산이 Python으로는 돌고 C 생성에서만 KeyError로 터진다.
@@ -498,7 +530,12 @@ assert set(_OP_C) == set(OPS), (
 # 공용 런타임 — 산출물마다 복제하지 않고 claw_rt.c/.h 한 벌로 낸다 (emit_runtime).
 # "math"는 진짜 헬퍼가 아니라 <math.h>가 필요하다는 표시다. wrap_pi의 fmod 의존은
 # claw_rt.c 안에서 끝나므로, wrap_pi를 **부르는** 파티션은 math.h가 필요 없다.
-_HELPER_ORDER = ("claw_clip", "claw_wrap_pi", "claw_lookup1d", "claw_polyeval1d")
+_HELPER_ORDER = (
+    "claw_clip", "claw_wrap_pi", "claw_lookup1d", "claw_polyeval1d",
+    # 파라미터 로더 몫(v1.12) — 이미지를 바이트로 읽고(엔디언·정렬 무관) 검사한다
+    "claw_rd_u32", "claw_rd_u64", "claw_rd_f64", "claw_f64_bits", "claw_crc32",
+    "claw_prm_lookup_bad", "claw_prm_poly_bad",
+)
 _HELPER_SIG = {
     "claw_clip": "double claw_clip(double x, double lo, double hi)",
     "claw_wrap_pi": "double claw_wrap_pi(double a)",
@@ -509,13 +546,36 @@ _HELPER_SIG = {
         "double claw_polyeval1d(const double *kn, int nseg, const double *coef,\n"
         "                       int stride, const double *cs, const double *hs, double x)"
     ),
+    "claw_rd_u32": "uint32_t claw_rd_u32(const unsigned char *p)",
+    "claw_rd_u64": "uint64_t claw_rd_u64(const unsigned char *p)",
+    "claw_rd_f64": "double claw_rd_f64(const unsigned char *p)",
+    "claw_f64_bits": "uint64_t claw_f64_bits(double x)",
+    "claw_crc32": "uint32_t claw_crc32(const unsigned char *p, size_t n)",
+    "claw_prm_lookup_bad": (
+        "int claw_prm_lookup_bad(const double *bp, uint32_t n_bp, uint32_t n_val)"
+    ),
+    "claw_prm_poly_bad": (
+        "int claw_prm_poly_bad(const double *kn, uint32_t n_kn, uint32_t n_coef, uint32_t n_c,\n"
+        "                      const double *h, uint32_t n_h)"
+    ),
 }
 _HELPER_DOC = {
     "claw_clip": "[lo, hi] 클램프",
     "claw_wrap_pi": "(-π, π] 래핑 — Python `%`는 나머지가 제수 부호를 따르므로 fmod 뒤 보정한다",
-    "claw_lookup1d": "1D 선형 보간, 외삽 clip — tables/table.py:54 interp()와 같은 구간 선택",
+    "claw_lookup1d": (
+        "1D 선형 보간, 외삽 clip — tables/table.py:54 interp()와 같은 구간 선택. n < 2면 값 하나(1점 표)"
+    ),
     "claw_polyeval1d": (
         "구간별 다항 u-영역 호너, 외삽 clip — tables/poly.py interp()와 같은 구간 선택"
+    ),
+    "claw_rd_u32": "리틀엔디언 u32 읽기 — 바이트 조립이라 호스트 엔디언·정렬과 무관하다",
+    "claw_rd_u64": "리틀엔디언 u64 읽기",
+    "claw_rd_f64": "리틀엔디언 IEEE-754 double 읽기 — 비트를 그대로 옮긴다(memcpy, 별칭 규칙 안전)",
+    "claw_f64_bits": "double의 비트 표현 — 이미지 dt와 코드 DT 매크로를 비트로 대조한다",
+    "claw_crc32": "CRC-32 (IEEE 802.3, zlib.crc32와 같은 값) — 분기 없는 비트 루프",
+    "claw_prm_lookup_bad": "절점 표 모양 위반 여부 — 길이 ≥ 1, 격자점·값 길이 일치, 격자점 순증가 (분기 없음)",
+    "claw_prm_poly_bad": (
+        "다항 표 모양 위반 여부 — 구간 ≥ 1, 경계 = 구간 + 1, 계수 = 구간 × stride, 경계 순증가, 스케일 양수"
     ),
 }
 _HELPER_BODY = {
@@ -530,6 +590,7 @@ _HELPER_BODY = {
     ],
     "claw_lookup1d": [
         "    int i = 0;",
+        "    if (n < 2) { return val[0]; }",
         "    while (i < n - 2 && x >= bp[i + 1]) { i++; }",
         "    const double t = claw_clip((x - bp[i]) / (bp[i + 1] - bp[i]), 0.0, 1.0);",
         "    return (1.0 - t) * val[i] + t * val[i + 1];",
@@ -546,18 +607,96 @@ _HELPER_BODY = {
         "    }",
         "    return v;",
     ],
+    "claw_rd_u32": [
+        "    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16)",
+        "           | ((uint32_t)p[3] << 24);",
+    ],
+    "claw_rd_u64": [
+        "    return (uint64_t)claw_rd_u32(p) | ((uint64_t)claw_rd_u32(p + 4) << 32);",
+    ],
+    "claw_rd_f64": [
+        "    const uint64_t b = claw_rd_u64(p);",
+        "    double x;",
+        "    memcpy(&x, &b, sizeof x);",
+        "    return x;",
+    ],
+    "claw_f64_bits": [
+        "    uint64_t b;",
+        "    memcpy(&b, &x, sizeof b);",
+        "    return b;",
+    ],
+    "claw_crc32": [
+        "    uint32_t crc = 0xFFFFFFFFU;",
+        "    size_t i;",
+        "    int b;",
+        "    for (i = 0U; i < n; i++) {",
+        "        crc ^= (uint32_t)p[i];",
+        "        for (b = 0; b < 8; b++) {",
+        "            crc = (crc >> 1) ^ (0xEDB88320U & (0U - (crc & 1U)));",
+        "        }",
+        "    }",
+        "    return crc ^ 0xFFFFFFFFU;",
+    ],
+    "claw_prm_lookup_bad": [
+        "    int bad = (n_bp < 1U) | (n_bp != n_val) | (n_bp > 2147483647U);",
+        "    uint32_t i;",
+        "    for (i = 1U; i < n_bp; i++) {",
+        "        bad = bad | (bp[i] <= bp[i - 1U]);",
+        "    }",
+        "    return bad;",
+    ],
+    "claw_prm_poly_bad": [
+        "    const uint32_t nseg = n_c + (uint32_t)(n_c == 0U);  /* 0으로 나누지 않게 — 0 자체는 아래에서 걸린다 */",
+        "    int bad = (n_c < 1U) | (n_c > 2147483647U) | (n_h != n_c) | (n_kn != n_c + 1U)",
+        "              | (n_coef < n_c) | (n_coef % nseg != 0U) | (n_coef / nseg > 2147483647U);",
+        "    uint32_t i;",
+        "    for (i = 1U; i < n_kn; i++) {",
+        "        bad = bad | (kn[i] <= kn[i - 1U]);",
+        "    }",
+        "    for (i = 0U; i < n_h; i++) {",
+        "        bad = bad | (h[i] <= 0.0);",
+        "    }",
+        "    return bad;",
+    ],
 }
+# 헬퍼 → 의존. "math"·"string"·"stdint"는 헬퍼가 아니라 표준 헤더가 필요하다는 표시다. wrap_pi의 fmod 의존은
+# claw_rt.c 안에서 끝나므로 wrap_pi를 **부르는** 파티션은 math.h가 필요 없다
 _HELPER_NEEDS = {
     "claw_lookup1d": ("claw_clip",),
     "claw_wrap_pi": ("math",),
     "claw_polyeval1d": ("claw_clip",),
+    "claw_rd_u32": ("stdint",),
+    "claw_rd_u64": ("claw_rd_u32", "stdint"),
+    "claw_rd_f64": ("claw_rd_u64", "string", "stdint"),
+    "claw_f64_bits": ("string", "stdint"),
+    "claw_crc32": ("stdint",),
+    "claw_prm_lookup_bad": ("stdint",),
+    "claw_prm_poly_bad": ("stdint",),
 }
+# 로더가 부르는 헬퍼 — 표 종류에 따라 검사 헬퍼가 붙는다
+_LOADER_HELPERS = ("claw_rd_u32", "claw_rd_u64", "claw_rd_f64", "claw_f64_bits", "claw_crc32")
+_TABLE_CHECK = {"lookup": "claw_prm_lookup_bad", "poly": "claw_prm_poly_bad"}
 
 
 def _text(lines):
     while lines and not lines[-1].strip():
         lines.pop()
     return "\n".join(lines) + "\n"
+
+
+def _helper_closure(helpers):
+    """헬퍼 집합 → 의존까지 닫은 **정해진 순서**의 목록 (표준 헤더 표시는 뺀다).
+
+    한 번 훑기로는 안 닫힌다 — `claw_rd_f64 → claw_rd_u64 → claw_rd_u32`처럼 나중 헬퍼가 끌어온 헬퍼의 의존은 이미
+    지나간 자리라 빠진다. 고정점까지 돈다.
+    """
+    need = {h for h in helpers if h in _HELPER_SIG}
+    while True:
+        more = {d for h in need for d in _HELPER_NEEDS.get(h, ()) if d in _HELPER_SIG} - need
+        if not more:
+            break
+        need |= more
+    return [n for n in _HELPER_ORDER if n in need]
 
 
 def emit_runtime(helpers):
@@ -567,33 +706,43 @@ def emit_runtime(helpers):
     헬퍼가 적은 쪽이 덮어써 링크가 조용히 깨진다 (`flight/generate.py::build`).
 
     필요한 것만 낸다. 안 쓰는 헬퍼를 탑재 코드에 두지 않는 것은 IR이 도달 불가
-    노드를 막는 것과 같은 이유다(dead code — DO-178C 논점). 제어법칙 형상과
-    무관하므로 지문을 갖지 않는다.
+    노드를 막는 것과 같은 이유다(dead code — DO-178C 논점). 산출물의 구조 지문은 자기가 부르는 헬퍼 본문을 함께
+    해시하므로(`_structure_fingerprint`) 이 파일에는 지문을 따로 두지 않는다.
     """
-    need = {h for h in helpers if h in _HELPER_SIG}
-    for name in _HELPER_ORDER:
-        if name in need:
-            need.update(d for d in _HELPER_NEEDS.get(name, ()) if d in _HELPER_SIG)
-    names = [n for n in _HELPER_ORDER if n in need]
+    names = _helper_closure(helpers)
     if not names:
         return {}
 
+    def needs(marker):
+        return any(marker in _HELPER_NEEDS.get(n, ()) for n in names)
+
     head = [
         "/* CLAW 생성 코드 — 손으로 고치지 말 것.",
-        " * 산출물 공용 런타임 (MATLAB _sharedutils 대응). 제어법칙 형상과 무관하므로",
-        " * 지문을 갖지 않는다 — 산출물이 여럿이어도 이 한 벌을 함께 쓴다.",
+        " * 산출물 공용 런타임 (MATLAB _sharedutils 대응). 산출물이 여럿이어도 이 한 벌을 함께 쓴다 —",
+        " * 각 산출물의 구조 지문이 자기가 부르는 헬퍼 본문을 함께 해시한다.",
         " */",
     ]
     h = head + ["#ifndef CLAW_RT_H", "#define CLAW_RT_H", ""]
+    if needs("stdint"):
+        h += ["#include <stddef.h>", "#include <stdint.h>", ""]
     if "claw_wrap_pi" in names:
         h += ["#define CLAW_PI 3.141592653589793", ""]
+    if "claw_crc32" in names:
+        h += ["/* 파라미터 이미지 표식 \"CLAWPRM\\0\"을 리틀엔디언 u64로 읽은 값 (07 §6.1) */",
+              f"#define CLAW_PRM_MAGIC 0x{int.from_bytes(IMAGE_MAGIC, 'little'):016X}ULL", ""]
     for name in names:
         h += [f"/* {_HELPER_DOC[name]} */", f"{_HELPER_SIG[name]};", ""]
     h += ["#endif /* CLAW_RT_H */"]
 
     c = head + ['#include "claw_rt.h"', ""]
-    if any("math" in _HELPER_NEEDS.get(n, ()) for n in names):
-        c += ["#include <math.h>", ""]
+    std = [inc for marker, inc in (("math", "#include <math.h>"), ("string", "#include <string.h>"))
+           if needs(marker)]
+    if std:
+        c += std + [""]
+    if "claw_rd_f64" in names:
+        # 이미지는 8바이트 IEEE-754 double이다 — 크기가 다른 타깃은 여기서 컴파일이 깨진다(조용한 절반 읽기 대신)
+        c += ["/* double이 8바이트가 아니면 컴파일 오류 — 이미지 형식의 전제 (07 §6.1) */",
+              "typedef char claw_f64_is_8_bytes[(sizeof(double) == 8U) ? 1 : -1];", ""]
     for name in names:
         c += [f"/* {_HELPER_DOC[name]} */", _HELPER_SIG[name], "{"]
         c += _HELPER_BODY[name] + ["}", ""]
@@ -601,35 +750,54 @@ def emit_runtime(helpers):
     return {"claw_rt.h": _text(h), "claw_rt.c": _text(c)}
 
 
-def _fingerprint(graph, runner, ctx):
-    """형상 지문 — 파라미터 값 + dt + 구조. 구조가 바뀌어도 지문이 바뀐다."""
-    # 자료형은 구조체 레이아웃이라 형상의 일부다. 기본형은 접두를 붙이지 않아
-    # double뿐인 산출물의 지문이 움직이지 않는다 (07 §6).
-    def _typed(t, lit):
-        return lit if t == "double" else f"{t}:{lit}"
+def _structure_fingerprint(files, helpers):
+    """구조 지문 — **생성 C 텍스트 자체**의 해시 (v1.12, 07 §6).
 
-    payload = {f"param.{n}": _typed(t, lit) for n, t, lit, _c in ctx.params}
-    payload.update(
-        {f"array.{n}": _typed(t, ",".join(v)) for n, t, v, _c in ctx.arrays}
-    )
-    payload["dt"] = runner.dt
-    payload["structure"] = " ".join(
-        f"{n.id}:{n.block.__name__ if n.kind == 'block' else n.op}"
-        f"({','.join(n.inputs)})[{','.join(sorted(n.gains))}]"
-        f"{'=' + repr(n.value) if getattr(n, 'value', None) is not None else ''}"
-        f"{'@' + n.enable if getattr(n, 'enable', None) else ''}"
-        for n in graph.nodes
-    )
-    payload["outputs"] = ",".join(f"{k}={v}" for k, v in graph.outputs.items())
-    payload["inputs"] = ",".join(graph.inputs)
-    payload["enable"] = graph.enable or ""
-    return canonical_hash(payload)
+    예전 지문은 그래프·파라미터 값·dt를 해시해서 값만 바뀌어도 움직였고, 거꾸로 에미터 문장이 바뀌어도(v1.11 조건부
+    적분 보강) 움직이지 않았다. 구조 지문은 생성된 파일 텍스트(지문·엔진 버전 자리는 표식인 채)와 이 산출물이 부르는
+    공용 헬퍼 본문을 해시한다 — 그래서 "구조 지문이 같다"가 곧 "탑재 C가 바이트 단위로 같다"다. dt는 매크로로, 파일
+    분할은 파일 목록으로 텍스트에 드러난다. 엔진 버전은 빼 둔다 — 같은 코드를 내는 버전 올림이 구조 변경으로 보이지 않게.
+    """
+    return canonical_hash({
+        "files": dict(files),
+        "helpers": {h: [_HELPER_SIG[h], *_HELPER_BODY[h]] for h in _helper_closure(helpers)},
+    })
+
+
+def _param_fingerprint(ctx):
+    """파라미터 지문 — 이미지에 실리는 이름·값의 해시. 같은 구조 지문 아래에서 기체·설계값을 가른다.
+
+    값은 `repr`(최단 왕복 표현)로 적는다 — 비트가 다른 두 double이 같은 문자열이 되지 않는다.
+    """
+    def rep(v):
+        return [repr(x) for x in v] if isinstance(v, list) else repr(v)
+
+    return canonical_hash({name: rep(v) for name, v in ctx.values.items()})
+
+
+def header_bytes(n_arrays):
+    """이미지 헤더 크기 — 고정 64바이트 + 배열 길이 u32 × n, 8바이트 경계로 올림 (07 §6.1)."""
+    return 64 + (4 * n_arrays + 7) // 8 * 8
+
+
+def _layout(ctx):
+    """이미지 레이아웃 — 스칼라·배열 순서와 표 묶음. 구조에서만 나오므로 구조 지문이 같으면 같다."""
+    return {
+        "scalars": [{"name": n, "comment": c} for n, _t, _l, c in ctx.params],
+        "arrays": [{"name": n, "comment": c} for n, _t, _l, c in ctx.arrays],
+        "tables": [dict(t) for t in ctx.tables],
+        "header_bytes": header_bytes(len(ctx.arrays)),
+    }
 
 
 def _emit_one(ctx, node, runner, env, dt_macro):
     ins = [env[r] for r in node.inputs]
     if node.kind == "op":
-        expr, needs = _OP_C[node.op](*ins, *((node.value,) if node.value is not None else ()))
+        if node.op in _OP_PARAM_NOTE:
+            ref = ctx.param(node.id, "c", node.value, _OP_PARAM_NOTE[node.op])
+            expr, needs = _OP_C[node.op](*ins, ref)
+        else:
+            expr, needs = _OP_C[node.op](*ins, *((node.value,) if node.value is not None else ()))
         for need in needs:
             ctx.helper(need)
         ctx.line()
@@ -735,14 +903,15 @@ def _unit_includes(helpers):
 
 
 def emit_c(graph, runner):
-    """IR + 초기화된 실행기 → `CModule(파일, 이 그래프가 쓴 공용 헬퍼)`.
+    """IR + 초기화된 실행기 → `CModule`.
 
     헬퍼를 따로 돌려주는 이유: 공용 런타임(`claw_rt`)은 산출물 **전체의 합집합**으로
     한 번 만들어야 해서 그래프 하나만 보고는 낼 수 없다 (`emit_runtime`).
 
     노드에 `grouped()` 이름표가 붙어 있으면 서브시스템별 `.c/.h`가 함께 나오고
     `{base}.c`에는 조립부만 남는다. 이름표가 없으면 예전처럼 파일 하나다.
-    생성은 결정적이다 (시각 미포함).
+    파라미터 값은 파일에 없다 — `{base}_params.c/.h`가 이미지를 적재하는 로더이고, 값은 `CModule.values`로 나가
+    `codegen/param_image.py`가 이미지로 싼다. 생성은 결정적이다 (시각 미포함).
     """
     if runner.graph is not graph:
         raise ValueError("runner가 다른 그래프로 만들어졌다")
@@ -764,7 +933,6 @@ def emit_c(graph, runner):
         part["env"] = env
         ctx.flush_part(part["group"])
 
-    fp = _fingerprint(graph, runner, ctx)
     # 그래프 enable은 본문이 아니라 함수 진입부에서 쓰이므로 미사용이 아니다
     read = {r for n in graph.nodes for r in n.refs}
     unused = [u for u in graph.inputs if u != graph.enable and u not in read]
@@ -777,11 +945,12 @@ def emit_c(graph, runner):
     sig = head + first + _wrap_args([f"double {u}" for u in graph.inputs], pad)
 
     files = {
-        f"{base}_types.h": _types_h(base, guard, ctx, graph, fp, single, dt_macro, runner),
-        f"{base}.h": _header_h(base, guard, sig, fp, graph),
-        f"{base}_data.c": _data_c(base, ctx, fp),
+        f"{base}_types.h": _types_h(base, guard, ctx, graph, single, dt_macro, runner),
+        f"{base}.h": _header_h(base, guard, sig, graph),
+        f"{base}_params.h": _params_h(base, guard, ctx),
+        f"{base}_params.c": _params_c(base, guard, ctx, dt_macro),
     }
-    helpers = set()
+    helpers = set(_LOADER_HELPERS) | {_TABLE_CHECK[t["kind"]] for t in ctx.tables}
     for _group, _body, used in ctx.parts:
         helpers |= used
 
@@ -791,25 +960,31 @@ def emit_c(graph, runner):
             top_env.update({e: f"{e}_y" for e in part["exports"]})
         for (group, body, used), part in zip(ctx.parts, parts):
             name = f"{base}_{group}"
-            files[f"{name}.h"] = _part_h(base, name, fp, part)
-            files[f"{name}.c"] = _part_c(base, name, fp, part, body, used)
+            files[f"{name}.h"] = _part_h(base, name, part)
+            files[f"{name}.c"] = _part_c(base, name, part, body, used)
         includes = [f'#include "{base}_{p["group"]}.h"' for p in parts] + [""]
         body = _assembly(base, parts, top_env)
     else:
         top_env = parts[0]["env"]
-        includes = _unit_includes(helpers)
+        includes = _unit_includes(helpers - set(_LOADER_HELPERS) - set(_TABLE_CHECK.values()))
         body = ctx.parts[0][1]
 
     files[f"{base}.c"] = _impl_c(base, ctx, sig, graph, top_env, unused, single, includes, body)
-    return CModule(files, helpers, fp)
+
+    # 구조 지문은 표식이 든 텍스트에서 계산하고 나서 채운다 — 지문이 자기 자신을 해시할 수는 없다
+    sfp = _structure_fingerprint(files, helpers)
+    files = {n: t.replace(_FP_TOKEN, sfp).replace(_ENGINE_TOKEN, claw.__version__)
+             for n, t in files.items()}
+    return CModule(files, helpers, sfp, _param_fingerprint(ctx), _layout(ctx),
+                   dict(ctx.values), runner.dt)
 
 
-def _banner(base, fp, extra=()):
+def _banner(base, extra=()):
     lines = [
-        "/* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).",
-        f" * 그래프  : {base}",
-        f" * 지문    : {fp}",
-        f" * 엔진    : claw {claw.__version__}",
+        "/* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR에서, 값은 파라미터 이미지에서 온다).",
+        f" * 그래프    : {base}",
+        f" * 구조 지문 : {_FP_TOKEN}",
+        f" * 엔진      : claw {_ENGINE_TOKEN}",
     ]
     lines += [f" * {t}" for t in extra]
     lines.append(" */")
@@ -835,36 +1010,33 @@ def _wrap_args(args, pad, width=98):
     return "\n" + "\n".join(pad + ln for ln in lines)
 
 
-def _wrap_array(name, literals, indent="        "):
-    """긴 배열 초기화자를 줄바꿈 — 한 줄에 몰아 두면 리뷰가 불가능하다."""
-    out, cur = [], indent
-    for k, lit in enumerate(literals):
-        piece = lit + ("," if k < len(literals) - 1 else "")
-        if len(cur) + len(piece) + 1 > 92 and cur.strip():
-            out.append(cur.rstrip())
-            cur = indent
-        cur += piece + " "
-    if cur.strip():
-        out.append(cur.rstrip())
-    return out
-
-
-def _types_h(base, guard, ctx, graph, fp, single, dt_macro, runner):
-    lines = _banner(base, fp, ["자료형 (MATLAB _types.h 대응)"])
+def _types_h(base, guard, ctx, graph, single, dt_macro, runner):
+    lines = _banner(base, ["자료형 (MATLAB _types.h 대응)"])
     lines += [f"#ifndef CLAW_{guard}_TYPES_H", f"#define CLAW_{guard}_TYPES_H", ""]
     # dt는 진입점이 아니라 여기 둔다 — 기능축 파티션 헤더가 이 파일만 의존하면 되고,
     # 포함 관계가 DAG로 남는다 (파티션 → _types.h ← 진입점 .h)
     lines += [
-        "/* 이 주기로 이산 계수가 구워져 있다 — 주기를 바꾸려면 재생성해야 한다.",
-        " * 이 값만 고치면 필터 계수가 조용히 틀린다. */",
+        "/* 이 주기로 이산 계수(파라미터 이미지)가 계산되어 있다 — 이미지 헤더의 dt를 로더가",
+        " * 이 매크로와 비트로 대조한다. 주기를 바꾸려면 재생성하고 이미지도 다시 만든다. */",
         f"#define {dt_macro} {_cnum(runner.dt)}",
         "",
     ]
-    lines.append("/* 파라미터 (MATLAB rtP 대응) — 실제로 참조되는 것만 있다:")
-    lines.append(" * 게인 스케줄로 신호가 된 값은 여기 남지 않는다. */")
+    lines.append("/* 파라미터 (MATLAB rtP 대응) — 실제로 참조되는 것만 있다. 값은 코드에 없고 비행 전에")
+    lines.append(f" * 파라미터 이미지에서 적재한다({base}_params.h). 표는 포인터와 점 수로 잡혀 크기가 코드에")
+    lines.append(" * 박히지 않는다. 게인 스케줄로 신호가 된 값은 여기 남지 않는다. */")
     lines.append("typedef struct {")
-    rows = [(f"    {t} {n};", c) for n, t, _v, c in ctx.params]
-    rows += [(f"    {t} {n}[{len(v)}];", c) for n, t, v, c in ctx.arrays]
+    rows = [(f"    {t} {n};", c) for n, t, _l, c in ctx.params]
+    comment_of = {n: c for n, _t, _l, c in ctx.arrays}
+    type_of = {n: t for n, t, _l, _c in ctx.arrays}
+    in_table = set()
+    for tab in ctx.tables:
+        for role in _TABLE_ARRAYS[tab["kind"]]:
+            name = tab[role]
+            in_table.add(name)
+            rows.append((f"    const {type_of[name]} *{name};", comment_of[name]))
+        for role, note in _TABLE_INTS[tab["kind"]]:
+            rows.append((f"    int {tab[role]};", note))
+    rows += [(f"    const {t} *{n};", c) for n, t, _l, c in ctx.arrays if n not in in_table]
     lines += _tail_align(rows) if rows else ["    char _unused;  /* 파라미터 없는 그래프 */"]
     lines.append(f"}} {base}_params_t;")
     lines.append("")
@@ -887,13 +1059,14 @@ def _types_h(base, guard, ctx, graph, fp, single, dt_macro, runner):
     return "\n".join(lines) + "\n"
 
 
-def _header_h(base, guard, sig, fp, graph):
-    lines = _banner(base, fp)
+def _header_h(base, guard, sig, graph):
+    lines = _banner(base)
     lines += [
         f"#ifndef CLAW_{guard}_H",
         f"#define CLAW_{guard}_H",
         "",
         f'#include "{base}_types.h"',
+        f'#include "{base}_params.h"',
         "",
         "/* 빌드 요구 — 설계 시뮬과의 비트 일치는 아래 조건에서만 성립한다:",
         " *   · 부동소수 축약(FMA) 금지   예) -ffp-contract=off",
@@ -902,9 +1075,11 @@ def _header_h(base, guard, sig, fp, graph):
         " * 사라지고, 같은 입력에서 최대 2.8e-16 어긋난다 (clang 14, -O2).",
         " * 타깃 컴파일러·최적화 옵션 차이는 별도 확인(PIL)이 필요하다. */",
         "",
-        f"extern const {base}_params_t {base}_params;",
+        "/* 파라미터는 코드에 없다 — 비행 전에 파라미터 이미지를",
+        f" * {base}_params_load로 적재한 구조체를 넘긴다. 구조 지문이 같은 이미지만 받으므로",
+        " * 기체·설계값이 바뀌어도 이 코드는 그대로다 (07 §6). */",
         "",
-        "/* 상태를 초기값으로 되돌린다. 이산 계수는 생성 시점에 구워졌으므로",
+        "/* 상태를 초기값으로 되돌린다. 이산 계수는 이미지에 계산되어 있으므로",
         " * 런타임 초기화는 이것뿐이다 (별도 init 없음).",
         " * 트림 웜스타트·범프리스 전환은 리셋 후 상태 필드를 직접 대입한다. */",
         f"void {base}_reset({base}_state_t *sta);",
@@ -920,20 +1095,154 @@ def _header_h(base, guard, sig, fp, graph):
     return "\n".join(lines) + "\n"
 
 
-def _data_c(base, ctx, fp):
-    lines = _banner(base, fp, ["파라미터 데이터 (MATLAB _data.c 대응)"])
-    lines += ["", f'#include "{base}.h"', "", f"const {base}_params_t {base}_params = {{"]
-    if ctx.params:
-        wn = max(len(n) for n, _, _, _ in ctx.params)
-        lines += _tail_align(
-            [(f"    .{n.ljust(wn)} = {v},", c) for n, _t, v, c in ctx.params]
-        )
-    for name, _ctype, values, comment in ctx.arrays:
-        lines.append(f"    .{name} = {{" + (f"  /* {comment} */" if comment else ""))
-        lines += _wrap_array(name, values)
-        lines.append("    },")
-    lines.append("};")
-    return "\n".join(lines) + "\n"
+# 로더 상태 코드 — 순서가 곧 값이다(0 = 성공). param_image.py가 같은 표로 손상 이미지의 기대 코드를 만든다
+PARAM_STATUS = (
+    ("OK", "적재 성공"),
+    ("E_SHORT", "길이가 헤더보다 짧다"),
+    ("E_MAGIC", "CLAW 파라미터 이미지가 아니다"),
+    ("E_FORMAT", "형식 버전이 다르다"),
+    ("E_HEADER", "헤더 크기가 이 레이아웃과 다르다"),
+    ("E_STRUCTURE", "구조 지문이 다르다 — 다른 C 코드용 이미지"),
+    ("E_DT", "제어주기가 DT 매크로와 비트로 다르다"),
+    ("E_LAYOUT", "스칼라·배열 개수 또는 double 총수가 어긋난다"),
+    ("E_LENGTH", "전체 길이가 헤더와 어긋난다"),
+    ("E_CRC", "CRC-32 불일치 — 손상"),
+    ("E_POOL", "호출자 pool이 double 총수보다 작다"),
+    ("E_NONFINITE", "NaN·Inf 값"),
+    ("E_TABLE", "표 모양 위반 — 길이·순증가·다항 정합"),
+)
+
+
+def _params_h(base, guard, ctx):
+    p = f"{guard}_PARAMS"
+    n_arr = len(ctx.arrays)
+    load = f"int {base}_params_load("
+    lines = _banner(base, ["파라미터 로더 — 이미지 형식 v1 (07 §6.1)"])
+    lines += [
+        f"#ifndef CLAW_{guard}_PARAMS_H",
+        f"#define CLAW_{guard}_PARAMS_H",
+        "",
+        "#include <stddef.h>",
+        "",
+        f'#include "{base}_types.h"',
+        "",
+        "/* 이 로더가 받는 이미지의 모양 — 전부 구조에서 나온다(값·표 길이는 이미지가 정한다). */",
+        f"#define {guard}_STRUCTURE_FP 0x{_FP_TOKEN}ULL",
+        f"#define {p}_FORMAT {IMAGE_FORMAT}U",
+        f"#define {p}_N_SCALARS {len(ctx.params)}U",
+        f"#define {p}_N_ARRAYS {n_arr}U",
+        f"#define {p}_HEADER_BYTES {header_bytes(n_arr)}U",
+        "",
+        "/* 적재 상태 — 0이 아니면 *out은 건드리지 않는다 */",
+    ]
+    lines += _tail_align([(f"#define {p}_{name} {code}", note)
+                          for code, (name, note) in enumerate(PARAM_STATUS)])
+    lines += [
+        "",
+        "/* 이미지를 검사하고 double 총수를 낸다 — 호출자가 그만큼의 pool을 마련한다 (동적 할당 없음). */",
+        f"int {base}_params_pool_size(const unsigned char *img, size_t len, size_t *n_double);",
+        "",
+        "/* 이미지 → pool에 값 복사 → *out 조립. 표 필드는 pool을 가리키므로 pool은 *out보다 오래",
+        " * 살아야 한다. 이미지 버퍼는 반환 뒤 버려도 된다 (바이트로 읽어 복사 — 정렬·별칭 무관). */",
+        f"{load}const unsigned char *img, size_t len, double *pool, size_t pool_n,",
+        f"{' ' * len(load)}{base}_params_t *out);",
+        "",
+        f"#endif /* CLAW_{guard}_PARAMS_H */",
+    ]
+    return _text(lines)
+
+
+def _params_c(base, guard, ctx, dt_macro):
+    """생성 로더 — 검사는 전부 **단일 조건** if다(verify/mcdc.py 판정 형태 제한). 표 모양 검사는 분기 없는 헬퍼의
+    비트 OR로 모아 한 번에 판정한다 — 표마다 if를 두면 표 수만큼 손상 이미지가 있어야 분기 커버리지가 닫힌다."""
+    wrong = [(n, t) for n, t, _l, _c in ctx.params + ctx.arrays if t != "double"]
+    if wrong:
+        raise NotImplementedError(
+            f"파라미터 이미지 형식 v{IMAGE_FORMAT}은 double 스칼라·배열만 싣는다 — 받음 {wrong}")
+    p = f"{guard}_PARAMS"
+    n_arr = len(ctx.arrays)
+    index = {name: k for k, (name, _t, _l, _c) in enumerate(ctx.arrays)}
+
+    def check(cond, status, indent="    "):
+        return [f"{indent}if ({cond}) {{", f"{indent}    return {p}_{status};", f"{indent}}}"]
+
+    lines = _banner(base, ["파라미터 로더 — 이미지 형식 v1 (07 §6.1)"])
+    lines += ["", "#include <string.h>", "", f'#include "{base}_params.h"', '#include "claw_rt.h"', ""]
+
+    # ── 헤더 검사 → double 총수 ──
+    lines += [f"int {base}_params_pool_size(const unsigned char *img, size_t len, size_t *n_double)",
+              "{", f"    uint64_t total = {p}_N_SCALARS;"]
+    if n_arr:
+        lines.append("    uint32_t k;")
+    lines.append("")
+    lines += check(f"len < (size_t){p}_HEADER_BYTES + 8U", "E_SHORT")
+    lines += check("claw_rd_u64(img) != CLAW_PRM_MAGIC", "E_MAGIC")
+    lines += check(f"claw_rd_u32(img + 8) != {p}_FORMAT", "E_FORMAT")
+    lines += check(f"claw_rd_u32(img + 12) != {p}_HEADER_BYTES", "E_HEADER")
+    lines += check("claw_rd_u32(img + 60) != 0U", "E_HEADER")  # 예약 — 0이어야 v2가 뜻을 붙일 수 있다
+    lines += check(f"claw_rd_u64(img + 16) != {guard}_STRUCTURE_FP", "E_STRUCTURE")
+    lines += check(f"claw_rd_u64(img + 40) != claw_f64_bits({dt_macro})", "E_DT")
+    lines += check(f"claw_rd_u32(img + 48) != {p}_N_SCALARS", "E_LAYOUT")
+    lines += check(f"claw_rd_u32(img + 52) != {p}_N_ARRAYS", "E_LAYOUT")
+    if n_arr:
+        lines += [f"    for (k = 0U; k < {p}_N_ARRAYS; k++) {{",
+                  "        total += claw_rd_u32(img + 64U + 4U * k);",
+                  "    }"]
+    lines += check("(uint64_t)claw_rd_u32(img + 56) != total", "E_LAYOUT")
+    lines += check(f"(uint64_t)len != (uint64_t){p}_HEADER_BYTES + 8U * total + 8U", "E_LENGTH")
+    lines += check("claw_crc32(img, len - 8U) != claw_rd_u32(img + (len - 8U))", "E_CRC")
+    lines += check("claw_rd_u32(img + (len - 4U)) != 0U", "E_CRC")  # CRC 레코드의 예약 칸
+    lines += ["    *n_double = (size_t)total;", f"    return {p}_OK;", "}", ""]
+
+    # ── 적재 ──
+    load = f"int {base}_params_load("
+    lines += [f"{load}const unsigned char *img, size_t len, double *pool, size_t pool_n,",
+              f"{' ' * len(load)}{base}_params_t *out)",
+              "{",
+              f"    {base}_params_t v;",
+              "    size_t total = 0U;",
+              "    size_t k;"]
+    if n_arr:
+        lines += [f"    uint32_t alen[{p}_N_ARRAYS];", f"    size_t off = {p}_N_SCALARS;"]
+    if ctx.tables:
+        lines.append("    int bad = 0;")
+    lines += [f"    const int st = {base}_params_pool_size(img, len, &total);", ""]
+    lines += [f"    if (st != {p}_OK) {{", "        return st;", "    }"]
+    lines += check("pool_n < total", "E_POOL")
+    lines += ["    for (k = 0U; k < total; k++) {",
+              f"        pool[k] = claw_rd_f64(img + {p}_HEADER_BYTES + 8U * k);",
+              "    }",
+              f"    /* NaN·Inf 거부 — x − x는 유한값에서만 0이다 (빠른 수학 금지 빌드 전제, {base}.h) */",
+              "    for (k = 0U; k < total; k++) {"]
+    lines += check("pool[k] - pool[k] != 0.0", "E_NONFINITE", indent="        ")
+    lines += ["    }"]
+    if n_arr:
+        lines += [f"    for (k = 0U; k < {p}_N_ARRAYS; k++) {{",
+                  "        alen[k] = claw_rd_u32(img + 64U + 4U * k);",
+                  "    }"]
+    lines += ["", "    memset(&v, 0, sizeof v);"]
+    for k, (name, _t, _l, _c) in enumerate(ctx.params):
+        lines.append(f"    v.{name} = pool[{k}];")
+    for k, (name, _t, _l, _c) in enumerate(ctx.arrays):
+        lines += [f"    v.{name} = &pool[off];", f"    off += alen[{k}];"]
+    for tab in ctx.tables:
+        i = {role: index[tab[role]] for role in _TABLE_ARRAYS[tab["kind"]]}
+        if tab["kind"] == "lookup":
+            lines.append(f"    v.{tab['n']} = (int)alen[{i['bp']}];")
+            stmt = (f"bad = bad | claw_prm_lookup_bad(v.{tab['bp']}, alen[{i['bp']}], "
+                    f"alen[{i['val']}]);")
+        else:
+            nseg = f"alen[{i['c']}]"
+            lines.append(f"    v.{tab['nseg']} = (int){nseg};")
+            lines += _wrap_stmt(f"    v.{tab['stride']} = (int)(alen[{i['coef']}] / "
+                                f"({nseg} + (uint32_t)({nseg} == 0U)));")
+            stmt = (f"bad = bad | claw_prm_poly_bad(v.{tab['kn']}, alen[{i['kn']}], alen[{i['coef']}], "
+                    f"{nseg}, v.{tab['h']}, alen[{i['h']}]);")
+        lines += _wrap_stmt("    " + stmt)
+    if ctx.tables:
+        lines += check("bad != 0", "E_TABLE")
+    lines += ["    *out = v;", f"    return {p}_OK;", "}"]
+    return _text(lines)
 
 
 def _void_unused(body, holds_output):
@@ -969,9 +1278,9 @@ def _part_sig(base, name, part):
     return head + first + _wrap_args(rest, pad)
 
 
-def _part_h(base, name, fp, part):
+def _part_h(base, name, part):
     guard = name.upper()
-    lines = _banner(base, fp, [f"{part['group']} — 기능축 분할, {len(part['nodes'])}개 블록"])
+    lines = _banner(base, [f"{part['group']} — 기능축 분할, {len(part['nodes'])}개 블록"])
     lines += [
         f"#ifndef CLAW_{guard}_H",
         f"#define CLAW_{guard}_H",
@@ -987,8 +1296,8 @@ def _part_h(base, name, fp, part):
     return _text(lines)
 
 
-def _part_c(base, name, fp, part, body, helpers):
-    lines = _banner(base, fp, [f"{part['group']} — 기능축 분할, {len(part['nodes'])}개 블록"])
+def _part_c(base, name, part, body, helpers):
+    lines = _banner(base, [f"{part['group']} — 기능축 분할, {len(part['nodes'])}개 블록"])
     lines += [f'#include "{name}.h"', ""]
     lines += _unit_includes(helpers)
     lines.append(_part_sig(base, name, part))

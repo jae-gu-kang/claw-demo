@@ -215,7 +215,7 @@ def test_규칙표가_어휘와_어긋나지_않는다():
     assert tr.known_blocks() == frozenset(_EMITTERS), (
         "C 에미터가 있는데 타입 규칙이 없는 블록이 있다 — 그 블록은 조용히 통과한다"
     )
-    assert len(_EMITTERS) == 10 and len(OPS) == 6, "어휘 크기가 바뀌었다"
+    assert len(_EMITTERS) == 10 and len(OPS) == 8, "어휘 크기가 바뀌었다"  # v1.12 add_param·switch_param
 
 
 def test_규칙_모듈은_코드를_내지_않는다():

@@ -250,18 +250,21 @@ def test_IR_연산_어휘가_늘면_두_표를_함께_고치게_한다():
     **어휘가 늘었다는 사실**을 알린다. 둘은 잡는 것이 다르다.
     """
     assert set(OPS) == {
-        "wrap_pi", "min2", "gt", "add_const", "sec_minus_1", "sec2_minus_1",
+        "wrap_pi", "min2", "gt", "add_const", "add_param", "switch_param", "sec_minus_1", "sec2_minus_1",
     }, "연산 어휘가 바뀌었다 — ir_exec._OP_FN과 emit_c._OP_C를 함께 고쳤는지 확인할 것"
     assert set(_OP_C) == set(OPS)
 
 
-def test_이산계수는_엔진이_계산한_값을_그대로_굽는다():
-    """이산화 공식이 Python과 C에 두 번 적히면 그 순간 어긋난다 (filters.py:29)."""
-    files, runner = _emit(scas_axis_graph("ax", **DEMO_YAW))
+def test_이산계수는_엔진이_계산한_값을_그대로_이미지에_싣는다():
+    """이산화 공식이 Python과 C에 두 번 적히면 그 순간 어긋난다 (filters.py:29). 값은 C가 아니라 이미지로 간다(v1.12)."""
+    graph = scas_axis_graph("ax", **DEMO_YAW)
+    runner = GraphRunner(graph, DT)
+    module = emit_c(graph, runner)
     expected = math.exp(-DT / DEMO_YAW["washout_tau"])
     assert runner.instances["wo"]._p == expected
-    assert repr(expected) in files["ax_data.c"]
-    assert repr(1.0 - expected) in files["ax_data.c"]
+    assert module.values["wo_p"] == expected
+    assert module.values["wo_one_minus_p"] == 1.0 - expected
+    assert repr(expected) not in "".join(module.files.values()), "값이 C 텍스트에 새어 나갔다"
 
 
 def test_스케줄된_게인은_파라미터_구조체에_남지_않는다():
@@ -307,18 +310,98 @@ def test_빌드_요구가_생성_헤더에_박힌다():
     assert "ffast-math" in files["ax.h"]
 
 
-def test_지문은_파라미터와_구조_양쪽에_반응한다():
-    base, _ = _emit(scas_axis_graph("ax", **DEMO_YAW))
-    other = dict(DEMO_YAW, kp=DEMO_YAW["kp"] + 0.1)
-    changed_param, _ = _emit(scas_axis_graph("ax", **other))
-    changed_struct, _ = _emit(scas_axis_graph("ax", scheduled=("kp",), **DEMO_YAW))
+def test_값이_바뀌면_파라미터_지문만_구조가_바뀌면_구조_지문이_움직인다():
+    """지문 둘(v1.12, 07 §6) — 값만 바꾸면 C 텍스트가 바이트 동일하고 구조 지문도 같다. 구조를 바꾸면(스케줄 포트) 구조
+    지문이 움직인다."""
+    def mod(graph):
+        return emit_c(graph, GraphRunner(graph, DT))
 
-    def fp(files):
-        line = next(ln for ln in files["ax.h"].splitlines() if "지문" in ln)
+    base = mod(scas_axis_graph("ax", **DEMO_YAW))
+    changed_param = mod(scas_axis_graph("ax", **dict(DEMO_YAW, kp=DEMO_YAW["kp"] + 0.1)))
+    changed_struct = mod(scas_axis_graph("ax", scheduled=("kp",), **DEMO_YAW))
+
+    assert changed_param.files == base.files, "값만 바꿨는데 C 텍스트가 달라졌다"
+    assert changed_param.structure_fingerprint == base.structure_fingerprint
+    assert changed_param.param_fingerprint != base.param_fingerprint, "값이 바뀌었는데 파라미터 지문이 같다"
+    assert changed_struct.structure_fingerprint != base.structure_fingerprint, "구조가 바뀌었는데 구조 지문이 같다"
+
+    def banner_fp(files):
+        line = next(ln for ln in files["ax.h"].splitlines() if "구조 지문" in ln)
         return line.split(":")[1].strip()
 
-    assert fp(base) != fp(changed_param), "파라미터가 바뀌었는데 지문이 같다"
-    assert fp(base) != fp(changed_struct), "구조가 바뀌었는데 지문이 같다"
+    assert banner_fp(base.files) == base.structure_fingerprint
+    assert f"#define AX_STRUCTURE_FP 0x{base.structure_fingerprint}ULL" in base.files["ax_params.h"]
+
+
+def test_ki가_0이어도_적분기를_낸다():
+    """값이 구조를 바꾸지 않는다(v1.12) — ki = 0이면 적분기·증분·가드를 접던 것을 없앴다. Python 정본도 매 스텝 적분하므로
+    적분기를 두는 쪽이 정본 그대로이고, ki = 0 이미지에서 가드 증분 조건은 비활성 분기다(검증 탭이 목록화한다)."""
+    off, _ = _emit(scas_axis_graph("ax", **dict(DEMO_YAW, ki=0.0)))
+    on, _ = _emit(scas_axis_graph("ax", **dict(DEMO_YAW, ki=0.3)))
+    assert "sta->pid_i" in off["ax.c"] and "pid_inc > 0.0" in off["ax.c"]
+    assert off == on, "ki 값이 C 텍스트를 바꿨다"
+
+
+def test_1점_표는_점_수가_1인_룩업이다():
+    """표준 템플릿의 빈 스케줄 자리(tables/point.py) — Python은 값 하나를, C 룩업은 n < 2에서 val[0]을 그대로 낸다."""
+    from claw.fcl.graphs import gain_schedule_graph
+    from claw.tables import PointTable
+
+    graph = gain_schedule_graph("pt", tables={"pitch.kp": PointTable("mach", -1.25, name="pitch.kp")},
+                                filter_tau=0.0)
+    runner = GraphRunner(graph, DT)
+    module = emit_c(graph, runner)
+    runner.reset()
+    for mach in (0.0, 0.3, 5.0):
+        assert runner.step(mach=mach) == -1.25
+    assert module.values["pitch_kp_bp"] == [0.0] and module.values["pitch_kp_val"] == [-1.25]
+    assert "int pitch_kp_n;" in module.files["pt_types.h"]
+    rt = emit_runtime(module.helpers)["claw_rt.c"]
+    assert "if (n < 2) { return val[0]; }" in rt
+
+
+def test_add_param은_편차를_이미지로_뺀다():
+    """add_const는 템플릿 상수라 C 리터럴, add_param은 기체값이라 prm 필드다 — 결과 비트는 같다(x + (−c) ≡ x − c)."""
+    from claw.codegen.ir import Op
+
+    def graph(op):
+        return Graph("ap", inputs=("x",), nodes=[Op("b", op, inputs=("x",), value=-0.05)], outputs={"y": "b"})
+
+    import struct
+
+    ga, gp = graph("add_const"), graph("add_param")
+    lit, prm = emit_c(ga, GraphRunner(ga, DT)), emit_c(gp, GraphRunner(gp, DT))
+    assert "x - 0.05" in lit.files["ap.c"]
+    assert "x + prm->b_c" in prm.files["ap.c"] and prm.values["b_c"] == -0.05
+    # 두 C 식이 같은 비트를 내는가 — 두 러너는 같은 Python 람다라 비교해도 아무것도 못 박는다. IEEE에서 뺄셈은 음수의
+    # 덧셈이라는 성질 자체를 부호 있는 0·반올림 경계까지 비트로 본다
+    for x in (0.3, 0.05, -0.0, 0.0, 1e-17, -0.05, 1e308, 5e-324):
+        assert struct.pack("<d", x - 0.05) == struct.pack("<d", x + -0.05), x
+
+
+def test_switch_param은_선택을_이미지로_뺀다():
+    """끈 워시아웃을 곱(0·u)이 아니라 선택으로 건너뛰는 연산(v1.12 리뷰) — 고르지 않은 입력의 NaN이 새지 않는다."""
+    from claw.codegen.ir import Op
+
+    def graph(flag):
+        return Graph("sp", inputs=("a", "b"), nodes=[Op("s", "switch_param", inputs=("a", "b"), value=flag)],
+                     outputs={"y": "s"})
+
+    g0, g1 = graph(0.0), graph(1.0)
+    r0, r1 = GraphRunner(g0, DT), GraphRunner(g1, DT)
+    m0, m1 = emit_c(g0, r0), emit_c(g1, r1)
+    assert "(prm->s_c != 0.0) ? a : b" in m0.files["sp.c"]
+    assert m0.files == m1.files and (m0.values["s_c"], m1.values["s_c"]) == (0.0, 1.0)  # 플래그는 값이다
+    assert r0.step(a=math.nan, b=2.0) == 2.0 and r1.step(a=3.0, b=math.nan) == 3.0
+
+
+def test_같은_이름_배열에_다른_값이_오면_죽는다():
+    """예전에는 이름만 보고 첫 등록을 조용히 남겼다 — 한쪽 값이 소리 없이 사라지는 자리."""
+    ctx = _Ctx()
+    ctx.array("n", "bp", [0.0, 1.0])
+    assert ctx.array("n", "bp", [0.0, 1.0]) == "prm->n_bp"  # 같은 값은 그대로
+    with pytest.raises(ValueError, match="불일치"):
+        ctx.array("n", "bp", [0.0, 2.0])
 
 
 def test_생성은_결정적이다():
@@ -471,7 +554,10 @@ def test_테이블은_격자점과_값이_함께_구워진다():
     table = make_demo_stall_table()
     graph = alpha_limiter_graph(stall_table=table, margin=0.05)
     files, runner = _emit(graph)
-    assert f"double stall_bp[{len(table.axes[0])}]" in files["alpha_limiter_types.h"]
+    # 표는 포인터와 점 수 필드다 — 점 수가 코드에 박히지 않는다(값·길이는 이미지)
+    assert "const double *stall_bp;" in files["alpha_limiter_types.h"]
+    assert "int stall_n;" in files["alpha_limiter_types.h"]
+    assert f"[{len(table.axes[0])}]" not in files["alpha_limiter_types.h"]
     assert "claw_lookup1d" in files["alpha_limiter.c"]
     runner.reset()
     for mach in (0.1, 0.35, 0.6, 0.95, 2.0):  # 경계 밖 포함 (외삽 clip)
@@ -671,13 +757,13 @@ def test_group_이름이_신호와_충돌하면_거부한다():
 
 def test_이름표가_없으면_예전처럼_파일_하나다():
     files, _ = _emit(_split_graph(tag=False))
-    assert sorted(files) == ["sp.c", "sp.h", "sp_data.c", "sp_types.h"]
+    assert sorted(files) == ["sp.c", "sp.h", "sp_params.c", "sp_params.h", "sp_types.h"]
 
 
 def test_이름표가_붙으면_서브시스템별로_떨어진다():
     files, _ = _emit(_split_graph())
     assert sorted(files) == [
-        "sp.c", "sp.h", "sp_data.c", "sp_first.c", "sp_first.h",
+        "sp.c", "sp.h", "sp_first.c", "sp_first.h", "sp_params.c", "sp_params.h",
         "sp_second.c", "sp_second.h", "sp_types.h",
     ]
     # 조립부에는 계산이 없고 호출만 있다
@@ -692,19 +778,15 @@ def test_이름표가_붙으면_서브시스템별로_떨어진다():
     assert "const double b_s_y = claw_clip(a_k_y" in files["sp_second.c"]
 
 
-def test_분할은_지문을_바꾸지_않는다():
-    """지문은 형상(파라미터·dt·구조)의 신원이다 — 파일을 어떻게 쪼개든 같은 법칙이다.
-
-    배치가 바뀐 것은 파일 diff로 보이면 되고, 지문까지 흔들리면 "형상이 바뀌었나"를
-    구별할 수 없게 된다.
-    """
-    def fp(files):
-        line = next(ln for ln in files["sp.h"].splitlines() if "지문" in ln)
-        return line.split(":")[1].strip()
-
-    flat, _ = _emit(_split_graph(tag=False))
-    split, _ = _emit(_split_graph())
-    assert fp(flat) == fp(split)
+def test_분할은_값을_바꾸지_않는다():
+    """분할은 파일 배치다 — 값(파라미터 지문)과 이미지 레이아웃은 그대로다. 구조 지문은 생성 C 텍스트의 해시라 파일이
+    달라지면 함께 움직인다(v1.12 — "구조 지문이 같다 = C가 바이트 동일")."""
+    graph_flat, graph_split = _split_graph(tag=False), _split_graph()
+    flat = emit_c(graph_flat, GraphRunner(graph_flat, DT))
+    split = emit_c(graph_split, GraphRunner(graph_split, DT))
+    assert flat.param_fingerprint == split.param_fingerprint
+    assert flat.layout == split.layout
+    assert flat.structure_fingerprint != split.structure_fingerprint
 
 
 _DETERMINISM_PROBE = """
@@ -724,7 +806,7 @@ assert "claw_rt.c" in files, sorted(files)
 blob = "".join(f"{k}\\n{v}" for k, v in sorted(files.items()))
 print(os.environ.get("PYTHONHASHSEED"))
 print(hashlib.sha256(blob.encode()).hexdigest())
-print(m.fingerprint)
+print(m.structure_fingerprint + m.param_fingerprint)
 print(len(blob))
 # 카나리아: 시드가 실제로 달라졌는지. 문자열 해시는 시드마다 다르다
 print(hash("결정성"))

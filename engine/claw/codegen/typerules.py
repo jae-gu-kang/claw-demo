@@ -109,6 +109,8 @@ OP_RULES = {
     "gt": (None, _to_bool),
     # 상수 편차 — 같은 물리량을 더한다 (상수의 단위는 파라미터에 살지만 읽지 않는다)
     "add_const": (None, _same),
+    "add_param": (None, _same),  # 값이 이미지에 사는 편차 — 규칙은 add_const와 같다
+    "switch_param": (None, _same),  # 두 갈래 중 하나를 낸다 — 같은 물리량이어야 한다(Switch 값 갈래와 같다)
     # 1/cos φ − 1: 각도를 받아 **무차원**을 낸다
     "sec_minus_1": (it.ANGLE, _to_dimensionless),
     "sec2_minus_1": (it.ANGLE, _to_dimensionless),

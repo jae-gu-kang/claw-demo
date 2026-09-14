@@ -101,8 +101,11 @@ INSTRUMENT_STATES = {
 class FlightControlLaw:
     def __init__(self, scas, autopilot, mixer, schedule=None, alpha_limiter=None,
                  alloc_trim_table=None, alloc_resv_frac=0.7,
-                 theta_hi_table=None):
+                 theta_hi_table=None, standard=False):
         self.scas = scas
+        # 표준 템플릿(fcl/graphs.py 머리말) — 탑재 C 생성·검증만 켠다. 시뮬·해석은 분석 그래프(False)
+        self.standard = bool(standard)
+        self.template = None  # 표준 템플릿 id — assemble_law가 프로파일에서 확인해 채운다
         # 엘레본 제어권한 배분 계수 [rad/하중] — 0이면 배분 없음 (fcl/graphs.py)
         self.alloc_trim_table = alloc_trim_table
         # θ 상한 표 — 있으면 마하 룩업, 없으면 오토파일럿의 스칼라 theta_hi.
@@ -153,6 +156,7 @@ class FlightControlLaw:
                 alloc_resv_frac=self.alloc_resv_frac,
                 gain_tables=self.schedule.tables if self.schedule is not None else None,
                 filter_tau=self.schedule.filter_tau if self.schedule is not None else 0.5,
+                standard=self.standard,
             ),
             dt,
         )

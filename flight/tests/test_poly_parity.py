@@ -6,7 +6,6 @@
 혼합(1차+4차, 0 패딩 호너), 스케줄 변수 1차 필터 상태.
 """
 
-import re
 import shutil
 import subprocess
 
@@ -14,7 +13,7 @@ import numpy as np
 import pytest
 from generate import DT
 
-from claw.codegen import GraphRunner, emit_c, emit_runtime
+from claw.codegen import GraphRunner, emit_c, emit_runtime, param_image
 from claw.design import fit_gain_surface
 from claw.fcl.graphs import gain_schedule_graph
 from claw.tables import PolyTable, Table
@@ -32,19 +31,33 @@ MACHS = np.round(np.arange(0.15, 0.951, 0.05), 4)
 # 안 걸쳐 **조용히** 무의미해진다(초록인 채로). 데모 형상의 축별 상한과는 무관하다.
 DP = np.minimum((0.6 / MACHS) ** 2, 4.0)
 
+# 파라미터는 이미지로 받는다(v1.12) — stdin 첫 줄이 "바이트 수 16진이미지", 이후 한 줄에 mach 하나
 HARNESS = """\
 #include <stdio.h>
+#include <stdlib.h>
 #include "{name}.h"
 
 int main(void)
 {{
+    {name}_params_t prm;
     {name}_state_t s;
     {name}_out_t out;
+    unsigned char img[1 << 16];
+    size_t len = 0, n = 0;
     double mach;
+    double *pool;
+    unsigned int byte;
 
+    size_t want = 0;
+
+    if (scanf("%zu", &want) != 1 || want > sizeof img) {{ return 2; }}
+    while (len < want && scanf("%2x", &byte) == 1) {{ img[len++] = (unsigned char)byte; }}
+    if ({name}_params_pool_size(img, len, &n) != 0) {{ return 2; }}
+    pool = malloc(n * sizeof *pool);
+    if ({name}_params_load(img, len, pool, n, &prm) != 0) {{ return 2; }}
     {name}_reset(&s);
     while (scanf("%lf", &mach) == 1) {{
-        {name}_step(&{name}_params, &s, &out, mach);
+        {name}_step(&prm, &s, &out, mach);
         printf("%.17g %.17g\\n", out.pitch_kp, out.roll_kp);
     }}
     return 0;
@@ -234,12 +247,8 @@ def test_emitted_padding_is_trailing():
     poly = _mixed_poly()
     graph = _graph("sched_poly_pad", 0.0, poly=poly)
     module = emit_c(graph, GraphRunner(graph, DT))
-    body = re.search(r"\.pitch_kp_coef = \{(.*?)\n\s*\},",
-                     module.files["sched_poly_pad_data.c"], re.S)
-    assert body, "생성물에서 계수 배열을 못 찾았다 — 이름 규약이 바뀌었나"
-    # 배열 머리에 붙는 주석("… 오름차수, 0 패딩")에도 숫자가 있다 — 먼저 지운다
-    values = re.sub(r"/\*.*?\*/", "", body.group(1), flags=re.S)
-    nums = [float(v) for v in re.findall(r"-?\d+\.?\d*(?:[eE][-+]?\d+)?", values)]
+    # 값은 C가 아니라 이미지에 있다(v1.12) — 이미지를 싸고 다시 읽은 값으로 본다(왕복까지 함께 확인)
+    nums = param_image.unpack(param_image.pack(module), module)["values"]["pitch_kp_coef"]
     stride = max(len(s["coeffs"]) for s in poly.segments)
     assert len(nums) == stride * len(poly.segments)
     for i, s in enumerate(poly.segments):
@@ -283,7 +292,8 @@ def test_poly_schedule_parity(tmp_path, name, filter_tau, steps):
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode == 0, f"컴파일 실패:\n{res.stderr}"
 
-    stdin = "\n".join(f"{m!r}" for m in steps) + "\n"
+    image = param_image.pack(module)
+    stdin = f"{len(image)} {image.hex()}\n" + "\n".join(f"{m!r}" for m in steps) + "\n"
     run = subprocess.run([str(exe)], input=stdin, capture_output=True, text=True)
     assert run.returncode == 0
 

@@ -49,8 +49,18 @@ def test_생성_결과가_flight_generate_산출물과_같다(client):
         )
     # scas_yaw는 이 라우트의 산출물이 아니다(제어법칙 전체만) — 그 차이는 정상
     assert set(committed) - set(files) == {
-        "scas_yaw.c", "scas_yaw.h", "scas_yaw_data.c", "scas_yaw_types.h",
+        "scas_yaw.c", "scas_yaw.h", "scas_yaw_params.c", "scas_yaw_params.h", "scas_yaw_types.h",
     }
+    # 이미지도 정본 경로(generate.image_for)와 같다 — 같은 기체·같은 값·같은 계보
+    import base64
+
+    from claw.profile import example_profile
+
+    spec = importlib.util.spec_from_file_location("flight_generate_image", GENERATE)
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    assert base64.b64decode(body["param_image"]["base64"]) == gen.image_for(example_profile())[1]
+    assert body["param_image"]["name"] == "example-delta.bin"
 
 
 def test_읽는_순서를_서버가_정해_준다(client):
@@ -61,7 +71,7 @@ def test_읽는_순서를_서버가_정해_준다(client):
     assert order[-2:] == ["claw_rt.h", "claw_rt.c"]
     # 서브시스템은 실행 순서대로, 짝은 .h 먼저
     parts = [n for n in order if n.startswith("fcl_") and "_types" not in n
-             and "_data" not in n]
+             and "_params" not in n]
     assert parts == [
         "fcl_sched.h", "fcl_sched.c", "fcl_ap.h", "fcl_ap.c", "fcl_lim.h", "fcl_lim.c",
         "fcl_scas.h", "fcl_scas.c", "fcl_mix.h", "fcl_mix.c",
@@ -69,34 +79,30 @@ def test_읽는_순서를_서버가_정해_준다(client):
     roles = {f["name"]: f["role"] for f in files}
     assert roles["fcl.h"] == "진입점"
     assert roles["fcl.c"] == "조립부"
-    assert roles["fcl_data.c"] == "파라미터 데이터"
+    assert roles["fcl_params.c"] == "파라미터 로더"
+    assert order[-4:-2] == ["fcl_params.h", "fcl_params.c"]  # 로더는 서브시스템 뒤, 공용 런타임 앞
     assert roles["claw_rt.c"] == "공용 런타임"
     assert all(f["lines"] > 0 for f in files)
 
 
-def test_편집한_게인이_생성_코드에_박힌다(client):
-    """웹에서 값을 고치는 목적 자체 — 안 박히면 이 화면은 장식이다."""
+def test_편집한_게인은_C가_아니라_이미지에_박힌다(client):
+    """웹에서 값을 고치는 목적 자체 — 값이 이미지에 실려야 하고, C 파일은 한 바이트도 안 바뀌어야 한다(v1.12)."""
     base = _post(client).json()
     edited = _post(client, autopilot={"kp_alt": 0.008}).json()
-    assert edited["fingerprint"] != base["fingerprint"], "값이 바뀌었는데 지문이 같다"
-
-    def data_c(body):
-        return next(f["text"] for f in body["files"] if f["name"] == "fcl_data.c")
-
-    # _data.c는 필드명을 정렬 패딩한다 (생성 데이터도 리뷰 대상 문서라서)
-    assigned = re.compile(r"\.ap_alt_pid_kp\s+= 0\.008,")
-    assert assigned.search(data_c(edited)), "편집값이 파라미터 데이터에 없다"
-    assert not assigned.search(data_c(base))
-    # 값만 바뀌었으므로 구조 파일은 그대로여야 한다
-    def top(body):
-        return next(f["text"] for f in body["files"] if f["name"] == "fcl.c")
-
-    assert top(edited) == top(base)
+    assert edited["files"] == base["files"], "값만 바꿨는데 C가 달라졌다"
+    assert edited["structure_fingerprint"] == base["structure_fingerprint"]
+    assert edited["param_fingerprint"] != base["param_fingerprint"], "값이 바뀌었는데 파라미터 지문이 같다"
+    # 표준 템플릿에서 고도 kp는 1점 표 자리다 — 목록의 그 표 값이 편집값이다
+    listing = edited["param_image"]["listing"]
+    assert re.search(r"sched_alt_kp — 절점 표 n = 1\n    bp  = [^\n]*\n    val = 0\.008\n", listing), listing[:2000]
+    assert "val = 0.008\n" not in base["param_image"]["listing"]
 
 
-def test_편집한_scas가_생성_코드에_박힌다(client):
+def test_편집한_scas가_이미지에_박힌다(client):
     """SCAS도 AP와 같은 계약 — 스케줄이 안 붙은 자리(요축)와 스케줄 대상이 아닌
-    파라미터(washout_tau)가 탑재 C까지 내려가야 웹의 편집이 의미를 갖는다."""
+    파라미터(washout_tau)가 이미지까지 내려가야 웹의 편집이 의미를 갖는다."""
+    import math
+
     axes = {
         "pitch": {"kp": -2.0, "ki": -0.5, "k_rate": 0.4, "out_lo": -0.35, "out_hi": 0.35},
         "roll": {"kp": 1.0, "ki": 0.1, "k_rate": -0.2, "out_lo": -0.35, "out_hi": 0.35},
@@ -105,15 +111,33 @@ def test_편집한_scas가_생성_코드에_박힌다(client):
     }
     base = _post(client).json()
     edited = _post(client, scas=axes).json()
-    assert edited["fingerprint"] != base["fingerprint"], "값이 바뀌었는데 지문이 같다"
+    assert edited["files"] == base["files"]
+    assert edited["param_fingerprint"] != base["param_fingerprint"], "값이 바뀌었는데 지문이 같다"
+    listing = edited["param_image"]["listing"]
+    assert re.search(r"sched_yaw_kp — 절점 표 n = 1\n    bp  = [^\n]*\n    val = 0\.7\n", listing)
+    # 워시아웃 시정수는 dt로 계산한 계수로 실린다
+    assert f"scas_yaw_wo_p" in listing and repr(math.exp(-0.01 / 3.0)) in listing
+    assert repr(math.exp(-0.01 / 3.0)) not in base["param_image"]["listing"]
 
-    def data_c(body):
-        return next(f["text"] for f in body["files"] if f["name"] == "fcl_data.c")
 
-    assert re.search(r"\.scas_yaw_pid_kp\s+= 0\.7,", data_c(edited))
-    # 워시아웃 시정수는 상수가 아니라 dt로 구운 계수로 박힌다 (tau=3.0 주석이 근거)
-    assert "tau=3.0 s" in data_c(edited)
-    assert "tau=3.0 s" not in data_c(base)
+def test_형상_변형은_C를_그대로_두고_이미지만_바꾼다(client):
+    """EO/IR형은 질량·관성만 바꾸는 변형이다 — 탑재 C·구조 지문·법칙 값(파라미터 지문)이 기본형과 같고, 이미지는 계보
+    칸(프로파일 지문)만 다르다. 기체가 바뀌어도 코드는 그대로라는 v1.12 목표 상태의 서버 쪽 증명."""
+    import base64
+
+    from claw.profile import load_shipped_example
+
+    # 서버 테스트는 예제 자리에 구 기체 픽스처를 두므로(conftest) 제품 예제를 사본으로 올려 그 형상 변형을 쓴다
+    d = load_shipped_example()
+    d.update(id="shipped-delta-variant", name="제품 예제 사본", is_example=False)
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    base = _post(client, profile={"id": "shipped-delta-variant"}).json()
+    eoir = _post(client, profile={"id": "shipped-delta-variant", "variant": "eoir"}).json()
+    assert eoir["files"] == base["files"]
+    assert eoir["structure_fingerprint"] == base["structure_fingerprint"]
+    assert eoir["param_fingerprint"] == base["param_fingerprint"]
+    assert base64.b64decode(eoir["param_image"]["base64"]) != base64.b64decode(base["param_image"]["base64"])
+    assert eoir["param_image"]["name"] == "shipped-delta-variant-eoir.bin"
 
 
 def test_scas_부분_주입은_422(client):
@@ -128,9 +152,10 @@ def test_스케줄을_끄면_구조가_바뀐다(client):
     assert "sched" not in off["groups"]
     names = {f["name"] for f in off["files"]}
     assert "fcl_sched.c" not in names
-    # 스케줄이 없으면 게인이 신호가 아니라 상수 파라미터가 된다
+    # 스케줄이 없으면 게인이 신호가 아니라 상수 파라미터가 된다 — 명시 구조 옵션이라 구조 지문이 움직인다
     scas = next(f["text"] for f in off["files"] if f["name"] == "fcl_scas.c")
     assert "prm->scas_pitch_pid_kp" in scas
+    assert off["structure_fingerprint"] != _post(client).json()["structure_fingerprint"]
 
 
 def test_리미터를_끄면_출력도_줄어든다(client):
@@ -138,14 +163,16 @@ def test_리미터를_끄면_출력도_줄어든다(client):
     assert "lim" not in off["groups"]
     types = next(f["text"] for f in off["files"] if f["name"] == "fcl_types.h")
     assert "alpha_margin" not in types, "리미터를 껐는데 엔벨로프 출력이 남았다"
+    assert off["structure_fingerprint"] != _post(client).json()["structure_fingerprint"]
 
 
 def test_제어주기가_이산계수를_바꾼다(client):
-    """dt는 튜닝 파라미터가 아니라 형상의 일부 — 지문이 함께 움직여야 한다."""
+    """dt는 튜닝 파라미터가 아니라 형상의 일부 — 구조 지문(DT 매크로)과 이미지 값(이산 계수)이 함께 움직인다."""
     fast = _post(client, control_hz=200.0).json()
     slow = _post(client).json()
     assert fast["dt"] == 0.005
-    assert fast["fingerprint"] != slow["fingerprint"]
+    assert fast["structure_fingerprint"] != slow["structure_fingerprint"]
+    assert fast["param_fingerprint"] != slow["param_fingerprint"]
     types = next(f["text"] for f in fast["files"] if f["name"] == "fcl_types.h")
     assert "#define FCL_DT 0.005" in types
 
@@ -191,7 +218,9 @@ def test_다항_게인_스케줄이_생성_코드에_박힌다(client):
     files = {f["name"]: f["text"] for f in r.json()["files"]}
     assert "claw_polyeval1d" in files["fcl_sched.c"], "다항 평가 호출이 없다"
     assert "claw_polyeval1d" in files["claw_rt.c"], "공용 런타임에 다항 헬퍼가 없다"
-    assert "sched_pitch_kp_kn" in files["fcl_data.c"], "구간 경계 배열이 없다"
+    assert "sched_pitch_kp — 다항 표" in r.json()["param_image"]["listing"], "구간 경계 배열이 이미지에 없다"
+    # 절점 표 대 다항 표는 명시 구조 옵션이다 — 구조 지문이 움직인다
+    assert r.json()["structure_fingerprint"] != _post(client).json()["structure_fingerprint"]
     # 기존 테이블 페이로드(kind 없음)와 혼재 가능 — 태그드 유니언 하위호환
     table = {"axes": {"mach": [0.15, 0.95]}, "data": [1.0, 0.5]}
     r2 = _post(client, gain_tables={"pitch.kp": poly, "roll.kp": table})
@@ -227,5 +256,6 @@ def test_부분_자동조종_지정은_이_기체의_설계값_위에_덧댄다(
     part = _post(client, profile=ref, autopilot={"kp_alt": d["law"]["design"]["autopilot"]["kp_alt"]})
     assert base.status_code == 200 and part.status_code == 200, part.text
     assert part.json()["files"] == base.json()["files"]
-    data = {f["name"]: f["text"] for f in part.json()["files"]}["fcl_data.c"]
-    assert re.search(r"\.ap_vs_pid_kp\s+= 0\.196,", data), "승강률 게인이 기체 설계값이 아니다"
+    assert part.json()["param_fingerprint"] == base.json()["param_fingerprint"]
+    listing = part.json()["param_image"]["listing"]
+    assert re.search(r"ap_vs_pid_kp\s+= 0\.196\b", listing), "승강률 게인이 기체 설계값이 아니다"

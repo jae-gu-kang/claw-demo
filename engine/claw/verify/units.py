@@ -44,11 +44,42 @@ def unit_specs(graph):
     ]
 
 
-def make_unit_harness(base, spec) -> str:
-    """유닛 하네스 C — stdin 한 행 = 임포트, stdout 한 행 = 익스포트 (%.17g).
+# 이미지 파일 읽기 — 하네스(통합 계층)의 몫이라 동적 할당·표준입출력을 쓴다. 생성 코드에는 없다
+IMAGE_READER = """static unsigned char *claw_read_image(const char *path, size_t *len)
+{
+    FILE *f = fopen(path, "rb");
+    unsigned char *buf = NULL;
+    long n;
 
-    상태는 `{base}_reset` 한 번 후 행 순서대로 흐른다 — 행 시퀀스가 곧 시나리오다.
-    MC/DC 계측 빌드에서만 종료 시 덤프를 낸다 (CLAW_MCDC_ENABLED — 커버리지
+    if (f == NULL) { return NULL; }
+    if (fseek(f, 0, SEEK_END) == 0 && (n = ftell(f)) > 0 && fseek(f, 0, SEEK_SET) == 0) {
+        buf = malloc((size_t)n);
+        if (buf != NULL && fread(buf, 1, (size_t)n, f) != (size_t)n) { free(buf); buf = NULL; }
+        *len = (size_t)n;
+    }
+    fclose(f);
+    return buf;
+}
+"""
+
+
+def load_params_c(base, indent="    "):
+    """하네스 main 첫머리 — argv[1]의 이미지를 적재해 `prm`을 채운다. 실패하면 종료 코드 2."""
+    return "\n".join(f"{indent}{ln}" if ln else "" for ln in [
+        "len = 0;",
+        "img = (argc > 1) ? claw_read_image(argv[1], &len) : NULL;",
+        f"if (img == NULL || {base}_params_pool_size(img, len, &npool) != 0) {{ return 2; }}",
+        "pool = malloc((npool + 1U) * sizeof *pool);",
+        f"if (pool == NULL || {base}_params_load(img, len, pool, npool, &prm) != 0) {{ return 2; }}",
+        "free(img);",
+    ])
+
+
+def make_unit_harness(base, spec) -> str:
+    """유닛 하네스 C — argv[1] = 파라미터 이미지, stdin 한 행 = 임포트, stdout 한 행 = 익스포트 (%.17g).
+
+    상태는 `{base}_reset` 한 번 후 행 순서대로 흐른다 — 행 시퀀스가 곧 시나리오다. 같은 실행 파일이 파라미터 세트의
+    이미지마다 돈다(v1.12). MC/DC 계측 빌드에서만 종료 시 덤프를 낸다 (CLAW_MCDC_ENABLED — 커버리지
     빌드가 -include claw_mcdc.h 로 매크로를 공급한다).
     """
     g = spec["group"]
@@ -57,26 +88,33 @@ def make_unit_harness(base, spec) -> str:
     exports = spec["exports"]
     if len(exports) == 1:
         call = (f"        printf(\"%.17g\\n\", "
-                f"{base}_{g}_step(&{base}_params, &s, {args}));")
+                f"{base}_{g}_step(&prm, &s, {args}));")
         decls = ""
     else:
         outs = ", ".join(f"&y[{i}]" for i in range(len(exports)))
         fmt = " ".join(["%.17g"] * len(exports))
         prints = ", ".join(f"y[{i}]" for i in range(len(exports)))
         decls = f"    double y[{len(exports)}];\n"
-        call = (f"        {base}_{g}_step(&{base}_params, &s, {args}, {outs});\n"
+        call = (f"        {base}_{g}_step(&prm, &s, {args}, {outs});\n"
                 f"        printf(\"{fmt}\\n\", {prints});")
     return f"""/* CLAW 유닛 하네스 — {base}_{g} 파티션 단독 구동 (스텁 없음: 임포트가 곧 상류다). */
 #include <stdio.h>
+#include <stdlib.h>
 #include "{base}.h"
 #include "{base}_{g}.h"
 
-int main(void)
+{IMAGE_READER}
+int main(int argc, char **argv)
 {{
+    {base}_params_t prm;
     {base}_state_t s;
     double u[{n}];
 {decls}    int k;
+    size_t len, npool = 0;
+    unsigned char *img;
+    double *pool;
 
+{load_params_c(base)}
     {base}_reset(&s);
     for (;;) {{
         for (k = 0; k < {n}; k++) {{
@@ -91,6 +129,56 @@ int main(void)
     }}
 }}
 """
+
+
+def make_params_harness(base) -> str:
+    """로더 유닛 하네스 C — stdin 한 행 = "pool_delta 바이트수 16진이미지", stdout 한 행 = 적재 상태 코드.
+
+    생성 로더의 거부 경로(구조 지문·CRC·길이·표 모양·pool 부족·NaN…)를 손상 이미지로 하나씩 태운다
+    (`codegen/param_image.corruptions`). pool은 double 총수 + pool_delta로 준다 — E_POOL 경로.
+    """
+    return f"""/* CLAW 유닛 하네스 — {base}_params 로더 거부 경로 (손상 이미지 → 상태 코드). */
+#include <stdio.h>
+#include <stdlib.h>
+#include "{base}.h"
+
+int main(void)
+{{
+    int delta;
+    size_t want;
+
+    while (scanf("%d %zu", &delta, &want) == 2) {{
+        {base}_params_t prm;
+        unsigned char *img = malloc(want + 1U);
+        size_t k, npool = 0;
+        unsigned int byte;
+        double *pool;
+        int st;
+
+        if (img == NULL) {{ return 3; }}
+        for (k = 0; k < want; k++) {{
+            if (scanf("%2x", &byte) != 1) {{ return 3; }}
+            img[k] = (unsigned char)byte;
+        }}
+        /* pool 크기만 pool_size로 잰다 — 거부 판정은 load가 낸다(load 안의 헤더 검사 분기까지 태운다) */
+        (void){base}_params_pool_size(img, want, &npool);
+        pool = malloc((npool + 1U) * sizeof *pool);
+        st = {base}_params_load(img, want, pool, (size_t)((long)npool + delta), &prm);
+        printf("%d\\n", st);
+        free(pool);
+        free(img);
+    }}
+#ifdef CLAW_MCDC_ENABLED
+    claw_mcdc_dump();
+#endif
+    return 0;
+}}
+"""
+
+
+def params_stdin(cases) -> str:
+    """손상 이미지 케이스 → 로더 하네스 stdin."""
+    return "".join(f"{c['pool_delta']} {len(c['image'])} {c['image'].hex()}\n" for c in cases)
 
 
 def run_unit_oracle(spec, dt, rows):

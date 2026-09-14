@@ -50,13 +50,19 @@ OPS = {
     "wrap_pi": 1,  # (-π, π] 래핑
     "min2": 2,  # min(a, b)
     "gt": 2,  # a > b → 1.0 / 0.0 (불리언은 0/1 double로 나른다)
-    "add_const": 1,  # u + c  (상수 편차 — Simulink Bias 대응)
+    "add_const": 1,  # u + c  (상수 편차 — Simulink Bias 대응). c는 **템플릿 상수**라 C 리터럴로 박힌다
+    # u + c, c는 **이미지의 파라미터**(v1.12) — 기체마다 다른 편차(α 보호마진·배분 예산)를 C 구조 밖으로 뺀다.
+    # 식은 add_const와 같고(x + (−c) ≡ x − c, IEEE 정확) C에서 리터럴 대신 prm 필드를 읽는다
+    "add_param": 1,
+    # 값이 이미지에 사는 선택 — c ≠ 0이면 첫 입력, 0이면 둘째 입력(v1.12). 표준 템플릿이 끈 워시아웃을 곱(0·u)이 아니라
+    # 선택으로 건너뛰는 자리다 — 곱이면 NaN 한 번이 워시아웃 상태에 굳어 출력까지 끌려간다
+    "switch_param": 2,
     "sec_minus_1": 1,  # 1/cos φ − 1   (선회 피치 FF)
     "sec2_minus_1": 1,  # 1/cos²φ − 1  (선회 스로틀 FF)
 }
 
 # 상수 파라미터를 갖는 연산 — 블록을 새로 만들지 않고 상수를 다루기 위한 최소 장치
-OPS_VALUE = frozenset({"add_const"})
+OPS_VALUE = frozenset({"add_const", "add_param", "switch_param"})
 
 
 # 생성 C의 함수 인자로 쓰는 이름 — 그래프 입력이 이걸 가리면 `prm->x`가 깨진다.

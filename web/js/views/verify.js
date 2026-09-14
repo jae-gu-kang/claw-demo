@@ -18,8 +18,8 @@
 import { api, errorText } from "../api.js";
 import { clear, el, flagBadge } from "../dom.js";
 import {
-  buildVerifyRequest, caseGroups, covCell, failedRuleCount, firstFailKey,
-  mcdcCell, mismatchedOutputCount, pct, sourceRows, statusFlag, truthTable,
+  buildVerifyRequest, caseGroups, covCell, deactivatedRows, failedRuleCount, firstFailKey, identLine,
+  mcdcCell, mismatchedOutputCount, paramSetRows, pct, sourceRows, statusFlag, truthTable,
   uncoveredBranchCount, unitGridRows, verdictModel,
 } from "../lib/verify.js";
 import { store } from "../store.js";
@@ -59,6 +59,7 @@ export function render() {
   const viewerBox = el("div");
   const casesBox = el("div");
   const equivBox = el("div");
+  const psetBox = el("div");
   const staticBox = el("div");
   const dalBox = el("div");
   const docBox = el("div");
@@ -89,6 +90,13 @@ export function render() {
         title: "출력별 비트 대조 · 대조가 밟은 경로",
         count: () => mismatchedOutputCount(lastReport),
         build: () => equivBox },
+      { key: "psets", label: "파라미터 세트", group: "근거",
+        title: "요청 이미지·커버리지 이미지 · 값으로 꺼진(비활성) 경로 · 이미지 의미 검사",
+        count: () => {
+          const rows = deactivatedRows(lastReport);
+          return rows.length ? rows.filter((r) => r.uncovered).length || null : null;
+        },
+        build: () => psetBox },
       { key: "static", label: "정적·컴파일 상세", group: "근거",
         title: "규칙별 지적 · 함수 지표 · 컴파일 경고",
         count: () => failedRuleCount(lastReport),
@@ -107,7 +115,7 @@ export function render() {
   // 실패 요약 키 → 근거가 사는 가장 가까운 자리
   const drawerOf = (key) => (
     { static: "static", compile: "static", paths: "equiv", equiv: "equiv",
-      coverage: "cases" }[key] ?? null);
+      params: "psets", coverage: "cases" }[key] ?? null);
 
   const paintViewer = () => renderViewer(viewerBox, lastReport, selFile, (name) => {
     selFile = name;
@@ -124,6 +132,7 @@ export function render() {
     paintViewer();
     renderCases(casesBox, lastReport);
     renderEquiv(equivBox, lastReport);
+    renderParamSets(psetBox, lastReport);
     renderStatic(staticBox, lastReport);
     renderDal(dalBox, lastReport);
     renderDoc(docBox, lastReport);
@@ -212,7 +221,7 @@ function renderBoard(box, report) {
       el("span", { class: `flag ${v.cls} vf-verdict` }, `판정 — ${v.label}`),
       el("span", { class: "hint" }, v.line)),
     el("p", { class: "vf-ident hint" },
-      `형상 지문 ${report.fingerprint} · 엔진 claw ${report.engine} · 제어주기 ${report.dt} s`
+      identLine(report)
       + (report.steps ? ` · 통합 대조 ${report.steps.toLocaleString()}스텝` : "")),
     el("div", { class: "vf-cards" }, (report.summary ?? []).map((r) => {
       const f = statusFlag(r.status);
@@ -369,6 +378,47 @@ function renderEquiv(box, report) {
   );
 }
 
+/** 파라미터 세트 — 한 실행 파일이 이미지만 바꿔 돈다(v1.12). 커버리지는 세트 합산, 비활성 경로는 목록화. */
+function renderParamSets(box, report) {
+  if (!report) return emptyHint(box);
+  const sets = paramSetRows(report);
+  const off = deactivatedRows(report);
+  const checks = report.param_image?.checks ?? [];
+  clear(box).append(
+    drawerSection("파라미터 세트",
+      "탑재 C는 구조 하나로 한 번 빌드하고 이미지만 바꿔 돈다 — 요청 기체 이미지(미션 + 벡터 + 유닛)와, 요청 "
+      + "이미지에서 값으로 꺼진 경로를 켠 커버리지 이미지(벡터 + 유닛). 이미지마다 비트 대조하고 라인·분기·MC/DC는 합산한다.",
+      sets.length
+        ? table(["세트", "역할", "파라미터 지문", "바꾼 값"], sets.map((s) => el("tr", {},
+            el("td", { style: "text-align:left" }, `${s.id} — ${s.title}`),
+            el("td", {}, s.role),
+            el("td", { class: "num" }, s.fp),
+            el("td", { style: "text-align:left" }, el("span", { class: "hint" }, s.changes)))))
+        : el("p", { class: "hint" }, "이 리포트에는 파라미터 세트 기록이 없습니다 (v1.12 이전 결과)."),
+      report.param_sets_note ? el("p", { class: "hint" }, report.param_sets_note) : null),
+    drawerSection("비활성 경로 — 값으로 꺼진 코드",
+      "구조가 고정이라 이 경로들도 코드에 있다. 요청 이미지로는 실행되지 않거나 결과에 기여하지 않을 뿐이고, 어느 세트가 "
+      + "그 경로를 태웠는지를 함께 적는다 (DO-178C 비활성 코드 개념).",
+      off.length
+        ? table(["노드", "경로", "덮은 세트"], off.map((r) => el("tr", {},
+            el("td", { class: "num" }, r.node),
+            el("td", { style: "text-align:left" }, r.title),
+            el("td", {}, r.uncovered ? chip({ cls: "bad", label: "미커버" }) : r.covered))))
+        : el("p", { class: "hint" }, "값으로 꺼진 경로가 없습니다.")),
+    drawerSection("이미지 의미 검사",
+      report.param_image
+        ? `${report.param_image.bytes.toLocaleString()}바이트 · CRC-32 0x`
+          + `${report.param_image.crc32.toString(16).padStart(8, "0")} — 로더 거부 경로는 [시험 케이스]의 params 유닛`
+        : null,
+      checks.length
+        ? table(["검사", "판정", "근거"], checks.map((c) => el("tr", {},
+            el("td", { style: "text-align:left" }, c.title),
+            el("td", {}, flagBadge(c.ok, "통과", "실패")),
+            el("td", { style: "text-align:left" }, c.detail))))
+        : el("p", { class: "hint" }, "—")),
+  );
+}
+
 function renderStatic(box, report) {
   if (!report) return emptyHint(box);
   const st = report.static;
@@ -442,8 +492,7 @@ function renderDoc(box, report) {
   const doc = el("div", { class: "vf-report" },
     el("h1", {}, "CLAW 탑재 C 검증 보고서"),
     el("p", { class: "vf-ident" },
-      `산출물 ${report.artifact} · 형상 지문 ${report.fingerprint} · 엔진 claw `
-      + `${report.engine} · 제어주기 ${report.dt} s · 대조 미션 ${report.t_end} s`),
+      `산출물 ${report.artifact} · ${identLine(report)} · 대조 미션 ${report.t_end} s`),
     el("p", {}, el("span", { class: `flag ${v.cls} vf-verdict` }, `판정 — ${v.label}`),
       " ", el("span", { class: "hint" }, v.line)),
 
@@ -514,7 +563,20 @@ function renderDoc(box, report) {
       el("td", { class: "num" }, o.steps.toLocaleString()),
       el("td", {}, flagBadge(o.first_diff == null, "비트 일치", "불일치"))))),
 
-    el("h2", {}, "7. DO-178C 목표 대응"),
+    el("h2", {}, "7. 파라미터 세트·비활성 코드"),
+    el("p", { class: "hint" },
+      "탑재 C는 구조 하나이고 값은 파라미터 이미지다 — 같은 실행 파일을 이미지만 바꿔 돌렸다. "
+      + "비활성 코드는 값으로만 생기며 아래 목록이 전부다."),
+    table(["세트", "파라미터 지문", "바꾼 값"], paramSetRows(report).map((s) => el("tr", {},
+      el("td", { style: "text-align:left" }, `${s.id} — ${s.title}`),
+      el("td", { class: "num" }, s.fp),
+      el("td", { style: "text-align:left" }, s.changes)))),
+    table(["노드", "비활성 경로", "덮은 세트"], deactivatedRows(report).map((r) => el("tr", {},
+      el("td", { class: "num" }, r.node),
+      el("td", { style: "text-align:left" }, r.title),
+      el("td", {}, r.covered)))),
+
+    el("h2", {}, "8. DO-178C 목표 대응"),
     dalTable(report),
   );
 

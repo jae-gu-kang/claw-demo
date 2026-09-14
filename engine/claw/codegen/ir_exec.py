@@ -28,6 +28,8 @@ _OP_FN = {
     "min2": lambda a, b: min(a, b),
     "gt": lambda a, b: 1.0 if a > b else 0.0,
     "add_const": lambda a, c: a + c,
+    "add_param": lambda a, c: a + c,  # 값이 이미지에 사는 것만 다르다 (emit_c)
+    "switch_param": lambda a, b, c: a if c != 0.0 else b,  # C 3항과 같은 판정 (emit_c)
     "sec_minus_1": lambda a: 1.0 / math.cos(a) - 1.0,
     "sec2_minus_1": lambda a: 1.0 / math.cos(a) ** 2 - 1.0,
 }

@@ -214,3 +214,40 @@ test("caseGroups — 유닛 순서로 묶고 제목을 단다", () => {
   assert.equal(g.find((x) => x.unit === "fcl").cases.length, 1);
   assert.equal(caseGroups(null).length, 0);
 });
+
+// ── v1.12 — 두 지문·파라미터 세트·비활성 경로 ─────────────────────────────
+
+import { deactivatedRows, identLine, paramSetRows } from "./verify.js";
+
+const REP112 = {
+  structure_fingerprint: "60ef218187ba1d01", param_fingerprint: "36e8f3b34dd1827c", engine: "0.2.0", dt: 0.01,
+  param_sets: [
+    { id: "request", title: "요청 기체", role: "request", param_fingerprint: "36e8f3b34dd1827c", changes: [] },
+    { id: "cover-1", title: "커버리지 세트", role: "coverage", param_fingerprint: "70a6650eed2e577e",
+      changes: [{ slot: "heading.ki", value: 0.4, why: "적분 경로를 켠다" }] },
+  ],
+  deactivated: [
+    { node: "ap_hdg_pid", kind: "integrator", title: "적분 경로", covered_by: ["cover-1"] },
+    { node: "sched_yaw_kp", kind: "point_table", title: "1점 표", covered_by: ["request"] },
+    { node: "mix_diff", kind: "zero_gain", title: "게인 0", covered_by: [] },
+  ],
+};
+
+test("신원 줄 — 두 지문, 옛 리포트는 (구) 단일 지문", () => {
+  assert.equal(identLine(REP112), "구조 지문 60ef218187ba1d01 · 파라미터 지문 36e8f3b34dd1827c · 엔진 claw 0.2.0 · 제어주기 0.01 s");
+  assert.match(identLine({ fingerprint: "9b992c84c6e5d4f8", engine: "0.1", dt: 0.01 }), /^형상 지문\(구\) 9b992c84c6e5d4f8/);
+});
+
+test("파라미터 세트 행 — 역할과 바꾼 값을 사람이 읽게", () => {
+  const rows = paramSetRows(REP112);
+  assert.deepEqual(rows.map((r) => r.role), ["요청 기체", "커버리지"]);
+  assert.equal(rows[0].changes, "—");
+  assert.equal(rows[1].changes, "heading.ki = 0.4 (적분 경로를 켠다)");
+  assert.deepEqual(paramSetRows({}), []);
+});
+
+test("비활성 경로 행 — 덮은 세트가 없으면 미커버로 드러난다", () => {
+  const rows = deactivatedRows(REP112);
+  assert.deepEqual(rows.map((r) => r.covered), ["cover-1", "요청 이미지(공용 헬퍼 경로)", "미커버"]);
+  assert.deepEqual(rows.map((r) => r.uncovered), [false, false, true]);
+});

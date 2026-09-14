@@ -37,10 +37,10 @@ def _cap_for(gain_name: str) -> float:
 
 
 def make_demo_fcl(with_schedule=True, with_limiter=True, autopilot=None, gain_tables=None,
-                  scas=None, mixer=None, alpha_margin=None):
+                  scas=None, mixer=None, alpha_margin=None, standard=False):
     return assemble_law(_example(), with_schedule=with_schedule, with_limiter=with_limiter,
                         autopilot=autopilot, gain_tables=gain_tables, scas=scas, mixer=mixer,
-                        alpha_margin=alpha_margin)
+                        alpha_margin=alpha_margin, standard=standard)
 
 
 def _legacy_axis(profile, axis):

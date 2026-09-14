@@ -1,7 +1,7 @@
-/* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
- * 그래프  : fcl
- * 지문    : 9b992c84c6e5d4f8
- * 엔진    : claw 0.2.0
+/* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR에서, 값은 파라미터 이미지에서 온다).
+ * 그래프    : fcl
+ * 구조 지문 : bc5d7dc7d4ee4c60
+ * 엔진      : claw 0.2.0
  * mix — 기능축 분할, 10개 블록
  */
 #include "fcl_mix.h"
@@ -9,7 +9,7 @@
 #include "claw_rt.h"
 
 void fcl_mix_step(const fcl_params_t *prm, fcl_state_t *sta,
-                  double ap_spd_sat_y, double scas_roll_sat_y, double scas_pitch_sat_y,
+                  double ap_thr_out_y, double scas_roll_sat_y, double scas_pitch_sat_y,
                   double scas_yaw_sat_y, double *out_mix_elevon_l, double *out_mix_elevon_r,
                   double *out_mix_rudder, double *out_mix_thr_l, double *out_mix_thr_r)
 {
@@ -35,13 +35,13 @@ void fcl_mix_step(const fcl_params_t *prm, fcl_state_t *sta,
     const double mix_diff_y = prm->mix_diff_k * mix_rudder_y;
 
     /* mix_thr_l_raw — Sum */
-    const double mix_thr_l_raw_y = ap_spd_sat_y - mix_diff_y;
+    const double mix_thr_l_raw_y = ap_thr_out_y - mix_diff_y;
 
     /* mix_thr_l — Saturation */
     const double mix_thr_l_y = claw_clip(mix_thr_l_raw_y, prm->mix_thr_l_lo, prm->mix_thr_l_hi);
 
     /* mix_thr_r_raw — Sum */
-    const double mix_thr_r_raw_y = ap_spd_sat_y + mix_diff_y;
+    const double mix_thr_r_raw_y = ap_thr_out_y + mix_diff_y;
 
     /* mix_thr_r — Saturation */
     const double mix_thr_r_y = claw_clip(mix_thr_r_raw_y, prm->mix_thr_r_lo, prm->mix_thr_r_hi);

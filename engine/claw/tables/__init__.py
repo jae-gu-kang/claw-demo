@@ -7,8 +7,9 @@
 """
 
 from claw.tables.loader import load_table_csv
+from claw.tables.point import PointTable
 from claw.tables.poly import PolyTable
 from claw.tables.stall import load_stall_boundary_csv
 from claw.tables.table import Table, TableError
 
-__all__ = ["Table", "PolyTable", "TableError", "load_table_csv", "load_stall_boundary_csv"]
+__all__ = ["Table", "PointTable", "PolyTable", "TableError", "load_table_csv", "load_stall_boundary_csv"]

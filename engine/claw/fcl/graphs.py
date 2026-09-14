@@ -20,7 +20,22 @@
 호출 규약이 생기지 않고 Python 실행에는 아무 영향이 없다. 반면 탑재 C는 그 이름표
 경계에서 `fcl_ap.c`·`fcl_scas.c`처럼 서브시스템별로 쪼개져 나온다 — Embedded Coder의
 `Function packaging: Nonreusable function`에 해당한다.
+
+## 표준 템플릿 (`standard=True`, v1.12)
+
+같은 템플릿이면 기체·설계값이 바뀌어도 **탑재 C가 바이트 단위로 같아야** 한다(07 §6). 분석 그래프는 값이 구조를 바꾼다 —
+k_rate = 0이면 레이트 경로가, washout_tau = 0이면 워시아웃 노드가, 선회 FF 계수 = 0이면 FF 노드가 사라지고, 스케줄하지
+않은 게인 자리는 룩업 대신 상수가 되며, α 보호마진·배분 예산은 C 리터럴(`add_const`)로 박힌다. 표준 그래프는 그 자리를
+전부 **값으로 가둔다**: 경로를 남기고 게인을 0으로, 워시아웃은 이미지 플래그 선택으로 건너뛰고(`switch_param`), 빈 자리는
+1점 표(`PointTable`), 기체값
+편차는 `add_param`(이미지의 파라미터). 전부 분석 그래프와 **비트 동일**하다 — 근거는 각 자리 주석에 있고 증명은 flight
+패리티(한 실행 파일 × 세 기체 이미지)다. 시뮬·해석·영향성은 분석 그래프를 그대로 쓴다(노드 수·속도·골든 불변).
+
+구조를 바꾸는 것은 요청의 **명시 옵션**뿐이다 — 제어주기, 스케줄 끔, 리미터 끔, 절점 표 대 다항 표(자리마다), 스케줄 축.
+바뀌면 구조 지문이 드러낸다. 기체 값이 없어서 구조가 달라지는 경우(배분 표 없음)는 `TemplateError`로 거부한다.
 """
+
+import math
 
 from claw.blocks.basic import Gain, Product, Saturation, Sum, Switch
 from claw.blocks.controllers import PID
@@ -29,8 +44,15 @@ from claw.blocks.lookup import LookupBlock, PolyBlock
 from claw.blocks.base import Block
 from claw.codegen import irtypes as it
 from claw.codegen.ir import Graph, Node, Op, grouped
-from claw.tables import PolyTable
+from claw.tables import PointTable, PolyTable
 from claw.codegen.ir_exec import GraphRunner
+
+# 표준 템플릿 id — 프로파일 `law.template`이 이것이어야 표준 그래프로 조립한다 (fcl/assemble.py)
+STANDARD_TEMPLATE = "delta_elevon_v1"
+
+
+class TemplateError(ValueError):
+    """표준 템플릿으로 조립할 수 없는 형상 — 기체 값이 없어 구조가 달라지는 경우 (서버 422)."""
 
 _SCHEDULABLE = ("kp", "ki", "k_rate")
 _SCAS_GROUPS = ("pitch", "roll", "yaw")
@@ -163,6 +185,7 @@ def scas_axis_nodes(
     enable=None,
     pid_on_disable=None,
     limit_ports=None,
+    standard=False,
 ):
     """SCAS 한 축(`fcl/scas.py:26`)의 노드 목록 → (nodes, 출력 노드 id).
 
@@ -175,6 +198,12 @@ def scas_axis_nodes(
     (오토파일럿의 속도·헤딩 축이 그렇다 — 죽은 곱셈을 탑재 코드에 내지 않는다).
     `damp_src`는 rate 항을 바깥에서 이미 계산한 경우 — 고도 축은 그 항이 모드
     영역 안에 있어야 해서(비활성 시 0) 축 밖에서 만들어 넣는다.
+
+    `standard=True`(표준 템플릿)면 rate 입력이 있는 축은 **값과 무관하게** rate 경로와 워시아웃을 둔다. k_rate = 0이면
+    감쇠항이 ±0.0이라 PID 판정(raw + ±0.0 = raw)과 합(y + ±0.0)이 비트로 같다. 워시아웃 노드 뒤에는 이미지 플래그
+    선택(`switch_param`)이 붙어 washout_tau = 0이면 **원 신호를 그대로** 고른다 — 곱(0·u)으로 끄면 NaN 한 번이 워시아웃
+    상태에 굳어 출력이 리셋 전까지 NaN이 되지만(분석 그래프는 다음 스텝에 회복한다), 선택이면 쓰이지 않는 상태의 NaN이
+    출력에 실리지 않는다(v1.12 리뷰). 꺼진 워시아웃의 tau는 ∞(p = 1) — 쓰이지 않는 계수다.
     """
     ports = dict(gain_ports or {})
     bad = set(ports) - set(_SCHEDULABLE)
@@ -190,16 +219,23 @@ def scas_axis_nodes(
 
     common = {"enable": enable} if enable is not None else {}
     nodes = []
-    has_rate = damp_src is not None or "k_rate" in ports or k_rate != 0.0
+    has_rate = (damp_src is not None or "k_rate" in ports or k_rate != 0.0
+                or (standard and rate_src is not None))
     if has_rate and damp_src is None and rate_src is None:
         raise ValueError(f"{prefix}: rate 경로가 있는데 rate_src가 없다")
 
     rate_ref = rate_src
-    if has_rate and damp_src is None and washout_tau > 0:
+    if has_rate and damp_src is None and (washout_tau > 0 or standard):
+        # 표준 템플릿의 꺼진 워시아웃은 tau = ∞(쓰이지 않는 계수) — 출력은 아래 선택이 원 신호로 돌린다
+        tau = washout_tau if washout_tau > 0 else math.inf
         nodes.append(
-            Node(nm("wo"), Washout, inputs=(rate_src,), params={"tau": washout_tau}, **common)
+            Node(nm("wo"), Washout, inputs=(rate_src,), params={"tau": tau}, **common)
         )
         rate_ref = nm("wo")
+        if standard:
+            nodes.append(Op(nm("wo_sel"), "switch_param", inputs=(nm("wo"), rate_src),
+                            value=1.0 if washout_tau > 0 else 0.0, **common))
+            rate_ref = nm("wo_sel")
 
     # 감쇠항을 **PID보다 먼저** 만든다 — PID가 안티와인드업 판정에 쓸 수 있어야 한다.
     damp = None
@@ -318,7 +354,7 @@ def scas_axis_graph(name, *, kp, ki, k_rate, out_lo, out_hi, washout_tau=0.0, sc
 
 
 def _roll_budget_nodes(prefix, *, phi_cmd_src, mach_src, elevon_hi, trim_table,
-                       resv_frac):
+                       resv_frac, standard=False):
     """선회 하중 → 피치 몫(R)을 먼저 떼고 남은 것이 롤 예산 [rad].
 
     R = clip(δe_trim(mach) · n, 0, resv_frac · B),  n = 1/cos φ_cmd (선회 하중배수)
@@ -348,10 +384,14 @@ def _roll_budget_nodes(prefix, *, phi_cmd_src, mach_src, elevon_hi, trim_table,
 
     φ_cmd는 ±phi_max로 잘려 있고 그 한계가 π/2 미만으로 강제되므로 sec가 발산하지
     않는다 (autopilot_nodes 선회 FF가 기대는 같은 가드).
+
+    예산 B는 기체 한계에서 오는 값이라 표준 템플릿에서는 `add_param`(이미지)이다 — 1.0(하중 n = 증분 + 1)은 식의 일부라
+    템플릿 상수(`add_const`)로 남는다.
     """
     def nm(s):
         return _pre(prefix, s)
 
+    budget_op = "add_param" if standard else "add_const"
     if not elevon_hi > 0.0:
         raise ValueError(f"elevon_hi는 양수여야 한다: {elevon_hi}")
     if not 0.0 < resv_frac < 1.0:
@@ -364,13 +404,13 @@ def _roll_budget_nodes(prefix, *, phi_cmd_src, mach_src, elevon_hi, trim_table,
         Node(nm("resv"), Saturation, inputs=(nm("resv_raw"),),
              params={"lo": 0.0, "hi": resv_frac * elevon_hi}),
         Node(nm("resv_neg"), Gain, inputs=(nm("resv"),), params={"k": -1.0}),
-        Op(nm("roll_hi"), "add_const", inputs=(nm("resv_neg"),), value=elevon_hi),
+        Op(nm("roll_hi"), budget_op, inputs=(nm("resv_neg"),), value=elevon_hi),
         Node(nm("roll_lo"), Gain, inputs=(nm("roll_hi"),), params={"k": -1.0}),
     ]
     return nodes, {"out_lo": nm("roll_lo"), "out_hi": nm("roll_hi")}
 
 
-def _pitch_budget_nodes(prefix, *, da_src, elevon_hi):
+def _pitch_budget_nodes(prefix, *, da_src, elevon_hi, standard=False):
     """롤이 **실제로 쓴** δa → 피치에 남는 권한 = elevon_hi − |δa|.
 
     수요(δa 명령)가 아니라 배분 후 값을 쓴다 — 롤이 못 쓴 몫까지 피치가 갖는다.
@@ -382,13 +422,14 @@ def _pitch_budget_nodes(prefix, *, da_src, elevon_hi):
         Node(nm("da_neg"), Gain, inputs=(da_src,), params={"k": -1.0}),
         # −|δa| = min(δa, −δa) — IR에 abs가 없어 min2로 만든다
         Op(nm("da_nabs"), "min2", inputs=(da_src, nm("da_neg"))),
-        Op(nm("pitch_hi"), "add_const", inputs=(nm("da_nabs"),), value=elevon_hi),
+        Op(nm("pitch_hi"), "add_param" if standard else "add_const", inputs=(nm("da_nabs"),),
+           value=elevon_hi),
         Node(nm("pitch_lo"), Gain, inputs=(nm("pitch_hi"),), params={"k": -1.0}),
     ]
     return nodes, {"out_lo": nm("pitch_lo"), "out_hi": nm("pitch_hi")}
 
 
-def scas3_nodes(prefix, *, pitch, roll, yaw, srcs, gain_ports=None, alloc=None):
+def scas3_nodes(prefix, *, pitch, roll, yaw, srcs, gain_ports=None, alloc=None, standard=False):
     """`fcl/scas.py:102` — (θ_cmd, φ_cmd, 측정) → 믹싱 전 축 명령 (de, da, dr).
 
     피치는 θ 오차 + q, 롤은 wrap(φ 오차) + p, 요는 **−β** + washout(r)이다
@@ -413,7 +454,7 @@ def scas3_nodes(prefix, *, pitch, roll, yaw, srcs, gain_ports=None, alloc=None):
     # 유일한 길이다. 축끼리는 독립이라 순서가 결과를 바꾸지 않는다(배분 자체를 빼면).
     limits = {}
     if alloc is not None:
-        budget_nodes, limits["roll"] = _roll_budget_nodes(nm("alloc"), **alloc)
+        budget_nodes, limits["roll"] = _roll_budget_nodes(nm("alloc"), standard=standard, **alloc)
         nodes += budget_nodes
     order = (("roll", roll, nm("roll_err"), srcs["p"]),
              ("pitch", pitch, nm("pitch_err"), srcs["q"]),
@@ -425,13 +466,13 @@ def scas3_nodes(prefix, *, pitch, roll, yaw, srcs, gain_ports=None, alloc=None):
     for group, cfg, err, rate in order:
         axis_nodes, out = scas_axis_nodes(
             nm(group), err_src=err, rate_src=rate,
-            gain_ports=ports.get(group), limit_ports=limits.get(group), **cfg,
+            gain_ports=ports.get(group), limit_ports=limits.get(group), standard=standard, **cfg,
         )
         nodes += axis_nodes
         outs[group] = out
         if group == "roll" and alloc is not None:
             pitch_nodes, limits["pitch"] = _pitch_budget_nodes(
-                nm("alloc"), da_src=out, elevon_hi=alloc["elevon_hi"])
+                nm("alloc"), da_src=out, elevon_hi=alloc["elevon_hi"], standard=standard)
             nodes += pitch_nodes
     return nodes, outs
 
@@ -501,6 +542,7 @@ def autopilot_nodes(
     theta_lo, theta_hi, phi_max,
     k_pitch_turn, k_thr_turn,
     theta_hi_table=None,
+    standard=False,
 ):
     """`fcl/autopilot.py:136` — 속도·고도·헤딩 PI + 명령필터 + 선회 피드포워드.
 
@@ -512,6 +554,8 @@ def autopilot_nodes(
 
     선회 FF 계수가 0이면 항과 그 뒤 재클램프가 통째로 사라진다 — 축 포화가 이미
     같은 한계로 잘라 두었으므로 결과가 같고, 죽은 항을 탑재 코드에 내지 않는다.
+    표준 템플릿(`standard=True`)은 계수가 0이어도 노드를 둔다 — θ + 0·(sec − 1)은 θ ± 0.0이고, 재클램프는 θ가 이미 같은
+    한계로 잘려 있어 항등이라 비트로 같다(값이 구조를 바꾸지 않게, 모듈 머리말).
 
     ## θ 상한은 상수가 아니라 표일 수 있다 (`theta_hi_table`)
 
@@ -651,7 +695,7 @@ def autopilot_nodes(
     theta_axis = nm("theta_src")
 
     theta_out = theta_axis
-    if k_pitch_turn != 0.0:  # 01 §3.3.1 델타윙 선회 고도손실 보상
+    if k_pitch_turn != 0.0 or standard:  # 01 §3.3.1 델타윙 선회 고도손실 보상
         nodes += [
             Op(nm("ff_p_raw"), "sec_minus_1", inputs=(phi_cmd,)),
             Node(nm("ff_p"), Gain, inputs=(nm("ff_p_raw"),), params={"k": k_pitch_turn}),
@@ -678,7 +722,7 @@ def autopilot_nodes(
     nodes += spd_nodes
 
     thr_out = thr_axis
-    if k_thr_turn != 0.0:
+    if k_thr_turn != 0.0 or standard:
         nodes += [
             Op(nm("ff_t_raw"), "sec2_minus_1", inputs=(phi_cmd,)),
             Node(nm("ff_t"), Gain, inputs=(nm("ff_t_raw"),), params={"k": k_thr_turn}),
@@ -788,17 +832,18 @@ def gain_schedule_graph(name="gain_schedule", *, tables, filter_tau):
 # ── α 리미터 ──────────────────────────────────────────────────────────────
 
 
-def alpha_limiter_nodes(prefix, *, stall_table, margin, srcs):
+def alpha_limiter_nodes(prefix, *, stall_table, margin, srcs, standard=False):
     """`fcl/limiter.py:44` — θ_cmd ≤ θ + (α_max − α), α_max = α_stall(mach) − margin.
 
-    실속 마진(α_max − α)은 엔벨로프 감시(02 §6.1)가 소비하므로 함께 낸다.
+    실속 마진(α_max − α)은 엔벨로프 감시(02 §6.1)가 소비하므로 함께 낸다. 표준 템플릿에서 마진은 `add_param`(이미지)이다.
     """
     def nm(s):
         return _pre(prefix, s)
 
     nodes = [
         Node(nm("stall"), LookupBlock, inputs=(srcs["mach"],), params={"table": stall_table}),
-        Op(nm("alpha_max"), "add_const", inputs=(nm("stall"),), value=-margin),
+        Op(nm("alpha_max"), "add_param" if standard else "add_const", inputs=(nm("stall"),),
+           value=-margin),
         Node(nm("a_margin"), Sum, inputs=(nm("alpha_max"), srcs["alpha"]),
              params={"signs": (1.0, -1.0)}),
         Node(nm("cap"), Sum, inputs=(srcs["theta"], nm("a_margin")),
@@ -913,6 +958,25 @@ def mixer_graph(name="mixer", **params):
 
 # ── 최상위 조립 ───────────────────────────────────────────────────────────
 
+
+def _standard_tables(tables, *, autopilot, scas_axes):
+    """스케줄 표 + 빈 자리의 1점 표 — 표준 템플릿은 카탈로그(`SCHEDULABLE`) 16자리를 전부 룩업으로 둔다.
+
+    빈 자리의 값은 분석 그래프가 그 자리에 박았을 **바로 그 상수**다(SCAS 축 cfg, 자동조종 cfg — `AP_PARAM`이 이름을
+    잇는다). 축은 마하 — 1점 표는 질의점과 무관하므로 어느 축이든 값이 같고, 마하 필터는 스케줄이 켜진 기체에 이미 있다.
+    """
+    out = dict(tables)
+    for group, keys in SCHEDULABLE.items():
+        for key in keys:
+            name = f"{group}.{key}"
+            if name in out:
+                continue
+            value = (scas_axes[group][key] if group in _SCAS_GROUPS
+                     else autopilot[AP_PARAM[(group, key)]])
+            out[name] = PointTable("mach", value, name=name)
+    return out
+
+
 FCL_INPUTS = (
     "nav_valid",
     "theta", "phi", "psi", "p", "q", "r", "V", "alpha", "beta", "h", "hdot", "mach",
@@ -934,6 +998,7 @@ def fcl_graph(
     theta_hi_table=None,
     gain_tables=None,
     filter_tau=0.5,
+    standard=False,
 ):
     """`fcl/law.py:85` 최상위 — 게인 스케줄 → 오토파일럿 → α 리미터 → SCAS → 믹서.
 
@@ -944,11 +1009,21 @@ def fcl_graph(
 
     게인 스케줄·α 리미터는 옵션이며 없으면 그 경로가 아예 생기지 않는다
     (`with_schedule`·`with_limiter` 조합이 구조 분기가 아니라 그래프 차이가 된다).
+
+    `standard=True`는 표준 템플릿이다(모듈 머리말) — 스케줄이 켜져 있으면 카탈로그의 16자리를 전부 룩업으로 두고 표를 안 받은
+    자리는 설계 상수의 1점 표를 물린다. 배분 표가 없으면 구조가 달라지므로 `TemplateError`다.
     """
     src = {u: u for u in FCL_INPUTS}
     nodes = []
+    if standard and alloc_trim_table is None:
+        raise TemplateError(
+            f"{name}: 표준 템플릿은 엘레본 배분 표(δe_trim)가 있어야 한다 — 없으면 배분 노드가 빠져 탑재 C 구조가 달라진다. "
+            "기체 탭에서 δe_trim을 도출한다"
+        )
 
     ap_ports, scas_ports = {}, {}
+    if gain_tables and standard:
+        gain_tables = _standard_tables(gain_tables, autopilot=autopilot, scas_axes=scas_axes)
     if gain_tables:
         sched_nodes, gains = gain_schedule_nodes(
             "sched", tables=gain_tables, filter_tau=filter_tau,
@@ -977,7 +1052,7 @@ def fcl_graph(
                     f"(α_stall − margin {alpha_margin})"
                 )
     ap_nodes, ap_out = autopilot_nodes("ap", srcs=src, gain_ports=ap_ports,
-                                       theta_hi_table=theta_hi_table, **autopilot)
+                                       theta_hi_table=theta_hi_table, standard=standard, **autopilot)
     nodes += grouped(ap_nodes, "ap")
 
     theta_cmd = ap_out["theta_cmd"]
@@ -985,6 +1060,7 @@ def fcl_graph(
         lim_nodes, lim_out = alpha_limiter_nodes(
             "lim", stall_table=stall_table, margin=alpha_margin,
             srcs={"theta_cmd": theta_cmd, "theta": "theta", "alpha": "alpha", "mach": "mach"},
+            standard=standard,
         )
         nodes += grouped(lim_nodes, "lim")
         theta_cmd = lim_out["theta_cmd"]
@@ -1018,6 +1094,7 @@ def fcl_graph(
         srcs={**src, "theta_cmd": theta_cmd, "phi_cmd": ap_out["phi_cmd"]},
         gain_ports=scas_ports,
         alloc=alloc,
+        standard=standard,
         **scas_axes,
     )
     nodes += grouped(scas_nodes, "scas")

@@ -172,7 +172,8 @@ def test_catalog_design_index_points_at_the_design_mach(client):
 
 
 def test_catalog_slot_subset_runs_and_changes_flight_code(client):
-    """자리 선택은 표시 설정이 아니라 형상이다 — 탑재 C의 룩업 수와 지문이 바뀐다."""
+    """자리 선택은 표시 설정이 아니라 설계 결정이다 — 탑재 C는 표준 템플릿이라(v1.12) 구조는 그대로이고 이미지 값이
+    바뀐다: 고른 자리는 카탈로그 표, 뺀 자리는 설계 상수의 1점 표."""
     cat = {s["name"]: s for s in client.get("/api/gains/catalog").json()["slots"]}
     base = client.post("/api/codegen/flight", json={}).json()
     subset = {n: cat[n]["table"] for n in ("pitch.kp", "roll.kp", "yaw.k_rate")}
@@ -183,21 +184,22 @@ def test_catalog_slot_subset_runs_and_changes_flight_code(client):
     def sched(body):
         return next(f["text"] for f in body["files"] if f["name"] == "fcl_sched.c")
 
-    assert sched(base).count("claw_lookup1d") == 6
-    assert sched(got).count("claw_lookup1d") == 3
-    assert got["fingerprint"] != base["fingerprint"]
-    # 요축 레이트 게인이 상수에서 신호가 된다
-    scas = next(f["text"] for f in got["files"] if f["name"] == "fcl_scas.c")
-    assert "sched_yaw_k_rate" in scas
+    assert sched(base).count("claw_lookup1d") == sched(got).count("claw_lookup1d") == 16  # 카탈로그 16자리 전부
+    assert got["files"] == base["files"] and got["structure_fingerprint"] == base["structure_fingerprint"]
+    assert got["param_fingerprint"] != base["param_fingerprint"]
+    # 요축 레이트 게인이 설계 상수(1점 표)에서 카탈로그 표가 된다 — 코드가 아니라 이미지에서
+    n = len(cat["yaw.k_rate"]["table"]["axes"]["mach"])
+    assert f"sched_yaw_k_rate — 절점 표 n = {n}\n" in got["param_image"]["listing"]
+    assert "sched_yaw_k_rate — 절점 표 n = 1\n" in base["param_image"]["listing"]
 
 
 def test_schedule_off_drops_the_whole_subsystem(client):
-    """'전부 끔' = with_schedule=False — 룩업도 필터 상태도 남지 않는다."""
+    """'전부 끔' = with_schedule=False — 룩업도 필터 상태도 남지 않는다. 명시 구조 옵션이라 구조 지문이 움직인다."""
     off = client.post("/api/codegen/flight", json={"with_schedule": False}).json()
     names = {f["name"] for f in off["files"]}
     assert "fcl_sched.c" not in names and "fcl_sched.h" not in names
-    assert off["fingerprint"] != client.post("/api/codegen/flight", json={}).json()[
-        "fingerprint"]
+    assert off["structure_fingerprint"] != client.post("/api/codegen/flight", json={}).json()[
+        "structure_fingerprint"]
 
 
 def test_structurally_impossible_slot_rejected(client):

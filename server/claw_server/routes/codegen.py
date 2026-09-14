@@ -5,18 +5,23 @@
 전부 들어 있다. 산출물 정본은 `flight/gen/`(커밋됨)이며 이 라우트는 같은
 생성기를 **현재 편집 중인 형상**으로 돌려 보여 준다.
 
-**조립을 재현하지 않는다.** `assemble_law`(기체 프로파일) → `law.init(dt)` → `law.runner`가
+**구조와 값이 갈린다 (v1.12).** 생성 C에는 구조만 있고, 값은 파라미터 이미지(`param_image`)로 따로
+나간다 — 같은 템플릿의 기체는 C 파일이 바이트 동일하고(구조 지문 하나) 이미지만 다르다(파라미터 지문).
+응답에 이미지(base64)와 사람이 읽는 목록을 함께 싣는다.
+
+**조립을 재현하지 않는다.** `assemble_law(standard=True)`(기체 프로파일) → `law.init(dt)` → `law.runner`가
 `flight/generate.py`와 완전히 같은 경로다. 여기서 `fcl_graph(...)`를 따로
 부르면 게인·타면 한계·마진이 또 한 곳에 적히고 한쪽만 고치면 조용히 어긋난다
 (02 §5.5 중복 정의 금지 — 실제로 generate.py가 그 상태였다가 통합됨).
 """
 
+import base64
 import math
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
-from claw.codegen import emit_c, emit_runtime
+from claw.codegen import emit_c, emit_runtime, param_image
 from claw.fcl.assemble import assemble_law
 from claw_server.refs import ProfileRef, profile_echo, resolve_profile
 from claw.params.registry import REGISTRY
@@ -28,7 +33,7 @@ router = APIRouter(tags=["codegen"])
 # "어디부터 보나"가 곧 사용성이다 (역할축은 MATLAB Embedded Coder 대응).
 ROLE_ENTRY = "진입점"
 ROLE_TYPES = "자료형"
-ROLE_DATA = "파라미터 데이터"
+ROLE_LOADER = "파라미터 로더"
 ROLE_TOP = "조립부"
 ROLE_PART = "서브시스템"
 ROLE_RT = "공용 런타임"
@@ -86,19 +91,19 @@ def _role(name: str, base: str) -> str:
     stem = name.rsplit(".", 1)[0]
     if stem == f"{base}_types":
         return ROLE_TYPES
-    if stem == f"{base}_data":
-        return ROLE_DATA
+    if stem == f"{base}_params":
+        return ROLE_LOADER
     if stem == base:
         return ROLE_ENTRY if name.endswith(".h") else ROLE_TOP
     return ROLE_PART
 
 
 def _order_key(name: str, base: str, groups: list[str]) -> tuple:
-    """읽는 순서: 진입점 → 자료형 → 조립부 → 서브시스템(실행 순서) → 데이터 → 공용."""
+    """읽는 순서: 진입점 → 자료형 → 조립부 → 서브시스템(실행 순서) → 파라미터 로더 → 공용."""
     role = _role(name, base)
     rank = {
         ROLE_ENTRY: 0, ROLE_TYPES: 1, ROLE_TOP: 2,
-        ROLE_PART: 3, ROLE_DATA: 4, ROLE_RT: 5,
+        ROLE_PART: 3, ROLE_LOADER: 4, ROLE_RT: 5,
     }[role]
     sub = 0
     if role == ROLE_PART:
@@ -114,6 +119,7 @@ def build_flight_law(req: FlightCodeIn, profile):
 
     구성 오류(미정의 게인 키·범위 이탈 등)는 엔진이 ValueError로 내고 422가 된다.
     조립이 두 곳에 적히면 "화면에 보인 코드"와 "검증한 코드"가 갈라진다 (02 §5.5).
+    표준 템플릿으로 조립한다(v1.12) — 템플릿으로 낼 수 없는 기체(배분 표 없음 등)는 TemplateError(ValueError)라 422다.
     """
     dt = 1.0 / req.control_hz
     try:
@@ -130,6 +136,7 @@ def build_flight_law(req: FlightCodeIn, profile):
             ),
             scas=build_scas(req.scas),
             gain_tables=gain_tables,
+            standard=True,
         ).init(dt)
     except (ValueError, TypeError) as e:  # 엔진 구성 검증 → 422 (sim.py와 같은 정책)
         raise HTTPException(status_code=422, detail=str(e))
@@ -137,7 +144,7 @@ def build_flight_law(req: FlightCodeIn, profile):
 
 @router.post("/codegen/flight")
 def flight_code(req: FlightCodeIn, request: Request) -> dict:
-    """현재 형상의 탑재 제어법칙 C — {파일명, 역할, 줄수, 본문} 목록."""
+    """현재 형상의 탑재 제어법칙 C — {파일명, 역할, 줄수, 본문} 목록 + 파라미터 이미지."""
     dt = 1.0 / req.control_hz
     profile = resolve_profile(request, req.profile)
     law = build_flight_law(req, profile)
@@ -146,16 +153,31 @@ def flight_code(req: FlightCodeIn, request: Request) -> dict:
     module = emit_c(runner.graph, runner)
     files = dict(module.files)
     files.update(emit_runtime(module.helpers))
+    try:
+        image = param_image.pack(module, lineage=profile.fingerprint)
+    except ValueError as e:  # 의미 검사 실패(lo > hi 등) — 이미지를 만들지 않는다
+        raise HTTPException(status_code=422, detail=str(e))
 
     base = runner.graph.name
     groups = [g for g, _nodes in runner.graph.partitions]
     names = sorted(files, key=lambda n: _order_key(n, base, groups))
+    stem = profile.id + (f"-{profile.variant}" if profile.variant else "")
     return {
         "artifact": base,
         "dt": dt,
-        "fingerprint": module.fingerprint,
+        "structure_fingerprint": module.structure_fingerprint,
+        "param_fingerprint": module.param_fingerprint,
+        "template": law.template,
         "groups": groups,
         "profile": profile_echo(profile),
+        "param_image": {
+            "name": f"{stem}.bin",
+            "bytes": len(image),
+            "crc32": param_image.unpack(image, module)["crc32"],
+            "checks": param_image.checks(module),
+            "listing": param_image.listing(module, image, title=f"{base} — {profile.name} ({stem})"),
+            "base64": base64.b64encode(image).decode("ascii"),
+        },
         "files": [
             {
                 "name": n,

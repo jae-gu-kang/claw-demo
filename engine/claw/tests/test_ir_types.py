@@ -264,7 +264,8 @@ def test_기대_범위는_포화를_만들지_않는다():
     def clips(m):
         return sum(f.count("claw_clip") for f in m.files.values())
 
-    assert clips(plain) == 2, "클램프 자리를 못 찾았다 — 세는 이름이 바뀌었나(0 == 0은 공허하다)"
+    # PID 출력·적분기 클램프·축 포화 — 적분기는 ki 값과 무관하게 늘 있다(v1.12, emit_c _emit_pid)
+    assert clips(plain) == 3, "클램프 자리를 못 찾았다 — 세는 이름이 바뀌었나(0 == 0은 공허하다)"
     assert clips(plain) == clips(typed), "expected_range가 클램프를 낳았다"
     assert plain.files == typed.files
 
@@ -275,27 +276,32 @@ def test_없는_kind도_백엔드로_새지_않는다():
 
 
 def test_지문은_타입_선언에_반응하지_않는다():
-    assert _module(_graph()).fingerprint == _module(_graph(DECLARED)).fingerprint
+    plain, typed = _module(_graph()), _module(_graph(DECLARED))
+    assert plain.structure_fingerprint == typed.structure_fingerprint
+    assert plain.param_fingerprint == typed.param_fingerprint
 
 
 def test_지문_payload는_타입_항목을_품지_않는다(monkeypatch):
-    """나중에 누가 무심코 타입을 넣으면 여기서 죽는다 — 지문은 형상의 신원이다."""
-    seen = {}
+    """나중에 누가 무심코 타입을 넣으면 여기서 죽는다 — 지문은 형상의 신원이다.
+
+    지문은 둘이다(v1.12): 구조 지문 payload는 {생성 파일 텍스트, 헬퍼 본문}뿐이고(타입은 텍스트를 안 바꾼다 — 위 바이트
+    동일 테스트), 파라미터 지문 payload는 이미지에 실리는 필드 이름뿐이다.
+    """
+    seen = []
 
     def spy(payload):
-        seen.update(payload)
+        seen.append(dict(payload))
         return "0" * 16
 
     import importlib
 
     monkeypatch.setattr(importlib.import_module("claw.codegen.emit_c"),
                         "canonical_hash", spy)
-    _module(_graph(DECLARED))
-    kinds = {k.split(".")[0] for k in seen}
-    allowed = {"param", "array", "dt", "structure", "outputs", "inputs", "enable"}
-    assert kinds <= allowed, f"지문 payload에 새 항목이 생겼다: {sorted(kinds - allowed)}"
-    # 공허하지 않게 — 스파이가 실제로 payload를 봤는지 함께 확인한다
-    assert {"dt", "structure", "inputs", "outputs"} <= kinds
+    module = _module(_graph(DECLARED))
+    structure = [p for p in seen if set(p) == {"files", "helpers"}]
+    params = [p for p in seen if p not in structure]
+    assert len(structure) == 1 and len(params) == 1, f"지문 payload가 예상과 다르다: {[sorted(p) for p in seen]}"
+    assert set(params[0]) == set(module.values), "파라미터 지문 payload에 값 필드 밖의 항목이 생겼다"
 
 
 def test_두_백엔드는_타입_모듈을_임포트하지_않는다():
@@ -440,7 +446,8 @@ def test_실제_fcl_그래프도_생성_C를_한_바이트도_바꾸지_않는�
     assert len(typed.signal_types) == 40, "선언 수가 바뀌었다 — 아래 대조의 무게가 달라진다"
     plain = Graph(typed.name, typed.inputs, typed.nodes, typed.outputs, typed.enable)
     assert _module(plain).files == _module(typed).files
-    assert _module(plain).fingerprint == _module(typed).fingerprint
+    assert _module(plain).structure_fingerprint == _module(typed).structure_fingerprint
+    assert _module(plain).param_fingerprint == _module(typed).param_fingerprint
 
 
 def test_리미터의_cap은_자세각과_공력_마진의_합이다():

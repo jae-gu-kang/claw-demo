@@ -36,7 +36,7 @@ _COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
 _STRING = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'')
 # 인식하는 반환형. 여기 없는 형으로 나온 함수는 **인벤토리에서 조용히 사라지고**,
 # 그러면 복잡도·재귀 콜그래프·커버리지 함수 행이 그 함수를 통째로 빼먹는다.
-_RETURN_TYPES = ("double", "void", "int")
+_RETURN_TYPES = ("double", "void", "int", "uint32_t", "uint64_t")  # 고정폭 둘은 파라미터 로더 헬퍼(v1.12)
 # 교대는 **왼쪽 우선**이라 긴 것부터 세운다 — `("long", "long long")` 순이면 `long long f(`가
 # `long`에 물려 `\s*\(`에서 실패하고, 그 함수가 인벤토리에서 사라진다(위 사고의 재발이다).
 _FN_DEF = re.compile(
@@ -119,7 +119,7 @@ def _find_recursion(fns: dict) -> list:
 
 
 def _mutable_globals(text: str) -> list:
-    """파일 스코프의 비-const 정의 — 생성 .c에는 const 파라미터 하나뿐이어야 한다."""
+    """파일 스코프의 비-const 정의 — 생성 .c에는 가변 전역이 없어야 한다(파라미터는 호출자가 이미지에서 적재해 소유한다)."""
     clean = strip_comments_strings(text)
     hits, depth = [], 0
     for k, raw in enumerate(clean.split("\n"), start=1):
@@ -174,7 +174,7 @@ def analyze(files: dict) -> dict:
              "검사한 규칙만 말한다."),
         rule("recursion", "재귀 없음 (직·간접 콜그래프)", recursion,
              "스택 상한을 정적으로 셀 수 있는 전제 (DO-178C 스택 해석 논점)."),
-        rule("globals", "가변 전역 없음 (파라미터는 const, 상태는 포인터 전달)",
+        rule("globals", "가변 전역 없음 (파라미터·상태는 호출자 소유 — 포인터 전달)",
              global_hits,
              "재진입·초기화 순서 문제의 원천 차단 — 상태 소유는 통합 계층 하나다."),
     ]

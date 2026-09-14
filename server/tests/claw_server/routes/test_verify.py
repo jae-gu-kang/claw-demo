@@ -28,7 +28,7 @@ def test_리포트가_저장되고_요약과_판정이_실린다(client, wait_jo
     assert body["kind"] == "verify_flight"
     rep = body["report"]
     assert [r["key"] for r in rep["summary"]] == [
-        "static", "compile", "paths", "equiv", "coverage"]
+        "static", "compile", "paths", "equiv", "params", "coverage"]
     assert rep["verdict"] in ("pass", "fail", "pass_with_skips")
     # DAL A 증적 구획 — 화면·보고서가 소비하는 것들이 전부 실려야 한다
     assert rep["dal"] and rep["cases"] and rep["units"]
@@ -38,7 +38,9 @@ def test_리포트가_저장되고_요약과_판정이_실린다(client, wait_jo
     meta = next(m for m in client.get("/api/results").json() if m["id"] == rid)
     assert meta["kind"] == "verify_flight"
     assert meta["verdict"] == rep["verdict"]
-    assert meta["fingerprint"] == rep["fingerprint"]
+    assert meta["structure_fingerprint"] == rep["structure_fingerprint"]
+    assert meta["param_fingerprint"] == rep["param_fingerprint"]
+    assert "fingerprint" not in meta  # 옛 단일 지문은 폐기 — 화면은 옛 결과만 "구 형상 지문"으로 읽는다
 
 
 def test_환경에_정직하다_컴파일러_유무(client, wait_job):
@@ -51,7 +53,7 @@ def test_환경에_정직하다_컴파일러_유무(client, wait_job):
         assert by["equiv"]["status"] == "pass", rep["equivalence"]
         assert all(c["status"] == "pass" for c in rep["cases"])
         units = {u["unit"]: u for u in rep["units"]}
-        assert set(units) == {"sched", "ap", "lim", "scas", "mix", "fcl", "claw_rt"}
+        assert set(units) == {"sched", "ap", "lim", "scas", "mix", "fcl", "params", "claw_rt"}
         assert all(u["cases"]["passed"] == u["cases"]["total"] for u in rep["units"])
         if rep["coverage"]["status"] == "measured":
             assert rep["mcdc"]["status"] == "measured"
@@ -63,11 +65,12 @@ def test_환경에_정직하다_컴파일러_유무(client, wait_job):
 
 
 def test_지문이_codegen_라우트와_같다(client, wait_job):
-    """검증한 코드 = Autocode 탭이 보여 준 코드 — 조립이 갈라지면 지문이 갈라진다."""
+    """검증한 코드 = Autocode 탭이 보여 준 코드 — 조립이 갈라지면 지문이 갈라진다 (구조·값 둘 다)."""
     edited = {"autopilot": {"kp_alt": 0.008}}
     code = client.post("/api/codegen/flight", json=edited).json()
     _rid, body = _run(client, wait_job, **edited)
-    assert body["report"]["fingerprint"] == code["fingerprint"]
+    assert body["report"]["structure_fingerprint"] == code["structure_fingerprint"]
+    assert body["report"]["param_fingerprint"] == code["param_fingerprint"]
 
 
 def test_구성_오류는_202_전에_422(client):

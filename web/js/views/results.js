@@ -7,6 +7,7 @@
 그 답 위에 다른 것을 얹지 않는다.
 */
 
+import { lineageText } from "../lib/lineage.js";
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
@@ -179,7 +180,9 @@ export function render() {
             "지문(fingerprint)은 산출물 계보 키 (02 §2.4) — ",
             el("b", {}, "현재 클라이언트 자기신고"),
             "다. 같은 지문이 곧 같은 형상이라는 보장이 아직 없다는 뜻이고, ",
-            "파라미터 관리 계층(02 §5.5) 결선 시 엔진 발급으로 전환 예정이다."),
+            "파라미터 관리 계층(02 §5.5) 결선 시 엔진 발급으로 전환 예정이다. ",
+            "탑재 C 검증 결과는 엔진이 발급한 지문 둘을 싣는다(v1.12) — 구조 지문(생성 C가 바이트 동일한가)과 ",
+            "파라미터 지문(장입 이미지의 값). 그 전 결과의 단일 지문은 「구 형상 지문」으로 표시한다."),
         ] },
     ],
   });
@@ -279,7 +282,7 @@ function renderList(box, list, all, onToggle, brief) {
       el("td", {}, aircraftCell(m.profile)),
       el("td", { class: "num" }, m.id),
       el("td", { class: "num" }, m.n ?? "—"),
-      el("td", { class: "num" }, m.fingerprint || "—"),
+      el("td", { class: "num" }, lineageText(m)),
       el("td", { style: "white-space:nowrap" },
         el("a", { href: `/api/results/${m.id}`, target: "_blank" }, "원본 JSON"),
         " ", briefBtn(m, brief)),

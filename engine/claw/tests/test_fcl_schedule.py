@@ -100,8 +100,9 @@ def test_모든_자리를_하나씩_켤_수_있다():
     assert "sched_alt_k_rate_y * hdot" in mod.files["fcl_ap.c"]
 
 
-def test_자리를_빼면_상수로_접히고_지문이_바뀐다():
-    """스케줄 대상 선택은 표시 설정이 아니라 **형상**이다 — 탑재 C 구조가 달라진다."""
+def test_자리를_빼면_분석_그래프는_상수로_접히고_표준_템플릿은_1점_표가_된다():
+    """스케줄 대상 선택 — 분석 그래프에서는 **구조**(룩업 노드가 사라지고 상수로 접힌다), 표준 템플릿에서는 **값**(빈
+    자리가 설계 상수의 1점 표가 된다 — 탑재 C는 바이트 동일, 01 §3.4 · 07 §6)."""
     base = _module()
     fewer = _module(gain_tables=make_demo_gain_tables(["pitch.kp", "roll.kp"]))
     assert base.files["fcl_sched.c"].count("claw_lookup1d") == 6
@@ -109,8 +110,46 @@ def test_자리를_빼면_상수로_접히고_지문이_바뀐다():
     # 빠진 ki는 설계 상수로 돌아온다 (포트 참조가 사라진다)
     assert "sched_pitch_ki" in base.files["fcl_scas.c"]
     assert "sched_pitch_ki" not in fewer.files["fcl_scas.c"]
-    assert str(DEMO_PITCH["ki"]) in fewer.files["fcl_data.c"]
-    assert base.fingerprint != fewer.fingerprint
+    assert fewer.values["scas_pitch_pid_ki"] == DEMO_PITCH["ki"]
+    assert base.structure_fingerprint != fewer.structure_fingerprint
+
+    std_base = _module(standard=True)
+    std_fewer = _module(standard=True, gain_tables=make_demo_gain_tables(["pitch.kp", "roll.kp"]))
+    assert std_fewer.files == std_base.files, "표준 템플릿에서 자리 선택이 C 구조를 바꿨다"
+    assert std_base.files["fcl_sched.c"].count("claw_lookup1d") == 16  # 카탈로그 16자리 전부
+    assert std_fewer.values["sched_pitch_ki_val"] == [DEMO_PITCH["ki"]]  # 빈 자리 = 설계 상수의 1점 표
+    assert std_fewer.param_fingerprint != std_base.param_fingerprint
+
+
+def test_표준_템플릿은_NaN_한_번_뒤에도_분석_그래프와_같은_스텝에_회복한다():
+    """끈 워시아웃을 tau = ∞ 곱(0·u)으로 두면 p·q에 NaN이 한 번만 들어와도 워시아웃 상태가 NaN으로 굳어 피치·롤 출력이
+    리셋 전까지 NaN이다 — 분석 그래프(워시아웃 노드 없음)는 다음 스텝에 회복한다(v1.12 리뷰가 994/994 스텝으로 잰 결함).
+    표준 템플릿은 선택(switch_param)이라 두 그래프가 NaN까지 스텝마다 비트로 같아야 한다."""
+    import math
+    import struct
+
+    from claw.verify import vectors
+
+    rows = vectors.integration_cases()[0]["rows"][:120]
+    inject = {20: "q", 40: "p", 60: "r"}
+
+    def run(standard):
+        runner = make_demo_fcl(standard=standard).init(DT).runner
+        runner.reset(states={"scas_pitch_pid": 0.0, "ap_alt_pid": 0.05, "ap_spd_pid": 0.5})
+        out = []
+        for k, row in enumerate(rows):
+            row = dict(row, **({inject[k]: math.nan} if k in inject else {}))
+            out.append(runner.step_all(**row))
+        return out
+
+    analysis, standard = run(False), run(True)
+    for k, (a, s) in enumerate(zip(analysis, standard)):
+        for key, v in a.items():
+            same = struct.pack("<d", v) == struct.pack("<d", s[key]) or (v != v and s[key] != s[key])
+            assert same, f"스텝 {k} {key}: 분석 {v!r} vs 표준 {s[key]!r}"
+    # 공허하지 않게 — NaN이 실제로 실렸고(주입 스텝) 엘레본은 회복했다(요축은 워시아웃이 켜진 축이라 두 그래프 모두 굳는다)
+    assert math.isnan(standard[20]["elevon_l"])
+    assert all(math.isfinite(standard[-1][k]) for k in ("elevon_l", "elevon_r"))
 
 
 def test_전부_끄면_스케줄_파일_자체가_사라진다():
@@ -131,7 +170,7 @@ def test_전부_끄면_스케줄_파일_자체가_사라진다():
     assert "sched_" not in off.files["fcl_scas.c"], "스케줄 흔적이 SCAS에 남았다"
     # 배분의 룩업은 남아야 한다 — 없으면 배분이 스케줄에 딸려 꺼진 것이다
     assert "scas_alloc_trim" in off.files["fcl_scas.c"]
-    assert off.fingerprint != _module().fingerprint
+    assert off.structure_fingerprint != _module().structure_fingerprint
 
 
 def test_기본_테이블은_예전과_같다():
@@ -164,7 +203,11 @@ def test_기본_테이블은_예전과_같다():
     # v1.11: θ 상한 마하 표 노드 2개(ap_theta_hi_raw·ap_theta_hi)와 한계 포트 배선으로 구조가 바뀌었다 — 2dd6835e50ae5869 →
     # ab5f3d7f1c1a5abf(θ_hi 브랜치가 기록한 값과 같다). 안티와인드업 보강은 생성 C 문장만 바꾸고 그래프·파라미터는 그대로라
     # 지문을 움직이지 않는다(지문은 생성 문장을 해시하지 않는다)
-    assert _module().fingerprint == "ab5f3d7f1c1a5abf"
+    # v1.12: 지문이 둘로 갈렸다 — 구조 지문(생성 C 텍스트의 해시)과 파라미터 지문(이미지 값의 해시). 이 테스트는 분석
+    # 그래프(시뮬이 쓰는 그래프)를 핀하고, 표준 템플릿의 두 지문은 flight/tests/test_parity.py가 핀한다. ki = 0 폴딩을 없애
+    # 헤딩·요 적분기가 코드에 돌아왔고 표가 포인터+점 수로 바뀌었다 — ab5f3d7f1c1a5abf(값+구조) → 아래 둘
+    module = _module()
+    assert (module.structure_fingerprint, module.param_fingerprint) == ("be2a2e6fe00dff02", "8bd3e4b1400dbaac")
 
 
 def test_없는_자리를_요구하면_거부한다():

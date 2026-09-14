@@ -11,16 +11,41 @@
 그대로 검증된다 (02 §1 의존성 최소화).
 """
 
+import json
 import math
 import shutil
+import struct
 import subprocess
+from pathlib import Path
 
 import mission_trace
 import pytest
-from generate import DT, GEN_DIR, build, fcl_demo_runner, manifest, scas_yaw_runner
+from generate import (DT, GEN_DIR, PARAMS_DIR, build, fcl_demo_runner, image_for, manifest, modules, params,
+                      scas_yaw_runner)
 
+from claw.codegen import param_image
 from claw.fcl.demo import DEMO_YAW, make_demo_fcl
 from claw.fcl.scas import ScasAxis
+from claw.profile import build_profile, load_shipped_example
+
+LEGACY_DOC = Path(__file__).resolve().parents[2] / "engine" / "claw" / "tests" / "fixtures" / "delta_legacy.json"
+
+# 구조 지문 — 세 기체가 **하나**를 나눈다. 파라미터 지문은 기체마다(아래 테스트)
+STRUCTURE_FP = "bc5d7dc7d4ee4c60"
+PARAM_FP = {"example": "9434b43ca18a887d", "eoir": "9434b43ca18a887d", "legacy": "41eceddd3279a2c1"}
+
+
+def _profiles():
+    """세 기체 — 제품 예제(200 kg급), EO/IR형(220 kg), 구 합성 기체(1200 kg 회귀 픽스처)."""
+    shipped = load_shipped_example()
+    return {"example": build_profile(shipped), "eoir": build_profile(shipped, "eoir"),
+            "legacy": build_profile(json.loads(LEGACY_DOC.read_text(encoding="utf-8")))}
+
+
+def _image_file(tmp_path, name, image):
+    path = tmp_path / f"{name}.bin"
+    path.write_bytes(image)
+    return path
 
 CC = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
 needs_cc = pytest.mark.skipif(CC is None, reason="C 컴파일러 없음 — Python 경로만 검증")
@@ -58,7 +83,9 @@ def _first_diff(a, b, label):
     for k, (x, y) in enumerate(zip(a, b, strict=True)):
         if x is None:
             continue
-        if x != y:
+        # 비트로 본다 — `!=`는 −0.0과 +0.0을 같게 봐서, ±0.0 합에 기대는 표준 템플릿 논거(07 §6.2)가 깨져도 못 본다.
+        # NaN끼리는 같게 친다(%.17g 왕복이 NaN 페이로드를 보존하지 않는다)
+        if struct.pack("<d", x) != struct.pack("<d", y) and not (x != x and y != y):
             return f"{label} 스텝 {k} (t={k * DT:.2f}s): {x!r} vs {y!r} (차 {x - y!r})"
     return None
 
@@ -66,8 +93,8 @@ def _first_diff(a, b, label):
 # ── 최상위 제어법칙 ───────────────────────────────────────────────────────
 
 
-def _ir_runner(warm):
-    runner = fcl_demo_runner()
+def _ir_runner(warm, profile=None):
+    runner = fcl_demo_runner(profile)
     de0, th0, thr0 = warm
     # 손으로 쓴 법칙과 같은 트림 웜스타트 (law.py:61, autopilot.py:126, simulator.py:132)
     runner.reset(
@@ -83,6 +110,7 @@ def test_law_replays_deterministically(trace):
 
     미션 중 기록한 출력과, 그 입력을 따로 세운 러너에 다시 흘린 출력이 같아야
     한다. 어댑터(항법→공학량)와 웜스타트 주입이 재현 가능한지를 여기서 잡는다.
+    기록은 분석 그래프, 재생은 표준 템플릿 그래프다(v1.12) — 컴파일러 없이도 두 그래프의 비트 동일을 여기서 본다.
     """
     inputs, refs, warm, _mission = trace
     runner = _ir_runner(warm)
@@ -189,31 +217,88 @@ def test_trace_exercises_the_hard_paths(trace):
 
 
 @needs_cc
-def test_generated_fcl_matches_ir(trace, tmp_path):
-    """생성 C가 IR·oracle과 비트 일치. -Werror이므로 경고 0도 함께 보증한다."""
-    inputs, refs, warm, _mission = trace
+def test_한_실행_파일이_세_기체_이미지로_설계와_비트_일치(trace, tmp_path):
+    """표준 템플릿 C를 **한 번만** 컴파일하고 기체마다 이미지만 바꿔 돌린다 (v1.12, 07 §9).
+
+    기준은 각 기체의 **분석 그래프**(`assemble_law(profile)` — 시뮬이 쓰는 그래프)로 기록한 미션 + 통합 벡터다. C는
+    표준 그래프에서 나왔으므로 이 대조가 곧 "표준 그래프 = 분석 그래프"의 증명이다 — 1점 표·0 게인 경로·tau = ∞
+    워시아웃·add_param이 전부 비트로 같다는 것. 표준 그래프 러너(IR)와도 대조한다. -Werror라 경고 0도 함께 보증한다.
+    """
     exe = _build("fcl", "HARNESS_FCL", tmp_path)
+    for name, profile in _profiles().items():
+        inputs, refs, warm, _mission = trace if name == "example" else mission_trace.run(profile=profile)
+        _module, image = image_for(profile)
+        stdin = " ".join(repr(v) for v in warm) + "\n"
+        stdin += "\n".join(
+            " ".join(repr(row[k]) for k in mission_trace.INPUT_ORDER) for row in inputs
+        ) + "\n"
+        run = subprocess.run([str(exe), str(_image_file(tmp_path, name, image))],
+                             input=stdin, capture_output=True, text=True)
+        assert run.returncode == 0, f"{name} 하네스 실행 실패:\n{run.stderr}"
 
-    stdin = " ".join(repr(v) for v in warm) + "\n"
-    stdin += "\n".join(
-        " ".join(repr(row[k]) for k in mission_trace.INPUT_ORDER) for row in inputs
-    ) + "\n"
+        rows = [[float(x) for x in line.split()] for line in run.stdout.splitlines()]
+        assert len(rows) == len(inputs), f"{name} 출력 {len(rows)}행 ≠ 입력 {len(inputs)}행"
+
+        runner = _ir_runner(warm, profile)
+        ir = [runner.step(**row) for row in inputs]
+        for i, out in enumerate(mission_trace.OUTPUT_ORDER):
+            c_vals = [row[i] for row in rows]
+            diff = _first_diff([r[i] for r in refs], c_vals, out)
+            assert diff is None, f"{name}: 분석 그래프(설계 실행) ≠ 생성 C — {diff}"
+            diff = _first_diff([g[out] for g in ir], c_vals, out)
+            assert diff is None, f"{name}: 표준 그래프 러너 ≠ 생성 C — {diff}"
+
+
+def test_세_기체의_생성_C가_바이트_동일하고_파라미터만_갈린다():
+    """기체가 바뀌어도 탑재 C는 그대로다 — 기체가 바꾸는 것은 이미지뿐이다 (v1.12 목표 상태, 07 §6).
+
+    구조 지문은 생성 C 텍스트의 해시라 셋이 같아야 하고, 파라미터 지문은 법칙 값의 해시다. EO/IR형은 질량·관성만 바꾸는
+    형상 변형이고 δe_trim 표를 기본형·EO/IR형을 함께 재어 도출했으므로(02 §5.6.1) 법칙 값이 기본형과 **같다** — 파라미터
+    지문도 같다. 이미지 바이트는 계보 칸(프로파일 지문)이 달라 셋 다 다르다.
+    """
+    built = {name: image_for(p) for name, p in _profiles().items()}
+    files = {name: m.files for name, (m, _img) in built.items()}
+    assert files["legacy"] == files["example"] == files["eoir"], "기체마다 생성 C가 다르다"
+    assert {m.structure_fingerprint for m, _img in built.values()} == {STRUCTURE_FP}
+    assert {name: m.param_fingerprint for name, (m, _img) in built.items()} == PARAM_FP
+    assert len({img for _m, img in built.values()}) == 3, "계보가 다른 세 이미지가 같은 바이트다"
+    for name, (m, img) in built.items():
+        head = param_image.unpack(img, m)
+        assert head["lineage"] == _profiles()[name].fingerprint
+
+
+@needs_cc
+def test_로더가_손상_이미지를_상태_코드로_거부한다(tmp_path):
+    """생성 로더의 거부 경로를 하나씩 태운다 — 구조 지문·CRC·길이·절점 역순·pool 부족·NaN 등 상태 코드 전부.
+
+    정상 이미지는 적재한 필드 몇 개(표 점 수·표 마지막 값·add_param 편차·스칼라)를 Python 값과 비트로 대조한다 —
+    포인터가 이미지의 제자리를 가리키는지. 파이썬 판독기(param_image.unpack)도 같은 상태를 낸다.
+    """
+    exe = _build("fcl", "HARNESS_FCL_PARAMS", tmp_path)
+    profile = _profiles()["example"]
+    module, _image = image_for(profile)
+    cases = param_image.corruptions(module, lineage=profile.fingerprint)
+    assert {c["status"] for c in cases} == set(param_image.STATUS), "상태 코드 중 안 태운 것이 있다"
+    stdin = "".join(f"{c['pool_delta']} {c['image'].hex()}\n" for c in cases)
     run = subprocess.run([str(exe)], input=stdin, capture_output=True, text=True)
-    assert run.returncode == 0, f"하네스 실행 실패:\n{run.stderr}"
-
-    rows = [[float(x) for x in line.split()] for line in run.stdout.splitlines()]
-    assert len(rows) == len(inputs), f"출력 {len(rows)}행 ≠ 입력 {len(inputs)}행"
-
-    runner = _ir_runner(warm)
-    ir = [runner.step(**row) for row in inputs]
-    for i, name in enumerate(mission_trace.OUTPUT_ORDER):
-        c_vals = [row[i] for row in rows]
-        assert _first_diff([r[i] for r in refs], c_vals, name) is None, (
-            f"설계 실행 ≠ 생성 C — {_first_diff([r[i] for r in refs], c_vals, name)}"
-        )
-        assert _first_diff([g[name] for g in ir], c_vals, name) is None, (
-            f"러너 ≠ 생성 C — {_first_diff([g[name] for g in ir], c_vals, name)}"
-        )
+    assert run.returncode == 0, run.stderr
+    rows = run.stdout.splitlines()
+    assert len(rows) == len(cases)
+    for case, row in zip(cases, rows):
+        assert int(row.split()[0]) == param_image.STATUS[case["status"]], f"{case['id']}: C 로더가 {row}"
+        if case["status"] != "E_POOL":
+            try:
+                param_image.unpack(case["image"], module)
+                got = "OK"
+            except param_image.ParamImageError as e:
+                got = e.status
+            assert got == case["status"], f"{case['id']}: 파이썬 판독기가 {got}"
+    _st, n, last, margin, diff_k = rows[0].split()
+    vals = module.values
+    assert int(n) == len(vals["sched_pitch_kp_bp"])
+    assert float(last) == vals["sched_pitch_kp_val"][-1]
+    assert float(margin) == vals["lim_alpha_max_c"]
+    assert float(diff_k) == vals["mix_diff_k"]
 
 
 # ── SCAS 요축 (단일 출력 반환 경로) ───────────────────────────────────────
@@ -257,7 +342,8 @@ def test_generated_yaw_axis_matches_ir(tmp_path):
     """단일 출력 그래프는 구조체가 아니라 값을 반환한다 — 그 경로도 대조한다."""
     exe = _build("scas_yaw", "HARNESS_SCAS_YAW", tmp_path)
     ref, ir, stdin = _yaw_reference()
-    run = subprocess.run([str(exe)], input=stdin, capture_output=True, text=True)
+    image = _image_file(tmp_path, "scas_yaw", param_image.pack(modules()["scas_yaw"]))
+    run = subprocess.run([str(exe), str(image)], input=stdin, capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
     got = [float(x) for x in run.stdout.split()]
     assert _first_diff(ref, got, "u") is None
@@ -333,7 +419,8 @@ def test_generated_mixer_matches_ir_with_diff_thrust(tmp_path):
     """차동추력을 켠 채 생성 C ↔ 설계가 비트 일치 — 단발 형상이 가리는 경로."""
     exe = _build("fcl", "HARNESS_FCL_MIX", tmp_path)
     ref, stdin = _mixer_reference()
-    run = subprocess.run([str(exe)], input=stdin, capture_output=True, text=True)
+    image = _image_file(tmp_path, "example", image_for(_profiles()["example"])[1])
+    run = subprocess.run([str(exe), str(image)], input=stdin, capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
     got = [tuple(float(x) for x in line.split()) for line in run.stdout.split("\n") if line]
     assert len(got) == len(ref), f"출력 줄 수 불일치: {len(got)} vs {len(ref)}"
@@ -351,12 +438,21 @@ def test_committed_artifacts_match_generator():
 
     생성은 결정적(시각 미포함)이므로 차이가 나면 곧 실제 설계 변경이다.
     """
-    for name, text in sorted(build().items()):
+    files = build()
+    for name, text in sorted(files.items()):
         path = GEN_DIR / name
         assert path.exists(), f"{name} 미커밋 — `python flight/generate.py` 실행 필요"
         assert path.read_text(encoding="utf-8") == text, (
             f"{name}이 생성기 출력과 다름 — 손으로 고쳤거나 재생성이 필요하다"
         )
+    # 그래프에서 사라진 파일이 gen/에 남으면 커밋본이 생성기보다 크다(v1.12에서 _data.c가 로더로 바뀌었다)
+    stale = sorted(p.name for p in GEN_DIR.glob("*.[ch]") if p.name not in files)
+    assert not stale, f"생성기가 더는 내지 않는 파일이 남았다: {stale}"
+    for name, content in sorted(params().items()):
+        path = PARAMS_DIR / name
+        data = content if isinstance(content, bytes) else content.encode("utf-8")
+        assert path.exists(), f"params/{name} 미커밋 — `python flight/generate.py` 실행 필요"
+        assert path.read_bytes() == data, f"params/{name}이 생성기 출력과 다르다"
 
 
 def test_generation_is_deterministic():
@@ -382,7 +478,9 @@ def test_진입점에는_조립부만_남는다():
         assert f"fcl_{group}_step(" in step, f"{group} 호출이 없다"
     for token in ("claw_lookup1d", "claw_clip", "claw_wrap_pi", "prm->", "sta->ap_"):
         assert token not in step, f"조립부에 블록 계산이 남았다: {token}"
-    assert len(_gen("fcl.c").splitlines()) < 120, "조립부가 다시 부풀었다"
+    # 리셋은 상태 필드 수만큼 자란다 — 표준 템플릿(v1.12)은 값으로 꺼진 경로도 두어 헤딩·요 적분기와 피치·롤 워시아웃
+    # 상태가 늘었다(112 → 120줄). 이 상한은 step 본문(조립부)이 블록 계산을 다시 떠안는 것을 잡는 자리다
+    assert len(_gen("fcl.c").splitlines()) < 140, "조립부가 다시 부풀었다"
 
 
 def test_신호_이름이_파티션_경계를_넘어_유지된다():
@@ -408,11 +506,14 @@ def test_파티션은_types_h만_의존한다():
         assert '#include "fcl.h"' not in text
 
 
-def test_분할해도_지문은_그대로다():
-    """지문은 형상의 신원이다 — 파일 배치가 아니라 제어법칙이 바뀔 때만 움직인다."""
+def test_모든_파일이_같은_구조_지문을_싣는다():
+    """구조 지문은 탑재 C의 신원이다 — 파일마다 배너에 같은 값이 있고, 로더가 받는 이미지의 지문 매크로와도 같다.
+
+    (v1.12 전에는 "형상 지문"이 파라미터 값·dt·그래프를 한데 해시했다 — 아래 이력은 그 시절 기록이다.)
+    """
     fps = set()
-    for name in ("fcl.h", "fcl_types.h", "fcl_data.c", *(f"fcl_{g}.h" for g in GROUPS)):
-        line = next(ln for ln in _gen(name).splitlines() if "지문" in ln)
+    for name in ("fcl.h", "fcl_types.h", "fcl_params.h", "fcl_params.c", *(f"fcl_{g}.h" for g in GROUPS)):
+        line = next(ln for ln in _gen(name).splitlines() if "구조 지문" in ln)
         fps.add(line.split(":")[1].strip())
     # 지문이 움직이는 것이 곧 설계 변경이다. 이번 갱신은 **안티와인드업 판정을 축
     # 출력 기준으로 바꾼 구조 변경**이다 — 감쇠항이 PID의 둘째 입력이 되어 그래프
@@ -442,4 +543,9 @@ def test_분할해도_지문은_그대로다():
     # 같은 버전의 안티와인드업 보강(감쇠항이 있는 PID 가드가 PID 출력과 축 출력 중 더 나간 쪽으로 판정 — 3항 두 줄)은
     # 생성 C 문장을 바꾸지만 **지문을 움직이지 않는다** — 지문은 그래프·파라미터·dt의 신원이지 에미터 문장의 해시가
     # 아니다(07 §6). 문장만 바뀐 변경은 이 테스트가 아니라 test_committed_artifacts_match_generator가 잡는다.
-    assert fps == {"9b992c84c6e5d4f8"}, f"형상 지문이 움직였다: {fps}"
+    # **v1.12부터 지문이 둘이다.** 구조 지문은 생성 C 텍스트(와 부르는 헬퍼 본문)의 해시라 기체·설계값이 바뀌어도 안
+    # 움직이고, 에미터 문장이 바뀌면 움직인다 — v1.11의 "문장만 바뀐 변경은 지문이 못 본다"는 구멍이 닫혔다. 값은 파라미터
+    # 지문(이미지)으로 갔다. 표준 템플릿 그래프(1점 표·0 게인 경로·add_param)와 생성 로더가 들어와 9b992c84c6e5d4f8(값+구조)
+    # → bc5d7dc7d4ee4c60(구조).
+    assert fps == {STRUCTURE_FP}, f"구조 지문이 움직였다: {fps}"
+    assert f"#define FCL_STRUCTURE_FP 0x{STRUCTURE_FP}ULL" in _gen("fcl_params.h")

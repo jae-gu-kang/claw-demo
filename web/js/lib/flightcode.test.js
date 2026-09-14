@@ -170,3 +170,38 @@ test("빈 응답이면 빈 문자열 — 화면이 터지지 않는다", () => {
   assert.equal(mergeFiles(null), "");
   assert.equal(mergeFiles({ files: [] }), "");
 });
+
+// ── v1.12 — 두 지문·파라미터 이미지 ──────────────────────────────────────
+
+import { IMAGE_TAB, fingerprintLine, imageBytes } from "./flightcode.js";
+
+const V112 = {
+  artifact: "fcl", dt: 0.01,
+  structure_fingerprint: "60ef218187ba1d01", param_fingerprint: "36e8f3b34dd1827c",
+  files: [{ name: "fcl.h", role: "진입점", lines: 3, text: "H\n" },
+    { name: "fcl_params.c", role: "파라미터 로더", lines: 5, text: "L\n" }],
+  param_image: { name: "example-delta.bin", bytes: 8, base64: "Q0xBV1BSTQA=",
+    listing: "CLAW 파라미터 이미지 — fcl\n  sched_f_mach_one_minus_p = 0.0198   1 − exp(-dt/tau)\n  bad */ token\n" },
+};
+
+test("신원 줄은 두 지문 — 옛 응답의 단일 지문은 (구)로 읽는다", () => {
+  assert.equal(fingerprintLine(V112), "구조 지문 60ef218187ba1d01 · 파라미터 지문 36e8f3b34dd1827c");
+  assert.equal(fingerprintLine({ fingerprint: "9b992c84c6e5d4f8" }), "형상 지문(구) 9b992c84c6e5d4f8");
+  assert.equal(fingerprintLine(null), "지문 —");
+});
+
+test("통합 열람본 끝에 이미지 목록이 C 주석으로 붙는다 — 값은 C에 없으므로", () => {
+  const text = mergeFiles(V112);
+  assert.ok(text.includes("구조 지문 60ef218187ba1d01"), "머리말 지문");
+  assert.ok(text.includes("파라미터 이미지 example-delta.bin"), "목록 머리");
+  assert.ok(text.indexOf("fcl_params.c") < text.indexOf("sched_f_mach_one_minus_p"), "목록은 파일 뒤");
+  // 목록 속 `*/`가 주석을 닫지 않는다
+  assert.equal((text.match(/\/\*/g) ?? []).length, (text.match(/\*\//g) ?? []).length);
+  assert.ok(!mergeFiles({ ...V112, param_image: null }).includes("파라미터 이미지 example"));
+});
+
+test("이미지 바이트 복원 — 내려받기는 응답의 base64를 그대로 쓴다", () => {
+  assert.deepEqual([...imageBytes(V112.param_image.base64)], [...Buffer.from("CLAWPRM\0", "latin1")]);
+  assert.equal(imageBytes("").length, 0);
+  assert.equal(IMAGE_TAB.startsWith("@"), true, "실제 파일 이름과 겹치지 않는 표식");
+});

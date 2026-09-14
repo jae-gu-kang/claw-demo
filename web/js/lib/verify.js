@@ -186,3 +186,35 @@ export function caseGroups(report) {
     cases: cases.filter((c) => c.unit === unit),
   }));
 }
+
+/** 판정판·보고서 신원 줄 — 두 지문(v1.12). 옛 리포트는 단일 형상 지문이라 "구"로 읽는다. */
+export function identLine(report) {
+  const fp = report?.structure_fingerprint
+    ? `구조 지문 ${report.structure_fingerprint} · 파라미터 지문 ${report.param_fingerprint ?? "—"}`
+    : `형상 지문(구) ${report?.fingerprint ?? "—"}`;
+  return `${fp} · 엔진 claw ${report?.engine ?? "—"} · 제어주기 ${report?.dt ?? "—"} s`;
+}
+
+/** 파라미터 세트 표 행 — 요청 이미지와 커버리지 이미지(값으로 꺼진 경로를 켠 합성 값). 옛 리포트는 빈 목록. */
+export function paramSetRows(report) {
+  return (report?.param_sets ?? []).map((s) => ({
+    id: s.id,
+    title: s.title,
+    role: s.role === "request" ? "요청 기체" : "커버리지",
+    fp: s.param_fingerprint,
+    changes: s.changes?.length
+      ? s.changes.map((c) => `${c.slot} = ${c.value} (${c.why})`).join(" · ")
+      : "—",
+  }));
+}
+
+/** 비활성 경로 표 행 — 요청 이미지에서 값으로 꺼진 경로와 그 경로를 덮은 세트. 덮은 세트가 없으면 uncovered. */
+export function deactivatedRows(report) {
+  return (report?.deactivated ?? []).map((d) => ({
+    node: d.node,
+    title: d.title,
+    covered: !d.covered_by?.length ? "미커버"
+      : d.covered_by.map((id) => (id === "request" ? "요청 이미지(공용 헬퍼 경로)" : id)).join(" · "),
+    uncovered: !d.covered_by?.length,
+  }));
+}
