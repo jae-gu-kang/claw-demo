@@ -21,8 +21,12 @@ import { clear, el } from "../dom.js";
 import { normalizeDraft } from "../lib/missiondraft.js";
 import { strideFor } from "../lib/replay.js";
 import {
-  applyActuatorSchema, appliedFrom, buildSimRequest, initialForm,
+  DEFAULT_FORM, appliedFrom, applyProfileDefaults, buildSimRequest, initialForm, profileSimDefaults,
 } from "../lib/simrequest.js";
+import { selectedDocument } from "./profilepick.js";
+import {
+  DOC_FAILED_HINT, MISSING_TEMPLATE_HINT, templateDefaults, untouchedUpdates,
+} from "../lib/missiontemplate.js";
 import {
   TOUR_SPEED, captionFor, endTimeFor, finaleModel, precheck, stepperModel,
 } from "../lib/tour.js";
@@ -233,16 +237,24 @@ export function mount() {
 
       // ② 폐루프 시뮬 — 시뮬 탭과 같은 조립(lib/simrequest.js)
       const applied = appliedFrom((k) => store.get(k));
-      let schema = null;
-      if (!applied.actuatorParams) {
-        // 적용본이 없을 때만 스키마로 폴백을 고친다 — 시뮬 탭과 같은 규칙
-        try {
-          schema = await api.get("/registry/actuator/SecondOrderActuator/schema");
-        } catch { /* 폴백으로 돈다 */ }
-        if (!alive(token)) return;
+      // 기체 문서가 정본인 칸(레일·지상장치·작동기)은 고른 기체 값으로 — 시뮬 탭과 같은 규칙
+      // 미션 템플릿의 연료·연료 소모율·시간·도달 반경도 시뮬 탭과 같게 — 초안이 준 조건이 그 위에 앉는다
+      let defaults = null;
+      let tpl = null;
+      try {
+        const doc = await selectedDocument();
+        defaults = profileSimDefaults(doc);
+        tpl = templateDefaults(doc);
+      } catch { /* 폴백으로 돈다 — 아래 경고가 말한다 */ }
+      if (!alive(token)) return;
+      let form = initialForm(applied.actuatorParams);
+      if (defaults) {
+        form = applyProfileDefaults(form, defaults.form,
+          { skip: applied.actuatorParams ? ["wn", "zeta", "rate"] : [] });
       }
-      let form = { ...initialForm(applied.actuatorParams), ...norm.runConditions };
-      if (schema) form = applyActuatorSchema(form, schema);
+      if (tpl?.sim) form = { ...form, ...untouchedUpdates(form, DEFAULT_FORM, tpl.sim.form) };
+      if (!tpl?.hasTemplate) run.warnings = [...(run.warnings ?? []), tpl ? MISSING_TEMPLATE_HINT : DOC_FAILED_HINT];
+      form = { ...form, ...norm.runConditions };
       const { req, snapshot } = buildSimRequest(form, norm.modeRows, norm.wpRows, applied);
       const simSub = await api.post("/sim/run", req);
       if (!alive(token)) { cancelJob(simSub.id).catch(() => {}); return; }

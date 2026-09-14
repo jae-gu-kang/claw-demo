@@ -314,6 +314,11 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
   `build_profile(doc, variant)` → `BuiltProfile`(`aircraft(ground, dispersion)`·`stall_table`·
   `db_ranges`·`structural_limits`·`skid_gear`·`launch_rail`·`design_gains`·`gain_tables`·
   `alloc_trim_table`, `fingerprint`·`plant_fingerprint`). 표·배열은 호출마다 새로 만든다
+- 편집 폼 서술 `form.form_spec()` — 칸 이름·단위·형식·선택지(검증기 상수를 그대로 읽는다).
+  서버가 `GET /profiles/_form`으로 내고 웹 기체 탭이 그대로 세운다(06 §8). 판정은 여기 없다 —
+  검증기 몫이다
+- 선택 절 `mission_template`(화면 기본값) — 계산에 쓰이지 않아 지문 밖이고, 문서에 없으면
+  없음으로 채운다(스키마 버전 불변, 02 §5.6)
 - 예제 문서는 패키지 데이터(`examples/*.json`, engine pyproject package-data)다 — 폐쇄망 휠에서
   빠지면 예제 기체가 사라진다
 - 의존: M0, M1(REGISTRY·canonical_hash), M3(Table), M5(조립 부품), M7(design_gains·SCHEDULABLE —

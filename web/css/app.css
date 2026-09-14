@@ -124,6 +124,30 @@ nav a:hover:not(.active) { color: var(--text); background: var(--bg); }
 .health.bad { color: var(--bad); }
 .health.bad::before { background: var(--bad); }
 
+/* 헤더 기체 선택기 (06 §8) — health와 같은 알약 언어. 선택기가 오른쪽 끝을 차지하고 health가 그 옆에 붙는다 */
+header { flex-wrap: wrap; }
+.profile-pick {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 3px 6px 3px 12px;
+  border-radius: 999px;
+  background: var(--panel);
+  white-space: nowrap;
+}
+.profile-pick + .health { margin-left: 0; }
+.profile-pick select { font-size: 12px; padding: 3px 6px; max-width: 220px; }
+.profile-pick .badge { padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.profile-pick .badge.example { background: #fdf2d7; color: #946200; }
+.profile-pick .badge.warn { background: #fdeae8; color: #b3352b; }
+.aircraft-page .unreadable td { color: var(--bad); }
+.aircraft-page tr.selected td { background: #eef5ff; }
+.aircraft-page textarea.doc { width: 100%; min-height: 420px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.aircraft-page .notice { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: #fdf2d7; color: #6b4a00; font-size: 12px; }
+
 /* ── 전역 질문 위젯 (D2) — 탭 밖 크롬 ─────────────────────────────────────
    어느 탭에서든 뜨므로 헤더와 같은 밝은 스킨이다(어두운 스킨은 전부 탭 로컬
    접두라는 규약 — .tab-dark 주석 참조). 이 리포 최초의 position:fixed·
@@ -1368,3 +1392,33 @@ body:has(.tab-page) main { max-width: 1580px; }
   .vf-printonly .vf-tt { border: 1px solid #ccc; }
   .vf-printonly .vf-src { max-height: none; }
 }
+
+/* ── 기체 문서 절별 폼 (views/profileform.js, 06 §8) ─────────────────────────
+   칸 서술은 서버가 준다. 덮어쓴 칸(형상 변형)은 옅은 호박색 — 예제 배지와 같은 색 언어다 */
+.pf-meta, .pf-vbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 10px; }
+.pf-sect { border-top: 1px solid rgba(0, 0, 0, .08); padding: 6px 0; }
+.pf-sect > summary { cursor: pointer; font-weight: 600; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.pf-sect > summary .hint { font-weight: 400; }
+.pf-row { display: grid; grid-template-columns: minmax(170px, 260px) 1fr; gap: 4px 14px; padding: 6px 4px; align-items: start; }
+.pf-row.ov, .pf-group.ov { background: #fff4d6; border-radius: 6px; }
+.pf-row.ov-part, .pf-group.ov-part { background: #fffaeb; border-radius: 6px; }
+.pf-row.pf-need .pf-edit input { outline: 2px dashed #946200; }
+.pf-label { font-size: 12px; }
+.pf-unit { color: var(--muted); margin-left: 4px; font-size: 11px; }
+.pf-badge { display: inline-flex; gap: 4px; align-items: center; margin-left: 6px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 700; background: #fdf2d7; color: #946200; }
+.pf-mini { font-size: 11px; padding: 1px 7px; }
+.pf-null { margin-left: 8px; font-size: 12px; white-space: nowrap; }
+.pf-edit input.pf-num { width: 104px; }
+.pf-edit input.pf-wide { width: 100%; max-width: 420px; }
+.pf-edit .bad { outline: 2px solid var(--bad); }
+.pf-grid { display: inline-grid; gap: 4px; }
+.pf-table td, .pf-table th { padding: 2px 4px; font-size: 12px; }
+.pf-json { width: 100%; min-height: 70px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.pf-group { border-left: 3px solid rgba(0, 0, 0, .08); padding: 4px 0 4px 10px; margin: 4px 0; }
+.pf-group-head { font-weight: 600; font-size: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pf-multi { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+.pf-reg { margin: 0 0 6px; }
+.pf-param { display: grid; grid-template-columns: 150px 110px 1fr; gap: 6px; align-items: center; font-size: 12px; margin: 2px 0; }
+.pf-coef { margin: 0 0 8px; }
+.pf-csv { margin-top: 6px; font-size: 12px; }
+.aircraft-page .stale { opacity: .45; } /* 편집 뒤의 옛 검증·저장 결과 — 지우면 레이아웃이 바뀌어 누르던 버튼이 밀린다 */

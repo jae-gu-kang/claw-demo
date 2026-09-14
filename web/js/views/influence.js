@@ -86,6 +86,7 @@ import { conePlayback, summaryOf } from "../lib/influenceplay.js";
 import { cascadeLayout, layeredLayout } from "../lib/influencelayout.js";
 import { createInfluenceCanvas } from "./influencecanvas.js";
 import { store } from "../store.js";
+import { fillGridFromProfile, firstTimeThisPage } from "./missionfill.js";
 
 // 그래프가 카드 밖으로 나오면서 폭이 늘었다 (app.css가 이 탭만 main을 1580까지
 // 연다). 캔버스는 `width:논리폭 + max-width:100%`라 좁은 화면에서는 비율을 지킨
@@ -134,6 +135,7 @@ const state = {
     tStep: "15" },
 };
 let canvas = null;
+let gridVisit = 0; // 격자 패널을 그린 차례 — 떠난 방문의 늦은 콜백이 지금 칸·상태를 건드리지 않게
 
 // 성운(radial)은 삭제됐고 **전파 폭포가 기본**이다. 재생 일정은 배치와 무관한 위상
 // 랭크이므로(influenceplay.js) 「프로세스 뷰」(레이어 활성망)로 전환해도 같은 재생·
@@ -847,6 +849,7 @@ export function render() {
   // 케이스 격자 — margins 탭과 같은 기본값(18케이스). 2단은 케이스당 ~10 ms라
   // 격자 전체가 공짜지만, 3단은 케이스 × 런 곱이라 A(전 케이스 base 스캔)로
   // 결함 케이스를 좁힌 뒤 B(부분 풀 스윕)로 간다.
+  const gridVisitNow = ++gridVisit;
   const g = state.gridForm;
   const machFromIn = numIn(g.machFrom, 55);
   const machToIn = numIn(g.machTo, 55);
@@ -867,12 +870,15 @@ export function render() {
       parseNumberList(fuelsIn.value),
     ));
   }
+  // 템플릿 없는 기체면 케이스 수 옆에 그렇다고 적는다 — 격자가 예제 기체에 맞춘 폴백이다
+  const templateNote = el("span");
   function renderCaseCount() {
     try {
       caseCountHint.textContent = `케이스 ${gridCases().length}건`;
     } catch {
       caseCountHint.textContent = "격자 입력 오류";
     }
+    caseCountHint.append(templateNote);
   }
   for (const [key, inp] of Object.entries({
     machFrom: machFromIn, machTo: machToIn, machStep: machStepIn,
@@ -884,6 +890,23 @@ export function render() {
     });
   }
   renderCaseCount();
+  // 격자 칸은 예제 기체 격자(폴백)로 먼저 선다 — 스캔 결과가 아직 없을 때만 고른 기체의 미션 템플릿 격자로
+  // 손대지 않은 칸을 바꾼다(결과가 있으면 입력이 결과와 같아야 3단 B가 받는다)
+  if (!state.scan?.result) {
+    const gridInputs = { machFrom: machFromIn, machTo: machToIn, machStep: machStepIn, alts: altsIn, fuels: fuelsIn };
+    // 템플릿 없음 안내는 케이스 수 줄에 붙인다 — 받는 쪽이 글을 쓰는 순간 옮겨 단다(응답을 기다린 뒤다)
+    const note = {
+      set textContent(text) {
+        templateNote.textContent = text ? ` · ${text}` : "";
+        renderCaseCount();
+      },
+    };
+    // 격자 칸은 모듈 상태라 페이지당 한 번만 채운다 — 안내는 들어올 때마다 단다
+    fillGridFromProfile(gridInputs, note, (changed) => {
+      for (const k of changed) state.gridForm[k] = gridInputs[k].value;
+      renderCaseCount();
+    }, { fill: () => gridVisitNow === gridVisit && firstTimeThisPage("influence.grid") });
+  }
 
   const metricDef = (key) => (state.model?.metrics ?? []).find((m) => m.key === key);
   const metricLabel = (key) => metricDef(key)?.label ?? key;

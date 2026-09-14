@@ -152,13 +152,28 @@ class ProfileStore:
         }
 
     def list(self) -> list:
-        """예제가 맨 앞, 나머지는 id 순. 손상 문서 하나가 목록 전체를 죽이지 않게 건너뛴다."""
+        """예제가 맨 앞, 나머지는 id 순. 읽을 수 없는 기체는 목록을 죽이지 않되 **건너뛰지도 않는다** —
+        `{id, unreadable: true, reason}`으로 싣는다. 복구 경로가 "그 id를 지우고 다시 만든다"인데 목록에서
+        사라지면 화면이 지울 id를 알 길이 없다."""
         out = [self.summary(*self.get(EXAMPLE_ID))]
         for pid in self.ids():
             try:
-                out.append(self.summary(*self.get(pid)))
-            except (KeyError, ValueError, ProfileUnreadable, OSError):
+                doc, revision = self.get(pid)
+            except KeyError as e:
+                # head가 없으면 목록을 훑는 사이 지워진 것이다. head는 있는데 리비전 파일이 없으면 손상이다 —
+                # 건너뛰면 목록에서 사라지는데 같은 id 생성은 head 때문에 409라, 지울 id를 화면이 모르게 된다
+                if (self.root / pid / "head.json").exists():
+                    out.append({"id": pid, "unreadable": True, "reason": f"기체 문서 파일이 없다: {e}"})
                 continue
+            except (ValueError, ProfileUnreadable, OSError) as e:
+                out.append({"id": pid, "unreadable": True, "reason": str(e)})
+                continue
+            try:
+                out.append(self.summary(doc, revision))
+            except (KeyError, ValueError, TypeError) as e:
+                # 조립 실패 — 레지스트리 오류(RegistryError)는 KeyError라, 위와 한 except로 묶으면 지운 기체로
+                # 오인돼 목록에서 사라진다
+                out.append({"id": pid, "unreadable": True, "reason": f"{type(e).__name__}: {e}"})
         return out
 
     # ── 쓰기 ────────────────────────────────────────────────────────────────

@@ -83,6 +83,10 @@ def health(request: Request) -> dict:
         "jobs": len(request.app.state.jobs.list()),
         "world_terrain_packs": packs,
         "world_terrain_build_log_tail": build_log_tail,
+        # 기체 저장소가 휘발성 디스크 위인가 — 공개 데모(render free)는 재배포·슬립 복귀마다 비워진다.
+        # 웹 기체 탭이 "저장한 기체가 사라질 수 있다"를 말하는 근거다(06 §8). 서버는 디스크가 휘발인지
+        # 재 볼 수 없으므로 배포가 알려 준다($CLAW_PROFILE_VOLATILE) — 모르면 말하지 않는다
+        "profile_store": {"volatile": bool(getattr(request.app.state, "profile_volatile", False))},
     }
 
 

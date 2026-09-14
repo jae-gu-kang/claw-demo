@@ -39,19 +39,27 @@ import { fuelsOf, linScale, niceTicks, pivotCases } from "../lib/plot.js";
 import { heatmapCanvas, makeCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
+import {
+  DOC_FAILED_HINT, ENVELOPE_FALLBACK, MISSING_TEMPLATE_HINT, untouchedUpdates,
+} from "../lib/missiontemplate.js";
+import { firstTimeThisPage, selectedDefaults } from "./missionfill.js";
 
 let lastVn = null;
 let lastMh = null;
 let lastScan = null; // /results 페이로드 {kind: "envelope_scan", cases, n_requested}
 let runningJobId = null;
 // 폼 문자열 — 재진입 유지. 구조 5종은 첫 응답 echo로 프리필(02 §5.5 자기 정렬)
+// 선도 조건·α 보호 마진·스캔 격자는 **예제 기체 사본(폴백)**으로 먼저 선다 — 고른 기체 문서가 오면 손대지
+// 않은 칸만 그 기체 값(미션 템플릿·law.alpha_margin)으로 바뀐다 (lib/missiontemplate.js)
 const form = {
-  alt: "1000", fuel: "200", margin: "0.05",
+  ...ENVELOPE_FALLBACK,
   nPos: "", nNeg: "", sf: "", machNo: "", machD: "",
   qMax: "", altMin: "", altMax: "", machMargin: "", nz: "",
-  scanFrom: "0.2", scanTo: "0.7", scanStep: "0.05", scanAlts: "0, 1000, 3000, 5000",
 };
 const touched = new Set(); // 구조 필드 중 사용자가 손댄 것 — 이것만 서버로 보낸다
+const liveInputs = {}; // 지금 화면의 폼 칸 — 기체 기본값이 도착하면 그 자리에서 고친다
+let drawSeq = 0; // 그리기 차례 — 늦게 온 옛 조건의 응답이 새 조건의 선도를 덮지 않게
+let envVisit = 0; // 탭을 그린 차례 — 떠난 방문의 늦은 콜백이 지금 화면의 그리기를 가로채지 않게
 // 레이어 토글 — 겹쳐 그릴 것이 아홉 가지라 토글 없이는 읽히지 않는다.
 // 응답을 다시 받지 않고 다시 그리기만 하므로 서버 계약과 무관한 순수 표시 상태.
 const layers = { isoQbar: true, isoTas: false, maneuver: true, scan: true, thrust: true };
@@ -133,6 +141,7 @@ const goTo = (hash, label, tail) =>
     "→ ", el("a", { href: hash }, label), tail ? ` ${tail}` : null);
 
 export function render() {
+  const visit = ++envVisit;
   const errBox = el("div");
   const progressBox = el("div");
   const mhBox = el("div");
@@ -155,6 +164,7 @@ export function render() {
       el("label", { class: "field" }, "간격", scanInput("scanStep", "num-sm")),
       el("label", { class: "field grow" }, "고도 목록 [m]", scanInput("scanAlts", ""))));
   const formBox = el("div");
+  const templateHint = el("p", { class: "hint" });
   const l1Box = el("div");
   const l3Box = el("div");
   const l4Box = el("div");
@@ -168,6 +178,7 @@ export function render() {
   const bind = (key, opts = {}) => {
     const inp = el("input", { class: "num", value: form[key], ...opts });
     inp.oninput = () => { form[key] = inp.value; };
+    liveInputs[key] = inp;
     return inp;
   };
   const structInputs = {};
@@ -189,12 +200,13 @@ export function render() {
   const structuralParams = () => {
     const out = {};
     for (const [key, param] of STRUCT_FIELDS) {
-      if (touched.has(key)) out[param] = optNum(form[key], param); // 빈칸 = 데모로 복귀
+      if (touched.has(key)) out[param] = optNum(form[key], param); // 빈칸 = 기체 프로파일 값으로 복귀
     }
     return out;
   };
 
   const draw = async () => {
+    const seq = ++drawSeq;
     try {
       clear(errBox);
       const struct = structuralParams();
@@ -203,9 +215,9 @@ export function render() {
         alpha_margin: Number(form.margin),
         ...struct,
       };
-      lastVn = await api.get("/analysis/vn-envelope?"
+      const vn = await api.get("/analysis/vn-envelope?"
         + envelopeQuery({ alt: Number(form.alt), ...shared }));
-      lastMh = await api.get("/analysis/design-envelope?"
+      const mh = await api.get("/analysis/design-envelope?"
         + envelopeQuery({
           ...shared,
           q_max: optNum(form.qMax, "q̄_max"),
@@ -214,10 +226,13 @@ export function render() {
           mach_margin: optNum(form.machMargin, "실속 여유"),
           nz: optNum(form.nz, "기동 하중배수"),
         }));
+      if (seq !== drawSeq) return; // 그사이 새 조건으로 다시 그리기가 나갔다
+      lastVn = vn;
+      lastMh = mh;
       syncStructural(lastMh.limits);
       renderAll();
     } catch (e) {
-      showErr(e);
+      if (seq === drawSeq) showErr(e); // 옛 조건 요청의 오류가 새 선도 위에 앉지 않게
     }
   };
 
@@ -304,9 +319,10 @@ export function render() {
       el("label", { class: "field" }, "보호 마진 [rad]", bind("margin")),
       el("button", { class: "primary", onclick: draw }, "그리기"),
     ),
+    templateHint,
     el("div", { class: "field-grid", style: "margin-top: 10px" },
       el("div", { class: "opt-group" },
-        el("div", { class: "g-title" }, "구조 한계 — 빈칸/미수정 = 데모 자리표시 (응답이 채움)"),
+        el("div", { class: "g-title" }, "구조 한계 — 빈칸/미수정 = 기체 프로파일 값 (응답이 채움)"),
         el("div", { class: "row-inner" },
           el("label", { class: "field" }, "+제한 [g]", bindStruct("nPos")),
           el("label", { class: "field" }, "−제한 [g]", bindStruct("nNeg")),
@@ -325,7 +341,7 @@ export function render() {
     el("p", { class: "hint" },
       "설계 엔벨로프 = 구조 ∧ 공력 ∧ 추진 ∧ 운용 ∧ 제어 가능 영역 (01 §2.6) — ",
       "V-n은 상위 constraint 하나. 구조 필드는 손댄 것만 서버로 보내고(02 §5.5), ",
-      "빈칸으로 되돌리면 데모 자리표시로 복귀. 실속 여유 빈칸 = 엔진 기본값. ",
+      "빈칸으로 되돌리면 기체 프로파일 값으로 복귀. 실속 여유 빈칸 = 엔진 기본값. ",
       "기동 n_z는 그 하중배수를 낼 수 있는 영역(1g 영역의 안쪽) — 빈칸이면 안 그린다."),
   );
 
@@ -380,8 +396,8 @@ export function render() {
           ...layerHead("L5", [
             "V-n 선도가 구조 한계를, 운용 박스가 입력한 고도·마하 한계를 낸다. ",
             "이 층의 값이 그대로 제어법칙의 보호 한계(α 리미터·n_z·q̄)가 된다 — ",
-            "지금 구조 한계는 데모 프로파일 자리표시이고, 위 「필요값 입력」에 실기체 값을 "
-            + "넣으면 그 값으로 다시 계산한다.",
+            "구조 한계는 고른 기체 프로파일 값이다(예제 기체면 자리표시 — 아래 안내가 가려 말한다). ",
+            "위 「필요값 입력」에 값을 넣으면 그 값으로 다시 계산한다.",
           ]),
           limitsBox,
           drawerSection("V-n 선도 (교과서형)", null, vnBox),
@@ -399,6 +415,19 @@ export function render() {
   // 먼저 한 번 그린다 — 응답이 아직 없어도 각 층이 **왜 비었는지**를 말해야 한다
   renderAll();
   loadStored().then(() => drawers.refresh());
+  // 고른 기체의 선도 조건·α 보호 마진·스캔 격자 — 손대지 않은 칸만 바꾸고, 바뀌었으면 받아 둔 선도가 옛
+  // 조건이라 다시 그린다. 템플릿이 없는 기체면 그렇다고 적는다(α 마진은 템플릿이 아니라 법칙 값이라 그래도 바뀐다)
+  selectedDefaults().then((d) => {
+    if (visit !== envVisit) return;
+    if (!d || !d.hasTemplate) templateHint.textContent = d ? MISSING_TEMPLATE_HINT : DOC_FAILED_HINT;
+    // 폼은 모듈 상태라 페이지당 한 번만 채운다 — 다시 들어올 때 사용자가 폴백과 같게 고친 칸을 덮지 않게
+    if (!d || !firstTimeThisPage("envelope.form")) return;
+    const up = untouchedUpdates(form, ENVELOPE_FALLBACK, d.envelope);
+    if (!Object.keys(up).length) return;
+    Object.assign(form, up);
+    for (const [k, v] of Object.entries(up)) if (liveInputs[k]) liveInputs[k].value = v;
+    draw();
+  });
   if (!lastVn && !lastMh) draw(); // 재진입이면 받아 둔 응답 그대로 (다시 부르지 않는다)
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착
 
@@ -586,6 +615,7 @@ function renderScanTable(box) {
 function scanInput(key, cls) {
   const inp = el("input", { class: cls, value: form[key] });
   inp.oninput = () => { form[key] = inp.value; };
+  liveInputs[key] = inp;
   return inp;
 }
 
@@ -725,13 +755,25 @@ const ISO_NAME = {
   tas: (c) => `TAS ${fmt(c.v, 4)} m/s`,
 };
 
-const placeholderHint = (body) => (body?.limits_source === "user-input"
-  ? el("p", { class: "hint" },
-    `구조 한계 중 사용자 입력: ${(body.limits_overridden ?? []).join(", ")} — `
-    + "나머지는 데모 프로파일 자리표시 [기본값 — 실기체 값 아님, 01 §2.6].")
-  : el("p", { class: "hint" },
-    "⚠ 구조 한계(±제한/극한·M_NO·M_D)는 데모 프로파일 자리표시 [기본값 — 실기체 값 ",
-    "아님, 01 §2.6]: 구조팀 정본 확보 시 프로파일 교체. 폼에 값을 넣으면 그 값으로 계산."));
+// 구조 한계의 출처는 서버 echo(limits_source·profile)를 그대로 말한다. 사용자 기체의 값을 "자리표시"로
+// 부르면 실기체 값을 가짜라고 말하게 되고, 예제 값을 기체 값으로 부르면 가짜를 진짜라고 말한다 (02 §5.6)
+const placeholderHint = (body) => {
+  const src = body?.limits_source;
+  const userAircraft = src === "profile" || body?.profile?.is_example === false;
+  const who = body?.profile?.name ? `「${body.profile.name}」` : "선택한 기체";
+  if (src === "user-input") {
+    return el("p", { class: "hint" },
+      `구조 한계 중 사용자 입력: ${(body.limits_overridden ?? []).join(", ")} — 나머지는 `
+      + (userAircraft ? `${who} 프로파일 값.` : "예제 기체 자리표시 [기본값 — 실기체 값 아님, 01 §2.6]."));
+  }
+  if (userAircraft) {
+    return el("p", { class: "hint" },
+      `구조 한계(±제한/극한·M_NO·M_D)는 ${who} 프로파일 값 — 폼에 값을 넣으면 그 값으로 계산.`);
+  }
+  return el("p", { class: "hint" },
+    "⚠ 구조 한계(±제한/극한·M_NO·M_D)는 예제 기체 자리표시 [기본값 — 실기체 값 ",
+    "아님, 01 §2.6]: 기체 탭에서 실기체 프로파일을 만들어 고르면 그 값으로 계산. 폼에 값을 넣으면 그 값으로 계산.");
+};
 
 // ── 합성 (M-h) ────────────────────────────────────────────────────────────
 

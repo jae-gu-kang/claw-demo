@@ -5,6 +5,10 @@ import { clear } from "./dom.js";
 // 전역 질문 위젯·가이드 투어 — 라우트 뷰가 아니다 (VIEWS 밖: blocks.test.js nav 가드와 무관)
 import * as ask from "./views/ask.js";
 import * as tour from "./views/tour.js";
+// 헤더 기체 선택기 — 라우트 뷰가 아니다. 기체 탭(aircraft)은 문서 편집, 이것은 선택
+import * as profilepick from "./views/profilepick.js";
+import { loadSelection, setSelection } from "./lib/profile.js";
+import * as aircraft from "./views/aircraft.js";
 import * as autocode from "./views/autocode.js";
 import * as autodesign from "./views/autodesign.js";
 import * as blocks from "./views/blocks.js";
@@ -25,7 +29,7 @@ import * as world from "./views/world.js";
 // 뒤로는(v0.66) 한쪽만 고치면 원문 둘이 다른 순서를 말한다. 드리프트 가드는
 // lib/blocks.test.js가 두 원문을 나란히 읽어 대조한다 (집합이 아니라 배열로)
 const VIEWS = {
-  blocks, envelope, trim, gains, margins, autodesign, sim, world, influence,
+  aircraft, blocks, envelope, trim, gains, margins, autodesign, sim, world, influence,
   autocode, verify, results,
 };
 
@@ -57,9 +61,12 @@ async function refreshHealth() {
   }
 }
 
+// 기체 선택은 첫 요청보다 먼저 읽는다 — 라우팅이 뷰를 그리자마자 계산 요청을 보낸다 (lib/profile.js)
+setSelection(loadSelection(profilepick.browserStorage()));
 window.addEventListener("hashchange", route);
 route();
 refreshHealth();
 setInterval(refreshHealth, 5000);
+profilepick.mount(); // 헤더 기체 선택기 — 선택이 서버에서 사라졌으면 예제로 되돌리고 사유를 말한다
 ask.mount(); // 전역 질문 위젯 — 탭 전환(#view 교체)에 영향받지 않는 body 크롬
 tour.mount(); // 가이드 투어 — 탭을 넘나들며 순서를 쥐어야 해서 같은 자리에 산다

@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from claw.profile import ProfileError, build_profile
+from claw.profile.form import form_spec
 from claw.tables import TableError
 from claw.tables.loader import parse_table_csv
 from claw_server.profiles import ProfileConflict, ProfileReadOnly, ProfileUnreadable
@@ -55,6 +56,15 @@ def _body(doc: dict, revision: int) -> dict:
 @router.get("/profiles")
 def list_profiles(request: Request) -> list:
     return request.app.state.profiles.list()
+
+
+@router.get("/profiles/_form")
+def profile_form() -> dict:
+    """편집 폼 서술 — 칸 이름·단위·형식·선택지. 정본은 엔진 `claw.profile.form`(검증기 옆)이다.
+
+    기체 id는 `_`로 시작할 수 없으므로(저장소 규칙) 이 경로는 기체 조회와 겹치지 않는다 — 이 선언이
+    `/profiles/{profile_id}`보다 앞에 있어야 한다."""
+    return form_spec()
 
 
 @router.get("/profiles/{profile_id}")

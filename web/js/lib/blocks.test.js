@@ -794,6 +794,7 @@ test("헤더 탭이 전부 실제 라우트다 — 죽은 탭 금지", () => {
 // 말하는지, 그리고 그 순서가 파이프라인인지를 여기서 못박는다. 배열을 손으로 적어
 // 두는 이유: 순서가 뜻을 갖는 지금은 "조용히 바뀌었다"가 곧 화면이 거짓말하는 것이다
 const PIPELINE = [
+  "aircraft",                            // 무엇을 설계하나 — 기체 (v1.04, 모든 단계의 입력)
   "blocks", "envelope", "trim",          // 구조와 영역
   "gains", "margins", "autodesign",      // 선형 설계
   "sim", "world",                        // 한 번 날려 보고 눈으로 확인
@@ -847,6 +848,7 @@ test("02 §8 워크플로우가 탭 줄과 같은 순서다", () => {
 test("코드가 인용한 02 §8 단계 번호가 그 탭을 가리킨다", () => {
   // 파일 이름이 곧 탭인 뷰만 본다 — lib/*.js는 이름으로 탭을 못 정한다
   for (const [file, tab] of [
+    ["../views/aircraft.js", "기체"],
     ["../views/trim.js", "트림"], ["../views/gains.js", "게인"],
     ["../views/margins.js", "마진 맵"], ["../views/sim.js", "시뮬레이션"],
     ["../views/results.js", "결과"],

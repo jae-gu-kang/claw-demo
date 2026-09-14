@@ -23,18 +23,29 @@ MAX_VARIANTS = 64  # 형상 변형 상한 — 읽을 때마다 변형마다 재�
 SECTIONS = (
     "schema_version", "id", "name", "description", "is_example",
     "geometry", "aero", "stall", "mass", "propulsion", "actuator", "surfaces",
-    "structural", "operating", "ground", "trim", "law", "variants",
+    "structural", "operating", "ground", "trim", "law", "mission_template", "variants",
 )
+# 스키마 v1에 나중에 더한 **선택 절** — 문서에 없으면 null(없음)로 채운다. 버전을 올리는 대신 이렇게 한
+# 이유: 이 절은 계산에 쓰이지 않아 지문 밖인데(fingerprint.py), 버전을 올리면 버전 값이 지문에 들어가 옛
+# 결과·설계 세션의 계보(스냅숏 지문)가 통째로 끊긴다. 계산에 쓰이는 절이 생기면 그때 버전을 올린다
+OPTIONAL_SECTIONS = ("mission_template",)
+# 미션 템플릿 격자의 케이스 상한 — 서버 스캔·영향성 격자 상한(MAX_SCAN_CASES·MAX_CASES)과 같은 자리.
+# 간격 오타 하나로 수만 케이스가 되면 그 기체를 고른 모든 화면이 격자를 만들다 멈춘다
+MAX_TEMPLATE_CASES = 200
 AERO_FORMS = {
     "lift_drag": ("CL", "CD", "CY", "Cl", "Cm", "Cn"),
     "body": ("CX", "CY", "CZ", "Cl", "Cm", "Cn"),
 }
 TERM_INPUTS = ("alpha", "beta", "V", "mach", "phat", "qhat", "rhat", "de", "da", "dr")
+# 형식·계수별로 더 받는 입력 — 양력·항력형 CD의 유도항력 항만 CL을 곱할 수 있다
+TERM_EXTRA_INPUTS = {("lift_drag", "CD"): ("CL",)}
 # 섭동 태그 → (허용 계수, 항에 반드시 있어야 할 입력). 태그가 없는 축은 흔들 수 없다
 DISPERSION_TAGS = {"cmalpha": ("Cm", "alpha"), "cmq": ("Cm", "qhat")}
 LAYOUTS = ("elevon4_rudder1",)  # [한계] 법칙 템플릿이 하나라 배치도 하나다
 TEMPLATES = ("delta_elevon_v1",)
 SCHEDULE_RULES = ("qbar_inverse",)
+DE_TRIM_SOURCES = ("explicit", "derived")  # 트림 엘레본 표의 출처 — 손으로 넣음 / 도출 잡이 만듦
+TABLE_EXTRAPOLATE = ("clip",)  # 문서 속 마하 표의 외삽 — α 리미터·할당 조회가 clip만 받는다
 ACTUATOR_RESERVED = ("pos_lo", "pos_hi", "initial")  # 위치 한계는 surfaces, 초기값은 트림
 SCAS_RESERVED = ("out_lo", "out_hi")  # 출력 한계는 surfaces에서 온다 (중복 정의 금지)
 ISA_ALT_RANGE = (-5000.0, 20000.0)  # env/constants.py ISA_MIN_ALT·ISA_STRATO1_TOP_ALT
@@ -186,7 +197,7 @@ def _component(v, path, category, *, reserved=()):
 def _terms(v, path, *, coef, form):
     if not isinstance(v, list):
         _fail(path, "항 목록이어야 함")
-    allowed = TERM_INPUTS + (("CL",) if form == "lift_drag" and coef == "CD" else ())
+    allowed = TERM_INPUTS + TERM_EXTRA_INPUTS.get((form, coef), ())
     out = []
     for i, t in enumerate(v):
         p = f"{path}/{i}"
@@ -232,7 +243,7 @@ def _stall(s, p):
     _keys(s, p, ("table", "neg_alpha_ratio"))
     return {
         # α 리미터가 1축(mach)·clip만 받는다 (fcl/limiter.py) — 문서도 같은 제약
-        "table": _table_mach(s["table"], f"{p}/table", extrapolate=("clip",)),
+        "table": _table_mach(s["table"], f"{p}/table", extrapolate=TABLE_EXTRAPOLATE),
         "neg_alpha_ratio": _num(s["neg_alpha_ratio"], f"{p}/neg_alpha_ratio",
                                 lo=0.0, lo_open=True, hi=1.0),
     }
@@ -413,10 +424,9 @@ def _law(law, p):
         if de_trim is not None:
             _keys(de_trim, f"{ap}/de_trim", ("source", "table", "provenance"))
             de_trim = {
-                "source": _choice(de_trim["source"], f"{ap}/de_trim/source",
-                                  ("explicit", "derived")),
+                "source": _choice(de_trim["source"], f"{ap}/de_trim/source", DE_TRIM_SOURCES),
                 "table": _table_mach(de_trim["table"], f"{ap}/de_trim/table",
-                                     extrapolate=("clip",)),
+                                     extrapolate=TABLE_EXTRAPOLATE),
                 "provenance": copy.deepcopy(de_trim["provenance"]),
             }
         alloc = {
@@ -427,8 +437,95 @@ def _law(law, p):
     return out
 
 
+def _span(v, path, *, lo=None):
+    _keys(v, path, ("from", "to", "step"))
+    start = _num(v["from"], f"{path}/from", lo=lo)
+    end = _num(v["to"], f"{path}/to", lo=lo)
+    if not start <= end:
+        _fail(f"{path}/to", f"시작 ≤ 끝이어야 함: {start} > {end}")
+    return {"from": start, "to": end, "step": _num(v["step"], f"{path}/step", lo=0.0, lo_open=True)}
+
+
+def _numlist(v, path, *, lo=None, hi=None):
+    if not isinstance(v, list) or not v:
+        _fail(path, "수치 1개 이상 목록이어야 함")
+    return [_num(x, f"{path}/{i}", lo=lo, hi=hi) for i, x in enumerate(v)]
+
+
+def _mission_template(t, p):
+    """미션 시나리오 기본값 — **계산에 쓰이지 않는다.** 웹 폼(트림·마진 맵·영향성 격자, 엔벨로프, 시뮬
+    미션)의 초기값이고, 결과는 실제로 보낸 요청을 싣는다. 그래서 지문 밖이다. 경로·활주로 같은 장소 값은
+    여기 없다(웹 lib/site.js) — 기체의 성능에 맞춘 값(속도·상승각·고도·연료·미끄럼 거리)만 있다."""
+    if t is None:
+        return None
+    lo, hi = ISA_ALT_RANGE
+    _keys(t, p, ("trim_grid", "envelope", "sim"))
+    g, e, s = t["trim_grid"], t["envelope"], t["sim"]
+    gp, ep, sp = f"{p}/trim_grid", f"{p}/envelope", f"{p}/sim"
+    _keys(g, gp, ("mach", "alt", "fuel"))
+    _keys(e, ep, ("alt", "fuel", "scan_mach", "scan_alt"))
+    _keys(s, sp, ("fuel", "fuel_flow", "t_end", "accept_radius", "climb", "cruise", "approach", "flare",
+                  "rollout_m"))
+    for k, keys in (("climb", ("speed", "pitch", "exit_alt")), ("cruise", ("speed", "alt")),
+                    ("approach", ("speed", "hdot", "exit_alt")), ("flare", ("speed", "hdot"))):
+        _keys(s[k], f"{sp}/{k}", keys)
+
+    def speed(k):
+        return _num(s[k]["speed"], f"{sp}/{k}/speed", lo=0.0, lo_open=True)
+
+    def points(span, path):
+        # 나누기부터 막는다 — 간격 1e-310이면 비율이 inf라 floor가 OverflowError(500)를 낸다
+        ratio = (span["to"] - span["from"]) / span["step"]
+        if not math.isfinite(ratio) or ratio > MAX_TEMPLATE_CASES:
+            _fail(path, f"격자 점이 너무 많다 — 케이스 {MAX_TEMPLATE_CASES}개까지 (간격·범위 확인)")
+        return int(math.floor(ratio + 1e-9)) + 1
+
+    trim_grid = {
+        "mach": _span(g["mach"], f"{gp}/mach", lo=0.0),
+        "alt": _numlist(g["alt"], f"{gp}/alt", lo=lo, hi=hi),
+        "fuel": _numlist(g["fuel"], f"{gp}/fuel", lo=0.0),
+    }
+    n = points(trim_grid["mach"], gp) * len(trim_grid["alt"]) * len(trim_grid["fuel"])
+    if n > MAX_TEMPLATE_CASES:
+        _fail(gp, f"격자 케이스 {n}개 — {MAX_TEMPLATE_CASES}개까지 (간격·목록 확인)")
+    envelope = {
+        "alt": _num(e["alt"], f"{ep}/alt", lo=lo, hi=hi),
+        "fuel": _num(e["fuel"], f"{ep}/fuel", lo=0.0),
+        "scan_mach": _span(e["scan_mach"], f"{ep}/scan_mach", lo=0.0),
+        "scan_alt": _numlist(e["scan_alt"], f"{ep}/scan_alt", lo=lo, hi=hi),
+    }
+    n = points(envelope["scan_mach"], f"{ep}/scan_mach") * len(envelope["scan_alt"])
+    if n > MAX_TEMPLATE_CASES:
+        _fail(f"{ep}/scan_mach", f"스캔 케이스 {n}개 — {MAX_TEMPLATE_CASES}개까지 (간격·목록 확인)")
+
+    return {
+        "trim_grid": trim_grid,
+        "envelope": envelope,
+        "sim": {
+            "fuel": _num(s["fuel"], f"{sp}/fuel", lo=0.0),
+            "fuel_flow": _num(s["fuel_flow"], f"{sp}/fuel_flow", lo=0.0),
+            "t_end": _num(s["t_end"], f"{sp}/t_end", lo=0.0, lo_open=True),
+            "accept_radius": _num(s["accept_radius"], f"{sp}/accept_radius", lo=0.0, lo_open=True),
+            "climb": {"speed": speed("climb"),
+                      "pitch": _num(s["climb"]["pitch"], f"{sp}/climb/pitch", lo=-0.5 * math.pi,
+                                    hi=0.5 * math.pi, lo_open=True, hi_open=True),
+                      "exit_alt": _num(s["climb"]["exit_alt"], f"{sp}/climb/exit_alt", lo=lo, hi=hi)},
+            "cruise": {"speed": speed("cruise"),
+                       "alt": _num(s["cruise"]["alt"], f"{sp}/cruise/alt", lo=lo, hi=hi)},
+            "approach": {"speed": speed("approach"),
+                         "hdot": _num(s["approach"]["hdot"], f"{sp}/approach/hdot", hi=0.0, hi_open=True),
+                         "exit_alt": _num(s["approach"]["exit_alt"], f"{sp}/approach/exit_alt", lo=0.0)},
+            "flare": {"speed": speed("flare"),
+                      "hdot": _num(s["flare"]["hdot"], f"{sp}/flare/hdot", hi=0.0, hi_open=True)},
+            "rollout_m": _num(s["rollout_m"], f"{sp}/rollout_m", lo=0.0, lo_open=True, nullable=True),
+        },
+    }
+
+
 def _body(d, *, with_variants):
     top = SECTIONS if with_variants else tuple(k for k in SECTIONS if k != "variants")
+    if isinstance(d, dict):
+        d = {**{k: None for k in OPTIONAL_SECTIONS}, **d}  # 선택 절이 없으면 없음(null)
     _keys(d, "", top)
     sv = d["schema_version"]
     if isinstance(sv, bool) or sv != SCHEMA_VERSION:
@@ -456,6 +553,7 @@ def _body(d, *, with_variants):
         "ground": _ground(d["ground"], "/ground"),
         "trim": _trim(d["trim"], "/trim"),
         "law": _law(d["law"], "/law"),
+        "mission_template": _mission_template(d["mission_template"], "/mission_template"),
     }
 
 

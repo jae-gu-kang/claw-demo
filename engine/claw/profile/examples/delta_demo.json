@@ -424,5 +424,62 @@
       }
     }
   },
+  "mission_template": {
+    "trim_grid": {
+      "mach": {
+        "from": 0.3,
+        "to": 0.55,
+        "step": 0.05
+      },
+      "alt": [
+        100.0,
+        1000.0,
+        3000.0
+      ],
+      "fuel": [
+        200.0
+      ]
+    },
+    "envelope": {
+      "alt": 1000.0,
+      "fuel": 200.0,
+      "scan_mach": {
+        "from": 0.2,
+        "to": 0.7,
+        "step": 0.05
+      },
+      "scan_alt": [
+        0.0,
+        1000.0,
+        3000.0,
+        5000.0
+      ]
+    },
+    "sim": {
+      "fuel": 300.0,
+      "fuel_flow": 0.3,
+      "t_end": 320.0,
+      "accept_radius": 300.0,
+      "climb": {
+        "speed": 110.0,
+        "pitch": 0.3665,
+        "exit_alt": 180.0
+      },
+      "cruise": {
+        "speed": 88.0,
+        "alt": 200.0
+      },
+      "approach": {
+        "speed": 88.0,
+        "hdot": -4.8,
+        "exit_alt": 20.0
+      },
+      "flare": {
+        "speed": 80.0,
+        "hdot": -0.8
+      },
+      "rollout_m": 870.0
+    }
+  },
   "variants": []
 }

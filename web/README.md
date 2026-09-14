@@ -18,18 +18,19 @@ scripts/run.sh          # 모노레포 루트에서 (설치까지 겸함)
 
 ```
 index.html            # 탭 네비 — **왼쪽에서 오른쪽이 업무 순서**다 (06 §3, 순서 정본은 02 §8):
-                      #   블록도·엔벨로프·트림 → 게인·마진 맵·자동 설계 →
+                      #   기체 → 블록도·엔벨로프·트림 → 게인·마진 맵·자동 설계 →
                       #   시뮬레이션·가상환경 → 영향성 → Autocode·검증 | 결과
                       #   탭은 **설계 단계**만. 런 하나를 다시 읽는 화면(타면 사용)은
                       #   그 단계 탭의 패널이다. 나열 순서는 main.js VIEWS와 같아야
                       #   하고 lib/blocks.test.js가 배열로 대조한다
 css/app.css
 js/
-├── main.js           # 해시 라우팅 (기본 = 구조도 허브) + 헬스 폴링
-├── api.js            # REST 래퍼·ApiError·watchJob(WS 우선, 폴링 폴백)
+├── main.js           # 해시 라우팅 (기본 = 구조도 허브) + 헬스 폴링 + 기체 선택 읽기
+├── api.js            # REST 래퍼·ApiError·watchJob(WS 우선, 폴링 폴백)·기체 선택 주입
 ├── dom.js            # el() 조립·fmt(비유한값 정책)·flagBadge(3-상태)
 ├── store.js          # 탭 간 공유 상태 (게인·AP 편집본 전달 등)
-├── lib/              # 순수 로직 37개 (공존 *.test.js로 테스트)
+├── lib/              # 순수 로직 45개 (공존 *.test.js로 테스트)
+│   ├── 기체          profile (선택 저장·요청 주입·라우트 가드) · profileform (폼 포인터·변형 덮어쓰기) · missiontemplate (화면 기본값)
 │   ├── 블록도·매뉴얼   blocks · manualdoc · schemaform · wiresignals
 │   ├── 격자·배치      grid · stage · specs · loops
 │   ├── 엔벨로프·트림   envelope
@@ -43,6 +44,7 @@ js/
 │   └── 플롯          plot
 └── views/            # DOM 조립 전용 (얇게 유지) + testdom.js (테스트 전용 가짜 DOM)
     ├── 뼈대·공용      stage · plots · progress · evalcards · codeview
+    ├── 기체 (0단계)   aircraft · profileform (절별 폼) · profilepick (헤더 선택기) · missionfill (기본값 배선)
     ├── 블록도        blocks · diagram · subsystems · manual
     ├── 엔벨로프      envelope
     ├── 트림 (3단계)   trim

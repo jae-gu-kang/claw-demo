@@ -52,23 +52,33 @@ const CLIMB_PITCH = "0.3665"; // [rad] 21° — α 리미터 한계까지 기수
 // 축에서 595 m 벌어져 있었고, 맞추고 나니 29 m다.
 export const RUNWAY_HDG = String(GOHEUNG.runwayHeadingRad); // [rad] 3.417°
 
+/** 기본 미션의 기체 성능 값 — **예제 기체 사본**(기체 문서 mission_template.sim, missiontemplate.test.js가
+ *  대조). 위 주석의 실측 근거는 예제 기체의 것이다. 고른 기체에 템플릿이 있으면 그 값으로 모드 표를 세운다. */
+export const MODE_FALLBACK = Object.freeze({
+  climbSpeed: "110", climbPitch: CLIMB_PITCH, climbExitAlt: "180",
+  cruiseSpeed: "88", cruiseAlt: "200",
+  approachSpeed: "88", approachHdot: "-4.8", approachExitAlt: "20",
+  flareSpeed: "80", flareHdot: "-0.8",
+});
+
 /** 기본 모드 표 — **부를 때마다 새 사본**이다. 표 편집이 행을 제자리에서 고치므로
- *  (views/sim.js renderModeTable) 정본 배열을 그대로 내주면 기본값이 오염된다. */
-export function defaultModeRows() {
+ *  (views/sim.js renderModeTable) 정본 배열을 그대로 내주면 기본값이 오염된다.
+ *  v: 기체 성능 값(MODE_FALLBACK과 같은 키) — 고른 기체의 미션 템플릿. 장소 값(활주로 방위)은 따로다. */
+export function defaultModeRows(v = MODE_FALLBACK) {
   return [
-    { name: "launch", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH,
+    { name: "launch", speed: v.climbSpeed, lonAxis: "pitch", lonValue: v.climbPitch,
       heading: RUNWAY_HDG, exitKind: "off_rail", exitValue: "", next: "climb" },
-    { name: "climb", speed: "110", lonAxis: "pitch", lonValue: CLIMB_PITCH,
-      heading: RUNWAY_HDG, exitKind: "alt_ge", exitValue: "180", next: "cruise" },
+    { name: "climb", speed: v.climbSpeed, lonAxis: "pitch", lonValue: v.climbPitch,
+      heading: RUNWAY_HDG, exitKind: "alt_ge", exitValue: v.climbExitAlt, next: "cruise" },
     // 순항 헤딩은 "path" — 기본 웨이포인트를 따라 날고, 소진(path_done)이 접근
     // 진입을 정한다. 종전 time_ge 15는 경로를 15 s만 따르다 시계로 포기하고
     // 활주로 방위로 되돌아갔다 — 웨이포인트를 찍어도 비행이 안 바뀌던 이유였다.
-    { name: "cruise", speed: "88", lonAxis: "alt", lonValue: "200", heading: "path",
+    { name: "cruise", speed: v.cruiseSpeed, lonAxis: "alt", lonValue: v.cruiseAlt, heading: "path",
       exitKind: "path_done", exitValue: "", next: "approach" },
-    // 3° 활공: 88 m/s · sin3° ≈ 4.6 m/s
-    { name: "approach", speed: "88", lonAxis: "hdot", lonValue: "-4.8",
-      heading: RUNWAY_HDG, exitKind: "alt_le", exitValue: "20", next: "flare" },
-    { name: "flare", speed: "80", lonAxis: "hdot", lonValue: "-0.8",
+    // 3° 활공: 88 m/s · sin3° ≈ 4.6 m/s (예제 기체)
+    { name: "approach", speed: v.approachSpeed, lonAxis: "hdot", lonValue: v.approachHdot,
+      heading: RUNWAY_HDG, exitKind: "alt_le", exitValue: v.approachExitAlt, next: "flare" },
+    { name: "flare", speed: v.flareSpeed, lonAxis: "hdot", lonValue: v.flareHdot,
       heading: RUNWAY_HDG, exitKind: "on_ground", exitValue: "", next: "rollout" },
     { name: "rollout", speed: "0", lonAxis: "pitch", lonValue: "0",
       heading: RUNWAY_HDG, exitKind: "speed_le", exitValue: "0.5", next: "stopped" },
@@ -112,16 +122,17 @@ export function defaultWpRows() {
   ];
 }
 
-/** 작동기 폼 폴백 — 엔진 기본값의 사본이다(02 §5.5). 폼이 즉시 유효해야 해서
- *  남기되, 스키마가 도착하면 `applyActuatorSchema`가 스스로 어긋남을 고친다. */
+/** 작동기 폼 폴백 — **예제 기체 문서 값의 사본**이다. 폼이 즉시 유효해야 해서 남기되,
+ *  고른 기체 문서가 도착하면 `applyProfileDefaults`가 손대지 않은 칸만 그 기체 값으로 바꾼다.
+ *  사본이 예제 문서와 어긋나면 simrequest.test.js가 빨개진다. */
 export const ACT_FALLBACK = Object.freeze({ wn: 30, zeta: 0.7, rate: 10 });
 const ACT_SCHEMA_KEY = Object.freeze({ wn: "wn", zeta: "zeta", rate: "rate_max" });
 
 /** 뱅크 한계 폴백 [rad] — 웨이포인트 기하 판정(lib/wpcheck.js)이 선회 반경을 재는 데
  *  쓴다. 위 `ACT_FALLBACK`과 같은 부류의 사본이다: 화면이 표를 그리는 **그 순간**
- *  판정을 내야 해서 남기되, 레지스트리 스키마(`/registry/fcl/Autopilot/schema`)가
- *  도착하면 뷰가 실값으로 갈아 끼운다. 실행 경로에는 이 값이 쓰이지 않는다 —
- *  서버가 오토파일럿의 실제 `phi_max`를 경로추종기에 넘긴다(routes/sim.py _build). */
+ *  판정을 내야 해서 남기되, 고른 기체 문서(설계 게인의 `autopilot.phi_max`)가 도착하면
+ *  뷰가 그 값으로 갈아 끼운다. 레지스트리 기본값이 아니다 — 서버는 **그 기체의 설계값**을
+ *  경로추종기에 넘긴다(routes/sim.py _build). 실행 경로에는 이 폴백이 쓰이지 않는다. */
 export const AP_PHI_MAX_FALLBACK = 0.7;
 
 /** 실행 조건 기본값 — 폼 칸 이름 그대로(뷰의 f.* 키와 1:1). 수치는 문자열이다:
@@ -136,6 +147,9 @@ export const DEFAULT_FORM = Object.freeze({
   rwHeading: RUNWAY_HDG,
   rwLength: String(GOHEUNG.runwayLengthM),
   launchOn: true,
+  // 레일·지상장치·작동기 칸은 **예제 기체 문서 값의 사본**이다 — 고른 기체 문서가 도착하면
+  // 손대지 않은 칸만 그 기체 값으로 바뀐다(profileSimDefaults). 레일 앙각은 예제 문서의
+  // radians(15)를 네 자리로 줄인 값이다(0.2617993…)
   railLen: "10",
   railAngle: "0.2618", // [rad] 15°
   railExit: "81.5", // 1.15 × 트림 실속속도 70.9 → 33.9 g
@@ -190,16 +204,46 @@ export function initialForm(actuatorParams = null) {
   return out;
 }
 
-/** 레지스트리 스키마 기본값을 **손대지 않은 칸에만** 채운다.
+/** 고른 기체의 **적용 문서**(형상 변형 반영) → 시뮬 폼 기본값 — 기체 문서가 정본인 칸만.
  *
- *  폴백(위 ACT_FALLBACK)은 엔진 기본값의 사본이라 조용히 어긋날 수 있다 — 항법
- *  기본값 7개가 어긋난 채 돌던 전례(01 v0.19)가 그것이다. 사용자가 고친 칸은
- *  건드리지 않는다: 고친 값을 스키마가 덮으면 편집이 조용히 사라진다. */
-export function applyActuatorSchema(form, schema) {
+ *  레일·지상장치·작동기 칸과 뱅크 한계(설계 게인의 오토파일럿 `phi_max`). 종전에는 레지스트리
+ *  스키마 기본값으로 폴백을 고쳤는데, 그것은 **기체와 무관한 엔진 기본값**이라 다른 기체를 고르면
+ *  틀린 값이 칸에 앉았다. 레일·지상장치가 없는 기체(null)는 토글을 끄고 레일 칸을 비운다 — 예제
+ *  기체 값을 보여 주지 않는다. 미션 시나리오 값(모드 속도·연료 등)은 여기 없다 — 기체 문서의
+ *  미션 템플릿이 준다(lib/missiontemplate.js, 06 §8).
+ *  돌려주는 것: {form: {칸: 글|불리언}, phiMax: 수|null} */
+export function profileSimDefaults(doc) {
+  const form = {};
+  const rail = doc?.ground?.rail;
+  if (rail === null) {
+    Object.assign(form, { launchOn: false, railLen: "", railAngle: "", railExit: "" });
+  } else if (rail && typeof rail === "object") {
+    Object.assign(form, {
+      launchOn: true, railLen: String(rail.length), railAngle: String(rail.elev_angle),
+      railExit: String(rail.exit_speed),
+    });
+  }
+  const skid = doc?.ground?.skid;
+  if (skid === null) form.groundOn = false;
+  else if (skid && typeof skid === "object") form.groundOn = true;
+  const act = doc?.actuator;
+  if (act?.type === "SecondOrderActuator" && act.params) {
+    for (const [key, name] of Object.entries(ACT_SCHEMA_KEY)) {
+      if (typeof act.params[name] === "number") form[key] = String(act.params[name]);
+    }
+  }
+  const phi = doc?.law?.design?.autopilot?.phi_max;
+  return { form, phiMax: typeof phi === "number" && phi > 0 ? phi : null };
+}
+
+/** 기체 기본값을 **손대지 않은 칸에만** 채운다 — 칸이 아직 DEFAULT_FORM 그대로면 손대지 않은 것이다.
+ *  사용자가 고친 칸은 건드리지 않는다: 고친 값을 기체 문서가 덮으면 편집이 조용히 사라진다.
+ *  skip: 이번에는 채우지 않을 칸(블록도에서 작동기를 '시뮬에 적용'했으면 작동기 칸은 그 값이 우선이다). */
+export function applyProfileDefaults(form, defaults, { skip = [] } = {}) {
   const out = { ...form };
-  for (const [key, name] of Object.entries(ACT_SCHEMA_KEY)) {
-    const d = schema?.properties?.[name]?.default;
-    if (d !== undefined && out[key] === String(ACT_FALLBACK[key])) out[key] = String(d);
+  for (const [key, value] of Object.entries(defaults ?? {})) {
+    if (skip.includes(key)) continue;
+    if (out[key] === DEFAULT_FORM[key]) out[key] = value;
   }
   return out;
 }

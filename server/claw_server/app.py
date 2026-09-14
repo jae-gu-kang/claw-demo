@@ -69,20 +69,29 @@ async def _validation_error_handler(request, exc: RequestValidationError):
     return JSONResponse(status_code=422, content={"detail": errors})
 
 
+def _flag(value) -> bool:
+    """켜짐 표기 — 문자열은 "1"·"true"·"yes"(대소문자 무시)만 참이다. bool("0")이 참인 함정을 막는다."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes")
+    return bool(value)
+
+
 def _default_web_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "web"  # 모노레포 루트/web (03 §5)
 
 
 def create_app(data_dir=None, web_dir=None, access_password=None,
-               result_limit=None, profile_dir=None) -> FastAPI:
+               result_limit=None, profile_dir=None, profile_volatile=None) -> FastAPI:
     """앱 생성 — data_dir: 결과 저장 루트 (기본 $CLAW_SERVER_DATA 또는 ./server_data),
     web_dir: M14 정적 파일 루트 (기본 $CLAW_WEB_DIR 또는 모노레포 web/ — 없으면 API만),
     access_password: 공용 비밀번호 (기본 $CLAW_ACCESS_PASSWORD — 빈 값이면 무인증),
     result_limit: 결과 보존 개수 상한 (기본 $CLAW_RESULT_LIMIT — 0·미설정이면 무제한),
     profile_dir: 기체 프로파일 저장 루트 (기본 $CLAW_PROFILE_DATA 또는 결과 루트 아래 profiles/ —
-    결과 보존 상한이 지우지 않는 별도 저장소, 02 §5.6).
+    결과 보존 상한이 지우지 않는 별도 저장소, 02 §5.6),
+    profile_volatile: 기체 저장소가 재시작마다 비워지는 배포인가 (기본 $CLAW_PROFILE_VOLATILE —
+    "1"·"true"·"yes"면 참). 서버가 디스크를 재 볼 수 없어 배포가 알려 주고, /api/health가 웹에 전한다.
 
-    네 인자 모두 **환경변수 기본값 + 명시 주입** 패턴이다 — 테스트가 환경을 건드리지
+    인자 모두 **환경변수 기본값 + 명시 주입** 패턴이다 — 테스트가 환경을 건드리지
     않고 상한이 걸린 앱을 세울 수 있어야 보존 상한 관련 동작을 고정할 수 있다."""
     app = FastAPI(title="CLAW server", version="0.1.0")
     pw = (
@@ -111,6 +120,8 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
         profile_dir if profile_dir is not None
         else os.environ.get("CLAW_PROFILE_DATA") or Path(data_root) / "profiles"
     )
+    app.state.profile_volatile = _flag(
+        profile_volatile if profile_volatile is not None else os.environ.get("CLAW_PROFILE_VOLATILE", ""))
     for router in (
         system_routes.router,
         profiles_routes.router,

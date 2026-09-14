@@ -14,6 +14,8 @@ PM·GM 맵이 카드 밖 전면에 놓이고(블록도 최상위·영향성과 �
 import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import { DEFAULT_GRID, machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
+import { MARGIN_ACT_FALLBACK } from "../lib/missiontemplate.js";
+import { applyUntouched, fillGridFromProfile, selectedDefaults } from "./missionfill.js";
 import { AXIS_NAMES, DEFAULT_LOOPS, validateActuatorDelay, validateLoops } from "../lib/loops.js";
 import {
   FALLBACK_CRITERIA, STATUS, fuelsOf, gmColor, heatmapCanvasHeight, heatmapCellAt, marginColor,
@@ -67,11 +69,18 @@ export function render() {
   const fFp = el("input", { value: "web-margin-v1" });
   // 작동기·지연 포함 — [기본값 01 §4.2] 체크 ON으로 시작, 꺼서 영향 분리 비교 가능
   const fUseAct = el("input", { type: "checkbox", checked: true });
-  const fWn = el("input", { class: "num-sm", value: "30" });
-  const fZeta = el("input", { class: "num-sm", value: "0.7" });
+  // 작동기 칸은 예제 기체 actuator 값의 사본(폴백) — 고른 기체 문서가 오면 손대지 않은 칸만 그 기체 값으로
+  const fWn = el("input", { class: "num-sm", value: MARGIN_ACT_FALLBACK.wn });
+  const fZeta = el("input", { class: "num-sm", value: MARGIN_ACT_FALLBACK.zeta });
   const fUseDelay = el("input", { type: "checkbox", checked: true });
   const fDelay = el("input", { class: "num-sm", value: "0.035" });
   const fPade = el("input", { class: "num-sm", value: "2" });
+  // 격자 칸은 예제 기체의 격자(폴백)로 먼저 선다 — 고른 기체의 미션 템플릿 격자가 손대지 않은 칸을 채운다
+  const gridHint = el("p", { class: "hint" });
+  fillGridFromProfile({ machFrom: fMachFrom, machTo: fMachTo, machStep: fMachStep, alts: fAlts, fuels: fFuels }, gridHint);
+  selectedDefaults().then((d) => {
+    if (d) applyUntouched({ wn: fWn, zeta: fZeta }, MARGIN_ACT_FALLBACK, d.margins);
+  });
 
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -248,7 +257,7 @@ export function render() {
       actions: [el("button", { class: "primary", onclick: run }, "실행")],
       // 판정선은 **패널에 넣지 않는다** — 히트맵 색이 무엇을 기준으로 갈리는지이고,
       // 폴백을 쓰는 중이라면 그 사실이 색과 같은 화면에 있어야 한다
-      extra: [criteriaBox, progressBox, errBox],
+      extra: [criteriaBox, gridHint, progressBox, errBox],
     }),
     // PM·GM 히트맵 — 카드 밖, 페이지 위에 그대로. 이 탭의 답이 여기 있다
     tabStage(slots.head, slots.plots),

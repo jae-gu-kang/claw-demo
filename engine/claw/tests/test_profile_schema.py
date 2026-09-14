@@ -153,3 +153,39 @@ def test_variant_count_is_capped():
     with pytest.raises(ProfileError) as ei:
         validate_document(doc)
     assert ei.value.path == "/variants"
+
+
+def test_mission_template_is_optional_and_validated_with_paths():
+    """선택 절 — 없으면 없음(null)으로 채우고, 있으면 칸마다 경로가 붙은 오류로 판정한다."""
+    doc = load_example()
+    del doc["mission_template"]
+    assert validate_document(doc)["mission_template"] is None
+    assert list(validate_document(load_example())).index("mission_template") == \
+        list(validate_document(load_example())).index("law") + 1
+    e = _bad(lambda d: d["mission_template"]["trim_grid"]["mach"].__setitem__("step", 0.0))
+    assert e.path == "/mission_template/trim_grid/mach/step"
+    e = _bad(lambda d: d["mission_template"]["envelope"]["scan_mach"].__setitem__("to", 0.1))
+    assert e.path == "/mission_template/envelope/scan_mach/to"
+    e = _bad(lambda d: d["mission_template"]["sim"]["approach"].__setitem__("hdot", 1.0))
+    assert e.path == "/mission_template/sim/approach/hdot"
+    e = _bad(lambda d: d["mission_template"]["sim"].__setitem__("extra", 1.0))
+    assert e.path == "/mission_template/sim/extra"
+    doc = load_example()
+    doc["mission_template"]["sim"]["rollout_m"] = None  # 실측이 없는 기체
+    validate_document(doc)
+
+
+def test_mission_template_grids_are_capped():
+    """간격 오타 하나로 수만 케이스가 되면 그 기체를 고른 화면이 격자를 만들다 멈춘다 — 경로와 함께 거부한다."""
+    e = _bad(lambda d: d["mission_template"]["trim_grid"]["mach"].__setitem__("step", 0.0001))
+    assert e.path == "/mission_template/trim_grid"
+    e = _bad(lambda d: d["mission_template"]["envelope"]["scan_mach"].__setitem__("step", 0.0001))
+    assert e.path == "/mission_template/envelope/scan_mach"
+    # 비율이 inf가 되는 간격·범위 — 500(OverflowError)이 아니라 같은 경로의 거부다
+    e = _bad(lambda d: d["mission_template"]["trim_grid"]["mach"].__setitem__("step", 1e-310))
+    assert e.path == "/mission_template/trim_grid"
+
+    def huge(d):
+        d["mission_template"]["envelope"]["scan_mach"].update({"to": 1e308, "step": 1e-5})
+    e = _bad(huge)
+    assert e.path == "/mission_template/envelope/scan_mach"

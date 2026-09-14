@@ -10,6 +10,7 @@ DOM 조립 전용 (얇게) — 격자 로직은 lib/grid.js, 수치·판정은 �
 import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { DEFAULT_GRID, machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
+import { fillGridFromProfile } from "./missionfill.js";
 import { STATUS, fuelsOf, pivotCases, trimEnvelopeCell } from "../lib/plot.js";
 import { store } from "../store.js";
 import { heatmapCanvas } from "./plots.js";
@@ -48,6 +49,14 @@ export function render() {
   const fAlts = el("input", { value: DEFAULT_GRID.alts.join(", ") });
   const fFuels = el("input", { class: "num", value: DEFAULT_GRID.fuels.join(", ") });
   const fFp = el("input", { value: "web-trim-v1" });
+  // 위 격자는 **예제 기체의 격자**(폴백)다 — 고른 기체 문서가 오면 손대지 않은 칸만 그 기체 미션 템플릿의
+  // 격자로 바꾸고, 템플릿이 없으면 그렇다고 적는다(views/missionfill.js). 케이스 목록이 아직 기본 격자
+  // 그대로면 새 격자로 다시 만든다 — 손으로 고친 목록은 두지 않는다
+  const gridHint = el("p", { class: "hint" });
+  const isDefaultCases = () => JSON.stringify(cases) === JSON.stringify(serpentineCases(
+    machRange(DEFAULT_GRID.machFrom, DEFAULT_GRID.machTo, DEFAULT_GRID.machStep), DEFAULT_GRID.alts, DEFAULT_GRID.fuels));
+  fillGridFromProfile({ machFrom: fMachFrom, machTo: fMachTo, machStep: fMachStep, alts: fAlts, fuels: fFuels },
+    gridHint, () => { if (!runningJobId && isDefaultCases()) makeGrid(); });
 
   // 실행 버튼은 **전면**이다 — 격자를 고치는 패널 안에만 있으면 패널을 닫는 순간
   // 실행할 방법이 사라진다. 라벨이 케이스 수를 들고 있어 상태 표시도 겸한다
@@ -168,7 +177,7 @@ export function render() {
       lead: "격자의 점마다 평형해를 푼다 — 그 판정이 곧 «어디를 날 수 있나»의 답이고, "
         + "다음 단계(선형화·마진)는 여기서 수렴한 점 위에서만 성립한다.",
       actions: [runBtn, el("button", { onclick: makeGrid }, "격자 생성")],
-      extra: [summaryLine, progressBox, errBox],
+      extra: [summaryLine, gridHint, progressBox, errBox],
     }),
     // 비행 엔벨로프 맵 — 카드 밖, 페이지 위에 그대로 (캔버스가 자기 테두리를 갖는다)
     tabStage(mapBox),

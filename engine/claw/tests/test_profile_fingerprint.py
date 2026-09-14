@@ -18,7 +18,20 @@ def _fps(doc, variant=None):
 def test_excluded_fields_are_pinned():
     # 이 목록이 넓어지면 "같은 기체"의 정의가 넓어진다 — 조용히 늘면 안 된다
     assert FP_EXCLUDED == ("/id", "/name", "/description", "/is_example", "/variants",
-                           "/law/design/provenance", "/law/alloc/de_trim/provenance")
+                           "/law/design/provenance", "/law/alloc/de_trim/provenance", "/mission_template")
+
+
+def test_mission_template_does_not_change_either_fingerprint():
+    """화면 기본값은 계산에 쓰이지 않는다 — 고쳐도, 없어도 같은 기체다(옛 결과·스냅숏의 계보가 끊기지 않게)."""
+    base = _fps(load_example())
+    doc = load_example()
+    doc["mission_template"]["sim"]["climb"]["speed"] = 130.0
+    assert _fps(doc) == base
+    doc = load_example()
+    del doc["mission_template"]  # 이 절이 생기기 전 문서
+    assert _fps(doc) == base
+    doc["mission_template"] = None
+    assert _fps(doc) == base
 
 
 def test_fingerprints_are_16_hex():

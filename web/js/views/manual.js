@@ -43,8 +43,8 @@ const goto = (page) => () => { location.hash = `#blocks/${page}`; };
  * 사용이 26번 클릭이 되면 "필요할 때 연다"가 "매번 연다"가 된다.
  *
  * localStorage가 아니라 __모듈 변수__인 이유: 라우터는 해시가 바뀌면 뷰를 재렌더할
- * 뿐 재적재가 아니라 이걸로 충분하고(views/gains.js fitCfg와 같은 수법), 이 저장소엔
- * Web Storage 사용례가 0건이라 키 규약·예외 처리·사생활 창 대응을 새로 들이게 된다.
+ * 뿐 재적재가 아니라 이걸로 충분하고(views/gains.js fitCfg와 같은 수법), Web Storage는
+ * 새로고침을 넘어야 하는 값 — 헤더 기체 선택(lib/profile.js) — 에만 쓴다.
  * 새로고침하면 전부 닫힘 — "기본은 닫힘"이라는 요구와도 맞는다. */
 const openKinds = new Set();
 

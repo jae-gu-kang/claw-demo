@@ -26,7 +26,7 @@ uvicorn --factory claw_server:create_app --port 8000   # 모노레포 루트에�
 
 | 경로 | 내용 |
 |---|---|
-| `GET /api/health` | 헬스체크 |
+| `GET /api/health` | 헬스체크 — 버전·커밋·지형 팩·기체 저장소 휘발 여부(`profile_store.volatile`, `$CLAW_PROFILE_VOLATILE`) |
 | `GET /api/registry`, `GET /api/registry/{cat}/{name}/schema` | 컴포넌트 목록·파라미터 JSON 스키마 (폼 자동 생성) |
 | `POST /api/trim/batch` | 3단계: 트림 케이스 매트릭스 → 배치 작업 (202 + job, 판정 플래그 포함) |
 | `POST /api/analysis/margin-map` | 5단계: 케이스 격자 + PI 루프 스펙 → 선형화·모드 분류·마진 맵 |
@@ -37,8 +37,9 @@ uvicorn --factory claw_server:create_app --port 8000   # 모노레포 루트에�
 | `WS /api/ws/jobs/{id}` | 작업 진행률 푸시 (변화 시·종단 시 종료) |
 | `POST /api/verify/flight` | 탑재 C DAL A 검증 (202 + job) — 정적 규율·엄격 컴파일·유닛(파티션)+통합 비트 대조·라인/분기/MC/DC 커버리지·DO-178C 대응표, 판정 문구·표는 엔진 정본. 리포트는 소스 동봉 자립 증적 |
 | `GET /api/results`, `GET /api/results/{id}` | 저장 산출물 목록(메타)·본문 |
-| `GET`·`POST /api/profiles`, `GET`·`PUT`·`DELETE /api/profiles/{id}` | 기체 프로파일 목록·생성(가져오기)·조회(내보내기, `?revision=`)·리비전 갱신(`base_revision`, 낡으면 409)·삭제 — 예제 기체는 읽기 전용 (02 §5.6) |
+| `GET`·`POST /api/profiles`, `GET`·`PUT`·`DELETE /api/profiles/{id}` | 기체 프로파일 목록·생성(가져오기)·조회(내보내기, `?revision=`)·리비전 갱신(`base_revision`, 낡으면 409)·삭제 — 예제 기체는 읽기 전용, 목록은 읽을 수 없는 기체도 `unreadable`로 싣는다 (02 §5.6) |
 | `POST /api/profiles/validate`, `POST /api/profiles/parse-table` | 저장 없는 검증(오류는 문서 경로) · CSV 텍스트 → 표 JSON |
+| `GET /api/profiles/_form` | 기체 편집 폼 서술 — 칸 이름·단위·형식·선택지 (엔진 `claw.profile.form`, 06 §8) |
 
 계산 라우트(트림·분석·시뮬·게인·영향성·설계·탑재 C·검증)는 기체를 본문
 `profile: {id, variant?, revision?}` 또는 GET 쿼리

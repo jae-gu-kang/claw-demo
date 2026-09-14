@@ -113,6 +113,15 @@ def test_snapshot_outlives_the_profile_it_came_from(client, wait_job):
     assert snap["mass"]["m_empty"] == 900.0  # 이름표(id)는 먼저 남긴 기체의 것일 수 있어 보지 않는다
 
 
+def test_form_spec_is_served_and_does_not_shadow_profile_ids(client):
+    form = client.get("/api/profiles/_form")
+    assert form.status_code == 200
+    assert [s["key"] for s in form.json()["sections"]][:3] == ["geometry", "aero", "stall"]
+    assert "PropEngine" in form.json()["registry"]["propulsion"]
+    # `_`로 시작하는 id는 저장소가 거부한다 — 폼 경로가 실제 기체를 가릴 수 없다
+    assert client.post("/api/profiles", json={"document": _doc(pid="_form")}).status_code == 422
+
+
 def test_parse_table_reads_csv_text(client):
     ok = client.post("/api/profiles/parse-table", json={
         "csv_text": "mach,alpha_stall\n0.1,0.4\n0.5,0.33\n",
@@ -162,7 +171,58 @@ def test_unreadable_stored_document_is_409_not_500(client):
     (root / "rev-1.json").write_text('{"schema_version": 1, "id": "heavy-delta"}', encoding="utf-8")
     assert client.get("/api/profiles/heavy-delta").status_code == 409
     assert client.get("/api/analysis/vn-envelope?alt=1000&fuel=200&profile_id=heavy-delta").status_code == 409
-    assert [p["id"] for p in client.get("/api/profiles").json()] == ["example-delta"]  # 목록은 건너뛴다
+    listing = client.get("/api/profiles").json()
+    # 목록을 죽이지 않되 숨기지도 않는다 — 복구(삭제)할 id를 화면이 알아야 한다
+    assert [p["id"] for p in listing] == ["example-delta", "heavy-delta"]
+    assert listing[1]["unreadable"] is True and "heavy-delta" in listing[1]["reason"]
+
+
+def test_health_says_whether_saved_aircraft_survive_a_restart(tmp_path, monkeypatch):
+    """공개 데모(휘발 디스크)에서 "저장했는데 없어졌다"가 버그로 읽히지 않게 — 배포가 알려 준 대로 전한다."""
+    from fastapi.testclient import TestClient
+
+    from claw_server import create_app
+
+    with TestClient(create_app(data_dir=tmp_path / "a")) as c:
+        assert c.get("/api/health").json()["profile_store"] == {"volatile": False}
+    monkeypatch.setenv("CLAW_PROFILE_VOLATILE", "1")
+    with TestClient(create_app(data_dir=tmp_path / "b")) as c:
+        assert c.get("/api/health").json()["profile_store"] == {"volatile": True}
+    with TestClient(create_app(data_dir=tmp_path / "c", profile_volatile=False)) as c:
+        assert c.get("/api/health").json()["profile_store"] == {"volatile": False}
+    with TestClient(create_app(data_dir=tmp_path / "d", profile_volatile="0")) as c:  # bool("0")은 참이다
+        assert c.get("/api/health").json()["profile_store"] == {"volatile": False}
+
+
+def test_list_keeps_an_aircraft_whose_revision_file_is_missing(client):
+    """head는 있는데 리비전 파일이 없다 — 「지워짐」과 달리 같은 id 생성이 409라, 목록이 숨기면 복구할 길이 없다."""
+    client.post("/api/profiles", json={"document": _doc()})
+    (client.app.state.profiles.root / "heavy-delta" / "rev-1.json").unlink()
+    listing = client.get("/api/profiles").json()
+    assert [p["id"] for p in listing] == [EXAMPLE_ID, "heavy-delta"]
+    assert listing[1]["unreadable"] is True
+    assert client.delete("/api/profiles/heavy-delta").status_code == 204  # 목록이 알려 준 id로 치운다
+    assert [p["id"] for p in client.get("/api/profiles").json()] == [EXAMPLE_ID]
+
+
+def test_list_keeps_an_aircraft_whose_summary_fails(client, monkeypatch):
+    """조립 단계의 KeyError(레지스트리 오류가 KeyError다)가 "지워진 기체"로 오인돼 목록에서 사라지지 않는다."""
+    from claw.params.registry import RegistryError
+
+    from claw_server.profiles import ProfileStore
+
+    client.post("/api/profiles", json={"document": _doc()})
+    real = ProfileStore.summary
+
+    def failing(doc, revision):
+        if doc["id"] == "heavy-delta":
+            raise RegistryError("없는 추진 형식")
+        return real(doc, revision)
+
+    monkeypatch.setattr(ProfileStore, "summary", staticmethod(failing))
+    listing = client.get("/api/profiles").json()
+    assert [p["id"] for p in listing] == [EXAMPLE_ID, "heavy-delta"]
+    assert listing[1]["unreadable"] is True and "RegistryError" in listing[1]["reason"]
 
 
 def test_unreadable_head_is_409_and_delete_is_the_way_out(client):

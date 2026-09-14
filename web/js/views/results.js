@@ -267,13 +267,14 @@ function renderList(box, list, all, onToggle, brief) {
       : null,
     el("div", { class: "scroll-x" }, el("table", {},
     el("thead", {}, el("tr", {},
-      el("th", {}, "생성 시각"), el("th", {}, "종류"), el("th", {}, "id"),
+      el("th", {}, "생성 시각"), el("th", {}, "종류"), el("th", {}, "기체"), el("th", {}, "id"),
       el("th", {}, "건수"), el("th", {}, "지문(계보)"), el("th", {}, ""))),
     el("tbody", {}, shown.map((m) => el("tr", {},
       el("td", {}, m.created ? new Date(m.created * 1000).toLocaleString() : "—"),
       el("td", {}, kindLabel(m.kind),
         // 코드도 함께 낸다 — 우리말 이름만 내면 API·다른 화면과 대조가 안 된다
         el("span", { class: "hint", style: "margin-left:6px" }, m.kind ?? "")),
+      el("td", {}, aircraftCell(m.profile)),
       el("td", { class: "num" }, m.id),
       el("td", { class: "num" }, m.n ?? "—"),
       el("td", { class: "num" }, m.fingerprint || "—"),
@@ -282,6 +283,20 @@ function renderList(box, list, all, onToggle, brief) {
         " ", briefBtn(m, brief)),
     ))),
   ))));
+}
+
+/** 그 결과를 계산한 기체 — 결과 meta의 profile 블록(02 §5.6). 지금 헤더에서 고른 기체가 아니다.
+ *  블록이 없으면 기체 선택이 생기기 전(v1.03 이전)의 결과이거나 기체와 무관한 산출물(LLM 등)이다. */
+function aircraftCell(p) {
+  if (!p) {
+    return el("span", { class: "hint",
+      title: "기체 기록 없음 — v1.03 이전 결과(그때는 예제 기체뿐이었다)이거나 기체와 무관한 산출물" }, "—");
+  }
+  return el("span", {
+    title: `${p.id}${p.variant ? ` / ${p.variant}` : ""} · 리비전 ${p.revision ?? "—"} · 지문 ${p.fingerprint}`
+      + ` · 출처 ${p.source ?? "—"}`,
+  }, p.name ?? p.id, p.variant ? ` · ${p.variant}` : "",
+  p.is_example ? el("span", { class: "hint", style: "margin-left:6px" }, "예제") : null);
 }
 
 function renderSummary(box, list) {

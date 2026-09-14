@@ -62,3 +62,28 @@ test("errorText: pydantic 422 배열 → 줄단위 요약", () => {
 test("TERMINAL 상태 집합", () => {
   assert.deepEqual([...TERMINAL].sort(), ["cancelled", "done", "error"]);
 });
+
+test("고른 기체가 계산 요청에만 실린다 — 규칙은 lib/profile.js", async () => {
+  const { setSelection } = await import("./lib/profile.js");
+  setSelection({ id: "heavy-delta", variant: "full-stores" });
+  try {
+    mockFetch(202, { id: "j1" });
+    await api.post("/trim/batch", { cases: [] });
+    assert.deepEqual(JSON.parse(mockFetch.last.opts.body),
+      { cases: [], profile: { id: "heavy-delta", variant: "full-stores" } });
+    mockFetch(200, {});
+    await api.get("/analysis/vn-envelope?alt=1000");
+    assert.equal(mockFetch.last.url,
+      "/api/analysis/vn-envelope?alt=1000&profile_id=heavy-delta&profile_variant=full-stores");
+    await api.get("/results");
+    assert.equal(mockFetch.last.url, "/api/results");
+    await api.put("/profiles/heavy-delta", { base_revision: 1, document: {} });
+    assert.equal(mockFetch.last.opts.method, "PUT");
+    assert.deepEqual(JSON.parse(mockFetch.last.opts.body), { base_revision: 1, document: {} });
+    mockFetch(204, undefined);
+    assert.equal(await api.del("/profiles/heavy-delta"), null);
+    assert.equal(mockFetch.last.opts.method, "DELETE");
+  } finally {
+    setSelection(null);
+  }
+});

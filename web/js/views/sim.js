@@ -10,8 +10,8 @@ import { COND_KINDS, LON_AXES, pathUsage } from "../lib/mission.js";
 // 요청 조립·기본 미션·실행 조건 기본값은 lib가 정본 — 가이드 투어(views/tour.js)가
 // **같은 조립**을 쓴다. 두 벌이면 투어가 돌린 미션과 이 표가 조용히 갈린다
 import {
-  AP_PHI_MAX_FALLBACK, applyActuatorSchema, appliedFrom, buildSimRequest,
-  defaultModeRows, defaultWpRows, initialForm, RUNWAY_HDG,
+  AP_PHI_MAX_FALLBACK, DEFAULT_FORM, appliedFrom, applyProfileDefaults, buildSimRequest,
+  defaultModeRows, defaultWpRows, initialForm, profileSimDefaults, RUNWAY_HDG,
 } from "../lib/simrequest.js";
 import { planeViews, wpMarks } from "../lib/plot.js";
 import { atEnd as cursorAtEnd, dtSample, indexAt, isPlayable } from "../lib/playcursor.js";
@@ -28,6 +28,9 @@ import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createDutyPanel, invalidate as dutyInvalidate } from "./duty.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
+import { DOC_FAILED_HINT, MISSING_TEMPLATE_HINT, templateDefaults, untouchedUpdates } from "../lib/missiontemplate.js";
+import { firstTimeThisPage } from "./missionfill.js";
+import { selectedDocument } from "./profilepick.js";
 import { createProfileChart, createWpMap } from "./wpmap.js";
 
 // 기본 미션(발사 → 상승 → 순항 → 접근 → 플레어 → 미끄럼 → 정지)과 기본 웨이포인트,
@@ -53,6 +56,7 @@ let acceptRadiusOf = () => 0;
 // 뱅크 한계 [rad] — 웨이포인트 기하 판정의 선회 반경 근거. 폼 폴백으로 시작해
 // 레지스트리 스키마가 오면 실값으로 갈아 낀다(작동기 3칸과 같은 자기정렬 — 02 §5.5).
 let apPhiMax = AP_PHI_MAX_FALLBACK;
+let simVisit = 0; // 탭을 그린 차례 — 떠난 방문의 늦은 콜백이 지금 표·칸을 건드리지 않게
 /** 지금 쓸 뱅크 한계 — 블록도에서 오토파일럿을 주입했으면 그쪽이 이긴다.
  *
  *  **경고(checkWaypoints)와 미리보기(flyablePath)가 반드시 같은 값을 봐야 한다** —
@@ -163,6 +167,7 @@ function groupTitle(text, toggle) {
 }
 
 export function render() {
+  const visit = ++simVisit;
   // 탭을 떠났다 돌아오면 이전 DOM은 버려진다 — 그쪽을 밀던 타이머도 같이 정리
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
 
@@ -212,6 +217,25 @@ export function render() {
   const progressBox = el("div");
   const replayBox = el("div");
   const modeBox = el("div");
+  // 기본 미션(모드 표 속도·상승각·고도, 연료·시간·도달 반경)은 기체의 미션 템플릿 값이다 — 없으면 예제
+  // 기체에 맞춘 폴백이고 여기 그렇다고 적는다
+  const missionHint = el("p", { class: "hint" });
+  // 착륙 미끄럼도 기체 값(mission_template.sim.rollout_m) — 문서가 도착하면 문장을 그 자리에서 고친다
+  let rolloutM = GOHEUNG.rolloutM;
+  const rolloutSpans = [];
+  const rolloutText = (kind) => {
+    if (rolloutM == null) return "";
+    const win = touchdownWindowM(GOHEUNG, rolloutM);
+    return kind === "ground"
+      ? `접지 후 미끄럼이 ${rolloutM} m라, 활주로 안에 서려면 ${win} m 안에 접지해야 합니다. `
+      : `활주로 ${GOHEUNG.runwayLengthM} m라도 미끄럼 ${rolloutM} m는 굴러가므로, 활주로 안에 서려면 `
+        + `${win} m 안에 접지해야 합니다 — 산포를 활주로 전장과 견주면 안 됩니다. `;
+  };
+  const rolloutNote = (kind) => {
+    const span = el("span", {}, rolloutText(kind));
+    rolloutSpans.push([span, kind]);
+    return span;
+  };
   const wpBox = el("div");
 
   // 블록도 탭 '시뮬에 적용' 값 — 작동기는 필드에 프리필(최종 편집권은 여기),
@@ -257,25 +281,58 @@ export function render() {
   const readForm = () => Object.fromEntries(Object.entries(f).map(
     ([k, node]) => [k, node.type === "checkbox" ? node.checked : node.value]));
 
-  // 작동기 폴백(lib ACT_FALLBACK)은 엔진 기본값의 사본이라 조용히 어긋날 수 있다 —
-  // 스키마가 도착하면 **손대지 않은 칸만** 갱신한다(판정은 lib, 여기는 DOM 대입).
-  // 실패는 무시: 폴백으로 동작한다 (항법 기본값 7개가 어긋난 채 돌던 전례 — 01 v0.19)
-  if (!actApplied) {
-    api.get("/registry/actuator/SecondOrderActuator/schema").then((s) => {
-      const next = applyActuatorSchema(
-        { wn: f.wn.value, zeta: f.zeta.value, rate: f.rate.value }, s);
-      for (const key of ["wn", "zeta", "rate"]) f[key].value = next[key];
-    }).catch(() => {});
-  }
-  // 뱅크 한계도 같은 자기정렬 — 실패는 무시(폴백으로 판정한다). 도착하면 경고를
-  // 다시 그린다: 폴백과 실값이 다르면 선회 반경이 달라져 판정이 뒤집힐 수 있다
-  api.get("/registry/fcl/Autopilot/schema").then((s) => {
-    const d = Number(s?.properties?.phi_max?.default);
-    if (Number.isFinite(d) && d > 0 && d !== apPhiMax) {
-      apPhiMax = d;
+  // 기체 문서가 정본인 칸(레일·지상장치·작동기)과 뱅크 한계 — 고른 기체 문서가 도착하면 **손대지 않은
+  // 칸만** 그 기체 값으로 바꾼다(판정은 lib/simrequest.js). 폴백은 예제 기체 값의 사본이라 다른 기체를
+  // 고르면 틀린 값이다. 블록도 작동기 적용값이 있으면 작동기 칸은 그 값이 우선이다. 실패는 무시 —
+  // 폴백으로 동작한다. 뱅크 한계가 바뀌면 경고를 다시 그린다(선회 반경이 달라져 판정이 뒤집힐 수 있다)
+  let docApplied = false;
+  const applyDocDefaults = (doc) => {
+    if (visit !== simVisit || docApplied) return;
+    docApplied = true;
+    const d = profileSimDefaults(doc);
+    const before = readForm();
+    const next = applyProfileDefaults(before, d.form, { skip: actApplied ? ["wn", "zeta", "rate"] : [] });
+    for (const key of Object.keys(d.form)) {
+      const node = f[key];
+      if (!node || next[key] === before[key]) continue;
+      if (node.type === "checkbox") {
+        node.checked = next[key];
+        node.dispatchEvent?.(new Event("change")); // 토글에 묶인 칸 표시가 따라오게
+      } else {
+        node.value = next[key];
+      }
+    }
+    if (d.phiMax != null && d.phiMax !== apPhiMax) {
+      apPhiMax = d.phiMax;
       renderWpNotice();
     }
-  }).catch(() => {});
+    // 미션 템플릿 — 손대지 않은 미션 칸과 모드 표(기본 그대로일 때만)를 그 기체 값으로
+    const t = templateDefaults(doc);
+    if (t.sim) {
+      const up = untouchedUpdates(readForm(), DEFAULT_FORM, t.sim.form);
+      for (const [key, v] of Object.entries(up)) f[key].value = v;
+      // 도달 반경 칸의 input 청취자가 지도 원을 다시 그린다 — 코드로 바꾼 값은 스스로 알리지 않는다
+      if (up.accept !== undefined) f.accept.dispatchEvent?.(new Event("input"));
+      // 모드 표는 모듈 상태라 페이지당 한 번만 — 다시 들어올 때 사용자가 폴백과 같게 고친 표를 덮지 않게
+      if (firstTimeThisPage("sim.modeRows") && JSON.stringify(modeRows) === JSON.stringify(defaultModeRows())) {
+        modeRows = defaultModeRows(t.sim.rows);
+        renderModeTable(modeBox);
+      }
+      rolloutM = t.rolloutM;
+    } else {
+      missionHint.textContent = MISSING_TEMPLATE_HINT;
+      rolloutM = null; // 예제 기체의 실측을 이 기체 값인 척 말하지 않는다
+    }
+    // 속도·도달 반경이 바뀌면 선회 반경 판정이 뒤집힐 수 있다 — 모드 표의 속도 칸이 그러는 것과 같은 이유
+    renderWpNotice();
+    for (const [span, kind] of rolloutSpans) span.textContent = rolloutText(kind);
+  };
+  selectedDocument().then(applyDocDefaults).catch(() => {
+    if (visit !== simVisit) return;
+    missionHint.textContent = DOC_FAILED_HINT;
+    rolloutM = null;
+    for (const [span, kind] of rolloutSpans) span.textContent = rolloutText(kind);
+  });
 
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
@@ -467,6 +524,10 @@ export function render() {
       // 조립은 **lib 한 벌**이다 — 가이드 투어(views/tour.js)가 같은 함수로 같은
       // 요청을 만든다. 표가 틀리면 여기서 던진다(검증 정본 buildModes·buildWaypoints).
       // 적용값(store 5키)은 **제출 순간에** 읽는다.
+      // 기체 기본값이 칸에 앉기 전에 보내지 않는다 — 첫 받기가 실패했다가 지금 받은 문서면 여기서 채운다
+      // (이미 채웠으면 그대로다 — 손대지 않은 칸만 바꾸는 규칙은 같다)
+      const docNow = await selectedDocument().catch(() => null);
+      if (docNow) applyDocDefaults(docNow);
       const { req, snapshot, missing } = buildSimRequest(
         readForm(), modeRows, wpRows, appliedFrom((k) => store.get(k)));
       if (missing.length) {
@@ -681,8 +742,7 @@ export function render() {
         "표고는 위 '고도' 칸이고 기준면 감시도 그 값을 씁니다. ",
         `방위 ${RUNWAY_HDG} rad(3.417°)·길이 ${GOHEUNG.runwayLengthM} m는 고흥 `,
         "활주로를 항공영상에서 잰 값입니다 — 공표 제원 1.2 km와 0.4% 안에서 맞습니다. ",
-        `접지 후 미끄럼이 ${GOHEUNG.rolloutM} m라, 활주로 안에 서려면 `,
-        `${touchdownWindowM()} m 안에 접지해야 합니다. `,
+        rolloutNote("ground"),
         "아래 착륙 요약은 접지→정지 ", el("strong", {}, "거리"), "만 이 길이와 ",
         "견주고 접지 ", el("strong", {}, "위치"), "는 보지 않습니다 — ",
         "활주로에 내렸는지는 판정하지 않습니다.",
@@ -692,9 +752,9 @@ export function render() {
        field("이탈속도 [m/s]", f.railExit)], [
         "레일 구간은 힘이 아니라 구속이라, 자세가 고정된 등가속 운동입니다 ",
         "— 해석해로 정확히 적분하므로 스텝 수와 무관합니다. ",
-        "이탈속도 81.5 m/s는 트림 실속속도 70.9의 1.15배이고, 레일 10 m에서 ",
-        "그 속도는 33.9 g를 요구합니다 — 종방향 발사하중 한계가 아직 없어 ",
-        "(구조 한계표의 6.0은 Nz입니다) 결과에 '미판정'으로 표시됩니다.",
+        "기본값은 고른 기체 문서(ground.rail)의 값입니다 — 이탈속도는 보통 트림 실속속도의 1.15배쯤으로 ",
+        "잡고, 레일이 짧을수록 그 속도가 요구하는 가속이 커집니다. 기체 문서에 종방향 발사하중 한계",
+        "(structural.n_x_launch)가 없으면 결과에 '미판정'으로 표시됩니다 — 구조 한계표의 Nz와는 다른 축입니다.",
       ]),
     optGroup("측지 원점", f.originOn,
       [field("위도 [deg]", f.originLat), field("경도 [deg]", f.originLon)], [
@@ -716,9 +776,7 @@ export function render() {
         ? "블록도 적용값 사용 중 (시드만 여기서 우선). "
         : "미지정 항목은 엔진 기본값 — 편집은 블록도 탭 항법 블록. ",
       "RTK는 접지를 부드럽게 하지 않습니다 — 접지 지점을 반복 가능하게 합니다. ",
-      `활주로 ${GOHEUNG.runwayLengthM} m라도 미끄럼 ${GOHEUNG.rolloutM} m는 `,
-      `굴러가므로, 활주로 안에 서려면 ${touchdownWindowM()} m 안에 접지해야 `,
-      "합니다 — 산포를 활주로 전장과 견주면 안 됩니다. ",
+      rolloutNote("sensor"),
       // **수치를 옮겨 적지 않는다.** 산포는 항법 등급·접근 프로파일·게인
       // 스케줄의 함수라 여기 적으면 낡는데, 웹은 엔진을 읽지 않고 엔진은
       // 여기를 읽지 않아 **낡아도 아무것도 빨개지지 않는다**. UI 결정(RTK 토글)에
@@ -786,6 +844,7 @@ export function render() {
           el("p", { class: "hint", style: "margin:0 0 10px" },
             "종방향 축은 모드마다 하나다 — 피치(자세 구간)·강하율(내려가는 속도를 잡는 "
             + "구간)·고도(순항) 중 하나. 헤딩에 \"path\"를 적은 모드만 웨이포인트를 따른다."),
+          missionHint,
           modeBox,
         ] },
       // 초안은 「미션」 그룹 — wp·modes와 연속 배치여야 그룹 라벨이 한 번만 선다

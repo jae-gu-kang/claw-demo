@@ -1,12 +1,13 @@
 // 시뮬 요청 조립 — 시뮬 탭과 가이드 투어가 쓰는 한 벌 (sim.js run() 이식의 동등성 고정)
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { buildModes, buildWaypoints } from "./mission.js";
 import { GOHEUNG } from "./site.js";
 import {
-  ACT_FALLBACK, DEFAULT_FORM, appliedFrom, applyActuatorSchema, buildSimRequest,
-  defaultModeRows, defaultWpRows, initialForm,
+  ACT_FALLBACK, AP_PHI_MAX_FALLBACK, DEFAULT_FORM, appliedFrom, applyProfileDefaults, buildSimRequest,
+  defaultModeRows, defaultWpRows, initialForm, profileSimDefaults,
 } from "./simrequest.js";
 
 const NONE = appliedFrom(() => undefined); // store가 빈 상태
@@ -167,11 +168,33 @@ test("작동기 폼 초기값 — 적용본이 있으면 그 값, 없으면 폴�
   assert.equal(f.tEnd, DEFAULT_FORM.tEnd); // 나머지는 기본 폼 그대로
 });
 
-test("스키마 기본값은 손대지 않은 칸(폴백 그대로)에만 들어간다", () => {
-  const schema = { properties: { wn: { default: 25 }, zeta: { default: 0.9 } } };
-  const out = applyActuatorSchema({ ...DEFAULT_FORM, zeta: "0.75" }, schema);
-  assert.equal(out.wn, "25"); // 폴백이었다 → 갱신
-  assert.equal(out.zeta, "0.75"); // 사용자가 고쳤다 → 유지
-  assert.equal(out.rate, String(ACT_FALLBACK.rate)); // 스키마에 없다 → 유지
-  assert.equal(applyActuatorSchema(DEFAULT_FORM, null).wn, DEFAULT_FORM.wn); // 스키마 실패
+test("기체 문서 기본값 — 폴백은 예제 문서의 사본이고, 손대지 않은 칸만 고른 기체 값으로 바뀐다", () => {
+  const example = JSON.parse(readFileSync(
+    new URL("../../../engine/claw/profile/examples/delta_demo.json", import.meta.url), "utf8"));
+  const d = profileSimDefaults(example);
+  // 폴백 사본이 예제 문서와 어긋나면 여기서 빨개진다 (앙각만 네 자리로 줄였다)
+  assert.equal(d.form.railLen, DEFAULT_FORM.railLen);
+  assert.equal(d.form.railExit, DEFAULT_FORM.railExit);
+  assert.ok(Math.abs(Number(d.form.railAngle) - Number(DEFAULT_FORM.railAngle)) < 5e-5);
+  assert.deepEqual([d.form.wn, d.form.zeta, d.form.rate], [DEFAULT_FORM.wn, DEFAULT_FORM.zeta, DEFAULT_FORM.rate]);
+  assert.equal(d.phiMax, AP_PHI_MAX_FALLBACK);
+  assert.deepEqual([d.form.launchOn, d.form.groundOn], [true, true]);
+
+  const other = JSON.parse(JSON.stringify(example));
+  other.actuator.params.wn = 45;
+  other.ground.rail = null; // 발사 레일이 없는 기체
+  other.law.design.autopilot.phi_max = 0.5;
+  const o = profileSimDefaults(other);
+  assert.deepEqual([o.form.launchOn, o.form.railLen, o.form.wn, o.phiMax], [false, "", "45", 0.5]);
+  const out = applyProfileDefaults({ ...DEFAULT_FORM, zeta: "0.75", railLen: "12" }, o.form);
+  assert.equal(out.wn, "45", "폴백 그대로였다 → 기체 값");
+  assert.equal(out.zeta, "0.75", "사용자가 고쳤다 → 유지");
+  assert.equal(out.railLen, "12", "고친 칸은 둔다 — 토글이 꺼져 요청에 실리지 않는다");
+  assert.equal(out.launchOn, false);
+  assert.equal(applyProfileDefaults(DEFAULT_FORM, o.form, { skip: ["wn"] }).wn, DEFAULT_FORM.wn,
+    "블록도 작동기 적용값이 있으면 작동기 칸은 채우지 않는다");
+  other.law.design = null;
+  other.ground.skid = null;
+  assert.deepEqual([profileSimDefaults(other).phiMax, profileSimDefaults(other).form.groundOn], [null, false]);
+  assert.deepEqual(profileSimDefaults(null), { form: {}, phiMax: null });
 });

@@ -1,5 +1,7 @@
 /** 서버(M13) 통신 래퍼 — REST + 작업 진행 구독(WS, 폴백 폴링). 이 모듈만 통신 담당. */
 
+import { currentSelection, withProfile } from "./lib/profile.js";
+
 const BASE = "/api";
 export const TERMINAL = new Set(["done", "error", "cancelled"]);
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -13,6 +15,8 @@ export class ApiError extends Error {
 }
 
 async function request(method, path, body) {
+  // 헤더에서 고른 기체를 계산 요청에 싣는다 — 어느 요청이 받는가는 lib/profile.js 한 곳 (02 §5.6)
+  ({ path, body } = withProfile(method, path, body, currentSelection()));
   const opts = { method, headers: {} };
   if (body !== undefined) {
     opts.headers["content-type"] = "application/json";
@@ -37,6 +41,8 @@ async function request(method, path, body) {
 export const api = {
   get: (path) => request("GET", path),
   post: (path, body) => request("POST", path, body),
+  put: (path, body) => request("PUT", path, body),
+  del: (path) => request("DELETE", path),
 };
 
 /** 422 detail(pydantic 오류 배열)을 사람이 읽을 줄단위 텍스트로. */

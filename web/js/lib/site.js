@@ -32,7 +32,9 @@ export const GOHEUNG = {
   originLonDeg: 127.212067,
   runwayHeadingRad: 0.05964, // 진방위 3.417°
   runwayLengthM: 1205.0,
-  // 접지에서 정지까지 (engine/claw/tests/test_landing.py, 실측 868.8 m).
+  // 접지에서 정지까지 (engine/claw/tests/test_landing.py, 실측 868.8 m) — **예제 기체의 실측이다.**
+  // 장소가 아니라 기체(플레어 속도·스키드 마찰)의 값이라 기체 문서 mission_template.sim.rollout_m이 정본이고
+  // 이 칸은 그 사본(폴백)이다(missiontemplate.test.js가 대조).
   // 엔진의 허용대 rel=0.12는 측정 불확실도가 아니라 회귀가 안 깨지도록 넉넉히 잡은
   // 밴드다 — 넓다는 것이 값이 안정적이라는 뜻은 아니다. **민감도에 주의**: 접지 창은
   // 두 큰 수의 차라 미끄럼이 12% 움직이면 창은 31% 움직인다. 플레어 속도(80 m/s)나
@@ -46,6 +48,6 @@ export const GOHEUNG = {
  * 실제로 허용되는 접지 지점의 폭은 그만큼 짧다. 활주로가 1,500 m에서 실측 1,205 m로
  * 줄었을 때 이 구별을 놓쳐 "산포가 겨우 들어간다"고 쓴 적이 있다(리뷰 지적).
  */
-export function touchdownWindowM(site = GOHEUNG) {
-  return site.runwayLengthM - site.rolloutM;
+export function touchdownWindowM(site = GOHEUNG, rolloutM = site.rolloutM) {
+  return site.runwayLengthM - rolloutM;
 }

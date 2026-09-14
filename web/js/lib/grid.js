@@ -111,14 +111,17 @@ export function orderCaseNames(names) {
 // 세 고도·연료 200 kg는 위 엔벨로프를 **잰 조건**이라 마하와 같이 묶여 있다 —
 // 무게가 아래 끝의 α 여유를 정하므로 셋 중 하나만 바꿔도 위 구간은 무효다
 // (grid.test.js가 그 전제까지 못박는다).
+// **이 값은 예제 기체의 격자다**(기체 문서 mission_template.trim_grid의 사본 — missiontemplate.test.js가
+// 대조한다). 다른 기체를 고르면 그 기체 템플릿의 격자가 손대지 않은 칸을 채운다 — 위 엔벨로프 수치는
+// 예제 기체에서 잰 것이라 그 기체에는 맞지 않는다
 export const DEFAULT_GRID = {
   machFrom: 0.3, machTo: 0.55, machStep: 0.05,
   alts: [100, 1000, 3000], fuels: [200],
 };
 
-/** 기본 격자의 이름 붙은 케이스 18건 — 실행 순서는 서펜타인(인접 트림 시드). */
-export function defaultGridCases() {
+/** 기본 격자의 이름 붙은 케이스 — 실행 순서는 서펜타인(인접 트림 시드). 인자 없이 부르면 위 폴백 18건,
+ *  고른 기체의 미션 템플릿 격자(lib/missiontemplate.js templateDefaults)를 넘기면 그 격자다. */
+export function defaultGridCases(grid = DEFAULT_GRID) {
   return nameCases(serpentineCases(
-    machRange(DEFAULT_GRID.machFrom, DEFAULT_GRID.machTo, DEFAULT_GRID.machStep),
-    DEFAULT_GRID.alts, DEFAULT_GRID.fuels));
+    machRange(grid.machFrom, grid.machTo, grid.machStep), grid.alts, grid.fuels));
 }

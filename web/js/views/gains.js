@@ -26,6 +26,8 @@ import {
   checksSummary, evaluateRequest, normalizeEvalReport,
 } from "../lib/evaluate.js";
 import { defaultGridCases } from "../lib/grid.js";
+import { selectedDefaults } from "./missionfill.js";
+import { DOC_FAILED_HINT, MISSING_TEMPLATE_HINT } from "../lib/missiontemplate.js";
 import {
   GAIN_KEYS, alignTables, appliedTables, defaultSelection, schedSummary, slotRows,
   storePayload, toggleSlot, zeroTables,
@@ -73,6 +75,9 @@ let evalStrip = { status: null, result: null, error: null, stale: false, depth: 
 // 형상·값 편집 핸들러(모듈 함수)에서 카드 stale을 켜는 통로 — render()가 실제
 // 구현으로 갈아 끼운다 (핸들러가 렌더 클로저 밖에 살기 때문)
 let markStale = () => {};
+// 고른 기체의 미션 템플릿 격자 — 영향성 격자 칸과 같은 원천(views/missionfill.js). 없으면 폴백(예제 격자)
+let templateGrid = null;
+let templateNote = ""; // 템플릿이 없거나 기체 문서를 못 받았으면 그 사실 — 케이스 수 줄에 붙인다
 
 export function render() {
   // 조각으로 갈라 둔다 — 어느 것이 전면이고 어느 것이 패널인지는 아래 배치가 정한다
@@ -88,6 +93,11 @@ export function render() {
   // ── 튜닝 지표 카드 (평가와 같은 카드, views/evalcards.js 공용) ──────
   const stripStatus = el("span", { class: "hint" });
   const stripCards = el("div", { style: "margin-top:8px" });
+  selectedDefaults().then((d) => {
+    templateGrid = d?.grid ?? null;
+    templateNote = !d ? DOC_FAILED_HINT : d.hasTemplate ? "" : MISSING_TEMPLATE_HINT;
+    if (!evalStrip.status) paintStrip(); // 아직 안 잰 상태의 케이스 수가 그 격자를 말하게
+  });
 
   function paintStrip() {
     clear(stripCards);
@@ -97,8 +107,8 @@ export function render() {
       // 케이스 수는 세어서 쓴다 — 손으로 적으면 DEFAULT_GRID가 바뀔 때
       // 화면만 옛 수를 말한다(v0.72까지 「15케이스」로 남아 있었다)
       stripStatus.textContent =
-        `아직 안 쟀다 — 기본 격자 ${defaultGridCases().length}케이스(영향성 탭과 동일), `
-        + "미적용 편집 포함 형상으로 잰다" + stale;
+        `아직 안 쟀다 — 기본 격자 ${defaultGridCases(templateGrid ?? undefined).length}케이스(영향성 탭과 동일), `
+        + "미적용 편집 포함 형상으로 잰다" + stale + (templateNote ? ` · ${templateNote}` : "");
       return;
     }
     stripStatus.textContent = evalStrip.status + stale;
@@ -119,7 +129,7 @@ export function render() {
 
   async function runGainEval(depth) {
     if (!catalog) return;
-    const cases = defaultGridCases();
+    const cases = defaultGridCases(templateGrid ?? undefined);
     evalStrip = { status: `제출 중 — 케이스 ${cases.length}건`, result: null,
                   error: null, stale: false, depth };
     paintStrip();

@@ -14,7 +14,7 @@ TERMINAL = ("done", "error", "cancelled")
 def _no_deploy_env(monkeypatch):
     """개발자 셸의 배포용 환경변수 오염 차단 — 테스트는 명시 주입만 쓴다."""
     for var in ("CLAW_ACCESS_PASSWORD", "CLAW_RESULT_LIMIT",
-                "CLAW_WEB_DIR", "CLAW_SERVER_DATA", "CLAW_PROFILE_DATA",
+                "CLAW_WEB_DIR", "CLAW_SERVER_DATA", "CLAW_PROFILE_DATA", "CLAW_PROFILE_VOLATILE",
                 # 배포 형상 변수 — 로컬에서 재현하느라 켜 뒀을 수 있다
                 "CLAW_GIT_COMMIT", "RENDER_GIT_COMMIT",
                 # LLM 백엔드 — 셸의 진짜 키·사내 URL로 테스트가 바깥에 나가면

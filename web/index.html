@@ -16,6 +16,8 @@
     <h1>CLAW <span class="sub">비행제어법칙 설계·해석·시뮬레이션</span></h1>
     <nav id="nav">
       <!-- 설계 파이프라인 — 왼쪽에서 오른쪽이 업무 순서다.
+           맨 앞은 기체다(v1.04): 무엇을 설계하는지부터 정한다. 헤더 선택기에서 고른 기체가
+           오른쪽 모든 단계의 입력이고, 이 탭은 그 기체 문서를 만들고 고치는 자리다.
            구조·영역을 정하고(블록도·엔벨로프·트림), 게인을 잡고(게인·마진 맵·
            자동 설계 — 전부 선형), 미션 하나를 실제로 날려 보고(시뮬레이션),
            그 궤적을 눈으로 확인한 뒤(가상환경), 격자 전체로 판정하고(영향성),
@@ -29,6 +31,7 @@
            영향성이 자동 설계 뒤인 근거는 그대로다 — 자동 설계는 선형 네 지표만
            자기 설계점에서 보므로(docs 04 §6) 추종·과도·타면·권한·동시명령·
            회복은 영향성이 처음 **판정**하고, 그 판정을 통과해야 코드로 낼 형상이 된다. -->
+      <a href="#aircraft" data-view="aircraft">기체</a>
       <a href="#blocks" data-view="blocks">블록도</a>
       <a href="#envelope" data-view="envelope">엔벨로프</a>
       <a href="#trim" data-view="trim">트림</a>
@@ -44,6 +47,7 @@
            결과는 지금까지 낸 산출물 목록(계보 원장)이라 어느 단계에도 속하지 않는다. -->
       <a href="#results" data-view="results">결과</a>
     </nav>
+    <span id="profile-pick" class="profile-pick"></span>
     <span id="health" class="health">…</span>
   </header>
   <main id="view"></main>
