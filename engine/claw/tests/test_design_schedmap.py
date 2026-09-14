@@ -95,6 +95,26 @@ def test_margin_point_matches_direct_composition(setup):
     assert out["roll_rate"]["kind"] == "bandwidth" and out["roll_rate"]["roll_lambda"] > 0
 
 
+def test_gain_sign_opposite_to_the_plant_fails_even_when_it_matches_the_design(setup):
+    """설계부터 부호가 틀렸으면 설계 부호 대조로는 못 잡는다 — 루프를 뒤집어야만 PM>0인 것을 결함으로 친다."""
+    from claw.design.criteria import MarginCriteria
+
+    ac, tables, design = setup
+    case = _case(0.6)
+    tr = trim_level(ac, case)
+    lm = linearize(ac, tr)
+    flipped = {**design, "pitch.kp": -design["pitch.kp"], "pitch.ki": -design["pitch.ki"]}
+    no_pitch_att_tables = {k: v for k, v in tables.items() if k not in ("pitch.kp", "pitch.ki")}
+    out = scheduled_margin_point(
+        lm, no_pitch_att_tables, flipped, case, criteria=MarginCriteria(),
+        actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
+    )
+    att = out["pitch_att"]
+    assert att["orientation"] == -1 and att["pm_deg"] > 45.0  # 수치만 보면 건강하다
+    assert att["status"] == "fail" and att["sign_mismatch"] is True
+    assert "sign_flip" not in att  # 설계와 같은 부호라 종전 대조로는 안 잡히던 자리
+
+
 def test_design_point_composition_is_sane(setup):
     """게인 출처점(M0.6 h1000)에서 조성 판정이 정상 범위 — 자세 마진 PM>0, 댐퍼 감쇠 개선.
 

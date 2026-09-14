@@ -149,6 +149,13 @@ def scheduled_margin_point(
         entry = {"kind": "margin", **m, "orientation": orient, "gains": {"kp": kp, "ki": ki}}
         if criteria is not None:
             entry["status"] = criteria.judge(m)
+        if orient != 1:
+            # 루프를 뒤집어야만 PM>0 — 실효 게인 부호가 플랜트와 반대(양의 되먹임)다. 설계 부호와의 대조
+            # (_apply_sign_check)는 설계 부호가 맞다는 전제라, 설계부터 틀렸거나 0이면 못 잡는 자리다
+            entry["sign_mismatch"] = True
+            entry["status"] = "fail"
+            entry["note"] = ("루프를 뒤집어야만 위상여유가 난다 — 실효 게인 부호가 플랜트와 반대다(양의 되먹임)."
+                             " 마진 수치는 뒤집은 루프의 값이라 건강해 보인다")
         _apply_sign_check(entry, eff, design, [f"{group}.kp", f"{group}.ki"])
         out[f"{group}_att"] = entry
     return out

@@ -22,6 +22,8 @@ import { lineChartCanvas } from "./plots.js";
 import { renderProfileForm } from "./profileform.js";
 import { browserStorage, refresh as refreshPicker, restoredNotice, switchTo } from "./profilepick.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
+import { deriveSummary, deTrimStatus, designSource, seedSummary } from "../lib/quickseed.js";
+import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
 // 탭 재진입에도 목록·열어 둔 문서·편집 중 글·열린 패널 유지 (모듈 스코프 규약)
 let list = null;
@@ -41,6 +43,13 @@ const viewer = {
   result: null, forId: null, error: null,
 };
 const AXIS_UNIT = { alpha: "rad", beta: "rad", de: "rad", da: "rad", dr: "rad", mach: "", alt: "m" };
+// 기체를 고치는 잡(초기 게인 탐색·δe_trim 도출) — 도는 잡(탭을 떠났다 와도 진행바를 다시 붙인다)·마지막 결과·
+// 시뮬 확인 체크. 한 번에 하나만 돈다(둘 다 같은 기준 리비전 위에 쓰므로 나중 것이 충돌한다)
+let seedJob = null; // {id, profileId, kind: "quick_seed"|"derive_de_trim"}
+let seedResult = null; // {profileId, kind, body}
+let seedSimCheck = false;
+const AP_SOURCE = { heuristic: "휴리스틱", registry_default: "레지스트리 기본값", document: "문서 값",
+  structural_limit: "구조 한계로 깎음" };
 
 const failText = (e) => (e instanceof ApiError && profileErrorText(e.detail)) || errorText(e);
 const path = (id) => `/profiles/${encodeURIComponent(id)}`;
@@ -61,6 +70,7 @@ export function render() {
   const docBox = el("div");
   const variantBox = el("div");
   const viewerBox = el("div");
+  const seedBox = el("div");
   const importBox = el("div");
 
   const showError = (e) => clear(errBox).append(
@@ -117,6 +127,9 @@ export function render() {
         : el("tr", { class: p.id === sel ? "selected" : null },
           el("td", {}, p.name,
             p.is_example ? el("span", { class: "hint", style: "margin-left:6px" }, "예제 · 읽기 전용") : null,
+            p.design_source === null ? el("span", { class: "hint", style: "margin-left:6px" }, "게인 미설계") : null,
+            p.design_source === "quick_seed"
+              ? el("span", { class: "hint", style: "margin-left:6px" }, "초기 탐색 게인 — 자동 설계 전") : null,
             p.id === sel ? el("span", { class: "hint", style: "margin-left:6px" }, "← 계산에 쓰는 중") : null),
           el("td", { class: "num" }, p.id),
           el("td", { class: "num" }, p.revision),
@@ -163,6 +176,7 @@ export function render() {
       paintDoc();
       paintVariants();
       paintViewer();
+      paintSeed();
     }
   };
 
@@ -216,6 +230,7 @@ export function render() {
       }
       paintDoc();
       paintVariants();
+      paintSeed(); // 리비전이 바뀌었다 — 탐색은 저장한 리비전에서 돈다
       await load();
       refreshPicker();
       // 지금 고른 기체를 고쳤다 — 다른 탭이 옛 리비전에서 만든 상태(게인 카탈로그 등)를 들고 있을 수 있다.
@@ -584,6 +599,178 @@ export function render() {
     paintChart();
   };
 
+  // ── 초기 게인 빠른 탐색 (패널) ─────────────────────────────────────────────
+  // 저장된 리비전에서 서버 잡이 돈다(편집 중 글은 보내지 않는다). 채택되면 서버가 새 리비전으로 쓰고, 여기서는
+  // 목록·열린 문서를 다시 받는다. 부호·크기·출처는 엔진이 정한다 — 이 패널은 결과를 줄 세울 뿐이다
+  const seedResultView = (body) => {
+    const s = seedSummary(body);
+    const num = (v) => (typeof v === "number" ? Number(v.toPrecision(4)).toString() : "—");
+    return el("div", { style: "margin-top:8px" },
+      el("p", { class: s.ok ? "notice" : "error-box" }, s.headline),
+      s.rows.length ? el("div", { class: "scroll-x" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "자리"), el("th", {}, "값"), el("th", {}, "부호 근거"),
+          el("th", {}, "쓴 앵커"), el("th", {}, "사유"))),
+        el("tbody", {}, s.rows.map((r) => el("tr", {},
+          el("td", { class: "num" }, r.name), el("td", { class: "num" }, num(r.value)),
+          el("td", { class: "num" }, r.basis), el("td", { class: "num" }, r.used),
+          el("td", {}, r.reason ? `${r.reason} — ${r.reasonText ?? ""}` : "")))))) : null,
+      s.anchors.length ? el("p", { class: "hint" }, `앵커(q̄ 중앙·최저·최고): ${s.anchors.join(" · ")}`) : null,
+      Object.keys(s.autopilotSources).length
+        ? el("p", { class: "hint" }, "자동조종 자리 출처: "
+          + Object.entries(s.autopilotSources).map(([k, n]) => `${AP_SOURCE[k] ?? k} ${n}`).join(" · ")
+          + (s.scheduleCreated ? " · 게인 스케줄을 새로 만들었습니다(q̄ 역비)" : ""))
+        : null,
+      s.warnings.length ? el("details", {}, el("summary", {}, `검증 경고 ${s.warnings.length}건`),
+        el("ul", {}, s.warnings.map((w) => el("li", {}, w)))) : null,
+      s.notes.map((n) => el("p", { class: "hint" }, n)));
+  };
+
+  const deriveResultView = (body) => {
+    const s = deriveSummary(body);
+    const st = s.stats;
+    const deg = (v) => (typeof v === "number" ? `${(v * 180 / Math.PI).toFixed(2)}°` : "—");
+    return el("div", { style: "margin-top:8px" },
+      el("p", { class: s.ok ? "notice" : "error-box" }, s.headline),
+      s.rows.length ? el("div", { class: "scroll-x" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "마하"), el("th", {}, "δe_trim [rad]"), el("th", {}, "[°]"))),
+        el("tbody", {}, s.rows.map((r) => el("tr", {}, el("td", { class: "num" }, r.mach),
+          el("td", { class: "num" }, Number(r.value.toPrecision(5)).toString()), el("td", { class: "num" }, deg(r.value))))))) : null,
+      st ? el("p", { class: "hint" },
+        `검사 ${st.checks}점 · 요구 미달 ${st.shortfall} · 과잉 최대 ${deg(st.excessMax)} · 보정 ${st.iterations}회 · `
+        + `뺀 트림(미수렴·포화) ${st.excluded}`
+        + (st.undefined.length ? ` · 요구가 없어 이웃 값으로 채운 마하 ${st.undefined.join(", ")}` : "")) : null);
+  };
+
+  const seedDone = async (job) => {
+    // 같은 잡에 감시자가 여럿 붙는다(도는 동안 패널을 다시 그릴 때마다) — 지금 잡이 아니면 이미 처리했거나 다음
+    // 잡이 돌고 있다. 그대로 두면 늦은 감시자가 다음 잡을 자기 대상으로 알고 지운다
+    if (seedJob?.id !== job.id) {
+      paintSeed();
+      return;
+    }
+    const target = seedJob;
+    seedJob = null;
+    if (job.status === "error") showError(`초기 게인 탐색 작업 오류 — ${job.error ?? ""}`);
+    if (!target || cancelledWithoutResult(job) || !job.result_id) {
+      paintSeed();
+      return;
+    }
+    try {
+      const body = await api.get(`/results/${encodeURIComponent(job.result_id)}`);
+      seedResult = { profileId: target.profileId, kind: target.kind, body };
+      if (body.written) {
+        await load();
+        refreshPicker();
+        if (opened?.id === target.profileId && !opened.dirty) {
+          opened = fresh(await api.get(path(target.profileId)));
+          paintDoc();
+          paintVariants();
+          paintViewer();
+        }
+        if (currentSelection()?.id === target.profileId && globalThis.confirm?.(
+          `지금 계산에 쓰는 기체에 ${target.kind === "derive_de_trim" ? "δe_trim 표" : "초기 게인"}을 리비전 `
+          + `${body.profile?.revision}로 저장했습니다. 다른 탭이 옛 리비전에서 `
+          + "만든 상태를 들고 있을 수 있어 페이지를 다시 읽는 것이 안전합니다. 다시 읽을까요?")) {
+          globalThis.location.reload();
+          return;
+        }
+      }
+    } catch (e) {
+      showError(e);
+    }
+    paintSeed();
+  };
+
+  const runSeed = async () => {
+    if (!opened || opened.body.is_example) return;
+    if (opened.dirty) {
+      showError("저장하지 않은 편집이 있습니다 — 초기 게인 탐색은 저장한 리비전에서만 돕니다. 먼저 저장합니다.");
+      return;
+    }
+    if (opened.body.document.law?.design != null && !globalThis.confirm?.(
+      "지금 게인을 탐색 결과로 바꿔 새 리비전으로 저장합니다(옛 리비전은 남습니다). 탐색할까요?")) return;
+    try {
+      clear(errBox);
+      const job = await api.post(`${path(opened.id)}/quick-seed`,
+        { base_revision: opened.body.revision, sim_check: seedSimCheck });
+      seedJob = { id: job.id, profileId: opened.id, kind: "quick_seed" };
+      seedResult = null;
+      paintSeed();
+    } catch (e) {
+      showError(e);
+    }
+  };
+
+  const runDerive = async () => {
+    if (!opened || opened.body.is_example) return;
+    if (opened.dirty) {
+      showError("저장하지 않은 편집이 있습니다 — δe_trim 표 도출은 저장한 리비전의 플랜트로 돕니다. 먼저 저장합니다.");
+      return;
+    }
+    if (opened.body.document.law?.alloc?.de_trim != null && !globalThis.confirm?.(
+      "지금 δe_trim 표를 도출 결과로 바꿔 새 리비전으로 저장합니다(옛 리비전은 남습니다). 도출할까요? "
+      + "(마하 검사 격자 × 연료 × 고도로 트림을 돌려 수십 초 걸릴 수 있습니다)")) return;
+    try {
+      clear(errBox);
+      const job = await api.post(`${path(opened.id)}/derive-de-trim`, { base_revision: opened.body.revision });
+      seedJob = { id: job.id, profileId: opened.id, kind: "derive_de_trim" };
+      seedResult = null;
+      paintSeed();
+    } catch (e) {
+      showError(e);
+    }
+  };
+
+  const paintSeed = () => {
+    if (!opened) {
+      clear(seedBox).append(el("p", { class: "hint" }, "목록에서 [열기]로 기체를 열면 게인 출처와 초기 게인 빠른 탐색이 여기 섭니다."));
+      return;
+    }
+    const doc = opened.body.document;
+    const src = designSource(doc);
+    const trim = deTrimStatus(doc, list?.find((p) => p.id === opened.id));
+    const busy = seedJob != null;
+    const progress = el("div");
+    const res = seedResult?.profileId === opened.id ? seedResult : null;
+    clear(seedBox).append(
+      el("p", {}, el("strong", {}, src.label), ` · 저장된 리비전 ${opened.body.revision}`),
+      el("p", { class: "hint" },
+        "부호는 선형 모델의 조종효율(B)에서, 크기는 설계 격자 앵커(q̄ 중앙·최저·최고)마다 튜닝한 값의 중앙값에서, "
+        + "자동조종은 시간척도 분리 휴리스틱에서 옵니다. 채택되면 새 리비전으로 저장하고(옛 리비전은 남습니다) 결과 "
+        + "탭에도 남깁니다. 자동 설계가 이 게인에서 출발해 다듬습니다."),
+      opened.body.is_example
+        ? el("p", { class: "hint" }, "예제 기체는 고칠 수 없습니다 — 복제한 기체에서 탐색합니다.")
+        : el("div", { class: "row", style: "gap:8px;align-items:center;flex-wrap:wrap" },
+          el("button", { class: "primary", disabled: busy, onclick: runSeed,
+            title: busy ? "기체를 고치는 잡이 이미 돌고 있다 — 끝난 뒤 돌린다" : "" },
+            doc.law?.design ? "초기 게인 다시 탐색" : "초기 게인 빠른 탐색"),
+          el("label", { class: "field", title: "중앙 앵커 한 케이스로 평가(시뮬 포함)를 돌려 결과에 싣는다 — 채택 판정에는 쓰지 않는다" },
+            el("input", { type: "checkbox", checked: seedSimCheck, onchange: (e) => { seedSimCheck = e.target.checked; } }),
+            " 시뮬 확인도 싣기(수 초 더)")),
+      el("h4", { style: "margin:14px 0 4px" }, "할당 δe_trim 표"),
+      el("p", {}, el("strong", { class: trim.stale ? "error-box" : null }, trim.label)),
+      el("p", { class: "hint" },
+        "선회 하중에서 롤 예산의 피치 몫을 먼저 떼는 1g 트림 승강타 표입니다(R = δe_trim(M)·n). 마하마다 연료 × 고도 "
+        + "격자의 최악 |δe|를 요구로 삼고, 표 보간이 검사 격자(마하 0.005 간격)의 요구를 밑돌지 않을 때까지 올립니다. "
+        + "도출한 표는 플랜트 지문을 남겨, 플랜트를 고치면 법칙 조립이 낡은 표를 거부합니다."),
+      opened.body.is_example ? null : el("div", { class: "row", style: "gap:8px;align-items:center" },
+        el("button", { disabled: busy, onclick: runDerive,
+          title: busy ? "기체를 고치는 잡이 이미 돌고 있다 — 끝난 뒤 돌린다" : "" },
+        doc.law?.alloc?.de_trim ? "δe_trim 표 다시 도출" : "δe_trim 표 도출")),
+      progress,
+      res ? (res.kind === "derive_de_trim" ? deriveResultView(res.body) : seedResultView(res.body)) : null);
+    if (busy && seedJob.profileId === opened.id) {
+      attachProgress(progress, seedJob.id, {
+        onDone: seedDone,
+        onError: (e) => {
+          seedJob = null;
+          showError(e);
+          paintSeed();
+        },
+      });
+    }
+  };
+
   // ── 복제·내보내기·가져오기·삭제 ─────────────────────────────────────────
   const clone = async (p) => {
     if (!discardOk("복제할까요? (복제한 기체가 문서 패널에 열립니다)")) return;
@@ -602,6 +789,7 @@ export function render() {
       paintDoc();
       paintVariants();
       paintViewer(); // 옛 기체의 곡선이 새 문서 밑에 남지 않게
+      paintSeed();
       drawers.open("doc");
     } catch (e) {
       showError(e);
@@ -642,6 +830,7 @@ export function render() {
       paintDoc();
       paintVariants();
       paintViewer();
+      paintSeed();
       drawers.open("doc");
     } catch (e) {
       const text = e instanceof ApiError && e.status === 409
@@ -700,6 +889,7 @@ export function render() {
       paintDoc();
       paintVariants();
       paintViewer(); // 지운 문서의 곡선·[그리기]가 남으면 누를 때 빈 문서를 읽는다
+      paintSeed();
     } catch (e) {
       showError(e);
     }
@@ -715,6 +905,9 @@ export function render() {
       { key: "variants", label: "형상 변형", group: "편집",
         title: "연 기체의 형상 변형 — 덮어쓴 경로·지문·고르기",
         count: () => opened?.body.document.variants?.length ?? null, build: () => variantBox },
+      { key: "seed", label: "게인·δe_trim", group: "설계",
+        title: "연 기체의 게인 출처와 할당 표 — 초기 게인 빠른 탐색(조종효율 부호·앵커 튜닝 크기)·δe_trim 표 도출",
+        build: () => seedBox },
       { key: "aero", label: "공력 DB 뷰어", group: "보기",
         title: "연 문서의 계수 계산기로 한 축을 따라 CL·CD·모멘트 계수 곡선 — 실속 표 대조", build: () => viewerBox },
       { key: "import", label: "가져오기", group: "반입",
@@ -728,6 +921,7 @@ export function render() {
   paintDoc();
   paintVariants();
   paintViewer();
+  paintSeed();
   paintImport();
   load();
 

@@ -59,7 +59,8 @@ _ATT_META = ("target_pm_deg", "target_gm_db", "target_wc_frac", "wc_fallback")
 # 서로 다른 사유 넷이 뭉쳐 있었고, 안내 문구는 그중 한 경우에 **사실과 달랐다**
 # (마진은 통과했는데 "마진 미달"이라 적었다).
 REASON_OK = "ok"
-REASON_ZERO_DESIGN = "zero_design"  # 설계값 0 — 방향 정보가 없어 튜닝 자체를 안 한다
+# 옛 결과의 사유 — 더는 내지 않는다(seed_required로 바뀜). 저장된 결과의 문구를 읽으려고 표에 남긴다
+REASON_ZERO_DESIGN = "zero_design"
 REASON_TARGET_UNREACHED = "target_unreached"  # 브래킷을 끝까지 넓혀도 미달 (플랜트 한계)
 REASON_CAPPED = "capped"  # 댐퍼 안정 캡이 목표 전에 묶었다 (작동기·지연 예산)
 REASON_NO_STABLE_GAIN = "no_stable_gain"  # 안정한 |k|가 없어 댐퍼를 껐다
@@ -68,11 +69,24 @@ REASON_MARGIN_FLOOR = "margin_floor"  # 백오프 바닥까지 PM/GM 미달
 REASON_DEGENERATE = "degenerate"  # 기저 루프 응답이 무의미 — 튜닝 불가
 REASON_RESCUED = "rescued"  # 백오프 해가 하한 미달이라 마무리로 구제됨 (통과)
 REASON_NA_NO_CROSSOVER = "na_no_crossover"  # 교차가 없어 마진을 잴 수 없다 (통과 아님)
+# 설계값 0 — 방향(부호)을 몰라 튜닝하지 않았다. 종전에는 "튜닝 안 함(na)"이라 점 판정을 끌어내리지 않았고,
+# 그래서 댐퍼·자세 루프가 꺼진 채 자동 설계가 통과할 수 있었다. 새 기체의 첫 설계가 바로 이 모양이다
+REASON_SEED_REQUIRED = "seed_required"
+# 게인 부호가 플랜트와 반대(양의 되먹임). 자세 자리: 루프를 뒤집어야만 위상여유가 난다 — oriented_margins가
+# PM>0인 쪽을 골라 주므로 수치는 건강해 보인다(데모 피치 kp·ki 부호를 뒤집으면 PM 104~121°로 "ok"였다).
+# 레이트 자리: 설계 부호로 조금 닫으면 반대 부호보다 감쇠·대역폭이 나빠진다 — 브래킷을 256배까지 넓혀도
+# 목표에 못 닿고 안정 캡에 걸려 capped·target_unreached(통과 쪽 사유)로 끝났다(롤·요 조종 미계수 부호를
+# 뒤집은 예제 기체에서 손설계 게인)
+REASON_SIGN_MISMATCH = "sign_mismatch"
 
 # 사유 → 사람이 읽는 한 줄 + 다음 수. 화면·원장이 이 표를 쓴다 (엔진이 정본).
 REASON_TEXT = {
     REASON_OK: "설계 목표 달성",
     REASON_ZERO_DESIGN: "설계 게인이 0이라 방향 정보가 없다 — 이 자리를 쓸 것이면 설계값을 먼저 정한다",
+    REASON_SEED_REQUIRED: "설계 게인이 0이라 부호를 몰라 튜닝하지 않았다 — 초기 게인 빠른 탐색으로 부호·크기를"
+                          " 채운 뒤 다시 돌린다 (부호를 짐작하면 틀린 부호도 통과해 보인다)",
+    REASON_SIGN_MISMATCH: "게인 부호가 플랜트와 반대다(양의 되먹임) — 자세 루프는 뒤집어야만 위상여유가 나고,"
+                          " 레이트 댐퍼는 반대 부호가 감쇠를 더 준다. 설계 게인 부호를 확인한다",
     REASON_TARGET_UNREACHED: "게인을 아무리 키워도 목표 지표가 안 나온다 — 플랜트 한계다."
                              " 목표를 낮추거나 이 조건을 설계 범위에서 뺀다",
     REASON_CAPPED: "작동기·지연 포함 폐루프 안정 경계가 목표 전에 묶는다 —"
@@ -98,7 +112,8 @@ _PASSING = (REASON_OK, REASON_RESCUED)
 # 분류기의 구조 한계 게이트도 이 목록을 본다 (classify가 import한다 — 두 모듈에
 # 같은 목록이 손으로 두 번 적히면 갈린다)
 SLOT_DESIGN_FAILED = (REASON_NO_STABLE_GAIN, REASON_DEGENERATE, REASON_MARGIN_FLOOR,
-                      REASON_BANDWIDTH_COLLAPSE, REASON_NA_NO_CROSSOVER)
+                      REASON_BANDWIDTH_COLLAPSE, REASON_NA_NO_CROSSOVER, REASON_SEED_REQUIRED,
+                      REASON_SIGN_MISMATCH)
 
 
 @dataclass(frozen=True)
@@ -153,6 +168,10 @@ class TuneTargets:
 
 
 # 레이트 자리 → (축, 지표 키, 목표 필드). 순서 = 닫는 순서(요 먼저 — closure.py).
+# 레이트 댐퍼 방향 확인 — 설계 크기의 이 배로 양 부호를 닫아 지표를 비교한다. 작은 닫기에서 가르는 이유: 크게
+# 닫으면 ζ가 양쪽 다 1(과감쇠 실근)에 붙어 못 가르는 점이 있다(데모 M0.6 요 댐퍼). 못 가르면 설계 크기에서 한 번 더
+_DIRECTION_PROBE = 0.1
+
 _RATE_PLAN = (
     ("pitch", "lon", "zeta_sp", "zeta_sp"),
     ("yaw", "lat", "zeta_dr", "zeta_dr"),
@@ -288,6 +307,20 @@ def _cap_by_stability(lm_axis, group, x_rate, u_in, k, act_kw):
     return sign * lo, "capped"
 
 
+def _rate_sign_opposes(f, mag) -> bool:
+    """f(±크기) → 설계 부호가 반대 부호보다 **분명히** 나쁜가. nan(판정할 모드 없음)은 가장 나쁜 값으로 친다.
+
+    두 크기 모두에서 못 가르면(같은 값·양쪽 nan) 부호 결함이라 하지 않는다 — 모르는 것을 결함으로 만들지 않는다."""
+    def score(v):
+        return v if math.isfinite(v) else -math.inf
+
+    for m in (_DIRECTION_PROBE * mag, mag):
+        up, down = score(f(m)), score(f(-m))
+        if up != down:
+            return down > up
+    return False
+
+
 def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
     """레이트 3자리 순차 튜닝 — (gains, achieved, notes)."""
     axes = {"lon": lon, "lat": lat}
@@ -303,9 +336,9 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
             gains[slot] = 0.0
             achieved[f"{group}_rate"] = {
                 "kind": "damping" if metric_key != "roll_lambda" else "bandwidth",
-                "target": getattr(targets, target_field), "reason": REASON_ZERO_DESIGN,
+                "target": getattr(targets, target_field), "reason": REASON_SEED_REQUIRED,
             }
-            notes.append(f"{slot}: 설계값 0 — 방향 정보가 없어 튜닝하지 않는다")
+            notes.append(f"{slot}: {REASON_TEXT[REASON_SEED_REQUIRED]}")
             continue
         sign = math.copysign(1.0, k_design)
         target = getattr(targets, target_field)
@@ -332,6 +365,15 @@ def _tune_rates(lon, lat, design, targets, act_kw) -> tuple:
             g = dict(_base)
             g[_slot] = _sign * mag
             return _metric(_lm, g, _mk, _rf)
+
+        if _rate_sign_opposes(f, abs(k_design)):
+            gains[slot] = 0.0
+            achieved[f"{group}_rate"] = {
+                "kind": "damping" if metric_key != "roll_lambda" else "bandwidth",
+                "target": target, "reason": REASON_SIGN_MISMATCH,
+            }
+            notes.append(f"{slot}: {REASON_TEXT[REASON_SIGN_MISMATCH]}")
+            continue
 
         mag, reached, grown = _first_reach_bisect(f, 0.0, 4.0 * abs(k_design), target)
         k = sign * mag
@@ -478,7 +520,11 @@ def _att_margin_verdict(m, targets) -> str:
 def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> tuple:
     """자세 PI 루프쉐이핑 + 마진 검증 백오프 — (kp, ki, achieved, reason, evals)."""
     kp_design = float(design[f"{group}.kp"])
-    sign = math.copysign(1.0, kp_design) if kp_design != 0.0 else 1.0
+    if kp_design == 0.0:
+        # 부호를 +1로 짐작하지 않는다 — 틀린 부호도 oriented_margins가 뒤집어 건강해 보이게 만든다
+        return 0.0, 0.0, {"target_pm_deg": targets.pm_deg, "target_gm_db": targets.gm_db,
+                          "target_wc_frac": targets.wc_att_ok_frac}, REASON_SEED_REQUIRED, 0
+    sign = math.copysign(1.0, kp_design)
     # rate_wc = 0이면(댐퍼가 0으로 캡됐거나 교차를 못 찾음) 목표 교차가 **다른 물리량**
     # 으로 바뀐다 — 개루프 최속 진동 wn. 조용히 갈아타지 않고 플래그로 남긴다
     wc_fallback = not (rate_wc > 0)
@@ -487,6 +533,7 @@ def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> t
     evals = 0
     best = None
     last_verdict = "na"
+    inverted_ok = False  # 뒤집은 루프에서만 마진이 통과했다 — 끝까지 +방향 통과가 없으면 부호 결함
     while wc >= targets.wc_att_floor_frac * wc0:
         zc = wc * targets.ki_zero_frac
         base = att_margin_loop(lm_axis, rate_gains, kp=1.0, ki=zc, **act_kw)
@@ -506,6 +553,14 @@ def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> t
                          "wc_fallback": wc_fallback, "target_pm_deg": targets.pm_deg,
                          "target_gm_db": targets.gm_db,
                          "target_wc_frac": targets.wc_att_ok_frac})
+        if orient != 1:
+            # 루프를 뒤집어야만 PM>0 — 설계 부호가 이 플랜트와 반대(양의 되먹임)다. 뒤집은 루프의 마진은 통과가
+            # 아니다. 백오프는 계속한다: 부호는 맞는데 이 교차에서만 +루프가 무너진 경우와 가르려고
+            if verdict == "ok":
+                inverted_ok = True
+            last_verdict = "sign"
+            wc *= targets.backoff
+            continue
         if verdict == "ok":
             # 대역폭 하한 — 이 밑에서만 통과하는 것은 성능 붕괴다 (structural limit).
             # **마진은 통과했다** — 사유를 margin_floor와 뭉개면 안내가 거짓이 된다
@@ -517,6 +572,8 @@ def _tune_att(lm_axis, group, rate_gains, rate_wc, design, targets, act_kw) -> t
     if best is None:
         return 0.0, 0.0, {"wc0": wc0, "wc_fallback": wc_fallback}, REASON_DEGENERATE, evals
     kp, ki, ach = best
+    if inverted_ok:
+        return kp, ki, ach, REASON_SIGN_MISMATCH, evals
     # 백오프를 다 쓰고도 **판정 불가로만** 끝났으면 "마진 미달"이 아니다 —
     # 교차가 없어 잴 수 없었던 것이고, 그 둘을 뭉개면 안내가 엉뚱한 예산을 가리킨다
     return kp, ki, ach, (REASON_NA_NO_CROSSOVER if last_verdict == "na"
@@ -564,7 +621,8 @@ def tune_point(
             lm_axis, group, rate_gains, rate_wc, design, targets, act_kw
         )
         evals += ev
-        if st != REASON_OK and ach.get("wc0"):
+        # 부호 결함·부호 모름은 마무리로 구제하지 않는다 — 마무리도 PM>0인 방향을 골라 주므로 틀린 부호를 살려 낸다
+        if st not in (REASON_OK, REASON_SIGN_MISMATCH, REASON_SEED_REQUIRED) and ach.get("wc0"):
             # 구제 마무리 — 백오프가 대역폭만 버리는 한 방향 탐색이라 놓친 해를 찾는다.
             # **실패한 자리에만** 돈다: 통과한 자리까지 벌점 무릎으로 밀면 전 운영점이
             # 마진 경계에 앉게 되고(작동기 공진에 가까워진다) 결정론적 결과도 흔들린다.
@@ -577,7 +635,8 @@ def tune_point(
             evals += ev2
             # 마무리가 **후퇴**했으면(게인이 그대로) 구제라 부를 수 없다 — wcp가 wc보다
             # 큰 루프에서는 아무것도 안 바꾸고 "구제됨"이 될 수 있다
-            if ach2.get("polished") and _att_margin_verdict(ach2, targets) == "ok" \
+            if ach2.get("polished") and ach2.get("orientation") == 1 \
+                    and _att_margin_verdict(ach2, targets) == "ok" \
                     and _bandwidth_ok(ach2["wc_att"], ach["wc0"], targets):
                 kp, ki, ach, st = kp2, ki2, ach2, REASON_RESCUED
                 notes.append(

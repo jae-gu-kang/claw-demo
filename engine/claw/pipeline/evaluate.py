@@ -1596,11 +1596,27 @@ def verify(aircraft_factory, cases, shape: Shape, criteria: GainEvalCriteria, *,
             "n_judged": len(judged),
         }
 
+    # 공력 계수 축은 축마다 판정을 싣는다 — 한 축(Cmα)만 흔들렸는데 묶음 status가 ok면 흔들지 못한 축(Cmq)이 통과로
+    # 읽힌다. 흔들 수 없는 축(태그된 공력 항 없음)은 코너가 없어 na이고, 그렇다고 사유를 적는다
+    requested = {n for n, _f in _robust_axes(criteria)}
+    aero_block = {**split_axis(("cmalpha", "cmq")), "note": None, "axes": {}}
+    for name in ("cmalpha", "cmq"):
+        if name not in requested:
+            continue
+        one = split_axis((name,))
+        aero_block["axes"][name] = {k: one[k] for k in ("status", "n_pass", "n_judged")}
+        if name in unshakable:
+            aero_block["axes"][name]["note"] = "기체에 이 축으로 태그된 공력 항이 없어 흔들 수 없다 — 판정 불가(통과 아님)"
+    gone = [n for n in ("cmalpha", "cmq") if n in unshakable]
+    if gone:
+        aero_block["note"] = (f"흔들 수 없는 축 {gone} — 기체에 태그된 공력 항이 없어 판정 불가(통과 아님)."
+                              + (" 묶음 판정은 흔든 축만의 것이다" if len(gone) < len(requested & {"cmalpha", "cmq"}) else ""))
+
     out_verify = {
         "mass_cg": {**split_axis(("mass",)),
                     "note": "CG축은 [TBD] — 모멘트 기준점 이전 미구현이라 흔들어도 "
                             "동역학이 안 변한다(plant/mass.py FuelMass). 질량축만 실측"},
-        "aero_coeff": {**split_axis(("cmalpha", "cmq")), "note": None},
+        "aero_coeff": aero_block,
         "grid_midpoints": (
             {**mid_summary,
              "status": ("na" if mid_summary["hard_fail"] is None else

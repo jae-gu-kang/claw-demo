@@ -502,3 +502,28 @@ def test_authority_trim_fraction_divides_by_the_limit_on_the_trim_side():
     pos, _ = _authority_stage(tr(0.10), None, GainEvalCriteria(), asym)
     assert frac_of(neg) == pytest.approx(0.10 / 0.20)
     assert frac_of(pos) == pytest.approx(0.10 / 0.35)
+
+
+def test_verify_공력축은_축마다_판정하고_못_흔든_축은_통과로_읽히지_않는다(rig):
+    """Cmq 태그를 뗀 기체 — Cmα만 코너가 서고, Cmq는 na와 사유다. 묶음 status가 ok여도 그것은 Cmα만의 판정이다."""
+    from claw.profile import build_profile, load_example
+
+    doc = load_example()
+    for t in doc["aero"]["coefficients"]["Cm"]:
+        if t["dispersion"] == "cmq":
+            t["dispersion"] = None
+    built = build_profile(doc)
+    assert built.dispersion_axes == ("mass", "cmalpha")
+    crit = GainEvalCriteria.from_dict({
+        "robustness": {"mass_frac": 0.0, "cmalpha_frac": 0.2, "cmq_frac": 0.2}})
+    out = verify(built.aircraft, [_CASE], Shape(profile=built), crit, depth="linear")
+    aero = out["verify"]["aero_coeff"]
+    assert aero["axes"]["cmq"]["status"] == "na" and aero["axes"]["cmq"]["n_judged"] == 0
+    assert "통과 아님" in aero["axes"]["cmq"]["note"]
+    assert aero["axes"]["cmalpha"]["n_judged"] == 2 and "note" not in aero["axes"]["cmalpha"]
+    assert "cmq" in aero["note"] and "흔든 축만" in aero["note"]
+    assert any("cmq" in w for w in out["warnings"])
+
+    tagged = verify(example_profile().aircraft, [_CASE], Shape(profile=example_profile()), crit, depth="linear")
+    assert tagged["verify"]["aero_coeff"]["note"] is None
+    assert tagged["verify"]["aero_coeff"]["axes"]["cmq"]["n_judged"] == 2

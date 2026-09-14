@@ -280,7 +280,7 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
 
 - **루프의 정본은 [`fcs-context-05-autodesign.md`](fcs-context-05-autodesign.md)다** —
   스테이지(COARSE→REFINE→TUNE→FIT→VERIFY→CLASSIFY), 역할 있는 운영점 집합(anchor > breakpoint >
-  validation, 단방향 래칫), 판정의 단위 (점, 자리), 사유 코드 10종·verdict 6종, 완화 임계값이
+  validation, 단방향 래칫), 판정의 단위 (점, 자리), 사유 코드 12종·verdict 6종, 완화 임계값이
   거기 있다. 합격기준은 04가 정본이다
 - M15 `pipeline`(반자동 진단·스윕 보조)과 **층이 다르다** — 여기는 산출물(트림 격자·게인
   테이블·마진 판정)을 **생성**하는 루프다. 지표 계산(`closure`)과 판정(`criteria`)은 분리한다
@@ -300,6 +300,12 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
   테이블(`tables_resampled`)에 더해 실제로 쓴 허용치(`resample_tol`)와 자리별 **실측**
   어긋남(`resample_error`)을 함께 실어 "확정이 주입하는 형상 ≠ 검증한 형상"을 수치로 말한다
   (01 §3.4)
+- **초기 게인 빠른 탐색** `design/seed.py quick_seed`(v1.06, 05 §10) — 게인이 빈 기체의 SCAS
+  부호를 조종효율 B에서, 크기를 설계 격자 앵커(q̄ 중앙·최저·최고) 튜닝의 중앙값에서 재고
+  자동조종은 시간척도 분리 휴리스틱으로 채운다. 문서에 쓰지 않고 결과를 돌려준다 — 저장은 서버
+  잡 `POST /api/profiles/{id}/quick-seed`가 새 리비전으로 한다. 튜너는 설계값 0을
+  `seed_required`, 플랜트와 반대인 게인 부호(자세 루프 orientation −1·레이트 댐퍼 방향)를
+  `sign_mismatch`로 실패시키고 schedmap 검증도 자세 orientation ≠ +1을 fail로 친다
 - **의도적 이탈 기록**: M15 Pipeline DAG 캐시는 파라미터 지문 축이라 점집합 상태와 결이 달라
   직접 채택하지 않음(경량 dict 캐시 + params_fingerprint 계보 승계). openloop GROUP_LOOPS(평탄
   SISO Δ-민감도 선언)와 절대 판정 조성(closure)이 다른 이유는 실측 병리(레이트 루프 DC 0
@@ -323,6 +329,11 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
   없음으로 채운다(스키마 버전 불변, 02 §5.6)
 - 공력 표 항(k = 표, 02 §5.6)과 공력 DB 뷰어 계산 `aeroview.aero_slice` — 문서의 계수 계산기로
   한 축 곡선·풍축 역변환·실속 표 대조(02 §5.2). 서버 창구는 `POST /profiles/aero-slice`
+- δe_trim 표 도출 `derive.derive_de_trim`(02 §5.6.1) — 마하마다 연료 × 고도 격자의 최악 |δe|를
+  요구로 삼아 표 보간이 검사 격자에서 요구를 밑돌지 않을 때까지 올린다. 도출 표는 플랜트 지문을
+  출처에 남기고 `BuiltProfile.de_trim_stale`·`alloc_trim_table`이 낡은 표를 거부한다. 초기 게인
+  빠른 탐색은 M17 `design/seed.py`다. 둘 다 문서에 쓰지 않고, 서버
+  잡(`POST /profiles/{id}/quick-seed`·`/derive-de-trim`)이 새 리비전으로 쓴다
 - 예제 문서는 패키지 데이터(`examples/*.json`, engine pyproject package-data)다 — 폐쇄망 휠에서
   빠지면 예제 기체가 사라진다
 - 의존: M0, M1(REGISTRY·canonical_hash), M3(Table), M5(조립 부품), M7(design_gains·SCHEDULABLE —

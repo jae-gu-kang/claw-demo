@@ -204,10 +204,48 @@ class BuiltProfile:
             for name in wanted
         }
 
+    @property
+    def de_trim_stale(self) -> bool:
+        """도출한 δe_trim 표가 이 플랜트를 덮지 않는가 — 도출이 요구를 잰 플랜트 지문 목록(기본 문서 + 그때의 형상
+        변형들)에 지금 플랜트가 없으면 낡았다. 기본 문서 지문 하나만 대조하면 플랜트를 바꾸는 형상 변형이 전부
+        막힌다(무게가 다른 변형은 1g 요구도 다르므로 도출은 변형까지 잰다).
+
+        손으로 넣은 표(explicit)는 대조할 기록이 없어 낡았다고 하지 않는다."""
+        alloc = self.doc["law"]["alloc"]
+        if alloc is None or alloc["de_trim"] is None or alloc["de_trim"]["source"] != "derived":
+            return False
+        prov = alloc["de_trim"]["provenance"]
+        if not isinstance(prov, dict):
+            return True
+        fps = prov.get("plant_fingerprints")
+        if not isinstance(fps, list):
+            fps = [prov.get("plant_fingerprint")]
+        return self.plant_fingerprint not in fps
+
+    def alts_within(self, candidates) -> list:
+        """해석 고도 후보를 운용 고도 범위(operating.alt_min·alt_max)로 거르고 **범위 끝을 더한다**.
+
+        끝을 더하는 이유: 격자점만 남기면 격자 사이에 있는 한계(예: 상한 2900 m, 격자 2500·3000)가 빠진다. 같은 마하의
+        1g 트림 요구는 동압이 낮은 상한에서 가장 크므로, 그 한 줄이 빠지면 도출 표가 상한에서 요구를 밑돈다(실측
+        M0.30에서 0.53°). 범위 안에 후보가 하나도 없으면 끝과 가운데를 쓴다."""
+        lo, hi = self.doc["operating"]["alt_min"], self.doc["operating"]["alt_max"]
+        alts = {float(a) for a in candidates if (lo is None or a >= lo) and (hi is None or a <= hi)}
+        ends = [float(x) for x in (lo, hi) if x is not None]
+        if not alts and not ends:
+            return sorted(float(a) for a in candidates)
+        if not alts and len(ends) == 2:
+            alts.add(0.5 * (ends[0] + ends[1]))
+        return sorted(alts | set(ends))
+
     def alloc_trim_table(self) -> Table | None:
         alloc = self.doc["law"]["alloc"]
         if alloc is None or alloc["de_trim"] is None:
             return None
+        if self.de_trim_stale:
+            # 낡은 표로 조립하지 않는다 — 1g 몫이 틀리면 선회에서 롤 권한을 과하게 묶거나 피치 몫이 모자란다
+            raise ProfileError("/law/alloc/de_trim",
+                               "도출한 δe_trim 표가 낡았다 — 도출한 뒤 플랜트(공력·질량·추진·트림 등)가 바뀌었다."
+                               " 표를 다시 도출한다")
         return _mach_table(alloc["de_trim"]["table"], "de_trim")
 
     @property

@@ -352,6 +352,10 @@ export function reportLine(report, nPointsFallback) {
 export const REASON_TEXT = {
   ok: "설계 목표 달성",
   zero_design: "설계 게인이 0이라 방향 정보가 없다 — 이 자리를 쓸 것이면 설계값을 먼저 정한다",
+  seed_required: "설계 게인이 0이라 부호를 몰라 튜닝하지 않았다 — 초기 게인 빠른 탐색으로 부호·크기를"
+    + " 채운 뒤 다시 돌린다 (부호를 짐작하면 틀린 부호도 통과해 보인다)",
+  sign_mismatch: "게인 부호가 플랜트와 반대다 — 루프를 뒤집어야만 위상여유가 난다(양의 되먹임)."
+    + " 설계 게인 부호를 확인한다",
   target_unreached: "게인을 아무리 키워도 목표 지표가 안 나온다 — 플랜트 한계다."
     + " 목표를 낮추거나 이 조건을 설계 범위에서 뺀다",
   capped: "작동기·지연 포함 폐루프 안정 경계가 목표 전에 묶는다 —"

@@ -70,6 +70,22 @@ def _nonfinite_path(obj, path: str = "") -> str | None:
     return None
 
 
+def _de_trim_summary(doc: dict, built) -> dict | None:
+    """할당 표 요약 — 도출 표면 형상 변형마다도 낡음을 본다(변형이 플랜트를 바꾸면 그 변형만 낡을 수 있다)."""
+    de_trim = None if doc["law"]["alloc"] is None else doc["law"]["alloc"]["de_trim"]
+    if de_trim is None:
+        return None
+    stale_variants = ([v["id"] for v in doc["variants"] if build_profile(doc, v["id"], validated=True).de_trim_stale]
+                      if de_trim["source"] == "derived" else [])
+    return {"source": de_trim["source"], "stale": built.de_trim_stale, "stale_variants": stale_variants}
+
+
+def _design_source(doc: dict) -> str | None:
+    design = doc["law"]["design"]
+    prov = None if design is None else design["provenance"]
+    return prov.get("source") if isinstance(prov, dict) else None
+
+
 class ProfileStore:
     def __init__(self, root):
         self.root = Path(root)
@@ -149,6 +165,10 @@ class ProfileStore:
             "is_example": doc["is_example"], "revision": revision,
             "fingerprint": built.fingerprint,
             "variants": [{"id": v["id"], "name": v["name"]} for v in doc["variants"]],
+            # 게인 출처 — null이면 미설계. "quick_seed"면 화면이 「초기 탐색 게인 — 자동 설계 전」을 단다
+            "design_source": _design_source(doc),
+            # 할당 δe_trim 표 — null이면 없음. 도출 표는 플랜트가 바뀌면 stale(법칙 조립이 거부한다)
+            "de_trim": _de_trim_summary(doc, built),
         }
 
     def list(self) -> list:

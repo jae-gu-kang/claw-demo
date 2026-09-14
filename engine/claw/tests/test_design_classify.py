@@ -606,11 +606,11 @@ def test_free_gain_optimum_uses_the_hand_design_bracket():
 
     브래킷 **크기** 차이는 이제 확장(_first_reach_bisect, 최대 256배)이 흡수한다 —
     같은 최적을 찾아낸다. 남은 노출은 **0**이다: 설계값 0인 자리는 방향 정보가 없어
-    튜너가 통째로 건너뛰고(REASON_ZERO_DESIGN) 0.0을 "자유 게인 최적"이라 낸다.
+    튜너가 통째로 건너뛰고(REASON_SEED_REQUIRED) 0.0을 "자유 게인 최적"이라 낸다.
     4×0 = 0이라 확장으로도 못 산다. 적합이 부호 가드 폴백으로 상수를 내거나 스케줄
     자리가 비면 실제로 0이 온다.
     """
-    from claw.design.tune import REASON_ZERO_DESIGN
+    from claw.design.tune import REASON_SEED_REQUIRED
 
     ac, points, lms, trims = _setup((0.25, 0.3, 0.35), v_mach=0.3)
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.3, 0.25, 0.35))
@@ -631,6 +631,6 @@ def test_free_gain_optimum_uses_the_hand_design_bracket():
     # 이 단정이 무너지면 두 경로가 같아진 것이므로 이 테스트가 판별력을 잃은 것이다
     stale = classify_margin_deficit(ac, v, "roll_att", points, lms, trims, {}, zeroed,
                                     cases, **kw)
-    assert stale["evidence"]["tuned"]["reason"] != REASON_ZERO_DESIGN  # 자세 자리는 살아 있고
+    assert stale["evidence"]["tuned"]["reason"] != REASON_SEED_REQUIRED  # 자세 자리는 살아 있고
     assert stale["evidence"]["tuned"]["achieved"]["pm_deg"] != pytest.approx(
         got["pm_deg"], rel=1e-6), "브래킷 차이가 결과를 안 바꾼다 — 판별력 없는 테스트"

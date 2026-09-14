@@ -1,7 +1,7 @@
 {
  "golden": "verify_linear",
  "mode": "full",
- "captured_at": "6fd4d3d+dirty",
+ "captured_at": "af3f131+dirty",
  "value": {
   "dict": {
    "corners": [
@@ -539,7 +539,25 @@
          ],
          "n_pass": 4,
          "n_judged": 4,
-         "note": null
+         "note": null,
+         "axes": {
+          "dict": {
+           "cmalpha": {
+            "dict": {
+             "status": "ok",
+             "n_pass": 2,
+             "n_judged": 2
+            }
+           },
+           "cmq": {
+            "dict": {
+             "status": "ok",
+             "n_pass": 2,
+             "n_judged": 2
+            }
+           }
+          }
+         }
         }
        },
        "grid_midpoints": {

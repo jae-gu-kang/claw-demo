@@ -5,7 +5,8 @@
 
 1. structural_limit — v에서 튜너(tune_point — 자유 게인 국소 최적)를 돌려도
    **합격선**(criteria) 미달이거나 **그 자리의 설계가 성립하지 않았다**
-   (SLOT_DESIGN_FAILED — 넷 다 안정한 게인은 내지만 목표대로 성형하지 못한 것이다)
+   (SLOT_DESIGN_FAILED — 안정한 게인을 못 냈거나, 목표대로 성형하지 못했거나, 부호를 몰라
+   튜닝하지 않았거나(seed_required), 부호가 플랜트와 반대인(sign_mismatch) 자리다)
    → 게인·
    breakpoint로는 불가 (게이트는 _slot_passes 한 곳에만 있다).
    action=escalate (**보고 전용** — 필터·작동기 대역폭·지연 예산 등 상위 설계
@@ -131,7 +132,8 @@ def _slot_passes(tune_out, loop_name, criteria) -> bool:
     둘 중 하나라도 걸리면 구조 한계다 (이 함수는 그 부정이다):
     - 자유 게인 최적의 판정이 fail — **합격선**(criteria)에조차 못 미친다.
     - 자리 사유가 **그 자리의 설계가 성립하지 않은** 축이다 (tune의 SLOT_DESIGN_FAILED:
-      no_stable_gain·degenerate·margin_floor·bandwidth_collapse).
+      no_stable_gain·degenerate·margin_floor·bandwidth_collapse·na_no_crossover·
+      seed_required·sign_mismatch).
 
     종전 게이트는 `slot["status"] == "infeasible" or judged == "fail"`이었는데, 자리
     status는 **TuneTargets**(설계 목표 ζ_dr 0.5·PM 50°) 기준이고 judged는
@@ -370,8 +372,8 @@ def classify_margin_deficit(
     같은 플랜트·같은 목표, design만 다름): 손설계 브래킷은 roll.k_rate −0.592로
     λ 12.00을 달성하는데, 적합이 −0.05로 접힌 값을 브래킷으로 쓰면 −0.200(정확히
     천장 4×0.05)에서 λ 4.22로 끝난다 — **4.6배 틀린 g_opt**가 valley 괴리 계산과
-    승격 게인에 그대로 들어간다. 상수가 0.0이면 그 자리는 아예 건너뛰고 0.0을
-    "최적"이라 낸다.
+    승격 게인에 그대로 들어간다. 손설계가 0.0이면 부호를 몰라 튜닝하지 않고
+    seed_required로 실패시킨다(종전에는 건너뛰고 0.0을 "최적"이라 냈다).
 
     생략하면 design을 쓴다 (직접 호출·테스트 편의 — 오케스트레이터는 늘 넘긴다).
     """

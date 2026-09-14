@@ -112,4 +112,13 @@ def profile_echo(built) -> dict:
         "revision": getattr(built, "revision", None), "fingerprint": built.fingerprint,
         "plant_fingerprint": built.plant_fingerprint, "is_example": built.is_example,
         "source": getattr(built, "source", None),
+        # 초기 탐색 게인으로 계산한 결과만 표시한다 — 자동 설계 전 게인이라는 사실이 결과와 함께 다녀야 한다.
+        # 다른 출처에는 키를 달지 않는다: 예제 기체 결과의 서버 골든(바이트 동일 증명)이 이 블록을 싣는다
+        **({"design_source": "quick_seed"} if _seeded(built) else {}),
     }
+
+
+def _seeded(built) -> bool:
+    design = built.doc["law"]["design"]
+    prov = None if design is None else design["provenance"]
+    return isinstance(prov, dict) and prov.get("source") == "quick_seed"

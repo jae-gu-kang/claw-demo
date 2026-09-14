@@ -20,6 +20,8 @@ const KIND_LABEL = {
   envelope_scan: "엔벨로프 스캔",
   sim: "시뮬레이션",
   auto_design: "자동 설계",
+  quick_seed: "초기 게인 빠른 탐색",
+  derive_de_trim: "δe_trim 표 도출",
   verify_flight: "검증 — 탑재 C 신뢰성",
   influence_scan: "영향성 — 전 케이스 스캔",
   influence_sweep: "영향성 — 부분 풀 스윕",
@@ -296,7 +298,11 @@ function aircraftCell(p) {
     title: `${p.id}${p.variant ? ` / ${p.variant}` : ""} · 리비전 ${p.revision ?? "—"} · 지문 ${p.fingerprint}`
       + ` · 출처 ${p.source ?? "—"}`,
   }, p.name ?? p.id, p.variant ? ` · ${p.variant}` : "",
-  p.is_example ? el("span", { class: "hint", style: "margin-left:6px" }, "예제") : null);
+  p.is_example ? el("span", { class: "hint", style: "margin-left:6px" }, "예제") : null,
+  // 초기 탐색 게인으로 계산한 결과 — 자동 설계 전 게인이라는 사실을 결과와 함께 보인다(서버가 그때만 싣는다)
+  p.design_source === "quick_seed"
+    ? el("span", { class: "hint", style: "margin-left:6px", title: "초기 게인 빠른 탐색이 채운 게인 — 자동 설계 전" },
+      "초기 탐색 게인") : null);
 }
 
 function renderSummary(box, list) {

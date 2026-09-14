@@ -496,17 +496,77 @@ def test_slot_status_survives_a_failing_sibling(setup):
         "pitch_rate", "yaw_rate", "roll_rate", "pitch_att", "roll_att"}
 
 
-def test_zero_design_slot_is_na_not_failure(setup):
-    """설계값 0인 자리는 튜닝을 **안 한** 것이지 실패한 것이 아니다."""
-    from claw.design.tune import REASON_ZERO_DESIGN
+def test_zero_design_slot_requires_a_seed_and_fails_the_point(setup):
+    """설계값 0인 자리는 부호를 몰라 튜닝하지 않는다 — 그리고 그것은 **통과가 아니다**.
+
+    종전에는 na라 점 판정을 끌어내리지 않았다. 새 기체의 첫 설계(게인이 비어 있는 문서)가 바로 이 모양이라,
+    댐퍼가 꺼진 채 자동 설계가 조용히 통과할 수 있었다. 초기 게인 빠른 탐색이 채울 자리다."""
+    from claw.design.tune import REASON_SEED_REQUIRED
 
     _, design, _, lm = setup
     out = tune_point(lm, {**design, "yaw.k_rate": 0.0}, **ACT)
     slot = out["slots"]["yaw_rate"]
-    assert slot["status"] == "na" and slot["reason"] == REASON_ZERO_DESIGN
+    assert slot["status"] == "infeasible" and slot["reason"] == REASON_SEED_REQUIRED
     assert out["gains"]["yaw.k_rate"] == 0.0
-    # na가 점 status를 실패로 끌어내리지 않는다 (판정 불가 ≠ 불합격)
-    assert out["status"] != "infeasible"
+    assert out["status"] == "infeasible"
+
+
+def test_zero_attitude_design_is_not_guessed_positive(setup):
+    """자세 kp가 0이면 부호를 +1로 짐작하지 않는다 — 짐작한 부호가 틀려도 뒤집은 루프가 통과해 보인다."""
+    from claw.design.tune import REASON_SEED_REQUIRED
+
+    _, design, _, lm = setup
+    out = tune_point(lm, {**design, "pitch.kp": 0.0, "pitch.ki": 0.0}, **ACT)
+    assert out["slots"]["pitch_att"]["reason"] == REASON_SEED_REQUIRED
+    assert (out["gains"]["pitch.kp"], out["gains"]["pitch.ki"]) == (0.0, 0.0)
+    assert out["slots"]["roll_att"]["status"] == "ok"  # 다른 자리는 그대로 튜닝된다
+
+
+def test_attitude_gain_sign_opposite_to_the_plant_fails(setup):
+    """피치 kp·ki 부호를 뒤집으면 루프를 뒤집어야만 PM>0이다 — 종전에는 PM 100° 넘게 「ok」였다(양의 되먹임)."""
+    from claw.design.tune import REASON_SIGN_MISMATCH
+
+    _, design, _, lm = setup
+    flipped = {**design, "pitch.kp": -design["pitch.kp"], "pitch.ki": -design["pitch.ki"]}
+    out = tune_point(lm, flipped, **ACT)
+    att = out["slots"]["pitch_att"]
+    assert att["status"] == "infeasible" and att["reason"] == REASON_SIGN_MISMATCH
+    assert out["achieved"]["pitch_att"]["orientation"] == -1
+    assert out["status"] == "infeasible"
+    # 마무리가 켜져 있어도 틀린 부호를 구제하지 않는다
+    assert tune_point(lm, flipped, polish=True, **ACT)["slots"]["pitch_att"]["reason"] == REASON_SIGN_MISMATCH
+    # 부호가 맞는 설계는 그대로 +방향 통과다
+    assert tune_point(lm, design, **ACT)["achieved"]["pitch_att"]["orientation"] == 1
+
+
+def test_rate_damper_sign_opposite_to_the_plant_fails():
+    """롤·요 조종 미계수 부호를 뒤집은 기체에 손설계 게인 — 레이트 댐퍼가 반대로 걸린다.
+
+    종전에는 브래킷을 넓혀도 목표에 못 닿고 안정 캡에 걸려 capped(통과 쪽 사유)로 끝났다. 피치는 그대로 통과."""
+    import copy
+
+    from claw.design.tune import REASON_SIGN_MISMATCH
+    from claw.profile import build_profile, load_example
+
+    ex = load_example()
+    hand = build_profile(ex).design_gains()
+    flip = copy.deepcopy(ex)
+    for coef, inp in (("Cl", "da"), ("Cn", "dr")):
+        for t in flip["aero"]["coefficients"][coef]:
+            if t["inputs"] == [inp]:
+                t["k"] = -t["k"]
+    ac = build_profile(flip).aircraft()
+    lm = linearize(ac, trim_level(ac, TrimCase(name="flip", mach=0.45, alt=1000.0, fuel=200.0)))
+    out = tune_point(lm, hand, **ACT)
+    assert out["slots"]["yaw_rate"]["reason"] == REASON_SIGN_MISMATCH
+    assert out["slots"]["roll_rate"]["reason"] == REASON_SIGN_MISMATCH
+    assert out["gains"]["yaw.k_rate"] == out["gains"]["roll.k_rate"] == 0.0
+    assert out["slots"]["pitch_rate"]["status"] == "ok" and out["status"] == "infeasible"
+    # 부호를 맞춘 설계는 같은 기체에서 통과한다 — 결함은 부호다
+    fixed = {**hand, "yaw.k_rate": -hand["yaw.k_rate"], "roll.k_rate": -hand["roll.k_rate"],
+             "roll.kp": -hand["roll.kp"], "roll.ki": -hand["roll.ki"]}
+    ok = tune_point(lm, fixed, **ACT)
+    assert REASON_SIGN_MISMATCH not in {s["reason"] for s in ok["slots"].values()}
 
 
 def test_unmeasurable_margin_is_not_a_pass():
