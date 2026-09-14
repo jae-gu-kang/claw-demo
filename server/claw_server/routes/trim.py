@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
 from claw.common.contracts import TrimCase
-from claw_server.refs import current_profile
+from claw_server.refs import ProfileRef, profile_echo, resolve_profile
 from claw.trim import trim_batch
 from claw_server.serialize import trim_result_dict
 
@@ -48,7 +48,7 @@ class TrimCaseIn(BaseModel):
 
 
 class TrimBatchIn(BaseModel):
-    aircraft: Literal["demo"] = "demo"  # 비행체 프로파일 교체 단위 (03 §7.2) — 데모만 등록
+    profile: ProfileRef | None = None  # 기체 선택 — 없으면 예제 기체 (02 §5.6)
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1)
 
@@ -69,7 +69,9 @@ def build_cases(case_inputs: list[TrimCaseIn]) -> list[TrimCase]:
 
 @router.post("/trim/batch", status_code=202)
 def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) -> dict:
-    ac = current_profile().aircraft()
+    profile = resolve_profile(request, req.profile)
+    ac = profile.aircraft()
+    echo = profile_echo(profile)
     cases = build_cases(req.cases)
     store = request.app.state.store
 
@@ -84,12 +86,14 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
         )
         store.save(
             job.id,
-            {"kind": "trim_batch", "results": [trim_result_dict(r) for r in results]},
+            {"kind": "trim_batch", "results": [trim_result_dict(r) for r in results],
+             "profile": echo},
             meta={
                 "kind": "trim_batch",
                 "created": job.created,
                 "n": len(results),
                 "fingerprint": req.fingerprint,
+                "profile": echo,
             },
         )
         job.result_id = job.id

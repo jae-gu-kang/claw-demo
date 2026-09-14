@@ -27,7 +27,7 @@ from claw.sim import Simulator
 from claw.tables import PolyTable, Table
 from claw.trim import trim
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
-from claw_server.refs import current_profile
+from claw_server.refs import ProfileRef, profile_echo, resolve_profile
 from claw_server.serialize import sim_result_dict, to_jsonable
 
 router = APIRouter(tags=["sim"])
@@ -205,13 +205,13 @@ class LaunchIn(BaseModel):
     exit_speed: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     accel: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     # 발사대 구조물이 기체를 지면에서 들어 올린 높이 [m]. 0이면 스키드가 지면에
-    # 박힌 채 출발해 레일 구간 내내 기어 반력이 거짓으로 선다. 기본 2.9는 발사관
-    # 시각화 모델의 캐니스터 축 높이와 맞춘 값 — 엔진 RAIL_ORIGIN_H와 같은 근거
-    origin_height: float = Field(default=2.9, ge=0.0, allow_inf_nan=False)
+    # 박힌 채 출발해 레일 구간 내내 기어 반력이 거짓으로 선다. None = 기체 프로파일의
+    # ground.rail.origin_height (서버가 수를 재기술하지 않는다, 02 §5.6)
+    origin_height: float | None = Field(default=None, ge=0.0, allow_inf_nan=False)
 
 
 class SimRunIn(BaseModel):
-    aircraft: Literal["demo"] = "demo"
+    profile: ProfileRef | None = None  # 기체 선택 — 없으면 예제 기체 (02 §5.6)
     fingerprint: str = ""
     trim: TrimCaseIn  # 시작 트림점 (웜스타트 기준)
     modes: list[ModeIn] = Field(min_length=1)
@@ -330,10 +330,9 @@ def build_scas(spec: dict | None):
     return Scas(*(REGISTRY.create("fcl", "ScasAxis", spec[a]) for a in SCAS_AXES))
 
 
-def _build(req: SimRunIn):
-    """미션 스펙 → (Simulator, TrimResult) — 구성 오류는 ValueError/TypeError."""
+def _build(req: SimRunIn, profile):
+    """(미션 스펙, 기체 프로파일) → (Simulator, TrimResult) — 구성 오류는 ValueError/TypeError."""
     # 활주로가 있으면 스키드를 단다 — 없으면 ground=None이라 지면 도입 전과 동일하다
-    profile = current_profile()
     gear = profile.skid_gear() if req.runway else None
     if req.runway and gear is None:
         # 활주로 미션인데 지상장치가 없으면 기체가 활주로를 통과한다 — 조용히 지면 없이 돌리지 않는다
@@ -396,12 +395,21 @@ def _build(req: SimRunIn):
         # 활주로가 없으면 엔진 기본값(해수면 0)이 그대로다.
         ground_elev=req.runway.elevation if req.runway else 0.0,
         min_altitude=req.runway.elevation if req.runway else 0.0,
-        launch=_build_rail(req.launch),
+        launch=_build_rail(req.launch, profile),
     )
     return sim, tr
 
 
-def _build_rail(spec):
+def _rail_origin_height(spec, profile) -> float:
+    """요청이 높이를 안 주면 기체 문서의 레일 높이 — 둘 다 없으면 지어내지 않고 거부한다."""
+    if spec.origin_height is not None:
+        return spec.origin_height
+    if profile.rail_origin_height is None:
+        raise ValueError("레일 높이(origin_height)가 요청에도 기체 문서(ground.rail)에도 없다")
+    return profile.rail_origin_height
+
+
+def _build_rail(spec, profile):
     """LaunchIn → 엔진 LaunchRail. exit_speed·accel 배타 판정은 엔진이 정본이다."""
     if spec is None:
         return None
@@ -411,14 +419,15 @@ def _build_rail(spec):
         azimuth=spec.azimuth,
         exit_speed=spec.exit_speed,
         accel=spec.accel,
-        origin_n=(0.0, 0.0, -spec.origin_height),
+        origin_n=(0.0, 0.0, -_rail_origin_height(spec, profile)),
     )
 
 
 @router.post("/sim/run", status_code=202)
 def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
     try:
-        sim, tr = _build(req)
+        profile = resolve_profile(request, req.profile)
+        sim, tr = _build(req, profile)
     except (ValueError, TypeError) as e:  # 엔진 구성 검증 → 제출 시점 422
         raise HTTPException(status_code=422, detail=str(e))
     store = request.app.state.store
@@ -448,7 +457,8 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
             None if req.runway is None else req.runway.model_dump()
         )
         payload["meta"]["launch"] = (
-            None if req.launch is None else req.launch.model_dump()
+            None if req.launch is None
+            else {**req.launch.model_dump(), "origin_height": _rail_origin_height(req.launch, profile)}
         )
         # 기체 형상 치수 — 3D 월드가 기체를 그리려면 실제 기준량이 필요하다.
         #
@@ -469,6 +479,7 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
         # h_ref는 곡률반경 평가용 기준 고도이고 수직 원점이 아니다(OriginIn 참조).
         # 출처를 함께 적는 이유: 어느 값을 썼는지 모호하면 원점에서 20 km 떨어진 지점의
         # 1.6 m 어긋남(h_ref 500 m / R 6.37e6 = 7.8e-5)을 나중에 설명할 수 없다.
+        payload["meta"]["profile"] = profile_echo(profile)  # 어느 기체로 날았는가 (02 §5.6)
         payload["meta"]["origin"] = (
             None if req.origin is None
             else {
@@ -482,6 +493,7 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
             payload,
             meta={
                 "kind": "sim",
+                "profile": profile_echo(profile),
                 "created": job.created,
                 "n": len(res.t),
                 "t_end": req.t_end,

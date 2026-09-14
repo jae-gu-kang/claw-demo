@@ -1,7 +1,7 @@
 {
  "golden": "envelope_scan",
  "mode": "full",
- "captured_at": "388cc91",
+ "captured_at": "02e96c7+dirty",
  "value": {
   "dict": {
    "kind": "envelope_scan",
@@ -248,7 +248,19 @@
      }
     }
    ],
-   "n_requested": 4
+   "n_requested": 4,
+   "profile": {
+    "dict": {
+     "id": "example-delta",
+     "name": "예제 델타윙",
+     "variant": null,
+     "revision": 0,
+     "fingerprint": "627fbbf154983a90",
+     "plant_fingerprint": "dc86fad3932a3446",
+     "is_example": true,
+     "source": "default-example"
+    }
+   }
   }
  }
 }

@@ -10,14 +10,14 @@
 보여 준 자리가 실행 시점에 터진다.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 
 from claw.fcl.autopilot import Autopilot
 from claw.fcl.assemble import assemble_law
 from claw.fcl.graphs import SCHEDULABLE
 from claw.fcl.scas import ScasAxis
 from claw.fcl.schedule import AP_GAIN_FIELD
-from claw_server.refs import current_profile
+from claw_server.refs import ProfileRef, profile_echo, profile_query, resolve_profile
 from claw_server.serialize import table_dict
 
 router = APIRouter(tags=["gains"])
@@ -65,19 +65,21 @@ def _design_index(tables: dict, design: dict) -> int:
 
 
 @router.get("/gains/demo")
-def demo_gain_tables() -> dict:
-    """데모 기체 설계 게인 테이블 — "그룹.게인" 이름 → 테이블 JSON."""
-    return {name: table_dict(t) for name, t in current_profile().gain_tables().items()}
+def demo_gain_tables(request: Request, profile_ref: ProfileRef | None = Depends(profile_query)) -> dict:
+    """기체 설계 게인 테이블 — "그룹.게인" 이름 → 테이블 JSON. 경로 이름은 호환용(기체는 선택한 것)."""
+    profile = resolve_profile(request, profile_ref)
+    return {name: table_dict(t) for name, t in profile.gain_tables().items()}
 
 
 @router.get("/gains/catalog")
-def gain_slot_catalog() -> dict:
+def gain_slot_catalog(request: Request,
+                      profile_ref: ProfileRef | None = Depends(profile_query)) -> dict:
     """스케줄 **자리** 목록 — 켤 수 있는 곳, 지금 켜진 곳, 끄면 굳는 값.
 
     켜져 있지 않은 자리에도 제안 테이블(설계 상수 × 같은 동압 스케일)을 함께 준다.
     체크하는 순간 곡선이 뜨고, 설계점에서는 원래 상수와 같은 값에서 출발한다.
     """
-    profile = current_profile()
+    profile = resolve_profile(request, profile_ref)
     scheduled = tuple(profile.law["schedule"]["scheduled"])
     design = profile.design_gains()
     tables = {name: table_dict(t) for name, t in profile.gain_tables(design).items()}
@@ -111,4 +113,5 @@ def gain_slot_catalog() -> dict:
         "default": list(scheduled),
         "design_index": _design_index(tables, design),
         "slots": slots,
+        "profile": profile_echo(profile),
     }

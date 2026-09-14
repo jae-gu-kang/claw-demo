@@ -143,3 +143,13 @@ def test_ids_must_match_exactly():
     with pytest.raises(ProfileError) as ei:
         validate_document(doc)
     assert ei.value.path == "/variants/0/id"
+
+
+def test_variant_count_is_capped():
+    from claw.profile.schema import MAX_VARIANTS
+
+    doc = load_example()
+    doc["variants"] = [{"id": f"v{i}", "name": "v", "patch": {}} for i in range(MAX_VARIANTS + 1)]
+    with pytest.raises(ProfileError) as ei:
+        validate_document(doc)
+    assert ei.value.path == "/variants"

@@ -320,9 +320,9 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
   순환을 피해 검증·조립 시점에 import)
 - 소비자: 법칙 조립 정본 `fcl/assemble.py assemble_law`(M7), 해석 형상 `Shape.profile`(M15 —
   `make_law`·`evaluate`·`verify`·`run_sweep`), `Aircraft.trim_bounds`(M5 → M9), 대조 미션
-  `record_mission(profile=)`(M12), 서버 창구 `claw_server/refs.py`(M13).
-  `plant/demo.py`·`fcl/demo.py`는 예제를 감싸는 호환 층이고 제품 코드의 import는 가드 테스트가
-  막는다
+  `record_mission(profile=)`(M12), 서버 창구 `claw_server/refs.py resolve_profile`과 저장소
+  `claw_server/profiles.py`(M13). `plant/demo.py`·`fcl/demo.py`는 예제를 감싸는 호환 층이고 제품
+  코드의 import는 가드 테스트가 막는다
 
 ### M13 `server` — 백엔드
 

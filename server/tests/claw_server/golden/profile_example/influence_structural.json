@@ -1,7 +1,7 @@
 {
  "golden": "influence_structural",
  "mode": "full",
- "captured_at": "6507b94",
+ "captured_at": "02e96c7+dirty",
  "value": {
   "dict": {
    "fingerprint": "c48da3269a9a8e4c",
@@ -1317,7 +1317,19 @@
    "warnings": [
     "게인 스케줄이 덮어써 실행에 반영되지 않는 상수 8개: fcl/ScasAxis.pitch.kp, fcl/ScasAxis.pitch.ki, fcl/ScasAxis.pitch.out_lo, fcl/ScasAxis.pitch.out_hi, fcl/ScasAxis.roll.kp, fcl/ScasAxis.roll.ki, fcl/ScasAxis.roll.out_lo, fcl/ScasAxis.roll.out_hi — 실효값은 게인 탭의 테이블이다",
     "그래프에 방출되지 않는 상수 2개: fcl/ScasAxis.pitch.k_rate, fcl/ScasAxis.roll.k_rate — 스케줄 경로가 상수 대신 조회 노드를 쓰므로 편집해도 아무 일도 일어나지 않는다"
-   ]
+   ],
+   "profile": {
+    "dict": {
+     "id": "example-delta",
+     "name": "예제 델타윙",
+     "variant": null,
+     "revision": 0,
+     "fingerprint": "627fbbf154983a90",
+     "plant_fingerprint": "dc86fad3932a3446",
+     "is_example": true,
+     "source": "default-example"
+    }
+   }
   }
  }
 }

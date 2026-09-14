@@ -1,7 +1,7 @@
 {
  "golden": "vn_envelope",
  "mode": "full",
- "captured_at": "388cc91",
+ "captured_at": "02e96c7+dirty",
  "value": {
   "dict": {
    "default": {
@@ -200,7 +200,19 @@
      "fuel": "f:0x1.9000000000000p+7",
      "alpha_margin": "f:0x1.999999999999ap-5",
      "limits_source": "demo-placeholder",
-     "limits_overridden": []
+     "limits_overridden": [],
+     "profile": {
+      "dict": {
+       "id": "example-delta",
+       "name": "예제 델타윙",
+       "variant": null,
+       "revision": 0,
+       "fingerprint": "627fbbf154983a90",
+       "plant_fingerprint": "dc86fad3932a3446",
+       "is_example": true,
+       "source": "default-example"
+      }
+     }
     }
    },
    "override": {
@@ -402,7 +414,19 @@
      "limits_overridden": [
       "n_limit_pos",
       "mach_d"
-     ]
+     ],
+     "profile": {
+      "dict": {
+       "id": "example-delta",
+       "name": "예제 델타윙",
+       "variant": null,
+       "revision": 0,
+       "fingerprint": "627fbbf154983a90",
+       "plant_fingerprint": "dc86fad3932a3446",
+       "is_example": true,
+       "source": "default-example"
+      }
+     }
     }
    }
   }

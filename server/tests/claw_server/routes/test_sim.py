@@ -7,6 +7,7 @@
 import pytest
 
 from claw.nav import NavErrorModel
+from claw.profile import example_profile
 
 
 def _hold_mission(t_end=20.0, alt=1000.0, **over):
@@ -495,7 +496,7 @@ def test_nav_grade_picks_rtk_without_the_web_restating_numbers():
 
     req = _landing_mission(nav_grade="rtk", nav={"seed": 5})
     assert set(req["nav"]) & set(RTK_FIXED) == set(), "요청에 RTK 수치가 없어야 한다"
-    sim, _tr = _build(SimRunIn(**req))
+    sim, _tr = _build(SimRunIn(**req), example_profile())
     assert sim.nav_model.pos_std_v == RTK_FIXED["pos_std_v"]
     assert sim.nav_model.bias_std_v == RTK_FIXED["bias_std_v"]
     assert sim.nav_model.seed == 5
@@ -503,11 +504,11 @@ def test_nav_grade_picks_rtk_without_the_web_restating_numbers():
     assert sim.nav_model.att_std == NavErrorModel().att_std
 
     # 대조군 — _landing_mission의 기본이 rtk라 등급을 명시적으로 되돌려야 한다
-    plain, _ = _build(SimRunIn(**_landing_mission(nav_grade="default", nav={"seed": 5})))
+    plain, _ = _build(SimRunIn(**_landing_mission(nav_grade="default", nav={"seed": 5})), example_profile())
     assert plain.nav_model.pos_std_v == NavErrorModel().pos_std_v
     # 등급 위에 nav가 덮인다
     over, _ = _build(SimRunIn(**_landing_mission(
-        nav_grade="rtk", nav={"seed": 5, "pos_std_v": 0.5})))
+        nav_grade="rtk", nav={"seed": 5, "pos_std_v": 0.5})), example_profile())
     assert over.nav_model.pos_std_v == 0.5
 
 

@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from claw.design import AutoDesignConfig, DesignSession, resample_to_table
 from claw.design.tune import REASON_TEXT
-from claw_server.refs import current_profile
+from claw_server.refs import ProfileRef, profile_echo, resolve_profile, resolve_snapshot
 from claw.tables import PolyTable
 from claw_server.serialize import to_jsonable
 
@@ -49,7 +49,7 @@ _RESAMPLE_PROBE = 401
 
 
 class AutoDesignIn(BaseModel):
-    aircraft: Literal["demo"] = "demo"
+    profile: ProfileRef | None = None  # 기체 선택 — 없으면 예제 기체 (02 §5.6)
     fingerprint: str = ""
     config: dict = Field(default_factory=dict)  # 기본값 위 부분 덮어쓰기 — 정본은 엔진
 
@@ -228,18 +228,21 @@ def _ledger_payload(session: DesignSession) -> dict:
 
 
 def _save_session(store, job, session: DesignSession, fingerprint: str,
-                  parent: str | None = None) -> None:
+                  parent: str | None = None, *, profile) -> None:
     payload = session.to_dict()
     payload["report"] = session.report()
     payload["proposed_actions"] = session.proposed_actions()
     payload["gain_export"] = _gain_export(session)
     # 마지막에 얹는다 — to_jsonable 봉투 **안**이어야 원장의 inf/nan이 정책을 탄다
     payload.update(_ledger_payload(session))
+    # 이 세션이 설계한 기체 — 재개는 이 지문의 스냅숏으로 같은 기체를 되살린다 (02 §5.6)
+    payload["profile"] = profile_echo(profile)
     store.save(
         job.id,
         to_jsonable(payload),
         meta={
             "kind": "auto_design",
+            "profile": profile_echo(profile),
             "created": job.created,
             "status": session.status,
             "stage": session.stage,
@@ -251,9 +254,8 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
 
 
 def _run_session_job(request, response, session: DesignSession, fingerprint: str,
-                     parent: str | None = None) -> dict:
+                     parent: str | None = None, *, profile) -> dict:
     store = request.app.state.store
-    profile = current_profile()
     ac = profile.aircraft()
     stall = profile.stall_table()
     limits = profile.structural_limits()
@@ -270,7 +272,7 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
             fingerprint=fingerprint,
             on_progress=lambda done, total, msg: job.report(done, total, message=msg),
         )
-        _save_session(store, job, session, fingerprint, parent=parent)
+        _save_session(store, job, session, fingerprint, parent=parent, profile=profile)
 
     job = request.app.state.jobs.submit("auto_design", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"
@@ -303,7 +305,8 @@ def submit_auto_design(req: AutoDesignIn, request: Request, response: Response) 
         # 비교에서 TypeError로 나온다. 형제 라우트(sim·codegen·influence)와 같은 정책으로
         # 422에 매핑한다 (놓치면 500)
         raise HTTPException(status_code=422, detail=str(e))
-    return _run_session_job(request, response, DesignSession(cfg), req.fingerprint)
+    return _run_session_job(request, response, DesignSession(cfg), req.fingerprint,
+                            profile=resolve_profile(request, req.profile))
 
 
 @router.post("/design/{result_id}/resume", status_code=202)
@@ -349,4 +352,4 @@ def resume_auto_design(result_id: str, req: ResumeIn, request: Request,
             detail=f"재개 불가 상태: {session.status} (awaiting_approval·cancelled만 재개)",
         )
     return _run_session_job(request, response, session, req.fingerprint,
-                            parent=result_id)
+                            parent=result_id, profile=resolve_snapshot(request, payload.get("profile")))

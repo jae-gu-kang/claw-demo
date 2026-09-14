@@ -18,6 +18,7 @@ from claw.profile.errors import ProfileError
 from claw.profile.patch import apply_patch, get_pointer
 
 SCHEMA_VERSION = 1
+MAX_VARIANTS = 64  # 형상 변형 상한 — 읽을 때마다 변형마다 재검증하므로 단일 워커를 물지 않게
 
 SECTIONS = (
     "schema_version", "id", "name", "description", "is_example",
@@ -461,6 +462,8 @@ def _body(d, *, with_variants):
 def _variants(v, base):
     if not isinstance(v, list):
         _fail("/variants", "목록이어야 함")
+    if len(v) > MAX_VARIANTS:
+        _fail("/variants", f"형상 변형은 {MAX_VARIANTS}개까지: {len(v)}개")
     seen = set()
     out = []
     for i, item in enumerate(v):

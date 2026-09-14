@@ -10,7 +10,7 @@ import math
 from typing import Literal
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
 from claw.analysis import (
@@ -38,7 +38,7 @@ from claw.trim import (
     trim_batch,
 )
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
-from claw_server.refs import current_profile
+from claw_server.refs import ProfileRef, profile_echo, profile_query, resolve_profile
 from claw_server.serialize import to_jsonable, trim_result_dict
 
 router = APIRouter(tags=["analysis"])
@@ -81,7 +81,7 @@ class ActuatorIn(BaseModel):
 
 
 class MarginMapIn(BaseModel):
-    aircraft: Literal["demo"] = "demo"
+    profile: ProfileRef | None = None  # 기체 선택 — 없으면 예제 기체 (02 §5.6)
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1)
     loops: list[LoopIn] = []
@@ -174,7 +174,8 @@ def _assemble_limits(
     }
     overridden = [k for k, v in overrides.items() if v is not None]
     limits.update({k: overrides[k] for k in overridden})
-    source = "user-input" if overridden else "demo-placeholder"
+    # 예제 기체의 한계는 자리표시라 종전 문구를 유지한다(웹이 이 값으로 자리표시를 표시한다)
+    source = "user-input" if overridden else ("demo-placeholder" if profile.is_example else "profile")
     return limits, source, overridden
 
 
@@ -215,10 +216,13 @@ def _num_list(raw, label) -> list | None:
 
 @router.get("/analysis/vn-envelope")
 def vn_envelope_endpoint(
+    request: Request,
+    profile_ref: ProfileRef | None = Depends(profile_query),
     alt: float = Query(..., allow_inf_nan=False),
     fuel: float = Query(ge=0.0, allow_inf_nan=False),  # inf는 fuel_max로 조용히 잘려 거짓 echo가 된다
-    alpha_margin: float = Query(default=0.05, ge=0.0, allow_inf_nan=False),  # α 리미터 [기본값]과 동일
-    neg_alpha_ratio: float = Query(default=0.6, gt=0.0, le=1.0),  # 음의 실속 자리표시 비율
+    # None = 기체 프로파일 값 (α 리미터 마진·음의 실속 자리표시 비율) — 서버가 수를 재기술하지 않는다
+    alpha_margin: float | None = Query(default=None, ge=0.0, allow_inf_nan=False),
+    neg_alpha_ratio: float | None = Query(default=None, gt=0.0, le=1.0),
     # 구조 한계 오버라이드 — None = 데모 프로파일이 채움 (기본값 재기술 금지, 02 §5.5)
     n_limit_pos: float | None = Query(default=None, allow_inf_nan=False),
     n_limit_neg: float | None = Query(default=None, allow_inf_nan=False),
@@ -233,7 +237,9 @@ def vn_envelope_endpoint(
     echo. 음의 실속 곡선도 자리표시(−ratio×α_stall, 엔진이 ratio echo).
     표기는 웹 소관.
     """
-    profile = current_profile()
+    profile = resolve_profile(request, profile_ref)
+    alpha_margin = profile.law["alpha_margin"] if alpha_margin is None else alpha_margin
+    neg_alpha_ratio = profile.neg_alpha_ratio if neg_alpha_ratio is None else neg_alpha_ratio
     ac = profile.aircraft()
     limits, source, overridden = _assemble_limits(
         profile, n_limit_pos, n_limit_neg, safety_factor, mach_no, mach_d
@@ -255,17 +261,20 @@ def vn_envelope_endpoint(
     env["alpha_margin"] = alpha_margin
     env["limits_source"] = source  # demo-placeholder = 실기체 값 아님 — 웹이 명기 표시
     env["limits_overridden"] = overridden
+    env["profile"] = profile_echo(profile)
     return env
 
 
 @router.get("/analysis/design-envelope")
 def design_envelope_endpoint(
+    request: Request,
+    profile_ref: ProfileRef | None = Depends(profile_query),
     fuel: float = Query(ge=0.0, allow_inf_nan=False),  # inf는 fuel_max로 조용히 잘려 거짓 echo가 된다
     q_max: float | None = Query(default=None, allow_inf_nan=False),
     alt_min: float | None = Query(default=None, allow_inf_nan=False),
     alt_max: float | None = Query(default=None, allow_inf_nan=False),
     mach_margin: float | None = Query(default=None, allow_inf_nan=False),
-    alpha_margin: float = Query(default=0.05, ge=0.0, allow_inf_nan=False),  # 공력 보호선 — α 리미터 [기본값]과 동일
+    alpha_margin: float | None = Query(default=None, ge=0.0, allow_inf_nan=False),  # None = 기체 α 리미터 마진
     nz: float | None = Query(default=None, gt=0.0, allow_inf_nan=False),  # 기동 엔벨로프 하중배수
     iso_qbar: str | None = Query(default=None),  # 콤마 구분 [Pa] — None이면 엔진 [기본값]
     iso_tas: str | None = Query(default=None),  # 콤마 구분 [m/s]
@@ -287,7 +296,8 @@ def design_envelope_endpoint(
     nz·iso_qbar·iso_tas도 같은 계약 — 미지정이면 전달하지 않고 엔진이 정한다
     (기동 엔벨로프는 아예 없는 것, 등고선은 엔진 [기본값]).
     """
-    profile = current_profile()
+    profile = resolve_profile(request, profile_ref)
+    alpha_margin = profile.law["alpha_margin"] if alpha_margin is None else alpha_margin
     ac = profile.aircraft()
     stall = profile.stall_table()
     db_ranges = profile.db_ranges()
@@ -313,6 +323,7 @@ def design_envelope_endpoint(
     env["limits"] = limits
     env["limits_source"] = source
     env["limits_overridden"] = overridden
+    env["profile"] = profile_echo(profile)
     return to_jsonable(env)
 
 
@@ -322,7 +333,7 @@ MAX_SCAN_CASES = 200  # 영향성 라우트 MAX_CASES와 같은 지위 — 오�
 class EnvelopeScanIn(BaseModel):
     """제어 가능 영역 스캔 — 케이스 격자 트림 + envelope_ok 판정 (01 §2.6)."""
 
-    aircraft: Literal["demo"] = "demo"
+    profile: ProfileRef | None = None
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_SCAN_CASES)
 
@@ -335,7 +346,8 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
     saturated_throttle_high는 대리 지표가 아니라 추진 한계 자체다 (plant/prop.py PropEngine).
     취소는 trim_batch 협조적 중단 — 완료분 보존.
     """
-    ac = current_profile().aircraft()
+    profile = resolve_profile(request, req.profile)
+    ac = profile.aircraft()
     cases = build_cases(req.cases)
     store = request.app.state.store
 
@@ -354,9 +366,11 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
         ]
         store.save(
             job.id,
-            {"kind": "envelope_scan", "cases": entries, "n_requested": len(cases)},
+            {"kind": "envelope_scan", "cases": entries, "n_requested": len(cases),
+             "profile": profile_echo(profile)},
             meta={
                 "kind": "envelope_scan",
+                "profile": profile_echo(profile),
                 "created": job.created,
                 "n": len(entries),
                 "fingerprint": req.fingerprint,
@@ -377,7 +391,7 @@ class BodeIn(BaseModel):
     그대로 실어 보내는 것이 전제다.
     """
 
-    aircraft: Literal["demo"] = "demo"
+    profile: ProfileRef | None = None
     fingerprint: str = ""
     case: TrimCaseIn
     loop: LoopIn
@@ -396,14 +410,14 @@ class BodeIn(BaseModel):
 
 
 @router.post("/analysis/bode")
-def bode_endpoint(req: BodeIn) -> dict:
+def bode_endpoint(req: BodeIn, request: Request) -> dict:
     """개루프 보드선도 (01 §4.2) — 트림 1건이라 동기 계산.
 
     GM과 PM은 같은 곡선의 서로 다른 자리에서 읽는 수라 히트맵 두 장으로는 둘의
     주파수 관계가 안 보인다. 이 응답이 같은 주파수축의 이득·위상과 **교차점 전량**을
     줘서 화면이 "보고된 마진이 어느 교차의 것인가"까지 말하게 한다 (엔진 bode_data).
     """
-    profile = current_profile()
+    profile = resolve_profile(request, req.profile)
     ac = profile.aircraft()
     (case,) = build_cases([req.case])
     tr = trim_level(ac, case, z0=req.z0, fingerprint=req.fingerprint)
@@ -474,12 +488,14 @@ def bode_endpoint(req: BodeIn) -> dict:
         "actuator": req.actuator.model_dump() if req.actuator else None,
         "delay_s": req.delay_s,
         "pade_order": req.pade_order,
+        "profile": profile_echo(profile),
     })
 
 
 @router.post("/analysis/margin-map", status_code=202)
 def submit_margin_map(req: MarginMapIn, request: Request, response: Response) -> dict:
-    ac = current_profile().aircraft()
+    profile = resolve_profile(request, req.profile)
+    ac = profile.aircraft()
     cases = build_cases(req.cases)
     store = request.app.state.store
     n = len(cases)
@@ -528,9 +544,11 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                 "delay_s": req.delay_s,
                 "pade_order": req.pade_order,
                 "n_requested": n,
+                "profile": profile_echo(profile),
             },
             meta={
                 "kind": "margin_map",
+                "profile": profile_echo(profile),
                 "created": job.created,
                 "n": len(entries),
                 "fingerprint": req.fingerprint,

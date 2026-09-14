@@ -35,7 +35,7 @@ from claw.pipeline.prescribe import (
 )
 from claw.pipeline.sweep import nonadditivity, plan_shapes, run_sweep, sweep_plan
 from claw.sim import check_law_plant_pairing
-from claw_server.refs import current_profile
+from claw_server.refs import profile_echo, resolve_profile
 from claw.trim import trim_batch
 from claw_server.routes.codegen import FlightCodeIn
 from claw_server.routes.sim import _load_sim, build_gain_tables
@@ -128,13 +128,13 @@ def to_shape(req: InfluenceIn, profile) -> Shape:
 
 
 @router.post("/influence/structural")
-def influence_structural(req: InfluenceIn) -> dict:
+def influence_structural(req: InfluenceIn, request: Request) -> dict:
     """1단 — 구조 + 도달성. 파라미터 65개를 각각 재조립해 diff하고도 100 ms 안쪽이라 동기다.
 
     구성 오류(범위 이탈·스케줄 불가 자리 등)는 엔진이 ValueError로 내고 422가 된다.
     """
     t0 = time.perf_counter()
-    profile = current_profile()
+    profile = resolve_profile(request, req.profile)
     try:
         payload = structural_payload(
             to_shape(req, profile),
@@ -143,6 +143,7 @@ def influence_structural(req: InfluenceIn) -> dict:
         )
     except (ValueError, TypeError) as e:  # 엔진 판정 → 422 (sim·codegen과 같은 정책)
         raise HTTPException(status_code=422, detail=str(e))
+    payload["profile"] = profile_echo(profile)
     payload["elapsed_ms"] = round((time.perf_counter() - t0) * 1000, 1)
     return payload
 
@@ -165,7 +166,7 @@ def influence_diagnose(req: DiagnoseIn, request: Request) -> dict:
     """
     t0 = time.perf_counter()
     payload = _load_sim(request, req.result_id)
-    profile = current_profile()
+    profile = resolve_profile(request, req.profile)
     try:
         criteria = GainEvalCriteria.from_dict(req.criteria)
         out = diagnose_run(payload, to_shape(req, profile), probe_rel=req.probe_rel,
@@ -178,7 +179,15 @@ def influence_diagnose(req: DiagnoseIn, request: Request) -> dict:
             f"계보 불일치: 결과 지문 {fp} ≠ 형상 지문 {out['fingerprint']} — "
             "처방 승격 판정이 실제 런 형상과 다를 수 있다"
         )
+    flown = ((payload.get("meta") or {}).get("profile") or {}).get("fingerprint")
+    if flown and flown != profile.fingerprint:
+        # 형상 지문 경고와 같은 자리 — 기체는 형상 지문 밖이라 그 경고로는 안 잡힌다 (02 §5.6)
+        out["warnings"].append(
+            f"기체 불일치: 결과는 기체 지문 {flown}로 날았는데 요청 기체는 {profile.fingerprint} — "
+            "처방이 다른 기체를 기준으로 할 수 있다"
+        )
     out["result_id"] = req.result_id
+    out["profile"] = profile_echo(profile)
     out["elapsed_ms"] = round((time.perf_counter() - t0) * 1000, 1)
     return to_jsonable(out)
 
@@ -199,7 +208,7 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
     케이스 보존. 파라미터 id 오타는 실행이 아니라 **제출 시점 422**로 잡는다 —
     잡이 돌고 나서 실패하면 오타 하나에 트림 배치 비용을 지불한다.
     """
-    profile = current_profile()
+    profile = resolve_profile(request, req.profile)
     ac = profile.aircraft()
     cases = build_cases(req.cases)
     try:
@@ -230,9 +239,10 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
         )
         payload = to_jsonable(out)
         payload["kind"] = "influence_openloop"
+        payload["profile"] = profile_echo(profile)
         store.save(
             job.id, payload,
-            meta={"kind": "influence_openloop", "created": job.created,
+            meta={"kind": "influence_openloop", "profile": profile_echo(profile), "created": job.created,
                   "n": len(out["cases"]), "fingerprint": req.fingerprint},
         )
         job.result_id = job.id
@@ -280,7 +290,7 @@ def submit_sweep(req: SweepIn, request: Request, response: Response) -> dict:
     if not req.knobs and not req.pairs:
         raise HTTPException(status_code=422,
                             detail="흔들 것이 없다 — knobs 또는 pairs가 필요")
-    profile = current_profile()
+    profile = resolve_profile(request, req.profile)
     ac = profile.aircraft()
     cases = build_cases(req.cases)
     try:
@@ -342,10 +352,11 @@ def submit_sweep(req: SweepIn, request: Request, response: Response) -> dict:
                                "values": nonadditivity(m0, ma, mb, mab)})
         payload = to_jsonable(out)
         payload["kind"] = "influence_sweep"
+        payload["profile"] = profile_echo(profile)
         payload["nonadditivity"] = to_jsonable(nonadd)
         store.save(
             job.id, payload,
-            meta={"kind": "influence_sweep", "created": job.created,
+            meta={"kind": "influence_sweep", "profile": profile_echo(profile), "created": job.created,
                   "n": len(out["rows"]), "fingerprint": req.fingerprint},
         )
         job.result_id = job.id
@@ -380,7 +391,7 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
     소급 활성화다. 취소 시 완료 케이스의 행은 보존되고, 판정은 남은 케이스로만
     낸다 (n_cases가 계보다).
     """
-    profile = current_profile()
+    profile = resolve_profile(request, req.profile)
     ac = profile.aircraft()
     cases = build_cases(req.cases)
     try:
@@ -421,6 +432,7 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
                 f"발산으로 잘린 케이스 {n_aborted}건 — 국소성 판정에서 제외")
         payload = to_jsonable(out)
         payload["kind"] = "influence_scan"
+        payload["profile"] = profile_echo(profile)
         # 문턱은 평가 기준 정본에서 — 진단·평가·스캔이 각자 상수를 들면 같은 런이
         # 화면마다 다른 판정을 받는다 (02 §5.5)
         payload["grid"] = to_jsonable(diagnose_grid(
@@ -428,7 +440,7 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
             local_frac=criteria.schedule.local_frac))
         store.save(
             job.id, payload,
-            meta={"kind": "influence_scan", "created": job.created,
+            meta={"kind": "influence_scan", "profile": profile_echo(profile), "created": job.created,
                   "n": len(out["rows"]), "fingerprint": req.fingerprint},
         )
         job.result_id = job.id
@@ -495,7 +507,7 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
     기준 오류·기체와 안 맞는 형상은 제출 시점 422 (sweep과 같은 계약). 결과에
     형상·기준 지문이 함께 실린다 — 무슨 기준으로 판정했는지가 계보다.
     """
-    profile = current_profile()
+    profile = resolve_profile(request, req.profile)
     ac = profile.aircraft()
     cases = build_cases(req.cases)
     try:
@@ -527,9 +539,10 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
         )
         payload = to_jsonable(out)
         payload["kind"] = "influence_evaluate"
+        payload["profile"] = profile_echo(profile)
         store.save(
             job.id, payload,
-            meta={"kind": "influence_evaluate", "created": job.created,
+            meta={"kind": "influence_evaluate", "profile": profile_echo(profile), "created": job.created,
                   "n": len(out["cases"]), "fingerprint": req.fingerprint,
                   "criteria_fingerprint": out["criteria_fingerprint"]},
         )
@@ -568,7 +581,7 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
     이름이 겹치면 귀속이 조용히 다른 케이스로 바뀐다(웹 nameCases와 같은 계약).
     "mid/"는 예약 접두사다: 사용자 케이스가 그 이름을 쓰면 중간점 집계에 섞인다.
     """
-    profile = current_profile()
+    profile = resolve_profile(request, req.profile)
     ac = profile.aircraft()
     cases = build_cases(req.cases)
     reserved = [c.name for c in cases if c.name.startswith("mid/")]
@@ -622,9 +635,10 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
         )
         payload = to_jsonable(out)
         payload["kind"] = "influence_verify"
+        payload["profile"] = profile_echo(profile)
         store.save(
             job.id, payload,
-            meta={"kind": "influence_verify", "created": job.created,
+            meta={"kind": "influence_verify", "profile": profile_echo(profile), "created": job.created,
                   "n": expected, "fingerprint": req.fingerprint,
                   "criteria_fingerprint": out["criteria_fingerprint"]},
         )
@@ -676,7 +690,13 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
             detail=f"influence_sweep 결과가 아니다: kind={payload.get('kind')}")
     rows = payload.get("rows") or []
 
-    profile = current_profile()
+    profile = resolve_profile(request, req.profile)
+    sweep_profile_fp = (payload.get("profile") or {}).get("fingerprint")
+    if sweep_profile_fp and sweep_profile_fp != profile.fingerprint:
+        # 다른 기체의 스윕으로 풀고 이 기체로 확인 런을 돌리면 처방과 확인이 서로 다른 기체를 말한다
+        raise HTTPException(
+            status_code=409,
+            detail=f"기체 불일치: 스윕은 기체 지문 {sweep_profile_fp}로 계산됐는데 요청 기체는 {profile.fingerprint}")
     ac = profile.aircraft()
     cases = build_cases(req.cases)
     try:
@@ -697,6 +717,12 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
                 raise HTTPException(
                     status_code=409,
                     detail=f"influence_evaluate 결과가 아니다: kind={ev.get('kind')}")
+            eval_profile_fp = (ev.get("profile") or {}).get("fingerprint")
+            if eval_profile_fp and eval_profile_fp != profile.fingerprint:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"기체 불일치: 평가는 기체 지문 {eval_profile_fp}로 계산됐는데 요청 기체는 "
+                           f"{profile.fingerprint}")
             # 실패 지표 — 하드 위반이 지목한 지표 + 국소성 판정이 나쁜 지표
             metrics = set()
             for f in (ev.get("aggregate") or {}).get("hard_fails") or []:
@@ -813,9 +839,10 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
             "sweep_fingerprint": sweep_fp,
             "criteria_fingerprint": criteria.fingerprint(),
             "warnings": warnings,
+            "profile": profile_echo(profile),
         })
         store.save(job.id, out,
-                   meta={"kind": "influence_prescribe", "created": job.created,
+                   meta={"kind": "influence_prescribe", "profile": profile_echo(profile), "created": job.created,
                          "n": len(knobs), "fingerprint": req.fingerprint,
                          "criteria_fingerprint": criteria.fingerprint()})
         job.result_id = job.id

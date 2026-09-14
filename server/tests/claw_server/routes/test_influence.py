@@ -277,6 +277,60 @@ def test_diagnose_fingerprint_mismatch_warns(client, wait_job):
     assert not any("계보 불일치" in w for w in body2["warnings"])
 
 
+def _heavy_aircraft(client):
+    """예제를 복제해 공허 질량만 바꾼 기체 — 지문이 예제와 다르다."""
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="heavy-delta", name="무거운 델타", description="시험용", is_example=False, variants=[])
+    d["mass"]["m_empty"] = 900.0
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    return {"id": "heavy-delta"}
+
+
+def test_diagnose_warns_when_the_run_flew_another_aircraft(client, wait_job):
+    """기체는 형상 지문 밖이라 형상 계보 경고로는 안 잡힌다 — 기체 지문을 따로 대조한다 (02 §5.6)."""
+    heavy = _heavy_aircraft(client)
+    rid = _run_sim(client, wait_job)  # 예제 기체로 난 런
+    same = client.post("/api/influence/diagnose", json={"result_id": rid}).json()
+    assert not any("기체 불일치" in w for w in same["warnings"])
+    other = client.post("/api/influence/diagnose", json={"result_id": rid, "profile": heavy})
+    assert other.status_code == 200, other.text
+    assert any("기체 불일치" in w for w in other.json()["warnings"])
+    # 기체 기록이 없는 옛 결과는 대조할 계보가 없다 — 경고하지 않는다
+    store = client.app.state.store
+    legacy = store.load(rid)
+    del legacy["meta"]["profile"]
+    store.save("legacy-sim", legacy, meta={"kind": "sim"})
+    old = client.post("/api/influence/diagnose", json={"result_id": "legacy-sim", "profile": heavy}).json()
+    assert not any("기체 불일치" in w for w in old["warnings"])
+
+
+def test_prescribe_refuses_results_computed_for_another_aircraft(client):
+    """다른 기체의 스윕·평가로 풀고 이 기체로 확인하면 처방과 확인이 서로 다른 기체를 말한다 — 409."""
+    store = client.app.state.store
+    example_fp = client.get("/api/profiles/example-delta").json()["fingerprint"]
+    other = {"fingerprint": "0123456789abcdef"}
+    store.save("sweep-other", {"kind": "influence_sweep", "rows": [], "profile": other},
+               meta={"kind": "influence_sweep"})
+    store.save("sweep-mine", {"kind": "influence_sweep", "rows": [], "profile": {"fingerprint": example_fp}},
+               meta={"kind": "influence_sweep"})
+    store.save("eval-other", {"kind": "influence_evaluate", "profile": other}, meta={"kind": "influence_evaluate"})
+    store.save("sweep-legacy", {"kind": "influence_sweep", "rows": []}, meta={"kind": "influence_sweep"})
+    store.save("eval-legacy", {"kind": "influence_evaluate"}, meta={"kind": "influence_evaluate"})
+    base = {"cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}], "confirm": "none"}
+
+    swept = client.post("/api/influence/prescribe", json={**base, "result_id": "sweep-other"})
+    assert swept.status_code == 409 and "기체 불일치: 스윕" in swept.json()["detail"], swept.text
+    evaluated = client.post("/api/influence/prescribe",
+                            json={**base, "result_id": "sweep-mine", "eval_result_id": "eval-other"})
+    assert evaluated.status_code == 409 and "기체 불일치: 평가" in evaluated.json()["detail"], evaluated.text
+    # 기체 기록이 없는 옛 결과는 대조하지 않는다 — 빈 스윕이라 다음 검사(단독 런 없음)에서 멈춘다
+    legacy = client.post("/api/influence/prescribe",
+                         json={**base, "result_id": "sweep-legacy", "eval_result_id": "eval-legacy"})
+    assert legacy.status_code == 422 and "기체 불일치" not in legacy.text, legacy.text
+
+
 def test_sweep_rejects_impossible_shape_at_submit_not_mid_job(client):
     """기체가 낼 수 없는 설계변수는 **제출 시점 422** — 잡 안에서 터지면 안 된다.
 

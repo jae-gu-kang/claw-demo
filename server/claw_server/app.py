@@ -14,6 +14,7 @@ import claw.guidance  # noqa: F401 — "guidance" 카테고리 등록
 import claw.plant  # noqa: F401 — "actuator" 카테고리 등록
 from claw_server.auth import BasicAuthProtect
 from claw_server.jobs import JobManager
+from claw_server.profiles import ProfileStore
 from claw_server.routes import analysis as analysis_routes
 from claw_server.routes import codegen as codegen_routes
 from claw_server.routes import design as design_routes
@@ -21,6 +22,7 @@ from claw_server.routes import gains as gains_routes
 from claw_server.routes import influence as influence_routes
 from claw_server.routes import jobs as jobs_routes
 from claw_server.routes import llm as llm_routes
+from claw_server.routes import profiles as profiles_routes
 from claw_server.routes import results as results_routes
 from claw_server.routes import sim as sim_routes
 from claw_server.routes import system as system_routes
@@ -72,11 +74,13 @@ def _default_web_dir() -> Path:
 
 
 def create_app(data_dir=None, web_dir=None, access_password=None,
-               result_limit=None) -> FastAPI:
+               result_limit=None, profile_dir=None) -> FastAPI:
     """앱 생성 — data_dir: 결과 저장 루트 (기본 $CLAW_SERVER_DATA 또는 ./server_data),
     web_dir: M14 정적 파일 루트 (기본 $CLAW_WEB_DIR 또는 모노레포 web/ — 없으면 API만),
     access_password: 공용 비밀번호 (기본 $CLAW_ACCESS_PASSWORD — 빈 값이면 무인증),
-    result_limit: 결과 보존 개수 상한 (기본 $CLAW_RESULT_LIMIT — 0·미설정이면 무제한).
+    result_limit: 결과 보존 개수 상한 (기본 $CLAW_RESULT_LIMIT — 0·미설정이면 무제한),
+    profile_dir: 기체 프로파일 저장 루트 (기본 $CLAW_PROFILE_DATA 또는 결과 루트 아래 profiles/ —
+    결과 보존 상한이 지우지 않는 별도 저장소, 02 §5.6).
 
     네 인자 모두 **환경변수 기본값 + 명시 주입** 패턴이다 — 테스트가 환경을 건드리지
     않고 상한이 걸린 앱을 세울 수 있어야 보존 상한 관련 동작을 고정할 수 있다."""
@@ -94,16 +98,22 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
     )
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
     app.state.jobs = JobManager()
+    data_root = (data_dir if data_dir is not None
+                 else os.environ.get("CLAW_SERVER_DATA", "server_data"))
     app.state.store = ResultStore(
-        data_dir
-        if data_dir is not None
-        else os.environ.get("CLAW_SERVER_DATA", "server_data"),
+        data_root,
         # "" 포함 미설정·0 = 무제한 — 빈 값이 int()에서 기동 크래시 내지 않게
         limit=(result_limit if result_limit is not None
                else int(os.environ.get("CLAW_RESULT_LIMIT") or 0) or None),
     )
+    # 결과 저장소는 루트의 *.meta.json만 훑고 id로만 지우므로 하위 profiles/와 겹치지 않는다
+    app.state.profiles = ProfileStore(
+        profile_dir if profile_dir is not None
+        else os.environ.get("CLAW_PROFILE_DATA") or Path(data_root) / "profiles"
+    )
     for router in (
         system_routes.router,
+        profiles_routes.router,
         jobs_routes.router,
         results_routes.router,
         trim_routes.router,

@@ -8,6 +8,15 @@ import numpy as np
 import pytest
 
 
+def _resolved_example():
+    """_save_session을 직접 부르는 테스트용 — 라우트가 해석한 것과 같은 모양의 예제 기체(02 §5.6)."""
+    from claw.profile import example_profile
+
+    p = example_profile()
+    p.revision, p.source = 0, "default-example"
+    return p
+
+
 def _small_config(**over):
     cfg = {"n_mach": 3, "alts": [1000.0], "fuels": [200.0],
            "budget_points": 24, "budget_iters": 2, "mode": "auto"}
@@ -399,7 +408,7 @@ def test_saved_result_carries_effect_accounting(client):
 
     s = _effect_session()
     job = types.SimpleNamespace(id="effect-x", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, s, "fp-effect")
+    _save_session(client.app.state.store, job, s, "fp-effect", profile=_resolved_example())
     assert job.result_id == "effect-x"
 
     body = client.get("/api/results/effect-x").json()
@@ -426,7 +435,7 @@ def test_saved_effect_log_obeys_nonfinite_policy(client):
 
     s = _effect_session()
     job = types.SimpleNamespace(id="policy-x", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, s, "fp-policy")  # 여기서 안 터져야 한다
+    _save_session(client.app.state.store, job, s, "fp-policy", profile=_resolved_example())  # 여기서 안 터져야 한다
 
     body = client.get("/api/results/policy-x").json()
     eff = body["applied_log"][1]["effect"]
@@ -535,7 +544,7 @@ def test_saved_ledger_keeps_severity_order(client):
     assert want != sorted(want, key=lambda t: (t[0], t[1] or ""))
 
     job = types.SimpleNamespace(id="ledger-order", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, s, "fp-order")
+    _save_session(client.app.state.store, job, s, "fp-order", profile=_resolved_example())
 
     rows = client.get("/api/results/ledger-order").json()["ledger"]
     assert [(r["point"], r["loop"], r["severity"]) for r in rows] == want
@@ -569,7 +578,7 @@ def test_saved_ledger_obeys_nonfinite_policy(client):
                                  "deficit": math.inf, "deficit_frac": math.nan}},
     }]
     job = types.SimpleNamespace(id="ledger-policy", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, s, "fp-lpolicy")  # 여기서 안 터져야 한다
+    _save_session(client.app.state.store, job, s, "fp-lpolicy", profile=_resolved_example())  # 여기서 안 터져야 한다
 
     row = client.get("/api/results/ledger-policy").json()["ledger"][0]
     assert row["severity"] == "inf"  # ±inf → 문자열 (0으로 뭉개면 최악이 최선이 된다)
@@ -595,7 +604,7 @@ def test_saved_ledger_truncation_is_reported(client):
     total = len(s.shortfall_ledger())
     assert total > MAX_LEDGER_ROWS
     job = types.SimpleNamespace(id="ledger-cut", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, s, "fp-cut")
+    _save_session(client.app.state.store, job, s, "fp-cut", profile=_resolved_example())
 
     body = client.get("/api/results/ledger-cut").json()
     assert len(body["ledger"]) == MAX_LEDGER_ROWS
@@ -637,7 +646,7 @@ def test_old_result_without_ledger_still_reads(client):
 
     restored = DesignSession.from_dict(client.app.state.store.load("legacy-noledger"))
     job = types.SimpleNamespace(id="legacy-upgraded", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, restored, "fp-legacy")
+    _save_session(client.app.state.store, job, restored, "fp-legacy", profile=_resolved_example())
     up = client.get("/api/results/legacy-upgraded").json()
     assert isinstance(up["ledger"], list)  # 재저장하면 원장이 붙는다
     assert isinstance(up["report"]["ledger_size"], int)

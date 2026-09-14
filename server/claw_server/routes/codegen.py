@@ -13,12 +13,12 @@
 
 import math
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from claw.codegen import emit_c, emit_runtime
 from claw.fcl.assemble import assemble_law
-from claw_server.refs import current_profile
+from claw_server.refs import ProfileRef, profile_echo, resolve_profile
 from claw.params.registry import REGISTRY
 from claw_server.routes.sim import PolyTableIn, TableIn, build_gain_tables, build_scas
 
@@ -37,6 +37,7 @@ ROLE_RT = "공용 런타임"
 class FlightCodeIn(BaseModel):
     """탑재 C 생성 요청 — 시뮬 요청(SimRunIn)의 법칙 관련 필드만 추린 것."""
 
+    profile: ProfileRef | None = None  # 기체 선택 — 없으면 예제 기체 (02 §5.6)
     control_hz: float = Field(100.0, gt=0, le=1000)
     with_schedule: bool = True
     with_limiter: bool = True
@@ -132,10 +133,11 @@ def build_flight_law(req: FlightCodeIn, profile):
 
 
 @router.post("/codegen/flight")
-def flight_code(req: FlightCodeIn) -> dict:
+def flight_code(req: FlightCodeIn, request: Request) -> dict:
     """현재 형상의 탑재 제어법칙 C — {파일명, 역할, 줄수, 본문} 목록."""
     dt = 1.0 / req.control_hz
-    law = build_flight_law(req, current_profile())
+    profile = resolve_profile(request, req.profile)
+    law = build_flight_law(req, profile)
 
     runner = law.runner
     module = emit_c(runner.graph, runner)
@@ -150,6 +152,7 @@ def flight_code(req: FlightCodeIn) -> dict:
         "dt": dt,
         "fingerprint": module.fingerprint,
         "groups": groups,
+        "profile": profile_echo(profile),
         "files": [
             {
                 "name": n,

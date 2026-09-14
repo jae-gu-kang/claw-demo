@@ -82,8 +82,9 @@ def test_trim_batch_validation_422(client):
     assert client.post("/api/trim/batch", json={"cases": []}).status_code == 422
     bad = {"cases": [{"mach": -0.5, "alt": 0.0, "fuel": 0.0}]}
     assert client.post("/api/trim/batch", json=bad).status_code == 422
-    unknown_ac = {"aircraft": "f16", "cases": [{"mach": 0.5, "alt": 0.0, "fuel": 0.0}]}
-    assert client.post("/api/trim/batch", json=unknown_ac).status_code == 422
+    # 없는 기체는 404 — 조용히 예제 기체로 계산하지 않는다 (02 §5.6)
+    unknown_ac = {"profile": {"id": "f16"}, "cases": [{"mach": 0.5, "alt": 0.0, "fuel": 0.0}]}
+    assert client.post("/api/trim/batch", json=unknown_ac).status_code == 404
 
 
 def test_trim_batch_nonfinite_rejected_422(client):
