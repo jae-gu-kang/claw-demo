@@ -25,7 +25,6 @@ from claw.fcl.boundary import graph_inputs
 from claw.fcl.graphs import FCL_INPUTS
 from claw.guidance import Guidance, LosPath, ModeSpec
 from claw.nav import NavErrorModel
-from claw.plant import make_demo_aircraft, make_demo_stall_table
 from claw.sim import Simulator
 from claw.trim import trim_level
 
@@ -58,8 +57,12 @@ def _mission_modes(V0):
     ]
 
 
-def record_mission(law, *, t_end=180.0, control_hz=100.0, on_progress=None) -> dict:
+def record_mission(law, *, profile, t_end=180.0, control_hz=100.0, on_progress=None) -> dict:
     """주어진 법칙으로 대조 미션 1회 → 입·출력 기록.
+
+    profile: 미션을 나는 기체 프로파일 — 법칙을 조립한 **그 기체**여야 한다. 대조 미션 자체(시작 트림
+    M0.6·h1000·연료 300, 경로·모드)는 아직 예제 기체에 맞춘 값이다 — 기체별 미션 템플릿은 [백로그]
+    (02 §5.6).
 
     돌려주는 dict:
       inputs        스텝별 그래프 입력 {이름: float} (INPUT_ORDER의 키 전부)
@@ -71,7 +74,7 @@ def record_mission(law, *, t_end=180.0, control_hz=100.0, on_progress=None) -> d
     on_progress(done, total)는 시뮬 스텝 기준 ~1% 주기 — truthy 반환 = 협조적 취소.
     취소·절단되어도 그때까지의 기록을 그대로 돌려준다 (판단은 부르는 쪽 몫).
     """
-    ac = make_demo_aircraft()
+    ac = profile.aircraft()
     tr = trim_level(ac, TrimCase("design", mach=0.6, alt=1000.0, fuel=300.0))
     assert tr.converged
     path = LosPath(waypoints=((8000.0, 0.0), (8000.0, 8000.0)), accept_radius=1500.0)
@@ -97,7 +100,7 @@ def record_mission(law, *, t_end=180.0, control_hz=100.0, on_progress=None) -> d
         sim = Simulator(
             aircraft=ac, fcl=law, guidance=Guidance(_mission_modes(V0), path=path),
             nav_model=NavErrorModel(delay_s=0.02, update_hz=50.0, seed=11),
-            stall_table=make_demo_stall_table(), dt_plant=0.01, control_hz=control_hz,
+            stall_table=profile.stall_table(), dt_plant=0.01, control_hz=control_hz,
             actuator_params={"wn": 30.0, "zeta": 0.7, "rate_max": 10.0}, fuel_flow=0.3,
         )
         res = sim.run(tr, t_end=t_end, on_progress=on_progress)

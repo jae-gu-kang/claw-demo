@@ -14,22 +14,20 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from claw.analysis.duty import duty_report
-from claw.fcl import Scas, make_demo_fcl
+from claw.fcl import Scas
+from claw.fcl.assemble import assemble_law
 from claw.guidance import Guidance, LosPath, ModeSpec
 from claw.nav import NavErrorModel
 from claw.params.registry import REGISTRY
 from claw.pipeline.influence import SCAS_AXES
 from claw.plant import (
     LaunchRail,
-    make_demo_aircraft,
-    make_demo_db_ranges,
-    make_demo_skid_gear,
-    make_demo_stall_table,
 )
 from claw.sim import Simulator
 from claw.tables import PolyTable, Table
 from claw.trim import trim
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
+from claw_server.refs import current_profile
 from claw_server.serialize import sim_result_dict, to_jsonable
 
 router = APIRouter(tags=["sim"])
@@ -306,7 +304,7 @@ def build_scas(spec: dict | None):
     """{'pitch': kwargs, 'roll': …, 'yaw': …} → Scas — None이면 설계 기본값.
 
     **부분 주입은 막는다.** 한 축만 보내면 나머지 축이 조용히 데모 설계값으로 남아
-    "내가 보낸 형상"과 다른 것이 돌아간다 (make_demo_fcl의 gain_tables 전체 교체
+    "내가 보낸 형상"과 다른 것이 돌아간다 (assemble_law의 gain_tables 전체 교체
     계약과 같은 이유). 축별 kwargs 판정은 레지스트리 ParamDef가 한다 —
     미정의 키·타입·범위는 ParamError ⊂ ValueError → 422.
 
@@ -335,7 +333,12 @@ def build_scas(spec: dict | None):
 def _build(req: SimRunIn):
     """미션 스펙 → (Simulator, TrimResult) — 구성 오류는 ValueError/TypeError."""
     # 활주로가 있으면 스키드를 단다 — 없으면 ground=None이라 지면 도입 전과 동일하다
-    ac = make_demo_aircraft(ground=make_demo_skid_gear() if req.runway else None)
+    profile = current_profile()
+    gear = profile.skid_gear() if req.runway else None
+    if req.runway and gear is None:
+        # 활주로 미션인데 지상장치가 없으면 기체가 활주로를 통과한다 — 조용히 지면 없이 돌리지 않는다
+        raise ValueError("이 기체 프로파일에는 지상장치(ground.skid)가 없다 — 활주로 미션을 돌릴 수 없음")
+    ac = profile.aircraft(ground=gear)
     tr = trim(ac, build_cases([req.trim])[0])
     if not tr.converged:
         raise ValueError(f"시작 트림 미수렴: {req.trim.model_dump()}")
@@ -356,7 +359,8 @@ def _build(req: SimRunIn):
     else:
         nav_model = NavErrorModel(**req.nav)
     gain_tables = build_gain_tables(req.gain_tables)
-    fcl = make_demo_fcl(
+    fcl = assemble_law(
+        profile,
         with_schedule=req.with_schedule,
         with_limiter=req.with_limiter,
         # 레지스트리 경유 = ParamDef 판정(미정의 키·타입·범위·choices → ParamError
@@ -382,8 +386,8 @@ def _build(req: SimRunIn):
         fcl=fcl,
         guidance=guidance,
         nav_model=nav_model,
-        stall_table=make_demo_stall_table(),
-        db_ranges=make_demo_db_ranges(),
+        stall_table=profile.stall_table(),
+        db_ranges=profile.db_ranges(),
         dt_plant=req.dt_plant,
         control_hz=req.control_hz,
         actuator_params=req.actuators,

@@ -14,6 +14,7 @@ from claw.pipeline.influence import Shape
 from claw.pipeline.openloop import GROUP_LOOPS, openloop_delta
 from claw.plant import make_demo_aircraft
 from claw.trim import trim_level
+from claw.profile import example_profile
 
 
 @pytest.fixture(scope="module")
@@ -27,7 +28,7 @@ def design_trim():
 def test_스케줄_배율은_마진_델타가_나오고_상수는_분리_보고된다(design_trim):
     ac, tr = design_trim
     out = openloop_delta(
-        ac, [tr], Shape(),
+        ac, [tr], Shape(profile=example_profile()),
         ["table.pitch.k_rate", "fcl/ScasAxis.pitch.kp", "fcl/ScasAxis.yaw.kp",
          "fcl/Autopilot.kp_spd", "fcl/Mixer.k_diff_thr"],
     )
@@ -58,7 +59,7 @@ def test_스케줄_배율은_마진_델타가_나오고_상수는_분리_보고�
 def test_스케줄_끄면_설계점_상수가_직접_루프에_잡힌다(design_trim):
     ac, tr = design_trim
     out = openloop_delta(
-        ac, [tr], Shape(with_schedule=False), ["fcl/ScasAxis.pitch.kp"])
+        ac, [tr], Shape(profile=example_profile(), with_schedule=False), ["fcl/ScasAxis.pitch.kp"])
     p = out["params"]["fcl/ScasAxis.pitch.kp"]
     assert p["status"] == "ok"
     assert "pitch_att" in p["loops"]
@@ -75,7 +76,7 @@ def test_취소는_완료_케이스를_보존한다(design_trim):
         calls.append((done, total))
         return done >= 1  # 첫 케이스 후 취소
 
-    out = openloop_delta(ac, [tr, tr2], Shape(with_schedule=False),
+    out = openloop_delta(ac, [tr, tr2], Shape(profile=example_profile(), with_schedule=False),
                          ["fcl/ScasAxis.pitch.kp"], on_progress=cancel_after_first)
     assert out["cases"] == ["design"]  # 완료분 보존
     assert out["aborted"] == "cancelled"
@@ -100,7 +101,7 @@ def test_미수렴_트림은_건너뛰고_경고한다(design_trim):
     bad = trim_level(ac, TrimCase("impossible", mach=0.05, alt=1000.0, fuel=200.0))
     if bad.converged:  # 데모 기체가 언젠가 수렴시키면 이 전제부터 다시 본다
         pytest.skip("미수렴 케이스 전제가 깨짐")
-    out = openloop_delta(ac, [bad, tr], Shape(with_schedule=False),
+    out = openloop_delta(ac, [bad, tr], Shape(profile=example_profile(), with_schedule=False),
                          ["fcl/ScasAxis.pitch.kp"])
     assert out["cases"] == ["design"]
     assert any("미수렴" in w for w in out["warnings"])
@@ -109,7 +110,7 @@ def test_미수렴_트림은_건너뛰고_경고한다(design_trim):
 def test_알_수_없는_파라미터는_시끄럽게_거부한다(design_trim):
     ac, tr = design_trim
     with pytest.raises(ValueError):
-        openloop_delta(ac, [tr], Shape(), ["없는.자리"])
+        openloop_delta(ac, [tr], Shape(profile=example_profile()), ["없는.자리"])
 
 
 def test_yaw_rate_loop_includes_the_law_washout(design_trim):
@@ -154,7 +155,7 @@ def test_effective_filter_reads_the_law_not_a_constant(design_trim):
     from claw.pipeline.openloop import _effective_filter
 
     _ac, _tr = design_trim
-    law = make_law(Shape())
+    law = make_law(Shape(profile=example_profile()))
     spec = next(sp for sp in GROUP_LOOPS["yaw"] if sp["name"] == "yaw_rate")
     got = _effective_filter(law, "yaw", spec)
     assert got == {"kind": "washout", "tau": float(law.scas.cfg["yaw"]["washout_tau"])}

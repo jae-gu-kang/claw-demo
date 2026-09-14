@@ -27,7 +27,8 @@ from claw.plant import (
 )
 from claw.plant.demo import RAIL_ORIGIN_H, DispersionSet
 from claw.trim import linearize, split_axes, trim_batch
-from claw.trim.trim import ALPHA_BOUNDS, trim
+from claw.trim.trim import trim
+from claw.profile import example_profile
 
 SEED = 20260914
 DISPERSIONS = (
@@ -115,7 +116,7 @@ def plant_data():
         "skid_gear": make_demo_skid_gear(),
         "launch_rail": make_demo_launch_rail(),
         "rail_origin_h": RAIL_ORIGIN_H,
-        "trim_alpha_bounds": ALPHA_BOUNDS,
+        "trim_alpha_bounds": ac.trim_bounds["alpha"],
     }
 
 
@@ -147,8 +148,9 @@ def _grid_cases():
 
 
 def trim_grid():
-    trs = trim_batch(_aircraft(), _grid_cases(), fingerprint="golden")
-    return [(tr, envelope_verdict(tr)) for tr in trs]
+    ac = _aircraft()
+    trs = trim_batch(ac, _grid_cases(), fingerprint="golden")
+    return [(tr, envelope_verdict(tr, ac.trim_bounds["de"])) for tr in trs]
 
 
 def trim_special():
@@ -182,7 +184,7 @@ def envelopes():
         "design_default": design_envelope(ac, stall, limits, db, fuel=200.0),
         "design_full": design_envelope(ac, stall, limits, db, fuel=300.0, q_max=20000.0,
                                        alt_min=0.0, alt_max=9000.0, nz=3.0),
-        "aero": aero_envelope(stall, db, alpha_margin=0.05, trim_alpha_bounds=ALPHA_BOUNDS),
+        "aero": aero_envelope(stall, db, alpha_margin=0.05, trim_alpha_bounds=ac.trim_bounds["alpha"]),
     }
 
 
@@ -199,7 +201,7 @@ def gains():
 def evaluate_linear():
     ac = _aircraft()
     cases = [TrimCase(name=f"M{m}", mach=m, alt=1000.0, fuel=200.0) for m in (0.35, 0.45, 0.55)]
-    return evaluate(ac, trim_batch(ac, cases), Shape(), GainEvalCriteria(), depth="linear")
+    return evaluate(ac, trim_batch(ac, cases), Shape(profile=example_profile()), GainEvalCriteria(), depth="linear")
 
 
 def verify_linear():
@@ -207,7 +209,7 @@ def verify_linear():
     cases = [TrimCase(name=f"M{m}", mach=m, alt=1000.0, fuel=200.0) for m in (0.4, 0.5)]
     return {
         "corners": _corner_dispersions(crit),
-        "result": verify(make_demo_aircraft, cases, Shape(), crit, depth="linear"),
+        "result": verify(make_demo_aircraft, cases, Shape(profile=example_profile()), crit, depth="linear"),
     }
 
 

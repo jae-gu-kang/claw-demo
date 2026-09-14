@@ -147,7 +147,7 @@ def test_saturation_detail_matches_saturation_ok(ac):
         TrimCase("high", mach=0.4, alt=3000.0, fuel=400.0),  # 설계 천장(만재 ~3.8 km, CEILING) 아래로
     ]
     for tr in trim_batch(ac, cases):
-        det = saturation_detail(tr)
+        det = saturation_detail(tr, ac.trim_bounds["de"])
         assert set(det) == {"de", "throttle_high", "throttle_low"}
         assert tr.flags["saturation_ok"] == (not any(det.values())), tr.case.name
 
@@ -340,3 +340,15 @@ def test_설계점_스로틀이_인용한_수치와_같고_판정도_그대로�
     assert envelope_ok(tr) is want_ok, (
         f"M{mach} h{alt:.0f} f{fuel:.0f}의 엔벨로프 판정이 뒤집혔다 — "
         f"'설계점은 엔벨로프 밖'이라고 적은 문장들이 거짓이 됐다")
+
+
+def test_saturation_channels_use_the_limit_on_each_side():
+    """δe 포화는 **부호 쪽 한계**로 판정한다 — 비대칭 엘레본에서 |δe|를 상한과 비교하면 틀린다."""
+    from claw.trim.trim import _saturation_channels
+
+    asym = (-0.20, 0.35)  # 하한 0.95×0.20 = 0.19, 상한 0.95×0.35 = 0.3325
+    assert _saturation_channels(-0.195, 0.5, asym)["de"] is True
+    assert _saturation_channels(-0.18, 0.5, asym)["de"] is False
+    assert _saturation_channels(0.30, 0.5, asym)["de"] is False  # |δe|=0.30 > 0.19여도 양의 쪽은 상한
+    assert _saturation_channels(0.34, 0.5, asym)["de"] is True
+

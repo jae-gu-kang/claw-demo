@@ -23,13 +23,7 @@ from pydantic import BaseModel, Field
 
 from claw.design import AutoDesignConfig, DesignSession, resample_to_table
 from claw.design.tune import REASON_TEXT
-from claw.fcl.demo import demo_design_gains, demo_rate_filters
-from claw.plant import (
-    make_demo_aircraft,
-    make_demo_db_ranges,
-    make_demo_stall_table,
-    make_demo_structural_limits,
-)
+from claw_server.refs import current_profile
 from claw.tables import PolyTable
 from claw_server.serialize import to_jsonable
 
@@ -259,14 +253,15 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
 def _run_session_job(request, response, session: DesignSession, fingerprint: str,
                      parent: str | None = None) -> dict:
     store = request.app.state.store
-    ac = make_demo_aircraft()
-    stall = make_demo_stall_table()
-    limits = make_demo_structural_limits()
-    db = make_demo_db_ranges()
-    design = demo_design_gains()
+    profile = current_profile()
+    ac = profile.aircraft()
+    stall = profile.stall_table()
+    limits = profile.structural_limits()
+    db = profile.db_ranges()
+    design = profile.design_gains()
     # 법칙의 레이트 필터도 프로파일이 준다 — 안 넘기면 튜닝·검증이 출하되지 않는
     # 조성(요축 워시아웃 없는 A′)을 본다 (05 §6)
-    rate_filters = demo_rate_filters()
+    rate_filters = profile.rate_filters()
 
     def work(job):
         # job.report의 반환값이 취소 요청 여부 — 엔진 협조적 취소 규약과 그대로 맞물린다

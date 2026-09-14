@@ -56,14 +56,12 @@ from claw.nav import NavErrorModel
 from claw.pipeline.criteria import GainEvalCriteria
 # 적분기 "주차" 허용오차의 정본은 진단이다 — 회복 판정과 진단 규칙 3이 같은 판정
 from claw.pipeline.diagnose import PARK_TOL_FRAC, diagnose_grid, diagnose_run
-from claw.pipeline.influence import Shape, make_law
+from claw.pipeline.influence import Shape, make_law, shape_profile
 from claw.pipeline.metrics import metric_values
 from claw.pipeline.openloop import GROUP_LOOPS, _effective_filter, _effective_gain
 from claw.pipeline.sweep import PROBE_DH, PROBE_DPSI, PROBE_DV, probe_mission
-from claw.plant import make_demo_db_ranges, make_demo_stall_table
 from claw.sim import Simulator
 from claw.trim import linearize, split_axes, trim_batch
-from claw.trim.trim import DE_BOUNDS
 
 # ── 원자료 어휘 (구 11항목 — 케이스 × 항목 격자의 열) ─────────────────────────
 # 표시·판정의 정본 표면은 CARDS/CHECKS다. 이 목록은 케이스별 상세(stages)의 키로
@@ -527,15 +525,17 @@ def _actuator_stage(signals, meta, dt_plant, crit):
                   channels=channels), fails
 
 
-def _authority_stage(tr, metrics, crit):
+def _authority_stage(tr, metrics, crit, de_bounds):
     """카드 ⑦의 근거 — 트림 소모(선형 단계에서도 가능) + 비행 중 잔여 권한(런 필요).
 
     잔여 권한 < b_min_frac은 **하드**다(v2 신규). 배분 미계측(신호 없음)·미실행
     (depth=linear)은 하드 판정에서 빠진다 — envelope.nz 패턴.
-    트림 δe 소모율의 기준 한계는 트림 솔버의 경계(DE_BOUNDS)다.
+    트림 δe 소모율의 기준 한계는 트림 솔버의 경계(기체의 aircraft.trim_bounds 엘레본 범위)의 δe 부호 쪽이다.
     """
-    de = abs(float(tr.control.elevon[0]))
-    frac = de / DE_BOUNDS[1]
+    de_signed = float(tr.control.elevon[0])
+    de = abs(de_signed)
+    # 부호 쪽 한계로 나눈다 — 비대칭 엘레본에서 음의 δe를 상한으로 나누면 소모율이 틀린다
+    frac = de / (de_bounds[1] if de_signed >= 0.0 else -de_bounds[0])
     if frac > crit.authority.de_frac_max:
         trim_status = "fail"
     elif frac > crit.authority.de_frac_warn:
@@ -867,7 +867,7 @@ def _eval_case(aircraft, tr, shape, law, criteria, *, depth, stall, db_ranges,
         hard_fails += f
         cancelled = tick(f"동시명령 런: {tr.case.name}")
 
-    stages["authority"], f = _authority_stage(tr, metrics, criteria)
+    stages["authority"], f = _authority_stage(tr, metrics, criteria, aircraft.trim_bounds["de"])
     hard_fails += f
 
     # ── 소견(원인 귀속) — **같은 런의 후처리다** ─────────────────────────────
@@ -1322,9 +1322,11 @@ def evaluate(aircraft, trs, shape: Shape, criteria: GainEvalCriteria, *,
     """
     if depth not in ("linear", "full"):
         raise ValueError(f"depth는 'linear'|'full': {depth}")
+    profile = shape_profile(shape)
+    _check_pairing(aircraft, profile)
     law = make_law(shape)
-    stall = make_demo_stall_table()
-    db_ranges = make_demo_db_ranges()
+    stall = profile.stall_table()
+    db_ranges = profile.db_ranges()
     midpoint_names = set(midpoint_names)
     if t_hold is None:
         t_hold = t_step
@@ -1439,18 +1441,31 @@ def evaluate(aircraft, trs, shape: Shape, criteria: GainEvalCriteria, *,
 # ═══ 3단계 검증 (verify) — 후보 확정 후 별도 실행 ══════════════════════════════
 
 
-def _corner_dispersions(crit):
-    """강건성 코너 — 결정적 축별 ±(기본). vertices(2^n)는 corners='vertices'일 때.
+def _check_pairing(aircraft, profile):
+    """기체와 형상의 기체가 같은 프로파일에서 왔는가 — 다르면 A 기체를 B 기체의 법칙·표로 평가한다."""
+    fp = getattr(aircraft, "plant_fingerprint", None)
+    if fp is not None and fp != profile.plant_fingerprint:
+        raise ValueError(f"기체의 플랜트 지문({fp})이 형상의 기체 프로파일({profile.plant_fingerprint})과 다르다")
 
-    CG는 목록에 없다 — plant/demo.py DispersionSet 머리말의 [TBD] 사유. 축이 0이면
-    (frac=0) 그 축은 코너를 만들지 않는다(흔드는 시늉 금지).
-    """
-    from claw.plant.demo import DispersionSet
 
-    axes = [(name, frac) for name, frac in
+def _robust_axes(crit):
+    return [(name, frac) for name, frac in
             (("mass", crit.robustness.mass_frac),
              ("cmalpha", crit.robustness.cmalpha_frac),
              ("cmq", crit.robustness.cmq_frac)) if frac > 0.0]
+
+
+def _corner_dispersions(crit, axes=None):
+    """강건성 코너 — 결정적 축별 ±(기본). vertices(2^n)는 corners='vertices'일 때.
+
+    CG는 목록에 없다 — plant/dispersion.py 머리말의 [TBD] 사유. 축이 0이면
+    (frac=0) 그 축은 코너를 만들지 않는다(흔드는 시늉 금지).
+    """
+    from claw.plant.dispersion import DispersionSet
+
+    # axes: 기체가 흔들 수 있는 축(프로파일 dispersion_axes). None이면 기준이 요구한 축 전부
+    wanted = axes
+    axes = [(name, frac) for name, frac in _robust_axes(crit) if wanted is None or name in wanted]
     if crit.robustness.corners == "axis":
         return [DispersionSet(**{n: s * f}) for n, f in axes for s in (+1.0, -1.0)]
     import itertools
@@ -1472,7 +1487,8 @@ def verify(aircraft_factory, cases, shape: Shape, criteria: GainEvalCriteria, *,
     worst-case 탐색은 어휘와 자리만 있다([자리] — 구현 스코프 밖, 사유 동봉).
     on_progress(done, total, msg) truthy → 협조적 취소(완료 코너 보존).
     """
-    corners = _corner_dispersions(criteria)
+    profile = shape_profile(shape)
+    corners = _corner_dispersions(criteria, axes=profile.dispersion_axes)
     mids = list(midpoint_cases)
     per_case = 1 if depth == "linear" else 3
     # 진행 총량: (코너 × 케이스) + 중간점 케이스 — 트림은 케이스 단위에 포함해 셈
@@ -1480,6 +1496,10 @@ def verify(aircraft_factory, cases, shape: Shape, criteria: GainEvalCriteria, *,
     done = 0
     aborted = None
     warnings = []
+    unshakable = [n for n, _f in _robust_axes(criteria) if n not in profile.dispersion_axes]
+    if unshakable:
+        # 흔들 공력 항이 없는 축은 코너를 만들지 않는다 — 통과가 아니라 판정 불가라고 말한다
+        warnings.append(f"기체에 태그된 공력 항이 없어 흔들 수 없는 강건성 축 — 판정 불가: {unshakable}")
 
     def tick(msg):
         nonlocal done
@@ -1488,9 +1508,10 @@ def verify(aircraft_factory, cases, shape: Shape, criteria: GainEvalCriteria, *,
 
     def eval_block(aircraft, block_cases, midpoint_names=()):
         nonlocal aborted
+        _check_pairing(aircraft, profile)
         law = make_law(shape)
-        stall = make_demo_stall_table()
-        db = make_demo_db_ranges()
+        stall = profile.stall_table()
+        db = profile.db_ranges()
         trs = trim_batch(aircraft, block_cases)
         rows = []
         unconv = []
@@ -1578,7 +1599,7 @@ def verify(aircraft_factory, cases, shape: Shape, criteria: GainEvalCriteria, *,
     out_verify = {
         "mass_cg": {**split_axis(("mass",)),
                     "note": "CG축은 [TBD] — 모멘트 기준점 이전 미구현이라 흔들어도 "
-                            "동역학이 안 변한다(plant/demo.py). 질량축만 실측"},
+                            "동역학이 안 변한다(plant/mass.py FuelMass). 질량축만 실측"},
         "aero_coeff": {**split_axis(("cmalpha", "cmq")), "note": None},
         "grid_midpoints": (
             {**mid_summary,

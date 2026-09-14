@@ -19,7 +19,8 @@ import sys
 from pathlib import Path
 
 from claw.codegen import GraphRunner, emit_c, emit_runtime
-from claw.fcl.demo import DEMO_YAW, make_demo_fcl
+from claw.fcl.assemble import assemble_law
+from claw.profile import example_profile
 from claw.fcl.graphs import scas_axis_graph
 
 GEN_DIR = Path(__file__).resolve().parent / "gen"
@@ -30,17 +31,17 @@ DT = 0.01
 
 
 def fcl_demo_runner():
-    """데모 기체 형상의 제어법칙 전체 — **조립은 `make_demo_fcl`이 정본**이다.
+    """예제 기체 형상의 제어법칙 전체 — **조립은 `assemble_law`가 정본**이다.
 
     여기서 `fcl_graph(...)`를 다시 부르면 게인·타면 한계·마진이 두 곳에 적히고,
     한쪽만 고치면 산출물이 조용히 설계와 달라진다 (02 §5.5 중복 정의 금지).
     서버의 탑재 C 응답도 같은 이유로 이 경로를 쓴다.
     """
-    return make_demo_fcl().init(DT).runner
+    return assemble_law(example_profile()).init(DT).runner
 
 
 def scas_yaw_runner():
-    return GraphRunner(scas_axis_graph("scas_yaw", **DEMO_YAW), DT)
+    return GraphRunner(scas_axis_graph("scas_yaw", **example_profile().scas_axis_params("yaw")), DT)
 
 
 ARTIFACTS = {"fcl": fcl_demo_runner, "scas_yaw": scas_yaw_runner}

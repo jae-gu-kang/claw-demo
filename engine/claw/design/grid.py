@@ -5,7 +5,7 @@
 PointSet이 격자가 아니라 목록인 이유가 이것이다 (points.py).
 
 - mach 하한·행 좌표: analysis.envelope의 stall_mach_lo·row_machs가 정본 —
-  V_S(n=1) 역보간 × mach_margin(기본 1.1 — 실속 여유 10%, trim.ALPHA_MARGIN과
+  V_S(n=1) 역보간 × mach_margin(기본 1.1 — 실속 여유 10%, 기체 프로파일 trim.alpha_margin과
   같은 지위의 [기본값]). 교차가 없는 경우는 **둘로 갈린다**(01 §2.6 v0.31):
   전 구간 n>1이면 DB 하한 폴백이고, 전 구간 n<1이면 그 고도에서 1g 자체가
   도달 불가라 하한=상한이 되어 **빈 행**이 된다(귀속 "n_reach"). 후자를 종전처럼

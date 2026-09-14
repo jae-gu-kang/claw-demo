@@ -264,11 +264,17 @@ def _mass(m, p):
 
 def _surfaces(s, p):
     _keys(s, p, ("layout", "elevon", "rudder"))
-    return {
+    out = {
         "layout": _choice(s["layout"], f"{p}/layout", LAYOUTS),
         "elevon": _range(s["elevon"], f"{p}/elevon"),
         "rudder": _range(s["rudder"], f"{p}/rudder"),
     }
+    for k in ("elevon", "rudder"):
+        lo, hi = out[k]
+        # 트림은 중립에서 탐색을 시작하고 소모율은 부호 쪽 한계로 나눈다 — 0이 범위 끝이면 0/0이 된다
+        if not lo < 0.0 < hi:
+            _fail(f"{p}/{k}", f"타면 한계는 중립(0)을 사이에 둬야 함: [{lo}, {hi}]")
+    return out
 
 
 def _structural(s, p):

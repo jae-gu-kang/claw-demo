@@ -13,15 +13,11 @@
 from fastapi import APIRouter
 
 from claw.fcl.autopilot import Autopilot
-from claw.fcl.demo import (
-    DEFAULT_SCHEDULED,
-    demo_design_gains,
-    make_demo_fcl,
-    make_demo_gain_tables,
-)
+from claw.fcl.assemble import assemble_law
 from claw.fcl.graphs import SCHEDULABLE
 from claw.fcl.scas import ScasAxis
 from claw.fcl.schedule import AP_GAIN_FIELD
+from claw_server.refs import current_profile
 from claw_server.serialize import table_dict
 
 router = APIRouter(tags=["gains"])
@@ -71,7 +67,7 @@ def _design_index(tables: dict, design: dict) -> int:
 @router.get("/gains/demo")
 def demo_gain_tables() -> dict:
     """데모 기체 설계 게인 테이블 — "그룹.게인" 이름 → 테이블 JSON."""
-    return {name: table_dict(t) for name, t in make_demo_gain_tables().items()}
+    return {name: table_dict(t) for name, t in current_profile().gain_tables().items()}
 
 
 @router.get("/gains/catalog")
@@ -81,8 +77,10 @@ def gain_slot_catalog() -> dict:
     켜져 있지 않은 자리에도 제안 테이블(설계 상수 × 같은 동압 스케일)을 함께 준다.
     체크하는 순간 곡선이 뜨고, 설계점에서는 원래 상수와 같은 값에서 출발한다.
     """
-    design = demo_design_gains()
-    tables = {name: table_dict(t) for name, t in make_demo_gain_tables(design).items()}
+    profile = current_profile()
+    scheduled = tuple(profile.law["schedule"]["scheduled"])
+    design = profile.design_gains()
+    tables = {name: table_dict(t) for name, t in profile.gain_tables(design).items()}
     slots = []
     for group in SCHEDULABLE:
         for key in _ALL_KEYS:
@@ -95,14 +93,14 @@ def gain_slot_catalog() -> dict:
                 continue
             slots.append({
                 "name": name, "group": group, "key": key, "available": True,
-                "scheduled": name in DEFAULT_SCHEDULED,
+                "scheduled": name in scheduled,
                 "design": design[name], "table": tables[name], **_meta(group, key),
             })
     # 축·필터 시정수·SCAS 설계 kwargs는 엔진 조립에서 읽는다 — 여기에 0.5를 또 적으면
     # 데모 형상이 바뀌었을 때 웹만 옛 값을 보여 준다 (init(dt) 없이 파라미터만 보유한 상태)
-    law = make_demo_fcl()
+    law = assemble_law(profile)
     return {
-        "axis": next(iter(tables[DEFAULT_SCHEDULED[0]]["axes"])),
+        "axis": next(iter(tables[scheduled[0]]["axes"])),
         "filter_tau": law.schedule.filter_tau,
         # 데모 기체의 SCAS 축 kwargs 전량 — 구조도 축 폼의 초기값이자, 한 축만 고쳐도
         # 세 축을 함께 보내야 하는(req.scas 계약) 나머지 축을 채우는 값이다.
@@ -110,7 +108,7 @@ def gain_slot_catalog() -> dict:
         # 없다 — AP는 PARAM_DEFS 기본값이 곧 데모 설계값이라 이 문제가 없었다.
         # 게인 자리(kp·ki·k_rate) 밖의 washout_tau·클램프도 여기에 들어 있다.
         "scas_design": {g: dict(cfg) for g, cfg in law.scas.cfg.items()},
-        "default": list(DEFAULT_SCHEDULED),
+        "default": list(scheduled),
         "design_index": _design_index(tables, design),
         "slots": slots,
     }

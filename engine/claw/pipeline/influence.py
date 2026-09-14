@@ -14,7 +14,8 @@
 대신 파라미터를 흔들어 법칙을 **재조립하고 노드 서명을 diff** 한다. 구조 정본
 (fcl/graphs.py)이 바뀌면 매핑도 따라 바뀐다.
 
-조립은 언제나 M7 `make_demo_fcl` 한 경로를 지난다 (02 v0.24) — 여기서 FCL을 따로
+조립은 언제나 M7 `fcl/assemble.py assemble_law` 한 경로를 지난다 (02 v0.24) — 기체는 형상이 가리키는
+프로파일(02 §5.6)이다 — 여기서 FCL을 따로
 조립하면 게인·타면 한계·마진이 또 한 곳에 적힌다.
 
 **구조 도달성은 "영향이 있다"가 아니라 "영향이 있을 수 있다"이다.** 포화된 가지나
@@ -31,22 +32,14 @@ import claw.fcl  # noqa: F401  — REGISTRY에 Autopilot·ScasAxis·Mixer 등재
 import claw.guidance  # noqa: F401  — LOS
 import claw.nav  # noqa: F401  — ErrorModel
 import claw.plant  # noqa: F401  — SecondOrderActuator
-from claw.fcl.demo import (
-    DEMO_ALPHA_MARGIN,
-    DEMO_K_DIFF_THR,
-    DEMO_PITCH,
-    DEMO_ROLL,
-    DEMO_YAW,
-    make_demo_fcl,
-    make_demo_gain_tables,
-)
+from claw.fcl.assemble import assemble_law
 from claw.fcl.scas import Scas
 from claw.params.paramset import canonical_hash
 from claw.params.registry import REGISTRY
+from claw.profile.errors import ProfileError
 from claw.tables import PolyTable, Table
 
 SCAS_AXES = ("pitch", "roll", "yaw")
-_SCAS_BASE = {"pitch": DEMO_PITCH, "roll": DEMO_ROLL, "yaw": DEMO_YAW}
 
 # 파라미터 묶음(band) — 화면의 세로 그룹이자 "법칙 안/밖"의 판정 근거.
 # in_law=False인 묶음은 IR 그래프 **바깥**이라 개루프 Δ가 구조적으로 0이다.
@@ -111,6 +104,10 @@ class Shape:
     nav: dict = field(default_factory=dict)
     actuators: dict = field(default_factory=dict)
     guidance: dict = field(default_factory=dict)
+    # 이 형상이 설계되는 기체 (claw.profile BuiltProfile). **지문 밖이다** — 형상 지문은 사용자가
+    # 정한 덮어쓰기의 계보이고 기체의 계보는 프로파일 지문(profile_fp)이 맡는다 (02 §5.6 — 결과
+    # meta에 싣는 것은 요청별 기체 선택과 함께 들어온다). copy()는 replace라 따라간다
+    profile: object | None = None
 
     @property
     def dt(self) -> float:
@@ -152,37 +149,47 @@ class Shape:
         )[:16]
 
 
+def shape_profile(shape: Shape):
+    """형상이 가리키는 기체 프로파일 — 없으면 거부한다(예제 기체로 조용히 계산하지 않는다)."""
+    if shape.profile is None:
+        raise ProfileError("/", "형상에 기체가 없다 — Shape(profile=…)로 기체 프로파일을 지정해야 한다 (02 §5.6)")
+    return shape.profile
+
+
 def make_law(shape: Shape):
-    """형상 → 조립된 FCL (`init(dt)`까지). 조립 정본은 M7 `make_demo_fcl` 하나다.
+    """형상 → 조립된 FCL (`init(dt)`까지). 조립 정본은 M7 `assemble_law` 하나다.
 
     부분 지정 보충: 사용자가 정한 키만 싣고 나머지는 엔진 기본값이 채운다. SCAS·믹서는
-    설계 기본값(DEMO_*)에 덮어쓰기를 얹어 레지스트리로 구성한다 — 레지스트리를 지나야
+    기체 프로파일의 설계값에 덮어쓰기를 얹어 레지스트리로 구성한다 — 레지스트리를 지나야
     ParamDef 범위와 생성자 교차조건(theta_lo ≤ theta_hi 등)이 그대로 판정된다.
     """
-    ap = REGISTRY.create("fcl", "Autopilot", shape.autopilot) if shape.autopilot else None
+    profile = shape_profile(shape)
+    # 부분 덮어쓰기는 **이 기체의** 설계값 위에 얹는다 — 레지스트리 기본값(어느 한 기체의 값)이 아니라
+    ap = (REGISTRY.create("fcl", "Autopilot", {**profile.autopilot_params(), **shape.autopilot})
+          if shape.autopilot else None)
     scas = None
     if shape.scas:
         unknown = sorted(set(shape.scas) - set(SCAS_AXES))
         if unknown:  # 조용히 버리면 지문만 움직이고 그래프는 그대로다 — 무증상 거짓말
             raise ValueError(f"알 수 없는 SCAS 축 {unknown} — 허용: {list(SCAS_AXES)}")
         axes = {
-            a: REGISTRY.create("fcl", "ScasAxis", {**_SCAS_BASE[a], **shape.scas.get(a, {})})
+            a: REGISTRY.create("fcl", "ScasAxis", {**profile.scas_axis_params(a), **shape.scas.get(a, {})})
             for a in SCAS_AXES
         }
         scas = Scas(axes["pitch"], axes["roll"], axes["yaw"])
     mixer = None
     if shape.mixer:
         mixer = REGISTRY.create(
-            "fcl", "Mixer", {"k_diff_thr": DEMO_K_DIFF_THR, **shape.mixer}
+            "fcl", "Mixer", {**profile.mixer_params(), **shape.mixer}
         )
     # `with_schedule=False`인데 테이블이 실려 오면 **조립 함수가 거부해야 한다**
-    # (make_demo_fcl의 가드). and로 단락시키면 그 가드가 영영 안 울리고, 사용자가
+    # (assemble_law의 가드). and로 단락시키면 그 가드가 영영 안 울리고, 사용자가
     # 기술한 것과 **다른 법칙**을 분석해 놓고 지문은 맞다고 말하게 된다 —
     # 같은 본문에 codegen 라우트는 422, 이 라우트는 200이 되는 불일치
     gain_tables = shape.gain_tables if not shape.with_schedule else None
     if shape.with_schedule and (shape.gain_tables is not None or shape.gain_scale):
         gain_tables = dict(
-            make_demo_gain_tables() if shape.gain_tables is None else shape.gain_tables
+            profile.gain_tables() if shape.gain_tables is None else shape.gain_tables
         )
         for name, scale in shape.gain_scale.items():
             if name not in gain_tables:
@@ -200,7 +207,8 @@ def make_law(shape: Shape):
                     name=name,
                     extrapolate=t.extrapolate,
                 )
-    return make_demo_fcl(
+    return assemble_law(
+        profile,
         with_schedule=shape.with_schedule,
         with_limiter=shape.with_limiter,
         autopilot=ap,

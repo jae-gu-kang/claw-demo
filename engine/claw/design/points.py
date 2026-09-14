@@ -42,7 +42,7 @@ def envelope_ok(tr) -> bool:
                 and tr.flags.get("alpha_margin_ok"))
 
 
-def envelope_verdict(tr) -> dict:
+def envelope_verdict(tr, de_bounds) -> dict:
     """envelope_ok + 실패 사유 귀속 — {"ok", "reasons"} (설계 엔벨로프 스캔용).
 
     ok는 반드시 envelope_ok() 호출 — 판정 정본(01 §4.1)을 재기술하지 않는다.
@@ -56,7 +56,7 @@ def envelope_verdict(tr) -> dict:
         reasons.append("not_converged")
     if not tr.flags.get("alpha_margin_ok"):
         reasons.append("alpha_margin")
-    sat = saturation_detail(tr)
+    sat = saturation_detail(tr, de_bounds)
     if sat["throttle_high"]:
         reasons.append("saturated_throttle_high")
     if sat["de"]:

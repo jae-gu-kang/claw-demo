@@ -19,6 +19,7 @@ from claw.pipeline.prescribe import (
     solve_single_knob,
 )
 from claw.pipeline.influence import Shape
+from claw.profile import example_profile
 
 
 def _rows(case, knob, base_metrics, by_span):
@@ -146,7 +147,7 @@ def test_조합_불가능이면_위반_목록과_함께_거절():
 
 
 def test_proposal_shape는_클립을_삼키지_않는다():
-    shape = Shape()
+    shape = Shape(profile=example_profile())
     shape2, notes = proposal_shape(shape, {"table.pitch.kp": 0.1})
     assert shape2.fingerprint() != shape.fingerprint()
     assert notes == []

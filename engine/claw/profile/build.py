@@ -60,7 +60,8 @@ class BuiltProfile:
             cg_empty=np.array(m["cg_empty"]),
             cg_full=np.array(m["cg_full"]),
         )
-        return Aircraft(fuel_mass, aero, self.engine(), ground=ground)
+        return Aircraft(fuel_mass, aero, self.engine(), ground=ground,
+                        trim_bounds=self.trim_bounds, plant_fingerprint=self.plant_fingerprint)
 
     def engine(self):
         from claw.params.registry import REGISTRY
@@ -125,6 +126,12 @@ class BuiltProfile:
         return self.doc["trim"]["alpha_margin"]
 
     @property
+    def trim_bounds(self) -> dict:
+        """트림 탐색 범위 — α는 trim 섹션, δe는 엘레본 한계(믹서와 같은 값, 중복 정의 금지)."""
+        return {"alpha": self.trim_alpha_bounds, "de": tuple(self.doc["surfaces"]["elevon"]),
+                "alpha_margin": self.trim_alpha_margin}
+
+    @property
     def surfaces(self) -> dict:
         s = self.doc["surfaces"]
         return {"layout": s["layout"], "elevon": tuple(s["elevon"]), "rudder": tuple(s["rudder"])}
@@ -168,7 +175,14 @@ class BuiltProfile:
                 out[group] = {"kind": "washout", "tau": tau}
         return out
 
-    def _cap_for(self, gain_name: str) -> float:
+    def mixer_params(self) -> dict:
+        """믹서 kwargs — 타면 한계(surfaces)와 차동추력 설계값."""
+        s = self.doc["surfaces"]
+        return {"elevon_lo": s["elevon"][0], "elevon_hi": s["elevon"][1],
+                "rudder_lo": s["rudder"][0], "rudder_hi": s["rudder"][1],
+                "k_diff_thr": self.k_diff_thr}
+
+    def cap_for(self, gain_name: str) -> float:
         caps = self.doc["law"]["schedule"]["caps"]
         return caps["by_group"].get(gain_name.split(".", 1)[0], caps["default"])
 
@@ -185,7 +199,7 @@ class BuiltProfile:
         if unknown:
             raise ValueError(f"스케줄 불가 자리 {unknown} — 허용: {sorted(design)}")
         return {
-            name: Table({"mach": machs}, design[name] * np.minimum(ideal, self._cap_for(name)),
+            name: Table({"mach": machs}, design[name] * np.minimum(ideal, self.cap_for(name)),
                         name=name, extrapolate="clip")
             for name in wanted
         }

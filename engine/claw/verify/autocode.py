@@ -582,7 +582,7 @@ def _summary(report):
 # ── 오케스트레이터 ────────────────────────────────────────────────────────
 
 
-def verify_flight(law, *, t_end=180.0, control_hz=100.0, on_progress=None,
+def verify_flight(law, *, profile, t_end=180.0, control_hz=100.0, on_progress=None,
                   keep_dir=None, with_vectors=True):
     """초기화된 법칙(`law.init(dt)` 완료) → 검증 리포트 dict. 취소되면 None.
 
@@ -677,7 +677,7 @@ def verify_flight(law, *, t_end=180.0, control_hz=100.0, on_progress=None,
         if tick(10, "대조 미션 기록"):
             return None
         rec = record_mission(
-            law, t_end=t_end, control_hz=control_hz,
+            law, profile=profile, t_end=t_end, control_hz=control_hz,
             on_progress=(lambda d, t: tick(10 + 40.0 * d / max(t, 1), "대조 미션 기록"))
             if on_progress is not None else None,
         )

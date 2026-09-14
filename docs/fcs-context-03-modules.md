@@ -318,6 +318,11 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
   빠지면 예제 기체가 사라진다
 - 의존: M0, M1(REGISTRY·canonical_hash), M3(Table), M5(조립 부품), M7(design_gains·SCHEDULABLE —
   순환을 피해 검증·조립 시점에 import)
+- 소비자: 법칙 조립 정본 `fcl/assemble.py assemble_law`(M7), 해석 형상 `Shape.profile`(M15 —
+  `make_law`·`evaluate`·`verify`·`run_sweep`), `Aircraft.trim_bounds`(M5 → M9), 대조 미션
+  `record_mission(profile=)`(M12), 서버 창구 `claw_server/refs.py`(M13).
+  `plant/demo.py`·`fcl/demo.py`는 예제를 감싸는 호환 층이고 제품 코드의 import는 가드 테스트가
+  막는다
 
 ### M13 `server` — 백엔드
 
@@ -331,9 +336,9 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
   경계 유한성만 서버가 차단
 - 탑재 C 생성(`POST /codegen/flight`, v0.24): 현재 편집 형상의 제어법칙 C를
   {파일명·역할·줄수·본문} 목록으로 회신하고 **읽는 순서까지 정해** 준다. **조립을 재현하지
-  않는다** — `make_demo_fcl` → `law.init(dt)` → `law.runner`가 `flight/generate.py`와 같은
-  경로이고, 그래서 응답이 커밋 산출물과 바이트 단위로 같다(테스트가 대조). 구성 오류는 엔진 판정
-  → 422
+  않는다** — `assemble_law`(기체 프로파일) → `law.init(dt)` → `law.runner`가
+  `flight/generate.py`와 같은 경로이고, 그래서 응답이 커밋 산출물과 바이트 단위로 같다(테스트가
+  대조). 구성 오류는 엔진 판정 → 422
 - 게인 스케줄 자리(`GET /gains/catalog`, v0.27): 켤 수 있는 자리·현재 켜진 자리·**끄면 굳는 설계
   상수**·불가 사유·단위/설명을 18칸 격자로 회신하고, 켜지 않은 자리에도 제안 테이블(설계 상수 ×
   같은 동압 스케일)을 붙여 준다 — 체크하는 순간 곡선이 뜨고 설계점에서는 원래 상수와 같은 값에서

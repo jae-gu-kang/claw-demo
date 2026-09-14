@@ -1,7 +1,7 @@
 {
  "golden": "verify_linear",
  "mode": "full",
- "captured_at": "388cc91",
+ "captured_at": "6fd4d3d+dirty",
  "value": {
   "dict": {
    "corners": [
@@ -229,7 +229,7 @@
          ],
          "n_pass": 2,
          "n_judged": 2,
-         "note": "CG축은 [TBD] — 모멘트 기준점 이전 미구현이라 흔들어도 동역학이 안 변한다(plant/demo.py). 질량축만 실측"
+         "note": "CG축은 [TBD] — 모멘트 기준점 이전 미구현이라 흔들어도 동역학이 안 변한다(plant/mass.py FuelMass). 질량축만 실측"
         }
        },
        "aero_coeff": {

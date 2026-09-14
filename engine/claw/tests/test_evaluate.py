@@ -30,6 +30,7 @@ from claw.pipeline.evaluate import (
 from claw.pipeline.influence import Shape
 from claw.plant.demo import make_demo_aircraft
 from claw.trim import trim_batch
+from claw.profile import example_profile
 
 _CASE = TrimCase(name="M0.5/h1000", mach=0.5, alt=1000.0, fuel=200.0)
 
@@ -45,7 +46,7 @@ def rig():
 @pytest.fixture(scope="module")
 def report(rig):
     ac, trs = rig
-    return evaluate(ac, trs, Shape(), GainEvalCriteria(),
+    return evaluate(ac, trs, Shape(profile=example_profile()), GainEvalCriteria(),
                     t_settle=1.0, t_step=2.0)
 
 
@@ -109,7 +110,7 @@ def test_지연_여유는_PM의_보조라_판정을_따로_만들지_않는다(r
 
 def test_depth_linear는_시뮬_항목을_사유와_함께_비운다(rig):
     ac, trs = rig
-    out = evaluate(ac, trs, Shape(), GainEvalCriteria(), depth="linear")
+    out = evaluate(ac, trs, Shape(profile=example_profile()), GainEvalCriteria(), depth="linear")
     st = out["cases"][0]["stages"]
     for k in ("tracking", "envelope", "actuator", "coupling", "recovery"):
         assert st[k]["status"] == "na"
@@ -122,13 +123,13 @@ def test_depth_linear는_시뮬_항목을_사유와_함께_비운다(rig):
 
 def test_모르는_depth는_거부():
     with pytest.raises(ValueError, match="depth"):
-        evaluate(None, [], Shape(), GainEvalCriteria(), depth="quick")
+        evaluate(None, [], Shape(profile=example_profile()), GainEvalCriteria(), depth="quick")
 
 
 def test_미수렴_케이스만_있으면_판정을_보류한다(rig):
     ac, trs = rig
     fake = dataclasses.replace(trs[0], converged=False)
-    out = evaluate(ac, [fake], Shape(), GainEvalCriteria(),
+    out = evaluate(ac, [fake], Shape(profile=example_profile()), GainEvalCriteria(),
                    t_settle=1.0, t_step=2.0)
     assert out["cases"] == []
     # False로 두면 "케이스 0건 = 합격"으로 읽힌다 — 통과도 실패도 아닌 None
@@ -173,7 +174,7 @@ def test_verify는_코너마다_재트림하고_중간점을_따로_잰다(rig):
     crit = GainEvalCriteria.from_dict({
         "robustness": {"mass_frac": 0.0, "cmalpha_frac": 0.0, "cmq_frac": 0.0}})
     mid = TrimCase(name="mid/M0.525_h1000_f200", mach=0.525, alt=1000.0, fuel=200.0)
-    out = verify(make_demo_aircraft, [_CASE], Shape(), crit,
+    out = verify(make_demo_aircraft, [_CASE], Shape(profile=example_profile()), crit,
                  depth="linear", midpoint_cases=[mid])
     assert out["verify"]["mass_cg"]["corners"] == []
     assert out["verify"]["mass_cg"]["status"] == "na"
@@ -187,7 +188,7 @@ def test_verify_코너는_섭동_기체로_돈다(rig):
     _ac, _trs = rig
     crit = GainEvalCriteria.from_dict({
         "robustness": {"mass_frac": 0.2, "cmalpha_frac": 0.0, "cmq_frac": 0.0}})
-    out = verify(make_demo_aircraft, [_CASE], Shape(), crit, depth="linear")
+    out = verify(make_demo_aircraft, [_CASE], Shape(profile=example_profile()), crit, depth="linear")
     labels = [c["label"] for c in out["verify"]["mass_cg"]["corners"]]
     assert labels == ["mass+20%", "mass-20%"]
     for c in out["verify"]["mass_cg"]["corners"]:
@@ -262,7 +263,7 @@ def test_실패_케이스에는_원인이_같은_런에서_붙는다(report):
 
 def test_선형_깊이는_귀속을_사유와_함께_비운다(rig):
     ac, trs = rig
-    out = evaluate(ac, trs, Shape(), GainEvalCriteria(), depth="linear")
+    out = evaluate(ac, trs, Shape(profile=example_profile()), GainEvalCriteria(), depth="linear")
     a = out["cases"][0]["attribution"]
     assert a["status"] == "na"
     assert "런" in a["note"]  # 안 잰 것과 잴 수 없는 것은 다른 문장이다
@@ -274,9 +275,9 @@ def test_기준을_바꾸면_소견도_따라간다(rig):
     ac, trs = rig
     loose = GainEvalCriteria.from_dict(
         {"response": {"rms_max": {"alt": 1e6, "spd": 1e6, "hdg": 1e6}}})
-    strict = evaluate(ac, trs, Shape(), GainEvalCriteria(),
+    strict = evaluate(ac, trs, Shape(profile=example_profile()), GainEvalCriteria(),
                       t_settle=1.0, t_step=2.0)["cases"][0]["attribution"]
-    relaxed = evaluate(ac, trs, Shape(), loose,
+    relaxed = evaluate(ac, trs, Shape(profile=example_profile()), loose,
                        t_settle=1.0, t_step=2.0)["cases"][0]["attribution"]
     # 규칙은 문턱과 무관하게 근거(info)를 늘 남긴다 — 바뀌는 것은 **처방 여부**다
     warned = lambda a: [f["rule"] for f in a["findings"] if f["severity"] == "warn"]
@@ -295,7 +296,7 @@ def test_격자_재기가_국소성을_함께_낸다(rig):
     ac, _trs = rig
     cases = [_CASE, TrimCase(name="M0.55", mach=0.55, alt=1000.0, fuel=200.0)]
     trs = trim_batch(ac, cases)
-    out = evaluate(ac, trs, Shape(), GainEvalCriteria(), t_settle=1.0, t_step=2.0)
+    out = evaluate(ac, trs, Shape(profile=example_profile()), GainEvalCriteria(), t_settle=1.0, t_step=2.0)
     loc = out["aggregate"]["locality"]
     assert loc and "metrics" in loc
     for key, v in loc["metrics"].items():
@@ -308,7 +309,7 @@ def test_격자_재기가_국소성을_함께_낸다(rig):
 
 def test_선형_깊이는_국소성을_내지_않는다(rig):
     ac, trs = rig
-    out = evaluate(ac, trs, Shape(), GainEvalCriteria(), depth="linear")
+    out = evaluate(ac, trs, Shape(profile=example_profile()), GainEvalCriteria(), depth="linear")
     assert out["aggregate"]["locality"] is None  # 잰 지표가 없다 — 0으로 위장 금지
 
 
@@ -368,8 +369,8 @@ def test_설계점_마진은_자동설계와_같은_수다(rig):
     ac, trs = rig
     tr = trs[0]
     crit = GainEvalCriteria()
-    out = evaluate(ac, trs, Shape(), crit, depth="linear")
-    law = make_law(Shape())
+    out = evaluate(ac, trs, Shape(profile=example_profile()), crit, depth="linear")
+    law = make_law(Shape(profile=example_profile()))
     rate_gains, rate_filters, att, _spd = _case_gains(law, tr.case)
     lon, lat = split_axes(linearize(ac, tr))
     for group, axis, model in (("pitch", "lon", lon), ("roll", "lat", lat)):
@@ -474,3 +475,30 @@ def test_결과가_어느_기동으로_쟀는지_적는다(report):
     assert set(m) == {"dv", "dh", "dpsi", "t_settle", "t_step", "t_hold"}
     assert m["dv"] > 0 and m["dh"] > 0 and m["dpsi"] > 0
     assert m["t_step"] == 2.0  # report 픽스처가 넘긴 값이 그대로 적힌다
+
+
+def test_authority_trim_fraction_divides_by_the_limit_on_the_trim_side():
+    """트림 δe 소모율은 δe 부호 쪽 한계로 나눈다 — 비대칭 엘레본에서 |δe|/상한은 틀린 비율이다."""
+    from types import SimpleNamespace
+
+    import numpy as np
+    import pytest
+
+    from claw.pipeline.evaluate import _authority_stage
+
+    def frac_of(stage):
+        if isinstance(stage, dict):
+            if "frac" in stage:
+                return stage["frac"]
+            for v in stage.values():
+                found = frac_of(v)
+                if found is not None:
+                    return found
+        return None
+
+    asym = (-0.20, 0.35)
+    tr = lambda de: SimpleNamespace(control=SimpleNamespace(elevon=np.array([de] * 4)))  # noqa: E731
+    neg, _ = _authority_stage(tr(-0.10), None, GainEvalCriteria(), asym)
+    pos, _ = _authority_stage(tr(0.10), None, GainEvalCriteria(), asym)
+    assert frac_of(neg) == pytest.approx(0.10 / 0.20)
+    assert frac_of(pos) == pytest.approx(0.10 / 0.35)

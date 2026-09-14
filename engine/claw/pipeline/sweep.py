@@ -25,9 +25,8 @@ import numpy as np
 
 from claw.guidance import Guidance, ModeSpec
 from claw.nav import NavErrorModel
-from claw.pipeline.influence import Shape, apply_param, make_law, param_universe
+from claw.pipeline.influence import Shape, apply_param, make_law, param_universe, shape_profile
 from claw.pipeline.metrics import metric_values
-from claw.plant import make_demo_db_ranges, make_demo_stall_table
 from claw.sim import Simulator
 
 # 표준 진단 기동의 스텝 — 오차가 **물리 한계가 아니라 제어 품질**을 재도록 (v0.72).
@@ -211,8 +210,9 @@ def run_sweep(aircraft, trs, shape: Shape, plan, *, dt_plant=0.01,
     runs = list(plan["runs"])
     shapes = plan_shapes(shape, plan)
 
-    stall = make_demo_stall_table()
-    db_ranges = make_demo_db_ranges()
+    profile = shape_profile(shape)
+    stall = profile.stall_table()
+    db_ranges = profile.db_ranges()
     good = [tr for tr in trs if tr.converged]
     warnings = [f"미수렴 트림 케이스 건너뜀: {tr.case.name}"
                 for tr in trs if not tr.converged]

@@ -54,6 +54,8 @@ def test_missing_and_unknown_keys_are_rejected():
     ("/structural/mach_d", lambda d: d["structural"].__setitem__("mach_d", 0.5)),
     ("/mass/J_empty/0/1", lambda d: d["mass"]["J_empty"][0].__setitem__(1, 5.0)),
     ("/surfaces/layout", lambda d: d["surfaces"].__setitem__("layout", "canard")),
+    ("/surfaces/elevon", lambda d: d["surfaces"].__setitem__("elevon", [-0.35, 0.0])),
+    ("/surfaces/rudder", lambda d: d["surfaces"].__setitem__("rudder", [0.05, 0.35])),
     ("/operating/alt_max", lambda d: d["operating"].update(alt_min=3000.0, alt_max=1000.0)),
     ("/ground/rail/elev_angle", lambda d: d["ground"]["rail"].__setitem__("elev_angle", 2.0)),
 ])

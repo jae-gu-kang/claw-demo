@@ -656,20 +656,18 @@ test("하위 페이지 스키마는 실존 컴포넌트 + 편집 불가 루트 �
   assert.ok(found > 0, "하위 페이지 스키마가 하나도 없다 — 경로가 조용히 사라졌나?");
 });
 
-test("추진 페이지 스키마 = 데모 기체가 실제로 쓰는 엔진 클래스 (엔진 원문 대조)", () => {
+test("추진 페이지 스키마 = 예제 기체가 실제로 쓰는 엔진 클래스 (엔진 원문 대조)", () => {
   // 목록 대조만 하면 SUB_PARAM_NAMES에 항목 하나 더 얹어 뚫린다 — data-code 가드와
-  // 같은 방식으로 **엔진 소스를 읽어** plant/demo.py가 조립하는 클래스와 직접 묶는다.
-  // 어긋나면 화면이 안 나는 형상의 추력·배치를 "이 기체 값"이라고 보여 준다
-  const demo = readFileSync(
-    new URL("../../../engine/claw/plant/demo.py", import.meta.url), "utf8",
-  );
-  const ms = [...demo.matchAll(/^\s*engine = (\w+)\(/gm)];
-  assert.ok(ms.length > 0, "plant/demo.py에서 엔진 조립 줄을 못 찾음 (형식이 바뀌었나?)");
-  // 팩토리가 둘이 되면 첫 매치가 파일 내 순서에 좌우된다 — 조용히 엉뚱한 쪽을
-  // 가리키느니 여기서 터지는 편이 낫다 (리뷰)
-  assert.equal(ms.length, 1, `엔진 조립 줄이 ${ms.length}개 — 어느 쪽이 정본인지 모호`);
-  assert.equal(SUBSYSTEMS.plant.children.prop.schema.name, ms[0][1],
-    `추진 페이지가 ${SUBSYSTEMS.plant.children.prop.schema.name}인데 데모는 ${ms[0][1]}`);
+  // 같은 방식으로 **엔진 원문을 읽어** 예제 기체가 조립하는 클래스와 직접 묶는다.
+  // 어긋나면 화면이 안 나는 형상의 추력·배치를 "이 기체 값"이라고 보여 준다.
+  // 기체 값은 코드가 아니라 기체 프로파일 문서에 있다 (02 §5.6) — 예제 문서의 propulsion.type
+  const example = JSON.parse(readFileSync(
+    new URL("../../../engine/claw/profile/examples/delta_demo.json", import.meta.url), "utf8",
+  ));
+  const type = example?.propulsion?.type;
+  assert.ok(typeof type === "string" && type, "예제 기체 문서에 propulsion.type이 없음 (형식이 바뀌었나?)");
+  assert.equal(SUBSYSTEMS.plant.children.prop.schema.name, type,
+    `추진 페이지가 ${SUBSYSTEMS.plant.children.prop.schema.name}인데 예제 기체는 ${type}`);
 });
 
 test("웹이 인용한 엔벨로프·천장·SAT_FRAC이 엔진 정본과 같다 (엔진 원문 대조)", () => {

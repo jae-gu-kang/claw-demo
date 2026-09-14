@@ -1,84 +1,29 @@
-"""예제 기체 문서 ≡ 구 데모 코드 — 한 프로세스 안에서 비트 동일 비교 (02 §5.6).
+"""예제 기체 문서와 호환 층 — 옛 이름이 옛 **모양과 값**을 그대로 내놓는지 리터럴로 고정한다 (02 §5.6).
 
-단계 1(데모 코드가 아직 원본)에서는 문서로 만든 객체를 원본 코드와 직접 대조한다. 데모 함수가
-이 문서를 감싸는 래퍼로 바뀐 뒤에는 이 대조가 자기 자신과의 비교가 되므로, 그때부터의 독립
-증거는 이관 전 HEAD에서 굳힌 골든(test_golden_profile_example.py)이다.
+이관 전후 비트 동일의 독립 증거는 이관 전 HEAD에서 굳힌 골든(test_golden_profile_example.py)이다.
+데모 함수가 이제 이 문서를 감싸므로 "문서 ≡ 데모 함수" 같은 비교는 실패할 수 없어 두지 않는다.
+여기서는 기존 호출(테스트·대조 하네스)이 기대는 호환 층의 표면을 고정한다.
 """
-
-import pathlib
-import sys
 
 import pytest
 
-GOLDEN = pathlib.Path(__file__).resolve().parent / "golden"
-sys.path.insert(0, str(GOLDEN))
-
-import engine_goldens  # noqa: E402
-import hexjson  # noqa: E402
-
-from claw.fcl.autopilot import Autopilot  # noqa: E402
-from claw.fcl.demo import (  # noqa: E402
-    DEMO_ALLOC_RESV_FRAC,
-    DEMO_ALPHA_MARGIN,
-    DEMO_K_DIFF_THR,
-    DEMO_PITCH,
-    DEMO_ROLL,
-    DEMO_YAW,
-    demo_design_gains,
-    demo_rate_filters,
-    make_demo_gain_tables,
-)
-from claw.fcl.scas import ScasAxis  # noqa: E402
-from claw.plant import (  # noqa: E402
-    make_demo_aircraft,
-    make_demo_db_ranges,
-    make_demo_launch_rail,
-    make_demo_skid_gear,
-    make_demo_stall_table,
-    make_demo_structural_limits,
-    make_demo_trim_elevator_table,
-)
-from claw.plant.demo import RAIL_ORIGIN_H  # noqa: E402
-from claw.profile import EXAMPLE_ID, example_profile  # noqa: E402
-from claw.trim.trim import ALPHA_BOUNDS, ALPHA_MARGIN, DE_BOUNDS  # noqa: E402
+from claw.fcl.autopilot import Autopilot
+from claw.profile import EXAMPLE_ID, example_profile
 
 
-def same(a, b):
-    ea, eb = hexjson.encode(a), hexjson.encode(b)
-    assert hexjson.dumps(ea) == hexjson.dumps(eb), hexjson.first_diff(ea, eb)
-
-
-@pytest.mark.parametrize("label,dispersion", engine_goldens.DISPERSIONS)
-def test_aero_coefficients_are_bit_identical(label, dispersion):
-    new = example_profile().aircraft(dispersion=dispersion).aero.coef_fn
-    old = make_demo_aircraft(dispersion=dispersion).aero.coef_fn
-    for inp in engine_goldens._aero_inputs():
-        same(new(dict(inp)), old(dict(inp)))
-
-
-@pytest.mark.parametrize("label,dispersion", engine_goldens.DISPERSIONS)
-def test_mass_engine_and_reference_geometry(label, dispersion):
-    new = example_profile().aircraft(dispersion=dispersion)
-    old = make_demo_aircraft(dispersion=dispersion)
-    same(new.fuel_mass, old.fuel_mass)
-    same(new.engine, old.engine)
-    assert type(new.engine) is type(old.engine)
-    same((new.aero.S, new.aero.cbar, new.aero.b), (old.aero.S, old.aero.cbar, old.aero.b))
-
-
-def test_boundary_tables_limits_and_ground():
+def test_example_identity_and_dispersion_axes():
     p = example_profile()
-    same(p.stall_table(), make_demo_stall_table())
-    same(p.alloc_trim_table(), make_demo_trim_elevator_table())
-    same(p.db_ranges(), make_demo_db_ranges())
-    same(p.structural_limits(), make_demo_structural_limits())
-    same(p.skid_gear(), make_demo_skid_gear())
-    same(p.launch_rail(), make_demo_launch_rail())
-    assert p.rail_origin_height == RAIL_ORIGIN_H
-    same(p.trim_alpha_bounds, ALPHA_BOUNDS)
-    assert p.trim_alpha_margin == ALPHA_MARGIN
-    same(p.surfaces["elevon"], DE_BOUNDS)
-    assert p.q_max is None and p.operating == {"alt_min": None, "alt_max": None}
+    assert p.id == EXAMPLE_ID and p.is_example is True
+    assert p.dispersion_axes == ("mass", "cmalpha", "cmq")
+
+
+def test_trim_bounds_are_the_former_module_constants():
+    # 트림 모듈 상수(ALPHA_BOUNDS·DE_BOUNDS·ALPHA_MARGIN)는 프로파일로 옮겨 없어졌다 — 종전 값을 고정한다
+    p = example_profile()
+    assert p.trim_alpha_bounds == (-0.10, 0.35) and p.trim_alpha_margin == 0.035
+    assert p.surfaces["elevon"] == (-0.35, 0.35)
+    assert p.aircraft().trim_bounds == {"alpha": (-0.10, 0.35), "de": (-0.35, 0.35),
+                                        "alpha_margin": 0.035}
 
 
 def test_tables_are_built_fresh_each_call():
@@ -87,23 +32,37 @@ def test_tables_are_built_fresh_each_call():
     assert p.stall_table().data is not p.stall_table().data
 
 
-def test_law_data_matches_demo_assembly():
-    p = example_profile()
-    for axis, demo in (("pitch", DEMO_PITCH), ("roll", DEMO_ROLL), ("yaw", DEMO_YAW)):
-        same(ScasAxis(**p.scas_axis_params(axis)).cfg, ScasAxis(**demo).cfg)
-    same(p.autopilot_params(), Autopilot().cfg)
-    assert p.k_diff_thr == DEMO_K_DIFF_THR
-    assert p.law["alpha_margin"] == DEMO_ALPHA_MARGIN
-    assert p.law["filter_tau"] == 0.5  # make_demo_fcl의 GainSchedule(filter_tau=0.5)
-    assert p.alloc_resv_frac == DEMO_ALLOC_RESV_FRAC
-    same(p.design_gains(), demo_design_gains())
-    same(p.rate_filters(), demo_rate_filters())
-    same(p.gain_tables(), make_demo_gain_tables())
-    everything = sorted(demo_design_gains())
-    same(p.gain_tables(everything), make_demo_gain_tables(everything))
+def test_registry_autopilot_defaults_equal_the_example_design():
+    # 알려진 중복: Autopilot ParamDef 기본값이 예제 기체의 설계값이다. 프로파일은 기본값을 쓰지 않고
+    # 전부 명시하므로 계산에는 영향이 없지만, 둘이 갈리면 폼 초기값이 예제와 달라진다
+    assert example_profile().autopilot_params() == Autopilot().cfg
 
 
-def test_example_identity_and_dispersion_axes():
-    p = example_profile()
-    assert p.id == EXAMPLE_ID and p.is_example is True
-    assert p.dispersion_axes == ("mass", "cmalpha", "cmq")
+def test_legacy_constants_keep_their_old_shapes_and_values():
+    from claw.fcl.demo import (DEFAULT_SCHEDULED, DEMO_ALLOC_RESV_FRAC, DEMO_ALLOC_TRIM_TABLE,
+                               DEMO_ALPHA_MARGIN, DEMO_K_DIFF_THR, DEMO_PITCH, DEMO_ROLL, DEMO_YAW,
+                               _F_CAP, _F_CAP_ROLL, _M_DESIGN)
+    from claw.plant.demo import RAIL_ORIGIN_H, SKID_C, SKID_K, SKID_MU
+
+    assert list(DEMO_PITCH.items()) == [("kp", -2.0), ("ki", -0.5), ("k_rate", 0.4),
+                                        ("out_lo", -0.35), ("out_hi", 0.35)]
+    assert list(DEMO_ROLL.items()) == [("kp", 1.0), ("ki", 0.1), ("k_rate", -0.2),
+                                       ("out_lo", -0.35), ("out_hi", 0.35)]
+    assert list(DEMO_YAW.items()) == [("kp", 0.5), ("ki", 0.0), ("k_rate", 0.8), ("washout_tau", 2.0),
+                                      ("out_lo", -0.35), ("out_hi", 0.35)]
+    assert (DEMO_K_DIFF_THR, DEMO_ALPHA_MARGIN, DEMO_ALLOC_RESV_FRAC) == (0.0, 0.05, 0.80)
+    assert DEFAULT_SCHEDULED == ("pitch.kp", "pitch.ki", "pitch.k_rate",
+                                 "roll.kp", "roll.ki", "roll.k_rate")
+    assert (_M_DESIGN, _F_CAP, _F_CAP_ROLL) == (0.6, 2.0, 4.0)
+    assert (RAIL_ORIGIN_H, SKID_K, SKID_C, SKID_MU) == (2.9, 54_000.0, 5_400.0, 0.35)
+    assert callable(DEMO_ALLOC_TRIM_TABLE) and DEMO_ALLOC_TRIM_TABLE().name == "de_trim"
+
+
+def test_unknown_legacy_names_raise_attribute_error():
+    import claw.fcl.demo as fcl_demo
+    import claw.plant.demo as plant_demo
+
+    with pytest.raises(AttributeError):
+        fcl_demo.NOPE
+    with pytest.raises(AttributeError):
+        plant_demo.NOPE

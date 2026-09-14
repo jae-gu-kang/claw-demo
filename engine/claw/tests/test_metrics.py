@@ -13,6 +13,7 @@ import pytest
 
 from claw.pipeline.influence import METRICS
 from claw.pipeline.metrics import metric_values
+from claw.profile import example_profile
 
 
 def _payload(n=4):
@@ -465,7 +466,7 @@ def test_추력_천장은_조립된_법칙의_포화_한계와_같다():
     from claw.pipeline.influence import Shape, make_law
     from claw.pipeline.metrics import THR_HI
 
-    law = make_law(Shape())
+    law = make_law(Shape(profile=example_profile()))
     his = {n.params["hi"] for n in law.runner.graph.nodes
            if n.id in ("mix_thr_l", "mix_thr_r")}
     assert his == {THR_HI}, f"법칙 포화 한계 {his} ≠ metrics 천장 {THR_HI}"

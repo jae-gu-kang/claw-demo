@@ -21,6 +21,7 @@ from claw.pipeline.sweep import (
 )
 from claw.plant import make_demo_aircraft
 from claw.trim import trim_level
+from claw.profile import example_profile
 
 
 @pytest.fixture(scope="module")
@@ -66,7 +67,7 @@ def test_표준_진단_기동의_스텝은_계측으로_정해진다(design_trim
 
 def test_sweep_plan은_기준런과_스팬과_쌍_3점을_만든다():
     plan = sweep_plan(
-        Shape(), ["table.pitch.kp"],
+        Shape(profile=example_profile()), ["table.pitch.kp"],
         pairs=[("table.pitch.kp", "table.pitch.k_rate")],
     )
     labels = {r.label: r for r in plan["runs"]}
@@ -90,7 +91,7 @@ def test_sweep_plan은_기준런과_스팬과_쌍_3점을_만든다():
 def test_sweep_plan_빈_knobs는_기준런_하나다():
     """knobs·pairs가 비면 계획은 base 런 1개 — 전 케이스 base 스캔(3단 A,
     /influence/scan)이 run_sweep을 그대로 재사용하는 계약이다."""
-    plan = sweep_plan(Shape(), [], ())
+    plan = sweep_plan(Shape(profile=example_profile()), [], ())
     assert [r.label for r in plan["runs"]] == ["base"]
     assert plan["runs"][0].overrides == {}
     assert plan["pairs"] == [] and plan["notes"] == []
@@ -99,7 +100,7 @@ def test_sweep_plan_빈_knobs는_기준런_하나다():
 def test_sweep_plan_기준값_0은_절대_스텝으로():
     """상대 스팬은 0에서 성립하지 않는다 (probe_value와 같은 이유) — zero_step
     절대 스텝을 쓴다. 0을 0으로 곱해 '스윕했는데 아무 일 없음'을 만들지 않는다."""
-    plan = sweep_plan(Shape(), ["fcl/Autopilot.ki_hdg"], span=(0.1, 0.2))
+    plan = sweep_plan(Shape(profile=example_profile()), ["fcl/Autopilot.ki_hdg"], span=(0.1, 0.2))
     labels = {r.label: r for r in plan["runs"]}
     vals = sorted(r.overrides["fcl/Autopilot.ki_hdg"]
                   for r in labels.values() if r.overrides)
@@ -108,7 +109,7 @@ def test_sweep_plan_기준값_0은_절대_스텝으로():
 
 def test_sweep_plan_unknown_knob은_거부():
     with pytest.raises(ValueError):
-        sweep_plan(Shape(), ["없는.자리"])
+        sweep_plan(Shape(profile=example_profile()), ["없는.자리"])
 
 
 def test_비가산성은_델타의_합과_동시_델타의_차다():
@@ -127,8 +128,8 @@ def test_run_sweep_초소형_통합(design_trim):
     """1케이스 × (base + 1런) — 행마다 지표·형상 지문이 실리고, 기준런이 부수
     산출물로 나온다 (규칙 4 국소성의 입력)."""
     ac, tr = design_trim
-    plan = sweep_plan(Shape(), ["table.pitch.kp"], span=(0.1,))
-    out = run_sweep(ac, [tr], Shape(), plan, t_settle=2.0, t_step=4.0)
+    plan = sweep_plan(Shape(profile=example_profile()), ["table.pitch.kp"], span=(0.1,))
+    out = run_sweep(ac, [tr], Shape(profile=example_profile()), plan, t_settle=2.0, t_step=4.0)
     assert out["aborted"] is None
     rows = out["rows"]
     assert [r["label"] for r in rows] == ["base", "table.pitch.kp@+0.1"]

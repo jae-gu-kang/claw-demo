@@ -5,7 +5,7 @@
 전부 들어 있다. 산출물 정본은 `flight/gen/`(커밋됨)이며 이 라우트는 같은
 생성기를 **현재 편집 중인 형상**으로 돌려 보여 준다.
 
-**조립을 재현하지 않는다.** `make_demo_fcl` → `law.init(dt)` → `law.runner`가
+**조립을 재현하지 않는다.** `assemble_law`(기체 프로파일) → `law.init(dt)` → `law.runner`가
 `flight/generate.py`와 완전히 같은 경로다. 여기서 `fcl_graph(...)`를 따로
 부르면 게인·타면 한계·마진이 또 한 곳에 적히고 한쪽만 고치면 조용히 어긋난다
 (02 §5.5 중복 정의 금지 — 실제로 generate.py가 그 상태였다가 통합됨).
@@ -17,7 +17,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from claw.codegen import emit_c, emit_runtime
-from claw.fcl.demo import make_demo_fcl
+from claw.fcl.assemble import assemble_law
+from claw_server.refs import current_profile
 from claw.params.registry import REGISTRY
 from claw_server.routes.sim import PolyTableIn, TableIn, build_gain_tables, build_scas
 
@@ -107,7 +108,7 @@ def _order_key(name: str, base: str, groups: list[str]) -> tuple:
     return (rank, sub, 0 if name.endswith(".h") else 1, name)
 
 
-def build_flight_law(req: FlightCodeIn):
+def build_flight_law(req: FlightCodeIn, profile):
     """요청 형상 → 초기화된 법칙 — 이 라우트와 /verify/flight가 같은 조립을 쓴다.
 
     구성 오류(미정의 게인 키·범위 이탈 등)는 엔진이 ValueError로 내고 422가 된다.
@@ -116,7 +117,8 @@ def build_flight_law(req: FlightCodeIn):
     dt = 1.0 / req.control_hz
     try:
         gain_tables = build_gain_tables(req.gain_tables)  # 구간 검증도 엔진 → 422
-        return make_demo_fcl(
+        return assemble_law(
+            profile,
             with_schedule=req.with_schedule,
             with_limiter=req.with_limiter,
             autopilot=(
@@ -133,7 +135,7 @@ def build_flight_law(req: FlightCodeIn):
 def flight_code(req: FlightCodeIn) -> dict:
     """현재 형상의 탑재 제어법칙 C — {파일명, 역할, 줄수, 본문} 목록."""
     dt = 1.0 / req.control_hz
-    law = build_flight_law(req)
+    law = build_flight_law(req, current_profile())
 
     runner = law.runner
     module = emit_c(runner.graph, runner)

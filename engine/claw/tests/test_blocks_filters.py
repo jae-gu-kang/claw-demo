@@ -220,7 +220,7 @@ def test_pid_zero_ki_axis_is_untouched_by_conditional_integration():
 def test_pid_out_of_range_warm_start_is_clamped_on_the_first_step():
     """범위 밖 웜스타트는 **첫 스텝에** 잘린다 — 증분을 버려도 클램프는 무조건이다.
 
-    도달 가능한 조합이다: 트림 θ의 상한(0.35, trim.py ALPHA_BOUNDS)이 AP의
+    도달 가능한 조합이다: 트림 θ의 상한(0.35, 예제 기체 trim.alpha_bounds)이 AP의
     theta_hi(0.3)보다 커서, 범프리스 웜스타트가 범위 밖 값을 그대로 넣는다.
     증분 버림과 클램프를 한 덩어리로 건너뛰면 그 0.05 rad가 영영 안 잘리고,
     음의 오차로만 방전되므로 **와인드업이 되레 길어진다** (리뷰 지적).

@@ -7,6 +7,7 @@
 """
 
 from claw.fcl import make_demo_fcl
+from claw.profile import example_profile
 from claw.verify.trace import INPUT_ORDER, record_mission  # noqa: F401 — 재수출
 
 # 데모 형상 fcl 그래프의 출력 선언 순서 — 하네스 출력 열과 1:1
@@ -18,7 +19,7 @@ OUTPUT_ORDER = (
 
 def run(t_end=180.0):
     """→ (입력 dict 목록, 기준 출력 튜플 목록, 트림 웜스타트 (de0, th0, thr0))."""
-    rec = record_mission(make_demo_fcl(), t_end=t_end)
+    rec = record_mission(make_demo_fcl(), profile=example_profile(), t_end=t_end)
     assert rec["meta"]["aborted"] is None, rec["meta"]["aborted"]
     # 여기 적은 순서가 낡으면 하네스 열이 어긋난 채 대조된다 — 그래프가 정본
     assert rec["output_order"] == OUTPUT_ORDER, rec["output_order"]

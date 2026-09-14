@@ -1,335 +1,79 @@
-"""데모 델타윙 M7 조립 — 설계 게인·동압 스케줄·α 리미터·믹서 일습.
+"""예제 기체(구 데모 델타윙) 법칙 쪽 호환 이름 — 설계값과 조립은 기체 프로파일에 있다 (02 §5.6).
 
-"비행체 프로파일" 교체 단위(03 §7.2)의 법칙 측 절반 — plant.demo와 짝.
-SCAS·AP 게인은 설계점 M0.6 h1000 fuel200에서 선형모델 고유치 스캔 + 비선형
-폐루프 확인으로 선정한 설계값 (증분 A·B 테스트가 성능 회귀 고정).
-**주의**: 프로펠러 추력 모델 이후 그 설계점은 엔벨로프 밖이다(스로틀 95.04% >
-SAT_FRAC 0.95). 게인의 출처는 그대로 유효하지만 — 선정 당시의 플랜트가 그 조건에서
-성립했다 — 지금 그 점으로 설계 파이프라인을 돌리면 trimmable=False로 걸러진다.
-재튜닝은 별건이다 (_M_DESIGN 주석의 스케줄 정규화 논거 참조).
+종전에는 이 모듈이 데모 기체의 SCAS·AP 설계 게인, 동압 스케줄(정규화 마하·축별 상한·스케줄 자리),
+차동추력 계수, α 리미터 마진, 엘레본 할당 예약을 상수로 들고 조립 정본(make_demo_fcl)까지 겸했다.
+이제 값은 예제 문서의 `law` 섹션에, 조립 정본은 `fcl/assemble.py assemble_law`에 있고, 여기 이름들은
+기존 호출(주로 테스트·대조 하네스)을 위한 **얇은 호환 층**이다. 제품 코드가 import하면 가드
+테스트(test_profile_guard.py)가 막는다.
 
-게인 스케줄 [기본값]: 동압 역비 스케일 f = min((M_design/M)², 상한) — 저속에서
-루프 강성 유지(피치·롤 PI·레이트 게인 공통). **상한은 저속 타면 포화 억제가 아니라
-대역폭 한계에서 온다** — 사유·실측은 _F_CAP 주석에 있다(종전 4는 저속에서 내측
-피치 루프를 리밋사이클에 넣었다). 스케일 **법칙은 자리마다 같고 상한만 축별로
-다르다**(피치 2.0 · 롤 4.0) — 리밋사이클을 만드는 것이 피치였고 롤은 실측으로
-무관했기 때문이다. 폐루프 고유치 안정 확인은 상수 추력 시절의 M0.25~0.8 격자에서 한 것이고,
-프로펠러 전환 뒤 수평비행 범위(해면 M0.21~0.60(연료 200 kg — 만재 400 kg면 M0.23~0.58))에서의 재확인은 [TBD]다. 1D mach 테이블이며 고도·연료 축 확장은 트림 격자 확보 후 [TBD].
-
-**어느 게인을 스케줄할지는 형상의 일부다** — 기본은 DEFAULT_SCHEDULED 6자리이고,
-전체 자리는 fcl/graphs.py SCHEDULABLE(16자리)이다. 뺀 자리는 설계점 상수로 굳어
-생성 C에서 룩업이 사라진다.
+수치의 근거(설계점 게인·정규화 마하·_F_CAP 파탄점 실측·축별 상한·차동추력 0·할당 예약 하한)는
+02 §5.6.1로 옮겼다.
 """
 
-import numpy as np
-
-from claw.fcl.autopilot import Autopilot
-from claw.fcl.law import FlightControlLaw
-from claw.fcl.limiter import AlphaLimiter
-from claw.fcl.mixer import Mixer
-from claw.fcl.scas import Scas, ScasAxis
-from claw.fcl.schedule import GainSchedule, design_gains
-from claw.plant import make_demo_stall_table, make_demo_trim_elevator_table
-from claw.tables import Table
-
-# 설계점 M0.6 h1000 fuel200 SCAS 게인 (증분 A 설계 스캔 — 그 점은 이제 엔벨로프 밖)
-DEMO_PITCH = dict(kp=-2.0, ki=-0.5, k_rate=0.4, out_lo=-0.35, out_hi=0.35)
-DEMO_ROLL = dict(kp=1.0, ki=0.1, k_rate=-0.2, out_lo=-0.35, out_hi=0.35)
-DEMO_YAW = dict(kp=0.5, ki=0.0, k_rate=0.8, washout_tau=2.0, out_lo=-0.35, out_hi=0.35)
-
-# 동압 스케일의 **정규화 상수** — 비행조건이 아니다.
-#
-# 프로펠러 추력 모델로 옮기면서 비행 가능 범위가 해면 M0.21~0.60(연료 200 kg — 만재
-# 400 kg면 M0.23~0.58)으로 좁아졌다. **설계점 M0.6 h1000 fuel200은 이제 엔벨로프
-# 밖이다**: 스로틀 95.04%로 SAT_FRAC(0.95, trim.py)을 0.04%p 넘겨 envelope_ok가
-# False이고, 그래서 design/grid.py가 이 점을 trimmable=False로 걸러 튜닝에서 뺀다.
-# (해면이면 94.06%로 아슬하게 안이지만 설계점은 해면이 아니다 — 고도를 바꿔 재면
-# 안심되는 숫자가 나오므로 여기 적는 값은 반드시 설계 고도의 것이어야 한다.)
-# 연료를 300 kg만 실어도 99.1%다. 그렇다고
-# 이 값을 0.4로 내리면 안 된다: 스케줄이
-# K(M) = K0·min((M_design/M)², cap)이라 M_design을 내리면 **전 구간의 실효 게인이
-# (0.6/0.4)² = 2.25배 낮아진다**. K0는 M0.6에서 고른 값이지만 여기 쓰이는 방식은
-# "그 자리에서 1이 되는 기준점"이고, 그 기준을 옮기면 아래 _F_CAP 실측(리밋사이클
-# 파탄점 — 현행 기체 재측정 3.5, 채택 2.0. 수치·표는 _F_CAP 주석이 정본이다)이
-# 통째로 무의미해진다. 값을 유지해 **검증된 게인 곡선을 그대로 보존**한다 — 새
-# 엔벨로프에서 이 곡선은 상한에 걸리는 구간이 축마다 다르고(피치 M0.424 아래,
-# 롤 M0.300 아래) 그 위에서 M0.59까지 1/q̄ 법칙이 산다.
-_M_DESIGN = 0.6
-# 동압 스케일 상한 — **작동기·항법 지연이 정하는 값이지 동압이 정하는 값이 아니다.**
-#
-# 1/q̄ 스케일은 "동압이 낮으면 같은 모멘트를 내려고 타를 더 친다"는 뜻이라 원리는
-# 맞지만, 대역폭은 동압이 아니라 작동기(wn 30 rad/s)와 항법 지연(delay_s 30 ms —
-# rtk_fixed도 같다, nav/error_model.py)이 묶는다.
-# 그 둘이 고정인데 게인만 올리면 위상여유를 잃고 내측 피치 루프가 리밋사이클에
-# 든다 — 상한 4.0에서 실측한 것이 그것이다. **아래 표는 프로펠러 전환 이전
-# 기체다** — 현행 기체 재측정은 뒤쪽 「파탄점 재측정」표이고, 거기서는 4.0이
-# 순항에 도달조차 못 한다(상승 중 66 s 추락):
-#
-#   M0.26(88 m/s) 순항에서 de가 ±20°(전 스트로크) 2 Hz로 왕복, de σ 10.6°·q σ 15.5°/s.
-#   자리별로 갈라 보면 pitch.kp(σ 11.0°·q 30.0°/s)와 pitch.k_rate(σ 12.1°)가 원인이고
-#   pitch.ki와 롤 3개는 무관하다(σ 3.3° = 부스트 없음과 동일).
-#
-# 직진 미션은 그 진동을 안고도 착륙했지만 **타면 여유가 남지 않아**, 선회를 얹는
-# 순간 고도를 못 잡고 나선 강하로 지면까지 갔다(경로추종 미션 36 s·−42.6 m/s,
-# 최악 실속마진 −2.73). 상한만 낮추면 같은 미션이 산다:
-#
-#   상한  4.0 → 추락       (마진 −2.726)
-#         3.0 → 정상        (+0.040, de σ 8.3°)
-#         2.0 → 정상        (+0.046, de σ 4.0°)   ← 채택
-#         1.0 → 정상        (+0.052, de σ 2.3°)
-#
-# 2.0을 고른 이유는 파탄점에서 배수로 떨어져 있으면서도 스케줄이 여전히 일을 하기
-# 때문이다 — 상한이 물리는 것은 M < 0.6/√2 = 0.42 아래뿐이고(축별 상한을 도입한
-# 지금은 **피치 기준**이다 — 롤은 M0.300), 그 위에서는 1/q̄ 법칙이 그대로다.
-# 순항 회귀(M0.41~0.6)는 2.14가 2.0으로 깎일 뿐이다. 저속에서
-# 설계 의도보다 게인이 낮은 것은 **의도한 거래**다: 낼 수 없는 대역폭을 좇는 것보다
-# 안정된 응답이 낫다.
-#
-# ⚠ **위 자리별 분해와 아래 두 표는 기록된 실측이지 대조되는 값이 아니다.**
-# 상한 값과 그 효과는 test_fcl_schedule.py가 못박고(값 변이는 전부 죽고, 저속
-# 코너 PM은 균일 상한으로 되돌리면 실패한다) 룩업
-# 표는 생성 C와 비트 대조되지만, 이 수치들에 대해서는 **틀렸을 때 실패하는 것이
-# 없다** — 기체가 바뀌면 조용히 낡는다. 실제로 그렇게 됐다: v0.44 추력 모델이
-# 파탄점을 4.0 → 3.5로 옮겼는데 주석은 30개 버전 동안 4.0을 말했다.
-#
-# **가장 낡기 쉬운 것이 위 자리별 분해다.** 「롤 3개는 무관(σ 3.3°)」이 축별 상한의
-# 근거 전체인데, v0.74는 결론(롤 4.0이 안전하다)만 현행 기체에서 재확인했고 분해
-# 자체는 **다시 안 쟀다**. 결론이 직접 검증됐으므로 판단은 서지만, 근거는 옛 기체의
-# 것이다 — 상한을 더 열거나 다른 축으로 넓히려면 분해부터 다시 재라.
-#
-# 플랜트(추력·공력·질량)나 작동기·지연을 건드리면 **셋 다 다시 재라.** 재는 법:
-#   · 6DOF 표(σ·마진·최저고도) — test_landing.py의 두 미션(fly·fly_path)에
-#     gain_tables를 주입한다. 볼 것은 순항 후반 de σ(문턱 6.0°) · 경로 접지 시각 ·
-#     res.envelope["worst_margin"] · 순항 구간 min(h). **순항 구간이 비었는지 먼저
-#     본다** — 상한 4.0은 순항에 도달조차 못 해서 σ가 무의미해진다.
-#   · 롤 PM 표 — `evaluate(depth="linear")`의 18칸 격자 최악값이다. 설계측
-#     `scheduled_margin_point`와 헷갈리지 말 것: 루프 조성(작동기·지연·레이트
-#     폐쇄)이 달라 같은 점에서 ~19° 높게 나온다. 둘 다 맞지만 같은 자가 아니다.
-#
-# **파탄점 재측정 (v0.74 — 위 표는 프로펠러 전환 이전 기체다).** v0.44가 추력
-# 모델을 바꾼 뒤 같은 두 미션을 다시 돌리면 절벽이 4.0 → 3.5로 **내려와 있다**:
-#
-#   상한  1.0 → 정상 (직진 정착 de σ 0.4° · 경로 마진 +0.049)
-#         2.0 → 정상 (1.1° · +0.046)                     ← 채택 (피치)
-#         3.0 → 정상이나 de σ 7.8°로 리밋사이클 문턱(6.0°) **초과**
-#         3.5 → 경로 미션 57 s 추락
-#         4.0 → 상승 중 66 s 추락 (순항 도달 못 함, |de| 19.7° 전 스트로크)
-#
-# 즉 2.0의 여유는 이제 2배가 아니라 1.75배다. 값은 유지하되 근거는 이 표가 정본이다.
-#
-# **축별 상한 — 롤만 4.0** (v0.74). 종전에는 자리별로 다른 상한을 두지 않았다.
-# 그 규칙을 깨는 이유는 **상한을 정당화한 측정 자체가 축별이기 때문이다**: 위
-# 자리별 분해가 pitch.kp·pitch.k_rate를 원인으로 지목하고 롤 3개는 σ 3.3°
-# (= 부스트 없음)로 무관하다고 이미 적어 두었다. 균일 상한은 피치 때문에 건 것을
-# 롤이 같이 뒤집어쓰는 구조였고, 그 대가가 저속 코너의 롤 자세 위상여유였다 —
-# 기본 격자가 v0.73에서 엔벨로프 안으로 들어오기 전까지는 보이지도 않았다:
-#
-#   롤 자세 PM (18칸 격자 최악, 합격선 45°)   균일 2.0 → 39.6° (3칸 미달)
-#                                          피치2·롤3 → 44.8° (1칸 미달)
-#                                          피치2·롤4 → 48.4° (전 칸 통과)
-#   그 대가 (직진 정착 de σ / 경로 마진      균일 2.0 → 1.1° / +0.046 / 248 m
-#            / 경로 순항 최저고도)            피치2·롤3 → 1.1° / +0.046 / 239 m
-#                                          피치2·롤4 → 1.7° / +0.043 / 236 m
-#
-# 롤 3.0을 안 쓰는 이유는 **한 칸이 남기 때문**이다 — 대가가 없어서가 아니다:
-# σ·마진은 **표기 정밀도에서** 기준선과 같지만(σ는 1.09 → 1.14°로 미세하게 오른다)
-# 순항 최저고도는 248 → 239 m로 이미 9 m를 낸다.
-# 엘레본은 피치·롤이 공유하므로 롤만 올려도 승강타가 더 움직이는 것은 맞다
-# (σ 1.1 → 1.7°, 문턱 6.0의 28 %). 다만 지배 소비자는 피치다 — 같은 롤 부스트라도
-# 피치를 함께 올린 균일 3.0은 7.8°다.
-#
-# 미등재 축은 **기본 상한(_F_CAP)을 따른다** — 측정이 없는 자리를 관대하게 여는
-# 것은 근거 없이 여는 것이다. 롤이 예외인 것은 롤을 재 봤기 때문이지 롤이라서가 아니다.
-#
-# **대가 하나가 스케줄 자신의 검증 어휘에 잡힌다**(01 §3.4 게인 테이블 불연속 검출,
-# fcl/schedule.py max_adjacent_jump): 상한이 늦게 물릴수록 곡선이 더 늦게 평평해져
-# 꺾이는 자리가 가팔라진다. 균일 상한에서는 롤과 피치의 **정규화 곡선이 같은 곡선**
-# 이라 최대 인접 Δ(0.05 마하당)가 둘 다 0.338(M0.45→0.50)이었고, M0.30→0.35는 이미
-# 평평해서 정확히 0이었다. 롤만 4.0으로 올리면 꺾이는 자리가 그 M0.30→0.35로 옮겨
-# 가며 **1.061**이 된다 — 자리마다 설계게인 배가 달라 절대값은 갈리지만(그 함수는
-# 비정규화 값을 낸다: roll.kp 1.061 · roll.k_rate 0.212 · roll.ki 0.106) **비는 어느
-# 롤 자리에서나 3.14배로 같다**. 판정선이 걸린 자리는 아니지만 그 검사를 돌리면
-# 롤만 뛰는 것이 보이므로 적어 둔다 — 원인은 결함이 아니라 이 상한 선택이다.
-_F_CAP = 2.0        # 기본 — 피치와 미측정 자리
-_F_CAP_ROLL = 4.0   # 롤 전용 (위 실측)
+from claw.fcl.assemble import assemble_law
 
 
-def _cap_for(gain_name: str) -> float:
-    """자리 이름 → 동압 스케일 상한. 축 접두사로 고르고, 모르는 축은 기본값."""
-    return _F_CAP_ROLL if gain_name.split(".", 1)[0] == "roll" else _F_CAP
+def _example():
+    # 지연 import — claw.profile의 검증기가 claw.fcl 레지스트리를 쓰므로 모듈 로드 시점에 부르면 순환한다
+    from claw.profile import example_profile
 
-
-# 기본 스케줄 대상 [기본값] — 피치·롤의 PI·레이트 게인. 요축과 AP 게인은 설계점
-# 고정이다. 이 구성은 **선택 가능**하고(웹 게인 탭), 바꾸면 탑재 C 구조와 지문이
-# 함께 바뀐다 — 스케줄한 자리는 룩업 + 필터 상태가 생기고 뺀 자리는 상수로 접힌다.
-DEFAULT_SCHEDULED = (
-    "pitch.kp", "pitch.ki", "pitch.k_rate",
-    "roll.kp", "roll.ki", "roll.k_rate",
-)
+    return example_profile()
 
 
 def demo_design_gains() -> dict:
-    """데모 기체의 자리별 설계점 상수 — `make_demo_fcl`이 조립하는 값 그대로."""
-    return design_gains(
-        {"pitch": DEMO_PITCH, "roll": DEMO_ROLL, "yaw": DEMO_YAW}, Autopilot().cfg
-    )
+    return _example().design_gains()
 
 
 def demo_rate_filters() -> dict:
-    """레이트 경로 필터 스펙 {그룹: 스펙} — 위 DEMO_* 프로파일이 실제로 조립하는 것.
-
-    자동 설계(M17)가 **출하되는 조성**을 보고 튜닝·검증하도록 넘기는 값이다.
-    이 dict를 안 넘기면 해석은 필터 없는 A′를 보는데, 데모 요축은 워시아웃 τ=2 s가
-    켜져 있어 그 차이가 ζ_dr를 움직인다 (01 §4.2 실측 M0.3/h0 0.5951 → 0.6612).
-
-    `washout_tau == 0`은 "그 축에 필터 없음"이라는 법칙 쪽 관용(graphs.py는 0이면
-    노드를 아예 안 만든다)을 그대로 따라 목록에서 뺀다 — 해석이 법칙에 없는
-    필터를 만들어 내지 않는다. 어휘 정본은 blocks.RATE_FILTERS.
-    """
-    out = {}
-    for group, cfg in (("pitch", DEMO_PITCH), ("roll", DEMO_ROLL), ("yaw", DEMO_YAW)):
-        tau = float(cfg.get("washout_tau", 0.0))
-        if tau > 0.0:
-            out[group] = {"kind": "washout", "tau": tau}
-    return out
+    return _example().rate_filters()
 
 
 def make_demo_gain_tables(names=None) -> dict:
-    """동압 스케일 1D mach 게인 테이블 — 기본은 피치·롤 PI·레이트 게인 6개.
-
-    `names`로 스케줄 자리를 골라 만들 수 있다 (웹 게인 탭의 대상 선택 경로).
-    새로 켠 자리도 **같은 동압 스케일 법칙**으로 채운다 — 자리마다 다른 규칙을 쓰면
-    켜는 순간 형상이 튀어서, 켜기 전후를 비교할 수가 없다. 설계점(M0.6)에서는 어느
-    자리든 설계 상수 그대로다.
-
-    **법칙은 같고 상한만 축별이다** (_cap_for — 피치·미측정 2.0, 롤 4.0). 위 규칙이
-    막는 것은 "자리마다 다른 *법칙*"이고, 상한은 대역폭 한계라 축마다 실측이 다르다.
-    새로 켜는 자리는 기본 상한을 따르므로 켜기 전후 비교는 그대로 성립한다.
-    """
-    # 격자 상단을 **자르지 않는다.** 프로펠러 전환으로 수평비행 상단이 M0.60으로
-    # 내려왔지만, Table이 extrapolate="clip"이라 격자를 M0.6에서 끊으면 그 위에서
-    # 1/q̄ 롤오프가 사라지고 게인이 설계값에 붙박인다 — _F_CAP이 리밋사이클을 만든다고
-    # 실측한 바로 그 방향(게인 과다)이다. 게다가 M0.6 위는 **강하로 도달한다**:
-    # 3000 m에서 de +0.02·thr 1.0이면 M0.816, 스로틀 0에서도 M0.730이다. 종말 강하가
-    # 정확히 그 구간이고, 스케줄 변수는 마하가 아니라 동압이라 거기서 더 중요하다.
-    # (하단 0.15→0.20은 무해하다 — 상한이 이미 평평하게 만드는 구간이라 잘라도 값이
-    #  같다. 평평해지는 자리는 축마다 다르다: 피치 M0.424 아래, 롤 M0.300 아래.
-    #  둘 다 0.20보다 위라 결론은 그대로다. 그래서 종전 격자를 안 건드린다.)
-    machs = np.round(np.arange(0.15, 0.951, 0.05), 4)
-    ideal = (_M_DESIGN / machs) ** 2
-    design = demo_design_gains()
-    wanted = DEFAULT_SCHEDULED if names is None else tuple(names)
-    unknown = [n for n in wanted if n not in design]
-    if unknown:
-        raise ValueError(f"스케줄 불가 자리 {unknown} — 허용: {sorted(design)}")
-    return {
-        name: Table({"mach": machs},
-                    design[name] * np.minimum(ideal, _cap_for(name)),
-                    name=name, extrapolate="clip")
-        for name in wanted
-    }
+    return _example().gain_tables(names)
 
 
-# 설계 기본값 — 조립이 쓰는 값 그대로. 주입 인자가 None일 때 여기서 만든다
-# 차동추력 러더 보조 — **0이다. 데모 기체가 단발이기 때문이다** (plant/demo.py:
-# PropEngine 중심선 1기). 중심선 1기는 좌우 추력차로 요 모멘트를 못 내므로 이
-# 계수를 켜면 법칙은 요축을 돕는다고 믿는데 기체는 아무것도 안 하고, 스로틀이
-# 상·하한에 붙은 구간에서는 좌우 클립이 비대칭이라 **평균이 밀려 러더가 추력을 깎는**
-# 진짜 버그가 된다 (plant/prop.py PropEngine·SingleEngine 참조).
-#
-# 구조는 지운 게 아니라 값으로 껐다 — 믹서의 차동추력 노드는 그대로 있고(생성 C도
-# 같다) 쌍발 형상(TwinEngine)을 물리면 계수만 되살리면 된다. 부호 기준은 그대로
-# "Cn_dr<0 프로파일에서 +".
-#
-# **요축 재튜닝은 하지 않았다 — 실측으로 불필요하다고 판정했다.** 헤딩 30° 스텝
-# 폐루프 비교(쌍발+0.1 vs 단발+0):
-#   M0.6/1000 m  t90 13.78 s 동일, |δr|max 0.0320→0.0327 (+2%), ψ 차이 0.00°
-#   M0.25/200 m  t90 7.06→6.97 s,  |δr|max 0.0986→0.1059 (+7%), ψ 차이 0.50°
-# 이유: 이 기체의 선회는 뱅크로 만들고 요축 SCAS는 댐퍼다(ki=0). 러더 변위 자체가
-# 작아(≤0.11 rad, 한계 0.35의 30%) 거기 비례하는 추력차 기여도 작았다. 저속에서
-# 비중이 커지는 것은 차동추력이 동압과 무관한 반면 러더 모멘트는 q̄에 비례하기
-# 때문인데, 그 저속에서도 러더 여유가 충분해 게인을 올릴 이유가 없었다.
-DEMO_K_DIFF_THR = 0.0
-DEMO_ALPHA_MARGIN = 0.05  # α 리미터 실속 마진 [rad] (01 §3.6)
+def _cap_for(gain_name: str) -> float:
+    return _example().cap_for(gain_name)
 
 
-# 엘레본 제어권한 배분 — 선회 하중 n = 1/cos φ_cmd 에 비례해 피치 몫을 먼저 뗀다.
-# R = clip(δe_trim(mach) · n, 0, frac · B). (유도는 fcl/graphs.py 모듈 주석)
-#
-# 1g 몫은 **상수가 아니라 mach 테이블**이다 — plant/demo.py
-# make_demo_trim_elevator_table. 트림 승강타 요구가 포락선 안에서 0.68°(M0.6) ~
-# 14.88°(M0.23)로 22배 움직여 어떤 상수도 양 끝을 동시에 못 만족한다. 실측 비교
-# (선회 착륙 시나리오, 순항 최저고도 / 최악 실속마진 / |φ|max):
-#   상수  7.16°  247.1 m  0.0473  41.21°   ← 근거가 틀렸다(격자가 포락선 하단 누락)
-#   상수 12.91°  248.7 m  0.0461  40.71°
-#   상수 14.66°  250.4 m  0.0498  40.57°   ← 안전하지만 M0.6에서 롤 12.2°를 버린다
-# 셋 다 나는 데는 문제가 없다 — 차이는 안전이 아니라 **버리는 롤 권한의 양**이고,
-# 표는 그걸 안 버린다.
-DEMO_ALLOC_TRIM_TABLE = make_demo_trim_elevator_table
-
-# 예산 중 피치 예약이 가져갈 수 있는 최대 비율 — 롤에 (1 − frac)·B가 항상 남는다.
-# 이 상한이 없으면 φ_cmd가 클 때 R이 예산 전체를 먹어 롤이 뱅크를 되돌리지도
-# 못하는 자기지속 상태가 된다.
-#
-# **하한이 있다**: frac·B는 표의 최댓값(15.24°, M0.25)을 덮어야 한다. 안 그러면
-# 상한이 1g 트림 요구 자체를 잘라, 예약이 "피치 몫을 먼저"라면서 정작 그 몫을
-# 못 준다. 0.7로 뒀다가 M0.15~0.25에서 상한 14.04° < 요구 14.78°로 걸렸다.
-# 0.76 이상이 필요하고 0.80을 쓴다 — 상한 16.04°, 롤 바닥 4.01°.
-#
-# 롤 바닥이 4.01°까지 내려가는 것은 **저속에서 기체에 타면이 모자라기 때문**이다:
-# M0.25의 1g 트림만 15.24°로 예산 20.05°의 76%를 쓴다. 배분이 만든 부족이 아니라
-# 원래 있던 것을 드러낸 것이고, 이 상한이 그 지점을 명시적으로 만든다.
-DEMO_ALLOC_RESV_FRAC = 0.80
+def make_demo_fcl(with_schedule=True, with_limiter=True, autopilot=None, gain_tables=None,
+                  scas=None, mixer=None, alpha_margin=None):
+    return assemble_law(_example(), with_schedule=with_schedule, with_limiter=with_limiter,
+                        autopilot=autopilot, gain_tables=gain_tables, scas=scas, mixer=mixer,
+                        alpha_margin=alpha_margin)
 
 
-def make_demo_fcl(
-    with_schedule: bool = True,
-    with_limiter: bool = True,
-    autopilot: Autopilot | None = None,
-    gain_tables: dict | None = None,
-    scas: Scas | None = None,
-    mixer: Mixer | None = None,
-    alpha_margin: float | None = None,
-) -> FlightControlLaw:
-    """데모 기체 FCL 조립 — init(dt) 후 reset(트림 웜스타트)으로 사용.
+def _legacy_axis(profile, axis):
+    """종전 DEMO_* dict 모양 그대로 — washout_tau는 켜진 축(>0)에만 있었다."""
+    a = profile.scas_axis_params(axis)
+    out = {k: a[k] for k in ("kp", "ki", "k_rate")}
+    if a["washout_tau"] > 0.0:
+        out["washout_tau"] = a["washout_tau"]
+    out["out_lo"], out["out_hi"] = a["out_lo"], a["out_hi"]
+    return out
 
-    **조립 정본은 이 함수 하나다** (02 v0.24) — 생성기·서버·해석 모듈이 전부 여기를
-    지난다. 아래 주입 인자들은 그 정본을 우회하는 통로가 아니라, 정본이 받는 설계변수다.
 
-    autopilot·scas·mixer·alpha_margin 주입은 **파라미터 스터디용** (파이프라인
-    Δ리포트·민감도 스윕에서 게인을 흔들 때, M15) — None이면 설계 기본값.
-    gain_tables 주입은 게인 스케줄 편집 경로 (M13/M14, 02 §8 4단계) — None이면
-    설계 테이블. 주입은 **전체 교체**(설계 테이블과 병합 아님 — 일부만 주입하면
-    나머지 게인은 스케줄 없이 설계점 고정값). 그룹·키 검증은 FCL 조립이 수행.
+def _alloc_trim_table():
+    return _example().alloc_trim_table()
 
-    alpha_margin은 with_limiter=True에서만 뜻이 있다 — 리미터 없는 형상에 마진을
-    주는 것은 조용히 무시되면 안 되는 모순이라 예외로 막는다.
-    """
-    if gain_tables is not None and not with_schedule:
-        raise ValueError("gain_tables 주입은 with_schedule=True에서만 유효")
-    if alpha_margin is not None and not with_limiter:
-        raise ValueError("alpha_margin 주입은 with_limiter=True에서만 유효")
-    scas = scas if scas is not None else Scas(
-        ScasAxis(**DEMO_PITCH), ScasAxis(**DEMO_ROLL), ScasAxis(**DEMO_YAW)
-    )
-    ap = autopilot if autopilot is not None else Autopilot()  # 기본값 = 증분 B 설계값
-    mixer = mixer if mixer is not None else Mixer(k_diff_thr=DEMO_K_DIFF_THR)
-    schedule = (
-        GainSchedule(
-            gain_tables if gain_tables is not None else make_demo_gain_tables(),
-            filter_tau=0.5,
-        )
-        if with_schedule
-        else None
-    )
-    limiter = (
-        AlphaLimiter(
-            make_demo_stall_table(),
-            margin=DEMO_ALPHA_MARGIN if alpha_margin is None else float(alpha_margin),
-        )
-        if with_limiter
-        else None
-    )
-    return FlightControlLaw(scas, ap, mixer, schedule=schedule, alpha_limiter=limiter,
-                            alloc_trim_table=DEMO_ALLOC_TRIM_TABLE(),
-                            alloc_resv_frac=DEMO_ALLOC_RESV_FRAC)
+
+_LAZY = {
+    "DEMO_PITCH": lambda p: _legacy_axis(p, "pitch"),
+    "DEMO_ROLL": lambda p: _legacy_axis(p, "roll"),
+    "DEMO_YAW": lambda p: _legacy_axis(p, "yaw"),
+    "DEMO_K_DIFF_THR": lambda p: p.k_diff_thr,
+    "DEMO_ALPHA_MARGIN": lambda p: p.law["alpha_margin"],
+    "DEMO_ALLOC_RESV_FRAC": lambda p: p.alloc_resv_frac,
+    "DEMO_ALLOC_TRIM_TABLE": lambda p: _alloc_trim_table,
+    "DEFAULT_SCHEDULED": lambda p: tuple(p.law["schedule"]["scheduled"]),
+    "_M_DESIGN": lambda p: p.law["schedule"]["m_design"],
+    "_F_CAP": lambda p: p.law["schedule"]["caps"]["default"],
+    "_F_CAP_ROLL": lambda p: p.law["schedule"]["caps"]["by_group"]["roll"],
+}
+
+
+def __getattr__(name):
+    # 모듈 상수도 문서에서 읽는다 — import 시점에 읽으면 위 순환이 생기므로 PEP 562 지연 속성
+    if name in _LAZY:
+        return _LAZY[name](_example())
+    raise AttributeError(f"module 'claw.fcl.demo' has no attribute {name!r}")

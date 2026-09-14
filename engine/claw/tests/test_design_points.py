@@ -12,6 +12,8 @@ from claw.design import (
     case_name,
 )
 
+_DE = (-0.35, 0.35)  # 예제 기체 엘레본 범위 — 판정 입력 대역이 쓰는 기체 한계
+
 
 def _pt(mach, alt, fuel, role=ROLE_ANCHOR, origin="coarse"):
     return OperatingPoint(
@@ -141,21 +143,22 @@ def test_envelope_verdict_reasons_priority():
     from claw.design.points import envelope_ok, envelope_verdict
 
     good = _fake_tr()
-    assert envelope_verdict(good) == {"ok": True, "reasons": []}
+    assert envelope_verdict(good, _DE) == {"ok": True, "reasons": []}
 
     cases = [
         (_fake_tr(converged=False), "not_converged"),
         (_fake_tr(alpha_ok=False), "alpha_margin"),
         (_fake_tr(thr=0.97), "saturated_throttle_high"),
         (_fake_tr(de=0.34), "saturated_de"),
+        (_fake_tr(de=-0.34), "saturated_de"),  # 음의 한계 쪽 — 방향별 한계식의 lo 가지
         (_fake_tr(thr=0.01), "saturated_throttle_low"),
     ]
     for tr, reason in cases:
-        v = envelope_verdict(tr)
+        v = envelope_verdict(tr, _DE)
         assert v["ok"] is False and v["ok"] == envelope_ok(tr)
         assert v["reasons"] == [reason], reason
 
     # 복합 실패 — 우선순위 순서 유지 (첫 항목이 표시 대표)
     multi = _fake_tr(converged=False, alpha_ok=False, thr=0.97)
-    assert envelope_verdict(multi)["reasons"] == [
+    assert envelope_verdict(multi, _DE)["reasons"] == [
         "not_converged", "alpha_margin", "saturated_throttle_high"]

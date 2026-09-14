@@ -17,6 +17,7 @@ from claw.fcl.demo import (
 from claw.fcl.graphs import SCHEDULABLE, autopilot_nodes
 from claw.fcl.schedule import design_gains
 from claw.tables import Table
+from claw.profile import example_profile
 
 DT = 0.01
 
@@ -304,7 +305,7 @@ def test_롤_상한이_저속_코너_위상여유를_지킨다():
         return float(lp["margins"]["pm_deg"])
 
     limit = GainEvalCriteria().margin.pm_min_deg
-    assert roll_pm(Shape()) > limit, "출하 형상이 저속 코너 위상여유를 못 지킨다"
+    assert roll_pm(Shape(profile=example_profile())) > limit, "출하 형상이 저속 코너 위상여유를 못 지킨다"
 
     # 균일 상한(= 이 변경 이전)으로 되돌리면 떨어진다 — 그것이 이 상한의 이유다
     machs = np.round(np.arange(0.15, 0.951, 0.05), 4)
@@ -313,7 +314,7 @@ def test_롤_상한이_저속_코너_위상여유를_지킨다():
                         design[n] * np.minimum((_M_DESIGN / machs) ** 2, _F_CAP),
                         name=n, extrapolate="clip")
                for n in DEFAULT_SCHEDULED}
-    assert roll_pm(Shape(gain_tables=uniform)) < limit, (
+    assert roll_pm(Shape(profile=example_profile(), gain_tables=uniform)) < limit, (
         "균일 상한에서도 합격선을 넘는다 — 그렇다면 축별 상한의 근거가 사라진 것이라\n"
         "        _F_CAP_ROLL을 지우는 것이 맞다. 단 판정선(pm_min_deg)을 낮췄다면\n"
         "        상한이 아니라 그쪽부터 보라 — 이 단정은 둘 다에 반응한다.")

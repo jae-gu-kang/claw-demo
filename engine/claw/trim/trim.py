@@ -12,7 +12,7 @@
 자동 판정 플래그 (01 §4.1 [기본값], TrimResult.flags):
 - residual_ok    : |u̇|,|ẇ| < RESID_TOL, |q̇| < RESID_TOL
 - saturation_ok  : δe·스로틀이 한계의 SAT_FRAC 이내 (스로틀 하한 여유 THR_MARGIN 포함)
-- alpha_margin_ok: α가 상한 대비 ALPHA_MARGIN 이상 여유 (실속 경계 [TBD] 확보 전 대용)
+- alpha_margin_ok: α가 탐색 상한 대비 기체의 trim.alpha_margin 이상 여유 (실속 경계 기준은 [백로그])
 - continuity_ok  : 배치에서 인접 케이스 해와의 급변 없음. **None = 미판정**
   (첫 케이스·비교 기준 부재) — 미판정을 합격으로 오인하지 않도록 3-상태
 """
@@ -26,19 +26,17 @@ from claw.common.contracts import SurfaceCommand, TrimResult, VehicleState
 from claw.env import isa_atmosphere
 from claw.plant.aircraft import XE_H, XE_P, XE_PHI, XE_Q, XE_R, XE_THETA, XE_U, XE_V, XE_W
 
-ALPHA_BOUNDS = (-0.10, 0.35)  # [rad]
-DE_BOUNDS = (-0.35, 0.35)  # [rad]
+# α·δe 탐색 범위와 α 여유는 **기체 데이터**라 여기 없다 — Aircraft.trim_bounds(기체 프로파일, 02 §5.6)
 THR_BOUNDS = (0.0, 1.0)
 RESID_TOL = 1e-4  # [m/s², rad/s²]
 SAT_FRAC = 0.95
 THR_MARGIN = 0.02  # 스로틀 하한 여유 — 아이들 포화 해 검출
-ALPHA_MARGIN = 0.035  # [rad] ≈ 2° — 실속 경계 테이블 확보 전 대용 [기본값]
 CONTINUITY_STEP = np.array([0.05, 0.05, 0.15])  # 인접 케이스 허용 Δ[α, δe, thr]
 
 _Z0_DEFAULT = np.array([0.05, 0.0, 0.3])
 
 
-def _saturation_channels(de, thr) -> dict:
+def _saturation_channels(de, thr, de_bounds) -> dict:
     """포화 채널별 판정 — saturation_ok의 부정과 동치인 세 갈래 (상수 단일 거처).
 
     throttle_high는 이제 **진짜 추진 한계**다 — 프로펠러 추력 모델
@@ -47,19 +45,20 @@ def _saturation_channels(de, thr) -> dict:
     (01 §2.6). 수평비행 추력 부족은 여전히 스로틀 상한 포화로 드러난다.
     """
     return {
-        "de": bool(abs(de) >= SAT_FRAC * DE_BOUNDS[1]),
+        "de": bool(de >= SAT_FRAC * de_bounds[1] or de <= SAT_FRAC * de_bounds[0]),
         "throttle_high": bool(thr >= SAT_FRAC * THR_BOUNDS[1]),
         "throttle_low": bool(thr <= THR_BOUNDS[0] + THR_MARGIN),
     }
 
 
-def saturation_detail(tr) -> dict:
+def saturation_detail(tr, de_bounds) -> dict:
     """TrimResult → 포화 채널 상세 {"de", "throttle_high", "throttle_low"}.
 
     trim_level의 saturation_ok과 같은 식(_saturation_channels) — 어느 채널이
     걸렸는지는 설계 엔벨로프 스캔(제어 가능 영역 귀속)의 입력이 된다.
     """
-    return _saturation_channels(float(tr.control.elevon[0]), float(tr.control.throttle[0]))
+    return _saturation_channels(float(tr.control.elevon[0]), float(tr.control.throttle[0]),
+                                de_bounds)
 
 
 def _controls(z):
@@ -75,7 +74,15 @@ def _xe(z, v_true, alt):
     return xe
 
 
+def _trim_bounds(aircraft) -> dict:
+    tb = getattr(aircraft, "trim_bounds", None)
+    if tb is None:
+        raise ValueError("트림 탐색 범위가 없는 기체 — 기체 프로파일로 조립해야 한다 (02 §5.6)")
+    return tb
+
+
 def trim_level(aircraft, case, z0=None, fingerprint=""):
+    tb = _trim_bounds(aircraft)
     atm = isa_atmosphere(case.alt)
     v_true = case.mach * atm.a
 
@@ -90,15 +97,15 @@ def trim_level(aircraft, case, z0=None, fingerprint=""):
         cost,
         _Z0_DEFAULT if z0 is None else np.asarray(z0, dtype=float),
         method="SLSQP",
-        bounds=[ALPHA_BOUNDS, DE_BOUNDS, THR_BOUNDS],
+        bounds=[tb["alpha"], tb["de"], THR_BOUNDS],
         options={"maxiter": 300, "ftol": 1e-16},
     )
     alpha, de, thr = res.x
     r = resid(res.x)
 
     residual_ok = bool(np.all(np.abs(r) < RESID_TOL))
-    saturation_ok = not any(_saturation_channels(de, thr).values())
-    alpha_margin_ok = bool(alpha < ALPHA_BOUNDS[1] - ALPHA_MARGIN)
+    saturation_ok = not any(_saturation_channels(de, thr, tb["de"]).values())
+    alpha_margin_ok = bool(alpha < tb["alpha"][1] - tb["alpha_margin"])
     flags = {
         "residual_ok": residual_ok,
         "saturation_ok": saturation_ok,

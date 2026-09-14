@@ -65,7 +65,7 @@ def close_rates(lm_axis, rate_gains: dict, rate_filters: dict | None = None) -> 
     자세 PI 루프가 같은 입력으로 들어간다.
 
     rate_filters: {group: 필터 스펙} — 그 자리의 댐퍼가 **필터를 거친 신호**를
-    먹는 경우(데모 요축 워시아웃 τ=2 s, fcl/demo.py DEMO_YAW). 필터마다 상태를
+    먹는 경우(데모 요축 워시아웃 τ=2 s, 예제 기체 law.design.scas.yaw). 필터마다 상태를
     하나 **뒤에 붙인다** — 물리 상태 인덱스가 밀리지 않아야 이름 조회
     (x_names.index("p") 등)를 쓰는 소비자가 전부 그대로 동작한다.
 

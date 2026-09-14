@@ -97,7 +97,7 @@ def pi_loop(
       Padé 근사(pade_order차, [기본값] 2 — 마진 해석에서 흔히 쓰는 차수) 캐스케이드.
     - rate_filter: 레이트 피드백 경로 필터 스펙(filter_tf 규격). 법칙에 실제로
       들어 있는 필터를 루프에 반영한다 — 데모 요축 워시아웃(τ=2 s,
-      fcl/demo.py DEMO_YAW)이 그 예다. 미지정이면 필터 없음이고, 그 경우
+      예제 기체 law.design.scas.yaw)이 그 예다. 미지정이면 필터 없음이고, 그 경우
       **필터가 실제로 있어도 루프는 정적 게인으로 본다**(호출자가 선언해야 한다 —
       pipeline/openloop.py GROUP_LOOPS가 그 선언의 정본).
     """

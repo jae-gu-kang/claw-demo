@@ -18,11 +18,12 @@ from claw.pipeline.influence import (
     structural_payload,
     probe_value,
 )
+from claw.profile import example_profile
 
 
 @pytest.fixture(scope="module")
 def base_shape():
-    return Shape()
+    return Shape(profile=example_profile())
 
 
 @pytest.fixture(scope="module")
@@ -54,10 +55,10 @@ def test_universe_reads_values_from_the_assembled_law(base_shape, refs):
 
 def test_universe_follows_the_shape_not_a_fixed_list():
     """리미터·스케줄을 끄면 그 파라미터가 목록에서 **사라진다**."""
-    off = {r.id for r in param_universe(Shape(with_schedule=False, with_limiter=False))}
+    off = {r.id for r in param_universe(Shape(profile=example_profile(), with_schedule=False, with_limiter=False))}
     assert "fcl/AlphaLimiter.margin" not in off
     assert not [i for i in off if i.startswith("table.")]
-    on = {r.id for r in param_universe(Shape())}
+    on = {r.id for r in param_universe(Shape(profile=example_profile()))}
     assert "fcl/AlphaLimiter.margin" in on
     assert [i for i in on if i.startswith("table.")]
 
@@ -172,7 +173,7 @@ def test_elevon_axes_have_their_limits_overridden_by_allocation(impacts):
 
 
 def test_override_disappears_when_schedule_is_off():
-    imp = param_impacts(Shape(with_schedule=False))["fcl/ScasAxis.pitch.kp"]
+    imp = param_impacts(Shape(profile=example_profile(), with_schedule=False))["fcl/ScasAxis.pitch.kp"]
     assert imp.seeds == ("scas_pitch_pid",)
     assert imp.overridden == ()
 
@@ -252,7 +253,7 @@ def test_offgraph_params_are_not_inert(impacts):
 
 
 def test_inert_disappears_without_schedule():
-    assert not param_impacts(Shape(with_schedule=False))["fcl/ScasAxis.pitch.k_rate"].inert
+    assert not param_impacts(Shape(profile=example_profile(), with_schedule=False))["fcl/ScasAxis.pitch.k_rate"].inert
 
 
 # ── 1단 payload ────────────────────────────────────────────────────────────
@@ -313,7 +314,7 @@ def test_override_follows_the_schedule_slots_not_a_band_list():
     from claw.fcl.demo import make_demo_gain_tables
 
     tables = make_demo_gain_tables(names=("alt.kp", "alt.ki", "pitch.kp"))
-    imp = param_impacts(Shape(gain_tables=tables))
+    imp = param_impacts(Shape(profile=example_profile(), gain_tables=tables))
     assert imp["fcl/Autopilot.kp_alt"].overridden == ("ap_alt_pid",)
     assert imp["fcl/Autopilot.ki_alt"].overridden == ("ap_alt_pid",)
     # 스케줄하지 않은 자리는 그대로 먹는다 — 자리 단위로 갈린다
@@ -324,7 +325,7 @@ def test_override_follows_the_schedule_slots_not_a_band_list():
 
 def test_override_is_not_claimed_when_wiring_changes():
     """배선·enable만 바뀐 노드는 덮임이 아니다 — 인자가 안 움직였으면 판정하지 않는다."""
-    imp = param_impacts(Shape())["fcl/Autopilot.k_thr_turn"]
+    imp = param_impacts(Shape(profile=example_profile()))["fcl/Autopilot.k_thr_turn"]
     assert imp.structural
     assert imp.overridden == ()
 
@@ -337,10 +338,10 @@ def test_gain_tables_without_schedule_is_refused_like_codegen():
     from claw.fcl.demo import make_demo_gain_tables
 
     with pytest.raises(ValueError, match="with_schedule=True"):
-        make_law(Shape(with_schedule=False, gain_tables=make_demo_gain_tables()))
+        make_law(Shape(profile=example_profile(), with_schedule=False, gain_tables=make_demo_gain_tables()))
 
 
 def test_unknown_scas_axis_is_refused():
     """조용히 버리면 지문만 움직이고 그래프는 그대로다 — 무증상 거짓말."""
     with pytest.raises(ValueError, match="알 수 없는 SCAS 축"):
-        make_law(Shape(scas={"badaxis": {"kp": 1.0}}))
+        make_law(Shape(profile=example_profile(), scas={"badaxis": {"kp": 1.0}}))

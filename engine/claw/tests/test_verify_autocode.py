@@ -28,6 +28,7 @@ from claw.verify.static_c import (
     strip_comments_strings,
 )
 from claw.verify.units import make_unit_harness, run_unit_oracle, unit_specs
+from claw.profile import example_profile
 
 DT = 0.01
 
@@ -264,7 +265,7 @@ def test_벡터를_빼면_커버리지_미달이_정직하게_드러난다(demo_
 
     이것이 이 탭의 존재 이유다 — 시험이 모자라면 초록이 아니라 빨강이 선다.
     """
-    rep = verify_flight(demo_law, t_end=6.0, with_vectors=False)
+    rep = verify_flight(demo_law, profile=example_profile(), t_end=6.0, with_vectors=False)
     assert rep is not None
     by = {r["key"]: r for r in rep["summary"]}
     assert by["paths"]["status"] == "fail"
@@ -278,7 +279,7 @@ def test_벡터를_빼면_커버리지_미달이_정직하게_드러난다(demo_
 
 def test_전체_파이프라인은_기본_형상에서_DAL_A_목표를_닫는다(demo_law):
     """짧은 미션이어도 보강·유닛 벡터가 커버리지를 100%(정당화 포함)로 닫는다."""
-    rep = verify_flight(demo_law, t_end=6.0)
+    rep = verify_flight(demo_law, profile=example_profile(), t_end=6.0)
     assert rep is not None
     keys = [r["key"] for r in rep["summary"]]
     assert keys == ["static", "compile", "paths", "equiv", "coverage"]
@@ -395,7 +396,7 @@ def test_웜스타트는_접힌_축을_건너뛴다(demo_law):
     assert "s.ap_alt_pid_i" not in off_lines
     assert "폴딩" in off_lines  # 침묵이 아니라 사유가 남는다
     if find_cc():
-        rep = verify_flight(off, t_end=4.0, with_vectors=False)
+        rep = verify_flight(off, profile=example_profile(), t_end=4.0, with_vectors=False)
         assert rep["compile"]["status"] == "pass", rep["compile"]["log"][:400]
 
 
@@ -411,5 +412,5 @@ def test_인벤토리는_못_잡은_다조건을_시끄럽게_거부한다(demo_
 
 
 def test_취소는_결과를_내지_않는다(demo_law):
-    assert verify_flight(demo_law, t_end=6.0,
+    assert verify_flight(demo_law, profile=example_profile(), t_end=6.0,
                          on_progress=lambda d, t, m="": True) is None

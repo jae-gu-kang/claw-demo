@@ -35,7 +35,7 @@ from claw.pipeline.prescribe import (
 )
 from claw.pipeline.sweep import nonadditivity, plan_shapes, run_sweep, sweep_plan
 from claw.sim import check_law_plant_pairing
-from claw.plant import make_demo_aircraft
+from claw_server.refs import current_profile
 from claw.trim import trim_batch
 from claw_server.routes.codegen import FlightCodeIn
 from claw_server.routes.sim import _load_sim, build_gain_tables
@@ -106,7 +106,7 @@ class InfluenceIn(FlightCodeIn):
         return v
 
 
-def to_shape(req: InfluenceIn) -> Shape:
+def to_shape(req: InfluenceIn, profile) -> Shape:
     """요청 → 엔진 형상. 지정하지 않은 자리는 비워 두어 **엔진 기본값이 채우게** 한다."""
     # 조립은 sim·codegen과 같은 빌더 하나로 — 여기만 손으로 짜 두면 게인 페이로드가
     # 넓어질 때(다항 kind='poly') 이 경로만 빠져 AttributeError → 500이 된다
@@ -123,6 +123,7 @@ def to_shape(req: InfluenceIn) -> Shape:
         nav=dict(req.nav or {}),
         actuators=dict(req.actuators or {}),
         guidance=dict(req.guidance or {}),
+        profile=profile,
     )
 
 
@@ -133,9 +134,10 @@ def influence_structural(req: InfluenceIn) -> dict:
     구성 오류(범위 이탈·스케줄 불가 자리 등)는 엔진이 ValueError로 내고 422가 된다.
     """
     t0 = time.perf_counter()
+    profile = current_profile()
     try:
         payload = structural_payload(
-            to_shape(req),
+            to_shape(req, profile),
             include_offgraph=req.include_offgraph,
             probe_rel=req.probe_rel,
         )
@@ -163,9 +165,10 @@ def influence_diagnose(req: DiagnoseIn, request: Request) -> dict:
     """
     t0 = time.perf_counter()
     payload = _load_sim(request, req.result_id)
+    profile = current_profile()
     try:
         criteria = GainEvalCriteria.from_dict(req.criteria)
-        out = diagnose_run(payload, to_shape(req), probe_rel=req.probe_rel,
+        out = diagnose_run(payload, to_shape(req, profile), probe_rel=req.probe_rel,
                            thresholds=criteria.to_diagnose_thresholds())
     except (ValueError, TypeError) as e:  # 엔진 판정 → 422 (structural과 같은 정책)
         raise HTTPException(status_code=422, detail=str(e))
@@ -196,10 +199,11 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
     케이스 보존. 파라미터 id 오타는 실행이 아니라 **제출 시점 422**로 잡는다 —
     잡이 돌고 나서 실패하면 오타 하나에 트림 배치 비용을 지불한다.
     """
-    ac = make_demo_aircraft()
+    profile = current_profile()
+    ac = profile.aircraft()
     cases = build_cases(req.cases)
     try:
-        shape = to_shape(req)
+        shape = to_shape(req, profile)
         if req.params:
             universe = {r.id for r in param_universe(shape)}
             unknown = [p for p in req.params if p not in universe]
@@ -276,10 +280,11 @@ def submit_sweep(req: SweepIn, request: Request, response: Response) -> dict:
     if not req.knobs and not req.pairs:
         raise HTTPException(status_code=422,
                             detail="흔들 것이 없다 — knobs 또는 pairs가 필요")
-    ac = make_demo_aircraft()
+    profile = current_profile()
+    ac = profile.aircraft()
     cases = build_cases(req.cases)
     try:
-        shape = to_shape(req)
+        shape = to_shape(req, profile)
         plan = (
             sweep_plan(shape, req.knobs, [tuple(p) for p in req.pairs],
                        span=tuple(req.span))
@@ -375,10 +380,11 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
     소급 활성화다. 취소 시 완료 케이스의 행은 보존되고, 판정은 남은 케이스로만
     낸다 (n_cases가 계보다).
     """
-    ac = make_demo_aircraft()
+    profile = current_profile()
+    ac = profile.aircraft()
     cases = build_cases(req.cases)
     try:
-        shape = to_shape(req)
+        shape = to_shape(req, profile)
         criteria = GainEvalCriteria.from_dict(req.criteria)
         plan = sweep_plan(shape, [], ())
         # 잡 안에서 터지면 이미 돌린 런이 통째로 버려진다 — 기체와 안 맞는 형상은
@@ -489,10 +495,11 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
     기준 오류·기체와 안 맞는 형상은 제출 시점 422 (sweep과 같은 계약). 결과에
     형상·기준 지문이 함께 실린다 — 무슨 기준으로 판정했는지가 계보다.
     """
-    ac = make_demo_aircraft()
+    profile = current_profile()
+    ac = profile.aircraft()
     cases = build_cases(req.cases)
     try:
-        shape = to_shape(req)
+        shape = to_shape(req, profile)
         criteria = GainEvalCriteria.from_dict(req.criteria)
         check_law_plant_pairing(ac, make_law(shape))
     except (ValueError, TypeError) as e:
@@ -561,7 +568,8 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
     이름이 겹치면 귀속이 조용히 다른 케이스로 바뀐다(웹 nameCases와 같은 계약).
     "mid/"는 예약 접두사다: 사용자 케이스가 그 이름을 쓰면 중간점 집계에 섞인다.
     """
-    ac = make_demo_aircraft()
+    profile = current_profile()
+    ac = profile.aircraft()
     cases = build_cases(req.cases)
     reserved = [c.name for c in cases if c.name.startswith("mid/")]
     if reserved:
@@ -569,7 +577,7 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
             status_code=422,
             detail=f"'mid/'는 중간점 예약 접두사다 — 케이스 이름 변경 필요: {reserved}")
     try:
-        shape = to_shape(req)
+        shape = to_shape(req, profile)
         criteria = GainEvalCriteria.from_dict(req.criteria)
         check_law_plant_pairing(ac, make_law(shape))
     except (ValueError, TypeError) as e:
@@ -590,7 +598,7 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
 
     from claw.pipeline.evaluate import _corner_dispersions
 
-    n_corner = len(_corner_dispersions(criteria))
+    n_corner = len(_corner_dispersions(criteria, axes=shape.profile.dispersion_axes))
     expected = n_corner * len(cases) + len(mids)
     if expected > MAX_CASES:
         raise HTTPException(
@@ -605,7 +613,7 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
 
     def work(job):
         out = verify(
-            make_demo_aircraft, cases, shape, criteria,
+            shape.profile.aircraft, cases, shape, criteria,
             depth=req.depth, midpoint_cases=mids, dt_plant=req.dt_plant,
             t_settle=req.t_settle, t_step=req.t_step, t_hold=req.t_hold,
             on_progress=lambda done, v_total, msg: job.report(
@@ -668,10 +676,11 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
             detail=f"influence_sweep 결과가 아니다: kind={payload.get('kind')}")
     rows = payload.get("rows") or []
 
-    ac = make_demo_aircraft()
+    profile = current_profile()
+    ac = profile.aircraft()
     cases = build_cases(req.cases)
     try:
-        shape = to_shape(req)
+        shape = to_shape(req, profile)
         criteria = GainEvalCriteria.from_dict(req.criteria)
         check_law_plant_pairing(ac, make_law(shape))
         # ── 승계 — 평가가 좁혀 준 것을 사용자가 다시 고르지 않는다 ──────────

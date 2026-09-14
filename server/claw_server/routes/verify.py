@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import Field
 
 from claw.verify import verify_flight
+from claw_server.refs import current_profile
 from claw_server.routes.codegen import FlightCodeIn, build_flight_law
 from claw_server.serialize import to_jsonable
 
@@ -32,12 +33,13 @@ class VerifyFlightIn(FlightCodeIn):
 @router.post("/verify/flight", status_code=202)
 def submit_verify(req: VerifyFlightIn, request: Request, response: Response) -> dict:
     # 검증할 수 없는 형상은 수락하지 않는다 — 202 뒤 작업 오류보다 즉시 422가 낫다
-    law = build_flight_law(req)
+    profile = current_profile()  # 법칙과 대조 미션이 같은 기체를 본다
+    law = build_flight_law(req, profile)
     store = request.app.state.store
 
     def work(job):
         report = verify_flight(
-            law, t_end=req.t_end, control_hz=req.control_hz,
+            law, profile=profile, t_end=req.t_end, control_hz=req.control_hz,
             on_progress=lambda done, total, message="": job.report(
                 done, total, message=message),
         )

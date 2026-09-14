@@ -4,7 +4,7 @@
 구성: airdata(NavOutput→V·α·β), SCAS, 오토파일럿(+명령필터·선회 FF),
 게인 스케줄(동압 등 테이블+변수 필터), α 리미터, 믹서(엘레본4+차동추력),
 FlightControlLaw(최상위 조립: 스케줄→AP→리미터→SCAS→믹서).
-데모 프로파일 조립은 claw.fcl.demo.make_demo_fcl.
+조립 정본은 claw.fcl.assemble.assemble_law(기체 프로파일) — demo.make_demo_fcl은 예제 기체 호환 이름.
 
 **구조의 정본은 `graphs.py`의 IR 선언 하나다** (07 §1, M16). 여기 클래스들은
 파라미터를 보유하고, 그 그래프를 태우고, 원시 항법 상태를 그래프가 받는 공학량으로

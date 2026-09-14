@@ -6,7 +6,7 @@ alpha_margin=0이면 실속 경계, α 리미터 마진(0.05 [기본값])을 주
 L = −F_z·cosα + F_x·sinα — 계수 부호 가정 없이 프로파일 DB를 그대로 소비.
 
 구조 한계(±n·안전계수·M_NO·M_D)는 비행체 프로파일 데이터로 주입받아
-(데모: plant.make_demo_structural_limits [기본값] 자리표시 — 실기체 값 아님)
+(예제 기체 프로파일 structural [기본값] 자리표시 — 실기체 값 아님)
 vn_envelope가 한계선·특성 속도(V_S·V_A)까지 산출한다. Nz 제한 "기능" 채택
 여부는 01 §3.6 [TBD] 유지.
 

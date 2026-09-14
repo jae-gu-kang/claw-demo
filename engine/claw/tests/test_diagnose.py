@@ -14,6 +14,7 @@ from claw.pipeline.diagnose import (
     diagnose_run,
 )
 from claw.pipeline.influence import Shape, param_universe
+from claw.profile import example_profile
 
 N = 200
 DT = 0.01
@@ -71,7 +72,7 @@ def _pres(out, knob_class=None, rule=None):
 
 
 def test_조용한_기준선은_처방이_없다():
-    out = diagnose_run(_payload(), Shape())
+    out = diagnose_run(_payload(), Shape(profile=example_profile()))
     assert out["prescriptions"] == []
     assert out["metrics"]["alt_rms"] == 0.0
 
@@ -84,7 +85,7 @@ def test_규칙1_필터_병목이면_tau_처방():
     s["cmd_alt"] = np.full(N, 1100.0)
     s["alt_cmd_filt"] = np.linspace(1000.0, 1080.0, N)  # 필터가 명령을 못 따라감
     s["h"] = s["alt_cmd_filt"] - 1.0  # 루프는 필터 명령을 잘 추종 (오차 1 m)
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     ps = _pres(out, knob_class="filter")
     assert len(ps) == 1
     assert ps[0]["knobs"] == ["fcl/Autopilot.tau_alt"]
@@ -101,7 +102,7 @@ def test_규칙1_루프_미달이면_kp_ki_처방():
     s["cmd_alt"] = np.full(N, 1100.0)
     s["alt_cmd_filt"] = np.full(N, 1100.0)  # 필터는 즉시 통과
     s["h"] = np.full(N, 1100.0 - 3.0 * RMS_THRESH["alt"])  # 정상상태 미달
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     ps = _pres(out, knob_class="loop_gain", rule="error_split")
     assert len(ps) == 1
     assert ps[0]["knobs"] == ["fcl/Autopilot.kp_alt", "fcl/Autopilot.ki_alt"]
@@ -120,7 +121,7 @@ def test_규칙2_포화를_PI항이_주도하면_감소_처방과_스케줄_승�
     s["pitch"][sat] = 0.35  # 클램프에 물림
     s["pitch_pi"][sat] = 0.55  # PI 지배
     s["pitch_damp"][sat] = 0.05
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     ps = _pres(out, rule="sat_attrib")
     assert len(ps) == 1
     assert ps[0]["knobs"] == ["table.pitch.kp", "table.pitch.ki"]  # 승격됨
@@ -139,7 +140,7 @@ def test_규칙2_damp_지배면_k_rate_처방():
     s["pitch"][sat] = 0.35
     s["pitch_pi"][sat] = 0.05
     s["pitch_damp"][sat] = 0.55  # 레이트항 지배
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     ps = _pres(out, rule="sat_attrib")
     assert len(ps) == 1
     assert ps[0]["knobs"] == ["table.pitch.k_rate"]  # 스케줄 자리라 역시 승격 (inert)
@@ -152,7 +153,7 @@ def test_규칙3_적분기_클램프_주차는_와인드업_처방():
     p = _payload()
     s = p["signals"]
     s["i_alt"][:40] = 0.3  # theta_hi에 주차 (40/200 = 20%)
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     ps = _pres(out, rule="windup")
     assert len(ps) == 1
     assert ps[0]["knobs"] == ["fcl/Autopilot.ki_alt"]
@@ -167,7 +168,7 @@ def test_규칙5_리미터_작동_중_침투는_감쇠_처방():
     s = p["signals"]
     s["limiter_active"][:20] = True
     s["alpha_margin"][:20] = -0.01  # 보호 경계 침투
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     ps = _pres(out, rule="limiter")
     assert len(ps) == 1
     assert ps[0]["knobs"] == ["table.pitch.k_rate"]
@@ -179,7 +180,7 @@ def test_규칙5_침투_없는_지속_작동은_margin_처방():
     p = _payload()
     s = p["signals"]
     s["limiter_active"][:20] = True  # 침투 없음 (alpha_margin 0.2 유지)
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     ps = _pres(out, rule="limiter")
     assert len(ps) == 1
     assert ps[0]["knobs"] == ["fcl/AlphaLimiter.margin"]
@@ -199,7 +200,7 @@ def test_처방_knob은_전부_실재하는_파라미터다():
     s["pitch_pi"][:24] = 0.55
     s["i_alt"][:40] = 0.3
     s["limiter_active"][:20] = True
-    shape = Shape()
+    shape = Shape(profile=example_profile())
     out = diagnose_run(p, shape)
     assert out["prescriptions"], "결함을 주입했는데 처방이 없다"
     ids = {r.id for r in param_universe(shape)}
@@ -277,7 +278,7 @@ def _saturating_run(control_hz):
         {"t": list(res.t), "envelope": res.envelope,
          "signals": {k: list(np.asarray(v)) for k, v in res.signals.items()},
          "meta": res.meta},
-        Shape(),
+        Shape(profile=example_profile()),
     )
     return res, out
 
@@ -344,13 +345,13 @@ def test_ki가_0인_축은_와인드업으로_잡지_않는다():
     s = p["signals"]
     s["yaw_pi"][:] = 0.35  # 출력이 상한에 붙어 있다
     s["i_yaw"][:] = 0.1  # 적분기는 상수 — ki = 0의 서명 (클램프 ±0.35 근처도 아니다)
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     wind = [f for f in out["findings"] if f["rule"] == "windup" and f["axis"] == "yaw"]
     assert not wind, f"ki=0 축에 와인드업 오탐: {wind}"
     # 그리고 살아 있는 적분기라면 같은 형상에서 반드시 잡아야 한다 (가드가 공허하지 않다)
     s["i_yaw"][:] = np.linspace(0.1, 0.1002, N)  # 미세하지만 움직인다 → 적분기 있음
     s["i_yaw"][40:] = 0.1002  # 그 뒤 동결 — 출력은 계속 포화 (80%)
-    out2 = diagnose_run(p, Shape())
+    out2 = diagnose_run(p, Shape(profile=example_profile()))
     wind2 = [f for f in out2["findings"] if f["rule"] == "windup" and f["axis"] == "yaw"]
     assert wind2 and wind2[0]["severity"] == "warn", "살아 있는 적분기의 동결을 놓쳤다"
 
@@ -375,11 +376,11 @@ def test_규칙3이_판정을_접을_때는_조용히_넘기지_않는다():
 
     p = _frozen_while_saturated()
     p["meta"].pop("control_hz")
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     assert any("control_hz 미상" in w for w in out["warnings"]), out["warnings"]
     assert not [f for f in out["findings"] if f["rule"] == "windup"], "②를 접었어야 한다"
     # 대조군 — 같은 신호에 control_hz만 있으면 잡힌다 (위 단정이 공허하지 않다)
-    got = [f for f in diagnose_run(_frozen_while_saturated(), Shape())["findings"]
+    got = [f for f in diagnose_run(_frozen_while_saturated(), Shape(profile=example_profile()))["findings"]
            if f["rule"] == "windup"]
     assert got and got[0]["axis"] == "alt", f"②가 이 형상을 못 본다: {got}"
 
@@ -387,7 +388,7 @@ def test_규칙3이_판정을_접을_때는_조용히_넘기지_않는다():
     p = _payload()
     p["signals"]["yaw_pi"][:] = 0.35
     p["signals"]["i_yaw"][:] = 0.1
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     assert any("적분기가 런 내내 정지" in w and "yaw" in w for w in out["warnings"]), out["warnings"]
     wu = [w for w in out["warnings"] if "와인드업" in w]
     assert len(wu) == 1, f"포화도 안 한 축까지 경고했다: {wu}"
@@ -397,5 +398,5 @@ def test_규칙3이_판정을_접을_때는_조용히_넘기지_않는다():
     p["signals"]["ap_alt_pi"][:] = 0.3  # 출력 포화 (클램프 ±0.3)
     p["signals"]["i_alt"][:] = np.linspace(0.0, 0.2, N)  # 적분기는 살아 있다
     p["meta"]["control_hz"] = 1.0 / (DT * (N + 10))
-    out = diagnose_run(p, Shape())
+    out = diagnose_run(p, Shape(profile=example_profile()))
     assert any("제어주기보다 짧다" in w for w in out["warnings"]), out["warnings"]

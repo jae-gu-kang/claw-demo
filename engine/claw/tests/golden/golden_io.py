@@ -8,9 +8,17 @@ import hexjson
 
 
 def head_commit() -> str:
+    """캡처 기준 커밋 — 추적 파일이 고쳐진 트리에서 굳혔으면 `+dirty`를 붙인다.
+
+    그 커밋만으로는 골든을 재현할 수 없다는 뜻이다. 표시가 없으면 사람이 그 커밋을 체크아웃해
+    재현을 시도하다 헤맨다.
+    """
     try:
-        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
+        head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
                               text=True, check=True).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True, check=True).stdout.strip()
+        return f"{head}+dirty" if dirty else head
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
 
