@@ -32,5 +32,5 @@ web/world/node_modules/
 # 커밋하면 `bundle.sh`가 매 반입에 영구히 싣는데, preview.png는 이미 deflate라
 # **gzip이 한 톨도 안 줄인다**(2.35 MB 실측). 런타임이 쓰는 것은 `.glb` 뿐이다.
 models/*/*.blend
-models/*/preview.png
+models/*/preview*.png
 *.blend1

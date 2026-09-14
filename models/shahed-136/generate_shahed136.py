@@ -1,7 +1,8 @@
 # SHAHED-136형 무인기 — 조종면(엘레본·러더)이 분리되어 움직이는 .blend 생성 스크립트
 #
 # 실행:  blender -b --factory-startup -P generate_shahed136.py
-# 산출:  shahed136.blend  (+ preview.png, shahed136.glb)
+#        SHAHED_VARIANT=eoir blender -b --factory-startup -P generate_shahed136.py   (EOIR형)
+# 산출:  shahed136.blend  (+ preview.png, shahed136.glb) — EOIR형은 각 이름에 _eoir
 #
 # 좌표계(블렌더, Z-up): +Y 기수 방향, +X 우현, +Z 상방.
 # FRD 동체축(docs/conventions.md §1)과의 대응: FRD x(전방)=+Y, y(우측)=+X, z(하방)=-Z.
@@ -17,6 +18,15 @@ import os
 import sys
 
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 변형 — 기체는 같고 기수만 갈린다. 산출 파일 이름이 갈리므로 서로의 산출물을 덮지 않는다.
+#   ""     기본형: 원추 기수                → shahed136.blend / .glb / preview.png
+#   "eoir" EOIR형: 기수 대신 2축 짐벌 볼    → shahed136_eoir.blend / .glb / preview_eoir.png
+VARIANT = os.environ.get("SHAHED_VARIANT", "").strip().lower()
+if VARIANT not in ("", "eoir"):
+    sys.exit("[gen] 알 수 없는 SHAHED_VARIANT=%r (허용: '', 'eoir')" % VARIANT)
+EOIR = VARIANT == "eoir"
+SUFFIX = "_" + VARIANT if VARIANT else ""
 
 # 내장 numpy가 못 뜨는 블렌더 빌드가 있다 — glTF 내보내기가 그때 조용히 빠진다.
 # 사유·증상·복구는 models/blender_numpy.py 참조. **bpy.ops 호출 전에** 부른다.
@@ -72,7 +82,10 @@ def finish_bm(name, bm, mats, collection):
     return ob
 
 
-def superellipse_ring(y, w, h, zc, n=28, e=2.7):
+SUPERELLIPSE_E = 2.7                            # 동체 단면 기본 지수
+
+
+def superellipse_ring(y, w, h, zc, n=28, e=SUPERELLIPSE_E):
     pts = []
     for i in range(n):
         a = 2.0 * math.pi * i / n
@@ -150,9 +163,15 @@ MAT_CTRL = make_mat("ControlSurface", (0.430, 0.450, 0.435), rough=0.55)
 
 # ---------------------------------------------------------------- 동체
 bm = bmesh.new()
-stations = [                                    # (y, 반폭, 반높이, z 중심)
-    (1.75, 0.010, 0.010, 0.000),
-    (1.55, 0.055, 0.065, -0.005),
+# 기수부 — 기본형은 원추. EOIR형은 1.25 m 선을 이어 받아 원형 짐벌 칼라(r 0.090, y 1.44)로
+# 모으고, 그 앞에 볼이 앉는다. 다섯 번째 값은 초타원 지수 e(생략 시 2.7) — 칼라 끝을 2.0(원)으로.
+if EOIR:
+    nose = [(1.44, 0.090, 0.090, -0.005, 2.0),
+            (1.40, 0.094, 0.099, -0.005, 2.35)]
+else:
+    nose = [(1.75, 0.010, 0.010, 0.000),
+            (1.55, 0.055, 0.065, -0.005)]
+stations = nose + [                             # (y, 반폭, 반높이, z 중심[, e])
     (1.25, 0.115, 0.125, -0.005),
     (0.85, 0.185, 0.180, 0.000),
     (0.35, 0.245, 0.215, 0.000),
@@ -162,7 +181,8 @@ stations = [                                    # (y, 반폭, 반높이, z 중�
     (-1.45, 0.195, 0.175, 0.000),
     (-1.70, 0.115, 0.130, 0.010),
 ]
-loft(bm, [superellipse_ring(y, w, h, zc) for y, w, h, zc in stations])
+loft(bm, [superellipse_ring(y, w, h, zc, e=e[0] if e else SUPERELLIPSE_E)
+          for y, w, h, zc, *e in stations])
 
 # 꼬리 페어링(엔진부 수렴)
 loft(bm, [superellipse_ring(-1.699, 0.112, 0.127, 0.010),
@@ -180,9 +200,10 @@ loft(bm, [circle_ring(16, 0.055, 'z', (0.0, -0.50, 0.205)),
           circle_ring(16, 0.001, 'z', (0.0, -0.50, 0.276))])
 
 fuselage = finish_bm("Fuselage", bm, [MAT_AIRFRAME, MAT_DARK], col_model)
-for p in fuselage.data.polygons:                # 기수 캡·실린더 헤드는 어두운 재질
+NOSE_DARK_Y = 1.39 if EOIR else 1.28            # EOIR형은 칼라 띠(1.40~1.44)만 — 짐벌 하우징
+for p in fuselage.data.polygons:                # 기수 캡(EOIR형은 칼라)·실린더 헤드는 어두운 재질
     c = p.center
-    if c.y > 1.28 or (abs(c.x) > 0.205 and c.y < -1.25 and abs(c.z - 0.02) < 0.12):
+    if c.y > NOSE_DARK_Y or (abs(c.x) > 0.205 and c.y < -1.25 and abs(c.z - 0.02) < 0.12):
         p.material_index = 1
 shade_smooth(fuselage)
 
@@ -303,6 +324,71 @@ prop = finish_bm("Propeller", bm, [MAT_DARK], col_model)
 prop.location = (0.0, -1.80, 0.0)               # 원점 = 회전축(로컬 y)
 shade_smooth(prop)
 
+# ---------------------------------------------------------------- EOIR 짐벌 (EOIR형만 — 분리 오브젝트 2축)
+# 칼라 앞에 볼이 앉는다. 외측 EOIR_Pan(방위, 로컬 Z) › 내측 EOIR_Tilt(고각, 로컬 X).
+# 두 원점 = 볼 중심 = 두 축의 교점 — 볼은 어느 자세에서도 외형이 같고 창만 돈다.
+# 보어사이트 = 로컬 +Y(기수 방향). 부호는 FRD 오일러와 같은 뜻: pan + = 우측, tilt + = 위.
+eoir = {}
+if EOIR:
+    EOIR_R = 0.100                              # 볼 반경 — 칼라(0.090)보다 커서 칼라 끝 캡을 가린다
+    EOIR_C = (0.0, 1.470, -0.005)               # 볼 중심 — 칼라 축 위
+    WIN_Y = 0.085                               # 창 절단면(로컬 y) → 창 반경 √(R²−y²) ≈ 0.053
+
+    MAT_EOIR = make_mat("EOIR_Housing", (0.150, 0.155, 0.160), rough=0.40, metal=0.30)
+    MAT_WINDOW = make_mat("EOIR_Window", (0.010, 0.012, 0.015), rough=0.08)
+    MAT_LENS_EO = make_mat("EOIR_Lens_EO", (0.020, 0.040, 0.075), rough=0.03, metal=0.60)
+    MAT_LENS_IR = make_mat("EOIR_Lens_IR", (0.300, 0.250, 0.170), rough=0.15, metal=0.90)
+
+    # 볼 — 구 앞면을 잘라 평판 창을 붙인다. 재질 인덱스: 0 하우징, 1 창, 2 EO 렌즈, 3 IR 렌즈
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=40, v_segments=20, radius=EOIR_R)
+    for f in bm.faces:
+        f.smooth = True
+    cut = bmesh.ops.bisect_plane(bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:],
+                                 dist=1e-6, plane_co=(0.0, WIN_Y, 0.0),
+                                 plane_no=(0.0, 1.0, 0.0), clear_outer=True)
+    rim = [g for g in cut["geom_cut"] if isinstance(g, bmesh.types.BMEdge)]
+    bmesh.ops.contextual_create(bm, geom=rim)
+
+    # 개구 — 창 앞으로 4 mm 솟은 경통, 그 안에 렌즈가 1.5 mm 들어가 앉는다
+    APERTURES = [(-0.018, 0.008, 0.022, 2),     # (로컬 x, 로컬 z, 반경, 렌즈 재질) EO 주광
+                 (0.022, 0.010, 0.015, 3),      # IR 열상
+                 (0.020, -0.026, 0.007, 2)]     # 레이저 거리측정
+    y_back, y_front, y_lens = WIN_Y - 0.002, WIN_Y + 0.004, WIN_Y + 0.0025
+    for ax, az, r, _lens in APERTURES:
+        loft(bm, [circle_ring(24, r, 'y', (ax, y_back, az)),
+                  circle_ring(24, r, 'y', (ax, y_front, az)),
+                  circle_ring(24, 0.78 * r, 'y', (ax, y_front, az)),
+                  circle_ring(24, 0.78 * r, 'y', (ax, y_lens, az))])
+
+    # 재질은 형상이 다 선 뒤 **좌표로** 칠한다. bm.faces 순서는 생성 순서가 아니다 —
+    # `bm.faces[n0:]`를 새 면으로 믿고 칠했더니 창 면이 섞여 하우징 재질로 덮였다(실측).
+    def on_plane(f, y):
+        return all(abs(v.co.y - y) < 1e-6 for v in f.verts)
+
+    for f in bm.faces:
+        if on_plane(f, WIN_Y):
+            f.material_index, f.smooth = 1, False
+        elif on_plane(f, y_lens):
+            c = f.calc_center_median()
+            f.material_index = next(lens for ax, az, r, lens in APERTURES
+                                    if (c.x - ax) ** 2 + (c.z - az) ** 2 < r * r)
+    tilt = finish_bm("EOIR_Tilt", bm, [MAT_EOIR, MAT_WINDOW, MAT_LENS_EO, MAT_LENS_IR],
+                     col_model)
+    tilt.location = EOIR_C
+
+    # 방위 요크 — 볼 좌·우의 고각축 캡(트러니언). 방위만 타고 고각은 안 탄다 → 고각축이 보인다.
+    # 볼 면에 거의 붙인다(3 mm): 캡은 방위를 타고 뒤로 돌면 볼 옆면과 함께 칼라 안으로 들어가는데,
+    # 크게 솟아 있으면 칼라 끝에서 잘린 캡이 보였다(확대 렌더 실측, 반경 30 mm·9 mm 돌출 때).
+    bm = bmesh.new()
+    for sx in (1.0, -1.0):
+        loft(bm, [circle_ring(20, 0.024, 'x', (sx * 0.090, 0.0, 0.0)),
+                  circle_ring(20, 0.024, 'x', (sx * (EOIR_R + 0.0015), 0.0, 0.0)),
+                  circle_ring(20, 0.016, 'x', (sx * (EOIR_R + 0.003), 0.0, 0.0))])
+    pan = finish_bm("EOIR_Pan", bm, [MAT_EOIR], col_model)
+    pan.location = EOIR_C
+    eoir = {"pan": pan, "tilt": tilt}
+
 # ---------------------------------------------------------------- 루트 엠프티 + 계층
 root = bpy.data.objects.new("SHAHED136_Root", None)
 root.empty_display_type = 'PLAIN_AXES'
@@ -325,6 +411,9 @@ for ob in elevons.values():
 for tag in ("L", "R"):
     parent_to(fins[tag], wing)
     parent_to(rudders[tag], fins[tag])
+if EOIR:
+    parent_to(eoir["pan"], fuselage)
+    parent_to(eoir["tilt"], eoir["pan"])
 
 # ---------------------------------------------------------------- 조종 프로퍼티 + 드라이버
 PROPS = [
@@ -336,6 +425,11 @@ PROPS = [
     ("rudder_right", 0.0, -30, 30, "우 러더 변위 [deg], + = 뒷전 좌(TE left)"),
     ("prop_speed", 45.0, 0, 120, "프로펠러 회전 [deg/frame]"),
 ]
+if EOIR:
+    PROPS += [
+        ("eoir_pan", 0.0, -50, 50, "EOIR 방위(pan) [deg], + = 우측"),
+        ("eoir_tilt", 0.0, -75, 30, "EOIR 고각(tilt) [deg], + = 위"),
+    ]
 for name, default, lo, hi, desc in PROPS:
     root[name] = float(default)
     ui = root.id_properties_ui(name)
@@ -354,11 +448,11 @@ def add_driver(ob, index, expr, prop_name):
     d.expression = expr
 
 
-def limit_rot(ob, axis, deg=35.0):
+def limit_rot(ob, axis, lo=-35.0, hi=35.0):
     c = ob.constraints.new('LIMIT_ROTATION')
     setattr(c, 'use_limit_' + axis, True)
-    setattr(c, 'min_' + axis, -math.radians(deg))
-    setattr(c, 'max_' + axis, math.radians(deg))
+    setattr(c, 'min_' + axis, math.radians(lo))
+    setattr(c, 'max_' + axis, math.radians(hi))
     c.owner_space = 'LOCAL'
 
 
@@ -378,6 +472,18 @@ for ob in elevons.values():
 for tag in ("L", "R"):
     limit_rot(rudders[tag], 'z')
 
+if EOIR:
+    # 방위: 로컬 Z. +Z 회전 = 보어사이트(+Y)가 좌(−X)로 → 규약(+ = 우측)에 맞춰 부호 반전
+    add_driver(eoir["pan"], 2, '-radians(v)', "eoir_pan")
+    # 고각: 로컬 X. +X 회전 = 보어사이트가 위(+Z)로 → 부호 그대로
+    add_driver(eoir["tilt"], 0, 'radians(v)', "eoir_tilt")
+    # 범위 = 창·렌즈가 동체에 닿지 않는 **직사각형**(동체 메시 대비 실측). 한 축만이면 pan ±80·
+    # tilt −80까지 비지만 두 축을 함께 돌리면 줄어든다(tilt −60에서 pan ±70, −75에서 ±55부터
+    # 닿기 시작, −80에서 ±35). 축별 리밋은 그 결합 영역을 못 그리므로 그 안에 드는 직사각형으로
+    # 자른다 — ±50 × −75…+30은 1° 간격 전 영역에서 간섭 0.
+    limit_rot(eoir["pan"], 'z', -50, 50)
+    limit_rot(eoir["tilt"], 'x', -75, 30)
+
 # ---------------------------------------------------------------- 데모 애니메이션 (루트 프로퍼티 키프레임)
 # 롤(4면 차동) → 피치(4면 동상) → 인보드만 + 러더 → 아웃보드만 + 러더
 DEMO = {
@@ -392,6 +498,9 @@ DEMO = {
     "rudder_left":  [(1, 0), (90, 0), (114, 22), (138, -22), (162, 0)],
     "rudder_right": [(1, 0), (90, 0), (114, 22), (138, -22), (162, 0)],
 }
+if EOIR:                                        # 짐벌 탐색: 좌우 훑기 → 내려다보며 추적 → 복귀
+    DEMO["eoir_pan"] = [(1, 0), (30, -45), (72, 45), (100, 30), (138, -20), (162, 0)]
+    DEMO["eoir_tilt"] = [(1, 0), (30, -10), (72, -10), (100, -35), (138, -60), (162, 0)]
 for prop_name, keys in DEMO.items():
     for frame, value in keys:
         root[prop_name] = float(value)
@@ -406,7 +515,8 @@ scene.world = world
 cam_data = bpy.data.cameras.new("Camera")
 cam_data.lens = 43
 cam = bpy.data.objects.new("Camera", cam_data)
-cam.location = (3.1, -4.0, 2.0)                 # 후방 쿼터뷰 — 타면 변위가 보인다
+# 기본형은 후방 쿼터뷰(타면 변위가 보인다), EOIR형은 전방 쿼터뷰(볼 창이 보인다)
+cam.location = (2.7, 3.7, 1.35) if EOIR else (3.1, -4.0, 2.0)
 col_studio.objects.link(cam)
 tc = cam.constraints.new('TRACK_TO')
 tc.target, tc.track_axis, tc.up_axis = root, 'TRACK_NEGATIVE_Z', 'UP_Y'
@@ -443,16 +553,17 @@ scene.render.image_settings.file_format = 'PNG'
 
 # ---------------------------------------------------------------- 저장 → 내보내기 → 미리보기 렌더
 scene.frame_set(1)
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT_DIR, "shahed136.blend"))
-print("[gen] saved shahed136.blend")
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(OUT_DIR, "shahed136%s.blend" % SUFFIX))
+print("[gen] saved shahed136%s.blend" % SUFFIX)
 
 # 미리보기 렌더는 드라이버 리그가 온전한 상태에서 먼저 (GLB 베이크가 in-메모리 리그를 바꾸므로)
 if os.environ.get("SHAHED_SKIP_RENDER") != "1":
-    scene.frame_set(114)                        # 엘레본 차동 + 러더 변위가 보이는 프레임
-    scene.render.filepath = os.path.join(OUT_DIR, "preview.png")
+    # 기본형: 엘레본 차동 + 러더 변위가 보이는 프레임 / EOIR형: 볼이 우측 45°로 돌아 창이 카메라를 보는 프레임
+    scene.frame_set(72 if EOIR else 114)
+    scene.render.filepath = os.path.join(OUT_DIR, "preview%s.png" % SUFFIX)
     try:
         bpy.ops.render.render(write_still=True)
-        print("[gen] rendered preview.png")
+        print("[gen] rendered preview%s.png" % SUFFIX)
     except Exception as exc:
         print("[gen] render failed:", exc)
 
@@ -465,7 +576,7 @@ if os.environ.get("SHAHED_SKIP_RENDER") != "1":
 # 이 베이크는 이미 저장된 .blend가 아니라 in-메모리 상태만 바꾼다(스크립트 종료 시 폐기).
 def export_threejs_glb(path):
     ctrl = [elevons["InL"], elevons["OutL"], elevons["InR"], elevons["OutR"],
-            rudders["L"], rudders["R"], prop]
+            rudders["L"], rudders["R"], prop, *eoir.values()]
 
     frames = range(scene.frame_start, scene.frame_end + 1)
     samples = {ob: [] for ob in ctrl}           # 드라이버 결과를 먼저 샘플
@@ -500,11 +611,11 @@ def export_threejs_glb(path):
                                   export_anim_scene_split_object=False, **common)
     except TypeError:                           # 구버전 폴백
         bpy.ops.export_scene.gltf(**common)
-    print("[gen] exported shahed136.glb (three.js: rigged nodes + baked clip)")
+    print("[gen] exported %s (three.js: rigged nodes + baked clip)" % os.path.basename(path))
 
 
 try:
-    export_threejs_glb(os.path.join(OUT_DIR, "shahed136.glb"))
+    export_threejs_glb(os.path.join(OUT_DIR, "shahed136%s.glb" % SUFFIX))
 except Exception as exc:
     print("[gen] glb export skipped:", exc)
 

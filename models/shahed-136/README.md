@@ -15,6 +15,8 @@
 | `shahed136.blend` | 산출된 블렌더 파일 (Blender 4.0+) — 드라이버·커스텀 프로퍼티 리그 |
 | `shahed136.glb` | **three.js용** glTF — 조종면이 개별 노드로 살아 있고, 데모 동작이 애니메이션 클립으로 구워져 있다 |
 | `preview.png` | 미리보기 렌더 (Cycles) |
+| `shahed136_eoir.blend` · `.glb` · `preview_eoir.png` | **EOIR형** — 기수 대신 2축 EO/IR 짐벌 볼 (아래 「EOIR형」). 기본형 파일과 따로 산출된다 |
+| `test_generate_shahed136.py` | 두 GLB의 노드·기수 형상·짐벌 부호 검사 — `pytest models` (블렌더 불필요) |
 
 ## 움직이는 조종면 (6개)
 
@@ -132,13 +134,59 @@ el('Propeller').rotation.z += 12 * dt;
 `mixer.stopAllAction()` 후 노드 회전을 준다. (GLB에는 블렌더의 ±35° 리밋
 컨스트레인트가 안 들어가므로, 각도 클램프가 필요하면 앱에서 건다.)
 
+## EOIR형 — 기수 대신 짐벌 볼 (`SHAHED_VARIANT=eoir`)
+
+기수 원추를 떼고 동체를 원형 칼라(y 1.44 m, r 0.09 m)로 모은 뒤, 그 앞에 **2축 EO/IR
+짐벌 볼**(r 0.10 m)을 얹은 변형이다. 기체·타면·프로펠러와 그 노드 이름은 기본형과 같고
+노드가 **두 개 더** 있다 — 가상환경이 조회하는 노드(`VEHICLE_NODES`)를 전부 가지므로
+GLB만 바꿔 물려도 타면은 그대로 움직인다.
+
+| 오브젝트 | 회전축(블렌더 로컬) | 부모 | + 방향 | three.js |
+|----------|-------------------|------|--------|----------|
+| `EOIR_Pan` | Z (수직) | `Fuselage` | 보어사이트 우측 | `rotation.y = −pan` |
+| `EOIR_Tilt` | X (좌우) | `EOIR_Pan` | 보어사이트 위 | `rotation.x = +tilt` |
+
+- 두 원점 = 볼 중심 = 두 축의 교점이라, 볼은 어느 자세에서도 외형이 같고 창만 돈다.
+- 보어사이트 = 기수 방향(블렌더 +Y, glTF −Z). 볼 앞면은 평판 창(`EOIR_Window`)이고 그 위에
+  EO 주광(`EOIR_Lens_EO`)·IR 열상(`EOIR_Lens_IR`)·레이저 거리측정 개구가 있다.
+  `EOIR_Pan`의 좌우 캡(트러니언)은 고각은 안 타고 방위만 타므로, 정면에서 고각축이 보인다.
+  다만 방위를 돌리면 뒤로 가는 쪽 캡은 볼 옆면과 함께 칼라 안으로 숨는다.
+- 부호는 FRD 오일러와 같은 뜻이다: **pan + = 우측, tilt + = 위.** three.js 열은
+  `test_generate_shahed136.py`가 구워진 클립에서 부호·축·크기까지 실측해 고정한다.
+
+루트 프로퍼티가 둘 늘고, 같은 범위의 Limit Rotation이 걸린다:
+
+| 프로퍼티 | 대상 | 범위 |
+|----------|------|------|
+| `eoir_pan` | 방위 [deg] | ±50 |
+| `eoir_tilt` | 고각 [deg] | −75 … +30 |
+
+범위는 창·렌즈가 동체에 닿지 않는 **직사각형**이다(동체 메시 대비 실측, 1° 간격 전 영역에서
+간섭 0). 한 축만 돌리면 pan ±80°·tilt −80°까지 비지만, 두 축을 함께 돌리면 줄어든다 —
+tilt −60°에서 pan ±70°, −75°에서 ±55°부터 닿기 시작, −80°에서 ±35°. 축별 리밋은 이 결합
+영역을 그리지 못하므로 그 안에 드는 직사각형으로 잘랐다. 직하방(−90°)은 창이 칼라에 약
+1 cm 들어가 범위에서 뺐다.
+
+**리밋은 `.blend`에만 있다.** GLB에는 컨스트레인트가 안 들어가므로, three.js에서 짐벌을
+직접 돌리면 앱이 위 범위로 클램프해야 한다.
+
+데모 1–168 프레임에는 짐벌 탐색(좌우 훑기 → 내려다보며 추적 → 복귀)이 겹쳐 있다.
+미리보기는 창이 보이도록 전방 쿼터뷰, 프레임 72(pan +45°)다.
+
+```js
+el('EOIR_Pan').rotation.y = -deg(30);    // 우측 30°
+el('EOIR_Tilt').rotation.x = deg(-20);   // 아래 20°
+```
+
 ## 재생성
 
 ```bash
-blender -b --factory-startup -P generate_shahed136.py
+blender -b --factory-startup -P generate_shahed136.py                       # 기본형
+SHAHED_VARIANT=eoir blender -b --factory-startup -P generate_shahed136.py   # EOIR형
 ```
 
-`shahed136.blend`, `shahed136.glb`, `preview.png`를 다시 만든다. 렌더를 건너뛰려면
+기본형은 `shahed136.blend`, `shahed136.glb`, `preview.png`를, EOIR형은 같은 이름에 `_eoir`가
+붙은 셋을 만든다 — 서로의 산출물을 덮지 않는다. 렌더를 건너뛰려면
 `SHAHED_SKIP_RENDER=1`. glTF 내보내기는 Blender 내장 파이썬에 `numpy`가 필요하다
 (없으면 그 단계만 건너뛰고 `.blend`는 정상 생성).
 
