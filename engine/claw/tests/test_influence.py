@@ -104,7 +104,9 @@ def test_signature_is_stable_across_independent_builds(base_shape):
     # 66 → 78: 엘레본 제어권한 배분 12개 (scas_alloc_* — 선회 하중과 트림 테이블에서
     # 롤 예산을 내는 8개, 롤이 쓴 δa에서 피치 권한을 내는 4개). 이 수가 움직이는
     # 것이 곧 법칙 구조 변경이다.
-    assert len([k for k in a if not k.startswith("__")]) == 78
+    # 78 → 80: 피치 상한 마하 스케줄이 노드 둘을 더한다 (v1.05 — 실속표 룩업 +
+    # 스칼라 theta_hi와의 min 클립). 상한이 상수가 아니라 신호가 된 결과다
+    assert len([k for k in a if not k.startswith("__")]) == 80
 
 
 # ── 구조적 영향: 관측된 매핑 ───────────────────────────────────────────────
@@ -116,9 +118,12 @@ def test_signature_is_stable_across_independent_builds(base_shape):
         ("fcl/Autopilot.k_hdot", {"ap_alt_damp"}),
         ("fcl/Autopilot.tau_spd", {"ap_fv"}),
         ("fcl/Autopilot.phi_max", {"ap_hdg_pid", "ap_hdg_sat"}),
-        # θ 한계는 세 종방향 갈래 전부의 포화 한계다 — 축이 늘면 씨앗도 는다
+        # θ 한계는 세 종방향 갈래 전부의 포화 한계다 — 축이 늘면 씨앗도 는다.
+        # ap_theta_hi가 더해진 것은 v1.05의 마하 스케줄 때문이다: 표가 스칼라를
+        # 덮어쓰지 않고 **둘 중 낮은 쪽**이 이기도록 클립하는 노드라, 스칼라
+        # theta_hi가 그 노드의 상한으로도 들어간다 (fcl/graphs.py autopilot_nodes)
         ("fcl/Autopilot.theta_hi",
-         {"ap_alt_pid", "ap_alt_sat", "ap_theta_out",
+         {"ap_alt_pid", "ap_alt_sat", "ap_theta_out", "ap_theta_hi",
           "ap_vs_pid", "ap_vs_sat", "ap_pitch_sat"}),
         ("table.pitch.kp", {"sched_pitch_kp"}),
     ],
@@ -183,7 +188,7 @@ def test_control_rate_touches_every_stateful_node(impacts):
     """dt는 fcl_graph의 인자가 아니라 러너의 인자다 — 노드 인자만 보면 '아무것도
     안 건드린다'는 거짓말이 나온다. 이산 계수가 형상의 일부라는 것(07 §5)의 시각화."""
     imp = impacts["rate.control_hz"]
-    assert len(imp.reach) == 78  # 배분 12개 포함 (test_signature_is_stable 주석 참조)
+    assert len(imp.reach) == 80  # 배분 12개 + θ상한 스케줄 2개 (위 주석 참조)
     assert "sched_f_mach" in imp.seeds
 
 
@@ -264,7 +269,10 @@ def test_structural_payload_shape(base_shape):
     kinds = Counter(n["kind"] for n in p["nodes"])
     # 입력 19 → 23: cmd_pitch·cmd_hdot·pitch_on·hdot_on
     # ir 66 → 78: 엘레본 제어권한 배분 (입력은 안 는다 — φ_cmd·mach를 그래프 안에서 받는다)
-    assert kinds["ir"] == 78 and kinds["input"] == 23 and kinds["output"] == 7
+    # ir 78 → 80: 피치 상한 마하 스케줄 (v1.05). 여기서도 **입력은 안 는다** —
+    # 같은 이유로 mach를 그래프 안에서 받기 때문이다. 단독 AP 그래프(AP_INPUTS)에는
+    # mach가 없어 거기서는 스케줄을 쓸 수 없고, autopilot_nodes가 그것을 거부한다
+    assert kinds["ir"] == 80 and kinds["input"] == 23 and kinds["output"] == 7
     assert kinds["metric"] == len(p["metrics"]) and kinds["plant"] == 1
     assert p["topological_order"] is True
     assert "rank" not in p["nodes"][0]  # 층 번호는 소비자가 계산 — 두 곳에 정의하지 않는다

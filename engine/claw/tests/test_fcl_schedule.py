@@ -157,7 +157,11 @@ def test_기본_테이블은_예전과_같다():
     # 이번 갱신은 **축별 동압 상한**(fcl/demo.py _cap_for) — 롤 3자리만 상한 4.0이라
     # M0.42 아래 룩업 |값|이 커졌다(roll.k_rate는 −0.4 → −0.8로 부호가 음이다). 법칙도 자리 구성도 그대로이므로 구조가 아니라
     # **데이터** 변경이고, 그래도 지문은 움직인다(룩업 표가 탑재 C에 박힌다).
-    assert _module().fingerprint == "2dd6835e50ae5869"
+    # 이번 갱신은 **피치 상한의 마하 스케줄**(v1.05 — fcl/graphs.py autopilot_nodes
+    # theta_hi_table). θ 상한이 컴파일 시점 상수에서 실속표 룩업으로 바뀌어 노드 둘
+    # (룩업 + 스칼라와의 min 클립)이 늘고, 고도·승강률 축 PID와 두 Saturation이 그
+    # 신호를 한계로 받는다. 법칙이 바뀐 것이므로 지문이 움직이는 것이 맞다.
+    assert _module().fingerprint == "ab5f3d7f1c1a5abf"
 
 
 def test_없는_자리를_요구하면_거부한다():

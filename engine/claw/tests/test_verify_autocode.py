@@ -383,17 +383,31 @@ def test_정당화는_kd가_있으면_적용되지_않는다(demo_law):
 
 def test_웜스타트는_접힌_축을_건너뛴다(demo_law):
     """ki=0으로 편집한 형상이 '빌드 실패'로 뜨면 안 된다 — 없는 필드에 대입하면
-    컴파일이 깨진다. 판정이 정체성인 탭에서 그건 틀린 판정이다."""
+    컴파일이 깨진다. 판정이 정체성인 탭에서 그건 틀린 판정이다.
+
+    **축을 고도에서 속도로 옮겼다** (v1.05). 고도축은 이제 θ 상한이 마하 룩업 신호라
+    `_pid_has_integrator`가 접지 않는다 — 그 판정의 규칙 그대로다("한계가 포트면
+    런타임 값을 정적으로 알 수 없으므로 역시 접지 않는다"). 즉 ki_alt=0으로도 고도
+    적분기가 남는다. 속도축은 한계가 여전히 상수라 접히므로, 웜스타트 계약을 재는
+    자리는 이쪽이다. 아래 두 번째 단언이 그 새 사실을 함께 못박는다.
+    """
     from claw.fcl.autopilot import Autopilot
     from claw.fcl.demo import make_demo_fcl
 
     lines = "\n".join(warm_start_lines(demo_law.runner))
     assert "s.ap_alt_pid_i = th0;" in lines  # 기본 형상은 ki ≠ 0이라 그대로 대입
 
-    off = make_demo_fcl(autopilot=Autopilot(ki_alt=0.0)).init(DT)
+    off = make_demo_fcl(autopilot=Autopilot(ki_spd=0.0)).init(DT)
     off_lines = "\n".join(warm_start_lines(off.runner))
-    assert "s.ap_alt_pid_i" not in off_lines
+    assert "s.ap_spd_pid_i" not in off_lines
     assert "폴딩" in off_lines  # 침묵이 아니라 사유가 남는다
+
+    # **θ 상한 스케줄의 대가** — ki_alt=0이어도 고도 적분기는 남는다. 탑재 C에 상태와
+    # 안티와인드업 분기가 그대로 실린다는 뜻이라 공짜가 아니다. 이 단언이 빨개지면
+    # 폴딩이 되살아난 것이고, 그때는 한계가 다시 상수가 됐는지부터 확인할 것
+    alt_off = make_demo_fcl(autopilot=Autopilot(ki_alt=0.0)).init(DT)
+    assert "s.ap_alt_pid_i" in "\n".join(warm_start_lines(alt_off.runner))
+
     if find_cc():
         rep = verify_flight(off, t_end=4.0, with_vectors=False)
         assert rep["compile"]["status"] == "pass", rep["compile"]["log"][:400]
