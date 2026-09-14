@@ -499,7 +499,7 @@ export const SUBSYSTEMS = {
   <li>명령 경로 <b>1차 명령필터</b> — 급명령의 타면 포화·과도 하중 방지 · 첫 스텝 현재 측정 시드(캡처) · 헤딩 필터는 wrap 최단경로 보간 · τ 속도 2 · 고도 5 · 헤딩 1 s <span class="chip dft">기본값 M7</span></li>
   <li>비활성 축: 필터는 측정 추적(reset_to) — 활성화 순간 현재값부터 램프 · 오차 0 적분 → <b>트림 홀드</b> · 헤딩 off는 적분 소거 + φ_cmd=0 (재관여 시 잔존 뱅크 킥 방지)</li>
   <li>선회 <b>피드포워드 보상</b>(델타윙 유도항력) — θ += k_pitch_turn·(1/cosφ−1), δt += k_thr_turn·(1/cos²φ−1) · 축 클립 후 합산 → 재클립 (이중 제한) · 데모 튜닝: 피치 0.05, 스로틀 0(역효과) <span class="chip dft">기본값</span></li>
-  <li>피치 명령은 θ 한계 클립 후 <b>α 리미터</b>를 거쳐 SCAS로 · 뱅크는 ±phi_max — π/2 미만 강제 (선회 FF 부호 보전 가드) · 요축 별도 출력 없음 (요 안정화는 SCAS, 차동추력은 믹서)</li>
+  <li>피치 명령 상한은 <b>min(theta_hi, α_stall(M) − α 여유)</b> — 실속표에서 유도한 마하 표라 고속일수록 낮아진다(상승 γ ≥ 0이면 α ≤ θ라, 상한이 보호경계 아래면 피치 명령만으로는 α가 경계를 못 넘는다) <span class="chip ok">v1.11</span> · 하한은 표로 두지 않는다(급강하 보호는 실속이 아니다) · 피치 명령은 θ 한계 클립 후 <b>α 리미터</b>를 거쳐 SCAS로 · 뱅크는 ±phi_max — π/2 미만 강제 (선회 FF 부호 보전 가드) · 요축 별도 출력 없음 (요 안정화는 SCAS, 차동추력은 믹서)</li>
   <li>트림 웜스타트: 속도 적분기 = 트림 스로틀 · 고도 적분기 = 트림 θ <span class="chip ok">범프리스 계약</span> · 게인은 게인 스케줄링 적용 대상 · 이 페이지 폼 편집 → 시뮬 주입 가능</li>
   <li>구 합성 기체(1200 kg) 설계점 성능 (M0.6 h1000 fuel200 폐루프 스캔 — 200 kg급 예제에서는 다시 재지 않았다): 고도 +100 m 오버슈트 8.3% · 속도 +10 m/s 3.7% · 헤딩 0.5 rad 무오버슈트·고도 강하 1.1 m <span class="chip dft">기본값</span></li>
   <li>채널 내부(필터·PI·클립·FF 합류)는 채널 블록 클릭 — 층3 <span class="chip ok">확정</span></li>
@@ -599,7 +599,7 @@ export const SUBSYSTEMS = {
   <path class="wire" d="M478 100 H492" marker-end="url(#aw-apa)"/>
   <g class="sblk" data-code="fcl/autopilot.py:Autopilot.step"><rect class="body" x="496" y="74" width="90" height="52" rx="3"/>
     <path d="M506 116 H518 L564 84 H576" stroke="#111" stroke-width="2" fill="none"/></g>
-  <text class="bname" x="541" y="64">클립 <tspan data-p="theta_lo">−0.3</tspan>~<tspan data-p="theta_hi">0.3</tspan> rad</text>
+  <text class="bname" x="541" y="64">클립 <tspan data-p="theta_lo">−0.3</tspan>~min(<tspan data-p="theta_hi">0.3</tspan>, θ_hi(M))</text>
   <path class="wire" d="M586 100 H612" marker-end="url(#aw-apa)"/>
   <circle class="body" data-code="fcl/autopilot.py:Autopilot.step" cx="630" cy="100" r="14"/>
   <text class="sumsign" x="621" y="104">+</text><text class="sumsign" x="630" y="93">+</text>
@@ -1920,7 +1920,7 @@ export const SUBSYSTEMS = {
   <path class="wire soft" d="M136 34 V60" marker-end="url(#as-vf)"/>
   <g class="sblk" data-code="sim/simulator.py:Simulator.run sim/simulator.py:Simulator._envelope"><rect class="body" x="640" y="210" width="260" height="84" rx="3"/>
     <text class="ttl" x="770" y="234" style="font-size:13px">신호 로깅 · 엔벨로프 감시</text>
-    <text class="ttl2" x="770" y="254">기본 26 + 명령 사슬 53 신호</text>
+    <text class="ttl2" x="770" y="254">기본 26 + 명령 사슬 54 신호</text>
     <text class="ttl2" x="770" y="270">실속 마진 · DB 이탈 플래그 · 페이즈</text></g>
   <path class="wire soft" d="M700 190 V206" marker-end="url(#as-vf)"/>
   <path class="wire" d="M900 252 H946" marker-end="url(#aw-vf)"/>

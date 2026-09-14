@@ -248,8 +248,11 @@ def scas_axis_nodes(
     nodes.append(
         Node(nm("sat"), Saturation, inputs=(last,),
              params={"lo": out_lo, "hi": out_hi},
-             gains={"lo": limit_ports["out_lo"], "hi": limit_ports["out_hi"]}
-             if limit_ports else {},
+             # 한계는 **한쪽만 동적일 수 있다** — θ 상한은 실속표에서 오고(마하 함수)
+             # 하한은 급강하 방지라 다른 물리다. 있는 쪽만 포트로 잇는다
+             gains={k: v for k, v in (("lo", (limit_ports or {}).get("out_lo")),
+                                      ("hi", (limit_ports or {}).get("out_hi")))
+                    if v is not None},
              **common)
     )
     return nodes, nm("sat")
@@ -497,6 +500,7 @@ def autopilot_nodes(
     kp_vs, ki_vs, tau_vs,
     theta_lo, theta_hi, phi_max,
     k_pitch_turn, k_thr_turn,
+    theta_hi_table=None,
 ):
     """`fcl/autopilot.py:136` — 속도·고도·헤딩 PI + 명령필터 + 선회 피드포워드.
 
@@ -508,8 +512,38 @@ def autopilot_nodes(
 
     선회 FF 계수가 0이면 항과 그 뒤 재클램프가 통째로 사라진다 — 축 포화가 이미
     같은 한계로 잘라 두었으므로 결과가 같고, 죽은 항을 탑재 코드에 내지 않는다.
+
+    ## θ 상한은 상수가 아니라 표일 수 있다 (`theta_hi_table`)
+
+    주면 상한이 **마하 룩업**이 되고, 안 주면 종전대로 스칼라 `theta_hi`다.
+
+    있어야 하는 이유는 불변식 하나다 — θ_hi(M) ≤ α_stall(M) − 마진. 준정상 비행에서
+    α = θ − γ이고 상승은 γ ≥ 0이라 **α ≤ θ**이므로, 상한이 보호경계 아래면 피치
+    명령만으로는 α가 경계를 넘을 수 없다. α_stall이 마하의 함수이니 이 상한도
+    그렇다. 상수를 박으면 한쪽을 버려야 한다: 데모 실속표에서 경계는 M0.1의 0.35 ~
+    M0.9의 0.22라 **1.6배** 움직이고, 종전 상수 0.3은 M0.30 위에서 경계를 넘었다
+    (`test_mission`의 순항 M0.41에서 경계 0.2889). 1g 트림 승강타 몫을 상수가 아닌
+    마하 표로 두는 `_roll_budget_nodes`와 **같은 부류**이고 같은 이유다.
+
+    **하한은 표로 두지 않는다.** 급강하 방지는 실속이 아니라 구조·운용 한계라 다른
+    물리다 — 같은 표로 잇는 것은 두 판단을 한 수에 묶는 것이다.
+
+    표는 도메인 표이지 게인 슬롯이 아니다(`SCHEDULABLE` 미변경) — α 리미터의 실속표와
+    같은 취급이고, 마하도 리미터처럼 **필터 없는 원신호**를 쓴다. 게인 스케줄의 필터된
+    마하를 쓰면 스케줄을 껐을 때 상한 거동까지 달라져 두 기능이 조용히 엮인다.
     """
     ports = gain_ports or {}
+
+    # θ 상한 신호 — 표를 주면 마하 룩업, 안 주면 None이라 아래가 전부 스칼라로 간다.
+    # 마하는 **원신호**다 (머리말 참조 — α 리미터·롤 예산과 같은 규약)
+    th_hi_src = None
+    if theta_hi_table is not None:
+        if "mach" not in srcs:
+            raise ValueError(
+                f"{prefix}: theta_hi_table을 쓰려면 srcs에 mach가 있어야 한다 — "
+                "단독 AP 그래프(AP_INPUTS)에는 없으므로 전장착 fcl_graph에서만 쓸 수 있다"
+            )
+        th_hi_src = _pre(prefix, "theta_hi")
 
     # 스케줄 불가 자리는 조용히 무시하지 않고 **여기서** 거부한다 — 축을 조립하다
     # 걸리면 "rate 경로가 있는데 rate_src가 없다" 같은 내부 사정으로 터져서, 무엇을
@@ -547,6 +581,19 @@ def autopilot_nodes(
 
     # ── 고도: 필터·오차·댐핑만 영역 안, PI는 밖(적분기 유지 = 트림 θ 홀드) ──
     alt_en = {"enable": srcs["alt_on"]}
+    if th_hi_src is not None:
+        # **표가 스칼라를 덮어쓰지 않는다 — 둘 중 낮은 쪽이 이긴다.**
+        # 덮어쓰면 `theta_hi` 파라미터가 무효가 되어, 블록도에서 값을 고쳐도 아무 일도
+        # 일어나지 않는 손잡이가 된다(실측: 0.3·0.5·0.7이 전부 같은 결과). 둘은 서로
+        # 다른 것을 말한다 — 스칼라는 "무슨 일이 있어도 이 이상은 안 된다"는 운용·구조
+        # 쪽 상한이고, 표는 "게다가 실속 보호경계는 넘지 않는다"는 공력 쪽 상한이다.
+        # 클립 범위를 [theta_lo, theta_hi]로 두면 스칼라 둘이 바깥 상자로 남고 표가
+        # 그 안에서 조인다 — 한계가 하한 아래로 내려가 lo > hi가 되는 일도 막힌다.
+        nodes.append(Node(_pre(prefix, "theta_hi_raw"), LookupBlock,
+                          inputs=(srcs["mach"],), params={"table": theta_hi_table}))
+        nodes.append(Node(th_hi_src, Saturation, inputs=(_pre(prefix, "theta_hi_raw"),),
+                          params={"lo": theta_lo, "hi": theta_hi}))
+
     alt_kr = (ports.get("alt") or {}).get("k_rate")
     nodes += [
         Node(nm("fh"), CommandFilter, inputs=(srcs["cmd_alt"], srcs["h"]),
@@ -560,9 +607,11 @@ def autopilot_nodes(
         else Node(nm("alt_damp"), Gain, inputs=(srcs["hdot"],),
                   params={"k": k_hdot}, **alt_en),
     ]
+    th_limits = {"out_hi": th_hi_src} if th_hi_src is not None else None
     alt_nodes, theta_axis = scas_axis_nodes(
         nm("alt"), kp=kp_alt, ki=ki_alt, k_rate=k_hdot, out_lo=theta_lo, out_hi=theta_hi,
         err_src=nm("alt_err"), damp_src=nm("alt_damp"), gain_ports=ports.get("alt"),
+        limit_ports=th_limits,
     )
     nodes += alt_nodes
 
@@ -580,7 +629,7 @@ def autopilot_nodes(
     # 자리 목록·웹 UI·탑재 코드까지 파급된다. 필요해지면 그때 한 번에 연다.
     vs_nodes, vs_axis = scas_axis_nodes(
         nm("vs"), kp=kp_vs, ki=ki_vs, k_rate=0.0, out_lo=theta_lo, out_hi=theta_hi,
-        err_src=nm("vs_err"),
+        err_src=nm("vs_err"), limit_ports=th_limits,
     )
     nodes += vs_nodes
 
@@ -591,7 +640,8 @@ def autopilot_nodes(
     # 피치 축은 PI가 없다: θ를 직접 지령하는 것이라 통과시키고 축 한계로만 자른다.
     nodes += [
         Node(nm("pitch_sat"), Saturation, inputs=(srcs["cmd_pitch"],),
-             params={"lo": theta_lo, "hi": theta_hi}),
+             params={"lo": theta_lo, "hi": theta_hi},
+             gains={"hi": th_hi_src} if th_hi_src is not None else {}),
         Node(nm("theta_vs"), Switch, inputs=(vs_axis, srcs["hdot_on"], theta_axis),
              params={"threshold": 0.5}),
         Node(nm("theta_src"), Switch,
@@ -608,7 +658,8 @@ def autopilot_nodes(
             Node(nm("theta_ff"), Sum, inputs=(theta_axis, nm("ff_p")),
                  params={"signs": (1.0, 1.0)}),
             Node(nm("theta_out"), Saturation, inputs=(nm("theta_ff"),),
-                 params={"lo": theta_lo, "hi": theta_hi}),
+                 params={"lo": theta_lo, "hi": theta_hi},
+                 gains={"hi": th_hi_src} if th_hi_src is not None else {}),
         ]
         theta_out = nm("theta_out")
 
@@ -880,6 +931,7 @@ def fcl_graph(
     alpha_margin=0.05,
     alloc_trim_table=None,
     alloc_resv_frac=0.7,
+    theta_hi_table=None,
     gain_tables=None,
     filter_tau=0.5,
 ):
@@ -909,7 +961,23 @@ def fcl_graph(
         if unknown:
             raise ValueError(f"{name}: 미정의 게인 그룹 {sorted(unknown)}")
 
-    ap_nodes, ap_out = autopilot_nodes("ap", srcs=src, gain_ports=ap_ports, **autopilot)
+    # θ 상한 표를 받았으면 **불변식을 여기서 건다** — θ_hi(M) ≤ α_stall(M) − 마진.
+    # 표는 바깥에서 만들어 들어오므로(alloc_trim_table과 같은 규약, 계층 유지) 리미터가
+    # 보는 실속표·마진과 어긋난 표가 들어올 수 있다. 어긋나면 외곽 루프가 리미터
+    # 안쪽으로 명령을 밀고 둘이 싸운다 — 조용히 두면 "보호가 성능과 다투는" 그 상태가
+    # 형상 조립만으로 만들어진다. 리미터가 없으면(stall_table=None) 걸 기준이 없어
+    # 검사하지 않는다: 그때 상한은 단독 백스톱이다
+    if theta_hi_table is not None and stall_table is not None:
+        for m in theta_hi_table.axes[0]:
+            bound = float(stall_table.interp(mach=float(m))) - float(alpha_margin)
+            if float(theta_hi_table.interp(mach=float(m))) > bound + 1e-12:
+                raise ValueError(
+                    f"{name}: theta_hi_table이 α 보호경계를 넘는다 — M{float(m):.3f}에서 "
+                    f"{float(theta_hi_table.interp(mach=float(m))):.4f} > {bound:.4f} "
+                    f"(α_stall − margin {alpha_margin})"
+                )
+    ap_nodes, ap_out = autopilot_nodes("ap", srcs=src, gain_ports=ap_ports,
+                                       theta_hi_table=theta_hi_table, **autopilot)
     nodes += grouped(ap_nodes, "ap")
 
     theta_cmd = ap_out["theta_cmd"]

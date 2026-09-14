@@ -31,6 +31,7 @@ import tempfile
 from pathlib import Path
 
 import claw
+from claw.blocks.basic import Saturation
 from claw.codegen import emit_c, emit_runtime
 from claw.codegen.emit_c import _pid_has_integrator
 from claw.verify import mcdc as mcdc_mod
@@ -691,7 +692,9 @@ def verify_flight(law, *, profile, t_end=180.0, control_hz=100.0, on_progress=No
         if with_vectors and rec["meta"].get("aborted") is None:
             if tick(52, "통합 보강 벡터 실행"):
                 return None
-            for case in vectors.integration_cases():
+            ap_cfg = getattr(getattr(law, "autopilot", None), "cfg", None)
+            theta_hi = getattr(law, "theta_hi_table", None) is not None
+            for case in vectors.integration_cases(ap_cfg, law.runner.dt, theta_hi=theta_hi):
                 start = len(rec["inputs"])
                 for row in case["rows"]:
                     out = law.runner.step_all(**row)
@@ -804,6 +807,22 @@ _COUPLED_REASON = (
 )
 
 
+def _port_bound(graph, runner, ref, side):
+    """한계 신호의 정적 경계 — 상수 `side` 한계를 가진 영역 밖 Saturation 출력이면 그 값, 아니면 ∓∞(보장 없음).
+
+    fcl의 θ 상한 신호(`ap_theta_hi`)가 이 모양이다 — [theta_lo, theta_hi]로 묶여 고도·승강률 PID 하한(theta_lo) 아래로
+    못 내려간다. 영역 안 노드는 비활성 스텝에 disabled_output(0.0)을 내므로 보장이 없다.
+    """
+    none = -math.inf if side == "lo" else math.inf
+    try:
+        src = graph.node(ref)
+    except KeyError:
+        return none  # 그래프 입력 — 무엇이든 들어온다
+    if src.kind != "block" or src.block is not Saturation or side in src.gains or src.enable is not None:
+        return none
+    return float(getattr(runner.instances[ref], side))
+
+
 def _coupled_guards(decisions, runner):
     """독립쌍이 수학적으로 부재한 가드 조건 — {결정 id: {cis, reason}}.
 
@@ -813,9 +832,13 @@ def _coupled_guards(decisions, runner):
     **정당화는 측정의 대체이므로 조건을 좁게 잡는다.** 하나라도 함의를 깰 수 있는
     항이 있으면 정당화하지 않고 미커버로 남긴다 — 거짓 정당화는 이 기능의 존재
     이유를 정면으로 거스르고, 놓친 정당화는 그저 fail 한 줄이다:
-      · `_axis`형(감쇠항 u_ext) — raw > hi가 kp·e > 0을 함의하지 않는다
+      · 감쇠항 u_ext가 있는 축(`_hi_x`·`_lo_x`형) — 판정량이 raw와 raw + u_ext 중 큰 쪽이라 kp·e > 0을 함의하지 않는다
       · kd ≠ 0 (상수·포트 무관) — 미분항이 raw를 밀어 e < 0에서도 hi를 넘을 수 있다
-      · ki·kp·한계가 포트(신호) — 함의가 시변이라 정적으로 못 박는다
+      · ki·kp가 포트(신호) — 함의가 시변이라 정적으로 못 박는다
+      · 한계는 **쪽마다** 본다: 포트인 쪽의 조건만 뺀다(v1.11). 상수 쪽도 반대편 신호가 그 상수를 못 넘는다는 그래프
+        보장(상수 한계로 묶인 포화 출력 — `_port_bound`)이 있을 때만 인정한다. 상한이 신호(θ_hi(M))면 스텝 사이에 상한이 내려갈 때
+        적분기가 직전 상한에 남아 새 상한 위에 있을 수 있어 오차 ≤ 0에서도 raw > hi가 된다 — 독립쌍이 실재한다.
+        상수인 하한 쪽은 적분기가 늘 하한 이상이라 raw < lo가 여전히 kp·e < 0을 함의한다
       · ki·kp 이부호 — inc 부호가 kp·e 부호를 따르지 않는다
     """
     graph = runner.graph
@@ -823,20 +846,31 @@ def _coupled_guards(decisions, runner):
     for d in decisions:
         if d["kind"] != "guard":
             continue
-        atom = d["conditions"][0].split()[0]  # "<nid>_raw" 또는 "<nid>_axis"
+        atom = d["conditions"][0].split()[0]  # "<nid>_raw" 또는 "<nid>_hi_x"
         if not atom.endswith("_raw"):
-            continue  # u_ext 있는 축 — axis = raw + u_ext라 함의가 깨진다
+            continue  # u_ext 있는 축 — 판정량이 max(raw, raw + u_ext)라 함의가 깨진다
         nid = atom[: -len("_raw")]
         try:
             node = graph.node(nid)
         except KeyError:
             continue
-        if {"ki", "kp", "kd", "out_lo", "out_hi"} & set(node.gains):
+        if {"ki", "kp", "kd"} & set(node.gains):
             continue
         inst = runner.instances.get(nid)
         if inst is None or inst.ki * inst.kp <= 0 or inst.kd != 0.0:
             continue
-        out[d["id"]] = {"cis": (1, 3), "reason": _COUPLED_REASON}
+        # c1은 상한 쪽(raw > hi && inc > 0), c3은 하한 쪽 — 한계가 상수인 쪽만 정당화한다. 반대편이 신호면 그 신호가
+        # 상수 쪽을 **넘지 않음이 그래프에서 보장될 때만** 인정한다: 신호 상한이 상수 하한 아래로 내려가는 스텝에는 적분기
+        # 클램프가 상한으로 가 i < lo가 되고, 그러면 raw < lo가 kp·e < 0을 함의하지 않는다(상한 쪽도 대칭)
+        lo_port, hi_port = node.gains.get("out_lo"), node.gains.get("out_hi")
+        cis = []
+        if hi_port is None and (lo_port is None or _port_bound(graph, runner, lo_port, "hi") <= inst.out_hi):
+            cis.append(1)
+        if lo_port is None and (hi_port is None or _port_bound(graph, runner, hi_port, "lo") >= inst.out_lo):
+            cis.append(3)
+        cis = tuple(cis)
+        if cis:
+            out[d["id"]] = {"cis": cis, "reason": _COUPLED_REASON}
     return out
 
 

@@ -26,7 +26,8 @@ def test_structural_node_census(client):
     # 먼저 떼어 두고 남은 것을 롤에 주는 배분으로 클립 자체를 없앴다.
     # 입력·출력은 안 늘었다(뱅크 명령을 재활용한다) — 늘었으면 계약이 바뀐 것이다.
     # (엔진 test_influence와 한 쌍 — 한쪽만 고치면 다른 쪽이 깨진다)
-    assert kinds["ir"] == 78 and kinds["input"] == 23 and kinds["output"] == 7
+    # 78 → 80: θ 상한 마하 표 2노드(ap_theta_hi_raw 실속표 룩업 · ap_theta_hi 스칼라 상자 클램프, v1.11)
+    assert kinds["ir"] == 80 and kinds["input"] == 23 and kinds["output"] == 7
     # 지표 12 → 29: 응답특성(축별 Tr·Ts·Mp·sse 12종)·잔여 권한 2종·포화 최장 지속
     # (v0.56), 추력 포화율·최소 여유 2종(v0.72) — 키는 전부 신규, rename 없음
     assert kinds["param"] > 50 and kinds["plant"] == 1 and kinds["metric"] == 34

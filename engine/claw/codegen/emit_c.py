@@ -301,8 +301,16 @@ def _emit_pid(ctx, node, inst, ins, gains, dt_macro):
         ctx.line(f"double {nid}_inc = {dt_macro} * {ki} * {e};")
         # 판정 기준은 PID 출력이 아니라 축 출력이다 — 감쇠항이 PID 뒤에서 더해져 다시
         # clip되는 축에서 PID만 보면 포화를 절반쯤 놓친다 (controllers.py 실측 주석)
-        axis = raw if u_ext is None else ctx.declare(f"{nid}_axis", f"{raw} + {u_ext}")
-        ctx.line(f"if (({axis} > {hi} && {nid}_inc > 0.0) || ({axis} < {lo} && {nid}_inc < 0.0)) {{")
+        # 외부항이 있으면 PID 출력(raw)과 축 출력(axis) 중 그 방향으로 더 나간 쪽으로 판정한다(v1.11 — PID 출력이 붙었는데
+        # 감쇠가 축을 안쪽으로 끌어도 적분을 멈춘다). controllers.py와 같은 3항이라 NaN에서도 판정이 같고, 가드 줄은
+        # 그대로 두 조건 쌍이라 MC/DC 판정 형태(verify/mcdc.py _GUARD)가 안 바뀐다
+        if u_ext is None:
+            hi_x = lo_x = raw
+        else:
+            axis = ctx.declare(f"{nid}_axis", f"{raw} + {u_ext}")
+            hi_x = ctx.declare(f"{nid}_hi_x", f"({raw} > {axis}) ? {raw} : {axis}")
+            lo_x = ctx.declare(f"{nid}_lo_x", f"({raw} < {axis}) ? {raw} : {axis}")
+        ctx.line(f"if (({hi_x} > {hi} && {nid}_inc > 0.0) || ({lo_x} < {lo} && {nid}_inc < 0.0)) {{")
         ctx.line(f"    {nid}_inc = 0.0;")
         ctx.line("}")
         ctx.line(f"{i_st} = {clip}({i_st} + {nid}_inc, {lo}, {hi});")

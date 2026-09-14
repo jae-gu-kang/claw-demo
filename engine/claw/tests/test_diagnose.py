@@ -161,6 +161,31 @@ def test_규칙3_적분기_클램프_주차는_와인드업_처방():
     assert set(ps[0]["joint_with"]) >= {"fcl/Autopilot.theta_lo", "fcl/Autopilot.theta_hi"}
 
 
+def test_규칙3_상한이_마하_표면_스텝별_상한에_주차해도_잡는다():
+    """θ 상한이 실속표에서 유도한 마하 표면(v1.11) 고도 적분기 클램프는 스텝마다 min(theta_hi, θ_hi(M))이다 — 스칼라 0.3만
+    보면 표가 내려간 고속 구간의 주차를 놓친다. 신호 이름은 시뮬 meta.clamps.alt.hi_signal이 가리킨다."""
+    p = _payload()
+    s = p["signals"]
+    n = len(p["t"])
+    s["theta_hi"] = np.full(n, 0.15)
+    s["i_alt"][:40] = 0.15  # 표 상한에 주차 (40/200 = 20%) — 스칼라 0.3에서는 한참 아래
+    p["meta"]["clamps"]["alt"]["hi_signal"] = "theta_hi"
+    out = diagnose_run(p, Shape(profile=example_profile()))
+    ps = _pres(out, rule="windup")
+    assert len(ps) == 1 and ps[0]["knobs"] == ["fcl/Autopilot.ki_alt"]
+    assert out["findings"][ps[0]["findings"][0]]["evidence"]["hi_signal"] == "theta_hi"
+    # 표가 물린 주차다 — 스칼라 theta_hi는 죽은 손잡이라 후보에서 빠지고 표를 움직이는 α 리미터 마진이 들어간다
+    assert ps[0]["joint_with"] == ["fcl/Autopilot.theta_lo", "fcl/AlphaLimiter.margin"]
+    # 신호를 모르는 결과(스칼라만)는 같은 적분기를 주차로 보지 않는다 — 판정이 신호에서 온다는 대조
+    del p["meta"]["clamps"]["alt"]["hi_signal"]
+    assert _pres(diagnose_run(p, Shape(profile=example_profile())), rule="windup") == []
+    # 신호 이름은 있는데 채널이 없으면 조용히 스칼라로 가지 않고 경고를 남긴다
+    p["meta"]["clamps"]["alt"]["hi_signal"] = "theta_hi_gone"
+    out = diagnose_run(p, Shape(profile=example_profile()))
+    assert _pres(out, rule="windup") == []
+    assert any("theta_hi_gone" in w for w in out["warnings"]), out["warnings"]
+
+
 def test_규칙5_리미터_작동_중_침투는_감쇠_처방():
     """리미터가 자주 물리는데 α 마진까지 뚫리면 피치 응답이 경계를 넘는 것 —
     감쇠(k_rate) 문제다. pitch.k_rate는 스케줄 자리라 승격된다."""

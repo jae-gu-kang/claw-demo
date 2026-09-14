@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : 7f205e611b1fe53d
+ * 지문    : 9b992c84c6e5d4f8
  * 엔진    : claw 0.2.0
  * 자료형 (MATLAB _types.h 대응)
  */
@@ -21,28 +21,24 @@ typedef struct {
     double ap_hdg_pid_out_hi;           /* 출력·적분기 클램프 상한 (안티와인드업) */
     double ap_hdg_sat_lo;               /* 하한 */
     double ap_hdg_sat_hi;               /* 상한 */
+    double ap_theta_hi_lo;              /* 하한 */
+    double ap_theta_hi_hi;              /* 상한 */
     double ap_fh_one_minus_p;           /* 1 − exp(-dt/tau), tau=5.0 s */
     double ap_alt_damp_k;               /* 게인 */
     double ap_alt_pid_kp;               /* 비례 게인 */
     double ap_alt_pid_out_lo;           /* 출력·적분기 클램프 하한 (안티와인드업) */
-    double ap_alt_pid_out_hi;           /* 출력·적분기 클램프 상한 (안티와인드업) */
     double ap_alt_pid_ki;               /* 적분 게인 */
     double ap_alt_sat_lo;               /* 하한 */
-    double ap_alt_sat_hi;               /* 상한 */
     double ap_fvs_one_minus_p;          /* 1 − exp(-dt/tau), tau=2.0 s */
     double ap_vs_pid_kp;                /* 비례 게인 */
     double ap_vs_pid_out_lo;            /* 출력·적분기 클램프 하한 (안티와인드업) */
-    double ap_vs_pid_out_hi;            /* 출력·적분기 클램프 상한 (안티와인드업) */
     double ap_vs_pid_ki;                /* 적분 게인 */
     double ap_vs_sat_lo;                /* 하한 */
-    double ap_vs_sat_hi;                /* 상한 */
     double ap_pitch_sat_lo;             /* 하한 */
-    double ap_pitch_sat_hi;             /* 상한 */
     double ap_theta_vs_threshold;       /* 전환 임계값 */
     double ap_theta_src_threshold;      /* 전환 임계값 */
     double ap_ff_p_k;                   /* 게인 */
     double ap_theta_out_lo;             /* 하한 */
-    double ap_theta_out_hi;             /* 상한 */
     double ap_fv_one_minus_p;           /* 1 − exp(-dt/tau), tau=2.0 s */
     double ap_spd_pid_kp;               /* 비례 게인 */
     double ap_spd_pid_out_lo;           /* 출력·적분기 클램프 하한 (안티와인드업) */
@@ -87,6 +83,8 @@ typedef struct {
     double sched_roll_ki_val[17];       /* roll.ki 값 */
     double sched_roll_kp_bp[17];        /* mach 격자점 */
     double sched_roll_kp_val[17];       /* roll.kp 값 */
+    double ap_theta_hi_raw_bp[5];       /* mach 격자점 */
+    double ap_theta_hi_raw_val[5];      /* theta_hi 값 */
     double lim_stall_bp[5];             /* mach 격자점 */
     double lim_stall_val[5];            /* alpha_stall 값 */
     double scas_alloc_trim_bp[7];       /* mach 격자점 */

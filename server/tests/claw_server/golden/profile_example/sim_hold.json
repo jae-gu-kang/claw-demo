@@ -1,7 +1,7 @@
 {
  "golden": "sim_hold",
  "mode": "full",
- "captured_at": "654ec14+dirty",
+ "captured_at": "10fd39d+dirty",
  "value": {
   "dict": {
    "t": {
@@ -2457,6 +2457,49 @@
        }
       }
      },
+     "theta_hi": {
+      "dict": {
+       "__digest__": {
+        "dict": {
+         "n": 1000,
+         "chunk": 100,
+         "sha": [
+          "0e248acf4cba59c577754da69ea7f8f327c4a61b602edcffa891390c0865e75a",
+          "270ddfd5b79c967ae4629d135893fa85acbfb741b3ecdb275fa75ffa50cc6a5a",
+          "07a2d16440cc517540d44290f9bebe34a8decdd5a2e5e750017a920ec6d4872b",
+          "0eab0b23a65f91a6b620071bf6b7b66d1123a0e47ec59cbfe0ea6cc1ab2b9812",
+          "db3e567614c5b8477580a7dedb2fa939ee63821097e5155e6be3cf5102d7722c",
+          "da056cf586327fd53d86216f4e98d8382882a399f0d296d84a7cd95bb5e273a0",
+          "d079dd66ca2087f484c590bd1e83973e1ab369b4903a3a83bd90a30dfe6c85d2",
+          "7c23830e59f218b0a0fe5e194678e2dc86f1243382af0ee074fafa7c34a9c95a",
+          "e9b3325682dd06248da09b9078a3d25199825135023fa6befee913067d542f98",
+          "8ae87cc82537c953c1e3c2ae9c829e50fedb39f05e08b1ca7c8c65dd95504fb5"
+         ],
+         "samples": {
+          "dict": {
+           "0": "f:0x1.23d70a3d70a3ep-2",
+           "62": "f:0x1.23f61dea316bap-2",
+           "124": "f:0x1.244476538c5dcp-2",
+           "186": "f:0x1.24a28c9e1fe43p-2",
+           "248": "f:0x1.25046db2303b2p-2",
+           "310": "f:0x1.2564a9bab8771p-2",
+           "372": "f:0x1.25c2364916272p-2",
+           "434": "f:0x1.261a0c9d5d539p-2",
+           "496": "f:0x1.2669309344c5ep-2",
+           "558": "f:0x1.26ae75f5a9db2p-2",
+           "620": "f:0x1.26e975a73701cp-2",
+           "682": "f:0x1.271a532143946p-2",
+           "744": "f:0x1.274194dec2e50p-2",
+           "806": "f:0x1.2760040daa4e6p-2",
+           "868": "f:0x1.277691fcd3a56p-2",
+           "930": "f:0x1.27864332d6146p-2",
+           "992": "f:0x1.27901f85978dcp-2"
+          }
+         }
+        }
+       }
+      }
+     },
      "pitch": {
       "dict": {
        "__digest__": {
@@ -3955,7 +3998,8 @@
        "alt": {
         "dict": {
          "lo": "f:-0x1.3333333333333p-2",
-         "hi": "f:0x1.3333333333333p-2"
+         "hi": "f:0x1.3333333333333p-2",
+         "hi_signal": "theta_hi"
         }
        },
        "spd": {

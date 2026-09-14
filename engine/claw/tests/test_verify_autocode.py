@@ -382,6 +382,84 @@ def test_정당화는_kd가_있으면_적용되지_않는다(demo_law):
     assert guards(_pid_graph(ki=-0.5)) == {}, "ki·kp 이부호인데 정당화됐다"
 
 
+def test_정당화는_한계가_상수인_쪽만_인정한다():
+    """상한이 신호(θ_hi(M) — v1.11)면 스텝 사이에 상한이 내려갈 때 적분기가 새 상한 위에 남아 오차 ≤ 0에서도 raw > hi가
+    된다 — 상한 쪽 조건(c1)의 독립쌍이 실재하므로 정당화하면 거짓 100%다. 상수인 하한 쪽(c3)은 함의가 여전히 선다."""
+    from claw.blocks.controllers import PID
+    from claw.codegen import GraphRunner, emit_c, emit_runtime
+    from claw.codegen.ir import Graph, Node
+    from claw.verify.mcdc import find_decisions
+
+    def guards(runner):
+        module = emit_c(runner.graph, runner)
+        files = dict(module.files)
+        files.update(emit_runtime(module.helpers))
+        return _coupled_guards(find_decisions(files), runner)
+
+    params = dict(kp=1.0, ki=0.5, out_lo=-1.0, out_hi=1.0)
+    both = guards(_pid_graph(ki=0.5))
+    assert [v["cis"] for v in both.values()] == [(1, 3)]
+    g = Graph("g", inputs=("e", "hi"),
+              nodes=[Node("pid", PID, inputs=("e",), params=params, gains={"out_hi": "hi"})],
+              outputs={"y": "pid"})
+    # 신호 상한이 그래프에서 **상수 하한 이상으로 묶여 있지 않으면**(여기선 입력 그대로) 하한 쪽도 정당화하지 않는다 —
+    # hi < lo가 되는 스텝에 적분기 클램프가 hi로 가 i < lo가 되고, 그러면 raw < lo가 kp·e < 0을 함의하지 않는다
+    assert guards(GraphRunner(g, DT)) == {}
+    from claw.blocks.basic import Saturation
+
+    def bounded(lo_floor):
+        return Graph("g", inputs=("e", "hi"),
+                     nodes=[Node("hi_sat", Saturation, inputs=("hi",), params={"lo": lo_floor, "hi": 1.0}),
+                            Node("pid", PID, inputs=("e",), params=params, gains={"out_hi": "hi_sat"})],
+                     outputs={"y": "pid"})
+    hi_port = guards(GraphRunner(bounded(-1.0), DT))  # fcl의 ap_theta_hi 모양 — 상수 하한 theta_lo로 묶인 포화 출력
+    assert [v["cis"] for v in hi_port.values()] == [(3,)], hi_port
+    assert guards(GraphRunner(bounded(-2.0), DT)) == {}  # 묶는 하한이 PID 하한보다 낮다 — 넘을 수 있다
+    g2 = Graph("g", inputs=("e", "lo"),
+               nodes=[Node("lo_sat", Saturation, inputs=("lo",), params={"lo": -1.0, "hi": 1.0}),
+                      Node("pid", PID, inputs=("e",), params=params, gains={"out_lo": "lo_sat"})],
+               outputs={"y": "pid"})
+    assert [v["cis"] for v in guards(GraphRunner(g2, DT)).values()] == [(1,)]
+
+
+def test_θ_상한_하강_벡터는_게인에서_길이를_정한다():
+    """이름 기반 값 정책만으로는 승강률 적분기를 새 상한 위에 올릴 수 없다(큰 오차는 조건부 적분이 적분기를 멈춘다) —
+    kp·e를 단계적으로 줄이는 시간이 kp/ki에 비례하므로 게인을 받아 길이를 정한다. 게인을 모르면 케이스를 붙이지 않는다."""
+    base = vectors.integration_cases()
+    assert all(c["id"] != "TC-INT-THETA-HI-DROP" for c in base)
+    slow = vectors.integration_cases({"kp_vs": 0.08, "ki_vs": 0.02}, 0.01, theta_hi=True)
+    fast = vectors.integration_cases({"kp_vs": 0.08, "ki_vs": 0.04}, 0.01, theta_hi=True)
+    drop = {c["id"]: c for c in slow}["TC-INT-THETA-HI-DROP"]
+    assert len(drop["rows"]) > len({c["id"]: c for c in fast}["TC-INT-THETA-HI-DROP"]["rows"])
+    last = drop["rows"][-1]
+    assert last["mach"] == 0.9 and last["hdot_on"] == 1.0 and 0.08 * (last["cmd_hdot"] - last["hdot"]) < 0.0
+    # 적분 없음(가드가 없다)·표 없음(상한이 상수라 정당화된다)·길이 상한 초과(ki_vs를 아주 작게 편집)는 붙이지 않는다
+    assert vectors.integration_cases({"kp_vs": 0.08, "ki_vs": 0.0}, 0.01, theta_hi=True) == base
+    assert vectors.integration_cases({"kp_vs": 0.08, "ki_vs": 0.02}, 0.01) == base
+    assert vectors.integration_cases({"kp_vs": 0.196, "ki_vs": 0.001}, 0.01, theta_hi=True) == base
+
+
+def test_θ_상한_하강_벡터가_실제로_가드_상한_조건_거짓측을_만든다():
+    """길이·마지막 행만 보면 램프를 (0.3, 0.3, 0.3)으로 망가뜨려도 통과한다(적분기가 hi − 0.3에서 멈춰 쌍이 안 생긴다) —
+    법칙 러너에 벡터를 흘려 승강률 PID가 raw > hi인데 증분 ≤ 0인 스텝을 실제로 밟는지 본다."""
+    from claw.fcl.demo import make_demo_fcl
+
+    law = make_demo_fcl().init(DT)
+    runner = law.runner
+    cases = vectors.integration_cases(law.autopilot.cfg, DT, theta_hi=law.theta_hi_table is not None)
+    drop = {c["id"]: c for c in cases}["TC-INT-THETA-HI-DROP"]
+    pid = runner.instances["ap_vs_pid"]
+    hits = 0
+    for row in drop["rows"]:
+        i_prev = pid._i
+        runner.step_all(**row)
+        env = runner.last_env
+        e = env["ap_vs_err"]
+        if pid.kp * e + i_prev > env["ap_theta_hi"] and DT * pid.ki * e <= 0.0:
+            hits += 1
+    assert hits >= 1, "θ 상한 하강 벡터가 가드 상한 조건의 (c0 참, c1 거짓) 스텝을 한 번도 못 만들었다"
+
+
 def test_웜스타트는_접힌_축을_건너뛴다(demo_law):
     """ki=0으로 편집한 형상이 '빌드 실패'로 뜨면 안 된다 — 없는 필드에 대입하면
     컴파일이 깨진다. 판정이 정체성인 탭에서 그건 틀린 판정이다."""
@@ -391,9 +469,13 @@ def test_웜스타트는_접힌_축을_건너뛴다(demo_law):
     lines = "\n".join(warm_start_lines(demo_law.runner))
     assert "s.ap_alt_pid_i = th0;" in lines  # 기본 형상은 ki ≠ 0이라 그대로 대입
 
-    off = make_demo_fcl(autopilot=Autopilot(ki_alt=0.0)).init(DT)
+    # 접힘은 속도축으로 본다 — 고도축은 θ 상한이 실속표 마하 표 신호(포트)라(v1.11) ki_alt = 0이어도 한계를 정적으로
+    # 알 수 없어 적분기를 접지 않는다(emit_c._pid_has_integrator). 그 사실도 함께 못박는다
+    alt_off = make_demo_fcl(autopilot=Autopilot(ki_alt=0.0)).init(DT)
+    assert "s.ap_alt_pid_i" in "\n".join(warm_start_lines(alt_off.runner))
+    off = make_demo_fcl(autopilot=Autopilot(ki_spd=0.0)).init(DT)
     off_lines = "\n".join(warm_start_lines(off.runner))
-    assert "s.ap_alt_pid_i" not in off_lines
+    assert "s.ap_spd_pid_i" not in off_lines
     assert "폴딩" in off_lines  # 침묵이 아니라 사유가 남는다
     if find_cc():
         rep = verify_flight(off, profile=example_profile(), t_end=4.0, with_vectors=False)

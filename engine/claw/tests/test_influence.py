@@ -105,7 +105,8 @@ def test_signature_is_stable_across_independent_builds(base_shape):
     # 66 → 78: 엘레본 제어권한 배분 12개 (scas_alloc_* — 선회 하중과 트림 테이블에서
     # 롤 예산을 내는 8개, 롤이 쓴 δa에서 피치 권한을 내는 4개). 이 수가 움직이는
     # 것이 곧 법칙 구조 변경이다.
-    assert len([k for k in a if not k.startswith("__")]) == 78
+    # 78 → 80: θ 상한 마하 표 2개 (ap_theta_hi_raw 실속표 룩업 · ap_theta_hi 스칼라 상자 클램프, v1.11).
+    assert len([k for k in a if not k.startswith("__")]) == 80
 
 
 # ── 구조적 영향: 관측된 매핑 ───────────────────────────────────────────────
@@ -120,7 +121,7 @@ def test_signature_is_stable_across_independent_builds(base_shape):
         # θ 한계는 세 종방향 갈래 전부의 포화 한계다 — 축이 늘면 씨앗도 는다
         ("fcl/Autopilot.theta_hi",
          {"ap_alt_pid", "ap_alt_sat", "ap_theta_out",
-          "ap_vs_pid", "ap_vs_sat", "ap_pitch_sat"}),
+          "ap_vs_pid", "ap_vs_sat", "ap_pitch_sat", "ap_theta_hi"}),
         ("table.pitch.kp", {"sched_pitch_kp"}),
     ],
 )
@@ -184,7 +185,7 @@ def test_control_rate_touches_every_stateful_node(impacts):
     """dt는 fcl_graph의 인자가 아니라 러너의 인자다 — 노드 인자만 보면 '아무것도
     안 건드린다'는 거짓말이 나온다. 이산 계수가 형상의 일부라는 것(07 §5)의 시각화."""
     imp = impacts["rate.control_hz"]
-    assert len(imp.reach) == 78  # 배분 12개 포함 (test_signature_is_stable 주석 참조)
+    assert len(imp.reach) == 80  # 배분 12개·θ 상한 표 2개 포함 (test_signature_is_stable 주석 참조)
     assert "sched_f_mach" in imp.seeds
 
 
@@ -265,7 +266,8 @@ def test_structural_payload_shape(base_shape):
     kinds = Counter(n["kind"] for n in p["nodes"])
     # 입력 19 → 23: cmd_pitch·cmd_hdot·pitch_on·hdot_on
     # ir 66 → 78: 엘레본 제어권한 배분 (입력은 안 는다 — φ_cmd·mach를 그래프 안에서 받는다)
-    assert kinds["ir"] == 78 and kinds["input"] == 23 and kinds["output"] == 7
+    # ir 78 → 80: θ 상한 마하 표 (마하는 이미 그래프 입력이라 입력 수는 그대로)
+    assert kinds["ir"] == 80 and kinds["input"] == 23 and kinds["output"] == 7
     assert kinds["metric"] == len(p["metrics"]) and kinds["plant"] == 1
     assert p["topological_order"] is True
     assert "rank" not in p["nodes"][0]  # 층 번호는 소비자가 계산 — 두 곳에 정의하지 않는다

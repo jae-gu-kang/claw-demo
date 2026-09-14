@@ -88,6 +88,9 @@ _SCAS_AXIS = {
         "clamp": (f"fcl/ScasAxis.{a}.out_lo", f"fcl/ScasAxis.{a}.out_hi")}
     for a in ("pitch", "roll", "yaw")
 }
+# θ 상한 스칼라와 그 표(θ_hi(M) = α_stall − margin)를 움직이는 손잡이 — 와인드업 처방이 어느 쪽이 물렸는지로 고른다
+_THETA_HI_ID = "fcl/Autopilot.theta_hi"
+_MARGIN_ID = "fcl/AlphaLimiter.margin"
 # AP 파라미터 이름 → 스케줄 그룹·키 (승격용) — 정본 AP_PARAM(fcl/graphs.py)의 역방향
 _AP_GROUP_OF = {param: gk for gk, param in AP_PARAM.items()}
 
@@ -341,8 +344,25 @@ def _rule_windup(signals, meta, dt, t, findings, pres, warnings, th):
             continue  # 구버전 결과·클램프 미상 — 판정 불가 (0으로 위장하지 않는다)
         lo, hi = float(cl["lo"]), float(cl["hi"])
         tol = max(PARK_TOL_FRAC * (hi - lo), 1e-12)
+        # 상한이 스텝마다 움직이는 축(고도 — θ_hi(M) 표, v1.11)은 계측 신호와 스칼라 중 낮은 쪽이 실제 클램프다. 스칼라로만
+        # 대조하면 표가 0.3 아래로 내려간 고속 구간에서 적분기가 표에 주차해도 "막힘 없음"으로 읽힌다. tol은 바깥 상자 폭
+        # 기준 그대로 둔다(스텝마다 바뀌면 같은 주차가 구간마다 다른 문턱으로 세진다)
+        hi_eff = hi
+        hi_sig = None
+        if cl.get("hi_signal"):
+            hi_sig = _arr(signals, cl["hi_signal"])
+            if hi_sig is None:
+                warnings.append(f"와인드업(규칙 3) {axis}: 상한 신호 {cl['hi_signal']} 없음 — 스칼라 상한으로 판정")
+            else:
+                hi_eff = np.where(np.isfinite(hi_sig), np.minimum(hi_sig, hi), hi)
         ok = np.isfinite(i)
-        parked = ok & ((i >= hi - tol) | (i <= lo + tol))
+        parked = ok & ((i >= hi_eff - tol) | (i <= lo + tol))
+        # 상한 주차가 **표 쪽에서** 일어났나 — 그 스텝은 스칼라 theta_hi가 물린 한계가 아니라 올려도 아무 일도 없다.
+        # 표는 α 리미터 마진이 움직이므로(θ_hi = α_stall − margin) 처방의 동시 수정 후보를 그쪽으로 바꾼다
+        at_hi = ok & (i >= hi_eff - tol)
+        by_table = (np.isfinite(hi_sig) & (hi_sig < hi)) if hi_sig is not None else np.zeros(i.shape, dtype=bool)
+        table_bound = bool(np.any(at_hi & by_table))
+        scalar_bound = bool(np.any(at_hi & ~by_table))
         # ② 조건부 적분의 형태 — 출력이 한계에 붙은 채 적분기가 안 움직인다.
         y = _arr(signals, out_k)
         if y is None or not np.isfinite(y).any():
@@ -352,7 +372,7 @@ def _rule_windup(signals, meta, dt, t, findings, pres, warnings, th):
             warnings.append(f"와인드업(규칙 3) {axis}: PID 출력 계측 채널 없음 — 주차만 판정")
         elif step == 0:
             warnings.append(f"와인드업(규칙 3) {axis}: control_hz 미상 — 주차만 판정")
-        elif not (np.isfinite(y) & ((y >= hi - tol) | (y <= lo + tol))).any():
+        elif not (np.isfinite(y) & ((y >= hi_eff - tol) | (y <= lo + tol))).any():
             pass  # 출력이 한 번도 한계에 안 닿았다 — ②의 전제가 없다, 할 말도 없다
         elif not _pid_integrator_is_live(i):
             # 출력은 포화했는데 적분기가 런 내내 한 칸도 안 움직였다. 대개 ki = 0인
@@ -363,7 +383,7 @@ def _rule_windup(signals, meta, dt, t, findings, pres, warnings, th):
                 f"ki=0이거나 전 구간 막힘, 신호로는 구분 불가라 판정 보류")
         else:
             frozen = np.abs(np.diff(i)) <= _FROZEN_TOL
-            saturated = np.isfinite(y) & ((y >= hi - tol) | (y <= lo + tol))
+            saturated = np.isfinite(y) & ((y >= hi_eff - tol) | (y <= lo + tol))
             blocked = np.zeros(i.shape, dtype=bool)
             # 제어 틱 표본만 판정한다 — 틱 사이는 ZOH 유지 구간이지 동결이 아니다.
             # 첫 틱은 직전 틱이 없어 증분을 못 재므로 제외한다.
@@ -386,7 +406,8 @@ def _rule_windup(signals, meta, dt, t, findings, pres, warnings, th):
             continue
         ev = {"parked_frac": stats["frac"], "events": stats["events"],
               "longest": stats["longest"], "first_t": stats["first_t"],
-              "clamp": [lo, hi], "threshold": th["windup_frac"]}
+              "clamp": [lo, hi], "threshold": th["windup_frac"],
+              **({"hi_signal": cl["hi_signal"], "table_bound": table_bound} if cl.get("hi_signal") else {})}
         if stats["frac"] <= th["windup_frac"]:
             findings.append(Finding(
                 "windup", axis, "info",
@@ -396,12 +417,17 @@ def _rule_windup(signals, meta, dt, t, findings, pres, warnings, th):
             "windup", axis, "warn",
             f"{axis} 적분이 {stats['frac']:.1%} 막혀 있었다 (최장 "
             f"{stats['longest']:.2g} s) — ki·출력 한계 상호작용", ev))
+        joint, notes = clamp_ids, ("클램프 완화(joint_with)가 동시 수정 후보 — ki만 줄이면 "
+                                   "정상상태 수렴이 느려진다",)
+        if table_bound:
+            # 스칼라 상한은 표보다 높은 스텝에서만 물린다 — 그런 주차가 없으면 후보에서 뺀다(죽은 손잡이를 처방하지 않는다)
+            joint = tuple(c for c in clamp_ids if c != _THETA_HI_ID or scalar_bound) + (_MARGIN_ID,)
+            notes += ("상한 주차가 θ_hi(M) 표에서 일어났다 — 스칼라 theta_hi를 올려도 표가 그대로 물리고, 표는 "
+                      "α 리미터 마진이 움직인다",)
         pres.append(Prescription(
             knobs=(ki_id,), knob_class="loop_gain", direction="decrease",
-            findings=(len(findings) - 1,), joint_with=clamp_ids,
-            recheck=COUPLING["clamp"],
-            notes=("클램프 완화(joint_with)가 동시 수정 후보 — ki만 줄이면 "
-                   "정상상태 수렴이 느려진다",)))
+            findings=(len(findings) - 1,), joint_with=joint,
+            recheck=COUPLING["clamp"], notes=notes))
 
 
 def _rule_limiter(signals, dt, t, findings, pres, warnings, th):

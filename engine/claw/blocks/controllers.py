@@ -85,7 +85,16 @@ class PID(Block):
         # 있었다는 뜻이다. u_ext를 받는 것은 출력을 바꾸기 위해서가 아니라 **포화를
         # 제대로 보기 위해서**다 — y는 그대로 clip(raw)이라 제어법칙은 안 바뀐다.
         axis = raw + u_ext
-        if (axis > hi and inc > 0.0) or (axis < lo and inc < 0.0):
+        # **역방향도 막는다 (v1.11).** 위와 반대로 PID 출력이 한계에 붙었는데 감쇠항이 반대로 끌어 축은 안쪽인 경우다 —
+        # 그때 적분은 PID 출력을 한 칸도 못 바꾸는데 계속 차서, 오차가 줄어도 raw가 한계 위에 오래 머물다 늦게 풀린다.
+        # 구 합성 기체 고도 포착(test_sim, 1000→1200 m): 상승 중 PID 출력이 theta_hi에 붙고 강하율 감쇠(−0.15)가 축을
+        # 0.14로 끌어내린 채 적분기가 0.24까지 찼다 — 오버슈트 19.8 m, θ 상한을 실속표 마하 표(M0.58~0.60에서 0.268~0.265)로 낮추자
+        # 27.5 m. PID 출력과 축 출력 중 하나라도 그 방향 한계를 넘으면 버리면 12.9 m · 9.98 m다.
+        # 최대·최소를 max()/min()이 아니라 **3항**으로 쓰는 것은 생성 C(codegen/emit_c.py _emit_pid)와 같은 식이라야
+        # NaN에서도 판정이 비트 단위로 같기 때문이다. u_ext = 0이면 axis = raw라 종전과 같다
+        hi_x = raw if raw > axis else axis
+        lo_x = raw if raw < axis else axis
+        if (hi_x > hi and inc > 0.0) or (lo_x < lo and inc < 0.0):
             inc = 0.0
         self._i = min(max(self._i + inc, lo), hi)
         self._e_prev = e

@@ -72,6 +72,9 @@ INSTRUMENT_NODES = {
     "yaw_wo": "scas_yaw_wo",  # 워시아웃 통과 r — 지속 선회의 정상 r 제거 확인
     # ── 리미터 (귀속: 감쇠 문제 vs margin 문제, 진단 규칙 5) ──
     "lim_cap": "lim_cap",  # θ 상한 = θ + (α_max − α) — theta_cmd−cap 지속이 margin 문제 신호
+    # 자동조종 θ 명령 상한 min(theta_hi, θ_hi(M)) — 실속표에서 유도한 마하 표가 있을 때만 존재한다(v1.11).
+    # 고도·승강률 적분기의 클램프가 스텝마다 이 값이라, 와인드업 진단이 스칼라 theta_hi 대신 이것과 대조한다
+    "theta_hi": "ap_theta_hi",
     # ── 엘레본 제어권한 배분 (평가 카드 ⑦ 잔여 권한 — fcl/graphs.py 예산 노드) ──
     # 배분 미장착 형상(alloc_trim_table=None)은 노드 자체가 조립되지 않으므로
     # `if nid in env` 가드가 자동 생략한다 — 선택 경로 계측의 기존 관례(ap_ff_* 등).
@@ -97,10 +100,14 @@ INSTRUMENT_STATES = {
 
 class FlightControlLaw:
     def __init__(self, scas, autopilot, mixer, schedule=None, alpha_limiter=None,
-                 alloc_trim_table=None, alloc_resv_frac=0.7):
+                 alloc_trim_table=None, alloc_resv_frac=0.7,
+                 theta_hi_table=None):
         self.scas = scas
         # 엘레본 제어권한 배분 계수 [rad/하중] — 0이면 배분 없음 (fcl/graphs.py)
         self.alloc_trim_table = alloc_trim_table
+        # θ 상한 표 — 있으면 마하 룩업, 없으면 오토파일럿의 스칼라 theta_hi.
+        # 불변식(θ_hi ≤ α_stall − 마진)은 fcl_graph가 조립 시점에 건다
+        self.theta_hi_table = theta_hi_table
         self.alloc_resv_frac = float(alloc_resv_frac)
         self.autopilot = autopilot
         self.mixer = mixer
@@ -142,6 +149,7 @@ class FlightControlLaw:
                 stall_table=lim.stall_table if lim is not None else None,
                 alpha_margin=lim.margin if lim is not None else 0.05,
                 alloc_trim_table=self.alloc_trim_table,
+                theta_hi_table=self.theta_hi_table,
                 alloc_resv_frac=self.alloc_resv_frac,
                 gain_tables=self.schedule.tables if self.schedule is not None else None,
                 filter_tau=self.schedule.filter_tau if self.schedule is not None else 0.5,

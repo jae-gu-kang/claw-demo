@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR, 값은 파라미터에서 나온다).
  * 그래프  : fcl
- * 지문    : 7f205e611b1fe53d
+ * 지문    : 9b992c84c6e5d4f8
  * 엔진    : claw 0.2.0
  * scas — 기능축 분할, 29개 블록
  */
@@ -65,7 +65,9 @@ void fcl_scas_step(const fcl_params_t *prm, fcl_state_t *sta,
                                              scas_alloc_roll_hi_y);
     double scas_roll_pid_inc = FCL_DT * sched_roll_ki_y * scas_roll_err_y;
     const double scas_roll_pid_axis = scas_roll_pid_raw + scas_roll_damp_y;
-    if ((scas_roll_pid_axis > scas_alloc_roll_hi_y && scas_roll_pid_inc > 0.0) || (scas_roll_pid_axis < scas_alloc_roll_lo_y && scas_roll_pid_inc < 0.0)) {
+    const double scas_roll_pid_hi_x = (scas_roll_pid_raw > scas_roll_pid_axis) ? scas_roll_pid_raw : scas_roll_pid_axis;
+    const double scas_roll_pid_lo_x = (scas_roll_pid_raw < scas_roll_pid_axis) ? scas_roll_pid_raw : scas_roll_pid_axis;
+    if ((scas_roll_pid_hi_x > scas_alloc_roll_hi_y && scas_roll_pid_inc > 0.0) || (scas_roll_pid_lo_x < scas_alloc_roll_lo_y && scas_roll_pid_inc < 0.0)) {
         scas_roll_pid_inc = 0.0;
     }
     sta->scas_roll_pid_i = claw_clip(sta->scas_roll_pid_i + scas_roll_pid_inc,
@@ -100,7 +102,9 @@ void fcl_scas_step(const fcl_params_t *prm, fcl_state_t *sta,
                                               scas_alloc_pitch_hi_y);
     double scas_pitch_pid_inc = FCL_DT * sched_pitch_ki_y * scas_pitch_err_y;
     const double scas_pitch_pid_axis = scas_pitch_pid_raw + scas_pitch_damp_y;
-    if ((scas_pitch_pid_axis > scas_alloc_pitch_hi_y && scas_pitch_pid_inc > 0.0) || (scas_pitch_pid_axis < scas_alloc_pitch_lo_y && scas_pitch_pid_inc < 0.0)) {
+    const double scas_pitch_pid_hi_x = (scas_pitch_pid_raw > scas_pitch_pid_axis) ? scas_pitch_pid_raw : scas_pitch_pid_axis;
+    const double scas_pitch_pid_lo_x = (scas_pitch_pid_raw < scas_pitch_pid_axis) ? scas_pitch_pid_raw : scas_pitch_pid_axis;
+    if ((scas_pitch_pid_hi_x > scas_alloc_pitch_hi_y && scas_pitch_pid_inc > 0.0) || (scas_pitch_pid_lo_x < scas_alloc_pitch_lo_y && scas_pitch_pid_inc < 0.0)) {
         scas_pitch_pid_inc = 0.0;
     }
     sta->scas_pitch_pid_i = claw_clip(sta->scas_pitch_pid_i + scas_pitch_pid_inc,

@@ -84,7 +84,7 @@ def test_law_replays_deterministically(trace):
     미션 중 기록한 출력과, 그 입력을 따로 세운 러너에 다시 흘린 출력이 같아야
     한다. 어댑터(항법→공학량)와 웜스타트 주입이 재현 가능한지를 여기서 잡는다.
     """
-    inputs, refs, warm = trace
+    inputs, refs, warm, _mission = trace
     runner = _ir_runner(warm)
     got = [runner.step(**row) for row in inputs]
     for i, name in enumerate(mission_trace.OUTPUT_ORDER):
@@ -93,8 +93,14 @@ def test_law_replays_deterministically(trace):
 
 
 def test_trace_exercises_the_hard_paths(trace):
-    """대조가 통과해도 그 경로를 안 밟았으면 의미가 없다 — 커버리지를 단정한다."""
-    inputs, refs, _warm = trace
+    """대조가 통과해도 그 경로를 안 밟았으면 의미가 없다 — 커버리지를 단정한다.
+
+    내용 단정은 **미션 구간**에서 한다. 뒤에 붙는 보강 벡터가 항법 무효·모드 토글·마하 스윕·포화를 전부 확실히
+    밟으므로 전체 입력으로 보면 미션이 선회나 항법 무효 구간을 잃어도 통과한다. 롤 동적 한계만 전체 입력으로 본다
+    (미션만으로는 기체 동역학에 매여 있다 — mission_trace.run).
+    """
+    all_inputs, _refs, _warm, mission = trace
+    inputs, refs = all_inputs[:mission], _refs[:mission]
     assert any(row["nav_valid"] == 0.0 for row in inputs), "항법 무효(홀드) 구간 없음"
     for flag in ("speed_on", "alt_on", "heading_on", "pitch_on", "hdot_on"):
         vals = {row[flag] for row in inputs}
@@ -144,7 +150,7 @@ def test_trace_exercises_the_hard_paths(trace):
     roll_his = []
     bound_roll = bound_pitch = 0
     integ_over = -math.inf
-    for row in inputs:
+    for row in all_inputs:
         env_runner.step_all(**row)
         e = env_runner.last_env
         if "scas_alloc_roll_hi" not in e:
@@ -176,6 +182,7 @@ def test_trace_exercises_the_hard_paths(trace):
     assert integ_over <= 0.0, (
         f"적분기가 배분 한계를 넘어섰다 (최대 초과 {integ_over:+.3e} rad) — "
         "클램프가 포트 한계가 아니라 생성자 한계를 보고 있다")
+    # 입력은 미션 + 통합 보강 벡터다(mission_trace.run) — 롤 한계는 벡터의 SCAS 포화 왕복이 확실히 친다
     assert bound_roll > 0 and bound_pitch > 0, (
         f"동적 한계에 실제로 걸린 스텝이 없다 (롤 {bound_roll}, 피치 {bound_pitch}) "
         "— 배분 경로의 C 대조가 반쪽이다")
@@ -184,7 +191,7 @@ def test_trace_exercises_the_hard_paths(trace):
 @needs_cc
 def test_generated_fcl_matches_ir(trace, tmp_path):
     """생성 C가 IR·oracle과 비트 일치. -Werror이므로 경고 0도 함께 보증한다."""
-    inputs, refs, warm = trace
+    inputs, refs, warm, _mission = trace
     exe = _build("fcl", "HARNESS_FCL", tmp_path)
 
     stdin = " ".join(repr(v) for v in warm) + "\n"
@@ -430,4 +437,9 @@ def test_분할해도_지문은_그대로다():
     # 격자·δe_trim 표의 수치가 달라졌다. 그래프 위상과 파라미터 목록은 그대로이고 fcl_data.c의 수치만 바뀌었지만,
     # 지문이 값을 포함하므로 모든 파일의 배너가 함께 움직였다.
     # (같은 v1.10 안에서 추진 1.45배 상향으로 δe_trim 표를 다시 도출해 한 번 더 움직였다 — 8855acbb9a03d9be → 7f205e611b1fe53d.)
-    assert fps == {"7f205e611b1fe53d"}, f"형상 지문이 움직였다: {fps}"
+    # 이번 갱신은 **v1.11 θ 상한 마하 표**다 — 실속표에서 유도한 θ_hi(M) 룩업·클램프 노드 2개가 늘고 고도·승강률 PID
+    # 한계와 피치 클립이 신호 포트가 된다. 구조 변경이라 지문이 움직인다 — 7f205e611b1fe53d → 9b992c84c6e5d4f8.
+    # 같은 버전의 안티와인드업 보강(감쇠항이 있는 PID 가드가 PID 출력과 축 출력 중 더 나간 쪽으로 판정 — 3항 두 줄)은
+    # 생성 C 문장을 바꾸지만 **지문을 움직이지 않는다** — 지문은 그래프·파라미터·dt의 신원이지 에미터 문장의 해시가
+    # 아니다(07 §6). 문장만 바뀐 변경은 이 테스트가 아니라 test_committed_artifacts_match_generator가 잡는다.
+    assert fps == {"9b992c84c6e5d4f8"}, f"형상 지문이 움직였다: {fps}"

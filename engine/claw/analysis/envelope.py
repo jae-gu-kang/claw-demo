@@ -438,6 +438,33 @@ def design_envelope(
     }
 
 
+def pitch_limit_table(stall_table, *, alpha_margin):
+    """피치 상한 **표** θ_hi(M) = α_stall(M) − margin — 그래프가 룩업할 형태.
+
+    `LookupBlock`에 그대로 물릴 `Table`을 낸다 — 조립(`BuiltProfile.theta_hi_table`)이 리미터와 같은 마진으로 부른다.
+    **축은 실속표의 축을 그대로 쓴다** — 다시 샘플링하면 원 표에 없는 중간값이
+    탑재 코드의 룩업에 박히고, 두 표가 같은 물리를 다른 격자로 말하게 된다.
+
+    외삽 정책도 실속표를 따른다(`clip`). 그 정책은 실속표가 **선언한 것**이라
+    (plant/demo.py 「여기서 clip은 외삽 회피가 아니라 선언된 정책이다」) 파생 표가
+    임의로 바꾸면 축 밖에서 두 표의 답이 갈린다.
+    """
+    if not float(alpha_margin) >= 0.0:
+        raise ValueError(f"alpha_margin은 0 이상: {alpha_margin}")
+    axis = stall_table.axes[0]
+    vals = [float(v) - float(alpha_margin) for v in np.asarray(stall_table.data).ravel()]
+    if min(vals) <= 0.0:
+        raise ValueError(
+            f"보호경계가 0 이하인 격자점이 있다 (마진 {alpha_margin} 과대) — 최소 {min(vals):.4f}"
+        )
+    return type(stall_table)(
+        {stall_table.axis_names[0]: tuple(float(m) for m in axis)},
+        tuple(vals),
+        name="theta_hi",
+        extrapolate=stall_table.extrapolate,
+    )
+
+
 def aero_envelope(stall_table, db_ranges, *, alpha_margin=0.0, trim_alpha_bounds=None, n_mach=81) -> dict:
     """공력 엔벨로프 선도 데이터 (01 §2.6) — α–Mach 평면의 경계 일습.
 

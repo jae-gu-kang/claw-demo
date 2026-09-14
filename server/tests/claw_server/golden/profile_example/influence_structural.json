@@ -1,7 +1,7 @@
 {
  "golden": "influence_structural",
  "mode": "full",
- "captured_at": "654ec14+dirty",
+ "captured_at": "10fd39d+dirty",
  "value": {
   "dict": {
    "fingerprint": "c48da3269a9a8e4c",
@@ -12,7 +12,7 @@
    "graph": {
     "dict": {
      "name": "fcl",
-     "n_nodes": 78,
+     "n_nodes": 80,
      "n_inputs": 23,
      "n_outputs": 7,
      "enable": "nav_valid",
@@ -87,12 +87,12 @@
     "dict": {
      "__digest__": {
       "dict": {
-       "n": 218,
+       "n": 220,
        "chunk": 100,
        "sha": [
-        "6105e12282c4c07c8d5fd64d2c999c6cb0feb8733734298b289bc4fc902a00a1",
-        "33be22b562b5da31c0f4aab501fb71bee367b0a72b8d357784ace12828806f7c",
-        "646606c40b5cc6bdcd03b2eb89344f39896d02a757e980389aaedf7ec58286e8"
+        "a0ec27d1270ae96ff383d754e6526122d306f5fd441637e39cee97c161a75e61",
+        "2fdb5240b2074acc6719f421e57cf24576383f9fc755462dcf41e22ef8914844",
+        "d66b617407796969450de9eb66b4cba208e70c8243179899eaeff8714f6c54f3"
        ],
        "samples": {
         "dict": {
@@ -174,9 +174,41 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "ap_alt_sum",
+             "id": "ap_alt_damp",
              "kind": "ir",
-             "label": "ap_alt_sum",
+             "label": "ap_alt_damp",
+             "band": "ap",
+             "block": "Gain",
+             "op": null,
+             "group": "ap",
+             "enable": "alt_on",
+             "params": {
+              "dict": {
+               "dict": {
+                "dict": {
+                 "k": "f:-0x1.0624dd2f1a9fcp-7"
+                }
+               }
+              }
+             },
+             "gains": {
+              "dict": {
+               "dict": {
+                "dict": {}
+               }
+              }
+             }
+            }
+           }
+          }
+         },
+         "52": {
+          "dict": {
+           "dict": {
+            "dict": {
+             "id": "ap_theta_ff",
+             "kind": "ir",
+             "label": "ap_theta_ff",
              "band": "ap",
              "block": "Sum",
              "op": null,
@@ -205,45 +237,13 @@
            }
           }
          },
-         "52": {
-          "dict": {
-           "dict": {
-            "dict": {
-             "id": "ap_fv",
-             "kind": "ir",
-             "label": "ap_fv",
-             "band": "ap",
-             "block": "CommandFilter",
-             "op": null,
-             "group": "ap",
-             "enable": "speed_on",
-             "params": {
-              "dict": {
-               "dict": {
-                "dict": {
-                 "tau": "f:0x1.0000000000000p+1"
-                }
-               }
-              }
-             },
-             "gains": {
-              "dict": {
-               "dict": {
-                "dict": {}
-               }
-              }
-             }
-            }
-           }
-          }
-         },
          "65": {
           "dict": {
            "dict": {
             "dict": {
-             "id": "scas_yaw_err",
+             "id": "scas_roll_diff",
              "kind": "ir",
-             "label": "scas_yaw_err",
+             "label": "scas_roll_diff",
              "band": "scas",
              "block": "Sum",
              "op": null,
@@ -254,6 +254,7 @@
                "dict": {
                 "dict": {
                  "signs": [
+                  "f:0x1.0000000000000p+0",
                   "f:-0x1.0000000000000p+0"
                  ]
                 }
@@ -275,11 +276,11 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "scas_alloc_da_neg",
+             "id": "scas_roll_sum",
              "kind": "ir",
-             "label": "scas_alloc_da_neg",
+             "label": "scas_roll_sum",
              "band": "scas",
-             "block": "Gain",
+             "block": "Sum",
              "op": null,
              "group": "scas",
              "enable": null,
@@ -287,7 +288,10 @@
               "dict": {
                "dict": {
                 "dict": {
-                 "k": "f:-0x1.0000000000000p+0"
+                 "signs": [
+                  "f:0x1.0000000000000p+0",
+                  "f:0x1.0000000000000p+0"
+                 ]
                 }
                }
               }
@@ -307,13 +311,13 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "mix_sum_l",
+             "id": "scas_yaw_sum",
              "kind": "ir",
-             "label": "mix_sum_l",
-             "band": "mix",
+             "label": "scas_yaw_sum",
+             "band": "scas",
              "block": "Sum",
              "op": null,
-             "group": "mix",
+             "group": "scas",
              "enable": null,
              "params": {
               "dict": {
@@ -342,11 +346,11 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "out:throttle_l",
+             "id": "out:elevon_r",
              "kind": "output",
-             "label": "throttle_l",
+             "label": "elevon_r",
              "band": "io",
-             "source": "mix_thr_l"
+             "source": "mix_elevon_r"
             }
            }
           }
@@ -355,15 +359,15 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "metric:hdg_mp",
+             "id": "metric:alt_mp",
              "kind": "metric",
              "band": "metric",
-             "key": "hdg_mp",
-             "label": "헤딩 오버슈트",
+             "key": "alt_mp",
+             "label": "고도 오버슈트",
              "unit": "-",
              "signals": [
-              "psi",
-              "cmd_heading"
+              "h",
+              "cmd_alt"
              ],
              "better": "lower",
              "desc": "스텝 방향 목표 초과분 최대 / 스텝 크기",
@@ -377,18 +381,18 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "metric:de_dyn_reserve_min_frac",
+             "id": "metric:thr_margin_min",
              "kind": "metric",
              "band": "metric",
-             "key": "de_dyn_reserve_min_frac",
-             "label": "가용 동적 여유(엘레본)",
+             "key": "thr_margin_min",
+             "label": "최소 추력 여유",
              "unit": "-",
              "signals": [
-              "de",
-              "da"
+              "thr_l",
+              "thr_r"
              ],
              "better": "higher",
-             "desc": "min[(한계 − |δe_trim| − |δ(t) − δe_trim|) / 한계] — 트림은 되지만 기동 여유가 없는 점을 잡는다(δmax − max|δ|의 보수적 하한). 롤 사용 포함, 지상·레일 구간 제외",
+             "desc": "기동 중 남아 있던 가장 얇은 여유 1 − thr — 트림값만으로는 안 보인다(상승·선회가 여유를 먹는 것은 기동 중에 일어난다)",
              "tier": "A",
              "group": "타면·권한"
             }
@@ -399,17 +403,21 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "ap_ff_t_raw",
-             "kind": "ghost",
-             "label": "ap_ff_t_raw",
-             "band": "ap",
-             "block": null,
-             "op": "sec2_minus_1",
-             "group": "ap",
-             "appears_with": [
-              "fcl/Autopilot.k_thr_turn"
+             "id": "metric:rollout_dist",
+             "kind": "metric",
+             "band": "metric",
+             "key": "rollout_dist",
+             "label": "접지→정지 직선거리",
+             "unit": "m",
+             "signals": [
+              "pn",
+              "pe",
+              "wow"
              ],
-             "note": "지금 형상엔 없는 노드 — 이 파라미터를 올리면 생긴다"
+             "better": "lower",
+             "desc": "접지점과 정지점의 직선거리(경로장 아님) — 활주로 길이 요구의 근거. 정지 전이면 없음",
+             "tier": "C",
+             "group": "임무·이착륙"
             }
            }
           }
@@ -418,52 +426,38 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "param:fcl/Autopilot.kp_hdg",
+             "id": "param:fcl/Autopilot.k_hdot",
              "band": "ap",
-             "label": "kp_hdg",
-             "unit": "-",
-             "desc": "헤딩 비례 게인",
-             "value": "f:0x1.0000000000000p+2",
+             "label": "k_hdot",
+             "unit": "rad·s/m",
+             "desc": "승강률 댐핑 게인",
+             "value": "f:-0x1.0624dd2f1a9fcp-7",
              "lo": null,
              "hi": null,
              "in_law": true,
-             "probe_to": "f:0x1.028f5c28f5c29p+2",
+             "probe_to": "f:-0x1.0385c67dfe32ap-7",
              "clipped_by": null,
              "changed": [
-              "ap_hdg_pid"
+              "ap_alt_damp"
              ],
              "added": [],
              "removed": [],
              "overridden": [],
              "seeds": [
-              "ap_hdg_pid"
+              "ap_alt_damp"
              ],
              "reach": [
-              "ap_hdg_pid",
-              "ap_hdg_sat",
-              "ap_ff_p_raw",
-              "ap_ff_p",
+              "ap_alt_damp",
+              "ap_alt_pid",
+              "ap_alt_sum",
+              "ap_alt_sat",
+              "ap_theta_vs",
+              "ap_theta_src",
               "ap_theta_ff",
               "ap_theta_out",
               "lim_theta_lim",
               "lim_active",
               "scas_pitch_err",
-              "scas_roll_diff",
-              "scas_roll_err",
-              "scas_alloc_load",
-              "scas_alloc_n",
-              "scas_alloc_resv_raw",
-              "scas_alloc_resv",
-              "scas_alloc_resv_neg",
-              "scas_alloc_roll_hi",
-              "scas_alloc_roll_lo",
-              "scas_roll_pid",
-              "scas_roll_sum",
-              "scas_roll_sat",
-              "scas_alloc_da_neg",
-              "scas_alloc_da_nabs",
-              "scas_alloc_pitch_hi",
-              "scas_alloc_pitch_lo",
               "scas_pitch_pid",
               "scas_pitch_sum",
               "scas_pitch_sat",
@@ -472,7 +466,7 @@
               "mix_sum_r",
               "mix_elevon_r"
              ],
-             "n_reach": 32,
+             "n_reach": 18,
              "outputs": [
               "elevon_l",
               "elevon_r",
@@ -483,7 +477,7 @@
              "added_meta": [],
              "error": null,
              "kind": "param",
-             "param_id": "fcl/Autopilot.kp_hdg"
+             "param_id": "fcl/Autopilot.k_hdot"
             }
            }
           }
@@ -492,31 +486,48 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "param:fcl/ScasAxis.pitch.k_rate",
+             "id": "param:fcl/ScasAxis.pitch.kp",
              "band": "scas",
-             "label": "pitch.k_rate",
-             "unit": "s",
-             "desc": "각속도 피드백 게인",
-             "value": "f:0x1.999999999999ap-2",
+             "label": "pitch.kp",
+             "unit": "-",
+             "desc": "자세오차 비례 게인",
+             "value": "f:-0x1.0000000000000p+1",
              "lo": null,
              "hi": null,
              "in_law": true,
-             "probe_to": "f:0x1.9db22d0e56042p-2",
+             "probe_to": "f:-0x1.fae147ae147aep+0",
              "clipped_by": null,
-             "changed": [],
+             "changed": [
+              "scas_pitch_pid"
+             ],
              "added": [],
              "removed": [],
-             "overridden": [],
-             "seeds": [],
-             "reach": [],
-             "n_reach": 0,
-             "outputs": [],
+             "overridden": [
+              "scas_pitch_pid"
+             ],
+             "seeds": [
+              "scas_pitch_pid"
+             ],
+             "reach": [
+              "scas_pitch_pid",
+              "scas_pitch_sum",
+              "scas_pitch_sat",
+              "mix_sum_l",
+              "mix_elevon_l",
+              "mix_sum_r",
+              "mix_elevon_r"
+             ],
+             "n_reach": 7,
+             "outputs": [
+              "elevon_l",
+              "elevon_r"
+             ],
              "structural": false,
-             "inert": true,
+             "inert": false,
              "added_meta": [],
              "error": null,
              "kind": "param",
-             "param_id": "fcl/ScasAxis.pitch.k_rate"
+             "param_id": "fcl/ScasAxis.pitch.kp"
             }
            }
           }
@@ -525,29 +536,27 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "param:fcl/ScasAxis.yaw.washout_tau",
+             "id": "param:fcl/ScasAxis.yaw.ki",
              "band": "scas",
-             "label": "yaw.washout_tau",
-             "unit": "s",
-             "desc": "rate 워시아웃 시정수 (0=미사용)",
-             "value": "f:0x1.0000000000000p+1",
-             "lo": "f:0x0.0p+0",
+             "label": "yaw.ki",
+             "unit": "1/s",
+             "desc": "자세오차 적분 게인",
+             "value": "f:0x0.0p+0",
+             "lo": null,
              "hi": null,
              "in_law": true,
-             "probe_to": "f:0x1.028f5c28f5c29p+1",
+             "probe_to": "f:0x1.47ae147ae147bp-7",
              "clipped_by": null,
              "changed": [
-              "scas_yaw_wo"
+              "scas_yaw_pid"
              ],
              "added": [],
              "removed": [],
              "overridden": [],
              "seeds": [
-              "scas_yaw_wo"
+              "scas_yaw_pid"
              ],
              "reach": [
-              "scas_yaw_wo",
-              "scas_yaw_damp",
               "scas_yaw_pid",
               "scas_yaw_sum",
               "scas_yaw_sat",
@@ -558,7 +567,7 @@
               "mix_thr_r_raw",
               "mix_thr_r"
              ],
-             "n_reach": 11,
+             "n_reach": 9,
              "outputs": [
               "rudder",
               "throttle_l",
@@ -569,7 +578,7 @@
              "added_meta": [],
              "error": null,
              "kind": "param",
-             "param_id": "fcl/ScasAxis.yaw.washout_tau"
+             "param_id": "fcl/ScasAxis.yaw.ki"
             }
            }
           }
@@ -578,11 +587,11 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "param:table.roll.ki",
+             "id": "param:table.pitch.kp",
              "band": "sched",
-             "label": "roll.ki (곡선 배율)",
+             "label": "pitch.kp (곡선 배율)",
              "unit": "-",
-             "desc": "게인 스케줄 곡선 roll.ki 전체 배율 — 절점 개별값이 아님",
+             "desc": "게인 스케줄 곡선 pitch.kp 전체 배율 — 절점 개별값이 아님",
              "value": "f:0x1.0000000000000p+0",
              "lo": "f:0x0.0p+0",
              "hi": null,
@@ -590,23 +599,16 @@
              "probe_to": "f:0x1.028f5c28f5c29p+0",
              "clipped_by": null,
              "changed": [
-              "sched_roll_ki"
+              "sched_pitch_kp"
              ],
              "added": [],
              "removed": [],
              "overridden": [],
              "seeds": [
-              "sched_roll_ki"
+              "sched_pitch_kp"
              ],
              "reach": [
-              "sched_roll_ki",
-              "scas_roll_pid",
-              "scas_roll_sum",
-              "scas_roll_sat",
-              "scas_alloc_da_neg",
-              "scas_alloc_da_nabs",
-              "scas_alloc_pitch_hi",
-              "scas_alloc_pitch_lo",
+              "sched_pitch_kp",
               "scas_pitch_pid",
               "scas_pitch_sum",
               "scas_pitch_sat",
@@ -615,7 +617,7 @@
               "mix_sum_r",
               "mix_elevon_r"
              ],
-             "n_reach": 15,
+             "n_reach": 8,
              "outputs": [
               "elevon_l",
               "elevon_r"
@@ -625,7 +627,7 @@
              "added_meta": [],
              "error": null,
              "kind": "param",
-             "param_id": "table.roll.ki"
+             "param_id": "table.pitch.kp"
             }
            }
           }
@@ -634,12 +636,12 @@
           "dict": {
            "dict": {
             "dict": {
-             "id": "param:nav/ErrorModel.delay_s",
+             "id": "param:nav/ErrorModel.bias_std_v",
              "band": "nav",
-             "label": "delay_s",
-             "unit": "s",
-             "desc": "항법 출력 지연",
-             "value": "f:0x1.eb851eb851eb8p-6",
+             "label": "bias_std_v",
+             "unit": "m",
+             "desc": "수직 위치 마르코프 바이어스 정상 표준편차",
+             "value": "f:0x1.8000000000000p+0",
              "lo": "f:0x0.0p+0",
              "hi": null,
              "in_law": false,
@@ -658,7 +660,7 @@
              "added_meta": [],
              "error": null,
              "kind": "param",
-             "param_id": "nav/ErrorModel.delay_s"
+             "param_id": "nav/ErrorModel.bias_std_v"
             }
            }
           }
@@ -673,13 +675,13 @@
     "dict": {
      "__digest__": {
       "dict": {
-       "n": 365,
+       "n": 378,
        "chunk": 100,
        "sha": [
-        "1f961517e40a25437e12e2b31eae662c4554bec109e16af8350093dd9059f8c9",
-        "7633e7eb9715ff6bd8d6bbb28186371ec52d359f251a3129d54fd1693819ffa8",
-        "4baca3af00d6728e2e63f0e659abd27f3f2cf97817fe438b9b2e301c8613a0f8",
-        "a8cec377d8c6627cfa16adadc50415f0cfda38622bca19bf38ad09054fce3308"
+        "c08f5664e5650b6e4902cfcad9f82bf63515bbae7bac088ba76b1b60d727184e",
+        "1fc2af6518cd2bee76cd9eb22c4bd6f84bcb12b68e712a9b02dc6464b08843b2",
+        "28e4929e1713271a1f71378f973075922c392ae6a17082d6cd6f68578bcc3e8b",
+        "509fc41ea3901d955c5ba962e36b55868e1e223e501e067eb3f903c39d4e7d23"
        ],
        "samples": {
         "dict": {
@@ -695,11 +697,11 @@
            }
           }
          },
-         "22": {
+         "23": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "in:h",
+             "src": "in:cmd_alt",
              "dst": "ap_fh",
              "kind": "ir",
              "port": "input"
@@ -707,79 +709,78 @@
            }
           }
          },
-         "44": {
+         "46": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "in:cmd_pitch",
-             "dst": "ap_pitch_sat",
+             "src": "ap_vs_err",
+             "dst": "ap_vs_pid",
              "kind": "ir",
              "port": "input"
             }
            }
           }
          },
-         "66": {
+         "69": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "lim_stall",
-             "dst": "lim_alpha_max",
+             "src": "in:V",
+             "dst": "ap_spd_err",
              "kind": "ir",
              "port": "input"
             }
            }
           }
          },
-         "88": {
+         "92": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "scas_alloc_resv_neg",
-             "dst": "scas_alloc_roll_hi",
+             "src": "scas_alloc_trim",
+             "dst": "scas_alloc_resv_raw",
              "kind": "ir",
              "port": "input"
             }
            }
           }
          },
-         "110": {
+         "115": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "scas_pitch_err",
-             "dst": "scas_pitch_pid",
+             "src": "scas_alloc_pitch_hi",
+             "dst": "scas_alloc_pitch_lo",
              "kind": "ir",
              "port": "input"
             }
            }
           }
          },
-         "132": {
+         "138": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "scas_roll_sat",
-             "dst": "mix_sum_r",
+             "src": "mix_sum_l",
+             "dst": "mix_elevon_l",
              "kind": "ir",
              "port": "input"
             }
            }
           }
          },
-         "154": {
+         "161": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "lim_a_margin",
-             "dst": "out:alpha_margin",
-             "kind": "ir",
-             "port": "output"
+             "src": "out:limiter_active",
+             "dst": "sys:plant",
+             "kind": "boundary"
             }
            }
           }
          },
-         "176": {
+         "184": {
           "dict": {
            "dict": {
             "dict": {
@@ -790,35 +791,35 @@
            }
           }
          },
-         "198": {
+         "207": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "param:fcl/Autopilot.ki_spd",
-             "dst": "ap_spd_pid",
+             "src": "param:fcl/Autopilot.tau_spd",
+             "dst": "ap_fv",
              "kind": "param",
              "effect": "changed"
             }
            }
           }
          },
-         "220": {
+         "230": {
           "dict": {
            "dict": {
             "dict": {
              "src": "param:fcl/Autopilot.theta_hi",
              "dst": "ap_pitch_sat",
              "kind": "param",
-             "effect": "changed"
+             "effect": "overridden"
             }
            }
           }
          },
-         "242": {
+         "253": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "param:fcl/ScasAxis.roll.kp",
+             "src": "param:fcl/ScasAxis.roll.ki",
              "dst": "scas_roll_pid",
              "kind": "param",
              "effect": "overridden"
@@ -826,11 +827,11 @@
            }
           }
          },
-         "264": {
+         "276": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "param:fcl/Mixer.elevon_lo",
+             "src": "param:fcl/Mixer.elevon_hi",
              "dst": "mix_elevon_l",
              "kind": "param",
              "effect": "changed"
@@ -838,47 +839,47 @@
            }
           }
          },
-         "286": {
+         "299": {
           "dict": {
            "dict": {
             "dict": {
              "src": "param:rate.control_hz",
-             "dst": "ap_psi_diff",
+             "dst": "ap_hdg_sat",
              "kind": "param",
              "effect": "changed"
             }
            }
           }
          },
-         "308": {
+         "322": {
           "dict": {
            "dict": {
             "dict": {
              "src": "param:rate.control_hz",
-             "dst": "ap_spd_sat",
+             "dst": "lim_stall",
              "kind": "param",
              "effect": "changed"
             }
            }
           }
          },
-         "330": {
+         "345": {
           "dict": {
            "dict": {
             "dict": {
              "src": "param:rate.control_hz",
-             "dst": "scas_yaw_wo",
+             "dst": "scas_yaw_pid",
              "kind": "param",
              "effect": "changed"
             }
            }
           }
          },
-         "352": {
+         "368": {
           "dict": {
            "dict": {
             "dict": {
-             "src": "param:nav/ErrorModel.bias_std_h",
+             "src": "param:nav/ErrorModel.delay_s",
              "dst": "sys:plant",
              "kind": "offgraph"
             }
@@ -1407,7 +1408,7 @@
     }
    ],
    "warnings": [
-    "게인 스케줄이 덮어써 실행에 반영되지 않는 상수 8개: fcl/ScasAxis.pitch.kp, fcl/ScasAxis.pitch.ki, fcl/ScasAxis.pitch.out_lo, fcl/ScasAxis.pitch.out_hi, fcl/ScasAxis.roll.kp, fcl/ScasAxis.roll.ki, fcl/ScasAxis.roll.out_lo, fcl/ScasAxis.roll.out_hi — 실효값은 게인 탭의 테이블이다",
+    "게인 스케줄이 덮어써 실행에 반영되지 않는 상수 9개: fcl/Autopilot.theta_hi, fcl/ScasAxis.pitch.kp, fcl/ScasAxis.pitch.ki, fcl/ScasAxis.pitch.out_lo, fcl/ScasAxis.pitch.out_hi, fcl/ScasAxis.roll.kp, fcl/ScasAxis.roll.ki, fcl/ScasAxis.roll.out_lo, fcl/ScasAxis.roll.out_hi — 실효값은 게인 탭의 테이블이다",
     "그래프에 방출되지 않는 상수 2개: fcl/ScasAxis.pitch.k_rate, fcl/ScasAxis.roll.k_rate — 스케줄 경로가 상수 대신 조회 노드를 쓰므로 편집해도 아무 일도 일어나지 않는다"
    ],
    "profile": {

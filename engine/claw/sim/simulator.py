@@ -48,6 +48,7 @@ _CHAIN_SIGNALS = (
     "ap_vs_pi", "ap_theta_alt", "ap_theta_vs", "ap_theta_pitch", "ap_theta_src",
     "theta_lim",  # 리미터 → SCAS (보호가 물리면 theta_cmd와 갈라진다)
     "lim_cap",  # 리미터 θ 상한 — 귀속(감쇠 vs margin)의 근거
+    "theta_hi",  # AP θ 명령 상한 min(theta_hi, θ_hi(M)) — 고도·승강률 적분기 클램프(와인드업 진단, v1.11)
     "pitch", "roll", "yaw",  # SCAS → 믹서
     "pitch_pi", "pitch_damp", "pitch_raw",  # SCAS 축 기여항 (포화 전)
     "roll_pi", "roll_damp", "roll_raw",
@@ -554,6 +555,10 @@ class Simulator:
             out["alt"] = out["spd"] = out["hdg"] = None
         else:
             out["alt"] = {"lo": float(cfg["theta_lo"]), "hi": float(cfg["theta_hi"])}
+            # θ 상한이 실속표에서 유도한 마하 표면(v1.11) 실제 클램프는 스텝마다 min(theta_hi, θ_hi(M))이다 —
+            # 스칼라는 바깥 상자로 남기고, 스텝별 값은 계측 신호 이름으로 가리킨다(값을 여기 사본으로 두지 않는다)
+            if getattr(self.fcl, "theta_hi_table", None) is not None:
+                out["alt"]["hi_signal"] = "theta_hi"
             out["spd"] = {"lo": 0.0, "hi": 1.0}
             out["hdg"] = {"lo": -float(cfg["phi_max"]), "hi": float(cfg["phi_max"])}
         return out

@@ -51,8 +51,12 @@ def assemble_law(
     margin = law["alpha_margin"] if alpha_margin is None else float(alpha_margin)
     limiter = AlphaLimiter(profile.stall_table(), margin=margin) if with_limiter else None
     alloc = {} if profile.alloc_resv_frac is None else {"alloc_resv_frac": profile.alloc_resv_frac}
+    # θ 상한은 실속표에서 유도한 마하 표다(v1.11) — 리미터가 있을 때만. 리미터와 **같은 마진**으로 만든다
+    # (fcl_graph가 θ_hi(M) ≤ α_stall(M) − margin을 격자점마다 검사한다). 스칼라 theta_hi는 바깥 상자로 남는다
+    theta_hi = profile.theta_hi_table(margin) if with_limiter else None
     return FlightControlLaw(
         scas, ap, mixer, schedule=schedule, alpha_limiter=limiter,
         alloc_trim_table=profile.alloc_trim_table(),
+        theta_hi_table=theta_hi,
         **alloc,
     )

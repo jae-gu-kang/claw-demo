@@ -95,6 +95,18 @@ class BuiltProfile:
     def stall_table(self) -> Table:
         return _mach_table(self.doc["stall"]["table"], "alpha_stall")
 
+    def theta_hi_table(self, alpha_margin: float | None = None) -> Table:
+        """피치 명령 상한 표 θ_hi(M) = α_stall(M) − margin — 실속표 축 그대로 (01 §3.5, v1.11).
+
+        margin을 안 주면 리미터와 같은 `law.alpha_margin`이다. 조립이 주입한 마진(영향성 스윕)을 그대로 넘겨야 표와
+        리미터가 같은 보호경계를 말한다 — 표가 문서 값에 묶여 있으면 마진을 흔드는 스윕에서 둘이 갈린다.
+        유도식은 analysis/envelope.py `pitch_limit_table`이 정본이다(fcl이 analysis를 import하지 않도록 여기서 부른다).
+        """
+        from claw.analysis.envelope import pitch_limit_table
+
+        margin = self.doc["law"]["alpha_margin"] if alpha_margin is None else float(alpha_margin)
+        return pitch_limit_table(self.stall_table(), alpha_margin=margin)
+
     @property
     def neg_alpha_ratio(self) -> float:
         return self.doc["stall"]["neg_alpha_ratio"]
