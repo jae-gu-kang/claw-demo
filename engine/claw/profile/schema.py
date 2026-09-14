@@ -683,16 +683,26 @@ def _variants(v, base):
 def document_warnings(doc: dict) -> list:
     """검증된 문서에서 알려야 할 것 — [{"path", "message"}]. 오류가 아니다(저장·계산은 된다).
 
-    - 트림 α 탐색 상한 < 실속 표 최대: 트림 α 판정은 실속 표 기준(α < α_stall(M) − trim.alpha_margin)인데, 해가
-      탐색 상한을 넘을 수 없어 그 차이만큼 저속에서 트림이 실속각이 아니라 탐색 상한에 막힌다(저속 가림)."""
-    out = []
-    hi = float(doc["trim"]["alpha_bounds"][1])
-    stall_max = max(float(v) for v in doc["stall"]["table"]["data"])
-    if hi < stall_max:
-        out.append({"path": "/trim/alpha_bounds/1",
-                    "message": f"트림 α 탐색 상한 {hi:g} rad가 실속 표 최대 {stall_max:g} rad보다 낮다 — 저속에서 트림이 "
-                               "실속각이 아니라 탐색 상한에 막힌다(저속 가림). α 여유 판정은 실속 표 기준이라 탐색 상한은 "
-                               "판정이 아니라 풀이 범위다"})
+    - 트림 α 탐색 상한 < 판정 한계 최대(실속 표 최대 − trim.alpha_margin): 트림 α 판정은 실속 표 기준인데 해가 탐색
+      상한을 넘을 수 없어, 저속에서 트림이 판정 한계가 아니라 탐색 상한에 막힌다(저속 가림). 실속 표 최대와 비교하면
+      그 사이(판정 한계 위·실속각 아래)의 상한에도 경고하게 된다 — 그 상한은 아무것도 가리지 않는다.
+    형상 변형이 trim·stall을 덮어쓰면 달라지므로 변형마다도 본다(variant 키)."""
+    def check(d, variant):
+        hi = float(d["trim"]["alpha_bounds"][1])
+        limit_max = max(float(v) for v in d["stall"]["table"]["data"]) - float(d["trim"]["alpha_margin"])
+        if hi >= limit_max:
+            return []
+        return [{"path": "/trim/alpha_bounds/1", "variant": variant,
+                 "message": f"트림 α 탐색 상한 {hi:g} rad가 판정 한계 최대 {limit_max:g} rad(실속 표 최대 − 트림 α 여유)보다 "
+                            "낮다 — 저속에서 트림이 판정 한계가 아니라 탐색 상한에 막힌다(저속 가림). 탐색 상한은 판정이 아니라 "
+                            "풀이 범위다"}]
+
+    out = check(doc, None)
+    for item in doc.get("variants") or []:
+        eff = effective_document(doc, item["id"])
+        warns = check(eff, item["id"])
+        if warns and not (out and eff["trim"] == doc["trim"] and eff["stall"] == doc["stall"]):
+            out += warns
     return out
 
 

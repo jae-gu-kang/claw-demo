@@ -470,3 +470,30 @@ def test_추력_천장은_조립된_법칙의_포화_한계와_같다():
     his = {n.params["hi"] for n in law.runner.graph.nodes
            if n.id in ("mix_thr_l", "mix_thr_r")}
     assert his == {THR_HI}, f"법칙 포화 한계 {his} ≠ metrics 천장 {THR_HI}"
+
+
+
+def test_dynamic_reserve_stays_conservative_with_asymmetric_elevon_limits():
+    """한계는 표본의 부호 쪽이다 — 트림 쪽 한계를 쓰면 반대쪽 멈춤에 붙은 표본의 여유가 부풀려진다(리뷰 재현).
+
+    한계 −0.20/+0.35, 트림 δe +0.01, 엘레본이 −0.20 멈춤에 붙으면 참 여유는 0이다. 종전 식은 37 %였다."""
+    import numpy as np
+
+    from claw.pipeline.metrics import trim_reserve_breakdown
+
+    n = 50
+    de = np.full(n, 0.01)
+    de[20:30] = -0.20
+    signals = {"de": de, "da": np.zeros(n), "dr": np.zeros(n), "wow": np.zeros(n, dtype=bool)}
+    meta = {"limits": {"elevon_lo": -0.20, "elevon_hi": 0.35},
+            "trim": {"mach": 0.4, "de": 0.01, "reserve": {"de": {"frac": 0.01 / 0.35}, "thr": {"reserve_hi": 0.5},
+                                                          "alpha": {"stall_reserve": 0.2}}}}
+    br = trim_reserve_breakdown(signals, meta)
+    assert br["de_dyn_reserve_min_frac"] <= 0.0  # 멈춤에 붙었다 — 여유가 없다
+    assert abs(br["de_excursion_max"] - 0.21) < 1e-12 and br["reference"] == "start_trim"
+
+    # 트림과 같은 쪽으로 멀어지는 표본은 한계 − |δ| 그대로다
+    de2 = np.full(n, 0.01)
+    de2[5] = 0.30
+    br2 = trim_reserve_breakdown({**signals, "de": de2}, meta)
+    assert abs(br2["de_dyn_reserve_min_frac"] - (0.35 - 0.30) / 0.35) < 1e-12

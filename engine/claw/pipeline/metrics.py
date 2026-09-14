@@ -376,7 +376,9 @@ def trim_reserve_breakdown(signals, meta) -> dict:
     """트림 몫과 기동 몫 — 가용 동적 여유 (카드 ⑦, 01 §4.1). 지표 5개 + 기준선 출처(reference).
 
     δreserve_dynamic = (한계 − |δe_ref|) − |δ(t) − δe_ref| 를 엘레본 좌·우(롤 사용 포함) 표본마다 한계로 나눠 최소를
-    취한다 — δmax − max|δ|의 보수적 하한이다(편차의 방향을 버린다). 지상·레일 구간은 뺀다(바퀴가 하중을 받는 구간에는
+    취한다 — δmax − max|δ|의 보수적 하한이다(편차의 방향을 버린다). **한계는 표본 δ(t)의 부호 쪽**이다: 트림 쪽 한계를
+    쓰면 0을 지나 반대쪽 멈춤으로 간 표본의 여유가 비대칭 엘레본에서 부풀려진다(한계 −0.20/+0.35·트림 +0.01에서 −0.20
+    멈춤에 붙은 표본이 37 %로 읽혔다). 표본 쪽 한계면 반대쪽 표본은 한계 − 2|δe_ref| − |δ|로 참 여유 이하다. 지상·레일 구간은 뺀다(바퀴가 하중을 받는 구간에는
     1g 트림 요구가 없다). δe_ref는 시작 트림 상수이고, 런 중 마하가 TRIM_REF_MACH_SPAN 넘게 움직이면 법칙의 δe_trim(M)
     할당 표(크기)에 시작 트림의 부호를 붙여 읽는다 — 할당 표는 연료·고도 최악값이라 기준선이 보수적으로 크다.
 
@@ -415,11 +417,11 @@ def trim_reserve_breakdown(signals, meta) -> dict:
             sign = -1.0 if de0 < 0.0 else 1.0
             ref = sign * np.interp(mach, np.asarray(table["mach"], float), np.asarray(table["data"], float))
             out["reference"] = "alloc_table"
-    lim = np.where(ref >= 0.0, hi, -lo)
     out["de_limit"] = hi if de0 >= 0.0 else -lo  # 시작 트림 부호 쪽 한계 — 화면이 기동 몫을 비율로 그린다
     exc_max, frac_min = None, None
     for key in ("elevon_l", "elevon_r"):
         x = np.asarray(surfaces[key], dtype=float)
+        lim = np.where(x >= 0.0, hi, -lo)
         m = np.isfinite(x) & np.isfinite(ref) & ~ground & (lim > 0.0)
         if not m.any():
             continue

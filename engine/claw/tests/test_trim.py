@@ -379,3 +379,16 @@ def test_트림_여유_수치가_판정의_근거다(ac):
         assert r["thr"]["reserve_hi"] == 1.0 - thr and r["elevon_roll_avail"] == 0.35 - abs(de)
     low = trim_level(ac, TrimCase("low", mach=0.2, alt=0.0, fuel=200.0))
     assert low.converged and low.flags["alpha_margin_ok"] is True and low.reserve["alpha"]["trim"] > 0.315
+
+
+def test_트림_여유의_소모율은_부호_쪽_한계로_나눈다():
+    """비대칭 엘레본 — 음의 δe는 하한 쪽으로 나눈다(상한으로 나누면 소모율이 틀린다)."""
+    from claw.profile import example_profile
+    from claw.trim.trim import trim_reserve
+
+    tb = {"de": (-0.20, 0.35), "alpha_margin": 0.035, "stall": example_profile().stall_table()}
+    neg = trim_reserve(0.1, -0.10, 0.5, 0.4, tb)
+    assert neg["de"]["limit"] == 0.20 and neg["de"]["frac"] == 0.5 and neg["de"]["reserve"] == 0.10
+    pos = trim_reserve(0.1, 0.10, 0.5, 0.4, tb)
+    assert pos["de"]["limit"] == 0.35 and pos["de"]["frac"] == 0.10 / 0.35
+    assert neg["de"]["reserve_hi"] == pytest.approx(0.45) and neg["de"]["reserve_lo"] == pytest.approx(0.10)

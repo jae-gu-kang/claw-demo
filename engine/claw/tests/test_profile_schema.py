@@ -199,5 +199,9 @@ def test_document_warns_when_the_trim_search_hides_the_low_speed_stall():
     doc = validate_document(load_example())
     warns = document_warnings(doc)
     assert [w["path"] for w in warns] == ["/trim/alpha_bounds/1"] and "저속 가림" in warns[0]["message"]
-    doc["trim"]["alpha_bounds"] = [-0.1, 0.45]
+    doc["trim"]["alpha_bounds"] = [-0.1, 0.37]  # 판정 한계 최대 0.365 위 — 실속각 0.40 아래여도 가리는 것이 없다
     assert document_warnings(validate_document(doc)) == []
+    # 형상 변형이 탐색 상한을 낮추면 그 변형만 경고한다
+    doc["variants"] = [{"id": "narrow", "name": "좁은 탐색", "patch": {"/trim/alpha_bounds": [-0.1, 0.30]}}]
+    warns = document_warnings(validate_document(doc))
+    assert [(w["variant"], w["path"]) for w in warns] == [("narrow", "/trim/alpha_bounds/1")]

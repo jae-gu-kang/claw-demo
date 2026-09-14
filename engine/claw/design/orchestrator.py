@@ -182,6 +182,8 @@ def _trim_to_dict(tr: TrimResult) -> dict:
         "thr": float(tr.control.throttle[0]),
         "converged": tr.converged, "cost": tr.cost, "flags": dict(tr.flags),
         "fingerprint": tr.params_fingerprint,
+        # 트림 여유 수치(01 §4.1) — 저장·재개 뒤에도 "미계산"으로 바뀌지 않게 싣는다
+        "reserve": dict(getattr(tr, "reserve", None) or {}),
     }
 
 
@@ -203,7 +205,8 @@ def _trim_from_dict(d: dict) -> TrimResult:
     )
     tr = TrimResult(case=case, state=state, control=control,
                     converged=bool(d["converged"]), cost=float(d["cost"]),
-                    flags=dict(d["flags"]), params_fingerprint=d.get("fingerprint", ""))
+                    flags=dict(d["flags"]), params_fingerprint=d.get("fingerprint", ""),
+                    reserve=dict(d.get("reserve") or {}))  # 옛 세션 저장물에는 없다 — 미계산(빈 dict)
     tr._design_dict = dict(d)  # 직렬화 멱등성 캐시 (_trim_to_dict 참조)
     return tr
 

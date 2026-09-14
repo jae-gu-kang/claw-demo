@@ -561,3 +561,12 @@ def test_가용_동적_여유는_트림은_되지만_기동_여유가_없는_점
     # 선형 단계·트림 여유 없는 저장물은 판정 불가 — 통과로 위장하지 않는다
     stage, fails = _authority_stage(SimpleNamespace(control=tr.control, reserve={}), None, crit, (-0.35, 0.35))
     assert stage["dynamic"]["status"] == "na" and stage["thr_trim"]["status"] == "na" and fails == []
+
+
+
+def test_평가가_두_런의_가용_동적_여유를_판정에_넘긴다(report):
+    """비선형 평가 — ⑦의 dynamic이 표준·동시명령 두 런을 다 본다(연결이 끊기면 합성 테스트로는 안 잡힌다)."""
+    stages = [c["stages"]["authority"] for c in report["cases"]]
+    assert stages and all(s["dynamic"]["status"] in ("ok", "fail") for s in stages)
+    assert all(set(s["dynamic"]["by_run"]) == {"standard", "combined"} for s in stages)
+    assert all(s["dynamic"]["value"] == min(s["dynamic"]["by_run"].values()) for s in stages)

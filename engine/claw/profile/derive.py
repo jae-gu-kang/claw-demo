@@ -71,10 +71,11 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=DEFA
     """BuiltProfile → {"ok", "reason", "reason_text", "alloc", "requirement", "elapsed_s"}.
 
     alloc은 law.alloc 모양({resv_frac, de_trim{source "derived", table, provenance}}) — resv_frac은 문서 값을
-    그대로 두고, 할당 섹션이 없던 기체면 법칙 기본값이다. 요구가 없는 표 격자 마하(모든 트림이 미수렴·포화)는
-    **양 끝이면 표에서 뺀다** — 날 수 없는 마하에 이웃 값을 복사해 두면 없는 요구가 있는 것처럼 보인다(룩업은 표 끝에서
-    clip하므로 뺀 쪽이 거동은 같고 표는 정직하다). 가운데 빈 점만 이웃 값으로 채운다. 둘 다 출처에 적는다
-    (trimmed_machs · undefined_machs). variants는 같은 문서의 형상 변형 BuiltProfile들 — 플랜트
+    그대로 두고, 할당 섹션이 없던 기체면 법칙 기본값이다. 표의 양 끝은 **요구가 있는 검사점**으로 정한다 — 첫(마지막)
+    요구 검사점을 덮는 가장 안쪽 격자점까지 남기고 그 밖의 격자점은 표에서 뺀다(trimmed_machs). 격자점만 보고 자르면
+    잘린 격자점과 첫 요구 격자점 사이의 검사점 요구가 버려져, clip 룩업이 끝값을 답하는 자리가 모자란다(격자 0.1·0.3에서
+    M0.25 요구 0.188을 0.128로 답했다). 남긴 격자점 중 자기 요구가 없는 점은 요구 검사점들의 보간값으로 시작하고
+    보정이 덮는다(undefined_machs) — 이웃 격자값을 복사하지 않는다. variants는 같은 문서의 형상 변형 BuiltProfile들 — 플랜트
     지문이 기본 문서와 같은 변형은 다시 재지 않는다. alts를 주지 않으면 기체마다 운용 범위로 거른 DEFAULT_ALTS."""
     t0 = time.perf_counter()
     grid = _grid(built, machs)
@@ -106,19 +107,25 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=DEFA
                 worst = de if worst is None else max(worst, de)
         need[m] = worst
 
-    values = [need[round(g, 6)] for g in grid]
-    defined = [i for i, v in enumerate(values) if v is not None]
-    if len(defined) < 2:
+    req_m = [m for m in checks if need[m] is not None]
+    if len(req_m) < 2:
         return {"ok": False, "reason": REASON_NO_REQUIREMENT, "reason_text": REASON_TEXT[REASON_NO_REQUIREMENT],
                 "alloc": None, "requirement": None, "elapsed_s": time.perf_counter() - t0}
-    first, last = defined[0], defined[-1]
+    lo_m, hi_m = req_m[0], req_m[-1]
+    first = max((i for i, g in enumerate(grid) if g <= lo_m + 1e-9), default=0)
+    last = min((i for i, g in enumerate(grid) if g >= hi_m - 1e-9), default=len(grid) - 1)
+    if last - first < 1:  # 요구 검사점들이 한 격자 칸 안 — 그 칸의 양 끝을 남긴다
+        first, last = (first, first + 1) if first + 1 < len(grid) else (last - 1, last)
     trimmed = [g for i, g in enumerate(grid) if i < first or i > last]
-    grid, values = grid[first:last + 1], values[first:last + 1]
-    checks = [m for m in checks if grid[0] - 1e-9 <= m <= grid[-1] + 1e-9]
-    undefined = [g for g, v in zip(grid, values) if v is None]
-    known = [(g, v) for g, v in zip(grid, values) if v is not None]
-    kg, kv = [g for g, _ in known], [v for _, v in known]
-    values = [v if v is not None else float(np.interp(g, kg, kv)) for g, v in zip(grid, values)]
+    grid = grid[first:last + 1]
+    req_need = [need[m] for m in req_m]
+    values, undefined = [], []
+    for g in grid:
+        v = need[round(g, 6)]
+        if v is None:
+            undefined.append(g)
+            v = float(np.interp(g, req_m, req_need))
+        values.append(v)
 
     pts = [(m, need[m]) for m in checks if need[m] is not None]
     iterations, short = 0, []

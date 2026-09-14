@@ -195,7 +195,7 @@ export function render() {
           `통과 — 지문 ${r.fingerprint} · 플랜트 지문 ${r.plant_fingerprint}`
             + (vs.length ? ` · 형상 변형 ${vs.map(([k, fp]) => `${k} ${fp}`).join(", ")}` : ""),
           // 오류가 아닌 알림(저속 가림 등) — 저장·계산은 된다
-          ...(r.warnings ?? []).map((w) => `주의 ${w.path} — ${w.message}`),
+          ...(r.warnings ?? []).map((w) => `주의${w.variant ? ` [형상 변형 ${w.variant}]` : ""} ${w.path} — ${w.message}`),
         ] };
       } catch (e) {
         target.check = { ok: false, lines: [failText(e)] };
@@ -222,7 +222,7 @@ export function render() {
         next.mode = target.mode;
         next.editVariant = target.editVariant;
         next.check = { ok: true, lines: [`리비전 ${body.revision}로 저장했습니다 — 지문 ${body.fingerprint}`,
-          ...(body.warnings ?? []).map((w) => `주의 ${w.path} — ${w.message}`)] };
+          ...(body.warnings ?? []).map((w) => `주의${w.variant ? ` [형상 변형 ${w.variant}]` : ""} ${w.path} — ${w.message}`)] };
         if (target.text !== sentText) {
           // 저장하는 사이 더 친 글은 버리지 않는다 — 새 리비전 위의 편집으로 남긴다
           next.text = target.text;

@@ -692,3 +692,18 @@ def test_bandwidth_floor_is_one_predicate():
     assert _bandwidth_ok(1.99, 10.0, tg) is False
     assert _bandwidth_ok(float("nan"), 10.0, tg) is False, "못 잰 교차가 통과가 됐다"
     assert _bandwidth_ok(5.0, 0.0, tg) is False, "분모가 없으면 비율이 없다"
+
+
+
+def test_session_trim_round_trip_keeps_the_trim_reserve():
+    """세션 저장·재개가 트림 여유 수치를 잃지 않는다 — 잃으면 재개 뒤 모든 트림이 「미계산」으로 읽힌다(리뷰)."""
+    from claw.common.contracts import TrimCase
+    from claw.design.orchestrator import _trim_from_dict, _trim_to_dict
+    from claw.profile import example_profile
+    from claw.trim import trim_level
+
+    tr = trim_level(example_profile().aircraft(), TrimCase("rt", mach=0.45, alt=1000.0, fuel=200.0))
+    back = _trim_from_dict(_trim_to_dict(tr))
+    assert back.reserve == tr.reserve and back.reserve["de"]["frac"] > 0.0
+    legacy = {k: v for k, v in _trim_to_dict(tr).items() if k != "reserve"}
+    assert _trim_from_dict(legacy).reserve == {}

@@ -122,16 +122,26 @@ def test_derivation_keeps_to_the_operating_altitudes_and_trims_at_the_ceiling():
             assert have >= abs(float(tr.control.elevon[0])) - 1e-12
 
 
-def test_derivation_drops_unflyable_ends_instead_of_copying_neighbours():
-    """표가 없던 기체의 격자는 DB 마하 범위에서 잡혀 날 수 없는 마하(예: M0.05~0.15)를 포함한다 — 거기에 이웃 값을
-    복사해 두면 없는 요구가 있는 것처럼 보인다. 양 끝의 요구 없는 점은 표에서 빼고 출처에 적는다."""
+def test_derivation_drops_unflyable_ends_but_keeps_requirements_between_grid_points():
+    """표가 없던 기체의 격자는 DB 마하 범위에서 잡혀 날 수 없는 마하(예: M0.05~0.15)를 포함한다 — 그 끝은 뺀다.
+    다만 끝은 **요구가 있는 검사점**이 정한다: 격자점만 보고 자르면 잘린 격자점과 첫 요구 격자점 사이의 검사점
+    요구가 버려진다(격자 0.1·0.3에서 M0.25 요구를 32 % 모자라게 답했다 — 리뷰 재현)."""
     doc = load_example()
     doc["law"]["alloc"] = None
     out = derive_de_trim(build_profile(doc), alts=(0.0,), fuel_fracs=(1.0,), check_step=0.05)
     assert out["ok"], out["reason"]
     table = out["alloc"]["de_trim"]["table"]
     prov = out["alloc"]["de_trim"]["provenance"]
-    assert table["axes"]["mach"][0] >= 0.2 and 0.05 in prov["trimmed_machs"] and 0.1 in prov["trimmed_machs"]
-    assert table["axes"]["mach"][-1] <= 0.6 and 0.75 in prov["trimmed_machs"]
-    assert prov["undefined_machs"] == [] and len(set(table["data"])) == len(table["data"])  # 복사한 평탄 구간이 없다
-    assert all(table["axes"]["mach"][0] - 1e-9 <= m <= table["axes"]["mach"][-1] + 1e-9 for m in out["requirement"]["mach"])
+    assert {0.05, 0.1, 0.75} <= set(prov["trimmed_machs"])
+    req = out["requirement"]
+    assert table["axes"]["mach"][0] <= req["mach"][0] and table["axes"]["mach"][-1] >= req["mach"][-1]
+    assert all(h >= n - 1e-12 for h, n in zip(req["have"], req["need"]))
+
+    coarse = derive_de_trim(build_profile(doc), machs=(0.1, 0.3, 0.45, 0.6, 0.7), alts=(0.0,), fuel_fracs=(1.0,),
+                            check_step=0.05)
+    assert coarse["ok"], coarse["reason"]
+    cp = coarse["alloc"]["de_trim"]
+    assert cp["table"]["axes"]["mach"][0] == 0.1 and 0.1 in cp["provenance"]["undefined_machs"]  # 0.25 요구를 덮으려 남긴다
+    creq = coarse["requirement"]
+    assert 0.25 in creq["mach"]
+    assert all(h >= n - 1e-12 for h, n in zip(creq["have"], creq["need"]))
