@@ -49,7 +49,7 @@ def test_display_model_does_not_change_either_fingerprint():
 
 
 def test_example_eoir_variant_only_swaps_the_display_model():
-    """예제의 EO/IR형은 표시 모델(기수 대신 짐벌 볼 GLB)만 바꾼다 — 짐벌의 질량·항력 자료가 없어 계산 입력은 기본형 그대로다.
+    """예제의 EO/IR형은 표시 모델(기수 대신 총알형 EO/IR 헤드 GLB)만 바꾼다 — 짐벌의 질량·항력 자료가 없어 계산 입력은 기본형 그대로다.
     그래서 두 지문이 기본형과 같고(같은 기체로 계산된다), 기본형의 문서 알림이 변형 몫으로 겹쳐 나오지 않는다."""
     doc = validate_document(load_example())
     assert [(v["id"], v["name"]) for v in doc["variants"]] == [("eoir", "EO/IR형")]

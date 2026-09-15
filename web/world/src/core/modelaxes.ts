@@ -18,7 +18,7 @@
  * `translation + 메시 bbox 중심`이지 `translation`만이 아니다. 둘을 섞으면 재확인할 때
  * 어긋난 것처럼 보인다(`Fin_L/R`은 translation이 아예 없고 메시로만 자리를 갖는다):
  *
- *     Propeller      중심 Zc = +1.84   ← 가장 뒤. 기수는 −Z   (translation z = 1.80)
+ *     Propeller      중심 Zc = +1.81   ← 가장 뒤. 기수는 −Z   (translation z = 1.80)
  *     Elevon_In_R    중심 Xc = +0.56   ← 우현이 +X
  *     Elevon_In_L    중심 Xc = −0.56
  *     Fin_L/R        중심 Xc = ∓1.24   ← 익단 부근, 스팬 2.504 m와 정합 (translation 없음)

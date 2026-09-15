@@ -61,9 +61,9 @@ test("사실 줄은 문서 값 그대로다 — 형상·종횡비·질량 범위
   assert.ok(!bare.includes("스키드 착륙") && !bare.some((f) => f.startsWith("레일 발사")));
 });
 
-test("예제의 EO/IR형은 문서가 가리키는 짐벌 볼 모델을 그린다", () => {
+test("예제의 EO/IR형은 문서가 가리키는 EO/IR 헤드 모델을 그린다", () => {
   const doc = effectiveOf(EXAMPLE, "eoir"); // 기체 탭이 쓰는 그 치환 적용(lib/profileform.js)
-  const plan = heroPlan(doc, { models: [...MANIFEST.models, { name: "shahed136_eoir.glb", bytes: 160904 }] });
+  const plan = heroPlan(doc, { models: [...MANIFEST.models, { name: "shahed136_eoir.glb", bytes: 681252 }] });
   assert.equal(plan.model, "shahed136_eoir.glb");
 });
 
