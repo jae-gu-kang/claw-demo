@@ -39797,6 +39797,17 @@ const SURFACE_NOTES = {
   propellerDisplay: "프로펠러 회전은 집합 스로틀에 비례한 표시 값이며, 실제 회전수가 아닙니다 — 빠르면 블레이드 대신 반투명 원반으로 그립니다(모션블러 대용).",
   holdOnMissing: "조종면 각이 결측인 구간에서는 **마지막 각을 유지**합니다 — 중립으로 되돌리면 없는 조종 입력을 그리게 됩니다. 결측이 계속되면 타면이 움직이지 않습니다."
 };
+function rudderRotationY(rudder) {
+  return -rudder;
+}
+function surfaceNodeRotations(pose2) {
+  const rudder = rudderRotationY(pose2.rudder);
+  return [
+    ...Object.entries(pose2.elevon).map(([name, angle]) => ({ name, axis: "x", angle })),
+    { name: "Rudder_L", axis: "y", angle: rudder },
+    { name: "Rudder_R", axis: "y", angle: rudder }
+  ];
+}
 function clamp(v2, lo, hi2) {
   let out = v2;
   if (typeof lo === "number" && Number.isFinite(lo) && out < lo) out = lo;
@@ -45519,13 +45530,9 @@ function hideVehicle(model) {
 }
 function applySurfaces(model, pose2) {
   if (pose2 == null) return false;
-  for (const [name, angle] of Object.entries(pose2.elevon)) {
+  for (const { name, axis: axis2, angle } of surfaceNodeRotations(pose2)) {
     const n2 = model.nodes.get(name);
-    if (n2) n2.rotation.x = angle;
-  }
-  for (const name of ["Rudder_L", "Rudder_R"]) {
-    const n2 = model.nodes.get(name);
-    if (n2) n2.rotation.y = pose2.rudder;
+    if (n2) n2.rotation[axis2] = angle;
   }
   return true;
 }

@@ -65,6 +65,39 @@ export interface SurfacePose {
   clamped: boolean;
 }
 
+/** 러더 δr [rad](TE left +) → 모델 `Rudder_L/R` 노드의 three `rotation.y`. **부호가 뒤집힌다.**
+ *
+ * 러더 +는 기수를 12시에 두고 내려다볼 때 뒷전이 4시 쪽에서 8시 쪽, 곧 좌현으로 가는 방향이다
+ * (규약 §5). 모델 로컬에서 뒷전은 후방(+Z)에 있고 three `rotation.y = θ > 0`은 +Z를
+ * 우현(+X)으로 돌리므로 `rotation.y = −δr`이다. `shahed136.glb`의 구운 클립으로 실측했다 —
+ * rudder +22° 키에서 `rotation.y = −22°`, 뒷전 좌현. 그 사실은
+ * `models/shahed-136/test_generate_shahed136.py`가 고정한다. 한때 δr을 그대로 넣어 러더가
+ * 거울상으로 그려졌다. */
+export function rudderRotationY(rudder: number): number {
+  return -rudder;
+}
+
+/** 모델 노드에 넣을 회전 한 줄 — 노드 이름 · three 오일러 축 · 각 [rad]. */
+export interface NodeRotation {
+  name: string;
+  axis: "x" | "y";
+  angle: number;
+}
+
+/** 여섯 면의 노드 회전표. `scene/models.ts`의 `applySurfaces`는 이것을 **넣기만** 한다.
+ *
+ * 축과 부호를 여기 두어야 테스트가 닿는다 — scene은 three를 import해 테스트 밖이고, 러더를
+ * 호출 자리에서 부호 없이 넣던 것이 실제로 난 버그였다. */
+export function surfaceNodeRotations(pose: SurfacePose): NodeRotation[] {
+  const rudder = rudderRotationY(pose.rudder);
+  return [
+    ...Object.entries(pose.elevon)
+      .map(([name, angle]) => ({ name, axis: "x" as const, angle })),
+    { name: "Rudder_L", axis: "y", angle: rudder },
+    { name: "Rudder_R", axis: "y", angle: rudder },
+  ];
+}
+
 /** 타면 위치 한계 [rad] — 결과의 `meta.limits`가 정본. **미상은 null**이고 안 자른다. */
 export interface SurfaceLimits {
   elevon_lo?: number | null; elevon_hi?: number | null;

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { SURFACE_NOTES, propellerRate, skidCompression, surfacePose } from "./surfaces.ts";
+import { LOCAL_NOSE } from "./modelaxes.ts";
+import {
+  SURFACE_NOTES, propellerRate, rudderRotationY, skidCompression,
+  surfaceNodeRotations, surfacePose,
+} from "./surfaces.ts";
 
 const LIMITS = { elevon_lo: -0.35, elevon_hi: 0.35, rudder_lo: -0.35, rudder_hi: 0.35 };
 
@@ -9,6 +13,43 @@ const LIMITS = { elevon_lo: -0.35, elevon_hi: 0.35, rudder_lo: -0.35, rudder_hi:
  *  허용오차는 1 µrad: 화면에서 구분 불가능하고, 부호·믹싱 실수는 훨씬 크게 어긋난다. */
 const near = (got: number, want: number, what = "") =>
   assert.ok(Math.abs(got - want) < 1e-6, `${what} ${got} ≠ ${want}`);
+
+describe("러더 노드 회전 — δr(TE left +) → three rotation.y", () => {
+  /** three `rotation.y = θ`를 **행렬 그대로** 곱한다 — 부호를 손으로 따지지 않으려고 둔다. */
+  const rotY = (v: readonly number[], th: number): number[] => [
+    Math.cos(th) * v[0]! + Math.sin(th) * v[2]!,
+    v[1]!,
+    -Math.sin(th) * v[0]! + Math.cos(th) * v[2]!,
+  ];
+  /** 러더 뒷전은 힌지 뒤 — 모델 로컬 후방, 곧 기수의 반대(+Z). 우현은 +X. */
+  const TE = LOCAL_NOSE.map((c) => -c);
+
+  it("러더 +면 뒷전이 좌현(−X)으로 간다 — 기수 12시로 내려다볼 때 4시 → 8시", () => {
+    const te = rotY(TE, rudderRotationY(0.2));
+    near(te[0]!, -Math.sin(0.2), "x");
+    near(te[2]!, Math.cos(0.2), "z");
+  });
+
+  it("러더 −면 뒷전이 우현(+X), 0이면 제자리", () => {
+    assert.ok(rotY(TE, rudderRotationY(-0.2))[0]! > 0);
+    near(rotY(TE, rudderRotationY(0))[0]!, 0, "중립");
+  });
+
+  it("applySurfaces가 넣는 회전표도 같은 부호다", () => {
+    // 호출 자리에서 부호를 빠뜨린 것이 실제로 난 버그였다 — 이제 그 자리는 이 표를 넣기만 한다.
+    const rots = surfaceNodeRotations(surfacePose(0.1, 0.04, 0.2)!);
+    const by = new Map(rots.map((r) => [r.name, r]));
+    assert.equal(rots.length, 6, "엘레본 4 + 러더 2");
+    for (const name of ["Rudder_L", "Rudder_R"]) {
+      const r = by.get(name)!;
+      assert.equal(r.axis, "y", name);
+      near(rotY(TE, r.angle)[0]!, -Math.sin(0.2), `${name} 뒷전 x`);
+    }
+    assert.equal(by.get("Elevon_In_L")!.axis, "x");
+    near(by.get("Elevon_In_L")!.angle, 0.14, "좌 엘레본");
+    near(by.get("Elevon_Out_R")!.angle, 0.06, "우 엘레본");
+  });
+});
 
 describe("타면 재구성 — 믹서 규약의 역", () => {
   it("좌 = de + da, 우 = de − da (fcl/mixer.py의 항등)", () => {

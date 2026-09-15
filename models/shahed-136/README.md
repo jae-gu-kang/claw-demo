@@ -27,11 +27,12 @@
 |----------|-------------|------|-------------|
 | `Elevon_In_L` / `Elevon_In_R` | X (스팬) | `Wing` | 뒷전 내림 (TE down) |
 | `Elevon_Out_L` / `Elevon_Out_R` | X (스팬) | `Wing` | 뒷전 내림 (TE down) |
-| `Rudder_L` / `Rudder_R` | Z (수직) | `Fin_L` / `Fin_R` | 뒷전 좌 (TE left) |
+| `Rudder_L` / `Rudder_R` | Z (수직) | `Fin_L` / `Fin_R` | 뒷전 좌 (TE left) — 로컬 +Z 회전의 **반대**(드라이버가 부호를 뒤집는다) |
 
 엘레본은 **좌/우 × 인보드/아웃보드 = 4면**이 각각 독립이다. `docs/conventions.md`
 §5의 4면 배치 규약(collective δe = 4면 평균 → 피치, differential δa = (좌−우)/2 →
-롤)을 그대로 구동할 수 있다. 부호도 규약에 맞췄다: 엘레본 + = TE down, 러더 + = TE left.
+롤)을 그대로 구동할 수 있다. 부호도 규약에 맞췄다: 엘레본 + = TE down, 러더 + = TE left —
+기수를 12시에 두고 내려다볼 때 러더 뒷전이 4시 쪽에서 8시 쪽으로 가는 방향이다.
 
 `Propeller`도 별도 오브젝트로, 회전축(로컬 Y)을 중심으로 프레임에 비례해 돈다.
 
@@ -83,7 +84,7 @@ three.js(`GLTFLoader`)는 블렌더의 **드라이버·커스텀 프로퍼티를
 |------|----------------|--------|
 | `Elevon_In_L`, `Elevon_In_R` | `rotation.x` | 뒷전 내림 (TE down) |
 | `Elevon_Out_L`, `Elevon_Out_R` | `rotation.x` | 뒷전 내림 (TE down) |
-| `Rudder_L`, `Rudder_R` | `rotation.y` | 뒷전 좌 (TE left) |
+| `Rudder_L`, `Rudder_R` | `rotation.y` | 뒷전 **우** (TE right) — 러더 δr(TE left +)은 `rotation.y = −δr` |
 | `Propeller` | `rotation.z` | 회전 |
 
 계층: `SHAHED136_Root › Fuselage › { Propeller, Wing › {엘레본 4, Fin_L/R › Rudder} }`.
@@ -123,8 +124,8 @@ for (const n of ['Elevon_In_L','Elevon_In_R','Elevon_Out_L','Elevon_Out_R'])
 el('Elevon_In_L').rotation.x = el('Elevon_Out_L').rotation.x = deg(+15);
 el('Elevon_In_R').rotation.x = el('Elevon_Out_R').rotation.x = deg(-15);
 
-// 요 우: 러더 TE right (음수)
-el('Rudder_L').rotation.y = el('Rudder_R').rotation.y = deg(-15);
+// 요 우: 러더 TE right = δr −15° → rotation.y = −δr = +15°
+el('Rudder_L').rotation.y = el('Rudder_R').rotation.y = deg(+15);
 
 // 프로펠러 스핀 (렌더 루프에서)
 el('Propeller').rotation.z += 12 * dt;

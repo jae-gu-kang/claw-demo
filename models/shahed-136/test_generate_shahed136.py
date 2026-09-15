@@ -130,6 +130,18 @@ def test_base_keeps_cone_nose_and_has_no_gimbal(base):
     assert base.mesh_min("Fuselage")[2] == pytest.approx(-1.75, abs=0.01)
 
 
+@pytest.mark.parametrize("name", ["shahed136.glb", "shahed136_eoir.glb"])
+def test_rudder_positive_moves_trailing_edge_to_port(name):
+    # 규약 §5: 러더 + = TE left — 기수 12시로 내려다볼 때 뒷전이 4시 → 8시.
+    # 데모 키 114에서 두 러더가 +22°다. 뒷전은 노드 로컬 후방(+Z). 여기서 rotation.y = −δr이
+    # 나오고, 가상환경이 그것을 쓴다(web/world/src/core/surfaces.ts의 rudderRotationY).
+    g = load(name)
+    a = math.radians(22)
+    for node in ("Rudder_L", "Rudder_R"):
+        te = rotate(g.rotation_at(node, frame_time(114)), (0.0, 0.0, 1.0))
+        assert te == pytest.approx((-math.sin(a), 0.0, math.cos(a)), abs=0.01)     # −X = 좌현
+
+
 def test_eoir_is_drop_in_with_gimbal_nodes(eoir):
     missing = [n for n in VEHICLE_NODES + EOIR_NODES if n not in eoir.index]
     assert not missing

@@ -28,7 +28,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { BodyAxes, Vec3 } from "../lib/attitude.ts";
 import { modelColumnsNed } from "../core/modelaxes.ts";
 import type { LauncherPose } from "../core/launcher.ts";
-import type { SurfacePose } from "../core/surfaces.ts";
+import { surfaceNodeRotations, type SurfacePose } from "../core/surfaces.ts";
 import { applyAerialPerspective } from "./atmosphere.ts";
 import { WEAR_BY_MATERIAL, applyWear } from "./materials.ts";
 import { disposeTree } from "./dispose.ts";
@@ -151,20 +151,17 @@ export function hideVehicle(model: LoadedModel): void {
 
 /** 조종면 — `core/surfaces.ts`가 낸 각을 노드 회전에 넣는다.
  *
- * 축은 모델 README가 정본이다: 엘레본 `rotation.x`(TE down +), 러더 `rotation.y`(TE left +). */
+ * 축은 모델 README가 정본이다: 엘레본 `rotation.x = δ`(TE down +), 러더 `rotation.y = −δr`
+ * (δr은 TE left +). 축과 부호는 `surfaceNodeRotations`가 정하고 여기서는 넣기만 한다. */
 export function applySurfaces(model: LoadedModel, pose: SurfacePose | null): boolean {
   // **결측이면 마지막 각을 유지한다** — 중립으로 튀면 없는 조종 입력을 그리게 되고,
   // 타면을 숨기면 날개에 구멍이 뚫린다. 다만 유지도 표시 선택이라, 그 사실을 호출측이
   // 알 수 있게 **적용 여부를 돌려준다**(`SURFACE_NOTES.holdOnMissing`이 문장이다).
   // 결측이 처음부터 끝까지면 타면이 정확히 0에 앉는데, 그건 "중립"과 구별되지 않는다.
   if (pose == null) return false;
-  for (const [name, angle] of Object.entries(pose.elevon)) {
+  for (const { name, axis, angle } of surfaceNodeRotations(pose)) {
     const n = model.nodes.get(name);
-    if (n) n.rotation.x = angle;
-  }
-  for (const name of ["Rudder_L", "Rudder_R"]) {
-    const n = model.nodes.get(name);
-    if (n) n.rotation.y = pose.rudder;
+    if (n) n.rotation[axis] = angle;
   }
   return true;
 }
