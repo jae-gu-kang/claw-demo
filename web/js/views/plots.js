@@ -85,8 +85,10 @@ const MODE_BAND_COLORS = ["#e8f1fe", "#e6f6ea", "#fdf6df", "#fdeaea", "#efe9fb",
 export function lineChartCanvas(t, series, { title = "", width = 620, height = 190, bands = [], xUnit = "s", markers = false } = {}) {
   const { canvas, ctx } = makeCanvas(width, height);
   const mL = 56, mT = 22, mR = 10, mB = 24;
-  const t0 = t[0] ?? 0;
-  const t1 = t[t.length - 1] ?? 1;
+  // x 범위는 끝점이 아니라 극값 — 단조 축(시각·마하)에서는 같은 값이고, 극선(CD–CL)처럼
+  // x가 접혀 되돌아오는 곡선에서는 끝점 범위가 최소점 쪽 곡선을 그림 영역 밖에 그린다
+  let [t0, t1] = extent(t);
+  if (!(t0 < t1)) { t0 -= 1; t1 += 1; } // 한 점·상수 x — 세로축 퇴화 가드와 같은 정책
   let lo = Infinity;
   let hi = -Infinity;
   for (const s of series) {

@@ -15,12 +15,16 @@ JSON 글이 같은 문서를 고친다.
 
 import { ApiError, api, errorText } from "../api.js";
 import { heroEntries, heroFacts, heroPlan, stepIndex, variantNote } from "../lib/aircrafthero.js";
-import { clear, el } from "../dom.js";
+import { clear, el, fmt } from "../dom.js";
+import { SERIES_COLORS } from "../lib/plot.js";
 import {
   EXAMPLE_ID, cloneDocument, currentSelection, exportFileName, parseDocumentText, profileErrorText,
   sameSelection, saveSelection, setSelection,
 } from "../lib/profile.js";
-import { effectiveOf, formUpdate, sliceBody, stallNote } from "../lib/profileform.js";
+import {
+  aeroCurveStats, effectiveOf, formUpdate, overlayValues, sliceBody, stabilityBody,
+  stabilityVerdictText, stallNote,
+} from "../lib/profileform.js";
 import { lineChartCanvas } from "./plots.js";
 import { renderProfileForm } from "./profileform.js";
 import {
@@ -45,9 +49,24 @@ const schemaCache = new Map();
 const viewer = {
   along: "alpha", start: "-0.2", stop: "0.6", n: "81", coef: "CL",
   fixed: { alpha: "0", beta: "0", mach: "0.5", alt: "0", de: "0", da: "0", dr: "0" },
+  // 겹치기 — 한 고정축의 값 목록(콤마)마다 곡선 하나. 빈 칸 = 곡선 하나(종전과 동일)
+  ovAxis: "mach", ovValues: "",
   result: null, forId: null, error: null,
 };
 const AXIS_UNIT = { alpha: "rad", beta: "rad", de: "rad", da: "rad", dr: "rad", mach: "", alt: "m" };
+// 정적 안정성 패널 칸·마지막 곡선 — 뷰어와 같은 유지 규약(그린 문서의 것임을 forId로 대조)
+const stability = {
+  start: "-0.2", stop: "0.5", n: "61",
+  fixed: { beta: "0", mach: "0.5", alt: "0", de: "0", da: "0", dr: "0" },
+  result: null, forId: null, error: null,
+};
+// 도함수 → 그림 제목. 부호 관례·판정은 엔진(STABILITY_SIGNS)이 정본이고 응답 judgments가
+// 싣는다 — 여기는 이름표만
+const STABILITY_LABELS = [
+  ["Cl_beta", "Clβ(α) — 횡 정적 안정"],
+  ["Cn_beta", "Cnβ(α) — 방향 정적 안정"],
+  ["Cm_alpha", "Cmα(α) — 종 정적 안정"],
+];
 // 기체를 고치는 잡(초기 게인 탐색·δe_trim 도출) — 도는 잡(탭을 떠났다 와도 진행바를 다시 붙인다)·마지막 결과·
 // 시뮬 확인 체크. 한 번에 하나만 돈다(둘 다 같은 기준 리비전 위에 쓰므로 나중 것이 충돌한다)
 let seedJob = null; // {id, profileId, kind: "quick_seed"|"derive_de_trim"}
@@ -89,6 +108,7 @@ export function render() {
   const docBox = el("div");
   const variantBox = el("div");
   const viewerBox = el("div");
+  const stabilityBox = el("div");
   const seedBox = el("div");
   const importBox = el("div");
 
@@ -197,6 +217,7 @@ export function render() {
       paintDoc();
       paintVariants();
       paintViewer();
+      paintStability();
       paintSeed();
     }
   };
@@ -541,30 +562,69 @@ export function render() {
       viewer.result = null;
       viewer.error = null;
     }
+    // 겹치기 축은 따라갈 축일 수 없다 — 축을 바꿔 겹치기 축과 같아지면 남은 축으로 옮긴다
+    const ovAxisChoices = axes.filter((a) => a !== viewer.along);
+    if (!ovAxisChoices.includes(viewer.ovAxis)) {
+      viewer.ovAxis = ovAxisChoices.includes("mach") ? "mach" : ovAxisChoices[0];
+    }
     const input = (value, onValue, cls = "pf-num") => el("input", {
       class: cls, value, spellcheck: "false", oninput: (e) => onValue(e.target.value),
     });
     const chartBox = el("div");
     const paintChart = () => {
-      const res = viewer.result;
-      if (!res) {
+      const cur = viewer.result;
+      if (!cur) {
         clear(chartBox).append(viewer.error ? el("p", { class: "error-box" }, viewer.error)
           : el("p", { class: "hint" }, "[그리기]를 누르면 곡선이 섭니다."));
         return;
       }
-      const range = res.db_ranges?.[res.along];
-      clear(chartBox).append(
-        lineChartCanvas(res.x, [{ data: res.coefficients[viewer.coef], color: "#0a84ff", label: viewer.coef }],
-          { title: `${viewer.coef} — ${res.along}`, xUnit: AXIS_UNIT[res.along] ?? "", width: 640, height: 240 }),
-        res.stall?.table_curve
-          ? lineChartCanvas(res.x, [{ data: res.stall.table_curve, color: "#ff9f0a", label: "α_stall" }],
+      const curves = cur.curves;
+      const first = curves[0].res;
+      const multi = curves.length > 1;
+      const colorAt = (i) => (multi ? SERIES_COLORS[i % SERIES_COLORS.length] : "#0a84ff");
+      const range = first.db_ranges?.[first.along];
+      const isAlpha = first.along === "alpha";
+      const stats = isAlpha ? curves.map((c) => aeroCurveStats(c.res)) : null;
+      const optCell = (o, d = 4) => (o ? `${fmt(o.v, d)} @ ${fmt(o.x, 4)}` : "—");
+      clear(chartBox).append(el("div", {},
+        lineChartCanvas(first.x, curves.map((c, i) => ({
+          data: c.res.coefficients[viewer.coef], color: colorAt(i),
+          label: multi ? c.tag : viewer.coef,
+        })), { title: `${viewer.coef} — ${first.along}`, xUnit: AXIS_UNIT[first.along] ?? "", width: 640, height: 240 }),
+        // 실속 표 곡선은 마하 축·기체 실속 표의 것 — 겹친 곡선과 무관하게 한 벌이다
+        first.stall?.table_curve
+          ? lineChartCanvas(first.x, [{ data: first.stall.table_curve, color: "#ff9f0a", label: "α_stall" }],
             { title: "실속 표 α_stall(M)", xUnit: "", width: 640, height: 160 })
           : null,
-        el("p", { class: "hint" }, stallNote(res)),
+        // 극선·L/D — α 슬라이스에서만 성립하는 유도 그림 (CL·CD가 같은 응답에서 온다).
+        // 극선의 x(CD)는 접혀 되돌아온다 — lineChartCanvas가 극값 범위를 쓰는 이유
+        isAlpha ? el("div", { class: "row" },
+          lineChartCanvas(curves.flatMap((c) => c.res.coefficients.CD), curves.map((c, i) => ({
+            x: c.res.coefficients.CD, data: c.res.coefficients.CL, color: colorAt(i),
+            label: multi ? c.tag : "",
+          })), { title: "극선 CL–CD (가로 CD·세로 CL)", xUnit: "", width: 315, height: 220 }),
+          lineChartCanvas(first.x, curves.map((c, i) => ({
+            data: stats[i].ld, color: colorAt(i), label: multi ? c.tag : "",
+          })), { title: "L/D — alpha", xUnit: "rad", width: 315, height: 220 })) : null,
+        isAlpha ? el("div", { class: "scroll-x" }, el("table", {},
+          el("thead", {}, el("tr", {},
+            el("th", {}, "곡선"),
+            // 극값 통계는 요청 구간 ∩ DB 유효 범위(α) 안에서만 — 밖은 외삽이라 보지 않는다
+            el("th", { title: "요청 구간 ∩ DB 유효 범위(α) 안의 최대 — 외삽 구간은 보지 않는다" }, "CL 최대 @ α"),
+            el("th", { title: "CL이 오르다 떨어지는 첫 꼭대기 — 참고용, 정본은 실속 표" }, "실속 추출 α [rad]"),
+            el("th", {}, "CD 최소 @ α"), el("th", {}, "L/D 최대 @ α"))),
+          el("tbody", {}, curves.map((c, i) => el("tr", {},
+            el("td", {}, multi ? c.tag : "현재 조건"),
+            el("td", { class: "num" }, optCell(stats[i].clMax)),
+            el("td", { class: "num" }, c.res.stall?.extracted == null ? "—" : fmt(c.res.stall.extracted, 4)),
+            el("td", { class: "num" }, optCell(stats[i].cdMin)),
+            el("td", { class: "num" }, optCell(stats[i].ldMax, 3))))))) : null,
+        multi ? null : el("p", { class: "hint" }, stallNote(first)),
         el("p", { class: "hint" },
-          `고정: ${Object.entries(res.fixed).map(([k, v]) => `${k} ${v}`).join(" · ")} · 무차원 각속도 0 · V = 마하 × 그 고도 음속`
-          + (range ? ` · DB 유효 범위 ${res.along} [${range[0]}, ${range[1]}]` : "")),
-      );
+          `고정: ${Object.entries(first.fixed).map(([k, v]) => `${k} ${v}`).join(" · ")} · 무차원 각속도 0 · V = 마하 × 그 고도 음속`
+          + (multi ? ` · 겹친 곡선은 ${cur.axis}만 다르다` : "")
+          + (range ? ` · DB 유효 범위 ${first.along} [${range[0]}, ${range[1]}]` : "")),
+      ));
     };
     // 못 그린 사유는 옛 곡선을 지우고 적는다 — 곡선을 남기면 누른 것이 아무 일도 안 한 것처럼 보이고, 글을 고친 뒤라면
     // 고친 것이 반영되지 않은 것처럼 보인다. 사유도 이 기체의 것으로 묶는다(다른 기체를 열면 지워진다)
@@ -582,16 +642,26 @@ export function render() {
       const b = sliceBody(viewer, axes);
       if (b.error) return fail(b.error);
       if (b.value.n > maxPoints) return fail(`점 수는 ${maxPoints}까지입니다`);
+      // 겹치기 — 한 고정축(기본 mach)의 값 목록마다 곡선 하나. 그 축의 고정 칸은 곡선마다 덮인다
+      const ov = overlayValues(viewer.ovValues);
+      if (ov.error) return fail(`겹치기: ${ov.error}`);
+      if (ov.value && viewer.ovAxis === viewer.along) {
+        return fail("겹치기 축이 따라갈 축과 같습니다 — 겹치기 칸을 비우거나 축을 바꾸세요");
+      }
+      const plans = ov.value
+        ? ov.value.map((v) => ({ tag: `${viewer.ovAxis} ${v}`,
+                                 body: { ...b.value, fixed: { ...b.value.fixed, [viewer.ovAxis]: v } } }))
+        : [{ tag: null, body: b.value }];
       // JSON 글 편집 중이면 글이 정본이다 — 폼 객체는 글에서 폼으로 올 때만 맞춰진다
       const parsed = opened.mode === "json" ? parseDocumentText(opened.text) : { doc: opened.obj };
       if (parsed.error) return fail(`JSON 글을 읽을 수 없어 그리지 않았습니다 — ${parsed.error}`);
       const target = opened;
       try {
-        const res = await api.post("/profiles/aero-slice", {
-          document: parsed.doc, ...(opened.editVariant ? { variant: opened.editVariant } : {}), ...b.value,
-        });
+        const results = await Promise.all(plans.map((p) => api.post("/profiles/aero-slice", {
+          document: parsed.doc, ...(opened.editVariant ? { variant: opened.editVariant } : {}), ...p.body,
+        })));
         if (opened !== target) return; // 그사이 다른 기체를 열었다
-        viewer.result = res;
+        viewer.result = { axis: viewer.ovAxis, curves: plans.map((p, i) => ({ tag: p.tag, res: results[i] })) };
         viewer.forId = target.id;
         viewer.error = null;
       } catch (e) {
@@ -615,13 +685,113 @@ export function render() {
       el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" },
         axes.filter((a) => a !== viewer.along).map((a) => el("label", { class: "field" },
           `${a}${AXIS_UNIT[a] ? ` [${AXIS_UNIT[a]}]` : ""}`,
-          input(viewer.fixed[a] ?? "0", (v) => { viewer.fixed[a] = v; })))),
+          input(viewer.fixed[a] ?? "0", (v) => { viewer.fixed[a] = v; }))),
+        el("label", { class: "field" }, "겹치기 축", el("select", {
+          onchange: (e) => { viewer.ovAxis = e.target.value; },
+        }, ovAxisChoices.map((a) => el("option", { value: a, selected: a === viewer.ovAxis }, a)))),
+        el("label", { class: "field" }, "겹치기 값 (콤마)",
+          input(viewer.ovValues, (v) => { viewer.ovValues = v; }))),
       el("p", { class: "hint", style: "margin:6px 0" },
         opened.editVariant ? `형상 변형 「${opened.editVariant}」을 적용한 문서로 계산합니다(편집 중인 글 기준). `
           : "편집 중인 글(저장 전 포함)로 계산합니다. ",
-        "실속 추출은 참고용이고 정본은 공력팀 실속 표다(01 §2.3)."),
+        "실속 추출은 참고용이고 정본은 공력팀 실속 표다(01 §2.3). ",
+        "겹치기 값을 넣으면(예: mach 0.1, 0.3, 0.5) 그 축의 고정 칸 대신 값마다 곡선을 겹친다 — ",
+        "α 슬라이스에서는 극선(CL–CD)·L/D 곡선과 곡선별 CLmax·CDmin·L/D 최대 표가 함께 선다."),
       chartBox);
     paintChart();
+  };
+
+  // ── 정적 안정성 (패널) ──────────────────────────────────────────────────
+  // Clβ(α)·Cnβ(α)·Cmα(α) — 뷰어와 **같은 계산기**의 중앙차분(엔진 stability_slice).
+  // 부호 관례(Clβ<0·Cnβ>0·Cmα<0)와 위반 구간 판정은 서버 응답 judgments가 정본이다
+  const paintStability = () => {
+    if (!opened) {
+      clear(stabilityBox).append(el("p", { class: "hint" },
+        "목록에서 [열기]로 기체를 열면 그 문서의 정적 안정성 도함수를 봅니다."));
+      return;
+    }
+    if (!formSpec?.slice) {
+      clear(stabilityBox).append(el("p", { class: "hint" }, "뷰어 서술을 불러오는 중…"));
+      ensureFormAssets().then(() => { if (opened) paintStability(); }).catch((e) => showError(e));
+      return;
+    }
+    const { axes, max_points: maxPoints } = formSpec.slice;
+    if (stability.forId !== opened.id) {
+      stability.result = null;
+      stability.error = null;
+    }
+    const input = (value, onValue) => el("input", {
+      class: "pf-num", value, spellcheck: "false", oninput: (e) => onValue(e.target.value),
+    });
+    const chartBox = el("div");
+    const paintCharts = () => {
+      const res = stability.result;
+      if (!res) {
+        clear(chartBox).append(stability.error ? el("p", { class: "error-box" }, stability.error)
+          : el("p", { class: "hint" }, "[그리기]를 누르면 도함수 곡선과 부호 판정이 섭니다."));
+        return;
+      }
+      clear(chartBox).append(el("div", {},
+        ...STABILITY_LABELS.map(([name, label]) => el("div", { style: "margin-top:6px" },
+          lineChartCanvas(res.x, [
+            { data: res.derivatives[name], color: "#0a84ff", label: "" },
+            // 0선이 곧 판정선이다 — 곡선이 이 선의 어느 쪽에 있는가가 답
+            { data: res.x.map(() => 0), color: "#c93400", dash: [4, 4], label: "" },
+          ], { title: label, xUnit: "rad", width: 640, height: 170 }),
+          el("p", { class: "hint", style: "margin:2px 0 6px" }, stabilityVerdictText(res.judgments[name])))),
+        el("p", { class: "hint" },
+          `고정: ${Object.entries(res.fixed).map(([k, v]) => `${k} ${v}`).join(" · ")} · `
+          + `중앙차분 간격 ${res.step} rad — β 도함수는 고정 β 주변, α 도함수는 그 α 주변의 기울기`),
+      ));
+    };
+    const fail = (text) => {
+      stability.result = null;
+      stability.error = text;
+      stability.forId = opened?.id ?? null;
+      paintCharts();
+    };
+    const draw = async () => {
+      if (!opened) {
+        paintStability(); // 그사이 연 문서를 지웠다 — 안내로 바꾼다
+        return;
+      }
+      const b = stabilityBody(stability, axes);
+      if (b.error) return fail(b.error);
+      if (b.value.n > maxPoints) return fail(`점 수는 ${maxPoints}까지입니다`);
+      const parsed = opened.mode === "json" ? parseDocumentText(opened.text) : { doc: opened.obj };
+      if (parsed.error) return fail(`JSON 글을 읽을 수 없어 그리지 않았습니다 — ${parsed.error}`);
+      const target = opened;
+      try {
+        const res = await api.post("/profiles/aero-stability", {
+          document: parsed.doc, ...(opened.editVariant ? { variant: opened.editVariant } : {}), ...b.value,
+        });
+        if (opened !== target) return;
+        stability.result = res;
+        stability.forId = target.id;
+        stability.error = null;
+      } catch (e) {
+        if (opened !== target) return;
+        return fail(failText(e));
+      }
+      paintCharts();
+    };
+    clear(stabilityBox).append(
+      el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;align-items:flex-end" },
+        el("label", { class: "field" }, "α 시작 [rad]", input(stability.start, (v) => { stability.start = v; })),
+        el("label", { class: "field" }, "α 끝 [rad]", input(stability.stop, (v) => { stability.stop = v; })),
+        el("label", { class: "field" }, "점 수", input(stability.n, (v) => { stability.n = v; })),
+        el("button", { class: "primary", onclick: draw }, "그리기")),
+      el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" },
+        axes.filter((a) => a !== "alpha").map((a) => el("label", { class: "field" },
+          `${a}${AXIS_UNIT[a] ? ` [${AXIS_UNIT[a]}]` : ""}`,
+          input(stability.fixed[a] ?? "0", (v) => { stability.fixed[a] = v; })))),
+      el("p", { class: "hint", style: "margin:6px 0" },
+        opened.editVariant ? `형상 변형 「${opened.editVariant}」을 적용한 문서로 계산합니다(편집 중인 글 기준). `
+          : "편집 중인 글(저장 전 포함)로 계산합니다. ",
+        "안정 부호: 횡 Clβ < 0 (상반각 효과) · 방향 Cnβ > 0 (풍향계 안정) · 종 Cmα < 0. ",
+        "도함수 0(중립)도 위반으로 판정합니다 — 복원 모멘트가 없는 것은 안정이 아닙니다."),
+      chartBox);
+    paintCharts();
   };
 
   // ── 초기 게인 빠른 탐색 (패널) ─────────────────────────────────────────────
@@ -691,6 +861,7 @@ export function render() {
           paintDoc();
           paintVariants();
           paintViewer();
+          paintStability();
         }
         if (currentSelection()?.id === target.profileId && globalThis.confirm?.(
           `지금 계산에 쓰는 기체에 ${target.kind === "derive_de_trim" ? "δe_trim 표" : "초기 게인"}을 리비전 `
@@ -814,6 +985,7 @@ export function render() {
       paintDoc();
       paintVariants();
       paintViewer(); // 옛 기체의 곡선이 새 문서 밑에 남지 않게
+      paintStability();
       paintSeed();
       drawers.open("doc");
     } catch (e) {
@@ -855,6 +1027,7 @@ export function render() {
       paintDoc();
       paintVariants();
       paintViewer();
+      paintStability();
       paintSeed();
       drawers.open("doc");
     } catch (e) {
@@ -914,6 +1087,7 @@ export function render() {
       paintDoc();
       paintVariants();
       paintViewer(); // 지운 문서의 곡선·[그리기]가 남으면 누를 때 빈 문서를 읽는다
+      paintStability();
       paintSeed();
     } catch (e) {
       showError(e);
@@ -1101,6 +1275,8 @@ export function render() {
         build: () => seedBox },
       { key: "aero", label: "공력 DB 뷰어", group: "보기",
         title: "연 문서의 계수 계산기로 한 축을 따라 CL·CD·모멘트 계수 곡선 — 실속 표 대조", build: () => viewerBox },
+      { key: "stability", label: "정적 안정성", group: "보기",
+        title: "Clβ·Cnβ·Cmα 대 α — 부호 판정(횡 −·방향 +·종 −)과 위반 구간", build: () => stabilityBox },
       { key: "import", label: "가져오기", group: "반입",
         title: "내보내 둔 기체 JSON을 새 기체로", build: () => [
           drawerSection("가져오기", null, importBox)] },
@@ -1112,6 +1288,7 @@ export function render() {
   paintDoc();
   paintVariants();
   paintViewer();
+  paintStability();
   paintSeed();
   paintImport();
   paintHero();

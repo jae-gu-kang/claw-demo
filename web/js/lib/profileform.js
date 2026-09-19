@@ -313,6 +313,70 @@ export function sliceBody(form, axes) {
   return errors.length ? { error: errors.join(" · ") } : { value: body };
 }
 
+/** CL·CD 배열 → L/D. CD ≤ 0인 점은 null — 나눠서 그럴듯한 수를 지어내지 않는다. */
+export function liftDragRatio(cl, cd) {
+  return cl.map((c, i) => {
+    const d = cd[i];
+    return typeof c === "number" && typeof d === "number" && d > 0 ? c / d : null;
+  });
+}
+
+/** α 슬라이스 응답 → 곡선 통계 {clMax, cdMin, ldMax: {v, x}|null, ld}.
+ *
+ * 극값은 요청 구간 ∩ DB 유효 범위(α) 안에서만 뽑는다 — 그 밖은 외삽이라(clip이면 평평)
+ * 평탄 구간 값이 「최대」로 찍힌다. 실속 추출이 같은 창을 쓰는 이유와 같다(엔진
+ * `_cl_peak` — 외삽은 보지 않는다, 리뷰 지적). ld 곡선 자체는 전 구간이다 — 곡선은
+ * DB가 느끼는 값 그대로고 유효 범위는 캡션이 말한다. CLmax의 정본은 실속 표·실속
+ * 추출이고 이것은 구간 통계다. */
+export function aeroCurveStats(res) {
+  const cl = res.coefficients.CL;
+  const cd = res.coefficients.CD;
+  const ld = liftDragRatio(cl, cd);
+  const r = res.db_ranges?.alpha;
+  const inWindow = (i) => !r || (res.x[i] >= r[0] && res.x[i] <= r[1]);
+  const argOpt = (arr, better) => {
+    let best = null;
+    arr.forEach((v, i) => {
+      if (!inWindow(i) || typeof v !== "number" || !Number.isFinite(v)) return;
+      if (best === null || better(v, arr[best])) best = i;
+    });
+    return best === null ? null : { v: arr[best], x: res.x[best] };
+  };
+  return {
+    ld,
+    clMax: argOpt(cl, (a, b) => a > b),
+    cdMin: argOpt(cd.map((d) => (d > 0 ? d : null)), (a, b) => a < b),
+    ldMax: argOpt(ld, (a, b) => a > b),
+  };
+}
+
+/** 겹치기 값 파싱 — 빈 칸은 겹치기 없음({value: null}), 최대 max개 (한 그림에서 셀 수 있는 곡선 수). */
+export function overlayValues(raw, max = 6) {
+  if (!String(raw ?? "").trim()) return { value: null };
+  const r = parseNumList(raw);
+  if (r.error) return r;
+  if (r.value.length > max) return { error: `겹치기 값은 ${max}개까지입니다: ${r.value.length}개` };
+  return r;
+}
+
+/** 정적 안정성 요청 본문 — sliceBody에 위임한다(따라가는 축이 α로 고정일 뿐 검증 규칙은
+ *  한 벌이다 — 복사해 두면 규칙이 진화할 때 두 벌이 갈라진다, 리뷰 지적). */
+export function stabilityBody(form, axes) {
+  const r = sliceBody({ ...form, along: "alpha" }, axes);
+  if (r.error) return r;
+  const { along, ...value } = r.value;
+  return { value };
+}
+
+/** 정적 안정성 판정 한 줄 — 부호 관례와, 위반이 있으면 **전** 구간을 나열한다
+ *  (하나만 보이면 나머지 위반이 숨는다). 수치·판정은 서버 산출이고 여기는 문장만. */
+export function stabilityVerdictText(j) {
+  const sign = j.stable_sign === "+" ? "+" : "−";
+  if (j.all_ok) return `안정 부호 ${sign} — 전 구간 안정`;
+  const spans = j.violations.map(([a, b]) => `α [${a.toFixed(4)}, ${b.toFixed(4)}] rad`).join(" · ");
+  return `안정 부호 ${sign} — 부호 위반: ${spans}`;
+}
+
 /** 뷰어 응답의 실속 대조 한 줄 — 추출은 참고, 정본은 실속 표다. */
 export function stallNote(slice) {
   const st = slice?.stall;

@@ -235,3 +235,66 @@ test("절의 필수·선택 수 — 선택 묶음은 하나로 세고 안의 칸
   assert.deepEqual(requirementCounts([]), { required: 0, optional: 0 });
   assert.deepEqual(requirementCounts(undefined), { required: 0, optional: 0 });
 });
+
+test("정적 안정성 본문 — α는 따라가는 축이라 고정값에서 빠지고, 틀린 칸은 모아서 말한다", async () => {
+  const { stabilityBody } = await import("./profileform.js");
+  const axes = ["alpha", "beta", "mach", "alt"];
+  const ok = stabilityBody({ start: "-0.1", stop: "0.4", n: "41", fixed: { alpha: "x", beta: "0", mach: "0.4", alt: "0" } }, axes);
+  assert.deepEqual(ok.value, { start: -0.1, stop: 0.4, n: 41, fixed: { beta: 0, mach: 0.4, alt: 0 } });
+  assert.match(stabilityBody({ start: "0.5", stop: "0.1", n: "5", fixed: { beta: "0", mach: "0.4", alt: "0" } }, axes).error, /시작 < 끝/);
+  const bad = stabilityBody({ start: "", stop: "1", n: "2.5", fixed: { beta: "0", mach: "a", alt: "0" } }, axes).error;
+  assert.match(bad, /시작/);
+  assert.match(bad, /mach/);
+});
+
+test("정적 안정성 판정 한 줄 — 전 구간 안정 / 위반 구간 나열", async () => {
+  const { stabilityVerdictText } = await import("./profileform.js");
+  assert.match(stabilityVerdictText({ stable_sign: "-", all_ok: true, violations: [] }),
+    /안정 부호 −.*전 구간 안정/);
+  const t = stabilityVerdictText({ stable_sign: "+", all_ok: false, violations: [[0.2, 0.4]] });
+  assert.match(t, /안정 부호 \+/);
+  assert.match(t, /α \[0\.2000, 0\.4000\] rad/);
+  // 구간이 여럿이면 전부 — 하나만 보이면 나머지 위반이 숨는다
+  assert.match(stabilityVerdictText({ stable_sign: "-", all_ok: false, violations: [[-0.1, -0.05], [0.3, 0.3]] }),
+    /α \[-0\.1000, -0\.0500\] rad.*α \[0\.3000, 0\.3000\] rad/);
+});
+
+test("L/D — CD ≤ 0인 점은 null (나누기 위조 금지), 통계는 유한값에서만", async () => {
+  const { aeroCurveStats, liftDragRatio } = await import("./profileform.js");
+  assert.deepEqual(liftDragRatio([0.2, 0.4, 0.6], [0.02, 0.0, 0.03]), [10, null, 20]);
+  const res = {
+    along: "alpha", x: [0.0, 0.1, 0.2],
+    coefficients: { CL: [0.2, 0.4, 0.6], CD: [0.03, 0.02, 0.04] },
+  };
+  const s = aeroCurveStats(res);
+  assert.deepEqual(s.clMax, { v: 0.6, x: 0.2 });
+  assert.deepEqual(s.cdMin, { v: 0.02, x: 0.1 });
+  assert.deepEqual(s.ldMax, { v: 20, x: 0.1 });
+  assert.deepEqual(s.ld, [0.2 / 0.03, 20, 15]);
+  // CD가 전부 0 이하이면 통계가 없다 — 지어내지 않는다
+  const none = aeroCurveStats({ along: "alpha", x: [0], coefficients: { CL: [1], CD: [0] } });
+  assert.equal(none.ldMax, null);
+  assert.equal(none.cdMin, null);
+});
+
+test("곡선 통계는 DB 유효 범위(α) 밖(외삽 구간)을 보지 않는다 — 실속 추출과 같은 창", async () => {
+  const { aeroCurveStats } = await import("./profileform.js");
+  const res = {
+    along: "alpha", x: [0.0, 0.1, 0.2],
+    coefficients: { CL: [0.2, 0.4, 0.6], CD: [0.03, 0.02, 0.01] },
+    db_ranges: { alpha: [0.0, 0.15] }, // 0.2는 외삽 — clip 평탄값이 「최대」로 찍히는 자리
+  };
+  const s = aeroCurveStats(res);
+  assert.deepEqual(s.clMax, { v: 0.4, x: 0.1 });
+  assert.deepEqual(s.ldMax, { v: 20, x: 0.1 });
+  assert.equal(s.ld.length, 3); // 곡선 자체는 전 구간 — 창은 극값 통계만 제한한다
+});
+
+test("겹치기 값 파싱 — 빈 칸은 겹치기 없음, 개수 상한, 수치 오류는 사유", async () => {
+  const { overlayValues } = await import("./profileform.js");
+  assert.equal(overlayValues("").value, null);
+  assert.equal(overlayValues("  ").value, null);
+  assert.deepEqual(overlayValues("0.1, 0.3 0.5").value, [0.1, 0.3, 0.5]);
+  assert.match(overlayValues("0.1, x").error, /수치가 아님/);
+  assert.match(overlayValues("1,2,3,4,5,6,7").error, /6개까지/);
+});

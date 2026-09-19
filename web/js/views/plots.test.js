@@ -175,3 +175,16 @@ test("trackCanvas: 도달반경이 아주 작아도 원이 점(반지름 3) 밑�
   assert.ok(arc, "도달반경 원이 없다");
   assert.ok(arc.r >= 3, `반지름 ${arc.r} — 하한이 일하지 않았다`);
 });
+
+test("lineChartCanvas: 접힌 x(극선)도 곡선이 그림 영역 안에 있다 — x 범위는 끝점이 아니라 극값", () => {
+  // 극선(CD–CL)은 x가 줄었다 다시 는다 — 끝점 [x[0], x[끝]]을 범위로 쓰면
+  // 최소점 쪽 곡선이 왼쪽 여백 **밖**에 그려진다 (캔버스는 클리핑 없이 그냥 그린다)
+  const x = [0.05, 0.02, 0.08]; // 접힘 — 끝점 범위 [0.05, 0.08]는 0.02를 밖에 둔다
+  const color = "#0af";
+  const width = 620, mL = 56, mR = 10; // plots.js lineChartCanvas의 여백
+  const canvas = lineChartCanvas(x, [{ data: [0.2, 0.4, 0.9], color }], { width });
+  const line = opsOf(canvas).find((o) => o.kind === "stroke" && o.strokeStyle === color);
+  for (const p of line.path) {
+    assert.ok(p.x >= mL - 1e-9 && p.x <= width - mR + 1e-9, `곡선 x ${p.x}가 그림 영역 밖이다`);
+  }
+});
