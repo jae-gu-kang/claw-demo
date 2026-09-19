@@ -133,6 +133,10 @@ export function createDrawers({ id, defs, initial = null, onOpen = null } = {}) 
       open = toggleOpen(defs, null, key); // null에서 여는 것 = 항상 그 칩을 연다
       paintChips();
       paintDrawer();
+      // 프로그램이 연 것도 onOpen에 알린다 — 뷰가 "열린 패널 유지"를 모듈 상태로 하는데
+      // (트림·기체 등) 여기서만 조용하면 [열기]·자동 열림으로 연 패널이 재진입에 복원되지
+      // 않고, 자동 열림 가드(openDrawer 확인)도 헛돈다(리뷰 지적)
+      onOpen?.(open);
     },
   };
 }

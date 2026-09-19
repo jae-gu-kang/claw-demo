@@ -39,6 +39,8 @@ let list = null;
 let volatile = false;
 let opened = null; // {id, body: GET·PUT 응답, text: 편집 중 글, dirty, check: {ok, lines}|null, conflict: 최신 리비전|null}
 let openDrawer = null;
+// 목록 자동 열림은 세션에 한 번 — 일부러 닫은 사람에게 재진입마다 다시 들이밀지 않는다
+let listAutoOpened = false;
 let importText = "";
 // 절별 폼 서술(엔진 claw.profile.form)·예제 문서(비어 있던 묶음을 만들 때만)·레지스트리 스키마 — 한 번 받는다
 let formSpec = null;
@@ -54,12 +56,15 @@ const viewer = {
   result: null, forId: null, error: null,
 };
 const AXIS_UNIT = { alpha: "rad", beta: "rad", de: "rad", da: "rad", dr: "rad", mach: "", alt: "m" };
-// 정적 안정성 패널 칸·마지막 곡선 — 뷰어와 같은 유지 규약(그린 문서의 것임을 forId로 대조)
+// 정적 안정성 칸·마지막 곡선 — 뷰어와 같은 유지 규약(그린 문서의 것임을 forId로 대조).
+// **고정 입력점은 viewer.fixed를 같이 쓴다** — 「공력」 패널의 두 모드가 서로 다른
+// 마하·고도로 계산하면 곡선과 판정이 다른 조건을 말하게 된다(한 입력점 원칙)
 const stability = {
   start: "-0.2", stop: "0.5", n: "61",
-  fixed: { beta: "0", mach: "0.5", alt: "0", de: "0", da: "0", dr: "0" },
   result: null, forId: null, error: null,
 };
+// 「공력」 패널의 모드 — 탭 재진입에도 유지 (모듈 스코프 규약)
+let aeroMode = "curves";
 // 도함수 → 그림 제목. 부호 관례·판정은 엔진(STABILITY_SIGNS)이 정본이고 응답 judgments가
 // 싣는다 — 여기는 이름표만
 const STABILITY_LABELS = [
@@ -109,6 +114,27 @@ export function render() {
   const variantBox = el("div");
   const viewerBox = el("div");
   const stabilityBox = el("div");
+  // 「공력」 패널 모드 바 — 두 모드는 같은 고정 입력점(viewer.fixed)을 쓰므로 전환 때
+  // 보이는 쪽을 **다시 그린다**: 다른 모드에서 고친 고정 칸이 표시에도 반영돼야
+  // 표시와 계산이 같은 조건을 말한다. 버튼은 한 번만 만들고 class만 토글한다 —
+  // 누른 버튼을 다시 만들면 포커스가 body로 떨어진다(stage.js paintChips와 같은 함정)
+  const aeroModeBtns = [["curves", "계수 곡선"], ["stability", "정적 안정성"]].map(([key, label]) =>
+    [key, el("button", {
+      onclick: () => {
+        if (aeroMode === key) return;
+        aeroMode = key;
+        (key === "curves" ? paintViewer : paintStability)();
+        syncAeroMode();
+      },
+    }, label)]);
+  const aeroModeBox = el("div", { class: "row", style: "gap:6px; margin-bottom:8px; align-items:center" },
+    ...aeroModeBtns.map(([, btn]) => btn),
+    el("span", { class: "hint" }, "— 두 모드가 같은 고정 입력점(마하·고도·β·타면)을 쓴다"));
+  const syncAeroMode = () => {
+    viewerBox.hidden = aeroMode !== "curves";
+    stabilityBox.hidden = aeroMode !== "stability";
+    for (const [key, btn] of aeroModeBtns) btn.className = aeroMode === key ? "primary" : "";
+  };
   const seedBox = el("div");
   const importBox = el("div");
 
@@ -146,12 +172,21 @@ export function render() {
     } catch (e) {
       statusLine.textContent = "";
       showError(e);
+      if (!list) {
+        // 「불러오는 중…」을 실패 뒤에도 두면 패널만 보는 사람에게 거짓말이 된다(리뷰 지적)
+        clear(listBox).append(el("p", { class: "hint" },
+          "목록을 불러오지 못했습니다 — 위 오류를 확인하고 [새로고침]을 누르세요."));
+      }
     }
   };
 
-  // ── 목록 (전면) ──────────────────────────────────────────────────────────
+  // ── 목록 (패널 「기체 목록」 — 연 문서가 없으면 자동으로 열린다) ────────────
   const paintList = () => {
-    if (!list) return;
+    if (!list) {
+      // 자동 열림이 load() 완료보다 먼저다 — 빈 div를 두면 패딩·그림자만 있는 빈 판이 뜬다
+      clear(listBox).append(el("p", { class: "hint" }, "목록을 불러오는 중…"));
+      return;
+    }
     const sel = selectedId();
     clear(listBox).append(el("div", { class: "scroll-x" }, el("table", {},
       el("thead", {}, el("tr", {},
@@ -755,7 +790,7 @@ export function render() {
         paintStability(); // 그사이 연 문서를 지웠다 — 안내로 바꾼다
         return;
       }
-      const b = stabilityBody(stability, axes);
+      const b = stabilityBody({ ...stability, fixed: viewer.fixed }, axes);
       if (b.error) return fail(b.error);
       if (b.value.n > maxPoints) return fail(`점 수는 ${maxPoints}까지입니다`);
       const parsed = opened.mode === "json" ? parseDocumentText(opened.text) : { doc: opened.obj };
@@ -784,7 +819,7 @@ export function render() {
       el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" },
         axes.filter((a) => a !== "alpha").map((a) => el("label", { class: "field" },
           `${a}${AXIS_UNIT[a] ? ` [${AXIS_UNIT[a]}]` : ""}`,
-          input(stability.fixed[a] ?? "0", (v) => { stability.fixed[a] = v; })))),
+          input(viewer.fixed[a] ?? "0", (v) => { viewer.fixed[a] = v; })))),
       el("p", { class: "hint", style: "margin:6px 0" },
         opened.editVariant ? `형상 변형 「${opened.editVariant}」을 적용한 문서로 계산합니다(편집 중인 글 기준). `
           : "편집 중인 글(저장 전 포함)로 계산합니다. ",
@@ -1273,25 +1308,36 @@ export function render() {
       { key: "seed", label: "게인·δe_trim", group: "설계",
         title: "연 기체의 게인 출처와 할당 표 — 초기 게인 빠른 탐색(조종효율 부호·앵커 튜닝 크기)·δe_trim 표 도출",
         build: () => seedBox },
-      { key: "aero", label: "공력 DB 뷰어", group: "보기",
-        title: "연 문서의 계수 계산기로 한 축을 따라 CL·CD·모멘트 계수 곡선 — 실속 표 대조", build: () => viewerBox },
-      { key: "stability", label: "정적 안정성", group: "보기",
-        title: "Clβ·Cnβ·Cmα 대 α — 부호 판정(횡 −·방향 +·종 −)과 위반 구간", build: () => stabilityBox },
-      { key: "import", label: "가져오기", group: "반입",
+      { key: "aero", label: "공력", group: "보기",
+        title: "편집 중 문서로 계산 — 계수 곡선(겹치기·극선·L/D·실속 대조)과 정적 안정성(Clβ·Cnβ·Cmα 부호 판정)",
+        build: () => [aeroModeBox, viewerBox, stabilityBox] },
+      { key: "list", label: "기체 목록", group: "관리",
+        title: "저장된 기체 — 열기·복제·내보내기 (계산에 쓸 기체 선택은 헤더)",
+        count: () => (Array.isArray(list) ? list.length : null),
+        build: () => listBox },
+      { key: "import", label: "가져오기", group: "관리",
         title: "내보내 둔 기체 JSON을 새 기체로", build: () => [
           drawerSection("가져오기", null, importBox)] },
     ],
   });
 
-  if (list) paintList();
+  paintList();
   paintNotices();
   paintDoc();
   paintVariants();
   paintViewer();
   paintStability();
+  syncAeroMode();
   paintSeed();
   paintImport();
   paintHero();
+  // 연 문서도 열린 패널도 없으면 목록부터 — 첫 방문의 다음 행동(열기)이 닫힌 칩 뒤에
+  // 숨지 않게 한다. 이미 뭔가 하던 중이면(문서 열림·패널 열림) 끼어들지 않고, 세션에
+  // 한 번만이다 — 일부러 닫은 사람에게 재진입마다 다시 들이밀지 않는다(리뷰 지적)
+  if (!opened && !openDrawer && !listAutoOpened) {
+    listAutoOpened = true;
+    drawers.open("list");
+  }
   load();
 
   return el("div", { class: "tab-page aircraft-page" },
@@ -1301,7 +1347,7 @@ export function render() {
       actions: [el("button", { onclick: load }, "새로고침")],
       extra: [statusLine, errBox, noticeBox],
     }),
-    tabStage(heroBox, listBox),
+    tabStage(heroBox),
     drawers.root,
   );
 }

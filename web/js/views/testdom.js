@@ -107,6 +107,17 @@ class FakeNode {
 
   setAttribute(k, v) { this.attrs[k] = v; }
   getAttribute(k) { return this.attrs[k]; }
+  /** data-* 속성 뷰(읽기 전용 파생) — stage.js paintChips가 버튼 재사용 판정에
+   *  dataset.key를 읽는다. 실 코드가 setAttribute로만 쓰므로 쓰기는 흉내 내지 않는다. */
+  get dataset() {
+    const out = {};
+    for (const [k, v] of Object.entries(this.attrs)) {
+      if (k.startsWith("data-")) {
+        out[k.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = String(v);
+      }
+    }
+    return out;
+  }
   append(...cs) { this.children.push(...cs); }
   appendChild(c) { this.children.push(c); return c; }
   replaceChildren(...cs) { this.children = [...cs]; }
