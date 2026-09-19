@@ -25,8 +25,9 @@ export const FQ_BADGE = {
   na: { label: "판정 없음", short: "—", color: STATUS.na },
 };
 
-// 최악 정렬 순서 — 클수록 나쁘다. na는 순서에 없다(잰 것이 없으므로 최악 후보가 아니다)
-const RANK = { 1: 0, 2: 1, 3: 2, out: 3 };
+// 최악 정렬 순서 — 클수록 나쁘다. na는 순서에 없다(잰 것이 없으므로 최악 후보가 아니다).
+// 수준 체계가 바뀌면 여기 한 곳이다 — 결과 브리핑(lib/resultbrief.js)도 이 표를 쓴다
+export const FQ_RANK = { 1: 0, 2: 1, 3: 2, out: 3 };
 
 /** 판정 dict(서버 fq 블록의 모드 하나) → FQ_BADGE 키. */
 export function fqKey(j) {
@@ -69,8 +70,8 @@ export function fqWorst(entries) {
       const j = e[axis]?.fq?.[mode];
       const key = fqKey(j);
       if (key === "na") continue;
-      if (!worst || RANK[key] > RANK[worst.key]
-        || (RANK[key] === RANK[worst.key] && worseness(mode, j) > worseness(mode, worst.j))) {
+      if (!worst || FQ_RANK[key] > FQ_RANK[worst.key]
+        || (FQ_RANK[key] === FQ_RANK[worst.key] && worseness(mode, j) > worseness(mode, worst.j))) {
         worst = { key, j, caseName: e.trim.case.name };
       }
     }

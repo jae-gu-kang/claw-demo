@@ -1,41 +1,20 @@
-/** 결과 뷰 (02 §8 12단계 열람) — 저장 산출물 목록(메타)·원본 조회.
+/** 결과 뷰 (02 §8 12단계 열람) — 저장 산출물 목록(메타)·브리핑·원본 조회.
 
 검증 리포트 생성(M12)은 엔진 구축 대기 — 여기서는 산출물 계보(지문) 열람까지.
 
-배치는 다른 탭과 같은 규약(views/stage.js): **목록이 전면**이고 종류별 요약·저장
-구조 설명은 패널이다. 이 탭에 온 사람의 질문은 "무엇이 저장돼 있나" 하나뿐이라,
-그 답 위에 다른 것을 얹지 않는다.
+배치는 다른 탭과 같은 규약(views/stage.js): **목록이 전면**이고 브리핑·종류별
+요약·저장 구조 설명은 패널이다. 결과 하나를 여는 길은 [브리핑]이 먼저다 —
+정해진 양식(머리·종합 판정·절)이 본문에서 계산으로 즉시 서고(lib/resultbrief.js),
+원본 JSON은 그 안의 접기(옵션)다. LLM 소견서는 별도 패널(키 필요·자유 서술).
 */
 
 import { lineageText } from "../lib/lineage.js";
+import { briefModel, jsonPreview, kindLabel } from "../lib/resultbrief.js";
+import { STATUS } from "../lib/plot.js";
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
-
-// 산출물 종류의 우리말 이름 — 서버가 내는 것은 코드다. 모르는 코드는 **그대로** 낸다
-// (임의로 "기타"로 뭉치면 새 종류가 생겼다는 사실이 화면에서 사라진다).
-const KIND_LABEL = {
-  trim_batch: "트림 배치",
-  margin_map: "마진 맵",
-  envelope_scan: "엔벨로프 스캔",
-  sim: "시뮬레이션",
-  auto_design: "자동 설계",
-  quick_seed: "초기 게인 빠른 탐색",
-  derive_de_trim: "δe_trim 표 도출",
-  verify_flight: "검증 — 탑재 C 신뢰성",
-  influence_scan: "영향성 — 전 케이스 스캔",
-  influence_sweep: "영향성 — 부분 풀 스윕",
-  influence_openloop: "영향성 — 개루프 Δ",
-  influence_evaluate: "평가 — 대표 카드·나머지 판정",
-  influence_verify: "검증 — 3단계 (강건성·중간점)",
-  influence_prescribe: "정량 처방 — 얼마나·조합·확인",
-  mission_draft: "미션 초안 (LLM)",
-  llm_brief: "소견서 (LLM)",
-  llm_comms: "교신 대본 (LLM)",
-  llm_ask: "문답 (LLM)",
-};
-const kindLabel = (k) => KIND_LABEL[k] ?? k ?? "—";
 
 /** 전면에 한 번에 세우는 최대 행 수 [표시 정책].
  *
@@ -49,9 +28,15 @@ const HEAD_ROWS = 50;
 let items = null;
 let openDrawer = null;
 let showAll = false;
+// 브리핑 — 마지막으로 연 결과의 결정적 요약 {meta, model, preview} (재진입 유지)
+let lastView = null;
+let viewSeq = 0; // 늦게 온 옛 본문이 새로 고른 결과의 브리핑을 덮지 않게
+// 탭을 열면 최신 결과의 브리핑이 자동으로 선다 — 세션에 한 번, 이미 보던 브리핑·열어 둔
+// 패널이 있으면 끼어들지 않는다 (기체 탭 목록 자동 열림과 같은 규약)
+let briefAutoOpened = false;
 // LLM 소견서 — 잡·결과 재진입 유지 (시뮬 탭 draftJobId와 같은 규약)
-let briefJobId = null;
-let lastBrief = null;
+let opinionJobId = null;
+let lastOpinion = null;
 
 export function render() {
   const listBox = el("div", { class: "tab-sheet" });
@@ -59,25 +44,115 @@ export function render() {
   const errBox = el("div");
   const statusLine = el("p", { class: "tab-status" });
 
-  // ── LLM 소견서 — 행의 [브리핑]이 시작하고 결과는 「브리핑」 패널에 산다 ────
+  // ── 브리핑 — 행의 [브리핑]이 연다. 정해진 양식의 결정적 요약(lib/resultbrief.js),
+  //    원본 JSON은 그 안의 접기다 (사용자 제기: "브리핑부터, JSON은 옵션으로")
+  const briefBox = el("div");
+
+  const paintBriefDoc = () => {
+    clear(briefBox);
+    if (!lastView) {
+      briefBox.append(el("p", { class: "hint" },
+        "목록 행의 [브리핑]을 누르면 그 결과의 요약이 정해진 양식(머리·종합 판정·절)으로 "
+        + "여기 섭니다 — 원본 JSON은 맨 아래 접기에서 폅니다."));
+      return;
+    }
+    if (lastView.loading) {
+      briefBox.append(el("p", { class: "hint" }, `본문 불러오는 중… (${lastView.id})`));
+      return;
+    }
+    if (lastView.error) {
+      briefBox.append(el("div", { class: "error-box" }, lastView.error));
+      return;
+    }
+    // 이 paint의 view를 스냅숏으로 잡는다 — 클로저가 모듈 lastView를 잡으면 옛 details의
+    // 늦은 toggle이 **새** 결과의 캐시를 건드릴 수 있다. view에만 쓰면 구조적으로 옳다(리뷰 지적)
+    const view = lastView;
+    const { model, id } = view;
+    const toneColor = { ok: STATUS.ok, warn: STATUS.warn, bad: STATUS.bad, na: STATUS.na };
+    // 원본 JSON은 **펼칠 때 처음** 문자열화한다 — 시뮬 본문(전 해상도, 수 MB)을 브리핑을
+    // 열 때마다 만들면 대부분 버려지는 수십 MB 문자열이 매번 생긴다(리뷰 지적).
+    // 한 번 만든 것은 view에 남아 재진입·재펼침에 다시 만들지 않는다
+    const summaryText = (p) => (p
+      ? `원본 JSON — ${Math.max(1, Math.round(p.chars / 1024)).toLocaleString()} KB`
+        + (p.truncated ? " (상한 앞부분만 — 전량은 아래 새 탭 링크)" : "")
+      : "원본 JSON 펼치기 (펼칠 때 문자열화)");
+    const jsonSummary = el("summary", {}, summaryText(view.preview));
+    const jsonPre = el("pre", { style: "max-height:420px; overflow:auto; font-size:11px" },
+      view.preview ? view.preview.text : "");
+    const jsonFold = el("details", {
+      style: "margin-top:12px",
+      ontoggle: () => {
+        if (!jsonFold.open || view.preview) return;
+        view.preview = jsonPreview(view.body);
+        clear(jsonSummary).append(summaryText(view.preview));
+        clear(jsonPre).append(view.preview.text);
+      },
+    }, jsonSummary, jsonPre);
+    // 네이티브 append에 null 직접 전달 금지 (문자열화 함정 — 판정 없는 브리핑마다
+    // "null" 글자가 찍힌다, 리뷰 지적) — el 래핑으로 조립한다
+    briefBox.append(el("div", {},
+      el("h2", {}, model.title),
+      el("table", { class: "num", style: "margin:4px 0 8px" }, el("tbody", {},
+        model.head.map(([k, v]) => el("tr", {},
+          el("td", { class: "hint", style: "padding-right:10px; white-space:nowrap" }, k),
+          el("td", {}, v))))),
+      model.verdict
+        ? el("p", { style: "margin:0 0 8px" },
+            el("span", { class: "flag",
+              style: `background:${toneColor[model.verdict.tone]}22; color:${toneColor[model.verdict.tone]}` },
+              "종합"),
+            " ", model.verdict.text)
+        : null,
+      ...model.sections.map((s) => el("div", { style: "margin-top:8px" },
+        el("h3", { style: "font-size:13px; margin:0 0 4px" }, s.title),
+        s.rows ? el("div", { class: "scroll-x" }, el("table", {}, el("tbody", {},
+          s.rows.map(([k, v]) => el("tr", {},
+            el("td", { style: "padding-right:10px; white-space:nowrap" }, k),
+            el("td", {}, v))))))
+          : el("div", {}, (s.lines ?? []).map((t) => el("p", { style: "max-width:96ch; margin:4px 0" }, t))))),
+      jsonFold,
+      el("p", { class: "hint", style: "margin-top:6px" },
+        el("a", { href: `/api/results/${id}`, target: "_blank" }, "원본 JSON (새 탭)"),
+        " — 다른 탭이 이 결과를 되읽는 바로 그 본문이다."),
+    ));
+  };
+
+  const onView = async (m) => {
+    const my = ++viewSeq;
+    lastView = { id: m.id, meta: m, loading: true }; // meta 보관 — 로딩 중 재진입이 다시 건다
+    paintBriefDoc();
+    drawers.open("brief"); // 결과가 사는 패널을 열어 준다 (전 탭 규약)
+    try {
+      const body = await api.get(`/results/${m.id}`);
+      if (my !== viewSeq) return; // 그사이 다른 행을 열었다
+      lastView = { id: m.id, model: briefModel(m, body), body, preview: null };
+    } catch (e) {
+      if (my !== viewSeq) return;
+      lastView = { id: m.id, error: errorText(e) };
+    }
+    paintBriefDoc();
+    drawers.refresh(); // 「브리핑」 칩 배지
+  };
+
+  // ── LLM 소견서 — 행의 [소견서]가 시작하고 결과는 「소견서 (LLM)」 패널에 산다 ──
   // 판단 로직 없음(표시 조립뿐)이라 lib 없이 여기 둔다. 서버 계약·가지치기는
   // routes/llm.py·brief.py + 테스트가 정본.
-  const briefProgressBox = el("div");
-  const briefErrBox = el("div");
-  const briefBox = el("div");
+  const opinionProgressBox = el("div");
+  const opinionErrBox = el("div");
+  const opinionBox = el("div");
   let llm = null; // GET /llm/status — 이 render 안에서 한 번 (재진입 시 재조회)
 
-  const paintBrief = () => {
-    clear(briefBox);
-    if (!lastBrief) {
-      briefBox.append(el("p", { class: "hint" },
-        "아직 소견서가 없습니다 — 목록 행의 [브리핑]을 누르면 그 결과의 소견서가 "
-        + "생성돼 여기 열립니다. 버튼이 꺼져 있으면 버튼 설명(title)이 사유를 "
+  const paintOpinion = () => {
+    clear(opinionBox);
+    if (!lastOpinion) {
+      opinionBox.append(el("p", { class: "hint" },
+        "아직 소견서가 없습니다 — 목록 행의 [소견서]를 누르면 그 결과의 소견서가 "
+        + "LLM으로 생성돼 여기 열립니다. 버튼이 꺼져 있으면 버튼 설명(title)이 사유를 "
         + "말합니다 (키 없는 배포에서는 꺼진 것이 정상)."));
       return;
     }
-    const b = lastBrief;
-    briefBox.append(
+    const b = lastOpinion;
+    opinionBox.append(
       el("h2", {}, b.headline || "(제목 없음)"),
       el("p", { class: "hint", style: "margin:0 0 8px" },
         `대상 ${b.parent} — ${kindLabel(b.parent_kind)}`,
@@ -93,58 +168,58 @@ export function render() {
     );
   };
 
-  const watchBrief = () => attachProgress(briefProgressBox, briefJobId, {
+  const watchOpinion = () => attachProgress(opinionProgressBox, opinionJobId, {
     onDone: async (job) => {
-      briefJobId = null;
+      opinionJobId = null;
       paintList(); // 행 버튼이 다시 켜진다
       try {
         if (job.status === "error") throw new Error(job.error);
         if (cancelledWithoutResult(job)) {
-          clear(briefErrBox).append(el("div", { class: "error-box" },
+          clear(opinionErrBox).append(el("div", { class: "error-box" },
             "취소됨 — 저장된 소견서 없음"));
           return;
         }
-        lastBrief = await api.get(`/results/${job.result_id}`);
-        paintBrief();
-        drawers.open("brief"); // 결과가 사는 패널을 열어 준다 (전 탭 규약)
+        lastOpinion = await api.get(`/results/${job.result_id}`);
+        paintOpinion();
+        drawers.open("opinion"); // 결과가 사는 패널을 열어 준다 (전 탭 규약)
         load(); // 목록에도 「소견서 (LLM)」 행이 선다
       } catch (e) {
-        clear(briefErrBox).append(el("div", { class: "error-box" }, errorText(e)));
+        clear(opinionErrBox).append(el("div", { class: "error-box" }, errorText(e)));
       }
     },
     onError: (e) => {
-      briefJobId = null;
+      opinionJobId = null;
       paintList();
-      clear(briefErrBox).append(el("div", { class: "error-box" }, errorText(e)));
+      clear(opinionErrBox).append(el("div", { class: "error-box" }, errorText(e)));
     },
   });
 
-  // await 앞의 동기 플래그 — briefJobId만 보면 POST 왕복 사이의 더블클릭이
+  // await 앞의 동기 플래그 — opinionJobId만 보면 POST 왕복 사이의 더블클릭이
   // 유료 잡을 두 번 만든다 (리뷰 지적: 워처가 첫 잡을 고아로 만들고 둘 다 과금)
-  let briefSubmitting = false;
-  const onBrief = async (id) => {
-    if (briefJobId || briefSubmitting) return; // 버튼이 이미 꺼져 있다 — 방어만
-    briefSubmitting = true;
+  let opinionSubmitting = false;
+  const onOpinion = async (id) => {
+    if (opinionJobId || opinionSubmitting) return; // 버튼이 이미 꺼져 있다 — 방어만
+    opinionSubmitting = true;
     try {
-      clear(briefErrBox);
+      clear(opinionErrBox);
       const submitted = await api.post("/llm/brief", { result_id: id });
-      briefJobId = submitted.id;
+      opinionJobId = submitted.id;
       paintList();
-      drawers.open("brief"); // 진행이 이 패널에 산다 — 누른 자리에서 보이게 바로 연다
-      watchBrief();
+      drawers.open("opinion"); // 진행이 이 패널에 산다 — 누른 자리에서 보이게 바로 연다
+      watchOpinion();
     } catch (e) {
-      drawers.open("brief");
-      clear(briefErrBox).append(el("div", { class: "error-box" }, errorText(e)));
+      drawers.open("opinion");
+      clear(opinionErrBox).append(el("div", { class: "error-box" }, errorText(e)));
     } finally {
-      briefSubmitting = false;
+      opinionSubmitting = false;
     }
   };
 
-  const briefCtl = () => ({
+  const opinionCtl = () => ({
     available: !!llm?.available,
     reason: llm == null ? "서버 LLM 상태 확인 중…" : llm.reason,
-    busy: !!briefJobId || briefSubmitting,
-    onBrief,
+    busy: !!opinionJobId || opinionSubmitting,
+    onOpinion,
   });
 
   const loadLlm = async () => {
@@ -161,21 +236,26 @@ export function render() {
     initial: openDrawer,
     onOpen: (k) => { openDrawer = k; },
     defs: [
+      { key: "brief", label: "브리핑", group: "보기",
+        title: "고른 결과의 요약 — 정해진 양식(머리·종합 판정·절), 원본 JSON은 안의 접기",
+        count: () => (lastView && !lastView.loading && !lastView.error ? 1 : null),
+        build: () => briefBox },
       { key: "kinds", label: "종류별 요약", group: "보기",
         title: "무엇을 몇 건 냈나 — 단계별로 실측이 있는지",
         count: () => (items ? new Set(items.map((m) => m.kind)).size : null),
         build: () => summaryBox },
-      { key: "brief", label: "브리핑", group: "보기",
-        title: "고른 결과의 LLM 소견서 — 목록 행의 [브리핑]으로 생성한다",
-        count: () => (lastBrief ? 1 : null),
-        build: () => [briefProgressBox, briefErrBox, briefBox] },
+      { key: "opinion", label: "소견서 (LLM)", group: "보기",
+        title: "고른 결과의 LLM 소견서(자유 서술·키 필요) — 목록 행의 [소견서]로 생성한다",
+        count: () => (lastOpinion ? 1 : null),
+        build: () => [opinionProgressBox, opinionErrBox, opinionBox] },
       { key: "about", label: "저장 구조·지문", group: "설명",
         build: () => [
           el("h2", {}, "본문/메타 분리 저장소"),
           el("p", { class: "hint", style: "max-width:96ch" },
             "목록에 뜨는 것은 메타뿐이고 본문(케이스·신호·판정)은 따로 저장된다 — ",
-            "그래서 이 표는 산출물이 아무리 커도 즉시 뜬다. 각 행의 [원본 JSON]이 ",
-            "본문이며, 다른 탭이 결과를 다시 열 때 쓰는 것과 같은 경로다."),
+            "그래서 이 표는 산출물이 아무리 커도 즉시 뜬다. 행의 [브리핑]이 그 본문을 ",
+            "정형 요약으로 열고, 원본 JSON(다른 탭이 되읽는 그 본문)은 브리핑 안의 ",
+            "접기·새 탭 링크다."),
           el("p", { class: "hint", style: "max-width:96ch" },
             "지문(fingerprint)은 산출물 계보 키 (02 §2.4) — ",
             el("b", {}, "현재 클라이언트 자기신고"),
@@ -192,7 +272,7 @@ export function render() {
     renderList(listBox, items, showAll, () => {
       showAll = !showAll;
       paintList();
-    }, briefCtl());
+    }, opinionCtl(), onView);
   };
 
   const load = async () => {
@@ -206,6 +286,13 @@ export function render() {
       paintList();
       renderSummary(summaryBox, items);
       drawers.refresh();
+      // 최신 결과의 브리핑을 바로 세운다 (사용자 제기 "누르지 않아도 기본으로") —
+      // 목록이 최근순이라 [0]이 최신이다. 소견서(LLM) 결과가 최신이어도 그대로 연다:
+      // 그 브리핑은 소견 본문을 보여 주므로 "최신 산출물"이라는 답에 맞다
+      if (items.length && !lastView && !openDrawer && !briefAutoOpened) {
+        briefAutoOpened = true;
+        onView(items[0]);
+      }
     } catch (e) {
       items = null;
       statusLine.textContent = "";
@@ -224,14 +311,20 @@ export function render() {
   }
   load();
   loadLlm();
-  paintBrief(); // 재진입 — 마지막 소견서 복원
-  if (briefJobId) watchBrief(); // 생성 중 재진입 — 진행 UI 재부착 (전 탭 규약)
+  // 재진입 — 마지막 브리핑 복원. 로딩 중에 떠났다 왔으면 다시 건다: 진행 중이던 옛
+  // render의 continuation은 분리된 옛 DOM만 갱신해 화면이 「불러오는 중」에 멈춘다
+  // (viewSeq가 올라가 옛 응답은 버려진다 — 소견서의 watchOpinion 재부착과 같은 규약)
+  if (lastView?.loading && lastView.meta) onView(lastView.meta);
+  else paintBriefDoc();
+  paintOpinion(); // 재진입 — 마지막 소견서 복원
+  if (opinionJobId) watchOpinion(); // 생성 중 재진입 — 진행 UI 재부착 (전 탭 규약)
 
   return el("div", { class: "tab-page" },
     tabTop({
       title: "결과",
-      lead: "이 도구가 지금까지 낸 산출물 전부 — 어느 단계를 실제로 재 봤는지가 "
-        + "여기서 한 줄로 읽힌다. 각 행의 원본 JSON이 다른 탭이 되읽는 바로 그 본문이다.",
+      lead: "이 도구가 지금까지 낸 산출물 전부 — 탭을 열면 최신 결과의 브리핑이 "
+        + "정해진 양식으로 바로 서고, 다른 결과는 행의 [브리핑]으로 연다. "
+        + "원본 JSON은 브리핑 안의 접기다.",
       actions: [el("button", { onclick: load }, "새로고침")],
       extra: [statusLine, errBox],
     }),
@@ -240,19 +333,19 @@ export function render() {
   );
 }
 
-/** [브리핑] 버튼 — 못 누르는 상태는 끄되 사유를 title로 낸다 (조용한 비활성 금지). */
-function briefBtn(m, brief) {
+/** [소견서] 버튼 — 못 누르는 상태는 끄되 사유를 title로 낸다 (조용한 비활성 금지). */
+function opinionBtn(m, opinion) {
   const isBrief = m.kind === "llm_brief";
-  const disabled = isBrief || !brief.available || brief.busy;
-  const title = isBrief ? "소견서에는 브리핑을 만들지 않습니다"
-    : !brief.available ? (brief.reason ?? "사용할 수 없습니다")
-    : brief.busy ? "브리핑이 이미 생성 중입니다 — 「브리핑」 패널에서 진행을 봅니다"
-    : "이 결과의 소견서를 LLM으로 생성합니다";
-  return el("button", { disabled, title, onclick: () => brief.onBrief(m.id) },
-    "브리핑");
+  const disabled = isBrief || !opinion.available || opinion.busy;
+  const title = isBrief ? "소견서에는 소견서를 만들지 않습니다"
+    : !opinion.available ? (opinion.reason ?? "사용할 수 없습니다")
+    : opinion.busy ? "소견서가 이미 생성 중입니다 — 「소견서 (LLM)」 패널에서 진행을 봅니다"
+    : "이 결과의 소견서를 LLM으로 생성합니다 (자유 서술 — 정형 요약은 [브리핑])";
+  return el("button", { disabled, title, onclick: () => opinion.onOpinion(m.id) },
+    "소견서");
 }
 
-function renderList(box, list, all, onToggle, brief) {
+function renderList(box, list, all, onToggle, opinion, onView) {
   if (!list.length) {
     clear(box).append(el("p", { class: "hint" },
       "저장된 산출물이 없습니다 — ", el("a", { href: "#trim" }, "트림"), " · ",
@@ -284,8 +377,10 @@ function renderList(box, list, all, onToggle, brief) {
       el("td", { class: "num" }, m.n ?? "—"),
       el("td", { class: "num" }, lineageText(m)),
       el("td", { style: "white-space:nowrap" },
-        el("a", { href: `/api/results/${m.id}`, target: "_blank" }, "원본 JSON"),
-        " ", briefBtn(m, brief)),
+        // 브리핑이 먼저다 — 정형 요약이 즉시 서고, 원본 JSON은 그 안의 접기(옵션)다
+        el("button", { class: "primary", title: "정해진 양식의 요약 — 원본 JSON은 안의 접기",
+          onclick: () => onView(m) }, "브리핑"),
+        " ", opinionBtn(m, opinion)),
     ))),
   ))));
 }
