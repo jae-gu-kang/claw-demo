@@ -1,4 +1,4 @@
-/** 마진 맵 뷰 (02 §8 5단계) — 케이스 격자 × PI 개루프(다중) → 마진 맵·고유치·감쇠비.
+/** 마진 맵 뷰 (02 §8 5단계) — 케이스 격자 × PI 개루프(다중) → 마진 맵·고유치·감쇠비·비행성 수준.
 
 이 탭의 답은 **히트맵**이다: "전 구간에서 마진이 서는가, 어디가 얇은가." 그래서
 PM·GM 맵이 카드 밖 전면에 놓이고(블록도 최상위·영향성과 같은 규약, views/stage.js),
@@ -13,6 +13,7 @@ PM·GM 맵이 카드 밖 전면에 놓이고(블록도 최상위·영향성과 �
 
 import { api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
+import { FQ_BADGE, fqKey, fqLegendText, fqMeasureText, fqWorst } from "../lib/fq.js";
 import { DEFAULT_GRID, machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { MARGIN_ACT_FALLBACK } from "../lib/missiontemplate.js";
 import { applyUntouched, fillGridFromProfile, selectedDefaults } from "./missionfill.js";
@@ -240,7 +241,7 @@ export function render() {
           lastBody ? null : el("p", { class: "hint" }, "실행 후 표시됩니다."),
         ] },
       { key: "damp", label: "감쇠비·모드 표", group: "결과",
-        title: "케이스별 모드 ω_n·ζ — 어느 점의 어느 모드가 얇은가",
+        title: "케이스별 모드 ω_n·ζ + 비행성 수준(1/2/3) — 어느 점의 어느 모드가 얇은가",
         build: () => [
           el("h2", {}, "모드별 감쇠비"),
           slots.damp,
@@ -538,7 +539,12 @@ function renderResults(slots, body) {
         `연료 ${fmt(fuel, 4)} kg 격자의 전 케이스 모드를 한 평면에 겹친 것 — 점 하나가 `
         + "케이스 하나의 모드 하나다. 어느 점이 어느 케이스인지는 아래 감쇠비 표가 낸다."),
     );
-    clear(slots.damp).append(dampingTable(entries.filter((e) => e.trim.case.fuel === fuel)));
+    const fuelEntries = entries.filter((e) => e.trim.case.fuel === fuel);
+    clear(slots.damp).append(el("div", {},
+      fqSummaryLine(fuelEntries),
+      dampingTable(fuelEntries),
+      el("p", { class: "hint" }, fqLegendText(body.fq_criteria)),
+    ));
   };
   fuelSel.addEventListener("change", draw);
   // el()로 감싼다 — 아래 `loops.length > 0 && …`는 거짓일 때 **false**를 낳고,
@@ -606,23 +612,59 @@ function renderBode(box, lp, entry, body) {
   clear(box).append(...kids);
 }
 
+/** 모드별 최악 수준 한 줄 — 표를 읽기 전에 "어디가 최악이고 몇 수준인가"부터 답한다.
+ *  v1.10의 나선 T₂ 14 s는 이 줄이 처음부터 말했어야 하는 사실이다. */
+function fqSummaryLine(entries) {
+  return el("p", { style: "margin:0 0 6px" },
+    el("b", {}, "비행성 수준 (모드별 최악) — "),
+    ...fqWorst(entries).flatMap(({ mode, label, key, j, caseName }) => {
+      const b = FQ_BADGE[key];
+      const measure = fqMeasureText(mode, j);
+      return [
+        el("span", { style: "margin-right:10px; white-space:nowrap" },
+          `${label} `,
+          el("span", { class: "flag", style: `background:${b.color}22; color:${b.color}` }, b.label),
+          caseName ? el("span", { class: "hint" }, ` (${measure} @ ${caseName})`) : null),
+      ];
+    }));
+}
+
+/** 수준 배지 — 판정 dict가 없으면(na) 배지도 없다: 표가 "잰 것이 없다"를 회색 글로 말한다. */
+function fqBadge(j) {
+  const key = fqKey(j);
+  if (key === "na") return null;
+  const b = FQ_BADGE[key];
+  return el("span", { class: "flag", style: `background:${b.color}22; color:${b.color}; margin-left:6px` },
+    b.short);
+}
+
 function dampingTable(entries) {
-  const modeCell = (m) => (m ? `${fmt(m.wn, 3)} / ${fmt(m.zeta, 2)}` : "—");
+  const modeCell = (m, j) => (m
+    ? el("span", {}, `${fmt(m.wn, 3)} / ${fmt(m.zeta, 2)}`, fqBadge(j))
+    : "—");
   return el("table", {},
     el("thead", {}, el("tr", {},
       el("th", {}, "케이스"),
       el("th", {}, "단주기 wn/ζ"), el("th", {}, "장주기 wn/ζ"),
-      el("th", {}, "더치롤 wn/ζ"), el("th", {}, "롤 λ"), el("th", {}, "나선 λ"))),
+      el("th", {}, "더치롤 wn/ζ"),
+      el("th", { title: "실근 λ [1/s] — 판정은 시정수 τ = −1/λ" }, "롤 λ"),
+      el("th", { title: "실근 λ [1/s] — 발산이면 배가 시간 T₂ = ln2/λ로 판정" }, "나선 λ"))),
     el("tbody", {}, entries.map((e) => {
       const lonC = e.lon && e.lon.classified;
       const latC = e.lat && e.lat.classified;
+      const lonJ = e.lon?.fq ?? {};
+      const latJ = e.lat?.fq ?? {};
+      const spiralExtra = latJ.spiral && !latJ.spiral.stable && latJ.spiral.t2_s != null
+        ? ` (T₂ ${fmt(latJ.spiral.t2_s, 3)} s)` : "";
       return el("tr", {},
         el("td", {}, e.trim.case.name),
-        el("td", { class: "num" }, modeCell(lonC && lonC.short_period)),
-        el("td", { class: "num" }, modeCell(lonC && lonC.phugoid)),
-        el("td", { class: "num" }, modeCell(latC && latC.dutch_roll)),
-        el("td", { class: "num" }, latC ? fmt(latC.roll.eig[0], 3) : "—"),
-        el("td", { class: "num" }, latC ? fmt(latC.spiral.eig[0], 3) : "—"),
+        el("td", { class: "num" }, modeCell(lonC && lonC.short_period, lonJ.short_period)),
+        el("td", { class: "num" }, modeCell(lonC && lonC.phugoid, lonJ.phugoid)),
+        el("td", { class: "num" }, modeCell(latC && latC.dutch_roll, latJ.dutch_roll)),
+        el("td", { class: "num" }, latC
+          ? el("span", {}, fmt(latC.roll.eig[0], 3), fqBadge(latJ.roll)) : "—"),
+        el("td", { class: "num" }, latC
+          ? el("span", {}, `${fmt(latC.spiral.eig[0], 3)}${spiralExtra}`, fqBadge(latJ.spiral)) : "—"),
       );
     })),
   );

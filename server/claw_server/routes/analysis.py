@@ -14,12 +14,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
 from claw.analysis import (
+    FQCriteria,
     aero_envelope,
     bode_data,
     classify_lat,
     classify_lon,
     damp,
     design_envelope,
+    fq_lat,
+    fq_lon,
     loop_margins,
     omega_covering,
     pi_loop,
@@ -99,15 +102,25 @@ class MarginMapIn(BaseModel):
         return self
 
 
-def _axis_block(model, classify_fn) -> dict:
-    """축 부분모델 → 고유치 원자료 + 자동 분류 (비정형 구조는 note로 보고)."""
+# 비행성 수준 판정선 — 엔진 [기본값](MIL-F-8785C Class I·Cat B). 결과에 fq_criteria로
+# 동봉해 화면이 판정선을 재기술하지 않게 한다 (MarginCriteria /design/defaults와 같은 원칙)
+_FQ_CRITERIA = FQCriteria()
+
+
+def _axis_block(model, classify_fn, fq_fn) -> dict:
+    """축 부분모델 → 고유치 원자료 + 자동 분류 + 비행성 수준 (비정형 구조는 note로 보고).
+
+    fq는 분류가 선 모드에만 선다 — 분류 불가(실근 분리 등)면 판정할 모드 자체가
+    없으므로 함께 None이다. 판정은 무증강 기체 모드의 것이다(engine analysis/fq.py).
+    """
     block = {"modes": to_jsonable(damp(model.A))}
     try:
-        block["classified"] = to_jsonable(classify_fn(model))
-        block["note"] = None
+        classified = classify_fn(model)
     except ValueError as e:  # 실근 분리 등 비정형 — 데이터이지 실패가 아님
-        block["classified"] = None
-        block["note"] = str(e)
+        return {**block, "classified": None, "fq": None, "note": str(e)}
+    block["classified"] = to_jsonable(classified)
+    block["fq"] = to_jsonable(fq_fn(classified, _FQ_CRITERIA))
+    block["note"] = None
     return block
 
 
@@ -521,8 +534,8 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
             if tr.converged:
                 try:
                     lon, lat = split_axes(linearize(ac, tr))
-                    entry["lon"] = _axis_block(lon, classify_lon)
-                    entry["lat"] = _axis_block(lat, classify_lat)
+                    entry["lon"] = _axis_block(lon, classify_lon, fq_lon)
+                    entry["lat"] = _axis_block(lat, classify_lat, fq_lat)
                     for spec in req.loops:
                         model = lon if spec.axis == "lon" else lat
                         loop = _compose_loop(
@@ -539,6 +552,8 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
             {
                 "kind": "margin_map",
                 "cases": entries,
+                # 판정선 동봉 — 화면은 이 값을 읽어 범례를 쓴다 (판정선 재기술 금지)
+                "fq_criteria": {**_FQ_CRITERIA.to_dict(), "fingerprint": _FQ_CRITERIA.fingerprint()},
                 "loops": [lp.model_dump() for lp in req.loops],
                 "actuator": req.actuator.model_dump() if req.actuator else None,
                 "delay_s": req.delay_s,

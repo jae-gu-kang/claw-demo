@@ -42,12 +42,23 @@ def test_margin_map_end_to_end(client, wait_job):
         assert sp["wn"] > ph["wn"] > 0.0
         assert isinstance(sp["eig"], list) and len(sp["eig"]) == 2  # 복소 → [re, im]
         assert e["lat"]["classified"]["dutch_roll"]["wn"] > 0.5
+        # 비행성 수준 판정 (엔진 fq 통과) — 분류된 모드마다 level이 있고 나선은
+        # 안정(stable) 또는 배가 시간(t2_s) 중 하나를 말한다
+        assert set(e["lon"]["fq"]) == {"short_period", "phugoid"}
+        assert set(e["lat"]["fq"]) == {"dutch_roll", "roll", "spiral"}
+        for judged in (*e["lon"]["fq"].values(), *e["lat"]["fq"].values()):
+            assert judged["level"] in (1, 2, 3, None)
+        spiral = e["lat"]["fq"]["spiral"]
+        assert spiral["stable"] is (spiral["t2_s"] is None)
         # 마진 (엔진 pi_loop+loop_margins 통과) — 데모 피치 루프 PM > 20°
         m = e["margins"]["pitch_q"]
         assert m["pm_deg"] > 20.0
     # 고유치 원자료도 포함 (고유치 맵 대시보드용)
     assert len(entries[0]["lon"]["modes"]) == 4
     assert len(entries[0]["lat"]["modes"]) == 4
+    # 판정선 동봉 — 화면 범례의 정본 (재기술 금지). 지문은 계보 키
+    fq = body["fq_criteria"]
+    assert fq["spiral_t2_l1"] == 20.0 and len(fq["fingerprint"]) == 16
 
     meta = client.get("/api/results").json()[0]
     assert meta["kind"] == "margin_map" and meta["fingerprint"] == "fp-mm"

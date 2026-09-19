@@ -1,6 +1,7 @@
 """M10 analysis — 고유치·감쇠비·모드 분류, 이득/위상여유, 마진 맵 (도메인 문서 §4.2).
 
 구현됨: damp / classify_lon(단주기·장주기) / classify_lat(더치롤·롤·나선) /
+fq(비행성 수준 1/2/3 판정 — FQCriteria·fq_lon·fq_lat, MIL-F-8785C 관례) /
 make_siso / loop_margins / margin_map (python-control 기반). pi_loop는 작동기
 동특성(actuator_wn·zeta — 2차계 캐스케이드)·순수지연(delay_s — Padé 근사,
 pade_order [기본값] 2) 포함 옵션 지원 (01 §4.2 [기본값] — 둘 다 미지정이면 기존과
@@ -14,6 +15,7 @@ bode_data — 개루프 주파수응답 + 교차점 전량(다중 교차 시 con
 """
 
 from claw.analysis.duty import duty_report, surface_positions
+from claw.analysis.fq import FQCriteria, fq_lat, fq_lon
 from claw.analysis.envelope import (
     aero_envelope,
     design_envelope,
@@ -38,6 +40,9 @@ __all__ = [
     "damp",
     "classify_lon",
     "classify_lat",
+    "FQCriteria",
+    "fq_lon",
+    "fq_lat",
     "make_siso",
     "pi_loop",
     "loop_margins",

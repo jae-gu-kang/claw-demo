@@ -713,3 +713,120 @@ def test_level_crossings_does_not_multiply_a_tangency():
 
     b = bode_data(control.tf([1.0], [1.0]), n_points=400)  # |L| = 0 dB 전 구간
     assert len(b["crossings"]["gain"]) == 1, len(b["crossings"]["gain"])
+
+
+# ── 비행성 수준 판정 (fq — MIL-F-8785C Class I·Cat B [기본값]) ──────────────
+
+
+def _pair(zeta, wn):
+    """감쇠비·고유진동수 → classify가 내는 복소쌍 모드 dict."""
+    re = -zeta * wn
+    im = wn * math.sqrt(max(0.0, 1.0 - zeta * zeta))
+    return {"eig": complex(re, im), "wn": wn, "zeta": zeta}
+
+
+def _real(re):
+    return {"eig": complex(re, 0.0), "wn": abs(re), "zeta": 1.0 if re < 0 else -1.0}
+
+
+def test_fq_short_period_bands():
+    from claw.analysis import FQCriteria
+
+    c = FQCriteria()
+    assert c.judge_short_period(_pair(0.5, 3.0))["level"] == 1
+    assert c.judge_short_period(_pair(0.30, 3.0))["level"] == 1  # 경계 포함
+    assert c.judge_short_period(_pair(0.25, 3.0))["level"] == 2
+    assert c.judge_short_period(_pair(0.17, 3.0))["level"] == 3
+    assert c.judge_short_period(_pair(0.10, 3.0))["level"] is None  # 수준 밖
+    # 과감쇠 쪽 대역 상한 — ζ 2.0 초과는 수준 1이 아니다
+    assert c.judge_short_period(_pair(2.5, 3.0))["level"] == 3
+
+
+def test_fq_phugoid_stable_and_divergent():
+    from claw.analysis import FQCriteria
+
+    c = FQCriteria()
+    assert c.judge_phugoid(_pair(0.06, 0.1))["level"] == 1
+    j2 = c.judge_phugoid(_pair(0.01, 0.1))  # 안정이지만 ζ < 0.04
+    assert j2["level"] == 2 and j2["t2_s"] is None
+    # 발산 장주기 — T₂ = ln2/Re. Re=0.01 → 69.3 s ≥ 55 s → 수준 3
+    j3 = c.judge_phugoid({"eig": complex(0.01, 0.1), "wn": 0.1, "zeta": -0.0995})
+    assert j3["level"] == 3 and j3["t2_s"] == pytest.approx(math.log(2) / 0.01)
+    j4 = c.judge_phugoid({"eig": complex(0.02, 0.1), "wn": 0.1, "zeta": -0.196})
+    assert j4["level"] is None  # T₂ 34.7 s < 55 s
+
+
+def test_fq_dutch_roll_requires_all_three():
+    from claw.analysis import FQCriteria
+
+    c = FQCriteria()
+    assert c.judge_dutch_roll(_pair(0.2, 2.0))["level"] == 1
+    # ζ는 수준 1인데 ζωn이 모자라면(0.09×1.0=0.09 < 0.15) 수준 2다 — 셋 다 요구
+    assert c.judge_dutch_roll(_pair(0.09, 1.0))["level"] == 2
+    assert c.judge_dutch_roll(_pair(0.03, 2.0))["level"] == 2
+    assert c.judge_dutch_roll(_pair(0.01, 2.0))["level"] == 3
+    assert c.judge_dutch_roll(_pair(0.2, 0.3))["level"] is None  # ωn < 0.4
+    assert c.judge_dutch_roll({"eig": complex(0.01, 1.0), "wn": 1.0, "zeta": -0.01})["level"] is None
+
+
+def test_fq_roll_time_constant():
+    from claw.analysis import FQCriteria
+
+    c = FQCriteria()
+    assert c.judge_roll(_real(-2.0)) == {"level": 1, "tau_s": 0.5}
+    assert c.judge_roll(_real(-0.5))["level"] == 2  # τ 2.0 s
+    assert c.judge_roll(_real(-0.15))["level"] == 3  # τ 6.7 s
+    assert c.judge_roll(_real(-0.05))["level"] is None  # τ 20 s
+    assert c.judge_roll(_real(0.3)) == {"level": None, "tau_s": None}  # 발산 롤
+
+
+def test_fq_spiral_doubling_time():
+    from claw.analysis import FQCriteria
+
+    c = FQCriteria()
+    assert c.judge_spiral(_real(-0.01)) == {"level": 1, "stable": True, "t2_s": None}
+    j = c.judge_spiral(_real(0.02))  # T₂ 34.7 s ≥ 20 s
+    assert j["level"] == 1 and j["stable"] is False and j["t2_s"] == pytest.approx(math.log(2) / 0.02)
+    # v1.10의 실측 사례 — T₂ 14 s는 수준 1(20 s)이 아니라 수준 2(≥ 8 s)다.
+    # 그때는 사람이 손으로 발견했다 — 이 판정이 그 관례의 정본이다
+    assert c.judge_spiral(_real(math.log(2) / 14.0))["level"] == 2
+    assert c.judge_spiral(_real(math.log(2) / 5.0))["level"] == 3
+    assert c.judge_spiral(_real(math.log(2) / 2.0))["level"] is None
+
+
+def test_fq_lon_lat_on_demo_aircraft(lon_lat):
+    """데모 기체 M0.6 — 분류된 모드 전부에 판정이 서고, 값이 분류와 정합한다."""
+    from claw.analysis import FQCriteria, fq_lat, fq_lon
+
+    c = FQCriteria()
+    lon, lat = lon_lat[1]
+    jl = fq_lon(classify_lon(lon), c)
+    jt = fq_lat(classify_lat(lat), c)
+    assert set(jl) == {"short_period", "phugoid"}
+    assert set(jt) == {"dutch_roll", "roll", "spiral"}
+    for j in (*jl.values(), *jt.values()):
+        assert j["level"] in (1, 2, 3, None)
+    lat_c = classify_lat(lat)
+    if lat_c["spiral"]["eig"].real > 0:
+        assert jt["spiral"]["t2_s"] == pytest.approx(math.log(2) / lat_c["spiral"]["eig"].real)
+    else:
+        assert jt["spiral"] == {"level": 1, "stable": True, "t2_s": None}
+
+
+def test_fq_criteria_ordering_and_fingerprint():
+    from claw.analysis import FQCriteria
+
+    c = FQCriteria()
+    assert c.fingerprint() == FQCriteria.from_dict(c.to_dict()).fingerprint()
+    # 서버가 결과에 동봉하는 형태(지문 포함)를 그대로 되먹여도 선다 — 모르는 다른 키는 여전히 거부
+    assert FQCriteria.from_dict({**c.to_dict(), "fingerprint": c.fingerprint()}) == c
+    with pytest.raises(TypeError):
+        FQCriteria.from_dict({**c.to_dict(), "zzz": 1.0})
+    with pytest.raises(ValueError):
+        FQCriteria(spiral_t2_l2=25.0)  # 서열 위반: l2 > l1(20)
+    with pytest.raises(ValueError):
+        FQCriteria(sp_zeta_l1_lo=0.1)  # 서열 위반: l1 < l2(0.20)
+    with pytest.raises(ValueError):
+        FQCriteria(dr_wn_l3=0.5)  # 서열 위반: l3 > l2(0.4)
+    with pytest.raises(ValueError):
+        FQCriteria(roll_tau_l1=0.0)

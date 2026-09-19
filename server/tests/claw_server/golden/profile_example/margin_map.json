@@ -1,7 +1,7 @@
 {
  "golden": "margin_map",
  "mode": "full",
- "captured_at": "654ec14+dirty",
+ "captured_at": "56b0f96+dirty",
  "value": {
   "dict": {
    "kind": "margin_map",
@@ -158,6 +158,23 @@
           }
          }
         },
+        "fq": {
+         "dict": {
+          "short_period": {
+           "dict": {
+            "level": 3,
+            "zeta": "f:0x1.83a62ce5c760dp-3"
+           }
+          },
+          "phugoid": {
+           "dict": {
+            "level": 1,
+            "zeta": "f:0x1.41f444302155dp-3",
+            "t2_s": null
+           }
+          }
+         }
+        },
         "note": null
        }
       },
@@ -235,6 +252,31 @@
             ],
             "wn": "f:0x1.6025e29fdbcd9p-8",
             "zeta": "f:0x1.0000000000000p+0"
+           }
+          }
+         }
+        },
+        "fq": {
+         "dict": {
+          "dutch_roll": {
+           "dict": {
+            "level": 2,
+            "zeta": "f:0x1.66d805a77bcb5p-5",
+            "wn": "f:0x1.4d0319747f583p+1",
+            "zwn": "f:0x1.d2cb579151eeap-4"
+           }
+          },
+          "roll": {
+           "dict": {
+            "level": 2,
+            "tau_s": "f:0x1.bb1f903fd132ep+0"
+           }
+          },
+          "spiral": {
+           "dict": {
+            "level": 1,
+            "stable": true,
+            "t2_s": null
            }
           }
          }
@@ -409,6 +451,23 @@
           }
          }
         },
+        "fq": {
+         "dict": {
+          "short_period": {
+           "dict": {
+            "level": 3,
+            "zeta": "f:0x1.82db71134898ep-3"
+           }
+          },
+          "phugoid": {
+           "dict": {
+            "level": 1,
+            "zeta": "f:0x1.3023794952765p-3",
+            "t2_s": null
+           }
+          }
+         }
+        },
         "note": null
        }
       },
@@ -486,6 +545,31 @@
             ],
             "wn": "f:0x1.bdfb26ff3b531p-8",
             "zeta": "f:0x1.0000000000000p+0"
+           }
+          }
+         }
+        },
+        "fq": {
+         "dict": {
+          "dutch_roll": {
+           "dict": {
+            "level": 2,
+            "zeta": "f:0x1.6a86082138261p-5",
+            "wn": "f:0x1.758d8929f80e1p+1",
+            "zwn": "f:0x1.087edbf405192p-3"
+           }
+          },
+          "roll": {
+           "dict": {
+            "level": 2,
+            "tau_s": "f:0x1.8529e09b9f53ep+0"
+           }
+          },
+          "spiral": {
+           "dict": {
+            "level": 1,
+            "stable": true,
+            "t2_s": null
            }
           }
          }
@@ -660,6 +744,23 @@
           }
          }
         },
+        "fq": {
+         "dict": {
+          "short_period": {
+           "dict": {
+            "level": 3,
+            "zeta": "f:0x1.826daf5b98553p-3"
+           }
+          },
+          "phugoid": {
+           "dict": {
+            "level": 1,
+            "zeta": "f:0x1.31bc2c4800a7cp-3",
+            "t2_s": null
+           }
+          }
+         }
+        },
         "note": null
        }
       },
@@ -741,6 +842,31 @@
           }
          }
         },
+        "fq": {
+         "dict": {
+          "dutch_roll": {
+           "dict": {
+            "level": 2,
+            "zeta": "f:0x1.6f1be6dce0a32p-5",
+            "wn": "f:0x1.9e8ef702d72c0p+1",
+            "zwn": "f:0x1.293e1185a0297p-3"
+           }
+          },
+          "roll": {
+           "dict": {
+            "level": 1,
+            "tau_s": "f:0x1.5ace7ace7ab1fp+0"
+           }
+          },
+          "spiral": {
+           "dict": {
+            "level": 1,
+            "stable": true,
+            "t2_s": null
+           }
+          }
+         }
+        },
         "note": null
        }
       },
@@ -760,6 +886,32 @@
      }
     }
    ],
+   "fq_criteria": {
+    "dict": {
+     "sp_zeta_l1_lo": "f:0x1.3333333333333p-2",
+     "sp_zeta_l1_hi": "f:0x1.0000000000000p+1",
+     "sp_zeta_l2_lo": "f:0x1.999999999999ap-3",
+     "sp_zeta_l2_hi": "f:0x1.0000000000000p+1",
+     "sp_zeta_l3_lo": "f:0x1.3333333333333p-3",
+     "ph_zeta_l1": "f:0x1.47ae147ae147bp-5",
+     "ph_t2_l3": "f:0x1.b800000000000p+5",
+     "dr_zeta_l1": "f:0x1.47ae147ae147bp-4",
+     "dr_zwn_l1": "f:0x1.3333333333333p-3",
+     "dr_wn_l1": "f:0x1.999999999999ap-2",
+     "dr_zeta_l2": "f:0x1.47ae147ae147bp-6",
+     "dr_zwn_l2": "f:0x1.999999999999ap-5",
+     "dr_wn_l2": "f:0x1.999999999999ap-2",
+     "dr_zeta_l3": "f:0x0.0p+0",
+     "dr_wn_l3": "f:0x1.999999999999ap-2",
+     "roll_tau_l1": "f:0x1.6666666666666p+0",
+     "roll_tau_l2": "f:0x1.8000000000000p+1",
+     "roll_tau_l3": "f:0x1.4000000000000p+3",
+     "spiral_t2_l1": "f:0x1.4000000000000p+4",
+     "spiral_t2_l2": "f:0x1.0000000000000p+3",
+     "spiral_t2_l3": "f:0x1.0000000000000p+2",
+     "fingerprint": "02ffa9fcef663843"
+    }
+   },
    "loops": [
     {
      "dict": {
