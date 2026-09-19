@@ -44,7 +44,8 @@ import {
 } from "../lib/missiontemplate.js";
 import { firstTimeThisPage, selectedDefaults } from "./missionfill.js";
 
-let lastVn = null;
+let lastVn = null; // V-n 응답 목록 — 고도마다 한 장 (값 하나면 길이 1)
+const MAX_VN_ALTS = 6; // V-n 병렬 비교 고도 상한 — 한 줄에서 읽을 수 있는 장 수
 let lastMh = null;
 let lastScan = null; // /results 페이로드 {kind: "envelope_scan", cases, n_requested}
 let runningJobId = null;
@@ -215,8 +216,14 @@ export function render() {
         alpha_margin: Number(form.margin),
         ...struct,
       };
-      const vn = await api.get("/analysis/vn-envelope?"
-        + envelopeQuery({ alt: Number(form.alt), ...shared }));
+      // 고도 칸은 목록이다 — 값 하나면 종전과 같은 한 장, 여러 값이면 고도별 병렬 비교.
+      // 상한은 읽을 수 있는 곡선 수(등고선 MAX_ISO_VALUES와 같은 취지, 화면은 더 좁다)
+      const vnAlts = parseNumberList(form.alt);
+      if (vnAlts.length > MAX_VN_ALTS) {
+        throw new Error(`V-n 고도는 ${MAX_VN_ALTS}개까지입니다: ${vnAlts.length}개`);
+      }
+      const vn = await Promise.all(vnAlts.map((alt) => api.get("/analysis/vn-envelope?"
+        + envelopeQuery({ alt, ...shared }))));
       const mh = await api.get("/analysis/design-envelope?"
         + envelopeQuery({
           ...shared,
@@ -314,7 +321,7 @@ export function render() {
   //    같은 패널 안에만 있으면 패널을 닫는 순간 다시 그릴 방법이 사라진다.
   clear(formBox).append(
     el("div", { class: "row" },
-      el("label", { class: "field" }, "고도 [m] (V-n)", bind("alt")),
+      el("label", { class: "field" }, "고도 [m] (V-n — 콤마로 여러 개 = 병렬 비교)", bind("alt")),
       el("label", { class: "field" }, "연료 [kg]", bind("fuel")),
       el("label", { class: "field" }, "보호 마진 [rad]", bind("margin")),
       el("button", { class: "primary", onclick: draw }, "그리기"),
@@ -1363,9 +1370,9 @@ function renderMh(box) {
 
 // ── 구조 (V-n — 교과서형, 기존 캔버스 유지) ───────────────────────────────
 
-function vnDiagramCanvas(body) {
-  const W = 780;
-  const H = 470;
+function vnDiagramCanvas(body, { width = 780, height = 470 } = {}) {
+  const W = width;
+  const H = height;
   const { canvas, ctx } = makeCanvas(W, H);
   const mL = 52, mT = 30, mR = 16, mB = 40;
   const L = body.limits;
@@ -1552,13 +1559,15 @@ function vnDiagramCanvas(body) {
 }
 
 function renderVn(box) {
-  if (!lastVn) {
+  if (!lastVn || !lastVn.length) {
     clear(box).append(el("p", { class: "hint" }, "그리기 실행 시 표시됩니다."));
     return;
   }
-  const body = lastVn;
+  // 한 장이면 종전 크기 그대로, 여러 장이면 줄여서 나란히 — 장마다 제목이 자기 고도를 말한다
+  const single = lastVn.length === 1;
   clear(box).append(
-    el("div", { class: "scroll-x" }, vnDiagramCanvas(body)),
+    el("div", { class: "scroll-x" }, el("div", { class: "row" },
+      lastVn.map((b) => vnDiagramCanvas(b, single ? {} : { width: 480, height: 330 })))),
     el("div", { class: "legend" },
       el("span", {}, el("span", { class: "chip", style: `background:${C.ok}` }), "정상 운용"),
       el("span", {}, el("span", { class: "chip", style: `background:${C.stallZone}` }), "실속 영역 (공력 도달 불가)"),
