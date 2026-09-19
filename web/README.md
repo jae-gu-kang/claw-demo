@@ -25,12 +25,13 @@ index.html            # 탭 네비 — **왼쪽에서 오른쪽이 업무 순서
                       #   하고 lib/blocks.test.js가 배열로 대조한다
 css/app.css
 js/
-├── main.js           # 해시 라우팅 (기본 = 구조도 허브) + 헬스 폴링 + 기체 선택 읽기
+├── main.js           # 부팅 게이트(await login.gate()) → 해시 라우팅 (기본 = 구조도 허브) + 헬스 폴링 + 기체 선택 읽기
 ├── api.js            # REST 래퍼·ApiError·watchJob(WS 우선, 폴링 폴백)·기체 선택 주입
 ├── dom.js            # el() 조립·fmt(비유한값 정책)·flagBadge(3-상태)
 ├── store.js          # 탭 간 공유 상태 (게인·AP 편집본 전달 등)
-├── lib/              # 순수 로직 45개 (공존 *.test.js로 테스트)
+├── lib/              # 순수 로직 46개 (공존 *.test.js로 테스트)
 │   ├── 기체          profile (선택 저장·요청 주입·라우트 가드) · profileform (폼 포인터·변형 덮어쓰기) · missiontemplate (화면 기본값)
+│   ├── 로그인 게이트   logingate (게이트 판정·해체/조립 수치 — 화면은 views/login)
 │   ├── 블록도·매뉴얼   blocks · manualdoc · schemaform · wiresignals
 │   ├── 격자·배치      grid · stage · specs · loops
 │   ├── 엔벨로프·트림   envelope
@@ -56,7 +57,11 @@ js/
     ├── 영향성 (9단계)  influence · influencecanvas · plot3d
     ├── Autocode (10단계) autocode · codegen
     ├── 검증 (11단계)  verify
-    └── 결과 (12단계)  results
+    ├── 결과 (12단계)  results
+    └── 탭 아님(크롬)  ask (전역 질문) · tour (가이드 투어) · profilepick (헤더)
+                      · login (부팅 게이트 — 세션 모드면 로그인이 끝나야 앱이 선다;
+                        블록도 해체→조립 연출, 수치는 lib/logingate)
+                      · admin (#admin 특례 — nav·VIEWS 밖, 헤더 세션 알약 [관리]로만)
 world/                # 가상환경 번들 (별도 빌드 — 반입물은 build/world.js)
 ├── src/core/         #   판단: 자세·카메라·해수면·지형 좌표 (순수 함수, 테스트)
 ├── src/scene|shaders|post/  #   three를 아는 층

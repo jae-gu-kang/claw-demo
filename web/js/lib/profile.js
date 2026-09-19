@@ -35,6 +35,17 @@ export const COMPUTE_GET = new Set([
 /** 기체를 받지 않는 라우트와 그 사유 — "METHOD 경로" 키. 사유가 없는 분류는 분류가 아니다. */
 export const NOT_AIRCRAFT = {
   "GET /health": "서버 상태",
+  "POST /auth/login": "로그인 — 사람 계정, 기체 무관",
+  "POST /auth/logout": "로그아웃 — 사람 계정, 기체 무관",
+  "GET /auth/me": "세션 확인 — 사람 계정, 기체 무관",
+  "POST /auth/signup": "가입 신청 — 사람 계정, 기체 무관",
+  "GET /admin/users": "회원관리 — 사람 계정, 기체 무관",
+  "POST /admin/users": "회원관리 — 사람 계정, 기체 무관",
+  "PATCH /admin/users/{name}": "회원관리 — 사람 계정, 기체 무관",
+  "DELETE /admin/users/{name}": "회원관리 — 사람 계정, 기체 무관",
+  "GET /admin/sessions": "접속 현황 — 사람 계정, 기체 무관",
+  "GET /admin/data": "결과 저장소 현황 — 결과가 자기 기체를 싣는다",
+  "POST /admin/data/prune": "결과 저장소 정리 — 결과가 자기 기체를 싣는다",
   "GET /jobs": "작업 목록", "GET /jobs/{job_id}": "작업 상태", "POST /jobs/{job_id}/cancel": "작업 취소",
   "GET /results": "저장 결과 — 결과가 자기 기체(profile 블록)를 싣는다",
   "GET /results/{result_id}": "저장 결과 — 결과가 자기 기체(profile 블록)를 싣는다",

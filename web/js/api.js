@@ -33,6 +33,12 @@ async function request(method, path, body) {
     }
   }
   if (!res.ok) {
+    // 세션 만료·거절 → 로그인 게이트 재소환 (views/login.js가 듣는다).
+    // /auth/* 는 제외 — 로그인 실패 401이 게이트를 다시 세우면 재귀다.
+    // window 존부 확인은 node --test용 (이 모듈은 DOM 없이도 import된다)
+    if (res.status === 401 && !path.startsWith("/auth/") && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("claw:auth-required", { detail: { path } }));
+    }
     throw new ApiError(res.status, data && data.detail !== undefined ? data.detail : data);
   }
   return data;
@@ -42,6 +48,7 @@ export const api = {
   get: (path) => request("GET", path),
   post: (path, body) => request("POST", path, body),
   put: (path, body) => request("PUT", path, body),
+  patch: (path, body) => request("PATCH", path, body),
   del: (path) => request("DELETE", path),
 };
 

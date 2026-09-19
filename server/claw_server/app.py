@@ -12,10 +12,13 @@ from fastapi.staticfiles import StaticFiles
 import claw.blocks  # noqa: F401 — import 부수효과: 전역 REGISTRY "blocks" 등록
 import claw.guidance  # noqa: F401 — "guidance" 카테고리 등록
 import claw.plant  # noqa: F401 — "actuator" 카테고리 등록
-from claw_server.auth import BasicAuthProtect
+from claw_server import sessions
+from claw_server.auth import BasicAuthProtect, SessionAuthProtect
 from claw_server.jobs import JobManager
 from claw_server.profiles import ProfileStore
+from claw_server.routes import admin as admin_routes
 from claw_server.routes import analysis as analysis_routes
+from claw_server.routes import auth as auth_routes
 from claw_server.routes import codegen as codegen_routes
 from claw_server.routes import design as design_routes
 from claw_server.routes import gains as gains_routes
@@ -30,6 +33,7 @@ from claw_server.routes import trim as trim_routes
 from claw_server.routes import verify as verify_routes
 from claw_server.routes import world as world_routes
 from claw_server.store import ResultStore
+from claw_server.users import ensure_admin, make_user_store
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -81,7 +85,9 @@ def _default_web_dir() -> Path:
 
 
 def create_app(data_dir=None, web_dir=None, access_password=None,
-               result_limit=None, profile_dir=None, profile_volatile=None) -> FastAPI:
+               result_limit=None, profile_dir=None, profile_volatile=None,
+               admin_user=None, admin_password=None, session_secret=None,
+               users_db_url=None) -> FastAPI:
     """앱 생성 — data_dir: 결과 저장 루트 (기본 $CLAW_SERVER_DATA 또는 ./server_data),
     web_dir: M14 정적 파일 루트 (기본 $CLAW_WEB_DIR 또는 모노레포 web/ — 없으면 API만),
     access_password: 공용 비밀번호 (기본 $CLAW_ACCESS_PASSWORD — 빈 값이면 무인증),
@@ -91,24 +97,55 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
     profile_volatile: 기체 저장소가 재시작마다 비워지는 배포인가 (기본 $CLAW_PROFILE_VOLATILE —
     "1"·"true"·"yes"면 참). 서버가 디스크를 재 볼 수 없어 배포가 알려 주고, /api/health가 웹에 전한다.
 
+    세션 모드 (auth.py 머리말 — admin_password가 있으면 Basic보다 우선):
+    admin_user/admin_password: 시드 관리자 (기본 $CLAW_ADMIN_USER("admin")/$CLAW_ADMIN_PASSWORD
+    — 빈 값이면 세션 모드 꺼짐), session_secret: 쿠키 서명 시크릿 (기본 $CLAW_SESSION_SECRET
+    — 빈 값이면 부팅마다 랜덤 = 재시작 시 전원 로그아웃), users_db_url: 계정 저장 Postgres URL
+    (기본 $CLAW_DB_URL — 빈 값이면 결과 루트의 users.json, users.py 머리말).
+
     인자 모두 **환경변수 기본값 + 명시 주입** 패턴이다 — 테스트가 환경을 건드리지
     않고 상한이 걸린 앱을 세울 수 있어야 보존 상한 관련 동작을 고정할 수 있다."""
     app = FastAPI(title="CLAW server", version="0.1.0")
+    data_root = (data_dir if data_dir is not None
+                 else os.environ.get("CLAW_SERVER_DATA", "server_data"))
     pw = (
         access_password
         if access_password is not None
         else os.environ.get("CLAW_ACCESS_PASSWORD", "")
     )
-    if pw:  # add_middleware는 앞에 insert — 뒤의 CORS가 최외곽이라 프리플라이트는 인증 밖
+    admin_pw = (
+        admin_password
+        if admin_password is not None
+        else os.environ.get("CLAW_ADMIN_PASSWORD", "")
+    )
+    # add_middleware는 앞에 insert — 뒤의 CORS가 최외곽이라 프리플라이트는 인증 밖
+    if admin_pw:  # 세션 모드 — 계정·쿠키·회원관리 (로그인 화면은 웹 부팅 게이트)
+        app.state.auth_mode = "session"
+        app.state.users = make_user_store(
+            users_db_url if users_db_url is not None
+            else os.environ.get("CLAW_DB_URL", ""),
+            Path(data_root) / "users.json",  # 결과 저장소는 루트 *.meta.json만 훑는다 — 무충돌
+        )
+        ensure_admin(app.state.users,
+                     admin_user or os.environ.get("CLAW_ADMIN_USER") or "admin",
+                     admin_pw)
+        app.state.session_secret = sessions.secret_bytes(
+            session_secret if session_secret is not None
+            else os.environ.get("CLAW_SESSION_SECRET", ""))
+        app.state.active = {}  # username → 마지막 요청 시각 (--workers 1 전제, routes/admin.py)
+        app.add_middleware(SessionAuthProtect, users=app.state.users,
+                           secret=app.state.session_secret, active=app.state.active)
+    elif pw:
+        app.state.auth_mode = "basic"
         app.add_middleware(BasicAuthProtect, password=pw)
+    else:
+        app.state.auth_mode = "open"
     # 단독 사용자 로컬 서버 (02 §4) — M14 dev 서버(다른 포트) 접속 허용 [기본값]
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
     )
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
     app.state.jobs = JobManager()
-    data_root = (data_dir if data_dir is not None
-                 else os.environ.get("CLAW_SERVER_DATA", "server_data"))
     app.state.store = ResultStore(
         data_root,
         # "" 포함 미설정·0 = 무제한 — 빈 값이 int()에서 기동 크래시 내지 않게
@@ -124,6 +161,10 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
         profile_volatile if profile_volatile is not None else os.environ.get("CLAW_PROFILE_VOLATILE", ""))
     for router in (
         system_routes.router,
+        # 인증·관리자 — 세션 모드가 아니면 로그인·가입·관리자는 404/403으로 답한다
+        # (라우터는 항상 등록: /api/auth/me가 모드 자체를 웹 부팅 게이트에 알린다)
+        auth_routes.router,
+        admin_routes.router,
         profiles_routes.router,
         jobs_routes.router,
         results_routes.router,

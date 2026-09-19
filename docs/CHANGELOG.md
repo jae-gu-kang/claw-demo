@@ -43,6 +43,40 @@ mach 축은 그대로 둔다: 예제가 [0.0, 0.9]를 보간 앵커로 쓰고 �
 **강하율 칸에 부호 안내** — 접근·플레어 hdot은 음수만 받는데 라벨만으로는 알 수 없어, 「하강이
 음수다」 help를 달았다. 엔진 1296 · 서버 371 · 웹 939 통과, 리뷰 무결 판정.
 
+### v1.16 — 로그인 화면(블록도 해체→조립)·회원 계정·관리자 화면
+
+**세션 모드 신설**(사용자 요청 — "블록들이 해체되어 둥둥 떠다니다가 로그인하면 착-하고
+조립"). `$CLAW_ADMIN_PASSWORD`가 있으면 기존 Basic 대신 계정·쿠키 인증이 켜진다 —
+환경변수 **존재**로 모드를 고르는 llm.py 규율 그대로, 둘 다 없으면 종전 무인증
+(`auth.py` 머리말, `test_auth.py` 4케이스 그대로 생존). 게이트는 `/api/*`만이고 정적은
+연다 — 로그인 화면이 js/css·블록도 SVG를 먹는다. 세션 401은 `WWW-Authenticate` 없이
+JSON — 브라우저 Basic 팝업이 자체 로그인 화면을 가리면 안 된다.
+
+**로그인 화면 = 부팅 게이트**(`web/js/views/login.js` — 탭 아님, ask/tour와 같은 body
+크롬). TOP_SVG 클론의 `.blk .lift`에 CSS 변수·클래스만 얹는다(TOP_SVG 불변 —
+blocks.test.js 가드 무접촉, replayoverlay 선례). 해체·둥둥은 `@keyframes login-float`,
+조립은 **현재 자세를 인라인 행렬로 얼리고** 애니메이션을 끊은 뒤 DOM 등장 순서
+(뒷줄→CHAIN→항법) 80 ms 스태거로 원위치 전이(오버슛 곡선) — "애니메이션 제거 직후
+전이 시작값"은 브라우저마다 미더워 얼리는 쪽을 택했다. 수치는 `lib/logingate.js`
+(+test). `prefers-reduced-motion`이면 연출 전부 생략. 조립 끝에 #blocks — 방금 조립된
+그 보드 — 로 들어간다.
+
+**계정**: 자가 가입 → pending → 관리자 승인(active). 비밀번호는 stdlib scrypt
+자기기술 형식, 세션은 HMAC 서명 쿠키(`sessions.py`) — 쿠키에 role을 굽지 않고 매 요청
+저장소를 읽어 거절·삭제가 즉시 먹힌다. 저장은 이원화(`users.py`): `$CLAW_DB_URL`이
+있으면 Postgres(`server[db]` extra의 psycopg — 기본 설치·폐쇄망 휠하우스 불변, URL만
+있고 psycopg가 없으면 기동 실패), 없으면 `server_data/users.json`(폐쇄망·로컬 —
+디스크 영속이라 그걸로 족하다). 시드 관리자(`$CLAW_ADMIN_USER`/`PASSWORD`)는 재기동마다
+복원 — 저장소가 비어도, 비밀번호를 잊어도 잠기지 않는다.
+
+**관리자 화면**(`#admin` — **탭이 아니다**): 회원 승인·거절·역할·비번 재설정·삭제
+(유일한 active 관리자 강등·자기 삭제는 409), 접속 현황(최근 5분 in-memory —
+`--workers 1` 전제, JobManager와 동일), 결과 저장소 건수·용량·정리(`store.delete`
+추출). nav·`VIEWS`·ask `TAB_HASHES` 어디에도 안 넣었다 — blocks.test.js가 탭 줄을
+02 §8과 3중 대조하므로, 헤더 세션 알약의 [관리] 링크 + `route()` 특례로만 들어간다.
+같은 이유로 `lib/profile.js` 라우트 분류 가드에 auth·admin 라우트를 NOT_AIRCRAFT로
+등재했고(가드가 이제 `patch`도 읽는다), 신규 라우터는 prefix 없이 전체 경로 선언이다.
+
 ### v1.15 — EO/IR형 기수가 사진의 총알형이 되고, 엔진·프로펠러가 드러난다
 
 **EO/IR형 기수를 실기체 사진처럼 총알형으로**(사용자 요청 — "헤드부분 셰잎이 다른데?"). 가는

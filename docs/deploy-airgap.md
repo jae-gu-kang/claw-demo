@@ -243,10 +243,23 @@ Render 대시보드 같은 대안이 없으므로 이 대조가 유일한 확인
 접근 가능한 누구나 결과를 읽고 쓰고 연산 작업을 실행할 수 있다 — 위 '워커를 늘리지
 말 것'의 `HOST=0.0.0.0 scripts/run.sh`가 그 상태다.
 
-`CLAW_ACCESS_PASSWORD`를 주면 **공용 비밀번호 하나짜리 Basic Auth**가 켜진다
-(`auth.py` — 공개 데모가 쓰는 방식, 아이디는 무엇이든 무시하고 비밀번호만 본다).
-따로 만들 필요가 없다. `/api/health`만 면제인데, 배포 플랫폼 헬스체크가 자격 없이
-오기 때문이고 위 커밋 대조 절차도 그 면제 위에 선다.
+켜는 방법은 둘이고 환경변수 **존재**로 고른다 (`auth.py` — LLM 백엔드 선택과 같은 규율):
+
+- `CLAW_ADMIN_PASSWORD` — **세션 모드**: 로그인 화면·개인 계정·가입 승인·관리자
+  화면(회원관리·접속 현황·결과 정리)이 켜진다. 계정은 기본으로
+  `server_data/users.json`에 저장된다 — **폐쇄망은 디스크가 영속이라 이걸로 충분하고,
+  외부 DB도 psycopg도 필요 없다**(휠하우스 불변). `CLAW_SESSION_SECRET`(긴 무작위
+  문자열)을 함께 둘 것 — 없으면 재기동마다 전원 로그아웃된다. `CLAW_ADMIN_USER`
+  (기본 `admin`)와 `CLAW_ADMIN_PASSWORD`의 시드 관리자는 재기동마다 복원되므로
+  비밀번호를 잊어도 잠기지 않는다. `CLAW_DB_URL`(Postgres)은 디스크가 휘발인
+  공개 PaaS용이다 — 폐쇄망에서 채우면 `[db]` extra(psycopg) 미설치 시 기동이
+  실패한다(조용한 폴백 없음, `users.py` 머리말).
+- `CLAW_ACCESS_PASSWORD` — **공용 비밀번호 하나짜리 Basic Auth** (아이디는 무엇이든
+  무시하고 비밀번호만 본다). 둘 다 있으면 세션 모드가 이긴다.
+
+`/api/health`만 면제인데, 배포 플랫폼 헬스체크가 자격 없이 오기 때문이고 위 커밋
+대조 절차도 그 면제 위에 선다. 세션 모드는 정적 파일(js/css)도 열어 두는데, 로그인
+화면 자체가 그 재료를 먹기 때문이다 — 데이터는 전부 `/api` 뒤에 있다.
 
 **비밀번호를 유닛 파일에 인라인으로 넣지 말 것.** `/etc/systemd/system/*.service`는
 통상 0644라 그 장비의 모든 사용자가 읽는다. 위 systemd 예시의 `Environment=`는
@@ -260,7 +273,7 @@ EnvironmentFile=/etc/claw.env
 ```bash
 # /etc/claw.env — 0600, claw 소유
 sudo install -o claw -g claw -m 600 /dev/null /etc/claw.env
-sudo -e /etc/claw.env    # CLAW_ACCESS_PASSWORD=... 한 줄
+sudo -e /etc/claw.env    # CLAW_ADMIN_PASSWORD=... CLAW_SESSION_SECRET=... (또는 CLAW_ACCESS_PASSWORD=...)
 ```
 
 `echo ... | sudo tee`로 쓰지 않는 이유는 그러면 비밀번호가 셸 히스토리에 남기

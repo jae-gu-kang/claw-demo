@@ -5,6 +5,10 @@ import { clear } from "./dom.js";
 // 전역 질문 위젯·가이드 투어 — 라우트 뷰가 아니다 (VIEWS 밖: blocks.test.js nav 가드와 무관)
 import * as ask from "./views/ask.js";
 import * as tour from "./views/tour.js";
+// 로그인 게이트·관리자 — 둘 다 파이프라인 탭이 아니다 (VIEWS 밖). 게이트는 부팅
+// 오버레이(body 크롬), 관리자는 헤더 세션 알약의 [관리]로만 여는 특례 라우트(#admin)
+import * as login from "./views/login.js";
+import * as admin from "./views/admin.js";
 // 헤더 기체 선택기 — 라우트 뷰가 아니다. 기체 탭(aircraft)은 문서 편집, 이것은 선택
 import * as profilepick from "./views/profilepick.js";
 import { loadSelection, setSelection } from "./lib/profile.js";
@@ -40,11 +44,16 @@ let current = null;
 
 function route() {
   const name = location.hash.slice(1) || "blocks";
-  const view = VIEWS[name] ?? VIEWS.blocks;
+  // #admin 특례 — VIEWS 리터럴에 넣지 않는다 (blocks.test.js가 VIEWS 순서 ==
+  // 파이프라인을 못 박는다). 권한은 서버가 최종 판정하고(403), 여기서는 관리자가
+  // 아니면 링크 자체가 없던 것처럼 블록도로 폴백만 한다
+  const isAdmin = name === "admin" && login.currentUser()?.role === "admin";
+  const view = isAdmin ? admin : (VIEWS[name] ?? VIEWS.blocks);
   if (current !== view) current?.dispose?.();
   current = view;
   for (const a of document.querySelectorAll("#nav a")) {
-    a.classList.toggle("active", a.dataset.view === (VIEWS[name] ? name : "blocks"));
+    a.classList.toggle("active",
+      !isAdmin && a.dataset.view === (VIEWS[name] ? name : "blocks"));
   }
   clear(document.getElementById("view")).append(view.render());
 }
@@ -61,6 +70,10 @@ async function refreshHealth() {
   }
 }
 
+// 부팅 게이트 — 세션 모드(서버 $CLAW_ADMIN_PASSWORD)면 로그인(블록도 해체→조립)이
+// 끝나야 아래가 돈다. 라우팅·헬스·크롬이 게이트보다 먼저 API를 쏘면 401 이벤트가
+// 게이트와 경합하므로 **전부 게이트 뒤**다 (top-level await — ES 모듈이라 가능)
+await login.gate();
 // 기체 선택은 첫 요청보다 먼저 읽는다 — 라우팅이 뷰를 그리자마자 계산 요청을 보낸다 (lib/profile.js)
 setSelection(loadSelection(profilepick.browserStorage()));
 window.addEventListener("hashchange", route);
@@ -70,3 +83,4 @@ setInterval(refreshHealth, 5000);
 profilepick.mount(); // 헤더 기체 선택기 — 선택이 서버에서 사라졌으면 예제로 되돌리고 사유를 말한다
 ask.mount(); // 전역 질문 위젯 — 탭 전환(#view 교체)에 영향받지 않는 body 크롬
 tour.mount(); // 가이드 투어 — 탭을 넘나들며 순서를 쥐어야 해서 같은 자리에 산다
+login.mountSessionBox(); // 헤더 세션 알약 — 게이트가 알아낸 로그인 사용자를 그린다 (세션 모드만)

@@ -22,6 +22,10 @@ dependencies = [
 [project.optional-dependencies]
 # dev의 httpx는 TestClient용 — 런타임 항목과 하한을 같게 유지할 것 (갈리면 두 뜻이 된다)
 dev = ["pytest>=7", "httpx>=0.27"]
+# 계정 저장 외부 Postgres($CLAW_DB_URL — users.py 머리말). extra인 이유: 기본
+# 설치·폐쇄망 wheelhouse 불변 — 폐쇄망은 users.json이라 psycopg가 아예 필요 없다.
+# URL이 설정됐는데 이 extra가 없으면 조용한 폴백 대신 기동 실패로 드러난다.
+db = ["psycopg[binary]>=3.2"]
 
 [build-system]
 requires = ["setuptools>=68"]

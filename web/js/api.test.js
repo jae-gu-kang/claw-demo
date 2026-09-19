@@ -87,3 +87,25 @@ test("고른 기체가 계산 요청에만 실린다 — 규칙은 lib/profile.j
     setSelection(null);
   }
 });
+
+test("401 → claw:auth-required 발화 (로그인 게이트 재소환), /auth/*와 로그인 실패는 제외", async () => {
+  const fired = [];
+  globalThis.window = { dispatchEvent: (ev) => fired.push(ev) };
+  globalThis.CustomEvent ??= class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } };
+  try {
+    mockFetch(401, { detail: "인증 필요" });
+    await assert.rejects(api.get("/jobs"), ApiError);
+    assert.equal(fired.length, 1);
+    assert.equal(fired[0].type, "claw:auth-required");
+    assert.equal(fired[0].detail.path, "/jobs");
+    // 로그인 실패 401이 게이트를 다시 세우면 재귀 — /auth/*는 조용히 던지기만
+    await assert.rejects(api.post("/auth/login", { username: "a", password: "b" }), ApiError);
+    assert.equal(fired.length, 1);
+    // 401이 아닌 실패는 발화하지 않는다
+    mockFetch(403, { detail: "관리자 전용" });
+    await assert.rejects(api.get("/admin/users"), ApiError);
+    assert.equal(fired.length, 1);
+  } finally {
+    delete globalThis.window;
+  }
+});

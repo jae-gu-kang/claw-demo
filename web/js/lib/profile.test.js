@@ -126,10 +126,10 @@ test("서버 라우트 전부가 분류돼 있다 — 기체를 받는 라우트
   const seen = new Set();
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".py"))) {
     const text = readFileSync(new URL(file, dir), "utf8");
-    const heads = [...text.matchAll(/@router\.(get|post|put|delete)\("([^"]+)"/g)];
-    // 가드가 못 읽는 선언(여러 줄·작은따옴표·patch·api_route)은 조용히 건너뛰지 않고 빨개진다 (websocket만 예외)
+    const heads = [...text.matchAll(/@router\.(get|post|put|patch|delete)\("([^"]+)"/g)];
+    // 가드가 못 읽는 선언(여러 줄·작은따옴표·api_route)은 조용히 건너뛰지 않고 빨개진다 (websocket만 예외)
     const declared = [...text.matchAll(/@router\.(\w+)\(/g)].filter((m) => m[1] !== "websocket");
-    assert.equal(declared.length, heads.length, `${file}: 해석하지 못한 라우트 선언이 있다 — 한 줄·큰따옴표 get/post/put/delete로 쓸 것`);
+    assert.equal(declared.length, heads.length, `${file}: 해석하지 못한 라우트 선언이 있다 — 한 줄·큰따옴표 get/post/put/patch/delete로 쓸 것`);
     heads.forEach((m, i) => {
       const method = m[1].toUpperCase();
       const path = m[2];

@@ -19,7 +19,9 @@ services:
     # server 설치로도 따라 들어오지만, 그 의존이 다시 내려가도 지형 굽기가 죽지 않게
     # 명시 설치를 남겨 둔다. scripts/terrain/build_terrain.py의 폴백 경로도 macOS/BSD
     # 경로라 Render 리눅스 빌드 이미지와는 맞지 않는다 — certifi가 그 폴백보다 먼저다.
-    buildCommand: pip install --upgrade pip && pip install -e engine && pip install -e server && pip install certifi && (python3 scripts/terrain/build_terrain.py --origin-lat 34.601303 --origin-lon 127.212067 --tier core:radius=12000,step=30 --tier outer:radius=30000,step=90 --out data/geo/site-terrain-v1.bin > data/geo/.terrain-build.log 2>&1 || echo "지형 팩 생성 실패 — 로그는 data/geo/.terrain-build.log, 지형 없이 배포를 계속합니다")
+    # server[db]: 계정 저장 외부 Postgres용 psycopg (users.py 머리말). extra라 폐쇄망
+    # wheelhouse는 불변 — 이 데모만 깐다. CLAW_DB_URL이 비면 psycopg는 import되지 않는다.
+    buildCommand: pip install --upgrade pip && pip install -e engine && pip install -e 'server[db]' && pip install certifi && (python3 scripts/terrain/build_terrain.py --origin-lat 34.601303 --origin-lon 127.212067 --tier core:radius=12000,step=30 --tier outer:radius=30000,step=90 --out data/geo/site-terrain-v1.bin > data/geo/.terrain-build.log 2>&1 || echo "지형 팩 생성 실패 — 로그는 data/geo/.terrain-build.log, 지형 없이 배포를 계속합니다")
     # --workers 1 명시 — uvicorn이 $WEB_CONCURRENCY로 워커를 늘리면 프로세스 메모리의
     # JobManager가 갈라져 진행률 조회가 조용히 404가 된다 (README 알려진 제약).
     startCommand: uvicorn --factory claw_server:create_app --host 0.0.0.0 --port $PORT --workers 1
@@ -30,7 +32,16 @@ services:
       - key: PYTHON_VERSION
         value: 3.13.4 # devcontainer(3.13)와 맞춤 — 상한 핀 없는 의존성 조합 고정
       - key: CLAW_ACCESS_PASSWORD
-        sync: false # 대시보드에서 입력 — 커밋 금지. 빈 값이면 무인증(공개)
+        sync: false # 대시보드에서 입력 — 커밋 금지. 빈 값이면 무인증(공개). CLAW_ADMIN_PASSWORD가 있으면 무시된다(세션 모드가 우선 — auth.py)
+      # ── 세션 모드 (로그인 화면·회원관리) — CLAW_ADMIN_PASSWORD를 넣는 순간 켜진다 ──
+      - key: CLAW_ADMIN_USER
+        sync: false # 시드 관리자 아이디 — 비우면 "admin"
+      - key: CLAW_ADMIN_PASSWORD
+        sync: false # 시드 관리자 비밀번호 — 비우면 세션 모드 꺼짐(위 Basic으로 폴백). 재기동마다 이 값으로 복원된다
+      - key: CLAW_SESSION_SECRET
+        sync: false # 쿠키 서명 시크릿(긴 무작위 문자열) — 비우면 부팅마다 랜덤이라 재배포·슬립 복귀마다 전원 로그아웃된다
+      - key: CLAW_DB_URL
+        sync: false # 계정 저장 Postgres URL(Neon/Supabase 등 아무 제공자, sslmode는 URL에) — 비우면 users.json인데 이 디스크는 휘발이라(위 plan 주석) 계정이 재배포마다 사라진다. 공개 데모는 반드시 채울 것
       - key: CLAW_ANTHROPIC_API_KEY
         # 이름만 선언한다(값은 대시보드) — 선언이 없으면 blueprint 동기화가 대시보드에서 넣은 값을
         # 어떻게 다루는지에 기대게 된다. 폐쇄망 CLAW_LLM_* 계열은 선언하지 않는다: CLAW_LLM_BASE_URL에

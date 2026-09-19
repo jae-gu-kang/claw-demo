@@ -49,6 +49,9 @@
     </nav>
     <span id="profile-pick" class="profile-pick"></span>
     <span id="health" class="health">…</span>
+    <!-- 세션 알약 (세션 모드만 — views/login.js가 채운다). data-view를 달지 않는다:
+         blocks.test.js가 이 파일 전체의 data-view 배열을 파이프라인과 대조한다 -->
+    <span id="session-box" class="session-box" hidden></span>
   </header>
   <main id="view"></main>
   <script type="module" src="/js/main.js"></script>

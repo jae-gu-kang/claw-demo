@@ -33,9 +33,15 @@ class ResultStore:
                 rid = str(old.get("id", ""))
                 if not _ID_RE.fullmatch(rid):  # 외부 유입 메타 방어 — 경로 조작 불허 유지
                     continue
-                # 메타 먼저 — 목록에서 사라진 뒤 본문 제거 (본문 없는 유령 목록 방지)
-                (self.root / f"{rid}.meta.json").unlink(missing_ok=True)
-                (self.root / f"{rid}.json").unlink(missing_ok=True)
+                self.delete(rid)
+
+    def delete(self, result_id: str) -> None:
+        """결과 하나 제거 (없어도 조용히 성공 — 상한 삭제·수동 정리 공용).
+
+        메타 먼저 — 목록에서 사라진 뒤 본문 제거 (본문 없는 유령 목록 방지)."""
+        self._check_id(result_id)
+        (self.root / f"{result_id}.meta.json").unlink(missing_ok=True)
+        (self.root / f"{result_id}.json").unlink(missing_ok=True)
 
     def load(self, result_id: str) -> dict:
         self._check_id(result_id)

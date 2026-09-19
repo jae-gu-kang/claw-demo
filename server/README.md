@@ -27,6 +27,8 @@ uvicorn --factory claw_server:create_app --port 8000   # 모노레포 루트에�
 | 경로 | 내용 |
 |---|---|
 | `GET /api/health` | 헬스체크 — 버전·커밋·지형 팩·기체 저장소 휘발 여부(`profile_store.volatile`, `$CLAW_PROFILE_VOLATILE`) |
+| `POST /api/auth/login`·`logout`·`signup`, `GET /api/auth/me` | 세션 모드(`$CLAW_ADMIN_PASSWORD` — `auth.py`·`users.py`) 로그인·가입 신청(관리자 승인 대기)·세션 확인. 세션 모드가 아니면 로그인·가입은 404, `me`는 모드만 답한다 |
+| `GET`·`POST /api/admin/users`, `PATCH`·`DELETE /api/admin/users/{name}`, `GET /api/admin/sessions`, `GET /api/admin/data`·`POST …/prune` | 관리자 전용(role=admin) — 회원 승인·거절·역할·비번 재설정·삭제, 접속 현황(최근 5분), 결과 저장소 현황·정리 |
 | `GET /api/registry`, `GET /api/registry/{cat}/{name}/schema` | 컴포넌트 목록·파라미터 JSON 스키마 (폼 자동 생성) |
 | `POST /api/trim/batch` | 3단계: 트림 케이스 매트릭스 → 배치 작업 (202 + job, 판정 플래그 포함) |
 | `POST /api/analysis/margin-map` | 5단계: 케이스 격자 + PI 루프 스펙 → 선형화·모드 분류·마진 맵 |

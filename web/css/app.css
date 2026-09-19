@@ -640,6 +640,10 @@ rx는 SVG2 지오메트리 프로퍼티 (미지원 브라우저는 마크업 rx�
   .bd .wire { animation: none !important; }
   /* 블록이 떠오르는 것은 **즉시** 바뀌게 한다 — 색과 높이(정보)는 남기고 움직임만 뺀다 */
   .bd .top .blk .lift { transition: none !important; }
+  /* 로그인 게이트 — 해체·둥둥·조립 연출 전부 정지 (views/login.js도 JS에서 같은
+     판정으로 scatter 자체를 생략한다 — 여기는 이중 방어) */
+  .login-gate .top .blk .lift { animation: none !important; transition: none !important; }
+  .login-gate { transition: none !important; }
 }
 /* 화살촉·내부 소자 곡선 — 마크업의 프레젠테이션 속성을 CSS로 재도색 (인라인 style 아님) */
 .bd .sub marker path[fill="#3b3b3b"] { fill: var(--text); }
@@ -1460,3 +1464,144 @@ body:has(.tab-page) main { max-width: 1580px; }
 .pf-coef { margin: 0 0 8px; }
 .pf-csv { margin-top: 6px; font-size: 12px; }
 .aircraft-page .stale { opacity: .45; } /* 편집 뒤의 옛 검증·저장 결과 — 지우면 레이아웃이 바뀌어 누르던 버튼이 밀린다 */
+
+/* ── 로그인 게이트 (세션 모드) — 부팅 오버레이, 탭 아님 (views/login.js) ──────
+   블록도(TOP_SVG 클론)가 뒤에 깔려 해체된 채 둥둥 떠다니고, 로그인하면 조립
+   순서대로 착착 제자리로 돌아온다. 아래 규칙들은 반드시 .bd .top 규칙들(위쪽)
+   **뒤에 있어야** 같은 특이도(.login-gate .top …)에서 이긴다. */
+.login-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40; /* ask/tour(20) 위 — 게이트는 화면 전부를 가려야 한다 */
+  background: var(--bg);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  transition: opacity .45s ease; /* .done — 조립 끝난 보드가 #blocks로 크로스페이드 */
+}
+.login-gate.done { opacity: 0; pointer-events: none; }
+.login-gate .login-board {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: visible;     /* .bd .canvas-wrap의 overflow-x:auto를 눌러 흩어진 블록이 안 잘리게 */
+  pointer-events: none;  /* 연출 전용 — 블록 호버·클릭(.blk:hover 규칙 일체) 무력화 */
+}
+.login-gate .login-board svg { min-width: 0; width: min(1320px, 94vw); height: auto; overflow: visible; }
+/* 떠오르는 것은 .lift뿐 — 히트 도형 불변 규약을 게이트에서도 그대로 지킨다.
+   rotate가 블록 중심을 돌게 transform-box/origin을 세운다 (SVG 기본은 뷰포트 원점) */
+.login-gate .top .blk .lift {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition: transform .95s cubic-bezier(.34, 1.56, .64, 1); /* 오버슛 — "착" */
+  will-change: transform;
+}
+/* 해체 상태 — 흩어진 위치·둥둥 위상은 블록마다 인라인 CSS 변수(--sx… lib/logingate.js).
+   조립(views/login.js assemble)은 현재 자세를 인라인 행렬로 얼린 뒤 이 클래스를
+   떼므로, 여기서는 transition을 꺼 초기 진입이 번쩍이지 않게만 한다 */
+.login-gate.scattered .top .blk .lift {
+  transition: none;
+  animation: login-float var(--fdur, 5s) ease-in-out var(--fdel, 0s) infinite alternate;
+}
+@keyframes login-float {
+  from { transform: translate(var(--sx, 0px), var(--sy, 0px)) rotate(var(--srot, 0deg)); }
+  to {
+    transform: translate(calc(var(--sx, 0px) + var(--fx, 9px)), calc(var(--sy, 0px) + var(--fy, 11px)))
+      rotate(calc(var(--srot, 0deg) + 3deg));
+  }
+}
+/* 블록이 아닌 것(판·배선·라벨·값 슬롯·그림자)은 해체 동안 숨고, 조립이 시작되면
+   지연을 두고 배어난다 — 블록이 반쯤 모였을 때 판이 나타나야 "조립되는 곳"이 보인다 */
+.login-gate .top .plate,
+.login-gate .top .wires,
+.login-gate .top .labels,
+.login-gate .top .sigval,
+.login-gate .top .board-shadow { transition: opacity .8s ease .45s; }
+.login-gate.scattered .top .plate,
+.login-gate.scattered .top .wires,
+.login-gate.scattered .top .labels,
+.login-gate.scattered .top .sigval,
+.login-gate.scattered .top .board-shadow { opacity: 0; transition: none; }
+
+.login-card {
+  position: relative;
+  z-index: 1; /* 보드 위 */
+  width: min(360px, calc(100vw - 48px));
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 22px 24px 16px;
+  display: grid;
+  gap: 10px;
+}
+.login-card h1 { margin: 0; font-size: 22px; font-weight: 800; }
+.login-card h1 .sub { display: block; font-size: 12px; font-weight: 500; color: var(--muted); margin-top: 3px; }
+.login-card form { display: grid; gap: 8px; }
+.login-card input {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  background: var(--panel);
+}
+.login-card input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.login-card .primary {
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--text);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+.login-card .primary:disabled { opacity: .55; cursor: default; }
+.login-card .login-msg { margin: 0; min-height: 18px; font-size: 12px; color: var(--muted); }
+.login-card .login-msg.bad { color: var(--bad); }
+.login-card .login-msg.ok { color: var(--ok); }
+.login-card .login-alt { text-align: center; }
+.login-card .alt { border: none; background: none; color: var(--muted); font-size: 12px; cursor: pointer; text-decoration: underline; }
+.login-card .alt:hover { color: var(--text); }
+
+/* 헤더 세션 알약 — health와 같은 알약 언어. data-view 없음(nav 가드) */
+.session-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 5px 7px 5px 12px;
+  border-radius: 999px;
+  background: var(--panel);
+  white-space: nowrap;
+}
+.session-box .who { font-weight: 700; color: var(--text); }
+.session-box a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.session-box a:hover { text-decoration: underline; }
+.session-box .logout {
+  border: none;
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+}
+.session-box .logout:hover { background: var(--line); }
+
+/* ── 관리자 화면 (#admin — 탭 아님, views/admin.js) ───────────────────── */
+.admin-page { display: grid; gap: 16px; max-width: 1100px; }
+.admin-page .panel { background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 18px; }
+.admin-page h2 { margin: 0 0 10px; font-size: 16px; }
+.admin-page table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.admin-page th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 600; }
+.admin-page th, .admin-page td { padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.admin-page tr.pending td { background: #fdf2d7; } /* 승인 대기 — 기체 탭 notice와 같은 노랑 */
+.admin-page .rowbtns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.admin-page .rowbtns button { font-size: 11px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+.admin-page .rowbtns button:hover { background: var(--bg); }
+.admin-page .rowbtns button.danger { color: var(--bad); border-color: #f3c8c8; }
+.admin-page .muted { color: var(--muted); font-size: 12px; }
+.admin-page .notice { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: #fdeaea; color: var(--bad); font-size: 12px; }
