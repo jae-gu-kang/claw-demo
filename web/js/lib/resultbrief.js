@@ -10,6 +10,7 @@
  */
 
 import { FQ_BADGE, FQ_RANK, fqMeasureText, fqWorst } from "./fq.js";
+import { FLAG_LABEL, landingSummary } from "./replay.js";
 
 // 산출물 종류의 우리말 이름 — 서버가 내는 것은 코드다. 모르는 코드는 **그대로** 낸다
 // (임의로 "기타"로 뭉치면 새 종류가 생겼다는 사실이 화면에서 사라진다).
@@ -35,8 +36,9 @@ export const KIND_LABEL = {
 };
 export const kindLabel = (k) => KIND_LABEL[k] ?? k ?? "—";
 
-// 트림 판정 플래그의 우리말 — 트림 탭 표의 열 이름과 같은 어휘
-const FLAG_LABEL = {
+// 트림 판정 플래그의 우리말 — 트림 탭 표의 열 이름과 같은 어휘.
+// (시뮬 엔벨로프 플래그 어휘는 replay.js FLAG_LABEL — 다른 축이라 표도 다르다)
+const TRIM_FLAG_LABEL = {
   residual_ok: "잔차", saturation_ok: "포화", alpha_margin_ok: "α여유", continuity_ok: "연속성",
 };
 // 엔벨로프 스캔 사유 — 엔진 envelope_verdict.reasons의 코드 (design/points.py)
@@ -64,7 +66,7 @@ function headRows(meta) {
 function trimBrief(body) {
   const rows = body.results ?? [];
   const flagBad = (r) => Object.entries(r.flags ?? {})
-    .filter(([, v]) => v === false).map(([k]) => FLAG_LABEL[k] ?? k);
+    .filter(([, v]) => v === false).map(([k]) => TRIM_FLAG_LABEL[k] ?? k);
   const nOk = rows.filter((r) => r.converged).length;
   const bad = rows.map((r) => {
     if (!r.converged) return [r.case.name, "미수렴"];
@@ -187,16 +189,70 @@ function envelopeBrief(body) {
 
 function simBrief(body) {
   const t = body.t ?? [];
+  const meta = body.meta ?? {};
+  const env = body.envelope ?? {};
   const nSig = Object.keys(body.signals ?? {}).length;
-  const wps = body.meta?.waypoints;
+  const wps = meta.waypoints;
+  // 착륙 요약 — 시뮬 탭 재생과 **같은 계산**(lib/replay.js landingSummary). 강하율·속도는
+  // 엔진이 전 해상도에서 재어 meta.phases에 실은 값이다 — 여기서 다시 계산하지 않는다
+  const landing = landingSummary(body);
+  // α리미터 작동률·이탈 표본은 본문 신호·플래그의 단순 집계다 — 새 판정선이 아니다.
+  // 표본 수/분모를 함께 낸다: 4만 표본 중 1표본이 "0 %"로 접히면 데이터가 있는데
+  // 0으로 보인다("0 위조 금지"의 이웃 — 리뷰 지적). 분모가 있어야 1이 몇 초인지 읽힌다
+  const lim = body.signals?.limiter_active;
+  const limN = Array.isArray(lim) ? lim.filter(Boolean).length : null;
+  const pct = (n, total) => {
+    const p = (100 * n) / total;
+    return `${p > 0 && p < 0.05 ? "< 0.05" : num(p, 1)} % (${n}/${total} 표본)`;
+  };
+  const limText = limN != null && lim.length ? pct(limN, lim.length) : "—";
+  // 플래그 어휘는 재생 화면과 같은 표(replay.js FLAG_LABEL) — 모르는 키는 그대로
+  const flagCounts = Object.entries(env.flags ?? {})
+    .map(([name, arr]) => [FLAG_LABEL[name] ?? name,
+      Array.isArray(arr) ? arr.filter(Boolean).length : 0, Array.isArray(arr) ? arr.length : 0])
+    .filter(([, n]) => n > 0);
+  const esc = meta.path_escapes;
+  // 판정은 본문 동봉 것만: aborted(중단 사유 코드 — "cancelled"·"alt_out_of_range" 등,
+  // 모르는 코드는 그대로 낸다)와 any_flag(엔벨로프 감시 요약)
+  const verdict = meta.aborted
+    ? { tone: "bad",
+        text: `중단된 런 (${typeof meta.aborted === "string" ? meta.aborted : "aborted"}) — 끝까지 돌지 않았다` }
+    : env.any_flag
+      ? { tone: "warn", text: `엔벨로프 이탈 표본 있음 — 첫 이탈 ${num(env.first_flag_t, 2)} s (지표·엔벨로프 절)` }
+      : env.any_flag === false
+        ? { tone: "ok", text: "정상 종료 — 엔벨로프 이탈 없음" }
+        : { tone: "na", text: "엔벨로프 요약 없음(구버전 결과) — 해석은 시뮬레이션 탭 [재생]" };
   return {
-    verdict: { tone: "na", text: "폐루프 런 — 궤적·지표·착륙 해석은 시뮬레이션 탭 [재생]이 한다" },
+    verdict,
     sections: [{
       title: "런 구성",
       rows: [
         ["시간", t.length ? `${num(t[0], 2)} ~ ${num(t[t.length - 1], 2)} s · 표본 ${t.length}` : "—"],
         ["신호", `${nSig}개`],
-        ["웨이포인트", wps ? `${wps.length}점 · 도달 반경 ${num(body.meta?.accept_radius)} m` : "없음 (경로 없는 미션)"],
+        ["시작 트림", meta.case ?? "—"],
+        ["웨이포인트", wps ? `${wps.length}점 · 도달 반경 ${num(meta.accept_radius)} m` : "없음 (경로 없는 미션)"],
+      ],
+    }, {
+      title: "착륙 요약 (엔진 전 해상도 실측 — 시뮬 탭 재생과 같은 계산)",
+      rows: landing.length
+        ? [...landing.map((r) => [r.label, r.note ? `${r.value} — ${r.note}` : r.value]),
+           // 같은 계산이지만 입력 해상도가 다르다 — 재생 화면은 솎은 표본이라 끝자리
+           // (접지→정지 1 m 단위 등)가 어긋날 수 있고, 이쪽(전 해상도)이 더 정확하다
+           ["표기", "전 해상도 저장 본문 기준 — 재생 화면(솎은 표본)과 끝자리가 다를 수 있으며 이쪽이 정본이다"]]
+        : [["—", "이탈·접지·정지 단계 기록 없음 — 착륙 없는 미션이거나 판정 이전 결과다 (0으로 위조하지 않는다)"]],
+    }, {
+      title: "지표·엔벨로프 (본문 동봉 요약의 집계)",
+      rows: [
+        ["최악 실속마진", env.worst_margin != null
+          ? `${num(env.worst_margin, 4)} rad @ ${num(env.worst_margin_t, 2)} s` : "—"],
+        ["최저 고도", env.min_alt != null ? `${num(env.min_alt, 1)} m @ ${num(env.min_alt_t, 2)} s` : "—"],
+        ["α리미터 작동률", limText],
+        ["엔벨로프 이탈 표본", flagCounts.length
+          ? flagCounts.map(([name, n, total]) => `${name} ${n}/${total}`).join(" · ")
+          : env.any_flag === false ? "없음" : "—"],
+        ["궤도 이탈 웨이포인트", Array.isArray(esc)
+          ? (esc.length ? `${esc.length}건 (#${esc.map((i) => i + 1).join(", #")})` : "없음") : "—"],
+        ["더 보기", "궤적·신호 재생·3면도·타면 사용은 시뮬레이션 탭 [재생]"],
       ],
     }],
   };

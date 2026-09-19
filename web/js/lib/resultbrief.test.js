@@ -165,3 +165,63 @@ test("시뮬레이션 — 런 구성(시간·신호·웨이포인트)과 해석 
   assert.ok(sec.rows.some(([k, v]) => k === "신호" && v === "2개"));
   assert.ok(sec.rows.some(([k, v]) => k === "웨이포인트" && v.includes("2점")));
 });
+
+test("시뮬레이션 — 착륙 요약(landingSummary 재사용)과 지표·엔벨로프 절", () => {
+  const body = {
+    kind: "sim",
+    t: [0, 1, 2, 3],
+    signals: {
+      pn: [0, 0, 100, 150], pe: [0, 0, 0, 0],
+      limiter_active: [false, false, true, false], // 1/4 = 25 %
+    },
+    envelope: {
+      stall_margin: [0.3, 0.05, 0.2, 0.2],
+      flags: { alpha: [false, true, false, false], altitude: [false, false, false, false] },
+      worst_margin: 0.05, worst_margin_t: 1.0,
+      min_alt: 42.0, min_alt_t: 2.5,
+      any_flag: true, first_flag_t: 1.0,
+    },
+    meta: {
+      case: "M0.20_h500_f25", aborted: false, path_escapes: [3],
+      waypoints: [[0, 0], [100, 0]], accept_radius: 50,
+      phases: { launch_exit_t: null, touchdown_t: 2.0, td_sink_rate: -0.8, td_speed: 30.0, stop_t: 3.0 },
+    },
+  };
+  const m = briefModel({ ...META, kind: "sim" }, body);
+  assert.equal(m.verdict.tone, "warn"); // 엔벨로프 이탈 표본 있음
+  assert.match(m.verdict.text, /첫 이탈 1/);
+  const landing = m.sections.find((s) => s.title.includes("착륙"));
+  assert.ok(landing.rows.some(([k, v]) => k === "접지" && /강하율 -0.8/.test(v)));
+  assert.ok(landing.rows.some(([k]) => k === "정지"));
+  const met = m.sections.find((s) => s.title.includes("지표"));
+  assert.ok(met.rows.some(([k, v]) => k.includes("실속마진") && v.includes("0.05") && v.includes("1")));
+  assert.ok(met.rows.some(([k, v]) => k.includes("최저 고도") && v.includes("42")));
+  assert.ok(met.rows.some(([k, v]) => k.includes("리미터") && /25 %.*1\/4 표본/.test(v)));
+  // 어휘는 재생 화면과 같은 표(FLAG_LABEL) — alpha가 아니라 α, 분모가 있어야 1이 몇 초인지 읽힌다
+  assert.ok(met.rows.some(([k, v]) => k.includes("이탈 표본") && /α 1\/4/.test(v)));
+  assert.ok(met.rows.some(([k, v]) => k.includes("궤도 이탈") && v.includes("#4")));
+});
+
+test("시뮬레이션 — 4만 표본 중 1표본 작동이 「0 %」로 접히지 않는다", () => {
+  const lim = Array(4000).fill(false);
+  lim[7] = true; // 0.025 % — 반올림하면 0으로 보이는 자리
+  const m = briefModel({ ...META, kind: "sim" },
+    { kind: "sim", t: [0, 1], signals: { limiter_active: lim }, envelope: { any_flag: false }, meta: {} });
+  const row = m.sections.find((s) => s.title.includes("지표")).rows.find(([k]) => k.includes("리미터"));
+  assert.match(row[1], /< 0.05 %.*1\/4000 표본/);
+});
+
+test("시뮬레이션 — 중단은 bad, 이탈 없음은 ok, 착륙 단계 없으면 없다고 말한다", () => {
+  const base = { kind: "sim", t: [0, 1], signals: {}, meta: {} };
+  // aborted는 불리언이 아니라 **사유 코드 문자열**이다("cancelled"·"alt_out_of_range" —
+  // 엔진 simulator.py). 실물 모양으로 박아야 truthy → === true 로 "엄밀해지는" 회귀를 잡는다
+  const aborted = briefModel({ ...META, kind: "sim" },
+    { ...base, meta: { aborted: "cancelled" }, envelope: { any_flag: false } });
+  assert.equal(aborted.verdict.tone, "bad"); // 취소 런이 any_flag=false로 초록 위장되면 안 된다
+  assert.match(aborted.verdict.text, /cancelled/); // 사유 코드는 그대로 낸다
+  const clean = briefModel({ ...META, kind: "sim" },
+    { ...base, envelope: { any_flag: false } });
+  assert.equal(clean.verdict.tone, "ok");
+  const landing = clean.sections.find((s) => s.title.includes("착륙"));
+  assert.match(landing.rows[0][1], /기록 없음/); // 0으로 위조하지 않는다
+});
