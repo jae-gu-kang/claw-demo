@@ -1565,6 +1565,10 @@ function renderVn(box) {
   }
   // 한 장이면 종전 크기 그대로, 여러 장이면 줄여서 나란히 — 장마다 제목이 자기 고도를 말한다
   const single = lastVn.length === 1;
+  // 출처·자리표시 설명은 고도와 무관(같은 기체·같은 한계) — 첫 장의 응답이 대표한다.
+  // v1.22 다중 고도 개편이 옛 단일 body를 지우며 아래 두 힌트가 죽은 참조로 남았었다(그리기마다
+  // ReferenceError — 선도 전체가 안 섰다, 사용자 제보)
+  const first = lastVn[0];
   clear(box).append(
     el("div", { class: "scroll-x" }, el("div", { class: "row" },
       lastVn.map((b) => vnDiagramCanvas(b, single ? {} : { width: 480, height: 330 })))),
@@ -1580,10 +1584,10 @@ function renderVn(box) {
       "V_S 실속속도(n=1) · V_A 기동속도(실속선∩제한하중) · V_NO 최대 구조 순항속도 · ",
       "V_D 급강하 한계속도. 보호선(녹)이 법칙이 명령을 자르는 선 — 실속선 안쪽. ",
       "실속·보호선은 제한하중 교차 이후 점선(엔벨로프 밖 참고)."),
-    placeholderHint(body),
+    placeholderHint(first),
     el("p", { class: "hint" },
       "음의 실속 곡선은 자리표시 ",
-      `(−${fmt(body.neg_alpha_ratio ?? 0.6, 3)}×α_stall 가정 [기본값]) — 공력 정본 확보 시 교체.`),
+      `(−${fmt(first.neg_alpha_ratio ?? 0.6, 3)}×α_stall 가정 [기본값]) — 공력 정본 확보 시 교체.`),
   );
 }
 
