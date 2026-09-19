@@ -124,7 +124,8 @@ nav a:hover:not(.active) { color: var(--text); background: var(--bg); }
 .health.bad { color: var(--bad); }
 .health.bad::before { background: var(--bad); }
 
-/* 헤더 기체 선택기 (06 §8) — health와 같은 알약 언어. 선택기가 오른쪽 끝을 차지하고 health가 그 옆에 붙는다 */
+/* 헤더 기체 선택기 (06 §8, v1.26 정리) — 셀렉트 하나가 곧 알약이다. 종전에는 알약 래퍼 안에
+   셀렉트 둘·배지가 앉아 테두리가 겹으로 보였다(사용자 제기 "지저분하다") */
 header { flex-wrap: wrap; }
 .profile-pick {
   margin-left: auto;
@@ -133,15 +134,17 @@ header { flex-wrap: wrap; }
   gap: 6px;
   font-size: 11px;
   color: var(--muted);
-  padding: 3px 6px 3px 12px;
-  border-radius: 999px;
-  background: var(--panel);
   white-space: nowrap;
 }
 .profile-pick + .health { margin-left: 0; }
-.profile-pick select { font-size: 12px; padding: 3px 6px; max-width: 220px; }
+.profile-pick select {
+  font-size: 12px;
+  padding: 4px 10px;
+  max-width: 260px;
+  border-radius: 999px;
+  background: var(--panel);
+}
 .profile-pick .badge { padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-.profile-pick .badge.example { background: #fdf2d7; color: #946200; }
 .profile-pick .badge.warn { background: #fdeae8; color: #b3352b; }
 .aircraft-page .unreadable td { color: var(--bad); }
 .aircraft-page tr.selected td { background: #eef5ff; }

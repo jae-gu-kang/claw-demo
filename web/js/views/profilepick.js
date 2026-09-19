@@ -51,51 +51,61 @@ export function switchTo(sel, {
 let box = null;
 let notice = null; // 서버에서 사라진 선택을 예제로 되돌린 사유 — 이 페이지 수명 동안 헤더에 남긴다
 
+// 통합 선택지의 값 인코딩 — 기체 id와 형상 변형 id를 "/"로 잇는다. id는 [A-Za-z0-9_-]뿐이라
+// (lib/profile.js ID_RE) "/"가 값 안에 나올 수 없어 자름이 유일하다
+export const encodePick = (id, variant) => (variant ? `${id}/${variant}` : id);
+export function decodePick(value) {
+  const i = String(value).indexOf("/");
+  return i < 0 ? { id: value, variant: null } : { id: value.slice(0, i), variant: value.slice(i + 1) };
+}
+
+/** 목록 → 통합 선택지 [{value, label, title, selected, disabled}] — 기체 기본과 형상 변형이
+ *  한 목록의 한 줄씩이다(v1.26, 사용자 제기 "헤더가 지저분하다"). 셀렉트 둘(기체·변형)을 하나로
+ *  접는 대신 어느 탭에서든 임의 조합으로 바로 전환하는 능력은 그대로다. 「예제」 배지는 접었다 —
+ *  읽기 전용·실기체 값 아님은 선택지 툴팁이 말한다(예제 기체는 이름부터 「예제」다). */
+export function pickEntries(list, sel) {
+  const out = [];
+  for (const p of list) {
+    if (p.unreadable) {
+      out.push({ value: encodePick(p.id, null), label: `${p.id} — 읽을 수 없음`,
+        title: p.reason, selected: false, disabled: true });
+      continue;
+    }
+    const base = `${p.id} · 리비전 ${p.revision} · 지문 ${p.fingerprint}`
+      + (p.is_example ? " · 읽기 전용 예제 — 실기체 값이 아니다" : "");
+    out.push({ value: encodePick(p.id, null), label: p.name, title: base,
+      selected: sameSelection({ id: p.id, variant: null }, sel), disabled: false });
+    for (const v of p.variants ?? []) {
+      out.push({ value: encodePick(p.id, v.id), label: `${p.name} — ${v.name}`,
+        title: `${base} · 형상 변형 ${v.id}(문서 일부를 덮어쓴 구성)`,
+        selected: sameSelection({ id: p.id, variant: v.id }, sel), disabled: false });
+    }
+  }
+  return out;
+}
+
 function paint(list, error) {
   if (!box) return;
   const sel = currentSelection() ?? { id: EXAMPLE_ID, variant: null };
   if (error) {
-    clear(box).append("기체 ", el("span", { class: "badge warn", title: error }, "목록 못 받음"));
+    clear(box).append(el("span", { class: "badge warn", title: error }, "기체 목록 못 받음"));
     return;
   }
-  const readable = list.filter((p) => !p.unreadable);
-  const row = readable.find((p) => p.id === sel.id) ?? readable[0];
-  const idSelect = el("select", {
-    title: "모든 탭의 계산이 이 기체를 쓴다 — 바꾸면 페이지를 다시 읽는다",
+  const select = el("select", {
+    title: "모든 탭의 계산이 이 기체·형상을 쓴다 — 바꾸면 페이지를 다시 읽는다. 문서 편집·목록은 기체 탭",
     onchange: (e) => {
-      const r = switchTo({ id: e.target.value, variant: null });
+      const r = switchTo(decodePick(e.target.value));
       if (!r.ok) {
-        e.target.value = sel.id; // 취소·실패 — 화면을 실제 선택으로 되돌린다
+        e.target.value = encodePick(sel.id, sel.variant); // 취소·실패 — 화면을 실제 선택으로 되돌린다
         if (r.reason) globalThis.alert?.(r.reason);
       }
     },
-  }, list.map((p) => el("option", {
-    value: p.id, selected: p.id === sel.id, disabled: !!p.unreadable,
-    title: p.unreadable ? p.reason : `${p.id} · 리비전 ${p.revision} · 지문 ${p.fingerprint}`,
-  }, p.unreadable ? `${p.id} — 읽을 수 없음` : p.name)));
-  const variants = row?.variants ?? [];
-  const variantSelect = variants.length
-    ? el("select", {
-      title: "형상 변형 — 기체 문서의 일부 값을 덮어쓴 구성",
-      onchange: (e) => {
-        const r = switchTo({ id: sel.id, variant: e.target.value || null });
-        if (!r.ok) {
-          e.target.value = sel.variant ?? "";
-          if (r.reason) globalThis.alert?.(r.reason);
-        }
-      },
-    },
-    el("option", { value: "", selected: !sel.variant }, "기본 형상"),
-    variants.map((v) => el("option", { value: v.id, selected: v.id === sel.variant }, v.name)))
-    : null;
+  }, pickEntries(list, sel).map((o) => el("option", {
+    value: o.value, selected: o.selected, disabled: o.disabled, title: o.title,
+  }, o.label)));
   // 네이티브 append는 null을 글자 "null"로 넣는다(el()과 다르다) — 없는 조각은 목록에서 뺀다
   clear(box).append(...[
-    el("a", { href: "#aircraft", title: "기체 탭 — 기체 문서 만들기·고치기" }, "기체"),
-    idSelect,
-    variantSelect,
-    row?.is_example
-      ? el("span", { class: "badge example", title: "엔진에 딸린 읽기 전용 예제 — 실기체 값이 아니다" }, "예제")
-      : null,
+    select,
     notice ? el("span", { class: "badge warn", title: notice }, "선택 복원") : null,
   ].filter(Boolean));
 }

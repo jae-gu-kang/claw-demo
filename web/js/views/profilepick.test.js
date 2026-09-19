@@ -125,3 +125,34 @@ test("받아 둔 문서는 선택마다다 — 선택이 바뀌면 다시 받고
     setSelection(null);
   }
 });
+
+test("통합 선택지 — 기체 기본·형상 변형이 한 목록, 값 인코딩이 왕복한다", async () => {
+  const { decodePick, encodePick, pickEntries } = await import("./profilepick.js");
+  // id는 [A-Za-z0-9_-]뿐이라 "/" 자름이 유일하다 (lib/profile.js ID_RE)
+  assert.equal(encodePick("heavy", null), "heavy");
+  assert.equal(encodePick("heavy", "eoir"), "heavy/eoir");
+  assert.deepEqual(decodePick("heavy"), { id: "heavy", variant: null });
+  assert.deepEqual(decodePick("heavy/eoir"), { id: "heavy", variant: "eoir" });
+
+  const list = [
+    { id: "example-delta", name: "예제 델타윙", revision: 0, fingerprint: "f1", is_example: true,
+      variants: [{ id: "eoir", name: "EO/IR형" }] },
+    { id: "heavy", name: "무거운", revision: 3, fingerprint: "f2", is_example: false, variants: [] },
+    { id: "bad", unreadable: true, reason: "손상된 head" },
+  ];
+  const rows = pickEntries(list, { id: "example-delta", variant: "eoir" });
+  assert.deepEqual(rows.map((r) => [r.value, r.label]), [
+    ["example-delta", "예제 델타윙"],
+    ["example-delta/eoir", "예제 델타윙 — EO/IR형"], // 변형은 「기체 — 변형」 한 줄
+    ["heavy", "무거운"],
+    ["bad", "bad — 읽을 수 없음"],
+  ]);
+  // 선택 표시는 정확히 한 줄 — 변형까지 맞아야 한다
+  assert.deepEqual(rows.map((r) => r.selected), [false, true, false, false]);
+  assert.equal(rows[3].disabled, true);
+  assert.match(rows[3].title, /손상된 head/);
+  // 「예제」 배지를 접은 대신 읽기 전용·실기체 값 아님은 툴팁이 말한다
+  assert.match(rows[0].title, /읽기 전용 예제/);
+  assert.match(rows[1].title, /읽기 전용 예제/); // 변형 줄에도 상속
+  assert.doesNotMatch(rows[2].title, /예제/);
+});
