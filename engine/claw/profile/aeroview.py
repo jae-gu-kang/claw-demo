@@ -61,10 +61,8 @@ def _cl_peak(xs, cl, lo, hi):
     return None
 
 
-def aero_slice(built, along, start, stop, n, fixed=None) -> dict:
-    """BuiltProfile → {along, x, fixed, coefficients{CL…Cn: [..]}, stall, db_ranges, form}. 틀린 인자는 ValueError."""
-    if along not in SLICE_AXES:
-        raise ValueError(f"따라갈 축은 {list(SLICE_AXES)} 중 하나: {along!r}")
+def _slice_args(start, stop, n, fixed):
+    """공용 인자 검증 — (xs 격자, 고정 입력점). aero_slice·stability_slice가 같은 계약을 쓴다."""
     n = int(n)
     if not 2 <= n <= MAX_POINTS:
         raise ValueError(f"점 수는 2~{MAX_POINTS}: {n}")
@@ -79,8 +77,15 @@ def aero_slice(built, along, start, stop, n, fixed=None) -> dict:
         if not math.isfinite(value):
             raise ValueError(f"고정 입력 {key}는 유한값이어야 함: {value}")
         point[key] = value
+    return [start + (stop - start) * i / (n - 1) for i in range(n)], point
+
+
+def aero_slice(built, along, start, stop, n, fixed=None) -> dict:
+    """BuiltProfile → {along, x, fixed, coefficients{CL…Cn: [..]}, stall, db_ranges, form}. 틀린 인자는 ValueError."""
+    if along not in SLICE_AXES:
+        raise ValueError(f"따라갈 축은 {list(SLICE_AXES)} 중 하나: {along!r}")
+    xs, point = _slice_args(start, stop, n, fixed)
     coef = make_coef_fn(built.doc["aero"], DispersionSet())
-    xs = [start + (stop - start) * i / (n - 1) for i in range(n)]
     series = {c: [] for c in COEFFICIENTS}
     for x in xs:
         p = dict(point)
@@ -117,6 +122,78 @@ def aero_slice(built, along, start, stop, n, fixed=None) -> dict:
         "fixed": {k: v for k, v in point.items() if k != along},
         "coefficients": series,
         "stall": stall,
+        "db_ranges": dict(built.doc["aero"]["db_ranges"]),
+        "form": built.doc["aero"]["form"],
+    }
+
+
+# 정적 안정성 도함수의 중앙차분 간격 [rad] — 표 항은 구간 선형이라 격자점 사이에서는
+# 정확한 기울기고, 격자점 위에서는 좌우 기울기의 평균이다(더 나은 단일 답이 없다)
+FD_STEP = 1e-4
+# 도함수 → 안정 부호. 횡 Clβ < 0(상반각 효과) · 방향 Cnβ > 0(풍향계 안정) · 종 Cmα < 0
+STABILITY_SIGNS = {"Cl_beta": -1.0, "Cn_beta": 1.0, "Cm_alpha": -1.0}
+
+
+def _sign_violations(xs, vals, sign):
+    """안정 부호를 벗어난 α 구간 [[α_시작, α_끝], …] — 도함수 0(중립)도 위반이다.
+
+    0을 통과로 치면 β에 무반응인 기체(Clβ ≡ 0)가 "횡 안정"으로 찍힌다 — 복원
+    모멘트가 없는 것은 안정이 아니다."""
+    out = []
+    i = 0
+    while i < len(xs):
+        if vals[i] * sign <= 0.0:
+            j = i
+            while j + 1 < len(xs) and vals[j + 1] * sign <= 0.0:
+                j += 1
+            out.append([xs[i], xs[j]])
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def stability_slice(built, start, stop, n, fixed=None) -> dict:
+    """정적 안정성 도함수 곡선 — α 격자에서 Clβ·Cnβ·Cmα를 중앙차분으로 (02 §5.2 확장).
+
+    뷰어(aero_slice)와 **같은 계산기**(make_coef_fn)를 쓴다 — 도함수가 별도 모델이
+    아니라 시뮬·트림이 느끼는 그 계수의 기울기다. β 도함수는 고정 β(기본 0) 주변,
+    α 도함수는 그 α 주변에서 잰다. 판정은 STABILITY_SIGNS 부호 관례고, 위반 구간을
+    [[α, α], …]로 낸다 — 전 구간 안정이면 빈 목록이다.
+    """
+    xs, point = _slice_args(start, stop, n, fixed)
+    coef = make_coef_fn(built.doc["aero"], DispersionSet())
+
+    def coef_at(p):
+        atm = isa_atmosphere(p["alt"])
+        return coef({**p, "V": p["mach"] * atm.a, "phat": 0.0, "qhat": 0.0, "rhat": 0.0})
+
+    h = FD_STEP
+    derivs = {name: [] for name in STABILITY_SIGNS}
+    for x in xs:
+        p = dict(point)
+        p["alpha"] = x
+        bp = coef_at({**p, "beta": p["beta"] + h})
+        bm = coef_at({**p, "beta": p["beta"] - h})
+        ap = coef_at({**p, "alpha": x + h})
+        am = coef_at({**p, "alpha": x - h})
+        derivs["Cl_beta"].append((bp["Cl"] - bm["Cl"]) / (2.0 * h))
+        derivs["Cn_beta"].append((bp["Cn"] - bm["Cn"]) / (2.0 * h))
+        derivs["Cm_alpha"].append((ap["Cm"] - am["Cm"]) / (2.0 * h))
+    judgments = {}
+    for name, sign in STABILITY_SIGNS.items():
+        violations = _sign_violations(xs, derivs[name], sign)
+        judgments[name] = {
+            "stable_sign": "+" if sign > 0 else "-",
+            "violations": violations,
+            "all_ok": not violations,
+        }
+    return {
+        "x": xs,
+        "fixed": {k: v for k, v in point.items() if k != "alpha"},
+        "derivatives": derivs,
+        "judgments": judgments,
+        "step": h,
         "db_ranges": dict(built.doc["aero"]["db_ranges"]),
         "form": built.doc["aero"]["form"],
     }

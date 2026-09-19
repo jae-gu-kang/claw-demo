@@ -214,3 +214,71 @@ def test_stall_is_not_extracted_at_the_end_of_the_table():
     plateau["aero"]["db_ranges"]["alpha"] = None
     s = aero_slice(build_profile(plateau), "alpha", -0.2, 0.6, 81, {"mach": 0.5})
     assert math.isclose(s["stall"]["extracted"], 0.2, abs_tol=1e-9)
+
+
+# ── 정적 안정성 도함수 (stability_slice — Clβ·Cnβ·Cmα vs α) ─────────────────
+
+
+def test_stability_slice_matches_finite_difference_of_slices():
+    """도함수 곡선은 같은 계산기(aero_slice)의 유한차분과 일치한다 — 별도 모델이 아니다."""
+    from claw.profile.aeroview import FD_STEP, stability_slice
+
+    ex = build_profile(load_example())
+    fixed = {"mach": 0.4, "alt": 500.0, "beta": 0.02}
+    s = stability_slice(ex, -0.1, 0.4, 11, fixed)
+    assert set(s["derivatives"]) == {"Cl_beta", "Cn_beta", "Cm_alpha"}
+    assert len(s["x"]) == 11 and s["fixed"]["beta"] == 0.02
+    h = FD_STEP
+    up = aero_slice(ex, "alpha", -0.1, 0.4, 11, {**fixed, "beta": 0.02 + h})
+    dn = aero_slice(ex, "alpha", -0.1, 0.4, 11, {**fixed, "beta": 0.02 - h})
+    for i in (0, 5, 10):
+        for name in ("Cl", "Cn"):
+            fd = (up["coefficients"][name][i] - dn["coefficients"][name][i]) / (2 * h)
+            assert math.isclose(s["derivatives"][f"{name}_beta"][i], fd, rel_tol=1e-9, abs_tol=1e-12)
+    cm = aero_slice(ex, "alpha", -0.1 - h, 0.4 - h, 11, fixed)  # α축 이동 곡선으로 Cmα 대조
+    cm2 = aero_slice(ex, "alpha", -0.1 + h, 0.4 + h, 11, fixed)
+    for i in (0, 5, 10):
+        fd = (cm2["coefficients"]["Cm"][i] - cm["coefficients"]["Cm"][i]) / (2 * h)
+        assert math.isclose(s["derivatives"]["Cm_alpha"][i], fd, rel_tol=1e-6, abs_tol=1e-10)
+
+
+def test_stability_slice_judgments_and_violation_intervals():
+    """부호 판정 — 안정 부호(Clβ<0·Cnβ>0·Cmα<0)와 위반 구간 [α_시작, α_끝]."""
+    from claw.profile.aeroview import stability_slice
+
+    doc = load_example()
+    # 횡: α에 따라 부호가 바뀌는 Clβ — α ≥ 0.2에서 +(위반). 표 k(α) × β 항
+    doc["aero"]["coefficients"]["Cl"] = [{
+        "k": {"table": {"axes": {"alpha": [-0.2, 0.1999, 0.2, 0.6]},
+                        "data": [-0.1, -0.1, 0.05, 0.05], "extrapolate": "clip"}},
+        "inputs": ["beta"], "dispersion": None}]
+    # 방향: 상수 풍향계 안정
+    doc["aero"]["coefficients"]["Cn"] = [{"k": 0.12, "inputs": ["beta"], "dispersion": None}]
+    s = stability_slice(build_profile(doc), 0.0, 0.4, 5, {"mach": 0.4})  # α 격자 0.0~0.4 (0.1 간격)
+    jl = s["judgments"]["Cl_beta"]
+    assert jl["stable_sign"] == "-" and jl["all_ok"] is False
+    assert jl["violations"] == [[0.2, 0.4]]  # 0.2부터 끝까지 한 구간
+    jn = s["judgments"]["Cn_beta"]
+    assert jn["stable_sign"] == "+" and jn["all_ok"] is True and jn["violations"] == []
+    assert s["judgments"]["Cm_alpha"]["stable_sign"] == "-"
+
+
+def test_stability_slice_neutral_counts_as_violation():
+    """도함수 0(중립)은 안정이 아니다 — 0을 통과로 치면 β 무반응 기체가 «안정»이 된다."""
+    from claw.profile.aeroview import stability_slice
+
+    doc = load_example()
+    doc["aero"]["coefficients"]["Cl"] = []  # 횡 모멘트 없음 → Clβ ≡ 0
+    s = stability_slice(build_profile(doc), -0.1, 0.1, 3, {"mach": 0.4})
+    j = s["judgments"]["Cl_beta"]
+    assert j["all_ok"] is False and j["violations"] == [[-0.1, 0.1]]
+
+
+@pytest.mark.parametrize("args", [(0.2, 0.1, 5), (0, 1, 1), (0, 1, 402), (0, float("nan"), 5)])
+def test_stability_slice_rejects_bad_arguments(args):
+    from claw.profile.aeroview import stability_slice
+
+    with pytest.raises(ValueError):
+        stability_slice(build_profile(load_example()), *args)
+    with pytest.raises(ValueError):
+        stability_slice(build_profile(load_example()), 0, 1, 5, {"V": 100.0})

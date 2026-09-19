@@ -142,6 +142,22 @@ def test_aero_slice_draws_from_the_posted_document(client):
     assert r.status_code == 422 and r.json()["detail"]["path"] == "/aero/coefficients/CL/0/k/table/axes/zzz"
 
 
+def test_aero_stability_derivatives_and_judgments(client):
+    """정적 안정성 도함수 — 엔진 stability_slice 통과(도함수 3종·부호 판정·위반 구간)."""
+    body = {"document": _doc(), "start": -0.1, "stop": 0.3, "n": 9, "fixed": {"mach": 0.4}}
+    r = client.post("/api/profiles/aero-stability", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert set(out["derivatives"]) == {"Cl_beta", "Cn_beta", "Cm_alpha"}
+    assert len(out["derivatives"]["Cl_beta"]) == 9 and out["fixed"]["mach"] == 0.4
+    for j in out["judgments"].values():
+        assert j["stable_sign"] in ("+", "-") and j["all_ok"] is (j["violations"] == [])
+    assert client.post("/api/profiles/aero-stability", json={**body, "variant": "nope"}).status_code == 422
+    assert client.post("/api/profiles/aero-stability", json={**body, "n": 1000}).status_code == 422
+    assert client.post("/api/profiles/aero-stability",
+                       json={**body, "fixed": {"V": 1.0}}).status_code == 422
+
+
 def test_parse_table_reads_csv_text(client):
     ok = client.post("/api/profiles/parse-table", json={
         "csv_text": "mach,alpha_stall\n0.1,0.4\n0.5,0.33\n",

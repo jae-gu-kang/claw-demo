@@ -74,6 +74,7 @@ export const NOT_AIRCRAFT = {
   "POST /profiles/parse-table": "CSV 표 판독 — 기체 무관",
   "GET /profiles/_form": "편집 폼 서술(칸 이름·단위·선택지) — 기체 무관",
   "POST /profiles/aero-slice": "공력 DB 뷰어 — 기체 id가 아니라 편집 중인 문서를 본문으로 받는다",
+  "POST /profiles/aero-stability": "정적 안정성 도함수 — 기체 id가 아니라 편집 중인 문서를 본문으로 받는다",
   "POST /profiles/{profile_id}/quick-seed": "초기 게인 빠른 탐색 잡 — 저장된 기체 id가 경로에 있다(헤더 선택과 무관)",
   "POST /profiles/{profile_id}/derive-de-trim": "δe_trim 표 도출 잡 — 저장된 기체 id가 경로에 있다(헤더 선택과 무관)",
 };

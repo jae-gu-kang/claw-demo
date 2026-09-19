@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from claw.design.seed import quick_seed
 from claw.profile import ProfileError, build_profile, validate_document
 from claw.profile.derive import CHECK_STEP, derive_de_trim
-from claw.profile.aeroview import MAX_POINTS, aero_slice
+from claw.profile.aeroview import MAX_POINTS, aero_slice, stability_slice
 from claw.profile.form import form_spec
 from claw.profile.schema import document_warnings
 from claw.tables import TableError
@@ -44,6 +44,17 @@ class AeroSliceIn(BaseModel):
     start: float = Field(allow_inf_nan=False)
     stop: float = Field(allow_inf_nan=False)
     n: int = Field(default=121, ge=2, le=MAX_POINTS)
+    fixed: dict[str, float] = Field(default_factory=dict)
+
+
+class AeroStabilityIn(BaseModel):
+    """정적 안정성 도함수 — aero-slice와 같은 문서 계약, 축은 α 고정이라 along이 없다."""
+
+    document: dict
+    variant: str | None = Field(default=None, min_length=1, max_length=64)
+    start: float = Field(allow_inf_nan=False)
+    stop: float = Field(allow_inf_nan=False)
+    n: int = Field(default=61, ge=2, le=MAX_POINTS)
     fixed: dict[str, float] = Field(default_factory=dict)
 
 
@@ -268,6 +279,21 @@ def profile_aero_slice(req: AeroSliceIn) -> dict:
     try:
         built = build_profile(validate_document(req.document), req.variant, validated=True)
         return to_jsonable(aero_slice(built, req.along, req.start, req.stop, req.n, req.fixed))
+    except ProfileError as e:
+        raise HTTPException(status_code=422, detail=profile_error_detail(e))
+    except ValueError as e:  # 인자 판정·표 질의 오류(TableError도 ValueError)
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/profiles/aero-stability")
+def profile_aero_stability(req: AeroStabilityIn) -> dict:
+    """정적 안정성 도함수 곡선 — α 격자의 Clβ·Cnβ·Cmα와 부호 판정 (02 §5.2 확장).
+
+    aero-slice와 같은 계약(문서 본문·스키마 검증만)이고, 도함수·부호 관례·위반 구간은
+    전부 엔진(stability_slice) 산출 — 서버는 통과만 한다."""
+    try:
+        built = build_profile(validate_document(req.document), req.variant, validated=True)
+        return to_jsonable(stability_slice(built, req.start, req.stop, req.n, req.fixed))
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
     except ValueError as e:  # 인자 판정·표 질의 오류(TableError도 ValueError)
