@@ -130,7 +130,7 @@ def form_spec() -> dict:
                 _f("registry", "/law/design/autopilot", "자동조종", category="fcl", name="Autopilot",
                    reserved=[]),
                 _f("number", "/law/design/k_diff_thr", "차동추력 보상 게인", "-"),
-                _f("text_json", "/law/design/provenance", "출처 (자유 기록)"),
+                _f("text_json", "/law/design/provenance", "출처 (자유 기록)", nullable=True),
             ]),
             _group("/law/schedule", "게인 스케줄", nullable=True, help="설계 게인 없이 둘 수 없다", fields=[
                 _f("choice", "/law/schedule/rule", "스케줄 규칙", choices=list(SCHEDULE_RULES)),
@@ -147,7 +147,9 @@ def form_spec() -> dict:
                     _f("choice", "/law/alloc/de_trim/source", "표 출처", choices=list(DE_TRIM_SOURCES)),
                     _f("table_mach", "/law/alloc/de_trim/table", "마하별 트림 엘레본", "rad",
                        value_label="δe_trim", extrapolate=list(TABLE_EXTRAPOLATE)),
-                    _f("text_json", "/law/alloc/de_trim/provenance", "출처 (자유 기록)"),
+                    _f("text_json", "/law/alloc/de_trim/provenance", "출처 (자유 기록)", nullable=True,
+                       help="도출 잡이 채우는 기록 — 없음(null)도 되지만, 출처 derived는 플랜트 지문 기록이 없으면 "
+                            "낡은 표로 취급돼 조립이 거부한다"),
                 ]),
             ]),
         ]),
@@ -186,12 +188,14 @@ def form_spec() -> dict:
                     ]),
                     _group("/mission_template/sim/approach", "접근", fields=[
                         _f("number", "/mission_template/sim/approach/speed", "속도 명령", "m/s"),
-                        _f("number", "/mission_template/sim/approach/hdot", "강하율 명령", "m/s"),
+                        _f("number", "/mission_template/sim/approach/hdot", "강하율 명령", "m/s",
+                           help="하강이 음수다 (예: −1.96) — 양수는 검증이 거부한다"),
                         _f("number", "/mission_template/sim/approach/exit_alt", "플레어 개시 고도", "m"),
                     ]),
                     _group("/mission_template/sim/flare", "플레어", fields=[
                         _f("number", "/mission_template/sim/flare/speed", "속도 명령", "m/s"),
-                        _f("number", "/mission_template/sim/flare/hdot", "강하율 명령", "m/s"),
+                        _f("number", "/mission_template/sim/flare/hdot", "강하율 명령", "m/s",
+                           help="하강이 음수다 — 양수는 검증이 거부한다"),
                     ]),
                     _f("number", "/mission_template/sim/rollout_m", "접지 후 미끄럼 거리 (실측)", "m", nullable=True,
                        help="활주로 안에 서려면 얼마나 앞에 접지해야 하는지를 화면이 재는 값 — 없으면 그 안내를 내지 않는다"),

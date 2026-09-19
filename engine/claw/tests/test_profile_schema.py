@@ -49,6 +49,13 @@ def test_missing_and_unknown_keys_are_rejected():
      lambda d: d["aero"]["coefficients"]["Cm"][2].__setitem__("dispersion", "cmq")),
     ("/stall/table/axes/mach/2",
      lambda d: d["stall"]["table"]["axes"]["mach"].__setitem__(2, 0.2)),
+    # 마하 축·격자는 0보다 커야 한다 — 스케줄이 (M_design/M)²을 계산하고, 0·음수 마하는 격자점으로 물리에 없다
+    ("/stall/table/axes/mach/0",
+     lambda d: d["stall"]["table"]["axes"]["mach"].__setitem__(0, 0.0)),
+    ("/law/schedule/mach_grid/0",
+     lambda d: d["law"]["schedule"]["mach_grid"].__setitem__(0, 0.0)),
+    ("/law/alloc/de_trim/table/axes/mach/0",
+     lambda d: d["law"]["alloc"]["de_trim"]["table"]["axes"]["mach"].__setitem__(0, -0.1)),
     ("/stall/table/extrapolate",
      lambda d: d["stall"]["table"].__setitem__("extrapolate", "linear")),
     ("/structural/mach_d", lambda d: d["structural"].__setitem__("mach_d", 0.5)),

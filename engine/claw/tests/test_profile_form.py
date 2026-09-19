@@ -91,9 +91,11 @@ def test_choices_are_the_validator_constants():
 
 
 def test_nullable_flags_match_the_validator():
-    """폼이 「없음」을 허용한 칸만 검증기가 null을 받는다 — 어긋나면 폼이 저장 못 할 값을 만들거나 가능한 선택을 막는다."""
+    """폼이 「없음」을 허용한 칸만 검증기가 null을 받는다 — 어긋나면 폼이 저장 못 할 값을 만들거나 가능한 선택을 막는다.
+
+    text_json도 대조한다 — 출처(provenance)는 null이 저장되는데 「필수」로 보이면 표시가 사실보다 세다."""
     for f in _fields():
-        if f["kind"] not in ("number", "range", "group"):
+        if f["kind"] not in ("number", "range", "group", "text_json"):
             continue
         doc = load_example()
         _set(doc, f["path"], None)

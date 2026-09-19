@@ -143,10 +143,10 @@ def _range(v, path, *, nullable=False):
     return [lo, hi]
 
 
-def _increasing(v, path, *, min_len=2):
+def _increasing(v, path, *, min_len=2, lo=None, lo_open=False):
     if not isinstance(v, list) or len(v) < min_len:
         _fail(path, f"수치 {min_len}개 이상 목록이어야 함")
-    out = [_num(x, f"{path}/{i}") for i, x in enumerate(v)]
+    out = [_num(x, f"{path}/{i}", lo=lo, lo_open=lo_open) for i, x in enumerate(v)]
     for i in range(1, len(out)):
         if not out[i] > out[i - 1]:
             _fail(f"{path}/{i}", "순증가(오름차순)여야 함")
@@ -156,7 +156,8 @@ def _increasing(v, path, *, min_len=2):
 def _table_mach(t, path, *, extrapolate):
     _keys(t, path, ("axes", "data", "extrapolate"))
     _keys(t["axes"], f"{path}/axes", ("mach",))
-    axis = _increasing(t["axes"]["mach"], f"{path}/axes/mach")
+    # 마하 0·음수는 격자점으로 물리에 없다 — 오름차순이라 첫 점만 걸려도 전부 양수다
+    axis = _increasing(t["axes"]["mach"], f"{path}/axes/mach", lo=0.0, lo_open=True)
     data = t["data"]
     if not isinstance(data, list) or len(data) != len(axis):
         _fail(f"{path}/data", f"축 길이 {len(axis)}와 같은 수치 목록이어야 함")
@@ -472,7 +473,8 @@ def _law(law, p):
         sched = {
             "rule": _choice(sched["rule"], f"{sp}/rule", SCHEDULE_RULES),
             "m_design": _num(sched["m_design"], f"{sp}/m_design", lo=0.0, lo_open=True),
-            "mach_grid": _increasing(sched["mach_grid"], f"{sp}/mach_grid"),
+            # 스케줄은 (M_design/M)²을 계산한다 — 격자에 0이 있으면 inf가 조용히 배율 상한으로 잘린다
+            "mach_grid": _increasing(sched["mach_grid"], f"{sp}/mach_grid", lo=0.0, lo_open=True),
             "caps": {
                 "default": _num(sched["caps"]["default"], f"{sp}/caps/default",
                                 lo=0.0, lo_open=True),
