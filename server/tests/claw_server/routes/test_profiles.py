@@ -158,6 +158,27 @@ def test_aero_stability_derivatives_and_judgments(client):
                        json={**body, "fixed": {"V": 1.0}}).status_code == 422
 
 
+def test_seed_basis_derives_candidates_from_the_posted_document(client):
+    """초기 게인 산출 근거 — 저차 근사 닫힌꼴 후보·전체 모델 확인·조종면 예산이 엔진에서 온다 (05 §10.1)."""
+    body = {"document": _doc(), "mach": 0.45, "alt": 1000.0, "fuel": 200.0}
+    r = client.post("/api/profiles/seed-basis", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["ok"] is True and out["order"] == ["pitch_rate", "yaw_rate", "roll_rate"]
+    for name in out["order"]:
+        rec = out["rates"][name]
+        assert rec["candidate"] is not None, (name, rec["reason"])
+        assert rec["budget"]["margin"] > 0
+        assert [n["mult"] for n in rec["neighbors"]] == [0.7, 1.0, 1.3]
+    # 판정선(목표·대표 오차)은 결과가 동봉한다 — 화면이 재기술하지 않는다
+    assert out["targets"]["zeta_sp"] == 0.7 and out["e_ref_dps"] == 10.0
+    assert out["attitude"]["pitch_att"]["slot"] == "pitch.kp/ki"
+    assert client.post("/api/profiles/seed-basis", json={**body, "variant": "full-stores"}).status_code == 200
+    assert client.post("/api/profiles/seed-basis", json={**body, "variant": "nope"}).status_code == 422
+    assert client.post("/api/profiles/seed-basis", json={**body, "mach": 0.0}).status_code == 422
+    assert client.post("/api/profiles/seed-basis", json={**body, "e_ref_dps": 0.0}).status_code == 422
+
+
 def test_parse_table_reads_csv_text(client):
     ok = client.post("/api/profiles/parse-table", json={
         "csv_text": "mach,alpha_stall\n0.1,0.4\n0.5,0.33\n",

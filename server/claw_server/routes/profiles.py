@@ -11,6 +11,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from claw.design.basis import E_REF_DPS, seed_basis
 from claw.design.seed import quick_seed
 from claw.profile import ProfileError, build_profile, validate_document
 from claw.profile.derive import CHECK_STEP, derive_de_trim
@@ -56,6 +57,17 @@ class AeroStabilityIn(BaseModel):
     stop: float = Field(allow_inf_nan=False)
     n: int = Field(default=61, ge=2, le=MAX_POINTS)
     fixed: dict[str, float] = Field(default_factory=dict)
+
+
+class SeedBasisIn(BaseModel):
+    """초기 게인 산출 근거 — aero-slice와 같은 문서 계약(저장 없음·예제 가능), 트림점·대표 오차는 조회 조건."""
+
+    document: dict
+    variant: str | None = Field(default=None, min_length=1, max_length=64)
+    mach: float = Field(gt=0.0, allow_inf_nan=False)
+    alt: float = Field(allow_inf_nan=False)
+    fuel: float = Field(ge=0.0, allow_inf_nan=False)
+    e_ref_dps: float = Field(default=E_REF_DPS, gt=0.0, le=360.0, allow_inf_nan=False)
 
 
 class QuickSeedIn(BaseModel):
@@ -294,6 +306,21 @@ def profile_aero_stability(req: AeroStabilityIn) -> dict:
     try:
         built = build_profile(validate_document(req.document), req.variant, validated=True)
         return to_jsonable(stability_slice(built, req.start, req.stop, req.n, req.fixed))
+    except ProfileError as e:
+        raise HTTPException(status_code=422, detail=profile_error_detail(e))
+    except ValueError as e:  # 인자 판정·표 질의 오류(TableError도 ValueError)
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/profiles/seed-basis")
+def profile_seed_basis(req: SeedBasisIn) -> dict:
+    """초기 게인 산출 근거 — 한 트림점의 저차 근사 닫힌꼴 후보와 확인(전체 모델·안정·예산) (05 §10.1).
+
+    aero-slice와 같은 계약(문서 본문·스키마 검증만·저장 없음) — 편집 중 문서와 읽기 전용 예제도 같은 길로
+    본다. 닫힌꼴·판정·사유 문구는 전부 엔진(seed_basis) 산출이고 시드 채택은 여전히 quick-seed 잡이 한다."""
+    try:
+        built = build_profile(validate_document(req.document), req.variant, validated=True)
+        return to_jsonable(seed_basis(built, req.mach, req.alt, req.fuel, e_ref_dps=req.e_ref_dps))
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
     except ValueError as e:  # 인자 판정·표 질의 오류(TableError도 ValueError)

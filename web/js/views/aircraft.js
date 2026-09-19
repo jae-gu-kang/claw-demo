@@ -15,7 +15,7 @@ JSON 글이 같은 문서를 고친다.
 
 import { ApiError, api, errorText } from "../api.js";
 import { heroEntries, heroFacts, heroPlan, stepIndex, variantNote } from "../lib/aircrafthero.js";
-import { clear, el, fmt } from "../dom.js";
+import { clear, el, flagBadge, fmt } from "../dom.js";
 import { SERIES_COLORS } from "../lib/plot.js";
 import {
   EXAMPLE_ID, cloneDocument, currentSelection, exportFileName, parseDocumentText, profileErrorText,
@@ -32,6 +32,7 @@ import {
 } from "./profilepick.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
 import { deriveSummary, deTrimStatus, designSource, seedSummary } from "../lib/quickseed.js";
+import { basisAttitude, basisHead, basisRates, designGain } from "../lib/seedbasis.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
 // 탭 재진입에도 목록·열어 둔 문서·편집 중 글·열린 패널 유지 (모듈 스코프 규약)
@@ -65,6 +66,12 @@ const stability = {
 };
 // 「공력」 패널의 모드 — 탭 재진입에도 유지 (모듈 스코프 규약)
 let aeroMode = "curves";
+// 초기 게인 산출 근거 — 조건 칸·마지막 결과 (뷰어와 같은 유지 규약: 결과는 계산한 기체의 것임을 forId로
+// 대조). 조건 기본값은 문서에서 채운다(설계 마하·연료 절반) — 연 기체가 바뀌면 다시 채운다(condFor)
+const basis = {
+  mach: "", alt: "0", fuel: "", eref: "10", condFor: null,
+  busy: false, result: null, forId: null, error: null,
+};
 // 도함수 → 그림 제목. 부호 관례·판정은 엔진(STABILITY_SIGNS)이 정본이고 응답 judgments가
 // 싣는다 — 여기는 이름표만
 const STABILITY_LABELS = [
@@ -86,6 +93,8 @@ const AP_SOURCE = { heuristic: "휴리스틱", registry_default: "레지스트�
   structural_limit: "구조 한계로 깎음" };
 
 const failText = (e) => (e instanceof ApiError && profileErrorText(e.detail)) || errorText(e);
+// rad → "1.23°" — 결측(null·비유한)은 "—" (도출 결과·산출 근거가 같이 쓴다)
+const degOf = (rad) => (typeof rad === "number" && Number.isFinite(rad) ? `${(rad * 180 / Math.PI).toFixed(2)}°` : "—");
 const path = (id) => `/profiles/${encodeURIComponent(id)}`;
 const fresh = (body) => ({
   id: body.document.id, body, text: JSON.stringify(body.document, null, 1),
@@ -858,7 +867,7 @@ export function render() {
   const deriveResultView = (body) => {
     const s = deriveSummary(body);
     const st = s.stats;
-    const deg = (v) => (typeof v === "number" ? `${(v * 180 / Math.PI).toFixed(2)}°` : "—");
+    const deg = degOf;
     return el("div", { style: "margin-top:8px" },
       el("p", { class: s.ok ? "notice" : "error-box" }, s.headline),
       s.rows.length ? el("div", { class: "scroll-x" }, el("table", {},
@@ -952,6 +961,148 @@ export function render() {
     }
   };
 
+  // ── 초기 게인 산출 근거 (같은 패널의 절) ──────────────────────────────────
+  // 한 트림점의 저차 근사 닫힌꼴 후보 + 확인(전체 모델·안정·예산) — 읽기 전용 분석(저장 없음·예제 가능).
+  // 닫힌꼴·목표·판정 불리언·사유 문구는 전부 서버 응답(엔진 seed_basis)이 정본이다 — 여기는 줄 세우기뿐
+  const failBasis = (text) => {
+    basis.result = null;
+    basis.error = text;
+    basis.forId = opened?.id ?? null;
+    paintSeed();
+  };
+
+  const runBasis = async () => {
+    if (!opened || basis.busy) return;
+    const numOf = (s) => {
+      const v = Number(String(s).trim());
+      return String(s).trim() !== "" && Number.isFinite(v) ? v : null;
+    };
+    const mach = numOf(basis.mach);
+    const alt = numOf(basis.alt);
+    const fuel = numOf(basis.fuel);
+    const eref = numOf(basis.eref);
+    if (mach == null || !(mach > 0)) return failBasis("마하는 0보다 큰 수여야 합니다");
+    if (alt == null) return failBasis("고도를 수로 입력하세요 [m]");
+    if (fuel == null || fuel < 0) return failBasis("연료는 0 이상의 수여야 합니다 [kg]");
+    if (eref == null || !(eref > 0)) return failBasis("대표 오차는 0보다 큰 수여야 합니다 [°/s]");
+    // JSON 글 편집 중이면 글이 정본이다 — 공력 뷰어와 같은 규약
+    const parsed = opened.mode === "json" ? parseDocumentText(opened.text) : { doc: opened.obj };
+    if (parsed.error) return failBasis(`JSON 글을 읽을 수 없어 계산하지 않았습니다 — ${parsed.error}`);
+    const target = opened;
+    basis.busy = true;
+    paintSeed();
+    try {
+      const res = await api.post("/profiles/seed-basis", {
+        document: parsed.doc, ...(opened.editVariant ? { variant: opened.editVariant } : {}),
+        mach, alt, fuel, e_ref_dps: eref,
+      });
+      if (opened === target) {
+        basis.result = res;
+        basis.forId = target.id;
+        basis.error = null;
+      }
+    } catch (e) {
+      if (opened === target) {
+        basis.result = null;
+        basis.error = failText(e);
+        basis.forId = target.id;
+      }
+    } finally {
+      basis.busy = false; // 그사이 다른 기체를 열었어도 바쁨은 푼다 — 안 풀면 버튼이 영영 죽는다
+      paintSeed();
+    }
+  };
+
+  const basisResultView = () => {
+    if (basis.forId !== opened.id || (!basis.result && !basis.error)) {
+      return el("p", { class: "hint" }, "[산출]을 누르면 그 조건의 트림·저차 근사에서 초기값 후보와 확인 결과가 섭니다.");
+    }
+    if (basis.error) return el("p", { class: "error-box" }, basis.error);
+    const body = basis.result;
+    const head = basisHead(body);
+    if (!head.ok) return el("p", { class: "error-box" }, head.line);
+    // 수치·배지는 공용 헬퍼(dom.js fmt·flagBadge) — 여기 다시 적으면 두 벌이 된다
+    const num = fmt;
+    const deg = degOf;
+    const flag = (ok, yes, no) => flagBadge(ok, yes, no, "—");
+    const rates = basisRates(body);
+    const t = body.targets ?? {};
+    const neighborLines = rates.filter((r) => r.neighbors.length).map((r) => el("p", { class: "hint", style: "margin:2px 0" },
+      `${r.slot} 주변: ` + r.neighbors.map((n) =>
+        `×${n.mult} → ${n.achieved == null ? "—" : num(n.achieved)}${n.stable === false ? " (불안정)" : ""}`).join(" · ")));
+    return el("div", { style: "margin-top:8px" },
+      el("p", { class: "notice" }, head.line),
+      el("div", { class: "scroll-x" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "자리"), el("th", {}, "저차 근사"), el("th", {}, "후보 k"),
+          el("th", {}, "지금 문서"), el("th", {}, "전체 모델 달성"), el("th", {}, "작동기 포함"),
+          el("th", {}, "조종면 예산 (P 몫)"))),
+        el("tbody", {}, rates.map((r) => el("tr", {},
+          el("td", { class: "num" }, r.slot),
+          el("td", { title: r.signBasis }, r.model),
+          el("td", { class: "num", title: r.note ?? "" }, r.k == null ? "—" : num(r.k, 4)),
+          el("td", { class: "num" }, designGain(body, r.slot) == null ? "—" : num(designGain(body, r.slot), 4)),
+          r.k == null
+            ? el("td", {}, r.reasonText ?? "—")
+            : el("td", { class: "num" }, `${num(r.achieved)} / 목표 ${num(r.target)} `,
+              flag(r.achievedOk, "달성", "미달")),
+          el("td", {}, r.k == null ? "—" : flag(r.stable, "안정", "불안정")),
+          el("td", { class: "num" }, r.budget
+            ? el("span", {}, `${deg(r.budget.delta_cmd)} / ${deg(r.budget.margin)}`
+              + (r.budget.share != null ? ` (${Math.round(r.budget.share * 100)} %)` : "") + " ",
+              flag(r.budget.ok, "예산 안", "초과"))
+            : "—")))))),
+      ...neighborLines,
+      el("div", { class: "scroll-x", style: "margin-top:8px" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "자세 PI"), el("th", {}, "kp"), el("th", {}, "ki"),
+          el("th", {}, "교차"), el("th", {}, "PM / GM"), el("th", {}, "판정"))),
+        el("tbody", {}, basisAttitude(body).map((a) => el("tr", {},
+          el("td", { class: "num", title: a.signBasis }, a.slot),
+          el("td", { class: "num" }, num(a.kp, 4)),
+          el("td", { class: "num" }, num(a.ki, 4)),
+          el("td", { class: "num" }, a.wcAtt == null ? "—" : `${num(a.wcAtt)} rad/s`),
+          el("td", { class: "num" }, `${num(a.pm)}° / ${num(a.gm)} dB`),
+          el("td", { title: a.reasonText ?? "" },
+            a.passing ? el("span", { class: "flag ok" }, "통과") : el("span", { class: "flag bad" }, "미달"))))))),
+      el("p", { class: "hint", style: "margin:6px 0 0" },
+        `목표(응답 동봉): ζ_sp ${t.zeta_sp} · ζ_dr ${t.zeta_dr} · λ_roll ${t.roll_lambda} rad/s · `
+        + `자세 PM ${t.pm_deg}° / GM ${t.gm_db} dB · 자세 교차 = 레이트 교차 ÷ ${t.wc_ratio_att}`
+        + (body.outer?.wc_outer != null
+          ? ` · 바깥 루프(헤딩·고도·속도) 대역폭 ≈ ${num(body.outer.wc_outer)} rad/s (자세 교차 ÷ ${body.outer.separation})`
+          : "")));
+  };
+
+  const basisSection = () => {
+    if (basis.condFor !== opened.id) {
+      // 조건 기본값은 문서에서 — 설계 마하(스케줄)·연료 절반. 없으면 비워 두고 입력을 받는다
+      basis.condFor = opened.id;
+      const doc = opened.body.document;
+      basis.mach = doc.law?.schedule?.m_design != null ? String(doc.law.schedule.m_design) : "";
+      basis.fuel = doc.mass?.fuel_max != null ? String(doc.mass.fuel_max / 2) : "";
+    }
+    const input = (value, onValue) => el("input", {
+      class: "pf-num", value, spellcheck: "false", oninput: (e) => onValue(e.target.value),
+    });
+    return el("div", {},
+      el("h4", { style: "margin:14px 0 4px" }, "산출 근거 (모델 기반 초기값)"),
+      el("p", { class: "hint" },
+        "한 트림점의 저차 근사에서 레이트 댐퍼 초기값을 닫힌꼴로 계산합니다 — 롤은 1차 극배치, 피치·요는 "
+        + "특성방정식 계수 비교(목표 감쇠). 후보마다 전체 선형 모델 달성·작동기 포함 안정·조종면 예산(대표 "
+        + "오차 × |k| 대 트림 잔여 변위 — P 몫만이라 자세·다른 명령 몫은 따로 남습니다)·×0.7/1.3 주변을 "
+        + "확인합니다. 자세 PI는 자동 튜닝과 같은 루프쉐이핑입니다. "
+        + (opened.editVariant ? `형상 변형 「${opened.editVariant}」을 적용한 문서로 계산합니다(편집 중인 글 기준). `
+          : "편집 중인 글(저장 전 포함)로 계산합니다. ")
+        + "저장하지 않는 분석입니다 — 채택·저장은 위 빠른 탐색이 합니다."),
+      el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;align-items:flex-end" },
+        el("label", { class: "field" }, "마하", input(basis.mach, (v) => { basis.mach = v; })),
+        el("label", { class: "field" }, "고도 [m]", input(basis.alt, (v) => { basis.alt = v; })),
+        el("label", { class: "field" }, "연료 [kg]", input(basis.fuel, (v) => { basis.fuel = v; })),
+        el("label", { class: "field", title: "예산 점검의 대표 레이트 오차 — P 출력 = |k| × 이 값" },
+          "대표 오차 [°/s]", input(basis.eref, (v) => { basis.eref = v; })),
+        el("button", { class: "primary", disabled: basis.busy, onclick: runBasis },
+          basis.busy ? "산출 중…" : "산출")),
+      basisResultView());
+  };
+
   const paintSeed = () => {
     if (!opened) {
       clear(seedBox).append(el("p", { class: "hint" }, "목록에서 [열기]로 기체를 열면 게인 출처와 초기 게인 빠른 탐색이 여기 섭니다."));
@@ -963,7 +1114,8 @@ export function render() {
     const busy = seedJob != null;
     const progress = el("div");
     const res = seedResult?.profileId === opened.id ? seedResult : null;
-    clear(seedBox).append(
+    // 네이티브 append는 null을 글자 "null"로 넣는다(el()과 다르다) — 없는 조각은 목록에서 뺀다
+    clear(seedBox).append(...[
       el("p", {}, el("strong", {}, src.label), ` · 저장된 리비전 ${opened.body.revision}`),
       el("p", { class: "hint" },
         "부호는 선형 모델의 조종효율(B)에서, 크기는 설계 격자 앵커(q̄ 중앙·최저·최고)마다 튜닝한 값의 중앙값에서, "
@@ -978,6 +1130,7 @@ export function render() {
           el("label", { class: "field", title: "중앙 앵커 한 케이스로 평가(시뮬 포함)를 돌려 결과에 싣는다 — 채택 판정에는 쓰지 않는다" },
             el("input", { type: "checkbox", checked: seedSimCheck, onchange: (e) => { seedSimCheck = e.target.checked; } }),
             " 시뮬 확인도 싣기(수 초 더)")),
+      basisSection(),
       el("h4", { style: "margin:14px 0 4px" }, "할당 δe_trim 표"),
       el("p", {}, el("strong", { class: trim.stale ? "error-box" : null }, trim.label)),
       el("p", { class: "hint" },
@@ -989,7 +1142,8 @@ export function render() {
           title: busy ? "기체를 고치는 잡이 이미 돌고 있다 — 끝난 뒤 돌린다" : "" },
         doc.law?.alloc?.de_trim ? "δe_trim 표 다시 도출" : "δe_trim 표 도출")),
       progress,
-      res ? (res.kind === "derive_de_trim" ? deriveResultView(res.body) : seedResultView(res.body)) : null);
+      res ? (res.kind === "derive_de_trim" ? deriveResultView(res.body) : seedResultView(res.body)) : null,
+    ].filter(Boolean));
     if (busy && seedJob.profileId === opened.id) {
       attachProgress(progress, seedJob.id, {
         onDone: seedDone,
@@ -1306,7 +1460,8 @@ export function render() {
         title: "연 기체의 형상 변형 — 덮어쓴 경로·지문·고르기",
         count: () => opened?.body.document.variants?.length ?? null, build: () => variantBox },
       { key: "seed", label: "게인·δe_trim", group: "설계",
-        title: "연 기체의 게인 출처와 할당 표 — 초기 게인 빠른 탐색(조종효율 부호·앵커 튜닝 크기)·δe_trim 표 도출",
+        title: "연 기체의 게인 출처와 할당 표 — 초기 게인 빠른 탐색(조종효율 부호·앵커 튜닝 크기)·산출 근거"
+          + "(저차 근사 닫힌꼴·예산 점검)·δe_trim 표 도출",
         build: () => seedBox },
       { key: "aero", label: "공력", group: "보기",
         title: "편집 중 문서로 계산 — 계수 곡선(겹치기·극선·L/D·실속 대조)과 정적 안정성(Clβ·Cnβ·Cmα 부호 판정)",
