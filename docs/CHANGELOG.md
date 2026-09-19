@@ -24,6 +24,20 @@ v0.75부터는 축이 하나뿐이라 이 혼동이 없다.
 
 ## 현행
 
+### v1.29 — 초기 게인 안내를 시뮬·Autocode·검증 탭까지 — 문구·링크는 seedlink.js 한 벌
+
+v1.28의 후속(리뷰가 남긴 후보). 시뮬 실행(`POST /sim/run`)·탑재 C 생성(`/codegen/flight`)·검증
+제출(`/verify/flight` — codegen과 같은 조립 build_flight_law라 한 자리 수정으로 둘을 덮는다)은
+게인 미설계 기체에서 이미 422였지만 detail이 **문자열**이라 웹의 경로 대조(needsSeed)가 서지
+않았다. ProfileError를 ValueError 포괄 매핑보다 먼저 잡아 {path, message}로 낸다. 웹은 다섯
+탭(게인·자동 설계·시뮬·Autocode·검증)의 오류 표시·링크를 `views/seedlink.js` 한 벌로
+접었다(v1.28의 두 벌 중복 해소) — 오류 문구는 엔진 detail 그대로(profileErrorText), 링크 뒤
+문구만 탭마다 다르다. Autocode는 오류가 코드 판에 서므로(생 JSON이던 것을 곱게) 링크는 코드 판
+바로 옆(파일 탭 줄)에 선다 — 각주 패널은 닫혀 있을 수 있다. 리뷰가 잡은 것: `api.js errorText`에
+{path, message} 폴백 — 안 넣으면 detail 형상 전환이 **투어**(같은 라우트의 남은 소비처)에 생
+JSON을 세우는 회귀였다. 「미설계 문서」 테스트 헬퍼 5벌을 서버 conftest 한 벌로, seedlink는
+단위 테스트로 핀 (06 §4).
+
 ### v1.28 — 게인 미설계 기체: 게인·자동 설계 탭이 500 대신 「기체 탭 → 초기 게인」을 안내한다
 
 사용자 제기("초기 게인 설정은 어느 탭에 있어야 하나" → 기체 탭 유지 + 링크). 게인이 빈(또는

@@ -757,14 +757,10 @@ def test_route_hands_the_law_rate_filters_to_the_session(client, wait_job, monke
     assert seen["rate_filters"], "데모 프로파일에 필터가 하나도 없다 — 전제가 바뀌었다"
 
 
-def test_unseeded_aircraft_is_rejected_at_submit_with_the_document_path(client):
+def test_unseeded_aircraft_is_rejected_at_submit_with_the_document_path(client, unseeded_doc):
     """게인 미설계 기체의 자동 설계 제출은 202 전에 422다 — 튜너의 브래킷이 설계값에서 나오므로(05 §7.4)
     잡을 받아 봐야 전 자리 seed_required다. detail.path(/law/design)가 웹 안내 링크의 근거다."""
-    from claw.profile import load_example
-
-    d = load_example()
-    d.update(id="no-gains-design", name="게인 없는 기체", is_example=False, variants=[])
-    d["law"]["design"] = d["law"]["schedule"] = d["law"]["alloc"] = None
+    d = unseeded_doc("no-gains-design")
     assert client.post("/api/profiles", json={"document": d}).status_code == 201
     r = client.post("/api/design/auto", json={"config": {}, "profile": {"id": "no-gains-design"}})
     assert r.status_code == 422, r.text

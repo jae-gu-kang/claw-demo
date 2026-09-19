@@ -55,3 +55,22 @@ def wait_job(client):
         raise AssertionError(f"작업 시간 초과: {j}")
 
     return _wait
+
+
+@pytest.fixture()
+def unseeded_doc():
+    """게인이 빈 기체 문서 공장 — 새 기체의 첫 상태(초기 게인 빠른 탐색 전). 「미설계」의 정의가 여기
+    한 벌이다(v1.28~29에서 다섯 테스트 파일에 복제됐던 헬퍼). keep_design=True면 설계는 남기고
+    스케줄만 비운다(카탈로그의 /law/schedule 경로 시험)."""
+    from claw.profile import load_example
+
+    def make(pid, *, keep_design=False):
+        d = load_example()
+        d.update(id=pid, name="게인 없는 기체", is_example=False, variants=[])
+        if not keep_design:
+            d["law"]["design"] = None
+            d["law"]["alloc"] = None
+        d["law"]["schedule"] = None
+        return d
+
+    return make

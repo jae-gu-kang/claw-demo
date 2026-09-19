@@ -38,10 +38,9 @@ import {
 } from "../lib/gainsync.js";
 import { gainPlotGroups } from "../lib/plot.js";
 import { piecewisePolyfit, rawCoeffs, sampleFit } from "../lib/polyfit.js";
-import { needsSeed, profileErrorText } from "../lib/profile.js";
 import { store } from "../store.js";
-import { requestSeedPanel } from "./aircraft.js";
 import { renderEvalCards } from "./evalcards.js";
+import { errorWithSeedLink } from "./seedlink.js";
 import { lineChartCanvas } from "./plots.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
 
@@ -216,14 +215,8 @@ export function render() {
         ? "서버 설계 제안으로 되돌렸습니다 (미적용) — '시뮬·코드에 적용'을 눌러야 형상이 바뀝니다."
         : adoptedText(adopted);
     } catch (e) {
-      // 게인 미설계·스케줄 없는 기체(detail 경로 대조 — lib/profile.js needsSeed): 오류 문구(엔진
-      // detail)는 그대로 보이고, 그것을 채우는 자리로 가는 길을 놓는다 — 초기 게인은 기체 탭 소관
-      clear(errBox).append(el("div", { class: "error-box" }, profileErrorText(e?.detail) ?? errorText(e)),
-        ...(needsSeed(e?.detail) ? [el("p", {},
-          el("button", { onclick: () => { requestSeedPanel(); location.hash = "#aircraft"; } },
-            "기체 탭에서 초기 게인 채우기"),
-          el("span", { class: "hint" },
-            " — 초기 게인 빠른 탐색(기체 탭 「게인·δe_trim」 패널)이 부호·크기와 스케줄을 채우면 이 탭이 섭니다."))] : []));
+      // 게인 미설계·스케줄 없는 기체면 오류 문구(엔진 detail) 아래에 채우러 가는 길이 선다 — seedlink.js
+      clear(errBox).append(...errorWithSeedLink(e, "이 탭이 섭니다."));
     }
   };
 

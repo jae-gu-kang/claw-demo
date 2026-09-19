@@ -27,6 +27,7 @@ import { createTrack3d } from "./plot3d.js";
 import { lineChartCanvas, profileCanvas, trackCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createDutyPanel, invalidate as dutyInvalidate } from "./duty.js";
+import { errorWithSeedLink } from "./seedlink.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
 import { DOC_FAILED_HINT, MISSING_TEMPLATE_HINT, templateDefaults, untouchedUpdates } from "../lib/missiontemplate.js";
 import { firstTimeThisPage } from "./missionfill.js";
@@ -335,7 +336,8 @@ export function render() {
   });
 
   const showErr = (e) =>
-    clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
+    // 게인 미설계 기체의 실행 422에는 「기체 탭 → 초기 게인」 링크가 함께 선다 — seedlink.js
+    clear(errBox).append(...errorWithSeedLink(e, "시뮬레이션을 돌릴 수 있습니다."));
 
   // 세로 프로파일 — 계획(입력한 WP 고도)과 최근 시뮬 실제 고도를 같은 거리축에.
   // 지도가 수평면을, 이쪽이 세로면을 맡아 웨이포인트 한 벌을 두 면으로 본다.

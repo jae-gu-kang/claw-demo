@@ -27,10 +27,9 @@ import {
   statusCounts, statusSeverity, statusText, trimLabel, verdictLegend,
 } from "../lib/autodesign.js";
 import { slotIndex, withConstant } from "../lib/gainsync.js";
-import { needsSeed, profileErrorText } from "../lib/profile.js";
 import { store } from "../store.js";
-import { requestSeedPanel } from "./aircraft.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
+import { errorWithSeedLink } from "./seedlink.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
 
 const SEV_COLOR = { ok: "#34c759", warn: "#ff9500", fail: "#ff3b30", na: "#8e8e93" };
@@ -148,14 +147,8 @@ export function render() {
         onError: (e) => clear(errBox).append(el("div", { class: "error-box" }, errorText(e))),
       });
     } catch (e) {
-      // 게인 미설계 기체는 제출이 422다 — 오류 문구(엔진 detail)에 채우러 가는 길을 붙인다.
-      // 자동 설계의 튜너 브래킷이 설계값에서 나오므로(05 §7.4) 초기 게인 없이는 돌 수 없다
-      clear(errBox).append(el("div", { class: "error-box" }, profileErrorText(e?.detail) ?? errorText(e)),
-        ...(needsSeed(e?.detail) ? [el("p", {},
-          el("button", { onclick: () => { requestSeedPanel(); location.hash = "#aircraft"; } },
-            "기체 탭에서 초기 게인 채우기"),
-          el("span", { class: "hint" },
-            " — 초기 게인 빠른 탐색(기체 탭 「게인·δe_trim」 패널)이 채우면 여기서 다듬습니다."))] : []));
+      // 게인 미설계 기체는 제출이 422다(튜너 브래킷이 설계값에서 나온다, 05 §7.4) — 채우러 가는 길이 선다
+      clear(errBox).append(...errorWithSeedLink(e, "여기서 다듬습니다."));
     }
   };
 

@@ -598,3 +598,15 @@ def test_비유한_원점_리터럴은_422로_거부된다(client, bad):
         "/api/sim/run", content=raw, headers={"content-type": "application/json"}
     )
     assert r.status_code == 422
+
+
+def test_unseeded_aircraft_sim_run_is_a_422_with_the_document_path(client, unseeded_doc):
+    """게인 미설계 기체의 실행 제출은 202 전에 422 — detail이 {path, message}라 웹이 「기체 탭 →
+    초기 게인」 링크를 경로 대조로 세운다 (문자열 detail이던 종전에는 링크가 서지 않았다)."""
+    assert client.post("/api/profiles", json={"document": unseeded_doc("no-gains-sim")}).status_code == 201
+    r = client.post("/api/sim/run", json={
+        "trim": {"name": "t", "mach": 0.45, "alt": 1000.0, "fuel": 200.0},
+        "modes": [{"name": "hold", "speed": 150.0, "alt": 1000.0, "heading": 0.0, "exit": ["time_ge", 1e9]}],
+        "t_end": 1.0, "profile": {"id": "no-gains-sim"}})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["path"] == "/law/design", r.text

@@ -23,7 +23,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from claw.codegen import emit_c, emit_runtime, param_image
 from claw.fcl.assemble import assemble_law
-from claw_server.refs import ProfileRef, profile_echo, resolve_profile
+from claw.profile import ProfileError
+from claw_server.refs import ProfileRef, profile_echo, profile_error_detail, resolve_profile
 from claw.params.registry import REGISTRY
 from claw_server.routes.sim import PolyTableIn, TableIn, build_gain_tables, build_scas
 
@@ -138,6 +139,8 @@ def build_flight_law(req: FlightCodeIn, profile):
             gain_tables=gain_tables,
             standard=True,
         ).init(dt)
+    except ProfileError as e:  # 기체 문서가 짚는 오류(게인 미설계 등) — 경로 동봉 422, verify/flight도 이 길로 온다
+        raise HTTPException(status_code=422, detail=profile_error_detail(e))
     except (ValueError, TypeError) as e:  # 엔진 구성 검증 → 422 (sim.py와 같은 정책)
         raise HTTPException(status_code=422, detail=str(e))
 

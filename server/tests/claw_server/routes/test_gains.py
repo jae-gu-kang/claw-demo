@@ -228,23 +228,10 @@ def test_catalog_carries_autopilot_design_of_the_selected_aircraft(client):
     assert client.get("/api/gains/catalog").json()["autopilot_design"] == Autopilot().cfg
 
 
-def _unseeded(pid, *, keep_design=False):
-    """게인이 빈(또는 스케줄만 없는) 기체 — 새 기체의 첫 상태."""
-    from claw.profile import load_example
-
-    d = load_example()
-    d.update(id=pid, name="게인 없는 기체", is_example=False, variants=[])
-    if not keep_design:
-        d["law"]["design"] = None
-        d["law"]["alloc"] = None
-    d["law"]["schedule"] = None
-    return d
-
-
-def test_unseeded_aircraft_gets_a_422_with_the_document_path_not_a_500(client):
+def test_unseeded_aircraft_gets_a_422_with_the_document_path_not_a_500(client, unseeded_doc):
     """게인 미설계 기체의 카탈로그·설계 테이블은 500이 아니라 422다 — detail.path가 /law/design을
     짚어 웹이 「기체 탭 → 초기 게인」 안내를 세운다 (문구 대조가 아니라 경로 대조)."""
-    assert client.post("/api/profiles", json={"document": _unseeded("no-gains")}).status_code == 201
+    assert client.post("/api/profiles", json={"document": unseeded_doc("no-gains")}).status_code == 201
     for path in ("/api/gains/catalog", "/api/gains/demo"):
         r = client.get(path, params={"profile_id": "no-gains"})
         assert r.status_code == 422, (path, r.text)
@@ -253,6 +240,6 @@ def test_unseeded_aircraft_gets_a_422_with_the_document_path_not_a_500(client):
         assert r.json()["detail"]["path"] in ("/law/design", "/law/schedule"), (path, r.text)
     # 설계는 있는데 스케줄만 없는 문서 — 카탈로그는 스케줄이 필요하다. 같은 422, 경로만 다르다
     assert client.post("/api/profiles",
-                       json={"document": _unseeded("no-sched", keep_design=True)}).status_code == 201
+                       json={"document": unseeded_doc("no-sched", keep_design=True)}).status_code == 201
     r = client.get("/api/gains/catalog", params={"profile_id": "no-sched"})
     assert r.status_code == 422 and r.json()["detail"]["path"] == "/law/schedule", r.text

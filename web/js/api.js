@@ -1,6 +1,6 @@
 /** 서버(M13) 통신 래퍼 — REST + 작업 진행 구독(WS, 폴백 폴링). 이 모듈만 통신 담당. */
 
-import { currentSelection, withProfile } from "./lib/profile.js";
+import { currentSelection, profileErrorText, withProfile } from "./lib/profile.js";
 
 const BASE = "/api";
 export const TERMINAL = new Set(["done", "error", "cancelled"]);
@@ -58,7 +58,10 @@ export function errorText(err) {
   if (Array.isArray(err.detail)) {
     return err.detail.map((e) => `${(e.loc || []).join(".")}: ${e.msg}`).join("\n");
   }
-  return typeof err.detail === "string" ? err.detail : err.message;
+  // {path, message}(엔진 ProfileError — v1.29에서 sim·codegen·verify도 이 형상)는 곱게 —
+  // message 폴백은 JSON.stringify라 생 JSON이 화면(투어 포함)에 선다
+  return typeof err.detail === "string" ? err.detail
+    : profileErrorText(err.detail) ?? err.message;
 }
 
 /**

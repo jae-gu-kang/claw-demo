@@ -15,7 +15,7 @@
 계약 — 같은 조립·같은 지문, 서버 테스트가 못박는다).
 */
 
-import { api, errorText } from "../api.js";
+import { api } from "../api.js";
 import { clear, el, flagBadge } from "../dom.js";
 import {
   buildVerifyRequest, caseGroups, covCell, deactivatedRows, failedRuleCount, firstFailKey, identLine,
@@ -24,6 +24,7 @@ import {
 } from "../lib/verify.js";
 import { store } from "../store.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
+import { errorWithSeedLink } from "./seedlink.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
 
 // 모듈 상태 — 탭 재진입 시 유지 (실행 중 작업 재부착 포함, 전 탭 관행)
@@ -658,5 +659,6 @@ function aboutBox() {
 }
 
 function showError(errBox, e) {
-  clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
+  // 게인 미설계 기체의 제출 422에는 「기체 탭 → 초기 게인」 링크가 함께 선다 — seedlink.js
+  clear(errBox).append(...errorWithSeedLink(e, "검증을 돌릴 수 있습니다."));
 }

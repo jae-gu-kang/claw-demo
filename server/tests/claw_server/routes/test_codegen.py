@@ -259,3 +259,11 @@ def test_부분_자동조종_지정은_이_기체의_설계값_위에_덧댄다(
     assert part.json()["param_fingerprint"] == base.json()["param_fingerprint"]
     listing = part.json()["param_image"]["listing"]
     assert re.search(r"ap_vs_pid_kp\s+= 0\.196\b", listing), "승강률 게인이 기체 설계값이 아니다"
+
+
+def test_unseeded_aircraft_flight_code_is_a_422_with_the_document_path(client, unseeded_doc):
+    """게인 미설계 기체의 탑재 C 생성은 422 — detail {path, message} (웹 안내 링크 근거)."""
+    assert client.post("/api/profiles", json={"document": unseeded_doc("no-gains-cg")}).status_code == 201
+    r = client.post("/api/codegen/flight", json={"profile": {"id": "no-gains-cg"}})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["path"] == "/law/design", r.text

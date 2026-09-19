@@ -25,8 +25,10 @@ import {
   IMAGE_TAB, excludedSpecs, fingerprintLine, flightRequest, groupByRole, imageBytes, mergeFiles, pickFile,
   summarize,
 } from "../lib/flightcode.js";
+import { needsSeed, profileErrorText } from "../lib/profile.js";
 import { store } from "../store.js";
 import { createCodeView, langOfFile } from "./codeview.js";
+import { seedLinkLine } from "./seedlink.js";
 
 // 뷰는 라우팅마다 재생성되므로 표시 상태는 모듈 스코프 (views/gains.js fitCfg 관행)
 const cfg = { lang: "python", verbose: false, traceOpen: false, file: null };
@@ -69,7 +71,8 @@ export function createCodePanel({
   // 탑재 C는 엔진이 생성한다(웹이 C를 조립하지 않는다) — 받아 둔 응답과 그 상태.
   // 게인 스케줄은 형상 전체의 것이라 스냅샷이 아니어도 적용값을 읽는다:
   // 스케줄 유무가 구조를 바꾸므로 빼면 실제와 다른 코드를 보여 주게 된다.
-  const flight = { data: null, error: null, loading: false };
+  // seed: 실패 사유가 「게인 미설계」인가(경로 대조) — 오류는 코드 판에, 채우러 가는 링크는 각주 자리에 선다
+  const flight = { data: null, error: null, seed: false, loading: false };
   const flightTables = () => gainTables ?? store.get("gainTables") ?? null;
   // 스케줄 자리를 전부 끈 상태는 테이블 dict로 표현할 수 없다 (lib/gainsched.js) —
   // 빈 dict는 서버가 막고, 생략하면 설계 기본으로 되돌아간다. 별도 신호로 읽는다
@@ -115,18 +118,23 @@ export function createCodePanel({
     const key = JSON.stringify(req);
     if (flightCache.key === key && flightCache.data) {
       flight.data = flightCache.data;
+      flight.error = null; // flightView는 error를 data보다 먼저 본다 — 옛 실패가 좋은 캐시를 덮지 않게
+      flight.seed = false;
       paint();
       return;
     }
     flight.loading = true;
     flight.error = null;
+    flight.seed = false;
     paint();
     try {
       flight.data = await api.post("/codegen/flight", req);
       flightCache.key = key;
       flightCache.data = flight.data;
     } catch (e) {
-      flight.error = e && e.message ? e.message : String(e);
+      // 기체 문서가 짚는 오류({path, message})는 곱게 — 생 JSON을 코드 판에 찍지 않는다
+      flight.error = profileErrorText(e?.detail) ?? (e && e.message ? e.message : String(e));
+      flight.seed = needsSeed(e?.detail);
     } finally {
       flight.loading = false;
       paint();
@@ -142,7 +150,10 @@ export function createCodePanel({
     clear(fileBar).append(...fileTabs(flight, current.file, (name) => {
       cfg.file = name;
       paint();
-    }, flightMerged));
+    }, flightMerged),
+    // 게인 미설계로 생성이 실패한 화면 — 채우러 가는 링크가 코드 판 바로 옆에 선다(각주 패널은
+    // 닫혀 있을 수 있다). 실패 시 파일 탭은 비므로 이 줄만 남는다 (seedlink.js)
+    ...(cfg.lang === "flight" && flight.seed ? [seedLinkLine("탑재 C가 생성됩니다.")] : []));
     // 검토도 다시 — float32 정밀도 지적은 C 탭에서만 성립한다
     clear(reviewHost).append(reviewBox(specs, validation, snapshot));
     // 추적성 표는 파라미터→코드 라인 대응이라 탑재 C에는 다른 대응이 필요하다

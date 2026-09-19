@@ -25,9 +25,10 @@ from claw.plant import (
 )
 from claw.sim import Simulator
 from claw.tables import PolyTable, Table
+from claw.profile import ProfileError
 from claw.trim import trim
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
-from claw_server.refs import ProfileRef, profile_echo, resolve_profile
+from claw_server.refs import ProfileRef, profile_echo, profile_error_detail, resolve_profile
 from claw_server.serialize import sim_result_dict, to_jsonable
 
 router = APIRouter(tags=["sim"])
@@ -430,6 +431,8 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
     try:
         profile = resolve_profile(request, req.profile)
         sim, tr = _build(req, profile)
+    except ProfileError as e:  # 기체 문서가 짚는 오류(게인 미설계 등) — 경로 동봉 422 (웹 안내 링크 근거)
+        raise HTTPException(status_code=422, detail=profile_error_detail(e))
     except (ValueError, TypeError) as e:  # 엔진 구성 검증 → 제출 시점 422
         raise HTTPException(status_code=422, detail=str(e))
     store = request.app.state.store

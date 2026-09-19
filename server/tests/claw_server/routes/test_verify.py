@@ -79,3 +79,12 @@ def test_구성_오류는_202_전에_422(client):
     assert r.status_code == 422 and "세 축 전부 필요" in r.text
     r = client.post("/api/verify/flight", json={"t_end": 0})
     assert r.status_code == 422
+
+
+def test_unseeded_aircraft_verify_is_a_422_with_the_document_path(client, unseeded_doc):
+    """게인 미설계 기체의 검증 제출은 202 전에 422 — 같은 조립(build_flight_law)이라 codegen과 같은
+    {path, message} detail이다 (웹 안내 링크 근거)."""
+    assert client.post("/api/profiles", json={"document": unseeded_doc("no-gains-vf")}).status_code == 201
+    r = client.post("/api/verify/flight", json={"profile": {"id": "no-gains-vf"}})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["path"] == "/law/design", r.text
