@@ -10,14 +10,15 @@
 보여 준 자리가 실행 시점에 터진다.
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from claw.fcl.autopilot import Autopilot
 from claw.fcl.assemble import assemble_law
 from claw.fcl.graphs import SCHEDULABLE
 from claw.fcl.scas import ScasAxis
 from claw.fcl.schedule import AP_GAIN_FIELD
-from claw_server.refs import ProfileRef, profile_echo, profile_query, resolve_profile
+from claw.profile import ProfileError
+from claw_server.refs import ProfileRef, profile_echo, profile_error_detail, profile_query, resolve_profile
 from claw_server.serialize import table_dict
 
 router = APIRouter(tags=["gains"])
@@ -68,7 +69,10 @@ def _design_index(tables: dict, design: dict) -> int:
 def demo_gain_tables(request: Request, profile_ref: ProfileRef | None = Depends(profile_query)) -> dict:
     """기체 설계 게인 테이블 — "그룹.게인" 이름 → 테이블 JSON. 경로 이름은 호환용(기체는 선택한 것)."""
     profile = resolve_profile(request, profile_ref)
-    return {name: table_dict(t) for name, t in profile.gain_tables().items()}
+    try:
+        return {name: table_dict(t) for name, t in profile.gain_tables().items()}
+    except ProfileError as e:  # 게인 미설계 — 500이 아니라 경로(/law/design)를 짚는 422다
+        raise HTTPException(status_code=422, detail=profile_error_detail(e))
 
 
 @router.get("/gains/catalog")
@@ -80,9 +84,17 @@ def gain_slot_catalog(request: Request,
     체크하는 순간 곡선이 뜨고, 설계점에서는 원래 상수와 같은 값에서 출발한다.
     """
     profile = resolve_profile(request, profile_ref)
+    # 게인 미설계·스케줄 없는 기체는 정중한 422다 — 엔진의 ProfileError(/law/design·/law/schedule)가
+    # 먼저 나게 설계값·조립부터 부른다. 종전에는 스케줄 None 첨자가 먼저 터져 500이었다.
+    # 축·필터 시정수·SCAS 설계 kwargs는 엔진 조립에서 읽는다 — 여기에 0.5를 또 적으면
+    # 데모 형상이 바뀌었을 때 웹만 옛 값을 보여 준다 (init(dt) 없이 파라미터만 보유한 상태)
+    try:
+        design = profile.design_gains()
+        law = assemble_law(profile)
+        tables = {name: table_dict(t) for name, t in profile.gain_tables(design).items()}
+    except ProfileError as e:
+        raise HTTPException(status_code=422, detail=profile_error_detail(e))
     scheduled = tuple(profile.law["schedule"]["scheduled"])
-    design = profile.design_gains()
-    tables = {name: table_dict(t) for name, t in profile.gain_tables(design).items()}
     slots = []
     for group in SCHEDULABLE:
         for key in _ALL_KEYS:
@@ -98,9 +110,6 @@ def gain_slot_catalog(request: Request,
                 "scheduled": name in scheduled,
                 "design": design[name], "table": tables[name], **_meta(group, key),
             })
-    # 축·필터 시정수·SCAS 설계 kwargs는 엔진 조립에서 읽는다 — 여기에 0.5를 또 적으면
-    # 데모 형상이 바뀌었을 때 웹만 옛 값을 보여 준다 (init(dt) 없이 파라미터만 보유한 상태)
-    law = assemble_law(profile)
     return {
         "axis": next(iter(tables[scheduled[0]]["axes"])),
         "filter_tau": law.schedule.filter_tau,

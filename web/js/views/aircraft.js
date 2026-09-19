@@ -40,6 +40,16 @@ let list = null;
 let volatile = false;
 let opened = null; // {id, body: GET·PUT 응답, text: 편집 중 글, dirty, check: {ok, lines}|null, conflict: 최신 리비전|null}
 let openDrawer = null;
+
+let pendingSeedOpen = false;
+
+/** 다른 탭에서 「게인·δe_trim」 패널로 인계 — 다음 렌더가 이 패널을 연 채로 서고, 헤더 선택 기체를
+ *  열어 패널이 바로 쓰이게 한다(편집 중인 문서에는 끼어들지 않는다 — 편집 보호).
+ *  게인·자동 설계 탭이 게인 미설계(needsSeed) 오류에 세우는 안내 링크가 부른다(누르고 #aircraft로). */
+export function requestSeedPanel() {
+  openDrawer = "seed";
+  pendingSeedOpen = true;
+}
 // 목록 자동 열림은 세션에 한 번 — 일부러 닫은 사람에게 재진입마다 다시 들이밀지 않는다
 let listAutoOpened = false;
 let importText = "";
@@ -1493,7 +1503,34 @@ export function render() {
     listAutoOpened = true;
     drawers.open("list");
   }
-  load();
+  load().then(async () => {
+    // 게인·자동 설계 탭에서 온 인계(requestSeedPanel) — 문서가 안 열려 있으면 헤더 선택 기체를 열어
+    // 「게인·δe_trim」 패널이 안내문("열면 여기 섭니다")이 아니라 바로 그 기체로 선다. 열어 둔 문서가
+    // 있으면 끼어들지 않는다(편집 중 글 보호 — openDoc의 discardOk와 같은 원칙, 여기서는 묻지도 않는다)
+    if (!pendingSeedOpen) return;
+    pendingSeedOpen = false;
+    const sel = selectedId();
+    if (!list?.some((p) => p.id === sel && !p.unreadable)) return;
+    // 편집 중인 문서에는 끼어들지 않는다. 깨끗한 **다른** 기체가 열려 있으면 선택 기체로 바꿔 연다 —
+    // openDoc의 "깨끗하면 말없이 다시 받는다" 정책과 같다(안 바꾸면 시드 패널이 엉뚱한 기체를 돌린다)
+    if (opened && (opened.dirty || opened.id === sel)) return;
+    const before = opened;
+    let body;
+    try {
+      body = await api.get(path(sel));
+    } catch {
+      return; // 못 열면 목록·오류 안내가 이미 서 있다 — 여기서 더 말하지 않는다
+    }
+    // 응답이 오는 사이 사용자가 문서를 열었으면 결과를 쓰지 않는다 — validate()와 같은 규약
+    if (opened !== before) return;
+    opened = fresh(body);
+    paintDoc();
+    paintVariants();
+    paintViewer();
+    paintStability();
+    paintSeed();
+    drawers.refresh();
+  });
 
   return el("div", { class: "tab-page aircraft-page" },
     tabTop({

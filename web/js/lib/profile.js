@@ -199,4 +199,11 @@ export function profileErrorText(detail) {
   return detail.path ? `${detail.path}: ${detail.message}` : String(detail.message);
 }
 
+/** 이 검증 오류가 「게인 미설계·스케줄 없음」인가 — 게인·자동 설계 탭이 「기체 탭 → 초기 게인」 안내
+ *  링크를 세울 자리 판정. 서버 detail의 **경로**로 대조한다(문구 대조가 아니다 — 문구는 엔진 소관이고
+ *  바뀔 수 있다). 두 경로 다 초기 게인 빠른 탐색이 채운다(설계 게인과, 없으면 스케줄까지 — 05 §10). */
+export function needsSeed(detail) {
+  return detail?.path === "/law/design" || detail?.path === "/law/schedule";
+}
+
 export const exportFileName = (id, revision) => `${id}-rev${revision}.json`;

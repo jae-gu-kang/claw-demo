@@ -179,6 +179,15 @@ test("복제·편집기 글·서버 오류 문구 — 기체 탭의 판단", asy
   assert.equal(profileErrorText("문자열 detail"), null);
   assert.equal(profileErrorText([{ loc: ["body"], msg: "x" }]), null);
   assert.equal(exportFileName("my-delta", 3), "my-delta-rev3.json");
+
+  // 초기 게인 안내 링크 판정 — 경로 대조(문구 아님). 하위 경로(/law/design/scas/…)는 다른 오류다
+  const { needsSeed } = await import("./profile.js");
+  assert.equal(needsSeed({ path: "/law/design", message: "게인 미설계 …" }), true);
+  assert.equal(needsSeed({ path: "/law/schedule", message: "게인 스케줄 없음" }), true);
+  assert.equal(needsSeed({ path: "/law/design/scas/pitch/kp", message: "수여야 함" }), false);
+  assert.equal(needsSeed({ path: "/mass/m_empty", message: "양수여야 함" }), false);
+  assert.equal(needsSeed("문자열 detail"), false);
+  assert.equal(needsSeed(null), false);
 });
 
 // 가상환경 번들(web/world)은 빌드가 js/api.js를 **자기 안에 복사**한다 — 그 사본의 lib/profile.js 선택은

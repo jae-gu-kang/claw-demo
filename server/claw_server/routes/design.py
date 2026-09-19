@@ -23,7 +23,8 @@ from pydantic import BaseModel, Field
 
 from claw.design import AutoDesignConfig, DesignSession, resample_to_table
 from claw.design.tune import REASON_TEXT
-from claw_server.refs import ProfileRef, profile_echo, resolve_profile, resolve_snapshot
+from claw.profile import ProfileError
+from claw_server.refs import ProfileRef, profile_echo, profile_error_detail, resolve_profile, resolve_snapshot
 from claw.tables import PolyTable
 from claw_server.serialize import to_jsonable
 
@@ -256,14 +257,20 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
 def _run_session_job(request, response, session: DesignSession, fingerprint: str,
                      parent: str | None = None, *, profile) -> dict:
     store = request.app.state.store
-    ac = profile.aircraft()
-    stall = profile.stall_table()
-    limits = profile.structural_limits()
-    db = profile.db_ranges()
-    design = profile.design_gains()
-    # 법칙의 레이트 필터도 프로파일이 준다 — 안 넘기면 튜닝·검증이 출하되지 않는
-    # 조성(요축 워시아웃 없는 A′)을 본다 (05 §6)
-    rate_filters = profile.rate_filters()
+    try:
+        ac = profile.aircraft()
+        stall = profile.stall_table()
+        limits = profile.structural_limits()
+        db = profile.db_ranges()
+        # 게인 미설계 기체는 202 전에 422다 — 튜너 브래킷이 설계값에서 나오므로(05 §7.4) 잡을
+        # 받아 봐야 전 자리 seed_required고, detail.path(/law/design)가 웹의 「기체 탭 → 초기
+        # 게인」 안내 링크 근거가 된다. 종전에는 여기서 잡히지 않아 500이었다
+        design = profile.design_gains()
+        # 법칙의 레이트 필터도 프로파일이 준다 — 안 넘기면 튜닝·검증이 출하되지 않는
+        # 조성(요축 워시아웃 없는 A′)을 본다 (05 §6)
+        rate_filters = profile.rate_filters()
+    except ProfileError as e:
+        raise HTTPException(status_code=422, detail=profile_error_detail(e))
 
     def work(job):
         # job.report의 반환값이 취소 요청 여부 — 엔진 협조적 취소 규약과 그대로 맞물린다
