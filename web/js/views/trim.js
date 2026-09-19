@@ -11,9 +11,9 @@ import { api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { DEFAULT_GRID, machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { fillGridFromProfile } from "./missionfill.js";
-import { STATUS, fuelsOf, pivotCases, trimEnvelopeCell } from "../lib/plot.js";
+import { SERIES_COLORS, STATUS, fuelsOf, pivotCases, trimCurves, trimEnvelopeCell } from "../lib/plot.js";
 import { store } from "../store.js";
-import { heatmapCanvas } from "./plots.js";
+import { heatmapCanvas, lineChartCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
 
@@ -36,6 +36,7 @@ export function render() {
   const progressBox = el("div");
   const mapBox = el("div");     // 전면 — 비행 엔벨로프 맵
   const tableBox = el("div");   // 패널 — 케이스별 수치·판정
+  const curvesBox = el("div");  // 패널 — 트림 곡선 (α·스로틀·δe vs 마하)
   const errBox = el("div");
   const summaryLine = el("p", { class: "tab-status" });
 
@@ -130,6 +131,7 @@ export function render() {
   const renderResults = () => {
     renderMap(mapBox, summaryLine, lastBody);
     renderRows(tableBox, lastBody);
+    renderCurves(curvesBox, lastBody);
     drawers.refresh();
   };
 
@@ -163,12 +165,19 @@ export function render() {
         title: "θ·δe·스로틀과 판정 플래그 4종",
         count: () => (lastBody ? lastBody.results.length : null),
         build: () => [el("h2", {}, "결과 — 케이스별 트림 해와 판정"), tableBox] },
+      { key: "curves", label: "트림 곡선", group: "결과",
+        title: "α(=θ)·스로틀·δe — 마하에 따른 곡선, 고도별 색, 연료별 한 장",
+        build: () => [el("h2", {}, "트림 곡선 — 조건(마하·고도·연료)에 따른 트림 해"), curvesBox] },
     ],
   });
 
   repaintCases();
   if (lastBody) renderResults();
-  else renderMap(mapBox, summaryLine, null);
+  else {
+    renderMap(mapBox, summaryLine, null);
+    renderRows(tableBox, null);
+    renderCurves(curvesBox, null);
+  }
   if (runningJobId) watchTrim(); // 재부착
 
   return el("div", { class: "tab-page" },
@@ -283,6 +292,54 @@ function renderRows(tableBox, body) {
       FLAG_COLS.map(([key]) => el("td", {}, flagBadge(r.flags[key]))),
     ))),
   )));
+}
+
+// 곡선에 그릴 양 — 표(renderRows)와 같은 수를 다른 표현으로 낸다. α는 트림 해에서
+// θ와 같으므로(수평정상비행 γ=0 — lib/plot.js trimCurves 머리말) 두 그림을 내지 않는다
+const CURVE_QTYS = [
+  ["alpha", "받음각 α (= 피치각 θ) [rad]"],
+  ["throttle", "스로틀 [-]"],
+  ["de", "엘레본 δe [rad]"],
+];
+
+/** 패널 — 트림 곡선. 양마다 한 줄, 연료마다 한 장, 고도는 색(전 그림 공통 배정).
+ *  같은 고도가 어느 그림에서든 같은 색이어야 연료 장끼리 비교가 선다. */
+function renderCurves(curvesBox, body) {
+  if (!body) {
+    clear(curvesBox).append(el("p", { class: "hint" },
+      "아직 결과가 없습니다 — 배치를 실행하면 마하에 따른 α(=θ)·스로틀·δe 곡선이 "
+      + "연료마다 한 장씩 여기 섭니다."));
+    return;
+  }
+  const entries = body.results.map((r) => ({ trim: r }));
+  const fuels = fuelsOf(entries);
+  const byFuel = fuels.map((fuel) => ({ fuel, curves: trimCurves(body.results, fuel) }));
+  // 고도 → 색: 연료 장마다 고도 집합이 달라도 같은 고도는 같은 색 (합집합 순번)
+  const altsUnion = [...new Set(byFuel.flatMap((f) => f.curves.alts))].sort((a, b) => a - b);
+  const colorOf = (alt) => SERIES_COLORS[altsUnion.indexOf(alt) % SERIES_COLORS.length];
+  const drawable = byFuel.filter((f) => f.curves.machs.length >= 2);
+  const rows = CURVE_QTYS.map(([qty, label]) => el("div", { style: "margin-top: 10px" },
+    el("h3", { style: "font-size: 13px; margin: 0 0 4px" }, label),
+    el("div", { class: "row" }, drawable.map(({ fuel, curves }) =>
+      lineChartCanvas(curves.machs, curves.series[qty].map((s) => ({
+        data: s.data, color: colorOf(s.alt), label: "",
+      })), { title: `연료 ${fuel} kg`, width: 420, height: 200, xUnit: "M", markers: true })))));
+  // 네이티브 append에 null 직접 전달 금지 (문자열화 함정) — el 래핑으로 조립
+  clear(curvesBox).append(el("div", {},
+    el("div", { class: "legend" },
+      ...altsUnion.map((alt) => el("span", {},
+        el("span", { class: "chip", style: `background:${colorOf(alt)}` }), `${alt} m`)),
+      el("span", { class: "hint" }, "— 고도별 곡선 · 점 = 계산한 격자점")),
+    ...rows,
+    byFuel.length > drawable.length
+      ? el("p", { class: "hint" },
+          `마하 점이 1개뿐인 연료(${byFuel.filter((f) => f.curves.machs.length < 2)
+            .map((f) => `${f.fuel} kg`).join(", ")})는 곡선이 서지 않습니다 — 수치는 위 표에 있습니다.`)
+      : null,
+    el("p", { class: "hint" },
+      "끊긴 구간 = 트림 불가·미수렴(위 지도의 「불가」 칸과 같은 사실) — 0으로 채우지 않습니다. ",
+      "α는 수평정상비행 트림이라 θ와 같습니다 — 상승·강하 트림을 지원하면 두 곡선이 갈립니다."),
+  ));
 }
 
 function showError(errBox, e) {

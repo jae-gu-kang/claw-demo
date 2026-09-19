@@ -206,6 +206,38 @@ export function fuelsOf(entries) {
   return [...new Set(entries.map((e) => e.trim.case.fuel))].sort((a, b) => a - b);
 }
 
+/** 트림 배치 결과(results 행) → 연료 고정 트림 곡선 데이터.
+ *
+ * {machs, alts, series: {alpha|throttle|de: [{alt, data}]}} — data는 machs 순서.
+ * 없는 (마하, 고도) 조합과 **미수렴 케이스는 null**이다: 곡선이 거기서 끊긴다
+ * (lineChartCanvas의 null 규약). 0이나 이웃 보간으로 채우면 "트림이 없는 점"이
+ * 그럴듯한 값으로 위장된다 — 히트맵의 "불가" 칸과 같은 사실을 곡선도 말해야 한다.
+ * α는 트림 해에서 θ와 같다(수평정상비행 γ=0, engine trim.py) — 그래서 받음각
+ * 곡선이 곧 피치각 곡선이고, 두 그림을 따로 내지 않는다.
+ */
+export function trimCurves(results, fuel) {
+  const sel = results.filter((r) => r.case.fuel === fuel);
+  const machs = [...new Set(sel.map((r) => r.case.mach))].sort((a, b) => a - b);
+  const alts = [...new Set(sel.map((r) => r.case.alt))].sort((a, b) => a - b);
+  const map = new Map(sel.map((r) => [`${r.case.mach}|${r.case.alt}`, r]));
+  const getters = {
+    alpha: (r) => r.euler[1],
+    throttle: (r) => r.control.throttle[0],
+    de: (r) => r.control.elevon[0],
+  };
+  const series = {};
+  for (const [qty, get] of Object.entries(getters)) {
+    series[qty] = alts.map((alt) => ({
+      alt,
+      data: machs.map((m) => {
+        const r = map.get(`${m}|${alt}`);
+        return r && r.converged ? get(r) : null;
+      }),
+    }));
+  }
+  return { machs, alts, series };
+}
+
 // ── 마진 맵 격자 레이아웃 (views/plots.js heatmapCanvas와 **공유**) ────────
 // 그리기와 역매핑이 각자 상수를 들고 있으면 갈린다 — 갈려도 화면은 멀쩡해 보이고
 // 클릭만 한 칸씩 어긋나므로 눈에 잘 안 띈다. 한 표를 양쪽이 읽는다.

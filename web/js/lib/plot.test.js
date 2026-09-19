@@ -23,6 +23,7 @@ import {
   niceTicks,
   pivotCases,
   planeViews,
+  trimCurves,
   trimEnvelopeCell,
   wpAlt,
   wpMarks,
@@ -183,6 +184,44 @@ test("pivotCases: 연료 필터 + 축 정렬 + 조회", () => {
   assert.equal(p.at(0.4, 1000).margins.pitch_q.pm_deg, 40);
   assert.equal(p.at(0.5, 1000), null); // 빈 셀
   assert.deepEqual(fuelsOf(entries), [200, 300]);
+});
+
+const trimRow = (mach, alt, fuel, { theta = 0.05, thr = 0.5, de = -0.01, converged = true } = {}) => ({
+  case: { mach, alt, fuel, name: `M${mach}-${alt}` },
+  converged,
+  euler: [0.0, theta, 0.0],
+  control: { elevon: [de, de], throttle: [thr, thr] },
+});
+
+test("trimCurves: 연료 필터 + 축 정렬 + 고도별 시리즈", () => {
+  const rows = [
+    trimRow(0.6, 1000, 200, { theta: 0.02, thr: 0.6, de: -0.03 }),
+    trimRow(0.4, 1000, 200, { theta: 0.08, thr: 0.4, de: -0.01 }),
+    trimRow(0.4, 0, 200, { theta: 0.09 }),
+    trimRow(0.6, 0, 200, { theta: 0.03 }),
+    trimRow(0.5, 0, 300), // 다른 연료 — 제외
+  ];
+  const c = trimCurves(rows, 200);
+  assert.deepEqual(c.machs, [0.4, 0.6]);
+  assert.deepEqual(c.alts, [0, 1000]);
+  assert.deepEqual(c.series.alpha.map((s) => s.alt), [0, 1000]);
+  // data는 machs 순서 — 입력 순서(0.6 먼저)가 아니라 정렬된 축 순서
+  assert.deepEqual(c.series.alpha[1].data, [0.08, 0.02]);
+  assert.deepEqual(c.series.throttle[1].data, [0.4, 0.6]);
+  assert.deepEqual(c.series.de[1].data, [-0.01, -0.03]);
+});
+
+test("trimCurves: 미수렴·빈 조합은 null — 곡선을 끊지 값을 위조하지 않는다", () => {
+  const rows = [
+    trimRow(0.4, 0, 200),
+    trimRow(0.5, 0, 200, { converged: false }),
+    trimRow(0.6, 0, 200),
+    trimRow(0.4, 3000, 200), // 3000 m는 0.4만 있다 — 나머지 마하는 빈 조합
+  ];
+  const c = trimCurves(rows, 200);
+  assert.deepEqual(c.machs, [0.4, 0.5, 0.6]);
+  assert.equal(c.series.alpha[0].data[1], null); // 미수렴
+  assert.deepEqual(c.series.throttle[1].data, [0.5, null, null]); // 빈 조합
 });
 
 const SIG = { pn: [0, 100, 200], pe: [0, 10, 20], h: [1000, 1010, 1020] };
