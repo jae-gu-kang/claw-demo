@@ -70,17 +70,17 @@ def _nonfinite_path(obj, path: str = "") -> str | None:
     return None
 
 
-def _de_trim_summary(doc: dict, built) -> dict | None:
+def _de_trim_summary(doc: dict, built, variant_builts: dict) -> dict | None:
     """할당 표 요약 — 도출 표면 형상 변형마다도 낡음을 본다(변형이 플랜트를 바꾸면 그 변형만 낡을 수 있다)."""
     de_trim = None if doc["law"]["alloc"] is None else doc["law"]["alloc"]["de_trim"]
     if de_trim is None:
         return None
-    stale_variants = ([v["id"] for v in doc["variants"] if build_profile(doc, v["id"], validated=True).de_trim_stale]
+    stale_variants = ([vid for vid, vb in variant_builts.items() if vb.de_trim_stale]
                       if de_trim["source"] == "derived" else [])
     return {"source": de_trim["source"], "stale": built.de_trim_stale, "stale_variants": stale_variants}
 
 
-def _gain_tables_summary(doc: dict, built) -> dict | None:
+def _gain_tables_summary(doc: dict, built, variant_builts: dict) -> dict | None:
     """확정 게인 표 요약 — 출처·낡음·낡은 형상 변형. 낡음 판정은 조립 거부와 같은 자다
     (build.gain_tables_stale). 표는 기본 문서에서 확정되므로 문서를 바꾸는 변형에서는 기준 지문이
     어긋나 낡음이다 — δe_trim의 stale_variants와 같은 자리에서 미리 말한다(변형 계산 422가
@@ -90,8 +90,7 @@ def _gain_tables_summary(doc: dict, built) -> dict | None:
         return None
     prov = gt.get("provenance")
     source = prov.get("source") if isinstance(prov, dict) else None
-    stale_variants = [v["id"] for v in doc["variants"]
-                      if build_profile(doc, v["id"], validated=True).gain_tables_stale]
+    stale_variants = [vid for vid, vb in variant_builts.items() if vb.gain_tables_stale]
     return {"source": source, "stale": built.gain_tables_stale, "stale_variants": stale_variants}
 
 
@@ -175,17 +174,22 @@ class ProfileStore:
     @staticmethod
     def summary(doc: dict, revision: int) -> dict:
         built = build_profile(doc, validated=True)
+        # 변형 조립은 한 번만 — 표 낡음 두 판정과 변형 지문(결과 신선도 대조의 근거, v1.32)이 같이 쓴다
+        variant_builts = {v["id"]: build_profile(doc, v["id"], validated=True) for v in doc["variants"]}
         return {
             "id": doc["id"], "name": doc["name"], "description": doc["description"],
             "is_example": doc["is_example"], "revision": revision,
             "fingerprint": built.fingerprint,
-            "variants": [{"id": v["id"], "name": v["name"]} for v in doc["variants"]],
+            # 변형 지문 동봉 — 변형으로 계산한 결과의 신선도를 웹이 지문으로 판정한다(lib/freshness.js)
+            "variants": [{"id": v["id"], "name": v["name"],
+                          "fingerprint": variant_builts[v["id"]].fingerprint}
+                         for v in doc["variants"]],
             # 게인 출처 — null이면 미설계. "quick_seed"면 화면이 「초기 탐색 게인 — 자동 설계 전」을 단다
             "design_source": _design_source(doc),
             # 할당 δe_trim 표 — null이면 없음. 도출 표는 플랜트가 바뀌면 stale(법칙 조립이 거부한다)
-            "de_trim": _de_trim_summary(doc, built),
+            "de_trim": _de_trim_summary(doc, built, variant_builts),
             # 확정 게인 표(v2) — null이면 없음. 반영 뒤 문서가 바뀌면 stale(법칙 조립이 거부한다)
-            "gain_tables": _gain_tables_summary(doc, built),
+            "gain_tables": _gain_tables_summary(doc, built, variant_builts),
         }
 
     def list(self) -> list:

@@ -655,6 +655,24 @@ function renderResult(box, body, resultId, ctx) {
   }
   clear(box).append(...sections);
 
+  // 반영 가능성 사전 확인 — 설계가 잰 문서와 지금 문서의 지문 대조(서버 409 가드와 같은 판정을
+  // 미리 말한다). 조회 실패는 조용히 — 최종 판정은 어차피 서버 가드다
+  if (body.profile?.source === "request" && body.profile.id && !body.profile.variant) {
+    (async () => {
+      try {
+        const head = await api.get(`/profiles/${encodeURIComponent(body.profile.id)}`);
+        // 그사이 사용자가 반영을 눌렀으면(성공 메시지·오류가 이미 섰으면) 덮지 않는다 — 반영이
+        // 지문을 바꾸므로 늦은 사전 확인이 성공한 반영을 "거부됩니다"로 뒤집어 읽게 만든다(리뷰 지적)
+        if (applyMsg.hasChildNodes()) return;
+        if (head.fingerprint !== body.profile.fingerprint) {
+          clear(applyMsg).append(el("span", { class: "error-box" },
+            ` 설계가 잰 문서(리비전 ${body.profile.revision ?? "—"})와 지금 문서(리비전 ${head.revision})가 `
+            + "다릅니다 — 반영은 거부됩니다. 자동 설계를 다시 돌리세요."));
+        }
+      } catch { /* 조회 실패 — 서버 가드가 최종 판정 */ }
+    })();
+  }
+
   async function applyToDoc() {
     const pid = body.profile.id;
     const head = await api.get(`/profiles/${encodeURIComponent(pid)}`);

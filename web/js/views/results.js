@@ -9,6 +9,7 @@
 */
 
 import { lineageText } from "../lib/lineage.js";
+import { resultFreshness } from "../lib/freshness.js";
 import { briefModel, jsonPreview, kindLabel } from "../lib/resultbrief.js";
 import { STATUS } from "../lib/plot.js";
 import { api, errorText } from "../api.js";
@@ -30,6 +31,7 @@ let openDrawer = null;
 let showAll = false;
 // 브리핑 — 마지막으로 연 결과의 결정적 요약 {meta, model, preview} (재진입 유지)
 let lastView = null;
+let profileRows = null; // GET /profiles — 결과 신선도 대조용(lib/freshness.js). 못 받으면 판정하지 않는다
 let viewSeq = 0; // 늦게 온 옛 본문이 새로 고른 결과의 브리핑을 덮지 않게
 // 탭을 열면 최신 결과의 브리핑이 자동으로 선다 — 세션에 한 번, 이미 보던 브리핑·열어 둔
 // 패널이 있으면 끼어들지 않는다 (기체 탭 목록 자동 열림과 같은 규약)
@@ -68,6 +70,9 @@ export function render() {
     // 늦은 toggle이 **새** 결과의 캐시를 건드릴 수 있다. view에만 쓰면 구조적으로 옳다(리뷰 지적)
     const view = lastView;
     const { model, id } = view;
+    // 신선도 — 계산 시점 지문과 지금 목록 대조. 낡음은 눈에 띄게(이 결과로 지금 기체를 판단하면
+    // 틀린다), 기체 없음은 정보로, 신선·판정 불가는 조용히
+    const fresh = resultFreshness(view.meta?.profile, profileRows);
     const toneColor = { ok: STATUS.ok, warn: STATUS.warn, bad: STATUS.bad, na: STATUS.na };
     // 원본 JSON은 **펼칠 때 처음** 문자열화한다 — 시뮬 본문(전 해상도, 수 MB)을 브리핑을
     // 열 때마다 만들면 대부분 버려지는 수십 MB 문자열이 매번 생긴다(리뷰 지적).
@@ -96,6 +101,9 @@ export function render() {
         model.head.map(([k, v]) => el("tr", {},
           el("td", { class: "hint", style: "padding-right:10px; white-space:nowrap" }, k),
           el("td", {}, v))))),
+      fresh.state === "stale" ? el("p", { class: "error-box", style: "margin:0 0 8px" }, fresh.label) : null,
+      fresh.state === "gone" || fresh.state === "unreadable"
+        ? el("p", { class: "hint", style: "margin:0 0 8px" }, fresh.label) : null,
       model.verdict
         ? el("p", { style: "margin:0 0 8px" },
             el("span", { class: "flag",
@@ -125,7 +133,7 @@ export function render() {
     try {
       const body = await api.get(`/results/${m.id}`);
       if (my !== viewSeq) return; // 그사이 다른 행을 열었다
-      lastView = { id: m.id, model: briefModel(m, body), body, preview: null };
+      lastView = { id: m.id, meta: m, model: briefModel(m, body), body, preview: null };
     } catch (e) {
       if (my !== viewSeq) return;
       lastView = { id: m.id, error: errorText(e) };
@@ -272,17 +280,27 @@ export function render() {
     renderList(listBox, items, showAll, () => {
       showAll = !showAll;
       paintList();
-    }, opinionCtl(), onView);
+    }, opinionCtl(), onView, profileRows);
   };
 
   const load = async () => {
     try {
       clear(errBox);
       statusLine.textContent = "불러오는 중…";
-      items = await api.get("/results");
+      const [res, rows] = await Promise.all([
+        api.get("/results"),
+        api.get("/profiles").catch(() => null), // 신선도 대조용 — 실패는 판정 불가(unknown)로 조용히
+      ]);
+      items = res;
+      profileRows = rows;
       statusLine.textContent = items.length
         ? `${items.length}건 · 최근순`
         : "";
+      // 신선도 대조는 기체 목록이 재료다 — 못 받았으면 "전부 신선"처럼 보이게 두지 않고 그 사실을
+      // 말한다(조용한 실패 금지 — 결과별 unknown이 조용한 것과 층이 다르다: 이건 열 전체의 측정 실패)
+      if (profileRows === null && items.length) {
+        statusLine.textContent += " · 신선도 대조 불가(기체 목록 조회 실패 — 낡음 표시가 빠져 있을 수 있음)";
+      }
       paintList();
       renderSummary(summaryBox, items);
       drawers.refresh();
@@ -345,7 +363,7 @@ function opinionBtn(m, opinion) {
     "소견서");
 }
 
-function renderList(box, list, all, onToggle, opinion, onView) {
+function renderList(box, list, all, onToggle, opinion, onView, rows) {
   if (!list.length) {
     clear(box).append(el("p", { class: "hint" },
       "저장된 산출물이 없습니다 — ", el("a", { href: "#trim" }, "트림"), " · ",
@@ -372,7 +390,7 @@ function renderList(box, list, all, onToggle, opinion, onView) {
       el("td", {}, kindLabel(m.kind),
         // 코드도 함께 낸다 — 우리말 이름만 내면 API·다른 화면과 대조가 안 된다
         el("span", { class: "hint", style: "margin-left:6px" }, m.kind ?? "")),
-      el("td", {}, aircraftCell(m.profile)),
+      el("td", {}, aircraftCell(m.profile), freshnessChip(m.profile, rows)),
       el("td", { class: "num" }, m.id),
       el("td", { class: "num" }, m.n ?? "—"),
       el("td", { class: "num" }, lineageText(m)),
@@ -383,6 +401,21 @@ function renderList(box, list, all, onToggle, opinion, onView) {
         " ", opinionBtn(m, opinion)),
     ))),
   ))));
+}
+
+/** 신선도 칩 — 계산 시점 지문과 지금 목록의 지문 대조(lib/freshness.js). 신선·판정 불가는 조용하다. */
+function freshnessChip(p, rows) {
+  const f = resultFreshness(p, rows);
+  if (f.state === "stale") {
+    return el("span", { class: "flag bad", style: "margin-left:6px", title: f.label }, "낡음");
+  }
+  if (f.state === "gone") {
+    return el("span", { class: "flag na", style: "margin-left:6px", title: f.label }, "기체 없음");
+  }
+  if (f.state === "unreadable") {
+    return el("span", { class: "flag na", style: "margin-left:6px", title: f.label }, "읽을 수 없음");
+  }
+  return null;
 }
 
 /** 그 결과를 계산한 기체 — 결과 meta의 profile 블록(02 §5.6). 지금 헤더에서 고른 기체가 아니다.

@@ -20,6 +20,31 @@ def _tabled(doc):
     return d
 
 
+def test_summary_carries_variant_fingerprints_for_freshness_checks():
+    """목록 요약의 변형 줄에 지문 동봉 — 결과 신선도 대조(웹 lib/freshness.js)가 변형 결과도 지문으로
+    판정할 근거다. 기본 지문과 다르고, 문서 조회(_fingerprints)의 변형 지문과 같다."""
+    from claw.profile import build_profile
+
+    plain = validate_document(load_example())
+    out = ProfileStore.summary(plain, 1)
+    assert out["fingerprint"] == build_profile(plain).fingerprint
+    for v in out["variants"]:
+        assert v["fingerprint"] == build_profile(plain, v["id"], validated=True).fingerprint
+    # 지문 밖 절(/display)만 바꾸는 변형은 기본과 같은 지문 — 같은 기체다(표시-only 변형의
+    # 결과는 display 편집에도 신선을 유지). 예제의 eoir가 어느 쪽인지는 픽스처마다 다르므로
+    # (제품 예제는 질량도 패치한다) 단정하지 않고, 규약은 아래 두 조작 변형으로 고정한다
+    skin = copy.deepcopy(plain)
+    skin["variants"] = [{"id": "skin", "name": "표시만", "patch": {"/display": None}}]
+    sout = ProfileStore.summary(validate_document(skin), 1)
+    assert sout["variants"][0]["fingerprint"] == sout["fingerprint"]
+    # 문서를 바꾸는 변형은 달라진다
+    heavy = copy.deepcopy(plain)
+    heavy["variants"] = [{"id": "heavy", "name": "무거움",
+                          "patch": {"/mass/m_empty": plain["mass"]["m_empty"] + 5.0}}]
+    hout = ProfileStore.summary(validate_document(heavy), 1)
+    assert hout["variants"][0]["fingerprint"] != hout["fingerprint"]
+
+
 def test_summary_reports_confirmed_gain_tables_and_their_staleness():
     plain = validate_document(load_example())
     assert ProfileStore.summary(plain, 1)["gain_tables"] is None
