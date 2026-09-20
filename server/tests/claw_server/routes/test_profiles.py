@@ -684,3 +684,59 @@ def test_quick_seed_adoption_clears_the_confirmed_gain_tables(client, wait_job, 
     assert body2["written"] is True, body2.get("seed", {}).get("reason_text")
     got = client.get("/api/profiles/qs-clear").json()["document"]
     assert got["law"]["gain_tables"] is None  # 채택 저장이 옛 확정 표를 지웠다
+
+
+def test_apply_seed_basis_writes_a_provisional_design(client, unseeded_doc):
+    """산출 근거 직행 저장(4단계 이음새) — 한 점 후보를 law.design 새 리비전으로, **검증 전** 표시와
+    함께. 스케줄 없는 문서에는 규칙 스케줄도 만든다(안 만들면 설계는 있는데 조립이 거부되는 반쪽
+    문서). 가드는 quick-seed와 같은 규칙(예제 403·낡은 기준 409)."""
+    from claw.profile import EXAMPLE_ID
+
+    assert client.post("/api/profiles", json={"document": unseeded_doc("sb-apply")}).status_code == 201
+    body = {"base_revision": 1, "mach": 0.45, "alt": 1000.0, "fuel": 200.0}
+    stale = client.post("/api/profiles/sb-apply/apply-seed-basis", json={**body, "base_revision": 9})
+    assert stale.status_code == 409 and stale.json()["detail"]["head"] == 1
+
+    r = client.post("/api/profiles/sb-apply/apply-seed-basis", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["written"] is True and out["revision"] == 2 and out["schedule_created"] is True
+
+    got = client.get("/api/profiles/sb-apply").json()["document"]
+    prov = got["law"]["design"]["provenance"]
+    assert prov["source"] == "seed_basis"
+    assert "검증 전" in prov["note"]  # 한 점 직행 경로는 검증 전 표시 필수(사용자 결정)
+    assert got["law"]["schedule"] is not None
+    assert got["law"]["design"]["scas"]["pitch"]["k_rate"] != 0.0
+    # 저장한 문서로 실제 조립이 선다 — 시뮬 제출 202
+    sim = client.post("/api/sim/run", json={
+        "trim": {"name": "t", "mach": 0.45, "alt": 1000.0, "fuel": 200.0},
+        "modes": [{"name": "hold", "speed": 150.0, "alt": 1000.0, "heading": 0.0, "exit": ["time_ge", 1e9]}],
+        "t_end": 0.5, "profile": {"id": "sb-apply"}})
+    assert sim.status_code == 202, sim.text
+
+    # 옛 확정 표(v2)는 지운다 — quick-seed 채택과 같은 규칙 (안 지우면 기준 지문이 어긋나 이후
+    # 계산 전부가 낡음 422로 죽는다). 이 두 번째 저장은 문서 스케줄 유지 경로도 함께 핀한다
+    from claw.profile import validate_document
+    from claw.profile.fingerprint import gain_tables_basis_fingerprint
+
+    doc2 = client.get("/api/profiles/sb-apply").json()["document"]
+    grid = doc2["law"]["schedule"]["mach_grid"]
+    doc2["law"]["gain_tables"] = {
+        "tables": {"pitch.kp": {"axes": {"mach": list(grid)}, "data": [-1.0] * len(grid),
+                                "extrapolate": "clip"}},
+        "provenance": {"source": "test",
+                       "basis_fingerprint": gain_tables_basis_fingerprint(validate_document(doc2))}}
+    assert client.put("/api/profiles/sb-apply",
+                      json={"base_revision": 2, "document": doc2}).status_code == 200
+    r2 = client.post("/api/profiles/sb-apply/apply-seed-basis", json={**body, "base_revision": 3})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["schedule_created"] is False
+    got2 = client.get("/api/profiles/sb-apply").json()["document"]
+    assert got2["law"]["gain_tables"] is None  # 직행 저장이 옛 확정 표를 지웠다
+    assert got2["law"]["schedule"] == doc2["law"]["schedule"]  # 문서 스케줄은 그대로다
+
+    assert client.post(f"/api/profiles/{EXAMPLE_ID}/apply-seed-basis", json=body).status_code == 403
+    bad = client.post("/api/profiles/sb-apply/apply-seed-basis",
+                      json={"base_revision": 4, "mach": 0.05, "alt": 1000.0, "fuel": 200.0})
+    assert bad.status_code == 422  # 트림 불성립 조건 — 반쪽 설계를 쓰지 않는다

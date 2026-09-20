@@ -81,6 +81,10 @@ let aeroMode = "curves";
 const basis = {
   mach: "", alt: "0", fuel: "", eref: "10", condFor: null,
   busy: false, result: null, forId: null, error: null,
+  applyBusy: false, applyMsg: null, // {ok, text} — 직행 저장의 마지막 상태줄 (결과처럼 forId로 대조)
+  // 결과를 **계산한 순간**의 문서 상태 — 저장 가드는 지금 상태가 아니라 이 스냅숏을 본다(리뷰 지적:
+  // 계산 뒤에 변형을 골랐다고 막으면 거짓 사유, 계산 뒤에 변형을 지우면 화면 수치와 저장이 어긋난다)
+  variantAt: null, dirtyAt: false,
 };
 // 도함수 → 그림 제목. 부호 관례·판정은 엔진(STABILITY_SIGNS)이 정본이고 응답 judgments가
 // 싣는다 — 여기는 이름표만
@@ -907,28 +911,33 @@ export function render() {
     try {
       const body = await api.get(`/results/${encodeURIComponent(job.result_id)}`);
       seedResult = { profileId: target.profileId, kind: target.kind, body };
-      if (body.written) {
-        await load();
-        refreshPicker();
-        if (opened?.id === target.profileId && !opened.dirty) {
-          opened = fresh(await api.get(path(target.profileId)));
-          paintDoc();
-          paintVariants();
-          paintViewer();
-          paintStability();
-        }
-        if (currentSelection()?.id === target.profileId && globalThis.confirm?.(
-          `지금 계산에 쓰는 기체에 ${target.kind === "derive_de_trim" ? "δe_trim 표" : "초기 게인"}을 리비전 `
-          + `${body.profile?.revision}로 저장했습니다. 다른 탭이 옛 리비전에서 `
-          + "만든 상태를 들고 있을 수 있어 페이지를 다시 읽는 것이 안전합니다. 다시 읽을까요?")) {
-          globalThis.location.reload();
-          return;
-        }
-      }
+      if (body.written && await afterLawWrite(target.profileId,
+        target.kind === "derive_de_trim" ? "δe_trim 표" : "초기 게인", body.profile?.revision)) return;
     } catch (e) {
       showError(e);
     }
     paintSeed();
+  };
+
+  // 법칙 절을 새 리비전으로 쓴 뒤의 공통 갱신(빠른 탐색·도출·산출 근거 저장) — 목록·선택기·열린 문서를
+  // 다시 받고, 지금 계산에 쓰는 기체면 새로고침을 물어본다. 새로고침을 시작했으면 true
+  const afterLawWrite = async (profileId, what, revision) => {
+    await load();
+    refreshPicker();
+    if (opened?.id === profileId && !opened.dirty) {
+      opened = fresh(await api.get(path(profileId)));
+      paintDoc();
+      paintVariants();
+      paintViewer();
+      paintStability();
+    }
+    if (currentSelection()?.id === profileId && globalThis.confirm?.(
+      `지금 계산에 쓰는 기체에 ${what}을 리비전 ${revision}로 저장했습니다. 다른 탭이 옛 리비전에서 `
+      + "만든 상태를 들고 있을 수 있어 페이지를 다시 읽는 것이 안전합니다. 다시 읽을까요?")) {
+      globalThis.location.reload();
+      return true;
+    }
+    return false;
   };
 
   const runSeed = async () => {
@@ -978,6 +987,7 @@ export function render() {
     basis.result = null;
     basis.error = text;
     basis.forId = opened?.id ?? null;
+    basis.applyMsg = null;
     paintSeed();
   };
 
@@ -999,26 +1009,81 @@ export function render() {
     const parsed = opened.mode === "json" ? parseDocumentText(opened.text) : { doc: opened.obj };
     if (parsed.error) return failBasis(`JSON 글을 읽을 수 없어 계산하지 않았습니다 — ${parsed.error}`);
     const target = opened;
+    // 요청을 만든 순간의 상태 — 응답이 오는 사이 편집·변형 선택이 바뀔 수 있어 여기서 잡는다
+    const variantAt = target.editVariant ?? null;
+    const dirtyAt = !!target.dirty;
     basis.busy = true;
     paintSeed();
     try {
       const res = await api.post("/profiles/seed-basis", {
-        document: parsed.doc, ...(opened.editVariant ? { variant: opened.editVariant } : {}),
+        document: parsed.doc, ...(variantAt ? { variant: variantAt } : {}),
         mach, alt, fuel, e_ref_dps: eref,
       });
       if (opened === target) {
         basis.result = res;
         basis.forId = target.id;
         basis.error = null;
+        basis.applyMsg = null; // 새 결과 — 옛 저장 상태줄은 이 결과의 것이 아니다
+        basis.variantAt = variantAt; // 계산 시점 스냅숏 — 저장 가드가 본다
+        basis.dirtyAt = dirtyAt;
       }
     } catch (e) {
       if (opened === target) {
         basis.result = null;
         basis.error = failText(e);
         basis.forId = target.id;
+        basis.applyMsg = null;
       }
     } finally {
       basis.busy = false; // 그사이 다른 기체를 열었어도 바쁨은 푼다 — 안 풀면 버튼이 영영 죽는다
+      paintSeed();
+    }
+  };
+
+  // 산출 근거 → 설계값 직행 저장 (05 §10.1) — 화면의 결과가 동봉한 조건(case·e_ref_dps)으로 서버가
+  // 저장된 리비전에서 다시 계산해 쓴다(입력 칸을 그새 고쳐도 보이는 결과의 점이 저장된다). 편집 중
+  // 글·형상 변형으로 본 결과는 저장본과 다르므로 막고 사유를 말한다 — 조용한 폴백 금지
+  const runApplyBasis = async () => {
+    if (!opened || opened.body.is_example || basis.applyBusy || !basis.result) return;
+    const applyFail = (text) => {
+      basis.applyMsg = { ok: false, text };
+      paintSeed();
+    };
+    // 가드는 **계산 시점 스냅숏**을 본다 — 지금 상태로 재면 계산 뒤 변형을 고른 결과(기본 문서
+    // 수치)를 거짓 사유로 막고, 계산 뒤 변형을 지운 결과(변형 수치)를 조용히 통과시킨다(리뷰 지적)
+    if (basis.variantAt) {
+      return applyFail(`형상 변형 「${basis.variantAt}」을 적용해 계산한 결과입니다 — 저장은 기본 문서에 `
+        + "씁니다. 변형 선택을 지우고 다시 산출하세요.");
+    }
+    if (basis.dirtyAt) {
+      return applyFail("저장하지 않은 편집 중인 글로 계산한 결과입니다 — 화면 수치가 저장본과 다를 수 "
+        + "있습니다. 먼저 저장하고 다시 산출한 뒤 저장하세요.");
+    }
+    if (opened.dirty) {
+      return applyFail("저장하지 않은 편집이 있습니다 — 설계값 저장은 저장된 리비전 위에 쓰므로 그 편집이 "
+        + "다음 저장에서 충돌합니다. 먼저 저장하고 다시 산출한 뒤 저장하세요.");
+    }
+    if (opened.body.document.law?.design != null && !globalThis.confirm?.(
+      "지금 설계값(law.design)을 이 한 점 후보로 바꿔 새 리비전으로 저장합니다(옛 리비전은 남습니다). "
+      + "빠른 탐색의 채택 게이트를 거치지 않은 검증 전 값입니다. 저장할까요?")) return;
+    const c = basis.result.case;
+    const target = opened;
+    basis.applyBusy = true;
+    basis.applyMsg = null;
+    paintSeed();
+    try {
+      const r = await api.post(`${path(target.id)}/apply-seed-basis`, {
+        base_revision: target.body.revision, mach: c.mach, alt: c.alt, fuel: c.fuel,
+        e_ref_dps: basis.result.e_ref_dps,
+      });
+      basis.applyMsg = { ok: true,
+        text: `리비전 ${r.revision}로 저장했습니다 — 출처에 검증 전 표시가 남습니다.`
+          + (r.schedule_created ? ` 스케줄이 없어 마하 ${c.mach} 한 점 스케줄도 만들었습니다.` : "") };
+      if (await afterLawWrite(target.id, "산출 근거 설계값", r.revision)) return;
+    } catch (e) {
+      basis.applyMsg = { ok: false, text: failText(e) };
+    } finally {
+      basis.applyBusy = false;
       paintSeed();
     }
   };
@@ -1078,7 +1143,20 @@ export function render() {
         + `자세 PM ${t.pm_deg}° / GM ${t.gm_db} dB · 자세 교차 = 레이트 교차 ÷ ${t.wc_ratio_att}`
         + (body.outer?.wc_outer != null
           ? ` · 바깥 루프(헤딩·고도·속도) 대역폭 ≈ ${num(body.outer.wc_outer)} rad/s (자세 교차 ÷ ${body.outer.separation})`
-          : "")));
+          : "")),
+      // 직행 저장 — 예제는 저장 대상이 아니라 버튼도 없다(403을 눌러 보게 하지 않는다)
+      opened.body.is_example ? null : el("div", { style: "margin-top:10px" },
+        el("button", { disabled: basis.applyBusy, onclick: runApplyBasis },
+          basis.applyBusy ? "저장 중…" : "이 후보를 설계값으로 저장 (한 점·검증 전)"),
+        el("p", { class: "hint", style: "margin:4px 0 0" },
+          "빠른 탐색의 채택 게이트(여러 앵커·부호 일치·스케줄 검증)를 거치지 않은 한 점 후보를 law.design "
+          + "새 리비전으로 씁니다 — 출처에 검증 전 표시가 남고, 옛 확정 게인 표는 지웁니다. 자세 kp·ki와 "
+          + "레이트 후보가 들어가고 요 자세·washout은 문서 값(없으면 0), 자동조종은 문서 값 또는 휴리스틱, "
+          + "스케줄 없는 문서에는 이 마하 한 점 스케줄을 만듭니다."),
+        basis.applyMsg
+          ? el("p", { class: basis.applyMsg.ok ? "notice" : "error-box", style: "margin:6px 0 0" },
+            basis.applyMsg.text)
+          : null));
   };
 
   const basisSection = () => {

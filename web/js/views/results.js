@@ -14,6 +14,7 @@ import { briefModel, jsonPreview, kindLabel } from "../lib/resultbrief.js";
 import { STATUS } from "../lib/plot.js";
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
+import { store } from "../store.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
 
@@ -304,6 +305,20 @@ export function render() {
       paintList();
       renderSummary(summaryBox, items);
       drawers.refresh();
+      // 설계 흐름 탭의 「브리핑 →」 인계 — 그 결과의 브리핑을 바로 연다 (시뮬 → 영향성 인계와
+      // 같은 store 규약: 한 번 읽고 지운다). 목록에 없으면(그사이 삭제) 조용히 넘어가지 않고
+      // 상태줄이 말한다
+      const brief = store.get("resultBrief");
+      if (brief) {
+        store.set("resultBrief", null);
+        const meta = items.find((m) => m.id === brief.resultId);
+        if (meta) {
+          briefAutoOpened = true;
+          onView(meta);
+        } else {
+          statusLine.textContent += ` · 인계된 결과 ${brief.resultId}가 목록에 없습니다(그사이 지워졌을 수 있음)`;
+        }
+      }
       // 최신 결과의 브리핑을 바로 세운다 (사용자 제기 "누르지 않아도 기본으로") —
       // 목록이 최근순이라 [0]이 최신이다. 소견서(LLM) 결과가 최신이어도 그대로 연다:
       // 그 브리핑은 소견 본문을 보여 주므로 "최신 산출물"이라는 답에 맞다

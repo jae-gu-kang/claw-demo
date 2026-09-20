@@ -31,6 +31,7 @@ import { defaultGridCases } from "../lib/grid.js";
 import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
 import { effectiveOf } from "../lib/profileform.js";
 import { designSource, seedSummary } from "../lib/quickseed.js";
+import { store } from "../store.js";
 import { selectedDefaults } from "./missionfill.js";
 import { tabStage, tabTop } from "./stage.js";
 
@@ -214,6 +215,23 @@ export function render() {
     const applyBlocked = applyBlockReason();
     const toneChip = (v) => el("span", { class: `flag ${v?.tone ?? "na"}` },
       ({ ok: "통과", warn: "주의", bad: "실패", na: "—" })[v?.tone ?? "na"]);
+    // 결과 인계 — 이 흐름이 만든 산출물을 그 결과가 사는 화면으로 바로 연다 (시뮬 → 영향성
+    // 인계와 같은 store 규약: 목적 탭이 한 번 읽고 지운다). 결과가 없는 단계는 링크도 없다
+    const handoffLink = (key) => {
+      const rid = stages[key]?.resultId;
+      if (!rid) return null;
+      if (key === "design") {
+        return el("a", { href: "#autodesign", style: "margin-left:8px",
+          title: "이 실행의 보고서(운영점 판정·처방·승인)를 자동 설계 탭에서 연다",
+          onclick: () => store.set("designOpen", { resultId: rid, from: "flow" }) }, "결과 열기 →");
+      }
+      if (key === "eval") {
+        return el("a", { href: "#results", style: "margin-left:8px",
+          title: "이 평가 결과의 브리핑을 결과 탭에서 연다",
+          onclick: () => store.set("resultBrief", { resultId: rid, from: "flow" }) }, "브리핑 →");
+      }
+      return null;
+    };
     clear(rowsBox).append(
       el("div", { class: "scroll-x" }, el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "단계"), el("th", {}, "판정"),
@@ -241,7 +259,7 @@ export function render() {
                     onclick: () => runApply().catch(showErr),
                   }, "문서에 반영")
                 : el("button", { disabled: running, onclick: () => runOne(s.key) }, "실행")),
-            el("td", {}, el("a", { href: s.tab }, "탭 열기 →")));
+            el("td", {}, el("a", { href: s.tab }, "탭 열기 →"), handoffLink(s.key)));
         })))),
       el("p", { class: "hint", style: "margin-top:8px" },
         "각 단계는 정본(문서)에서 다시 잽니다 — 단계끼리 결과를 물려주지 않아 낡음 사고가 없고, "

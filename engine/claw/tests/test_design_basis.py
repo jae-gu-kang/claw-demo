@@ -177,3 +177,95 @@ def test_match_zeta_2x2_returns_none_when_no_stable_match_exists():
     b2 = np.array([1.0, 0.0])
     k, roots = match_zeta_2x2(A2, b2, 0.7)
     assert k is None and roots == []
+
+
+def test_apply_seed_basis_assembles_a_full_design_that_builds_and_flies():
+    """한 점 후보 → law.design 저장용 조립(검증 전) — 저장한 문서가 실제로 조립돼야 한다.
+
+    빠른 탐색과 같은 조립 규칙(자세 kp·ki + 레이트 후보 + 자동조종 휴리스틱/문서 값)이고,
+    스케줄 없는 문서에는 스케줄도 만든다(안 만들면 설계는 있는데 조립이 거부되는 반쪽 문서가 된다)."""
+    import copy
+
+    from claw.design.basis import apply_seed_basis
+    from claw.fcl.assemble import assemble_law
+    from claw.profile import build_profile, load_example
+
+    blank = copy.deepcopy(load_example())
+    blank["id"], blank["is_example"] = "blank-basis", False
+    blank["law"]["design"] = blank["law"]["schedule"] = blank["law"]["alloc"] = None
+    out = apply_seed_basis(build_profile(blank), **CASE)
+    assert out["ok"], out.get("reason_text")
+    prov = out["design"]["provenance"]
+    assert prov["source"] == "seed_basis"
+    assert "검증 전" in prov["note"]  # 한 점 후보 — quick_seed 채택 게이트 미통과를 문서에 남긴다
+    assert out["schedule"] is not None and out["schedule_created"] is True
+
+    cand = copy.deepcopy(blank)
+    cand["law"]["design"] = out["design"]
+    cand["law"]["schedule"] = out["schedule"]
+    built = build_profile(cand)
+    law = assemble_law(built)  # 조립이 실제로 선다
+    assert law.schedule is not None
+    gains = built.design_gains()
+    hand = build_profile(load_example()).design_gains()
+    for slot in ("pitch.k_rate", "yaw.k_rate", "roll.k_rate", "pitch.kp", "roll.kp"):
+        assert gains[slot] != 0.0, slot
+        assert (gains[slot] > 0) == (hand[slot] > 0), slot  # 부호는 손설계와 같아야 한다
+
+    # 설계·스케줄이 이미 있는 문서 — 스케줄은 문서 것을 쓰고(새로 안 만듦) yaw 자세·washout은 문서 값 유지
+    keep = apply_seed_basis(build_profile(load_example()), **CASE)
+    assert keep["ok"] and keep["schedule_created"] is False and keep["schedule"] is None
+    prev = build_profile(load_example()).doc["law"]["design"]["scas"]["yaw"]
+    assert keep["design"]["scas"]["yaw"]["kp"] == prev["kp"]
+    assert keep["design"]["scas"]["yaw"]["washout_tau"] == prev["washout_tau"]
+
+
+def test_apply_seed_basis_stores_design_point_base_values():
+    """저장값은 스케줄 배율을 나눈 **기저값**이다 — 조립이 배율을 도로 곱해 이 점에서 확인한
+    후보로 돌아온다(quick_seed k0 나누기와 같은 규칙). 예제 스케줄은 이 점에서 배율이 1이
+    아니므로 그대로 저장하면 조립된 법칙이 검증한 값의 배율배로 난다 — 리뷰가 잡은 결함을
+    값 수준으로 핀한다."""
+    from claw.design.basis import apply_seed_basis
+    from claw.design.seed import _factor
+
+    sched = load_example()["law"]["schedule"]
+    f = _factor(sched, "pitch.k_rate", CASE["mach"])
+    assert abs(f - 1.0) > 0.2  # 배율이 1이면 이 시험은 나누기를 못 본다 (픽스처 전제를 명시)
+    keep = apply_seed_basis(build_profile(load_example()), **CASE)
+    assert keep["ok"], keep.get("reason_text")
+    for slot, group, key in (("pitch.k_rate", "pitch", "k_rate"), ("yaw.k_rate", "yaw", "k_rate"),
+                             ("roll.k_rate", "roll", "k_rate"), ("pitch.kp", "pitch", "kp"),
+                             ("roll.ki", "roll", "ki")):
+        fac = _factor(sched, slot, CASE["mach"])
+        rec = keep["basis"]["rates"].get(f"{group}_rate") if key == "k_rate" else None
+        at_point = (rec["candidate"]["k"] if rec
+                    else keep["basis"]["attitude"][f"{group}_att"][key])
+        assert keep["design"]["scas"][group][key] == pytest.approx(at_point / fac, rel=1e-9), slot
+    # provenance가 두 값(이 점의 확인값·저장 기저값)과 배율을 같이 말한다 — 화면·기록이 재계산하지 않게
+    p = keep["design"]["provenance"]["slots"]["pitch.k_rate"]
+    assert p["stored"] == keep["design"]["scas"]["pitch"]["k_rate"]
+    assert p["schedule_factor"] == pytest.approx(f, rel=1e-9)
+    assert p["k"] == pytest.approx(p["stored"] * p["schedule_factor"], rel=1e-9)
+
+
+def test_basis_missing_slots_refuses_failed_attitude_not_just_zero_kp():
+    """직행 저장 관문 — quick_seed의 앵커 제외(SLOT_DESIGN_FAILED)와 같은 선. kp == 0만 보면
+    부호 반전 백오프 해(sign_mismatch — 이 플랜트에서 정궤환)가 0이 아니라는 이유로 통과한다."""
+    from claw.design.basis import basis_missing_slots
+    from claw.design.tune import REASON_CAPPED, REASON_OK, REASON_SIGN_MISMATCH
+
+    out = {
+        "order": ["pitch_rate", "yaw_rate", "roll_rate"],
+        "rates": {"pitch_rate": {"candidate": {"k": 0.1}}, "yaw_rate": {"candidate": None},
+                  "roll_rate": {"candidate": {"k": -0.2}}},
+        "attitude": {"pitch_att": {"kp": -0.5, "reason": REASON_OK},
+                     "roll_att": {"kp": 0.4, "reason": REASON_SIGN_MISMATCH}},
+    }
+    assert basis_missing_slots(out) == ["yaw_rate", "roll_att"]
+    # 통과 사유(ok)와 물리 한계(capped — 작동하는 댐퍼를 냈다)는 거부 목록이 아니다
+    out["rates"]["yaw_rate"]["candidate"] = {"k": 0.3}
+    out["attitude"]["roll_att"] = {"kp": 0.4, "reason": REASON_CAPPED}
+    assert basis_missing_slots(out) == []
+    # 축퇴(kp 0)는 사유와 무관하게 못 쓴다
+    out["attitude"]["pitch_att"] = {"kp": 0.0, "reason": REASON_OK}
+    assert basis_missing_slots(out) == ["pitch_att"]

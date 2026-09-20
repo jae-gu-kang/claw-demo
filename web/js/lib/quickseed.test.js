@@ -21,6 +21,10 @@ test("게인 출처 — 미설계·빠른 탐색·그 밖", () => {
   assert.match(q.label, /자동 설계 전/);
   assert.equal(designSource({ law: { design: { provenance: { source: "example" } } } }).label, "게인 출처: example");
   assert.equal(designSource({ law: { design: { provenance: {} } } }).kind, "unknown");
+  // 산출 근거 직행 저장(v1.34) — 검증 전임을 출처 줄이 말한다
+  const b = designSource({ law: { design: { provenance: { source: "seed_basis" } } } });
+  assert.equal(b.kind, "seed_basis");
+  assert.match(b.label, /검증 전/);
 });
 
 test("탐색 요약 — 저장·충돌·미채택 머리말과 자리 순서", () => {

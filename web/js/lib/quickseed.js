@@ -14,6 +14,10 @@ export function designSource(doc) {
   if (src === "quick_seed") {
     return { kind: "quick_seed", seeded: true, ok: d.provenance?.ok !== false, label: "초기 탐색 게인 — 자동 설계 전" };
   }
+  if (src === "seed_basis") {
+    // 산출 근거 직행 저장(05 §10.1) — 채택 게이트를 안 거친 한 점 후보임을 출처 줄이 그대로 말한다
+    return { kind: "seed_basis", seeded: true, ok: true, label: "산출 근거 직행 게인 — 한 점·검증 전, 자동 설계 전" };
+  }
   return { kind: src ?? "unknown", seeded: false, label: src ? `게인 출처: ${src}` : "게인 출처 기록 없음" };
 }
 

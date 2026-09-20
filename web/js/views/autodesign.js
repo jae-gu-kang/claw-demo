@@ -259,6 +259,15 @@ export function render() {
     "아직 결과가 없습니다 — [자동 설계 시작]을 누르거나 위 목록에서 지난 결과를 "
     + "열면 운영점 판정·처방 카드·게인 확정이 여기 채워집니다."));
   loadDefaults();
+  // 설계 흐름 탭의 「결과 열기 →」 인계 — 그 실행의 보고서를 바로 연다 (store 규약: 한 번 읽고
+  // 지운다). 실패(그사이 삭제 등)는 조용히 넘기지 않고 오류 상자가 말한다
+  const handed = store.get("designOpen");
+  if (handed) {
+    store.set("designOpen", null);
+    showResult(handed.resultId).catch(
+      (e) => clear(errBox).append(el("div", { class: "error-box" },
+        `인계된 결과 ${handed.resultId}를 열지 못했습니다 — ${errorText(e)}`)));
+  }
   loadList();
   return root;
 }

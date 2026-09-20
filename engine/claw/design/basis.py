@@ -58,11 +58,14 @@ _XU = {"pitch": ("q", "de"), "yaw": ("r", "dr"), "roll": ("p", "da")}  # 자리 
 
 REASON_BASIS_TRIM_FAILED = "basis_trim_failed"
 REASON_BASIS_NO_MATCH = "basis_no_match"
+REASON_BASIS_INCOMPLETE = "basis_incomplete"
 REASON_TEXT = {
     REASON_BASIS_TRIM_FAILED: "이 조건의 트림이 수렴하지 않는다 — 저차 근사를 세울 기준점이 없다."
                               " 트림 탭에서 성립 영역을 먼저 확인한다",
     REASON_BASIS_NO_MATCH: "저차 근사가 목표 감쇠를 어떤 게인으로도 못 만든다(계수 비교 2차식에 유효한"
                            " 근이 없다) — 근사가 유효하지 않거나 플랜트 한계다. 빠른 탐색(스캔)으로 확인한다",
+    REASON_BASIS_INCOMPLETE: "후보가 없는 자리가 있어 설계로 저장하지 않는다 — 반쪽 설계를 정본에 두지"
+                             " 않는다. 빠른 탐색(스캔·여러 앵커)으로 채운다",
 }
 
 
@@ -325,6 +328,125 @@ def seed_basis(built, mach, alt, fuel, *, e_ref_dps=E_REF_DPS, targets=None,
         "design_now": _design_now(existing, built),
         "elapsed_s": time.perf_counter() - t0,
     })
+
+
+def basis_missing_slots(out) -> list:
+    """직행 저장을 거부할 자리 — 레이트는 후보 없음, 자세는 설계 실패 사유(SLOT_DESIGN_FAILED).
+
+    quick_seed가 앵커를 거르는 목록과 같다(seed.py — reason not in SLOT_DESIGN_FAILED만 쓴다).
+    kp == 0만 보면 부호 반전 백오프 해(REASON_SIGN_MISMATCH — 루프를 뒤집어야 마진이 서는,
+    이 플랜트에서 정궤환인 게인)가 0이 아니라는 이유로 정본에 들어간다(리뷰 지적)."""
+    missing = [n for n in out["order"] if out["rates"][n]["candidate"] is None]
+    missing += [f"{g}_att" for g in ("pitch", "roll")
+                if not out["attitude"][f"{g}_att"].get("kp")
+                or out["attitude"][f"{g}_att"].get("reason") in SLOT_DESIGN_FAILED]
+    return missing
+
+
+def apply_seed_basis(built, mach, alt, fuel, *, e_ref_dps=E_REF_DPS, targets=None,
+                     delay_s=0.035, pade_order=2) -> dict:
+    """산출 근거를 law.design 저장용으로 조립 — **한 점 후보, 검증 전** (05 §10.1의 직행 경로).
+
+    quick_seed와 같은 조립 규칙(자세 kp·ki + 레이트 후보 k_rate; yaw 자세·washout·k_diff_thr는
+    문서 값 또는 0; 자동조종은 문서 값 또는 시간척도 휴리스틱 — seed._autopilot 재사용)이되,
+    quick_seed의 채택 게이트(여러 앵커·부호 일치·스케줄 검증 §10 ④)를 **거치지 않는다** — 그
+    사실을 provenance에 적는다(사용자 결정: 한 점 직행 경로는 검증 전 표시 필수). 스케줄 없는
+    문서에는 quick_seed와 같은 규칙 스케줄을 만든다 — 안 만들면 설계는 있는데 조립이 거부되는
+    반쪽 문서가 된다. 후보가 하나라도 없거나 자세 자리가 설계 실패 사유(SLOT_DESIGN_FAILED —
+    부호 반전 백오프 해 포함)면 ok=False — 반쪽 설계를 내지 않는다(basis_missing_slots).
+
+    저장값은 **설계점 기저값**이다 — 조립이 스케줄 배율을 도로 곱하므로 이 점의 후보를 그대로
+    쓰면 조립된 법칙이 검증한 값과 다른 게인으로 난다. quick_seed의 k0 나누기와 같은 규칙으로
+    스케줄 배율을 나눠 저장한다(리뷰 지적 — 문서 스케줄이 있으면 배율이 1이 아니다).
+
+    반환 {"ok", "reason", "reason_text", "design", "schedule"(새로 만든 것만), "schedule_created",
+    "basis"(산출 근거 전체 — 화면·기록용)}. 문서에 쓰지 않는다 — 저장은 호출자(서버 라우트)가 한다.
+    """
+    import types
+
+    from claw.design.seed import _autopilot, _factor, _new_schedule
+
+    out = seed_basis(built, mach, alt, fuel, e_ref_dps=e_ref_dps, targets=targets,
+                     delay_s=delay_s, pade_order=pade_order)
+    base = {"basis": out, "design": None, "schedule": None, "schedule_created": False}
+    if not out["ok"]:
+        return {**base, "ok": False, "reason": out["reason"], "reason_text": out["reason_text"]}
+    missing = basis_missing_slots(out)
+    if missing:
+        return {**base, "ok": False, "reason": REASON_BASIS_INCOMPLETE,
+                "reason_text": f"{reason_text(REASON_BASIS_INCOMPLETE)} — {', '.join(missing)}"}
+
+    existing = built.doc["law"]["design"]
+    schedule = built.doc["law"]["schedule"]
+    created = schedule is None
+    if created:
+        schedule = _new_schedule([float(mach)], float(mach))
+    # 저장값은 설계점 **기저값** — 조립(gain_tables)이 스케줄 배율 min((m_design/M)², cap)을 도로
+    # 곱하므로, 이 점에서 확인한 후보를 그대로 쓰면 조립된 법칙이 검증한 값의 배율배로 난다.
+    # quick_seed의 k0 나누기와 같은 규칙(seed.py _factor). 새로 만든 스케줄은 m_design = 이
+    # 마하라 배율 ≈ 1이고, 문서 스케줄이 있으면 1이 아니다(예제는 이 점에서 ×0.3 수준)
+    def stored(slot, value):
+        return value / _factor(schedule, slot, float(mach))
+
+    scas = {}
+    for group in ("pitch", "roll", "yaw"):
+        prev = existing["scas"][group] if existing is not None else {}
+        att = out["attitude"].get(f"{group}_att")
+        scas[group] = {
+            "kp": stored(f"{group}.kp", att["kp"]) if att else prev.get("kp", 0.0),
+            "ki": stored(f"{group}.ki", att["ki"]) if att else prev.get("ki", 0.0),
+            "k_rate": stored(f"{group}.k_rate", out["rates"][f"{group}_rate"]["candidate"]["k"]),
+            "washout_tau": prev.get("washout_tau", 0.0),
+        }
+    # 자동조종 휴리스틱 — quick_seed와 같은 재료(이 점의 트림·종축 모델·자세 교차). 자세 교차는
+    # 설계 실패 사유인 자리를 빼고 넘긴다(quick_seed와 같은 규칙 — _autopilot이 없는 값은 건너뛴다)
+    case = TrimCase(f"M{mach:.2f}_h{alt:.0f}_f{fuel:.0f}", mach=float(mach), alt=float(alt),
+                    fuel=float(fuel))
+    tr = trim(built.aircraft(), case, fingerprint=built.plant_fingerprint)
+    lon, _lat = split_axes(linearize(built.aircraft(), tr))
+    wc = {g: (out["attitude"][f"{g}_att"].get("wc_att")
+              if out["attitude"][f"{g}_att"].get("reason") not in SLOT_DESIGN_FAILED else None)
+          for g in ("pitch", "roll")}
+    ap, ap_source, ap_notes = _autopilot(built, types.SimpleNamespace(case=case), lon, wc,
+                                         None if existing is None else existing["autopilot"])
+    design = {
+        "scas": scas, "autopilot": ap,
+        "k_diff_thr": existing["k_diff_thr"] if existing is not None else 0.0,
+        "provenance": {
+            "source": "seed_basis",
+            "note": "산출 근거의 한 점 후보 — 검증 전(빠른 탐색의 채택 게이트·여러 앵커·스케줄 검증"
+                    " §10 ④ 미통과). 자동 설계 전이며, 저차 근사 닫힌꼴과 이 점의 전체 모델 확인만 거쳤다",
+            "plant_fingerprint": built.plant_fingerprint,
+            "case": out["case"], "e_ref_dps": out["e_ref_dps"], "targets": out["targets"],
+            # k·kp·ki는 이 점에서 확인한 값, stored_*는 배율을 나눠 문서에 쓴 기저값 —
+            # 조립이 배율을 도로 곱하면 이 점에서 확인한 값으로 돌아온다
+            "slots": {
+                **{out["rates"][n]["slot"]: {
+                    "k": out["rates"][n]["candidate"]["k"],
+                    "stored": scas[n.split("_", 1)[0]]["k_rate"],
+                    "schedule_factor": _factor(schedule, out["rates"][n]["slot"], float(mach)),
+                    "achieved": out["rates"][n]["full"]["achieved"],
+                    "stable": out["rates"][n]["full"]["stable"],
+                    "budget_ok": (out["rates"][n]["budget"] or {}).get("ok"),
+                } for n in out["order"]},
+                **{f"{g}.kp/ki": {
+                    "kp": out["attitude"][f"{g}_att"]["kp"], "ki": out["attitude"][f"{g}_att"]["ki"],
+                    "stored_kp": scas[g]["kp"], "stored_ki": scas[g]["ki"],
+                    # 자리마다 배율 — 손으로 고친 스케줄이 kp만 목록에 올리면 ki 배율이 다르다
+                    "schedule_factor_kp": _factor(schedule, f"{g}.kp", float(mach)),
+                    "schedule_factor_ki": _factor(schedule, f"{g}.ki", float(mach)),
+                    "passing": out["attitude"][f"{g}_att"].get("passing"),
+                    "reason": out["attitude"][f"{g}_att"].get("reason"),
+                } for g in ("pitch", "roll")},
+            },
+            "autopilot": ap_source, "autopilot_notes": ap_notes,
+            "yaw_attitude": "document" if existing is not None else "zero",
+            "schedule": "created" if created else "document",
+        },
+    }
+    return _clean({**base, "ok": True, "reason": None, "reason_text": None,
+                   "design": design, "schedule": schedule if created else None,
+                   "schedule_created": created})
 
 
 def _design_now(existing, built) -> dict | None:

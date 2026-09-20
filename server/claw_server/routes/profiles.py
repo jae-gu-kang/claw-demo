@@ -11,7 +11,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from claw.design.basis import E_REF_DPS, seed_basis
+from claw.design.basis import E_REF_DPS, apply_seed_basis, seed_basis
 from claw.design.seed import quick_seed
 from claw.profile import ProfileError, build_profile, validate_document
 from claw.profile.derive import CHECK_STEP, derive_de_trim
@@ -73,6 +73,16 @@ class SeedBasisIn(BaseModel):
 class QuickSeedIn(BaseModel):
     base_revision: int = Field(ge=1)
     sim_check: bool = False
+
+
+class ApplySeedBasisIn(BaseModel):
+    """산출 근거 직행 저장 — 트림점은 산출 근거 조회와 같은 계약, 저장 가드는 quick-seed와 같은 계약."""
+
+    base_revision: int = Field(ge=1)
+    mach: float = Field(gt=0.0, allow_inf_nan=False)
+    alt: float = Field(allow_inf_nan=False)
+    fuel: float = Field(ge=0.0, allow_inf_nan=False)
+    e_ref_dps: float = Field(default=E_REF_DPS, gt=0.0, le=360.0, allow_inf_nan=False)
 
 
 class DeriveDeTrimIn(BaseModel):
@@ -195,6 +205,32 @@ def submit_quick_seed(profile_id: str, req: QuickSeedIn, request: Request, respo
                             ok=seed["ok"])
 
     return _submit_profile_job(request, response, "quick_seed", work)
+
+
+@router.post("/profiles/{profile_id}/apply-seed-basis")
+def apply_seed_basis_route(profile_id: str, req: ApplySeedBasisIn, request: Request) -> dict:
+    """산출 근거 직행 저장 (05 §10.1) — 한 점 닫힌꼴 후보를 law.design 새 리비전으로 쓴다(**검증 전**).
+
+    빠른 탐색과 달리 잡이 아니다 — 한 점 계산이라 동기로 끝난다. 조립 규칙·검증 전 표시는 전부
+    엔진(apply_seed_basis)이 정하고, 서버는 quick-seed와 같은 가드(예제 403·낡은 기준 409)와 저장만
+    한다. 새 설계의 출발이므로 옛 확정 게인 표는 지운다(quick-seed 채택과 같은 규칙)."""
+    doc, rev, built = _job_head(request, profile_id, req.base_revision)
+    out = apply_seed_basis(built, req.mach, req.alt, req.fuel, e_ref_dps=req.e_ref_dps)
+    if not out["ok"]:
+        raise HTTPException(status_code=422, detail=out["reason_text"] or out["reason"])
+    design = copy.deepcopy(out["design"])
+    design["provenance"].update(base_revision=rev)
+    new = copy.deepcopy(doc)
+    new["law"].update({"design": design, "gain_tables": None,
+                       **({"schedule": out["schedule"]} if out["schedule_created"] else {})})
+    try:
+        _, new_rev = request.app.state.profiles.update(profile_id, new, rev)
+    except ProfileConflict as e:
+        raise HTTPException(status_code=409, detail={"message": str(e), "head": e.head})
+    except ProfileError as e:
+        raise HTTPException(status_code=422, detail=profile_error_detail(e))
+    return {"written": True, "revision": new_rev, "schedule_created": out["schedule_created"],
+            "provenance": design["provenance"]}
 
 
 @router.post("/profiles/{profile_id}/derive-de-trim", status_code=202)
