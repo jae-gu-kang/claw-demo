@@ -207,7 +207,7 @@ export const SUBSYSTEMS = {
   <li>축 공통 구조: <b>PI(자세오차) + k_rate·각속도</b>, 출력 클립 — 캐스케이드(자세→레이트 2단) 아닌 평탄형 <span class="chip ok">확정 M7</span> · 축 내부·PI 내부는 블록 클릭으로 진입</li>
   <li>안티와인드업: 적분항 클램프 <span class="chip dft">기본값 M7</span> · 이산화: 제어주기 100 Hz 시작(50 Hz 비교 예정), 계수 자동 계산 <span class="chip ok">확정</span> · 멀티레이트 입력 전제 <span class="chip note">설계 유의</span></li>
   <li>rate 항은 PI 클램프 <b>밖</b>에서 합산 → 축 출력은 최종 클립이 한 번 더 제한 · 재관여 시 적분 웜스타트 + 워시아웃 rate 시드 <span class="chip ok">범프리스 계약</span></li>
-  <li>예제 기체 SCAS 설계값(구 합성 기체의 설계점 M0.6·h1000·fuel200에서 정한 값 — 200 kg급 예제는 무게비 상사라 같은 값이고 설계 마하만 M0.245): 피치 kp −2.0 / ki −0.5 / k_rate 0.4 · 롤 1.0 / 0.1 / −0.2 · 요 kβ 0.5 / kr 0.8 · 게인 부호는 설계값(게인 테이블) 소관 — 코드는 공력 부호 무가정</li>
+  <li>SCAS 설계값은 기체마다 다르다 — <b>지금 계산에 쓰는 기체</b>의 값이 아래 「이 페이지의 게인」 카드(「설계값」 배지)와 파라미터 폼에 선다(미설계 기체는 기체 탭 「초기 게인」에서 채운다). 게인 부호는 설계값(게인 테이블) 소관 — 코드는 공력 부호 무가정</li>
 </ul>`,
     children: {
       pitch: {
@@ -271,7 +271,7 @@ export const SUBSYSTEMS = {
 <h4>설계 노트</h4>
 <ul>
   <li><span class="mono">δe = clip( PI(θ_cmd − θ) + k_rate·q, out_lo~hi )</span> — 명령은 α 리미터를 거친 θ_cmd <span class="chip ok">확정 M7</span></li>
-  <li>데모 설계값: kp −2.0 · ki −0.5 · k_rate 0.4 (구 합성 기체 설계점 M0.6·h1000·fuel200 — 200 kg급 예제도 같은 값, 설계 마하 M0.245) — 동압 스케일 1D mach 스케줄 적용 <span class="chip dft">기본값</span></li>
+  <li>설계값(kp·ki·k_rate)은 지금 계산에 쓰는 기체의 값이 게인 카드 「설계값」 배지·파라미터 폼에 선다 — 동압 스케일 1D mach 스케줄이 곱해진다 <span class="chip dft">기본값</span></li>
   <li>PI 내부(비례·조건부 적분 AW·출력 클립)는 PI 블록 클릭 — 층4</li>
 </ul>`,
         children: { pi: SCAS_PI_PAGE },
@@ -336,7 +336,7 @@ export const SUBSYSTEMS = {
 <h4>설계 노트</h4>
 <ul>
   <li><span class="mono">δa = clip( PI(wrap(φ_cmd − φ)) + k_rate·p, out_lo~hi )</span> — 오차 <b>wrap ±π</b>로 배면 통과 시 2π 점프 방지 <span class="chip ok">확정 M7</span></li>
-  <li>데모 설계값: kp 1.0 · ki 0.1 · k_rate −0.2 (δa 부호 관례상 음수가 정상 판독) <span class="chip dft">기본값</span></li>
+  <li>설계값은 지금 계산에 쓰는 기체의 값이 게인 카드 「설계값」 배지·파라미터 폼에 선다 (k_rate는 δa 부호 관례상 음수가 정상 판독) <span class="chip dft">기본값</span></li>
   <li>PI 내부는 PI 블록 클릭 — 층4</li>
 </ul>`,
         children: { pi: SCAS_PI_PAGE },
@@ -405,7 +405,7 @@ export const SUBSYSTEMS = {
 <ul>
   <li><span class="mono">δr = clip( PI(−β) + k_rate·washout(r), out_lo~hi )</span> — 자세 명령 없음, β 억제(선회조화) <span class="chip ok">확정 M7</span></li>
   <li><b>워시아웃</b> τs/(τs+1)이 지속 선회의 정상 요레이트를 제거 — 선회 유지 <span class="chip ok">확정</span> · τ = 2 s <span class="chip dft">기본값</span> (washout_tau=0이면 생략)</li>
-  <li>데모 설계값: kβ 0.5 · kr 0.8 · 러더는 믹서에서 차동추력 보상과 결합</li>
+  <li>설계값(kβ=kp·kr=k_rate)은 지금 계산에 쓰는 기체의 값이 게인 카드 「설계값」 배지·파라미터 폼에 선다 · 러더는 믹서에서 차동추력 보상과 결합</li>
   <li>PI 내부는 PI 블록 클릭 — 층4</li>
 </ul>`,
         children: { pi: SCAS_PI_PAGE },
@@ -550,7 +550,7 @@ export const SUBSYSTEMS = {
           reads: [
             "유도가 준 ψ_cmd가 ①로 들어와 명령필터(τ 1 s)를 지난다. 이 필터도 wrap을 안다 — <b>최단경로로</b> 보간한다.",
             "항법의 ψ(②)를 빼고, 그 오차에 다시 wrap ±π를 건다.",
-            "PI를 지난다 (데모는 kp 4 · ki 0).",
+            "PI를 지난다 — 게인은 기체 설계값(아래 게인 카드 「설계값」 배지)이다.",
             "±phi_max로 클립한 것이 φ_cmd이고, SCAS 롤축으로 간다.",
             "같은 φ_cmd가 옆으로 갈라져 고도·속도 채널의 <b>선회 FF 입력</b>이 된다 — 이 채널이 다른 두 채널을 건드리는 유일한 경로다.",
           ],
@@ -558,7 +558,7 @@ export const SUBSYSTEMS = {
             "헤딩을 러더가 아니라 <b>뱅크로</b> 잡는다. 비행기는 기울여서 도는 것이지 옆으로 미끄러뜨려 도는 것이 아니다 — 러더로 돌리면 사이드슬립이 남고 항력이 는다. 그래서 이 채널의 출력이 δr이 아니라 φ_cmd다.",
             "wrap이 필터와 오차 <b>양쪽에</b> 걸려 있다. 한쪽만 걸면 359° → 1° 명령에서 필터가 먼 길로 358°를 돌아간다.",
             "±phi_max가 π/2 미만으로 강제되는 이유는 선회 FF에 있다: 보상식이 1/cosφ라 φ가 90°에 닿으면 발산한다. 이 클립이 그 앞을 막는 가드다.",
-            "데모가 ki 0인 것은 값의 선택이지 구조의 결함이 아니다 — 설계점 폐루프 스캔에서 헤딩 0.5 rad 스텝이 무오버슈트였다.",
+            "구 합성 기체가 ki 0을 쓴 것은 값의 선택이지 구조의 결함이 아니다 — 그 설계점 폐루프 스캔에서 헤딩 0.5 rad 스텝이 무오버슈트였다.",
           ],
         },
         notes: `
@@ -566,7 +566,7 @@ export const SUBSYSTEMS = {
 <ul>
   <li><span class="mono">φ_cmd = clip( PI(wrap(ψ_ref − ψ)), ±phi_max )</span> — 오차·명령필터 모두 wrap 최단경로 <span class="chip ok">확정 M7</span></li>
   <li>φ_cmd 분기가 <b>선회 피드포워드</b> 입력 — 고도(θ)·속도(δt) 채널 내부에서 가산 <span class="chip note">설계 유의</span></li>
-  <li>데모 설계값: kp 4 · ki 0 · τ 1 s · phi_max 0.7 rad <span class="chip dft">기본값</span> · 헤딩 0.5 rad 스텝 무오버슈트 (설계점 폐루프 스캔)</li>
+  <li>설계값(kp_hdg·ki_hdg·τ·phi_max)은 지금 계산에 쓰는 기체의 값이 게인 카드 「설계값」 배지·파라미터 폼에 선다 <span class="chip dft">기본값</span> · 구 합성 기체 실측: 헤딩 0.5 rad 스텝 무오버슈트 (설계점 폐루프 스캔 기록)</li>
 </ul>`,
       },
       alt: {
@@ -646,7 +646,7 @@ export const SUBSYSTEMS = {
 <ul>
   <li><span class="mono">θ_cmd = 재클립( clip(PI(h_ref−h) + k_hdot·ḣ, θ한계) + FF, θ한계 )</span> — FF 가산 후 <b>재클립</b>으로 이중 제한 <span class="chip ok">확정 M7</span></li>
   <li>승강률 댐핑 k_hdot·ḣ — PI 클램프 <b>밖</b>·θ 클립 <b>안</b>(FF 가산 전)에서 합산 (SCAS의 k_rate 자리 재사용) · θ_cmd는 α 리미터를 거쳐 SCAS로</li>
-  <li>데모 설계값: kp 0.004 · ki 0.0004 · k_hdot −0.008 · τ 5 s <span class="chip dft">기본값</span> · 고도 +100 m 오버슈트 8.3% (설계점 폐루프 스캔)</li>
+  <li>설계값(kp_alt·ki_alt·k_hdot·τ)은 지금 계산에 쓰는 기체의 값이 게인 카드 「설계값」 배지·파라미터 폼에 선다 <span class="chip dft">기본값</span> · 구 합성 기체 실측: 고도 +100 m 오버슈트 8.3% (설계점 폐루프 스캔 기록)</li>
 </ul>`,
       },
       spd: {
@@ -715,7 +715,7 @@ export const SUBSYSTEMS = {
 <ul>
   <li><span class="mono">δt_cmd = 재클립( clip(PI(V_ref−V), 0~1) + FF, 0~1 )</span> — FF 가산 후 <b>재클립</b> <span class="chip ok">확정 M7</span></li>
   <li>비활성 시 필터는 V 추적 + 오차 0 적분 → <b>트림 스로틀 홀드</b> · 스로틀 FF는 데모에서 0 (역효과 확인) <span class="chip dft">기본값</span></li>
-  <li>데모 설계값: kp 0.15 · ki 0.03 · τ 2 s <span class="chip dft">기본값</span> · 속도 +10 m/s 오버슈트 3.7% (설계점 폐루프 스캔)</li>
+  <li>설계값(kp_spd·ki_spd·τ)은 지금 계산에 쓰는 기체의 값이 게인 카드 「설계값」 배지·파라미터 폼에 선다 <span class="chip dft">기본값</span> · 구 합성 기체 실측: 속도 +10 m/s 오버슈트 3.7% (설계점 폐루프 스캔 기록)</li>
 </ul>`,
       },
     },

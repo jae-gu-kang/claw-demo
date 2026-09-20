@@ -8,7 +8,10 @@ tone 어휘는 평가 카드와 같은 넷(ok·warn·bad·na) — 화면이 flag
 */
 
 /** 단계 정의 — key·이름·드릴다운 탭. 순서가 곧 [끝까지 실행]의 순서다.
- *  apply(채택·문서 반영)는 실행 단계가 아니라 **수동 관문**이다(사용자 결정) — run이 없다. */
+ *  apply(채택·문서 반영)는 실행 단계가 아니라 **수동 관문**이다(사용자 결정) — run이 없다.
+ *  단계 **수(6)는 화면과 결합돼 있다**: app.css .fd-rail의 repeat(6,1fr)·8.33%(=1/12) 마디
+ *  여백이 같은 수를 전제한다 — 단계를 늘리면 CSS를 같이 고친다(리뷰 지적; 번호 숫자는
+ *  flow.js가 인덱스+1로 만든다). */
 export const FLOW_STAGES = [
   { key: "doc", label: "문서 검증", tab: "#aircraft" },
   { key: "envelope", label: "엔벨로프", tab: "#envelope" },
@@ -90,4 +93,34 @@ export function applyStateVerdict(gainTables, hasDesignResult) {
     return { tone: "na", text: "미반영 — 아래 [문서에 반영]이 정본에 씁니다(수동 관문)" };
   }
   return { tone: "na", text: "미반영 — 자동 설계를 먼저 돌립니다" };
+}
+
+/** 단계 산출물 서술 — 이 단계의 저장물이 **어디에** 남았나 (v1.35 다이어그램 발치줄).
+ *
+ * 사용자 요구 "진행 상황과 저장 파일들이 어디에 있는지 확실히"의 절반이 이 줄이다:
+ * 조회 단계(검증·엔벨로프)는 저장이 없다고 말하고, 잡 단계는 결과 저장소의 그 결과를,
+ * 문서에 쓴 단계(시드 채택·확정 표 반영)는 문서 리비전을 가리킨다. 없는 결과·안 쓴
+ * 문서를 위조하지 않는다. `to`는 뷰가 링크로 배선하는 목적지 표지(brief=결과 탭 브리핑,
+ * design=자동 설계 탭 보고서, aircraft=기체 탭, gains=게인 탭)다.
+ */
+export function stageArtifact(key, st) {
+  if (key === "doc") return [{ label: "저장 없음 — 문서 판정만", to: null }];
+  if (key === "envelope") return [{ label: "저장 없음 — 조회 계산", to: null }];
+  if (key === "apply") {
+    // "쓰는 곳" 프레이밍 — 이 줄은 목적지이지 저장됐다는 뜻이 아니다(반영 여부는 위 판정 칩이
+    // 말한다). "문서 law.gain_tables"라고만 적으면 확정 표 없는 문서에서도 저장된 것처럼 읽힌다
+    return [{ label: "쓰는 곳 — 문서 law.gain_tables(확정 표)", to: "gains" }];
+  }
+  if (key === "seed") {
+    if (!st?.resultId) return [{ label: "저장 없음 — 미실행·탐색 생략", to: null }];
+    const out = [{ label: `결과 ${st.resultId}`, to: "brief" }];
+    // 채택·저장(ok = seedSummary ok && written)일 때만 문서 항목 — 미채택 결과가 문서에
+    // 저장된 것처럼 읽히면 안 된다
+    if (st.verdict?.tone === "ok" && st.echo?.revision != null) {
+      out.push({ label: `문서 리비전 ${st.echo.revision}에 저장`, to: "aircraft" });
+    }
+    return out;
+  }
+  if (!st?.resultId) return [{ label: "결과 저장소(잡 산출물)", to: null }];
+  return [{ label: `결과 ${st.resultId}`, to: key === "design" ? "design" : "brief" }];
 }

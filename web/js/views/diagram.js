@@ -53,7 +53,8 @@ export function fromMarkup(markup) {
 /** 층 판 ①~⑤ — rect는 [x, y, w, h](원좌표), z는 판 밑면 높이.
 바깥 판일수록 낮고 넓다. page는 클릭 시 이동할 서브시스템(=설계 단계 페이지).
 **색·이름의 정본은 여기 한 곳**이다 — 판과 층 칩이 어긋나면 색으로 층을 되짚는
-독법 자체가 깨진다 (app.css --l1~--l5도 같은 값). */
+독법 자체가 깨진다 (app.css --l1~--l5, 그리고 설계 흐름 탭 .fd 3면 블록의
+--fd-t/-s/-f도 같은 값 — blocks.test.js가 둘 다 대조한다). */
 const LAYERS = [
   { n: 5, page: "verify", name: "비선형 시뮬 검증", color: "#6b7280", z: 0,
     rect: [24, 56, 1258, 496], fill: { top: "#e2e6ed", side: "#b3bac7", front: "#c9cfd9" } },
@@ -67,9 +68,12 @@ const LAYERS = [
     rect: [1072, 226, 160, 118], fill: { top: "#e9def9", side: "#b79ce8", front: "#cfbdf0" } },
 ];
 
-/** 설계 순서 칩 (①→⑤) — page id로 이동. 판에서 그대로 뽑아 쓰므로 색이 어긋날 수 없다. */
+/** 설계 순서 칩 (①→⑤) — page id로 이동. 판에서 그대로 뽑아 쓰므로 색이 어긋날 수 없다.
+ * front까지 내보내는 이유: 설계 흐름 탭(.fd)의 3면 블록이 이 팔레트의 CSS 사본을 쓰고,
+ * blocks.test.js가 세 면 전부를 여기와 대조한다(층 색 가드와 같은 관례). */
 export const DESIGN_ORDER = [...LAYERS].sort((a, b) => a.n - b.n).map((L) => ({
-  page: L.page, n: L.n, name: L.name, color: L.color, tint: L.fill.top, edge: L.fill.side,
+  page: L.page, n: L.n, name: L.name, color: L.color,
+  tint: L.fill.top, edge: L.fill.side, front: L.fill.front,
 }));
 
 // ── 투영 ────────────────────────────────────────────────────────────────

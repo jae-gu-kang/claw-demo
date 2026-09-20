@@ -34,7 +34,7 @@ import * as world from "./views/world.js";
 // 뒤로는(v0.66) 한쪽만 고치면 원문 둘이 다른 순서를 말한다. 드리프트 가드는
 // lib/blocks.test.js가 두 원문을 나란히 읽어 대조한다 (집합이 아니라 배열로)
 const VIEWS = {
-  aircraft, flow, blocks, envelope, trim, gains, margins, autodesign, sim, world, influence,
+  aircraft, blocks, flow, envelope, trim, gains, margins, autodesign, sim, world, influence,
   autocode, verify, results,
 };
 

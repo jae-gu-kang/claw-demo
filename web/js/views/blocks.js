@@ -234,6 +234,8 @@ function renderSubPage(root, path) {
   const revealGain = renderPageManual(manualBox, path, sub, {
     anchored: new Set(anchors.keys()),
     onShowInDiagram: (key) => flashNode(svgWrap, anchors.get(key)),
+    // 게인 카드의 「설계값」 배지 재료 — 파라미터 폼이 이미 받는 그 요청의 약속을 나눠 쓴다
+    designCatalog: loadGainsCatalog(),
   });
   wireGainAnchors(anchors, revealGain);
   renderParams(paramBox, sub, block, svgWrap, path);

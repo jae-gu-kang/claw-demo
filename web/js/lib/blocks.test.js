@@ -137,6 +137,25 @@ test("층 색이 한 벌이다 — diagram.js LAYERS ↔ app.css --l1~--l5 (색�
   }
 });
 
+test("설계 흐름 3D 블록 면 색이 층판 팔레트다 — diagram.js LAYERS.fill ↔ app.css --fd-t/-s/-f", () => {
+  // 흐름 탭(.fd)의 3면 블록은 블록도 층판 팔레트를 그대로 쓴다(v1.35 — "두 탭이 같은 팔레트"가
+  // 이 디자인의 전제). 값이 CSS 사본이라 층 색 가드와 같은 관례로 대조한다 — 안 그러면 블록도
+  // 팔레트를 손질할 때 이 사본만 조용히 남는다(리뷰 지적). 단계 → 층 대응은 미학적 배정이라
+  // 여기 손으로 적는다. apply(수동 관문 주의색)는 층판에 없는 자체 색이라 제외
+  const css = read("../../css/app.css");
+  const FD_LAYER = { doc: 1, envelope: 2, seed: 3, design: 4, eval: 5 };
+  const byN = Object.fromEntries(DESIGN_ORDER.map((s) => [s.n, s]));
+  for (const [key, n] of Object.entries(FD_LAYER)) {
+    const m = css.match(new RegExp(
+      `\\.fd \\.fd-step\\[data-key="${key}"\\] \\{ --fd-t: (#[0-9a-fA-F]{3,6}); `
+      + `--fd-s: (#[0-9a-fA-F]{3,6}); --fd-f: (#[0-9a-fA-F]{3,6}); \\}`));
+    assert.ok(m, `app.css에 .fd ${key}의 세 면 색 선언이 있어야 함`);
+    assert.equal(norm(m[1]), norm(byN[n].tint), `${key} 윗면 ≠ 층${n} fill.top`);
+    assert.equal(norm(m[2]), norm(byN[n].edge), `${key} 옆면 ≠ 층${n} fill.side`);
+    assert.equal(norm(m[3]), norm(byN[n].front), `${key} 앞면 ≠ 층${n} fill.front`);
+  }
+});
+
 test("작은 글자 색 조합이 WCAG AA(4.5:1)를 넘는다 — 배지·태그·칩", () => {
   // 층 색은 판 틴트가 아니라 **흰 글자가 얹히는 배지·태그**다. 밝은 초록/주황으로
   // 잡으면 3.4/2.9까지 떨어진다 — 실제로 그렇게 회귀시킨 적이 있어 테스트로 못박는다.
@@ -821,8 +840,9 @@ test("헤더 탭이 전부 실제 라우트다 — 죽은 탭 금지", () => {
 // 두는 이유: 순서가 뜻을 갖는 지금은 "조용히 바뀌었다"가 곧 화면이 거짓말하는 것이다
 const PIPELINE = [
   "aircraft",                            // 무엇을 설계하나 — 기체 (v1.04, 모든 단계의 입력)
+  "blocks",                              // 무엇의 파라미터를 채우나 — 법칙 구조 (v1.35, 대상 → 구조 → 실행)
   "flow",                                // 사슬 한 화면 — 오케스트레이션 층 (v1.33, 유기화 3단계)
-  "blocks", "envelope", "trim",          // 구조와 영역
+  "envelope", "trim",                    // 영역
   "gains", "margins", "autodesign",      // 선형 설계
   "sim", "world",                        // 한 번 날려 보고 눈으로 확인
   "influence",                           // 격자 전체로 판정

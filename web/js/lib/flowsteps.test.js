@@ -3,7 +3,7 @@ import test from "node:test";
 
 import {
   FLOW_STAGES, applyStateVerdict, designVerdict, docVerdict, envelopeVerdict,
-  evalVerdict, seedStateVerdict,
+  evalVerdict, seedStateVerdict, stageArtifact,
 } from "./flowsteps.js";
 
 test("단계 순서 — 실행 다섯 + 수동 관문 하나, apply만 manual", () => {
@@ -69,4 +69,23 @@ test("채택·반영 — 확정 표 상태와 설계 결과 유무로 관문 상
   assert.equal(ready.tone, "na");
   assert.match(ready.text, /문서에 반영/);
   assert.match(applyStateVerdict(null, false).text, /먼저/);
+});
+
+test("단계 산출물 — 어디에 남았나(다이어그램 발치줄), 안 쓴 문서·없는 결과는 위조하지 않는다", () => {
+  assert.deepEqual(stageArtifact("doc", null), [{ label: "저장 없음 — 문서 판정만", to: null }]);
+  assert.deepEqual(stageArtifact("envelope", {}), [{ label: "저장 없음 — 조회 계산", to: null }]);
+  assert.deepEqual(stageArtifact("design", null), [{ label: "결과 저장소(잡 산출물)", to: null }]);
+  assert.deepEqual(stageArtifact("design", { resultId: "abc123" }),
+    [{ label: "결과 abc123", to: "design" }]);
+  assert.deepEqual(stageArtifact("eval", { resultId: "e1" }), [{ label: "결과 e1", to: "brief" }]);
+  // 시드 — 채택·저장(ok)이면 결과와 문서 리비전 둘 다, 미채택(bad)이면 결과만
+  assert.deepEqual(stageArtifact("seed", { resultId: "r1", verdict: { tone: "ok" }, echo: { revision: 3 } }),
+    [{ label: "결과 r1", to: "brief" }, { label: "문서 리비전 3에 저장", to: "aircraft" }]);
+  assert.deepEqual(stageArtifact("seed", { resultId: "r1", verdict: { tone: "bad" }, echo: { revision: 2 } }),
+    [{ label: "결과 r1", to: "brief" }]);
+  assert.deepEqual(stageArtifact("seed", { verdict: { tone: "ok" } }),
+    [{ label: "저장 없음 — 미실행·탐색 생략", to: null }]);
+  // apply는 목적지 프레이밍 — "저장됐다"가 아니라 "쓰는 곳"(반영 여부는 판정 칩 몫)
+  assert.deepEqual(stageArtifact("apply", null),
+    [{ label: "쓰는 곳 — 문서 law.gain_tables(확정 표)", to: "gains" }]);
 });

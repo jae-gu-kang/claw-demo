@@ -204,6 +204,29 @@ export function designValue(catalog, table) {
   return designPointValue(table, catalog?.design_index);
 }
 
+/** 게인 카드의 「설계값」 배지 글 — 지금 계산에 쓰는 기체 문서(law.design)의 값 (v1.35).
+ *
+ * 재료는 카탈로그가 싣는 두 절(scas_design·autopilot_design — 축/필드 kwargs 전량)뿐이다.
+ * 카탈로그가 안 싣는 절(작동기·항법·유도·믹서 — 문서·레지스트리 소관)과 카탈로그
+ * 부재(미설계 422·조회 실패)는 null — 배지를 위조하지 않는다. SCAS는 축이 셋이라
+ * 축 페이지(scas/pitch…)는 그 축 값 하나, 루트(scas)는 값이 있는 축을 나란히 적는다. */
+export function designBadge(catalog, path, key) {
+  const fmtV = (v) => (typeof v === "number" && Number.isFinite(v)
+    ? String(Number(v.toPrecision(4))) : null);
+  if (!catalog) return null;
+  if (path[0] === "scas") {
+    const axes = ["pitch", "roll", "yaw"];
+    if (axes.includes(path[1])) return fmtV(catalog.scas_design?.[path[1]]?.[key]);
+    const parts = axes
+      .map((a) => [{ pitch: "피치", roll: "롤", yaw: "요" }[a], fmtV(catalog.scas_design?.[a]?.[key])])
+      .filter(([, v]) => v != null)
+      .map(([name, v]) => `${name} ${v}`);
+    return parts.length ? parts.join(" · ") : null;
+  }
+  if (path[0] === "autopilot") return fmtV(catalog.autopilot_design?.[key]);
+  return null;
+}
+
 /** 자리를 끌 때 굳힐 상수 = 편집된 표의 설계점 값.
  *
  * 카탈로그의 원래 설계 상수로 되돌리면, 표를 고쳐 놓고 스케줄만 끈 사용자에게

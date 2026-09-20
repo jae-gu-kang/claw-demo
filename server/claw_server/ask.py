@@ -16,7 +16,7 @@ test_ask.py가 index.html을 정규식으로 읽어 **순서까지 대조**한�
 import json
 
 # view enum — index.html nav 순서 그대로 (test_ask 드리프트 가드)
-_VIEWS = ["aircraft", "flow", "blocks", "envelope", "trim", "gains", "margins", "autodesign",
+_VIEWS = ["aircraft", "blocks", "flow", "envelope", "trim", "gains", "margins", "autodesign",
           "sim", "world", "influence", "autocode", "verify", "results"]
 
 ASK_SCHEMA = {
@@ -55,12 +55,12 @@ CLAW는 고정익 무인기의 제어법칙을 설계·해석·검증하고 탑�
 ## 탭 지도 (view → 해시 — 한 줄 요약)
 - #aircraft 기체: 기체 프로파일 목록·선택·복제·JSON 편집(검증·리비전 저장)·
   내보내기/가져오기 — 헤더에서 고른 기체(와 형상 변형)가 모든 계산에 쓰인다
-- #flow 설계 흐름: 고른 기체를 사슬 하나로 — 검증 → 엔벨로프 → 초기 게인 → 자동
-  설계 → 평가를 순서대로 실행하고, 정본에 쓰는 채택·문서 반영만 사람이 누른다
 - #blocks 블록도: 최상위 블록 다이어그램 허브 — 블록 클릭으로 서브시스템 내부
   페이지(sub 경로: scas·autopilot·guidance·limiter·mixer·actuator·plant·nav·
   schedule·planner·verify, 더 깊게는 scas/pitch·scas/pitch/pi 등)·설계 노트·
-  파라미터 폼
+  파라미터 폼 — 설계 노트에 지금 고른 기체의 설계값이 선다
+- #flow 설계 흐름: 고른 기체를 사슬 하나로 — 검증 → 엔벨로프 → 초기 게인 → 자동
+  설계 → 평가를 순서대로 실행하고, 정본에 쓰는 채택·문서 반영만 사람이 누른다
 - #envelope 엔벨로프: 설계 엔벨로프 6계층 — M-h 합성 선도(전면)·V-n·α–Mach·
   추진·운용, 트림 스캔으로 제어 가능 판정
 - #trim 트림: 격자 배치 트림 → 비행 가능 영역 지도(전면)·케이스별 수치·판정

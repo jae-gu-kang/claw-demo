@@ -13,6 +13,7 @@
 
 import { api } from "../api.js";
 import { el } from "../dom.js";
+import { designBadge } from "../lib/gainsync.js";
 import {
   BLOCK_DOCS, FLOW_HEADINGS, GAIN_GROUPS, HEADINGS, PAGE_ASIDES, TUNING_ORDER,
   TUNING_ORDER_PAGE, UNDRAWN_GAINS, docFor, gainCountFor, gainsFor,
@@ -169,7 +170,7 @@ export function renderPageManual(box, path, sub, diagram = {}) {
   // 경고라는 유일한 신호마저 사라져 개발 중에 아무도 모른다
   let ready = Promise.resolve();
   if (groups.length) {
-    ready = renderGainCards(wrap, groups, cards, diagram)
+    ready = renderGainCards(wrap, path, groups, cards, diagram)
       .catch((e) => { console.error("게인 카드 렌더 실패", e); });
   }
 
@@ -210,12 +211,16 @@ export function renderPageManual(box, path, sub, diagram = {}) {
 값이 없으면 그 칸만 빈다. 서버가 죽었다고 매뉴얼이 사라지면 안 된다.
 
 한 페이지 몫이라 ref마다 요청 하나다 (홈에 사전을 다 두던 때는 6건이었다). */
-async function renderGainCards(box, groups, cards, diagram = {}) {
+async function renderGainCards(box, path, groups, cards, diagram = {}) {
   const fmt = (v) => {
     if (typeof v !== "number") return String(v ?? "");
     if (Math.abs(v) >= 1e29) return "제한 없음";
     return String(Number(v.toPrecision(4)));
   };
+  // 지금 계산에 쓰는 기체의 설계값(카탈로그) — 뷰(blocks.js)가 이미 받는 그 응답의 약속을
+  // 나눠 받는다(요청 추가 없음, loadGainsCatalog는 실패를 null로 삼킨다 — 거부 없음).
+  // 못 받으면(미설계 422·조회 실패) 배지 없이 그 사실을 적는다
+  const designCat = await (diagram.designCatalog ?? null); // 이름이 cat이면 아래 ref split의 cat(카테고리 문자열)과 섀도잉된다(리뷰 지적)
   for (const g of groups) {
     // 다른 섹션과 같은 fold를 쓴다 — 길이로 여닫던 기준(OPEN_MAX)은 없앴다.
     // 이제 기본은 전부 닫힘이고, 닫힌 줄에 ref와 개수가 남아 뭐가 있는지는 보인다
@@ -223,6 +228,13 @@ async function renderGainCards(box, groups, cards, diagram = {}) {
       el("span", { class: "man-brief" }, `${g.ref} · ${g.rows.length}개`));
     const lead = el("p", { class: "man-lead" }); lead.innerHTML = g.lead;
     set.append(lead);
+    // 설계값 배지의 출처 한 줄 — 카탈로그가 아는 두 절(SCAS·AP)에서만. 못 받았으면
+    // 조용히 비우지 않고 사유를 말한다(미설계 기체의 배지 부재가 고장으로 읽히지 않게)
+    if (g.ref === "fcl/ScasAxis" || g.ref === "fcl/Autopilot") {
+      set.append(el("p", { class: "man-lead man-design-note" }, designCat
+        ? "「설계값」 = 지금 계산에 쓰는 기체 문서(law.design)의 값 — 스케줄이 켜진 자리는 실행 시점에 표 룩업이 곱해집니다. 편집은 아래 파라미터 폼·게인 탭."
+        : "「설계값」 배지가 없습니다 — 게인 카탈로그를 못 받았습니다(게인 미설계 기체 포함). 기체 탭 「초기 게인」에서 채우면 여기 섭니다."));
+    }
     box.append(set);
 
     let fields = [];
@@ -235,11 +247,18 @@ async function renderGainCards(box, groups, cards, diagram = {}) {
     const byName = Object.fromEntries(fields.map((f) => [f.name, f]));
     for (const d of g.rows) {
       const f = byName[d.key];
+      // 지금 문서의 설계값 — 레지스트리 「기본」(범용 기본값)과 별개의 배지다 (v1.35,
+      // 판정·값은 카탈로그 응답 그대로 — lib/gainsync.designBadge). 모르는 자리는 배지 없음
+      const dv = designBadge(designCat, path, d.key);
       // tabindex −1: focus()는 되고 탭 순서에는 안 들어간다 (그림 클릭으로 오는 자리)
       const row = el("div", { class: "man-gain", tabindex: "-1" },
         el("div", { class: "man-gname" },
           el("code", {}, d.key),
           f?.unit ? el("span", { class: "man-unit" }, `[${f.unit}]`) : null,
+          dv != null
+            ? el("span", { class: "man-def man-design",
+              title: "지금 계산에 쓰는 기체 문서(law.design)의 설계값 — 스케줄이 켜진 자리는 실행 시점에 표 룩업이 곱해진다" },
+              `설계값 ${dv}`) : null,
           f && f.default !== undefined
             ? el("span", { class: "man-def" }, `기본 ${fmt(f.default)}`) : null,
           f && (f.lo !== null || f.hi !== null)

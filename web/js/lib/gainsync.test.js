@@ -3,8 +3,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  constantOf, designCoord, designPointValue, designValue, foldToConstant, fullConstants,
-  lockedParams, scasKwargs, seedTable, selectedSlots, slotIndex, valueAt, withConstant,
+  constantOf, designBadge, designCoord, designPointValue, designValue, foldToConstant,
+  fullConstants, lockedParams, scasKwargs, seedTable, selectedSlots, slotIndex, valueAt,
+  withConstant,
 } from "./gainsync.js";
 
 // 설계점 = 인덱스 1 (스케일 1). 인덱스 0은 저마하 스케일 4배 자리.
@@ -189,4 +190,27 @@ test("설계점 좌표는 한 번 굳히면 표가 갈려도 흔들리지 않는
   };
   assert.equal(designCoord({ ...swapped, design_coord: 0.6 }), 0.6);
   assert.equal(designCoord(swapped), 1.2, "굳히지 않으면 갈아낀 표를 읽는다");
+});
+
+test("설계값 배지 — 카탈로그가 아는 절(SCAS·AP)만, 축 페이지는 그 축·루트는 세 축", () => {
+  const cat = {
+    scas_design: {
+      pitch: { kp: -2.0, ki: -0.5, k_rate: 0.4 },
+      roll: { kp: 1.0 },
+      yaw: { kp: 0.5, washout_tau: 1.2 },
+    },
+    autopilot_design: { kp_alt: 0.08, tau_hdg: 2.5 },
+  };
+  assert.equal(designBadge(cat, ["scas", "pitch"], "kp"), "-2");
+  assert.equal(designBadge(cat, ["scas", "pitch", "pi"], "ki"), "-0.5");
+  assert.equal(designBadge(cat, ["scas", "yaw"], "washout_tau"), "1.2");
+  // 루트 scas — 축마다 값이 달라 세 축을 나란히 적고, 없는 축 값은 뺀다(위조 금지)
+  assert.equal(designBadge(cat, ["scas"], "kp"), "피치 -2 · 롤 1 · 요 0.5");
+  assert.equal(designBadge(cat, ["scas"], "ki"), "피치 -0.5");
+  assert.equal(designBadge(cat, ["autopilot", "alt"], "kp_alt"), "0.08");
+  assert.equal(designBadge(cat, ["autopilot"], "tau_hdg"), "2.5");
+  // 카탈로그가 안 싣는 절(작동기·항법·유도)·카탈로그 부재(미설계 422·조회 실패)는 null — 배지 없음
+  assert.equal(designBadge(cat, ["actuator"], "wn"), null);
+  assert.equal(designBadge(null, ["scas", "pitch"], "kp"), null);
+  assert.equal(designBadge(cat, ["scas", "pitch"], "없는키"), null);
 });
