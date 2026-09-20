@@ -1,7 +1,7 @@
 {
  "golden": "sim_landing",
  "mode": "full",
- "captured_at": "10fd39d+dirty",
+ "captured_at": "e75a09f+dirty",
  "value": {
   "dict": {
    "t": {
@@ -5850,7 +5850,7 @@
        "name": "예제 델타윙",
        "variant": null,
        "revision": 0,
-       "fingerprint": "627fbbf154983a90",
+       "fingerprint": "9ddb480f9c5ddb03",
        "plant_fingerprint": "dc86fad3932a3446",
        "is_example": true,
        "source": "default-example"

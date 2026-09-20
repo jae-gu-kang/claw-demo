@@ -49,9 +49,12 @@ def assemble_law(
     ap = autopilot if autopilot is not None else Autopilot(**profile.autopilot_params())
     mixer = mixer if mixer is not None else Mixer(**profile.mixer_params())
     law = profile.law
+    # 스케줄 표 우선순위: 주입(파라미터 스터디) > 문서의 확정 표(자동 설계 반영, v2 — 낡았으면
+    # confirmed_gain_tables가 거부한다) > 규칙 스케줄(설계 상수 × q̄ 역비)
     schedule = (
         GainSchedule(
-            gain_tables if gain_tables is not None else profile.gain_tables(),
+            gain_tables if gain_tables is not None
+            else (profile.confirmed_gain_tables() or profile.gain_tables()),
             filter_tau=law["filter_tau"],
         )
         if with_schedule

@@ -608,3 +608,79 @@ def test_profile_job_cancel_before_the_write_does_not_write_and_after_it_stays_d
     assert j["status"] == "done"
     assert client.get(f"/api/results/{j['result_id']}").json()["written"] is True
     assert client.get("/api/profiles/cancel-late").json()["revision"] == rev + 1
+
+
+def test_listing_carries_the_confirmed_gain_tables_summary(client):
+    """확정 게인 표(v2) 요약 — 없으면 null, 있으면 {source, stale}. 반영 뒤 문서가 바뀌면 stale이
+    참이 된다(법칙 조립 거부와 같은 판정 — build.gain_tables_stale)."""
+    from claw.profile import build_profile, validate_document
+    from claw.profile.fingerprint import gain_tables_basis_fingerprint
+
+    d = _doc(pid="gt-delta")
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    row = next(p for p in client.get("/api/profiles").json() if p["id"] == "gt-delta")
+    assert row["gain_tables"] is None
+
+    doc = client.get("/api/profiles/gt-delta").json()["document"]
+    grid = doc["law"]["schedule"]["mach_grid"]
+    k0 = build_profile(validate_document(doc)).design_gains()["pitch.kp"]
+    doc["law"]["gain_tables"] = {
+        "tables": {"pitch.kp": {"axes": {"mach": list(grid)}, "data": [k0] * len(grid),
+                    "extrapolate": "clip"}},
+        "provenance": {"source": "auto_design",
+                       "basis_fingerprint": gain_tables_basis_fingerprint(validate_document(doc))},
+    }
+    r = client.put("/api/profiles/gt-delta", json={"base_revision": 1, "document": doc})
+    assert r.status_code == 200, r.text
+    row = next(p for p in client.get("/api/profiles").json() if p["id"] == "gt-delta")
+    # 기본 문서는 신선하지만 플랜트를 바꾸는 변형(full-stores)에서는 표가 낡음이다 — 사전 통보
+    assert row["gain_tables"] == {"source": "auto_design", "stale": False, "stale_variants": ["full-stores"]}
+    cat = client.get("/api/gains/catalog", params={"profile_id": "gt-delta"}).json()
+    assert cat["confirmed"] == {"slots": ["pitch.kp"], "stale": False}
+
+    # 반영 뒤 플랜트를 고치면 낡는다 — 요약이 stale을 말하고 시뮬 제출이 422로 거부한다
+    doc2 = client.get("/api/profiles/gt-delta").json()["document"]
+    doc2["mass"]["m_empty"] += 1.0
+    assert client.put("/api/profiles/gt-delta",
+                      json={"base_revision": 2, "document": doc2}).status_code == 200
+    row = next(p for p in client.get("/api/profiles").json() if p["id"] == "gt-delta")
+    assert row["gain_tables"] == {"source": "auto_design", "stale": True, "stale_variants": ["full-stores"]}
+    r = client.post("/api/sim/run", json={
+        "trim": {"name": "t", "mach": 0.45, "alt": 1000.0, "fuel": 200.0},
+        "modes": [{"name": "hold", "speed": 150.0, "alt": 1000.0, "heading": 0.0, "exit": ["time_ge", 1e9]}],
+        "t_end": 1.0, "profile": {"id": "gt-delta"}})
+    assert r.status_code == 422 and r.json()["detail"]["path"] == "/law/gain_tables", r.text
+    # 낡음을 고치러 오는 게인 탭(카탈로그)은 낡은 표에도 죽지 않는다 — 규칙 표 명시 주입
+    cat = client.get("/api/gains/catalog", params={"profile_id": "gt-delta"})
+    assert cat.status_code == 200 and cat.json()["confirmed"]["stale"] is True, cat.text
+
+
+def test_quick_seed_adoption_clears_the_confirmed_gain_tables(client, wait_job, unseeded_doc):
+    """새 시드는 새 설계의 출발 — 채택 저장이 옛 확정 표(v2)를 지운다. 안 지우면 design이 바뀌어 기준
+    지문이 어긋나 그 기체의 이후 계산 전부가 낡음 422로 죽는데 스위트는 초록이다 (v1.31 리뷰 요구 핀)."""
+    from claw.profile import validate_document
+    from claw.profile.fingerprint import gain_tables_basis_fingerprint
+
+    assert client.post("/api/profiles", json={"document": unseeded_doc("qs-clear")}).status_code == 201
+    r = client.post("/api/profiles/qs-clear/quick-seed", json={"base_revision": 1})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=180.0)
+    assert client.get(f"/api/results/{j['result_id']}").json()["written"] is True
+
+    doc = client.get("/api/profiles/qs-clear").json()["document"]
+    grid = doc["law"]["schedule"]["mach_grid"]
+    doc["law"]["gain_tables"] = {
+        "tables": {"pitch.kp": {"axes": {"mach": list(grid)}, "data": [-1.0] * len(grid),
+                                "extrapolate": "clip"}},
+        "provenance": {"source": "test",
+                       "basis_fingerprint": gain_tables_basis_fingerprint(validate_document(doc))}}
+    assert client.put("/api/profiles/qs-clear",
+                      json={"base_revision": 2, "document": doc}).status_code == 200
+
+    r2 = client.post("/api/profiles/qs-clear/quick-seed", json={"base_revision": 3})
+    assert r2.status_code == 202, r2.text
+    j2 = wait_job(r2.json()["id"], timeout=180.0)
+    body2 = client.get(f"/api/results/{j2['result_id']}").json()
+    assert body2["written"] is True, body2.get("seed", {}).get("reason_text")
+    got = client.get("/api/profiles/qs-clear").json()["document"]
+    assert got["law"]["gain_tables"] is None  # 채택 저장이 옛 확정 표를 지웠다

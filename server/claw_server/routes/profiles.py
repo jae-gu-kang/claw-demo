@@ -187,7 +187,10 @@ def submit_quick_seed(profile_id: str, req: QuickSeedIn, request: Request, respo
         if seed["ok"]:
             design = copy.deepcopy(seed["design"])
             design["provenance"].update(job=job.id, base_revision=rev)
-            law = {"design": design, **({"schedule": seed["schedule"]} if seed["schedule_created"] else {})}
+            # 새 시드는 새 설계의 출발 — 옛 확정 게인 표(자동 설계 반영)는 이 설계값과 무관해 지운다.
+            # 안 지우면 낡음 대조가 거부해 다음 계산이 전부 조립에서 죽는다 (engine seed.py cand와 같은 규칙)
+            law = {"design": design, "gain_tables": None,
+                   **({"schedule": seed["schedule"]} if seed["schedule_created"] else {})}
         _finish_profile_job(request, job, "quick_seed", profile_id, doc, rev, built, law, {"seed": seed},
                             ok=seed["ok"])
 

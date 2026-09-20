@@ -90,6 +90,7 @@ export function render() {
   };
   const errBox = el("div");
   const statusLine = el("p", { class: "tab-status" });
+  const confirmedBox = el("div"); // 문서의 확정 게인 표(v2) 고지 — 이 화면(규칙 세계)과 조립 정본의 차이
 
   // ── 튜닝 지표 카드 (평가와 같은 카드, views/evalcards.js 공용) ──────
   const stripStatus = el("span", { class: "hint" });
@@ -199,6 +200,20 @@ export function render() {
     return false;
   };
 
+  // 문서에 확정 게인 표가 있으면(자동 설계 반영, v2) 조립 정본은 이 화면의 규칙 표가 아니라 그
+  // 표다 — 그 사실과 낡음을 여기서 말한다. 판정(stale)은 서버 응답이 동봉한다(재기술 없음)
+  const paintConfirmed = () => {
+    const c = catalog?.confirmed;
+    clear(confirmedBox);
+    if (!c) return;
+    confirmedBox.append(el("p", { class: c.stale ? "error-box" : "hint", style: "margin:4px 0 0" },
+      c.stale
+        ? "문서의 확정 게인 표가 낡았습니다 — 반영한 뒤 문서가 바뀌어 시뮬·코드 조립이 거부합니다. "
+          + "자동 설계를 다시 돌려 반영하거나 기체 탭에서 표를 지우세요."
+        : `문서에 확정 게인 표가 있습니다(자리 ${c.slots.length}개 — 자동 설계 반영). 시뮬·코드는 그 표로 `
+          + "조립됩니다. 이 화면의 편집을 [시뮬·코드에 적용]하면 작업본이 그 표를 덮습니다."));
+  };
+
   const load = async ({ fresh = false } = {}) => {
     try {
       clear(errBox);
@@ -211,6 +226,7 @@ export function render() {
       if (fresh) markSeen();
       syncFromStore({ force: fresh });
       renderTables(slots, statusLine);
+      paintConfirmed();
       statusLine.textContent = fresh
         ? "서버 설계 제안으로 되돌렸습니다 (미적용) — '시뮬·코드에 적용'을 눌러야 형상이 바뀝니다."
         : adoptedText(adopted);
@@ -280,7 +296,7 @@ export function render() {
         }, "설계값 다시 불러오기"),
         el("button", { class: "primary", onclick: apply }, "시뮬·코드에 적용"),
       ],
-      extra: [statusLine, errBox],
+      extra: [statusLine, confirmedBox, errBox],
     }),
     // 튜닝 지표 카드 — 게인을 만지는 화면에 상시로 서는 카드 표면(값·기준·최악
     // 운용점). 계산은 버튼 트리거(비용)고, 편집이 생기면 stale 배지가 먼저 말한다

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveSummary, deTrimStatus, designSource, seedSummary } from "./quickseed.js";
+import { deriveSummary, deTrimStatus, designSource, gainTablesStatus, seedSummary } from "./quickseed.js";
 
 const SEED = {
   ok: true, reason: null, reason_text: null, schedule_created: true, elapsed_s: 0.4,
@@ -65,4 +65,23 @@ test("도출 요약 — 표 줄과 검사 통계", () => {
   const failed = deriveSummary({ derive: { ok: false, reason: "de_trim_no_requirement", reason_text: "트림이 없다" } });
   assert.equal(failed.stats, null);
   assert.match(failed.headline, /트림이 없다/);
+});
+
+
+test("확정 게인 표 상태 — 없음·정상·낡음 (판정은 서버 요약 그대로)", () => {
+  assert.equal(gainTablesStatus(null).kind, "none");
+  assert.equal(gainTablesStatus({ gain_tables: null }).kind, "none");
+  const ok = gainTablesStatus({ gain_tables: { source: "auto_design", stale: false } });
+  assert.equal(ok.kind, "ok");
+  assert.match(ok.label, /auto_design/);
+  const stale = gainTablesStatus({ gain_tables: { source: "auto_design", stale: true } });
+  assert.equal(stale.kind, "stale");
+  assert.equal(stale.stale, true);
+  assert.match(stale.label, /낡았습니다/);
+  assert.match(gainTablesStatus({ gain_tables: { source: null, stale: false } }).label, /기록 없음/);
+  // 기본은 신선한데 변형에서만 낡음 — 그 변형 이름을 미리 말한다(변형 계산 422가 첫 통보가 되지 않게)
+  const v = gainTablesStatus({ gain_tables: { source: "auto_design", stale: false, stale_variants: ["heavy"] } });
+  assert.equal(v.kind, "ok");
+  assert.deepEqual(v.staleVariants, ["heavy"]);
+  assert.match(v.label, /heavy/);
 });

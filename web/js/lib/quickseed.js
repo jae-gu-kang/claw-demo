@@ -54,6 +54,26 @@ export function seedSummary(body) {
   };
 }
 
+/** 확정 게인 표(v2) 상태 한 줄 — 목록 요약(gain_tables: {source, stale}|null)에서. 낡음 판정은 서버(조립
+ *  거부와 같은 자)가 동봉한다 — 여기는 문구뿐이다. */
+export function gainTablesStatus(summary) {
+  const gt = summary?.gain_tables;
+  if (!gt) {
+    return { kind: "none", stale: false,
+      label: "확정 게인 표 없음 — 자동 설계 결과를 [문서에 반영]하면 여기 선다(조립은 규칙 스케줄)" };
+  }
+  if (gt.stale) {
+    return { kind: "stale", stale: true, staleVariants: gt.stale_variants ?? [],
+      label: "확정 게인 표가 낡았습니다 — 반영한 뒤 문서가 바뀌어 법칙 조립이 거부합니다. "
+        + "자동 설계를 다시 돌려 반영하거나 표를 지웁니다(없음으로)" };
+  }
+  const sv = gt.stale_variants ?? [];
+  return { kind: "ok", stale: false, staleVariants: sv,
+    label: `확정 게인 표 (출처 ${gt.source ?? "기록 없음"}) — 조립이 규칙 스케줄 대신 이 표를 씁니다`
+      + (sv.length ? `. 단 문서를 바꾸는 형상 변형(${sv.join(", ")})에서는 낡음이라 조립이 거부합니다`
+        + " — 그 변형으로 계산하려면 표를 지우거나 변형 없이 설계합니다" : "") };
+}
+
 /** 할당 δe_trim 표 상태 — 표의 출처는 문서가, 낡음은 서버 목록 요약(de_trim.stale — 플랜트 지문 대조)이 안다. */
 export function deTrimStatus(doc, summary) {
   const t = doc?.law?.alloc?.de_trim ?? null;

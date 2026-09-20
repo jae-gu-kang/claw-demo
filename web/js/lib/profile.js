@@ -76,6 +76,7 @@ export const NOT_AIRCRAFT = {
   "POST /profiles/aero-slice": "공력 DB 뷰어 — 기체 id가 아니라 편집 중인 문서를 본문으로 받는다",
   "POST /profiles/aero-stability": "정적 안정성 도함수 — 기체 id가 아니라 편집 중인 문서를 본문으로 받는다",
   "POST /profiles/seed-basis": "초기 게인 산출 근거 — 기체 id가 아니라 편집 중인 문서를 본문으로 받는다",
+  "POST /design/{result_id}/apply-gains": "확정 게인 반영 — 대상 기체는 결과가 안다(잰 문서의 지문 대조), 선택을 실으면 안 된다",
   "POST /profiles/{profile_id}/quick-seed": "초기 게인 빠른 탐색 잡 — 저장된 기체 id가 경로에 있다(헤더 선택과 무관)",
   "POST /profiles/{profile_id}/derive-de-trim": "δe_trim 표 도출 잡 — 저장된 기체 id가 경로에 있다(헤더 선택과 무관)",
 };

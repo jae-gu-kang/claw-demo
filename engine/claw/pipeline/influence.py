@@ -188,8 +188,13 @@ def make_law(shape: Shape):
     # 같은 본문에 codegen 라우트는 422, 이 라우트는 200이 되는 불일치
     gain_tables = shape.gain_tables if not shape.with_schedule else None
     if shape.with_schedule and (shape.gain_tables is not None or shape.gain_scale):
+        # 배율의 기저는 조립 기본과 같은 표다 — 확정 표(v2)가 있으면 그것, 아니면 규칙 표
+        # (assemble_law 우선순위와 동일). 규칙 표를 고정 기저로 쓰면 확정 표 문서에서 스윕
+        # 중심값(배율 1.0)이 실제 운용 법칙과 **다른 법칙**이 된다 — 위 주석의 그 불일치다.
+        # 낡은 확정 표는 여기서도 거부된다(confirmed_gain_tables) — 다른 라우트와 같은 판정
         gain_tables = dict(
-            profile.gain_tables() if shape.gain_tables is None else shape.gain_tables
+            (profile.confirmed_gain_tables() or profile.gain_tables())
+            if shape.gain_tables is None else shape.gain_tables
         )
         for name, scale in shape.gain_scale.items():
             if name not in gain_tables:

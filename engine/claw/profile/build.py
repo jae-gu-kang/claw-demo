@@ -218,6 +218,41 @@ class BuiltProfile:
         }
 
     @property
+    def gain_tables_stale(self) -> bool:
+        """확정 게인 표가 낡았는가 — 반영 뒤 문서(플랜트·설계·한계 등)가 바뀌었으면 낡았다.
+
+        기준은 provenance의 basis_fingerprint(반영 시점의, 표 절을 뺀 적용 문서 지문 —
+        fingerprint.gain_tables_basis_fingerprint)와 지금 문서의 같은 지문 대조다. 기록이 없으면(손으로
+        넣은 표) 근거 없는 표라 낡은 것으로 취급한다 — δe_trim과 달리 표가 설계에서만 나오기 때문이다.
+        지문 밖 변경(표시 모델·미션 템플릿·출처 기록)은 낡음이 아니다."""
+        gt = self.doc["law"]["gain_tables"]
+        if gt is None:
+            return False
+        prov = gt.get("provenance")
+        if not isinstance(prov, dict):
+            return True
+        from claw.profile.fingerprint import gain_tables_basis_fingerprint
+
+        return prov.get("basis_fingerprint") != gain_tables_basis_fingerprint(self.doc)
+
+    def confirmed_gain_tables(self) -> dict | None:
+        """문서의 확정 게인 표(자동 설계 반영, v2) — {자리: Table} 또는 None(없음).
+
+        낡은 표로는 조립하지 않는다(alloc_trim_table의 δe_trim 낡음 거부와 같은 원칙) — 게인이
+        틀리면 마진·비행성 판정 전부가 그 틀린 형상을 말하게 된다. 조립 우선순위는 assemble_law:
+        주입(gain_tables 인자) > 이 표 > 규칙 스케줄(gain_tables())."""
+        gt = self.doc["law"]["gain_tables"]
+        if gt is None:
+            return None
+        if self.gain_tables_stale:
+            raise ProfileError("/law/gain_tables",
+                               "확정 게인 표가 낡았다 — 반영한 뒤 문서(플랜트·설계·한계 등)가 바뀌었거나,"
+                               " 기준 지문 기록이 없거나, 문서를 바꾸는 형상 변형 위다(표는 기본 문서에서"
+                               " 확정된 것이라 그 변형에서는 쓸 수 없다). 자동 설계를 다시 돌려 반영하거나"
+                               " 표를 지운다")
+        return {name: _mach_table(t, name) for name, t in gt["tables"].items()}
+
+    @property
     def de_trim_stale(self) -> bool:
         """도출한 δe_trim 표가 이 플랜트를 덮지 않는가 — 도출이 요구를 잰 플랜트 지문 목록(기본 문서 + 그때의 형상
         변형들)에 지금 플랜트가 없으면 낡았다. 기본 문서 지문 하나만 대조하면 플랜트를 바꾸는 형상 변형이 전부

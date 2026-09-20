@@ -19,8 +19,9 @@ def _fps(doc, variant=None):
 def test_excluded_fields_are_pinned():
     # 이 목록이 넓어지면 "같은 기체"의 정의가 넓어진다 — 조용히 늘면 안 된다
     assert FP_EXCLUDED == ("/id", "/name", "/description", "/is_example", "/variants",
-                           "/law/design/provenance", "/law/alloc/de_trim/provenance", "/mission_template",
-                           "/display")
+                           "/law/design/provenance", "/law/alloc/de_trim/provenance",
+                           "/law/gain_tables/provenance",  # v2 — 표는 지문 안, 출처 기록만 밖
+                           "/mission_template", "/display")
 
 
 def test_mission_template_does_not_change_either_fingerprint():

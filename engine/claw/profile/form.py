@@ -141,6 +141,11 @@ def form_spec() -> dict:
                    help=f"그룹: {', '.join(SCHEDULABLE)}"),
                 _f("multichoice", "/law/schedule/scheduled", "스케줄 적용 자리", choices=slots),
             ]),
+            _f("text_json", "/law/gain_tables", "확정 게인 표", nullable=True,
+               help="자동 설계 산출을 정본에 반영한 마하별 게인 표(스키마 v2) — {tables: {자리: 마하 표}, "
+                    "provenance}. 있으면 조립이 규칙 스케줄 대신 이 표를 쓴다. 반영 잡이 쓰는 절이라 폼에서는 "
+                    "보고 지우는 용도다 — 반영한 뒤 문서를 고치면 낡은 표로 취급돼 조립이 거부한다(자동 설계를 "
+                    "다시 돌려 반영하거나 없음으로 지운다)"),
             _group("/law/alloc", "타면 할당", nullable=True, fields=[
                 _f("number", "/law/alloc/resv_frac", "롤 권한 예비 비율", "-"),
                 _group("/law/alloc/de_trim", "트림 엘레본 표", nullable=True, fields=[

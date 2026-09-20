@@ -527,6 +527,7 @@ function renderResult(box, body, resultId, ctx) {
       + " 다항 정본은 결과 JSON의 gain_export.tables — API 직접 주입용."));
   };
   const adoptMsg = el("span");
+  const applyMsg = el("span");
 
   const covBox = coverageBox(report);
   const sections = [
@@ -628,9 +629,40 @@ function renderResult(box, body, resultId, ctx) {
           clear(adoptMsg).append(el("span", { class: "error-box" }, errorText(e)))) },
           "게인 확정 (스토어 주입)"), adoptMsg,
       );
+      // 정본 되쓰기(v2) — 확정 표를 기체 문서(law.gain_tables) 새 리비전으로. 스토어 주입(위)이
+      // 세션 작업본이라면 이쪽은 정본이다: 페이지를 다시 읽어도, 어느 세션에서도 계산이 이 표로
+      // 조립된다. 예제·형상 변형 결과는 반영 대상이 없다(서버도 거부한다 — 버튼을 안 세운다)
+      if (body.profile?.source === "request" && body.profile.id && !body.profile.variant) {
+        sections.push(
+          el("div", { style: "margin-top:6px" },
+            el("button", { onclick: () => applyToDoc().catch((e) =>
+              clear(applyMsg).append(el("span", { class: "error-box" }, errorText(e)))) },
+              "문서에 반영 (새 리비전)"), applyMsg),
+          el("p", { class: "hint", style: "margin:4px 0 0" },
+            "반영하면 조립 우선순위가 「작업본 주입 > 문서의 확정 표 > 규칙 스케줄」이 된다 — "
+            + "확정(작업본)이 걸려 있으면 그것이 문서 표를 덮는다. 반영한 뒤 문서를 고치면 표가 "
+            + "낡음으로 거부된다(자동 설계를 다시 돌려 반영). 다항은 재양자화 표로 반영되고 그 "
+            + "오차 고지가 출처에 함께 적힌다."),
+        );
+      } else if (body.profile?.variant) {
+        sections.push(el("p", { class: "hint" },
+          "형상 변형 위에서 돈 설계는 기본 문서에 반영할 수 없다 — 기본 형상으로 다시 돌린다."));
+      } else {
+        sections.push(el("p", { class: "hint" },
+          "예제 기체(또는 기체 기록이 없는 옛 결과)는 문서에 반영할 수 없다 — 복제한 기체에서 설계하고 반영한다."));
+      }
     }
   }
   clear(box).append(...sections);
+
+  async function applyToDoc() {
+    const pid = body.profile.id;
+    const head = await api.get(`/profiles/${encodeURIComponent(pid)}`);
+    const r = await api.post(`/design/${encodeURIComponent(resultId)}/apply-gains`,
+      { base_revision: head.revision });
+    clear(applyMsg).append(el("span", { class: "hint" },
+      ` 리비전 ${r.revision}로 반영 — 자리 ${r.slots.length}개. 기체 탭 「게인·δe_trim」 패널이 상태를 보인다.`));
+  }
 }
 
 /** 처방 카드의 근거 — 수치 계층은 lib/autodesign.evidenceLines, 여기는 배치만.

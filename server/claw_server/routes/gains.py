@@ -90,7 +90,11 @@ def gain_slot_catalog(request: Request,
     # 데모 형상이 바뀌었을 때 웹만 옛 값을 보여 준다 (init(dt) 없이 파라미터만 보유한 상태)
     try:
         design = profile.design_gains()
-        law = assemble_law(profile)
+        # 규칙 표를 **명시 주입**해 조립한다 — 이 화면은 규칙 세계의 편집기라서다(제안 표·설계 상수).
+        # 기본 조립은 문서의 확정 표(v2)를 우선하는데, 확정 표가 낡았으면 조립이 거부한다 — 낡음을
+        # 고치러 오는 화면이 그 낡음 때문에 죽으면 안 된다
+        rule_tables = profile.gain_tables()
+        law = assemble_law(profile, gain_tables=rule_tables)
         tables = {name: table_dict(t) for name, t in profile.gain_tables(design).items()}
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
@@ -125,5 +129,11 @@ def gain_slot_catalog(request: Request,
         "default": list(scheduled),
         "design_index": _design_index(tables, design),
         "slots": slots,
+        # 문서의 확정 게인 표(v2) — 있으면 조립 정본이 이 화면의 규칙 표가 아니라 그 표다.
+        # 화면이 그 사실과 낡음을 말할 근거 (판정은 build.gain_tables_stale — 조립 거부와 같은 자)
+        "confirmed": (None if profile.doc["law"]["gain_tables"] is None else {
+            "slots": sorted(profile.doc["law"]["gain_tables"]["tables"]),
+            "stale": profile.gain_tables_stale,
+        }),
         "profile": profile_echo(profile),
     }

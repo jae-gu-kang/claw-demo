@@ -17,7 +17,11 @@ import re
 from claw.profile.errors import ProfileError
 from claw.profile.patch import apply_patch, get_pointer
 
-SCHEMA_VERSION = 1
+# v2 (v1.31): law.gain_tables(확정 게인 표 — 자동 설계 산출의 정본 되쓰기) 추가. 계산에 쓰이는
+# 절이라 OPTIONAL_SECTIONS 방식(지문 밖·버전 불변)이 아니라 버전을 올렸다 — 예제 지문이 바뀌어
+# 옛 결과·스냅숏 계보가 끊기고, v1 저장 문서는 다음 검증에서 거부된다(공개 데모는 volatile이라
+# 영향 미미 — v1.17 마하 0 격자점 거부와 같은 정책)
+SCHEMA_VERSION = 2
 MAX_VARIANTS = 64  # 형상 변형 상한 — 읽을 때마다 변형마다 재검증하므로 단일 워커를 물지 않게
 
 SECTIONS = (
@@ -427,7 +431,9 @@ def _schedulable_slots():
 
 
 def _law(law, p):
-    _keys(law, p, ("template", "alpha_margin", "filter_tau", "design", "schedule", "alloc"))
+    if isinstance(law, dict):
+        law = {"gain_tables": None, **law}  # v2에 더한 절 — 없으면 없음(null), 최상위 선택 절과 같은 규약
+    _keys(law, p, ("template", "alpha_margin", "filter_tau", "design", "schedule", "alloc", "gain_tables"))
     out = {
         "template": _choice(law["template"], f"{p}/template", TEMPLATES),
         "alpha_margin": _num(law["alpha_margin"], f"{p}/alpha_margin", lo=0.0),
@@ -484,6 +490,28 @@ def _law(law, p):
             "scheduled": list(scheduled),
         }
     out["schedule"] = sched
+    # 확정 게인 표(v2) — 자동 설계 산출을 정본에 반영한 마하별 표. 있으면 조립이 규칙 스케줄 대신
+    # 이 표를 쓴다(build.confirmed_gain_tables). 낡음 판정(반영 뒤 문서 변경)은 조립이 한다 —
+    # 스키마는 모양만 본다
+    gt = law["gain_tables"]
+    if gt is not None:
+        gp = f"{p}/gain_tables"
+        if design is None:
+            _fail(gp, "확정 게인 표는 설계 게인(design) 없이 둘 수 없음 — 표는 설계의 산출물이다")
+        _keys(gt, gp, ("tables", "provenance"))
+        tables = gt["tables"]
+        if not isinstance(tables, dict) or not tables:
+            _fail(f"{gp}/tables", "자리 이름 → 마하 표의 비어 있지 않은 객체여야 함")
+        slots = _schedulable_slots()
+        names = [f"{g}.{k}" for g, ks in slots.items() for k in ks]
+        out_tables = {}
+        for n in tables:
+            if n not in names:
+                _fail(f"{gp}/tables/{n}", f"스케줄 불가 자리: {n!r}")
+            # 외삽 금지 원칙 — GainSchedule이 clip만 받는다(fcl/schedule.py)
+            out_tables[n] = _table_mach(tables[n], f"{gp}/tables/{n}", extrapolate=("clip",))
+        gt = {"tables": out_tables, "provenance": copy.deepcopy(gt["provenance"])}
+    out["gain_tables"] = gt
     alloc = law["alloc"]
     if alloc is not None:
         ap = f"{p}/alloc"

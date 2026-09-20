@@ -162,7 +162,9 @@ def test_모듈_이름을_낱말_단위로_고른다():
     가드 하나에 4분이 넘어가고, 그러면 아무도 이 도구를 안 돌린다.
     """
     picked = g.tests_for("engine/claw/fcl/law.py")
-    assert 0 < len(picked) < 30, f"낱말 단위가 아니다: {len(picked)}개"
+    # 상한은 부분문자열 오선택(78개)을 가르는 눈금이지 소비자 수 제한이 아니다 — 정당한 import가
+    # 늘면 올린다 (v1.31 test_profile_gain_tables가 31번째)
+    assert 0 < len(picked) < 40, f"낱말 단위가 아니다: {len(picked)}개"
     assert all(g._is_test(p) for p in picked)
     # 이름이 저장소에 없으면 빈 목록 — 센티널을 **소스에 안 적는다**. 적으면 이 파일이
     # 커밋되는 순간 그 이름이 저장소 내용이 되어 이 단언이 스스로 깨진다

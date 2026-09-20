@@ -765,3 +765,58 @@ def test_unseeded_aircraft_is_rejected_at_submit_with_the_document_path(client, 
     r = client.post("/api/design/auto", json={"config": {}, "profile": {"id": "no-gains-design"}})
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["path"] == "/law/design", r.text
+
+
+def test_apply_gains_writes_the_confirmed_tables_to_the_document(client, wait_job):
+    """정본 되쓰기(v2) — 자동 설계 확정 게인을 law.gain_tables 새 리비전으로. 반영 후의 계산이 문서의
+    그 표로 조립되고, 지문 가드가 "다른 문서에 설계 이식"과 "같은 결과 재반영"을 막는다."""
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="ad-apply", name="반영 시험", is_example=False, variants=[])
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    r = client.post("/api/design/auto", json={"config": _small_config(), "profile": {"id": "ad-apply"}})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    rid = j["result_id"]
+
+    # 기준 리비전이 낡으면 409 + head (저장 규칙과 동일)
+    stale = client.post(f"/api/design/{rid}/apply-gains", json={"base_revision": 99})
+    assert stale.status_code == 409 and stale.json()["detail"]["head"] == 1
+
+    ok = client.post(f"/api/design/{rid}/apply-gains", json={"base_revision": 1})
+    assert ok.status_code == 200, ok.text
+    body = ok.json()
+    assert body["written"] is True and body["revision"] == 2 and body["slots"]
+
+    got = client.get("/api/profiles/ad-apply").json()
+    gt = got["document"]["law"]["gain_tables"]
+    assert set(gt["tables"]) == set(body["slots"])
+    prov = gt["provenance"]
+    assert prov["source"] == "auto_design" and prov["result_id"] == rid
+    assert prov["resample_tol"] > 0.0 and set(prov["resample_error"]) == set(gt["tables"])
+    assert prov["applied_at"]  # 결과가 보존 상한에 밀려도 표의 시간 앵커가 남는다
+    assert prov["basis_fingerprint"]
+    row = next(p for p in client.get("/api/profiles").json() if p["id"] == "ad-apply")
+    assert row["gain_tables"] == {"source": "auto_design", "stale": False, "stale_variants": []}
+    # 반영된 문서로 조립이 실제로 선다 — 시뮬 제출이 202다 (확정 표 우선 조립)
+    sim = client.post("/api/sim/run", json={
+        "trim": {"name": "t", "mach": 0.45, "alt": 1000.0, "fuel": 200.0},
+        "modes": [{"name": "hold", "speed": 150.0, "alt": 1000.0, "heading": 0.0, "exit": ["time_ge", 1e9]}],
+        "t_end": 0.5, "profile": {"id": "ad-apply"}})
+    assert sim.status_code == 202, sim.text
+    wait_job(sim.json()["id"], timeout=120.0)
+
+    # 같은 결과를 새 리비전에 또 반영할 수 없다 — 설계가 잰 문서(리비전 1)와 지금 문서가 다르다
+    again = client.post(f"/api/design/{rid}/apply-gains", json={"base_revision": 2})
+    assert again.status_code == 409 and "지문" in str(again.json()["detail"]), again.text
+
+    # 자동 설계 결과가 아닌 id는 422, 없는 id는 404
+    tr = client.post("/api/trim/batch", json={"profile": {"id": "ad-apply"},
+                                              "cases": [{"mach": 0.45, "alt": 1000.0, "fuel": 200.0}]})
+    tj = wait_job(tr.json()["id"])
+    bad = client.post(f"/api/design/{tj['result_id']}/apply-gains", json={"base_revision": 2})
+    assert bad.status_code == 422, bad.text
+    assert client.post(f"/api/design/{'0' * 16}/apply-gains",
+                       json={"base_revision": 2}).status_code == 404

@@ -31,7 +31,7 @@ import {
   browserStorage, refresh as refreshPicker, restoredNotice, selectedDocument, switchTo,
 } from "./profilepick.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
-import { deriveSummary, deTrimStatus, designSource, seedSummary } from "../lib/quickseed.js";
+import { deriveSummary, deTrimStatus, designSource, gainTablesStatus, seedSummary } from "../lib/quickseed.js";
 import { basisAttitude, basisHead, basisRates, designGain } from "../lib/seedbasis.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
@@ -1120,13 +1120,18 @@ export function render() {
     }
     const doc = opened.body.document;
     const src = designSource(doc);
-    const trim = deTrimStatus(doc, list?.find((p) => p.id === opened.id));
+    const summary = list?.find((p) => p.id === opened.id);
+    const trim = deTrimStatus(doc, summary);
+    const gt = gainTablesStatus(summary);
     const busy = seedJob != null;
     const progress = el("div");
     const res = seedResult?.profileId === opened.id ? seedResult : null;
     // 네이티브 append는 null을 글자 "null"로 넣는다(el()과 다르다) — 없는 조각은 목록에서 뺀다
     clear(seedBox).append(...[
       el("p", {}, el("strong", {}, src.label), ` · 저장된 리비전 ${opened.body.revision}`),
+      // 확정 게인 표(v2) — 자동 설계 [문서에 반영]의 결과. 낡음(반영 뒤 문서 변경)은 조립 거부와
+      // 같은 판정을 서버 목록 요약이 동봉한다
+      el("p", {}, el("strong", { class: gt.stale ? "error-box" : null }, gt.label)),
       el("p", { class: "hint" },
         "부호는 선형 모델의 조종효율(B)에서, 크기는 설계 격자 앵커(q̄ 중앙·최저·최고)마다 튜닝한 값의 중앙값에서, "
         + "자동조종은 시간척도 분리 휴리스틱에서 옵니다. 채택되면 새 리비전으로 저장하고(옛 리비전은 남습니다) 결과 "

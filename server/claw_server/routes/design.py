@@ -21,9 +21,14 @@ import numpy as np
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+import copy
+from datetime import datetime, timezone
+
 from claw.design import AutoDesignConfig, DesignSession, resample_to_table
 from claw.design.tune import REASON_TEXT
-from claw.profile import ProfileError
+from claw.profile import ProfileError, build_profile
+from claw.profile.fingerprint import gain_tables_basis_fingerprint
+from claw_server.profiles import EXAMPLE_ID, ProfileConflict, ProfileReadOnly, ProfileUnreadable
 from claw_server.refs import ProfileRef, profile_echo, profile_error_detail, resolve_profile, resolve_snapshot
 from claw.tables import PolyTable
 from claw_server.serialize import to_jsonable
@@ -314,6 +319,83 @@ def submit_auto_design(req: AutoDesignIn, request: Request, response: Response) 
         raise HTTPException(status_code=422, detail=str(e))
     return _run_session_job(request, response, DesignSession(cfg), req.fingerprint,
                             profile=resolve_profile(request, req.profile))
+
+
+class ApplyGainsIn(BaseModel):
+    base_revision: int = Field(ge=1)
+
+
+@router.post("/design/{result_id}/apply-gains")
+def apply_gains_to_profile(result_id: str, req: ApplyGainsIn, request: Request) -> dict:
+    """자동 설계 확정 게인을 그 기체 문서에 반영 — law.gain_tables 새 리비전 (정본 되쓰기, 스키마 v2).
+
+    반영 후의 모든 계산(시뮬·마진·코드)이 문서의 이 표로 조립된다(assemble_law 우선순위). 표는 웹
+    「채택」(작업본 주입)과 같은 `tables_resampled`다 — 다항은 재양자화 근사이고 그 오차 고지
+    (resample_tol·resample_error)를 provenance에 함께 적는다. 가드:
+    - 결과의 기체·지문과 지금 문서가 같아야 한다(409) — 다른 문서에 설계를 이식하지 않고, 같은
+      결과의 재반영도 막힌다(반영 자체가 지문을 바꾼다 — 재설계 후 다시 반영한다)
+    - 형상 변형 위에서 돈 설계는 기본 문서에 반영하지 않는다(422) · 예제 403 · 기준 리비전 충돌
+      409 (quick-seed와 같은 규칙)
+    """
+    store = request.app.state.store
+    try:
+        payload = store.load(result_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"잘못된 결과 id 형식: {e}")
+    except KeyError:
+        raise HTTPException(status_code=404,
+                            detail=f"결과 없음(보존 상한에 밀려 사라졌을 수 있음): {result_id}")
+    if payload.get("kind") != "auto_design":
+        raise HTTPException(status_code=422, detail=f"자동 설계 결과가 아니다: {payload.get('kind')!r}")
+    echo = payload.get("profile") or {}
+    pid = echo.get("id")
+    if not pid or echo.get("source") == "default-example" or pid == EXAMPLE_ID:
+        raise HTTPException(status_code=403, detail="예제 기체는 고칠 수 없다 — 복제한 기체에서 설계하고 반영한다")
+    if echo.get("variant"):
+        raise HTTPException(status_code=422,
+                            detail="형상 변형 위에서 돈 설계는 기본 문서에 반영할 수 없다 — 기본 형상으로 다시 돌린다")
+    export = payload.get("gain_export") or {}
+    tables = export.get("tables_resampled") or {}
+    if not tables:
+        raise HTTPException(status_code=422, detail="반출 게인 표가 없는 결과 — 반영할 것이 없다")
+    profiles = request.app.state.profiles
+    try:
+        doc, rev = profiles.get(pid)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"기체 프로파일 없음: {pid}")
+    except ProfileUnreadable as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if req.base_revision != rev:
+        raise HTTPException(status_code=409, detail={
+            "message": f"기준 리비전 {req.base_revision}이 최신 {rev}와 다르다 — 최신을 불러온 뒤 반영한다",
+            "head": rev})
+    built = build_profile(doc, validated=True)
+    if built.fingerprint != echo.get("fingerprint"):
+        raise HTTPException(status_code=409, detail=
+                            "설계가 잰 문서와 지금 문서가 다르다(지문 불일치) — 자동 설계를 다시 돌린 뒤 반영한다")
+    new = copy.deepcopy(doc)
+    new["law"]["gain_tables"] = {
+        "tables": copy.deepcopy(tables),
+        "provenance": {
+            # result_id는 휘발 결과 저장소를 가리킨다(보존 상한에 밀릴 수 있음) — 시각이 함께 있어야
+            # 결과가 사라진 뒤에도 표의 시간 앵커가 남는다
+            "source": "auto_design", "result_id": result_id, "base_revision": rev,
+            "applied_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "resample_tol": export.get("resample_tol"),
+            "resample_error": copy.deepcopy(export.get("resample_error") or {}),
+            # 낡음 판정의 기준 — 표 절을 뺀 지금 문서의 지문 (build.gain_tables_stale이 대조)
+            "basis_fingerprint": gain_tables_basis_fingerprint(built.doc),
+        },
+    }
+    try:
+        _, new_rev = profiles.update(pid, new, rev)
+    except ProfileReadOnly as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ProfileConflict as e:
+        raise HTTPException(status_code=409, detail={"message": str(e), "head": e.head})
+    except ProfileError as e:
+        raise HTTPException(status_code=422, detail=profile_error_detail(e))
+    return {"written": True, "revision": new_rev, "profile_id": pid, "slots": sorted(tables)}
 
 
 @router.post("/design/{result_id}/resume", status_code=202)

@@ -27,6 +27,7 @@ FP_EXCLUDED = (
     "/variants",
     "/law/design/provenance",
     "/law/alloc/de_trim/provenance",
+    "/law/gain_tables/provenance",
     "/mission_template",
     "/display",
 )
@@ -48,6 +49,18 @@ def _ordered_axes(aero: dict) -> dict:
 
 def plant_fingerprint(effective: dict) -> str:
     return canonical_hash({k: (_ordered_axes(effective[k]) if k == "aero" else effective[k]) for k in PLANT_SECTIONS})
+
+
+def gain_tables_basis_fingerprint(effective: dict) -> str:
+    """확정 게인 표의 **기준 지문** — 표 절(/law/gain_tables)을 통째로 뺀 적용 문서의 계보 지문.
+
+    표가 어느 문서에서 확정됐는지를 표 없이 잰다(자기 참조 제거) — 반영이 provenance에 적고, 조립이
+    지금 문서와 대조해 낡음을 판정한다(build.gain_tables_stale — δe_trim의 플랜트 지문 대조와 같은
+    원칙, 다만 게인 표는 설계·한계에도 매이므로 플랜트만이 아니라 문서 전체가 기준이다)."""
+    doc = copy.deepcopy(effective)
+    if isinstance(doc.get("law"), dict):
+        doc["law"] = {k: v for k, v in doc["law"].items() if k != "gain_tables"}
+    return profile_fingerprint(doc)
 
 
 def profile_fingerprint(effective: dict) -> str:

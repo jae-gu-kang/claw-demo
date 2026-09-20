@@ -378,6 +378,9 @@ def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=5, delay_s=0.
         cand["variants"] = []
         cand["law"]["design"] = design
         cand["law"]["schedule"] = schedule
+        # 새 시드는 새 설계의 출발이다 — 옛 확정 게인 표(자동 설계 반영, v2)는 이 설계값과 무관해
+        # 무효다. 안 지우면 기준 지문 대조가 낡음으로 거부해 확인 평가(sim_check)가 조립에서 죽는다
+        cand["law"]["gain_tables"] = None
         cb = build_profile(cand)
         tables, gains, rf = cb.gain_tables(), cb.design_gains(), cb.rate_filters()
         for a in anchors:

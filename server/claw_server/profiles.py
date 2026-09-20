@@ -80,6 +80,21 @@ def _de_trim_summary(doc: dict, built) -> dict | None:
     return {"source": de_trim["source"], "stale": built.de_trim_stale, "stale_variants": stale_variants}
 
 
+def _gain_tables_summary(doc: dict, built) -> dict | None:
+    """확정 게인 표 요약 — 출처·낡음·낡은 형상 변형. 낡음 판정은 조립 거부와 같은 자다
+    (build.gain_tables_stale). 표는 기본 문서에서 확정되므로 문서를 바꾸는 변형에서는 기준 지문이
+    어긋나 낡음이다 — δe_trim의 stale_variants와 같은 자리에서 미리 말한다(변형 계산 422가
+    첫 통보가 되지 않게)."""
+    gt = doc["law"]["gain_tables"]
+    if gt is None:
+        return None
+    prov = gt.get("provenance")
+    source = prov.get("source") if isinstance(prov, dict) else None
+    stale_variants = [v["id"] for v in doc["variants"]
+                      if build_profile(doc, v["id"], validated=True).gain_tables_stale]
+    return {"source": source, "stale": built.gain_tables_stale, "stale_variants": stale_variants}
+
+
 def _design_source(doc: dict) -> str | None:
     design = doc["law"]["design"]
     prov = None if design is None else design["provenance"]
@@ -169,6 +184,8 @@ class ProfileStore:
             "design_source": _design_source(doc),
             # 할당 δe_trim 표 — null이면 없음. 도출 표는 플랜트가 바뀌면 stale(법칙 조립이 거부한다)
             "de_trim": _de_trim_summary(doc, built),
+            # 확정 게인 표(v2) — null이면 없음. 반영 뒤 문서가 바뀌면 stale(법칙 조립이 거부한다)
+            "gain_tables": _gain_tables_summary(doc, built),
         }
 
     def list(self) -> list:
