@@ -821,6 +821,7 @@ test("헤더 탭이 전부 실제 라우트다 — 죽은 탭 금지", () => {
 // 두는 이유: 순서가 뜻을 갖는 지금은 "조용히 바뀌었다"가 곧 화면이 거짓말하는 것이다
 const PIPELINE = [
   "aircraft",                            // 무엇을 설계하나 — 기체 (v1.04, 모든 단계의 입력)
+  "flow",                                // 사슬 한 화면 — 오케스트레이션 층 (v1.33, 유기화 3단계)
   "blocks", "envelope", "trim",          // 구조와 영역
   "gains", "margins", "autodesign",      // 선형 설계
   "sim", "world",                        // 한 번 날려 보고 눈으로 확인
@@ -864,7 +865,12 @@ const WORKFLOW = (() => {
 
 test("02 §8 워크플로우가 탭 줄과 같은 순서다", () => {
   const navLabels = [...read("../../index.html").matchAll(/data-view="[\w-]+">([^<]+)</g)]
-    .map((m) => m[1]);
+    .map((m) => m[1])
+    // 「설계 흐름」은 단계가 아니라 단계들을 잇는 오케스트레이션 층이다(v1.33) — 02 §8 서문이
+    // 그렇게 적고 목록 밖에 둔다. 서문에서 그 문장이 사라지면 이 제외가 근거를 잃으므로 대조한다
+    .filter((t) => t !== "설계 흐름");
+  assert.match(DOC2, /「설계 흐름」 탭.*단계가 아니라/,
+    "02 §8 서문의 설계 흐름 예외 서술이 사라졌다 — 목록에 넣든 서술을 되살리든 한쪽으로");
   assert.equal(WORKFLOW.size, navLabels.length,
     `02 §8 단계 ${WORKFLOW.size}개 ↔ 탭 ${navLabels.length}개 — 한쪽이 낡았다`);
   const stepTabs = [...WORKFLOW.keys()].sort((a, b) => a - b).map((k) => WORKFLOW.get(k));

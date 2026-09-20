@@ -353,6 +353,9 @@ table.edit .c-md { width: 130px; }  /* 이름·헤딩·선택 칸 */
 .flag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
 .flag.ok { background: #e0f2e5; color: var(--ok); }
 .flag.bad { background: #fbe2e2; color: var(--bad); }
+/* warn 잉크는 var(--warn)이 아니다 — #b57908은 이 배경(11px)에서 대비 ~3.3:1로 AA(4.5:1) 미달,
+   #b25000은 ~4.7:1로 통과. "정합성" 명목으로 변수로 되돌리면 접근성이 조용히 깨진다 */
+.flag.warn { background: #fdf1de; color: #b25000; }
 .flag.na { background: #eceef1; color: #5b6673; }
 
 .progress { height: 10px; background: var(--bg); border-radius: 5px; overflow: hidden; flex: 1; }

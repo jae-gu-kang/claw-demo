@@ -13,7 +13,7 @@ views/subsystems를 여기서 import하면 층이 역전된다 (lib/stage.js 어
  *  index.html을 정규식으로 읽어 순서까지 deepEqual로 못박는다(blocks.test.js
  *  PIPELINE 선례). 서버 ASK_SCHEMA의 enum도 같은 가드를 파이썬판으로 갖는다. */
 export const TAB_HASHES = [
-  "aircraft", "blocks", "envelope", "trim", "gains", "margins", "autodesign",
+  "aircraft", "flow", "blocks", "envelope", "trim", "gains", "margins", "autodesign",
   "sim", "world", "influence", "autocode", "verify", "results",
 ];
 
