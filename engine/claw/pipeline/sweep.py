@@ -195,12 +195,12 @@ def schedule_crossing_mission(tr, scenario, *, t_settle=5.0, t_step=30.0,
 
     가속·상승 목표는 TAS로 명령한다(유도 speed 규약) — mach 목표는 그 페이즈 고도의
     ISA 음속으로 환산. 페이즈 exit는 상태 기반(speed_ge·alt_ge)이고 문턱은 마지막
-    breakpoint 너머, **항상 b2보다 엄격히 위**다(`exit_short_of`): 명령 목표가 b2보다
-    실제로 위면 min(b2+¼Δ, b2+½(target−b2))로 종전과 같고, 격자 상한이 target 자체를
-    b2까지 눌러 버린 극단(2-breakpoint 표가 케이스 격자 상하한과 정확히 겹치는 최소
-    스케줄 등)에서는 "목표보다 안쪽" 제약이 무의미해지므로 드롭하고 격자 무관 절대
-    상한 b2+¼Δ만 쓴다 — 어느 경우든 exit == target(= 점근 접근 발화 불가)이 되지
-    않는다(리뷰 지적, 종전엔 이 극단에서 뚫려 있었다).
+    breakpoint 너머, **항상 b2보다 엄격히 위**다(`exit_short_of`, min(b2+¼Δ,
+    b2+½(target−b2))). 격자 상한이 target 자체를 b2까지 눌러 버리는 극단(2-breakpoint
+    표가 케이스 격자 상하한과 정확히 겹치는 최소 스케줄 등)에서는 target > b2가
+    깨지므로 exit_short_of가 손댈 자리가 아니다 — 그 경우는 pick()이 애초에 그 축의
+    레그를 None으로 걸러 이 함수까지 오지 않는다(리뷰 지적, 종전엔 exit_short_of 안에서
+    무조건 문턱을 내리눌러 exit == target이 되는 자리가 뚫려 있었다).
     천장 t_end 안에 못 넘으면 시뮬은 거기서 끝날 뿐이고, 통과 여부는 호출자가
     mach/alt **시계열로 실측**한다 (Ts=∞ 패턴).
 
