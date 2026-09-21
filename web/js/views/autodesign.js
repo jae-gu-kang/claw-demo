@@ -23,8 +23,9 @@ import { clear, el, fmt } from "../dom.js";
 import {
   CRITERIA_FIELDS, TARGET_FIELDS, VERDICT_LABEL, actionCards, adoptBlockedText,
   adoptStorePayload, adoptWarnText, buildConfig, coverageLines, evidenceLines,
-  ledgerRows, ledgerTruncatedText, pointRows, reportLine, resumable, resumeBlockedText,
-  statusCounts, statusSeverity, statusText, trimLabel, verdictLegend,
+  fitQualityLines, ledgerRows, ledgerTruncatedText, pointRows, reportLine, resumable,
+  resumeBlockedText, reverifyLines, statusCounts, statusSeverity, statusText, trimLabel,
+  verdictLegend,
 } from "../lib/autodesign.js";
 import { slotIndex, withConstant } from "../lib/gainsync.js";
 import { store } from "../store.js";
@@ -64,6 +65,7 @@ export function render() {
     budgetPoints: el("input", { size: 5, placeholder: "200" }),
     budgetIters: el("input", { size: 3, placeholder: "5" }),
     nMach: el("input", { size: 3, placeholder: "5" }),
+    nValidationBetween: el("input", { size: 3, placeholder: "1" }),
     altsText: el("input", { size: 16, placeholder: "0 1000 3000 5000" }),
     fuelsText: el("input", { size: 12, placeholder: "40 200 400" }),
     actuatorWn: el("input", { size: 5 }),
@@ -132,6 +134,7 @@ export function render() {
         budgetPoints: form.budgetPoints.value,
         budgetIters: form.budgetIters.value,
         nMach: form.nMach.value,
+        nValidationBetween: form.nValidationBetween.value,
         altsText: form.altsText.value,
         fuelsText: form.fuelsText.value,
         actuatorWn: form.actuatorWn.value,
@@ -190,6 +193,7 @@ export function render() {
             el("label", {}, " 점 예산 ", form.budgetPoints),
             el("label", {}, " 이터 상한 ", form.budgetIters),
             el("label", {}, " mach 점수 ", form.nMach),
+            el("label", {}, " 구간당 검증점 ", form.nValidationBetween),
             el("label", {}, " 고도[m] ", form.altsText),
             el("label", {}, " 연료[kg] ", form.fuelsText)),
           el("p", { class: "hint" },
@@ -557,6 +561,11 @@ function renderResult(box, body, resultId, ctx) {
     // 상태 줄 바로 아래 — 이 실행이 무엇을 안 봤는지가 상태의 전제다.
     // sections는 native append로 펼쳐지므로 null을 넣으면 터진다 (el과 다르다)
     ...(covBox ? [covBox] : []),
+    // 적합 품질 — 문턱을 켠 실행의 경고(04 §10 렌더 경로). 문턱이 꺼진 실행은 줄이
+    // 없다: 판정하지 않은 것을 "확인 완료"처럼 말하지 않는다 (수치는 결과 JSON에)
+    ...fitQualityLines(body.fits).map((l) => (l.tone === "hint"
+      ? el("p", { class: "hint" }, l.text)
+      : el("p", { style: `color:${SEV_COLOR.warn}` }, el("strong", {}, l.text)))),
     el("h4", {}, "운영점"),
     countsLine(rows),
     pointsTable,
@@ -619,6 +628,14 @@ function renderResult(box, body, resultId, ctx) {
         `실패 ${report.failures}건이 남아 있다 — 그대로 확정하면 그 운영점은 합격선 `
         + "미달인 채로 굳는다. 처방 카드를 승인해 재개하거나, 에스컬레이션이면 "
         + "작동기·지연 예산 같은 상위 설계를 먼저 정한 뒤 다시 돌릴 것.")));
+    }
+    // 채택 표 재검증 — "확정되는 표로 다시 판정하면 무엇이 움직이나". 게인 오차
+    // 고지(resample_error)와 별개다: 오차가 허용치 안이어도 판정이 움직일 수 있다
+    for (const l of reverifyLines(body.gain_export)) {
+      sections.push(l.tone === "hint"
+        ? el("p", { class: "hint" }, l.text)
+        : el("p", { style: `color:${SEV_COLOR[l.tone === "fail" ? "fail" : "warn"]}` },
+            el("strong", {}, l.text)));
     }
     // 실패 0은 통과의 근거가 못 된다 — 판정 수가 0이면 볼 것이 없었던 실행이고,
     // 그 게인을 확정하면 **아무것도 검증하지 않은 게인이 정본이 된다**

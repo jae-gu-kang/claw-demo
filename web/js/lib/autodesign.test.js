@@ -13,6 +13,7 @@ import {
   coverageLines,
   effectText,
   evidenceLines,
+  fitQualityLines,
   ledgerActionText,
   ledgerKindText,
   ledgerRows,
@@ -23,6 +24,7 @@ import {
   reportLine,
   resumable,
   resumeBlockedText,
+  reverifyLines,
   shortfallLines,
   statusCounts,
   statusRank,
@@ -66,10 +68,11 @@ const RESULT = {
 test("buildConfig — 채운 것만 덮어쓰고 수치 목록을 파싱한다", () => {
   const cfg = buildConfig({
     mode: "auto", budgetPoints: "60", budgetIters: "3",
-    nMach: "4", altsText: "0, 3000", fuelsText: "",
+    nMach: "4", nValidationBetween: "2", altsText: "0, 3000", fuelsText: "",
   });
   assert.deepEqual(cfg, {
-    mode: "auto", budget_points: 60, budget_iters: 3, n_mach: 4, alts: [0, 3000],
+    mode: "auto", budget_points: 60, budget_iters: 3, n_mach: 4,
+    n_validation_between: 2, alts: [0, 3000],
   });
 });
 
@@ -914,4 +917,75 @@ test("reliefLines — 없는 것을 추가하는 축은 '없음 → 값' (필터
   // 양쪽 다 없는 경우는 종전대로 괄호 자체를 안 그린다
   const [bare] = reliefLines([{ label: "x", from: null, to: null, resolves: true }], {});
   assert.equal(bare.text, "x → 통과");
+});
+
+test("reverifyLines — 무변화는 hint, 등급 이동은 경고, fail 이동은 fail 톤", () => {
+  const [clean] = reverifyLines({ reverify: { n_judged: 115, changed: [], worse: 0, better: 0 } });
+  assert.equal(clean.tone, "hint");
+  assert.match(clean.text, /115곳 전부 다항 검증과 같다/);
+
+  const moved = reverifyLines({ reverify: {
+    n_judged: 115, worse: 2, better: 0,
+    changed: [
+      { case: "M0.3_h1000_f200", loop: "yaw_rate", from: "ok", to: "warn" },
+      { case: "M0.5_h1000_f200", loop: "pitch_att", from: "ok", to: "fail" },
+    ],
+  } })[0];
+  assert.equal(moved.tone, "fail"); // to:"fail"이 하나라도 있으면 fail 톤
+  assert.match(moved.text, /2곳의 등급이 움직인다/);
+  assert.match(moved.text, /악화 2/);
+  assert.match(moved.text, /M0\.5_h1000_f200 pitch_att → fail/);
+
+  const warnOnly = reverifyLines({ reverify: {
+    n_judged: 10, worse: 1, better: 0,
+    changed: [{ case: "c", loop: "yaw_rate", from: "ok", to: "warn" }],
+  } })[0];
+  assert.equal(warnOnly.tone, "warn");
+
+  // 판정 소실(dropped) — 등급 이동 목록에 안 나오므로 따로 경고한다 (리뷰 지적)
+  const lines = reverifyLines({ reverify: {
+    n_judged: 9, worse: 0, better: 0, changed: [], dropped: 1,
+  } });
+  assert.equal(lines[0].tone, "warn");
+  assert.match(lines[0].text, /판정 불가가 된 자리 1곳/);
+  assert.equal(lines[1].tone, "hint"); // 나머지 9곳 무변화는 여전히 말한다
+});
+
+test("reverifyLines — 없음·생략은 위장하지 않고 말한다", () => {
+  // 재검증 도입 전 결과 — 0으로 위장 금지
+  const [none] = reverifyLines({ tables_resampled: {} });
+  assert.equal(none.tone, "hint");
+  assert.match(none.text, /재검증 도입 전/);
+  // 재료가 없어 생략된 실행 — 엔진 사유를 그대로 나른다
+  const [skipped] = reverifyLines({ reverify: {
+    n_judged: 0, changed: [], worse: 0, better: 0,
+    note: "재검증 생략 — 스케줄 표가 없다(전 자리 상수)",
+  } });
+  assert.equal(skipped.tone, "warn");
+  assert.match(skipped.text, /스케줄 표가 없다/);
+});
+
+test("fitQualityLines — 문턱 끔(전부 na)은 침묵, 켜면 warn/전부 통과 hint", () => {
+  // 전부 na — 판정하지 않은 것을 "품질 확인 완료"처럼 말하지 않는다
+  assert.deepEqual(fitQualityLines({
+    "pitch.kp": { quality: { status: "na", note: "문턱 미설정" } },
+    "yaw.k_rate": { quality: { status: "na", note: "상수 자리" } },
+  }), []);
+  assert.deepEqual(fitQualityLines(undefined), []);
+
+  const warns = fitQualityLines({
+    "pitch.kp": { quality: { status: "warn", slope_jump_norm_max: 3.0, cross_axis_frac: 0.0 } },
+    "roll.kp": { quality: { status: "ok", slope_jump_norm_max: 0.1, cross_axis_frac: 0.0 } },
+  });
+  assert.equal(warns.length, 1); // 통과 자리는 warn 목록에 안 낀다
+  assert.equal(warns[0].tone, "warn");
+  assert.match(warns[0].text, /pitch\.kp/);
+  assert.match(warns[0].text, /기울기 점프 3/);
+
+  // 켰고 전부 통과 — 켠 실행과 안 켠 실행이 화면에서 같아 보이면 안 된다
+  const [ok] = fitQualityLines({
+    "pitch.kp": { quality: { status: "ok", slope_jump_norm_max: 0.1, cross_axis_frac: 0.0 } },
+  });
+  assert.equal(ok.tone, "hint");
+  assert.match(ok.text, /1자리 전부 문턱 내/);
 });

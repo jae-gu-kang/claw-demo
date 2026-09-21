@@ -1,11 +1,11 @@
 {
  "golden": "evaluate_linear",
  "mode": "full",
- "captured_at": "654ec14+dirty",
+ "captured_at": "8cbda3a+dirty",
  "value": {
   "dict": {
    "fingerprint": "c48da3269a9a8e4c",
-   "criteria_fingerprint": "37412a0414d514b9",
+   "criteria_fingerprint": "4d79f79374fbe514",
    "criteria": {
     "dict": {
      "schema_version": 2,
@@ -110,6 +110,7 @@
         "dict": {}
        },
        "midpoints": true,
+       "mission": true,
        "local_frac": "f:0x1.5555555555555p-2"
       }
      },

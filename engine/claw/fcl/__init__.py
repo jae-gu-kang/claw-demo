@@ -2,7 +2,8 @@
 
 법칙은 NavOutput만 소비한다 — plant 참값 직접 참조 금지 (03 §4 핵심 계약).
 구성: airdata(NavOutput→V·α·β), SCAS, 오토파일럿(+명령필터·선회 FF),
-게인 스케줄(동압 등 테이블+변수 필터), α 리미터, 믹서(엘레본4+차동추력),
+게인 스케줄(mach·alt·fuel 테이블+변수 필터 — SCHED_VARS가 정본, q̄ 의존은 mach 축이 대리),
+α 리미터, 믹서(엘레본4+차동추력),
 FlightControlLaw(최상위 조립: 스케줄→AP→리미터→SCAS→믹서).
 조립 정본은 claw.fcl.assemble.assemble_law(기체 프로파일) — demo.make_demo_fcl은 예제 기체 호환 이름.
 

@@ -183,3 +183,31 @@ def test_mixed_sign_samples_are_unconstrained():
     guard = (out.get("report") or out)["sign_guard"]
     assert guard["want"] == 0.0
     assert guard["lowered"] is False
+
+
+def test_fit_quality_normalizes_by_the_slots_own_scale():
+    """fit_quality — 무차원 정규화 한 곳 (04 §10 지표부). 기체 무관이어야 한다.
+
+    slope_jump_norm의 단위는 scale/axis_span("축 전폭에 걸쳐 스케일만큼 변하는
+    기울기" = 1)이다 — 절대 기울기로 재면 게인 크기가 큰 자리가 항상 나쁘게 읽힌다.
+    상수 자리는 None이다: "잴 것이 없다"를 0("완벽하다")으로 위장하지 않는다.
+    """
+    from claw.design.fit import fit_quality
+
+    rep = {
+        "kind": "poly",
+        "segments": [{"x0": 0.2, "x1": 0.5}, {"x0": 0.5, "x1": 0.8}],
+        "scale": 2.0,  # span 0.6 → 단위 기울기 2.0/0.6
+        "joints": [{"x": 0.5, "value_jump": 0.0, "slope_jump": 10.0}],
+        "cross_axis_residual": 0.5,
+    }
+    q = fit_quality(rep)
+    assert q["slope_jump_norm_max"] == pytest.approx(10.0 / (2.0 / 0.6))
+    assert q["cross_axis_frac"] == pytest.approx(0.25)
+    # 관절 없는 1구간 — 꺾임이 없다 = 0 (None이 아니다: 실제로 재서 없는 것)
+    q1 = fit_quality({"kind": "poly", "segments": [{"x0": 0.2, "x1": 0.8}],
+                      "scale": 2.0, "joints": [], "cross_axis_residual": 0.0})
+    assert q1["slope_jump_norm_max"] == 0.0 and q1["cross_axis_frac"] == 0.0
+    # 상수 자리 — 관절도 축도 없다
+    qc = fit_quality({"kind": "constant", "slot": "yaw.k_rate", "value": 0.4})
+    assert qc["slope_jump_norm_max"] is None and qc["cross_axis_frac"] is None

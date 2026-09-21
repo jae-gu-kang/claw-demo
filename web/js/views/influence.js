@@ -72,8 +72,8 @@ import {
 import {
   STATUS_LABEL, attributionRows, cardDeltas, caseGrid, checksSummary,
   compositionLine, evalFocus, maneuverLine, sameManeuver,
-  evaluateRequest, hardFailLines, jLine, localityLines, normalizeEvalReport,
-  normalizeVerifyReport, statusInk, verifyRequest,
+  evaluateRequest, hardFailLines, jLine, localityLines, missionProfileLines,
+  normalizeEvalReport, normalizeVerifyReport, statusInk, verifyRequest,
 } from "../lib/evaluate.js";
 import {
   applyExport, jointLines, normalizePrescribe, prescribeRequest, singleRows,
@@ -1584,7 +1584,10 @@ export function render() {
                 : null,
               b.n_cases != null && !b.corners
                 ? `케이스 ${b.n_cases}건${b.hard_fail ? " · 하드 위반" : ""} ` : null,
-              b.note ?? ""))))))); 
+              b.note ?? "",
+              // 미션 프로파일 상세 — 시나리오·통과 실측·facts (04 §5.5, v1.41)
+              ...missionProfileLines(b).map((t) =>
+                el("div", { class: "hint" }, t))))))));
       for (const w of v.warnings) {
         verifyBox.append(el("p", {
           style: `margin:4px 0;font-size:12px;color:${WARN_INK}`,

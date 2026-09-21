@@ -13,6 +13,7 @@ import test from "node:test";
 import {
   STATUS_LABEL, attributionRows, cardDeltas, cardLines, caseGrid, checksSummary,
   compositionLine, evalFocus, evaluateRequest, hardFailLines, jLine, localityLines,
+  missionProfileLines,
   normalizeEvalReport,
   normalizeVerifyReport, statusInk, verifyRequest,
   maneuverLine,
@@ -395,4 +396,40 @@ test("선형끼리는 기동과 무관하게 비교된다 — 없는 비교 불�
   assert.ok(sameManeuver(a, b));
   // 깊이가 다르면 애초에 비교 대상이 아니다
   assert.ok(!sameManeuver(a, { depth: "full", maneuver: a.maneuver }));
+});
+
+test("missionProfileLines — 시나리오·통과 실측·facts를 문장으로, na는 침묵", () => {
+  const block = {
+    status: "ok",
+    scenario: {
+      start: { mach: 0.425, alt: 1000, fuel: 200 },
+      legs: { mach: { pair: [0.45, 0.5], start: 0.425, target: 0.525 } },
+      notes: ["fuel 축 스케줄은 시간축 통과 시나리오가 없다 — 연료는 명령이 아니라 소모 상태다"],
+      t_end: 60,
+    },
+    crossed: { mach: { expected: [0.45, 0.5], crossed: [0.45] } },
+    facts: {
+      sat_frac: 0.02, rate_sat_frac: null, windup_frac: 0,
+      worst_stall_margin: 0.25,
+      rms: { alt_rms: 1.49, spd_rms: 14.6, hdg_rms: 0 },
+    },
+  };
+  const lines = missionProfileLines(block);
+  assert.match(lines[0], /mach 0\.45→0\.5/);
+  assert.match(lines[0], /천장 60 s/);
+  assert.match(lines[1], /0\.45✓ 0\.5✕/); // 못 넘은 breakpoint를 숨기지 않는다
+  assert.match(lines[2], /포화 2%/);
+  assert.match(lines[2], /타율 —/); // 작동기 미장착 — 0으로 위장 금지
+  assert.match(lines[3], /보고만/); // RMS는 판정이 아니다
+  assert.match(lines[4], /fuel 축/);
+  // na(시나리오 없음)는 note가 사유를 드니 줄을 더하지 않는다
+  assert.deepEqual(missionProfileLines({ status: "na", note: "가로지를 스케줄이 없다" }), []);
+  assert.deepEqual(missionProfileLines(undefined), []);
+});
+
+test("verifyRequest — t_mission은 채웠을 때만 나간다", () => {
+  const state = { profile: null };
+  const body = verifyRequest(state, { cases: [], tMission: 120 });
+  assert.equal(body.t_mission, 120);
+  assert.ok(!("t_mission" in verifyRequest(state, { cases: [] })));
 });

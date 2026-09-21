@@ -174,6 +174,12 @@ def model_distance(lm_a, lm_b, tr_a, tr_b) -> dict:
       고유치 최근접 매칭 이동거리 폴백
     - d_ctrl: B행렬 핵심 성분(q̇/δe, ṗ/δa, ṙ/δr) 상대 변화
     - d_total = max(성분) — 한 성분이라도 크면 플랜트가 변한 것
+
+    [한계 — fuel 축의 CG 맹점] 플랜트가 연료에서 보는 것은 질량·관성뿐이고 CG 이동은
+    동역학에 안 들어간다(모멘트 기준점 이전 [TBD] — plant/aircraft.py:46·trim/trim.py
+    ·sim/simulator.py 전 소비처가 `_cg` 폐기). 그래서 이 거리는 fuel 축에서 실기체의
+    CG 이동분(정적 여유 변화)을 **과소평가**하고, refine가 fuel 축 breakpoint를 실제
+    필요보다 적게 잡을 소지가 있다. CG 이전이 구현되면 이 한계는 자동으로 풀린다.
     """
     d_trim = float(np.max(np.abs(_trim_z(tr_a) - _trim_z(tr_b)) / CONTINUITY_STEP))
     lon_a, lat_a = split_axes(lm_a)

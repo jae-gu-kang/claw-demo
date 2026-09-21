@@ -557,10 +557,11 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
 class VerifyIn(InfluenceIn):
     """3단계 검증 요청 — 후보 게인 스케줄 확정 **후** 별도 실행 (실행 단계 3).
 
-    강건성 코너(질량·Cmα·Cmq — 축·문턱은 criteria.robustness)와 격자 중간점을
-    돌린다. 지연 섭동·MC·미션·worst-case 탐색은 어휘와 자리만 있다(엔진 verify
-    참조). 코너마다 재트림하므로 비용이 코너 수 × 케이스로 곱해진다 — 제출 시점에
-    총량을 상한으로 막는다.
+    강건성 코너(질량·Cmα·Cmq — 축·문턱은 criteria.robustness)와 격자 중간점,
+    그리고 미션 프로파일(시간축 스케줄 통과 — v1.41, criteria.schedule.mission
+    스위치·depth=full 한정)을 돌린다. 지연 섭동·MC·worst-case 탐색은 어휘와
+    자리만 있다(엔진 verify 참조). 코너마다 재트림하므로 비용이 코너 수 ×
+    케이스로 곱해진다 — 제출 시점에 총량을 상한으로 막는다.
     """
 
     fingerprint: str = ""
@@ -571,6 +572,9 @@ class VerifyIn(InfluenceIn):
     t_settle: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
     t_step: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
     t_hold: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
+    # 미션 런 천장 덮개 — 없으면 엔진 [기본값] 천장(t_settle + 페이즈당 8×t_step + t_step).
+    # 미도달 na가 나오면 이 값을 늘려 다시 돈다 (엔진이 시계열 실측으로 정직 보고)
+    t_mission: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
 
 
@@ -613,23 +617,27 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
     from claw.pipeline.evaluate import _corner_dispersions
 
     n_corner = len(_corner_dispersions(criteria, axes=shape.profile.dispersion_axes))
-    expected = n_corner * len(cases) + len(mids)
+    mission_on = req.depth == "full" and bool(criteria.schedule.mission)
+    # 미션 런도 케이스 한 개 몫의 시뮬이다 — 상한 셈에서 빼면 가득 찬 격자에 조용히 얹힌다
+    expected = n_corner * len(cases) + len(mids) + (1 if mission_on else 0)
     if expected > MAX_CASES:
         raise HTTPException(
             status_code=422,
             detail=f"검증 총량 {expected}케이스(코너 {n_corner}×{len(cases)} + "
-                   f"중간점 {len(mids)})가 상한 {MAX_CASES}를 넘는다 — 격자를 "
-                   "줄이거나 강건성 축을 좁히세요")
+                   f"중간점 {len(mids)} + 미션 {1 if mission_on else 0})가 상한 "
+                   f"{MAX_CASES}를 넘는다 — 격자를 줄이거나 강건성 축을 좁히세요")
 
     store = request.app.state.store
     per_case = (1 if req.depth == "linear" else 3) + 1
-    total = expected * per_case
+    # 미션 런은 1틱 — 엔진 verify의 총량 계산과 같은 셈 (총량이 어긋나면 진행 바가 넘친다)
+    total = (expected - (1 if mission_on else 0)) * per_case + (1 if mission_on else 0)
 
     def work(job):
         out = verify(
             shape.profile.aircraft, cases, shape, criteria,
             depth=req.depth, midpoint_cases=mids, dt_plant=req.dt_plant,
             t_settle=req.t_settle, t_step=req.t_step, t_hold=req.t_hold,
+            t_mission=req.t_mission,
             on_progress=lambda done, v_total, msg: job.report(
                 done, max(v_total, total), message=msg
             ),

@@ -570,3 +570,86 @@ def test_평가가_두_런의_가용_동적_여유를_판정에_넘긴다(report
     assert stages and all(s["dynamic"]["status"] in ("ok", "fail") for s in stages)
     assert all(set(s["dynamic"]["by_run"]) == {"standard", "combined"} for s in stages)
     assert all(s["dynamic"]["value"] == min(s["dynamic"]["by_run"].values()) for s in stages)
+
+
+def _no_corner_crit(extra=None):
+    d = {"robustness": {"mass_frac": 0.0, "cmalpha_frac": 0.0, "cmq_frac": 0.0}}
+    d.update(extra or {})
+    return GainEvalCriteria.from_dict(d)
+
+
+def test_mission_profile_crosses_the_schedule_and_judges(rig):
+    """미션 프로파일 [자리] → 실측 (v1.41) — 시간축 스케줄 통과 + 기존 문턱만 판정.
+
+    표준 기동(dh 30·dv 3)은 breakpoint 간격보다 작아 스케줄을 못 가로지른다 —
+    이 블록만이 "게인이 보간으로 움직이는 동안"을 본다. 통과는 mach 시계열 실측이
+    정본이고, 추종 RMS는 facts로 보고만 한다(램프 런에 표준 기동 판정선 금지).
+    """
+    _ac, _trs = rig
+    cases = [TrimCase(name=f"M{m}/h1000", mach=m, alt=1000.0, fuel=200.0)
+             for m in (0.4, 0.6)]
+    out = verify(make_demo_aircraft, cases, Shape(profile=example_profile()),
+                 _no_corner_crit(), depth="full",
+                 t_settle=2.0, t_step=10.0, t_mission=60.0)
+    mp = out["verify"]["mission_profile"]
+    assert mp["status"] in ("ok", "warn", "fail")
+    got = mp["crossed"]["mach"]
+    assert got["expected"] and got["crossed"] == got["expected"]  # 시계열 실측 통과
+    assert set(mp["stages"]) == {"envelope", "actuator", "recovery"}
+    assert mp["facts"]["rms"]["spd_rms"] is not None  # 보고만 — 판정 목록에 없다
+    assert mp["scenario"]["legs"]["mach"]["pair"][0] < mp["scenario"]["legs"]["mach"]["pair"][1]
+
+    # 짧은 천장 — 조용한 통과 위장 금지: na + 사유 + 빈 crossed (Ts=∞ 패턴)
+    short = verify(make_demo_aircraft, cases, Shape(profile=example_profile()),
+                   _no_corner_crit(), depth="full",
+                   t_settle=2.0, t_step=10.0, t_mission=6.0)
+    smp = short["verify"]["mission_profile"]
+    assert smp["status"] == "na" and "미도달" in smp["note"]
+    assert smp["crossed"]["mach"]["crossed"] == []
+
+
+def test_mission_profile_switch_depth_and_degenerate_grid(rig):
+    """스위치·깊이·퇴화 격자 — 어느 경로든 na에는 사유가 있다 (0 위장 금지)."""
+    _ac, _trs = rig
+    # depth=linear — 런이 없으니 잴 수 없다
+    out = verify(make_demo_aircraft, [_CASE], Shape(profile=example_profile()),
+                 _no_corner_crit(), depth="linear")
+    assert out["verify"]["mission_profile"]["status"] == "na"
+    assert "linear" in out["verify"]["mission_profile"]["note"]
+    # criteria.schedule.mission=False — 사용자가 껐다
+    out2 = verify(make_demo_aircraft, [_CASE], Shape(profile=example_profile()),
+                  _no_corner_crit({"schedule": {"mission": False}}),
+                  depth="full", t_settle=1.0, t_step=2.0)
+    assert "끔" in out2["verify"]["mission_profile"]["note"]
+    # 한 점 격자 — 범위가 점이라 가로지를 구간이 없다 (시나리오 None 경로)
+    out3 = verify(make_demo_aircraft, [_CASE], Shape(profile=example_profile()),
+                  _no_corner_crit(), depth="full", t_settle=1.0, t_step=2.0)
+    assert out3["verify"]["mission_profile"]["status"] == "na"
+    assert "2개 미만" in out3["verify"]["mission_profile"]["note"]
+
+
+def test_mission_verdict_does_not_swallow_a_recovery_fail():
+    """미도달 na가 recovery fail을 삼키지 않는다 (리뷰 must-fix).
+
+    recovery는 hard fails 목록을 내지 않는 스테이지라 status로 합류한다 — 추력
+    부족으로 breakpoint를 못 넘는 런이 곧 와인드업하는 런이므로, 이 조합은 이
+    블록이 잡으라고 만든 바로 그 경로다.
+    """
+    from claw.pipeline.evaluate import _mission_verdict
+
+    ok3 = {"envelope": "ok", "actuator": "ok", "recovery": "ok"}
+    rec_fail = {"envelope": "ok", "actuator": "ok", "recovery": "fail"}
+    # 미도달 + recovery fail → fail (사유에 둘 다)
+    s, note = _mission_verdict([], rec_fail, False, 60.0)
+    assert s == "fail" and "와인드업" in note and "미도달" in note
+    # 도달 + recovery fail → fail (worst 경로와 일치)
+    assert _mission_verdict([], rec_fail, True, 60.0)[0] == "fail"
+    # 미도달 + 전 스테이지 ok → na + 사유 (종전과 동일)
+    s2, note2 = _mission_verdict([], ok3, False, 60.0)
+    assert s2 == "na" and "미도달" in note2
+    # 하드 실패는 미도달이어도 fail — 사유가 crossed 실측을 가리킨다
+    s3, note3 = _mission_verdict([{"check": "envelope.stall_margin"}],
+                                 {"envelope": "fail", "actuator": "ok", "recovery": "na"},
+                                 False, 60.0)
+    assert s3 == "fail" and "crossed" in note3
+    assert _mission_verdict([], ok3, True, 60.0) == ("ok", None)

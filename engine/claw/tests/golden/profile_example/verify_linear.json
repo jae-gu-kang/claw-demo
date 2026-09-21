@@ -1,7 +1,7 @@
 {
  "golden": "verify_linear",
  "mode": "full",
- "captured_at": "654ec14+dirty",
+ "captured_at": "8cbda3a+dirty",
  "value": {
   "dict": {
    "corners": [
@@ -57,7 +57,7 @@
    "result": {
     "dict": {
      "fingerprint": "c48da3269a9a8e4c",
-     "criteria_fingerprint": "37412a0414d514b9",
+     "criteria_fingerprint": "4d79f79374fbe514",
      "depth": "linear",
      "verify_meta": {
       "dict": {
@@ -581,7 +581,7 @@
        "mission_profile": {
         "dict": {
          "status": "na",
-         "note": "[자리] 미션 프로파일 재생 검증 — 후속"
+         "note": "비선형 런 없음(depth=linear) — 시간축 통과는 런에서만 잰다"
         }
        },
        "worst_case_search": {

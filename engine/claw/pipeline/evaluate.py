@@ -51,6 +51,7 @@ from claw.design.closure import (
     att_margin_loop, axis_metrics, close_rates, oriented_margins,
     rate_loop_crossover,
 )
+from claw.common.contracts import TrimCase
 from claw.guidance import Guidance, ModeSpec
 from claw.nav import NavErrorModel
 from claw.pipeline.criteria import GainEvalCriteria
@@ -59,7 +60,10 @@ from claw.pipeline.diagnose import PARK_TOL_FRAC, diagnose_grid, diagnose_run
 from claw.pipeline.influence import Shape, make_law, shape_profile
 from claw.pipeline.metrics import metric_values
 from claw.pipeline.openloop import GROUP_LOOPS, _effective_filter, _effective_gain
-from claw.pipeline.sweep import PROBE_DH, PROBE_DPSI, PROBE_DV, probe_mission
+from claw.pipeline.sweep import (
+    PROBE_DH, PROBE_DPSI, PROBE_DV, probe_mission,
+    schedule_crossing_mission, schedule_crossing_scenario,
+)
 from claw.sim import Simulator
 from claw.trim import linearize, split_axes, trim_batch
 
@@ -1521,23 +1525,139 @@ def _corner_dispersions(crit, axes=None):
     return out
 
 
+def _mission_profile_block(aircraft, shape, law, cases, criteria, *, stall,
+                           db_ranges, dt_plant, t_settle, t_step, t_mission):
+    """3단계 mission_profile — 게인 스케줄을 **시간축으로** 가로지르는 재생 검증 (04 §5.5).
+
+    점 동결 평가(판정 10·중간점)가 못 보는 것: 가감속·상승 **중** 게인이 보간으로
+    움직이는 동안의 포화·와인드업·실속 여유. 시나리오는 표·격자에서 자동 유도
+    (sweep.schedule_crossing_scenario — 특정 기체 전제 금지), 명목 기체 1런이다.
+    07 §9의 18,000틱 재생과 목적이 다르다 — 그쪽은 백엔드 비트 일치 대조다.
+
+    판정은 기존 문턱만 재사용한다(실속 마진·위치/타율 포화·와인드업 — envelope/
+    actuator/recovery 스테이지 그대로): 추종 RMS는 표준 기동에서 시드된 판정선
+    (04 §10)을 램프 런에 갖다 대면 거짓 fail이라 **facts로 보고만** 한다.
+    천장 t_end 안에 breakpoint를 못 넘으면 na + 사유 — mach/alt **시계열 실측**이
+    "통과했는가"의 정본이고, 스위치를 켠 채 조용히 통과하지 않는다 (Ts=∞ 패턴).
+    """
+    tables = law.schedule.tables if law.schedule is not None else {}
+    scenario = schedule_crossing_scenario(tables, cases)
+    if scenario is None:
+        return {"status": "na",
+                "note": "가로지를 스케줄이 없다 — mach·alt 축 breakpoint가 케이스 "
+                        "격자 범위 안에 2개 미만 (게인 스케줄 미장착 포함)"}
+    start = scenario["start"]
+    echo = {
+        "start": dict(start),
+        "legs": {ax: dict(scenario[ax]) for ax in ("mach", "alt")
+                 if scenario.get(ax) is not None},
+        "notes": scenario["notes"],
+    }
+    tr = trim_batch(aircraft, [TrimCase(
+        name="mission_start", mach=start["mach"], alt=start["alt"],
+        fuel=start["fuel"])])[0]
+    if not tr.converged:
+        return {"status": "na", "scenario": echo,
+                "note": f"시작점 트림 미수렴 (M{start['mach']:.3f}/h{start['alt']:.0f}"
+                        f"/f{start['fuel']:.0f}) — 시나리오가 엔벨로프 경계에 걸렸다. "
+                        "케이스 격자를 좁히거나 스케줄 범위를 확인할 것"}
+    modes, t_end = schedule_crossing_mission(
+        tr, scenario, t_settle=t_settle, t_step=t_step, t_mission=t_mission)
+    echo["t_end"] = t_end
+    res = _simulate(aircraft, shape, law, tr, modes, t_end, stall, db_ranges,
+                    dt_plant)
+    metrics = metric_values(res.t, res.signals, res.envelope, res.meta)
+
+    hard = []
+    env_stage, f = _envelope_stage(metrics, criteria)
+    hard += f
+    act_stage, f = _actuator_stage(res.signals, res.meta, dt_plant, criteria)
+    hard += f
+    rec_stage = _recovery_stage(res.signals, res.meta, criteria)
+    hard = [dict(x, case="mission_profile") for x in hard]
+
+    # 통과 실측 — 시작 좌표보다 위에 있는 breakpoint가 기대값, 시계열 도달이 실측
+    crossed = {}
+    fully = True
+    for axis, sig_key in (("mach", "mach"), ("alt", "h")):
+        leg = scenario.get(axis)
+        if leg is None:
+            continue
+        series = np.asarray(res.signals[sig_key], dtype=float)
+        expected = [b for b in leg["pair"] if b > start[axis] + 1e-12]
+        got = [b for b in expected if bool(np.any(series >= b))]
+        crossed[axis] = {"expected": expected, "crossed": got}
+        fully = fully and len(got) == len(expected)
+
+    def _worst_frac(kind):
+        vals = [ch.get(kind, {}).get("sat_frac")
+                for ch in act_stage.get("channels", {}).values()
+                if isinstance(ch.get(kind), dict)]
+        vals = [v for v in vals if v is not None]
+        return max(vals) if vals else None
+
+    facts = {
+        "sat_frac": _worst_frac("pos"),
+        "rate_sat_frac": _worst_frac("rate"),
+        "windup_frac": (rec_stage.get("windup") or {}).get("worst", {}).get("frac"),
+        "worst_stall_margin": metrics.get("worst_stall_margin"),
+        # RMS는 판정하지 않는다 — 램프 런에 표준 기동 판정선을 갖다 대지 않는다
+        "rms": {k: metrics.get(k) for k in ("alt_rms", "spd_rms", "hdg_rms")},
+    }
+    stages = {"envelope": env_stage["status"], "actuator": act_stage["status"],
+              "recovery": rec_stage["status"]}
+    status, note = _mission_verdict(hard, stages, fully, t_end)
+    return {"status": status, "note": note, "scenario": echo, "crossed": crossed,
+            "aborted": res.meta["aborted"], "stages": stages, "facts": facts,
+            "hard_fails": hard}
+
+
+def _mission_verdict(hard, stages, fully, t_end):
+    """미션 상태 합류 — 순수 함수 (리뷰 must-fix: 미도달 na가 recovery fail을 삼켰다).
+
+    recovery(와인드업)는 관례상 hard fails 목록을 내지 않는 스테이지라 status로
+    합류시킨다 — 추력 부족·포화로 breakpoint를 못 넘는 런이 곧 적분기가 와인드업하는
+    런이다. 미도달 분기가 이 fail을 na로 접으면, 이 블록이 잡으라고 만든 셋(포화·
+    와인드업·실속) 중 하나가 실패가 가장 개연적인 경로에서 사라진다.
+    """
+    if hard or stages.get("recovery") == "fail":
+        parts = []
+        if not hard:
+            parts.append("와인드업(recovery) 문턱 초과")
+        if not fully:
+            parts.append(f"천장 {t_end:.0f} s 안에 breakpoint 미도달인 채의 실패 — "
+                         "통과 실측(crossed) 참조")
+        return "fail", (" · ".join(parts) or None)
+    if not fully:
+        return "na", (f"천장 {t_end:.0f} s 안에 breakpoint 미도달 — 추력·상승 한계이거나 "
+                      "t_mission이 짧다. 시계열 실측이 정본이다")
+    judged = [s for s in stages.values() if s in ("ok", "warn", "fail")]
+    return (_worst(judged) if judged else "na",
+            None if judged else "판정 가능한 스테이지가 없다")
+
+
 def verify(aircraft_factory, cases, shape: Shape, criteria: GainEvalCriteria, *,
            depth="full", midpoint_cases=(), dt_plant=0.01,
-           t_settle=5.0, t_step=30.0, t_hold=None, on_progress=None) -> dict:
+           t_settle=5.0, t_step=30.0, t_hold=None, t_mission=None,
+           on_progress=None) -> dict:
     """3단계 검증 — 강건성 코너(질량·Cmα·Cmq) + 격자 중간점. 코너마다 **재트림**한다
     (기체가 다르면 트림해도 다르다 — 명목 트림해로 섭동 기체를 평가하면 시작부터
     비평형이라 전 지표가 과도응답에 오염된다).
 
-    aircraft_factory(dispersion=DispersionSet|None) → Aircraft (키워드 호출). MC·미션 프로파일·지연 섭동·
-    worst-case 탐색은 어휘와 자리만 있다([자리] — 구현 스코프 밖, 사유 동봉).
-    on_progress(done, total, msg) truthy → 협조적 취소(완료 코너 보존).
+    aircraft_factory(dispersion=DispersionSet|None) → Aircraft (키워드 호출). 미션 프로파일
+    (시간축 스케줄 통과 — _mission_profile_block, criteria.schedule.mission 스위치·depth=full 한정)은
+    v1.41에서 실측이 됐고, MC·지연 섭동·worst-case 탐색은 어휘와 자리만 있다([자리] — 구현
+    스코프 밖, 사유 동봉). on_progress(done, total, msg) truthy → 협조적 취소(완료 코너 보존).
     """
     profile = shape_profile(shape)
     corners = _corner_dispersions(criteria, axes=profile.dispersion_axes)
     mids = list(midpoint_cases)
     per_case = 1 if depth == "linear" else 3
-    # 진행 총량: (코너 × 케이스) + 중간점 케이스 — 트림은 케이스 단위에 포함해 셈
-    total = (len(corners) * len(cases) + len(mids)) * (per_case + 1)
+    mission_on = depth == "full" and bool(getattr(criteria.schedule, "mission", True))
+    # 진행 총량: (코너 × 케이스) + 중간점 케이스 — 트림은 케이스 단위에 포함해 셈.
+    # 미션 런은 1틱(런이 하나뿐이라 그 이상 쪼개도 정보가 없다)
+    total = (len(corners) * len(cases) + len(mids)) * (per_case + 1) \
+        + (1 if mission_on else 0)
     done = 0
     aborted = None
     warnings = []
@@ -1629,6 +1749,17 @@ def verify(aircraft_factory, cases, shape: Shape, criteria: GainEvalCriteria, *,
                                   midpoint_names={c.name for c in mids})
         mid_summary = summarize(rows, unconv)
 
+    # ── 미션 프로파일 — 시간축 스케줄 통과 (명목 기체 1런) ─────────────────
+    mission_block = None
+    if mission_on and not aborted:
+        mission_block = _mission_profile_block(
+            aircraft_factory(dispersion=None), shape, make_law(shape), cases,
+            criteria, stall=profile.stall_table(), db_ranges=profile.db_ranges(),
+            dt_plant=dt_plant, t_settle=t_settle, t_step=t_step,
+            t_mission=t_mission)
+        if tick("미션 프로파일 런"):
+            aborted = "cancelled"
+
     def split_axis(names):
         rows = [r for r in corner_rows
                 if any(r["dispersion"][n] != 0.0 for n in names)]
@@ -1676,8 +1807,13 @@ def verify(aircraft_factory, cases, shape: Shape, criteria: GainEvalCriteria, *,
         "monte_carlo": {
             "status": "na",
             "note": "[자리] monte_carlo_n>0 활성화는 스코프 밖 — 코너가 1차다"},
-        "mission_profile": {
-            "status": "na", "note": "[자리] 미션 프로파일 재생 검증 — 후속"},
+        "mission_profile": (
+            mission_block if mission_block is not None else
+            {"status": "na",
+             "note": ("취소로 미션 프로파일 미실행" if mission_on else
+                      "비선형 런 없음(depth=linear) — 시간축 통과는 런에서만 잰다"
+                      if depth == "linear" else
+                      "criteria.schedule.mission=False — 끔")}),
         "worst_case_search": {
             "status": "na", "note": "[자리] 코너 전수 대신 탐색 — 후속"},
     }

@@ -302,6 +302,10 @@ class ScheduleCriteria:
     rel_step_max: float = 0.5  # 인접 격자점 |ΔK|/max(|K|) 상한 [기본값]
     per_table: dict = field(default_factory=dict)
     midpoints: bool = True  # 격자점 사이 중간점 케이스를 평가에 포함할지
+    # 3단계 미션 프로파일 런 — 스케줄을 **시간축으로** 가로지르는 재생 검증(04 §5.5).
+    # midpoints(점 동결 평가)와 나란한 스위치다: 저 둘이 "그 좌표에서"를 보면 이것은
+    # "지나가는 동안"을 본다. 구 기준 dict(from_dict)에는 키가 없어도 기본 True로 산다
+    mission: bool = True
     # 결함 케이스 비율이 이 이하면 국소(스케줄 셀 형상), 넘으면 전역(설계점 게인).
     # "어느 층을 만질 것인가"의 분기라 스케줄 기준과 한 몸이다 (diagnose.LOCAL_FRAC 시드)
     local_frac: float = 1.0 / 3.0

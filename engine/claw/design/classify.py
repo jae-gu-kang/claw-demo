@@ -356,6 +356,10 @@ def _first_finite(*values):
 def classify_margin_deficit(
     aircraft, v_name, loop_name, points, lms, trims, tables, design, margin_cases, *,
     criteria, design_base=None, targets=None, tol_plant=0.25, tol_gain=0.10,
+    # 히스테리시스 [기본값 — 실측 근거 없는 잠정값]: simple_deficit ↔ 상위 verdict
+    # 재분류가 판정 노이즈로 이터마다 튀지 않게 하는 밴드다. PM 5° · GM 1 dB ·
+    # ζ 0.10은 각 지표 합격선(45°/6 dB/0.30)의 10~17% 폭 — 밴드가 좁으면 채터링,
+    # 넓으면 지속 미달이 "좁은 골"로 눌러앉는다. 수치 확정은 폐쇄망 몫(04 §10)
     hysteresis_pm=5.0, hysteresis_gm=1.0, hysteresis_zeta=0.10,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
     rate_filters=None,

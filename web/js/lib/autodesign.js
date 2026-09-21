@@ -94,6 +94,7 @@ export function buildConfig(form) {
     ["budgetPoints", "budget_points"],
     ["budgetIters", "budget_iters"],
     ["nMach", "n_mach"],
+    ["nValidationBetween", "n_validation_between"],
     ["actuatorWn", "actuator_wn"],
     ["actuatorZeta", "actuator_zeta"],
     ["delayS", "delay_s"],
@@ -300,6 +301,74 @@ export function adoptWarnText(report) {
     + "정본이 된다.";
 }
 
+/** 반출 표 재검증(gain_export.reverify) → 줄 [{key, tone, text}] — 채택 섹션용.
+ *
+ * resample_error가 "게인이 얼마나 다른가"라면 이쪽은 "그 표로 다시 판정하면 무엇이
+ * 움직이나"다(05 §5.1). 악화(worse)가 있으면 확정 버튼 옆에서 경고해야 한다 —
+ * 게인 오차가 허용치 안이어도 판정 마진이 그보다 얇으면 등급이 움직인다.
+ * 움직인 자리 목록은 앞 몇 개만 문장에 싣는다(전량은 결과 JSON에 있다). */
+export function reverifyLines(gainExport) {
+  const rv = gainExport?.reverify;
+  if (!rv) {
+    // 재검증 도입 전 결과 — 없는 것을 0으로 위장하지 않고, 없다고 말한다
+    return [{ key: "none", tone: "hint",
+      text: "채택 표 재검증 없음 — 이 결과는 재검증 도입 전에 반출됐다." }];
+  }
+  if (rv.note) {
+    return [{ key: "note", tone: Number(rv.n_judged) > 0 ? "hint" : "warn",
+      text: `채택 표 재검증 — ${rv.note}` }];
+  }
+  const judged = Number(rv.n_judged) || 0;
+  const moved = rv.changed ?? [];
+  const dropped = Number(rv.dropped) || 0;
+  // 판정이 있다가 없어진 자리 — 등급 이동보다 나쁠 수 있다 (fail이 na로 사라진 것일 수 있다)
+  const droppedLine = dropped
+    ? [{ key: "dropped", tone: "warn",
+      text: `채택 표에서 판정 불가가 된 자리 ${dropped}곳 — 다항에서는 판정이 있었다`
+        + " (교차 소멸 등). 등급 이동 목록에 나오지 않으므로 따로 확인할 것." }]
+    : [];
+  if (!moved.length) {
+    return [...droppedLine, { key: "clean", tone: "hint",
+      text: `채택 표(재양자화) 재검증 — 판정 ${judged}곳 전부 다항 검증과 같다.` }];
+  }
+  const toFail = moved.some((c) => c.to === "fail");
+  const head = moved.slice(0, 3)
+    .map((c) => `${c.case} ${c.loop} ${c.to === "fail" ? "→ fail" : `${c.from}→${c.to}`}`)
+    .join(" · ");
+  const more = moved.length > 3 ? ` 외 ${moved.length - 3}곳` : "";
+  return [...droppedLine, { key: "moved", tone: toFail ? "fail" : "warn",
+    text: `채택 표(재양자화)로 재판정하면 ${judged}곳 중 ${moved.length}곳의 등급이 움직인다`
+      + ` (악화 ${Number(rv.worse) || 0} · 호전 ${Number(rv.better) || 0}): ${head}${more}.`
+      + " 확정되는 것은 이 표다 — 다항 검증 결과를 그대로 물려받지 않는다." }];
+}
+
+/** 적합 품질(fits[*].quality) → 줄 [{key, tone, text}] — 04 §10 갭의 렌더 경로.
+ *
+ * 문턱을 켠 실행에서 넘은 자리만 경고로 세운다. 문턱이 꺼진 실행(전부 na)은 줄을
+ * 세우지 않는다 — 지표는 결과 JSON에 있고, 판정하지 않은 것을 화면이 "품질 확인
+ * 완료"처럼 말하면 안 된다. 켰는데 전부 통과면 그 사실을 hint 한 줄로 남긴다
+ * (켠 실행과 안 켠 실행이 화면에서 같아 보이면 안 된다). */
+export function fitQualityLines(fits) {
+  const entries = Object.entries(fits ?? {})
+    .map(([slot, rep]) => [slot, rep?.quality])
+    .filter(([, q]) => q);
+  const warns = entries.filter(([, q]) => q.status === "warn");
+  if (warns.length) {
+    return warns.map(([slot, q]) => ({
+      key: `warn:${slot}`, tone: "warn",
+      text: `적합 품질 — ${slot}: `
+        + `기울기 점프 ${num(q.slope_jump_norm_max)} · 교차축 ${num(q.cross_axis_frac)}`
+        + " — 문턱 초과. 급한 관절·교차축 잔차는 스케줄 전이 채터링 소지다.",
+    }));
+  }
+  const judged = entries.filter(([, q]) => q.status === "ok").length;
+  if (judged) {
+    return [{ key: "ok", tone: "hint",
+      text: `적합 품질 — 판정한 ${judged}자리 전부 문턱 내.` }];
+  }
+  return []; // 전부 na(문턱 끔·상수) — 판정하지 않은 것을 말하지 않는다
+}
+
 /** report → 상태 줄 조각 [문자열] — 계산해 놓고 안 내던 수치를 담되 0은 생략한다.
  *
  * judged와 failures만은 0이어도 낸다: "실패 0 / 판정 0"이 곧 nothing_verified의
@@ -322,6 +391,7 @@ export function reportLine(report, nPointsFallback) {
     ["ineffective_actions", "무효 처방"],
     ["sealed", "봉인"],
     ["fit_tighten", "적합 조이기"],
+    ["fit_quality_warns", "적합 품질 경고"],
     // 원장 행 수 — 처방 카드 수와 다른 수다. 카드 없는 미달이 대부분이라
     // 이 수가 카드 수보다 훨씬 클 수 있고, 그 격차가 곧 "안 보이던 것"의 규모다
     ["ledger_size", "미달 원장"],

@@ -95,6 +95,167 @@ def probe_mission(tr, *, dv=PROBE_DV, dh=PROBE_DH, dpsi=PROBE_DPSI,
     return modes, float(t_settle) + 3.0 * float(t_step)
 
 
+def schedule_crossing_scenario(tables, cases):
+    """게인 스케줄을 시간축으로 가로지르는 시나리오 좌표 — 표·격자에서만 유도 (04 §5.5).
+
+    점 동결 평가(판정 10의 dK/dV·3단계 중간점)가 못 보는 것이 "게인이 보간으로
+    움직이는 **동안**"이고, 표준 기동(probe_mission)의 스텝(dh 30 m·dv 3 m/s)은
+    breakpoint 간격보다 작아 스케줄을 못 가로지른다. 여기서는 스케줄 표의
+    breakpoint(Table.axes ∪ PolyTable.knots — 다항의 knot도 구간 전환점이다)를
+    요청 케이스 격자 범위로 클립한 뒤, 범위 중앙에 가장 가까운 인접쌍 (b1, b2)를
+    골라 b1−½Δ → b2+½Δ(범위 클립)의 통과 구간을 만든다 — 전 수치가 표·격자에서
+    나온다 (특정 기체 전제 금지).
+
+    mach 축은 가속, alt 축은 상승으로 가로지른다(둘 다 있으면 가속 → 상승 연쇄).
+    fuel 축은 명령으로 움직일 수 없어(연료는 소모 상태) 시나리오가 없다 — notes에
+    사유를 남긴다. 가로지를 축이 없으면 None — 호출자가 na + 사유로 낸다.
+
+    **여유 없는 쌍은 그 축의 레그를 아예 안 낸다**(리뷰 지적). breakpoint가 범위 안에
+    딱 둘뿐이고 그 상한이 격자 상한과 겹치면(작은 스케줄에서 자연스러운 형상) target을
+    만들 여유가 없다 — 억지로 만들면 격자 밖을 명령하거나(검증 대상 밖) exit 문턱이
+    명령 목표와 같아져(점근 접근으로 영영 발화 못 함) 둘 다 이 함수의 다른 불변식을
+    깬다. 그 축은 `None`으로 두고, 다른 축에 레그가 있으면 그 축만으로 진행한다(둘 다
+    없으면 위 문단대로 전체가 None).
+    """
+    machs = sorted({float(c.mach) for c in cases})
+    alts = sorted({float(c.alt) for c in cases})
+    fuels = sorted({float(c.fuel) for c in cases})
+    if not machs or not alts or not fuels:
+        return None
+
+    def axis_bps(axis, lo, hi):
+        bps = set()
+        for tab in (tables or {}).values():
+            names = tuple(tab.axis_names)
+            if axis not in names:
+                continue
+            # 다축 Table도 그 축의 격자점은 전환점이다 — 1축만 보면 파라미터 장입 경로의
+            # 다축 스케줄(blocks/lookup.py)이 "미장착"으로 오독된다 (리뷰 지적).
+            # PolyTable은 1D뿐이라 knots는 names == (axis,)일 때만 온다
+            coords = getattr(tab, "knots", None)
+            if coords is None:
+                coords = tab.axes[names.index(axis)]
+            bps.update(float(x) for x in np.asarray(coords).ravel())
+        return sorted(b for b in bps if lo <= b <= hi)
+
+    def pick(bps, lo, hi):
+        if len(bps) < 2:
+            return None
+        mid = 0.5 * (lo + hi)
+
+        def key(k):
+            # b2가 격자 상한이면 목표 초과 여유가 없어(target==b2) exit가 영영 발화
+            # 못 한다 — 여유 있는 쌍이 있으면 그쪽을 우선한다 (리뷰 지적: 그 격자에선
+            # mission_profile이 구조적으로 통과 판정을 못 내는 상태가 된다)
+            return (1 if bps[k + 1] >= hi else 0,
+                    abs(0.5 * (bps[k] + bps[k + 1]) - mid))
+
+        i = min(range(len(bps) - 1), key=key)
+        b1, b2 = bps[i], bps[i + 1]
+        if b2 >= hi:
+            # 여유 있는 쌍이 있으면 key()가 이미 그쪽을 골랐다 — 그런데도 b2가 여전히
+            # 격자 상한이면 대안이 없었던 것이다(breakpoint가 딱 둘, 범위 양끝에 걸침 —
+            # 작은 스케줄에서 자연스러운 형상이다). 그 상태로 target을 억지로 만들면
+            # 격자 밖을 명령하게 되고(밖은 검증 대상이 아니다), 그렇다고 target==b2로
+            # 두면 exit 문턱이 명령 목표와 같아져 점근 접근으로 영영 발화 못 한다
+            # (exit_short_of 쪽에서 고치면 문턱이 명령 목표를 넘어서 버려 형태만 바뀐
+            # 같은 증상이 된다 — 리뷰 지적, 실측 재현: 2-breakpoint 표가 케이스
+            # 격자와 정확히 겹치는 최소 스케줄). 이 격자로는 이 축의 통과를 여유 있게
+            # 확인할 수 없다는 뜻이므로 정직하게 레그를 안 낸다 — 다른 축에 레그가
+            # 있으면 그 축만으로 진행하고, 없으면 호출자가 시나리오 자체를 없음으로
+            # 받아 na + 사유로 낸다
+            return None
+        half = 0.5 * (b2 - b1)
+        return {"pair": (b1, b2),
+                "start": max(lo, b1 - half), "target": min(hi, b2 + half)}
+
+    m = pick(axis_bps("mach", machs[0], machs[-1]), machs[0], machs[-1])
+    a = pick(axis_bps("alt", alts[0], alts[-1]), alts[0], alts[-1])
+    if m is None and a is None:
+        return None
+    notes = []
+    if any("fuel" in tuple(tab.axis_names) for tab in (tables or {}).values()):
+        notes.append("fuel 축 스케줄은 시간축 통과 시나리오가 없다 — "
+                     "연료는 명령이 아니라 소모 상태다")
+    return {
+        "mach": m, "alt": a,
+        # 시작점: 가로지르는 축은 그 축의 start, 아닌 축은 격자 중앙(대표 조건)
+        "start": {
+            "mach": m["start"] if m is not None else machs[len(machs) // 2],
+            "alt": a["start"] if a is not None else alts[len(alts) // 2],
+            "fuel": fuels[len(fuels) // 2],
+        },
+        "notes": notes,
+    }
+
+
+def schedule_crossing_mission(tr, scenario, *, t_settle=5.0, t_step=30.0,
+                              t_mission=None):
+    """시나리오 좌표 + 시작점 트림해 → (modes, t_end) — probe_mission의 형제.
+
+    가속·상승 목표는 TAS로 명령한다(유도 speed 규약) — mach 목표는 그 페이즈 고도의
+    ISA 음속으로 환산. 페이즈 exit는 상태 기반(speed_ge·alt_ge)이고 문턱은 마지막
+    breakpoint 너머, **항상 b2보다 엄격히 위**다(`exit_short_of`): 명령 목표가 b2보다
+    실제로 위면 min(b2+¼Δ, b2+½(target−b2))로 종전과 같고, 격자 상한이 target 자체를
+    b2까지 눌러 버린 극단(2-breakpoint 표가 케이스 격자 상하한과 정확히 겹치는 최소
+    스케줄 등)에서는 "목표보다 안쪽" 제약이 무의미해지므로 드롭하고 격자 무관 절대
+    상한 b2+¼Δ만 쓴다 — 어느 경우든 exit == target(= 점근 접근 발화 불가)이 되지
+    않는다(리뷰 지적, 종전엔 이 극단에서 뚫려 있었다).
+    천장 t_end 안에 못 넘으면 시뮬은 거기서 끝날 뿐이고, 통과 여부는 호출자가
+    mach/alt **시계열로 실측**한다 (Ts=∞ 패턴).
+
+    t_end 천장 [기본값]: t_settle + 페이즈당 8×t_step + 정착 t_step — 실측(데모 기체
+    1000 m, breakpoint 간격 0.05 mach): 한 구간 통과 가속이 표준 기동 스텝(dv 3 m/s)
+    의 10배가 넘는 속도 변화라 3×t_step로는 반도 못 간다. t_mission이 천장을 덮는다.
+    """
+    from claw.env import isa_atmosphere
+
+    V0 = float(np.linalg.norm(tr.state.vel_b))
+    alt0 = float(tr.case.alt)
+    m, a = scenario.get("mach"), scenario.get("alt")
+    if m is None and a is None:
+        raise ValueError("가로지를 레그가 없는 시나리오 — schedule_crossing_scenario가 "
+                         "None을 낸 경우는 미션을 만들지 않는다")
+
+    def exit_short_of(b1, b2, target):
+        # 넘은 것을 확인할 문턱: b2보다 위, 명령 목표보다 엄격히 아래. target==b2인
+        # 여유 없는 쌍은 pick()이 애초에 레그를 안 낸다(리뷰 지적 — 여기서 손대면
+        # 문턱이 명령 목표 자체를 넘어서 버려 "역시 영영 발화 못 함"이 형태만 바뀐다.
+        # 격자 밖을 명령하지 않는 한 이 함수 혼자서는 못 고치는 자리라, 여유가 있는
+        # target(target > b2)만 이 함수에 들어온다는 것이 호출자 쪽 불변식이다)
+        return b2 + min(0.25 * (b2 - b1), 0.5 * max(target - b2, 0.0))
+
+    phases = []
+    speed = V0
+    if m is not None:
+        b1, b2 = m["pair"]
+        sos = isa_atmosphere(alt0).a  # 가속은 시작 고도에서 — 상승 전이다
+        speed = float(m["target"] * sos)
+        phases.append(("accel", {
+            "speed": speed, "alt": alt0, "heading": 0.0,
+            "exit_when": ("speed_ge", float(exit_short_of(b1, b2, m["target"]) * sos)),
+        }))
+    if a is not None:
+        b1, b2 = a["pair"]
+        phases.append(("climb", {
+            "speed": speed, "alt": float(a["target"]), "heading": 0.0,
+            "exit_when": ("alt_ge", float(exit_short_of(b1, b2, a["target"]))),
+        }))
+
+    modes = [ModeSpec(name="settle", speed=V0, alt=alt0, heading=0.0,
+                      exit_when=("time_ge", float(t_settle)),
+                      next=phases[0][0])]
+    for i, (name, kw) in enumerate(phases):
+        nxt = phases[i + 1][0] if i + 1 < len(phases) else "hold"
+        modes.append(ModeSpec(name=name, next=nxt, **kw))
+    last = phases[-1][1]
+    modes.append(ModeSpec(name="hold", speed=last["speed"], alt=last["alt"],
+                          heading=0.0, exit_when=("time_ge", 1e9)))
+    t_end = (float(t_mission) if t_mission is not None
+             else float(t_settle) + (8.0 * len(phases) + 1.0) * float(t_step))
+    return modes, t_end
+
+
 def _value_at(ref, s, notes):
     """기준값에서 상대 스팬 s만큼 움직인 절대값 — 0 기준은 절대 스텝, 범위는 클립.
 

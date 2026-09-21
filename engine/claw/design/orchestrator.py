@@ -28,7 +28,7 @@ from claw.common.contracts import SurfaceCommand, TrimCase, TrimResult, VehicleS
 from claw.common.attitude import euler_to_quat
 from claw.design.classify import classify_failures
 from claw.design.criteria import MarginCriteria
-from claw.design.fit import fit_slots
+from claw.design.fit import fit_quality, fit_slots
 from claw.design.grid import coarse_grid
 from claw.design.linmodels import LinearModelSet
 from claw.design.points import (
@@ -41,7 +41,7 @@ from claw.design.points import (
     case_name,
 )
 from claw.design.refine import refine_trim_points
-from claw.design.schedmap import midpoint_validation_points, scheduled_margin_map
+from claw.design.schedmap import margin_delta, midpoint_validation_points, scheduled_margin_map
 from claw.design.tune import REASON_TEXT, TuneTargets, tune_points
 from claw.env import isa_atmosphere
 from claw.tables import PolyTable, Table
@@ -71,12 +71,29 @@ class AutoDesignConfig:
     criteria: MarginCriteria = field(default_factory=MarginCriteria)
     targets: TuneTargets = field(default_factory=TuneTargets)
     refine_tol: float = 0.25  # classify tol_plant와 같은 값을 공유 (기준 이원화 금지)
+    # fit_tol 0.02 [기본값] = "적합 잔차는 그 자리 게인 스케일의 2%까지" — 웹 수동 적합
+    # (lib/polyfit.js)과 같은 자리의 관례값이고 실측 근거는 없다(폐쇄망 확정 대상, 04 §10).
+    # flat_tol 0.02 [기본값] = "축 방향 변동이 스케일의 2% 미만이면 그 축은 실질 무변동" —
+    # fit_tol과 같은 자(둘 다 스케일 대비 비율)라 같은 수를 쓴다. 정의는 fit.py가 정본
     fit_tol: float = 0.02
     flat_tol: float = 0.02
+    # tol_gain 0.10 [기본값] = "보간 게인이 그 점 자유 최적 대비 10% 넘게 어긋나면
+    # 보간이 범인(valley)" — refine.tol 0.25(플랜트 변화)보다 조인 것은 게인 어긋남이
+    # 마진으로 직결되기 때문인데, 10%라는 수 자체는 실측 근거 없는 잠정값이다(04 §10)
     tol_gain: float = 0.10
+    # 적합 품질 문턱 (fit.fit_quality의 무차원 지표와 같은 자) — **0.0 = 판정 끔(보고만)**
+    # [기본값]. 억지 기본값 금지(04 §10): 합격선 수치의 근거가 아직 없어, 켜는 것은
+    # 사용자 몫이고 끈 채로도 지표·원장·화면 보고는 나간다. None 기본값을 못 쓰는
+    # 것은 서버 config 검증(_check_number)이 None을 거부하기 때문이다
+    fit_slope_jump_max: float = 0.0
+    fit_cross_axis_max: float = 0.0
     max_degree: int = 4
     max_segments: int = 4
     n_mach: int = 5
+    # 보간 구간당 검증점 수 [기본값 1 = 중점] — 05 §3. 상한 4: MAX_POINTS 200에서
+    # breakpoint 인접쌍이 수십 개면 4점만으로도 검증점이 예산 몫(_VALIDATION_RESERVE_FRAC)
+    # 을 다 쓴다 — 더 촘촘한 탐색은 밀도가 아니라 worst_case_search(04 §5.5 [자리])의 몫
+    n_validation_between: int = 1
     alts: tuple | None = None
     fuels: tuple | None = None
     actuator_wn: float = 30.0
@@ -104,8 +121,14 @@ class AutoDesignConfig:
             v = getattr(self, name)
             if not 0.0 < v < 1.0:
                 raise ValueError(f"{name}은 (0, 1) 구간: {v}")
+        for name in ("fit_slope_jump_max", "fit_cross_axis_max"):
+            v = getattr(self, name)
+            if v < 0.0:
+                raise ValueError(f"{name}은 0(끔) 이상: {v}")
         if self.n_mach < 2:
             raise ValueError(f"n_mach는 2 이상: {self.n_mach}")
+        if not 1 <= self.n_validation_between <= 4:
+            raise ValueError(f"n_validation_between은 1~4: {self.n_validation_between}")
         if self.budget_tune_evals < 0:
             raise ValueError(f"budget_tune_evals는 음수 불가: {self.budget_tune_evals}")
         if self.actuator_wn <= 0 or self.actuator_zeta <= 0:
@@ -395,12 +418,36 @@ class DesignSession:
         self.sched_tables = out["tables"]
         self.sched_constants = out["constants"]
         self.fits = out["reports"]
+        self._judge_fit_quality()
         cb(1, 1, "fit")
         self.stage = "VERIFY"
 
+    def _judge_fit_quality(self):
+        """적합 품질 판정 — fits[slot]["quality"] 부착 (04 §10 갭의 소비자).
+
+        지표(fit.fit_quality)는 항상 붙고, 문턱이 켜진(> 0) 지표만 판정한다 —
+        warn까지다(verdict·자동 처방 신설 안 함: tighten_fit이 구간을 늘려 관절을
+        오히려 보탤 수 있어 처방 방향이 확정되지 않았다. 04 §10 [TBD] 유지).
+        """
+        c = self.config
+        for rep in self.fits.values():
+            q = fit_quality(rep)
+            checks = []
+            if q["slope_jump_norm_max"] is not None:
+                if c.fit_slope_jump_max > 0.0:
+                    checks.append(q["slope_jump_norm_max"] <= c.fit_slope_jump_max)
+                if c.fit_cross_axis_max > 0.0:
+                    checks.append(q["cross_axis_frac"] <= c.fit_cross_axis_max)
+            q["status"] = "na" if not checks else ("ok" if all(checks) else "warn")
+            if not checks:
+                q["note"] = ("상수 자리 — 관절·교차축이 없다"
+                             if q["slope_jump_norm_max"] is None else
+                             "문턱 미설정(0 = 끔) — 보고만 한다 [기본값]")
+            rep["quality"] = q
+
     def _stage_verify(self, aircraft, fingerprint, cb):
         c = self.config
-        wanted = midpoint_validation_points(self.points)
+        wanted = midpoint_validation_points(self.points, n_between=c.n_validation_between)
         self.validation_wanted = len(wanted)
         added = 0
         for pt in wanted:
@@ -425,6 +472,38 @@ class DesignSession:
         # 결과를 안 보면 무효 처방이 예산을 태우는 것을 아무도 모른다
         self._score_applied_actions()
         self.stage = "CLASSIFY"
+
+    def reverify_resampled(self, aircraft, tables: dict, *, on_progress=None) -> dict:
+        """반출 표(재양자화 Table)로 검증을 다시 판정한다 — 채택되는 표현이 검증받게.
+
+        세션 검증(margin_out)은 다항 기준인데, 웹 「채택」·apply-gains가 주입하는 것은
+        resample_to_table의 근사 표다(routes/design.py `_gain_export`). 근사 오차 고지
+        (resample_error — 게인 공간)만으로는 "판정이 갈렸는가"에 답하지 못하므로, 같은
+        점·같은 트림·같은 기준으로 그 표를 재판정해 다항 판정과의 차이를 센다(05 §5.1).
+        trims·lms 재사용이라 비용은 점당 선형 마진 계산뿐이다 — 트림·시뮬 0.
+
+        반환: margin_delta(n_judged·changed·worse·better) + 재양자화 기준 failures
+        (_worst_failures 형식 — 분류기 형식과 같아 화면이 재사용한다). 재료가 없으면
+        n_judged 0 + 사유 — 조용히 통과로 위장하지 않는다.
+        """
+        c = self.config
+        if not self.margin_out.get("cases"):
+            return {"n_judged": 0, "changed": [], "worse": 0, "better": 0, "dropped": 0,
+                    "failures": [], "note": "재검증 생략 — 세션에 검증 결과가 없다"}
+        if not tables:
+            return {"n_judged": 0, "changed": [], "worse": 0, "better": 0, "dropped": 0,
+                    "failures": [], "note": "재검증 생략 — 스케줄 표가 없다(전 자리 상수)"}
+        design_eff = {**self.design, **self.sched_constants}
+        out = scheduled_margin_map(
+            aircraft, self.points, self.lms, tables, design_eff,
+            criteria=c.criteria, targets=c.targets, trims=self.trims,
+            on_progress=on_progress, **self._act_kw(),
+        )
+        if out["aborted"]:
+            return {"n_judged": 0, "changed": [], "worse": 0, "better": 0, "dropped": 0,
+                    "failures": [], "aborted": out["aborted"], "note": "재검증 취소"}
+        delta = margin_delta(self.margin_out["cases"], out["cases"], c.criteria)
+        return {**delta, "failures": out["failures"]}
 
     def judged_count(self) -> int:
         """실제로 판정이 난 (점, 자리) 수 — "통과"와 "안 봤다"를 가르는 수치.
@@ -587,6 +666,26 @@ class DesignSession:
                 action={"id": rec["id"], "verdict": rec["verdict"],
                         "type": rec["type"], "applied": True, "changed": False,
                         "sealed": None})
+
+        # ④ 적합 품질 문턱을 넘은 자리 (04 §10 부분 해소) — 점이 아니라 자리(slot)의
+        #    속성이라 point는 None이다. severity는 문턱 대비 초과 비율(엔진 severity와
+        #    같은 축 — 요구선 대비 비율)로 실어 정렬에 낀다
+        for slot, rep in self.fits.items():
+            q = rep.get("quality") or {}
+            if q.get("status") != "warn":
+                continue
+            over = []
+            sev = 0.0
+            for key, cap in (("slope_jump_norm_max", self.config.fit_slope_jump_max),
+                             ("cross_axis_frac", self.config.fit_cross_axis_max)):
+                v = q.get(key)
+                if cap > 0.0 and v is not None and v > cap:
+                    over.append(f"{key} {v:.3g} > {cap:.3g}")
+                    sev = max(sev, v / cap - 1.0)
+            add(None, slot, "fit_quality",
+                "적합 품질 문턱 초과 — " + " · ".join(over)
+                + " (급한 관절·교차축 잔차는 스케줄 전이 채터링 소지다)",
+                status="warn", severity=sev, quality=dict(q))
 
         # 측정 불가(None)가 맨 앞, 그 뒤로 부족 비율 내림차순
         rows.sort(key=lambda r: (0 if r["severity"] is None else 1,
@@ -865,6 +964,10 @@ class DesignSession:
                 1 for r in self.applied_log if r["effect"].get("changed") is False),
             "sealed": len(self.sealed_keys()),
             "fit_tighten": self.fit_tighten,
+            # 적합 품질 경고 수 — 문턱을 켠 실행에서만 0이 아닐 수 있다 (04 §10)
+            "fit_quality_warns": sum(
+                1 for rep in self.fits.values()
+                if (rep.get("quality") or {}).get("status") == "warn"),
             "criteria_fingerprint": c.criteria.fingerprint(),
         }
 

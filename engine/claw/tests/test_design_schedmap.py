@@ -456,3 +456,106 @@ def test_roll_mode_is_picked_by_participation_not_by_speed():
     assert part == pytest.approx(1.0)
     assert lat_metrics(A, wn_floor=0.1)["roll_lambda"] == pytest.approx(2.0)
     assert max(abs(v) for v in (-9.0, -2.0, -4.0, -0.01)) == 9.0  # 종전 축의 답
+
+
+def test_margin_delta_counts_judged_and_lists_only_moves():
+    """margin_delta — 양쪽 다 판정된 자리만 세고, 등급이 움직인 자리만 수치 동봉.
+
+    반출 표 재검증(reverify_resampled)의 대조 규약: na·미수렴(loops 빈 점)은
+    "판정 불가"지 변화가 아니므로 n_judged에 안 든다. 측정 불가(+inf) 심각도는
+    None으로 — JSON에 inf를 싣지 않는다. 엔벨로프 밖 점은 `_worst_failures`·
+    `judged_count`와 같은 이유로 판정 우주 자체에서 빠진다(p4·p5, 리뷰 지적).
+    """
+    from claw.design import margin_delta
+
+    before = {
+        "p1": {"loops": {
+            "pitch_att": {"kind": "margin", "pm_deg": 50.0, "gm_db": 12.0, "status": "ok"},
+            "yaw_rate": {"kind": "damping", "zeta": 0.55, "status": "ok"},
+            "roll_att": {"kind": "margin", "note": "제로 개루프", "status": "na"},
+        }},
+        "p2": {"loops": {
+            "pitch_att": {"kind": "margin", "pm_deg": 35.0, "gm_db": 12.0, "status": "fail"},
+            "roll_att": {"kind": "margin", "pm_deg": float("nan"),
+                         "gm_db": float("nan"), "status": "fail"},
+        }},
+        "p3": {"note": "미수렴 트림 — 마진 판정 불가", "loops": {}},
+        # p4: 양쪽 다 엔벨로프 밖 — fail→ok로 등급이 움직이지만 세면 안 된다
+        "p4": {"outside_envelope": True, "loops": {
+            "pitch_att": {"kind": "margin", "pm_deg": 1.0, "gm_db": 1.0, "status": "fail"},
+        }},
+        # p5: before는 안이었는데 after에서 엔벨로프 밖이 된다 — 소실(dropped)이 아니라
+        # 판정 우주 이탈이므로 dropped에도 안 잡혀야 한다
+        "p5": {"loops": {
+            "pitch_att": {"kind": "margin", "pm_deg": 50.0, "gm_db": 12.0, "status": "ok"},
+        }},
+        # p6: after에서 케이스가 통째로 빠진다 — 자리 단위 소실과 같은 규약으로
+        # dropped에 잡혀야 한다 (공개 API — 유일 호출자 밖 소비자 대비, 리뷰 지적)
+        "p6": {"loops": {
+            "pitch_att": {"kind": "margin", "pm_deg": 50.0, "gm_db": 12.0, "status": "ok"},
+            "roll_att": {"kind": "margin", "note": "제로 개루프", "status": "na"},
+        }},
+    }
+    after = {
+        "p1": {"loops": {
+            # ok → fail (악화) — 재양자화가 판정을 무너뜨린 자리
+            "pitch_att": {"kind": "margin", "pm_deg": 40.0, "gm_db": 12.0, "status": "fail"},
+            "yaw_rate": {"kind": "damping", "zeta": 0.54, "status": "ok"},  # 무변화
+            "roll_att": {"kind": "margin", "note": "제로 개루프", "status": "na"},
+        }},
+        "p2": {"loops": {
+            # 판정이 있다가 없어진 자리 — 재양자화 게인에서 교차 소멸. 조용히 빼면
+            # fail→na가 델타에서 사라지므로 dropped로 센다 (n_judged·changed 밖)
+            "pitch_att": {"kind": "margin", "note": "교차 없음", "status": "na"},
+            # 측정 불가 fail → ok — severity_from은 inf라 None으로 나가야 한다
+            "roll_att": {"kind": "margin", "pm_deg": 50.0, "gm_db": 12.0, "status": "ok"},
+        }},
+        "p3": {"note": "미수렴 트림 — 마진 판정 불가", "loops": {}},
+        "p4": {"outside_envelope": True, "loops": {
+            "pitch_att": {"kind": "margin", "pm_deg": 50.0, "gm_db": 12.0, "status": "ok"},
+        }},
+        "p5": {"outside_envelope": True, "loops": {
+            "pitch_att": {"kind": "margin", "pm_deg": 40.0, "gm_db": 12.0, "status": "fail"},
+        }},
+    }
+    out = margin_delta(before, after, MarginCriteria())
+    # na(p1.roll_att)·빈 loops(p3)·소실(p2.pitch_att)·엔벨로프 밖(p4·p5)은 전부 제외
+    assert out["n_judged"] == 3
+    # p2.pitch_att(자리 소실) + p6.pitch_att(케이스 소실 — na 자리는 안 센다) = 2.
+    # p5(엔벨로프 이탈)는 여전히 포함 안 함
+    assert out["dropped"] == 2
+    assert out["worse"] == 1 and out["better"] == 1  # p4의 fail→ok는 안 들어간다
+    moved = {(c["case"], c["loop"]): c for c in out["changed"]}
+    assert set(moved) == {("p1", "pitch_att"), ("p2", "roll_att")}  # p4는 없다
+    w = moved[("p1", "pitch_att")]
+    assert (w["from"], w["to"]) == ("ok", "fail")
+    assert w["severity_to"] == pytest.approx((45.0 - 40.0) / 45.0)  # PM 요구선 대비 부족 비율
+    assert moved[("p2", "roll_att")]["severity_from"] is None  # inf → None
+
+
+def test_validation_density_rounds_cover_every_interval_first():
+    """n_between=2·3 — 좌표는 등간 내분점, 순서는 라운드 우선(구간당 1점이 먼저 찬다).
+
+    VERIFY는 예산 소진 시 목록 앞에서 끊는다(orchestrator). 쌍 우선으로 내면 첫
+    구간이 3점을 다 받는 동안 마지막 구간은 0점이라, 밀도를 올린 실행이 오히려
+    커버리지를 잃는다. 첫 라운드는 중점(종전 좌표 그대로)이어야 기존 검증점
+    이름이 재사용된다 — 트림 캐시 적중.
+    """
+    ps = PointSet([
+        OperatingPoint(case=_case(0.2), role=ROLE_BREAKPOINT, origin="coarse"),
+        OperatingPoint(case=_case(0.5), role=ROLE_BREAKPOINT, origin="coarse"),
+        OperatingPoint(case=_case(0.8), role=ROLE_BREAKPOINT, origin="coarse"),
+    ])
+    two = midpoint_validation_points(ps, n_between=2)
+    assert [p.case.mach for p in two] == pytest.approx([0.3, 0.6, 0.4, 0.7])  # 라운드 1 → 2
+    # n=3의 첫 라운드는 중점 — n_between=1 좌표(이름째)가 그대로 앞머리에 온다
+    three = midpoint_validation_points(ps, n_between=3)
+    assert [p.case.mach for p in three[:2]] == pytest.approx([0.35, 0.65])
+    assert {p.case.name for p in three[:2]} == {p.case.name for p in midpoint_validation_points(ps)}
+    assert len(three) == 6 and all(p.role == "validation" for p in three)
+    # 이미 있는 좌표는 다시 만들지 않는다 (멱등)
+    for p in three:
+        ps.add(p)
+    assert midpoint_validation_points(ps, n_between=3) == []
+    with pytest.raises(ValueError):
+        midpoint_validation_points(ps, n_between=0)

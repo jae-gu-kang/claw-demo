@@ -19,8 +19,9 @@ closure 조성(closure.py) × pi_loop 전체 조성(작동기 2차계 + Padé �
 덕 타이핑으로 소비한다 (blocks/lookup.py의 Table 소비와 같은 원칙).
 
 검증점 생성 기본값(05 §3 — 01 §3.4 [TBD] "보간 구간 검증점 밀도"의 확정): breakpoint 이상
-역할 점의 축정렬 인접쌍마다 중점 1개. anchor는 breakpoint 역할을 겸하므로
-(points.at_least 서열) 트림 앵커 인접 구간의 중점도 함께 나온다.
+역할 점의 축정렬 인접쌍마다 등간 내분점 n_between개(기본 1 = 중점, v1.41 파라미터화 —
+라운드 우선 순서라 예산이 끊겨도 구간당 1점이 먼저 찬다). anchor는 breakpoint 역할을
+겸하므로(points.at_least 서열) 트림 앵커 인접 구간의 검증점도 함께 나온다.
 
 점의 세 상태를 구분해 낸다 (종전에는 뒤 둘이 한 덩어리였다):
 - 트림 수렴 + 엔벨로프 안 → 정상 판정, 실패는 처방으로
@@ -185,26 +186,42 @@ def _apply_sign_check(entry: dict, eff: dict, design: dict, slots) -> None:
         )
 
 
-def midpoint_validation_points(points) -> list:
-    """breakpoint 이상 역할 인접쌍의 중점 검증점 — 이미 있는 좌표는 만들지 않는다."""
+def midpoint_validation_points(points, *, n_between: int = 1) -> list:
+    """breakpoint 이상 역할 인접쌍의 검증점 — 구간당 n_between개 등간 내분점 (05 §3).
+
+    기본 1 = 종전 중점과 동일. 반환은 **라운드 우선**(전 구간의 1번째 점 → 2번째 …)
+    이다 — VERIFY가 예산 소진 시 목록 앞에서 끊으므로, 밀도를 올려도 "구간당 최소
+    1점" 커버리지가 한 구간의 2·3번째 점보다 먼저 찬다. 각 라운드 안에서 내분점은
+    중점에서 가까운 순(k = ⌈n/2⌉, … 바깥쪽)으로 — **홀수 n**에서는 첫 라운드가 곧
+    종전 중점이라 기존 검증점 좌표가 이름째 재사용된다(트림 캐시 적중). 짝수 n은
+    등간 내분점에 중점(t=½)이 없어 좌표가 전부 새로 잡힌다 (리뷰 정정).
+    이미 있는 좌표는 만들지 않는다. origin은 `midpoint:` 접두 유지(coverage 집계 키).
+    """
+    if n_between < 1:
+        raise ValueError(f"n_between은 1 이상: {n_between}")
+    # 중점 우선 라운드 순서 — n=3이면 [2, 1, 3]/(3+1): 중점, 안쪽, 바깥쪽
+    ks = sorted(range(1, n_between + 1), key=lambda k: abs(2 * k - (n_between + 1)))
     out = []
     seen = set(points.names())
-    for a, b, axis in points.adjacent_pairs(ROLE_BREAKPOINT):
-        ca, cb = points.get(a).case, points.get(b).case
-        mid = {
-            "mach": (ca.mach + cb.mach) / 2.0,
-            "alt": (ca.alt + cb.alt) / 2.0,
-            "fuel": (ca.fuel + cb.fuel) / 2.0,
-        }
-        name = case_name(mid["mach"], mid["alt"], mid["fuel"])
-        if name in seen:
-            continue
-        seen.add(name)
-        out.append(OperatingPoint(
-            case=TrimCase(name=name, mach=mid["mach"], alt=mid["alt"], fuel=mid["fuel"]),
-            role=ROLE_VALIDATION,
-            origin=f"midpoint:{a}|{b}",
-        ))
+    pairs = [(points.get(a).case, points.get(b).case, a, b)
+             for a, b, _axis in points.adjacent_pairs(ROLE_BREAKPOINT)]
+    for k in ks:
+        t = k / (n_between + 1.0)
+        for ca, cb, a, b in pairs:
+            pt = {
+                "mach": ca.mach + (cb.mach - ca.mach) * t,
+                "alt": ca.alt + (cb.alt - ca.alt) * t,
+                "fuel": ca.fuel + (cb.fuel - ca.fuel) * t,
+            }
+            name = case_name(pt["mach"], pt["alt"], pt["fuel"])
+            if name in seen:
+                continue
+            seen.add(name)
+            out.append(OperatingPoint(
+                case=TrimCase(name=name, mach=pt["mach"], alt=pt["alt"], fuel=pt["fuel"]),
+                role=ROLE_VALIDATION,
+                origin=f"midpoint:{a}|{b}",
+            ))
     return out
 
 
@@ -290,6 +307,71 @@ def scheduled_margin_map(
         "criteria_fingerprint": criteria.fingerprint(),
         "failures": _worst_failures(cases, criteria),
     }
+
+
+_STATUS_RANK = {"ok": 0, "warn": 1, "fail": 2}
+
+
+def margin_delta(cases_before: dict, cases_after: dict, criteria) -> dict:
+    """두 마진맵 `cases`의 (점, 자리)별 판정 대조 — 표현을 바꿔 재판정하면 무엇이 움직였나.
+
+    반출 표(재양자화 Table)가 검증받은 다항과 판정이 갈리는 자리를 세는 용도(05 §5.1).
+    양쪽 다 판정(ok·warn·fail)이 있는 자리만 센다 — na·미수렴은 "판정 불가"지 변화가
+    아니다. 단 **판정이 있다가 없어진 자리**(예: 재양자화 게인에서 교차 소멸)는 조용히
+    빼면 fail→na가 델타에서 사라지므로 dropped로 따로 센다 (0 위장 금지 — 리뷰 지적).
+    changed에는 등급이 움직인 자리만 수치를 동봉한다(criteria.severity — 비유한은
+    None으로: JSON에 inf를 싣지 않는다). 전 자리 수치 덤프는 저장물만 불린다.
+
+    엔벨로프 밖(포화·α 여유 미달) 점은 **판정 우주 자체에서** 뺀다 — `_worst_failures`·
+    `judged_count`와 같은 이유다(그 점의 fail에는 반영해도 듣지 않는다). before·after
+    어느 쪽에서든 엔벨로프 밖이면 그 점은 세지 않는다: n_judged·changed·worse·better는
+    물론 dropped에도 안 잡힌다(dropped는 "판정하다 못하게 된" 것이지 "애초에 판정
+    대상이 아니었던" 것이 아니다). 안 빼면 재양자화로 한 점이 엔벨로프 경계를 넘나들
+    때마다 행동 불가능한 판정 변화가 "나빠짐/좋아짐"으로 섞여 든다.
+    """
+    n_judged = 0
+    changed = []
+    worse = better = dropped = 0
+    for name, entry_b in cases_before.items():
+        entry_a = cases_after.get(name)
+        if entry_a is None:
+            # 케이스가 통째로 빠진 경우 — 그 안의 판정 자리도 소실이다. 유일 호출자
+            # (reverify_resampled)는 같은 점집합이라 도달 불가지만 공개 API라 다음
+            # 소비자가 밟는 자리다 (리뷰 지적 — 자리 단위 소실과 같은 규약).
+            # 엔벨로프 밖 점은 여기서도 제외 원칙 그대로다
+            if not entry_b.get("outside_envelope"):
+                dropped += sum(1 for m in entry_b.get("loops", {}).values()
+                               if _STATUS_RANK.get(m.get("status")) is not None)
+            continue
+        if entry_b.get("outside_envelope") or entry_a.get("outside_envelope"):
+            continue
+        loops_a = entry_a.get("loops", {})
+        for loop_name, m_b in entry_b.get("loops", {}).items():
+            m_a = loops_a.get(loop_name)
+            rank_b = _STATUS_RANK.get(m_b.get("status"))
+            rank_a = None if m_a is None else _STATUS_RANK.get(m_a.get("status"))
+            if rank_b is not None and rank_a is None:
+                dropped += 1  # 전엔 판정, 후엔 판정 불가 — 변화가 아니라 소실이다
+                continue
+            if rank_b is None or rank_a is None:
+                continue
+            n_judged += 1
+            if rank_a == rank_b:
+                continue
+            if rank_a > rank_b:
+                worse += 1
+            else:
+                better += 1
+            sev_b = criteria.severity(m_b)
+            sev_a = criteria.severity(m_a)
+            changed.append({
+                "case": name, "loop": loop_name,
+                "from": m_b["status"], "to": m_a["status"],
+                "severity_from": sev_b if math.isfinite(sev_b) else None,
+                "severity_to": sev_a if math.isfinite(sev_a) else None,
+            })
+    return {"n_judged": n_judged, "changed": changed, "worse": worse,
+            "better": better, "dropped": dropped}
 
 
 def _worst_failures(cases: dict, criteria) -> list:

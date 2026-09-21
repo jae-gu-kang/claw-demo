@@ -32,6 +32,7 @@ from claw.design.orchestrator import AutoDesignConfig, DesignSession
 from claw.design.refine import refine_trim_points
 from claw.design.tune import TuneTargets, tune_point, tune_points
 from claw.design.schedmap import (
+    margin_delta,
     midpoint_validation_points,
     scheduled_gains,
     scheduled_margin_map,
@@ -51,6 +52,7 @@ __all__ = [
     "scheduled_gains",
     "scheduled_margin_point",
     "scheduled_margin_map",
+    "margin_delta",
     "midpoint_validation_points",
     "coarse_grid",
     "refine_trim_points",

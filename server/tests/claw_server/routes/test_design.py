@@ -136,6 +136,13 @@ def test_auto_design_end_to_end(client, wait_job):
     # 재양자화 고지 — 자리마다 빠짐없이 (하나라도 비면 웹이 그 자리를 무오차로 읽는다)
     assert export["resample_tol"] > 0.0
     assert set(export["resample_error"]) == set(export["tables"])
+    # 채택 표 재검증 — 게인 공간 오차와 별개로 **판정 공간**의 대조가 실린다 (05 §5.1).
+    # 검증점·트림 재사용이라 세션이 판정한 전 자리가 대조 대상이다
+    rv = export["reverify"]
+    assert rv["n_judged"] == body["report"]["judged"] > 0
+    assert isinstance(rv["changed"], list)
+    assert rv["worse"] + rv["better"] == len(rv["changed"])
+    assert rv["dropped"] == 0  # 판정이 있다가 없어진 자리 — 데모 재양자화에선 없어야 한다
     meta = client.get("/api/results").json()[0]
     assert meta["kind"] == "auto_design" and meta["fingerprint"] == "fp-ad"
 
@@ -345,13 +352,19 @@ def test_schema_mismatch_is_409_not_500(client):
 def test_non_integer_counts_rejected(client):
     """격자 개수·차수에 float을 넣으면 엔진 범위 비교는 통과하고 잡 안에서 터진다."""
     for cfg in ({"n_mach": 2.5}, {"pade_order": 2.5}, {"budget_points": 24.7},
-                {"max_degree": 3.5}):
+                {"max_degree": 3.5}, {"n_validation_between": 1.5}):
         r = client.post("/api/design/auto", json={"config": cfg})
         assert r.status_code == 422, f"{cfg} → {r.status_code}"
     # 정수값 float은 통과해야 한다 (JSON은 24와 24.0을 구별하지 않는다)
     assert client.post("/api/design/auto",
                        json={"config": _small_config(budget_points=24.0)}
                        ).status_code == 202
+    # 새 밀도 필드 — 범위 안 정수는 202, 범위 밖은 엔진 검증이 422로 돌려준다
+    assert client.post("/api/design/auto",
+                       json={"config": _small_config(n_validation_between=2)}
+                       ).status_code == 202
+    assert client.post("/api/design/auto",
+                       json={"config": {"n_validation_between": 9}}).status_code == 422
 
 
 def test_awaiting_approval_requires_at_least_one(client, wait_job):
@@ -678,11 +691,14 @@ def test_gain_export_reports_resample_error(client):
     화면은 "확정"이 검증 결과를 그대로 물려받는 것처럼 보인다. 실제로 쓴 허용치와
     자리별 최대 어긋남이 함께 실리는지 고정한다.
     """
+    from claw.plant import make_demo_aircraft
     from claw_server.routes.design import _RESAMPLE_TOL, _gain_export
 
-    ex = _gain_export(_poly_session())
+    ex = _gain_export(_poly_session(), make_demo_aircraft())
     assert ex["resample_tol"] == _RESAMPLE_TOL
     assert set(ex["resample_error"]) == {"pitch.kp", "yaw.k_rate"}
+    # 합성 세션은 검증을 돈 적이 없다 — 재검증은 0 위장 없이 생략 사유를 말해야 한다
+    assert ex["reverify"]["n_judged"] == 0 and "검증 결과가 없다" in ex["reverify"]["note"]
 
     err = ex["resample_error"]["pitch.kp"]
     assert err["max_abs"] > 0.0  # 곡선을 직선으로 이었으니 0일 수 없다
@@ -699,11 +715,12 @@ def test_resample_error_is_measured_not_assumed(client):
     "이만큼 어긋난다"가 거짓이 된다. 보고된 지점(at)에서 다항과 재샘플 테이블을
     직접 평가해 max_abs와 맞는지 확인한다.
     """
+    from claw.plant import make_demo_aircraft
     from claw.tables import Table
     from claw_server.routes.design import _gain_export
 
     s = _poly_session()
-    ex = _gain_export(s)
+    ex = _gain_export(s, make_demo_aircraft())
     err = ex["resample_error"]["pitch.kp"]
     spec = ex["tables_resampled"]["pitch.kp"]
     rt = Table(spec["axes"], spec["data"], extrapolate="clip")
@@ -798,6 +815,9 @@ def test_apply_gains_writes_the_confirmed_tables_to_the_document(client, wait_jo
     assert prov["resample_tol"] > 0.0 and set(prov["resample_error"]) == set(gt["tables"])
     assert prov["applied_at"]  # 결과가 보존 상한에 밀려도 표의 시간 앵커가 남는다
     assert prov["basis_fingerprint"]
+    # 재검증 요약도 문서에 영속한다 — 행 목록은 개수로 접는다 (결과 저장물 복제 금지)
+    assert prov["reverify"]["n_judged"] > 0
+    assert isinstance(prov["reverify"]["changed"], int)
     row = next(p for p in client.get("/api/profiles").json() if p["id"] == "ad-apply")
     assert row["gain_tables"] == {"source": "auto_design", "stale": False, "stale_variants": []}
     # 반영된 문서로 조립이 실제로 선다 — 시뮬 제출이 202다 (확정 표 우선 조립)

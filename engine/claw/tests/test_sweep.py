@@ -138,3 +138,150 @@ def test_run_sweep_초소형_통합(design_trim):
         assert r["metrics"]["alt_rms"] is not None
         assert r["fingerprint"]
     assert rows[0]["fingerprint"] != rows[1]["fingerprint"]  # 지문이 계보
+
+
+# ── 스케줄 가로지르기 시나리오 (v1.41 — 04 §5.5 mission_profile) ─────────────
+
+
+def _cases(machs=(0.3, 0.5, 0.7), alts=(1000.0,), fuel=200.0):
+    return [TrimCase(name=f"M{m}/h{a}", mach=m, alt=a, fuel=fuel)
+            for m in machs for a in alts]
+
+
+def test_crossing_scenario_derives_everything_from_tables_and_grid():
+    """시나리오 좌표는 전부 표·격자에서 나온다 — 특정 기체 전제 금지.
+
+    breakpoint는 Table.axes ∪ PolyTable.knots, 범위는 케이스 격자로 클립,
+    쌍은 범위 중앙 최근접 인접쌍, 시작·목표는 b1−½Δ·b2+½Δ(클립)다.
+    """
+    from claw.pipeline.sweep import schedule_crossing_scenario
+    from claw.tables import Table
+
+    tables = {"pitch.kp": Table({"mach": [0.2, 0.4, 0.6, 0.8]},
+                                [-8.0, -6.0, -4.0, -2.0], name="pitch.kp")}
+    sc = schedule_crossing_scenario(tables, _cases())
+    assert sc["mach"]["pair"] == (0.4, 0.6)  # 격자 범위 [0.3, 0.7]의 중앙 최근접 쌍
+    assert sc["mach"]["start"] == pytest.approx(0.3)  # 0.4−0.1이나 범위 하한 클립
+    assert sc["mach"]["target"] == pytest.approx(0.7)
+    assert sc["alt"] is None and sc["start"]["alt"] == 1000.0
+    assert sc["start"]["fuel"] == 200.0
+
+    # breakpoint가 격자 범위 안에 2개 미만이면 None — 호출자가 na + 사유로 낸다
+    narrow = [TrimCase(name="n", mach=0.45, alt=1000.0, fuel=200.0)]
+    assert schedule_crossing_scenario(tables, narrow) is None
+    assert schedule_crossing_scenario({}, _cases()) is None
+
+    # fuel 축 스케줄 — 시나리오는 없고 사유가 남는다 (연료는 명령이 아니라 소모 상태)
+    tables["yaw.k_rate"] = Table({"fuel": [0.0, 400.0]}, [0.4, 0.5], name="yaw.k_rate")
+    sc2 = schedule_crossing_scenario(tables, _cases())
+    assert any("fuel" in n for n in sc2["notes"])
+
+
+def test_crossing_mission_chains_state_based_exits(design_trim):
+    """페이즈 exit는 상태 기반(speed_ge·alt_ge)이고 문턱은 breakpoint 너머다 —
+    시간이 아니라 **넘은 것이 확인된 뒤에만** 다음 페이즈로 간다."""
+    from claw.env import isa_atmosphere
+    from claw.pipeline.sweep import schedule_crossing_mission
+
+    _ac, tr = design_trim
+    sc = {"mach": {"pair": (0.55, 0.65), "start": 0.5, "target": 0.7},
+          "alt": {"pair": (1000.0, 3000.0), "start": 0.0, "target": 4000.0},
+          "start": {"mach": 0.5, "alt": 0.0, "fuel": 200.0}, "notes": []}
+    modes, t_end = schedule_crossing_mission(tr, sc, t_settle=5.0, t_step=30.0)
+    assert [m.name for m in modes] == ["settle", "accel", "climb", "hold"]
+    kind, v = modes[1].exit_when
+    assert kind == "speed_ge"
+    sos = isa_atmosphere(float(tr.case.alt)).a
+    assert v == pytest.approx((0.65 + 0.025) * sos)  # b2 + ¼Δ — 명령 목표(0.7)보다 안쪽
+    assert modes[1].speed == pytest.approx(0.7 * sos)
+    assert modes[2].exit_when == ("alt_ge", 3500.0)  # 3000 + ¼(2000)
+    assert modes[2].alt == 4000.0
+    assert t_end == pytest.approx(5.0 + (8.0 * 2 + 1.0) * 30.0)  # 천장 [기본값]
+    _, t2 = schedule_crossing_mission(tr, sc, t_settle=5.0, t_step=30.0, t_mission=90.0)
+    assert t2 == 90.0  # t_mission이 천장을 덮는다
+
+
+def test_crossing_exit_stays_strictly_inside_a_clipped_target(design_trim):
+    """격자 상한이 목표를 b2+¼Δ 안쪽으로 깎아도 exit < 명령 목표 — 같아지면 점근
+    접근으로 영영 발화하지 않아 후속 페이즈가 못 선다 (리뷰 지적)."""
+    from claw.env import isa_atmosphere
+    from claw.pipeline.sweep import schedule_crossing_mission
+
+    _ac, tr = design_trim
+    sos = isa_atmosphere(float(tr.case.alt)).a
+    # target 0.66 < b2+¼Δ(0.675) — 종전 식이면 exit == target이 되던 기하
+    sc = {"mach": {"pair": (0.55, 0.65), "start": 0.5, "target": 0.66}, "alt": None,
+          "start": {"mach": 0.5, "alt": float(tr.case.alt), "fuel": 200.0}, "notes": []}
+    modes, _ = schedule_crossing_mission(tr, sc, t_settle=5.0, t_step=30.0)
+    _, v_exit = modes[1].exit_when
+    assert v_exit == pytest.approx((0.65 + 0.005) * sos)  # b2 + ½(target−b2)
+    assert v_exit < modes[1].speed  # 명령 목표보다 엄격히 안쪽
+
+    # 레그 없는 시나리오는 미션을 만들지 않는다 — 공개 함수 가드
+    with pytest.raises(ValueError, match="레그가 없는"):
+        schedule_crossing_mission(tr, {"mach": None, "alt": None,
+                                       "start": sc["start"], "notes": []})
+
+
+def test_crossing_scenario_multi_axis_tables_and_headroom_preference():
+    """다축 테이블의 축 격자점도 breakpoint다 + 여유 없는 쌍은 뒤로 (리뷰 반영).
+
+    ① 2축(mach×alt) 스케줄만 장착돼도 "미장착"으로 오독하지 않는다.
+    ② b2가 격자 상한인 쌍은 target==b2라 exit가 영영 발화 못 하므로, 여유 있는
+    쌍이 존재하면 중앙 최근접이라도 양보한다.
+    """
+    from claw.pipeline.sweep import schedule_crossing_scenario
+    from claw.tables import Table
+
+    # ① 다축 테이블 — mach 축 격자점이 잡힌다
+    multi = {"pitch.kp": Table({"mach": [0.3, 0.5, 0.7], "alt": [0.0, 5000.0]},
+                               [[-8, -7], [-6, -5], [-4, -3]], name="pitch.kp")}
+    sc = schedule_crossing_scenario(multi, _cases(machs=(0.3, 0.7)))
+    assert sc is not None and sc["mach"]["pair"] == (0.3, 0.5)
+
+    # ② (0.4, 0.7)이 중앙 최근접이지만 b2==상한 — (0.2, 0.4)가 대신 뽑힌다
+    t = {"pitch.kp": Table({"mach": [0.2, 0.4, 0.7]}, [-8.0, -6.0, -4.0],
+                           name="pitch.kp")}
+    sc2 = schedule_crossing_scenario(t, _cases(machs=(0.2, 0.7)))
+    assert sc2["mach"]["pair"] == (0.2, 0.4)
+    assert sc2["mach"]["target"] > sc2["mach"]["pair"][1]  # 여유가 실제로 있다
+
+
+def test_crossing_scenario_drops_a_leg_with_no_headroom_alternative():
+    """breakpoint가 범위 안에 딱 둘뿐이고 그 상한이 격자 상한과 겹치면(양보할 대안이
+    없는 최소 스케줄) 그 축은 레그를 안 낸다 — target==b2를 강행하면 exit 문턱이
+    명령 목표와 같아져 점근 접근으로 영영 발화 못 한다(리뷰 지적, ②의 "양보"가 대안이
+    없을 때는 못 구하는 자리).
+    """
+    from claw.pipeline.sweep import schedule_crossing_scenario
+    from claw.tables import Table
+
+    # mach: breakpoint 딱 둘, 케이스 격자 상하한과 정확히 겹친다 — 양보할 대안이 없다
+    two_bp = {"pitch.kp": Table({"mach": [0.4, 0.6]}, [-6.0, -4.0], name="pitch.kp")}
+    sc = schedule_crossing_scenario(two_bp, _cases(machs=(0.4, 0.6)))
+    assert sc is None, "가로지를 축이(마하 하나뿐인데 그마저 여유 없음) 없으면 전체가 None"
+
+    # alt 축에 여유 있는 스케줄을 더하면 — mach 레그만 빠지고 alt 레그는 그대로 선다
+    two_bp["roll.k_rate"] = Table({"alt": [500.0, 1500.0, 3000.0]},
+                                  [-0.2, -0.3, -0.4], name="roll.k_rate")
+    sc2 = schedule_crossing_scenario(two_bp, _cases(machs=(0.4, 0.6), alts=(500.0, 3000.0)))
+    assert sc2 is not None
+    assert sc2["mach"] is None, "마하는 여유가 없어 레그가 없어야 한다"
+    assert sc2["alt"] is not None and sc2["alt"]["target"] > sc2["alt"]["pair"][1]
+
+
+def test_crossing_mission_skips_the_accel_phase_when_mach_has_no_headroom(design_trim):
+    """마하 레그가 없으면(위 테스트) accel 페이즈 자체가 없다 — climb이 바로 settle
+    뒤에 서므로, 여유 없는 축이 뒤 페이즈(고도 가로지르기)를 막지 않는다(리뷰 지적:
+    exit_short_of만 손보면 문턱이 명령 목표를 넘어서 버려 같은 증상이 형태만 바뀐다)."""
+    from claw.pipeline.sweep import schedule_crossing_mission
+
+    _ac, tr = design_trim
+    sc = {"mach": None,
+          "alt": {"pair": (1000.0, 3000.0), "start": 500.0, "target": 4000.0},
+          "start": {"mach": 0.5, "alt": 500.0, "fuel": 200.0}, "notes": []}
+    modes, _ = schedule_crossing_mission(tr, sc, t_settle=5.0, t_step=30.0)
+    assert [m.name for m in modes] == ["settle", "climb", "hold"]
+    kind, v = modes[1].exit_when
+    assert kind == "alt_ge" and v == pytest.approx(3500.0)  # b2 + ¼Δ
+    assert v < modes[1].alt  # 명령 목표(4000)보다 엄격히 안쪽 — 도달 가능하다

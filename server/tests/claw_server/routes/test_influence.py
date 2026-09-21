@@ -616,3 +616,44 @@ def test_prescribe_inherit_guards(client, wait_job):
     # 종류가 다른 저장물을 승계원으로 주면 409 — 조용히 무시하면 승계한 척이 된다
     assert client.post("/api/influence/prescribe", json={
         **base, "result_id": rid, "eval_result_id": rid}).status_code == 409
+
+
+def test_verify_mission_profile_crosses_the_schedule(client, wait_job):
+    """미션 프로파일 [자리] → 실측 (v1.41) — 시간축 스케줄 통과가 결과에 실린다.
+
+    코너 0·중간점 끔이면 이 런이 유일한 시뮬이다. 통과는 mach 시계열 실측,
+    RMS는 facts 보고만(판정선 없음), t_mission이 엔진 천장을 덮는다.
+    """
+    r = client.post("/api/influence/verify", json={
+        "cases": [{"name": "a", "mach": 0.4, "alt": 1000.0, "fuel": 200.0},
+                  {"name": "b", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "depth": "full", "midpoints": False,
+        "t_settle": 2.0, "t_step": 10.0, "t_mission": 60.0,
+        "criteria": {"robustness": {"mass_frac": 0.0, "cmalpha_frac": 0.0,
+                                    "cmq_frac": 0.0}},
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    mp = res["verify"]["mission_profile"]
+    assert "[자리]" not in (mp.get("note") or "")  # placeholder가 아니라 실측이다
+    assert mp["status"] in ("ok", "warn", "fail")
+    got = mp["crossed"]["mach"]
+    assert got["expected"] and got["crossed"] == got["expected"]
+    assert mp["scenario"]["t_end"] == 60.0  # t_mission이 천장을 덮었다
+    assert mp["facts"]["rms"]["spd_rms"] is not None
+    json.dumps(res, allow_nan=False)
+
+
+def test_verify_mission_knob_validation(client):
+    """t_mission은 양수·유한만 — 0·음수·NaN은 202 전에 422다."""
+    base = {"cases": [{"name": "a", "mach": 0.5, "alt": 1000.0, "fuel": 200.0}]}
+    for bad in (0.0, -5.0):
+        assert client.post("/api/influence/verify",
+                           json={**base, "t_mission": bad}).status_code == 422
+    # 스위치 끔은 유효한 요청 — na + 사유가 결과에 남는다 (제출은 202)
+    assert client.post("/api/influence/verify", json={
+        **base, "depth": "linear",
+        "criteria": {"schedule": {"mission": False}},
+    }).status_code == 202

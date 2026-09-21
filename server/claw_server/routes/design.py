@@ -70,7 +70,7 @@ class ResumeIn(BaseModel):
 # 정수로만 뜻이 있는 필드 — 격자 개수·차수·예산. float을 넣으면 엔진 범위 비교는
 # 통과하고 np.linspace·Padé 차수에서 터져 **202 뒤 원인 없는 실패**가 된다
 _INT_KEYS = ("budget_points", "budget_iters", "budget_tune_evals", "n_mach",
-             "max_degree", "max_segments", "pade_order")
+             "n_validation_between", "max_degree", "max_segments", "pade_order")
 
 
 def _check_number(where: str, v) -> None:
@@ -164,8 +164,8 @@ def _resample_error(poly: PolyTable, tab) -> dict:
             "at": float(xs[i]), "n_points": int(tab.data.size)}
 
 
-def _gain_export(session: DesignSession) -> dict:
-    """확정 게인 반출 — sched_spec(정본, 다항 포함) + 테이블 호환 재샘플 + 그 오차.
+def _gain_export(session: DesignSession, aircraft, on_progress=None) -> dict:
+    """확정 게인 반출 — sched_spec(정본, 다항 포함) + 테이블 호환 재샘플 + 그 오차 + 재검증.
 
     tables 항목은 sim/codegen 게인 페이로드(TableIn|PolyTableIn 태그드 유니언)에
     그대로 주입 가능한 형상이다 — 웹 "게인 확정" 버튼의 소비 계약.
@@ -173,17 +173,23 @@ def _gain_export(session: DesignSession) -> dict:
     그런데 그 버튼이 실제로 주입하는 것은 `tables_resampled`이고, 그것은 다항을
     선형 격자로 **재양자화한 근사**다 — 세션이 검증한(margin_out) 형상이 아니다.
     차이를 어디에도 안 적으면 "확정"이 검증 결과를 그대로 물려받는 것처럼 보인다.
-    그래서 실제로 쓴 허용치(`resample_tol`)와 자리별 최대 어긋남(`resample_error`)을
-    함께 낸다 — 웹이 "확정하면 이만큼 어긋난다"를 말할 수 있어야 한다.
+    그래서 둘을 함께 낸다:
+    - `resample_tol`·`resample_error` — **게인 공간**의 어긋남 (얼마나 다른 표인가)
+    - `reverify` — **판정 공간**의 재검증 (그 표로 다시 판정하면 무엇이 움직이나 —
+      session.reverify_resampled, 검증점·트림 재사용이라 점당 선형 계산뿐).
+      게인 오차가 허용치 안이어도 판정 마진이 그보다 얇으면 등급이 움직일 수 있다 —
+      그때 "확정하면 이 자리가 fail이 된다"를 말하는 것은 이쪽이다.
     비다항 자리는 재샘플이 곧 원본이라 오차가 정의상 0이다.
     """
     tables = {}
     tables_resampled = {}
     resample_error = {}
+    export_tables = {}  # 재검증용 Table 실물 — 직렬화한 것과 같은 객체여야 한다
     for slot, tab in session.sched_tables.items():
         if isinstance(tab, PolyTable):
             tables[slot] = tab.to_dict()
             rt = resample_to_table(tab, tol_interp=_RESAMPLE_TOL)
+            export_tables[slot] = rt
             tables_resampled[slot] = {
                 "axes": {rt.axis_names[0]: rt.axes[0].tolist()},
                 "data": rt.data.tolist(),
@@ -195,6 +201,7 @@ def _gain_export(session: DesignSession) -> dict:
                 "axes": {n: a.tolist() for n, a in zip(tab.axis_names, tab.axes)},
                 "data": tab.data.tolist(), "extrapolate": tab.extrapolate,
             }
+            export_tables[slot] = tab
             tables_resampled[slot] = tables[slot]
             resample_error[slot] = {"max_abs": 0.0, "max_frac": 0.0, "at": None,
                                     "n_points": int(tab.data.size)}
@@ -203,6 +210,8 @@ def _gain_export(session: DesignSession) -> dict:
         "tables_resampled": tables_resampled,
         "resample_tol": _RESAMPLE_TOL,
         "resample_error": resample_error,
+        "reverify": session.reverify_resampled(aircraft, export_tables,
+                                               on_progress=on_progress),
         "constants": dict(session.sched_constants),
     }
 
@@ -238,7 +247,10 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
     payload = session.to_dict()
     payload["report"] = session.report()
     payload["proposed_actions"] = session.proposed_actions()
-    payload["gain_export"] = _gain_export(session)
+    # 재검증(반출 표 재판정)도 잡 스레드 몫이다 — job.report 배선으로 취소가 통한다
+    payload["gain_export"] = _gain_export(
+        session, profile.aircraft(),
+        on_progress=lambda d, t, m: job.report(d, t, message=f"reverify {m}"))
     # 마지막에 얹는다 — to_jsonable 봉투 **안**이어야 원장의 inf/nan이 정책을 탄다
     payload.update(_ledger_payload(session))
     # 이 세션이 설계한 기체 — 재개는 이 지문의 스냅숏으로 같은 기체를 되살린다 (02 §5.6)
@@ -325,6 +337,22 @@ class ApplyGainsIn(BaseModel):
     base_revision: int = Field(ge=1)
 
 
+def _reverify_summary(rv: dict | None) -> dict:
+    """재검증 결과 → provenance 요약 — 수치 목록(changed·failures)은 개수로 접는다.
+
+    provenance는 문서에 영속하는 자리라 행 목록을 통째로 실으면 문서가 결과 저장물을
+    복제하게 된다. 없으면(옛 결과) None 필드로 — 0으로 위장하지 않는다.
+    """
+    if not rv:
+        return {"n_judged": None, "worse": None, "better": None, "changed": None,
+                "note": "재검증 없음 — 이 결과가 반출될 때는 재검증이 없었다"}
+    out = {"n_judged": rv.get("n_judged"), "worse": rv.get("worse"),
+           "better": rv.get("better"), "changed": len(rv.get("changed") or [])}
+    if rv.get("note"):
+        out["note"] = rv["note"]
+    return out
+
+
 @router.post("/design/{result_id}/apply-gains")
 def apply_gains_to_profile(result_id: str, req: ApplyGainsIn, request: Request) -> dict:
     """자동 설계 확정 게인을 그 기체 문서에 반영 — law.gain_tables 새 리비전 (정본 되쓰기, 스키마 v2).
@@ -383,6 +411,9 @@ def apply_gains_to_profile(result_id: str, req: ApplyGainsIn, request: Request) 
             "applied_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "resample_tol": export.get("resample_tol"),
             "resample_error": copy.deepcopy(export.get("resample_error") or {}),
+            # 판정 공간의 재검증 요약 — 게인 공간 오차(위)와 나란히. 결과가 보존 상한에
+            # 밀려 사라져도 "채택 표로 재판정했더니 몇 곳이 움직였나"는 문서에 남는다
+            "reverify": _reverify_summary(export.get("reverify")),
             # 낡음 판정의 기준 — 표 절을 뺀 지금 문서의 지문 (build.gain_tables_stale이 대조)
             "basis_fingerprint": gain_tables_basis_fingerprint(built.doc),
         },

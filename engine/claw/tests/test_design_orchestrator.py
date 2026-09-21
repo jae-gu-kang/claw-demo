@@ -105,8 +105,14 @@ def test_config_validation():
         AutoDesignConfig(mode="yolo")
     with pytest.raises(ValueError, match="budget_iters"):
         AutoDesignConfig(budget_iters=99)
-    c = AutoDesignConfig(alts=(1000.0,))
+    for bad in (0, 5):
+        with pytest.raises(ValueError, match="n_validation_between"):
+            AutoDesignConfig(n_validation_between=bad)
+    c = AutoDesignConfig(alts=(1000.0,), n_validation_between=2)
     assert AutoDesignConfig.from_dict(c.to_dict()) == c
+    # 필드가 생기기 전 저장물(왕복 dict에 키 없음) — 기본값 1로 재개된다
+    legacy = {k: v for k, v in c.to_dict().items() if k != "n_validation_between"}
+    assert AutoDesignConfig.from_dict(legacy).n_validation_between == 1
 
 
 def test_targets_must_meet_criteria():
@@ -479,7 +485,7 @@ def test_verify_stage_scores_the_applied_actions(monkeypatch):
     s.apply_actions(["a1"])
     assert "after" not in s.actions[0]["effect"]
 
-    monkeypatch.setattr(O, "midpoint_validation_points", lambda pts: [])
+    monkeypatch.setattr(O, "midpoint_validation_points", lambda pts, **kw: [])
     monkeypatch.setattr(O, "scheduled_margin_map", lambda *a, **k: {
         "aborted": None, "failures": [],
         "cases": {v: {"role": "validation", "loops": {"pitch_att": {
@@ -707,3 +713,120 @@ def test_session_trim_round_trip_keeps_the_trim_reserve():
     assert back.reserve == tr.reserve and back.reserve["de"]["frac"] > 0.0
     legacy = {k: v for k, v in _trim_to_dict(tr).items() if k != "reserve"}
     assert _trim_from_dict(legacy).reserve == {}
+
+
+def test_reverify_resampled_judges_the_adopted_tables(env):
+    """반출 표 재검증 — 채택되는 재양자화 표로 판정을 다시 받는다 (05 §5.1).
+
+    세션이 검증한 것은 다항인데 웹 「채택」·apply-gains가 주입하는 것은
+    resample_to_table의 근사 표다. 기본 허용치 재양자화는 판정을 안 움직여야 하고
+    (움직이면 허용치가 판정 마진보다 크다는 뜻), 게인을 크게 왜곡한 표는 악화를
+    잡아내야 한다 — 델타가 0만 내는 기계는 재검증이 아니라 장식이다.
+    """
+    from claw.design.fit import resample_to_table
+    from claw.tables import PolyTable, Table
+
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small())
+    s.run(ac, stall, limits, db, design, fingerprint="fp")
+
+    def export_tables(scale=1.0):
+        out = {}
+        for slot, t in s.sched_tables.items():
+            rt = resample_to_table(t) if isinstance(t, PolyTable) else t
+            out[slot] = Table({rt.axis_names[0]: rt.axes[0]}, rt.data * scale,
+                              name=rt.name, extrapolate=rt.extrapolate)
+        return out
+
+    # 기본 허용치 재양자화 — 판정 무변화 (트림·점 재사용이라 전 판정 자리가 대조된다)
+    out = s.reverify_resampled(ac, export_tables())
+    assert out["n_judged"] > 0 and out["changed"] == [] and out["failures"] == []
+    assert out["n_judged"] == s.judged_count() and out["dropped"] == 0
+
+    # 왜곡 표(게인 반감) — 악화를 잡아낸다. 실측: 데모 소격자에서 worse 51/판정 115
+    bad = s.reverify_resampled(ac, export_tables(scale=0.5))
+    assert bad["worse"] > 0 and bad["better"] == 0
+    assert all(c["from"] == "ok" or c["from"] == "warn" for c in bad["changed"])
+
+    # 재료가 없으면 n_judged 0 + 사유 — 조용한 통과 위장 금지
+    assert s.reverify_resampled(ac, {})["n_judged"] == 0
+    fresh = DesignSession(_small())
+    empty = fresh.reverify_resampled(ac, export_tables())
+    assert empty["n_judged"] == 0 and "검증 결과가 없다" in empty["note"]
+
+
+def test_validation_density_reaches_the_verify_stage(env):
+    """n_validation_between이 VERIFY까지 배선됐는지 — 밀도 2가 실제로 검증점을 늘린다.
+
+    예산이 넉넉한 조건에서 같은 격자로 1·2를 돌려 midpoint 검증점 수를 대조한다.
+    배선이 끊기면(스테이지가 기본값 호출) 이 대조가 같아져 잡아낸다.
+    """
+    ac, stall, limits, db, design = env
+    counts = {}
+    for n in (1, 2):
+        s = DesignSession(_small(budget_points=40, n_validation_between=n))
+        s.run(ac, stall, limits, db, design, fingerprint="fp")
+        counts[n] = s.coverage()["validation_points"]
+    assert counts[2] > counts[1] > 0
+
+
+def test_fit_quality_judgement_warns_ledgers_and_reports():
+    """적합 품질 판정 — 문턱 0 = 끔(na·보고만), 켜면 warn + 원장 행 + report 카운트.
+
+    verdict·자동 처방은 없다(04 §10 [TBD] 유지 — tighten_fit이 관절을 보탤 수 있어
+    처방 방향 미확정). warn의 severity는 문턱 대비 초과 비율이라 엔진 severity 축에
+    끼어 정렬된다.
+    """
+    poly_rep = {
+        "kind": "poly", "slot": "pitch.kp",
+        "segments": [{"x0": 0.2, "x1": 0.5}, {"x0": 0.5, "x1": 0.8}],
+        "scale": 2.0,
+        "joints": [{"x": 0.5, "value_jump": 0.0, "slope_jump": 10.0}],  # norm 3.0
+        "cross_axis_residual": 0.0,
+    }
+    const_rep = {"kind": "constant", "slot": "yaw.k_rate", "value": 0.4}
+
+    # 문턱 끔(기본값) — 지표는 붙되 판정은 na, 원장·카운트 0
+    s = DesignSession(_small())
+    s.fits = {"pitch.kp": dict(poly_rep), "yaw.k_rate": dict(const_rep)}
+    s._judge_fit_quality()
+    assert s.fits["pitch.kp"]["quality"]["status"] == "na"
+    assert "문턱 미설정" in s.fits["pitch.kp"]["quality"]["note"]
+    assert s.fits["yaw.k_rate"]["quality"]["status"] == "na"
+    assert not [r for r in s.shortfall_ledger() if r["kind"] == "fit_quality"]
+
+    # 문턱 켬 — norm 3.0 > 1.5 → warn, severity = 초과 비율 1.0
+    s2 = DesignSession(_small(fit_slope_jump_max=1.5))
+    s2.fits = {"pitch.kp": dict(poly_rep), "yaw.k_rate": dict(const_rep)}
+    s2._judge_fit_quality()
+    q = s2.fits["pitch.kp"]["quality"]
+    assert q["status"] == "warn" and q["slope_jump_norm_max"] == pytest.approx(3.0)
+    assert s2.fits["yaw.k_rate"]["quality"]["status"] == "na"  # 상수는 판정 대상이 아니다
+    rows = [r for r in s2.shortfall_ledger() if r["kind"] == "fit_quality"]
+    assert len(rows) == 1 and rows[0]["loop"] == "pitch.kp"
+    assert rows[0]["severity"] == pytest.approx(3.0 / 1.5 - 1.0)
+    assert s2.report()["fit_quality_warns"] == 1
+
+    # 넉넉한 문턱 — ok (켰다는 사실이 na와 구별돼야 한다)
+    s3 = DesignSession(_small(fit_slope_jump_max=10.0))
+    s3.fits = {"pitch.kp": dict(poly_rep)}
+    s3._judge_fit_quality()
+    assert s3.fits["pitch.kp"]["quality"]["status"] == "ok"
+
+    with pytest.raises(ValueError, match="fit_slope_jump_max"):
+        _small(fit_slope_jump_max=-0.1)
+
+
+def test_fit_quality_flows_through_a_real_run(env):
+    """실행 통합 — 기본값(끔)으로 돌아도 전 자리에 지표·status가 붙고 warns는 0이다."""
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small())
+    s.run(ac, stall, limits, db, design, fingerprint="fp")
+    assert s.fits, "적합 보고가 비어 있다"
+    for slot, rep in s.fits.items():
+        assert rep["quality"]["status"] in ("na", "ok", "warn"), slot
+    assert s.report()["fit_quality_warns"] == 0
+    # 왕복 후에도 품질이 남는다 (fits 직렬화 경유)
+    s2 = DesignSession.from_dict(s.to_dict())
+    assert s2.report()["fit_quality_warns"] == 0
+    assert all("quality" in rep for rep in s2.fits.values())

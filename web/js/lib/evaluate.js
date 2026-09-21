@@ -82,7 +82,7 @@ export function maneuverLine(model) {
 
 /** 형상 + 케이스 → /influence/verify 본문 (3단계 검증 — 후보 확정 후 별도 실행). */
 export function verifyRequest(state, { cases, criteria, depth, midpoints,
-                                       tSettle, tStep, tHold,
+                                       tSettle, tStep, tHold, tMission,
                                        fingerprint } = {}) {
   const body = { ...structuralRequest(state), cases };
   if (depth != null) body.depth = depth;
@@ -91,6 +91,7 @@ export function verifyRequest(state, { cases, criteria, depth, midpoints,
   if (tSettle != null) body.t_settle = tSettle;
   if (tStep != null) body.t_step = tStep;
   if (tHold != null) body.t_hold = tHold;
+  if (tMission != null) body.t_mission = tMission;  // 미션 런 천장 덮개 (v1.41)
   if (fingerprint) body.fingerprint = fingerprint;
   return body;
 }
@@ -156,6 +157,47 @@ const fmt = (v, digits = 3) => {
   if (!Number.isFinite(n)) return n > 0 ? "∞" : "−∞";
   return String(Number(n.toPrecision(digits)));
 };
+
+/** 미션 프로파일 블록(verify.mission_profile) → 표시 줄 [문자열] (v1.41).
+
+ * 시간축 스케줄 통과 검증(04 §5.5)의 상세다: 무엇을 가로지르려 했고(scenario),
+ * 실제로 넘었는지(crossed — 시계열 실측이 정본), 그 동안의 포화·와인드업·실속
+ * 여유(facts). RMS는 판정이 아니라 보고다 — 문구가 그렇게 말해야 한다.
+ * na(시나리오 없음·미도달·트림 미수렴)는 note가 이미 사유를 드니 줄을 더하지
+ * 않는다(없는 수치를 지어내지 않는다).
+ */
+export function missionProfileLines(block) {
+  if (!block?.scenario) return [];
+  const lines = [];
+  const legs = block.scenario.legs ?? {};
+  const legText = (axis, unit) => {
+    const l = legs[axis];
+    if (!l) return null;
+    const [b1, b2] = l.pair;
+    return `${axis} ${fmt(b1)}→${fmt(b2)}${unit} (시작 ${fmt(l.start)} → 목표 ${fmt(l.target)})`;
+  };
+  const legParts = [legText("mach", ""), legText("alt", " m")].filter(Boolean);
+  if (legParts.length) {
+    lines.push(`가로지르기: ${legParts.join(" · ")}`
+      + (block.scenario.t_end != null ? ` · 천장 ${fmt(block.scenario.t_end)} s` : ""));
+  }
+  for (const [axis, c] of Object.entries(block.crossed ?? {})) {
+    lines.push(`통과 실측(${axis}): `
+      + c.expected.map((b) => `${fmt(b)}${c.crossed.includes(b) ? "✓" : "✕"}`).join(" "));
+  }
+  const f = block.facts;
+  if (f) {
+    lines.push("포화 " + (f.sat_frac == null ? "—" : `${fmt(f.sat_frac * 100)}%`)
+      + " · 타율 " + (f.rate_sat_frac == null ? "—" : `${fmt(f.rate_sat_frac * 100)}%`)
+      + " · 와인드업 " + (f.windup_frac == null ? "—" : `${fmt(f.windup_frac * 100)}%`)
+      + " · 최악 실속마진 " + fmt(f.worst_stall_margin));
+    const rms = f.rms ?? {};
+    lines.push(`추종 RMS(보고만 — 램프 런에 판정선 없음): 고도 ${fmt(rms.alt_rms)} m · `
+      + `속도 ${fmt(rms.spd_rms)} m/s · 헤딩 ${fmt(rms.hdg_rms)} rad`);
+  }
+  for (const n of block.scenario.notes ?? []) lines.push(n);
+  return lines;
+}
 
 /** 카드 하나 → 표시 줄 목록 — 값/기준/최악 운용점 (사용자 확정 카드 문법).
  *

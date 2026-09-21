@@ -14,8 +14,10 @@ PolyTable(tables/poly.py) — 다항 런타임 채택(사용자 확정)에 따�
   기울기 점프는 joints로 정량 보고 (max_adjacent_jump 원칙 — 판정은 호출자).
 - 다축 변동: v1 다항 런타임은 1D 한정 [백로그] — 2축 이상 변동이면 지배 축으로
   적합하고 나머지 축 기여를 cross_axis_residual로 정직하게 보고한다.
-- resample_to_table: 다항 → 선형 보간 허용치 내 최소 breakpoint Table — 기존
-  claw_lookup1d 경로와의 호환 반출 (비교·백업용 보조 경로).
+- resample_to_table: 다항 → 선형 보간 허용치 내 최소 breakpoint Table. **웹 「채택」·
+  apply-gains가 실제로 주입하는 반출 표다** (routes/design.py `_gain_export` → 웹
+  작업본·기체 문서 law.gain_tables) — 세션이 검증한 것은 다항이므로, 반출 표는
+  `DesignSession.reverify_resampled`로 판정을 다시 받아 차이를 고지한다 (05 §5.1).
 """
 
 import numpy as np
@@ -83,6 +85,12 @@ def fit_gain_surface(xs, ys, *, tol_fit=0.02, max_degree=4, max_segments=4) -> d
 
     greedy: 전 구간 한 판 적합 → 잔차 초과 구간 중 최악을 그 구간의 최대 잔차
     격자점에서 분할 → 재적합(왼쪽부터 C0 제약 연쇄). max_segments 도달 시 최선 보고.
+
+    tol_fit 0.02 [기본값]의 근거(정본 — fit_slot·fit_slots·AutoDesignConfig가 이 수를
+    물려받는다): 잔차를 `scale = max|ys|`로 나눈 비율이라 "그 자리 게인 크기의 2%"다.
+    웹 수동 적합(lib/polyfit.js)과 같은 관례값이고 **실측 근거는 없다** — 마진 민감도로
+    확정하는 것은 폐쇄망 몫(04 §10). flat_tol(축 탈락, select_axes)도 같은 자의 비율이라
+    같은 수를 쓴다.
     """
     xs = np.asarray(xs, dtype=float)
     ys = np.asarray(ys, dtype=float)
@@ -292,6 +300,33 @@ def _fit_preserving_sign(xs, ys, axis, slot, *, tol_fit, max_degree, max_segment
     }
 
 
+def fit_quality(report: dict) -> dict:
+    """적합 보고 → 무차원 품질 지표 — 판정(문턱 대조)은 호출자(orchestrator._stage_fit).
+
+    04 §10이 기록한 갭("joints·cross_axis_residual — 문턱도 소비자도 렌더 경로도
+    없다")의 지표 부분이다. 정규화는 기체 무관이어야 하므로 그 자리 자신의 스케일로
+    잰다 (상수 하드코딩 금지):
+    - slope_jump_norm_max = max|slope_jump| / (scale/axis_span) — "축 전폭에 걸쳐
+      스케일만큼 변하는 기울기"가 1인 자. knot 관절의 꺾임이 그 자리 곡선의 평균
+      기울기 규모 대비 얼마나 급한가 (급한 꺾임 = 스케줄 전이 채터링 소지).
+    - cross_axis_frac = cross_axis_residual / scale — 지배 축 적합이 뭉갠 다른 축
+      기여의 비율 (v1 1D 한정의 대가를 수치로).
+    상수 자리는 관절도 축도 없다 — None으로 낸다 (0 위장 금지: "잴 것이 없다"와
+    "품질이 완벽하다"는 다른 말이다).
+    """
+    if report.get("kind") != "poly":
+        return {"slope_jump_norm_max": None, "cross_axis_frac": None}
+    segs = report["segments"]
+    span = float(segs[-1]["x1"] - segs[0]["x0"]) or 1.0
+    scale = float(report["scale"])  # fit_gain_surface가 0을 1.0으로 이미 막았다
+    unit = scale / span
+    jumps = [abs(float(j["slope_jump"])) for j in report.get("joints") or []]
+    return {
+        "slope_jump_norm_max": (max(jumps) / unit) if jumps else 0.0,
+        "cross_axis_frac": float(report.get("cross_axis_residual") or 0.0) / scale,
+    }
+
+
 def fit_slots(gain_samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
               max_degree=4, max_segments=4) -> dict:
     """전 자리 적합 — {"tables": {자리: PolyTable}, "constants": {자리: 값}, "reports"}."""
@@ -311,8 +346,10 @@ def fit_slots(gain_samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
 
 
 def resample_to_table(poly: PolyTable, *, tol_interp=0.01, max_pts=65) -> Table:
-    """다항 → 선형 보간 오차 허용치 내 최소 breakpoint Table (호환 반출 보조 경로).
+    """다항 → 선형 보간 오차 허용치 내 최소 breakpoint Table — **채택되는 반출 표**.
 
+    웹 「채택」과 apply-gains가 기체에 주입하는 것이 이 표다(모듈 머리말) — 검증받은
+    다항의 근사이므로 반출 시 reverify_resampled로 판정 차이를 재확인한다.
     구간마다 재귀 이분: 현 [a,b]의 중점에서 |다항 − 현(chord)| > tol_interp×scale
     이면 분할. knot ∪ 세분점이 최종 격자다.
     """
