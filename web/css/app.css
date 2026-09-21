@@ -944,7 +944,10 @@ body:has(.tab-page) main { max-width: 1580px; }
 .tab-top { margin: 2px 0 12px; }
 .tab-top h1 { margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
 .tab-subline { display: flex; align-items: center; justify-content: space-between; gap: 10px 24px; flex-wrap: wrap; margin-top: 7px; }
-.tab-subline p { margin: 0; font-size: 13px; font-weight: 500; color: var(--muted); max-width: 92ch; }
+/* 한 줄 설명 — 폭 상한을 두지 않는다. 92ch로 묶으면 1580px 칸에서 절반(~712px)만 쓰고
+   문장이 중간에 꺾여 오른쪽이 빈다(블록 매뉴얼 68ch를 없앤 것과 같은 이유 — 상자를
+   좁히지 말고 칸 너비를 다 쓰게, 사용자 지적). 대개 한 줄이라 폭이 넓어도 줄 수는 안 는다 */
+.tab-subline p { margin: 0; font-size: 13px; font-weight: 500; color: var(--muted); }
 
 /* `.tab-stage`에는 규칙이 없다 — 그것이 이 배치의 요지다. 캔버스·SVG는 자기 테두리·
    그림자를 이미 갖고 있고, 그 바깥에 배경도 테두리도 두지 않는 것이 "칸 없이 페이지
