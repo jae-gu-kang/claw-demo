@@ -263,7 +263,7 @@ function llmBriefBrief(body) {
     title: body.headline || "(제목 없음)",
     verdict: null,
     sections: [
-      { title: `소견 — 대상 ${body.parent ?? "—"} (${kindLabel(body.parent_kind)})${body.model ? ` · ${body.model}` : ""}`,
+      { title: `소견 — 대상 ${body.parent ?? "—"} (${kindLabel(body.parent_kind)})`,
         lines: String(body.body || "").split(/\n{2,}/).filter(Boolean) },
       ...(body.look_at?.length ? [{ title: "어디부터 볼까", lines: body.look_at }] : []),
     ],

@@ -81,7 +81,7 @@ let openDrawer = null;
 // 있으면 "돌긴 돌았나"만 남고 무슨 일이 있었는지가 안 보인다 (영향성 runStatus 선례)
 let simDrawers = null;
 // LLM 미션 초안 — 잡·결과·입력 문구를 탭 재진입에도 유지 (runningJobId와 같은 규약).
-// lastDraft는 normalizeDraft 산출(+model) — 적용 전 초안이 탭 이탈로 사라지지 않게
+// lastDraft는 normalizeDraft 산출 — 적용 전 초안이 탭 이탈로 사라지지 않게
 let draftJobId = null;
 let draftIntent = "";
 let lastDraft = null;
@@ -580,8 +580,7 @@ export function render() {
     // 키 없는 배포 — 숨기지 않고 서버가 준 사유 문장을 그대로 낸다 (조용한 비표시 금지)
     else if (!avail) draftStatusLine.append(llmStatus.reason ?? "사용할 수 없습니다.");
     else {
-      draftStatusLine.append(
-        `모델 ${llmStatus.model} — 서버가 대신 호출한다 (브라우저는 밖으로 나가지 않는다).`);
+      draftStatusLine.append("서버가 대신 호출한다 (브라우저는 밖으로 나가지 않는다).");
     }
   };
 
@@ -626,8 +625,7 @@ export function render() {
     // 정규화가 고친 것 + 검증 정본이 거부할 것 — 적용 전에 한자리에서 보인다
     const problems = [...d.issues, ...dryRun(d)];
     draftResultBox.append(
-      el("h3", { style: "margin:14px 0 4px; font-size:14px" }, "초안 미리보기",
-        d.model ? el("span", { class: "hint", style: "font-weight:400" }, ` — ${d.model}`) : null),
+      el("h3", { style: "margin:14px 0 4px; font-size:14px" }, "초안 미리보기"),
       el("p", { style: "margin:0 0 4px" }, d.summary || "(요약 없음)"),
       el("p", { class: "hint", style: "margin:0 0 4px" },
         `모드 ${d.modeRows.length}행 (${d.modeRows.map((r) => r.name).join(" → ") || "—"})`
@@ -672,7 +670,6 @@ export function render() {
         }
         const body = await api.get(`/results/${job.result_id}`);
         lastDraft = normalizeDraft(body.draft);
-        lastDraft.model = body.model;
         clear(draftAppliedNote); // 새 초안 — 옛 "적용됨"이 남으면 이 초안을 말하는 것처럼 읽힌다
         paintDraftResult();
       } catch (e) {

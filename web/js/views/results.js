@@ -164,8 +164,7 @@ export function render() {
     opinionBox.append(
       el("h2", {}, b.headline || "(제목 없음)"),
       el("p", { class: "hint", style: "margin:0 0 8px" },
-        `대상 ${b.parent} — ${kindLabel(b.parent_kind)}`,
-        b.model ? ` · ${b.model}` : ""),
+        `대상 ${b.parent} — ${kindLabel(b.parent_kind)}`),
       // body는 자유 서술이라 빈 줄로 문단을 가른다 — 통짜 <p>는 벽이 된다
       ...String(b.body || "").split(/\n{2,}/).map((par) =>
         el("p", { style: "max-width:96ch" }, par)),

@@ -473,7 +473,9 @@ def submit_mission_draft(req: MissionDraftIn, request: Request,
         # 단발 호출이라도 **보고를 두 번 이상** 한다 — 한 번도 안 하면
         # done==total==0이라 취소를 눌러도 상태가 done으로 남는다
         # (jobs.py _run의 completed 판정)
-        if job.report(0, 2, message=f"{model} 호출 중"):
+        # 진행 문구에 모델명을 싣지 않는다 — 웹 위젯 설명에서도 뺐다(사용자 결정, v1.36):
+        # 대상은 "어떤 LLM인가"가 아니라 "지금 뭘 하고 있나"다
+        if job.report(0, 2, message="초안 생성 중"):
             return  # 협조적 취소 — 저장 없음
         raw = call_llm(api_key=key, model=model, system=_SYSTEM,
                        user=req.intent, schema=_DRAFT_SCHEMA)
@@ -546,7 +548,7 @@ def submit_brief(req: BriefIn, request: Request, response: Response) -> dict:
         kind = str(meta.get("kind") or payload.get("kind") or "")
         pruned = prune(payload, kind)
         del payload  # sim 54MB — 가지치기 뒤에는 들고 있지 않는다
-        if job.report(1, 3, message=f"{model} 호출 중"):
+        if job.report(1, 3, message="소견서 생성 중"):  # 모델명은 진행 문구에 안 싣는다 (v1.36)
             return  # 돈 쓰기 전 마지막 취소 지점
         raw = call_llm(api_key=key, model=model, system=BRIEF_SYSTEM,
                        user=brief_user(meta, pruned), schema=BRIEF_SCHEMA)
@@ -616,7 +618,7 @@ def submit_comms(req: BriefIn, request: Request, response: Response) -> dict:
                 "밀려났거나 지워졌을 수 있습니다. 결과 탭을 새로고침하십시오.")
         log = flight_log(payload)
         del payload  # sim 54MB — 추출 뒤에는 들고 있지 않는다
-        if job.report(1, 3, message=f"{model} 호출 중"):
+        if job.report(1, 3, message="대본 생성 중"):  # 모델명은 진행 문구에 안 싣는다 (v1.36)
             return  # 돈 쓰기 전 마지막 취소 지점
         raw = call_llm(api_key=key, model=model, system=COMMS_SYSTEM,
                        user=comms_user(meta, log), schema=COMMS_SCHEMA)
@@ -668,7 +670,7 @@ def submit_ask(req: AskIn, request: Request, response: Response) -> dict:
     store = request.app.state.store
 
     def work(job):
-        if job.report(0, 2, message=f"{model} 호출 중"):
+        if job.report(0, 2, message="답변 생성 중"):  # 모델명은 진행 문구에 안 싣는다 (v1.36)
             return  # 협조적 취소 — 보고 2회 규약은 미션 초안과 같은 이유
         # 최근 메타 머리 30건 — 건당 ~130B라 유계이고, "돌린 적 있나"류 질문의
         # 실재 근거가 된다 (본문 수치는 안 준다 — ask.py 규칙 3)

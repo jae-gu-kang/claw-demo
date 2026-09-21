@@ -223,7 +223,6 @@ export function mount() {
       const dbody = await api.get(`/results/${dj.result_id}`);
       if (!alive(token)) return;
       const norm = normalizeDraft(dbody.draft);
-      norm.model = dbody.model;
       run.draft = norm;
       const { blockers, warnings } = precheck(norm);
       run.warnings = warnings;
@@ -355,7 +354,7 @@ export function mount() {
       statusLine.append(llm == null
         ? (statusErr ?? "서버 상태 확인 중…")
         : avail
-          ? `${llm.model} — 초안·교신 두 번만 부릅니다 (해설은 결과로 만듭니다).`
+          ? "초안·교신 두 번만 부릅니다 (해설은 결과로 만듭니다)."
           : (llm.reason ?? "사용할 수 없습니다."));
       input.disabled = !avail;
       startBtn.disabled = !avail || submitting;

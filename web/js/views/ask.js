@@ -25,7 +25,7 @@ let isOpen = false;
 let jobId = null;       // 진행 중 잡 — 이중 제출 방지의 한 축
 let submitting = false; // await 앞 동기 플래그 — 더블클릭 이중 과금 방지 (전 기능 규약)
 let llm = null;         // /llm/status — 성공만 캐시 (실패는 다음 열기에서 재시도)
-let lastQA = null;      // {question, norm, model} — 닫았다 열어도 남는다
+let lastQA = null;      // {question, norm} — 닫았다 열어도 남는다
 
 export function mount() {
   if (mounted) return; // 한 번만 — main.js 재호출 방어
@@ -53,7 +53,7 @@ export function mount() {
     clear(statusLine);
     if (llm == null) statusLine.append("서버 상태 확인 중…");
     else if (!avail) statusLine.append(llm.reason ?? "사용할 수 없습니다.");
-    else statusLine.append(`${llm.model} — 답이 그 화면을 엽니다 (수치의 정본은 각 탭).`);
+    else statusLine.append("답이 그 화면을 엽니다 (수치의 정본은 각 탭).");
   };
 
   const showErr = (text) =>
@@ -77,7 +77,7 @@ export function mount() {
   const paintAnswer = () => {
     clear(ansBox);
     if (!lastQA) return;
-    const { question, norm, model } = lastQA;
+    const { question, norm } = lastQA;
     ansBox.append(
       el("p", { class: "hint", style: "margin:10px 0 4px" }, `Q. ${question}`),
       ...norm.answer.split(/\n{2,}/).map((par) =>
@@ -94,7 +94,6 @@ export function mount() {
         ? el("div", { class: "error-box", style: "margin-top:8px" },
             norm.issues.map((m) => el("div", {}, `· ${m}`)))
         : null,
-      model ? el("p", { class: "hint", style: "margin:6px 0 0" }, model) : null,
     );
   };
 
@@ -126,7 +125,7 @@ export function mount() {
       const norm = normalizeAnswer(
         { answer: body.answer, actions: body.actions },
         { views: TAB_HASHES, blockPages });
-      lastQA = { question: q, norm, model: body.model ?? null };
+      lastQA = { question: q, norm };
       paintAnswer();
       // 첫 액션 자동 이동 — 패널은 떠 있어 답을 계속 읽는다
       if (norm.actions.length) location.hash = norm.actions[0].hash;
