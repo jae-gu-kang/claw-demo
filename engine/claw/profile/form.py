@@ -146,7 +146,9 @@ def form_spec() -> dict:
                     "provenance}. 있으면 조립이 규칙 스케줄 대신 이 표를 쓴다. 반영 잡이 쓰는 절이라 폼에서는 "
                     "보고 지우는 용도다 — 반영한 뒤 문서를 고치면 낡은 표로 취급돼 조립이 거부한다(자동 설계를 "
                     "다시 돌려 반영하거나 없음으로 지운다)"),
-            _group("/law/alloc", "타면 할당", nullable=True, fields=[
+            _group("/law/alloc", "타면 할당", nullable=True,
+                   help="문서 검증은 선택이지만 탑재 코드 생성·검증 탭에는 필요하다 — 없으면 배분 노드가 빠져 "
+                        "표준 템플릿 구조가 달라져 거부된다", fields=[
                 _f("number", "/law/alloc/resv_frac", "롤 권한 예비 비율", "-"),
                 _group("/law/alloc/de_trim", "트림 엘레본 표", nullable=True, fields=[
                     _f("choice", "/law/alloc/de_trim/source", "표 출처", choices=list(DE_TRIM_SOURCES)),
