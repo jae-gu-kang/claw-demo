@@ -286,6 +286,12 @@ class DesignSession:
         # 같은 자리에서 초기화·직렬화한다. 왕복에서 빠지면 재개한 세션이 조용히
         # 필터 없는 플랜트로 되돌아간다 (이 모듈 머리말의 '완전 왕복' 전제)
         self.rate_filters: dict = {}
+        # 운용 고도 범위 [alt_min, alt_max] (None = 그 끝 미입력) — 같은 성격(프로파일 operating).
+        # coarse 격자 고도 자동 유도(alts 미지정)의 범위다. 안 넘기면 운용 상한 3 km 기체도
+        # 표시 상한 12 km까지 격자를 편다
+        self.alt_range: list = [None, None]
+        # 고도 자동 유도 귀속 — 연료별 {fuel, alts, ceiling, ceiling_source, trim_probe} (지정 alts면 None)
+        self.alts_auto = None
         self.gain_samples: dict = {}
         self.tune_meta: dict = {}
         self.promoted_gains: dict = {}  # {slot: {이름: 값}} — valley 승격 breakpoint의 게인
@@ -328,13 +334,15 @@ class DesignSession:
     # ── 스테이지 ──
     def _stage_coarse(self, aircraft, stall_table, limits, db_ranges, fingerprint, cb):
         c = self.config
+        lo, hi = self.alt_range
         out = coarse_grid(
             aircraft, stall_table, limits, db_ranges,
             n_mach=c.n_mach, alts=c.alts, fuels=c.fuels,
-            budget=c.budget_points, fingerprint=fingerprint,
-            on_progress=lambda d, t, m: cb(d, t, m),
+            budget=c.budget_points, alt_lo=lo if lo is not None else 0.0, alt_hi=hi,
+            fingerprint=fingerprint, on_progress=lambda d, t, m: cb(d, t, m),
         )
         self.points, new_trims = out["points"], out["trims"]
+        self.alts_auto = out["alts_auto"]
         self.trims.update(new_trims)
         if out["aborted"]:
             raise _Cancelled()
@@ -892,7 +900,7 @@ class DesignSession:
 
     # ── 실행 ──
     def run(self, aircraft, stall_table, limits, db_ranges, design, *,
-            rate_filters=None, fingerprint="", on_progress=None) -> dict:
+            rate_filters=None, alt_range=None, fingerprint="", on_progress=None) -> dict:
         """현 스테이지부터 계속 실행 — DONE·awaiting_approval·취소에서 멈춘다.
 
         rate_filters: 법칙의 레이트 경로 필터 {그룹: 스펙}. `design`과 같이 **비행체
@@ -900,15 +908,22 @@ class DesignSession:
         BuiltProfile.rate_filters() — 요축 워시아웃 τ=2 s). 이것을 안 보고 도는 튜닝·검증은
         출하되지 않는 조성을 상대하게 된다 (05 §4.1).
 
-        **None은 "안 바꾼다"**이지 "필터 없음"이 아니다 — 재개 호출이 인자를
+        alt_range: 운용 고도 범위 (alt_min, alt_max) — 각 끝 None = 미입력. 같은 성격의
+        프로파일 값(operating)이고 coarse 격자 고도 자동 유도의 범위가 된다(config.alts를
+        지정하면 쓰이지 않는다).
+
+        **None은 "안 바꾼다"**이지 "필터 없음"·"범위 없음"이 아니다 — 재개 호출이 인자를
         생략해도 저장된 값(from_dict가 복원한 것)을 이어간다. 필터를 실제로
-        비우려면 빈 dict를 명시한다.
+        비우려면 빈 dict를, 범위를 풀려면 (None, None)을 명시한다.
         """
         self.design = dict(design)
         # None은 "안 바꾼다" — 재개 호출이 인자를 안 주면 저장된 값을 이어간다.
         # dict(rate_filters or {})로 덮으면 재개가 조용히 필터 없는 플랜트로 돌아간다.
         if rate_filters is not None:
             self.rate_filters = dict(rate_filters)
+        if alt_range is not None:
+            lo, hi = alt_range
+            self.alt_range = [None if lo is None else float(lo), None if hi is None else float(hi)]
         if self.status == "awaiting_approval":
             return self.report()  # 승인 없이 재호출 — 상태 유지 (apply_actions가 풀어 준다)
         self.status = "running"
@@ -981,6 +996,8 @@ class DesignSession:
             "trims": {n: _trim_to_dict(tr) for n, tr in self.trims.items()},
             "design": dict(self.design),
             "rate_filters": {g: dict(f) for g, f in self.rate_filters.items()},
+            "alt_range": list(self.alt_range),
+            "alts_auto": self.alts_auto,
             "gain_samples": {s: dict(v) for s, v in self.gain_samples.items()},
             "tune_meta": self.tune_meta,
             "promoted_gains": {s: dict(v) for s, v in self.promoted_gains.items()},
@@ -1009,6 +1026,8 @@ class DesignSession:
         s.trims = {n: _trim_from_dict(td) for n, td in d["trims"].items()}
         s.design = dict(d.get("design", {}))
         s.rate_filters = {g: dict(f) for g, f in d.get("rate_filters", {}).items()}
+        s.alt_range = list(d.get("alt_range", [None, None]))
+        s.alts_auto = d.get("alts_auto")
         s.gain_samples = {k: dict(v) for k, v in d.get("gain_samples", {}).items()}
         s.tune_meta = d.get("tune_meta", {})
         s.promoted_gains = {k: dict(v) for k, v in d.get("promoted_gains", {}).items()}

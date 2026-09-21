@@ -19,7 +19,7 @@ export const DOC_FAILED_HINT = "고른 기체 문서를 받지 못해 예제 기
 /** 엔벨로프 폼 폴백 — 예제 기체 사본. margin은 제어법칙의 α 리미터 여유(law.alpha_margin)다. */
 export const ENVELOPE_FALLBACK = Object.freeze({
   alt: "1000", fuel: "25", margin: "0.05",
-  scanFrom: "0.08", scanTo: "0.28", scanStep: "0.02", scanAlts: "0, 1000, 3000, 5000",
+  scanFrom: "0.08", scanTo: "0.28", scanStep: "0.02", scanAlts: "0, 2900, 6600, 12000",
 });
 
 /** 마진 맵 작동기 칸 폴백 — 예제 기체 actuator.params 사본. */

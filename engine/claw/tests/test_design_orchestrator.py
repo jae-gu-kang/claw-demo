@@ -80,6 +80,30 @@ def test_roundtrip_preserves_session(env):
     assert s2.report() == s.report()
 
 
+def test_auto_alts_follow_operating_range_and_roundtrip(env):
+    """alts 미지정 — coarse 고도 자동 유도가 프로파일 운용 범위(alt_range) 안에 선다.
+
+    안 넘기면 운용 상한 3 km 기체도 표시 상한 12 km까지 격자를 폈다(리뷰 지적). 범위와
+    유도 귀속은 세션 상태라 왕복하고, 재개 호출이 인자를 생략해도 저장된 범위를 잇는다."""
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small(alts=None, budget_points=24))
+
+    def stop_after_coarse(done, total, message):
+        return not message.startswith("[COARSE]")
+
+    s.run(ac, stall, limits, db, design, alt_range=(500.0, 3000.0), fingerprint="fp",
+          on_progress=stop_after_coarse)
+    alts = {p.case.alt for p in s.points}
+    assert alts and min(alts) == 500.0 and max(alts) <= 3000.0
+    (auto,) = s.alts_auto
+    assert auto["fuel"] == 200.0 and auto["alts"][0] == 500.0
+    assert auto["ceiling"] <= 3000.0 and auto["trim_probe"] == "applied"
+    s2 = DesignSession.from_dict(s.to_dict())
+    assert s2.alt_range == [500.0, 3000.0] and s2.alts_auto == s.alts_auto
+    s2.run(ac, stall, limits, db, design, fingerprint="fp", on_progress=lambda *a: True)
+    assert s2.alt_range == [500.0, 3000.0]  # None = 안 바꾼다
+
+
 def test_cancel_preserves_and_resumes(env):
     ac, stall, limits, db, design = env
     s = DesignSession(_small())

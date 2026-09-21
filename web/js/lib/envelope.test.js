@@ -6,7 +6,7 @@ import { test } from "node:test";
 import {
   boundColor, boundLabel, boundarySegments, capLabel, dbLoBinds, envelopeQuery, ftToM, isoLabelIndex,
   isoOffWindow, kindColor, kindLabel, machSpan, machWindow, mToFt, msToKt, optNum, outlineCaps,
-  outsideRegion, prefillValue, regionPolygons, scanCells, scanSummary, spreadLabels,
+  outsideRegion, prefillValue, regionPolygons, scanCells, scanSummary, scheduleAltsCaption, spreadLabels,
   tasAxisTicks, throttleCell, thrustFrontier,
 } from "./envelope.js";
 
@@ -273,6 +273,42 @@ test("isoLabelIndex — 기준점에서 바깥으로 훑어 첫 범위 안 인�
   assert.equal(isoLabelIndex(curve, 0.3, 1.0, 0), 1); // 0은 범위 밖 → 바깥으로 한 칸
 });
 
+test("scheduleAltsCaption — 스케줄 격자 고도의 유래를 엔진 echo로만 말한다", () => {
+  const g = (auto, alts) => ({ n_mach: 5, alts, auto, points: [] });
+  const auto = (ceiling, source, probe = "applied") => ({
+    ceiling, ceiling_source: source, trim_probe: probe, n_alt_max: 4, sigma_step: 0.14, min_width_frac: 0.25,
+  });
+  // 위 끝이 설계 범위 상한 — 천장이 그 위라는 것만 말하고, 몇 m인지는 지어내지 않는다
+  const top = scheduleAltsCaption(g(auto(4000, "alt_hi"), [0, 1200, 2550, 4000]));
+  assert.match(top, /4단/);
+  assert.match(top, /0–4000 m/);
+  assert.match(top, /σ 간격 0\.14/);
+  assert.match(top, /최대 4단/);
+  assert.match(top, /설계 범위 상한/);
+  // 추력 천장 — 격자가 왜 초록 영역 꼭대기까지 안 가는지를 말한다
+  const trim = scheduleAltsCaption(g(auto(7100, "trim"), [0, 1950, 4250, 7100]));
+  assert.match(trim, /0–7100 m/);
+  assert.match(trim, /트림 천장/);
+  // 공력 천장 — 행 폭 기준(비율은 엔진 echo)
+  const reach = scheduleAltsCaption(g(auto(8650, "reach"), [500, 3000, 8650]));
+  assert.match(reach, /3단/);
+  assert.match(reach, /500–8650 m/);
+  assert.match(reach, /실속 천장/);
+  assert.match(reach, /25%/);
+  // 탐침이 없었거나(null) 바닥부터 안 섰으면 추력을 안 봤다고 밝힌다 — 공력 천장을 비행 천장인 척하지 않는다
+  assert.match(scheduleAltsCaption(g(auto(12000, "alt_hi", null), [0, 2900, 6600, 12000])), /추력은 안 봤/);
+  assert.match(scheduleAltsCaption(g(auto(12000, "alt_hi", "floor_failed"), [0, 2900, 6600, 12000])),
+    /바닥 고도에서도 트림이 서지 않아/);
+  // 바닥부터 도달 불가 — 빈 격자를 빈 격자라고 한다
+  assert.match(scheduleAltsCaption(g(auto(null, "none"), [])), /격자가 없/);
+  // 모르는 귀속 코드는 코드 그대로 (엔진이 코드를 늘려도 화면이 숨기지 않는다)
+  assert.match(scheduleAltsCaption(g(auto(5000, "new_code"), [0, 5000])), /new_code/);
+  // 지정 고도 — 자동이 아닌 것을 자동이라 하지 않는다
+  const fixed = scheduleAltsCaption(g(null, [0, 5000]));
+  assert.match(fixed, /지정/);
+  assert.doesNotMatch(fixed, /자동/);
+});
+
 test("outsideRegion — q̄ 경계 밖 스케줄 격자점을 집어낸다 (이웃 행 보간)", () => {
   const r = region([
     [0, 0.3, 0.55, "stall", "qbar"],
@@ -300,6 +336,19 @@ test("outsideRegion — 행 이산화만큼의 어긋남은 이탈이 아니다 
   ]);
   assert.equal(outsideRegion({ mach: 0.3080 - 2e-4, alt: 5000 }, r), false);
   assert.equal(outsideRegion({ mach: 0.3080 - 5e-3, alt: 5000 }, r), true); // 진짜 이탈은 잡는다
+});
+
+test("outsideRegion — 하한 귀속이 바뀌는 꺾임 구간은 현(弦)으로 보간하지 않는다", () => {
+  // 실측(예제 기체 연료 25 kg): 하한 = max(DB 0.1, 실속×1.1)이 4200~4500 m 사이에서 꺾인다.
+  // 4250 m 격자점 M0.1은 제 고도에서 정확히 계산된 하한(DB)인데, 두 행을 직선으로 이으면
+  // 0.1018이 되어 ×로 찍혔다 — 볼록한 max()를 현이 위에서 덮는 탓이다
+  const r = region([
+    [4200, 0.1, 0.306, "db", "mach_no"],
+    [4500, 0.1106, 0.306, "stall", "mach_no"],
+  ]);
+  assert.equal(outsideRegion({ mach: 0.1, alt: 4250 }, r), false);
+  assert.equal(outsideRegion({ mach: 0.095, alt: 4250 }, r), true); // 두 하한 모두 밑이면 밖
+  assert.equal(outsideRegion({ mach: 0.32, alt: 4250 }, r), true); // 상한 쪽은 그대로
 });
 
 test("thrustFrontier — 행 가운데 고립 포화 섬은 전선이 아니다 (가짜 가로 전선 방지)", () => {

@@ -32,7 +32,7 @@ import {
   boundColor, boundLabel, boundarySegments, capColor, capLabel, dbLoBinds, envelopeQuery,
   ftToM, isoLabelIndex, isoOffWindow, kindColor, kindLabel, machSpan, machWindow, mToFt, msToKt,
   optNum, outlineCaps, prefillValue, outsideRegion, regionPolygons, scanCells, scanSummary,
-  spreadLabels, tasAxisTicks, throttleCell, thrustFrontier,
+  scheduleAltsCaption, spreadLabels, tasAxisTicks, throttleCell, thrustFrontier,
 } from "../lib/envelope.js";
 import { machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { fuelsOf, linScale, niceTicks, pivotCases } from "../lib/plot.js";
@@ -163,7 +163,22 @@ export function render() {
       el("label", { class: "field" }, "마하 시작", scanInput("scanFrom", "num-sm")),
       el("label", { class: "field" }, "끝", scanInput("scanTo", "num-sm")),
       el("label", { class: "field" }, "간격", scanInput("scanStep", "num-sm")),
-      el("label", { class: "field grow" }, "고도 목록 [m]", scanInput("scanAlts", ""))));
+      el("label", { class: "field grow" }, "고도 목록 [m]", scanInput("scanAlts", "")),
+      // 기체 템플릿의 고도는 고정 목록이라, 연료·운용 범위를 바꾸면 천장과 어긋난다 —
+      // 지금 선도의 스케줄 격자(엔진 자동 유도 echo)를 그대로 옮긴다. 웹이 고도를 짓지 않는다
+      el("button", {
+        type: "button",
+        title: "지금 선도의 게인 스케줄 격자 고도(엔진이 도달 천장까지 자동 유도)를 이 칸에 넣습니다",
+        onclick: () => {
+          const alts = lastMh?.schedule_grid?.alts;
+          if (!alts?.length) {
+            showErr(new Error("설계 격자 고도가 아직 없습니다 — 「그리기」로 선도를 먼저 받습니다"));
+            return;
+          }
+          form.scanAlts = alts.join(", ");
+          liveInputs.scanAlts.value = form.scanAlts;
+        },
+      }, "설계 격자 고도로")));
   const formBox = el("div");
   const templateHint = el("p", { class: "hint" });
   const l1Box = el("div");
@@ -705,6 +720,7 @@ function renderL4(box) {
     pts: g.points.filter((p) => p.alt === alt),
   }));
   kids.push(
+    el("p", { class: "hint", style: "max-width:96ch" }, scheduleAltsCaption(g)),
     el("div", { class: "scroll-x" }, el("table", {},
       el("thead", {}, el("tr", {},
         el("th", {}, "고도 [m]"),
@@ -1192,7 +1208,7 @@ function renderMh(box) {
     ...[...sources].map((s) => el("span", {},
       el("span", { class: "chip", style: `background:${boundColor(s)}` }), boundLabel(s))),
     el("span", {}, el("span", { class: "chip", style: `border:1.4px solid ${C.schedPt}; background:transparent` }),
-      "게인 스케줄 격자점 (coarse [기본값] — trimmable 미판정)"),
+      "게인 스케줄 격자점 (천장까지 자동 유도 — trimmable 미판정)"),
     // 꺼진 층은 범례에서도 뺀다 — 화면에 없는 표시를 설명하면 범례가 거짓말이 된다
     ...(layers.thrust ? [el("span", {}, el("span", { class: "chip", style: `background:${C.thrustLine}` }),
       "추력 한계 경계 (스로틀 상한 포화)")] : []),

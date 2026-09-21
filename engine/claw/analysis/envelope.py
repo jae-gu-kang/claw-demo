@@ -14,7 +14,9 @@ vn_envelope가 한계선·특성 속도(V_S·V_A)까지 산출한다. Nz 제한 
 공력(실속·DB 범위)·운용(고도 상하한) 경계를 합성해 행별 승자 귀속과 함께
 반환한다. 제어 가능 영역(트림 성립)은 여기 없다 — envelope_ok(design.points
 정본)를 트림 격자에 적용하는 별도 스캔의 몫. stall_mach_lo·row_machs는
-coarse 격자(design.grid)와 이 합성이 공유하는 mach 경계의 단일 정본이다.
+coarse 격자(design.grid)와 이 합성이 공유하는 mach 경계의 단일 정본이고,
+schedule_alts_auto는 격자 고도의 단일 정본이다(구 고정 4단 대체 — 쓸 수 있는 천장
+유도(공력 행 폭 + 주입 트림 탐침)·σ 균일 간격·스팬 비례 단수).
 """
 
 import math
@@ -25,8 +27,20 @@ from claw.common.constants import G0
 from claw.env import isa_atmosphere
 from claw.env.constants import ISA_MIN_ALT, ISA_STRATO1_TOP_ALT, ISA_TROPOPAUSE_ALT
 
-DEFAULT_SCHEDULE_ALTS = (0.0, 1000.0, 3000.0, 5000.0)  # [m] coarse 격자 고도 [기본값]
+DEFAULT_SCHEDULE_ALTS = (0.0, 1000.0, 3000.0, 5000.0)  # [m] 구 고정 격자 고도 — 이제 seed 후보 목록용(운용 범위로 거른다). 격자 기본은 schedule_alts_auto
 _ALT_DISPLAY_MAX = 12000.0  # [m] 설계 엔벨로프 표시 상한 [기본값] — 운용 상한 아님 (echo로 명기)
+# 자동 격자 고도 [기본값] 셋 — 앞의 둘은 구 고정 4단(0·1·3·5 km)의 승계값.
+# n_alt_max=4: coarse 예산 60 = 마하 5 × 연료 3 × 고도 4의 그 4단.
+# sigma_step=0.14: 구 4단의 밀도비 간격(σ 0.093·0.165·0.141)의 대표값 — 이 간격이면 0~5 km
+# 스팬이 종전처럼 4단이 된다. 스팬이 크면 단수가 이걸 따라 늘다 n_alt_max에서 멎는다.
+# min_width_frac=0.25: 천장 행이 바닥 행 마하 폭의 이 비율은 남아야 한다 — 행이 닫히는
+# 고도 자체를 끝으로 잡으면 맨 위 행의 마하 폭이 0에 가까워 격자점 5개가 같은 비행조건이
+# 된다(M_NO 0.30에서 0.2992~0.3 — 리뷰 실측)
+DEFAULT_SCHEDULE_N_ALT_MAX = 4
+DEFAULT_SCHEDULE_SIGMA_STEP = 0.14
+DEFAULT_SCHEDULE_MIN_WIDTH_FRAC = 0.25
+_CEILING_TOL = 100.0  # [m] 천장 이분 탐색 해상도 — 표시 격자(41행/12 km ≈ 300 m)보다 촘촘하게
+_ALT_ROUND = 50.0  # [m] 자동 격자 중간 고도·탐색 천장의 반올림 — 범위 끝(하한·상한)은 그대로 둔다
 _SCAN_POINTS = 41  # 실속 경계 역보간용 mach 스캔 밀도 (구 design.grid._SCAN_POINTS)
 # 등고선 [기본값] — q_max가 있으면 그 비율(경계선이 곧 1.0배 등동압선), 없으면 고정값
 _ISO_QBAR_FRACS = (0.25, 0.5, 0.75)
@@ -203,6 +217,114 @@ def row_machs(
     return [float(m) for m in np.round(np.linspace(lo, mach_hi, int(n_mach)), 4)]
 
 
+def schedule_alts_auto(
+    aircraft, stall_table, fuel, *,
+    mach_hi, db_mach_lo=0.0, alt_lo=0.0, alt_hi=None, mach_margin=1.1, n_target=1.0,
+    n_mach=5, n_alt_max=DEFAULT_SCHEDULE_N_ALT_MAX, sigma_step=DEFAULT_SCHEDULE_SIGMA_STEP,
+    min_width_frac=DEFAULT_SCHEDULE_MIN_WIDTH_FRAC, trim_probe=None,
+) -> dict:
+    """스케줄 격자 고도 자동 유도 — {"alts", "ceiling", "ceiling_source", "trim_probe",
+    "n_alt_max", "sigma_step", "min_width_frac"}.
+
+    구 고정 4단(DEFAULT_SCHEDULE_ALTS)은 기체 천장이 어디든 하단 5 km만 덮었다
+    (사용자 지적 — "엔벨로프 트림점이 하단에만 있다"). 여기서는 격자를 엔벨로프
+    자체에서 유도한다:
+
+    - **스팬**: alt_lo부터 그 연료(중량)의 **쓸 수 있는** 천장까지. 한 고도가 열려
+      있다는 것은 둘 다다:
+      ① 공력 — 그 행의 마하 폭(mach_hi − stall_mach_lo)이 바닥 행 폭의 min_width_frac
+      이상. 행이 닫히는 고도(폭 0) 자체를 끝으로 잡으면 맨 위 행 격자점이 한 점으로
+      뭉친다. mach_lo는 V_S ∝ 1/√ρ로 고도 단조 증가라 폭은 단조 감소 — vn_envelope의
+      단조 n(V) 가정과 같은 지위(비단조 실 DB 결선 시 함께 재검토).
+      ② 트림 — trim_probe(alt, machs)가 참(그 행의 격자 마하 중 하나라도 트림이 선다).
+      실속·마하 경계는 추력을 안 보므로, 이것 없이는 추력 천장 위 행이 통째로 트림
+      불가가 된다(예제·회귀 기체 모두 12 km 행 0/5 — 리뷰 실측). 트림은 이 계층이
+      import하지 않는 같은 층이라 호출자가 주입한다(aero_envelope의 trim_alpha_bounds와
+      같은 규칙). 바닥 행부터 트림이 안 서면 탐침을 적용하지 않는다(echo "floor_failed")
+      — 격자를 비우면 점마다의 실패 사유(데이터화된 실경계)까지 사라진다.
+      alt_hi(기본 _ALT_DISPLAY_MAX)가 열려 있으면 거기가 끝(귀속 "alt_hi"), 아니면 이분
+      탐색해 막힌 쪽 귀속을 싣는다("reach" 공력 | "trim" 트림). 바닥 행부터 공력으로
+      닫혀 있으면 빈 격자다("none" — 폴백 격자점을 만들지 않는다, n_reach 원칙).
+    - **간격**: 밀도비 σ = ρ/ρ(alt_lo) 균일 — 게인 스케줄이 실제로 쓰는 변수(q̄,
+      01 §3.4)의 물리라 저고도가 촘촘해진다. 구 4단의 간격 성격 승계.
+    - **단수**: 스팬(Δσ)에 비례해 2..n_alt_max로 적응 — 좁은 엔벨로프에 단을
+      우겨넣지 않고, 넓으면 sigma_step 단위로 늘다 상한에서 멎는다.
+
+    범위 끝(alt_lo·alt_hi)은 그대로 싣고 중간과 탐색 천장만 _ALT_ROUND로 내린다 — 운용
+    한계 행이 격자에서 빠지지 않게 (profile alts_within이 범위 끝을 더하는 이유와 동일).
+    """
+    if not float(n_alt_max) >= 2:
+        raise ValueError(f"n_alt_max는 2 이상 (한 층 격자는 스케줄이 아니다): {n_alt_max}")
+    if not float(sigma_step) > 0.0:
+        raise ValueError(f"sigma_step은 양수 (밀도비 간격): {sigma_step}")
+    if not 0.0 <= float(min_width_frac) < 1.0:
+        raise ValueError(f"min_width_frac은 [0, 1) (바닥 행 폭 대비): {min_width_frac}")
+    alt_lo = float(alt_lo)
+    alt_hi = float(alt_hi) if alt_hi is not None else _ALT_DISPLAY_MAX
+    if not alt_lo < alt_hi:
+        raise ValueError(f"alt_lo ≥ alt_hi: {alt_lo} ≥ {alt_hi} m")
+
+    def _row_lo(alt):
+        lo, _src = stall_mach_lo(
+            aircraft, stall_table, alt, fuel,
+            mach_hi=mach_hi, db_mach_lo=db_mach_lo,
+            mach_margin=mach_margin, n_target=n_target,
+        )
+        return lo
+
+    probe_state = None if trim_probe is None else "applied"
+
+    def _out(alts, ceiling, source):
+        return {"alts": alts, "ceiling": ceiling, "ceiling_source": source,
+                "trim_probe": probe_state, "n_alt_max": int(n_alt_max),
+                "sigma_step": float(sigma_step), "min_width_frac": float(min_width_frac)}
+
+    lo_floor = _row_lo(alt_lo)
+    w_min = float(min_width_frac) * (mach_hi - lo_floor)
+    if not lo_floor < mach_hi:
+        return _out([], None, "none")
+
+    def _aero_ok(alt):
+        return mach_hi - _row_lo(alt) >= w_min
+
+    def _trim_ok(alt):
+        lo = _row_lo(alt)
+        machs = [float(m) for m in np.round(np.linspace(lo, mach_hi, int(n_mach)), 4)]
+        return bool(trim_probe(alt, machs))
+
+    if trim_probe is not None and not _trim_ok(alt_lo):
+        trim_probe, probe_state = None, "floor_failed"
+
+    def _open(alt):
+        return _aero_ok(alt) and (trim_probe is None or _trim_ok(alt))
+
+    if _open(alt_hi):
+        ceiling, source = alt_hi, "alt_hi"
+    else:
+        lo_pt, hi_pt = alt_lo, alt_hi
+        while hi_pt - lo_pt > _CEILING_TOL:
+            mid = 0.5 * (lo_pt + hi_pt)
+            if _open(mid):
+                lo_pt = mid
+            else:
+                hi_pt = mid
+        source = "reach" if not _aero_ok(hi_pt) else "trim"
+        # 반올림도 아래로 — 올리면 확인 안 된(닫힌 쪽) 고도에 끝단이 놓인다
+        ceiling = max(alt_lo, math.floor(lo_pt / _ALT_ROUND) * _ALT_ROUND)
+    if not ceiling > alt_lo:
+        return _out([alt_lo], float(ceiling), source)  # 천장이 바닥에 붙었다 — 한 층
+
+    rho_lo = isa_atmosphere(alt_lo).rho
+    sig_top = isa_atmosphere(ceiling).rho / rho_lo
+    n = max(2, min(int(n_alt_max), math.ceil((1.0 - sig_top) / sigma_step - 1e-9) + 1))
+    hs = np.linspace(alt_lo, ceiling, 241)
+    sig = np.array([isa_atmosphere(float(h)).rho for h in hs]) / rho_lo
+    # σ는 고도 단조 감소 — np.interp는 증가 xp를 요구하므로 뒤집어 역보간
+    mids = np.interp(np.linspace(1.0, sig_top, n)[1:-1][::-1], sig[::-1], hs[::-1])[::-1]
+    alts = [alt_lo] + [round(float(h) / _ALT_ROUND) * _ALT_ROUND for h in mids] + [float(ceiling)]
+    return _out(sorted(set(alts)), float(ceiling), source)
+
+
 def mach_qbar_limit(alt, q_max) -> float:
     """동압 한계의 마하 환산 — M_q̄(h) = √(2·q_max/ρ(h)) / a(h).
 
@@ -298,7 +420,7 @@ def design_envelope(
     aircraft, stall_table, limits, db_ranges, *, fuel,
     q_max=None, alt_min=None, alt_max=None, mach_margin=1.1,
     n_alt=41, schedule_n_mach=5, schedule_alts=None,
-    nz=None, iso_qbar=None, iso_tas=None,
+    nz=None, iso_qbar=None, iso_tas=None, schedule_trim_probe=None,
 ) -> dict:
     """제어법칙 설계 엔벨로프 M-h 합성 (01 §2.6) — 행별 경계와 승자 귀속.
 
@@ -317,6 +439,12 @@ def design_envelope(
 
     schedule_grid는 coarse 격자(design.grid)와 같은 row_machs 좌표 —
     trimmable 판정 없는 좌표 표시용(판정은 트림 스캔 + envelope_ok 정본).
+    고도는 schedule_alts 미지정 시 schedule_alts_auto로 유도하고, 천장·간격 귀속을
+    schedule_grid.auto에 echo한다(지정 고도면 null). schedule_trim_probe는 그 유도의
+    트림 탐침(추력 천장) — 트림은 이 계층이 import하지 않아 호출자(서버)가
+    design.grid.trim_probe를 주입한다. 연료·고도 범위·n_mach·탐침이 같고 coarse 예산이
+    단수 상한 4를 허락하면 coarse 격자의 자동 기본과 좌표가 같다 — 예산이 모자라 coarse가
+    단수를 줄이면(budget < n_mach × 연료 수 × 4) 갈린다.
     좌표를 맞추려고 **q̄를 보지 않는다**(design.grid에는 q_max 입력이 없다) —
     q_max가 낮으면 격자점이 region 밖에 놓일 수 있고, 그것이 실제 설계점 위치다.
 
@@ -388,10 +516,19 @@ def design_envelope(
     if iso_tas is None:
         iso_tas = list(_ISO_TAS_DEFAULT)
 
-    sched_alts = tuple(
-        float(a) for a in (schedule_alts if schedule_alts is not None else DEFAULT_SCHEDULE_ALTS)
-        if alt_lo_used <= float(a) <= alt_hi_used
-    )
+    sched_auto = None
+    if schedule_alts is not None:
+        sched_alts = tuple(
+            float(a) for a in schedule_alts if alt_lo_used <= float(a) <= alt_hi_used
+        )
+    else:
+        sched_auto = schedule_alts_auto(
+            aircraft, stall_table, fuel,
+            mach_hi=static_hi, db_mach_lo=db_mach_lo,
+            alt_lo=alt_lo_used, alt_hi=alt_hi_used, mach_margin=mach_margin,
+            n_mach=schedule_n_mach, trim_probe=schedule_trim_probe,
+        )
+        sched_alts = tuple(sched_auto.pop("alts"))
     points = []
     for alt in sched_alts:
         for m in row_machs(
@@ -433,6 +570,9 @@ def design_envelope(
         "schedule_grid": {
             "n_mach": int(schedule_n_mach),
             "alts": list(sched_alts),
+            # 자동 유도의 귀속 echo(천장·간격·상한) — 지정 고도면 null (자동이 아닌
+            # 것을 자동이라 하지 않는다). 소비자(웹)가 기본값을 재기술하지 않는다
+            "auto": sched_auto,
             "points": points,
         },
     }

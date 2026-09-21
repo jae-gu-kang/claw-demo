@@ -29,6 +29,7 @@ from claw.analysis import (
     vn_envelope,
 )
 from claw.pipeline.openloop import GROUP_LOOPS
+from claw.design.grid import trim_probe
 from claw.design.points import envelope_verdict
 from claw.trim import trim_level
 from claw.trim import (
@@ -327,7 +328,11 @@ def design_envelope_endpoint(
         if v is not None
     }
     try:
-        env = design_envelope(ac, stall, limits, db_ranges, fuel=fuel, **kwargs)
+        # 스케줄 격자 고도의 추력 천장 — 트림은 엔진 analysis가 import하지 않는 같은 층이라
+        # 여기서 주입한다(trim_alpha_bounds와 같은 규칙). coarse 격자가 쓰는 그 탐침이다
+        env = design_envelope(ac, stall, limits, db_ranges, fuel=fuel,
+                              schedule_trim_probe=trim_probe(ac, fuel, profile.plant_fingerprint),
+                              **kwargs)
         env["aero"] = aero_envelope(
             stall, db_ranges, alpha_margin=alpha_margin, trim_alpha_bounds=profile.trim_alpha_bounds
         )

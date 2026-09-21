@@ -784,6 +784,26 @@ def test_unseeded_aircraft_is_rejected_at_submit_with_the_document_path(client, 
     assert r.json()["detail"]["path"] == "/law/design", r.text
 
 
+def test_auto_alts_follow_the_profile_operating_range(client, wait_job):
+    """alts 미지정 자동 설계 — coarse 고도 자동 유도가 기체 문서의 운용 고도 범위 안에 선다.
+
+    라우트가 operating을 세션에 안 넘기면 운용 상한 3 km 기체도 12 km까지 격자를 폈다(05 §3)."""
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="ad-oprange", name="운용 범위 시험", is_example=False, variants=[])
+    d["operating"]["alt_min"], d["operating"]["alt_max"] = 500.0, 3000.0
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    r = client.post("/api/design/auto", json={
+        "config": _small_config(alts=None, budget_iters=1), "profile": {"id": "ad-oprange"}})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    alts = {p["alt"] for p in body["points"]["points"]}
+    assert min(alts) == 500.0 and max(alts) <= 3000.0
+
+
 def test_apply_gains_writes_the_confirmed_tables_to_the_document(client, wait_job):
     """정본 되쓰기(v2) — 자동 설계 확정 게인을 law.gain_tables 새 리비전으로. 반영 후의 계산이 문서의
     그 표로 조립되고, 지문 가드가 "다른 문서에 설계 이식"과 "같은 결과 재반영"을 막는다."""

@@ -66,7 +66,10 @@ export function render() {
     budgetIters: el("input", { size: 3, placeholder: "5" }),
     nMach: el("input", { size: 3, placeholder: "5" }),
     nValidationBetween: el("input", { size: 3, placeholder: "1" }),
-    altsText: el("input", { size: 16, placeholder: "0 1000 3000 5000" }),
+    altsText: el("input", {
+      size: 16, placeholder: "자동 (천장까지)",
+      title: "비우면 엔진이 연료마다 도달 천장까지 밀도비 간격으로 고도를 유도한다(예산 안에서 2~4단)",
+    }),
     fuelsText: el("input", { size: 12, placeholder: "40 200 400" }),
     actuatorWn: el("input", { size: 5 }),
     actuatorZeta: el("input", { size: 5 }),

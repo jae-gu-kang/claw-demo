@@ -286,13 +286,16 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
         # 법칙의 레이트 필터도 프로파일이 준다 — 안 넘기면 튜닝·검증이 출하되지 않는
         # 조성(요축 워시아웃 없는 A′)을 본다 (05 §6)
         rate_filters = profile.rate_filters()
+        # 운용 고도 범위도 프로파일이 준다 — coarse 격자 고도 자동 유도의 범위(05 §3)
+        op = profile.doc["operating"]
+        alt_range = (op["alt_min"], op["alt_max"])
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
 
     def work(job):
         # job.report의 반환값이 취소 요청 여부 — 엔진 협조적 취소 규약과 그대로 맞물린다
         session.run(
-            ac, stall, limits, db, design, rate_filters=rate_filters,
+            ac, stall, limits, db, design, rate_filters=rate_filters, alt_range=alt_range,
             fingerprint=fingerprint,
             on_progress=lambda done, total, msg: job.report(done, total, message=msg),
         )

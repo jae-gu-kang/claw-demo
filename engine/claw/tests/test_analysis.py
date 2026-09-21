@@ -357,17 +357,27 @@ def test_design_envelope_composition_and_attribution():
     assert env0["bounds"]["qbar_mach"] is None and env0["bounds"]["q_max"] is None
     assert set(env0["region"]["hi_source"]) == {"mach_no"}
 
-    # 스케줄 격자 좌표 = coarse 격자 좌표 (row_machs 단일 정본 — 리팩토링 등가)
+    # 스케줄 격자 좌표 = coarse 격자 좌표 (row_machs·schedule_alts_auto 단일 정본) — 선도는
+    # 서버가 주입하는 그 트림 탐침을 받을 때 coarse 자동 기본과 같은 고도에 선다
+    from claw.design.grid import trim_probe
+
     grid = coarse_grid(ac, st, lim, db, fuels=(200.0,))
+    env_p = design_envelope(ac, st, lim, db, fuel=200.0,
+                            schedule_trim_probe=trim_probe(ac, 200.0))
     coarse_coords = {(p.case.mach, p.case.alt) for p in grid["points"]}
-    sched_coords = {(p["mach"], p["alt"]) for p in env0["schedule_grid"]["points"]}
+    sched_coords = {(p["mach"], p["alt"]) for p in env_p["schedule_grid"]["points"]}
     assert sched_coords == coarse_coords
+    assert env_p["schedule_grid"]["auto"]["trim_probe"] == "applied"
 
     # 운용 고도 상하한이 표본 범위·격자 필터에 반영
     env2 = design_envelope(ac, st, lim, db, fuel=200.0, alt_min=500.0, alt_max=4000.0)
     assert env2["bounds"]["alt_max_is_display_default"] is False
     assert env2["region"]["alt"][0] == 500.0 and env2["region"]["alt"][-1] == 4000.0
-    assert env2["schedule_grid"]["alts"] == [1000.0, 3000.0]  # 기본 (0,1k,3k,5k) ∩ [500,4000]
+    # 자동 격자가 운용 범위의 양 끝을 그대로 싣는다 — 구 고정 기본(0·1·3·5 km)의
+    # 교집합 [1k, 3k]에는 범위 한계 행이 아예 없었다 (alts_within이 끝을 더하는 이유와 동일)
+    a2 = env2["schedule_grid"]["alts"]
+    assert a2[0] == 500.0 and a2[-1] == 4000.0
+    assert env2["schedule_grid"]["auto"]["ceiling"] == 4000.0
 
 
 def test_design_envelope_validation_errors():
@@ -519,6 +529,143 @@ def test_iso_curves_share_the_qbar_formula_with_the_boundary():
     # 등고선 배열은 region.alt와 인덱스 짝 — 소비자가 검사 없이 짝지어 그린다
     assert len(env["iso"]["tas"][0]["mach"]) == len(env["region"]["alt"])
     assert len(env["iso"]["qbar"][0]["mach"]) == len(env["region"]["alt"])
+
+
+def _sched_env():
+    from claw.plant import make_demo_db_ranges, make_demo_structural_limits
+    return (make_demo_aircraft(), make_demo_stall_table(),
+            make_demo_structural_limits(), make_demo_db_ranges())
+
+
+def test_schedule_alts_auto_spans_to_ceiling_sigma_spacing():
+    """자동 격자 고도 — 고정 4단(0·1·3·5 km) 대신 엔벨로프 천장까지 σ 균일로 벌린다.
+
+    구 기본값은 엔벨로프가 어디까지든 하단 5 km만 덮었다(사용자 지적). σ(밀도비)
+    균일 간격은 구 4단의 간격 성격(저고도 촘촘)을 승계하면서 스팬을 천장에 맞춘다."""
+    from claw.analysis.envelope import DEFAULT_SCHEDULE_N_ALT_MAX, schedule_alts_auto
+
+    ac, st, _lim, _db = _sched_env()
+    out = schedule_alts_auto(ac, st, 200.0, mach_hi=0.75, db_mach_lo=0.0)
+    alts = out["alts"]
+    # 데모 기체는 표시 상한 12 km에서도 1g 행 폭이 남는다(도달 최대 n 2.38) — 공력만 보면
+    # 천장 = 표시 상한. 트림 탐침 없이 불렀으니 echo도 그렇다고 말한다
+    assert out["ceiling"] == 12000.0 and out["ceiling_source"] == "alt_hi"
+    assert out["trim_probe"] is None
+    assert alts[0] == 0.0 and alts[-1] == 12000.0
+    # 12 km 스팬(Δσ≈0.75)은 σ_step 0.14로 7단감이지만 상한 4단에서 멎는다
+    assert len(alts) == DEFAULT_SCHEDULE_N_ALT_MAX
+    # σ 균일 = 고도 간격 단조 증가 (저고도 촘촘 — ρ가 아래서 빨리 변한다)
+    gaps = [b - a for a, b in zip(alts, alts[1:])]
+    assert all(g2 > g1 for g1, g2 in zip(gaps, gaps[1:]))
+    # 중간 고도는 50 m 반올림 (양 끝은 그대로)
+    assert all(a % 50.0 == 0.0 for a in alts[1:-1])
+    # echo 일습 — 소비자(웹)가 기본값을 재기술하지 않는다
+    assert out["n_alt_max"] == DEFAULT_SCHEDULE_N_ALT_MAX and out["sigma_step"] == 0.14
+
+
+def test_schedule_alts_auto_adapts_count_to_span():
+    """스팬이 작으면 단수를 줄인다 — 좁은 엔벨로프에 4단을 우겨넣지 않는다."""
+    from claw.analysis.envelope import schedule_alts_auto
+
+    ac, st, _lim, _db = _sched_env()
+    # 0~3 km: Δσ≈0.26 → 3단 (구 기본이면 이 구간에 0·1·3의 3점이던 자리 — 간격은 σ 균일)
+    out = schedule_alts_auto(ac, st, 200.0, mach_hi=0.75, db_mach_lo=0.0, alt_hi=3000.0)
+    assert out["alts"][0] == 0.0 and out["alts"][-1] == 3000.0
+    assert len(out["alts"]) == 3
+    # 운용 하한이 있으면 그 끝이 격자에 그대로 남는다 (alts_within의 끝 포함과 같은 이유)
+    out2 = schedule_alts_auto(ac, st, 200.0, mach_hi=0.75, db_mach_lo=0.0,
+                              alt_lo=500.0, alt_hi=4000.0)
+    assert out2["alts"][0] == 500.0 and out2["alts"][-1] == 4000.0
+
+
+def test_schedule_alts_auto_ceiling_bisection_and_empty():
+    """공력 천장은 이분 탐색으로 찾고, 바닥부터 불가면 빈 격자다 — 폴백 없음.
+
+    천장은 행이 닫히는 고도가 아니라 **행 폭이 바닥 행의 min_width_frac 아래로 줄기 직전**이다."""
+    from claw.analysis.envelope import _CEILING_TOL, schedule_alts_auto, stall_mach_lo
+
+    ac, st, _lim, _db = _sched_env()
+
+    def width(alt):
+        lo, _src = stall_mach_lo(ac, st, alt, 200.0, mach_hi=0.75, db_mach_lo=0.0, n_target=3.0)
+        return 0.75 - lo
+
+    # n_z=3: 12 km 도달 최대 n 2.38 < 3 — 천장이 표시 상한 아래로 내려온다
+    out = schedule_alts_auto(ac, st, 200.0, mach_hi=0.75, db_mach_lo=0.0, n_target=3.0)
+    assert out["ceiling_source"] == "reach" and out["ceiling"] < 12000.0
+    assert out["alts"][-1] == out["ceiling"]
+    w_min = out["min_width_frac"] * width(0.0)
+    assert width(out["ceiling"]) >= w_min  # 천장 행은 폭이 남아 있고
+    assert width(out["ceiling"] + 2 * _CEILING_TOL + 50.0) < w_min  # 해상도+반올림 위는 모자란다
+    # 해면에서도 도달 불가(n=20 > 해면 최대 12.5) — 빈 격자, 천장 없음 (귀속 "none")
+    empty = schedule_alts_auto(ac, st, 200.0, mach_hi=0.75, db_mach_lo=0.0, n_target=20.0)
+    assert empty["alts"] == [] and empty["ceiling"] is None
+    assert empty["ceiling_source"] == "none"
+
+
+def test_schedule_alts_auto_top_row_keeps_distinct_machs():
+    """맨 위 행이 한 점으로 뭉치지 않는다 — 리뷰 실측: 행이 닫히는 고도를 끝으로 잡으면
+    M_NO 0.30에서 맨 위 행 5점이 0.2992~0.3(사실상 같은 비행조건)이었다."""
+    from claw.analysis.envelope import row_machs, schedule_alts_auto
+
+    ac, st, _lim, _db = _sched_env()
+    out = schedule_alts_auto(ac, st, 200.0, mach_hi=0.30, db_mach_lo=0.0)
+    assert out["ceiling_source"] == "reach"
+    floor = row_machs(ac, st, out["alts"][0], 200.0, mach_hi=0.30, db_mach_lo=0.0)
+    top = row_machs(ac, st, out["alts"][-1], 200.0, mach_hi=0.30, db_mach_lo=0.0)
+    assert len(set(top)) == len(top) == 5
+    assert top[-1] - top[0] >= out["min_width_frac"] * (floor[-1] - floor[0]) - 1e-4
+
+
+def test_schedule_alts_auto_trim_probe_lowers_the_ceiling():
+    """주입 트림 탐침 — 추력 천장 위 행을 격자에서 뺀다 (공력 경계는 추력을 안 본다).
+
+    탐침은 그 행의 격자 마하 목록을 받는다. 바닥부터 안 서면 적용하지 않는다(격자를 비우면
+    점마다의 실패 사유까지 사라진다)."""
+    from claw.analysis.envelope import schedule_alts_auto
+
+    ac, st, _lim, _db = _sched_env()
+    seen = []
+
+    def probe(alt, machs):
+        seen.append(len(machs))
+        return alt <= 7000.0
+
+    out = schedule_alts_auto(ac, st, 200.0, mach_hi=0.75, db_mach_lo=0.0, trim_probe=probe)
+    assert out["ceiling_source"] == "trim" and out["trim_probe"] == "applied"
+    assert 6850.0 <= out["ceiling"] <= 7000.0  # 해상도 100 m + 50 m 내림
+    assert out["alts"][-1] == out["ceiling"]
+    assert set(seen) == {5}  # 행의 격자 마하 5점을 통째로 받는다
+
+    dead = schedule_alts_auto(ac, st, 200.0, mach_hi=0.75, db_mach_lo=0.0,
+                              trim_probe=lambda alt, machs: False)
+    assert dead["trim_probe"] == "floor_failed"
+    assert dead["ceiling_source"] == "alt_hi" and dead["alts"][-1] == 12000.0  # 공력 결과 그대로
+
+    # 운용 범위가 좁아도 범위 끝은 둘 다 남는다 (한 층으로 접지 않는다)
+    narrow = schedule_alts_auto(ac, st, 200.0, mach_hi=0.75, db_mach_lo=0.0,
+                                alt_lo=500.0, alt_hi=550.0)
+    assert narrow["alts"] == [500.0, 550.0]
+    # 50 m 배수가 아닌 하한 — 내림 반올림이 천장을 하한 아래로 보내지 않는다
+    odd = schedule_alts_auto(ac, st, 200.0, mach_hi=0.75, db_mach_lo=0.0, alt_lo=520.0,
+                             trim_probe=lambda alt, machs: alt <= 560.0)
+    assert odd["ceiling"] >= 520.0 and odd["alts"][0] == 520.0
+
+
+def test_design_envelope_schedule_grid_auto_echo():
+    """설계 엔벨로프의 스케줄 격자 — 기본은 자동 유도(echo 동봉), 지정하면 auto는 null."""
+    from claw.analysis import design_envelope
+
+    ac, st, lim, db = _sched_env()
+    env = design_envelope(ac, st, lim, db, fuel=200.0)
+    g = env["schedule_grid"]
+    assert g["auto"] is not None
+    assert g["auto"]["ceiling"] == 12000.0 and g["auto"]["ceiling_source"] == "alt_hi"
+    assert g["alts"][0] == 0.0 and g["alts"][-1] == 12000.0
+    # 지정 고도는 그대로(범위 필터만) — 자동이 아니므로 echo 없음
+    env2 = design_envelope(ac, st, lim, db, fuel=200.0, schedule_alts=(0.0, 5000.0, 99999.0))
+    assert env2["schedule_grid"]["alts"] == [0.0, 5000.0]
+    assert env2["schedule_grid"]["auto"] is None
 
 
 def test_aero_envelope_boundaries():

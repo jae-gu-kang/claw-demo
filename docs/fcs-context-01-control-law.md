@@ -112,7 +112,10 @@
 - **[기본값]** 표시·합성 평면은 **M-h**(스케줄 변수 §3.4와 같은 축): 행(고도)별 mach 하한 =
   max(실속 V_S×여유, DB 하한), 상한 = min(M_NO, DB 상한, 실속표 축 상한, M_q̄(h)) — 행마다 어느
   엔벨로프가 경계를 결정했는지 승자 귀속을 함께 낸다. mach 경계 산식은 coarse 격자(§4.1)와
-  **단일 정본**(`analysis.envelope.stall_mach_lo`·`row_machs` — `design/grid.py`가 호출)
+  **단일 정본**(`analysis.envelope.stall_mach_lo`·`row_machs` — `design/grid.py`가 호출).
+  스케줄 격자 **고도**도 같은 정본(`schedule_alts_auto` — 쓸 수 있는 천장(공력 행 폭 + 서버가
+  주입하는 트림 탐침)까지 σ 균일, 2~4단, v1.43)이라 선도의 격자점과 설계 격자가 같은 좌표에
+  선다(coarse 예산이 단수를 줄이지 않는 한). 유도 귀속은 `schedule_grid.auto`로 echo(05 §3)
 - **[확정] n_z는 엔벨로프의 축이다** — 종전 구현은 V-n 선도의 *출력*으로만 있었고 M-h 합성은
   n=1에 고정돼 있었다(`stall_mach_lo`의 `np.interp(1.0, …)`). E에 n_z를 적어 두고 축으로 안 쓰면
   선언이 빈 말이 되므로 `n_target`으로 일반화했다: V_S(n_z) 역보간으로 하한만 올라가고

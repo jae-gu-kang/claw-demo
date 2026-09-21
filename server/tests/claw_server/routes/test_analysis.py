@@ -161,6 +161,11 @@ def test_design_envelope_endpoint(client):
     assert b["limits_source"] == "demo-placeholder" and b["limits_overridden"] == []
     # 스케줄 격자 좌표 존재 (coarse 격자 정본 — trimmable 미판정 좌표)
     assert len(b["schedule_grid"]["points"]) > 0
+    # 격자 고도는 자동 유도 + 서버가 주입한 트림 탐침(추력 천장) — 12 km 행 전부 스로틀
+    # 포화이던 기체라 천장이 표시 상한 아래로 내려온다
+    auto = b["schedule_grid"]["auto"]
+    assert auto["trim_probe"] == "applied" and auto["ceiling_source"] == "trim"
+    assert b["schedule_grid"]["alts"][-1] == auto["ceiling"] < 12000.0
     # 공력 선도 블록 — 보호선 = 실속 − α마진 [기본값 0.05], 트림 α 범위 주입 echo
     aero = b["aero"]
     assert aero["alpha_prot"][0] == pytest.approx(aero["alpha_stall"][0] - 0.05, rel=1e-9)

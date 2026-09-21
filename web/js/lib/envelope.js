@@ -38,6 +38,35 @@ export const CAP_META = {
 export const capLabel = (code) => CAP_META[code]?.label ?? code;
 export const capColor = (code) => CAP_META[code]?.color ?? "#8e8e93";
 
+// ── 스케줄 격자 고도의 위 끝 귀속 (엔진 schedule_grid.auto.ceiling_source가 정본) ──
+const SCHED_TOP_META = {
+  alt_hi: () => "설계 범위 상한(운용·표시)입니다 — 쓸 수 있는 천장은 그 위",
+  trim: () => "트림 천장입니다 — 그 위는 행의 격자 마하 어디서도 트림이 서지 않습니다(추력 포화 등)",
+  reach: (a) => `실속 천장입니다 — 그 위는 실속 하한이 마하 상한에 붙어 행 폭이 바닥의 `
+    + `${Math.round(a.min_width_frac * 100)}% 아래로 줄어듭니다`,
+};
+
+/** schedule_grid → 격자 고도가 어디서 왔는지 한두 문장. 수치는 전부 엔진 echo
+ * (auto.ceiling·sigma_step·n_alt_max·min_width_frac) — 웹이 σ나 천장을 다시 계산하지 않는다.
+ * auto가 null이면 지정 고도다(자동이 아닌 것을 자동이라 하지 않는다). 트림 탐침이 적용되지
+ * 않았으면 그렇다고 밝힌다 — 공력 천장을 비행 천장인 척하지 않는다. */
+export function scheduleAltsCaption(grid) {
+  const n = grid.alts.length;
+  const a = grid.auto;
+  if (!a) return `고도 ${n}단은 지정한 목록입니다.`;
+  if (a.ceiling_source === "none" || !n) {
+    return "바닥 고도부터 1g 행이 열리지 않아 스케줄 격자가 없습니다.";
+  }
+  const meta = SCHED_TOP_META[a.ceiling_source];
+  const top = meta ? meta(a) : a.ceiling_source;
+  const probe = a.trim_probe === "applied" ? ""
+    : a.trim_probe === "floor_failed"
+      ? " 바닥 고도에서도 트림이 서지 않아 추력 천장은 적용하지 않았습니다 — 트림 스캔으로 사유를 봅니다."
+      : " 이 격자는 실속·마하 경계만 봤고 추력은 안 봤습니다.";
+  return `고도 ${n}단은 엔진 자동 유도입니다 — ${grid.alts[0]}–${a.ceiling} m를 밀도비 `
+    + `σ 간격 ${a.sigma_step}로 나눴습니다(최대 ${a.n_alt_max}단). 위 끝은 ${top}.${probe}`;
+}
+
 const EPS = 1e-9;
 
 /** region → 닫힌 경계의 상·하 캡 [{side, alt, mach0, mach1, source}].
@@ -280,7 +309,12 @@ export function outsideRegion(point, region) {
   const span = region.alt[hi] - region.alt[lo];
   const t = span === 0 ? 0 : (point.alt - region.alt[lo]) / span;
   const at = (arr) => arr[lo] + (arr[hi] - arr[lo]) * t;
-  return point.mach < at(region.mach_lo) - REGION_TOL
+  // 하한 귀속이 두 행에서 다르면 그 사이에 max(DB, 실속) 꺾임이 있다 — 볼록한 꺾임을 현이 위에서
+  // 덮어 제 하한에 선 점을 밖으로 센다. 그 구간만 두 하한 중 낮은 쪽을 경계로 본다
+  const loBound = region.lo_source?.[lo] !== region.lo_source?.[hi]
+    ? Math.min(region.mach_lo[lo], region.mach_lo[hi])
+    : at(region.mach_lo);
+  return point.mach < loBound - REGION_TOL
     || point.mach > at(region.mach_hi) + REGION_TOL;
 }
 
