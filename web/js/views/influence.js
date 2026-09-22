@@ -1587,7 +1587,7 @@ export function render() {
               b.note ?? "",
               // 미션 프로파일 상세 — 시나리오·통과 실측·facts (04 §5.5, v1.41)
               ...missionProfileLines(b).map((t) =>
-                el("div", { class: "hint" }, t))))))));
+                el("div", { class: "hint" }, t)))))))));
       for (const w of v.warnings) {
         verifyBox.append(el("p", {
           style: `margin:4px 0;font-size:12px;color:${WARN_INK}`,

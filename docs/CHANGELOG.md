@@ -24,6 +24,16 @@ v0.75부터는 축이 하나뿐이라 이 혼동이 없다.
 
 ## 현행
 
+### v1.43 — influence.js 괄호 하나 누락으로 사이트 전체가 먹통이던 것 긴급 정정
+
+v1.41에서 미션 프로파일 상세를 `verifyBox`에 붙이는 코드(`missionProfileLines` 렌더 —
+04 §5.5)에 닫는 괄호가 하나 모자라 `web/js/views/influence.js` 전체가 파싱 실패였다.
+ES 모듈이라 파싱 실패는 그 파일 하나가 아니라 **그 파일을 import하는 모든 화면**을
+끌고 내려가— 메뉴만 뜨고 그 아래 아무 탭도 안 뜨는 증상으로 나타났다(사용자 보고).
+`node --check`로 `web/js` 전체를 훑어 그 한 줄(`missionProfileLines(b).map(...)` 닫는
+괄호 8개 → 9개)만 고쳤다 — 그 외 모든 view/lib 파일은 이상 없음을 같은 훑기로 확인.
+웹 999 통과.
+
 ### v1.42 — schedule_crossing_mission 바깥 docstring이 되돌린 exit_short_of를 안 따라와 있던 것 정정
 
 v1.41의 `pipeline/sweep.py` 수정(스케줄 상한이 명령 목표를 `b2`까지 눌러버리는 극단에서
