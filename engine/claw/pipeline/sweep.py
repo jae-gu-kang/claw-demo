@@ -95,7 +95,7 @@ def probe_mission(tr, *, dv=PROBE_DV, dh=PROBE_DH, dpsi=PROBE_DPSI,
     return modes, float(t_settle) + 3.0 * float(t_step)
 
 
-def schedule_crossing_scenario(tables, cases):
+def schedule_crossing_scenario(tables, cases, why=None):
     """게인 스케줄을 시간축으로 가로지르는 시나리오 좌표 — 표·격자에서만 유도 (04 §5.5).
 
     점 동결 평가(판정 10의 dK/dV·3단계 중간점)가 못 보는 것이 "게인이 보간으로
@@ -116,11 +116,19 @@ def schedule_crossing_scenario(tables, cases):
     명령 목표와 같아져(점근 접근으로 영영 발화 못 함) 둘 다 이 함수의 다른 불변식을
     깬다. 그 축은 `None`으로 두고, 다른 축에 레그가 있으면 그 축만으로 진행한다(둘 다
     없으면 위 문단대로 전체가 None).
+
+    **왜 없는가를 축별로 가른다** (v1.44). None만 돌려주면 호출자가 사유를 한 문장으로
+    뭉쳐 "breakpoint 2개 미만"이라고 말하게 되는데, 여유 없는 쌍 탈락(위 문단)은 2개가
+    있는데도 None이라 그 문장이 거짓이 된다. `why`(dict)를 넘기면 {축: 사유}를 채운다 —
+    스케줄 없음 / 격자가 한 점 / 범위 안 breakpoint 부족 / 상한 쪽 여유 없음. 한 축만
+    빠진 경우(스케줄은 있는데 레그를 못 만든 축)는 그 사유가 반환 notes에도 실린다.
     """
     machs = sorted({float(c.mach) for c in cases})
     alts = sorted({float(c.alt) for c in cases})
     fuels = sorted({float(c.fuel) for c in cases})
     if not machs or not alts or not fuels:
+        if why is not None:
+            why["cases"] = "케이스가 없다"
         return None
 
     def axis_bps(axis, lo, hi):
@@ -169,11 +177,37 @@ def schedule_crossing_scenario(tables, cases):
         return {"pair": (b1, b2),
                 "start": max(lo, b1 - half), "target": min(hi, b2 + half)}
 
-    m = pick(axis_bps("mach", machs[0], machs[-1]), machs[0], machs[-1])
-    a = pick(axis_bps("alt", alts[0], alts[-1]), alts[0], alts[-1])
+    def leg(axis, grid):
+        """(레그, 사유) — 레그를 만들면 사유 None, 못 만들면 레그 None + 한 문장."""
+        lo, hi = grid[0], grid[-1]
+        bps = axis_bps(axis, lo, hi)
+        out = pick(bps, lo, hi)
+        if out is not None:
+            return out, None
+        if not any(axis in tuple(t.axis_names) for t in (tables or {}).values()):
+            return None, f"{axis} 축 스케줄 없음"
+        if lo == hi:
+            return None, f"{axis} 축 케이스 격자가 한 점({lo:g})이라 가로지를 범위가 없다"
+        if len(bps) < 2:
+            return None, (f"{axis} 축 breakpoint가 케이스 격자 범위 [{lo:g}, {hi:g}] 안에 "
+                          f"{len(bps)}개 — 2개 이상이어야 구간을 가로지른다")
+        # pick()이 None인데 2개 이상이면 여유 있는 쌍이 하나도 없었다는 뜻이다
+        # (key()가 여유 있는 쌍을 먼저 고르므로) — 곧 딱 둘이 범위 양끝에 걸친 경우다
+        return None, (f"{axis} 축 breakpoint {len(bps)}개가 케이스 격자 [{lo:g}, {hi:g}] "
+                      "양끝에 걸쳐 상한 쪽 여유가 없다 — 격자 상한을 마지막 breakpoint "
+                      "너머로 넓히면 가로지를 수 있다")
+
+    m, why_m = leg("mach", machs)
+    a, why_a = leg("alt", alts)
     if m is None and a is None:
+        if why is not None:
+            why.update({"mach": why_m, "alt": why_a})
         return None
     notes = []
+    # 한 축만 빠졌으면 그 사유를 남긴다 — 단 애초에 스케줄이 없는 축은 소음이라 뺀다
+    for w in (why_m, why_a):
+        if w is not None and not w.endswith("스케줄 없음"):
+            notes.append(w)
     if any("fuel" in tuple(tab.axis_names) for tab in (tables or {}).values()):
         notes.append("fuel 축 스케줄은 시간축 통과 시나리오가 없다 — "
                      "연료는 명령이 아니라 소모 상태다")

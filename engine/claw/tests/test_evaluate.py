@@ -625,7 +625,10 @@ def test_mission_profile_switch_depth_and_degenerate_grid(rig):
     out3 = verify(make_demo_aircraft, [_CASE], Shape(profile=example_profile()),
                   _no_corner_crit(), depth="full", t_settle=1.0, t_step=2.0)
     assert out3["verify"]["mission_profile"]["status"] == "na"
-    assert "2개 미만" in out3["verify"]["mission_profile"]["note"]
+    # 사유는 축별로 정확해야 한다 — 한 점 격자를 "breakpoint 2개 미만"이라 부르지 않는다 (v1.44)
+    note3 = out3["verify"]["mission_profile"]["note"]
+    assert "한 점" in note3 and "mach" in note3
+    assert "2개 미만" not in note3
 
 
 def test_mission_verdict_does_not_swallow_a_recovery_fail():

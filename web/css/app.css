@@ -982,6 +982,10 @@ body:has(.tab-page) main { max-width: 1580px; }
   border: 1px solid rgba(255, 255, 255, .09);
   box-shadow: none;
 }
+/* 시트 **뒤에** 무대가 오면 띄운다 — 무대엔 규칙이 없어(위 .tab-stage 주석) 캔버스가
+   시트 그림자에 바로 붙는다. 게인 탭의 튜닝 지표 → 곡선이 그 자리다(사용자 지적 —
+   "너무 붙어 있다"). 다른 탭은 무대 → 시트 순이라 이 규칙에 안 걸린다 */
+.tab-sheet + .tab-stage { margin-top: 24px; }
 
 /* ── 패널 — 나머지는 전부 눌렀을 때만 ──────────────────────────────────── */
 .tab-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 0; align-items: center; }

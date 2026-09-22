@@ -1541,11 +1541,17 @@ def _mission_profile_block(aircraft, shape, law, cases, criteria, *, stall,
     "통과했는가"의 정본이고, 스위치를 켠 채 조용히 통과하지 않는다 (Ts=∞ 패턴).
     """
     tables = law.schedule.tables if law.schedule is not None else {}
-    scenario = schedule_crossing_scenario(tables, cases)
+    why = {}
+    scenario = schedule_crossing_scenario(tables, cases, why=why)
     if scenario is None:
-        return {"status": "na",
-                "note": "가로지를 스케줄이 없다 — mach·alt 축 breakpoint가 케이스 "
-                        "격자 범위 안에 2개 미만 (게인 스케줄 미장착 포함)"}
+        # 사유는 축별로 엔진이 가른다 — 한 문장("2개 미만")으로 뭉치면 여유 없는 쌍
+        # 탈락처럼 breakpoint가 있는데도 없다고 말하게 된다 (v1.44)
+        if not tables:
+            note = "게인 스케줄 미장착 — 가로지를 표가 없다"
+        else:
+            note = "가로지를 스케줄 구간이 없다 — " + " · ".join(
+                v for v in why.values() if v)
+        return {"status": "na", "note": note, "why": dict(why)}
     start = scenario["start"]
     echo = {
         "start": dict(start),

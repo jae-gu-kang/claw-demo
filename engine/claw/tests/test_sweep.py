@@ -285,3 +285,61 @@ def test_crossing_mission_skips_the_accel_phase_when_mach_has_no_headroom(design
     kind, v = modes[1].exit_when
     assert kind == "alt_ge" and v == pytest.approx(3500.0)  # b2 + ¼Δ
     assert v < modes[1].alt  # 명령 목표(4000)보다 엄격히 안쪽 — 도달 가능하다
+
+
+def test_crossing_scenario_why_names_the_exact_reason_per_axis():
+    """시나리오가 None일 때 축별 사유가 정확해야 한다 (v1.44).
+
+    종전 호출자는 None을 "breakpoint 2개 미만"이라는 한 문장으로 뭉쳤는데, 여유 없는
+    쌍 탈락은 breakpoint가 2개 있는데도 None이라 그 문장이 거짓이었다. 네 갈래 —
+    스케줄 없음 · 격자 한 점 · 범위 안 부족 · 상한 쪽 여유 없음 — 를 가른다.
+    """
+    from claw.pipeline.sweep import schedule_crossing_scenario
+    from claw.tables import Table
+
+    tab = {"pitch.kp": Table({"mach": [0.4, 0.6]}, [-6.0, -4.0], name="pitch.kp")}
+
+    # 여유 없음 — breakpoint 둘이 격자 양끝에 걸침: "2개 미만"이 아니라 여유가 없다고 말한다
+    why = {}
+    assert schedule_crossing_scenario(tab, _cases(machs=(0.4, 0.6)), why=why) is None
+    assert "여유가 없다" in why["mach"] and "2개" in why["mach"]
+    assert why["alt"] == "alt 축 스케줄 없음"
+
+    # 격자 한 점
+    why = {}
+    assert schedule_crossing_scenario(tab, _cases(machs=(0.5,)), why=why) is None
+    assert "한 점" in why["mach"]
+
+    # 범위 안 breakpoint 부족 (격자 [0.45, 0.55] 안에 0개)
+    why = {}
+    assert schedule_crossing_scenario(tab, _cases(machs=(0.45, 0.55)), why=why) is None
+    assert "0개" in why["mach"]
+
+    # 스케줄 없음
+    why = {}
+    assert schedule_crossing_scenario({}, _cases(), why=why) is None
+    assert why == {"mach": "mach 축 스케줄 없음", "alt": "alt 축 스케줄 없음"}
+
+    # why를 안 넘겨도 동작은 같다 (반환 계약 불변)
+    assert schedule_crossing_scenario(tab, _cases(machs=(0.4, 0.6))) is None
+
+
+def test_crossing_scenario_notes_the_axis_that_was_dropped():
+    """한 축만 빠지면 그 사유가 notes에 실린다 — 스케줄이 애초에 없는 축은 소음이라 뺀다."""
+    from claw.pipeline.sweep import schedule_crossing_scenario
+    from claw.tables import Table
+
+    tabs = {
+        "pitch.kp": Table({"mach": [0.4, 0.6]}, [-6.0, -4.0], name="pitch.kp"),  # 여유 없음
+        "roll.k_rate": Table({"alt": [500.0, 1500.0, 3000.0]}, [-0.2, -0.3, -0.4],
+                             name="roll.k_rate"),
+    }
+    sc = schedule_crossing_scenario(tabs, _cases(machs=(0.4, 0.6), alts=(500.0, 3000.0)))
+    assert sc["mach"] is None and sc["alt"] is not None
+    assert any("mach" in n and "여유가 없다" in n for n in sc["notes"])
+
+    # mach만 스케줄되고 alt 스케줄이 없으면 — alt 사유는 notes에 안 들어간다
+    only_m = {"pitch.kp": Table({"mach": [0.2, 0.4, 0.6, 0.8]}, [-8.0, -6.0, -4.0, -2.0],
+                                name="pitch.kp")}
+    sc2 = schedule_crossing_scenario(only_m, _cases(machs=(0.3, 0.7), alts=(0.0, 3000.0)))
+    assert sc2["mach"] is not None and sc2["notes"] == []

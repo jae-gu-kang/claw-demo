@@ -1,12 +1,14 @@
 /** 게인 스케줄 뷰 (02 §8 4단계) — 스케줄 자리 선택 → 셀 편집 → 시뮬 주입 준비.
 
-배치는 다른 탭과 같은 규약이다(views/stage.js): **곡선과 편집 표가 카드 밖 전면**,
-자리 선택 격자와 근사 곡선 설정은 패널. 곡선과 표는 한 벌이라 떨어뜨리지 않는다 —
-칸을 고치면 곡선이 그 자리에서 움직이는 것이 이 화면의 피드백 전부다.
+배치는 다른 탭과 같은 규약이다(views/stage.js): 곡선·계수·편집 표가 전면이고, 자리
+선택 격자와 근사 곡선 설정은 패널이다. 순서는 **곡선 → 설정 패널 → 근사식 계수 → 편집
+표**다. 자리나 근사 설정을 바꾸면 위의 곡선과 아래의 계수·잔차가 한눈에 보여야 해서
+패널을 곡선과 계수 사이에 둔다(사용자 지적 — 종전엔 패널이 맨 아래라 스크롤을 오갔다).
+편집 표는 패널에 넣지 않는다 — 칸을 고치면 곡선이 그 자리에서 움직이는 되먹임이 끊긴다.
 
 두 층이다. **자리 선택**(어떤 게인에 테이블을 붙이나)은 형상을 바꾸고 — 켠 자리는
 탑재 C에 룩업이 생기고 뺀 자리는 설계점 상수로 접힌다 — **값 편집**은 그 안에서
-게인을 바꾼다. 그래서 화면도 위(자리 격자)·아래(켠 것만 표·차트)로 나눈다.
+게인을 바꾼다. 곡선·계수·편집 표에는 켠 자리만 선다.
 
 주입은 전체 교체 (엔진 make_demo_fcl 계약)이고 **키 집합이 곧 선택**이다.
 편집본은 store("gainTables")로 시뮬레이션 탭에 전달하며, 전부 끈 경우만 빈 dict로
@@ -84,6 +86,9 @@ export function render() {
   // 조각으로 갈라 둔다 — 어느 것이 전면이고 어느 것이 패널인지는 아래 배치가 정한다
   const slots = {
     chart: el("div"),   // 전면 — 스케줄 곡선
+    // 전면 — 근사식 계수·잔차·경계 연속성. 곡선 칸에서 떼어 패널 **뒤**에 둔다: 자리·근사
+    // 설정을 바꾸면 위의 곡선과 아래의 계수가 동시에 보여야 한다 (사용자 지적)
+    fitTable: el("div", { class: "tab-sheet" }),
     table: el("div", { class: "tab-sheet" }), // 전면 — 셀 편집 (곡선과 한 벌)
     grid: el("div"),    // 패널 — 자리 선택 격자 (형상을 바꾸는 조작)
     fit: el("div"),     // 패널 — 근사 곡선 설정
@@ -310,12 +315,14 @@ export function render() {
           "정밀 (단계 2)"),
         stripStatus),
       stripCards),
-    // 곡선은 카드 밖(자기 테두리를 갖는 캔버스), 편집 표는 그 바로 아래 판독 시트.
-    // 둘은 한 벌이다 — 칸을 고치면 곡선이 그 자리에서 움직이는 것이 이 화면의 피드백
-    // 전부라 표를 패널에 넣으면 그 되먹임이 끊긴다
+    // 곡선은 카드 밖(자기 테두리를 갖는 캔버스). 그 바로 아래에 자리·근사 설정 패널,
+    // 그다음 근사식 계수 — 설정을 바꾸면서 위(곡선)와 아래(계수·잔차·경계 점프)를
+    // 한눈에 확인하게 한다(사용자 지적 — 종전엔 패널이 맨 아래라 스크롤을 오갔다).
+    // 편집 표는 판독 시트로 그 뒤에 선다 — 패널 안에 넣으면 칸 편집 → 곡선 되먹임이 끊긴다
     tabStage(slots.chart),
-    slots.table,
     drawers.root,
+    slots.fitTable,
+    slots.table,
   );
 
   if (catalog) {
@@ -557,7 +564,7 @@ function fitDetails(rows) {
       "경계 점프 = 경계 마하에서 우측 구간식 − 좌측 구간식 (값·기울기). 허용치 판정은 설계자 소관 (01 §3.4)."));
 }
 
-function drawCharts(chartBox, fitStatus) {
+function drawCharts(chartBox, fitBox, fitStatus) {
   const { groups, skipped } = gainPlotGroups(tables);
   let overlays = null;
   let fitRows = [];
@@ -576,13 +583,16 @@ function drawCharts(chartBox, fitStatus) {
         }))),
     el("p", { class: "hint" },
       "점 = 테이블 격자점(브레이크포인트), 실선 = 현재 조회 규칙(구간 선형 보간, 외삽 clip), ",
-      "점선 = 구간별 다항식 회귀 근사 곡선(위 경계·차수 설정). 셀 편집 시 즉시 갱신."),
+      "점선 = 구간별 다항식 회귀 근사 곡선(아래 「근사 곡선」 패널의 경계·차수). 셀 편집 시 즉시 갱신."),
     skipped.length
       ? el("p", { class: "hint" },
           `차트 제외: ${skipped.map((s) => `${s.name} — ${s.reason}`).join(" · ")}`)
       : null,
-    fitRows.length ? fitDetails(fitRows) : null,
   ));
+  // 계수 표는 패널 뒤 자기 시트에 — 곡선과 같은 재그리기에서 갱신되어 둘이 어긋나지 않는다.
+  // 근사를 껐거나 실패하면 시트를 비운다(.tab-sheet:not(:empty) — 빈 카드가 남지 않는다)
+  clear(fitBox);
+  if (fitRows.length) fitBox.append(fitDetails(fitRows));
 }
 
 function renderTables(slots, statusLine) {
@@ -600,6 +610,7 @@ function renderTables(slots, statusLine) {
   if (aligned === null) {
     clear(slots.grid).append(slotGrid(slots, statusLine));
     clear(slots.chart);
+    clear(slots.fitTable); // 곡선이 없으면 그 계수도 없다 — 옛 표가 남지 않게
     clear(slots.fit).append(el("p", { class: "hint" },
       "축이 어긋나 곡선을 세우지 못했습니다 — 아래 사유를 먼저 해결하세요."));
     clear(slots.table).append(el("p", { class: "error-box" },
@@ -616,6 +627,7 @@ function renderTables(slots, statusLine) {
   const names = Object.keys(tables);
   if (names.length === 0) {
     clear(slots.chart);
+    clear(slots.fitTable);
     // 빈 패널을 남기지 않는다 — 왜 비었는지가 화면에 없으면 고장으로 읽힌다
     clear(slots.fit).append(el("p", { class: "hint" },
       "켠 자리가 없어 근사할 곡선이 없습니다 — 「스케줄 자리」에서 자리를 켜세요."));
@@ -628,7 +640,7 @@ function renderTables(slots, statusLine) {
   const machs = tables[names[0]].axes[catalog.axis];
   const chartBox = clear(slots.chart);
   const fitStatus = el("span", { class: "hint" });
-  const redraw = () => drawCharts(chartBox, fitStatus);
+  const redraw = () => drawCharts(chartBox, slots.fitTable, fitStatus);
   // 컨트롤은 redraw 대상 밖 — 입력 도중 재그리기로 포커스를 잃지 않게
   const fitControls = el("div", { class: "row" },
     el("label", {},
