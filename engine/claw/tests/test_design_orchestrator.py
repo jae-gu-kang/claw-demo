@@ -108,11 +108,19 @@ def test_config_validation():
     for bad in (0, 5):
         with pytest.raises(ValueError, match="n_validation_between"):
             AutoDesignConfig(n_validation_between=bad)
+    with pytest.raises(ValueError, match="fit_mode"):
+        AutoDesignConfig(fit_mode="spline")
     c = AutoDesignConfig(alts=(1000.0,), n_validation_between=2)
     assert AutoDesignConfig.from_dict(c.to_dict()) == c
     # 필드가 생기기 전 저장물(왕복 dict에 키 없음) — 기본값 1로 재개된다
     legacy = {k: v for k, v in c.to_dict().items() if k != "n_validation_between"}
     assert AutoDesignConfig.from_dict(legacy).n_validation_between == 1
+    # 표현 기본값은 표다 (사용자 확정) — 옛 저장물도 그 기본으로 재개된다.
+    # 다항으로 돈 옛 세션의 결과는 저장물 자체에 sched_tables가 실려 있어 영향받지
+    # 않고, 재개(run 이어달리기)는 이 기본으로 FIT부터 다시 돈다
+    assert AutoDesignConfig().fit_mode == "table"
+    legacy2 = {k: v for k, v in c.to_dict().items() if k != "fit_mode"}
+    assert AutoDesignConfig.from_dict(legacy2).fit_mode == "table"
 
 
 def test_targets_must_meet_criteria():
@@ -433,7 +441,8 @@ def test_tighten_fit_moves_the_fit_parameters_and_ratchets():
     """앵커 처방(tighten_fit)은 샘플이 아니라 **적합**을 바꾼다 — 단조 래칫, 상한 있음."""
     from claw.design.orchestrator import _FIT_TIGHTEN_MAX
 
-    s, v = _seed_failing_session()
+    # 다항 전용 처방이다 — 기본(표) 모드에는 조일 적합이 없어 건너뛴다(아래 별 테스트)
+    s, v = _seed_failing_session(fit_mode="poly")
     base = s._fit_params()
     for i in range(_FIT_TIGHTEN_MAX + 2):
         s.actions = [{"id": f"t{i}", "verdict": "fit_residual", "case": v,
@@ -531,7 +540,7 @@ def test_tighten_fit_at_the_cap_is_still_scored_and_sealable():
     """
     from claw.design.orchestrator import _FIT_TIGHTEN_MAX
 
-    s, v = _seed_failing_session()
+    s, v = _seed_failing_session(fit_mode="poly")
     for i in range(_FIT_TIGHTEN_MAX + 2):
         s.actions = [{"id": f"t{i}", "verdict": "fit_residual", "case": v,
                       "loop": "pitch_att",
@@ -727,7 +736,9 @@ def test_reverify_resampled_judges_the_adopted_tables(env):
     from claw.tables import PolyTable, Table
 
     ac, stall, limits, db, design = env
-    s = DesignSession(_small())
+    # 재양자화가 끼는 것은 **다항 모드**다 — 표 모드는 반출 표가 검증한 표 그 자체라
+    # 재검증이 생략된다(그 경로는 test_table_mode_adopts_the_table_it_verified)
+    s = DesignSession(_small(fit_mode="poly"))
     s.run(ac, stall, limits, db, design, fingerprint="fp")
 
     def export_tables(scale=1.0):
@@ -753,6 +764,95 @@ def test_reverify_resampled_judges_the_adopted_tables(env):
     fresh = DesignSession(_small())
     empty = fresh.reverify_resampled(ac, export_tables())
     assert empty["n_judged"] == 0 and "검증 결과가 없다" in empty["note"]
+
+
+def test_table_mode_adopts_the_table_it_verified(env):
+    """기본(표) 모드 — FIT이 Table을 내고, 반출 표가 검증받은 그 표다.
+
+    다항 모드에서는 세션이 검증한 것(다항)과 채택되는 것(재양자화 표)이 달라 재검증이
+    필요했다(05 §5.1). 표 모드에는 그 간극이 없다 — 같은 점·같은 트림·같은 기준으로
+    다시 돌리면 정의상 같은 결과라 계산을 생략하고 **세션 검증을 인용한다**. 인용을
+    n_judged 0으로 내면 "아무것도 안 봤다"로 읽히므로 실제 판정 수를 낸다.
+    """
+    from claw.tables import PolyTable, Table
+
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small())
+    assert s.config.fit_mode == "table"
+    s.run(ac, stall, limits, db, design, fingerprint="fp")
+    assert s.sched_tables, "표 모드에서 스케줄 자리가 하나도 안 섰다"
+    assert all(isinstance(t, Table) and not isinstance(t, PolyTable)
+               for t in s.sched_tables.values())
+    assert s.report()["fit_mode"] == "table"
+    for rep in s.fits.values():
+        assert rep["kind"] in ("table", "constant")
+
+    # 반출 표 = 검증한 표 (서버는 값만 같은 새 객체를 넘긴다 — 값 동일성으로 짚는다)
+    copies = {slot: Table({t.axis_names[0]: t.axes[0]}, t.data, name=t.name,
+                          extrapolate=t.extrapolate)
+              for slot, t in s.sched_tables.items()}
+    rv = s.reverify_resampled(ac, copies)
+    assert rv.get("identical") is True
+    assert rv["n_judged"] == s.judged_count() > 0
+    assert rv["worse"] == 0 and rv["better"] == 0 and rv["changed"] == []
+    assert "동일" in rv["note"]
+
+    # 값이 다른 표는 생략하지 않는다 — 생략 조건이 "표 모드"가 아니라 "같은 표"다
+    moved = {slot: Table({t.axis_names[0]: t.axes[0]}, t.data * 0.5, name=t.name,
+                         extrapolate=t.extrapolate)
+             for slot, t in s.sched_tables.items()}
+    rv2 = s.reverify_resampled(ac, moved)
+    assert not rv2.get("identical") and rv2["worse"] > 0
+
+
+def test_failures_are_counted_by_point_role():
+    """"실패 N"만으로는 앵커 실패와 점 사이 실패가 섞인다 — 역할별로 센다.
+
+    표 모드에서 앵커의 실효 게인은 그 점의 튜닝값인 경우가 많아 통과가 "튜닝 성립"에
+    가깝다. 스케줄이 성립하는지를 말하는 것은 검증점 판정이므로 두 수가 갈려야 한다.
+    """
+    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, case_name
+
+    s, v = _seed_failing_session()
+    a = case_name(0.3, 1000.0, 200.0)
+    assert s.points.get(v).role == ROLE_VALIDATION
+    assert s.points.get(a).role == ROLE_ANCHOR
+    s.margin_out["failures"] = [
+        {"case": v, "loop": "pitch_att", "status": "fail"},
+        {"case": a, "loop": "pitch_att", "status": "fail"},
+        {"case": a, "loop": "roll_att", "status": "fail"},
+        # 점 집합에 없는 케이스(옛 저장물·격자 변경) — 0으로 위장하지 않고 미상으로 센다
+        {"case": "M9.9_h0_f0", "loop": "pitch_att", "status": "fail"},
+    ]
+    assert s.failures_by_role() == {ROLE_VALIDATION: 1, ROLE_ANCHOR: 2, "unknown": 1}
+    rep = s.report()
+    assert rep["failures"] == 4 and rep["failures_by_role"] == s.failures_by_role()
+    # 실패가 없으면 빈 dict — "앵커 0"을 적어 넣지 않는다
+    s.margin_out["failures"] = []
+    assert s.report()["failures_by_role"] == {}
+
+
+def test_tighten_fit_is_skipped_in_table_mode():
+    """표 모드에는 조일 적합이 없다 — 사유를 달아 건너뛰고, 그래도 채점·봉인된다.
+
+    남은 어긋남은 1축 붕괴(같은 축값의 다른 축 샘플 평균) 탓이라 조이기로는 안 풀린다.
+    상한 분기와 같은 규약으로 applied로 세야 채점 대상에 들어가고, 안 듣는 처방이
+    예산을 태우기 전에 봉인된다.
+    """
+    s, v = _seed_failing_session()  # 기본 = 표 모드
+    for i in range(3):
+        s.actions = [{"id": f"t{i}", "verdict": "fit_residual", "case": v,
+                      "loop": "pitch_att",
+                      "action": {"type": "tighten_fit", "point": v, "slots": []}}]
+        s.apply_actions([f"t{i}"])
+        _set_margin(s, v, 40.0, "fail")
+        s._score_applied_actions()
+    assert s.fit_tighten == 0, "표 모드에서 적합 조이기 래칫이 움직였다"
+    assert s._fit_params()["mode"] == "table"
+    skipped = s.actions[0].get("skipped")
+    assert skipped and "표 모드" in skipped
+    assert s.actions[0].get("applied") is True
+    assert s.sealed_keys() == {f"{v}|pitch_att|fit_residual"}
 
 
 def test_validation_density_reaches_the_verify_stage(env):

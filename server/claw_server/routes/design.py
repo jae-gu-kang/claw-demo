@@ -122,11 +122,15 @@ def _build_config(overrides: dict) -> AutoDesignConfig:
             merged[nested] = {**base[nested], **overrides[nested]}
     # 타입 검증 — 데이터클래스는 강제 변환을 하지 않으므로 여기서 걸러야 한다.
     # 안 걸리는 값은 잡 스레드 안에서 터져 202 뒤 원인 없는 실패가 된다
-    for key, want in (("mode", str), ("alts", (list, type(None))), ("fuels", (list, type(None)))):
+    for key, want in (("mode", str), ("fit_mode", str),
+                      ("alts", (list, type(None))), ("fuels", (list, type(None)))):
         if not isinstance(merged[key], want):
             raise ValueError(f"{key} 타입 오류: {type(merged[key]).__name__}")
     for key, value in merged.items():
-        if key in ("mode", "alts", "fuels", "criteria", "targets"):
+        # 문자열 필드는 수치 검사 대상이 아니다 — 값의 허용 목록은 엔진 __post_init__이
+        # 본다(ValueError → 422). 여기 목록에 새 문자열 필드를 빠뜨리면 _check_number가
+        # "수치여야 함"으로 422를 내어, 멀쩡한 설정이 거부된다
+        if key in ("mode", "fit_mode", "alts", "fuels", "criteria", "targets"):
             continue
         _check_number(key, value)
         if key in _INT_KEYS and isinstance(value, float) and not value.is_integer():
@@ -180,6 +184,12 @@ def _gain_export(session: DesignSession, aircraft, on_progress=None) -> dict:
       게인 오차가 허용치 안이어도 판정 마진이 그보다 얇으면 등급이 움직일 수 있다 —
       그때 "확정하면 이 자리가 fail이 된다"를 말하는 것은 이쪽이다.
     비다항 자리는 재샘플이 곧 원본이라 오차가 정의상 0이다.
+
+    **표 모드(config.fit_mode="table")에서는 전 자리가 그 비다항 경로**다 — 재양자화가
+    없으니 게인 공간 오차도 0이고, 판정 공간도 세션 검증이 그대로 반출 표의 검증이다
+    (엔진 `reverify_resampled`가 `_same_tables`로 짚어 사유와 함께 인용한다). 그래도
+    두 필드를 계속 싣는다: 반출 계약의 형상이 표현에 따라 갈리면 화면·문서 provenance가
+    표현별로 분기해야 하고, "오차 0"과 "필드 없음"은 읽는 사람에게 다른 말이다.
     """
     tables = {}
     tables_resampled = {}
@@ -386,6 +396,24 @@ def apply_gains_to_profile(result_id: str, req: ApplyGainsIn, request: Request) 
     tables = export.get("tables_resampled") or {}
     if not tables:
         raise HTTPException(status_code=422, detail="반출 게인 표가 없는 결과 — 반영할 것이 없다")
+    # 문서 스키마 v2의 확정 게인 표는 **마하 축 표만** 보유한다(profile/schema.py `_table_mach`).
+    # 자동 설계는 자리마다 지배 축을 고르므로(fit.select_axes) 고도·연료 축 표가 나올 수 있다.
+    # 그대로 저장을 시도해도 아래 ProfileError 매핑이 받아 422이긴 하나, 그 사유는 스키마
+    # 경로(`/law/gain_tables/tables/…/axes` 키 불일치)뿐이라 **어느 자리가 왜 고도 축인지**를
+    # 말하지 않는다. 표 모드(v1.47 기본)에서는 상수로 접히던 자리까지 스케줄로 서므로 더 자주
+    # 닿는 길이다 — 전환 전에도 다항 재샘플이 같은 축을 물려받아 같은 길로 샜다
+    off_axis = {slot: sorted((spec.get("axes") or {}))
+                for slot, spec in tables.items()
+                if sorted((spec.get("axes") or {})) != ["mach"]}
+    if off_axis:
+        raise HTTPException(status_code=422, detail=
+                            "문서의 확정 게인 표는 마하 축만 보유할 수 있다 — "
+                            + " · ".join(f"{s}: {'+'.join(ax) or '축 없음'}"
+                                         for s, ax in sorted(off_axis.items()))
+                            + ". 그 자리의 변동은 마하가 아니라 다른 축이 지배한다"
+                            " (다축 게인 표는 백로그 — 05 §9). 막히는 것은 문서 반영이다:"
+                            " 시뮬·코드 생성은 그 축 표를 받고(런타임 스케줄 변수는"
+                            " mach·alt·fuel), 게인 탭 편집 표는 축이 어긋난다고 알린다")
     profiles = request.app.state.profiles
     try:
         doc, rev = profiles.get(pid)

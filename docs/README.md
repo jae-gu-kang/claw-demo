@@ -11,7 +11,7 @@
 | [`fcs-context-02-implementation.md`](fcs-context-02-implementation.md) | **툴 구현 결정** | 스코프, MATLAB 대체 매핑, 블록 라이브러리, 데이터 인터페이스, 파라미터 관리 계층, 사용자 워크플로우 |
 | [`fcs-context-03-modules.md`](fcs-context-03-modules.md) | **모듈 분할** | 모듈 경계·의존·인터페이스 계약, 저장소 구조, 개발 Phase |
 | [`fcs-context-04-criteria.md`](fcs-context-04-criteria.md) | **평가·판정 기준** | 합격선·목표선, 부족량·심각도, 카드·판정·하드 게이트, 진단 규칙, 처방, 미달 원장 |
-| [`fcs-context-05-autodesign.md`](fcs-context-05-autodesign.md) | **자동 설계 루프** | 트림 격자 자동화, 게인 자동 튜닝, 다항 적합, 스케줄 인지 검증, 원인 분류, 이터레이션 |
+| [`fcs-context-05-autodesign.md`](fcs-context-05-autodesign.md) | **자동 설계 루프** | 트림 격자 자동화, 게인 자동 튜닝, 스케줄 표현(표·다항), 스케줄 인지 검증, 원인 분류, 이터레이션 |
 | [`fcs-context-06-webui.md`](fcs-context-06-webui.md) | **웹 UI** | 탭 구성·배치 규약, 화면별 구성, 영향성·감도 화면 |
 | [`fcs-context-07-ir-and-backends.md`](fcs-context-07-ir-and-backends.md) | **제어법칙 IR·백엔드** | 구조의 정본 IR, C 생성 제약, enable 영역, 생성물 분할, 형상 지문, 비트 일치 검증 |
 | [`conventions.md`](conventions.md) | **코드 규약** | 좌표계·단위·부호·명명 |

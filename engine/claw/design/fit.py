@@ -7,6 +7,19 @@
 PolyTable(tables/poly.py) — 다항 런타임 채택(사용자 확정)에 따라 설계 표현이 곧
 런타임 표현이다.
 
+**표현은 두 가지다 (mode)** — `fit_slots(..., mode=)`이 고르고, 자동 설계의 기본은
+`AutoDesignConfig.fit_mode`가 정한다 (05 §5):
+- `"poly"` — 위 절차. 매끄럽고 계수가 적지만 **급변을 뭉갠다**: 부호 보호
+  (_fit_preserving_sign)가 어느 차수로도 부호를 못 지키면 그 자리를 상수로 굳혀
+  스케줄 하나가 통째로 사라질 수 있다 (예제 기체 실측 — roll.k_rate).
+- `"table"` — 튜닝값을 **그대로 분할점에 놓는** 선형 보간 Table. 적합이 없어 급변을
+  뭉개지 않고 부호도 표본 그대로다. 대가는 **1축 붕괴의 톱니**다: 지배 축 하나로
+  펴면서 다른 축(고도·연료) 샘플을 같은 축값에서 평균하므로, 축값마다 참여한 행이
+  달라 값이 오르내린다 (예제 기체 실측 — pitch.k_rate 방향 반전 20회). 톱니는
+  숨기지 않고 `joints`(분할점마다의 기울기 꺾임)·`zigzag`·`adjacent_jump_frac`으로
+  보고하며, fit_quality가 다항과 **같은 자**로 재어 문턱 판정에 넣는다. 근본 해소는
+  다축 표이고 격자를 사각으로 채우는 절차가 필요하다 [백로그 — 05 §9].
+
 - 적합은 web polyfit.js와 같은 센터·스케일 u-영역 (계수 왕복 호환) — 풀이만
   정규방정식 대신 lstsq (수치 우위, 결과 동일 차원).
 - 경계 C0는 **구성적으로 강제**: 왼쪽 구간을 먼저 적합하고 오른쪽 구간은 경계값
@@ -24,6 +37,11 @@ import numpy as np
 
 from claw.design.points import AXES
 from claw.tables import PolyTable, Table
+
+# 톱니(zigzag) 집계에서 무시할 변화 폭 — 그 자리 스케일 대비 비율. tol_fit 0.02의
+# 1/4로, **적합 허용치 안의 잡음을 방향 반전으로 세지 않기** 위한 값이다 [기본값] —
+# 실측 근거는 없고 톱니 수는 판정이 아니라 보고용 facts다 (판정은 joints → fit_quality)
+_ZIGZAG_EPS_FRAC = 0.005
 
 
 def _centered(xs):
@@ -163,6 +181,48 @@ def fit_gain_surface(xs, ys, *, tol_fit=0.02, max_degree=4, max_segments=4) -> d
     }
 
 
+def table_surface(xs, ys) -> dict:
+    """1D 표 표현 — 튜닝값을 그대로 분할점에 놓는다 (적합 없음).
+
+    보고 형상은 fit_gain_surface와 나란히 둔다(scale·joints·rms) — 소비자(fit_quality·
+    원장·화면)가 표현 종류로 갈라지지 않게 하려는 것이다. 다만 뜻이 다른 곳이 둘 있다:
+    - `joints`는 knot 관절이 아니라 **내부 분할점 전부**다. 선형 보간은 분할점마다
+      기울기가 꺾이므로 관절 수가 곧 분할점 수 − 2다. 값은 구성적으로 연속이라
+      value_jump는 0이다 (다항의 C0 강제와 같은 성질).
+    - `max_residual`·`rms`는 0이 아니다 — 같은 축값에 놓인 다른 축(고도·연료) 샘플을
+      평균해서 한 점으로 접기 때문이다. 이 값이 곧 **1축 붕괴의 대가**이고, 0으로
+      위장하지 않는다 (호출자가 cross_axis_residual과 함께 보고한다).
+    """
+    xs = np.asarray(xs, dtype=float)
+    ys = np.asarray(ys, dtype=float)
+    order = np.argsort(xs, kind="stable")
+    xs, ys = xs[order], ys[order]
+    if len(xs) < 2:
+        raise ValueError("표에는 서로 다른 분할점 2개 이상 필요")
+    scale = float(np.max(np.abs(ys))) or 1.0
+    slopes = np.diff(ys) / np.diff(xs)
+    joints = [{"x": float(xs[i]), "value_jump": 0.0,
+               "slope_jump": float(slopes[i] - slopes[i - 1])}
+              for i in range(1, len(slopes))]
+    # 톱니 수 — 인접 분할점 간 변화의 부호가 뒤집힌 횟수. 스케일의 _ZIGZAG_EPS_FRAC
+    # 미만인 변화는 방향을 논하지 않는다 (적합 허용치 tol_fit 0.02의 1/4 — 허용치
+    # 안의 잡음을 방향 반전으로 세지 않기 위한 값이고 실측 근거는 없다 [기본값])
+    d = np.diff(ys)
+    big = d[np.abs(d) > _ZIGZAG_EPS_FRAC * scale]
+    zigzag = int(np.sum(np.sign(big[1:]) != np.sign(big[:-1]))) if len(big) > 1 else 0
+    return {
+        "breakpoints": [float(x) for x in xs],
+        "values": [float(y) for y in ys],
+        "n_breakpoints": len(xs),
+        "scale": scale,
+        "joints": joints,
+        "zigzag": zigzag,
+        # 인접 분할점 간 최대 변화 비율 — fcl.schedule.max_adjacent_jump와 같은 양을
+        # 그 자리 스케일로 무차원화한 것(기체 무관 규약). 룩업 표 자체의 거칠기다
+        "adjacent_jump_frac": float(np.max(np.abs(d)) / scale) if len(d) else 0.0,
+    }
+
+
 def _axis_spreads(samples: dict, points) -> dict:
     """축별 실질 변동 — 다른 축 고정 그룹 내 값 범위의 최대."""
     names = [n for n in samples if n in points]
@@ -190,14 +250,19 @@ def select_axes(samples: dict, points, *, flat_tol=0.02) -> tuple:
 
 
 def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
-             max_degree=4, max_segments=4) -> dict:
-    """자리 하나의 스케줄 표현 결정 — {"kind": "constant"|"poly", ...}.
+             max_degree=4, max_segments=4, mode="poly") -> dict:
+    """자리 하나의 스케줄 표현 결정 — {"kind": "constant"|"poly"|"table", ...}.
 
-    - 변동 축 없음 → 상수 (평균값 — 잔차를 report에 남긴다)
-    - 1축 → PolyTable (다항 런타임)
-    - 2축 이상 → v1 다항 런타임 1D 한정 [백로그]: 지배 축(변동 최대)으로 적합하고
-      나머지 축 기여를 cross_axis_residual로 보고 — 조용히 뭉개지 않는다
+    - 변동 축 없음 → 상수 (평균값 — 잔차를 report에 남긴다). **mode와 무관하다**:
+      축 탈락은 표현의 문제가 아니라 "이 자리는 실질 변동이 없다"는 판정이다
+    - 1축 → mode="poly"면 PolyTable(다항 런타임), mode="table"이면 튜닝값을 그대로
+      분할점에 놓은 Table (모듈 머리말의 두 표현)
+    - 2축 이상 → v1은 1D 한정 [백로그]: 지배 축(변동 최대)으로 펴고 나머지 축 기여를
+      cross_axis_residual로 보고 — 조용히 뭉개지 않는다. 표 모드에서는 그 기여가
+      분할점 값의 톱니로 나타나므로 zigzag·adjacent_jump_frac도 함께 낸다
     """
+    if mode not in ("poly", "table"):
+        raise ValueError(f"mode는 'poly'|'table': {mode!r}")
     names = [n for n in samples if n in points]
     vals = np.array([samples[n] for n in names], dtype=float)
     axes = select_axes(samples, points, flat_tol=flat_tol)
@@ -220,6 +285,35 @@ def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
     xs_u = np.array(sorted(uniq))
     ys_u = np.array([np.mean(uniq[x]) for x in xs_u])
     cross = float(max((max(v) - min(v) for v in uniq.values()), default=0.0))
+
+    if mode == "table":
+        if len(xs_u) < 2:
+            # 지배 축에 서로 다른 축값이 하나뿐 — 변동은 전부 다른 축에서 온 것이다.
+            # 표를 세울 수 없으니 상수로 굳히고 **그 사실을 사유로** 남긴다
+            mean = float(np.mean(ys_u))
+            return {
+                "kind": "constant", "slot": slot, "value": mean,
+                "max_residual": float(np.max(np.abs(vals - mean))),
+                "axes_detected": axes, "cross_axis_residual": cross,
+                "note": f"지배 축 {axis}의 분할점이 한 점 — 표를 세울 수 없어 상수로 굳혔다",
+            }
+        surface = table_surface(xs_u, ys_u)
+        # 잔차는 접기 전 **표본 전부**에 대해 잰다 — 접은 대표값끼리 재면 정의상 0이다
+        resid = np.abs(vals - np.interp(xs, xs_u, ys_u))
+        report = dict(surface)
+        report.update({
+            "kind": "table", "slot": slot, "axes_detected": axes, "axis": axis,
+            "cross_axis_residual": cross,
+            "max_residual": float(np.max(resid)),
+            "rms": float(np.sqrt(np.mean(resid**2))),
+            # 표는 표본값을 그대로 쓴다 — 부호를 넘길 곡선이 없다(다항의 부호 보호 대응)
+            "sign_guard": {"want": _constant_sign(ys_u), "degree_used": None,
+                           "lowered": False,
+                           "note": "표 모드 — 표본값을 그대로 놓아 부호가 유지된다"},
+        })
+        return {"kind": "table", "slot": slot,
+                "table": Table({axis: xs_u}, ys_u, name=slot, extrapolate="clip"),
+                "report": report}
 
     surface, poly, guard = _fit_preserving_sign(
         xs_u, ys_u, axis, slot,
@@ -313,11 +407,22 @@ def fit_quality(report: dict) -> dict:
       기여의 비율 (v1 1D 한정의 대가를 수치로).
     상수 자리는 관절도 축도 없다 — None으로 낸다 (0 위장 금지: "잴 것이 없다"와
     "품질이 완벽하다"는 다른 말이다).
+
+    **표 모드도 같은 자로 잰다.** 선형 보간 표는 분할점마다 기울기가 꺾이므로 관절이
+    내부 분할점 전부이고(table_surface의 joints), 정규화도 같다 — 그래서 문턱
+    (`fit_slope_jump_max`)이 두 표현에 그대로 적용된다. 04 §10이 "문턱도 소비자도
+    없다"고 적었던 지표가 표 모드에서 **실제로 걸리는 첫 자리**다: 1축 붕괴의 톱니가
+    이 값으로 드러난다.
     """
-    if report.get("kind") != "poly":
+    kind = report.get("kind")
+    if kind not in ("poly", "table"):
         return {"slope_jump_norm_max": None, "cross_axis_frac": None}
-    segs = report["segments"]
-    span = float(segs[-1]["x1"] - segs[0]["x0"]) or 1.0
+    if kind == "table":
+        bps = report["breakpoints"]
+        span = float(bps[-1] - bps[0]) or 1.0
+    else:
+        segs = report["segments"]
+        span = float(segs[-1]["x1"] - segs[0]["x0"]) or 1.0
     scale = float(report["scale"])  # fit_gain_surface가 0을 1.0으로 이미 막았다
     unit = scale / span
     jumps = [abs(float(j["slope_jump"])) for j in report.get("joints") or []]
@@ -328,13 +433,19 @@ def fit_quality(report: dict) -> dict:
 
 
 def fit_slots(gain_samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
-              max_degree=4, max_segments=4) -> dict:
-    """전 자리 적합 — {"tables": {자리: PolyTable}, "constants": {자리: 값}, "reports"}."""
+              max_degree=4, max_segments=4, mode="poly") -> dict:
+    """전 자리 적합 — {"tables": {자리: PolyTable|Table}, "constants": {자리: 값}, "reports"}.
+
+    mode="table"이면 tables 항목이 Table(선형 보간)이다 — 모듈 머리말의 두 표현.
+    tol_fit·max_degree·max_segments는 다항 전용이라 표 모드에서는 쓰이지 않는다
+    (호출자가 그 사실을 알아야 한다: 표 모드에서 tighten_fit 처방은 듣지 않는다 —
+    orchestrator.apply_actions가 사유를 달아 건너뛴다).
+    """
     tables, constants, reports = {}, {}, {}
     for slot, samples in gain_samples.items():
         out = fit_slot(
             slot, samples, points, flat_tol=flat_tol, tol_fit=tol_fit,
-            max_degree=max_degree, max_segments=max_segments,
+            max_degree=max_degree, max_segments=max_segments, mode=mode,
         )
         if out["kind"] == "constant":
             constants[slot] = out["value"]

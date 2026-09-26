@@ -30,6 +30,9 @@ def test_defaults_expose_engine_config(client):
     body = r.json()
     cfg = body["config"]
     assert cfg["mode"] == "gated"  # 기본 모드 — 승인 게이트 (사용자 확정)
+    # 기본 게인 표현 — 표(선형 보간, 사용자 확정). 웹 폼이 이 값으로 셀렉트를 맞춘다:
+    # 여기서 안 내려가면 화면이 표현을 하드코딩하게 되고, 엔진 기본이 바뀌어도 모른다
+    assert cfg["fit_mode"] == "table"
     assert cfg["criteria"]["pm_min_deg"] == 45.0
     assert cfg["criteria"]["gm_min_db"] == 6.0
     assert cfg["targets"]["pm_deg"] == 50.0
@@ -142,6 +145,10 @@ def test_auto_design_end_to_end(client, wait_job):
     assert rv["n_judged"] == body["report"]["judged"] > 0
     assert isinstance(rv["changed"], list)
     assert rv["worse"] + rv["better"] == len(rv["changed"])
+    # 기본은 표 모드 — 반출 표가 검증받은 그 표라 재계산 없이 세션 검증을 인용한다.
+    # 인용이어도 판정 수는 실제 수여야 한다(0이면 "안 봤다"로 읽힌다)
+    assert body["report"]["fit_mode"] == "table"
+    assert rv.get("identical") is True and "동일" in rv["note"]
     assert rv["dropped"] == 0  # 판정이 있다가 없어진 자리 — 데모 재양자화에선 없어야 한다
     meta = client.get("/api/results").json()[0]
     assert meta["kind"] == "auto_design" and meta["fingerprint"] == "fp-ad"
@@ -202,9 +209,31 @@ def test_bad_types_are_422_not_500(client):
         {"targets": {"pm_deg": None}},
         {"criteria": {"pm_min_deg": "abc"}},
         {"mode": 3},
+        # 문자열 필드는 수치 검사에서 빼되 **타입·허용값은 봐야** 한다 — 빠뜨리면
+        # 엔진 __post_init__까지 가서 잡 스레드에서 터지거나(500) 조용히 통과한다
+        {"fit_mode": 7},
+        {"fit_mode": "spline"},
     ):
         r = client.post("/api/design/auto", json={"config": cfg})
         assert r.status_code == 422, f"{cfg} → {r.status_code} (500이면 잡 스레드에서 터진다)"
+
+
+def test_fit_mode_override_reaches_the_session(client, wait_job):
+    """게인 표현 전환이 제출에서 세션까지 닿는가 — 저장물의 config·report로 확인.
+
+    문자열 설정이 _build_config의 수치 검사에 걸리면 멀쩡한 값이 422가 되고, 반대로
+    화이트리스트에서 빠지면 "미정의 config 키"로 막힌다. 어느 쪽이든 웹의 셀렉트가
+    죽는데 제출 경로라 사용자에겐 사유가 안 보인다 — 그래서 왕복으로 핀한다.
+    """
+    r = client.post("/api/design/auto", json={
+        "fingerprint": "fp-fm", "config": _small_config(fit_mode="poly", budget_iters=1),
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    assert body["config"]["fit_mode"] == "poly"
+    assert body["report"]["fit_mode"] == "poly"
 
 
 def test_nonfinite_config_is_422(client):
@@ -338,6 +367,45 @@ def test_cancelled_session_resumes_without_approvals(client, tmp_path):
                                       "status": "cancelled", "stage": "COARSE"})
     r = client.post("/api/design/cancelled-x/resume", json={"approved": []})
     assert r.status_code == 202, r.text
+
+
+def test_apply_gains_names_the_slot_whose_axis_the_document_cannot_hold(client):
+    """마하 아닌 축 표는 문서에 못 들어간다 — 어느 자리가 왜인지 짚어야 한다.
+
+    자동 설계는 자리마다 **지배 축**을 고르므로(fit.select_axes) 고도·연료 축 표가
+    나올 수 있는데, 문서 스키마 v2의 확정 게인 표는 마하 축만 보유한다. 그대로 저장을
+    시도하면 스키마 경로 오류(`/law/gain_tables/tables/…/axes`)가 되는데, 그 문구는
+    "왜 이 자리가 고도 축인가"를 말하지 않는다 — 표 모드(v1.47 기본)에서는 상수로
+    접히던 자리까지 스케줄로 서기 때문에 더 자주 닿는다.
+    """
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="ad-axis", name="축 시험", is_example=False, variants=[])
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    built = client.get("/api/profiles/ad-axis").json()
+
+    client.app.state.store.save("axis-x", {
+        "kind": "auto_design",
+        "profile": {"id": "ad-axis", "source": "request",
+                    "fingerprint": built["fingerprint"]},
+        "gain_export": {"tables_resampled": {
+            "pitch.kp": {"axes": {"mach": [0.2, 0.5]}, "data": [-2.0, -1.5],
+                         "extrapolate": "clip"},
+            "roll.kp": {"axes": {"alt": [0.0, 3000.0]}, "data": [0.4, 0.5],
+                        "extrapolate": "clip"},
+        }},
+    }, meta={"kind": "auto_design", "created": 0.0})
+
+    r = client.post("/api/design/axis-x/apply-gains", json={"base_revision": 1})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "roll.kp: alt" in detail and "마하 축만" in detail
+    assert "pitch.kp" not in detail, "마하 축 자리는 사유에 끌어들이지 않는다"
+    # 막힌 것은 문서 반영이다 — 다른 경로를 함께 막았다고 오인하지 않게 사유가 말한다
+    assert "시뮬·코드 생성은 그 축 표를 받고" in detail
+    # 문서는 그대로다 — 부분 반영으로 절반만 들어가면 안 된다
+    assert client.get("/api/profiles/ad-axis").json()["document"]["law"]["gain_tables"] is None
 
 
 def test_schema_mismatch_is_409_not_500(client):
@@ -705,6 +773,33 @@ def test_gain_export_reports_resample_error(client):
     assert err["n_points"] == len(ex["tables_resampled"]["pitch.kp"]["data"])
     # 격자 자리는 재샘플이 곧 원본 — 오차가 정의상 0이다 (다항 경로와 뭉뚱그리지 않는다)
     assert ex["resample_error"]["yaw.k_rate"]["max_abs"] == 0.0
+
+
+def test_gain_export_in_table_mode_has_nothing_to_requantize(client):
+    """표 모드 반출 — 재양자화가 없으니 오차가 정의상 0이고 형상은 그대로 유지된다.
+
+    필드를 빼지 않는 것이 핵심이다: 반출 계약이 표현에 따라 갈리면 화면·문서
+    provenance가 표현별로 분기해야 하고, "오차 0"과 "필드 없음"은 다른 말이다
+    (_gain_export 머리말). 판정 공간 인용은 엔진 쪽 테스트가 본다.
+    """
+    from claw.design import AutoDesignConfig, DesignSession
+    from claw.plant import make_demo_aircraft
+    from claw.tables import Table
+    from claw_server.routes.design import _gain_export
+
+    s = DesignSession(AutoDesignConfig(fit_mode="table"))
+    s.sched_tables = {
+        "pitch.kp": Table({"mach": [0.2, 0.6, 0.95]}, [-2.0, -1.4, -1.0], name="pitch.kp"),
+    }
+    s.sched_constants = {"roll.ki": 0.5}
+    ex = _gain_export(s, make_demo_aircraft())
+    assert set(ex["tables"]) == {"pitch.kp"}
+    assert "kind" not in ex["tables"]["pitch.kp"]  # 다항 태그가 아니라 격자 표다
+    assert ex["tables_resampled"] == ex["tables"], "표는 재양자화 없이 그대로 나간다"
+    err = ex["resample_error"]["pitch.kp"]
+    assert err["max_abs"] == 0.0 and err["max_frac"] == 0.0 and err["at"] is None
+    assert err["n_points"] == 3
+    assert ex["resample_tol"] > 0.0  # 표현이 바뀌어도 허용치 고지 자체는 남는다
 
 
 def test_resample_error_is_measured_not_assumed(client):

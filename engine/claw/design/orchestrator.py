@@ -71,6 +71,14 @@ class AutoDesignConfig:
     criteria: MarginCriteria = field(default_factory=MarginCriteria)
     targets: TuneTargets = field(default_factory=TuneTargets)
     refine_tol: float = 0.25  # classify tol_plant와 같은 값을 공유 (기준 이원화 금지)
+    # 게인 스케줄 표현 [기본값 "table" — 사용자 확정 2026-09-26]. "table"은 튜닝값을
+    # 그대로 분할점에 놓고(적합 없음) 검증은 지금처럼 점마다 선형화해서 마진을 본다.
+    # 바꾼 근거는 예제 기체 실측이다: 다항은 부호 보호에 걸려 roll.k_rate 스케줄을
+    # 통째로 상수로 굳혔고, 조이기 2회부터 yaw.k_rate도 상수가 됐다. 대가는 1축 붕괴의
+    # 톱니이고 fit.py가 지표로 보고한다. "poly"(다항 런타임 [확정] — PolyTable →
+    # PolyBlock → C claw_polyeval1d 비트 일치)는 **지우지 않고 설정으로 남긴다**:
+    # 매끄러움·계수 수가 필요한 자리의 선택지이고, 01 §3.4의 확정 사항이다
+    fit_mode: str = "table"
     # fit_tol 0.02 [기본값] = "적합 잔차는 그 자리 게인 스케일의 2%까지" — 웹 수동 적합
     # (lib/polyfit.js)과 같은 자리의 관례값이고 실측 근거는 없다(폐쇄망 확정 대상, 04 §10).
     # flat_tol 0.02 [기본값] = "축 방향 변동이 스케일의 2% 미만이면 그 축은 실질 무변동" —
@@ -104,6 +112,8 @@ class AutoDesignConfig:
     def __post_init__(self):
         if self.mode not in ("gated", "auto"):
             raise ValueError(f"mode는 'gated'|'auto': {self.mode!r}")
+        if self.fit_mode not in ("poly", "table"):
+            raise ValueError(f"fit_mode는 'poly'|'table': {self.fit_mode!r}")
         if not 1 <= self.budget_iters <= MAX_ITERS:
             raise ValueError(f"budget_iters는 1~{MAX_ITERS}: {self.budget_iters}")
         if self.budget_points < 4:
@@ -232,6 +242,29 @@ def _trim_from_dict(d: dict) -> TrimResult:
                     reserve=dict(d.get("reserve") or {}))  # 옛 세션 저장물에는 없다 — 미계산(빈 dict)
     tr._design_dict = dict(d)  # 직렬화 멱등성 캐시 (_trim_to_dict 참조)
     return tr
+
+
+def _same_tables(a: dict, b: dict) -> bool:
+    """두 스케줄 표 묶음이 같은 표인가 — 재검증을 생략해도 되는 유일한 조건.
+
+    같은 객체인지가 아니라 **값이 같은지**를 본다: 반출 경로가 표를 새로 만들어 넘길 수도
+    있고(routes/design.py `_gain_export`의 다항 자리·세션 왕복 복원본), 객체 동일성에
+    기대면 그 경로에서 조용히 재검증을 돌게 된다. 다항은 여기서 항상 다르다고 보고 실제
+    재검증을 돌린다 — 재양자화 근사가 끼기 때문이다.
+    """
+    if set(a) != set(b):
+        return False
+    for name, ta in a.items():
+        tb = b[name]
+        if isinstance(ta, PolyTable) or isinstance(tb, PolyTable):
+            return False
+        if ta.axis_names != tb.axis_names:
+            return False
+        if not all(np.array_equal(x, y) for x, y in zip(ta.axes, tb.axes)):
+            return False
+        if not np.array_equal(ta.data, tb.data):
+            return False
+    return True
 
 
 def _table_to_dict(tab) -> dict:
@@ -396,6 +429,9 @@ class DesignSession:
             "tol_fit": c.fit_tol * (_FIT_TIGHTEN_FACTOR ** n),
             "max_degree": c.max_degree,
             "max_segments": min(_MAX_SEGMENTS_CAP, c.max_segments + n),
+            # 표 모드에서는 위 세 개가 쓰이지 않는다 (fit.fit_slots 머리말) — 값을 계속
+            # 넘기는 것은 왕복·저장물의 형상을 표현에 따라 갈리지 않게 두려는 것이다
+            "mode": c.fit_mode,
         }
 
     def _stage_fit(self, cb):
@@ -476,8 +512,10 @@ class DesignSession:
     def reverify_resampled(self, aircraft, tables: dict, *, on_progress=None) -> dict:
         """반출 표(재양자화 Table)로 검증을 다시 판정한다 — 채택되는 표현이 검증받게.
 
-        세션 검증(margin_out)은 다항 기준인데, 웹 「채택」·apply-gains가 주입하는 것은
-        resample_to_table의 근사 표다(routes/design.py `_gain_export`). 근사 오차 고지
+        **다항 모드의 이야기다**: 세션 검증(margin_out)은 다항 기준인데, 웹 「채택」·
+        apply-gains가 주입하는 것은 resample_to_table의 근사 표다(routes/design.py
+        `_gain_export`). 표 모드(fit_mode="table")에서는 반출 표가 검증한 표 그 자체라
+        재계산할 것이 없다 — `_same_tables`가 그것을 짚어 사유와 함께 인용한다. 근사 오차 고지
         (resample_error — 게인 공간)만으로는 "판정이 갈렸는가"에 답하지 못하므로, 같은
         점·같은 트림·같은 기준으로 그 표를 재판정해 다항 판정과의 차이를 센다(05 §5.1).
         trims·lms 재사용이라 비용은 점당 선형 마진 계산뿐이다 — 트림·시뮬 0.
@@ -493,6 +531,17 @@ class DesignSession:
         if not tables:
             return {"n_judged": 0, "changed": [], "worse": 0, "better": 0, "dropped": 0,
                     "failures": [], "note": "재검증 생략 — 스케줄 표가 없다(전 자리 상수)"}
+        if _same_tables(self.sched_tables, tables):
+            # 표 모드의 정상 경로다 — 반출 표가 세션이 검증한 그 표다(재양자화가 없다).
+            # 같은 점·같은 트림·같은 기준으로 다시 돌리면 정의상 같은 결과가 나오므로
+            # 계산을 생략하고 **세션 검증을 그대로 인용한다**. n_judged를 0으로 두면
+            # "아무것도 안 봤다"로 읽히는데 그건 사실이 아니다 — 사유를 함께 낸다
+            return {"n_judged": self.judged_count(), "changed": [], "worse": 0,
+                    "better": 0, "dropped": 0,
+                    "failures": list(self.margin_out.get("failures", ())),
+                    "identical": True,
+                    "note": "반출 표가 세션이 검증한 표와 동일 — 재양자화가 없어"
+                            " 세션 검증이 곧 이 표의 검증이다 (재계산 생략)"}
         design_eff = {**self.design, **self.sched_constants}
         out = scheduled_margin_map(
             aircraft, self.points, self.lms, tables, design_eff,
@@ -692,6 +741,22 @@ class DesignSession:
                                  -(r["severity"] or 0.0)))
         return rows
 
+    def failures_by_role(self) -> dict:
+        """실패를 점 역할별로 — 같은 "실패 N"이 표현에 따라 다른 뜻을 갖기 때문이다.
+
+        표 모드(기본)에서는 앵커의 실효 게인이 **그 점의 튜닝값 자체**인 경우가 많다
+        (지배 축 좌표가 그 점 하나뿐이면 평균이 아니라 그 값이 그대로 들어간다). 그런
+        앵커가 통과하는 것은 "튜닝이 성립했다"는 말에 가깝고, 스케줄이 성립하는지를
+        말하는 것은 **점 사이(검증점)** 판정이다. 두 수를 합쳐만 내면 그 구별이 사라진다
+        — 다항 모드에서도 적합 괴리(앵커)와 보간 괴리(검증점)는 다른 처방으로 간다(§7).
+        """
+        out: dict = {}
+        for f in self.margin_out.get("failures", ()):
+            pt = self.points.get(f.get("case")) if f.get("case") in self.points else None
+            role = pt.role if pt is not None else "unknown"
+            out[role] = out.get(role, 0) + 1
+        return out
+
     def outside_envelope_count(self) -> int:
         """마진은 냈으나 엔벨로프 밖이라 판정·처방에서 뺀 점 수 — 조용한 제외 금지."""
         return sum(1 for entry in self.margin_out.get("cases", {}).values()
@@ -844,7 +909,15 @@ class DesignSession:
                 # 않은 채 매 이터 applicable로 다시 잡혀 아무것도 안 바꾸는 순환을
                 # 예산 소진까지 돈다. promote의 래칫 방어도 같은 규약이다
                 # (skipped를 남기되 applied로 센다)
-                if self.fit_tighten >= _FIT_TIGHTEN_MAX:
+                if self.config.fit_mode != "poly":
+                    # 표 모드에는 조일 적합이 없다. 남은 어긋남은 **1축 붕괴**(같은 축값의
+                    # 다른 축 샘플을 평균) 탓이라 조이기로는 안 풀린다 — 사유를 달아
+                    # 건너뛰되 applied로는 센다(위 상한 분기와 같은 규약: effect 레코드가
+                    # 안 생기면 채점·봉인에서 빠져 매 이터 다시 잡힌다)
+                    a["skipped"] = ("표 모드 — 조일 적합이 없다. 이 어긋남은 지배 축 하나로"
+                                    " 펴면서 다른 축 샘플을 평균한 대가이고, 다축 표가"
+                                    " 있어야 풀린다 [백로그 05 §9]")
+                elif self.fit_tighten >= _FIT_TIGHTEN_MAX:
                     a["skipped"] = f"적합 조이기 상한({_FIT_TIGHTEN_MAX}회) 도달 — 더 조일 수 없다"
                 else:
                     self.fit_tighten += 1
@@ -945,6 +1018,9 @@ class DesignSession:
             "status": self.status, "stage": self.stage, "iterations": self.iter_n,
             "points": roles, "n_points": len(self.points),
             "failures": len(self.margin_out.get("failures", ())),
+            # 실패가 앵커인지 점 사이인지 — 표 모드에서 앵커 통과는 튜닝 성립에 가깝고
+            # 스케줄 성립을 말하는 것은 검증점이다 (failures_by_role 머리말)
+            "failures_by_role": self.failures_by_role(),
             # 판정 수 — "실패 0"이 통과인지 미검증인지 화면이 구별할 수 있어야 한다
             "judged": self.judged_count(),
             # 판정·처방에서 뺀 엔벨로프 밖 점 수 — 제외했다는 사실 자체가 보고 대상이다
@@ -963,6 +1039,9 @@ class DesignSession:
             "ineffective_actions": sum(
                 1 for r in self.applied_log if r["effect"].get("changed") is False),
             "sealed": len(self.sealed_keys()),
+            # 어느 표현으로 검증한 결과인가 — 화면·저장물이 표와 다항을 구별해야 한다
+            # (표 모드는 재양자화가 없어 반출 표가 검증받은 표 그 자체다)
+            "fit_mode": c.fit_mode,
             "fit_tighten": self.fit_tighten,
             # 적합 품질 경고 수 — 문턱을 켠 실행에서만 0이 아닐 수 있다 (04 §10)
             "fit_quality_warns": sum(

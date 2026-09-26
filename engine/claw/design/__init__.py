@@ -22,10 +22,12 @@ from claw.design.points import (
 )
 from claw.design.fit import (
     fit_gain_surface,
+    fit_quality,
     fit_slot,
     fit_slots,
     resample_to_table,
     select_axes,
+    table_surface,
 )
 from claw.design.grid import coarse_grid
 from claw.design.orchestrator import AutoDesignConfig, DesignSession
@@ -60,9 +62,11 @@ __all__ = [
     "tune_point",
     "tune_points",
     "fit_gain_surface",
+    "fit_quality",
     "fit_slot",
     "fit_slots",
     "select_axes",
+    "table_surface",
     "resample_to_table",
     "VERDICTS",
     "classify_margin_deficit",

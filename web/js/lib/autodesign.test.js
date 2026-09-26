@@ -80,6 +80,41 @@ test("buildConfig — 잘못된 수치 목록은 던진다", () => {
   assert.throws(() => buildConfig({ mode: "gated", altsText: "abc" }));
 });
 
+test("buildConfig — 게인 표현은 열거값이라 수치로 파싱하지 않는다", () => {
+  // 수치 칸 목록에 섞이면 Number("table")=NaN으로 던져 폼 전체가 제출되지 않는다.
+  // 허용값 판정은 엔진 몫이라 여기서는 문자열을 그대로 실어 보낸다
+  assert.deepEqual(buildConfig({ mode: "auto", fitMode: "table" }),
+    { mode: "auto", fit_mode: "table" });
+  assert.deepEqual(buildConfig({ mode: "auto", fitMode: "poly" }),
+    { mode: "auto", fit_mode: "poly" });
+  // 안 고른 칸은 안 보낸다 — 서버 기본값(엔진 정본)이 이기게 둔다
+  assert.deepEqual(buildConfig({ mode: "auto" }), { mode: "auto" });
+});
+
+test("reportLine — 실패가 앵커인지 점 사이인지 갈라 보여 준다", () => {
+  // 앵커는 자기 튜닝값으로 검증받는 자리가 많아(표 모드) 통과가 "튜닝 성립"에 가깝다 —
+  // 스케줄 성립을 말하는 것은 검증점 실패다
+  const line = reportLine({
+    judged: 900, failures: 258,
+    failures_by_role: { anchor: 175, validation: 83, breakpoint: 0 },
+  }).join(" · ");
+  assert.match(line, /실패 위치 앵커 175 · 검증점 83/);
+  assert.doesNotMatch(line, /bp 0/, "0인 역할은 적지 않는다");
+  // 역할 집계가 없는 옛 결과·실패 0 — 줄을 만들지 않는다
+  assert.doesNotMatch(reportLine({ judged: 3, failures: 0 }).join(" · "), /실패 위치/);
+  assert.doesNotMatch(
+    reportLine({ failures: 2, failures_by_role: {} }).join(" · "), /실패 위치/);
+});
+
+test("reportLine — 어느 표현으로 검증한 결과인지 줄에 남는다", () => {
+  // 표는 반출 표가 검증받은 그 표이고, 다항은 재양자화 근사가 끼어 채택 시 재검증을
+  // 받는다 (05 §5.1) — 결과를 읽는 사람이 둘을 구별할 수 있어야 한다
+  assert.match(reportLine({ fit_mode: "table" }).join(" · "), /표현 표\(선형 보간\)/);
+  assert.match(reportLine({ fit_mode: "poly" }).join(" · "), /표현 다항/);
+  // 표현을 안 실은 옛 결과 — 없는 것을 "다항"으로 단정하지 않는다
+  assert.doesNotMatch(reportLine({ judged: 3, failures: 0 }).join(" · "), /표현/);
+});
+
 test("worstStatus — fail > warn > na > ok", () => {
   assert.equal(worstStatus({ a: { status: "ok" }, b: { status: "warn" } }), "warn");
   assert.equal(worstStatus({ a: { status: "warn" }, b: { status: "fail" } }), "fail");

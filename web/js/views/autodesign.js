@@ -62,6 +62,10 @@ export function render() {
       el("option", { value: "gated", selected: true }, "승인 게이트 (gated)"),
       el("option", { value: "auto" }, "전자동 (auto)"),
     ),
+    fitMode: el("select", { "aria-label": "게인 표현" },
+      el("option", { value: "table", selected: true }, "표 (선형 보간)"),
+      el("option", { value: "poly" }, "다항"),
+    ),
     budgetPoints: el("input", { size: 5, placeholder: "200" }),
     budgetIters: el("input", { size: 3, placeholder: "5" }),
     nMach: el("input", { size: 3, placeholder: "5" }),
@@ -82,6 +86,9 @@ export function render() {
       designDefaults = d;
       const c = d.config;
       form.mode.value = c.mode;
+      // 기본 표현도 엔진이 정본이다 — 여기서 고정하면 엔진 기본값이 바뀌어도 화면이
+      // 옛 표현을 보내고, 사용자는 안 고른 표현으로 도는 것을 모른다
+      if (c.fit_mode) form.fitMode.value = c.fit_mode;
       // 기본값은 placeholder로만 — 값으로 채우면 사용자가 안 건드린 칸까지 덮어쓰기로
       // 나가고, 서버 기본값이 바뀌어도 화면이 옛 수치를 계속 보낸다
       const ph = (input, v) => { if (v != null) input.placeholder = String(v); };
@@ -131,6 +138,7 @@ export function render() {
         Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value]));
       const config = buildConfig({
         mode: form.mode.value,
+        fitMode: form.fitMode.value,
         budgetPoints: form.budgetPoints.value,
         budgetIters: form.budgetIters.value,
         nMach: form.nMach.value,
@@ -190,6 +198,7 @@ export function render() {
           defaultsBox,
           el("div", { class: "form-row" },
             el("label", {}, "모드 ", form.mode),
+            el("label", {}, " 게인 표현 ", form.fitMode),
             el("label", {}, " 점 예산 ", form.budgetPoints),
             el("label", {}, " 이터 상한 ", form.budgetIters),
             el("label", {}, " mach 점수 ", form.nMach),
@@ -200,6 +209,12 @@ export function render() {
             "승인 게이트(gated)는 처방 카드에서 멈춘다 — 승인한 처방만 반영해 재개한다. "
             + "전자동(auto)은 예산이 다할 때까지 스스로 순환한다. "
             + "에스컬레이션(상위 설계 변경)은 어느 모드에서도 자동 적용되지 않는다."),
+          el("p", { class: "hint" },
+            "게인 표현 — 「표」는 튜닝값을 그대로 분할점에 놓는다(적합 없음): 급변을 "
+            + "뭉개지 않고, 채택하는 표가 검증받은 그 표다. 대신 지배 축 하나로 펴면서 "
+            + "다른 축 샘플을 평균하므로 값이 오르내릴 수 있다 — 그 거칠기는 결과의 "
+            + "「적합 품질」에 기울기 점프로 나온다. 「다항」은 매끄럽고 계수가 적지만 "
+            + "급변을 뭉개고, 채택 시 재양자화 표로 판정을 다시 받는다."),
         ] },
       { key: "tuning", label: "요구 조정", group: "입력",
         title: "합격기준·튜닝 목표·작동기·지연 (비우면 서버 기본값)",
@@ -227,7 +242,8 @@ export function render() {
           el("h2", {}, "설계 루프 한 바퀴"),
           el("p", { class: "hint", style: "max-width:96ch" },
             "엔벨로프에서 coarse 트림 격자를 유도하고, 플랜트 변화량으로 격자를 세분화한 뒤 "
-            + "운영점별 게인을 자동 튜닝·다항 적합하고, 보간 실효 게인으로 마진을 검증한다. "
+            + "운영점별 게인을 자동 튜닝해 스케줄 표현(기본은 표, 다항은 선택)으로 세우고, "
+            + "보간 실효 게인으로 마진을 검증한다. "
             + "마진 부족은 원인별 처방(검증점 추가/앵커·breakpoint 승격/상위 설계 "
             + "에스컬레이션)으로 순환한다."),
           el("p", { class: "hint", style: "max-width:96ch" },
@@ -537,7 +553,8 @@ function renderResult(box, body, resultId, ctx) {
       + constNote
       + " 게인 탭은 자리마다 다른 breakpoint를 합집합 축으로 정렬해 보여 주며,"
       + " 거기서 편집한 뒤 [시뮬·코드에 적용]을 누르면 이 확정을 덮어쓴다."
-      + " 다항 정본은 결과 JSON의 gain_export.tables — API 직접 주입용."));
+      + " 반출 정본(표 모드면 그 표, 다항 모드면 다항)은 결과 JSON의 gain_export.tables"
+      + " — API 직접 주입용."));
   };
   const adoptMsg = el("span");
   const applyMsg = el("span");

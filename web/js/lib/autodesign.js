@@ -4,7 +4,8 @@
 기본값을 다시 적지 않고, 사용자가 채운 칸만 config 덮어쓰기로 보낸다.
 
 게인 채택은 기존 스토어 계약(gains 탭 storePayload — {tables, scheduleOff})으로
-낸다. v1은 **재샘플 테이블**(gain_export.tables_resampled)을 주입한다 — 다항
+낸다. 주입은 `gain_export.tables_resampled`이고, 표 모드(v1.47 기본)에서는 그것이
+세션이 검증한 표 **그 자체**이며 다항 모드에서는 **재샘플 테이블**이다 — 다항
 정본(kind='poly')은 서버 sim/codegen이 직접 받지만, 웹 스토어 소비자(블록도
 표시·influence·웹 코드 미리보기)가 테이블 형상을 전제하므로 스토어 경유는
 호환 반출을 쓴다 (다항 스토어 채택은 [백로그] — docs -01 §3.4).
@@ -90,6 +91,9 @@ export const TARGET_FIELDS = [
 export function buildConfig(form) {
   const out = {};
   if (form.mode) out.mode = form.mode;
+  // 게인 표현 — 수치가 아니라 열거값이라 nums 목록에 넣으면 NaN으로 던진다.
+  // 허용 목록은 엔진(AutoDesignConfig.fit_mode)이 본다 — 여기서 재기술하지 않는다
+  if (form.fitMode) out.fit_mode = form.fitMode;
   const nums = [
     ["budgetPoints", "budget_points"],
     ["budgetIters", "budget_iters"],
@@ -384,6 +388,18 @@ export function reportLine(report, nPointsFallback) {
     `판정 ${Number(r.judged) || 0}`,
     `실패 ${Number(r.failures) || 0}`,
   ];
+  // 어느 표현으로 검증한 결과인가 — 표는 반출 표가 검증받은 그 표이고, 다항은
+  // 재양자화 근사가 끼어 채택 시 재검증을 받는다 (05 §5.1). 수치가 아니라
+  // 표현이라 아래 optional 카운터 목록에 못 섞는다
+  if (r.fit_mode) parts.push(`표현 ${r.fit_mode === "table" ? "표(선형 보간)" : "다항"}`);
+  // 실패가 앵커인지 점 사이인지 — 앵커는 자기 튜닝값으로 검증받는 자리가 많아
+  // (표 모드) 통과가 "튜닝 성립"에 가깝고, 스케줄 성립을 말하는 것은 검증점이다
+  const byRole = r.failures_by_role ?? {};
+  const roleParts = [["anchor", "앵커"], ["breakpoint", "bp"], ["validation", "검증점"],
+    ["unknown", "역할 미상"]]
+    .filter(([k]) => Number(byRole[k]) > 0)
+    .map(([k, label]) => `${label} ${Number(byRole[k])}`);
+  if (roleParts.length) parts.push(`실패 위치 ${roleParts.join(" · ")}`);
   const optional = [
     ["outside_envelope", "엔벨로프 밖"],
     ["tuned", "튜닝"],
