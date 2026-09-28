@@ -2,7 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { FQ_BADGE, FQ_MODES, fqKey, fqLegendText, fqMeasureText, fqWorst } from "./fq.js";
+import {
+  FQ_BADGE, FQ_MODES, fqKey, fqLegendText, fqMeasureText, fqOverallWorst, fqWorst, marginsCueReport,
+} from "./fq.js";
 
 test("fqKey: 수준·수준 밖·판정 없음을 구분한다", () => {
   assert.equal(fqKey({ level: 1 }), 1);
@@ -109,4 +111,34 @@ test("fqLegendText: 서버 동봉 판정선으로 문장을 만든다 — 수치
   assert.match(text, /abc123/); // 계보 지문 노출
   // 구버전 결과(판정선 미동봉)는 그 사실을 말한다 — 조용한 생략 금지
   assert.match(fqLegendText(null), /판정선 정보가 없습니다/);
+});
+
+test("fqOverallWorst — 모드별 최악 중 수준이 가장 나쁜 자리, 동률이면 표의 열 순서 앞", () => {
+  const w = (mode, key, caseName = "X") => ({ mode, label: mode, key, j: {}, caseName });
+  assert.equal(fqOverallWorst([w("short_period", 1), w("roll", 2), w("spiral", 2)]).mode, "roll");
+  assert.equal(fqOverallWorst([w("dutch_roll", 1), w("spiral", "out")]).mode, "spiral");
+  assert.equal(fqOverallWorst([w("short_period", "na"), w("roll", "na")]), null);
+  assert.equal(fqOverallWorst([]), null);
+});
+
+test("marginsCueReport — 최악 PM·GM 칸과 비행성 최악을 탭 라벨로 한 줄에", () => {
+  const entry = (name) => ({ trim: { case: { name } } });
+  const fqw = fqWorst([{
+    trim: { case: { name: "M0.12_h3000_f10" } },
+    lat: { fq: { roll: { level: 2, tau_s: 1.44 }, dutch_roll: { level: 1, zeta: 0.2, wn: 2, zwn: 0.4 } } },
+  }]);
+  const r = marginsCueReport({
+    pm: { loop: "yaw_r", entry: entry("M0.2_h0_f50"), value: 23.14 },
+    gm: { loop: "pitch_q", entry: entry("M0.12_h3000_f10"), value: 7.25 },
+  }, fqw);
+  assert.equal(r.summary, "PM 최악 23.1° (yaw_r @ M0.2_h0_f50) · GM 최악 7.3 dB (pitch_q @ M0.12_h3000_f10)"
+    + ` · 비행성 최악 ${FQ_BADGE[2].label} (롤 τ 1.44 s @ M0.12_h3000_f10)`);
+  assert.deepEqual(r.data, {
+    pm: { loop: "yaw_r", case: "M0.2_h0_f50", value: 23.14 },
+    gm: { loop: "pitch_q", case: "M0.12_h3000_f10", value: 7.25 },
+    fq: { mode: "roll", level: 2, case: "M0.12_h3000_f10" },
+  });
+  const none = marginsCueReport({ pm: null, gm: null }, []);
+  assert.deepEqual(none.data, { pm: null, gm: null, fq: null });
+  assert.match(none.summary, /PM — 판정할 칸 없음/);
 });

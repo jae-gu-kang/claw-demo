@@ -12,6 +12,11 @@ lib/missiondraft.js에 있다. 전역 body 크롬인 이유(views/ask.js 선례)
   지운다). React effect에서 읽고 지우면 dev StrictMode 이중 마운트의 두 번째가 빈
   키를 본다. 되돌아오는 신호는 `worldTourState`(store.subscribe).
 
+쇼케이스 진행기(views/showcase.js)와는 **서로 배타**다 — 카드 자리(좌하단)를 나눠 쓰고 둘 다
+탭을 끌고 다닌다. 카드가 열릴 때 store `chromeCard`에 제 이름을 적고 남의 이름이 오면 카드만
+닫는다(도는 런은 그대로). 진행기가 도는 동안(`showcaseBusy`)은 투어를 시작하지 않고, 진행기는
+`tourBlockReason()`으로 이쪽을 묻는다(도는 투어·안 읽힌 시뮬 인계). worldTour는 서로 제 토큰 것만 거둔다.
+
 LLM 호출은 **초안 1 + 교신 1** 두 번뿐이다(사용자 결정) — 단계 해설은 이미 있는
 산출물(초안 요약·모드 사슬·잡 진행률·교신 줄 수·착륙 요약)로 만든다.
 */
@@ -24,6 +29,7 @@ import {
   DEFAULT_FORM, appliedFrom, applyProfileDefaults, buildSimRequest, initialForm, profileSimDefaults,
 } from "../lib/simrequest.js";
 import { selectedDocument } from "./profilepick.js";
+import { launchLimitOf } from "./sim.js";
 import {
   DOC_FAILED_HINT, MISSING_TEMPLATE_HINT, templateDefaults, untouchedUpdates,
 } from "../lib/missiontemplate.js";
@@ -39,6 +45,21 @@ let llm = null;       // /llm/status — **성공만 캐시**(콜드 스타트 �
 let statusErr = null;
 let submitting = false; // await 앞 동기 플래그 — 유료 이중 제출 방지
 let intent = "";
+let blockedNote = null; // 쇼케이스가 도는 중이라 시작을 거절한 사유 — 다음 그리기에 한 번
+
+/** 투어가 지금 탭을 끌고 있나 — 쇼케이스 진행기가 시작 전에 묻는다(마무리·실패 카드는 끈 것이 아니다). */
+const tourRunning = () => run != null && !run.failedAt && run.stage !== "done";
+
+/** 쇼케이스 진행기가 지금 시작하면 안 되는 사유 — 없으면 null. 투어가 탭을 끄는 중이거나, 사전 판정에 막힌
+ *  초안을 시뮬 탭 인계(`tourSim`)에 남겨 둔 채 실패했을 때다: 그 인계는 시뮬 탭이 다음 렌더에 읽으므로,
+ *  진행기의 시뮬 단계가 투어 초안을 표에 앉힌 채 돈다. */
+export function tourBlockReason() {
+  if (tourRunning()) return "가이드 투어가 진행 중입니다 — 끝나거나 멈춘 뒤 시작하십시오.";
+  if (store.get("tourSim") != null) {
+    return "가이드 투어가 시뮬 탭에 넘긴 초안이 아직 읽히지 않았습니다 — 시뮬 탭에서 확인하거나 투어 카드를 닫은 뒤 시작하십시오.";
+  }
+  return null;
+}
 
 /** 가상환경이 재생을 시작했다고 말하지 않으면 사유와 함께 멈춘다 — 3D가 못 뜨거나
  *  결과 목록이 비면 투어가 영영 기다리게 되는 자리. */
@@ -94,6 +115,7 @@ export function mount() {
     open = v;
     card.hidden = !v;
     fab.setAttribute("aria-expanded", v ? "true" : "false");
+    if (v) store.set("chromeCard", "tour"); // 쇼케이스 카드와 한 자리 — 저쪽이 닫힌다
     if (v && llm == null) void loadStatus();
     paint();
     if (v && run == null) input.focus();
@@ -113,9 +135,13 @@ export function mount() {
   };
 
   const reset = () => {
+    const tok = run?.token;
     run = null;
     clearWatchdog();
-    store.set("worldTour", null);
+    // **제 것만** 거둔다 — 마무리·실패 카드에서 [새 투어]·[닫기]를 누르는 사이 쇼케이스 진행기가 제 재생을
+    // 걸어 두었을 수 있다(투어가 끝난 뒤엔 진행기가 시작할 수 있다). 남의 worldTour를 지우면 가상환경이
+    // 그 재생을 조용히 멈추고 진행기는 상한까지 기다린다
+    if (tok && store.get("worldTour")?.token === tok) store.set("worldTour", null);
     // **인계도 거둔다** — 초안이 막혀 넘겨 둔 tourSim을 남기면, 한참 뒤 아무 이유로
     // 시뮬 탭을 연 사람의 표가 그 초안으로 통째로 바뀐다(그 사람은 투어를 닫았다).
     // 정리 경로 둘(중단·닫기)이 같은 것을 거둬야 한다 (리뷰 지적)
@@ -282,7 +308,11 @@ export function mount() {
         makeComms(sj.result_id, token),
       ]);
       if (!alive(token)) return;
-      run.finale = finaleModel(replay);
+      // 레일 이탈 행의 발사하중 판정 — 시뮬 탭과 같은 한계 조회(그 런의 기체 문서 structural.n_x_launch).
+      // 던지지 않는다(못 받으면 사유가 행에 「판정 불가」로 선다)
+      const launchLimit = await launchLimitOf(replay.meta);
+      if (!alive(token)) return;
+      run.finale = finaleModel(replay, { launchLimit });
       if (comms.failed) run.commsNote = captionFor("comms", { failed: comms.failed });
 
       // ④ 3D 재생 — 가상환경이 조건을 보고 켠다 (수명은 이 모듈이 쥔다)
@@ -309,6 +339,12 @@ export function mount() {
 
   const startClicked = () => {
     if (run || submitting) return; // 이미 도는 투어 — Enter 연타가 unlock 발화를 반복하지 않게
+    if (store.get("showcaseBusy")) {
+      // 둘 다 탭을 끌고 다닌다 — 함께 돌면 서로의 신호·재생을 밟는다
+      blockedNote = "쇼케이스가 진행 중입니다 — 끝나거나 멈춘 뒤 투어를 시작하십시오.";
+      paint();
+      return;
+    }
     const text = input.value.trim();
     if (!text) {
       statusErr = "무엇을 비행할지 한 문장으로 적으십시오.";
@@ -341,6 +377,7 @@ export function mount() {
         el("span", { class: "k" }, r.label),
         el("span", { class: "v" }, r.value),
         r.over ? el("span", { class: "flag bad" }, r.overLabel ?? "초과") : null,
+        r.pass ? el("span", { class: "flag ok" }, r.passLabel ?? "기준 안") : null,
         r.unjudged ? el("span", { class: "flag na" }, "미판정") : null,
         r.note ? el("span", { class: "hint" }, r.note) : null)))
     : el("p", { class: "hint" }, m.note));
@@ -358,6 +395,8 @@ export function mount() {
           : (llm.reason ?? "사용할 수 없습니다."));
       input.disabled = !avail;
       startBtn.disabled = !avail || submitting;
+      if (blockedNote) bodyBox.append(el("div", { class: "error-box", style: "margin:0 0 8px" }, blockedNote));
+      blockedNote = null;
       bodyBox.append(
         el("p", { class: "hint", style: "margin:0 0 8px" },
           "문장 하나로 미션을 만들고, 시뮬을 돌리고, 3D에서 교신과 함께 재생한 뒤 "
@@ -408,6 +447,11 @@ export function mount() {
       el("div", { class: "tour-actions" }, el("button", { onclick: cancelTour }, "중단")),
     );
   };
+
+  // 쇼케이스 카드가 열렸다 — 카드만 닫는다(도는 투어는 그대로, 단추로 다시 연다)
+  store.subscribe((key, value) => {
+    if (key === "chromeCard" && value !== "tour" && open) setOpen(false);
+  });
 
   // 가상환경이 돌려주는 신호 — 토큰이 다르면 지난 투어의 것이라 버린다
   store.subscribe((key, value) => {

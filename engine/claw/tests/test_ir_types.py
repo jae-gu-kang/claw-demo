@@ -332,6 +332,17 @@ def test_노드는_타입_필드를_갖지_않는다():
     }, f"Node 속성이 늘었다 — pipeline/influence.py의 서명을 함께 볼 것: {sorted(vars(n))}"
 
 
+def test_추월_동기화는_켤_때만_노드에_서고_서명이_읽는다():
+    """`resync`(속도 명령필터 추월 동기화 — codegen/ir.py Node)는 `group`처럼 클래스 기본값이다 — 끈 노드의 속성 집합은
+    위 고정 그대로이고 켠 노드만 `resync` 하나가 는다. 그 대신 영향성 노드 서명이 그것을 **읽어야** 한다: 동기화는 실행
+    의미론이라(codegen/blockspec.py resync_state) 켜고 끔이 서명에 안 보이면 영향성이 "그 노드를 안 건드렸다"고 본다."""
+    off = Node("x", block=object, inputs=("cmd", "meas"))
+    on = Node("x", block=object, inputs=("cmd", "meas"), resync=True)
+    assert "resync" not in vars(off)
+    assert set(vars(on)) - set(vars(off)) == {"resync"}
+    assert node_signature(on) != node_signature(off)
+
+
 def test_타입_선언은_노드_서명을_바꾸지_않는다():
     a, b = _graph(), _graph(DECLARED)
     assert [node_signature(n) for n in a.nodes] == [node_signature(n) for n in b.nodes]

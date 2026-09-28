@@ -350,3 +350,166 @@ def test_fit_slots_table_mode_keeps_the_constant_decision():
     assert out["constants"] == {"yaw.k_rate": pytest.approx(0.8)}
     assert out["reports"]["pitch.kp"]["kind"] == "table"
     assert out["reports"]["yaw.k_rate"]["kind"] == "constant"
+
+
+def _points_2d(machs, alts, fuel=200.0):
+    ps = PointSet()
+    for a in alts:
+        for m in machs:
+            ps.add(OperatingPoint(
+                case=TrimCase(name=case_name(m, a, fuel), mach=float(m), alt=float(a), fuel=fuel),
+                role=ROLE_ANCHOR, origin="coarse",
+            ))
+    return ps
+
+
+def test_sched_axis_restriction_keeps_the_table_on_mach_and_reports_the_rest():
+    """스케줄 축 제한 — 고도 변동이 지배적이어도 마하 표로 적합하고, 뺀 축은 보고에 남는다.
+
+    기체 문서(law.gain_tables)와 게인 탭은 마하 1축 표만 받는다. 제한 없이 지배 축을 고르면
+    고도 표가 나와 apply-gains가 422로 거부했다(실측: 고도 2개 설정에서 pitch.kp가 alt 표).
+    """
+    machs, alts = (0.3, 0.4, 0.5, 0.6), (500.0, 3000.0)
+    ps = _points_2d(machs, alts)
+    # 마하로 조금, 고도로 크게 변하는 합성 게인 — 제한이 없으면 지배 축은 alt다
+    samples = {case_name(m, a, 200.0): -1.0 - 1.0 * m - 0.0004 * a for a in alts for m in machs}
+    free = fit_slot("pitch.kp", samples, ps)
+    assert free["kind"] == "poly" and free["table"].axis_names == ("alt",)  # 종전 동작 그대로
+    assert "axes_excluded" not in free["report"]
+
+    out = fit_slot("pitch.kp", samples, ps, axes=("mach",))
+    assert out["kind"] == "poly" and out["table"].axis_names == ("mach",)
+    rep = out["report"]
+    assert rep["axis"] == "mach"
+    assert rep["axes_detected"] == ("mach", "alt")  # 변동 축은 전부 적는다
+    assert rep["axes_excluded"] == ("alt",)
+    # 같은 마하의 고도별 샘플은 평균으로 접힌다 — 뭉갠 고도 기여가 cross_axis_residual로 나온다
+    assert rep["cross_axis_residual"] == pytest.approx(0.0004 * 2500.0)
+    for m in machs:
+        mean = np.mean([samples[case_name(m, a, 200.0)] for a in alts])
+        assert out["table"].interp(mach=m) == pytest.approx(mean, abs=0.02 * rep["scale"])
+
+
+def test_sched_axis_restriction_folds_an_off_axis_only_slot_to_a_constant_with_a_note():
+    """변동이 제한 밖 축에만 있으면 상수로 접되, 조용히 뭉개지 않는다 — 잔차·뺀 축·사유."""
+    machs, alts = (0.3, 0.4, 0.5), (500.0, 3000.0)
+    ps = _points_2d(machs, alts)
+    samples = {case_name(m, a, 200.0): 0.5 + 0.0002 * a for a in alts for m in machs}
+    out = fit_slot("yaw.k_rate", samples, ps, axes=("mach",))
+    assert out["kind"] == "constant"
+    assert out["axes_excluded"] == ("alt",) and out["note"]
+    assert out["max_residual"] == pytest.approx(0.0002 * 2500.0 / 2)
+    # 제한 안에 변동이 없고 밖에도 없으면 종전 상수 그대로 — 보고 칸이 늘지 않는다
+    flat = {case_name(m, a, 200.0): 0.5 for a in alts for m in machs}
+    assert fit_slot("yaw.k_rate", flat, ps, axes=("mach",)) == fit_slot("yaw.k_rate", flat, ps)
+
+
+def test_fit_slots_passes_the_restriction_and_rejects_unknown_axes():
+    machs, alts = (0.3, 0.4, 0.5, 0.6), (500.0, 3000.0)
+    ps = _points_2d(machs, alts)
+    samples = {"pitch.kp": {case_name(m, a, 200.0): -1.0 - 1.0 * m - 0.0004 * a
+                            for a in alts for m in machs}}
+    out = fit_slots(samples, ps, axes=("mach",))
+    assert out["tables"]["pitch.kp"].axis_names == ("mach",)
+    for bad in ((), ("speed",), ("mach", "qbar")):
+        with pytest.raises(ValueError):
+            fit_slots(samples, ps, axes=bad)
+
+
+def test_sched_axis_restriction_is_orthogonal_to_the_table_mode():
+    """제한(어느 축으로 펴는가)과 표현(편 것을 어떻게 싣는가)은 직교한다 — 표 모드에서도 마하 표·같은 보고.
+
+    v1.47 표 모드가 기본이 된 뒤에도 문서가 받는 모양(마하 1축)은 그대로다. 표 모드는 뺀 축의 기여를
+    평균으로 접어 분할점에 싣고, 그 대가를 잔차·교차축·fit_quality로 낸다 — axes_detected는 다항과 같은
+    뜻(변동 축 전부)이고 뺀 축은 axes_excluded다.
+    """
+    machs, alts = (0.3, 0.4, 0.5, 0.6), (500.0, 3000.0)
+    ps = _points_2d(machs, alts)
+    samples = {case_name(m, a, 200.0): -1.0 - 1.0 * m - 0.0004 * a for a in alts for m in machs}
+    free = fit_slot("pitch.kp", samples, ps, mode="table")
+    assert free["kind"] == "table" and free["table"].axis_names == ("alt",)  # v1.47 지배 축 그대로
+    assert "axes_excluded" not in free["report"]
+
+    out = fit_slot("pitch.kp", samples, ps, mode="table", axes=("mach",))
+    assert out["kind"] == "table" and not isinstance(out["table"], PolyTable)
+    assert out["table"].axis_names == ("mach",)
+    rep = out["report"]
+    assert rep["axis"] == "mach" and rep["axes_detected"] == ("mach", "alt")
+    assert rep["axes_excluded"] == ("alt",)
+    # 분할점 값 = 같은 마하의 고도별 샘플 평균 (적합 없음), 잔차 = 벌어진 폭의 절반
+    for m, v in zip(machs, out["table"].data):
+        assert v == pytest.approx(np.mean([samples[case_name(m, a, 200.0)] for a in alts]))
+    assert rep["cross_axis_residual"] == pytest.approx(0.0004 * 2500.0)
+    assert rep["max_residual"] == pytest.approx(0.0004 * 2500.0 / 2)
+    assert fit_quality(rep)["cross_axis_frac"] == pytest.approx(1.0 / rep["scale"])
+
+    # 제한 밖에만 변동 → 표현과 무관하게 같은 상수(사유 포함)
+    off = {case_name(m, a, 200.0): 0.5 + 0.0002 * a for a in alts for m in machs}
+    assert fit_slot("yaw.k_rate", off, ps, mode="table", axes=("mach",)) == \
+        fit_slot("yaw.k_rate", off, ps, mode="poly", axes=("mach",))
+    out2 = fit_slots({"pitch.kp": samples}, ps, mode="table", axes=("mach",))
+    assert out2["tables"]["pitch.kp"].axis_names == ("mach",)
+    assert out2["reports"]["pitch.kp"]["axes_excluded"] == ("alt",)
+
+
+def _failed_zero_samples():
+    """쇼케이스 기체 표 모드 실측의 모양 — 롤 댐퍼 표본이 음수로 매끄럽다가 튜닝 실패 한 점만 자리값 0."""
+    machs = (0.100, 0.1039, 0.1077, 0.1116, 0.1154)
+    ps = _points_1d(machs)
+    names = [case_name(m, 1000.0, 200.0) for m in machs]
+    k_rate = dict(zip(names, (-0.52, -0.50, 0.0, -0.46, -0.44)))
+    kp = dict(zip(names, (2.15, 2.07, 0.32, 1.93, 1.86)))  # 0 댐퍼 위에서 튜닝된 자세 게인
+    bad = names[2]
+    exclude = {"roll.k_rate": {bad: {"loop": "roll_rate", "reason": "sign_mismatch", "basis": "own"}},
+               "roll.kp": {bad: {"loop": "roll_rate", "reason": "sign_mismatch", "basis": "rate_loop"}}}
+    return ps, machs, names, {"roll.k_rate": k_rate, "roll.kp": kp}, exclude
+
+
+@pytest.mark.parametrize("mode", ["table", "poly"])
+def test_failed_tuning_samples_are_excluded_from_the_fit(mode):
+    """튜닝이 성립하지 않은 표본은 적합에 들어가지 않는다 — 표에 자리값 0이 박히지 않는다.
+
+    실패한 튜닝은 "그 점의 게인이 0"이 아니라 "게인을 못 찾았다"다. 표 모드는 표본을 그대로 분할점에
+    놓으므로 종전에는 roll.k_rate가 그 점에서 정확히 0이었고(부호가 섞인 표), 그 위에서 튜닝된 roll.kp가
+    이웃의 1/6로 튀었다. 뺀 점의 게인은 이웃 보간이 되고, 뺀 사실은 값·사유와 함께 보고에 남는다."""
+    ps, machs, names, samples, exclude = _failed_zero_samples()
+    out = fit_slots(samples, ps, mode=mode, exclude=exclude)
+    for slot, want in (("roll.k_rate", -0.48), ("roll.kp", 2.0)):
+        tab = out["tables"][slot]
+        got = tab.interp(mach=machs[2])
+        assert got == pytest.approx(want, rel=0.02), f"{slot}: 실패 표본이 적합에 들어갔다 ({got})"
+        rep = out["reports"][slot]
+        assert [r["point"] for r in rep["excluded_samples"]] == [names[2]]
+        row = rep["excluded_samples"][0]
+        assert row["value"] == samples[slot][names[2]]
+        assert row["reason"] == "sign_mismatch" and row["loop"] == "roll_rate"
+        assert "exclusion_withheld" not in rep
+    assert out["reports"]["roll.k_rate"]["excluded_samples"][0]["basis"] == "own"
+    assert out["reports"]["roll.kp"]["excluded_samples"][0]["basis"] == "rate_loop"
+    if mode == "table":
+        # 분할점에서 빠진다 — 표가 담은 것은 튜닝이 성립한 표본뿐이다
+        assert list(out["tables"]["roll.k_rate"].axes[0]) == [machs[i] for i in (0, 1, 3, 4)]
+        assert np.all(out["tables"]["roll.k_rate"].data < 0.0)
+    # 제외 목록이 없는 자리·exclude 생략은 종전과 같다
+    plain = fit_slots(samples, ps, mode=mode)
+    assert "excluded_samples" not in plain["reports"]["roll.k_rate"]
+    assert plain["tables"]["roll.k_rate"].interp(mach=machs[2]) != pytest.approx(-0.48, rel=0.02)
+
+
+def test_exclusion_is_withheld_when_fewer_than_two_samples_would_remain():
+    """표본이 2개 미만으로 남으면 빼지 않는다(표가 안 선다) — 대신 보류 사실을 보고한다."""
+    ps, machs, names, samples, _ = _failed_zero_samples()
+    reason = {"loop": "roll_rate", "reason": "no_stable_gain", "basis": "own"}
+    exclude = {"roll.k_rate": {n: reason for n in names[:4]}}  # 5개 중 4개 실패 → 1개만 남는다
+    out = fit_slots({"roll.k_rate": samples["roll.k_rate"]}, ps, mode="table", exclude=exclude)
+    rep = out["reports"]["roll.k_rate"]
+    assert "excluded_samples" not in rep
+    held = rep["exclusion_withheld"]
+    assert held["kept_would_be"] == 1 and held["min_kept"] == 2
+    assert [r["point"] for r in held["samples"]] == sorted(names[:4])
+    assert len(out["tables"]["roll.k_rate"].axes[0]) == 5  # 보류 — 표본 전부로 섰다
+    # 딱 2개가 남으면 뺀다
+    exclude2 = {"roll.k_rate": {n: reason for n in names[:3]}}
+    rep2 = fit_slots({"roll.k_rate": samples["roll.k_rate"]}, ps, mode="table",
+                     exclude=exclude2)["reports"]["roll.k_rate"]
+    assert len(rep2["excluded_samples"]) == 3 and "exclusion_withheld" not in rep2

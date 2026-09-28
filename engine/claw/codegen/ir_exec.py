@@ -17,12 +17,15 @@
 
 import math
 
-from claw.codegen.blockspec import CALL_STYLE, SEQ_INPUT, set_state
+from claw.codegen.blockspec import CALL_STYLE, RESYNC, SEQ_INPUT, resync_state, set_state
 from claw.codegen.ir import OPS
 
 # 순수 연산의 Python 구현. C 구현은 emit_c.py가 갖는다 (원시 블록과 같은 취급 —
 # 집합이 고정·유한하고 대조 테스트로 못박는다). 연산 순서는 원본 자구 그대로:
-# autopilot.py:161·170의 `1.0 / math.cos(φ) - 1.0`, `1.0 / math.cos(φ) ** 2 - 1.0`
+# autopilot.py:161의 `1.0 / math.cos(φ) - 1.0`. 제곱은 `**`(= libm pow)가 아니라 곱 `c·c`다 — pow는 정확
+# 반올림 보장이 없고(macOS libm: cos 0.0822 rad의 제곱이 c·c와 1 ulp 다르다), 생성 C를 -O2로 빌드하면 컴파일러가
+# `pow(x, 2.0)`을 `x*x`로 접어 **빌드마다** 답이 갈렸다(-O0 = Python, -O2 ≠ Python — 검증 탭 커버리지 세트가 잡았다).
+# 곱 하나는 IEEE가 정확 반올림을 보장하니 최적화 수준·libm과 무관하게 두 백엔드가 같다
 _OP_FN = {
     "wrap_pi": lambda a: -((-a + math.pi) % (2.0 * math.pi) - math.pi),
     "min2": lambda a, b: min(a, b),
@@ -31,7 +34,7 @@ _OP_FN = {
     "add_param": lambda a, c: a + c,  # 값이 이미지에 사는 것만 다르다 (emit_c)
     "switch_param": lambda a, b, c: a if c != 0.0 else b,  # C 3항과 같은 판정 (emit_c)
     "sec_minus_1": lambda a: 1.0 / math.cos(a) - 1.0,
-    "sec2_minus_1": lambda a: 1.0 / math.cos(a) ** 2 - 1.0,
+    "sec2_minus_1": lambda a: 1.0 / (math.cos(a) * math.cos(a)) - 1.0,
 }
 assert set(_OP_FN) == set(OPS), "OPS와 Python 구현 목록이 어긋남"
 
@@ -61,6 +64,10 @@ def execute_node(instances, env, node) -> None:
         return
     inst = instances[node.id]
     args = [env[r] for r in node.inputs]
+    if node.resync:
+        # 추월 동기화 — 스텝 **전** 상태를 측정으로 되시드한다(의미론은 blockspec.resync_state).
+        # 영역 안 노드라면 여기까지 온 것이 곧 활성 스텝이다 — 비활성 스텝은 위에서 on_disable로 끝났다
+        resync_state(inst, *args)
     gains = {port: env[ref] for port, ref in node.gains.items()}
     style = CALL_STYLE.get(type(inst))
     if style == "positional":
@@ -87,6 +94,17 @@ class GraphRunner:
             for n in graph.nodes
             if n.kind == "block"
         }
+        # 추월 동기화는 RESYNC 표의 블록만 — 각도(wrap) 필터는 차를 래핑해야 해서 판정식이 달라 받지 않는다.
+        # 여기서 거부하지 않으면 모르는 블록의 resync가 스텝마다 KeyError로 늦게 터진다
+        for n in graph.nodes:
+            if n.resync:
+                inst = self.instances[n.id]
+                if type(inst) not in RESYNC or getattr(inst, "angle", False):
+                    raise ValueError(
+                        f"{graph.name}.{n.id}: resync 미지원 블록 {type(inst).__name__}"
+                        f"{' (angle=True)' if getattr(inst, 'angle', False) else ''} — "
+                        f"지원: {sorted(c.__name__ for c in RESYNC)} (각도 모드 제외)"
+                    )
         self._hold = dict.fromkeys(graph.outputs, 0.0)
         self.last_env = {}  # 직전 스텝 중간 노드 값 (계측 전용 — step_all이 채운다)
 

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { STORAGE_KEY, currentSelection, setSelection } from "../lib/profile.js";
-import { reconcile, restoredNotice, selectedDocument, switchTo } from "./profilepick.js";
+import { reconcile, restoredNotice, selectedDocument, switchSelection, switchTo } from "./profilepick.js";
 
 const memStorage = () => {
   const m = new Map();
@@ -39,6 +39,33 @@ test("전환 — 같은 선택은 그대로, 취소는 저장하지 않고, 저�
     const noAsk = () => { throw new Error("같은 선택에 묻지 않는다"); };
     assert.deepEqual(switchTo({ id: "heavy", variant: "v" }, { storage: st, confirmFn: noAsk, reload }), { ok: true, reason: null });
     assert.equal(reloads, 1);
+  } finally {
+    setSelection(null);
+  }
+});
+
+test("묻지 않는 전환(쇼케이스) — 같은 형식으로 저장하고, 같은 선택이어도 다시 읽고, 저장이 안 되면 멈춘다", () => {
+  let reloads = 0;
+  const reload = () => { reloads += 1; };
+  try {
+    const st = memStorage();
+    assert.deepEqual(switchSelection("showcase-delta", null, { storage: st, reload }), { ok: true, reason: null });
+    assert.deepEqual(JSON.parse(st.m.get(STORAGE_KEY)), { id: "showcase-delta", variant: null });
+    assert.equal(reloads, 1);
+    // 같은 선택 — 방금 설치·초기화한 문서를 모든 탭이 새로 받게 다시 읽는다
+    setSelection({ id: "showcase-delta" });
+    assert.equal(switchSelection("showcase-delta", null, { storage: st, reload }).ok, true);
+    assert.equal(reloads, 2);
+    assert.equal(switchSelection("showcase-delta", "eoir", { storage: st, reload }).ok, true);
+    assert.deepEqual(JSON.parse(st.m.get(STORAGE_KEY)), { id: "showcase-delta", variant: "eoir" });
+    assert.equal(reloads, 3);
+    // 틀린 id·형상 변형 — 기본 형상으로 조용히 바꾸지 않는다
+    assert.equal(switchSelection("../x", null, { storage: st, reload }).ok, false);
+    assert.equal(switchSelection("showcase-delta", "a/b", { storage: st, reload }).ok, false);
+    const broken = { setItem() { throw new Error("QuotaExceededError"); } };
+    assert.match(switchSelection("showcase-delta", null, { storage: broken, reload }).reason, /저장소/);
+    assert.equal(switchSelection("showcase-delta", null, { storage: null, reload }).ok, false);
+    assert.equal(reloads, 3, "틀렸거나 저장 못 한 전환은 다시 읽지 않는다");
   } finally {
     setSelection(null);
   }

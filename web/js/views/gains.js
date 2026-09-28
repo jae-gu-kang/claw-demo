@@ -20,24 +20,34 @@ lib/gainsched.js. 검증(그룹·키·형상·유한성)은 제출 시 서버/�
 한다 — 같은 게인이 화면마다 다르면 "지금 형상"이라는 말이 성립하지 않는다.
 켜고 끌 때도 값이 이어진다: 켜면 그 상수에서 출발하는 표가 서고, 끄면 그 표의
 설계점 값으로 굳는다 (lib/gainsync.js — 스케일 규칙은 서버 제안 표에서 온다).
+
+쇼케이스 진행기 신호(lib/showcasecue.js): overview() — 카탈로그를 다시 받아 곡선·확정 표 배너 ·
+evaluate() — [지표 재계산 (선형)]과 같은 길 · fault({path, factor}) — 그 자리의 전 스케줄 점에 배율을
+곱해 [시뮬·코드에 적용]과 같은 길로 작업 사본에 싣는다 · restore() — 작업 사본을 버리고 [설계값 다시
+불러오기]로 되돌린다.
 */
 
-import { api, errorText, watchJob } from "../api.js";
+import { ApiError, api, errorText, watchJob } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
-import {
-  checksSummary, evaluateRequest, normalizeEvalReport,
-} from "../lib/evaluate.js";
+import { evaluateRequest, normalizeEvalReport } from "../lib/evaluate.js";
 import { defaultGridCases } from "../lib/grid.js";
 import { selectedDefaults } from "./missionfill.js";
 import { DOC_FAILED_HINT, MISSING_TEMPLATE_HINT } from "../lib/missiontemplate.js";
 import {
-  GAIN_KEYS, alignTables, appliedTables, defaultSelection, schedSummary, slotRows,
-  storePayload, toggleSlot, zeroTables,
+  GAIN_KEYS, alignTables, appliedTables, axisMismatch, axisMismatchText, defaultSelection, evalStripLine,
+  schedSummary, scheduleKnees, slotRows, storePayload, toggleSlot, zeroTables,
 } from "../lib/gainsched.js";
 import {
-  constantOf, designCoord, foldToConstant, seedTable, selectedSlots, slotIndex,
-  withConstant,
+  constantOf, designCoord, dropWorkingCopy, faultSlot, faultSummary, foldToConstant, seedTable, selectedSlots,
+  slotIndex, withConstant, workingCopyLine,
 } from "../lib/gainsync.js";
+import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
+import { gainTablesStatus } from "../lib/quickseed.js";
+import { effectiveOf } from "../lib/profileform.js";
+import { josaOf } from "../lib/josa.js";
+import { revealPanel } from "../lib/reveal.js";
+import { haltReason } from "../lib/showcase.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { gainPlotGroups } from "../lib/plot.js";
 import { piecewisePolyfit, rawCoeffs, sampleFit } from "../lib/polyfit.js";
 import { store } from "../store.js";
@@ -45,6 +55,9 @@ import { renderEvalCards } from "./evalcards.js";
 import { errorWithSeedLink } from "./seedlink.js";
 import { lineChartCanvas } from "./plots.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
+
+// 신호 실패 사유 — 서버 오류는 errorText(422 배열·엔진 detail을 사람 글로), 그 밖은 메시지만("Error: " 접두 없이)
+const cueReason = (e) => (e instanceof ApiError ? errorText(e) : (e?.message ?? String(e)));
 
 let catalog = null; // GET /gains/catalog — 자리 목록·설계 상수·제안 테이블
 let selected = []; // 켠 자리 이름 (카탈로그 기본 = 서버가 지금 스케줄하는 6자리)
@@ -65,10 +78,12 @@ let seenAp;
 // 테이블과 함께 '적용'에서 커밋한다 (여기만 즉시 반영되면 적용 전후가 갈린다)
 let constants = null;
 
-// 근사 곡선 설정 — 탭 이탈·재로드에도 유지 (경계 "0.3"은 **롤**의 동압 스케일
-// 상한 클립 경계와 일치하는 시연 기본값 — 상한이 축별이라 피치는 M0.424다.
-// 균일 상한 시절에는 어느 축과도 안 맞았다. 검증은 piecewisePolyfit이 수행)
-const fitCfg = { show: true, degree: 3, boundaries: "0.3", detailsOpen: false };
+// 근사 곡선 설정 — 탭 이탈·재로드에도 유지. 경계는 null(아직 안 정함)로 시작해 **첫 카탈로그의 스케줄 표**에서
+// 정한다 — 상한 클립이 풀리는 격자점들(lib/gainsched scheduleKnees). 종전 "0.3"은 1200 kg 기체 롤 상한의 꺾임이라
+// 다른 기체에서는 뜻 없는 자리였다. 기체를 바꾸면 페이지를 다시 읽으므로 기체마다 새로 정해진다.
+// 검증은 piecewisePolyfit이 수행
+const fitCfg = { show: true, degree: 3, boundaries: null, detailsOpen: false };
+const EVAL_DEPTHS = ["linear", "full"];
 
 // 지표 카드(평가 어휘·값은 서버 정본) — 마지막 계산 결과와 신선도.
 // 편집이 생기면 **stale 배지만** 켠다: 자동 재계산은 없다(서버 왕복 비용 — 버튼이
@@ -100,7 +115,7 @@ export function render() {
   // ── 튜닝 지표 카드 (평가와 같은 카드, views/evalcards.js 공용) ──────
   const stripStatus = el("span", { class: "hint" });
   const stripCards = el("div", { style: "margin-top:8px" });
-  selectedDefaults().then((d) => {
+  const gridReady = selectedDefaults().then((d) => {
     templateGrid = d?.grid ?? null;
     templateNote = !d ? DOC_FAILED_HINT : d.hasTemplate ? "" : MISSING_TEMPLATE_HINT;
     if (!evalStrip.status) paintStrip(); // 아직 안 잰 상태의 케이스 수가 그 격자를 말하게
@@ -125,17 +140,13 @@ export function render() {
     const m = evalStrip.result;
     if (!m) return;
     renderEvalCards(stripCards, m.cards);
-    const agg = m.aggregate;
     stripCards.append(el("p", { class: "hint", style: "margin:8px 0 0" },
-      (agg?.hard_fail == null ? "하드 게이트 판정 보류(케이스 0건)"
-        : agg.hard_fail ? `하드 게이트 위반 ${agg.hard_fails.length}건 — Fail`
-        : "하드 게이트 전부 통과")
-      + ` · ${checksSummary(m.checks)} · depth=${m.depth}`
-      + " · 상세는 영향성 탭 「평가」 패널"));
+      `${evalStripLine(m)} · 상세는 영향성 탭 「평가」 패널`));
   }
 
-  async function runGainEval(depth) {
-    if (!catalog) return;
+  // 평가 한 번 — {resultId, model} 또는 {error}. cue가 오면 잡을 건 순간 started를 알린다(진행기 [중단]용)
+  async function runGainEval(depth, cue = null) {
+    if (!catalog) return { error: "게인 카탈로그가 아직 없다 — 불러온 뒤 다시 잰다" };
     const cases = defaultGridCases(templateGrid ?? undefined);
     evalStrip = { status: `제출 중 — 케이스 ${cases.length}건`, result: null,
                   error: null, stale: false, depth };
@@ -143,6 +154,7 @@ export function render() {
     try {
       const job = await api.post("/influence/evaluate",
         evaluateRequest(editedShapeState(), { cases, depth }));
+      if (cue) reportCue(cue, { phase: "started", jobId: job.id });
       const done = await watchJob(job.id, (j) => {
         evalStrip.status = `${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`;
         // 진행 중엔 상태 한 줄만 — 카드를 다시 세우면 버튼 포커스가 들려 나간다
@@ -152,16 +164,18 @@ export function render() {
         evalStrip.status = `평가 ${done.status}`;
         evalStrip.error = done.error ?? null;
         paintStrip();
-        return;
+        return { error: `평가 ${done.status}${done.error ? ` — ${done.error}` : ""}` };
       }
       const res = await api.get(`/results/${done.result_id}`);
       evalStrip.status = "완료";
       evalStrip.result = normalizeEvalReport(res);
       paintStrip();
+      return { resultId: done.result_id, model: evalStrip.result };
     } catch (e) {
       evalStrip.status = "실패";
       evalStrip.error = errorText(e);
       paintStrip();
+      return { error: cueReason(e) };
     }
   }
 
@@ -207,10 +221,33 @@ export function render() {
 
   // 문서에 확정 게인 표가 있으면(자동 설계 반영, v2) 조립 정본은 이 화면의 규칙 표가 아니라 그
   // 표다 — 그 사실과 낡음을 여기서 말한다. 판정(stale)은 서버 응답이 동봉한다(재기술 없음)
+  let confirmedSeq = 0; // 늦게 온 목록 응답이 다시 그린 배너 위에 덧쓰지 않게
+  // 아래 「규칙 스케줄」 판정(gainTablesStatus 결과, 아니면 null) — 진행기 overview 보고가 **이 판정을 그대로** 읽는다.
+  // 보고가 따로 판정하면 같은 화면에서 배너는 규칙 스케줄을, 보고는 「확정 게인 표 없음」을 말했다(EO/IR형)
+  let confirmedRule = Promise.resolve(null);
   const paintConfirmed = () => {
     const c = catalog?.confirmed;
     clear(confirmedBox);
-    if (!c) return;
+    const seq = ++confirmedSeq;
+    confirmedRule = Promise.resolve(null);
+    if (!c) {
+      // 카탈로그는 고른 형상 변형을 적용한 문서에서 온다 — 기본형엔 확정 표가 있는데 변형 패치가 비웠으면(EO/IR형)
+      // 그 형상은 규칙 스케줄로 난다. 빈 배너는 「이 기체엔 확정 표가 없다」로 읽히므로 그 사실을 말한다.
+      // 판정은 서버 목록 요약(변형별 출처, 없으면 카탈로그가 말한 「변형 문서에 표 없음」) — lib/quickseed
+      const sel = currentSelection();
+      if (!sel?.variant) return;
+      confirmedRule = api.get("/profiles").then((rows) => {
+        const row = Array.isArray(rows) ? rows.find((r) => r?.id === sel.id) : null;
+        const st = gainTablesStatus(row, { variant: sel.variant, effectiveTables: null });
+        if (st.kind !== "rule") return null; // 기본형에도 표가 없다 — 종전처럼 말하지 않는다
+        if (seq === confirmedSeq) {
+          confirmedBox.append(el("p", { class: "hint", style: "margin:4px 0 0" },
+            `${st.label}. 이 화면의 규칙 표가 곧 시뮬·코드의 조립 정본입니다.`));
+        }
+        return st;
+      }).catch(() => null); // 목록을 못 받으면 배너 없이(종전) — 곡선·표는 이미 섰다
+      return;
+    }
     confirmedBox.append(el("p", { class: c.stale ? "error-box" : "hint", style: "margin:4px 0 0" },
       c.stale
         ? "문서의 확정 게인 표가 낡았습니다 — 반영한 뒤 문서가 바뀌어 시뮬·코드 조립이 거부합니다. "
@@ -219,6 +256,7 @@ export function render() {
           + "조립됩니다. 이 화면의 편집을 [시뮬·코드에 적용]하면 작업본이 그 표를 덮습니다."));
   };
 
+  // 카탈로그 받기 — 섰으면 null, 못 섰으면 그 오류(화면에는 이미 적었다)
   const load = async ({ fresh = false } = {}) => {
     try {
       clear(errBox);
@@ -227,6 +265,10 @@ export function render() {
       // 갈아끼운 뒤에도 기준이 흔들리지 않게 (lib/gainsync designCoord)
       catalog.design_coord = designCoord(catalog);
       selected = defaultSelection(catalog);
+      // 근사 경계는 처음 한 번 — 문서 스케줄 표(되읽기 전의 규칙 표)의 상한 꺾임에서
+      if (fitCfg.boundaries == null) {
+        fitCfg.boundaries = scheduleKnees(appliedTables(catalog, selected), catalog.axis).join(", ");
+      }
       adopted = fresh ? null : adoptStored();
       if (fresh) markSeen();
       syncFromStore({ force: fresh });
@@ -235,9 +277,11 @@ export function render() {
       statusLine.textContent = fresh
         ? "서버 설계 제안으로 되돌렸습니다 (미적용) — '시뮬·코드에 적용'을 눌러야 형상이 바뀝니다."
         : adoptedText(adopted);
+      return null;
     } catch (e) {
       // 게인 미설계·스케줄 없는 기체면 오류 문구(엔진 detail) 아래에 채우러 가는 길이 선다 — seedlink.js
       clear(errBox).append(...errorWithSeedLink(e, "이 탭이 섭니다."));
+      return e;
     }
   };
 
@@ -289,6 +333,16 @@ export function render() {
     ],
   });
 
+  const evalSheet = el("div", { class: "tab-sheet" },
+    el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
+      el("strong", {}, "튜닝 지표 — 대표 카드"),
+      el("button", { class: "primary", onclick: () => runGainEval("linear") },
+        "지표 재계산 (선형 — 수 초)"),
+      el("button", { onclick: () => runGainEval("full"),
+                     title: "표준 기동 + 동시명령 런 포함 — 케이스당 수십 초" },
+        "정밀 (단계 2)"),
+      stripStatus),
+    stripCards);
   const root = el("div", { class: "tab-page" },
     tabTop({
       title: "게인",
@@ -305,16 +359,7 @@ export function render() {
     }),
     // 튜닝 지표 카드 — 게인을 만지는 화면에 상시로 서는 카드 표면(값·기준·최악
     // 운용점). 계산은 버튼 트리거(비용)고, 편집이 생기면 stale 배지가 먼저 말한다
-    el("div", { class: "tab-sheet" },
-      el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
-        el("strong", {}, "튜닝 지표 — 대표 카드"),
-        el("button", { class: "primary", onclick: () => runGainEval("linear") },
-          "지표 재계산 (선형 — 수 초)"),
-        el("button", { onclick: () => runGainEval("full"),
-                       title: "표준 기동 + 동시명령 런 포함 — 케이스당 수십 초" },
-          "정밀 (단계 2)"),
-        stripStatus),
-      stripCards),
+    evalSheet,
     // 곡선은 카드 밖(자기 테두리를 갖는 캔버스). 그 바로 아래에 자리·근사 설정 패널,
     // 그다음 근사식 계수 — 설정을 바꾸면서 위(곡선)와 아래(계수·잔차·경계 점프)를
     // 한눈에 확인하게 한다(사용자 지적 — 종전엔 패널이 맨 아래라 스크롤을 오갔다).
@@ -325,24 +370,128 @@ export function render() {
     slots.table,
   );
 
-  if (catalog) {
-    // 재진입 — 카탈로그는 캐시지만 상수도, **적용된 형상도** 그 사이 바뀌었을 수 있다
-    // (자동 설계 탭의 '게인 확정'이 그 경로다). 밖에서 바뀐 경우에만 되읽어
-    // 미적용 편집 드래프트를 지키면서 확정본을 놓치지 않는다
-    if (storeChanged()) {
-      selected = defaultSelection(catalog);
-      adopted = adoptStored();
-      statusLine.textContent = adoptedText(adopted);
-    }
+  let loading = null; // 이번 그리기가 건 카탈로그 받기 — 신호가 그 끝을 기다린다
+  if (catalog && !storeChanged()) {
+    // 재진입 — 적용된 형상이 그대로면 캐시 카탈로그 위의 미적용 편집 드래프트를 지킨다
     syncFromStore();
     renderTables(slots, statusLine);
   } else {
+    // 처음이거나, 적용된 형상이 밖에서 바뀌었다(자동 설계 '게인 확정'·영향성 [적용]·쇼케이스 [■ 중단]의 복원).
+    // 카탈로그를 새로 받아 되읽는다 — 캐시의 자리 표는 앞선 되읽기·결함 주입이 덮어쓴 값이라, 그 위에 되읽으면
+    // 새 작업 사본에 없는 자리가 옛 값을 들고 선다(작업 사본을 비웠으면 결함 표가 미적용 편집처럼 남는다)
     clear(slots.chart).append(el("p", { class: "hint" }, "게인 카탈로그를 불러오는 중…"));
-    load();
+    loading = load();
   }
   gainsDrawers = drawers;
   drawers.refresh();
   paintStrip();  // 재진입 — 모듈 스코프 결과·stale 상태 복원
+
+  // ── 쇼케이스 신호 ──────────────────────────────────────────────────
+  // 카탈로그는 이번 그리기가 받은 것이 아니면 다시 받는다 — 앞선 방문 뒤에 문서가 바뀌었을 수 있다
+  // (자동 설계 [문서에 반영]이 확정 표 배너를 바꾼다). 받기는 [설계값 다시 불러오기]가 아닌 재진입 경로라
+  // 적용해 둔 작업 사본(스토어)을 되읽는다
+  const freshCatalog = async () => {
+    const err = await (loading ?? load());
+    if (err) throw err;
+  };
+
+  // 결함 주입의 기준 형상 — 계산이 **지금 실제로 쓰는** 형상이어야 결함만이 차이가 된다. 작업 사본(스토어)이
+  // 있으면 그것(영향성·시뮬이 싣는 그 값), 없으면 문서 조립 정본 — 확정 게인 표가 있으면 그 표, 없으면 규칙 표.
+  // 이 화면은 기본으로 규칙 표를 보여 주므로(배너가 말하는 차이) 확정 표는 여기서 명시로 세운다
+  const faultBase = async () => {
+    if (store.get("gainTables") != null || store.get("gainScheduleOff") === true) {
+      if (adopted?.error) throw new Error(`작업 사본을 이 화면에 세우지 못해 결함을 넣을 수 없다 — ${adopted.error}`);
+      return "작업 사본";
+    }
+    const conf = catalog.confirmed;
+    if (!conf) return "문서 규칙 표";
+    if (conf.stale) {
+      throw new Error("문서의 확정 게인 표가 낡아 조립이 거부한다 — 결함 기준이 될 수 없다. "
+        + "자동 설계를 다시 돌려 반영한다");
+    }
+    const sel = currentSelection();
+    const body = await api.get(`/profiles/${encodeURIComponent(sel?.id ?? EXAMPLE_ID)}`);
+    // 카탈로그(confirmed)는 고른 형상 변형을 적용한 문서에서 온다 — 기준도 같은 문서에서 읽는다
+    const docTables = effectiveOf(body?.document, sel?.variant ?? null)?.law?.gain_tables?.tables;
+    if (!docTables) throw new Error("카탈로그는 확정 게인 표가 있다는데 문서에 없다 — 기체 탭에서 새로고침한다");
+    adopted = adoptTables(docTables, false, { kind: "document" });
+    if (adopted.error) throw new Error(`문서 확정 게인 표를 세우지 못했다 — ${adopted.error}`);
+    return "문서 확정 게인 표";
+  };
+
+  const handleCue = async (c) => {
+    try {
+      if (c.action === "overview") {
+        await freshCatalog();
+        const conf = catalog.confirmed;
+        // 확정 표가 없으면 배너의 판정 그대로 — 변형이 규칙 스케줄로 나면 그 문구(목록을 못 받으면 종전 「없음」).
+        // freshCatalog가 끝났으면 이 카탈로그로 배너를 그린 뒤다(load → paintConfirmed)
+        const rule = conf ? null : await confirmedRule;
+        revealPanel(root); // 머리(확정 표 배너)와 바로 아래 곡선을 화면 위로 (06 §2)
+        reportCue(c, {
+          phase: "done",
+          summary: `${schedSummary(catalog, selected)} · `
+            + (conf ? `문서 확정 게인 표 ${conf.slots.length}자리${conf.stale ? " (낡음)" : ""}`
+              : rule ? rule.label : "문서 확정 게인 표 없음"),
+          data: { gain_tables: conf != null, stale: conf?.stale === true, slots: selected.length,
+            rule_schedule: rule !== null },
+        });
+      } else if (c.action === "evaluate") {
+        await gridReady; // 고른 기체의 템플릿 격자로 잰다 — 폴백(예제 격자)으로 재지 않는다
+        const loadErr = loading ? await loading : null;
+        if (loadErr) throw loadErr; // 카탈로그를 못 받은 사유 그대로(게인 미설계 등) — 「아직 없다」로 뭉개지 않는다
+        if (!templateGrid) throw new Error(templateNote || "고른 기체의 미션 템플릿 격자를 받지 못했다");
+        const depth = c.args?.depth ?? "linear";
+        if (!EVAL_DEPTHS.includes(depth)) throw new Error(`depth는 ${EVAL_DEPTHS.join("·")} 중 하나: ${depth}`);
+        const r = await runGainEval(depth, c);
+        if (r.error) throw new Error(r.error);
+        revealPanel(evalSheet); // 지표 카드가 사는 판을 화면 위로
+        reportCue(c, {
+          phase: "done", resultId: r.resultId, summary: evalStripLine(r.model),
+          data: { hard_fail: r.model.aggregate?.hard_fail ?? null, checks: r.model.checks },
+        });
+      } else if (c.action === "fault") {
+        const { path, factor } = c.args ?? {};
+        await freshCatalog();
+        const base = await faultBase();
+        // 받는 사이 진행기가 중단됐다 — 싣지 않는다(중단이 작업 사본을 문서 게인으로 되돌렸다, views/showcase.js).
+        // 여기부터 apply()까지는 await가 없어 확인과 쓰기 사이에 중단이 끼지 못한다
+        const stop = haltReason(store.get("showcaseBusy"));
+        if (stop) throw new Error(stop);
+        const r = faultSlot(catalog, { selected, constants }, path, factor);
+        if (r.scheduled) r.slot.table = r.table; // 켠 자리 — 표가 정본 (셀 편집과 같은 자리)
+        else constants = r.constants; // 끈 자리 — 상수가 정본 (자리 격자 입력과 같은 자리)
+        renderTables(slots, statusLine);
+        apply(); // [시뮬·코드에 적용]과 같은 길 — 스토어 작업 사본
+        markStale();
+        const line = faultSummary(r, factor);
+        statusLine.textContent = `결함 주입 적용됨 — ${line} (기준: ${base})`;
+        revealPanel(root); // 상태줄(결함 주입 적용됨)과 결함이 실린 곡선을 화면 위로
+        reportCue(c, {
+          phase: "done", summary: `${line} (기준: ${base})`,
+          data: { path, before: r.before, after: r.after, scheduled: r.scheduled, base },
+        });
+      } else if (c.action === "restore") {
+        if (loading) await loading;
+        // 작업 사본 전량을 비운다 — 표·스케줄 끔 신호·출처와, 끈 자리 상수(블록도 폼과 같은 스토어)까지.
+        // 비운 뒤의 계산은 서버가 문서 게인으로 조립한다(확정 표가 있으면 그 표). 진행기 [■ 중단]의 복원과
+        // 같은 함수다(lib/gainsync dropWorkingCopy — 키 목록을 여기 다시 적지 않는다)
+        const cleared = dropWorkingCopy(store);
+        const err = await load({ fresh: true });
+        if (err) throw err;
+        statusLine.textContent = "작업 사본을 버렸습니다 — 시뮬·코드·평가는 문서 게인으로 조립됩니다 "
+          + "(이 화면은 서버 설계 제안을 보여 줍니다).";
+        revealPanel(root);
+        reportCue(c, { phase: "done", summary: workingCopyLine(cleared), data: { cleared } });
+      } else {
+        unknownAction(c);
+      }
+    } catch (e) {
+      failCue(c, cueReason(e));
+    }
+  };
+  const cue = takeCue("gains");
+  if (cue) handleCue(cue);
   return root;
 }
 
@@ -376,8 +525,12 @@ function adoptStored() {
   const stored = store.get("gainTables");
   const off = store.get("gainScheduleOff") === true;
   markSeen();
+  return adoptTables(stored, off, store.get("gainTablesSource") ?? null);
+}
+
+/** 표 묶음을 편집 상태로 세운다 — 스토어 작업 사본(위)과 문서 확정 표(결함 주입 기준)가 같은 길을 쓴다. */
+function adoptTables(stored, off, source) {
   if (!stored && !off) return null;
-  const source = store.get("gainTablesSource") ?? null;
   selected = selectedSlots(catalog, stored, off);
   if (!stored) return { source, slots: 0, unknown: [], aligned: false };
 
@@ -389,8 +542,9 @@ function adoptStored() {
   }
   const al = alignTables(known, catalog.axis);
   if (!al) {
+    // 어느 자리가 어느 축인지 그대로 말한다 — 자동 설계가 고도 축으로 적합한 표가 여기 온다
     selected = defaultSelection(catalog);
-    return { source, error: `축 '${catalog.axis}'가 없는 표가 있어 되읽지 못했다`, unknown };
+    return { source, error: axisMismatchText(axisMismatch(known, catalog.axis), catalog.axis), unknown };
   }
   // 스토어 객체를 그대로 심으면 셀 편집이 '적용' 전에 다른 탭으로 새어 나간다
   for (const [name, t] of Object.entries(al.tables)) {
@@ -405,12 +559,14 @@ function adoptStored() {
 
 function adoptedText(a) {
   if (!a) return "";
-  const src = a.source?.kind === "autodesign"
-    ? `자동 설계 확정본${a.source.resultId ? ` (${a.source.resultId})` : ""}`
-    : "적용해 둔 형상";
-  if (a.error) return `${src}을 되읽지 못했습니다 — ${a.error}. 서버 제안을 표시합니다.`;
+  // 조사는 이름(괄호 덧붙임 앞)의 받침으로 — 「문서의 확정 게인 표을」이 찍혔다
+  const name = a.source?.kind === "autodesign" ? "자동 설계 확정본"
+    : a.source?.kind === "document" ? "문서의 확정 게인 표" : "적용해 둔 형상";
+  const src = `${name}${a.source?.kind === "autodesign" && a.source.resultId ? ` (${a.source.resultId})` : ""}`;
+  const obj = `${src}${josaOf(name, "을/를")}`;
+  if (a.error) return `${obj} 되읽지 못했습니다 — ${a.error}. 서버 제안을 표시합니다.`;
   if (!a.slots) return `${src} — 스케줄 없는 형상이 적용돼 있습니다 (전 자리 설계점 고정).`;
-  let out = `${src}을 되읽었습니다 — ${a.slots}자리`;
+  let out = `${obj} 되읽었습니다 — ${a.slots}자리`;
   if (a.aligned) {
     out += ` · 자리마다 다른 breakpoint를 합집합 ${a.points}점으로 정렬해 표시`
       + " (구간 선형 보간 결과는 그대로)";
@@ -505,7 +661,7 @@ function slotGrid(slots, statusLine) {
 
 /** 전 게인 구간별 회귀 — 실패 시 {error} (첫 실패에서 중단, 조건은 전 게인 공통). */
 function computeFits(groups) {
-  const items = fitCfg.boundaries.split(",").map((s) => s.trim()).filter((s) => s !== "");
+  const items = (fitCfg.boundaries ?? "").split(",").map((s) => s.trim()).filter((s) => s !== "");
   const values = items.map(Number);
   const bad = items.filter((_, i) => !Number.isFinite(values[i]));
   if (bad.length) return { error: `경계 형식 오류: ${bad.join(", ")}` };
@@ -614,7 +770,7 @@ function renderTables(slots, statusLine) {
     clear(slots.fit).append(el("p", { class: "hint" },
       "축이 어긋나 곡선을 세우지 못했습니다 — 아래 사유를 먼저 해결하세요."));
     clear(slots.table).append(el("p", { class: "error-box" },
-      `축 '${catalog.axis}'가 없는 표가 섞여 있어 편집 표를 세울 수 없습니다.`));
+      `편집 표를 세울 수 없습니다 — ${axisMismatchText(axisMismatch(tables, catalog.axis), catalog.axis)}.`));
     return;
   }
   if (aligned.aligned) {
@@ -649,9 +805,10 @@ function renderTables(slots, statusLine) {
         onchange: (ev) => { fitCfg.show = ev.target.checked; redraw(); },
       }),
       " 근사 곡선(점선) 표시"),
-    el("label", {}, "구간 경계 (마하, 쉼표 구분) ",
+    el("label", { title: "처음 값은 문서 스케줄 표의 상한 클립이 풀리는 격자점(꺾임) — 비우면 한 구간" },
+      "구간 경계 (마하, 쉼표 구분) ",
       el("input", {
-        class: "num-sm", type: "text", value: fitCfg.boundaries,
+        class: "num-sm", type: "text", value: fitCfg.boundaries ?? "",
         onchange: (ev) => { fitCfg.boundaries = ev.target.value; redraw(); },
       })),
     el("label", {}, "차수 ",

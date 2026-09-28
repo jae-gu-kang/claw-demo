@@ -34,10 +34,22 @@ export function basisHead(body) {
   };
 }
 
-/** 레이트 자리 줄 — body.order 순서. 판정 불리언은 엔진 것 그대로다. */
+// 엔진 지표 키 → 화면 기호 — 목표 줄(「목표(응답 동봉): ζ_sp · ζ_dr · λ_roll」)과 같은 표기
+const METRIC_LABEL = { zeta_sp: "ζ_sp", zeta_dr: "ζ_dr", roll_lambda: "λ_roll" };
+
+/** 지표 키 → 기호. 모르는 키는 그대로(엔진이 지표를 더해도 글이 사라지지 않게), 없으면 "—". */
+export const metricLabel = (key) => (key == null ? "—" : METRIC_LABEL[key] ?? String(key));
+
+const finite = (v) => typeof v === "number" && Number.isFinite(v);
+
+/** 레이트 자리 줄 — body.order 순서. 판정 불리언은 엔진 것 그대로다. gap은 목표 대비 상대 차
+ *  (달성 − 목표)/목표 — 판정을 대신하지 않고, 근소 미달(−0.4 %)과 큰 미달(−30 %)을 가르는 수다.
+ *  못 잰 값·후보 없음·목표 0이면 null. */
 export function basisRates(body) {
   return (body?.order ?? []).map((name) => {
     const r = body.rates?.[name] ?? {};
+    const achieved = r.full?.achieved ?? null;
+    const target = r.target?.value ?? null;
     return {
       name,
       slot: r.slot ?? name,
@@ -46,8 +58,9 @@ export function basisRates(body) {
       note: r.candidate?.note ?? null,
       metric: r.target?.metric ?? null,
       target: r.target?.value ?? null,
-      achieved: r.full?.achieved ?? null,
+      achieved,
       achievedOk: r.full?.ok ?? null,
+      gap: r.candidate && finite(achieved) && finite(target) && target !== 0 ? (achieved - target) / target : null,
       stable: r.full?.stable ?? null,
       budget: r.budget ?? null,
       neighbors: (r.neighbors ?? []).map((n) => ({
@@ -57,6 +70,16 @@ export function basisRates(body) {
       reasonText: reasonLine(r),
     };
   });
+}
+
+/** 레이트 줄 하나의 달성 글 — 「ζ_sp 0.698/0.7 (−0.3 %)」. 판정 배지 옆·쇼케이스 보고에 같은 글을 쓴다.
+ *  후보가 없으면 null(잴 것이 없다), 못 잰 값이면 차 없이 「—/목표」. */
+export function achievedText(row) {
+  if (row?.k == null) return null;
+  const head = `${metricLabel(row.metric)} ${num(row.achieved)}/${num(row.target)}`;
+  if (row.gap == null) return head;
+  const pct = (row.gap * 100).toFixed(1);
+  return `${head} (${row.gap < 0 ? `−${pct.slice(1)}` : `+${pct}`} %)`;
 }
 
 /** 자세 PI 줄 — 튜너 루프쉐이핑 결과. passing은 엔진 판정 그대로다. */

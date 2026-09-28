@@ -402,6 +402,7 @@ def node_signature(node) -> tuple:
         _norm(getattr(node, "on_disable", {})),
         getattr(node, "disabled_output", 0.0),
         node.group,
+        getattr(node, "resync", False),  # 추월 동기화도 노드 의미론이다(codegen/ir.py Node.resync)
     )
 
 
@@ -717,8 +718,15 @@ METRICS = (
     MetricDef("rollout_dist", "접지→정지 직선거리", "m", ("pn", "pe", "wow"), "lower",
               "접지점과 정지점의 직선거리(경로장 아님) — 활주로 길이 요구의 근거. "
               "정지 전이면 없음", tier="C", group="임무·이착륙"),
-    MetricDef("launch_gx", "사출 하중", "g", ("launch_gx", "on_rail"), "lower",
-              "발사 레일 축 가속도 — 판정 기준(구조 한계 n_x_launch)은 아직 없다 [TBD]",
+    # 이 지표는 레일 축 **순가속도**(중력 성분 제외 — plant.ground.LaunchRail.launch_gx)이지 축방향
+    # 하중배수 n_x가 아니다. 그래서 이름도 「하중」이 아니라 「레일 가속」이다(웹 lib/replay.js launchGx와 같은
+    # 말). 구조 판정(n_x_launch 대조)은 웹 시뮬 탭 착륙 요약이 sin(앙각)을 더한 n_x = gx + sin γ로 한다
+    # (lib/replay.js launchLoad) — 앙각이 위면 n_x가 이 값보다 크므로, 이 값을 한계와 바로 견주면 낙관한다.
+    # 문자열은 서버 골든(profile_example/influence_structural.json)에 잡혀 있다 — 바꾸면 재캡처와 함께
+    MetricDef("launch_gx", "레일 가속", "g", ("launch_gx", "on_rail"), "lower",
+              "발사 레일 축 순가속도의 최대 — 중력 성분이 빠져 하중배수가 아니다. 종방향 발사하중 판정"
+              "(n_x = 레일 가속 + sin 앙각을 structural.n_x_launch와 대조)은 시뮬 탭 착륙 요약이 한다. "
+              "레일에 오른 적 없으면 없음",
               tier="C", group="임무·이착륙"),
 )
 

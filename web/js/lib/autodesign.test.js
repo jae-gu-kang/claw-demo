@@ -1,10 +1,22 @@
 /** autodesign 순수 로직 검증 — 설정 페이로드, 점·판정 결합, 처방 그룹, 게인 채택. */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  DEFAULT_FUEL_FRACS,
+  emptyResultNotice,
+  REASON_TEXT,
+  VERDICT_LABEL,
   actionCards,
+  actuatorLine,
+  applyGateReason,
+  approvedByDefault,
+  configFormValues,
+  designCueSummary,
+  fuelsPlaceholder,
+  mergeDesignConfig,
   adoptBlockedText,
   adoptStorePayload,
   adoptWarnText,
@@ -13,6 +25,10 @@ import {
   coverageLines,
   effectText,
   evidenceLines,
+  excludedSamplesModel,
+  failureRoleText,
+  fitFactsModel,
+  fitModeLabel,
   fitQualityLines,
   ledgerActionText,
   ledgerKindText,
@@ -33,6 +49,7 @@ import {
   trimLabel,
   tunedLines,
   verdictLegend,
+  warnNoteText,
   worstStatus,
 } from "./autodesign.js";
 
@@ -345,7 +362,9 @@ test("reportLine — 신규 카운터와 건너뛴 점 이름", () => {
 
 test("reasonText — 서버 맵이 정본, 없으면 폴백, 그것도 없으면 코드 그대로", () => {
   assert.equal(reasonText("capped", { capped: "서버 문구" }), "capped — 서버 문구");
-  assert.match(reasonText("capped"), /^capped — 작동기·지연 포함 폐루프 안정 경계/);
+  assert.match(reasonText("capped"), /^capped — 댐퍼 안정 가드\(작동기·지연 포함 폐루프 안정/);
+  assert.match(reasonText("capped"), /레이트 루프 마진 가드\(AS94900 끊은 루프/); // cap_bound "margin"도 이 사유다
+  assert.match(reasonText("loop_unstable"), /^loop_unstable — 자세 루프까지 닫은 축 전체 폐루프/);
   assert.match(reasonText("zero_design"), /설계 게인이 0이라/);
   assert.match(reasonText("bandwidth_collapse"), /교차 주파수가 하한 아래/);
   assert.match(reasonText("margin_floor"), /지연·작동기 예산이 병목/);
@@ -1023,4 +1042,288 @@ test("fitQualityLines — 문턱 끔(전부 na)은 침묵, 켜면 warn/전부 �
   });
   assert.equal(ok.tone, "hint");
   assert.match(ok.text, /1자리 전부 문턱 내/);
+});
+
+// ── 문서 반영 관문 · 신호 사슬 (쇼케이스) ──────────────────────────────
+
+test("반영 관문 — 요청·스냅숏(재개 결과)은 통과, 예제·변형·기록 없음은 사유", () => {
+  const user = { id: "showcase-delta", source: "request", is_example: false, variant: null };
+  assert.equal(applyGateReason(user), null);
+  // 재개한 결과는 스냅숏으로 조립돼 source가 snapshot이다 — 종전 관문은 이걸 예제로 읽었다
+  assert.equal(applyGateReason({ ...user, source: "snapshot" }), null);
+  // 헤더에서 예제를 명시로 고르면 source가 request다 — 서버는 403, 관문도 막는다
+  assert.match(applyGateReason({ id: "example-delta", source: "request", is_example: true }), /예제/);
+  assert.match(applyGateReason({ id: "example-delta", source: "request" }), /예제/);
+  assert.match(applyGateReason({ id: "x", source: "default-example" }), /예제/);
+  assert.match(applyGateReason({ id: "x", source: "legacy-unrecorded" }), /예제/);
+  assert.match(applyGateReason({ ...user, variant: "eoir" }), /형상 변형/);
+  assert.match(applyGateReason(null), /기록이 없는/);
+  assert.match(applyGateReason({ source: "request" }), /기록이 없는/);
+});
+
+test("config 겹치기 — over가 이기고 criteria·targets는 중첩 병합", () => {
+  const base = { mode: "gated", n_mach: 5, criteria: { pm_min_deg: 45 }, alts: [0, 1000] };
+  const over = { n_mach: 3, criteria: { gm_min_db: 6 }, alts: [200], budget_points: 40 };
+  assert.deepEqual(mergeDesignConfig(base, over), {
+    mode: "gated", n_mach: 3, criteria: { pm_min_deg: 45, gm_min_db: 6 }, alts: [200], budget_points: 40,
+  });
+  assert.deepEqual(mergeDesignConfig(null, { n_mach: 3 }), { n_mach: 3 });
+  assert.deepEqual(mergeDesignConfig({ n_mach: 3 }, null), { n_mach: 3 });
+  // 원본을 건드리지 않는다
+  assert.deepEqual(base.criteria, { pm_min_deg: 45 });
+});
+
+test("config → 폼 칸 — buildConfig로 되읽으면 칸이 있는 키가 그대로 돌아온다", () => {
+  const cfg = {
+    mode: "gated", fit_mode: "poly", budget_points: 40, budget_iters: 3, n_mach: 3, alts: [200],
+    fuels: [20, 40], actuator_wn: 25, criteria: { pm_min_deg: 40 }, targets: { roll_lambda: 3 },
+    max_degree: 2, // 칸이 없는 키 — 폼 값에 나오지 않는다(호출측이 config로 덧씌운다)
+  };
+  const f = configFormValues(cfg);
+  assert.equal(f.altsText, "200");
+  assert.equal(f.fuelsText, "20 40");
+  assert.equal(f.budgetPoints, "40");
+  assert.equal(f.fitMode, "poly", "게인 표현(열거값)도 셀렉트 칸으로 옮긴다");
+  assert.equal(f.max_degree, undefined);
+  const back = buildConfig(f);
+  const { max_degree: _drop, ...rest } = cfg;
+  assert.deepEqual(back, rest);
+  assert.deepEqual(configFormValues(null), { criteria: {}, targets: {} });
+});
+
+test("기본 승인 — 봉인·건너뜀만 해제", () => {
+  assert.equal(approvedByDefault({ id: "a" }), true);
+  assert.equal(approvedByDefault({ id: "a", sealed: true }), false);
+  assert.equal(approvedByDefault({ id: "a", skipped: "reason" }), false);
+});
+
+test("신호 요약 한 줄 — 보고서가 내는 수만(상태·이터·판정·실패·처방·에스컬레이션)", () => {
+  const body = {
+    report: { status: "awaiting_approval", iterations: 1, judged: 120, failures: 7 },
+    proposed_actions: [
+      { id: "p1", action: { type: "promote" } },
+      { id: "p2", action: { type: "promote" }, superseded_by: "p1" },
+      { id: "e1", action: { type: "escalate" } },
+    ],
+  };
+  assert.equal(designCueSummary(body),
+    "awaiting_approval · 이터레이션 1 · 판정 120 · 실패 7 · 처방 1 · 에스컬레이션 1");
+  assert.equal(designCueSummary({ report: { status: "converged", judged: 30 } }),
+    "converged · 이터레이션 0 · 판정 30 · 실패 0");
+  assert.equal(designCueSummary(null), "? · 이터레이션 0 · 판정 0 · 실패 0");
+});
+
+test("연료 placeholder — 문서 fuel_max × 엔진 비율, 모르면 빈 글(옛 기체 값 금지)", () => {
+  assert.deepEqual([...DEFAULT_FUEL_FRACS], [0.1, 0.5, 1.0]);
+  assert.equal(fuelsPlaceholder(50), "5 25 50");
+  assert.equal(fuelsPlaceholder(45), "4.5 22.5 45");
+  // 서버가 비율을 내면 그쪽이 정본
+  assert.equal(fuelsPlaceholder(40, [0.25, 1]), "10 40");
+  assert.equal(fuelsPlaceholder(null), "");
+  assert.equal(fuelsPlaceholder(0), "");
+  assert.equal(fuelsPlaceholder("50"), "");
+  assert.notEqual(fuelsPlaceholder(50), "40 200 400");
+});
+
+// ── 보고서 사실: 표본 제외·작동기·적합 축·표현·실패 위치 (자동 설계 결과가 싣고 화면이 안 내던 것) ──
+//
+// 픽스처는 실제 결과에서 떼어 왔다 — 예제 기체 작은 설정(n_mach 5 · 고도 500·1500 · 연료 25 · 점 60 ·
+// 이터 1, 표 모드) 엔진 실행을 서버 _save_session과 같은 조립으로 저장한 본문. 그 실행은 튜닝 실패 표본
+// 62개(점 17곳)를 적합에서 뺐고 실패 45건이 앵커 31 · 검증점 14였다.
+const EX_ROWS = [
+  { slot: "roll.k_rate", point: "M0.103219_h1500_f25", value: 0.0, loop: "roll_rate", reason: "no_stable_gain", basis: "own" },
+  { slot: "roll.ki", point: "M0.103219_h1500_f25", value: 0.0028101184511675433, loop: "yaw_rate", reason: "no_stable_gain", basis: "rate_loop" },
+  { slot: "roll.kp", point: "M0.103219_h1500_f25", value: 0.050211585817503575, loop: "yaw_rate", reason: "no_stable_gain", basis: "rate_loop" },
+  { slot: "yaw.k_rate", point: "M0.103219_h1500_f25", value: 0.0, loop: "yaw_rate", reason: "no_stable_gain", basis: "own" },
+  { slot: "roll.k_rate", point: "M0.103219_h500_f25", value: 0.0, loop: "roll_rate", reason: "no_stable_gain", basis: "own" },
+];
+const EX_ACT = { source: { wn: "profile", zeta: "profile" }, wn: 30.0, zeta: 0.7, delay_s: 0.035, pade_order: 2 };
+
+test("fitModeLabel·failureRoleText — 상태 줄·신호·브리핑이 같은 말을 한다, 모르는 값은 코드 그대로", () => {
+  assert.equal(fitModeLabel("table"), "표(선형 보간)");
+  assert.equal(fitModeLabel("poly"), "다항");
+  // 종전 상태 줄은 table이 아니면 전부 "다항"이라 적었다 — 새 표현이 생기면 화면이 조용히 틀린다
+  assert.equal(fitModeLabel("spline"), "spline");
+  assert.equal(fitModeLabel(undefined), null);
+  assert.match(reportLine({ fit_mode: "spline" }).join(" · "), /표현 spline/);
+  assert.equal(failureRoleText({ anchor: 31, validation: 14 }), "앵커 31 · 검증점 14");
+  assert.equal(failureRoleText({}), null);
+  assert.equal(failureRoleText(undefined), null);
+  // 엔진에 역할이 늘어도 수가 사라지지 않는다 — 삼키면 실패 수와 위치의 합이 어긋난다
+  assert.equal(failureRoleText({ anchor: 2, frontier: 1 }), "앵커 2 · frontier 1");
+});
+
+test("reportLine — 튜닝 실패 표본 제외 수와 제외 보류 자리 수가 상태 줄에 선다", () => {
+  const line = reportLine({ judged: 290, failures: 45, fit_mode: "table",
+    failures_by_role: { anchor: 31, validation: 14 }, excluded_samples: EX_ROWS,
+    exclusion_withheld: ["pitch.ki"] }).join(" · ");
+  assert.match(line, /실패 위치 앵커 31 · 검증점 14 · 튜닝 실패 표본 제외 5 · 제외 보류 1자리/);
+  // 없으면 줄을 차지하지 않는다 (0 생략 규약)
+  const clean = reportLine({ judged: 3, failures: 0, excluded_samples: [], exclusion_withheld: [] }).join(" · ");
+  assert.doesNotMatch(clean, /표본 제외|제외 보류/);
+});
+
+test("designCueSummary — 실패 위치·표현·표본 제외를 진행기 한 줄에도 싣는다", () => {
+  const body = { report: { status: "escalated", iterations: 0, judged: 290, failures: 45,
+    failures_by_role: { anchor: 31, validation: 14 }, fit_mode: "table", excluded_samples: EX_ROWS },
+  proposed_actions: [{ id: "e1", action: { type: "escalate" } }] };
+  assert.equal(designCueSummary(body),
+    "escalated · 이터레이션 0 · 판정 290 · 실패 45 · 실패 위치 앵커 31 · 검증점 14 · 표현 표(선형 보간)"
+    + " · 에스컬레이션 1 · 튜닝 실패 표본 제외 5");
+});
+
+test("actuatorLine — report.actuator가 정본이다 (config는 이제 null) · 출처가 폴백이면 경고", () => {
+  // 새 결과: config.actuator_wn은 null이고 값은 기체 문서에서 왔다 — config만 보면 무엇으로 설계했는지가 없다
+  const a = actuatorLine({ config: { actuator_wn: null, actuator_zeta: null, delay_s: 0.035 },
+    report: { actuator: EX_ACT } });
+  assert.deepEqual(a, { tone: "hint", value: "ωn 30 rad/s · ζ 0.700 (기체 문서) · 지연 35 ms · Padé 2차",
+    text: "작동기 ωn 30 rad/s · ζ 0.700 (기체 문서) · 지연 35 ms · Padé 2차" });
+  // 칸마다 출처가 다르면 칸마다 적는다
+  const mixed = actuatorLine({ report: { actuator: { ...EX_ACT, wn: 45,
+    source: { wn: "config", zeta: "profile" } } } });
+  assert.match(mixed.text, /ωn 45 rad\/s \(설정 — 작동기 가정 연구\) · ζ 0\.700 \(기체 문서\)/);
+  assert.equal(mixed.tone, "hint");
+  // 폴백은 기체 값인 척하지 않는다
+  const fb = actuatorLine({ report: { actuator: { ...EX_ACT, source: { wn: "default", zeta: "default" } } } });
+  assert.equal(fb.tone, "warn");
+  assert.match(fb.text, /엔진 폴백 — 기체 값이 아니다/);
+  // 출처 기록 이전 결과 — 그때는 config 30·0.7이 늘 이겼다(기체 작동기를 보지 않았다)
+  const old = actuatorLine({ config: { actuator_wn: 30, actuator_zeta: 0.7, delay_s: 0.035, pade_order: 2 },
+    report: { status: "converged" } });
+  assert.equal(old.tone, "warn");
+  assert.match(old.text, /^작동기 ωn 30 rad\/s · ζ 0\.700 \(설정 — 작동기 출처 기록 이전 결과: 기체 문서의 작동기가 아니라/);
+  assert.equal(actuatorLine({ report: {} }), null);
+  assert.equal(actuatorLine(null), null);
+});
+
+test("excludedSamplesModel — 자리별로 어느 점을 왜 뺐는지 (사유·근거·뺀 값), 없으면 null", () => {
+  const m = excludedSamplesModel({ report: { excluded_samples: EX_ROWS, exclusion_withheld: [] } });
+  assert.equal(m.total, 5);
+  assert.equal(m.points, 2);
+  assert.deepEqual(m.slots.map((s) => [s.slot, s.n]),
+    [["roll.k_rate", 2], ["roll.ki", 1], ["roll.kp", 1], ["yaw.k_rate", 1]]);
+  const rk = m.slots[0];
+  assert.equal(rk.text, "2점 — 사유 no_stable_gain 2 · 근거 그 자리 튜닝 실패 2");
+  assert.equal(rk.items[0].value, 0); // 뺀 것이 0 자리값이었다는 사실이 남는다
+  assert.match(m.slots[2].text, /근거 같은 축 레이트 루프가 실패한 위에서 튜닝 1/);
+  assert.equal(m.summary, "튜닝 실패 표본 5개를 적합에서 뺐다 (점 2곳 · 자리 4개 — 그 점의 스케줄 값은 이웃 보간)");
+  assert.equal(m.withheld.length, 0);
+  assert.equal(excludedSamplesModel({ report: { excluded_samples: [], exclusion_withheld: [] } }), null);
+  assert.equal(excludedSamplesModel({}), null);
+});
+
+test("excludedSamplesModel — 제외 보류는 fits의 상세로 말하고, 상세가 없으면 수를 지어내지 않는다", () => {
+  const body = {
+    report: { excluded_samples: [], exclusion_withheld: ["pitch.ki"] },
+    fits: { "pitch.ki": { exclusion_withheld: { kept_would_be: 1, min_kept: 2,
+      samples: [{ point: "a" }, { point: "b" }] } } },
+  };
+  const m = excludedSamplesModel(body);
+  assert.equal(m.total, 0);
+  assert.equal(m.withheld[0].text,
+    "pitch.ki — 튜닝 실패 표본 2개를 빼면 1개만 남아 제외를 보류했다 — 이 자리의 표는 실패 표본을 담고 있다");
+  assert.equal(m.summary, "제외 보류 1자리 (빼면 표가 안 서서 못 뺐다)");
+  const bare = excludedSamplesModel({ report: body.report });
+  assert.equal(bare.withheld[0].n, null);
+  assert.match(bare.withheld[0].text, /상세는 결과 JSON fits/);
+});
+
+test("fitFactsModel — 스케줄 축 밖 변동·교차축 잔차·톱니를 문턱과 무관하게 사실로 (0은 생략)", () => {
+  const fits = {
+    // 실측(예제 작은 설정, 표 모드) — 고도 변동이 마하 1축 표에 평균으로 접혔다
+    "roll.ki": { kind: "table", axis: "mach", axes_detected: ["mach", "alt"], axes_excluded: ["alt"],
+      zigzag: 4, n_breakpoints: 14, quality: { slope_jump_norm_max: 7.0, cross_axis_frac: 0.5531390988648776, status: "na" } },
+    // S1 표 모드 실측의 모양 — 교차축 0(마하 값이 겹치지 않음)인데 톱니 38회/분할점 64
+    "pitch.k_rate": { kind: "table", axis: "mach", axes_detected: ["mach"], zigzag: 38, n_breakpoints: 64,
+      quality: { cross_axis_frac: 0.0, status: "na" } },
+    "roll.kp": { kind: "poly", axis: "mach", segments: [{}, {}, {}, {}], axes_excluded: ["alt"],
+      quality: { cross_axis_frac: 0.3338107558821755, status: "na" } },
+    "yaw.k_rate": { kind: "constant", value: 0.42, max_residual: 0.05, axes_excluded: ["alt"],
+      quality: { cross_axis_frac: null, status: "na" } },
+  };
+  const m = fitFactsModel(fits);
+  assert.deepEqual(m.rows.map((r) => r.text), [
+    "pitch.k_rate — 표 64점(mach 축) · 톱니 38회/분할점 64",
+    "roll.ki — 표 14점(mach 축) · 스케줄 축 밖 변동 alt · 교차축 잔차 55% · 톱니 4회/분할점 14",
+    "roll.kp — 다항(mach 축 · 구간 4) · 스케줄 축 밖 변동 alt · 교차축 잔차 33%",
+    "yaw.k_rate — 상수 0.420 · 스케줄 축 밖 변동 alt — 상수로 접었다(잔차 0.0500)",
+  ]);
+  assert.equal(m.summary, "적합 보고 — 스케줄 축 밖 변동 3/4자리(alt) · 교차축 잔차 최대 55% (roll.ki)"
+    + " · 톱니 최대 38회/분할점 64 (pitch.k_rate)");
+  // 볼 것이 없으면 요약이 없다 — 판정하지 않은 것을 "이상 없음"으로 말하지 않는다
+  assert.equal(fitFactsModel({ "a.b": { kind: "table", axis: "mach", n_breakpoints: 3, zigzag: 0,
+    quality: { cross_axis_frac: 0 } } }).summary, null);
+  assert.equal(fitFactsModel({}), null);
+  assert.equal(fitFactsModel(undefined), null);
+});
+
+test("warnNoteText — 표 모드에는 조일 적합이 없다 (다항 시절 문단을 그대로 두지 않는다)", () => {
+  const table = warnNoteText("table");
+  assert.match(table, /적합 허용치 조이기는 표 모드에 없다/);
+  assert.match(table, /검증점의 warn은 분할점 사이 선형 보간/);
+  assert.doesNotMatch(table, /적합 허용치를 조인다/);
+  // 다항·표현 기록 없음(표현 선택 이전 = 다항)은 종전 문단
+  for (const mode of ["poly", undefined]) {
+    assert.match(warnNoteText(mode), /스케줄 곡선이 목표선 아래로 내려온 자리다.*적합 허용치를 조인다/);
+  }
+  for (const t of [table, warnNoteText("poly")]) assert.match(t, /fail은 다르다/);
+});
+
+test("ledgerRows — 튜닝 행의 fit_excluded가 줄이 된다 (그 점의 값은 이웃 보간)", () => {
+  // 실측 원장 행(예제 작은 설정) — 요 댐퍼 실패가 같은 축 자세 자리까지 끌고 갔다
+  const [row] = ledgerRows({ ledger: [{ point: "M0.1_h500_f25", loop: "yaw_rate", kind: "tune",
+    reason: "no_stable_gain", status: "infeasible", severity: null,
+    fit_excluded: ["roll.ki", "roll.kp", "yaw.k_rate"] }] });
+  assert.equal(row.excludedLine,
+    "적합에서 뺐다 — roll.ki, roll.kp, yaw.k_rate (이 점의 스케줄 값은 튜닝값이 아니라 이웃 보간)");
+  const [plain] = ledgerRows({ ledger: [{ point: "p", loop: "roll_rate", kind: "tune", fit_excluded: [] }] });
+  assert.equal(plain.excludedLine, null);
+});
+
+test("VERDICT_LABEL — 엔진 분류 여섯 가지 전부에 이름이 있다 (fit_residual이 코드로 뜨지 않게)", () => {
+  for (const v of ["simple_deficit", "plant_variation", "gain_interp_valley", "structural_limit",
+    "gain_sign_flip", "fit_residual"]) {
+    assert.ok(VERDICT_LABEL[v], v);
+  }
+  assert.match(VERDICT_LABEL.fit_residual, /다항 전용 — 표 모드에서는 건너뛴다/);
+  assert.match(ledgerActionText({ verdict: "fit_residual", applied: false }), /^앵커 적합 괴리/);
+});
+
+test("자동 설계 뷰가 새 사실들을 실제로 그린다 (원문 대조 — 뷰는 테스트가 import하지 않는다)", () => {
+  const view = readFileSync(new URL("../views/autodesign.js", import.meta.url), "utf8");
+  assert.match(view, /\[actuatorBox\(body\), excludedBox\(body\), fitFactsBox\(body\.fits\)\]\.filter\(Boolean\)/);
+  assert.match(view, /\.\.\.facts,/);
+  assert.match(view, /legendBox\(body\.margin_out\?\.criteria, report\.fit_mode\)/);
+  assert.match(view, /el\("p", \{ class: "hint" \}, warnNoteText\(fitMode\)\)/);
+  assert.match(view, /r\.excludedLine \? el\("div", \{ class: "hint" \}, r\.excludedLine\) : null/);
+  // 다항 시절 문단이 뷰에 남아 있지 않다
+  assert.doesNotMatch(view, /늘리거나\(처방 카드가 이미 그것을 제안한다\) 적합 허용치를 조인다/);
+  // 실행 설정 안내가 기본 실행에서 실제로 보이는 자리를 가리킨다 — 「적합 품질」은 문턱을 켠 실행에만 선다
+  assert.match(view, /「적합 보고」 줄에 톱니·교차축 잔차로 나온다/);
+  assert.doesNotMatch(view, /「적합 품질」에 기울기 점프로 나온다/);
+});
+
+test("REASON_TEXT 폴백 — 엔진 tune.REASON_TEXT와 코드·문구가 같다 (사본이 옛 말을 하지 않게)", () => {
+  // 원문 대조 — 서버가 내는 사전(정본)과 같은 것이 조회 실패 화면에도 떠야 한다
+  const py = readFileSync(new URL("../../../engine/claw/design/tune.py", import.meta.url), "utf8");
+  const codeOf = Object.fromEntries([...py.matchAll(/^(REASON_[A-Z_]+) = "([a-z_]+)"/gm)].map((m) => [m[1], m[2]]));
+  const block = py.slice(py.indexOf("REASON_TEXT = {"), py.indexOf("\n}\n", py.indexOf("REASON_TEXT = {")));
+  const engine = {};
+  for (const part of block.split(/\n    (?=REASON_)/).slice(1)) {
+    const name = part.match(/^(REASON_[A-Z_]+):/)[1];
+    engine[codeOf[name]] = [...part.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]).join("");
+  }
+  assert.ok(Object.keys(engine).length >= 13, `엔진 사전을 못 읽었다: ${Object.keys(engine)}`);
+  assert.deepEqual(Object.keys(REASON_TEXT).sort(), Object.keys(engine).sort());
+  for (const [code, text] of Object.entries(engine)) assert.equal(REASON_TEXT[code], text, code);
+});
+
+test("emptyResultNotice — 잡이 서 있으면 「아직 결과가 없습니다」 대신 도는 중이라고 말한다 (verify D11과 같은 결함)", () => {
+  const idle = emptyResultNotice({ running: false });
+  const busy = emptyResultNotice({ running: true });
+  assert.match(idle, /^아직 결과가 없습니다/);
+  assert.match(busy, /도는 중입니다/);
+  assert.doesNotMatch(busy, /아직 결과가 없습니다/);
+  assert.match(busy, /진행/); // 경과는 위 진행줄에 있다고 가리킨다
+  assert.equal(emptyResultNotice(), idle); // 인자 없으면 쉬는 중
 });

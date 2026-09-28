@@ -159,3 +159,76 @@ def test_표본_안의_큰_노드도_재귀로_줄어든다():
     sampled = out["cases"]["_sample"][0]
     assert sampled["name"] == "c0"
     assert sampled["stages"]["_n"] == 11  # 안쪽 동질 dict도 표본화됐다
+
+
+# ── 골라 읽기(load_pruned) — 배제될 시계열을 세우지 않는 읽기가 통째 읽기 + prune과 **같은가** ──────
+
+
+def _dump(x) -> str:
+    return json.dumps(x, ensure_ascii=False)
+
+
+def _sim_body(n, n_sig=6, meta_extra=None):
+    return {
+        "t": [i * 0.01 for i in range(n)],
+        "signals": {f"s{k}": [((i * 7 + k) % 13) / 3.0 for i in range(n)] for k in range(n_sig)},
+        "envelope": {"stall_margin": [0.2] * n, "flags": {"alpha": [False] * n},
+                     "worst_margin": 0.12, "any_flag": False},
+        "meta": {"phases": {"touchdown_t": 96.9}, "note": "메모 " * 150, **(meta_extra or {})},
+        "params_fingerprint": "fp", "n_total": n, "kind": "sim",
+    }
+
+
+def _corrupt_signal(store, rid, key):
+    path = store.root / f"{rid}.json"
+    lines = path.read_text(encoding="utf-8").split("\n")
+    i = next(i for i, ln in enumerate(lines) if ln.startswith(f'"{key}": '))
+    lines[i] = f'"{key}": @손상@' + ("," if lines[i].endswith(",") else "")
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def test_load_pruned는_통째_읽기_가지치기와_글자까지_같다(tmp_path):
+    """큰 sim·작은 sim(배제 항목까지 통째로 실리는 4KB 아래 — 마커가 서면 안 된다)·긴 메타·verify·모르는
+    kind·kind 없음(메타에 없으면 본문의 kind) 모두 통째 읽어 prune한 글과 같다."""
+    from claw_server.brief import load_pruned
+    from claw_server.store import ResultStore
+
+    st = ResultStore(tmp_path)
+    cases = {
+        "big": (_sim_body(3000), "sim"),
+        "tiny": ({"t": [0.0, 0.01], "signals": {"h": [1.0, 2.0]}, "envelope": {"worst_margin": 0.1},
+                  "kind": "sim"}, "sim"),
+        "longmeta": (_sim_body(3, n_sig=2, meta_extra={"waypoints": [[i, i] for i in range(900)]}), "sim"),
+        "verify": ({"kind": "verify_flight", "report": {"verdict": "pass", "files": [
+            {"name": "a.c", "text": "int x;\n" * 3000}]}}, "verify_flight"),
+        "other": ({"kind": "future_kind", "huge": ["x"] * 5000, "verdict": "ok"}, "future_kind"),
+        "nokind": (_sim_body(2000), ""),
+        # 최상위가 동질 dict(목록 8개)면 표본 선택이 내용을 본다(판정상 나쁜 항목 우선) — 비운 t로는 다른 표본이
+        # 뽑히므로 통째로 다시 읽어야 한다
+        "homog": ({**{f"x{i}": [1] * 600 for i in range(7)}, "t": [False] * 600}, "sim"),
+    }
+    for rid, (body, kind) in cases.items():
+        st.save(rid, body)
+        got, got_kind = load_pruned(st, rid, kind)
+        assert got_kind == (kind or body["kind"]), rid
+        assert _dump(got) == _dump(prune(st.load(rid), got_kind)), rid
+    # 작은 sim은 배제 항목까지 통째로 실린다(부모가 4KB 아래) — 비운 본문으로 가지치기하면 여기서 마커가 선다
+    assert load_pruned(st, "tiny", "sim")[0]["signals"] == {"h": [1.0, 2.0]}
+    assert "제외" in _dump(load_pruned(st, "big", "sim")[0]["signals"])
+
+
+def test_load_pruned는_배제될_시계열을_파싱하지_않는다(tmp_path):
+    """신호 줄은 파싱조차 하지 않는다 — 그 줄을 망가뜨려도 소견서 입력은 그대로다(통째 읽기는 손상 판정).
+    예제 750 s 본문(107 MB)에서 통째 파싱은 서버 힙 +211 MB였다."""
+    import pytest
+
+    from claw_server.brief import load_pruned
+    from claw_server.store import ResultStore
+
+    st = ResultStore(tmp_path)
+    st.save("r1", _sim_body(3000))
+    want = _dump(prune(st.load("r1"), "sim"))
+    _corrupt_signal(st, "r1", "s3")
+    with pytest.raises(ValueError):
+        st.load("r1")
+    assert _dump(load_pruned(st, "r1", "sim")[0]) == want

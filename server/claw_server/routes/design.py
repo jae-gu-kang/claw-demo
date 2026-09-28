@@ -24,7 +24,8 @@ from pydantic import BaseModel, Field
 import copy
 from datetime import datetime, timezone
 
-from claw.design import AutoDesignConfig, DesignSession, resample_to_table
+from claw.design import AutoDesignConfig, DesignSession, design_inputs, resample_to_table
+from claw.design.grid import DEFAULT_ALTS, DEFAULT_FUEL_FRACS
 from claw.design.tune import REASON_TEXT
 from claw.profile import ProfileError, build_profile
 from claw.profile.fingerprint import gain_tables_basis_fingerprint
@@ -71,6 +72,9 @@ class ResumeIn(BaseModel):
 # 통과하고 np.linspace·Padé 차수에서 터져 **202 뒤 원인 없는 실패**가 된다
 _INT_KEYS = ("budget_points", "budget_iters", "budget_tune_evals", "n_mach",
              "n_validation_between", "max_degree", "max_segments", "pade_order")
+# 없음(null)이 뜻을 갖는 수치 — 작동기 동특성은 null이면 **기체 문서의 작동기**다(엔진
+# AutoDesignConfig 주석). 수치를 주면 그 값이 이긴다(작동기 가정 연구)
+_NULLABLE_KEYS = ("actuator_wn", "actuator_zeta")
 
 
 def _check_number(where: str, v) -> None:
@@ -123,14 +127,20 @@ def _build_config(overrides: dict) -> AutoDesignConfig:
     # 타입 검증 — 데이터클래스는 강제 변환을 하지 않으므로 여기서 걸러야 한다.
     # 안 걸리는 값은 잡 스레드 안에서 터져 202 뒤 원인 없는 실패가 된다
     for key, want in (("mode", str), ("fit_mode", str),
-                      ("alts", (list, type(None))), ("fuels", (list, type(None)))):
+                      ("alts", (list, type(None))), ("fuels", (list, type(None))),
+                      ("sched_axes", list)):
         if not isinstance(merged[key], want):
             raise ValueError(f"{key} 타입 오류: {type(merged[key]).__name__}")
+    # 축 이름은 문자열이어야 한다 — 범위(허용 축·중복)는 엔진 __post_init__이 판정한다
+    if not all(isinstance(a, str) for a in merged["sched_axes"]):
+        raise ValueError(f"sched_axes는 축 이름(문자열) 목록이어야 함: {merged['sched_axes']!r}")
     for key, value in merged.items():
-        # 문자열 필드는 수치 검사 대상이 아니다 — 값의 허용 목록은 엔진 __post_init__이
+        # 문자열·목록 필드는 수치 검사 대상이 아니다 — 값의 허용 목록은 엔진 __post_init__이
         # 본다(ValueError → 422). 여기 목록에 새 문자열 필드를 빠뜨리면 _check_number가
         # "수치여야 함"으로 422를 내어, 멀쩡한 설정이 거부된다
-        if key in ("mode", "fit_mode", "alts", "fuels", "criteria", "targets"):
+        if key in ("mode", "fit_mode", "alts", "fuels", "sched_axes", "criteria", "targets"):
+            continue
+        if key in _NULLABLE_KEYS and value is None:
             continue
         _check_number(key, value)
         if key in _INT_KEYS and isinstance(value, float) and not value.is_integer():
@@ -285,24 +295,23 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
                      parent: str | None = None, *, profile) -> dict:
     store = request.app.state.store
     try:
-        ac = profile.aircraft()
-        stall = profile.stall_table()
-        limits = profile.structural_limits()
-        db = profile.db_ranges()
-        # 게인 미설계 기체는 202 전에 422다 — 튜너 브래킷이 설계값에서 나오므로(05 §7.4) 잡을
-        # 받아 봐야 전 자리 seed_required고, detail.path(/law/design)가 웹의 「기체 탭 → 초기
-        # 게인」 안내 링크 근거가 된다. 종전에는 여기서 잡히지 않아 500이었다
-        design = profile.design_gains()
-        # 법칙의 레이트 필터도 프로파일이 준다 — 안 넘기면 튜닝·검증이 출하되지 않는
-        # 조성(요축 워시아웃 없는 A′)을 본다 (05 §6)
-        rate_filters = profile.rate_filters()
+        # 기체가 주는 값 전부 — 한 경로(엔진 design_inputs)에서 뽑는다:
+        # - 게인 미설계 기체는 202 전에 422다 — 튜너 브래킷이 설계값에서 나오므로(05 §7.4) 잡을
+        #   받아 봐야 전 자리 seed_required고, detail.path(/law/design)가 웹의 「기체 탭 → 초기
+        #   게인」 안내 링크 근거가 된다. 종전에는 여기서 잡히지 않아 500이었다
+        # - 법칙의 레이트 필터 — 안 넘기면 튜닝·검증이 출하되지 않는 조성(요축 워시아웃 없는
+        #   A′)을 본다 (05 §6)
+        # - 기체 작동기(wn·zeta) — 종전에는 넘기지 않아 config의 30·0.7이 늘 이겼다. 이제
+        #   config가 없음(null)이면 기체 문서 값이다
+        inp = design_inputs(profile)
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
 
     def work(job):
         # job.report의 반환값이 취소 요청 여부 — 엔진 협조적 취소 규약과 그대로 맞물린다
         session.run(
-            ac, stall, limits, db, design, rate_filters=rate_filters,
+            inp["aircraft"], inp["stall_table"], inp["limits"], inp["db_ranges"], inp["design"],
+            rate_filters=inp["rate_filters"], actuator=inp["actuator"],
             fingerprint=fingerprint,
             on_progress=lambda done, total, msg: job.report(done, total, message=msg),
         )
@@ -327,6 +336,10 @@ def design_defaults() -> dict:
         "config": AutoDesignConfig().to_dict(),
         "max_points": MAX_POINTS,
         "reason_text": dict(REASON_TEXT),
+        # alts·fuels를 비웠을 때 coarse 격자가 실제로 쓰는 값 — 고도 목록과 연료 **비율**(× 기체
+        # fuel_max). 비율로 내는 것은 기체 값이 여기 없기 때문이다(연료 kg은 웹이 문서에서 곱한다)
+        "grid": {"alts": [float(a) for a in DEFAULT_ALTS],
+                 "fuel_fracs": [float(f) for f in DEFAULT_FUEL_FRACS]},
     }
 
 
@@ -363,6 +376,26 @@ def _reverify_summary(rv: dict | None) -> dict:
     return out
 
 
+def _design_summary(rep: dict | None) -> dict:
+    """자동 설계 보고 → provenance.design 요약 — 판정 개수와 **표현·적합에서 뺀 표본 수**.
+
+    표 표현에서 뺀 표본(튜닝이 성립하지 않은 점)의 분할점 값은 튜닝값이 아니라 이웃 보간이고, 보류된 자리는 실패
+    표본을 담은 채다 — 결과가 보존 상한에 밀려 사라져도 문서의 표가 그 사실을 들고 있어야 한다. 목록은 개수로
+    접는다(_reverify_summary와 같은 이유 — 문서가 결과 저장물을 복제하지 않는다). 판정 칸 이름(status…
+    escalations)은 생성기(claw.profile.showcase)가 적는 design 요약과 같다. 옛 결과라 칸이 없으면 None — 0으로
+    위장하지 않는다."""
+    rep = rep or {}
+    excluded = rep.get("excluded_samples")
+    withheld = rep.get("exclusion_withheld")
+    return {
+        "status": rep.get("status"), "iterations": rep.get("iterations"), "judged": rep.get("judged"),
+        "failures": rep.get("failures"), "escalations": rep.get("escalations"),
+        "fit_mode": rep.get("fit_mode"),
+        "excluded_samples": len(excluded) if isinstance(excluded, list) else None,
+        "exclusion_withheld": sorted(withheld) if isinstance(withheld, list) else None,
+    }
+
+
 @router.post("/design/{result_id}/apply-gains")
 def apply_gains_to_profile(result_id: str, req: ApplyGainsIn, request: Request) -> dict:
     """자동 설계 확정 게인을 그 기체 문서에 반영 — law.gain_tables 새 리비전 (정본 되쓰기, 스키마 v2).
@@ -374,6 +407,7 @@ def apply_gains_to_profile(result_id: str, req: ApplyGainsIn, request: Request) 
       결과의 재반영도 막힌다(반영 자체가 지문을 바꾼다 — 재설계 후 다시 반영한다)
     - 형상 변형 위에서 돈 설계는 기본 문서에 반영하지 않는다(422) · 예제 403 · 기준 리비전 충돌
       409 (quick-seed와 같은 규칙)
+    - 마하 아닌 축 표는 문서가 못 담는다(422, detail {message, off_axis} — 자리·축을 짚는다)
     """
     store = request.app.state.store
     try:
@@ -397,23 +431,26 @@ def apply_gains_to_profile(result_id: str, req: ApplyGainsIn, request: Request) 
     if not tables:
         raise HTTPException(status_code=422, detail="반출 게인 표가 없는 결과 — 반영할 것이 없다")
     # 문서 스키마 v2의 확정 게인 표는 **마하 축 표만** 보유한다(profile/schema.py `_table_mach`).
-    # 자동 설계는 자리마다 지배 축을 고르므로(fit.select_axes) 고도·연료 축 표가 나올 수 있다.
-    # 그대로 저장을 시도해도 아래 ProfileError 매핑이 받아 422이긴 하나, 그 사유는 스키마
-    # 경로(`/law/gain_tables/tables/…/axes` 키 불일치)뿐이라 **어느 자리가 왜 고도 축인지**를
-    # 말하지 않는다. 표 모드(v1.47 기본)에서는 상수로 접히던 자리까지 스케줄로 서므로 더 자주
-    # 닿는 길이다 — 전환 전에도 다항 재샘플이 같은 축을 물려받아 같은 길로 샜다
+    # 자동 설계는 기본으로 마하로만 스케줄하지만(AutoDesignConfig.sched_axes — 적합 축 후보를
+    # 좁힌다, 표현 fit_mode와 무관), 그 전에 저장된 결과(지배 축 자유 선택)나 API로 sched_axes를
+    # 넓힌 결과는 고도·연료 축 표를 가질 수 있다. 그대로 저장을 시도해도 아래 ProfileError 매핑이
+    # 받아 422이긴 하나, 그 사유는 스키마 경로(`/law/gain_tables/tables/…/axes` 키 불일치)뿐이라
+    # **어느 자리가 왜 다른 축인지**를 말하지 않는다. detail은 {message, off_axis}다 — message가
+    # 자리·축을 짚으므로 웹 errorText(profileErrorText → message)가 그대로 보이고, off_axis는
+    # 기계 판독용 {자리: [축]}이다
     off_axis = {slot: sorted((spec.get("axes") or {}))
                 for slot, spec in tables.items()
                 if sorted((spec.get("axes") or {})) != ["mach"]}
     if off_axis:
-        raise HTTPException(status_code=422, detail=
-                            "문서의 확정 게인 표는 마하 축만 보유할 수 있다 — "
-                            + " · ".join(f"{s}: {'+'.join(ax) or '축 없음'}"
-                                         for s, ax in sorted(off_axis.items()))
-                            + ". 그 자리의 변동은 마하가 아니라 다른 축이 지배한다"
-                            " (다축 게인 표는 백로그 — 05 §9). 막히는 것은 문서 반영이다:"
-                            " 시뮬·코드 생성은 그 축 표를 받고(런타임 스케줄 변수는"
-                            " mach·alt·fuel), 게인 탭 편집 표는 축이 어긋난다고 알린다")
+        raise HTTPException(status_code=422, detail={
+            "message": "문서의 확정 게인 표는 마하 축만 보유할 수 있다 — "
+                       + " · ".join(f"{s}: {'+'.join(ax) or '축 없음'}"
+                                    for s, ax in sorted(off_axis.items()))
+                       + ". 그 자리는 마하가 아닌 축으로 스케줄됐다 — sched_axes를 마하로 두고(기본)"
+                       " 자동 설계를 다시 돌린 뒤 반영한다 (다축 게인 표는 백로그 — 05 §9)."
+                       " 막히는 것은 문서 반영이다: 시뮬·코드 생성은 그 축 표를 받고(런타임 스케줄"
+                       " 변수는 mach·alt·fuel), 게인 탭 편집 표는 축이 어긋난다고 알린다",
+            "off_axis": off_axis})
     profiles = request.app.state.profiles
     try:
         doc, rev = profiles.get(pid)
@@ -442,6 +479,8 @@ def apply_gains_to_profile(result_id: str, req: ApplyGainsIn, request: Request) 
             # 판정 공간의 재검증 요약 — 게인 공간 오차(위)와 나란히. 결과가 보존 상한에
             # 밀려 사라져도 "채택 표로 재판정했더니 몇 곳이 움직였나"는 문서에 남는다
             "reverify": _reverify_summary(export.get("reverify")),
+            # 이 표를 만든 설계의 요약 — 표현(fit_mode)과 적합에서 뺀 표본 수(그 점은 이웃 보간이다)
+            "design": _design_summary(payload.get("report")),
             # 낡음 판정의 기준 — 표 절을 뺀 지금 문서의 지문 (build.gain_tables_stale이 대조)
             "basis_fingerprint": gain_tables_basis_fingerprint(built.doc),
         },

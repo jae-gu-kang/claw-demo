@@ -71,6 +71,16 @@ test("POST 계산 라우트 본문에만 싣는다 — 이미 실은 profile·�
   assert.deepEqual(withProfile("POST", "/design/auto", {}, { id: "a" }).body, { profile: { id: "a" } });
 });
 
+test("미션 초안은 고른 기체를 싣고, 쇼케이스 설치는 싣지 않는다 — 대상이 패키지 문서라서", () => {
+  const sel = { id: "showcase-delta", variant: null };
+  // 초안 프롬프트의 기체 사실·기본 미션 예시가 이 선택의 문서에서 선다(서버 llm_draft.py) — 안 실으면 예제 기체로 짠다
+  assert.deepEqual(withProfile("POST", "/llm/mission-draft", { intent: "왕복" }, sel).body,
+    { intent: "왕복", profile: { id: "showcase-delta" } });
+  assert.deepEqual(withProfile("POST", "/profiles/_showcase/install", undefined, sel),
+    { path: "/profiles/_showcase/install", body: undefined });
+  assert.equal(withProfile("GET", "/profiles/_showcase", undefined, sel).path, "/profiles/_showcase");
+});
+
 test("GET 계산 라우트는 쿼리로 — 기존 쿼리 뒤에 붙이고, 이미 있으면 두고, 인코딩한다", () => {
   const sel = { id: "heavy-delta", variant: "full-stores" };
   assert.equal(withProfile("GET", "/analysis/vn-envelope?alt=1000&fuel=200", undefined, sel).path,

@@ -231,3 +231,45 @@ def test_validate_lines_위반은_사유_문장으로_실패한다():
         validate_lines({"lines": [{"t": 1.0, "speaker": "UAV", "text": 3}]})
     with pytest.raises(RuntimeError, match="객체가 아닙"):
         validate_lines({"lines": ["한 줄"]})
+
+
+def test_비행_로그가_읽는_신호는_미리_읽기_목록_안이다():
+    """라우트는 FLIGHT_LOG_SIGNALS만 먼저 파싱한다(store.load_picked) — flight_log가 그 밖을 읽으면 그 줄을
+    마저 채우므로 답은 같지만 메모리가 다시 는다. 목록이 추출기와 어긋나면 여기서 빨개진다(통째로 훑어도)."""
+    from claw_server.comms import FLIGHT_LOG_SIGNALS
+
+    seen = set()
+
+    class Watch(dict):
+        def get(self, k, default=None):
+            seen.add(k)
+            return super().get(k, default)
+
+        def __getitem__(self, k):
+            seen.add(k)
+            return super().__getitem__(k)
+
+        def __contains__(self, k):
+            seen.add(k)
+            return super().__contains__(k)
+
+        def __iter__(self):
+            seen.add("*전체*")
+            return super().__iter__()
+
+        def keys(self):
+            seen.add("*전체*")
+            return super().keys()
+
+        def items(self):
+            seen.add("*전체*")
+            return super().items()
+
+        def values(self):
+            seen.add("*전체*")
+            return super().values()
+
+    body = _sim()
+    body["signals"] = Watch({**body["signals"], "pn": [0.0] * 200, "pe": [0.0] * 200, "alpha": [0.1] * 200})
+    flight_log(body)
+    assert seen == FLIGHT_LOG_SIGNALS, (sorted(seen - FLIGHT_LOG_SIGNALS), sorted(FLIGHT_LOG_SIGNALS - seen))

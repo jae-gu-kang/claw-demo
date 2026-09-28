@@ -67,3 +67,17 @@ export function normalizeAnswer(json, { views, blockPages }) {
   }
   return out;
 }
+
+const CAPTION_MAX = 80;
+
+/** 답 한 줄 캡션 — 쇼케이스 진행기의 완료 줄(views/showcase.js). 답의 **첫 문장**과 첫 이동
+ *  액션 이름만 쓴다(산출물에서만 — 새 해설 금지). 전량은 질문 패널에 떠 있다. */
+export function answerCaption(norm) {
+  const text = str(norm?.answer).trim();
+  if (text === "") return "답이 비었다";
+  const m = text.match(/^[\s\S]*?[.?!。](?=\s|$)/);
+  let head = (m ? m[0] : text.split("\n")[0]).trim();
+  if (head.length > CAPTION_MAX) head = `${head.slice(0, CAPTION_MAX - 1)}…`;
+  const first = norm.actions?.[0];
+  return first ? `${head} → ${first.label}` : head;
+}

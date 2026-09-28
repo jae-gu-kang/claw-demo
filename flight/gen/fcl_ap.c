@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR에서, 값은 파라미터 이미지에서 온다).
  * 그래프    : fcl
- * 구조 지문 : bc5d7dc7d4ee4c60
+ * 구조 지문 : f94329070fbecd39
  * 엔진      : claw 0.2.0
  * ap — 기능축 분할, 32개 블록
  */
@@ -168,6 +168,8 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
     if (speed_on != 0.0) {
         /* ap_fv — CommandFilter */
         if (!sta->ap_fv_seeded) { sta->ap_fv_x = V; sta->ap_fv_seeded = 1; }
+        /* ap_fv 추월 동기화 — 측정이 상태를 앞질러 명령 쪽에 있으면 측정으로 다시 시드 */
+        if ((V - sta->ap_fv_x) * (cmd_speed - V) > 0.0) { sta->ap_fv_x = V; }
         const double ap_fv_d = cmd_speed - sta->ap_fv_x;
         sta->ap_fv_x = sta->ap_fv_x + prm->ap_fv_one_minus_p * ap_fv_d;
         ap_fv_y = sta->ap_fv_x;
@@ -196,7 +198,7 @@ void fcl_ap_step(const fcl_params_t *prm, fcl_state_t *sta,
     const double ap_spd_sat_y = claw_clip(ap_spd_pid_y, prm->ap_spd_sat_lo, prm->ap_spd_sat_hi);
 
     /* ap_ff_t_raw — sec2_minus_1 */
-    const double ap_ff_t_raw_y = 1.0 / pow(cos(ap_hdg_sat_y), 2.0) - 1.0;
+    const double ap_ff_t_raw_y = 1.0 / (cos(ap_hdg_sat_y) * cos(ap_hdg_sat_y)) - 1.0;
 
     /* ap_ff_t — Gain */
     const double ap_ff_t_y = prm->ap_ff_t_k * ap_ff_t_raw_y;

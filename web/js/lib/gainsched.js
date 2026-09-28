@@ -10,6 +10,7 @@
 계약으로 옮기는 것뿐이다.
 */
 
+import { checksSummary } from "./evaluate.js";
 import { valueAt } from "./gainsync.js";
 
 /** 격자의 열 — 불가 자리도 칸은 있어야 축마다 열이 어긋나지 않는다. */
@@ -125,6 +126,52 @@ export function alignTables(tables, axis) {
     };
   }
   return { tables: out, axis: union, aligned: true };
+}
+
+/** 축이 없는 표 [{name, axes}] — alignTables가 null을 낸 **사유**. 이 화면(과 문서 스키마 law.gain_tables)은
+ * 마하 축 표만 받는다 — 자동 설계가 고도 축으로 적합한 확정본이 오면 어느 자리가 어느 축인지를 그대로
+ * 말해야 한다(「축이 없는 표가 섞였다」만으로는 무엇을 고칠지 모른다). axes는 그 표가 가진 축 이름들. */
+export function axisMismatch(tables, axis) {
+  return Object.entries(tables ?? {})
+    .filter(([, t]) => !Array.isArray(t?.axes?.[axis]) || !t.axes[axis].length)
+    .map(([name, t]) => ({ name, axes: Object.keys(t?.axes ?? {}) }));
+}
+
+/** axisMismatch → 한 줄 사유. 비었으면 null. */
+export function axisMismatchText(mismatch, axis) {
+  if (!mismatch?.length) return null;
+  const list = mismatch.map((m) => `${m.name}(${m.axes.length ? `${m.axes.join("·")} 축` : "축 없음"})`);
+  return `${list.join(", ")} — '${axis}' 축이 아닌 표라 이 화면에 세울 수 없다(게인 탭·문서 확정 표는 `
+    + `'${axis}' 축만 받는다)`;
+}
+
+/** 근사 곡선 구간 경계 기본값 — 스케줄 표의 **상한 클립이 풀리는 첫 격자점**들 (문서 스케줄에서).
+ *
+ * 규칙 표 K(M) = K0·min((M_design/M)², 상한)은 상한에 걸린 평탄부와 동압 곡선 사이에 꺾임이 있다.
+ * 다항 근사는 꺾임을 한 구간에 품으면 잔차가 커지므로 거기에 경계를 두는 것이 기본값이다(종전 "0.3"은
+ * 1200 kg 기체 롤 상한의 꺾임이었다 — 다른 기체에서는 뜻이 없다). 표마다 앞머리의 평탄부(첫 값과 같은
+ * 점들) 다음 점을 모은다 — 평탄부가 없거나 표 전체가 평탄(0 표 등)이면 그 표는 경계를 내지 않는다.
+ * 격자점이라 구간마다 점이 하나 이상 들고(polyfit 조건), 축의 첫·끝 점은 경계가 될 수 없어 뺀다. */
+export function scheduleKnees(tables, axis) {
+  const out = new Set();
+  for (const t of Object.values(tables ?? {})) {
+    const grid = t?.axes?.[axis];
+    const data = t?.data;
+    if (!Array.isArray(grid) || !Array.isArray(data) || grid.length !== data.length || grid.length < 3) continue;
+    let i = 1;
+    while (i < data.length && data[i] === data[0]) i += 1;
+    if (i > 1 && i < data.length - 1) out.add(grid[i]);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/** 튜닝 지표 카드 한 줄 — 하드 게이트·나머지 판정·깊이 (게인 탭 카드 스트립과 쇼케이스 보고가 같은 줄). */
+export function evalStripLine(m) {
+  const agg = m?.aggregate;
+  return (agg?.hard_fail == null ? "하드 게이트 판정 보류(케이스 0건)"
+    : agg.hard_fail ? `하드 게이트 위반 ${agg.hard_fails.length}건 — Fail`
+    : "하드 게이트 전부 통과")
+    + ` · ${checksSummary(m?.checks)} · depth=${m?.depth}`;
 }
 
 /** 스토어에 넣을 값 — {tables, scheduleOff}.

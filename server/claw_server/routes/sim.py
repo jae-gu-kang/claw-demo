@@ -5,12 +5,16 @@
 수행하며(구성 시 ValueError/TypeError), 서버는 이를 422로 매핑한다.
 엔벨로프 감시(실속 테이블·DB 유효범위)는 항상 장착 [확정 02 §6.1].
 결과는 전 해상도로 저장, 재생은 stride 다운샘플 조회.
+조회(재생·타면 사용)는 본문을 통째로 세우지 않는다 — 재생은 읽으면서 솎고, 타면 사용은
+쓰는 신호만 파싱한다(store.load want·each, Render 512 MB — store.py 머리말).
 """
 
 import math
+import os
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from claw.analysis.duty import duty_report
@@ -178,10 +182,12 @@ class RunwayIn(BaseModel):
 
     **이 블록이 있으면 기체에 스키드가 달린다.** 없으면 지면 자체가 없어서
     도입 전과 완전히 같이 동작한다(기체가 h<0을 그대로 통과한다).
-    heading·length는 엔진이 소비하지 않고 결과 meta에 실려 화면이 활주로를 그리는 데
-    쓴다 — 기준선은 결과와 함께 다닌다. 다만 화면의 착륙 요약(lib/replay.js
-    landingSummary)은 접지→정지 **거리**만 length와 견주고 접지 **위치**는 보지
-    않는다. 즉 "활주로에 섰는가"는 아직 아무도 판정하지 않는다.
+    heading·length는 엔진이 소비하지 않고 결과 meta에 실려 화면이 활주로를 그리고 착륙을
+    판정하는 데 쓴다 — 기준선은 결과와 함께 다닌다. 화면의 착륙 요약(lib/replay.js
+    landingSummary)은 접지·정지 **위치**를 활주로 축 좌표로 재 축방향은 length 구간과,
+    횡방향은 활주로 폭(반폭 − 가장자리 여유)과 견준다. 폭은 이 블록에 없다 — 화면이 그 런의
+    활주로가 시험장 제원과 같을 때만(길이·방위 대조) 제원의 폭을 쓴다(lib/replay.js
+    runwayWidthFor ← data/geo/goheung-runway.json width_m), 다르면 횡편차는 판정 불가다.
     """
 
     elevation: FiniteFloat = 0.0  # [m] 지면 표고 — 기준면 감시도 이 값이 된다
@@ -513,10 +519,18 @@ def submit_sim_run(req: SimRunIn, request: Request, response: Response) -> dict:
     return job.to_dict()
 
 
-def _load_sim(request: Request, result_id: str) -> dict:
-    """저장된 sim 결과 본문 — 없으면 404, 다른 종류면 409 (조회 경로 공통 규약)."""
+def _load_sim(request: Request, result_id: str, *, want=None, each=None, picked=None) -> dict:
+    """저장된 sim 결과 본문 — 없으면 404, 다른 종류면 409 (조회 경로 공통 규약).
+
+    want·each는 store.load 그대로다(골라 읽기·읽으면서 솎기). 종류 판정에 "kind"가
+    필요하므로 want는 ("kind",)를 거르지 않아야 한다. picked(신호 이름 목록)를 주면 신호는
+    그것만 먼저 파싱하고 나머지는 엔진이 읽는 순간 채운다(store.load_picked — 타면 사용·진단)."""
+    store = request.app.state.store
     try:
-        payload = request.app.state.store.load(result_id)
+        if picked is None:
+            payload = store.load(result_id, want=want, each=each)
+        else:
+            payload = store.load_picked(result_id, "signals", picked, want=want)
     except (KeyError, ValueError):
         raise HTTPException(status_code=404, detail=f"결과 없음: {result_id}")
     if payload.get("kind") != "sim":
@@ -524,26 +538,82 @@ def _load_sim(request: Request, result_id: str) -> dict:
     return payload
 
 
+def _stride_each(stride: int):
+    """재생 솎음 규칙을 항목별로 — 시계열(t·신호·실속 여유·엔벨로프 플래그)만 자르고 요약
+    스칼라(worst_margin 등)·meta는 원본 그대로다. store.load가 한 줄을 파싱하자마자 불러
+    잘린 것만 남긴다."""
+    sl = slice(None, None, stride)
+
+    def each(path, value):
+        if path in (("t",), ("envelope", "stall_margin")):
+            return value[sl]
+        if path[0] == "signals" and len(path) == 2:
+            return value[sl]
+        if path == ("envelope", "flags"):
+            return {k: v[sl] for k, v in value.items()}
+        return value
+
+    return each
+
+
 @router.get("/sim/{result_id}/replay")
 def sim_replay(
     result_id: str, request: Request, stride: int = Query(default=1, ge=1)
 ) -> dict:
-    """저장된 시뮬 결과의 stride 다운샘플 뷰 — 재생·플롯용 (요약 스칼라는 원본 유지)."""
-    payload = _load_sim(request, result_id)
+    """저장된 시뮬 결과의 stride 다운샘플 뷰 — 재생·플롯용 (요약 스칼라는 원본 유지).
+
+    **읽으면서 솎는다.** 통째로 읽고 자르면 S1 기본 미션(475 s, 본문 68.6 MB)에서 본문 글과
+    전 해상도 파싱본이 함께 서서 +218~263 MB였다(Render 무료 512 MB의 절반) — 신호 한 줄씩
+    파싱 직후 잘라 담으면 전 해상도 파싱본이 한 번도 서지 않는다. 응답은 통째로 자르던 때와
+    키 순서까지 같다(test_sim이 옛 알고리즘과 대조).
+
+    stride 1(전 해상도)은 저장 파일을 **파싱 없이 흘려보낸다** — 파일 바이트가 곧 저장 본문의
+    JSON이다. 파싱해 다시 직렬화하면 파싱본과 직렬화본 두 벌이 서서(S1 기본 미션 +258 MB)
+    512 MB 인스턴스가 이 요청 하나에 넘어간다. 종류 판정(409)에는 "kind" 한 항목만 파싱한다."""
     if stride == 1:
-        return payload
-    sl = slice(None, None, stride)
-    out = dict(payload)
-    out["t"] = payload["t"][sl]
-    out["signals"] = {k: v[sl] for k, v in payload["signals"].items()}
-    envelope = dict(payload["envelope"])
-    if "stall_margin" in envelope:
-        envelope["stall_margin"] = envelope["stall_margin"][sl]
-    if "flags" in envelope:
-        envelope["flags"] = {k: v[sl] for k, v in envelope["flags"].items()}
-    out["envelope"] = envelope
-    out["stride"] = stride
-    return out
+        _load_sim(request, result_id, want=lambda path: path == ("kind",))
+        return stream_result_body(request, result_id)
+    payload = _load_sim(request, result_id, each=_stride_each(stride))
+    payload["stride"] = stride
+    return payload
+
+
+def stream_result_body(request: Request, result_id: str) -> StreamingResponse:
+    """저장 본문 파일 → 응답 (1 MB씩). 먼저 열어 두므로 그 뒤 보존 상한이 지워도 끝까지 간다.
+
+    종류를 묻지 않는 통째 전달이면 어느 라우트든 이것을 쓸 수 있다 — 결과 통째 조회
+    (/results/{id})도 dict로 돌려주면 파싱본 + 직렬화본이 선다(S1 sim +258 MB, store.py 머리말)."""
+    try:
+        fh = request.app.state.store.open_body(result_id)
+    except (KeyError, ValueError):  # 종류 판정과 열기 사이에 지워졌다 — _load_sim과 같은 404
+        raise HTTPException(status_code=404, detail=f"결과 없음: {result_id}")
+    size = os.fstat(fh.fileno()).st_size
+
+    def chunks():
+        with fh:
+            while block := fh.read(1 << 20):
+                yield block
+
+    return StreamingResponse(chunks(), media_type="application/json",
+                             headers={"Content-Length": str(size)})
+
+
+# 타면 사용 집계(엔진 analysis.duty)가 읽는 신호 — 타면 복원(de·da·dr)·모드별 구간(mode)·
+# 트림 여유 분해(mach·wow·on_rail — pipeline.metrics.trim_reserve_breakdown이 .get으로 읽는다).
+# 나머지 90여 신호는 파싱하지 않는다(S1 기본 미션에서 파싱본 129 MB → 신호 일곱).
+# 이 목록은 **미리 읽기 힌트**다: 엔진이 이 밖의 신호를 읽으면 store.PickedEntries가 그 줄을
+# 마저 파싱해 답은 통째 읽기와 같다(메모리만 더 든다). 목록이 엔진과 어긋나면 test_sim의
+# 감시 테스트(duty_report에 접근 기록 dict를 넣는다)가 빨개진다.
+DUTY_SIGNALS = frozenset({"de", "da", "dr", "mode", "mach", "wow", "on_rail"})
+
+
+def _load_for_duty(request: Request, result_id: str) -> dict:
+    """타면 사용의 입력 — t·meta·kind + DUTY_SIGNALS만 파싱한다. 엔벨로프는 읽지 않는다
+    (duty_report가 받지 않는다 — 라우트가 t·signals·meta만 넘긴다)."""
+    payload = _load_sim(request, result_id, picked=DUTY_SIGNALS, want=lambda path: path[0] != "envelope")
+    if not isinstance(payload.get("signals"), dict):  # 신호 절이 없는 본문 — 빈 신호로(종전과 같다)
+        payload["signals"] = {}
+    return payload
 
 
 @router.get("/sim/{result_id}/duty")
@@ -559,8 +629,9 @@ def sim_duty(
     구간이 통째로 사라져 조용히 낙관적인 수치가 나온다 — 재생(/replay)과 달리
     여기서는 저장된 전 해상도가 유일하게 옳은 입력이다. 그래서 원본을 쥔 서버가
     집계까지 끝내 웹에 요약만 보낸다 (표본 수와 무관하게 응답 크기 유계).
+    전 해상도는 지키되 쓰는 신호만 파싱한다(DUTY_SIGNALS) — 솎는 것이 아니라 고르는 것이다.
     """
-    payload = _load_sim(request, result_id)
+    payload = _load_for_duty(request, result_id)
     report = duty_report(
         payload["t"], payload["signals"], payload.get("meta") or {},
         bins=bins, rate_bins=rate_bins,

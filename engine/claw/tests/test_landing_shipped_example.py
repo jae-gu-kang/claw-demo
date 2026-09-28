@@ -3,7 +3,8 @@
 test_landing.py는 conftest가 예제 자리에 둔 구 합성 기체(1200 kg)를 난다. 기체 문서의 `rollout_m`과 그 사본인 웹 폴백
 (web/js/lib/site.js GOHEUNG.rolloutM)은 **제품 예제**의 값이라 여기서 따로 잰다. 모드의 속도·강하율·고도·연료는 전부 문서에서
 읽는다 — 사본을 두면 문서를 고쳐도 이 테스트가 자기 사본으로 통과한다. 경로는 웹 기본 미션(장주)이 아니라 직선이다 — 미끄럼은
-플레어 속도·접지 강하율·스키드 마찰이 정하고 수평 경로와는 무관하다(웹 기본 미션 155 m · 여기 155.8 m).
+플레어 속도·접지 강하율·스키드 마찰이 정하고 수평 경로와는 무관하다(v1.48 재튜닝 게인 — 웹 기본 미션 159 m · 여기 156.5 m).
+착륙 지점(활주로 축 접지)은 이 테스트가 지키지 않는다 — 직선 경로라 장주·파이널이 없다.
 """
 
 import pytest
@@ -65,7 +66,7 @@ def test_발사에서_정지까지_순서대로_완주한다(landed):
 
 
 def test_플레어가_문서의_속도와_강하율로_접지한다(landed, shipped):
-    """실측 −0.36 m/s · 32.72 m/s (문서 flare −0.33 m/s · 32.7 m/s) — 플레어가 강하를 실제로 세운다."""
+    """실측 −0.32 m/s · 32.7 m/s (v1.48 재튜닝 게인 · 문서 flare −0.33 m/s · 32.7 m/s) — 플레어가 강하를 실제로 세운다."""
     fl = shipped.doc["mission_template"]["sim"]["flare"]
     s = landed.signals
     k = int(round(landed.meta["phases"]["touchdown_t"] / DT))
@@ -74,7 +75,7 @@ def test_플레어가_문서의_속도와_강하율로_접지한다(landed, ship
 
 
 def test_미끄럼_거리가_문서의_rollout_m이다(landed, shipped):
-    """실측 155.8 m (RTK 시드 11 — 시드 12도 155.8 m, 순항 44 m/s). 허용대 rel 0.12는 site.js 폴백과 같은 회귀 밴드다."""
+    """실측 156.5 m (RTK 시드 11, v1.48 재튜닝 게인 — 재튜닝 전 155.8 m, 순항 44 m/s). 허용대 rel 0.12는 site.js 폴백과 같은 회귀 밴드다."""
     s, ph = landed.signals, landed.meta["phases"]
     k_td, k_st = int(round(ph["touchdown_t"] / DT)), int(round(ph["stop_t"] / DT))
     rollout = s["pn"][k_st] - s["pn"][k_td]

@@ -2,8 +2,10 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
 import {
-  readTour, tourMismatch, tourReady, tourShouldEnd, tourStopped, type WorldTour,
+  TOUR_CAM_MODE, TOUR_VEHICLE_LATE_NOTE, TOUR_VEHICLE_WAIT_MS, readTour, tourAwaitsVehicle, tourMismatch, tourReady,
+  tourShouldEnd, tourStopped, type WorldTour,
 } from "./tour.ts";
+import { CAM_MODES } from "../lib/camera.ts";
 
 const T: WorldTour = {
   token: "t1", resultId: "r1", commsId: "c1", speed: 2, voice: true, endT: 104.4,
@@ -27,7 +29,7 @@ describe("readTour", () => {
 });
 
 describe("tourReady", () => {
-  const ok = { chosen: "r1", shownId: "r1", playable: true, commsKey: "c1" };
+  const ok = { chosen: "r1", shownId: "r1", playable: true, commsKey: "c1", vehicleSettled: true };
 
   it("투어 런이 선택·표시·재생 가능하고 대본이 앉았을 때만 시작한다", () => {
     assert.equal(tourReady(T, ok), true);
@@ -38,6 +40,29 @@ describe("tourReady", () => {
 
   it("대본 없는 투어(교신 실패)는 대본을 기다리지 않는다", () => {
     assert.equal(tourReady({ ...T, commsId: null }, { ...ok, commsKey: null }), true);
+  });
+
+  it("기체가 서기 전에는 시작하지 않는다 — 발사 장면이 빈 레일로 흘러가지 않게(모델은 장면 뒤에 따라온다)", () => {
+    assert.equal(tourReady(T, { ...ok, vehicleSettled: false }), false);
+    // 대본 없는 투어(쇼케이스의 무-LLM 경로)도 기체는 기다린다
+    assert.equal(tourReady({ ...T, commsId: null }, { ...ok, commsKey: null, vehicleSettled: false }), false);
+  });
+});
+
+describe("tourAwaitsVehicle — 기다림 상한을 거는 자리", () => {
+  const ok = { chosen: "r1", shownId: "r1", playable: true, commsKey: "c1", vehicleSettled: false };
+
+  it("다른 것이 다 섰는데 기체만 남았을 때만 참 — 그때부터 상한을 잰다", () => {
+    assert.equal(tourAwaitsVehicle(T, ok), true);
+    assert.equal(tourAwaitsVehicle(T, { ...ok, vehicleSettled: true }), false); // 이미 섰다
+    assert.equal(tourAwaitsVehicle(T, { ...ok, shownId: "r0" }), false); // 장면부터 아직이다
+    assert.equal(tourAwaitsVehicle(T, { ...ok, commsKey: null }), false); // 대본부터 아직이다
+  });
+
+  it("상한은 조율자 워치독(90 s) 안쪽이고, 기체 없이 시작한 사실을 화면이 말한다", () => {
+    assert.ok(TOUR_VEHICLE_WAIT_MS > 0 && TOUR_VEHICLE_WAIT_MS < 60_000);
+    assert.match(TOUR_VEHICLE_LATE_NOTE, new RegExp(`${TOUR_VEHICLE_WAIT_MS / 1000}초`));
+    assert.match(TOUR_VEHICLE_LATE_NOTE, /기체 없이/);
   });
 });
 
@@ -78,5 +103,12 @@ describe("tourStopped", () => {
 
   it("형상이 깨진 값도 멈춤으로 본다 — 판정 불가를 '계속'으로 눙치지 않는다", () => {
     assert.equal(tourStopped({ token: "t1" }, T), true); // resultId가 없다 — 투어가 아니다
+  });
+});
+
+describe("TOUR_CAM_MODE", () => {
+  it("투어 재생은 추적 시점 — 첫 시점(자유 궤도)은 장면 규모로 멀어 기체가 안 보였다(쇼케이스 e2e)", () => {
+    assert.equal(TOUR_CAM_MODE, "chase");
+    assert.ok(CAM_MODES.includes(TOUR_CAM_MODE), "컨트롤러가 받는 시점 이름이어야 한다(아니면 setCamMode가 조용히 무시)");
   });
 });

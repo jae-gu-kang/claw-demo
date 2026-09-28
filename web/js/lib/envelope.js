@@ -335,6 +335,85 @@ export function spreadLabels(items, minGap) {
   return out;
 }
 
+/** 글 상자 — fillText 기준점(x, 기준선 y)·폭 w·글자 크기 size·정렬 → {x0, y0, x1, y1}.
+ *  기준선 위로 0.85·아래로 0.25 글자 크기 — 한글 받침·영문 내림까지 덮는 근사(겹침 판정용, 픽셀 정확도 아님). */
+export function textBox(x, y, w, size, align = "left") {
+  const x0 = align === "right" ? x - w : align === "center" ? x - w / 2 : x;
+  return { x0, y0: y - size * 0.85, x1: x0 + w, y1: y + size * 0.25 };
+}
+
+/** 두 상자의 겹친 넓이 (px²) — 0이면 안 겹친다(모서리 맞닿음 포함). */
+export function boxOverlap(a, b) {
+  const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+  const h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+const boxInside = (b, r) => b.x0 >= r.x0 && b.x1 <= r.x1 && b.y0 >= r.y0 && b.y1 <= r.y1;
+
+/** 점 목록 [{x, y}] → 반지름 r의 상자 — 판정 점·격자점을 라벨이 피할 장애물로. */
+export function pointObstacles(points, r) {
+  return points.map((p) => ({ x0: p.x - r, y0: p.y - r, x1: p.x + r, y1: p.y + r }));
+}
+
+/** 선에 붙는 라벨의 후보 자리 (placeLabels 입력) — 첫 후보가 종전 자리다(겹치지 않으면 그림이 그대로).
+ *  kind "v"(세로선, at = 가로축 값): 위 줄들의 선 오른쪽·왼쪽, 그다음 아래 줄들 — 가까운 줄부터.
+ *  kind "h"(가로선, at = 세로축 값): 선 바로 위·아래를 왼쪽 끝 → 오른쪽 끝(xEnd, 선이 끝나는 곳) → 가운데 순서로.
+ *  plot은 플롯 틀 {x0, y0, x1, y1}, px·py는 값 → 픽셀. */
+export function lineLabelCandidates(kind, at, { plot, px, py, xEnd = null, rows = 3, rowStep = 13 } = {}) {
+  const out = [];
+  if (kind === "v") {
+    const x = px(at);
+    const ys = [];
+    for (let r = 0; r < rows; r += 1) ys.push(plot.y0 + 12 + r * rowStep);
+    for (let r = 0; r < rows; r += 1) ys.push(plot.y1 - 5 - r * rowStep);
+    for (const y of ys) out.push({ x: x + 3, y, align: "left" }, { x: x - 3, y, align: "right" });
+    return out;
+  }
+  const y = py(at);
+  const end = xEnd ?? plot.x1;
+  for (const [x, align] of [[plot.x0 + 6, "left"], [end - 6, "right"], [(plot.x0 + end) / 2, "center"]]) {
+    out.push({ x, y: y - 4, align }, { x, y: y + 12, align });
+  }
+  return out;
+}
+
+/** 겹침 없는 라벨 자리 — 탐욕 배치 (그림 위 글이 서로·판정 점 밑에 깔리지 않게, 쇼케이스 D10).
+ *
+ *  labels는 **우선순위 순서**: [{key, w, size, candidates: [{x, y, align}], optional?, region?, accept?, avoid?}].
+ *  라벨마다 후보를 차례로 보며 첫 번째로 (a) 틀(bounds) 안이고 (b) region(구역 이름이면 그 구역 사각형) 안이고
+ *  (c) accept(상자)가 참이고 (d) 이미 놓인 라벨·obstacles·avoid와 pad 이상 떨어진 자리를 잡는다.
+ *  다 막히면 — optional이면 뺀다(skipped: 범례가 이름을 갖는 구역 이름 등), 아니면 겹침이 가장 적은 후보를 틀 안으로
+ *  밀어 넣어 쓴다(fits:false — 선 이름을 지우는 것보다 겹쳐도 남는 편이 낫다). 돌려주는 것은 입력 순서
+ *  [{key, x, y, align, box, fits, skipped}]. */
+export function placeLabels(labels, { bounds, obstacles = [], pad = 2 } = {}) {
+  const taken = [...obstacles];
+  const grow = (b) => ({ x0: b.x0 - pad, y0: b.y0 - pad, x1: b.x1 + pad, y1: b.y1 + pad });
+  return labels.map((l) => {
+    const cands = (l.candidates ?? []).map((c) => {
+      const align = c.align ?? "left";
+      return { x: c.x, y: c.y, align, box: textBox(c.x, c.y, l.w, l.size, align) };
+    });
+    const blockers = [...taken, ...(l.avoid ?? [])];
+    const allowed = (c) => boxInside(c.box, bounds) && (!l.region || boxInside(c.box, l.region))
+      && (!l.accept || l.accept(c.box));
+    const hit = cands.find((c) => allowed(c) && blockers.every((b) => boxOverlap(grow(c.box), b) === 0));
+    let at = hit ? { ...hit, fits: true } : null;
+    if (!at) {
+      if (l.optional || !cands.length) return { key: l.key, x: null, y: null, align: null, box: null, fits: false, skipped: true };
+      for (const c of cands) {
+        const dx = c.box.x0 < bounds.x0 ? bounds.x0 - c.box.x0 : c.box.x1 > bounds.x1 ? bounds.x1 - c.box.x1 : 0;
+        const dy = c.box.y0 < bounds.y0 ? bounds.y0 - c.box.y0 : c.box.y1 > bounds.y1 ? bounds.y1 - c.box.y1 : 0;
+        const box = { x0: c.box.x0 + dx, y0: c.box.y0 + dy, x1: c.box.x1 + dx, y1: c.box.y1 + dy };
+        const cost = blockers.reduce((sum, b) => sum + boxOverlap(box, b), 0);
+        if (!at || cost < at.cost) at = { x: c.x + dx, y: c.y + dy, align: c.align, box, fits: false, cost };
+      }
+    }
+    taken.push(at.box);
+    return { key: l.key, x: at.x, y: at.y, align: at.align, box: at.box, fits: at.fits, skipped: false };
+  });
+}
+
 /** 도표의 마하 창 {xMin, xMax} — 캔버스와 캡션이 **같은 창**을 봐야 "창 밖"이 한 말이
  * 된다. 창은 DB 하한·합성 하한의 최소와 M_D·합성 상한의 최대에 여백(pad)을 더한 것. */
 export function machWindow(bounds, region, pad = 0.03) {
@@ -434,4 +513,57 @@ export function envelopeQuery(params) {
     .filter(([, v]) => v !== null && v !== undefined)
     .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
     .join("&");
+}
+
+// ── 한계 값의 출처 (⑤ 표) — 서버 echo가 정본, 웹은 라벨로만 바꾼다 ──────────
+
+/** 구조 한계 한 칸의 출처 {text, ok} — limits_source("user-input"|"profile"|"demo-placeholder")와
+ * limits_overridden(질의로 덮은 칸)에서. 사용자 기체의 문서 값을 "자리표시"로 부르면 실기체 값을 가짜라고
+ * 말하게 되고, 예제 값을 기체 값으로 부르면 가짜를 진짜라고 말한다 (02 §5.6). user-input은 **덮은 칸만**
+ * 사용자 입력이다 — 나머지 칸의 출처는 그 기체가 예제인지(echo profile.is_example)로 가린다. */
+export function limitSourceLabel(param, limitsSource, overridden, isExample = null) {
+  if ((overridden ?? []).includes(param)) return { text: "사용자 입력", ok: true };
+  const example = limitsSource === "demo-placeholder"
+    || (limitsSource === "user-input" && isExample !== false);
+  return example ? { text: "데모 자리표시", ok: false } : { text: "기체 문서", ok: true };
+}
+
+/** 동압 한계·운용 고도 한 칸의 출처 {text, ok} — value는 응답 bounds의 값, source는 bounds_source의 그 칸
+ * ("query"|"profile"|null). 서버는 문서 값을 하나라도 쓴 응답에만 bounds_source를 싣는다 — 없으면 값이 있는
+ * 칸은 전부 질의(사용자 입력)에서 온 것이다. null 값은 문서에도 질의에도 없다는 뜻이라 경계 자체가 없다. */
+export function opsSourceLabel(value, source) {
+  if (value == null) return { text: "미입력 — 경계 없음", ok: false };
+  return source === "profile" ? { text: "기체 문서", ok: true } : { text: "사용자 입력", ok: true };
+}
+
+// ── 쇼케이스 신호 보고 (lib/showcasecue.js) — 탭 자신의 산출물로 만든 한 줄 ──────
+
+const num = (v) => (typeof v === "number" && Number.isFinite(v) ? String(Number(v.toPrecision(4))) : "—");
+
+/** V-n·M-h 그리기 → 보고 {summary, data}. data는 진행기 계약(alts·q_max·alt_min·alt_max) + 출처·n_z. */
+export function vnCueReport(vnList, mh) {
+  const alts = (vnList ?? []).map((v) => v.alt);
+  const b = mh?.bounds ?? {};
+  const src = mh?.bounds_source ?? null;
+  const nz = mh?.maneuver?.nz ?? null;
+  const parts = [`V-n ${alts.length}고도(${alts.map((a) => `${num(a)} m`).join(" · ")})`];
+  parts.push(b.q_max == null ? "q̄_max 경계 없음" : `q̄_max ${num(b.q_max)} Pa`);
+  parts.push(b.alt_min == null && b.alt_max == null
+    ? "운용 고도 경계 없음"
+    : `운용 고도 ${b.alt_min == null ? "—" : num(b.alt_min)}~${b.alt_max == null ? "—" : num(b.alt_max)} m`);
+  if (nz != null) parts.push(`기동 n_z ${num(nz)} g`);
+  return {
+    summary: parts.join(" · "),
+    data: {
+      alts, q_max: b.q_max ?? null, alt_min: b.alt_min ?? null, alt_max: b.alt_max ?? null,
+      bounds_source: src, nz,
+    },
+  };
+}
+
+/** 스캔 판정 집계(scanSummary) → 보고 한 줄 — 범례와 같은 라벨(kindLabel)만 쓴다. */
+export function scanCueSummary(s) {
+  const parts = [`${s.total}점 — ${kindLabel("ok")} ${s.ok}`];
+  for (const { kind, n } of s.byKind) parts.push(`${kindLabel(kind)} ${n}`);
+  return parts.join(" · ");
 }

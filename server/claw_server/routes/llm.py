@@ -10,7 +10,8 @@
 폴백하지 않는다(폐쇄망 의도 구성이 조용히 밖으로 나가면 안 된다). 아무것도
 설정하지 않으면 LLM 기능만 사유와 함께 꺼지고 서버는 그대로 선다 — 지형 팩
 없는 배포와 같은 degrade(`/llm/status`가 그 사유를 문장으로 낸다). 브리핑의
-가지치기·프롬프트는 claw_server/brief.py.
+가지치기·프롬프트는 claw_server/brief.py, 초안 프롬프트(고른 기체의 사실·기본
+미션 예시)는 claw_server/llm_draft.py.
 
 **초안은 웹 폼 행 형식이다** (`modeRows`/`wpRows` — 값 전부 문자열). 서버
 ModeIn(alt/pitch/hdot 3필드)이 아니라 웹 표의 lonAxis+lonValue 형식인 이유:
@@ -32,10 +33,12 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
 from claw_server.ask import ASK_SCHEMA, ASK_SYSTEM, ask_user
-from claw_server.brief import BRIEF_SCHEMA, BRIEF_SYSTEM, brief_user, prune
+from claw_server.brief import BRIEF_SCHEMA, BRIEF_SYSTEM, brief_user, load_pruned
 from claw_server.comms import (
-    COMMS_SCHEMA, COMMS_SYSTEM, comms_user, flight_log, validate_lines,
+    COMMS_SCHEMA, COMMS_SYSTEM, FLIGHT_LOG_SIGNALS, comms_user, flight_log, validate_lines,
 )
+from claw_server.llm_draft import draft_system
+from claw_server.refs import ProfileRef, profile_echo, resolve_profile
 
 router = APIRouter(tags=["llm"])
 
@@ -185,75 +188,9 @@ _DRAFT_SCHEMA = {
     "additionalProperties": False,
 }
 
-# ── 시스템 프롬프트 — 미션 표의 의미 규칙 (형상은 위 스키마가 강제한다) ──────────
-# 아래 수치·규칙의 출처는 웹(views/sim.js 기본 미션·lib/mission.js)과 엔진 검증이다.
-# 기본 미션은 **미션 시나리오**라 02 §5.5 재기술 금지 대상이 아니지만(웹 주석과
-# 같은 판단), sim.js 기본 미션이 바뀌면 아래 예시가 조용히 낡는다 — 그때 함께 고칠 것.
-_SYSTEM = """너는 CLAW 비행제어 설계툴의 미션 초안 생성기다. 사용자의 자연어
-의도를 시뮬레이션 탭의 편집 표에 그대로 앉는 초안으로 바꾼다. 초안은 실행되지
-않는다 — 사람이 표에서 다듬고 실행 버튼을 누르며, 틀린 값은 엔진이 거부한다.
-그래도 첫 초안이 한 번에 완주 가능해야 이 기능이 뜻이 있다.
-
-## 기체·무대 (고정 사실)
-- 델타윙 단발 무인기(최대 이륙 200 kg급). 트림 실속속도 28.9 m/s, 발사 이탈속도 33.3 m/s(=1.15×Vs),
-  순항 44 m/s 부근(더 느리면 선회에서 받음각 여유가 모자라 고도를 잃는다), 뱅크 한계 0.7 rad에서 선회 반경 약 234 m.
-- 무대는 고흥 시험장. NED 좌표(미터), 원점 = 활주로 남단 임계
-  (위도 34.601303, 경도 127.212067). 활주로는 원점에서 진방위 0.05964 rad
-  (3.417°) 방향으로 1205 m. 지형 팩 core가 반경 12 km라 웨이포인트는
-  |n|, |e| ≤ 12000 안에 두고, 벗어나면 warnings에 적는다.
-- 각도는 전부 라디안. hdot(강하율)은 상승이 +라 강하는 음수다.
-
-## 표의 의미 규칙 (위반하면 화면·엔진이 거부한다)
-1. 모든 칸 값은 문자열이다. 빈 문자열 ""는 "그 축 끔"이다.
-2. lonAxis(종방향 축)는 ""·alt·pitch·hdot 중 하나 — 모드마다 종방향 명령은
-   딱 하나다. lonValue가 그 축의 값이다.
-3. "path"는 두 곳에서만: heading 칸(수평 경로 추종), lonAxis가 alt일 때의
-   lonValue(세로 프로파일 추종). pitch·hdot 칸의 "path"는 거부된다.
-4. exitKind와 인자: time_ge·alt_ge·alt_le·speed_ge·speed_le·hdot_ge·hdot_le는
-   exitValue에 수치가 필수다(빈 문자열이면 거부). always·path_done·on_ground·
-   airborne·off_rail은 exitValue를 ""로 둔다.
-5. next 사슬: 실행은 첫 행에서 시작해 next로만 넘어간다. 모든 행이 첫 행에서
-   닿아야 한다 — 아무도 가리키지 않는 행은 절대 실행되지 않는다. 마지막 행은
-   next를 ""로 둔다.
-6. 웨이포인트 d(고도)는 전부 채우거나 전부 비운다. 비울 때는 ""로 둔다(화면이
-   키를 지운다). 수평 경로만 따를 미션이면 d를 전부 비우는 쪽이 단순하다.
-7. heading에 "path"를 쓴 모드가 있으면 wpRows가 비면 안 된다(엔진 거부).
-   반대로 wpRows를 채웠는데 어느 모드도 "path"를 안 쓰면 기체는 웨이포인트를
-   무시하고 직진한다 — 경로를 날라는 의도면 반드시 한 모드의 heading을
-   "path"로 둔다. 세로 프로파일(d)까지 따르려면 그 모드의 lonAxis를 alt,
-   lonValue를 "path"로 둔다.
-8. accept(도달 반경)는 특별한 이유가 없으면 "100"을 유지한다 — 너무 작으면
-   선회 반경 때문에 경로가 영영 끝나지 않는다(path_done 미발화).
-9. tEnd는 미션이 끝나는(착륙이면 정지) 시각을 여유 있게 덮어야 한다. 상한 3600.
-10. 지상 출발(groundOn=true)이면 mach는 반드시 "0"이고 alt는 비행 고도가
-    아니라 활주로 표고(기본 "0")다. launchOn=true면 발사대에서 뜬다.
-    공중 수평비행에서 시작하려면 groundOn=false·launchOn=false로 두고
-    mach를 양수(예: "0.13"≈44 m/s), alt를 시작 고도로 둔다.
-11. 착륙(on_ground·접지·활주 정지)이 있는 미션은 groundOn=true여야 한다 —
-    지면이 없으면 접지 판정 자체가 성립하지 않는다.
-12. runConditions의 문자열 칸을 ""로 두면 화면의 현재 값이 유지된다. 확신이
-    없는 칸은 ""로 두는 쪽이 낫다.
-
-## 답하는 법
-- summary는 초안이 무엇을 하는지 한 문장.
-- assumptions에는 사용자가 말하지 않아 네가 정한 것을 전부 적는다(고도·속도·
-  방향 등). warnings에는 요청을 그대로 못 지킨 것·위험한 값을 적는다.
-- 모드 이름은 소문자 영문(launch·climb·cruise 등 관례)을 따른다.
-
-## 검증된 완주 예시 (발사 → 순항(경로 추종) → 접근 → 착륙 정지, 약 221 s)
-{"summary":"발사대에서 떠서 활주로 축 웨이포인트를 따라 순항하고 되돌아와 정지",
-"assumptions":["순항 고도 200 m","순항 속도 44 m/s"],
-"modeRows":[
-{"name":"launch","speed":"44.9","lonAxis":"pitch","lonValue":"0.3665","heading":"0.05964","exitKind":"off_rail","exitValue":"","next":"climb"},
-{"name":"climb","speed":"44.9","lonAxis":"pitch","lonValue":"0.3665","heading":"0.05964","exitKind":"alt_ge","exitValue":"180","next":"cruise"},
-{"name":"cruise","speed":"44","lonAxis":"alt","lonValue":"200","heading":"path","exitKind":"path_done","exitValue":"","next":"approach"},
-{"name":"approach","speed":"35.9","lonAxis":"hdot","lonValue":"-1.96","heading":"0.05964","exitKind":"alt_le","exitValue":"20","next":"flare"},
-{"name":"flare","speed":"32.7","lonAxis":"hdot","lonValue":"-0.33","heading":"0.05964","exitKind":"on_ground","exitValue":"","next":"rollout"},
-{"name":"rollout","speed":"0","lonAxis":"pitch","lonValue":"0","heading":"0.05964","exitKind":"speed_le","exitValue":"0.5","next":"stopped"},
-{"name":"stopped","speed":"0","lonAxis":"pitch","lonValue":"0","heading":"","exitKind":"time_ge","exitValue":"1e9","next":""}],
-"wpRows":[{"n":"2596","e":"155","d":""},{"n":"3294","e":"197","d":""}],
-"runConditions":{"mach":"0","alt":"0","fuel":"37.5","groundOn":true,"launchOn":true,"tEnd":"280","accept":"100"},
-"warnings":[]}"""
+# ── 시스템 프롬프트 — claw_server/llm_draft.py (규칙·무대 고정, 기체 사실·기본 미션 예시는 고른 기체 문서에서) ──
+# 종전에는 예제 기체의 실속·레일·순항·선회 반경과 그 기체의 완주 예시를 여기 글로 박아 두었다 — 다른 기체를
+# 고르면 남의 기체 수치로 초안이 나왔다(기체 고정 금지 원칙). 이제 요청의 기체 선택으로 매번 세운다.
 
 
 def call_llm(*, api_key: str, model: str, system: str, user: str,
@@ -429,9 +366,10 @@ def _extract_json(raw: dict) -> dict:
 
 
 class MissionDraftIn(BaseModel):
-    """초안 요청 — 자연어 의도 한 덩이."""
+    """초안 요청 — 자연어 의도 한 덩이 + 기체 선택(없으면 예제 — 계산 라우트와 같은 규칙, refs.py)."""
 
     intent: str = Field(min_length=1, max_length=4000)
+    profile: ProfileRef | None = None
 
     @field_validator("intent")
     @classmethod
@@ -466,8 +404,18 @@ def llm_status() -> dict:
 @router.post("/llm/mission-draft", status_code=202)
 def submit_mission_draft(req: MissionDraftIn, request: Request,
                          response: Response) -> dict:
+    """미션 초안 — 고른 기체의 사실·기본 미션으로 세운 프롬프트(llm_draft.draft_system)로 한 번 부른다.
+
+    기체 해석·프롬프트 조립은 제출 시점에 한다 — 없는 기체(404)·손상(409)이 잡 오류가 아니라 즉시 드러나고,
+    V-n 실속속도 한 번(수 ms)이라 요청 스레드가 감당한다. 초안에는 그 기체 echo가 실린다."""
     model, key = _require_backend()  # 백엔드 미설정은 제출 시점 503 + 사유
     store = request.app.state.store
+    profile = resolve_profile(request, req.profile)
+    try:
+        system = draft_system(profile)
+    except (ValueError, TypeError) as e:  # V-n 실속속도 계산의 엔진 검증 — vn-envelope 라우트와 같은 422
+        raise HTTPException(status_code=422, detail=f"초안 프롬프트의 기체 사실을 세울 수 없다: {e}")
+    echo = profile_echo(profile)
 
     def work(job):
         # 단발 호출이라도 **보고를 두 번 이상** 한다 — 한 번도 안 하면
@@ -477,7 +425,7 @@ def submit_mission_draft(req: MissionDraftIn, request: Request,
         # 대상은 "어떤 LLM인가"가 아니라 "지금 뭘 하고 있나"다
         if job.report(0, 2, message="초안 생성 중"):
             return  # 협조적 취소 — 저장 없음
-        raw = call_llm(api_key=key, model=model, system=_SYSTEM,
+        raw = call_llm(api_key=key, model=model, system=system,
                        user=req.intent, schema=_DRAFT_SCHEMA)
         if job.report(1, 2, message="응답 정리 중"):
             return  # 호출 중 취소가 눌렸다 — 초안을 버린다
@@ -485,13 +433,15 @@ def submit_mission_draft(req: MissionDraftIn, request: Request,
         store.save(
             job.id,
             {"kind": "mission_draft", "intent": req.intent, "draft": draft,
-             "model": model, "usage": raw.get("usage")},
+             "model": model, "usage": raw.get("usage"), "profile": echo},
             meta={
                 "kind": "mission_draft",
                 "created": job.created,
                 # 지문은 형상 계보 키인데 초안은 형상 산출물이 아니다 — 빈 값이
                 # "계보 없음"을 그대로 말한다 (위장 금지)
                 "fingerprint": "",
+                # 어느 기체의 사실로 짠 초안인가 — 결과 목록의 기체 칸·신선도가 읽는다
+                "profile": echo,
                 "n": len(draft.get("modeRows") or [])
                 if isinstance(draft, dict) else 0,
             },
@@ -538,16 +488,15 @@ def submit_brief(req: BriefIn, request: Request, response: Response) -> dict:
         if job.report(0, 3, message="결과 읽는 중"):
             return
         try:
-            payload = store.load(req.result_id)
+            # 가지치기가 마커로 바꿀 시계열(sim의 t·signals)은 세우지 않는다 — 결과는 통째 읽기와
+            # 같다(brief.load_pruned). 서버 힙 정점: 예제 750 s 본문 +211 → +10 MB, S1 475 s +133 → +7 MB
+            pruned, kind = load_pruned(store, req.result_id, str(meta.get("kind") or ""))
         except KeyError:
             # 제출 시점 메타 확인과 이 로드 사이에 보존 상한이 대상을 밀어냈다 —
             # 트레이스백이 아니라 사유 문장으로 (design.py resume KeyError 선례)
             raise RuntimeError(
                 f"결과가 사라졌습니다: {req.result_id} — 저장소 보존 상한에 "
                 "밀려났거나 지워졌을 수 있습니다. 결과 탭을 새로고침하십시오.")
-        kind = str(meta.get("kind") or payload.get("kind") or "")
-        pruned = prune(payload, kind)
-        del payload  # sim 54MB — 가지치기 뒤에는 들고 있지 않는다
         if job.report(1, 3, message="소견서 생성 중"):  # 모델명은 진행 문구에 안 싣는다 (v1.36)
             return  # 돈 쓰기 전 마지막 취소 지점
         raw = call_llm(api_key=key, model=model, system=BRIEF_SYSTEM,
@@ -611,13 +560,16 @@ def submit_comms(req: BriefIn, request: Request, response: Response) -> dict:
         if job.report(0, 3, message="결과 읽는 중"):
             return
         try:
-            payload = store.load(req.result_id)
+            # 비행 로그가 읽는 신호만 먼저 파싱한다(comms.FLIGHT_LOG_SIGNALS — 84개 중 10개). 목록 밖을
+            # 읽으면 그 줄을 마저 채워 로그는 통째 읽기와 같다. 서버 힙 정점: 예제 750 s 본문 +211 → +37 MB,
+            # S1 475 s +133 → +24 MB
+            payload = store.load_picked(req.result_id, "signals", FLIGHT_LOG_SIGNALS)
         except KeyError:
             raise RuntimeError(
                 f"결과가 사라졌습니다: {req.result_id} — 저장소 보존 상한에 "
                 "밀려났거나 지워졌을 수 있습니다. 결과 탭을 새로고침하십시오.")
         log = flight_log(payload)
-        del payload  # sim 54MB — 추출 뒤에는 들고 있지 않는다
+        del payload  # 추출 뒤에는 들고 있지 않는다
         if job.report(1, 3, message="대본 생성 중"):  # 모델명은 진행 문구에 안 싣는다 (v1.36)
             return  # 돈 쓰기 전 마지막 취소 지점
         raw = call_llm(api_key=key, model=model, system=COMMS_SYSTEM,

@@ -298,3 +298,21 @@ test("겹치기 값 파싱 — 빈 칸은 겹치기 없음, 개수 상한, 수�
   assert.match(overlayValues("0.1, x").error, /수치가 아님/);
   assert.match(overlayValues("1,2,3,4,5,6,7").error, /6개까지/);
 });
+
+test("문서 경고 한 줄 — 형상 변형 표시·경로·문구 (검증·저장·GET 동봉이 같은 꼴)", async () => {
+  const { warningLine } = await import("./profileform.js");
+  assert.equal(warningLine({ path: "/trim/alpha_bounds/1", variant: null, message: "낮다" }),
+    "주의 /trim/alpha_bounds/1 — 낮다");
+  assert.equal(warningLine({ path: "/trim/alpha_bounds/1", variant: "eoir", message: "낮다" }),
+    "주의 [형상 변형 eoir] /trim/alpha_bounds/1 — 낮다");
+});
+
+test("정적 안정성 위반 구간 곡선 — 위반 α 구간 안의 점만 값, 밖은 null(선이 끊긴다)", async () => {
+  const { violationSeries } = await import("./profileform.js");
+  const x = [0.3, 0.4, 0.45, 0.5, 0.55];
+  const v = [0.05, 0.02, 0, -0.01, -0.03];
+  assert.deepEqual(violationSeries(x, v, [[0.45, 0.55]]), [null, null, 0, -0.01, -0.03]);
+  assert.deepEqual(violationSeries(x, v, []), [null, null, null, null, null]);
+  // 구간이 여럿이면 전부 — 한 점짜리 구간도 그 점을 싣는다
+  assert.deepEqual(violationSeries(x, v, [[0.3, 0.3], [0.5, 0.5]]), [0.05, null, null, -0.01, null]);
+});

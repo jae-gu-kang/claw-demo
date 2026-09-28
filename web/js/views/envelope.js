@@ -23,16 +23,22 @@ Envelope는 하나가 아니다. 목적에 따라 층이 갈리고, 그 순서�
 수치는 전부 엔진(vn_envelope·design_envelope·envelope_verdict) — 여기서는 표시만.
 표현 변환(다각형·세그먼트·셀 분류·프리필)은 lib/envelope.js(테스트).
 구조 한계 프리필은 응답 echo 자기 정렬(02 §5.5 — 기본값 재기술 금지):
-손대지 않은 필드만 echo로 갱신, 값을 보내는 건 손댄 필드뿐.
+손대지 않은 필드만 echo로 갱신, 값을 보내는 건 손댄 필드뿐. 동압 한계·운용 고도도 같은
+계약이다 — 고른 기체 문서 값(structural.q_max·operating)으로 먼저 서고, 손대지 않은 칸은
+보내지 않아 서버가 문서 값을 쓰며(bounds_source로 출처를 말한다) 그 echo로 다시 맞춘다.
+
+쇼케이스 진행기 신호(lib/showcasecue.js): vn({alts?, nz?}) — 선도 조건을 기체 값으로 세운 뒤
+[그리기]와 같은 길로 그리고 ⑤ 층을 연다 · scan() — [제어 가능 판정]과 같은 길로 스캔 잡.
 */
 
-import { api, errorText } from "../api.js";
+import { ApiError, api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
   boundColor, boundLabel, boundarySegments, capColor, capLabel, dbLoBinds, envelopeQuery,
-  ftToM, isoLabelIndex, isoOffWindow, kindColor, kindLabel, machSpan, machWindow, mToFt, msToKt,
-  optNum, outlineCaps, prefillValue, outsideRegion, regionPolygons, scanCells, scanSummary,
-  spreadLabels, tasAxisTicks, throttleCell, thrustFrontier,
+  ftToM, isoLabelIndex, isoOffWindow, kindColor, kindLabel, limitSourceLabel, machSpan, machWindow,
+  mToFt, msToKt, opsSourceLabel, optNum, outlineCaps, prefillValue, outsideRegion, regionPolygons,
+  scanCells, scanCueSummary, scanSummary, spreadLabels, tasAxisTicks, throttleCell, thrustFrontier,
+  vnCueReport, lineLabelCandidates, placeLabels, pointObstacles, textBox,
 } from "../lib/envelope.js";
 import { machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
 import { fuelsOf, linScale, niceTicks, pivotCases } from "../lib/plot.js";
@@ -43,21 +49,28 @@ import {
   DOC_FAILED_HINT, ENVELOPE_FALLBACK, MISSING_TEMPLATE_HINT, untouchedUpdates,
 } from "../lib/missiontemplate.js";
 import { firstTimeThisPage, selectedDefaults } from "./missionfill.js";
+import { revealPanel } from "../lib/reveal.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
+
+// 신호 실패 사유 — 서버 오류는 errorText(422 배열·엔진 detail을 사람 글로), 그 밖은 메시지만("Error: " 접두 없이)
+const cueReason = (e) => (e instanceof ApiError ? errorText(e) : (e?.message ?? String(e)));
 
 let lastVn = null; // V-n 응답 목록 — 고도마다 한 장 (값 하나면 길이 1)
 const MAX_VN_ALTS = 6; // V-n 병렬 비교 고도 상한 — 한 줄에서 읽을 수 있는 장 수
 let lastMh = null;
 let lastScan = null; // /results 페이로드 {kind: "envelope_scan", cases, n_requested}
 let runningJobId = null;
+let scanCue = null; // 스캔 잡을 건 진행기 신호 — 잡이 끝나면 한 번 보고하고 지운다 (감시자가 둘이어도 한 번)
 // 폼 문자열 — 재진입 유지. 구조 5종은 첫 응답 echo로 프리필(02 §5.5 자기 정렬)
-// 선도 조건·α 보호 마진·스캔 격자는 **예제 기체 사본(폴백)**으로 먼저 선다 — 고른 기체 문서가 오면 손대지
-// 않은 칸만 그 기체 값(미션 템플릿·law.alpha_margin)으로 바뀐다 (lib/missiontemplate.js)
+// 선도 조건·α 보호 마진·스캔 격자·동압·운용 고도는 **예제 기체 사본(폴백)**으로 먼저 선다 — 고른 기체 문서가
+// 오면 손대지 않은 칸만 그 기체 값(미션 템플릿·law.alpha_margin·structural.q_max·operating)으로 바뀐다
+// (lib/missiontemplate.js)
 const form = {
   ...ENVELOPE_FALLBACK,
   nPos: "", nNeg: "", sf: "", machNo: "", machD: "",
-  qMax: "", altMin: "", altMax: "", machMargin: "", nz: "",
+  machMargin: "", nz: "",
 };
-const touched = new Set(); // 구조 필드 중 사용자가 손댄 것 — 이것만 서버로 보낸다
+const touched = new Set(); // 구조·운용 필드 중 사용자가 손댄 것 — 이것만 서버로 보낸다
 const liveInputs = {}; // 지금 화면의 폼 칸 — 기체 기본값이 도착하면 그 자리에서 고친다
 let drawSeq = 0; // 그리기 차례 — 늦게 온 옛 조건의 응답이 새 조건의 선도를 덮지 않게
 let envVisit = 0; // 탭을 그린 차례 — 떠난 방문의 늦은 콜백이 지금 화면의 그리기를 가로채지 않게
@@ -75,6 +88,12 @@ const STRUCT_FIELDS = [
   ["nPos", "n_limit_pos"], ["nNeg", "n_limit_neg"], ["sf", "safety_factor"],
   ["machNo", "mach_no"], ["machD", "mach_d"],
 ];
+// [폼 키, 서버 파라미터, 사유 라벨] — 동압 한계·운용 고도 (design-envelope). 구조와 같은 자기 정렬:
+// 손댄 칸만 보내고, 보내지 않은 칸은 서버가 기체 문서 값을 쓴다(없으면 경계 없음)
+const OPS_FIELDS = [
+  ["qMax", "q_max", "q̄_max"], ["altMin", "alt_min", "운용 고도 하한"], ["altMax", "alt_max", "운용 고도 상한"],
+];
+const SUPERSEDED = "superseded"; // 그리기 도중 더 새 그리기가 나갔다 — 이 그리기의 결과는 버려졌다
 
 const LAYER_FIELDS = [
   ["isoQbar", "등동압선"], ["isoTas", "등속선"], ["maneuver", "기동 엔벨로프"],
@@ -190,13 +209,24 @@ export function render() {
     return inp;
   };
 
-  // 손대지 않은 구조 필드를 응답 echo로 채운다/맞춘다 (02 §5.5 자기 정렬)
-  const syncStructural = (limits) => {
+  // 손대지 않은 구조·운용 필드를 응답 echo로 채운다/맞춘다 (02 §5.5 자기 정렬)
+  const syncStructural = (limits, bounds, boundsSource) => {
     for (const [key, param] of STRUCT_FIELDS) {
       form[key] = prefillValue(form[key], touched.has(key), limits?.[param]);
       structInputs[key].value = form[key];
     }
+    for (const [key, param] of OPS_FIELDS) {
+      form[key] = prefillValue(form[key], touched.has(key), bounds?.[param]);
+      structInputs[key].value = form[key];
+      // 손대서 비운 칸은 서버가 기체 문서 값을 쓴다 — 빈칸이 곧 그 값임을 흐린 글로 보인다(문서 값일 때만)
+      structInputs[key].placeholder = boundsSource?.[param] === "profile" ? String(bounds[param]) : "";
+    }
   };
+
+  // 운용·동압 — 손댄 칸만 값을 보낸다(빈칸으로 되돌리면 기체 문서 값으로 복귀). 손대지 않은 칸은 문서 값이
+  // 이미 서 있어도 보내지 않는다 — 보내면 서버가 그 칸을 질의 값으로 적어 출처가 「사용자 입력」이 된다
+  const opsParams = () => Object.fromEntries(OPS_FIELDS.map(([key, param, label]) =>
+    [param, touched.has(key) ? optNum(form[key], label) : null]));
 
   const structuralParams = () => {
     const out = {};
@@ -206,6 +236,8 @@ export function render() {
     return out;
   };
 
+  // 그리기 한 번 — 끝나면 null, 실패면 사유 문장, 그사이 더 새 그리기가 나갔으면 SUPERSEDED
+  // (쇼케이스 신호가 결과를 기다린다 — 버튼 경로는 반환값을 쓰지 않는다)
   const draw = async () => {
     const seq = ++drawSeq;
     try {
@@ -227,49 +259,69 @@ export function render() {
       const mh = await api.get("/analysis/design-envelope?"
         + envelopeQuery({
           ...shared,
-          q_max: optNum(form.qMax, "q̄_max"),
-          alt_min: optNum(form.altMin, "운용 고도 하한"),
-          alt_max: optNum(form.altMax, "운용 고도 상한"),
+          ...opsParams(),
           mach_margin: optNum(form.machMargin, "실속 여유"),
           nz: optNum(form.nz, "기동 하중배수"),
         }));
-      if (seq !== drawSeq) return; // 그사이 새 조건으로 다시 그리기가 나갔다
+      if (seq !== drawSeq) return SUPERSEDED; // 그사이 새 조건으로 다시 그리기가 나갔다
       lastVn = vn;
       lastMh = mh;
-      syncStructural(lastMh.limits);
+      syncStructural(lastMh.limits, lastMh.bounds, lastMh.bounds_source);
       renderAll();
+      return null;
     } catch (e) {
-      if (seq === drawSeq) showErr(e); // 옛 조건 요청의 오류가 새 선도 위에 앉지 않게
+      if (seq !== drawSeq) return SUPERSEDED;
+      showErr(e); // 옛 조건 요청의 오류가 새 선도 위에 앉지 않게 (위 가드)
+      return cueReason(e);
     }
   };
 
   const watch = () => attachProgress(progressBox, runningJobId, {
     onDone: async (job) => {
       runningJobId = null;
+      // 신호는 한 번만 보고한다 — 재진입이 감시자를 하나 더 붙였어도 먼저 끝난 쪽이 가져간다.
+      // 잡이 끝난 뒤의 보고는 DOM과 무관하다(store에만 쓴다) — 떠난 화면이어도 보낸다
+      const cue = scanCue;
+      scanCue = null;
       try {
         if (job.status === "error") throw new Error(job.error);
         if (cancelledWithoutResult(job)) {
           showErr(new Error("취소됨 — 저장된 결과 없음 (실행 전 취소)"));
+          failCue(cue, "취소됨 — 저장된 결과 없음 (실행 전 취소)");
           return;
         }
         lastScan = await api.get(`/results/${job.result_id}`);
         renderAll();
         drawers.open("L2"); // 결과가 사는 층을 열어 준다 — 찾아 헤매게 하지 않는다
+        if (cue) revealPanel(drawers.box); // 신호면 그 층을 화면 안으로 — 청중이 판정 표를 본다 (06 §2)
+        if (job.status === "cancelled") {
+          failCue(cue, `취소됨 — 완료분 ${lastScan.cases.length}/${lastScan.n_requested}점만 저장`);
+          return;
+        }
+        const s = scanSummary(scanCells(lastScan.cases));
+        reportCue(cue, { phase: "done", resultId: job.result_id, summary: scanCueSummary(s), data: s });
       } catch (e) {
         showErr(e);
+        failCue(cue, cueReason(e));
       }
     },
     onError: (e) => {
       runningJobId = null;
       showErr(e);
+      const cue = scanCue;
+      scanCue = null;
+      failCue(cue, cueReason(e));
     },
   });
 
-  const runScan = async () => {
+  // 스캔 잡 걸기 — 걸었으면 null, 못 걸었으면 사유. cue가 오면 잡이 끝날 때 그 신호로 보고한다.
+  // 신호는 **이름 붙은 인자**로만 받는다 — 위치 인자면 버튼이 넘기는 MouseEvent가 신호로 둔갑해 토큰 없는
+  // 가짜 보고를 store에 쓴다(리뷰 지적). 버튼은 인자 없이 부른다(아래 tabTop)
+  const runScan = async ({ cue = null } = {}) => {
     if (runningJobId) { // 이중 제출 방지 — 무반응 대신 안내 (조용한 무시 금지)
       clear(errBox).append(el("div", { class: "error-box" },
         "이미 실행 중입니다 — 진행률 표시를 확인하세요."));
-      return;
+      return "이미 실행 중인 스캔이 있다 — 끝난 뒤 다시 건다";
     }
     try {
       clear(errBox);
@@ -281,9 +333,15 @@ export function render() {
       const submitted = await api.post("/analysis/design-envelope-scan",
         { cases, fingerprint: "web-envelope-v1" });
       runningJobId = submitted.id;
+      if (cue) {
+        scanCue = cue;
+        reportCue(cue, { phase: "started", jobId: submitted.id });
+      }
       watch();
+      return null;
     } catch (e) {
       showErr(e);
+      return cueReason(e);
     }
   };
 
@@ -337,17 +395,18 @@ export function render() {
           el("label", { class: "field" }, "M_NO", bindStruct("machNo")),
           el("label", { class: "field" }, "M_D", bindStruct("machD")))),
       el("div", { class: "opt-group" },
-        el("div", { class: "g-title" }, "운용·동압 — 실기체 값: 미입력이면 경계 없음 (기본값 없음)"),
+        el("div", { class: "g-title" },
+          "운용·동압 — 빈칸/미수정 = 기체 문서 값 (문서에도 없으면 경계 없음 · 기본값 없음)"),
         el("div", { class: "row-inner" },
-          el("label", { class: "field" }, "q̄_max [Pa]", bind("qMax")),
-          el("label", { class: "field" }, "운용 하한 [m]", bind("altMin")),
-          el("label", { class: "field" }, "운용 상한 [m]", bind("altMax")),
+          el("label", { class: "field" }, "q̄_max [Pa]", bindStruct("qMax")),
+          el("label", { class: "field" }, "운용 하한 [m]", bindStruct("altMin")),
+          el("label", { class: "field" }, "운용 상한 [m]", bindStruct("altMax")),
           el("label", { class: "field" }, "실속 여유 ×", bind("machMargin")),
           el("label", { class: "field" }, "기동 n_z [g]", bind("nz")))),
     ),
     el("p", { class: "hint" },
       "설계 엔벨로프 = 구조 ∧ 공력 ∧ 추진 ∧ 운용 ∧ 제어 가능 영역 (01 §2.6) — ",
-      "V-n은 상위 constraint 하나. 구조 필드는 손댄 것만 서버로 보내고(02 §5.5), ",
+      "V-n은 상위 constraint 하나. 구조·운용 필드는 손댄 것만 서버로 보내고(02 §5.5), ",
       "빈칸으로 되돌리면 기체 프로파일 값으로 복귀. 실속 여유 빈칸 = 엔진 기본값. ",
       "기동 n_z는 그 하중배수를 낼 수 있는 영역(1g 영역의 안쪽) — 빈칸이면 안 그린다."),
   );
@@ -401,14 +460,14 @@ export function render() {
         title: LAYER_DEF.L5.what,
         build: () => [
           ...layerHead("L5", [
-            "V-n 선도가 구조 한계를, 운용 박스가 입력한 고도·마하 한계를 낸다. ",
+            "V-n 선도가 구조 한계를, 운용 박스가 고도(기체 문서 또는 입력)·마하 한계를 낸다. ",
             "이 층의 값이 그대로 제어법칙의 보호 한계(α 리미터·n_z·q̄)가 된다 — ",
             "구조 한계는 고른 기체 프로파일 값이다(예제 기체면 자리표시 — 아래 안내가 가려 말한다). ",
             "위 「필요값 입력」에 값을 넣으면 그 값으로 다시 계산한다.",
           ]),
           limitsBox,
           drawerSection("V-n 선도 (교과서형)", null, vnBox),
-          drawerSection("운용 엔벨로프 — 입력 한계 박스", null, opsBox),
+          drawerSection("운용 엔벨로프 — 운용 한계 박스", null, opsBox),
           goTo("#sim", "시뮬레이션 탭 → 「타면 사용」 패널",
             "— 조종권(타면 위치·rate) 한계 쪽 층입니다. 다만 이 도구는 아직 "
             + "δ_max(M, q̄)처럼 비행조건별로 갈리는 조종권 한계를 관리하지 않습니다 — "
@@ -424,7 +483,7 @@ export function render() {
   loadStored().then(() => drawers.refresh());
   // 고른 기체의 선도 조건·α 보호 마진·스캔 격자 — 손대지 않은 칸만 바꾸고, 바뀌었으면 받아 둔 선도가 옛
   // 조건이라 다시 그린다. 템플릿이 없는 기체면 그렇다고 적는다(α 마진은 템플릿이 아니라 법칙 값이라 그래도 바뀐다)
-  selectedDefaults().then((d) => {
+  const defaultsReady = selectedDefaults().then((d) => {
     if (visit !== envVisit) return;
     if (!d || !d.hasTemplate) templateHint.textContent = d ? MISSING_TEMPLATE_HINT : DOC_FAILED_HINT;
     // 폼은 모듈 상태라 페이지당 한 번만 채운다 — 다시 들어올 때 사용자가 폴백과 같게 고친 칸을 덮지 않게
@@ -438,6 +497,45 @@ export function render() {
   if (!lastVn && !lastMh) draw(); // 재진입이면 받아 둔 응답 그대로 (다시 부르지 않는다)
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착
 
+  // 쇼케이스 신호 — 고른 기체의 칸 값이 선 **뒤에** 버튼과 같은 길로 한다(폴백=예제 값으로 그리지 않는다)
+  const setField = (key, v) => {
+    form[key] = v;
+    if (liveInputs[key]) liveInputs[key].value = v;
+  };
+  const handleCue = async (c) => {
+    try {
+      // 같은 문서 약속(selectedDocument 캐시)이라 위 채우기와 같은 d다 — 채우기가 끝난 뒤에 본다
+      const [d] = await Promise.all([selectedDefaults(), defaultsReady]);
+      if (visit !== envVisit) throw new Error("신호를 처리하기 전에 탭이 다시 그려졌다");
+      // 선도 고도·연료·스캔 격자가 폴백(예제 기체 값)이면 그 기체의 결과가 아니다 — 트림·마진 신호와 같은 관문
+      if (!d || !d.hasTemplate) throw new Error(d ? MISSING_TEMPLATE_HINT : DOC_FAILED_HINT);
+      if (c.action === "vn") {
+        const { alts = null, nz = null } = c.args ?? {};
+        if (alts != null) {
+          if (!Array.isArray(alts) || !alts.length || !alts.every((a) => Number.isFinite(a))) {
+            throw new Error(`alts는 고도 수 목록이어야 한다: ${JSON.stringify(alts)}`);
+          }
+          setField("alt", alts.join(", "));
+        }
+        if (nz != null) setField("nz", String(nz));
+        const err = await draw();
+        if (err) throw new Error(err === SUPERSEDED ? "그리는 도중 다른 그리기가 앞섰다" : err);
+        drawers.open("L5"); // V-n·운용 박스·한계 표가 사는 층
+        revealPanel(vnBox.parentElement ?? drawers.box); // V-n 선도 절의 머리를 화면 위로 (06 §2)
+        reportCue(c, { phase: "done", ...vnCueReport(lastVn, lastMh) });
+      } else if (c.action === "scan") {
+        const err = await runScan({ cue: c }); // 끝 보고는 잡 감시(watch)가 한다
+        if (err) throw new Error(err);
+      } else {
+        unknownAction(c);
+      }
+    } catch (e) {
+      failCue(c, cueReason(e));
+    }
+  };
+  const cue = takeCue("envelope");
+  if (cue) handleCue(cue);
+
   return el("div", { class: "tab-page" },
     tabTop({
       title: "엔벨로프",
@@ -446,7 +544,7 @@ export function render() {
         + "화면의 그림은 그중 ①이고, 나머지 층은 아래 칩에 있다.",
       actions: [
         el("button", { class: "primary", onclick: draw }, "그리기"),
-        el("button", { onclick: runScan }, "제어 가능 판정 (트림 스캔)"),
+        el("button", { onclick: () => runScan() }, "제어 가능 판정 (트림 스캔)"),
       ],
       extra: [progressBox, errBox],
     }),
@@ -467,7 +565,7 @@ async function loadStored() {
   }
 }
 
-/** 구조·운용 한계 표 — ⑤ 층. 값이 어디서 왔는지(자리표시/사용자 입력)가 값만큼 중요하다.
+/** 구조·운용 한계 표 — ⑤ 층. 값이 어디서 왔는지(기체 문서/자리표시/사용자 입력)가 값만큼 중요하다.
  *
  *  **지속 노드에 그린다.** build() 안에서 만들면 패널을 열어 둔 채 「그리기」를 눌렀을 때
  *  표가 옛 상태("그리기 실행 시 표시됩니다")에 얼어붙는다 — 패널 갱신은 칩만 고치므로. */
@@ -478,10 +576,10 @@ function renderLimits(box) {
   }
   const L = lastMh.limits;
   const b = lastMh.bounds;
-  const over = new Set(lastMh.limits_overridden ?? []);
-  const src = (param) => (over.has(param)
-    ? el("span", { class: "flag ok" }, "사용자 입력")
-    : el("span", { class: "flag na" }, "데모 자리표시"));
+  // 출처는 서버 echo(limits_source·limits_overridden·bounds_source)를 라벨로만 바꾼다 — lib/envelope.js
+  const flag = ({ text, ok }) => el("span", { class: `flag ${ok ? "ok" : "na"}` }, text);
+  const src = (param) => flag(limitSourceLabel(param, lastMh.limits_source, lastMh.limits_overridden,
+    lastMh.profile?.is_example ?? null));
   const rows = [
     ["n_limit_pos", "+제한하중 n", "g", L.n_limit_pos],
     ["n_limit_neg", "−제한하중 n", "g", L.n_limit_neg],
@@ -498,15 +596,13 @@ function renderLimits(box) {
         el("td", { class: "num" }, fmt(v, 4)),
         el("td", {}, unit),
         el("td", {}, src(param)))),
-      // 운용·동압은 구조와 출처가 다르다 — 미입력이면 **경계 자체가 없다**
-      [["q̄_max 동압 한계", "Pa", b.q_max], ["운용 고도 하한", "m", b.alt_min],
-       ["운용 고도 상한", "m", b.alt_max]].map(([name, unit, v]) => el("tr", {},
+      // 운용·동압은 구조와 출처가 다르다 — 문서에도 입력에도 없으면 **경계 자체가 없다**
+      [["q_max", "q̄_max 동압 한계", "Pa"], ["alt_min", "운용 고도 하한", "m"],
+       ["alt_max", "운용 고도 상한", "m"]].map(([param, name, unit]) => el("tr", {},
         el("td", {}, name),
-        el("td", { class: "num" }, v == null ? "—" : fmt(v, 5)),
+        el("td", { class: "num" }, b[param] == null ? "—" : fmt(b[param], 5)),
         el("td", {}, unit),
-        el("td", {}, v == null
-          ? el("span", { class: "flag na" }, "미입력 — 경계 없음")
-          : el("span", { class: "flag ok" }, "사용자 입력")))),
+        el("td", {}, flag(opsSourceLabel(b[param], lastMh.bounds_source?.[param]))))),
     ))));
 }
 
@@ -885,6 +981,7 @@ function mhEnvelopeCanvas(mh, cells) {
       : null,
   ].filter(Boolean);
   ctx.font = FONT_BASE;
+  const isoBoxes = []; // 등고선 라벨 상자 — 뒤에 적는 추력 한계 이름이 피한다
   // 라벨 기준 높이를 도표 안쪽으로 잡는다 — 곡선들이 하나같이 천장으로 빠져나가서
   // "범위 안 마지막 행"이 전부 같은 줄이 되면 라벨이 겹쳐 뭉갠다 (라이브 확인)
   for (const set of isoSets) {
@@ -904,7 +1001,9 @@ function mhEnvelopeCanvas(mh, cells) {
       const flip = x + 3 + ctx.measureText(text).width > W - mR;
       const yTop = py(r.alt[i]) - 3;
       ctx.textAlign = flip ? "right" : "left";
-      haloText(text, x + (flip ? -3 : 3), yTop < mT + 10 ? yTop + 15 : yTop, C.sub);
+      const ly = yTop < mT + 10 ? yTop + 15 : yTop;
+      haloText(text, x + (flip ? -3 : 3), ly, C.sub);
+      isoBoxes.push(textBox(x + (flip ? -3 : 3), ly, ctx.measureText(text).width, 11, flip ? "right" : "left"));
       ctx.textAlign = "left";
     }
   }
@@ -996,6 +1095,7 @@ function mhEnvelopeCanvas(mh, cells) {
   // 포화가 곧 진짜 한계다. 해석 곡선이 아니라 측정점이라 격자 해상도가 곧 경계 해상도
   // 저속(backside)·고속 전선은 서로 다른 곡선이다 — 한 줄로 이으면 평면을 가로지른다
   const frontier = layers.thrust && cells ? thrustFrontier(cells) : [];
+  const thrustLabels = []; // {side, pts} — 이름은 점을 다 그린 뒤 배치 (아래)
   for (const side of ["lo", "hi"]) {
     const pts = frontier.filter((p) => p.side === side);
     if (!pts.length) continue;
@@ -1018,12 +1118,9 @@ function mhEnvelopeCanvas(mh, cells) {
         ctx.fill();
       }
     }
-    const mid = pts[Math.floor(pts.length / 2)];
-    ctx.font = FONT_LABEL;
-    ctx.textAlign = side === "lo" ? "right" : "left";
-    haloText(side === "lo" ? "추력 한계 (저속)" : "추력 한계 (고속)",
-      px(mid.mach) + (side === "lo" ? -8 : 8), py(mid.alt) + 4, C.thrustLine);
-    ctx.textAlign = "left";
+    // 이름은 판정 점·격자점을 다 그린 **뒤에** 겹침 없는 자리에 적는다(아래) — 종전엔 가운데 점 옆 고정 자리라
+    // 판정 점과 M_NO 경계선 밑에 깔려 안 보였다(쇼케이스 D10)
+    thrustLabels.push({ side, pts });
   }
 
   // 게인 스케줄 격자점 (엔진 coarse 좌표 — trimmable 미판정, 빈 원).
@@ -1091,6 +1188,7 @@ function mhEnvelopeCanvas(mh, cells) {
     }
   }
   ctx.font = FONT_LABEL;
+  const attrBoxes = []; // 귀속 라벨 상자 — 추력 한계 이름이 피한다
   for (const side of ["lo", "hi"]) {
     const group = spreadLabels(anchors.filter((a) => a.side === side), 15);
     for (const a of group) {
@@ -1103,9 +1201,61 @@ function mhEnvelopeCanvas(mh, cells) {
       ctx.stroke();
       ctx.textAlign = side === "lo" ? "right" : "left";
       haloText(a.text, tx, a.y, a.color);
+      attrBoxes.push(textBox(tx, a.y, ctx.measureText(a.text).width, 11, side === "lo" ? "right" : "left"));
     }
   }
   ctx.textAlign = "left";
+
+  // 추력 한계 이름 — 전선의 점마다 좌·우·위·아래 후보(가운데 점부터 바깥으로), 판정 점·격자점·전선 점·합성 경계선·
+  // 귀속 라벨을 피한다. 판단은 lib/envelope.js placeLabels(테스트). 자리가 없으면 겹침 최소 자리에 흰 테두리로
+  if (thrustLabels.length) {
+    const dots = [
+      ...pointObstacles((cells && layers.scan ? cells : []).map((c) => ({ x: px(c.mach), y: py(c.alt) })), 3.2),
+      ...pointObstacles(mh.schedule_grid.points.map((p) => ({ x: px(p.mach), y: py(p.alt) })), 4),
+      ...pointObstacles(frontier.map((p) => ({ x: px(p.mach), y: py(p.alt) })), 3),
+      // 합성 경계선 — 표본점 사이를 4 px 간격으로 채운 점 (M_NO처럼 곧은 경계가 글을 가르지 않게)
+      ...pointObstacles(segs.flatMap((seg) => seg.pts.flatMap((p, i) => {
+        if (i === 0) return [{ x: px(p.mach), y: py(p.alt) }];
+        const q = seg.pts[i - 1];
+        const n = Math.max(1, Math.ceil(Math.hypot(px(p.mach) - px(q.mach), py(p.alt) - py(q.alt)) / 4));
+        return Array.from({ length: n }, (_, k) => ({
+          x: px(q.mach) + ((px(p.mach) - px(q.mach)) * (k + 1)) / n,
+          y: py(q.alt) + ((py(p.alt) - py(q.alt)) * (k + 1)) / n,
+        }));
+      })), 1.2),
+      ...attrBoxes,
+      ...isoBoxes,
+    ];
+    const specs = thrustLabels.map(({ side, pts }) => {
+      const text = side === "lo" ? "추력 한계 (저속)" : "추력 한계 (고속)";
+      // 도표 밖(스캔 고도가 운용 상한 위) 점은 이름의 닻이 될 수 없다 — 보이지 않는 점 곁 이름은 틀 가장자리에
+      // 떠서 엉뚱한 자리를 가리킨다. 보이는 점이 없으면 이름도 없다(후보 0 → 뺀다)
+      const seen = pts.filter((p) => px(p.mach) >= mL && px(p.mach) <= W - mR && py(p.alt) >= mT && py(p.alt) <= H - mB);
+      const m = Math.floor(seen.length / 2);
+      const order = [...seen.keys()].sort((i, j) => Math.abs(i - m) - Math.abs(j - m) || i - j);
+      const out = side === "lo" ? "right" : "left"; // 바깥쪽(영역 밖)이 먼저
+      const inn = side === "lo" ? "left" : "right";
+      const sgn = side === "lo" ? -1 : 1;
+      return {
+        key: text, w: ctx.measureText(text).width, size: 11, text,
+        candidates: order.flatMap((i) => {
+          const x = px(seen[i].mach);
+          const y = py(seen[i].alt);
+          return [
+            { x: x + 8 * sgn, y: y + 4, align: out }, { x: x - 8 * sgn, y: y + 4, align: inn },
+            { x, y: y - 9, align: "center" }, { x, y: y + 17, align: "center" },
+          ];
+        }),
+      };
+    });
+    const placed = placeLabels(specs, { bounds: { x0: mL, y0: mT, x1: W - mR, y1: H - mB }, obstacles: dots });
+    for (const [i, p] of placed.entries()) {
+      if (p.skipped) continue;
+      ctx.textAlign = p.align;
+      haloText(specs[i].text, p.x, p.y, C.thrustLine);
+    }
+    ctx.textAlign = "left";
+  }
   ctx.restore();
 
   // 영역 없음 안내 + 축
@@ -1485,6 +1635,10 @@ function vnDiagramCanvas(body, { width = 780, height = 470 } = {}) {
   splitCurve(nS, C.stallLine, L.n_limit_pos, false);
   splitCurve(nP, C.protLine, L.n_limit_pos, false);
   if (nN) splitCurve(nN, C.stallLine, L.n_limit_neg, true); // 음의 실속 자리표시
+  // 선의 이름은 여기서 적지 않고 모아 둔다 — 선을 다 그은 뒤 겹침 없는 자리를 골라 한꺼번에 적는다(아래 placeLabels).
+  // 고정 자리에 적던 때 +극한하중이 V_S 줄에, V_NO가 V_A 위에, −제한하중이 「실속 영역」 위에 앉았고 V_D는 오른쪽
+  // 끝에서 잘렸다(쇼케이스 D10)
+  const lineLabels = []; // {text, color, kind: "h"|"v", at}
   const hline = (n, color, dash, label) => {
     ctx.strokeStyle = color;
     ctx.lineWidth = 1.2;
@@ -1494,8 +1648,7 @@ function vnDiagramCanvas(body, { width = 780, height = 470 } = {}) {
     ctx.lineTo(px(L.v_d), py(n));
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = color;
-    ctx.fillText(label, mL + 6, py(n) - 4);
+    lineLabels.push({ text: label, color, kind: "h", at: n });
   };
   hline(L.n_limit_pos, C.limitLine, [6, 4], `+제한하중 ${fmt(L.n_limit_pos, 3)} g`);
   hline(L.n_limit_neg, C.limitLine, [6, 4], `−제한하중 ${fmt(L.n_limit_neg, 3)} g`);
@@ -1517,8 +1670,7 @@ function vnDiagramCanvas(body, { width = 780, height = 470 } = {}) {
     ctx.lineTo(px(v), H - mB);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = C.speedLine;
-    ctx.fillText(label, px(v) + 3, mT + 12);
+    lineLabels.push({ text: label, color: C.speedLine, kind: "v", at: v });
   };
   vline(body.speeds.v_s, `V_S ${fmt(body.speeds.v_s, 4)}`);
   vline(body.speeds.v_a, `V_A ${fmt(body.speeds.v_a, 4)}`);
@@ -1531,15 +1683,70 @@ function vnDiagramCanvas(body, { width = 780, height = 470 } = {}) {
   ctx.lineWidth = 1;
   ctx.strokeRect(mL, mT, W - mL - mR, H - mT - mB);
 
-  // 영역 라벨 (세미볼드)
+  // ── 이름 배치 — 선 이름(필수: 속도선이 먼저, 그다음 하중선) → 구역 이름(세미볼드, 자리가 없으면 뺀다 — 아래
+  //    범례가 같은 이름을 갖는다). 판단은 lib/envelope.js placeLabels(테스트) — 여기는 후보와 구역 모양만 댄다
+  const plot = { x0: mL, y0: mT, x1: W - mR, y1: H - mB };
+  const vAt = linScale(mL, W - mR, V[0], vMax); // 픽셀 → 값 (구역 판정)
+  const nAt = linScale(H - mB, mT, nBot, nTop);
+  const specs = [];
+  ctx.font = FONT_BASE;
+  // 속도선 이름이 **다른** 속도선을 가로지르면 어느 선의 이름인지 헷갈린다(V_A 글이 V_NO 선에 걸렸다) — 그 선들을
+  // 장애물로 준다. 하중선 이름은 속도선을 가로질러도 읽히므로(가로 글·세로 점선) 주지 않는다
+  const vLines = lineLabels.filter((x) => x.kind === "v");
+  const lineBar = (v) => ({ x0: px(v) - 0.5, y0: mT, x1: px(v) + 0.5, y1: H - mB });
+  for (const l of [...vLines, ...lineLabels.filter((x) => x.kind === "h")]) {
+    specs.push({
+      key: l.text, w: ctx.measureText(l.text).width, size: 11, draw: { ...l, font: FONT_BASE },
+      candidates: lineLabelCandidates(l.kind, l.at, { plot, px, py, xEnd: px(L.v_d) }),
+      avoid: l.kind === "v" ? vLines.filter((o) => o !== l).map((o) => lineBar(o.at)) : [],
+    });
+  }
   ctx.font = FONT_LABEL;
-  ctx.fillStyle = C.sub;
-  ctx.fillText("정상 운용", px(L.v_no * 0.62), py(L.n_limit_pos * 0.45));
-  ctx.fillText("실속 영역", px(V[0]) + 14, py(L.n_limit_pos) + 26);
-  if (nN) ctx.fillText("실속 영역", px(V[0]) + 14, py(L.n_limit_neg) - 10);
-  ctx.fillText("주의", (px(L.v_no) + px(L.v_d)) / 2 - 12, py(0.2));
-  ctx.fillText("구조 손상", px(L.v_d * 0.45), (py(L.n_limit_pos) + py(L.n_ultimate_pos)) / 2 + 4);
-  ctx.fillText("구조 파괴", px(L.v_d * 0.45), py(L.n_ultimate_pos) - 8);
+  const zone = (text, candidates, extra = {}) => specs.push({
+    key: `zone:${text}:${specs.length}`, w: ctx.measureText(text).width, size: 11, optional: true, candidates,
+    draw: { text, color: C.sub, font: FONT_LABEL }, ...extra,
+  });
+  const grid = (xs, ys, align = "left") => xs.flatMap((x) => ys.map((y) => ({ x, y, align })));
+  // 정상 운용 — 실속선 아래·음의 경계 위·V_NO 왼쪽 안에서만(실속선은 V가 클수록 높아 상자 왼쪽 끝이 구속이다).
+  // 보호선(녹)은 구역 안을 지나가므로 표본점을 피할 장애물로 준다
+  const protDots = pointObstacles(V.map((v, i) => ({ x: px(v), y: py(nP[i]) })).filter((p) => p.x <= W - mR), 1.5);
+  zone("정상 운용", grid([0.62, 0.72, 0.52, 0.82].map((f) => px(L.v_no * f)),
+    [0.45, 0.25, -0.1, -0.3].map((f) => py(L.n_limit_pos * f))), {
+    avoid: protDots,
+    accept: (b) => b.x1 <= px(L.v_no) && nAt(b.y0) <= Math.min(stallAt(vAt(b.x0)), L.n_limit_pos)
+      && nAt(b.y1) >= lowAt(vAt(b.x0)),
+  });
+  // 실속 영역(위) — 실속선 위·+제한 아래·V_A 왼쪽 (실속선이 오를수록 좁아져 상자 오른쪽 끝이 구속이다)
+  zone("실속 영역", grid([px(V[0]) + 14, px(V[0]) + 40], [26, 40, 54, 68].map((d) => py(L.n_limit_pos) + d)), {
+    accept: (b) => nAt(b.y1) >= stallAt(vAt(b.x1)) && nAt(b.y0) <= L.n_limit_pos
+      && vAt(b.x1) <= (body.speeds.v_a ?? L.v_d),
+  });
+  // 실속 영역(아래) — 음의 실속 자리표시선 아래·−제한 위 (그 선은 V가 클수록 내려가 상자 오른쪽 끝이 구속이다)
+  if (nN) {
+    zone("실속 영역", grid([px(V[0]) + 14, px(V[0]) + 40], [10, 24, 38, 52].map((d) => py(L.n_limit_neg) - d)), {
+      accept: (b) => nAt(b.y0) <= negAt(vAt(b.x1)) && nAt(b.y1) >= L.n_limit_neg,
+    });
+  }
+  const midX = (px(L.v_no) + px(L.v_d)) / 2;
+  zone("주의", grid([midX], [0.2, 1.4, -1, 2.6, -2.2].map((n) => py(n)), "center"), {
+    region: { x0: px(L.v_no), y0: py(L.n_limit_pos), x1: px(L.v_d), y1: py(L.n_limit_neg) },
+  });
+  const bandXs = [0.45, 0.3, 0.6, 0.75, 0.15].map((f) => px(L.v_d * f));
+  zone("구조 손상", grid(bandXs, [(py(L.n_limit_pos) + py(L.n_ultimate_pos)) / 2 + 4]), {
+    region: { x0: mL, y0: py(L.n_ultimate_pos), x1: px(L.v_d), y1: py(L.n_limit_pos) },
+  });
+  zone("구조 파괴", grid(bandXs, [py(L.n_ultimate_pos) - 8, py(L.n_ultimate_pos) - 3]), {
+    region: { x0: mL, y0: mT, x1: W - mR, y1: py(L.n_ultimate_pos) },
+  });
+  for (const [i, p] of placeLabels(specs, { bounds: plot }).entries()) {
+    if (p.skipped) continue;
+    const d = specs[i].draw;
+    ctx.font = d.font;
+    ctx.textAlign = p.align;
+    ctx.fillStyle = d.color;
+    ctx.fillText(d.text, p.x, p.y);
+  }
+  ctx.textAlign = "left";
 
   // 축
   ctx.font = FONT_BASE;
@@ -1782,15 +1989,15 @@ function renderOps(box) {
   const b = lastMh.bounds;
   if (b.alt_min == null && b.alt_max == null) {
     clear(box).append(el("p", { class: "hint" },
-      "운용 고도 한계 미입력 — 경계 없음 (없는 값을 그리지 않습니다). 폼의 운용 ",
-      "하한·상한을 입력하면 여기와 합성 차트에 반영됩니다. 마하 방향 운용 한계는 ",
-      "구조 M_NO·M_D를 준용."));
+      "운용 고도 한계 없음 — 기체 문서(operating)에도 폼에도 없어 경계 없음 (없는 값을 그리지 ",
+      "않습니다). 폼의 운용 하한·상한을 입력하면 여기와 합성 차트에 반영됩니다. 마하 방향 운용 ",
+      "한계는 구조 M_NO·M_D를 준용."));
     return;
   }
   clear(box).append(
     el("div", { class: "scroll-x" }, opsCanvas(b)),
     el("p", { class: "hint" },
-      "운용 엔벨로프 — 사용자 입력 고도 한계 × 마하 한계(M_NO 준용). 미입력 경계는 ",
-      "표시하지 않으며 합성에도 들어가지 않습니다."),
+      "운용 엔벨로프 — 운용 고도 한계(기체 문서 또는 폼 입력 — 출처는 ⑤ 표) × 마하 한계(M_NO 준용). ",
+      "없는 경계는 표시하지 않으며 합성에도 들어가지 않습니다."),
   );
 }

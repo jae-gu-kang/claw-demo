@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  AP_KEY, ENTRY, SCAS_GROUPS, SCAS_KEY, excludedSpecs, flightRequest, groupByRole,
+  AP_KEY, ENTRY, SCAS_GROUPS, SCAS_KEY, compareCaption, excludedSpecs, flightRequest, groupByRole,
   mergeFiles, pickFile, summarize,
 } from "./flightcode.js";
 
@@ -204,4 +204,27 @@ test("이미지 바이트 복원 — 내려받기는 응답의 base64를 그대�
   assert.deepEqual([...imageBytes(V112.param_image.base64)], [...Buffer.from("CLAWPRM\0", "latin1")]);
   assert.equal(imageBytes("").length, 0);
   assert.equal(IMAGE_TAB.startsWith("@"), true, "실제 파일 이름과 겹치지 않는 표식");
+});
+
+test("두 기체 대조 — 같은 구조 지문·다른 파라미터 지문이면 「같은 C, 이미지만 다름」", () => {
+  const mine = { structure_fingerprint: "bc5d7dc7d4ee4c60", param_fingerprint: "1111",
+    profile: { id: "showcase-delta", name: "쇼케이스" } };
+  const other = { structure_fingerprint: "bc5d7dc7d4ee4c60", param_fingerprint: "9434b43ca18a887d",
+    profile: { id: "example-delta", name: "예제 델타윙" } };
+  const c = compareCaption(mine, other);
+  assert.equal(c.sameStructure, true);
+  assert.equal(c.sameParams, false);
+  assert.match(c.text, /^같은 C — 구조 지문 bc5d7dc7d4ee4c60 동일/);
+  assert.match(c.text, /쇼케이스 1111 · 예제 델타윙 9434b43ca18a887d/);
+  // 값까지 같으면 그렇다고 말한다
+  const same = compareCaption(mine, { ...other, param_fingerprint: "1111" });
+  assert.equal(same.sameParams, true);
+  assert.match(same.text, /같은 이미지/);
+  // 구조가 다르면 같은 척하지 않는다
+  const diff = compareCaption(mine, { ...other, structure_fingerprint: "ffff" });
+  assert.equal(diff.sameStructure, false);
+  assert.match(diff.text, /^다른 C/);
+  // 옛 응답(지문 없음)은 판정 불가
+  assert.equal(compareCaption(mine, { fingerprint: "x" }).sameStructure, null);
+  assert.equal(compareCaption(null, null).sameStructure, null);
 });

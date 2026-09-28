@@ -196,6 +196,29 @@ def test_모델이_없으면_사유_문장을_낸다(client, world_dir, model_di
     assert body["models_reason"] and "generate_" in body["models_reason"]
 
 
+def test_모델_뿌리는_작업_폴더가_아니라_리포에_매달린다(client, world_dir, tmp_path, monkeypatch):
+    """**리포 루트 밖에서 기동한 서버도 리포의 GLB를 내준다.**
+
+    종전 기본값은 CWD 상대 `"models"`라, 워크트리 검증 기동기(스크래치패드 CWD)로 띄운 서버가
+    「모델 폴더가 없습니다 (models)」라고 답해 가상환경에 기체가 아예 없었다(쇼케이스 e2e 실측).
+    여기서는 환경변수를 지우고 CWD를 리포 밖(tmp)으로 옮겨 그 조건을 그대로 만든다 —
+    CWD 상대로 되돌리면 목록이 비어 실패한다. 발사관 GLB는 리포에 실려 있다(git 추적).
+    """
+    monkeypatch.delenv("CLAW_MODEL_DATA", raising=False)
+    monkeypatch.chdir(tmp_path)
+    body = client.get("/api/world/manifest").json()
+    assert "launcher.glb" in [m["name"] for m in body["models"]], body["models_reason"]
+    r = client.get("/api/world/model/launcher.glb")
+    assert r.status_code == 200 and r.content[:4] == GLB_MAGIC
+
+
+def test_모델_뿌리_환경변수가_비었으면_리포_기본값이다(client, world_dir, tmp_path, monkeypatch):
+    """빈 값은 "안 세움"이다 — `Path("")`(= CWD)로 읽으면 위 테스트의 결함이 빈 환경변수로 되살아난다."""
+    monkeypatch.setenv("CLAW_MODEL_DATA", "")
+    monkeypatch.chdir(tmp_path)
+    assert "launcher.glb" in [m["name"] for m in client.get("/api/world/manifest").json()["models"]]
+
+
 def test_모델_폴더_자체가_없어도_500이_아니다(client, world_dir, tmp_path, monkeypatch):
     monkeypatch.setenv("CLAW_MODEL_DATA", str(tmp_path / "없는폴더"))
     r = client.get("/api/world/manifest")

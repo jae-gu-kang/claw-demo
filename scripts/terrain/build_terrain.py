@@ -34,7 +34,7 @@ Pillow·GDAL·rasterio를 들이면 폐쇄망 반입 심사 대상이 늘고, �
 
 사용:
     python3 scripts/terrain/build_terrain.py \\
-        --origin-lat 34.601303 --origin-lon 127.212067 \\
+        --origin-lat 34.601301 --origin-lon 127.212107 \\
         --tier core:radius=12000,step=30 --tier outer:radius=30000,step=90 \\
         --out data/geo/site-terrain-v1.bin
 """

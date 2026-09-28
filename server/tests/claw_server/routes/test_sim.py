@@ -149,6 +149,157 @@ def test_sim_duty_stride_free_and_bounds(client, wait_job):
     assert client.get("/api/sim/nope/duty").status_code == 404
 
 
+# ── 재생·타면 사용은 본문을 통째로 세우지 않는다 (Render 512 MB — store.py 머리말) ──
+
+
+def _replay_by_slicing(full, stride):
+    """재생 솎음의 기준 — 통째 읽은 본문을 자르던 원래 알고리즘 그대로(v1.46까지의 sim_replay)."""
+    sl = slice(None, None, stride)
+    out = dict(full)
+    out["t"] = full["t"][sl]
+    out["signals"] = {k: v[sl] for k, v in full["signals"].items()}
+    envelope = dict(full["envelope"])
+    if "stall_margin" in envelope:
+        envelope["stall_margin"] = envelope["stall_margin"][sl]
+    if "flags" in envelope:
+        envelope["flags"] = {k: v[sl] for k, v in envelope["flags"].items()}
+    out["envelope"] = envelope
+    out["stride"] = stride
+    return out
+
+
+def test_sim_replay_is_the_full_body_sliced_byte_for_byte(client, wait_job):
+    """읽으면서 솎아도 응답은 통째 읽고 자르던 때와 **키 순서까지** 같다 — 재생 화면·착륙 요약·
+    가상환경이 같은 본문을 받는다. stride가 표본 수를 나누지 않거나 넘어도 같다."""
+    import json
+
+    j = wait_job(client.post("/api/sim/run", json=_hold_mission(
+        actuators={"rate_max": 6.0})).json()["id"], timeout=120.0)
+    rid = j["result_id"]
+    full = client.get(f"/api/results/{rid}").json()
+    for stride in (2, 7, 10, 1999, 5000):
+        got = client.get(f"/api/sim/{rid}/replay", params={"stride": stride}).json()
+        want = _replay_by_slicing(full, stride)
+        assert json.dumps(got, ensure_ascii=False) == json.dumps(want, ensure_ascii=False), stride
+    # stride 1은 저장 본문 그대로다
+    assert client.get(f"/api/sim/{rid}/replay").json() == full
+
+
+def test_sim_replay_does_not_build_the_full_resolution_body(client, wait_job):
+    """재생(stride>1)의 메모리 정점이 전 해상도 파싱본보다 작아야 한다 — 예전에는 본문 글 한 벌과
+    파싱본을 통째로 세운 뒤 잘랐다(S1 기본 미션 68.6 MB 본문에서 +218~263 MB). 기준은 전 해상도
+    파싱본(store.load)이다 — 통째 조회(/results/{id})는 이제 파일을 파싱 없이 흘려보내므로 그 정점은
+    TestClient의 응답 버퍼링만 잰다(기준으로 쓰면 비교가 뜻을 잃는다)."""
+    import tracemalloc
+
+    j = wait_job(client.post("/api/sim/run", json=_hold_mission()).json()["id"], timeout=120.0)
+    rid = j["result_id"]
+
+    def peak_of(call):
+        tracemalloc.start()
+        try:
+            tracemalloc.reset_peak()
+            base = tracemalloc.get_traced_memory()[0]
+            call()
+            return tracemalloc.get_traced_memory()[1] - base
+        finally:
+            tracemalloc.stop()
+
+    parsed = peak_of(lambda: client.app.state.store.load(rid))
+    lean = peak_of(lambda: client.get(f"/api/sim/{rid}/replay", params={"stride": 10}).raise_for_status())
+    assert lean < 0.35 * parsed, (lean, parsed)
+    # stride 1은 여기서 재지 않는다 — TestClient가 응답 본문을 통째로 두 벌 버퍼링해(파일 크기 ×2)
+    # 서버 쪽 정점이 가려진다. 파싱 없이 흘려보낸다는 사실은 아래 바이트 대조가 고정한다.
+
+
+def test_sim_replay_stride_one_streams_the_stored_json(client, wait_job):
+    """stride 1은 저장 본문 파일 그대로다 — 값은 /results와 같고, 종류 판정(409)·없음(404)도 그대로다."""
+    j = wait_job(client.post("/api/sim/run", json=_hold_mission(t_end=2.0)).json()["id"],
+                 timeout=120.0)
+    rid = j["result_id"]
+    r = client.get(f"/api/sim/{rid}/replay")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/json")
+    assert r.content == (client.app.state.store.root / f"{rid}.json").read_bytes()
+    assert int(r.headers["content-length"]) == len(r.content)
+    assert r.json() == client.get(f"/api/results/{rid}").json()
+    tj = wait_job(client.post("/api/trim/batch", json={
+        "cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}]}).json()["id"])
+    assert client.get(f"/api/sim/{tj['result_id']}/replay").status_code == 409
+    assert client.get("/api/sim/nope/replay").status_code == 404
+
+
+def test_sim_duty_parses_only_the_signals_the_engine_reads(client, wait_job, monkeypatch):
+    """타면 사용은 DUTY_SIGNALS만 파싱한다 — 그 목록이 엔진 duty_report가 실제로 읽는 신호를 다
+    덮는지 감시 dict로 확인하고, 골라 읽은 응답이 통째 본문으로 계산한 것과 같은지 본다.
+    엔진이 새 신호를 읽기 시작하면(또는 신호를 통째로 훑으면) 여기서 빨개진다."""
+    import json
+
+    from claw.analysis.duty import duty_report
+    from claw_server.routes import sim as sim_route
+    from claw_server.routes.sim import DUTY_SIGNALS
+    from claw_server.serialize import to_jsonable
+
+    j = wait_job(client.post("/api/sim/run", json=_hold_mission(
+        alt=1030.0, actuators={"rate_max": 6.0})).json()["id"], timeout=120.0)
+    rid = j["result_id"]
+    full = client.app.state.store.load(rid)
+    seen = set()
+
+    class Watch(dict):
+        def __getitem__(self, k):
+            seen.add(k)
+            return super().__getitem__(k)
+
+        def get(self, k, default=None):
+            seen.add(k)
+            return super().get(k, default)
+
+        def __contains__(self, k):
+            seen.add(k)
+            return super().__contains__(k)
+
+        def __iter__(self):
+            seen.add("*전체*")
+            return super().__iter__()
+
+        def keys(self):
+            seen.add("*전체*")
+            return super().keys()
+
+        def items(self):
+            seen.add("*전체*")
+            return super().items()
+
+        def values(self):
+            seen.add("*전체*")
+            return super().values()
+
+    ref = to_jsonable(duty_report(full["t"], Watch(full["signals"]), full["meta"],
+                                  bins=16, rate_bins=24))
+    assert seen and seen <= DUTY_SIGNALS, seen
+    ref["result_id"] = rid
+    got = client.get(f"/api/sim/{rid}/duty", params={"bins": 16}).json()
+    assert json.dumps(got, ensure_ascii=False) == json.dumps(ref, ensure_ascii=False)
+    # 트림 여유 분해가 선택 신호(mach·wow·on_rail)를 실제로 쓰는 런이어야 위 대조가 뜻이 있다
+    assert got["trim_reserve"]["de_dyn_reserve_min_frac"] is not None
+
+    # 목록이 엔진보다 모자라도 답은 같다 — 목록 밖 신호는 읽는 순간 그 줄만 마저 파싱한다
+    # (없는 신호처럼 굴면 엔진의 .get이 None을 받아 그 보정을 조용히 건너뛴다)
+    monkeypatch.setattr(sim_route, "DUTY_SIGNALS", frozenset({"de"}))
+    assert client.get(f"/api/sim/{rid}/duty", params={"bins": 16}).json() == got
+    monkeypatch.undo()
+
+    # 쓰지 않는 신호 줄은 파싱조차 하지 않는다 — 그 줄을 망가뜨려도 타면 사용은 그대로다
+    # (통째 읽기였다면 본문 전체가 손상 판정 → 404)
+    path = client.app.state.store.root / f"{rid}.json"
+    lines = path.read_text(encoding="utf-8").split("\n")
+    victim = next(i for i, ln in enumerate(lines) if ln.startswith('"alpha": '))
+    lines[victim] = '"alpha": @손상@,'
+    path.write_text("\n".join(lines), encoding="utf-8")
+    assert client.get(f"/api/sim/{rid}/duty", params={"bins": 16}).json() == got
+    assert client.get(f"/api/sim/{rid}/replay", params={"stride": 10}).status_code == 404
+
+
 def test_sim_cancel_preserves_partial_result(client, wait_job):
     import time
 
@@ -427,8 +578,11 @@ def test_landing_mission_runs_over_http(client, wait_job):
     # 엔진 test_landing과 같은 값 — 프로펠러 전환으로 뒤로 밀렸다(107.3→115.4,
     # 129.9→137.9). 여유추력이 5,840 N → 1,320 N으로 줄어 상승·가속이 느려진 것이지
     # 접지 품질이 나빠진 게 아니다(엔진 쪽이 접지 속도 −0.96 m/s를 따로 못박는다).
-    assert ph["touchdown_t"] == pytest.approx(115.4, abs=2.0)
-    assert ph["stop_t"] == pytest.approx(137.9, abs=3.0)
+    # 그다음 두 번은 발진 직후 스로틀이다 — 이 HTTP 경로 실측 115.74 → 112.05 → 111.27(정지 138.68 → 134.92 →
+    # 134.13): 속도 명령필터 추월 동기화(fcl/graphs.py 속도 절)가 이탈 직후 스로틀 0 구간을 없앴고, 발사 출력
+    # 웜스타트(sim/simulator.py run)가 남은 램프를 없앴다. 엔진 test_landing과 같은 사슬이다
+    assert ph["touchdown_t"] == pytest.approx(111.3, abs=2.0)
+    assert ph["stop_t"] == pytest.approx(134.1, abs=3.0)
 
     # 기준선은 결과와 함께 다닌다 — 엔진이 소비하지 않는 heading·length도 실려야
     # 재생 화면이 활주로 띠를 그린다 (웨이포인트 동봉과 같은 규약)

@@ -33,6 +33,9 @@ export interface MountDeps {
   store?: { get(k: string): unknown; set(k: string, v: unknown): void };
   /** 처음 열 결과 id (없으면 최신) */
   resultId?: string | null;
+  /** 헤더에서 고른 기체의 적용 문서(`views/profilepick.js selectedDocument`) — 결과가 하나도 없을 때만 기체
+   *  모델의 출처가 된다. 결과가 있으면 **그 런의 기체 문서**가 이긴다(이 번들은 헤더 선택을 모른다) */
+  selectedDocument?: () => Promise<unknown>;
 }
 
 export function mount(container: HTMLElement, deps: MountDeps = {}): MountHandle {

@@ -271,10 +271,10 @@ def test_list_keeps_an_aircraft_whose_summary_fails(client, monkeypatch):
     client.post("/api/profiles", json={"document": _doc()})
     real = ProfileStore.summary
 
-    def failing(doc, revision):
+    def failing(doc, revision, *rest):  # rest — 반영 표 절(written_gain_tables, 목록이 넘긴다)
         if doc["id"] == "heavy-delta":
             raise RegistryError("없는 추진 형식")
-        return real(doc, revision)
+        return real(doc, revision, *rest)
 
     monkeypatch.setattr(ProfileStore, "summary", staticmethod(failing))
     listing = client.get("/api/profiles").json()
@@ -634,7 +634,8 @@ def test_listing_carries_the_confirmed_gain_tables_summary(client):
     assert r.status_code == 200, r.text
     row = next(p for p in client.get("/api/profiles").json() if p["id"] == "gt-delta")
     # 기본 문서는 신선하지만 플랜트를 바꾸는 변형(full-stores)에서는 표가 낡음이다 — 사전 통보
-    assert row["gain_tables"] == {"source": "auto_design", "stale": False, "stale_variants": ["full-stores"]}
+    assert row["gain_tables"] == {"source": "auto_design", "stale": False, "stale_variants": ["full-stores"],
+                                  "variants": {"full-stores": {"source": "stale"}}}
     cat = client.get("/api/gains/catalog", params={"profile_id": "gt-delta"}).json()
     assert cat["confirmed"] == {"slots": ["pitch.kp"], "stale": False}
 
@@ -644,7 +645,8 @@ def test_listing_carries_the_confirmed_gain_tables_summary(client):
     assert client.put("/api/profiles/gt-delta",
                       json={"base_revision": 2, "document": doc2}).status_code == 200
     row = next(p for p in client.get("/api/profiles").json() if p["id"] == "gt-delta")
-    assert row["gain_tables"] == {"source": "auto_design", "stale": True, "stale_variants": ["full-stores"]}
+    assert row["gain_tables"] == {"source": "auto_design", "stale": True, "stale_variants": ["full-stores"],
+                                  "variants": {"full-stores": {"source": "stale"}}}
     r = client.post("/api/sim/run", json={
         "trim": {"name": "t", "mach": 0.45, "alt": 1000.0, "fuel": 200.0},
         "modes": [{"name": "hold", "speed": 150.0, "alt": 1000.0, "heading": 0.0, "exit": ["time_ge", 1e9]}],

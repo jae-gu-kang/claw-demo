@@ -19,6 +19,7 @@
 
 import { el, clear } from "../dom.js";
 import { store } from "../store.js";
+import { selectedDocument } from "./profilepick.js";
 
 const HINT = "font-size:12px; color:var(--muted); line-height:1.6;";
 const BUNDLE = "/world/build/world.js";
@@ -55,6 +56,8 @@ export function render() {
         live.handle = mod.mount(root, {
           store,
           resultId: store.get("simResult")?.id ?? null,
+          // 결과가 없을 때만 기체 모델의 출처(헤더 선택) — 결과가 있으면 그 런의 기체 문서가 이긴다(번들 안에서)
+          selectedDocument,
         });
       } catch (e) {
         fail(root, `화면을 세우지 못했습니다 — ${e?.message ?? e}`);

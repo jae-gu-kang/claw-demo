@@ -205,9 +205,11 @@ def test_기본_테이블은_예전과_같다():
     # 지문을 움직이지 않는다(지문은 생성 문장을 해시하지 않는다)
     # v1.12: 지문이 둘로 갈렸다 — 구조 지문(생성 C 텍스트의 해시)과 파라미터 지문(이미지 값의 해시). 이 테스트는 분석
     # 그래프(시뮬이 쓰는 그래프)를 핀하고, 표준 템플릿의 두 지문은 flight/tests/test_parity.py가 핀한다. ki = 0 폴딩을 없애
-    # 헤딩·요 적분기가 코드에 돌아왔고 표가 포인터+점 수로 바뀌었다 — ab5f3d7f1c1a5abf(값+구조) → 아래 둘
+    # 헤딩·요 적분기가 코드에 돌아왔고 표가 포인터+점 수로 바뀌었다 — ab5f3d7f1c1a5abf(값+구조) → be2a2e6fe00dff02
+    # 속도 명령필터 추월 동기화(fcl/graphs.py 속도 절 — 생성 C에 판정 한 줄)로 구조 지문만 움직였다 — be2a2e6fe00dff02 →
+    # 53ea5f4d121401a8. 값은 그대로라 파라미터 지문은 같다(동기화를 뗀 그래프로 재면 옛 지문이 그대로 나온다)
     module = _module()
-    assert (module.structure_fingerprint, module.param_fingerprint) == ("be2a2e6fe00dff02", "8bd3e4b1400dbaac")
+    assert (module.structure_fingerprint, module.param_fingerprint) == ("53ea5f4d121401a8", "8bd3e4b1400dbaac")
 
 
 def test_없는_자리를_요구하면_거부한다():

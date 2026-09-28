@@ -17,6 +17,8 @@ VectorCAST의 시험 케이스 목록에 해당하는 재료다. 전부 **결정
 금지 원칙상 생성 코드에 NaN 분기가 없다).
 """
 
+import math
+
 # ── 통합 케이스 (fcl 전체 입력) ───────────────────────────────────────────
 
 # 순항 비슷한 기준 행 — 케이스는 여기서 필요한 축만 극단으로 민다
@@ -52,31 +54,79 @@ def _sat_case(cid, title, hi_over, lo_over, n=250):
 _DROP_MAX_ROWS = 12_000
 
 
-def _theta_hi_drop_case(autopilot, dt):
+def _theta_hi_drop_points(autopilot, theta_hi):
+    """하강 케이스의 (상한이 높은 마하, 낮은 마하, 낙차, 높은 쪽 상한) — 표를 모르면 뒤 둘이 None, 상한이 안 내려가면 None.
+
+    실제 클램프 상한은 상자로 자른 표 min(max(θ_hi(M), theta_lo), theta_hi)다(fcl/graphs.py) — 격자점에서 재서 가장 높은
+    점(처음 것)과 가장 낮은 점을 고른다. 격자점이라 보간 없이 표 값 그대로다. 전 격자에서 상자 밖이면 상한이 상수라
+    (낙차 0) 붙이지 않는다 — 그 조건은 분석으로 정당화된다(verify/autocode.py `_port_const`).
+    옛 호출(theta_hi=True — 표를 안 넘긴다)은 데모 격자의 양 끝(마하 0.1 → 0.9)과 고정 여유로 낸다.
+    """
+    if theta_hi is True:
+        return 0.1, 0.9, None, None
+    axis = [float(m) for m in theta_hi.axes[0]]
+    vals = [float(v) for v in theta_hi.data.ravel()]
+    lo, hi = float(autopilot["theta_lo"]), float(autopilot["theta_hi"])
+    # 파이썬 min·max는 NaN을 전파하지 않는다 — 유한값만 받는다(NaN 표는 이미지 로더가 거부하는 값이기도 하다)
+    if len(axis) != len(vals) or not all(math.isfinite(v) for v in (*vals, lo, hi)):
+        return None
+    lim = [min(max(v, lo), hi) for v in vals]
+    k_up, k_dn = lim.index(max(lim)), lim.index(min(lim))
+    drop = lim[k_up] - lim[k_dn]
+    return (axis[k_up], axis[k_dn], drop, lim[k_up]) if drop > 0.0 else None
+
+
+def _theta_hi_drop_case(autopilot, dt, theta_hi=True):
     """θ 상한 표가 스텝 사이에 내려가는 순간의 승강률 적분기(v1.11) — 가드 상한 조건의 (c0 참, c1 거짓) 벡터.
 
-    상한이 신호(θ_hi(M))라 그 조건은 정당화할 수 없다(verify/autocode.py _coupled_guards) — 오차 ≤ 0인데 raw > hi는
-    적분기가 새 상한보다 높을 때만 생기므로 측정으로 덮는다. 적분기를 올리는 것이 까다롭다: 조건부 적분은 raw가 한계를
-    넘으면 적분을 멈추므로 **큰 오차로는 적분기가 안 오른다**(처음 넣은 고정 벡터가 그렇게 실패했다). 그래서 kp·e를
-    0.3 → 0.1 → 0.02로 줄이며 적분기를 −0.3에서 hi − 0.02 근처까지 올린다 — 각 단계가 kp/ki에 비례하는 시간이라 게인에서
-    길이를 정한다(두 예제 기체는 kp/ki = 4 s로 약 44 s). 마지막에 마하를 0.9로 올려 상한을 떨어뜨리고 kp·e = −0.01로 둔다.
-    명령은 0에 두고 측정 hdot으로 오차를 만든다(명령 필터를 거치지 않아 단계 경계에서 오차가 바로 바뀐다).
+    상한이 스텝마다 움직이는 신호(θ_hi(M))라 그 조건은 정당화할 수 없다(verify/autocode.py _coupled_guards) — 오차 ≤ 0인데
+    raw > hi는 적분기가 새 상한보다 높을 때만 생기므로 측정으로 덮는다. 적분기를 올리는 것이 까다롭다: 조건부 적분은 raw가
+    한계를 넘으면 적분을 멈추므로 **큰 오차로는 적분기가 안 오른다**(처음 넣은 고정 벡터가 그렇게 실패했다). 그래서 kp·e를
+    0.3 → 0.1 → 0.02로 줄이며 적분기를 하한에서 hi − 0.02 근처까지 올린다 — 각 단계가 kp/ki에 비례하는 시간이라 게인에서
+    길이를 정한다(두 예제 기체는 kp/ki = 4 s로 약 44 s). 마지막에 마하를 상한이 낮은 점으로 옮겨 상한을 떨어뜨리고
+    kp·e = −0.01로 둔다. 명령은 0에 두고 측정 hdot으로 오차를 만든다(명령 필터를 거치지 않아 단계 경계에서 오차가 바로 바뀐다).
+
+    **마하 두 점과 여유는 법칙의 표에서 정한다.** 하강 뒤 raw − 새 상한 ≈ 낙차 − (마지막 단 kp·e) − 0.01이라, 고정
+    여유(0.02·0.01)는 낙차가 0.03 미만이면 쌍을 못 만들고 0.03이면 조건부 적분의 넘침에만 기댄다 — 쇼케이스 기체(θ_hi
+    0.33·0.34, 낙차 0.01·0.02)에서 미커버 fail이었고 0.35(낙차 0.03)는 넘침 5e-6으로 겨우 통과했다. 마하도 데모 격자
+    (0.1·0.9)를 박지 않고 표 격자에서 고른다(기체 고정 금지). 낙차가 0.06 미만이면 사다리를 낙차/4까지
+    이어(단마다 1/5) 하강 오차도 낙차/4로 두어 여유를 낙차/2로 한다. 0.06 이상은 종전 여유 그대로다(예제 기체 낙차 0.08 —
+    벡터 불변). 낙차가 반올림 수준으로 작으면 사다리가 행 상한을 넘어 케이스가 빠지고 미커버 fail로 남는다(정직한 fail).
+    1단 길이도 적분기가 하한 theta_lo에서 출발해 상한 − 0.3까지 오르는 시간으로 늘린다(상자가 넓은 기체).
     """
     kp, ki = float(autopilot.get("kp_vs", 0.0)), float(autopilot.get("ki_vs", 0.0))
     if not (kp > 0.0 and ki > 0.0 and dt and dt > 0.0):
         return None
+    pts = _theta_hi_drop_points(autopilot, theta_hi)
+    if pts is None:
+        return None
+    m_up, m_dn, drop, h_up = pts
     t = kp / ki
 
     def n(sec):
         return max(1, int(round(sec / dt)))
 
-    if n(10.0) + n(1.2 * t) + n(2.4 * t) + n(4.8 * t) + n(0.5) > _DROP_MAX_ROWS:
+    stages = [(0.3, 1.2 * t), (0.1, 2.4 * t), (0.02, 4.8 * t)]
+    e_drop = 0.01
+    if drop is not None:
+        # 적분기는 클램프로 늘 theta_lo 이상 — 거기서 h_up − 0.3까지(1단 kp·e = 0.3의 천장) 오르는 시간
+        rise = h_up - float(autopilot["theta_lo"]) - 0.3
+        stages[0] = (0.3, 1.2 * t * max(1.0, rise / 0.3))
+        if drop < 0.06:
+            # 사다리를 낙차/4까지 잇는다 — 단마다 kp·e를 1/5로(0.1 → 0.02와 같은 비), 길이는 여유를 메우는 시간의 1.2배
+            last, kpe = drop / 4.0, 0.02
+            while kpe > last:
+                nxt = max(kpe / 5.0, last)
+                stages.append((nxt, 1.2 * t * (kpe - nxt) / nxt))
+                kpe = nxt
+            e_drop = last
+    if n(10.0) + sum(n(dur) for _, dur in stages) + n(0.5) > _DROP_MAX_ROWS:
         return None
     vs = dict(alt_on=0.0, hdot_on=1.0, cmd_hdot=0.0)
-    rows = _rows(n(10.0), hdot=0.0, mach=0.1, **vs)  # 명령 필터를 0에 앉힌다
-    for kpe, dur in ((0.3, 1.2 * t), (0.1, 2.4 * t), (0.02, 4.8 * t)):
-        rows += _rows(n(dur), hdot=-kpe / kp, mach=0.1, **vs)
-    rows += _rows(n(0.5), hdot=0.01 / kp, mach=0.9, **vs)
+    rows = _rows(n(10.0), hdot=0.0, mach=m_up, **vs)  # 명령 필터를 0에 앉힌다
+    for kpe, dur in stages:
+        rows += _rows(n(dur), hdot=-kpe / kp, mach=m_up, **vs)
+    rows += _rows(n(0.5), hdot=e_drop / kp, mach=m_dn, **vs)
     return {"id": "TC-INT-THETA-HI-DROP", "title": "θ 상한 표 하강 중 승강률 적분기 (가드 상한 조건 거짓측)",
             "rows": rows}
 
@@ -84,9 +134,10 @@ def _theta_hi_drop_case(autopilot, dt):
 def integration_cases(autopilot=None, dt=None, *, theta_hi=False):
     """통합 보강 케이스 목록 [{id, title, rows}] — 미션 뒤에 이 순서로 잇는다.
 
-    theta_hi=True(법칙에 θ 상한 표가 있다)이고 autopilot·dt를 주면 게인에서 길이를 정하는 케이스(θ 상한 하강)를 덧붙인다 —
-    이름 기반 값 정책만으로는 적분기를 원하는 높이에 올릴 수 없는 경로다. 표가 없으면(리미터 끔) 상한이 상수라 그 조건은
-    정당화되므로 붙이지 않는다.
+    theta_hi에 법칙의 θ 상한 표(`law.theta_hi_table`)를 주고 autopilot·dt를 주면 게인에서 길이를 정하는 케이스(θ 상한
+    하강)를 덧붙인다 — 이름 기반 값 정책만으로는 적분기를 원하는 높이에 올릴 수 없는 경로다. 마하 두 점과 여유는 그 표와
+    상자(theta_lo·theta_hi)에서 정한다. 표가 없거나(리미터 끔) 상자에 잘려 상한이 상수면 그 조건은 정당화되므로 붙이지 않는다.
+    옛 호출 theta_hi=True(표를 안 넘긴다)는 데모 격자 고정 벡터다 — 표를 넘기는 호출과 예제 기체에서 비트로 같다.
     """
     cases = [
         _sat_case("TC-INT-SAT-ALT", "고도축 포화 왕복 (θ 상·하한, 안티와인드업 4방향)",
@@ -123,7 +174,8 @@ def integration_cases(autopilot=None, dt=None, *, theta_hi=False):
                   dict(p=4.0, q=4.0, r=4.0, beta=0.5),
                   dict(p=-4.0, q=-4.0, r=-4.0, beta=-0.5), n=120),
     ]
-    drop = _theta_hi_drop_case(autopilot, dt) if (theta_hi and autopilot is not None) else None
+    has_table = theta_hi is not None and theta_hi is not False  # 표 객체의 참거짓에 기대지 않는다
+    drop = _theta_hi_drop_case(autopilot, dt, theta_hi) if (has_table and autopilot is not None) else None
     if drop is not None:
         cases.append(drop)
     return cases

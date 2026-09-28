@@ -229,3 +229,38 @@ def test_document_warns_when_the_trim_search_hides_the_low_speed_stall():
     doc["variants"] = [{"id": "narrow", "name": "좁은 탐색", "patch": {"/trim/alpha_bounds": [-0.1, 0.30]}}]
     warns = document_warnings(validate_document(doc))
     assert [(w["variant"], w["path"]) for w in warns] == [("narrow", "/trim/alpha_bounds/1")]
+
+
+def test_envelope_alt_takes_a_number_or_a_list_of_up_to_six():
+    """엔벨로프 선도 고도 — 수치 하나(종전) 또는 1~6개 목록(V-n 다중 고도). 받은 모양 그대로 정규화한다."""
+    from claw.profile.schema import ISA_ALT_RANGE, MAX_ENVELOPE_ALTS
+
+    out = validate_document(load_example())["mission_template"]["envelope"]["alt"]
+    assert type(out) is float  # 예제는 수치 그대로 — 목록으로 바꾸지 않는다
+
+    doc = load_example()
+    doc["mission_template"]["envelope"]["alt"] = [0, 1000, 3000.5]
+    alts = validate_document(doc)["mission_template"]["envelope"]["alt"]
+    assert alts == [0.0, 1000.0, 3000.5] and all(type(a) is float for a in alts)
+    doc["mission_template"]["envelope"]["alt"] = [1500]  # 한 개짜리 목록도 목록 그대로
+    assert validate_document(doc)["mission_template"]["envelope"]["alt"] == [1500.0]
+    doc["mission_template"]["envelope"]["alt"] = 700  # 정수 수치 → float
+    assert validate_document(doc)["mission_template"]["envelope"]["alt"] == 700.0
+    doc["mission_template"]["envelope"]["alt"] = [float(i) for i in range(MAX_ENVELOPE_ALTS)]
+    validate_document(doc)
+
+    lo, hi = ISA_ALT_RANGE
+    for bad, path in (([], "/mission_template/envelope/alt"),
+                      ([0.0] * (MAX_ENVELOPE_ALTS + 1), "/mission_template/envelope/alt"),
+                      ([0.0, hi + 1.0], "/mission_template/envelope/alt/1"),
+                      ([lo - 1.0], "/mission_template/envelope/alt/0"),
+                      ([0.0, float("nan")], "/mission_template/envelope/alt/1"),
+                      ([0.0, float("inf")], "/mission_template/envelope/alt/1"),
+                      ([True], "/mission_template/envelope/alt/0"),
+                      (["1000"], "/mission_template/envelope/alt/0"),
+                      ([[1000.0]], "/mission_template/envelope/alt/0"),
+                      ({"alt": 1000.0}, "/mission_template/envelope/alt"),
+                      (hi + 1.0, "/mission_template/envelope/alt"),
+                      (None, "/mission_template/envelope/alt")):
+        e = _bad(lambda d, v=bad: d["mission_template"]["envelope"].__setitem__("alt", v))
+        assert e.path == path, (bad, e.path, e.message)

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { checkWaypoints, flyablePath, pathSpeed, turnRadius } from "./wpcheck.js";
+import { checkWaypoints, flyablePath, pathAlt, pathSpeed, turnRadius } from "./wpcheck.js";
 
 const ok = (n, e) => ({ n, e, ok: true });
 
@@ -17,6 +17,24 @@ test("turnRadius: 판정할 수 없는 입력은 null이지 0이 아니다", () 
   for (const [v, b] of [[0, 0.7], [-1, 0.7], [NaN, 0.7], [88, 0], [88, NaN]]) {
     assert.equal(turnRadius(v, b), null, `${v}/${b}`);
   }
+});
+
+test("pathAlt: path 헤딩 모드의 고도 칸(수치) — 새 웨이포인트 기본 고도의 출처", () => {
+  const rows = [
+    { heading: "3.4", lonAxis: "pitch", lonValue: "0.3" }, // 상승 — 경로 모드 아님
+    { heading: "path", lonAxis: "alt", lonValue: "200" }, // 순항
+    { heading: "path", lonAxis: "alt", lonValue: "900" }, // 뒤 행은 쓰지 않는다(표 순서 첫 행)
+  ];
+  assert.equal(pathAlt(rows), 200);
+  // 고도가 "path"면 그 모드는 고도를 **받는** 쪽 — 출처가 아니다
+  assert.equal(pathAlt([{ heading: "path", lonAxis: "alt", lonValue: "path" }]), null);
+  // 종방향 축이 고도가 아니면(피치·강하율) 그 값은 고도가 아니다
+  assert.equal(pathAlt([{ heading: "path", lonAxis: "hdot", lonValue: "-2" }]), null);
+  for (const bad of ["", " ", "0", "-50", "abc"]) {
+    assert.equal(pathAlt([{ heading: "path", lonAxis: "alt", lonValue: bad }]), null, bad);
+  }
+  assert.equal(pathAlt([]), null);
+  assert.equal(pathAlt(undefined), null);
 });
 
 test("pathSpeed: path 헤딩 모드의 속도, 여럿이면 가장 빠른 쪽", () => {

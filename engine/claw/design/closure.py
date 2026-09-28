@@ -11,13 +11,17 @@ openloop.GROUP_LOOPS(평탄 SISO 선언)와 **의도적으로 다르다**. 그 �
 
 그래서 조성은: 축별 레이트 댐퍼(횡축은 롤·요 **둘 다** — 요 댐퍼 없이는 더치롤
 감쇠 판정이 성립하지 않는다)를 상태 피드백으로 접은 A′ 위에서
-- 레이트 자리: 모드 지표 (ζ_sp / ζ_dr / λ_roll) 판정
+- 레이트 자리: 모드 지표 (ζ_sp / ζ_dr / λ_roll) 판정 + AS94900 끊은 루프 여유(이 루프를 끊고 같은 축 다른 레이트
+  루프는 작동기·지연째 닫은 개루프 — analysis.margins.broken_loop, 루프 대역 교차만. 튜너 가드와 검증이 같은 자:
+  tune.rate_loop_margins). 위 병리는 이 루프만 연 SISO의 저주파 교차 이야기다 — 끊는 자리를 바로 잡고 루프 대역만 읽는다
 - 자세 자리: PI 개루프 마진 (작동기+지연 포함) 판정
 
 개루프 부호는 자동 방향 결정(oriented_margins) — 설계 게인의 부호가 자리마다
 달라(피치 kp<0, 롤 kp>0) 고정 sign 하나로는 절반이 음의 DC 루프가 된다.
 PM>0인 방향을 취하고 어느 방향이었는지를 결과에 남긴다.
 """
+
+import math
 
 import numpy as np
 
@@ -126,6 +130,129 @@ def close_rates(lm_axis, rate_gains: dict, rate_filters: dict | None = None) -> 
         x_names=tuple(x_names), u_names=lm_axis.u_names, axis=lm_axis.axis,
         dt=lm_axis.dt, case=lm_axis.case, params_fingerprint=lm_axis.params_fingerprint,
     )
+
+
+def _ss_matrices(tf):
+    """SISO 전달함수 → 상태공간 (A, B, C, D) 2차원 배열 — 폐루프 조립용."""
+    import control
+
+    s = control.tf2ss(tf)
+    return (np.atleast_2d(np.asarray(s.A, float)), np.atleast_2d(np.asarray(s.B, float)),
+            np.atleast_2d(np.asarray(s.C, float)), np.atleast_2d(np.asarray(s.D, float)))
+
+
+def closed_loop_poles(
+    lm_axis, rate_gains: dict, *, kp=0.0, ki=0.0, orientation=1.0,
+    actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2, rate_filters=None,
+):
+    """축 **전체** 폐루프 고유치 — 그 축의 레이트 댐퍼 전부 + 자세 PI를 한꺼번에 닫는다.
+
+    튜너와 검증은 루프를 하나씩 잰다: 댐퍼 가드는 자기 댐퍼 하나만 작동기·지연을 거쳐 닫고(앞선 댐퍼는
+    A′로 이상 접힘), 자세 마진은 레이트를 이상 폐쇄한 A′ 위의 SISO 보드 마진이다. 레이트 댐퍼는 안쪽
+    루프일 뿐이고, 개루프 불안정 플랜트(나선 발산 등) 위의 보드 마진은 폐루프 안정을 보장하지 않는다 —
+    여기서 실제 법칙의 모양대로 한 번에 닫아 고유치로 판정할 재료를 낸다:
+
+        명령(조종면 채널 u)  v_u = Σ k_g·필터_g(레이트_g) − orientation·(kp·자세 + ki·∫자세)   [u가 자세 입력일 때]
+        실제 조종면          u = 작동기 2차계 · Padé(지연) · v_u    (채널마다 따로 — 조종면마다 작동기가 있다)
+
+    부호 규약은 개별 경로와 같다: 댐퍼는 u = +k·rate(close_rates·댐퍼 가드), 자세는 orientation 방향의
+    음의 되먹임(oriented_margins가 PM>0으로 고른 방향 — att_margin_loop를 control.margin이 1 + L로
+    읽는다). 레이트 필터는 blocks의 연속시간 등가(analysis.margins.filter_tf)를 실현해 붙인다 —
+    close_rates가 거부하는 노치도 여기서는 상태 실현으로 들어간다(모드 선별이 아니라 고유치 전체를 본다).
+
+    작동기 인자가 없으면(actuator_wn None) 작동기를, delay_s = 0이면 Padé를 뺀다 — 그때 결과는
+    att_margin_loop를 닫은 극과 같다(구현 독립 검증: test_design_closure).
+    """
+    from claw.analysis.margins import filter_tf
+
+    if (actuator_wn is None) != (actuator_zeta is None):
+        raise ValueError("actuator_wn·actuator_zeta는 함께 지정해야 함 (한쪽만 지정 불가)")
+    spec = AXIS_SPECS[lm_axis.axis]
+    A0 = np.asarray(lm_axis.A, dtype=float)
+    B0 = np.asarray(lm_axis.B, dtype=float)
+    n = A0.shape[0]
+    x_names, u_names = list(lm_axis.x_names), list(lm_axis.u_names)
+
+    # 상태 배치: 물리 상태 | 레이트 필터 | 자세 적분기 | 채널마다 (Padé, 작동기)
+    nxt = n
+    dampers = []  # (x_rate, u_in, k, 필터 실현 | None, 필터 상태 시작)
+    for group, x_rate, u_in in spec["rates"]:
+        k = float(rate_gains.get(f"{group}.k_rate", 0.0))
+        if k == 0.0:
+            continue  # 꺼진 댐퍼 — 필터도 루프에 없다 (close_rates와 같은 규약)
+        tf = filter_tf((rate_filters or {}).get(group))
+        real = None if tf is None else _ss_matrices(tf)
+        dampers.append((x_rate, u_in, k, real, nxt))
+        if real is not None:
+            nxt += real[0].shape[0]
+    _group, x_att, u_att = spec["att"]
+    use_att = kp != 0.0 or ki != 0.0
+    i_int = None
+    if use_att and ki != 0.0:
+        i_int = nxt
+        nxt += 1
+    pade = _ss_matrices(_pade_tf(delay_s, pade_order)) if delay_s > 0.0 else None
+    channels = []  # (u 이름, Padé 상태 시작 | None, 작동기 상태 시작 | None)
+    for u in dict.fromkeys([u for _, _, u in spec["rates"]] + [u_att]):
+        i_pade = None
+        if pade is not None:
+            i_pade = nxt
+            nxt += pade[0].shape[0]
+        i_act = None
+        if actuator_wn is not None:
+            i_act = nxt
+            nxt += 2
+        channels.append((u, i_pade, i_act))
+
+    N = nxt
+    M = np.zeros((N, N))
+    M[:n, :n] = A0
+    cmd = {u: np.zeros(N) for u, _, _ in channels}  # v_u = cmd[u] · z
+    for x_rate, u_in, k, real, i_f in dampers:
+        ir = x_names.index(x_rate)
+        if real is None:
+            cmd[u_in][ir] += k
+            continue
+        Af, Bf, Cf, Df = real
+        nf = Af.shape[0]
+        M[i_f:i_f + nf, i_f:i_f + nf] = Af
+        M[i_f:i_f + nf, ir] += Bf[:, 0]
+        cmd[u_in][i_f:i_f + nf] += k * Cf[0, :]
+        cmd[u_in][ir] += k * Df[0, 0]
+    if use_att:
+        ia = x_names.index(x_att)
+        cmd[u_att][ia] += -orientation * kp
+        if i_int is not None:
+            M[i_int, ia] = 1.0  # ∫자세
+            cmd[u_att][i_int] += -orientation * ki
+    for u, i_pade, i_act in channels:
+        w = cmd[u]
+        if i_pade is not None:
+            Ap, Bp, Cp, Dp = pade
+            npd = Ap.shape[0]
+            M[i_pade:i_pade + npd, i_pade:i_pade + npd] += Ap
+            M[i_pade:i_pade + npd, :] += np.outer(Bp[:, 0], w)
+            out = np.zeros(N)
+            out[i_pade:i_pade + npd] = Cp[0, :]
+            w = out + Dp[0, 0] * w
+        if i_act is not None:
+            wn2 = actuator_wn * actuator_wn
+            M[i_act, i_act + 1] = 1.0  # 위치 → 속도
+            M[i_act + 1, :] += wn2 * w
+            M[i_act + 1, i_act] += -wn2
+            M[i_act + 1, i_act + 1] += -2.0 * actuator_zeta * actuator_wn
+            w = np.zeros(N)
+            w[i_act] = 1.0
+        M[:n, :] += np.outer(B0[:, u_names.index(u)], w)
+    return np.linalg.eigvals(M)
+
+
+def _pade_tf(delay_s, pade_order):
+    """Padé 근사 전달함수 — pi_loop와 같은 근사(control.pade)를 폐루프 조립에도 쓴다."""
+    import control
+
+    num, den = control.pade(delay_s, pade_order)
+    return control.tf(num, den)
 
 
 def wn_reference(lm_axis) -> float:
@@ -239,6 +366,55 @@ def oriented_margins(loop) -> tuple:
     if np.isfinite(m_neg["pm_deg"]) and m_neg["pm_deg"] > 0.0:
         return m_neg, -1
     return m_pos, 1
+
+
+def gain_margin_sides(m, oloop) -> dict:
+    """loop_margins 결과 m + 방향을 정한 개루프 → gm_db가 **이득 감소 쪽 경계**(유한한 음수)면 나이키스트 해석을 싣는다.
+
+    loop_margins(control.margin)는 −180° 교차 가운데 0 dB에 가장 가까운 경계 하나를 부호째 낸다. 음의 dB는
+    "게인을 그만큼 **줄이면** 폐루프 극이 허수축을 넘는다"는 경계다. 그 경계가 여유인지 결함인지는 **공칭(게인 1)
+    폐루프**가 가른다:
+    - 공칭 폐루프가 안정이면 −180° 교차마다 게인 배율 1/|L|에서 안정이 깨지고, 1에 가장 가까운 위·아래 두 경계
+      사이가 안정 구간이다 — 증가 쪽 여유 min{GM > 1}, 감소 쪽 여유 max{GM < 1}이고 둘 다 |dB|가 경계까지의
+      거리다(MIL-F-9490D·AS94900의 "±6 dB"가 이 양쪽 요구다). 개루프가 불안정하면(우반면 극 P개 — 나이키스트
+      조건은 −1을 반시계로 P번 감싸기) 감소 쪽 경계는 반드시 있다: 게인을 0으로 줄이면 개루프 발산이 그대로 남는다.
+      댐퍼 가드가 느린 나선을 면제하면(tune._damper_loop_verdict — 나선은 자세 루프의 몫) 자세 루프의 A′가 바로
+      그 모양이다. 구 기체 M0.3/h0/f200 작동기·지연 없는 튜닝 실측: A′ 고유치 +0.0131, 첫 후보(ωc 3.88)의 −180°
+      교차가 −49.0 dB(0.081 rad/s)·+293.9 dB(1.5e8 rad/s), PM 66.5°, 축 전체 폐루프 안정 — control.margin이 −49.0을
+      골라 튜너가 "GM 미달"로 백오프했고, 게인을 줄일수록 감소 쪽 경계가 0 dB로 다가와 못 빠져나와
+      margin_floor(교차 0.058배)로 끝났다(예제·구 기체 격자 11/11점).
+      그래서 gm_db를 **경계까지의 거리** min(|감소 쪽|, 증가 쪽)으로 바꿔 싣는다 — 판정(튜너 수용·criteria.judge)과
+      화면이 같은 자로 읽는다.
+    - 공칭 폐루프가 불안정이면 음의 GM은 "안정하려면 게인을 그만큼 줄여야 한다"는 뜻이지 여유가 아니다 — 개루프
+      안정 루프가 게인이 커 −1을 감싼 흔한 모양이다. gm_db를 그대로(음수 — 미달) 둔다.
+    공칭 안정 판정은 이 SISO 루프(방향을 정한 개루프의 1 + L 폐루프 극)다. 튜너의 백오프·구제는 여기에 더해 축 전체
+    폐루프(작동기·지연을 댐퍼 경로에도 넣은 조성 — tune._full_loop_stable)를 따로 요구한다.
+
+    gm_db ≥ 0(증가 쪽 경계가 가장 가깝다 — 감소 쪽이 있어도 더 멀다)·inf·nan·−inf는 손대지 않는다 — 그때 gm_db는
+    이미 가장 가까운 경계까지의 거리다(종전과 같다). 덧붙이는 칸: gm_down_db(감소 쪽 경계 — control.margin이 고른
+    음수 그대로), gm_up_db(증가 쪽 경계 — 없으면 inf), gm_nominal_stable. 한 번 바꾼 m에 다시 걸어도 그대로다."""
+    import control
+
+    gm = float(m["gm_db"])
+    if not (math.isfinite(gm) and gm < 0.0):
+        return m
+    gms = np.asarray(control.stability_margins(oloop, returnall=True)[0], dtype=float)
+    ups = [20.0 * math.log10(g) for g in gms if math.isfinite(g) and g > 1.0]
+    up = min(ups) if ups else math.inf
+    stable = bool(np.all(np.real(control.feedback(oloop, 1).poles()) < -1e-9))
+    out = {**m, "gm_down_db": gm, "gm_up_db": up, "gm_nominal_stable": stable}
+    if stable:
+        out["gm_db"] = min(-gm, up)
+    return out
+
+
+def att_margins(loop) -> tuple:
+    """자세 개루프 → (마진, 방향) — oriented_margins + 이득 감소 쪽 경계의 나이키스트 해석(gain_margin_sides).
+
+    튜너(백오프·구제·마무리)와 검증(schedmap)이 자세 마진을 이 한 곳에서 잰다 — 같은 루프를 두 규약으로 읽으면
+    튜너가 받아들인 해를 검증이 떨어뜨린다."""
+    m, orient = oriented_margins(loop)
+    return gain_margin_sides(m, loop if orient == 1 else -loop), orient
 
 
 def att_margin_loop(

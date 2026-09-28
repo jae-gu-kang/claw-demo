@@ -7,6 +7,7 @@ import pytest
 
 import statistics
 
+from claw.common.constants import G0
 from claw.design.seed import (
     REASON_SEED_NO_ANCHOR,
     REASON_SEED_NO_GRID,
@@ -14,10 +15,15 @@ from claw.design.seed import (
     REASON_SEED_VERIFY_FAILED,
     SEED_SCHEDULED,
     SEED_SOURCE,
+    SEPARATION,
+    WC_MATCH_RTOL,
+    _autopilot,
+    _inner_crossovers,
     quick_seed,
 )
+from claw.env import isa_atmosphere
 from claw.fcl.assemble import assemble_law
-from claw.profile import build_profile, load_example
+from claw.profile import build_profile, load_example, load_showcase
 
 TUNED = ("pitch.k_rate", "yaw.k_rate", "roll.k_rate", "pitch.kp", "pitch.ki", "roll.kp", "roll.ki")
 
@@ -42,23 +48,51 @@ def blank_seed():
     return doc, out, time.perf_counter() - t0
 
 
-def test_seed_signs_follow_the_example_hand_design_but_a_thin_roll_seed_is_not_adopted():
+def test_seed_signs_follow_the_example_hand_design_and_the_roll_damper_seeds_from_every_anchor():
     """부호는 조종효율 B에서 온다 — 예제 손설계(피치 kp<0·롤 kp>0, 댐퍼 부호 제각각)와 전부 같다.
 
-    그러나 예제 조성(요 워시아웃)에서는 롤 댐퍼가 한 앵커에서만 튜닝된다(나머지는 no_stable_gain). 그 한 점 값
-    (손설계의 약 1/8)으로 스케줄을 세우면 세 앵커 모두 롤 λ가 목표 12의 1/4 안팎이라, 다시 탐색이 멀쩡한 손설계를
-    덮게 된다 — 채택하지 않는다."""
+    예제 조성(요 워시아웃)에서 종전 댐퍼 가드("극 전부 안정")는 워시아웃이 되돌려 놓은 느린 나선을 보고 롤 댐퍼를
+    한 앵커만 남기고 꺼 버렸다(나머지 no_stable_gain) — 그 한 점 값(손설계의 약 1/8)이라 채택되지 않았다. 가드가
+    비행성 기준 안의 나선을 면제한 뒤로는 세 앵커 모두에서 롤 댐퍼가 튜닝되고 시드가 채택된다."""
     built = build_profile(load_example())
     hand = built.design_gains()
     out = quick_seed(built)
     for name in TUNED:
         assert _sign(out["slots"][name]["value"]) == _sign(hand[name]), (name, out["slots"][name])
-    assert out["ok"] is False
-    assert out["slots"]["roll.k_rate"]["reason"] == REASON_SEED_THIN_ANCHORS
-    assert out["slots"]["roll.k_rate"]["anchors_used"] == 1 and out["reason_text"]
+    assert out["ok"] is True, (out["reason"], out["slots"])
+    assert out["slots"]["roll.k_rate"]["anchors_used"] == len(out["anchors"]) == 3
+    assert all(out["slots"][n]["reason"] is None for n in TUNED)
     # 문서에 스케줄이 있으면 그 규칙으로 되돌린다 — 새로 만들지 않는다
     assert out["schedule"] is None and out["schedule_created"] is False
     assert out["design"]["provenance"]["schedule"] == "document"
+
+
+def test_thin_anchor_seed_is_not_adopted(monkeypatch):
+    """설계 실패 없이 튜닝한 앵커가 둘 미만인 자리는 채택하지 않는다 — 한 점 값으로 전 엔벨로프 스케줄을 세우지 않는다.
+
+    예제 기체가 더는 이 모양을 내지 않아(위 테스트) 튜너 결과를 대역한다: 가운데 앵커를 뺀 둘에서 롤 댐퍼가
+    no_stable_gain이면 롤 댐퍼는 한 앵커 값뿐이다. 같은 규칙(tune.failed_gain_slots)이 그 앵커들의 롤 자세 게인도
+    뺀다 — 실패한 댐퍼 위에서 튜닝된 값이다."""
+    import claw.design.seed as S
+
+    real = S.tune_point
+    calls = []
+
+    def fake(*a, **kw):
+        out = real(*a, **kw)
+        calls.append(1)
+        if len(calls) > 1:  # 첫 호출 = 가운데 앵커
+            out["slots"]["roll_rate"] = {**out["slots"]["roll_rate"], "status": "infeasible",
+                                         "reason": "no_stable_gain"}
+        return out
+
+    monkeypatch.setattr(S, "tune_point", fake)
+    out = quick_seed(build_profile(load_example()))
+    assert out["ok"] is False
+    for name in ("roll.k_rate", "roll.kp", "roll.ki"):
+        assert out["slots"][name]["reason"] == REASON_SEED_THIN_ANCHORS, (name, out["slots"][name])
+        assert out["slots"][name]["anchors_used"] == 1 and out["slots"][name]["reason_text"]
+    assert out["slots"]["pitch.kp"]["reason"] is None and out["slots"]["pitch.kp"]["anchors_used"] == 3
 
 
 def test_blank_aircraft_gets_a_design_and_schedule_that_assemble(blank_seed):
@@ -175,3 +209,123 @@ def test_seed_names_what_is_missing():
     heavy["mass"]["m_empty"] *= 40.0  # 1g조차 못 버티는 무게 — 격자에 엔벨로프 안 점이 없다
     out = quick_seed(build_profile(heavy))
     assert (out["ok"], out["reason"]) == (False, REASON_SEED_NO_ANCHOR)
+
+
+# ── 자동조종 시간척도 — 가짜 자세 교차 ─────────────────────────────────────
+
+
+def _att(wc, wcp=None, reason="ok"):
+    """튜너 achieved의 자세 자리 모양 — wcp를 안 주면 목표 교차가 곧 루프 교차(한 번 지나는 루프)."""
+    return {"wc_att": wc, "wcp": wc if wcp is None else wcp, "reason": reason}
+
+
+def _showcase_blank():
+    """쇼케이스 기체(S1)에서 설계·스케줄·확정 표를 뺀 것 — 빠른 탐색이 처음부터 잡는 모양."""
+    d = load_showcase()
+    d["id"] = "showcase-blank"
+    d["law"]["design"] = d["law"]["schedule"] = d["law"]["gain_tables"] = None
+    return d
+
+
+def test_inner_crossover_takes_the_design_point_target_only_when_it_is_the_loop_crossover():
+    """바깥 루프 시간척도 — ① 설계점의 목표 교차가 루프의 실측 이득교차면 그것 ② 아니면 목표가 루프 교차인 다른
+    앵커들의 중앙값 ③ 그것도 없으면 설계점 루프의 실측 이득교차."""
+    good = {"pitch_att": _att(1.03), "roll_att": _att(3.0)}
+    # S1 중앙 앵커 모양 — 목표 0.0967은 장주기 공진이 만든 레이트 교차 ÷ 3이고 루프는 0.514에서 마지막으로 1을 지난다
+    phantom = {"pitch_att": _att(0.0967, 0.514), "roll_att": _att(3.14)}
+    lo, hi = {"pitch_att": _att(0.7285), "roll_att": _att(3.52)}, {"pitch_att": _att(1.607), "roll_att": _att(2.33)}
+
+    wc, notes = _inner_crossovers(good, [lo, hi])
+    assert wc == {"pitch": 1.03, "roll": 3.0} and notes == []  # ① — 다른 앵커를 섞지 않는다(예제 경로)
+
+    wc, notes = _inner_crossovers(phantom, [lo, hi])
+    assert wc["pitch"] == statistics.median([0.7285, 1.607]) and wc["roll"] == 3.14  # ②
+    assert len(notes) == 1 and "0.0967" in notes[0] and "0.514" in notes[0] and "2곳" in notes[0]
+
+    # 다른 앵커도 가짜면 빌려 오지 않는다 — 설계점 루프가 실제로 내는 대역폭 ③
+    wc, notes = _inner_crossovers(phantom, [{"pitch_att": _att(0.1, 0.5), "roll_att": _att(3.5)}])
+    assert wc["pitch"] == 0.514 and "실측 이득교차 0.514 rad/s로" in notes[0]
+
+    # 설계 실패 자리 — 다른 앵커가 있으면 그 중앙값, 없으면 종전대로 None(_autopilot이 남은 자리로 잡는다)
+    failed = {"pitch_att": _att(0.5, reason="margin_floor"), "roll_att": _att(3.0)}
+    wc, notes = _inner_crossovers(failed, [lo, hi])
+    assert wc["pitch"] == statistics.median([0.7285, 1.607]) and "margin_floor" in notes[0]
+    assert _inner_crossovers(failed) == ({"pitch": None, "roll": 3.0}, [])
+
+    # 같은 교차를 두 방법으로 잰 반올림 차이는 같은 수다 — 허용 안이면 ①
+    wc, notes = _inner_crossovers({"pitch_att": _att(1.0, 1.0 + 0.5 * WC_MATCH_RTOL), "roll_att": _att(3.0)})
+    assert wc["pitch"] == 1.0 and notes == []
+    # 교차를 못 잰 자리(부호 모름 — wc_att·wcp가 없다)는 쓸 교차가 없다
+    wc, _ = _inner_crossovers({"pitch_att": {"reason": "seed_sign_ambiguous"}, "roll_att": _att(3.0)})
+    assert wc["pitch"] is None
+
+
+def test_showcase_quick_seed_sizes_a_live_autopilot():
+    """S1 빠른 탐색 — 중앙 앵커(M0.1305/해면/연료 25)의 피치 자세 목표가 장주기 공진이 만든 가짜 교차(0.097 rad/s)라
+    종전에는 자동조종이 kp_spd 0 · ki_spd 1e-4 · kp_hdg 0.088로 나왔다(웹 기본 미션에서 발사 8 s 만에 접지·추락).
+    같은 점의 산출 근거 직행(한 점 — 그 점의 목표는 루프 교차다)과 같은 크기의 바깥 루프여야 한다."""
+    from claw.design.basis import apply_seed_basis
+
+    built = build_profile(_showcase_blank())
+    out = quick_seed(built)
+    assert out["ok"], (out["reason"], out["slots"])
+    ap = out["design"]["autopilot"]
+    assert ap["kp_spd"] > 0.0 and ap["ki_spd"] > 0.0
+    c = out["anchors"][0]
+    ref = apply_seed_basis(built, c["mach"], c["alt"], c["fuel"])
+    assert ref["ok"] and ref["basis"]["outer"]["notes"] == [], ref["basis"]["outer"]
+    for k in ("kp_spd", "ki_spd", "kp_alt", "ki_alt", "kp_hdg"):
+        ratio = ap[k] / ref["design"]["autopilot"][k]
+        assert 0.5 < ratio < 2.0, (k, ap[k], ref["design"]["autopilot"][k])
+    # 자동조종은 자동 설계가 다시 잡지 않는다 — 대역폭을 어디서 잡았는지가 문서 출처에 남는다
+    assert out["design"]["provenance"]["autopilot_notes"] == out["autopilot_notes"]
+
+
+@pytest.mark.parametrize("which", ["legacy", "shipped"])
+def test_example_autopilot_keeps_the_centre_anchor_timescale(monkeypatch, which):
+    """예제 — 구 기체 픽스처(테스트의 예제 자리)와 제품에 실린 예제 둘 다. 세 앵커 모두 목표 교차가 루프 교차라,
+    자동조종은 종전 그대로 중앙 앵커의 느린 자세 교차 ÷ SEPARATION에서 나온다(가짜 교차 규칙이 예제 값을 한
+    비트도 바꾸지 않는다)."""
+    import claw.design.seed as seed_mod
+    from claw.profile import load_shipped_example
+
+    tuned = []
+    real = seed_mod.tune_point
+
+    def spy(*a, **kw):
+        tuned.append(real(*a, **kw))
+        return tuned[-1]
+
+    monkeypatch.setattr(seed_mod, "tune_point", spy)
+    out = quick_seed(build_profile(_blank(load_shipped_example() if which == "shipped" else None)))
+    assert out["ok"] and len(tuned) == len(out["anchors"]) == 3, (out["reason"], out["anchors"])
+    for r in tuned:
+        for slot in ("pitch_att", "roll_att"):
+            a = r["achieved"][slot]
+            assert abs(a["wcp"] - a["wc_att"]) <= WC_MATCH_RTOL * a["wc_att"], (slot, a)  # 전제 — 모두 ①
+    centre = tuned[0]["achieved"]
+    w = min(centre["pitch_att"]["wc_att"], centre["roll_att"]["wc_att"]) / SEPARATION
+    c = out["anchors"][0]
+    v = c["mach"] * isa_atmosphere(c["alt"]).a
+    assert out["design"]["autopilot"]["kp_hdg"] == w * v / G0
+    assert out["autopilot_notes"] == []
+
+
+def test_autopilot_says_so_when_the_speed_gain_formula_goes_negative():
+    """속도 kp 식 (2ζω + A_uu)/b가 음수면 0으로 깎되 조용히 하지 않는다 — S1의 kp_spd 0은 메모 없이 나왔다."""
+    import types
+
+    from claw.common.contracts import TrimCase
+    from claw.trim import linearize, split_axes, trim
+
+    built = build_profile(_showcase_blank())
+    case = TrimCase("M0.1305_h0_f25", mach=0.1305, alt=0.0, fuel=25.0)
+    tr = trim(built.aircraft(), case, fingerprint=built.plant_fingerprint)
+    assert tr.converged
+    lon, _ = split_axes(linearize(built.aircraft(), tr))
+    centre = types.SimpleNamespace(case=case)
+    slow, _, notes = _autopilot(built, centre, lon, {"pitch": 0.0967, "roll": 3.14}, None)  # 종전 S1 입력
+    assert slow["kp_spd"] == 0.0 and slow["ki_spd"] > 0.0
+    assert len(notes) == 1 and "0으로" in notes[0] and "−A_uu" in notes[0], notes
+    live, _, notes = _autopilot(built, centre, lon, {"pitch": 1.17, "roll": 3.14}, None)
+    assert live["kp_spd"] > 0.0 and notes == []

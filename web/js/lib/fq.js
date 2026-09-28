@@ -109,3 +109,38 @@ export function fqLegendText(c) {
     + `나선 T₂ ≥ ${c.spiral_t2_l1} / ${c.spiral_t2_l2} / ${c.spiral_t2_l3} s (안정 나선 = 수준 1). `
     + "무증강 모드의 수준 미달은 결함이 아니라 비행제어가 메꿀 몫이다 — 폐루프 판정은 마진 합격기준이 한다.";
 }
+
+/** 모드별 최악(fqWorst) 중 가장 나쁜 한 자리 — 수준이 먼저, 같으면 FQ_MODES 순서(표의 열 순서)의 앞.
+ *  전부 na면 null(잰 것이 없다). */
+export function fqOverallWorst(worst) {
+  let out = null;
+  for (const w of worst ?? []) {
+    if (w.key === "na") continue;
+    if (!out || FQ_RANK[w.key] > FQ_RANK[out.key]) out = w;
+  }
+  return out;
+}
+
+const deg = (v) => String(Math.round(v * 10) / 10);
+
+/** 마진 맵 → 쇼케이스 보고 {summary, data} — 최악 PM·GM 칸(lib/plot.js marginWorst)과 비행성 최악 수준.
+ *  라벨은 탭 표의 것(FQ_BADGE·모드 이름·케이스 이름) 그대로다. */
+export function marginsCueReport({ pm, gm }, fqw) {
+  const at = (w) => `${w.loop} @ ${w.entry.trim.case.name}`;
+  const worst = fqOverallWorst(fqw);
+  const parts = [
+    pm ? `PM 최악 ${deg(pm.value)}° (${at(pm)})` : "PM — 판정할 칸 없음",
+    gm ? `GM 최악 ${deg(gm.value)} dB (${at(gm)})` : "GM — 교차 없음(∞) 또는 판정할 칸 없음",
+    worst
+      ? `비행성 최악 ${FQ_BADGE[worst.key].label} (${worst.label} ${fqMeasureText(worst.mode, worst.j)} @ ${worst.caseName})`
+      : "비행성 — 판정 없음",
+  ];
+  const cell = (w) => (w ? { loop: w.loop, case: w.entry.trim.case.name, value: w.value } : null);
+  return {
+    summary: parts.join(" · "),
+    data: {
+      pm: cell(pm), gm: cell(gm),
+      fq: worst ? { mode: worst.mode, level: worst.key, case: worst.caseName } : null,
+    },
+  };
+}

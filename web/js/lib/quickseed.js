@@ -58,10 +58,54 @@ export function seedSummary(body) {
   };
 }
 
-/** 확정 게인 표(v2) 상태 한 줄 — 목록 요약(gain_tables: {source, stale}|null)에서. 낡음 판정은 서버(조립
- *  거부와 같은 자)가 동봉한다 — 여기는 문구뿐이다. */
-export function gainTablesStatus(summary) {
+const VARIANT_SOURCES = new Set(["confirmed", "rule_schedule", "stale", "none"]);
+
+/** 고른 형상 변형에서 확정 표가 어떻게 쓰이나 — "confirmed"|"rule_schedule"|"stale"|"none"|null(모름).
+ *  서버 목록 요약의 변형별 출처(gain_tables.variants[id].source — 조립과 같은 자)가 있으면 그것이 정본이다.
+ *  없으면(그 칸이 없는 서버) 이미 아는 두 사실로만 가린다: 낡은 변형 목록(stale_variants — 서버 판정)과
+ *  그 변형을 적용한 문서의 표 자리(effectiveTables — 변형 패치가 /law/gain_tables를 비우면 null,
+ *  호출자가 모르면 undefined). 둘로도 못 가리면 null — 기본형 문구를 변형에 그대로 물려주지 않는다. */
+export function variantTableSource(gt, variant, effectiveTables) {
+  const s = gt?.variants?.[variant]?.source;
+  if (VARIANT_SOURCES.has(s)) return s;
+  if (gt == null) return effectiveTables == null ? "none" : null;
+  if ((gt.stale_variants ?? []).includes(variant)) return "stale";
+  if (effectiveTables === null) return "rule_schedule";
+  return effectiveTables ? "confirmed" : null;
+}
+
+/** 확정 게인 표(v2) 상태 한 줄 — 목록 요약(gain_tables: {source, stale, stale_variants, variants?}|null)에서.
+ *  낡음 판정은 서버(조립 거부와 같은 자)가 동봉한다 — 여기는 문구뿐이다.
+ *  `variant`(고른 형상 변형 id)가 오면 **그 형상**의 상태를 말한다 — 확정 표는 기본형 설계 결과라, 변형 패치가
+ *  표를 비운 형상(예: 쇼케이스 EO/IR형)은 규칙 스케줄로 난다. 기본형 행의 「이 표를 씁니다」를 그 변형에
+ *  달면 사실과 반대다. `effectiveTables`는 variantTableSource 참고. */
+export function gainTablesStatus(summary, { variant = null, effectiveTables } = {}) {
   const gt = summary?.gain_tables;
+  // 조사는 괄호 앞 낱말(변형)에 붙는다 — 변형 이름의 받침과 무관하게 「은」
+  const who = `고른 형상 변형(「${summary?.variants?.find?.((v) => v?.id === variant)?.name ?? variant}」)`;
+  if (variant) {
+    const src = variantTableSource(gt, variant, effectiveTables);
+    const origin = `기본형 설계 결과(출처 ${gt?.source ?? "기록 없음"})`;
+    if (src === "rule_schedule") {
+      return { kind: "rule", stale: false, variant, staleVariants: gt?.stale_variants ?? [],
+        label: `${who}은 규칙 스케줄(설계 게인 × q̄ 역비)로 납니다 — 확정 게인 표는 ${origin}이고 `
+          + "이 변형은 그 표를 쓰지 않습니다" };
+    }
+    if (src === "stale") {
+      return { kind: "stale", stale: true, variant, staleVariants: gt?.stale_variants ?? [variant],
+        label: `확정 게인 표가 ${who}에서는 낡았습니다 — 표를 확정한 뒤 이 변형이 문서를 바꿔 법칙 조립이 `
+          + "거부합니다. 그 변형으로 계산하려면 표를 지우거나 변형 없이 설계합니다" };
+    }
+    if (src === "none") {
+      return { kind: "none", stale: false, variant,
+        label: `${who}에는 확정 게인 표가 없습니다 — 조립은 규칙 스케줄` };
+    }
+    if (src === "confirmed") {
+      return { kind: "ok", stale: false, variant, staleVariants: gt?.stale_variants ?? [],
+        label: `확정 게인 표 (${origin}) — ${who}도 조립이 규칙 스케줄 대신 이 표를 씁니다` };
+    }
+    // 모름 — 아래 기본형 문구에 「변형은 모른다」를 단다
+  }
   if (!gt) {
     return { kind: "none", stale: false,
       label: "확정 게인 표 없음 — 자동 설계 결과를 [문서에 반영]하면 여기 선다(조립은 규칙 스케줄)" };
@@ -75,7 +119,8 @@ export function gainTablesStatus(summary) {
   return { kind: "ok", stale: false, staleVariants: sv,
     label: `확정 게인 표 (출처 ${gt.source ?? "기록 없음"}) — 조립이 규칙 스케줄 대신 이 표를 씁니다`
       + (sv.length ? `. 단 문서를 바꾸는 형상 변형(${sv.join(", ")})에서는 낡음이라 조립이 거부합니다`
-        + " — 그 변형으로 계산하려면 표를 지우거나 변형 없이 설계합니다" : "") };
+        + " — 그 변형으로 계산하려면 표를 지우거나 변형 없이 설계합니다" : "")
+      + (variant ? ` (기본형 기준 — ${who}의 조립이 이 표를 쓰는지는 목록 요약에 없습니다)` : "") };
 }
 
 /** 할당 δe_trim 표 상태 — 표의 출처는 문서가, 낡음은 서버 목록 요약(de_trim.stale — 플랜트 지문 대조)이 안다. */

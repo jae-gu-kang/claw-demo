@@ -12,7 +12,10 @@ from pathlib import Path
 import pytest
 
 from claw.common.contracts import TrimCase
+from claw.design.basis import apply_seed_basis
 from claw.design.points import envelope_ok
+from claw.design.tune import TuneTargets
+from claw.env import isa_atmosphere
 from claw.pipeline.criteria import GainEvalCriteria
 from claw.pipeline.evaluate import evaluate
 from claw.pipeline.influence import Shape
@@ -46,12 +49,12 @@ def test_만재_200_kg_EO_IR형은_220_kg이고_계산이_달라지는_변형이
 
 
 def test_구_합성_기체를_무게비_상사로_줄였다(doc):
-    """공력·형상·실속·SCAS 게인은 그대로(같은 받음각·마하 비에서 회전 동역학이 같다), 질량·관성·추진·지상장치는 무게비,
-    속도류는 √무게비다. 경로 루프(고도·승강률·헤딩)는 V에 반비례·비례해 대역폭을 지킨다."""
+    """공력·형상·실속은 그대로(같은 받음각·마하 비에서 회전 동역학이 같다), 질량·관성·추진·지상장치는 무게비,
+    속도류는 √무게비다. 법칙 설계 게인(SCAS·자동조종)은 상사가 아니다 — 2026-09 재튜닝에서 툴이 이 기체로 다시 도출했다
+    (아래 test_법칙_설계는_툴_산출_근거_직행의_출력_그대로다)."""
     old = validate_document(json.loads(LEGACY.read_text(encoding="utf-8")))
     for sec in ("geometry", "aero", "stall", "surfaces", "trim", "actuator"):
         assert doc[sec] == old[sec], sec
-    assert doc["law"]["design"]["scas"] == old["law"]["design"]["scas"]
     flat = lambda J: [v for row in J for v in row]  # noqa: E731 — approx는 중첩 목록을 못 받는다
     assert flat(doc["mass"]["J_full"]) == pytest.approx([v * R for v in flat(old["mass"]["J_full"])], abs=0.006)
     p, q = doc["propulsion"]["params"], old["propulsion"]["params"]
@@ -60,9 +63,6 @@ def test_구_합성_기체를_무게비_상사로_줄였다(doc):
     assert doc["ground"]["rail"]["exit_speed"] == pytest.approx(old["ground"]["rail"]["exit_speed"] * S, abs=0.05)
     assert doc["ground"]["skid"]["k"] == pytest.approx(old["ground"]["skid"]["k"] * R, abs=0.05)
     assert doc["law"]["schedule"]["m_design"] == pytest.approx(old["law"]["schedule"]["m_design"] * S, abs=5e-5)
-    a, b = doc["law"]["design"]["autopilot"], old["law"]["design"]["autopilot"]
-    assert a["kp_hdg"] == pytest.approx(b["kp_hdg"] * S, rel=1e-3)
-    assert a["kp_alt"] == pytest.approx(b["kp_alt"] / S, rel=2e-3)
     sim, osim = doc["mission_template"]["sim"], old["mission_template"]["sim"]
     # 순항만 상사값(35.9 m/s)이 아니다 — 트림 실속속도의 1.24배로는 장주 선회에서 받음각이 α 리미터 한계에 붙어 고도를
     # 잃었다(흔들린 선회가 겹치면 나선 강하, v1.10 실측). 44 m/s(1.52배)에서 선회 중 최소 α 여유 0.09 rad
@@ -144,20 +144,57 @@ def test_기본_해석_격자_하한은_나선_배가_시간_20_s_위다(doc):
     assert below[0] < 20.0, below
 
 
-def test_기본_격자_양_끝의_판정이_구_기체_대응점과_같다(doc):
-    """02 §5.6.1 「게인 평가 판정이 구 기체 대응점과 같다」의 근거 — 기본 격자 양 끝(M0.14·0.22 × 세 고도, 연료 25 kg)과
-    구 기체 격자 양 끝(M0.30·0.55, 연료 200 kg)의 단계별 판정을 맞댄다. 나선(stability)은 양쪽 다 warn이다(배가 시간이 짧아졌을
-    뿐 판정선 안 — 위 테스트). EO/IR형도 같다 — 추진이 상사값 그대로일 때는 M0.22·3000 m 한 칸의 권한(authority)이 warn으로
-    갈렸고, 추진 상향(THRUST_UP) 뒤로 없어졌다(실측)."""
-    alts = doc["mission_template"]["trim_grid"]["alt"]
-    old = build_profile(validate_document(json.loads(LEGACY.read_text(encoding="utf-8"))), validated=True)
+def test_법칙_설계는_툴_산출_근거_직행의_출력_그대로다(doc):
+    """2026-09 재튜닝 — 설계 게인은 손으로 고른 수가 아니라 툴 출력이다(provenance.note에 근거). SCAS는 provenance.case(기본
+    격자 최대 동압 모서리), 자동조종은 provenance.autopilot_case(미션 템플릿 접근 속도의 해면 마하)에서 같은 목표(provenance.
+    targets — 사람이 정한 덧씀은 targets_override)로 산출 근거 직행을 다시 돌리면 **실린 값이 그대로 나온다**. 사람이 정한
+    자동조종 칸(명령필터 tau_*·자세 한계 등)은 툴이 문서 값을 이어 쓰므로 그대로 돌아온다(tau_vs 0.5는 그 사람 몫 — note). 엔진 튜너가
+    바뀌어 여기가 깨지면 예제 게인이 더는 툴 출력이 아니라는 뜻이다 — provenance의 두 점·목표로 다시 도출해 게이트·착륙을
+    다시 잰다."""
+    design = doc["law"]["design"]
+    prov = design["provenance"]
+    assert prov["source"] == "seed_basis"
+    assert prov["targets_override"] == {"zeta_sp": 0.85}
+    assert design["autopilot"]["tau_vs"] == 0.5 and prov["autopilot"]["tau_vs"] == "document"
+    assert "yaw.k_rate" in doc["law"]["schedule"]["scheduled"]
+    grid, sim = doc["mission_template"]["trim_grid"], doc["mission_template"]["sim"]
+    # 점 선택 규칙 — 격자 최대 동압 모서리(마하 끝·최저 고도·연료 절반) · 접근 속도의 해면 마하
+    assert (prov["case"]["mach"], prov["case"]["alt"], prov["case"]["fuel"]) == (
+        grid["mach"]["to"], min(grid["alt"]), doc["mass"]["fuel_max"] * 0.5)
+    assert prov["autopilot_case"]["mach"] == round(sim["approach"]["speed"] / isa_atmosphere(0.0).a, 4)
+    assert prov["autopilot_case"]["alt"] == 0.0
+    targets = TuneTargets.from_dict(prov["targets"])
+    bp = build_profile(doc, validated=True)
+    c, a = prov["case"], prov["autopilot_case"]
+    scas = apply_seed_basis(bp, c["mach"], c["alt"], c["fuel"], targets=targets)
+    ap = apply_seed_basis(bp, a["mach"], a["alt"], a["fuel"], targets=targets)
+    assert scas["ok"] and ap["ok"]
+    for g in ("pitch", "roll", "yaw"):
+        for k, v in design["scas"][g].items():
+            assert scas["design"]["scas"][g][k] == pytest.approx(v, rel=1e-9, abs=1e-12), (g, k)
+    for k, v in design["autopilot"].items():
+        assert ap["design"]["autopilot"][k] == pytest.approx(v, rel=1e-9, abs=1e-12), k
 
-    def statuses(bp, machs, fuel):
-        return [{k: v["status"] for k, v in c["stages"].items()}
-                for c in _evaluate_cases(bp, [(m, h, fuel) for m in machs for h in alts])]
-    legacy = statuses(old, (0.30, 0.55), 200.0)
+
+def test_기본_격자_게인_평가_게이트에_hard_fail이_없다(doc):
+    """게인 탭 [지표 재계산 (선형)]과 같은 판정 — 기본 격자(trim_grid 15칸) × 기본형·EO/IR형. 레이트 루프 GM/PM을 작동기·지연을
+    넣어 재는 게이트(2026-09)에서 구 상사 게인은 피치 레이트 발산·롤 레이트 여유 미달로 hard fail 66이었다. 카드 ②GM·④λ의 warn은
+    마하 1축 스케줄의 몫이다(provenance.note) — 해면 롤 GM 8 dB와 3000 m 롤 λ 12를 한 게인으로 함께 얻지 못한다."""
+    grid = doc["mission_template"]["trim_grid"]
+    m0, m1, dm = grid["mach"]["from"], grid["mach"]["to"], grid["mach"]["step"]
+    machs = [round(m0 + i * dm, 4) for i in range(int(round((m1 - m0) / dm)) + 1)]
+    cases = [(m, h, f) for m in machs for h in grid["alt"] for f in grid["fuel"]]
     for variant in (None, "eoir"):
-        assert statuses(build_profile(doc, variant, validated=True), (0.14, 0.22), 25.0) == legacy, variant
+        bp = build_profile(doc, variant, validated=True)
+        ac = bp.aircraft()
+        trs = trim_batch(ac, [TrimCase(name=f"M{m}_h{int(h)}_f{int(f)}", mach=m, alt=h, fuel=f) for m, h, f in cases])
+        assert all(tr.converged for tr in trs), variant
+        res = evaluate(ac, trs, Shape(profile=bp), GainEvalCriteria(), depth="linear")
+        assert res["aggregate"]["hard_fail"] is False, (variant, res["aggregate"]["hard_fails"][:3])
+        cards = {c["key"]: c for c in res["cards"]}
+        assert {k: cards[k]["status"] for k in ("mode_stability", "gm", "pm", "response_speed")} == {
+            "mode_stability": "ok", "gm": "warn", "pm": "ok", "response_speed": "warn"}, variant
+        assert cards["gm"]["value"]["loop"] == "roll_rate" and cards["gm"]["value"]["gm_db"] > 6.0, variant
 
 
 def test_EO_IR형은_3000_m_만재에서도_수평비행점이_있다(doc):
@@ -172,7 +209,9 @@ def test_EO_IR형은_3000_m_만재에서도_수평비행점이_있다(doc):
 def test_기본_격자_3000_m_줄은_추력_여유_판정을_통과한다(doc):
     """추진 상향의 다른 기준 — 표준 기동(속도 +3 m/s·고도 +30 m) 직후 스로틀이 1에 붙는 순간 킥이었다(상사값 그대로일 때 3000 m 트림 스로틀 0.72~0.96 — 1.45배에서는 0.47~0.66이고 1에 닿지 않는다).
     배율을 훑는 동안 최악 케이스는 늘 3000 m 줄이었다. 격자 전 칸 통과는 기본형 1.30배, EO/IR형 1.45배부터였다(1.40배는 EO/IR형
-    M0.22·3000 m 여유 0.045) — 그래서 THRUST_UP이 1.45다. 전 격자(15칸 × 2형)는 5분 가까이 걸려 최악이 난 줄만 돌린다."""
+    M0.22·3000 m 여유 0.045) — 그래서 THRUST_UP이 1.45다. 전 격자(15칸 × 2형)는 5분 가까이 걸려 최악이 난 줄만 돌린다.
+    여유는 자동조종 속도 루프에도 달렸다 — 2026-09 재튜닝에서 휴리스틱을 순항 속도 점에서 잡으면 EO/IR형 M0.22·3000 m 여유가
+    0.016이었고, 접근 속도 점(실린 값)에서 0.080이다(provenance.note)."""
     grid = doc["mission_template"]["trim_grid"]
     m0, m1, dm = grid["mach"]["from"], grid["mach"]["to"], grid["mach"]["step"]
     machs = [round(m0 + i * dm, 4) for i in range(int(round((m1 - m0) / dm)) + 1)]

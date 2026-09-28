@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { TAB_HASHES, normalizeAnswer } from "./ask.js";
+import { TAB_HASHES, answerCaption, normalizeAnswer } from "./ask.js";
 
 const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
 
@@ -101,4 +101,13 @@ test("라벨이 비면 탭 이름으로 채운다 — 이름 없는 버튼 금�
     actions: [{ view: "sim", sub: "", label: " ", why: "" }],
   }), OPTS);
   assert.equal(out.actions[0].label, "sim");
+});
+
+test("답 캡션 — 답의 첫 문장과 첫 이동만 (진행기 한 줄, 새 문구 없음)", () => {
+  const norm = normalizeAnswer(answer({ answer: "마진 맵 탭에서 봅니다. 히트맵이 전면입니다." }), OPTS);
+  assert.equal(answerCaption(norm), "마진 맵 탭에서 봅니다. → 마진 맵");
+  assert.equal(answerCaption(normalizeAnswer(answer({ actions: [] }), OPTS)), "마진 맵 탭에서 봅니다.");
+  const long = answerCaption(normalizeAnswer(answer({ answer: "가".repeat(200), actions: [] }), OPTS));
+  assert.ok(long.length <= 80 && long.endsWith("…"));
+  assert.equal(answerCaption(normalizeAnswer(null, OPTS)), "답이 비었다");
 });

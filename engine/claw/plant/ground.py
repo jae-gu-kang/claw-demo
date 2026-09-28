@@ -210,7 +210,12 @@ class LaunchRail:
 
     @property
     def launch_gx(self) -> float:
-        """레일 축 가속도 [g] — 사출 하중 지표. 판정 기준은 구조 한계 n_x_launch."""
+        """레일 축 가속도 [g] — 사출 하중 지표. 판정 기준은 구조 한계 n_x_launch.
+
+        이 값은 레일 축 **순가속도**라 중력 성분이 빠져 있다. 구조 판정은 여기에
+        sin(elev_angle)을 더한 축방향 하중배수 n_x = gx + sin γ로 한다(레일 위에서는
+        동체 x축이 곧 레일 축 — 웹 lib/replay.js launchLoad).
+        """
         return self.accel / G0
 
     def direction(self):

@@ -151,21 +151,35 @@ def test_tuned_point_judges_ok_not_warn():
     설정 정합은 AutoDesignConfig가 부등식으로 막지만(test_design_orchestrator),
     그 부등식이 **실제 달성 수치**에서 의도한 결과를 내는지는 여기서 잰다 —
     부등식만 있으면 판정 함수 쪽 규약이 바뀌어도 걸리지 않는다.
+
+    점은 M0.45/h1000이다 — 종전 M0.6/h1000은 자세 PI의 전체 폐루프 확인이 들어온 뒤 피치 자세가 대역폭 하한에
+    걸린다(종전 해는 피치 댐퍼까지 닫으면 15.9 rad/s 진동의 ζ가 0.024였다 — test_design_tune
+    test_tuned_attitude_loop_is_stable_with_everything_closed). 튜닝이 **성공한** 점이어야 이 불변식을 잰다.
     """
     ac = make_demo_aircraft()
     design = demo_design_gains()
-    tr = trim_level(ac, TrimCase("t", mach=0.6, alt=1000.0, fuel=200.0), fingerprint="fp")
+    tr = trim_level(ac, TrimCase("t", mach=0.45, alt=1000.0, fuel=200.0), fingerprint="fp")
     assert tr.converged
     out = tune_point(linearize(ac, tr), design, actuator_wn=30.0, actuator_zeta=0.7,
                      delay_s=0.035, pade_order=2)
-    assert out["status"] == "ok"
+    # 점은 degraded다 — 피치·롤 댐퍼가 레이트 루프 여유 가드에 묶였다(test_design_tune test_design_point_meets_targets).
+    # 불변식은 자리 단위로 잰다: 튜너가 목표를 지킨 여유는 판정에서 warn이 아니다
+    assert out["status"] == "degraded"
     c = MarginCriteria()
     for axis in ("pitch", "roll"):
         ach = out["achieved"][f"{axis}_att"]
         assert c.judge(ach) == "ok", f"{axis}_att 튜닝 성공점이 ok가 아니다 — {ach}"
-    # 감쇠 자리도 같은 자로 — 목표 달성(ζ_sp 0.7 / ζ_dr 0.5)이 곧 ok여야 한다
-    assert c.judge_damping(out["achieved"]["pitch_rate"]["zeta_sp"]) == "ok"
-    assert c.judge_damping(out["achieved"]["yaw_rate"]["zeta_dr"]) == "ok"
+    # 레이트 자리의 여유도 같은 자로 — 가드가 목표(TuneTargets GM 8 dB = 목표선 gm_good_db) 위 밴드에 묶었으므로 ok다.
+    # 목표 + 밴드가 없으면 이분이 목표선에 정확히 붙어 판정이 부동소수 잡음으로 warn ↔ ok를 오간다
+    for loop in ("pitch_rate", "yaw_rate", "roll_rate"):
+        m = out["achieved"][loop]["loop_margins"]
+        assert c.judge(m) == "ok", (loop, m)
+    # 감쇠 자리도 같은 자로 — 목표 달성(TuneTargets ζ_sp 0.7 / ζ_dr 0.6 — 둘 다 목표선 0.5 위)이 곧 ok여야 한다. 피치는
+    # 여유 가드에 묶여 목표 아래(0.668)지만 목표선 위다
+    assert c.judge_rate_loop(c.judge_damping(out["achieved"]["pitch_rate"]["zeta_sp"]),
+                             out["achieved"]["pitch_rate"]["loop_margins"]) == "ok"
+    assert c.judge_rate_loop(c.judge_damping(out["achieved"]["yaw_rate"]["zeta_dr"]),
+                             out["achieved"]["yaw_rate"]["loop_margins"]) == "ok"
 
 
 def test_roundtrip_and_fingerprint():
@@ -240,3 +254,33 @@ def test_unidentifiable_roll_mode_is_nan_not_zero():
     assert math.isnan(m["roll_lambda"]), "못 잰 λ가 0으로 나가 fail이 된다"
     assert m["roll_participation"] is None
     assert MarginCriteria().judge_bandwidth(m["roll_lambda"], 12.0) == "na"
+
+
+def test_rate_loop_judgement_adds_the_broken_loop_margin_on_the_attitude_lines():
+    """레이트 자리 합산 판정 — 모드 지표 판정 + AS94900 끊은 루프 여유(자세 자리와 같은 선: PM 45°·GM 6 dB 미만 fail,
+    GM 8 dB 미만 warn). 종전에는 레이트 자리가 모드 지표만 봐서 GM 4.1~5.1 dB 롤 댐퍼가 ok였다."""
+    c = MarginCriteria()
+    good = {"pm_deg": 60.0, "gm_db": 12.0, "divergent": False}
+    assert c.judge_rate_loop("ok", good) == "ok"
+    # 지표는 ok인데 여유가 합격선 아래 — fail (쇼케이스 roll_p GM 4.1 dB의 모양)
+    assert c.judge_rate_loop("ok", {**good, "gm_db": 4.1}) == "fail"
+    assert c.judge_rate_loop("ok", {**good, "pm_deg": 40.0}) == "fail"
+    # 합격이되 GM 목표선 아래 — warn (자세 자리와 같다)
+    assert c.judge_rate_loop("ok", {**good, "gm_db": 7.0}) == "warn"
+    # 둘 중 나쁜 쪽
+    assert c.judge_rate_loop("warn", good) == "warn"
+    assert c.judge_rate_loop("fail", good) == "fail"
+    assert c.judge_rate_loop("warn", {**good, "gm_db": 5.0}) == "fail"
+    # 발산(이 루프를 닫은 폐루프가 느린 나선 밖으로 발산)은 여유 수치와 무관하게 fail
+    assert c.judge_rate_loop("ok", {**good, "divergent": True}) == "fail"
+    # 무한 여유(루프 대역 교차 없음)는 통과
+    assert c.judge_rate_loop("ok", {"pm_deg": math.inf, "gm_db": math.inf, "divergent": False}) == "ok"
+    # 지표를 못 잰 자리(na)는 여유가 통과여도 na로 둔다 — 판정 수가 조용히 늘지 않게. 여유가 fail이면 fail
+    assert c.judge_rate_loop("na", good) == "na"
+    assert c.judge_rate_loop("na", {**good, "gm_db": 3.0}) == "fail"
+    # 여유를 못 잰 자리(nan)나 잴 루프가 없는 자리(None)는 지표 판정 그대로
+    assert c.judge_rate_loop("warn", {**good, "gm_db": math.nan}) == "warn"
+    assert c.judge_rate_loop("ok", None) == "ok"
+    # 부족량(shortfall)은 같은 키로 레이트 자리의 여유도 낸다 — 분류기 evidence·원장이 다시 계산하지 않게
+    sf = c.shortfall({"zeta": 0.6, "pm_deg": 50.0, "gm_db": 4.1})
+    assert sf["gm_db"]["deficit"] == pytest.approx(1.9) and sf["gm_db"]["goal"] == 8.0 and "zeta" in sf

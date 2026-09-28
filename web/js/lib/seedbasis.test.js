@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { basisAttitude, basisHead, basisRates, designGain, modelText } from "./seedbasis.js";
+import {
+  achievedText, basisAttitude, basisHead, basisRates, designGain, metricLabel, modelText,
+} from "./seedbasis.js";
 
 const BODY = {
   ok: true, reason: null, reason_text: null,
@@ -101,4 +103,34 @@ test("모델 문구와 지금 문서 게인", () => {
   assert.equal(designGain(BODY, "pitch.k_rate"), 0.4);
   assert.equal(designGain(BODY, "yaw.k_rate"), null);
   assert.equal(designGain({ design_now: null }, "pitch.kp"), null);
+});
+
+// 쇼케이스 결함 D7 — 0.697/0.700·0.590/0.600·11.6/12가 「레이트 후보 달성 0/3」으로만 읽혀 실패처럼 보였다.
+// 판정(달성·미달)은 엔진 것 그대로 두고, 달성값·목표·목표 대비 차를 함께 낸다 — 근소 미달과 큰 미달이 갈린다
+test("레이트 줄 — 목표 대비 상대 차(gap)를 싣는다 · 못 잰 값·후보 없음은 null", () => {
+  const rows = basisRates(BODY);
+  assert.ok(Math.abs(rows[0].gap - (0.698 - 0.7) / 0.7) < 1e-12);
+  assert.equal(rows[1].gap, null); // 후보 없음
+  assert.equal(rows[2].gap, null); // 못 잰 값 — 0 %로 위장하지 않는다
+  const zeroTarget = basisRates({ order: ["x"], rates: { x: { candidate: { k: 1 }, target: { metric: "m", value: 0 },
+    full: { achieved: 0.1, ok: true } } } });
+  assert.equal(zeroTarget[0].gap, null); // 목표 0 — 상대 차를 정의할 수 없다
+});
+
+test("achievedText — 「ζ_sp 0.698/0.7 (−0.3 %)」: 지표 이름·달성/목표·목표 대비 차", () => {
+  const rows = basisRates(BODY);
+  assert.equal(achievedText(rows[0]), "ζ_sp 0.698/0.7 (−0.3 %)");
+  assert.equal(achievedText(rows[2]), "λ_roll —/12"); // 못 잰 값 — 차를 적지 않는다
+  assert.equal(achievedText(rows[1]), null); // 후보 없음 — 잴 것이 없다
+  const over = basisRates({ order: ["p"], rates: { p: { candidate: { k: 1 }, target: { metric: "zeta_dr", value: 0.6 },
+    full: { achieved: 0.66, ok: true } } } });
+  assert.equal(achievedText(over[0]), "ζ_dr 0.66/0.6 (+10.0 %)");
+});
+
+test("metricLabel — 엔진 지표 키 → 화면 기호(목표 줄과 같은 표기), 모르는 키는 그대로", () => {
+  assert.equal(metricLabel("zeta_sp"), "ζ_sp");
+  assert.equal(metricLabel("zeta_dr"), "ζ_dr");
+  assert.equal(metricLabel("roll_lambda"), "λ_roll");
+  assert.equal(metricLabel("new_metric"), "new_metric");
+  assert.equal(metricLabel(null), "—");
 });

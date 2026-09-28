@@ -80,18 +80,71 @@ def _de_trim_summary(doc: dict, built, variant_builts: dict) -> dict | None:
     return {"source": de_trim["source"], "stale": built.de_trim_stale, "stale_variants": stale_variants}
 
 
+def _variant_gain_source(vb) -> str:
+    """형상 변형이 **실제로 나는** 게인의 출처 — 조립(assemble_law)의 표 우선순위와 같은 자.
+
+    - "confirmed": 적용 문서에 확정 표가 있고 낡지 않았다 — 그 표로 난다
+    - "stale": 확정 표가 있으나 낡았다 — 조립이 거부한다(그 변형의 시뮬·마진·코드 422)
+    - "rule_schedule": 적용 문서에 확정 표가 없다(변형 패치가 /law/gain_tables를 비운 경우 포함) — 설계 게인 ×
+      q̄ 역비 규칙 스케줄로 난다
+    - "none": 표도 규칙 스케줄도 없다(스케줄·설계 게인 없음) — 스케줄 게인으로는 조립되지 않는다"""
+    law = vb.doc["law"]
+    if law["gain_tables"] is not None:
+        return "stale" if vb.gain_tables_stale else "confirmed"
+    if law["schedule"] is not None and law["design"] is not None:
+        return "rule_schedule"
+    return "none"
+
+
 def _gain_tables_summary(doc: dict, built, variant_builts: dict) -> dict | None:
-    """확정 게인 표 요약 — 출처·낡음·낡은 형상 변형. 낡음 판정은 조립 거부와 같은 자다
+    """확정 게인 표 요약 — 출처·낡음·낡은 형상 변형·변형별 게인 출처. 낡음 판정은 조립 거부와 같은 자다
     (build.gain_tables_stale). 표는 기본 문서에서 확정되므로 문서를 바꾸는 변형에서는 기준 지문이
     어긋나 낡음이다 — δe_trim의 stale_variants와 같은 자리에서 미리 말한다(변형 계산 422가
-    첫 통보가 되지 않게)."""
+    첫 통보가 되지 않게).
+
+    variants는 **모든** 형상 변형의 {source} — 기본형의 확정 표 배너를 변형에도 그대로 달면 거짓이 되는 자리를
+    웹이 가른다: 쇼케이스 EO/IR형은 패치가 표를 비워 규칙 스케줄로 난다(확정 표는 기본형 설계 결과)."""
     gt = doc["law"]["gain_tables"]
     if gt is None:
         return None
     prov = gt.get("provenance")
     source = prov.get("source") if isinstance(prov, dict) else None
     stale_variants = [vid for vid, vb in variant_builts.items() if vb.gain_tables_stale]
-    return {"source": source, "stale": built.gain_tables_stale, "stale_variants": stale_variants}
+    return {"source": source, "stale": built.gain_tables_stale, "stale_variants": stale_variants,
+            "variants": {vid: {"source": _variant_gain_source(vb)} for vid, vb in variant_builts.items()}}
+
+
+def _applied_ref(doc: dict) -> tuple | None:
+    """확정 게인 표 출처가 반영 기록인가 — (결과 id, 반영이 쓴 리비전) 또는 None.
+
+    반영(POST /design/{id}/apply-gains)은 출처에 result_id와 base_revision(반영 직전 head)을 적고, 표를
+    base_revision + 1로 쓴다(기준 리비전 대조 뒤 head + 1 — 저장 규칙). 손으로 넣은 표·생성기 문서(결과
+    id 없음)는 None이다."""
+    gt = doc["law"]["gain_tables"]
+    prov = None if gt is None else gt.get("provenance")
+    if not isinstance(prov, dict) or prov.get("source") != "auto_design":
+        return None
+    rid, base = prov.get("result_id"), prov.get("base_revision")
+    if not isinstance(rid, str) or not rid or type(base) is not int or base < 1:
+        return None
+    return rid, base + 1
+
+
+def _applied_design(doc: dict, built, written: dict | None) -> dict | None:
+    """문서의 확정 게인 표가 **그대로** 어느 자동 설계 결과의 반영물인가 — {result_id, revision} 또는 None.
+
+    반영은 결과의 지문과 지금 문서가 같을 때만 쓰고(409 가드), 표 절을 뺀 기준 지문을 출처에 적는다.
+    그래서 (1) 표 절(출처 포함)이 반영이 쓴 리비전의 것과 같고 (2) 기준 지문이 지금과 같으면(낡지 않음),
+    그 결과를 계산한 문서와 지금 문서의 차이는 **그 결과 자신의 산출물(표)뿐**이다 — 웹 신선도
+    (lib/freshness.js)가 그 결과를 「낡음」 대신 「문서에 반영됨」으로 말하는 근거다. 표를 손으로 고쳤거나
+    (출처가 남았어도) 표 밖을 고쳤으면 None — 종전대로 낡음이다. 다른 결과(트림·마진·시뮬…)는 표가
+    실제로 그 계산을 바꾸므로 여기 해당하지 않는다(결과 id가 반영한 그 자동 설계 결과만 가리킨다).
+
+    written은 반영이 쓴 리비전의 표 절 — 목록이 읽어 넘긴다(못 읽으면 None → 판정 안 함)."""
+    ref = _applied_ref(doc)
+    if ref is None or written is None or written != doc["law"]["gain_tables"] or built.gain_tables_stale:
+        return None
+    return {"result_id": ref[0], "revision": ref[1]}
 
 
 def _design_source(doc: dict) -> str | None:
@@ -171,8 +224,24 @@ class ProfileStore:
             raise ProfileUnreadable(f"저장된 기체 문서에 NaN·Infinity가 있다: {profile_id}@{rev} {bad}")
         return doc, rev
 
+    def written_gain_tables(self, profile_id: str, doc: dict, revision: int) -> dict | None:
+        """반영이 쓴 리비전의 확정 표 절 — 요약의 `applied_design` 재료. 반영 기록이 아니거나 그 리비전을
+        못 읽으면(스키마가 바뀐 옛 리비전 등) None — 판정하지 않는다(낡음 그대로).
+
+        반영 직후(지금 리비전이 그 리비전)면 파일을 다시 읽지 않는다 — 목록은 자주 불린다."""
+        ref = _applied_ref(doc)
+        if ref is None:
+            return None
+        if ref[1] == revision:
+            return doc["law"]["gain_tables"]
+        try:
+            written, _ = self.get(profile_id, ref[1])
+        except (KeyError, ValueError, ProfileUnreadable, OSError):
+            return None
+        return written["law"]["gain_tables"]
+
     @staticmethod
-    def summary(doc: dict, revision: int) -> dict:
+    def summary(doc: dict, revision: int, written_gain_tables: dict | None = None) -> dict:
         built = build_profile(doc, validated=True)
         # 변형 조립은 한 번만 — 표 낡음 두 판정과 변형 지문(결과 신선도 대조의 근거, v1.32)이 같이 쓴다
         variant_builts = {v["id"]: build_profile(doc, v["id"], validated=True) for v in doc["variants"]}
@@ -188,8 +257,13 @@ class ProfileStore:
             "design_source": _design_source(doc),
             # 할당 δe_trim 표 — null이면 없음. 도출 표는 플랜트가 바뀌면 stale(법칙 조립이 거부한다)
             "de_trim": _de_trim_summary(doc, built, variant_builts),
-            # 확정 게인 표(v2) — null이면 없음. 반영 뒤 문서가 바뀌면 stale(법칙 조립이 거부한다)
+            # 확정 게인 표(v2) — null이면 없음. 반영 뒤 문서가 바뀌면 stale(법칙 조립이 거부한다). variants는 변형마다
+            # 실제로 나는 게인의 출처(confirmed·rule_schedule·stale·none — 변형 패치가 표를 비우면 규칙 스케줄)
             "gain_tables": _gain_tables_summary(doc, built, variant_builts),
+            # 확정 표가 그대로 어느 자동 설계 결과의 반영물인가 — {result_id, revision} 또는 null. 그 결과의
+            # 지문은 반영이 바꾼 표 때문에 지금과 다르지만, 달라진 것이 제 산출물뿐이라 웹이 낡음 대신
+            # 「문서에 반영됨」을 단다(lib/freshness.js). written_gain_tables는 목록이 넘긴다(없으면 null)
+            "applied_design": _applied_design(doc, built, written_gain_tables),
         }
 
     def list(self) -> list:
@@ -210,7 +284,7 @@ class ProfileStore:
                 out.append({"id": pid, "unreadable": True, "reason": str(e)})
                 continue
             try:
-                out.append(self.summary(doc, revision))
+                out.append(self.summary(doc, revision, self.written_gain_tables(pid, doc, revision)))
             except (KeyError, ValueError, TypeError) as e:
                 # 조립 실패 — 레지스트리 오류(RegistryError)는 KeyError라, 위와 한 except로 묶으면 지운 기체로
                 # 오인돼 목록에서 사라진다
@@ -279,6 +353,39 @@ class ProfileStore:
             self._write(d / f"rev-{rev}.json", doc)
             self._write(d / "head.json", {"revision": rev})
         return doc, rev
+
+    def install(self, document) -> tuple:
+        """패키지 문서를 저장 기체로 앉힌다 — (문서, 리비전, "created"|"reset"|"unchanged").
+
+        없으면(지운 기체 포함) 만든다 — 번호는 생성과 같이 이어 센다. 최신 문서가 다르면 그 문서를 **새
+        리비전**으로 쓴다(초기화 — 이력은 남는다, 기준 리비전 대조 없이 덮는 것이 이 호출의 뜻이다). 같으면
+        쓰지 않는다. 비교·쓰기를 한 잠금 안에서 한다 — 두 설치가 겹쳐도 리비전이 둘 생기지 않는다.
+
+        head나 최신 문서를 못 읽는 기체도 초기화한다(다른 기체는 지운 뒤 다시 만드는 것이 복구 경로지만,
+        설치는 그 자체가 「패키지 문서로 되돌림」이다). 휘발 저장소(재시작마다 비워짐)에서는 매번 "created"다."""
+        doc = self.checked(document)
+        pid = doc["id"]
+        with self._lock:
+            d = self._dir(pid)
+            head = None
+            if (d / "head.json").exists():
+                try:
+                    head = self._head(pid)
+                except ProfileUnreadable:
+                    head = 0  # 자리는 차지했으나 못 읽음 — 초기화한다
+            if head:
+                try:
+                    current, _ = self.get(pid)
+                except (KeyError, ProfileUnreadable):  # 리비전 파일 없음·손상·지금 스키마 불통
+                    current = None
+                if current == doc:
+                    return doc, head, "unchanged"
+            d.mkdir(parents=True, exist_ok=True)
+            # 지운 기체·못 읽는 head 뒤에도 옛 번호를 다시 쓰지 않는다 — (id, 리비전)은 한 문서를 영원히 가리킨다
+            rev = max(head or 0, self._max_revision(d)) + 1
+            self._write(d / f"rev-{rev}.json", doc)
+            self._write(d / "head.json", {"revision": rev})
+        return doc, rev, ("created" if head is None else "reset")
 
     def delete(self, profile_id: str) -> None:
         """head만 지운다 — 목록·조회에서 사라지지만 리비전 파일은 남아 번호가 재사용되지 않는다.

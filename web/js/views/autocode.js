@@ -21,15 +21,25 @@
 코드 텍스트·검토 패널 조립은 views/codegen.js가 조각으로 내주고 여기는 선택과 스펙
 조달, 그리고 그 조각을 어디에 놓을지만 정한다. 판단이 드는 부분(스펙 조립·병합·
 역할 묶음)은 lib/에 있다.
+
+쇼케이스 신호 `overview({compareWith?})`(lib/showcasecue.js) — 탑재코드를 이 탭의 경로 그대로 생성하고,
+compareWith가 오면 그 기체의 탑재 C도 같은 라우트(POST /codegen/flight, profile 참조)로 받아 두 지문을
+대조한다 — 「같은 C(구조 지문 같음), 다른 파라미터 이미지」가 코드판 **아래 캡션**으로 선다(그림 위 글
+최소). 대조 기체는 그 문서 그대로다(이 화면의 작업본 편집은 지금 기체에만 실린다).
 */
 
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
-import { BLOCKS, blockDesign, codegenTargets } from "../lib/blocks.js";
+import { BLOCKS, blockDesign, codegenTargets, paramSource } from "../lib/blocks.js";
+import { compareCacheHit } from "../lib/codegen.js";
 import { schemaFields } from "../lib/schemaform.js";
+import { compareCaption, fingerprintLine } from "../lib/flightcode.js";
+import { revealPanel } from "../lib/reveal.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { makeMetaSource, makeSpecBuilder } from "../lib/specs.js";
 import { store } from "../store.js";
 import { createCodePanel } from "./codegen.js";
+import { selectedDocument } from "./profilepick.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
 
 const ALL = "__all__";
@@ -39,6 +49,13 @@ const FLIGHT = "flight";
 // 뷰 재생성마다 처음으로 되돌아가지 않도록 모듈 스코프 (views/gains.js fitCfg 관행)
 const state = { kind: FLIGHT, target: ALL, merged: true, drawer: null };
 const buildSpec = makeSpecBuilder(api);
+// 두 기체 대조 — 대조 기체의 생성 응답 지문 {id, revision, structure_fingerprint, param_fingerprint, profile}.
+// 지금 기체 쪽은 매 생성마다 다시 대조한다(작업본을 고치면 파라미터 지문이 바뀐다). 대조 기체 쪽은 id+리비전으로만
+// 다시 쓴다(lib/codegen compareCacheHit — 저장 기체는 그사이 고쳐 새 리비전이 됐을 수 있다)
+let compareOther = null;
+// 처리 중인 신호 — 탑재 C 응답이 자리를 잡으면(onFlight) 한 번 보고하고 지운다
+let pendingCue = null;
+let captionHost = null; // 지금 화면의 캡션 자리 — 늦은 대조 응답이 옛 DOM에 쓰지 않게
 
 let catalogCache = null; // /gains/catalog — SCAS 축 설계 kwargs의 원천
 /** 실패해도 코드 패널은 뜬다 (SCAS만 스키마 기본값으로 떨어진다).
@@ -61,6 +78,21 @@ const codegenMeta = makeMetaSource(api);
 
 const targets = () => BLOCKS.filter((b) => b.detail.editable && b.detail.codegen);
 
+/** 블록의 기체 설계값 — codegenTargets의 design(편집이 없을 때의 값이자 「대비 변경」의 기준).
+ *  AP·SCAS는 카탈로그 설계 kwargs(lib/blocks blockDesign), 문서에 절이 있는 블록(작동기)은 선택 기체
+ *  문서 값이다 — 블록도 폼(views/blocks loadSchema)과 같은 출처(lib/blocks paramSource). 종전에는 작동기가
+ *  null이라 레지스트리 기본값을 이 기체 값인 양 싣고 그것과 비교했다(기체 고정 금지). 문서 절은 스키마가
+ *  전 칸 명시를 요구하므로(profile/schema _registry_params) 채울 빈칸이 없다 — 주입 예약 키(omit)만 뺀다.
+ *  문서를 못 받았거나 형식이 다르면 null(레지스트리 기본값 — 블록도가 그 사유를 말한다). */
+function designOf(block, catalog, doc) {
+  const d = blockDesign(block, catalog);
+  if (d) return d;
+  const src = paramSource(block.detail.schema, doc);
+  if (src?.kind !== "document") return null;
+  const omit = new Set(block.detail.omit ?? []);
+  return Object.fromEntries(Object.entries(src.values).filter(([k]) => !omit.has(k)));
+}
+
 const KIND_NOTE = {
   [SHAPE]: "현재 설계 형상을 코드로 적은 것입니다 — 파라미터가 대상이고 로직은 "
     + "담기지 않습니다. 검토·산출물 작성용입니다.",
@@ -78,6 +110,9 @@ export function render() {
   const footBox = el("div");    // 패널 ③
   const errBox = el("div");
   const lead = el("p", {}, KIND_NOTE[state.kind]);
+  // 두 기체 대조 캡션 — 코드판 아래(그림 위 글 최소). 대조가 없으면 비어 있다
+  const captionBox = el("div");
+  captionHost = captionBox;
 
   // hidden 콜백은 createDrawers 안에서 **즉시** 불린다 — 선언이 아래 있으면 TDZ다
   let panel = null;
@@ -112,6 +147,7 @@ export function render() {
 
   const load = async () => {
     clear(errBox);
+    clear(captionBox);
     clear(stageBox).append(el("p", { class: "hint" }, "생성 중…"));
     try {
       const shape = state.kind === SHAPE;
@@ -121,9 +157,10 @@ export function render() {
       // SCAS는 축마다 한 줄로 편다. 편집이 없어도 카탈로그 설계 kwargs로 채운다 —
       // ScasAxis의 스키마 기본값은 0이라 그대로 내면 게인 없는 형상이 나오고, 자동조종의
       // 스키마 기본값은 구 합성 기체의 설계값이라 다른 기체에서는 옛 경로 게인이 나온다
-      const catalog = await gainsCatalog();
+      // 문서 조회 실패는 코드 패널을 막지 않는다 — 작동기만 레지스트리 기본값으로 떨어진다
+      const [catalog, doc] = await Promise.all([gainsCatalog(), selectedDocument().catch(() => null)]);
       const specTargets = blocks.flatMap((b) =>
-        codegenTargets(b, store.get(b.detail.injectKey), blockDesign(b, catalog))
+        codegenTargets(b, store.get(b.detail.injectKey), designOf(b, catalog, doc))
           .map((t) => ({ block: b, ...t })));
       const [built, meta] = await Promise.all([
         Promise.all(specTargets.map((t) =>
@@ -142,6 +179,7 @@ export function render() {
         flightMerged: state.merged,
         // 형식이 바뀌면 추적성 칩이 서거나 사라진다 — 배지·숨김을 다시 묻게 한다
         onPaint: () => drawers.refresh(),
+        onFlight: (data, error) => flightSettled(captionBox, data, error),
       });
       // 형식 버튼·복사는 코드 **바로 위**다. 아래에 두면 코드 높이만큼 눈이 왕복한다
       clear(subRow).append(...subRowKids(repaint), el("span", { class: "grow" }), panel.bar);
@@ -155,9 +193,23 @@ export function render() {
       clear(stageBox);
       clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
       drawers.refresh();
+      if (pendingCue) {
+        failCue(pendingCue, `탑재 C를 조립하지 못했다 — ${errorText(e)}`);
+        pendingCue = null;
+      }
     }
   };
 
+  // 쇼케이스 신호 — 한 번 읽고 지운다. 탑재코드 화면으로 돌려 두고 생성이 끝나면(onFlight) 보고한다
+  const cue = takeCue("autocode");
+  if (cue) {
+    if (cue.action === "overview") {
+      state.kind = FLIGHT;
+      pendingCue = cue;
+    } else {
+      unknownAction(cue);
+    }
+  }
   paint();
   // **페이지는 밝다** (v0.54, 사용자 요청). 어두운 것은 코드판뿐이다 — 블록도 하위
   // 페이지의 코드 패널과 같은 모습이고, 다른 밝은 탭들과 나란히 봤을 때 이 탭만
@@ -171,8 +223,72 @@ export function render() {
     }),
     subRow,
     tabStage(stageBox),
+    captionBox,
     drawers.root,
   );
+}
+
+/** 탑재 C 응답이 자리를 잡았다 — 대조 캡션을 다시 그리고, 걸린 신호가 있으면 대조까지 마쳐 보고한다. */
+async function flightSettled(captionBox, data, error) {
+  paintCaption(captionBox, data);
+  const cue = pendingCue;
+  if (!cue) return;
+  pendingCue = null;
+  if (error || !data) {
+    failCue(cue, `탑재 C 생성 실패 — ${error ?? "응답 없음"}`);
+    return;
+  }
+  const other = cue.args?.compareWith;
+  if (other) {
+    try {
+      // 지금 리비전 — 캐시가 그 리비전의 것일 때만 다시 쓴다. 못 읽으면 null(다시 받는다 — 생성이 404 등을 말한다)
+      const head = await api.get(`/profiles/${encodeURIComponent(other)}`).catch(() => null);
+      if (!compareCacheHit(compareOther, other, head?.revision ?? null)) {
+        // 같은 라우트·같은 조립 — 대조 기체는 참조로(그 문서 그대로). 본문에 profile을 실으면 헤더 선택이
+        // 덮지 않는다(lib/profile.js withProfile)
+        const got = await api.post("/codegen/flight", { control_hz: 100, profile: { id: other } });
+        // 리비전은 생성 응답(그 조립이 실제로 쓴 문서)의 것 — 조회와 생성 사이에 저장이 끼어도 지문과 짝이 맞다
+        compareOther = { id: other, revision: got.profile?.revision ?? null,
+          structure_fingerprint: got.structure_fingerprint,
+          param_fingerprint: got.param_fingerprint, profile: got.profile };
+      }
+    } catch (e) {
+      failCue(cue, `대조 기체 ${other}의 탑재 C를 받지 못했다 — ${errorText(e)}`);
+      return;
+    }
+    paintCaption(captionHost, data);
+    // 캡션은 코드판 아래라 첫 화면 밖이다(y≈828, e2e D4) — 신호가 낸 대조는 청중이 보게 끌어올린다(결과가 사는
+    // 자리를 연다). 공용 lib/reveal: 떠난 화면(떨어진 노드)은 굴리지 않는다. 대조가 없으면 캡션이 비므로
+    // 굴리지 않는다 — 그때 결과(코드판)는 이미 첫 화면이다
+    revealPanel(captionHost);
+  }
+  const cmp = other ? compareCaption(data, compareOther) : null;
+  reportCue(cue, {
+    phase: "done",
+    summary: cmp ? cmp.text : fingerprintLine(data),
+    data: {
+      structure_fp: data.structure_fingerprint ?? null,
+      param_fp: data.param_fingerprint ?? null,
+      other_id: other ?? null,
+      other_structure_fp: compareOther && other ? compareOther.structure_fingerprint : null,
+      other_param_fp: compareOther && other ? compareOther.param_fingerprint : null,
+      other_revision: compareOther && other ? compareOther.revision ?? null : null,
+      same_structure: cmp ? cmp.sameStructure : null,
+    },
+  });
+}
+
+/** 대조 캡션 — 대조 기체 응답이 있고 지금 탑재 C가 있을 때만. 매 생성마다 지금 지문으로 다시 낸다. */
+function paintCaption(box, data) {
+  if (!box) return;
+  clear(box);
+  if (!compareOther || !data || state.kind !== FLIGHT) return;
+  const c = compareCaption(data, compareOther);
+  // 대조 기체 쪽은 신호가 받은 그 리비전의 지문이다 — 그 뒤 그 기체를 고쳤을 수 있어 어느 리비전인지 밝힌다
+  const rev = Number.isInteger(compareOther.revision) && !compareOther.profile?.is_example
+    ? ` (대조 기체는 리비전 ${compareOther.revision} 기준)` : "";
+  box.append(el("p", { class: "hint", style: "margin-top:8px" },
+    c.sameStructure ? el("strong", {}, c.text) : c.text, rev));
 }
 
 const btn = (label, on, opts) => el("button", { class: on ? "primary" : "", ...opts }, label);

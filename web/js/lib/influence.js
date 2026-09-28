@@ -704,6 +704,26 @@ export function nodeDetail(n, bands = {}) {
   return `${where}IR 연산 노드`;
 }
 
+/** 서버 잡 상태 코드(server/claw_server/jobs.py — queued → running → done·error·cancelled) → 화면 말.
+ *  코드는 서버 어휘라 영문이다 — 그대로 찍으면 [■ 중단] 뒤 「평가 cancelled」가 선다(e2e D15).
+ *  어휘는 jobs.py와 한 벌이다(테스트 드리프트 가드). */
+export const JOB_STATUS_LABEL = Object.freeze({
+  queued: "대기", running: "실행 중", done: "완료", error: "오류", cancelled: "취소됨",
+});
+
+/** 잡 상태 한 낱말 — 모르는 코드는 숨기지 않고 그대로 낸다(새 상태가 생겼다는 사실이 화면에 남게). */
+export function jobStatusLabel(status) {
+  if (status == null) return "상태 미상";
+  return JOB_STATUS_LABEL[status] ?? String(status);
+}
+
+/** 결과 없이 끝난 잡의 한 줄 — 「평가 취소됨」. 완료인데 결과 id가 없으면 그렇다고 말한다
+ *  (호출측 가드 `status !== "done" || !result_id`의 두 번째 갈래 — 「평가 완료」로 두면 성공처럼 읽힌다). */
+export function jobEndLine(what, job) {
+  const line = `${what} ${jobStatusLabel(job?.status)}`;
+  return job?.status === "done" && !job.result_id ? `${line} — 저장된 결과 없음` : line;
+}
+
 /** 형상 + 저장된 sim 결과 → /influence/diagnose 본문 — 형상 필드는
  *  structuralRequest에 위임한다 (같은 필드를 두 번 적으면 갈라진다). */
 export function diagnoseRequest(state, resultId) {
@@ -785,6 +805,21 @@ export function sweepCases(grid, scan) {
       `${missing.join(", ")} — 격자를 되돌리거나 다시 스캔한다.`);
   }
   return grid.filter((c) => sel.has(c.name));
+}
+
+/** 저장된 스윕을 [얼마나 →]가 다시 써도 되는가 — 그 설계변수를 **단독으로** 흔들었고, 지금 격자의
+ *  케이스가 전부 들어 있고, 형상 지문이 지금 평가와 같을 때만. 지문을 한쪽이라도 모르면 다시 쓰지
+ *  않는다(모르는 계보로 필요 변화량을 푸느니 한 번 더 잰다). 취소로 잘린 스윕(aborted — 3단 B가
+ *  완료 런을 보존해 저장한다)도 다시 쓰지 않는다: 마지막 케이스의 단독 런 일부가 빠져 있을 수 있다. */
+export function sweepReusable(sweepResult, { knobs = [], caseNames = [], fingerprint = null } = {}) {
+  const rows = sweepResult?.rows ?? [];
+  if (!rows.length || !knobs.length || sweepResult.aborted) return false;
+  if (!fingerprint || !sweepResult.fingerprint || sweepResult.fingerprint !== fingerprint) return false;
+  const swept = new Set(rows.filter((r) => r.role === "single")
+    .flatMap((r) => Object.keys(r.overrides ?? {})));
+  if (!knobs.every((k) => swept.has(k))) return false;
+  const cases = new Set(rows.map((r) => r.case));
+  return caseNames.every((n) => cases.has(n));
 }
 
 /** 다중 케이스 스윕 요약 — base 제외 런 label별로, 지표마다 |Δ| 최대인 **전이**와
@@ -1112,6 +1147,18 @@ export function normalizeDiagnosis(payload) {
     prescriptions: (payload.prescriptions ?? []).map((p, i) => ({ ...p, index: i })),
     hasWarn: findings.some((f) => f.severity === "warn"),
   };
+}
+
+/** 진단 결과 한 줄 — 무엇을 진단했고 소견·처방 카드가 몇 건인가 (패널 상태 줄과 같은 수).
+ *  처방 카드가 있으면 첫 카드의 설계변수를 붙인다 — 「무엇을 만질지」가 이 단계의 답이다.
+ *  id는 진단한 **시뮬 결과**의 것이다(진단은 저장물이 없다) — 패널 상태 줄과 같은 「결과」로 부른다. */
+export function diagnosisLine(diag) {
+  if (!diag) return "진단 없음";
+  const warn = diag.findings.filter((f) => f.severity === "warn").length;
+  const first = diag.prescriptions[0];
+  return `결과 ${diag.resultId} — 소견 ${diag.findings.length}건(처방 대상 ${warn}) · `
+    + `처방 카드 ${diag.prescriptions.length}건`
+    + (first ? ` · 첫 카드 ${(first.knobs ?? []).join(", ")}` : "");
 }
 
 /** 형상 → /influence/structural 요청 본문. 사용자가 정한 것만 싣는다 (02 §5.5). */

@@ -1,9 +1,13 @@
 """마진 맵 라우트 (02 §8 워크플로우 5단계) — 트림점별 선형화 → 안정성·마진 수치.
 
 엔진 호출 연쇄: trim_batch → linearize → split_axes → damp/classify →
-pi_loop+loop_margins. 루프 정의(축·입출력·PI 게인·부호)는 요청이 보유하고
+broken_loop+nyquist_margins. 루프 정의(축·입출력·PI 게인·부호)는 요청이 보유하고
 서버는 엔진 축 이름으로 검증만 한다 — 마진 산출 자체는 전부 M10 소관.
 격자 시각화는 M14(web) 소관 (01 §4.2).
+
+루프 게인은 요청이 적은 kp·ki가 기본이고, 루프가 `gain_source: "profile"`이면 고른 기체의 **조립 법칙이
+그 칸의 운용점에서 쓰는 게인**이다(케이스마다 다르다 — 스케줄 표@칸). 스케줄 산식은 여기 다시 적지 않는다:
+조립은 assemble_law, 칸의 실효 게인은 pipeline.openloop.effective_gain(2단 개루프와 같은 자)이다.
 """
 
 import math
@@ -23,12 +27,14 @@ from claw.analysis import (
     design_envelope,
     fq_lat,
     fq_lon,
-    loop_margins,
+    broken_loop,
+    nyquist_margins,
     omega_covering,
-    pi_loop,
     vn_envelope,
 )
-from claw.pipeline.openloop import GROUP_LOOPS
+from claw.fcl.assemble import assemble_law
+from claw.pipeline.openloop import GROUP_LOOPS, effective_gain
+from claw.profile import ProfileError
 from claw.design.points import envelope_verdict
 from claw.trim import trim_level
 from claw.trim import (
@@ -41,7 +47,7 @@ from claw.trim import (
     trim_batch,
 )
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
-from claw_server.refs import ProfileRef, profile_echo, profile_query, resolve_profile
+from claw_server.refs import ProfileRef, profile_echo, profile_error_detail, profile_query, resolve_profile
 from claw_server.serialize import to_jsonable, trim_result_dict
 
 router = APIRouter(tags=["analysis"])
@@ -52,16 +58,35 @@ _AXIS_NAMES = {
 }
 
 
+# 루프 자리 (축, 출력 상태, 입력) → (스케줄 그룹, 선언). 선언의 정본은 pipeline.openloop.GROUP_LOOPS이고 여기는
+# 역인덱스다(아래 _LOOP_GROUP 주석 참조). 자리가 겹치면 dict가 뒤 선언으로 조용히 덮어 **다른 그룹의 게인**을
+# 읽게 되므로 import 시점에 막는다(analysis/margins.py _FILTER_TF 단정문과 같은 가드)
+_LOOP_DECL = {
+    (d["axis"], d["x_out"], d["u_in"]): (group, d)
+    for group, decls in GROUP_LOOPS.items()
+    for d in decls
+}
+assert len(_LOOP_DECL) == sum(len(v) for v in GROUP_LOOPS.values()), "GROUP_LOOPS 루프 자리 중복"
+
+
 class LoopIn(BaseModel):
-    """PI 개루프 스펙 — 마진 맵의 루프 정의 (설계값은 요청이 보유)."""
+    """PI 개루프 스펙 — 마진 맵의 루프 정의 (설계값은 요청이 보유).
+
+    게인은 둘 중 하나다. 기본은 요청이 적은 kp·ki — 전 칸에 같은 값이다. `gain_source: "profile"`이면 kp·ki를
+    싣지 않고 고른 기체의 조립 법칙이 **칸마다 그 운용점에서** 쓰는 게인을 서버가 읽는다(스케줄 표@칸 — 기체가
+    실제로 나는 게인). 루프 한 개가 kp 하나라서 스케줄 게인을 한 마하에서 읽어 전 칸에 쓰면 그 마하 열 밖은
+    판정까지 뒤집힐 수 있는 근사였다 — 그것을 없애는 자리다. 법칙 자리 대응은 GROUP_LOOPS 선언뿐이라 선언이
+    없는 루프(예: v←dr)는 이 방식을 쓸 수 없다. 부호(sign)는 루프 구조라 요청이 계속 보유한다.
+    """
 
     name: str = Field(min_length=1)
     axis: Literal["lon", "lat"] = "lon"
     x_out: str = "q"
     u_in: str = "de"
-    kp: FiniteFloat
+    kp: FiniteFloat | None = None  # 요청 게인 루프에서만 — 필수 여부는 아래 검증이 gain_source로 가른다
     ki: FiniteFloat = 0.0
     sign: FiniteFloat = -1.0
+    gain_source: Literal["profile"] | None = None
 
     @model_validator(mode="after")
     def _check_axis_names(self):
@@ -70,9 +95,32 @@ class LoopIn(BaseModel):
             raise ValueError(f"{self.axis}축에 없는 상태: {self.x_out} (허용: {states})")
         if self.u_in not in inputs:
             raise ValueError(f"{self.axis}축에 없는 입력: {self.u_in} (허용: {inputs})")
+        if self.gain_source == "profile":
+            # 게인을 두 곳에서 받으면 어느 쪽으로 쟀는지가 결과에서 흐려진다 — 법칙 게인 루프는 kp·ki를 싣지 않는다
+            given = sorted({"kp", "ki"} & self.model_fields_set)
+            if given:
+                raise ValueError(f"gain_source \"profile\" 루프는 {', '.join(given)}를 싣지 않는다 — 게인은 법칙이 칸마다 준다")
+            if (self.axis, self.x_out, self.u_in) not in _LOOP_DECL:
+                raise ValueError(
+                    f"법칙 자리 선언이 없는 루프({self.axis} {self.x_out}←{self.u_in}) — gain_source \"profile\"은 "
+                    "pipeline.openloop.GROUP_LOOPS에 선언된 자리만 (kp·ki를 직접 적는다)")
+            if self.sign == 0.0:
+                raise ValueError("무의미 루프 (제로 개루프): sign=0")
+            return self
+        if self.kp is None:
+            raise ValueError("kp 필요 — 또는 gain_source \"profile\"(고른 기체의 법칙 게인을 칸마다)")
         if self.sign == 0.0 or (self.kp == 0.0 and self.ki == 0.0):
             raise ValueError("무의미 루프 (제로 개루프): sign=0 또는 kp=ki=0")
         return self
+
+
+def _loop_echo(spec) -> dict:
+    """결과·보드선도 응답에 싣는 루프 스펙 — 요청 게인 루프는 종전 모양 그대로(서버 골든 margin_map의 loops가
+    바이트로 지킨다), 법칙 게인 루프는 kp·ki 없이 gain_source만. 웹은 이 echo를 보드선도 요청에 그대로 되실으므로
+    법칙 게인 루프의 echo가 kp·ki를 가지면 위 검증이 그 요청을 거절한다."""
+    if spec.gain_source is None:
+        return spec.model_dump(exclude={"gain_source"})
+    return spec.model_dump(exclude={"kp", "ki"})
 
 
 class ActuatorIn(BaseModel):
@@ -93,6 +141,9 @@ class MarginMapIn(BaseModel):
     actuator: ActuatorIn | None = None
     delay_s: FiniteFloat = Field(default=0.0, ge=0.0)
     pade_order: int = Field(default=2, ge=1)
+    # 루프 하나를 끊을 때 같은 축의 나머지 요청 루프를 닫아 둔다(AS94900의 끊는 자리 — 엔진 broken_loop). 끄면 종전처럼
+    # 루프마다 그 루프 하나만 있는 축에서 잰다(비교용). 루프가 축마다 하나면 두 방식이 같다(서버 골든 margin_map)
+    close_others: bool = True
 
     @model_validator(mode="after")
     def _unique_loop_names(self):
@@ -132,14 +183,75 @@ def _axis_block(model, classify_fn, fq_fn) -> dict:
 # 갖고 pitch_att는 안 갖는다(openloop._effective_filter도 sp.get("filter")를 읽는다).
 # 그룹만 키로 쓰면 피치 축에 washout_tau가 켜지는 날 **자세 루프**가 선언에 없는
 # 레이트 워시아웃을 얻고, 그 사유 문장은 사실과 반대를 말하게 된다.
-_LOOP_GROUP = {
-    (d["axis"], d["x_out"], d["u_in"]): (group, d.get("filter"))
-    for group, decls in GROUP_LOOPS.items()
-    for d in decls
-}
+_LOOP_GROUP = {key: (group, d.get("filter")) for key, (group, d) in _LOOP_DECL.items()}
 
 
-def _compose_loop(model, spec, actuator, delay_s, pade_order, rate_filter=None):
+class _LawGains:
+    """고른 기체의 조립 법칙 → 법칙 게인 루프(gain_source "profile")의 칸별 {kp, ki}.
+
+    조립은 assemble_law 한 경로(시뮬·코드와 같은 표 우선순위: 문서 확정 표 > 규칙 스케줄), 칸의 실효 게인은
+    openloop.effective_gain(표@칸, 스케줄 안 한 자리는 설계 상수) — 스케줄 산식을 여기 다시 적지 않는다.
+    조립이 서지 않는 문서(확정 표 낡음·게인 미설계·δe_trim 낡음 등)는 422다: 기체가 날 게인이 없는데 다른
+    게인으로 재서 그 기체의 마진인 척하지 않는다.
+    """
+
+    def __init__(self, profile, loops):
+        self.loops = [lp for lp in loops if lp.gain_source == "profile"]
+        self.law = None
+        if not self.loops:
+            return
+        try:
+            self.law = assemble_law(profile)
+        except ProfileError as e:
+            raise HTTPException(status_code=422, detail=profile_error_detail(e))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=f"법칙 조립 실패 — 칸별 게인을 읽을 수 없다: {e}")
+
+    def at(self, spec, case) -> dict:
+        """이 루프의 이 칸 게인 {kp, ki} — 선언이 안 가진 PI 인자는 0 (레이트 루프는 kp = k_rate뿐)."""
+        group, decl = _LOOP_DECL[(spec.axis, spec.x_out, spec.u_in)]
+        g = {arg: effective_gain(self.law, group, key, case) for arg, key in decl["gains"].items()}
+        return {"kp": g.get("kp", 0.0), "ki": g.get("ki", 0.0)}
+
+    def case_gains(self, case) -> dict:
+        return {lp.name: self.at(lp, case) for lp in self.loops}
+
+    def provenance(self, profile) -> dict:
+        """어느 표에서 읽었나 — basis(확정 표 | 규칙 스케줄)와 루프 인자별 자리·스케줄 여부. 결과를 결과 탭에서
+        다시 열어도 그 마진을 잰 게인의 출처를 말할 수 있게 결과와 함께 저장한다."""
+        tables = self.law.schedule.tables if self.law.schedule is not None else {}
+        loops = {}
+        for lp in self.loops:
+            group, decl = _LOOP_DECL[(lp.axis, lp.x_out, lp.u_in)]
+            loops[lp.name] = {arg: {"slot": f"{group}.{key}", "scheduled": f"{group}.{key}" in tables}
+                              for arg, key in decl["gains"].items()}
+        # 조립이 섰으므로 문서의 확정 표는 낡지 않았다 — 있으면 조립이 그 표를 썼다(assemble_law 우선순위)
+        basis = "confirmed" if profile.doc["law"]["gain_tables"] is not None else "rule"
+        return {"basis": basis, "loops": loops}
+
+
+def _zero(g) -> bool:
+    return g["kp"] == 0.0 and g["ki"] == 0.0
+
+
+def _closed_others(spec, loops, gains_of):
+    """이 루프를 끊을 때 닫아 둘 루프 — 같은 축·**다른 자리**(출력·입력 쌍)의 요청 루프 중 이 칸 게인이 0이 아닌 것.
+
+    같은 자리의 다른 루프(예: kp만 다른 비교용 pitch_q 사본)는 닫지 않는다 — 한 센서·한 타면 경로에 되먹임이 둘인
+    법칙이 아니라 같은 루프의 대안이다. gains_of(spec) → 그 칸의 {kp, ki}(법칙 게인 루프) 또는 None(요청 게인).
+    반환 [(spec, gains | None)]."""
+    out = []
+    for o in loops:
+        if o is spec or o.axis != spec.axis or (o.x_out, o.u_in) == (spec.x_out, spec.u_in):
+            continue
+        g = gains_of(o)
+        if g is not None and _zero(g):
+            continue  # 이 칸에서 법칙 게인 0 — 닫을 루프가 없다
+        out.append((o, g))
+    return out
+
+
+def _compose_loop(model, spec, actuator, delay_s, pade_order, rate_filter=None, gains=None, others=()):
     """루프 스펙 + 작동기·지연 → 개루프 — 마진 맵과 보드선도의 **공용 조립**.
 
     두 곳이 따로 조립하면 곡선과 클릭한 칸의 수가 어긋난다. 어긋나도 화면에는
@@ -147,15 +259,32 @@ def _compose_loop(model, spec, actuator, delay_s, pade_order, rate_filter=None):
     rate_filter는 **마진 맵 경로에서 항상 None**이다 — 히트맵이 법칙의 필터를 안
     본다는 01 §4.2 [한계]를 보드선도가 몰래 바꾸면 칸의 수와 곡선이 어긋난다.
     보드선도는 그 차이를 없애는 대신 **두 곡선으로 보여준다**(아래 bode_endpoint).
+    gains는 법칙 게인 루프의 이 칸 {kp, ki}(_LawGains.at) — None이면 요청이 적은 kp·ki다.
+    others는 닫아 둘 루프 [(spec, gains | None)](_closed_others) — 비면 엔진 broken_loop이 pi_loop 그대로다(골든).
     """
-    return pi_loop(
+    def pi_of(s, g):
+        return (s.kp, s.ki) if g is None else (g["kp"], g["ki"])
+
+    kp, ki = pi_of(spec, gains)
+    closed = []
+    for o, g in others:
+        okp, oki = pi_of(o, g)
+        closed.append({"x_out": o.x_out, "u_in": o.u_in, "kp": okp, "ki": oki, "sign": o.sign})
+    return broken_loop(
         model, x_out=spec.x_out, u_in=spec.u_in,
-        kp=spec.kp, ki=spec.ki, sign=spec.sign,
+        kp=kp, ki=ki, sign=spec.sign, others=closed,
         actuator_wn=actuator.wn if actuator else None,
         actuator_zeta=actuator.zeta if actuator else None,
         delay_s=delay_s, pade_order=pade_order,
         rate_filter=rate_filter,
     )
+
+
+def _with_closed(margins, others) -> dict:
+    """마진 dict + 닫아 둔 루프 이름(closed_with) — 닫은 루프가 없으면 종전 dict 그대로(골든)."""
+    if not others:
+        return margins
+    return {**margins, "closed_with": [o.name for o, _g in others]}
 
 
 def _trim_only_entry(tr) -> dict:
@@ -302,12 +431,18 @@ def design_envelope_endpoint(
 
     합성·귀속·좌표는 전부 엔진(design_envelope·aero_envelope) — 서버는 데모
     프로파일 조립과 비-None 전달만 (기본값 재기술 금지, 02 §5.5). q_max·운용
-    고도는 실기체 값이라 미지정이면 경계 자체가 없다(엔진이 null echo).
+    고도는 실기체 값이라 질의에도 기체 문서에도 없으면 경계 자체가 없다(엔진이 null echo).
     trim_alpha_bounds는 trim 상수 정본을 조립 시점에 주입 (같은 L4 계층이라
     엔진 analysis가 직접 import하지 않는다 — 03 §2 계층 규칙).
 
     nz·iso_qbar·iso_tas도 같은 계약 — 미지정이면 전달하지 않고 엔진이 정한다
     (기동 엔벨로프는 아예 없는 것, 등고선은 엔진 [기본값]).
+
+    q_max·운용 고도를 질의가 주지 않으면 **기체 문서 값**(structural.q_max·operating)을 쓴다 — 실기체
+    값이 문서에 있는데 폼이 비었다고 경계를 빼면 그 기체의 엔벨로프가 아니다. 문서에도 없으면(null) 종전대로
+    경계가 없다. 어느 값이 문서에서 왔는지는 bounds_source({q_max·alt_min·alt_max: "query"|"profile"|null})로
+    말하되, 문서 값을 하나라도 쓴 응답에만 싣는다 — 문서 값이 전부 null인 예제 기체의 응답은 종전과 바이트
+    단위로 같아야 한다(서버 골든).
     """
     profile = resolve_profile(request, profile_ref)
     alpha_margin = profile.law["alpha_margin"] if alpha_margin is None else alpha_margin
@@ -317,6 +452,14 @@ def design_envelope_endpoint(
     limits, source, overridden = _assemble_limits(
         profile, n_limit_pos, n_limit_neg, safety_factor, mach_no, mach_d
     )
+    # 동압 한계·운용 고도 — 질의 > 기체 문서 > 없음(경계 없음)
+    query = {"q_max": q_max, "alt_min": alt_min, "alt_max": alt_max}
+    doc_bounds = {"q_max": profile.q_max, **profile.operating}
+    bounds = {k: v if v is not None else doc_bounds.get(k) for k, v in query.items()}
+    bounds_source = {k: "query" if query[k] is not None else ("profile" if bounds[k] is not None else None)
+                     for k in query}
+    q_max, alt_min, alt_max = bounds["q_max"], bounds["alt_min"], bounds["alt_max"]
+    from_profile = [k for k, s in bounds_source.items() if s == "profile"]
     kwargs = {
         k: v
         for k, v in dict(
@@ -332,10 +475,14 @@ def design_envelope_endpoint(
             stall, db_ranges, alpha_margin=alpha_margin, trim_alpha_bounds=profile.trim_alpha_bounds
         )
     except (ValueError, TypeError) as e:  # ISA 범위·서열 위반 등 — 엔진 검증
-        raise HTTPException(status_code=422, detail=str(e))
+        # 질의 값과 문서 값이 섞여 서열이 어긋나면 사용자가 넣지 않은 수가 사유에 나온다 — 그 출처를 붙인다
+        used = ", ".join(f"{k}={bounds[k]:g}" for k in from_profile)
+        raise HTTPException(status_code=422, detail=str(e) + (f" (기체 문서 값: {used})" if used else ""))
     env["limits"] = limits
     env["limits_source"] = source
     env["limits_overridden"] = overridden
+    if from_profile:
+        env["bounds_source"] = bounds_source
     env["profile"] = profile_echo(profile)
     return to_jsonable(env)
 
@@ -420,6 +567,19 @@ class BodeIn(BaseModel):
     # 실측: 같은 격자에서 M0.75는 마진이 어긋나고 M0.85는 **칸은 수렴인데 여기서만
     # 미수렴**이 나 422가 된다 — 색칠된 칸이 안 열리는 모순.
     z0: list[FiniteFloat] | None = Field(default=None, min_length=3, max_length=3)
+    # 닫아 둘 루프 — 마진 맵 칸의 closed_with(같은 축의 나머지 요청 루프)를 그 결과의 loops echo에서 그대로 싣는다.
+    # 칸과 곡선이 같은 조립이어야 한다(엔진 broken_loop). 비면 이 루프 하나만 있는 축(종전)
+    others: list[LoopIn] = []
+
+    @model_validator(mode="after")
+    def _others_same_axis(self):
+        names = [self.loop.name] + [o.name for o in self.others]
+        if len(names) != len(set(names)):
+            raise ValueError(f"루프 이름 중복: {names}")
+        stray = [o.name for o in self.others if o.axis != self.loop.axis]
+        if stray:
+            raise ValueError(f"닫아 둘 루프는 끊는 루프와 같은 축({self.loop.axis})이어야 한다: {stray}")
+        return self
 
 
 @router.post("/analysis/bode")
@@ -433,6 +593,12 @@ def bode_endpoint(req: BodeIn, request: Request) -> dict:
     profile = resolve_profile(request, req.profile)
     ac = profile.aircraft()
     (case,) = build_cases([req.case])
+    # 법칙 게인 루프면 이 칸의 게인 — 마진 맵이 그 칸에서 쓴 것과 같은 조립·같은 조회다(칸과 곡선이 같은 게인)
+    law_gains = _LawGains(profile, [req.loop, *req.others])
+    gains = law_gains.at(req.loop, case) if req.loop.gain_source == "profile" else None
+    if gains is not None and _zero(gains):
+        raise HTTPException(status_code=422, detail=(
+            f"이 칸({case.name})에서 법칙 게인이 0이다(제로 개루프) — 보드선도를 낼 루프가 없습니다"))
     tr = trim_level(ac, case, z0=req.z0, fingerprint=req.fingerprint)
     if not tr.converged:
         # 트림이 없으면 선형화할 점이 없다 — 빈 곡선을 그려 정상인 척하지 않는다.
@@ -466,16 +632,20 @@ def bode_endpoint(req: BodeIn, request: Request) -> dict:
     try:
         lon, lat = split_axes(linearize(ac, tr))
         model = lon if req.loop.axis == "lon" else lat
-        loop = _compose_loop(model, req.loop, req.actuator, req.delay_s, req.pade_order)
+        others = _closed_others(
+            req.loop, [req.loop, *req.others],
+            lambda o: law_gains.at(o, case) if o.gain_source == "profile" else None)
+        loop = _compose_loop(model, req.loop, req.actuator, req.delay_s, req.pade_order, gains=gains, others=others)
         floop = (
             _compose_loop(model, req.loop, req.actuator, req.delay_s, req.pade_order,
-                          rate_filter=fspec)
+                          rate_filter=fspec, gains=gains, others=others)
             if fspec else None
         )
         # 겹쳐 비교하려면 같은 축이어야 한다 — 워시아웃 코너처럼 한쪽에만 있는 극이
         # 다른 쪽 범위 밖으로 나가면 그 교차를 통째로 놓친다
         w = omega_covering(*( [loop, floop] if floop else [loop] ), n_points=req.n_points)
         data = bode_data(loop, w=w)
+        data["margins"] = _with_closed(data["margins"], others)  # 칸의 마진 dict와 같은 모양
         filtered = {**bode_data(floop, w=w), "filter": fspec} if floop else None
     except (ValueError, ArithmeticError) as e:
         # LinAlgError는 ValueError지만 **ZeroDivisionError는 아니다** — 고차 Padé에서
@@ -497,11 +667,13 @@ def bode_endpoint(req: BodeIn, request: Request) -> dict:
         "filtered": filtered,
         "filtered_note": filtered_note,
         "trim": trim_result_dict(tr),
-        "loop": req.loop.model_dump(),
+        "loop": _loop_echo(req.loop),
         "actuator": req.actuator.model_dump() if req.actuator else None,
         "delay_s": req.delay_s,
         "pade_order": req.pade_order,
         "profile": profile_echo(profile),
+        # 법칙 게인 루프만 — 이 곡선을 그린 이 칸의 게인과 그 출처(요청 게인 루프의 응답은 종전 모양 그대로)
+        **({"gains": gains, "profile_gains": law_gains.provenance(profile)} if gains is not None else {}),
     })
 
 
@@ -513,6 +685,14 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
     store = request.app.state.store
     n = len(cases)
     total = 2 * n  # 트림 패스 + 해석 패스
+    # 법칙 게인 루프 — 조립 실패는 잡을 걸기 전에 422. 게인은 트림과 무관하게 칸(마하·고도·연료)만으로 정해지므로
+    # 격자 전 칸에서 0인 루프도 여기서 거절한다(요청 게인 kp=ki=0 루프의 422와 같은 판정). 일부 칸만 0이면 그 칸만
+    # 마진 없이 사유(note)를 단다
+    law_gains = _LawGains(profile, req.loops)
+    for lp in law_gains.loops:
+        if all(_zero(law_gains.at(lp, c)) for c in cases):
+            raise HTTPException(status_code=422, detail=(
+                f"무의미 루프 (제로 개루프): {lp.name}의 법칙 게인이 격자 전 칸에서 0이다"))
 
     def work(job):
         trs = trim_batch(
@@ -523,24 +703,47 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                 done, total, message=f"트림: {tr.case.name}"
             ),
         )
+        def trim_entry(t):
+            # 이 칸의 법칙 게인 — 트림 수렴·취소와 무관하게 싣는다(칸의 기록). 법칙 게인 루프가 없으면 키도 없다(골든)
+            e = _trim_only_entry(t)
+            if law_gains.loops:
+                e["gains"] = law_gains.case_gains(t.case)
+            return e
+
         entries = []
         for i, tr in enumerate(trs):
             if job.cancel_requested:
                 # 취소 — 계산 완료된 나머지 트림 결과를 해석 생략 entry로
                 # 전량 보존 (리뷰 S1: 유실 금지)
-                entries.extend(_trim_only_entry(t) for t in trs[i:])
+                entries.extend(trim_entry(t) for t in trs[i:])
                 break
-            entry = _trim_only_entry(tr)
+            entry = trim_entry(tr)
+            case_gains = entry.get("gains")
             if tr.converged:
                 try:
                     lon, lat = split_axes(linearize(ac, tr))
                     entry["lon"] = _axis_block(lon, classify_lon, fq_lon)
                     entry["lat"] = _axis_block(lat, classify_lat, fq_lat)
+                    zero = []
                     for spec in req.loops:
                         model = lon if spec.axis == "lon" else lat
+                        g = case_gains.get(spec.name) if case_gains is not None else None
+                        if g is not None and _zero(g):
+                            zero.append(spec.name)  # 이 칸만 게인 0 — 재면 무의미한 inf 마진이 칠해진다
+                            continue
+                        others = (_closed_others(
+                            spec, req.loops,
+                            lambda o: case_gains.get(o.name) if case_gains is not None else None)
+                            if req.close_others else [])
                         loop = _compose_loop(
-                            model, spec, req.actuator, req.delay_s, req.pade_order)
-                        entry["margins"][spec.name] = to_jsonable(loop_margins(loop))
+                            model, spec, req.actuator, req.delay_s, req.pade_order, gains=g, others=others)
+                        # 칸의 마진은 나이퀴스트에 맞는 여유다(엔진 nyquist_margins — 보드선도와 같은 정의). control.margin
+                        # 부호를 그대로 칠하면 다중 교차 레이트 루프가 안정인데도 "음수"로 칠해졌다(e2e D2). 같은 축의 나머지
+                        # 루프는 닫고 끊는다(broken_loop) — 연 채로 재면 기체가 실제로 나는 폐루프가 아니다(요 댐퍼를 연
+                        # roll_p의 나선 발산). 루프가 축마다 하나이고 교차가 하나씩이며 폐루프가 안정이면 종전과 비트 같다(골든)
+                        entry["margins"][spec.name] = to_jsonable(_with_closed(nyquist_margins(loop), others))
+                    if zero:
+                        entry["note"] = f"법칙 게인이 이 칸에서 0 — 제로 개루프라 마진 없음: {', '.join(zero)}"
                 except (ValueError, ArithmeticError) as e:
                     # 케이스별 해석 실패 — 전량 소실 대신 데이터로. ArithmeticError는
                     # 고차 Padé의 ZeroDivisionError 몫이다(보드선도 라우트와 같은 이유)
@@ -554,12 +757,14 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                 "cases": entries,
                 # 판정선 동봉 — 화면은 이 값을 읽어 범례를 쓴다 (판정선 재기술 금지)
                 "fq_criteria": {**_FQ_CRITERIA.to_dict(), "fingerprint": _FQ_CRITERIA.fingerprint()},
-                "loops": [lp.model_dump() for lp in req.loops],
+                "loops": [_loop_echo(lp) for lp in req.loops],
                 "actuator": req.actuator.model_dump() if req.actuator else None,
                 "delay_s": req.delay_s,
                 "pade_order": req.pade_order,
                 "n_requested": n,
                 "profile": profile_echo(profile),
+                # 법칙 게인 루프가 있을 때만 — 칸별 게인(entry.gains)을 어느 표에서 읽었나
+                **({"profile_gains": law_gains.provenance(profile)} if law_gains.loops else {}),
             },
             meta={
                 "kind": "margin_map",

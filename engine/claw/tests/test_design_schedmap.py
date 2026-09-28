@@ -559,3 +559,44 @@ def test_validation_density_rounds_cover_every_interval_first():
     assert midpoint_validation_points(ps, n_between=3) == []
     with pytest.raises(ValueError):
         midpoint_validation_points(ps, n_between=0)
+
+
+def test_rate_loops_are_judged_on_the_as94900_broken_loop_margin():
+    """검증이 레이트 자리의 AS94900 끊은 루프 여유(같은 축 다른 레이트 루프 닫음·작동기+Padé)를 자세 자리와 같은 선으로 판다.
+
+    쇼케이스 기체 M0.12/h200(P6 마진 맵이 roll_p GM 4.1~5.1 dB를 찾은 자리) — 가드 없이 튜닝한 롤 댐퍼(λ 목표 12)는 GM
+    6.97 dB라 warn, 1.3배면 GM 4.7 dB로 합격선 아래라 fail이다. 두 경우 모두 λ는 목표 위(ok) — 종전 판정은 둘 다
+    ok였다. 여유 수치는 튜너 가드와 같은 자(tune.rate_loop_margins)이고 shortfall·실패 목록이 같은 키로 싣는다."""
+    from claw.design.criteria import MarginCriteria
+    from claw.design.schedmap import _worst_failures
+    from claw.design.tune import rate_loop_margins, tune_point
+    from claw.profile import build_profile, load_showcase
+
+    prof = build_profile(load_showcase())
+    ac, rf = prof.aircraft(), prof.rate_filters()
+    case = TrimCase("s1", mach=0.12, alt=200.0, fuel=10.0)
+    lm = linearize(ac, trim_level(ac, case, fingerprint="fp"))
+    act = dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2)
+    with pytest.MonkeyPatch.context() as mp:
+        from claw.design import tune as T
+
+        mp.setattr(T, "_rate_margin_verdict", lambda m, targets: "ok")  # 가드 없는 튜너 — 종전 게인
+        gains = tune_point(lm, prof.design_gains(), rate_filters=rf, **act)["gains"]
+    c = MarginCriteria()
+    lat = split_axes(lm)[1]
+    for scale, gm, want in ((1.0, 6.97, "warn"), (1.3, 4.69, "fail")):
+        g = {**gains, "roll.k_rate": scale * gains["roll.k_rate"]}
+        out = scheduled_margin_point(lm, {}, g, case, criteria=c, rate_filters=rf, **act)
+        rr = out["roll_rate"]
+        assert c.judge_bandwidth(rr["roll_lambda"], rr["target"], unstable=rr["roll_unstable"],
+                                 participation=rr["participation"]) == "ok"  # λ만 보면 통과다
+        assert rr["gm_db"] == pytest.approx(gm, abs=0.02) and rr["status"] == want, (scale, rr["gm_db"], rr["status"])
+        ref = rate_loop_margins(lat, "roll", g, {**act, "rate_filters": rf})
+        assert rr["loop_margins"] == ref and rr["pm_deg"] == ref["pm_deg"]
+        assert rr["loop_margins"]["closed_with"] == ["yaw_rate"]
+        # 요·피치 자리도 여유를 싣는다(이 점은 둘 다 목표 위 — 지표 판정 그대로)
+        assert out["yaw_rate"]["gm_db"] > 8.0 and out["pitch_rate"]["gm_db"] > 8.0
+        assert out["yaw_rate"]["status"] == out["pitch_rate"]["status"] == "ok"
+    fails = _worst_failures({"v": {"loops": out}}, c)
+    assert [(f["loop"], f["gm_db"] is not None) for f in fails] == [("roll_rate", True)]
+    assert fails[0]["shortfall"]["gm_db"]["deficit"] == pytest.approx(6.0 - 4.69, abs=0.02)

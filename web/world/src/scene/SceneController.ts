@@ -19,14 +19,16 @@ import {
   CAM_MODES, FOV_Y, attitudeCamera, chaseCamera, onboardCamera, orbitCamera,
   rotateBy, shouldResetSmoothing, type CamMode, type CameraPose,
 } from "../lib/camera.ts";
-import { attitudeAt, originsAgree, sampleAt, sceneExtent, trackPoints, velocityAt }
-  from "../lib/world3d.ts";
+import {
+  attitudeAt, originsAgree, sampleAt, sceneExtent, trackPoints, vehicleModelPlan, velocityAt,
+} from "../lib/world3d.ts";
 import { elevationAt, parseTerrainPack, tierRect, type TerrainPack } from "../lib/terrainpack.ts";
 import { spawnArcade, stepArcade, type ArcadeInput, type ArcadeState } from "../core/arcade.ts";
 import { reliefOf } from "../core/gamestyle.ts";
 import { placeProps } from "../core/propfield.ts";
 import { buildPropsGroup } from "./props.ts";
-import { strideFor } from "../lib/replay.ts";
+import { refLabel, runProfileRef, siteRunwayWidth, strideFor } from "../lib/replay.ts";
+import { runwayDrawing } from "../core/runway.ts";
 import { ATMOSPHERE_NOTES, CLOUD_NOTES } from "./atmosphere.ts";
 import { WEAR_NOTES } from "./materials.ts";
 import { launcherCaptionNotes, launcherPose } from "../core/launcher.ts";
@@ -34,7 +36,7 @@ import { SURFACE_NOTES, propellerRate, surfacePose } from "../core/surfaces.ts";
 import { WAVE_NOTES } from "../core/waves.ts";
 import type { Replay } from "../core/types.ts";
 import {
-  fetchReplay, fetchTerrainPack, fetchWorldManifest, listSimResults, modelUrl,
+  errorText, fetchReplay, fetchRunDocument, fetchTerrainPack, fetchWorldManifest, listSimResults, modelUrl,
   type SimResultRow, type WorldManifest,
 } from "../data/api.ts";
 import { SceneHost, createSceneHost, type Marker, type ViewStyle } from "./SceneHost.ts";
@@ -44,6 +46,8 @@ import {
   LAUNCHER_NODES, VEHICLE_NODES, applySurfaces, hideVehicle, loadModel,
   setVehiclePose, showLauncher, spinPropeller, type LoadedModel,
 } from "./models.ts";
+import { SCHEMATIC_NOTE, schematicCaption, vehicleSchematic } from "../lib/vehicleschematic.ts";
+import { schematicVehicle } from "./schematic.ts";
 
 /** 기체는 **실물 크기(1배)로만** 그린다.
  *
@@ -101,6 +105,10 @@ export interface ControllerCallbacks {
    *  이 신호로만 열린다. 선택 콜백이다(안 받아도 재생은 그대로 돈다). */
   onEnded?(): void;
   onStats(s: FrameStats): void;
+  /** 이 런의 기체가 섰나 — 모델·도식·「궤적만」 중 무엇을 그릴지 **판정이 끝나면** 참, 새 결과(또는 고른 기체)로
+   *  다시 맞추기 시작하면 거짓. 기체는 장면 뒤에 따라오므로(`syncVehicle`) 장면이 섰다고 기체가 선 것이 아니다 —
+   *  가이드 투어·쇼케이스 재생이 이 신호를 기다린다(core/tour.ts `tourReady`). */
+  onVehicle(settled: boolean): void;
   /** 게임 모드 웨이포인트 목록 — 찍고/지울 때마다. UI 목록·보내기 버튼이 이걸 그린다. */
   onGameWps(wps: ReadonlyArray<readonly [number, number, number]>): void;
 }
@@ -127,6 +135,24 @@ export class SceneController {
   private terrain: TerrainPack | null = null;
   private manifest: WorldManifest | null = null;
   private vehicle: LoadedModel | null = null;
+  /** 지금 얹힌 기체 모델 파일 — **런마다 그 기체 문서의 표시 모델**이다(`syncVehicle`). 종전에는
+   *  `shahed136.glb`를 늘 그려 다른 기체·EO/IR형의 런에도 같은 모양이 섰다. */
+  private vehicleName: string | null = null;
+  /** 기체를 못(안) 그리는 사유 — 캡션이 말한다. 모델이 서 있으면 null. */
+  private vehicleNote: string | null = null;
+  /** 그린 모델의 출처 한 줄(어느 기체 문서의 표시 모델인가) — 도식이면 도식으로 대신 그린 사유. */
+  private vehicleCaption: string | null = null;
+  /** 서 있는 기체가 GLB인가 도식인가 — 도식은 몰 노드가 없어 타면·프로펠러 캡션이 거짓이 된다(`vehicleNotes`). */
+  private vehicleKind: "model" | "schematic" | null = null;
+  /** 지금 결과(또는 고른 기체)의 기체 판정이 끝났나 — `onVehicle`로 알린다. */
+  private vehicleSettled = false;
+  /** 기체를 세우는 중인 단계 — "doc"(이 런의 기체 문서를 받는 중) | "model"(GLB를 받는 중) | null.
+   *  문서를 받는 사이에 「모델이 없어 궤적만」이나 직전 런의 출처를 말하지 않게 캡션이 이 단계를 말한다. */
+  private vehicleLoading: "doc" | "model" | null = null;
+  /** 기체 세대 — **장면의 결과(body)가 바뀔 때만** 오른다(`loadGen`은 요청마다 오른다). 새 결과 요청이 실패해
+   *  장면이 옛 결과 그대로면 그 결과의 기체 동기화는 이어져야 한다 — 요청 세대로 물리면 받던 GLB를 버리고
+   *  캡션이 「불러오는 중…」에 멈춘다. */
+  private vehicleGen = 0;
   private launcher: LoadedModel | null = null;
   private results: SimResultRow[] = [];
 
@@ -208,26 +234,128 @@ export class SceneController {
     if (signal.aborted || this.disposed) return;
 
     // 모델 — 없으면 사유가 매니페스트에 실려 온다(빼 놓고 침묵하지 않는다).
+    // **기체는 여기서 읽지 않는다** — 결과마다 그 런의 기체 문서가 표시 모델을 정한다(`syncVehicle`).
+    // 발사관은 기체가 아니라 시험장 장비라 결과와 무관하게 한 번 읽는다.
     const names = new Set(this.manifest.models.map((m) => m.name));
-    if (names.has("shahed136.glb")) {
-      const r = await loadModel(modelUrl("shahed136.glb"), VEHICLE_NODES, signal);
-      if (r.model) { this.vehicle = r.model; this.host.modelGroup.add(r.model.root); }
-      else this.terrainNotes.push(r.reason);
-    }
     if (names.has("launcher.glb")) {
       const r = await loadModel(modelUrl("launcher.glb"), LAUNCHER_NODES, signal);
       if (r.model) { this.launcher = r.model; this.host.modelGroup.add(r.model.root); }
       else this.terrainNotes.push(r.reason);
     }
     if (this.manifest.models_reason) this.terrainNotes.push(this.manifest.models_reason);
-    for (const m of [this.vehicle, this.launcher]) {
-      if (m && m.missing.length > 0) {
-        this.terrainNotes.push(
-          `모델에서 못 찾은 노드: ${m.missing.join(", ")} — 그 부분은 움직이지 않습니다.`,
-        );
-      }
+    if (this.launcher && this.launcher.missing.length > 0) {
+      this.terrainNotes.push(
+        `모델에서 못 찾은 노드: ${this.launcher.missing.join(", ")} — 그 부분은 움직이지 않습니다.`,
+      );
     }
     this.dirty = true;
+  }
+
+  /** 기체 모델을 **이 런의 기체 문서** 표시 모델로 맞춘다 — 같은 파일이면 그대로, 다르면 갈아 끼운다.
+   *
+   *  `gen`은 부른 쪽의 결과 세대 — 문서·GLB를 받는 사이 결과를 바꾸면 늦은 응답이 새 장면에 옛 기체를 얹지
+   *  않게 물러난다(`loadResult`의 세대 토큰과 같은 수법). 판단은 lib(`vehicleModelPlan`)이 정본. */
+  private async syncVehicle(
+    gen: number,
+    source: () => Promise<{ doc: unknown; label: string; error: string | null }>,
+  ): Promise<void> {
+    // 기체를 새로 맞춘다 — 첫 await 앞에서 내린다(loadResult가 shownId를 갱신하기 전에 거짓이 앉아야 투어가 옛 참을 안 본다)
+    this.setVehicleSettled(false);
+    // 문서를 받는 사이의 캡션 — 이 단계부터 말한다(「모델이 없어 궤적만」도, 직전 런의 출처 줄도 아직 아니다)
+    this.vehicleLoading = "doc";
+    this.emitNotes();
+    const src = await source();
+    if (gen !== this.vehicleGen || this.disposed) return;
+    const plan = vehicleModelPlan(src.doc, this.manifest, { label: src.label, error: src.error });
+    this.vehicleLoading = null;
+    if (plan.model != null && plan.model === this.vehicleName && this.vehicle != null) {
+      this.vehicleNote = null;
+      this.vehicleCaption = plan.caption;
+      this.emitNotes();
+      this.setVehicleSettled(true);
+      return;
+    }
+    this.vehicle?.dispose(); // 씬에서 떼고 자원을 놓는다(models.ts)
+    this.vehicle = null;
+    this.vehicleName = null;
+    this.vehicleKind = null;
+    this.vehicleNote = plan.note;
+    this.vehicleCaption = null;
+    this.dirty = true;
+    if (plan.model == null) {
+      this.standInSchematic(src.doc, plan.note);
+      this.emitNotes();
+      this.setVehicleSettled(true);
+      return;
+    }
+    this.vehicleLoading = "model";
+    this.emitNotes();
+    const r = await loadModel(modelUrl(plan.model), VEHICLE_NODES);
+    if (gen !== this.vehicleGen || this.disposed) { r.model?.dispose(); return; }
+    this.vehicleLoading = null;
+    if (r.model) {
+      this.vehicle = r.model;
+      this.vehicleName = plan.model;
+      this.vehicleKind = "model";
+      this.vehicleCaption = plan.caption;
+      this.host.modelGroup.add(r.model.root);
+      // 지금 판 상태의 타면을 바로 입힌다 — 게임 모드면 중립(enterGame과 같은 규약), 재생이면 다음 프레임이 덮는다
+      applySurfaces(r.model, surfacePose(0, 0, 0, this.body?.meta?.limits ?? {}));
+    } else {
+      this.vehicleNote = r.reason;
+      this.standInSchematic(src.doc, r.reason);
+    }
+    this.dirty = true;
+    this.emitNotes();
+    this.setVehicleSettled(true);
+  }
+
+  /** GLB 대신 **기체 탭과 같은 도식**을 그 자리에 세운다 — 궤적만 두면 발사·접지 장면에서 기체가 어디 있는지가
+   *  화면에 없다(쇼케이스 e2e 실측: 모델 폴더를 못 찾은 서버에서 추적 시점도 빈 하늘). 형상은 이 런의 기체 문서의
+   *  기준량에서만 — 문서가 없으면 그대로 궤적만이다(다른 기체의 형상을 빌리지 않는다, 사유는 `why`가 이미 말한다). */
+  private standInSchematic(doc: unknown, why: string | null): void {
+    const s = vehicleSchematic(doc);
+    if (s.mesh == null) {
+      if (s.reason != null) this.vehicleNote = [why, s.reason].filter(Boolean).join(" — ");
+      return;
+    }
+    this.vehicle = schematicVehicle(s.mesh);
+    this.vehicleKind = "schematic";
+    this.vehicleNote = null;
+    this.vehicleCaption = schematicCaption(why);
+    this.host.modelGroup.add(this.vehicle.root);
+    this.dirty = true;
+  }
+
+  private setVehicleSettled(v: boolean): void {
+    if (v === this.vehicleSettled) return;
+    this.vehicleSettled = v;
+    this.cb.onVehicle(v);
+  }
+
+  /** 이 런을 난 기체의 적용 문서 — 표시 모델의 출처. 못 받으면 사유(던지지 않는다). */
+  private async runDocument(body: Replay): Promise<{ doc: unknown; label: string; error: string | null }> {
+    const ref = runProfileRef(body.meta);
+    if (ref == null) return { doc: null, label: "이 런의 기체", error: "이 결과에 기체 기록(meta.profile)이 없다" };
+    const label = refLabel(ref);
+    try {
+      return { doc: await fetchRunDocument(ref), label, error: null };
+    } catch (e) {
+      return { doc: null, label, error: `이 런의 기체 문서(${label})를 받지 못했다 — ${errorText(e)}` };
+    }
+  }
+
+  /** 결과가 하나도 없을 때(게임 모드만 쓰는 경우) — 헤더에서 고른 기체의 표시 모델로 기체를 세운다.
+   *  결과를 읽으면 그 런의 기체가 이긴다(세대가 바뀌어 이 요청은 물러난다). */
+  async vehicleFromSelection(getDoc: () => Promise<unknown>): Promise<void> {
+    if (this.body != null) return;
+    await this.syncVehicle(this.vehicleGen, async () => {
+      try {
+        return { doc: await getDoc(), label: "고른 기체", error: null };
+      } catch (e) {
+        return { doc: null, label: "고른 기체", error: `고른 기체 문서를 받지 못했다 — ${errorText(e)}` };
+      }
+    });
   }
 
   /** 결과 목록. `prefer`(시뮬 탭이 고른 것)가 목록에 있으면 그것을 먼저 연다. */
@@ -272,16 +400,23 @@ export class SceneController {
     this.lastAtt = null;
     this.fellBack = null;
     this.shownId = id;
+    // 장면의 결과가 바뀐다 — 앞 결과(또는 고른 기체)의 기체 동기화는 여기서 물러난다
+    const vgen = ++this.vehicleGen;
     try {
       this.buildScene();
     } catch (e) {
       // **반쯤 세워진 장면을 "성공"이라고 하지 않는다.** 몸통은 새 결과인데 지형·궤적이
       // 옛 것일 수 있어, 화면과 선택칸이 조용히 갈린다. 사유를 내고 실패로 답한다.
       this.cb.onStatus(`장면을 세우지 못했습니다 — ${(e as Error).message}`);
+      // 앞 결과의 기체 동기화는 위에서 물러났고 이 결과의 것은 걸지 않는다 — 받는 중 캡션이 남지 않게
+      this.vehicleLoading = null;
+      this.emitNotes();
       return false;
     }
     this.dirty = true;
     this.cb.onStatus("");
+    // 기체 모델은 장면 뒤에 따라온다 — 문서·GLB 왕복이 궤적·지형 표시를 막지 않게
+    void this.syncVehicle(vgen, () => this.runDocument(body));
     return true;
   }
 
@@ -324,24 +459,16 @@ export class SceneController {
       if (this.pack && agree.reason) notes.push(agree.reason);
     }
 
-    // --- 활주로: 중심선 + 시단·종단 --- (원점에서 heading 방향 length 구간 — lib/site.js와
-    // lib/replay.js가 이 규약을 전제로 판정한다. 폭은 결과에 없어 그리지 않는다.)
+    // --- 활주로: 중심선 + 시단·종단 + 양 가장자리 --- (원점에서 heading 방향 length 구간 — lib/site.js와
+    // lib/replay.js가 이 규약을 전제로 판정한다). 폭은 결과에 없어 시험장 제원에서 — 시뮬 탭 횡편차 판정과 같은
+    // 한 자리(siteRunwayWidth)이고, 그 런의 활주로가 제원의 활주로가 아니면 중심선만(core/runway.ts)
     const rw = body.meta?.runway;
     const rwLines: { points: Float32Array; color: number }[] = [];
-    if (rw && num(rw.heading) !== null && num(rw.length) !== null) {
-      const el = num(rw.elevation) ?? 0;
-      const h = num(rw.heading)!;
-      const L = num(rw.length)!;
-      const n1 = Math.cos(h) * L;
-      const e1 = Math.sin(h) * L;
-      const pts: number[] = [0, 0, -el, n1, e1, -el];
-      // 시단·종단 가로선 — 접지 지점을 눈으로 짚을 수 있게 (옛 화면과 같은 22 m 반폭).
-      for (const [n0, e0] of [[0, 0], [n1, e1]] as const) {
-        pts.push(n0 - -Math.sin(h) * 22, e0 - Math.cos(h) * 22, -el,
-                 n0 + -Math.sin(h) * 22, e0 + Math.cos(h) * 22, -el);
-      }
-      rwLines.push({ points: new Float32Array(pts), color: 0xffffff });
-      notes.push("활주로는 중심선과 양 끝만 그립니다 — 폭은 결과에 없습니다.");
+    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw));
+    if (rwDraw) {
+      // 선분마다 따로 — setPaths는 한 목록을 꺾은선으로 잇는다
+      for (const points of rwDraw.segments) rwLines.push({ points, color: 0xffffff });
+      notes.push(rwDraw.note);
     }
 
 
@@ -379,13 +506,8 @@ export class SceneController {
     this.replayMarks = marks;
     this.syncMarkers();
 
-    // --- 기체 형상 --- (실물 1배 — MODEL_SCALE 주석 참조)
-    if (this.vehicle == null) {
-      notes.push("기체 모델이 없어 궤적만 그립니다.");
-    } else {
-      notes.push(SURFACE_NOTES.innerOuterShared, SURFACE_NOTES.rudderShared,
-        SURFACE_NOTES.propellerDisplay, SURFACE_NOTES.holdOnMissing);
-    }
+    // --- 기체 형상 --- (실물 1배 — MODEL_SCALE 주석 참조). 모델은 결과마다 따로 온다(`syncVehicle`) —
+    // 캡션도 그쪽 상태에서 매번 만든다(`vehicleNotes`, emitNotes)
 
     // --- 발사관 ---
     const lp = launcherPose(body.meta?.launch);
@@ -405,8 +527,32 @@ export class SceneController {
    * 시점에 달린 캡션(물러섬 사유 등)은 시점이 바뀔 때 다시 만들어야 한다 —
    * 결과를 읽을 때 한 번만 만들면 옛 문장이 남는다. `views/world.js`가 같은 자리에서 겪고
    * `captionStale` 플래그로 고쳐 둔 것을 여기서는 시점이 바뀔 때 다시 만드는 것으로 푼다. */
+  /** 기체 캡션 — 모델이 서 있으면 출처·타면 표시 규약, 아니면 궤적만 그리는 사유. */
+  private vehicleNotes(): string[] {
+    if (this.vehicle != null) {
+      // 문서를 받는 중이면 서 있는 모델은 앞서 얹은 것이다 — 그 출처 줄을 이 런의 것처럼 말하지 않는다
+      const head = this.vehicleLoading === "doc"
+        ? ["기체 문서를 받는 중… — 지금 보이는 모델은 앞서 얹은 것이고, 문서가 오면 그 문서의 표시 모델로 맞춥니다."]
+        : this.vehicleCaption ? [this.vehicleCaption] : [];
+      // 도식에는 몰 노드가 없다 — 타면·프로펠러 표시 규약을 말하면 없는 동작을 설명하게 된다
+      if (this.vehicleKind === "schematic") return [...head, SCHEMATIC_NOTE];
+      const out = [
+        ...head,
+        SURFACE_NOTES.innerOuterShared, SURFACE_NOTES.rudderShared,
+        SURFACE_NOTES.propellerDisplay, SURFACE_NOTES.holdOnMissing,
+      ];
+      if (this.vehicle.missing.length > 0) {
+        out.push(`모델에서 못 찾은 노드: ${this.vehicle.missing.join(", ")} — 그 부분은 움직이지 않습니다.`);
+      }
+      return out;
+    }
+    if (this.vehicleLoading === "model") return ["기체 모델을 불러오는 중…"];
+    if (this.vehicleLoading === "doc") return ["기체 문서를 받는 중… — 표시 모델은 그 문서가 정합니다."];
+    return [this.vehicleNote ?? "기체 모델이 없어 궤적만 그립니다."];
+  }
+
   private emitNotes(): void {
-    const notes = [...this.resultNotes];
+    const notes = [...this.resultNotes, ...this.vehicleNotes()];
     if (this.fellBack !== null) {
       const why = this.fellBack === "att" ? "자세가 없어" : "위치가 없어";
       notes.push(
@@ -422,7 +568,8 @@ export class SceneController {
     );
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
     notes.push(CLOUD_NOTES.model, CLOUD_NOTES.shadows);
-    if (this.vehicle || this.launcher) notes.push(WEAR_NOTES.model);
+    // 마모는 GLB 재질에만 건다(도식은 도장이 아니다 — schematic.ts)
+    if (this.vehicleKind === "model" || this.launcher) notes.push(WEAR_NOTES.model);
     const scale = this.host.getRenderScale();
     if (scale < 1) {
       notes.push(
@@ -717,6 +864,8 @@ export class SceneController {
   get playable(): boolean { return this.body != null && isPlayable(this.body.t); }
   /** 지금 화면이 설명하는 결과 id — 실패한 로드 뒤에 선택칸과 화면이 갈렸는지 판정한다. */
   get shownResultId(): string | null { return this.shownId; }
+  /** 결과 목록 길이 — 0이면 호스트가 고른 기체로 기체를 세운다(`vehicleFromSelection`). */
+  get resultCount(): number { return this.results.length; }
 
   resize(w: number, h: number, dpr: number): void {
     this.host.resize(w, h, dpr);

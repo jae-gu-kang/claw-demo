@@ -1,7 +1,7 @@
 {
  "golden": "verify_linear",
  "mode": "full",
- "captured_at": "8cbda3a+dirty",
+ "captured_at": "9bba329+dirty",
  "value": {
   "dict": {
    "corners": [
@@ -57,7 +57,7 @@
    "result": {
     "dict": {
      "fingerprint": "c48da3269a9a8e4c",
-     "criteria_fingerprint": "4d79f79374fbe514",
+     "criteria_fingerprint": "285b1415cbf86dba",
      "depth": "linear",
      "verify_meta": {
       "dict": {
@@ -74,7 +74,7 @@
       "dict": {
        "mass_cg": {
         "dict": {
-         "status": "ok",
+         "status": "fail",
          "corners": [
           {
            "dict": {
@@ -86,8 +86,102 @@
               "cmq": "f:0x0.0p+0"
              }
             },
-            "hard_fail": false,
-            "hard_fails": [],
+            "hard_fail": true,
+            "hard_fails": [
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.18d99367cc437p+2",
+                "f:0x1.65dec1f7d937bp+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.18d99367cc437p+2",
+                   "f:0x1.65dec1f7d937bp+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "pitch_rate",
+               "value": "f:0x1.6ebb21591c7a5p+2",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.1a5f7c8357ac0p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.0000d8f46f191p+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.4f2efb29d9952p+2",
+                "f:0x1.74aa693b59355p+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.4f2efb29d9952p+2",
+                   "f:0x1.74aa693b59355p+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.2479fb57dfe48p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.073386eae896dp+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.5"
+              }
+             }
+            ],
             "stage_status": {
              "dict": {
               "envelope": "na",
@@ -96,7 +190,7 @@
               "coupling": "na",
               "stability": "warn",
               "damping": "ok",
-              "margins": "ok",
+              "margins": "fail",
               "tracking": "na",
               "recovery": "na",
               "robustness": "na",
@@ -109,7 +203,7 @@
              {
               "dict": {
                "case": "M0.4",
-               "hard_fails": 0,
+               "hard_fails": 4,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -118,7 +212,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -130,7 +224,7 @@
              {
               "dict": {
                "case": "M0.5",
-               "hard_fails": 0,
+               "hard_fails": 3,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -139,7 +233,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -161,8 +255,102 @@
               "cmq": "f:0x0.0p+0"
              }
             },
-            "hard_fail": false,
-            "hard_fails": [],
+            "hard_fail": true,
+            "hard_fails": [
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.180487f080cefp+2",
+                "f:0x1.65fd27708a6f5p+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.180487f080cefp+2",
+                   "f:0x1.65fd27708a6f5p+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "pitch_rate",
+               "value": "f:0x1.6d641399efc0bp+2",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.1c338b6ff0cb8p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.012ed6341274fp+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.4df346f4a85d5p+2",
+                "f:0x1.74cbc1a66d922p+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.4df346f4a85d5p+2",
+                   "f:0x1.74cbc1a66d922p+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.2663340d985b0p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.08686df841cf2p+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.5"
+              }
+             }
+            ],
             "stage_status": {
              "dict": {
               "envelope": "na",
@@ -171,7 +359,7 @@
               "coupling": "na",
               "stability": "warn",
               "damping": "ok",
-              "margins": "ok",
+              "margins": "fail",
               "tracking": "na",
               "recovery": "na",
               "robustness": "na",
@@ -184,7 +372,7 @@
              {
               "dict": {
                "case": "M0.4",
-               "hard_fails": 0,
+               "hard_fails": 4,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -193,7 +381,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -205,7 +393,7 @@
              {
               "dict": {
                "case": "M0.5",
-               "hard_fails": 0,
+               "hard_fails": 3,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -214,7 +402,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -227,14 +415,14 @@
            }
           }
          ],
-         "n_pass": 2,
+         "n_pass": 0,
          "n_judged": 2,
          "note": "CG축은 [TBD] — 모멘트 기준점 이전 미구현이라 흔들어도 동역학이 안 변한다(plant/mass.py FuelMass). 질량축만 실측"
         }
        },
        "aero_coeff": {
         "dict": {
-         "status": "ok",
+         "status": "fail",
          "corners": [
           {
            "dict": {
@@ -246,8 +434,102 @@
               "cmq": "f:0x0.0p+0"
              }
             },
-            "hard_fail": false,
-            "hard_fails": [],
+            "hard_fail": true,
+            "hard_fails": [
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.1bc928b37001fp+2",
+                "f:0x1.67b6a36e8083dp+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.1bc928b37001fp+2",
+                   "f:0x1.67b6a36e8083dp+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "pitch_rate",
+               "value": "f:0x1.7883c8300e8b2p+2",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.1b2b403ab4618p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.008469953260bp+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.529a9e93ddd38p+2",
+                "f:0x1.775ce1d18bf46p+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.529a9e93ddd38p+2",
+                   "f:0x1.775ce1d18bf46p+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.25505729cc850p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.07baed79df934p+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.5"
+              }
+             }
+            ],
             "stage_status": {
              "dict": {
               "envelope": "na",
@@ -256,7 +538,7 @@
               "coupling": "na",
               "stability": "warn",
               "damping": "ok",
-              "margins": "ok",
+              "margins": "fail",
               "tracking": "na",
               "recovery": "na",
               "robustness": "na",
@@ -269,7 +551,7 @@
              {
               "dict": {
                "case": "M0.4",
-               "hard_fails": 0,
+               "hard_fails": 4,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -278,7 +560,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -290,7 +572,7 @@
              {
               "dict": {
                "case": "M0.5",
-               "hard_fails": 0,
+               "hard_fails": 3,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -299,7 +581,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -321,8 +603,102 @@
               "cmq": "f:0x0.0p+0"
              }
             },
-            "hard_fail": false,
-            "hard_fails": [],
+            "hard_fail": true,
+            "hard_fails": [
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.151e6bb31b444p+2",
+                "f:0x1.641f87100d6fap+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.151e6bb31b444p+2",
+                   "f:0x1.641f87100d6fap+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "pitch_rate",
+               "value": "f:0x1.63f1e9e4d3b8dp+2",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.1b6425d2326c8p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.00a93fe0e30cep+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.4a8d0fa2ffb18p+2",
+                "f:0x1.7210b40a32bdfp+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.4a8d0fa2ffb18p+2",
+                   "f:0x1.7210b40a32bdfp+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.258a679c53240p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.07dfcfd9f012bp+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.5"
+              }
+             }
+            ],
             "stage_status": {
              "dict": {
               "envelope": "na",
@@ -331,7 +707,7 @@
               "coupling": "na",
               "stability": "warn",
               "damping": "ok",
-              "margins": "ok",
+              "margins": "fail",
               "tracking": "na",
               "recovery": "na",
               "robustness": "na",
@@ -344,7 +720,7 @@
              {
               "dict": {
                "case": "M0.4",
-               "hard_fails": 0,
+               "hard_fails": 4,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -353,7 +729,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -365,7 +741,7 @@
              {
               "dict": {
                "case": "M0.5",
-               "hard_fails": 0,
+               "hard_fails": 3,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -374,7 +750,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -396,8 +772,102 @@
               "cmq": "f:0x1.999999999999ap-3"
              }
             },
-            "hard_fail": false,
-            "hard_fails": [],
+            "hard_fail": true,
+            "hard_fails": [
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.12c9f89e23beap+2",
+                "f:0x1.671fda52e7a3ap+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.12c9f89e23beap+2",
+                   "f:0x1.671fda52e7a3ap+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "pitch_rate",
+               "value": "f:0x1.65d1ac4d0e9ecp+2",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.1b4841fe896d8p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.009731ee223a8p+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.47893951e657ap+2",
+                "f:0x1.76167c4b26b5cp+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.47893951e657ap+2",
+                   "f:0x1.76167c4b26b5cp+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.256df26960d40p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.07cdbcb14db38p+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.5"
+              }
+             }
+            ],
             "stage_status": {
              "dict": {
               "envelope": "na",
@@ -406,7 +876,7 @@
               "coupling": "na",
               "stability": "warn",
               "damping": "ok",
-              "margins": "ok",
+              "margins": "fail",
               "tracking": "na",
               "recovery": "na",
               "robustness": "na",
@@ -419,7 +889,7 @@
              {
               "dict": {
                "case": "M0.4",
-               "hard_fails": 0,
+               "hard_fails": 4,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -428,7 +898,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -440,7 +910,7 @@
              {
               "dict": {
                "case": "M0.5",
-               "hard_fails": 0,
+               "hard_fails": 3,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -449,7 +919,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -471,8 +941,102 @@
               "cmq": "f:-0x1.999999999999ap-3"
              }
             },
-            "hard_fail": false,
-            "hard_fails": [],
+            "hard_fail": true,
+            "hard_fails": [
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.1e3b7a2966292p+2",
+                "f:0x1.64b37bf395edcp+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.1e3b7a2966292p+2",
+                   "f:0x1.64b37bf395edcp+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "pitch_rate",
+               "value": "f:0x1.769e5308e6d9ep+2",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.1b4841fe896d8p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.009731ee223a8p+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.4"
+              }
+             },
+             {
+              "dict": {
+               "check": "stability.unstable",
+               "loop": "pitch_rate",
+               "value": [
+                "f:0x1.55d34ac118612p+2",
+                "f:0x1.73554f71f6225p+4"
+               ],
+               "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+               "detail": {
+                "dict": {
+                 "stable": false,
+                 "unstable": [
+                  [
+                   "f:0x1.55d34ac118612p+2",
+                   "f:0x1.73554f71f6225p+4"
+                  ]
+                 ],
+                 "spiral_t2_s": null
+                }
+               },
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.pm",
+               "loop": "roll_rate",
+               "value": "f:0x1.256df26960d40p+4",
+               "limit": "f:0x1.6800000000000p+5",
+               "case": "M0.5"
+              }
+             },
+             {
+              "dict": {
+               "check": "margins.gm",
+               "loop": "roll_rate",
+               "value": "f:0x1.07cdbcb14db38p+1",
+               "limit": "f:0x1.8000000000000p+2",
+               "case": "M0.5"
+              }
+             }
+            ],
             "stage_status": {
              "dict": {
               "envelope": "na",
@@ -481,7 +1045,7 @@
               "coupling": "na",
               "stability": "warn",
               "damping": "ok",
-              "margins": "ok",
+              "margins": "fail",
               "tracking": "na",
               "recovery": "na",
               "robustness": "na",
@@ -494,7 +1058,7 @@
              {
               "dict": {
                "case": "M0.4",
-               "hard_fails": 0,
+               "hard_fails": 4,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -503,7 +1067,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -515,7 +1079,7 @@
              {
               "dict": {
                "case": "M0.5",
-               "hard_fails": 0,
+               "hard_fails": 3,
                "stages": {
                 "dict": {
                  "envelope": "na",
@@ -524,7 +1088,7 @@
                  "coupling": "na",
                  "stability": "warn",
                  "damping": "ok",
-                 "margins": "ok",
+                 "margins": "fail",
                  "tracking": "na",
                  "recovery": "na",
                  "robustness": "na",
@@ -537,22 +1101,22 @@
            }
           }
          ],
-         "n_pass": 4,
+         "n_pass": 0,
          "n_judged": 4,
          "note": null,
          "axes": {
           "dict": {
            "cmalpha": {
             "dict": {
-             "status": "ok",
-             "n_pass": 2,
+             "status": "fail",
+             "n_pass": 0,
              "n_judged": 2
             }
            },
            "cmq": {
             "dict": {
-             "status": "ok",
-             "n_pass": 2,
+             "status": "fail",
+             "n_pass": 0,
              "n_judged": 2
             }
            }
@@ -592,7 +1156,7 @@
        }
       }
      },
-     "status": "ok",
+     "status": "fail",
      "warnings": [],
      "aborted": null
     }

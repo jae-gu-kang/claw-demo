@@ -9,8 +9,12 @@ pade_order [기본값] 2) 포함 옵션 지원 (01 §4.2 [기본값] — 둘 다
 duty — 폐루프 런의 타면 사용 통계(타각 범위별 체류 시간·포화·타율). 주파수영역
 마진이 "선형화점에서 얼마나 안정한가"라면 이쪽은 "실제 런에서 작동기를 얼마나
 썼는가"다 — 작동기 rate 요구 사양(01 v0.13 ≥10 rad/s)의 검증 창구.
-bode_data — 개루프 주파수응답 + 교차점 전량(다중 교차 시 control.margin이
-어느 것을 골랐는지 화면이 말할 수 있게).
+bode_data — 개루프 주파수응답 + 교차점 전량(다중 교차 시 보고 마진이 어느 교차의
+것인지 화면이 말할 수 있게). nyquist_margins — 마진 맵·보드선도의 마진 정본: 이 루프만 닫은 폐루프
+극(나이퀴스트 판정)으로 가른 뒤, 안정이면 −1까지의 거리(부호는 방향 표시로), 불안정이면 루프 교차의
+고전 판독 + 발산극, 교차가 여럿이면 전량 공개.
+broken_loop — 루프 하나를 끊고 같은 축의 나머지 루프는 닫은 개루프(AS94900의 끊는 자리, 나머지가 없으면
+pi_loop 그대로). loop_margins(control.margin 그대로)는 자동 설계·평가·2단 개루프가 쓰는 종전 정의다.
 후속: 100 vs 50 Hz 이산화 영향 비교.
 """
 
@@ -28,6 +32,9 @@ from claw.analysis.envelope import (
 )
 from claw.analysis.margins import (
     bode_data,
+    broken_loop,
+    closed_loop_unstable,
+    nyquist_margins,
     loop_margins,
     make_siso,
     margin_map,
@@ -45,7 +52,10 @@ __all__ = [
     "fq_lat",
     "make_siso",
     "pi_loop",
+    "broken_loop",
     "loop_margins",
+    "nyquist_margins",
+    "closed_loop_unstable",
     "bode_data",
     "omega_covering",
     "margin_map",

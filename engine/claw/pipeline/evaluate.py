@@ -51,6 +51,8 @@ from claw.design.closure import (
     att_margin_loop, axis_metrics, close_rates, oriented_margins,
     rate_loop_crossover,
 )
+# 레이트 루프 여유의 자는 튜너 가드·VERIFY와 같은 것 하나다 (tune.rate_loop_margins — AS94900 끊은 루프)
+from claw.design.tune import rate_loop_margins
 from claw.common.contracts import TrimCase
 from claw.guidance import Guidance, ModeSpec
 from claw.nav import NavErrorModel
@@ -289,9 +291,21 @@ def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit,
 
     루프마다 **시간지연 여유**를 환산해 싣는다: DM = PM[rad] / ω_gc(wcp) — PM과
     같은 교차점의 같은 사실을 지연 언어로 낸 것이라 별도 판정선을 지어내지 않는다
-    (판정 delay_margin은 PM 판정을 따른다). 레이트 자리는 마진으로 판정하지
-    않는다 — 순수 P 레이트 루프의 SISO 마진은 병리적이고(closure 머리말) 고전
-    기준은 모드 감쇠(카드 ①)다. 대신 **레이트 교차 주파수**(BW의 근거)를 낸다.
+    (판정 delay_margin은 PM 판정을 따른다).
+
+    **레이트 자리도 여유로 판정한다** — VERIFY(schedmap)와 같은 자·같은 판정:
+    tune.rate_loop_margins(AS94900 끊은 루프 — 이 레이트 루프만 열고 같은 축 다른 레이트
+    루프는 닫음, 작동기 2차 + Padé 지연, 루프 대역 교차만 읽고 그 아래는 low_band로 공개)를
+    criteria.judge_rate_loop로 판다. 종전에는 "순수 P 레이트 루프의 SISO 마진은
+    병리적"이라 모드 감쇠(카드 ①)로만 봤다 — 그 병리는 이 루프만 연 SISO의 저주파 교차
+    이야기이고(closure 머리말), 끊는 자리를 바로 잡으면 쇼케이스 기체 roll_p GM 4.1~5.1 dB
+    (합격선 6 dB 미만)가 게이트를 통과하던 구멍이 닫힌다. judge_rate_loop의 모드 지표 쪽
+    인자는 "ok"로 준다 — 모드 지표는 이 원자료의 다른 단계가 이미 판정한다(ζ는 damping
+    단계의 하드 게이트·카드 ①, λ는 카드 ④). 여기서 또 합치면 ζ 경고가 마진 단계에 한 번
+    더 찍힌다. 두 단계를 합친 판정이 VERIFY의 합산 판정과 같다.
+    하드 실패는 자세 자리와 같은 키(margins.pm·margins.gm)이고, 이 루프를 닫은 폐루프가
+    나선 밖으로 발산하면(divergent — 여유가 정의되지 않는다) stability.unstable이다.
+    **레이트 교차 주파수**(BW의 근거)는 따로 낸다.
 
     **작동기·지연을 포함한다**(criteria.composition — 자동설계와 같은 값). 빼면
     고주파 롤오프가 없어 −180° 교차가 의미 없는 자리로 가고, 거기서 읽은 GM은
@@ -304,8 +318,8 @@ def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit,
     judged = []
     fails = []
 
-    def put(name, m, direction=None, note=None):
-        verdict = crit.margin.judge(m)
+    def put(name, m, direction=None, note=None, verdict=None):
+        verdict = crit.margin.judge(m) if verdict is None else verdict
         pm, gm, wcp = float(m["pm_deg"]), float(m["gm_db"]), float(m["wcp"])
         dm = (math.radians(pm) / wcp
               if math.isfinite(pm) and math.isfinite(wcp) and wcp > 0.0
@@ -347,6 +361,33 @@ def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit,
                                  "delay_margin_s": None,
                                  "note": "속도 실효 게인이 전부 0"}
 
+    # 레이트 루프 여유 — VERIFY와 같은 자(rate_loop_margins)·같은 판정(judge_rate_loop)
+    rate_kw = {**act_kw, "rate_filters": dict(rate_filters or {})}
+    for group, axis in (("pitch", "lon"), ("roll", "lat"), ("yaw", "lat")):
+        name = f"{group}_rate"
+        try:
+            lmr = rate_loop_margins(models[axis], group, rate_gains, rate_kw)
+        except ValueError as e:  # 노치 등 미지원 필터 — 데이터이지 죽을 일이 아니다
+            loops[name] = {"status": "na", "margins": None, "delay_margin_s": None,
+                           "note": str(e)}
+            continue
+        if lmr is None:
+            loops[name] = {"status": "zero", "margins": None, "delay_margin_s": None,
+                           "note": "이 케이스 레이트 실효 게인이 0"}
+            continue
+        verdict = crit.margin.judge_rate_loop("ok", lmr)
+        note = None
+        if lmr["divergent"]:
+            note = ("이 루프를 닫은 폐루프(같은 축 다른 레이트 루프 닫음, 작동기·지연 포함)가 느린 나선"
+                    " 밖으로 발산한다 — 여유가 정의되지 않는다")
+            unstable = (lmr.get("closed_loop") or {}).get("unstable") or []
+            fails.append({"check": "stability.unstable", "loop": name,
+                          "value": [float(v) for v in unstable[0]] if unstable else None,
+                          "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+                          "detail": lmr.get("closed_loop")})
+        put(name, lmr, note=note, verdict=verdict)
+        loops[name]["composition"] = "AS94900 끊은 루프 — 같은 축 다른 레이트 루프 닫음"
+
     # 레이트 교차 주파수 — 카드 ④의 상세 (판정은 카드 ④가 λ_roll로, 관례가 있는 자리만)
     crossovers = {}
     for axis, spec in (("lon", ("pitch", "q", "de")), ("lat", ("roll", "p", "da")),
@@ -361,8 +402,9 @@ def _margins_stage(law, tr, models, rate_gains, rate_filters, att, spd, crit,
     return _stage(status, "margins", loops=loops, crossovers=crossovers,
                   composition={
                       "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 "
-                              "(자동설계와 같은 조성) — 레이트 자리는 모드 "
-                              "감쇠(카드 ①)로 판정",
+                              "(자동설계와 같은 조성) — 레이트 자리는 AS94900 "
+                              "끊은 루프(같은 축 다른 레이트 루프 닫음) 여유로 "
+                              "판정(VERIFY와 같은 자), 모드 감쇠는 카드 ①",
                       **act_kw},
                   note=None if judged else "판정할 루프가 없다"), fails
 

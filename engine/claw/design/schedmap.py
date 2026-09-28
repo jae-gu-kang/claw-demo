@@ -14,6 +14,9 @@ closure 조성(closure.py) × pi_loop 전체 조성(작동기 2차계 + Padé �
   튜닝 목표 대비 비율**로 잰다(judge_bandwidth). 종전에는 상수 "ok"라 보간이 λ를
   얼마나 놓치든 통과였다 — 절대 실패할 수 없는 판정이 자리 하나를 차지했다
 - 자세 자리: PI 개루프 마진(레이트 폐쇄 후) — judge(PM/GM), 방향 자동 결정
+- 레이트 자리는 모드 지표에 더해 **AS94900 끊은 루프 여유**(tune.rate_loop_margins — 이 루프를 끊고 같은 축 다른
+  레이트 루프는 닫음, 작동기 2차계+Padé)를 자세 자리와 같은 선(PM 45°·GM 6 dB 미만 fail, GM 8 dB 미만 warn)으로
+  판다(criteria.judge_rate_loop). 종전에는 이 여유를 아무 데서도 안 재서 쇼케이스 roll_p GM 4.1~5.1 dB가 통과였다
 
 스케줄 항목은 Table이든 다항(PolySchedule spec)이든 `axis_names` + `interp(**좌표)`
 덕 타이핑으로 소비한다 (blocks/lookup.py의 Table 소비와 같은 원칙).
@@ -35,9 +38,9 @@ from claw.common.contracts import TrimCase
 from claw.design.closure import (
     AXIS_SPECS,
     att_margin_loop,
+    att_margins,
     axis_metrics,
     close_rates,
-    oriented_margins,
     rate_loop_crossover,
 )
 from claw.design.points import (
@@ -47,7 +50,7 @@ from claw.design.points import (
     case_name,
     envelope_ok,
 )
-from claw.design.tune import TuneTargets
+from claw.design.tune import TuneTargets, rate_loop_margins
 from claw.trim import split_axes
 from claw.trim.trim import trim_batch
 
@@ -134,6 +137,16 @@ def scheduled_margin_point(
                 entry["zeta"] = zeta
                 if criteria is not None:
                     entry["status"] = criteria.judge_damping(zeta)
+            # AS94900 끊은 루프 여유 — 튜너 마진 가드와 같은 자(같은 조성·같은 교차 선택). pm_deg·gm_db를 맨 위에 두어
+            # shortfall·severity·분류기 evidence가 자세 자리와 같은 키로 읽는다
+            lmr = rate_loop_margins(lm_axis, group, rate_gains, act_kw)
+            if lmr is not None:
+                entry.update({"pm_deg": lmr["pm_deg"], "gm_db": lmr["gm_db"], "loop_margins": lmr})
+                if lmr["divergent"]:
+                    entry["note"] = ("이 루프를 닫은 폐루프(같은 축 다른 레이트 루프 닫음, 작동기·지연 포함)가 느린 나선"
+                                     " 밖으로 발산한다 — 여유가 정의되지 않는다")
+            if criteria is not None:
+                entry["status"] = criteria.judge_rate_loop(entry["status"], lmr)
             _apply_sign_check(entry, eff, design, [f"{group}.k_rate"])
             out[f"{group}_rate"] = entry
 
@@ -146,7 +159,8 @@ def scheduled_margin_point(
             }
             continue
         loop = att_margin_loop(lm_axis, rate_gains, kp, ki, **act_kw)
-        m, orient = oriented_margins(loop)
+        # 튜너와 같은 자로 잰다(closure.att_margins) — 공칭 폐루프가 안정인 루프의 이득 감소 쪽 경계는 여유다
+        m, orient = att_margins(loop)
         entry = {"kind": "margin", **m, "orientation": orient, "gains": {"kp": kp, "ki": ki}}
         if criteria is not None:
             entry["status"] = criteria.judge(m)

@@ -30,7 +30,7 @@ from claw.design.fit import (
     table_surface,
 )
 from claw.design.grid import coarse_grid
-from claw.design.orchestrator import AutoDesignConfig, DesignSession
+from claw.design.orchestrator import AutoDesignConfig, DesignSession, design_inputs
 from claw.design.refine import refine_trim_points
 from claw.design.tune import TuneTargets, tune_point, tune_points
 from claw.design.schedmap import (
@@ -73,4 +73,5 @@ __all__ = [
     "classify_failures",
     "AutoDesignConfig",
     "DesignSession",
+    "design_inputs",
 ]

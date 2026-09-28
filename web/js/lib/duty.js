@@ -190,3 +190,51 @@ export function viewOf(channel, mode) {
     rateSat: m.rate_sat,
   };
 }
+
+/** 포화 한 종류를 전 타면에서 — 닿은 타면 이름들, 전부 한계 미상이면 판정 불가, 아니면 없음. */
+function satLine(channels, key, name) {
+  const hit = channels.filter((c) => (num(c[key]?.frac) ?? 0) > 0).map((c) => c.label);
+  if (hit.length) return `${name} ${hit.join("·")}`;
+  // 일부만 미상이면 "없음"이라 말할 수 없다 — 그 타면은 닿았는지조차 모른다
+  const unknown = channels.filter((c) => !c[key]).length;
+  if (unknown === channels.length) return `${name} 판정 불가`;
+  return unknown ? `${name} 없음(${unknown}면 판정 불가)` : `${name} 없음`;
+}
+
+/** 리포트 → 한 줄 요약 + 수치 — 쇼케이스 진행기 보고(views/sim.js 「duty」 동작). 표에 이미 있는 값을
+ *  잇는다(새 판정을 짓지 않는다): 가장 크게 꺾은 타면, 위치·rate 포화, 엘레본 가용 동적 여유.
+ *  돌려주는 것: {line, data} — 타면이 없으면 null. */
+export function dutySummary(report) {
+  const chans = report?.channels ?? [];
+  if (!chans.length) return null;
+  let worst = null;
+  for (const c of chans) {
+    const v = num(c.stats?.max_abs);
+    if (v != null && (worst == null || v > worst.v)) worst = { v, c };
+  }
+  const total = num(report?.t_total);
+  const reserve = num(report?.trim_reserve?.de_dyn_reserve_min_frac);
+  const parts = [
+    `타면 ${chans.length}면${total == null ? "" : ` · ${total.toFixed(1)} s`}`,
+    worst ? `최대 |δ| ${withTime(fmtDeg(worst.v), worst.c.stats?.max_abs_t)} (${worst.c.label})` : "최대 |δ| —",
+    satLine(chans, "pos_sat", "위치 포화"),
+    satLine(chans, "rate_sat", "rate 포화"),
+    // 지상 출발 런은 트림 여유 기준선이 없다(패널의 막대와 같은 사유) — 0으로 쓰지 않는다
+    reserve == null ? "가용 동적 여유 판정 불가" : `가용 동적 여유 최악 ${fmtPct(reserve)}`,
+  ];
+  return {
+    line: parts.join(" · "),
+    data: {
+      t_total: total,
+      dyn_reserve_min_frac: reserve,
+      channels: chans.map((c) => ({
+        label: c.label,
+        max_abs_deg: toDeg(c.stats?.max_abs),
+        p95_deg: toDeg(c.exceedance?.p95),
+        max_rate_deg_s: toDeg(c.stats?.max_rate_abs),
+        pos_sat_frac: c.pos_sat ? (num(c.pos_sat.frac) ?? 0) : null,
+        rate_sat_frac: c.rate_sat ? (num(c.rate_sat.frac) ?? 0) : null,
+      })),
+    },
+  };
+}

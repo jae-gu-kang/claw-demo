@@ -1,8 +1,10 @@
 // 결과 브리핑 모델 — 정해진 양식(머리·종합 판정·절)이 종류마다 결정적으로 나온다
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { briefModel, jsonPreview, kindLabel } from "./resultbrief.js";
+import { GOHEUNG } from "./site.js";
 
 const META = {
   id: "r1", kind: "trim_batch", created: 1758240000, n: 3,
@@ -112,8 +114,9 @@ test("소견서(LLM) 결과는 제목·문단이 브리핑 몸이 된다", () =>
 });
 
 test("모르는 종류는 일반 양식 — 본문 최상위 구성을 사실대로", () => {
-  const body = { kind: "verify_flight", report: { a: 1 }, cases: [1, 2, 3], note: "x".repeat(100) };
-  const m = briefModel({ ...META, kind: "verify_flight" }, body);
+  // 전용 요약이 없는 종류(영향성 스캔) — verify_flight·auto_design은 전용 요약이 생겼다
+  const body = { kind: "influence_scan", report: { a: 1 }, cases: [1, 2, 3], note: "x".repeat(100) };
+  const m = briefModel({ ...META, kind: "influence_scan" }, body);
   assert.equal(m.verdict, null);
   const sec = m.sections.find((s) => s.title.includes("본문 구성"));
   assert.ok(sec.rows.some(([k, v]) => k === "cases" && v.includes("3")));
@@ -153,6 +156,35 @@ test("마진 맵 — 루프 항목이 아예 없는 케이스도 판정 불가�
   const row = m.sections.find((s) => s.title.includes("루프")).rows[0][1];
   assert.match(row, /PM 0.*m1/); // 0이 「후보 없음」으로 오독되지 않는다
   assert.match(row, /판정 불가 2건/); // 항목 결측(m2)과 값 null(m3) 둘 다 센다
+});
+
+test("마진 맵 — 폐루프 발산 칸은 최악 PM·GM에서 빼고 「발산 N칸」으로 센다 · 종합은 부족", () => {
+  const fq = { short_period: { level: 1, zeta: 0.5 }, phugoid: { level: 1, zeta: 0.06 } };
+  const caseOf = (name, m) => ({
+    trim: { case: { name, mach: 0.14, alt: 100, fuel: 25 }, converged: true },
+    lon: { fq }, lat: null, margins: { pitch_q: m },
+  });
+  const div = (pm, gm) => ({ pm_deg: pm, gm_db: gm, closed_loop: { stable: false, unstable: [[1.97, 21.6]] } });
+  const body = {
+    kind: "margin_map", loops: [{ name: "pitch_q" }],
+    cases: [
+      caseOf("m1", div(-7.5, -2.0)), // 수가 더 작지만 발산 칸 — 최악 여유로 뽑히면 안 된다
+      caseOf("m2", { pm_deg: 48.0, gm_db: 9.0, closed_loop: { stable: true } }),
+      caseOf("m3", div(82.0, 20.0)),
+    ],
+  };
+  const m = briefModel({ ...META, kind: "margin_map" }, body);
+  const row = m.sections.find((s) => s.title.includes("루프")).rows[0][1];
+  assert.match(row, /^발산 2칸/);
+  assert.match(row, /최악 PM 48.*m2/);
+  assert.match(row, /최악 GM 9.*m2/);
+  assert.doesNotMatch(row, /-7\.5|−7\.5|판정 불가/); // 발산 칸은 판정 불가도 아니다
+  assert.equal(m.verdict.tone, "bad"); // 비행성 수준 1이어도 발산은 결함
+  assert.match(m.verdict.text, /^폐루프 발산 2칸 — pitch_q @ m1/);
+  // 발산이 없으면 종전과 같다 — 비행성 수준이 종합을 정한다
+  const ok = briefModel({ ...META, kind: "margin_map" }, { ...body, cases: [body.cases[1]] });
+  assert.equal(ok.verdict.tone, "ok");
+  assert.doesNotMatch(ok.sections.find((s) => s.title.includes("루프")).rows[0][1], /발산/);
 });
 
 test("시뮬레이션 — 런 구성(시간·신호·웨이포인트)과 해석 안내", () => {
@@ -224,4 +256,177 @@ test("시뮬레이션 — 중단은 bad, 이탈 없음은 ok, 착륙 단계 없�
   assert.equal(clean.verdict.tone, "ok");
   const landing = clean.sections.find((s) => s.title.includes("착륙"));
   assert.match(landing.rows[0][1], /기록 없음/); // 0으로 위조하지 않는다
+});
+
+test("자동 설계 — 종료 상태·판정 규모·처방·반출, 탭과 같은 함수의 문구 · 탭 인계(openIn)", () => {
+  const meta = { ...META, id: "d2", kind: "auto_design", parent: "d1",
+    profile: { id: "showcase-delta", name: "쇼케이스", revision: 4, fingerprint: "a".repeat(16) } };
+  const body = {
+    report: { status: "escalated", stage: "done", iterations: 2, judged: 180, failures: 4,
+      n_points: 40, points: { anchor: 12, breakpoint: 8, validation: 20 }, ledger_size: 31,
+      criteria_fingerprint: "0123456789abcdef" },
+    points: { points: [
+      { name: "A", mach: 0.1, alt: 200, fuel: 20, role: "anchor", trimmable: true },
+      { name: "B", mach: 0.2, alt: 200, fuel: 20, role: "anchor", trimmable: true },
+    ] },
+    margin_out: { cases: { A: { loops: { pitch: { status: "ok" } } }, B: { loops: { roll: { status: "fail" } } } } },
+    proposed_actions: [{ id: "e1", action: { type: "escalate" } }],
+    gain_export: { tables: { "pitch.kp": {} }, tables_resampled: { "pitch.kp": {} }, constants: { "roll.ki": 0 } },
+    profile: { id: "showcase-delta", source: "snapshot", is_example: false, variant: null },
+  };
+  const m = briefModel(meta, body);
+  assert.equal(m.verdict.tone, "bad"); // escalated는 통과가 아닌 채 끝난 것 — 탭 칩과 같은 색
+  assert.equal(m.verdict.text, "escalated — 판정 180 · 실패 4 · 에스컬레이션 1");
+  const run = m.sections.find((s) => s.title === "실행 요약");
+  assert.ok(run.rows.some(([k, v]) => k === "재개 이력" && v.includes("d1")));
+  assert.ok(run.rows.some(([k, v]) => k === "운영점 판정" && v.includes("ok 1") && v.includes("fail 1")));
+  const ge = m.sections.find((s) => s.title === "게인 반출");
+  assert.ok(ge.rows.some(([k, v]) => k === "스케줄 · 상수 자리" && v === "1 · 1"));
+  // 재개 결과(snapshot)도 반영 대상이다 — 예제로 읽지 않는다
+  assert.ok(ge.rows.some(([k, v]) => k === "문서 반영" && v.startsWith("대상 있음")));
+  assert.deepEqual(m.openIn && [m.openIn.href, m.openIn.key], ["#autodesign", "designOpen"]);
+  // 예제 결과면 반영 사유
+  const ex = briefModel(meta, { ...body, profile: { id: "example-delta", source: "request", is_example: true } });
+  assert.ok(ex.sections.find((s) => s.title === "게인 반출").rows
+    .some(([k, v]) => k === "문서 반영" && /예제/.test(v)));
+});
+
+test("탑재 C 검증 — 검사군·커버리지·구성, 두 지문 계보, 판정 없는 본문은 통과로 위장하지 않는다", () => {
+  const meta = { ...META, id: "v1", kind: "verify_flight", fingerprint: undefined,
+    structure_fingerprint: "bc5d7dc7d4ee4c60", param_fingerprint: "9434b43ca18a887d" };
+  const report = {
+    verdict: "pass_with_skips", artifact: "fcl", structure_fingerprint: "bc5d7dc7d4ee4c60",
+    param_fingerprint: "9434b43ca18a887d", engine: "0.2.0", dt: 0.01, t_end: 180, steps: 25550,
+    summary: [
+      { key: "compile", label: "컴파일 — 엄격", status: "pass", detail: "빌드 7개 · 경고 0" },
+      { key: "coverage", label: "커버리지 — 라인·분기", status: "skip", detail: "llvm-cov 없음" },
+    ],
+    files: [{ name: "fcl.c", lines: 100 }, { name: "fcl.h", lines: 20 }],
+    cases: [{ status: "pass" }, { status: "pass" }, { status: "skip" }],
+    coverage: { status: "skip", reason: "llvm-cov 없음" },
+  };
+  const m = briefModel(meta, { kind: "verify_flight", report });
+  assert.equal(m.verdict.tone, "na");
+  assert.match(m.verdict.text, /^통과 \(생략 있음\)/);
+  assert.ok(m.head.some(([k, v]) => k === "계보 지문" && v === "구조 bc5d7dc7d4ee4c60 · 값 9434b43ca18a887d"));
+  const sum = m.sections.find((s) => s.title.startsWith("검사군"));
+  assert.deepEqual(sum.rows[1], ["커버리지", "생략 — llvm-cov 없음"]);
+  const comp = m.sections.find((s) => s.title === "구성");
+  assert.ok(comp.rows.some(([k, v]) => k === "생성 파일" && v === "2개 · 120줄"));
+  assert.ok(comp.rows.some(([k, v]) => k === "시험 케이스" && v.includes("통과 2") && v.includes("생략 1")));
+  assert.deepEqual(m.sections.find((s) => s.title === "구조적 커버리지").rows, [["측정", "생략 — llvm-cov 없음"]]);
+  assert.deepEqual(m.openIn && [m.openIn.href, m.openIn.key], ["#verify", "verifyOpen"]);
+  // 측정된 커버리지
+  const measured = briefModel(meta, { report: { ...report, verdict: "pass",
+    coverage: { status: "measured", justified: [{}],
+      totals: { lines: { percent: 100, covered: 694, count: 694 }, branches: { percent: 99.4, covered: 167, count: 168 } } },
+    mcdc: { status: "measured", total: 30, covered: 29, justified: 1 } } });
+  assert.equal(measured.verdict.tone, "ok");
+  assert.deepEqual(measured.sections.find((s) => s.title === "구조적 커버리지").rows, [
+    ["라인", "100.0% (694/694)"], ["분기", "99.4% (167/168) (+정당화 1)"], ["MC/DC 조건", "29+1/30"]]);
+  // 판정 필드가 없으면 na — verdictModel의 기본 「통과」로 새지 않는다
+  const bare = briefModel(meta, { report: { a: 1 } });
+  assert.equal(bare.verdict.tone, "na");
+  assert.doesNotMatch(bare.verdict.text, /통과/);
+  // 전용 요약이 없는 종류는 openIn이 없다
+  assert.equal(briefModel({ ...META, kind: "influence_scan" }, {}).openIn, null);
+});
+
+// ── 시뮬 착륙 요약의 판정 재료 — 시뮬 탭·투어 마무리와 같은 두 한계(활주로 폭·발사하중) ──
+
+/** 고흥 활주로를 쓴 착륙 런 — 활주로 축 a · 횡편차 c(오른쪽 +)인 점을 NED로(방위가 0이 아니다). */
+const goheungSim = (c) => {
+  const h = GOHEUNG.runwayHeadingRad;
+  const pts = [0, 100, 200, 300].map((a) => [a * Math.cos(h) - c * Math.sin(h), a * Math.sin(h) + c * Math.cos(h)]);
+  return {
+    kind: "sim", t: [0, 1, 2, 3],
+    signals: { pn: pts.map((p) => p[0]), pe: pts.map((p) => p[1]), launch_gx: [5.1, 5.1, 0, 0] },
+    envelope: { any_flag: false },
+    meta: {
+      phases: { launch_exit_t: 1.0, touchdown_t: 2.0, td_sink_rate: -0.8, td_speed: 30.0, stop_t: 3.0 },
+      // 서버가 동봉하는 그 런의 활주로(시뮬 탭 기본 폼 = 고흥 제원)와 레일
+      runway: { elevation: 0, heading: GOHEUNG.runwayHeadingRad, length: GOHEUNG.runwayLengthM },
+      launch: { elev_angle: 0.26 },
+      profile: { id: "showcase-delta", revision: 3 },
+    },
+  };
+};
+const landingOf = (m) => Object.fromEntries(m.sections.find((s) => s.title.includes("착륙")).rows);
+
+test("시뮬레이션 — 접지·정지 횡편차를 고흥 활주로 폭(한 자리 siteRunwayWidth)으로 판정한다", () => {
+  const rows = landingOf(briefModel({ ...META, kind: "sim" }, goheungSim(-0.6)));
+  // 종전에는 폭을 안 넘겨 시뮬 탭이 「폭 안」이라 한 같은 런을 브리핑은 「대조하지 않았다, 판정 불가」라 했다
+  assert.match(rows["접지 횡편차"], /한계 21 m \(고흥 시험장 제원 활주로 폭 45 m의 반폭 22\.5 m − 가장자리 여유 1\.5 m\)/);
+  assert.doesNotMatch(rows["접지 횡편차"], /판정 불가/);
+  assert.match(rows["정지"], /횡편차 -1 m ≤ 한계 21 m/);
+  // 폼에서 활주로를 고친 런은 시험장 폭을 빌리지 않는다 — 사유와 함께 판정 불가
+  const edited = goheungSim(-0.6);
+  edited.meta.runway = { ...edited.meta.runway, length: 1500 };
+  assert.match(landingOf(briefModel({ ...META, kind: "sim" }, edited))["접지 횡편차"],
+    /달라 그 폭을 쓸 수 없다, 판정 불가/);
+});
+
+test("시뮬레이션 — 발사하중 한계는 조립이 넘긴다(그 런의 기체 문서) · 안 넘기면 대조 안 함", () => {
+  const body = goheungSim(0);
+  const judged = landingOf(briefModel({ ...META, kind: "sim" }, body,
+    { launchLimit: { nx: 8, source: "쇼케이스 · r3" } }));
+  assert.match(judged["레일 이탈"], /축방향 하중배수 5\.36 g .* ≤ 한계 8 g \(쇼케이스 · r3 structural\.n_x_launch\)/);
+  const over = landingOf(briefModel({ ...META, kind: "sim" }, body,
+    { launchLimit: { nx: 5.2, source: "쇼케이스 · r3" } }));
+  assert.match(over["레일 이탈"], /한계를 넘었다/);
+  const failed = landingOf(briefModel({ ...META, kind: "sim" }, body, { launchLimit: { error: "문서를 받지 못했다" } }));
+  assert.match(failed["레일 이탈"], /문서를 받지 못했다, 판정 불가/);
+  assert.match(landingOf(briefModel({ ...META, kind: "sim" }, body))["레일 이탈"],
+    /대조하지 않았다, 판정 불가/);
+  // 조립(views/results.js)이 실제로 넘긴다 — 원문 대조(뷰는 테스트가 import하지 않는다)
+  const view = readFileSync(new URL("../views/results.js", import.meta.url), "utf8");
+  assert.match(view, /m\.kind === "sim" \? await launchLimitOf\(body\.meta\) : undefined/);
+  assert.match(view, /briefModel\(m, body, \{ launchLimit \}\)/);
+  assert.match(view, /import \{ launchLimitOf \} from "\.\/sim\.js";/);
+});
+
+test("자동 설계 — 표현·실패 위치·작동기·적합 표본 제외·적합 보고가 브리핑에 선다 (탭과 같은 함수)", () => {
+  const meta = { ...META, id: "d3", kind: "auto_design" };
+  // 실측 모양(예제 작은 설정, 표 모드) — 튜닝 실패 표본을 적합에서 뺐고 표는 마하 1축이다
+  const body = {
+    report: { status: "escalated", stage: "DONE", iterations: 0, judged: 290, failures: 45,
+      failures_by_role: { anchor: 31, validation: 14 }, fit_mode: "table",
+      points: { anchor: 45, breakpoint: 0, validation: 15 }, n_points: 60,
+      excluded_samples: [
+        { slot: "roll.k_rate", point: "M0.103219_h1500_f25", value: 0, loop: "roll_rate", reason: "no_stable_gain", basis: "own" },
+        { slot: "roll.kp", point: "M0.103219_h1500_f25", value: 0.0502, loop: "yaw_rate", reason: "no_stable_gain", basis: "rate_loop" },
+      ],
+      exclusion_withheld: ["pitch.ki"],
+      actuator: { source: { wn: "profile", zeta: "profile" }, wn: 30, zeta: 0.7, delay_s: 0.035, pade_order: 2 } },
+    config: { actuator_wn: null, actuator_zeta: null },
+    fits: {
+      "roll.ki": { kind: "table", axis: "mach", axes_excluded: ["alt"], zigzag: 4, n_breakpoints: 14,
+        quality: { cross_axis_frac: 0.5531, status: "na" } },
+      "pitch.ki": { kind: "table", axis: "mach", n_breakpoints: 3, zigzag: 0, quality: { cross_axis_frac: 0 },
+        exclusion_withheld: { kept_would_be: 1, samples: [{}, {}] } },
+    },
+    proposed_actions: [{ id: "e1", action: { type: "escalate" } }],
+  };
+  const m = briefModel(meta, body);
+  assert.equal(m.verdict.text, "escalated — 판정 290 · 실패 45 (앵커 31 · 검증점 14) · 에스컬레이션 1");
+  const run = Object.fromEntries(m.sections.find((s) => s.title === "실행 요약").rows);
+  assert.equal(run["표현"], "표(선형 보간)");
+  assert.equal(run["판정 · 실패"], "290 · 45 — 실패 위치 앵커 31 · 검증점 14");
+  assert.equal(run["작동기"], "ωn 30 rad/s · ζ 0.700 (기체 문서) · 지연 35 ms · Padé 2차");
+  const fit = m.sections.find((s) => s.title === "게인 스케줄 적합").rows;
+  assert.deepEqual(fit, [
+    ["적합 표본 제외", "튜닝 실패 표본 2개를 적합에서 뺐다 (점 1곳 · 자리 2개 — 그 점의 스케줄 값은 이웃 보간)"],
+    ["제외 · roll.k_rate", "1점 — 사유 no_stable_gain 1 · 근거 그 자리 튜닝 실패 1"],
+    ["제외 · roll.kp", "1점 — 사유 no_stable_gain 1 · 근거 같은 축 레이트 루프가 실패한 위에서 튜닝 1"],
+    ["제외 보류", "pitch.ki — 튜닝 실패 표본 2개를 빼면 1개만 남아 제외를 보류했다 — 이 자리의 표는 실패 표본을 담고 있다"],
+    ["적합 보고", "스케줄 축 밖 변동 1/2자리(alt) · 교차축 잔차 최대 55% (roll.ki) · 톱니 최대 4회/분할점 14 (roll.ki)"],
+  ]);
+  // 표현 기록이 없는 옛 결과 — 없는 표현을 지어내지 않고 그 사실을, 작동기는 그때의 config 값을
+  const old = briefModel(meta, { report: { status: "converged", judged: 5, failures: 0 },
+    config: { actuator_wn: 30, actuator_zeta: 0.7 } });
+  const oldRun = Object.fromEntries(old.sections.find((s) => s.title === "실행 요약").rows);
+  assert.match(oldRun["표현"], /^기록 없음 — 표현 선택 이전 결과\(다항\)/);
+  assert.match(oldRun["작동기"], /설정 — 작동기 출처 기록 이전 결과/);
+  assert.equal(oldRun["판정 · 실패"], "5 · 0");
+  assert.equal(old.sections.find((s) => s.title === "게인 스케줄 적합"), undefined);
 });

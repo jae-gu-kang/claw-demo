@@ -7,6 +7,8 @@
 tone 어휘는 평가 카드와 같은 넷(ok·warn·bad·na) — 화면이 flag 배지로 그대로 그린다.
 */
 
+import { failureRoleText } from "./autodesign.js";
+
 /** 단계 정의 — key·이름·드릴다운 탭. 순서가 곧 [끝까지 실행]의 순서다.
  *  apply(채택·문서 반영)는 실행 단계가 아니라 **수동 관문**이다(사용자 결정) — run이 없다.
  *  단계 **수(6)는 화면과 결합돼 있다**: app.css .fd-rail의 repeat(6,1fr)·8.33%(=1/12) 마디
@@ -56,7 +58,12 @@ export function seedStateVerdict(designSource) {
     text: `게인 있음(출처 ${designSource}) — 탐색 생략(다시 탐색은 기체 탭)` };
 }
 
-/** 자동 설계 결과 → 판정 — gated 승인 대기는 흐름을 멈추는 관문이다. */
+/** 자동 설계 결과 → 판정 — gated 승인 대기는 흐름을 멈추는 관문이다.
+ *
+ * 실패 0이 곧 통과가 아니다(자동 설계 탭 adoptBlockedText와 같은 규약). 「전 판정 통과」는 **수렴했을
+ * 때만**이다: 판정이 0이면(nothing_verified) 실패 0은 아무것도 검증하지 않았다는 뜻이고, 취소처럼
+ * 수렴 전에 멈춘 실행의 실패 0은 끝까지 보지 않았다는 뜻이다 — 종전에는 셋 다 「전 판정 통과」라 적었다.
+ * 미달이 있으면 위치(앵커·검증점)를 붙인다 — 탭 상태 줄과 같은 함수(lib/autodesign failureRoleText). */
 export function designVerdict(body) {
   const st = body?.report?.status;
   if (st == null) return { tone: "na", text: "결과에 보고서가 없습니다" };
@@ -64,10 +71,19 @@ export function designVerdict(body) {
     return { tone: "warn", stop: true,
       text: "처방 승인 대기 — 자동 설계 탭에서 카드를 승인해 재개한 뒤 흐름을 이어 갑니다" };
   }
-  const failures = body.report.failures ?? 0;
+  const r = body.report;
+  const failures = Number(r.failures) || 0;
   const tone = st === "converged" ? (failures ? "warn" : "ok") : "warn";
-  return { tone,
-    text: `${st}${failures ? ` — 미달 ${failures}건(자동 설계 탭 원장)` : " — 전 판정 통과"}` };
+  if (failures) {
+    const where = failureRoleText(r.failures_by_role);
+    return { tone, text: `${st} — 미달 ${failures}건${where ? `(${where})` : ""} — 자동 설계 탭 원장` };
+  }
+  // judged가 없는 옛 결과는 이 판정을 못 한다 — 없는 수를 0으로 읽지 않는다
+  if (r.judged != null && !(Number(r.judged) > 0)) {
+    return { tone, text: `${st} — 판정 0: 실패 0은 통과가 아니다(아무것도 검증하지 않았다)` };
+  }
+  if (st !== "converged") return { tone, text: `${st} — 실패 0이나 수렴 전에 멈췄다` };
+  return { tone, text: `${st} — 전 판정 통과` };
 }
 
 /** 평가(엔진 평가 전체) 결과(normalizeEvalReport) → 판정 — 하드 게이트가 최종선이다. */
@@ -81,18 +97,80 @@ export function evalVerdict(m) {
   return { tone: "ok", text: `하드 게이트 전부 통과 · depth=${m.depth}` };
 }
 
-/** 채택·반영 단계의 상태 — 목록 요약의 확정 표(gain_tables)와 이 흐름의 설계 결과 유무로. */
-export function applyStateVerdict(gainTables, hasDesignResult) {
+/** 채택·반영 단계의 상태 — 목록 요약의 확정 표(gain_tables)와 이 흐름의 설계 결과 유무로.
+ *
+ * hasDesignResult는 **설계 결과가 있는가**다(반영 가능한가가 아니다). 결과는 있는데 반영이 막힌
+ * 경우(승인 대기·예제·변형·낡음)는 blockReason이 그 사유를 말한다 — 종전에는 뷰가 "막히지 않음"을
+ * 이 자리에 넘겨, 승인 대기 결과가 있어도 "자동 설계를 먼저 돌립니다"가 떴다. */
+export function applyStateVerdict(gainTables, hasDesignResult, blockReason = null) {
   if (gainTables && !gainTables.stale) {
     return { tone: "ok", text: `문서에 확정 게인 표 반영됨(출처 ${gainTables.source ?? "기록 없음"})` };
   }
   if (gainTables?.stale) {
     return { tone: "warn", text: "확정 게인 표가 낡았습니다 — 자동 설계를 다시 돌려 반영합니다" };
   }
+  if (hasDesignResult && blockReason) {
+    return { tone: "na", text: `미반영 — ${blockReason}` };
+  }
   if (hasDesignResult) {
     return { tone: "na", text: "미반영 — 아래 [문서에 반영]이 정본에 씁니다(수동 관문)" };
   }
   return { tone: "na", text: "미반영 — 자동 설계를 먼저 돌립니다" };
+}
+
+/** [문서에 반영] 관문의 신선도 사유 — null이면 이 관문은 막지 않는다. 설계가 잰 문서와 지금 문서가
+ *  다르면 서버가 409로 거절한다(지문 가드) — 버튼 앞에서 같은 판정을 한다. applied(이 결과를 이미
+ *  반영 — 달라진 것이 제 표뿐)도 막는다: 반영이 지문을 바꿨으니 재반영은 서버가 거절하고, 다시 쓸
+ *  것도 없다. 문구는 둘을 가른다 — 반영된 결과에 "문서가 다르다"고 하면 고친 적 없는 사용자를 속인다. */
+export function applyFreshnessBlock(freshState) {
+  if (freshState === "applied") {
+    return "이 결과는 이미 문서에 반영했다 — 다시 반영할 것이 없다(새로 설계하면 그 결과를 반영한다)";
+  }
+  if (freshState === "stale") {
+    return "설계가 잰 문서와 지금 문서가 다르다(이미 반영했거나 문서를 고쳤다) — 자동 설계를 다시 돌린 뒤 반영한다";
+  }
+  return null;
+}
+
+/** 결과 목록(최근순 meta)에서 이 기체·형상 변형의 가장 최근 kind 결과 — 없으면 null.
+ *  기체 기록(meta.profile)이 없는 옛 결과는 어느 기체 것인지 모르므로 고르지 않는다. */
+export function latestResultFor(metas, kind, sel) {
+  const id = sel?.id;
+  if (!id) return null;
+  const variant = sel.variant ?? null;
+  return (metas ?? []).find((m) => m?.kind === kind && m.profile?.id === id
+    && (m.profile.variant ?? null) === variant) ?? null;
+}
+
+/** 레일 단계 상태 목록 — [{key, label, state, text, fresh, resultId}] (신호 보고 data.steps).
+ *  state: 실행 중이면 "running", 판정이 있으면 그 tone(ok·warn·bad·na), 안 돌렸으면 "none".
+ *  apply는 기록이 아니라 문서 상태로 판정하므로 applyVerdict를 따로 받는다(화면과 같은 판정).
+ *  fresh는 freshOf(echo, resultId) — 화면의 「낡음」·「문서에 반영됨」 배지와 같은 대조(lib/freshness.js)다.
+ *  결과 id를 함께 넘긴다: 반영 직후의 자동 설계 결과는 그 id로만 applied가 된다. */
+export function flowStepStates(stages, applyVerdict, freshOf = () => "unknown") {
+  return FLOW_STAGES.map((s) => {
+    const st = stages?.[s.key];
+    const v = s.key === "apply" ? applyVerdict : st?.verdict;
+    return {
+      key: s.key,
+      label: s.label,
+      state: st?.state === "running" ? "running" : (v?.tone ?? "none"),
+      text: v?.text ?? null,
+      fresh: st?.echo ? freshOf(st.echo, st.resultId ?? null) : "unknown",
+      resultId: st?.resultId ?? null,
+    };
+  });
+}
+
+const STEP_WORD = { ok: "통과", warn: "주의", bad: "실패", na: "—", none: "안 돌림", running: "실행 중" };
+// 신선도 꼬리 — 레일 배지와 같은 글자. 신선·판정 불가는 조용하다
+const FRESH_TAIL = { stale: "(낡음)", applied: "(문서에 반영됨)" };
+
+/** 단계 상태 → 한 줄 — 「문서 검증 주의 · 엔벨로프 통과 · … · 자동 설계 주의(낡음)」. 판정어는
+ *  레일 칩과 같은 어휘다(새 판정 없음). */
+export function flowSummaryLine(steps) {
+  return (steps ?? []).map((s) =>
+    `${s.label} ${STEP_WORD[s.state] ?? s.state}${FRESH_TAIL[s.fresh] ?? ""}`).join(" · ");
 }
 
 /** 단계 산출물 서술 — 이 단계의 저장물이 **어디에** 남았나 (v1.35 다이어그램 발치줄).

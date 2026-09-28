@@ -4,13 +4,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  KNOB_CLASS, byImpact, columnFormat, coneOf, diagnoseRequest, edgeVia, fanLine,
-  fmtChange,
+  JOB_STATUS_LABEL, KNOB_CLASS, byImpact, columnFormat, coneOf, diagnoseRequest, diagnosisLine, edgeVia,
+  fanLine, fmtChange, jobEndLine, jobStatusLabel,
   measuringCone, unionCone,
   fmtDelta, fmtPair, fmtPercent, fmtSigned, impactRank, logScale, pairDigits,
   nodeDetail, normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor,
   paramState, probeTransition, radiusOf, rampColor, relOf, relReadable, fmtRel,
   scanRequest, scanSummary, structuralRequest, sweepCases, sweepKnobs, sweepRequest,
+  sweepReusable,
   trendInk, trendMatrix, worstTransitions,
   BAD_INK, BAND_COLOR, GOOD_INK, NODE_COLOR, SKIN, STATE_COLOR, TREND_LABEL,
   TREND_MARK, WARN_INK,
@@ -1172,4 +1173,140 @@ test("지렛대 자막은 그것이 다른 질문임을 밝힌다", () => {
     { prescribeSingles: SINGLES, lever: true }).fan);
   assert.match(line, /지렛대 보기/);
   assert.match(line, /영향 관계가 아니라/);
+});
+
+
+test("diagnosisLine: 소견·처방 카드 수와 첫 카드 설계변수 — 진단이 없으면 그렇다고", () => {
+  const d = normalizeDiagnosis({
+    result_id: "abc123", fingerprint: "f",
+    findings: [{ rule: "error_split", severity: "warn" }, { rule: "sat_attrib", severity: "info" }],
+    prescriptions: [{ knobs: ["fcl/Autopilot.tau_alt"] }],
+  });
+  assert.equal(diagnosisLine(d),
+    "결과 abc123 — 소견 2건(처방 대상 1) · 처방 카드 1건 · 첫 카드 fcl/Autopilot.tau_alt");
+  const none = normalizeDiagnosis({ result_id: "x", findings: [], prescriptions: [] });
+  assert.equal(diagnosisLine(none), "결과 x — 소견 0건(처방 대상 0) · 처방 카드 0건");
+  assert.equal(diagnosisLine(null), "진단 없음");
+});
+
+
+test("sweepReusable: 같은 형상·같은 격자·그 설계변수 단독 런이 있을 때만 다시 쓴다", () => {
+  const sw = { fingerprint: "fpA", rows: [
+    { case: "A", label: "base", role: "base", overrides: {} },
+    { case: "A", label: "table.pitch.k_rate@-0.1", role: "single", overrides: { "table.pitch.k_rate": 0.9 } },
+    { case: "B", label: "base", role: "base", overrides: {} },
+    { case: "B", label: "x&y@+0.1", role: "pair", overrides: { x: 1, y: 1 } },
+  ] };
+  const ok = { knobs: ["table.pitch.k_rate"], caseNames: ["A", "B"], fingerprint: "fpA" };
+  assert.equal(sweepReusable(sw, ok), true);
+  // 결함 주입·처방 적용 뒤 — 형상이 바뀌었다
+  assert.equal(sweepReusable(sw, { ...ok, fingerprint: "fpB" }), false);
+  // 지문을 모르면 다시 재다
+  assert.equal(sweepReusable(sw, { ...ok, fingerprint: null }), false);
+  assert.equal(sweepReusable({ ...sw, fingerprint: undefined }, ok), false);
+  // 쌍 런에만 나온 설계변수는 단독 감도가 없다
+  assert.equal(sweepReusable(sw, { ...ok, knobs: ["x"] }), false);
+  // 격자에 스윕이 안 본 케이스가 있다
+  assert.equal(sweepReusable(sw, { ...ok, caseNames: ["A", "C"] }), false);
+  assert.equal(sweepReusable(null, ok), false);
+  // 취소로 잘린 스윕 — 케이스 이름은 다 있어도 단독 런이 빠졌을 수 있다
+  assert.equal(sweepReusable({ ...sw, aborted: "cancelled" }, ok), false);
+});
+
+
+// 뷰(views/influence.js)는 DOM을 모듈 스코프에서 만져 import할 수 없다 — 배선은 **원문에서 읽는다**
+// (aircraftcue.test.js와 같은 가드)
+test("영향성 탭 배선 — [얼마나 →] 스윕 재사용은 sweepReusable, 신호는 한 번 읽고 끝 보고에 판정을 싣는다", () => {
+  const src = readFileSync(new URL("../views/influence.js", import.meta.url), "utf8");
+  const how = src.match(/async function runPrescribeFromEval\([\s\S]*?\n {2}\}\n/)?.[0];
+  assert.ok(how, "runPrescribeFromEval이 없다");
+  // 설계변수만 보고 옛 스윕을 물려 쓰던 자리(다른 형상의 감도로 수정안을 풀었다)로 돌아가지 않는다
+  assert.match(how, /sweepReusable\(state\.sweep\?\.result, \{[\s\S]{0,200}?fingerprint: state\.evalRun\?\.result\?\.fingerprint/);
+  assert.doesNotMatch(how, /const need = knobs\.filter/);
+  assert.equal(src.match(/takeCue\("influence"\)/g)?.length, 1, "render가 신호를 정확히 한 번 읽어야 한다");
+  // 진단 신호는 시뮬 탭과 같은 인계를 걸어 받는 쪽이 패널을 연다 — 인계 수신보다 먼저 읽어야 한다
+  assert.ok(src.indexOf('takeCue("influence")') < src.lastIndexOf("receiveHandoff();"),
+    "신호를 인계 수신 뒤에 읽으면 진단 신호의 인계가 이번 그리기에 안 잡힌다");
+  assert.match(src, /verdict: hardGateVerdict\(m\)/, "평가 보고에 판정이 없으면 진행기가 기대 판정을 대조하지 못한다");
+  assert.match(src, /\} else \{\n\s*unknownAction\(c\);/, "모르는 동작을 조용히 무시한다");
+  // 처방: [적용]이 못 싣는 지렛대면 적용 전에 실패 — 반쪽 적용을 「적용됨」이라 하지 않는다
+  assert.match(src, /unappliedLevers\(pm\)[\s\S]{0,400}?throw new Error[\s\S]{0,1200}?applyExport\(store, pm\.gainExport/);
+  // 지렛대 「얼마에서」는 수정안과 같은 형상의 기준값에서 — 스팬 되감기(기준 0이면 틀린 값)로 돌아가지 않는다.
+  // 기준값 조회(await)는 중단 확인 앞이어야 「중단 확인 → 적용」 사이에 틈이 없다
+  assert.match(src, /const base = await leverBaseFor\(pm\.fingerprint\);[\s\S]{0,400}?const stop = halted\(\);[\s\S]{0,300}?leverChange\(pm, \{ base \}\)/);
+  assert.doesNotMatch(src, /leverChange\(pm\)/);
+  // 보통 [이 수정안 적용] 버튼도 못 싣는 지렛대를 적용 전에 들고, 적용 문장에 남긴다
+  assert.match(src, /const unapplied = unappliedLevers\(m\);\n\s*const note = unappliedNote\(unapplied\);/);
+  assert.match(src, /applyExport\(store, m\.gainExport,\s*\{ sourceId: m\.sweepResultId, unapplied \}\)/);
+});
+
+// 진행기 [■ 중단]이 [얼마나 →] 스윕과 수정안 잡 사이에 오면 진행기가 취소할 잡 id가 아직 없다 — 탭이 스스로
+// 멈춰야 수정안 잡이 걸리지 않고 작업 사본에 쓰지 않는다(lib/showcase haltReason, views/autodesign.js halt()와 같은 규칙)
+test("영향성 탭 배선 — 신호 사슬은 진행기가 끝났으면(showcaseBusy 거짓) 잡을 걸지 않고 작업 사본에 쓰지 않는다", () => {
+  const src = readFileSync(new URL("../views/influence.js", import.meta.url), "utf8");
+  const fn = (name) => src.match(new RegExp(`async function ${name}\\([\\s\\S]*?\\n {2}\\}\\n`))?.[0] ?? "";
+  const pres = fn("runPrescribe");
+  const how = fn("runPrescribeFromEval");
+  const cue = fn("handleCue");
+  assert.ok(pres && how && cue, "처방 사슬·신호 처리 원문을 찾지 못했다");
+  // 신호의 멈춤 확인은 진행기 끝 신호 하나에서 온다
+  assert.match(cue, /const halted = \(\) => haltReason\(store\.get\("showcaseBusy"\)\);/);
+  assert.match(cue, /const hooks = \{[\s\S]*?\n\s+halted,\n\s+\};/, "사슬에 멈춤 확인을 넘기지 않는다");
+  // 중단 뒤에 걸린 잡은 탭이 거둔다(진행기는 그 id를 모른다)
+  assert.match(cue, /onJob: \(jobId\) => \{\s*(\/\/[^\n]*\n\s*)*if \(halted\(\)\) \{\s*cancelJob\(jobId\)/);
+  // 잡 제출 앞의 멈춤 자리 — 스윕 앞(runPrescribeFromEval), 수정안 앞(runPrescribe: 스윕과 수정안 사이의 틈)
+  const at = (body, a, b) => body.indexOf(a) >= 0 && body.indexOf(b) >= 0 && body.indexOf(a) < body.indexOf(b);
+  assert.ok(at(how, "haltedChain(hooks", 'api.post("/influence/sweep"'), "스윕 제출 앞에서 멈춤을 보지 않는다");
+  assert.ok(at(pres, "haltedChain(hooks", 'api.post("/influence/prescribe"'), "수정안 제출 앞에서 멈춤을 보지 않는다");
+  assert.ok(at(pres, "haltedChain(hooks", 'state.prescribe = { status: "제출됨"'),
+    "멈춘 사슬이 패널의 지난 수정안을 「제출됨」으로 덮는다");
+  // 적용 직전 — 마지막 await 뒤, applyExport 앞(그 사이에 await가 없어야 확인과 쓰기 사이에 중단이 끼지 못한다)
+  const branch = cue.slice(cue.indexOf('c.action === "prescribe"'), cue.indexOf("applyExport(store, pm.gainExport"));
+  const check = branch.lastIndexOf("const stop = halted();");
+  assert.ok(check > 0, "처방 적용 전에 멈춤을 보지 않는다");
+  assert.ok(check > branch.lastIndexOf("await "), "멈춤 확인 뒤에 await가 있다 — 그 틈에 중단이 끼면 작업 사본에 쓴다");
+  assert.match(branch.slice(check), /if \(stop\) throw new Error\(stop\);/);
+});
+
+// e2e(D15): [■ 중단] 뒤 영향성 탭이 「평가 cancelled」·「… · cancelled」를 그대로 찍었다 — 잡 상태 코드는
+// 서버 어휘(영문)이고 화면 문장은 한국어다
+test("jobStatusLabel: 서버 잡 상태 코드 → 한국어 — 모르는 코드는 숨기지 않고 그대로", () => {
+  assert.equal(jobStatusLabel("cancelled"), "취소됨");
+  assert.equal(jobStatusLabel("error"), "오류");
+  assert.equal(jobStatusLabel("done"), "완료");
+  assert.equal(jobStatusLabel("running"), "실행 중");
+  assert.equal(jobStatusLabel("queued"), "대기");
+  assert.equal(jobStatusLabel("awaiting_approval"), "awaiting_approval");
+  assert.equal(jobStatusLabel(null), "상태 미상");
+  assert.equal(jobStatusLabel(undefined), "상태 미상");
+  // 한 줄 — 「평가 취소됨」. 서버가 사유를 실었으면 붙인다(오류 본문은 오류 상자가 따로 싣는다)
+  assert.equal(jobEndLine("평가", { status: "cancelled" }), "평가 취소됨");
+  assert.equal(jobEndLine("검증", { status: "error", error: "Traceback …" }), "검증 오류");
+  assert.equal(jobEndLine("스캔", { status: "done", result_id: null }), "스캔 완료 — 저장된 결과 없음");
+  assert.equal(jobEndLine("스윕", null), "스윕 상태 미상");
+});
+
+test("잡 상태 어휘는 서버 jobs.py와 한 벌이다 (드리프트 가드)", () => {
+  const src = readFileSync(new URL("../../../server/claw_server/jobs.py", import.meta.url), "utf8");
+  const assigned = [...src.matchAll(/status = "(\w+)"/g)].map((m) => m[1]);
+  const terminal = src.match(/TERMINAL_STATES = \(([^)]+)\)/)?.[1];
+  assert.ok(assigned.length && terminal, "jobs.py의 상태 대입·TERMINAL_STATES를 찾지 못했다");
+  const server = new Set([...assigned, ...[...terminal.matchAll(/"(\w+)"/g)].map((m) => m[1])]);
+  assert.deepEqual(server, new Set(Object.keys(JOB_STATUS_LABEL)));
+});
+
+// 원문 가드 — 잡 상태 코드를 문장에 그대로 끼우던 자리(영향성 평가·검증·수정안·감도·개루프·스캔·스윕, 설계 흐름의
+// 빠른 탐색·자동 설계·평가)로 돌아가지 않는다. 진행 중 문장도 서버 message가 비면 코드가 아니라 한국어로
+test("영향성·설계 흐름 배선 — 잡 상태 코드를 화면 문장에 그대로 싣지 않는다 (e2e D15)", () => {
+  for (const name of ["influence", "flow"]) {
+    const src = readFileSync(new URL(`../views/${name}.js`, import.meta.url), "utf8");
+    assert.doesNotMatch(src, /\$\{s?done\.status\}/, `${name}.js가 잡 상태 코드를 문장에 끼운다`);
+    assert.doesNotMatch(src, /(status|error) = s?done\.status;/, `${name}.js가 잡 상태 코드를 상태 칸에 싣는다`);
+    assert.doesNotMatch(src, /j\.message \?\? j\.status/, `${name}.js — 빈 message가 코드로 떨어진다`);
+    assert.match(src, /jobEndLine\(/, `${name}.js가 lib/influence jobEndLine을 쓰지 않는다`);
+  }
+  const inf = readFileSync(new URL("../views/influence.js", import.meta.url), "utf8");
+  // [■ 중단] 뒤 평가 줄 — 「평가 취소됨」(오류 상자·실행 줄)과 「… · 취소됨」(평가 상태 줄)
+  assert.match(inf, /state\.evalRun\.status = jobStatusLabel\(done\.status\);\n\s*state\.evalRun\.error = done\.error \?\? jobEndLine\("평가", done\);/);
+  assert.match(inf, /runStatus\(jobEndLine\("평가", done\), \{ open: "eval", bad: true \}\);/);
 });

@@ -244,8 +244,9 @@ def test_다항_구간_불연속은_422(client):
 
 def test_부분_자동조종_지정은_이_기체의_설계값_위에_덧댄다(client):
     """안 보낸 경로 게인은 기체 설계값 그대로여야 한다 — ParamDef 기본값(구 합성 기체의 설계값)으로 채우면 200 kg급
-    기체의 승강률 게인이 0.196 → 0.08로 조용히 바뀐다(v1.10 리뷰, 시뮬 라우트도 같은 규칙). 설계값과 같은 값 하나만
-    보내면 안 보낸 것과 바이트 동일해야 한다."""
+    기체의 승강률 게인이 설계값(v1.10 상사값 0.196 · 2026-09 재튜닝 뒤 툴 도출 0.0418) → 0.08로 조용히 바뀐다(v1.10 리뷰,
+    시뮬 라우트도 같은 규칙). 설계값과 같은 값 하나만 보내면 안 보낸 것과 바이트 동일해야 한다."""
+    from claw.params.registry import REGISTRY
     from claw.profile import load_shipped_example
 
     d = load_shipped_example()
@@ -258,7 +259,10 @@ def test_부분_자동조종_지정은_이_기체의_설계값_위에_덧댄다(
     assert part.json()["files"] == base.json()["files"]
     assert part.json()["param_fingerprint"] == base.json()["param_fingerprint"]
     listing = part.json()["param_image"]["listing"]
-    assert re.search(r"ap_vs_pid_kp\s+= 0\.196\b", listing), "승강률 게인이 기체 설계값이 아니다"
+    kp_vs = d["law"]["design"]["autopilot"]["kp_vs"]
+    default = next(p.default for p in REGISTRY.param_defs("fcl", "Autopilot") if p.name == "kp_vs")
+    assert kp_vs != default, "예제 설계값이 레지스트리 기본값과 같으면 이 검사는 아무것도 가르지 못한다"
+    assert re.search(rf"ap_vs_pid_kp\s+= {re.escape(repr(kp_vs))}\s", listing), "승강률 게인이 기체 설계값이 아니다"
 
 
 def test_unseeded_aircraft_flight_code_is_a_422_with_the_document_path(client, unseeded_doc):

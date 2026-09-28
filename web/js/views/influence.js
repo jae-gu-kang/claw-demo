@@ -56,7 +56,7 @@ wpmap.js가 웨이포인트 표에 접근성을 맡긴 것과 같은 규약. 패
 클래스 하나 — 다른 탭 불변), JS가 그리는 색(캔버스·배지·경고)만 인라인이다.
 */
 
-import { api, errorText, watchJob } from "../api.js";
+import { api, cancelJob, errorText, watchJob } from "../api.js";
 import { clear, el } from "../dom.js";
 import {
   BAND_COLOR, DIRECTION_LABEL, GOOD_INK, KNOB_CLASS, SKIN, STATE_COLOR, STATE_INK,
@@ -67,26 +67,34 @@ import {
   normalizeDiagnosis, normalizeGraph, openloopWorst, pairsFor, probeTransition,
   measuringCone, radiusOf, relOf, relReadable, fmtRel, scanRequest, scanSummary,
   structuralRequest, unionCone,
-  sweepCases, sweepKnobs, sweepRequest, trendInk, trendMatrix, worstTransitions,
+  sweepCases, sweepKnobs, sweepRequest, sweepReusable, trendInk, trendMatrix, worstTransitions,
+  diagnosisLine, jobEndLine, jobStatusLabel,
 } from "../lib/influence.js";
 import {
   STATUS_LABEL, attributionRows, cardDeltas, caseGrid, checksSummary,
-  compositionLine, evalFocus, maneuverLine, sameManeuver,
+  compositionLine, evalFocus, hardGateVerdict, evalVerdictLine, maneuverLine, prescriptionTarget,
+  sameManeuver,
   evaluateRequest, hardFailLines, jLine, localityLines, missionProfileLines,
   normalizeEvalReport, normalizeVerifyReport, statusInk, verifyRequest,
 } from "../lib/evaluate.js";
 import {
-  applyExport, jointLines, normalizePrescribe, prescribeRequest, singleRows,
+  applyExport, jointLines, leverBase, leverChange, leverLine, normalizePrescribe, prescribeRequest,
+  singleRows, unappliedLevers, unappliedNote,
 } from "../lib/prescribe.js";
 import { EVAL_MARK, renderEvalCards } from "./evalcards.js";
 import {
-  DEFAULT_GRID, machRange, nameCases, parseNumberList, serpentineCases,
+  DEFAULT_GRID, REPRESENTATIVE_CASES, machRange, nameCases, parseNumberList, representativeGrid,
+  serpentineCases,
 } from "../lib/grid.js";
+import { DOC_FAILED_HINT, MISSING_TEMPLATE_HINT, gridStrings } from "../lib/missiontemplate.js";
+import { revealPanel } from "../lib/reveal.js";
+import { haltReason } from "../lib/showcase.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { conePlayback, summaryOf } from "../lib/influenceplay.js";
 import { cascadeLayout, layeredLayout } from "../lib/influencelayout.js";
 import { createInfluenceCanvas } from "./influencecanvas.js";
 import { store } from "../store.js";
-import { fillGridFromProfile, firstTimeThisPage } from "./missionfill.js";
+import { fillGridFromProfile, firstTimeThisPage, selectedDefaults } from "./missionfill.js";
 
 // 그래프가 카드 밖으로 나오면서 폭이 늘었다 (app.css가 이 탭만 main을 1580까지
 // 연다). 캔버스는 `width:논리폭 + max-width:100%`라 좁은 화면에서는 비율을 지킨
@@ -916,11 +924,12 @@ export function render() {
     return u && u !== "-" ? u : "";
   };
 
+  // 돌려주는 값은 쇼케이스 신호가 읽는다 — {error}면 실패 사유, 아니면 진단 모델(버튼은 무시한다)
   async function runDiagnose() {
     const rid = resultInput.value.trim() || store.get("simResult")?.id;
     if (!rid) {
       diagStatus.textContent = "진단할 런이 없다 — 시뮬레이션 탭에서 런을 만들거나 결과 id를 입력";
-      return;
+      return { error: diagStatus.textContent };
     }
     diagStatus.textContent = "진단 중…";
     clear(diagBox);
@@ -931,9 +940,11 @@ export function render() {
         `결과 ${state.diag.resultId} · 형상 지문 ${state.diag.fingerprint} · ` +
         `처방 ${state.diag.prescriptions.length}건`;
       renderDiag();
+      return state.diag;
     } catch (e) {
       diagStatus.textContent = "진단 실패";
       clear(diagBox).append(el("div", { class: "error-box" }, errorText(e)));
+      return { error: `진단 실패 — ${errorText(e)}` };
     }
   }
 
@@ -949,6 +960,8 @@ export function render() {
   });
   const evalCardsBox = el("div", { style: "margin-top:10px" });
   const evalBox = el("div");
+  // 판정 줄(하드 게이트 위반 / 전부 통과) — 쇼케이스 신호가 끝나면 이 자리를 화면에 올린다(renderEval이 세운다)
+  let evalVerdictNode = null;
   const verifyStatus = el("p", { class: "hint", style: "margin:6px 0 0" });
   const verifyBox = el("div");
   const evalChipBtns = new Map();
@@ -1014,7 +1027,8 @@ export function render() {
     }
   }
 
-  async function runEvaluate(depth) {
+  // hooks — 쇼케이스 신호가 잡 id·경과를 받아 간다(onJob·onProgress). 버튼은 넘기지 않는다
+  async function runEvaluate(depth, hooks = {}) {
     let cases;
     try {
       cases = gridCases();
@@ -1023,7 +1037,7 @@ export function render() {
                         result: null, error: errorText(e) };
       renderEval();
       runStatus("평가: 격자 입력 오류", { open: "eval", bad: true });
-      return;
+      return state.evalRun;
     }
     // 직전 결과는 여기서 잡는다 — 아래 제출이 state.evalRun을 갈아 끼우므로
     // 완료 시점에 읽으면 이미 null이다(델타가 영영 안 나오던 자리)
@@ -1038,17 +1052,21 @@ export function render() {
           fingerprint: state.diag?.fingerprint,
         }));
       state.evalRun = { status: "제출됨", submitted: true, result: null, error: null };
+      hooks.onJob?.(job.id);
+      // 상태 코드는 서버 어휘(영문)다 — 화면에는 한국어로(lib/influence jobStatusLabel·jobEndLine, e2e D15).
+      // 서버 message 기본값은 빈 문자열이라 ??가 아니라 ||로 떨어뜨린다(안 그러면 「… · 」로 빈다)
       const done = await watchJob(job.id, (j) => {
-        state.evalRun.status = j.message ?? j.status;
+        state.evalRun.status = j.message || jobStatusLabel(j.status);
         runStatus(`평가 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
+        hooks.onProgress?.(`평가 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
       });
       if (done.status !== "done" || !done.result_id) {
-        state.evalRun.status = done.status;
-        state.evalRun.error = done.error ?? `평가 ${done.status}`;
+        state.evalRun.status = jobStatusLabel(done.status);
+        state.evalRun.error = done.error ?? jobEndLine("평가", done);
         setMeasuringFocus(false);  // 결과가 없으면 켜 둘 근거도 없다
         renderEval();
-        runStatus(`평가 ${done.status}`, { open: "eval", bad: true });
-        return;
+        runStatus(jobEndLine("평가", done), { open: "eval", bad: true });
+        return state.evalRun;
       }
       const res = await api.get(`/results/${done.result_id}`);
       // 직전 결과가 델타의 기준이다 — 같은 깊이끼리만 비교한다(선형 카드와
@@ -1068,6 +1086,8 @@ export function render() {
       renderEval();
       runStatus("평가 실패", { open: "eval", bad: true });
     }
+    // 끝난 런 상태를 돌려준다 — 쇼케이스 신호가 판정·결과 id를 읽는다(버튼은 무시한다)
+    return state.evalRun;
   }
 
   async function runVerify() {
@@ -1089,14 +1109,14 @@ export function render() {
         }));
       state.verifyRun = { status: "제출됨", result: null, error: null };
       const done = await watchJob(job.id, (j) => {
-        state.verifyRun.status = j.message ?? j.status;
+        state.verifyRun.status = j.message || jobStatusLabel(j.status);
         runStatus(`검증 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
       });
       if (done.status !== "done" || !done.result_id) {
-        state.verifyRun.status = done.status;
-        state.verifyRun.error = done.error ?? `검증 ${done.status}`;
+        state.verifyRun.status = jobStatusLabel(done.status);
+        state.verifyRun.error = done.error ?? jobEndLine("검증", done);
         renderEval();
-        runStatus(`검증 ${done.status}`, { open: "eval", bad: true });
+        runStatus(jobEndLine("검증", done), { open: "eval", bad: true });
         return;
       }
       const res = await api.get(`/results/${done.result_id}`);
@@ -1116,13 +1136,13 @@ export function render() {
   const prescribeStatus = el("p", { class: "hint", style: "margin:10px 0 0" });
   const prescribeBox = el("div");
 
-  async function runPrescribe(card, { open = state.drawer === "sens" ? "sens" : "eval" }
-                              = {}) {
+  async function runPrescribe(card, { open = state.drawer === "sens" ? "sens" : "eval",
+                                     hooks = {} } = {}) {
     const rid = state.sweep?.resultId;
     if (!rid) {
       runStatus("수정안: 먼저 감도(스윕)가 돌아 있어야 한다 — "
         + "필요 변화량은 저장된 스윕의 감도에서 나온다", { open, bad: true });
-      return;
+      return { status: "제출 불가", result: null, error: "감도(스윕)가 없다" };
     }
     let cases;
     try {
@@ -1131,8 +1151,11 @@ export function render() {
       state.prescribe = { status: "제출 불가", result: null, error: errorText(e) };
       renderPrescribe();
       runStatus("수정안: 격자 입력 오류", { open, bad: true });
-      return;
+      return state.prescribe;
     }
+    // 스윕이 끝나고 여기 오기 전에 진행기가 중단됐다 — 수정안 잡을 걸지 않는다(패널의 지난 수정안은 그대로)
+    const stop = haltedChain(hooks, open);
+    if (stop) return stop;
     state.prescribe = { status: "제출됨", result: null, error: null };
     renderPrescribe();
     setLeverBusy("수정안 계산 중…");
@@ -1146,23 +1169,25 @@ export function render() {
           tSettle: 5, tStep: Number(stepIn.value) || 15,
           fingerprint: state.diag?.fingerprint,
         }));
+      hooks.onJob?.(job.id);
       const done = await watchJob(job.id, (j) => {
-        state.prescribe.status = j.message ?? j.status;
+        state.prescribe.status = j.message || jobStatusLabel(j.status);
         const pct = Math.round((j.progress ?? 0) * 100);
         setLeverBusy(`수정안 ${pct}%`);
         runStatus(`수정안 ${pct}% — ${j.message ?? ""}`);
+        hooks.onProgress?.(`수정안 ${pct}% — ${j.message ?? ""}`);
       });
       if (done.status !== "done" || !done.result_id) {
-        state.prescribe.status = done.status;
-        state.prescribe.error = done.error ?? `수정안 ${done.status}`;
+        state.prescribe.status = jobStatusLabel(done.status);
+        state.prescribe.error = done.error ?? jobEndLine("수정안", done);
         setLeverBusy(null);  // 끝났다 — 결과가 없으면 칩도 자리를 접는다
         renderPrescribe();
-        runStatus(`수정안 ${done.status}`, { open, bad: true });
-        return;
+        runStatus(jobEndLine("수정안", done), { open, bad: true });
+        return state.prescribe;
       }
       const res = await api.get(`/results/${done.result_id}`);
       state.prescribe = { status: "완료", result: normalizePrescribe(res),
-                          error: null };
+                          error: null, resultId: done.result_id };
       // 부채꼴의 근거가 방금 바뀌었다(감도 → 지렛대) — 다시 세우지 않으면 그림은
       // 옛 근거로 켜져 있으면서 자막만 새 말을 하게 된다
       recompute();
@@ -1177,6 +1202,18 @@ export function render() {
       renderPrescribe();
       runStatus("수정안 실패", { open, bad: true });
     }
+    // 끝난 수정안 상태 — 쇼케이스 신호가 확인 런 판정·적용 페이로드를 읽는다(버튼은 무시한다)
+    return state.prescribe;
+  }
+
+  /** 신호 사슬의 멈춤 자리 — 진행기가 이 실행을 끝냈으면(hooks.halted — lib/showcase haltReason) 다음 잡을
+   *  걸지 않고 사유를 돌려준다. 버튼 경로는 hooks.halted가 없어 늘 통과한다. 칩 자리는 접고 사유는 실행 줄에 */
+  function haltedChain(hooks, open) {
+    const why = hooks.halted?.() ?? null;
+    if (!why) return null;
+    setLeverBusy(null);
+    runStatus(why, { open, bad: true });
+    return { status: "중단", result: null, error: why };
   }
 
   function renderPrescribe() {
@@ -1249,18 +1286,24 @@ export function render() {
       }
       if (m.gainExport) {
         const applied = el("p", { class: "hint", style: "margin:4px 0 0" });
+        // 조합 해가 움직였지만 작업 사본에 자리가 없는 지렛대(리미터 여유 등) — 누르기 전에 이름을 든다.
+        // 확인 런은 그것까지 바꾼 형상이라, 통과여도 적용본은 확인한 형상이 아니다(그래서 primary도 뺀다)
+        const unapplied = unappliedLevers(m);
+        const note = unappliedNote(unapplied);
         prescribeBox.append(
           el("div", { class: "row", style: "gap:10px;margin-top:8px" },
             el("button", {
-              class: agg?.hard_fail === false ? "primary" : "",
+              class: agg?.hard_fail === false && !unapplied.length ? "primary" : "",
               onclick: () => {
                 applied.textContent = applyExport(store, m.gainExport,
-                  { sourceId: m.sweepResultId });
+                  { sourceId: m.sweepResultId, unapplied });
               },
             }, "이 수정안 적용"),
             agg?.hard_fail === false ? null
               : el("span", { style: `font-size:12px;color:${WARN_INK}` },
                   "확인 런이 Fail이다 — 적용은 되지만 기준 미달 형상이 된다")),
+          ...[note ? el("p", { style: `margin:4px 0 0;font-size:12px;color:${WARN_INK}` }, `⚠ ${note}`)
+            : null].filter(Boolean),
           applied);
       }
     }
@@ -1292,23 +1335,27 @@ export function render() {
    * 돌리세요"라는 말을 듣고 다른 패널로 가서 카드를 찾아 누르는 단계가 이
    * 연계의 이유라, 여기서 그 단계를 대신한다.
    */
-  async function runPrescribeFromEval(knobs) {
-    if (!knobs?.length) return;
+  async function runPrescribeFromEval(knobs, hooks = {}) {
+    if (!knobs?.length) return { status: "제출 불가", result: null, error: "설계변수가 없다" };
     let cases;
     try {
       cases = gridCases();
     } catch (e) {
       runStatus(`얼마나: 격자 입력 오류 — ${errorText(e)}`,
         { open: "eval", bad: true });
-      return;
+      return { status: "제출 불가", result: null, error: `격자 입력 오류 — ${errorText(e)}` };
     }
-    const swept = new Set(
-      (state.sweep?.result?.rows ?? [])
-        .filter((r) => r.role === "single")
-        .flatMap((r) => Object.keys(r.overrides ?? {})));
-    const need = knobs.filter((k) => !swept.has(k));
+    // 있는 스윕을 다시 쓰는 것은 **같은 형상·같은 격자**에서 그 설계변수를 흔들었을 때뿐이다 —
+    // 게인을 고치고(결함 주입·처방 적용) 다시 평가한 뒤에도 옛 스윕을 물려 쓰면 수정안이 다른 형상의
+    // 감도에서 나온다(서버는 「계보 불일치」 경고만 달고 푼다). 판정은 lib/influence sweepReusable
+    const reuse = sweepReusable(state.sweep?.result, {
+      knobs, caseNames: cases.map((c) => c.name),
+      fingerprint: state.evalRun?.result?.fingerprint,
+    });
+    const stop = haltedChain(hooks, "eval");
+    if (stop) return stop;
     try {
-      if (need.length || !state.sweep?.resultId) {
+      if (!reuse || !state.sweep?.resultId) {
         // 이 체인은 스윕 → 수정안 → 확인 런이라 몇 분이 걸린다. 그동안 칩 자리가
         // 비어 있으면 「지렛대는 어디 있나」가 된다 — 첫 걸음부터 자리를 세운다
         setLeverBusy("감도 측정 중…");
@@ -1318,25 +1365,29 @@ export function render() {
           tSettle: 5, tStep: Number(stepIn.value) || 15,
           fingerprint: state.diag?.fingerprint,
         }));
+        hooks.onJob?.(sj.id);
         const sdone = await watchJob(sj.id, (j) => {
           const pct = Math.round((j.progress ?? 0) * 100);
           setLeverBusy(`감도 ${pct}%`);
           runStatus(`감도 ${pct}% — ${j.message ?? ""}`);
+          hooks.onProgress?.(`감도 ${pct}% — ${j.message ?? ""}`);
         });
         if (sdone.status !== "done" || !sdone.result_id) {
           setLeverBusy(null);
-          runStatus(`감도 측정 ${sdone.status}`, { open: "eval", bad: true });
-          return;
+          runStatus(jobEndLine("감도 측정", sdone), { open: "eval", bad: true });
+          return { status: jobStatusLabel(sdone.status), result: null,
+                   error: sdone.error ?? jobEndLine("감도 측정", sdone) };
         }
         state.sweep = { card: { knobs }, status: "완료", submitted: true,
                         result: await api.get(`/results/${sdone.result_id}`),
                         resultId: sdone.result_id, error: null };
         renderSweep();
       }
-      await runPrescribe({ knobs }, { open: "eval" });
+      return await runPrescribe({ knobs }, { open: "eval", hooks });
     } catch (e) {
       setLeverBusy(null);
       runStatus(`얼마나: 실패 — ${errorText(e)}`, { open: "eval", bad: true });
+      return { status: "실패", result: null, error: `얼마나: 실패 — ${errorText(e)}` };
     }
   }
 
@@ -1400,6 +1451,7 @@ export function render() {
 
   function renderEval() {
     renderTabCounts();  // PASS/FAIL 배지가 패널이 닫혀 있어도 먼저 보인다
+    evalVerdictNode = null;
     clear(evalCardsBox);
     clear(evalBox);
     clear(verifyBox);
@@ -1519,14 +1571,16 @@ export function render() {
 
       const fails = hardFailLines(agg);
       if (fails.length) {
+        evalVerdictNode = el("h3", { style: `margin:12px 0 4px;font-size:14px;color:${WARN_INK}` },
+          `하드 게이트 위반 ${fails.length}건 — 이 형상은 Fail`);
         evalBox.append(
-          el("h3", { style: `margin:12px 0 4px;font-size:14px;color:${WARN_INK}` },
-            `하드 게이트 위반 ${fails.length}건 — 이 형상은 Fail`),
+          evalVerdictNode,
           el("ul", { style: "margin:0;padding-left:18px" },
             fails.map((t) => el("li", { style: `${mono()};margin:2px 0` }, t))));
       } else if (agg?.hard_fail === false) {
-        evalBox.append(el("p", { style: `margin:10px 0 0;color:${GOOD_INK}` },
-          "하드 게이트 전부 통과 — J로 후보 서열을 매길 수 있는 상태다"));
+        evalVerdictNode = el("p", { style: `margin:10px 0 0;color:${GOOD_INK}` },
+          "하드 게이트 전부 통과 — J로 후보 서열을 매길 수 있는 상태다");
+        evalBox.append(evalVerdictNode);
       }
       evalBox.append(el("p", { style: `margin:6px 0 0;${mono()}` }, jLine(agg)));
 
@@ -1798,7 +1852,7 @@ export function render() {
         runStatus(`개루프 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
       });
       if (done.status !== "done" || !done.result_id) {
-        runStatus(`개루프 ${done.status}`, { bad: true });
+        runStatus(jobEndLine("개루프", done), { bad: true });
         return;
       }
       const res = await api.get(`/results/${done.result_id}`);
@@ -1951,7 +2005,7 @@ export function render() {
         runStatus(state.scan.status);
       });
       state.scan.status = done.status === "done"
-        ? "완료" : `스캔 ${done.status} — 완료 케이스는 보존된다`;
+        ? "완료" : `스캔 ${jobStatusLabel(done.status)} — 완료 케이스는 보존된다`;
       if (done.result_id) {
         state.scan.result = await api.get(`/results/${done.result_id}`);
         // 결함 케이스 전부가 기본 선택 — 체크박스로 3단 B 대상을 조정한다
@@ -2146,7 +2200,7 @@ export function render() {
         renderTrend();
       });
       if (done.status !== "done") {
-        state.sweep.status = `스윕 ${done.status} — 완료 런은 보존된다`;
+        state.sweep.status = `스윕 ${jobStatusLabel(done.status)} — 완료 런은 보존된다`;
       } else {
         state.sweep.status = "완료";
       }
@@ -2693,6 +2747,159 @@ export function render() {
         "대표: ", names(m?.cards), " · 나머지: ", names(m?.checks)));
   }
 
+  // ── 쇼케이스 신호 (lib/showcasecue.js) — 탭 버튼과 **같은 함수**로 돈다 ───────────
+  // 진단 = [진단 실행](runDiagnose) · 선별 = [1단계 · 선별](runEvaluate linear, 템플릿 격자 전체) ·
+  // 평가 = [2단계 · 평가](runEvaluate full, 대표 부분 격자 — lib/grid representativeGrid) ·
+  // 처방 = 소견의 [얼마나 →](runPrescribeFromEval) → 확인 런 PASS면 [이 수정안 적용](applyExport).
+  // 격자는 폼 칸에 그대로 적는다 — 청중이 무엇을 쟀는지 칸에서 읽고, 처방·감도가 같은 격자(gridCases)를 쓴다
+
+  /** 고른 기체의 미션 템플릿 격자(수치). 격자 칸 채우기(fillGridFromProfile)가 같은 문서 약속에 먼저 걸려
+   *  있으므로 한 박자 넘겨 그쪽이 끝난 뒤에 칸을 쓴다 — 늦게 온 채우기가 방금 적은 칸을 덮지 않게 */
+  async function cueTemplateGrid() {
+    const d = await selectedDefaults();
+    await new Promise((r) => setTimeout(r, 0));
+    if (!d) throw new Error(DOC_FAILED_HINT);
+    if (!d.hasTemplate || !d.grid) throw new Error(MISSING_TEMPLATE_HINT);
+    return d.grid;
+  }
+
+  /** 격자 칸을 grid(수치)로 — 손 입력과 같은 자리(state.gridForm)에 남겨 재진입해도 같은 격자다. */
+  function setGridForm(grid) {
+    const text = gridStrings(grid);
+    const inputs = { machFrom: machFromIn, machTo: machToIn, machStep: machStepIn,
+      alts: altsIn, fuels: fuelsIn };
+    for (const [k, inp] of Object.entries(inputs)) {
+      inp.value = text[k];
+      state.gridForm[k] = text[k];
+    }
+    renderCaseCount();
+  }
+
+  /** 수정안 형상(지문 fp)의 설계변수 기준값 — 떠 있는 구조 모델이 그 형상이면 그것, 아니면 지금 작업 사본으로
+   *  구조를 한 번 더 받아(동기·수십 ms) 지문이 맞을 때만. 못 받거나 다르면 null(지렛대 줄이 「기준값 미상」) */
+  async function leverBaseFor(fp) {
+    const here = leverBase(state.model, fp);
+    if (here) return here;
+    try {
+      return leverBase(normalizeGraph(
+        await api.post("/influence/structural", structuralRequest(shapeState()))), fp);
+    } catch {
+      return null;
+    }
+  }
+
+  async function handleCue(c) {
+    // 진행기가 이 실행을 끝냈나(store showcaseBusy 거짓 — [■ 중단]). 잡 사이 틈에 온 중단은 진행기가 취소할
+    // 잡 id가 아직 없다 — 사슬이 스스로 멈춘다(views/autodesign.js halt()와 같은 규칙)
+    const halted = () => haltReason(store.get("showcaseBusy"));
+    // 잡 id는 진행기의 [■ 중단]이 취소에 쓴다 — 경과는 실행 줄과 같은 문장
+    const hooks = {
+      onJob: (jobId) => {
+        // 중단보다 늦게 걸린 잡(제출 응답이 중단 뒤에 왔다) — 진행기는 이 id를 모른다. 여기서 거둔다
+        if (halted()) {
+          cancelJob(jobId).catch(() => {});
+          return;
+        }
+        reportCue(c, { phase: "started", jobId });
+      },
+      onProgress: (text) => reportCue(c, { phase: "progress", summary: text }),
+      halted,
+    };
+    try {
+      if (c.action === "diagnose") {
+        if (!resultInput.value.trim() && !store.get("simResult")?.id) {
+          throw new Error("진단할 시뮬 런이 없다 — 시뮬레이션 탭의 런(sim: run)이 먼저다");
+        }
+        const d = await runDiagnose();
+        if (d?.error) throw new Error(d.error);
+        revealPanel(diagStatus);  // 진단 줄·소견표 — 인계가 연 「감도」 패널 안, 첫 화면 아래다
+        reportCue(c, {
+          phase: "done", resultId: d.resultId, summary: diagnosisLine(d),
+          data: { resultId: d.resultId, fingerprint: d.fingerprint, findings: d.findings.length,
+                  prescriptions: d.prescriptions.map((p) => p.knobs ?? []) },
+        });
+      } else if (c.action === "screen" || c.action === "evaluate") {
+        const full = c.action === "evaluate";
+        const tpl = await cueTemplateGrid();
+        const n = c.args?.cases ?? (full ? REPRESENTATIVE_CASES : null);
+        setGridForm(n == null ? tpl : representativeGrid(tpl, n));
+        const run = await runEvaluate(full ? "full" : "linear", hooks);
+        const m = run?.result;
+        if (!m) throw new Error(run?.error ?? "평가 결과가 없다");
+        const agg = m.aggregate ?? {};
+        // 판정 줄(「하드 게이트 위반 N건 — 이 형상은 Fail」)은 카드 7장·체크·소견 아래라 y≈2700이다(e2e D4) —
+        // 진행기가 다음 동작으로 가기 전에 청중 앞에 올린다. 판정이 없으면(케이스 0건) 상태 줄
+        revealPanel(evalVerdictNode ?? evalStatus);
+        reportCue(c, {
+          phase: "done", resultId: run.resultId,
+          summary: (c.args?.label ? `${c.args.label} — ` : "") + evalVerdictLine(m),
+          data: {
+            // verdict는 칩 배지와 같은 비트 — 진행기가 기대 판정(FAIL/PASS)과 대조한다
+            verdict: hardGateVerdict(m),
+            depth: m.depth, hard_fail: agg.hard_fail ?? null, n_cases: agg.n_cases ?? m.cases.length,
+            cases: m.cases.map((x) => x.case), fingerprint: m.fingerprint,
+            fails: (agg.hard_fails ?? []).map((f) => ({ case: f.case, check: f.check, value: f.value,
+                                                       limit: f.limit })),
+          },
+        });
+      } else if (c.action === "prescribe") {
+        const m = state.evalRun?.result;
+        if (!m) throw new Error("직전 평가가 없다 — 영향성 평가(evaluate)가 먼저다");
+        if (m.depth !== "full") {
+          throw new Error("직전 평가가 1단계(선형)다 — 처방은 2단계(시간축) 소견에서 나온다");
+        }
+        if (m.aggregate?.hard_fail !== true) {
+          throw new Error(`직전 평가가 FAIL이 아니다 — ${evalVerdictLine(m)}`);
+        }
+        const target = prescriptionTarget(m);
+        if (!target) throw new Error("FAIL 케이스의 소견에 처방 카드가 없다 — [얼마나 →]를 걸 자리가 없다");
+        reportCue(c, { phase: "progress",
+          summary: `[얼마나 →] ${target.knobs.join(", ")} @${target.case}` });
+        const pr = await runPrescribeFromEval(target.knobs, hooks);
+        const pm = pr?.result;
+        if (!pm) throw new Error(pr?.error ?? "수정안 결과가 없다");
+        if (!pm.confirm) {
+          throw new Error(`확인 런이 없다 — ${[...pm.warnings, ...jointLines(pm.joint)].join(" · ")}`);
+        }
+        if (pm.confirm.aggregate?.hard_fail !== false) {
+          throw new Error(`확인 런이 PASS가 아니라 적용하지 않았다 — ${evalVerdictLine(pm.confirm)}`);
+        }
+        // 확인 런은 제안 형상 전체로 돌았다 — [적용]이 못 싣는 지렛대(리미터 여유 등)가 움직였으면 적용 뒤
+        // 작업 사본은 확인한 형상이 아니다. 반쪽을 싣고 「적용됨」이라 하지 않는다
+        const unapplied = unappliedLevers(pm);
+        if (unapplied.length) {
+          throw new Error(`처방 지렛대 ${unapplied.join(", ")}는 작업 사본(게인 표·AP·SCAS 상수)에 `
+            + `실을 자리가 없어 적용하지 않았다 — ${jointLines(pm.joint).join(" · ")}`);
+        }
+        // 지렛대 「얼마에서」 — 수정안과 같은 형상의 구조 모델 값(엔진은 기준 0을 절대 스텝으로 움직여 스팬만으론
+        // 되감을 수 없다, lib/prescribe leverChange). 적용 전이라 작업 사본은 아직 그 형상이다
+        const base = await leverBaseFor(pm.fingerprint);
+        // 수정안 잡이 끝나는 사이 진행기가 중단됐다 — 작업 사본에 쓰지 않는다(중단은 결함 게인까지 문서 게인으로
+        // 되돌린다, views/showcase.js). 여기부터 applyExport까지는 await가 없다
+        const stop = halted();
+        if (stop) throw new Error(stop);
+        // [이 수정안 적용]과 같은 한 줄 — 작업 사본(store)에 쓰고, 문장은 실행 줄에 남긴다
+        const change = leverChange(pm, { base });
+        runStatus(applyExport(store, pm.gainExport, { sourceId: pm.sweepResultId }), { open: "eval" });
+        revealPanel(prescribeStatus);  // 수정안 표·확인 런 — 「평가·처방」 패널 아래쪽
+        reportCue(c, {
+          phase: "done", resultId: pr.resultId,
+          summary: `${leverLine(change)} · 확인 런 ${evalVerdictLine(pm.confirm)} · 작업 사본에 적용`,
+          data: {
+            lever: change?.lever ?? null, span: change?.span ?? null, kind: change?.kind ?? null,
+            from: change?.from ?? null, to: change?.to ?? null, absolute: change?.absolute ?? null,
+            knobs: target.knobs, case: target.case, sweepResultId: pm.sweepResultId,
+            joint_solvable: pm.joint?.solvable ?? null, confirm_hard_fail: false,
+          },
+        });
+      } else {
+        unknownAction(c);
+      }
+    } catch (e) {
+      failCue(c, e);
+    }
+  }
+
   // ── 인계 수신 — 시뮬 탭이 넘긴 런 (v0.66) ────────────────────────────────
   // **한 번 읽고 지운다** (가상환경 → 시뮬 `wpDraft`와 같은 규약, views/sim.js):
   // store에 남기면 다음에 그냥 탭을 눌러 들어와도 패널이 저절로 열리고, 그때 화면은
@@ -2972,9 +3179,17 @@ export function render() {
   renderEvalChips();
   renderEval();
   renderPrescribe();
+  // 쇼케이스 신호는 인계보다 먼저 읽는다 — 진단 신호는 시뮬 탭 [영향성에서 진단 →]과 **같은 인계**를
+  // 걸어 받는 쪽(receiveHandoff)이 패널·펼침·출처 안내를 정하게 한다(여는 규칙을 두 벌 두지 않는다)
+  const cue = takeCue("influence");
+  if (cue?.action === "diagnose" && !store.get("influenceHandoff")) {
+    const simId = store.get("simResult")?.id;
+    if (simId) store.set("influenceHandoff", { resultId: simId, from: "sim" });
+  }
   receiveHandoff();  // 인계로 왔으면 패널·펼침을 정한다 — renderDrawer보다 먼저
   renderTabCounts();
   renderDrawer();
+  if (cue) handleCue(cue);
 
   return el("div", { class: "inf-dark tab-dark tab-page" },
     // 카드 없는 머리 — 블록도 최상위(.bd .pagetop)와 같은 자리

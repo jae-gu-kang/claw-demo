@@ -400,10 +400,14 @@ def test_apply_gains_names_the_slot_whose_axis_the_document_cannot_hold(client):
     r = client.post("/api/design/axis-x/apply-gains", json={"base_revision": 1})
     assert r.status_code == 422, r.text
     detail = r.json()["detail"]
-    assert "roll.kp: alt" in detail and "마하 축만" in detail
-    assert "pitch.kp" not in detail, "마하 축 자리는 사유에 끌어들이지 않는다"
+    # 형상은 {message, off_axis} — message가 자리·축을 짚어 웹 errorText(→ message)가 그대로
+    # 보이고, off_axis는 기계 판독용이다 (옛 결과 테스트와 같은 형상)
+    assert detail["off_axis"] == {"roll.kp": ["alt"]}
+    msg = detail["message"]
+    assert "roll.kp: alt" in msg and "마하 축만" in msg
+    assert "pitch.kp" not in msg, "마하 축 자리는 사유에 끌어들이지 않는다"
     # 막힌 것은 문서 반영이다 — 다른 경로를 함께 막았다고 오인하지 않게 사유가 말한다
-    assert "시뮬·코드 생성은 그 축 표를 받고" in detail
+    assert "시뮬·코드 생성은 그 축 표를 받고" in msg
     # 문서는 그대로다 — 부분 반영으로 절반만 들어가면 안 된다
     assert client.get("/api/profiles/ad-axis").json()["document"]["law"]["gain_tables"] is None
 
@@ -913,8 +917,18 @@ def test_apply_gains_writes_the_confirmed_tables_to_the_document(client, wait_jo
     # 재검증 요약도 문서에 영속한다 — 행 목록은 개수로 접는다 (결과 저장물 복제 금지)
     assert prov["reverify"]["n_judged"] > 0
     assert isinstance(prov["reverify"]["changed"], int)
+    # 설계 요약 — 표현과 적합에서 뺀 표본 수(그 점의 분할점 값은 이웃 보간). 목록은 개수로 접는다
+    rep = client.get(f"/api/results/{rid}").json()["report"]
+    assert prov["design"] == {
+        "status": rep["status"], "iterations": rep["iterations"], "judged": rep["judged"],
+        "failures": rep["failures"], "escalations": rep["escalations"], "fit_mode": rep["fit_mode"],
+        "excluded_samples": len(rep["excluded_samples"]),
+        "exclusion_withheld": sorted(rep["exclusion_withheld"])}
+    assert prov["design"]["fit_mode"] in ("table", "poly") and prov["design"]["judged"] > 0
     row = next(p for p in client.get("/api/profiles").json() if p["id"] == "ad-apply")
-    assert row["gain_tables"] == {"source": "auto_design", "stale": False, "stale_variants": []}
+    assert row["gain_tables"] == {"source": "auto_design", "stale": False, "stale_variants": [],
+                                  "variants": {v["id"]: {"source": "confirmed"}
+                                               for v in got["document"]["variants"]}}
     # 반영된 문서로 조립이 실제로 선다 — 시뮬 제출이 202다 (확정 표 우선 조립)
     sim = client.post("/api/sim/run", json={
         "trim": {"name": "t", "mach": 0.45, "alt": 1000.0, "fuel": 200.0},
@@ -935,3 +949,160 @@ def test_apply_gains_writes_the_confirmed_tables_to_the_document(client, wait_jo
     assert bad.status_code == 422, bad.text
     assert client.post(f"/api/design/{'0' * 16}/apply-gains",
                        json={"base_revision": 2}).status_code == 404
+
+
+def test_defaults_expose_mach_schedule_axis_and_aircraft_actuator(client):
+    """스케줄 적합 축은 마하(문서·게인 탭이 받는 모양), 작동기는 없음 = 기체 문서의 작동기."""
+    body = client.get("/api/design/defaults").json()
+    cfg = body["config"]
+    assert cfg["sched_axes"] == ["mach"]
+    assert cfg["actuator_wn"] is None and cfg["actuator_zeta"] is None
+    # alts·fuels를 비웠을 때의 격자 — 고도 목록과 연료 비율(기체 fuel_max를 곱하는 것은 웹)
+    from claw.design.grid import DEFAULT_ALTS, DEFAULT_FUEL_FRACS
+
+    assert body["grid"] == {"alts": list(DEFAULT_ALTS), "fuel_fracs": list(DEFAULT_FUEL_FRACS)}
+
+
+def test_config_accepts_null_actuator_and_checks_sched_axes():
+    """작동기 없음(null)은 뜻이 있는 값이라 수치 검사를 비켜 가고, 축 목록은 이름만 받는다."""
+    from claw_server.routes.design import _build_config
+
+    cfg = _build_config({"actuator_wn": None, "actuator_zeta": 0.6, "sched_axes": ["mach", "alt"]})
+    assert cfg.actuator_wn is None and cfg.actuator_zeta == 0.6
+    assert cfg.sched_axes == ("mach", "alt")
+    for bad in ({"sched_axes": "mach"}, {"sched_axes": [1.0]}, {"sched_axes": []},
+                {"sched_axes": ["qbar"]}, {"sched_axes": ["mach", "mach"]},
+                {"actuator_wn": 0.0}, {"actuator_wn": "30"}, {"actuator_zeta": float("nan")}):
+        with pytest.raises((ValueError, TypeError)):
+            _build_config(bad)
+
+
+def test_config_errors_are_422(client):
+    for bad in ({"sched_axes": ["qbar"]}, {"sched_axes": "mach"}, {"actuator_wn": -1.0}):
+        r = client.post("/api/design/auto", json={"config": {**_small_config(), **bad}})
+        assert r.status_code == 422, (bad, r.text)
+
+
+def test_route_hands_the_document_actuator_to_the_session(client, wait_job, monkeypatch):
+    """라우트가 선택 기체의 작동기를 세션에 넘긴다 — 종전에는 config의 30·0.7이 늘 이겼다.
+
+    rate_filters 인계 테스트와 같은 이유로 실행이 아니라 인계를 잡는다."""
+    import claw_server.routes.design as design_route
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="ad-act", name="작동기 시험", is_example=False, variants=[])
+    d["actuator"]["params"].update(wn=18.0, zeta=0.55)
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    seen = {}
+
+    def spy_run(self, *args, **kwargs):
+        seen["actuator"] = kwargs.get("actuator")
+        seen["used"] = None
+        if kwargs.get("actuator") is not None:
+            self.actuator = dict(kwargs["actuator"])
+        seen["used"] = self.actuator_used()
+        self.status, self.stage = "converged", "DONE"
+        return self.report()
+
+    monkeypatch.setattr(design_route.DesignSession, "run", spy_run)
+    r = client.post("/api/design/auto", json={"config": _small_config(), "profile": {"id": "ad-act"}})
+    wait_job(r.json()["id"], timeout=120.0)
+    assert seen["actuator"] == {"wn": 18.0, "zeta": 0.55}
+    assert seen["used"]["source"] == {"wn": "profile", "zeta": "profile"}
+    # config가 수치를 주면 그쪽이 이긴다 (작동기 가정 연구)
+    r = client.post("/api/design/auto", json={"config": _small_config(actuator_wn=25.0),
+                                              "profile": {"id": "ad-act"}})
+    wait_job(r.json()["id"], timeout=120.0)
+    assert (seen["used"]["wn"], seen["used"]["zeta"]) == (25.0, 0.55)
+
+
+def test_apply_gains_after_a_multi_altitude_design(client, wait_job):
+    """고도 여럿으로 돌린 자동 설계도 문서에 반영된다 — 종전에는 고도 표가 섞여 422였다.
+
+    적합이 마하로만 스케줄하므로(sched_axes) 반출 표가 전부 마하 표이고, 반영된 문서가 검증을
+    통과해 다음 조회·조립까지 선다."""
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="ad-2alt", name="두 고도 반영", is_example=False, variants=[])
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    cfg = _small_config(alts=[1000.0, 5000.0], budget_iters=1)
+    r = client.post("/api/design/auto", json={"config": cfg, "profile": {"id": "ad-2alt"}})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done", j
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    assert body["config"]["sched_axes"] == ["mach"]
+    assert body["report"]["actuator"]["source"] == {"wn": "profile", "zeta": "profile"}
+    tables = body["gain_export"]["tables_resampled"]
+    assert tables and all(list(t["axes"]) == ["mach"] for t in tables.values())
+
+    ok = client.post(f"/api/design/{j['result_id']}/apply-gains", json={"base_revision": 1})
+    assert ok.status_code == 200, ok.text
+    gt = client.get("/api/profiles/ad-2alt").json()["document"]["law"]["gain_tables"]
+    assert set(gt["tables"]) == set(tables)
+    assert all(list(t["axes"]) == ["mach"] for t in gt["tables"].values())
+
+
+def test_apply_gains_design_summary_counts_excluded_samples_and_says_unknown_for_old_results(client):
+    """provenance.design — 적합에서 뺀 표본은 개수로(목록은 결과 저장물에), 표현은 그대로. 그 칸이 없는 옛 결과는
+    None이다 — 0으로 위장하면 "뺀 점 없음(전부 튜닝값)"으로 읽힌다. 잡을 돌리지 않고 저장물 모양만 세운다."""
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="ad-prov", name="설계 요약", is_example=False, variants=[])
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    fp = client.get("/api/profiles/ad-prov").json()["fingerprint"]
+    grid = client.get("/api/profiles/ad-prov").json()["document"]["law"]["schedule"]["mach_grid"]
+    table = {"axes": {"mach": list(grid)}, "data": [0.1] * len(grid), "extrapolate": "clip"}
+
+    def seed(rid, report):
+        payload = {"kind": "auto_design", "profile": {"id": "ad-prov", "source": "request", "fingerprint": fp},
+                   "gain_export": {"tables_resampled": {"pitch.k_rate": table}}}
+        if report is not None:
+            payload["report"] = report
+        client.app.state.store.save(rid, payload, meta={"kind": "auto_design", "created": 0.0})
+
+    seed("prov-new", {"status": "converged", "iterations": 1, "judged": 12, "failures": 0, "escalations": 0,
+                      "fit_mode": "table", "exclusion_withheld": ["roll.k_rate"],
+                      "excluded_samples": [{"slot": "roll.k_rate", "point": "p1", "value": 0.0},
+                                           {"slot": "roll.k_rate", "point": "p2", "value": 0.0}]})
+    ok = client.post("/api/design/prov-new/apply-gains", json={"base_revision": 1})
+    assert ok.status_code == 200, ok.text
+    prov = client.get("/api/profiles/ad-prov").json()["document"]["law"]["gain_tables"]["provenance"]
+    assert prov["design"] == {"status": "converged", "iterations": 1, "judged": 12, "failures": 0,
+                              "escalations": 0, "fit_mode": "table", "excluded_samples": 2,
+                              "exclusion_withheld": ["roll.k_rate"]}
+
+    # 반영이 지문을 바꿨다 — 옛 결과는 새 지문으로 세운다(재반영 409 가드는 위 테스트 몫)
+    fp = client.get("/api/profiles/ad-prov").json()["fingerprint"]
+    seed("prov-old", None)
+    ok = client.post("/api/design/prov-old/apply-gains", json={"base_revision": 2})
+    assert ok.status_code == 200, ok.text
+    prov = client.get("/api/profiles/ad-prov").json()["document"]["law"]["gain_tables"]["provenance"]
+    assert prov["design"] == dict.fromkeys(("status", "iterations", "judged", "failures", "escalations",
+                                            "fit_mode", "excluded_samples", "exclusion_withheld"))
+
+
+def test_apply_gains_names_off_axis_tables_of_an_old_result(client):
+    """옛 결과(또는 API로 축을 넓힌 결과)의 고도 표는 스키마 경로 오류가 아니라 사유와 자리로 거부한다.
+
+    축 판정은 저장물만 보고 문서를 읽기 전에 난다 — 잡을 돌리지 않고 저장물 모양만 세운다."""
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="ad-old", name="옛 결과", is_example=False, variants=[])
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    mach = {"axes": {"mach": [0.2, 0.6]}, "data": [1.0, 2.0], "extrapolate": "clip"}
+    alt = {"axes": {"alt": [500.0, 1500.0]}, "data": [1.0, 2.0], "extrapolate": "clip"}
+    payload = {"kind": "auto_design", "profile": {"id": "ad-old", "source": "request"},
+               "gain_export": {"tables_resampled": {"pitch.k_rate": mach, "pitch.kp": alt}}}
+    client.app.state.store.save("old-altaxis", payload, meta={"kind": "auto_design", "created": 0.0})
+    bad = client.post("/api/design/old-altaxis/apply-gains", json={"base_revision": 1})
+    assert bad.status_code == 422, bad.text
+    detail = bad.json()["detail"]
+    assert detail["off_axis"] == {"pitch.kp": ["alt"]} and "마하" in detail["message"]
+    assert "pitch.kp: alt" in detail["message"], "사유 문장이 자리·축을 짚는다(웹은 message만 보인다)"
+    # 문서는 그대로다 — 거부된 반영이 리비전을 만들지 않는다
+    assert client.get("/api/profiles/ad-old").json()["revision"] == 1

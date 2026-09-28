@@ -3,6 +3,8 @@
 마진 맵 시각화(06 §4)의 수치 부분. 캔버스 그리기 자체는 views/plots.js.
 */
 
+import { marginUnstable } from "./loops.js"; // 발산 칸 판정 — 마진 맵 탭·결과 브리핑과 한 정의
+
 export function linScale(d0, d1, r0, r1) {
   const k = (r1 - r0) / (d1 - d0 || 1);
   return (v) => r0 + (v - d0) * k;
@@ -95,6 +97,171 @@ export function trimEnvelopeCell(r) {
     return { kind: "saturated", color: STATUS.warn, text: "포화" };
   }
   return { kind: "ok", color: STATUS.ok, text: "가능" };
+}
+
+/** 비행 엔벨로프 셀 종류 → 범례 라벨 — 트림 탭 범례와 쇼케이스 보고가 **같은 말**을 쓴다(한 표).
+ *  키 순서가 범례 순서다. */
+export const TRIM_CELL_LABEL = Object.freeze({
+  ok: "가능",
+  stall: "실속 근접 (α 여유 위반)",
+  saturated: "포화 (추력·타면 한계)",
+  infeasible: "트림 불가",
+});
+
+/** 트림 판정 플래그 4종 → 트림 표의 열 이름 (01 §4.1). 키 순서가 표의 열 순서다 — 표·머리줄·보고가 한 표를 본다. */
+export const TRIM_FLAG_LABEL = Object.freeze({
+  residual_ok: "잔차",
+  saturation_ok: "포화",
+  alpha_margin_ok: "α여유",
+  continuity_ok: "연속성",
+});
+
+/** 트림 배치 결과 행 → 탭 머리줄의 근거 — 수렴 수, 판정 플래그 위반 케이스(플래그 하나라도 false — null은
+ *  미판정이라 위반 아님), 플래그별 위반 수. line은 탭 머리줄 문장, detail은 플래그별 「연속성 3」 나열. */
+export function trimFlagSummary(results) {
+  const byFlag = {};
+  const badNames = [];
+  for (const r of results) {
+    const bad = Object.entries(r.flags ?? {}).filter(([, v]) => v === false).map(([k]) => k);
+    if (!bad.length) continue;
+    badNames.push(r.case?.name ?? "?");
+    for (const k of bad) byFlag[k] = (byFlag[k] ?? 0) + 1;
+  }
+  const known = Object.keys(TRIM_FLAG_LABEL).filter((k) => byFlag[k]);
+  const other = Object.keys(byFlag).filter((k) => !Object.hasOwn(TRIM_FLAG_LABEL, k)); // 엔진이 새 플래그를 더하면 키 그대로
+  const converged = results.filter((r) => r.converged).length;
+  return {
+    total: results.length, converged, bad: badNames.length, byFlag, badNames,
+    line: `수렴 ${converged}/${results.length} · 판정 플래그 위반 ${badNames.length}건`,
+    detail: [...known.map((k) => `${TRIM_FLAG_LABEL[k]} ${byFlag[k]}`), ...other.map((k) => `${k} ${byFlag[k]}`)]
+      .join(" · "),
+  };
+}
+
+/** 트림 배치 결과 행 → 쇼케이스 보고 {summary, data} — 지도 셀 판정(trimEnvelopeCell) 종류별 개수.
+ *  「가능」은 0이어도 적고, 나머지는 있는 종류만 적는다(없는 실패를 0건으로 늘어놓지 않는다).
+ *  판정 플래그 위반이 있으면 **탭 머리줄과 같은 말**(「판정 플래그 위반 N건 확인 필요」)을 플래그별 수와 함께 붙인다 —
+ *  지도 셀은 연속성 플래그를 보지 않아, 셀 집계만 말하면 「가능 20」이 탭 자신의 경고를 가린다(쇼케이스 D6). */
+export function trimCueReport(results) {
+  const counts = Object.fromEntries(Object.keys(TRIM_CELL_LABEL).map((k) => [k, 0]));
+  for (const r of results) counts[trimEnvelopeCell(r).kind] += 1;
+  const parts = Object.keys(TRIM_CELL_LABEL)
+    .filter((k) => k === "ok" || counts[k] > 0)
+    .map((k) => `${TRIM_CELL_LABEL[k]} ${counts[k]}`);
+  const f = trimFlagSummary(results);
+  if (f.bad > 0) parts.push(`판정 플래그 위반 ${f.bad}건 확인 필요 (${f.detail})`);
+  return {
+    summary: `${results.length} 케이스 — ${parts.join(" · ")}`,
+    data: {
+      cases: results.length,
+      converged: f.converged,
+      fuels: [...new Set(results.map((r) => r.case.fuel))].sort((a, b) => a - b),
+      counts,
+      flag_violations: { cases: f.bad, by_flag: f.byFlag, names: f.badNames },
+    },
+  };
+}
+
+/** 비율 → 백분율 글 — 소수 자리 고정(기본 1자리). 유효 자리 표기(fmt(x·100, 1))는 20을 「2e+1」로 찍는다(D8).
+ *  수가 아니면 "—", 음수는 수학 기호 빼기(−). */
+export function pctText(frac, decimals = 1) {
+  if (typeof frac !== "number" || !Number.isFinite(frac)) return "—";
+  const t = (frac * 100).toFixed(decimals);
+  return `${t.startsWith("-") ? `−${t.slice(1)}` : t} %`;
+}
+
+/** 한 줄로 그린 곡선(coincidentGroups) → 캡션 한 줄. charts: [{name, groups, tags}] — tags[i]는 곡선 i의 이름.
+ *  겹친 무리가 없으면 null. 모든 그림이 같은 방식으로 겹치면 한 번만 말한다. */
+export function coincidentNote(charts) {
+  const parts = charts.map((c) => ({
+    name: c.name,
+    text: c.groups.filter((g) => g.length > 1).map((g) => g.map((i) => c.tags[i]).join(" = ")).join(", "),
+  })).filter((p) => p.text);
+  if (!parts.length) return null;
+  const uniform = parts.length === charts.length && parts.length > 1 && parts.every((p) => p.text === parts[0].text);
+  const body = uniform ? `${parts.map((p) => p.name).join("·")} 모두 ${parts[0].text}`
+    : parts.map((p) => `${p.name}: ${p.text}`).join(" · ");
+  return `같은 값의 곡선은 한 줄(앞 곡선의 색)로 그렸습니다 — ${body}`;
+}
+
+/** 곡선 무리의 퍼짐 — lists[i]는 곡선 i의 값 배열(null = 끊긴 자리). 모든 곡선이 수인 자리에서 (최대 − 최소)의
+ *  최댓값(maxDiff)과 전체 값 범위(range), 그 비율(rel). 곡선이 둘 미만이거나 견줄 자리가 없으면 null. */
+export function curveSpread(lists) {
+  if (!lists || lists.length < 2) return null;
+  const n = Math.min(...lists.map((l) => l.length));
+  let maxDiff = null;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const l of lists) {
+    for (const v of l) {
+      if (typeof v === "number" && Number.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    }
+  }
+  for (let i = 0; i < n; i += 1) {
+    const vs = lists.map((l) => l[i]);
+    if (!vs.every((v) => typeof v === "number" && Number.isFinite(v))) continue;
+    const d = Math.max(...vs) - Math.min(...vs);
+    maxDiff = maxDiff == null ? d : Math.max(maxDiff, d);
+  }
+  if (maxDiff == null) return null;
+  const range = hi - lo;
+  return { maxDiff, range, rel: range > 0 ? maxDiff / range : 0 };
+}
+
+/** 거의 포개진 곡선 → 캡션 한 줄. charts: [{name, spread: curveSpread|null}] — 퍼짐이 값 범위의 frac(기본 1.5 % —
+ *  기체 탭 극선·L/D 그림(220 px)의 플롯 영역에서 약 3 px, 1.4 px 선 두 가닥이 갈려 보이지 않는 폭) 아래인 그림만
+ *  말한다. 같은 값이 아니므로 「같다」고 하지 않는다 — 한 줄로 **보인다**고 한다. 말할 그림이 없으면 null. */
+export function nearOverlapNote(charts, frac = 0.015) {
+  const near = charts.filter((c) => c.spread && c.spread.maxDiff > 0 && c.spread.rel < frac);
+  if (!near.length) return null;
+  const num = (v) => String(Number(v.toPrecision(2)));
+  return "겹친 곡선의 차가 그림 해상도보다 작아 한 줄로 보입니다(나중 곡선의 색이 위) — "
+    + near.map((c) => `${c.name} 최대 차 ${num(c.spread.maxDiff)} (값 범위의 ${(c.spread.rel * 100).toFixed(1)} %)`)
+      .join(" · ");
+}
+
+/** 같은 값의 곡선 묶기 — seriesList[i]는 값 배열(null = 끊긴 자리). 앞선 무리의 **대표(첫 곡선)**와 같은 값이면
+ *  그 무리에 든다. 같음은 부동소수 잡음(상대 rtol·절대 atol)까지만 — 눈에 안 보일 만큼만 다른 곡선은 다른 곡선이다.
+ *  null은 같은 자리에 있어야 같다. 돌려주는 것: [[대표 i, 같은 곡선 j…], …] (대표 순서 = 입력 순서).
+ *  겹친 곡선이 전부 같은 값이면 한 줄만 보이는데 범례는 여럿을 말한다 — 뷰가 대표만 그리고 캡션에 그 사실을 적는다(D9). */
+export function coincidentGroups(seriesList, { rtol = 1e-9, atol = 1e-12 } = {}) {
+  const same = (a, b) => a.length === b.length && a.every((v, i) => {
+    const w = b[i];
+    if (typeof v !== "number" || typeof w !== "number") return v === w || (v == null && w == null);
+    return Math.abs(v - w) <= atol + rtol * Math.max(Math.abs(v), Math.abs(w));
+  });
+  const groups = [];
+  seriesList.forEach((s, i) => {
+    const g = groups.find((grp) => same(seriesList[grp[0]], s));
+    if (g) g.push(i);
+    else groups.push([i]);
+  });
+  return groups;
+}
+
+/** 마진 맵 entries·루프 → 최악 칸 {pm, gm, unstable} — pm·gm은 각각 {loop, entry, value} 또는 null,
+ *  unstable은 이 루프를 닫은 폐루프가 발산하는 칸(엔진 closed_loop.stable === false)의 수.
+ *  트림이 수렴하고 그 루프의 마진이 수(數)인 **안정** 칸만 후보다: "inf"(교차 없음 — 무한 여유)와 null(판정 불가)은
+ *  최악이 아니고, 발산 칸의 PM·GM은 여유가 아니라 루프 교차의 고전 판독이라 최소에 섞지 않는다(섞으면 「최악 PM
+ *  82°」 같은 거짓 안심 — 발산 칸 목록은 lib/loops.js unstableCells). 같은 값이면 먼저 온 칸(격자 순서)이 남는다. */
+export function marginWorst(entries, loops) {
+  let pm = null;
+  let gm = null;
+  let unstable = 0;
+  for (const e of entries ?? []) {
+    if (!e.trim?.converged) continue;
+    for (const lp of loops ?? []) {
+      const m = e.margins?.[lp.name];
+      if (!m) continue;
+      if (marginUnstable(m)) {
+        unstable += 1;
+        continue;
+      }
+      if (typeof m.pm_deg === "number" && (!pm || m.pm_deg < pm.value)) pm = { loop: lp.name, entry: e, value: m.pm_deg };
+      if (typeof m.gm_db === "number" && (!gm || m.gm_db < gm.value)) gm = { loop: lp.name, entry: e, value: m.gm_db };
+    }
+  }
+  return { pm, gm, unstable };
 }
 
 /** 시리즈 색 순환 팔레트 — 그룹 내 순번으로 배정 (애플 시스템 팔레트, 상태색과 동일 계열). */

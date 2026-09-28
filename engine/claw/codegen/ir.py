@@ -102,12 +102,20 @@ class Node:
     on_disable: {상태 필드: 값 또는 소스 참조} — 비활성 스텝의 상태 대입.
             숫자는 상수, 문자열은 신호 참조 (예: 비활성 축 필터가 측정을 추적)
     disabled_output: 비활성 스텝의 이 노드 출력값 [기본 0.0]
+    resync: 추월 동기화 — 실행 직전에 측정(둘째 입력)이 상태를 앞질러 명령(첫째 입력)
+            쪽에 있으면 상태를 측정으로 다시 시드한다. on_disable이 「꺼진 축은 측정을
+            추적한다」라면 이것은 「켜진 축에서도 기준이 기체보다 뒤처지지 않는다」다.
+            의미론은 `codegen/blockspec.py`의 `resync_state`가 정본이고, 지원 블록은
+            `RESYNC` 표뿐이다(지금은 CommandFilter — 실행기·생성기가 조립 시점에 거부한다)
     group: 기능축 이름표 — `grouped()`가 찍는다. 생성 C의 분할 단위이고 실행에는
             영향이 없다 (Python 실행기는 읽지 않는다)
     """
 
     kind = "block"
     group = None
+    # 기본은 클래스 값이고 켤 때만 인스턴스에 선다 — `group`과 같은 모양이다. 켜진 노드만 필드를 가지므로
+    # 안 쓰는 그래프의 노드 모양은 그대로이고, 켜진 노드는 영향성 노드 서명(pipeline/influence.py)이 읽는다
+    resync = False
 
     def __init__(
         self,
@@ -119,6 +127,7 @@ class Node:
         enable=None,
         on_disable=None,
         disabled_output=0.0,
+        resync=False,
     ):
         _check_ident(id, "노드 id")
         self.id = id
@@ -129,12 +138,16 @@ class Node:
         self.enable = enable
         self.on_disable = dict(on_disable or {})
         self.disabled_output = float(disabled_output)
+        if resync:
+            self.resync = True
         if not self.inputs:
             raise ValueError(f"{id}: 입력이 없는 블록 노드 — 상수는 파라미터로 둔다")
         for port in self.gains:
             _check_ident(port, f"{id} 게인 포트")
         if self.on_disable and self.enable is None:
             raise ValueError(f"{id}: on_disable은 enable과 함께여야 의미가 있다")
+        if self.resync and len(self.inputs) != 2:
+            raise ValueError(f"{id}: resync는 (명령, 측정) 두 입력 노드에만 — 입력 {len(self.inputs)}개")
 
     @property
     def refs(self):
@@ -156,6 +169,7 @@ class Op:
     gains = {}
     on_disable = {}
     disabled_output = 0.0
+    resync = False  # 상태가 없으니 동기화할 것도 없다 — Node와 같은 모양으로 읽히게만 둔다
 
     def __init__(self, id, op, inputs=(), value=None, enable=None):
         _check_ident(id, "노드 id")

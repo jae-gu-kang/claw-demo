@@ -1,9 +1,10 @@
 // 설계 형상 → 코드 텍스트(Python·C 헤더) + 검토 자료 생성 검증 (코드 생성 기능의 로직)
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  cLiteral, cMacro, diffParams, genCHeader, genPython, genSnapshotC, genSnapshotPython,
+  cLiteral, cMacro, compareCacheHit, diffParams, genCHeader, genPython, genSnapshotC, genSnapshotPython,
   notesToComment, numDisplay, paramWarnings, pyLiteral, refFields, traceRows, UNBOUNDED, wrapItems,
 } from "./codegen.js";
 
@@ -259,4 +260,24 @@ test("기체 설계값 기준의 나머지 갈래 — 무변경 적용·50% 이�
   const c = genCHeader(spec({ ...design, phi_max: 0.9 }, { baseline: design })).code;
   assert.match(c, /편집값 \(기체 설계값 대비 1개 변경\)/);
   assert.match(c, /← 설계 0\.7/);
+});
+
+test("compareCacheHit: 대조 기체 지문 캐시는 id와 리비전이 둘 다 같을 때만 — 저장 기체를 고치면 다시 받는다", () => {
+  const cached = { id: "showcase-delta", revision: 4, param_fingerprint: "aaa" };
+  assert.equal(compareCacheHit(cached, "showcase-delta", 4), true);
+  // 그사이 저장(새 리비전) — id만 같으면 옛 파라미터 지문을 지금 것처럼 대조한다
+  assert.equal(compareCacheHit(cached, "showcase-delta", 5), false);
+  assert.equal(compareCacheHit(cached, "example-delta", 4), false);
+  // 리비전을 모르면 다시 받는다
+  assert.equal(compareCacheHit(cached, "showcase-delta", null), false);
+  assert.equal(compareCacheHit({ id: "x", revision: null }, "x", null), false);
+  assert.equal(compareCacheHit(null, "showcase-delta", 4), false);
+});
+
+// 뷰(views/autocode.js)는 DOM을 모듈 스코프에서 만져 import할 수 없다 — 배선은 원문에서 읽는다(influence.test.js와 같은 가드)
+test("Autocode 탭 배선 — 대조 기체 캐시는 지금 리비전으로 판정하고, 캐시에 리비전을 싣는다", () => {
+  const src = readFileSync(new URL("../views/autocode.js", import.meta.url), "utf8");
+  assert.match(src, /if \(!compareCacheHit\(compareOther, other, head\?\.revision \?\? null\)\)/);
+  assert.doesNotMatch(src, /compareOther\?\.id !== other/, "id만으로 캐시하던 자리로 돌아가지 않는다");
+  assert.match(src, /compareOther = \{ id: other, revision: got\.profile\?\.revision \?\? null,/);
 });

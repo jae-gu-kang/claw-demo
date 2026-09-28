@@ -29,10 +29,19 @@ def _root() -> Path:
     return Path(os.environ.get("CLAW_WORLD_DATA", "data/geo"))
 
 
+def _default_model_root() -> Path:
+    return Path(__file__).resolve().parents[3] / "models"  # 모노레포 루트/models (app.py _default_web_dir와 같은 수법)
+
+
 def _model_root() -> Path:
     """모델 GLB의 뿌리. 지형과 **다른 꾸러미**라 경로도 따로 둔다 — 지형은 재생성이
-    네트워크를 타지만 모델은 리포에 실려 오고, 폐쇄망에서 둘의 반입 시점이 다르다."""
-    return Path(os.environ.get("CLAW_MODEL_DATA", "models"))
+    네트워크를 타지만 모델은 리포에 실려 오고, 폐쇄망에서 둘의 반입 시점이 다르다.
+
+    **기본값은 작업 폴더가 아니라 리포에 매단다.** 모델은 리포에 실려 오므로 리포 기준 자리가
+    곧 정본이다. 종전의 CWD 상대 `"models"`는 리포 루트 밖에서 기동한 서버(워크트리 검증 기동기,
+    테스트 러너의 `server/` 작업 폴더)에서 「모델 폴더가 없습니다 (models)」가 되어 기체를
+    아예 못 그렸다(쇼케이스 e2e 실측). 다른 자리는 여전히 `CLAW_MODEL_DATA`로 준다."""
+    return Path(os.environ.get("CLAW_MODEL_DATA") or _default_model_root())
 
 
 def _scan_models() -> tuple[dict[str, Path], list[str], list[str]]:

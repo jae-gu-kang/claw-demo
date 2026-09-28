@@ -149,6 +149,26 @@ def influence_structural(req: InfluenceIn, request: Request) -> dict:
     return payload
 
 
+# 진단(엔진 diagnose_run — 규칙 1~5 + metric_values)이 읽는 신호. 84개 중 이것만 먼저 파싱한다 — 통째로 읽으면
+# 예제 750 s 본문(107 MB)에서 서버 힙 +216 MB였다(Render 무료 512 MB), 골라 읽으면 +145 MB(S1 475 s는 +135 → +92).
+# 남은 몫은 엔진이 실제로 읽는 55개 신호의 파싱본(파이썬 float 목록)이다. 목록은 S1 기본 미션·예제 750 s
+# 본문에 감시 dict를 넣어 잰 합집합에 조건부로만 읽히는 자리(FF 없는 형상의 ap_alt_raw, 트림 여유 분해의
+# mach·wow)를 더한 것이다. **미리 읽기 힌트**다 — 엔진이 이 밖의 신호를 읽어도 store.PickedEntries가 그 줄을
+# 마저 파싱해 답은 통째 읽기와 같다(메모리만 더 든다). 어긋나면 test_influence의 감시 테스트가 빨개진다.
+DIAGNOSE_SIGNALS = frozenset({
+    "V", "h", "hdot", "psi", "pn", "pe", "mach", "wow", "on_rail", "launch_gx",
+    "cmd_alt", "alt_cmd_filt", "alt_on", "cmd_speed", "spd_cmd_filt", "speed_on",
+    "cmd_heading", "hdg_cmd_filt", "heading_on",
+    "de", "da", "dr", "thr_l", "thr_r", "alloc_pitch_hi", "alloc_roll_hi",
+    "pitch", "pitch_raw", "pitch_pi", "pitch_damp", "roll", "roll_raw", "roll_pi", "roll_damp",
+    "yaw", "yaw_raw", "yaw_pi", "yaw_damp",
+    "theta_cmd", "theta_hi", "ap_theta_raw", "ap_alt_raw", "ap_alt_pi", "ap_alt_damp", "ap_pitch_ff",
+    "ap_spd_pi", "ap_hdg_pi",
+    "i_pitch", "i_roll", "i_yaw", "i_alt", "i_spd", "i_hdg",
+    "limiter_active", "alpha_margin",
+})
+
+
 class DiagnoseIn(InfluenceIn):
     """진단 요청 — 형상(InfluenceIn) + 저장된 sim 결과 id."""
 
@@ -166,7 +186,8 @@ def influence_diagnose(req: DiagnoseIn, request: Request) -> dict:
     다르면 **오류가 아니라 경고**다: 진단은 내되 계보가 다름을 화면이 알아야 한다.
     """
     t0 = time.perf_counter()
-    payload = _load_sim(request, req.result_id)
+    # 쓰는 신호만 먼저 파싱한다(DIAGNOSE_SIGNALS) — 전 해상도는 그대로, 고르기만 한다
+    payload = _load_sim(request, req.result_id, picked=DIAGNOSE_SIGNALS)
     profile = resolve_profile(request, req.profile)
     try:
         criteria = GainEvalCriteria.from_dict(req.criteria)

@@ -4,10 +4,12 @@
  * 정본이고, 이 파일은 그 값을 화면이 쓸 수 있는 형태로 옮겨 둔 것이다. 브라우저는
  * 빌드 단계가 없어 JSON을 정적으로 읽어 올 수 없으므로 **옮겨 적는 것이 불가피**하고,
  * 대신 `site.test.js`가 두 파일을 대조해 어긋나면 빨개진다 — `data/geodesy-fixture.json`을
- * 엔진·웹 테스트가 함께 읽어 두 구현을 묶는 것과 같은 장치다.
+ * 엔진·웹 테스트가 함께 읽어 두 구현을 묶는 것과 같은 장치다. 활주로 **폭**만은 영상 측정이
+ * 아니라 같은 파일에 출처와 함께 실린 공표 제원이다(아래 runwayWidthM).
  *
- * 같은 좌표가 `data/README.md`의 굽는 명령에도 있다(지형 팩의 원점). 그쪽도 테스트가
- * 본다 — **셋 중 하나만 고치면 막힌다.**
+ * 같은 좌표가 `data/README.md`와 배포 빌드 `render.yaml`의 굽는 명령에도 있다(지형 팩의 원점).
+ * 둘 다 테스트가 본다 — **넷 중 하나만 고치면 막힌다.** 사본은 그 밖에도 있다(서버 미션 초안
+ * `llm_draft.py` — 서버 테스트가 대조, 가상환경 번들) — 목록은 goheung-runway.json `consumers`.
  *
  * ## 여기 두지 않는 것 — 접지 지점 산포
  *
@@ -25,13 +27,21 @@
 
 /** 고흥 국가종합비행성능시험장. 원점은 활주로 **남단 임계**다 —
  *  활주로를 "원점에서 heading 방향 length 구간"으로 그리는 규약
- *  (world/src/scene/SceneController.ts의 활주로 그리기 — 옛 renderer-three.js
+ *  (world/src/core/runway.ts의 runwayDrawing — 옛 renderer-three.js
  *  runwayMarks에서 왔다)과 기본 미션이 북향인 것이 함께 정한다. */
 export const GOHEUNG = {
-  originLatDeg: 34.601303,
-  originLonDeg: 127.212067,
-  runwayHeadingRad: 0.05964, // 진방위 3.417°
+  // 원점·방위는 **도색 중심선** 위다(2026-09-27 보정 — 종전 34.601303 / 127.212067 · 0.05964 rad는 유도로·계류장까지
+  // 든 포장면의 주성분 축이라 남단에서 3.6 m 서쪽이었다. goheung-runway.json centerline_correction).
+  // 보정 전 원점으로 구운 지형 팩·보정 전 결과는 이 값과 원점·방위가 달라 지형·횡편차 판정이 거절된다 — 다시 굽고 다시 돌린다.
+  originLatDeg: 34.601301,
+  originLonDeg: 127.212107,
+  runwayHeadingRad: 0.05682, // 진방위 3.256°
   runwayLengthM: 1205.0,
+  // 활주로 폭 [m] — **공표 제원**이다(길이·방위·좌표와 달리 영상 측정값이 아니다). 출처 인용·확인일과
+  // 항공영상 검산(측면 표지 바깥-바깥 44.9 m)은 goheung-runway.json width_source. 시험장의 다른 활주로
+  // (구활주로 700 m × 24 m)의 폭이 아니다. 착륙 요약의 횡편차 한계(반폭 − 가장자리 여유 → 21 m)가 이
+  // 칸에서 선다(lib/replay.js siteRunwayWidth) — 없으면 그 행은 판정 불가로 선다.
+  runwayWidthM: 45.0,
   // 접지에서 정지까지 (v1.10 200 kg급 예제 실측 — 웹 기본 미션 155 m · 엔진 직선 착륙 155.8 m, 구 합성 기체는 868.8 m) — **예제 기체의 실측이다.**
   // 장소가 아니라 기체(플레어 속도·스키드 마찰)의 값이라 기체 문서 mission_template.sim.rollout_m이 정본이고
   // 이 칸은 그 사본(폴백)이다(missiontemplate.test.js가 대조).

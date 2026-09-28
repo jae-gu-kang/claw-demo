@@ -6,16 +6,24 @@
 요약·저장 구조 설명은 패널이다. 결과 하나를 여는 길은 [브리핑]이 먼저다 —
 정해진 양식(머리·종합 판정·절)이 본문에서 계산으로 즉시 서고(lib/resultbrief.js),
 원본 JSON은 그 안의 접기(옵션)다. LLM 소견서는 별도 패널(키 필요·자유 서술).
+
+브리핑이 요약인 종류(자동 설계·탑재 C 검증)는 그 결과를 **낸 탭**이 전체 화면으로 다시 연다 —
+브리핑 모델의 openIn(store 인계 키 + 탭 해시)이 링크가 된다(lib/resultbrief.js).
+쇼케이스 신호(lib/showcasecue.js): `open({resultId?})`은 행의 [브리핑]과 같은 onView, `opinion({resultId?})`은
+행의 [소견서]와 같은 onOpinion이다(없으면 최신 결과 — 소견서는 소견서 아닌 최신).
 */
 
 import { lineageText } from "../lib/lineage.js";
 import { resultFreshness } from "../lib/freshness.js";
 import { briefModel, jsonPreview, kindLabel } from "../lib/resultbrief.js";
 import { STATUS } from "../lib/plot.js";
+import { revealPanel } from "../lib/reveal.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
 import { store } from "../store.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
+import { launchLimitOf } from "./sim.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
 
 /** 전면에 한 번에 세우는 최대 행 수 [표시 정책].
@@ -40,6 +48,11 @@ let briefAutoOpened = false;
 // LLM 소견서 — 잡·결과 재진입 유지 (시뮬 탭 draftJobId와 같은 규약)
 let opinionJobId = null;
 let lastOpinion = null;
+// 처리 중인 소견서 신호 — 생성 잡이 끝나면(재부착 감시자 중 먼저 끝난 쪽이) 한 번 보고하고 지운다
+let opinionCue = null;
+// 지금 화면의 브리핑·소견서 자리 — 신호가 끝나면 이 자리를 화면에 올린다(목록 아래라 첫 화면 밖이다, e2e D4).
+// 모듈 상태인 이유: 옛 화면의 재부착 감시자가 먼저 끝나 보고해도 올리는 것은 지금 화면이다
+let hosts = { brief: null, opinion: null };
 
 export function render() {
   const listBox = el("div", { class: "tab-sheet" });
@@ -72,8 +85,9 @@ export function render() {
     const view = lastView;
     const { model, id } = view;
     // 신선도 — 계산 시점 지문과 지금 목록 대조. 낡음은 눈에 띄게(이 결과로 지금 기체를 판단하면
-    // 틀린다), 기체 없음은 정보로, 신선·판정 불가는 조용히
-    const fresh = resultFreshness(view.meta?.profile, profileRows);
+    // 틀린다), 기체 없음·문서에 반영됨(자동 설계 결과가 제 표를 반영해 달라진 것뿐)은 정보로, 신선·판정
+    // 불가는 조용히
+    const fresh = resultFreshness(view.meta?.profile, profileRows, id);
     const toneColor = { ok: STATUS.ok, warn: STATUS.warn, bad: STATUS.bad, na: STATUS.na };
     // 원본 JSON은 **펼칠 때 처음** 문자열화한다 — 시뮬 본문(전 해상도, 수 MB)을 브리핑을
     // 열 때마다 만들면 대부분 버려지는 수십 MB 문자열이 매번 생긴다(리뷰 지적).
@@ -103,7 +117,7 @@ export function render() {
           el("td", { class: "hint", style: "padding-right:10px; white-space:nowrap" }, k),
           el("td", {}, v))))),
       fresh.state === "stale" ? el("p", { class: "error-box", style: "margin:0 0 8px" }, fresh.label) : null,
-      fresh.state === "gone" || fresh.state === "unreadable"
+      fresh.state === "gone" || fresh.state === "unreadable" || fresh.state === "applied"
         ? el("p", { class: "hint", style: "margin:0 0 8px" }, fresh.label) : null,
       model.verdict
         ? el("p", { style: "margin:0 0 8px" },
@@ -119,6 +133,13 @@ export function render() {
             el("td", { style: "padding-right:10px; white-space:nowrap" }, k),
             el("td", {}, v))))))
           : el("div", {}, (s.lines ?? []).map((t) => el("p", { style: "max-width:96ch; margin:4px 0" }, t))))),
+      // 그 결과를 낸 탭이 전체 화면으로 다시 연다 — 인계 키에 id를 두고 간다(받는 탭이 한 번 읽고 지운다)
+      model.openIn
+        ? el("p", { style: "margin-top:10px" },
+            el("a", { href: model.openIn.href,
+              onclick: () => store.set(model.openIn.key, { resultId: id, from: "results" }) },
+            `${model.openIn.label} →`))
+        : null,
       jsonFold,
       el("p", { class: "hint", style: "margin-top:6px" },
         el("a", { href: `/api/results/${id}`, target: "_blank" }, "원본 JSON (새 탭)"),
@@ -134,7 +155,11 @@ export function render() {
     try {
       const body = await api.get(`/results/${m.id}`);
       if (my !== viewSeq) return; // 그사이 다른 행을 열었다
-      lastView = { id: m.id, meta: m, model: briefModel(m, body), body, preview: null };
+      // 시뮬 착륙 요약의 발사하중 판정 — 시뮬 탭·투어 마무리와 같은 한계 조회(그 런의 기체 문서
+      // structural.n_x_launch, views/sim.js launchLimitOf). 던지지 않는다 — 못 받으면 사유가 행에 선다
+      const launchLimit = m.kind === "sim" ? await launchLimitOf(body.meta) : undefined;
+      if (my !== viewSeq) return;
+      lastView = { id: m.id, meta: m, model: briefModel(m, body, { launchLimit }), body, preview: null };
     } catch (e) {
       if (my !== viewSeq) return;
       lastView = { id: m.id, error: errorText(e) };
@@ -185,22 +210,40 @@ export function render() {
         if (cancelledWithoutResult(job)) {
           clear(opinionErrBox).append(el("div", { class: "error-box" },
             "취소됨 — 저장된 소견서 없음"));
+          settleOpinionCue(new Error("취소됨 — 저장된 소견서 없음"));
           return;
         }
         lastOpinion = await api.get(`/results/${job.result_id}`);
         paintOpinion();
         drawers.open("opinion"); // 결과가 사는 패널을 열어 준다 (전 탭 규약)
         load(); // 목록에도 「소견서 (LLM)」 행이 선다
+        settleOpinionCue(null, job.result_id);
       } catch (e) {
         clear(opinionErrBox).append(el("div", { class: "error-box" }, errorText(e)));
+        settleOpinionCue(e);
       }
     },
     onError: (e) => {
       opinionJobId = null;
       paintList();
       clear(opinionErrBox).append(el("div", { class: "error-box" }, errorText(e)));
+      settleOpinionCue(e);
     },
   });
+
+  // 소견서 신호의 끝 — 성공이면 소견서 머리줄, 실패면 사유(취소·생성 오류 포함)
+  const settleOpinionCue = (error, resultId = null) => {
+    const cue = opinionCue;
+    if (!cue) return;
+    opinionCue = null;
+    if (error) {
+      failCue(cue, error instanceof Error && !error.status ? error.message : errorText(error));
+      return;
+    }
+    revealPanel(hosts.opinion); // 소견서 패널 — 떠난 화면이면 굴리지 않는다
+    reportCue(cue, { phase: "done", summary: lastOpinion?.headline || "(제목 없음)", resultId,
+      data: { resultId, parent: lastOpinion?.parent ?? null, parent_kind: lastOpinion?.parent_kind ?? null } });
+  };
 
   // await 앞의 동기 플래그 — opinionJobId만 보면 POST 왕복 사이의 더블클릭이
   // 유료 잡을 두 번 만든다 (리뷰 지적: 워처가 첫 잡을 고아로 만들고 둘 다 과금)
@@ -212,12 +255,14 @@ export function render() {
       clear(opinionErrBox);
       const submitted = await api.post("/llm/brief", { result_id: id });
       opinionJobId = submitted.id;
+      if (opinionCue) reportCue(opinionCue, { phase: "started", jobId: submitted.id });
       paintList();
       drawers.open("opinion"); // 진행이 이 패널에 산다 — 누른 자리에서 보이게 바로 연다
       watchOpinion();
     } catch (e) {
       drawers.open("opinion");
       clear(opinionErrBox).append(el("div", { class: "error-box" }, errorText(e)));
+      settleOpinionCue(e);
     } finally {
       opinionSubmitting = false;
     }
@@ -237,6 +282,7 @@ export function render() {
       llm = { available: false, reason: `상태 조회 실패 — ${errorText(e)}` };
     }
     paintList(); // 버튼 활성·사유가 실제 상태를 말하게 다시 그린다
+    return llm;
   };
 
   const drawers = createDrawers({
@@ -341,8 +387,18 @@ export function render() {
   } else {
     clear(listBox).append(el("p", { class: "hint" }, "불러오는 중…"));
   }
-  load();
-  loadLlm();
+  hosts = { brief: briefBox, opinion: opinionBox };
+  // 쇼케이스 신호 — 한 번 읽고 지운다. 목록이 선 뒤에 행의 버튼과 같은 함수로 처리한다
+  const cue = takeCue("results");
+  // 신호가 브리핑을 고른다 — 목록 도착 시의 「최신 결과 자동 열림」이 끼어들어 두 번 열지 않게
+  if (cue?.action === "open") briefAutoOpened = true;
+  const loaded = load();
+  const llmReady = loadLlm();
+  if (cue) {
+    runCue(cue, { loaded, llmReady, onView, onOpinion: (id) => onOpinion(id),
+      busy: () => !!opinionJobId || opinionSubmitting })
+      .catch((e) => failCue(cue, errorText(e)));
+  }
   // 재진입 — 마지막 브리핑 복원. 로딩 중에 떠났다 왔으면 다시 건다: 진행 중이던 옛
   // render의 continuation은 분리된 옛 DOM만 갱신해 화면이 「불러오는 중」에 멈춘다
   // (viewSeq가 올라가 옛 응답은 버려진다 — 소견서의 watchOpinion 재부착과 같은 규약)
@@ -363,6 +419,62 @@ export function render() {
     tabStage(listBox),
     drawers.root,
   );
+}
+
+/** 신호 처리 — open은 행의 [브리핑], opinion은 행의 [소견서]와 같은 함수다. 끝에 done/failed를 반드시 보고한다. */
+async function runCue(cue, { loaded, llmReady, onView, onOpinion, busy }) {
+  if (cue.action !== "open" && cue.action !== "opinion") {
+    unknownAction(cue);
+    return;
+  }
+  await loaded;
+  if (!items) {
+    failCue(cue, "결과 목록을 불러오지 못했다");
+    return;
+  }
+  const rid = cue.args?.resultId ?? null;
+  if (cue.action === "open") {
+    const meta = rid ? items.find((m) => m.id === rid) : items[0];
+    if (!meta) {
+      failCue(cue, rid ? `결과 ${rid}가 목록에 없다(보존 상한에 밀렸을 수 있다)` : "저장된 결과가 없다");
+      return;
+    }
+    await onView(meta);
+    if (!lastView || lastView.id !== meta.id) {
+      failCue(cue, "그사이 다른 결과의 브리핑이 열렸다");
+    } else if (lastView.error) {
+      failCue(cue, lastView.error);
+    } else {
+      const m = lastView.model;
+      // 브리핑은 목록(최대 50행) 아래 패널이라 y≈1160이다 — 진행기가 다음 단계로 가기 전에 올린다
+      revealPanel(hosts.brief);
+      reportCue(cue, { phase: "done", summary: m.verdict?.text ?? m.title, resultId: meta.id,
+        data: { resultId: meta.id, kind: meta.kind, tone: m.verdict?.tone ?? null } });
+    }
+    return;
+  }
+  // opinion — LLM이 없으면 서버가 말한 사유로 실패한다(진행기는 이 단계를 건너뜀으로 싣는다)
+  const llmState = await llmReady;
+  if (!llmState?.available) {
+    failCue(cue, `LLM 불가 — ${llmState?.reason ?? "사유 없음"}`);
+    return;
+  }
+  // 소견서의 소견서는 만들지 않는다(서버 422) — 없으면 소견서 아닌 최신
+  const meta = rid ? items.find((m) => m.id === rid) : items.find((m) => m.kind !== "llm_brief");
+  if (!meta) {
+    failCue(cue, rid ? `결과 ${rid}가 목록에 없다(보존 상한에 밀렸을 수 있다)` : "소견서를 쓸 결과가 없다");
+    return;
+  }
+  if (meta.kind === "llm_brief") {
+    failCue(cue, "소견서에는 소견서를 만들지 않는다");
+    return;
+  }
+  if (busy() || opinionCue) {
+    failCue(cue, "소견서가 이미 생성 중이다");
+    return;
+  }
+  opinionCue = cue;
+  await onOpinion(meta.id);
 }
 
 /** [소견서] 버튼 — 못 누르는 상태는 끄되 사유를 title로 낸다 (조용한 비활성 금지). */
@@ -404,7 +516,7 @@ function renderList(box, list, all, onToggle, opinion, onView, rows) {
       el("td", {}, kindLabel(m.kind),
         // 코드도 함께 낸다 — 우리말 이름만 내면 API·다른 화면과 대조가 안 된다
         el("span", { class: "hint", style: "margin-left:6px" }, m.kind ?? "")),
-      el("td", {}, aircraftCell(m.profile), freshnessChip(m.profile, rows)),
+      el("td", {}, aircraftCell(m.profile), freshnessChip(m.profile, rows, m.id)),
       el("td", { class: "num" }, m.id),
       el("td", { class: "num" }, m.n ?? "—"),
       el("td", { class: "num" }, lineageText(m)),
@@ -417,11 +529,15 @@ function renderList(box, list, all, onToggle, opinion, onView, rows) {
   ))));
 }
 
-/** 신선도 칩 — 계산 시점 지문과 지금 목록의 지문 대조(lib/freshness.js). 신선·판정 불가는 조용하다. */
-function freshnessChip(p, rows) {
-  const f = resultFreshness(p, rows);
+/** 신선도 칩 — 계산 시점 지문과 지금 목록의 지문 대조(lib/freshness.js). 신선·판정 불가는 조용하다.
+ *  결과 id를 넘긴다 — 제 게인 표를 문서에 반영한 자동 설계 결과는 낡음이 아니라 「문서에 반영됨」이다. */
+function freshnessChip(p, rows, resultId) {
+  const f = resultFreshness(p, rows, resultId);
   if (f.state === "stale") {
     return el("span", { class: "flag bad", style: "margin-left:6px", title: f.label }, "낡음");
+  }
+  if (f.state === "applied") {
+    return el("span", { class: "flag ok", style: "margin-left:6px", title: f.label }, "문서에 반영됨");
   }
   if (f.state === "gone") {
     return el("span", { class: "flag na", style: "margin-left:6px", title: f.label }, "기체 없음");

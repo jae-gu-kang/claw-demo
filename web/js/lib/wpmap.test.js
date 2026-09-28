@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  CRUISE_ALT_DEFAULT, DEFAULT_SPAN, DRAG_PX, SPAN_MAX, SPAN_MIN, WHEEL_ZOOM_DIVISOR,
+  DEFAULT_SPAN, DRAG_PX, SPAN_MAX, SPAN_MIN, WHEEL_ZOOM_DIVISOR,
   ZOOM_STEP, defaultWaypointAlt, fillMissingAltitudes,
   fitView, fmtMeters, hitTest, isDrag,
   makeProjection, moveWaypoint, panBy, planProfile, profileHitTest, profileScale,
@@ -267,22 +267,25 @@ test("defaultWaypointAlt: **고도 없는 목록에는 값을 넣지 않는다**
   assert.equal(defaultWaypointAlt(0, 0, none, opt), null); // 원점도 마찬가지 — 목록을 따른다
   // 빈 문자열·공백만 있는 것도 "고도 없음"이다
   assert.equal(defaultWaypointAlt(5000, 3000, [{ n: "1", e: "2", d: "  " }], opt), null);
-  // **빈 목록**은 첫 점이므로 값을 준다 (여기서 고도 있는 목록이 시작된다)
-  assert.equal(defaultWaypointAlt(8000, 0, [], opt), String(CRUISE_ALT_DEFAULT));
+  // **빈 목록**은 첫 점이므로 값을 준다 (여기서 고도 있는 목록이 시작된다) — 출처가 있으면
+  assert.equal(defaultWaypointAlt(8000, 0, [], { ...opt, cruiseAlt: 200 }), "200");
   assert.equal(defaultWaypointAlt(0, 0, [], opt), "0");
   // 하나라도 차 있으면 "고도 있는 목록" — 섞인 상태는 이미 무효라 값을 준다
   assert.equal(defaultWaypointAlt(8000, 0, [{ n: "1", e: "2" }, { n: "3", e: "4", d: "700" }], opt), "700");
 });
 
-test("defaultWaypointAlt: 직전이 비면 순항 [기본값] — 목록의 첫 점", () => {
+test("defaultWaypointAlt: 직전이 비면 순항 고도(모드 표) — 웹은 고도 상수를 들지 않는다", () => {
   const opt = { acceptRadius: 1500 };
-  assert.equal(defaultWaypointAlt(8000, 0, [], opt), String(CRUISE_ALT_DEFAULT));
-  // 호출측이 순항값을 정할 수 있다 (기본값을 뷰가 재기술하지 않게)
-  assert.equal(defaultWaypointAlt(8000, 0, [], { ...opt, cruiseAlt: 900 }), "900");
+  // 호출측이 순항값(경로 모드 고도 — lib/wpcheck.js pathAlt)을 넘긴다
+  assert.equal(defaultWaypointAlt(8000, 0, [], { ...opt, cruiseAlt: 200 }), "200");
+  assert.equal(defaultWaypointAlt(8000, 0, [], { ...opt, cruiseAlt: "450" }), "450");
+  // 출처가 없으면 **지어내지 않는다** — 종전 700 m(구 1200 kg 기체의 상승 경사)가 순항 200 m 기체의
+  // 표를 채웠다. 빈 목록의 첫 점도 고도 없음(null)으로 시작한다
+  assert.equal(defaultWaypointAlt(8000, 0, [], opt), null);
   // null·""·0·음수는 0으로 통과하면 안 된다 — Number(null)===0 함정
-  for (const bad of [null, "", 0, -100, NaN, "abc"]) {
-    assert.equal(defaultWaypointAlt(8000, 0, [], { ...opt, cruiseAlt: bad }),
-      String(CRUISE_ALT_DEFAULT), `cruiseAlt=${JSON.stringify(bad)}`);
+  for (const bad of [null, "", "  ", 0, -100, NaN, "abc"]) {
+    assert.equal(defaultWaypointAlt(8000, 0, [], { ...opt, cruiseAlt: bad }), null,
+      `cruiseAlt=${JSON.stringify(bad)}`);
   }
 });
 
@@ -291,10 +294,15 @@ test("defaultWaypointAlt: 착륙점(0)은 물려받지 않는다 — 원점 밖�
   // 전부 지상 고도를 받는다 — 라이브에서 지도 먼 곳을 찍었는데 0이 들어왔다
   const opt = { acceptRadius: 1500 };
   const landed = [{ n: "8000", e: "0", d: "700" }, { n: "0", e: "0", d: "0" }];
-  assert.equal(defaultWaypointAlt(8000, 8000, landed, opt), String(CRUISE_ALT_DEFAULT));
+  // 순항 고도가 있으면 그것 — 없으면 목록이 이미 나는 가장 높은 고도(사용자 계획 안의 값)
   assert.equal(defaultWaypointAlt(8000, 8000, landed, { ...opt, cruiseAlt: 900 }), "900");
+  assert.equal(defaultWaypointAlt(8000, 8000, landed, opt), "700");
+  assert.equal(defaultWaypointAlt(8000, 8000,
+    [{ n: "1", e: "2", d: "300" }, { n: "3", e: "4", d: "650.5" }, { n: "0", e: "0", d: "0" }], opt), "650.5");
+  // 양수 고도가 하나도 없으면 null — 음수·0은 나는 고도가 아니다
   const neg = [{ n: "1", e: "2", d: "-50" }];
-  assert.equal(defaultWaypointAlt(8000, 8000, neg, opt), String(CRUISE_ALT_DEFAULT));
+  assert.equal(defaultWaypointAlt(8000, 8000, neg, opt), null);
+  assert.equal(defaultWaypointAlt(8000, 8000, neg, { ...opt, cruiseAlt: 200 }), "200");
   // 양수는 그대로 — 문자열 원형 보존 (소수점 표기를 정규화하지 않는다)
   assert.equal(defaultWaypointAlt(8000, 8000, [{ n: "1", e: "2", d: "1250.5" }], opt), "1250.5");
 });
@@ -311,7 +319,8 @@ test("defaultWaypointAlt: 반경이 없거나 비유한이어도 **정확히 원
 test("defaultWaypointAlt: 좌표가 비유한이면 원점 규칙을 안 탄다", () => {
   const opt = { acceptRadius: 1500 };
   assert.equal(defaultWaypointAlt(NaN, 0, [{ n: "1", e: "2", d: "700" }], opt), "700");
-  assert.equal(defaultWaypointAlt(0, undefined, [], opt), String(CRUISE_ALT_DEFAULT));
+  assert.equal(defaultWaypointAlt(0, undefined, [], opt), null);
+  assert.equal(defaultWaypointAlt(0, undefined, [], { ...opt, cruiseAlt: 200 }), "200");
 });
 
 test("defaultWaypointAlt: 비배열 rows는 던진다 — 빈 목록으로 눙치지 않는다", () => {
@@ -328,17 +337,30 @@ test("fillMissingAltitudes: 새 점 하나 얹은 뒤 부르면 빈 행 전부�
   // defaultWaypointAlt가 새 점도 null을 내 셋 다 계속 비어 있었다(사용자가 매번
   // 손으로 채워야 했던 그 동작). 이 함수는 반대로 셋 다 채운다.
   const rows = [{ n: "2600", e: "0" }, { n: "3300", e: "0" }, { n: "4000", e: "0" }];
-  const out = fillMissingAltitudes(rows, { acceptRadius: 200 });
+  const opt = { acceptRadius: 200, cruiseAlt: 200 };
+  const out = fillMissingAltitudes(rows, opt);
   assert.equal(out, rows, "제자리 수정 — 사본이 아니다");
   assert.ok(rows.every((r) => String(r.d).trim() !== ""), "빈 행이 하나도 안 남는다");
   // 하나씩 순서대로 찍었을 때와 같은 값이어야 한다: 첫 행은 "빈 목록"이라 순항
-  // 기본값, 둘째부터는 직전(양수) 상속 — defaultWaypointAlt 단독 호출과 대조한다
+  // 고도, 둘째부터는 직전(양수) 상속 — defaultWaypointAlt 단독 호출과 대조한다
   const seq = [];
   for (const r of rows) {
-    const d = defaultWaypointAlt(Number(r.n), Number(r.e), seq, { acceptRadius: 200 });
+    const d = defaultWaypointAlt(Number(r.n), Number(r.e), seq, opt);
     seq.push({ ...r, d });
   }
   assert.deepEqual(rows.map((r) => r.d), seq.map((r) => r.d));
+  assert.deepEqual(rows.map((r) => r.d), ["200", "200", "200"], "순항 고도가 목록 전체에");
+});
+
+test("fillMissingAltitudes: 순항 고도를 모르면 **전부 빈 채로** — 섞인 목록을 만들지 않는다", () => {
+  // 첫 점이 null이면 뒤 점도 "고도 없는 목록"을 보고 null을 낸다 — 전부 없음 규칙이 그대로 선다
+  const rows = [{ n: "2600", e: "0" }, { n: "3300", e: "0" }];
+  fillMissingAltitudes(rows, { acceptRadius: 200 });
+  assert.ok(rows.every((r) => r.d === undefined), JSON.stringify(rows));
+  // 원점 첫 행은 착륙 고도 0을 받지만 뒤 행에 물려줄 양수 고도가 없다 — 지어내지 않고 빈 채(제출 검증이 짚는다)
+  const fromOrigin = [{ n: "0", e: "0" }, { n: "3000", e: "0" }];
+  fillMissingAltitudes(fromOrigin, { acceptRadius: 100 });
+  assert.deepEqual(fromOrigin.map((r) => r.d), ["0", undefined]);
 });
 
 test("fillMissingAltitudes: 이미 값이 있는 행은 손대지 않는다 — 사용자가 고친 값을 안 덮는다", () => {

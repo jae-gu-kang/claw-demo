@@ -190,6 +190,39 @@ def test_design_envelope_endpoint(client):
                       params={"alt": 1000.0, "fuel": "inf"}).status_code == 422
 
 
+def test_design_envelope_takes_q_max_and_operating_altitudes_from_the_document(client):
+    """질의가 비면 기체 문서의 q_max·운용 고도 — 문서에 실기체 값이 있는데 폼이 비었다고 경계를 빼면 그 기체의
+    엔벨로프가 아니다. 출처는 bounds_source로 칸마다, 문서 값을 하나라도 쓴 응답에만 싣는다(예제 골든 보존)."""
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="ops-delta", name="운용 한계 기체", is_example=False, variants=[])
+    d["structural"]["q_max"] = 20000.0
+    d["operating"].update(alt_min=500.0, alt_max=6000.0)
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    base = {"fuel": 200.0, "profile_id": "ops-delta"}
+
+    b = client.get("/api/analysis/design-envelope", params=base).json()
+    assert (b["bounds"]["q_max"], b["bounds"]["alt_min"], b["bounds"]["alt_max"]) == (20000.0, 500.0, 6000.0)
+    assert b["bounds"]["alt_max_is_display_default"] is False
+    assert b["bounds"]["qbar_mach"] is not None and "qbar" in b["region"]["hi_source"]
+    assert b["bounds_source"] == {"q_max": "profile", "alt_min": "profile", "alt_max": "profile"}
+    assert b["limits_source"] == "profile"  # 구조 한계 출처(±n·M_NO·M_D)는 종전 필드 그대로
+    # 질의가 이긴다 — 칸마다
+    q = client.get("/api/analysis/design-envelope", params={**base, "q_max": 15000.0, "alt_max": 4000.0}).json()
+    assert (q["bounds"]["q_max"], q["bounds"]["alt_min"], q["bounds"]["alt_max"]) == (15000.0, 500.0, 4000.0)
+    assert q["bounds_source"] == {"q_max": "query", "alt_min": "profile", "alt_max": "query"}
+    # 전부 질의가 주면 문서 값을 쓰지 않은 응답 — 종전 모양(키 없음)
+    allq = client.get("/api/analysis/design-envelope",
+                      params={**base, "q_max": 15000.0, "alt_min": 0.0, "alt_max": 4000.0}).json()
+    assert "bounds_source" not in allq
+    # 섞여서 서열이 어긋나면 사용자가 넣지 않은 문서 값을 사유에 밝힌다
+    bad = client.get("/api/analysis/design-envelope", params={**base, "alt_min": 7000.0})
+    assert bad.status_code == 422 and "기체 문서 값" in bad.json()["detail"] and "alt_max=6000" in bad.json()["detail"]
+    # 문서 값이 전부 null인 예제는 종전 응답 그대로(서버 골든 design_envelope가 바이트로 지킨다)
+    assert "bounds_source" not in client.get("/api/analysis/design-envelope", params={"fuel": 200.0}).json()
+
+
 def test_design_envelope_maneuver_and_iso_params(client):
     """n_z·등고선 파라미터 — 미지정이면 엔진이 정하고, 지정하면 그대로 전달."""
     base = client.get("/api/analysis/design-envelope", params={"fuel": 200.0}).json()
@@ -546,3 +579,288 @@ def test_bode_refuses_what_it_cannot_linearize(client):
     # n_points 상한 — 교차 탐색 격자 폭주 차단
     assert client.post("/api/analysis/bode", json={
         "case": _BODE_CASE, "loop": _PITCH_LOOP, "n_points": 99999}).status_code == 422
+
+
+# ── 법칙 게인 루프 (gain_source "profile") — 칸마다 그 칸에서 기체가 실제로 나는 게인 ─────────────
+# 요청 게인 루프는 루프마다 kp 하나라 스케줄 게인을 한 마하에서 읽어 전 칸에 쓰면 그 마하 열 밖은 근사였다
+# (쇼케이스 기체 격자 20칸 중 4칸만 정확 — 판정까지 뒤집힌다). 법칙 게인 루프는 서버가 조립 법칙에서 칸마다 읽는다
+_RATE_LOOPS = (("pitch_q", "lon", "q", "de", "pitch"), ("roll_p", "lat", "p", "da", "roll"),
+               ("yaw_r", "lat", "r", "dr", "yaw"))
+
+
+def _law_loop(name, axis, x_out, u_in, _group=None):
+    return {"name": name, "axis": axis, "x_out": x_out, "u_in": u_in, "sign": -1.0, "gain_source": "profile"}
+
+
+def _run_map(client, wait_job, body):
+    r = client.post("/api/analysis/margin-map", json=body)
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"])
+    assert j["status"] == "done", j
+    return client.get(f"/api/results/{j['result_id']}").json()
+
+
+def _law_of(client, pid, variant=None):
+    """저장소의 그 기체 문서 → 조립 법칙 — 2단 개루프(openloop)와 같은 조립 경로(make_law)."""
+    from claw.pipeline.influence import Shape, make_law
+    from claw.profile import build_profile
+
+    doc = client.get(f"/api/profiles/{pid}").json()["document"]
+    built = build_profile(doc, variant)
+    return built, make_law(Shape(profile=built))
+
+
+def test_margin_map_law_gains_are_each_cells_own_openloop_gain(client, wait_job):
+    """쇼케이스 기체 격자에서 칸마다 게인이 openloop.effective_gain(그 칸)과 비트 같고, 마진은 그 게인을 요청
+    kp로 적은 같은 격자 맵의 그 칸과 비트 같다 — 서버가 스케줄 산식을 따로 적지 않고 법칙을 칸에서 읽는다는 증명.
+    한 kp 근사였다면 마하마다 다른 게인이 한 값으로 뭉친다."""
+    from claw.pipeline.openloop import effective_gain
+    from claw.profile import SHOWCASE_ID
+    from claw.common.contracts import TrimCase
+
+    assert client.post("/api/profiles/_showcase/install").status_code == 200
+    built, law = _law_of(client, SHOWCASE_ID)
+    g = built.doc["mission_template"]["trim_grid"]
+    step = g["mach"]["step"]
+    n = round((g["mach"]["to"] - g["mach"]["from"]) / step)
+    machs = [g["mach"]["from"], g["mach"]["from"] + step * (n // 2), g["mach"]["to"]]  # 템플릿 격자 양끝·가운데
+    cases = [{"name": f"c{i}", "mach": m, "alt": g["alt"][0], "fuel": g["fuel"][0]} for i, m in enumerate(machs)]
+    prof = {"id": SHOWCASE_ID}
+    body = _run_map(client, wait_job, {"profile": prof, "cases": cases,
+                                       "loops": [_law_loop(*lp) for lp in _RATE_LOOPS]})
+
+    # echo — 법칙 게인 루프는 kp·ki 없이 gain_source만(그대로 보드선도 요청에 되실린다), 출처는 결과와 함께
+    assert body["loops"] == [_law_loop(*lp) for lp in _RATE_LOOPS]
+    tables = law.schedule.tables
+    assert body["profile_gains"] == {
+        "basis": "confirmed" if built.doc["law"]["gain_tables"] is not None else "rule",
+        "loops": {name: {"kp": {"slot": f"{grp}.k_rate", "scheduled": f"{grp}.k_rate" in tables}}
+                  for name, *_, grp in _RATE_LOOPS},
+    }
+    entries = body["cases"]
+    assert all(e["trim"]["converged"] for e in entries)  # 픽스처 전제 — 템플릿 격자 안쪽
+    for e in entries:
+        c = e["trim"]["case"]
+        case = TrimCase(c["name"], mach=c["mach"], alt=c["alt"], fuel=c["fuel"])
+        for name, *_, grp in _RATE_LOOPS:
+            assert e["gains"][name] == {"kp": effective_gain(law, grp, "k_rate", case), "ki": 0.0}, (c, name)
+    # 격자 안에서 게인이 실제로 달라진다 — 같다면 이 테스트는 한 kp 근사와 구분하지 못한다
+    assert len({e["gains"]["pitch_q"]["kp"] for e in entries}) == len(entries)
+
+    # 마진 — 그 칸의 게인을 요청 kp로 적은 같은 격자(같은 순서 = 같은 웜스타트 트림) 맵의 그 칸과 비트 같다. 같은 축의
+    # 나머지 루프를 닫고 끊으므로(broken_loop) 세 루프를 함께 — 닫아 둔 루프도 그 칸의 게인이어야 같은 수다
+    for e in entries:
+        ref = _run_map(client, wait_job, {"profile": prof, "cases": cases, "loops": [
+            {"name": name, "axis": axis, "x_out": x_out, "u_in": u_in, "kp": e["gains"][name]["kp"], "ki": 0.0,
+             "sign": -1.0} for name, axis, x_out, u_in, _grp in _RATE_LOOPS]})
+        twin = next(r for r in ref["cases"] if r["trim"]["case"]["name"] == e["trim"]["case"]["name"])
+        for name, *_ in _RATE_LOOPS:
+            assert e["margins"][name] == twin["margins"][name], (name, e["trim"]["case"]["name"])
+        assert "gains" not in twin and "profile_gains" not in ref  # 요청 게인 맵은 종전 모양
+
+    # 보드선도 — 결과의 루프 echo를 그대로 되실어도 같은 칸 게인으로 같은 곡선(칸과 곡선이 같은 게인)
+    e = entries[-1]
+    t = e["trim"]
+    b = client.post("/api/analysis/bode", json={
+        "profile": prof, "case": t["case"], "loop": body["loops"][0],
+        "z0": [t["euler"][1], t["control"]["elevon"][0], t["control"]["throttle"][0]]})
+    assert b.status_code == 200, b.text
+    bj = b.json()
+    assert bj["gains"] == e["gains"]["pitch_q"] and bj["loop"] == body["loops"][0]
+    assert bj["profile_gains"]["loops"] == {"pitch_q": body["profile_gains"]["loops"]["pitch_q"]}
+    for k in ("pm_deg", "wcp"):
+        assert bj["margins"][k] == pytest.approx(e["margins"]["pitch_q"][k], rel=1e-6, abs=1e-9), k
+
+
+def test_margin_map_law_gains_mix_with_request_gains_and_name_the_constant_slots(client, wait_job):
+    """예제 기체(규칙 스케줄 — 피치 k_rate는 스케줄, 요 k_rate는 설계 상수): 스케줄 자리는 칸마다 다르고 상수
+    자리는 전 칸 같으며, 출처가 그 구분을 말한다. 손으로 적은 루프는 같은 요청 안에서 요청 kp 그대로다."""
+    from claw.profile import EXAMPLE_ID
+
+    _built, law = _law_of(client, EXAMPLE_ID)
+    tables = law.schedule.tables
+    assert "pitch.k_rate" in tables and "yaw.k_rate" not in tables  # 픽스처 전제
+    hand = {"name": "roll_hand", "axis": "lat", "x_out": "p", "u_in": "da", "kp": -0.4, "ki": 0.0, "sign": -1.0}
+    body = _run_map(client, wait_job, {**_margin_map_request(), "loops": [
+        _law_loop(*_RATE_LOOPS[0]), _law_loop(*_RATE_LOOPS[2]), hand]})
+    assert body["profile_gains"] == {"basis": "rule", "loops": {
+        "pitch_q": {"kp": {"slot": "pitch.k_rate", "scheduled": True}},
+        "yaw_r": {"kp": {"slot": "yaw.k_rate", "scheduled": False}}}}
+    assert body["loops"][2] == hand  # 요청 게인 루프 echo는 종전 모양(gain_source 키 없음)
+    entries = body["cases"]
+    assert len({e["gains"]["pitch_q"]["kp"] for e in entries}) > 1
+    assert {e["gains"]["yaw_r"]["kp"] for e in entries} == {float(law.scas.cfg["yaw"]["k_rate"])}
+    assert all(set(e["gains"]) == {"pitch_q", "yaw_r"} for e in entries)  # 손으로 적은 루프는 칸 게인 기록이 없다
+    assert all(set(e["margins"]) == {"pitch_q", "yaw_r", "roll_hand"} for e in entries)
+
+
+def test_margin_map_law_gain_loops_are_validated(client):
+    base = _margin_map_request()
+    law_loop = _law_loop(*_RATE_LOOPS[0])
+    # 게인을 두 곳에서 받지 않는다 — 어느 쪽으로 쟀는지 결과에서 흐려진다
+    for extra in ({"kp": 0.5}, {"ki": 0.1}, {"kp": None}):
+        r = client.post("/api/analysis/margin-map", json={**base, "loops": [{**law_loop, **extra}]})
+        assert r.status_code == 422, extra
+    # 법칙 자리 선언(GROUP_LOOPS)이 없는 루프는 법칙 게인을 읽을 자리가 없다
+    undeclared = {**law_loop, "name": "sideslip", "axis": "lat", "x_out": "v", "u_in": "dr"}
+    r = client.post("/api/analysis/margin-map", json={**base, "loops": [undeclared]})
+    assert r.status_code == 422 and "GROUP_LOOPS" in r.text
+    assert client.post("/api/analysis/margin-map",
+                       json={**base, "loops": [{**law_loop, "sign": 0.0}]}).status_code == 422
+    # 요청 게인 루프는 여전히 kp가 필수다
+    no_kp = {k: v for k, v in base["loops"][0].items() if k != "kp"}
+    r = client.post("/api/analysis/margin-map", json={**base, "loops": [no_kp]})
+    assert r.status_code == 422 and "kp 필요" in r.text
+    assert client.post("/api/analysis/bode", json={"case": _BODE_CASE, "loop": {**law_loop, "kp": 0.5}}).status_code == 422
+
+
+def test_margin_map_law_gains_refuse_a_law_that_does_not_assemble(client):
+    """확정 게인 표가 낡은 문서는 조립이 거부한다(시뮬·코드 422) — 법칙 게인 루프도 같은 422다. 기체가 날 게인이
+    없는데 다른 표(규칙 스케줄)로 재서 그 기체의 마진인 척하지 않는다. 요청 게인 루프는 조립과 무관하게 선다."""
+    from claw.profile import SHOWCASE_ID
+
+    assert client.post("/api/profiles/_showcase/install").status_code == 200
+    doc = client.get(f"/api/profiles/{SHOWCASE_ID}").json()["document"]
+    if doc["law"]["gain_tables"] is None:
+        pytest.skip("쇼케이스 문서에 확정 게인 표가 없다 — 낡음 경로를 만들 수 없다")
+    doc.update(id="stale-tables", name="낡은 확정 표", variants=[])
+    doc["law"]["design"]["autopilot"]["tau_alt"] *= 1.5  # 설계값 변경 → 표의 기준 지문과 어긋남(플랜트는 그대로)
+    assert client.post("/api/profiles", json={"document": doc}).status_code == 201
+    m = doc["mission_template"]["trim_grid"]["mach"]["from"]
+    req = {"profile": {"id": "stale-tables"}, "cases": [{"mach": m, "alt": 200.0, "fuel": 10.0}],
+           "loops": [_law_loop(*_RATE_LOOPS[0])]}
+    r = client.post("/api/analysis/margin-map", json=req)
+    assert r.status_code == 422 and r.json()["detail"]["path"] == "/law/gain_tables"
+    b = client.post("/api/analysis/bode", json={**req, "case": req["cases"][0], "loop": req["loops"][0]})
+    assert b.status_code == 422 and b.json()["detail"]["path"] == "/law/gain_tables"
+    hand = {"name": "pitch_q", "axis": "lon", "x_out": "q", "u_in": "de", "kp": 0.3, "sign": -1.0}
+    assert client.post("/api/analysis/margin-map", json={**req, "loops": [hand]}).status_code == 202
+
+
+def test_margin_map_law_gain_zero_everywhere_is_a_meaningless_loop(client):
+    """법칙 게인이 격자 전 칸에서 0인 루프는 요청 kp=ki=0 루프와 같은 422 — 재면 무의미한 inf 마진이 칠해진다."""
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="no-yaw-damper", name="요 댐퍼 없음", is_example=False, variants=[])
+    d["law"]["design"]["scas"]["yaw"]["k_rate"] = 0.0  # 예제는 요 k_rate를 스케줄하지 않는다 — 전 칸 설계 상수 0
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    req = {**_margin_map_request(), "profile": {"id": "no-yaw-damper"}, "loops": [_law_loop(*_RATE_LOOPS[2])]}
+    r = client.post("/api/analysis/margin-map", json=req)
+    assert r.status_code == 422 and "yaw_r" in r.json()["detail"] and "0" in r.json()["detail"]
+    b = client.post("/api/analysis/bode", json={"profile": {"id": "no-yaw-damper"}, "case": _BODE_CASE,
+                                               "loop": _law_loop(*_RATE_LOOPS[2])})
+    assert b.status_code == 422 and "0" in b.json()["detail"]
+
+
+def test_margin_map_law_gain_zero_in_some_cells_leaves_those_cells_blank_with_a_reason(client, wait_job):
+    """법칙 게인이 **일부 칸에서만** 0이면 그 칸만 마진 없이 사유(note) — 0 게인으로 재면 무의미한 inf 마진이 초록으로
+    칠해진다. 확정 표 값만 고친 문서는 표의 기준 지문(표 절 밖)이 그대로라 낡지 않는다."""
+    from claw.profile import SHOWCASE_ID
+
+    assert client.post("/api/profiles/_showcase/install").status_code == 200
+    doc = client.get(f"/api/profiles/{SHOWCASE_ID}").json()["document"]
+    if doc["law"]["gain_tables"] is None or "yaw.k_rate" not in doc["law"]["gain_tables"]["tables"]:
+        pytest.skip("쇼케이스 문서에 요 k_rate 확정 표가 없다")
+    t = doc["law"]["gain_tables"]["tables"]["yaw.k_rate"]
+    lo, hi = doc["mission_template"]["trim_grid"]["mach"]["from"], doc["mission_template"]["trim_grid"]["mach"]["to"]
+    cut = max(m for m in t["axes"]["mach"] if m < hi)  # hi 아래 마지막 격자점까지 0 — lo 칸은 0, hi 칸은 0이 아님
+    assert cut > lo
+    t["data"] = [0.0 if m <= cut else v for m, v in zip(t["axes"]["mach"], t["data"])]
+    doc.update(id="yaw-gap", name="요 댐퍼 저속 공백", variants=[])
+    assert client.post("/api/profiles", json={"document": doc}).status_code == 201
+    cases = [{"name": "lo", "mach": lo, "alt": 200.0, "fuel": 10.0}, {"name": "hi", "mach": hi, "alt": 200.0, "fuel": 10.0}]
+    body = _run_map(client, wait_job, {"profile": {"id": "yaw-gap"}, "cases": cases,
+                                       "loops": [_law_loop(*_RATE_LOOPS[0]), _law_loop(*_RATE_LOOPS[2])]})
+    e_lo, e_hi = body["cases"]
+    assert e_lo["gains"]["yaw_r"] == {"kp": 0.0, "ki": 0.0} and e_hi["gains"]["yaw_r"]["kp"] > 0.0
+    assert set(e_lo["margins"]) == {"pitch_q"} and "yaw_r" in e_lo["note"]  # 그 칸의 그 루프만 비고 사유가 붙는다
+    assert set(e_hi["margins"]) == {"pitch_q", "yaw_r"} and e_hi["note"] is None
+    b = client.post("/api/analysis/bode", json={"profile": {"id": "yaw-gap"}, "case": e_lo["trim"]["case"],
+                                               "loop": body["loops"][1]})
+    assert b.status_code == 422 and "0" in b.json()["detail"]
+
+
+# ── 끊는 자리 — 같은 축의 나머지 루프를 닫고 끊는다 (엔진 broken_loop, AS94900 · e2e D2) ──────────────────
+
+_ROLL_HAND = {"name": "roll_p", "axis": "lat", "x_out": "p", "u_in": "da", "kp": -0.3, "ki": 0.0, "sign": -1.0}
+_YAW_HAND = {"name": "yaw_r", "axis": "lat", "x_out": "r", "u_in": "dr", "kp": 0.9, "ki": 0.0, "sign": -1.0}
+_ACT = {"actuator": {"wn": 30.0, "zeta": 0.7}, "delay_s": 0.035}
+
+
+def _cells(body, name):
+    return {e["trim"]["case"]["name"]: e["margins"][name] for e in body["cases"] if name in e["margins"]}
+
+
+def test_margin_map_closes_the_other_loops_of_the_same_axis(client, wait_job):
+    """roll_p·yaw_r(같은 횡축)는 서로를 닫고 끊는다 — 칸의 마진이 엔진 broken_loop(나머지 닫힘)의 nyquist_margins와
+    같고 closed_with가 닫아 둔 루프를 말한다. 다른 축 루프(pitch_q)는 닫지 않는다 — 종전 값·종전 키 그대로.
+    close_others를 끄면 루프마다 그 루프 하나만 있는 축(종전 방식)이라 한 루프짜리 요청과 같은 수다."""
+    from claw.analysis import broken_loop, nyquist_margins
+    from claw.profile import load_example, build_profile
+    from claw.trim import linearize, split_axes, trim_batch
+    from claw.common.contracts import TrimCase
+    from claw_server.serialize import to_jsonable
+
+    req = {**_margin_map_request(), **_ACT, "loops": [_PITCH_LOOP, _ROLL_HAND, _YAW_HAND]}
+    body = _run_map(client, wait_job, req)
+    for e in body["cases"]:
+        assert e["margins"]["roll_p"]["closed_with"] == ["yaw_r"]
+        assert e["margins"]["yaw_r"]["closed_with"] == ["roll_p"]
+        assert "closed_with" not in e["margins"]["pitch_rate"]
+    # 엔진 대조 — 같은 웜스타트 순서로 트림해 같은 선형화점에서
+    ac = build_profile(load_example(), None).aircraft()
+    cases = [TrimCase(name=e["trim"]["case"]["name"], mach=e["trim"]["case"]["mach"],
+                      alt=e["trim"]["case"]["alt"], fuel=e["trim"]["case"]["fuel"]) for e in body["cases"]]
+    trs = trim_batch(ac, cases, fingerprint="fp-mm")
+    ad = {"actuator_wn": 30.0, "actuator_zeta": 0.7, "delay_s": 0.035, "pade_order": 2}
+    yaw = {k: _YAW_HAND[k] for k in ("x_out", "u_in", "kp", "ki", "sign")}
+    for tr, e in zip(trs, body["cases"]):
+        _lon, lat = split_axes(linearize(ac, tr))
+        want = nyquist_margins(broken_loop(lat, "p", "da", -0.3, others=[yaw], **ad))
+        got = {k: v for k, v in e["margins"]["roll_p"].items() if k != "closed_with"}
+        assert got == to_jsonable(want), tr.case.name
+
+    # 끄면 종전 — 한 루프짜리 요청과 같은 칸
+    off = _run_map(client, wait_job, {**req, "close_others": False})
+    alone = _run_map(client, wait_job, {**req, "loops": [_ROLL_HAND]})
+    assert _cells(off, "roll_p") == _cells(alone, "roll_p")
+    assert _cells(off, "roll_p") != _cells(body, "roll_p")  # 닫는 것이 실제로 수를 바꾼다(아니면 이 테스트가 무의미)
+    assert _cells(off, "pitch_rate") == _cells(body, "pitch_rate")  # 다른 축은 무관
+
+
+def test_margin_map_does_not_close_an_alternative_loop_on_the_same_slot(client, wait_job):
+    """같은 자리(p←δa)의 kp만 다른 사본은 한 루프의 대안이다 — 서로 닫지 않는다(한 센서·한 타면에 되먹임 둘이 아니다)."""
+    alt = {**_ROLL_HAND, "name": "roll_p_alt", "kp": -0.2}
+    body = _run_map(client, wait_job, {**_margin_map_request(), **_ACT, "loops": [_ROLL_HAND, alt]})
+    alone = _run_map(client, wait_job, {**_margin_map_request(), **_ACT, "loops": [_ROLL_HAND]})
+    assert _cells(body, "roll_p") == _cells(alone, "roll_p")
+    assert all("closed_with" not in m for m in _cells(body, "roll_p_alt").values())
+
+
+def test_bode_closes_the_same_others_as_the_cell(client, wait_job):
+    """칸의 closed_with 루프를 결과 echo에서 그대로 others로 실으면 보드선도가 그 칸과 같은 조립·같은 마진이다.
+    다른 축 루프를 others로 실으면 422 — 닫을 수 없는 루프를 조용히 버리지 않는다."""
+    req = {**_margin_map_request(), **_ACT, "loops": [_ROLL_HAND, _YAW_HAND]}
+    body = _run_map(client, wait_job, req)
+    e = body["cases"][1]
+    t = e["trim"]
+    z0 = [t["euler"][1], t["control"]["elevon"][0], t["control"]["throttle"][0]]
+    loops = {lp["name"]: lp for lp in body["loops"]}
+    b = client.post("/api/analysis/bode", json={
+        "case": t["case"], "loop": loops["roll_p"], "others": [loops["yaw_r"]], **_ACT, "z0": z0})
+    assert b.status_code == 200, b.text
+    got, want = b.json()["margins"], e["margins"]["roll_p"]
+    assert got["closed_with"] == ["yaw_r"]
+    for k in ("pm_deg", "wcp", "gm_db", "wcg"):
+        assert got[k] == pytest.approx(want[k], rel=1e-6, abs=1e-9), k
+    # others 없이 — 종전 단독 조립(칸과 다르다)
+    solo = client.post("/api/analysis/bode", json={
+        "case": t["case"], "loop": loops["roll_p"], **_ACT, "z0": z0}).json()["margins"]
+    assert "closed_with" not in solo and solo["pm_deg"] != pytest.approx(want["pm_deg"], rel=1e-6)
+    bad = client.post("/api/analysis/bode", json={
+        "case": t["case"], "loop": loops["roll_p"], "others": [_PITCH_LOOP], **_ACT, "z0": z0})
+    assert bad.status_code == 422 and "같은 축" in bad.text
+    dup = client.post("/api/analysis/bode", json={
+        "case": t["case"], "loop": loops["roll_p"], "others": [loops["roll_p"]], **_ACT, "z0": z0})
+    assert dup.status_code == 422 and "중복" in dup.text

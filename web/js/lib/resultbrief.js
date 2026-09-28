@@ -9,8 +9,16 @@
  * 새로 판정하지 않는다 — 그건 그 결과를 낸 탭의 몫이다.
  */
 
+import {
+  actionCards, actuatorLine, adoptBlockedText, applyGateReason, coverageLines, excludedSamplesModel,
+  failureRoleText, fitFactsModel, fitModeLabel, pointRows, resumable, resumeBlockedText, reverifyLines,
+  statusCounts, statusSeverity, statusText,
+} from "./autodesign.js";
 import { FQ_BADGE, FQ_RANK, fqMeasureText, fqWorst } from "./fq.js";
-import { FLAG_LABEL, landingSummary } from "./replay.js";
+import { lineageText } from "./lineage.js";
+import { marginUnstable, unstableCells, unstableTail } from "./loops.js";
+import { FLAG_LABEL, landingSummary, siteRunwayWidth } from "./replay.js";
+import { covCell, identLine, mcdcCell, statusFlag, verdictModel } from "./verify.js";
 
 // 산출물 종류의 우리말 이름 — 서버가 내는 것은 코드다. 모르는 코드는 **그대로** 낸다
 // (임의로 "기타"로 뭉치면 새 종류가 생겼다는 사실이 화면에서 사라진다).
@@ -58,7 +66,8 @@ function headRows(meta) {
     ["종류", `${kindLabel(meta.kind)} (${meta.kind ?? "—"})`],
     ["생성", meta.created ? new Date(meta.created * 1000).toLocaleString() : "—"],
     ["기체", p ? `${p.name ?? p.id}${p.variant ? ` · ${p.variant}` : ""} · 리비전 ${p.revision ?? "—"} · 지문 ${p.fingerprint ?? "—"}` : "—"],
-    ["계보 지문", meta.fingerprint || "—"],
+    // 결과 목록의 계보 칸과 같은 표기 — 탑재 C 검증은 엔진 발급 두 지문(구조·값)이다(lib/lineage.js)
+    ["계보 지문", lineageText(meta)],
     ["건수", meta.n != null ? String(meta.n) : "—"],
   ];
 }
@@ -106,10 +115,10 @@ function trimBrief(body) {
 function marginBrief(body) {
   const cases = body.cases ?? [];
   const loops = (body.loops ?? []).map((lp) => lp.name);
-  // 루프별 최악 PM·GM — 유한값 중 최소. "inf"(무한 여유)는 최악 후보가 아니고,
+  // 루프별 최악 PM·GM — 안정 칸의 유한값 중 최소(발산 칸은 따로 센다). "inf"(무한 여유)는 최악 후보가 아니고,
   // null(판정 불가)은 따로 센다 — 뭉치면 "교차 없음"이 "여유 넉넉"으로 위장된다
   const loopRows = loops.map((name) => {
-    let pm = null, gm = null, naCount = 0;
+    let pm = null, gm = null, naCount = 0, divCount = 0;
     for (const c of cases) {
       const m = c.margins?.[name];
       if (!m) {
@@ -118,12 +127,20 @@ function marginBrief(body) {
         naCount += 1;
         continue;
       }
+      // 이 루프를 닫은 폐루프가 발산하는 칸(엔진 closed_loop.stable === false) — 그 칸의 PM·GM은 안정 여유가 아니라
+      // 루프 교차의 고전 판독이다. 최악 최소에 섞으면 「최악 PM 82°」 같은 거짓 안심이 되므로 빼고 「발산 N칸」으로 따로
+      // 센다(마진 맵 탭 캡션·진행기 보고와 같은 판정 — lib/loops.js marginUnstable)
+      if (marginUnstable(m)) {
+        divCount += 1;
+        continue;
+      }
       const p = m.pm_deg, g = m.gm_db;
       if (typeof p === "number" && Number.isFinite(p) && (!pm || p < pm.v)) pm = { v: p, at: c.trim.case.name };
       if (typeof g === "number" && Number.isFinite(g) && (!gm || g < gm.v)) gm = { v: g, at: c.trim.case.name };
       if (p == null || g == null) naCount += 1;
     }
     const part = [];
+    if (divCount) part.push(`발산 ${divCount}칸`); // 발산이 먼저 — 여유 수치보다 무겁다
     part.push(pm ? `최악 PM ${num(pm.v, 1)}° (${pm.at})` : "PM —");
     part.push(gm ? `최악 GM ${num(gm.v, 1)} dB (${gm.at})` : "GM — (전부 ∞ 또는 판정 불가)");
     if (naCount) part.push(`판정 불가 ${naCount}건`);
@@ -138,7 +155,11 @@ function marginBrief(body) {
     const measure = j ? ` (${fqMeasureText(mode, j)} @ ${caseName})` : "";
     return [label, `${b.label}${measure}`];
   });
-  const tone = worstKey == null ? "na" : worstKey === 1 ? "ok" : worstKey === 2 ? "warn" : "bad";
+  const fqTone = worstKey == null ? "na" : worstKey === 1 ? "ok" : worstKey === 2 ? "warn" : "bad";
+  // 폐루프 발산 칸 — 본문이 싣고 있는 판정(closed_loop.stable)의 집계라 새 판정선이 아니다. 하나라도 있으면
+  // 종합은 부족(bad)이고 한 줄의 첫머리에 온다(비행성 수준이 1이어도 발산은 결함이다)
+  const bad = unstableCells(cases, body.loops ?? []);
+  const tone = bad.length ? "bad" : fqTone;
   const composition = [
     ["케이스·루프", `${cases.length}건 · ${loops.length}개`],
     ["작동기", body.actuator ? `wn ${num(body.actuator.wn)} · ζ ${num(body.actuator.zeta)}` : "미포함"],
@@ -148,9 +169,9 @@ function marginBrief(body) {
   return {
     verdict: {
       tone,
-      text: worstKey == null
+      text: (bad.length ? `${unstableTail(bad)} · ` : "") + (worstKey == null
         ? "비행성 수준 판정 없음(구버전 결과) — 마진 합격 판정은 마진 맵 탭이 한다"
-        : `비행성 수준 최악 ${FQ_BADGE[worstKey].label} — 마진 합격 판정(PM·GM 판정선)은 마진 맵 탭이 한다`,
+        : `비행성 수준 최악 ${FQ_BADGE[worstKey].label} — 마진 합격 판정(PM·GM 판정선)은 마진 맵 탭이 한다`),
     },
     sections: [
       { title: "루프별 최악 마진", rows: loopRows.length ? loopRows : [["루프", "없음 — 고유치·감쇠비만 계산한 결과"]] },
@@ -187,15 +208,19 @@ function envelopeBrief(body) {
   };
 }
 
-function simBrief(body) {
+function simBrief(body, _meta, { launchLimit } = {}) {
   const t = body.t ?? [];
   const meta = body.meta ?? {};
   const env = body.envelope ?? {};
   const nSig = Object.keys(body.signals ?? {}).length;
   const wps = meta.waypoints;
   // 착륙 요약 — 시뮬 탭 재생과 **같은 계산**(lib/replay.js landingSummary). 강하율·속도는
-  // 엔진이 전 해상도에서 재어 meta.phases에 실은 값이다 — 여기서 다시 계산하지 않는다
-  const landing = landingSummary(body);
+  // 엔진이 전 해상도에서 재어 meta.phases에 실은 값이다 — 여기서 다시 계산하지 않는다.
+  // 판정 재료도 시뮬 탭과 같다: 활주로 폭은 같은 한 자리(siteRunwayWidth — 그 런이 고흥 활주로를 썼을
+  // 때만), 발사하중 한계는 그 런의 기체 문서(views/sim.js launchLimitOf — 조회라 이 순수 모델이 못 하고
+  // 조립(views/results.js)이 받아 넘긴다). 안 넘기면 두 행이 「대조하지 않았다, 판정 불가」로 선다 —
+  // 종전에는 둘 다 안 넘겨, 시뮬 탭이 「폭 안」이라 한 같은 런을 브리핑은 판정 불가라 말했다
+  const landing = landingSummary(body, { runwayWidth: siteRunwayWidth(meta.runway), launchLimit });
   // α리미터 작동률·이탈 표본은 본문 신호·플래그의 단순 집계다 — 새 판정선이 아니다.
   // 표본 수/분모를 함께 낸다: 4만 표본 중 1표본이 "0 %"로 접히면 데이터가 있는데
   // 0으로 보인다("0 위조 금지"의 이웃 — 리뷰 지적). 분모가 있어야 1이 몇 초인지 읽힌다
@@ -270,6 +295,130 @@ function llmBriefBrief(body) {
   };
 }
 
+/** 자동 설계 — 종료 상태·판정 규모·처방·커버리지·게인 반출. 문구·판정은 자동 설계 탭과 **같은
+ *  함수**(lib/autodesign.js)에서 온다 — 두 화면이 같은 결과를 다르게 말하지 않게. 운영점 표·원장·
+ *  처방 카드 전문은 자동 설계 탭 보고서(openIn)가 연다. */
+function autoDesignBrief(body, meta) {
+  const r = body.report ?? {};
+  const status = r.status ?? null;
+  const tone = { ok: "ok", warn: "warn", fail: "bad", na: "na" }[statusSeverity(status)] ?? "na";
+  const judged = Number(r.judged) || 0;
+  const failures = Number(r.failures) || 0;
+  const c = statusCounts(pointRows(body));
+  const cards = actionCards(body);
+  const pts = r.points ?? {};
+  const pointText = ["ok", "warn", "fail"].map((k) => `${k} ${c[k]}`)
+    .concat(c.na ? [`na ${c.na}`] : [], c.unjudged ? [`미판정 ${c.unjudged}`] : [],
+      c.outside ? [`엔벨로프 경계 ${c.outside}(판정 제외)`] : []).join(" · ");
+  const ge = body.gain_export ?? null;
+  const nSched = Object.keys(ge?.tables ?? {}).length;
+  const nConst = Object.keys(ge?.constants ?? {}).length;
+  const gaps = coverageLines(r);
+  // 탭 상태 줄·진행기 보고와 같은 함수 — 실패가 앵커(튜닝 성립)인지 점 사이(스케줄 성립)인지,
+  // 검증받은 것이 반출 표 그 자체(표)인지 재양자화 근사(다항)인지
+  const where = failureRoleText(r.failures_by_role);
+  const act = actuatorLine(body);
+  const excluded = excludedSamplesModel(body);
+  const fitFacts = fitFactsModel(body.fits);
+  const sections = [
+    { title: "상태", lines: [statusText(status)] },
+    { title: "실행 요약", rows: [
+      ["스테이지 · 이터레이션", `${r.stage ?? "—"} · ${Number(r.iterations) || 0}`],
+      // 표현 기록이 없는 결과는 표현 선택이 생기기 전 것이다 — 그때는 다항뿐이었다(지어내지 않고 그 사실을)
+      ["표현", fitModeLabel(r.fit_mode) ?? "기록 없음 — 표현 선택 이전 결과(다항)"],
+      ["점", `${r.n_points ?? "—"} (앵커 ${pts.anchor ?? "—"} · bp ${pts.breakpoint ?? "—"} · 검증 ${pts.validation ?? "—"})`],
+      ["판정 · 실패", `${judged} · ${failures}` + (where ? ` — 실패 위치 ${where}` : "")],
+      ["작동기", act?.value ?? "기록 없음"],
+      ["운영점 판정", pointText],
+      ["처방 카드", cards.approvable.length
+        ? `${cards.approvable.length}건 — ${resumable(r) ? "승인 후 재개 가능(자동 설계 탭)" : resumeBlockedText(r)}`
+        : "없음"],
+      ["에스컬레이션", cards.escalations.length ? `${cards.escalations.length}건 — 상위 설계 변경 검토(자동 적용 없음)` : "없음"],
+      ["미달 원장", r.ledger_size != null ? `${r.ledger_size}행` : "—"],
+      ["재개 이력", meta?.parent ? `재개한 실행 — 부모 ${meta.parent}` : "처음 실행(재개 아님)"],
+      ["기준 지문", r.criteria_fingerprint ? String(r.criteria_fingerprint).slice(0, 8) : "—"],
+    ] },
+  ];
+  if (gaps.length) {
+    sections.push({ title: "검증 커버리지 — 이 실행이 안 본 것", lines: gaps.map((l) => l.text) });
+  }
+  // 스케줄 표에 무엇이 들어갔나 — 튜닝 실패로 뺀 표본(자리별 사유)·제외 보류·마하 1축이 뭉갠 변동
+  if (excluded || fitFacts?.summary) {
+    sections.push({ title: "게인 스케줄 적합", rows: [
+      ...(excluded
+        ? [["적합 표본 제외", excluded.excludedText ?? "없음"],
+           ...excluded.slots.map((s) => [`제외 · ${s.slot}`, s.text]),
+           ...excluded.withheld.map((h) => ["제외 보류", h.text])]
+        : [["적합 표본 제외", "없음"]]),
+      ...(fitFacts?.summary ? [["적합 보고", fitFacts.summary.replace(/^적합 보고 — /, "")]] : []),
+    ] });
+  }
+  if (ge) {
+    sections.push({ title: "게인 반출", rows: [
+      ["스케줄 · 상수 자리", `${nSched} · ${nConst}`],
+      ["확정(스토어 주입)", adoptBlockedText(r) ?? "가능 — 자동 설계 탭 [게인 확정]"],
+      ["문서 반영", applyGateReason(body.profile)
+        ?? "대상 있음 — 자동 설계 탭 [문서에 반영]. 반영 여부는 기체 탭 「게인·δe_trim」·설계 흐름이 말한다"],
+      ...reverifyLines(ge).map((l) => ["채택 표 재검증", l.text]),
+    ] });
+  }
+  return {
+    verdict: { tone, text: `${status ?? "?"} — 판정 ${judged} · 실패 ${failures}`
+      + (where ? ` (${where})` : "")
+      + (cards.escalations.length ? ` · 에스컬레이션 ${cards.escalations.length}` : "") },
+    sections,
+    openIn: { href: "#autodesign", key: "designOpen",
+      label: "자동 설계 탭에서 보고서 열기 (운영점 표·미달 원장·처방 카드·게인 확정)" },
+  };
+}
+
+/** 탑재 C 검증 — 판정판 요약(검사군·커버리지·구성). 판정 문구는 엔진 요약 행 그대로이고 머리줄은
+ *  검증 탭과 같은 함수(lib/verify.js verdictModel)다. 저장 본문이 소스까지 동봉한 자립 리포트라
+ *  검증 탭이 그대로 다시 그린다(openIn → 판정판·유닛 그리드·커버리지 소스·인쇄 보고서). */
+function verifyBrief(body) {
+  const rep = body.report ?? null;
+  // verdictModel은 fail·pass_with_skips가 아니면 「통과」로 읽는다 — 판정 필드가 없는 본문을
+  // 통과로 위장하지 않게 엔진 판정어 셋 중 하나일 때만 그 모델을 쓴다
+  if (!["pass", "pass_with_skips", "fail"].includes(rep?.verdict)) {
+    return { verdict: { tone: "na", text: "판정 없음 — 저장 본문에 검증 판정(report.verdict)이 없다" },
+      sections: [] };
+  }
+  const v = verdictModel(rep);
+  const t = rep.coverage?.totals;
+  const mc = rep.mcdc;
+  const files = rep.files ?? [];
+  const cases = rep.cases ?? [];
+  const covRows = rep.coverage?.status === "measured" && t
+    ? [
+        ["라인", covCell(t.lines)],
+        ["분기", `${covCell(t.branches)}${rep.coverage.justified?.length ? ` (+정당화 ${rep.coverage.justified.length})` : ""}`],
+        ["MC/DC 조건", mcdcCell(mc?.status === "measured"
+          ? { total: mc.total, covered: mc.covered, justified: mc.justified } : null)],
+      ]
+    : [["측정", `생략 — ${rep.coverage?.reason ?? "사유 없음"}`]];
+  return {
+    verdict: { tone: v.cls === "ok" ? "ok" : v.cls === "bad" ? "bad" : "na", text: `${v.label} — ${v.line}` },
+    sections: [
+      { title: "검사군 (엔진 요약 행)", rows: (rep.summary ?? []).map((r) => [
+        (r.label ?? r.key ?? "?").split(" — ")[0],
+        `${statusFlag(r.status).label}${r.detail ? ` — ${r.detail}` : ""}`]) },
+      { title: "구성", rows: [
+        ["산출물 · 지문", `${rep.artifact ?? "—"} · ${identLine(rep)}`],
+        ["대조 미션", `${rep.t_end ?? "—"} s${rep.steps ? ` · 통합 대조 ${rep.steps.toLocaleString()}스텝` : ""}`],
+        ["생성 파일", `${files.length}개 · ${files.reduce((n, f) => n + (f.lines ?? 0), 0).toLocaleString()}줄`],
+        ["시험 케이스", cases.length
+          ? `${cases.length}건 — 통과 ${cases.filter((c) => c.status === "pass").length}`
+            + ` · 생략 ${cases.filter((c) => c.status === "skip").length}`
+            + ` · 불일치 ${cases.filter((c) => c.status === "fail").length}`
+          : "—"],
+      ] },
+      { title: "구조적 커버리지", rows: covRows },
+    ],
+    openIn: { href: "#verify", key: "verifyOpen",
+      label: "검증 탭에서 전체 보고서 열기 (판정판·유닛 그리드·커버리지 소스·인쇄)" },
+  };
+}
+
 /** 일반 양식 — 본문 최상위 구성을 사실대로. 새 종류가 생겨도 브리핑이 빈손이 되지 않는다. */
 function genericBrief(body) {
   const describe = (v) => {
@@ -293,17 +442,24 @@ const BRIEFERS = {
   margin_map: marginBrief,
   envelope_scan: envelopeBrief,
   sim: simBrief,
+  auto_design: autoDesignBrief,
+  verify_flight: verifyBrief,
   llm_brief: llmBriefBrief,
 };
 
-/** 메타+본문 → 브리핑 모델 {title, head, verdict|null, sections}. 종류별 요약이 없으면 일반 양식. */
-export function briefModel(meta, body) {
-  const part = (BRIEFERS[meta.kind] ?? genericBrief)(body ?? {});
+/** 메타+본문 → 브리핑 모델 {title, head, verdict|null, sections, openIn|null}. 종류별 요약이 없으면
+ *  일반 양식. openIn {href, key, label} — 그 결과를 **낸 탭**이 전체 화면으로 다시 여는 인계(store
+ *  key에 {resultId}를 두고 href로 간다 — 받는 탭이 한 번 읽고 지운다). 없으면 null.
+ *  opts — 이 모델이 스스로 못 받는(조회가 필요한) 판정 재료. 지금은 시뮬의 `launchLimit`(그 런의 기체 문서
+ *  발사하중 한계 — views/sim.js launchLimitOf) 하나다. */
+export function briefModel(meta, body, opts = {}) {
+  const part = (BRIEFERS[meta.kind] ?? genericBrief)(body ?? {}, meta, opts ?? {});
   return {
     title: part.title ?? `${kindLabel(meta.kind)} — ${meta.id}`,
     head: headRows(meta),
     verdict: part.verdict ?? null,
     sections: part.sections ?? [],
+    openIn: part.openIn ?? null,
   };
 }
 

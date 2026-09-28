@@ -10,6 +10,7 @@ import {
   capabilityBox,
   channelRows,
   densityView,
+  dutySummary,
   exceedanceSeries,
   fmtDeg,
   histBars,
@@ -178,4 +179,29 @@ test("viewOf: 모드 선택 시 그 모드의 히스토그램·통계로 갈아�
 test("viewOf: 없는 모드는 조용히 전체로 넘어가지 않고 빈 뷰", () => {
   const v = viewOf(CH, "없는모드");
   assert.equal(v, null);
+});
+
+test("dutySummary: 표의 값을 한 줄로 — 가장 크게 꺾은 타면·포화·동적 여유", () => {
+  const rud = { ...CH, key: "rudder", label: "러더", stats: { ...CH.stats, max_abs: 0.05, max_abs_t: 1 },
+    rate_sat: { time: 0, frac: 0, events: 0, longest: 0 } };
+  const s = dutySummary({ ...REPORT, channels: [CH, rud] });
+  assert.equal(s.line,
+    "타면 2면 · 20.0 s · 최대 |δ| 12.03° @ 12.5 s (엘레본(좌)) · 위치 포화 없음 · rate 포화 엘레본(좌)"
+    + " · 가용 동적 여유 판정 불가");
+  assert.equal(s.data.channels.length, 2);
+  assert.ok(Math.abs(s.data.channels[0].max_abs_deg - 0.21 * DEG) < 1e-9);
+  assert.equal(s.data.channels[0].rate_sat_frac, 0.075);
+  assert.equal(s.data.dyn_reserve_min_frac, null, "지상 출발 — 0이 아니라 미상");
+});
+
+test("dutySummary: 한계 미상은 '없음'이 아니다 · 동적 여유가 있으면 싣는다", () => {
+  const na = { ...CH, pos_sat: null, rate_sat: null };
+  const s = dutySummary({ ...REPORT, channels: [na], trim_reserve: { de_dyn_reserve_min_frac: 0.42 } });
+  assert.match(s.line, /위치 포화 판정 불가 · rate 포화 판정 불가 · 가용 동적 여유 최악 42\.0%/);
+  assert.equal(s.data.channels[0].pos_sat_frac, null);
+  // 일부만 미상이면 "없음"이라 단정하지 않는다
+  const mixed = dutySummary({ ...REPORT, channels: [na, { ...CH, label: "B" }] });
+  assert.match(mixed.line, /위치 포화 없음\(1면 판정 불가\)/);
+  assert.equal(dutySummary({ ...REPORT, channels: [] }), null);
+  assert.equal(dutySummary(null), null);
 });

@@ -130,11 +130,15 @@ def test_파생_문턱은_진단_상수와_같은_값이다():
 
 def test_마진_조성은_자동설계와_같은_값이다():
     """두 화면이 같은 점에서 다른 마진을 말하면 어느 쪽이 정본인지가 사라진다."""
-    from claw.design.orchestrator import AutoDesignConfig
+    from claw.design.orchestrator import AutoDesignConfig, DesignSession
     from claw.pipeline.criteria import MarginComposition
 
     c, a = GainEvalCriteria().composition, AutoDesignConfig()
-    assert c.actuator_wn == a.actuator_wn and c.actuator_zeta == a.actuator_zeta
+    # 자동 설계의 작동기는 기체 문서 값이다(config 없음 = 기체) — 기체도 config도 없을 때의
+    # 폴백이 마진 조성 기본값과 같아야 한다 (두 경로 다 "형상 작동기가 이긴다" 규칙)
+    fallback = DesignSession(a).actuator_used()
+    assert fallback["source"] == {"wn": "default", "zeta": "default"}
+    assert c.actuator_wn == fallback["wn"] and c.actuator_zeta == fallback["zeta"]
     assert c.delay_s == a.delay_s and c.pade_order == a.pade_order
     with pytest.raises(ValueError):
         MarginComposition(actuator_wn=0.0)

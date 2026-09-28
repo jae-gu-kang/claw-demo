@@ -6,7 +6,8 @@
 
 import {
   attitudeAt as rawAttitudeAt, originsAgree as rawOriginsAgree, sampleAt as rawSampleAt,
-  sceneExtent as rawSceneExtent, trackPoints as rawTrackPoints, velocityAt as rawVelocityAt,
+  sceneExtent as rawSceneExtent, trackPoints as rawTrackPoints, vehicleModelPlan as rawVehicleModelPlan,
+  velocityAt as rawVelocityAt,
 } from "../../../js/lib/world3d.js";
 import type { Vec3 } from "./attitude.ts";
 import type { ResultOrigin, Signals } from "../core/types.ts";
@@ -50,4 +51,16 @@ export function originsAgree(
   resultOrigin: ResultOrigin | null | undefined,
 ): { ok: boolean; reason: string | null } {
   return rawOriginsAgree(packOrigin, resultOrigin) as { ok: boolean; reason: string | null };
+}
+
+/** 기체 모델 계획 — 읽을 GLB(없으면 null = 궤적만)·그 사유·출처 캡션. 판정은 원본(`vehicleModelPlan`)이 정본. */
+export interface VehiclePlan { model: string | null; note: string | null; caption: string | null }
+
+/** 이 런의 기체 적용 문서(형상 변형 반영) + 자산 목록 → 기체 모델 계획. */
+export function vehicleModelPlan(
+  doc: unknown,
+  manifest: { models: { name: string }[]; models_reason: string | null } | null,
+  opts: { label?: string; error?: string | null } = {},
+): VehiclePlan {
+  return rawVehicleModelPlan(doc, manifest, opts) as VehiclePlan;
 }

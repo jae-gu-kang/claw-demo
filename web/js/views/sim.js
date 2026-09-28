@@ -4,7 +4,7 @@
 서버(엔진) 소관 — 구성 오류는 422 텍스트로 표시.
 */
 
-import { api, errorText } from "../api.js";
+import { ApiError, api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { COND_KINDS, LON_AXES, pathUsage } from "../lib/mission.js";
 // 요청 조립·기본 미션·실행 조건 기본값은 lib가 정본 — 가이드 투어(views/tour.js)가
@@ -17,10 +17,16 @@ import { planeViews, wpMarks } from "../lib/plot.js";
 import { atEnd as cursorAtEnd, dtSample, indexAt, isPlayable } from "../lib/playcursor.js";
 import { dryRun, normalizeDraft } from "../lib/missiondraft.js";
 import {
-  flaggedNames, landingSummary, modeSpans, pathEscapeNote, strideFor,
+  flaggedNames, idleTail, idleTailNote, landingLine, landingSummary, launchGx, launchLimitFrom, launchLoad, modeSpans,
+  pathEscapeNote, profileDocPath, runProfileRef, siteRunwayWidth, strideFor,
 } from "../lib/replay.js";
 import { GOHEUNG, touchdownWindowM } from "../lib/site.js";
-import { checkWaypoints, flyablePath, pathSpeed } from "../lib/wpcheck.js";
+import { RAD2DEG } from "../lib/geo.js";
+import { checkWaypoints, flyablePath, pathAlt, pathSpeed, turnRadius } from "../lib/wpcheck.js";
+import { dutySummary } from "../lib/duty.js";
+import { effectiveOf } from "../lib/profileform.js";
+import { revealPanel } from "../lib/reveal.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { fillMissingAltitudes, moveWaypoint, rowsToPoints } from "../lib/wpmap.js";
 import { store } from "../store.js";
 import { createTrack3d } from "./plot3d.js";
@@ -40,7 +46,7 @@ import { createProfileChart, createWpMap } from "./wpmap.js";
 // 행을 제자리에서 고치므로 매번 새 사본이어야 한다).
 let modeRows = defaultModeRows();
 let wpRows = defaultWpRows();
-let lastReplay = null; // {body, waypoints, acceptRadius}
+let lastReplay = null; // {body, waypoints, acceptRadius, launchLimit}
 let runningJobId = null;
 // 제출 시점 스냅샷 — 실행 중 편집이 재생 오버레이를 오염시키지 않도록 (리뷰 S3)
 let runningSnapshot = { waypoints: [], acceptRadius: 0 };
@@ -68,6 +74,32 @@ function bankMaxNow() {
   const applied = Number(store.get("autopilotParams")?.phi_max);
   return Number.isFinite(applied) ? applied : apPhiMax;
 }
+/** 보고·사유 문장 — 서버 오류는 errorText(422 목록·ProfileError 평탄화), 그 밖은 메시지만("Error: " 머리 없이). */
+const reasonOf = (e) => (e instanceof ApiError ? errorText(e) : (e?.message ?? String(e)));
+
+/** 런의 발사하중 한계 — **그 런을 난 기체 문서**(meta.profile의 id·형상 변형·리비전)의 structural.n_x_launch.
+ *  돌려주는 것은 lib/replay.js landingSummary의 `launchLimit` 모양({nx, source} | {error}) — 던지지 않는다.
+ *
+ *  지금 헤더에서 고른 문서로 재지 않는 이유: 결과 목록에는 다른 기체(또는 고치기 전 리비전)로 돈 런이 섞이고,
+ *  그 런을 지금 문서의 한계로 판정하면 화면이 남의 기준으로 통과를 말한다. 가이드 투어의 마무리 카드
+ *  (views/tour.js)도 같은 판정을 내려면 이 함수를 부른다 — 조회 경로가 두 벌이 되지 않게 내보낸다. */
+export async function launchLimitOf(meta) {
+  const ref = runProfileRef(meta);
+  if (!ref) return { error: "이 결과에 기체 기록(meta.profile)이 없다" };
+  try {
+    const got = await api.get(profileDocPath(ref));
+    return launchLimitFrom(effectiveOf(got.document, ref.variant), ref);
+  } catch (e) {
+    return { error: `이 런의 기체 문서(${ref.id}${ref.revision == null ? "" : ` r${ref.revision}`})를 받지 못했다 — ${reasonOf(e)}` };
+  }
+}
+
+/** 런의 활주로 폭 — landingSummary의 `runwayWidth`({width, source} | {error}). 폭은 결과에 없어 시험장 제원
+ *  (lib/site.js GOHEUNG — 폭은 공표 제원)에서 받되, 그 런이 **그 활주로**(방위·길이)를 썼을 때만이다(lib/replay.js
+ *  runwayWidthFor). 투어 마무리·결과 브리핑도 같은 판정을 내려면 같은 호출(lib/replay.js siteRunwayWidth)을 쓴다.
+ *  제원에 폭이 없거나 폼에서 활주로를 고친 런이면 사유가 돌아와 횡편차 행이 판정 불가로 선다 — 지어내지 않는다. */
+const runwayWidthOf = (body) => siteRunwayWidth(body?.meta?.runway);
+
 // 지도 줌/팬 상태 — 탭 재진입 시 유지 (wpRows·lastReplay와 동렬)
 let wpMapView = { view: null };
 // 3D 시점(방위·고각) — 재렌더·탭 전환에도 돌려놓은 각도를 잃지 않게
@@ -85,6 +117,10 @@ let simDrawers = null;
 let draftJobId = null;
 let draftIntent = "";
 let lastDraft = null;
+// 쇼케이스 신호(lib/showcasecue.js)가 건 잡 — {cue, jobId, …}. 잡이 끝나면 **한 번** 보고하고 비운다.
+// 모듈 상태인 이유는 runningJobId와 같다: 실행 중 탭을 오가면 감시자가 다시 붙는데, 보고는 한 번이어야 한다
+let simCue = null;
+let draftCue = null;
 
 const PLAY_FRAME_MS = 40; // 25 fps — 캔버스 3장 재그리기에 무리 없는 간격
 
@@ -467,6 +503,8 @@ export function render() {
     // 매번 다시 계산한다(캐시 없음) — 속도는 모드 표, 뱅크 한계는 스토어에서 오므로
     // 둘 중 어느 쪽을 고쳐도 다음 redraw에서 선이 따라와야 한다
     getFlyable: () => flyablePath(rowsToPoints(wpRows), pathSpeed(modeRows), bankMaxNow()),
+    // 새 점의 기본 고도 — 경로 모드가 잡는 고도(모드 표 ← 기체 미션 템플릿). 표의 [웨이포인트 추가]와 같은 출처
+    getCruiseAlt: () => pathAlt(modeRows),
     onRowsChanged: () => { renderWpTable(wpBox, wpMap); drawProfile(); },
     onSelect: (idx) => profileChart.refresh(idx), // 프로파일도 같은 점을 가리키게
     viewRef: wpMapView,
@@ -481,21 +519,34 @@ export function render() {
   // 시작 트림 고도가 계획선의 출발점이다 — 바꾸면 프로파일도 따라 움직여야 한다
   f.alt.addEventListener("input", drawProfile);
 
-  const watch = () => attachProgress(progressBox, runningJobId, {
+  // 이 잡에 걸린 쇼케이스 신호를 꺼낸다 — **지금 방문의 감시자만**. 실행 중 탭을 다시 그리면 옛 감시자도
+  // 같은 잡의 끝을 받는데(progress.js 재부착), 보고가 두 번 나가거나 떨어진 DOM의 감시자가 먼저 보고하지 않게.
+  // 탭을 아예 떠났으면 마지막 방문이 곧 지금 방문이라 그 감시자가 보고한다(보고는 store에만 쓴다)
+  const takeSimCue = (jobId) => {
+    if (!simCue || simCue.jobId !== jobId || visit !== simVisit) return null;
+    const c = simCue;
+    simCue = null;
+    return c;
+  };
+
+  const watch = () => { const watchedId = runningJobId; return attachProgress(progressBox, watchedId, {
     onDone: async (job) => {
       runningJobId = null;
+      const cueHere = takeSimCue(job.id);
       try {
         if (job.status === "error") throw new Error(job.error);
         if (cancelledWithoutResult(job)) {
-          showErr(new Error("취소됨 — 저장된 결과 없음 (실행 전 취소)"));
-          return;
+          throw new Error("취소됨 — 저장된 결과 없음 (실행 전 취소)");
         }
         const stride = strideFor(job.total || 1);
         const body = await api.get(`/sim/${job.result_id}/replay?stride=${stride}`);
+        // 발사하중 한계는 그 런의 기체 문서에서 — 재생과 같이 받아 둔다(재진입해도 다시 묻지 않게)
+        const launchLimit = await launchLimitOf(body.meta);
         lastReplay = {
           body,
           waypoints: runningSnapshot.waypoints,
           acceptRadius: runningSnapshot.acceptRadius,
+          launchLimit,
         };
         store.set("simResult", { id: job.result_id });
         renderReplay(replayBox);
@@ -504,15 +555,46 @@ export function render() {
         dutyInvalidate(); // 새 런이다 — 타면 패널을 다음에 열 때 다시 집계한다
         simDrawers?.open("replay"); // 결과를 찾아 헤매게 하지 않는다
         syncHandoff(); // 넘길 런이 생겼다 — 다음 단계 버튼이 살아난다
+        if (cueHere) reportRunCue(cueHere, job.result_id);
       } catch (e) {
         showErr(e);
+        if (cueHere) failCue(cueHere.cue, reasonOf(e));
       }
     },
     onError: (e) => {
       runningJobId = null;
       showErr(e);
+      const cueHere = takeSimCue(watchedId);
+      if (cueHere) failCue(cueHere.cue, reasonOf(e));
     },
-  });
+  }); };
+
+  /** 제출 한 벌 — [시뮬 실행] 버튼과 쇼케이스 「run」 신호가 같이 쓴다. 던진다(사유는 호출측이 낸다).
+   *  돌려주는 것: 걸린 잡 id. */
+  const submitRun = async () => {
+    if (runningJobId) throw new Error("이미 실행 중입니다 — 진행률 표시를 확인하세요.");
+    clear(errBox);
+    clear(replayBox);
+    // 조립은 **lib 한 벌**이다 — 가이드 투어(views/tour.js)가 같은 함수로 같은
+    // 요청을 만든다. 표가 틀리면 여기서 던진다(검증 정본 buildModes·buildWaypoints).
+    // 적용값(store 5키)은 **제출 순간에** 읽는다.
+    // 기체 기본값이 칸에 앉기 전에 보내지 않는다 — 첫 받기가 실패했다가 지금 받은 문서면 여기서 채운다
+    // (이미 채웠으면 그대로다 — 손대지 않은 칸만 바꾸는 규칙은 같다)
+    const docNow = await selectedDocument().catch(() => null);
+    if (docNow) applyDocDefaults(docNow);
+    const { req, snapshot, missing } = buildSimRequest(
+      readForm(), modeRows, wpRows, appliedFrom((k) => store.get(k)));
+    if (missing.length) {
+      // 편집본 체크됐는데 적용본이 없으면 기본값 실행을 조용히 하지 않고 알림 (리뷰 Nit3)
+      errBox.append(el("div", { class: "error-box" },
+        `적용된 편집값 없음 — 기본값으로 실행됨: ${missing.join(", ")}`));
+    }
+    const submitted = await api.post("/sim/run", req);
+    runningJobId = submitted.id;
+    runningSnapshot = snapshot;
+    watch();
+    return submitted.id;
+  };
 
   const run = async () => {
     if (runningJobId) { // 이중 제출 방지 (리뷰 S4) — 무반응 대신 안내 (조용한 무시 금지)
@@ -521,26 +603,7 @@ export function render() {
       return;
     }
     try {
-      clear(errBox);
-      clear(replayBox);
-      // 조립은 **lib 한 벌**이다 — 가이드 투어(views/tour.js)가 같은 함수로 같은
-      // 요청을 만든다. 표가 틀리면 여기서 던진다(검증 정본 buildModes·buildWaypoints).
-      // 적용값(store 5키)은 **제출 순간에** 읽는다.
-      // 기체 기본값이 칸에 앉기 전에 보내지 않는다 — 첫 받기가 실패했다가 지금 받은 문서면 여기서 채운다
-      // (이미 채웠으면 그대로다 — 손대지 않은 칸만 바꾸는 규칙은 같다)
-      const docNow = await selectedDocument().catch(() => null);
-      if (docNow) applyDocDefaults(docNow);
-      const { req, snapshot, missing } = buildSimRequest(
-        readForm(), modeRows, wpRows, appliedFrom((k) => store.get(k)));
-      if (missing.length) {
-        // 편집본 체크됐는데 적용본이 없으면 기본값 실행을 조용히 하지 않고 알림 (리뷰 Nit3)
-        errBox.append(el("div", { class: "error-box" },
-          `적용된 편집값 없음 — 기본값으로 실행됨: ${missing.join(", ")}`));
-      }
-      const submitted = await api.post("/sim/run", req);
-      runningJobId = submitted.id;
-      runningSnapshot = snapshot;
-      watch();
+      await submitRun();
     } catch (e) {
       showErr(e);
     }
@@ -584,13 +647,30 @@ export function render() {
     }
   };
 
-  const loadLlmStatus = async () => {
-    try {
-      llmStatus = await api.get("/llm/status");
-    } catch (e) {
-      llmStatus = { available: false, reason: `상태 조회 실패 — ${errorText(e)}` };
+  // 조회 약속을 이 render 안에서 나눈다 — 패널 build와 쇼케이스 「draft」 신호가 같은 열림에서 둘 다 부른다
+  let llmStatusLoading = null;
+  const loadLlmStatus = () => {
+    if (!llmStatusLoading) {
+      llmStatusLoading = (async () => {
+        try {
+          llmStatus = await api.get("/llm/status");
+        } catch (e) {
+          llmStatus = { available: false, reason: `상태 조회 실패 — ${errorText(e)}` };
+        }
+        syncDraftUi();
+      })();
     }
-    syncDraftUi();
+    return llmStatusLoading;
+  };
+
+  // 초안의 실행 조건 → 칸 — [표에 적용]과 쇼케이스 「run({useDraft})」(seatDraftForRun)이 같이 쓴다
+  const seatDraftConditions = (rc) => {
+    for (const [k, input] of [["mach", f.mach], ["alt", f.alt], ["fuel", f.fuel],
+      ["tEnd", f.tEnd], ["accept", f.accept]]) {
+      if (rc[k] != null) input.value = rc[k];
+    }
+    if (typeof rc.groundOn === "boolean") f.groundOn.checked = rc.groundOn;
+    if (typeof rc.launchOn === "boolean") f.launchOn.checked = rc.launchOn;
   };
 
   const applyDraft = () => {
@@ -598,13 +678,7 @@ export function render() {
     if (!d || !d.modeRows.length) return; // 버튼 disabled와 같은 조건 — 방어만
     modeRows = d.modeRows.map((r) => ({ ...r }));
     wpRows = d.wpRows.map((r) => ({ ...r }));
-    const rc = d.runConditions;
-    for (const [k, input] of [["mach", f.mach], ["alt", f.alt], ["fuel", f.fuel],
-      ["tEnd", f.tEnd], ["accept", f.accept]]) {
-      if (rc[k] != null) input.value = rc[k];
-    }
-    if (typeof rc.groundOn === "boolean") f.groundOn.checked = rc.groundOn;
-    if (typeof rc.launchOn === "boolean") f.launchOn.checked = rc.launchOn;
+    seatDraftConditions(d.runConditions);
     wpMapView.view = null; // 새 목록에 맞춰 지도 시야 재fit (wpDraft 소비부와 동일)
     renderModeTable(modeBox);
     renderWpTable(wpBox, wpMap);
@@ -658,41 +732,49 @@ export function render() {
     );
   };
 
-  const watchDraft = () => attachProgress(draftProgressBox, draftJobId, {
+  // 이 잡에 걸린 쇼케이스 「draft」 신호 — takeSimCue와 같은 규약(지금 방문의 감시자만, 한 번)
+  const takeDraftCue = (jobId) => {
+    if (!draftCue || draftCue.jobId !== jobId || visit !== simVisit) return null;
+    const c = draftCue;
+    draftCue = null;
+    return c;
+  };
+
+  const watchDraft = () => { const watchedId = draftJobId; return attachProgress(draftProgressBox, watchedId, {
     onDone: async (job) => {
       draftJobId = null;
       syncDraftUi();
+      const cueHere = takeDraftCue(job.id);
       try {
         if (job.status === "error") throw new Error(job.error);
-        if (cancelledWithoutResult(job)) {
-          showDraftErr(new Error("취소됨 — 저장된 초안 없음"));
-          return;
-        }
+        if (cancelledWithoutResult(job)) throw new Error("취소됨 — 저장된 초안 없음");
         const body = await api.get(`/results/${job.result_id}`);
         lastDraft = normalizeDraft(body.draft);
         clear(draftAppliedNote); // 새 초안 — 옛 "적용됨"이 남으면 이 초안을 말하는 것처럼 읽힌다
         paintDraftResult();
+        if (cueHere) reportDraftCue(cueHere.cue, job.result_id);
       } catch (e) {
         showDraftErr(e);
+        if (cueHere) failCue(cueHere.cue, reasonOf(e));
       }
     },
     onError: (e) => {
       draftJobId = null;
       syncDraftUi();
       showDraftErr(e);
+      const cueHere = takeDraftCue(watchedId);
+      if (cueHere) failCue(cueHere.cue, reasonOf(e));
     },
-  });
+  }); };
 
   // await 앞의 동기 플래그 — draftJobId만 보면 POST 왕복 사이의 더블클릭이
   // 유료 잡을 두 번 만든다 (결과 탭 브리핑 리뷰가 잡은 같은 모양의 창)
   let draftSubmitting = false;
-  const runDraft = async () => {
-    if (draftJobId || draftSubmitting) return; // 버튼이 이미 꺼져 있다 — 방어만
+  /** 초안 잡 제출 한 벌 — [초안 생성] 버튼과 쇼케이스 「draft」 신호가 같이 쓴다. 던진다. 돌려주는 것: 잡 id. */
+  const submitDraft = async () => {
+    if (draftJobId || draftSubmitting) throw new Error("초안 생성이 이미 진행 중입니다");
     const intent = draftIntentInput.value.trim();
-    if (!intent) {
-      showDraftErr(new Error("의도 문장을 입력하십시오 — 무엇을 비행할지 한두 문장이면 된다."));
-      return;
-    }
+    if (!intent) throw new Error("의도 문장을 입력하십시오 — 무엇을 비행할지 한두 문장이면 된다.");
     draftSubmitting = true;
     try {
       clear(draftErrBox);
@@ -700,10 +782,17 @@ export function render() {
       draftJobId = submitted.id;
       syncDraftUi();
       watchDraft();
-    } catch (e) {
-      showDraftErr(e);
+      return submitted.id;
     } finally {
       draftSubmitting = false;
+    }
+  };
+  const runDraft = async () => {
+    if (draftJobId || draftSubmitting) return; // 버튼이 이미 꺼져 있다 — 방어만
+    try {
+      await submitDraft();
+    } catch (e) {
+      showDraftErr(e);
     }
   };
   draftRunBtn.onclick = runDraft;
@@ -728,8 +817,11 @@ export function render() {
     "활주로를 켜면 발사대·활주로 위 정지에서 출발합니다 — 그때 마하는 0이고 ",
     "고도는 비행 고도가 아니라 활주로 표고입니다(지상 평형해). 끄면 종전처럼 ",
     "수평비행 트림에서 출발하고 마하 > 0이 필요합니다. ",
-    "t_end는 정지까지 덮어야 합니다 — 기본 미션은 100 s 안팎에 서므로 ",
-    "200 s면 여유가 남습니다. 실제 접지·정지 시각은 실행 후 착륙 요약에 나옵니다.",
+    // 수치를 적지 않는다 — 정지 시각은 기체·미션마다 다르고(예제 기체 기본 미션 512.7 s, 이 문장이 한때 적던
+    // "100 s 안팎"은 구 합성 기체의 것이었다), 적어 두면 조용히 낡는다. 사실은 실행 후 재생 패널이 말한다
+    "t_end는 정지까지 덮어야 합니다 — 짧으면 서기 전에 끊깁니다. 기본값은 고른 기체 문서의 미션 템플릿 값입니다. ",
+    "정지 뒤 구간은 선 기체를 계산할 뿐이라 길면 결과 크기와 계산 시간만 늘어납니다 — 실제 접지·정지 시각과 ",
+    "남은 구간은 실행 후 재생 패널의 착륙 요약에 나옵니다.",
   ]);
 
   const groundGroups = () => [
@@ -739,12 +831,14 @@ export function render() {
         "그대로 통과하고, 접지·정지 판정(on_ground·speed_le)도 성립하지 않습니다. ",
         "지면은 표고 하나짜리 평면입니다 — 지형·파고는 미모델입니다. ",
         "표고는 위 '고도' 칸이고 기준면 감시도 그 값을 씁니다. ",
-        `방위 ${RUNWAY_HDG} rad(3.417°)·길이 ${GOHEUNG.runwayLengthM} m는 고흥 `,
+        // 도·좌표를 문자열로 적지 않는다 — 축 보정(2026-09-27) 때 이 자리의 「3.417°」가 혼자 남았다
+        `방위 ${RUNWAY_HDG} rad(${(GOHEUNG.runwayHeadingRad * RAD2DEG).toFixed(3)}°)·길이 ${GOHEUNG.runwayLengthM} m는 고흥 `,
         "활주로를 항공영상에서 잰 값입니다 — 공표 제원 1.2 km와 0.4% 안에서 맞습니다. ",
         rolloutNote("ground"),
-        "아래 착륙 요약은 접지→정지 ", el("strong", {}, "거리"), "만 이 길이와 ",
-        "견주고 접지 ", el("strong", {}, "위치"), "는 보지 않습니다 — ",
-        "활주로에 내렸는지는 판정하지 않습니다.",
+        // 착륙 요약(lib/replay.js landingSummary)이 실제로 판정하는 것 — 거리·축방향·횡편차 세 가지
+        "아래 착륙 요약은 접지→정지 거리를 이 길이와 견주고, 접지·정지 ", el("strong", {}, "지점"),
+        "을 활주로 축 구간(0~길이)과 폭에 견줍니다 — 폭은 시험장 공표 제원이라, 방위·길이를 고친 런은 ",
+        "다른 활주로로 보고 횡편차를 판정하지 않습니다(판정 불가).",
       ]),
     optGroup("발사 레일", f.launchOn,
       [field("길이 [m]", f.railLen), field("앙각 [rad]", f.railAngle),
@@ -752,8 +846,9 @@ export function render() {
         "레일 구간은 힘이 아니라 구속이라, 자세가 고정된 등가속 운동입니다 ",
         "— 해석해로 정확히 적분하므로 스텝 수와 무관합니다. ",
         "기본값은 고른 기체 문서(ground.rail)의 값입니다 — 이탈속도는 보통 트림 실속속도의 1.15배쯤으로 ",
-        "잡고, 레일이 짧을수록 그 속도가 요구하는 가속이 커집니다. 기체 문서에 종방향 발사하중 한계",
-        "(structural.n_x_launch)가 없으면 결과에 '미판정'으로 표시됩니다 — 구조 한계표의 Nz와는 다른 축입니다.",
+        "잡고, 레일이 짧을수록 그 속도가 요구하는 가속이 커집니다. 결과는 그 가속에 중력 성분(sin 앙각)을 ",
+        "더한 축방향 하중배수를 기체 문서의 종방향 발사하중 한계(structural.n_x_launch)와 견주고, 한계가 없으면 ",
+        "'미판정'으로 표시합니다 — 구조 한계표의 Nz와는 다른 축입니다.",
       ]),
     optGroup("측지 원점", f.originOn,
       [field("위도 [deg]", f.originLat), field("경도 [deg]", f.originLon)], [
@@ -761,7 +856,7 @@ export function render() {
         "결과에만 실립니다 — 가상환경이 지형을 얹으려면 지형 팩과 이 원점이 같아야 ",
         "합니다. 기본값은 고흥 시험장 활주로 ",
         el("strong", {}, "남단 임계"),
-        "를 항공영상에서 측정한 값입니다(34.601303 / 127.212067). 측정 방법과 ",
+        `를 항공영상에서 측정한 값입니다(${GOHEUNG.originLatDeg} / ${GOHEUNG.originLonDeg}). 측정 방법과 `,
         "공표 제원 대조는 data/geo/goheung-runway.json에 있습니다.",
       ]),
   ];
@@ -792,6 +887,18 @@ export function render() {
        " · 작동기 rate ≥ 10 rad/s 요구 [도출 사양] (01 v0.13)"]),
   ];
 
+  // 도달 반경 안내의 선회 반경 — **지금 모드 표·뱅크 한계**에서 잰다(지도 미리보기·경고와 같은 두 입력,
+  // bankMaxNow·pathSpeed). 예제 기체 수치를 문장에 박아 두면 다른 기체를 고른 화면이 남의 반경을 말한다
+  const turnRadiusText = () => {
+    const v = pathSpeed(modeRows);
+    const phi = bankMaxNow();
+    const r = turnRadius(v, phi);
+    return r == null
+      ? "경로 모드 속도나 뱅크 한계를 몰라 선회 반경을 잴 수 없지만, 선회 반경보다 훨씬 작은 원은 못 잡습니다"
+      : `지금 모드 표의 경로 속도 ${v} m/s·뱅크 한계 ${fmt(phi, 3)} rad에서 선회 반경이 ${Math.round(r)} m라 `
+        + "임의로 작은 원은 못 잡습니다";
+  };
+
   const guideGroups = () => [
     optGroup("유도 · 연료 · 게인", null, [
       field("도달반경 [m]", f.accept), field("연료유량 [kg/s]", f.fuelFlow),
@@ -806,8 +913,7 @@ export function render() {
       // 그것은 상수가 아니라 웨이포인트 기하 × 기체 선회 성능의 함수다
       "다음 웨이포인트로 넘어가는 통과 판정 반경입니다 — ",
       el("b", {}, "너무 작으면 경로가 끝나지 않습니다"),
-      ". 예제 기체는 순항 44 m/s·뱅크 한계 0.7 rad에서 선회 반경이 234 m라 ",
-      "임의로 작은 원은 못 잡습니다 — 구 합성 기체(순항 88 m/s)의 기본 미션 실측에서는 20 m는 완주했지만 ",
+      `. ${turnRadiusText()} — 구 합성 기체(순항 88 m/s)의 기본 미션 실측에서는 20 m는 완주했지만 `,
       "13 m로 줄이면 14 m로 스친 뒤 바퀴마다 되레 멀어져",
       "(14 → 69 → 81 m) 끝내 통과하지 못했습니다. 그 경계는 웨이포인트 기하마다 ",
       "다릅니다 — 다른 기하에서는 20 m도 같은 식으로 발산했습니다. ",
@@ -942,6 +1048,182 @@ export function render() {
     }
   }
 
+  // ── 쇼케이스 신호 (lib/showcasecue.js) ────────────────────────────────────
+  // 진행기는 요청을 조립하지 않는다 — 이 탭의 버튼과 **같은 길**(submitRun·submitDraft·패널 열기)로 하고,
+  // 끝나면 결과가 사는 패널을 연 채 탭 자신의 산출물(착륙 요약·초안 미리보기·타면 표)에서 한 줄을 보고한다.
+  // 동작: draft({intent}) · run({useDraft?}) · duty() — 이름·인자는 06 §9.3(쇼케이스 탭별 동작)이 정본
+  // drawers.open은 onOpen도 부른다(views/stage.js) — 다시 그려도 그 패널이 열린 채로 남는다
+  const openPanel = (key) => drawers.open(key);
+
+  /** 미션을 고른 기체의 **템플릿 기본값**으로 되돌린다 — 페이지를 처음 연 것과 같은 칸·모드 표·웨이포인트.
+   *  초안이 표를 바꿨어도 쇼케이스 「run」은 측정된 기본 미션을 돌린다. 문서를 못 받으면 던진다 — 예제 기체
+   *  폴백을 그 기체 값인 척 돌리지 않는다. 돌려주는 것: "template" | "fallback"(문서에 미션 템플릿이 없다 —
+   *  탭의 [시뮬 실행]처럼 예제 기체 값으로 돌고, 화면·보고가 그렇다고 말한다). */
+  const resetToTemplate = async () => {
+    const doc = await selectedDocument();
+    if (visit !== simVisit) throw new Error("시뮬레이션 탭을 떠나 미션 표를 되돌리지 못했다");
+    const init = initialForm(actApplied);
+    for (const [key, node] of Object.entries(f)) {
+      if (node.type !== "checkbox") node.value = init[key];
+      else if (node.checked !== init[key]) {
+        node.checked = init[key];
+        node.dispatchEvent?.(new Event("change"));
+      }
+    }
+    docApplied = false; // 기체 기본값을 다시 앉힌다 — 손대지 않은 칸 규칙 그대로(방금 전부 초기값이다)
+    applyDocDefaults(doc);
+    const t = templateDefaults(doc);
+    modeRows = defaultModeRows(t.sim ? t.sim.rows : undefined);
+    wpRows = defaultWpRows();
+    wpMapView.view = null; // 새 목록에 맞춰 지도 시야를 다시 맞춘다
+    renderModeTable(modeBox);
+    renderWpTable(wpBox, wpMap);
+    f.accept.dispatchEvent?.(new Event("input")); // 도달 반경 원
+    drawProfile();
+    drawers.refresh();
+    return t.sim ? "template" : "fallback";
+  };
+
+  /** 「run({useDraft:true})」의 미션 — 초안을 앉힌 표로 돈다. 모드·웨이포인트 표는 모듈 상태라 탭을 다시 그려도
+   *  남지만, 초안의 실행 조건(t_end·연료·출발 조건 …)은 칸(그때 render의 DOM)에 앉았던 것이라 진행기가 신호마다
+   *  탭을 다시 그리면 사라지고 기체 기본값으로 돈다. 표가 아직 그 초안이면 기체 기본값을 먼저 앉히고(늦게 와서
+   *  초안 값을 덮지 않게) 초안의 실행 조건을 다시 앉힌다. 표가 초안과 다르면(사람이 고쳤다) 지금 표·칸 그대로.
+   *  돌려주는 것: "draft" | "table". */
+  const seatDraftForRun = async () => {
+    const d = lastDraft;
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    if (!d || !d.modeRows.length || !same(modeRows, d.modeRows) || !same(wpRows, d.wpRows)) return "table";
+    const doc = await selectedDocument().catch(() => null);
+    if (visit !== simVisit) throw new Error("시뮬레이션 탭을 떠나 초안의 실행 조건을 앉히지 못했다");
+    if (doc) applyDocDefaults(doc);
+    seatDraftConditions(d.runConditions);
+    // 칸의 프로그램 대입은 input 청취자를 깨우지 않는다 — 도달 반경 원·프로파일 출발점을 직접(applyDraft와 같다)
+    wpMap.refresh();
+    drawProfile();
+    drawWpNotice();
+    return "draft";
+  };
+
+  const reportRunCue = (c, resultId) => {
+    const { body, launchLimit } = lastReplay;
+    const rows = landingSummary(body, { launchLimit, runwayWidth: runwayWidthOf(body) });
+    const modes = modeSpans(body.signals.mode).map((x) => x.mode);
+    const ph = body.meta?.phases ?? {};
+    const rail = rows.find((r) => r.label === "레일 이탈");
+    // 착륙 요약은 재생 패널 머리(모드 체인 줄 바로 아래)다 — 지도·프로파일 무대 아래라 첫 화면 밖이다(e2e D4).
+    // 진행기가 다음 동작으로 가기 전에 올린다. 떠난 화면(떨어진 노드)은 굴리지 않는다(lib/reveal)
+    revealPanel(replayBox);
+    reportCue(c.cue, {
+      phase: "done",
+      resultId,
+      summary: (c.mission === "fallback" ? "미션 템플릿 없음 — 예제 기체 폴백 미션 · " : "")
+        + (landingLine(rows) ?? `착륙 단계 없음 — 모드 체인 ${modes.join(" → ")}`),
+      data: {
+        resultId,
+        // "template" | "fallback" | "draft"(useDraft — 초안 표 + 초안 실행 조건) | "table"(useDraft — 지금 표 그대로)
+        mission: c.mission,
+        profile: body.meta?.profile ?? null,
+        t_end: body.meta?.t_end ?? null,
+        aborted: body.meta?.aborted ?? null,
+        modes,
+        launch_exit_t: ph.launch_exit_t ?? null,
+        touchdown_t: ph.touchdown_t ?? null,
+        stop_t: ph.stop_t ?? null,
+        td_sink_rate: ph.td_sink_rate ?? null,
+        td_speed: ph.td_speed ?? null,
+        launch_gx: launchGx(body) || null, // 0은 미계측(레일 위 표본 없음) — 행이 「미계측」이라 말하는 값
+        // 판정한 값 — 축방향 하중배수 gx + sin γ(γ = 그 런의 레일 앙각, lib/replay.js launchLoad). 앙각이 없으면 null
+        launch_nx: launchLoad(body)?.nx ?? null,
+        n_x_launch: typeof launchLimit?.nx === "number" ? launchLimit.nx : null,
+        launch_verdict: !rail ? null : rail.over ? "over" : rail.pass ? "pass" : "unjudged",
+        idle_tail_s: idleTail(body)?.idle ?? null,
+        rows: rows.map((r) => ({ label: r.label, value: r.value, note: r.note ?? null })),
+      },
+    });
+  };
+
+  const reportDraftCue = (c, resultId) => {
+    const d = lastDraft;
+    if (!d || !d.modeRows.length) {
+      failCue(c, "초안에 모드 행이 없어 표에 앉힐 것이 없다");
+      return;
+    }
+    // 적용 전 확인 — 미리보기가 보여 주는 것과 같은 목록(정규화가 고친 것 + 검증 정본이 거부할 것)
+    const problems = [...d.issues, ...dryRun(d)];
+    applyDraft(); // [표에 적용]과 같은 길 — 실행은 하지 않는다
+    revealPanel(draftResultBox); // 초안 미리보기 — 「미션 초안」 패널 안
+    const names = d.modeRows.map((r) => r.name);
+    reportCue(c, {
+      phase: "done",
+      resultId,
+      summary: `초안을 표에 적용 — 모드 ${names.length}행 (${names.join(" → ")}) · 웨이포인트 ${d.wpRows.length}개`
+        + (problems.length ? ` · 적용 전 확인 ${problems.length}건` : ""),
+      data: {
+        resultId, summary: d.summary || null, modes: names, waypoints: d.wpRows.length,
+        runConditions: d.runConditions, assumptions: d.assumptions, warnings: d.warnings, problems,
+      },
+    });
+  };
+
+  const cueDraft = async (c) => {
+    const intent = String(c.args?.intent ?? "").trim();
+    if (!intent) throw new Error("초안 의도 문장(args.intent)이 비었다");
+    openPanel("draft"); // 패널 build가 LLM 상태 조회를 건다 — 아래 await가 같은 약속을 기다린다
+    await loadLlmStatus();
+    // 키 없는 배포 — 서버가 준 사유 그대로(진행기가 「건너뜀: 사유」로 싣는다)
+    if (!llmStatus?.available) throw new Error(`LLM을 쓸 수 없다 — ${llmStatus?.reason ?? "사유 미상"}`);
+    draftIntentInput.value = intent;
+    draftIntent = intent;
+    let jobId;
+    try {
+      jobId = await submitDraft();
+    } catch (e) {
+      showDraftErr(e);
+      throw e;
+    }
+    draftCue = { cue: c, jobId };
+    reportCue(c, { phase: "started", jobId });
+  };
+
+  const cueRun = async (c) => {
+    if (runningJobId) throw new Error("이미 실행 중인 시뮬이 있다 — 그 잡이 끝난 뒤에 다시");
+    const mission = c.args?.useDraft === true ? await seatDraftForRun() : await resetToTemplate();
+    let jobId;
+    try {
+      jobId = await submitRun();
+    } catch (e) {
+      showErr(e);
+      throw e;
+    }
+    simCue = { cue: c, jobId, mission };
+    reportCue(c, { phase: "started", jobId });
+  };
+
+  const cueDuty = async (c) => {
+    const id = store.get("simResult")?.id;
+    if (!id) throw new Error("타면 사용을 볼 시뮬 결과가 없다 — 먼저 「run」");
+    openPanel("duty"); // 패널 build가 집계를 건다 — ensure()는 같은 약속을 돌려준다
+    await dutyPanel.ensure();
+    const snap = dutyPanel.snapshot();
+    if (!snap.report) throw new Error(snap.error ?? "타면 사용 집계가 없다");
+    if (snap.id !== id) throw new Error(`타면 패널이 다른 런(${snap.id})을 보여 준다 — 지목한 런은 ${id}`);
+    const sum = dutySummary(snap.report);
+    if (!sum) throw new Error("집계에 타면이 없다");
+    revealPanel(dutyPanel.root); // 요약 표가 패널 머리 바로 아래다
+    reportCue(c, { phase: "done", resultId: id, summary: sum.line, data: { resultId: id, ...sum.data } });
+  };
+
+  const handleCue = async (c) => {
+    try {
+      if (c.action === "draft") await cueDraft(c);
+      else if (c.action === "run") await cueRun(c);
+      else if (c.action === "duty") await cueDuty(c);
+      else unknownAction(c);
+    } catch (e) {
+      failCue(c, reasonOf(e));
+    }
+  };
+
   const root = el("div", { class: "tab-page" },
     tabTop({
       title: "시뮬레이션",
@@ -984,6 +1266,9 @@ export function render() {
   syncDraftUi();
   syncHandoff(); // 재진입 — 이전 런이 남아 있으면 인계 버튼이 켜진 채로 선다
   drawers.refresh();
+  // 쇼케이스 신호는 **한 번 읽고 지운다**(store 인계 규약). 처리는 이 render가 끝나 화면에 붙은 뒤에
+  const cue = takeCue("sim");
+  if (cue) queueMicrotask(() => handleCue(cue));
   return root;
 
 }
@@ -1124,7 +1409,8 @@ function renderWpTable(wpBox, wpMap) {
         // 새 행은 좌표 (0,0) = 원점. 지도 클릭 추가와 **같은 함수**로 빈 고도를
         // 전부 채운다(사용자 요청) — 두 곳에 따로 적으면 추가 경로마다 다른 고도가 붙는다
         wpRows.push({ n: "0", e: "0" });
-        fillMissingAltitudes(wpRows, { acceptRadius: acceptRadiusOf() });
+        // 순항 고도는 모드 표의 경로 모드 고도 — 지도 클릭 추가(views/wpmap.js getCruiseAlt)와 같은 출처
+        fillMissingAltitudes(wpRows, { acceptRadius: acceptRadiusOf(), cruiseAlt: pathAlt(modeRows) });
         sync();
       } }, "웨이포인트 추가"),
       el("span", { class: "hint" }, "지도에서 클릭 추가 · 드래그 이동 · 우클릭 삭제 가능")),
@@ -1137,7 +1423,7 @@ function renderWpTable(wpBox, wpMap) {
 function renderReplay(replayBox) {
   // 이전 렌더의 타이머가 살아 있으면 떨어져 나간 슬라이더를 계속 민다 — 먼저 정리
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
-  const { body, waypoints, acceptRadius } = lastReplay;
+  const { body, waypoints, acceptRadius, launchLimit } = lastReplay;
   const sig = body.signals;
   const env = body.envelope;
   const spans = modeSpans(sig.mode);
@@ -1244,13 +1530,17 @@ function renderReplay(replayBox) {
       env.first_flag_t != null ? ` · 최초 플래그 ${fmt(env.first_flag_t, 4)}s` : "",
       ` · 최종 h ${fmt(sig.h[sig.h.length - 1], 4)} m · 잔여 연료 ${fmt(sig.fuel[sig.fuel.length - 1], 4)} kg`),
     // 이착륙 요약 — 단계가 없으면 **행 자체가 없다**(0으로 채우면 착륙하지 않은 런이
-    // "접지 강하율 0 = 완벽한 착륙"으로 읽힌다). 판정 기준이 없는 사출 하중은
-    // 값과 함께 "미판정"을 낸다 — 초록 배지를 주면 34 g가 통과한 것처럼 보인다
-    ...landingSummary(body).map((r) => el("p", { class: "hint" },
+    // "접지 강하율 0 = 완벽한 착륙"으로 읽힌다). 발사 축방향 하중배수(레일 가속 + 중력 성분 sin γ)는 그 런의
+    // 기체 문서 한계(n_x_launch)와 견주고, 한계가 없으면 값과 함께 "미판정"을 낸다 — 기준 없이 초록 배지를
+    // 주면 통과한 것처럼 보인다. 접지·정지 횡편차는 시험장 활주로 폭(runwayWidthOf)과 같은 규약으로 견준다
+    ...landingSummary(body, { launchLimit, runwayWidth: runwayWidthOf(body) }).map((r) => el("p", { class: "hint" },
       el("b", {}, `${r.label} `), r.value,
       r.note ? " — " : "", r.note ?? "",
       r.unjudged ? " " : "", r.unjudged ? flagBadge(null) : "",
+      r.pass ? " " : "", r.pass ? flagBadge(true, r.passLabel ?? "OK") : "",
       r.over ? " " : "", r.over ? flagBadge(false, "", r.overLabel ?? "활주로 초과") : "")),
+    // 정지 뒤 t_end까지 남은 구간이 크면 말한다 — 결과 크기·계산 시간이 그만큼 헛돈다(lib/replay.js idleTail)
+    ...(idleTailNote(body) ? [el("p", { class: "hint" }, idleTailNote(body))] : []),
     // 못 잡고 넘어간 웨이포인트 — **경로가 끝난 것과 계획대로 난 것은 다르다.**
     // 엔진 안전망이 미션을 끝내 주므로 이 줄이 없으면 사용자는 자기가 찍은 경로를
     // 날았다고 읽는다 (engine guidance/path.py §궤도 고착 · meta.path_escapes)

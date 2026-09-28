@@ -128,3 +128,67 @@ export function defaultGridCases(grid = DEFAULT_GRID) {
   return nameCases(serpentineCases(
     machRange(grid.machFrom, grid.machTo, grid.machStep), grid.alts, grid.fuels));
 }
+
+
+// ── 대표 부분 격자 — 시간축 평가 비용을 n건으로 묶는다 (쇼케이스 영향성 2단) ────────
+// 2단 평가는 케이스마다 6DOF 런 둘이라(실측 ≈ 5~8 s/케이스) 템플릿 격자 전체(예제 15건)면 분 단위다.
+// 대표 몇 건만 재되 **폼 칸에 그대로 적히는 부분 격자**(마하 등간격 × 고도 목록 × 연료 목록)로 고른다 —
+// 케이스 목록을 따로 들고 다니면 평가·처방·감도가 쓰는 격자(gridCases)와 갈라지고, 청중은 무엇을 쟀는지
+// 격자 칸에서 읽지 못한다. 고르는 순서는 축마다 **끝점부터**다: 마하 양끝(동압 최저·최고 — 게인 스케줄이
+// 가장 멀리 가는 자리) → 고도 양끝 → 연료 양끝 → 그다음 가운데. 한 축에 하나만 남기면 가운데 값이다.
+
+/** 쇼케이스 영향성 2단의 기본 대표 케이스 수 — 신호가 수를 안 주면 이것. 4 = 마하 양끝 × 고도 양끝이고,
+ *  예제 기체 depth=full 4케이스가 21 s(단독 워커 실측)라 청중이 기다릴 만한 한 단계다. 기체 값이 아니라
+ *  비용 한도라 코드 상수다(격자 자체는 늘 기체 템플릿에서 온다). */
+export const REPRESENTATIVE_CASES = 4;
+
+/** 목록에서 k개 — 1이면 가운데, 2 이상이면 양끝을 포함한 등간격 첨자. */
+function pickSpread(list, k) {
+  if (k <= 1) return [list[Math.floor((list.length - 1) / 2)]];
+  const idx = [];
+  for (let i = 0; i < k; i += 1) idx.push(Math.round((i * (list.length - 1)) / (k - 1)));
+  return [...new Set(idx)].map((i) => list[i]);
+}
+
+/** 마하 k점이 **등간격으로** 뽑히는가 — 부분 격자가 from·to·step 세 칸으로 적혀야 한다. */
+const machPickable = (len, k) => k === 1 || (k >= 2 && k <= len && (len - 1) % (k - 1) === 0);
+
+/** 격자(수치 — DEFAULT_GRID와 같은 모양) → n건 이하의 대표 부분 격자(같은 모양).
+ *  n이 격자 전체 이상이면 격자 그대로다. 케이스 이름은 원 격자와 같다(nameCases — 값 그대로 문자열화). */
+export function representativeGrid(grid, n) {
+  if (!Number.isInteger(n) || n < 1) throw new Error(`대표 케이스 수는 1 이상의 정수: ${n}`);
+  const machs = machRange(grid.machFrom, grid.machTo, grid.machStep);
+  if (!grid.alts.length || !grid.fuels.length) throw new Error("격자 목록이 비었다 — 고도·연료를 하나 이상 적는다");
+  if (machs.length * grid.alts.length * grid.fuels.length <= n) {
+    return { machFrom: grid.machFrom, machTo: grid.machTo, machStep: grid.machStep,
+      alts: [...grid.alts], fuels: [...grid.fuels] };
+  }
+  // 「양끝」은 값의 양끝이다 — 목록이 적힌 순서(템플릿은 손으로 쓴다)의 첫·끝이 아니다. 마하는 등간격이라 이미 오름차순
+  const asc = (xs) => [...xs].sort((a, b) => a - b);
+  const axes = { mach: machs, alt: asc(grid.alts), fuel: asc(grid.fuels) };
+  const k = { mach: 1, alt: 1, fuel: 1 };
+  const nextK = (ax) => {
+    const len = axes[ax].length;
+    for (let c = k[ax] + 1; c <= len; c += 1) {
+      if (ax !== "mach" || machPickable(len, c)) return c;
+    }
+    return null;
+  };
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const ax of ["mach", "alt", "fuel"]) {
+      const c = nextK(ax);
+      if (c == null) continue;
+      const count = Object.entries(k).reduce((p, [a, v]) => p * (a === ax ? c : v), 1);
+      if (count > n) continue;
+      k[ax] = c;
+      grew = true;
+    }
+  }
+  const ms = pickSpread(machs, k.mach);
+  const step = ms.length > 1
+    ? Math.round(((ms[ms.length - 1] - ms[0]) / (ms.length - 1)) * 1e9) / 1e9
+    : grid.machStep;
+  return { machFrom: ms[0], machTo: ms[ms.length - 1], machStep: step,
+    alts: pickSpread(axes.alt, k.alt), fuels: pickSpread(axes.fuel, k.fuel) };
+}

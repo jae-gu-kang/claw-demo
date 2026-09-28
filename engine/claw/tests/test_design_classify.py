@@ -16,6 +16,7 @@ from claw.design import (
     case_name,
     tune_point,
 )
+from claw.design import tune as _tune_mod
 from claw.design.classify import classify_failures, classify_margin_deficit
 from claw.fcl.demo import demo_design_gains
 from claw.plant import make_demo_aircraft
@@ -116,31 +117,38 @@ def test_structural_limit_reports_no_relief_when_nothing_helps():
     assert "면 통과" not in bn["note"], "통하는 완화가 없는데 임계값 문장을 낸다"
 
 
-def test_design_target_miss_alone_is_not_a_structural_limit():
+def test_design_target_miss_alone_is_not_a_structural_limit(monkeypatch):
     """**설계 목표**에만 못 미치는 자리를 에스컬레이션으로 보내면 안 된다 — 자가 둘이었다.
 
-    자리 status는 TuneTargets(설계 목표 ζ_dr 0.5) 기준이고 judged는 MarginCriteria
+    자리 status는 TuneTargets(설계 목표 ζ_dr — 기본 0.6) 기준이고 judged는 MarginCriteria
     (합격선 ζ 0.30) 기준인데, 종전 게이트가 그 둘을 OR로 묶었다. 두 선의 간격은
     히스테리시스로 **일부러** 둔 것이라, 게이트가 그걸 결함으로 읽으면 합격선을 여유
     있게 넘는 자리가 적용 버튼 없는 escalate로 간다 — 원래 나왔어야 할 실행 가능한
     처방(승격·재적합)이 사라진다. 한 카드 안에서 evidence의 judged=="ok"와 verdict가
     서로를 부정하는 것도 그 증상이다.
 
-    재현: 데모 M0.45/h1000 yaw_rate에 ζ_dr 목표 0.95(플랜트가 못 내는 값)를 준다.
-    (프로펠러 전환으로 설계 조건이 내려오면서 M0.6은 못 나는 조건이 됐다. 달성값도
-     0.923 → 0.906으로 옮겼다 — 목표에 못 가면서도 합격선을 크게 넘는 성격은 같다.)
-    달성 0.923 — 합격선 0.30의 3배인데 사유는 target_unreached다.
+    재현: 데모 M0.45/h1000 yaw_rate에 ζ_dr 목표 1.0(임계감쇠 — 최종 조성에서 이 자리가 못 내는 값)을 준다.
+    달성 0.931 — 합격선 0.30의 3배인데 사유는 target_unreached다.
+    (프로펠러 전환으로 설계 조건이 내려오면서 M0.6은 못 나는 조건이 됐다. 목표는 0.95였는데, 요 2차 패스가 롤
+     열림 조성에서 닿은 자리에도 돌게 되면서(tune._retune_with_later_closed) 0.95는 롤을 닫은 최종 조성에서 다시
+     찾아 달성된다(종전 0.906 target_unreached → 0.95 ok). 1.0은 최종 조성에서 다시 찾으면 롤 λ가 목표 미달로
+     떨어져 2차 패스가 불채택이라 여전히 미달이다 — 목표에 못 가면서도 합격선을 크게 넘는 성격은 같다.)
     """
+    # 이 시험의 대상은 구조 한계 게이트다 — 레이트 루프 마진 가드는 뺀다. 가드가 있으면 이 점의 롤 댐퍼가 끊은 루프 여유
+    # 목표에서 묶여(capped) 요 2차 패스의 "다른 자리 목표 미달로 떨어뜨림" 불채택 근거가 사라지고, ζ_dr 목표 1.0이 최종
+    # 조성에서 달성돼 겨냥한 상황(target_unreached)이 안 선다. 가드는 test_design_tune이 잰다
+    monkeypatch.setattr(_tune_mod, "_rate_margin_verdict", lambda m, targets: "ok")
     ac, points, lms, trims = _setup((0.4, 0.45, 0.5), v_mach=0.45)
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.45, 0.4, 0.5))
     cases = _fail_cases(v, lo, hi, loop="yaw_rate")
     cases[v]["loops"]["yaw_rate"] = {"kind": "damping", "zeta": 0.2, "status": "fail"}
     out = classify_margin_deficit(
         ac, v, "yaw_rate", points, lms, trims, {}, demo_design_gains(), cases,
-        criteria=MarginCriteria(), targets=TuneTargets(zeta_dr=0.95), **ACT,
+        criteria=MarginCriteria(), targets=TuneTargets(zeta_dr=1.0), **ACT,
     )
     tuned = out["evidence"]["tuned"]
     assert tuned["reason"] == "target_unreached", "이 테스트가 겨냥한 상황이 아니다"
+    assert tuned["achieved"]["second_pass"]["adopted"] is False, "2차 패스가 목표를 채웠다 — 미달 상황이 아니다"
     assert tuned["judged"] == "ok" and tuned["achieved"]["zeta_dr"] > 0.9
     assert out["verdict"] != "structural_limit", (
         f"합격선의 3배를 내는 자리가 {out['verdict']}로 갔다 — 게이트가 설계 목표선을 결함으로 읽는다")
@@ -148,7 +156,7 @@ def test_design_target_miss_alone_is_not_a_structural_limit():
     assert "bottleneck" not in out["evidence"], "구조 한계가 아닌데 완화 프로브를 돌렸다"
 
 
-def test_structural_gate_keeps_both_of_its_halves():
+def test_structural_gate_keeps_both_of_its_halves(monkeypatch):
     """게이트를 합격선 축으로 옮겨도 **잡아야 할 둘은 그대로** 잡는다 — 술어 헬퍼로 직접 잰다.
 
     (a) 판정이 fail — 자유 게인 최적조차 합격선에 못 미친다.
@@ -156,12 +164,17 @@ def test_structural_gate_keeps_both_of_its_halves():
         margin_floor·bandwidth_collapse) — 지연 0.6 s의 pitch_att가 그 경우다. PM 86°/
         GM 10 dB라 마진 판정만 보면 ok지만 교차가 목표의 0.08배로 무너져 있다. 판정
         하나로만 게이트를 만들면 이 자리를 통과시킨다.
-    (c) 그 목록에 없는 사유(target_unreached·capped)는 구조 한계가 아니다.
+    (c) 그 목록에 없는 사유(target_unreached·capped)는 구조 한계가 아니다 — M0.45에 ζ_dr 목표 1.0(달성 0.931).
+        (종전에는 M0.4에 0.95였는데, 요 2차 패스가 닿은 자리에도 돌면서 그 목표는 최종 조성에서 달성된다.)
 
     게이트·프로브·이분이 모두 이 함수 하나를 부르므로, 여기서 셋을 한 번에 고정한다.
     """
     from claw.design.classify import _slot_passes, _tuned_judgement
 
+    # 이 시험의 대상은 구조 한계 게이트다 — 레이트 루프 마진 가드는 뺀다. 가드가 있으면 이 점의 롤 댐퍼가 끊은 루프 여유
+    # 목표에서 묶여(capped) 요 2차 패스의 "다른 자리 목표 미달로 떨어뜨림" 불채택 근거가 사라지고, ζ_dr 목표 1.0이 최종
+    # 조성에서 달성돼 겨냥한 상황(target_unreached)이 안 선다. 가드는 test_design_tune이 잰다
+    monkeypatch.setattr(_tune_mod, "_rate_margin_verdict", lambda m, targets: "ok")
     ac, _points, lms, trims = _setup((0.4,), v_mach=None)
     lm = lms.get(ac, trims[case_name(0.4, 1000.0, 200.0)])
     design = demo_design_gains()
@@ -175,8 +188,11 @@ def test_structural_gate_keeps_both_of_its_halves():
     assert not _slot_passes(collapsed, "pitch_att", MarginCriteria()), (
         "대역폭이 무너진 자리를 마진 판정만 보고 통과시킨다")
 
-    unreached = tune_point(lm, design, targets=TuneTargets(zeta_dr=0.95), **ACT)
+    ac45, _p45, lms45, trims45 = _setup((0.45,), v_mach=None)
+    lm45 = lms45.get(ac45, trims45[case_name(0.45, 1000.0, 200.0)])
+    unreached = tune_point(lm45, design, targets=TuneTargets(zeta_dr=1.0), **ACT)
     assert unreached["slots"]["yaw_rate"]["reason"] == "target_unreached"
+    assert unreached["achieved"]["yaw_rate"]["zeta_dr"] > 0.9
     assert _slot_passes(unreached, "yaw_rate", MarginCriteria())
 
 
@@ -340,6 +356,55 @@ def test_sign_flip_gets_its_own_verdict_not_promotion():
     assert out["evidence"]["sign_flip"]["slots"] == ["pitch.ki"]
 
 
+def test_sign_flip_does_not_pin_a_gain_whose_tuning_failed():
+    """부호 뒤집힘 처방은 그 점의 튜닝 게인을 고정한다 — 튜닝이 그 자리를 **성립시키지 못했으면** 고정하면 안 된다.
+
+    피치 자세 설계값이 0이면 튜너는 부호를 몰라 튜닝하지 않고(seed_required) kp·ki를 0으로 둔다. 종전 분류기는
+    그 0을 refit_at으로 검증점에 박았다 — 적합 제외 규칙(tune.failed_gain_slots)이 앵커 표본에서 빼는 바로 그
+    자리값이다. 이제는 부호 뒤집힘 근거를 남기고 일반 분류로 흘려, 자기 실패라 구조 한계 게이트가 잡는다."""
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
+    design = {**demo_design_gains(), "pitch.kp": 0.0}
+    cases = _fail_cases(v, lo, hi)
+    cases[v]["loops"]["pitch_att"].update({"sign_flip": ["pitch.ki"], "gains": {"kp": -2.0, "ki": +0.5}})
+    out = classify_margin_deficit(
+        ac, v, "pitch_att", points, lms, trims, {}, design, cases,
+        criteria=MarginCriteria(), tol_plant=0.001, **ACT,
+    )
+    assert out["verdict"] == "structural_limit", out["verdict"]
+    assert out["action"]["type"] == "escalate"
+    assert out["evidence"]["sign_flip"]["slots"] == ["pitch.ki"]
+    failed = out["evidence"]["sign_flip"]["tune_failed"]
+    assert set(failed) == {"pitch.kp", "pitch.ki"}
+    assert all(r["reason"] == "seed_required" and r["basis"] == "own" for r in failed.values())
+
+
+def test_valley_does_not_inject_gains_tuned_over_a_failed_damper():
+    """자리 자체는 게이트를 넘어도 **밑의 레이트 루프가 실패한 조성 위에서** 튜닝된 게인은 주입하지 않는다.
+
+    요 댐퍼 설계값이 0이면 요는 seed_required(0)이고, 롤 댐퍼·롤 자세는 요가 없는 조성에서 튜닝된다 — 적합 제외는
+    이 셋을 표본에서 뺀다(basis rate_loop). valley 승격이 그 롤 게인을 검증점에 주입하면 제외가 막으려던 값을
+    되살린다. 주입 처방을 건너뛰고 검증점 추가로 흘리며, 건너뛴 사실을 처방 문구에 남긴다."""
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
+    design = {**demo_design_gains(), "yaw.k_rate": 0.0}
+    opt = tune_point(lms.get(ac, trims[v]), design, **ACT)
+    assert opt["slots"]["yaw_rate"]["reason"] == "seed_required"
+    assert opt["slots"]["roll_att"]["reason"] == "ok"  # 자리 자체는 게이트를 넘는다
+    tables = {"roll.kp": Table({"mach": (0.55, 0.65)}, (opt["gains"]["roll.kp"] * 3.0,) * 2,
+                               extrapolate="clip")}
+    out = classify_margin_deficit(
+        ac, v, "roll_att", points, lms, trims, tables, design,
+        _fail_cases(v, lo, hi, loop="roll_att"), criteria=MarginCriteria(), tol_plant=99.0, **ACT,
+    )
+    assert out["verdict"] == "simple_deficit", out["verdict"]
+    assert out["action"]["type"] == "add_validation" and "gains" not in out["action"]
+    assert set(out["evidence"]["tune_failed"]) == {"roll.kp", "roll.ki"}
+    assert all(r["basis"] == "rate_loop" and r["loop"] == "yaw_rate"
+               for r in out["evidence"]["tune_failed"].values())
+    assert "주입하지 않았다" in out["action"]["note"]
+
+
 def test_failing_sibling_axis_does_not_escalate_this_slot():
     """한 축이 안 되는 점에서 **다른 축의 고칠 수 있는 실패**가 에스컬레이션으로 둔갑하면 안 된다.
 
@@ -348,12 +413,14 @@ def test_failing_sibling_axis_does_not_escalate_this_slot():
     실패까지 structural_limit → escalate(적용 버튼 없음)가 됐다 — 원래 나왔어야 할
     breakpoint 승격(실행 가능한 처방)이 사라진다.
 
-    지연 0.6 s에서 이 점의 자리별 상태: pitch_att infeasible / roll_att ok.
+    피치 자세 설계값을 0으로 두면(부호를 몰라 튜닝하지 않음 — seed_required) 이 점의 자리별 상태가
+    pitch_att infeasible / roll_att ok다. 종전에는 지연 0.6 s로 피치를 무너뜨렸는데, 그 지연에서는 요·롤 댐퍼를
+    함께 닫은 조성도 발산해(전체 폐루프 확인) 롤 자세가 멀쩡하지 않다.
     """
-    act = {**ACT, "delay_s": 0.6}
+    act = dict(ACT)
     ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
-    design = demo_design_gains()
+    design = {**demo_design_gains(), "pitch.kp": 0.0}
     out_t = tune_point(lms.get(ac, trims[v]), design, **act)
     assert out_t["status"] == "infeasible", "점 단위로는 실패인 상황이어야 한다"
     assert out_t["slots"]["pitch_att"]["status"] == "infeasible"
@@ -598,7 +665,7 @@ def test_nan_crossover_does_not_leak_into_the_bottleneck_numbers(monkeypatch):
     assert bn["delay_phase_deg_at_wc"] == pytest.approx(math.degrees(2.5 * 0.035))
 
 
-def test_free_gain_optimum_uses_the_hand_design_bracket():
+def test_free_gain_optimum_uses_the_hand_design_bracket(monkeypatch):
     """자유 게인 최적은 **손설계 정본**에서 부호·브래킷을 잡아야 한다.
 
     tune_point은 design에서 그 둘만 읽는다. 오케스트레이터가 분류기에 넘기던 것은
@@ -610,8 +677,12 @@ def test_free_gain_optimum_uses_the_hand_design_bracket():
     4×0 = 0이라 확장으로도 못 산다. 적합이 부호 가드 폴백으로 상수를 내거나 스케줄
     자리가 비면 실제로 0이 온다.
     """
+    from claw.design import tune as T
     from claw.design.tune import REASON_SEED_REQUIRED
 
+    # 이 시험의 대상은 브래킷의 출처다 — 레이트 루프 마진 가드는 뺀다(이 점의 롤 댐퍼는 λ 목표에서 끊은 루프 여유가 설계
+    # 목표 아래라 가드가 묶어 capped가 된다 — 기준 정답 "ok"의 전제가 바뀐다. 가드는 test_design_tune이 잰다)
+    monkeypatch.setattr(T, "_rate_margin_verdict", lambda m, targets: "ok")
     ac, points, lms, trims = _setup((0.25, 0.3, 0.35), v_mach=0.3)
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.3, 0.25, 0.35))
     design = demo_design_gains()
@@ -634,3 +705,103 @@ def test_free_gain_optimum_uses_the_hand_design_bracket():
     assert stale["evidence"]["tuned"]["reason"] != REASON_SEED_REQUIRED  # 자세 자리는 살아 있고
     assert stale["evidence"]["tuned"]["achieved"]["pm_deg"] != pytest.approx(
         got["pm_deg"], rel=1e-6), "브래킷 차이가 결과를 안 바꾼다 — 판별력 없는 테스트"
+
+
+def _two_failures_one_point():
+    ac, points, lms, trims = _setup((0.25, 0.35, 0.45), v_mach=0.35)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.35, 0.25, 0.45))
+    cases = _fail_cases(v, lo, hi)
+    cases[v]["loops"]["pitch_rate"] = {"kind": "damping", "zeta": 0.2, "status": "fail"}
+    margin_out = {"cases": cases, "failures": [
+        {"case": v, "loop": "pitch_att", "severity": 42.0},
+        {"case": v, "loop": "pitch_rate", "severity": 18.0},
+    ]}
+    return ac, points, lms, trims, margin_out
+
+
+def test_classify_failures_reports_progress_per_failure_and_stops_on_request():
+    """실패마다 진행 보고 — 종전에는 분류가 끝날 때까지 콜백이 없어 막대가 멈춰 있었다.
+
+    truthy 반환 = 협조적 취소: 거기까지 분류한 카드만 돌려준다(부분 목록)."""
+    ac, points, lms, trims, margin_out = _two_failures_one_point()
+    kw = dict(criteria=MarginCriteria(), tol_plant=0.05, **ACT)
+    seen = []
+    full = classify_failures(ac, points, lms, trims, {}, demo_design_gains(), margin_out,
+                             on_progress=lambda d, t, m: seen.append((d, t, m)) and False, **kw)
+    assert [(d, t) for d, t, _ in seen] == [(1, 2), (2, 2)]
+    assert all(a["case"] in m and a["loop"] in m and a["verdict"] in m
+               for a, (_, _, m) in zip(full, seen))
+    part = classify_failures(ac, points, lms, trims, {}, demo_design_gains(), margin_out,
+                             on_progress=lambda *a: True, **kw)
+    assert [a["id"] for a in part] == [full[0]["id"]]
+
+
+def test_tune_cache_changes_cost_not_cards(monkeypatch):
+    """같은 점의 여러 자리 실패가 같은 튜닝을 되풀이하지 않는다 — 카드는 캐시 없이 낸 것과 같다."""
+    from claw.design import classify as C
+
+    ac, points, lms, trims, margin_out = _two_failures_one_point()
+    kw = dict(criteria=MarginCriteria(), tol_plant=0.05, **ACT)
+    real, n = C.tune_point, {"calls": 0}
+
+    def counting(*a, **k):
+        n["calls"] += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(C, "tune_point", counting)
+    cached = classify_failures(ac, points, lms, trims, {}, demo_design_gains(), margin_out, **kw)
+    with_cache = n["calls"]
+    n["calls"] = 0
+    direct = [classify_margin_deficit(ac, f["case"], f["loop"], points, lms, trims, {},
+                                      demo_design_gains(), margin_out["cases"], **kw)
+              for f in margin_out["failures"]]
+    assert with_cache < n["calls"], "같은 (점, 조성) 튜닝을 다시 돌렸다"
+    for card, out in zip(cached, direct):
+        assert (card["verdict"], card["action"], card["evidence"]) == \
+            (out["verdict"], out["action"], out["evidence"])
+    # 캐시 사본 — 한 카드의 evidence를 고쳐도 다른 카드가 따라 바뀌지 않는다
+    cached[0]["evidence"]["tuned"]["notes"].append("x")
+    assert "x" not in cached[1]["evidence"]["tuned"]["notes"]
+
+
+def test_tune_cache_is_keyed_by_the_point():
+    """캐시 키에 점이 들어간다 — 다른 점의 같은 조성 실패가 앞 점의 자유 최적을 물려받지 않는다."""
+    ac, points, lms, trims = _setup((0.25, 0.35, 0.45), v_mach=0.35)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.35, 0.25, 0.45))
+    cases = _fail_cases(v, lo, hi)
+    cases[hi]["loops"]["pitch_att"] = dict(cases[v]["loops"]["pitch_att"])
+    margin_out = {"cases": cases, "failures": [
+        {"case": v, "loop": "pitch_att", "severity": 42.0},
+        {"case": hi, "loop": "pitch_att", "severity": 42.0},
+    ]}
+    kw = dict(criteria=MarginCriteria(), tol_plant=0.05, **ACT)
+    cached = {c["case"]: c for c in classify_failures(ac, points, lms, trims, {}, demo_design_gains(),
+                                                     margin_out, **kw)}
+    assert cached[v]["evidence"]["tuned"] != cached[hi]["evidence"]["tuned"], \
+        "두 점의 자유 최적이 같다 — 판별력 없는 테스트"
+    for f in margin_out["failures"]:
+        direct = classify_margin_deficit(ac, f["case"], f["loop"], points, lms, trims, {},
+                                         demo_design_gains(), margin_out["cases"], **kw)
+        assert cached[f["case"]]["evidence"]["tuned"] == direct["evidence"]["tuned"]
+
+
+def test_free_gain_judgement_of_a_rate_loop_includes_its_broken_loop_margin():
+    """구조 한계 게이트의 자유 게인 판정(_tuned_judgement)도 레이트 자리의 AS94900 여유를 검증과 같은 합산으로 본다.
+
+    검증이 여유로 떨어뜨린 자리를 튜너 결과의 지표(λ·ζ)만으로 "통과"라 하면, 자유 게인 최적도 여유를 못 지키는 자리가
+    게인·분할점 문제로 오분류된다(승격·재적합 처방 — 반영해도 여유는 그대로다)."""
+    from claw.design.classify import _slot_passes, _tuned_judgement
+
+    c = MarginCriteria()
+    roll = {"roll_lambda": 12.0, "target": 12.0, "unstable": False, "participation": 1.0, "reason": "ok"}
+    pitch = {"zeta_sp": 0.7, "reason": "ok"}
+    short = {"pm_deg": 60.0, "gm_db": 4.1, "divergent": False}
+    fine = {"pm_deg": 60.0, "gm_db": 8.3, "divergent": False}
+    for name, ach in (("roll_rate", roll), ("pitch_rate", pitch)):
+        out = {"achieved": {name: {**ach, "loop_margins": short}}, "slots": {name: {"reason": "ok"}}}
+        assert _tuned_judgement(out, name, c) == "fail", name
+        assert not _slot_passes(out, name, c), name
+        out = {"achieved": {name: {**ach, "loop_margins": fine}}, "slots": {name: {"reason": "ok"}}}
+        assert _tuned_judgement(out, name, c) == "ok", name
+        # 여유 기록이 없는 결과(가드 전 저장물)는 지표만 — 종전과 같다
+        assert _tuned_judgement({"achieved": {name: dict(ach)}, "slots": {}}, name, c) == "ok", name

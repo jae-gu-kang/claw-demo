@@ -33,6 +33,8 @@
    1~3으로 자연 재분류된다.
 """
 
+import copy
+import json
 import math
 
 from claw.design.linmodels import model_distance
@@ -42,20 +44,14 @@ from claw.design.tune import TuneTargets, tune_point
 
 # 그 자리의 **설계가 성립하지 않은** 사유 목록 — 구조 한계 게이트의 절반이다.
 # tune.py의 목록을 import해서만 쓴다: 여기 손으로 옮겨 적으면 사유가 하나 늘 때
-# 두 모듈의 판정이 조용히 갈린다
-from claw.design.tune import SLOT_DESIGN_FAILED
+# 두 모듈의 판정이 조용히 갈린다. 자리(루프) → 게인 슬롯 표(LOOP_SLOTS — valley 괴리·
+# breakpoint 승격 값의 대상)와 "표본으로 쓸 수 없는 게인" 규칙(failed_gain_slots)도 같은 이유로
+# tune.py가 정본이다 — 적합 제외(orchestrator)·시드·여기가 한 규칙을 쓴다
+from claw.design.tune import LOOP_SLOTS, SLOT_DESIGN_FAILED, failed_gain_slots
 
 VERDICTS = ("simple_deficit", "plant_variation", "gain_interp_valley", "structural_limit",
             "gain_sign_flip", "fit_residual")
 
-# 자리(루프) → 관련 게인 슬롯 — valley 괴리·breakpoint 승격 값의 대상
-LOOP_SLOTS = {
-    "pitch_att": ("pitch.kp", "pitch.ki"),
-    "pitch_rate": ("pitch.k_rate",),
-    "roll_att": ("roll.kp", "roll.ki"),
-    "roll_rate": ("roll.k_rate",),
-    "yaw_rate": ("yaw.k_rate",),
-}
 _EPS = 1e-12
 # 구조 한계 완화 프로브의 작동기 대역폭 배수. 데모 30 rad/s → 90 rad/s로, docs -01 §7
 # 백로그가 적어 둔 소멸 경계(wn ≥ 50 rad/s)를 넘는 값이라 "대역폭이 병목인가"에 답한다.
@@ -120,9 +116,9 @@ def _axis_set(kw, key, value, loop_name):
 # achieved를 통째로 실으면 자리마다 모양이 달라 화면이 전후 비교를 그리지 못한다.
 _ACHIEVED_KEYS = {
     "att": ("pm_deg", "gm_db", "wc_att", "wc0"),
-    "pitch_rate": ("zeta_sp", "target"),
-    "yaw_rate": ("zeta_dr", "target"),
-    "roll_rate": ("roll_lambda", "target", "unstable", "participation"),
+    "pitch_rate": ("zeta_sp", "target", "pm_deg", "gm_db"),
+    "yaw_rate": ("zeta_dr", "target", "pm_deg", "gm_db"),
+    "roll_rate": ("roll_lambda", "target", "unstable", "participation", "pm_deg", "gm_db"),
 }
 
 
@@ -165,8 +161,24 @@ def _achieved_digest(tune_out, loop_name) -> dict | None:
     return {k: ach[k] for k in keys if k in ach}
 
 
+def _tune_cached(cache, v_name, lm, design_base, targets, kw):
+    """튜닝 한 번 — cache(dict)가 있으면 같은 (점, 조성)은 한 번만 돌린다.
+
+    캐시는 분류 한 판(classify_failures 호출 하나) 안에서만 산다. tune_point는 결정적이고(같은
+    선형 모델·손설계·목표·조성이면 같은 답) 한 판 안에서 손설계·목표는 고정이라 키는 (점 이름,
+    조성)이면 된다. 같은 점의 여러 자리 실패가 같은 자유 최적·같은 완화 프로브를 되풀이하던
+    비용이다(실측: 실패 56개 분류의 튜닝 204회 중 44회가 중복). 사본을 돌려준다 — 카드끼리
+    evidence 객체를 공유하지 않게."""
+    if cache is None:
+        return tune_point(lm, design_base, targets=targets, **kw)
+    key = (v_name, json.dumps(kw, sort_keys=True, default=repr))
+    if key not in cache:
+        cache[key] = tune_point(lm, design_base, targets=targets, **kw)
+    return copy.deepcopy(cache[key])
+
+
 def _min_relief(lm, design_base, loop_name, *, targets, criteria, act_kw, key,
-                pass_value) -> tuple:
+                pass_value, tune=None) -> tuple:
     """통과하는 **최소 완화량** — 고정 8회 이분, (통과 쪽 끝, 미달 쪽 끝)을 낸다.
 
     브래킷은 [현재값, 완화값]으로 시작한다. 양 끝은 이미 실측돼 있다: 현재값은
@@ -186,12 +198,14 @@ def _min_relief(lm, design_base, loop_name, *, targets, criteria, act_kw, key,
     해소되면 이분만 16회라 (점, 자리)당 최악 ~4.3초가 더 붙는다. 구조 한계는 드물어
     전체 실행에는 거의 영향이 없지만, 한 점이 통째로 구조 한계인 실행에서는 보인다.
     """
+    if tune is None:
+        def tune(**kw):
+            return tune_point(lm, design_base, targets=targets, **kw)
     bad, good = _axis_get(act_kw, key, loop_name), float(pass_value)
     for _ in range(_RELIEF_BISECT_N):
         mid = 0.5 * (bad + good)
         kw = _axis_set(act_kw, key, mid, loop_name)
-        if _slot_passes(tune_point(lm, design_base, targets=targets, **kw),
-                        loop_name, criteria):
+        if _slot_passes(tune(**kw), loop_name, criteria):
             good = mid
         else:
             bad = mid
@@ -199,7 +213,7 @@ def _min_relief(lm, design_base, loop_name, *, targets, criteria, act_kw, key,
 
 
 def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw,
-                   base_out=None) -> list:
+                   base_out=None, tune=None) -> list:
     """지연·작동기 대역폭을 하나씩만 완화해 재튜닝 — 병목 지목의 실측 근거.
 
     structural_limit는 "게인으로는 안 된다"까지만 말한다. 그다음 질문인 "그럼 무엇을
@@ -220,7 +234,13 @@ def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw,
     비용은 구조 한계로 판정된 (점, 자리)당 튜닝 2회 + 해소된 축마다 8회다 — 최악
     18회. 1회가 ~35 ms(구제 마무리 없음)~270 ms(있음)라 최악 ~4.9초가 (점, 자리)당
     더 든다. 구조 한계는 드물다는 전제 위의 값이다.
+
+    tune: 튜닝 함수(**조성 → tune_point 결과) — 분류기가 (점, 조성) 캐시를 끼워 넘긴다.
+    없으면 tune_point를 그대로 부른다.
     """
+    if tune is None:
+        def tune(**kw):
+            return tune_point(lm, design_base, targets=targets, **kw)
     act_wn = float(act_kw.get("actuator_wn") or 0.0)
     delay = float(act_kw.get("delay_s") or 0.0)
     plan = []
@@ -242,7 +262,7 @@ def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw,
     probes = []
     for key, to_value, label in plan:
         kw = _axis_set(act_kw, key, to_value, loop_name)
-        out = tune_point(lm, design_base, targets=targets, **kw)
+        out = tune(**kw)
         slot = out["slots"].get(loop_name, {})
         # 구조 한계 게이트가 더 이상 성립하지 않으면 해소다 — 같은 함수를 부른다.
         # 식을 두 곳에 적으면 한쪽만 바뀐 날 프로브가 거짓 안도를 준다
@@ -257,7 +277,7 @@ def _relief_probes(lm, design_base, loop_name, *, targets, criteria, act_kw,
         if resolves:
             value, fail_at = _min_relief(
                 lm, design_base, loop_name, targets=targets, criteria=criteria,
-                act_kw=act_kw, key=key, pass_value=to_value,
+                act_kw=act_kw, key=key, pass_value=to_value, tune=tune,
             )
             spec = _RELIEF_AXES[key]
             # 필터 축의 "현재"는 값이 아니라 **없음**이다 — 이분의 미달 쪽 끝
@@ -317,18 +337,23 @@ def _tuned_judgement(tune_out, loop_name, criteria) -> str:
         if "pm_deg" not in ach:
             return "na"
         return criteria.judge(ach)
+    # 레이트 자리는 모드 지표 + AS94900 끊은 루프 여유(튜너 최종 조성 loop_margins)를 검증(schedmap)과 같은 합산
+    # (criteria.judge_rate_loop)으로 판다 — 검증이 여유로 떨어뜨린 자리를 자유 게인 최적이 지표만으로 "통과"라 하면
+    # 구조 한계 게이트가 그 자리를 게인 문제로 오분류한다
+    margins = ach.get("loop_margins")
     if loop_name == "roll_rate":
         # 롤은 감쇠가 아니라 대역폭이다. 종전에는 여기서도 zeta_dr을 찾았는데 롤
         # achieved에는 그 키가 없어 **항상 "na"**였다 — 롤이 실패해도 분류가 안 됐다
         if "roll_lambda" not in ach or not ach.get("target"):
             return "na"
-        return criteria.judge_bandwidth(ach["roll_lambda"], ach["target"],
-                                        unstable=bool(ach.get("unstable")),
-                                        participation=ach.get("participation"))
+        return criteria.judge_rate_loop(
+            criteria.judge_bandwidth(ach["roll_lambda"], ach["target"],
+                                     unstable=bool(ach.get("unstable")),
+                                     participation=ach.get("participation")), margins)
     key = "zeta_sp" if loop_name == "pitch_rate" else "zeta_dr"
     if key not in ach:
         return "na"
-    return criteria.judge_damping(ach[key])
+    return criteria.judge_rate_loop(criteria.judge_damping(ach[key]), margins)
 
 
 def _first_finite(*values):
@@ -362,9 +387,12 @@ def classify_margin_deficit(
     # 넓으면 지속 미달이 "좁은 골"로 눌러앉는다. 수치 확정은 폐쇄망 몫(04 §10)
     hysteresis_pm=5.0, hysteresis_gm=1.0, hysteresis_zeta=0.10,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
-    rate_filters=None,
+    rate_filters=None, tune_cache=None,
 ) -> dict:
     """실패 (검증점, 자리) 하나의 원인 분류 — {"verdict", "action", "evidence"}.
+
+    tune_cache: 분류 한 판의 (점, 조성) 튜닝 캐시(_tune_cached) — classify_failures가 만들어
+    넘긴다. 없으면(직접 호출) 매번 튜닝한다.
 
     design vs design_base — **두 개가 필요하다**:
     - `design`은 실효 설계값(오케스트레이터의 `{**손설계, **적합 상수}`)이고,
@@ -385,6 +413,11 @@ def classify_margin_deficit(
     design_base = design if design_base is None else design_base
     tr = trims[v_name]
     lm = lms.get(aircraft, tr)
+    act_kw = dict(actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
+                  rate_filters=rate_filters, delay_s=delay_s, pade_order=pade_order)
+
+    def tune(**kw):
+        return _tune_cached(tune_cache, v_name, lm, design_base, targets, kw)
     entry = margin_cases[v_name]["loops"][loop_name]
     evidence: dict = {
         "current": {k: entry.get(k) for k in
@@ -402,35 +435,32 @@ def classify_margin_deficit(
     #    적합 단계의 부호 가드(fit._fit_preserving_sign)가 먼저 막지만, 상수 폴백까지
     #    실패했거나 API로 직접 주입된 다항이면 여기로 온다
     if entry.get("sign_flip"):
-        tune_out = tune_point(
-            lm, design_base, targets=targets,
-            actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
-            rate_filters=rate_filters,
-            delay_s=delay_s, pade_order=pade_order,
-        )
+        tune_out = tune(**act_kw)
         slots = LOOP_SLOTS.get(loop_name, ())
+        # 고정할 값은 이 점의 튜닝 결과다 — 튜닝이 이 자리를 **성립시키지 못했으면**(자기 실패, 또는 밑의 레이트
+        # 루프 실패 위에서 튜닝됨 — tune.failed_gain_slots, 적합 제외와 같은 규칙) 그 값은 자리값(0 댐퍼·뒤집힌
+        # 루프의 백오프 해)이라 고정하면 안 된다. 적합 제외가 앵커 표본에서 빼는 바로 그 값을 검증점에 다시 박는
+        # 셈이 된다. 부호 뒤집힘 근거는 남기고 아래 일반 분류로 흘린다 — 자기 실패면 구조 한계 게이트가 잡는다
+        unusable = {s: v for s, v in failed_gain_slots(tune_out["slots"]).items() if s in slots}
         evidence["sign_flip"] = {
             "slots": entry["sign_flip"],
             "effective": {s: eff for s, eff in (entry.get("gains") or {}).items()},
             "design": {s: design.get(s) for s in slots},
+            "tune_failed": unusable or None,
         }
-        return {
-            "verdict": "gain_sign_flip",
-            "action": {
-                "type": "refit_at", "point": v_name,
-                "gains": {s: tune_out["gains"][s] for s in slots if s in tune_out["gains"]},
-                "note": "부호를 지키도록 그 점을 고정해 재적합 — 승격으로는 해결되지 않는다",
-            },
-            "evidence": evidence,
-        }
+        if not unusable:
+            return {
+                "verdict": "gain_sign_flip",
+                "action": {
+                    "type": "refit_at", "point": v_name,
+                    "gains": {s: tune_out["gains"][s] for s in slots if s in tune_out["gains"]},
+                    "note": "부호를 지키도록 그 점을 고정해 재적합 — 승격으로는 해결되지 않는다",
+                },
+                "evidence": evidence,
+            }
 
     # 1) 자유 게인 국소 최적 — structural_limit 판별의 근거
-    tune_out = tune_point(
-        lm, design_base, targets=targets,
-        actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
-        rate_filters=rate_filters,
-        delay_s=delay_s, pade_order=pade_order,
-    )
+    tune_out = tune(**act_kw)
     tuned_status = _tuned_judgement(tune_out, loop_name, criteria)
     slot = tune_out["slots"].get(loop_name, {})
     evidence["tuned"] = {
@@ -446,10 +476,7 @@ def classify_margin_deficit(
         wcp = _first_finite(entry.get("wcp"), entry.get("wc"))
         relief = _relief_probes(
             lm, design_base, loop_name, targets=targets, criteria=criteria,
-            act_kw=dict(actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
-                        rate_filters=rate_filters,
-                        delay_s=delay_s, pade_order=pade_order),
-            base_out=tune_out,
+            act_kw=dict(act_kw), base_out=tune_out, tune=tune,
         )
         resolved = [p for p in relief if p["resolves"]]
         # 결론 문장에 **임계값을 넣는다**. "작동기 대역폭 ×3이면 통과"는 배수라 사양이
@@ -483,6 +510,12 @@ def classify_margin_deficit(
     # 관련 슬롯의 보간 게인 vs 최적 게인 괴리 (valley 판별 재료)
     g_interp = scheduled_gains(tables, design, trims[v_name].case)
     slots = LOOP_SLOTS.get(loop_name, ())
+    # 이 자리 자체는 게이트를 넘었어도 밑의 레이트 루프가 실패한 조성 위에서 튜닝됐으면(basis rate_loop) 그 게인은
+    # "자유 게인 최적"이 아니다 — valley 승격·재적합이 그 값을 주입하면 적합 제외 규칙이 빼는 값을 되살린다.
+    # 주입하는 처방(valley·fit_residual)을 건너뛰고 검증점 추가로 흘린다
+    unusable = {s: v for s, v in failed_gain_slots(tune_out["slots"]).items() if s in slots}
+    if unusable:
+        evidence["tune_failed"] = unusable
     gaps = {}
     for slot in slots:
         go = tune_out["gains"].get(slot)
@@ -516,7 +549,7 @@ def classify_margin_deficit(
 
     # 3) 보간 valley — 최적은 통과 + 괴리 큼 + 이웃 breakpoint는 통과
     flank_b = points.flanking(v_name, ROLE_BREAKPOINT)
-    if max_gap > tol_gain and flank_b is not None:
+    if max_gap > tol_gain and flank_b is not None and not unusable:
         lo, hi, axis = flank_b
         neighbor_ok = all(
             margin_cases.get(n, {}).get("loops", {}).get(loop_name, {}).get("status")
@@ -563,6 +596,12 @@ def classify_margin_deficit(
     deficit_note = _deficit_note(
         evidence["shortfall"], hysteresis_pm, hysteresis_gm, hysteresis_zeta
     )
+    if unusable:
+        # 게인 주입 처방을 **건너뛴** 사실을 적는다 — 말없이 검증점 추가로 떨어지면 "왜 valley가 아닌가"가 안 남는다
+        why = ", ".join(sorted({f"{v['loop']} {v['reason']}" for v in unusable.values()}))
+        blocked = (f"이 점의 튜닝 게인({', '.join(sorted(unusable))})은 실패한 루프({why}) 위에서 나와 주입하지"
+                   " 않았다 — 그 루프가 먼저다")
+        deficit_note = f"{deficit_note} / {blocked}" if deficit_note else blocked
     return {
         "verdict": "simple_deficit",
         "action": {"type": "add_validation", "point": v_name, "note": deficit_note},
@@ -574,7 +613,7 @@ def classify_failures(
     aircraft, points, lms, trims, tables, design, margin_out, *,
     criteria, design_base=None, targets=None, tol_plant=0.25, tol_gain=0.10,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
-    rate_filters=None,
+    rate_filters=None, on_progress=None,
 ) -> list:
     """마진맵 결과의 fail 목록 전체 분류 — 처방 카드 목록 (심각 순, id 부여).
 
@@ -583,6 +622,12 @@ def classify_failures(
     points.promote 래칫).
 
     design_base(손설계 정본)를 함께 넘긴다 — 이유는 classify_margin_deficit 참조.
+
+    on_progress(done, total, message): 실패 하나를 분류할 때마다 부른다. 분류는 실패당
+    튜닝 수 회(구조 한계면 완화 프로브·이분까지)라 실패가 수백 개면 수 분이 걸리는데,
+    종전에는 콜백이 없어 그동안 진행 막대가 직전 VERIFY 메시지에 멈춰 있었고 취소도
+    먹지 않았다. truthy 반환 = 협조적 취소 — 거기까지 분류한 카드만 돌려준다(부분
+    목록이다. 오케스트레이터는 콜백이 예외로 빠져나가 부분 목록을 쓰지 않는다).
     """
     kw = dict(
         criteria=criteria, design_base=design_base, targets=targets,
@@ -591,10 +636,12 @@ def classify_failures(
         rate_filters=rate_filters,
         delay_s=delay_s, pade_order=pade_order,
     )
+    kw["tune_cache"] = {}  # 이 판에서만 사는 (점, 조성) 튜닝 캐시 — _tune_cached
     actions = []
     promoted: dict = {}  # point → 최고 승격 역할
     rank = {ROLE_BREAKPOINT: 1, ROLE_ANCHOR: 2}
-    for f in margin_out["failures"]:
+    failures = margin_out["failures"]
+    for i, f in enumerate(failures):
         out = classify_margin_deficit(
             aircraft, f["case"], f["loop"], points, lms, trims, tables, design,
             margin_out["cases"], **kw,
@@ -613,4 +660,7 @@ def classify_failures(
             else:
                 promoted[f["case"]] = act["to"]
         actions.append(item)
+        if on_progress is not None and on_progress(
+                i + 1, len(failures), f"classify {f['case']} {f['loop']} → {out['verdict']}"):
+            break
     return actions

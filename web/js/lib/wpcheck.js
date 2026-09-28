@@ -109,6 +109,23 @@ export function pathSpeed(modeRows) {
   return best;
 }
 
+/** `"path"` 헤딩 모드가 잡는 고도 [m] — 새 웨이포인트의 기본 고도(lib/wpmap.js defaultWaypointAlt)가 쓴다.
+ *  없으면 null.
+ *
+ * 종방향 축이 '고도'이고 값이 수치인 첫 행이다(표 순서 = 대개 실행 순서). 값이 "path"면 그 모드는 고도를
+ * 웨이포인트에서 **받는** 쪽이라 기본값의 출처가 될 수 없다 — 건너뛴다. 기체마다 다른 순항 고도가
+ * 미션 템플릿 → 모드 표로 들어오므로, 여기서 읽으면 웹이 고도 상수를 들 필요가 없다. */
+export function pathAlt(modeRows) {
+  for (const r of modeRows ?? []) {
+    if (String(r.heading ?? "").trim() !== "path") continue;
+    if (String(r.lonAxis ?? "").trim() !== "alt") continue;
+    const s = String(r.lonValue ?? "").trim();
+    const v = Number(s);
+    if (s !== "" && Number.isFinite(v) && v > 0) return v;
+  }
+  return null;
+}
+
 /** 웨이포인트 기하 판정.
  *
  * @param pts        [{n, e, ok}] — `wpmap.rowsToPoints` 결과 (ok=false는 건너뛴다)

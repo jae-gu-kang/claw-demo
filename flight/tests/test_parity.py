@@ -31,8 +31,10 @@ from claw.profile import build_profile, load_shipped_example
 LEGACY_DOC = Path(__file__).resolve().parents[2] / "engine" / "claw" / "tests" / "fixtures" / "delta_legacy.json"
 
 # 구조 지문 — 세 기체가 **하나**를 나눈다. 파라미터 지문은 기체마다(아래 테스트)
-STRUCTURE_FP = "bc5d7dc7d4ee4c60"
-PARAM_FP = {"example": "9434b43ca18a887d", "eoir": "9434b43ca18a887d", "legacy": "41eceddd3279a2c1"}
+STRUCTURE_FP = "f94329070fbecd39"
+# 제품 예제 9434b43ca18a887d → 73abdc9a7464b512 (2026-09 재튜닝 — 툴이 다시 도출한 SCAS·자동조종 + yaw.k_rate 스케줄 편입
+# + 승강률 명령필터 tau_vs 0.5, 구조 지문 불변). EO/IR형은 질량·관성만 바꾸는 변형이라 법칙 값·파라미터 지문이 기본형과 같다
+PARAM_FP = {"example": "73abdc9a7464b512", "eoir": "73abdc9a7464b512", "legacy": "41eceddd3279a2c1"}
 
 
 def _profiles():
@@ -214,6 +216,54 @@ def test_trace_exercises_the_hard_paths(trace):
     assert bound_roll > 0 and bound_pitch > 0, (
         f"동적 한계에 실제로 걸린 스텝이 없다 (롤 {bound_roll}, 피치 {bound_pitch}) "
         "— 배분 경로의 C 대조가 반쪽이다")
+
+
+def test_대조_입력이_속도_기준_추월_동기화의_양쪽_분기를_밟는다(trace, monkeypatch):
+    """추월 동기화(fcl/graphs.py 속도 절)는 생성 C에 판정 한 줄을 더한다 — 대조가 그 줄의 참·거짓을 둘 다 밟아야
+    비트 일치가 그 줄의 증명이 된다. 미션만으로는 기체가 기준을 앞지르지 않을 수 있어 전체 입력(보강 벡터 포함)으로 센다
+    — 속도축 포화 왕복(TC-INT-SAT-SPD)의 명령 900 → 0 반전이 참측을 확실히 낸다."""
+    import claw.codegen.ir_exec as ir_exec
+
+    inputs, _refs, warm, _mission = trace
+    runner = _ir_runner(warm)
+    real = ir_exec.resync_state
+    moved = []
+
+    def spy(inst, cmd, meas):
+        x0 = inst._x
+        real(inst, cmd, meas)
+        if x0 is not None:
+            moved.append(inst._x != x0)
+
+    monkeypatch.setattr(ir_exec, "resync_state", spy)
+    for row in inputs:
+        runner.step(**row)
+    assert any(moved), "대조 입력이 동기화 참측을 한 번도 밟지 않았다"
+    assert not all(moved), "대조 입력이 동기화 거짓측을 밟지 않았다"
+
+
+def test_대조가_잇는_보강_벡터는_검증_탭의_벡터와_같다():
+    """미션 뒤에 잇는 보강 벡터가 검증 탭(verify/autocode.py `_integration_cases`)이 돌리는 것과 **같아야** "테스트가 대조한
+    것 = 화면이 대조한 것"이다(mission_trace.run 독스트링). θ 상한 하강 케이스는 기체의 θ 상한 표에서 마하 두 점·여유를
+    정한다(verify/vectors.py) — 표 대신 bool을 넘기면 데모 격자 고정 벡터가 나오는데, 예제·EO/IR형·구 기체에서는 그 둘이
+    비트로 같아 세 기체 대조로는 갈림이 안 보인다. 쇼케이스 기체(S1)는 상자에 잘린 상수 상한이라 검증 탭에 하강 케이스가
+    없고 옛 bool 호출은 있다 — 그래서 여기서 본다. 보는 것은 뒤에 붙는 벡터라 미션은 짧게(5 s) 돈다."""
+    from claw.fcl.assemble import assemble_law
+    from claw.profile import load_showcase
+    from claw.verify import vectors
+    from claw.verify.autocode import _integration_cases
+
+    profile = build_profile(load_showcase())
+    inputs, _refs, _warm, mission = mission_trace.run(t_end=5.0, profile=profile)
+    law = assemble_law(profile).init(DT)
+    want = [row for case in _integration_cases(law) for row in case["rows"]]
+    # 이 기체가 두 호출을 가르는지부터 — 안 가르면 이 테스트는 아무것도 못 지킨다(S1 값이 바뀌면 다른 기체로 옮길 것)
+    ap_cfg = getattr(getattr(law, "autopilot", None), "cfg", None)
+    legacy_call = [row for case in vectors.integration_cases(ap_cfg, law.runner.dt, theta_hi=True)
+                   for row in case["rows"]]
+    assert legacy_call != want, "쇼케이스 기체에서 bool 호출과 표 호출이 같다 — 갈림을 보일 기체를 다시 고를 것"
+    assert inputs[mission:] == want, (
+        f"대조 보강 벡터 {len(inputs) - mission}행 ≠ 검증 탭 {len(want)}행 — θ 상한 표를 넘기지 않았나")
 
 
 @needs_cc
@@ -547,5 +597,10 @@ def test_모든_파일이_같은_구조_지문을_싣는다():
     # 움직이고, 에미터 문장이 바뀌면 움직인다 — v1.11의 "문장만 바뀐 변경은 지문이 못 본다"는 구멍이 닫혔다. 값은 파라미터
     # 지문(이미지)으로 갔다. 표준 템플릿 그래프(1점 표·0 게인 경로·add_param)와 생성 로더가 들어와 9b992c84c6e5d4f8(값+구조)
     # → bc5d7dc7d4ee4c60(구조).
+    # 이번 갱신은 **속도 명령필터 추월 동기화**다(fcl/graphs.py 속도 절, IR Node.resync) — fcl_ap.c에 판정 한 줄과 주석
+    # 한 줄이 늘었다. 같은 갱신에서 선회 스로틀 FF의 제곱을 `pow(c, 2.0)`에서 곱 `c·c`로 바꿨다 — -O2가 pow를 곱으로
+    # 접어 빌드마다 1 ulp 갈리던 것을 검증 탭 커버리지 세트가 잡았다(codegen/ir_exec.py _OP_FN 주석). 파라미터 목록·값은
+    # 그대로라 파라미터 지문(9434b43ca18a887d)은 안 움직이고, 이미지는 머리의 구조 지문과 CRC만 바뀐다
+    # — bc5d7dc7d4ee4c60 → f94329070fbecd39.
     assert fps == {STRUCTURE_FP}, f"구조 지문이 움직였다: {fps}"
     assert f"#define FCL_STRUCTURE_FP 0x{STRUCTURE_FP}ULL" in _gen("fcl_params.h")

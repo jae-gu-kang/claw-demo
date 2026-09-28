@@ -96,6 +96,11 @@ def _effective_gain(law, group, key, case):
     return float(law.autopilot.cfg[AP_PARAM[(group, key)]])
 
 
+# 공개 이름 — 모듈 밖(서버 분석 라우트·pipeline.evaluate)이 쓰는 조회 정본이다. 밑줄 이름은 기존 호출처가
+# 그대로 돌게 남긴다(같은 함수 객체라 두 이름이 갈라질 수 없다)
+effective_gain = _effective_gain
+
+
 def _effective_filter(law, group, sp):
     """루프 선언의 filter 항 → pi_loop 필터 스펙 (선언이 없거나 꺼져 있으면 None).
 

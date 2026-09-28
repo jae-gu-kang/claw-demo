@@ -102,6 +102,31 @@ def test_full_model_check_and_neighbors_share_the_tuner_yardstick(basis):
             assert isinstance(n["stable"], bool)
 
 
+def test_stable_label_is_the_tuner_guard_including_the_spiral_exemption(basis):
+    """산출 근거의 "안정" 표시는 튜너 캡과 **같은 가드**다 — 느린 나선은 비행성 수준 1 배가시간까지 면제하고, 면제한
+    나선의 배가시간을 함께 싣는다.
+
+    이 점(구 기체 M0.45/h1000)의 롤 후보 −0.256은 종전 가드("극 전부 안정")로 불안정이었다 — 05 §10.1은 그것을
+    "튜너라면 캡이 깎을 크기"라 적었다. 실제로 걸린 것은 작동기·지연이 아니라 **배가 177 s의 나선**이었다(요를 닫은
+    프리픽스 — 요 목표 0.5였을 때 175 s, 요 댐퍼가 세지면 조금 늘어난다). 이제는 안정이고 나선 배가시간이 보인다.
+    자세 자리에는 축 전체 폐루프 판정이 실린다(튜너 3단과 같은 판정)."""
+    from claw.design.tune import _SPIRAL_T2_MIN_S
+
+    _, out = basis
+    roll = out["rates"]["roll_rate"]
+    assert roll["full"]["stable"] is True and roll["full"]["bound"] is None
+    assert roll["full"]["spiral_t2_s"] == pytest.approx(176.86, rel=5e-3)
+    assert all(n["stable"] and n["spiral_t2_s"] >= _SPIRAL_T2_MIN_S for n in roll["neighbors"])
+    # 요·피치 댐퍼 후보는 나선을 남기지 않는다 — 면제가 쓰인 곳에만 수가 있다
+    assert out["rates"]["pitch_rate"]["full"]["spiral_t2_s"] is None
+    for group in ("pitch", "roll"):
+        cl = out["attitude"][f"{group}_att"]["closed_loop"]
+        assert cl["stable"] is True, (group, cl)
+    # 롤 자세까지 닫으면 나선이 잡힌다 — 댐퍼만 닫은 조성에만 느린 발산이 있다
+    rl = out["attitude"]["roll_att"]["closed_loop"]
+    assert rl["rates_only"]["spiral_t2_s"] == pytest.approx(176.86, rel=5e-3) and rl["max_re"] < 0.0
+
+
 def test_reported_metrics_are_measured_on_the_final_composition(basis):
     """조성 일관성이 이 기능의 중심 주장이다 — 보고 지표를 같은 자(axis_metrics, 최종 조성)로
     재계산해 대조한다. 요가 핵심이다: 프리픽스(롤 열림)로 재면 검증(schedmap)과 다른 수가 나온다."""
@@ -269,3 +294,37 @@ def test_basis_missing_slots_refuses_failed_attitude_not_just_zero_kp():
     # 축퇴(kp 0)는 사유와 무관하게 못 쓴다
     out["attitude"]["pitch_att"] = {"kp": 0.0, "reason": REASON_OK}
     assert basis_missing_slots(out) == ["pitch_att"]
+
+
+def test_outer_timescale_uses_the_real_attitude_crossover_on_the_showcase_aircraft():
+    """S1 연료 5 kg·M0.13·해면 — 피치 댐퍼 후보가 장주기 공진 봉우리를 1 위로 올려, 루프쉐이핑의 자세 목표(레이트
+    교차 ÷ 3)가 0.1 rad/s로 잡힌다. 그 목표는 루프의 이득교차가 아니다(루프는 0.49 rad/s에서 마지막으로 1을
+    지난다). 바깥 루프 보고와 직행 저장의 자동조종은 루프가 실제로 1을 지나는 교차를 써야 한다 — 종전에는 바깥
+    루프 0.02 rad/s · kp_spd 0이었다. 보고한 교차 = 실측 이득교차는 목표가 가짜든 아니든 서야 하는 불변식이다."""
+    from claw.common.constants import G0
+    from claw.design.basis import apply_seed_basis
+    from claw.env import isa_atmosphere
+    from claw.profile import load_showcase
+
+    doc = load_showcase()
+    doc["id"] = "showcase-blank"
+    doc["law"]["design"] = doc["law"]["schedule"] = doc["law"]["gain_tables"] = None
+    built = build_profile(doc)
+    point = dict(mach=0.13, alt=0.0, fuel=5.0)
+    out = seed_basis(built, **point)
+    assert out["ok"], out["reason_text"]
+    outer = out["outer"]
+    for group in ("pitch", "roll"):
+        assert outer["inner"][group] == pytest.approx(out["attitude"][f"{group}_att"]["wcp"], rel=1e-9), group
+    assert outer["wc_outer"] == pytest.approx(min(outer["inner"].values()) / outer["separation"], rel=1e-12)
+    assert outer["wc_outer"] > 0.05  # 종전 0.0199 — 자세 목표 0.0997 ÷ 5
+
+    applied = apply_seed_basis(built, **point)
+    assert applied["ok"], applied["reason_text"]
+    ap = applied["design"]["autopilot"]
+    assert ap["kp_spd"] > 0.0
+    v = point["mach"] * isa_atmosphere(point["alt"]).a
+    # 화면이 보인 바깥 루프 대역폭과 저장하는 자동조종이 같은 수에서 나온다
+    assert ap["kp_hdg"] == pytest.approx(outer["wc_outer"] * v / G0, rel=1e-9)
+    notes = applied["design"]["provenance"]["autopilot_notes"]
+    assert notes[:len(outer["notes"])] == outer["notes"]  # 가짜 교차를 바꾼 근거가 문서 출처에 남는다

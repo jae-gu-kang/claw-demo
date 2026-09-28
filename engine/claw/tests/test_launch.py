@@ -6,6 +6,7 @@
 기록되지 않는가 — 셋 다 화면이 사실을 말하려면 필요한 것들이다.
 """
 
+import inspect
 import math
 
 import numpy as np
@@ -130,6 +131,90 @@ def test_launch_reaches_commanded_climb(launched):
     s = res.signals
     assert s["h"][-1] == pytest.approx(300.0, rel=0.15)
     assert s["V"][-1] == pytest.approx(110.0, rel=0.05)
+
+
+def test_speed_reference_rides_the_rail_and_throttle_comes_in_at_exit(launched):
+    """속도 축이 켜진 채 레일에서 출발해도 기준이 V = 0에 붙잡히지 않는다 (fcl/graphs.py 속도 절 추월 동기화).
+
+    사출기가 속도를 올리는 동안 기준은 측정을 따라가고(뒤처지지 않는다), 이탈 순간 이탈속도에서 목표로 램프한다.
+    고치기 전(구 기체, τ_spd 2 s)에는 이탈 직후 기준이 13.4 m/s(이탈 81.5 m/s)라 「명령 < 속도」로 스로틀이 약 2.2 s
+    동안 0이었다.
+    """
+    rail, res = launched
+    s = res.signals
+    on = s["on_rail"]
+    ref, V = s["spd_cmd_filt"], s["V"]
+    assert (ref[on] >= V[on]).all(), "레일 위에서 속도 기준이 기체보다 뒤처졌다"
+    i = int(np.argmax(~on))  # 이탈 후 첫 표본
+    assert ref[i] >= 0.95 * rail.exit_speed
+    thr = 0.5 * (s["thr_l"] + s["thr_r"])
+    j = int(np.searchsorted(res.t, res.t[i] + 0.3))
+    assert thr[i:j].max() > 0.05, "이탈 뒤 0.3 s 동안 스로틀이 0에 머물렀다"
+
+
+def test_throttle_is_warm_started_at_launch_power_not_the_pad_trim(pitch_launched):
+    """레일 발진의 스로틀 웜스타트는 발사 출력(기본 최대)이다 — 지상 평형 트림의 0이 아니다 (sim/simulator.py run).
+
+    지상 평형은 V = 0이라 스로틀을 0으로 푼다(trim_ground). 그 값으로 속도 PI를 시작하면 이탈 뒤 스로틀이 적분 속도로만
+    올라온다 — 쇼케이스 기체 EO/IR형 만재에서 0.5까지 2.4 s·0.9까지 13 s, 그동안 속도 42.0 → 39.2 m/s·고도 4.4 m 처짐.
+    이 구 기체는 추력이 커서 처지지는 않았지만 같은 병이다: 이탈 뒤 스로틀 0.5까지 0.24 s, 속도 81.5 → 81.1 m/s로 빠졌다.
+    이제 레일 위에서 발사 출력에 머물고, 이탈 뒤에도 기체가 속도 기준을 따라잡기 전까지는 그대로다(오차가 +라 PI가
+    포화에 붙어 있고, 조건부 적분이라 적분기도 발사 출력에서 움직이지 않는다).
+    """
+    _rail, res = pitch_launched
+    s = res.signals
+    on = s["on_rail"]
+    thr = 0.5 * (s["thr_l"] + s["thr_r"])
+    power = inspect.signature(Simulator).parameters["launch_throttle"].default
+    assert power == 1.0, "기본 발사 출력은 최대"
+    assert (thr[on] == power).all(), "레일 위에서 발사 출력에 머문다"
+    assert (s["i_spd"][on] == power).all(), "속도 PI 적분기가 발사 출력에서 시작한다"
+    i = int(np.argmax(~on))  # 이탈 후 첫 표본
+    caught = np.flatnonzero(s["V"][i:] >= s["spd_cmd_filt"][i:])
+    k_end = i + (int(caught[0]) if caught.size else len(s["V"]) - i)
+    assert res.t[k_end - 1] - res.t[i] > 5.0, "이 단정의 전제 — 이탈 뒤 한동안 기체가 기준 아래에 있다"
+    assert (thr[i:k_end] == power).all(), "기준을 따라잡기 전에 스로틀이 발사 출력에서 내려왔다"
+    j = int(np.searchsorted(res.t, res.t[i] + 2.0))
+    assert s["V"][i:j].min() >= s["V"][i] - 1e-9, "이탈 직후 속도가 이탈속도 아래로 빠졌다"
+
+
+def test_launch_power_is_a_setting_and_zero_is_the_old_pad_start():
+    """발사 출력은 조립 설정이다(Simulator launch_throttle) — 0이면 지상 트림 스로틀로 시작하던 예전 거동이 그대로
+    나온다(비교 기준).
+
+    값은 법칙 속도 축의 정규화 범위 [0, 1] 안이어야 한다 — 밖이면 웜스타트가 첫 스텝에 조용히 잘린다.
+    """
+    gear = make_demo_skid_gear()
+    ac = make_demo_aircraft(ground=gear)
+    tr = trim_ground(ac, TrimCase("pad", mach=0.0, alt=0.0, fuel=300.0, condition="ground"))
+    assert float(tr.control.throttle[0]) == 0.0, "전제 — 지상 평형 트림의 스로틀은 0"
+    modes = [ModeSpec(name="launch", speed=110.0, pitch=math.radians(21.0), heading=0.0,
+                      exit_when=("time_ge", 1e9))]
+
+    def build(**kw):
+        return Simulator(aircraft=ac, fcl=make_demo_fcl(), guidance=Guidance(modes),
+                         stall_table=make_demo_stall_table(), dt_plant=DT, control_hz=100.0, ground_elev=0.0,
+                         launch=make_demo_launch_rail(), **kw)
+
+    s = build(launch_throttle=0.0).run(tr, t_end=0.5).signals
+    thr = 0.5 * (s["thr_l"] + s["thr_r"])
+    assert thr[s["on_rail"]].max() < 0.1, "발사 출력 0이면 레일 위 스로틀은 PI 비례항 몫뿐"
+    for bad in (-0.1, 1.1, float("nan")):
+        with pytest.raises(ValueError, match="발사 출력"):
+            build(launch_throttle=bad)
+
+
+def test_air_start_still_warm_starts_from_the_trim_throttle():
+    """레일이 없으면 스로틀 웜스타트는 예전 그대로 시작 트림의 스로틀이다 — 발사 출력은 레일 발진에만 쓴다(주어도 무시)."""
+    ac = make_demo_aircraft()
+    tr = trim_level(ac, TrimCase("air", mach=0.4, alt=1000.0, fuel=300.0))
+    assert tr.converged and 0.05 < float(tr.control.throttle[0]) < 0.95
+    modes = [ModeSpec(name="hold", exit_when=("time_ge", 1e9))]  # 전 축 홀드 — 속도 PI는 오차 0으로 돈다
+    sim = Simulator(aircraft=ac, fcl=make_demo_fcl(), guidance=Guidance(modes),
+                    stall_table=make_demo_stall_table(), dt_plant=DT, control_hz=100.0, launch_throttle=1.0)
+    s = sim.run(tr, t_end=0.05).signals
+    assert s["i_spd"][0] == pytest.approx(float(tr.control.throttle[0]), abs=1e-12)
+    assert s["thr_l"][0] == pytest.approx(float(tr.control.throttle[0]), abs=1e-12)
 
 
 def test_without_launch_nothing_changes(launched):

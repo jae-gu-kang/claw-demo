@@ -370,6 +370,14 @@ def _emit_command_filter(ctx, node, inst, ins, gains, dt_macro):
     x = ctx.st(nid, "x", 0.0, "필터 상태(= 출력)")
     seeded = ctx.st(nid, "seeded", 0, "시드 완료 여부 — 첫 스텝은 측정에서 출발", ctype="int")
     ctx.line(f"if (!{seeded}) {{ {x} = {current}; {seeded} = 1; }}")
+    if node.resync:
+        # 추월 동기화(IR Node.resync) — blockspec.resync_state와 **같은 식**이다. 곱 하나라 단일 조건
+        # 결정이고(verify/mcdc.py 대상 밖 — 분기 커버리지가 곧 MC/DC), NaN이면 거짓이라 상태를 안 건드린다.
+        # 시드 뒤에 두므로 첫 스텝은 (측정 − 측정)·… = 0으로 거짓 — Python이 미시드면 건너뛰는 것과 같다
+        if inst.angle:
+            raise ValueError(f"{nid}: 각도(wrap) 명령필터는 resync 미지원 — 차를 래핑해야 해서 판정식이 다르다")
+        ctx.line(f"/* {nid} 추월 동기화 — 측정이 상태를 앞질러 명령 쪽에 있으면 측정으로 다시 시드 */")
+        ctx.line(f"if (({current} - {x}) * ({cmd} - {current}) > 0.0) {{ {x} = {current}; }}")
     diff = f"{cmd} - {x}"
     if inst.angle:
         wrap = ctx.helper("claw_wrap_pi")
@@ -514,8 +522,9 @@ _OP_C = {
     "switch_param": lambda a, b, ref: (f"({ref} != 0.0) ? {a} : {b}", ()),
     # autopilot.py:161 — 1.0 / math.cos(φ) - 1.0
     "sec_minus_1": lambda a: (f"1.0 / cos({a}) - 1.0", ("math",)),
-    # autopilot.py:170 — 1.0 / math.cos(φ) ** 2 - 1.0 (Python `**2`는 libm pow)
-    "sec2_minus_1": lambda a: (f"1.0 / pow(cos({a}), 2.0) - 1.0", ("math",)),
+    # 1/cos²φ − 1 — 제곱은 pow가 아니라 곱이다(ir_exec._OP_FN 주석). `pow(x, 2.0)`은 -O2에서 `x*x`로 접히고 -O0에서는
+    # libm pow를 불러 **빌드마다** 1 ulp 갈렸다. cos를 두 번 부르는 것은 같은 값이다(순수 함수 — 컴파일러가 합쳐도 같다)
+    "sec2_minus_1": lambda a: (f"1.0 / (cos({a}) * cos({a})) - 1.0", ("math",)),
 }
 
 # 값을 이미지에서 읽는 연산 — 이미지 필드 `{id}_c`의 주석

@@ -31,6 +31,12 @@ import { groupFields, schemaFields } from "../lib/schemaform.js";
 
 // 열어 둔 절 — 모양이 바뀌어 다시 그려도 닫히지 않게 (모듈 스코프 규약)
 const openSections = new Set();
+
+/** 다음 그리기에서 이 절을 펼친 채로 — 기체 탭이 폼 밖에서 칸을 고친 뒤(쇼케이스 공학 수정) 고친 자리를
+ *  보이게 한다. 사람이 접으면 그대로 접힌다(ontoggle이 지운다). */
+export function revealSection(key) {
+  openSections.add(key);
+}
 // 그린 차례 — 응답을 기다리는 쓰기(CSV 표 반입)가 행 번호를 들고 있다. 그사이 폼을 다시 그렸으면(항 추가·삭제 등
 // 모양이 바뀐 쓰기는 반드시 다시 그린다) 그 번호가 다른 항을 가리킬 수 있어 쓰지 않는다
 let renderSeq = 0;

@@ -3,8 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  alignTables, appliedTables, defaultSelection, fixedGains, schedSummary, slotRows,
-  storePayload, toggleSlot, zeroTables,
+  alignTables, appliedTables, axisMismatch, axisMismatchText, defaultSelection, evalStripLine, fixedGains,
+  schedSummary, scheduleKnees, slotRows, storePayload, toggleSlot, zeroTables,
 } from "./gainsched.js";
 import { valueAt } from "./gainsync.js";
 
@@ -170,4 +170,47 @@ test("서버 제안 격자와 확정본 격자가 섞여도 조회 함수가 보
         `${name} 원래 격자점 @M${x}는 정확히 보존돼야 한다`);
     }
   }
+});
+
+test("axisMismatch — 고도 축 확정본이 오면 어느 자리가 어느 축인지 그대로 말한다", () => {
+  const tables = {
+    "pitch.kp": { axes: { mach: [0.1, 0.2] }, data: [1, 2] },
+    "roll.kp": { axes: { alt: [0, 3000] }, data: [1, 2] },
+    "roll.ki": { axes: {}, data: [] },
+  };
+  assert.equal(alignTables(tables, "mach"), null); // 화면은 세우지 않는다 — 그 사유가 아래다
+  const m = axisMismatch(tables, "mach");
+  assert.deepEqual(m, [{ name: "roll.kp", axes: ["alt"] }, { name: "roll.ki", axes: [] }]);
+  assert.equal(axisMismatchText(m, "mach"),
+    "roll.kp(alt 축), roll.ki(축 없음) — 'mach' 축이 아닌 표라 이 화면에 세울 수 없다"
+    + "(게인 탭·문서 확정 표는 'mach' 축만 받는다)");
+  assert.deepEqual(axisMismatch({ "pitch.kp": tables["pitch.kp"] }, "mach"), []);
+  assert.equal(axisMismatchText([], "mach"), null);
+});
+
+test("scheduleKnees — 상한 클립이 풀리는 첫 격자점(문서 스케줄에서), 기체 상수가 아니다", () => {
+  // 예제 기체 규칙 표 그대로: K = K0·min((M_d/M)², 상한), M_d 0.2449, 피치 상한 2 · 롤 상한 4
+  const grid = [0.0612, 0.0816, 0.1021, 0.1225, 0.1429, 0.1633, 0.1837, 0.2041, 0.2245, 0.2449, 0.2654];
+  const rule = (k0, cap) => ({
+    axes: { mach: grid }, data: grid.map((m) => k0 * Math.min((0.2449 / m) ** 2, cap)), extrapolate: "clip",
+  });
+  const knees = scheduleKnees({ "pitch.kp": rule(-2, 2), "pitch.k_rate": rule(0.4, 2), "roll.kp": rule(1, 4) },
+    "mach");
+  assert.deepEqual(knees, [0.1225, 0.1837]);
+  // 평탄부가 없는 표·전부 평탄(0 표)·꺾임이 끝점인 표는 경계를 내지 않는다
+  const flat = { axes: { mach: grid }, data: grid.map(() => 0) };
+  const curve = { axes: { mach: grid }, data: grid.map((m) => 1 / m) };
+  const lastKnee = { axes: { mach: [0.1, 0.2, 0.3] }, data: [2, 2, 1] };
+  assert.deepEqual(scheduleKnees({ a: flat, b: curve, c: lastKnee }, "mach"), []);
+  assert.deepEqual(scheduleKnees(null, "mach"), []);
+});
+
+test("evalStripLine — 하드 게이트·나머지 판정·깊이 한 줄", () => {
+  const checks = { n_pass: 8, n_judged: 9, n_fail: 1, n_warn: 0, n_na: 1 };
+  assert.equal(evalStripLine({ aggregate: { hard_fail: false, hard_fails: [] }, checks, depth: "linear" }),
+    "하드 게이트 전부 통과 · 나머지 판정 8/9 PASS · 실패 1 · 판정 불가 1 · depth=linear");
+  assert.equal(evalStripLine({ aggregate: { hard_fail: true, hard_fails: ["a", "b"] }, checks, depth: "full" })
+    .startsWith("하드 게이트 위반 2건 — Fail · "), true);
+  assert.equal(evalStripLine({ aggregate: null, checks: null, depth: "linear" }),
+    "하드 게이트 판정 보류(케이스 0건) · 나머지 판정 — 아직 없다 · depth=linear");
 });

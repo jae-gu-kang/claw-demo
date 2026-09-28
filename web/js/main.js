@@ -5,6 +5,8 @@ import { clear } from "./dom.js";
 // 전역 질문 위젯·가이드 투어 — 라우트 뷰가 아니다 (VIEWS 밖: blocks.test.js nav 가드와 무관)
 import * as ask from "./views/ask.js";
 import * as tour from "./views/tour.js";
+// 쇼케이스 진행기 — 투어와 같은 body 크롬(라우트 아님). 단계 표는 lib/showcase.js
+import * as showcase from "./views/showcase.js";
 // 로그인 게이트·관리자 — 둘 다 파이프라인 탭이 아니다 (VIEWS 밖). 게이트는 부팅
 // 오버레이(body 크롬), 관리자는 헤더 세션 알약의 [관리]로만 여는 특례 라우트(#admin)
 import * as login from "./views/login.js";
@@ -84,4 +86,5 @@ setInterval(refreshHealth, 5000);
 profilepick.mount(); // 헤더 기체 선택기 — 선택이 서버에서 사라졌으면 예제로 되돌리고 사유를 말한다
 ask.mount(); // 전역 질문 위젯 — 탭 전환(#view 교체)에 영향받지 않는 body 크롬
 tour.mount(); // 가이드 투어 — 탭을 넘나들며 순서를 쥐어야 해서 같은 자리에 산다
+showcase.mount(); // 쇼케이스 진행기 — 투어와 배타. 기체 전환 다시 읽기 뒤 여기서 이어 달린다(sessionStorage)
 login.mountSessionBox(); // 헤더 세션 알약 — 게이트가 알아낸 로그인 사용자를 그린다 (세션 모드만)

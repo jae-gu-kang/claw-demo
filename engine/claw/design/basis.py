@@ -8,7 +8,9 @@
 
 후보마다 세 가지를 확인한다 — 저차 근사는 후보를 만들 뿐, 채택 판단은 전체 모델이 한다:
 1. 전체 선형 모델 지표(axis_metrics — 튜너·검증과 같은 자, 최종 조성에서)와 작동기·지연 포함 폐루프
-   안정(tune._damper_loop_stable — 같은 가드, 튜너와 같은 프리픽스 조성에서)
+   안정(tune._damper_loop_verdict — 같은 가드, 튜너와 같은 프리픽스 조성에서. 느린 나선은 비행성 기준
+   배가시간(자세 루프가 빠진 고장 상태 — 수준 2)까지 면제하고 그 배가시간을 함께 싣는다). 자세 자리는
+   축 전체(댐퍼 + 자세 PI)를 닫은 폐루프도 튜너와 같은 판정으로 확인한다(tune._closed_loop_check)
 2. 조종면 예산 — 대표 오차 e_ref × |k|가 트림 잔여 변위(피치는 방향별 최소·롤은 엘레본 롤 몫·요는
    러더)에 드는가. P 몫만이므로 통과해도 자세 PI·다른 명령의 몫은 따로 남겨야 한다
 3. ×0.7/1.0/1.3 주변 후보의 지표·안정 — 하나의 시작점 대신 주변을 본다
@@ -16,7 +18,8 @@
 자세 PI는 새 식을 만들지 않는다 — 튜너의 루프쉐이핑(tune._tune_att: 목표 교차 = 레이트 교차 ÷
 wc_ratio_att, |PI·G·Act·지연| = 1에서 |kp|, PI 영점 = 교차 × ki_zero_frac, PM/GM 검증·백오프)을 그대로
 부른다. 같은 방법이 두 곳에 적히면 갈린다. 바깥 루프(헤딩·고도·속도)는 시간척도 분리(자세 교차 ÷
-SEPARATION)만 적는다 — 게인 유도는 quick_seed의 휴리스틱이 정본이다.
+SEPARATION)만 적는다 — 게인 유도는 quick_seed의 휴리스틱이, 어느 자세 교차를 쓰는지(가짜 교차 거르기)는
+seed._inner_crossovers가 정본이다.
 
 읽기 전용 분석이다 — 문서를 고치지 않고, 시드 채택(스케줄 검증 포함)은 여전히 quick_seed가 한다.
 """
@@ -28,15 +31,18 @@ import numpy as np
 
 from claw.common.contracts import TrimCase
 from claw.design.closure import axis_metrics, close_rates, rate_loop_crossover
-from claw.design.seed import REASON_SEED_SIGN_AMBIGUOUS, SEPARATION, _clean
+from claw.design.seed import REASON_SEED_SIGN_AMBIGUOUS, SEPARATION, _clean, _inner_crossovers
 from claw.design.seed import reason_text as _seed_reason_text
 from claw.design.tune import (
+    _CLOSED_LOOP_OVERRIDES,
     _FINAL_METRIC_RTOL,
     _PASSING,
     _RATE_PLAN,
+    REASON_LOOP_UNSTABLE,
     SLOT_DESIGN_FAILED,
     TuneTargets,
-    _damper_loop_stable,
+    _closed_loop_check,
+    _damper_loop_verdict,
     _tune_att,
 )
 from claw.trim import linearize, split_axes, trim
@@ -272,16 +278,20 @@ def seed_basis(built, mach, alt, fuel, *, e_ref_dps=E_REF_DPS, targets=None,
 
         k0 = rec["candidate"]["k"]
         got = measure(k0)
+        # 안정 표시는 튜너 캡과 **같은 가드**다(tune._damper_loop_verdict — 느린 나선은 비행성 기준 배가시간까지
+        # 면제). 면제한 나선의 배가시간을 함께 싣는다 — 화면이 "안정"을 "나선 발산 없음"으로 읽지 않게
+        v0 = _damper_loop_verdict(lm_prefix, group, x, u, k0, act_kw)
         rec["full"] = {
             "achieved": got,
-            "stable": _damper_loop_stable(lm_prefix, group, x, u, k0, act_kw),
+            "stable": v0["stable"], "spiral_t2_s": v0["spiral_t2_s"], "bound": v0["bound"],
             "ok": None if got is None else bool(got >= target * (1.0 - _FINAL_METRIC_RTOL)),
         }
         # k = 0 후보(개루프가 이미 목표 이상 — 댐퍼 불요)는 배수가 전부 0이라 같은 줄 셋이 된다
-        rec["neighbors"] = [] if k0 == 0.0 else [{
-            "mult": mult, "k": k0 * mult, "achieved": measure(k0 * mult),
-            "stable": _damper_loop_stable(lm_prefix, group, x, u, k0 * mult, act_kw),
-        } for mult in NEIGHBOR_MULTS]
+        rec["neighbors"] = []
+        for mult in (() if k0 == 0.0 else NEIGHBOR_MULTS):
+            vn = _damper_loop_verdict(lm_prefix, group, x, u, k0 * mult, act_kw)
+            rec["neighbors"].append({"mult": mult, "k": k0 * mult, "achieved": measure(k0 * mult),
+                                     "stable": vn["stable"], "spiral_t2_s": vn["spiral_t2_s"]})
 
     # 자세 PI — 튜너 루프쉐이핑 그대로 (부호는 조종효율에서: quick_seed와 같은 규칙). 레이트 게인은
     # 최종 조성, 레이트 교차는 튜너처럼 프리픽스 조성에서 잰다. **구제 마무리(_polish_att)는 부르지
@@ -310,15 +320,26 @@ def seed_basis(built, mach, alt, fuel, *, e_ref_dps=E_REF_DPS, targets=None,
             rate_wc = wc if wc and math.isfinite(wc) else 0.0
         kp, ki, ach, why, _ev = _tune_att(lm_axis, group, final, rate_wc,
                                           {f"{group}.kp": math.copysign(1.0, b)}, targets, act_kw)
+        # 자세까지 닫은 축 전체 폐루프 — 튜너의 3단(tune._apply_closed_loop_check)과 같은 판정·같은 덮어쓰기 규칙.
+        # 백오프는 이미 발산하는 해를 수용하지 않으니, 여기서 발산이 나오면 백오프가 끝내 못 세운 루프다
+        cl = _closed_loop_check(lm_axis, {**final, f"{group}.kp": kp, f"{group}.ki": ki},
+                                ach.get("orientation", 1), act_kw)
+        if not cl["stable"] and why in _CLOSED_LOOP_OVERRIDES:
+            why = REASON_LOOP_UNSTABLE
         # passing은 여기서 판정해 동봉한다 — 화면이 통과 사유 집합(_PASSING)을 재기술하지 않게
         entry.update(kp=kp, ki=ki, reason=why, reason_text=reason_text(why),
-                     passing=why in _PASSING, **ach)
+                     passing=why in _PASSING, **ach, closed_loop=cl)
         attitude[f"{group}_att"] = entry
 
-    inner = [a.get("wc_att") for a in attitude.values()
-             if a.get("wc_att") and a.get("reason") not in SLOT_DESIGN_FAILED]
+    # 바깥 루프 시간척도 — 자동조종 휴리스틱과 같은 자세 교차 규칙(seed._inner_crossovers — 설계 실패 제외,
+    # 목표 교차가 루프의 실측 이득교차가 아니면 가짜 교차로 본다). 한 점 분석이라 빌려 올 다른 앵커가 없어
+    # 그때는 그 루프의 실측 이득교차를 쓴다 — S1 연료 5 kg·M0.105~0.155에서 목표 0.08~0.12(장주기 공진이 만든
+    # 레이트 교차 ÷ 3)가 그대로 바깥 루프 0.02 rad/s 안팎으로 보고되던 자리다(루프의 실제 교차는 0.42~0.62)
+    inner, inner_notes = _inner_crossovers(attitude)
+    used = [w for w in inner.values() if w]
     outer = {"separation": SEPARATION,
-             "wc_outer": (min(inner) / SEPARATION) if inner else None}
+             "wc_outer": (min(used) / SEPARATION) if used else None,
+             "inner": inner, "notes": inner_notes}
 
     return _clean({
         **base, "ok": True, "reason": None, "reason_text": None,
@@ -399,16 +420,15 @@ def apply_seed_basis(built, mach, alt, fuel, *, e_ref_dps=E_REF_DPS, targets=Non
             "washout_tau": prev.get("washout_tau", 0.0),
         }
     # 자동조종 휴리스틱 — quick_seed와 같은 재료(이 점의 트림·종축 모델·자세 교차). 자세 교차는
-    # 설계 실패 사유인 자리를 빼고 넘긴다(quick_seed와 같은 규칙 — _autopilot이 없는 값은 건너뛴다)
+    # 산출 근거의 바깥 루프 보고(outer.inner)와 같은 값이다 — 설계 실패 제외·가짜 교차 규칙이 한 곳
+    # (seed._inner_crossovers)에서 정해져, 화면이 보인 대역폭과 저장하는 게인이 갈리지 않는다
     case = TrimCase(f"M{mach:.2f}_h{alt:.0f}_f{fuel:.0f}", mach=float(mach), alt=float(alt),
                     fuel=float(fuel))
     tr = trim(built.aircraft(), case, fingerprint=built.plant_fingerprint)
     lon, _lat = split_axes(linearize(built.aircraft(), tr))
-    wc = {g: (out["attitude"][f"{g}_att"].get("wc_att")
-              if out["attitude"][f"{g}_att"].get("reason") not in SLOT_DESIGN_FAILED else None)
-          for g in ("pitch", "roll")}
-    ap, ap_source, ap_notes = _autopilot(built, types.SimpleNamespace(case=case), lon, wc,
+    ap, ap_source, ap_notes = _autopilot(built, types.SimpleNamespace(case=case), lon, out["outer"]["inner"],
                                          None if existing is None else existing["autopilot"])
+    ap_notes = out["outer"]["notes"] + ap_notes
     design = {
         "scas": scas, "autopilot": ap,
         "k_diff_thr": existing["k_diff_thr"] if existing is not None else 0.0,

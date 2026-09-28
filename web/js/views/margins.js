@@ -8,30 +8,85 @@ PM·GM 맵이 카드 밖 전면에 놓이고(블록도 최상위·영향성과 �
 수치는 전부 서버(엔진 linearize/classify/pi_loop) 산출 — 여기서는 표시만.
 루프 스펙(축·출력 상태·입력·kp·ki·sign)은 행 편집 — 서버 loops[] 계약 그대로
 ("설계값은 요청이 보유"). 사전검증은 lib/loops.js, 최종 판정은 서버 422.
+루프 게인은 **고른 기체가 실제로 나는 k_rate**로 선다 — 엔진 조립과 같은 우선순위로, 문서 확정 게인 표
+(law.gain_tables, 낡지 않았을 때)가 있으면 그 표, 없으면 규칙 스케줄(카탈로그 제안 표)을 읽는다(lib/loops.js
+loopGainSources — 종전의 설계 상수 law.design은 확정 표가 있는 기체가 실제로 날지 않는 값이었다). 손대지 않은
+문서 게인 루프는 kp를 싣지 않고 `gain_source: "profile"`로 보낸다 — 서버가 **칸마다** 그 칸의 운용점에서 조립 법칙의
+게인을 읽으므로(엔진 openloop._effective_gain과 같은 자) 모든 칸이 그 칸의 실제 게인으로 잰 마진이다. 결과 캡션의
+격자 게인 범위는 서버가 칸마다 실제로 쓴 게인(entry.gains)에서 낸다. 편집 표의 kp 칸은 「게인 읽을 마하」(비우면
+격자 가운데)의 값이고, 고치면 그 루프는 손으로 적은 한 값으로 전 칸을 잰다. 확정 게인 표가 낡았으면 서버 조립이
+거부하므로(시뮬·코드와 같은 422) 그때만 종전대로 한 점에서 읽은 kp를 싣고, 그 kp가 그 칸의 게인인 칸이 몇인지를
+캡션이 말한다(나머지 칸은 근사 — 칸별 보드선도도 그 칸의 게인을 덧붙인다). 손대지 않은 동안은 문서를 따라가고,
+고치면 그 편집이 남는다. 문서에 게인이 없으면 루프도 없다(예제 값을 물려주지 않는다 — 기체 고정 금지).
 트림 가능/불가·판정 색상 맵은 트림 플래그 재사용 (06 §4).
+칸의 PM·GM은 나이퀴스트 여유다(엔진 nyquist_margins — −1까지의 거리, 폐루프 발산이면 「발산」). 같은 축의 나머지
+루프는 닫고 그 루프를 끊는다(엔진 broken_loop — AS94900). 종전 control.margin 부호를 그대로 칠해 다중 교차 레이트
+루프가 안정인데도 전 칸 음수로 칠해졌다(e2e D2). 그 뜻은 결과 캡션(lib/loops.js marginSemanticsText)이 그림 밑에서 말한다.
+
+쇼케이스 진행기 신호(lib/showcasecue.js): run() — 격자를 미션 템플릿 격자로, 루프를 문서 게인(칸별 법칙 게인)으로
+세워 [실행]과 같은 길로 돌린 뒤, 최악 PM 칸의 보드선도를 열고 PM·GM 최악·비행성 최악과 루프 게인
+출처를 보고한다.
 */
 
-import { api, errorText } from "../api.js";
+import { ApiError, api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
-import { FQ_BADGE, fqKey, fqLegendText, fqMeasureText, fqWorst } from "../lib/fq.js";
-import { DEFAULT_GRID, machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
-import { MARGIN_ACT_FALLBACK } from "../lib/missiontemplate.js";
+import { FQ_BADGE, fqKey, fqLegendText, fqMeasureText, fqWorst, marginsCueReport } from "../lib/fq.js";
+import { DEFAULT_GRID, machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
+import {
+  DOC_FAILED_HINT, MARGIN_ACT_FALLBACK, MISSING_TEMPLATE_HINT, gridCentreCase, gridStrings,
+} from "../lib/missiontemplate.js";
 import { applyUntouched, fillGridFromProfile, selectedDefaults } from "./missionfill.js";
-import { AXIS_NAMES, DEFAULT_LOOPS, validateActuatorDelay, validateLoops } from "../lib/loops.js";
+import {
+  AXIS_NAMES, DELAY_TOOL_DEFAULT, LOOPS_LOADING_TEXT, bodeLawGainNote, bodeMarginNotes, bodeOthers, cellGainNote,
+  delaySourceText, followDocRows, gainCueData, gainSourceText, gainSummaryTag, lawGainRecord,
+  lawGainsPerCase, lawKpText, loopGainSources, loopKpTag, loopLoadState, loopsAt, marginCellView, marginSemanticsText,
+  requestLoops, runGainInfo, stableMarginEntries, unstableCells, unstableTail, validateActuatorDelay,
+  validateLoops,
+} from "../lib/loops.js";
+import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
+import { effectiveOf } from "../lib/profileform.js";
 import {
   FALLBACK_CRITERIA, STATUS, fuelsOf, gmColor, heatmapCanvasHeight, heatmapCellAt, marginColor,
-  marginLegendText, pivotCases, threshold,
+  marginLegendText, marginWorst, pivotCases, threshold,
 } from "../lib/plot.js";
+import { revealPanel } from "../lib/reveal.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { toCanvasXY } from "../lib/wpmap.js";
-import { store } from "../store.js";
 import { bodeCanvas, heatmapCanvas, scatterCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
+import { errorWithSeedLink } from "./seedlink.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
+
+// 신호 실패 사유 — 서버 오류는 errorText(422 배열·엔진 detail을 사람 글로), 그 밖은 메시지만("Error: " 접두 없이)
+const cueReason = (e) => (e instanceof ApiError ? errorText(e) : (e?.message ?? String(e)));
 
 let lastBody = null;
 let runningJobId = null;
-// 탭 재진입에도 루프 편집 상태 유지 (수치는 입력 문자열 — 제출 시 파싱)
-let loopRows = DEFAULT_LOOPS.map((r) => ({ ...r }));
+let marginCue = null; // 잡을 건 진행기 신호 — 잡이 끝나면 한 번 보고하고 지운다 (감시자가 둘이어도 한 번)
+// 붙인 감시자 차례 — 잡이 끝났을 때 결과·신호는 **마지막에 붙은**(= 지금 화면의) 감시자만 맡는다. 먼저 끝난 쪽이
+// 가져가면 버려진 화면의 감시자가 신호를 먹고 최악 칸 보드선도를 아무도 못 보는 DOM에 연다
+let watchSeq = 0;
+let marginsVisit = 0; // 탭을 그린 차례 — 떠난 방문의 늦은 신호 처리가 버려진 화면에서 잡을 걸지 않게
+// 탭 재진입에도 루프 편집 상태 유지 (수치는 입력 문자열 — 제출 시 파싱). 처음엔 비어 있고 고른 기체의 게인
+// 출처가 도착하면 선다 — 문서가 없거나 게인이 없으면 루프가 없다(예제 값을 물려주지 않는다).
+// 행마다 touched(편집 표에서 고쳤거나 「루프 추가」로 만든 행)를 단다 — 손대지 않은 행만 **루프마다** 새 문서 게인을
+// 따라간다(lib/loops.js followDocRows). 종전의 표 전체 비교(all-or-nothing)는 한 루프만 고쳐도 나머지 루프를 옛 점의
+// kp로 굳혀 「손으로 적은 값」으로 불렀다(round1 #4)
+let loopRows = [];
+// 사용자가 지운 문서 루프 이름 — 문서 게인을 다시 읽어도 되살리지 않는다(「문서 게인으로 복원」이 비운다)
+let removedDocLoops = [];
+// 문서 게인 → 루프 {rows, skipped} | {rows: [], skipped: [], error} — 지금 격자·「게인 읽을 마하」의 점에서 (복원 버튼이 쓴다)
+let designLoops = null;
+// 루프 게인 출처(lib/loops.js loopGainSources — 확정 표 | 규칙 스케줄) | {error} — 탭을 그릴 때마다 다시 받는다
+let gainSources = null;
+// 「게인 읽을 마하」 칸 글 — 비면 격자 가운데 마하 (탭 재진입에도 유지)
+let refMachText = "";
+// 제출·완료한 실행의 게인 기록(lib/loops.js runGainInfo) — 제출 시점에 굳혀 결과(lastBody)와 짝으로 산다
+let runningGains = null;
+let lastGains = null;
+// 제출·완료한 실행의 지연 출처(lib/loops.js delaySourceText — 툴 기본값 | 입력값) — 게인 기록과 같은 짝 규약
+let runningDelaySrc = null;
+let lastDelaySrc = null;
 // 판정선 — 정본은 /design/defaults(엔진 MarginCriteria). 하드코딩 폴백을 쓰면
 // 자동 설계 탭에서 기준을 바꿨을 때 같은 점을 두 탭이 다르게 칠한다 (lib/plot.js
 // FALLBACK_CRITERIA 머리말). 탭 재진입마다 다시 부르지 않도록 모듈에 남긴다
@@ -48,6 +103,7 @@ let bodeSeq = 0;
 let openDrawer = null;
 
 export function render() {
+  const visit = ++marginsVisit;
   const errBox = el("div");
   const progressBox = el("div");
   const loopBox = el("div");
@@ -74,13 +130,133 @@ export function render() {
   const fWn = el("input", { class: "num-sm", value: MARGIN_ACT_FALLBACK.wn });
   const fZeta = el("input", { class: "num-sm", value: MARGIN_ACT_FALLBACK.zeta });
   const fUseDelay = el("input", { type: "checkbox", checked: true });
-  const fDelay = el("input", { class: "num-sm", value: "0.035" });
-  const fPade = el("input", { class: "num-sm", value: "2" });
-  // 격자 칸은 예제 기체의 격자(폴백)로 먼저 선다 — 고른 기체의 미션 템플릿 격자가 손대지 않은 칸을 채운다
+  // 지연 칸은 툴 기본값(lib/loops.js DELAY_TOOL_DEFAULT) — 기체 문서에 지연 칸이 없어 기체에서 채울 수 없다.
+  // 결과 캡션이 그 출처를 수치 옆에 단다(appliedSummary)
+  const fDelay = el("input", { class: "num-sm", value: String(DELAY_TOOL_DEFAULT.delay_s) });
+  const fPade = el("input", { class: "num-sm", value: String(DELAY_TOOL_DEFAULT.pade_order) });
+  // 격자 칸은 예제 기체의 격자(폴백)로 먼저 선다 — 고른 기체의 미션 템플릿 격자가 손대지 않은 칸을 채운다.
+  // 격자가 바뀌면 가운데 마하도 바뀐다 — 손대지 않은 루프의 게인을 다시 읽는다
   const gridHint = el("p", { class: "hint" });
-  fillGridFromProfile({ machFrom: fMachFrom, machTo: fMachTo, machStep: fMachStep, alts: fAlts, fuels: fFuels }, gridHint);
-  selectedDefaults().then((d) => {
+  fillGridFromProfile({ machFrom: fMachFrom, machTo: fMachTo, machStep: fMachStep, alts: fAlts, fuels: fFuels }, gridHint,
+    () => refreshDocLoops());
+  for (const f of [fMachFrom, fMachTo, fMachStep, fAlts, fFuels]) f.addEventListener("input", () => refreshDocLoops());
+  const defaultsReady = selectedDefaults().then((d) => {
     if (d) applyUntouched({ wn: fWn, zeta: fZeta }, MARGIN_ACT_FALLBACK, d.margins);
+    return d;
+  });
+
+  // ── 루프 게인 — 고른 기체가 실제로 나는 k_rate (확정 표 | 규칙 스케줄, lib/loops.js loopGainSources) ──
+  // 손대지 않은 루프는 서버가 칸마다 읽는다(gain_source "profile"). 편집 표의 kp 칸은 한 점의 값 — 「게인 읽을 마하」
+  // 칸, 비우면 격자 가운데. 고칠 때의 출발값이고, 확정 표가 낡아 칸별로 못 읽을 때 전 칸에 싣는 값이다
+  const fRefMach = el("input", {
+    class: "num-sm", value: refMachText, placeholder: "격자 가운데",
+    title: "편집 표의 kp 칸을 이 마하에서 기체가 실제로 나는 게인으로 세운다 — 비우면 격자 가운데 마하. "
+      + "손대지 않은 루프는 실행 때 서버가 칸마다 그 칸의 게인을 읽으므로 이 값과 무관하게 전 칸이 정확하다. "
+      + "확정 게인 표가 낡았을 때만 이 한 값을 전 칸에 싣는다(그 마하 열만 정확)",
+    oninput: (ev) => { refMachText = ev.target.value; refreshDocLoops(); },
+  });
+  const gridNow = () => ({
+    machFrom: Number(fMachFrom.value), machTo: Number(fMachTo.value), machStep: Number(fMachStep.value),
+    alts: parseNumberList(fAlts.value), fuels: parseNumberList(fFuels.value),
+  });
+  // 게인을 읽을 점 {mach, alt, fuel} — 격자·칸 글을 못 읽으면 null (고치는 중이다)
+  const refPoint = () => {
+    let centre;
+    try {
+      centre = gridCentreCase(gridNow());
+    } catch {
+      return null;
+    }
+    const t = refMachText.trim();
+    if (!t) return centre;
+    const m = Number(t);
+    return Number.isFinite(m) && m > 0 ? { ...centre, mach: m } : null;
+  };
+  const gridPoints = () => {
+    try {
+      const g = gridNow();
+      return serpentineCases(machRange(g.machFrom, g.machTo, g.machStep), g.alts, g.fuels);
+    } catch {
+      return null;
+    }
+  };
+  // 문서 게인 행을 지금 점에서 다시 읽는다 — 손대지 않은 루프만, 루프마다 따라간다(복원 버튼용 designLoops는 늘
+  // 갱신). force면 손댄 행·지운 루프도 버리고 문서 행 그대로. 점을 못 정하면 사유, 아니면 null
+  const refreshDocLoops = ({ force = false } = {}) => {
+    // 버려진 화면(재진입 전)의 늦은 격자 채움이 모듈의 편집 행을 옛 화면의 격자 점으로 다시 세우지 않게
+    if (visit !== marginsVisit) return null;
+    if (!gainSources || gainSources.error) return null;
+    const ref = refPoint();
+    if (!ref) return `「게인 읽을 마하」가 양수가 아니다: ${refMachText} — 비우면 격자 가운데 마하`;
+    designLoops = loopsAt(gainSources, ref);
+    if (force) removedDocLoops = [];
+    const next = followDocRows(force ? [] : loopRows, designLoops.rows, removedDocLoops);
+    if (JSON.stringify(next) !== JSON.stringify(loopRows)) {
+      loopRows = next;
+      renderLoopEditor(loopBox);
+      drawers.refresh();
+    }
+    paintLoopNote();
+    return null;
+  };
+  const loopNote = el("div");
+  const paintLoopNote = () => {
+    clear(loopNote);
+    if (loopLoadState(gainSources) === "loading") {
+      loopNote.append(el("p", { class: "hint" }, LOOPS_LOADING_TEXT));
+      return;
+    }
+    if (designLoops?.error) {
+      loopNote.append(...errorWithSeedLink(designLoops.error, "여기 루프가 그 게인으로 섭니다."));
+      return;
+    }
+    // 문서 게인 행이 무엇을 어디서 읽은 것인가 — 결과 캡션과 같은 글(제출 전 미리보기)
+    const ref = refPoint();
+    const points = gridPoints();
+    const text = gainSources && !gainSources.error && ref && points
+      ? gainSourceText(runGainInfo(gainSources, loopRows, designLoops?.rows ?? [], ref, points,
+        lawGainsPerCase(gainSources)))
+      : null;
+    if (text) loopNote.append(el("p", { class: "hint" }, text));
+    if (designLoops?.skipped.length) {
+      loopNote.append(el("p", { class: "hint" },
+        `문서 게인으로 세우지 않은 루프: ${designLoops.skipped.map((k) => `${k.name} — ${k.reason}`).join(" · ")}`));
+    }
+  };
+  // 카탈로그 → (확정 표가 있고 낡지 않았으면) 같은 리비전 문서의 확정 표 → 출처. 확정 표 값은 카탈로그에 없다
+  // (자리 이름·낡음만) — 게인 탭 결함 주입 기준(faultBase)과 같은 문서 읽기다
+  const loadSources = async () => {
+    const cat = await api.get("/gains/catalog");
+    let tables = null;
+    if (cat?.confirmed && cat.confirmed.stale !== true) {
+      const p = cat.profile ?? {};
+      const id = p.id ?? currentSelection()?.id ?? EXAMPLE_ID;
+      const rev = typeof p.revision === "number" ? `?revision=${p.revision}` : "";
+      const body = await api.get(`/profiles/${encodeURIComponent(id)}${rev}`);
+      tables = effectiveOf(body?.document, p.variant ?? null)?.law?.gain_tables?.tables ?? null;
+    }
+    return loopGainSources(cat, tables);
+  };
+  const loopsReady = loadSources().then(
+    (src) => ({ src }),
+    (e) => ({ error: e }),
+  ).then((r) => {
+    if (visit !== marginsVisit) return; // 버려진 화면의 늦은 응답 — 새 화면이 자기 것을 받는다
+    if (r.error) {
+      gainSources = { error: r.error };
+      designLoops = { rows: [], skipped: [], error: r.error };
+      // 문서 게인이 없다 — 손대지 않은 행은 빠지고 손댄 행만 남는다
+      const next = followDocRows(loopRows, [], removedDocLoops);
+      if (next.length !== loopRows.length) {
+        loopRows = next;
+        renderLoopEditor(loopBox);
+        drawers.refresh();
+      }
+      paintLoopNote();
+      return;
+    }
+    gainSources = r.src;
+    refreshDocLoops();
   });
 
   const showErr = (e) =>
@@ -115,70 +291,144 @@ export function render() {
     if (lastBody) renderResults(slots, lastBody);
   };
 
-  const watch = () => attachProgress(progressBox, runningJobId, {
-    onDone: async (job) => {
-      runningJobId = null;
-      try {
-        if (job.status === "error") throw new Error(job.error);
-        if (cancelledWithoutResult(job)) {
-          showErr(new Error("취소됨 — 저장된 결과 없음 (실행 전 취소)"));
-          return;
+  const watch = () => {
+    const mine = ++watchSeq;
+    attachProgress(progressBox, runningJobId, {
+      onDone: async (job) => {
+        // 재진입이 감시자를 새로 붙였으면 이 감시자는 버려진 화면의 것이다 — 결과·신호·보드선도는 새 감시자가 맡는다
+        if (mine !== watchSeq) return;
+        runningJobId = null;
+        // 신호는 한 번만 — 잡이 끝난 뒤의 보고는 store에만 쓰므로 떠난 화면이어도 보낸다(그 뒤로 붙은 감시자가 없으면)
+        const cue = marginCue;
+        marginCue = null;
+        // 이 잡의 게인 기록(제출 시점) — 결과를 받는 사이 새 제출이 runningGains를 덮을 수 있어 먼저 잡아 둔다
+        const gains = runningGains;
+        const delaySrc = runningDelaySrc;
+        try {
+          if (job.status === "error") throw new Error(job.error);
+          if (cancelledWithoutResult(job)) {
+            showErr(new Error("취소됨 — 저장된 결과 없음 (실행 전 취소)"));
+            failCue(cue, "취소됨 — 저장된 결과 없음 (실행 전 취소)");
+            return;
+          }
+          const body = await api.get(`/results/${job.result_id}`);
+          lastBody = body;
+          lastGains = gains; // 결과와 짝 — 캡션·칸별 보드선도 주석이 이 실행이 쓴 게인을 말한다
+          lastDelaySrc = delaySrc;
+          const shown = renderResults(slots, lastBody);
+          // refresh(칩만)가 아니라 repaint — 패널이 열린 채였다면 "실행 후 표시됩니다"
+          // 줄이 방금 채워진 캔버스 밑에 그대로 남는다
+          drawers.repaint();
+          // 손으로 누른 실행은 굴리지 않는다 — 결과는 **전면**이라 히트맵이 화면 위쪽에 온다. 진행기 신호는 아래에서
+          // 최악 칸의 보드선도(히트맵 밑)를 화면 안으로 굴린다(e2e D4)
+          if (!cue) return;
+          if (job.status === "cancelled") {
+            failCue(cue, `취소됨 — 완료분 ${lastBody.cases.length}케이스만 저장`);
+            return;
+          }
+          // 최악 칸의 보드선도를 연다 — 청중이 「어디가 얇은가」와 그 곡선을 함께 본다. 이 루프를 닫은 폐루프가 발산하는
+          // 칸이 있으면 그것이 먼저다(수가 좋아 보여도 여유가 아니다). 최악 PM·GM은 안정 칸의 여유끼리 비교한다
+          const loops = loopsOf(lastBody);
+          const bad = unstableCells(lastBody.cases, loops);
+          const worst = marginWorst(stableMarginEntries(lastBody.cases), loops);
+          const target = bad[0] ?? worst.pm;
+          const box = target ? await shown.focus(target.loop, target.entry) : null;
+          revealPanel(box ?? slots.plots); // 떠난 화면(떨어진 노드)이면 굴리지 않는다
+          // 보고 꼬리에 루프 게인 출처 — 이 맵이 어느 게인으로 잰 것이고 몇 칸이 그 칸의 실제 게인인가(탭 캡션과 같은
+          // 기록). 칸별 법칙 게인은 서버가 실제로 쓴 게인 기록(결과의 profile_gains·entry.gains)으로 말한다
+          const rep = marginsCueReport(worst, fqWorst(lastBody.cases));
+          const law = lawGainRecord(lastBody);
+          const tag = gainSummaryTag(gains, law);
+          reportCue(cue, { phase: "done", resultId: job.result_id,
+            summary: [unstableTail(bad), rep.summary, tag].filter(Boolean).join(" · "), // 발산이 먼저 — 진행기가 긴 줄을 자른다
+            data: { ...rep.data,
+              unstable: bad.map((c) => ({ loop: c.loop, case: c.entry.trim.case.name, poles: c.poles })),
+              gains: gainCueData(gains, law) } });
+        } catch (e) {
+          showErr(e);
+          failCue(cue, cueReason(e));
         }
-        lastBody = await api.get(`/results/${job.result_id}`);
-        store.set("marginMap", { id: job.result_id });
-        renderResults(slots, lastBody);
-        // refresh(칩만)가 아니라 repaint — 패널이 열린 채였다면 "실행 후 표시됩니다"
-        // 줄이 방금 채워진 캔버스 밑에 그대로 남는다
-        drawers.repaint();
-        // 결과는 **전면**이라 스크롤이 필요 없다 — 폼이 패널로 들어가면서
-        // 히트맵이 항상 화면 위쪽에 온다 (종전의 scrollIntoView는 그 자리의 흔적)
-      } catch (e) {
+      },
+      onError: (e) => {
+        if (mine !== watchSeq) return; // 위와 같다 — 새 감시자가 같은 잡의 끝을 받는다
+        runningJobId = null;
         showErr(e);
-      }
-    },
-    onError: (e) => {
-      runningJobId = null;
-      showErr(e);
-    },
-  });
+        const cue = marginCue;
+        marginCue = null;
+        failCue(cue, cueReason(e));
+      },
+    });
+  };
 
-  const run = async () => {
-    if (runningJobId) { // 이중 제출 방지 (리뷰 S4) — 무반응 대신 안내 (조용한 무시 금지)
+  // 잡 걸기 — 걸었으면 null, 못 걸었으면 사유. cue가 오면 잡이 끝날 때 그 신호로 보고한다
+  const run = async (cue = null) => {
+    if (runningJobId || submitting) { // 이중 제출 방지 (리뷰 S4) — 무반응 대신 안내 (조용한 무시 금지)
       clear(errBox).append(el("div", { class: "error-box" },
         "이미 실행 중입니다 — 진행률 표시를 확인하세요."));
-      return;
+      return "이미 실행 중인 마진 맵이 있다 — 끝난 뒤 다시 건다";
     }
+    submitting = true;
     try {
       clear(errBox);
+      // 문서 게인 출처를 아직 못 받았으면 받은 뒤에 건다 — 그대로 걸면 루프 0개(고유치만) 맵이 조용히 돈다(round1 #5)
+      if (loopLoadState(gainSources) === "loading") {
+        clear(errBox).append(el("p", { class: "hint" }, LOOPS_LOADING_TEXT));
+        await loopsReady;
+        clear(errBox);
+        if (visit !== marginsVisit) return "문서 게인을 받는 사이 탭이 다시 그려졌다 — 다시 누른다";
+        if (loopLoadState(gainSources) === "loading") return "문서 게인을 받지 못했다 — 다시 누른다";
+      }
+      // 이름은 격자 값 그대로 명시한다(lib/grid.js nameCases — 영향성·엔벨로프와 같다). 서버 기본 이름은 마하를
+      // 소수 둘째 자리로 반올림해 M0.135 칸을 「M0.14」로 부른다 — 최악 칸 보고·감쇠비 표가 격자에 없는 마하를 말한다
+      const cases = nameCases(serpentineCases(
+        machRange(Number(fMachFrom.value), Number(fMachTo.value), Number(fMachStep.value)),
+        parseNumberList(fAlts.value),
+        parseNumberList(fFuels.value),
+      ));
+      // 손대지 않은 루프는 **지금 격자**의 점에서 문서 게인을 다시 읽는다 — 격자를 고친 뒤 옛 가운데 마하의 게인으로
+      // 재지 않게. 점을 못 정하면(「게인 읽을 마하」 오타) 제출하지 않는다
+      const refErr = refreshDocLoops();
       const v = validateLoops(loopRows);
       const ad = validateActuatorDelay({
         useActuator: fUseAct.checked, wn: fWn.value, zeta: fZeta.value,
         useDelay: fUseDelay.checked, delaySeconds: fDelay.value, padeOrder: fPade.value,
       });
-      const errs = [...(v.errors ?? []), ...(ad.errors ?? [])];
+      const errs = [...(refErr ? [refErr] : []), ...(v.errors ?? []), ...(ad.errors ?? [])];
       if (errs.length) {
         clear(errBox).append(el("div", { class: "error-box" }, errs.join("\n")));
-        return;
+        return errs.join(" · ");
       }
       for (const slot of Object.values(slots)) clear(slot);
-      const cases = serpentineCases(
-        machRange(Number(fMachFrom.value), Number(fMachTo.value), Number(fMachStep.value)),
-        parseNumberList(fAlts.value),
-        parseNumberList(fFuels.value),
-      );
+      // 이 실행의 게인 기록 — 제출하는 행 그대로(사본)와 같은 점의 문서 게인 행을 대조해 굳힌다. 확정 표가 낡지 않았으면
+      // 손대지 않은 문서 게인 루프는 칸별(서버가 칸마다 법칙에서 읽는다 — kp를 싣지 않는다), 손댄 루프는 적은 kp 그대로
+      const sources = gainSources?.error ? null : gainSources;
+      const gains = runGainInfo(sources, loopRows.map((r) => ({ ...r })),
+        designLoops?.rows ?? [], refPoint(), cases, lawGainsPerCase(sources));
       const req = {
-        cases, loops: v.loops, fingerprint: fFp.value,
-        actuator: ad.actuator, delay_s: ad.delay_s, pade_order: ad.pade_order,
+        cases, loops: requestLoops(v.loops, gains.perCase ? gains.loops.map((l) => l.name) : []),
+        fingerprint: fFp.value, actuator: ad.actuator, delay_s: ad.delay_s, pade_order: ad.pade_order,
       };
       const submitted = await api.post("/analysis/margin-map", req);
       runningJobId = submitted.id;
+      runningGains = gains;
+      runningDelaySrc = delaySourceText(ad);
+      if (cue) {
+        marginCue = cue;
+        reportCue(cue, { phase: "started", jobId: submitted.id });
+      }
       watch();
+      return null;
     } catch (e) {
       showErr(e);
+      return cueReason(e);
+    } finally {
+      submitting = false;
     }
   };
 
+  let submitting = false; // 문서 게인을 기다리며 제출 중 — 그사이 한 번 더 누르면 두 번 걸린다
   renderLoopEditor(loopBox);
+  paintLoopNote();
 
   const drawers = createDrawers({
     id: "margins-drawer",
@@ -206,10 +456,17 @@ export function render() {
         count: () => loopRows.length,
         build: () => [
           el("h2", {}, "PI 개루프 (다중)"),
+          el("div", { class: "row" },
+            el("label", { class: "field" }, "게인 읽을 마하", fRefMach)),
+          loopNote,
           loopBox,
           el("p", { class: "hint" },
-            "트림 → 선형화 → 모드 분류 → 루프별 sign·PI·G(x_out←u_in) 마진 (엔진 M9·M10). "
-            + "루프를 전부 지우면 고유치·감쇠비만 계산."),
+            "트림 → 선형화 → 모드 분류 → 루프별 sign·PI·G(x_out←u_in) 마진 (엔진 M9·M10) — 같은 축의 나머지 루프는 "
+            + "닫고 그 루프를 끊어 잰다(AS94900의 끊는 자리). "
+            + "루프를 전부 지우면 고유치·감쇠비만 계산. 3축 레이트 루프는 고른 기체가 실제로 나는 k_rate로 선다 — "
+            + "문서 확정 게인 표가 있으면 그 표, 없으면 규칙 스케줄. 손대지 않은 루프는 실행 때 서버가 칸마다 그 칸의 "
+            + "게인을 읽어 전 칸이 정확하다(표의 kp 칸은 「게인 읽을 마하」의 값 — 비우면 격자 가운데). kp를 고친 루프는 "
+            + "그 한 값으로 전 칸을 잰다. 확정 게인 표가 낡았으면 칸별로 못 읽어 한 값을 싣고, 다른 마하 열은 근사다."),
         ] },
       { key: "plant", label: "작동기·지연", group: "입력",
         title: "미포함 마진은 낙관적 — 체크 해제로 영향 분리 비교",
@@ -230,8 +487,10 @@ export function render() {
                 el("label", { class: "field" }, "Padé 차수", fPade)))),
           el("p", { class: "hint" },
             "작동기·지연 미포함 마진은 낙관적 (01 §4.2) — 기본은 포함, 체크 해제로 영향 "
-            + "분리 비교. 지연 기본값 0.035 s = 항법 출력 지연 0.03 s [기본값] + "
-            + "제어주기(100 Hz) 등가지연 0.005 s."),
+            + "분리 비교. 작동기 wn·ζ는 고른 기체 문서(actuator)에서 채운다. 지연 칸의 처음 값 "
+            + `${DELAY_TOOL_DEFAULT.delay_s} s·Padé ${DELAY_TOOL_DEFAULT.pade_order}차는 툴 기본값이다 — 기체 문서에 `
+            + "지연 칸이 없어 기체별 값이 아니다(엔진 항법 오차 모델의 기본 출력 지연 0.03 s + 기본 제어주기 "
+            + "100 Hz의 반주기 등가지연 0.005 s). 기체의 센서·연산 지연을 알면 고쳐 넣는다."),
         ] },
       { key: "eig", label: "고유치 맵", group: "결과",
         title: "전 케이스의 모드를 한 복소평면에 — 허수축 좌측이 안정",
@@ -255,7 +514,9 @@ export function render() {
       title: "마진 맵",
       lead: "격자의 점마다 선형화해 개루프 마진을 잰다 — 설계점만이 아니라 그 사이까지 "
         + "훑어야 스케줄 경계에서 마진이 꺼지는 곳이 보인다. 격자·루프·조건은 아래 패널에.",
-      actions: [el("button", { class: "primary", onclick: run }, "실행")],
+      // 인자 없이 부른다 — run(cue)에 클릭 이벤트가 들어가면 신호로 읽혀 가짜 보고(token 없음)를 store에 쓰고
+      // 최악 칸 보드선도를 멋대로 연다
+      actions: [el("button", { class: "primary", onclick: () => run() }, "실행")],
       // 판정선은 **패널에 넣지 않는다** — 히트맵 색이 무엇을 기준으로 갈리는지이고,
       // 폴백을 쓰는 중이라면 그 사실이 색과 같은 화면에 있어야 한다
       extra: [criteriaBox, gridHint, progressBox, errBox],
@@ -274,18 +535,56 @@ export function render() {
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
   if (criteria) drawCriteria(); // 이미 받아 둔 판정선 — 재진입마다 다시 부르지 않는다
   else loadCriteria();
+
+  // 쇼케이스 신호 — 격자는 미션 템플릿 격자, 루프는 문서 게인(서버가 칸마다 읽는 법칙 게인 — 편집 표는 가운데 마하 값),
+  // 작동기는 문서 값으로 세운 뒤(손댄 칸도 — 진행기는 「문서의 기체」를 잰다) [실행]과 같은 길로. 템플릿·게인이
+  // 없으면 예제 값으로 돌리지 않고 사유를 단다
+  const handleCue = async (c) => {
+    try {
+      if (c.action !== "run") {
+        unknownAction(c);
+        return;
+      }
+      const [d] = await Promise.all([defaultsReady, loopsReady]);
+      // 기다리는 사이 탭이 다시 그려졌으면 이 화면은 버려졌다 — 여기서 잡을 걸면 새 화면엔 감시자도 보드선도도 없다
+      if (visit !== marginsVisit) throw new Error("신호를 처리하기 전에 탭이 다시 그려졌다");
+      if (!d || !d.hasTemplate) throw new Error(d ? MISSING_TEMPLATE_HINT : DOC_FAILED_HINT);
+      if (gainSources?.error) throw new Error(`문서 게인을 받지 못했다 — ${cueReason(gainSources.error)}`);
+      const g = gridStrings(d.grid);
+      fMachFrom.value = g.machFrom;
+      fMachTo.value = g.machTo;
+      fMachStep.value = g.machStep;
+      fAlts.value = g.alts;
+      fFuels.value = g.fuels;
+      if (d.margins.wn) fWn.value = d.margins.wn;
+      if (d.margins.zeta) fZeta.value = d.margins.zeta;
+      // 손댄 「게인 읽을 마하」·루프도 문서 게인으로 되돌린다(편집 표는 템플릿 격자 가운데 마하 값 — 실행은 칸별)
+      refMachText = "";
+      fRefMach.value = "";
+      const refErr = refreshDocLoops({ force: true });
+      if (refErr) throw new Error(refErr);
+      if (!loopRows.length) throw new Error("문서 게인으로 설 루프가 없다 — 레이트 게인 k_rate가 전부 0이다");
+      const err = await run(c); // 끝 보고는 잡 감시(watch)가 한다
+      if (err) throw new Error(err);
+    } catch (e) {
+      failCue(c, cueReason(e));
+    }
+  };
+  const cue = takeCue("margins");
+  if (cue) handleCue(cue);
   return root;
 }
 
 // ── 루프 스펙 편집 표 ──────────────────────────────────────────────────
 
 function renderLoopEditor(loopBox) {
+  // 칸을 고친 행은 touched — 그 행만 문서 게인을 따라가지 않는다(lib/loops.js followDocRows)
   const numCell = (row, key) => el("input", {
     class: "num-sm", value: String(row[key]),
-    oninput: (ev) => { row[key] = ev.target.value; },
+    oninput: (ev) => { row[key] = ev.target.value; row.touched = true; },
   });
   const nameSel = (row, key, names) => el("select", {
-    onchange: (ev) => { row[key] = ev.target.value; },
+    onchange: (ev) => { row[key] = ev.target.value; row.touched = true; },
   }, names.map((n) => el("option", { value: n, selected: n === row[key] }, n)));
 
   const rowTr = (row) => {
@@ -303,10 +602,10 @@ function renderLoopEditor(loopBox) {
     return el("tr", {},
       el("td", {}, el("input", {
         style: "width: 110px", value: row.name,
-        oninput: (ev) => { row.name = ev.target.value; },
+        oninput: (ev) => { row.name = ev.target.value; row.touched = true; },
       })),
       el("td", {}, el("select", {
-        onchange: (ev) => { row.axis = ev.target.value; fillSelects(); },
+        onchange: (ev) => { row.axis = ev.target.value; row.touched = true; fillSelects(); },
       }, ["lon", "lat"].map((a) =>
         el("option", { value: a, selected: a === row.axis }, a === "lon" ? "종축 (lon)" : "횡축 (lat)")))),
       xTd, uTd,
@@ -317,6 +616,8 @@ function renderLoopEditor(loopBox) {
         class: "danger",
         onclick: () => {
           loopRows = loopRows.filter((r) => r !== row);
+          // 문서 루프를 지웠으면 문서 게인을 다시 읽어도 되살리지 않는다
+          if (!removedDocLoops.includes(row.name)) removedDocLoops = [...removedDocLoops, row.name];
           renderLoopEditor(loopBox);
         },
       }, "삭제")),
@@ -337,17 +638,19 @@ function renderLoopEditor(loopBox) {
           while (loopRows.some((r) => r.name === `loop_${i}`)) i += 1;
           loopRows.push({
             name: `loop_${i}`, axis: "lon", x_out: "q", u_in: "de",
-            kp: "0.5", ki: "0", sign: "-1",
+            kp: "0.5", ki: "0", sign: "-1", touched: true, // 문서 루프가 아니다 — 문서 게인을 따라가지 않는다
           });
           renderLoopEditor(loopBox);
         },
       }, "루프 추가"),
       el("button", {
+        title: "고른 기체가 「게인 읽을 마하」에서 실제로 나는 k_rate로 3축 레이트 루프를 다시 세운다",
         onclick: () => {
-          loopRows = DEFAULT_LOOPS.map((r) => ({ ...r }));
+          loopRows = (designLoops?.rows ?? []).map((r) => ({ ...r }));
+          removedDocLoops = [];
           renderLoopEditor(loopBox);
         },
-      }, "3축 프리셋 복원"),
+      }, "문서 게인으로 복원"),
     ),
   );
 }
@@ -364,12 +667,13 @@ function loopsOf(body) {
 
 /** 저장 결과의 작동기·지연 적용값 요약 — 재열람 시 현재 폼 상태와 무관하게
 그 결과가 실제로 무엇을 포함해 계산됐는지 확인 (구형 결과는 필드 자체가 없음). */
-function appliedSummary(body) {
+function appliedSummary(body, delaySrc = null) {
   const act = body.actuator
     ? `작동기 포함 (wn=${body.actuator.wn} rad/s, ζ=${body.actuator.zeta})`
     : "작동기 미포함";
+  // 지연 출처는 제출한 이 화면만 안다(결과 본문엔 수치뿐) — 다시 연 결과엔 수치만 낸다
   const delay = body.delay_s > 0
-    ? `지연 포함 (${body.delay_s} s, Padé ${body.pade_order}차)`
+    ? `지연 포함 (${body.delay_s} s, Padé ${body.pade_order}차${delaySrc ? ` · ${delaySrc}` : ""})`
     : "지연 미포함";
   return `${act} · ${delay}`;
 }
@@ -380,6 +684,10 @@ function appliedSummary(body) {
 function renderResults(slots, body) {
   const entries = body.cases;
   const loops = loopsOf(body);
+  // 이 결과를 잰 루프 게인의 기록(제출 시점) — 라벨 꼬리표·출처 캡션·칸별 보드선도 주석
+  const gainsInfo = lastBody === body ? lastGains : null;
+  // 서버가 칸마다 법칙에서 읽은 게인의 기록(법칙 게인 루프가 있는 결과만) — 칸별 루프의 범위·출처는 이것이 정본
+  const law = lawGainRecord(body);
   const fuels = fuelsOf(entries);
   const fuelSel = el("select", { "aria-label": "연료 선택" },
     fuels.map((f) => el("option", { value: f }, `연료 ${f} kg`)));
@@ -417,6 +725,8 @@ function renderResults(slots, body) {
     try {
       const res = await api.post("/analysis/bode", {
         case: entry.trim.case, loop: lp,
+        // 칸이 닫아 둔 같은 축의 루프(closed_with)를 그대로 — 곡선이 칸과 같은 조립이어야 같은 수다
+        others: bodeOthers(loops, entry.margins?.[lp.name]),
         actuator: lastBody.actuator ?? null,
         delay_s: lastBody.delay_s ?? 0.0,
         pade_order: lastBody.pade_order ?? 2,
@@ -426,7 +736,9 @@ function renderResults(slots, body) {
         z0: [entry.trim.euler[1], entry.trim.control.elevon[0], entry.trim.control.throttle[0]],
       });
       if (seq !== bodeSeq) return; // 그사이 다른 칸을 눌렀다 — 옛 응답을 버린다
-      renderBode(box, lp, entry, res);
+      // 이 칸에서 기체가 실제로 나는 게인이 맵의 kp와 다르면 그 사실을 곡선 밑에 — 한 kp 요청의 근사를 칸에서 말한다.
+      // 법칙 게인 루프는 서버가 이 칸의 게인으로 그렸다 — 그 값을 곡선 밑에(bodeLawGainNote)
+      renderBode(box, lp, entry, res, cellGainNote(gainsInfo, lp.name, entry.trim.case, lp.kp), bodeLawGainNote(res));
     } catch (e) {
       if (seq !== bodeSeq) return;
       clear(box).append(el("div", { class: "error-box" }, errorText(e)));
@@ -493,18 +805,28 @@ function renderResults(slots, body) {
     bodeSeq += 1;
     detailBoxes = new Map(); // 슬롯도 새로 만든다 (옛 노드는 곧 버려진다)
     const loopPlots = loops.flatMap((lp) => {
+      // 게인도 라벨에 싣는다 — 이 칸들이 **어느 게인으로** 잰 마진인지(문서 설계값이 바뀌면 같은 이름의 다른 루프다)
+      // 출처 꼬리표도 — 확정 표·규칙 스케줄을 어느 마하에서 읽었나, 손으로 적은 값인가 (lib/loops.js loopKpTag)
+      const tag = loopKpTag(gainsInfo, lp.name, law);
+      // 법칙 게인 루프는 kp가 칸마다 다르다 — 격자 범위(서버 기록)를 싣는다
+      const lawKp = lp.gain_source === "profile" ? lawKpText(law, lp.name) : null;
+      const gains = typeof lp.kp === "number"
+        ? ` · kp ${fmt(lp.kp, 4)}${lp.ki ? ` · ki ${fmt(lp.ki, 4)}` : ""}${tag ? ` (${tag})` : ""}`
+        : lawKp ? ` · kp ${lawKp}${tag ? ` (${tag})` : ""}` : "";
       const label = lp.x_out
-        ? `${lp.name} — ${lp.sign < 0 ? "−" : "+"}PI·G(${lp.x_out} ← ${lp.u_in}) [${lp.axis}]`
+        ? `${lp.name} — ${lp.sign < 0 ? "−" : "+"}PI·G(${lp.x_out} ← ${lp.u_in}) [${lp.axis}]${gains}`
         : lp.name;
+      // 칸의 수는 나이퀴스트 여유(−1까지의 거리 — 엔진 nyquist_margins). 이 루프를 닫은 폐루프가 발산하는 칸은 수와
+      // 무관하게 「발산」·부족 색(lib/loops.js marginCellView) — 교차 판독이 좋아 보여도 여유가 아니다
       const pmCanvas = heatmapCanvas(pivot, (e) => {
         if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
-        const pm = e.margins[lp.name] ? e.margins[lp.name].pm_deg : null;
-        return { color: marginColor(pm, cr), text: `${fmt(pm, 3)}°` };
+        const v = marginCellView(e.margins[lp.name], "pm_deg");
+        return v ? { color: marginColor(v.value, cr), text: v.text } : { color: STATUS.na, text: "—" };
       }, { title: `위상여유 PM [deg] — ${lp.name} (≥${threshold(cr, "pm_min_deg")}°)`, width: HEAT_W });
       const gmCanvas = heatmapCanvas(pivot, (e) => {
         if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
-        const gm = e.margins[lp.name] ? e.margins[lp.name].gm_db : null;
-        return { color: gmColor(gm, cr), text: gm === "inf" ? "∞ dB" : `${fmt(gm, 3)} dB` };
+        const v = marginCellView(e.margins[lp.name], "gm_db");
+        return v ? { color: gmColor(v.value, cr), text: v.text } : { color: STATUS.na, text: "—" };
       }, { title: `이득여유 GM [dB] — ${lp.name} (≥${threshold(cr, "gm_min_db")} dB)`, width: HEAT_W });
       // PM·GM 두 장 다 같은 루프의 같은 칸이므로 어느 쪽을 눌러도 같은 선도가 뜬다
       wireCells(pmCanvas, pivot, lp);
@@ -530,6 +852,9 @@ function renderResults(slots, body) {
         el("span", {}, el("span", { class: "chip", style: `background:${STATUS.warn}` }), "주의"),
         el("span", {}, el("span", { class: "chip", style: `background:${STATUS.bad}` }), "부족"),
         el("span", {}, el("span", { class: "chip", style: `background:${STATUS.na}` }), "트림 불가/판정 불가")),
+      // 칸의 수가 무엇인가(끊는 자리·나이퀴스트 거리·발산·게인 탭 판정 범위)와 루프 게인 출처 — 그림 아래 캡션
+      ...[marginSemanticsText(body), gainSourceText(gainsInfo, law)].filter(Boolean)
+        .map((t) => el("p", { class: "hint", style: "margin:6px 0 0" }, t)),
     );
     // 고유치·감쇠비는 패널이다 — 같은 연료로 함께 갈아 끼운다
     clear(slots.eig).append(
@@ -547,12 +872,22 @@ function renderResults(slots, body) {
     ));
   };
   fuelSel.addEventListener("change", draw);
+  /** 그 루프·그 칸의 보드선도를 연다 — 칸의 연료로 히트맵을 바꿔 그 칸이 보이게 한 뒤 (쇼케이스 최악 칸).
+   *  클릭과 같은 길(openBode)이다. 곡선이 열린 노드, 루프·칸을 못 찾으면 null. */
+  const focus = async (loopName, entry) => {
+    const lp = loops.find((l) => l.name === loopName);
+    if (!lp || !entry || !lp.x_out) return null;
+    fuelSel.value = String(entry.trim.case.fuel);
+    draw();
+    await openBode(lp, entry);
+    return detailBoxes.get(lp) ?? null; // 곡선이 열린 자리 — 진행기가 화면 안으로 굴린다
+  };
   // el()로 감싼다 — 아래 `loops.length > 0 && …`는 거짓일 때 **false**를 낳고,
   // clear().append()는 네이티브라 그것을 "false" 텍스트로 붙인다 (el은 걸러 낸다)
   clear(slots.head).append(el("div", {},
     el("p", { style: "margin:0 0 4px" },
       el("b", {}, `계산 완료 — 케이스 ${entries.length}건 · 루프 ${loops.length}개`)),
-    el("p", { class: "hint", style: "margin:0 0 6px" }, appliedSummary(body)),
+    el("p", { class: "hint", style: "margin:0 0 6px" }, appliedSummary(body, lastBody === body ? lastDelaySrc : null)),
     el("div", { class: "row" }, fuelSel),
     // 안내가 플롯 **앞**에 있어야 한다 — 상세가 루프 구간마다 열리므로 맨 아래
     // 한 줄로는 어디를 눌러야 하는지 읽을 자리가 없다. 루프가 0개면(루프를 전부
@@ -563,6 +898,7 @@ function renderResults(slots, body) {
   ));
   clear(slots.plots).append(plotBox);
   draw();
+  return { focus };
 }
 
 /** 필터 스펙 한 줄 — 파라미터 이름·단위는 블록 PARAM_DEFS 그대로 (엔진 filter_tf
@@ -575,7 +911,7 @@ function filterText(f) {
 }
 
 /** 보드선도 상세 — 어느 칸인지, 무엇이 기준인지, 교차가 몇 개인지를 문장으로. */
-function renderBode(box, lp, entry, body) {
+function renderBode(box, lp, entry, body, gainNote = null, lawNote = null) {
   const c = entry.trim.case;
   const m = body.margins;
   const nGain = body.crossings.gain.length;
@@ -591,12 +927,13 @@ function renderBode(box, lp, entry, body) {
       + "PM은 |L|=0 dB인 wcp(초록)에서, GM은 ∠L=−180°인 wcg(주황)에서 읽습니다 — "
       + "두 수가 서로 다른 주파수의 값이라는 것이 두 수직선의 간격입니다."),
   ];
+  // 보고한 마진이 무엇인가 — 닫아 둔 루프·발산·방향(진상 쪽·이득 감소 쪽)·교차가 여럿일 때 어느 것인가(lib/loops.js).
   // 교차가 여럿이면 보고된 마진은 그중 하나다 — 01 §4.2의 yaw_rate 사례가 이것이다
-  if (nGain > 1 || nPhase > 1) {
+  for (const line of bodeMarginNotes(m)) kids.push(el("p", { class: "hint" }, line));
+  // 엔진 교차 공개(margins.crossings)가 없는 응답(교차가 하나씩)인데 표본 곡선이 여럿을 봤을 때만 곡선 쪽 개수를 말한다
+  if ((nGain > 1 || nPhase > 1) && !m.crossings) {
     kids.push(el("p", { class: "hint" },
-      `⚠ 0 dB 교차 ${nGain}개 · −180° 교차 ${nPhase}개 — 보고된 마진은 그중 하나입니다`
-      + "(채운 원이 control.margin이 고른 자리, 빈 원이 나머지). 조립이 조금 바뀔 때 "
-      + "마진 숫자가 크게 튀면 값이 나빠진 것이 아니라 **선택이 바뀐 것**일 수 있습니다."));
+      `곡선의 0 dB 교차 ${nGain}개 · −180° 교차 ${nPhase}개 — 채운 원이 보고한 자리, 빈 원이 나머지다.`));
   }
   if (body.filtered) {
     const f = body.filtered.margins;
@@ -608,6 +945,14 @@ function renderBode(box, lp, entry, body) {
       + "틀린 것이 아니라 필터를 안 본 값입니다."));
   } else if (body.filtered_note) {
     kids.push(el("p", { class: "hint" }, `필터 반영 곡선 없음 — ${body.filtered_note}.`));
+  }
+  // 법칙 게인 루프 — 서버가 이 칸의 게인으로 그렸다(맵의 이 칸과 같은 게인)
+  if (lawNote) kids.push(el("p", { class: "hint" }, `${lawNote}.`));
+  // 한 kp로 잰 루프(손으로 적은 값·낡은 확정 표) — 이 칸에서 기체가 실제로 나는 게인이 다르면 이 곡선은 근사다
+  if (gainNote) {
+    kids.push(el("p", { class: "hint" },
+      `${gainNote}. 이 칸의 게인으로 재려면 [개루프 정의]의 「게인 읽을 마하」를 `
+      + `${entry.trim.case.mach}로 두고 다시 실행한다.`));
   }
   clear(box).append(...kids);
 }

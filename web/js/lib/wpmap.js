@@ -212,18 +212,13 @@ export function profileHitTest(plan, x, y, scale, { radiusPx = 10 } = {}) {
   return -1;
 }
 
-// 순항 고도 [기본값] — 고도가 하나도 없는 목록에 첫 점을 찍을 때 받는 값.
-// 엔진에 대응 기본값이 없는 "미션 시나리오" 값이라 웹이 든다 (lib/loops.js의
-// DEFAULT_LOOPS와 같은 부류 — 02 §5.5의 "엔진 기본값 재기술"이 아니다).
-//
-// 700 m인 이유는 **기체가 실제로 낼 수 있는 상승 경사**다: 데모 기체는 약 11%
-// (실측 Δ738 m / Δ6600 m)를 내는데, 8 km 첫 구간의 램프 구간은 도달 반경을 뺀
-// 6.5 km라 1300 m를 요구하면 20%가 되어 계획선이 실제선보다 5 km 앞서 달아난다.
-// 계획과 실제를 겹쳐 보라고 만든 화면이 기본 상태에서 못 따라갈 계획을 그리면 안 된다.
-export const CRUISE_ALT_DEFAULT = 700;
-
-/** 새 웨이포인트의 기본 고도 [m 문자열] — 원점 반경 안이면 "0", 밖이면 직전 행 고도,
- * 그것도 없으면 순항 [기본값].
+/** 새 웨이포인트의 기본 고도 [m 문자열] — 원점 반경 안이면 "0", 밖이면 직전 행 고도, 그것도 없으면
+ * 순항 고도(`cruiseAlt` — 호출측이 모드 표의 경로 모드 고도를 넘긴다, lib/wpcheck.js pathAlt), 그것도
+ * 없으면 목록이 이미 쓰는 가장 높은 고도, 그것도 없으면 `null`(고도 없음).
+ *
+ * **웹이 고도 상수를 들지 않는다.** 종전의 700 m 기본값은 구 합성 기체(1200 kg)의 상승 경사로 정한
+ * 값이었고, 호출측이 순항값을 넘기지 않아 순항 200 m인 예제 기체에서도 표가 700 m로 채워졌다 — 기체
+ * 고정 금지. 순항 고도는 기체 문서의 미션 템플릿이 모드 표에 넣는 값이라 기체마다 따라온다.
  *
  * 원점은 이륙점이다(docs/conventions.md — "NED 원점 = 이륙점"). 거기로 돌아오는 점은
  * 곧 착륙점이므로 0이 맞다. 판정 반경은 **도달 반경을 재사용**한다: 엔진이 "이
@@ -232,7 +227,8 @@ export const CRUISE_ALT_DEFAULT = 700;
  *
  * **반환은 문자열 또는 `null`**이다 — 고도가 하나도 없는 목록에는 `null`을 내고
  * 호출측이 `d` 키를 생략해야 한다("전부 있거나 전부 없거나", 엔진 set_waypoints).
- * 빈 목록은 첫 점이라 값을 준다: 거기서 고도 있는 목록이 시작된다.
+ * 빈 목록은 첫 점이라 값을 준다(출처가 있으면): 거기서 고도 있는 목록이 시작된다.
+ * 출처가 하나도 없으면 첫 점도 `null`이다 — 지어낸 고도로 목록을 시작하지 않는다.
  *
  * **찍는 순간에만** 쓴다 — 이후 끌어 옮길 때 다시 적용하면 사용자가 고친 값을 덮는다.
  * 반경이 없거나 비유한이면 0으로 본다: 그래도 **정확히 원점**인 점은 0을 받는다
@@ -240,7 +236,7 @@ export const CRUISE_ALT_DEFAULT = 700;
  */
 export function defaultWaypointAlt(n, e, rows, { acceptRadius, cruiseAlt } = {}) {
   // 비배열을 빈 목록으로 눙치면 **고도 없는 목록이 값을 받아** 방금 막은 회귀가
-  // 조용히 되살아난다 — 게다가 옛 3인자 호출이 그럴듯한 값("700")을 돌려받아
+  // 조용히 되살아난다 — 게다가 옛 3인자 호출이 그럴듯한 값을 돌려받아
   // 더 안 들킨다(리뷰 실측). 판정 불가를 정상으로 위장하지 않는다
   if (!Array.isArray(rows)) {
     throw new TypeError(
@@ -267,7 +263,16 @@ export function defaultWaypointAlt(n, e, rows, { acceptRadius, cruiseAlt } = {})
   // cruiseAlt도 **양수 검사**를 건다 — Number(null)·Number("")은 0이라 그냥 통과하면
   // 빈 입력이 조용히 해면 고도가 된다(lib/mission.js num()이 막는 그 함정)
   const cruise = Number(cruiseAlt);
-  return String(Number.isFinite(cruise) && cruise > 0 ? cruise : CRUISE_ALT_DEFAULT);
+  if (cruiseAlt != null && String(cruiseAlt).trim() !== "" && Number.isFinite(cruise) && cruise > 0) {
+    return String(cruise);
+  }
+  // 순항 고도를 모르면 목록이 이미 나는 고도 — 사용자가 적은 계획 안의 값이지 지어낸 수가 아니다
+  let top = null;
+  for (const row of filled) {
+    const v = Number(String(row.d).trim());
+    if (Number.isFinite(v) && v > 0 && (top === null || v > top.v)) top = { v, s: String(row.d).trim() };
+  }
+  return top ? top.s : null;
 }
 
 /** 빈 고도를 **전부** 메운다(사용자 요청, 2026-09-04) — 배열을 그 자리에서 고친다.
@@ -296,8 +301,10 @@ export function fillMissingAltitudes(rows, opts = {}) {
   for (const r of rows) {
     if (String(r?.d ?? "").trim() === "") {
       const d = defaultWaypointAlt(Number(r?.n), Number(r?.e), filled, opts);
-      // 위 문서대로 filled는 앞선 행이 이미 다 채워진 채라 여기서 null이 날 일은
-      // 없지만, 원 함수의 계약(null 가능)을 그대로 존중해 방어를 남긴다.
+      // 순항 고도를 모르면(cruiseAlt 없음) null이 난다 — 첫 행이 고도 없이 남으면 뒤 행도 "고도 없는
+      // 목록"을 보고 null이라 전부 빈 채가 된다. 지어낸 고도로 메우지 않는다(원 함수의 계약).
+      // 단 원점 반경 안의 첫 행은 "0"을 받으므로, 그 뒤 행은 물려받을 양수 고도가 없어 빈 채로 남아
+      // 섞인 목록이 된다 — 제출 검증(buildWaypoints)이 그 사실을 사유와 함께 말한다.
       if (d != null) r.d = d;
     }
     filled.push(r);

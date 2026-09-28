@@ -10,15 +10,16 @@
 
 칸 형식(kind):
   number · range([lo,hi]) · vec3 · mat3(3×3, symmetric이면 대칭 칸을 함께 고친다) · rows3(N×3 행)
-  · table_mach(마하 1축 표) · choice · multichoice · numlist · text(짧은 문자열 — 파일 이름)
+  · table_mach(마하 1축 표) · choice · multichoice · numlist(scalar_ok면 수치 하나도 받는다 · max_items 상한)
+  · text(짧은 문자열 — 파일 이름)
   · text_json(자유 객체 — 출처 등)
   · terms(공력 계수 항 목록) · registry(레지스트리 파라미터 객체, 형식 고정)
   · component({type, params} — 형식을 고르면 파라미터 칸이 바뀐다) · group(하위 칸 묶음, nullable 가능)
 """
 
 from claw.profile.schema import (
-    ACTUATOR_RESERVED, AERO_FORMS, DE_TRIM_SOURCES, DISPERSION_TAGS, DISPLAY_KINDS, LAYOUTS, SCAS_RESERVED,
-    SCHEDULE_RULES, SCHEMA_VERSION, TABLE_AXES, TABLE_EXTRAPOLATE, TABLE_POLICIES, TEMPLATES,
+    ACTUATOR_RESERVED, AERO_FORMS, DE_TRIM_SOURCES, DISPERSION_TAGS, DISPLAY_KINDS, LAYOUTS, MAX_ENVELOPE_ALTS,
+    SCAS_RESERVED, SCHEDULE_RULES, SCHEMA_VERSION, TABLE_AXES, TABLE_EXTRAPOLATE, TABLE_POLICIES, TEMPLATES,
     TERM_EXTRA_INPUTS, TERM_INPUTS,
 )
 
@@ -172,7 +173,11 @@ def form_spec() -> dict:
                     _f("numlist", "/mission_template/trim_grid/fuel", "연료 목록", "kg"),
                 ]),
                 _group("/mission_template/envelope", "엔벨로프 폼", fields=[
-                    _f("number", "/mission_template/envelope/alt", "선도 고도", "m"),
+                    # 수치 하나 또는 목록 — numlist 칸은 수치 하나도 그대로 보여 주고(쉼표 없는 한 값) 저장은
+                    # 목록으로 한다. 검증기가 둘 다 받는다(scalar_ok). max_items는 검증기 상한 그대로
+                    _f("numlist", "/mission_template/envelope/alt", "선도 고도 (하나 또는 여럿)", "m",
+                       scalar_ok=True, max_items=MAX_ENVELOPE_ALTS,
+                       help=f"V-n 선도를 그릴 고도 — 여럿이면 고도마다 선도를 겹쳐 그린다({MAX_ENVELOPE_ALTS}개까지)"),
                     _f("number", "/mission_template/envelope/fuel", "선도 연료", "kg"),
                     _f("number", "/mission_template/envelope/scan_mach/from", "스캔 마하 시작", "-"),
                     _f("number", "/mission_template/envelope/scan_mach/to", "스캔 마하 끝", "-"),

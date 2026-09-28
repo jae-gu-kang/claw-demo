@@ -10,29 +10,42 @@
 JSON 글이 같은 문서를 고친다.
 
 예제 기체는 엔진 패키지 데이터라 읽기 전용이다. 보여 주되 검증을 부르지 않는다(검증은 저장 규칙이라
-예제 표시를 거부한다) — 고치려면 복제한다.
+예제 표시를 거부한다) — 고치려면 복제한다. 문서 경고(저속 가림 등)는 검증 없이도 보인다 — 서버가 GET 응답에
+저장본의 경고를 동봉한다.
+
+쇼케이스 진행기의 신호(lib/showcasecue.js — overview·aero·stability·seed-basis·edit-eoir-drag·derive-de-trim)는
+render가 한 번 읽고 **이 탭의 버튼과 같은 길**(문서 열기·[그리기]·[산출]·폼 쓰기 + [저장]·[δe_trim 표 도출])로
+처리한 뒤 보고한다. 판단(기본 조건·치환 경로·보고 한 줄)은 lib/aircraftcue.js. 확인 창은 띄우지 않는다 — 진행기를
+누른 것이 사용자의 뜻이고, 창은 자동 재생을 멈춰 세운다. 편집 중인 문서에는 끼어들지 않고 사유와 함께 멈춘다.
 */
 
 import { ApiError, api, errorText } from "../api.js";
 import { heroEntries, heroFacts, heroPlan, stepIndex, variantNote } from "../lib/aircrafthero.js";
+import {
+  aeroReport, basisReport, cd0EditPlan, deriveReport, editReport, machListArg, operatingMachs, overviewReport,
+  stabilityReport, viewerDefaults,
+} from "../lib/aircraftcue.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
-import { SERIES_COLORS } from "../lib/plot.js";
+import { SERIES_COLORS, coincidentGroups, coincidentNote, curveSpread, nearOverlapNote } from "../lib/plot.js";
 import {
   EXAMPLE_ID, cloneDocument, currentSelection, exportFileName, parseDocumentText, profileErrorText,
   sameSelection, saveSelection, setSelection,
 } from "../lib/profile.js";
 import {
   aeroCurveStats, effectiveOf, formUpdate, overlayValues, sliceBody, stabilityBody,
-  stabilityVerdictText, stallNote,
+  stabilityVerdictText, stallNote, violationSeries, warningLine, writeValues,
 } from "../lib/profileform.js";
+import { withJosa } from "../lib/josa.js";
+import { revealPanel } from "../lib/reveal.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { lineChartCanvas } from "./plots.js";
-import { renderProfileForm } from "./profileform.js";
+import { renderProfileForm, revealSection } from "./profileform.js";
 import {
   browserStorage, refresh as refreshPicker, restoredNotice, selectedDocument, switchTo,
 } from "./profilepick.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
 import { deriveSummary, deTrimStatus, designSource, gainTablesStatus, seedSummary } from "../lib/quickseed.js";
-import { basisAttitude, basisHead, basisRates, designGain } from "../lib/seedbasis.js";
+import { achievedText, basisAttitude, basisHead, basisRates, designGain } from "../lib/seedbasis.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
 // 탭 재진입에도 목록·열어 둔 문서·편집 중 글·열린 패널 유지 (모듈 스코프 규약)
@@ -58,13 +71,15 @@ let formSpec = null;
 let formAssets = null; // 진행 중인 요청 — 다시 그리기가 겹쳐도 한 번만 받는다
 let exampleDoc = null;
 const schemaCache = new Map();
-// 공력 DB 뷰어 칸·마지막 곡선 — 탭을 떠났다 와도 그대로 (곡선은 그린 기체·문서의 것임을 forId로 대조한다)
+// 공력 DB 뷰어 칸·마지막 곡선 — 탭을 떠났다 와도 그대로 (곡선은 그린 기체·문서의 것임을 forId로 대조한다).
+// 고정 마하·α 구간은 **연 문서에서** 채운다(설계 마하·DB 유효 범위 — lib/aircraftcue viewerDefaults). 연 기체가
+// 바뀌면 다시 채운다(condFor, 산출 근거 조건과 같은 규약). 종전 고정값 마하 0.5는 예제 M_D 0.367 위였다
 const viewer = {
   along: "alpha", start: "-0.2", stop: "0.6", n: "81", coef: "CL",
-  fixed: { alpha: "0", beta: "0", mach: "0.5", alt: "0", de: "0", da: "0", dr: "0" },
+  fixed: { alpha: "0", beta: "0", mach: "", alt: "0", de: "0", da: "0", dr: "0" },
   // 겹치기 — 한 고정축의 값 목록(콤마)마다 곡선 하나. 빈 칸 = 곡선 하나(종전과 동일)
   ovAxis: "mach", ovValues: "",
-  result: null, forId: null, error: null,
+  result: null, forId: null, error: null, condFor: null,
 };
 const AXIS_UNIT = { alpha: "rad", beta: "rad", de: "rad", da: "rad", dr: "rad", mach: "", alt: "m" };
 // 정적 안정성 칸·마지막 곡선 — 뷰어와 같은 유지 규약(그린 문서의 것임을 forId로 대조).
@@ -119,6 +134,19 @@ const fresh = (body) => ({
 // 지금 계산에 쓰이는 기체 id — 고르지 않았으면 예제
 const selectedId = () => currentSelection()?.id ?? EXAMPLE_ID;
 
+/** 공력 패널 두 모드의 문서 기본 조건 — 연 기체가 바뀌었을 때만 채운다(사람이 고친 칸을 다시 그릴 때마다 덮지
+ *  않는다). 문서에 없으면 마하 칸을 비운다 — 예제 값이나 옛 고정값을 조용히 물려주지 않는다(기체 고정 금지) */
+function applyViewerDefaults(doc, id) {
+  if (viewer.condFor === id) return;
+  viewer.condFor = id;
+  const d = viewerDefaults(doc);
+  viewer.fixed.mach = d.mach == null ? "" : String(d.mach);
+  if (d.alpha) {
+    if (viewer.along === "alpha") [viewer.start, viewer.stop] = d.alpha.map(String);
+    [stability.start, stability.stop] = d.alpha.map(String);
+  }
+}
+
 export function dispose() {
   if (hero == null) return;
   const handle = hero.handle;
@@ -128,6 +156,10 @@ export function dispose() {
 
 export function render() {
   dispose(); // 같은 뷰를 다시 그리면 main.js가 dispose를 부르지 않는다 — 옛 렌더러를 여기서 놓는다
+  // 쇼케이스 신호 — 한 번 읽고 지운다(규약). 처리는 목록을 받은 뒤(맨 아래 runCue)
+  const cue = takeCue("aircraft");
+  // 기본 화면 신호는 대표 그림도 계산에 쓰는 기체로 되돌린다(‹ ›로 보던 미리 보기 대신)
+  if (cue?.action === "overview") heroPick = null;
   const heroBox = el("div", { class: "hero-block" });
   const statusLine = el("p", { class: "hint", style: "margin:4px 0 0" });
   const errBox = el("div");
@@ -256,17 +288,20 @@ export function render() {
   const discardOk = (then) => !opened?.dirty
     || !!globalThis.confirm?.(`「${opened.id}」에 저장하지 않은 편집이 있습니다 — 버리고 ${then}`);
 
+  // 돌려주는 것: 그 기체가 열렸는가(쇼케이스 신호가 성공을 가린다 — 버튼은 쓰지 않는다)
   const openDoc = async (id) => {
     if (opened?.id === id && opened.dirty) {
       // 편집 중인 그 문서다 — 다시 받지 않는다. 받으면 패널을 닫았다 돌아온 사람의 글이 조용히 사라진다.
       // 편집이 없으면 아래로 내려가 다시 받는다(다른 곳에서 저장한 새 리비전을 보여 준다)
       drawers.open("doc");
-      return;
+      return true;
     }
-    if (opened?.id !== id && !discardOk("다른 기체를 열까요?")) return;
+    if (opened?.id !== id && !discardOk("다른 기체를 열까요?")) return false;
+    let ok = false;
     try {
       clear(errBox);
       opened = fresh(await api.get(path(id)));
+      ok = true;
       drawers.open("doc");
     } catch (e) {
       showError(e);
@@ -278,6 +313,7 @@ export function render() {
       paintStability();
       paintSeed();
     }
+    return ok;
   };
 
   const checkLine = (ok, text) => el("p", { class: ok ? "hint" : "error-box", style: "margin:8px 0 0" }, text);
@@ -294,8 +330,8 @@ export function render() {
         target.check = { ok: true, lines: [
           `통과 — 지문 ${r.fingerprint} · 플랜트 지문 ${r.plant_fingerprint}`
             + (vs.length ? ` · 형상 변형 ${vs.map(([k, fp]) => `${k} ${fp}`).join(", ")}` : ""),
-          // 오류가 아닌 알림(저속 가림 등) — 저장·계산은 된다
-          ...(r.warnings ?? []).map((w) => `주의${w.variant ? ` [형상 변형 ${w.variant}]` : ""} ${w.path} — ${w.message}`),
+          // 오류가 아닌 알림(저속 가림 등) — 저장·계산은 된다. 편집 중 글의 경고다(저장본 경고는 문서 머리에)
+          ...(r.warnings ?? []).map(warningLine),
         ] };
       } catch (e) {
         target.check = { ok: false, lines: [failText(e)] };
@@ -304,14 +340,17 @@ export function render() {
     if (opened === target) paintDoc();
   };
 
-  const save = async () => {
+  // [저장] — PUT(base_revision). 돌려주는 것: {ok, body} | {ok: false, error, conflict?} — 쇼케이스 신호가 결과를
+  // 가린다(버튼은 쓰지 않는다). quiet: 지금 고른 기체를 고쳤을 때의 다시 읽기 질문을 건너뛴다(신호 — 창이 자동
+  // 재생을 멈춘다. 다시 읽을지는 진행기가 정한다)
+  const save = async ({ quiet = false } = {}) => {
     const target = opened;
     const sentText = target.text;
     const { doc, error } = parseDocumentText(sentText);
     if (error) {
       target.check = { ok: false, lines: [error] };
       paintDoc();
-      return;
+      return { ok: false, error };
     }
     const wasSelected = currentSelection()?.id === target.id;
     try {
@@ -321,8 +360,8 @@ export function render() {
         const next = fresh(body);
         next.mode = target.mode;
         next.editVariant = target.editVariant;
-        next.check = { ok: true, lines: [`리비전 ${body.revision}로 저장했습니다 — 지문 ${body.fingerprint}`,
-          ...(body.warnings ?? []).map((w) => `주의${w.variant ? ` [형상 변형 ${w.variant}]` : ""} ${w.path} — ${w.message}`)] };
+        // 저장본의 문서 경고는 문서 머리(paintDoc)가 새 리비전 기준으로 보인다 — 여기 겹쳐 적지 않는다
+        next.check = { ok: true, lines: [`리비전 ${withJosa(body.revision, "으로/로")} 저장했습니다 — 지문 ${body.fingerprint}`] };
         if (target.text !== sentText) {
           // 저장하는 사이 더 친 글은 버리지 않는다 — 새 리비전 위의 편집으로 남긴다
           next.text = target.text;
@@ -338,20 +377,27 @@ export function render() {
       refreshPicker();
       // 지금 고른 기체를 고쳤다 — 다른 탭이 옛 리비전에서 만든 상태(게인 카탈로그 등)를 들고 있을 수 있다.
       // 다음 계산부터 새 리비전이 쓰이지만, 섞이지 않게 하는 확실한 길은 다시 읽기다 (profilepick.js 머리말)
-      if (wasSelected && globalThis.confirm?.(
-        `지금 계산에 쓰는 기체를 리비전 ${body.revision}로 저장했습니다. 다른 탭이 옛 리비전에서 만든 `
+      if (!quiet && wasSelected && globalThis.confirm?.(
+        `지금 계산에 쓰는 기체를 리비전 ${withJosa(body.revision, "으로/로")} 저장했습니다. 다른 탭이 옛 리비전에서 만든 `
         + "상태를 들고 있을 수 있어 페이지를 다시 읽는 것이 안전합니다."
         + (opened?.dirty ? " 저장하는 사이 더 친 편집은 저장되지 않았고, 다시 읽으면 사라집니다." : "")
         + " 다시 읽을까요?")) {
         globalThis.location.reload();
       }
+      return { ok: true, body };
     } catch (e) {
+      let out;
       if (e instanceof ApiError && e.status === 409 && e.detail?.head != null) {
         target.conflict = e.detail.head; // 다른 곳에서 먼저 저장했다 — 조용히 덮지 않는다
+        out = { ok: false, conflict: e.detail.head,
+          error: `다른 곳에서 먼저 저장했습니다 — 최신은 리비전 ${e.detail.head}이고 이 편집은 리비전 `
+            + `${target.body.revision} 위의 것이라 덮어쓰지 않았습니다` };
       } else {
         target.check = { ok: false, lines: [failText(e)] };
+        out = { ok: false, error: failText(e) };
       }
       if (opened === target) paintDoc();
+      return out;
     }
   };
 
@@ -502,6 +548,15 @@ export function render() {
     const head = el("p", { class: "hint", style: "margin:0 0 8px" },
       `${b.document.name} · ${b.document.id} · 리비전 ${b.revision} · 지문 ${b.fingerprint} · `
       + `플랜트 지문 ${b.plant_fingerprint}`);
+    // 저장본의 문서 경고 — 서버가 GET·PUT 응답에 동봉한다(검증과 같은 판정). 종전에는 [검증]·[저장] 뒤에만 섰고,
+    // 검증을 부르지 않는 예제에서는 끝내 안 보였다. 편집 중 글의 경고는 [검증]이 아래 결과 줄에 따로 말한다
+    const warns = Array.isArray(b.warnings) ? b.warnings : [];
+    const warnBox = warns.length
+      ? el("div", { class: "notice", "data-doc-warnings": "" },
+        el("strong", {}, `문서 경고 ${warns.length}건`),
+        ` — 리비전 ${b.revision} 저장본 기준. 오류가 아니라 알림입니다(저장·계산은 됩니다).`,
+        el("ul", { style: "margin:4px 0 0; padding-left:18px" }, warns.map((w) => el("li", {}, warningLine(w)))))
+      : null;
     const modeBar = el("div", { class: "row", style: "gap:6px;margin:0 0 8px;align-items:center" },
       el("button", { class: opened.mode === "form" ? "primary" : null, onclick: () => setMode("form") }, "절별 폼"),
       el("button", { class: opened.mode === "json" ? "primary" : null, onclick: () => setMode("json") }, "JSON 글"),
@@ -543,6 +598,7 @@ export function render() {
     checksBox = el("div", {}, ...(opened.check ? opened.check.lines.map((t) => checkLine(opened.check.ok, t)) : []));
     // DOM append는 null을 "null" 글자로 찍는다(el()과 달리) — 조건부 조각은 걸러서 넘긴다
     clear(docBox).append(...[head,
+      warnBox,
       readOnly
         ? el("p", { class: "notice" }, "예제 기체는 읽기 전용입니다 — 엔진에 딸린 문서이고 실기체 값이 아닙니다. ",
           el("button", { onclick: () => clone({ id: b.document.id, name: b.document.name }) }, "복제해서 고치기"))
@@ -552,7 +608,7 @@ export function render() {
       editor,
       readOnly ? null : el("div", { class: "row", style: "gap:8px;margin-top:8px;align-items:center" },
         el("button", { onclick: validate, title: "저장하지 않고 서버 검증만 — 저장과 같은 규칙" }, "검증"),
-        el("button", { class: "primary", onclick: save,
+        el("button", { class: "primary", onclick: () => save(),
           title: `리비전 ${b.revision} 위에 저장한다 — 그사이 다른 곳에서 저장했으면 충돌로 알린다` }, "저장"),
         el("button", { onclick: reloadLatest }, "최신 불러오기"),
         status),
@@ -604,7 +660,10 @@ export function render() {
 
   // ── 공력 DB 뷰어 (패널) ─────────────────────────────────────────────────
   // 연 문서의 계수 계산기로 한 축을 따라 곡선을 낸다 — 표를 반입한 직후 저장하지 않고도 본다(서버가 본문 문서로
-  // 계산한다). 표를 따로 그리지 않는다: 시뮬·트림이 쓰는 같은 계산기라 곡선이 곧 기체가 느끼는 계수다
+  // 계산한다). 표를 따로 그리지 않는다: 시뮬·트림이 쓰는 같은 계산기라 곡선이 곧 기체가 느끼는 계수다.
+  // drawViewer·drawStability는 마지막으로 그린 패널의 [그리기] — 쇼케이스 신호가 버튼과 같은 길로 부른다
+  let drawViewer = null;
+  let drawStability = null;
   const paintViewer = () => {
     if (!opened) {
       clear(viewerBox).append(el("p", { class: "hint" }, "목록에서 [열기]로 기체를 열면 그 문서의 공력 곡선을 봅니다."));
@@ -615,6 +674,7 @@ export function render() {
       ensureFormAssets().then(() => { if (opened) paintViewer(); }).catch((e) => showError(e));
       return;
     }
+    applyViewerDefaults(opened.body.document, opened.id);
     const { axes, coefficients, max_points: maxPoints } = formSpec.slice;
     if (viewer.forId !== opened.id) {
       viewer.result = null;
@@ -644,10 +704,34 @@ export function render() {
       const isAlpha = first.along === "alpha";
       const stats = isAlpha ? curves.map((c) => aeroCurveStats(c.res)) : null;
       const optCell = (o, d = 4) => (o ? `${fmt(o.v, d)} @ ${fmt(o.x, 4)}` : "—");
+      // 겹친 곡선 — 이름은 그림 위가 아니라 아래 범례에(좁은 극선·L/D 그림에서 범례가 제목을 덮었다 — D9).
+      // 같은 값의 곡선은 대표(첫 곡선)만 그리고 캡션이 그 사실을 말한다: 세 줄이 한 자리에 포개지면 한 줄만 보이는데
+      // 범례는 셋을 말하고, 위 곡선의 색이 아래 곡선을 가려 어느 마하인지도 틀리게 읽힌다
+      const tags = curves.map((c) => c.tag);
+      const chartDefs = [{ name: viewer.coef, data: curves.map((c) => c.res.coefficients[viewer.coef]) }];
+      if (isAlpha) {
+        chartDefs.push({ name: "극선", data: curves.map((c) => [...c.res.coefficients.CD, ...c.res.coefficients.CL]) });
+        chartDefs.push({ name: "L/D", data: stats.map((st) => st.ld) });
+      }
+      const groupsOf = Object.fromEntries(chartDefs.map((d) => [d.name, multi ? coincidentGroups(d.data) : [[0]]]));
+      const reps = (name) => groupsOf[name].map((g) => g[0]); // 그릴 곡선 — 무리의 대표
+      const sameNote = multi
+        ? coincidentNote(chartDefs.map((d) => ({ name: d.name, groups: groupsOf[d.name], tags }))) : null;
+      // 같은 값은 아니지만 차가 그림 해상도 아래인 곡선 — 한 줄로 **보인다**고만 말한다(쇼케이스 S1의 세 마하 CL은
+      // 0.3 % 차라 맨 위 곡선 색만 보였다). 극선은 CD·CL 중 더 갈리는 쪽으로 잰다
+      const wider = (a, b) => (!a ? b : !b ? a : a.rel >= b.rel ? a : b);
+      const nearNote = multi ? nearOverlapNote([
+        { name: viewer.coef, spread: curveSpread(reps(viewer.coef).map((i) => curves[i].res.coefficients[viewer.coef])) },
+        ...(isAlpha ? [
+          { name: "극선", spread: wider(curveSpread(reps("극선").map((i) => curves[i].res.coefficients.CD)),
+            curveSpread(reps("극선").map((i) => curves[i].res.coefficients.CL))) },
+          { name: "L/D", spread: curveSpread(reps("L/D").map((i) => stats[i].ld)) },
+        ] : []),
+      ]) : null;
       clear(chartBox).append(el("div", {},
-        lineChartCanvas(first.x, curves.map((c, i) => ({
-          data: c.res.coefficients[viewer.coef], color: colorAt(i),
-          label: multi ? c.tag : viewer.coef,
+        lineChartCanvas(first.x, reps(viewer.coef).map((i) => ({
+          data: curves[i].res.coefficients[viewer.coef], color: colorAt(i),
+          label: multi ? "" : viewer.coef,
         })), { title: `${viewer.coef} — ${first.along}`, xUnit: AXIS_UNIT[first.along] ?? "", width: 640, height: 240 }),
         // 실속 표 곡선은 마하 축·기체 실속 표의 것 — 겹친 곡선과 무관하게 한 벌이다
         first.stall?.table_curve
@@ -657,24 +741,33 @@ export function render() {
         // 극선·L/D — α 슬라이스에서만 성립하는 유도 그림 (CL·CD가 같은 응답에서 온다).
         // 극선의 x(CD)는 접혀 되돌아온다 — lineChartCanvas가 극값 범위를 쓰는 이유
         isAlpha ? el("div", { class: "row" },
-          lineChartCanvas(curves.flatMap((c) => c.res.coefficients.CD), curves.map((c, i) => ({
-            x: c.res.coefficients.CD, data: c.res.coefficients.CL, color: colorAt(i),
-            label: multi ? c.tag : "",
+          lineChartCanvas(curves.flatMap((c) => c.res.coefficients.CD), reps("극선").map((i) => ({
+            x: curves[i].res.coefficients.CD, data: curves[i].res.coefficients.CL, color: colorAt(i), label: "",
           })), { title: "극선 CL–CD (가로 CD·세로 CL)", xUnit: "", width: 315, height: 220 }),
-          lineChartCanvas(first.x, curves.map((c, i) => ({
-            data: stats[i].ld, color: colorAt(i), label: multi ? c.tag : "",
+          lineChartCanvas(first.x, reps("L/D").map((i) => ({
+            data: stats[i].ld, color: colorAt(i), label: "",
           })), { title: "L/D — alpha", xUnit: "rad", width: 315, height: 220 })) : null,
+        // 겹친 곡선의 범례 — 그림 아래 (그림 위 글 최소). 색은 위 그림들과 같은 배정
+        multi ? el("div", { class: "legend" },
+          ...curves.map((c, i) => el("span", {},
+            el("span", { class: "chip", style: `background:${colorAt(i)}` }), c.tag))) : null,
+        sameNote ? el("p", { class: "hint", "data-same-curves": "" }, sameNote) : null,
+        nearNote ? el("p", { class: "hint", "data-near-curves": "" }, nearNote) : null,
         isAlpha ? el("div", { class: "scroll-x" }, el("table", {},
           el("thead", {}, el("tr", {},
             el("th", {}, "곡선"),
             // 극값 통계는 요청 구간 ∩ DB 유효 범위(α) 안에서만 — 밖은 외삽이라 보지 않는다
             el("th", { title: "요청 구간 ∩ DB 유효 범위(α) 안의 최대 — 외삽 구간은 보지 않는다" }, "CL 최대 @ α"),
             el("th", { title: "CL이 오르다 떨어지는 첫 꼭대기 — 참고용, 정본은 실속 표" }, "실속 추출 α [rad]"),
+            // 곡선마다 그 마하의 실속 표 값 — 겹친 곡선에서는 아래 한 줄 대조(stallNote)가 서지 않아 여기서 나란히 본다
+            el("th", { title: "공력팀 실속 표 α_stall(M) — 그 곡선의 마하에서 (정본)" }, "실속 표 α [rad]"),
             el("th", {}, "CD 최소 @ α"), el("th", {}, "L/D 최대 @ α"))),
           el("tbody", {}, curves.map((c, i) => el("tr", {},
             el("td", {}, multi ? c.tag : "현재 조건"),
             el("td", { class: "num" }, optCell(stats[i].clMax)),
-            el("td", { class: "num" }, c.res.stall?.extracted == null ? "—" : fmt(c.res.stall.extracted, 4)),
+            el("td", { class: "num", title: c.res.stall?.reason ?? "" },
+              c.res.stall?.extracted == null ? "—" : fmt(c.res.stall.extracted, 4)),
+            el("td", { class: "num" }, c.res.stall?.table_at == null ? "—" : fmt(c.res.stall.table_at, 4)),
             el("td", { class: "num" }, optCell(stats[i].cdMin)),
             el("td", { class: "num" }, optCell(stats[i].ldMax, 3))))))) : null,
         multi ? null : el("p", { class: "hint" }, stallNote(first)),
@@ -728,6 +821,7 @@ export function render() {
       }
       paintChart();
     };
+    drawViewer = draw;
     clear(viewerBox).append(
       el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;align-items:flex-end" },
         el("label", { class: "field" }, "따라갈 축", el("select", {
@@ -773,6 +867,7 @@ export function render() {
       ensureFormAssets().then(() => { if (opened) paintStability(); }).catch((e) => showError(e));
       return;
     }
+    applyViewerDefaults(opened.body.document, opened.id);
     const { axes, max_points: maxPoints } = formSpec.slice;
     if (stability.forId !== opened.id) {
       stability.result = null;
@@ -795,6 +890,12 @@ export function render() {
             { data: res.derivatives[name], color: "#0a84ff", label: "" },
             // 0선이 곧 판정선이다 — 곡선이 이 선의 어느 쪽에 있는가가 답
             { data: res.x.map(() => 0), color: "#c93400", dash: [4, 4], label: "" },
+            // 위반 띠 — 서버가 판정한 위반 α 구간의 곡선을 붉게 덧그린다(구간 수치는 아래 판정 줄). 위반이 없으면
+            // 싣지 않는다: 전부 null인 계열은 세로축 극값을 [0, 1]로 끌어 곡선을 납작하게 만든다(replay extent)
+            ...(res.judgments[name]?.violations?.length
+              ? [{ data: violationSeries(res.x, res.derivatives[name], res.judgments[name].violations),
+                color: "#ff3b30", label: "" }]
+              : []),
           ], { title: label, xUnit: "rad", width: 640, height: 170 }),
           el("p", { class: "hint", style: "margin:2px 0 6px" }, stabilityVerdictText(res.judgments[name])))),
         el("p", { class: "hint" },
@@ -833,6 +934,7 @@ export function render() {
       }
       paintCharts();
     };
+    drawStability = draw;
     clear(stabilityBox).append(
       el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;align-items:flex-end" },
         el("label", { class: "field" }, "α 시작 [rad]", input(stability.start, (v) => { stability.start = v; })),
@@ -903,25 +1005,46 @@ export function render() {
     }
     const target = seedJob;
     seedJob = null;
+    // 쇼케이스 신호로 건 잡 — 보고는 잡이 끝난 뒤 여기서 한다. 감시자는 DOM과 무관하게 끝까지 돌므로(watchJob)
+    // 탭을 떠났어도 보고는 간다(보고는 store에만 쓴다)
+    const cue = target?.cue ?? null;
     if (job.status === "error") showError(`초기 게인 탐색 작업 오류 — ${job.error ?? ""}`);
     if (!target || cancelledWithoutResult(job) || !job.result_id) {
+      if (cue) failCue(cue, `작업이 결과 없이 끝났습니다 — ${job.status}${job.error ? ` (${job.error})` : ""}`);
       paintSeed();
       return;
     }
     try {
       const body = await api.get(`/results/${encodeURIComponent(job.result_id)}`);
       seedResult = { profileId: target.profileId, kind: target.kind, body };
-      if (body.written && await afterLawWrite(target.profileId,
-        target.kind === "derive_de_trim" ? "δe_trim 표" : "초기 게인", body.profile?.revision)) return;
+      // 보고 한 줄은 이 패널이 그리는 결과(deriveSummary)에서 — 갱신(다시 받기)이 끝난 뒤 보낸다
+      const r = cue ? deriveReport(body) : null;
+      let restarting = false;
+      try {
+        restarting = body.written && await afterLawWrite(target.profileId,
+          target.kind === "derive_de_trim" ? "δe_trim 표" : "초기 게인", body.profile?.revision, { quiet: !!cue });
+      } catch (e) {
+        showError(e);
+      }
+      if (cue) {
+        if (r.error) failCue(cue, r.error);
+        else {
+          revealPanel(seedBox); // 도출 표가 사는 패널을 화면 위로 — 떠난 화면이면 굴리지 않는다(lib/reveal.js)
+          reportCue(cue, { phase: "done", summary: r.summary, resultId: job.result_id, data: r.data });
+        }
+      }
+      if (restarting) return;
     } catch (e) {
       showError(e);
+      if (cue) failCue(cue, e);
     }
     paintSeed();
   };
 
   // 법칙 절을 새 리비전으로 쓴 뒤의 공통 갱신(빠른 탐색·도출·산출 근거 저장) — 목록·선택기·열린 문서를
-  // 다시 받고, 지금 계산에 쓰는 기체면 새로고침을 물어본다. 새로고침을 시작했으면 true
-  const afterLawWrite = async (profileId, what, revision) => {
+  // 다시 받고, 지금 계산에 쓰는 기체면 새로고침을 물어본다. 새로고침을 시작했으면 true.
+  // quiet: 묻지 않는다(쇼케이스 신호 — 다시 읽을지는 진행기가 정한다)
+  const afterLawWrite = async (profileId, what, revision, { quiet = false } = {}) => {
     await load();
     refreshPicker();
     if (opened?.id === profileId && !opened.dirty) {
@@ -931,8 +1054,8 @@ export function render() {
       paintViewer();
       paintStability();
     }
-    if (currentSelection()?.id === profileId && globalThis.confirm?.(
-      `지금 계산에 쓰는 기체에 ${what}을 리비전 ${revision}로 저장했습니다. 다른 탭이 옛 리비전에서 `
+    if (!quiet && currentSelection()?.id === profileId && globalThis.confirm?.(
+      `지금 계산에 쓰는 기체에 ${withJosa(what, "을/를")} 리비전 ${withJosa(revision, "으로/로")} 저장했습니다. 다른 탭이 옛 리비전에서 `
       + "만든 상태를 들고 있을 수 있어 페이지를 다시 읽는 것이 안전합니다. 다시 읽을까요?")) {
       globalThis.location.reload();
       return true;
@@ -960,23 +1083,30 @@ export function render() {
     }
   };
 
-  const runDerive = async () => {
-    if (!opened || opened.body.is_example) return;
+  // 돌려주는 것: 잡을 걸지 않은 사유(글) 또는 null — 쇼케이스 신호가 실패 사유로 쓴다(버튼은 쓰지 않는다).
+  // cue가 있으면 덮어쓰기 질문을 건너뛰고(신호를 건 것이 사용자의 뜻), 걸자마자 started를 보고한다
+  const runDerive = async ({ cue = null } = {}) => {
+    if (!opened || opened.body.is_example) return "예제 기체는 고칠 수 없습니다 — 저장된 기체에서 도출합니다";
+    if (seedJob) return "기체를 고치는 잡이 이미 돌고 있습니다 — 끝난 뒤 돌립니다";
     if (opened.dirty) {
-      showError("저장하지 않은 편집이 있습니다 — δe_trim 표 도출은 저장한 리비전의 플랜트로 돕니다. 먼저 저장합니다.");
-      return;
+      const why = "저장하지 않은 편집이 있습니다 — δe_trim 표 도출은 저장한 리비전의 플랜트로 돕니다. 먼저 저장합니다.";
+      showError(why);
+      return why;
     }
-    if (opened.body.document.law?.alloc?.de_trim != null && !globalThis.confirm?.(
+    if (!cue && opened.body.document.law?.alloc?.de_trim != null && !globalThis.confirm?.(
       "지금 δe_trim 표를 도출 결과로 바꿔 새 리비전으로 저장합니다(옛 리비전은 남습니다). 도출할까요? "
-      + "(마하 검사 격자 × 연료 × 고도로 트림을 돌려 수십 초 걸릴 수 있습니다)")) return;
+      + "(마하 검사 격자 × 연료 × 고도로 트림을 돌려 수십 초 걸릴 수 있습니다)")) return "취소했습니다";
     try {
       clear(errBox);
       const job = await api.post(`${path(opened.id)}/derive-de-trim`, { base_revision: opened.body.revision });
-      seedJob = { id: job.id, profileId: opened.id, kind: "derive_de_trim" };
+      seedJob = { id: job.id, profileId: opened.id, kind: "derive_de_trim", cue };
       seedResult = null;
+      if (cue) reportCue(cue, { phase: "started", jobId: job.id });
       paintSeed();
+      return null;
     } catch (e) {
       showError(e);
+      return failText(e);
     }
   };
 
@@ -1077,7 +1207,7 @@ export function render() {
         e_ref_dps: basis.result.e_ref_dps,
       });
       basis.applyMsg = { ok: true,
-        text: `리비전 ${r.revision}로 저장했습니다 — 출처에 검증 전 표시가 남습니다.`
+        text: `리비전 ${withJosa(r.revision, "으로/로")} 저장했습니다 — 출처에 검증 전 표시가 남습니다.`
           + (r.schedule_created ? ` 스케줄이 없어 마하 ${c.mach} 한 점 스케줄도 만들었습니다.` : "") };
       if (await afterLawWrite(target.id, "산출 근거 설계값", r.revision)) return;
     } catch (e) {
@@ -1109,7 +1239,10 @@ export function render() {
       el("p", { class: "notice" }, head.line),
       el("div", { class: "scroll-x" }, el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "자리"), el("th", {}, "저차 근사"), el("th", {}, "후보 k"),
-          el("th", {}, "지금 문서"), el("th", {}, "전체 모델 달성"), el("th", {}, "작동기 포함"),
+          el("th", {}, "지금 문서"),
+          el("th", { title: "전체 선형 모델에서 잰 지표 / 목표 (목표 대비 차) — 달성·미달 배지는 엔진 판정 그대로" },
+            "전체 모델 달성"),
+          el("th", {}, "작동기 포함"),
           el("th", {}, "조종면 예산 (P 몫)"))),
         el("tbody", {}, rates.map((r) => el("tr", {},
           el("td", { class: "num" }, r.slot),
@@ -1118,8 +1251,8 @@ export function render() {
           el("td", { class: "num" }, designGain(body, r.slot) == null ? "—" : num(designGain(body, r.slot), 4)),
           r.k == null
             ? el("td", {}, r.reasonText ?? "—")
-            : el("td", { class: "num" }, `${num(r.achieved)} / 목표 ${num(r.target)} `,
-              flag(r.achievedOk, "달성", "미달")),
+            // 달성/목표에 목표 대비 차를 곁들인다 — 근소 미달(−0.4 %)과 큰 미달이 같은 「미달」로만 읽히지 않게(D7)
+            : el("td", { class: "num" }, `${achievedText(r)} `, flag(r.achievedOk, "달성", "미달")),
           el("td", {}, r.k == null ? "—" : flag(r.stable, "안정", "불안정")),
           el("td", { class: "num" }, r.budget
             ? el("span", {}, `${deg(r.budget.delta_cmd)} / ${deg(r.budget.margin)}`
@@ -1170,7 +1303,7 @@ export function render() {
     const input = (value, onValue) => el("input", {
       class: "pf-num", value, spellcheck: "false", oninput: (e) => onValue(e.target.value),
     });
-    return el("div", {},
+    return el("div", { "data-seed-basis": "" },
       el("h4", { style: "margin:14px 0 4px" }, "산출 근거 (모델 기반 초기값)"),
       el("p", { class: "hint" },
         "한 트림점의 저차 근사에서 레이트 댐퍼 초기값을 닫힌꼴로 계산합니다 — 롤은 1차 극배치, 피치·요는 "
@@ -1200,7 +1333,13 @@ export function render() {
     const src = designSource(doc);
     const summary = list?.find((p) => p.id === opened.id);
     const trim = deTrimStatus(doc, summary);
-    const gt = gainTablesStatus(summary);
+    // 확정 표 배너는 **고른 형상**의 사실이어야 한다 — 이 기체의 형상 변형을 골라 두었으면 그 변형의 상태(서버 변형별
+    // 출처, 없으면 저장된 문서에 변형을 적용한 표 자리). 변형 패치가 표를 비운 형상(EO/IR형)은 규칙 스케줄로 난다
+    const selNow = currentSelection();
+    const selVariant = selNow?.id === opened.id && (doc.variants ?? []).some((v) => v?.id === selNow?.variant)
+      ? selNow.variant : null;
+    const gt = gainTablesStatus(summary, selVariant
+      ? { variant: selVariant, effectiveTables: effectiveOf(doc, selVariant)?.law?.gain_tables ?? null } : {});
     const busy = seedJob != null;
     const progress = el("div");
     const res = seedResult?.profileId === opened.id ? seedResult : null;
@@ -1231,16 +1370,22 @@ export function render() {
         + "격자의 최악 |δe|를 요구로 삼고, 표 보간이 검사 격자(마하 0.005 간격)의 요구를 밑돌지 않을 때까지 올립니다. "
         + "도출한 표는 플랜트 지문을 남겨, 플랜트를 고치면 법칙 조립이 낡은 표를 거부합니다."),
       opened.body.is_example ? null : el("div", { class: "row", style: "gap:8px;align-items:center" },
-        el("button", { disabled: busy, onclick: runDerive,
+        el("button", { disabled: busy, onclick: () => runDerive(),
           title: busy ? "기체를 고치는 잡이 이미 돌고 있다 — 끝난 뒤 돌린다" : "" },
         doc.law?.alloc?.de_trim ? "δe_trim 표 다시 도출" : "δe_trim 표 도출")),
       progress,
       res ? (res.kind === "derive_de_trim" ? deriveResultView(res.body) : seedResultView(res.body)) : null,
     ].filter(Boolean));
     if (busy && seedJob.profileId === opened.id) {
-      attachProgress(progress, seedJob.id, {
+      const watched = seedJob;
+      attachProgress(progress, watched.id, {
         onDone: seedDone,
         onError: (e) => {
+          // 감시가 끊겼다 — 잡을 놓는다. 쇼케이스 신호로 건 잡이면 끝 보고를 여기서 한다: 놓은 잡에는 seedDone이
+          // 보고하지 않으므로(지금 잡이 아니다) 안 보내면 진행기는 시간 초과까지 기다린다. 먼저 끊긴 감시자만 보낸다
+          if (seedJob === watched && watched.cue) {
+            failCue(watched.cue, `잡 진행을 받지 못해 끝났는지 알 수 없습니다 — ${errorText(e)}`);
+          }
           seedJob = null;
           showError(e);
           paintSeed();
@@ -1586,7 +1731,8 @@ export function render() {
     listAutoOpened = true;
     drawers.open("list");
   }
-  load().then(async () => {
+  const loaded = load(); // 실패해도 거절하지 않는다(load가 오류를 화면에 싣는다) — 쇼케이스 신호가 기다린다
+  loaded.then(async () => {
     // 게인·자동 설계 탭에서 온 인계(requestSeedPanel) — 문서가 안 열려 있으면 헤더 선택 기체를 열어
     // 「게인·δe_trim」 패널이 안내문("열면 여기 섭니다")이 아니라 바로 그 기체로 선다. 열어 둔 문서가
     // 있으면 끼어들지 않는다(편집 중 글 보호 — openDoc의 discardOk와 같은 원칙, 여기서는 묻지도 않는다)
@@ -1614,6 +1760,161 @@ export function render() {
     paintSeed();
     drawers.refresh();
   });
+
+  // ── 쇼케이스 신호 (lib/showcasecue.js · 판단은 lib/aircraftcue.js) ──────────
+  // 동작마다 이 탭의 버튼과 같은 길을 탄다 — 문서 열기(openDoc)·[그리기](drawViewer·drawStability)·[산출](runBasis)·
+  // 폼 쓰기(updateForm) + [저장](save)·[δe_trim 표 도출](runDerive). 끝나면 결과가 사는 패널을 열어 둔다(06 §2)
+  // 굴리기는 공용 도우미(부드럽게 · 모션 축소 설정 존중 · 떠난 화면은 굴리지 않음) — lib/reveal.js
+  const reveal = (node, block = "start") => revealPanel(node, { block });
+
+  // 헤더에서 고른 기체를 문서 패널에 연다(열기 버튼과 같은 길 — 편집이 없으면 최신 리비전을 다시 받는다).
+  // 편집 중인 문서가 있으면 묻지 않고 멈춘다 — 버리면 사용자의 글이 사라지고, 창은 자동 재생을 세운다
+  const openSelected = async () => {
+    await loaded;
+    const id = selectedId();
+    if (opened?.dirty) {
+      throw new Error(`「${opened.id}」에 저장하지 않은 편집이 있습니다 — 저장하거나 [최신 불러오기]로 버린 뒤 다시 합니다`);
+    }
+    if (!(await openDoc(id)) || opened?.id !== id) {
+      throw new Error(`기체 문서를 열지 못했습니다 (${id})${errBox.textContent ? ` — ${errBox.textContent}` : ""}`);
+    }
+    if (!formSpec) await ensureFormAssets(); // 폼·뷰어 서술 — 없으면 [그리기]가 서지 않는다
+    return opened;
+  };
+
+  const cueOverview = async () => {
+    const o = await openSelected();
+    drawers.open("doc");
+    paintDoc();
+    reveal(docBox.querySelector("[data-doc-warnings]") ?? docBox, "center"); // 그림 아래 문서 머리 — 경고가 화면 안에
+    return overviewReport(o.body);
+  };
+
+  const cueAero = async (args) => {
+    const o = await openSelected();
+    const machs = args?.mach != null ? machListArg(args.mach) : operatingMachs(o.body.document);
+    if (machs.error) throw new Error(machs.error);
+    // 칸을 채우는 것까지가 신호의 몫 — 그리기는 [그리기]와 같은 함수다
+    viewer.along = "alpha";
+    viewer.coef = "CL";
+    viewer.ovAxis = "mach";
+    viewer.ovValues = machs.value.join(", ");
+    viewer.condFor = null; // α 구간·고정 마하를 이 문서 기본값으로(따라갈 축을 α로 바꾼 뒤)
+    aeroMode = "curves";
+    drawers.open("aero");
+    paintViewer();
+    syncAeroMode();
+    viewer.result = null; // 옛 곡선을 이번 결과로 오인하지 않게 — 실패하면 draw가 사유를 싣는다
+    viewer.error = null;
+    await drawViewer?.();
+    if (!viewer.result || viewer.forId !== o.id) throw new Error(viewer.error ?? "공력 곡선을 그리지 못했습니다");
+    reveal(viewerBox);
+    const r = aeroReport(viewer.result);
+    return { summary: r.summary, data: { ...r.data, ...(machs.source ? { mach_source: machs.source } : {}) } };
+  };
+
+  const cueStability = async () => {
+    const o = await openSelected();
+    aeroMode = "stability";
+    drawers.open("aero");
+    paintStability();
+    syncAeroMode();
+    stability.result = null;
+    stability.error = null;
+    await drawStability?.();
+    if (!stability.result || stability.forId !== o.id) throw new Error(stability.error ?? "정적 안정성을 그리지 못했습니다");
+    reveal(stabilityBox);
+    return stabilityReport(stability.result);
+  };
+
+  const cueSeedBasis = async () => {
+    const o = await openSelected();
+    if (basis.busy) throw new Error("산출 근거 계산이 이미 돌고 있습니다");
+    basis.condFor = null; // 조건을 문서 기본값으로 — 설계 마하·연료 절반(basisSection)
+    drawers.open("seed");
+    paintSeed();
+    await runBasis();
+    if (basis.error || !basis.result || basis.forId !== o.id) throw new Error(basis.error ?? "산출 근거를 내지 못했습니다");
+    const r = basisReport(basis.result);
+    if (r.error) throw new Error(r.error);
+    reveal(seedBox.querySelector("[data-seed-basis]"));
+    return r;
+  };
+
+  const cueEditDrag = async (args) => {
+    const o = await openSelected();
+    if (o.body.is_example) throw new Error("예제 기체는 읽기 전용입니다 — 저장된(편집 가능한) 기체를 고른 뒤 고칩니다");
+    const variantId = typeof args?.variant === "string" ? args.variant : "eoir";
+    const delta = args?.cd0_delta;
+    const plan = cd0EditPlan(o.body.document, variantId, delta);
+    if (plan.error) throw new Error(plan.error);
+    const before = { revision: o.body.revision, fingerprint: o.body.variants?.[variantId] ?? null,
+      baseFingerprint: o.body.fingerprint };
+    // 폼 편집과 같은 길 — 형상 변형을 편집 대상으로 두고 그 칸을 쓴다(profileform edit → writeValues)
+    o.mode = "form";
+    revealSection("aero");
+    drawers.open("doc");
+    if (!plan.changed) {
+      o.editVariant = variantId;
+      paintDoc();
+      return editReport({ variant: variantId, delta, plan, before, after: null, trim: null });
+    }
+    const pre = { obj: o.obj, text: o.text };
+    updateForm(o, (cur) => writeValues(cur, variantId, [[plan.ptr, plan.value]]),
+      { structural: true, editVariant: variantId });
+    if (opened !== o || opened.formError || !opened.dirty) {
+      throw new Error(opened?.formError ?? "폼에 값을 쓰지 못했습니다");
+    }
+    const edited = o.text;
+    const out = await save({ quiet: true }); // [저장]과 같은 PUT(base_revision) — 충돌은 덮지 않고 알린다
+    if (!out.ok) {
+      // 저장되지 않았다 — 신호가 친 편집을 거둔다. 남기면 사용자가 치지 않은 「저장하지 않은 편집」이 다음 신호(이
+      // 단계의 재시도 포함)를 막는다. 다시 보내면 같은 계획(기본 CD0 + Δ)을 최신 리비전 위에 다시 쓴다. 그사이
+      // 사람이 더 친 글이 있으면 건드리지 않는다. 사유(충돌·검증)는 결과 줄에 남긴다
+      if (opened === o && o.text === edited) {
+        Object.assign(o, { obj: pre.obj, text: pre.text, dirty: false, conflict: null,
+          check: { ok: false, lines: [out.error] } });
+        paintDoc();
+      }
+      throw new Error(out.error);
+    }
+    const b = out.body;
+    const summaryRow = list?.find((p) => p.id === b.document.id);
+    reveal(docBox.querySelector('[data-pf-path="/aero/coefficients"]') ?? docBox);
+    return editReport({
+      variant: variantId, delta, plan, before,
+      after: { revision: b.revision, fingerprint: b.variants?.[variantId] ?? null, baseFingerprint: b.fingerprint },
+      trim: deTrimStatus(b.document, summaryRow),
+    });
+  };
+
+  // 도출은 잡이다 — 걸면 started, 끝난 보고는 seedDone이 한다(null을 돌려 여기서 done을 보내지 않는다)
+  const cueDerive = async (cue) => {
+    await openSelected();
+    drawers.open("seed");
+    const refused = await runDerive({ cue });
+    if (refused) throw new Error(refused);
+    reveal(seedBox);
+    return null;
+  };
+
+  const CUE_ACTIONS = {
+    overview: () => cueOverview(),
+    aero: (c) => cueAero(c.args),
+    stability: () => cueStability(),
+    "seed-basis": () => cueSeedBasis(),
+    "edit-eoir-drag": (c) => cueEditDrag(c.args),
+    "derive-de-trim": (c) => cueDerive(c),
+  };
+  if (cue) {
+    const act = Object.hasOwn(CUE_ACTIONS, cue.action) ? CUE_ACTIONS[cue.action] : null;
+    if (!act) unknownAction(cue);
+    else {
+      act(cue).then((r) => {
+        if (r) reportCue(cue, { phase: "done", summary: r.summary, data: r.data });
+      }).catch((e) => failCue(cue, e));
+    }
+  }
 
   return el("div", { class: "tab-page aircraft-page" },
     tabTop({

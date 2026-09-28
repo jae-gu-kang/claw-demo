@@ -1,11 +1,11 @@
 {
  "golden": "evaluate_linear",
  "mode": "full",
- "captured_at": "8cbda3a+dirty",
+ "captured_at": "9bba329+dirty",
  "value": {
   "dict": {
    "fingerprint": "c48da3269a9a8e4c",
-   "criteria_fingerprint": "4d79f79374fbe514",
+   "criteria_fingerprint": "285b1415cbf86dba",
    "criteria": {
     "dict": {
      "schema_version": 2,
@@ -129,7 +129,7 @@
        "pm_deg": "f:0x1.9000000000000p+5",
        "gm_db": "f:0x1.0000000000000p+3",
        "zeta_sp": "f:0x1.6666666666666p-1",
-       "zeta_dr": "f:0x1.0000000000000p-1",
+       "zeta_dr": "f:0x1.3333333333333p-1",
        "roll_lambda": "f:0x1.8000000000000p+3",
        "wc_ratio_att": "f:0x1.8000000000000p+1",
        "ki_zero_frac": "f:0x1.0000000000000p-3",
@@ -198,11 +198,11 @@
       "key": "gm",
       "card": 2,
       "label": "이득여유 GM",
-      "status": "ok",
+      "status": "fail",
       "value": {
        "dict": {
-        "gm_db": "f:0x1.27b2a4573f7e8p+3",
-        "loop": "roll_att"
+        "gm_db": "f:0x1.f9f98b13d1fdbp+0",
+        "loop": "roll_rate"
        }
       },
       "threshold": {
@@ -213,7 +213,7 @@
       },
       "primary": {
        "dict": {
-        "value": "f:0x1.27b2a4573f7e8p+3",
+        "value": "f:0x1.f9f98b13d1fdbp+0",
         "unit": "dB",
         "better": "higher"
        }
@@ -227,12 +227,12 @@
       "key": "pm",
       "card": 3,
       "label": "위상여유 PM",
-      "status": "ok",
+      "status": "fail",
       "value": {
        "dict": {
-        "pm_deg": "f:0x1.9e8cdd54db814p+5",
-        "loop": "roll_att",
-        "delay_margin_s": "f:0x1.8ec94bd656f1ep-3"
+        "pm_deg": "f:0x1.1643aacb09ff8p+4",
+        "loop": "roll_rate",
+        "delay_margin_s": "f:0x1.44c0e9be1564fp-6"
        }
       },
       "threshold": {
@@ -242,7 +242,7 @@
       },
       "primary": {
        "dict": {
-        "value": "f:0x1.9e8cdd54db814p+5",
+        "value": "f:0x1.1643aacb09ff8p+4",
         "unit": "deg",
         "better": "higher"
        }
@@ -405,12 +405,12 @@
        "dict": {
         "key": "delay_margin",
         "label": "시간지연 여유",
-        "status": "ok",
+        "status": "fail",
         "worst_case": "M0.35",
         "value": {
          "dict": {
-          "value": "f:0x1.8ec94bd656f1ep-3",
-          "loop": "roll_att",
+          "value": "f:0x1.44c0e9be1564fp-6",
+          "loop": "roll_rate",
           "case": "M0.35"
          }
         },
@@ -478,9 +478,9 @@
        }
       }
      ],
-     "n_pass": 2,
+     "n_pass": 1,
      "n_warn": 1,
-     "n_fail": 0,
+     "n_fail": 1,
      "n_na": 7,
      "n_judged": 3
     }
@@ -641,7 +641,7 @@
         },
         "margins": {
          "dict": {
-          "status": "ok",
+          "status": "fail",
           "item": 3,
           "label": "이득·위상여유",
           "loops": {
@@ -693,6 +693,112 @@
               "direction": 1,
               "note": null
              }
+            },
+            "pitch_rate": {
+             "dict": {
+              "status": "fail",
+              "margins": {
+               "dict": {
+                "pm_deg": "f:0x1.d045f5e703848p+4",
+                "gm_db": "f:0x1.a58a1d0d9e69ap+1",
+                "wcp": "f:0x1.86e5650787929p+4",
+                "wcg": "f:0x1.31ce354383241p+4",
+                "band_floor": "f:0x1.120ec2837054ep+1",
+                "closed_with": [],
+                "divergent": true,
+                "low_band": {
+                 "dict": {
+                  "pm_deg": "f:0x1.5edf5f532a078p+5",
+                  "gm_db": "f:0x1.266b845108112p+8"
+                 }
+                },
+                "closed_loop": {
+                 "dict": {
+                  "stable": false,
+                  "unstable": [
+                   [
+                    "f:0x1.41cd138fd873ep+1",
+                    "f:0x1.4f1691163f286p+4"
+                   ]
+                  ],
+                  "spiral_t2_s": null
+                 }
+                }
+               }
+              },
+              "delay_margin_s": "f:0x1.53a2029d53e85p-6",
+              "direction": null,
+              "note": "이 루프를 닫은 폐루프(같은 축 다른 레이트 루프 닫음, 작동기·지연 포함)가 느린 나선 밖으로 발산한다 — 여유가 정의되지 않는다",
+              "composition": "AS94900 끊은 루프 — 같은 축 다른 레이트 루프 닫음"
+             }
+            },
+            "roll_rate": {
+             "dict": {
+              "status": "fail",
+              "margins": {
+               "dict": {
+                "pm_deg": "f:0x1.1643aacb09ff8p+4",
+                "gm_db": "f:0x1.f9f98b13d1fdbp+0",
+                "wcp": "f:0x1.ea0a0f0cc8515p+3",
+                "wcg": "f:0x1.2900a0888e7a1p+4",
+                "band_floor": "f:0x1.0a68e129ff79cp+0",
+                "closed_with": [
+                 "yaw_rate"
+                ],
+                "divergent": false,
+                "low_band": {
+                 "dict": {
+                  "pm_deg": "f:0x1.121f45f6afe31p+6",
+                  "gm_db": "f:0x1.deeaa8028b72cp+2"
+                 }
+                }
+               }
+              },
+              "delay_margin_s": "f:0x1.44c0e9be1564fp-6",
+              "direction": null,
+              "note": null,
+              "composition": "AS94900 끊은 루프 — 같은 축 다른 레이트 루프 닫음"
+             }
+            },
+            "yaw_rate": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "pm_deg": "f:0x1.3efd2a4eeaa84p+6",
+                "gm_db": "f:0x1.02e90fb4bd0a1p+4",
+                "wcp": "f:0x1.131fc945d4323p+2",
+                "wcg": "f:0x1.29650367aa448p+4",
+                "band_floor": "f:0x1.0a68e129ff79cp+0",
+                "closed_with": [
+                 "roll_rate"
+                ],
+                "divergent": false,
+                "low_band": {
+                 "dict": {
+                  "pm_deg": "f:inf",
+                  "gm_db": "f:inf"
+                 }
+                },
+                "closed_loop": {
+                 "dict": {
+                  "stable": false,
+                  "unstable": [
+                   [
+                    "f:0x1.38eee343a34c7p-7",
+                    "f:0x0.0p+0"
+                   ]
+                  ],
+                  "spiral_t2_s": "f:0x1.225317c0f584cp+6"
+                 }
+                }
+               }
+              },
+              "delay_margin_s": "f:0x1.4b8bd9e2da6aep-2",
+              "direction": null,
+              "note": null,
+              "composition": "AS94900 끊은 루프 — 같은 축 다른 레이트 루프 닫음"
+             }
             }
            }
           },
@@ -705,7 +811,7 @@
           },
           "composition": {
            "dict": {
-            "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 (자동설계와 같은 조성) — 레이트 자리는 모드 감쇠(카드 ①)로 판정",
+            "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 (자동설계와 같은 조성) — 레이트 자리는 AS94900 끊은 루프(같은 축 다른 레이트 루프 닫음) 여유로 판정(VERIFY와 같은 자), 모드 감쇠는 카드 ①",
             "actuator_wn": "f:0x1.e000000000000p+4",
             "actuator_zeta": "f:0x1.6666666666666p-1",
             "delay_s": "f:0x1.1eb851eb851ecp-5",
@@ -955,13 +1061,69 @@
         "note": "비선형 런 없음(depth=linear) — 원인 귀속은 런의 내부 기여항에서 나온다"
        }
       },
-      "hard_fails": [],
+      "hard_fails": [
+       {
+        "dict": {
+         "check": "stability.unstable",
+         "loop": "pitch_rate",
+         "value": [
+          "f:0x1.41cd138fd873ep+1",
+          "f:0x1.4f1691163f286p+4"
+         ],
+         "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+         "detail": {
+          "dict": {
+           "stable": false,
+           "unstable": [
+            [
+             "f:0x1.41cd138fd873ep+1",
+             "f:0x1.4f1691163f286p+4"
+            ]
+           ],
+           "spiral_t2_s": null
+          }
+         }
+        }
+       },
+       {
+        "dict": {
+         "check": "margins.pm",
+         "loop": "pitch_rate",
+         "value": "f:0x1.d045f5e703848p+4",
+         "limit": "f:0x1.6800000000000p+5"
+        }
+       },
+       {
+        "dict": {
+         "check": "margins.gm",
+         "loop": "pitch_rate",
+         "value": "f:0x1.a58a1d0d9e69ap+1",
+         "limit": "f:0x1.8000000000000p+2"
+        }
+       },
+       {
+        "dict": {
+         "check": "margins.pm",
+         "loop": "roll_rate",
+         "value": "f:0x1.1643aacb09ff8p+4",
+         "limit": "f:0x1.6800000000000p+5"
+        }
+       },
+       {
+        "dict": {
+         "check": "margins.gm",
+         "loop": "roll_rate",
+         "value": "f:0x1.f9f98b13d1fdbp+0",
+         "limit": "f:0x1.8000000000000p+2"
+        }
+       }
+      ],
       "metrics_raw": {
        "dict": {}
       },
       "J": null,
       "J_terms": null,
-      "J_reason": "비선형 항(RMS·Mp·δ) 미계측 — depth=linear",
+      "J_reason": "하드 실패라 J를 매기지 않는다 (통과 후보 사이의 서열)",
       "midpoint": false
      }
     },
@@ -1023,7 +1185,7 @@
         },
         "margins": {
          "dict": {
-          "status": "ok",
+          "status": "fail",
           "item": 3,
           "label": "이득·위상여유",
           "loops": {
@@ -1075,6 +1237,112 @@
               "direction": 1,
               "note": null
              }
+            },
+            "pitch_rate": {
+             "dict": {
+              "status": "fail",
+              "margins": {
+               "dict": {
+                "pm_deg": "f:0x1.ce80f529aa202p+5",
+                "gm_db": "f:0x1.b7ba2667c4638p+2",
+                "wcp": "f:0x1.e4aeb582ebdf4p+4",
+                "wcg": "f:0x1.36cd91792c5fdp+4",
+                "band_floor": "f:0x1.606509c36d258p+1",
+                "closed_with": [],
+                "divergent": true,
+                "low_band": {
+                 "dict": {
+                  "pm_deg": "f:0x1.5d39d87c5640cp+5",
+                  "gm_db": "f:0x1.24c9c8eb8ca6dp+8"
+                 }
+                },
+                "closed_loop": {
+                 "dict": {
+                  "stable": false,
+                  "unstable": [
+                   [
+                    "f:0x1.4e5ed9e81cb58p+2",
+                    "f:0x1.71850550bf254p+4"
+                   ]
+                  ],
+                  "spiral_t2_s": null
+                 }
+                }
+               }
+              },
+              "delay_margin_s": "f:0x1.10dea2492ac7ep-5",
+              "direction": null,
+              "note": "이 루프를 닫은 폐루프(같은 축 다른 레이트 루프 닫음, 작동기·지연 포함)가 느린 나선 밖으로 발산한다 — 여유가 정의되지 않는다",
+              "composition": "AS94900 끊은 루프 — 같은 축 다른 레이트 루프 닫음"
+             }
+            },
+            "roll_rate": {
+             "dict": {
+              "status": "fail",
+              "margins": {
+               "dict": {
+                "pm_deg": "f:0x1.2057204ae0b10p+4",
+                "gm_db": "f:0x1.0432ee8a8c574p+1",
+                "wcp": "f:0x1.e9e6e63614889p+3",
+                "wcg": "f:0x1.2a7bc02e1dffdp+4",
+                "band_floor": "f:0x1.4ba5926a2c812p+0",
+                "closed_with": [
+                 "yaw_rate"
+                ],
+                "divergent": false,
+                "low_band": {
+                 "dict": {
+                  "pm_deg": "f:0x1.554b86270dbb9p+6",
+                  "gm_db": "f:0x1.04dddb389ce73p+4"
+                 }
+                }
+               }
+              },
+              "delay_margin_s": "f:0x1.509b7842a6313p-6",
+              "direction": null,
+              "note": null,
+              "composition": "AS94900 끊은 루프 — 같은 축 다른 레이트 루프 닫음"
+             }
+            },
+            "yaw_rate": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "pm_deg": "f:0x1.0969cc3a946e4p+6",
+                "gm_db": "f:0x1.77674e11d93bfp+3",
+                "wcp": "f:0x1.9b0c685986360p+2",
+                "wcg": "f:0x1.29b68b70a93c5p+4",
+                "band_floor": "f:0x1.4ba5926a2c812p+0",
+                "closed_with": [
+                 "roll_rate"
+                ],
+                "divergent": false,
+                "low_band": {
+                 "dict": {
+                  "pm_deg": "f:inf",
+                  "gm_db": "f:inf"
+                 }
+                },
+                "closed_loop": {
+                 "dict": {
+                  "stable": false,
+                  "unstable": [
+                   [
+                    "f:0x1.0e24f694c5d89p-8",
+                    "f:0x0.0p+0"
+                   ]
+                  ],
+                  "spiral_t2_s": "f:0x1.504f4ac2d4fb5p+7"
+                 }
+                }
+               }
+              },
+              "delay_margin_s": "f:0x1.7147ec71f845ap-3",
+              "direction": null,
+              "note": null,
+              "composition": "AS94900 끊은 루프 — 같은 축 다른 레이트 루프 닫음"
+             }
             }
            }
           },
@@ -1087,7 +1355,7 @@
           },
           "composition": {
            "dict": {
-            "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 (자동설계와 같은 조성) — 레이트 자리는 모드 감쇠(카드 ①)로 판정",
+            "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 (자동설계와 같은 조성) — 레이트 자리는 AS94900 끊은 루프(같은 축 다른 레이트 루프 닫음) 여유로 판정(VERIFY와 같은 자), 모드 감쇠는 카드 ①",
             "actuator_wn": "f:0x1.e000000000000p+4",
             "actuator_zeta": "f:0x1.6666666666666p-1",
             "delay_s": "f:0x1.1eb851eb851ecp-5",
@@ -1337,13 +1605,53 @@
         "note": "비선형 런 없음(depth=linear) — 원인 귀속은 런의 내부 기여항에서 나온다"
        }
       },
-      "hard_fails": [],
+      "hard_fails": [
+       {
+        "dict": {
+         "check": "stability.unstable",
+         "loop": "pitch_rate",
+         "value": [
+          "f:0x1.4e5ed9e81cb58p+2",
+          "f:0x1.71850550bf254p+4"
+         ],
+         "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+         "detail": {
+          "dict": {
+           "stable": false,
+           "unstable": [
+            [
+             "f:0x1.4e5ed9e81cb58p+2",
+             "f:0x1.71850550bf254p+4"
+            ]
+           ],
+           "spiral_t2_s": null
+          }
+         }
+        }
+       },
+       {
+        "dict": {
+         "check": "margins.pm",
+         "loop": "roll_rate",
+         "value": "f:0x1.2057204ae0b10p+4",
+         "limit": "f:0x1.6800000000000p+5"
+        }
+       },
+       {
+        "dict": {
+         "check": "margins.gm",
+         "loop": "roll_rate",
+         "value": "f:0x1.0432ee8a8c574p+1",
+         "limit": "f:0x1.8000000000000p+2"
+        }
+       }
+      ],
       "metrics_raw": {
        "dict": {}
       },
       "J": null,
       "J_terms": null,
-      "J_reason": "비선형 항(RMS·Mp·δ) 미계측 — depth=linear",
+      "J_reason": "하드 실패라 J를 매기지 않는다 (통과 후보 사이의 서열)",
       "midpoint": false
      }
     },
@@ -1405,7 +1713,7 @@
         },
         "margins": {
          "dict": {
-          "status": "ok",
+          "status": "fail",
           "item": 3,
           "label": "이득·위상여유",
           "loops": {
@@ -1457,6 +1765,112 @@
               "direction": 1,
               "note": null
              }
+            },
+            "pitch_rate": {
+             "dict": {
+              "status": "fail",
+              "margins": {
+               "dict": {
+                "pm_deg": "f:0x1.d459c16fa2862p+5",
+                "gm_db": "f:0x1.cadded883d871p+2",
+                "wcp": "f:0x1.ea4994a9edd8fp+4",
+                "wcg": "f:0x1.3c960195618fbp+4",
+                "band_floor": "f:0x1.aeb7e8d23ef64p+1",
+                "closed_with": [],
+                "divergent": true,
+                "low_band": {
+                 "dict": {
+                  "pm_deg": "f:0x1.d6ff00a895c10p+5",
+                  "gm_db": "f:inf"
+                 }
+                },
+                "closed_loop": {
+                 "dict": {
+                  "stable": false,
+                  "unstable": [
+                   [
+                    "f:0x1.4f174ac84e876p+2",
+                    "f:0x1.7822d63157e5cp+4"
+                   ]
+                  ],
+                  "spiral_t2_s": null
+                 }
+                }
+               }
+              },
+              "delay_margin_s": "f:0x1.11290be374aa3p-5",
+              "direction": null,
+              "note": "이 루프를 닫은 폐루프(같은 축 다른 레이트 루프 닫음, 작동기·지연 포함)가 느린 나선 밖으로 발산한다 — 여유가 정의되지 않는다",
+              "composition": "AS94900 끊은 루프 — 같은 축 다른 레이트 루프 닫음"
+             }
+            },
+            "roll_rate": {
+             "dict": {
+              "status": "fail",
+              "margins": {
+               "dict": {
+                "pm_deg": "f:0x1.2a8d4a1a5df50p+4",
+                "gm_db": "f:0x1.0b65a81237a3dp+1",
+                "wcp": "f:0x1.e9be15a261a4dp+3",
+                "wcg": "f:0x1.2bf2dd68aa167p+4",
+                "band_floor": "f:0x1.8e22300106e98p+0",
+                "closed_with": [
+                 "yaw_rate"
+                ],
+                "divergent": false,
+                "low_band": {
+                 "dict": {
+                  "pm_deg": "f:0x1.6a6ee631ac028p+6",
+                  "gm_db": "f:0x1.766353446da75p+4"
+                 }
+                }
+               }
+              },
+              "delay_margin_s": "f:0x1.5ca44777e159dp-6",
+              "direction": null,
+              "note": null,
+              "composition": "AS94900 끊은 루프 — 같은 축 다른 레이트 루프 닫음"
+             }
+            },
+            "yaw_rate": {
+             "dict": {
+              "status": "ok",
+              "margins": {
+               "dict": {
+                "pm_deg": "f:0x1.a1222325dac68p+5",
+                "gm_db": "f:0x1.04611f207f1e9p+3",
+                "wcp": "f:0x1.1f4d883cf50b5p+3",
+                "wcg": "f:0x1.2a0ea3bbbd6acp+4",
+                "band_floor": "f:0x1.8e22300106e98p+0",
+                "closed_with": [
+                 "roll_rate"
+                ],
+                "divergent": false,
+                "low_band": {
+                 "dict": {
+                  "pm_deg": "f:inf",
+                  "gm_db": "f:inf"
+                 }
+                },
+                "closed_loop": {
+                 "dict": {
+                  "stable": false,
+                  "unstable": [
+                   [
+                    "f:0x1.0003df6d8cecbp-9",
+                    "f:0x0.0p+0"
+                   ]
+                  ],
+                  "spiral_t2_s": "f:0x1.62ded19b39fddp+8"
+                 }
+                }
+               }
+              },
+              "delay_margin_s": "f:0x1.9f2d1029a1a0fp-4",
+              "direction": null,
+              "note": null,
+              "composition": "AS94900 끊은 루프 — 같은 축 다른 레이트 루프 닫음"
+             }
             }
            }
           },
@@ -1469,7 +1883,7 @@
           },
           "composition": {
            "dict": {
-            "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 (자동설계와 같은 조성) — 레이트 자리는 모드 감쇠(카드 ①)로 판정",
+            "text": "레이트 폐쇄 플랜트 + 작동기·지연 포함 (자동설계와 같은 조성) — 레이트 자리는 AS94900 끊은 루프(같은 축 다른 레이트 루프 닫음) 여유로 판정(VERIFY와 같은 자), 모드 감쇠는 카드 ①",
             "actuator_wn": "f:0x1.e000000000000p+4",
             "actuator_zeta": "f:0x1.6666666666666p-1",
             "delay_s": "f:0x1.1eb851eb851ecp-5",
@@ -1719,21 +2133,206 @@
         "note": "비선형 런 없음(depth=linear) — 원인 귀속은 런의 내부 기여항에서 나온다"
        }
       },
-      "hard_fails": [],
+      "hard_fails": [
+       {
+        "dict": {
+         "check": "stability.unstable",
+         "loop": "pitch_rate",
+         "value": [
+          "f:0x1.4f174ac84e876p+2",
+          "f:0x1.7822d63157e5cp+4"
+         ],
+         "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+         "detail": {
+          "dict": {
+           "stable": false,
+           "unstable": [
+            [
+             "f:0x1.4f174ac84e876p+2",
+             "f:0x1.7822d63157e5cp+4"
+            ]
+           ],
+           "spiral_t2_s": null
+          }
+         }
+        }
+       },
+       {
+        "dict": {
+         "check": "margins.pm",
+         "loop": "roll_rate",
+         "value": "f:0x1.2a8d4a1a5df50p+4",
+         "limit": "f:0x1.6800000000000p+5"
+        }
+       },
+       {
+        "dict": {
+         "check": "margins.gm",
+         "loop": "roll_rate",
+         "value": "f:0x1.0b65a81237a3dp+1",
+         "limit": "f:0x1.8000000000000p+2"
+        }
+       }
+      ],
       "metrics_raw": {
        "dict": {}
       },
       "J": null,
       "J_terms": null,
-      "J_reason": "비선형 항(RMS·Mp·δ) 미계측 — depth=linear",
+      "J_reason": "하드 실패라 J를 매기지 않는다 (통과 후보 사이의 서열)",
       "midpoint": false
      }
     }
    ],
    "aggregate": {
     "dict": {
-     "hard_fail": false,
-     "hard_fails": [],
+     "hard_fail": true,
+     "hard_fails": [
+      {
+       "dict": {
+        "check": "stability.unstable",
+        "loop": "pitch_rate",
+        "value": [
+         "f:0x1.41cd138fd873ep+1",
+         "f:0x1.4f1691163f286p+4"
+        ],
+        "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+        "detail": {
+         "dict": {
+          "stable": false,
+          "unstable": [
+           [
+            "f:0x1.41cd138fd873ep+1",
+            "f:0x1.4f1691163f286p+4"
+           ]
+          ],
+          "spiral_t2_s": null
+         }
+        },
+        "case": "M0.35"
+       }
+      },
+      {
+       "dict": {
+        "check": "margins.pm",
+        "loop": "pitch_rate",
+        "value": "f:0x1.d045f5e703848p+4",
+        "limit": "f:0x1.6800000000000p+5",
+        "case": "M0.35"
+       }
+      },
+      {
+       "dict": {
+        "check": "margins.gm",
+        "loop": "pitch_rate",
+        "value": "f:0x1.a58a1d0d9e69ap+1",
+        "limit": "f:0x1.8000000000000p+2",
+        "case": "M0.35"
+       }
+      },
+      {
+       "dict": {
+        "check": "margins.pm",
+        "loop": "roll_rate",
+        "value": "f:0x1.1643aacb09ff8p+4",
+        "limit": "f:0x1.6800000000000p+5",
+        "case": "M0.35"
+       }
+      },
+      {
+       "dict": {
+        "check": "margins.gm",
+        "loop": "roll_rate",
+        "value": "f:0x1.f9f98b13d1fdbp+0",
+        "limit": "f:0x1.8000000000000p+2",
+        "case": "M0.35"
+       }
+      },
+      {
+       "dict": {
+        "check": "stability.unstable",
+        "loop": "pitch_rate",
+        "value": [
+         "f:0x1.4e5ed9e81cb58p+2",
+         "f:0x1.71850550bf254p+4"
+        ],
+        "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+        "detail": {
+         "dict": {
+          "stable": false,
+          "unstable": [
+           [
+            "f:0x1.4e5ed9e81cb58p+2",
+            "f:0x1.71850550bf254p+4"
+           ]
+          ],
+          "spiral_t2_s": null
+         }
+        },
+        "case": "M0.45"
+       }
+      },
+      {
+       "dict": {
+        "check": "margins.pm",
+        "loop": "roll_rate",
+        "value": "f:0x1.2057204ae0b10p+4",
+        "limit": "f:0x1.6800000000000p+5",
+        "case": "M0.45"
+       }
+      },
+      {
+       "dict": {
+        "check": "margins.gm",
+        "loop": "roll_rate",
+        "value": "f:0x1.0432ee8a8c574p+1",
+        "limit": "f:0x1.8000000000000p+2",
+        "case": "M0.45"
+       }
+      },
+      {
+       "dict": {
+        "check": "stability.unstable",
+        "loop": "pitch_rate",
+        "value": [
+         "f:0x1.4f174ac84e876p+2",
+         "f:0x1.7822d63157e5cp+4"
+        ],
+        "limit": "레이트 루프 폐루프(작동기·지연 포함) 발산 불허 — 느린 나선만 면제",
+        "detail": {
+         "dict": {
+          "stable": false,
+          "unstable": [
+           [
+            "f:0x1.4f174ac84e876p+2",
+            "f:0x1.7822d63157e5cp+4"
+           ]
+          ],
+          "spiral_t2_s": null
+         }
+        },
+        "case": "M0.55"
+       }
+      },
+      {
+       "dict": {
+        "check": "margins.pm",
+        "loop": "roll_rate",
+        "value": "f:0x1.2a8d4a1a5df50p+4",
+        "limit": "f:0x1.6800000000000p+5",
+        "case": "M0.55"
+       }
+      },
+      {
+       "dict": {
+        "check": "margins.gm",
+        "loop": "roll_rate",
+        "value": "f:0x1.0b65a81237a3dp+1",
+        "limit": "f:0x1.8000000000000p+2",
+        "case": "M0.55"
+       }
+      }
+     ],
      "stages": {
       "dict": {
        "envelope": {
@@ -1822,13 +2421,13 @@
        },
        "margins": {
         "dict": {
-         "status": "ok",
+         "status": "fail",
          "counts": {
           "dict": {
-           "fail": 0,
+           "fail": 3,
            "warn": 0,
            "na": 0,
-           "ok": 3
+           "ok": 0
           }
          },
          "worst_case": "M0.35"

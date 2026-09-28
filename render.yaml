@@ -21,7 +21,7 @@ services:
     # 경로라 Render 리눅스 빌드 이미지와는 맞지 않는다 — certifi가 그 폴백보다 먼저다.
     # server[db]: 계정 저장 외부 Postgres용 psycopg (users.py 머리말). extra라 폐쇄망
     # wheelhouse는 불변 — 이 데모만 깐다. CLAW_DB_URL이 비면 psycopg는 import되지 않는다.
-    buildCommand: pip install --upgrade pip && pip install -e engine && pip install -e 'server[db]' && pip install certifi && (python3 scripts/terrain/build_terrain.py --origin-lat 34.601303 --origin-lon 127.212067 --tier core:radius=12000,step=30 --tier outer:radius=30000,step=90 --out data/geo/site-terrain-v1.bin > data/geo/.terrain-build.log 2>&1 || echo "지형 팩 생성 실패 — 로그는 data/geo/.terrain-build.log, 지형 없이 배포를 계속합니다")
+    buildCommand: pip install --upgrade pip && pip install -e engine && pip install -e 'server[db]' && pip install certifi && (python3 scripts/terrain/build_terrain.py --origin-lat 34.601301 --origin-lon 127.212107 --tier core:radius=12000,step=30 --tier outer:radius=30000,step=90 --out data/geo/site-terrain-v1.bin > data/geo/.terrain-build.log 2>&1 || echo "지형 팩 생성 실패 — 로그는 data/geo/.terrain-build.log, 지형 없이 배포를 계속합니다")
     # --workers 1 명시 — uvicorn이 $WEB_CONCURRENCY로 워커를 늘리면 프로세스 메모리의
     # JobManager가 갈라져 진행률 조회가 조용히 404가 된다 (README 알려진 제약).
     startCommand: uvicorn --factory claw_server:create_app --host 0.0.0.0 --port $PORT --workers 1
@@ -49,9 +49,18 @@ services:
         # 빈 값은 무시된다) 이 데모에 채울 자리를 만들어 두지 않는다
         sync: false # 대시보드에서 입력 — 커밋 금지. 비면 LLM 기능만 사유와 함께 꺼진다
       - key: CLAW_RESULT_LIMIT
-        # 결과 크기는 미션 길이에 비례한다 — 기본 미션이 장주 착륙(320 s)이 되면서
-        # 1건 ≈ 14MB(200 s) → ≈ 22MB로 늘었다. 상한 280MB를 유지하려고 건수를
-        # 20 → 13으로 내린다. 건수를 그대로 두면 같은 디스크에서 440MB를 쓴다.
+        # 건수 상한이지 바이트 상한이 아니다. sim 본문은 미션 길이에 비례한다(100 Hz 전 해상도 ×
+        # 시계열 90개(t·신호 84·엔벨로프 5) × 값당 ≈ 16 B ≈ 0.144 MB/s) — 쇼케이스 기체 템플릿
+        # 475 s ≈ 69 MB, 예제 기체 웹 기본 750 s ≈ 107 MB(옛 "≈ 22MB/건"은 신호가 늘기 전
+        # 320 s 값이다). 13건이 전부 sim이면 0.9~1.4 GB 디스크다. 쇼케이스 한 바퀴는 sim 1건에
+        # 결과를 10여 건 남기고 sim 뒤 단계(교신·영향성·검증·결과)가 그 sim을 참조하므로 건수를
+        # 더 줄이지 않는다. 메모리는 건수와 무관하다(본문은 요청 때만 읽는다). sim 본문을 통째로
+        # 파싱하는 소비자는 없다 — 저장·재생·원본 JSON은 줄 단위라 수~수십 MB, 타면 사용·교신·진단은
+        # 쓰는 신호만 골라(store.load_picked), 소견서는 가지쳐(brief.load_pruned) 읽는다. 서버 힙 정점
+        # (예제 750 s 본문 107 MB / S1 475 s 69 MB): 소견서 +10 / +7 MB, 교신 +37 / +24 MB, 진단
+        # +145 / +92 MB — 진단이 가장 크다(엔진이 읽는 신호 55개의 파싱본, 본문의 약 1.3배). 통째로
+        # 읽던 때는 셋 다 +211~216 MB였다 (store.py 머리말 · routes/llm.py · routes/influence.py
+        # DIAGNOSE_SIGNALS 주석).
         value: "13"
       - key: CLAW_PROFILE_VOLATILE
         # 디스크가 휘발이라(위 plan 주석) 웹에서 저장한 기체가 재배포·슬립 복귀마다 사라진다.

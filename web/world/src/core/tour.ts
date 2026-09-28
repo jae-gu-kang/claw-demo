@@ -46,14 +46,47 @@ export interface TourScene {
   shownId: string | null;
   playable: boolean;
   commsKey: string | null;
+  /** 이 런의 기체가 섰나 — 모델·도식·「궤적만」 어느 쪽이든 **판정이 끝났나**(SceneController `onVehicle`).
+   *  기다림 상한(`TOUR_VEHICLE_WAIT_MS`)을 넘기면 호스트가 참으로 넘기고 그 사실을 화면에 적는다. */
+  vehicleSettled: boolean;
 }
 
-/** 재생을 시작해도 되나 — 투어 런이 **선택되고 화면에 실제로 서고** 재생 가능하며,
- *  대본이 있어야 하는 투어면 그 대본이 앉은 뒤여야 한다. */
-export function tourReady(tour: WorldTour, s: TourScene): boolean {
+/** 기체 말고 다 섰나 — 투어 런이 선택되고 화면에 서고 재생 가능하며, 대본이 있어야 하면 앉았다. */
+function sceneReady(tour: WorldTour, s: TourScene): boolean {
   if (s.chosen !== tour.resultId || s.shownId !== tour.resultId || !s.playable) return false;
   return tour.commsId == null || s.commsKey === tour.commsId;
 }
+
+/** 재생을 시작해도 되나 — 투어 런이 **선택되고 화면에 실제로 서고** 재생 가능하며,
+ *  대본이 있어야 하는 투어면 그 대본이 앉은 뒤여야 하고, **기체가 선 뒤**여야 한다.
+ *
+ *  기체 모델은 장면 뒤에 따라온다(SceneController `syncVehicle` — 이 런의 기체 문서를 받고 GLB를 받는다).
+ *  장면만 보고 시작하면 투어가 보여 주려던 바로 그 발사 장면이 빈 레일로 흘러간다(리뷰 확정 — 예전에는
+ *  자산 단계에서 모델을 먼저 읽어 이 틈이 없었다). */
+export function tourReady(tour: WorldTour, s: TourScene): boolean {
+  return sceneReady(tour, s) && s.vehicleSettled;
+}
+
+/** 기체만 남았나 — 호스트가 이때부터 기다림 상한을 잰다(모델 요청이 멈추면 투어가 영영 안 서지 않게). */
+export function tourAwaitsVehicle(tour: WorldTour, s: TourScene): boolean {
+  return sceneReady(tour, s) && !s.vehicleSettled;
+}
+
+/** 기체를 기다리는 상한 [ms] — 조율자 워치독(views/tour.js·lib/showcase.js 90 s) 안쪽이라, 넘겨도 투어는
+ *  기체 없이라도 시작하고 **그 사실을 말한다**(워치독이 "재생이 안 섰다"로 멈추는 것보다 낫다). */
+export const TOUR_VEHICLE_WAIT_MS = 15_000;
+
+/** 기다림 상한을 넘겨 기체 없이 시작했다는 한 줄 — 기체가 서면 화면이 거둔다. */
+export const TOUR_VEHICLE_LATE_NOTE =
+  `기체가 ${TOUR_VEHICLE_WAIT_MS / 1000}초 안에 서지 않아 투어 재생을 기체 없이 시작했습니다 — `
+  + "기체가 도착하면 그 자리부터 그립니다(사유는 「캡션」).";
+
+/** 투어 재생의 시점 — **추적**. 화면의 첫 시점(자유 궤도, SceneController `mode`)은 바다·해안을 보이려고
+ *  장면 규모(수백 m)로 멀리 서 있어, 그대로 재생하면 기체가 점도 안 된다(쇼케이스 e2e 실측: 가상환경 단계
+ *  내내 기체가 안 보였고, 손으로 [추적]을 누르자 기체·발사관이 섰다). 투어·쇼케이스가 보여 주려는 것은
+ *  이 런의 비행이라 재생을 켜는 그 자리에서 기체를 따라가는 시점으로 옮긴다 — 사용자는 재생 중에도 버튼으로
+ *  다른 시점을 고를 수 있다. 문자열 값은 lib/camera `CamMode`의 한 원소다(core는 lib를 들이지 않는다). */
+export const TOUR_CAM_MODE = "chase" as const;
 
 /** 투어가 어긋났나 — 사유 문장 또는 null. 목록을 아직 모르면 판단하지 않는다. */
 export function tourMismatch(

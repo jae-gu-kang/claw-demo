@@ -15,6 +15,7 @@
 */
 
 import { parseNumberList } from "./grid.js";
+import { EXAMPLE_ID } from "./profile.js";
 
 /** 수치 표기 — dom.js의 fmt와 같은 정책(null=—, "inf"=∞, 유효자릿수).
  *
@@ -42,6 +43,9 @@ export const VERDICT_LABEL = {
   gain_interp_valley: "게인 보간 valley — breakpoint 승격 + 재튜닝",
   structural_limit: "구조 한계 — 상위 설계 변경 검토 (보고 전용)",
   gain_sign_flip: "게인 부호 뒤집힘 — 부호 보존 재적합 (승격으로는 안 풀린다)",
+  // 엔진 classify VERDICTS의 여섯째 — 빠져 있어 카드·원장에 코드("fit_residual")가 그대로 떴다.
+  // 조일 적합은 다항에만 있다: 표 모드에서는 엔진이 사유를 달아 건너뛴다(orchestrator apply_actions)
+  fit_residual: "앵커 적합 괴리 — 적합 허용치 조이기 (다항 전용 — 표 모드에서는 건너뛴다)",
 };
 
 const _STATUS_RANK = { ok: 0, na: 1, warn: 2, fail: 3 };
@@ -198,6 +202,29 @@ export function verdictLegend(criteria) {
     // 문장은 그대로 텍스트 노드로 들어간다 — 마크다운 강조는 별표가 화면에 그대로 뜬다
     { key: "na", text: "판정 불가 — 교차 없음(nan)이거나 트림 미수렴. 통과가 아니다" },
   ];
+}
+
+/** 범례 아래 「warn은 무엇이고 어떻게 줄이나」 문단 — 표현(report.fit_mode)에 따라 다르다.
+ *
+ * 종전 문단은 다항 시절 그대로였다: "스케줄 곡선이 목표선 아래로 내려온 자리 — breakpoint를 늘리거나
+ * 적합 허용치를 조인다". 표 모드(기본)에는 조일 적합이 없고(엔진이 tighten_fit을 사유와 함께 건너뛴다),
+ * 분할점의 값은 곡선이 아니라 그 마하의 튜닝값이다(같은 마하에 표본이 여럿이면 평균, 튜닝 실패로 뺀
+ * 점은 이웃 보간). 그래서 앵커의 warn과 검증점의 warn이 다른 말이다. 표현 기록이 없는 결과(표현 선택
+ * 이전)는 다항이었으므로 다항 문단이다. */
+export function warnNoteText(fitMode) {
+  const tail = " fail은 다르다 — 합격선 미달이라 그대로 확정하면 안 된다.";
+  if (fitMode === "table") {
+    return "warn은 자동 설계가 실패한 것이 아니다 — 합격선은 넘겼으나 목표선에 못 미친 자리다. "
+      + "표 모드에서 분할점의 값은 그 마하의 튜닝값이다(같은 마하에 고도·연료 표본이 여럿이면 평균, "
+      + "튜닝 실패로 적합에서 뺀 점은 이웃 보간). 그래서 앵커의 warn은 튜닝이 목표에 못 갔거나"
+      + "(미달 원장 「튜닝 목표 미달」) 평균·보간으로 접힌 값 탓이고, 검증점의 warn은 분할점 사이 "
+      + "선형 보간이 목표선 아래로 내려온 자리다. 보간 탓이면 그 구간에 breakpoint를 늘린다(처방 "
+      + "카드가 제안한다). 적합 허용치 조이기는 표 모드에 없다 — 평균으로 접힌 어긋남은 다축 표가 "
+      + "있어야 풀린다." + tail;
+  }
+  return "warn은 자동 설계가 실패한 것이 아니다 — 튜닝은 목표를 맞췄는데 그 사이를 잇는 "
+    + "스케줄 곡선이 목표선 아래로 내려온 자리다. 줄이려면 그 구간에 breakpoint를 "
+    + "늘리거나(처방 카드가 이미 그것을 제안한다) 적합 허용치를 조인다." + tail;
 }
 
 // ── 종료 상태 ──────────────────────────────────────────────────────────
@@ -373,6 +400,200 @@ export function fitQualityLines(fits) {
   return []; // 전부 na(문턱 끔·상수) — 판정하지 않은 것을 말하지 않는다
 }
 
+/** 비율 → 백분율 표기 (유효 2자리). */
+const pctText = (x) => `${num(100 * x, 2)}%`;
+
+/** 적합 보고(fits) → 자리별 사실 {rows, summary} — 스케줄 축 밖 변동(axes_excluded)·교차축 잔차
+ *  (quality.cross_axis_frac)·톱니(zigzag). 적합 보고가 없으면 null.
+ *
+ * fitQualityLines는 **문턱을 켠 실행의 판정**이라, 문턱이 꺼진 기본 실행에서는 아무 줄도 없다. 그런데
+ * 이 수치들은 문턱과 무관하게 매 실행 계산되어 결과에 실려 있었고 화면 어디에도 없었다: 표는 마하 1축
+ * (sched_axes)이라 고도·연료로 변하는 게인은 버려지지 않고 마하 분할점 하나에 평균되거나(교차축 잔차)
+ * 마하 축 위에 번갈아 놓여 값이 오르내린다(톱니) — 그 대가를 사실로 적는다. 판정은 하지 않는다(판정은
+ * VERIFY가 그 표로 했고, 문턱은 fitQualityLines 몫이다). 0은 생략한다 — 실제로 0인 것을 적으면
+ * 행마다 "교차축 0% · 톱니 0회"가 붙어 정작 0이 아닌 자리가 묻힌다. */
+export function fitFactsModel(fits) {
+  const entries = Object.entries(fits ?? {}).filter(([, rep]) => rep && typeof rep === "object");
+  if (!entries.length) return null;
+  entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const rows = entries.map(([slot, rep]) => {
+    const kind = rep.kind ?? null;
+    const excluded = Array.isArray(rep.axes_excluded) ? rep.axes_excluded.map(String) : [];
+    const cross = numeric(rep.quality?.cross_axis_frac);
+    const zigzag = numeric(rep.zigzag);
+    const nBreakpoints = numeric(rep.n_breakpoints);
+    const shape = kind === "table" ? `표 ${nBreakpoints ?? "?"}점(${rep.axis ?? "?"} 축)`
+      : kind === "poly" ? `다항(${rep.axis ?? "?"} 축`
+        + `${Array.isArray(rep.segments) ? ` · 구간 ${rep.segments.length}` : ""})`
+        : kind === "constant" ? `상수 ${num(rep.value)}` : `표현 ${kind ?? "?"}`;
+    const parts = [shape];
+    if (excluded.length) {
+      // 상수로 접힌 자리는 그 변동이 잔차에 남는다(fit.fit_slot) — 적합에서 "뺐다"가 아니라 "접었다"다
+      parts.push(`스케줄 축 밖 변동 ${excluded.join("·")}`
+        + (kind === "constant" ? ` — 상수로 접었다(잔차 ${num(rep.max_residual)})` : ""));
+    }
+    if (cross != null && cross > 0) parts.push(`교차축 잔차 ${pctText(cross)}`);
+    if (zigzag != null && zigzag > 0) {
+      parts.push(`톱니 ${zigzag}회${nBreakpoints ? `/분할점 ${nBreakpoints}` : ""}`);
+    }
+    return { slot, kind, excluded, cross, zigzag, nBreakpoints, text: `${slot} — ${parts.join(" · ")}` };
+  });
+  const withExcluded = rows.filter((r) => r.excluded.length);
+  const axes = [...new Set(withExcluded.flatMap((r) => r.excluded))];
+  const worst = (key) => rows.reduce((w, r) => (r[key] != null && r[key] > 0
+    && (w == null || r[key] > w[key]) ? r : w), null);
+  const wc = worst("cross");
+  const wz = worst("zigzag");
+  const head = [];
+  if (withExcluded.length) {
+    head.push(`스케줄 축 밖 변동 ${withExcluded.length}/${rows.length}자리(${axes.join("·")})`);
+  }
+  if (wc) head.push(`교차축 잔차 최대 ${pctText(wc.cross)} (${wc.slot})`);
+  if (wz) {
+    head.push(`톱니 최대 ${wz.zigzag}회${wz.nBreakpoints ? `/분할점 ${wz.nBreakpoints}` : ""} (${wz.slot})`);
+  }
+  return { rows, summary: head.length ? `적합 보고 — ${head.join(" · ")}` : null };
+}
+
+// 적합에서 뺀 근거 — 엔진 orchestrator._fit_exclusions의 두 겹
+const EXCLUDE_BASIS_TEXT = {
+  own: "그 자리 튜닝 실패",
+  rate_loop: "같은 축 레이트 루프가 실패한 위에서 튜닝",
+};
+
+/** 값 목록 → "a 3 · b 1" (나온 순서, 수 붙여). */
+function tallyText(values) {
+  const m = new Map();
+  for (const v of values) m.set(v, (m.get(v) ?? 0) + 1);
+  return [...m.entries()].map(([k, n]) => `${k} ${n}`).join(" · ");
+}
+
+/** 적합에서 뺀 튜닝 표본(report.excluded_samples)·제외 보류(report.exclusion_withheld) → 화면 모델 —
+ *  {total, points, slots:[{slot, n, items, text}], withheld:[{slot, n, keptWouldBe, text}], excludedText,
+ *  summary}. excludedText는 뺀 표본 한 줄(없으면 null), summary는 거기에 보류 한 줄을 이은 것. 둘 다 없으면 null.
+ *
+ * 엔진의 coverage_gaps 문장은 **몇 개인가**만 말한다. 어느 자리의 어느 점을 왜 뺐는지(사유 코드·근거·
+ * 뺀 값)는 결과 JSON에만 있었다 — 표의 어느 분할점이 튜닝값이 아니라 이웃 보간인지 화면이 말할 수 없었다.
+ * 보류는 반대 방향의 사실이다: 빼면 표가 안 서서 못 뺐으니 **그 표는 실패 표본(자리값 — 0 댐퍼 등)을
+ * 담고 있다**. 보류 상세(남을 뻔한 수)는 report가 아니라 fits[자리].exclusion_withheld에 있다 —
+ * 없으면(옛 결과·잘린 본문) 수를 지어내지 않는다. */
+export function excludedSamplesModel(body) {
+  const r = body?.report ?? {};
+  const rows = Array.isArray(r.excluded_samples) ? r.excluded_samples.filter(Boolean) : [];
+  const held = Array.isArray(r.exclusion_withheld) ? r.exclusion_withheld : [];
+  if (!rows.length && !held.length) return null;
+  const bySlot = new Map();
+  for (const x of rows) {
+    const slot = x.slot ?? "?";
+    if (!bySlot.has(slot)) bySlot.set(slot, []);
+    bySlot.get(slot).push(x);
+  }
+  const slots = [...bySlot.entries()].map(([slot, items]) => ({
+    slot,
+    n: items.length,
+    items: items.map((x) => ({
+      point: x.point ?? "?", value: x.value ?? null, loop: x.loop ?? null,
+      reason: x.reason ?? null, basis: x.basis ?? null,
+      basisText: EXCLUDE_BASIS_TEXT[x.basis] ?? (x.basis ? String(x.basis) : "근거 미상"),
+    })),
+    text: `${items.length}점 — 사유 ${tallyText(items.map((x) => x.reason ?? "기록 없음"))}`
+      + ` · 근거 ${tallyText(items.map((x) => EXCLUDE_BASIS_TEXT[x.basis] ?? x.basis ?? "미상"))}`,
+  }));
+  const withheld = held.map((slot) => {
+    const h = body?.fits?.[slot]?.exclusion_withheld;
+    const n = Array.isArray(h?.samples) ? h.samples.length : null;
+    const kept = numeric(h?.kept_would_be);
+    return {
+      slot, n, keptWouldBe: kept,
+      text: `${slot} — `
+        + (n != null && kept != null
+          ? `튜닝 실패 표본 ${n}개를 빼면 ${kept}개만 남아 제외를 보류했다`
+          : "튜닝 실패 표본 제외를 보류했다 (상세는 결과 JSON fits)")
+        + " — 이 자리의 표는 실패 표본을 담고 있다",
+    };
+  });
+  const points = new Set(rows.map((x) => x.point)).size;
+  const excludedText = rows.length
+    ? `튜닝 실패 표본 ${rows.length}개를 적합에서 뺐다 (점 ${points}곳 · 자리 ${slots.length}개`
+      + " — 그 점의 스케줄 값은 이웃 보간)"
+    : null;
+  const heldText = withheld.length ? `제외 보류 ${withheld.length}자리 (빼면 표가 안 서서 못 뺐다)` : null;
+  return { total: rows.length, points, slots, withheld, excludedText,
+    summary: [excludedText, heldText].filter(Boolean).join(" · ") };
+}
+
+// 작동기 값의 출처 — 엔진 DesignSession.actuator_used의 source 어휘
+const ACTUATOR_SOURCE_TEXT = {
+  profile: "기체 문서",
+  config: "설정 — 작동기 가정 연구",
+  default: "엔진 폴백 — 기체 값이 아니다",
+};
+
+/** 튜닝·검증이 본 작동기 한 줄 {tone, value, text} — report.actuator({wn, zeta, source, delay_s, pade_order}).
+ *
+ * 작동기는 마진 조성의 일부다(병목이 되는 상위 설계값). 이제 config의 actuator_wn·zeta는 비어(null)
+ * 있고 값은 기체 문서에서 오므로, config만 보면 **무엇으로 설계했는지가 사라진다** — 정본은
+ * report.actuator다. 출처가 폴백(기체 값 아님)이면 경고 톤이다.
+ * 그 필드가 없는 옛 결과는 config 수치가 곧 쓴 값이다(그때는 config 30·0.7이 늘 이겼다 — 기체 작동기를
+ * 보지 않았다). 그 사실을 그대로 적는다. 둘 다 없으면 null. */
+export function actuatorLine(body) {
+  const a = body?.report?.actuator;
+  const c = body?.config ?? {};
+  const delayOf = (d, p) => {
+    const bits = [];
+    if (numeric(d) != null) bits.push(`지연 ${num(Math.round(d * 1e6) / 1e3)} ms`);
+    if (p != null) bits.push(`Padé ${p}차`);
+    return bits.length ? ` · ${bits.join(" · ")}` : "";
+  };
+  // value는 머리말 없는 값 — 표의 「작동기」 칸(결과 브리핑)이 쓴다. text는 한 줄로 서는 문장
+  const line = (tone, value) => ({ tone, value, text: `작동기 ${value}` });
+  if (a && typeof a === "object") {
+    const src = a.source ?? {};
+    const label = (k) => ACTUATOR_SOURCE_TEXT[src[k]] ?? (src[k] ? String(src[k]) : "출처 기록 없음");
+    const head = src.wn === src.zeta
+      ? `ωn ${num(a.wn)} rad/s · ζ ${num(a.zeta)} (${label("wn")})`
+      : `ωn ${num(a.wn)} rad/s (${label("wn")}) · ζ ${num(a.zeta)} (${label("zeta")})`;
+    const known = (k) => src[k] === "profile" || src[k] === "config";
+    return line(known("wn") && known("zeta") ? "hint" : "warn", head + delayOf(a.delay_s, a.pade_order));
+  }
+  if (numeric(c.actuator_wn) != null) {
+    return line("warn", `ωn ${num(c.actuator_wn)} rad/s · ζ ${num(c.actuator_zeta)}`
+      + " (설정 — 작동기 출처 기록 이전 결과: 기체 문서의 작동기가 아니라 설정값으로 튜닝·검증했다)"
+      + delayOf(c.delay_s, c.pade_order));
+  }
+  return null;
+}
+
+const FIT_MODE_LABEL = { table: "표(선형 보간)", poly: "다항" };
+
+/** 게인 표현 이름 — report.fit_mode(엔진 AutoDesignConfig.fit_mode). 모르는 값은 **코드 그대로**(종전
+ *  상태 줄은 table이 아니면 전부 "다항"이라 적었다 — 엔진에 표현이 늘면 화면이 조용히 틀린다).
+ *  없으면 null — 표현 선택이 생기기 전 결과다. 없는 것을 지어내지 않고, 부르는 쪽이 그 사실을 말한다. */
+export function fitModeLabel(mode) {
+  if (mode == null || mode === "") return null;
+  return FIT_MODE_LABEL[mode] ?? String(mode);
+}
+
+const ROLE_SHORT = [["anchor", "앵커"], ["breakpoint", "bp"], ["validation", "검증점"],
+  ["unknown", "역할 미상"]];
+
+/** report.failures_by_role → "앵커 31 · 검증점 14" — 실패가 없으면 null.
+ *
+ * 실패가 앵커인지 점 사이인지 — 앵커는 자기 튜닝값으로 검증받는 자리가 많아(표 모드) 통과가
+ * "튜닝 성립"에 가깝고, 스케줄 성립을 말하는 것은 검증점이다(엔진 failures_by_role 머리말).
+ * 상태 줄·신호 보고·결과 브리핑이 **이 한 함수로** 같은 말을 한다. 화면이 모르는 역할도 코드 그대로
+ * 센다 — 삼키면 "실패 N"과 위치의 합이 어긋나는데 화면은 그걸 말하지 않는다. */
+export function failureRoleText(byRole) {
+  const known = new Set(ROLE_SHORT.map(([k]) => k));
+  const parts = ROLE_SHORT
+    .filter(([k]) => Number(byRole?.[k]) > 0)
+    .map(([k, label]) => `${label} ${Number(byRole[k])}`);
+  for (const [k, v] of Object.entries(byRole ?? {})) {
+    if (!known.has(k) && Number(v) > 0) parts.push(`${k} ${Number(v)}`);
+  }
+  return parts.length ? parts.join(" · ") : null;
+}
+
 /** report → 상태 줄 조각 [문자열] — 계산해 놓고 안 내던 수치를 담되 0은 생략한다.
  *
  * judged와 failures만은 0이어도 낸다: "실패 0 / 판정 0"이 곧 nothing_verified의
@@ -391,15 +612,16 @@ export function reportLine(report, nPointsFallback) {
   // 어느 표현으로 검증한 결과인가 — 표는 반출 표가 검증받은 그 표이고, 다항은
   // 재양자화 근사가 끼어 채택 시 재검증을 받는다 (05 §5.1). 수치가 아니라
   // 표현이라 아래 optional 카운터 목록에 못 섞는다
-  if (r.fit_mode) parts.push(`표현 ${r.fit_mode === "table" ? "표(선형 보간)" : "다항"}`);
-  // 실패가 앵커인지 점 사이인지 — 앵커는 자기 튜닝값으로 검증받는 자리가 많아
-  // (표 모드) 통과가 "튜닝 성립"에 가깝고, 스케줄 성립을 말하는 것은 검증점이다
-  const byRole = r.failures_by_role ?? {};
-  const roleParts = [["anchor", "앵커"], ["breakpoint", "bp"], ["validation", "검증점"],
-    ["unknown", "역할 미상"]]
-    .filter(([k]) => Number(byRole[k]) > 0)
-    .map(([k, label]) => `${label} ${Number(byRole[k])}`);
-  if (roleParts.length) parts.push(`실패 위치 ${roleParts.join(" · ")}`);
+  const mode = fitModeLabel(r.fit_mode);
+  if (mode) parts.push(`표현 ${mode}`);
+  const where = failureRoleText(r.failures_by_role);
+  if (where) parts.push(`실패 위치 ${where}`);
+  // 튜닝이 성립하지 않아 적합에서 뺀 표본 — 그 점의 스케줄 값은 튜닝값이 아니라 이웃 보간이다.
+  // 보류(표본이 모자라 못 뺀 자리)는 따로 센다 — 그 자리의 표는 실패 표본(자리값)을 담고 있다
+  const nExcluded = Array.isArray(r.excluded_samples) ? r.excluded_samples.length : 0;
+  if (nExcluded) parts.push(`튜닝 실패 표본 제외 ${nExcluded}`);
+  const nHeld = Array.isArray(r.exclusion_withheld) ? r.exclusion_withheld.length : 0;
+  if (nHeld) parts.push(`제외 보류 ${nHeld}자리`);
   const optional = [
     ["outside_envelope", "엔벨로프 밖"],
     ["tuned", "튜닝"],
@@ -434,18 +656,22 @@ export function reportLine(report, nPointsFallback) {
 /** 튜닝 포기 사유 코드 → 한국어 [폴백].
  *
  * 정본은 서버 /design/defaults의 reason_text(← 엔진 tune.REASON_TEXT)다 —
- * 여기 문구는 그 응답에 코드가 없을 때만 쓴다. */
+ * 여기 문구는 그 응답에 코드가 없을 때만 쓴다. 그래도 **사본은 정본과 같아야** 한다 — 엔진이
+ * sign_mismatch·capped 문구를 고치고 loop_unstable을 보탠 뒤 이 사본만 옛 말을 했다(기본값 조회가
+ * 실패한 화면에서 드러난다). autodesign.test.js가 tune.py 원문과 대조한다. */
 export const REASON_TEXT = {
   ok: "설계 목표 달성",
   zero_design: "설계 게인이 0이라 방향 정보가 없다 — 이 자리를 쓸 것이면 설계값을 먼저 정한다",
   seed_required: "설계 게인이 0이라 부호를 몰라 튜닝하지 않았다 — 초기 게인 빠른 탐색으로 부호·크기를"
     + " 채운 뒤 다시 돌린다 (부호를 짐작하면 틀린 부호도 통과해 보인다)",
-  sign_mismatch: "게인 부호가 플랜트와 반대다 — 루프를 뒤집어야만 위상여유가 난다(양의 되먹임)."
-    + " 설계 게인 부호를 확인한다",
+  sign_mismatch: "게인 부호가 플랜트와 반대다(양의 되먹임) — 자세 루프는 뒤집어야만 위상여유가 나고,"
+    + " 레이트 댐퍼는 반대 부호가 감쇠를 더 준다. 설계 게인 부호를 확인한다",
   target_unreached: "게인을 아무리 키워도 목표 지표가 안 나온다 — 플랜트 한계다."
     + " 목표를 낮추거나 이 조건을 설계 범위에서 뺀다",
-  capped: "작동기·지연 포함 폐루프 안정 경계가 목표 전에 묶는다 —"
-    + " 작동기 대역폭 예산을 늘리거나 목표를 낮춘다",
+  capped: "댐퍼 안정 가드(작동기·지연 포함 폐루프 안정, 느린 나선은 비행성 기준 배가시간) 또는"
+    + " 레이트 루프 마진 가드(AS94900 끊은 루프 여유가 설계 목표 PM/GM 아래로 내려가지 않게)가"
+    + " 목표 전에 묶는다 — 작동기·지연이나 마진 가드가 묶었으면 작동기 대역폭·지연 예산을 늘리거나"
+    + " 목표를 낮추고, 나선 기준이 묶었으면 목표를 낮춘다 (어느 쪽인지는 그 점의 note·cap_bound)",
   no_stable_gain: "어떤 게인으로도 이 댐퍼 루프가 안정하지 않아 0으로 두었다 —"
     + " 플랜트·루프 구조를 검토한다",
   bandwidth_collapse: "마진은 넘겼으나 교차 주파수가 하한 아래다 — 성능이 무너졌다."
@@ -455,6 +681,9 @@ export const REASON_TEXT = {
   na_no_crossover: "교차가 없어 이 루프의 마진을 잴 수 없다 — 통과가 아니라 판정 불가다."
     + " 루프 조성·게인 부호를 확인한다",
   rescued: "백오프 해가 대역폭 하한 아래여서 마무리로 되찾았다 (통과)",
+  loop_unstable: "자세 루프까지 닫은 축 전체 폐루프(작동기·지연 포함)가 불안정하다(발산, 또는 작동기"
+    + " 대역 공진의 감쇠가 댐퍼 가드와 같은 하한 미만) — 개별 루프의 댐퍼 가드·보드 마진은"
+    + " 통과해도 합친 루프가 서지 않는다. 지연·작동기 예산을 늘리거나 게인(자세 교차·댐퍼)을 줄인다",
 };
 
 /** 사유 코드 → "코드 — 뜻". 서버 맵이 우선, 없으면 폴백, 그것도 없으면 코드 그대로.
@@ -858,6 +1087,12 @@ export function ledgerRows(body, reasonMap) {
       // 못 잰 것을 "0"으로 그리면 최악이 최선처럼 보인다 — 낱말로 적는다
       severityText: r?.severity == null ? "못 잼" : num(r.severity),
       actionLine: ledgerActionText(r?.action),
+      // 튜닝 행의 fit_excluded — 튜닝이 성립하지 않아 이 점의 표본을 적합에서 뺀 게인 자리(엔진 원장).
+      // 그 점의 스케줄 값은 튜닝값이 아니라 이웃 보간이다 — 원장이 "못 맞췄다"만 말하면 표에 무엇이
+      // 들어갔는지(0 자리값이 박혔는지, 보간인지)를 모른다
+      excludedLine: Array.isArray(r?.fit_excluded) && r.fit_excluded.length
+        ? `적합에서 뺐다 — ${r.fit_excluded.join(", ")} (이 점의 스케줄 값은 튜닝값이 아니라 이웃 보간)`
+        : null,
     };
   });
   return rows.sort((a, b) => {
@@ -984,4 +1219,133 @@ export function coverageLines(report) {
     out.push({ key: `gap${i}`, tone: "warn", text: String(g) });
   });
   return out.sort((a, b) => (_TONE_RANK[b.tone] ?? 0) - (_TONE_RANK[a.tone] ?? 0));
+}
+
+// ── 문서 반영 관문 · 신호(쇼케이스) 사슬 ────────────────────────────────
+
+/** [문서에 반영] 관문 — 결과의 기체 echo로 서버 apply-gains 가드(routes/design.py)와 같은 판정을
+ * **버튼 앞에서** 말한다. null이면 반영 대상이 있다(최종 판정은 여전히 서버 — 지문·리비전 409).
+ *
+ * source가 "request"인지만 보면 안 된다. 재개(resume)한 결과는 저장된 스냅숏으로 조립돼
+ * source가 "snapshot"이다 — 종전 관문은 이걸 예제로 읽어 승인·재개한 결과의 반영 버튼을
+ * 숨겼다. 거꾸로 헤더에서 예제를 **명시로** 고르면 source가 "request"라 관문을 지나고
+ * 서버가 403을 낸다. 그래서 id·예제 표시·출처 셋을 함께 본다. */
+export function applyGateReason(echo) {
+  if (!echo?.id) {
+    return "기체 기록이 없는 옛 결과는 문서에 반영할 수 없다 — 기체를 골라 다시 설계한다.";
+  }
+  if (echo.is_example || echo.id === EXAMPLE_ID
+      || echo.source === "default-example" || echo.source === "legacy-unrecorded") {
+    return "예제 기체는 문서에 반영할 수 없다 — 복제한 기체에서 설계하고 반영한다.";
+  }
+  if (echo.variant) {
+    return "형상 변형 위에서 돈 설계는 기본 문서에 반영할 수 없다 — 기본 형상으로 다시 돌린다.";
+  }
+  return null;
+}
+
+/** config 덮어쓰기 둘을 겹친다 — over가 이긴다. criteria·targets는 **중첩 병합**(서버
+ * _build_config와 같은 규칙): 한쪽이 PM만, 다른 쪽이 GM만 줬으면 둘 다 남는다. */
+export function mergeDesignConfig(base, over) {
+  const out = { ...(base ?? {}) };
+  for (const [k, v] of Object.entries(over ?? {})) {
+    if ((k === "criteria" || k === "targets") && v && typeof v === "object" && !Array.isArray(v)) {
+      out[k] = { ...(out[k] ?? {}), ...v };
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+// 폼 칸 ↔ config 키 — buildConfig의 역방향. 칸이 없는 키(예: max_degree)는 여기 없다
+const FORM_OF_CONFIG = [
+  ["budget_points", "budgetPoints"], ["budget_iters", "budgetIters"], ["n_mach", "nMach"],
+  ["n_validation_between", "nValidationBetween"], ["actuator_wn", "actuatorWn"],
+  ["actuator_zeta", "actuatorZeta"], ["delay_s", "delayS"],
+];
+
+/** config 덮어쓰기 → 실행 설정·요구 조정 칸의 글 — 신호로 온 설정을 **화면 칸에** 보이게.
+ * 칸이 있는 키만 옮긴다(나머지는 호출측이 config로 그대로 덧씌운다). 숫자 목록은 공백 구분 —
+ * 칸 placeholder와 같은 모양이라 buildConfig가 그대로 되읽는다. */
+export function configFormValues(config) {
+  const c = config ?? {};
+  const out = { criteria: {}, targets: {} };
+  if (typeof c.mode === "string") out.mode = c.mode;
+  // 게인 표현 — 열거값이라 FORM_OF_CONFIG(수치 칸)에 못 섞는다. 옮기지 않으면 신호가 준 표현이
+  // 셀렉트에 안 보이고(실행은 config 덧씌움으로 맞게 돈다), buildConfig 되읽기에서 사라진다
+  if (typeof c.fit_mode === "string") out.fitMode = c.fit_mode;
+  for (const [key, field] of FORM_OF_CONFIG) {
+    if (c[key] != null) out[field] = String(c[key]);
+  }
+  if (Array.isArray(c.alts)) out.altsText = c.alts.join(" ");
+  if (Array.isArray(c.fuels)) out.fuelsText = c.fuels.join(" ");
+  for (const key of ["criteria", "targets"]) {
+    for (const [k, v] of Object.entries(c[key] ?? {})) {
+      if (v != null) out[key][k] = String(v);
+    }
+  }
+  return out;
+}
+
+/** 처방 카드의 기본 승인 — 봉인·건너뜀 처방만 해제(엔진은 승인하면 봉인된 것도 반영하고 다시
+ * 봉인한다 — 무효인 줄 아는 처방에 이터 예산이 나간다). 탭 체크박스의 기본값이 이것이고, 신호
+ * 사슬도 그 체크박스를 그대로 읽는다(손대지 않고 [승인 반영 재개]를 누른 것과 같다). */
+export function approvedByDefault(action) {
+  return !(action?.sealed || action?.skipped);
+}
+
+/** 결과 한 줄 — 신호 보고의 summary. 탭 보고서가 이미 내는 수(상태·이터레이션·판정·실패·
+ * 실패 위치·표현·처방·에스컬레이션·표본 제외)만 옮긴다 — 새 판정을 만들지 않는다. 실패 위치와 표현은
+ * 상태 줄(reportLine)과 같은 함수다: "실패 45"가 앵커의 튜닝 실패인지 점 사이의 스케줄 실패인지,
+ * 검증받은 것이 반출될 표 그 자체인지 재양자화 근사인지를 진행기 카드도 같은 말로 한다. */
+export function designCueSummary(body) {
+  const r = body?.report ?? {};
+  const cards = actionCards(body);
+  const parts = [
+    r.status ?? "?",
+    `이터레이션 ${Number(r.iterations) || 0}`,
+    `판정 ${Number(r.judged) || 0}`,
+    `실패 ${Number(r.failures) || 0}`,
+  ];
+  const where = failureRoleText(r.failures_by_role);
+  if (where) parts.push(`실패 위치 ${where}`);
+  const mode = fitModeLabel(r.fit_mode);
+  if (mode) parts.push(`표현 ${mode}`);
+  if (cards.approvable.length) parts.push(`처방 ${cards.approvable.length}`);
+  if (cards.escalations.length) parts.push(`에스컬레이션 ${cards.escalations.length}`);
+  const nExcluded = Array.isArray(r.excluded_samples) ? r.excluded_samples.length : 0;
+  if (nExcluded) parts.push(`튜닝 실패 표본 제외 ${nExcluded}`);
+  return parts.join(" · ");
+}
+
+/** 엔진 coarse 격자의 기본 연료 비율 — `fuels`를 비우면 fuel_max × 이 비율(엔진 design/grid.py
+ * DEFAULT_FUEL_FRACS의 **사본**이다). 서버 /design/defaults가 `grid.fuel_fracs`를 내면 그쪽이
+ * 정본이고 이 사본은 옛 서버용 폴백이다. 기체 값(fuel_max)은 여기 없다 — 문서에서 받는다. */
+export const DEFAULT_FUEL_FRACS = Object.freeze([0.1, 0.5, 1.0]);
+
+/** 연료 칸 placeholder — 비웠을 때 엔진이 실제로 쓰는 연료 목록([kg], 공백 구분). 기체 문서의
+ * fuel_max × 비율이다: 예제 값이나 옛 1200 kg 기체의 "40 200 400"을 물려주지 않는다(기체 고정
+ * 금지). fuel_max를 모르면 빈 글 — 모르는 값을 수치로 위장하지 않는다. */
+export function fuelsPlaceholder(fuelMax, fracs = DEFAULT_FUEL_FRACS) {
+  const fm = numeric(fuelMax);
+  if (fm == null || !(fm > 0)) return "";
+  const list = Array.isArray(fracs) && fracs.length ? fracs : DEFAULT_FUEL_FRACS;
+  return list.map((f) => {
+    const v = fm * Number(f);
+    // 0.1 × 45 = 4.5000000001 같은 부동소수 꼬리를 떼고, 정수면 정수로
+    return String(Number(v.toPrecision(4)));
+  }).join(" ");
+}
+
+/** 보고서 자리의 빈 안내 — 결과가 아직 없을 때만 쓴다(결과가 서 있으면 보고서가 스스로 말한다).
+ * e2e: 첫 자동 설계가 도는 동안(36/41) 「아직 결과가 없습니다 — [자동 설계 시작]을 누르거나…」가 서 있어
+ * 청중은 버튼을 다시 눌러야 하는 줄 알았다 — 검증 탭 D11(lib/verify boardNotice)과 같은 결함, 같은 처방. */
+export function emptyResultNotice({ running = false } = {}) {
+  if (running) {
+    return "자동 설계가 도는 중입니다 — 트림 → 게인 튜닝 → 스케줄 적합 → 마진 검증이 끝나면 운영점 판정·"
+      + "처방 카드·게인 확정이 여기 섭니다. 진행은 위 진행줄에 있습니다.";
+  }
+  return "아직 결과가 없습니다 — [자동 설계 시작]을 누르거나 위 목록에서 지난 결과를 "
+    + "열면 운영점 판정·처방 카드·게인 확정이 여기 채워집니다.";
 }

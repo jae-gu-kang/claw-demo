@@ -2,7 +2,8 @@
 
 LLM 호출 자체는 routes/llm.py에 있다 — "이 리포의 유일한 런타임 아웃바운드"
 선언(그 파일 머리말)을 지키려고 여기는 httpx를 모른다. 여기 있는 것은 "무엇을
-보낼 것인가"다.
+보낼 것인가"다 — 그래서 "무엇은 읽지 않아도 되는가"(load_pruned — 배제될 시계열을
+세우지 않는 읽기)도 여기 있다.
 
 ## 왜 가지치기가 이 기능의 본체인가 (server_data 232건 실측)
 
@@ -161,6 +162,38 @@ def _prune(node, path, excl):
 def prune(payload: dict, kind: str) -> dict:
     """결과 본문 → LLM에 실을 수 있는 크기의 정직한 축약."""
     return _prune(payload, (), EXCLUDE_PATHS.get(kind, frozenset()))
+
+
+def _hollow(value):
+    """같은 형의 빈 값 — 어림 크기(exceeds)가 원래 값 이하라 아래 판정이 통째 읽기보다 커지지 않는다."""
+    return type(value)() if isinstance(value, (list, dict, str)) else value
+
+
+def load_pruned(store, result_id: str, kind: str) -> tuple:
+    """저장 결과 → (가지치기본, kind). 최상위째 배제되는 항목(sim의 t·signals)은 **세우지 않는다**.
+
+    가지치기가 어차피 마커 한 줄로 바꿀 자리를 통째로 파싱하면 예제 750 s 본문(107 MB)에서 서버 힙
+    +211 MB였다(Render 무료 512 MB). 그래서 쪼갠 dict(signals)의 항목은 파싱하지 않고, 한 줄 항목(t)은
+    파싱 즉시 같은 형의 빈 값으로 바꾼다(store.load want·each). 배제가 둘째 층인 자리(envelope의
+    stall_margin·flags, verify_flight의 report.files)는 그대로 읽는다 — 그 부모가 4KB 경계 아래면
+    통째 유지라 마커가 서지 않기 때문이다.
+
+    **결과는 통째 읽어 prune한 것과 같다.** 최상위 노드는 비운 본문으로도 4KB를 넘으면(어림 크기는
+    비운 쪽이 작거나 같다) 통째 본문으로도 넘는다 — 그러면 키마다 재귀하고 최상위 배제 경로는 내용과
+    무관하게 마커가 되며, 나머지 항목은 두 본문이 같다. 넘지 않거나(작은 본문 — 배제 항목까지 통째로
+    실린다) 동질 dict로 보이면(표본 선택이 내용을 본다) 통째로 다시 읽는다 — 작은 본문이라 싸다.
+    kind가 비면(메타에 없음) 통째로 읽고 본문의 kind를 쓴다(종전과 같다)."""
+    tops = {p[0] for p in EXCLUDE_PATHS.get(kind, ()) if len(p) == 1}
+    if tops:
+        lean = store.load(result_id,
+                          want=lambda p: not (len(p) == 2 and p[0] in tops),
+                          each=lambda p, v: _hollow(v) if p[0] in tops else v)
+        if isinstance(lean, dict) and exceeds(lean, KEEP_WHOLE_BYTES) and not _homogeneous(lean):
+            return prune(lean, kind), kind
+        del lean
+    payload = store.load(result_id)
+    kind = kind or str(payload.get("kind") or "")
+    return prune(payload, kind), kind
 
 
 # ── 소견서 출력 스키마 — headline 한 문장 · body 서술 · look_at 화면 안내 ──────

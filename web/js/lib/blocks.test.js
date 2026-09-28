@@ -39,6 +39,10 @@ test("블록: id 유일 + 상세 스펙 완결", () => {
     // "유도 (M8)" 하나만 붙어 있어서 그 블록만 뭔가 다른 것처럼 읽혔다.
     // 어느 엔진 모듈이 구현하는지는 서브시스템 페이지 부제(eng)가 말하는 자리다
     assert.ok(!/\(M\d/.test(b.title), `${b.id} 제목에 마일스톤 번호: "${b.title}"`);
+    // 최상위 블록도(TOP_SVG)는 정적이라 고른 기체를 모른다 — 부제가 값의 출처(「기본값」)를 단정하면 문서 값을 쓰는
+    // 기체에서 거짓이 된다(쇼케이스: 작동기가 문서 wn 30·ζ 0.7인데 「2차계 (기본값)」). 출처는 하위 페이지의
+    // 값 출처 줄(paramSource)이 말한다
+    assert.ok(!/기본값|문서 값|가정값/.test(b.sub ?? ""), `${b.id} 부제가 값의 출처를 단정: "${b.sub}"`);
     const d = b.detail;
     assert.ok(d && typeof d.desc === "string" && d.desc.length > 0, `${b.id} desc 없음`);
     // 이동 대상 해시는 실제 뷰만 (라우터 폴백으로 무효 링크 은폐 방지)
@@ -731,7 +735,9 @@ test("웹이 인용한 엔벨로프·천장·SAT_FRAC이 엔진 정본과 같다
     `${(ceil[50][0] / 1000).toFixed(1)} km`,
     `${(ceil[0][0] / 1000).toFixed(1)} km`,
   ];
-  const quoters = ["./manualdoc.js", "../views/subsystems.js"];
+  // 블록도(subsystems.js)는 이제 예제 기체의 범위·천장을 인용하지 않는다 — 추진 페이지는 선택 기체 문서 값을
+  // 그리므로 산문이 한 기체의 수치를 말하면 그림과 어긋난다(아래 「문서 값이 서는 페이지」 가드)
+  const quoters = ["./manualdoc.js"];
   for (const rel of quoters) {
     const text = read(rel);
     for (const w of want) {
@@ -745,43 +751,72 @@ test("웹이 인용한 엔벨로프·천장·SAT_FRAC이 엔진 정본과 같다
   }
 });
 
-test("블록도가 인용한 예제 기체의 정지추력·축동력이 예제 문서와 같다 (문서 원문 대조)", () => {
-  // 수평비행 범위·천장과 같은 죽은 문자열이다 — 추진을 1.45배로 올릴 때(v1.10) 문장만 고치고 문서를 안 고치거나
-  // 그 반대면 블록도가 다른 기체를 말한다
-  const doc = JSON.parse(readFileSync(
-    new URL("../../../engine/claw/profile/examples/delta_demo.json", import.meta.url), "utf8"));
-  const p = doc.propulsion.params;
-  const want = `정지추력 ${p.static_thrust / 1000} kN·축동력 ${p.power_max / 1000} kW`;
-  const text = readFileSync(new URL("../views/subsystems.js", import.meta.url), "utf8");
-  assert.ok(text.includes(want), `subsystems.js에 예제 문서의 추진 "${want}"가 없다`);
+// ── 문서 값이 서는 블록도 페이지의 산문 (v1.47 쇼케이스) ──
+// 작동기·추진 페이지는 그림 수치를 선택 기체 문서에서 그린다(lib/blocks.js paramSource). 그런데 흐름·노트·블록 설명이
+// 구 1200 kg 스터디의 수치(「rate ≥ 10 rad/s 요구」, V_c 66.7 m/s, 6 kN·500 kW)나 한 예제 기체의 추진·범위를 말하고
+// 있어, 다른 기체를 고르면 그림과 글이 한 화면에서 어긋났다(기체 고정 금지 원칙). 수치는 그림의 살아 있는 값
+// (data-p·data-d)만 말하고, 산문은 모델을 일반형으로 설명한다.
+
+// 기체 의존 물리량 리터럴 — 힘·동력·질량·속도·각속도·면적·길이, 마하 표기, 고정 요구 수치(≥ 10). 식의 계수(2ρA)·
+// 클립 범위(0~1)·계약 폭((2,))·판정 규칙(95%)·절 번호(01 §7)는 단위가 없어 걸리지 않는다
+const AIRFRAME_LITERAL = /\d[\d.,]*\s*(?:k?N|k?W|kg|m\/s|rad\/s|m²|km|m)(?![A-Za-z/²])|\bM\d*\.\d+|[≥≤]\s*\d/;
+// 살아 있는 표시값은 뺀다 — 뷰가 선택 기체 문서 값으로 다시 쓰는 자리이고, 안의 글은 문서를 못 받았을 때의 폴백이다
+const stripLive = (t) => t.replace(/<tspan data-[pd]="[^"]*">[^<]*<\/tspan>/g, "");
+
+test("문서 값이 서는 블록도 페이지(작동기·추진)의 글은 기체 수치를 박지 않는다 — 수치는 그림의 살아 있는 값뿐", async () => {
+  const { paramSource, walkPages } = await import("./blocks.js");
+  const example = JSON.parse(read("../../../engine/claw/profile/examples/delta_demo.json"));
+  const byId = Object.fromEntries(BLOCKS.map((b) => [b.id, b]));
+  const checked = [];
+  for (const { node, path, key } of walkPages(SUBSYSTEMS)) {
+    const root = byId[path[0]] ?? null;
+    // 바인딩 소스 — 하위 페이지가 스스로 지목한 스키마, 아니면 루트 블록 스키마 (views/blocks.js와 같은 규칙)
+    const ref = node.schema ?? root?.detail.schema ?? null;
+    if (paramSource(ref, example)?.kind !== "document") continue;
+    checked.push(key);
+    // 블록 설명은 루트·하위 페이지 모두 파라미터 패널에 뜬다(views/blocks.js renderParams) — 작동기는 코드 생성
+    // 주석(설계 근거)에도 실린다
+    const texts = [
+      stripLive(node.svg), node.flow.lead, ...node.flow.reads, ...node.flow.why, node.notes ?? "",
+      root?.detail.desc ?? "",
+    ];
+    for (const t of texts) {
+      const hit = t.match(AIRFRAME_LITERAL);
+      assert.equal(hit, null, `${key}: 기체 수치 "${hit?.[0]}"를 글에 박았다 — 그림의 살아 있는 값(data-p·data-d)만 `
+        + `수치를 말한다: …${hit ? t.slice(Math.max(0, hit.index - 30), hit.index + 30) : ""}…`);
+      // 특정 표시 모델·「데모」를 이 페이지 값의 정체로 말하지 않는다 — 값은 선택 기체 문서다
+      assert.ok(!/models\/|데모/.test(t), `${key}: 특정 기체(표시 모델·데모)를 이 페이지의 정본으로 말한다`);
+    }
+  }
+  // 빈 순회로 통과하지 않게 — 지금 문서 값이 서는 페이지는 이 둘이다(항법은 문서에 없고, AP·SCAS는 카탈로그)
+  assert.deepEqual(checked.sort(), ["actuator", "plant/prop"]);
+  // 교차속도는 그림의 유도값 하나로만 말한다 — 문서 값으로 다시 계산되는 자리 (SVG_DERIVED vc)
+  assert.match(SUBSYSTEMS.plant.children.prop.svg, /V_c = ηP\/T_static = <tspan data-d="vc">/);
+  // 가드가 실제로 무는지 — 이번에 지운 문장들의 꼴
+  for (const stale of ["요구 사양은 ≥ 10 rad/s다", "V_c = ηP/T_static = 66.7 m/s", "정지추력 6 kN은",
+    "축동력 500 kW는", "1200 kg에 날개 3 m²", "해면 M0.09~0.28", "4 kN × 2 = 8 kN"]) {
+    assert.match(stale, AIRFRAME_LITERAL, `가드가 "${stale}"를 못 잡는다`);
+  }
 });
 
-test("추진 페이지의 교차속도 V_c는 엔진 기본값에서 유도된 값과 같다 (엔진 원문 대조)", () => {
-  // V_c만 **죽은 문자열**이다 — 바로 옆 P·η·T_static은 data-p로 살아 있는데, 셋에서
-  // 유도한 이 수치는 아니다. 기본값을 한 번만 바꾸면 화면이 그 자리에서 앞뒤가 안 맞고,
-  // 그걸 아무도 안 본다. 렌더 시 계산하는 대신 여기서 못박는다 (기계 장치 없이).
-  const src = readFileSync(
-    new URL("../../../engine/claw/plant/prop.py", import.meta.url), "utf8",
-  );
-  const cls = src.slice(src.indexOf("class PropEngine"));
-  const def = (name) => {
-    const m = cls.match(new RegExp(`ParamDef\\("${name}",\\s*([0-9_.eE+-]+)`));
-    assert.ok(m, `prop.py PropEngine에서 ${name} 기본값을 못 찾음 (형식이 바뀌었나?)`);
-    return Number(m[1].replace(/_/g, ""));
-  };
-  // PropEngine.crossover_speed와 같은 식 — 그 아래는 정지추력 상한, 위는 1/V
-  const vc = (def("eta") * def("power_max")) / def("static_thrust");
-  const want = vc.toFixed(1);
-  assert.equal(want, "66.7", `엔진 기본값이 바뀌었다 — V_c = ${want} m/s`);
-
-  const prop = SUBSYSTEMS.plant.children.prop;
-  const texts = [prop.svg, ...(prop.flow?.why ?? []), prop.notes ?? ""].join("\n");
-  const cited = [...texts.matchAll(/V_c = ηP\/T_static = ([\d.]+) m\/s/g)].map((m) => m[1]);
-  assert.ok(cited.length > 0, "추진 페이지에 V_c 인용이 하나도 없다 — 문구가 바뀌었나?");
-  for (const c of cited) {
-    assert.equal(c, want,
-      `V_c 인용 ${c}가 엔진 기본값 유도값 ${want}와 다르다 (prop.py PARAM_DEFS)`);
+test("구 합성 기체의 실측(폐루프 오버슈트·α·선회 FF 역효과)은 출처를 밝혀서만 말한다 — 「데모」 사실처럼 말하지 않는다", async () => {
+  // 자동조종 흐름이 "데모 설계점에서 고도 +100 m 오버슈트 8.3%"라고 썼다 — 그 스캔은 구 1200 kg 합성 기체의 것이고
+  // 200 kg급 예제·쇼케이스 기체에서는 다시 재지 않았다. 같은 기록을 설계 노트는 출처와 함께 적고 있다. α 리미터의
+  // 「리미터 없이 α > 0.34 → 장착 α ≤ 0.31」도 M7 때 그 기체의 폐루프 검증이다
+  const { walkPages } = await import("./blocks.js");
+  let hits = 0;
+  for (const { node, key } of walkPages(SUBSYSTEMS)) {
+    const units = [
+      node.flow?.lead, ...(node.flow?.reads ?? []), ...(node.flow?.why ?? []),
+      ...(node.notes ?? "").split("<li>").slice(1), // 노트는 항목 단위 — 한 항목 안에서 출처를 밝혀야 한다
+    ].filter(Boolean);
+    for (const t of units) {
+      if (!/오버슈트 [\d.]+%|역효과|α\s*(?:&gt;|>|≤|&lt;|<|≥)\s*\d/.test(t)) continue;
+      hits += 1;
+      assert.match(t, /구 합성 기체/, `${key}: 출처 없는 실측 — ${t.slice(0, 60)}`);
+    }
   }
+  assert.ok(hits > 0, "실측 인용이 하나도 없다 — 문구가 바뀌었나? (가드가 빈 순회로 통과한다)");
 });
 
 // 편집 가능 블록 스키마의 파라미터명 사본 — 정본은 엔진 레지스트리
@@ -936,4 +971,62 @@ test("가이드 투어 인계가 실제로 배선돼 있다 — 시뮬 인계는
   const sim = read("../views/sim.js");
   assert.match(sim, /store\.get\("tourSim"\)/, "시뮬 탭이 투어 인계를 안 받는다");
   assert.match(sim, /store\.set\("tourSim", null\)/, "인계를 소비하지 않는다");
+});
+
+// ── 블록 파라미터 값의 출처 (v1.47 쇼케이스 — 블록도가 레지스트리 기본값을 이 기체 값인 양 보이던 결함) ──
+test("파라미터 출처 — 작동기·추진은 선택 기체 문서, 항법은 문서에 없다고 말한다", async () => {
+  const { paramSource } = await import("./blocks.js");
+  const example = JSON.parse(read("../../../engine/claw/profile/examples/delta_demo.json"));
+  const act = paramSource({ category: "actuator", name: "SecondOrderActuator" }, example);
+  assert.equal(act.kind, "document");
+  assert.deepEqual(act.values, example.actuator.params);
+  assert.equal(act.path, "/actuator/params");
+  assert.match(act.text, /선택 기체 문서/);
+  const prop = paramSource({ category: "propulsion", name: "PropEngine" }, example);
+  assert.equal(prop.kind, "document");
+  assert.equal(prop.values.static_thrust, example.propulsion.params.static_thrust);
+  // 형식이 다르면 이 페이지 도식의 기본값을 이 기체 값인 양 보이지 않는다
+  const twin = paramSource({ category: "propulsion", name: "PropEngine" },
+    { ...example, propulsion: { type: "TwinEngine", params: {} } });
+  assert.equal(twin.kind, "registry");
+  assert.equal(twin.values, null);
+  assert.match(twin.text, /TwinEngine/);
+  const nav = paramSource({ category: "nav", name: "ErrorModel" }, example);
+  assert.equal(nav.kind, "registry");
+  assert.match(nav.text, /기체 문서.*없는/);
+  // RTK 등급은 바탕이 다르다(엔진 RTK_FIXED 위에 적용값) — "없으면 이 기본값"만 말하면 RTK 실행에서 거짓이 된다
+  assert.match(nav.text, /RTK/);
+  // 문서를 못 받았으면 사유와 함께 레지스트리 기본값
+  const none = paramSource({ category: "actuator", name: "SecondOrderActuator" }, null, { docError: "503" });
+  assert.equal(none.kind, "registry");
+  assert.match(none.text, /503/);
+  // 게인 카탈로그가 정본인 블록(AP·SCAS)과 문서 절이 없는 블록은 여기서 말하지 않는다
+  assert.equal(paramSource({ category: "fcl", name: "Autopilot" }, example), null);
+  assert.equal(paramSource({ category: "fcl", name: "ScasAxis" }, example), null);
+  assert.equal(paramSource({ category: "guidance", name: "LOS" }, example), null);
+  // 배선 — 하위 페이지(추진)와 블록 페이지(작동기·항법) 둘 다 이 판정으로 값·출처 줄을 세운다(뷰는 원문에서 읽는다)
+  const view = read("../views/blocks.js");
+  assert.match(view, /paramSource\(ref, picked\.doc/, "하위 페이지(추진)가 문서 값을 안 쓴다");
+  assert.match(view, /paramSource\(block\.detail\.schema, picked\.doc/, "블록 페이지(작동기)가 문서 값을 안 쓴다");
+});
+
+test("SVG 유도 표시값(data-d) — 등록된 이름만, 추진 V_c 폴백 글은 레지스트리 기본값의 유도값", async () => {
+  const { SVG_DERIVED, derivedText } = await import("./blocks.js");
+  for (const [id, s] of Object.entries(SUBSYSTEMS)) {
+    for (const { node, path } of walk(id, s)) {
+      for (const m of node.svg.matchAll(/data-d="([^"]+)">([^<]*)</g)) {
+        assert.ok(SVG_DERIVED[m[1]], `${path.join("/")}: 등록되지 않은 유도 표시값 data-d="${m[1]}"`);
+      }
+    }
+  }
+  const src = read("../../../engine/claw/plant/prop.py");
+  const cls = src.slice(src.indexOf("class PropEngine"));
+  const def = (name) => Number(cls.match(new RegExp(`ParamDef\\("${name}",\\s*([0-9_.eE+-]+)`))[1].replace(/_/g, ""));
+  const defaults = { eta: def("eta"), power_max: def("power_max"), static_thrust: def("static_thrust") };
+  const fallback = SUBSYSTEMS.plant.children.prop.svg.match(/data-d="vc">([^<]*)</)[1];
+  assert.equal(fallback, derivedText("vc", defaults), "폴백 글이 레지스트리 기본값의 V_c와 다르다");
+  // 문서 값으로 다시 계산한다 — 예제 49.3 kW·1.45 kN·η 0.8 → 27.2 m/s
+  assert.equal(derivedText("vc", { eta: 0.8, power_max: 49300, static_thrust: 1450 }), "27.2");
+  assert.equal(derivedText("vc", { eta: 0.8, power_max: 49300, static_thrust: 0 }), null);
+  assert.equal(derivedText("nope", defaults), null);
 });

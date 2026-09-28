@@ -1,7 +1,7 @@
 {
  "golden": "influence_structural",
  "mode": "full",
- "captured_at": "e75a09f+dirty",
+ "captured_at": "9bba329+dirty",
  "value": {
   "dict": {
    "fingerprint": "c48da3269a9a8e4c",
@@ -91,7 +91,7 @@
        "chunk": 100,
        "sha": [
         "a0ec27d1270ae96ff383d754e6526122d306f5fd441637e39cee97c161a75e61",
-        "2fdb5240b2074acc6719f421e57cf24576383f9fc755462dcf41e22ef8914844",
+        "35078f848206e91cae828baf7a8462e79f6039f9612f4803f63b9a5a693e16bb",
         "d66b617407796969450de9eb66b4cba208e70c8243179899eaeff8714f6c54f3"
        ],
        "samples": {
@@ -1394,14 +1394,14 @@
     {
      "dict": {
       "key": "launch_gx",
-      "label": "사출 하중",
+      "label": "레일 가속",
       "unit": "g",
       "signals": [
        "launch_gx",
        "on_rail"
       ],
       "better": "lower",
-      "desc": "발사 레일 축 가속도 — 판정 기준(구조 한계 n_x_launch)은 아직 없다 [TBD]",
+      "desc": "발사 레일 축 순가속도의 최대 — 중력 성분이 빠져 하중배수가 아니다. 종방향 발사하중 판정(n_x = 레일 가속 + sin 앙각을 structural.n_x_launch와 대조)은 시뮬 탭 착륙 요약이 한다. 레일에 오른 적 없으면 없음",
       "tier": "C",
       "group": "임무·이착륙"
      }

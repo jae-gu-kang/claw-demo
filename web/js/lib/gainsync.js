@@ -236,3 +236,76 @@ export function foldToConstant(catalog, slot, tables) {
   const v = t ? designValue(catalog, t) : null;
   return typeof v === "number" ? v : slot.design;
 }
+
+/** "절.축.칸" 경로("scas.yaw.k_rate"·"autopilot.alt.kp") → 카탈로그 자리. 없거나 불가 자리·절이 어긋나면
+ * 던진다 — 결함 주입이 엉뚱한 자리를 조용히 고르지 않게. 절은 자리 상수가 사는 컴포넌트(slot.block)다. */
+export function slotByPath(catalog, path) {
+  const parts = String(path ?? "").split(".");
+  if (parts.length !== 3 || parts.some((p) => !p)) {
+    throw new Error(`게인 경로는 "절.축.칸" 꼴이어야 한다(예: scas.yaw.k_rate): ${path}`);
+  }
+  const [block, group, key] = parts;
+  const slot = (catalog?.slots ?? []).find((s) => s.group === group && s.key === key);
+  if (!slot) throw new Error(`카탈로그에 없는 자리: ${group}.${key}`);
+  if (!slot.available) throw new Error(`${slot.name}은 구조상 없는 자리다 — ${slot.reason ?? "불가"}`);
+  if (slot.block !== block) throw new Error(`${slot.name}의 상수는 「${slot.block}」 절에 산다 — 경로의 절 「${block}」과 다르다`);
+  return slot;
+}
+
+/** 공학 결함 주입 — 그 자리의 **전 스케줄 점**에 factor를 곱한다.
+ *
+ * 켠 자리(selected에 있음)면 그 표의 데이터 전량, 끈 자리면 설계점 상수 하나다 — 그 자리의 값이 사는 곳이
+ * 둘 중 하나이기 때문이다(머리말). 원본은 건드리지 않는다: 켠 자리는 새 표를, 끈 자리는 새 {scas, autopilot}을
+ * 돌려준다. 반환 {slot, scheduled, before, after, table?, constants?} — before/after는 표면 배열, 상수면 수. */
+export function faultSlot(catalog, { selected, constants, tables = null }, path, factor) {
+  if (typeof factor !== "number" || !Number.isFinite(factor)) {
+    throw new Error(`결함 배율은 유한한 수여야 한다: ${factor}`);
+  }
+  const slot = slotByPath(catalog, path);
+  if ((selected ?? []).includes(slot.name)) {
+    const t = tables?.[slot.name] ?? slot.table;
+    const before = [...t.data];
+    const after = before.map((v) => v * factor);
+    return { slot, scheduled: true, before, after, table: { ...t, axes: { ...t.axes }, data: after } };
+  }
+  const before = constantOf(slot, constants);
+  const after = before * factor;
+  return { slot, scheduled: false, before, after, constants: withConstant(catalog, slot, after, constants) };
+}
+
+/** 결함 주입 한 줄 — 무엇을 몇 배로, 값이 어디서 어디로. */
+export function faultSummary(r, factor) {
+  const f = (v) => String(Number(v.toPrecision(4)));
+  const span = (xs) => {
+    const lo = Math.min(...xs);
+    const hi = Math.max(...xs);
+    return lo === hi ? f(lo) : `${f(lo)}~${f(hi)}`;
+  };
+  return r.scheduled
+    ? `${r.slot.name} ×${f(factor)} — 스케줄 표 ${r.before.length}점 ${span(r.before)} → ${span(r.after)}`
+    : `${r.slot.name} ×${f(factor)} — 설계점 상수 ${f(r.before)} → ${f(r.after)}`;
+}
+
+/** 게인 작업 사본의 스토어 키 — 게인 탭 [시뮬·코드에 적용]·자동 설계 [게인 확정]·영향성 [이 수정안 적용]이
+ * 쓰는 표·스케줄 끔 신호·출처와, 끈 자리 상수(블록도 폼과 같은 스토어 — 머리말). 항법·작동기 편집은 게인
+ * 작업 사본이 아니다. */
+export const WORKING_COPY_KEYS = Object.freeze([
+  "gainTables", "gainScheduleOff", "gainTablesSource", "scasParams", "autopilotParams",
+]);
+
+/** 작업 사본을 버린다 — 이 키들을 전부 비우면 시뮬·코드·평가는 서버가 문서 게인으로 조립한다(확정 게인 표가
+ * 있으면 그 표). 게인 탭 restore 신호와 쇼케이스 진행기 [■ 중단](결함 주입 뒤 — 뒷정리 신호를 걸 탭 이동이
+ * 없다)이 **이 함수 하나**를 쓴다: 둘이 다른 키를 비우면 중단 뒤 형상이 복원 뒤 형상과 달라진다.
+ * s는 store 모양({get, set}). 돌려주는 것: 비우기 전에 값이 있던 키(빈 목록이면 되돌릴 것이 없었다). */
+export function dropWorkingCopy(s) {
+  const had = WORKING_COPY_KEYS.filter((k) => s.get(k) != null);
+  for (const k of WORKING_COPY_KEYS) s.set(k, null);
+  return had;
+}
+
+/** 작업 사본 버리기 한 줄(dropWorkingCopy의 답) — 신호 보고와 진행기 줄이 같은 말을 한다. */
+export function workingCopyLine(cleared) {
+  return cleared.length
+    ? "작업 사본 해제 — 문서 게인으로 조립"
+    : "작업 사본이 이미 비어 있었다 — 문서 게인 그대로";
+}

@@ -119,3 +119,16 @@ def test_term_input_rules_come_from_the_validator():
     from claw.profile import aeroview
     assert spec["slice"] == {"axes": list(aeroview.SLICE_AXES), "coefficients": list(aeroview.COEFFICIENTS),
                              "max_points": aeroview.MAX_POINTS}
+
+
+def test_envelope_alt_field_says_it_takes_one_or_several():
+    """선도 고도 칸 — numlist(수치 하나도 받는다: scalar_ok), 개수 상한은 검증기 상수 그대로."""
+    by_path = {f["path"]: f for f in _fields()}
+    f = by_path["/mission_template/envelope/alt"]
+    assert f["kind"] == "numlist" and f["scalar_ok"] is True
+    assert f["max_items"] == schema.MAX_ENVELOPE_ALTS
+    # 칸이 말하는 두 모양을 검증기가 실제로 받는다
+    for v in (1000.0, [0.0, 1000.0, 3000.0]):
+        doc = load_example()
+        doc["mission_template"]["envelope"]["alt"] = v
+        validate_document(doc)

@@ -26,7 +26,7 @@ SUBSYSTEMS[id].children 재귀 (subsystems.js 규약). 브레드크럼 중간 �
 
 import { api, errorText } from "../api.js";
 import { clear, el } from "../dom.js";
-import { BLOCKS, resolvePath } from "../lib/blocks.js";
+import { BLOCKS, derivedText, paramSource, resolvePath } from "../lib/blocks.js";
 import {
   designCoord, designValue, lockedParams, scasKwargs, selectedSlots, slotIndex,
 } from "../lib/gainsync.js";
@@ -37,6 +37,7 @@ import { store } from "../store.js";
 import { renderCodePanel } from "./codegen.js";
 import { DESIGN_ORDER, fromMarkup, topDiagramSvg } from "./diagram.js";
 import { renderPageManual } from "./manual.js";
+import { selectedDocument } from "./profilepick.js";
 import { createTopReplay } from "./replayoverlay.js";
 import { CHIP_LABEL, SUB_TINT, SUBSYSTEMS } from "./subsystems.js";
 
@@ -298,13 +299,39 @@ function flashNode(svgWrap, node) {
 }
 
 /** SVG 내 data-p 표시값 갱신 — 블록도 수치를 파라미터 값과 동기화.
-values에 없는 이름은 초기(폴백) 텍스트 유지. textContent만 교체 (마크업 삽입 없음). */
+values에 없는 이름은 초기(폴백) 텍스트 유지. textContent만 교체 (마크업 삽입 없음).
+data-d는 같은 값에서 **유도한** 수치(lib/blocks.js SVG_DERIVED — 추진 V_c)라 함께 다시 계산한다 — 옆 수치만
+바뀌고 유도값이 기본값에서 굳으면 그림이 한자리에서 앞뒤가 안 맞는다. */
 function bindSvgParams(svgWrap, values) {
   for (const node of svgWrap.querySelectorAll("[data-p]")) {
     const v = values[node.dataset.p];
     if (v !== undefined) node.textContent = displayVal(v);
   }
+  for (const node of svgWrap.querySelectorAll("[data-d]")) {
+    const t = derivedText(node.dataset.d, values);
+    if (t != null) node.textContent = t;
+  }
 }
+
+/** 선택 기체의 적용 문서 — 블록 값의 출처 판정(lib/blocks.js paramSource)에 쓴다. 못 받으면 {doc: null, error}
+ *  — 폼·표는 레지스트리 기본값으로 서고 출처 줄이 사유를 말한다(화면이 통째로 안 뜨는 것보다 낫다). */
+async function selectedDocOrNull() {
+  try {
+    return { doc: await selectedDocument(), error: null };
+  } catch (e) {
+    return { doc: null, error: errorText(e) };
+  }
+}
+
+/** 값 출처 한 줄 — 문서 값이면 안내(hint), 레지스트리 기본값으로 물러났으면 알림 톤(기체 탭 .notice와 같은 색 —
+ *  블록도에는 그 클래스가 없어 인라인이다). 이 기체 값이 아닌 수치를 보고 있다는 사실은 흘려 읽히면 안 된다. */
+const sourceLine = (src) => (src
+  ? el("p", {
+    class: "hint",
+    style: src.kind === "document" ? "margin:4px 0 8px"
+      : "margin:4px 0 8px;padding:6px 10px;border-radius:8px;background:#fdf2d7;color:#6b4a00",
+  }, src.text)
+  : null);
 
 /** 표시용 값 포맷 — UNBOUNDED(±1e30)는 ±∞, 수치는 유효 6자리로 정리. */
 function displayVal(v) {
@@ -371,32 +398,45 @@ function renderParams(box, sub, block, svgWrap, path = []) {
  * 편집 경로(폼·게인 잠금·store 주입)를 통째로 건너뛴다: 잠금은 편집이 있을 때만
  * 뜻이 있고, 여기에는 편집이 없다. */
 async function loadSubSchema(schemaBox, ref, svgWrap) {
-  let key, fields;
+  let key, fields, picked;
   try {
-    ({ key, fields } = await fetchSchemaFields(ref));
+    [{ key, fields }, picked] = await Promise.all([fetchSchemaFields(ref), selectedDocOrNull()]);
   } catch (e) {
     clear(schemaBox).append(el("div", { class: "error-box" }, errorText(e)));
     return;
   }
-  bindSvgParams(svgWrap, Object.fromEntries(fields.map((f) => [f.name, f.default])));
-  renderReadonlyTable(schemaBox, key, fields);
+  // 그림 수치 = 선택 기체 문서 값(있으면) 위에 — 종전에는 레지스트리 기본값(추진 500 kW·6 kN)을 이 기체의
+  // 추력인 양 그렸다. 문서에 없는 칸만 기본값이다(엔진 조립도 같다)
+  const src = paramSource(ref, picked.doc, { docError: picked.error });
+  const docValues = src?.kind === "document" ? src.values : null;
+  bindSvgParams(svgWrap, { ...Object.fromEntries(fields.map((f) => [f.name, f.default])), ...(docValues ?? {}) });
+  renderReadonlyTable(schemaBox, key, fields, docValues);
+  // 네이티브 prepend·append는 null을 글자 "null"로 넣는다 — 없는 줄은 뺀다
+  schemaBox.prepend(...[sourceLine(src)].filter(Boolean));
   schemaBox.append(el("p", { class: "hint" },
-    "엔진 레지스트리 기본값입니다 — 이 페이지에서는 열람만 합니다. 시뮬 요청에 주입 "
-    + "경로가 있는 블록만 편집을 엽니다."));
+    "이 페이지에서는 열람만 합니다 — 시뮬 요청에 주입 경로가 있는 블록만 편집을 엽니다."));
 }
 
 async function loadSchema(schemaBox, block, svgWrap, axis = null) {
   // omit(주입 경로 예약 키)까지 적용된 필드 목록 — 폼·코드 생성이 같은 원천을 쓴다
-  let key, fields, catalog;
+  let key, fields, catalog, picked;
   try {
-    [{ key, fields }, catalog] = await Promise.all([
-      fetchFields(block), loadGainsCatalog(),
+    [{ key, fields }, catalog, picked] = await Promise.all([
+      fetchFields(block), loadGainsCatalog(), selectedDocOrNull(),
     ]);
   } catch (e) {
     clear(schemaBox).append(el("div", { class: "error-box" }, errorText(e)));
     return;
   }
   const access = paramAccess(block, axis, catalog);
+  // 값 출처 — 작동기는 선택 기체 문서(/actuator/params)가 기본 형상이다(시뮬 폼도 그 값을 프리필한다 —
+  // lib/simrequest profileSimDefaults). 레지스트리 기본값을 기본 형상으로 두면 폼·[기본값·적용 해제]·코드 생성의
+  // 비교 기준이 이 기체와 무관한 값이 된다. 항법은 문서에 없다고 말한다
+  const src = paramSource(block.detail.schema, picked.doc, { docError: picked.error });
+  if (src?.kind === "document") {
+    const known = new Set(fields.map((f) => f.name)); // 주입 예약 키(omit)는 폼·주입에 싣지 않는다
+    access.defaults = Object.fromEntries(Object.entries(src.values).filter(([k]) => known.has(k)));
+  }
   const locks = scheduleLocks(catalog, access);
   // 폼 기본값 = 스키마 기본값 + 그 축의 설계 kwargs. ScasAxis는 범용 축 컴포넌트라
   // 스키마 기본값이 전부 0이다 — 그걸 "기본값으로 되돌리기"에 쓰면 게인이 0이 된다
@@ -427,6 +467,7 @@ async function loadSchema(schemaBox, block, svgWrap, axis = null) {
   } else {
     renderReadonlyTable(schemaBox, key, fields);
   }
+  schemaBox.prepend(...[sourceLine(src)].filter(Boolean));
 }
 
 /** 값 접근 계약 — 블록 한 벌(AP·작동기·항법)과 축 한 벌(SCAS)의 차이를 여기서 흡수.
@@ -499,17 +540,24 @@ function designPointLabel(catalog, slot) {
   return at == null ? "설계점" : `${String(axisName).toUpperCase()[0]}${at}`;
 }
 
-function renderReadonlyTable(schemaBox, key, fields) {
+/** 읽기 전용 표 — docValues(선택 기체 문서 값)가 있으면 「이 기체 값」 열을 앞에 두고 기본값 열은 「레지스트리
+ *  기본값」으로 이름을 바꾼다(둘을 나란히 — 어느 쪽이 이 기체의 값인지 헷갈리지 않게). 문서에 없는 칸은 "—". */
+function renderReadonlyTable(schemaBox, key, fields, docValues = null) {
+  const cols = docValues ? 6 : 5;
   clear(schemaBox).append(
     el("div", { class: "scroll-x" }, el("table", {},
       el("thead", {}, el("tr", {},
-        el("th", {}, "파라미터"), el("th", {}, "기본값"), el("th", {}, "단위"),
+        el("th", {}, "파라미터"),
+        docValues && el("th", {}, "이 기체 값"),
+        el("th", {}, docValues ? "레지스트리 기본값" : "기본값"), el("th", {}, "단위"),
         el("th", {}, "범위"), el("th", {}, "설명"))),
       el("tbody", {}, groupFields(key, fields).flatMap((g) => [
         g.title && el("tr", {},
-          el("th", { colspan: "5", style: "text-align: left; padding-top: 10px" }, g.title)),
+          el("th", { colspan: String(cols), style: "text-align: left; padding-top: 10px" }, g.title)),
         g.fields.map((f) => el("tr", {},
           el("td", { class: "num" }, f.name),
+          docValues && el("td", { class: "num" },
+            Object.hasOwn(docValues, f.name) ? defaultText(docValues[f.name]) : "—"),
           el("td", { class: "num" }, defaultText(f.default)),
           el("td", {}, f.unit),
           el("td", { class: "num" }, rangeText(f)),

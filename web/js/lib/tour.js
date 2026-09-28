@@ -6,7 +6,7 @@
 */
 
 import { dryRun } from "./missiondraft.js";
-import { landingSummary } from "./replay.js";
+import { landingSummary, siteRunwayWidth } from "./replay.js";
 
 /** 가상환경의 음성 게이트(core/comms.ts SPEECH_MAX_SPEED)와 같은 값 — 번들 경계를
  *  넘는 짝이라 주석만으로는 갈린다. 캡션이 이 상수로 **스스로 판정**하므로, 배속이
@@ -63,9 +63,14 @@ export function endTimeFor(body) {
 }
 
 /** 마무리 카드 — **시뮬 탭과 같은 착륙 요약**을 쓴다(같은 stride로 받은 같은 본문이라
- *  두 화면의 수치가 같다). 없으면 빈 표가 아니라 그 사실을 문장으로 낸다. */
-export function finaleModel(body) {
-  const rows = landingSummary(body);
+ *  두 화면의 수치가 같다). 없으면 빈 표가 아니라 그 사실을 문장으로 낸다.
+ *  `launchLimit`은 시뮬 탭과 같은 발사하중 한계(views/sim.js launchLimitOf) — 안 넘기면 레일 이탈 행이
+ *  「대조하지 않았다, 판정 불가」로 선다(시뮬 탭과 다른 판정을 말하지 않게 넘겨야 한다).
+ *  활주로 폭은 시뮬 탭과 **같은 한 자리**(lib/replay.js siteRunwayWidth — 그 런이 고흥 활주로를 썼을 때만
+ *  폭 45 m)에서 받는다. 조회가 아니라 순수 계산이라 여기서 부른다 — 종전에는 안 넘겨 시뮬 탭이 「폭 안」이라
+ *  한 같은 런을 마무리 카드는 접지·정지 횡편차 「판정 불가」라 말했다. */
+export function finaleModel(body, { launchLimit } = {}) {
+  const rows = landingSummary(body, { launchLimit, runwayWidth: siteRunwayWidth(body?.meta?.runway) });
   return {
     rows,
     note: rows.length
@@ -97,10 +102,13 @@ export function captionFor(stage, ctx = {}) {
       return ctx.failed ? `교신 없이 계속한다 — ${ctx.failed}` : "관제 교신 대본을 만드는 중";
     case "play": {
       const lines = ctx.lines ?? 0;
+      // 배속은 **실제로 건 값** — 쇼케이스 진행기는 교신이 없으면 투어보다 빨리 튼다(lib/showcase
+      // worldSpeedFor). 안 넘기면 투어 배속
+      const speed = typeof ctx.speed === "number" && ctx.speed > 0 ? ctx.speed : TOUR_SPEED;
       // 배속이 게이트를 넘으면 가상환경이 자막만 흘린다 — 그때 "음성"이라 적으면
       // 카드가 하지 않는 일을 말하게 된다
-      return `3D 재생 — ${lines > 0 ? `교신 ${lines}줄` : "교신 없음"} · ${TOUR_SPEED}×`
-        + (ctx.voice && lines > 0 && TOUR_SPEED <= SPEECH_GATE ? " · 음성" : "");
+      return `3D 재생 — ${lines > 0 ? `교신 ${lines}줄` : "교신 없음"} · ${speed}×`
+        + (ctx.voice && lines > 0 && speed <= SPEECH_GATE ? " · 음성" : "");
     }
     case "finale":
     case "done":

@@ -6,9 +6,11 @@ import { test } from "node:test";
 import {
   boundColor, boundLabel, boundarySegments, capLabel, dbLoBinds, envelopeQuery, ftToM, isoLabelIndex,
   isoOffWindow, kindColor, kindLabel, machSpan, machWindow, mToFt, msToKt, optNum, outlineCaps,
-  outsideRegion, prefillValue, regionPolygons, scanCells, scanSummary, spreadLabels,
-  tasAxisTicks, throttleCell, thrustFrontier,
+  limitSourceLabel, opsSourceLabel, outsideRegion, prefillValue, regionPolygons, scanCells, scanCueSummary,
+  scanSummary, spreadLabels, tasAxisTicks, throttleCell, thrustFrontier, vnCueReport,
+  boxOverlap, lineLabelCandidates, placeLabels, pointObstacles, textBox,
 } from "./envelope.js";
+import { linScale } from "./plot.js";
 
 const region = (rows) => ({
   alt: rows.map((r) => r[0]),
@@ -435,4 +437,187 @@ test("machSpan — 창 밖 안내의 증거 숫자, 비유한값이 섞이면 nu
   assert.equal(machSpan({ mach: [0.3, undefined] }), null); // 이쪽은 NaN이 된다
   assert.equal(machSpan({ mach: [] }), null);
   assert.equal(machSpan({}), null);
+});
+
+test("limitSourceLabel — 구조 한계 출처: 덮은 칸만 사용자 입력, 나머지는 기체가 예제인지로 가린다", () => {
+  assert.equal(limitSourceLabel("mach_no", "profile", []).text, "기체 문서");
+  assert.equal(limitSourceLabel("mach_no", "demo-placeholder", []).text, "데모 자리표시");
+  assert.equal(limitSourceLabel("mach_no", "demo-placeholder", []).ok, false);
+  // user-input은 응답 전체의 표지다 — 덮지 않은 칸은 그 기체의 값(예제면 자리표시)
+  assert.equal(limitSourceLabel("mach_d", "user-input", ["mach_d"], false).text, "사용자 입력");
+  assert.equal(limitSourceLabel("mach_no", "user-input", ["mach_d"], false).text, "기체 문서");
+  assert.equal(limitSourceLabel("mach_no", "user-input", ["mach_d"], true).text, "데모 자리표시");
+  // 예제인지 모르면(구 응답) 자리표시 쪽으로 — 가짜를 진짜라고 말하지 않는다
+  assert.equal(limitSourceLabel("mach_no", "user-input", ["mach_d"]).text, "데모 자리표시");
+});
+
+test("opsSourceLabel — 동압·운용 고도 출처: bounds_source가 profile이면 문서, 값이 없으면 경계 없음", () => {
+  assert.deepEqual(opsSourceLabel(3000, "profile"), { text: "기체 문서", ok: true });
+  assert.deepEqual(opsSourceLabel(3000, "query"), { text: "사용자 입력", ok: true });
+  // 서버는 문서 값을 쓴 응답에만 bounds_source를 싣는다 — 없는데 값이 있으면 질의 값이다
+  assert.equal(opsSourceLabel(4000, undefined).text, "사용자 입력");
+  assert.deepEqual(opsSourceLabel(null, null), { text: "미입력 — 경계 없음", ok: false });
+});
+
+test("vnCueReport — 그린 고도·문서 한계를 진행기 계약 모양으로, 없는 경계는 없다고", () => {
+  const mh = {
+    bounds: { q_max: 3000, alt_min: 0, alt_max: 4000 },
+    bounds_source: { q_max: "profile", alt_min: "profile", alt_max: "profile" },
+    maneuver: null,
+  };
+  const r = vnCueReport([{ alt: 0 }, { alt: 1500 }, { alt: 3000 }], mh);
+  assert.deepEqual(r.data, {
+    alts: [0, 1500, 3000], q_max: 3000, alt_min: 0, alt_max: 4000,
+    bounds_source: mh.bounds_source, nz: null,
+  });
+  assert.equal(r.summary, "V-n 3고도(0 m · 1500 m · 3000 m) · q̄_max 3000 Pa · 운용 고도 0~4000 m");
+  const bare = vnCueReport([{ alt: 1000 }], { bounds: { q_max: null, alt_min: null, alt_max: null },
+    maneuver: { nz: 3 } });
+  assert.equal(bare.summary, "V-n 1고도(1000 m) · q̄_max 경계 없음 · 운용 고도 경계 없음 · 기동 n_z 3 g");
+  assert.deepEqual([bare.data.q_max, bare.data.bounds_source, bare.data.nz], [null, null, 3]);
+});
+
+test("scanCueSummary — 판정 집계를 범례 라벨 그대로 한 줄로 (엔진 우선순위 순)", () => {
+  const cells = scanCells([
+    { trim: { case: { mach: 0.1, alt: 0, fuel: 25 } }, verdict: { ok: true, reasons: [] } },
+    { trim: { case: { mach: 0.08, alt: 0, fuel: 25 } }, verdict: { ok: false, reasons: ["not_converged"] } },
+    { trim: { case: { mach: 0.3, alt: 0, fuel: 25 } },
+      verdict: { ok: false, reasons: ["saturated_throttle_high"] } },
+  ]);
+  assert.equal(scanCueSummary(scanSummary(cells)),
+    `3점 — ${kindLabel("ok")} 1 · ${kindLabel("not_converged")} 1 · ${kindLabel("saturated_throttle_high")} 1`);
+});
+
+// ── 라벨 겹침 없는 배치 (쇼케이스 D10 — V-n·M-h 라벨이 서로·판정 점 밑에 깔렸다) ────────────────
+
+test("textBox — fillText 기준점·정렬 → 글 상자 (기준선 위 0.85·아래 0.25 글자 크기)", () => {
+  assert.deepEqual(textBox(10, 50, 40, 10, "left"), { x0: 10, y0: 41.5, x1: 50, y1: 52.5 });
+  assert.deepEqual(textBox(50, 50, 40, 10, "right"), { x0: 10, y0: 41.5, x1: 50, y1: 52.5 });
+  assert.deepEqual(textBox(30, 50, 40, 10, "center"), { x0: 10, y0: 41.5, x1: 50, y1: 52.5 });
+  assert.equal(boxOverlap(textBox(0, 10, 10, 10), textBox(20, 10, 10, 10)), 0);
+  assert.equal(boxOverlap({ x0: 0, y0: 0, x1: 10, y1: 10 }, { x0: 5, y0: 5, x1: 15, y1: 15 }), 25);
+});
+
+const BOUNDS = { x0: 0, y0: 0, x1: 200, y1: 100 };
+const lab = (key, candidates, extra = {}) => ({ key, w: 40, size: 10, candidates, ...extra });
+
+test("placeLabels — 같은 자리를 원하면 뒤 라벨이 다음 후보로 · 우선순위(입력 순서)가 자리를 먼저 잡는다", () => {
+  const a = { x: 10, y: 20, align: "left" };
+  const b = { x: 10, y: 40, align: "left" };
+  const out = placeLabels([lab("A", [a, b]), lab("B", [a, b])], { bounds: BOUNDS });
+  assert.deepEqual(out.map((o) => [o.key, o.y, o.fits]), [["A", 20, true], ["B", 40, true]]);
+  assert.equal(boxOverlap(out[0].box, out[1].box), 0);
+});
+
+test("placeLabels — 틀 밖(오른쪽 끝에서 잘림) 후보는 건너뛴다: 선 왼쪽으로 뒤집은 후보를 쓴다", () => {
+  // V_D 라벨 — 선 오른쪽에 두면 틀을 넘어 「V_D 10…」로 잘렸다
+  const out = placeLabels([lab("VD", [{ x: 190, y: 20, align: "left" }, { x: 186, y: 20, align: "right" }])],
+    { bounds: BOUNDS });
+  assert.equal(out[0].align, "right");
+  assert.ok(out[0].box.x1 <= BOUNDS.x1);
+});
+
+test("placeLabels — 장애물(판정 점)과 겹치는 후보는 건너뛴다 · pad만큼 떨어져야 한다", () => {
+  const dot = { x0: 48, y0: 14, x1: 54, y1: 20 };
+  const out = placeLabels([lab("T", [{ x: 10, y: 20, align: "left" }, { x: 10, y: 60, align: "left" }])],
+    { bounds: BOUNDS, obstacles: [dot] });
+  assert.equal(out[0].y, 60);
+  // pad — 상자와 1 px 떨어진 점도 pad 2 안이면 겹친 것으로 본다
+  const near = { x0: 51, y0: 14, x1: 55, y1: 20 };
+  const out2 = placeLabels([lab("T", [{ x: 10, y: 20, align: "left" }, { x: 10, y: 60, align: "left" }])],
+    { bounds: BOUNDS, obstacles: [near] });
+  assert.equal(out2[0].y, 60);
+});
+
+test("placeLabels — 영역(region)·accept를 만족하는 후보만 (구역 이름은 그 구역 안에)", () => {
+  const out = placeLabels([lab("Z", [{ x: 10, y: 20 }, { x: 10, y: 80 }], {
+    region: { x0: 0, y0: 50, x1: 200, y1: 100 },
+  })], { bounds: BOUNDS });
+  assert.equal(out[0].y, 80);
+  const acc = placeLabels([lab("Z", [{ x: 10, y: 20 }, { x: 100, y: 20 }], {
+    accept: (box) => box.x0 >= 100,
+  })], { bounds: BOUNDS });
+  assert.equal(acc[0].x, 100);
+});
+
+test("placeLabels — 다 막히면: optional은 뺀다(범례가 이름을 갖는다) · 필수는 겹침 최소 후보를 틀 안으로 밀어 쓴다", () => {
+  const block = { x0: 0, y0: 0, x1: 200, y1: 100 };
+  const out = placeLabels([
+    lab("opt", [{ x: 10, y: 20 }], { optional: true }),
+    lab("must", [{ x: 190, y: 20, align: "left" }], {}),
+  ], { bounds: BOUNDS, obstacles: [block] });
+  assert.equal(out[0].skipped, true);
+  assert.equal(out[1].fits, false);
+  assert.equal(out[1].skipped, false);
+  assert.ok(out[1].box.x1 <= BOUNDS.x1, "틀 밖으로 잘리지 않게 밀어 넣는다");
+  assert.equal(out[1].box.x1 - out[1].box.x0, 40);
+});
+
+test("pointObstacles — 점 → 반지름 상자 (판정 점·격자점을 라벨이 피할 장애물로)", () => {
+  assert.deepEqual(pointObstacles([{ x: 10, y: 20 }], 3), [{ x0: 7, y0: 17, x1: 13, y1: 23 }]);
+});
+
+// 실측 재현 — 쇼케이스 V-n 3000 m 장(480×330): V_NO 78.86·V_A 82.51 m/s가 12 px 거리라 라벨이 포개졌고, V_D는
+// 오른쪽 끝에서 잘렸고, +극한하중 라벨이 V_S 라벨 줄에 앉았다. 후보 생성 + 배치로 셋 다 풀려야 한다
+test("V-n 실측 배치 — 속도·하중 라벨이 서로 안 겹치고 틀 안에 선다 (쇼케이스 3000 m 장)", () => {
+  const W = 480, H = 330, mL = 52, mT = 30, mR = 16, mB = 40;
+  const L = { n_limit_pos: 6, n_limit_neg: -3, n_ultimate_pos: 9, n_ultimate_neg: -4.5, v_no: 78.86, v_d: 98.57 };
+  const V0 = 6.57;
+  const px = linScale(V0, L.v_d * 1.08, mL, W - mR);
+  const py = linScale(L.n_ultimate_neg * 1.15, L.n_ultimate_pos * 1.1, H - mB, mT);
+  const plot = { x0: mL, y0: mT, x1: W - mR, y1: H - mB };
+  const width = (t) => t.length * 6.2; // 11 px 글꼴의 대략 폭 — 뷰는 ctx.measureText로 잰다
+  const speeds = { vs: 33.76, va: 82.51, vno: 78.86, vd: 98.57 };
+  const bar = (v) => ({ x0: px(v) - 0.5, y0: mT, x1: px(v) + 0.5, y1: H - mB });
+  // 속도선 이름은 **다른** 속도선을 가로지르지 않는다(뷰가 그 선들을 avoid로 준다)
+  const mk = (key, text, kind, at) => ({
+    key, w: width(text), size: 11,
+    candidates: lineLabelCandidates(kind, at, { plot, px, py, xEnd: px(L.v_d) }),
+    avoid: kind === "v" ? Object.values(speeds).filter((v) => v !== at).map(bar) : [],
+  });
+  const labels = [
+    mk("vs", "V_S 33.76", "v", 33.76), mk("va", "V_A 82.51", "v", 82.51),
+    mk("vno", "V_NO 78.86", "v", 78.86), mk("vd", "V_D 98.57", "v", 98.57),
+    mk("ult+", "+극한하중 9 g (제한×1.5)", "h", 9), mk("lim+", "+제한하중 6 g", "h", 6),
+    mk("lim-", "−제한하중 −3 g", "h", -3), mk("ult-", "−극한하중 −4.5 g", "h", -4.5),
+    mk("n1", "n=1 수평비행", "h", 1),
+  ];
+  const out = placeLabels(labels, { bounds: plot });
+  for (const o of out) {
+    assert.ok(o.fits, `${o.key}가 자리를 못 찾았다`);
+    assert.ok(o.box.x0 >= plot.x0 && o.box.x1 <= plot.x1 && o.box.y0 >= plot.y0 && o.box.y1 <= plot.y1,
+      `${o.key}가 틀 밖(잘림): ${JSON.stringify(o.box)}`);
+  }
+  for (let i = 0; i < out.length; i += 1) {
+    for (let j = i + 1; j < out.length; j += 1) {
+      assert.equal(boxOverlap(out[i].box, out[j].box), 0, `${out[i].key} ↔ ${out[j].key} 겹침`);
+    }
+  }
+  // 속도 라벨은 제 선 곁에 선다 — 선과 글 사이가 멀어지면 어느 선의 이름인지 잃는다
+  const byKey = Object.fromEntries(out.map((o) => [o.key, o]));
+  for (const [k, v] of [["vs", 33.76], ["va", 82.51], ["vno", 78.86], ["vd", 98.57]]) {
+    const b = byKey[k].box;
+    assert.ok(Math.min(Math.abs(b.x0 - px(v)), Math.abs(b.x1 - px(v))) <= 4, `${k} 라벨이 선에서 떨어졌다`);
+  }
+  // V_D는 오른쪽 끝이라 선 왼쪽으로 뒤집힌다
+  assert.equal(byKey.vd.align, "right");
+  for (const k of Object.keys(speeds)) {
+    for (const [k2, v2] of Object.entries(speeds)) {
+      const b = byKey[k].box;
+      if (k !== k2) assert.ok(!(b.x0 < px(v2) && b.x1 > px(v2)), `${k} 이름이 ${k2} 선(${v2})을 가로지른다`);
+    }
+  }
+});
+
+test("lineLabelCandidates — 가로선은 선 바로 위·아래(왼쪽 끝·오른쪽 끝·가운데), 세로선은 위·아래 줄의 좌우", () => {
+  const plot = { x0: 0, y0: 0, x1: 200, y1: 100 };
+  const id = (v) => v;
+  const h = lineLabelCandidates("h", 50, { plot, px: id, py: id, xEnd: 180 });
+  assert.deepEqual(h[0], { x: 6, y: 46, align: "left" }); // 종전 자리(왼쪽 위)가 첫 후보
+  assert.ok(h.some((c) => c.align === "right" && c.x === 174));
+  assert.ok(h.every((c) => Math.abs(c.y - 50) <= 13));
+  const v = lineLabelCandidates("v", 120, { plot, px: id, py: id });
+  assert.deepEqual(v[0], { x: 123, y: 12, align: "left" }); // 종전 자리(선 오른쪽 윗줄)가 첫 후보
+  assert.deepEqual(v[1], { x: 117, y: 12, align: "right" });
+  assert.ok(v.some((c) => c.y > 50), "아래 줄 후보도 있다");
 });

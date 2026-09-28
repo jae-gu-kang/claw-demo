@@ -10,13 +10,17 @@ import는 VIEWS 객체 **밖**이라 blocks.test.js의 nav 정규식 가드에 �
 보여 주는"), 패널은 떠 있어 답을 계속 읽는다. 키 없는 배포는 서버 사유
 문장이 패널에 그대로 뜬다(조용한 비표시 금지).
 
+쇼케이스 진행기(views/showcase.js)는 `askPreset(question)`으로 이 위젯을 **같은 길**로 부른다 —
+패널을 열고 질문을 칸에 앉힌 뒤 [묻기]와 같은 run()을 태운다(요청 조립은 한 벌). 결과를
+{ok, summary?, error?}로 돌려받아 제 카드의 완료 줄로 쓴다.
+
 ESC 전역 리스너는 이 리포 최초다 — 열려 있을 때만 닫고, preventDefault를
 하지 않아 캔버스 스코프의 기존 Escape(영향성 선택 해제)와 충돌하지 않는다.
 */
 
 import { api, errorText, watchJob } from "../api.js";
 import { clear, el } from "../dom.js";
-import { TAB_HASHES, normalizeAnswer } from "../lib/ask.js";
+import { TAB_HASHES, answerCaption, normalizeAnswer } from "../lib/ask.js";
 import { walkPages } from "../lib/blocks.js";
 import { SUBSYSTEMS } from "./subsystems.js";
 
@@ -26,6 +30,15 @@ let jobId = null;       // 진행 중 잡 — 이중 제출 방지의 한 축
 let submitting = false; // await 앞 동기 플래그 — 더블클릭 이중 과금 방지 (전 기능 규약)
 let llm = null;         // /llm/status — 성공만 캐시 (실패는 다음 열기에서 재시도)
 let lastQA = null;      // {question, norm} — 닫았다 열어도 남는다
+let preset = null;      // mount가 채운다 — 쇼케이스 진행기가 부르는 창구(askPreset)
+
+/** 쇼케이스 진행기용 — 패널을 열고 이 질문을 [묻기]와 같은 길로 보낸다. 돌려주는 것:
+ *  {ok, summary?, resultId?, error?}. 키 없는 배포는 서버 사유로 실패한다(조용한 건너뜀 금지 —
+ *  건너뜀 판정은 진행기가 먼저 한다). onJob(id)은 잡을 걸자마자 — 진행기 [■ 중단]이 취소하게. */
+export async function askPreset(question, { onJob } = {}) {
+  if (!preset) return { ok: false, error: "질문 위젯이 아직 붙지 않았다" };
+  return preset(String(question ?? ""), onJob);
+}
 
 export function mount() {
   if (mounted) return; // 한 번만 — main.js 재호출 방어
@@ -97,12 +110,13 @@ export function mount() {
     );
   };
 
-  const run = async () => {
-    if (jobId || submitting) return; // 버튼이 이미 꺼져 있다 — 방어만
+  // 돌려주는 것 {ok, …} — 버튼·Enter는 버리고, askPreset(진행기)이 받는다
+  const run = async ({ onJob } = {}) => {
+    if (jobId || submitting) return { ok: false, error: "이미 질문을 처리하는 중이다" }; // 버튼이 이미 꺼져 있다 — 방어만
     const q = input.value.trim();
     if (!q) {
       showErr("질문을 입력하십시오 — 한 줄이면 됩니다.");
-      return;
+      return { ok: false, error: "질문이 비었다" };
     }
     submitting = true;
     syncUi();
@@ -111,6 +125,7 @@ export function mount() {
       busyLine.textContent = "";
       const sub = await api.post("/llm/ask", { question: q });
       jobId = sub.id;
+      onJob?.(sub.id);
       syncUi();
       busyLine.textContent = "답을 만드는 중…";
       // 서버의 단계 보고("호출 중"·"답 정리 중")를 그대로 흘린다 — 다른 기능과
@@ -129,8 +144,10 @@ export function mount() {
       paintAnswer();
       // 첫 액션 자동 이동 — 패널은 떠 있어 답을 계속 읽는다
       if (norm.actions.length) location.hash = norm.actions[0].hash;
+      return { ok: true, resultId: done.result_id, summary: answerCaption(norm) };
     } catch (e) {
       showErr(errorText(e));
+      return { ok: false, error: errorText(e) };
     } finally {
       jobId = null;
       submitting = false;
@@ -138,7 +155,7 @@ export function mount() {
       syncUi();
     }
   };
-  askBtn.onclick = run;
+  askBtn.onclick = () => run(); // 클릭 이벤트를 옵션 자리로 넘기지 않는다
 
   const panel = el("div", { class: "ask-panel", hidden: true },
     el("div", { class: "ask-head" },
@@ -166,6 +183,14 @@ export function mount() {
     }
   }
   fab.onclick = () => setOpen(!isOpen);
+  preset = async (q, onJob) => {
+    // 상태를 먼저 안다 — 모른 채 run()을 태우면 꺼진 버튼 뒤에서 제출이 나간다
+    if (llm == null) await loadStatus();
+    setOpen(true);
+    input.value = q;
+    if (!llm?.available) return { ok: false, error: llm?.reason ?? "LLM 상태를 알 수 없다" };
+    return run({ onJob });
+  };
   // 열려 있을 때만 닫는다 — preventDefault 없음 (다른 Escape 소비자와 공존)
   window.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && isOpen) setOpen(false);

@@ -53,10 +53,13 @@ meta: {generatedAt, server, engine} · validation: [{key, ok, detail}] · gainTa
   review — 검토 (엔진 검증 → 기본값 대비 Δ → 주의)
   trace  — 추적성 체크리스트 (파라미터 → 코드 줄)
   foot   — 이 코드가 무엇인지에 대한 설명
-  hasTrace() — 추적성 표가 지금 형식에서 성립하는가 (칩 배지·숨김 판정용) */
+  hasTrace() — 추적성 표가 지금 형식에서 성립하는가 (칩 배지·숨김 판정용)
+
+onFlight(data, error) — 탑재 C 응답이 **자리를 잡았을 때**(받아 옴·캐시 적중·실패) 한 번 부른다.
+Autocode 탭의 쇼케이스 신호가 두 지문을 읽는 자리다 — 없으면 아무 일도 없다. */
 export function createCodePanel({
   specs, meta, validation = [], gainTables = null, scheduleOff = null,
-  langs = LANGS.map((l) => l[0]), flightMerged = false, onPaint = null,
+  langs = LANGS.map((l) => l[0]), flightMerged = false, onPaint = null, onFlight = null,
 }) {
   // 어떤 형식 탭을 노출할지는 부르는 쪽이 정한다 — Autocode 탭은 종류(형상/탑재)를
   // 이미 위에서 고르게 하므로 여기서 다시 세 개를 늘어놓으면 선택지가 흩어진다.
@@ -121,6 +124,7 @@ export function createCodePanel({
       flight.error = null; // flightView는 error를 data보다 먼저 본다 — 옛 실패가 좋은 캐시를 덮지 않게
       flight.seed = false;
       paint();
+      onFlight?.(flight.data, null);
       return;
     }
     flight.loading = true;
@@ -139,6 +143,7 @@ export function createCodePanel({
       flight.loading = false;
       paint();
     }
+    onFlight?.(flight.data, flight.error);
   };
 
   let current = build();

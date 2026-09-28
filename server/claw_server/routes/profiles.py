@@ -1,4 +1,4 @@
-"""기체 프로파일 라우트 (02 §5.6) — 목록·조회·생성·갱신·삭제·검증·CSV 표 판독.
+"""기체 프로파일 라우트 (02 §5.6) — 목록·조회·생성·갱신·삭제·검증·CSV 표 판독·쇼케이스 기체 설치.
 
 기체 문서는 웹에서만 만들고 고친다. 내보내기는 조회(GET)의 `document`, 가져오기는 생성(POST)이다 —
 같은 검증을 두 번 적지 않는다. 검증 오류는 422이고 detail이 문서 안 경로를 싣는다(웹 편집기가 칸을
@@ -125,6 +125,46 @@ def profile_form() -> dict:
     기체 id는 `_`로 시작할 수 없으므로(저장소 규칙) 이 경로는 기체 조회와 겹치지 않는다 — 이 선언이
     `/profiles/{profile_id}`보다 앞에 있어야 한다."""
     return form_spec()
+
+
+def _showcase_document() -> dict:
+    """쇼케이스 기체 문서(엔진 패키지 데이터, 검증된 사본) — 라우트가 부르는 한 자리.
+
+    엔진 로더를 부를 때 import한다(모듈 import 시점이 아니라) — 테스트가 이 함수를 합성 문서로 갈아끼운다."""
+    from claw.profile.document import load_showcase
+
+    return load_showcase()
+
+
+def _showcase_checked(request) -> dict:
+    """저장 규칙까지 넘긴 쇼케이스 문서 — 조회와 설치가 같은 문서를 말하게(조회는 되는데 설치가 422인 일이 없게)."""
+    try:
+        return request.app.state.profiles.checked(_showcase_document())
+    except ProfileError as e:  # 패키지 문서가 저장 규칙을 못 넘는다 — 요청이 아니라 배포 결함이라 500
+        raise HTTPException(status_code=500, detail=profile_error_detail(e))
+    except (ImportError, OSError, ValueError) as e:
+        # 패키지 파일 없음·손상 JSON·로더 없는 엔진 — 역시 배포 결함. 맨 500이면 진행기가 사유 없이 멈춘다
+        raise HTTPException(status_code=500, detail={
+            "path": "", "message": f"쇼케이스 기체 문서를 읽을 수 없다 — {type(e).__name__}: {e}"})
+
+
+@router.get("/profiles/_showcase")
+def showcase_document(request: Request) -> dict:
+    """쇼케이스 기체 문서 — 설치하지 않고 본다. `_`로 시작하는 경로라 기체 조회와 겹치지 않는다(_form과 같은 자리)."""
+    doc = _showcase_checked(request)
+    return {"document": doc, "fingerprint": build_profile(doc, validated=True).fingerprint}
+
+
+@router.post("/profiles/_showcase/install")
+def install_showcase(request: Request) -> dict:
+    """쇼케이스 기체를 편집 가능한 저장 기체로 설치·초기화 — 없으면 생성, 최신이 패키지 문서와 다르면 그 문서를
+    새 리비전으로(이력은 남는다), 같으면 그대로. 몇 번을 불러도 결과가 같다(쇼케이스 진행기의 준비 단계).
+
+    휘발 저장소(재시작·슬립 복귀마다 비워짐)에서는 다시 불러 되살린다 — `volatile`로 그 사실을 함께 준다."""
+    doc, rev, action = request.app.state.profiles.install(_showcase_checked(request))
+    return {"id": doc["id"], "revision": rev, "action": action,
+            "fingerprint": build_profile(doc, validated=True).fingerprint,
+            "volatile": bool(getattr(request.app.state, "profile_volatile", False))}
 
 
 @router.get("/profiles/{profile_id}")

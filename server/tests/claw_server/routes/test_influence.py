@@ -128,6 +128,84 @@ def test_diagnose_round_trip(client, wait_job):
     json.dumps(body, allow_nan=False)  # NaN을 흘리면 브라우저 파싱이 터진다
 
 
+def _watch_dict(seen):
+    """접근 기록 dict — 엔진이 신호를 무엇을 읽는지 센다(통째로 훑으면 "*전체*")."""
+
+    class Watch(dict):
+        def __getitem__(self, k):
+            seen.add(k)
+            return super().__getitem__(k)
+
+        def get(self, k, default=None):
+            seen.add(k)
+            return super().get(k, default)
+
+        def __contains__(self, k):
+            seen.add(k)
+            return super().__contains__(k)
+
+        def __iter__(self):
+            seen.add("*전체*")
+            return super().__iter__()
+
+        def keys(self):
+            seen.add("*전체*")
+            return super().keys()
+
+        def items(self):
+            seen.add("*전체*")
+            return super().items()
+
+        def values(self):
+            seen.add("*전체*")
+            return super().values()
+
+    return Watch
+
+
+def test_diagnose_parses_only_the_signals_the_engine_reads(client, wait_job, monkeypatch):
+    """진단은 DIAGNOSE_SIGNALS만 먼저 파싱한다(예제 750 s 본문에서 통째 파싱은 서버 힙 +216 MB) — 그 목록이
+    엔진 diagnose_run이 실제로 읽는 신호를 다 덮는지 감시 dict로 보고, 골라 읽은 응답이 통째 읽기와 같은지 본다.
+    엔진이 새 신호를 읽기 시작하면(또는 신호를 통째로 훑으면) 여기서 빨개진다."""
+    from claw.pipeline.diagnose import diagnose_run
+    from claw.profile import example_profile
+    from claw_server.routes import influence as influence_route
+    from claw_server.routes.influence import DIAGNOSE_SIGNALS, DiagnoseIn, to_shape
+
+    rid = _run_sim(client, wait_job, t_end=4.0, actuators={"rate_max": 6.0})
+    full = client.app.state.store.load(rid)
+    seen = set()
+    diagnose_run({**full, "signals": _watch_dict(seen)(full["signals"])},
+                 to_shape(DiagnoseIn(result_id=rid), example_profile()))
+    assert seen and seen <= DIAGNOSE_SIGNALS, sorted(seen - DIAGNOSE_SIGNALS)
+
+    def body(**kw):
+        r = client.post("/api/influence/diagnose", json={"result_id": rid, **kw})
+        assert r.status_code == 200, r.text
+        out = r.json()
+        out.pop("elapsed_ms")
+        return json.dumps(out, ensure_ascii=False)
+
+    got = body()
+    # 통째 읽기와 같다 — 목록을 본문의 신호 전부로 두면 골라 읽기가 곧 통째 읽기다
+    monkeypatch.setattr(influence_route, "DIAGNOSE_SIGNALS", frozenset(full["signals"]))
+    assert body() == got
+    # 목록이 엔진보다 모자라도 답은 같다 — 목록 밖 신호는 읽는 순간 그 줄만 마저 파싱한다
+    monkeypatch.setattr(influence_route, "DIAGNOSE_SIGNALS", frozenset())
+    assert body() == got
+    monkeypatch.undo()
+
+    # 쓰지 않는 신호 줄은 파싱조차 하지 않는다 — 그 줄을 망가뜨려도 진단은 그대로다
+    # (통째 읽기였다면 본문 전체가 손상 판정 → 404)
+    assert "alpha" in full["signals"] and "alpha" not in DIAGNOSE_SIGNALS
+    path = client.app.state.store.root / f"{rid}.json"
+    lines = path.read_text(encoding="utf-8").split("\n")
+    victim = next(i for i, ln in enumerate(lines) if ln.startswith('"alpha": '))
+    lines[victim] = '"alpha": @손상@,'
+    path.write_text("\n".join(lines), encoding="utf-8")
+    assert body() == got
+
+
 def test_diagnose_missing_and_wrong_kind(client, wait_job):
     assert client.post("/api/influence/diagnose",
                        json={"result_id": "nope"}).status_code == 404

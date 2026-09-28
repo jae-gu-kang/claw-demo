@@ -377,6 +377,15 @@ export function stabilityVerdictText(j) {
   return `안정 부호 ${sign} — 부호 위반: ${spans}`;
 }
 
+/** 위반 구간 강조 곡선 — 도함수 값 중 위반 α 구간(서버 judgments.violations, 양 끝 포함) 안의 점만 남기고
+ *  밖은 null(선이 끊긴다). 그림에 겹쳐 그리면 부호를 벗어난 구간이 색으로 보인다 — 구간 판정은 서버 것 그대로. */
+export function violationSeries(x, values, spans) {
+  return x.map((a, i) => ((spans ?? []).some(([lo, hi]) => a >= lo && a <= hi) ? values[i] : null));
+}
+
+/** 문서 경고 한 줄(서버 document_warnings 한 건) — [검증]·[저장] 응답과 GET 동봉 경고가 같은 꼴로 선다. */
+export const warningLine = (w) => `주의${w.variant ? ` [형상 변형 ${w.variant}]` : ""} ${w.path} — ${w.message}`;
+
 /** 뷰어 응답의 실속 대조 한 줄 — 추출은 참고, 정본은 실속 표다. */
 export function stallNote(slice) {
   const st = slice?.stall;

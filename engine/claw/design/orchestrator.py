@@ -32,6 +32,7 @@ from claw.design.fit import fit_quality, fit_slots
 from claw.design.grid import coarse_grid
 from claw.design.linmodels import LinearModelSet
 from claw.design.points import (
+    AXES,
     ROLE_ANCHOR,
     ROLE_BREAKPOINT,
     ROLE_RANK,
@@ -42,7 +43,7 @@ from claw.design.points import (
 )
 from claw.design.refine import refine_trim_points
 from claw.design.schedmap import margin_delta, midpoint_validation_points, scheduled_margin_map
-from claw.design.tune import REASON_TEXT, TuneTargets, tune_points
+from claw.design.tune import REASON_TEXT, TuneTargets, failed_gain_slots, tune_points
 from claw.env import isa_atmosphere
 from claw.tables import PolyTable, Table
 
@@ -60,6 +61,21 @@ _SEAL_AFTER = 2  # 연속 무효 횟수 — 이 이상이면 그 (점, 자리, v
 # (예산 60)에서 요구 60개 중 0개, 기본 테스트 설정(예산 24)에서도 21개 중 2개만
 # 들어갔다. REFINE에 예산을 다 주지 않고 이 비율만큼 남긴다 [기본값]
 _VALIDATION_RESERVE_FRAC = 0.25
+# 작동기 동특성의 마지막 폴백 — config도 기체 작동기도 없을 때(프로파일 없이 엔진을 직접
+# 부르는 경우)만 쓴다. 서버 경로는 늘 기체 문서의 actuator를 넘긴다(design_inputs). 값은
+# 마진 조성 기본값(pipeline.criteria.MarginComposition)과 같다 — 두 화면이 같은 점에서
+# 다른 마진을 말하지 않게(드리프트는 test_eval_criteria가 지킨다). 어느 값을 썼는지는
+# report의 actuator.source가 말한다 — 폴백을 기체 값인 척하지 않는다
+ACTUATOR_FALLBACK = {"wn": 30.0, "zeta": 0.7}
+# 스케줄 적합 축 [기본값] — 산출 표가 가는 곳(기체 문서 law.gain_tables·게인 탭)이 마하 1축
+# 표만 받는다(profile/schema.py _table_mach). 고도 변동이 지배적인 자리를 고도 표로 적합하면
+# apply-gains가 422로 거부됐다(실측: 고도 2개 설정에서 pitch.kp가 alt 표). 제한 밖 축의
+# 변동은 적합 보고(axes_excluded)에 남고, 그 변동이 마진을 깨는지는 VERIFY가 반출될 마하
+# 표로 판정한다. 런타임 스케줄은 mach·alt·fuel을 다 받으므로 API로 넓힐 수는 있으나,
+# 그 결과는 문서에 반영할 수 없다(apply-gains 422). 표현(fit_mode)과 직교한다 — 지배 축
+# 선택(v1.47 "1축 = 지배 축")은 이 축 안에서 한다. 표 모드에서 제한 밖 변동은 마하 분할점
+# 값의 톱니·cross_axis_residual로 드러나고(fit_quality가 잰다), 반출 표는 그대로 검증한 표다
+DEFAULT_SCHED_AXES = ("mach",)
 
 
 @dataclass
@@ -104,8 +120,13 @@ class AutoDesignConfig:
     n_validation_between: int = 1
     alts: tuple | None = None
     fuels: tuple | None = None
-    actuator_wn: float = 30.0
-    actuator_zeta: float = 0.7
+    # 스케줄 적합 축 — 위 DEFAULT_SCHED_AXES 주석. AXES(mach·alt·fuel)의 부분집합
+    sched_axes: tuple = DEFAULT_SCHED_AXES
+    # 작동기 동특성 — None = **기체 문서의 작동기**(run(actuator=…) — 서버는 선택 기체의
+    # actuator.params를 넘긴다). 수치를 주면 그 값이 이긴다(작동기 가정 연구). 종전에는
+    # 30·0.7 고정이라 기체 작동기가 달라도 설계·검증이 그 값을 봤다
+    actuator_wn: float | None = None
+    actuator_zeta: float | None = None
     delay_s: float = 0.035
     pade_order: int = 2
 
@@ -141,8 +162,14 @@ class AutoDesignConfig:
             raise ValueError(f"n_validation_between은 1~4: {self.n_validation_between}")
         if self.budget_tune_evals < 0:
             raise ValueError(f"budget_tune_evals는 음수 불가: {self.budget_tune_evals}")
-        if self.actuator_wn <= 0 or self.actuator_zeta <= 0:
-            raise ValueError("actuator_wn·actuator_zeta는 양수여야 함")
+        for name in ("actuator_wn", "actuator_zeta"):
+            v = getattr(self, name)
+            if v is not None and not v > 0:
+                raise ValueError(f"{name}은 양수 또는 없음(기체 작동기)이어야 함: {v}")
+        axes = tuple(self.sched_axes)
+        if not axes or len(set(axes)) != len(axes) or any(a not in AXES for a in axes):
+            raise ValueError(f"sched_axes는 {list(AXES)}의 중복 없는 비어 있지 않은 부분집합: {list(axes)}")
+        self.sched_axes = axes
         if self.delay_s < 0 or self.pade_order < 1:
             raise ValueError("delay_s는 음수 불가, pade_order는 1 이상")
         self._check_targets_meet_criteria()
@@ -183,6 +210,7 @@ class AutoDesignConfig:
         d = {k: v for k, v in self.__dict__.items() if k not in ("criteria", "targets")}
         d["alts"] = list(self.alts) if self.alts is not None else None
         d["fuels"] = list(self.fuels) if self.fuels is not None else None
+        d["sched_axes"] = list(self.sched_axes)
         d["criteria"] = self.criteria.to_dict()
         d["targets"] = self.targets.to_dict()
         return d
@@ -192,7 +220,7 @@ class AutoDesignConfig:
         d = dict(d)
         d["criteria"] = MarginCriteria.from_dict(d["criteria"])
         d["targets"] = TuneTargets.from_dict(d["targets"])
-        for k in ("alts", "fuels"):
+        for k in ("alts", "fuels", "sched_axes"):
             if d.get(k) is not None:
                 d[k] = tuple(d[k])
         return cls(**d)
@@ -285,6 +313,26 @@ class _Cancelled(Exception):
     pass
 
 
+def design_inputs(built) -> dict:
+    """BuiltProfile → DesignSession.run의 기체 인자 묶음 — 서버 라우트·생성 스크립트의 한 경로.
+
+    {aircraft, stall_table, limits, db_ranges, design, rate_filters, actuator}. 기체가 주는 값은
+    **전부 여기서** 뽑는다 — 호출자마다 따로 뽑으면 한 곳이 빠뜨린다(종전에는 작동기가 빠져 설계·
+    검증이 늘 config의 30·0.7을 봤다). 게인 미설계 등 문서 문제는 ProfileError로 그대로 올린다
+    (서버가 202 전에 422로 낸다). 작동기는 wn·zeta 두 칸만 싣는다 — 위치·속도 한계는 선형 마진
+    조성에 들어가지 않는다(선형 모델은 포화를 모른다)."""
+    act = built.actuator_params()
+    return {
+        "aircraft": built.aircraft(),
+        "stall_table": built.stall_table(),
+        "limits": built.structural_limits(),
+        "db_ranges": built.db_ranges(),
+        "design": built.design_gains(),
+        "rate_filters": built.rate_filters(),
+        "actuator": {k: act.get(k) for k in ("wn", "zeta")},
+    }
+
+
 def _seal_key(case, loop, verdict) -> str:
     """봉인 키 — 문자열이라야 세션 왕복(JSON)에서 살아남는다."""
     return f"{case}|{loop}|{verdict}"
@@ -319,6 +367,9 @@ class DesignSession:
         # 같은 자리에서 초기화·직렬화한다. 왕복에서 빠지면 재개한 세션이 조용히
         # 필터 없는 플랜트로 되돌아간다 (이 모듈 머리말의 '완전 왕복' 전제)
         self.rate_filters: dict = {}
+        # 기체 작동기 {wn, zeta} — rate_filters와 같은 성격(프로파일이 주는 값)이라 같은
+        # 규약으로 초기화·직렬화한다. config.actuator_wn·zeta가 수치면 그쪽이 이긴다(_act_kw)
+        self.actuator: dict = {}
         self.gain_samples: dict = {}
         self.tune_meta: dict = {}
         self.promoted_gains: dict = {}  # {slot: {이름: 값}} — valley 승격 breakpoint의 게인
@@ -352,10 +403,29 @@ class DesignSession:
         if on_progress is not None and on_progress(done, total, f"[{self.stage}] {message}"):
             raise _Cancelled()
 
-    def _act_kw(self):
+    def actuator_used(self) -> dict:
+        """이 세션이 튜닝·검증·분류에 쓰는 작동기 — {wn, zeta, source: {wn, zeta}, delay_s, pade_order}.
+
+        우선순위: config 수치(명시 — 작동기 가정 연구) > 기체 작동기(run(actuator=…)) >
+        ACTUATOR_FALLBACK(엔진 직접 호출용). source가 어느 쪽인지 말한다 — 폴백을 기체 값인
+        척하지 않는다."""
         c = self.config
-        return dict(actuator_wn=c.actuator_wn, actuator_zeta=c.actuator_zeta,
-                    delay_s=c.delay_s, pade_order=c.pade_order,
+        out = {"source": {}}
+        for key, cfg_v in (("wn", c.actuator_wn), ("zeta", c.actuator_zeta)):
+            prof_v = self.actuator.get(key)
+            if cfg_v is not None:
+                out[key], out["source"][key] = float(cfg_v), "config"
+            elif prof_v is not None:
+                out[key], out["source"][key] = float(prof_v), "profile"
+            else:
+                out[key], out["source"][key] = float(ACTUATOR_FALLBACK[key]), "default"
+        out["delay_s"], out["pade_order"] = float(c.delay_s), int(c.pade_order)
+        return out
+
+    def _act_kw(self):
+        act = self.actuator_used()
+        return dict(actuator_wn=act["wn"], actuator_zeta=act["zeta"],
+                    delay_s=act["delay_s"], pade_order=act["pade_order"],
                     rate_filters=dict(self.rate_filters))
 
     # ── 스테이지 ──
@@ -432,7 +502,39 @@ class DesignSession:
             # 표 모드에서는 위 세 개가 쓰이지 않는다 (fit.fit_slots 머리말) — 값을 계속
             # 넘기는 것은 왕복·저장물의 형상을 표현에 따라 갈리지 않게 두려는 것이다
             "mode": c.fit_mode,
+            # 스케줄 축 제한은 표현과 직교한다 — 두 표현 모두 이 축 안에서 지배 축을 고른다
+            "axes": c.sched_axes,
         }
+
+    def _fit_exclusions(self) -> dict:
+        """적합에서 뺄 표본 — {게인 자리: {점 이름: {loop, reason, basis}}} (fit.fit_slots의 exclude).
+
+        규칙은 tune.failed_gain_slots 한 곳이다(분류기의 게인 주입·시드 중앙값도 같은 규칙을 쓴다). 두 겹이다
+        (사용자 합의 규칙 2026-09-27):
+        - basis "own" — 그 자리의 튜닝이 **성립하지 않았다**(tune.SLOT_DESIGN_FAILED). 실패한 튜닝이 남기는
+          게인은 자리값이다(댐퍼를 끈 0, 뒤집힌 루프의 백오프 해) — 표본이 아니다.
+        - basis "rate_loop" — 실패한 레이트 루프 **뒤에 닫히는** 같은 축 자리(요 실패 → 롤 댐퍼·롤 자세, 롤
+          댐퍼 실패 → 롤 자세, 피치 댐퍼 실패 → 피치 자세)는 그 실패한 조성 위에서 튜닝됐다 — S1 표 모드 실측:
+          롤 댐퍼 0 위의 roll.kp 0.32·ki 0.035(M0.1077/h0, 이웃 2.1·0.9), M0.113/h3000에서는 ki 0.0056(이웃 약
+          1.2 — 216배 튐). 요 실패 점의 롤 댐퍼는 요 = 0인 프리픽스에서 찾은 값이라 같은 이유로 뺀다.
+        target_unreached·capped는 빼지 않는다 — 목표엔 못 갔어도 **작동하는 댐퍼를 냈다**(tune 머리말).
+        """
+        out: dict = {}
+        for name, slots in (self.tune_meta.get("slots") or {}).items():
+            for gslot, rec in failed_gain_slots(slots).items():
+                out.setdefault(gslot, {})[name] = rec
+        return out
+
+    def excluded_samples(self) -> list:
+        """적합에서 뺀 튜닝 표본 전부 — [{slot, point, value, loop, reason, basis}] (fits 보고에서 모은다).
+
+        보고·화면이 "이 표의 어느 점이 튜닝값이 아니라 이웃 보간인가"를 말할 수 있게 한다. 뺀 점도 VERIFY는
+        그대로 판정한다 — 판정 대상은 그 점의 **보간 게인**이다."""
+        rows = []
+        for slot, rep in sorted(self.fits.items()):
+            for r in rep.get("excluded_samples") or ():
+                rows.append({"slot": slot, **r})
+        return rows
 
     def _stage_fit(self, cb):
         # 승격·재적합 게인을 샘플에 합류 — 그 점 근방의 적합이 처방 의도를 따라가게
@@ -450,7 +552,7 @@ class DesignSession:
                 # 덮어써 같은 점이 영원히 재분류된다 (이터 예산만 태운다). 앵커에 대한
                 # 주입 처방은 이제 분류기가 아예 안 낸다 — fit_residual로 간다
                 target.setdefault(name, value)
-        out = fit_slots(samples, self.points, **self._fit_params())
+        out = fit_slots(samples, self.points, exclude=self._fit_exclusions(), **self._fit_params())
         self.sched_tables = out["tables"]
         self.sched_constants = out["constants"]
         self.fits = out["reports"]
@@ -635,6 +737,26 @@ class DesignSession:
                 f"트림 미수렴 점 {cov['not_trimmed']}개는 아무것도 보지 못했다 —"
                 " 실패 목록에도 판정 수에도 들어가지 않는다"
             )
+        dropped = self.excluded_samples()
+        if dropped:
+            by_slot: dict = {}
+            for r in dropped:
+                by_slot[r["slot"]] = by_slot.get(r["slot"], 0) + 1
+            pts = len({r["point"] for r in dropped})
+            out.append(
+                f"튜닝이 성립하지 않은 표본 {len(dropped)}개(점 {pts}곳 · "
+                + " · ".join(f"{k} {n}" for k, n in sorted(by_slot.items()))
+                + ")를 적합에서 뺐다 — 그 점의 스케줄 값은 튜닝값이 아니라 이웃 보간이고, 검증은 그 보간값으로 했다"
+            )
+        for slot, rep in sorted(self.fits.items()):
+            held = rep.get("exclusion_withheld")
+            if held:
+                # 규칙이 못 지켜진 자리다 — 표가 튜닝 실패 표본(자리값)을 담고 있다. 조용히 두면 "실패 표본은
+                # 표에 안 들어간다"는 보장이 거짓이 된다
+                out.append(
+                    f"{slot}: 튜닝 실패 표본 {len(held['samples'])}개를 빼면 {held['kept_would_be']}개만 남아"
+                    " 제외를 보류했다 — 이 자리의 표는 실패 표본을 담고 있다"
+                )
         return out
 
     def shortfall_ledger(self) -> list:
@@ -694,13 +816,18 @@ class DesignSession:
 
         # ② 자동 튜닝이 설계 목표를 못 채운 자리 — 검증에서 합격선을 넘기면 실패
         #    목록에 안 나오지만, "목표를 못 맞췄다"는 사실 자체가 보고 대상이다
+        #    적합에서 뺀 게인 자리를 행에 붙인다 — 그 점의 스케줄 값은 튜닝값이 아니라 이웃 보간이다
+        excluded: dict = {}
+        for r in self.excluded_samples():
+            excluded.setdefault((r["point"], r["loop"]), []).append(r["slot"])
         for name, slots in (self.tune_meta.get("slots") or {}).items():
             for loop, rec in slots.items():
                 if rec.get("status") == "ok":
                     continue
                 add(name, loop, "tune", REASON_TEXT.get(rec.get("reason")),
                     reason=rec.get("reason"), status=rec.get("status"),
-                    target=rec.get("target"), achieved=rec.get("achieved"))
+                    target=rec.get("target"), achieved=rec.get("achieved"),
+                    fit_excluded=sorted(excluded.get((name, loop), ())))
         for name in self.tune_meta.get("skipped", ()):
             add(name, None, "skipped",
                 "튜닝을 건너뛴 점 — 트림 미수렴이거나 엔벨로프 경계다 (게인 샘플이 없다)")
@@ -783,6 +910,10 @@ class DesignSession:
             # 덮인 값)를 쓰면 자유 게인 최적이 적합 결과에 끌려가 g_opt가 틀린다
             criteria=c.criteria, design_base=self.design, targets=c.targets,
             tol_plant=c.refine_tol, tol_gain=c.tol_gain, **self._act_kw(),
+            # 실패마다 진행 보고 — 여기가 한 실행에서 가장 긴 구간일 수 있다(실측: 실패
+            # 56개 ≈ 25 s, 325개 ≈ 100 s). cb는 취소 요청이면 _Cancelled를 던진다 — 상태를
+            # 아직 안 바꿨으므로 CLASSIFY부터 그대로 재개된다
+            on_progress=lambda d, t, m: cb(d, t, m),
         )
         cb(1, 1, "classify")
         # 두 번 반영해도 판정이 안 움직인 처방은 다시 내지 않는다 — 무효인 줄 알면서
@@ -914,8 +1045,8 @@ class DesignSession:
                     # 다른 축 샘플을 평균) 탓이라 조이기로는 안 풀린다 — 사유를 달아
                     # 건너뛰되 applied로는 센다(위 상한 분기와 같은 규약: effect 레코드가
                     # 안 생기면 채점·봉인에서 빠져 매 이터 다시 잡힌다)
-                    a["skipped"] = ("표 모드 — 조일 적합이 없다. 이 어긋남은 지배 축 하나로"
-                                    " 펴면서 다른 축 샘플을 평균한 대가이고, 다축 표가"
+                    a["skipped"] = ("표 모드 — 조일 적합이 없다. 이 어긋남은 스케줄 축(sched_axes"
+                                    " — 기본 마하) 하나로 펴면서 다른 축 샘플을 평균한 대가이고, 다축 표가"
                                     " 있어야 풀린다 [백로그 05 §9]")
                 elif self.fit_tighten >= _FIT_TIGHTEN_MAX:
                     a["skipped"] = f"적합 조이기 상한({_FIT_TIGHTEN_MAX}회) 도달 — 더 조일 수 없다"
@@ -965,7 +1096,7 @@ class DesignSession:
 
     # ── 실행 ──
     def run(self, aircraft, stall_table, limits, db_ranges, design, *,
-            rate_filters=None, fingerprint="", on_progress=None) -> dict:
+            rate_filters=None, actuator=None, fingerprint="", on_progress=None) -> dict:
         """현 스테이지부터 계속 실행 — DONE·awaiting_approval·취소에서 멈춘다.
 
         rate_filters: 법칙의 레이트 경로 필터 {그룹: 스펙}. `design`과 같이 **비행체
@@ -976,12 +1107,19 @@ class DesignSession:
         **None은 "안 바꾼다"**이지 "필터 없음"이 아니다 — 재개 호출이 인자를
         생략해도 저장된 값(from_dict가 복원한 것)을 이어간다. 필터를 실제로
         비우려면 빈 dict를 명시한다.
+
+        actuator: 기체 작동기 {wn, zeta}(BuiltProfile.actuator_params()의 그 두 칸) —
+        rate_filters와 같은 규약(None = 안 바꾼다). config.actuator_wn·zeta가 수치면
+        그쪽이 이긴다(actuator_used).
         """
         self.design = dict(design)
         # None은 "안 바꾼다" — 재개 호출이 인자를 안 주면 저장된 값을 이어간다.
         # dict(rate_filters or {})로 덮으면 재개가 조용히 필터 없는 플랜트로 돌아간다.
         if rate_filters is not None:
             self.rate_filters = dict(rate_filters)
+        if actuator is not None:
+            self.actuator = {k: float(actuator[k]) for k in ("wn", "zeta")
+                             if actuator.get(k) is not None}
         if self.status == "awaiting_approval":
             return self.report()  # 승인 없이 재호출 — 상태 유지 (apply_actions가 풀어 준다)
         self.status = "running"
@@ -1043,11 +1181,18 @@ class DesignSession:
             # (표 모드는 재양자화가 없어 반출 표가 검증받은 표 그 자체다)
             "fit_mode": c.fit_mode,
             "fit_tighten": self.fit_tighten,
+            # 튜닝이 성립하지 않아 적합에서 뺀 표본 — 그 점의 게인은 이웃 보간이다(표에 자리값 0이 안 박힌다).
+            # 보류(표본이 2개 미만으로 남아 못 뺀 자리)는 따로 센다 — 그 자리의 표는 실패 표본을 담고 있다
+            "excluded_samples": self.excluded_samples(),
+            "exclusion_withheld": sorted(slot for slot, rep in self.fits.items()
+                                         if rep.get("exclusion_withheld")),
             # 적합 품질 경고 수 — 문턱을 켠 실행에서만 0이 아닐 수 있다 (04 §10)
             "fit_quality_warns": sum(
                 1 for rep in self.fits.values()
                 if (rep.get("quality") or {}).get("status") == "warn"),
             "criteria_fingerprint": c.criteria.fingerprint(),
+            # 튜닝·검증이 본 작동기와 그 출처(config·profile·default) — 판정 조성의 일부다
+            "actuator": self.actuator_used(),
         }
 
     # ── 직렬화 ──
@@ -1060,6 +1205,7 @@ class DesignSession:
             "trims": {n: _trim_to_dict(tr) for n, tr in self.trims.items()},
             "design": dict(self.design),
             "rate_filters": {g: dict(f) for g, f in self.rate_filters.items()},
+            "actuator": dict(self.actuator),
             "gain_samples": {s: dict(v) for s, v in self.gain_samples.items()},
             "tune_meta": self.tune_meta,
             "promoted_gains": {s: dict(v) for s, v in self.promoted_gains.items()},
@@ -1088,6 +1234,8 @@ class DesignSession:
         s.trims = {n: _trim_from_dict(td) for n, td in d["trims"].items()}
         s.design = dict(d.get("design", {}))
         s.rate_filters = {g: dict(f) for g, f in d.get("rate_filters", {}).items()}
+        # 옛 저장물에는 없다 — 그때 config에 작동기 수치가 명시돼 있어(30·0.7) 그쪽이 이긴다
+        s.actuator = {k: float(v) for k, v in (d.get("actuator") or {}).items()}
         s.gain_samples = {k: dict(v) for k, v in d.get("gain_samples", {}).items()}
         s.tune_meta = d.get("tune_meta", {})
         s.promoted_gains = {k: dict(v) for k, v in d.get("promoted_gains", {}).items()}

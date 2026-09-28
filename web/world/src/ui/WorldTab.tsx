@@ -5,7 +5,8 @@ import {
   type CommsLine, type SpeechState,
 } from "../core/comms.ts";
 import {
-  readTour, tourMismatch, tourReady, tourShouldEnd, tourStopped, type WorldTour,
+  TOUR_CAM_MODE, TOUR_VEHICLE_LATE_NOTE, TOUR_VEHICLE_WAIT_MS, readTour, tourAwaitsVehicle, tourMismatch, tourReady,
+  tourShouldEnd, tourStopped, type WorldTour,
 } from "../core/tour.ts";
 import {
   errorText, fetchCommsBody, fetchLlmStatus, findCommsFor, requestComms, watchJob,
@@ -69,6 +70,10 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   const [playing, setPlaying] = useState(false);
   const [playable, setPlayable] = useState(false);
   const [shownId, setShownId] = useState<string | null>(null);
+  // 이 런의 기체가 섰나(모델·도식·궤적만 판정 끝) — 컨트롤러 `onVehicle`. 투어는 이것을 기다린다
+  const [vehicleSettled, setVehicleSettled] = useState(false);
+  // 기체를 기다린 상한(TOUR_VEHICLE_WAIT_MS)이 지났다 — 투어는 기체 없이 시작하고 그 사실을 한 줄로 말한다
+  const [vehicleLate, setVehicleLate] = useState(false);
   const [stats, setStats] = useState<FrameStats | null>(null);
   const [speed, setSpeed] = useState(5);
   const [cursor, setCursor] = useState(0);
@@ -183,6 +188,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
         markEnded();
       },
       onStats: setStats,
+      onVehicle: setVehicleSettled,
       onGameWps: setGameWps,
     });
     if (made.controller == null) {
@@ -215,6 +221,8 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
       try {
         await ctl.loadResults(deps.resultId);
         setStatus("");
+        // 결과가 없으면(게임 모드만 쓰는 경우) 고른 기체의 표시 모델로 — 결과가 생기면 그 런의 기체가 이긴다
+        if (ctl.resultCount === 0 && deps.selectedDocument) void ctl.vehicleFromSelection(deps.selectedDocument);
       } catch (e) {
         setStatus(`결과 목록을 불러오지 못했습니다 — ${(e as Error).message}`);
       }
@@ -535,16 +543,35 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
     // 보므로 그 창은 아무도 안 본다: 그냥 두면 중단한 뒤에 커서가 0으로 되감기고
     // 배속이 바뀌고 한 프레임 재생·음성이 번쩍인다 (리뷰 지적)
     if (tourStopped(deps.store?.get("worldTour"), tour)) return;
-    if (!tourReady(tour, { chosen, shownId, playable, commsKey: commsKeyRef.current })) return;
+    // 기체도 기다린다 — 모델은 장면 뒤에 따라와서, 장면만 보고 켜면 발사 장면이 빈 레일로 흐른다.
+    // 상한을 넘겼으면(아래 effect) 기체 없이 시작하고 그 사실을 알림줄이 말한다
+    if (!tourReady(tour, {
+      chosen, shownId, playable, commsKey: commsKeyRef.current, vehicleSettled: vehicleSettled || vehicleLate,
+    })) return;
     tourPhaseRef.current = "playing";
     const port = speechRef.current;
     if (tour.voice && port?.available) setVoiceOn(true);
     setSpeed(tour.speed);
     ctl.setSpeed(tour.speed);
+    // 첫 시점(자유 궤도)은 장면 규모로 멀어 기체가 안 보인다 — 투어는 기체를 따라간다(core/tour TOUR_CAM_MODE).
+    // 컨트롤러가 onMode로 버튼을 맞춘다(시점 정본은 컨트롤러 하나)
+    ctl.setCamMode(TOUR_CAM_MODE);
     ctl.setCursor(0);
     ctl.setPlaying(true);
     emitTour("playing");
-  }, [chosen, shownId, playable, comms, style, emitTour, deps.store]);
+  }, [chosen, shownId, playable, comms, vehicleSettled, vehicleLate, style, emitTour, deps.store]);
+
+  // 기체만 남았으면 상한을 잰다 — 모델 요청이 멈춰도 투어가 영영 안 서지는 않게(조율자 워치독 90 s 안쪽).
+  // 기체가 서거나 무엇이 바뀌면 정리 함수가 타이머를 거둔다
+  useEffect(() => {
+    const tour = tourRef.current;
+    if (tour == null || tourPhaseRef.current !== "idle" || vehicleLate) return;
+    if (!tourAwaitsVehicle(tour, {
+      chosen, shownId, playable, commsKey: commsKeyRef.current, vehicleSettled,
+    })) return;
+    const id = setTimeout(() => setVehicleLate(true), TOUR_VEHICLE_WAIT_MS);
+    return () => clearTimeout(id);
+  }, [chosen, shownId, playable, comms, vehicleSettled, vehicleLate]);
 
   // 투어가 어긋났다 — 목록에 없는 런(화면은 최신으로 조용히 폴백한다)·사용자가 바꾼
   // 선택·게임 모드 전환. 조용히 다른 런을 투어로 틀지 않고 사유를 돌려준다.
@@ -602,13 +629,14 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
   }, [voiceErr, emitTour]);
 
   // 화면이 지금 말해야 하는 한 줄 — 화면 밖에 두면 사용자가 사유를 못 본다.
-  // 순서가 곧 급한 순이다: 실패 > 투어가 거둬져 멈춤 > 화면과 선택이 갈림 > 결과 없음.
+  // 순서가 곧 급한 순이다: 실패 > 투어가 거둬져 멈춤 > 기체 없이 시작한 투어 > 화면과 선택이 갈림 > 결과 없음.
   const alert = status !== "" ? status
     : tourStopNote !== null ? tourStopNote
-      : shownId !== null && chosen !== null && shownId !== chosen
-        ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.`
-        : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다."
-          : null;
+      : vehicleLate && !vehicleSettled ? TOUR_VEHICLE_LATE_NOTE
+        : shownId !== null && chosen !== null && shownId !== chosen
+          ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.`
+          : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다."
+            : null;
 
   const drawers: ReadonlyArray<{ key: DrawerKey; label: string; n: number | null }> = [
     { key: "env", label: "환경", n: null },
@@ -696,7 +724,7 @@ export function WorldTab({ deps }: { deps: MountDeps }) {
             </>
           ) : "표본 없음"}
         </div>
-        {/* 교신 자막 (F1) — 상단 중앙, 판독(.wv-hud 좌하단)과 안 겹치는 자리.
+        {/* 교신 자막 (F1) — 상단 중앙, 판독(.wv-hud — 캔버스 하단, 자리는 app.css)과 안 겹치는 자리.
             캔버스가 보조기술에 불투명하므로 대본 전문은 「교신」 드로어에도 있다. */}
         {ccLine != null && (
           <div className="wv-cc">

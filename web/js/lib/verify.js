@@ -218,3 +218,29 @@ export function deactivatedRows(report) {
     uncovered: !d.covered_by?.length,
   }));
 }
+
+/** 신호 보고 한 줄 — 판정 + 생략 사유(엔진 요약 행의 detail 그대로). 새 판정을 만들지 않는다.
+ *  예: "통과 (생략 있음) — 실패 0건 · 생략 1건 … · 생략: 커버리지 — llvm-cov 없음". */
+export function verifyCueSummary(report) {
+  const v = verdictModel(report);
+  if (!v) return "리포트 없음";
+  const skips = (report.summary ?? []).filter((r) => r.status === "skip")
+    .map((r) => `${(r.label ?? r.key ?? "?").split(" — ")[0]} — ${r.detail ?? "사유 없음"}`);
+  return `${v.label} — ${v.line}` + (skips.length ? ` · 생략: ${skips.join(" / ")}` : "");
+}
+
+/** 판정판 머리 안내 — 결과 유무 × 실행 중. 결과가 있고 돌지 않으면 null(판정판이 스스로 말한다).
+ *  e2e(D11): 첫 검증이 도는 동안(43/100) 「아직 실행하지 않았습니다 — [검증 실행]을 누르면…」이 서 있어,
+ *  청중은 버튼을 다시 눌러야 하는 줄 알았다 — 잡이 서 있으면 도는 중이라고 말한다. */
+export function boardNotice({ hasReport, running }) {
+  if (running) {
+    return hasReport
+      ? "새 검증이 도는 중입니다 — 끝나면 이 판정판이 새 결과로 바뀝니다 (아래는 지난 결과)."
+      : "검증이 도는 중입니다 — 탑재 C 생성 → 정적 규율 → 엄격 컴파일 → 대조 미션·보강 벡터·유닛 시험 "
+        + "→ 커버리지가 끝나면 판정판과 유닛 그리드가 여기 섭니다. 진행은 위 진행줄에 있습니다.";
+  }
+  if (hasReport) return null;
+  return "아직 실행하지 않았습니다 — [검증 실행]을 누르면 지금 형상(게인·AP·스케줄 편집 "
+    + "반영)의 탑재 C를 생성해 정적·컴파일·유닛·통합 대조·커버리지를 돌리고, 판정판과 "
+    + "유닛 그리드가 여기 섭니다. Autocode 탭이 보여 주는 코드와 같은 조립입니다.";
+}

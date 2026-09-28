@@ -13,15 +13,22 @@
 
 검증 대상 선택이 없는 이유: 탑재코드는 형상 전체가 대상이다 (Autocode 탭과 같은
 계약 — 같은 조립·같은 지문, 서버 테스트가 못박는다).
+
+저장된 결과 다시 열기 — 결과 탭 브리핑의 「검증 탭에서 전체 보고서 열기」가 store `verifyOpen`
+{resultId}를 두고 이리로 온다(designOpen과 같은 인계 규약: 한 번 읽고 지운다). 저장 본문의
+report를 그대로 그리므로 판정판·유닛 그리드·커버리지 소스·인쇄 보고서가 실행 직후와 같다.
+쇼케이스 신호 `run`(lib/showcasecue.js)은 [검증 실행]과 같은 run()이다.
 */
 
-import { api } from "../api.js";
+import { api, errorText } from "../api.js";
 import { clear, el, flagBadge } from "../dom.js";
 import {
-  buildVerifyRequest, caseGroups, covCell, deactivatedRows, failedRuleCount, firstFailKey, identLine,
+  boardNotice, buildVerifyRequest, caseGroups, covCell, deactivatedRows, failedRuleCount, firstFailKey, identLine,
   mcdcCell, mismatchedOutputCount, paramSetRows, pct, sourceRows, statusFlag, truthTable,
-  uncoveredBranchCount, unitGridRows, verdictModel,
+  uncoveredBranchCount, unitGridRows, verdictModel, verifyCueSummary,
 } from "../lib/verify.js";
+import { revealPanel } from "../lib/reveal.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { store } from "../store.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { errorWithSeedLink } from "./seedlink.js";
@@ -29,7 +36,13 @@ import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
 
 // 모듈 상태 — 탭 재진입 시 유지 (실행 중 작업 재부착 포함, 전 탭 관행)
 let lastReport = null;
+let lastResultId = null; // 화면의 리포트가 사는 저장 결과 — 판정판 신원 줄에 적는다
 let runningJobId = null;
+// 처리 중인 쇼케이스 신호 — 잡이 끝나면(재부착 감시자 중 먼저 끝난 쪽이) 한 번 보고하고 지운다
+let verifyCue = null;
+// 지금 화면의 판정판 — 재부착 감시자가 둘일 때 옛 화면의 감시자가 먼저 끝나 보고해도 신호가 올리는 것은
+// 지금 화면이다(autocode captionHost와 같은 규약)
+let boardHost = null;
 let openDrawer = null;
 let selFile = null;   // 소스 뷰어에 열린 파일
 
@@ -68,10 +81,16 @@ export function render() {
   const errBox = el("div");
   const sheet = el("div", { class: "tab-sheet" }, gridBox, viewerBox);
 
+  boardHost = boardBox;
+  // 판정판은 실행 중인지 안다 — 첫 검증이 도는 동안 「아직 실행하지 않았습니다」가 서면 청중은 버튼을 다시
+  // 누르게 된다(e2e D11). 문구는 lib/verify boardNotice
+  const paintBoard = () => renderBoard(boardBox, lastReport, !!runningJobId);
   const runBtn = el("button", { class: "primary" }, "검증 실행");
+  // 잡 id가 서고 걷히는 자리마다 불린다 — 버튼과 판정판 안내가 같이 바뀐다
   const syncRunBtn = () => {
     runBtn.disabled = !!runningJobId;
     clear(runBtn).append(runningJobId ? "검증 중…" : "검증 실행");
+    paintBoard();
   };
   runBtn.onclick = () => run();
 
@@ -125,7 +144,7 @@ export function render() {
 
   const paintResult = () => {
     sheet.style.display = lastReport ? "" : "none"; // 빈 시트는 빈 띠로 보인다
-    renderBoard(boardBox, lastReport);
+    paintBoard();
     renderGrid(gridBox, lastReport, (name) => {
       selFile = selFile === name ? null : name;
       paintViewer();
@@ -141,6 +160,22 @@ export function render() {
     if (drawers.current()) drawers.repaint();
   };
 
+  // 신호가 걸려 있으면 끝을 보고한다 — 성공이면 판정 한 줄, 실패면 사유
+  const settleCue = (error, resultId = null) => {
+    const cue = verifyCue;
+    if (!cue) return;
+    verifyCue = null;
+    if (error) {
+      failCue(cue, typeof error === "string" ? error : errorText(error));
+      return;
+    }
+    revealPanel(boardHost); // 판정판 — 진행기는 보고를 받자마자 다음 탭으로 간다. 떠난 화면이면 굴리지 않는다
+    reportCue(cue, { phase: "done", summary: verifyCueSummary(lastReport), resultId,
+      data: { resultId, verdict: lastReport?.verdict ?? null,
+        structure_fp: lastReport?.structure_fingerprint ?? null,
+        param_fp: lastReport?.param_fingerprint ?? null } });
+  };
+
   const run = async () => {
     if (runningJobId) return;
     clear(errBox);
@@ -148,43 +183,90 @@ export function render() {
       const req = buildVerifyRequest(store.get, await gainsCatalog(), { tEnd: T_END });
       const submitted = await api.post("/verify/flight", req);
       runningJobId = submitted.id;
+      if (verifyCue) reportCue(verifyCue, { phase: "started", jobId: submitted.id });
       syncRunBtn();
       watch();
     } catch (e) {
       showError(errBox, e);
+      settleCue(e);
     }
   };
 
   const watch = () => attachProgress(progressBox, runningJobId, {
     onDone: async (job) => {
       runningJobId = null;
-      syncRunBtn();
+      // 버튼·판정판 안내는 결과를 그린 **뒤에** 푼다(finally) — 먼저 풀면 본문을 받는 사이 첫 실행의
+      // 판정판이 「아직 실행하지 않았습니다」로 되돌아간다(D11의 끝자락)
       try {
         if (job.status === "error") throw new Error(job.error);
         if (cancelledWithoutResult(job)) {
           showError(errBox, new Error("취소됨 — 반쪽 판정은 판정이 아니라 결과를 남기지 않습니다"));
+          settleCue("취소됨 — 반쪽 판정은 판정이 아니라 결과를 남기지 않는다");
           return;
         }
         const body = await api.get(`/results/${job.result_id}`);
         lastReport = body.report;
+        lastResultId = job.result_id;
         selFile = firstMissFile(lastReport);
         paintResult();
         const open = drawerOf(firstFailKey(lastReport));
         if (open) drawers.open(open); // 실패의 근거가 사는 패널부터
+        settleCue(null, job.result_id);
       } catch (e) {
         showError(errBox, e);
+        settleCue(e instanceof Error && !e.status ? e.message : e);
+      } finally {
+        syncRunBtn();
       }
     },
     onError: (e) => {
       runningJobId = null;
       syncRunBtn();
       showError(errBox, e);
+      settleCue(e);
     },
   });
+
+  /** 저장된 검증 결과를 그대로 연다 — 결과 탭 인계(verifyOpen). 실행 직후와 같은 그리기 경로다. */
+  const openStored = async (resultId) => {
+    try {
+      const body = await api.get(`/results/${resultId}`);
+      if (body?.kind !== "verify_flight" || !body.report) {
+        throw new Error(`결과 ${resultId}는 검증 결과가 아니다 (${body?.kind ?? "종류 없음"})`);
+      }
+      lastReport = body.report;
+      lastResultId = resultId;
+      selFile = firstMissFile(lastReport);
+      paintResult();
+      const open = drawerOf(firstFailKey(lastReport));
+      if (open) drawers.open(open);
+    } catch (e) {
+      showError(errBox, e);
+    }
+  };
 
   paintResult();
   syncRunBtn();
   if (runningJobId) watch(); // 재부착 — 실행 중 탭 이탈·재진입
+  // 결과 탭 인계 — 저장된 검증 결과의 보고서를 연다 (한 번 읽고 지운다)
+  const handed = store.get("verifyOpen");
+  if (handed) {
+    store.set("verifyOpen", null);
+    openStored(handed.resultId);
+  }
+  // 쇼케이스 신호 — [검증 실행]과 같은 run(). 이미 도는 검증이 있으면 그 끝을 보고한다
+  const cue = takeCue("verify");
+  if (cue) {
+    if (cue.action !== "run") {
+      unknownAction(cue);
+    } else if (verifyCue) {
+      failCue(cue, "검증 신호가 이미 처리 중이다");
+    } else {
+      verifyCue = cue;
+      if (runningJobId) reportCue(cue, { phase: "started", jobId: runningJobId });
+      else run();
+    }
+  }
 
   return el("div", { class: "tab-page" },
     tabTop({
@@ -206,16 +288,12 @@ function firstMissFile(report) {
   return u ? u.file : null;
 }
 
-/** 전면 대시보드 — 판정 + 검사군 카드. 결과가 없으면 무엇이 그려질지 말한다. */
-function renderBoard(box, report) {
+/** 전면 대시보드 — 판정 + 검사군 카드. 결과가 없으면 무엇이 그려질지(돌고 있으면 도는 중이라고) 말한다. */
+function renderBoard(box, report, running = false) {
   clear(box);
-  if (!report) {
-    box.append(el("p", { class: "hint" },
-      "아직 실행하지 않았습니다 — [검증 실행]을 누르면 지금 형상(게인·AP·스케줄 편집 "
-      + "반영)의 탑재 C를 생성해 정적·컴파일·유닛·통합 대조·커버리지를 돌리고, 판정판과 "
-      + "유닛 그리드가 여기 섭니다. Autocode 탭이 보여 주는 코드와 같은 조립입니다."));
-    return;
-  }
+  const notice = boardNotice({ hasReport: !!report, running });
+  if (notice) box.append(el("p", { class: "hint" }, notice));
+  if (!report) return;
   const v = verdictModel(report);
   box.append(
     el("div", { class: "vf-head" },
@@ -223,7 +301,8 @@ function renderBoard(box, report) {
       el("span", { class: "hint" }, v.line)),
     el("p", { class: "vf-ident hint" },
       identLine(report)
-      + (report.steps ? ` · 통합 대조 ${report.steps.toLocaleString()}스텝` : "")),
+      + (report.steps ? ` · 통합 대조 ${report.steps.toLocaleString()}스텝` : "")
+      + (lastResultId ? ` · 결과 ${lastResultId}` : "")),
     el("div", { class: "vf-cards" }, (report.summary ?? []).map((r) => {
       const f = statusFlag(r.status);
       const [name, sub] = r.label.split(" — ");
@@ -601,7 +680,8 @@ function renderDoc(box, report) {
   clear(box).append(
     el("div", { class: "row", style: "margin-bottom:10px" }, printBtn,
       el("span", { class: "hint" },
-        "저장된 결과 JSON이 소스까지 동봉한 자립 증적이라, 결과 탭에서 다시 열어도 같은 보고서가 나옵니다.")),
+        "저장된 결과 JSON이 소스까지 동봉한 자립 증적이라, 결과 탭 브리핑의 「검증 탭에서 전체 보고서 "
+        + "열기」로 다시 열면 이 보고서가 그대로 다시 섭니다(결과가 보존 상한에 밀려 지워지기 전까지).")),
     doc);
 }
 

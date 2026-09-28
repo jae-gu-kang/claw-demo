@@ -212,7 +212,7 @@ def test_washout_returns_the_spiral_the_yaw_damper_was_moving(lat_axes):
     assert with_wo > without, "워시아웃을 넣었는데 저주파 댐퍼 권한이 늘었다 — 부호 확인"
 
 
-def test_rate_filters_reach_the_tuner_and_change_the_design():
+def test_rate_filters_reach_the_tuner_and_change_the_design(monkeypatch):
     """`rate_filters`가 tune_point까지 실제로 흘러 **설계 결과를 바꾼다** — 배선 핀.
 
     이 배선은 네 손을 거친다: 라우트 → `DesignSession.run` → `_act_kw` →
@@ -220,35 +220,154 @@ def test_rate_filters_reach_the_tuner_and_change_the_design():
     않는 플랜트**(요 댐퍼에 워시아웃이 없는 A′)를 상대로 튜닝하는데, 그때도 기존
     테스트는 전부 통과한다 — 그래서 결과 수치로 직접 못박는다.
 
-    실측 (작동기 wn 30·ζ 0.7·지연 0.035 s):
-        M0.3/h0     roll.k_rate −0.5225(ok) → 0.0000(no_stable_gain), λ 12.000 → 2.322
-        M0.6/h1000  roll.k_rate −0.1416(ok) → −0.0482(capped),        λ 12.000 → 4.740
+    원인은 test_washout_returns_the_spiral_the_yaw_damper_was_moving가 고정한 것 — 워시아웃이 나선 주파수에서 요
+    댐퍼 권한을 없애 댐퍼만 닫은 조성에 **느린 나선 발산**이 남는다. 종전 가드("극 전부 안정")는 그 나선을 보고 롤
+    댐퍼를 끄거나 깎았다(M0.3/h0 −0.5225 → 0 no_stable_gain, λ 2.32 · M0.6/h1000 → −0.0482 capped, λ 4.74). 이제
+    가드는 비행성 기준 나선선(자세 루프가 빠진 고장 상태라 수준 2 — 배가 8 s 이상)의 나선을 면제하고 — 나선은
+    자세 루프 몫이다 — 자세까지 닫은 전체 폐루프를 따로 확인한다. 필터의 흔적은 롤 게인이 아니라 **면제된 나선의
+    배가시간**과 요 게인에 남는다.
 
-    원인은 test_washout_returns_the_spiral_the_yaw_damper_was_moving가 고정한 것 —
-    워시아웃이 나선 주파수에서 요 댐퍼 권한을 없애고, 롤은 요를 닫은 뒤 튜닝되므로
-    남은 나선근이 안정 캡을 문다. 종전 λ 12.0 달성이 **없는 권한에 기대고 있었다.**
+    실측 (작동기 wn 30·ζ 0.7·지연 0.035 s, 필터 없음 → 워시아웃, 요 목표 기본 0.6):
+        M0.3/h0     roll.k_rate −0.5225 → −0.5225 (λ 12), yaw.k_rate 0.7812 → 0.6966, 나선 배가 없음 → 52.9 s
+        M0.6/h1000  roll.k_rate −0.1416 → −0.1416 (λ 12), yaw.k_rate 0.4207 → 0.3924, 롤 나선 배가 없음 → 588 s
+    요 게인은 네 경우 모두 2차 패스(롤을 닫은 최종 조성에서 목표에 처음 닿는 크기)다. 1차 패스(롤 열림)는 필터
+    없음 M0.3에서 0.966에 닿았고(최종 조성 ζ_dr 0.718 — 과감쇠), 워시아웃 M0.3에서는 못 닿아 argmax 1.0이었다.
+    이력: 요 2차 패스가 닿은 자리에도 돌게 된 뒤(tune._retune_with_later_closed, 목표 0.5) 필터 없음 값이
+    0.8175 → 0.6263, M0.6/h1000이 0.3648 → 0.3408 · 0.3501 → 0.3222로 옮았고, 요 목표를 목표선 위 0.6으로 올리자
+    (TuneTargets.zeta_dr) 0.6263 → 0.7812 · 0.5742 → 0.6966, 0.3408 → 0.4207 · 0.3222 → 0.3924가 됐다(롤은 그대로,
+    나선 배가 52.4 → 52.9 s · 583 → 588 s — 요 댐퍼가 세지면 조금 늘어난다).
     """
+    from claw.design import tune as T
     from claw.design.tune import tune_point
     from claw.fcl.demo import demo_design_gains, demo_rate_filters
     from claw.trim import trim_level
 
+    # 배선 핀이다 — 수치는 레이트 루프 마진 가드 없이 쟀다(이 두 점의 롤 댐퍼는 λ 12에서 끊은 루프 여유가 설계 목표 아래라
+    # 가드가 묶는다 — 가드 자체는 test_design_tune이 잰다). 필터가 여유 판정까지 흐르는지는 아래 끝에서 따로 본다
+    monkeypatch.setattr(T, "_rate_margin_verdict", lambda m, targets: "ok")
     ac = make_demo_aircraft()
     design = demo_design_gains()
     act = dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2)
-    expected = {  # (mach, alt): (필터 없음 k, 반영 k, 반영 사유, 반영 λ)
-        (0.3, 0.0): (-0.5225, 0.0, "no_stable_gain", 2.322),
-        (0.6, 1000.0): (-0.1416, -0.0482, "capped", 4.740),
+    expected = {  # (mach, alt): (롤 k, 요 k 필터 없음, 요 k 반영, 반영 롤 나선 배가 s)
+        (0.3, 0.0): (-0.5225, 0.7812, 0.6966, 52.9),
+        (0.6, 1000.0): (-0.1416, 0.4207, 0.3924, 588.5),
     }
-    for (mach, alt), (k0, k1, reason, lam) in expected.items():
+    for (mach, alt), (kr, ky0, ky1, t2) in expected.items():
         lm = linearize(ac, trim_level(ac, TrimCase("t", mach=mach, alt=alt, fuel=200.0)))
         without = tune_point(lm, design, **act)
         with_f = tune_point(lm, design, **act, rate_filters=demo_rate_filters())
         tag = f"M{mach}/h{alt:.0f}"
-        assert without["gains"]["roll.k_rate"] == pytest.approx(k0, abs=5e-3), tag
-        assert without["slots"]["roll_rate"]["reason"] == "ok", tag
-        assert with_f["gains"]["roll.k_rate"] == pytest.approx(k1, abs=5e-3), tag
-        assert with_f["slots"]["roll_rate"]["reason"] == reason, tag
-        assert with_f["achieved"]["roll_rate"]["roll_lambda"] == pytest.approx(lam, abs=5e-3), tag
+        for out in (without, with_f):
+            assert out["gains"]["roll.k_rate"] == pytest.approx(kr, abs=5e-3), tag
+            assert out["slots"]["roll_rate"]["reason"] == "ok", tag
+            assert out["achieved"]["roll_rate"]["roll_lambda"] == pytest.approx(12.0, rel=1e-3), tag
+            # 나선을 면제한 조성도 자세 루프를 닫으면 안정이다 — 면제의 전제
+            assert out["achieved"]["roll_att"]["closed_loop"]["stable"], tag
+        # 필터가 튜너에 닿았다는 흔적 — 요 게인과, 필터가 되돌려 놓은 느린 나선
+        assert without["gains"]["yaw.k_rate"] == pytest.approx(ky0, abs=5e-3), tag
+        assert with_f["gains"]["yaw.k_rate"] == pytest.approx(ky1, abs=5e-3), tag
+        assert without["achieved"]["roll_rate"]["spiral_t2_s"] is None, tag
+        assert with_f["achieved"]["roll_rate"]["spiral_t2_s"] == pytest.approx(t2, rel=5e-3), tag
+    # 필터는 레이트 루프 여유(AS94900 끊은 루프)의 끊는 루프 경로에도 든다 — 같은 게인에서 요 워시아웃 유무가 요 루프
+    # 여유를 바꾼다(빠지면 튜너 가드·검증이 출하되지 않는 루프의 여유를 잰다)
+    from claw.design.tune import rate_loop_margins
+    from claw.trim import split_axes
+
+    lat = split_axes(lm)[1]
+    m_f = rate_loop_margins(lat, "yaw", with_f["gains"], {**act, "rate_filters": demo_rate_filters()})
+    m_0 = rate_loop_margins(lat, "yaw", with_f["gains"], act)
+    assert m_f["pm_deg"] != pytest.approx(m_0["pm_deg"], rel=1e-6)
+
+
+def _indep_axis_poles(lm_axis, rate_gains, kp, ki, orientation, act, rate_filters=None):
+    """축 전체 폐루프 극 — closed_loop_poles와 **다른 경로**(채널에서 끊은 전달함수의 합)로.
+
+    조종면 채널 u마다 명령 v_u = Σ_y C_uy(s)·y를 내고 y = G_yu'·A·D·v_u'가 돌아온다. 채널이 하나면(종축 δe·
+    요 댐퍼를 끈 횡축) 특성식은 1 − L(s) = 0, L = Σ_y C_y·G_yu·A·D — control.feedback(L, 1, +1)의 극이다.
+    """
+    import control
+
+    from claw.analysis.margins import filter_tf, make_siso
+    from claw.design.closure import AXIS_SPECS
+
+    s = control.tf("s")
+    spec = AXIS_SPECS[lm_axis.axis]
+    _g, x_att, u = spec["att"]
+    L = 0
+    for group, x_rate, u_in in spec["rates"]:
+        k = rate_gains.get(f"{group}.k_rate", 0.0)
+        if k == 0.0:
+            continue
+        assert u_in == u, "이 대조는 채널 하나짜리 조성에서만 성립한다"
+        filt = filter_tf((rate_filters or {}).get(group))
+        L = L + k * (filt if filt is not None else 1) * control.ss2tf(make_siso(lm_axis, x_rate, u))
+    L = L - orientation * (kp + ki / s) * control.ss2tf(make_siso(lm_axis, x_att, u))
+    wn, z = act["actuator_wn"], act["actuator_zeta"]
+    num, den = control.pade(act["delay_s"], act["pade_order"])
+    L = L * (wn * wn / (s * s + 2 * z * wn * s + wn * wn)) * control.tf(num, den)
+    # 전달함수 합은 분모를 곱해 플랜트 극을 겹쳐 싣는다(영점이 지우는 비최소 실현) — 최소 실현으로 걷어 낸다
+    return control.feedback(control.minreal(L, verbose=False), 1, sign=1).poles()
+
+
+def _match(ref, got, tol=1e-6):
+    """ref의 극 하나하나가 got에 있다 — 남는 got 극(다른 채널의 작동기·Padé)을 돌려준다."""
+    left = list(got)
+    for p in ref:
+        j = int(np.argmin([abs(p - q) for q in left]))
+        assert abs(p - left[j]) <= tol * max(1.0, abs(p)), (p, left[j])
+        left.pop(j)
+    return left
+
+
+def test_closed_loop_poles_match_independent_single_channel_closures(lat_axes):
+    """축 전체 폐루프(closure.closed_loop_poles)의 조립은 **구현 독립 검증**으로 고정한다 — 부호·행 배치 오류는
+    "발산한다"/"안정하다"로 조용히 보고되므로 같은 물리를 다른 경로(채널에서 끊은 전달함수)로 짜서 맞춘다.
+
+    세 조성: 종축(피치 댐퍼 + 피치 PI) · 횡축 롤 채널만(요 댐퍼 끔, 롤 댐퍼 + 롤 PI) · 횡축 요 채널만(워시아웃 댐퍼).
+    채널이 하나일 때 다른 채널의 작동기·Padé 극은 루프 밖이라 **그대로 남아야** 한다(대조 뒤 남는 극)."""
+    from claw.design.closure import closed_loop_poles
+
+    ac = make_demo_aircraft()
+    lon = split_axes(linearize(ac, trim_level(ac, TrimCase("t", mach=0.6, alt=1000.0, fuel=200.0))))[0]
+    lat = lat_axes[(0.3, 0.0)]
+    act = dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2)
+    kw = dict(actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2)
+    cases = (  # (축, 댐퍼, kp, ki, 루프 밖에 남는 극 수 — 종축은 채널이 δe 하나, 횡축은 δr 채널의 작동기·Padé 넷)
+        (lon, {"pitch.k_rate": 0.1}, -0.69, -0.10, 0),
+        (lat, {"roll.k_rate": -0.52, "yaw.k_rate": 0.0}, 1.5, 0.5, 4),
+    )
+    for lm_axis, gains, kp, ki, n_left in cases:
+        ref = _indep_axis_poles(lm_axis, gains, kp, ki, 1.0, act)
+        got = closed_loop_poles(lm_axis, gains, kp=kp, ki=ki, orientation=1.0, **kw)
+        assert len(_match(ref, got)) == n_left, lm_axis.axis
+    # 요 채널만 — 자세가 da 채널이라 요 댐퍼 하나만 닫는다(kp = ki = 0). 댐퍼 가드의 SISO 루프와 같은 극
+    import control
+
+    from claw.analysis import pi_loop
+
+    g = {"yaw.k_rate": 0.8}
+    got = closed_loop_poles(lat, g, rate_filters=WASHOUT, **kw)
+    ref = control.feedback(pi_loop(lat, x_out="r", u_in="dr", kp=0.8, ki=0.0, sign=1.0,
+                                   rate_filter=WASHOUT["yaw"], **kw), 1, sign=1).poles()
+    left = _match(ref, got)
+    # 남는 극은 루프 밖 δa 채널의 작동기 쌍과 Padé 쌍뿐이다 — 전부 안정하고 플랜트와 무관
+    assert len(left) == 4 and all(p.real < -20.0 for p in left)
+
+
+def test_closed_loop_poles_without_actuator_is_the_attitude_margin_loop(lat_axes):
+    """작동기·지연을 빼면 전체 폐루프 = 자세 마진 루프(att_margin_loop — 레이트를 이상 폐쇄한 A′ 위 PI)를
+    음의 되먹임으로 닫은 극이다. 두 루프가 같은 부호 규약(댐퍼 u = +k·rate, 자세 orientation 방향 음의 되먹임)을
+    쓴다는 고정 — 한쪽 규약만 뒤집히면 여기서 걸린다."""
+    import control
+
+    from claw.design.closure import att_margin_loop, closed_loop_poles
+
+    lat = lat_axes[(0.3, 0.0)]
+    gains = {"yaw.k_rate": 0.8, "roll.k_rate": -0.3}
+    for rf in (None, WASHOUT):
+        ref = control.feedback(att_margin_loop(lat, gains, 0.7, 0.2, rate_filters=rf), 1).poles()
+        got = closed_loop_poles(lat, gains, kp=0.7, ki=0.2, rate_filters=rf)
+        assert _match(ref, got) == []
 
 
 def test_session_round_trips_rate_filters():

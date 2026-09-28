@@ -620,19 +620,21 @@ def test_pi_loop_filter_is_opt_in(lon_lat):
     )
 
 
-def test_bode_data_textbook_and_reuses_loop_margins():
+def test_bode_data_textbook_and_reuses_the_margin_map_margins():
     """보드선도 데이터 (01 §4.2) — 교과서 대조 + 마진 정본 재사용.
 
     GM과 PM은 같은 곡선의 서로 다른 자리에서 읽는 수다: PM은 |L|=0 dB인 wcp의
     위상, GM은 ∠L=−180°인 wcg의 이득. 두 자리가 실제로 그 값을 갖는지 곡선에서
-    직접 확인한다 (마진 수치는 loop_margins가 정본이라 재계산하지 않는다).
+    직접 확인한다 (마진 수치는 마진 맵 칸과 같은 nyquist_margins가 정본이라 재계산하지
+    않는다 — 교차가 하나씩인 교과서 루프에서는 loop_margins와도 같다).
     """
-    from claw.analysis import bode_data, loop_margins
+    from claw.analysis import bode_data, loop_margins, nyquist_margins
 
     s = control.tf("s")
     loop = 10.0 / (s * (s + 1.0) * (s + 5.0))  # 교과서 gm=3(9.54 dB), wcg=√5
     b = bode_data(loop)
-    assert b["margins"] == loop_margins(loop)  # 재계산 금지 — 정본 그대로
+    assert b["margins"] == nyquist_margins(loop)  # 재계산 금지 — 정본 그대로
+    assert b["margins"] == loop_margins(loop)  # 고를 교차가 없으면 두 정의가 같다
     n = len(b["w"])
     assert n > 50 and len(b["mag_db"]) == n and len(b["phase_deg"]) == n
     assert all(b["w"][i] < b["w"][i + 1] for i in range(n - 1))  # 단조 증가

@@ -21,7 +21,8 @@
    손설계를 덮는 것을 이 조건이 막는다.
 5. 자동조종 — 선형 모델이 없어 시간척도 분리 휴리스틱이다(바깥 루프 대역폭 = 두 자세 교차 중 느린 것 ÷
    SEPARATION — 헤딩·고도·속도가 한 시간척도를 쓴다. 피치 교차만 쓰면 저속 앵커에서 고도 루프가 0.7 rad/s로
-   빨라진다).
+   빨라진다). 자세 교차는 중앙 앵커의 튜너 목표 교차이되, 그 목표가 루프의 실측 이득교차가 아니면(장주기
+   공진이 만든 가짜 레이트 교차 — _inner_crossovers) 목표가 루프 교차인 다른 앵커들의 중앙값을 쓴다.
    부호는 SCAS가 θ·φ를 추종하면 기체와 무관하다. 명령필터 시정수·자세 한계·선회 보상은 유도식이 없어
    문서 값(있으면) 또는 레지스트리 기본값이고, 출처에 자리마다 그렇게 적는다 — 조용히 물려주지 않는다.
    sim_check=True면 중앙 앵커 한 케이스로 평가(evaluate depth="full")를 돌려 결과를 싣는다(채택 판정에는
@@ -44,7 +45,14 @@ from claw.design.closure import AXIS_SPECS, axis_metrics, wn_reference
 from claw.design.criteria import MarginCriteria
 from claw.design.grid import coarse_grid
 from claw.design.schedmap import scheduled_margin_point
-from claw.design.tune import REASON_SIGN_MISMATCH, _RATE_PLAN, SLOT_DESIGN_FAILED, TuneTargets, tune_point
+from claw.design.tune import (
+    _RATE_PLAN,
+    REASON_SIGN_MISMATCH,
+    SLOT_DESIGN_FAILED,
+    TuneTargets,
+    failed_gain_slots,
+    tune_point,
+)
 from claw.design.tune import REASON_TEXT as TUNE_REASON_TEXT
 from claw.env import isa_atmosphere
 from claw.trim import linearize, split_axes
@@ -57,6 +65,11 @@ ZETA_SPEED = 0.7  # [기본값] 속도 루프 감쇠
 # (1 + r)·s² + V·kp·s + V·ki = 0이다. r은 같은 대역폭·감쇠를 kp·ki를 몇 배로 키워 얻을지(오차 되먹임 대 승강률
 # 되먹임의 몫)를 정한다 — 식이 주지 않는 선택이라 기본값으로 적는다
 HDOT_RATIO = 1.5
+# 튜너의 목표 교차(wc_att)와 루프의 실측 이득교차(wcp)가 같은 수로 보는 허용 — 루프가 목표에서 한 번만 1을
+# 지나면 둘은 같은 교차를 두 방법으로 잰 것이라 반올림 차이뿐이다(설계 격자 n_mach 7 × 연료 3벌 — 예제 69점·
+# 구 기체 49점·S1 63점의 자세 루프 362개 중 목표가 루프 교차인 것의 실측 상대차 ≤ 4.3e-15). 목표가 루프의 교차가
+# 아니면 수 배 어긋난다(S1 7개 루프, 실측 wcp/wc_att ×2.9~×5.4 — 예제·구 기체는 0개) — 그 사이 어디든 가른다
+WC_MATCH_RTOL = 1e-3
 SWEEP = tuple(float(f) for f in np.logspace(-2.0, 2.0, 17))  # k_ref 배수
 DIRECTION_PROBE = 0.1  # k_ref 배 — 부호 확인용 작은 닫기
 FUEL_FRAC = 0.5  # [기본값] 앵커 연료 = fuel_max × 이 값
@@ -189,8 +202,72 @@ def _clean(v):
     return v
 
 
+def _loop_crossover(ach) -> tuple:
+    """자세 자리 achieved 하나 → (목표 교차가 루프의 실측 이득교차인가, 실측 이득교차 | None).
+
+    설계 실패 사유인 자리(성형하지 못한 루프)·교차를 못 잰 자리는 (False, None)이다."""
+    if not ach or ach.get("reason") in SLOT_DESIGN_FAILED:
+        return False, None
+    wc, wcp = ach.get("wc_att"), ach.get("wcp")
+    if wcp is None or not math.isfinite(wcp) or wcp <= 0.0:
+        return False, None
+    return bool(wc is not None and math.isfinite(wc) and abs(wcp - wc) <= WC_MATCH_RTOL * wc), wcp
+
+
+def _inner_crossovers(design_point, others=()) -> tuple:
+    """자동조종 시간척도의 기준 자세 교차 — ({"pitch": ω | None, "roll": …}, 메모 목록).
+
+    design_point·others는 튜너 achieved 모양({"pitch_att": {...}, "roll_att": {...}} — tune_point의 achieved·
+    산출 근거의 attitude)이다. design_point는 자동조종을 설계하는 점(빠른 탐색의 중앙 앵커·산출 근거의 한 점),
+    others는 나머지 앵커다.
+
+    튜너의 wc_att는 **설계 목표** 교차다 — |PI·G·Act·지연| = 1을 그 주파수에 맞춘다. 루프가 거기서 한 번만 1을
+    지나면 그것이 실측 이득교차(wcp)이고 곧 자세 대역폭이다. 그런데 목표는 레이트 루프 교차 ÷ wc_ratio_att이고,
+    레이트 댐퍼가 약하면(개루프 단주기 ζ가 이미 목표 근처) 레이트 루프 |L|의 최댓값이 단주기가 아니라 장주기
+    공진에 선다 — 그 봉우리가 1을 살짝 넘으면 레이트 교차가 장주기 주파수로 잡힌다. S1 중앙 앵커(M0.1305/해면/
+    연료 25)에서 튜닝한 피치 댐퍼 0.1984가 장주기(0.28 rad/s, ζ 0.16) 봉우리를 1.008로 올려 레이트 교차 0.29 →
+    자세 목표 0.097 rad/s였다. 2 % 작은 0.1937(산출 근거 닫힌꼴)은 봉우리가 0.984라 교차가 없고 목표가 단주기
+    기준(wn/3 = 1.03)이다 — 댐퍼 게인 2 %에 목표가 10배 뛴다. 그 목표로 성형한 루프는 0.0085·0.097·0.514
+    rad/s에서 1을 세 번 지나고 목표 교차의 위상여유는 −148°다 — 목표 교차는 대역폭이 아니다. 그 수로 바깥
+    루프를 잡으면 ω = 0.019 rad/s라 속도 kp 식이 음수가 되어 kp_spd = 0 · 헤딩 kp 0.088이었다(S1 빠른 탐색
+    실측 — 웹 기본 미션에서 발사 8 s 만에 접지·추락).
+
+    자리마다: ① 설계점의 목표 교차가 루프 교차면 그것 ② 아니면(설계 실패 포함) 목표 교차가 루프 교차인 다른
+    앵커들의 중앙값 — 자세 대역폭은 마하·고도·연료를 따라 이어지는 양이라 이웃 앵커가 그 점의 값을 말한다(S1:
+    같은 고도·연료의 이웃 격자점 0.93·1.13, 다른 두 앵커 0.73·1.61 → 1.17) ③ 그것도 없으면 설계점 루프의 실측
+    이득교차 — 그 루프가 실제로 내는 대역폭이다. 설계 실패 사유인 자리는 ①·③에서 뺀다(성형하지 못한 루프의
+    교차는 대역폭이 아니다 — 종전 규칙). 예제 기체는 세 앵커 모두 ①이라 종전 값 그대로다."""
+    wc, notes = {}, []
+    for group in ("pitch", "roll"):
+        slot = f"{group}_att"
+        own = design_point.get(slot) or {}
+        matched, measured = _loop_crossover(own)
+        if matched:
+            wc[group] = own["wc_att"]
+            continue
+        if own.get("reason") in SLOT_DESIGN_FAILED:
+            why = f"설계점 {group} 자세 자리가 설계 실패({own.get('reason')})라"
+        elif measured is None:
+            why = f"설계점 {group} 자세 루프의 이득교차를 잴 수 없어"
+        else:
+            why = (f"설계점 {group} 자세의 목표 교차 {own['wc_att']:.3g} rad/s가 루프의 실측 이득교차"
+                   f"({measured:.3g} rad/s)가 아니라(루프가 1을 여러 번 지난다)")
+        usable = [a[slot]["wc_att"] for a in others if _loop_crossover(a.get(slot))[0]]
+        if usable:
+            wc[group] = statistics.median(usable)
+            notes.append(f"{why} 목표 교차가 루프 교차인 다른 앵커 {len(usable)}곳의 중앙값"
+                         f" {wc[group]:.3g} rad/s로 바깥 루프 대역폭을 잡았다")
+        elif measured is not None:
+            wc[group] = measured
+            notes.append(f"{why} 루프의 실측 이득교차 {measured:.3g} rad/s로 바깥 루프 대역폭을 잡았다")
+        else:
+            wc[group] = None  # 종전 규칙 — _autopilot이 남은 자리로 잡고 메모를 단다
+    return wc, notes
+
+
 def _autopilot(built, center, lon, wc, act_existing):
-    """자동조종 18자리 — (값, 자리별 출처, 메모). wc = {"pitch": 자세 교차, "roll": …} (없으면 None)."""
+    """자동조종 18자리 — (값, 자리별 출처, 메모). wc = {"pitch": 자세 교차, "roll": …} (없으면 None —
+    _inner_crossovers가 고른다)."""
     from claw.params.registry import REGISTRY
 
     defs = {d.name: d.default for d in REGISTRY.param_defs("fcl", "Autopilot")}
@@ -222,8 +299,13 @@ def _autopilot(built, center, lon, wc, act_existing):
         a_uu = float(lon.A[iu, iu])
         if b > 0.0 and math.isfinite(b):
             # u̇ ≈ A_uu·u + b·thr, thr = kp·e + ki·∫e → s² + (b·kp − A_uu)·s + b·ki
-            values.update(kp_spd=max(0.0, (2.0 * ZETA_SPEED * w_a + a_uu) / b), ki_spd=w_a * w_a / b)
+            kp_spd = (2.0 * ZETA_SPEED * w_a + a_uu) / b
+            values.update(kp_spd=max(0.0, kp_spd), ki_spd=w_a * w_a / b)
             source.update(kp_spd="heuristic", ki_spd="heuristic")
+            if kp_spd < 0.0:
+                # 0으로 깎는 것은 조용히 하지 않는다 — S1의 kp_spd 0은 이 자리에서 아무 말 없이 나왔다
+                notes.append(f"속도 kp 식 (2ζω + A_uu)/b = {kp_spd:.3g}가 음수라 0으로 두었다 — 바깥 루프 대역폭"
+                             f" ω = {w_a:.3g} rad/s가 속도 자연 감쇠 −A_uu = {-a_uu:.3g} 1/s보다 느려 적분만 남는다")
         else:
             notes.append(f"스로틀 효율 B[u,thr]={b:.4g}가 양이 아니어서 속도 게인을 유도하지 못했다")
     n_lim = built.doc["structural"]["n_limit_pos"]
@@ -307,8 +389,10 @@ def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=5, delay_s=0.
     for name, slot in _GAIN_SLOT.items():
         group = _SIGN_GROUP[name]
         signs = {a["signs"][group]["sign"] for a in anchors if a["signs"][group]["sign"]}
-        used = [a for a in anchors if a["signs"][group]["sign"]
-                and a["tuned"]["slots"][slot]["reason"] not in SLOT_DESIGN_FAILED]
+        # 표본으로 쓸 수 없는 앵커를 뺀다 — 자기 튜닝 실패와, 실패한 레이트 루프 위에서 튜닝된 뒤 자리(요 실패 점의
+        # 롤 댐퍼·자세 등). 적합 제외(orchestrator)와 같은 규칙(tune.failed_gain_slots)이다
+        unusable = [failed_gain_slots(a["tuned"]["slots"]) for a in anchors]
+        used = [a for a, bad in zip(anchors, unusable) if a["signs"][group]["sign"] and name not in bad]
         center = anchors[0]
         g, kind = group.split("_")
         _, x, u = (_RATE_B if kind == "rate" else _ATT_B)[g]
@@ -321,6 +405,7 @@ def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=5, delay_s=0.
                                           for a in anchors)
         elif not used:
             rec["reason"] = (center["signs"][group]["reason"]
+                             or (unusable[0].get(name) or {}).get("reason")
                              or center["tuned"]["slots"][slot]["reason"])
         else:
             sign = signs.pop()
@@ -336,12 +421,11 @@ def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=5, delay_s=0.
         values[name] = rec["value"]
         slots[name] = rec
 
-    wc = {}
-    for group in ("pitch", "roll"):
-        ach = anchors[0]["tuned"]["achieved"].get(f"{group}_att", {})
-        wc[group] = ach.get("wc_att") if ach.get("reason") not in SLOT_DESIGN_FAILED else None
+    wc, wc_notes = _inner_crossovers(anchors[0]["tuned"]["achieved"],
+                                     [a["tuned"]["achieved"] for a in anchors[1:]])
     ap, ap_source, ap_notes = _autopilot(built, anchors[0]["point"], anchors[0]["lon"],
                                          wc, None if existing is None else existing["autopilot"])
+    ap_notes = wc_notes + ap_notes
 
     scas = {}
     for group in ("pitch", "roll", "yaw"):
@@ -363,6 +447,9 @@ def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=5, delay_s=0.
             "anchors": [a["point"].case.name for a in anchors],
             "slots": slots,
             "autopilot": ap_source,
+            # 자동조종은 자동 설계가 다시 잡지 않는다(튜너는 SCAS 7자리만) — 바깥 루프 대역폭을 어디서 잡았는지가
+            # 결과가 아니라 문서에 남아야 나중에 읽는 사람이 안다(apply_seed_basis와 같은 자리)
+            "autopilot_notes": ap_notes,
             "yaw_attitude": "document" if existing is not None else "zero",
             "schedule": "created" if created else "document",
         },

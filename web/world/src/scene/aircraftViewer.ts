@@ -19,28 +19,24 @@
  */
 
 import {
-  ACESFilmicToneMapping, Box3, BufferAttribute, BufferGeometry, CircleGeometry, DirectionalLight, Group,
-  HemisphereLight, Mesh, MeshStandardMaterial, PCFShadowMap, PMREMGenerator, PerspectiveCamera, Scene,
+  ACESFilmicToneMapping, Box3, CircleGeometry, DirectionalLight, Group,
+  HemisphereLight, Mesh, PCFShadowMap, PMREMGenerator, PerspectiveCamera, Scene,
   ShadowMaterial, SRGBColorSpace, Vector3, WebGLRenderer, type Object3D,
 } from "three";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
-import { frdToModelLocal } from "../core/modelaxes.ts";
 import {
   KEY_STEP, START_VIEW, advanceYaw, cameraOffset, clampElev, dragView, fitDistance, wrapYaw,
   type TurntableExtent, type TurntableView,
 } from "../core/turntable.ts";
 import { modelUrl } from "../data/api.ts";
+import type { SchematicMesh } from "../lib/vehicleschematic.ts";
 import { disposeMaterial, disposeTree } from "./dispose.ts";
+import { schematicObject } from "./schematic.ts";
 
-/** 절차 도식 메시 — `web/js/lib/uavmesh.js`의 반환 모양(FRD 성분, 면마다 정점). */
-export interface SchematicMesh {
-  positions: Float32Array;
-  normals: Float32Array;
-  indices: Uint16Array;
-  groups: readonly { start: number; count: number; name: string }[];
-}
+// 도식 메시의 모양과 three 조립은 가상환경 대체 기체와 한 벌이다(`lib/vehicleschematic.ts`·`schematic.ts`)
+export type { SchematicMesh };
 
 /** 무엇을 그리나 — 기체 하나 몫. */
 export interface AircraftViewerContent {
@@ -79,34 +75,8 @@ interface Staged {
   bottom: number;
 }
 
-/** 도식 색 — 엘레본만 눈에 띄게(믹서가 쓰는 그 4면). 표시 선택이다 */
-const SCHEMATIC_COLOR: Record<string, number> = { wing: 0xb8c1cb, elevon: 0xe08a2e, body: 0x7b8591 };
-
 const prefersReducedMotion = (): boolean =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-function schematicObject(mesh: SchematicMesh): Mesh {
-  const n = mesh.positions.length / 3;
-  const pos = new Float32Array(mesh.positions.length);
-  const nrm = new Float32Array(mesh.normals.length);
-  for (let i = 0; i < n; i++) {
-    const k = 3 * i;
-    pos.set(frdToModelLocal([mesh.positions[k]!, mesh.positions[k + 1]!, mesh.positions[k + 2]!]), k);
-    nrm.set(frdToModelLocal([mesh.normals[k]!, mesh.normals[k + 1]!, mesh.normals[k + 2]!]), k);
-  }
-  const geo = new BufferGeometry();
-  geo.setAttribute("position", new BufferAttribute(pos, 3));
-  geo.setAttribute("normal", new BufferAttribute(nrm, 3));
-  geo.setIndex(new BufferAttribute(new Uint16Array(mesh.indices), 1));
-  const mats = mesh.groups.map((g, i) => {
-    geo.addGroup(g.start, g.count, i);
-    return new MeshStandardMaterial({ color: SCHEMATIC_COLOR[g.name] ?? 0xaab2bc, roughness: 0.55, metalness: 0.1 });
-  });
-  const obj = new Mesh(geo, mats);
-  obj.castShadow = true;
-  obj.receiveShadow = true;
-  return obj;
-}
 
 export function mountAircraftViewer(container: HTMLElement, opts: AircraftViewerOptions): AircraftViewerHandle {
   const report = (s: AircraftViewerStatus) => opts.onStatus?.(s);

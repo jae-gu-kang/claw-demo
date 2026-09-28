@@ -105,6 +105,62 @@ export function blockDesign(block, catalog) {
   return block.id === "autopilot" ? (catalog?.autopilot_design ?? null) : null;
 }
 
+// 기체 문서에 절이 있는 블록 — 레지스트리 카테고리 → 문서 절 이름 (02 §5.6: {type, params}). 여기 없는 카테고리는
+// 문서가 값을 갖지 않는다: AP·SCAS는 게인 카탈로그(/gains/catalog — 문서 law에서)가 정본이라 따로 말하고, 항법
+// 오차 모델은 **기체 문서에 없는 항목**이다(센서·항법 등급은 기체 형상이 아니라 시뮬 실행 조건)
+const DOC_SECTIONS = { actuator: "작동기", propulsion: "추진" };
+
+/** 블록 파라미터 값의 출처 — 블록도가 레지스트리 기본값을 이 기체 값인 양 보이지 않게 (v1.47).
+ *
+ *  ref는 페이지의 레지스트리 스키마 {category, name}, doc은 헤더에서 고른 기체의 **적용 문서**(형상 변형 반영,
+ *  views/profilepick selectedDocument) 또는 못 받았으면 null. 문서의 그 절이 이 스키마와 같은 형식이면 문서 값,
+ *  형식이 다르거나(쌍발 기체의 PropEngine 도식) 문서를 못 받았으면 레지스트리 기본값과 그 사유다. 항법은 문서에
+ *  없다고 **정직하게** 말한다. 말할 것이 없는 블록(AP·SCAS — 카탈로그가 정본, 유도·믹서)은 null.
+ *  돌려주는 것: {kind: "document"|"registry", values: {이름: 값}|null, path, text} | null */
+export function paramSource(ref, doc, { docError = null } = {}) {
+  if (ref?.category === "nav") {
+    return { kind: "registry", values: null, path: null,
+      text: "항법 오차 모델은 기체 문서(프로파일)에 없는 항목입니다 — 아래 값은 엔진 레지스트리 기본값"
+        + `(${ref.name})이고 어느 기체를 골라도 같습니다. 시뮬은 항법을 켜면 여기서 [시뮬에 적용]한 값을, `
+        + "없으면 이 기본값을 씁니다 — 시뮬 탭에서 RTK 등급을 고르면 바탕이 엔진의 RTK 수치로 바뀌고 적용한 값이 "
+        + "그 위를 덮습니다(시드는 시뮬 탭)." };
+  }
+  const label = DOC_SECTIONS[ref?.category];
+  if (!label) return null;
+  if (!doc) {
+    return { kind: "registry", values: null, path: null,
+      text: `선택 기체 문서를 받지 못해 ${label} 값은 엔진 레지스트리 기본값입니다 — 이 기체 값이 아닐 수 있습니다`
+        + (docError ? ` (${docError})` : "") };
+  }
+  const sec = doc[ref.category];
+  if (!sec || sec.type !== ref.name || sec.params == null || typeof sec.params !== "object") {
+    return { kind: "registry", values: null, path: null,
+      text: `이 기체(${doc.name ?? doc.id})의 ${label}는 ${sec?.type ?? "없음"}이라 이 페이지의 ${ref.name} 도식과 `
+        + `다릅니다 — 아래 값은 ${ref.name} 레지스트리 기본값이지 이 기체 값이 아닙니다` };
+  }
+  return { kind: "document", values: { ...sec.params }, path: `/${ref.category}/params`,
+    text: `값 출처: 선택 기체 문서 「${doc.name ?? doc.id}」 /${ref.category}/params (${ref.name}) — `
+      + "문서에 없는 칸은 레지스트리 기본값이 채웁니다. 문서를 고치는 곳은 기체 탭입니다" };
+}
+
+const finiteNum = (v) => typeof v === "number" && Number.isFinite(v);
+
+/** 서브시스템 SVG의 **유도** 표시값(`<tspan data-d="이름">`) — 파라미터 값에서 계산하는 수치. data-p는 값을
+ *  그대로 옮기고 이것은 식을 거친다. 바로 옆 data-p가 문서 값으로 바뀌는데 유도값만 기본값에서 굳어 있으면
+ *  그림이 한자리에서 앞뒤가 안 맞는다(추진 V_c). 이름 → (값 묶음) → 수|null */
+export const SVG_DERIVED = {
+  // 교차속도 V_c = ηP/T_static — PropEngine.crossover_speed와 같은 식(아래는 정지추력 상한, 위는 1/V) [m/s]
+  vc: (p) => (finiteNum(p?.eta) && finiteNum(p?.power_max) && finiteNum(p?.static_thrust) && p.static_thrust > 0
+    ? (p.eta * p.power_max) / p.static_thrust : null),
+};
+
+/** 유도 표시값 글 — 소수 첫째 자리. 계산할 수 없으면 null(폴백 글을 둔다). */
+export function derivedText(name, values) {
+  const f = Object.hasOwn(SVG_DERIVED, name) ? SVG_DERIVED[name] : null;
+  const v = f ? f(values) : null;
+  return finiteNum(v) ? v.toFixed(1) : null;
+}
+
 export const BLOCKS = [
   {
     id: "planner",
@@ -195,9 +251,10 @@ export const BLOCKS = [
   },
   {
     id: "actuator",
-    title: "작동기", sub: "2차계 (기본값)",
+    // 부제는 구조만 — 값의 출처(문서·레지스트리 기본값)는 정적 블록도가 모른다. 하위 페이지의 출처 줄이 말한다
+    title: "작동기", sub: "2차계 · rate/위치 한계",
     detail: {
-      desc: "2차계 작동기 (wn·ζ·rate 한계) — rate ≥ 10 rad/s 요구 [도출 사양 01 v0.13]. "
+      desc: "2차계 작동기 (wn·ζ·rate 한계) — 값은 선택 기체 문서의 가정값이다(실기체 특성 데이터 TBD 01 §7). "
         + "여기서 '시뮬에 적용'한 값이 시뮬 탭 '작동기' 그룹에 프리필·병합된다. "
         + "위치 한계·초기값은 믹서 타면 한계·트림 웜스타트가 결정 (편집 대상 아님).",
       schema: { category: "actuator", name: "SecondOrderActuator" }, editable: true,
@@ -215,7 +272,7 @@ export const BLOCKS = [
     id: "plant",
     title: "기체 동역학", sub: "6DOF",
     detail: {
-      desc: "6DOF 강체 + 공력 DB(데모 프로파일) + ISA, RK4 dt 10 ms [확정 02 §6]. "
+      desc: "6DOF 강체 + 공력 DB(선택 기체 문서) + ISA, RK4 dt 10 ms [확정 02 §6]. "
         + "평형점·트림 가능 영역은 트림 탭에서.",
       schema: null, editable: false, injectKey: null,
       edit: { hash: "trim", label: "트림 탭 — 평형점·비행 엔벨로프 맵" },

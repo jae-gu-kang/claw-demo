@@ -499,6 +499,143 @@ def test_스케줄_포트_게인도_표_부호가_한결같으면_정당화한�
     assert labels["ap_hdg_pid_raw"] is None  # ki = 0 — 곱이 0이라 함의가 없다(측정으로 덮는다)
 
 
+def _table_limit_guards(table_vals, *, box=(-1.0, 1.0), side="out_hi", enable=None, extra=()):
+    """PID 한계 한쪽이 「마하 룩업 → 상자 포화」 신호인 그래프(fcl의 ap_theta_hi 모양)의 가드 정당화 — (cis, 문구).
+
+    extra는 같은 구조의 다른 표 값 — 파라미터 세트의 다른 이미지로 함께 넘긴다."""
+    from claw.blocks.basic import Saturation
+    from claw.blocks.controllers import PID
+    from claw.blocks.lookup import LookupBlock
+    from claw.codegen import GraphRunner, emit_c, emit_runtime
+    from claw.codegen.ir import Graph, Node
+    from claw.tables import Table
+    from claw.verify.mcdc import find_decisions
+
+    def runner(vals):
+        tab = Table({"mach": (0.1, 0.5, 0.9)}, vals, name="lim")
+        nodes = [Node("lim_raw", LookupBlock, inputs=("mach",), params={"table": tab},
+                      **({"enable": enable} if enable else {})),
+                 Node("lim", Saturation, inputs=("lim_raw",), params={"lo": box[0], "hi": box[1]}),
+                 Node("pid", PID, inputs=("e",), params=dict(kp=1.0, ki=0.5, out_lo=box[0], out_hi=box[1]),
+                      gains={side: "lim"})]
+        return GraphRunner(Graph("g", inputs=("e", "mach", "on"), nodes=nodes, outputs={"y": "pid"}), DT)
+
+    rs = [runner(table_vals), *(runner(v) for v in extra)]
+    module = emit_c(rs[0].graph, rs[0])
+    files = dict(module.files)
+    files.update(emit_runtime(module.helpers))
+    got = _coupled_guards(find_decisions(files), rs)
+    assert len(got) <= 1
+    return (next(iter(got.values()))["cis"], next(iter(got.values()))["reason"]) if got else (None, None)
+
+
+def test_상자에_잘려_상수가_된_표_상한은_스칼라처럼_정당화한다():
+    """θ_hi(M) 표가 전 마하에서 상자 상한 theta_hi 이상이면(min(α_stall − 마진) ≥ theta_hi) 포화가 늘 theta_hi를 낸다 —
+    상한이 신호여도 스텝 사이에 안 움직이므로 스칼라와 같은 구조적 종속이다. 전에는 신호라는 이유로 c1을 미커버로 남겨
+    쇼케이스 기체가 theta_hi 0.3에서 DAL-A 커버리지 fail(분기 166+1/168)이었다."""
+    cis, why = _table_limit_guards((1.3, 1.2, 1.05))
+    assert cis == (1, 3), cis
+    # 문구가 정직해야 한다 — 기댄 수치와 NaN 전제를 적는다
+    assert why.startswith("구조적 종속") and "최소 1.05 ≥ 상자 상한 1.0" in why, why
+    assert "룩업 입력(mach)이 NaN이면" in why, why
+    # 하한 쪽 대칭 — 표가 전 값에서 상자 하한 이하면 하한이 상수다
+    cis_lo, why_lo = _table_limit_guards((-1.3, -1.2, -1.05), side="out_lo")
+    assert cis_lo == (1, 3) and "최대 -1.05 ≤ 상자 하한 -1.0" in why_lo, why_lo
+
+
+def test_표_상한이_실제로_움직이면_여전히_미커버로_남긴다():
+    """거짓 정당화 방지 — 상한이 한 스텝이라도 내려갈 수 있으면 독립쌍이 실재한다(측정 대상, TC-INT-THETA-HI-DROP)."""
+    assert _table_limit_guards((1.3, 0.8, 0.5))[0] == (3,)  # 표가 상자 안으로 들어온다 — 상한이 마하 따라 움직인다
+    # 표 최솟값이 상자 상한과 딱 같다 — C 보간의 반올림으로 상한이 1 ulp 내려가는 스텝이 있을 수 있어 상수로 안 본다
+    assert _table_limit_guards((1.3, 1.2, 1.0))[0] == (3,)
+    # 룩업이 영역 안이면 비활성 스텝에 0.0을 내 포화가 상자 안 값을 낸다 — 상수가 아니다
+    assert _table_limit_guards((1.3, 1.2, 1.05), enable="on")[0] == (3,)
+    # 파라미터 세트의 한 이미지라도 표가 상자 안이면 정당화하지 않는다(값에 기댄 정당화 — v1.12 규칙)
+    assert _table_limit_guards((1.3, 1.2, 1.05), extra=[(1.3, 0.8, 0.5)])[0] == (3,)
+    assert _table_limit_guards((1.3, 1.2, 1.05), extra=[(1.4, 1.1, 1.01)])[0] == (1, 3)
+
+
+def test_법칙의_θ_상한이_표_최솟값_아래면_승강률_가드를_정당화한다():
+    """조립 정본 위에서 — 예제 기체 θ_hi(M) 표(최소 0.22) 아래로 theta_hi를 두면 승강률 PID 가드의 상한 조건이 정당화되고,
+    표 안(0.3)이면 종전대로 하한만 정당화된다(상한은 하강 벡터가 측정으로 덮는다)."""
+    from claw.codegen import emit_c, emit_runtime
+    from claw.fcl.autopilot import Autopilot
+    from claw.verify.mcdc import find_decisions
+
+    def vs_guard(theta_hi):
+        ap = Autopilot(**{**example_profile().autopilot_params(), "theta_hi": theta_hi})
+        law = make_demo_fcl(autopilot=ap, standard=True).init(DT)
+        module = emit_c(law.runner.graph, law.runner)
+        files = dict(module.files)
+        files.update(emit_runtime(module.helpers))
+        decs = find_decisions(files)
+        got = _coupled_guards(decs, [law.runner])
+        (d,) = [d for d in decs if d["kind"] == "guard" and d["label"] == "ap_vs_pid_raw"]
+        return got.get(d["id"], {})
+
+    boxed = vs_guard(0.2)
+    assert boxed["cis"] == (1, 3) and "ap_theta_hi" in boxed["reason"], boxed
+    assert vs_guard(0.3)["cis"] == (3,)
+
+
+def test_상자에_잘린_θ_상한_형상도_파이프라인이_커버리지를_닫는다():
+    """끝단 회귀 — 상한이 상수로 잘린 형상(예제 표 최소 0.22 아래 theta_hi 0.2)에서 종전엔 승강률 가드 상한 조건이 측정도
+    정당화도 안 돼 커버리지 fail이었다. 이제 분기·MC/DC 양쪽이 같은 근거 문구로 정당화해 닫는다."""
+    from claw.fcl.autopilot import Autopilot
+
+    if not find_cc():
+        pytest.skip("C 컴파일러 없음 — 끝단 커버리지는 도구가 있는 환경에서만")
+    ap = Autopilot(**{**example_profile().autopilot_params(), "theta_hi": 0.2})
+    rep = verify_flight(make_demo_fcl(autopilot=ap).init(DT), profile=example_profile(), t_end=6.0)
+    if rep["coverage"]["status"] != "measured":
+        pytest.skip(f"커버리지 도구 없음 — {rep['coverage'].get('reason')}")
+    by = {r["key"]: r for r in rep["summary"]}
+    assert by["coverage"]["status"] == "pass", (by["coverage"], rep["coverage"]["uncovered_branches"])
+    vs_line = [j for j in rep["coverage"]["justified"] if "ap_vs_pid_raw > " in j["text"]]  # 줄 번호 말고 내용으로
+    assert len(vs_line) == 2 and all("ap_theta_hi" in j["reason"] for j in vs_line), rep["coverage"]["justified"]
+    (dec,) = [d for d in rep["mcdc"]["decisions"] if d["label"] == "ap_vs_pid_raw"]
+    assert dec["justified_cis"] == [1, 3] and all("ap_theta_hi" in u["reason"] for u in dec["uncovered"]), dec
+
+
+def test_θ_상한_하강_벡터는_표의_낙차에서_여유를_정한다():
+    """고정 여유(마지막 단 kp·e 0.02 + 하강 오차 0.01)는 낙차가 0.03 이하면 쌍을 못 만든다 — 쇼케이스 기체 theta_hi 0.33·0.34가
+    그렇게 미커버 fail이었다. 표를 넘기면 마하 두 점·여유를 표에서 정해 작은 낙차에서도 (c0 참, c1 거짓) 스텝을 밟는다.
+    예제 기체(낙차 0.08)는 옛 고정 벡터와 비트로 같고, 상자에 잘려 상수가 된 표는 케이스를 붙이지 않는다(정당화된다)."""
+    from claw.fcl.autopilot import Autopilot
+
+    base = make_demo_fcl().init(DT)
+    assert (vectors.integration_cases(base.autopilot.cfg, DT, theta_hi=base.theta_hi_table)
+            == vectors.integration_cases(base.autopilot.cfg, DT, theta_hi=True))
+
+    def law_at(theta_hi):
+        return make_demo_fcl(autopilot=Autopilot(**{**example_profile().autopilot_params(), "theta_hi": theta_hi})).init(DT)
+
+    boxed = law_at(0.2)  # 예제 표 최소 0.22 — 전 마하에서 상자 위
+    assert all(c["id"] != "TC-INT-THETA-HI-DROP"
+               for c in vectors.integration_cases(boxed.autopilot.cfg, DT, theta_hi=boxed.theta_hi_table))
+
+    law = law_at(0.24)  # 상한 0.24 → 0.22, 낙차 0.02
+    runner = law.runner
+    cases = vectors.integration_cases(law.autopilot.cfg, DT, theta_hi=law.theta_hi_table)
+    drop = {c["id"]: c for c in cases}["TC-INT-THETA-HI-DROP"]
+    axis = [float(m) for m in law.theta_hi_table.axes[0]]
+    assert drop["rows"][0]["mach"] == axis[0] and drop["rows"][-1]["mach"] == axis[-1]  # 표의 최고·최저 상한 점
+    pid = runner.instances["ap_vs_pid"]
+    hits, margin = 0, -1.0
+    for row in drop["rows"]:
+        i_prev = pid._i
+        runner.step_all(**row)
+        env = runner.last_env
+        e = env["ap_vs_err"]
+        over = pid.kp * e + i_prev - env["ap_theta_hi"]
+        if row["mach"] == axis[-1]:
+            margin = max(margin, over)
+        if over > 0.0 and DT * pid.ki * e <= 0.0:
+            hits += 1
+    assert hits >= 1, "작은 낙차에서 하강 벡터가 가드 상한 조건의 (c0 참, c1 거짓) 스텝을 못 만들었다"
+    assert margin > 0.005, margin  # 여유 ≈ 낙차/2 — 조건부 적분의 넘침에 기대지 않는다
+
+
 def test_비활성_경로와_커버리지_세트(demo_law):
     """값으로 꺼진 경로를 목록화하고, 커버리지 세트가 구조를 바꾸지 않은 채 그 경로를 켠다(v1.12)."""
     from claw.codegen import emit_c

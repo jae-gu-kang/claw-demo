@@ -25,6 +25,8 @@ export const COMPUTE_POST = new Set([
   "/codegen/flight", "/verify/flight",
   "/influence/structural", "/influence/diagnose", "/influence/openloop", "/influence/sweep",
   "/influence/scan", "/influence/evaluate", "/influence/verify", "/influence/prescribe",
+  // 미션 초안 — 프롬프트의 기체 사실·기본 미션 예시를 고른 기체 문서에서 세운다(서버 llm_draft.py)
+  "/llm/mission-draft",
 ]);
 
 /** 쿼리로 기체를 받는 GET 라우트 (서버 `Depends(profile_query)`). */
@@ -61,9 +63,8 @@ export const NOT_AIRCRAFT = {
   "POST /llm/ask": "화면 안내 문답 — 기체 문맥은 9단계 [백로그]",
   "POST /llm/brief": "저장 결과의 소견서 — 결과가 자기 기체를 싣는다",
   "POST /llm/comms": "저장 런의 교신 대본 — 런이 자기 기체를 싣는다",
-  "POST /llm/mission-draft": "미션 초안 — 기체 문맥은 9단계 [백로그]",
-  "GET /world/manifest": "지형·표시 자산 — 기체 표시 모델은 10단계 [백로그]",
-  "GET /world/model/{name}": "지형·표시 자산 — 기체 표시 모델은 10단계 [백로그]",
+  "GET /world/manifest": "지형·표시 자산 목록 — 기체 표시 모델 이름은 런의 기체 문서(display)에서 온다",
+  "GET /world/model/{name}": "표시 자산 파일 — 어느 모델인지는 런의 기체 문서(display)가 이름으로 정한다",
   "GET /world/terrain/{name}": "지형·표시 자산",
   "GET /profiles": "기체 문서 자체 — id가 경로·본문에 있다",
   "POST /profiles": "기체 문서 자체 — id가 경로·본문에 있다",
@@ -73,6 +74,8 @@ export const NOT_AIRCRAFT = {
   "POST /profiles/validate": "기체 문서 자체 — id가 경로·본문에 있다",
   "POST /profiles/parse-table": "CSV 표 판독 — 기체 무관",
   "GET /profiles/_form": "편집 폼 서술(칸 이름·단위·선택지) — 기체 무관",
+  "GET /profiles/_showcase": "쇼케이스 기체 문서(엔진 패키지 데이터) — 설치 전 조회, 헤더 선택과 무관",
+  "POST /profiles/_showcase/install": "쇼케이스 기체 설치·초기화 — 대상 id는 패키지 문서가 정한다(헤더 선택과 무관)",
   "POST /profiles/aero-slice": "공력 DB 뷰어 — 기체 id가 아니라 편집 중인 문서를 본문으로 받는다",
   "POST /profiles/aero-stability": "정적 안정성 도함수 — 기체 id가 아니라 편집 중인 문서를 본문으로 받는다",
   "POST /profiles/seed-basis": "초기 게인 산출 근거 — 기체 id가 아니라 편집 중인 문서를 본문으로 받는다",

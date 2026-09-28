@@ -429,3 +429,10 @@ export function traceRows(specs, lineOf, { prefixed = false } = {}) {
   }
   return rows;
 }
+
+/** 두 기체 대조(Autocode 탭 overview 신호 compareWith)의 대조 기체 지문 캐시를 다시 쓸 수 있나 — id와 리비전이
+ *  **둘 다** 같을 때만. 저장 기체는 고치면 새 리비전이 되고 파라미터 지문이 바뀐다 — id만으로 두면 옛 리비전의
+ *  지문을 「지금 그 기체」로 대조한다. 리비전을 모르면(조회 실패 등) 다시 받는다. cached: {id, revision, …} | null */
+export function compareCacheHit(cached, id, revision) {
+  return cached != null && cached.id === id && Number.isInteger(revision) && cached.revision === revision;
+}

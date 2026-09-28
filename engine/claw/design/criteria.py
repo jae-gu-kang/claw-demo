@@ -7,8 +7,13 @@ views/margins.js gmColor — PM 30/45°, GM 6/10 dB). 자동 설계 루프는 �
 
 의미 구분 — 합격선·목표선·표시 음영선의 세 층:
 - 합격(pass) = pm_deg ≥ pm_min_deg ∧ gm_db ≥ gm_min_db  (관례 45° / 6 dB)
+  자세 자리의 gm_db는 **안정 경계까지의 거리**다(closure.att_margins — 공칭 폐루프가 안정인 루프의 이득 감소
+  쪽 경계는 |dB|로 바뀌어 온다. 개루프 불안정 A′의 음의 GM을 미달로 읽지 않는다)
 - pm_bad_deg(30°)는 표시용 심각선(30~45° 주의 음영) — 자동화에서는 45° 미만이 곧 fail
 - gm_good_db·zeta_good은 **설계 목표선**이다 — 합격이되 목표 미달이면 warn
+- 레이트 자리도 같은 PM·GM 선으로 판다 — AS94900 끊은 루프 여유(tune.rate_loop_margins, 같은 축 다른 레이트 루프
+  닫음·작동기+Padé)를 모드 지표 판정과 합친다(judge_rate_loop). 종전에는 레이트 자리가 ζ·λ로만 판정돼 여유 미달이
+  드러나지 않았다
 
 warn이 뜻하는 것: "합격선은 넘겼으나 튜너가 겨냥한 설계 목표에는 못 미친다".
 그러려면 목표선이 튜너 목표(TuneTargets) **이하**여야 한다 — 그렇지 않으면 튜닝이
@@ -16,6 +21,9 @@ warn이 뜻하는 것: "합격선은 넘겼으나 튜너가 겨냥한 설계 목
 gm_good_db 10 dB > TuneTargets.gm_db 8 dB라 자유 게인 최적점이 구조적으로 warn이었고,
 사용자에게는 "경고가 압도적으로 많다"로 보였다. 이 정합은 AutoDesignConfig.__post_init__이
 강제한다 (기준과 목표가 만나는 유일한 자리 — 한쪽만 조정하면 거기서 걸린다).
+감쇠는 같기만 해도 모자라다 — 튜너는 앵커에서 목표를 맞추고 출하되는 스케줄은 검증점에서 그보다
+내려가므로, 여유 0이면 표현 손실이 곧 warn이다. 그래서 감쇠 목표는 목표선 위에 잰 표현 손실만큼
+여유를 둔다 (TuneTargets.zeta_dr 주석 — 요 목표를 목표선과 같던 0.5에서 0.6으로 올린 근거).
 
 판정 불가(nan — 교차 없음)는 "na"로 낸다. 무한 여유(inf)는 그 축 통과로 본다.
 loop_margins가 nan을 nan으로 유지하는 이유(margins.py — 무한 여유 오인 금지)와
@@ -80,7 +88,10 @@ class MarginCriteria:
     pm_bad_deg: float = 30.0  # 표시용 심각선 [deg] (30~45 주의 음영)
     gm_good_db: float = 8.0  # 설계 목표선 [dB] — TuneTargets.gm_db와 같은 값 (6~8 warn)
     zeta_min: float = 0.30  # 레이트 댐퍼 폐쇄 모드 감쇠 합격선 (MIL-8785류 Level 관례 대역)
-    zeta_good: float = 0.50  # 감쇠 목표선 — 합격이되 이 미만은 warn (TuneTargets.zeta_dr와 동치)
+    # 감쇠 목표선 — 합격이되 이 미만은 warn. 튜너 목표(TuneTargets.zeta_sp·zeta_dr)보다 **아래**에 둔다: 튜너는 앵커에서
+    # 목표에 처음 닿는 크기를 골라 앵커 지표가 곧 목표이고, 스케줄 표현(1축 표의 고도 교차·다항)은 검증점에서 그보다
+    # 내려간다 — 목표와 같은 선이면 그 표현 손실이 전부 warn이 된다(요 목표가 이 값과 같던 때 쇼케이스 요 warn 35건)
+    zeta_good: float = 0.50
     # 롤 대역폭(λ)만 합격선이 **절대값이 아니라 목표 대비 비율**이다 [기본값]. λ는
     # 안정성 마진이 아니라 조종성 성능 지표라 관례적 절대 합격선이 없고, 요구 자체가
     # 그 실행의 튜닝 목표(TuneTargets.roll_lambda)로 주어진다. 비율은 폐쇄망 검증에서
@@ -146,6 +157,29 @@ class MarginCriteria:
         if gm < self.gm_good_db:
             return "warn"
         return "ok"
+
+    def judge_rate_loop(self, metric_status: str, margins) -> str:
+        """레이트 자리의 합산 판정 — 모드 지표 판정(judge_damping·judge_bandwidth) + AS94900 끊은 루프 여유.
+
+        margins는 tune.rate_loop_margins 결과({pm_deg, gm_db, divergent} — 없으면 None: 잴 루프가 없다)다. 여유는 자세
+        자리와 **같은 선**으로 판다(judge — PM·GM 합격선 미만 fail, GM 목표선 미만 warn). 레이트 자리는 종전에 모드
+        지표만 봤다 — 쇼케이스 기체 roll_p가 GM 4.1~5.1 dB(합격선 6 dB 미만)인데 λ가 목표라 전부 통과였다.
+        발산(divergent — 이 루프를 닫은 폐루프가 느린 나선 밖으로 발산)은 fail이다.
+
+        합산: 어느 쪽이든 fail이면 fail. 모드 지표가 na(롤 모드를 못 잼 등)면 여유가 통과여도 na로 둔다 — 여유 판정이
+        "지표를 못 잰 자리"를 판정한 자리로 바꾸면 judged 수가 조용히 는다. 여유가 na(nan)면 모드 지표 판정 그대로.
+        나머지는 둘 중 나쁜 쪽(ok < warn < fail)."""
+        rank = {"ok": 0, "warn": 1, "fail": 2}
+        if margins is None:
+            return metric_status
+        m_status = "fail" if margins.get("divergent") else self.judge(margins)
+        if metric_status == "fail" or m_status == "fail":
+            return "fail"
+        if metric_status not in rank:
+            return metric_status
+        if m_status not in rank:
+            return metric_status
+        return max(metric_status, m_status, key=rank.__getitem__)
 
     def judge_bandwidth(self, lam: float, target: float, *, unstable: bool = False,
                         participation=None) -> str:

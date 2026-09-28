@@ -30,7 +30,9 @@
  */
 
 import { api, errorText } from "../api.js";
-import { clear, el } from "../dom.js";
+// fmt — 엘레본 여유 막대(reserveBox)가 쓴다. 빠져 있어 수평비행 출발 런(트림 여유 수치가 있는 결과)을 열면
+// ReferenceError로 패널이 죽었다 — 지상 출발 기본 미션은 그 분기에 안 닿아 드러나지 않았다
+import { clear, el, fmt } from "../dom.js";
 import {
   capabilityBox, channelRows, densityView, exceedanceSeries, fmtDeg,
   histBars, modeOptions, toDeg, viewOf,
@@ -97,8 +99,10 @@ export function createDutyPanel() {
     drawChannel();
   };
 
+  let lastError = null; // 마지막 집계·목록 실패 사유 — snapshot()이 호출측(쇼케이스 보고)에 넘긴다
   const load = async (id) => {
     try {
+      lastError = null;
       clear(errBox);
       statusBox.textContent = "집계 중…";
       lastReport = await api.get(
@@ -116,15 +120,18 @@ export function createDutyPanel() {
       clear(chanBar);
       clear(chanBox);
       statusBox.textContent = "";
-      clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
+      lastError = errorText(e);
+      clear(errBox).append(el("div", { class: "error-box" }, lastError));
     }
   };
 
   const loadList = async () => {
     try {
+      lastError = null;
       clear(errBox);
       const items = (await api.get("/results")).filter((m) => m.kind === "sim");
       if (!items.length) {
+        lastError = "시뮬 결과가 없습니다";
         // 조용한 빈 화면 금지 — 무엇을 해야 하는지를 말한다
         clear(summaryBox).append(el("p", { class: "hint" },
           "시뮬 결과가 없습니다 — 위 [시뮬 실행]을 한 번 누르면 그 런의 타면 사용 "
@@ -140,7 +147,8 @@ export function createDutyPanel() {
       if (lastReport && selectedId === pick && !stale) draw();
       else await load(pick);
     } catch (e) {
-      clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
+      lastError = errorText(e);
+      clear(errBox).append(el("div", { class: "error-box" }, lastError));
     }
   };
 
@@ -168,13 +176,22 @@ export function createDutyPanel() {
     noteBox(),
   );
 
+  // 집계 중복 방지 — 패널 build()와 쇼케이스 신호(views/sim.js 「duty」)가 같은 열림에서 둘 다 부른다
+  let inflight = null;
   return {
     root,
-    /** 패널이 열릴 때 — 아직 없거나 새 런이 끝났으면 그때 집계한다. */
+    /** 패널이 열릴 때 — 아직 없거나 새 런이 끝났으면 그때 집계한다. 끝나면 풀리는 약속을 돌려준다
+     *  (실패도 풀린다 — 사유는 패널이 errBox에 낸다; 호출측은 snapshot()으로 결과 유무를 본다). */
     ensure() {
-      if (!lastReport || stale) loadList();
-      else draw();
+      if (!lastReport || stale) {
+        if (!inflight) inflight = loadList().finally(() => { inflight = null; });
+        return inflight;
+      }
+      draw();
+      return Promise.resolve();
     },
+    /** 지금 패널이 보여 주는 집계 {id, report} — 없으면 report null. */
+    snapshot: () => ({ id: selectedId, report: lastReport, error: lastError }),
   };
 }
 

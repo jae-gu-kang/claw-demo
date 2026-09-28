@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  attitudeAt, niceStep, originsAgree, sampleAt, sceneExtent, trackPoints, velocityAt,
+  attitudeAt, niceStep, originsAgree, sampleAt, sceneExtent, trackPoints, vehicleModelPlan, velocityAt,
 } from "./world3d.js";
 
 /** 결측이 섞인 신호 — 직렬화가 비유한값을 null로 바꾼 모양 (M13 serialize). */
@@ -134,6 +134,20 @@ test("원점이 다르면 사유에 두 좌표를 다 적는다", () => {
   assert.ok(r.reason.includes("34.6000") && r.reason.includes("37.5000"), r.reason);
 });
 
+test("허용차를 겨우 넘는 차이도 사유의 두 좌표가 다르게 읽힌다", () => {
+  // 활주로 원점 보정(2026-09-27, 동쪽 3.7 m) 전후처럼 소수 넷째 자리까지 같은 두 원점 — 같게 찍히면 사유가 자기모순이다
+  const r = originsAgree({ lat_deg: 34.601301, lon_deg: 127.212107, h_ref: 0 }, { lat: 34.601303, lon: 127.212067 });
+  assert.equal(r.ok, false);
+  assert.ok(r.reason.includes("127.212107") && r.reason.includes("127.212067"), r.reason);
+  // 허용차 바로 위(1.5e-6°)의 차이 — 반올림으로 두 수가 같아지지 않는다. 허용차를 넓히면 자릿수도 따라 준다
+  const edge = originsAgree({ lat_deg: 34.6000004, lon_deg: 127.2, h_ref: 0 }, { lat: 34.6000019, lon: 127.2 });
+  assert.equal(edge.ok, false);
+  const [a, b] = edge.reason.match(/\d+\.\d+°N/g);
+  assert.notEqual(a, b, edge.reason);
+  const loose = originsAgree(PACK_ORIGIN, { lat: 34.61, lon: 127.2 }, 1e-4);
+  assert.match(loose.reason, /34\.6000°N .* 34\.6100°N/, loose.reason);
+});
+
 test("허용오차 안의 차이는 같은 원점으로 본다", () => {
   assert.equal(originsAgree(PACK_ORIGIN, { lat: 34.6 + 5e-7, lon: 127.2 }).ok, true);
   assert.equal(originsAgree(PACK_ORIGIN, { lat: 34.6 + 5e-5, lon: 127.2 }).ok, false);
@@ -164,4 +178,42 @@ test("자세 신호 자체가 없는 결과도 null이다 (0으로 메우지 않
 
 test("자세 0은 결측이 아니다 — 수평비행은 유효한 값이다", () => {
   assert.deepEqual(attitudeAt({ phi: [0], theta: [0], psi: [0] }, 0), [0, 0, 0]);
+});
+
+// ---- 기체 모델 — 이 런의 기체 문서 display (종전: shahed136.glb 고정) ----
+
+const MANIFEST = { models: [{ name: "shahed136.glb" }, { name: "shahed136_eoir.glb" }, { name: "launcher.glb" }],
+  models_reason: null };
+const docWith = (display) => ({ id: "x", display });
+
+test("vehicleModelPlan: 문서의 표시 모델을 그린다 — 변형이 바꾼 모델도 그대로", () => {
+  const eo = vehicleModelPlan(docWith({ kind: "model", model: "shahed136_eoir.glb" }), MANIFEST, { label: "S1 / eoir · r3" });
+  assert.equal(eo.model, "shahed136_eoir.glb", "EO/IR형 런에 기본형 모델을 그리지 않는다");
+  assert.equal(eo.note, null);
+  assert.match(eo.caption, /shahed136_eoir\.glb — S1 \/ eoir · r3의 표시 모델/);
+});
+
+test("vehicleModelPlan: 표시 모델이 없는 기체는 궤적만 — 예제의 GLB를 빌리지 않는다", () => {
+  const p = vehicleModelPlan(docWith(null), MANIFEST, { label: "내 기체 · r1" });
+  assert.equal(p.model, null);
+  assert.match(p.note, /내 기체 · r1의 문서에 표시 모델이 없어 궤적만/);
+  assert.match(p.note, /빌려 그리지 않습니다/);
+});
+
+test("vehicleModelPlan: 자산 목록에 없으면 궤적만 + 서버 사유 · 목록을 모르면 읽어 보게 둔다", () => {
+  const miss = vehicleModelPlan(docWith({ kind: "model", model: "other.glb" }),
+    { models: [], models_reason: "모델 폴더가 없습니다" });
+  assert.equal(miss.model, null);
+  assert.match(miss.note, /other\.glb\)이 서버 자산에 없어 궤적만 그립니다 — 모델 폴더가 없습니다/);
+  assert.equal(vehicleModelPlan(docWith({ kind: "model", model: "other.glb" }), null).model, "other.glb");
+});
+
+test("vehicleModelPlan: 문서를 못 받았거나 기록이 없으면 그 사유 — 기본 모델로 눙치지 않는다", () => {
+  const e = vehicleModelPlan(null, MANIFEST, { error: "이 결과에 기체 기록(meta.profile)이 없다" });
+  assert.equal(e.model, null);
+  assert.match(e.note, /^이 결과에 기체 기록\(meta\.profile\)이 없다 — 표시 모델을 정할 수 없어/);
+  assert.equal(vehicleModelPlan(null, MANIFEST).model, null);
+  // 모르는 kind·빈 이름은 모델이 아니다
+  assert.equal(vehicleModelPlan(docWith({ kind: "mesh", model: "a.glb" }), MANIFEST).model, null);
+  assert.equal(vehicleModelPlan(docWith({ kind: "model", model: "" }), MANIFEST).model, null);
 });

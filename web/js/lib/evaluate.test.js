@@ -12,7 +12,9 @@ import test from "node:test";
 
 import {
   STATUS_LABEL, attributionRows, cardDeltas, cardLines, caseGrid, checksSummary,
-  compositionLine, evalFocus, evaluateRequest, hardFailLines, jLine, localityLines,
+  compositionLine, evalFocus, hardGateVerdict, evalVerdictLine, evaluateRequest, hardFailLines, jLine,
+  localityLines,
+  prescriptionTarget,
   missionProfileLines,
   normalizeEvalReport,
   normalizeVerifyReport, statusInk, verifyRequest,
@@ -432,4 +434,80 @@ test("verifyRequest — t_mission은 채웠을 때만 나간다", () => {
   const body = verifyRequest(state, { cases: [], tMission: 120 });
   assert.equal(body.t_mission, 120);
   assert.ok(!("t_mission" in verifyRequest(state, { cases: [] })));
+});
+
+
+// ── 쇼케이스 보고 — 판정 한 줄·[얼마나 →] 대상 ─────────────────────────────────
+// 모양은 예제 기체 실측(피치 댐퍼 표 ×4.9 결함, 4케이스 depth=full)에서 줄였다
+
+const faultRun = normalizeEvalReport({
+  depth: "full",
+  aggregate: {
+    n_cases: 2, hard_fail: true,
+    hard_fails: [
+      { check: "actuator.sat_frac", channel: "de", value: 0.3126, limit: 0.05, case: "M0.22_h100_f25" },
+      { check: "authority.dynamic_reserve", value: -0.1147, limit: 0.05, case: "M0.22_h100_f25" },
+    ],
+    J: null, J_reason: "하드 실패라 J를 매기지 않는다",
+  },
+  cases: [
+    { case: "M0.14_h3000_f25", hard_fails: [],
+      attribution: { status: "ok", findings: [{ rule: "error_split", severity: "warn" }],
+                     prescriptions: [{ knobs: ["fcl/Autopilot.tau_alt"], findings: [0] }] } },
+    { case: "M0.22_h100_f25", hard_fails: [{ check: "actuator.sat_frac" }],
+      attribution: { status: "ok",
+        findings: [{ rule: "error_split", severity: "warn" }, { rule: "sat_attrib", severity: "warn" },
+                   { rule: "mix_sat", severity: "warn" }],
+        prescriptions: [
+          { knobs: ["fcl/Autopilot.tau_alt"], findings: [0] },
+          { knobs: ["table.pitch.k_rate"], findings: [1] },
+          { knobs: ["table.pitch.kp", "table.pitch.ki"], findings: [2] },
+        ] } },
+  ],
+});
+
+test("evalVerdictLine: FAIL은 칩과 같은 머리 + 하드 위반 첫 줄", () => {
+  assert.equal(evalVerdictLine(faultRun),
+    "FAIL 2 — 케이스 2건 · full · actuator.sat_frac (de) — 0.313 (한계 0.05) @M0.22_h100_f25");
+});
+
+test("evalVerdictLine: PASS는 J 줄, 판정 없음은 그렇다고", () => {
+  const pass = normalizeEvalReport({ depth: "linear",
+    aggregate: { n_cases: 15, hard_fail: false, hard_fails: [], J: null, J_reason: "비선형 항 미계측" } });
+  assert.equal(evalVerdictLine(pass), "PASS — 케이스 15건 · linear · J 없음 — 비선형 항 미계측");
+  assert.equal(evalVerdictLine(normalizeEvalReport({ cases: [] })), "판정 없음 — 케이스 0건");
+  assert.equal(evalVerdictLine(null), "판정 없음 — 케이스 0건");
+  // 위반 목록 없이 FAIL만 온 옛 결과 — 「undefined」를 찍지 않는다
+  assert.equal(evalVerdictLine(normalizeEvalReport({ aggregate: { n_cases: 1, hard_fail: true } })),
+    "FAIL 0 — 케이스 1건");
+});
+
+test("hardGateVerdict: 칩과 같은 한 비트 — 진행기가 기대 판정과 대조하는 data.verdict", () => {
+  assert.equal(hardGateVerdict(faultRun), "FAIL");
+  assert.equal(hardGateVerdict(normalizeEvalReport({ aggregate: { hard_fail: false, hard_fails: [] } })), "PASS");
+  // 판정이 없으면 없다고 — PASS로 위장하지 않는다(칩 배지도 이때 서지 않는다)
+  assert.equal(hardGateVerdict(normalizeEvalReport({ cases: [] })), null);
+  assert.equal(hardGateVerdict(normalizeEvalReport({ aggregate: { hard_fail: null } })), null);
+  assert.equal(hardGateVerdict(null), null);
+});
+
+test("prescriptionTarget: 하드 위반 케이스의 하드 규칙 카드 — 통과 케이스·추종 카드는 건너뛴다", () => {
+  const t = prescriptionTarget(faultRun);
+  assert.equal(t.case, "M0.22_h100_f25");
+  assert.deepEqual(t.knobs, ["table.pitch.k_rate"]);
+});
+
+test("prescriptionTarget: 하드 규칙 카드가 없으면 첫 카드, 위반이 없으면 null", () => {
+  const onlyTracking = normalizeEvalReport({
+    cases: [{ case: "A", hard_fails: [{ check: "damping.zeta" }],
+      attribution: { status: "ok", findings: [{ rule: "windup" }],
+                     prescriptions: [{ knobs: ["fcl/Autopilot.ki_alt"], findings: [0] }] } }],
+  });
+  assert.deepEqual(prescriptionTarget(onlyTracking).knobs, ["fcl/Autopilot.ki_alt"]);
+  const clean = normalizeEvalReport({ cases: [{ case: "A", hard_fails: [], attribution: { status: "na" } }] });
+  assert.equal(prescriptionTarget(clean), null);
+  // 소견이 귀속에 실패한 위반 케이스(선형 전용 ζ 실패 등)는 대상이 없다
+  const na = normalizeEvalReport({ cases: [{ case: "A", hard_fails: [{ check: "damping.zeta" }],
+    attribution: { status: "na", note: "비선형 런 없음" } }] });
+  assert.equal(prescriptionTarget(na), null);
 });

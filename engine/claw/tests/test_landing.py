@@ -7,7 +7,7 @@
 
 전제 하나를 명시한다 — **RTK 고정해**. 다만 그 이유는 처음 적었던 것과 다르다:
 실측해 보니 접지 강하율은 항법 등급과 거의 무관하고, 갈리는 것은
-**접지 지점**이다 — RTK 5시드 폭 7.9 m이고 기본 GNSS는 그보다 두 자릿수 크다.
+**접지 지점**이다 — RTK 5시드 폭 11.7 m이고 기본 GNSS는 3시드만으로 512 m다.
 활주로가 1,500 m이므로 그 산포가 곧 "활주로에 내리느냐"를 가른다.
 (수치는 프로펠러 전환으로 재측정했다 — 아래 테스트 독스트링에 경위가 있다.)
 test_rtk_buys_a_repeatable_touchdown_point_not_a_softer_one이 그 대비를 담는다.
@@ -109,8 +109,12 @@ def test_phase_times_are_recorded(landed):
     # 부드럽다(−0.96 m/s) — 느려진 것은 거기까지 가는 시간이지 접지 품질이 아니다.
     # (직전 갱신은 동압 스케줄 상한 4.0→2.0 — 승강타 리밋사이클 수정이었다.)
     # 레일 이탈은 구속 적분이라 추진과 무관하게 그대로다
-    assert ph["touchdown_t"] == pytest.approx(115.4, abs=1.5)
-    assert ph["stop_t"] == pytest.approx(137.9, abs=2.0)
+    # 그다음 두 번은 **발진 직후 스로틀**이다(115.4 → 112.1 → 111.3, 137.9 → 134.9 → 134.1): 속도 명령필터 추월
+    # 동기화가 이탈 직후 스로틀 0 약 2.2 s를 없앴고(fcl/graphs.py 속도 절), 발사 출력 웜스타트가 남은 램프
+    # (지상 트림 스로틀 0에서 0.5까지 0.24 s)를 없앴다(sim/simulator.py run) — 상승이 빨라져 250 m에 일찍 닿는다.
+    # 접지 품질은 그대로다(강하율 −0.93 → −0.95, 접지 속도 78.9 m/s)
+    assert ph["touchdown_t"] == pytest.approx(111.3, abs=1.5)
+    assert ph["stop_t"] == pytest.approx(134.1, abs=2.0)
     assert ph["touchdown_t"] < ph["stop_t"]
 
 
@@ -188,10 +192,12 @@ def test_rtk_buys_a_repeatable_touchdown_point_not_a_softer_one(seed):
     곧 개시 시점 오차이고, 88 m/s에서 그것이 접지 지점으로 증폭된다:
 
         기본 GNSS   두 시드(3·7)가 수백 m 차이 (2시드 표본 — 폭이 아니라 하한)
-        RTK 고정해  5시드 폭 7.9 m
+        RTK 고정해  5시드 폭 11.7 m
 
     수치는 프로펠러 전환으로 다시 재측정한 것이다 — 접지점 자체가 9,700 → 10,237 m로
-    멀어졌다(추력이 줄어 상승이 길어진 만큼 더 나아간 뒤 내려온다). **대비는 그대로
+    멀어졌다(추력이 줄어 상승이 길어진 만큼 더 나아간 뒤 내려온다). 그 뒤 발진 직후
+    스로틀 두 수리(속도 명령필터 추월 동기화, 발사 출력 웜스타트)로 상승이 빨라져
+    10,237 → 9,987 → 9,953 m로 다시 당겨졌다(5시드 9,947~9,959 m, 폭 11.7 m). **대비는 그대로
     30배 이상**이고, 그것이 이 테스트가 지키는 명제다. 기본 GNSS는 2시드만 재서
     폭이 아니라 하한이다 — 5시드 폭은 그보다 크다.
     활주로 길이가 1,500 m인데 수백 m가 흔들리면 활주로에 못 내린다.
@@ -199,8 +205,8 @@ def test_rtk_buys_a_repeatable_touchdown_point_not_a_softer_one(seed):
     """
     rtk = fly(nav=NavErrorModel.rtk_fixed(seed=seed))
     k = int(round(rtk.meta["phases"]["touchdown_t"] / DT))
-    # RTK면 시드가 바뀌어도 같은 자리에 내린다 (5시드 폭 7.9 m)
-    assert float(rtk.signals["pn"][k]) == pytest.approx(10237.0, abs=150.0)
+    # RTK면 시드가 바뀌어도 같은 자리에 내린다 (5시드 폭 11.7 m)
+    assert float(rtk.signals["pn"][k]) == pytest.approx(9953.0, abs=150.0)
     assert climb_rate(rtk.signals, k) == pytest.approx(-0.96, abs=0.25)
 
 
@@ -298,7 +304,9 @@ def test_cruise_elevon_activity_stays_bounded(landed):
     느린 성분이 σ를 지배한다 — 순항 전체로 재면 채택값 2.0이 6.7°, 파탄 직전인 3.0이
     8.9°로 **둘 다 문턱을 넘어** 건전한 형상까지 같이 잡는다. 정착 구간만 보면
     1.1° 대 7.8°로 갈린다. 문턱 6.0°는 그 사이고, 기본 형상(피치 2.0·롤 4.0)은
-    정착 1.7°로 그 28 %다.
+    정착 2.9°로 그 48 %다. 발사 출력 웜스타트(sim/simulator.py run) 전에는 1.5°였다 — 순항 진입
+    과도의 2.6 Hz 성분이 후반 창에 더 남아 있어서다. 2 s 창 σ가 순항 후반 4.4 → 1.5°로 계속 줄어
+    리밋사이클이 아니다(전: 2.6 → 1.0°). 5시드 2.7~3.3°(전 0.9~1.5°).
     """
     s = landed.signals
     k = np.flatnonzero(np.array(s["mode"]) == "cruise")
@@ -315,8 +323,8 @@ def test_default_nav_lands_but_scatters_the_touchdown_point():
         assert res.meta["phases"]["touchdown_t"] is not None, "착륙 자체는 한다"
         k = int(round(res.meta["phases"]["touchdown_t"] / DT))
         pns.append(float(res.signals["pn"][k]))
-    # 시드 셋의 전폭이 RTK 전체 폭을 훌쩍 넘는다 — 실측 168 m(원점 2.9 m 기준,
-    # 5시드도 극값이 같다) 대 RTK 5시드 12 m. 문턱은 RTK 폭의 4배 자리에 둔다:
+    # 시드 셋의 전폭이 RTK 전체 폭을 훌쩍 넘는다 — 실측 512 m(발사 출력 웜스타트 전 312 m,
+    # 원점 2.9 m 때 168 m) 대 RTK 5시드 11.7 m. 문턱은 RTK 폭의 4배 자리에 둔다:
     # 이 테스트가 말하는 것은 "기본 항법이 자릿수 크게 흩어진다"이지 특정 시드들의
     # 거리가 아니다. 원래 시드 (3, 23) 둘이었는데, 발사 원점을 1.2→2.9 m로 올리자
     # 그 쌍만 37 m로 좁아져 깨졌다 — 두 표본은 우연에 볼모다. 셋로 넓혔다.

@@ -37,7 +37,11 @@ def run(t_end=180.0, profile=None):
     assert rec["meta"]["aborted"] is None, rec["meta"]["aborted"]
     mission_steps = len(rec["inputs"])
     ap_cfg = getattr(getattr(law, "autopilot", None), "cfg", None)
-    theta_hi = getattr(law, "theta_hi_table", None) is not None
+    # θ 상한 표 **자체**를 넘긴다 — 검증 탭(verify/autocode.py `_integration_cases`)과 같은 호출이다. 표가 있나(bool)만
+    # 넘기면 하강 케이스가 데모 격자 고정 벡터(마하 0.1→0.9·고정 여유)로 떨어진다: 예제·EO/IR형·구 기체는 표에서 정한
+    # 벡터와 비트로 같아 드러나지 않았지만, 상자에 잘려 상한이 상수인 기체(쇼케이스 S1 — 하강 케이스가 없다)는 검증 탭과
+    # 다른 입력으로 대조됐다
+    theta_hi = getattr(law, "theta_hi_table", None)
     for case in vectors.integration_cases(ap_cfg, law.runner.dt, theta_hi=theta_hi):
         for row in case["rows"]:
             out = law.runner.step_all(**row)

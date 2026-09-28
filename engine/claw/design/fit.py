@@ -27,6 +27,14 @@ PolyTable(tables/poly.py) — 다항 런타임 채택(사용자 확정)에 따�
   기울기 점프는 joints로 정량 보고 (max_adjacent_jump 원칙 — 판정은 호출자).
 - 다축 변동: v1 다항 런타임은 1D 한정 [백로그] — 2축 이상 변동이면 지배 축으로
   적합하고 나머지 축 기여를 cross_axis_residual로 정직하게 보고한다.
+- 스케줄 축 제한(axes): 적합 축 후보를 호출자가 준 부분집합으로 좁힌다. 자동 설계는
+  **마하만** 준다(AutoDesignConfig.sched_axes) — 산출 표가 가는 곳(기체 문서
+  law.gain_tables·게인 탭)이 마하 1축 표만 받기 때문이다. 제한 밖 축의 변동은 버리지
+  않고 보고에 남긴다(axes_excluded) — 그 변동이 마진을 깨는지는 VERIFY가 **반출될 그
+  마하 표로** 판정한다(고도 표로 검증해 놓고 마하 표를 반출하면 검증받지 않은 형상이
+  나간다). 제한은 표현(mode)과 직교한다 — 표 모드에서는 반출 표가 곧 검증한 표이고
+  (orchestrator `reverify_resampled`가 동일 표로 인용), 제한 밖 축의 기여는 1축 붕괴의
+  톱니·cross_axis_residual로 드러난다.
 - resample_to_table: 다항 → 선형 보간 허용치 내 최소 breakpoint Table. **웹 「채택」·
   apply-gains가 실제로 주입하는 반출 표다** (routes/design.py `_gain_export` → 웹
   작업본·기체 문서 law.gain_tables) — 세션이 검증한 것은 다항이므로, 반출 표는
@@ -249,8 +257,19 @@ def select_axes(samples: dict, points, *, flat_tol=0.02) -> tuple:
     return tuple(axis for axis in AXES if spreads[axis] > flat_tol * scale)
 
 
+def _allowed_axes(axes) -> tuple:
+    """스케줄 축 제한 인자 정규화 — None = 전 축(AXES). AXES 밖 이름·빈 목록은 거부."""
+    if axes is None:
+        return AXES
+    axes = tuple(axes)
+    bad = [a for a in axes if a not in AXES]
+    if not axes or bad:
+        raise ValueError(f"스케줄 축은 {list(AXES)}의 비어 있지 않은 부분집합: {list(axes)}")
+    return axes
+
+
 def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
-             max_degree=4, max_segments=4, mode="poly") -> dict:
+             max_degree=4, max_segments=4, mode="poly", axes=None) -> dict:
     """자리 하나의 스케줄 표현 결정 — {"kind": "constant"|"poly"|"table", ...}.
 
     - 변동 축 없음 → 상수 (평균값 — 잔차를 report에 남긴다). **mode와 무관하다**:
@@ -260,16 +279,31 @@ def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
     - 2축 이상 → v1은 1D 한정 [백로그]: 지배 축(변동 최대)으로 펴고 나머지 축 기여를
       cross_axis_residual로 보고 — 조용히 뭉개지 않는다. 표 모드에서는 그 기여가
       분할점 값의 톱니로 나타나므로 zigzag·adjacent_jump_frac도 함께 낸다
+    - axes(스케줄 축 제한, None = 전 축): 지배 축은 이 안에서만 고른다. 변동은 있는데
+      제한 밖인 축은 axes_excluded로 보고한다 — 제한 안에 변동 축이 없으면 상수로
+      접히고, 그 변동은 상수의 max_residual에 그대로 남는다. **mode와 직교한다**:
+      제한은 "어느 축으로 펴는가", mode는 "편 것을 어떻게 싣는가"다. 제한 밖 축의
+      기여는 두 표현 모두 cross_axis_residual(→ fit_quality cross_axis_frac)로, 표
+      모드에서는 톱니(zigzag·joints)로도 드러난다
     """
     if mode not in ("poly", "table"):
         raise ValueError(f"mode는 'poly'|'table': {mode!r}")
+    allowed = _allowed_axes(axes)
     names = [n for n in samples if n in points]
     vals = np.array([samples[n] for n in names], dtype=float)
-    axes = select_axes(samples, points, flat_tol=flat_tol)
+    detected = select_axes(samples, points, flat_tol=flat_tol)
+    excluded = tuple(a for a in detected if a not in allowed)
+    axes = tuple(a for a in detected if a in allowed)
     if not axes:
         mean = float(np.mean(vals)) if len(vals) else 0.0
         resid = float(np.max(np.abs(vals - mean))) if len(vals) else 0.0
-        return {"kind": "constant", "slot": slot, "value": mean, "max_residual": resid}
+        out = {"kind": "constant", "slot": slot, "value": mean, "max_residual": resid}
+        if excluded:
+            # 제한 밖 축 변동을 상수로 접었다 — 조용히 뭉개지 않는다
+            out.update({"axes_detected": detected, "axes_excluded": excluded,
+                        "note": f"변동 축 {list(excluded)}이 스케줄 축 {list(allowed)} 밖이라 상수로"
+                                " 접었다 — 그 변동은 max_residual에 있다"})
+        return out
 
     # 지배 축: 축별 그룹 내 스프레드 최대 (1축이면 그 축)
     spreads = _axis_spreads(samples, points)
@@ -291,18 +325,22 @@ def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
             # 지배 축에 서로 다른 축값이 하나뿐 — 변동은 전부 다른 축에서 온 것이다.
             # 표를 세울 수 없으니 상수로 굳히고 **그 사실을 사유로** 남긴다
             mean = float(np.mean(ys_u))
-            return {
+            out = {
                 "kind": "constant", "slot": slot, "value": mean,
                 "max_residual": float(np.max(np.abs(vals - mean))),
-                "axes_detected": axes, "cross_axis_residual": cross,
+                "axes_detected": detected, "cross_axis_residual": cross,
                 "note": f"지배 축 {axis}의 분할점이 한 점 — 표를 세울 수 없어 상수로 굳혔다",
             }
+            if excluded:
+                out["axes_excluded"] = excluded
+            return out
         surface = table_surface(xs_u, ys_u)
         # 잔차는 접기 전 **표본 전부**에 대해 잰다 — 접은 대표값끼리 재면 정의상 0이다
         resid = np.abs(vals - np.interp(xs, xs_u, ys_u))
         report = dict(surface)
         report.update({
-            "kind": "table", "slot": slot, "axes_detected": axes, "axis": axis,
+            # axes_detected는 변동 축 전부(제한 밖 포함) — 다항 보고와 같은 뜻(아래)
+            "kind": "table", "slot": slot, "axes_detected": detected, "axis": axis,
             "cross_axis_residual": cross,
             "max_residual": float(np.max(resid)),
             "rms": float(np.sqrt(np.mean(resid**2))),
@@ -311,6 +349,8 @@ def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
                            "lowered": False,
                            "note": "표 모드 — 표본값을 그대로 놓아 부호가 유지된다"},
         })
+        if excluded:
+            report["axes_excluded"] = excluded
         return {"kind": "table", "slot": slot,
                 "table": Table({axis: xs_u}, ys_u, name=slot, extrapolate="clip"),
                 "report": report}
@@ -321,16 +361,23 @@ def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
     )
     if poly is None:  # 어떤 차수로도 부호를 못 지켰다 — 상수로 굳힌다
         mean = float(np.mean(ys_u))
-        return {
+        out = {
             "kind": "constant", "slot": slot, "value": mean,
             "max_residual": float(np.max(np.abs(ys_u - mean))),
             "sign_guard": guard,
         }
+        if excluded:
+            out.update({"axes_detected": detected, "axes_excluded": excluded})
+        return out
     report = dict(surface)
     report.update({
-        "kind": "poly", "slot": slot, "axes_detected": axes, "axis": axis,
+        # axes_detected는 **실제로 변동이 있는 축 전부**다(제한 밖 포함) — 종전과 같은
+        # 뜻을 지키고, 제한 때문에 적합에서 뺀 축은 axes_excluded로 따로 적는다
+        "kind": "poly", "slot": slot, "axes_detected": detected, "axis": axis,
         "cross_axis_residual": cross, "sign_guard": guard,
     })
+    if excluded:
+        report["axes_excluded"] = excluded
     return {"kind": "poly", "slot": slot, "table": poly, "report": report}
 
 
@@ -432,20 +479,57 @@ def fit_quality(report: dict) -> dict:
     }
 
 
+# 튜닝 실패 표본을 뺀 뒤에도 남아야 하는 표본 수 — 적합(서로 다른 격자점 2개)·표(분할점 2개)가 서는 최소다.
+# 이보다 적게 남으면 제외를 **보류**하고 그 사실을 보고한다 (사용자 합의 규칙 "자리마다 표본 2개 이상은 남긴다")
+_MIN_KEPT_SAMPLES = 2
+
+
+def _drop_failed_samples(samples: dict, points, failed: dict | None) -> tuple:
+    """튜닝이 성립하지 않은 표본을 적합 전에 뺀다 — (남은 표본, 뺀 기록 목록, 보류 기록 | None).
+
+    failed: {점 이름: 사유 레코드(dict — loop·reason·basis 등, 호출자가 정한다)}. 기록에는 그 표본의
+    값도 싣는다 — 뺀 것이 "0 자리값"이었다는 사실이 보고에 남아야 한다. 적합에 안 쓰이는 점(points 밖)은
+    남은 수에 세지 않는다 (fit_slot이 그 이름을 어차피 버린다)."""
+    hit = sorted(n for n in (failed or {}) if n in samples)
+    if not hit:
+        return samples, [], None
+    rows = [{"point": n, "value": float(samples[n]), **dict(failed[n])} for n in hit]
+    kept = {n: v for n, v in samples.items() if n not in failed}
+    n_kept = sum(1 for n in kept if n in points)
+    if n_kept < _MIN_KEPT_SAMPLES:
+        return samples, [], {
+            "kept_would_be": n_kept, "min_kept": _MIN_KEPT_SAMPLES, "samples": rows,
+            "note": f"튜닝 실패 표본 {len(rows)}개를 빼면 {n_kept}개만 남아 표가 서지 않는다 —"
+                    " 제외를 보류했다. 이 자리의 스케줄은 실패 표본을 담고 있다",
+        }
+    return kept, rows, None
+
+
 def fit_slots(gain_samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
-              max_degree=4, max_segments=4, mode="poly") -> dict:
+              max_degree=4, max_segments=4, mode="poly", axes=None, exclude=None) -> dict:
     """전 자리 적합 — {"tables": {자리: PolyTable|Table}, "constants": {자리: 값}, "reports"}.
 
     mode="table"이면 tables 항목이 Table(선형 보간)이다 — 모듈 머리말의 두 표현.
     tol_fit·max_degree·max_segments는 다항 전용이라 표 모드에서는 쓰이지 않는다
     (호출자가 그 사실을 알아야 한다: 표 모드에서 tighten_fit 처방은 듣지 않는다 —
     orchestrator.apply_actions가 사유를 달아 건너뛴다).
+    axes: 스케줄 축 제한(fit_slot) — None이면 전 축. 표현(mode)과 무관하게 걸린다.
+
+    exclude: {자리: {점 이름: 사유 레코드}} — **튜닝이 성립하지 않은 표본**(tune.SLOT_DESIGN_FAILED)을
+    적합 전에 뺀다. 실패한 튜닝은 게인을 못 찾았다는 뜻이지 그 점의 게인이 0이라는 뜻이 아니다 — 자리값
+    (댐퍼를 끈 0, 뒤집힌 루프의 백오프 해)이 표본으로 들어가면 표 모드는 그 값을 **그대로 분할점에** 놓고
+    (S1 표 모드 실측: roll.k_rate가 M0.1077·M0.1130에서 정확히 0, 이웃 −0.49), 다항 모드는 곡선을 끌어
+    내린다. 뺀 표본은 보고의 `excluded_samples`에 값·사유와 함께 남고, 그 점의 게인은 이웃 표본의 보간으로
+    정해져 VERIFY가 **그 보간값으로** 판정한다. 표본이 `_MIN_KEPT_SAMPLES` 미만으로 남으면 빼지 않고
+    `exclusion_withheld`로 보고한다. 표현(mode)과 무관하게 걸린다.
     """
+    _allowed_axes(axes)  # 샘플이 없어도 잘못된 제한은 여기서 말한다
     tables, constants, reports = {}, {}, {}
     for slot, samples in gain_samples.items():
+        samples, dropped, withheld = _drop_failed_samples(samples, points, (exclude or {}).get(slot))
         out = fit_slot(
             slot, samples, points, flat_tol=flat_tol, tol_fit=tol_fit,
-            max_degree=max_degree, max_segments=max_segments, mode=mode,
+            max_degree=max_degree, max_segments=max_segments, mode=mode, axes=axes,
         )
         if out["kind"] == "constant":
             constants[slot] = out["value"]
@@ -453,6 +537,10 @@ def fit_slots(gain_samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
         else:
             tables[slot] = out["table"]
             reports[slot] = out["report"]
+        if dropped:
+            reports[slot]["excluded_samples"] = dropped
+        if withheld:
+            reports[slot]["exclusion_withheld"] = withheld
     return {"tables": tables, "constants": constants, "reports": reports}
 
 

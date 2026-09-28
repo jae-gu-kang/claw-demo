@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { deriveSummary, deTrimStatus, designSource, gainTablesStatus, seedSummary } from "./quickseed.js";
+import {
+  deriveSummary, deTrimStatus, designSource, gainTablesStatus, seedSummary, variantTableSource,
+} from "./quickseed.js";
 
 const SEED = {
   ok: true, reason: null, reason_text: null, schedule_created: true, elapsed_s: 0.4,
@@ -88,4 +91,61 @@ test("확정 게인 표 상태 — 없음·정상·낡음 (판정은 서버 요�
   assert.equal(v.kind, "ok");
   assert.deepEqual(v.staleVariants, ["heavy"]);
   assert.match(v.label, /heavy/);
+});
+
+// 쇼케이스 EO/IR형 — 변형 패치가 /law/gain_tables를 비워 규칙 스케줄로 난다(기본형 행은 「확정 표 사용」)
+const s1Row = (variants) => ({
+  variants: [{ id: "eoir", name: "EO/IR형", fingerprint: "847d" }],
+  gain_tables: { source: "auto_design", stale: false, stale_variants: [], ...(variants ? { variants } : {}) },
+});
+
+test("확정 게인 표 상태 — 고른 형상 변형은 서버 변형별 출처대로 (EO/IR형은 규칙 스케줄)", () => {
+  const rule = gainTablesStatus(s1Row({ eoir: { source: "rule_schedule" } }), { variant: "eoir" });
+  assert.equal(rule.kind, "rule");
+  assert.equal(rule.stale, false);
+  assert.equal(rule.label, "고른 형상 변형(「EO/IR형」)은 규칙 스케줄(설계 게인 × q̄ 역비)로 납니다 — "
+    + "확정 게인 표는 기본형 설계 결과(출처 auto_design)이고 이 변형은 그 표를 쓰지 않습니다");
+  assert.doesNotMatch(rule.label, /이 표를 씁니다/);
+  // 서버 판정이 문서 추정보다 앞선다 — 문서가 표를 가진 듯 보여도 서버가 낡음이라 하면 낡음
+  const st = gainTablesStatus(s1Row({ eoir: { source: "stale" } }), { variant: "eoir", effectiveTables: {} });
+  assert.equal(st.kind, "stale");
+  assert.match(st.label, /「EO\/IR형」\)에서는 낡았습니다/);
+  assert.equal(gainTablesStatus(s1Row({ eoir: { source: "confirmed" } }), { variant: "eoir" }).kind, "ok");
+  assert.match(gainTablesStatus(s1Row({ eoir: { source: "confirmed" } }), { variant: "eoir" }).label,
+    /「EO\/IR형」\)도 조립이 규칙 스케줄 대신 이 표를 씁니다/);
+  assert.equal(gainTablesStatus(s1Row({ eoir: { source: "none" } }), { variant: "eoir" }).kind, "none");
+  // 변형을 안 고르면 기본형 문구 그대로
+  assert.equal(gainTablesStatus(s1Row({ eoir: { source: "rule_schedule" } })).kind, "ok");
+});
+
+test("확정 게인 표 상태 — 변형별 출처가 없는 서버면 낡은 변형 목록과 변형 문서의 표 자리로 가린다", () => {
+  // 변형 패치가 표를 비웠다(effectiveTables null) — 규칙 스케줄
+  assert.equal(gainTablesStatus(s1Row(), { variant: "eoir", effectiveTables: null }).kind, "rule");
+  // 낡은 변형 목록(서버 판정)이 먼저
+  const stale = { ...s1Row(), gain_tables: { ...s1Row().gain_tables, stale_variants: ["eoir"] } };
+  assert.equal(gainTablesStatus(stale, { variant: "eoir", effectiveTables: { tables: {} } }).kind, "stale");
+  assert.equal(gainTablesStatus(s1Row(), { variant: "eoir", effectiveTables: { tables: {} } }).kind, "ok");
+  // 둘 다 모르면 기본형 문구에 단서를 단다 — 「이 표를 씁니다」를 변형의 사실처럼 말하지 않는다
+  const unk = gainTablesStatus(s1Row(), { variant: "eoir" });
+  assert.equal(unk.kind, "ok");
+  assert.match(unk.label, /기본형 기준 — 고른 형상 변형\(「EO\/IR형」\)의 조립이 이 표를 쓰는지는 목록 요약에 없습니다/);
+  // 기본형에 표가 없으면 변형도 없음(변형이 제 표를 들고 있으면 모름)
+  assert.equal(variantTableSource(null, "eoir", null), "none");
+  assert.equal(variantTableSource(null, "eoir", undefined), "none");
+  assert.equal(variantTableSource(null, "eoir", { tables: {} }), null);
+  // 알 수 없는 출처 값은 무시하고 다른 사실로
+  assert.equal(variantTableSource({ variants: { eoir: { source: "bogus" } }, stale_variants: [] }, "eoir", null),
+    "rule_schedule");
+});
+
+// 뷰는 DOM을 모듈 스코프에서 만져 import할 수 없다 — 배선은 원문에서 읽는다(influence.test.js와 같은 가드)
+test("확정 게인 표 배너 배선 — 기체 탭·게인 탭이 고른 형상 변형을 넘긴다", () => {
+  const aircraft = readFileSync(new URL("../views/aircraft.js", import.meta.url), "utf8");
+  // 기체 탭: 연 기체가 고른 기체면 그 형상 변형 + 저장 문서에 변형을 적용한 표 자리
+  assert.match(aircraft, /const gt = gainTablesStatus\(summary, selVariant\s*\? \{ variant: selVariant, effectiveTables: effectiveOf\(doc, selVariant\)\?\.law\?\.gain_tables \?\? null \} : \{\}\);/);
+  assert.doesNotMatch(aircraft, /gainTablesStatus\(summary\);/, "기본형 행의 상태를 변형에 그대로 단다");
+  const gains = readFileSync(new URL("../views/gains.js", import.meta.url), "utf8");
+  // 게인 탭: 카탈로그(변형 적용 문서)에 확정 표가 없고 변형을 골랐으면 목록 요약으로 「규칙 스케줄」을 말한다
+  assert.match(gains, /import \{ gainTablesStatus \} from "\.\.\/lib\/quickseed\.js";/);
+  assert.match(gains, /if \(!c\) \{[\s\S]{0,600}?gainTablesStatus\(row, \{ variant: sel\.variant, effectiveTables: null \}\)[\s\S]{0,200}?st\.kind !== "rule"/);
 });

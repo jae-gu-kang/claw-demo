@@ -10,7 +10,9 @@
  */
 
 import { api, errorText as rawErrorText, watchJob as rawWatchJob } from "../../../js/api.js";
+import { effectiveOf as rawEffectiveOf } from "../../../js/lib/profileform.js";
 import type { Replay, ResultRow } from "../core/types.ts";
+import { profileDocPath, type RunProfileRef } from "../lib/replay.ts";
 
 const rawApi = api as {
   get(path: string): Promise<unknown>;
@@ -66,6 +68,16 @@ export async function fetchTerrainPack(name: string, signal?: AbortSignal): Prom
   });
   if (!r.ok) throw new Error(`지형 팩을 받지 못했습니다 (${r.status})`);
   return r.arrayBuffer();
+}
+
+/** 이 런을 난 기체의 **적용 문서**(형상 변형 반영) — 표시 모델(`display`)을 읽는 자리.
+ *
+ * 기체 문서 조회는 계산 라우트가 아니다 — 기체 id·리비전이 경로에 있어 헤더 선택(이 번들의 api.js 사본은
+ * 모른다)과 무관하다(`web/js/lib/profile.js` NOT_AIRCRAFT `GET /profiles/{profile_id}`). 형상 변형 적용은
+ * 기체 탭과 같은 함수(`lib/profileform.js effectiveOf`)다 — 치환 규칙을 여기서 다시 짜지 않는다. */
+export async function fetchRunDocument(ref: RunProfileRef): Promise<unknown> {
+  const got = (await rawApi.get(profileDocPath(ref))) as { document?: unknown };
+  return rawEffectiveOf(got.document, ref.variant) as unknown;
 }
 
 /** GLB의 URL — GLTFLoader가 직접 받는다(같은 출처라 CSP 무변경). */

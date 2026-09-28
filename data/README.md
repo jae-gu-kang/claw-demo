@@ -31,15 +31,29 @@ data/geo/
 
 ```bash
 python3 scripts/terrain/build_terrain.py \
-    --origin-lat 34.601303 --origin-lon 127.212067 \
+    --origin-lat 34.601301 --origin-lon 127.212107 \
     --tier core:radius=12000,step=30 --tier outer:radius=30000,step=90 \
     --out data/geo/site-terrain-v1.bin
 ```
 
-원점은 고흥 국가종합비행성능시험장 활주로의 **남단 임계**이고, 항공영상에서 측정한
-값이다 — 방법·검산·불확실도는 `goheung-runway.json`에 있다. 팩은 gitignore 대상이라
-이 명령이 재생성의 유일한 근거다: **원점을 바꾸면 여기와 goheung-runway.json,
-`web/js/views/sim.js`의 기본값이 함께 움직여야 한다.**
+원점은 고흥 국가종합비행성능시험장 활주로의 **남단 임계**(도색 중심선 위)이고, 항공영상에서
+측정한 값이다 — 방법·검산·불확실도는 `goheung-runway.json`에 있다. 팩은 gitignore 대상이라
+이 명령이 재생성의 근거다: **원점을 바꾸면 goheung-runway.json과 이 명령, `web/js/lib/site.js`,
+`server/claw_server/llm_draft.py`, 배포 빌드 `render.yaml`의 같은 명령(이 넷은 테스트가 기록과 대조한다 —
+`render.yaml`은 인자 전체가 이 명령과 같아야 한다)이 함께 움직이고, 이미 구운 팩은 다시 굽는다** —
+가상환경은 결과와 원점이 다른 팩을 얹지 않는다(사본 목록은 goheung-runway.json `consumers`).
+가상환경 번들(`web/world/build/world.js`)도 `site.js`를 싣는다 — 값이 바뀌면 다시 빌드한다.
+
+원점은 2026-09-27에 34.601303 / 127.212067에서 옮겼다 — 기록의 축이 유도로·계류장까지 든 포장면의
+주성분이라 도색 중심선보다 남단에서 3.6 m 서쪽이었다(`centerline_correction`). **그 전에 구운
+팩은 다시 구워야 한다.** `raw/` 캐시가 있으면 내려받기 없이(10초 안팎) 끝나고, 같은 캐시·같은
+원점이면 바이트까지 같은 팩이 나온다 — 옛 원점으로 다시 구운 팩이 기존 팩과 `cmp`로 같았다.
+보정 전에 저장된 결과는 새 팩 위에서 지형 없이 뜬다(원점이 다르다) — 다시 돌린다.
+
+활주로 **폭**(45 m)만은 영상 측정값이 아니라 **시험장 공표 제원**이다 — 항공안전기술원·
+한국항공우주연구원의 시험장 페이지(2026-09-27 확인)를 인용했고, 인용문·URL과 항공영상 검산은
+`goheung-runway.json`의 `width_source`에 있다. 시험장의 구활주로(700 m × 24 m) 폭이 아니다.
+착륙 요약의 횡편차 판정(반폭 − 가장자리 여유)이 이 폭을 쓴다.
 
 자산이 없으면 가상환경 탭은 **지형 없이** 돌고(기준면 평면 + 활주로 + 궤적), 캡션이 무엇이
 없어서 없는지 말한다. 서버는 이 폴더를 읽기만 하며 **바깥으로 나가지 않는다**.

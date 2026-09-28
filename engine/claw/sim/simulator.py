@@ -103,6 +103,7 @@ class Simulator:
         min_altitude: float | None = 0.0,
         ground_elev: float = 0.0,
         launch=None,
+        launch_throttle: float = 1.0,
     ):
         if dt_plant <= 0 or control_hz <= 0:
             raise ValueError(f"dt_plant({dt_plant})·control_hz({control_hz})는 양수여야 함")
@@ -148,6 +149,14 @@ class Simulator:
         self.launch = launch
         if launch is not None and not hasattr(launch, "state_at"):
             raise ValueError("launch는 LaunchRail 계약(state_at·exit_time·length)이어야 함")
+        # 발사 출력 [0~1] — 사출 전에 엔진을 올려 두는 스로틀. 레일 발진은 엔진을 발사 출력(최대)으로 세운 채
+        # 쏘는 것이 절차다: 이탈 순간 기체는 최소 비행 속도 근처라 여유 추력이 가장 필요한 때다. 레일 구간 운동은
+        # 레일 순가속도가 정하므로 여기에 영향이 없고, run()이 법칙 속도 축 웜스타트로 쓴다(지상 평형 트림의 스로틀
+        # 0 대신). 레일이 없으면 쓰이지 않는다. 범위는 법칙 속도 축의 정규화 범위다(fcl/graphs.py 속도 축 포화) —
+        # 밖의 값은 웜스타트가 첫 스텝에 조용히 잘려 "무엇으로 쐈나"가 기록과 달라진다
+        if not (math.isfinite(float(launch_throttle)) and 0.0 <= float(launch_throttle) <= 1.0):
+            raise ValueError(f"발사 출력(launch_throttle)은 0~1이어야 함: {launch_throttle}")
+        self.launch_throttle = float(launch_throttle)
         # on_ground·airborne 조건은 착륙장치가 있어야 판정된다. 없으면 그 조건이
         # 영원히 판정 불가라 모드 체인이 조용히 그 자리에 멈춘다 — path 없이
         # path_done을 쓰는 것을 구성 시점에 거부하는 것과 같은 자리다(guidance.py).
@@ -208,7 +217,7 @@ class Simulator:
         if not tr.converged:
             raise ValueError(f"미수렴 트림해로는 시뮬 불가: {tr.case.name}")
         de0 = float(tr.control.elevon[0])
-        thr0 = float(tr.control.throttle[0])
+        thr0 = float(tr.control.throttle[0])  # 레일 발진이면 아래에서 발사 출력으로 바뀐다
         fuel = float(tr.case.fuel)
 
         # 초기 상태는 **트림해의 상태**에서 온다. 수평비행 트림은 pos_n = [0,0,−case.alt]
@@ -222,6 +231,16 @@ class Simulator:
             # 있으므로 평형해가 아니라 구속 상태다. 트림해는 질량·연료와 법칙 웜스타트의
             # 출처로만 남는다. 웜스타트 자세도 레일 앙각이어야 한다(수평이 아니다).
             x = pack(*self.launch.state_at(0.0))
+            # 스로틀 웜스타트는 **발사 출력**이다(launch_throttle, 기본 최대) — 지상 평형 트림의 0이 아니다.
+            # 지상 평형은 V = 0이라 추력을 0으로 풀 뿐이고(trim/trim.py trim_ground), 법칙이 기체를 넘겨받는 것은
+            # 정지가 아니라 이탈 순간이다. 법칙은 속도 축 PI 적분기를 발사 출력으로 시작해 범프 없이 이어받는다:
+            # 레일 위에서는 기준이 기체를 따라가(추월 동기화) 오차가 작은 +라 스로틀이 발사 출력에 머물고, 이탈 뒤
+            # 목표 속도에 닿으면 PI가 거기서부터 조인다(조건부 적분이라 포화 동안 적분기는 움직이지 않는다). 0에서 출발하면
+            # 스로틀이 PI 적분 속도로만 올라온다 — 쇼케이스 기체 EO/IR형 만재에서 이탈 뒤 0.5까지 2.4 s·0.9까지 13 s,
+            # 그동안 속도 42.0 → 39.2 m/s·고도 4.4 m 처짐(τ_spd 2 s). δe 웜스타트는 지상 트림 그대로 둔다 — 이탈 조건
+            # 수평 트림의 δe로 바꿔 재 보면(같은 기체·발사 출력) 이탈 직후 θ 과도의 부호만 바뀌고 크기는 같았다
+            # (명령 0.3 rad 대비 −0.067 → +0.074). 레일이 붙잡은 자세 오차가 비례항으로 타면을 미리 당기기 때문이다
+            thr0 = self.launch_throttle
         th0 = float(VehicleState(q_nb=x[QUAT]).euler()[1])
         self.fcl.init(self.dt_ctrl)
         self.fcl.reset(state={"theta": th0, "throttle": thr0, "de": de0})

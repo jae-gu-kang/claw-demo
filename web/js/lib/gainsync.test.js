@@ -2,10 +2,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { readFileSync } from "node:fs";
+
 import {
-  constantOf, designBadge, designCoord, designPointValue, designValue, foldToConstant,
-  fullConstants, lockedParams, scasKwargs, seedTable, selectedSlots, slotIndex, valueAt,
-  withConstant,
+  WORKING_COPY_KEYS, constantOf, designBadge, designCoord, designPointValue, designValue, dropWorkingCopy,
+  faultSlot, faultSummary, foldToConstant, fullConstants, lockedParams, scasKwargs, seedTable, selectedSlots,
+  slotByPath, slotIndex, valueAt, withConstant, workingCopyLine,
 } from "./gainsync.js";
 
 // 설계점 = 인덱스 1 (스케일 1). 인덱스 0은 저마하 스케일 4배 자리.
@@ -213,4 +215,95 @@ test("설계값 배지 — 카탈로그가 아는 절(SCAS·AP)만, 축 페이�
   assert.equal(designBadge(cat, ["actuator"], "wn"), null);
   assert.equal(designBadge(null, ["scas", "pitch"], "kp"), null);
   assert.equal(designBadge(cat, ["scas", "pitch"], "없는키"), null);
+});
+
+test("slotByPath — \"절.축.칸\" 경로를 자리로, 틀린 경로는 조용히 넘기지 않는다", () => {
+  assert.equal(slotByPath(CAT, "scas.yaw.kp").name, "yaw.kp");
+  assert.equal(slotByPath(CAT, "autopilot.alt.k_rate").param, "k_hdot"); // AP 자리는 이름이 다르다
+  assert.throws(() => slotByPath(CAT, "yaw.kp"), /절\.축\.칸/);
+  assert.throws(() => slotByPath(CAT, "scas.yaw.k_rate"), /없는 자리/);
+  assert.throws(() => slotByPath(CAT, "autopilot.speed.k_rate"), /구조상 없는 자리/);
+  assert.throws(() => slotByPath(CAT, "autopilot.yaw.kp"), /「scas」 절/);
+});
+
+test("faultSlot — 끈 자리는 상수 하나, 켠 자리는 표의 전 점에 배율 (원본 불변)", () => {
+  // 끈 자리 — 스토어 상수(없으면 설계값)에 곱하고, 나머지 자리는 설계 상수로 채운 전량 kwargs
+  const c = faultSlot(CATD, { selected: ["pitch.kp"], constants: null }, "scas.yaw.kp", 0.25);
+  assert.deepEqual([c.scheduled, c.before, c.after], [false, 0.5, 0.125]);
+  assert.equal(c.constants.scas.yaw.kp, 0.125);
+  assert.equal(c.constants.scas.yaw.washout_tau, 2.0, "축 kwargs 전량 — 워시아웃이 0으로 새지 않는다");
+  assert.equal(c.constants.scas.pitch.kp, -2.0);
+  const edited = faultSlot(CATD, { selected: [], constants: { scas: { yaw: { kp: 0.9 } } } }, "scas.yaw.kp", 0.5);
+  assert.equal(edited.before, 0.9, "작업 사본의 상수가 기준");
+  // 켠 자리 — 넘겨준 표(작업 사본·문서 확정본)가 있으면 그 표, 없으면 카탈로그 표
+  const t = faultSlot(CATD, { selected: ["pitch.kp"], constants: null }, "scas.pitch.kp", 0.5);
+  assert.deepEqual([t.scheduled, t.before, t.after], [true, [-8, -2], [-4, -1]]);
+  assert.deepEqual(S("pitch.kp").table.data, [-8, -2], "카탈로그 표는 그대로");
+  const doc = { axes: { mach: [0.1, 0.2, 0.3] }, data: [-3, -2, -1], extrapolate: "clip" };
+  const d = faultSlot(CATD, { selected: ["pitch.kp"], constants: null, tables: { "pitch.kp": doc } },
+    "scas.pitch.kp", 2);
+  assert.deepEqual([d.table.axes.mach, d.table.data, doc.data], [[0.1, 0.2, 0.3], [-6, -4, -2], [-3, -2, -1]]);
+  assert.throws(() => faultSlot(CATD, { selected: [] }, "scas.yaw.kp", Number.NaN), /유한한 수/);
+});
+
+test("faultSummary — 무엇을 몇 배로, 어디서 어디로", () => {
+  const c = faultSlot(CATD, { selected: [], constants: null }, "scas.yaw.kp", 0.25);
+  assert.equal(faultSummary(c, 0.25), "yaw.kp ×0.25 — 설계점 상수 0.5 → 0.125");
+  const t = faultSlot(CATD, { selected: ["pitch.kp"], constants: null }, "scas.pitch.kp", 0.5);
+  assert.equal(faultSummary(t, 0.5), "pitch.kp ×0.5 — 스케줄 표 2점 -8~-2 → -4~-1");
+});
+
+// ── 작업 사본 버리기 — 게인 restore 신호와 진행기 [■ 중단]이 같은 함수 ─────────────────
+
+/** store.js와 같은 모양(get·set·subscribe 없이) — 쓴 순서를 남긴다. */
+const fakeStore = (init = {}) => {
+  const m = new Map(Object.entries(init));
+  const writes = [];
+  return { get: (k) => m.get(k), set: (k, v) => { writes.push(k); m.set(k, v); }, m, writes };
+};
+
+test("dropWorkingCopy — 작업 사본 다섯 키를 비우고, 값이 있던 키만 돌려준다 (다른 스토어 키는 그대로)", () => {
+  assert.deepEqual([...WORKING_COPY_KEYS],
+    ["gainTables", "gainScheduleOff", "gainTablesSource", "scasParams", "autopilotParams"]);
+  assert.ok(Object.isFrozen(WORKING_COPY_KEYS));
+  // 결함 주입 뒤의 모양 — 표·출처·SCAS 상수가 있고 AP 상수는 없다. false도 「값이 있다」(스케줄 켬 신호)
+  const s = fakeStore({
+    gainTables: { "pitch.k_rate": tab(1) }, gainScheduleOff: false, gainTablesSource: { kind: "gains" },
+    scasParams: { pitch: { k_rate: 4.8 } }, navParams: { L1: 30 }, actuatorParams: { tau: 0.05 },
+    simResult: { id: "r1" },
+  });
+  assert.deepEqual(dropWorkingCopy(s), ["gainTables", "gainScheduleOff", "gainTablesSource", "scasParams"]);
+  for (const k of WORKING_COPY_KEYS) assert.equal(s.get(k), null, `${k}가 남았다`);
+  // 작업 사본이 아닌 키 — 항법·작동기 편집과 시뮬 결과는 문서 게인 복원과 무관하다
+  assert.deepEqual([s.get("navParams"), s.get("actuatorParams"), s.get("simResult")],
+    [{ L1: 30 }, { tau: 0.05 }, { id: "r1" }]);
+  // 두 번 불러도 같다 — 비어 있으면 빈 목록(되돌릴 것이 없었다)
+  assert.deepEqual(dropWorkingCopy(s), []);
+  // 스케줄 끔(표 없음)만 있어도 작업 사본이다
+  assert.deepEqual(dropWorkingCopy(fakeStore({ gainScheduleOff: true })), ["gainScheduleOff"]);
+});
+
+test("workingCopyLine — 비웠는지·이미 비었는지를 그대로", () => {
+  assert.equal(workingCopyLine(["gainTables"]), "작업 사본 해제 — 문서 게인으로 조립");
+  assert.equal(workingCopyLine([]), "작업 사본이 이미 비어 있었다 — 문서 게인 그대로");
+});
+
+// 뷰(views/gains.js)는 DOM을 모듈 스코프에서 만져 import할 수 없다 — 배선은 원문에서 읽는다
+// (influence.test.js 배선 가드와 같은 방식)
+test("게인 탭 배선 — restore는 dropWorkingCopy 한 벌, 결함 주입은 중단이면 작업 사본에 싣지 않는다", () => {
+  const src = readFileSync(new URL("../views/gains.js", import.meta.url), "utf8");
+  const restore = src.slice(src.indexOf('c.action === "restore"'), src.indexOf("unknownAction(c)"));
+  assert.ok(restore.length > 0, "restore 분기를 찾지 못했다");
+  assert.match(restore, /dropWorkingCopy\(store\)/, "restore가 lib 함수로 비우지 않는다");
+  // 키 목록을 뷰에 다시 적으면 진행기 [■ 중단]의 복원과 두 벌이 된다
+  assert.doesNotMatch(src, /"gainTablesSource", "scasParams"/, "작업 사본 키 목록이 뷰에 다시 적혔다");
+  const fault = src.slice(src.indexOf('c.action === "fault"'), src.indexOf('c.action === "restore"'));
+  const halt = fault.indexOf('haltReason(store.get("showcaseBusy"))');
+  assert.ok(halt > 0, "결함 주입이 진행기 중단을 보지 않는다");
+  assert.ok(halt > fault.lastIndexOf("await "), "중단 확인은 마지막 await 뒤여야 한다(그 틈에 중단이 온다)");
+  assert.ok(halt < fault.indexOf("apply();"), "중단 확인이 작업 사본 쓰기(apply) 뒤에 있다");
+  assert.match(fault.slice(halt), /^haltReason\(store\.get\("showcaseBusy"\)\);\s*if \(stop\) throw new Error\(stop\);/,
+    "중단 사유를 받고도 멈추지 않는다");
+  // 재진입 — 작업 사본이 밖에서 바뀌면(중단의 복원 등) 캐시 카탈로그(결함 표가 덮어쓴 자리 표) 위에 되읽지 않는다
+  assert.match(src, /if \(catalog && !storeChanged\(\)\) \{/, "밖에서 바뀐 작업 사본을 캐시 카탈로그 위에 되읽는다");
 });

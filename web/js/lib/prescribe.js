@@ -104,8 +104,10 @@ export function mergeConstants(existing, add) {
 }
 
 /** [적용] — 제안 형상을 설계 상태(store)에 쓴다. 시뮬·Autocode·블록도가 소비하는
- *  바로 그 키들(게인 탭 apply와 동일)이다. 반환은 요약 문장. */
-export function applyExport(store, gainExport, { sourceId = null } = {}) {
+ *  바로 그 키들(게인 탭 apply와 동일)이다. 반환은 요약 문장.
+ *  `unapplied`(unappliedLevers) — 조합 해가 움직였지만 store에 자리가 없어 못 싣는 설계변수. 적용은
+ *  그대로 하되 문장에 **이름을 들어** 남긴다(조용히 빠지면 「확인 런 통과」를 적용본의 판정으로 읽는다). */
+export function applyExport(store, gainExport, { sourceId = null, unapplied = [] } = {}) {
   if (!gainExport) return "적용할 것이 없다 — 확인 런이 없었다";
   if (gainExport.tables) {
     store.set("gainTables", JSON.parse(JSON.stringify(gainExport.tables)));
@@ -121,7 +123,94 @@ export function applyExport(store, gainExport, { sourceId = null } = {}) {
       { ...(store.get("autopilotParams") ?? {}), ...c.autopilot });
   }
   const nT = Object.keys(gainExport.tables ?? {}).length;
+  const note = unappliedNote(unapplied);
   return `적용됨 — 테이블 ${nT}개 교체(배율 반영본)`
     + " · 시뮬('편집 게인 사용')·Autocode·블록도가 이 형상을 소비한다."
-    + " 적용 후 재평가로 카드가 실제로 움직였는지 확인할 것";
+    + " 적용 후 재평가로 카드가 실제로 움직였는지 확인할 것"
+    + (note ? ` · ⚠ ${note}` : "");
+}
+
+const sig4 = (v) => String(Number(Number(v).toPrecision(4)));
+const rangeOf = (xs) => [Math.min(...xs), Math.max(...xs)];
+
+/** 처방 형상의 설계변수 기준값 {param_id: value} — 구조 모델(normalizeGraph)이 **그 수정안과 같은
+ *  형상**(지문 일치)에서 나왔을 때만. 다르면 null: 다른 형상의 값을 「얼마에서」로 말하지 않는다. */
+export function leverBase(graph, fingerprint) {
+  if (!graph || !fingerprint || graph.fingerprint !== fingerprint) return null;
+  const out = {};
+  for (const p of graph.params ?? []) {
+    if (p.param_id && Number.isFinite(p.value)) out[p.param_id] = p.value;
+  }
+  return out;
+}
+
+/** 처방이 실제로 움직인 지렛대 — 조합 해에서 |스팬|이 가장 큰 설계변수와 그 값이 얼마에서 얼마로.
+ *
+ * {lever, span, kind, from, to, absolute} | null. 표 설계변수(`table.<자리>`)면 from·to는 표 값의
+ * [최소, 최대]이고 상수(`fcl/…`)면 수 하나다. **to는 서버 제안(gain_export)이 정본**이다.
+ * - 표: 웹은 곡선 배율(gain_scale)을 보내지 않아 기준 배율이 늘 1이다 — from은 배율 1+s를 되감는다
+ *   (sweep._value_at). 배율이 0 아래로 잘리는 s ≤ −1이면 되감을 수 없어 null.
+ * - 상수: from은 `base`(leverBase — 같은 형상의 구조 모델 값)에서 **그대로** 읽는다. 스팬에서 되감지
+ *   않는 이유: 엔진은 기준값 0을 상대 배율이 아니라 **절대 스텝**으로 움직이고(sweep._value_at의 0 기준)
+ *   범위 끝에서 자르기도 해서, 제안값과 스팬만으로는 기준값이 하나로 정해지지 않는다. 기준값이 0이면
+ *   absolute=true(스팬 %는 상대 변화가 아니다). base가 없으면 from=null — 지어내지 않는다. */
+export function leverChange(model, { base = null } = {}) {
+  const spans = Object.entries(model?.joint?.spans ?? {}).filter(([, s]) => Number.isFinite(s));
+  if (!spans.length || !model?.gainExport) return null;
+  const [lever, span] = spans.reduce((a, b) => (Math.abs(b[1]) > Math.abs(a[1]) ? b : a));
+  const ex = model.gainExport;
+  if (lever.startsWith("table.")) {
+    if (!(span > -1)) return null;
+    const data = ex.tables?.[lever.slice("table.".length)]?.data;
+    if (!Array.isArray(data) || !data.length) return null;
+    const flat = data.flat(Infinity).map(Number);
+    return { lever, span, kind: "table", absolute: false,
+      from: rangeOf(flat.map((v) => v / (1 + span))), to: rangeOf(flat) };
+  }
+  const m = /^fcl\/(Autopilot|ScasAxis)\.(.+)$/.exec(lever);
+  if (!m) return null;
+  let to;
+  if (m[1] === "Autopilot") to = ex.constants?.autopilot?.[m[2]];
+  else {
+    const [axis, key] = m[2].split(".");
+    to = ex.constants?.scas?.[axis]?.[key];
+  }
+  if (!Number.isFinite(to)) return null;
+  const v0 = base?.[lever];
+  const from = Number.isFinite(v0) ? v0 : null;
+  return { lever, span, kind: "constant", from, to, absolute: from === 0 };
+}
+
+// [적용](applyExport)이 작업 사본에 싣는 설계변수 — 게인 표(배율 반영본)와 AP·SCAS 상수뿐이다
+// (엔진 proposal_export 계약). 리미터 여유·믹서·작동기·항법 등은 확인 런의 제안 형상에만 있고
+// store에는 자리가 없다
+const EXPORTABLE = /^(table\.|fcl\/(Autopilot|ScasAxis)\.)/;
+
+/** 조합 해가 움직인 설계변수 중 [적용]이 작업 사본에 싣지 못하는 것 — 있으면 확인 런이 PASS여도
+ *  적용 뒤 형상은 확인한 형상이 아니다(예: limiter 소견의 fcl/AlphaLimiter.margin). 0 스팬은 서버와
+ *  같은 문턱(1e-6)으로 「안 움직임」이다. */
+export function unappliedLevers(model) {
+  return Object.entries(model?.joint?.spans ?? {})
+    .filter(([k, s]) => Number.isFinite(s) && Math.abs(s) >= 1e-6 && !EXPORTABLE.test(k))
+    .map(([k]) => k);
+}
+
+/** [적용]이 못 싣는 지렛대 한 문장 — 없으면 null. 수정안 패널(적용 전)과 적용 문장(적용 뒤)이 같은 말을 한다. */
+export function unappliedNote(levers) {
+  if (!levers?.length) return null;
+  return `[적용]이 싣지 못하는 지렛대 ${levers.length}개: ${levers.join(", ")} — 작업 사본에는 게인 표와 `
+    + "AP·SCAS 상수만 실린다. 확인 런은 이 값까지 바꾼 형상이었으므로 적용 뒤 작업 사본은 확인한 형상이 아니다";
+}
+
+/** 지렛대 한 줄 — "table.pitch.k_rate −20% (0.7817~3.92 → 0.6253~3.136)".
+ *  기준값 0인 상수는 "… 0 → 0.002 (기준값 0 — 절대 스텝, 상대 % 아님)", 기준값을 모르면 "기준값 미상 → …". */
+export function leverLine(change) {
+  if (!change) return "지렛대 없음 — 조합 해가 움직인 설계변수가 없다";
+  const val = (v) => (Array.isArray(v) ? (v[0] === v[1] ? sig4(v[0]) : `${sig4(v[0])}~${sig4(v[1])}`) : sig4(v));
+  if (change.absolute) {
+    return `${change.lever} ${val(change.from)} → ${val(change.to)} `
+      + `(기준값 0 — 스팬 ${signed(change.span)}는 상대 변화가 아니라 절대 스텝)`;
+  }
+  const from = change.from == null ? "기준값 미상" : val(change.from);
+  return `${change.lever} ${signed(change.span)} (${from} → ${val(change.to)})`;
 }

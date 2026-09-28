@@ -1,6 +1,6 @@
 /* CLAW 생성 코드 — 손으로 고치지 말 것 (구조는 IR에서, 값은 파라미터 이미지에서 온다).
  * 그래프    : fcl
- * 구조 지문 : bc5d7dc7d4ee4c60
+ * 구조 지문 : f94329070fbecd39
  * 엔진      : claw 0.2.0
  * 파라미터 로더 — 이미지 형식 v1 (07 §6.1)
  */
@@ -12,7 +12,7 @@
 #include "fcl_types.h"
 
 /* 이 로더가 받는 이미지의 모양 — 전부 구조에서 나온다(값·표 길이는 이미지가 정한다). */
-#define FCL_STRUCTURE_FP 0xbc5d7dc7d4ee4c60ULL
+#define FCL_STRUCTURE_FP 0xf94329070fbecd39ULL
 #define FCL_PARAMS_FORMAT 1U
 #define FCL_PARAMS_N_SCALARS 62U
 #define FCL_PARAMS_N_ARRAYS 38U

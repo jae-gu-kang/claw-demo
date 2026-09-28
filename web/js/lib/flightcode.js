@@ -163,3 +163,35 @@ export function summarize(files) {
     lines: list.reduce((n, f) => n + (f.lines ?? 0), 0),
   };
 }
+
+/** 두 기체의 생성 응답 → 「같은 C, 다른 이미지」 대조 한 줄 (v1.12 구조/값 분리의 실증).
+ *
+ * mine·other는 POST /codegen/flight 응답(또는 그 지문·profile 부분). 판정은 지문 문자열의 같음뿐이다 —
+ * 같은 구조 지문이면 생성 C가 바이트 동일하고, 파라미터 지문만 다르면 두 기체는 이미지(값)만 다르다.
+ * 구조 지문이 다르면 그 사실을 그대로 말한다(스케줄 끔 같은 구조 옵션이 한쪽에 걸린 경우) — 같은 척하지
+ * 않는다. 돌려주는 것: {sameStructure, sameParams, text}. */
+export function compareCaption(mine, other) {
+  const name = (d) => d?.profile?.name ?? d?.profile?.id ?? "?";
+  const s1 = mine?.structure_fingerprint ?? null;
+  const s2 = other?.structure_fingerprint ?? null;
+  const p1 = mine?.param_fingerprint ?? null;
+  const p2 = other?.param_fingerprint ?? null;
+  if (!s1 || !s2) {
+    return { sameStructure: null, sameParams: null,
+      text: "구조 지문이 없는 응답이 있어 대조할 수 없다 (v1.12 이전 서버)" };
+  }
+  const sameStructure = s1 === s2;
+  const sameParams = p1 != null && p1 === p2;
+  const pair = `${name(mine)} ${p1 ?? "—"} · ${name(other)} ${p2 ?? "—"}`;
+  if (sameStructure && !sameParams) {
+    return { sameStructure, sameParams,
+      text: `같은 C — 구조 지문 ${s1} 동일, 파라미터 이미지만 다름 (파라미터 지문 ${pair})` };
+  }
+  if (sameStructure) {
+    return { sameStructure, sameParams,
+      text: `같은 C, 같은 이미지 — 구조 지문 ${s1} · 파라미터 지문 ${p1} 둘 다 같다(법칙 값이 같은 두 기체)` };
+  }
+  return { sameStructure, sameParams,
+    text: `다른 C — 구조 지문 ${name(mine)} ${s1} · ${name(other)} ${s2} (스케줄 끔 같은 구조 옵션이`
+      + ` 한쪽에 걸렸다) · 파라미터 지문 ${pair}` };
+}

@@ -5,17 +5,28 @@
 views/stage.js), 격자 조건·케이스 목록·케이스별 수치는 패널에 들어간다.
 
 DOM 조립 전용 (얇게) — 격자 로직은 lib/grid.js, 수치·판정은 전부 서버(엔진) 산출.
+
+쇼케이스 진행기 신호(lib/showcasecue.js): run() — 격자 칸을 고른 기체의 미션 템플릿 격자로 세우고
+[배치 실행]과 같은 길로 돌린 뒤, 판정 개수(지도 범례와 같은 라벨)를 보고한다.
 */
 
-import { api, errorText } from "../api.js";
+import { ApiError, api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import { DEFAULT_GRID, machRange, parseNumberList, serpentineCases } from "../lib/grid.js";
-import { fillGridFromProfile } from "./missionfill.js";
-import { SERIES_COLORS, STATUS, fuelsOf, pivotCases, trimCurves, trimEnvelopeCell } from "../lib/plot.js";
-import { store } from "../store.js";
+import { DOC_FAILED_HINT, MISSING_TEMPLATE_HINT, gridCentreCase, gridStrings } from "../lib/missiontemplate.js";
+import { fillGridFromProfile, selectedDefaults } from "./missionfill.js";
+import {
+  SERIES_COLORS, STATUS, TRIM_CELL_LABEL, TRIM_FLAG_LABEL, fuelsOf, pctText, pivotCases, trimCueReport, trimCurves,
+  trimEnvelopeCell, trimFlagSummary,
+} from "../lib/plot.js";
+import { revealPanel } from "../lib/reveal.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { heatmapCanvas, lineChartCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
+
+// 신호 실패 사유 — 서버 오류는 errorText(422 배열·엔진 detail을 사람 글로), 그 밖은 메시지만("Error: " 접두 없이)
+const cueReason = (e) => (e instanceof ApiError ? errorText(e) : (e?.message ?? String(e)));
 
 // 모듈 상태 — 탭 재진입 시 유지 (실행 중 작업 재부착 포함, 리뷰 S4)
 let cases = [];
@@ -23,15 +34,16 @@ let lastBody = null;
 let runningJobId = null;
 let runningFp = "";
 let openDrawer = null;
+let trimCue = null; // 배치를 건 진행기 신호 — 잡이 끝나면 한 번 보고하고 지운다 (감시자가 둘이어도 한 번)
+let trimVisit = 0; // 탭을 그린 차례 — 떠난 방문의 늦은 신호 처리가 지금 화면의 칸·케이스를 덮지 않게
+// 배치가 이미 도는 중일 때의 사유 — [배치 실행]과 신호가 같은 문장을 낸다
+const BUSY_REASON = "이미 실행 중인 배치가 있다 — 끝난 뒤 다시 건다";
 
-const FLAG_COLS = [
-  ["residual_ok", "잔차"],
-  ["saturation_ok", "포화"],
-  ["alpha_margin_ok", "α여유"],
-  ["continuity_ok", "연속성"],
-];
+// 판정 플래그 열 — 라벨은 lib 한 표(머리줄·쇼케이스 보고가 같은 말을 쓴다)
+const FLAG_COLS = Object.entries(TRIM_FLAG_LABEL);
 
 export function render() {
+  const visit = ++trimVisit;
   const caseBox = el("div");
   const progressBox = el("div");
   const mapBox = el("div");     // 전면 — 비행 엔벨로프 맵
@@ -68,6 +80,7 @@ export function render() {
   };
   runBtn.onclick = () => runBatch();
 
+  // 격자 → 케이스 — 만들었으면 null, 못 만들었으면 사유 (신호 경로가 옛 케이스로 돌지 않게)
   const makeGrid = () => {
     try {
       clear(errBox);
@@ -77,28 +90,53 @@ export function render() {
         parseNumberList(fFuels.value),
       );
       repaintCases();
+      return null;
+    } catch (e) {
+      showError(errBox, e);
+      return cueReason(e);
+    }
+  };
+
+  // [행 추가]의 첫 값 — 지금 격자 칸(고른 기체의 미션 템플릿 격자로 선다)의 가운데 점. 특정 기체의 점을
+  // 코드에 적지 않는다(종전 M0.45·연료 200은 1200 kg 기체의 점이라 200 kg급에서는 M_D 밖·연료 상한 밖이었다)
+  const addRow = () => {
+    try {
+      clear(errBox);
+      cases.push(gridCentreCase({
+        machFrom: Number(fMachFrom.value), machTo: Number(fMachTo.value), machStep: Number(fMachStep.value),
+        alts: parseNumberList(fAlts.value), fuels: parseNumberList(fFuels.value),
+      }));
+      repaintCases();
     } catch (e) {
       showError(errBox, e);
     }
   };
 
   const repaintCases = () => {
-    renderCases(caseBox, cases, repaintCases);
+    renderCases(caseBox, cases, repaintCases, addRow);
     syncRunBtn();
     drawers.refresh();
   };
 
-  const runBatch = async () => {
-    if (runningJobId) return;
+  // 배치 걸기 — 걸었으면 null, 못 걸었으면 사유. cue가 오면 잡이 끝날 때 그 신호로 보고한다
+  const runBatch = async (cue = null) => {
+    if (runningJobId) return BUSY_REASON;
+    if (!cases.length) return "케이스가 없다 — 격자를 생성하거나 행을 추가한다";
     clear(errBox);
     runningFp = fFp.value;
     try {
       const submitted = await api.post("/trim/batch", { cases, fingerprint: runningFp });
       runningJobId = submitted.id;
+      if (cue) {
+        trimCue = cue;
+        reportCue(cue, { phase: "started", jobId: submitted.id });
+      }
       repaintCases(); // 버튼 비활성 반영
       watchTrim();
+      return null;
     } catch (e) {
       showError(errBox, e);
+      return cueReason(e);
     }
   };
 
@@ -106,25 +144,38 @@ export function render() {
     onDone: async (job) => {
       runningJobId = null;
       repaintCases();
+      // 신호는 한 번만 — 잡이 끝난 뒤의 보고는 store에만 쓰므로 떠난 화면이어도 보낸다
+      const cue = trimCue;
+      trimCue = null;
       try {
         if (job.status === "error") throw new Error(job.error);
         if (cancelledWithoutResult(job)) {
           showError(errBox, new Error("취소됨 — 저장된 결과 없음 (실행 전 취소)"));
+          failCue(cue, "취소됨 — 저장된 결과 없음 (실행 전 취소)");
           return;
         }
         const body = await api.get(`/results/${job.result_id}`);
         lastBody = body;
-        store.set("trimResult", { id: job.result_id, fingerprint: runningFp, cases: [...cases] });
         renderResults();
         drawers.open("rows"); // 수치가 사는 패널을 열어 준다
+        if (cue) revealPanel(drawers.box); // 신호면 그 패널을 화면 안으로 — 청중이 표를 본다 (06 §2)
+        if (job.status === "cancelled") {
+          failCue(cue, `취소됨 — 완료분 ${body.results.length}케이스만 저장`);
+          return;
+        }
+        reportCue(cue, { phase: "done", resultId: job.result_id, ...trimCueReport(body.results) });
       } catch (e) {
         showError(errBox, e);
+        failCue(cue, cueReason(e));
       }
     },
     onError: (e) => {
       runningJobId = null;
       repaintCases();
       showError(errBox, e);
+      const cue = trimCue;
+      trimCue = null;
+      failCue(cue, cueReason(e));
     },
   });
 
@@ -180,6 +231,35 @@ export function render() {
   }
   if (runningJobId) watchTrim(); // 재부착
 
+  // 쇼케이스 신호 — 격자 칸을 고른 기체의 미션 템플릿 격자로 세우고(손댄 칸도 — 진행기는 「템플릿 격자로」
+  // 돌린다) 케이스를 다시 만든 뒤 [배치 실행]과 같은 길로. 템플릿이 없으면 예제 격자로 돌리지 않고 사유를 단다
+  const handleCue = async (c) => {
+    try {
+      if (c.action !== "run") {
+        unknownAction(c);
+        return;
+      }
+      const d = await selectedDefaults();
+      // 칸·케이스를 덮기 **전에** 거른다 — 덮은 뒤 runBatch가 거절하면 사용자가 돌리던 격자만 잃는다.
+      // 기다리는 사이 탭이 다시 그려졌거나(떠났다 옴) 사용자의 배치가 걸렸을 수 있다 (엔벨로프 신호와 같은 관문)
+      if (visit !== trimVisit) throw new Error("신호를 처리하기 전에 탭이 다시 그려졌다");
+      if (runningJobId) throw new Error(BUSY_REASON);
+      if (!d || !d.hasTemplate) throw new Error(d ? MISSING_TEMPLATE_HINT : DOC_FAILED_HINT);
+      const g = gridStrings(d.grid);
+      fMachFrom.value = g.machFrom;
+      fMachTo.value = g.machTo;
+      fMachStep.value = g.machStep;
+      fAlts.value = g.alts;
+      fFuels.value = g.fuels;
+      const err = makeGrid() ?? await runBatch(c); // 끝 보고는 잡 감시(watchTrim)가 한다
+      if (err) throw new Error(err);
+    } catch (e) {
+      failCue(c, cueReason(e));
+    }
+  };
+  const cue = takeCue("trim");
+  if (cue) handleCue(cue);
+
   return el("div", { class: "tab-page" },
     tabTop({
       title: "트림",
@@ -194,7 +274,7 @@ export function render() {
   );
 }
 
-function renderCases(caseBox, list, repaint) {
+function renderCases(caseBox, list, repaint, addRow) {
   clear(caseBox);
   if (!list.length) {
     caseBox.append(el("p", { class: "hint" }, "격자를 생성하거나 행을 추가하세요."));
@@ -216,12 +296,8 @@ function renderCases(caseBox, list, repaint) {
     )));
   }
   caseBox.append(el("div", { class: "row" },
-    el("button", {
-      onclick: () => {
-        list.push({ mach: 0.45, alt: 1000, fuel: 200 });  // 엔벨로프 안 (스로틀 0.58)
-        repaint();
-      },
-    }, "행 추가"),
+    el("button", { onclick: addRow, title: "지금 격자의 가운데 점을 한 줄 더한다 — 값은 표에서 고친다" },
+      "행 추가"),
   ));
 }
 
@@ -236,13 +312,11 @@ function renderMap(mapBox, summaryLine, body) {
     return;
   }
   const rows = body.results;
-  const nOk = rows.filter((r) => r.converged).length;
-  const nBad = rows.filter(
-    (r) => !Object.values(r.flags).every((v) => v !== false),
-  ).length;
+  // 머리줄의 판정은 lib 한 벌 — 쇼케이스 보고(trimCueReport)가 같은 집계로 같은 경고를 말한다
+  const f = trimFlagSummary(rows);
   summaryLine.append(
-    `수렴 ${nOk}/${rows.length} · 판정 플래그 위반 ${nBad}건`,
-    nBad === 0 && nOk === rows.length
+    f.line + (f.bad ? ` (${f.detail})` : ""),
+    f.bad === 0 && f.converged === rows.length
       ? el("span", { class: "flag ok", style: "margin-left:8px" }, "전체 정상")
       : el("span", { class: "flag bad", style: "margin-left:8px" }, "확인 필요"));
   // 비행 엔벨로프 맵 — 트림 판정 기반 (mach×alt, 연료별)
@@ -256,10 +330,10 @@ function renderMap(mapBox, summaryLine, body) {
   clear(mapBox).append(
     el("div", { class: "stage-pair" }, ...maps),
     el("div", { class: "legend" },
-      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.ok}` }), "가능"),
-      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.bad}` }), "실속 근접 (α 여유 위반)"),
-      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.warn}` }), "포화 (추력·타면 한계)"),
-      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.na}` }), "트림 불가"),
+      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.ok}` }), TRIM_CELL_LABEL.ok),
+      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.bad}` }), TRIM_CELL_LABEL.stall),
+      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.warn}` }), TRIM_CELL_LABEL.saturated),
+      el("span", {}, el("span", { class: "chip", style: `background:${STATUS.na}` }), TRIM_CELL_LABEL.infeasible),
       el("span", { class: "hint" }, "— 격자를 조밀하게(마하 간격 0.05, 고도 추가) 돌릴수록 경계가 정확해집니다")),
   );
 }
@@ -286,8 +360,9 @@ function renderRows(tableBox, body) {
       el("td", { class: "num" }, fmt(r.euler[1], 4)),
       el("td", { class: "num" }, fmt(r.control.elevon[0], 4)),
       el("td", { class: "num" }, fmt(r.control.throttle[0], 3)),
-      el("td", { class: "num" }, r.reserve?.de ? `${fmt(r.reserve.de.frac * 100.0, 1)} %` : "—"),
-      el("td", { class: "num" }, r.reserve?.thr ? `${fmt(r.reserve.thr.reserve_hi * 100.0, 1)} %` : "—"),
+      // 백분율은 소수 자리 고정 — 유효 자리(fmt(·, 1))는 20 %를 「2e+1 %」로 찍었다
+      el("td", { class: "num" }, r.reserve?.de ? pctText(r.reserve.de.frac) : "—"),
+      el("td", { class: "num" }, r.reserve?.thr ? pctText(r.reserve.thr.reserve_hi) : "—"),
       el("td", { class: "num" }, r.reserve?.alpha ? fmt(r.reserve.alpha.stall_reserve, 4) : "—"),
       FLAG_COLS.map(([key]) => el("td", {}, flagBadge(r.flags[key]))),
     ))),

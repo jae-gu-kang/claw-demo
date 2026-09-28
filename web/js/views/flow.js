@@ -14,29 +14,40 @@
  * 드릴다운 링크를 세우고, 실패·승인 대기에서 멈춘다. 판정 문구는 lib/flowsteps.js(재료는 서버 응답).
  *
  * 단계별 기록은 실행 시점의 기체 지문(echo — 형상 변형이면 그 변형의 지문)을 남기고, 문서가 바뀌면
- * lib/freshness.js로 「낡음」을 단다 — 결과 탭 배지(v1.32)와 같은 자다. 잡은 서버에서 계속 돌고 결과
+ * lib/freshness.js로 「낡음」을 단다 — 결과 탭 배지(v1.32)와 같은 자다(자동 설계 결과가 제 게인 표를
+ * 반영해 달라진 것뿐이면 「문서에 반영됨」 — 서버 목록의 applied_design). 잡은 서버에서 계속 돌고 결과
  * 탭에 남는다(탭을 떠나도).
  *
  * **다시 그리기는 모듈의 repaint를 지난다** — 이 탭은 드릴다운·승인 워크플로우로 사용자를 밖으로
  * 보내는 구조라, 실행 중 탭을 떠났다 돌아오는 것이 정상 경로다. render 클로저의 paint를 늦은 콜백이
  * 직접 잡으면 떨어져 나간 옛 DOM에 그려 화면이 동결된다(리뷰 지적) — 콜백은 모듈 repaint(항상 지금
  * 화면의 paint)를 부르고, 상태줄·오류도 모듈 상태로 들어 paint가 그린다.
+ *
+ * 쇼케이스 신호 `overview`(lib/showcasecue.js) — 잡을 새로 걸지 않고 레일을 **지금 문서와 최근 결과로**
+ * 채운다: 문서 검증·엔벨로프는 이 탭의 [실행]과 같은 러너(조회 계산), 초기 게인은 설계 게인이 있으면
+ * 판정만(없으면 탐색 잡이 필요하므로 건드리지 않는다), 자동 설계는 이 기체의 가장 최근 auto_design
+ * 결과를 이 탭이 직접 돈 것과 같은 판정으로 싣는다(낡음 배지 포함). 평가는 싣지 않는다 — 이 흐름의
+ * 평가는 **문서 그대로**의 엔진 평가인데, 다른 탭의 평가 결과는 작업본(주입 게인)으로 잰 것일 수 있다.
  */
 
-import { api, errorText, watchJob } from "../api.js";
+import { ApiError, api, errorText, watchJob } from "../api.js";
 import { clear, el } from "../dom.js";
-import { adoptBlockedText } from "../lib/autodesign.js";
+import { adoptBlockedText, applyGateReason } from "../lib/autodesign.js";
 import { envelopeQuery } from "../lib/envelope.js";
 import { evaluateRequest, normalizeEvalReport } from "../lib/evaluate.js";
 import {
-  FLOW_STAGES, applyStateVerdict, designVerdict, docVerdict, envelopeVerdict,
-  evalVerdict, seedStateVerdict, stageArtifact,
+  FLOW_STAGES, applyFreshnessBlock, applyStateVerdict, designVerdict, docVerdict, envelopeVerdict,
+  evalVerdict, flowStepStates, flowSummaryLine, latestResultFor, seedStateVerdict, stageArtifact,
 } from "../lib/flowsteps.js";
 import { resultFreshness } from "../lib/freshness.js";
 import { defaultGridCases } from "../lib/grid.js";
+// 잡 상태 코드 → 한국어 한 줄(「평가 취소됨」) — 영향성 탭과 같은 말(서버 jobs.py 어휘와 한 벌, 테스트 가드)
+import { jobEndLine } from "../lib/influence.js";
 import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
 import { effectiveOf } from "../lib/profileform.js";
 import { designSource, seedSummary } from "../lib/quickseed.js";
+import { revealPanel } from "../lib/reveal.js";
+import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { store } from "../store.js";
 import { selectedDefaults } from "./missionfill.js";
 import { tabStage, tabTop } from "./stage.js";
@@ -51,6 +62,7 @@ let flowStatus = ""; // 상태줄 — paint가 그린다(늦은 콜백이 옛 DO
 let flowError = null;
 let profileRows = null; // GET /profiles — 이름·확정 표 상태·낡음 대조 재료 (실행 뒤마다 새로 받음)
 let repaint = () => {}; // 지금 화면의 paint — render()가 갈아 끼운다
+let revealRail = () => {}; // 지금 화면의 레일을 화면에 올린다(신호 끝) — repaint와 같은 이유로 render()가 갈아 끼운다
 
 const selectedId = () => currentSelection()?.id ?? EXAMPLE_ID;
 const selectedVariant = () => currentSelection()?.variant ?? null;
@@ -148,7 +160,7 @@ const runSeed = async (seq) => {
     { state: "running", note: `빠른 탐색 ${Math.round((j.progress ?? 0) * 100)}%`,
       progress: j.progress ?? null }));
   if (done.status !== "done" || !done.result_id) {
-    const v = { tone: "bad", text: `빠른 탐색 ${done.status} — ${done.error ?? "사유 없음"}` };
+    const v = { tone: "bad", text: `${jobEndLine("빠른 탐색", done)} — ${done.error ?? "사유 없음"}` };
     set(seq, "seed", { state: "done", verdict: v, echo: null, resultId: null });
     return v;
   }
@@ -169,13 +181,19 @@ const runDesign = async (seq) => {
     { state: "running", note: `자동 설계 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`,
       progress: j.progress ?? null }));
   if (done.status !== "done" || !done.result_id) {
-    const v = { tone: "bad", text: `자동 설계 ${done.status} — ${done.error ?? "사유 없음"}` };
+    const v = { tone: "bad", text: `${jobEndLine("자동 설계", done)} — ${done.error ?? "사유 없음"}` };
     set(seq, "design", { state: "done", verdict: v, echo: null, resultId: null, report: null });
     return v;
   }
-  const body = await api.get(`/results/${done.result_id}`);
+  return settleDesign(seq, done.result_id);
+};
+
+/** 자동 설계 결과 하나를 이 단계의 기록으로 — 이 탭이 돈 실행과 개요(overview)가 싣는 최근 결과가
+ *  같은 판정·같은 기록 모양을 쓴다(echo = 결과의 기체 — 낡음 배지 재료). */
+const settleDesign = async (seq, resultId) => {
+  const body = await api.get(`/results/${resultId}`);
   const v = designVerdict(body);
-  set(seq, "design", { state: "done", verdict: v, resultId: done.result_id,
+  set(seq, "design", { state: "done", verdict: v, resultId,
     report: body.report ?? null, echo: body.profile ?? null });
   return v;
 };
@@ -192,7 +210,7 @@ const runEval = async (seq) => {
     { state: "running", note: `평가 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`,
       progress: j.progress ?? null }));
   if (done.status !== "done" || !done.result_id) {
-    const v = { tone: "bad", text: `평가 ${done.status} — ${done.error ?? "사유 없음"}` };
+    const v = { tone: "bad", text: `${jobEndLine("평가", done)} — ${done.error ?? "사유 없음"}` };
     set(seq, "eval", { state: "done", verdict: v, echo: null, resultId: null });
     return v;
   }
@@ -215,10 +233,72 @@ const applyBlockReason = () => {
   if (d.verdict?.tone === "bad") return "실패한 실행의 결과는 반영하지 않는다";
   const blocked = d.report ? adoptBlockedText(d.report) : null;
   if (blocked) return blocked;
-  if (d.echo?.source !== "request") return "예제 기체 결과는 문서에 반영할 수 없다 — 복제한 기체에서 진행한다";
-  if (d.echo?.variant) return "형상 변형 위에서 돈 설계는 기본 문서에 반영할 수 없다";
-  return null;
+  // 예제·변형·기록 없음 — 자동 설계 탭 버튼과 같은 관문(lib). 종전 관문은 source가 "request"인지만
+  // 봐서, 헤더에서 예제를 명시로 고르면 지나가 서버 403을 받았고 재개 결과(스냅숏)는 막혔다
+  const gate = applyGateReason(d.echo);
+  if (gate) return gate;
+  // 설계가 잰 문서와 지금 문서가 다르면 서버가 409로 거절한다 — 같은 판정을 버튼 앞에서(반영 자체도
+  // 문서를 바꾸므로 한 번 반영한 결과는 여기 걸린다 — 「문서에 반영됨」도 막되 문구를 가른다, lib)
+  return applyFreshnessBlock(resultFreshness(d.echo, profileRows, d.resultId).state);
 };
+
+/** 채택·반영 단계 판정 — 화면 칩과 신호 보고가 같은 것을 말한다. */
+const applyVerdictNow = () => applyStateVerdict(
+  profileRows?.find((p) => p.id === selectedId())?.gain_tables ?? null,
+  Boolean(stages.design?.resultId), applyBlockReason());
+
+/** 레일 단계 상태 — 신호 보고(data.steps)용. 낡음 대조는 화면 배지와 같은 판정(결과 id 포함 —
+ *  반영 직후의 자동 설계는 「문서에 반영됨」). */
+const stepStates = () => flowStepStates(stages, applyVerdictNow(),
+  (echo, rid) => resultFreshness(echo, profileRows, rid).state);
+
+/** 쇼케이스 신호 `overview` — 잡을 걸지 않고 레일을 지금 문서·최근 결과로 채운다(머리말). */
+async function overview(cue) {
+  if (running) {
+    failCue(cue, "설계 흐름이 이미 실행 중이다 — 끝난 뒤 다시 건다");
+    return;
+  }
+  flowError = null;
+  const seq = ++flowSeq;
+  running = true;
+  flowStatus = "";
+  repaint();
+  // 러너가 던지면 그 줄을 실패로 닫는다 — 러너는 먼저 「실행 중」을 세우므로 안 닫으면 그 칩이
+  // 「실행 중…」에 언다(runOne·runAll의 fail과 같은 규약)
+  const step = async (key, runner) => {
+    try {
+      return await runner(seq);
+    } catch (e) {
+      fail(seq, key, e);
+      throw e;
+    }
+  };
+  try {
+    await step("doc", runDoc);
+    await step("envelope", runEnvelope);
+    const got = await doc();
+    // 설계 게인이 있으면 이 탭의 러너가 판정만 한다(잡 없음). 없으면 러너가 탐색 잡을 걸므로 건너뛴다
+    if (designSource(got.document).kind !== "none") await step("seed", runSeed);
+    const metas = await api.get("/results");
+    const last = latestResultFor(metas, "auto_design",
+      { id: selectedId(), variant: selectedVariant() });
+    if (last) await settleDesign(seq, last.id);
+  } catch (e) {
+    running = false;
+    await refreshRows();
+    repaint();
+    failCue(cue, e instanceof ApiError ? errorText(e) : e); // 서버 detail은 곱게(생 JSON 금지)
+    return;
+  }
+  running = false;
+  await refreshRows();
+  repaint();
+  const steps = stepStates();
+  flowStatus = flowSummaryLine(steps);
+  repaint();
+  revealRail(); // 레일 — 진행기가 다음 단계로 가기 전에 청중 앞에(06 §2)
+  reportCue(cue, { phase: "done", summary: flowSummaryLine(steps), data: { steps } });
+}
 
 export function render() {
   const errBox = el("div");
@@ -237,6 +317,7 @@ export function render() {
     const row = profileRows?.find((p) => p.id === selectedId());
     const variant = selectedVariant();
     const applyBlocked = applyBlockReason();
+    const applyVerdict = applyVerdictNow();
     const toneChip = (v) => el("span", { class: `flag ${v?.tone ?? "na"}` },
       ({ ok: "통과", warn: "주의", bad: "실패", na: "—" })[v?.tone ?? "na"]);
     // 산출물 발치줄의 링크 — 결과 인계는 시뮬 → 영향성과 같은 store 규약(목적 탭이 한 번 읽고
@@ -281,12 +362,13 @@ export function render() {
       el("div", { class: "fd-fill", style: `width:${(reach * 100 / FLOW_STAGES.length).toFixed(2)}%` }));
     FLOW_STAGES.forEach((s, i) => {
       const st = stages[s.key];
-      const v = s.key === "apply"
-        ? applyStateVerdict(row?.gain_tables ?? null, !applyBlocked)
-        : st?.verdict;
+      // 채택·반영 칩 — 설계 결과 유무와 막힌 사유를 따로 넘긴다(종전 !applyBlocked 인자 오류:
+      // 승인 대기 결과가 있어도 "자동 설계를 먼저 돌립니다"가 떴다)
+      const v = s.key === "apply" ? applyVerdict : st?.verdict;
       const busy = st?.state === "running";
-      // 실행 시점 지문과 지금 문서의 대조 — 결과 탭 배지(v1.32)와 같은 판정
-      const fresh = st?.echo ? resultFreshness(st.echo, profileRows) : { state: "unknown" };
+      // 실행 시점 지문과 지금 문서의 대조 — 결과 탭 배지(v1.32)와 같은 판정. 결과 id를 함께 넘긴다:
+      // 제 표를 반영해 달라진 것뿐인 자동 설계 결과는 낡음이 아니라 「문서에 반영됨」이다
+      const fresh = st?.echo ? resultFreshness(st.echo, profileRows, st.resultId ?? null) : { state: "unknown" };
       const arts = stageArtifact(s.key, st);
       rail.append(el("div", { class: "fd-step", "data-key": s.key,
         "data-tone": busy ? "run" : (v?.tone ?? "na") },
@@ -303,7 +385,10 @@ export function render() {
               : v ? el("span", {}, toneChip(v), " ", v.text)
               : el("span", { class: "hint" }, "아직 안 돌림"),
             fresh.state === "stale"
-              ? el("span", { class: "flag bad", style: "margin-left:6px", title: fresh.label }, "낡음") : null),
+              ? el("span", { class: "flag bad", style: "margin-left:6px", title: fresh.label }, "낡음")
+              : fresh.state === "applied"
+                ? el("span", { class: "flag ok", style: "margin-left:6px", title: fresh.label }, "문서에 반영됨")
+                : null),
           busy && typeof st?.progress === "number"
             ? el("div", { class: "fd-prog" },
                 el("i", { style: `width:${Math.round(st.progress * 100)}%` }))
@@ -327,11 +412,13 @@ export function render() {
       el("p", { class: "hint", style: "margin-top:8px" },
         "각 단계는 정본(문서)에서 다시 잽니다 — 단계끼리 결과를 물려주지 않아 낡음 사고가 없고, "
         + "게인 탭·자동 설계의 확정(작업본)이 걸려 있어도 이 흐름은 문서로 잽니다(작업본 평가는 영향성 "
-        + "탭). 실행 시점과 문서가 달라지면 「낡음」이 붙습니다(다시 실행). 카드 발치의 「저장」 줄이 "
+        + "탭). 실행 시점과 문서가 달라지면 「낡음」이 붙습니다(다시 실행) — 자동 설계 결과가 제 게인 표를 "
+        + "반영해 달라진 것뿐이면 「문서에 반영됨」입니다. 카드 발치의 「저장」 줄이 "
         + "그 단계 산출물이 남는 곳입니다 — 잡 결과는 결과 탭에, 채택·반영은 정본 문서 새 리비전에. "
         + "자동 설계가 승인 대기(gated)로 멈추면 자동 설계 탭에서 승인·재개한 뒤 이어 갑니다."));
   };
   repaint = paint; // 이 화면이 지금 화면 — 이전 render의 늦은 콜백도 이제 여기 그린다
+  revealRail = () => revealPanel(rowsBox);
 
   const runOne = async (key) => {
     if (running) return;
@@ -407,6 +494,12 @@ export function render() {
 
   refreshRows().then(() => repaint());
   paint();
+  // 쇼케이스 신호 — 한 번 읽고 지운다(store 인계 규약)
+  const cue = takeCue("flow");
+  if (cue) {
+    if (cue.action === "overview") overview(cue);
+    else unknownAction(cue);
+  }
 
   return el("div", { class: "tab-page" },
     tabTop({

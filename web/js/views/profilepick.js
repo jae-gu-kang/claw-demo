@@ -48,6 +48,25 @@ export function switchTo(sel, {
   return { ok: true, reason: null };
 }
 
+/** 확인 없이 전환 — 쇼케이스 진행기가 부른다(설치·초기화한 기체를 고를 때). 저장 형식은 switchTo와 같다
+ *  (lib/profile.js saveSelection). 묻지 않는 이유: 진행기를 누른 것이 곧 사용자의 전환 의사이고, 확인 창은 자동
+ *  재생을 멈춰 세운다.
+ *
+ *  **같은 선택이어도 다시 읽는다** — 진행기는 방금 그 기체 문서를 새로 설치·초기화했다. 옛 리비전에서 만든 탭
+ *  상태(게인 카탈로그·적용 편집본 등, 이 파일 머리말)를 버리는 것이 전환의 목적이다. 없는 형상 변형 id를 조용히
+ *  기본 형상으로 바꾸지 않는다. 저장이 안 되면 다시 읽지 않는다(switchTo와 같은 사유). 돌려주는 것: {ok, reason}. */
+export function switchSelection(id, variant = null, {
+  storage = browserStorage(), reload = () => globalThis.location.reload(),
+} = {}) {
+  const norm = normalizeSelection({ id, variant });
+  if (!norm || (variant != null && norm.variant !== variant)) return { ok: false, reason: "잘못된 기체 선택" };
+  if (!storage || !saveSelection(storage, norm)) {
+    return { ok: false, reason: "브라우저 저장소를 쓸 수 없어 기체 선택을 유지할 수 없습니다 — 전환하지 않았습니다" };
+  }
+  reload();
+  return { ok: true, reason: null };
+}
+
 let box = null;
 let notice = null; // 서버에서 사라진 선택을 예제로 되돌린 사유 — 이 페이지 수명 동안 헤더에 남긴다
 

@@ -20,9 +20,19 @@ import {
   logScale,
   marginColor,
   marginLegendText,
+  marginWorst,
   niceTicks,
   pivotCases,
   planeViews,
+  TRIM_CELL_LABEL,
+  TRIM_FLAG_LABEL,
+  coincidentGroups,
+  coincidentNote,
+  curveSpread,
+  nearOverlapNote,
+  pctText,
+  trimCueReport,
+  trimFlagSummary,
   trimCurves,
   trimEnvelopeCell,
   wpAlt,
@@ -412,4 +422,171 @@ test("interpLogAt — log-x 보간, 범위 밖은 가장 가까운 끝값, null�
   assert.equal(interpLogAt(xs, [0, null, -40], 5), 0);
   assert.equal(interpLogAt(xs, [0, null, -40], 50), -40);
   assert.equal(interpLogAt([], [], 1), null);
+});
+
+test("trimCueReport — 지도 셀 판정 종류별 개수, 범례와 같은 라벨·「가능」은 늘 적는다", () => {
+  const row = (name, converged, flags, fuel = 10) => ({ case: { name, fuel }, converged, flags });
+  const ok = { residual_ok: true, saturation_ok: true, alpha_margin_ok: true, continuity_ok: true };
+  const r = trimCueReport([
+    row("a", true, ok), row("b", true, ok, 50), row("c", true, { ...ok, alpha_margin_ok: false }),
+    row("d", false, { ...ok, residual_ok: false }, 50),
+  ]);
+  assert.equal(r.summary,
+    `4 케이스 — ${TRIM_CELL_LABEL.ok} 2 · ${TRIM_CELL_LABEL.stall} 1 · ${TRIM_CELL_LABEL.infeasible} 1`
+    + " · 판정 플래그 위반 2건 확인 필요 (잔차 1 · α여유 1)");
+  assert.deepEqual(r.data, { cases: 4, converged: 3, fuels: [10, 50],
+    counts: { ok: 2, stall: 1, saturated: 0, infeasible: 1 },
+    flag_violations: { cases: 2, by_flag: { alpha_margin_ok: 1, residual_ok: 1 }, names: ["c", "d"] } });
+  // 전부 불가여도 「가능 0」은 적는다 — 없는 성공을 숨기지 않는다. 플래그가 없는 행은 위반이 아니다(미판정)
+  assert.equal(trimCueReport([row("d", false, {})]).summary, `1 케이스 — ${TRIM_CELL_LABEL.ok} 0 · ${TRIM_CELL_LABEL.infeasible} 1`);
+});
+
+// 쇼케이스 결함 D6 — 진행 카드 줄이 「가능 20」이라 하는 사이 탭 머리줄은 「판정 플래그 위반 3건 확인 필요」였다.
+// 지도 셀(가능)은 연속성 플래그를 보지 않는다 — 보고가 셀 집계만 말하면 탭 자신의 경고를 가린다
+test("trimCueReport — 지도 셀이 「가능」이어도 판정 플래그 위반은 탭 머리줄과 같은 말로 싣는다", () => {
+  const row = (name, flags) => ({ case: { name, fuel: 10 }, converged: true, flags });
+  const ok = { residual_ok: true, saturation_ok: true, alpha_margin_ok: true, continuity_ok: true };
+  const rows = [
+    row("M0.12_h3000_f10", { ...ok, continuity_ok: false }), row("M0.15_h3000_f10", ok),
+    row("M0.18_h3000_f50", { ...ok, continuity_ok: false }), row("M0.12_h3000_f50", { ...ok, continuity_ok: false }),
+  ];
+  const r = trimCueReport(rows);
+  assert.equal(r.summary, `4 케이스 — ${TRIM_CELL_LABEL.ok} 4 · 판정 플래그 위반 3건 확인 필요 (연속성 3)`);
+  assert.deepEqual(r.data.flag_violations, {
+    cases: 3, by_flag: { continuity_ok: 3 },
+    names: ["M0.12_h3000_f10", "M0.18_h3000_f50", "M0.12_h3000_f50"],
+  });
+  // 위반이 없으면 붙이지 않는다(없는 경고를 0건으로 늘어놓지 않는다)
+  const clean = trimCueReport([row("a", ok)]);
+  assert.equal(clean.summary, `1 케이스 — ${TRIM_CELL_LABEL.ok} 1`);
+  assert.deepEqual(clean.data.flag_violations, { cases: 0, by_flag: {}, names: [] });
+});
+
+test("trimFlagSummary — 탭 머리줄의 근거: 수렴 수·위반 케이스 수(플래그 하나라도 false)·플래그별 수", () => {
+  const row = (name, converged, flags) => ({ case: { name }, converged, flags });
+  const s = trimFlagSummary([
+    row("a", true, { residual_ok: true, continuity_ok: false, saturation_ok: false }),
+    row("b", true, { residual_ok: true, continuity_ok: null }), // null = 미판정 — 위반 아님
+    row("c", false, { residual_ok: false, continuity_ok: false }),
+  ]);
+  assert.deepEqual(s, {
+    total: 3, converged: 2, bad: 2,
+    byFlag: { saturation_ok: 1, continuity_ok: 2, residual_ok: 1 },
+    badNames: ["a", "c"],
+    line: "수렴 2/3 · 판정 플래그 위반 2건",
+    detail: "잔차 1 · 포화 1 · 연속성 2",
+  });
+  // 라벨은 트림 표의 열 이름 — 표·머리줄·보고가 한 표를 본다
+  assert.deepEqual(Object.values(TRIM_FLAG_LABEL), ["잔차", "포화", "α여유", "연속성"]);
+});
+
+// 쇼케이스 결함 D8 — δe 소모·추력 여유 열이 fmt(x·100, 1)(유효 1자리)라 「2e+1 %」로 찍혔다
+test("pctText — 비율을 소수 자리 고정 백분율로 (지수 표기 금지)", () => {
+  assert.equal(pctText(0.2), "20.0 %");
+  assert.equal(pctText(0.567), "56.7 %");
+  assert.equal(pctText(0.0004), "0.0 %");
+  assert.equal(pctText(1), "100.0 %");
+  assert.equal(pctText(0.1234, 0), "12 %");
+  assert.equal(pctText(-0.05), "−5.0 %"); // 음수는 수학 기호 빼기
+  assert.equal(pctText(null), "—");
+  assert.equal(pctText(Number.NaN), "—");
+  assert.equal(pctText("inf"), "—");
+  for (const v of [0.2, 0.6, 0.5, 0.95]) assert.ok(!/e[+-]/.test(pctText(v)), `${v} → ${pctText(v)}`);
+});
+
+// 쇼케이스 결함 D9 — 세 마하의 CL 곡선이 같은 값이라 한 줄만 보이는데 범례는 셋을 말했다
+test("coincidentGroups — 값이 같은 곡선끼리 묶는다 (첫 곡선이 대표) · null 자리까지 같아야 같다", () => {
+  const a = [0.1, 0.2, 0.3];
+  assert.deepEqual(coincidentGroups([a, [...a], [0.1, 0.2, 0.31]]), [[0, 1], [2]]);
+  assert.deepEqual(coincidentGroups([a, a, a]), [[0, 1, 2]]);
+  assert.deepEqual(coincidentGroups([a]), [[0]]);
+  assert.deepEqual(coincidentGroups([]), []);
+  // 부동소수 잡음(상대 1e-9)은 같은 값 — 눈에 안 보일 만큼 다른 곡선(1e-4)은 다른 곡선이다
+  assert.deepEqual(coincidentGroups([[1, 2], [1 + 1e-12, 2]]), [[0, 1]]);
+  assert.deepEqual(coincidentGroups([[1, 2], [1 + 1e-4, 2]]), [[0], [1]]);
+  // null(판정 불가 구간)은 같은 자리에 있어야 같다 — 0으로 메우지 않는다
+  assert.deepEqual(coincidentGroups([[1, null, 3], [1, null, 3], [1, 2, 3]]), [[0, 1], [2]]);
+  // 길이가 다르면 다른 곡선
+  assert.deepEqual(coincidentGroups([[1, 2], [1, 2, 3]]), [[0], [1]]);
+  // 뒤 곡선이 앞 무리의 대표와만 견준다 — 순서가 곧 대표 순서
+  assert.deepEqual(coincidentGroups([[5], [6], [5], [6]]), [[0, 2], [1, 3]]);
+});
+
+test("marginWorst — 수렴·수치 마진 칸만 후보, inf·null은 최악이 아니다", () => {
+  const e = (name, converged, margins) => ({ trim: { converged, case: { name } }, margins });
+  const loops = [{ name: "pitch_q" }, { name: "yaw_r" }];
+  const entries = [
+    e("A", true, { pitch_q: { pm_deg: 50, gm_db: "inf" }, yaw_r: { pm_deg: 61, gm_db: 9.5 } }),
+    e("B", true, { pitch_q: { pm_deg: 38.2, gm_db: 12 }, yaw_r: { pm_deg: null, gm_db: 7.1 } }),
+    e("C", false, { pitch_q: { pm_deg: -80, gm_db: -9 } }), // 미수렴 — 선형화점이 없다
+    e("D", true, {}),
+  ];
+  const w = marginWorst(entries, loops);
+  assert.deepEqual([w.pm.loop, w.pm.entry.trim.case.name, w.pm.value], ["pitch_q", "B", 38.2]);
+  assert.deepEqual([w.gm.loop, w.gm.entry.trim.case.name, w.gm.value], ["yaw_r", "B", 7.1]);
+  assert.deepEqual(marginWorst([e("A", true, { pitch_q: { pm_deg: "inf", gm_db: "inf" } })], loops),
+    { pm: null, gm: null, unstable: 0 });
+  assert.deepEqual(marginWorst([], []), { pm: null, gm: null, unstable: 0 });
+});
+
+test("marginWorst — 폐루프 발산 칸은 최악 후보가 아니라 unstable로 센다", () => {
+  const e = (name, converged, margins) => ({ trim: { converged, case: { name } }, margins });
+  const loops = [{ name: "pitch_q" }];
+  const div = (pm, gm) => ({ pm_deg: pm, gm_db: gm, closed_loop: { stable: false, unstable: [[1.97, 21.6]] } });
+  const entries = [
+    // 발산 칸의 PM·GM은 루프 교차의 고전 판독 — 수가 더 작아도(−5°·−3 dB) 최악 여유로 뽑히면 안 된다
+    e("A", true, { pitch_q: div(-5, -3) }),
+    e("B", true, { pitch_q: { pm_deg: 45, gm_db: 8, closed_loop: { stable: true } } }),
+    e("C", true, { pitch_q: div(82, 20) }), // 넉넉해 보이는 발산 칸도 마찬가지
+    e("D", false, { pitch_q: div(1, 1) }), // 미수렴 — 세지 않는다
+  ];
+  const w = marginWorst(entries, loops);
+  assert.deepEqual([w.pm.entry.trim.case.name, w.pm.value], ["B", 45]);
+  assert.deepEqual([w.gm.entry.trim.case.name, w.gm.value], ["B", 8]);
+  assert.equal(w.unstable, 2);
+  // 전부 발산이면 최악 여유는 없다 — 발산 칸의 수가 「최악 PM」으로 둔갑하지 않는다
+  assert.deepEqual(marginWorst([entries[0], entries[2]], loops), { pm: null, gm: null, unstable: 2 });
+});
+
+test("coincidentNote — 같은 값이라 한 줄로 그린 곡선을 캡션 한 줄로 · 없으면 null", () => {
+  const tags = ["mach 0.09", "mach 0.16", "mach 0.23"];
+  const all = [[0, 1, 2]];
+  // 세 그림 모두 같은 방식으로 겹치면 한 번만 말한다
+  assert.equal(coincidentNote([
+    { name: "CL", groups: all, tags }, { name: "극선", groups: all, tags }, { name: "L/D", groups: all, tags },
+  ]), "같은 값의 곡선은 한 줄(앞 곡선의 색)로 그렸습니다 — CL·극선·L/D 모두 mach 0.09 = mach 0.16 = mach 0.23");
+  // 그림마다 다르면 그림별로 — 겹침이 없는 그림은 빼고
+  assert.equal(coincidentNote([
+    { name: "CL", groups: [[0, 1], [2]], tags }, { name: "극선", groups: [[0], [1], [2]], tags },
+  ]), "같은 값의 곡선은 한 줄(앞 곡선의 색)로 그렸습니다 — CL: mach 0.09 = mach 0.16");
+  assert.equal(coincidentNote([{ name: "CL", groups: [[0], [1], [2]], tags }]), null);
+  assert.equal(coincidentNote([]), null);
+});
+
+// 쇼케이스 실측 — 세 마하의 CL 곡선은 같은 값이 아니다(CL 최대 1.103·1.106·1.109). 차가 그림 해상도 아래라 한 줄로
+// 보이고 맨 위 곡선의 색만 남는다 — 같은 값이라고 말하면 거짓이고, 말하지 않으면 범례의 셋 중 둘이 사라진 것처럼 읽힌다
+test("curveSpread — 모든 곡선이 수인 자리의 (최대 − 최소) 최댓값과 값 범위 대비 비율", () => {
+  const s = curveSpread([[0, 1, 2], [0, 1.01, 2], [0, 1.02, 2.01]]);
+  assert.ok(Math.abs(s.maxDiff - 0.02) < 1e-12);
+  assert.equal(s.range, 2.01);
+  assert.ok(Math.abs(s.rel - 0.02 / 2.01) < 1e-12);
+  // null 자리는 건너뛴다(끊긴 구간을 0으로 메우지 않는다)
+  assert.equal(curveSpread([[0, null, 2], [0, 5, 2]]).maxDiff, 0);
+  assert.equal(curveSpread([[1, 2]]), null); // 곡선 하나 — 퍼짐이 없다
+  assert.equal(curveSpread([[null], [null]]), null); // 견줄 자리가 없다
+});
+
+test("nearOverlapNote — 차가 값 범위의 frac 아래인 그림만 캡션 한 줄로 · 없으면 null", () => {
+  const note = nearOverlapNote([
+    { name: "CL", spread: { maxDiff: 0.006, range: 1.9, rel: 0.006 / 1.9 } },
+    { name: "L/D", spread: { maxDiff: 2, range: 10, rel: 0.2 } }, // 잘 갈린다 — 말하지 않는다
+    { name: "극선", spread: null },
+  ]);
+  assert.equal(note, "겹친 곡선의 차가 그림 해상도보다 작아 한 줄로 보입니다(나중 곡선의 색이 위) — "
+    + "CL 최대 차 0.006 (값 범위의 0.3 %)");
+  assert.equal(nearOverlapNote([{ name: "L/D", spread: { maxDiff: 2, range: 10, rel: 0.2 } }]), null);
+  // 기본 문턱 1.5 % — 쇼케이스 극선의 CD 퍼짐(1.07 %)은 한 줄로 보였다. 같은 값(maxDiff 0)은 coincidentNote의 몫
+  assert.match(nearOverlapNote([{ name: "극선", spread: { maxDiff: 0.0033, range: 0.3076, rel: 0.0107 } }]), /극선 최대 차 0\.0033/);
+  assert.equal(nearOverlapNote([{ name: "CL", spread: { maxDiff: 0, range: 1, rel: 0 } }]), null);
+  assert.equal(nearOverlapNote([]), null);
 });

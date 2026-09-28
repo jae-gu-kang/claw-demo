@@ -656,3 +656,90 @@ def test_mission_verdict_does_not_swallow_a_recovery_fail():
                                  False, 60.0)
     assert s3 == "fail" and "crossed" in note3
     assert _mission_verdict([], ok3, True, 60.0) == ("ok", None)
+
+
+# ── 레이트 루프 여유 — 게이트가 VERIFY와 같은 자·같은 판정으로 판다 (04 §5) ──────────────
+
+
+def test_레이트_루프_여유는_VERIFY와_같은_자와_판정이다(rig):
+    """게인 탭 게이트가 레이트 루프 GM/PM을 안 재면, VERIFY가 떨어뜨린 댐퍼를 게이트는 통과시킨다.
+
+    같은 게인·같은 조성이므로 여유는 tune.rate_loop_margins와 **일치**해야 하고, 판정은
+    criteria.judge_rate_loop(모드 지표 쪽은 damping 단계 몫이라 "ok")와 같아야 한다.
+    """
+    from claw.design.tune import rate_loop_margins
+    from claw.pipeline.evaluate import _case_gains
+    from claw.pipeline.influence import make_law
+    from claw.trim import linearize, split_axes
+
+    ac, trs = rig
+    tr = trs[0]
+    crit = GainEvalCriteria()
+    out = evaluate(ac, trs, Shape(profile=example_profile()), crit, depth="linear")
+    law = make_law(Shape(profile=example_profile()))
+    rate_gains, rate_filters, _att, _spd = _case_gains(law, tr.case)
+    lon, lat = split_axes(linearize(ac, tr))
+    kw = {**crit.composition.act_kw(), "rate_filters": dict(rate_filters)}
+    loops = out["cases"][0]["stages"]["margins"]["loops"]
+    for group, model in (("pitch", lon), ("roll", lat), ("yaw", lat)):
+        want = rate_loop_margins(model, group, rate_gains, kw)
+        got = loops[f"{group}_rate"]
+        assert want is not None, group
+        assert got["margins"]["pm_deg"] == want["pm_deg"], group
+        assert got["margins"]["gm_db"] == want["gm_db"], group
+        assert got["margins"]["divergent"] == want["divergent"], group
+        assert got["status"] == crit.margin.judge_rate_loop("ok", want), group
+    # 횡축 레이트 루프는 서로를 닫아 두고 잰다 (AS94900 끊은 루프)
+    assert loops["roll_rate"]["margins"]["closed_with"] == ["yaw_rate"]
+    assert loops["yaw_rate"]["margins"]["closed_with"] == ["roll_rate"]
+
+
+def test_레이트_루프_여유_미달은_하드_실패다(rig):
+    """구 합성 기체 손설계 게인(M0.5/h1000): 롤 댐퍼 GM ≈2.1 dB·PM ≈18°(합격선 6 dB·45° 미만)이고, 피치 댐퍼는
+    작동기·지연을 넣으면 폐루프가 발산한다(댐퍼 가드 _damper_loop_verdict도 unstable). 종전 게이트는 둘 다 통과였다
+    (카드 ②③이 자세 루프만 봤다). 합격선을 측정값 아래로 내리면 그 여유 실패가 사라져야 한다 — 문턱에 묶인 판정이다."""
+    ac, trs = rig
+    crit = GainEvalCriteria()
+    out = evaluate(ac, trs, Shape(profile=example_profile()), crit, depth="linear")
+    c = out["cases"][0]
+    rr = c["stages"]["margins"]["loops"]["roll_rate"]
+    assert rr["status"] == "fail"
+    assert rr["margins"]["gm_db"] < crit.margin.gm_min_db
+    fails = {(f["check"], f.get("loop")) for f in c["hard_fails"]}
+    assert ("margins.gm", "roll_rate") in fails
+    assert ("margins.pm", "roll_rate") in fails
+    assert ("stability.unstable", "pitch_rate") in fails  # 발산 — 여유가 정의되지 않는다
+    assert c["stages"]["margins"]["loops"]["pitch_rate"]["margins"]["divergent"] is True
+    assert out["aggregate"]["hard_fail"] is True
+    gm_card = next(k for k in out["cards"] if k["key"] == "gm")
+    assert gm_card["status"] == "fail" and gm_card["value"]["loop"] == "roll_rate"
+
+    # 문턱을 측정값 아래로 — 롤 레이트 여유 실패만 사라지고(발산은 문턱과 무관하게 남는다)
+    loose = dataclasses.replace(crit, margin=dataclasses.replace(
+        crit.margin, pm_bad_deg=5.0, pm_min_deg=10.0, gm_min_db=1.0, gm_good_db=1.5))
+    out2 = evaluate(ac, trs, Shape(profile=example_profile()), loose, depth="linear")
+    c2 = out2["cases"][0]
+    fails2 = {(f["check"], f.get("loop")) for f in c2["hard_fails"]}
+    assert not any(ch.startswith("margins.") and lp == "roll_rate" for ch, lp in fails2)
+    assert c2["stages"]["margins"]["loops"]["roll_rate"]["status"] == "ok"
+    assert ("stability.unstable", "pitch_rate") in fails2
+
+
+def test_레이트_게인이_0이면_여유를_재지_않는다(rig):
+    """잴 루프가 없으면(rate_loop_margins None) zero로 남기고 판정 수에 넣지 않는다 — 0을 통과로 위장하지 않는다."""
+    from claw.pipeline.evaluate import _margins_stage, _case_gains
+    from claw.pipeline.influence import make_law
+    from claw.trim import linearize, split_axes
+
+    ac, trs = rig
+    tr = trs[0]
+    crit = GainEvalCriteria()
+    law = make_law(Shape(profile=example_profile()))
+    rate_gains, rate_filters, att, spd = _case_gains(law, tr.case)
+    lon, lat = split_axes(linearize(ac, tr))
+    zeroed = {**rate_gains, "pitch.k_rate": 0.0}
+    st, fails = _margins_stage(law, tr, {"lon": lon, "lat": lat}, zeroed, rate_filters, att, spd,
+                               crit, crit.composition.act_kw())
+    assert st["loops"]["pitch_rate"]["status"] == "zero"
+    assert st["loops"]["pitch_rate"]["margins"] is None
+    assert not any(f.get("loop") == "pitch_rate" for f in fails)

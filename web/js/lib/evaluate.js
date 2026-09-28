@@ -422,3 +422,51 @@ export function hardFailLines(aggregate) {
       + ` (한계 ${f.limit}) @${f.case}`;
   });
 }
+
+/** 평가 판정 — 칩 배지와 같은 하드 게이트 한 비트: "PASS" | "FAIL" | null(판정 없음 — 케이스 0건·취소).
+ *  쇼케이스 보고 data.verdict가 이것이다(진행기가 기대 판정과 대조한다 — lib/showcase verdictOf). */
+export function hardGateVerdict(model) {
+  const hf = model?.aggregate?.hard_fail;
+  if (hf == null) return null;
+  return hf ? "FAIL" : "PASS";
+}
+
+/** 평가 결과 한 줄 — 칩 배지와 같은 판정 머리(FAIL n / PASS) + 케이스 수·깊이 + 최악 한 줄.
+ *  쇼케이스 보고 summary가 이것이다(탭 산출물에서 만든 문장 — 새 해설을 쓰지 않는다).
+ *  FAIL이면 하드 위반 첫 줄, PASS면 J 줄이 최악 자리다. 판정이 없으면(케이스 0건·취소) 그렇다고 한다. */
+export function evalVerdictLine(model) {
+  const agg = model?.aggregate;
+  const n = agg?.n_cases ?? (model?.cases ?? []).length;
+  const depth = model?.depth ? ` · ${model.depth}` : "";
+  const verdict = hardGateVerdict(model);
+  if (!verdict) return `판정 없음 — 케이스 ${n}건${depth}`;
+  if (verdict === "FAIL") {
+    // 위반 목록이 비어 오면(옛 결과) 「undefined」를 찍지 않는다 — 머리만 선다
+    const first = hardFailLines(agg)[0];
+    return `FAIL ${(agg.hard_fails ?? []).length} — 케이스 ${n}건${depth}${first ? ` · ${first}` : ""}`;
+  }
+  return `PASS — 케이스 ${n}건${depth} · ${jLine(agg)}`;
+}
+
+// 하드 게이트에 말을 거는 소견 규칙 — 포화(축별 기여·타면 예산)와 리미터(실속 여유). 추종 오차
+// 분할(error_split)·와인드업은 하드 게이트가 아니다(추종 RMS는 J의 항) — 하드 위반 케이스라도 그
+// 카드를 먼저 고르면 실패와 무관한 자리를 흔든다(예제 기체 h3000 고도 추종이 그렇게 늘 서 있다)
+const HARD_RULES = new Set(["sat_attrib", "mix_sat", "limiter"]);
+
+/** [얼마나 →]의 대상 — 하드 위반 케이스의 소견에서 **하드 게이트에 말을 거는 첫 처방 카드**.
+ *  {case, knobs, card} | null. 카드는 소견 안 순서(엔진 diagnose가 규칙·지배 기여 순으로 낸다)대로 보고,
+ *  하드 규칙 카드가 없으면 그 케이스의 첫 카드다. 행 전체(attributionRows의 knobs 합집합)가 아니라
+ *  카드 하나인 이유는 비용이다 — 스윕은 설계변수 × 스팬 × 케이스의 곱이라 셋이면 셋 배다. */
+export function prescriptionTarget(model) {
+  for (const c of model?.cases ?? []) {
+    if (!(c.hard_fails ?? []).length) continue;
+    const a = c.attribution;
+    if (!a || a.status !== "ok") continue;
+    const pres = (a.prescriptions ?? []).filter((p) => (p.knobs ?? []).length);
+    if (!pres.length) continue;
+    const rules = (p) => (p.findings ?? []).map((i) => a.findings?.[i]?.rule);
+    const card = pres.find((p) => rules(p).some((r) => HARD_RULES.has(r))) ?? pres[0];
+    return { case: c.case, knobs: [...card.knobs], card };
+  }
+  return null;
+}

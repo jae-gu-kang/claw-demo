@@ -36,6 +36,9 @@ OPTIONAL_SECTIONS = ("mission_template", "display")
 # 미션 템플릿 격자의 케이스 상한 — 서버 스캔·영향성 격자 상한(MAX_SCAN_CASES·MAX_CASES)과 같은 자리.
 # 간격 오타 하나로 수만 케이스가 되면 그 기체를 고른 모든 화면이 격자를 만들다 멈춘다
 MAX_TEMPLATE_CASES = 200
+# 엔벨로프 선도 고도(mission_template.envelope.alt)를 목록으로 줄 때의 개수 상한 — V-n 선도를 고도마다 한 장씩
+# 겹쳐 그린다. 여섯 장이 넘으면 곡선이 서로를 가려 읽을 수 없다(화면 사정의 상한이지 물리 상한이 아니다)
+MAX_ENVELOPE_ALTS = 6
 # 표시 모델 형식 — 지금은 GLB 파일 하나다. 모델이 없는 기체는 절을 없음(null)으로 두고, 화면이 기준량에서 만든
 # 도식을 그리며 그렇다고 말한다(06 §8)
 DISPLAY_KINDS = ("model",)
@@ -548,6 +551,16 @@ def _numlist(v, path, *, lo=None, hi=None):
     return [_num(x, f"{path}/{i}", lo=lo, hi=hi) for i, x in enumerate(v)]
 
 
+def _num_or_list(v, path, *, lo=None, hi=None, max_items):
+    """수치 하나 또는 수치 1~max_items개 목록 — 받은 모양 그대로 정규화한다(수치는 float, 목록은 float 목록).
+    한 개짜리 목록을 수치로 바꾸지 않는다 — 저장본이 편집 전후로 모양을 바꾸면 안 한 변경이 생긴다."""
+    if isinstance(v, list):
+        if not 1 <= len(v) <= max_items:
+            _fail(path, f"수치 하나 또는 수치 1~{max_items}개 목록이어야 함: {len(v)}개")
+        return [_num(x, f"{path}/{i}", lo=lo, hi=hi) for i, x in enumerate(v)]
+    return _num(v, path, lo=lo, hi=hi)
+
+
 def _mission_template(t, p):
     """미션 시나리오 기본값 — **계산에 쓰이지 않는다.** 웹 폼(트림·마진 맵·영향성 격자, 엔벨로프, 시뮬
     미션)의 초기값이고, 결과는 실제로 보낸 요청을 싣는다. 그래서 지문 밖이다. 경로·활주로 같은 장소 값은
@@ -585,7 +598,8 @@ def _mission_template(t, p):
     if n > MAX_TEMPLATE_CASES:
         _fail(gp, f"격자 케이스 {n}개 — {MAX_TEMPLATE_CASES}개까지 (간격·목록 확인)")
     envelope = {
-        "alt": _num(e["alt"], f"{ep}/alt", lo=lo, hi=hi),
+        # 선도 고도 — 하나(종전) 또는 여럿(V-n 다중 고도 선도). 웹 엔벨로프 폼의 초기값이다
+        "alt": _num_or_list(e["alt"], f"{ep}/alt", lo=lo, hi=hi, max_items=MAX_ENVELOPE_ALTS),
         "fuel": _num(e["fuel"], f"{ep}/fuel", lo=0.0),
         "scan_mach": _span(e["scan_mach"], f"{ep}/scan_mach", lo=0.0),
         "scan_alt": _numlist(e["scan_alt"], f"{ep}/scan_alt", lo=lo, hi=hi),

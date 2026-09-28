@@ -5,12 +5,13 @@
 */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
-  buildVerifyRequest, caseGroups, covCell, failedRuleCount, firstFailKey,
+  boardNotice, buildVerifyRequest, caseGroups, covCell, failedRuleCount, firstFailKey,
   mcdcCell, mismatchedOutputCount, pct, sourceRows, statusFlag, truthTable,
-  uncoveredBranchCount, unitGridRows, verdictModel,
+  uncoveredBranchCount, unitGridRows, verdictModel, verifyCueSummary,
 } from "./verify.js";
 
 const storeOf = (map) => (key) => map[key];
@@ -250,4 +251,45 @@ test("비활성 경로 행 — 덮은 세트가 없으면 미커버로 드러난
   const rows = deactivatedRows(REP112);
   assert.deepEqual(rows.map((r) => r.covered), ["cover-1", "요청 이미지(공용 헬퍼 경로)", "미커버"]);
   assert.deepEqual(rows.map((r) => r.uncovered), [false, false, true]);
+});
+
+test("신호 요약 — 판정 머리줄 + 생략 사유(엔진 detail 그대로)", () => {
+  const pass = { verdict: "pass", summary: [{ key: "static", label: "정적 — 규율", status: "pass" }] };
+  assert.equal(verifyCueSummary(pass), "통과 — 전 검사군 통과 · 생략 0건");
+  const skip = { verdict: "pass_with_skips", summary: [
+    { key: "compile", label: "컴파일 — 엄격", status: "pass", detail: "ok" },
+    { key: "coverage", label: "커버리지 — 라인·분기", status: "skip", detail: "llvm-cov 없음" },
+  ] };
+  assert.equal(verifyCueSummary(skip),
+    "통과 (생략 있음) — 실패 0건 · 생략 1건 — 이 환경에서 못 잰 것은 잰 척하지 않는다"
+    + " · 생략: 커버리지 — llvm-cov 없음");
+  const fail = { verdict: "fail", summary: [{ key: "paths", label: "경로 — 밟은 경로", status: "fail" }] };
+  assert.match(verifyCueSummary(fail), /^실패 — 실패 1건 — 경로/);
+  assert.equal(verifyCueSummary(null), "리포트 없음");
+});
+
+// e2e(D11): 첫 검증이 「running 43/100」을 도는 동안 판정판 자리가 「아직 실행하지 않았습니다 — [검증 실행]을
+// 누르면…」이라고 말했다 — 청중은 버튼을 다시 눌러야 하는 줄 안다
+test("판정판 안내 — 도는 중이면 「아직 실행하지 않았습니다」가 아니다", () => {
+  const idle = boardNotice({ hasReport: false, running: false });
+  assert.match(idle, /^아직 실행하지 않았습니다 — \[검증 실행\]을 누르면/);
+  const first = boardNotice({ hasReport: false, running: true });
+  assert.match(first, /^검증이 도는 중입니다/);
+  assert.doesNotMatch(first, /아직 실행하지 않았|\[검증 실행\]을 누르면/);
+  // 지난 결과가 떠 있는데 새 검증이 돈다 — 판정판은 지난 것이라고 밝힌다(새 결과로 읽히지 않게)
+  assert.match(boardNotice({ hasReport: true, running: true }), /지난 결과/);
+  // 결과가 있고 돌지 않으면 판정판이 스스로 말한다
+  assert.equal(boardNotice({ hasReport: true, running: false }), null);
+});
+
+// 뷰(views/verify.js)는 DOM을 모듈 스코프에서 만져 import할 수 없다 — 배선은 원문에서 읽는다(influence.test.js와 같은 가드)
+test("검증 탭 배선 — 판정판은 실행 중 여부를 알고, 잡이 서고 걷힐 때 다시 그린다", () => {
+  const src = readFileSync(new URL("../views/verify.js", import.meta.url), "utf8");
+  // 판정판 안내는 lib 한 곳 — 뷰에 옛 문구를 다시 적지 않는다
+  assert.doesNotMatch(src, /["`]아직 실행하지 않았습니다/);
+  assert.match(src, /boardNotice\(\{ hasReport: !!report, running \}\)/);
+  assert.match(src, /const paintBoard = \(\) => renderBoard\(boardBox, lastReport, !!runningJobId\);/);
+  // 잡 id가 서고 걷힐 때마다(syncRunBtn) 판정판도 다시 — 안 그리면 제출 전 화면(「아직 …」)이 남는다
+  const sync = src.match(/const syncRunBtn = \(\) => \{[\s\S]*?\n {2}\};/)?.[0] ?? "";
+  assert.match(sync, /paintBoard\(\);/, "잡이 서도 판정판을 다시 그리지 않는다");
 });

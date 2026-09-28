@@ -7065,14 +7065,14 @@ function nextSpeech(prev, now) {
   };
 }
 const str = (v2) => typeof v2 === "string" && v2 !== "" ? v2 : null;
-const num$1 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+const num$3 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
 function readTour(v2) {
   if (v2 == null || typeof v2 !== "object") return null;
   const o = v2;
   const token = str(o.token);
   const resultId = str(o.resultId);
   if (token == null || resultId == null) return null;
-  const speed = num$1(o.speed);
+  const speed = num$3(o.speed);
   return {
     token,
     resultId,
@@ -7080,13 +7080,22 @@ function readTour(v2) {
     // 0·음수·NaN 배속은 재생이 흐르지 않는다 — 투어가 영영 끝나지 않는다
     speed: speed != null && speed > 0 ? speed : 1,
     voice: o.voice === true,
-    endT: num$1(o.endT)
+    endT: num$3(o.endT)
   };
 }
-function tourReady(tour, s) {
+function sceneReady(tour, s) {
   if (s.chosen !== tour.resultId || s.shownId !== tour.resultId || !s.playable) return false;
   return tour.commsId == null || s.commsKey === tour.commsId;
 }
+function tourReady(tour, s) {
+  return sceneReady(tour, s) && s.vehicleSettled;
+}
+function tourAwaitsVehicle(tour, s) {
+  return sceneReady(tour, s) && !s.vehicleSettled;
+}
+const TOUR_VEHICLE_WAIT_MS = 15e3;
+const TOUR_VEHICLE_LATE_NOTE = `기체가 ${TOUR_VEHICLE_WAIT_MS / 1e3}초 안에 서지 않아 투어 재생을 기체 없이 시작했습니다 — 기체가 도착하면 그 자리부터 그립니다(사유는 「캡션」).`;
+const TOUR_CAM_MODE = "chase";
 function tourMismatch(tour, s) {
   if (s.resultIds.length === 0) return null;
   if (!s.resultIds.includes(tour.resultId)) {
@@ -7118,7 +7127,9 @@ const COMPUTE_POST = /* @__PURE__ */ new Set([
   "/influence/scan",
   "/influence/evaluate",
   "/influence/verify",
-  "/influence/prescribe"
+  "/influence/prescribe",
+  // 미션 초안 — 프롬프트의 기체 사실·기본 미션 예시를 고른 기체 문서에서 세운다(서버 llm_draft.py)
+  "/llm/mission-draft"
 ]);
 const COMPUTE_GET = /* @__PURE__ */ new Set([
   "/analysis/vn-envelope",
@@ -7155,6 +7166,10 @@ function withProfile(method, path, body, sel = selection) {
   }
   return { path, body };
 }
+function profileErrorText(detail) {
+  if (detail == null || typeof detail !== "object" || Array.isArray(detail) || !("message" in detail)) return null;
+  return detail.path ? `${detail.path}: ${detail.message}` : String(detail.message);
+}
 const BASE = "/api";
 const TERMINAL = /* @__PURE__ */ new Set(["done", "error", "cancelled"]);
 const sleep = (ms) => new Promise((r2) => setTimeout(r2, ms));
@@ -7183,6 +7198,9 @@ async function request(method, path, body) {
     }
   }
   if (!res.ok) {
+    if (res.status === 401 && !path.startsWith("/auth/") && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("claw:auth-required", { detail: { path } }));
+    }
     throw new ApiError(res.status, data && data.detail !== void 0 ? data.detail : data);
   }
   return data;
@@ -7191,6 +7209,7 @@ const api = {
   get: (path) => request("GET", path),
   post: (path, body) => request("POST", path, body),
   put: (path, body) => request("PUT", path, body),
+  patch: (path, body) => request("PATCH", path, body),
   del: (path) => request("DELETE", path)
 };
 function errorText$1(err) {
@@ -7198,7 +7217,7 @@ function errorText$1(err) {
   if (Array.isArray(err.detail)) {
     return err.detail.map((e) => `${(e.loc || []).join(".")}: ${e.msg}`).join("\n");
   }
-  return typeof err.detail === "string" ? err.detail : err.message;
+  return typeof err.detail === "string" ? err.detail : profileErrorText(err.detail) ?? err.message;
 }
 function watchJob$1(jobId, onUpdate) {
   return new Promise((resolve, reject) => {
@@ -7252,6 +7271,130 @@ function watchJob$1(jobId, onUpdate) {
     };
   });
 }
+const FORBIDDEN_PATCH_ROOTS = ["schema_version", "id", "is_example", "variants"];
+function parsePointer(ptr) {
+  if (typeof ptr !== "string" || !ptr.startsWith("/")) throw new Error(`JSON Pointer는 '/'로 시작해야 함: ${ptr}`);
+  return ptr.slice(1).split("/").map((t2) => t2.replaceAll("~1", "/").replaceAll("~0", "~"));
+}
+function step(node, token) {
+  if (Array.isArray(node)) {
+    if (!/^(0|[1-9][0-9]*)$/.test(token)) return void 0;
+    const i = Number(token);
+    return i < node.length ? i : void 0;
+  }
+  if (node != null && typeof node === "object" && Object.hasOwn(node, token)) return token;
+  return void 0;
+}
+const clone$1 = (v2) => v2 === void 0 ? void 0 : JSON.parse(JSON.stringify(v2));
+function setAt(doc, ptr, value) {
+  const out = clone$1(doc);
+  const tokens = parsePointer(ptr);
+  let node = out;
+  for (const t2 of tokens.slice(0, -1)) {
+    const k2 = step(node, t2);
+    if (k2 === void 0) throw new Error(`문서에 없는 경로: ${ptr}`);
+    node = node[k2];
+  }
+  const last = step(node, tokens.at(-1));
+  if (last === void 0) throw new Error(`문서에 없는 경로: ${ptr}`);
+  node[last] = clone$1(value);
+  return out;
+}
+function applyPatch(doc, patch) {
+  const issues = [];
+  let out = clone$1(Object.fromEntries(Object.entries(doc ?? {}).filter(([k2]) => k2 !== "variants")));
+  for (const [ptr, value] of Object.entries(patch ?? {})) {
+    let tokens;
+    try {
+      tokens = parsePointer(ptr);
+    } catch (e) {
+      issues.push(`${ptr}: ${e.message}`);
+      continue;
+    }
+    if (FORBIDDEN_PATCH_ROOTS.includes(tokens[0])) {
+      issues.push(`${ptr}: 형상 변형이 바꿀 수 없는 항목`);
+      continue;
+    }
+    try {
+      out = setAt(out, ptr, value);
+    } catch (e) {
+      issues.push(`${ptr}: ${e.message}`);
+    }
+  }
+  return { doc: out, issues };
+}
+function effectiveOf(doc, variantId) {
+  if (variantId == null) return doc;
+  const v2 = (Array.isArray(doc?.variants) ? doc.variants : []).find((x2) => x2?.id === variantId);
+  return v2 ? applyPatch(doc, v2.patch).doc : doc;
+}
+const GOHEUNG = {
+  runwayHeadingRad: 0.05682,
+  // 진방위 3.256°
+  runwayLengthM: 1205,
+  // 활주로 폭 [m] — **공표 제원**이다(길이·방위·좌표와 달리 영상 측정값이 아니다). 출처 인용·확인일과
+  // 항공영상 검산(측면 표지 바깥-바깥 44.9 m)은 goheung-runway.json width_source. 시험장의 다른 활주로
+  // (구활주로 700 m × 24 m)의 폭이 아니다. 착륙 요약의 횡편차 한계(반폭 − 가장자리 여유 → 21 m)가 이
+  // 칸에서 선다(lib/replay.js siteRunwayWidth) — 없으면 그 행은 판정 불가로 선다.
+  runwayWidthM: 45
+};
+function strideFor$1(nTotal, target = 1500) {
+  return Math.max(1, Math.ceil(nTotal / target));
+}
+function runProfileRef$1(meta) {
+  const p2 = meta?.profile;
+  if (!p2 || typeof p2.id !== "string" || p2.id === "") return null;
+  return {
+    id: p2.id,
+    variant: typeof p2.variant === "string" && p2.variant !== "" ? p2.variant : null,
+    // 리비전이 없으면(해석기를 안 거친 조립) 최신 문서를 받는다 — 경로가 그 사실을 드러낸다
+    revision: Number.isInteger(p2.revision) && p2.revision >= 0 ? p2.revision : null,
+    name: typeof p2.name === "string" && p2.name !== "" ? p2.name : p2.id
+  };
+}
+function profileDocPath$1(ref) {
+  return `/profiles/${encodeURIComponent(ref.id)}${ref.revision == null ? "" : `?revision=${ref.revision}`}`;
+}
+function refLabel$1(ref) {
+  if (!ref) return "기체 미상";
+  return `${ref.name}${ref.variant ? ` / ${ref.variant}` : ""}${ref.revision == null ? "" : ` · r${ref.revision}`}`;
+}
+const RUNWAY_EDGE_MARGIN_M = 1.5;
+const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+function runwayWidthFor(runway, site, source = "시험장 제원") {
+  const num2 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+  const w2 = num2(site?.runwayWidthM);
+  if (w2 === null || w2 <= 0) return { error: `${source}에 활주로 폭이 없다` };
+  if (w2 <= 2 * RUNWAY_EDGE_MARGIN_M) {
+    return { error: `${source}의 활주로 폭 ${w2} m가 가장자리 여유 ${RUNWAY_EDGE_MARGIN_M} m의 두 배 이하라 한계가 서지 않는다` };
+  }
+  const hdg = num2(runway?.heading);
+  const len = num2(runway?.length);
+  const sh2 = num2(site?.runwayHeadingRad);
+  const sl2 = num2(site?.runwayLengthM);
+  if (hdg === null || len === null || sh2 === null || sl2 === null || Math.abs(len - sl2) > 0.5 || Math.abs(wrapPi(hdg - sh2)) > 1e-4) {
+    return {
+      error: `이 런의 활주로(방위 ${hdg ?? "?"} rad · 길이 ${len ?? "?"} m)가 ${source}의 활주로(방위 ${sh2 ?? "?"} rad · 길이 ${sl2 ?? "?"} m)와 달라 그 폭을 쓸 수 없다`
+    };
+  }
+  return { width: w2, source };
+}
+const siteRunwayWidth$1 = (runway) => runwayWidthFor(runway, GOHEUNG, "고흥 시험장 제원");
+function strideFor(nTotal, target = 1500) {
+  return strideFor$1(nTotal, target);
+}
+function runProfileRef(meta) {
+  return runProfileRef$1(meta) ?? null;
+}
+function profileDocPath(ref) {
+  return profileDocPath$1(ref);
+}
+function refLabel(ref) {
+  return refLabel$1(ref);
+}
+function siteRunwayWidth(runway) {
+  return siteRunwayWidth$1(runway);
+}
 const rawApi = api;
 async function listSimResults() {
   const rows = await rawApi.get("/results");
@@ -7270,6 +7413,10 @@ async function fetchTerrainPack(name, signal) {
   });
   if (!r2.ok) throw new Error(`지형 팩을 받지 못했습니다 (${r2.status})`);
   return r2.arrayBuffer();
+}
+async function fetchRunDocument(ref) {
+  const got = await rawApi.get(profileDocPath(ref));
+  return effectiveOf(got.document, ref.variant);
 }
 function modelUrl(name) {
   return `/api/world/model/${encodeURIComponent(name)}`;
@@ -7618,13 +7765,42 @@ function originsAgree$1(packOrigin, resultOrigin, tolDeg = 1e-6) {
   if (!(dLat <= tolDeg && dLon <= tolDeg)) {
     return {
       ok: false,
-      reason: `지형 팩은 ${fmtDeg(packOrigin.lat_deg)}N ${fmtDeg(packOrigin.lon_deg)}E 기준인데 이 결과는 ${fmtDeg(resultOrigin.lat)}N ${fmtDeg(resultOrigin.lon)}E 기준입니다 — 원점이 달라 겹쳐 그릴 수 없습니다.`
+      reason: `지형 팩은 ${fmtDeg(packOrigin.lat_deg, tolDeg)}N ${fmtDeg(packOrigin.lon_deg, tolDeg)}E 기준인데 이 결과는 ${fmtDeg(resultOrigin.lat, tolDeg)}N ${fmtDeg(resultOrigin.lon, tolDeg)}E 기준입니다 — 원점이 달라 겹쳐 그릴 수 없습니다.`
     };
   }
   return { ok: true, reason: null };
 }
-function fmtDeg(v2) {
-  return Number.isFinite(v2) ? `${v2.toFixed(4)}°` : "?";
+function fmtDeg(v2, tolDeg) {
+  const digits = tolDeg > 0 && Number.isFinite(tolDeg) ? Math.min(10, Math.max(4, Math.ceil(-Math.log10(tolDeg) - 1e-9))) : 6;
+  return Number.isFinite(v2) ? `${v2.toFixed(digits)}°` : "?";
+}
+function vehicleModelPlan$1(doc, manifest, { label = "이 런의 기체", error: error2 = null } = {}) {
+  if (error2) return { model: null, note: `${error2} — 표시 모델을 정할 수 없어 궤적만 그립니다.`, caption: null };
+  if (doc == null || typeof doc !== "object") {
+    return { model: null, note: `${label}의 문서가 없어 표시 모델을 정할 수 없어 궤적만 그립니다.`, caption: null };
+  }
+  const d = doc.display;
+  const want = d && d.kind === "model" && typeof d.model === "string" && d.model !== "" ? d.model : null;
+  if (!want) {
+    return {
+      model: null,
+      note: `${label}의 문서에 표시 모델이 없어 궤적만 그립니다 — 다른 기체의 모델을 빌려 그리지 않습니다.`,
+      caption: null
+    };
+  }
+  const listed = Array.isArray(manifest?.models) ? manifest.models.map((m2) => m2?.name) : null;
+  if (listed && !listed.includes(want)) {
+    return {
+      model: null,
+      note: `표시 모델 파일(${want})이 서버 자산에 없어 궤적만 그립니다` + (manifest.models_reason ? ` — ${manifest.models_reason}` : "."),
+      caption: null
+    };
+  }
+  return {
+    model: want,
+    note: null,
+    caption: `기체 모델 ${want} — ${label}의 표시 모델입니다(화면용 형상, 계산은 문서의 수치).`
+  };
 }
 const v3 = (v2) => {
   if (!Array.isArray(v2) || v2.length !== 3) return null;
@@ -7648,6 +7824,9 @@ function sceneExtent(signals, fallback = 4e3) {
 }
 function originsAgree(packOrigin, resultOrigin) {
   return originsAgree$1(packOrigin, resultOrigin);
+}
+function vehicleModelPlan(doc, manifest, opts = {}) {
+  return vehicleModelPlan$1(doc, manifest, opts);
 }
 const MAGIC = "CLAWTER1";
 function parseTerrainPack$1(buffer) {
@@ -7949,32 +8128,32 @@ function hash2(ix, iy, seed) {
   h ^= h >>> 16;
   return (h >>> 0) / 4294967296;
 }
-function slopeAt(sample, n2, e, z0, step) {
-  const zn = sample(n2 + step, e);
-  const zs = sample(n2 - step, e);
-  const ze = sample(n2, e + step);
-  const zw = sample(n2, e - step);
+function slopeAt(sample, n2, e, z0, step2) {
+  const zn = sample(n2 + step2, e);
+  const zs = sample(n2 - step2, e);
+  const ze = sample(n2, e + step2);
+  const zw = sample(n2, e - step2);
   if (zn === null || zs === null || ze === null || zw === null) return Infinity;
-  return Math.hypot((zn - zs) / (2 * step), (ze - zw) / (2 * step));
+  return Math.hypot((zn - zs) / (2 * step2), (ze - zw) / (2 * step2));
 }
 function placeProps(sample, rect, relief, seed = 1) {
   const out = { pines: [], leaves: [], cabins: [] };
-  const step = PROPS.gridStep;
+  const step2 = PROPS.gridStep;
   const treeLine = relief * 0.72;
-  const i0 = Math.ceil(rect.n0 / step);
-  const i1 = Math.floor(rect.n1 / step);
-  const j0 = Math.ceil(rect.e0 / step);
-  const j1 = Math.floor(rect.e1 / step);
+  const i0 = Math.ceil(rect.n0 / step2);
+  const i1 = Math.floor(rect.n1 / step2);
+  const j0 = Math.ceil(rect.e0 / step2);
+  const j1 = Math.floor(rect.e1 / step2);
   for (let i = i0; i <= i1; i++) {
     for (let j = j0; j <= j1; j++) {
-      const jn = (hash2(i, j, seed) - 0.5) * step * 0.9;
-      const je2 = (hash2(i, j, seed + 1) - 0.5) * step * 0.9;
-      const n2 = i * step + jn;
-      const e = j * step + je2;
+      const jn = (hash2(i, j, seed) - 0.5) * step2 * 0.9;
+      const je2 = (hash2(i, j, seed + 1) - 0.5) * step2 * 0.9;
+      const n2 = i * step2 + jn;
+      const e = j * step2 + je2;
       if (Math.hypot(n2, e) < PROPS.originClear) continue;
       const z2 = sample(n2, e);
       if (z2 === null || z2 <= PROPS.seaLevel || z2 > treeLine) continue;
-      const slope2 = slopeAt(sample, n2, e, z2, step);
+      const slope2 = slopeAt(sample, n2, e, z2, step2);
       const ci2 = Math.floor(n2 / 300);
       const cj2 = Math.floor(e / 300);
       const cluster = 0.6 * hash2(ci2, cj2, seed + 2) + 0.4 * hash2(i >> 1, j >> 1, seed + 3);
@@ -9681,10 +9860,10 @@ class Quaternion {
    * @param {number} step - The angular step in radians.
    * @return {Quaternion} A reference to this quaternion.
    */
-  rotateTowards(q2, step) {
+  rotateTowards(q2, step2) {
     const angle = this.angleTo(q2);
     if (angle === 0) return this;
-    const t2 = Math.min(1, step / angle);
+    const t2 = Math.min(1, step2 / angle);
     this.slerp(q2, t2);
     return this;
   }
@@ -16793,8 +16972,8 @@ class Triangle {
    * @param {Box3} box - The box to intersect.
    * @return {boolean} Whether this triangle intersects with the given box or not.
    */
-  intersectsBox(box) {
-    return box.intersectsTriangle(this);
+  intersectsBox(box2) {
+    return box2.intersectsTriangle(this);
   }
   /**
    * Returns the closest point on the triangle to the given point.
@@ -16971,9 +17150,9 @@ class Box3 {
    * @param {Box3} box - The box to copy.
    * @return {Box3} A reference to this bounding box.
    */
-  copy(box) {
-    this.min.copy(box.min);
-    this.max.copy(box.max);
+  copy(box2) {
+    this.min.copy(box2.min);
+    this.max.copy(box2.max);
     return this;
   }
   /**
@@ -17116,8 +17295,8 @@ class Box3 {
    * @param {Box3} box - The bounding box to test.
    * @return {boolean} Whether the bounding box contains the given bounding box or not.
    */
-  containsBox(box) {
-    return this.min.x <= box.min.x && box.max.x <= this.max.x && this.min.y <= box.min.y && box.max.y <= this.max.y && this.min.z <= box.min.z && box.max.z <= this.max.z;
+  containsBox(box2) {
+    return this.min.x <= box2.min.x && box2.max.x <= this.max.x && this.min.y <= box2.min.y && box2.max.y <= this.max.y && this.min.z <= box2.min.z && box2.max.z <= this.max.z;
   }
   /**
    * Returns a point as a proportion of this box's width, height and depth.
@@ -17139,8 +17318,8 @@ class Box3 {
    * @param {Box3} box - The bounding box to test.
    * @return {boolean} Whether the given bounding box intersects with this bounding box.
    */
-  intersectsBox(box) {
-    return box.max.x >= this.min.x && box.min.x <= this.max.x && box.max.y >= this.min.y && box.min.y <= this.max.y && box.max.z >= this.min.z && box.min.z <= this.max.z;
+  intersectsBox(box2) {
+    return box2.max.x >= this.min.x && box2.min.x <= this.max.x && box2.max.y >= this.min.y && box2.min.y <= this.max.y && box2.max.z >= this.min.z && box2.min.z <= this.max.z;
   }
   /**
    * Returns `true` if the given bounding sphere intersects with this bounding box.
@@ -17285,9 +17464,9 @@ class Box3 {
    * @param {Box3} box - The bounding box to intersect with.
    * @return {Box3} A reference to this bounding box.
    */
-  intersect(box) {
-    this.min.max(box.min);
-    this.max.min(box.max);
+  intersect(box2) {
+    this.min.max(box2.min);
+    this.max.min(box2.max);
     if (this.isEmpty()) this.makeEmpty();
     return this;
   }
@@ -17299,9 +17478,9 @@ class Box3 {
    * @param {Box3} box - The bounding box that will be unioned with this instance.
    * @return {Box3} A reference to this bounding box.
    */
-  union(box) {
-    this.min.min(box.min);
-    this.max.max(box.max);
+  union(box2) {
+    this.min.min(box2.min);
+    this.max.max(box2.max);
     return this;
   }
   /**
@@ -17341,8 +17520,8 @@ class Box3 {
    * @param {Box3} box - The box to test for equality.
    * @return {boolean} Whether this bounding box is equal with the given one.
    */
-  equals(box) {
-    return box.min.equals(this.min) && box.max.equals(this.max);
+  equals(box2) {
+    return box2.min.equals(this.min) && box2.max.equals(this.max);
   }
   /**
    * Returns a serialized structure of the bounding box.
@@ -17974,8 +18153,8 @@ class Sphere {
    * @param {Box3} box - The box to test.
    * @return {boolean} Whether this sphere intersects with the given box or not.
    */
-  intersectsBox(box) {
-    return box.intersectsSphere(this);
+  intersectsBox(box2) {
+    return box2.intersectsSphere(this);
   }
   /**
    * Returns `true` if this sphere intersects with the given plane.
@@ -20227,33 +20406,33 @@ class Ray {
    * @param {Vector3} target - The target vector that is used to store the method's result.
    * @return {?Vector3} The intersection point.
    */
-  intersectBox(box, target) {
+  intersectBox(box2, target) {
     let tmin, tmax, tymin, tymax, tzmin, tzmax;
     const invdirx = 1 / this.direction.x, invdiry = 1 / this.direction.y, invdirz = 1 / this.direction.z;
     const origin = this.origin;
     if (invdirx >= 0) {
-      tmin = (box.min.x - origin.x) * invdirx;
-      tmax = (box.max.x - origin.x) * invdirx;
+      tmin = (box2.min.x - origin.x) * invdirx;
+      tmax = (box2.max.x - origin.x) * invdirx;
     } else {
-      tmin = (box.max.x - origin.x) * invdirx;
-      tmax = (box.min.x - origin.x) * invdirx;
+      tmin = (box2.max.x - origin.x) * invdirx;
+      tmax = (box2.min.x - origin.x) * invdirx;
     }
     if (invdiry >= 0) {
-      tymin = (box.min.y - origin.y) * invdiry;
-      tymax = (box.max.y - origin.y) * invdiry;
+      tymin = (box2.min.y - origin.y) * invdiry;
+      tymax = (box2.max.y - origin.y) * invdiry;
     } else {
-      tymin = (box.max.y - origin.y) * invdiry;
-      tymax = (box.min.y - origin.y) * invdiry;
+      tymin = (box2.max.y - origin.y) * invdiry;
+      tymax = (box2.min.y - origin.y) * invdiry;
     }
     if (tmin > tymax || tymin > tmax) return null;
     if (tymin > tmin || isNaN(tmin)) tmin = tymin;
     if (tymax < tmax || isNaN(tmax)) tmax = tymax;
     if (invdirz >= 0) {
-      tzmin = (box.min.z - origin.z) * invdirz;
-      tzmax = (box.max.z - origin.z) * invdirz;
+      tzmin = (box2.min.z - origin.z) * invdirz;
+      tzmax = (box2.max.z - origin.z) * invdirz;
     } else {
-      tzmin = (box.max.z - origin.z) * invdirz;
-      tzmax = (box.min.z - origin.z) * invdirz;
+      tzmin = (box2.max.z - origin.z) * invdirz;
+      tzmax = (box2.min.z - origin.z) * invdirz;
     }
     if (tmin > tzmax || tzmin > tmax) return null;
     if (tzmin > tmin || tmin !== tmin) tmin = tzmin;
@@ -20267,8 +20446,8 @@ class Ray {
    * @param {Box3} box - The box to intersect.
    * @return {boolean} Whether this ray intersects with the given box or not.
    */
-  intersectsBox(box) {
-    return this.intersectBox(box, _vector$7) !== null;
+  intersectsBox(box2) {
+    return this.intersectBox(box2, _vector$7) !== null;
   }
   /**
    * Intersects this ray with the given triangle, returning the intersection
@@ -21468,8 +21647,8 @@ class Plane {
    * @param {Box3} box - The bounding box to test.
    * @return {boolean} Whether the given bounding box intersects with the plane or not.
    */
-  intersectsBox(box) {
-    return box.intersectsPlane(this);
+  intersectsBox(box2) {
+    return box2.intersectsPlane(this);
   }
   /**
    * Returns `true` if the given bounding sphere intersects with the plane.
@@ -21679,13 +21858,13 @@ class Frustum {
    * @param {Box3} box - The bounding box to test.
    * @return {boolean} Whether the bounding box is intersecting this frustum or not.
    */
-  intersectsBox(box) {
+  intersectsBox(box2) {
     const planes = this.planes;
     for (let i = 0; i < 6; i++) {
       const plane = planes[i];
-      _vector$6.x = plane.normal.x > 0 ? box.max.x : box.min.x;
-      _vector$6.y = plane.normal.y > 0 ? box.max.y : box.min.y;
-      _vector$6.z = plane.normal.z > 0 ? box.max.z : box.min.z;
+      _vector$6.x = plane.normal.x > 0 ? box2.max.x : box2.min.x;
+      _vector$6.y = plane.normal.y > 0 ? box2.max.y : box2.min.y;
+      _vector$6.z = plane.normal.z > 0 ? box2.max.z : box2.min.z;
       if (plane.distanceToPoint(_vector$6) < 0) {
         return false;
       }
@@ -21823,14 +22002,14 @@ class Line extends Object3D {
     _ray$1.copy(raycaster.ray).applyMatrix4(_inverseMatrix$1);
     const localThreshold = threshold / ((this.scale.x + this.scale.y + this.scale.z) / 3);
     const localThresholdSq = localThreshold * localThreshold;
-    const step = this.isLineSegments ? 2 : 1;
+    const step2 = this.isLineSegments ? 2 : 1;
     const index = geometry.index;
     const attributes = geometry.attributes;
     const positionAttribute = attributes.position;
     if (index !== null) {
       const start = Math.max(0, drawRange.start);
       const end = Math.min(index.count, drawRange.start + drawRange.count);
-      for (let i = start, l2 = end - 1; i < l2; i += step) {
+      for (let i = start, l2 = end - 1; i < l2; i += step2) {
         const a = index.getX(i);
         const b = index.getX(i + 1);
         const intersect2 = checkIntersection(this, raycaster, _ray$1, localThresholdSq, a, b, i);
@@ -21849,7 +22028,7 @@ class Line extends Object3D {
     } else {
       const start = Math.max(0, drawRange.start);
       const end = Math.min(positionAttribute.count, drawRange.start + drawRange.count);
-      for (let i = start, l2 = end - 1; i < l2; i += step) {
+      for (let i = start, l2 = end - 1; i < l2; i += step2) {
         const intersect2 = checkIntersection(this, raycaster, _ray$1, localThresholdSq, i, i + 1, i);
         if (intersect2) {
           intersects.push(intersect2);
@@ -39122,11 +39301,39 @@ function buildPropsGroup(field) {
   }
   return { group, count };
 }
-function strideFor$1(nTotal, target = 1500) {
-  return Math.max(1, Math.ceil(nTotal / target));
-}
-function strideFor(nTotal, target = 1500) {
-  return strideFor$1(nTotal, target);
+const num$2 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+const fmtM = (v2) => String(Number(v2.toFixed(1)));
+function runwayDrawing(rw, width) {
+  const r2 = rw ?? null;
+  const h = num$2(r2?.heading);
+  const L2 = num$2(r2?.length);
+  if (h === null || L2 === null) return null;
+  const d = -(num$2(r2?.elevation) ?? 0);
+  const [cn, ce2] = [Math.cos(h), Math.sin(h)];
+  const n1 = cn * L2;
+  const e1 = ce2 * L2;
+  const seg = (a, b) => new Float32Array([a[0], a[1], d, b[0], b[1], d]);
+  const segments = [seg([0, 0], [n1, e1])];
+  if (!("width" in width)) {
+    return { segments, note: `활주로는 중심선만 그립니다 — 폭을 모릅니다: ${width.error}.` };
+  }
+  const half = width.width / 2;
+  const [rn, re2] = [-ce2 * half, cn * half];
+  const at = (n2, e, side) => [n2 + side * rn, e + side * re2];
+  segments.push(
+    seg(at(0, 0, -1), at(0, 0, 1)),
+    // 시단
+    seg(at(n1, e1, -1), at(n1, e1, 1)),
+    // 종단
+    seg(at(0, 0, -1), at(n1, e1, -1)),
+    // 왼 가장자리
+    seg(at(0, 0, 1), at(n1, e1, 1))
+    // 오른 가장자리
+  );
+  return {
+    segments,
+    note: `활주로: 중심선·시단·종단·양 가장자리 — 폭 ${fmtM(width.width)} m는 ${width.source} 값입니다(결과에는 폭이 없어, 이 런의 활주로가 제원의 활주로와 같을 때만 씁니다).`
+  };
 }
 const CLOUD_UNIFORM_DECL = (
   /* glsl */
@@ -45349,20 +45556,20 @@ class GLTFParser {
 }
 function computeBounds(geometry, primitiveDef, parser) {
   const attributes = primitiveDef.attributes;
-  const box = new Box3();
+  const box2 = new Box3();
   if (attributes.POSITION !== void 0) {
     const accessor = parser.json.accessors[attributes.POSITION];
     const min = accessor.min;
     const max = accessor.max;
     if (min !== void 0 && max !== void 0) {
-      box.set(
+      box2.set(
         new Vector3(min[0], min[1], min[2]),
         new Vector3(max[0], max[1], max[2])
       );
       if (accessor.normalized) {
         const boxScale = getNormalizedComponentScale(WEBGL_COMPONENT_TYPES[accessor.componentType]);
-        box.min.multiplyScalar(boxScale);
-        box.max.multiplyScalar(boxScale);
+        box2.min.multiplyScalar(boxScale);
+        box2.max.multiplyScalar(boxScale);
       }
     } else {
       console.warn("THREE.GLTFLoader: Missing min/max properties for accessor POSITION.");
@@ -45395,12 +45602,12 @@ function computeBounds(geometry, primitiveDef, parser) {
         }
       }
     }
-    box.expandByVector(maxDisplacement);
+    box2.expandByVector(maxDisplacement);
   }
-  geometry.boundingBox = box;
+  geometry.boundingBox = box2;
   const sphere = new Sphere();
-  box.getCenter(sphere.center);
-  sphere.radius = box.min.distanceTo(box.max) / 2;
+  box2.getCenter(sphere.center);
+  sphere.radius = box2.min.distanceTo(box2.max) / 2;
   geometry.boundingSphere = sphere;
 }
 function addPrimitiveAttributes(geometry, primitiveDef, parser) {
@@ -45546,8 +45753,8 @@ function spinPropeller(model, rate, dt) {
   n2.rotation.z = (n2.rotation.z + rate * dt) % (Math.PI * 2);
   let disc = n2.userData.blurDisc;
   if (!disc) {
-    const box = new Box3().setFromObject(n2);
-    const size = box.getSize(new Vector3());
+    const box2 = new Box3().setFromObject(n2);
+    const size = box2.getSize(new Vector3());
     const r2 = Math.max(size.x, size.y) / 2;
     const mat = new MeshBasicMaterial({
       color: 1711135,
@@ -45600,6 +45807,195 @@ function showLauncher(model, siteNed, pose2) {
   placeLauncher(model, siteNed, pose2);
   return applyLauncher(model, pose2);
 }
+const CG_AT_ROOT_CHORD = 0.4;
+const THICK = 0.06;
+const POD_HALF_W = 0.18;
+const ELEVON_CHORD = 0.18;
+const N_ELEVON = 4;
+function uavMesh(geometry) {
+  const b = num$1(geometry?.b, "b");
+  const sRef = num$1(geometry?.s_ref, "s_ref");
+  const half = b / 2;
+  const cRoot = 2 * sRef / b;
+  const xNose = CG_AT_ROOT_CHORD * cRoot;
+  const xTe = xNose - cRoot;
+  const P2 = [], N2 = [], I2 = [];
+  const mesh = { P: P2, N: N2, I: I2 };
+  const noseT = [xNose, 0, -THICK], noseB = [xNose, 0, THICK];
+  const tipLT = [xTe, -half, -THICK], tipRT = [xTe, half, -THICK];
+  const tipLB = [xTe, -half, THICK], tipRB = [xTe, half, THICK];
+  tri(mesh, noseT, tipRT, tipLT);
+  tri(mesh, noseB, tipLB, tipRB);
+  quad(mesh, noseT, tipLT, tipLB, noseB);
+  quad(mesh, noseT, noseB, tipRB, tipRT);
+  quad(mesh, tipLT, tipRT, tipRB, tipLB);
+  const elevonStart = I2.length;
+  for (let k2 = 0; k2 < N_ELEVON; k2++) {
+    const y0 = -half + b * k2 / N_ELEVON;
+    const y1 = -half + b * (k2 + 1) / N_ELEVON;
+    box(mesh, xTe - ELEVON_CHORD, xTe, y0 + 0.02, y1 - 0.02, -THICK * 0.7, THICK * 0.7);
+  }
+  const elevonCount = I2.length - elevonStart;
+  const bodyStart = I2.length;
+  box(mesh, xTe + 0.1, xNose - 0.15, -POD_HALF_W, POD_HALF_W, -0.22, 0.14);
+  const finX0 = xTe + 0.05, finX1 = xTe + 0.55;
+  quad(
+    mesh,
+    [finX0, 0, -THICK],
+    [finX1, 0, -THICK],
+    [finX1, 0, -0.55 * 0.55],
+    [finX0, 0, -0.55]
+  );
+  quad(
+    mesh,
+    [finX1, 0, -THICK],
+    [finX0, 0, -THICK],
+    [finX0, 0, -0.55],
+    [finX1, 0, -0.55 * 0.55]
+  );
+  for (const c of geometry?.gear_contacts ?? []) {
+    box(mesh, c[0] - 0.06, c[0] + 0.06, c[1] - 0.04, c[1] + 0.04, 0, c[2]);
+  }
+  const bodyCount = I2.length - bodyStart;
+  return {
+    positions: new Float32Array(P2),
+    normals: new Float32Array(N2),
+    indices: new Uint16Array(I2),
+    groups: [
+      { start: 0, count: elevonStart, name: "wing" },
+      { start: elevonStart, count: elevonCount, name: "elevon" },
+      { start: bodyStart, count: bodyCount, name: "body" }
+    ],
+    landmarks: {
+      nose: [xNose, 0, 0],
+      rightWingTip: [xTe, half, 0],
+      leftWingTip: [xTe, -half, 0],
+      finTop: [finX0, 0, -0.55]
+    },
+    extent: { length: cRoot + 0.55, span: b, rootChord: cRoot, xNose, xTe }
+  };
+}
+function tri(m2, a, b, c) {
+  const nrm = normalOf(a, b, c);
+  const base = m2.P.length / 3;
+  for (const v2 of [a, b, c]) {
+    m2.P.push(v2[0], v2[1], v2[2]);
+    m2.N.push(nrm[0], nrm[1], nrm[2]);
+  }
+  m2.I.push(base, base + 1, base + 2);
+}
+function quad(m2, a, b, c, d) {
+  const nrm = normalOf(a, b, c);
+  const base = m2.P.length / 3;
+  for (const v2 of [a, b, c, d]) {
+    m2.P.push(v2[0], v2[1], v2[2]);
+    m2.N.push(nrm[0], nrm[1], nrm[2]);
+  }
+  m2.I.push(base, base + 1, base + 2, base, base + 2, base + 3);
+}
+function box(m2, x0, x1, y0, y1, z0, z1) {
+  const [X0, X1] = x0 <= x1 ? [x0, x1] : [x1, x0];
+  const [Y0, Y1] = y0 <= y1 ? [y0, y1] : [y1, y0];
+  const [Z0, Z1] = z0 <= z1 ? [z0, z1] : [z1, z0];
+  quad(m2, [X1, Y0, Z0], [X1, Y1, Z0], [X1, Y1, Z1], [X1, Y0, Z1]);
+  quad(m2, [X0, Y1, Z0], [X0, Y0, Z0], [X0, Y0, Z1], [X0, Y1, Z1]);
+  quad(m2, [X0, Y1, Z0], [X1, Y1, Z0], [X1, Y1, Z1], [X0, Y1, Z1]);
+  quad(m2, [X1, Y0, Z0], [X0, Y0, Z0], [X0, Y0, Z1], [X1, Y0, Z1]);
+  quad(m2, [X0, Y0, Z0], [X0, Y1, Z0], [X1, Y1, Z0], [X1, Y0, Z0]);
+  quad(m2, [X1, Y0, Z1], [X1, Y1, Z1], [X0, Y1, Z1], [X0, Y0, Z1]);
+}
+function normalOf(a, b, c) {
+  const u2 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const v2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+  const n2 = [u2[1] * v2[2] - u2[2] * v2[1], u2[2] * v2[0] - u2[0] * v2[2], u2[0] * v2[1] - u2[1] * v2[0]];
+  const len = Math.hypot(n2[0], n2[1], n2[2]);
+  if (!(len > 0)) throw new Error("퇴화한 면 — 법선을 만들 수 없음");
+  return [n2[0] / len, n2[1] / len, n2[2] / len];
+}
+function num$1(v2, what) {
+  if (typeof v2 !== "number" || !Number.isFinite(v2) || v2 <= 0) {
+    throw new Error(`기체 형상 ${what}은(는) 양의 유한값이어야 함: ${v2}`);
+  }
+  return v2;
+}
+const SCHEMATIC_TITLE = "익폭·기준면적에서 만든 도식 — 삼각 평면형 가정, 모양은 표시용입니다.";
+function heroPlan(doc, manifest) {
+  const notes = [];
+  let schematic = null;
+  try {
+    schematic = uavMesh({
+      b: doc?.geometry?.b,
+      s_ref: doc?.geometry?.S,
+      cbar: doc?.geometry?.cbar,
+      gear_contacts: doc?.ground?.skid?.contacts ?? []
+    });
+  } catch (e) {
+    notes.push(`도식을 만들 수 없습니다 — ${e.message}`);
+  }
+  const wanted = doc?.display?.kind === "model" ? doc.display.model : null;
+  if (!wanted) {
+    notes.push("표시 모델이 없는 기체라 익폭·기준면적에서 만든 도식입니다.");
+    return { model: null, schematic, notes, title: SCHEMATIC_TITLE };
+  }
+  const listed = Array.isArray(manifest?.models) ? manifest.models.map((m2) => m2?.name) : null;
+  if (listed && !listed.includes(wanted)) {
+    notes.push(`표시 모델 파일(${wanted})을 서버 자산에서 찾지 못해 도식으로 대신 그립니다` + (manifest.models_reason ? ` — ${manifest.models_reason}` : "."));
+    return { model: null, schematic, notes, title: SCHEMATIC_TITLE };
+  }
+  return { model: wanted, schematic, notes, title: `표시 모델 ${wanted} — 화면용 형상입니다. 계산은 문서의 수치(형상·공력·질량)를 씁니다.` };
+}
+function vehicleSchematic(doc) {
+  if (doc == null || typeof doc !== "object") return { mesh: null, reason: null };
+  const plan = heroPlan(doc, null);
+  if (plan.schematic != null) return { mesh: plan.schematic, reason: null };
+  return { mesh: null, reason: plan.notes[0] ?? "도식을 만들 수 없습니다." };
+}
+const SCHEMATIC_NOTE = "도식은 문서의 익폭·기준면적에서 만든 삼각 평면형(표시용)이라 타면·프로펠러는 움직이지 않습니다.";
+const TRACK_ONLY = "궤적만 그립니다";
+const INSTEAD = "도식으로 대신 그립니다";
+function schematicCaption(why) {
+  if (why == null || why === "") return `기체 모델 대신 ${INSTEAD}.`;
+  if (why.includes(TRACK_ONLY)) return why.replace(TRACK_ONLY, INSTEAD);
+  return `${why.replace(/[.\s]+$/, "")} — ${INSTEAD}.`;
+}
+const SCHEMATIC_COLOR = { wing: 12108235, elevon: 14715438, body: 8095121 };
+function schematicObject(mesh) {
+  const n2 = mesh.positions.length / 3;
+  const pos = new Float32Array(mesh.positions.length);
+  const nrm = new Float32Array(mesh.normals.length);
+  for (let i = 0; i < n2; i++) {
+    const k2 = 3 * i;
+    pos.set(frdToModelLocal([mesh.positions[k2], mesh.positions[k2 + 1], mesh.positions[k2 + 2]]), k2);
+    nrm.set(frdToModelLocal([mesh.normals[k2], mesh.normals[k2 + 1], mesh.normals[k2 + 2]]), k2);
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute("position", new BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new BufferAttribute(nrm, 3));
+  geo.setIndex(new BufferAttribute(new Uint16Array(mesh.indices), 1));
+  const mats = mesh.groups.map((g, i) => {
+    geo.addGroup(g.start, g.count, i);
+    return new MeshStandardMaterial({ color: SCHEMATIC_COLOR[g.name] ?? 11186876, roughness: 0.55, metalness: 0.1 });
+  });
+  const obj = new Mesh(geo, mats);
+  obj.castShadow = true;
+  obj.receiveShadow = true;
+  return obj;
+}
+function schematicVehicle(mesh) {
+  const obj = schematicObject(mesh);
+  for (const m2 of obj.material) applyAerialPerspective(m2);
+  const root = new Group();
+  root.add(obj);
+  return {
+    root,
+    nodes: /* @__PURE__ */ new Map(),
+    missing: [],
+    dispose() {
+      root.removeFromParent();
+      disposeTree(root);
+    }
+  };
+}
 const MODEL_SCALE = 1;
 const GAME_ACCEPT_RADIUS = 100;
 const GAME_CLICK_CLEARANCE = 150;
@@ -45620,6 +46016,24 @@ class SceneController {
   terrain = null;
   manifest = null;
   vehicle = null;
+  /** 지금 얹힌 기체 모델 파일 — **런마다 그 기체 문서의 표시 모델**이다(`syncVehicle`). 종전에는
+   *  `shahed136.glb`를 늘 그려 다른 기체·EO/IR형의 런에도 같은 모양이 섰다. */
+  vehicleName = null;
+  /** 기체를 못(안) 그리는 사유 — 캡션이 말한다. 모델이 서 있으면 null. */
+  vehicleNote = null;
+  /** 그린 모델의 출처 한 줄(어느 기체 문서의 표시 모델인가) — 도식이면 도식으로 대신 그린 사유. */
+  vehicleCaption = null;
+  /** 서 있는 기체가 GLB인가 도식인가 — 도식은 몰 노드가 없어 타면·프로펠러 캡션이 거짓이 된다(`vehicleNotes`). */
+  vehicleKind = null;
+  /** 지금 결과(또는 고른 기체)의 기체 판정이 끝났나 — `onVehicle`로 알린다. */
+  vehicleSettled = false;
+  /** 기체를 세우는 중인 단계 — "doc"(이 런의 기체 문서를 받는 중) | "model"(GLB를 받는 중) | null.
+   *  문서를 받는 사이에 「모델이 없어 궤적만」이나 직전 런의 출처를 말하지 않게 캡션이 이 단계를 말한다. */
+  vehicleLoading = null;
+  /** 기체 세대 — **장면의 결과(body)가 바뀔 때만** 오른다(`loadGen`은 요청마다 오른다). 새 결과 요청이 실패해
+   *  장면이 옛 결과 그대로면 그 결과의 기체 동기화는 이어져야 한다 — 요청 세대로 물리면 받던 GLB를 버리고
+   *  캡션이 「불러오는 중…」에 멈춘다. */
+  vehicleGen = 0;
   launcher = null;
   results = [];
   body = null;
@@ -45695,13 +46109,6 @@ class SceneController {
     }
     if (signal.aborted || this.disposed) return;
     const names = new Set(this.manifest.models.map((m2) => m2.name));
-    if (names.has("shahed136.glb")) {
-      const r2 = await loadModel(modelUrl("shahed136.glb"), VEHICLE_NODES, signal);
-      if (r2.model) {
-        this.vehicle = r2.model;
-        this.host.modelGroup.add(r2.model.root);
-      } else this.terrainNotes.push(r2.reason);
-    }
     if (names.has("launcher.glb")) {
       const r2 = await loadModel(modelUrl("launcher.glb"), LAUNCHER_NODES, signal);
       if (r2.model) {
@@ -45710,14 +46117,111 @@ class SceneController {
       } else this.terrainNotes.push(r2.reason);
     }
     if (this.manifest.models_reason) this.terrainNotes.push(this.manifest.models_reason);
-    for (const m2 of [this.vehicle, this.launcher]) {
-      if (m2 && m2.missing.length > 0) {
-        this.terrainNotes.push(
-          `모델에서 못 찾은 노드: ${m2.missing.join(", ")} — 그 부분은 움직이지 않습니다.`
-        );
-      }
+    if (this.launcher && this.launcher.missing.length > 0) {
+      this.terrainNotes.push(
+        `모델에서 못 찾은 노드: ${this.launcher.missing.join(", ")} — 그 부분은 움직이지 않습니다.`
+      );
     }
     this.dirty = true;
+  }
+  /** 기체 모델을 **이 런의 기체 문서** 표시 모델로 맞춘다 — 같은 파일이면 그대로, 다르면 갈아 끼운다.
+   *
+   *  `gen`은 부른 쪽의 결과 세대 — 문서·GLB를 받는 사이 결과를 바꾸면 늦은 응답이 새 장면에 옛 기체를 얹지
+   *  않게 물러난다(`loadResult`의 세대 토큰과 같은 수법). 판단은 lib(`vehicleModelPlan`)이 정본. */
+  async syncVehicle(gen, source) {
+    this.setVehicleSettled(false);
+    this.vehicleLoading = "doc";
+    this.emitNotes();
+    const src = await source();
+    if (gen !== this.vehicleGen || this.disposed) return;
+    const plan = vehicleModelPlan(src.doc, this.manifest, { label: src.label, error: src.error });
+    this.vehicleLoading = null;
+    if (plan.model != null && plan.model === this.vehicleName && this.vehicle != null) {
+      this.vehicleNote = null;
+      this.vehicleCaption = plan.caption;
+      this.emitNotes();
+      this.setVehicleSettled(true);
+      return;
+    }
+    this.vehicle?.dispose();
+    this.vehicle = null;
+    this.vehicleName = null;
+    this.vehicleKind = null;
+    this.vehicleNote = plan.note;
+    this.vehicleCaption = null;
+    this.dirty = true;
+    if (plan.model == null) {
+      this.standInSchematic(src.doc, plan.note);
+      this.emitNotes();
+      this.setVehicleSettled(true);
+      return;
+    }
+    this.vehicleLoading = "model";
+    this.emitNotes();
+    const r2 = await loadModel(modelUrl(plan.model), VEHICLE_NODES);
+    if (gen !== this.vehicleGen || this.disposed) {
+      r2.model?.dispose();
+      return;
+    }
+    this.vehicleLoading = null;
+    if (r2.model) {
+      this.vehicle = r2.model;
+      this.vehicleName = plan.model;
+      this.vehicleKind = "model";
+      this.vehicleCaption = plan.caption;
+      this.host.modelGroup.add(r2.model.root);
+      applySurfaces(r2.model, surfacePose(0, 0, 0, this.body?.meta?.limits ?? {}));
+    } else {
+      this.vehicleNote = r2.reason;
+      this.standInSchematic(src.doc, r2.reason);
+    }
+    this.dirty = true;
+    this.emitNotes();
+    this.setVehicleSettled(true);
+  }
+  /** GLB 대신 **기체 탭과 같은 도식**을 그 자리에 세운다 — 궤적만 두면 발사·접지 장면에서 기체가 어디 있는지가
+   *  화면에 없다(쇼케이스 e2e 실측: 모델 폴더를 못 찾은 서버에서 추적 시점도 빈 하늘). 형상은 이 런의 기체 문서의
+   *  기준량에서만 — 문서가 없으면 그대로 궤적만이다(다른 기체의 형상을 빌리지 않는다, 사유는 `why`가 이미 말한다). */
+  standInSchematic(doc, why) {
+    const s = vehicleSchematic(doc);
+    if (s.mesh == null) {
+      if (s.reason != null) this.vehicleNote = [why, s.reason].filter(Boolean).join(" — ");
+      return;
+    }
+    this.vehicle = schematicVehicle(s.mesh);
+    this.vehicleKind = "schematic";
+    this.vehicleNote = null;
+    this.vehicleCaption = schematicCaption(why);
+    this.host.modelGroup.add(this.vehicle.root);
+    this.dirty = true;
+  }
+  setVehicleSettled(v2) {
+    if (v2 === this.vehicleSettled) return;
+    this.vehicleSettled = v2;
+    this.cb.onVehicle(v2);
+  }
+  /** 이 런을 난 기체의 적용 문서 — 표시 모델의 출처. 못 받으면 사유(던지지 않는다). */
+  async runDocument(body) {
+    const ref = runProfileRef(body.meta);
+    if (ref == null) return { doc: null, label: "이 런의 기체", error: "이 결과에 기체 기록(meta.profile)이 없다" };
+    const label = refLabel(ref);
+    try {
+      return { doc: await fetchRunDocument(ref), label, error: null };
+    } catch (e) {
+      return { doc: null, label, error: `이 런의 기체 문서(${label})를 받지 못했다 — ${errorText(e)}` };
+    }
+  }
+  /** 결과가 하나도 없을 때(게임 모드만 쓰는 경우) — 헤더에서 고른 기체의 표시 모델로 기체를 세운다.
+   *  결과를 읽으면 그 런의 기체가 이긴다(세대가 바뀌어 이 요청은 물러난다). */
+  async vehicleFromSelection(getDoc) {
+    if (this.body != null) return;
+    await this.syncVehicle(this.vehicleGen, async () => {
+      try {
+        return { doc: await getDoc(), label: "고른 기체", error: null };
+      } catch (e) {
+        return { doc: null, label: "고른 기체", error: `고른 기체 문서를 받지 못했다 — ${errorText(e)}` };
+      }
+    });
   }
   /** 결과 목록. `prefer`(시뮬 탭이 고른 것)가 목록에 있으면 그것을 먼저 연다. */
   async loadResults(prefer) {
@@ -45755,14 +46259,18 @@ class SceneController {
     this.lastAtt = null;
     this.fellBack = null;
     this.shownId = id2;
+    const vgen = ++this.vehicleGen;
     try {
       this.buildScene();
     } catch (e) {
       this.cb.onStatus(`장면을 세우지 못했습니다 — ${e.message}`);
+      this.vehicleLoading = null;
+      this.emitNotes();
       return false;
     }
     this.dirty = true;
     this.cb.onStatus("");
+    void this.syncVehicle(vgen, () => this.runDocument(body));
     return true;
   }
   buildScene() {
@@ -45794,25 +46302,10 @@ class SceneController {
     }
     const rw = body.meta?.runway;
     const rwLines = [];
-    if (rw && num(rw.heading) !== null && num(rw.length) !== null) {
-      const el2 = num(rw.elevation) ?? 0;
-      const h = num(rw.heading);
-      const L2 = num(rw.length);
-      const n1 = Math.cos(h) * L2;
-      const e1 = Math.sin(h) * L2;
-      const pts = [0, 0, -el2, n1, e1, -el2];
-      for (const [n0, e0] of [[0, 0], [n1, e1]]) {
-        pts.push(
-          n0 - -Math.sin(h) * 22,
-          e0 - Math.cos(h) * 22,
-          -el2,
-          n0 + -Math.sin(h) * 22,
-          e0 + Math.cos(h) * 22,
-          -el2
-        );
-      }
-      rwLines.push({ points: new Float32Array(pts), color: 16777215 });
-      notes.push("활주로는 중심선과 양 끝만 그립니다 — 폭은 결과에 없습니다.");
+    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw));
+    if (rwDraw) {
+      for (const points2 of rwDraw.segments) rwLines.push({ points: points2, color: 16777215 });
+      notes.push(rwDraw.note);
     }
     const { points, breaks } = trackPoints(body.signals, this.n);
     this.host.setPaths([{ points, color: 3331071, breaks }, ...rwLines]);
@@ -45844,16 +46337,6 @@ class SceneController {
     }
     this.replayMarks = marks;
     this.syncMarkers();
-    if (this.vehicle == null) {
-      notes.push("기체 모델이 없어 궤적만 그립니다.");
-    } else {
-      notes.push(
-        SURFACE_NOTES.innerOuterShared,
-        SURFACE_NOTES.rudderShared,
-        SURFACE_NOTES.propellerDisplay,
-        SURFACE_NOTES.holdOnMissing
-      );
-    }
     const lp = launcherPose(body.meta?.launch);
     if (this.launcher) {
       const site = [0, 0, -(num(body.meta?.runway?.elevation) ?? 0)];
@@ -45870,8 +46353,29 @@ class SceneController {
    * 시점에 달린 캡션(물러섬 사유 등)은 시점이 바뀔 때 다시 만들어야 한다 —
    * 결과를 읽을 때 한 번만 만들면 옛 문장이 남는다. `views/world.js`가 같은 자리에서 겪고
    * `captionStale` 플래그로 고쳐 둔 것을 여기서는 시점이 바뀔 때 다시 만드는 것으로 푼다. */
+  /** 기체 캡션 — 모델이 서 있으면 출처·타면 표시 규약, 아니면 궤적만 그리는 사유. */
+  vehicleNotes() {
+    if (this.vehicle != null) {
+      const head = this.vehicleLoading === "doc" ? ["기체 문서를 받는 중… — 지금 보이는 모델은 앞서 얹은 것이고, 문서가 오면 그 문서의 표시 모델로 맞춥니다."] : this.vehicleCaption ? [this.vehicleCaption] : [];
+      if (this.vehicleKind === "schematic") return [...head, SCHEMATIC_NOTE];
+      const out = [
+        ...head,
+        SURFACE_NOTES.innerOuterShared,
+        SURFACE_NOTES.rudderShared,
+        SURFACE_NOTES.propellerDisplay,
+        SURFACE_NOTES.holdOnMissing
+      ];
+      if (this.vehicle.missing.length > 0) {
+        out.push(`모델에서 못 찾은 노드: ${this.vehicle.missing.join(", ")} — 그 부분은 움직이지 않습니다.`);
+      }
+      return out;
+    }
+    if (this.vehicleLoading === "model") return ["기체 모델을 불러오는 중…"];
+    if (this.vehicleLoading === "doc") return ["기체 문서를 받는 중… — 표시 모델은 그 문서가 정합니다."];
+    return [this.vehicleNote ?? "기체 모델이 없어 궤적만 그립니다."];
+  }
   emitNotes() {
-    const notes = [...this.resultNotes];
+    const notes = [...this.resultNotes, ...this.vehicleNotes()];
     if (this.fellBack !== null) {
       const why = this.fellBack === "att" ? "자세가 없어" : "위치가 없어";
       notes.push(
@@ -45885,7 +46389,7 @@ class SceneController {
     );
     notes.push(WAVE_NOTES.displayOnly, WAVE_NOTES.model);
     notes.push(CLOUD_NOTES.model, CLOUD_NOTES.shadows);
-    if (this.vehicle || this.launcher) notes.push(WEAR_NOTES.model);
+    if (this.vehicleKind === "model" || this.launcher) notes.push(WEAR_NOTES.model);
     const scale = this.host.getRenderScale();
     if (scale < 1) {
       notes.push(
@@ -46074,8 +46578,8 @@ class SceneController {
   }
   zoom(deltaY) {
     const WHEEL_DULL = 5;
-    const step = Math.pow(1.1, 1 / WHEEL_DULL);
-    const k2 = deltaY > 0 ? step : 1 / step;
+    const step2 = Math.pow(1.1, 1 / WHEEL_DULL);
+    const k2 = deltaY > 0 ? step2 : 1 / step2;
     if (this.gameOn) {
       this.gameDist = Math.min(Math.max(this.gameDist * k2, 8), 120);
       this.dirty = true;
@@ -46129,6 +46633,10 @@ class SceneController {
   /** 지금 화면이 설명하는 결과 id — 실패한 로드 뒤에 선택칸과 화면이 갈렸는지 판정한다. */
   get shownResultId() {
     return this.shownId;
+  }
+  /** 결과 목록 길이 — 0이면 호스트가 고른 기체로 기체를 세운다(`vehicleFromSelection`). */
+  get resultCount() {
+    return this.results.length;
   }
   resize(w2, h, dpr) {
     this.host.resize(w2, h, dpr);
@@ -46458,6 +46966,8 @@ function WorldTab({ deps }) {
   const [playing, setPlaying] = reactExports.useState(false);
   const [playable, setPlayable] = reactExports.useState(false);
   const [shownId, setShownId] = reactExports.useState(null);
+  const [vehicleSettled, setVehicleSettled] = reactExports.useState(false);
+  const [vehicleLate, setVehicleLate] = reactExports.useState(false);
   const [stats, setStats] = reactExports.useState(null);
   const [speed, setSpeed] = reactExports.useState(5);
   const [cursor, setCursor] = reactExports.useState(0);
@@ -46541,6 +47051,7 @@ function WorldTab({ deps }) {
         markEnded();
       },
       onStats: setStats,
+      onVehicle: setVehicleSettled,
       onGameWps: setGameWps
     });
     if (made.controller == null) {
@@ -46567,6 +47078,7 @@ function WorldTab({ deps }) {
       try {
         await ctl.loadResults(deps.resultId);
         setStatus("");
+        if (ctl.resultCount === 0 && deps.selectedDocument) void ctl.vehicleFromSelection(deps.selectedDocument);
       } catch (e) {
         setStatus(`결과 목록을 불러오지 못했습니다 — ${e.message}`);
       }
@@ -46839,16 +47351,36 @@ function WorldTab({ deps }) {
     if (tour == null || ctl == null || tourPhaseRef.current !== "idle") return;
     if (style === "game") return;
     if (tourStopped(deps.store?.get("worldTour"), tour)) return;
-    if (!tourReady(tour, { chosen, shownId, playable, commsKey: commsKeyRef.current })) return;
+    if (!tourReady(tour, {
+      chosen,
+      shownId,
+      playable,
+      commsKey: commsKeyRef.current,
+      vehicleSettled: vehicleSettled || vehicleLate
+    })) return;
     tourPhaseRef.current = "playing";
     const port = speechRef.current;
     if (tour.voice && port?.available) setVoiceOn(true);
     setSpeed(tour.speed);
     ctl.setSpeed(tour.speed);
+    ctl.setCamMode(TOUR_CAM_MODE);
     ctl.setCursor(0);
     ctl.setPlaying(true);
     emitTour("playing");
-  }, [chosen, shownId, playable, comms, style, emitTour, deps.store]);
+  }, [chosen, shownId, playable, comms, vehicleSettled, vehicleLate, style, emitTour, deps.store]);
+  reactExports.useEffect(() => {
+    const tour = tourRef.current;
+    if (tour == null || tourPhaseRef.current !== "idle" || vehicleLate) return;
+    if (!tourAwaitsVehicle(tour, {
+      chosen,
+      shownId,
+      playable,
+      commsKey: commsKeyRef.current,
+      vehicleSettled
+    })) return;
+    const id2 = setTimeout(() => setVehicleLate(true), TOUR_VEHICLE_WAIT_MS);
+    return () => clearTimeout(id2);
+  }, [chosen, shownId, playable, comms, vehicleSettled, vehicleLate]);
   reactExports.useEffect(() => {
     const tour = tourRef.current;
     if (tour == null) return;
@@ -46882,7 +47414,7 @@ function WorldTab({ deps }) {
     if (voiceErr == null) return;
     if (tourPhaseRef.current === "playing") emitTour("voice_error", voiceErr);
   }, [voiceErr, emitTour]);
-  const alert = status !== "" ? status : tourStopNote !== null ? tourStopNote : shownId !== null && chosen !== null && shownId !== chosen ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.` : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다." : null;
+  const alert = status !== "" ? status : tourStopNote !== null ? tourStopNote : vehicleLate && !vehicleSettled ? TOUR_VEHICLE_LATE_NOTE : shownId !== null && chosen !== null && shownId !== chosen ? `지금 보이는 화면은 ${shownId.slice(0, 8)}의 것입니다 — 고른 결과를 세우지 못해 직전 것이 그대로 있습니다.` : results.length === 0 ? "시뮬레이션 결과가 없습니다 — 시뮬레이션 탭에서 한 번 실행하면 여기 나타납니다." : null;
   const drawers = [
     { key: "env", label: "환경", n: null },
     { key: "perf", label: "성능", n: null },
@@ -47372,30 +47904,7 @@ function fitDistance(ext, elev, vfovRad, aspect2, margin = FIT_MARGIN) {
 function cameraOffset(dist, elev) {
   return [0, dist * Math.sin(elev), dist * Math.cos(elev)];
 }
-const SCHEMATIC_COLOR = { wing: 12108235, elevon: 14715438, body: 8095121 };
 const prefersReducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-function schematicObject(mesh) {
-  const n2 = mesh.positions.length / 3;
-  const pos = new Float32Array(mesh.positions.length);
-  const nrm = new Float32Array(mesh.normals.length);
-  for (let i = 0; i < n2; i++) {
-    const k2 = 3 * i;
-    pos.set(frdToModelLocal([mesh.positions[k2], mesh.positions[k2 + 1], mesh.positions[k2 + 2]]), k2);
-    nrm.set(frdToModelLocal([mesh.normals[k2], mesh.normals[k2 + 1], mesh.normals[k2 + 2]]), k2);
-  }
-  const geo = new BufferGeometry();
-  geo.setAttribute("position", new BufferAttribute(pos, 3));
-  geo.setAttribute("normal", new BufferAttribute(nrm, 3));
-  geo.setIndex(new BufferAttribute(new Uint16Array(mesh.indices), 1));
-  const mats = mesh.groups.map((g, i) => {
-    geo.addGroup(g.start, g.count, i);
-    return new MeshStandardMaterial({ color: SCHEMATIC_COLOR[g.name] ?? 11186876, roughness: 0.55, metalness: 0.1 });
-  });
-  const obj = new Mesh(geo, mats);
-  obj.castShadow = true;
-  obj.receiveShadow = true;
-  return obj;
-}
 function mountAircraftViewer(container, opts) {
   const report = (s) => opts.onStatus?.(s);
   const canvas = document.createElement("canvas");
@@ -47478,16 +47987,16 @@ function mountAircraftViewer(container, opts) {
     if (!raf && !disposed) raf = requestAnimationFrame(tick);
   };
   const stage = (obj) => {
-    const box = new Box3().setFromObject(obj);
-    const center = box.getCenter(new Vector3());
-    const size = box.getSize(new Vector3());
+    const box2 = new Box3().setFromObject(obj);
+    const center = box2.getCenter(new Vector3());
+    const size = box2.getSize(new Vector3());
     obj.position.sub(center);
     const pivot = new Group();
     pivot.add(obj);
     return {
       pivot,
       extent: { radial: Math.max(Math.hypot(size.x, size.z) / 2, 1e-3), halfHeight: size.y / 2 },
-      bottom: box.min.y - center.y
+      bottom: box2.min.y - center.y
     };
   };
   const clearStage = () => {
@@ -47595,15 +48104,15 @@ function mountAircraftViewer(container, opts) {
     requestFrame();
   };
   const onKey = (e) => {
-    const step = {
+    const step2 = {
       ArrowLeft: [-KEY_STEP, 0],
       ArrowRight: [KEY_STEP, 0],
       ArrowUp: [0, KEY_STEP],
       ArrowDown: [0, -KEY_STEP]
     }[e.key];
-    if (!step) return;
+    if (!step2) return;
     e.preventDefault();
-    view = { yaw: wrapYaw(view.yaw + step[0]), elev: clampElev(view.elev + step[1]) };
+    view = { yaw: wrapYaw(view.yaw + step2[0]), elev: clampElev(view.elev + step2[1]) };
     requestFrame();
   };
   canvas.addEventListener("pointerdown", onDown);

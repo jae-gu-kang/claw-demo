@@ -19,6 +19,8 @@ from pathlib import Path
 import pytest
 
 import claw_server.routes.llm as llm_route
+from claw.profile import example_profile, load_example
+from claw_server.llm_draft import draft_system
 
 _REPO = Path(__file__).resolve().parents[4]
 
@@ -113,9 +115,41 @@ def test_초안과_의도가_저장되고_메타에_모드_수가_실린다(clie
     assert calls["user"] == "북쪽 5 km 왕복"
     assert calls["api_key"] == "test-key"
     assert calls["model"] == "claude-opus-5"
-    # 초안 경로는 초안 프롬프트·스키마로 부른다 — 브리핑과 갈리는 자리
-    assert calls["system"] is llm_route._SYSTEM
+    # 초안 경로는 초안 프롬프트·스키마로 부른다 — 브리핑과 갈리는 자리. 기체를 안 고르면 예제 기체의 사실로
+    assert calls["system"] == draft_system(example_profile())
     assert calls["schema"] is llm_route._DRAFT_SCHEMA
+    assert body["profile"]["source"] == "default-example" and meta["profile"]["id"] == "example-delta"
+
+
+def test_초안_프롬프트는_고른_기체의_사실로_선다(client, wait_job, monkeypatch):
+    """기체 고정 금지 — 프롬프트의 기체 절·예시가 고른 기체(형상 변형 포함) 문서에서 온다. 종전에는 예제
+    기체(200 kg급)의 실속·레일·선회 반경이 글로 박혀 있어 다른 기체를 골라도 그 수치로 초안이 나왔다."""
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    d = load_example()
+    d.update(id="rail-delta", name="레일 시험 기체", is_example=False)
+    d["ground"]["rail"]["exit_speed"] = 97.3
+    d["variants"] = [{"id": "long-rail", "name": "긴 레일", "patch": {"/ground/rail/length": 23.0}}]
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    calls = []
+    monkeypatch.setattr(llm_route, "call_llm", lambda **kw: calls.append(kw) or _fake_raw(_DRAFT))
+
+    r = client.post("/api/llm/mission-draft",
+                    json={"intent": "왕복", "profile": {"id": "rail-delta", "variant": "long-rail"}})
+    assert r.status_code == 202, r.text
+    job = wait_job(r.json()["id"])
+    assert job["status"] == "done", job
+    system = calls[0]["system"]
+    assert "레일 시험 기체" in system and "이탈속도 97.3 m/s" in system and "길이 23 m" in system
+    assert system != draft_system(example_profile())
+    body = client.get(f"/api/results/{job['result_id']}").json()
+    assert (body["profile"]["id"], body["profile"]["variant"], body["profile"]["source"]) == (
+        "rail-delta", "long-rail", "request")
+    assert calls[0]["user"] == "왕복"  # 사용자 몫은 의도 그대로 — 기체 사실은 시스템 프롬프트에
+
+    # 없는 기체는 제출 시점 404 — 돈 드는 호출 전에, 잡 없이
+    calls.clear()
+    gone = client.post("/api/llm/mission-draft", json={"intent": "왕복", "profile": {"id": "no-such"}})
+    assert gone.status_code == 404 and calls == []
 
 
 def test_나가는_요청은_계약_그대로다(client, wait_job, monkeypatch):
@@ -152,7 +186,7 @@ def test_나가는_요청은_계약_그대로다(client, wait_job, monkeypatch):
     body = sent["body"]
     assert body["model"] == "claude-opus-5"
     assert body["messages"] == [{"role": "user", "content": "계약 고정"}]
-    assert body["system"] == llm_route._SYSTEM  # 초안 규약 프롬프트가 실제로 실린다
+    assert body["system"] == draft_system(example_profile())  # 초안 규약 프롬프트가 실제로 실린다
     fmt = body["output_config"]["format"]
     assert fmt["type"] == "json_schema"
     assert fmt["schema"] == llm_route._DRAFT_SCHEMA
@@ -187,9 +221,10 @@ def test_호출_중_취소는_cancelled로_남고_저장이_없다(client, wait_
 def test_프롬프트의_활주로_사실은_정본과_같다():
     """활주로 수치의 정본은 data/geo/goheung-runway.json이다(웹 lib/site.js도
     같은 대조 테스트를 갖는다). 시스템 프롬프트는 그 셋째 사본이라 낡아도
-    아무것도 안 빨개지는 자리였다 — 여기서 빨개지게 만든다 (리뷰 지적)."""
+    아무것도 안 빨개지는 자리였다 — 여기서 빨개지게 만든다 (리뷰 지적).
+    프롬프트 조립은 claw_server/llm_draft.py — 장주 사본 대조는 test_llm_draft.py."""
     geo = json.loads((_REPO / "data/geo/goheung-runway.json").read_text())
-    sys_prompt = llm_route._SYSTEM
+    sys_prompt = draft_system(example_profile())
     assert str(geo["heading_rad"]) in sys_prompt
     assert str(geo["threshold_south"]["lat_deg"]) in sys_prompt
     assert str(geo["threshold_south"]["lon_deg"]) in sys_prompt
@@ -402,6 +437,53 @@ def test_교신_대본도_키가_없으면_503(client):
     assert "CLAW_ANTHROPIC_API_KEY" in r.json()["detail"]
 
 
+def test_교신과_소견서는_sim_본문을_통째로_세우지_않고_같은_입력을_보낸다(client, wait_job, monkeypatch):
+    """교신은 비행 로그가 읽는 신호만(comms.FLIGHT_LOG_SIGNALS), 소견서는 배제될 시계열을 빼고(brief.load_pruned)
+    읽는다 — 예제 750 s 본문(107 MB)에서 둘 다 서버 힙 +211 MB였다(Render 무료 512 MB). 모델에 가는 사용자
+    메시지는 통째 읽기로 만든 것과 **글자까지 같다**. 쓰지 않는 신호 줄을 망가뜨려도 그대로다(통째 읽기라면
+    본문 손상으로 잡이 실패한다) — 그 줄을 파싱조차 하지 않았다는 증거다."""
+    from claw_server.brief import brief_user, prune
+    from claw_server.comms import FLIGHT_LOG_SIGNALS, comms_user, flight_log
+
+    monkeypatch.setenv("CLAW_ANTHROPIC_API_KEY", "test-key")
+    j = wait_job(client.post("/api/sim/run", json={
+        "trim": {"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0},
+        "modes": [{"name": "hold", "speed": 199.0, "alt": 1000.0, "heading": 0.0,
+                   "exit": ["time_ge", 1e9]}],
+        "t_end": 2.0}).json()["id"], timeout=120.0)
+    rid = j["result_id"]
+    store = client.app.state.store
+    full = store.load(rid)
+    meta = next(m for m in store.list() if m["id"] == rid)
+    want = {"comms": comms_user(meta, flight_log(full)), "brief": brief_user(meta, prune(full, "sim"))}
+    assert "[제외" in want["brief"]  # 시계열이 마커로 — 가지치기가 실제로 배제 경로를 탄 본문이다
+    calls = []
+
+    def fake(*, api_key, model, system, user, schema):
+        calls.append(user)
+        return _fake_raw(_COMMS if system is llm_route.COMMS_SYSTEM else _BRIEF)
+
+    monkeypatch.setattr(llm_route, "call_llm", fake)
+
+    def sent(kind):
+        r = client.post(f"/api/llm/{kind}", json={"result_id": rid})
+        assert r.status_code == 202, r.text
+        job = wait_job(r.json()["id"])
+        assert job["status"] == "done", job
+        return calls.pop()
+
+    for kind in ("comms", "brief"):
+        assert sent(kind) == want[kind], kind
+    victim = next(k for k in full["signals"] if k not in FLIGHT_LOG_SIGNALS)
+    path = store.root / f"{rid}.json"
+    lines = path.read_text(encoding="utf-8").split("\n")
+    i = next(i for i, ln in enumerate(lines) if ln.startswith(f'"{victim}": '))
+    lines[i] = f'"{victim}": @손상@' + ("," if lines[i].endswith(",") else "")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    for kind in ("comms", "brief"):
+        assert sent(kind) == want[kind], kind
+
+
 # ── 전역 질문 (/llm/ask) ──────────────────────────────────────────────────
 
 _ANSWER = {"answer": "마진 맵 탭 히트맵에서 봅니다 — 칸을 누르면 보드선도까지.",
@@ -570,7 +652,7 @@ def test_로컬_백엔드로_나가는_요청은_계약_그대로다(client, wai
     body = sent["body"]
     assert body["model"] == "qwen3-32b"
     assert body["messages"] == [
-        {"role": "system", "content": llm_route._SYSTEM},  # system은 첫 메시지로
+        {"role": "system", "content": draft_system(example_profile())},  # system은 첫 메시지로
         {"role": "user", "content": "계약 고정"},
     ]
     js = body["response_format"]

@@ -126,16 +126,21 @@ export function originsAgree(packOrigin, resultOrigin, tolDeg = 1e-6) {
   if (!(dLat <= tolDeg && dLon <= tolDeg)) {
     return {
       ok: false,
-      reason: `지형 팩은 ${fmtDeg(packOrigin.lat_deg)}N ${fmtDeg(packOrigin.lon_deg)}E 기준인데 `
-        + `이 결과는 ${fmtDeg(resultOrigin.lat)}N ${fmtDeg(resultOrigin.lon)}E 기준입니다 `
+      reason: `지형 팩은 ${fmtDeg(packOrigin.lat_deg, tolDeg)}N ${fmtDeg(packOrigin.lon_deg, tolDeg)}E 기준인데 `
+        + `이 결과는 ${fmtDeg(resultOrigin.lat, tolDeg)}N ${fmtDeg(resultOrigin.lon, tolDeg)}E 기준입니다 `
         + "— 원점이 달라 겹쳐 그릴 수 없습니다.",
     };
   }
   return { ok: true, reason: null };
 }
 
-function fmtDeg(v) {
-  return Number.isFinite(v) ? `${v.toFixed(4)}°` : "?";
+/** 사유에 적는 좌표 — **허용차만큼의 자릿수**로(기본 1e-6° → 6자리). 허용차를 넘는 차이는 이 자릿수에서 반드시
+ *  다른 숫자가 된다(반올림은 반 칸씩만 움직인다). 4자리(≈ 10 m)로 적던 때는 활주로 원점 보정(2026-09-27, 동쪽
+ *  3.7 m) 전후의 두 원점이 같은 좌표로 찍혀 "원점이 달라"라는 사유가 제 말을 부정했다. */
+function fmtDeg(v, tolDeg) {
+  const digits = tolDeg > 0 && Number.isFinite(tolDeg)
+    ? Math.min(10, Math.max(4, Math.ceil(-Math.log10(tolDeg) - 1e-9))) : 6;
+  return Number.isFinite(v) ? `${v.toFixed(digits)}°` : "?";
 }
 
 /** 격자 간격 — 1·2·5 계열에서 고른다 (lib/plot.js niceTicks와 같은 어휘). */
@@ -143,4 +148,48 @@ export function niceStep(extent) {
   const raw = extent / 20;
   const mag = 10 ** Math.floor(Math.log10(raw));
   return [1, 2, 5, 10].map((m) => m * mag).find((v) => v >= raw) ?? 10 * mag;
+}
+
+/** 가상환경 기체 모델 — **이 런을 난 기체 문서**의 표시 모델(`display`, 02 §5.6) → {model, note, caption}.
+ *
+ * 종전에는 `shahed136.glb`를 늘 그렸다 — 다른 기체의 런에도, EO/IR형 변형(표시 모델이 `shahed136_eoir.glb`)의
+ * 런에도. 화면이 기체를 잘못 말하는 자리라, 기체 탭 대표 그림(lib/aircrafthero.js heroPlan)과 같은 규약을 따른다:
+ * 문서가 GLB를 가리키고 서버 자산 목록에 있으면 그것, 아니면 **빌리지 않고** 궤적만 그리며 왜 그런지를 말한다.
+ * 자산 목록을 못 받았으면(null) 일단 읽어 보게 둔다 — 못 읽으면 로더가 사유를 낸다.
+ *
+ * doc: 적용 문서(형상 변형 반영) 또는 null · manifest: `/world/manifest` 응답 또는 null ·
+ * label: 캡션에 적을 기체 이름표(lib/replay.js refLabel) · error: 문서를 못 받은 사유(있으면 그것이 우선).
+ * model: 읽을 GLB 이름 또는 null · note: 궤적만 그리는 사유(model이 있으면 null) · caption: 그린 모델의 출처 한 줄.
+ *
+ * @param {unknown} doc
+ * @param {unknown} manifest
+ * @param {{label?: string, error?: string | null}} [opts]
+ */
+export function vehicleModelPlan(doc, manifest, { label = "이 런의 기체", error = null } = {}) {
+  if (error) return { model: null, note: `${error} — 표시 모델을 정할 수 없어 궤적만 그립니다.`, caption: null };
+  if (doc == null || typeof doc !== "object") {
+    return { model: null, note: `${label}의 문서가 없어 표시 모델을 정할 수 없어 궤적만 그립니다.`, caption: null };
+  }
+  const d = doc.display;
+  const want = d && d.kind === "model" && typeof d.model === "string" && d.model !== "" ? d.model : null;
+  if (!want) {
+    return {
+      model: null,
+      note: `${label}의 문서에 표시 모델이 없어 궤적만 그립니다 — 다른 기체의 모델을 빌려 그리지 않습니다.`,
+      caption: null,
+    };
+  }
+  const listed = Array.isArray(manifest?.models) ? manifest.models.map((m) => m?.name) : null;
+  if (listed && !listed.includes(want)) {
+    return {
+      model: null,
+      note: `표시 모델 파일(${want})이 서버 자산에 없어 궤적만 그립니다`
+        + (manifest.models_reason ? ` — ${manifest.models_reason}` : "."),
+      caption: null,
+    };
+  }
+  return {
+    model: want, note: null,
+    caption: `기체 모델 ${want} — ${label}의 표시 모델입니다(화면용 형상, 계산은 문서의 수치).`,
+  };
 }

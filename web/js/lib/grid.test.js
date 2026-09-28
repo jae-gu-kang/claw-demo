@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 
 import {
   DEFAULT_GRID, defaultGridCases,
-  machRange, nameCases, orderCaseNames, parseCaseName, parseNumberList, serpentineCases,
+  machRange, nameCases, representativeGrid, orderCaseNames, parseCaseName, parseNumberList, serpentineCases,
 } from "./grid.js";
 
 test("machRange: 부동소수 오차 없는 등간격", () => {
@@ -132,4 +132,59 @@ test("기본 격자는 세 고도 공통 엔벨로프 안이다 — 트림 실�
   // 그 판정이 기본 격자에서 영영 안 걸린다.
   assert.ok(machs[0] <= 0.14, "아래 코너를 안 잡는다 — 나선·실속 여유가 걸리는 자리가 격자에 없다");
   assert.ok(machs[machs.length - 1] >= 0.22, "위 코너를 안 잡는다 — 추력 여유가 걸리는 자리가 격자에 없다");
+});
+
+
+// ── 대표 부분 격자 (쇼케이스 영향성 2단) ──────────────────────────────────────
+
+test("representativeGrid: n=4는 마하 양끝 × 고도 양끝 — 폼 칸 세 개로 적히는 부분 격자", () => {
+  const g = representativeGrid(DEFAULT_GRID, 4);
+  assert.deepEqual(g, { machFrom: 0.14, machTo: 0.22, machStep: 0.08, alts: [100, 3000], fuels: [25] });
+  const names = defaultGridCases(g).map((c) => c.name);
+  assert.deepEqual(names, ["M0.14_h100_f25", "M0.22_h100_f25", "M0.22_h3000_f25", "M0.14_h3000_f25"]);
+  // 이름이 원 격자와 같다 — 평가·처방·감도가 같은 케이스를 같은 이름으로 부른다
+  const full = new Set(defaultGridCases().map((c) => c.name));
+  assert.ok(names.every((n) => full.has(n)));
+});
+
+test("representativeGrid: 건수는 n 이하 — 등간격이 안 되는 마하 점수는 건너뛴다", () => {
+  for (let n = 1; n <= 20; n += 1) {
+    const g = representativeGrid(DEFAULT_GRID, n);
+    const cases = defaultGridCases(g);
+    assert.ok(cases.length <= n, `n=${n} → ${cases.length}건`);
+    assert.ok(cases.length >= 1);
+  }
+  // 마하 5점에서 4점은 등간격으로 못 뽑는다 — 3점(0.14·0.18·0.22)으로 선다
+  const g6 = representativeGrid(DEFAULT_GRID, 6);
+  assert.deepEqual(machRange(g6.machFrom, g6.machTo, g6.machStep), [0.14, 0.18, 0.22]);
+  assert.deepEqual(g6.alts, [100, 3000]);
+});
+
+test("representativeGrid: n=1은 가운데 점, 격자보다 크면 격자 그대로", () => {
+  assert.deepEqual(defaultGridCases(representativeGrid(DEFAULT_GRID, 1)).map((c) => c.name),
+    ["M0.18_h1000_f25"]);
+  assert.deepEqual(representativeGrid(DEFAULT_GRID, 15), { ...DEFAULT_GRID });
+  assert.deepEqual(representativeGrid(DEFAULT_GRID, 99), { ...DEFAULT_GRID });
+});
+
+test("representativeGrid: 연료 축도 끝점부터 — 기체 값은 인자 격자에서만 온다", () => {
+  const grid = { machFrom: 0.3, machTo: 0.5, machStep: 0.1, alts: [0, 2000], fuels: [10, 50, 90] };
+  const g = representativeGrid(grid, 8);
+  assert.deepEqual(g, { machFrom: 0.3, machTo: 0.5, machStep: 0.2, alts: [0, 2000], fuels: [10, 90] });
+  assert.equal(defaultGridCases(g).length, 8);
+});
+
+test("representativeGrid: 양끝은 값의 양끝 — 순서 없이 적힌 템플릿 목록에서도 최저·최고 고도를 잡는다", () => {
+  const grid = { machFrom: 0.14, machTo: 0.22, machStep: 0.02, alts: [1000, 100, 3000], fuels: [50, 10] };
+  const g = representativeGrid(grid, 4);
+  assert.deepEqual(g.alts, [100, 3000]);   // 목록 첫·끝(1000·3000)이면 저고도 최대 동압 구석이 빠진다
+  assert.deepEqual(g.fuels, [10]);         // 둘 중 가운데는 작은 쪽 — 적힌 순서와 무관
+  // 격자 전체를 돌려줄 때는 적힌 목록 그대로다
+  assert.deepEqual(representativeGrid(grid, 99).alts, [1000, 100, 3000]);
+});
+
+test("representativeGrid: 잘못된 n·빈 목록은 던진다", () => {
+  assert.throws(() => representativeGrid(DEFAULT_GRID, 0));
+  assert.throws(() => representativeGrid(DEFAULT_GRID, 2.5));
+  assert.throws(() => representativeGrid({ ...DEFAULT_GRID, alts: [] }, 4));
 });

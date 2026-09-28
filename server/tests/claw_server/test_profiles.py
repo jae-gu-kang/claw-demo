@@ -51,7 +51,8 @@ def test_summary_reports_confirmed_gain_tables_and_their_staleness():
 
     tabled = validate_document(_tabled(plain))
     assert ProfileStore.summary(tabled, 1)["gain_tables"] == {"source": "auto_design", "stale": False,
-                                                             "stale_variants": []}
+                                                             "stale_variants": [],
+                                                             "variants": {"eoir": {"source": "confirmed"}}}
 
     # 반영 뒤 문서가 바뀌면 낡는다 — 기준 지문 대조(조립 거부와 같은 판정)
     edited = copy.deepcopy(tabled)
@@ -59,14 +60,16 @@ def test_summary_reports_confirmed_gain_tables_and_their_staleness():
     edited = validate_document(edited)
     # 기본이 낡으면 변형도 낡다 — 예제의 eoir(표시-only)까지 기준 지문이 어긋난다
     assert ProfileStore.summary(edited, 2)["gain_tables"] == {"source": "auto_design", "stale": True,
-                                                             "stale_variants": ["eoir"]}
+                                                             "stale_variants": ["eoir"],
+                                                             "variants": {"eoir": {"source": "stale"}}}
 
     # 출처 기록이 이상해도 요약이 죽지 않는다 — source는 없으면 null, 낡음은 참
     odd = copy.deepcopy(tabled)
     odd["law"]["gain_tables"]["provenance"] = {}
     odd = validate_document(odd)
     assert ProfileStore.summary(odd, 3)["gain_tables"] == {"source": None, "stale": True,
-                                                          "stale_variants": ["eoir"]}
+                                                          "stale_variants": ["eoir"],
+                                                          "variants": {"eoir": {"source": "stale"}}}
 
 
 def test_summary_names_the_variants_whose_confirmed_tables_are_stale():
@@ -81,3 +84,35 @@ def test_summary_names_the_variants_whose_confirmed_tables_are_stale():
     tabled = validate_document(tabled)
     out = ProfileStore.summary(tabled, 1)["gain_tables"]
     assert out["stale"] is False and out["stale_variants"] == ["heavy"]
+    assert out["variants"] == {"heavy": {"source": "stale"}, "skin": {"source": "confirmed"}}
+
+
+def test_summary_says_which_gains_each_variant_flies():
+    """변형마다 **실제로 나는** 게인의 출처 — 기본형의 확정 표 배너를 변형에 그대로 달면 거짓이 되는 자리를 웹이
+    가른다. 쇼케이스 EO/IR형처럼 패치가 /law/gain_tables를 비운 변형은 규칙 스케줄(설계 게인 × q̄ 역비)로 난다.
+    스케줄·설계가 없어 스케줄 게인으로 조립되지 않는 변형은 none. 변형이 제 표를 실으면 그 표의 신선도다."""
+    from claw.profile import build_profile, load_showcase
+
+    plain = validate_document(load_example())
+    tabled = copy.deepcopy(_tabled(plain))
+    heavy_patch = {"/mass/m_empty": plain["mass"]["m_empty"] + 5.0}
+    tabled["variants"] = [
+        {"id": "heavy", "name": "무거움", "patch": dict(heavy_patch)},
+        {"id": "heavy-rule", "name": "무거움 — 규칙 스케줄", "patch": {**heavy_patch, "/law/gain_tables": None}},
+        {"id": "unscheduled", "name": "스케줄 없음", "patch": {"/law/gain_tables": None, "/law/schedule": None}},
+        {"id": "skin", "name": "표시만", "patch": {"/display": None}},
+    ]
+    tabled = validate_document(tabled)
+    out = ProfileStore.summary(tabled, 1)["gain_tables"]
+    assert out["variants"] == {"heavy": {"source": "stale"}, "heavy-rule": {"source": "rule_schedule"},
+                               "unscheduled": {"source": "none"}, "skin": {"source": "confirmed"}}
+    assert out["stale_variants"] == ["heavy"]  # 표를 비운 변형은 낡음이 아니다 — 조립이 선다
+    # 규칙 스케줄이라고 말한 변형은 실제로 확정 표 없이 조립된다(assemble_law가 규칙 스케줄로 떨어진다)
+    rule = build_profile(tabled, "heavy-rule", validated=True)
+    assert rule.confirmed_gain_tables() is None and set(rule.gain_tables()) == set(tabled["law"]["schedule"]["scheduled"])
+
+    # 패키지 쇼케이스 문서 — 기본형은 확정 표, EO/IR형은 규칙 스케줄(IB1)
+    show = validate_document(load_showcase())
+    sgt = ProfileStore.summary(show, 1)["gain_tables"]
+    assert sgt["stale"] is False and sgt["stale_variants"] == []
+    assert sgt["variants"] == {"eoir": {"source": "rule_schedule"}}

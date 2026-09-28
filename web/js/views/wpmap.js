@@ -224,6 +224,9 @@ export function createWpMap({
   // (오토파일럿 phi_max)는 시뮬 탭이 들고 있는 값이라, 지도가 그것을 알려면 표와
   // 스토어를 같이 봐야 한다 — 그리기만 하는 이 모듈의 경계를 넘는다.
   getFlyable,
+  // () => number | null — 새 점의 기본 고도 출처(모드 표의 경로 모드 고도, lib/wpcheck.pathAlt).
+  // getFlyable과 같은 사유로 시뮬 탭이 준다 — 모드 표는 그쪽 상태라 지도가 읽을 수 없다
+  getCruiseAlt,
   onRowsChanged, // () => void — 추가·삭제·이동·재배열 후 표 재렌더
   onSelect, // (idx) => void — 선택이 **바뀔 때만** (세로 프로파일이 같은 점을 가리키게)
   viewRef, // {view: {cN,cE,span}|null} — 호출측 스코프 홀더 (탭 재진입 시 줌/팬 유지)
@@ -455,7 +458,9 @@ export function createWpMap({
         // 지금까지 비어 있던 행까지 한꺼번에 채운다. 표의 추가 버튼과 **같은 함수**를 쓴다
         const rows = getRows();
         rows.push({ n: fmtMeters(ned.n), e: fmtMeters(ned.e) });
-        fillMissingAltitudes(rows, { acceptRadius: getAcceptRadius?.() || 0 });
+        fillMissingAltitudes(rows, {
+          acceptRadius: getAcceptRadius?.() || 0, cruiseAlt: getCruiseAlt?.() ?? null,
+        });
         selected = rows.length - 1;
         onRowsChanged();
         redraw();

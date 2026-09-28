@@ -34,6 +34,13 @@ TARGET_SAMPLES = 24     # 균등 표본 목표 — 예산 초과 시 축소 계�
 _MAX_LIMITER_SPANS = 10
 _NAME_MAX = 40          # 모드 이름 표시 상한 — 이름은 사용자 입력이라 길이 무제한이다
 
+# flight_log가 읽는 신호 — 84개 중 이것만 먼저 파싱한다(라우트가 store.load_picked로). 통째로 읽으면 예제
+# 750 s 본문(107 MB)에서 파싱본이 서버 힙 +211 MB였다(Render 무료 512 MB). **미리 읽기 힌트**다 — 이 밖의
+# 신호를 읽게 고쳐도 store.PickedEntries가 그 줄을 마저 파싱해 로그는 같다(메모리만 더 든다). 어긋나면
+# test_comms의 감시 테스트가 빨개진다.
+FLIGHT_LOG_SIGNALS = frozenset({"mode", "h", "V", "hdot", "theta", "phi", "launch_gx", "pn", "pe",
+                                "limiter_active"})
+
 # 예산 축소 계획 (표본 목표, 스팬 상한, 전이 이벤트 상한) — 순서대로 시도한다.
 # 표본만 줄이는 것으로는 부족하다: 두 모드가 프레임마다 번갈아 드는 채터링 런
 # (한계 접근 — 이 기능이 가장 필요한 종류의 런)에서는 modes 행과 스팬 강제
@@ -175,6 +182,9 @@ def _events(t, sig, env, meta, spans, trans_cap, dropped_spans):
     le = phase_t("launch_exit_t")
     if le is not None:
         ev = {"t": round(le, 2), "kind": "launch_exit"}
+        # peak_gx는 레일 축 순가속도의 최대(중력 성분 제외)다 — 축방향 하중배수 n_x가 아니다
+        # (시뮬 탭 판정은 여기에 sin 앙각을 더한다, 웹 lib/replay.js launchLoad). COMMS_SYSTEM도 이것을 하중이라
+        # 부르지 않는다 — 대본에 하중을 말하게 하려면 n_x를 따로 실어야 한다
         gx = [g for g in map(_num, sig.get("launch_gx") or []) if g is not None]
         if gx:
             ev["peak_gx"] = round(max(gx), 1)

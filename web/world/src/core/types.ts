@@ -32,7 +32,7 @@ export interface Signals {
   /** 동체 각속도 [rad/s] */ p?: Signal; q?: Signal; r?: Signal;
   /** 실속 마진 */ alpha_margin?: Signal;
   /** 착륙장치 수직반력 합 [N] — 장치가 없으면 전 구간 null */ n_gear?: Signal;
-  /** 레일 축방향 하중 [g] */ launch_gx?: Signal;
+  /** 레일 축 순가속도 [g] — 중력 성분 제외 */ launch_gx?: Signal;
   limiter_active?: (boolean | null)[];
   wow?: (boolean | null)[];
   on_rail?: (boolean | null)[];

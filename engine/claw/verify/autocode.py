@@ -1118,10 +1118,11 @@ def verify_flight(law, *, profile, t_end=180.0, control_hz=100.0, on_progress=No
 
 
 def _integration_cases(law):
-    """법칙의 통합 보강 케이스 — 게인에서 길이를 정하는 케이스(θ 상한 하강)까지 그 법칙 값으로."""
+    """법칙의 통합 보강 케이스 — 게인에서 길이를 정하는 케이스(θ 상한 하강)까지 그 법칙 값으로.
+
+    θ 상한 표 자체를 넘긴다 — 하강 케이스의 마하 두 점·여유가 그 표와 상자에서 나온다(기체마다 격자·낙차가 다르다)."""
     ap_cfg = getattr(getattr(law, "autopilot", None), "cfg", None)
-    theta_hi = getattr(law, "theta_hi_table", None) is not None
-    return vectors.integration_cases(ap_cfg, law.runner.dt, theta_hi=theta_hi)
+    return vectors.integration_cases(ap_cfg, law.runner.dt, theta_hi=getattr(law, "theta_hi_table", None))
 
 
 _COUPLED_REASON = (
@@ -1146,6 +1147,72 @@ def _port_bound(graph, runner, ref, side):
     if src.kind != "block" or src.block is not Saturation or side in src.gains or src.enable is not None:
         return none
     return float(getattr(runner.instances[ref], side))
+
+
+def _port_const(graph, runner, ref):
+    """한계 신호가 **모든 스텝에서 같은 값**인가 — {value, …근거} 또는 None(보장 없음).
+
+    fcl의 θ 상한 신호(`ap_theta_hi`)가 이 모양일 수 있다: 마하 룩업 표 θ_hi(M) = α_stall(M) − 마진을 상자
+    [theta_lo, theta_hi]로 자른 포화 출력인데, 표의 전 값이 상자 상한 이상이면(min(α_stall − 마진) ≥ theta_hi) 포화가 늘
+    theta_hi를 낸다 — 스칼라 한계와 같은 상수다(하한 쪽 대칭). 보장은 좁게 잡는다:
+      · 영역 밖 포화(한계 포트 없음) ← 영역 밖 절점 룩업(clip 외삽) 한 단 — 영역 안이면 비활성 스텝에 0.0을 내고,
+        다항 표는 절점 사이에서 넘칠 수 있다
+      · 표 값·격자 간격이 전부 유한 — 간격이 ∞면 보간 비율이 ∞/∞ = NaN이 된다
+      · **보간 반올림 여유** — C 보간 (1 − t)·a + t·b(FMA 없음)는 반올림 세 번이라 min(a, b)보다 최대 약 3u·max|값| 낮을 수
+        있다(u = eps/2). 표 최솟값이 상한과 딱 같으면 상한이 1 ulp 내려가는 스텝이 있을 수 있고 그러면 독립쌍이 생긴다 —
+        그래서 4·eps·max|값|을 빼고도 상한 이상일 때만 상수로 본다(딱 같은 값은 측정도 정당화도 못 해 미커버로 남는다)
+    룩업 입력(fcl은 마하)이 NaN이면 룩업·포화가 NaN을 내 그 스텝의 한계가 풀린다 — 이 판정은 NaN을 시험 영역 밖에 두는
+    벡터 규약(verify/vectors.py 머리말)을 전제하고, 정당화 문구가 그 전제를 적는다.
+    """
+    try:
+        sat = graph.node(ref)
+    except KeyError:
+        return None  # 그래프 입력 — 무엇이든 들어온다
+    if sat.kind != "block" or sat.block is not Saturation or sat.gains or sat.enable is not None:
+        return None
+    src_ref = sat.inputs[0]
+    try:
+        src = graph.node(src_ref)
+    except KeyError:
+        return None
+    if src.kind != "block" or src.block is not LookupBlock or src.enable is not None:
+        return None
+    table = runner.instances[src_ref].table
+    if table.extrapolate != "clip" or len(table.axes) != 1:
+        return None
+    data = np.asarray(table.data, dtype=float).ravel()
+    if data.size == 0 or not (np.all(np.isfinite(data)) and np.all(np.isfinite(np.diff(table.axes[0])))):
+        return None
+    slack = 4.0 * float(np.finfo(float).eps) * float(np.max(np.abs(data)))
+    t_min, t_max = float(np.min(data)), float(np.max(data))
+    box = runner.instances[ref]
+    lo, hi = float(box.lo), float(box.hi)
+    if t_min - slack >= hi:
+        value = hi
+    elif t_max + slack <= lo:
+        value = lo
+    else:
+        return None
+    return {"value": value, "lookup": src_ref, "input": src.inputs[0], "t_min": t_min, "t_max": t_max,
+            "lo": lo, "hi": hi}
+
+
+def _const_port_reason(ref, side, facts):
+    """상수로 잘린 한계 신호의 정당화 문구 — 이미지마다의 수치를 그대로 싣는다(값에 기댄 정당화라서).
+
+    수는 왕복 표기(repr)다 — 자릿수를 줄이면 0.3199999 ≥ 0.32가 "0.32 ≥ 0.32"로 보여 근거가 흐려진다."""
+    word = "상한" if side == "out_hi" else "하한"
+    nums = " · ".join(sorted({
+        (f"최소 {f['t_min']!r} ≥ 상자 상한 {f['hi']!r}" if f["value"] == f["hi"]
+         else f"최대 {f['t_max']!r} ≤ 상자 하한 {f['lo']!r}")
+        for f in facts}))
+    return (
+        f" {word}은 신호({ref})지만 상자로 자른 표({facts[0]['lookup']})의 전 값이 상자 밖이라({nums}, 보간 반올림 여유 포함) "
+        f"포화가 모든 스텝에서 같은 값을 낸다 — 스칼라 한계와 같은 상수라 위 함의가 그대로 선다. 이 이미지 값에 기댄 "
+        f"정당화다(표가 상자 안으로 들어오면 {word}이 스텝마다 움직여 독립쌍이 실재하므로 측정 대상이다). 룩업 입력"
+        f"({facts[0]['input']})이 NaN이면 표·포화가 NaN을 내 그 스텝의 {word} 클램프가 풀린다 — NaN을 시험 영역 밖에 두는 "
+        f"벡터 규약(verify/vectors.py)을 전제한다."
+    )
 
 
 def _gain_signs(graph, runner, node, inst, key):
@@ -1185,6 +1252,9 @@ def _coupled_guards(decisions, runners):
         상한이 신호(θ_hi(M))면 스텝 사이에 상한이 내려갈 때
         적분기가 직전 상한에 남아 새 상한 위에 있을 수 있어 오차 ≤ 0에서도 raw > hi가 된다 — 독립쌍이 실재한다.
         상수인 하한 쪽은 적분기가 늘 하한 이상이라 raw < lo가 여전히 kp·e < 0을 함의한다
+      · 다만 신호 한계가 **전 스텝 상수**로 보장되면(상자 [theta_lo, theta_hi]로 자른 θ_hi(M) 표가 전 마하에서 상자 위 —
+        `_port_const`) 상수 한계와 같다. 그 판정은 이미지 값에 기대고 마하 NaN을 시험 영역 밖에 두는 전제가 붙어, 결정의
+        정당화 문구에 수치와 전제를 덧붙인다
     """
     runners = list(runners) if isinstance(runners, (list, tuple)) else [runners]
     graph = runners[0].graph
@@ -1216,17 +1286,31 @@ def _coupled_guards(decisions, runners):
             continue
         # c1은 상한 쪽(raw > hi && inc > 0), c3은 하한 쪽 — 한계가 상수인 쪽만 정당화한다. 반대편이 신호면 그 신호가
         # 상수 쪽을 **넘지 않음이 그래프에서 보장될 때만** 인정한다: 신호 상한이 상수 하한 아래로 내려가는 스텝에는 적분기
-        # 클램프가 상한으로 가 i < lo가 되고, 그러면 raw < lo가 kp·e < 0을 함의하지 않는다(상한 쪽도 대칭)
+        # 클램프가 상한으로 가 i < lo가 되고, 그러면 raw < lo가 kp·e < 0을 함의하지 않는다(상한 쪽도 대칭).
+        # 포트라도 전 스텝 상수임이 그래프·이미지 값에서 보장되면(상자로 자른 표가 전 값에서 상자 밖 — `_port_const`)
+        # 상수 한계로 본다 — 전 이미지에서 성립해야 하고, 문구에 그 수치와 전제를 싣는다
+        lims, notes = {}, []
+        for side in ("out_lo", "out_hi"):
+            ref = node.gains.get(side)
+            if ref is None:
+                lims[side] = [float(getattr(r.instances[nid], side)) for r in runners]
+                continue
+            facts = [_port_const(graph, r, ref) for r in runners]
+            if all(f is not None for f in facts):
+                lims[side] = [f["value"] for f in facts]
+                notes.append(_const_port_reason(ref, side, facts))
+            else:
+                lims[side] = None  # 스텝마다 움직일 수 있는 신호
         lo_port, hi_port = node.gains.get("out_lo"), node.gains.get("out_hi")
         cis = []
-        if hi_port is None and (lo_port is None or all(
-                _port_bound(graph, r, lo_port, "hi") <= r.instances[nid].out_hi for r in runners)):
+        if lims["out_hi"] is not None and (lims["out_lo"] is not None or all(
+                _port_bound(graph, r, lo_port, "hi") <= h for r, h in zip(runners, lims["out_hi"]))):
             cis.append(1)
-        if lo_port is None and (hi_port is None or all(
-                _port_bound(graph, r, hi_port, "lo") >= r.instances[nid].out_lo for r in runners)):
+        if lims["out_lo"] is not None and (lims["out_hi"] is not None or all(
+                _port_bound(graph, r, hi_port, "lo") >= lo for r, lo in zip(runners, lims["out_lo"]))):
             cis.append(3)
         if cis:
-            out[d["id"]] = {"cis": tuple(cis), "reason": _COUPLED_REASON}
+            out[d["id"]] = {"cis": tuple(cis), "reason": _COUPLED_REASON + "".join(notes)}
     return out
 
 
@@ -1236,11 +1320,13 @@ def _justify_branches(uncovered, decisions, coupled, files):
     같은 사실이 두 측정에 두 번 나타나는 것뿐이다 — llvm 분기의 '거짓측 미실행'과
     MC/DC의 '독립쌍 부재'는 동일한 구조적 종속의 두 그림자다.
     """
-    just_cols = {}
+    just_cols, reasons = {}, {}
     by_id = {d["id"]: d for d in decisions}
     for did, info in coupled.items():
         d = by_id[did]
         line_text = files[d["file"]].split("\n")[d["line"] - 1]
+        # 문구는 결정의 것 그대로 — 상수로 잘린 신호 한계면 그 수치·전제가 붙어 있다(MC/DC 쪽과 같은 문장)
+        reasons[(d["file"], d["line"])] = info["reason"]
         for ci in info["cis"]:
             col = line_text.find(d["conditions"][ci])
             if col >= 0:
@@ -1249,7 +1335,7 @@ def _justify_branches(uncovered, decisions, coupled, files):
     for u in uncovered:
         cols = just_cols.get((u["file"], u["line"]), set())
         if u.get("col") in cols and u["missing"] == "거짓측":
-            justified.append({**u, "reason": _COUPLED_REASON})
+            justified.append({**u, "reason": reasons[(u["file"], u["line"])]})
         else:
             remaining.append(u)
     return remaining, justified

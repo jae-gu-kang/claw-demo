@@ -309,38 +309,38 @@
     "design": {
       "scas": {
         "pitch": {
-          "kp": -2.0,
-          "ki": -0.5,
-          "k_rate": 0.4,
+          "kp": -0.7754485733491393,
+          "ki": -0.2804588964787171,
+          "k_rate": 0.08964913414790522,
           "washout_tau": 0.0
         },
         "roll": {
-          "kp": 1.0,
-          "ki": 0.1,
-          "k_rate": -0.2,
+          "kp": 0.478579847750273,
+          "ki": 0.191863786083933,
+          "k_rate": -0.11782711922404399,
           "washout_tau": 0.0
         },
         "yaw": {
           "kp": 0.5,
           "ki": 0.0,
-          "k_rate": 0.8,
+          "k_rate": 0.33352648902135773,
           "washout_tau": 2.0
         }
       },
       "autopilot": {
-        "kp_spd": 0.15,
-        "ki_spd": 0.03,
+        "kp_spd": 0.07637872624403545,
+        "ki_spd": 0.024215168362923225,
         "tau_spd": 2.0,
-        "kp_alt": 0.0098,
-        "ki_alt": 0.00098,
-        "k_hdot": -0.0196,
+        "kp_alt": 0.04344032498535738,
+        "ki_alt": 0.010585536973215789,
+        "k_hdot": -0.04178154765867609,
         "tau_alt": 5.0,
-        "kp_hdg": 1.633,
+        "kp_hdg": 1.4273348540965236,
         "ki_hdg": 0.0,
         "tau_hdg": 1.0,
-        "kp_vs": 0.196,
-        "ki_vs": 0.049,
-        "tau_vs": 2.0,
+        "kp_vs": 0.04178154765867609,
+        "ki_vs": 0.027150203115848363,
+        "tau_vs": 0.5,
         "theta_lo": -0.3,
         "theta_hi": 0.3,
         "phi_max": 0.7,
@@ -349,8 +349,149 @@
       },
       "k_diff_thr": 0.0,
       "provenance": {
-        "source": "example",
-        "note": "구 합성 기체(1200 kg)의 설계점 M0.6 h1000 fuel200 선형모델 고유치 스캔 + 비선형 폐루프 확인(구 fcl/demo.py)에서 정한 게인을 200 kg급 무게비 상사(r=1/6, s=√r≈0.408)로 이어받음 — SCAS 그대로, 설계 마하 s배(M0.2449), 자동조종 고도·승강률 1/s·헤딩 s 보정 (v1.10)"
+        "source": "seed_basis",
+        "note": "2026-09-28 재튜닝 — 게인 수치는 툴의 산출 근거 직행(design.basis.apply_seed_basis)을 두 점에서 돌린 출력 그대로다. 게인 탭 게이트가 작동기(30 rad/s·ζ 0.7)와 지연 35 ms를 넣어 레이트 루프 GM/PM을 재자, 구 합성 기체에서 상사로 물려받은 SCAS(피치 −2/−0.5/0.4 · 롤 1/0.1/−0.2 · 요 k_rate 0.8)가 기본 격자 15칸에서 피치 레이트 발산·롤 레이트 GM/PM 미달로 FAIL이었다(hard fail 66). SCAS는 case(기본 격자 trim_grid의 최대 동압 모서리 — 마하 끝·최저 고도·연료 절반)에서 잰다: 스케줄이 마하 1축 q̄ 역비라 고도를 싣지 못해, 루프 이득이 가장 큰 점에서 여유를 맞추면 격자의 나머지는 이득이 낮아진다. 자동조종은 autopilot_case(미션 템플릿 접근 속도의 해면 마하)의 시간척도 휴리스틱이다 — 휴리스틱이 설계점 속도에 비례·반비례하고 자동조종은 스케줄되지 않는데, 착륙을 정하는 것은 접근·플레어 구간이다. 순항 속도 점(M0.1293)에서 잡으면 속도 루프가 세져 EO/IR형 M0.22·3000 m의 추력 여유(표준 기동, depth full)가 0.016으로 하한 0.05 밑이었다(접근 속도 점 0.080 · 구 게인 0.073). 사람이 정한 것 셋: targets_override(단주기 감쇠 목표 0.7→0.85 — 0.7은 기본 미션에서 EO/IR형 접지가 활주로 시단 228 m 앞(tau_vs 1.0), 0.9는 게이트 pitch_rate GM 5.76 dB로 fail), 자동조종 tau_vs 2.0→0.5(승강률 명령필터 — 구 게인의 강한 승강률 루프(kp_vs 0.196)에 맞춘 값이라 툴의 완만한 루프(kp_vs 0.042) 위에서는 플레어가 강하를 늦게 세운다: EO/IR형 접지 2.0 −41 m · 1.0 +88 m · 0.5 +169 m), 스케줄 대상에 yaw.k_rate 편입(한 점 요 댐퍼를 그대로 두면 저동압 끝 M0.14·3000 m의 ζ_dr 0.41로 warn — 쇼케이스 기체와 같은 7자리 스케줄). 게이트 결과(기본 격자 15칸 선형, 기본형·EO/IR형): hard fail 0 — ① ζ ok · ② GM warn(roll_rate 6.34·7.25 dB @M0.14_h100) · ③ PM ok · ④ 롤 λ warn(7.78·6.95 rad/s @M0.14_h3000). ②④ warn은 마하 1축 스케줄의 몫이다 — 해면 쪽 롤 GM 8 dB와 3000 m 쪽 λ 12를 한 게인으로 함께 얻을 수 없다(고도·동압 스케줄 축이나 낮은 λ 목표가 있어야 한다). 기본 미션(웹 기본값) 접지: 기본형 활주로 축 +272 m · EO/IR형 +169 m, 횡 +11 m(구 게인 +260 · +237 m)",
+        "plant_fingerprint": "a2777da81972fa3c",
+        "case": {
+          "name": "M0.22_h100_f25",
+          "mach": 0.22,
+          "alt": 100.0,
+          "fuel": 25.0
+        },
+        "e_ref_dps": 10.0,
+        "targets": {
+          "pm_deg": 50.0,
+          "gm_db": 8.0,
+          "zeta_sp": 0.85,
+          "zeta_dr": 0.6,
+          "roll_lambda": 12.0,
+          "wc_ratio_att": 3.0,
+          "ki_zero_frac": 0.125,
+          "backoff": 0.7,
+          "wc_att_floor_frac": 0.05,
+          "wc_att_ok_frac": 0.2
+        },
+        "slots": {
+          "pitch.k_rate": {
+            "k": 0.11162130652829386,
+            "stored": 0.08964913414790522,
+            "schedule_factor": 1.2450907372305284,
+            "achieved": 0.8494621045103491,
+            "stable": true,
+            "budget_ok": true
+          },
+          "yaw.k_rate": {
+            "k": 0.41527074210151205,
+            "stored": 0.33352648902135773,
+            "schedule_factor": 1.2450907372305284,
+            "achieved": 0.63202266937569,
+            "stable": true,
+            "budget_ok": true
+          },
+          "roll.k_rate": {
+            "k": -0.1467054547404143,
+            "stored": -0.11782711922404399,
+            "schedule_factor": 1.2450907372305284,
+            "achieved": 11.933750875515033,
+            "stable": true,
+            "budget_ok": true
+          },
+          "pitch.kp/ki": {
+            "kp": -0.9655038358756414,
+            "ki": -0.3491967741795463,
+            "stored_kp": -0.7754485733491393,
+            "stored_ki": -0.2804588964787171,
+            "schedule_factor_kp": 1.2450907372305284,
+            "schedule_factor_ki": 1.2450907372305284,
+            "passing": true,
+            "reason": "ok"
+          },
+          "roll.kp/ki": {
+            "kp": 0.5958753354590615,
+            "ki": 0.23888782286308455,
+            "stored_kp": 0.478579847750273,
+            "stored_ki": 0.191863786083933,
+            "schedule_factor_kp": 1.2450907372305284,
+            "schedule_factor_ki": 1.2450907372305284,
+            "passing": true,
+            "reason": "ok"
+          }
+        },
+        "autopilot": {
+          "kp_spd": "heuristic",
+          "ki_spd": "heuristic",
+          "tau_spd": "document",
+          "kp_alt": "heuristic",
+          "ki_alt": "heuristic",
+          "k_hdot": "heuristic",
+          "tau_alt": "document",
+          "kp_hdg": "heuristic",
+          "ki_hdg": "heuristic",
+          "tau_hdg": "document",
+          "kp_vs": "heuristic",
+          "ki_vs": "heuristic",
+          "tau_vs": "document",
+          "theta_lo": "document",
+          "theta_hi": "document",
+          "phi_max": "document",
+          "k_pitch_turn": "document",
+          "k_thr_turn": "document"
+        },
+        "autopilot_notes": [],
+        "yaw_attitude": "document",
+        "schedule": "document",
+        "autopilot_case": {
+          "name": "M0.11_h0_f25",
+          "mach": 0.1055,
+          "alt": 0.0,
+          "fuel": 25.0
+        },
+        "targets_override": {
+          "zeta_sp": 0.85
+        },
+        "replaced": {
+          "source": "example",
+          "scas": {
+            "pitch": {
+              "kp": -2.0,
+              "ki": -0.5,
+              "k_rate": 0.4,
+              "washout_tau": 0.0
+            },
+            "roll": {
+              "kp": 1.0,
+              "ki": 0.1,
+              "k_rate": -0.2,
+              "washout_tau": 0.0
+            },
+            "yaw": {
+              "kp": 0.5,
+              "ki": 0.0,
+              "k_rate": 0.8,
+              "washout_tau": 2.0
+            }
+          },
+          "autopilot": {
+            "kp_spd": 0.15,
+            "ki_spd": 0.03,
+            "tau_spd": 2.0,
+            "kp_alt": 0.0098,
+            "ki_alt": 0.00098,
+            "k_hdot": -0.0196,
+            "tau_alt": 5.0,
+            "kp_hdg": 1.633,
+            "ki_hdg": 0.0,
+            "tau_hdg": 1.0,
+            "kp_vs": 0.196,
+            "ki_vs": 0.049,
+            "tau_vs": 2.0,
+            "theta_lo": -0.3,
+            "theta_hi": 0.3,
+            "phi_max": 0.7,
+            "k_pitch_turn": 0.05,
+            "k_thr_turn": 0.0
+          }
+        }
       }
     },
     "schedule": {
@@ -387,7 +528,8 @@
         "pitch.k_rate",
         "roll.kp",
         "roll.ki",
-        "roll.k_rate"
+        "roll.k_rate",
+        "yaw.k_rate"
       ]
     },
     "alloc": {
