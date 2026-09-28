@@ -742,3 +742,30 @@ def test_apply_seed_basis_writes_a_provisional_design(client, unseeded_doc):
     bad = client.post("/api/profiles/sb-apply/apply-seed-basis",
                       json={"base_revision": 4, "mach": 0.05, "alt": 1000.0, "fuel": 200.0})
     assert bad.status_code == 422  # 트림 불성립 조건 — 반쪽 설계를 쓰지 않는다
+
+
+# ── 평가 기준 조회 (기준 통합 ① S3a) ─────────────────────────────────────────────
+
+
+def test_기준_조회는_적용값·적은_칸·기본값·판정선_뜻을_함께_준다(client):
+    got = client.get(f"/api/profiles/{EXAMPLE_ID}/criteria")
+    assert got.status_code == 200, got.text
+    b = got.json()
+    assert b["echo"]["source"] == "default" and b["echo"]["scheme"]
+    assert b["written"] == {"criteria": None, "tuning": None}
+    assert b["applied"] == b["defaults"]
+    assert {ln["metric"] for ln in b["lines"]} >= {"pm_deg", "gm_db", "zeta_sp", "zeta_dr"}
+    assert b["statuses"] == ["fail", "warn", "ok", "na"]
+    assert b["target_conflicts"] == []
+
+    doc = _doc("strict-delta")
+    doc["criteria"] = {"margin": {"pm_min_deg": 50.0}}
+    doc["tuning"] = {"targets": {"pm_deg": 48.0}}  # 합격선보다 느슨하다 — 저장은 되고 충돌로 보인다
+    assert client.post("/api/profiles", json={"document": doc}).status_code == 201
+    s = client.get("/api/profiles/strict-delta/criteria").json()
+    assert s["echo"]["source"] == "profile"
+    assert s["applied"]["margin"]["pm_min_deg"] == 50.0 and s["defaults"]["margin"]["pm_min_deg"] == 45.0
+    assert s["written"]["criteria"] == {"margin": {"pm_min_deg": 50.0}}
+    assert s["echo"]["judgement_fingerprint"] != b["echo"]["judgement_fingerprint"]
+    assert [c["level"] for c in s["target_conflicts"]] == ["pass"]
+    assert client.get("/api/profiles/nope/criteria").status_code == 404

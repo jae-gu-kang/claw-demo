@@ -47,7 +47,9 @@ from claw.trim import (
     trim_batch,
 )
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
-from claw_server.refs import ProfileRef, profile_echo, profile_error_detail, profile_query, resolve_profile
+from claw_server.refs import (
+    ProfileRef, criteria_echo, profile_echo, profile_error_detail, profile_query, resolve_criteria, resolve_profile,
+)
 from claw_server.serialize import to_jsonable, trim_result_dict
 
 router = APIRouter(tags=["analysis"])
@@ -285,6 +287,18 @@ def _with_closed(margins, others) -> dict:
     if not others:
         return margins
     return {**margins, "closed_with": [o.name for o, _g in others]}
+
+
+def _with_status(margins: dict, mc) -> dict:
+    """칸의 마진 dict + 엔진 판정(프로파일 기준) — 화면이 PM·GM 색을 다시 짜지 않게 판정을 싣는다.
+    pm_status = judge_pm, gm_status = judge_gm, status = judge({pm_deg, gm_db}) (= 둘의 합산). nan이면 na(judge와 같다).
+    to_jsonable 전의 날 수치로 판정한다(nan·inf가 JSON 표현으로 바뀌기 전)."""
+    return {
+        **margins,
+        "pm_status": mc.judge_pm(margins["pm_deg"]),
+        "gm_status": mc.judge_gm(margins["gm_db"]),
+        "status": mc.judge({"pm_deg": margins["pm_deg"], "gm_db": margins["gm_db"]}),
+    }
 
 
 def _trim_only_entry(tr) -> dict:
@@ -688,6 +702,9 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
     # 법칙 게인 루프 — 조립 실패는 잡을 걸기 전에 422. 게인은 트림과 무관하게 칸(마하·고도·연료)만으로 정해지므로
     # 격자 전 칸에서 0인 루프도 여기서 거절한다(요청 게인 kp=ki=0 루프의 422와 같은 판정). 일부 칸만 0이면 그 칸만
     # 마진 없이 사유(note)를 단다
+    # 칸의 판정은 프로파일 기준 한 벌로(기준 통합 ① S3a) — 마진 맵은 요청 기준을 받지 않는다
+    crit, crit_source = resolve_criteria(profile)
+    crit_block = criteria_echo(crit, crit_source)
     law_gains = _LawGains(profile, req.loops)
     for lp in law_gains.loops:
         if all(_zero(law_gains.at(lp, c)) for c in cases):
@@ -741,7 +758,8 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                         # 부호를 그대로 칠하면 다중 교차 레이트 루프가 안정인데도 "음수"로 칠해졌다(e2e D2). 같은 축의 나머지
                         # 루프는 닫고 끊는다(broken_loop) — 연 채로 재면 기체가 실제로 나는 폐루프가 아니다(요 댐퍼를 연
                         # roll_p의 나선 발산). 루프가 축마다 하나이고 교차가 하나씩이며 폐루프가 안정이면 종전과 비트 같다(골든)
-                        entry["margins"][spec.name] = to_jsonable(_with_closed(nyquist_margins(loop), others))
+                        entry["margins"][spec.name] = to_jsonable(
+                            _with_status(_with_closed(nyquist_margins(loop), others), crit.margin))
                     if zero:
                         entry["note"] = f"법칙 게인이 이 칸에서 0 — 제로 개루프라 마진 없음: {', '.join(zero)}"
                 except (ValueError, ArithmeticError) as e:
@@ -763,12 +781,15 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                 "pade_order": req.pade_order,
                 "n_requested": n,
                 "profile": profile_echo(profile),
+                # 칸의 status 필드를 낸 기준 — profile 블록과 따로(profile 블록은 골든이 바이트로 못박는다)
+                "criteria_echo": crit_block,
                 # 법칙 게인 루프가 있을 때만 — 칸별 게인(entry.gains)을 어느 표에서 읽었나
                 **({"profile_gains": law_gains.provenance(profile)} if law_gains.loops else {}),
             },
             meta={
                 "kind": "margin_map",
                 "profile": profile_echo(profile),
+                "criteria_echo": crit_block,
                 "created": job.created,
                 "n": len(entries),
                 "fingerprint": req.fingerprint,

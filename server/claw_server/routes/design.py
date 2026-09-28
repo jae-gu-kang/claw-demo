@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 import copy
+import dataclasses
 from datetime import datetime, timezone
 
 from claw.design import AutoDesignConfig, DesignSession, design_inputs, resample_to_table
@@ -30,7 +31,8 @@ from claw.design.tune import REASON_TEXT
 from claw.profile import ProfileError, build_profile
 from claw.profile.fingerprint import gain_tables_basis_fingerprint
 from claw_server.profiles import EXAMPLE_ID, ProfileConflict, ProfileReadOnly, ProfileUnreadable
-from claw_server.refs import ProfileRef, profile_echo, profile_error_detail, resolve_profile, resolve_snapshot
+from claw_server.refs import (ProfileRef, criteria_echo, profile_echo, profile_error_detail, resolve_criteria,
+                              resolve_profile, resolve_snapshot)
 from claw.tables import PolyTable
 from claw_server.serialize import to_jsonable
 
@@ -110,8 +112,17 @@ def _check_number(where: str, v) -> None:
         raise ValueError(f"비유한값 config — {where}: {v!r}")
 
 
-def _build_config(overrides: dict) -> AutoDesignConfig:
+def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
+    """요청 config(부분 덮어쓰기) → AutoDesignConfig.
+
+    바탕은 엔진 기본값이되 **판정선(criteria)·튜닝 목표(targets)는 기체 프로파일의 기준**
+    (`profile_criteria` = GainEvalCriteria — 그 margin·targets)이다 (기준 통합 ① S3a). 없으면
+    (테스트 등) 엔진 기본값 그대로다. 요청의 criteria·targets는 아직 받아 그 위에 한 단계로
+    얹는다 — 거절은 다음 단계(S3b)다."""
     base = AutoDesignConfig().to_dict()
+    if profile_criteria is not None:
+        base["criteria"] = profile_criteria.margin.to_dict()
+        base["targets"] = profile_criteria.targets.to_dict()
     unknown = sorted(set(overrides) - set(base))
     if unknown:
         raise ValueError(f"미정의 config 키 {unknown} — 허용: {sorted(base)}")
@@ -262,8 +273,17 @@ def _ledger_payload(session: DesignSession) -> dict:
     }
 
 
+def _config_criteria_echo(profile, cfg: AutoDesignConfig, source: str) -> dict:
+    """실제로 쓴 config의 기준 블록 — 프로파일 기준 한 벌에서 margin·targets만 config 것으로 바꿔 지문을 잰다.
+    자동 설계가 판정·튜닝에 쓰는 것은 그 둘이고, 요청 덮어쓰기가 있었다면 지문이 그것을 반영해야 한다."""
+    crit = dataclasses.replace(profile.eval_criteria, margin=cfg.criteria, targets=cfg.targets)
+    return criteria_echo(crit, source)
+
+
 def _save_session(store, job, session: DesignSession, fingerprint: str,
-                  parent: str | None = None, *, profile) -> None:
+                  parent: str | None = None, *, profile, criteria: dict) -> None:
+    """criteria — 기준 블록(criteria_echo). 부르는 쪽이 판정·튜닝에 **실제로 쓴** 설정에서 재 넘긴다(제출·재개가
+    출처를 안다) — 여기서 기체 기준으로 다시 재면 재개 세션의 저장된 설정과 어긋날 수 있다."""
     payload = session.to_dict()
     payload["report"] = session.report()
     payload["proposed_actions"] = session.proposed_actions()
@@ -275,12 +295,15 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
     payload.update(_ledger_payload(session))
     # 이 세션이 설계한 기체 — 재개는 이 지문의 스냅숏으로 같은 기체를 되살린다 (02 §5.6)
     payload["profile"] = profile_echo(profile)
+    # 어느 기준으로 판정·튜닝했나 — profile 블록과 따로 둔다(refs.criteria_echo 머리말)
+    payload["criteria_echo"] = criteria
     store.save(
         job.id,
         to_jsonable(payload),
         meta={
             "kind": "auto_design",
             "profile": profile_echo(profile),
+            "criteria_echo": criteria,
             "created": job.created,
             "status": session.status,
             "stage": session.stage,
@@ -292,7 +315,7 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
 
 
 def _run_session_job(request, response, session: DesignSession, fingerprint: str,
-                     parent: str | None = None, *, profile) -> dict:
+                     parent: str | None = None, *, profile, criteria: dict) -> dict:
     store = request.app.state.store
     try:
         # 기체가 주는 값 전부 — 한 경로(엔진 design_inputs)에서 뽑는다:
@@ -315,7 +338,7 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
             fingerprint=fingerprint,
             on_progress=lambda done, total, msg: job.report(done, total, message=msg),
         )
-        _save_session(store, job, session, fingerprint, parent=parent, profile=profile)
+        _save_session(store, job, session, fingerprint, parent=parent, profile=profile, criteria=criteria)
 
     job = request.app.state.jobs.submit("auto_design", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"
@@ -345,15 +368,20 @@ def design_defaults() -> dict:
 
 @router.post("/design/auto", status_code=202)
 def submit_auto_design(req: AutoDesignIn, request: Request, response: Response) -> dict:
+    # 기준은 기체 프로파일에서 온다 — 판정선·튜닝 목표의 바탕이 그 기체의 /criteria·/tuning이다
+    profile = resolve_profile(request, req.profile)
+    base_crit, source = resolve_criteria(profile)
+    if "criteria" in req.config or "targets" in req.config:
+        source = "request"  # 옮겨 가는 동안만 받는 덮어쓰기 (S3b에서 거절)
     try:
-        cfg = _build_config(req.config)
+        cfg = _build_config(req.config, base_crit)
     except (ValueError, TypeError) as e:
         # 데이터클래스는 값을 강제 변환하지 않는다 — 타입이 틀린 스칼라는 __post_init__의
         # 비교에서 TypeError로 나온다. 형제 라우트(sim·codegen·influence)와 같은 정책으로
         # 422에 매핑한다 (놓치면 500)
         raise HTTPException(status_code=422, detail=str(e))
-    return _run_session_job(request, response, DesignSession(cfg), req.fingerprint,
-                            profile=resolve_profile(request, req.profile))
+    return _run_session_job(request, response, DesignSession(cfg), req.fingerprint, profile=profile,
+                            criteria=_config_criteria_echo(profile, cfg, source))
 
 
 class ApplyGainsIn(BaseModel):
@@ -538,5 +566,10 @@ def resume_auto_design(result_id: str, req: ResumeIn, request: Request,
             status_code=409,
             detail=f"재개 불가 상태: {session.status} (awaiting_approval·cancelled만 재개)",
         )
+    # 재개는 저장된 세션 config(판정선·목표 포함)를 그대로 쓴다 — 기준을 다시 풀지 않는다. 그래서 기준 블록도
+    # 저장된 것을 그대로 잇는다(출처 보존). 블록이 없는 옛 결과는 저장 config로 재되 출처는 "snapshot"이다 —
+    # 스냅숏 기체의 나머지 기준 그룹이 그 결과를 낸 기준이라는 보장이 없다(refs.resolve_criteria 머리말)
+    profile = resolve_snapshot(request, payload.get("profile"))
+    criteria = payload.get("criteria_echo") or _config_criteria_echo(profile, session.config, "snapshot")
     return _run_session_job(request, response, session, req.fingerprint,
-                            parent=result_id, profile=resolve_snapshot(request, payload.get("profile")))
+                            parent=result_id, profile=profile, criteria=criteria)

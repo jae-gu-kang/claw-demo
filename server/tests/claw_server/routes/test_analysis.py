@@ -818,7 +818,8 @@ def test_margin_map_closes_the_other_loops_of_the_same_axis(client, wait_job):
     for tr, e in zip(trs, body["cases"]):
         _lon, lat = split_axes(linearize(ac, tr))
         want = nyquist_margins(broken_loop(lat, "p", "da", -0.3, others=[yaw], **ad))
-        got = {k: v for k, v in e["margins"]["roll_p"].items() if k != "closed_with"}
+        got = {k: v for k, v in e["margins"]["roll_p"].items()
+               if k not in ("closed_with", "pm_status", "gm_status", "status")}  # 판정은 기준의 몫(따로 핀)
         assert got == to_jsonable(want), tr.case.name
 
     # 끄면 종전 — 한 루프짜리 요청과 같은 칸
@@ -864,3 +865,57 @@ def test_bode_closes_the_same_others_as_the_cell(client, wait_job):
     dup = client.post("/api/analysis/bode", json={
         "case": t["case"], "loop": loops["roll_p"], "others": [loops["roll_p"]], **_ACT, "z0": z0})
     assert dup.status_code == 422 and "중복" in dup.text
+
+
+# ── 칸의 엔진 판정 (기준 통합 ① S3a) ─────────────────────────────────────────────
+# M0.4·kp 0.3·ki 2.0·지연 35 ms(Padé 2차) — 실측 PM 41.3°·GM 9.45 dB. PM이 30~45°라 종전 화면(plot.js)이 「주의」로
+# 칠하던 칸인데 엔진 판정선(pm_min_deg 45)은 fail이다 — 서버가 판정을 실어 그 어긋남을 없앤다
+def _pm41_request(profile_id=None):
+    req = {
+        "cases": [{"mach": 0.4, "alt": 1000.0, "fuel": 200.0}],
+        "loops": [{"name": "pitch_q", "axis": "lon", "x_out": "q", "u_in": "de", "kp": 0.3, "ki": 2.0}],
+        "delay_s": 0.035, "pade_order": 2,
+    }
+    if profile_id is not None:
+        req["profile"] = {"id": profile_id}
+    return req
+
+
+def _map_body(client, wait_job, req):
+    j = wait_job(client.post("/api/analysis/margin-map", json=req).json()["id"])
+    assert j["status"] == "done", j
+    return client.get(f"/api/results/{j['result_id']}").json()
+
+
+def test_margin_map_cells_carry_the_engine_verdict(client, wait_job):
+    from claw.design.criteria import MarginCriteria
+
+    body = _map_body(client, wait_job, _pm41_request())
+    m = body["cases"][0]["margins"]["pitch_q"]
+    assert 30.0 < m["pm_deg"] < 45.0 and m["gm_db"] >= 8.0  # 이 칸의 전제 — 수치가 옮겨 가면 픽스처를 고친다
+    assert m["pm_status"] == "fail" and m["gm_status"] == "ok" and m["status"] == "fail"
+    mc = MarginCriteria()
+    assert m["status"] == mc.judge(m) and m["pm_status"] == mc.judge_pm(m["pm_deg"])
+    assert m["gm_status"] == mc.judge_gm(m["gm_db"])
+    # 기준 블록 — 결과와 목록 meta 둘 다. 예제 기체는 /criteria가 없어 도구 기본값
+    crit = body["criteria_echo"]
+    assert crit["source"] == "default" and len(crit["judgement_fingerprint"]) == 16
+    meta = client.get("/api/results").json()[0]
+    assert meta["criteria_echo"] == crit
+
+
+def test_margin_map_verdict_follows_the_profile_criteria(client, wait_job):
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="pm30-delta", name="PM 30° 기준 기체", is_example=False, variants=[])
+    d["criteria"] = {"margin": {"pm_min_deg": 30.0}}
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    base = _map_body(client, wait_job, _pm41_request())
+    body = _map_body(client, wait_job, _pm41_request("pm30-delta"))
+    m0, m = base["cases"][0]["margins"]["pitch_q"], body["cases"][0]["margins"]["pitch_q"]
+    assert m["pm_deg"] == m0["pm_deg"]  # 수치는 같고 판정만 기준을 따른다
+    assert m0["pm_status"] == "fail" and m["pm_status"] == "ok" and m["status"] == "ok"
+    assert body["criteria_echo"]["source"] == "profile"
+    assert body["criteria_echo"]["judgement_fingerprint"] != base["criteria_echo"]["judgement_fingerprint"]
+    assert body["profile"]["id"] == "pm30-delta"

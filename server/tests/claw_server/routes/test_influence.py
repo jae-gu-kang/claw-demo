@@ -735,3 +735,86 @@ def test_verify_mission_knob_validation(client):
         **base, "depth": "linear",
         "criteria": {"schedule": {"mission": False}},
     }).status_code == 202
+
+
+
+# ---------- 기준 통합 S3a — 판정 라우트는 기체 프로파일의 기준을 쓰고 출처를 밝힌다 ----------
+
+
+def _linear_evaluate(client, wait_job, **over):
+    """단계 1(시뮬 0) 평가 → (본문, 저장 meta)."""
+    r = client.post("/api/influence/evaluate", json={
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "depth": "linear", **over,
+    })
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=120.0)
+    assert j["status"] == "done", j
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    root = client.app.state.store.root
+    meta = json.loads((root / f"{j['result_id']}.meta.json").read_text(encoding="utf-8"))
+    return res, meta
+
+
+def test_evaluate_echoes_default_criteria_for_the_example(client, wait_job):
+    """/criteria 없는 예제 → 도구 기본값(source default). 본문의 기준 전문·옛 지문은 그대로."""
+    from claw.pipeline.criteria import JUDGEMENT_SCHEME, GainEvalCriteria
+
+    res, meta = _linear_evaluate(client, wait_job)
+    d = GainEvalCriteria()
+    echo = {"judgement_fingerprint": d.judgement_fingerprint(),
+            "targets_fingerprint": d.targets_fingerprint(),
+            "scheme": JUDGEMENT_SCHEME, "source": "default"}
+    assert res["criteria_echo"] == echo and meta["criteria_echo"] == echo
+    assert res["criteria"] == d.to_dict()  # 엔진이 실은 기준 전문 — 덮이지 않는다
+    assert res["criteria_fingerprint"] == d.fingerprint() == meta["criteria_fingerprint"]
+    assert res["profile"] == meta["profile"]
+
+
+def test_evaluate_uses_profile_criteria(client, wait_job):
+    """프로파일 /criteria.margin.pm_min_deg가 판정선이 된다 — 요청이 기준을 안 들고 와도."""
+    from claw.pipeline.criteria import GainEvalCriteria
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id="strict-delta", name="엄격한 델타", description="시험용", is_example=False, variants=[])
+    d["criteria"] = {"margin": {"pm_min_deg": 89.0}}
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+
+    base, _ = _linear_evaluate(client, wait_job)
+    res, meta = _linear_evaluate(client, wait_job, profile={"id": "strict-delta"})
+    strict = GainEvalCriteria.from_dict({"margin": {"pm_min_deg": 89.0}})
+    assert res["criteria_echo"]["source"] == meta["criteria_echo"]["source"] == "profile"
+    assert res["criteria_echo"]["judgement_fingerprint"] == strict.judgement_fingerprint()
+    assert res["criteria_echo"]["judgement_fingerprint"] != base["criteria_echo"]["judgement_fingerprint"]
+    assert res["criteria"]["margin"]["pm_min_deg"] == 89.0  # 판정에 쓴 기준 전문
+    assert base["criteria"]["margin"]["pm_min_deg"] != 89.0
+    # PM 카드의 판정선이 프로파일 값이고, 89°는 실제 PM이 못 넘으니 판정이 실패다
+    pm_base = next(c for c in base["cards"] if c["key"] == "pm")
+    pm = next(c for c in res["cards"] if c["key"] == "pm")
+    assert pm_base["threshold"]["pm_min_deg"] == GainEvalCriteria().margin.pm_min_deg
+    assert pm["threshold"]["pm_min_deg"] == 89.0
+    assert pm["primary"] == pm_base["primary"]  # 같은 기체·형상 — 잰 값은 같고 판정선만 다르다
+    assert pm["status"] == "fail"
+    assert any(f["check"] == "margins.pm" and f["limit"] == 89.0
+               for f in res["cases"][0]["hard_fails"])
+
+
+def test_evaluate_request_criteria_are_still_accepted(client, wait_job):
+    """요청 기준은 옮겨 가는 동안 받는다 — 출처 request. 형식 오류는 여전히 422."""
+    res, meta = _linear_evaluate(client, wait_job, criteria={"margin": {"pm_min_deg": 50.0}})
+    assert res["criteria_echo"]["source"] == meta["criteria_echo"]["source"] == "request"
+    assert res["criteria"]["margin"]["pm_min_deg"] == 50.0
+    assert client.post("/api/influence/evaluate", json={
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "depth": "linear", "criteria": {"margin": {"pm_min": 1.0}},
+    }).status_code == 422
+
+
+def test_diagnose_echoes_criteria_source(client, wait_job):
+    rid = _run_sim(client, wait_job)
+    body = client.post("/api/influence/diagnose", json={"result_id": rid}).json()
+    assert body["criteria_echo"]["source"] == "default"
+    body = client.post("/api/influence/diagnose",
+                       json={"result_id": rid, "criteria": {"margin": {"pm_min_deg": 50.0}}}).json()
+    assert body["criteria_echo"]["source"] == "request"

@@ -122,3 +122,46 @@ def _seeded(built) -> bool:
     design = built.doc["law"]["design"]
     prov = None if design is None else design["provenance"]
     return isinstance(prov, dict) and prov.get("source") == "quick_seed"
+
+
+# ── 평가 기준 해석 (기준 통합 ① S3a) ─────────────────────────────────────────────
+#
+# 기체 프로파일 = 설계 작업 단위이고, 그 단위의 모든 탭이 프로파일의 기준 한 벌(/criteria 합격·권장선 +
+# /tuning 목표·가중치)로 판정한다. 라우트는 기준을 여기서만 받는다 — 라우트마다 기본값을 따로 만들면 같은 점이
+# 탭마다 다르게 판정된다(기준 통합의 이유). 결과에는 criteria_echo를 싣는다: 어느 기준(지문 둘·판정 함수 버전)
+# 으로, 어디서 온 기준(source)으로 판정했나. 이 블록은 profile_echo와 **따로** 둔다 — profile 블록은 서버 골든이
+# 바이트로 못박고 있고, 기준은 기체가 아니다.
+
+CRITERIA_SOURCES = ("profile", "default", "request", "snapshot")
+
+
+def resolve_criteria(built, request_criteria: dict | None = None):
+    """(GainEvalCriteria, source). 요청이 기준을 주면 그 기준(source "request" — 옮겨 가는 동안만 받는다, S3b에서
+    거절), 아니면 프로파일 기준("profile" | 없으면 도구 기본값 "default").
+
+    스냅숏에서 되살린 기체(built.source == "snapshot")는 source를 "snapshot"으로 밝힌다: 스냅숏은 기체 지문 키로
+    저장되는데 기준은 지문 밖이라, 그 문서의 기준은 **이 기체를 처음 남긴 문서의 기준**일 뿐 그 결과를 낸 기준이라는
+    보장이 없다. 재개 경로는 저장된 결과가 실은 기준을 써야 한다. 요청 기준 형식 오류는 ValueError다(라우트가 422)."""
+    from claw.pipeline.criteria import GainEvalCriteria
+
+    if request_criteria is not None:
+        return GainEvalCriteria.from_dict(request_criteria), "request"
+    if getattr(built, "source", None) == "snapshot":
+        return built.eval_criteria, "snapshot"
+    return built.eval_criteria, built.criteria_source
+
+
+def criteria_echo(crit, source: str) -> dict:
+    """결과 meta·응답에 싣는 기준 블록 — 판정 기준 지문·목표 지문·판정 함수 버전·출처.
+    화면은 이것을 지금 프로파일의 지문과 대조해 「재평가 필요」(판정 기준 지문 다름)·「J 재계산 필요」·「목표와 다름」
+    (목표 지문만 다름)을 가른다. scheme이 없는 옛 결과는 대조할 수 없다(「판정 기준 미상」)."""
+    from claw.pipeline.criteria import JUDGEMENT_SCHEME
+
+    if source not in CRITERIA_SOURCES:
+        raise ValueError(f"기준 출처는 {CRITERIA_SOURCES} 중 하나: {source!r}")
+    return {
+        "judgement_fingerprint": crit.judgement_fingerprint(),
+        "targets_fingerprint": crit.targets_fingerprint(),
+        "scheme": JUDGEMENT_SCHEME,
+        "source": source,
+    }

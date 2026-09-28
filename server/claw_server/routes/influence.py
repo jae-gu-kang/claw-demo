@@ -35,7 +35,7 @@ from claw.pipeline.prescribe import (
 )
 from claw.pipeline.sweep import nonadditivity, plan_shapes, run_sweep, sweep_plan
 from claw.sim import check_law_plant_pairing
-from claw_server.refs import profile_echo, resolve_profile
+from claw_server.refs import criteria_echo, profile_echo, resolve_criteria, resolve_profile
 from claw.trim import trim_batch
 from claw_server.routes.codegen import FlightCodeIn
 from claw_server.routes.sim import _load_sim, build_gain_tables
@@ -190,7 +190,7 @@ def influence_diagnose(req: DiagnoseIn, request: Request) -> dict:
     payload = _load_sim(request, req.result_id, picked=DIAGNOSE_SIGNALS)
     profile = resolve_profile(request, req.profile)
     try:
-        criteria = GainEvalCriteria.from_dict(req.criteria)
+        criteria, crit_source = resolve_criteria(profile, req.criteria)
         out = diagnose_run(payload, to_shape(req, profile), probe_rel=req.probe_rel,
                            thresholds=criteria.to_diagnose_thresholds())
     except (ValueError, TypeError) as e:  # 엔진 판정 → 422 (structural과 같은 정책)
@@ -210,6 +210,7 @@ def influence_diagnose(req: DiagnoseIn, request: Request) -> dict:
         )
     out["result_id"] = req.result_id
     out["profile"] = profile_echo(profile)
+    out["criteria_echo"] = criteria_echo(criteria, crit_source)
     out["elapsed_ms"] = round((time.perf_counter() - t0) * 1000, 1)
     return to_jsonable(out)
 
@@ -418,7 +419,7 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
     cases = build_cases(req.cases)
     try:
         shape = to_shape(req, profile)
-        criteria = GainEvalCriteria.from_dict(req.criteria)
+        criteria, crit_source = resolve_criteria(profile, req.criteria)
         plan = sweep_plan(shape, [], ())
         # 잡 안에서 터지면 이미 돌린 런이 통째로 버려진다 — 기체와 안 맞는 형상은
         # 202를 주기 전에 여기서 걸러 위 except가 422로 바꾼다 (독스트링의 계약)
@@ -455,6 +456,7 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
         payload = to_jsonable(out)
         payload["kind"] = "influence_scan"
         payload["profile"] = profile_echo(profile)
+        payload["criteria_echo"] = criteria_echo(criteria, crit_source)
         # 문턱은 평가 기준 정본에서 — 진단·평가·스캔이 각자 상수를 들면 같은 런이
         # 화면마다 다른 판정을 받는다 (02 §5.5)
         payload["grid"] = to_jsonable(diagnose_grid(
@@ -462,7 +464,8 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
             local_frac=criteria.schedule.local_frac))
         store.save(
             job.id, payload,
-            meta={"kind": "influence_scan", "profile": profile_echo(profile), "created": job.created,
+            meta={"kind": "influence_scan", "profile": profile_echo(profile),
+                  "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
                   "n": len(out["rows"]), "fingerprint": req.fingerprint},
         )
         job.result_id = job.id
@@ -534,7 +537,7 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
     cases = build_cases(req.cases)
     try:
         shape = to_shape(req, profile)
-        criteria = GainEvalCriteria.from_dict(req.criteria)
+        criteria, crit_source = resolve_criteria(profile, req.criteria)
         check_law_plant_pairing(ac, make_law(shape))
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -562,9 +565,13 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
         payload = to_jsonable(out)
         payload["kind"] = "influence_evaluate"
         payload["profile"] = profile_echo(profile)
+        # 본문의 "criteria"는 엔진이 실은 기준 전문(화면이 판정선을 읽는다)이다 — 기준 블록은 모든 라우트가 본문·meta
+        # 둘 다 "criteria_echo"로 싣는다(이름 하나로 화면이 결과 종류를 가리지 않고 대조한다)
+        payload["criteria_echo"] = criteria_echo(criteria, crit_source)
         store.save(
             job.id, payload,
-            meta={"kind": "influence_evaluate", "profile": profile_echo(profile), "created": job.created,
+            meta={"kind": "influence_evaluate", "profile": profile_echo(profile),
+                  "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
                   "n": len(out["cases"]), "fingerprint": req.fingerprint,
                   "criteria_fingerprint": out["criteria_fingerprint"]},
         )
@@ -617,7 +624,7 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
             detail=f"'mid/'는 중간점 예약 접두사다 — 케이스 이름 변경 필요: {reserved}")
     try:
         shape = to_shape(req, profile)
-        criteria = GainEvalCriteria.from_dict(req.criteria)
+        criteria, crit_source = resolve_criteria(profile, req.criteria)
         check_law_plant_pairing(ac, make_law(shape))
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -666,9 +673,11 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
         payload = to_jsonable(out)
         payload["kind"] = "influence_verify"
         payload["profile"] = profile_echo(profile)
+        payload["criteria_echo"] = criteria_echo(criteria, crit_source)
         store.save(
             job.id, payload,
-            meta={"kind": "influence_verify", "profile": profile_echo(profile), "created": job.created,
+            meta={"kind": "influence_verify", "profile": profile_echo(profile),
+                  "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
                   "n": expected, "fingerprint": req.fingerprint,
                   "criteria_fingerprint": out["criteria_fingerprint"]},
         )
@@ -731,7 +740,7 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
     cases = build_cases(req.cases)
     try:
         shape = to_shape(req, profile)
-        criteria = GainEvalCriteria.from_dict(req.criteria)
+        criteria, crit_source = resolve_criteria(profile, req.criteria)
         check_law_plant_pairing(ac, make_law(shape))
         # ── 승계 — 평가가 좁혀 준 것을 사용자가 다시 고르지 않는다 ──────────
         inherited = {"metrics": None, "knobs": None, "cases": None,
@@ -870,9 +879,11 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
             "criteria_fingerprint": criteria.fingerprint(),
             "warnings": warnings,
             "profile": profile_echo(profile),
+            "criteria_echo": criteria_echo(criteria, crit_source),
         })
         store.save(job.id, out,
-                   meta={"kind": "influence_prescribe", "profile": profile_echo(profile), "created": job.created,
+                   meta={"kind": "influence_prescribe", "profile": profile_echo(profile),
+                         "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
                          "n": len(knobs), "fingerprint": req.fingerprint,
                          "criteria_fingerprint": criteria.fingerprint()})
         job.result_id = job.id

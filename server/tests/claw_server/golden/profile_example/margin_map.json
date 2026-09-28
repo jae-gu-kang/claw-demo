@@ -1,7 +1,7 @@
 {
  "golden": "margin_map",
  "mode": "full",
- "captured_at": "e75a09f+dirty",
+ "captured_at": "580091d+dirty",
  "value": {
   "dict": {
    "kind": "margin_map",
@@ -291,7 +291,10 @@
           "gm_db": "inf",
           "pm_deg": "f:0x1.67854ea8b6158p+6",
           "wcg": null,
-          "wcp": "f:0x1.2d166f71ca6c0p+4"
+          "wcp": "f:0x1.2d166f71ca6c0p+4",
+          "pm_status": "ok",
+          "gm_status": "ok",
+          "status": "ok"
          }
         }
        }
@@ -584,7 +587,10 @@
           "gm_db": "inf",
           "pm_deg": "f:0x1.6952095d92980p+6",
           "wcg": null,
-          "wcp": "f:0x1.8242d01599dd9p+4"
+          "wcp": "f:0x1.8242d01599dd9p+4",
+          "pm_status": "ok",
+          "gm_status": "ok",
+          "status": "ok"
          }
         }
        }
@@ -877,7 +883,10 @@
           "gm_db": "inf",
           "pm_deg": "f:0x1.6a7178f6a2cd8p+6",
           "wcg": null,
-          "wcp": "f:0x1.e2b0284c22c79p+4"
+          "wcp": "f:0x1.e2b0284c22c79p+4",
+          "pm_status": "ok",
+          "gm_status": "ok",
+          "status": "ok"
          }
         }
        }
@@ -939,6 +948,14 @@
      "plant_fingerprint": "dc86fad3932a3446",
      "is_example": true,
      "source": "default-example"
+    }
+   },
+   "criteria_echo": {
+    "dict": {
+     "judgement_fingerprint": "f8bd767344930845",
+     "targets_fingerprint": "cecc725030d7ef9a",
+     "scheme": "crit-v1",
+     "source": "default"
     }
    }
   }

@@ -17,6 +17,20 @@ def _resolved_example():
     return p
 
 
+def _echo(session) -> dict:
+    """_save_session을 직접 부르는 테스트용 기준 블록 — 라우트처럼 세션 설정에서 잰다(예제 기체 = 도구 기본값)."""
+    from claw_server.routes.design import _config_criteria_echo
+
+    return _config_criteria_echo(_resolved_example(), session.config, "default")
+
+
+def _echo(session) -> dict:
+    """_save_session을 직접 부르는 테스트용 기준 블록 — 라우트처럼 세션 설정에서 잰다(예제 기체 = 도구 기본값)."""
+    from claw_server.routes.design import _config_criteria_echo
+
+    return _config_criteria_echo(_resolved_example(), session.config, "default")
+
+
 def _small_config(**over):
     cfg = {"n_mach": 3, "alts": [1000.0], "fuels": [200.0],
            "budget_points": 24, "budget_iters": 2, "mode": "auto"}
@@ -493,7 +507,7 @@ def test_saved_result_carries_effect_accounting(client):
 
     s = _effect_session()
     job = types.SimpleNamespace(id="effect-x", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, s, "fp-effect", profile=_resolved_example())
+    _save_session(client.app.state.store, job, s, "fp-effect", profile=_resolved_example(), criteria=_echo(s))
     assert job.result_id == "effect-x"
 
     body = client.get("/api/results/effect-x").json()
@@ -520,7 +534,7 @@ def test_saved_effect_log_obeys_nonfinite_policy(client):
 
     s = _effect_session()
     job = types.SimpleNamespace(id="policy-x", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, s, "fp-policy", profile=_resolved_example())  # 여기서 안 터져야 한다
+    _save_session(client.app.state.store, job, s, "fp-policy", profile=_resolved_example(), criteria=_echo(s))  # 여기서 안 터져야 한다
 
     body = client.get("/api/results/policy-x").json()
     eff = body["applied_log"][1]["effect"]
@@ -629,7 +643,7 @@ def test_saved_ledger_keeps_severity_order(client):
     assert want != sorted(want, key=lambda t: (t[0], t[1] or ""))
 
     job = types.SimpleNamespace(id="ledger-order", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, s, "fp-order", profile=_resolved_example())
+    _save_session(client.app.state.store, job, s, "fp-order", profile=_resolved_example(), criteria=_echo(s))
 
     rows = client.get("/api/results/ledger-order").json()["ledger"]
     assert [(r["point"], r["loop"], r["severity"]) for r in rows] == want
@@ -663,7 +677,7 @@ def test_saved_ledger_obeys_nonfinite_policy(client):
                                  "deficit": math.inf, "deficit_frac": math.nan}},
     }]
     job = types.SimpleNamespace(id="ledger-policy", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, s, "fp-lpolicy", profile=_resolved_example())  # 여기서 안 터져야 한다
+    _save_session(client.app.state.store, job, s, "fp-lpolicy", profile=_resolved_example(), criteria=_echo(s))  # 여기서 안 터져야 한다
 
     row = client.get("/api/results/ledger-policy").json()["ledger"][0]
     assert row["severity"] == "inf"  # ±inf → 문자열 (0으로 뭉개면 최악이 최선이 된다)
@@ -689,7 +703,7 @@ def test_saved_ledger_truncation_is_reported(client):
     total = len(s.shortfall_ledger())
     assert total > MAX_LEDGER_ROWS
     job = types.SimpleNamespace(id="ledger-cut", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, s, "fp-cut", profile=_resolved_example())
+    _save_session(client.app.state.store, job, s, "fp-cut", profile=_resolved_example(), criteria=_echo(s))
 
     body = client.get("/api/results/ledger-cut").json()
     assert len(body["ledger"]) == MAX_LEDGER_ROWS
@@ -731,7 +745,7 @@ def test_old_result_without_ledger_still_reads(client):
 
     restored = DesignSession.from_dict(client.app.state.store.load("legacy-noledger"))
     job = types.SimpleNamespace(id="legacy-upgraded", created=0.0, result_id=None)
-    _save_session(client.app.state.store, job, restored, "fp-legacy", profile=_resolved_example())
+    _save_session(client.app.state.store, job, restored, "fp-legacy", profile=_resolved_example(), criteria=_echo(restored))
     up = client.get("/api/results/legacy-upgraded").json()
     assert isinstance(up["ledger"], list)  # 재저장하면 원장이 붙는다
     assert isinstance(up["report"]["ledger_size"], int)
@@ -1106,3 +1120,80 @@ def test_apply_gains_names_off_axis_tables_of_an_old_result(client):
     assert "pitch.kp: alt" in detail["message"], "사유 문장이 자리·축을 짚는다(웹은 message만 보인다)"
     # 문서는 그대로다 — 거부된 반영이 리비전을 만들지 않는다
     assert client.get("/api/profiles/ad-old").json()["revision"] == 1
+
+
+# ── 기준 통합 ① S3a — 판정선·튜닝 목표의 바탕은 기체 프로파일 ─────────────────────
+
+
+def test_example_profile_criteria_leave_the_config_at_tool_defaults():
+    """기준을 안 적은 기체(예제)면 바탕 config가 오늘의 엔진 기본값 그대로다 — 동작 불변."""
+    from claw.design import AutoDesignConfig
+    from claw_server.routes.design import _build_config
+
+    built = _resolved_example()
+    assert built.criteria_source == "default"
+    assert _build_config({}, built.eval_criteria) == AutoDesignConfig()
+    assert _build_config(_small_config(), built.eval_criteria) == _build_config(_small_config())
+
+
+def _spy_design_run(monkeypatch):
+    """실행 대신 즉시 수렴 — 라우트가 만든 config·기준 블록만 본다."""
+    import claw_server.routes.design as design_route
+
+    def spy_run(self, *args, **kwargs):
+        self.status, self.stage = "converged", "DONE"
+        return self.report()
+
+    monkeypatch.setattr(design_route.DesignSession, "run", spy_run)
+    monkeypatch.setattr(design_route, "_gain_export", lambda *a, **k: {})
+
+
+def test_profile_tuning_targets_drive_auto_design(client, wait_job, monkeypatch):
+    """/tuning.targets.zeta_sp가 요청 없이도 설계 목표가 되고(source "profile"), 요청 targets는 아직 그 위에
+    얹힌다(source "request"). 기준 블록은 저장물 본문과 meta에 함께 실리고, 지문은 실제로 쓴 목표를 반영한다."""
+    from claw.profile import load_example
+
+    _spy_design_run(monkeypatch)
+    d = load_example()
+    d.update(id="ad-tuning", name="목표 시험", is_example=False, variants=[])
+    d["tuning"] = {"targets": {"zeta_sp": 0.9}}
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+
+    def run(cfg):
+        r = client.post("/api/design/auto", json={"config": cfg, "profile": {"id": "ad-tuning"}})
+        assert r.status_code == 202, r.text
+        j = wait_job(r.json()["id"], timeout=120.0)
+        assert j["status"] == "done", j
+        return client.get(f"/api/results/{j['result_id']}").json(), j["result_id"]
+
+    body, rid = run(_small_config())
+    assert body["config"]["targets"]["zeta_sp"] == 0.9
+    assert body["config"]["targets"]["pm_deg"] == 50.0  # 안 적은 목표는 도구 기본값
+    assert body["criteria_echo"]["source"] == "profile"
+    meta = next(m for m in client.get("/api/results").json() if m.get("id") == rid)
+    assert meta["criteria_echo"] == body["criteria_echo"]
+    fp_profile = body["criteria_echo"]["targets_fingerprint"]
+
+    # 쇼케이스 재현처럼 같은 값을 요청으로도 보내면 — 설정은 같고 출처만 "request"
+    body_req, _ = run(_small_config(targets={"zeta_sp": 0.9}))
+    assert body_req["config"] == body["config"]
+    assert body_req["criteria_echo"]["source"] == "request"
+    assert body_req["criteria_echo"]["targets_fingerprint"] == fp_profile
+
+    # 다른 값을 요청하면 그 값이 이기고 목표 지문이 달라진다 (판정 기준 지문은 그대로)
+    body_other, _ = run(_small_config(targets={"zeta_sp": 0.8}))
+    assert body_other["config"]["targets"]["zeta_sp"] == 0.8
+    assert body_other["criteria_echo"]["source"] == "request"
+    assert body_other["criteria_echo"]["targets_fingerprint"] != fp_profile
+    assert body_other["criteria_echo"]["judgement_fingerprint"] == body["criteria_echo"]["judgement_fingerprint"]
+
+
+def test_example_design_echoes_default_criteria(client, wait_job, monkeypatch):
+    _spy_design_run(monkeypatch)
+    r = client.post("/api/design/auto", json={"config": _small_config()})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=120.0)
+    assert j["status"] == "done", j
+    crit = client.get(f"/api/results/{j['result_id']}").json()["criteria_echo"]
+    assert crit["source"] == "default"
+    assert set(crit) == {"judgement_fingerprint", "targets_fingerprint", "scheme", "source"}

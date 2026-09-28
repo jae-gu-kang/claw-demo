@@ -180,6 +180,42 @@ def get_profile(profile_id: str, request: Request, revision: int | None = None) 
     return _body(doc, rev)
 
 
+@router.get("/profiles/{profile_id}/criteria")
+def get_profile_criteria(profile_id: str, request: Request, revision: int | None = None) -> dict:
+    """이 작업 단위의 평가 기준 — 모든 탭이 판정에 쓰는 한 벌(기준 통합 ①).
+
+    `applied`는 도구 기본값을 펼친 적용값, `written`은 문서가 실제로 적은 칸(없음 = 기본값을 따른다), `defaults`는
+    도구 기본값이다 — 편집 화면이 「기본값을 따르는 칸」과 「이 기체가 바꾼 칸」을 가를 수 있게. `lines`는 판정선의
+    뜻(방향·합격선·권장선·목표 필드 — design.criteria.LINES)이라 화면이 방향을 다시 적지 않는다. `echo`는 결과에
+    실리는 기준 블록과 같은 모양이다 — 화면은 결과의 echo를 이것과 대조해 「재평가 필요」를 가린다."""
+    from dataclasses import asdict
+
+    from claw.design.criteria import LINES, STATUSES
+    from claw.pipeline.criteria import GainEvalCriteria
+    from claw_server.refs import criteria_echo
+
+    try:
+        doc, rev = request.app.state.profiles.get(profile_id, revision)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"기체 프로파일 없음: {profile_id}")
+    except ProfileUnreadable as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    built = build_profile(doc, validated=True)
+    crit = built.eval_criteria
+    return to_jsonable({
+        "id": doc["id"], "revision": rev,
+        "applied": crit.to_dict(),
+        "written": {"criteria": doc.get("criteria"), "tuning": doc.get("tuning")},
+        "defaults": GainEvalCriteria().to_dict(),
+        "lines": [asdict(ln) for ln in LINES],
+        "statuses": list(STATUSES),
+        "target_conflicts": crit.target_conflicts(),
+        "echo": criteria_echo(crit, built.criteria_source),
+    })
+
+
 @router.post("/profiles", status_code=201)
 def create_profile(req: ProfileDocIn, request: Request) -> dict:
     try:
