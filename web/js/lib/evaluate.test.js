@@ -21,6 +21,7 @@ import {
   maneuverLine,
   sameManeuver,
   MANEUVER_KEYS,
+  durText, runVerdictMark, stageProgress,
 } from "./evaluate.js";
 
 const payload = {
@@ -510,4 +511,93 @@ test("prescriptionTarget: 하드 규칙 카드가 없으면 첫 카드, 위반�
   const na = normalizeEvalReport({ cases: [{ case: "A", hard_fails: [{ check: "damping.zeta" }],
     attribution: { status: "na", note: "비선형 런 없음" } }] });
   assert.equal(prescriptionTarget(na), null);
+});
+
+// ── 실행 버튼 진행 — 틱 순서 × 비용 가중 ───────────────────────────────────────
+
+test("stageProgress: 평가 full — 트림 동안은 「트림 k/n」이고 %는 거의 안 오른다", () => {
+  // 4케이스 full: 서버 total = 4 + 4×3 = 16 (routes/influence evaluate)
+  const p = stageProgress("evaluate", { done: 2, total: 16 }, { n: 4, depth: "full" });
+  assert.equal(p.count, "트림 3/4");
+  // 개수 %면 12.5%다 — 트림 2 / 전체 가중(4 + 4×(1+8+8)=72) ≈ 2.8%
+  assert.ok(p.frac < 0.05, `frac ${p.frac}`);
+});
+
+test("stageProgress: 평가 full — 트림이 끝나면 케이스 k/N, 마지막 틱에 N/N·100%", () => {
+  const job = (done) => stageProgress("evaluate", { done, total: 16 }, { n: 4 });
+  assert.equal(job(4).count, "케이스 1/4");   // 트림 끝, 첫 케이스가 돈다
+  assert.equal(job(6).count, "케이스 1/4");   // 첫 케이스의 동시명령 런 중
+  assert.equal(job(7).count, "케이스 2/4");
+  assert.equal(job(16).count, "케이스 4/4");
+  assert.equal(job(16).frac, 1);
+  // 서버 message는 방금 끝난 틱 — 지금 도는 것은 순서로 낸다
+  assert.equal(job(3).doing, "트림");
+  assert.equal(job(5).doing, "표준 기동 런");   // 「선형: X」가 끝난 뒤
+  assert.equal(job(6).doing, "동시명령 런");
+  assert.equal(job(16).doing, null);
+});
+
+test("stageProgress: 평가 linear — 케이스당 틱 하나", () => {
+  const p = stageProgress("evaluate", { done: 6, total: 8 }, { n: 4, depth: "linear" });
+  assert.equal(p.count, "케이스 3/4");
+  assert.equal(p.frac, 6 / 8);  // 트림·선형 가중이 같다
+});
+
+test("stageProgress: 검증 — 코너 블록 4틱, 끝의 미션 1틱", () => {
+  // 코너×케이스 + 중간점 = 5블록, 미션 켜짐: total = 5×4 + 1 = 21
+  const p = (done) => stageProgress("verify", { done, total: 21 }, { n: 3 });
+  assert.equal(p(0).count, "코너 1/5");
+  assert.equal(p(5).count, "코너 2/5");
+  assert.equal(p(20).count, "미션 런");
+  // 미션 없이 나누어떨어지면 미션 틱이 없다
+  assert.equal(stageProgress("verify", { done: 19, total: 20 }).count, "코너 5/5");
+});
+
+test("stageProgress: 감도 셋 — 개루프는 케이스, 스윕은 런을 센다", () => {
+  assert.equal(stageProgress("openloop", { done: 5, total: 8 }, { n: 4 }).count, "케이스 2/4");
+  assert.equal(stageProgress("scan", { done: 4, total: 8 }, { n: 4 }).count, "케이스 1/4");
+  // 스윕: 케이스 2 × 런 9 = 18, total = 2 + 18
+  assert.equal(stageProgress("sweep", { done: 12, total: 20 }, { n: 2 }).count, "런 11/18");
+});
+
+test("stageProgress: 제출 직후(total 0)·남은 시간의 표본 문턱", () => {
+  assert.deepEqual(stageProgress("evaluate", null, { n: 4 }),
+    { count: "제출 중", frac: 0, eta: null, doing: null });
+  const early = stageProgress("scan", { done: 5, total: 8 }, { n: 4, elapsed: 2 });
+  assert.equal(early.eta, null);  // 3초 전은 안 낸다
+  const p = stageProgress("scan", { done: 6, total: 8 }, { n: 4, elapsed: 10 });
+  // 가중 = 4 + 2×8 = 20 / 전체 36 → 남은 = 10 × 16/20 = 8초
+  assert.ok(Math.abs(p.eta - 8) < 1e-9, `eta ${p.eta}`);
+});
+
+test("stageProgress: 서버 틱 순서가 흔들리는 자리 — 미수렴·전부 미수렴·good < n", () => {
+  // 검증: 첫 블록이 트림 미수렴으로 1틱에 끝났다 — 5블록×4 + 미션 = 21, done 2 = 블록 1(1틱) + 블록 2 트림
+  const v = stageProgress("verify", { done: 2, total: 21 }, { skipped: 1 });
+  assert.equal(v.count, "코너 2/5");
+  assert.equal(v.doing, "선형화");
+  // 미수렴 하나를 건너뛰면 미션 틱이 total-1보다 앞에 온다
+  assert.equal(stageProgress("verify", { done: 17, total: 21 }, { skipped: 1 }).count, "미션 런");
+  // 평가: 트림 4건 전부 미수렴이면 서버 total = n + 0
+  assert.equal(stageProgress("evaluate", { done: 4, total: 4 }, { n: 4 }).count, "마무리");
+  // 평가: 4건 중 3건만 수렴 — 트림 뒤 서버가 total을 n + 3×3 = 13으로 다시 알린다
+  const e = stageProgress("evaluate", { done: 7, total: 13 }, { n: 4 });
+  assert.equal(e.count, "케이스 2/3");
+  assert.equal(e.doing, "선형화");
+});
+
+test("durText: 남은 시간은 어림, 걸린 시간은 정확히", () => {
+  assert.equal(durText(null), "");
+  assert.equal(durText(2), "약 5초");
+  assert.equal(durText(42), "약 40초");
+  assert.equal(durText(170), "약 3분");
+  assert.equal(durText(21.4, { exact: true }), "21초");
+  assert.equal(durText(185, { exact: true }), "3분 5초");
+  assert.equal(durText(120, { exact: true }), "2분");
+});
+
+test("runVerdictMark: 칩 배지와 같은 말 + 기호, 판정 없음은 PASS로 위장하지 않는다", () => {
+  assert.equal(runVerdictMark({ aggregate: { hard_fail: false } }), "○ PASS");
+  assert.equal(runVerdictMark({ aggregate: { hard_fail: true, hard_fails: [{}, {}] } }), "✕ FAIL 2");
+  assert.equal(runVerdictMark({ aggregate: { hard_fail: null } }), "— 판정 없음");
+  assert.equal(runVerdictMark(null), "— 판정 없음");
 });

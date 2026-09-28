@@ -470,3 +470,100 @@ export function prescriptionTarget(model) {
   }
   return null;
 }
+
+// ── 실행 버튼 진행 — 버튼에 「케이스 k/N」, 아래 줄에 %·남은 시간 ────────────────
+//
+// 서버 done/total은 틱 **개수**다. 그런데 틱 비용이 고르지 않다: 트림·선형화는 한순간이고
+// 시간축 런이 케이스당 수 초를 먹는다. 틱 개수 그대로 %를 내면 트림 동안 25%까지 튀고
+// 런에서 오래 멈춘 것처럼 보이며, 그 %로 낸 남은 시간은 처음에 크게 짧게 나온다.
+// 틱 순서는 서버·엔진이 고정한다(routes/influence·pipeline/evaluate) — done만으로 어느 틱까지
+// 끝났는지 알므로 그 순서에 비용 가중을 매긴다:
+//   evaluate  트림 n → 케이스마다 선형[·표준·동시명령]
+//   verify    코너·케이스 블록마다 트림·선형[·표준·동시명령] → 미션 1틱(켜졌으면)
+//   openloop  트림 n → 케이스마다 선형화 1
+//   scan      트림 n → 케이스마다 base 런 1
+//   sweep     트림 n → 런(케이스 × 스팬 점)
+// 가중은 상대값이다(grid.js 주석의 실측: 풀 평가 케이스당 5~8 s, 트림·선형은 1 s 미만).
+const TICK_COST = { trim: 1, linear: 1, std: 8, comb: 8, base: 8, sweep: 8, mission: 24 };
+// 서버 message는 **방금 끝난** 틱이다(「선형: X」가 떠 있는 동안 실제로는 표준 런이 돈다).
+// 지금 도는 틱은 순서로 안다 — 그 이름
+const TICK_DOING = {
+  trim: "트림", linear: "선형화", std: "표준 기동 런", comb: "동시명령 런",
+  base: "base 런", sweep: "스윕 런", mission: "미션 프로파일 런",
+};
+
+function stageTicks(kind, total, { n = 0, depth = "full" } = {}) {
+  const runs = depth === "linear" ? [] : ["std", "comb"];
+  const ticks = [];
+  if (kind === "verify") {
+    const unit = 2 + runs.length;  // 블록 = 트림 + 선형 + 런들
+    const blocks = Math.floor(total / unit);
+    for (let b = 0; b < blocks; b++) ticks.push("trim", "linear", ...runs);
+    if (total - blocks * unit === 1) ticks.push("mission");
+    return { ticks, unit, lead: 0, blocks, noun: "코너" };
+  }
+  for (let i = 0; i < n; i++) ticks.push("trim");
+  const block = kind === "evaluate" ? ["linear", ...runs]
+    : kind === "openloop" ? ["linear"] : kind === "scan" ? ["base"] : ["sweep"];
+  const blocks = Math.max(0, Math.floor((total - n) / block.length));
+  for (let b = 0; b < blocks; b++) ticks.push(...block);
+  return { ticks, unit: block.length, lead: n, blocks,
+           noun: kind === "sweep" ? "런" : "케이스" };
+}
+
+/** 실행 잡 진행 → 표시값 {count, frac, eta, doing}.
+ *  kind = "evaluate" | "verify" | "openloop" | "scan" | "sweep", n = 케이스 수(트림 선행 틱).
+ *  count는 버튼에 서는 짧은 글(「트림 3/15」「케이스 6/15」「코너 12/60」「미션 런」),
+ *  frac는 비용 가중 진행(0..1), eta는 남은 초(추정할 근거가 모자라면 null),
+ *  doing은 지금 도는 틱의 이름(다 끝났으면 null).
+ *  skipped = 본 트림 미수렴 수 — 검증은 그 블록을 1틱으로 건너뛰는데(엔진 verify eval_block)
+ *  서버 total은 그대로라, 건너뛴 만큼 틱 순서에서 앞으로 당겨 읽는다. */
+export function stageProgress(kind, job, { n = 0, depth = "full", elapsed = null,
+                                          skipped = 0 } = {}) {
+  const total = Math.max(0, job?.total ?? 0);
+  const done = Math.min(Math.max(0, job?.done ?? 0), total);
+  if (!total) return { count: "제출 중", frac: 0, eta: null, doing: null };
+  const { ticks, unit, lead, blocks, noun } = stageTicks(kind, total, { n, depth });
+  const pos = kind === "verify"
+    ? Math.min(ticks.length, done + skipped * (unit - 1)) : done;
+  const cost = (k) => TICK_COST[k] ?? 1;
+  const all = ticks.reduce((s, k) => s + cost(k), 0) || 1;
+  const spent = ticks.slice(0, pos).reduce((s, k) => s + cost(k), 0);
+  const frac = Math.min(1, spent / all);
+  let count;
+  if (pos < lead) {
+    count = `트림 ${pos + 1}/${lead}`;
+  } else if (ticks[pos] === "mission") {
+    count = "미션 런";
+  } else if (!blocks) {
+    count = "마무리";  // 트림이 전부 미수렴 — 셀 케이스가 없다(「케이스 1/0」을 찍지 않는다)
+  } else {
+    // 지금 도는 블록 — 끝난 블록 수 + 1 (마지막 틱이 끝나면 N/N에 선다)
+    const k = Math.min(blocks, Math.floor((pos - lead) / unit) + 1);
+    count = `${noun} ${Math.max(k, 1)}/${blocks}`;
+  }
+  // 남은 시간 — 5% 전·3초 전에는 표본이 모자라 크게 흔들린다(없는 편이 낫다)
+  const eta = (elapsed != null && elapsed >= 3 && frac >= 0.05 && frac < 1)
+    ? elapsed * (1 - frac) / frac : null;
+  return { count, frac, eta, doing: TICK_DOING[ticks[pos]] ?? null };
+}
+
+/** 초 → 「약 40초」「약 3분」(남은 시간), exact면 「21초」「3분 5초」(걸린 시간). */
+export function durText(sec, { exact = false } = {}) {
+  if (sec == null || !Number.isFinite(sec)) return "";
+  if (exact) {
+    const s = Math.max(0, Math.round(sec));
+    return s < 60 ? `${s}초` : `${Math.floor(s / 60)}분${s % 60 ? ` ${s % 60}초` : ""}`;
+  }
+  if (sec < 60) return `약 ${Math.max(5, Math.round(sec / 5) * 5)}초`;
+  return `약 ${Math.round(sec / 60)}분`;
+}
+
+/** 끝난 평가 → 버튼에 남는 판정 머리 — 칩 배지와 같은 말(PASS / FAIL n)에 탭의 기호(○✕—)를 붙인다.
+ *  판정이 없으면(케이스 0건·취소 뒤 부분 결과) PASS로 위장하지 않고 「판정 없음」이다. */
+export function runVerdictMark(model) {
+  const v = hardGateVerdict(model);
+  if (v === "PASS") return "○ PASS";
+  if (v === "FAIL") return `✕ FAIL ${(model.aggregate.hard_fails ?? []).length}`;
+  return "— 판정 없음";
+}

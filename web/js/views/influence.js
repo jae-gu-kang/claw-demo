@@ -76,6 +76,7 @@ import {
   sameManeuver,
   evaluateRequest, hardFailLines, jLine, localityLines, missionProfileLines,
   normalizeEvalReport, normalizeVerifyReport, statusInk, verifyRequest,
+  durText, runVerdictMark, stageProgress,
 } from "../lib/evaluate.js";
 import {
   applyExport, jointLines, leverBase, leverChange, leverLine, normalizePrescribe, prescribeRequest,
@@ -115,6 +116,9 @@ const state = {
   // 게인 평가 — 어휘·기준(서버 정본 echo), 카드 강조(null = 전체 — 표시 전용:
   // 비용 게이트는 depth·verify가 대신한다), 마지막 평가 런·검증 런
   evalMeta: null, evalSel: null, evalRun: null, verifyRun: null,
+  // 실행 버튼(평가 1·2·3단계, 감도 셋)의 진행·끝 상태 — 키마다 {jobId, kind, n, t0, job, end}.
+  // 버튼 자체가 진행 막대라 탭을 떠났다 와도 도는 중인지·어떻게 끝났는지가 버튼에 남는다
+  runs: {},
   // 평가 결과의 그림 몫 — 귀속된 설계변수가 문턱 넘은 지표까지 어떻게 닿는지.
   // 파라미터를 직접 고르면 그쪽이 이긴다(사용자 조작이 자동 강조보다 위다)
   evalCone: null, evalPlay: null, evalCaption: null,
@@ -143,6 +147,9 @@ const state = {
     tStep: "15" },
 };
 let canvas = null;
+// 지금 뷰의 실행 버튼 다시 그리기 — 잡 감시는 **제출한 뷰의 클로저**에서 돌므로, 탭을 떠났다
+// 오면 새 뷰의 버튼은 그 콜백을 모른다. 콜백은 이 자리로 부른다(새 뷰가 render마다 갈아 끼운다)
+let renderRunsHook = null;
 let gridVisit = 0; // 격자 패널을 그린 차례 — 떠난 방문의 늦은 콜백이 지금 칸·상태를 건드리지 않게
 
 // 성운(radial)은 삭제됐고 **전파 폭포가 기본**이다. 재생 일정은 배치와 무관한 위상
@@ -954,6 +961,140 @@ export function render() {
   // 판정색이 참칭이 아니다(lib/evaluate.js 머리말). 기호(○△✕—)가 색과 별도로
   // 판정을 말한다 — 색 하나에만 기대지 않는 이 탭의 접근성 규약.
 
+  // ── 실행 버튼 — 버튼 자체가 진행 막대다 (평가 1·2·3단계, 감도 셋) ──────────
+  //
+  // 종전에는 진행이 패널 밖 한 줄(runLine)의 「평가 42% — …」뿐이었고, 버튼은 도는
+  // 동안에도 눌렸다(두 번 누르면 잡이 겹친다). 이제 누른 버튼이 차오르고 그 자리에
+  // 「케이스 6/15」가 서며, 끝나면 결과(PASS·FAIL·완료)와 걸린 시간이 남는다.
+  // 긴 글(지금 무엇을 재나·%·남은 시간)은 버튼 폭을 흔들지 않게 **아래 한 줄**로 뺀다.
+  // %는 서버 틱 개수가 아니라 비용 가중이다(lib/evaluate stageProgress — 트림은 한순간,
+  // 런이 대부분이라 개수 %는 앞에서 튀고 뒤에서 멈춘다).
+  const RUN_BTN = {
+    linear: { group: "eval", kind: "evaluate", depth: "linear", name: "1단계 선별" },
+    full: { group: "eval", kind: "evaluate", depth: "full", name: "2단계 평가" },
+    verify: { group: "eval", kind: "verify", depth: "full", name: "3단계 검증" },
+    openloop: { group: "sens", kind: "openloop", name: "마진 민감도" },
+    sweep: { group: "sens", kind: "sweep", name: "지표 감도" },
+    scan: { group: "sens", kind: "scan", name: "전 케이스 스캔" },
+  };
+  const runBtns = new Map();  // key → {btn, fill, sub, x, idleSub, title}
+  const runDetail = {
+    eval: el("p", { class: "hint run-detail" }),
+    sens: el("p", { class: "hint run-detail" }),
+  };
+  // 끄는 사유(감도의 「대상 없음」) — 도는 잡과 별개로 버튼을 못 누르게 하는 조건
+  const runBlocked = new Map();
+
+  function runButton(key, { label, sub, title, primary = false, onclick }) {
+    const fill = el("span", { class: "run-btn-fill" });
+    const subEl = el("span", { class: "run-btn-sub" }, sub);
+    const btn = el("button", {
+      class: primary ? "run-btn primary" : "run-btn", onclick, title,
+    }, fill, el("span", { class: "run-btn-label" }, label), subEl);
+    const x = el("button", {
+      class: "run-btn-x", title: "이 실행 취소", "aria-label": `${label} 취소`, hidden: true,
+      // 막 끝난 잡을 취소하면 서버가 거절한다 — 끝 처리는 감시 쪽이 한다
+      onclick: () => { const r = state.runs[key]; if (r?.jobId) cancelJob(r.jobId).catch(() => {}); },
+    }, "✕");
+    runBtns.set(key, { btn, fill, sub: subEl, x, idleSub: sub, title });
+    return el("span", { class: "run-btn-wrap" }, btn, x);
+  }
+
+  function runBusyKey() {
+    return Object.keys(state.runs).find((k) => state.runs[k] && !state.runs[k].end) ?? null;
+  }
+
+  function renderRunBtns() {
+    const busy = runBusyKey();
+    for (const [key, b] of runBtns) {
+      const r = state.runs[key];
+      const running = key === busy;
+      const blocked = runBlocked.get(key);
+      b.btn.dataset.state = running ? "run" : r?.end ? r.end.state : "idle";
+      b.btn.disabled = busy != null || !!blocked;
+      b.btn.title = blocked ? blocked
+        : busy && !running ? `${RUN_BTN[busy].name}이(가) 도는 중 — 끝나거나 취소한 뒤에 누른다`
+        : b.title;
+      b.x.hidden = !running;
+      const p = running ? runProgress(key) : null;
+      b.fill.style.width = running ? `${Math.round(100 * p.frac)}%` : "0%";
+      b.sub.textContent = running ? p.count : r?.end ? r.end.text : b.idleSub;
+    }
+    for (const [group, line] of Object.entries(runDetail)) {
+      clear(line);
+      if (busy && RUN_BTN[busy].group === group) {
+        const p = runProgress(busy);
+        const msg = state.runs[busy].job?.message;
+        line.textContent = [
+          `${RUN_BTN[busy].name} ${Math.round(100 * p.frac)}%`,
+          p.doing ? `지금 ${p.doing}` : null,
+          msg ? `방금 끝 — ${msg}` : null,
+          p.eta != null ? `남은 시간 ${durText(p.eta)}` : null,
+        ].filter(Boolean).join(" · ");
+      }
+    }
+  }
+
+  function runProgress(key) {
+    const r = state.runs[key];
+    const spec = RUN_BTN[key];
+    return stageProgress(spec.kind, r.job, {
+      n: r.n, depth: spec.depth, elapsed: (Date.now() - r.t0) / 1000,
+      skipped: r.skipped ?? 0,
+    });
+  }
+
+  /** 버튼이 도는 상태로 선다 — 제출 **전에** jobId=null로 한 번(응답을 기다리는 사이 두 번
+   *  눌러 잡이 겹치지 않게), 제출 뒤 id를 채우며 한 번. n = 케이스 수(트림 선행 틱 수). */
+  function runBegin(key, jobId, n) {
+    const r = state.runs[key];
+    state.runs[key] = r && !r.end ? { ...r, jobId }
+      : { jobId, n, t0: Date.now(), job: null, end: null };
+    renderRunsHook?.();
+  }
+
+  function runTick(key, job) {
+    const r = state.runs[key];
+    if (!r) return;
+    r.job = job;
+    // 검증은 트림 미수렴 케이스가 블록 틱을 건너뛴다(엔진 verify eval_block) — 새로 본 미수렴
+    // 틱을 세어 틱 순서를 보정한다. 같은 케이스가 코너마다 같은 문구로 오므로 이름이 아니라
+    // done이 바뀐 것으로 가른다. 감시 사이에 스친 틱은 놓칠 수 있다(표시 전용 어림)
+    if (job?.message?.startsWith("트림 미수렴") && job.done !== r.skipAt) {
+      r.skipped = (r.skipped ?? 0) + 1;
+      r.skipAt = job.done;
+    }
+    renderRunsHook?.();
+  }
+
+  /** 다른 실행이 도는 중이면 새로 띄우지 않는다 — 버튼만 잠그면 진단 카드 버튼·쇼케이스처럼
+   *  같은 함수를 부르는 다른 입구로 잡이 겹치고, 먼저 끝난 잡이 도는 잡의 버튼 상태를 지운다. */
+  function runRefused() {
+    const busy = runBusyKey();
+    if (!busy) return false;
+    runStatus(`${RUN_BTN[busy].name}이(가) 도는 중 — 끝나거나 ✕로 취소한 뒤에 다시 누른다`,
+      { bad: true });
+    return true;
+  }
+
+  /** 안전망 — 끝 처리 전에 렌더러가 던지면 runEnd가 안 불려 여섯 버튼이 영영 잠긴다. */
+  function runSettle(key) {
+    const r = state.runs[key];
+    if (r && !r.end) runEnd(key, false, "실패");
+  }
+
+  /** 끝 — ok면 text(판정 등)에 걸린 시간을 붙여 버튼에 남긴다. 제출 전 실패는 키가 없어도 선다. */
+  function runEnd(key, ok, text) {
+    const r = state.runs[key] ?? { t0: Date.now() };
+    const took = durText((Date.now() - r.t0) / 1000, { exact: true });
+    state.runs[key] = { ...r, end: {
+      state: ok ? "done" : "fail",
+      text: ok ? `${text} · ${took}` : `✕ ${text}`,
+    } };
+    renderRunsHook?.();
+  }
+  renderRunsHook = renderRunBtns;
+
   const evalStatus = el("p", { class: "hint", style: "margin:6px 0 0" });
   const evalChipRow = el("div", {
     class: "row", style: "gap:8px;flex-wrap:wrap;align-items:center",
@@ -1029,6 +1170,12 @@ export function render() {
 
   // hooks — 쇼케이스 신호가 잡 id·경과를 받아 간다(onJob·onProgress). 버튼은 넘기지 않는다
   async function runEvaluate(depth, hooks = {}) {
+    // 거절은 결과 없는 런으로 돌려준다 — 직전 평가를 돌려주면 쇼케이스 신호가 옛 판정을
+    // 새 격자의 답으로 보고한다(handleCue는 result가 없으면 error를 던진다)
+    if (runRefused()) {
+      return { status: "거절", submitted: false, result: null,
+               error: `${RUN_BTN[runBusyKey()].name}이(가) 도는 중이라 평가를 띄우지 않았다` };
+    }
     let cases;
     try {
       cases = gridCases();
@@ -1036,6 +1183,7 @@ export function render() {
       state.evalRun = { status: "제출 불가", submitted: false,
                         result: null, error: errorText(e) };
       renderEval();
+      runEnd(depth, false, "격자 입력 오류");
       runStatus("평가: 격자 입력 오류", { open: "eval", bad: true });
       return state.evalRun;
     }
@@ -1045,6 +1193,7 @@ export function render() {
     setMeasuringFocus(true);  // 도는 동안 재는 대상을 켠다
     runStatus(`평가 제출 중 — 케이스 ${cases.length}건`
       + (depth === "linear" ? " · 선형만(시뮬 0)" : " · 표준+동시명령 런"));
+    runBegin(depth, null, cases.length);
     try {
       const job = await api.post("/influence/evaluate",
         evaluateRequest(shapeState(), {
@@ -1052,11 +1201,13 @@ export function render() {
           fingerprint: state.diag?.fingerprint,
         }));
       state.evalRun = { status: "제출됨", submitted: true, result: null, error: null };
+      runBegin(depth, job.id, cases.length);
       hooks.onJob?.(job.id);
       // 상태 코드는 서버 어휘(영문)다 — 화면에는 한국어로(lib/influence jobStatusLabel·jobEndLine, e2e D15).
       // 서버 message 기본값은 빈 문자열이라 ??가 아니라 ||로 떨어뜨린다(안 그러면 「… · 」로 빈다)
       const done = await watchJob(job.id, (j) => {
         state.evalRun.status = j.message || jobStatusLabel(j.status);
+        runTick(depth, j);
         runStatus(`평가 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
         hooks.onProgress?.(`평가 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
       });
@@ -1065,6 +1216,7 @@ export function render() {
         state.evalRun.error = done.error ?? jobEndLine("평가", done);
         setMeasuringFocus(false);  // 결과가 없으면 켜 둘 근거도 없다
         renderEval();
+        runEnd(depth, false, jobStatusLabel(done.status));
         runStatus(jobEndLine("평가", done), { open: "eval", bad: true });
         return state.evalRun;
       }
@@ -1078,29 +1230,36 @@ export function render() {
                         resultId: done.result_id };
       applyEvalFocus(next);
       renderEval();
+      runEnd(depth, true, runVerdictMark(next));
       runStatus("평가 완료", { open: "eval" });
     } catch (e) {
       state.evalRun = { status: "실패", submitted: state.evalRun?.submitted ?? false,
                         result: null, error: errorText(e) };
       setMeasuringFocus(false);
       renderEval();
+      runEnd(depth, false, "실패");
       runStatus("평가 실패", { open: "eval", bad: true });
+    } finally {
+      runSettle(depth);
     }
     // 끝난 런 상태를 돌려준다 — 쇼케이스 신호가 판정·결과 id를 읽는다(버튼은 무시한다)
     return state.evalRun;
   }
 
   async function runVerify() {
+    if (runRefused()) return;
     let cases;
     try {
       cases = gridCases();
     } catch (e) {
       state.verifyRun = { status: "제출 불가", result: null, error: errorText(e) };
       renderEval();
+      runEnd("verify", false, "격자 입력 오류");
       runStatus("검증: 격자 입력 오류", { open: "eval", bad: true });
       return;
     }
     runStatus(`검증 제출 중 — 코너 × ${cases.length}케이스 재트림(비쌈)`);
+    runBegin("verify", null, cases.length);
     try {
       const job = await api.post("/influence/verify",
         verifyRequest(shapeState(), {
@@ -1108,14 +1267,17 @@ export function render() {
           fingerprint: state.diag?.fingerprint,
         }));
       state.verifyRun = { status: "제출됨", result: null, error: null };
+      runBegin("verify", job.id, cases.length);
       const done = await watchJob(job.id, (j) => {
         state.verifyRun.status = j.message || jobStatusLabel(j.status);
+        runTick("verify", j);
         runStatus(`검증 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
       });
       if (done.status !== "done" || !done.result_id) {
         state.verifyRun.status = jobStatusLabel(done.status);
         state.verifyRun.error = done.error ?? jobEndLine("검증", done);
         renderEval();
+        runEnd("verify", false, jobStatusLabel(done.status));
         runStatus(jobEndLine("검증", done), { open: "eval", bad: true });
         return;
       }
@@ -1123,11 +1285,15 @@ export function render() {
       state.verifyRun = { status: "완료", result: normalizeVerifyReport(res),
                           error: null };
       renderEval();
+      runEnd("verify", true, "✓ 완료");
       runStatus("검증 완료", { open: "eval" });
     } catch (e) {
       state.verifyRun = { status: "실패", result: null, error: errorText(e) };
       renderEval();
+      runEnd("verify", false, "실패");
       runStatus("검증 실패", { open: "eval", bad: true });
+    } finally {
+      runSettle("verify");
     }
   }
 
@@ -1799,22 +1965,28 @@ export function render() {
     clear(sensTargetLine);
     // 끄면 title을 **사유로** 갈아 끼운다 — 비용 설명이 그대로 남아 있으면
     // 왜 못 누르는지가 화면에 없다 (views/sim.js syncHandoff와 같은 규약)
-    const mk = (label, title, fn) => el("button", {
-      onclick: fn, disabled: !knobs.length,
-      title: knobs.length ? title
-        : "흔들 설계변수가 없다 — 그래프에서 파라미터를 고르거나 평가·진단을 먼저 돌린다",
-    }, label);
+    const noKnobs = knobs.length ? null
+      : "흔들 설계변수가 없다 — 그래프에서 파라미터를 고르거나 평가·진단을 먼저 돌린다";
+    runBlocked.set("openloop", noKnobs);
+    runBlocked.set("sweep", noKnobs);
     sensRow.append(
-      mk("마진 민감도 재기", "케이스당 선형화 한 번 — 시뮬을 안 돈다",
-        () => runOpenloop({ knobs })),
-      mk("지표 감도 재기 (폐루프 스윕)",
-        "케이스 × 스팬 4점만큼 6DOF 런 — 구간 경향도 이 런으로 선다",
-        () => runSweep({ knobs })),
-      el("button", {
-        onclick: runScan,
+      runButton("openloop", {
+        label: "마진 민감도 재기", sub: "선형화 · 시뮬 0",
+        title: "케이스당 선형화 한 번 — 시뮬을 안 돈다",
+        onclick: () => runOpenloop({ knobs }),
+      }),
+      runButton("sweep", {
+        label: "지표 감도 재기", sub: "폐루프 스윕",
+        title: "케이스 × 스팬 4점만큼 6DOF 런 — 구간 경향도 이 런으로 선다",
+        onclick: () => runSweep({ knobs }),
+      }),
+      runButton("scan", {
+        label: "전 케이스 스캔", sub: "base 지표",
         title: "격자 전 케이스의 base 지표 — 설계변수 없이 돈다",
-      }, "전 케이스 스캔"),
+        onclick: runScan,
+      }),
     );
+    renderRunBtns();
     sensTargetLine.append(knobs.length
       ? `대상 ${knobs.length}개 (${source}) — ${knobs.join(" · ")}`
         // 여기서 도는 스윕은 **단독 점만** 낸다(쌍 런 없음) — 처방의 「조합」
@@ -1832,26 +2004,32 @@ export function render() {
   const olBox = el("div");
 
   async function runOpenloop(card) {
+    if (runRefused()) return;
     let cases;
     try {
       cases = gridCases();
     } catch (e) {
       state.openloop = { card, result: null, error: errorText(e) };
       renderOpenloop();
+      runEnd("openloop", false, "격자 입력 오류");
       runStatus("개루프: 격자 입력 오류", { open: "sens", bad: true });
       return;
     }
     runStatus(`개루프 Δ 계산 중 — 케이스 ${cases.length}건…`);
     clear(olBox);
+    runBegin("openloop", null, cases.length);
     try {
       const job = await api.post("/influence/openloop", {
         ...structuralRequest(shapeState()),
         cases, params: card.knobs, fingerprint: state.diag?.fingerprint,
       });
+      runBegin("openloop", job.id, cases.length);
       const done = await watchJob(job.id, (j) => {
+        runTick("openloop", j);
         runStatus(`개루프 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`);
       });
       if (done.status !== "done" || !done.result_id) {
+        runEnd("openloop", false, jobStatusLabel(done.status));
         runStatus(jobEndLine("개루프", done), { bad: true });
         return;
       }
@@ -1861,12 +2039,16 @@ export function render() {
       // 판독대의 2단 줄이 여기서 채워진다 — 결과를 안 알리면 방금 잰 수치가
       // 패널 안에만 있고 화면의 주 표면은 여전히 "아직 안 쟀다"라고 말한다
       renderReadout();
+      runEnd("openloop", true, "✓ 완료");
       runStatus("개루프 Δ 완료", { open: "sens" });
     } catch (e) {
       state.openloop = { card, result: null, error: errorText(e) };
       renderOpenloop();
       renderReadout();  // 실패했는데 판독대가 "아직 안 쟀다"로 남으면 거짓말이다
+      runEnd("openloop", false, "실패");
       runStatus("개루프 실패", { open: "sens", bad: true });
+    } finally {
+      runSettle("openloop");
     }
   }
 
@@ -1979,6 +2161,7 @@ export function render() {
   }
 
   async function runScan() {
+    if (runRefused()) return;
     let cases;
     try {
       cases = gridCases();
@@ -1986,6 +2169,7 @@ export function render() {
       state.scan = { status: "격자 입력 오류", result: null,
         error: errorText(e), selected: null };
       renderScan();
+      runEnd("scan", false, "격자 입력 오류");
       runStatus("스캔: 격자 입력 오류", { open: "sens", bad: true });
       return;
     }
@@ -1993,12 +2177,15 @@ export function render() {
       result: null, error: null, selected: null };
     renderScan();
     runStatus(state.scan.status);
+    runBegin("scan", null, cases.length);
     try {
       const job = await api.post("/influence/scan", scanRequest(shapeState(), {
         cases, tSettle: 5, tStep: Number(stepIn.value) || 15,
         fingerprint: state.diag?.fingerprint,
       }));
+      runBegin("scan", job.id, cases.length);
       const done = await watchJob(job.id, (j) => {
+        runTick("scan", j);
         state.scan.status =
           `스캔 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`;
         scanStatusLine.textContent = state.scan.status;
@@ -2012,13 +2199,18 @@ export function render() {
         state.scan.selected = new Set(scanSummary(state.scan.result).badCaseNames);
       }
       renderScan();
+      if (done.status === "done") runEnd("scan", true, "✓ 완료");
+      else runEnd("scan", false, jobStatusLabel(done.status));
       runStatus(`전 케이스 스캔 ${state.scan.status}`,
         { open: "sens", bad: done.status !== "done" });
     } catch (e) {
       state.scan.status = "실패";
       state.scan.error = errorText(e);
       renderScan();
+      runEnd("scan", false, "실패");
       runStatus("전 케이스 스캔 실패", { open: "sens", bad: true });
+    } finally {
+      runSettle("scan");
     }
   }
 
@@ -2159,6 +2351,7 @@ export function render() {
   }
 
   async function runSweep(card) {
+    if (runRefused()) return;
     let cases;
     try {
       // 대상 결정은 순수 로직 — lib이 쥔다 (격자·스캔·선택 → 케이스 목록)
@@ -2171,6 +2364,7 @@ export function render() {
       state.sweep = { card, status: "제출 불가", result: null, submitted: false,
         error: errorText(e) };
       renderSweep();
+      runEnd("sweep", false, "제출 불가");
       runStatus("스윕 제출 불가", { open: "sens", bad: true });
       return;
     }
@@ -2182,6 +2376,7 @@ export function render() {
       result: null, error: null, submitted: true };
     renderSweep();
     runStatus(state.sweep.status);
+    runBegin("sweep", null, cases.length);
     try {
       const body = sweepRequest(shapeState(), {
         cases, knobs: card.knobs, pairs: pairsFor(card),
@@ -2189,7 +2384,9 @@ export function render() {
         fingerprint: state.diag?.fingerprint,
       });
       const job = await api.post("/influence/sweep", body);
+      runBegin("sweep", job.id, cases.length);
       const done = await watchJob(job.id, (j) => {
+        runTick("sweep", j);
         state.sweep.status =
           `스윕 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`;
         sweepStatusLine.textContent = state.sweep.status;
@@ -2210,6 +2407,8 @@ export function render() {
       }
       renderSweep();
       renderReadout();  // 판독대 3단 줄 — 패널 안에만 두면 주 표면이 계속 "안 쟀다"다
+      if (done.status === "done") runEnd("sweep", true, "✓ 완료");
+      else runEnd("sweep", false, jobStatusLabel(done.status));
       runStatus(`폐루프 스윕 ${state.sweep.status}`,
         { open: "sens", bad: done.status !== "done" });
     } catch (e) {
@@ -2217,7 +2416,10 @@ export function render() {
       state.sweep.error = errorText(e);
       renderSweep();
       renderReadout();  // 실패했는데 판독대가 "아직 안 쟀다"로 남으면 거짓말이다
+      runEnd("sweep", false, "실패");
       runStatus("폐루프 스윕 실패", { open: "sens", bad: true });
+    } finally {
+      runSettle("sweep");
     }
   }
 
@@ -2982,22 +3184,26 @@ export function render() {
           el("div", {
             class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap",
           },
-            el("button", {
+            runButton("linear", {
+              label: "1단계 · 선별", sub: "선형 · 시뮬 0",
               onclick: () => runEvaluate("linear"),
               title: "선형 기준은 통과하나? — 트림 + 선형화만, 6DOF 런 0. "
                 + "자동 설계가 이미 보는 넷을 다시 보고 그 밖 넷을 더 본다",
-            }, "1단계 · 선별 (선형)"),
-            el("button", {
-              class: "primary", onclick: () => runEvaluate("full"),
+            }),
+            runButton("full", {
+              label: "2단계 · 평가", sub: "시간축 런", primary: true,
+              onclick: () => runEvaluate("full"),
               title: "시간축에서 실제로 어떤가? — 케이스마다 표준 기동 런 + "
                 + "동시명령 런. 자동 설계가 못 보는 것이 여기서 나온다",
-            }, "2단계 · 평가 (시간축)"),
-            el("button", {
+            }),
+            runButton("verify", {
+              label: "3단계 · 검증", sub: "섭동 코너",
               onclick: runVerify,
               title: "그 판정이 섭동에도 버티나? — 강건성 코너마다 재트림 + "
                 + "격자 중간점. 후보 확정 후 한 번",
-            }, "3단계 · 검증 (섭동)"),
+            }),
             el("span", { class: "hint" }, caseText)),
+          runDetail.eval,
           el("p", { class: "hint", style: "margin:8px 0 0" },
             el("b", {}, "1단계"), "는 시뮬을 한 번도 안 돈다 — 폐루프 안정성·감쇠비·" +
             "GM/PM·스케줄 전이와 제어권한의 트림 소모분까지 값이 나오고, 추종·과도·" +
@@ -3056,7 +3262,7 @@ export function render() {
         // 실행 줄이 판 맨 위에 선다 — 종전에는 이 판을 채우는 버튼이 전부 다른
         // 패널에 있어서(마진 민감도는 접힌 수동 진단 안에만) "감도를 어떻게
         // 켜냐"가 매번 물음이었다. 대상은 위에서 이미 좁혀 온 것을 물려받는다
-        sensRow, sensTargetLine,
+        sensRow, runDetail.sens, sensTargetLine,
         el("p", { class: "hint", style: "margin:6px 0 0" },
           "「평가·처방」의 [얼마나 →]는 아래 둘(지표 감도·구간 경향)을 처방과 함께 " +
           "한 번에 돌리는 지름길이다. 여기 버튼은 그 한 조각씩을 따로 돌린다."),
@@ -3112,6 +3318,7 @@ export function render() {
     // 사이에 바뀌었을 수 있고, 낡은 대상으로 돌면 결과표가 딴 것을 말한다
     if (d.key === "sens") renderSensRow();
     for (const node of d.build()) if (node) drawerBox.append(node);
+    renderRunBtns();  // 패널이 버튼을 새로 세웠다 — 도는 잡·끝난 판정을 다시 얹는다
   }
 
   const tabBar = el("div", { class: "tab-chips" },
