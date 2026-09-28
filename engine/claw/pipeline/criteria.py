@@ -45,8 +45,9 @@ SCHEMA_VERSION = 2
 # 단계 판정. 기준 dict의 모양(SCHEMA_VERSION)과는 다른 축이다.
 JUDGEMENT_SCHEME = "crit-v1"
 
-# 판정이 아니라 튜닝 쪽에 속한 묶음 — 목표 지문으로 간다
+# 판정이 아니라 튜닝 쪽에 속한 묶음 — 목표 지문으로 간다. 기체 프로파일에서는 /tuning 절이다(/criteria가 나머지)
 _TUNING_SUBS = ("targets", "weights")
+TUNING_GROUPS = _TUNING_SUBS
 
 
 def _frac(name, v, lo=0.0, hi=1.0):
@@ -470,6 +471,13 @@ class GainEvalCriteria:
                 raise ValueError(f"기준 그룹 '{name}' 필드 오류: {e}") from None
         return cls(**kwargs)
 
+    @classmethod
+    def from_profile(cls, doc: dict) -> "GainEvalCriteria":
+        """기체 프로파일(검증된 문서) → 적용 기준. /criteria(합격·권장선) + /tuning(목표·가중치)을 한 벌로
+        합친다 — 어느 쪽이든 없음(null)이거나 적지 않은 칸은 도구 기본값이다. 기준 통합 ①: 이 프로파일의
+        모든 탭이 이 한 벌로 판정한다."""
+        return cls.from_dict({**(doc.get("criteria") or {}), **(doc.get("tuning") or {})})
+
     def to_diagnose_thresholds(self) -> dict:
         """단일런 진단(diagnose_run)이 쓰는 문턱 — **이 정본에서 파생**한다.
 
@@ -584,3 +592,7 @@ class GainEvalCriteria:
         이 클래스는 아직 **거절하지 않는다**(보고만 — 기준 통합 ① S1은 동작 불변). 거절·경고 정책은
         기준이 프로파일로 옮겨 가는 단계에서 정한다."""
         return target_conflicts(self.margin, self.targets)
+
+
+# 기체 프로파일 /criteria 절이 받는 그룹 — 튜닝(목표·가중치)을 뺀 전부
+JUDGED_GROUPS = tuple(k for k in _SUBS if k not in _TUNING_SUBS)

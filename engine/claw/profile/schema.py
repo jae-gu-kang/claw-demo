@@ -27,12 +27,19 @@ MAX_VARIANTS = 64  # 형상 변형 상한 — 읽을 때마다 변형마다 재�
 SECTIONS = (
     "schema_version", "id", "name", "description", "is_example",
     "geometry", "aero", "stall", "mass", "propulsion", "actuator", "surfaces",
-    "structural", "operating", "ground", "trim", "law", "mission_template", "display", "variants",
+    "structural", "operating", "ground", "trim", "law", "mission_template", "display", "criteria", "tuning",
+    "variants",
 )
 # 스키마 v1에 나중에 더한 **선택 절** — 문서에 없으면 null(없음)로 채운다. 버전을 올리는 대신 이렇게 한
 # 이유: 이 절들은 계산에 쓰이지 않아 지문 밖인데(fingerprint.py), 버전을 올리면 버전 값이 지문에 들어가 옛
 # 결과·설계 세션의 계보(스냅숏 지문)가 통째로 끊긴다. 계산에 쓰이는 절이 생기면 그때 버전을 올린다
-OPTIONAL_SECTIONS = ("mission_template", "display")
+OPTIONAL_SECTIONS = ("mission_template", "display", "criteria", "tuning")
+# 평가 기준(합격선·권장선)과 튜닝 목표 — 이 설계 작업 단위(프로파일)의 모든 탭이 공유한다(기준 통합 ①, v1.51).
+# 없음(null)이면 도구 기본값이고, 부분만 적으면 나머지는 기본값이다. 둘 다 **지문 밖**이다(fingerprint.py) — 기준을
+# 바꿨다고 트림·게인 표가 낡지 않는다. 판정·결과가 어느 기준으로 났는지는 기준 지문 둘이 따로 말한다
+# (pipeline/criteria.py judgement_fingerprint·targets_fingerprint). 형상 변형은 이 둘을 고칠 수 없다 — 기준은
+# 형상 하나가 아니라 작업 단위 전체의 요구조건이다
+VARIANT_FORBIDDEN = ("criteria", "tuning")
 # 미션 템플릿 격자의 케이스 상한 — 서버 스캔·영향성 격자 상한(MAX_SCAN_CASES·MAX_CASES)과 같은 자리.
 # 간격 오타 하나로 수만 케이스가 되면 그 기체를 고른 모든 화면이 격자를 만들다 멈춘다
 MAX_TEMPLATE_CASES = 200
@@ -665,7 +672,91 @@ def _body(d, *, with_variants):
         "law": _law(d["law"], "/law"),
         "mission_template": _mission_template(d["mission_template"], "/mission_template"),
         "display": _display(d["display"], "/display"),
+        "criteria": _criteria(d["criteria"], "/criteria"),
+        "tuning": _tuning(d["tuning"], "/tuning"),
     }
+
+
+def _criteria_value(v, default, path):
+    """기준 칸 하나의 형식 — 기본값의 형식을 따른다. 형식이 틀린 값을 저장하면 저장은 되고 평가 때(한계와의 비교에서)
+    TypeError로 터진다(문자열 "10"이 RMS 한계가 되는 식). 수치는 float로(정수 칸은 int로) 정규화한다."""
+    def num(x, p_):
+        if isinstance(x, bool) or not isinstance(x, (int, float)):
+            _fail(p_, "수치여야 함")
+        return float(x)
+
+    if isinstance(default, bool):
+        if not isinstance(v, bool):
+            _fail(path, "true/false여야 함")
+        return v
+    if isinstance(default, int):
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v != int(v):
+            _fail(path, "정수여야 함")
+        return int(v)
+    if isinstance(default, float):
+        return num(v, path)
+    if isinstance(default, str):
+        if not isinstance(v, str):
+            _fail(path, "문자열이어야 함")
+        return v
+    if isinstance(default, dict):  # 축별 한계(rms_max 등) — {축: 수치}
+        if not isinstance(v, dict):
+            _fail(path, "{이름: 수치} 객체여야 함")
+        return {k: num(x, f"{path}/{k}") for k, x in v.items()}
+    # 기본이 없음(null)인 칸 — 없음, 수치, 또는 수치 목록(bandwidth_window)
+    if v is None:
+        return None
+    if isinstance(v, list):
+        return [num(x, f"{path}/{i}") for i, x in enumerate(v)]
+    return num(v, path)
+
+
+def _criteria_groups(t, p, allowed, what):
+    """기준 절 공통 — 칸마다 형식을 보고(_criteria_value), 그룹마다 GainEvalCriteria.from_dict로 값을 검증(오류 경로는
+    그룹까지)하고, **적은 칸만** 정규화해 돌려준다(적지 않은 칸은 기본값을 따른다 — 기본값을 문서에 굳히지 않는다)."""
+    from claw.pipeline.criteria import GainEvalCriteria
+
+    if t is None:
+        return None
+    if not isinstance(t, dict):
+        _fail(p, "객체여야 함")
+    defaults = GainEvalCriteria().to_dict()
+    typed = {}
+    for g, v in t.items():
+        if g not in allowed:
+            _fail(f"{p}/{g}", f"모르는 {what} 그룹 — {', '.join(allowed)} 중 하나")
+        if not isinstance(v, dict):
+            _fail(f"{p}/{g}", "객체여야 함")
+        for k in v:
+            if k not in defaults[g]:
+                _fail(f"{p}/{g}/{k}", f"모르는 칸 — {', '.join(defaults[g])} 중 하나")
+        typed[g] = {k: _criteria_value(x, defaults[g][k], f"{p}/{g}/{k}") for k, x in v.items()}
+    # 값 검증(범위·서열) — 그룹 하나씩 재 어느 그룹이 틀렸는지 짚는다(from_dict 오류는 칸 경로를 모른다).
+    # AttributeError까지 받는다: 형식을 통과해도 __post_init__이 예상 밖 모양에서 던지면 500이 아니라 경로 있는 오류여야 한다
+    for g in typed:
+        try:
+            GainEvalCriteria.from_dict({g: typed[g]})
+        except (ValueError, TypeError, AttributeError) as e:
+            _fail(f"{p}/{g}", str(e))
+    try:
+        full = GainEvalCriteria.from_dict(typed).to_dict()
+    except (ValueError, TypeError, AttributeError) as e:  # 그룹 사이 규칙(지금은 없다)
+        _fail(p, str(e))
+    return {g: {k: copy.deepcopy(full[g][k]) for k in typed[g]} for g in typed}
+
+
+def _criteria(t, p):
+    """평가 기준 — 합격선·권장선(목표·가중치 뺀 전 그룹). 없음이면 도구 기본값."""
+    from claw.pipeline.criteria import JUDGED_GROUPS
+
+    return _criteria_groups(t, p, JUDGED_GROUPS, "기준")
+
+
+def _tuning(t, p):
+    """튜닝 목표 — 자동 설계가 겨냥하는 값(targets)과 J 가중치(weights). 없음이면 도구 기본값."""
+    from claw.pipeline.criteria import TUNING_GROUPS
+
+    return _criteria_groups(t, p, TUNING_GROUPS, "튜닝")
 
 
 def _display(t, p):
@@ -730,6 +821,11 @@ def _variants(v, base):
         patch = item["patch"]
         if not isinstance(patch, dict):
             _fail(f"{p}/patch", "{경로: 값} 객체여야 함")
+        for ptr in patch:
+            head = ptr.split("/")[1] if isinstance(ptr, str) and ptr.startswith("/") else None
+            if head in VARIANT_FORBIDDEN:
+                _fail(f"{p}/patch", f"형상 변형은 /{head}를 고칠 수 없다 — 평가 기준·튜닝 목표는 형상이 아니라 "
+                                    f"작업 단위(프로파일) 전체의 요구조건이다 ({ptr})")
         try:
             effective = _body(apply_patch(base, patch), with_variants=False)
         except ProfileError as e:
@@ -763,13 +859,27 @@ def document_warnings(doc: dict) -> list:
                             "낮다 — 저속에서 트림이 판정 한계가 아니라 탐색 상한에 막힌다(저속 가림). 탐색 상한은 판정이 아니라 "
                             "풀이 범위다"}]
 
-    out = check(doc, None)
+    out = check(doc, None) + _target_warnings(doc)
     for item in doc.get("variants") or []:
         eff = effective_document(doc, item["id"])
         warns = check(eff, item["id"])
         if warns and not (out and eff["trim"] == doc["trim"] and eff["stall"] == doc["stall"]):
             out += warns
     return out
+
+
+def _target_warnings(doc: dict) -> list:
+    """튜닝 목표가 판정선보다 느슨한 자리 — 저장은 된다(경고). 판정은 design.criteria.target_conflicts 한 자리다.
+    합격선보다 느슨하면 튜닝에 성공한 점이 곧바로 불합격이고, 권장선보다 느슨하면 성공한 점이 전부 주의다."""
+    from claw.pipeline.criteria import GainEvalCriteria
+
+    why = {"pass": "합격선보다 느슨하다 — 튜닝에 성공한 점이 곧바로 불합격으로 찍힌다",
+           "rec": "권장선보다 느슨하다 — 튜닝에 성공한 점이 전부 합격·주의로 찍힌다"}
+    crit = GainEvalCriteria.from_profile(doc)
+    return [{"path": f"/tuning/targets/{c['target_key']}", "variant": None,
+             "message": f"튜닝 목표 {c['target_key']} {c['target']:g}가 {c['line_key']} {c['line']:g}보다 "
+                        + why[c["level"]]}
+            for c in crit.target_conflicts()]
 
 
 def validate_document(doc) -> dict:

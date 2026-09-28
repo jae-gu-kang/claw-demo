@@ -301,6 +301,22 @@ class BuiltProfile:
         alloc = self.doc["law"]["alloc"]
         return None if alloc is None else alloc["resv_frac"]
 
+    # ── 평가 기준 (기준 통합 ①) ─────────────────────────────────────────────
+    @property
+    def eval_criteria(self):
+        """이 작업 단위의 적용 기준 한 벌 — /criteria(합격·권장선) + /tuning(목표·가중치), 없는 칸은 도구 기본값.
+        형상 변형은 기준을 못 고치므로(schema.VARIANT_FORBIDDEN) 변형을 골라도 같은 기준이다."""
+        from claw.pipeline.criteria import GainEvalCriteria
+
+        return GainEvalCriteria.from_profile(self.doc)
+
+    @property
+    def criteria_source(self) -> str:
+        """기준의 출처 — "profile"(문서가 한 칸이라도 적었다) | "default"(둘 다 없음 → 도구 기본값).
+        기본값으로 대체한 것을 조용히 두지 않고 결과·화면이 말하게 한다."""
+        written = [k for sec in ("criteria", "tuning") for grp in (self.doc.get(sec) or {}).values() for k in grp]
+        return "profile" if written else "default"  # 빈 그룹({"margin": {}})은 적은 것이 없다
+
 
 def build_profile(document: dict, variant: str | None = None, *, validated=False) -> BuiltProfile:
     """기체 문서(+형상 변형) → BuiltProfile. validated=False면 먼저 검증한다."""

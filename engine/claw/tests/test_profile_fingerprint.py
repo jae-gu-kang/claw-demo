@@ -21,7 +21,27 @@ def test_excluded_fields_are_pinned():
     assert FP_EXCLUDED == ("/id", "/name", "/description", "/is_example", "/variants",
                            "/law/design/provenance", "/law/alloc/de_trim/provenance",
                            "/law/gain_tables/provenance",  # v2 — 표는 지문 안, 출처 기록만 밖
-                           "/mission_template", "/display")
+                           "/mission_template", "/display",
+                           "/criteria", "/tuning")  # v1.51 기준 통합 ① — 판정·설계 목표이지 기체가 아니다
+
+
+def test_criteria_and_tuning_change_neither_fingerprint():
+    """기준·목표를 적어도, 바꿔도, 없애도 같은 기체다 — 기준을 바꿨다고 트림·게인 표가 낡으면 안 된다.
+    어느 기준으로 났는지는 기준 지문 둘이 따로 말한다(판정 기준 지문은 바뀐다)."""
+    base = _fps(load_example())
+    doc = load_example()
+    doc["criteria"] = {"margin": {"pm_min_deg": 40.0}}
+    doc["tuning"] = {"targets": {"zeta_sp": 0.9}}
+    assert _fps(doc) == base
+    doc = load_example()
+    doc.pop("criteria", None)
+    doc.pop("tuning", None)  # 이 절이 생기기 전 문서
+    assert _fps(doc) == base
+    from claw.profile import build_profile as bp
+    j0 = bp(validate_document(load_example()), validated=True).eval_criteria.judgement_fingerprint()
+    doc = load_example()
+    doc["criteria"] = {"margin": {"pm_min_deg": 40.0}}
+    assert bp(validate_document(doc), validated=True).eval_criteria.judgement_fingerprint() != j0
 
 
 def test_mission_template_does_not_change_either_fingerprint():

@@ -1469,6 +1469,12 @@
     "kind": "model",
     "model": "shahed136.glb"
   },
+  "criteria": null,
+  "tuning": {
+    "targets": {
+      "zeta_sp": 0.9
+    }
+  },
   "variants": [
     {
       "id": "eoir",

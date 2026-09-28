@@ -30,6 +30,10 @@ FP_EXCLUDED = (
     "/law/gain_tables/provenance",
     "/mission_template",
     "/display",
+    # 평가 기준·튜닝 목표 — 판정·설계 목표이지 기체가 아니다. 바꿨다고 트림·게인 표가 낡으면 안 된다. 어느 기준으로
+    # 났는지는 기준 지문 둘(pipeline/criteria.py)이 결과에 따로 실린다(기준 통합 ①)
+    "/criteria",
+    "/tuning",
 )
 
 
