@@ -138,6 +138,28 @@ def test_request_criteria_and_targets_are_rejected(client):
         assert REQUEST_CRITERIA_REJECTED in r.text
 
 
+def test_target_below_pass_line_is_422_but_below_rec_line_is_warning(client, wait_job):
+    """튜닝 목표 대 판정선 — 합격선보다 느슨하면 422, 권장선보다만 느슨하면 수락 + 경고 (기준 통합 ① S5, v1.56).
+
+    권장선 충돌은 설정 모순이 아니라 선택이다 — 거절하면 사용자가 일부러 고른 목표를 못 돌린다.
+    대신 저장된 report.target_warnings가 "성공한 점이 warn으로 찍힌다"를 말해야 한다.
+    """
+    # 목표는 기체 /tuning에 산다(v1.54 — 요청 목표는 거절). 합격선보다 느슨한 목표도 기체 저장은 된다(문서 경고) —
+    # 거절은 그 목표로 설계를 제출할 때다
+    for pid, gm in (("tgt-pass", 5.0), ("tgt-rec", 7.0)):
+        r = client.post("/api/profiles", json={"document": _criteria_doc(pid, tuning={"targets": {"gm_db": gm}})})
+        assert r.status_code == 201, r.text
+    r = client.post("/api/design/auto", json={"config": _small_config(), "profile": {"id": "tgt-pass"}})
+    assert r.status_code == 422, r.text  # < gm_min_db 6 — 성공점이 곧 fail
+    assert "gm_db" in r.json()["detail"]
+    r2 = client.post("/api/design/auto", json={"config": _small_config(), "profile": {"id": "tgt-rec"}})
+    assert r2.status_code == 202, r2.text  # < gm_good_db 8이지만 합격선은 지킨다
+    j = wait_job(r2.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    (w,) = client.get(f"/api/results/{j['result_id']}").json()["report"]["target_warnings"]
+    assert "gm_db 7" in w and "gm_good_db 8" in w
+
+
 def test_budget_and_unknown_key_rejected(client):
     r = client.post("/api/design/auto", json={"config": {"budget_points": 999}})
     assert r.status_code == 422

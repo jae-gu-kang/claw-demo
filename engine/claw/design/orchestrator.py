@@ -174,35 +174,51 @@ class AutoDesignConfig:
             raise ValueError("delay_s는 음수 불가, pade_order는 1 이상")
         self._check_targets_meet_criteria()
 
-    # 충돌 수준별 사유 — 어느 쪽이든 결과는 같다: 성공한 튜닝이 판정에서 거짓말을 한다
+    # 충돌 수준별 사유 — 합격선 충돌은 거절(ValueError)의 사유, 권장선 충돌은 경고 문구의 꼬리다
     _CONFLICT_WHY = {
         "pass": "튜닝 목표가 합격선보다 느슨하면 성공한 점이 곧바로 fail로 찍힌다",
-        "rec": "튜닝 목표가 권장선보다 느슨하면 성공한 점이 전부 warn이 되어 warn이 무의미해진다",
+        "rec": "튜닝에 성공한 점이 합격·주의(warn)로 찍힌다",
     }
 
     def _check_targets_meet_criteria(self):
-        """튜너 목표가 판정선을 넘는지 — warn/fail이 의미를 갖게 하는 유일한 불변식.
+        """튜너 목표가 판정선을 넘는지 — warn/fail이 의미를 갖게 하는 불변식.
 
         criteria(판정)와 targets(튜닝)는 서로를 모른 채 각자 기본값을 들고 있어서
         조용히 어긋난다. 어긋나면 산출물이 거짓말을 한다:
-        - targets.gm_db < criteria.gm_good_db  → 튜닝이 **성공한** 점이 전부 warn.
-          실제로 8 dB vs 10 dB로 어긋나 있었고, 화면은 경고로 뒤덮였다.
         - targets.pm_deg < criteria.pm_min_deg → 튜닝 성공점이 곧바로 fail.
           그러면 분류기가 그 점을 structural_limit로 몰아 에스컬레이션을 양산한다
           (자유 게인 최적조차 fail이니 정의상 구조 한계로 보인다).
-        둘 다 "판정이 틀렸다"가 아니라 **설정이 모순**인 것이라 제출 시점에 막는다
-        (routes/design.py가 ValueError를 422로 낸다 — 워커를 돌린 뒤 알아채면 늦다).
+          이것은 **설정 모순**이라 제출 시점에 막는다 (routes/design.py가 ValueError를
+          422로 낸다 — 워커를 돌린 뒤 알아채면 늦다).
+        - targets.gm_db < criteria.gm_good_db  → 튜닝이 **성공한** 점이 전부 warn.
+          실제로 8 dB vs 10 dB로 어긋나 있었고, 화면은 경고로 뒤덮였다. 다만 합격선은
+          지킨 설정이라 모순은 아니다 — 권장선보다 느슨한 목표를 일부러 고를 수도 있다.
+          그래서 거절하지 않고 **경고**로 남긴다(기준 통합 ⑤ S5 — 사용자 승인 동작 변경):
+          target_warnings()가 문구를 내고 DesignSession.report()["target_warnings"]가 싣는다.
 
         판정은 공용 함수(criteria.target_conflicts — 판정선 방향까지 아는 한 자리)가 하고, 여기는
-        **정책**만 쥔다: 자동 설계는 합격선·권장선 어느 쪽 충돌이든 거절한다(기준 통합 ① S1 — 권장선
-        충돌을 경고로 낮추는 것은 동작 변경이라 별도 단계다).
+        **정책**만 쥔다: 합격선 충돌은 거절, 권장선 충돌은 경고.
         """
         for c in target_conflicts(self.criteria, self.targets):
+            if c["level"] != "pass":
+                continue
             raise ValueError(
                 f"targets.{c['target_key']}({c['target']:g}) {'≥' if c['direction'] == MIN else '≤'} "
                 f"criteria.{c['line_key']}({c['line']:g}) 필요 — "
                 + self._CONFLICT_WHY[c["level"]]
             )
+
+    def target_warnings(self) -> list:
+        """권장선보다 느슨한 튜닝 목표 — 사람이 읽는 경고 문구 목록 (없으면 빈 목록).
+
+        저장하지 않고 매번 criteria·targets에서 다시 계산한다 — 직렬화 필드를 늘리지 않으니
+        to_dict/from_dict 왕복이 그대로이고, 옛 세션을 다시 열어도 같은 경고가 나온다.
+        """
+        return [
+            f"튜닝 목표 {c['target_key']} {c['target']:g}이 권장선 {c['line_key']} {c['line']:g}보다 "
+            f"느슨하다 — " + self._CONFLICT_WHY["rec"]
+            for c in target_conflicts(self.criteria, self.targets) if c["level"] == "rec"
+        ]
 
     def to_dict(self) -> dict:
         d = {k: v for k, v in self.__dict__.items() if k not in ("criteria", "targets")}
@@ -1189,6 +1205,9 @@ class DesignSession:
                 1 for rep in self.fits.values()
                 if (rep.get("quality") or {}).get("status") == "warn"),
             "criteria_fingerprint": c.criteria.fingerprint(),
+            # 권장선보다 느슨한 튜닝 목표 — 거절하지 않고 여기서 말한다(AutoDesignConfig.target_warnings).
+            # 이게 있으면 warn 판정은 "목표 미달"이 아니라 설정이 예고한 결과다
+            "target_warnings": c.target_warnings(),
             # 튜닝·검증이 본 작동기와 그 출처(config·profile·default) — 판정 조성의 일부다
             "actuator": self.actuator_used(),
         }
