@@ -1,0 +1,7048 @@
+{
+ "aircraft": "example",
+ "fingerprint": "6226a2c59c3c95fc",
+ "plant_fingerprint": "a2777da81972fa3c",
+ "criteria_source": "default",
+ "code": "f67ebf7",
+ "region": {
+  "mach": [
+   0.12600000000000003,
+   0.9500000000000001
+  ],
+  "alt": [
+   100.0,
+   3000.0
+  ],
+  "fuel": [
+   10.0,
+   50.0
+  ],
+  "boundary": {
+   "10.0": [
+    [
+     100.0,
+     0.12600000000000003,
+     0.9500000000000001
+    ],
+    [
+     1550.0,
+     0.14,
+     0.9500000000000001
+    ]
+   ],
+   "50.0": [
+    [
+     100.0,
+     0.14,
+     0.9500000000000001
+    ],
+    [
+     1550.0,
+     0.15400000000000003,
+     0.9500000000000001
+    ]
+   ]
+  },
+  "source": "user(experiment)",
+  "draft": {
+   "mach": [
+    0.14,
+    0.22
+   ],
+   "alt": [
+    100.0,
+    3000.0
+   ],
+   "fuel": [
+    25.0,
+    25.0
+   ],
+   "confirmed": false
+  }
+ },
+ "model": {
+  "mach": [
+   0.0,
+   0.9
+  ],
+  "fuel": [
+   0.0,
+   50.0
+  ]
+ },
+ "design_points": [
+  {
+   "mach": 0.12600000000000003,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.22900000000000004,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.3320000000000001,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.43500000000000005,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.538,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.641,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.7440000000000001,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.8470000000000001,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.9500000000000001,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.14,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.24125000000000002,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.3425,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.44375000000000003,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.545,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.6462500000000001,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.7475,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.84875,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.9500000000000001,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.13125000000000003,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.23359375000000004,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.33593750000000006,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.43828125000000007,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.5406250000000001,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.6429687500000001,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.7453125,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.8476562500000002,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.9500000000000001,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.14525000000000002,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.24584375000000003,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.34643750000000006,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.44703125,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.547625,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.6482187500000001,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.7488125,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.84940625,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.9500000000000001,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.14,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.24125000000000002,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.3425,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.44375000000000003,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.545,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.6462500000000001,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.7475,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.84875,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.9500000000000001,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.15400000000000003,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.25350000000000006,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.35300000000000004,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.4525,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.552,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.6515000000000001,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.751,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.8505,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  },
+  {
+   "mach": 0.9500000000000001,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "origin": "auto:grid"
+  }
+ ],
+ "schedule": {
+  "bp_sets": {
+   "A": {
+    "axis": "mach",
+    "coords": [
+     0.14,
+     0.166667,
+     0.193333,
+     0.22
+    ]
+   },
+   "B": {
+    "axis": "mach",
+    "coords": [
+     0.14,
+     0.153334,
+     0.206667,
+     0.22
+    ]
+   }
+  },
+  "refs": {
+   "pitch.kp": "A",
+   "pitch.ki": "A",
+   "pitch.k_rate": "A",
+   "roll.kp": "A",
+   "roll.ki": "A",
+   "roll.k_rate": "B",
+   "yaw.k_rate": "A"
+  },
+  "sharing": {
+   "pitch.kp": "shared",
+   "pitch.ki": "shared",
+   "pitch.k_rate": "shared",
+   "roll.kp": "shared",
+   "roll.ki": "shared",
+   "roll.k_rate": "independent",
+   "yaw.k_rate": "shared"
+  },
+  "values": {
+   "pitch.kp": [
+    -1.5508971466982788,
+    -1.522393658948923,
+    -1.2546065471201095,
+    -0.9655038358756414
+   ],
+   "pitch.ki": [
+    -0.5609177929574342,
+    -0.5506088479226232,
+    -0.4537574506076948,
+    -0.3491967741795463
+   ],
+   "pitch.k_rate": [
+    0.17929826829581044,
+    0.1760029975522087,
+    0.1450442937303209,
+    0.11162130652829386
+   ],
+   "roll.kp": [
+    1.4777118719581994,
+    1.0390990055024723,
+    0.7742994583302939,
+    0.5958753354590615
+   ],
+   "roll.ki": [
+    0.5924181635057457,
+    0.41657723418346787,
+    0.31041847318967886,
+    0.23888782286308455
+   ],
+   "roll.k_rate": [
+    -0.3638150117153667,
+    -0.304604338381254,
+    -0.16594009975670349,
+    -0.1467054547404143
+   ],
+   "yaw.k_rate": [
+    0.6670529780427155,
+    0.654793405299101,
+    0.5396160766108955,
+    0.41527074210151205
+   ]
+  }
+ },
+ "validation": {
+  "alts": [
+   100.0,
+   1550.0,
+   3000.0
+  ],
+  "fuels": [
+   10.0,
+   25.0,
+   50.0
+  ],
+  "mode": "full",
+  "omitted": [],
+  "union": [
+   0.14,
+   0.153334,
+   0.166667,
+   0.193333,
+   0.206667,
+   0.22
+  ]
+ },
+ "records": [
+  {
+   "name": "M0.14_h100.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8628493234209633
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 67.8976311191
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6758091741283236
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.27886998503238
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.1365216564476
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5508971466982788,
+    "pitch.ki": -0.5609177929574342,
+    "pitch.k_rate": 0.17929826829581044,
+    "roll.kp": 1.4777118719581994,
+    "roll.ki": 0.5924181635057457,
+    "roll.k_rate": -0.3638150117153667,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6670529780427155,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.14,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.153334_h100.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8938801775693885
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 70.67713481813291
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.716734711227808
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.461479788982688
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.22445166074937
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5366448683898861,
+    "pitch.ki": -0.5557631271497254,
+    "pitch.k_rate": 0.17765057113845545,
+    "roll.kp": 1.2583972148418887,
+    "roll.ki": 0.5044944018683942,
+    "roll.k_rate": -0.304604338381254,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6609229618067927,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.153334,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.166667_h100.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "불합격",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.92386725890199
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 72.95198946310603
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7572549521497941
+    },
+    "roll_rate": {
+     "verdict": "불합격",
+     "metric": 12.07128942027582
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.72551763231053
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.522393658948923,
+    "pitch.ki": -0.5506088479226232,
+    "pitch.k_rate": 0.1760029975522087,
+    "roll.kp": 1.0390990055024723,
+    "roll.ki": 0.41657723418346787,
+    "roll.k_rate": -0.26993892871779734,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.654793405299101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.166667,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.193333_h100.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.9056218583332268
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 83.05325848242705
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.720178567213268
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 12.349615055821353
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 55.54492535982661
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.2546065471201095,
+    "pitch.ki": -0.4537574506076948,
+    "pitch.k_rate": 0.1450442937303209,
+    "roll.kp": 0.7742994583302939,
+    "roll.ki": 0.31041847318967886,
+    "roll.k_rate": -0.2006081093908841,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5396160766108955,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.193333,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.206667_h100.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8837222242344556
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 87.07759507766434
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.684625834644608
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.915852724294634
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.1364261872684
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1100497708897974,
+    "pitch.ki": -0.4014751519054437,
+    "pitch.k_rate": 0.12833217345613077,
+    "roll.kp": 0.6850840514841916,
+    "roll.ki": 0.2746518068434529,
+    "roll.k_rate": -0.16594009975670349,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.47744107791032486,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.206667,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.22_h100.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8549482717107816
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 89.35611431209139
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6417097806622098
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 12.073163113442684
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.96546366231837
+    }
+   },
+   "gains": {
+    "pitch.kp": -0.9655038358756414,
+    "pitch.ki": -0.3491967741795463,
+    "pitch.k_rate": 0.11162130652829386,
+    "roll.kp": 0.5958753354590615,
+    "roll.ki": 0.23888782286308455,
+    "roll.k_rate": -0.1467054547404143,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.41527074210151205,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.22,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.146667_h100.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.878493027651781
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 69.35110682363887
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6964534171976432
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.430322413592954
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.24674991049281
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5437710075440827,
+    "pitch.ki": -0.5583404600535798,
+    "pitch.k_rate": 0.17847441971713296,
+    "roll.kp": 1.3680545434000444,
+    "roll.ki": 0.5484562826870701,
+    "roll.k_rate": -0.33420967504831045,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6639879699247541,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.146667,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.1600005_h100.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.9090050419509957
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 71.8763008788114
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7371975935185843
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.800256090493042
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.46986053188408
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5295192636694046,
+    "pitch.ki": -0.5531859875361743,
+    "pitch.k_rate": 0.17682678434533206,
+    "roll.kp": 1.1487481101721806,
+    "roll.ki": 0.4605358180259312,
+    "roll.k_rate": -0.28727163354952573,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6578581835529469,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.1600005,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.18_h100.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": "불합격",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.9177326779568523
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 78.2273181556485
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7426622144556229
+    },
+    "roll_rate": {
+     "verdict": "불합격",
+     "metric": 12.384346152995656
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 55.24663786492741
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.3885001030345163,
+    "pitch.ki": -0.502183149265159,
+    "pitch.k_rate": 0.1605236456412648,
+    "roll.kp": 0.9066992319163831,
+    "roll.ki": 0.3634978536865734,
+    "roll.k_rate": -0.23527351905434074,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5972047409549983,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.18,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.2_h100.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8955146672729117
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 85.25625686780648
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7034460714875111
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 12.185804493005541
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.9359014957204
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1823281590049532,
+    "pitch.ki": -0.42761630125656913,
+    "pitch.k_rate": 0.13668823359322582,
+    "roll.kp": 0.7296917549072426,
+    "roll.ki": 0.29253514001656583,
+    "roll.k_rate": -0.18327410457379378,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5085285772606101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.2133335_h100.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8702131025735723
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 88.45192233382551
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6642007991028445
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 12.022987190979418
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.562528510585366
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.0377768033827193,
+    "pitch.ki": -0.37533596304249495,
+    "pitch.k_rate": 0.1199767399922123,
+    "roll.kp": 0.6404796934716264,
+    "roll.ki": 0.25676981485326866,
+    "roll.k_rate": -0.15632277724855886,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.4463559100059184,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2133335,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.133_h100.0_f10.0",
+   "kind": "clip",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "clip",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8444682842788582
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 66.44124140076372
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6499751881771341
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.233042576529177
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 51.04968976443783
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5508971466982788,
+    "pitch.ki": -0.5609177929574342,
+    "pitch.k_rate": 0.17929826829581044,
+    "roll.kp": 1.4777118719581994,
+    "roll.ki": 0.5924181635057457,
+    "roll.k_rate": -0.3638150117153667,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6670529780427155,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.133,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.5850000000000001_h100.0_f10.0",
+   "kind": "clip",
+   "row": [
+    100.0,
+    10.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [
+    "not_converged"
+   ],
+   "state": "calc_failed",
+   "cond": {
+    "mach": 0.5850000000000001,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.14_h1550.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.819263967136423
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 63.02444816826045
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6274394422362612
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.460924663220364
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 49.873174685548435
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5508971466982788,
+    "pitch.ki": -0.5609177929574342,
+    "pitch.k_rate": 0.17929826829581044,
+    "roll.kp": 1.4777118719581994,
+    "roll.ki": 0.5924181635057457,
+    "roll.k_rate": -0.3638150117153667,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6670529780427155,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.14,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.153334_h1550.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8490618646234455
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 66.32022262024884
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6650349267610707
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.617241061316447
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 50.000876063272244
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5366448683898861,
+    "pitch.ki": -0.5557631271497254,
+    "pitch.k_rate": 0.17765057113845545,
+    "roll.kp": 1.2583972148418887,
+    "roll.ki": 0.5044944018683942,
+    "roll.k_rate": -0.304604338381254,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6609229618067927,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.153334,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.166667_h1550.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.877966853764559
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 69.24076550287691
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.703026566218674
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.132594835927227
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.731234007533885
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.522393658948923,
+    "pitch.ki": -0.5506088479226232,
+    "pitch.k_rate": 0.1760029975522087,
+    "roll.kp": 1.0390990055024723,
+    "roll.ki": 0.41657723418346787,
+    "roll.k_rate": -0.26993892871779734,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.654793405299101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.166667,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.193333_h1550.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8602402750993413
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 82.18898015500463
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6686801760435398
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.372058010366162
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.70247015599733
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.2546065471201095,
+    "pitch.ki": -0.4537574506076948,
+    "pitch.k_rate": 0.1450442937303209,
+    "roll.kp": 0.7742994583302939,
+    "roll.ki": 0.31041847318967886,
+    "roll.k_rate": -0.2006081093908841,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5396160766108955,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.193333,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.206667_h1550.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8390435829727462
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 88.31666417875113
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6353389143899002
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.010641567893432
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.21943501853747
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1100497708897974,
+    "pitch.ki": -0.4014751519054437,
+    "pitch.k_rate": 0.12833217345613077,
+    "roll.kp": 0.6850840514841916,
+    "roll.ki": 0.2746518068434529,
+    "roll.k_rate": -0.16594009975670349,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.47744107791032486,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.206667,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.22_h1550.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8112327770505814
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 91.97000156680838
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.5953630827285993
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.145521162834973
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.16591456780145
+    }
+   },
+   "gains": {
+    "pitch.kp": -0.9655038358756414,
+    "pitch.ki": -0.3491967741795463,
+    "pitch.k_rate": 0.11162130652829386,
+    "roll.kp": 0.5958753354590615,
+    "roll.ki": 0.23888782286308455,
+    "roll.k_rate": -0.1467054547404143,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.41527074210151205,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.22,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.146667_h1550.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8342693095233409
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 64.71576919441716
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6463460504406588
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.58962548980031
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 50.009169625696074
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5437710075440827,
+    "pitch.ki": -0.5583404600535798,
+    "pitch.k_rate": 0.17847441971713296,
+    "roll.kp": 1.3680545434000444,
+    "roll.ki": 0.5484562826870701,
+    "roll.k_rate": -0.33420967504831045,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6639879699247541,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.146667,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.1600005_h1550.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8636295211417959
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 67.83027851710028
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6841782681452779
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.903395825883962
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 51.35716452174688
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5295192636694046,
+    "pitch.ki": -0.5531859875361743,
+    "pitch.k_rate": 0.17682678434533206,
+    "roll.kp": 1.1487481101721806,
+    "roll.ki": 0.4605358180259312,
+    "roll.k_rate": -0.28727163354952573,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6578581835529469,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.1600005,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.18_h1550.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8719873624542063
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 75.62456887496259
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6896438981994104
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.398414405779345
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.33895961197857
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.3885001030345163,
+    "pitch.ki": -0.502183149265159,
+    "pitch.k_rate": 0.1605236456412648,
+    "roll.kp": 0.9066992319163831,
+    "roll.ki": 0.3634978536865734,
+    "roll.k_rate": -0.23527351905434074,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5972047409549983,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.18,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.2_h1550.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8504538065347135
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 85.46635269647459
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6530025435220307
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.235897060093732
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.06220601609573
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1823281590049532,
+    "pitch.ki": -0.42761630125656913,
+    "pitch.k_rate": 0.13668823359322582,
+    "roll.kp": 0.7296917549072426,
+    "roll.ki": 0.29253514001656583,
+    "roll.k_rate": -0.18327410457379378,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5085285772606101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.2133335_h1550.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8259815116939003
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 90.52223343348953
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6163224580169385
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.10200448293257
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.70572773744061
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.0377768033827193,
+    "pitch.ki": -0.37533596304249495,
+    "pitch.k_rate": 0.1199767399922123,
+    "roll.kp": 0.6404796934716264,
+    "roll.ki": 0.25676981485326866,
+    "roll.k_rate": -0.15632277724855886,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.4463559100059184,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2133335,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.133_h1550.0_f10.0",
+   "kind": "clip",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [],
+   "state": "out_of_region",
+   "cond": {
+    "mach": 0.133,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.5850000000000001_h1550.0_f10.0",
+   "kind": "clip",
+   "row": [
+    1550.0,
+    10.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "state": "infeasible",
+   "cond": {
+    "mach": 0.5850000000000001,
+    "alt": 1550.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.14_h3000.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.14,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.153334_h3000.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.153334,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.166667_h3000.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.166667,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.193333_h3000.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.193333,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.206667_h3000.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.206667,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.22_h3000.0_f10.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.22,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.146667_h3000.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.146667,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.1600005_h3000.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.1600005,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.18_h3000.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.18,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.2_h3000.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.2,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.2133335_h3000.0_f10.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.2133335,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.133_h3000.0_f10.0",
+   "kind": "clip",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.133,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.5850000000000001_h3000.0_f10.0",
+   "kind": "clip",
+   "row": [
+    3000.0,
+    10.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.5850000000000001,
+    "alt": 3000.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.14_h100.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8575421881415424
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 66.83762599963384
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6662964278544998
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.147015470844849
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.131822469051144
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5508971466982788,
+    "pitch.ki": -0.5609177929574342,
+    "pitch.k_rate": 0.17929826829581044,
+    "roll.kp": 1.4777118719581994,
+    "roll.ki": 0.5924181635057457,
+    "roll.k_rate": -0.3638150117153667,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6670529780427155,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.14,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.153334_h100.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8892490513217995
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 69.84298096208192
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7070562759193303
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.327809707857833
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.2235366660903
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5366448683898861,
+    "pitch.ki": -0.5557631271497254,
+    "pitch.k_rate": 0.17765057113845545,
+    "roll.kp": 1.2583972148418887,
+    "roll.ki": 0.5044944018683942,
+    "roll.k_rate": -0.304604338381254,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6609229618067927,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.153334,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.166667_h100.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.9199217663048307
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 72.37987090727651
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7476718577842354
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.931437213928819
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.74606592168254
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.522393658948923,
+    "pitch.ki": -0.5506088479226232,
+    "pitch.k_rate": 0.1760029975522087,
+    "roll.kp": 1.0390990055024723,
+    "roll.ki": 0.41657723418346787,
+    "roll.k_rate": -0.26993892871779734,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.654793405299101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.166667,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.193333_h100.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.9012673862504953
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 83.74949275659509
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7105583856119915
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 12.207083377335836
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 55.5815590219305
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.2546065471201095,
+    "pitch.ki": -0.4537574506076948,
+    "pitch.k_rate": 0.1450442937303209,
+    "roll.kp": 0.7742994583302939,
+    "roll.ki": 0.31041847318967886,
+    "roll.k_rate": -0.2006081093908841,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5396160766108955,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.193333,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.206667_h100.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.87887298402253
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 88.5936508933404
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6749295777667805
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.777959133251734
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.173075658338234
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1100497708897974,
+    "pitch.ki": -0.4014751519054437,
+    "pitch.k_rate": 0.12833217345613077,
+    "roll.kp": 0.6850840514841916,
+    "roll.ki": 0.2746518068434529,
+    "roll.k_rate": -0.16594009975670349,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.47744107791032486,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.206667,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.22_h100.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8494621045103491
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 91.33226646485139
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.63202266937569
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.933750875515033
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 55.00751057965675
+    }
+   },
+   "gains": {
+    "pitch.kp": -0.9655038358756414,
+    "pitch.ki": -0.3491967741795463,
+    "pitch.k_rate": 0.11162130652829386,
+    "roll.kp": 0.5958753354590615,
+    "roll.ki": 0.23888782286308455,
+    "roll.k_rate": -0.1467054547404143,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.41527074210151205,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.22,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.146667_h100.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.873521986360575
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 68.39798901328612
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6868309285379552
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.296938732349126
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.24369940110972
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5437710075440827,
+    "pitch.ki": -0.5583404600535798,
+    "pitch.k_rate": 0.17847441971713296,
+    "roll.kp": 1.3680545434000444,
+    "roll.ki": 0.5484562826870701,
+    "roll.k_rate": -0.33420967504831045,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6639879699247541,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.146667,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.1600005_h100.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.904716140202883
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 71.17015487989045
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7275473908112146
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.663149297426036
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.47926806599284
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5295192636694046,
+    "pitch.ki": -0.5531859875361743,
+    "pitch.k_rate": 0.17682678434533206,
+    "roll.kp": 1.1487481101721806,
+    "roll.ki": 0.4605358180259312,
+    "roll.k_rate": -0.28727163354952573,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6578581835529469,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.1600005,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.18_h100.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": "불합격",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.9136524964422778
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 78.17417214363263
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7330861173347538
+    },
+    "roll_rate": {
+     "verdict": "불합격",
+     "metric": 12.241346601120192
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 55.27452081010068
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.3885001030345163,
+    "pitch.ki": -0.502183149265159,
+    "pitch.k_rate": 0.1605236456412648,
+    "roll.kp": 0.9066992319163831,
+    "roll.ki": 0.3634978536865734,
+    "roll.k_rate": -0.23527351905434074,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5972047409549983,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.18,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.2_h100.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8909309882541625
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 86.38371672776856
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6937884086285945
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 12.045035781133407
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.97230209419797
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1823281590049532,
+    "pitch.ki": -0.42761630125656913,
+    "pitch.k_rate": 0.13668823359322582,
+    "roll.kp": 0.7296917549072426,
+    "roll.ki": 0.29253514001656583,
+    "roll.k_rate": -0.18327410457379378,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5085285772606101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.2133335_h100.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8650627284005995
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 90.26014908480732
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6545059280362835
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.884038601648475
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.60251323059441
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.0377768033827193,
+    "pitch.ki": -0.37533596304249495,
+    "pitch.k_rate": 0.1199767399922123,
+    "roll.kp": 0.6404796934716264,
+    "roll.ki": 0.25676981485326866,
+    "roll.k_rate": -0.15632277724855886,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.4463559100059184,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2133335,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.133_h100.0_f25.0",
+   "kind": "clip",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "clip",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8387795437095746
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 65.28343444200374
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6406413810640229
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.111782374362551
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 51.048997264137455
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5508971466982788,
+    "pitch.ki": -0.5609177929574342,
+    "pitch.k_rate": 0.17929826829581044,
+    "roll.kp": 1.4777118719581994,
+    "roll.ki": 0.5924181635057457,
+    "roll.k_rate": -0.3638150117153667,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6670529780427155,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.133,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.5850000000000001_h100.0_f25.0",
+   "kind": "clip",
+   "row": [
+    100.0,
+    25.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "state": "infeasible",
+   "cond": {
+    "mach": 0.5850000000000001,
+    "alt": 100.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.14_h1550.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "out_of_region",
+   "cond": {
+    "mach": 0.14,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.153334_h1550.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8432893463145736
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 65.09418563154014
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6555096849392142
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.502182353401649
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 50.00703065657274
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5366448683898861,
+    "pitch.ki": -0.5557631271497254,
+    "pitch.k_rate": 0.17765057113845545,
+    "roll.kp": 1.2583972148418887,
+    "roll.ki": 0.5044944018683942,
+    "roll.k_rate": -0.304604338381254,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6609229618067927,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.153334,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.166667_h1550.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8727606182507502
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 68.18130125123719
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6932586070917754
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.012450777466686
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.76561752766264
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.522393658948923,
+    "pitch.ki": -0.5506088479226232,
+    "pitch.k_rate": 0.1760029975522087,
+    "roll.kp": 1.0390990055024723,
+    "roll.ki": 0.41657723418346787,
+    "roll.k_rate": -0.26993892871779734,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.654793405299101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.166667,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.193333_h1550.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8546788078525009
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 82.13111797786826
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6589643027097207
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.249734605285763
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.76479579529769
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.2546065471201095,
+    "pitch.ki": -0.4537574506076948,
+    "pitch.k_rate": 0.1450442937303209,
+    "roll.kp": 0.7742994583302939,
+    "roll.ki": 0.31041847318967886,
+    "roll.k_rate": -0.2006081093908841,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5396160766108955,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.193333,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.206667_h1550.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·권장 충족",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8330623044901976
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 89.39200372389581
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6256617965068899
+    },
+    "roll_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 9.892189534518979
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.28576699501275
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1100497708897974,
+    "pitch.ki": -0.4014751519054437,
+    "pitch.k_rate": 0.12833217345613077,
+    "roll.kp": 0.6850840514841916,
+    "roll.ki": 0.2746518068434529,
+    "roll.k_rate": -0.16594009975670349,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.47744107791032486,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.206667,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.22_h1550.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·권장 충족",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8047150372361862
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 93.89797340564166
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.5858221683630662
+    },
+    "roll_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 10.025839266104928
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.246715521834574
+    }
+   },
+   "gains": {
+    "pitch.kp": -0.9655038358756414,
+    "pitch.ki": -0.3491967741795463,
+    "pitch.k_rate": 0.11162130652829386,
+    "roll.kp": 0.5958753354590615,
+    "roll.ki": 0.23888782286308455,
+    "roll.k_rate": -0.1467054547404143,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.41527074210151205,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.22,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.146667_h1550.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8282203399485882
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 63.4272120115896
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6370622643471976
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.474809140750123
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 50.01236897830162
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5437710075440827,
+    "pitch.ki": -0.5583404600535798,
+    "pitch.k_rate": 0.17847441971713296,
+    "roll.kp": 1.3680545434000444,
+    "roll.ki": 0.5484562826870701,
+    "roll.k_rate": -0.33420967504831045,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6639879699247541,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.146667,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.1600005_h1550.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8581383796273874
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 66.68106488353465
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6745033877663513
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.78550928072892
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 51.37639667724201
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5295192636694046,
+    "pitch.ki": -0.5531859875361743,
+    "pitch.k_rate": 0.17682678434533206,
+    "roll.kp": 1.1487481101721806,
+    "roll.ki": 0.4605358180259312,
+    "roll.k_rate": -0.28727163354952573,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6578581835529469,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.1600005,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.18_h1550.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8666615984747786
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 74.87853274391892
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.67990492340859
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.275683187903969
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.38552986152149
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.3885001030345163,
+    "pitch.ki": -0.502183149265159,
+    "pitch.k_rate": 0.1605236456412648,
+    "roll.kp": 0.9066992319163831,
+    "roll.ki": 0.3634978536865734,
+    "roll.k_rate": -0.23527351905434074,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5972047409549983,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.18,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.2_h1550.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8446974635274603
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 85.94798659926681
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.643304601959692
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.115046575130583
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.12613565715151
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1823281590049532,
+    "pitch.ki": -0.42761630125656913,
+    "pitch.k_rate": 0.13668823359322582,
+    "roll.kp": 0.7296917549072426,
+    "roll.ki": 0.29253514001656583,
+    "roll.k_rate": -0.18327410457379378,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5085285772606101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.2133335_h1550.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·권장 충족",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8197460943731308
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 92.11587181644222
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6067092098221033
+    },
+    "roll_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 9.982692813142691
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.779894726075554
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.0377768033827193,
+    "pitch.ki": -0.37533596304249495,
+    "pitch.k_rate": 0.1199767399922123,
+    "roll.kp": 0.6404796934716264,
+    "roll.ki": 0.25676981485326866,
+    "roll.k_rate": -0.15632277724855886,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.4463559100059184,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2133335,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.133_h1550.0_f25.0",
+   "kind": "clip",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [],
+   "state": "out_of_region",
+   "cond": {
+    "mach": 0.133,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.5850000000000001_h1550.0_f25.0",
+   "kind": "clip",
+   "row": [
+    1550.0,
+    25.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [
+    "not_converged"
+   ],
+   "state": "calc_failed",
+   "cond": {
+    "mach": 0.5850000000000001,
+    "alt": 1550.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.14_h3000.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.14,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.153334_h3000.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.153334,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.166667_h3000.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.166667,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.193333_h3000.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.193333,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.206667_h3000.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.206667,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.22_h3000.0_f25.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.22,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.146667_h3000.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.146667,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.1600005_h3000.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.1600005,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.18_h3000.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.18,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.2_h3000.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.2,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.2133335_h3000.0_f25.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.2133335,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.133_h3000.0_f25.0",
+   "kind": "clip",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.133,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.5850000000000001_h3000.0_f25.0",
+   "kind": "clip",
+   "row": [
+    3000.0,
+    25.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.5850000000000001,
+    "alt": 3000.0,
+    "fuel": 25.0
+   }
+  },
+  {
+   "name": "M0.14_h100.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8481737202405998
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 64.9584915837612
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6518361483776661
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.933242767487542
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.12148302979318
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5508971466982788,
+    "pitch.ki": -0.5609177929574342,
+    "pitch.k_rate": 0.17929826829581044,
+    "roll.kp": 1.4777118719581994,
+    "roll.ki": 0.5924181635057457,
+    "roll.k_rate": -0.3638150117153667,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6670529780427155,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.14,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.153334_h100.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8807294241960238
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 68.21771891443353
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6919528596952133
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.111063935006593
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.22057538021227
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5366448683898861,
+    "pitch.ki": -0.5557631271497254,
+    "pitch.k_rate": 0.17765057113845545,
+    "roll.kp": 1.2583972148418887,
+    "roll.ki": 0.5044944018683942,
+    "roll.k_rate": -0.304604338381254,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6609229618067927,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.153334,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.166667_h100.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.9122768616602666
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 71.0791561542382
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7323618400270039
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.704675255031601
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.78068058146283
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.522393658948923,
+    "pitch.ki": -0.5506088479226232,
+    "pitch.k_rate": 0.1760029975522087,
+    "roll.kp": 1.0390990055024723,
+    "roll.ki": 0.41657723418346787,
+    "roll.k_rate": -0.26993892871779734,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.654793405299101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.166667,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.193333_h100.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8930963072799499
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 84.17576170443061
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6953637926042271
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.97596872286502
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 55.64702412036954
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.2546065471201095,
+    "pitch.ki": -0.4537574506076948,
+    "pitch.k_rate": 0.1450442937303209,
+    "roll.kp": 0.7742994583302939,
+    "roll.ki": 0.31041847318967886,
+    "roll.k_rate": -0.2006081093908841,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5396160766108955,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.193333,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.206667_h100.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8700679070034135
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 90.5123356388616
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6597979439417921
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.554338693250589
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.24051722069294
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1100497708897974,
+    "pitch.ki": -0.4014751519054437,
+    "pitch.k_rate": 0.12833217345613077,
+    "roll.kp": 0.6850840514841916,
+    "roll.ki": 0.2746518068434529,
+    "roll.k_rate": -0.16594009975670349,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.47744107791032486,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.206667,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.22_h100.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8398457058695342
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 94.22904265667648
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6171076407000419
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.707675738862976
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 55.085604436080985
+    }
+   },
+   "gains": {
+    "pitch.kp": -0.9655038358756414,
+    "pitch.ki": -0.3491967741795463,
+    "pitch.k_rate": 0.11162130652829386,
+    "roll.kp": 0.5958753354590615,
+    "roll.ki": 0.23888782286308455,
+    "roll.k_rate": -0.1467054547404143,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.41527074210151205,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.22,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.146667_h100.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8645735361976503
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 66.63535120168942
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.672001295895192
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.080672834305958
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.23658717565104
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5437710075440827,
+    "pitch.ki": -0.5583404600535798,
+    "pitch.k_rate": 0.17847441971713296,
+    "roll.kp": 1.3680545434000444,
+    "roll.ki": 0.5484562826870701,
+    "roll.k_rate": -0.33420967504831045,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6639879699247541,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.146667,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.1600005_h100.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8966316587596738
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 69.70002288097263
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7123042638675524
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.440835449495827
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.49428713795811
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5295192636694046,
+    "pitch.ki": -0.5531859875361743,
+    "pitch.k_rate": 0.17682678434533206,
+    "roll.kp": 1.1487481101721806,
+    "roll.ki": 0.4605358180259312,
+    "roll.k_rate": -0.28727163354952573,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6578581835529469,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.1600005,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.18_h100.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.9058341270880651
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 77.49695567765775
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7178474892468457
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 12.009483276996459
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 55.32326837734621
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.3885001030345163,
+    "pitch.ki": -0.502183149265159,
+    "pitch.k_rate": 0.1605236456412648,
+    "roll.kp": 0.9066992319163831,
+    "roll.ki": 0.3634978536865734,
+    "roll.k_rate": -0.23527351905434074,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5972047409549983,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.18,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.2_h100.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8824658374326426
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 87.55622342601532
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6786220788929189
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.816768917439862
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 55.03832247221834
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1823281590049532,
+    "pitch.ki": -0.42761630125656913,
+    "pitch.k_rate": 0.13668823359322582,
+    "roll.kp": 0.7296917549072426,
+    "roll.ki": 0.29253514001656583,
+    "roll.k_rate": -0.18327410457379378,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5085285772606101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.2133335_h100.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·주의",
+     "metric": 0.8558733293552908
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 92.7855237270814
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6394747237740132
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 11.658712541284546
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 54.67646685460963
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.0377768033827193,
+    "pitch.ki": -0.37533596304249495,
+    "pitch.k_rate": 0.1199767399922123,
+    "roll.kp": 0.6404796934716264,
+    "roll.ki": 0.25676981485326866,
+    "roll.k_rate": -0.15632277724855886,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.4463559100059184,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2133335,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.133_h100.0_f50.0",
+   "kind": "clip",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [],
+   "state": "out_of_region",
+   "cond": {
+    "mach": 0.133,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.5850000000000001_h100.0_f50.0",
+   "kind": "clip",
+   "row": [
+    100.0,
+    50.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [
+    "not_converged"
+   ],
+   "state": "calc_failed",
+   "cond": {
+    "mach": 0.5850000000000001,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.14_h1550.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "out_of_region",
+   "cond": {
+    "mach": 0.14,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.153334_h1550.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "out_of_region",
+   "cond": {
+    "mach": 0.153334,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.166667_h1550.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8634403833629887
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 66.29476491765502
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6781262480490954
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.81756035015556
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.82115744585394
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.522393658948923,
+    "pitch.ki": -0.5506088479226232,
+    "pitch.k_rate": 0.1760029975522087,
+    "roll.kp": 1.0390990055024723,
+    "roll.ki": 0.41657723418346787,
+    "roll.k_rate": -0.26993892871779734,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.654793405299101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.166667,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.193333_h1550.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8449083092260595
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 81.29938386107005
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6439718308896974
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.051287000254398
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.87211155928361
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.2546065471201095,
+    "pitch.ki": -0.4537574506076948,
+    "pitch.k_rate": 0.1450442937303209,
+    "roll.kp": 0.7742994583302939,
+    "roll.ki": 0.31041847318967886,
+    "roll.k_rate": -0.2006081093908841,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5396160766108955,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.193333,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.206667_h1550.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·권장 충족",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8227667964554591
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 90.35708625544311
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6108601018258104
+    },
+    "roll_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 9.69998930230771
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.40214911830958
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1100497708897974,
+    "pitch.ki": -0.4014751519054437,
+    "pitch.k_rate": 0.12833217345613077,
+    "roll.kp": 0.6850840514841916,
+    "roll.ki": 0.2746518068434529,
+    "roll.k_rate": -0.16594009975670349,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.47744107791032486,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.206667,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.22_h1550.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": "합격·권장 충족",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.7937540672911341
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 96.62429699710168
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.5713819060493118
+    },
+    "roll_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 9.831650823898407
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.391046996840714
+    }
+   },
+   "gains": {
+    "pitch.kp": -0.9655038358756414,
+    "pitch.ki": -0.3491967741795463,
+    "pitch.k_rate": 0.11162130652829386,
+    "roll.kp": 0.5958753354590615,
+    "roll.ki": 0.23888782286308455,
+    "roll.k_rate": -0.1467054547404143,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.41527074210151205,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.22,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.146667_h1550.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "out_of_region",
+   "cond": {
+    "mach": 0.146667,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.1600005_h1550.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8484658305595297
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 64.70020160181895
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6596900097078666
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.594282467989341
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 51.4056989292601
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5295192636694046,
+    "pitch.ki": -0.5531859875361743,
+    "pitch.k_rate": 0.17682678434533206,
+    "roll.kp": 1.1487481101721806,
+    "roll.ki": 0.4605358180259312,
+    "roll.k_rate": -0.28727163354952573,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6578581835529469,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.1600005,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.18_h1550.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8571883525832799
+    },
+    "pitch_att": {
+     "verdict": "합격·주의",
+     "metric": 73.25229017038305
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6648158821379825
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 10.07659032064125
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.4636085043598
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.3885001030345163,
+    "pitch.ki": -0.502183149265159,
+    "pitch.k_rate": 0.1605236456412648,
+    "roll.kp": 0.9066992319163831,
+    "roll.ki": 0.3634978536865734,
+    "roll.k_rate": -0.23527351905434074,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5972047409549983,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.18,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.2_h1550.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8346827944637112
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 85.89389536446481
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6284007267611278
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.918974387815409
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 53.23730541392348
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.1823281590049532,
+    "pitch.ki": -0.42761630125656913,
+    "pitch.k_rate": 0.13668823359322582,
+    "roll.kp": 0.7296917549072426,
+    "roll.ki": 0.29253514001656583,
+    "roll.k_rate": -0.18327410457379378,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.5085285772606101,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.2133335_h1550.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": "합격·권장 충족",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8091345607488841
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 94.11177781102259
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.5920784244793285
+    },
+    "roll_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 9.78910268226003
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 52.91128460891923
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.0377768033827193,
+    "pitch.ki": -0.37533596304249495,
+    "pitch.k_rate": 0.1199767399922123,
+    "roll.kp": 0.6404796934716264,
+    "roll.ki": 0.25676981485326866,
+    "roll.k_rate": -0.15632277724855886,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.4463559100059184,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.2133335,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.133_h1550.0_f50.0",
+   "kind": "clip",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [],
+   "state": "out_of_region",
+   "cond": {
+    "mach": 0.133,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.5850000000000001_h1550.0_f50.0",
+   "kind": "clip",
+   "row": [
+    1550.0,
+    50.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "state": "infeasible",
+   "cond": {
+    "mach": 0.5850000000000001,
+    "alt": 1550.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.14_h3000.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.14,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.153334_h3000.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.153334,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.166667_h3000.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.166667,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.193333_h3000.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.193333,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.206667_h3000.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.206667,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.22_h3000.0_f50.0",
+   "kind": "breakpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "breakpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.22,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.146667_h3000.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.146667,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.1600005_h3000.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.1600005,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.18_h3000.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.18,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.2_h3000.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.2,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.2133335_h3000.0_f50.0",
+   "kind": "midpoint",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "midpoint",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.2133335,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.133_h3000.0_f50.0",
+   "kind": "clip",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.133,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.5850000000000001_h3000.0_f50.0",
+   "kind": "clip",
+   "row": [
+    3000.0,
+    50.0
+   ],
+   "origin": "clip",
+   "verdict": null,
+   "reasons": [],
+   "state": "undefined",
+   "cond": {
+    "mach": 0.5850000000000001,
+    "alt": 3000.0,
+    "fuel": 50.0
+   }
+  },
+  {
+   "name": "M0.12600000000000003_h100.0_f10.0",
+   "kind": "boundary",
+   "row": null,
+   "origin": "boundary:region",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "state": "computable",
+   "slots": {
+    "pitch_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.8259869849143682
+    },
+    "pitch_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 64.84780087096664
+    },
+    "yaw_rate": {
+     "verdict": "합격·권장 충족",
+     "metric": 0.6241654537880876
+    },
+    "roll_rate": {
+     "verdict": "합격·주의",
+     "metric": 9.23600113334755
+    },
+    "roll_att": {
+     "verdict": "합격·권장 충족",
+     "metric": 49.8441441616705
+    }
+   },
+   "gains": {
+    "pitch.kp": -1.5508971466982788,
+    "pitch.ki": -0.5609177929574342,
+    "pitch.k_rate": 0.17929826829581044,
+    "roll.kp": 1.4777118719581994,
+    "roll.ki": 0.5924181635057457,
+    "roll.k_rate": -0.3638150117153667,
+    "yaw.kp": 0.5,
+    "yaw.ki": 0.0,
+    "yaw.k_rate": 0.6670529780427155,
+    "alt.kp": 0.04344032498535738,
+    "alt.ki": 0.010585536973215789,
+    "alt.k_rate": -0.04178154765867609,
+    "speed.kp": 0.07637872624403545,
+    "speed.ki": 0.024215168362923225,
+    "heading.kp": 1.4273348540965236,
+    "heading.ki": 0.0
+   },
+   "cond": {
+    "mach": 0.12600000000000003,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.9500000000000001_h100.0_f10.0",
+   "kind": "boundary",
+   "row": null,
+   "origin": "boundary:region",
+   "verdict": null,
+   "reasons": [],
+   "state": "model_gap",
+   "cond": {
+    "mach": 0.9500000000000001,
+    "alt": 100.0,
+    "fuel": 10.0
+   }
+  },
+  {
+   "name": "M0.9500000000000001_h100.0_f50.0",
+   "kind": "boundary",
+   "row": null,
+   "origin": "boundary:region",
+   "verdict": null,
+   "reasons": [],
+   "state": "model_gap",
+   "cond": {
+    "mach": 0.9500000000000001,
+    "alt": 100.0,
+    "fuel": 50.0
+   }
+  }
+ ],
+ "summary": {
+  "columns": [
+   "clip<",
+   "bp1",
+   "iv1-2",
+   "bp2",
+   "iv2-3",
+   "bp3",
+   "iv3-4",
+   "bp4",
+   "iv4-5",
+   "bp5",
+   "iv5-6",
+   "bp6",
+   "clip>"
+  ],
+  "out_of_region": 8,
+  "cells": [
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "bp1",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "bp2",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "bp3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "불합격": 1
+    },
+    "headline": "불합격",
+    "text": "불합격 1 · 완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "bp4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "bp5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "bp6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "iv1-2",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "iv2-3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "iv3-4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "불합격": 1
+    },
+    "headline": "불합격",
+    "text": "불합격 1 · 완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "iv4-5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "iv5-6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "clip<",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     10.0
+    ],
+    "col": "clip>",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "calc_failed": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 계산 실패 1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "bp1",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "bp2",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "bp3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "bp4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "bp5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "bp6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "iv1-2",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "iv2-3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "iv3-4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "iv4-5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "iv5-6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     10.0
+    ],
+    "col": "clip>",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "infeasible": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 물리적 불가 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "bp1",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "bp2",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "bp3",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "bp4",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "bp5",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "bp6",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "iv1-2",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "iv2-3",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "iv3-4",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "iv4-5",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "iv5-6",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "clip<",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     10.0
+    ],
+    "col": "clip>",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "bp1",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "bp2",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "bp3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "bp4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "bp5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "bp6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "iv1-2",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "iv2-3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "iv3-4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "불합격": 1
+    },
+    "headline": "불합격",
+    "text": "불합격 1 · 완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "iv4-5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "iv5-6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "clip<",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     25.0
+    ],
+    "col": "clip>",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "infeasible": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 물리적 불가 1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "bp2",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "bp3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "bp4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "bp5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·권장 충족": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "bp6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·권장 충족": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "iv1-2",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "iv2-3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "iv3-4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "iv4-5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "iv5-6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·권장 충족": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     25.0
+    ],
+    "col": "clip>",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "calc_failed": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 계산 실패 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "bp1",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "bp2",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "bp3",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "bp4",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "bp5",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "bp6",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "iv1-2",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "iv2-3",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "iv3-4",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "iv4-5",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "iv5-6",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "clip<",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     25.0
+    ],
+    "col": "clip>",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "bp1",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "bp2",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "bp3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "bp4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "bp5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "bp6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "iv1-2",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "iv2-3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "iv3-4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "iv4-5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "iv5-6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     100.0,
+     50.0
+    ],
+    "col": "clip>",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "calc_failed": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 계산 실패 1"
+   },
+   {
+    "row": [
+     1550.0,
+     50.0
+    ],
+    "col": "bp3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     50.0
+    ],
+    "col": "bp4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     50.0
+    ],
+    "col": "bp5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·권장 충족": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     50.0
+    ],
+    "col": "bp6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·권장 충족": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     50.0
+    ],
+    "col": "iv2-3",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     50.0
+    ],
+    "col": "iv3-4",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     50.0
+    ],
+    "col": "iv4-5",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     50.0
+    ],
+    "col": "iv5-6",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·권장 충족": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": [
+     1550.0,
+     50.0
+    ],
+    "col": "clip>",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "infeasible": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 물리적 불가 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "bp1",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "bp2",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "bp3",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "bp4",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "bp5",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "bp6",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "iv1-2",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "iv2-3",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "iv3-4",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "iv4-5",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "iv5-6",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "clip<",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": [
+     3000.0,
+     50.0
+    ],
+    "col": "clip>",
+    "n": 1,
+    "done": 0,
+    "states": {
+     "undefined": 1
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/1 · 요구 미정의 1"
+   },
+   {
+    "row": "경계·추가",
+    "col": "clip<",
+    "n": 1,
+    "done": 1,
+    "states": {
+     "computable": 1
+    },
+    "verdicts": {
+     "합격·주의": 1
+    },
+    "headline": "검사한 점 모두 충족",
+    "text": "완료 1/1"
+   },
+   {
+    "row": "경계·추가",
+    "col": "clip>",
+    "n": 2,
+    "done": 0,
+    "states": {
+     "model_gap": 2
+    },
+    "verdicts": {},
+    "headline": "미완료",
+    "text": "완료 0/2 · 모델 부족 2"
+   }
+  ]
+ },
+ "d": {
+  "pitch_att": {
+   "n": 27,
+   "median": 0.0372851496769556,
+   "p90": 0.08296691586247107,
+   "max": 0.12421723695003947
+  },
+  "pitch_rate": {
+   "n": 27,
+   "median": 0.0021131040573796334,
+   "p90": 0.007470298348109806,
+   "max": 0.007868856544892
+  },
+  "roll_att": {
+   "n": 27,
+   "median": 0.013252650378865383,
+   "p90": 0.022283273771768107,
+   "max": 0.024421506042591544
+  },
+  "roll_rate": {
+   "n": 27,
+   "median": 0.012374241934426499,
+   "p90": 0.040579995175736225,
+   "max": 0.04830386526307517
+  },
+  "yaw_rate": {
+   "n": 27,
+   "median": 0.0033051745046223475,
+   "p90": 0.012644895026139674,
+   "max": 0.013282243104100571
+  }
+ },
+ "checks": {
+  "separation": {
+   "design_points": 54,
+   "breakpoints": 4,
+   "ok": true
+  },
+  "per_table": {
+   "union": [
+    0.14,
+    0.153334,
+    0.166667,
+    0.193333,
+    0.206667,
+    0.22
+   ],
+   "independent": [
+    "roll.k_rate"
+   ],
+   "ok": true
+  },
+  "validation_rows": {
+   "rows": 9,
+   "midpoints": 45,
+   "intervals": 5,
+   "ok": true
+  },
+  "no_omission": {
+   "candidates": 120,
+   "by_state": {
+    "완료": 65,
+    "계산 실패": 3,
+    "요구영역 밖": 8,
+    "물리적 불가": 3,
+    "요구 미정의": 39,
+    "모델 부족": 2
+   },
+   "summary_denominator": 112,
+   "out_of_region": 8,
+   "ok": true
+  },
+  "scheduled_gains": {
+   "checked": 65,
+   "mismatch": [],
+   "ok": true
+  },
+  "reuse": {
+   "trims_first_run": 71,
+   "new_trims_second_run": 18,
+   "expected_new": 18,
+   "reused_second_run": 53,
+   "ok": true
+  }
+ },
+ "elapsed_s": 2.9
+}

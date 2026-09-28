@@ -1,0 +1,190 @@
+"""격자 체계 첫 실험 실행기 (05 §11.10) — 예제·쇼케이스 기체에서 확인 항목 + 부산물(d 분포).
+
+실행: 워크트리 루트에서 `python experiments/grid_system/run_experiment.py`
+산출: experiments/grid_system/out/<기체>.json (UI 프로토타입이 같은 형식을 읽는다) + 표준출력 요약.
+"""
+
+import json
+import pathlib
+import statistics
+import subprocess
+import sys
+import time
+import warnings
+
+HERE = pathlib.Path(__file__).resolve().parent
+ROOT = HERE.parents[1]
+sys.path[:0] = [str(ROOT / "engine"), str(HERE)]
+warnings.filterwarnings("ignore")
+
+import claw  # noqa: E402
+
+assert str(ROOT / "engine") in claw.__file__, f"워크트리 엔진이 아니다: {claw.__file__}"
+
+import gridsys as g  # noqa: E402
+
+OUT = HERE / "out"
+
+
+def setup(built):
+    """기체마다 같은 규칙으로 실험 조건을 만든다 — 값은 기체 문서(trim_grid·db_ranges·fuel_max)에서."""
+    draft = g.region_draft_from_trim_grid(built.doc["mission_template"]["trim_grid"])
+    fuel_max = built.aircraft().fuel_mass.fuel_max
+    db_m = built.db_ranges()["mach"]
+    a_lo, a_hi = draft.alt
+    a_mid = float(round((a_lo + a_hi) / 2.0))
+    m_lo, m_hi = draft.mach
+    f_lo, f_hi = 0.2 * fuel_max, fuel_max
+    # 요구영역: 초안을 사용자가 넓혀 확정한 것으로 둔다 — 마하 상한을 DB 밖까지(모델 부족 확인),
+    # 경계표는 가운데 고도까지만 정의(그 위는 요구 미정의 확인)
+    top = db_m[1] + 0.05
+    region = g.Region(
+        mach=(m_lo * 0.9, top), alt=(a_lo, a_hi), fuel=(f_lo, f_hi),
+        boundary={f_lo: [(a_lo, m_lo * 0.9, top), (a_mid, m_lo, top)],
+                  f_hi: [(a_lo, m_lo, top), (a_mid, m_lo * 1.1, top)]},
+        source="user(experiment)")
+    model = g.ModelRange(mach=db_m, fuel=(0.0, fuel_max))
+    bps = tuple(round(m_lo + (m_hi - m_lo) * k / 3.0, 6) for k in range(4))  # 절점 4개
+    return draft, region, model, bps, (a_lo, a_mid, a_hi), (f_lo, 0.5 * fuel_max, f_hi)
+
+
+def run_case(built, store, region, model, schedule, spec):
+    ev = g.Evaluator(built, store)
+    val = g.generate_validation(region, schedule, spec)
+    return ev, val, g.evaluate(ev, region, model, schedule, val["points"])
+
+
+def jsonable(recs):
+    out = []
+    for r in recs:
+        x = {k: v for k, v in r.items() if k != "cond"}
+        x["cond"] = {"mach": r["cond"].mach, "alt": r["cond"].alt, "fuel": r["cond"].fuel}
+        x["row"] = list(r["row"]) if r["row"] is not None else None
+        out.append(x)
+    return out
+
+
+def experiment(name, built):
+    t0 = time.time()
+    draft, region, model, bps, alts, fuels = setup(built)
+    names = tuple(built.doc["law"]["schedule"]["scheduled"])
+    checks = {}
+
+    # ① 설계점·절점 분리 — 설계점 수와 무관하게 지정한 절점대로 표가 나온다
+    dps = g.auto_design_points(region, n_mach=9, alts=alts, fuels=fuels)
+    bset = {"A": g.BreakpointSet("A", "mach", bps)}
+    sch1 = g.sample_schedule(built, bset, {n: "A" for n in names})
+    checks["separation"] = {
+        "design_points": len(dps), "breakpoints": len(bps),
+        "ok": all(tuple(t.axes[0]) == bps for t in sch1.tables().values()),
+    }
+
+    # ② 표별 절점 — roll.k_rate만 독립 절점(가운데 두 절점을 다르게)으로 분리
+    b_coords = (bps[0], round((bps[0] + bps[1]) / 2, 6), round((bps[2] + bps[3]) / 2, 6), bps[3])
+    bset2 = {**bset, "B": g.BreakpointSet("B", "mach", b_coords)}
+    sch2 = g.sample_schedule(built, bset2, {n: ("B" if n == "roll.k_rate" else "A") for n in names})
+    union = sch2.union_coords()
+    checks["per_table"] = {
+        "union": union, "independent": [k for k, v in sch2.sharing().items() if v == "independent"],
+        "ok": set(union) == set(bps) | set(b_coords) and sch2.sharing()["roll.k_rate"] == "independent",
+    }
+
+    # ③ 검증조건 생성 — 중간 마하 × 별도 지정한 고도·연료 조합
+    store = g.TrimStore()
+    spec = g.ValidationSpec(alts=alts, fuels=fuels, n_between=1)
+    ev, val, recs = run_case(built, store, region, model, sch2, spec)
+    mids = [p for p in val["points"] if p.kind == "midpoint"]
+    want_rows = {(float(a), float(f)) for f in fuels for a in alts}
+    checks["validation_rows"] = {
+        "rows": len(want_rows), "midpoints": len(mids), "intervals": len(union) - 1,
+        "ok": {p.row for p in mids} == want_rows and len(mids) == (len(union) - 1) * len(want_rows),
+    }
+
+    # ④ 누락 방지 — 상태 합 = 후보 수, 요약 분모 + 영역 밖 = 후보 수
+    by_state = {}
+    for r in recs:
+        by_state[r["state"]] = by_state.get(r["state"], 0) + 1
+    summ = g.summarize(recs, union)
+    in_cells = sum(c["n"] for c in summ["cells"].values())
+    checks["no_omission"] = {
+        "candidates": len(recs), "by_state": {g.STATE_LABEL[k]: v for k, v in by_state.items()},
+        "summary_denominator": in_cells, "out_of_region": summ["out_of_region"],
+        "ok": sum(by_state.values()) == len(recs) and in_cells + summ["out_of_region"] == len(recs),
+    }
+
+    # ⑤ 스케줄 게인 사용 — 계산 완료 점마다 게인 = 자기 표 평가값 (비트 일치)
+    tabs2 = sch2.tables()
+    done = [r for r in recs if r["state"] == g.COMPUTABLE]
+    mism = [r["name"] for r in done for n, t in tabs2.items() if r["gains"][n] != t.interp(mach=r["cond"].mach)]
+    checks["scheduled_gains"] = {"checked": len(done), "mismatch": mism, "ok": bool(done) and not mism}
+
+    # ⑥ 계산 재사용 — 절점 하나를 옮겨 다시 돌리면 새 좌표만 트림한다
+    moved = list(bps)
+    moved[1] = round(moved[1] + (moved[2] - moved[1]) * 0.25, 6)
+    sch3 = g.sample_schedule(built, {"A": g.BreakpointSet("A", "mach", tuple(moved)), "B": bset2["B"]},
+                             sch2.refs)
+    known = {k[1] for k in store._d}
+    before, reused_before = store.computed, store.reused
+    _, _, recs3 = run_case(built, store, region, model, sch3, g.ValidationSpec(alts=alts, fuels=fuels))
+    need = {r["name"] for r in recs3
+            if region.classify(r["cond"]) is None and model.covers(r["cond"]) and r["name"] not in known}
+    checks["reuse"] = {
+        "trims_first_run": before, "new_trims_second_run": store.computed - before,
+        "expected_new": len(need), "reused_second_run": store.reused - reused_before,
+        "ok": store.computed - before == len(need) and store.reused > reused_before,
+    }
+
+    # 부산물 — 보강 지표 d 분포 (허용치 보정 자료, 05 §11.7)
+    ds = g.d_values(recs, union, g.d_scales(ev.criteria))
+    d_stats = {}
+    for slot in sorted({d["slot"] for d in ds}):
+        v = sorted(d["d"] for d in ds if d["slot"] == slot)
+        d_stats[slot] = {"n": len(v), "median": statistics.median(v), "p90": v[int(0.9 * (len(v) - 1))],
+                         "max": v[-1]}
+
+    return {
+        "aircraft": name, "fingerprint": built.fingerprint, "plant_fingerprint": built.plant_fingerprint,
+        "criteria_source": built.criteria_source,
+        "code": subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],
+                               capture_output=True, text=True).stdout.strip(),
+        "region": {"mach": region.mach, "alt": region.alt, "fuel": region.fuel,
+                   "boundary": {str(k): v for k, v in region.boundary.items()}, "source": region.source,
+                   "draft": {"mach": draft.mach, "alt": draft.alt, "fuel": draft.fuel,
+                             "confirmed": draft.confirmed}},
+        "model": {"mach": model.mach, "fuel": model.fuel},
+        "design_points": [{"mach": d.cond.mach, "alt": d.cond.alt, "fuel": d.cond.fuel, "origin": d.origin}
+                          for d in dps],
+        "schedule": {"bp_sets": {k: {"axis": v.axis, "coords": v.coords} for k, v in sch2.bp_sets.items()},
+                     "refs": sch2.refs, "sharing": sch2.sharing(), "values": sch2.values},
+        "validation": {"alts": alts, "fuels": fuels, "mode": spec.mode, "omitted": val["omitted"],
+                       "union": union},
+        "records": jsonable(recs),
+        "summary": {"columns": summ["columns"], "out_of_region": summ["out_of_region"],
+                    "cells": [{"row": list(k[0]) if isinstance(k[0], tuple) else k[0], "col": k[1], **c}
+                              for k, c in summ["cells"].items()]},
+        "d": d_stats, "checks": checks, "elapsed_s": round(time.time() - t0, 1),
+    }
+
+
+def main():
+    from claw.profile.build import build_profile
+    from claw.profile.document import load_example, load_showcase
+
+    OUT.mkdir(exist_ok=True)
+    all_ok = True
+    for name, loader in (("example", load_example), ("showcase", load_showcase)):
+        res = experiment(name, build_profile(loader()))
+        (OUT / f"{name}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str))
+        print(f"\n== {name} ({res['elapsed_s']} s, code {res['code']}) ==")
+        for k, v in res["checks"].items():
+            all_ok &= v["ok"]
+            print(f"  [{'OK' if v['ok'] else 'NG'}] {k}: "
+                  + json.dumps({kk: vv for kk, vv in v.items() if kk != "ok"}, ensure_ascii=False, default=str))
+        print("  d:", json.dumps({k: {kk: round(vv, 3) for kk, vv in v.items()} for k, v in res["d"].items()},
+                                 ensure_ascii=False))
+    print("\n전체:", "통과" if all_ok else "실패 있음")
+    return 0 if all_ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
