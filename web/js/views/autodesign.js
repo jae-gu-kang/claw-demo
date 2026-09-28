@@ -26,9 +26,9 @@ config 덮어쓰기로 보낸다. "게인 확정"은 결과의 반출 표(표 �
 import { ApiError, api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
-  CRITERIA_FIELDS, DEFAULT_FUEL_FRACS, TARGET_FIELDS, VERDICT_LABEL, actionCards, actuatorLine,
+  DEFAULT_FUEL_FRACS, VERDICT_LABEL, actionCards, actuatorLine,
   adoptBlockedText, adoptStorePayload, adoptWarnText, applyGateReason, approvedByDefault, buildConfig,
-  configFormValues, coverageLines, designCueSummary, emptyResultNotice, evidenceLines, excludedSamplesModel, fitFactsModel,
+  configFormValues, coverageLines, criteriaSummaryModel, designCueSummary, emptyResultNotice, evidenceLines, excludedSamplesModel, fitFactsModel,
   fitQualityLines, fuelsPlaceholder, ledgerRows, ledgerTruncatedText, mergeDesignConfig, pointRows,
   reasonText, reportLine, resumable, resumeBlockedText, reverifyLines, statusCounts, statusSeverity,
   statusText, trimLabel, verdictLegend, warnNoteText,
@@ -41,6 +41,7 @@ import { revealPanel } from "../lib/reveal.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { store } from "../store.js";
 import { selectedDocument } from "./profilepick.js";
+import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { errorWithSeedLink } from "./seedlink.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
@@ -148,10 +149,9 @@ export function render() {
     actuatorWn: el("input", { size: 5 }),
     actuatorZeta: el("input", { size: 5 }),
     delayS: el("input", { size: 6 }),
-    // 중첩 덮어쓰기 칸 — 채운 것만 config.criteria / config.targets로 나간다
-    criteria: Object.fromEntries(CRITERIA_FIELDS.map(([k]) => [k, el("input", { size: 5 })])),
-    targets: Object.fromEntries(TARGET_FIELDS.map(([k]) => [k, el("input", { size: 5 })])),
   };
+  // 판정선·튜닝 목표 — 읽기 전용. 선택 기체 문서의 /criteria·/tuning이 정본이고 서버가 그것으로 설계한다
+  const criteriaBox = el("div", {}, el("p", { class: "hint" }, "판정선·튜닝 목표 불러오는 중…"));
 
   const loadDefaults = async () => {
     try {
@@ -168,15 +168,11 @@ export function render() {
       // 기본값은 placeholder로만 — 값으로 채우면 사용자가 안 건드린 칸까지 덮어쓰기로
       // 나가고, 서버 기본값이 바뀌어도 화면이 옛 수치를 계속 보낸다
       const ph = (input, v) => { if (v != null) input.placeholder = String(v); };
-      for (const [k] of CRITERIA_FIELDS) ph(form.criteria[k], c.criteria?.[k]);
-      for (const [k] of TARGET_FIELDS) ph(form.targets[k], c.targets?.[k]);
       ph(form.delayS, c.delay_s);
       // 격자 기본 — 서버가 내면(grid) 그쪽이 정본, 아니면 엔진 기본의 사본
       ph(form.altsText, Array.isArray(d.grid?.alts) ? d.grid.alts.join(" ") : null);
-      defaultsBox.textContent =
-        `합격기준 PM ≥ ${c.criteria.pm_min_deg}° · GM ≥ ${c.criteria.gm_min_db} dB · `
-        + `ζ ≥ ${c.criteria.zeta_min} — 설계 목표 PM ${c.targets.pm_deg}° / GM `
-        + `${c.targets.gm_db} dB · ζsp ${c.targets.zeta_sp} (정본: 엔진 AutoDesignConfig)`;
+      defaultsBox.textContent = "판정선·튜닝 목표는 고른 기체 문서의 값으로 설계한다 — [판정선·튜닝 목표] 패널."
+        + " 나머지 칸의 회색 수치가 서버 기본값이다(정본: 엔진 AutoDesignConfig).";
       // 연료·작동기 기본은 **고른 기체 문서**에서 — config 기본이 비어 있으면(기체 작동기를 쓰는 엔진)
       // 문서 actuator.params가 자리표시다. 문서를 못 받으면 칸을 비워 둔다(모르는 값을 수치로 위장 않음)
       const doc = await selectedDocument().catch(() => null);
@@ -186,6 +182,17 @@ export function render() {
     } catch (e) {
       defaultsBox.textContent = `기본값 조회 실패: ${errorText(e)}`
         + " — 아래 [요구 조정] 칸은 기본값을 못 보여 주고, 사유 코드는 웹 폴백 문구로 뜬다.";
+    }
+  };
+
+  const loadCriteria = async () => {
+    const sel = currentSelection() ?? { id: EXAMPLE_ID };
+    try {
+      const body = await api.get(`/profiles/${encodeURIComponent(sel.id)}/criteria`);
+      clear(criteriaBox).append(...criteriaSummary(body));
+    } catch (e) {
+      clear(criteriaBox).append(el("p", { class: "hint" },
+        `판정선·튜닝 목표 조회 실패: ${errorText(e)} — 서버는 그래도 선택 기체 문서의 값으로 설계한다.`));
     }
   };
 
@@ -226,8 +233,6 @@ export function render() {
    *  거절은 던진다(부르는 쪽이 표시). 돌려주는 것: {jobId, done: followJob 약속}. */
   const start = async (extra = null) => {
     clear(errBox);
-    const values = (inputs) =>
-      Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value]));
     const config = mergeDesignConfig(buildConfig({
       mode: form.mode.value,
       fitMode: form.fitMode.value,
@@ -240,9 +245,7 @@ export function render() {
       actuatorWn: form.actuatorWn.value,
       actuatorZeta: form.actuatorZeta.value,
       delayS: form.delayS.value,
-      criteria: values(form.criteria),
-      targets: values(form.targets),
-    }), extra);
+    }), extra); // 판정선·튜닝 목표는 싣지 않는다 — mergeDesignConfig가 신호 config에서도 뗀다
     const job = await api.post("/design/auto", { config });
     return { jobId: job.id, done: followJob(job.id, "자동 설계 실패") };
   };
@@ -268,9 +271,6 @@ export function render() {
       }
     } catch { /* 목록 실패는 시작 흐름을 막지 않는다 */ }
   };
-
-  const fieldRow = (fields, inputs) => el("div", { class: "form-row" },
-    fields.map(([k, label]) => el("label", {}, `${label} `, inputs[k])));
 
   const listBox = el("span");
 
@@ -306,21 +306,12 @@ export function render() {
             + "「다항」은 매끄럽고 계수가 적지만 급변을 뭉개고, 채택 시 재양자화 표로 판정을 다시 받는다."),
         ] },
       { key: "tuning", label: "요구 조정", group: "입력",
-        title: "합격기준·튜닝 목표·작동기·지연 (비우면 서버 기본값)",
+        title: "판정선·튜닝 목표(기체 문서 — 읽기 전용)·작동기·지연(비우면 서버 기본값)",
         build: () => [
-          el("h2", {}, "요구 조정 — 합격기준·튜닝 목표·작동기·지연"),
-          // 서버는 이 중첩 덮어쓰기를 이미 받는다(routes/design.py _build_config).
-          // 패널에 넣는 이유는 기본값이 정본이고 조정이 예외이기 때문이다
-          el("p", { class: "hint" },
-            "채운 칸만 config 덮어쓰기로 나간다. 회색 수치가 서버 기본값이다. "
-            + "튜닝 목표가 합격선보다 낮으면 서버가 422로 거절한다 — 튜닝이 성공한 점이 "
-            + "곧바로 fail로 찍히기 때문이다(PM은 목표 ≥ 합격선, GM은 목표 ≥ 목표선). "
-            + "여기서 바꾼 합격기준은 결과에 동봉되어 마진 탭 색과 판정어 설명에도 그대로 쓰인다."),
-          el("p", { class: "hint" }, "합격기준 (판정선)"),
-          fieldRow(CRITERIA_FIELDS, form.criteria),
-          el("p", { class: "hint" }, "튜닝 목표 (설계선)"),
-          fieldRow(TARGET_FIELDS, form.targets),
-          el("p", { class: "hint" }, "작동기·지연 예산 (마진의 병목이 되는 상위 설계값)"),
+          el("h2", {}, "요구 조정 — 판정선·튜닝 목표·작동기·지연"),
+          el("p", { class: "hint" }, "판정선·튜닝 목표 (고른 기체 문서의 /criteria·/tuning — 읽기 전용)"),
+          criteriaBox,
+          el("p", { class: "hint" }, "작동기·지연 예산 (마진의 병목이 되는 상위 설계값 — 채운 칸만 덮어쓴다)"),
           el("div", { class: "form-row" },
             el("label", {}, "작동기 wn [rad/s] ", form.actuatorWn),
             el("label", {}, " 작동기 ζ ", form.actuatorZeta),
@@ -368,6 +359,7 @@ export function render() {
   clear(resultBox).append(emptyNote);
   syncEmpty(); // 잡 도중 재진입이면 처음부터 「도는 중」
   loadDefaults();
+  loadCriteria();
   // 설계 흐름 탭의 「결과 열기 →」·결과 탭 브리핑의 「자동 설계 탭에서 보고서 열기」 인계 — 그 실행의
   // 보고서를 바로 연다 (store 규약: 한 번 읽고 지운다). 실패(그사이 삭제 등)는 조용히 넘기지 않고
   // 오류 상자가 말한다
@@ -518,9 +510,41 @@ function fillForm(form, config) {
     "actuatorWn", "actuatorZeta", "delayS"]) {
     form[k].value = vals[k] ?? "";
   }
-  for (const key of ["criteria", "targets"]) {
-    for (const [k, input] of Object.entries(form[key])) input.value = vals[key][k] ?? "";
+}
+
+const CRIT_SOURCE = { profile: "이 기체가 바꾼 값", default: "기본값" };
+
+/** 판정선·튜닝 목표 요약(읽기 전용) — lib/autodesign criteriaSummaryModel의 표. 이 기체가 바꾼 칸은 굵게. */
+function criteriaSummary(body) {
+  const m = criteriaSummaryModel(body);
+  const cell = (c) => c
+    ? el("td", { title: `${c.key} — ${CRIT_SOURCE[c.source]}`, style: c.source === "profile" ? "font-weight:600" : "" },
+      `${c.text} `, el("span", { class: "hint" }, `(${CRIT_SOURCE[c.source]})`))
+    : el("td", {}, "—");
+  const table = el("table", { class: "data" },
+    el("thead", {}, el("tr", {}, ["지표", "합격선", "권장선", "튜닝 목표"].map((h) => el("th", {}, h)))),
+    el("tbody", {}, m.rows.map((r) => el("tr", {},
+      el("td", {}, r.unit ? `${r.label} [${r.unit}]` : r.label),
+      ...["pass", "rec", "target"].map((k) => cell(r.cells.find((c) => c.kind === k)))))));
+  const out = [
+    el("p", { class: "hint" }, m.written
+      ? "이 기체 문서가 판정선·목표 일부를 바꿨다 — 굵은 칸이 이 기체가 바꾼 값, 나머지는 도구 기본값이다."
+      : "이 기체 문서는 판정선·목표를 적지 않았다 — 전부 도구 기본값이다."),
+    table,
+  ];
+  if (m.extra.length) {
+    out.push(el("p", { class: "hint" }, "그 밖의 판정 칸 — "
+      + m.extra.map((x) => `${x.key} ${x.text}${x.source === "profile" ? " (이 기체)" : ""}`).join(" · ")));
   }
+  for (const c of m.conflicts) {
+    out.push(el("p", { class: "error-box" },
+      `튜닝 목표 ${c.target_key} ${c.target}가 ${c.level === "pass" ? "합격선" : "권장선"} ${c.line_key} ${c.line}보다`
+      + " 느슨하다 — 자동 설계가 거절한다. 기체 문서의 /criteria·/tuning을 고친다."));
+  }
+  out.push(el("p", { class: "hint" },
+    "자동 설계는 이 값으로 튜닝·판정한다 — 이 탭에서 바꾸지 않는다. 값은 기체마다 기체 문서에서 편집한다"
+    + "(기체 탭의 전용 편집기는 준비 중이다)."));
+  return out;
 }
 
 function sevChip(status) {

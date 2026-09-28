@@ -138,6 +138,8 @@ const S1_DESIGN_CONFIG = {
   n_mach: 7, budget_points: 90, budget_iters: 2, alts: [0], fuels: [25],
   targets: { zeta_sp: 0.9 }, fit_mode: "table",
 };
+// 요청으로 옮긴 모양 — 판정선·목표(criteria·targets)는 뗀다(기준 통합 ①: 목표는 기체 문서 /tuning이 정본)
+const { targets: _S1_TARGETS, ...S1_REQUEST_CONFIG } = S1_DESIGN_CONFIG;
 const withRecord = (config, extra = {}) => ({
   id: SHOWCASE_ID,
   mission_template: { envelope: { alt: [111, 2222] }, trim_grid: { fuel: [7, 33] } },
@@ -148,19 +150,19 @@ const withRecord = (config, extra = {}) => ({
 test("자동 설계 config — 문서가 적어 둔 설계 설정(provenance.design.config)이 템플릿 규칙보다 먼저다", () => {
   const doc = withRecord(S1_DESIGN_CONFIG);
   const r = autodesignConfigFor(doc);
-  // 목표 ζsp·게인 표현까지 그대로 — 템플릿 축(111·2222 / 7·33)도 진행기 예산(n_mach 5)도 섞이지 않는다
-  assert.deepEqual(r.config, S1_DESIGN_CONFIG);
+  // 게인 표현까지 그대로 — 템플릿 축(111·2222 / 7·33)도 진행기 예산(n_mach 5)도 섞이지 않는다. 목표 ζsp는 뗀다
+  assert.deepEqual(r.config, S1_REQUEST_CONFIG);
+  assert.equal("targets" in r.config, false);
   assert.equal(r.source, "document");
   assert.match(r.note, /^설정 출처: 문서 확정 게인 표를 만든 설정\(law\.gain_tables\.provenance\.design\.config\)/);
   // 사본이다 — 신호 args를 고쳐도 문서 캐시(selectedDocument)가 안 바뀐다
-  r.config.targets.zeta_sp = 0.1;
   r.config.alts.push(9);
   assert.equal(doc.law.gain_tables.provenance.design.config.targets.zeta_sp, 0.9);
   assert.deepEqual(doc.law.gain_tables.provenance.design.config.alts, [0]);
   assert.deepEqual(designConfigRecord(doc), S1_DESIGN_CONFIG);
   // 단계 표의 문서 인자도 같은 출처
   const da = acts("autodesign")[0].docArgs(doc);
-  assert.deepEqual(da.args, { config: S1_DESIGN_CONFIG });
+  assert.deepEqual(da.args, { config: S1_REQUEST_CONFIG });
   assert.deepEqual(da.notes, [r.note]);
   // 빈 기록·객체 아닌 기록은 기록이 아니다 — 템플릿 규칙으로
   for (const bad of [{}, null, [1, 2], "x", 7]) {
@@ -180,11 +182,12 @@ test("자동 설계 config — 반영 뒤 기록이 빠진 쇼케이스 문서�
   assert.equal(needsPackagedDoc(null), false);
   const packaged = withRecord(S1_DESIGN_CONFIG);
   const r = autodesignConfigFor(applied, { packaged });
-  assert.deepEqual(r.config, S1_DESIGN_CONFIG);
+  assert.deepEqual(r.config, S1_REQUEST_CONFIG);
   assert.equal(r.source, "package");
   assert.match(r.note, new RegExp(`^설정 출처: ${SHOWCASE_ID} 패키지 문서의 확정 표 설정`));
-  r.config.targets.zeta_sp = 0.1;
-  assert.equal(packaged.law.gain_tables.provenance.design.config.targets.zeta_sp, 0.9, "패키지 문서도 사본으로");
+  r.config.alts.push(9);
+  assert.deepEqual(packaged.law.gain_tables.provenance.design.config.alts, [0], "패키지 문서도 사본으로");
+  assert.equal(packaged.law.gain_tables.provenance.design.config.targets.zeta_sp, 0.9, "기록 자체는 그대로");
   // id가 다른 패키지(남의 기체)의 설정은 물려주지 않는다 — 템플릿 규칙
   const other = autodesignConfigFor({ ...applied, id: "other-plane" }, { packaged });
   assert.equal(other.source, "template");
@@ -196,7 +199,18 @@ test("자동 설계 config — 반영 뒤 기록이 빠진 쇼케이스 문서�
   const own = withRecord({ ...S1_DESIGN_CONFIG, n_mach: 3 });
   assert.equal(autodesignConfigFor(own, { packaged }).config.n_mach, 3);
   // 단계 표의 문서 인자가 패키지를 넘겨받는다
-  assert.deepEqual(acts("autodesign")[0].docArgs(applied, { packaged }).args, { config: S1_DESIGN_CONFIG });
+  assert.deepEqual(acts("autodesign")[0].docArgs(applied, { packaged }).args, { config: S1_REQUEST_CONFIG });
+});
+
+test("자동 설계 config — 판정선·목표는 요청에 싣지 않는다(기체 문서 /tuning이 정본)", () => {
+  const withCrit = { ...S1_DESIGN_CONFIG, criteria: { pm_min_deg: 50 } };
+  for (const r of [autodesignConfigFor(withRecord(withCrit)),
+    autodesignConfigFor({ ...withRecord(null), law: { gain_tables: { provenance: {} } } },
+      { packaged: withRecord(withCrit) })]) {
+    assert.equal("criteria" in r.config, false, r.source);
+    assert.equal("targets" in r.config, false, r.source);
+    assert.deepEqual(r.config, S1_REQUEST_CONFIG, r.source);
+  }
 });
 
 const readS1 = () => JSON.parse(readFileSync(
@@ -251,10 +265,14 @@ test("실물 S1 패키지 문서 — 자동 설계 config는 생성기가 적은
   assert.equal(s1.id, SHOWCASE_ID);
   const r = autodesignConfigFor(s1);
   assert.equal(r.source, "document");
-  assert.deepEqual(r.config, s1.law.gain_tables.provenance.design.config);
-  // 출하 표를 다시 내는 두 칸이 실려 가는지 — 목표 ζsp(기본 0.7이면 피치 게인 표가 S1 띠 검사를 못 넘는다)와
-  // 게인 표현(표 — 엔진 기본값이 바뀌어도 같은 표현으로 다시 설계한다)
-  assert.ok(Number.isFinite(r.config.targets?.zeta_sp));
+  const { targets, ...rest } = s1.law.gain_tables.provenance.design.config;
+  assert.deepEqual(r.config, rest);
+  // 목표 ζsp(기본 0.7이면 피치 게인 표가 S1 띠 검사를 못 넘는다)는 요청에서 뗀다 — 문서 /tuning이 같은 값을 적어
+  // 서버가 그것으로 설계한다(기준 통합 ①). 게인 표현(표)은 실려 간다(엔진 기본값이 바뀌어도 같은 표현으로)
+  assert.equal(targets.zeta_sp, 0.9);
+  assert.equal(s1.tuning.targets.zeta_sp, targets.zeta_sp);
+  assert.equal("targets" in r.config, false);
+  assert.equal("criteria" in r.config, false);
   assert.equal(r.config.fit_mode, "table");
   assert.equal(needsPackagedDoc(s1), false);
 });
@@ -1038,4 +1056,15 @@ test("재생 길이 — 끝 시각(정지 + 여유), 없으면 본문의 마지�
   assert.equal((w.match(/captionFor\("play", \{ lines: comms\.n, voice, speed \}\)/g) ?? []).length, 2,
     "줄·경과 캡션이 실제로 건 배속을 말한다");
   assert.doesNotMatch(w, /TOUR_SPEED/);
+});
+
+
+test("recordedCriteriaGap — 기록에서 뗀 목표가 문서에 없으면 말한다(v1.51 전 사본)", async () => {
+  const { recordedCriteriaGap } = await import("./showcase.js");
+  const rec = { n_mach: 7, targets: { zeta_sp: 0.9 } };
+  assert.equal(recordedCriteriaGap(rec, { tuning: { targets: { zeta_sp: 0.9 } } }), "");
+  const gap = recordedCriteriaGap(rec, { tuning: null });
+  assert.match(gap, /zeta_sp 기록 0\.9 · 문서 없음/);
+  assert.match(gap, /다시 설치/);
+  assert.equal(recordedCriteriaGap({ n_mach: 7 }, {}), "");
 });

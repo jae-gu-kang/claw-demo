@@ -153,6 +153,28 @@ def test_생성기가_자기_출처에서_시드_경로와_설계_설정을_되�
     assert resolve_seed(example, None) == "quick" and resolve_design_config(example, None) is None
 
 
+def test_생성기의_판정선_튜닝_목표는_문서의_것이다(doc):
+    """기준 통합 ① — 설계 설정의 criteria·targets는 떼고 문서의 /criteria·/tuning(eval_criteria)으로 설계한다(서버 자동 설계와
+    같은 길). 기록 설정에 목표가 남아 있어도 문서와 같으면 통과, 다르면 조용히 무시하지 않고 거부한다."""
+    rec = doc["law"]["gain_tables"]["provenance"]["design"]["config"]
+    assert doc["tuning"]["targets"]["zeta_sp"] == rec["targets"]["zeta_sp"] == 0.9
+    ev = build_profile(doc, validated=True).eval_criteria
+    stripped = {k: v for k, v in rec.items() if k not in ("criteria", "targets")}
+    for cfg in (rec, stripped):
+        c = _config(cfg, doc)
+        assert c.targets.to_dict() == ev.targets.to_dict() and c.targets.zeta_sp == 0.9
+        assert c.criteria.to_dict() == ev.margin.to_dict()
+        assert c.n_mach == rec["n_mach"] and c.fit_mode == rec["fit_mode"]
+    with pytest.raises(ValueError, match=r"targets\.zeta_sp"):
+        _config({**rec, "targets": {"zeta_sp": 0.7}}, doc)
+    # 문서가 목표를 안 적었으면 도구 기본값 — 설정의 목표가 그것을 덮지 않는다
+    bare = copy.deepcopy(doc)
+    bare.pop("tuning", None)
+    assert _config(stripped, bare).targets.to_dict() == TuneTargets().to_dict()
+    with pytest.raises(ValueError, match="/tuning"):
+        _config(rec, bare)
+
+
 def test_설계_게인은_툴이_잡은_것이다(doc):
     design = doc["law"]["design"]
     assert design is not None and doc["law"]["schedule"] is not None
@@ -265,7 +287,7 @@ def test_확정_게인_표가_운용_범위_전부에서_자동_설계_검증을
            "budget_points": 200, "budget_iters": 1}
     for b, tables in ((base, base.confirmed_gain_tables()), (eoir, eoir.gain_tables())):
         inp = design_inputs(b)
-        session = DesignSession(_config(cfg))
+        session = DesignSession(_config(cfg, doc))
         session.run(inp["aircraft"], inp["stall_table"], inp["limits"], inp["db_ranges"], inp["design"],
                     rate_filters=inp["rate_filters"], actuator=inp["actuator"], fingerprint="")
         assert session.status in ("converged", "budget_exhausted"), (b.variant, session.report()["status"])

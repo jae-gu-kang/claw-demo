@@ -230,18 +230,35 @@ def design_overrides(doc: dict) -> dict:
     return {**DESIGN_BUDGET, "alts": alts, "fuels": fuels, "budget_points": min(200, 2 * n_coarse)}
 
 
-def _config(overrides: dict):
-    """기본값 위 부분 덧씀 — 서버 routes/design.py _build_config의 병합 규칙(criteria·targets는 한 겹 더 병합)."""
+# 판정선·튜닝 목표는 설계 설정이 아니라 기체 문서의 것이다(기준 통합 ① — /criteria·/tuning). 덧씀·기록 설정에서 뺀다
+CRITERIA_KEYS = ("criteria", "targets")
+
+
+def _criteria_conflicts(ev, overrides: dict) -> list:
+    """덧씀·기록 설정이 적은 criteria·targets 중 문서의 적용값(ev = build_profile(doc).eval_criteria)과 다른 칸.
+
+    생성기는 그 칸을 쓰지 않고 문서 값으로 설계한다 — 다르면 조용히 무시하지 않고 부르는 쪽이 문서를 고치게 한다."""
+    applied = {"criteria": ev.margin.to_dict(), "targets": ev.targets.to_dict()}
+    return [f"{sec}.{k}: 설정 {v!r} ≠ 문서 {applied[sec].get(k)!r}"
+            for sec in CRITERIA_KEYS for k, v in (overrides.get(sec) or {}).items() if applied[sec].get(k) != v]
+
+
+def _config(overrides: dict, doc: dict):
+    """기본값 위 부분 덧씀 + 문서의 판정선·튜닝 목표 — 서버 routes/design.py _build_config와 같은 길(기준은 선택 기체
+    문서의 /criteria·/tuning에서, 없는 칸은 도구 기본값). 덧씀의 criteria·targets는 떼어 낸다 — 문서 값과 다르면 거부."""
     from claw.design import AutoDesignConfig
 
     base = AutoDesignConfig().to_dict()
     unknown = sorted(set(overrides) - set(base))
     if unknown:
         raise ValueError(f"미정의 config 키 {unknown}")
-    merged = {**base, **overrides}
-    for nested in ("criteria", "targets"):
-        if nested in overrides:
-            merged[nested] = {**base[nested], **overrides[nested]}
+    ev = build_profile(doc, validated=True).eval_criteria
+    conflicts = _criteria_conflicts(ev, overrides)
+    if conflicts:
+        raise ValueError("설계 설정의 판정선·튜닝 목표가 기체 문서와 다르다 — 문서의 /criteria·/tuning을 고친다: "
+                         + "; ".join(conflicts))
+    merged = {**base, **{k: v for k, v in overrides.items() if k not in CRITERIA_KEYS},
+              "criteria": ev.margin.to_dict(), "targets": ev.targets.to_dict()}
     return AutoDesignConfig.from_dict(merged)
 
 
@@ -354,7 +371,11 @@ def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
         inp = design_inputs(built)
     except ProfileError as e:
         raise ShowcaseError("design", f"자동 설계 입력을 못 만든다 — {e.path}: {e}") from e
-    session = DesignSession(_config(overrides))
+    try:
+        cfg = _config(overrides, doc)
+    except ValueError as e:
+        raise ShowcaseError("design", str(e)) from e
+    session = DesignSession(cfg)
 
     def run(s):
         s.run(inp["aircraft"], inp["stall_table"], inp["limits"], inp["db_ranges"], inp["design"],
@@ -413,6 +434,8 @@ def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
                        "failures": rep["failures"], "escalations": rep["escalations"], "fit_mode": rep["fit_mode"],
                        "excluded_samples": len(rep["excluded_samples"]),
                        "exclusion_withheld": sorted(rep["exclusion_withheld"]),
+                       # config는 받은 덧씀 그대로 — criteria·targets 칸이 있으면 _config가 문서 값과 같음을 확인했다
+                       # (설계는 문서 /criteria·/tuning으로 했다). 그 칸을 빼면 출하 파일의 기록이 바뀐다
                        "approved_actions": approved_total, "config": _plain(overrides)},
             "resample_tol": RESAMPLE_TOL,
             "resample_error": copy.deepcopy(export["resample_error"]),

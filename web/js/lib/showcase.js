@@ -13,6 +13,7 @@
 무엇이 와도 죽지 않는다(깨진 칸은 버리고 기본값).
 */
 
+import { withoutCriteria } from "./autodesign.js";
 import { workingCopyLine } from "./gainsync.js";
 import { EXAMPLE_ID } from "./profile.js";
 import { SPEECH_GATE, TOUR_SPEED, endTimeFor } from "./tour.js";
@@ -99,6 +100,25 @@ export function designConfigRecord(doc) {
   return isObj(c) && Object.keys(c).length ? c : null;
 }
 
+/** 기록에서 뗀 판정선·목표가 선택 문서에 **같은 값으로** 있는가 — 없으면 그렇다고 말하는 꼬리 글(있으면 빈 글).
+ *  기록을 떼면 서버는 문서의 /criteria·/tuning(없으면 도구 기본값)으로 설계한다. v1.51 전에 저장한 쇼케이스 사본은
+ *  기록(ζsp 0.9)만 있고 /tuning이 없다 — 그대로 재생하면 ζsp 0.7로 조용히 설계돼 S1 표 검사를 넘는 약한 피치 게인이
+ *  난다. 요청에 다시 싣는 길은 닫혔다(서버가 요청 기준을 거절한다) — 사본을 다시 설치하라고 말한다. */
+export function recordedCriteriaGap(record, doc) {
+  const gaps = [];
+  for (const [sec, grp, rec] of [["criteria", "margin", record?.criteria], ["tuning", "targets", record?.targets]]) {
+    if (!isObj(rec)) continue;
+    const have = doc?.[sec]?.[grp] ?? {};
+    for (const [k, v] of Object.entries(rec)) {
+      if (have[k] !== v) gaps.push(`${k} 기록 ${v} · 문서 ${have[k] ?? "없음(도구 기본값)"}`);
+    }
+  }
+  return gaps.length
+    ? ` — 주의: 기록의 판정선·목표가 문서 /${"criteria·/tuning"}와 다르다(${gaps.join(", ")}). 서버는 문서 값으로 `
+      + "설계하므로 기록한 표와 다른 게인이 날 수 있다 — 쇼케이스 기체를 다시 설치하면 맞춰진다"
+    : "";
+}
+
 /** 자동 설계 config — 출처 순서:
  *  ① 선택 기체 문서의 기록(designConfigRecord) — 출하 표와 같은 설정이라 다시 설계해도 같은 표가 난다(단계 7 뒤
  *     재설계도 출하 표와 비트 단위로 같았다 — 수렴 · 점 81 · 판정 395 · 실패 0). S1은 기본 목표 ζsp 0.7이면 피치 게인이
@@ -111,6 +131,9 @@ export function designConfigRecord(doc) {
  *  ③ 예산(AUTODESIGN_BUDGET) + 선택 기체 문서의 미션 템플릿 축(고도 envelope.alt · 연료 trim_grid.fuel,
  *     스칼라는 한 점 목록으로).
  *  ④ 템플릿에 그 칸이 없거나 문서를 못 받았으면 빈 덧씀(서버 기본 설정) — 예제 값을 조용히 물려주지 않는다.
+ *  ①② 기록에서 판정선·목표(criteria·targets)는 뗀다 — 기준 통합 ①: 목표는 이제 기체 문서의 /tuning이 정본이고
+ *  서버가 선택 기체의 그 값으로 설계한다(쇼케이스 문서는 기록과 같은 ζsp 0.9를 /tuning에 적었다). 요청에 실으면
+ *  서버가 곧 거절한다.
  *  어느 출처를 썼는지는 행에 남긴다(note — 늘 한 줄). 돌려주는 것: {config, source, note},
  *  source ∈ "document" | "package" | "template" | "server". config는 문서와 떨어진 사본이다. */
 export function autodesignConfigFor(doc, { packaged = null } = {}) {
@@ -119,13 +142,15 @@ export function autodesignConfigFor(doc, { packaged = null } = {}) {
   }
   const own = designConfigRecord(doc);
   if (own) {
-    return { config: structuredClone(own), source: "document",
-      note: "설정 출처: 문서 확정 게인 표를 만든 설정(law.gain_tables.provenance.design.config)" };
+    return { config: withoutCriteria(structuredClone(own)), source: "document",
+      note: "설정 출처: 문서 확정 게인 표를 만든 설정(law.gain_tables.provenance.design.config)"
+        + recordedCriteriaGap(own, doc) };
   }
   const pkg = packaged?.id != null && packaged.id === doc.id ? designConfigRecord(packaged) : null;
   if (pkg) {
-    return { config: structuredClone(pkg), source: "package",
-      note: `설정 출처: ${doc.id} 패키지 문서의 확정 표 설정 — 지금 문서에는 설계 설정 기록이 없다` };
+    return { config: withoutCriteria(structuredClone(pkg)), source: "package",
+      note: `설정 출처: ${doc.id} 패키지 문서의 확정 표 설정 — 지금 문서에는 설계 설정 기록이 없다`
+        + recordedCriteriaGap(pkg, doc) };
   }
   const mt = doc.mission_template;
   const alts = numList(mt?.envelope?.alt);

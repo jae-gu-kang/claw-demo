@@ -14,6 +14,8 @@ import {
   applyGateReason,
   approvedByDefault,
   configFormValues,
+  criteriaSummaryModel,
+  withoutCriteria,
   designCueSummary,
   fuelsPlaceholder,
   mergeDesignConfig,
@@ -523,33 +525,74 @@ test("evidenceLines — 부호 뒤집힘은 맨 앞에 온다", () => {
 
 // ── 요구 조정 폼 ───────────────────────────────────────────────────────
 
-test("buildConfig — criteria·targets 중첩 덮어쓰기는 채운 칸만", () => {
+test("buildConfig — 판정선·튜닝 목표(criteria·targets)는 폼이 줘도 싣지 않는다(기체 문서 정본)", () => {
   const cfg = buildConfig({
     mode: "gated",
-    criteria: { pm_min_deg: "50", gm_min_db: "", zeta_min: " " },
-    targets: { pm_deg: "55", gm_db: "" },
+    criteria: { pm_min_deg: "50" },
+    targets: { pm_deg: "55", gm_db: "abc" }, // 옛 칸 모양 — 읽지 않으므로 비수치도 던지지 않는다
     actuatorWn: "40", actuatorZeta: "", delayS: "0.05",
   });
-  assert.deepEqual(cfg, {
-    mode: "gated",
-    actuator_wn: 40, delay_s: 0.05,
-    criteria: { pm_min_deg: 50 },
-    targets: { pm_deg: 55 },
-  });
-});
-
-test("buildConfig — 중첩이 전부 비면 키 자체를 안 보낸다 (빈 dict 금지)", () => {
-  const cfg = buildConfig({ mode: "auto", criteria: { pm_min_deg: "" }, targets: {} });
-  assert.deepEqual(cfg, { mode: "auto" });
-  assert.equal("criteria" in cfg, false);
-  assert.equal("targets" in cfg, false);
-});
-
-test("buildConfig — 중첩 칸의 비수치는 어느 칸인지 밝히며 던진다", () => {
-  assert.throws(() => buildConfig({ criteria: { pm_min_deg: "쉰" } }),
-    /criteria.pm_min_deg/);
-  assert.throws(() => buildConfig({ targets: { gm_db: "abc" } }), /targets.gm_db/);
+  assert.deepEqual(cfg, { mode: "gated", actuator_wn: 40, delay_s: 0.05 });
   assert.throws(() => buildConfig({ actuatorWn: "xx" }), /actuator_wn/);
+});
+
+test("withoutCriteria — criteria·targets만 뗀 사본", () => {
+  const c = { n_mach: 7, targets: { zeta_sp: 0.9 }, criteria: { pm_min_deg: 50 }, fit_mode: "table" };
+  assert.deepEqual(withoutCriteria(c), { n_mach: 7, fit_mode: "table" });
+  assert.deepEqual(c.targets, { zeta_sp: 0.9 }, "원본은 그대로");
+  assert.deepEqual(withoutCriteria(null), {});
+});
+
+// GET /profiles/{id}/criteria 응답 모양(서버 routes/profiles.py get_profile_criteria — lines는 design.criteria.LINES)
+const CRIT_BODY = {
+  applied: {
+    margin: { pm_min_deg: 45, gm_min_db: 6, pm_bad_deg: 30, gm_good_db: 8, zeta_min: 0.3, zeta_good: 0.5,
+      lam_min_frac: 0.5, lam_good_frac: 0.8, lam_part_min: 0.5 },
+    targets: { pm_deg: 50, gm_db: 8, zeta_sp: 0.9, zeta_dr: 0.6, roll_lambda: 12 },
+  },
+  written: { criteria: null, tuning: { targets: { zeta_sp: 0.9 } } },
+  lines: [
+    { metric: "pm_deg", label: "위상여유 PM", unit: "°", direction: "min", pass_key: "pm_min_deg", rec_key: null,
+      target_key: "pm_deg", ratio_of_target: false },
+    { metric: "zeta_sp", label: "단주기 감쇠 ζ_sp", unit: "", direction: "min", pass_key: "zeta_min",
+      rec_key: "zeta_good", target_key: "zeta_sp", ratio_of_target: false },
+    { metric: "roll_lambda", label: "롤 수렴 대역폭 λ_roll", unit: "rad/s", direction: "min",
+      pass_key: "lam_min_frac", rec_key: "lam_good_frac", target_key: "roll_lambda", ratio_of_target: true },
+  ],
+  target_conflicts: [],
+};
+
+test("판정선·튜닝 목표 요약 — 적용값과 출처(기본값 / 이 기체가 바꾼 값)", () => {
+  const m = criteriaSummaryModel(CRIT_BODY);
+  assert.equal(m.written, true);
+  assert.deepEqual(m.rows.map((r) => r.metric), ["pm_deg", "zeta_sp", "roll_lambda"]);
+  const pm = m.rows[0].cells;
+  assert.deepEqual(pm.map((c) => c.kind), ["pass", "target"], "권장선 없는 PM은 칸이 둘");
+  assert.deepEqual(pm.map((c) => [c.text, c.source]), [["≥ 45", "default"], ["50", "default"]]);
+  const zeta = m.rows[1].cells;
+  assert.deepEqual(zeta.map((c) => [c.kind, c.text, c.source]),
+    [["pass", "≥ 0.3", "default"], ["rec", "≥ 0.5", "default"], ["target", "0.9", "profile"]]);
+  assert.equal(m.rows[2].cells[0].text, "≥ 0.5 × 목표", "λ 판정선은 목표의 비율");
+  // 판정선 표에 없는 margin 칸도 숨기지 않는다
+  assert.deepEqual(m.extra.map((x) => x.key), ["gm_min_db", "pm_bad_deg", "gm_good_db", "lam_part_min"]);
+  // 문서가 아무것도 안 적었으면 전부 기본값
+  const bare = criteriaSummaryModel({ ...CRIT_BODY, written: { criteria: null, tuning: null } });
+  assert.equal(bare.written, false);
+  assert.ok(bare.rows.every((r) => r.cells.every((c) => c.source === "default")));
+  // 표에 안 서는 그룹만 적어도 「적었다」 — /tuning.weights만 적은 기체에 「전부 기본값」이라 하면 거짓이다
+  assert.equal(criteriaSummaryModel({ ...CRIT_BODY,
+    written: { criteria: null, tuning: { weights: { w_rms: 2 } } } }).written, true);
+  assert.equal(criteriaSummaryModel({ ...CRIT_BODY,
+    written: { criteria: { margin: {} }, tuning: null } }).written, false);
+  // 빈 응답에도 던지지 않는다
+  assert.deepEqual(criteriaSummaryModel(null), { rows: [], extra: [], conflicts: [], written: false });
+});
+
+test("자동 설계 뷰 — 판정선·목표는 입력 칸이 아니라 /profiles/{id}/criteria 요약이다 (배선 가드)", () => {
+  const view = readFileSync(new URL("../views/autodesign.js", import.meta.url), "utf8");
+  assert.doesNotMatch(view, /CRITERIA_FIELDS|TARGET_FIELDS|form\.criteria|form\.targets/);
+  assert.match(view, /\/profiles\/\$\{encodeURIComponent\(sel\.id\)\}\/criteria/);
+  assert.match(view, /criteriaSummaryModel\(body\)/);
 });
 
 test("shortfallLines — 비유한값은 문자열로 온다, 숫자로 다루면 최악이 초록이 된다", () => {
@@ -1061,11 +1104,11 @@ test("반영 관문 — 요청·스냅숏(재개 결과)은 통과, 예제·변�
   assert.match(applyGateReason({ source: "request" }), /기록이 없는/);
 });
 
-test("config 겹치기 — over가 이기고 criteria·targets는 중첩 병합", () => {
+test("config 겹치기 — over가 이기고 criteria·targets는 어느 쪽에서든 뗀다", () => {
   const base = { mode: "gated", n_mach: 5, criteria: { pm_min_deg: 45 }, alts: [0, 1000] };
-  const over = { n_mach: 3, criteria: { gm_min_db: 6 }, alts: [200], budget_points: 40 };
+  const over = { n_mach: 3, targets: { zeta_sp: 0.9 }, alts: [200], budget_points: 40 };
   assert.deepEqual(mergeDesignConfig(base, over), {
-    mode: "gated", n_mach: 3, criteria: { pm_min_deg: 45, gm_min_db: 6 }, alts: [200], budget_points: 40,
+    mode: "gated", n_mach: 3, alts: [200], budget_points: 40,
   });
   assert.deepEqual(mergeDesignConfig(null, { n_mach: 3 }), { n_mach: 3 });
   assert.deepEqual(mergeDesignConfig({ n_mach: 3 }, null), { n_mach: 3 });
@@ -1076,8 +1119,9 @@ test("config 겹치기 — over가 이기고 criteria·targets는 중첩 병합"
 test("config → 폼 칸 — buildConfig로 되읽으면 칸이 있는 키가 그대로 돌아온다", () => {
   const cfg = {
     mode: "gated", fit_mode: "poly", budget_points: 40, budget_iters: 3, n_mach: 3, alts: [200],
-    fuels: [20, 40], actuator_wn: 25, criteria: { pm_min_deg: 40 }, targets: { roll_lambda: 3 },
+    fuels: [20, 40], actuator_wn: 25,
     max_degree: 2, // 칸이 없는 키 — 폼 값에 나오지 않는다(호출측이 config로 덧씌운다)
+    targets: { roll_lambda: 3 }, // 판정선·목표는 칸이 없다 — 기체 문서의 것
   };
   const f = configFormValues(cfg);
   assert.equal(f.altsText, "200");
@@ -1086,9 +1130,9 @@ test("config → 폼 칸 — buildConfig로 되읽으면 칸이 있는 키가 �
   assert.equal(f.fitMode, "poly", "게인 표현(열거값)도 셀렉트 칸으로 옮긴다");
   assert.equal(f.max_degree, undefined);
   const back = buildConfig(f);
-  const { max_degree: _drop, ...rest } = cfg;
+  const { max_degree: _drop, targets: _t, ...rest } = cfg;
   assert.deepEqual(back, rest);
-  assert.deepEqual(configFormValues(null), { criteria: {}, targets: {} });
+  assert.deepEqual(configFormValues(null), {});
 });
 
 test("기본 승인 — 봉인·건너뜀만 해제", () => {

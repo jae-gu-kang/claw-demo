@@ -65,33 +65,64 @@ export function worstStatus(loops) {
   return worst;
 }
 
-/** 요구 조정 칸의 정의 — 서버 config.criteria/targets 키와 1:1 (routes/design.py가
- * 중첩 덮어쓰기를 이미 받는다). 라벨만 여기 있고 기본 수치는 없다 — placeholder는
- * /design/defaults가 채운다. */
-export const CRITERIA_FIELDS = [
-  ["pm_min_deg", "PM 합격선 [°]"],
-  ["gm_min_db", "GM 합격선 [dB]"],
-  ["pm_bad_deg", "PM 심각선 [°]"],
-  ["gm_good_db", "GM 목표선 [dB]"],
-  ["zeta_min", "ζ 합격선"],
-  ["zeta_good", "ζ 목표선"],
-  ["lam_min_frac", "λ 합격 비율"],
-  ["lam_good_frac", "λ 목표 비율"],
-  ["lam_part_min", "λ 참여도 하한"],
-];
+/** 판정선·튜닝 목표는 설계 설정이 아니라 **기체 문서**의 것이다(기준 통합 ① — /criteria·/tuning). 서버 자동
+ * 설계는 선택 기체의 그 절로 설계하고, 요청의 config.criteria·config.targets는 곧 거절한다 — 화면·신호 어느 길로도
+ * 싣지 않는다. */
+export const CRITERIA_CONFIG_KEYS = ["criteria", "targets"];
 
-export const TARGET_FIELDS = [
-  ["pm_deg", "튜닝 목표 PM [°]"],
-  ["gm_db", "튜닝 목표 GM [dB]"],
-  ["zeta_sp", "목표 ζ_sp"],
-  ["zeta_dr", "목표 ζ_dr"],
-  ["roll_lambda", "목표 λ_roll [rad/s]"],
-];
+/** config에서 판정선·튜닝 목표 칸을 뗀 사본 — 기록된 설계 설정(provenance)·신호 config를 요청으로 옮길 때. */
+export function withoutCriteria(config) {
+  const out = { ...(config ?? {}) };
+  for (const k of CRITERIA_CONFIG_KEYS) delete out[k];
+  return out;
+}
+
+const fmtCrit = (v) => (typeof v === "number" && Number.isFinite(v) ? String(+v.toPrecision(6)) : "—");
+
+/** GET /profiles/{id}/criteria 응답 → 읽기 전용 요약(자동 설계 탭의 「판정선·튜닝 목표」 패널).
+ *  판정선의 뜻(방향·합격선·권장선·목표 칸)은 응답의 lines가 정본이다 — 여기서 다시 적지 않는다. 칸마다 값과
+ *  출처(written에 적혔으면 "profile" = 이 기체가 바꾼 값, 아니면 "default" = 도구 기본값)를 낸다.
+ *  돌려주는 것: {rows: [{metric, label, unit, cells: [{kind, key, value, text, source}]}], extra, conflicts, written}.
+ *  kind ∈ "pass"(합격선) | "rec"(권장선) | "target"(튜닝 목표). 비율선(λ — 목표의 비율)은 text에 "× 목표"를 붙인다. */
+export function criteriaSummaryModel(body) {
+  const applied = body?.applied ?? {};
+  const margin = applied.margin ?? {};
+  const targets = applied.targets ?? {};
+  const wMargin = body?.written?.criteria?.margin ?? {};
+  const wTargets = body?.written?.tuning?.targets ?? {};
+  const src = (w, k) => (w[k] != null ? "profile" : "default");
+  const ge = (dir) => (dir === "max" ? "≤" : "≥");
+  const used = new Set();
+  const rows = (Array.isArray(body?.lines) ? body.lines : []).map((ln) => {
+    const cells = [];
+    for (const [kind, key] of [["pass", ln.pass_key], ["rec", ln.rec_key]]) {
+      if (!key) continue;
+      used.add(key);
+      const v = margin[key];
+      const text = ln.ratio_of_target ? `${ge(ln.direction)} ${fmtCrit(v)} × 목표` : `${ge(ln.direction)} ${fmtCrit(v)}`;
+      cells.push({ kind, key, value: v ?? null, text, source: src(wMargin, key) });
+    }
+    if (ln.target_key) {
+      const v = targets[ln.target_key];
+      cells.push({ kind: "target", key: ln.target_key, value: v ?? null, text: fmtCrit(v),
+        source: src(wTargets, ln.target_key) });
+    }
+    return { metric: ln.metric, label: ln.label, unit: ln.unit ?? "", cells };
+  });
+  // 판정선 표(lines)에 없는 margin 칸(심각선·참여도 하한 등) — 숨기지 않고 한 줄로
+  const extra = Object.keys(margin).filter((k) => !used.has(k)).map((k) => ({
+    key: k, value: margin[k], text: fmtCrit(margin[k]), source: src(wMargin, k),
+  }));
+  // 「적지 않았다」는 문서 전체로 판단한다 — 표에 서는 margin·targets만 보면 /criteria.stability나 /tuning.weights만
+  // 적은 기체에 「전부 도구 기본값」이라고 거짓말을 한다
+  const w = body?.written ?? {};
+  const written = ["criteria", "tuning"].some((sec) =>
+    Object.values(w[sec] ?? {}).some((grp) => grp && Object.keys(grp).length > 0));
+  return { rows, extra, conflicts: Array.isArray(body?.target_conflicts) ? body.target_conflicts : [], written };
+}
 
 /** 폼 → config 덮어쓰기 — 채운 칸만. 수치 목록 오류는 던진다 (호출측이 표시).
- *
- * criteria·targets는 **중첩 덮어쓰기**다 (서버 _build_config가 base와 병합한다) —
- * 빈 dict를 보내면 안 되므로 채운 칸이 하나도 없으면 키 자체를 넣지 않는다. */
+ * 판정선·튜닝 목표(criteria·targets)는 싣지 않는다 — 기체 문서의 것이다(CRITERIA_CONFIG_KEYS). */
 export function buildConfig(form) {
   const out = {};
   if (form.mode) out.mode = form.mode;
@@ -118,17 +149,6 @@ export function buildConfig(form) {
     const raw = String(form[from] ?? "").trim();
     if (!raw) continue;
     out[to] = parseNumberList(raw);
-  }
-  for (const key of ["criteria", "targets"]) {
-    const nested = {};
-    for (const [k, raw0] of Object.entries(form[key] ?? {})) {
-      const raw = String(raw0 ?? "").trim();
-      if (!raw) continue;
-      const v = Number(raw);
-      if (!Number.isFinite(v)) throw new Error(`${key}.${k}: 수치가 아님 — ${raw}`);
-      nested[k] = v;
-    }
-    if (Object.keys(nested).length) out[key] = nested;
   }
   return out;
 }
@@ -1244,18 +1264,10 @@ export function applyGateReason(echo) {
   return null;
 }
 
-/** config 덮어쓰기 둘을 겹친다 — over가 이긴다. criteria·targets는 **중첩 병합**(서버
- * _build_config와 같은 규칙): 한쪽이 PM만, 다른 쪽이 GM만 줬으면 둘 다 남는다. */
+/** config 덮어쓰기 둘을 겹친다 — over가 이긴다. 판정선·튜닝 목표(criteria·targets)는 어느 쪽에 있어도
+ * 뗀다 — 서버는 선택 기체 문서의 /criteria·/tuning으로 설계한다(옛 신호·기록이 실어 와도 요청에 안 싣는다). */
 export function mergeDesignConfig(base, over) {
-  const out = { ...(base ?? {}) };
-  for (const [k, v] of Object.entries(over ?? {})) {
-    if ((k === "criteria" || k === "targets") && v && typeof v === "object" && !Array.isArray(v)) {
-      out[k] = { ...(out[k] ?? {}), ...v };
-    } else {
-      out[k] = v;
-    }
-  }
-  return out;
+  return withoutCriteria({ ...(base ?? {}), ...(over ?? {}) });
 }
 
 // 폼 칸 ↔ config 키 — buildConfig의 역방향. 칸이 없는 키(예: max_degree)는 여기 없다
@@ -1270,7 +1282,7 @@ const FORM_OF_CONFIG = [
  * 칸 placeholder와 같은 모양이라 buildConfig가 그대로 되읽는다. */
 export function configFormValues(config) {
   const c = config ?? {};
-  const out = { criteria: {}, targets: {} };
+  const out = {};
   if (typeof c.mode === "string") out.mode = c.mode;
   // 게인 표현 — 열거값이라 FORM_OF_CONFIG(수치 칸)에 못 섞는다. 옮기지 않으면 신호가 준 표현이
   // 셀렉트에 안 보이고(실행은 config 덧씌움으로 맞게 돈다), buildConfig 되읽기에서 사라진다
@@ -1280,11 +1292,6 @@ export function configFormValues(config) {
   }
   if (Array.isArray(c.alts)) out.altsText = c.alts.join(" ");
   if (Array.isArray(c.fuels)) out.fuelsText = c.fuels.join(" ");
-  for (const key of ["criteria", "targets"]) {
-    for (const [k, v] of Object.entries(c[key] ?? {})) {
-      if (v != null) out[key][k] = String(v);
-    }
-  }
   return out;
 }
 
