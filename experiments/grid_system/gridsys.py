@@ -679,3 +679,124 @@ def subdivision_d(measure, rows, union, scales, *, levels=(1, 2, 4)) -> dict:
                         if d is not None:
                             out[slot][k] = max(out[slot].get(k, 0.0), d)
     return out
+
+
+# ── 기본 모델 격자 + 역할별 선택 + 보강 사유 (05 §11.11) ─────────────────────────
+R_BASE = "BASE"
+R_ROLE_REQUEST = "ROLE_REQUEST"
+R_BOUNDARY = "BOUNDARY"
+R_NONLINEAR_METRIC = "NONLINEAR_METRIC"
+R_VERDICT_CHANGE = "VERDICT_CHANGE"
+R_TRIM_FAILURE_BOUNDARY = "TRIM_FAILURE_BOUNDARY"
+R_MARGIN_NEAR_LIMIT = "MARGIN_NEAR_LIMIT"  # 규칙 [TBD] — 코드만 예약
+R_USER_REQUEST = "USER_REQUEST"
+
+_TRIED_FAIL = (CALC_FAILED, CONSTRAINT_HIT, INFEASIBLE)  # 트림을 시도해 실패한 상태
+
+
+def base_grid(region: Region, *, alts, fuels, n_mach: int, common_axis: bool = False) -> list:
+    """기본 모델 격자. common_axis=False: 행(고도·연료)마다 그 행의 요구 마하 범위를 n_mach 등간격.
+    True: 요구영역 전체 마하를 n_mach 등간격한 **공통 좌표**를 행 범위로 거르고 행 끝점(하한·상한)을 더한다
+    — 절점·검증점이 공통 마하 좌표라 재사용이 좌표 일치에 달려 있어서다. 미정의 행은 건너뛴다."""
+    axis = np.linspace(region.mach[0], region.mach[1], n_mach)
+    out = []
+    for fuel in fuels:
+        for alt in alts:
+            b = region.mach_bounds(alt, fuel)
+            if b is None:
+                continue
+            if common_axis:
+                ms = sorted({float(b[0]), float(b[1])} | {float(m) for m in axis if b[0] - _EPS <= m <= b[1] + _EPS})
+            else:
+                ms = [float(m) for m in np.linspace(b[0], b[1], n_mach)]
+            out += [{"cond": Condition(m, float(alt), float(fuel)), "reason": R_BASE} for m in ms]
+    return out
+
+
+def _by_row(recs):
+    rows: dict = {}
+    for r in recs:
+        if r.get("row") is not None:
+            rows.setdefault(r["row"], []).append(r)
+    return {k: sorted(v, key=lambda x: x["cond"].mach) for k, v in rows.items()}
+
+
+def _mid(a, b, row, reason):
+    m = (a["cond"].mach + b["cond"].mach) / 2
+    return {"cond": Condition(float(m), row[0], row[1]), "row": row, "reason": reason,
+            "between": (a["cond"].mach, b["cond"].mach)}
+
+
+def verdict_change_points(recs, *, max_points: int) -> list:
+    """이웃한 계산 완료 검사점의 판정이 다르면 그 사이 중점 — 판정이 어디서 바뀌는지 좁힌다."""
+    out = []
+    for row, rs in _by_row(recs).items():
+        done = [r for r in rs if r["state"] == COMPUTABLE]
+        for a, b in zip(done, done[1:]):
+            if a["verdict"] != b["verdict"] and len(out) < max_points:
+                out.append(_mid(a, b, row, R_VERDICT_CHANGE))
+    return out
+
+
+def trim_boundary_points(recs, *, max_points: int) -> list:
+    """계산 가능 ↔ 트림을 시도한 실패(계산 실패·제약 도달·물리적 불가) 이웃 사이 중점 — 경계 위치를 좁힌다.
+    요구영역 밖·요구 미정의·모델 부족은 트림을 안 돌린 상태라 여기서 찾지 않는다(요구·모델의 문제)."""
+    out = []
+    for row, rs in _by_row(recs).items():
+        tried = [r for r in rs if r["state"] == COMPUTABLE or r["state"] in _TRIED_FAIL]
+        for a, b in zip(tried, tried[1:]):
+            if (a["state"] == COMPUTABLE) != (b["state"] == COMPUTABLE) and len(out) < max_points:
+                out.append(_mid(a, b, row, R_TRIM_FAILURE_BOUNDARY))
+    return out
+
+
+def interpolation_share(recs, union) -> dict:
+    """계산 완료 검사점이 게인을 어떻게 받았나 — 절점 위 / 절점 사이 보간 / 끝단 clip(외삽 고정)."""
+    out = {"breakpoint": 0, "interpolated": 0, "clip": 0}
+    for r in recs:
+        if r["state"] != COMPUTABLE:
+            continue
+        col = column_of(r["cond"].mach, union)
+        out["clip" if col.startswith("clip") else "breakpoint" if col.startswith("bp") else "interpolated"] += 1
+    return out
+
+
+QUALITY_ANOMALY_RATIO = 3.0  # [잠정] 행 중앙값의 몇 배면 국소 이상인가 — 실험용, 근거 [TBD]
+
+
+def classify_pair_distances(rows: dict, *, tol_plant: float, anomaly_ratio: float = QUALITY_ANOMALY_RATIO) -> dict:
+    """인접 쌍 플랜트 거리 → 조밀화 필요(거리 > tol_plant)와 국소 이상(그중 행 중앙값의 anomaly_ratio배 초과).
+
+    전반적으로 큰 거리는 격자가 성긴 것이지 트림 결함이 아니다 — 둘을 섞으면 품질 경고가 조밀화 요구로
+    뒤덮인다(실측: 기본 격자 9점에서 인접 쌍 대부분이 tol을 넘었고 모두 매끄러운 트림 기울기였다)."""
+    dense, anomaly = [], []
+    for row, pairs in rows.items():
+        med = float(np.median([dd for _, dd in pairs])) if pairs else 0.0
+        for between, dd in pairs:
+            if dd > tol_plant:
+                dense.append({"row": row, "between": between, "d_total": dd})
+                if med > 0 and dd > anomaly_ratio * med:
+                    anomaly.append({"row": row, "between": between, "d_total": dd, "ratio": dd / med})
+    return {"dense": dense, "anomaly": anomaly}
+
+
+def quality_warnings(ev, points_by_row: dict, *, tol_plant: float) -> dict:
+    """트림 품질 관문 — 행 안의 인접 계산 완료 점 사이 플랜트 거리(트림 기울기·모드·조종효과). 수렴만으로
+    끝내지 않는다(05 §11.11). 결과는 조밀화 필요와 국소 이상(품질 경고)으로 나눈다."""
+    from claw.design.linmodels import model_distance
+
+    ac = ev._ctx["aircraft"]
+    rows, worst = {}, {}
+    for row, pts in points_by_row.items():
+        done = sorted((p for p in pts if p["state"] == COMPUTABLE), key=lambda p: p["cond"].mach)
+        for a, b in zip(done, done[1:]):
+            ta, tb_ = a["rec"]["tr"], b["rec"]["tr"]
+            dist = model_distance(ev.lms.get(ac, ta), ev.lms.get(ac, tb_), ta, tb_)
+            key = (a["cond"].mach, b["cond"].mach)
+            rows.setdefault(row, []).append((key, dist["d_total"]))
+            worst[(row, key)] = max(("d_trim", "d_mode", "d_ctrl"), key=lambda k: dist.get(k, 0.0))
+    out = classify_pair_distances(rows, tol_plant=tol_plant)
+    for grp in out.values():
+        for x in grp:
+            x["worst"] = worst[(x["row"], x["between"])]
+    return out

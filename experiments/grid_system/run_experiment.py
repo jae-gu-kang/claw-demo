@@ -163,6 +163,84 @@ def dump(obj) -> str:
                       allow_nan=False)
 
 
+def base_refine(built, *, n_mach=9, budget=REINFORCE_MAX_POINTS, common_axis=False) -> dict:
+    """기본 모델 격자 + 역할별 선택 + 보강 (05 §11.11) — 재사용·추가 트림·보강 사유를 잰다.
+
+    1) 기본 격자(행별 등간격)를 먼저 트림하고 품질 관문(인접 플랜트 거리)을 거친다. 2) 역할별 선택 —
+    절점은 기본 격자 마하에서 한 칸 건너, 설계점은 기본 격자의 계산 완료 점. 3) 검증점을 만들어 평가 —
+    기본 격자에서 재사용된 점과 새로 트림한 점을 센다. 4) 보강 — 지표 비선형(d > 허용치) · 판정 변화 ·
+    트림 실패 경계, 사유를 점마다 남긴다. 예산은 사유별로 같은 값(budget)을 실행 전에 준다.
+    """
+    from claw.design.orchestrator import AutoDesignConfig
+
+    _, region, model, _, alts, fuels = setup(built)
+    names = tuple(built.doc["law"]["schedule"]["scheduled"])
+    store = g.TrimStore()
+    ev = g.Evaluator(built, store)
+    base_alts = tuple(alts[:-1])  # 가장 높은 고도는 이 실험의 요구 미정의 행
+    base = g.base_grid(region, alts=base_alts, fuels=fuels, n_mach=n_mach, common_axis=common_axis)
+    by_row: dict = {}
+    for b in base:
+        st, rec, why = ev.state(b["cond"], region, model)
+        b.update(state=st, rec=rec, reasons=why, row=(b["cond"].alt, b["cond"].fuel))
+        by_row.setdefault(b["row"], []).append(b)
+    base_trims, base_keys = store.attempts, set(store._d)
+    quality = g.quality_warnings(ev, by_row, tol_plant=AutoDesignConfig().refine_tol)
+
+    # 역할별 선택 — 절점은 기준 행(가장 낮은 고도·가운데 연료)의 기본 격자 마하에서 한 칸 건너
+    ref = sorted(p["cond"].mach for p in by_row[(base_alts[0], fuels[1])])
+    bps = tuple(ref[::2]) if len(ref[::2]) >= 2 else tuple(ref)
+    sch = g.sample_schedule(built, {"A": g.BreakpointSet("A", "mach", bps)}, {n: "A" for n in names})
+    design = [b for b in base if b["state"] == g.COMPUTABLE]
+
+    spec = g.ValidationSpec(alts=base_alts, fuels=fuels)
+    val = g.generate_validation(region, sch, spec)
+    a0, h0 = store.attempts, store.reused
+    recs = g.evaluate(ev, region, model, sch, val["points"])
+    role_new, role_hits = store.attempts - a0, store.reused - h0
+
+    # 보강
+    a1 = store.attempts
+    rows_v = [(float(a), float(f)) for f in fuels for a in base_alts]
+    re_ = run_reinforce(ev, region, model, sch, rows_v, sch.union_coords(), g.d_scales(ev.criteria))
+    added = [{"cond": x["cond"], "row": x["row"], "reason": g.R_NONLINEAR_METRIC, "slot": x["slot"]}
+             for x in re_["added"]]
+    extra = g.verdict_change_points(recs, max_points=budget) + g.trim_boundary_points(recs, max_points=budget)
+    for p in extra:
+        ev.state(p["cond"], region, model)
+    added += [{"cond": p["cond"], "row": p["row"], "reason": p["reason"]} for p in extra]
+    refine_new = store.attempts - a1
+
+    new_keys = set(store._d) - base_keys
+    new_fail = sum(1 for k in new_keys if ev.state(g.Condition(*_cond_of(store._d[k]["tr"])), region, model)[0]
+                   != g.COMPUTABLE)
+    reasons: dict = {}
+    for a in added:
+        reasons[a["reason"]] = reasons.get(a["reason"], 0) + 1
+    tried = role_new + role_hits
+    metrics = {
+        "base_points": len(base), "base_trims": base_trims,
+        "quality_dense_pairs": len(quality["dense"]), "quality_anomalies": len(quality["anomaly"]),
+        "breakpoints": len(bps), "design_points": len(design), "validation_points": len(recs),
+        "role_new_trims": role_new, "role_reused": role_hits,
+        "base_reuse_ratio": role_hits / tried if tried else 0.0,
+        "refine_new_trims": refine_new, "additional_trims": role_new + refine_new,
+        "additional_trim_failures": new_fail, "interpolation": g.interpolation_share(recs, sch.union_coords()),
+        "refinement_reasons": reasons, "reinforce_status": re_["status"],
+        "unique_conditions": store.unique_conditions, "attempts": store.attempts,
+    }
+    return {"metrics": metrics, "bps": bps, "quality": quality,
+            "added": [{"mach": a["cond"].mach, "alt": a["cond"].alt, "fuel": a["cond"].fuel,
+                       "reason": a["reason"], **({"slot": a["slot"]} if "slot" in a else {})} for a in added],
+            "base": [{"mach": b["cond"].mach, "alt": b["cond"].alt, "fuel": b["cond"].fuel, "state": b["state"]}
+                     for b in base]}
+
+
+def _cond_of(tr):
+    c = tr.case
+    return c.mach, c.alt, c.fuel
+
+
 def jsonable(recs):
     out = []
     for r in recs:
@@ -339,13 +417,25 @@ def main():
     OUT.mkdir(exist_ok=True)
     all_ok = True
     for name, loader in (("example", load_example), ("showcase", load_showcase)):
-        res = experiment(name, build_profile(loader()))
+        built = build_profile(loader())
+        res = experiment(name, built)
+        br = base_refine(built)
+        (OUT / f"{name}_base_refine.json").write_text(dump(br))
+        brc = base_refine(built, common_axis=True)
+        (OUT / f"{name}_base_refine_common_axis.json").write_text(dump(brc))
         (OUT / f"{name}.json").write_text(dump(res))
         print(f"\n== {name} ({res['elapsed_s']} s, code {res['code']}) ==")
         for k, v in res["checks"].items():
             all_ok &= v["ok"]
             print(f"  [{'OK' if v['ok'] else 'NG'}] {k}: "
                   + json.dumps({kk: vv for kk, vv in v.items() if kk != "ok"}, ensure_ascii=False, default=str))
+        for tag, x in (("행별 축", br), ("공통 축", brc)):
+            mm = x["metrics"]
+            print(f"  기본 격자 + 보강 [{tag}]: 기본 {mm['base_points']} · 재사용률 {mm['base_reuse_ratio']:.2f} "
+                  f"(역할 새 트림 {mm['role_new_trims']} / 재사용 {mm['role_reused']}) · 보강 새 트림 {mm['refine_new_trims']} "
+                  f"· 추가 트림 {mm['additional_trims']}(실패 {mm['additional_trim_failures']}) · 설계점 {mm['design_points']} "
+                  f"· 검증점 {mm['validation_points']} · 보간 {mm['interpolation']} · 사유 {mm['refinement_reasons']} "
+                  f"· 조밀화 {mm['quality_dense_pairs']}/이상 {mm['quality_anomalies']} · 보강 {mm['reinforce_status']}")
         print("  트림 시도점:", json.dumps(res["trim_counts"], ensure_ascii=False))
         print("  구간 세분화 d(최대, 1·2·4등분):", json.dumps({k: {kk: round(vv, 3) for kk, vv in v.items()}
                                                           for k, v in res["subdivision_d"].items()}))

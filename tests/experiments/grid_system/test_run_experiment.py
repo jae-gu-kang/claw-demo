@@ -111,3 +111,17 @@ def test_trim_attempt_points_include_constraint_hits(built):
     c = g.Condition(bps[1], alts[0], fuels[0])
     recs = [{"cond": c, "name": c.name, "state": g.CONSTRAINT_HIT, "reasons": ["alpha_search_bound"]}]
     assert [t["name"] for t in rx.trim_points(ev, region, model, [], recs)] == [c.name]
+
+
+def test_base_refine_metrics_are_consistent(built):
+    out = rx.base_refine(built, n_mach=5, budget=4)
+    m = out["metrics"]
+    assert m["base_trims"] > 0 and 0.0 <= m["base_reuse_ratio"] <= 1.0
+    # 추가 트림 = 역할 요청으로 새로 푼 점 + 보강으로 새로 푼 점, 그중 실패 수는 그 이하
+    assert m["additional_trims"] == m["role_new_trims"] + m["refine_new_trims"]
+    assert 0 <= m["additional_trim_failures"] <= m["additional_trims"]
+    # 보강 사유 합 = 추가점 수, 사유 코드는 정의된 것만
+    assert sum(m["refinement_reasons"].values()) == len(out["added"])
+    assert set(m["refinement_reasons"]) <= {g.R_NONLINEAR_METRIC, g.R_VERDICT_CHANGE, g.R_TRIM_FAILURE_BOUNDARY}
+    assert set(m["interpolation"]) == {"breakpoint", "interpolated", "clip"}
+    assert m["design_points"] <= m["base_points"]  # 설계점은 기본 격자에서 고른다

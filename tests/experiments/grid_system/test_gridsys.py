@@ -378,3 +378,58 @@ def test_trim_store_counts_unique_conditions_and_attempts_separately(example):
     ev.state(cond(0.18), region, model)  # 재사용 — 시도가 아니다
     store.retry(ev._ctx["aircraft"], cond(0.18), plant_fp=example.plant_fingerprint, trim_fp=ev.trim_fp)
     assert store.unique_conditions == 1 and store.attempts == 2 and store.reused == 1
+
+
+# ── 기본 모델 격자 + 역할별 선택 + 보강 사유 (05 §11.11) ─────────────────────────
+def test_base_grid_is_regular_per_row_and_tagged_base():
+    r = g.Region(mach=(0.1, 0.3), alt=(0.0, 3000.0), fuel=(10.0, 50.0))
+    pts = g.base_grid(r, alts=(0.0, 1000.0), fuels=(10.0,), n_mach=5)
+    assert len(pts) == 10 and all(p["reason"] == g.R_BASE for p in pts)
+    assert sorted({round(p["cond"].mach, 6) for p in pts}) == [0.1, 0.15, 0.2, 0.25, 0.3]
+
+
+def _r(m, state=g.COMPUTABLE, verdict=g.GOOD, row=(0.0, 10.0)):
+    c = g.Condition(m, row[0], row[1])
+    return {"name": c.name, "cond": c, "row": row, "state": state, "verdict": verdict, "kind": "midpoint",
+            "reasons": []}
+
+
+def test_verdict_change_adds_midpoint_between_neighbours_with_different_verdicts():
+    recs = [_r(0.1), _r(0.2), _r(0.3, verdict=g.FAIL), _r(0.4, verdict=g.FAIL)]
+    pts = g.verdict_change_points(recs, max_points=10)
+    assert [round(p["cond"].mach, 6) for p in pts] == [0.25]
+    assert pts[0]["reason"] == g.R_VERDICT_CHANGE and pts[0]["between"] == (0.2, 0.3)
+
+
+def test_trim_failure_boundary_bisects_between_computable_and_trimmed_failure_only():
+    recs = [_r(0.1), _r(0.2, state=g.INFEASIBLE, verdict=None), _r(0.3, state=g.UNDEFINED, verdict=None),
+            _r(0.4, state=g.CONSTRAINT_HIT, verdict=None), _r(0.5)]
+    pts = g.trim_boundary_points(recs, max_points=10)
+    # 계산 가능 ↔ 트림을 시도한 실패 사이만 — 요구 미정의 경계는 요구영역의 문제라 여기서 찾지 않는다
+    assert [round(p["cond"].mach, 6) for p in pts] == [0.15, 0.45]
+    assert all(p["reason"] == g.R_TRIM_FAILURE_BOUNDARY for p in pts)
+
+
+def test_interpolation_share_splits_breakpoint_interpolated_and_clip():
+    recs = [_r(0.05), _r(0.1), _r(0.15), _r(0.2), _r(0.25), _r(0.3, state=g.UNDEFINED, verdict=None)]
+    assert g.interpolation_share(recs, (0.1, 0.2)) == {"breakpoint": 2, "interpolated": 1, "clip": 2}
+
+
+def test_pair_distances_split_density_from_local_anomaly():
+    # 행 안에서 매끄럽게 큰 거리는 조밀화 필요, 이웃보다 유독 큰 거리만 국소 이상(품질 경고)이다
+    rows = {(0.0, 10.0): [((0.1, 0.2), 1.0), ((0.2, 0.3), 1.2), ((0.3, 0.4), 5.0), ((0.4, 0.5), 1.1)]}
+    out = g.classify_pair_distances(rows, tol_plant=0.25, anomaly_ratio=3.0)
+    assert len(out["dense"]) == 4
+    assert [a["between"] for a in out["anomaly"]] == [(0.3, 0.4)]
+
+
+def test_base_grid_common_axis_shares_mach_coordinates_across_rows():
+    # 행마다 마하 범위가 다른 경계표 — 공통 축이면 모든 행이 같은 마하 좌표를 (행 범위 안에서) 쓴다
+    bt = {10.0: [(0.0, 0.10, 0.30), (1000.0, 0.12, 0.30)]}
+    r = g.Region(mach=(0.1, 0.3), alt=(0.0, 1000.0), fuel=(10.0, 10.0), boundary=bt)
+    own = g.base_grid(r, alts=(0.0, 1000.0), fuels=(10.0,), n_mach=5)
+    common = g.base_grid(r, alts=(0.0, 1000.0), fuels=(10.0,), n_mach=5, common_axis=True)
+    per_row = lambda pts, a: sorted(round(p["cond"].mach, 6) for p in pts if p["cond"].alt == a)  # noqa: E731
+    assert per_row(own, 1000.0) == [0.12, 0.165, 0.21, 0.255, 0.3]  # 행마다 따로 — 좌표가 다르다
+    assert per_row(common, 0.0) == [0.1, 0.15, 0.2, 0.25, 0.3]
+    assert per_row(common, 1000.0) == [0.12, 0.15, 0.2, 0.25, 0.3]  # 공통 좌표 + 행 하한 끝점
