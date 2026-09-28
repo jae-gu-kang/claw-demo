@@ -158,6 +158,28 @@ class MarginCriteria:
             return "warn"
         return "ok"
 
+    def judge_pm(self, pm_deg: float) -> str:
+        """PM 한 축 → 'ok' | 'fail' | 'na'. PM에는 목표선이 없다(합격 아니면 fail — judge와 같은 선).
+
+        마진 지도처럼 PM·GM을 칸마다 따로 칠하는 화면이 판정을 다시 짜지 않게 축별로 낸다 —
+        judge()는 두 축의 합산이고, 그 합산이 `combine_margin_status(judge_pm, judge_gm)`와 같다(테스트가 묶는다).
+        """
+        pm = float(pm_deg)
+        if math.isnan(pm):
+            return "na"
+        return "fail" if pm < self.pm_min_deg else "ok"
+
+    def judge_gm(self, gm_db: float) -> str:
+        """GM 한 축 → 'ok' | 'warn' | 'fail' | 'na' (합격선 gm_min_db, 목표선 gm_good_db)."""
+        gm = float(gm_db)
+        if math.isnan(gm):
+            return "na"
+        if gm < self.gm_min_db:
+            return "fail"
+        if gm < self.gm_good_db:
+            return "warn"
+        return "ok"
+
     def judge_rate_loop(self, metric_status: str, margins) -> str:
         """레이트 자리의 합산 판정 — 모드 지표 판정(judge_damping·judge_bandwidth) + AS94900 끊은 루프 여유.
 
@@ -273,3 +295,97 @@ class MarginCriteria:
     def fingerprint(self) -> str:
         """판정 기준의 계보 지문 — 결과 저장물에 동봉해 '무슨 기준으로 판정했나'를 남긴다."""
         return canonical_hash(self.to_dict())
+
+
+# ── 판정 상태 합산 · 판정선 표 · 목표 ↔ 판정선 정합 (공용) ─────────────────────────
+#
+# 기준 통합 ①(v1.50~): 같은 조건·지표·기준 버전이면 어느 탭에서도 판정이 같아야 한다. 그러려면
+# 값만이 아니라 **판정 함수와 그 판정선의 뜻**이 한 자리에 있어야 한다 — 방향(큰 쪽이 엄격한가
+# 작은 쪽이 엄격한가)이 호출하는 자리마다 다시 적히면 오버슈트·정착시간 같은 상한 지표에서 부등호가
+# 조용히 뒤집힌다. 이 표가 그 뜻의 정본이고, 목표 검사(target_conflicts)·기준 편집 화면·판정 표시가
+# 여기서 읽는다. 상태 넷의 화면 이름: fail 불합격 · warn 합격·주의 · ok 합격·권장 충족 · na 판정 불가.
+
+STATUSES = ("fail", "warn", "ok", "na")
+
+# 합산 순위 — na가 fail보다 앞선다(judge()와 같은 규칙: 한 축이라도 못 재면 판정 불가다.
+# fail로 뭉개면 분류기가 엉뚱한 처방을 낸다)
+_COMBINE_RANK = {"na": 3, "fail": 2, "warn": 1, "ok": 0}
+
+
+def combine_margin_status(*statuses: str) -> str:
+    """축별 판정 → 합산 판정. judge(margins) == combine_margin_status(judge_pm, judge_gm)."""
+    return max(statuses, key=lambda s: _COMBINE_RANK[s])
+
+
+MIN, MAX = "min", "max"  # min = 값이 클수록 엄격(하한선) · max = 값이 작을수록 엄격(상한선)
+
+
+@dataclass(frozen=True)
+class Line:
+    """판정선 하나의 뜻 — 어느 지표를, 어느 방향으로, 어느 필드가 합격·권장선인가.
+
+    pass_key·rec_key는 MarginCriteria 필드 이름(없으면 None — PM에는 권장선이 없다),
+    target_key는 TuneTargets 필드 이름(자동 설계가 겨냥하는 목표가 없으면 None).
+    ratio_of_target이면 판정선이 **목표의 비율**이다(λ_roll — lam_min_frac × roll_lambda):
+    목표 자체가 선을 정하므로 목표 ↔ 판정선 정합 검사 대상이 아니다.
+    """
+
+    metric: str
+    label: str
+    unit: str
+    direction: str
+    pass_key: str | None
+    rec_key: str | None
+    target_key: str | None = None
+    ratio_of_target: bool = False
+
+
+# 튜닝 목표가 있는 판정선 — 자동 설계와 영향성 평가가 같은 MarginCriteria·TuneTargets를 쓰는 자리.
+# 나머지 평가 항목(권한·작동기·회복·스케줄 — pipeline/criteria.py)의 방향은 기준 편집 화면을
+# 세우는 단계(기준 통합 ① S2)에서 이 표에 더한다: 그 항목들은 튜닝 목표가 없어 정합 검사에는 안 걸린다
+LINES = (
+    Line("pm_deg", "위상여유 PM", "°", MIN, "pm_min_deg", None, "pm_deg"),
+    Line("gm_db", "이득여유 GM", "dB", MIN, "gm_min_db", "gm_good_db", "gm_db"),
+    Line("zeta_sp", "단주기 감쇠 ζ_sp", "", MIN, "zeta_min", "zeta_good", "zeta_sp"),
+    Line("zeta_dr", "더치롤 감쇠 ζ_dr", "", MIN, "zeta_min", "zeta_good", "zeta_dr"),
+    Line("roll_lambda", "롤 수렴 대역폭 λ_roll", "rad/s", MIN,
+         "lam_min_frac", "lam_good_frac", "roll_lambda", ratio_of_target=True),
+)
+
+
+def at_least_as_strict(direction: str, value: float, line: float) -> bool:
+    """value가 line과 같거나 더 엄격한가 — min이면 value ≥ line, max면 value ≤ line."""
+    if direction == MIN:
+        return value >= line
+    if direction == MAX:
+        return value <= line
+    raise ValueError(f"판정선 방향은 {MIN!r}|{MAX!r}: {direction!r}")
+
+
+def target_conflicts(criteria: "MarginCriteria", targets) -> list:
+    """튜닝 목표가 판정선보다 느슨한 자리 — [{metric, level, target_key, target, line_key, line, direction}].
+
+    level "pass" = 목표가 **합격선**보다 느슨하다(튜닝에 성공한 점이 곧바로 fail — 설정 모순),
+    level "rec" = 합격선은 지키되 **권장선**보다 느슨하다(성공한 점이 전부 warn — warn이 무의미).
+    한 지표는 더 심한 쪽 하나만 낸다. 거절할지 경고할지는 호출측 정책이다 — 판정은 여기서만 한다.
+    targets는 TuneTargets(또는 같은 필드를 가진 것) — 이 모듈은 tune을 import하지 않는다(tune이 이 모듈을 쓴다).
+    """
+    out = []
+    for ln in LINES:
+        if ln.target_key is None or ln.ratio_of_target:
+            continue
+        t = float(getattr(targets, ln.target_key))
+        if math.isnan(t):
+            # 잴 수 없는 목표는 충돌로 판정하지 않는다 — 종전 검사(`t < line`)가 nan을 통과시켰고
+            # S1은 동작 불변이다. nan 목표를 막는 것은 목표 값 검증(TuneTargets)의 몫이다
+            continue
+        for level, key in (("pass", ln.pass_key), ("rec", ln.rec_key)):
+            if key is None:
+                continue
+            v = float(getattr(criteria, key))
+            if not at_least_as_strict(ln.direction, t, v):
+                out.append({"metric": ln.metric, "level": level,
+                            "target_key": ln.target_key, "target": t,
+                            "line_key": key, "line": v, "direction": ln.direction})
+                break
+    return out

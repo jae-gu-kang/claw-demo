@@ -284,3 +284,74 @@ def test_rate_loop_judgement_adds_the_broken_loop_margin_on_the_attitude_lines()
     # 부족량(shortfall)은 같은 키로 레이트 자리의 여유도 낸다 — 분류기 evidence·원장이 다시 계산하지 않게
     sf = c.shortfall({"zeta": 0.6, "pm_deg": 50.0, "gm_db": 4.1})
     assert sf["gm_db"]["deficit"] == pytest.approx(1.9) and sf["gm_db"]["goal"] == 8.0 and "zeta" in sf
+
+
+# ── 기준 통합 ① S1 — 축별 판정·판정선 표·목표 정합 (공용 한 자리) ──────────────────
+
+
+def test_judge_는_축별_판정의_합산과_같다():
+    """마진 지도처럼 PM·GM을 따로 칠하는 화면이 판정을 다시 짜지 않게 축별 함수를 둔다 —
+    그 합산이 judge()와 한 점도 어긋나면 두 화면이 같은 점을 다르게 말한다."""
+    from claw.design.criteria import combine_margin_status
+
+    c = MarginCriteria()
+    values = (math.nan, -3.0, 5.9, 6.0, 7.9, 8.0, 30.0, 44.9, 45.0, 60.0, math.inf)
+    for pm in values:
+        for gm in values:
+            m = {"pm_deg": pm, "gm_db": gm}
+            assert c.judge(m) == combine_margin_status(c.judge_pm(pm), c.judge_gm(gm)), m
+
+
+def test_PM_30_45_는_주의가_아니라_불합격이다():
+    """웹 음영(30~45° 주의)과 엔진 판정이 갈렸던 자리 — 엔진은 합격선 미만을 fail로 본다."""
+    c = MarginCriteria()
+    assert c.judge_pm(35.0) == "fail"
+    assert c.judge_pm(45.0) == "ok"
+    assert c.judge_gm(7.0) == "warn"
+
+
+def test_판정선_방향_엄격성():
+    from claw.design.criteria import MAX, MIN, at_least_as_strict
+
+    assert at_least_as_strict(MIN, 50.0, 45.0)      # 여유: 클수록 엄격
+    assert at_least_as_strict(MIN, 45.0, 45.0)      # 같아도 된다
+    assert not at_least_as_strict(MIN, 40.0, 45.0)
+    assert at_least_as_strict(MAX, 0.1, 0.2)        # 오버슈트 상한: 작을수록 엄격
+    assert not at_least_as_strict(MAX, 0.3, 0.2)
+    with pytest.raises(ValueError):
+        at_least_as_strict("up", 1.0, 1.0)
+
+
+def test_목표_정합_검사는_수준을_가른다():
+    from claw.design import TuneTargets
+    from claw.design.criteria import target_conflicts
+
+    c = MarginCriteria()
+    assert target_conflicts(c, TuneTargets()) == []  # 출하 기본값끼리 정합
+    got = {x["metric"]: x for x in target_conflicts(
+        c, TuneTargets(pm_deg=40.0, gm_db=7.0, zeta_sp=0.2))}
+    assert got["pm_deg"]["level"] == "pass" and got["pm_deg"]["line_key"] == "pm_min_deg"
+    assert got["gm_db"]["level"] == "rec" and got["gm_db"]["line_key"] == "gm_good_db"
+    # 합격선까지 느슨하면 더 심한 쪽(pass) 하나만 낸다
+    assert got["zeta_sp"]["level"] == "pass" and got["zeta_sp"]["line_key"] == "zeta_min"
+    assert "zeta_dr" not in got
+    # λ_roll은 판정선이 목표의 비율이라 정합 검사 대상이 아니다
+    assert target_conflicts(c, TuneTargets(roll_lambda=0.1)) == []
+    # 선 위(같음)는 통과 — 「같거나 더 엄격」
+    assert target_conflicts(c, TuneTargets(pm_deg=45.0, gm_db=8.0, zeta_sp=0.5, zeta_dr=0.5)) == []
+    # nan 목표는 충돌로 판정하지 않는다 — 종전 검사가 통과시켰다(S1 동작 불변)
+    assert target_conflicts(c, TuneTargets(pm_deg=math.nan, gm_db=math.nan)) == []
+
+
+def test_목표_정합_검사는_상한_지표에서_부등호를_뒤집는다(monkeypatch):
+    """지금 목표가 있는 선은 전부 하한(min)이지만, 상한 지표가 표에 들어오는 순간 부등호가 뒤집혀야 한다."""
+    from types import SimpleNamespace
+
+    from claw.design import criteria as cr
+
+    monkeypatch.setattr(cr, "LINES", (cr.Line("overshoot", "오버슈트", "", cr.MAX,
+                                               "os_max", "os_good", "os_target"),))
+    crit = SimpleNamespace(os_max=0.2, os_good=0.1)
+    assert cr.target_conflicts(crit, SimpleNamespace(os_target=0.05)) == []
+    assert cr.target_conflicts(crit, SimpleNamespace(os_target=0.15))[0]["level"] == "rec"
+    assert cr.target_conflicts(crit, SimpleNamespace(os_target=0.25))[0]["level"] == "pass"

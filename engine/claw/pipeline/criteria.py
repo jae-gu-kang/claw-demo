@@ -30,7 +30,7 @@ diagnose.WINDUP_FRAC, α 마진 0.0 = diagnose._GRID_CHECKS) — 기준 정본�
 import math
 from dataclasses import asdict, dataclass, field, fields
 
-from claw.design.criteria import MarginCriteria
+from claw.design.criteria import LINES, MarginCriteria, target_conflicts
 from claw.design.tune import TuneTargets
 from claw.params.paramset import canonical_hash
 
@@ -38,6 +38,15 @@ from claw.params.paramset import canonical_hash
 # 지문이 v1과 달라지는 것은 의도된 단절이고, 화면은 이 번호로 "구버전 스키마"를
 # 지문 불일치와 구분해 말한다.
 SCHEMA_VERSION = 2
+
+# 판정 함수 버전 — judgement_fingerprint·targets_fingerprint에 들어간다. **판정 로직을 바꾸면 올린다**
+# (판정선 값이 같아도 부등호·합산 규칙·na 처리가 바뀌면 옛 결과의 판정은 새 판정이 아니다).
+# 판정 로직 = design/criteria.py의 judge*·combine_margin_status·target_conflicts와 pipeline/evaluate.py의
+# 단계 판정. 기준 dict의 모양(SCHEMA_VERSION)과는 다른 축이다.
+JUDGEMENT_SCHEME = "crit-v1"
+
+# 판정이 아니라 튜닝 쪽에 속한 묶음 — 목표 지문으로 간다
+_TUNING_SUBS = ("targets", "weights")
 
 
 def _frac(name, v, lo=0.0, hi=1.0):
@@ -537,5 +546,41 @@ class GainEvalCriteria:
         return out
 
     def fingerprint(self) -> str:
-        """판정 기준의 계보 지문 — 평가 저장물에 동봉 (02 §5.4)."""
+        """판정 기준의 계보 지문 — 평가 저장물에 동봉 (02 §5.4).
+
+        목표·가중치까지 한 해시라 "판정이 바뀌었나"와 "J만 바뀌었나"를 못 가른다 — 기준 통합 ①은
+        아래 둘(judgement_fingerprint·targets_fingerprint)로 옮겨 간다. 저장물 호환을 위해 이 값은
+        옮겨 가는 동안 그대로 둔다(바꾸면 저장된 결과의 criteria_fingerprint가 전부 어긋난다).
+        """
         return canonical_hash(self.to_dict())
+
+    def _split(self) -> tuple:
+        """(판정에 들어가는 것, 튜닝에 들어가는 것). 판정선이 **목표의 비율**인 선(λ_roll — 합격선 =
+        lam_min_frac × targets.roll_lambda, evaluate 카드 ④)은 그 목표가 판정을 바꾸므로 판정 쪽에도 넣는다 —
+        빼면 roll_lambda만 바꿔 ok가 fail이 돼도 「J 재계산」으로만 보인다."""
+        d = self.to_dict()
+        tuning = {k: d.pop(k) for k in _TUNING_SUBS}
+        d["judged_targets"] = {ln.target_key: tuning["targets"][ln.target_key]
+                               for ln in LINES if ln.ratio_of_target}
+        return d, tuning
+
+    def judgement_fingerprint(self) -> str:
+        """**판정 기준 지문** — 합격선·권장선(목표·가중치를 뺀 전 항목) + 판정 함수 버전.
+
+        값은 비어 있는 설정이 아니라 **펼친 적용값**(to_dict — 기본값 포함)으로 잰다: 기본값이
+        바뀌어도 감지된다. JUDGEMENT_SCHEME을 함께 넣어, 값이 같아도 판정 함수가 바뀌면 지문이 갈린다.
+        """
+        judged, _ = self._split()
+        return canonical_hash({"scheme": JUDGEMENT_SCHEME, "criteria": judged})
+
+    def targets_fingerprint(self) -> str:
+        """**목표 지문** — 튜닝 목표(자동 설계가 겨냥하는 값)와 J 가중치. 판정 합격 여부에는 안 들어가고
+        J 점수와 설계 산출물에만 들어간다 — 이것만 다르면 「재평가」가 아니라 「J 재계산」·「목표와 다름」이다."""
+        _, tuning = self._split()
+        return canonical_hash({"scheme": JUDGEMENT_SCHEME, "tuning": tuning})
+
+    def target_conflicts(self) -> list:
+        """튜닝 목표가 판정선보다 느슨한 자리 — design.criteria.target_conflicts를 그대로 쓴다(판정 한 자리).
+        이 클래스는 아직 **거절하지 않는다**(보고만 — 기준 통합 ① S1은 동작 불변). 거절·경고 정책은
+        기준이 프로파일로 옮겨 가는 단계에서 정한다."""
+        return target_conflicts(self.margin, self.targets)

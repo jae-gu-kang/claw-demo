@@ -27,7 +27,7 @@ import numpy as np
 from claw.common.contracts import SurfaceCommand, TrimCase, TrimResult, VehicleState
 from claw.common.attitude import euler_to_quat
 from claw.design.classify import classify_failures
-from claw.design.criteria import MarginCriteria
+from claw.design.criteria import MIN, MarginCriteria, target_conflicts
 from claw.design.fit import fit_quality, fit_slots
 from claw.design.grid import coarse_grid
 from claw.design.linmodels import LinearModelSet
@@ -174,6 +174,12 @@ class AutoDesignConfig:
             raise ValueError("delay_s는 음수 불가, pade_order는 1 이상")
         self._check_targets_meet_criteria()
 
+    # 충돌 수준별 사유 — 어느 쪽이든 결과는 같다: 성공한 튜닝이 판정에서 거짓말을 한다
+    _CONFLICT_WHY = {
+        "pass": "튜닝 목표가 합격선보다 느슨하면 성공한 점이 곧바로 fail로 찍힌다",
+        "rec": "튜닝 목표가 권장선보다 느슨하면 성공한 점이 전부 warn이 되어 warn이 무의미해진다",
+    }
+
     def _check_targets_meet_criteria(self):
         """튜너 목표가 판정선을 넘는지 — warn/fail이 의미를 갖게 하는 유일한 불변식.
 
@@ -186,25 +192,17 @@ class AutoDesignConfig:
           (자유 게인 최적조차 fail이니 정의상 구조 한계로 보인다).
         둘 다 "판정이 틀렸다"가 아니라 **설정이 모순**인 것이라 제출 시점에 막는다
         (routes/design.py가 ValueError를 422로 낸다 — 워커를 돌린 뒤 알아채면 늦다).
+
+        판정은 공용 함수(criteria.target_conflicts — 판정선 방향까지 아는 한 자리)가 하고, 여기는
+        **정책**만 쥔다: 자동 설계는 합격선·권장선 어느 쪽 충돌이든 거절한다(기준 통합 ① S1 — 권장선
+        충돌을 경고로 낮추는 것은 동작 변경이라 별도 단계다).
         """
-        cr, tg = self.criteria, self.targets
-        if tg.pm_deg < cr.pm_min_deg:
+        for c in target_conflicts(self.criteria, self.targets):
             raise ValueError(
-                f"targets.pm_deg({tg.pm_deg}°) ≥ criteria.pm_min_deg({cr.pm_min_deg}°) 필요 — "
-                "튜닝 목표가 합격선보다 낮으면 성공한 점이 곧바로 fail로 찍힌다"
+                f"targets.{c['target_key']}({c['target']:g}) {'≥' if c['direction'] == MIN else '≤'} "
+                f"criteria.{c['line_key']}({c['line']:g}) 필요 — "
+                + self._CONFLICT_WHY[c["level"]]
             )
-        if tg.gm_db < cr.gm_good_db:
-            raise ValueError(
-                f"targets.gm_db({tg.gm_db} dB) ≥ criteria.gm_good_db({cr.gm_good_db} dB) 필요 — "
-                "튜닝 목표가 목표선보다 낮으면 성공한 점이 전부 warn이 되어 warn이 무의미해진다"
-            )
-        for field_name in ("zeta_sp", "zeta_dr"):
-            z = getattr(tg, field_name)
-            if z < cr.zeta_good:
-                raise ValueError(
-                    f"targets.{field_name}({z}) ≥ criteria.zeta_good({cr.zeta_good}) 필요 — "
-                    "감쇠 목표가 목표선보다 낮으면 성공한 댐퍼가 warn으로 찍힌다"
-                )
 
     def to_dict(self) -> dict:
         d = {k: v for k, v in self.__dict__.items() if k not in ("criteria", "targets")}

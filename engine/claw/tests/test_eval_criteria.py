@@ -182,3 +182,66 @@ def test_척도가_양수인_것은_기준이_먼저_막기_때문이다():
     with pytest.raises(ValueError):
         GainEvalCriteria.from_dict({"response": {"mp_max": {"alt": 0.0}}})
     assert all(v > 0 for v in GainEvalCriteria().to_metric_scales().values())
+
+
+# ── 기준 통합 ① S1 — 판정 기준 지문 · 목표 지문 ────────────────────────────────
+
+
+def test_지문_둘은_서로_독립이다():
+    """목표만 바꾸면 판정 기준 지문은 그대로(「J 재계산」), 판정선을 바꾸면 목표 지문은 그대로(「재평가」)."""
+    base = GainEvalCriteria()
+    d = base.to_dict()
+    d["targets"]["zeta_sp"] = 0.9
+    tgt = GainEvalCriteria.from_dict(d)
+    assert tgt.judgement_fingerprint() == base.judgement_fingerprint()
+    assert tgt.targets_fingerprint() != base.targets_fingerprint()
+
+    d = base.to_dict()
+    d["margin"]["pm_min_deg"] = 40.0
+    crit = GainEvalCriteria.from_dict(d)
+    assert crit.judgement_fingerprint() != base.judgement_fingerprint()
+    assert crit.targets_fingerprint() == base.targets_fingerprint()
+
+    d = base.to_dict()
+    d["weights"]["w_rms"] = 2.0
+    w = GainEvalCriteria.from_dict(d)
+    assert w.judgement_fingerprint() == base.judgement_fingerprint()
+    assert w.targets_fingerprint() != base.targets_fingerprint()
+
+
+def test_지문은_펼친_적용값으로_잰다_그리고_판정_함수_버전을_담는다(monkeypatch):
+    """빈 설정({})도 기본값을 펼친 값으로 재야 기본값 변경이 감지된다. 판정 함수 버전을 올리면 값이 같아도 갈린다."""
+    from claw.pipeline import criteria as pc
+
+    assert GainEvalCriteria.from_dict({}).judgement_fingerprint() == GainEvalCriteria().judgement_fingerprint()
+    before = GainEvalCriteria().judgement_fingerprint(), GainEvalCriteria().targets_fingerprint()
+    monkeypatch.setattr(pc, "JUDGEMENT_SCHEME", "crit-test")
+    after = GainEvalCriteria().judgement_fingerprint(), GainEvalCriteria().targets_fingerprint()
+    assert before[0] != after[0] and before[1] != after[1]
+
+
+def test_옛_지문은_그대로다():
+    """S1은 동작 불변 — 저장물의 criteria_fingerprint(전 항목 한 해시)는 옮겨 가는 동안 그대로다.
+    값을 못박는다: 기본값이나 to_dict 모양이 바뀌면 저장된 평가 결과가 전부 「다른 기준」이 된다 —
+    그 변경은 의도해서 여기 값을 고치는 커밋이어야 한다."""
+    assert GainEvalCriteria().fingerprint() == "285b1415cbf86dba"
+
+
+def test_목표의_비율인_판정선은_판정_지문에도_든다():
+    """λ_roll 합격선 = lam_min_frac × targets.roll_lambda — 이 목표를 바꾸면 카드 ④ 판정이 바뀐다.
+    판정 지문이 그대로면 판정이 바뀐 결과가 「J 재계산」으로만 보인다."""
+    base = GainEvalCriteria()
+    d = base.to_dict()
+    d["targets"]["roll_lambda"] = 20.0
+    c = GainEvalCriteria.from_dict(d)
+    assert c.judgement_fingerprint() != base.judgement_fingerprint()
+    assert c.targets_fingerprint() != base.targets_fingerprint()
+
+
+def test_평가_기준은_목표_충돌을_보고만_한다():
+    """S1에서는 거절하지 않는다(동작 불변) — 판정은 design.criteria.target_conflicts 한 자리다."""
+    d = GainEvalCriteria().to_dict()
+    d["targets"]["gm_db"] = 7.0
+    c = GainEvalCriteria.from_dict(d)  # 예전처럼 받아들인다
+    assert [x["metric"] for x in c.target_conflicts()] == ["gm_db"]
+    assert GainEvalCriteria().target_conflicts() == []
