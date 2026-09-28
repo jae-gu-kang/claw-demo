@@ -28,25 +28,55 @@ OUT = HERE / "out"
 
 
 def setup(built):
-    """기체마다 같은 규칙으로 실험 조건을 만든다 — 값은 기체 문서(trim_grid·db_ranges·fuel_max)에서."""
+    """기체마다 같은 규칙으로 실험 조건을 만든다 — 값은 기체 문서에서.
+
+    요구영역 마하 = 기체 게인 스케줄이 덮는 범위(law.schedule.mach_grid 양끝) — 설계자가 게인을 정의한
+    범위이자 이 기체가 실제로 쓰는 속도대다. 절점 5개를 그 범위 양끝까지 고르게 둔다(종전 설정은 절점을
+    trim_grid의 좁은 범위에서 뽑고 요구영역만 DB 밖까지 늘려, 점이 좁은 띠에 몰렸다). 고도·연료는
+    trim_grid 초안에서, 경계표는 가운데 고도까지만 정의해 그 위를 요구 미정의로 남긴다. 모델 부족은
+    요구영역을 비행 불가 속도까지 늘려야 생기므로 여기서 만들지 않고 단위 테스트가 확인한다.
+    """
     draft = g.region_draft_from_trim_grid(built.doc["mission_template"]["trim_grid"])
     fuel_max = built.aircraft().fuel_mass.fuel_max
-    db_m = built.db_ranges()["mach"]
+    mg = built.doc["law"]["schedule"]["mach_grid"]
+    m_lo, m_hi = float(mg[0]), float(mg[-1])
     a_lo, a_hi = draft.alt
     a_mid = float(round((a_lo + a_hi) / 2.0))
-    m_lo, m_hi = draft.mach
     f_lo, f_hi = 0.2 * fuel_max, fuel_max
-    # 요구영역: 초안을 사용자가 넓혀 확정한 것으로 둔다 — 마하 상한을 DB 밖까지(모델 부족 확인),
-    # 경계표는 가운데 고도까지만 정의(그 위는 요구 미정의 확인)
-    top = db_m[1] + 0.05
     region = g.Region(
-        mach=(m_lo * 0.9, top), alt=(a_lo, a_hi), fuel=(f_lo, f_hi),
-        boundary={f_lo: [(a_lo, m_lo * 0.9, top), (a_mid, m_lo, top)],
-                  f_hi: [(a_lo, m_lo, top), (a_mid, m_lo * 1.1, top)]},
+        mach=(m_lo, m_hi), alt=(a_lo, a_hi), fuel=(f_lo, f_hi),
+        boundary={f_lo: [(a_lo, m_lo, m_hi), (a_mid, m_lo * 1.1, m_hi)],
+                  f_hi: [(a_lo, m_lo * 1.1, m_hi), (a_mid, m_lo * 1.2, m_hi)]},
         source="user(experiment)")
-    model = g.ModelRange(mach=db_m, fuel=(0.0, fuel_max))
-    bps = tuple(round(m_lo + (m_hi - m_lo) * k / 3.0, 6) for k in range(4))  # 절점 4개
+    model = g.ModelRange(mach=built.db_ranges()["mach"], fuel=(0.0, fuel_max))
+    bps = tuple(round(m_lo + (m_hi - m_lo) * k / 4.0, 6) for k in range(5))  # 절점 5개
     return draft, region, model, bps, (a_lo, a_mid, a_hi), (f_lo, 0.5 * fuel_max, f_hi)
+
+
+def design_rows(alts, fuels):
+    """설계점 행 — 검증 조합과 일부러 다르게(가운데 연료·가장 높은 고도를 뺀다). 두 집합이 독립이라는 것을 보인다."""
+    return tuple(alts[:-1]), (fuels[0], fuels[-1])
+
+
+def trim_points(ev, region, model, design_points, recs) -> list:
+    """트림점 = 트림이 필요한 조건 전부(설계점 ∪ 검증점). 같은 조건은 저장소 키가 같아 한 번만 계산된다.
+
+    검증점은 이미 평가한 레코드의 상태를 쓰고, 설계점은 여기서 상태를 판정한다(트림 저장소 재사용)."""
+    trimmed = (g.COMPUTABLE, g.CALC_FAILED, g.INFEASIBLE)  # 트림을 실제로 돌린 상태만 — 나머지는 트림점이 아니다
+    out: dict = {}
+    for d in design_points:
+        st, _, why = ev.state(d.cond, region, model)
+        if st in trimmed:
+            out[d.cond.name] = {"name": d.cond.name, "cond": d.cond, "state": st, "reasons": why,
+                                "used_by": ["design"]}
+    for r in recs:
+        if r["state"] not in trimmed:
+            continue
+        t = out.setdefault(r["name"], {"name": r["name"], "cond": r["cond"], "state": r["state"],
+                                       "reasons": r["reasons"], "used_by": []})
+        if "validation" not in t["used_by"]:
+            t["used_by"].append("validation")
+    return list(out.values())
 
 
 def run_case(built, store, region, model, schedule, spec):
@@ -90,8 +120,9 @@ def experiment(name, built):
     # ① 설계점·절점 분리 — 설계점 수를 바꿔도 절점은 그대로이고, 설계점의 절점 구간 연결은 저장 없이
     # 절점에서 계산된다. 표 값이 설계점과 무관한 것은 샘플 표라 구성상 참이다(튜닝 연결은 이관 과제)
     bset = {"A": g.BreakpointSet("A", "mach", bps)}
-    few = g.auto_design_points(region, n_mach=3, alts=alts, fuels=fuels)
-    dps = g.auto_design_points(region, n_mach=9, alts=alts, fuels=fuels)
+    d_alts, d_fuels = design_rows(alts, fuels)
+    few = g.auto_design_points(region, n_mach=3, alts=d_alts, fuels=d_fuels)
+    dps = g.auto_design_points(region, n_mach=7, alts=d_alts, fuels=d_fuels)
     sch1 = g.sample_schedule(built, bset, {n: "A" for n in names})
     links = g.design_links(dps, bps)
     moved_links = g.design_links(dps, (bps[0], bps[-1]))
@@ -123,6 +154,8 @@ def experiment(name, built):
         "rows": len(want_rows), "midpoints": len(mids), "intervals": len(union) - 1,
         "ok": {p.row for p in mids} == want_rows and len(mids) == (len(union) - 1) * len(want_rows),
     }
+
+    tps = trim_points(ev, region, model, dps, recs)
 
     # ④ 누락 방지 — 상태 합 = 후보 수, 요약 분모 + 영역 밖 = 후보 수
     by_state = {}
@@ -184,6 +217,7 @@ def experiment(name, built):
         "validation": {"alts": alts, "fuels": fuels, "mode": spec.mode, "omitted": val["omitted"],
                        "union": union},
         "records": jsonable(recs),
+        "trim_points": jsonable([{**t, "row": None} for t in tps]),
         "summary": {"columns": summ["columns"], "out_of_region": summ["out_of_region"],
                     "cells": [{"row": list(k[0]) if isinstance(k[0], tuple) else k[0], "col": k[1], **c}
                               for k, c in summ["cells"].items()]},

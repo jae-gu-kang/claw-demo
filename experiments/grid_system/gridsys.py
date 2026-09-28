@@ -369,11 +369,17 @@ class Evaluator:
         rec = self.store.get(self._ctx["aircraft"], c, plant_fp=self.built.plant_fingerprint,
                              trim_fp=self.trim_fp)
         tr = rec["tr"]
-        # 미수렴이어도 조종량이 한계에 붙어 잔차가 남았으면 물리적 불가다(추력 부족 등) — 계산 실패와
+        # 미수렴이어도 조종량·받음각이 한계에 붙어 잔차가 남았으면 물리적 불가다(추력 부족·양력 부족) — 계산 실패와
         # 가른다(05 §11.3). 한계에 안 붙었는데 미수렴이면 그때가 계산 실패다
         from claw.trim.trim import saturation_detail
 
-        sat = [ch for ch, on in saturation_detail(tr, self.built.trim_bounds["de"]).items() if on]
+        tb = self.built.trim_bounds
+        sat = [ch for ch, on in saturation_detail(tr, tb["de"]).items() if on]
+        # 받음각이 트림 탐색 한계에 붙은 것도 같은 뜻이다 — 양력(저속)·음의 양력 한계
+        alpha = math.atan2(float(tr.state.vel_b[2]), float(tr.state.vel_b[0]))
+        a_lo, a_hi = tb["alpha"]
+        if alpha >= a_hi - 1e-6 or alpha <= a_lo + 1e-6:
+            sat.append("alpha_limit")
         if not tr.converged:
             return (INFEASIBLE, rec, [*sat, "not_converged"]) if sat else (CALC_FAILED, rec, ["not_converged"])
         why = sat + (["alpha_margin"] if not tr.flags.get("alpha_margin_ok") else [])

@@ -256,3 +256,13 @@ def test_unconverged_trim_pinned_at_control_limit_is_infeasible_not_calc_failure
     st, rec, why = ev.state(cond(0.5, a=100.0), region, model)
     assert rec["tr"].converged is False
     assert st == g.INFEASIBLE and "throttle_high" in why
+
+
+def test_unconverged_trim_pinned_at_alpha_bound_is_infeasible(example):
+    # 너무 느리다: 받음각이 트림 탐색 상한에 붙은 채 잔차가 남는다 — 양력 한계라 물리적 불가다
+    ev = g.Evaluator(example, g.TrimStore())
+    region = g.Region(mach=(0.05, 0.5), alt=(0.0, 3000.0), fuel=(0.0, 50.0))
+    model = g.ModelRange(mach=example.db_ranges()["mach"], fuel=(0.0, 50.0))
+    st, rec, why = ev.state(cond(0.0612, a=100.0, f=10.0), region, model)
+    assert rec["tr"].converged is False
+    assert st == g.INFEASIBLE and "alpha_limit" in why

@@ -46,6 +46,16 @@
   .okmark { color: var(--ok); font-weight: 700; } .ngmark { color: var(--fail); font-weight: 700; }
   #detail table td:first-child { white-space: nowrap; }
   .scroll { overflow-x: auto; }
+  .kinds { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 4px 0 8px; }
+  .kind { border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; display: grid;
+          grid-template-columns: 22px 1fr; column-gap: 7px; align-items: start; cursor: pointer; user-select: none; }
+  .kind.off { opacity: 0.42; }
+  .kind svg { width: 20px; height: 20px; margin-top: 1px; }
+  .kind b { font-size: 13px; }
+  .kind .def { grid-column: 2; color: var(--muted); font-size: 12px; line-height: 1.35; }
+  .kind .cnt { grid-column: 2; font-size: 12px; margin-top: 3px; }
+  @media (max-width: 760px) { .kinds { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  :root { --design: #1f4e8c; --trim: #8a8a84; }
 </style>
 </head>
 <body>
@@ -58,10 +68,9 @@
     <div class="bar">
       <span class="seg" id="acSeg"></span>
       <span>연료 <span class="seg" id="fuelSeg"></span></span>
-      <label><input type="checkbox" id="tDesign" checked> 설계점</label>
-      <label><input type="checkbox" id="tVal" checked> 검증점</label>
       <span>보기 <span class="seg" id="viewSeg"></span></span>
     </div>
+    <div class="kinds" id="kinds"></div>
     <svg id="mh" viewBox="0 0 900 420" role="img" aria-label="마하-고도 운용영역"></svg>
     <div class="legend" id="legend"></div>
     <div class="caption" id="caption"></div>
@@ -135,14 +144,53 @@ function el(tag, attrs = {}, text) {
   return e;
 }
 
+// 점 종류 네 가지 — 각각 켜고 끈다. 정의는 05 §11.1 용어표를 따른다
+const KINDS = {
+  trim: { name: "트림점", def: "트림(평형) 계산을 실제로 돌린 조건. 설계점·검증점이 같은 조건이면 한 번만 계산해 함께 쓴다" },
+  design: { name: "설계점", def: "게인을 튜닝할 때 고려하는 비행조건(마하·고도·연료). 절점과 무관하게 늘고 준다" },
+  bp: { name: "게인 분할점(절점)", def: "게인 표가 값을 갖는 마하 좌표. 비행조건이 아니라 축 위의 위치라 세로선으로 그린다" },
+  val: { name: "검증점", def: "완성된 스케줄을 실제 표 평가 게인으로 확인하는 조건. 절점 위·구간 중간·경계에 둔다" },
+};
+const ON = { trim: true, design: true, bp: true, val: true };
+
+function glyph(kind) {
+  const g = { trim: '<path d="M4 10h12M10 4v12" stroke="#8a8a84" stroke-width="2"/>',
+    design: '<rect x="5" y="5" width="10" height="10" transform="rotate(45 10 10)" fill="#1f4e8c"/>',
+    bp: '<path d="M10 2v16" stroke="#1d1d1b" stroke-width="1.6"/><path d="M6 2h8l-4 5z" fill="#1d1d1b"/>',
+    val: '<circle cx="10" cy="10" r="5.5" fill="#2f8a4c" stroke="#2f8a4c" stroke-width="2"/>' }[kind];
+  return `<svg viewBox="0 0 20 20">${g}</svg>`;
+}
+
+function drawKinds(d) {
+  const f = S.fuel, bps = new Set(Object.values(d.schedule.bp_sets).flatMap((s) => s.coords));
+  const count = {
+    trim: [d.trim_points.filter((t) => near(t.cond.fuel, f)).length, d.trim_points.length],
+    design: [d.design_points.filter((p) => near(p.fuel, f)).length, d.design_points.length],
+    bp: [bps.size, bps.size],
+    val: [d.records.filter((r) => near(r.cond.fuel, f)).length, d.records.length],
+  };
+  const shared = d.trim_points.filter((t) => t.used_by.length > 1).length;
+  $("kinds").replaceChildren(...Object.entries(KINDS).map(([k, v]) => {
+    const e = document.createElement("div"); e.className = `kind${ON[k] ? "" : " off"}`;
+    const [here, all] = count[k];
+    const extra = k === "trim" ? ` · 설계·검증 공유 ${shared}` : k === "bp" ? ` · 표 ${Object.keys(d.schedule.refs).length}개가 참조` : "";
+    e.innerHTML = `${glyph(k)}<b>${v.name}</b><div class="def">${v.def}</div>`
+      + `<div class="cnt">${k === "bp" ? `합집합 ${all}개 (${Object.entries(d.schedule.bp_sets).map(([n, v]) => `${n} ${v.coords.length}`).join(" · ")}) · 연료 무관` : `이 연료 ${here} · 전체 ${all}`}${extra}</div>`;
+    e.title = "눌러서 켜고 끄기"; e.onclick = () => { ON[k] = !ON[k]; render(); };
+    return e;
+  }));
+}
+
 function drawMH(d) {
   const svg = $("mh"); svg.replaceChildren();
-  const W = 900, H = 420, L = 62, R = 18, T = 18, B = 44;
-  const u = d.validation.union, pad = (u[u.length - 1] - u[0]) * 0.35;
-  // 보기 — 전체(요구영역 끝까지) / 절점 구간 확대. 확대해도 좌표는 옮기지 않고 창만 좁힌다
-  const mMin = S.view === "all" ? 0 : Math.max(0, u[0] - pad);
-  const mMax = S.view === "all" ? d.region.mach[1] * 1.04 : u[u.length - 1] + pad, aMin = 0, aMax = d.region.alt[1] * 1.12;
-  const x = (m) => L + ((Math.min(Math.max(m, mMin - 0.02 * (mMax - mMin)), mMax + 0.02 * (mMax - mMin)) - mMin) / (mMax - mMin)) * (W - L - R), y = (a) => H - B - ((a - aMin) / (aMax - aMin)) * (H - T - B);
+  const W = 900, H = 420, L = 62, R = 18, T = 40, B = 44;
+  const u = d.validation.union, pad = (u[u.length - 1] - u[0]) * 0.12;
+  // 보기 — 전체(0부터) / 절점 구간 확대(요구영역 앞뒤 약간). 확대해도 좌표는 옮기지 않고 창만 좁힌다
+  const mMin = S.view === "all" ? 0 : Math.max(0, Math.min(u[0], d.region.mach[0]) - pad);
+  const mMax = (S.view === "all" ? Math.max(d.region.mach[1], u[u.length - 1]) * 1.25 : Math.max(u[u.length - 1], d.region.mach[1]) + pad);
+  const aMin = 0, aMax = d.region.alt[1] * 1.12;
+  const x = (m) => L + ((Math.min(Math.max(m, mMin - 0.02 * (mMax - mMin)), mMax + 0.02 * (mMax - mMin)) - mMin) / (mMax - mMin)) * (W - L - R);
+  const y = (a) => H - B - ((a - aMin) / (aMax - aMin)) * (H - T - B);
   const clipId = "plotClip"; const defs = el("defs");
   const cp = el("clipPath", { id: clipId }); cp.append(el("rect", { x: L, y: T, width: W - L - R, height: H - B - T })); defs.append(cp);
   const hatch = (id, color) => { const p = el("pattern", { id, width: 8, height: 8, patternUnits: "userSpaceOnUse",
@@ -153,15 +201,15 @@ function drawMH(d) {
   svg.append(el("line", { x1: L, y1: H - B, x2: W - R, y2: H - B, stroke: "#999" }));
   svg.append(el("line", { x1: L, y1: T, x2: L, y2: H - B, stroke: "#999" }));
   for (let k = 0; k <= 10; k++) { const m = mMin + ((mMax - mMin) * k) / 10;
-    svg.append(el("text", { x: x(m), y: H - B + 16, "text-anchor": "middle", "font-size": 11, fill: "#6b6b66" }, fmt(m, 2))); }
+    svg.append(el("text", { x: x(m), y: H - B + 16, "text-anchor": "middle", "font-size": 11, fill: "#6b6b66" }, fmt(m, 3))); }
   for (let k = 0; k <= 5; k++) { const a = (aMax * k) / 5;
     svg.append(el("text", { x: L - 8, y: y(a) + 4, "text-anchor": "end", "font-size": 11, fill: "#6b6b66" }, Math.round(a))); }
   svg.append(el("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle", "font-size": 12, fill: "#6b6b66" }, "마하"));
   svg.append(el("text", { x: 14, y: (T + H - B) / 2, "font-size": 12, fill: "#6b6b66",
     transform: `rotate(-90 14 ${(T + H - B) / 2})`, "text-anchor": "middle" }, "고도 [m]"));
+  const plot = el("g", { "clip-path": `url(#${clipId})` }); svg.append(plot);
   // 모델 미지원 — 회색 빗금 (요구영역을 자르지 않고 겹쳐 보인다)
   const mm = d.model.mach[1];
-  const plot = el("g", { "clip-path": `url(#${clipId})` }); svg.append(plot);
   if (mm < mMax) { plot.append(el("rect", { x: x(mm), y: T, width: x(mMax) - x(mm), height: H - B - T, fill: "url(#hModel)" }));
     svg.append(el("text", { x: x(mm) + 6, y: T + 14, "font-size": 11, fill: "#6b6b66" }, "모델 미지원")); }
   // 요구영역 — 이 연료에서 경계표 보간, 표가 덮지 않는 고도는 요구 미정의 무늬
@@ -176,38 +224,58 @@ function drawMH(d) {
       plot.append(el("rect", { x: x(d.region.mach[0]), y: y(d.region.alt[1]), width: x(d.region.mach[1]) - x(d.region.mach[0]),
         height: y(aTop) - y(d.region.alt[1]), fill: "url(#hUndef)", stroke: "var(--undef)", "stroke-dasharray": "4 3" }));
   }
-  // 절점 — 세로선 (비행조건이 아니다). 표별 절점 집합마다 다른 선
+  // 게인 분할점(절점) — 세로선 + 위쪽 ▼ 표식과 값. 비행조건이 아니다. 절점 집합마다 다른 선
   const bpLegend = [];
   const sets = d.schedule.bp_sets, sharing = d.schedule.sharing, refs = d.schedule.refs;
   Object.entries(sets).forEach(([name, s], i) => {
     const users = Object.keys(refs).filter((g) => refs[g] === name);
     const indep = users.every((g) => sharing[g] === "independent");
-    s.coords.forEach((m) => plot.append(el("line", { x1: x(m), y1: T, x2: x(m), y2: H - B,
-      stroke: i ? "var(--bp-b)" : "var(--bp-a)", "stroke-width": 1, "stroke-dasharray": indep ? "5 4" : "none", opacity: 0.55 })));
-    bpLegend.push([name, i ? "var(--bp-b)" : "var(--bp-a)", indep ? `독립: ${users.join(", ")}` : `공유 ${users.length}표`, indep]);
+    const col = i ? "var(--bp-b)" : "var(--bp-a)";
+    bpLegend.push([name, col, indep ? `독립: ${users.join(", ")}` : `공유 ${users.length}표`, indep]);
+    if (!ON.bp) return;
+    s.coords.forEach((m) => {
+      plot.append(el("line", { x1: x(m), y1: T, x2: x(m), y2: H - B, stroke: col, "stroke-width": 1.2,
+        "stroke-dasharray": indep ? "5 4" : "none", opacity: 0.6 }));
+      const ty = i ? T - 4 : T - 16;
+      svg.append(el("path", { d: `M${x(m) - 4} ${ty + 2}h8l-4 5z`, fill: col }));
+      svg.append(el("text", { x: x(m) + 6, y: ty + 7, "font-size": 10, fill: col }, `${name}:${fmt(m, 3)}`));
+    });
   });
-  // 설계점 — 속 빈 회색 네모
-  if ($("tDesign").checked) d.design_points.filter((p) => near(p.fuel, f)).forEach((p) =>
-    plot.append(el("rect", { x: x(p.mach) - 3, y: y(p.alt) - 3, width: 6, height: 6, fill: "none", stroke: "#8a8a84" })));
-  // 검증점 — 원, 색 = 계산 상태(완료면 판정 색)
-  if ($("tVal").checked) d.records.filter((r) => near(r.cond.fuel, f)).forEach((r) => {
-    const c = r.state === "computable" ? VERDICT[r.verdict] : STATE[r.state][1];
-    const g = el("circle", { cx: x(r.cond.mach), cy: y(r.cond.alt), r: r.kind === "midpoint" ? 4.5 : 3.5,
-      fill: r.state === "computable" ? c : "#fff", stroke: c, "stroke-width": 2 });
-    g.append(el("title", {}, `${r.name}\n${r.kind} · ${STATE[r.state][0]}${r.verdict ? " · " + r.verdict : ""}${r.reasons.length ? "\n사유: " + r.reasons.join(", ") : ""}`));
+  // 트림점 — 회색 +. 계산 상태를 툴팁에
+  if (ON.trim) d.trim_points.filter((t) => near(t.cond.fuel, f)).forEach((t) => {
+    const g = el("path", { d: `M${x(t.cond.mach) - 6} ${y(t.cond.alt)}h12M${x(t.cond.mach)} ${y(t.cond.alt) - 6}v12`,
+      stroke: "var(--trim)", "stroke-width": 1.6 });
+    g.append(el("title", {}, `트림점 ${t.name}\n${STATE[t.state][0]}${t.reasons.length ? " · " + t.reasons.join(", ") : ""}\n쓰는 곳: ${t.used_by.map((u) => u === "design" ? "설계점" : "검증점").join(", ")}`));
     plot.append(g);
   });
-  $("caption").textContent = `연료 ${fmt(f, 1)} kg · 요구영역 마하 ${fmt(d.region.mach[0])}–${fmt(d.region.mach[1])}, `
+  // 설계점 — 채운 남색 마름모 (검증점 원보다 크게 — 같은 조건이면 원 뒤로 테두리가 보인다)
+  if (ON.design) d.design_points.filter((p) => near(p.fuel, f)).forEach((p) => {
+    const g = el("rect", { x: x(p.mach) - 5.5, y: y(p.alt) - 5.5, width: 11, height: 11, fill: "var(--design)",
+      transform: `rotate(45 ${x(p.mach)} ${y(p.alt)})`, opacity: 0.85 });
+    g.append(el("title", {}, `설계점 M${fmt(p.mach, 4)} · ${p.alt} m · ${fmt(p.fuel, 1)} kg\n출처: ${p.origin}`));
+    plot.append(g);
+  });
+  // 검증점 — 원, 색 = 계산 상태(완료면 판정 색). 구간 중간은 큰 원, 절점 위는 작은 원, 경계·clip은 점선 테두리
+  if (ON.val) d.records.filter((r) => near(r.cond.fuel, f)).forEach((r) => {
+    const c = r.state === "computable" ? VERDICT[r.verdict] : STATE[r.state][1];
+    const g = el("circle", { cx: x(r.cond.mach), cy: y(r.cond.alt), r: r.kind === "midpoint" ? 4.5 : 3.2,
+      fill: r.state === "computable" ? c : "#fff", stroke: c, "stroke-width": 2,
+      "stroke-dasharray": r.kind === "boundary" || r.kind === "clip" ? "2 1.5" : "none" });
+    const kindKo = { breakpoint: "절점 위", midpoint: "구간 중간", clip: "clip 구간", boundary: "요구영역 경계", extra: "추가" }[r.kind];
+    g.append(el("title", {}, `검증점 ${r.name}\n${kindKo} · ${STATE[r.state][0]}${r.verdict ? " · " + r.verdict : ""}${r.reasons.length ? "\n사유: " + r.reasons.join(", ") : ""}`));
+    plot.append(g);
+  });
+  $("caption").textContent = `연료 ${fmt(f, 1)} kg · 요구영역 마하 ${fmt(d.region.mach[0])}–${fmt(d.region.mach[1])}(기체 게인 스케줄 범위), `
     + `고도 ${d.region.alt[0]}–${d.region.alt[1]} m · 모델 마하 ${d.model.mach[0]}–${d.model.mach[1]} · 기준 ${d.criteria_source}`
-    + ` · 코드 ${d.code}`;
-  $("legend").replaceChildren(...[
-    ...Object.entries(VERDICT).map(([k, c]) => [k, c, true]),
-    ...["calc_failed", "infeasible", "model_gap", "undefined", "out_of_region"].map((s) => [STATE[s][0], STATE[s][1], false]),
-  ].map(([k, c, fill]) => { const s = document.createElement("span");
-    s.innerHTML = `<i style="background:${fill ? c : "#fff"};border:2px solid ${c}"></i>${k}`; return s; }),
-    Object.assign(document.createElement("span"), { textContent: "□ 설계점" }),
-    ...bpLegend.map(([n, c, txt, indep]) => { const s = document.createElement("span");
-      s.innerHTML = `<span style="color:${c}">${indep ? "┆" : "│"}</span> 절점 ${n} (${txt})`; return s; }));
+    + ` · 코드 ${d.code} · 점에 마우스를 올리면 조건과 사유`;
+  const span = (html) => { const e = document.createElement("span"); e.innerHTML = html; return e; };
+  $("legend").replaceChildren(
+    span("<b>검증점 색</b>"),
+    ...Object.entries(VERDICT).map(([k, c]) => span(`<i style="background:${c};border:2px solid ${c}"></i>${k}`)),
+    ...["infeasible", "calc_failed", "model_gap", "undefined"].map((st) =>
+      span(`<i style="background:#fff;border:2px solid ${STATE[st][1]}"></i>${STATE[st][0]}`)),
+    span("<b>검증점 모양</b> 큰 원 = 구간 중간 · 작은 원 = 절점 위 · 점선 = 경계·clip"),
+    ...bpLegend.map(([n, c, txt, indep]) => span(`<span style="color:${c}">${indep ? "┆" : "│"}</span> 절점 ${n} (${txt})`)));
 }
 
 function drawSummary(d) {
@@ -275,9 +343,8 @@ async function render() {
   seg($("acSeg"), [["example", "예제 기체"], ["showcase", "쇼케이스 기체"]], S.ac, (v) => { S.ac = v; S.fuel = null; render(); });
   seg($("viewSeg"), [["all", "전체"], ["bp", "절점 구간 확대"]], S.view, (v) => { S.view = v; render(); });
   seg($("fuelSeg"), d.validation.fuels.map((f) => [f, `${fmt(f, 1)} kg`]), S.fuel, (v) => { S.fuel = v; render(); });
-  drawMH(d); drawSummary(d); drawChecks(d);
+  drawKinds(d); drawMH(d); drawSummary(d); drawChecks(d);
 }
-$("tDesign").onchange = render; $("tVal").onchange = render;
 render().catch((e) => { document.body.insertAdjacentHTML("afterbegin", `<pre style="color:#c0392b">${e}</pre>`); });
 </script>
 </body>
