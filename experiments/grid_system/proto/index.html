@@ -88,6 +88,7 @@
 <script>
 const STATE = {
   computable: ["완료", "var(--ok)"], calc_failed: ["계산 실패", "var(--calc)"],
+  constraint_hit: ["제약 도달·미수렴", "#8e44ad"],
   infeasible: ["물리적 불가", "var(--infeasible)"], model_gap: ["모델 부족", "var(--gap)"],
   undefined: ["요구 미정의", "var(--undef)"], out_of_region: ["요구영역 밖", "#ddd"],
   not_run: ["미계산", "var(--notrun)"],
@@ -146,8 +147,8 @@ function el(tag, attrs = {}, text) {
 
 // 점 종류 네 가지 — 각각 켜고 끈다. 정의는 05 §11.1 용어표를 따른다
 const KINDS = {
-  trim: { name: "트림점", def: "트림(평형) 계산을 실제로 돌린 조건. 설계점·검증점이 같은 조건이면 한 번만 계산해 함께 쓴다" },
-  design: { name: "설계점", def: "게인을 튜닝할 때 고려하는 비행조건(마하·고도·연료). 절점과 무관하게 늘고 준다" },
+  trim: { name: "트림 시도점", def: "트림(평형) 계산을 시도한 조건 — 성공·실패 모두. 같은 조건은 한 번만 계산해 설계·검증이 함께 쓴다" },
+  design: { name: "설계점", def: "게인을 튜닝할 때 고려하는 비행조건(마하·고도·연료). 절점과 무관하게 늘고 준다. 검증점과 따로 지정하되 겹쳐도 된다" },
   bp: { name: "게인 분할점(절점)", def: "게인 표가 값을 갖는 마하 좌표. 비행조건이 아니라 축 위의 위치라 세로선으로 그린다" },
   val: { name: "검증점", def: "완성된 스케줄을 실제 표 평가 게인으로 확인하는 조건. 절점 위·구간 중간·경계에 둔다" },
 };
@@ -165,6 +166,7 @@ function drawKinds(d) {
   const f = S.fuel, bps = new Set(Object.values(d.schedule.bp_sets).flatMap((s) => s.coords));
   const count = {
     trim: [d.trim_points.filter((t) => near(t.cond.fuel, f)).length, d.trim_points.length],
+    attempts: d.trim_counts?.attempts,
     design: [d.design_points.filter((p) => near(p.fuel, f)).length, d.design_points.length],
     bp: [bps.size, bps.size],
     val: [d.records.filter((r) => near(r.cond.fuel, f)).length, d.records.length],
@@ -173,7 +175,7 @@ function drawKinds(d) {
   $("kinds").replaceChildren(...Object.entries(KINDS).map(([k, v]) => {
     const e = document.createElement("div"); e.className = `kind${ON[k] ? "" : " off"}`;
     const [here, all] = count[k];
-    const extra = k === "trim" ? ` · 설계·검증 공유 ${shared}` : k === "bp" ? ` · 표 ${Object.keys(d.schedule.refs).length}개가 참조` : "";
+    const extra = k === "trim" ? ` (고유 조건) · 계산 시도 ${count.attempts ?? "?"}회 · 설계·검증 공유 ${shared}` : k === "bp" ? ` · 표 ${Object.keys(d.schedule.refs).length}개가 참조` : "";
     e.innerHTML = `${glyph(k)}<b>${v.name}</b><div class="def">${v.def}</div>`
       + `<div class="cnt">${k === "bp" ? `합집합 ${all}개 (${Object.entries(d.schedule.bp_sets).map(([n, v]) => `${n} ${v.coords.length}`).join(" · ")}) · 연료 무관` : `이 연료 ${here} · 전체 ${all}`}${extra}</div>`;
     e.title = "눌러서 켜고 끄기"; e.onclick = () => { ON[k] = !ON[k]; render(); };
@@ -245,7 +247,7 @@ function drawMH(d) {
   if (ON.trim) d.trim_points.filter((t) => near(t.cond.fuel, f)).forEach((t) => {
     const g = el("path", { d: `M${x(t.cond.mach) - 6} ${y(t.cond.alt)}h12M${x(t.cond.mach)} ${y(t.cond.alt) - 6}v12`,
       stroke: "var(--trim)", "stroke-width": 1.6 });
-    g.append(el("title", {}, `트림점 ${t.name}\n${STATE[t.state][0]}${t.reasons.length ? " · " + t.reasons.join(", ") : ""}\n쓰는 곳: ${t.used_by.map((u) => u === "design" ? "설계점" : "검증점").join(", ")}`));
+    g.append(el("title", {}, `트림 시도점 ${t.name}\n${STATE[t.state][0]}${t.reasons.length ? " · " + t.reasons.join(", ") : ""}\n쓰는 곳: ${t.used_by.map((u) => u === "design" ? "설계점" : "검증점").join(", ")}`));
     plot.append(g);
   });
   // 설계점 — 채운 남색 마름모 (검증점 원보다 크게 — 같은 조건이면 원 뒤로 테두리가 보인다)
@@ -265,14 +267,14 @@ function drawMH(d) {
     g.append(el("title", {}, `검증점 ${r.name}\n${kindKo} · ${STATE[r.state][0]}${r.verdict ? " · " + r.verdict : ""}${r.reasons.length ? "\n사유: " + r.reasons.join(", ") : ""}`));
     plot.append(g);
   });
-  $("caption").textContent = `연료 ${fmt(f, 1)} kg · 요구영역 마하 ${fmt(d.region.mach[0])}–${fmt(d.region.mach[1])}(기체 게인 스케줄 범위), `
+  $("caption").textContent = `연료 ${fmt(f, 1)} kg · 실험 영역 마하 ${fmt(d.region.mach[0])}–${fmt(d.region.mach[1])}(기존 게인 스케줄 범위에 맞춘 실험 설정 — 요구 운용영역의 정의가 아니다), `
     + `고도 ${d.region.alt[0]}–${d.region.alt[1]} m · 모델 마하 ${d.model.mach[0]}–${d.model.mach[1]} · 기준 ${d.criteria_source}`
     + ` · 코드 ${d.code} · 점에 마우스를 올리면 조건과 사유`;
   const span = (html) => { const e = document.createElement("span"); e.innerHTML = html; return e; };
   $("legend").replaceChildren(
     span("<b>검증점 색</b>"),
     ...Object.entries(VERDICT).map(([k, c]) => span(`<i style="background:${c};border:2px solid ${c}"></i>${k}`)),
-    ...["infeasible", "calc_failed", "model_gap", "undefined"].map((st) =>
+    ...["infeasible", "constraint_hit", "calc_failed", "model_gap", "undefined"].map((st) =>
       span(`<i style="background:#fff;border:2px solid ${STATE[st][1]}"></i>${STATE[st][0]}`)),
     span("<b>검증점 모양</b> 큰 원 = 구간 중간 · 작은 원 = 절점 위 · 점선 = 경계·clip"),
     ...bpLegend.map(([n, c, txt, indep]) => span(`<span style="color:${c}">${indep ? "┆" : "│"}</span> 절점 ${n} (${txt})`)));

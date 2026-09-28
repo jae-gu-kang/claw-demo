@@ -30,11 +30,12 @@ OUT = HERE / "out"
 def setup(built):
     """기체마다 같은 규칙으로 실험 조건을 만든다 — 값은 기체 문서에서.
 
-    요구영역 마하 = 기체 게인 스케줄이 덮는 범위(law.schedule.mach_grid 양끝) — 설계자가 게인을 정의한
-    범위이자 이 기체가 실제로 쓰는 속도대다. 절점 5개를 그 범위 양끝까지 고르게 둔다(종전 설정은 절점을
-    trim_grid의 좁은 범위에서 뽑고 요구영역만 DB 밖까지 늘려, 점이 좁은 띠에 몰렸다). 고도·연료는
-    trim_grid 초안에서, 경계표는 가운데 고도까지만 정의해 그 위를 요구 미정의로 남긴다. 모델 부족은
-    요구영역을 비행 불가 속도까지 늘려야 생기므로 여기서 만들지 않고 단위 테스트가 확인한다.
+    **실험 영역**의 마하를 기존 게인 스케줄 범위(law.schedule.mach_grid 양끝)에 맞춘다 — 점 밀집의 원인
+    (절점을 좁은 범위에서 뽑은 설정)을 확인하려는 실험 설정이다. 요구 운용영역의 정의가 아니다: 요구
+    영역은 성능을 확보해야 할 범위이고, 게인 스케줄은 그것을 지원하도록 설계하는 쪽이라 관계가 반대다.
+    이 범위 전체가 모든 고도·연료에서 비행 가능하다는 뜻도 아니다. 절점 5개를 그 범위 양끝까지 고르게
+    둔다. 고도·연료는 trim_grid 초안에서, 경계표는 가운데 고도까지만 정의해 그 위를 요구 미정의로
+    남긴다. 모델 부족은 실제 기체 데이터와 구분한 합성 시험 데이터(synthetic_limited_model)가 맡는다.
     """
     draft = g.region_draft_from_trim_grid(built.doc["mission_template"]["trim_grid"])
     fuel_max = built.aircraft().fuel_mass.fuel_max
@@ -47,22 +48,31 @@ def setup(built):
         mach=(m_lo, m_hi), alt=(a_lo, a_hi), fuel=(f_lo, f_hi),
         boundary={f_lo: [(a_lo, m_lo, m_hi), (a_mid, m_lo * 1.1, m_hi)],
                   f_hi: [(a_lo, m_lo * 1.1, m_hi), (a_mid, m_lo * 1.2, m_hi)]},
-        source="user(experiment)")
+        source="experiment:schedule_range")
     model = g.ModelRange(mach=built.db_ranges()["mach"], fuel=(0.0, fuel_max))
     bps = tuple(round(m_lo + (m_hi - m_lo) * k / 4.0, 6) for k in range(5))  # 절점 5개
     return draft, region, model, bps, (a_lo, a_mid, a_hi), (f_lo, 0.5 * fuel_max, f_hi)
 
 
+def synthetic_limited_model(region, model):
+    """**합성 시험 데이터** — 요구영역은 그대로 두고 제공 모델의 마하 범위만 요구영역 안쪽 80 %까지로
+    줄인다. 모델 부족 상태를 종단 간(생성 → 상태 → 요약)으로 확인하려는 것이고, 실제 기체 데이터가 아니다."""
+    hi = region.mach[0] + 0.8 * (region.mach[1] - region.mach[0])
+    return g.ModelRange(mach=(model.mach[0], hi), fuel=model.fuel, source="synthetic:model_mach_limited_80pct")
+
+
 def design_rows(alts, fuels):
-    """설계점 행 — 검증 조합과 일부러 다르게(가운데 연료·가장 높은 고도를 뺀다). 두 집합이 독립이라는 것을 보인다."""
+    """설계점 행 — 이 실험에서는 검증 조합과 다르게 둬 **따로 지정할 수 있음**을 보인다. 반드시 달라야 하는
+    것은 아니다 — 실제 검증에는 설계점도 포함할 수 있고, 같은 조건은 트림을 한 번만 계산한다."""
     return tuple(alts[:-1]), (fuels[0], fuels[-1])
 
 
 def trim_points(ev, region, model, design_points, recs) -> list:
-    """트림점 = 트림이 필요한 조건 전부(설계점 ∪ 검증점). 같은 조건은 저장소 키가 같아 한 번만 계산된다.
+    """트림 시도점 = 트림을 시도한 조건 전부(설계점 ∪ 검증점, 성공·실패 모두). 같은 조건은 저장소 키가
+    같아 한 번만 계산된다 — 개수는 **고유 조건 수**이고, 계산 시도 횟수는 저장소가 따로 센다.
 
     검증점은 이미 평가한 레코드의 상태를 쓰고, 설계점은 여기서 상태를 판정한다(트림 저장소 재사용)."""
-    trimmed = (g.COMPUTABLE, g.CALC_FAILED, g.INFEASIBLE)  # 트림을 실제로 돌린 상태만 — 나머지는 트림점이 아니다
+    trimmed = (g.COMPUTABLE, g.CALC_FAILED, g.CONSTRAINT_HIT, g.INFEASIBLE)  # 트림을 실제로 시도한 상태만
     out: dict = {}
     for d in design_points:
         st, _, why = ev.state(d.cond, region, model)
@@ -109,13 +119,18 @@ def compare_reinforce(before, after) -> dict:
     }
 
 
-def run_reinforce(ev, region, model, schedule, rows, union, scales, tol=None):
+def make_measure(ev, region, model, schedule):
     tables = schedule.tables()
 
     def measure(c):
         st, rec, _ = ev.state(c, region, model)
         return ev.judge(c, rec, schedule, tables)[1] if st == g.COMPUTABLE else None
 
+    return measure
+
+
+def run_reinforce(ev, region, model, schedule, rows, union, scales, tol=None):
+    measure = make_measure(ev, region, model, schedule)
     return g.reinforce(measure, rows, union, scales, tol=REINFORCE_TOL if tol is None else tol,
                        max_points=REINFORCE_MAX_POINTS,
                        max_depth=REINFORCE_MAX_DEPTH)
@@ -203,6 +218,23 @@ def experiment(name, built):
     }
 
     tps = trim_points(ev, region, model, dps, recs)
+    trim_counts = {"unique_conditions": store.unique_conditions, "attempts": store.attempts, "reused": store.reused}
+
+    # ⑦ 모델 부족 종단 간 — 합성 시험 데이터(요구영역 그대로, 모델 마하 범위만 줄임). 실제 기체와 구분
+    syn = synthetic_limited_model(region, model)
+    ev_syn = g.Evaluator(built, g.TrimStore())
+    val_syn = g.generate_validation(region, sch2, spec)
+    recs_syn = g.evaluate(ev_syn, region, syn, sch2, val_syn["points"])
+    gap = [r for r in recs_syn if r["state"] == g.MODEL_GAP]
+    trimmed_names = {k[1] for k in ev_syn.store._d}
+    summ_syn = g.summarize(recs_syn, union)
+    checks["model_gap_e2e"] = {
+        "data": syn.source, "model_mach": syn.mach, "region_mach": region.mach,
+        "model_gap": len(gap), "gap_trimmed": sum(r["name"] in trimmed_names for r in gap),
+        "candidates": [len(recs), len(recs_syn)],
+        "ok": bool(gap) and not any(r["name"] in trimmed_names for r in gap) and len(recs_syn) == len(recs)
+        and sum(c["n"] for c in summ_syn["cells"].values()) + summ_syn["out_of_region"] == len(recs_syn),
+    }
 
     # ④ 누락 방지 — 상태 합 = 후보 수, 요약 분모 + 영역 밖 = 후보 수
     by_state = {}
@@ -256,6 +288,11 @@ def experiment(name, built):
                                "initial_over_before": over(d_scales_legacy_target_based(ev.criteria)),
                                "initial_over_after": over(g.d_scales(ev.criteria))}
 
+    # 구간 세분화 — 기체·게인 표·고도·연료·척도를 고정하고 같은 구간을 1·2·4등분(재튜닝 없음). 점 간격만의
+    # 효과를 분리한다 — 절점 배치를 바꾼 전후 비교는 범위·위치·검사 조건까지 함께 바뀌어 간격 효과로 못 읽는다
+    subdiv = g.subdivision_d(make_measure(ev, region, model, sch2), rows_v, union, g.d_scales(ev.criteria),
+                             levels=(1, 2, 4))
+
     # 부산물 — 보강 지표 d 분포 (허용치 보정 자료, 05 §11.7)
     ds = g.d_values(recs, union, g.d_scales(ev.criteria))
     d_stats = {}
@@ -286,7 +323,7 @@ def experiment(name, built):
         "summary": {"columns": summ["columns"], "out_of_region": summ["out_of_region"],
                     "cells": [{"row": list(k[0]) if isinstance(k[0], tuple) else k[0], "col": k[1], **c}
                               for k, c in summ["cells"].items()]},
-        "d": d_stats, "checks": checks,
+        "d": d_stats, "checks": checks, "trim_counts": trim_counts, "subdivision_d": subdiv,
         "d_scales": {k: {"value": v, "source": g.d_scale_sources(ev.criteria)[k]}
                      for k, v in g.d_scales(ev.criteria).items()},
         "d_scales_legacy": d_scales_legacy_target_based(ev.criteria),
@@ -309,6 +346,9 @@ def main():
             all_ok &= v["ok"]
             print(f"  [{'OK' if v['ok'] else 'NG'}] {k}: "
                   + json.dumps({kk: vv for kk, vv in v.items() if kk != "ok"}, ensure_ascii=False, default=str))
+        print("  트림 시도점:", json.dumps(res["trim_counts"], ensure_ascii=False))
+        print("  구간 세분화 d(최대, 1·2·4등분):", json.dumps({k: {kk: round(vv, 3) for kk, vv in v.items()}
+                                                          for k, v in res["subdivision_d"].items()}))
         rc = res["reinforce"]["comparison"]
         print("  보강 비교(이전 → 새):", json.dumps({"추가점": [rc["added"]["before"], rc["added"]["after"]],
               "처음 갈린 순서": rc["first_order_difference"], "종료": [rc["status"]["before"], rc["status"]["after"]],

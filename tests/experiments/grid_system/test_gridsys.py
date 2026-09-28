@@ -258,14 +258,41 @@ def test_unconverged_trim_pinned_at_control_limit_is_infeasible_not_calc_failure
     assert st == g.INFEASIBLE and "throttle_high" in why
 
 
-def test_unconverged_trim_pinned_at_alpha_bound_is_infeasible(example):
-    # 너무 느리다: 받음각이 트림 탐색 상한에 붙은 채 잔차가 남는다 — 양력 한계라 물리적 불가다
+def test_alpha_search_bound_without_stall_basis_is_constraint_hit_not_infeasible(example):
+    # 탐색 상한(0.35)에 붙은 미수렴 — 실속표 마하 축(0.1부터) 밖이라 V_S 근거가 없다: 판단 미완료
     ev = g.Evaluator(example, g.TrimStore())
     region = g.Region(mach=(0.05, 0.5), alt=(0.0, 3000.0), fuel=(0.0, 50.0))
     model = g.ModelRange(mach=example.db_ranges()["mach"], fuel=(0.0, 50.0))
     st, rec, why = ev.state(cond(0.0612, a=100.0, f=10.0), region, model)
     assert rec["tr"].converged is False
-    assert st == g.INFEASIBLE and "alpha_limit" in why
+    assert st == g.CONSTRAINT_HIT and "alpha_search_bound" in why and "stall_basis_missing" in why
+
+
+def test_alpha_search_bound_above_stall_speed_is_constraint_hit(example):
+    # V_S보다 빠른데 탐색 상한(0.35 < 실속 α 0.40)에서 못 푼다 — 날 수 없는 조건이 아니라 탐색 제약
+    ev = g.Evaluator(example, g.TrimStore())
+    region = g.Region(mach=(0.05, 0.5), alt=(0.0, 3000.0), fuel=(0.0, 50.0))
+    model = g.ModelRange(mach=example.db_ranges()["mach"], fuel=(0.0, 50.0))
+    st, rec, why = ev.state(cond(0.101, a=3000.0, f=50.0), region, model)
+    assert rec["tr"].converged is False
+    assert st == g.CONSTRAINT_HIT and "above_V_S" in why
+
+
+def test_below_stall_speed_with_stall_table_basis_is_infeasible():
+    # 실속표로 V_S를 잴 수 있고 그보다 느리다 — 별도 근거가 있는 물리적 불가
+    from claw.analysis.envelope import stall_mach_lo
+    from claw.profile.build import build_profile
+    from claw.profile.document import load_showcase
+
+    b = build_profile(load_showcase())
+    vs, src = stall_mach_lo(b.aircraft(), b.stall_table(), 100.0, 50.0, mach_hi=0.45, mach_margin=1.0)
+    assert src == "stall"
+    ev = g.Evaluator(b, g.TrimStore())
+    region = g.Region(mach=(0.05, 0.5), alt=(0.0, 3000.0), fuel=(0.0, 50.0))
+    model = g.ModelRange(mach=b.db_ranges()["mach"], fuel=(0.0, 50.0))
+    st, rec, why = ev.state(cond(0.95 * vs, a=100.0, f=50.0), region, model)
+    assert rec["tr"].converged is False
+    assert st == g.INFEASIBLE and "below_V_S" in why
 
 
 def test_d_scales_are_independent_of_tuning_targets(example):
@@ -331,3 +358,23 @@ def test_d_scale_sources_are_recorded(example):
     assert set(src) == {"pitch_rate", "yaw_rate", "roll_rate", "pitch_att", "roll_att"}
     assert "권장선" in src["pitch_rate"] and "잠정" in src["pitch_att"]
     assert "12" in src["roll_rate"] and "0.8" in src["roll_rate"] and "0.5" in src["roll_rate"]  # 고정한 당시 값
+
+
+def test_subdivision_d_shrinks_for_smooth_curvature():
+    # 같은 구간을 1·2·4등분 — 매끄러운 곡률이면 d는 간격 제곱에 비례해 줄어든다(구간 폭 효과만 분리)
+    def measure(c):
+        return {"s": {"metric": (c.mach - 0.1) ** 2 * 100.0}}
+    out = g.subdivision_d(measure, [(0.0, 10.0)], (0.1, 0.3), {"s": 1.0}, levels=(1, 2, 4))
+    d1, d2, d4 = (out["s"][k] for k in (1, 2, 4))
+    assert d2 == pytest.approx(d1 / 4) and d4 == pytest.approx(d1 / 16)
+
+
+def test_trim_store_counts_unique_conditions_and_attempts_separately(example):
+    store = g.TrimStore()
+    ev = g.Evaluator(example, store)
+    region = g.Region(mach=(0.1, 0.3), alt=(0.0, 3000.0), fuel=(0.0, 50.0))
+    model = g.ModelRange(mach=example.db_ranges()["mach"], fuel=(0.0, 50.0))
+    ev.state(cond(0.18), region, model)
+    ev.state(cond(0.18), region, model)  # 재사용 — 시도가 아니다
+    store.retry(ev._ctx["aircraft"], cond(0.18), plant_fp=example.plant_fingerprint, trim_fp=ev.trim_fp)
+    assert store.unique_conditions == 1 and store.attempts == 2 and store.reused == 1

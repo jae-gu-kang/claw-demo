@@ -21,13 +21,14 @@ import numpy as np
 OUT_OF_REGION = "out_of_region"  # 요구영역 밖
 UNDEFINED = "undefined"  # 요구 미정의 — 경계표가 덮지 않음
 MODEL_GAP = "model_gap"  # 모델 부족
-CALC_FAILED = "calc_failed"  # 계산 실패 (트림 미수렴)
+CALC_FAILED = "calc_failed"  # 계산 실패 (트림 미수렴 — 어떤 한계에도 안 붙음)
+CONSTRAINT_HIT = "constraint_hit"  # 제약 도달·미수렴 (받음각 탐색 상한 — 물리적 불가 근거 없음)
 INFEASIBLE = "infeasible"  # 물리적 불가 (α 여유·포화 — 사유 전량)
 COMPUTABLE = "computable"  # 계산 가능 (계산 완료)
 NOT_RUN = "not_run"  # 미계산
 STATE_LABEL = {
     OUT_OF_REGION: "요구영역 밖", UNDEFINED: "요구 미정의", MODEL_GAP: "모델 부족",
-    CALC_FAILED: "계산 실패", INFEASIBLE: "물리적 불가", COMPUTABLE: "완료", NOT_RUN: "미계산",
+    CALC_FAILED: "계산 실패", CONSTRAINT_HIT: "제약 도달·미수렴", INFEASIBLE: "물리적 불가", COMPUTABLE: "완료", NOT_RUN: "미계산",
 }
 
 # ── 성능 판정 어휘 (04 판정 상태 — 기준 통합 ①) ────────────────────────────────
@@ -128,6 +129,7 @@ class ModelRange:
 
     mach: tuple  # aero.db_ranges.mach
     fuel: tuple  # 질량 모델 범위 [0, fuel_max]
+    source: str = "aircraft"  # 실제 기체 데이터 | synthetic:… (합성 시험 데이터)
 
     def covers(self, c: Condition) -> bool:
         return (self.mach[0] - _EPS <= c.mach <= self.mach[1] + _EPS
@@ -293,25 +295,45 @@ def generate_validation(region: Region, schedule: Schedule, spec: ValidationSpec
 
 # ── 트림·모델 저장소 (05 §11.8) ───────────────────────────────────────────────
 class TrimStore:
-    """키 = 플랜트 지문 + 조건 식별자 + 트림 설정. 실패한 해도 보존한다."""
+    """키 = 플랜트 지문 + 조건 식별자 + 트림 설정. 실패한 해도 보존한다.
+
+    **고유 조건 수와 계산 시도 횟수를 따로 센다** — 같은 조건을 시드를 바꿔 다시 풀 수 있어서다(계산
+    실패의 재시도). 재사용(저장소 적중)은 시도가 아니다."""
 
     def __init__(self):
         self._d: dict = {}
-        self.computed = 0
+        self.attempts = 0
         self.reused = 0
 
-    def get(self, aircraft, c: Condition, *, plant_fp: str, trim_fp: str) -> dict:
+    @property
+    def unique_conditions(self) -> int:
+        return len(self._d)
+
+    @property
+    def computed(self) -> int:  # 종전 이름 — 시도 횟수
+        return self.attempts
+
+    def _solve(self, aircraft, c: Condition, plant_fp: str, seed: str):
         from claw.common.contracts import TrimCase
         from claw.trim import trim_level
 
+        self.attempts += 1
+        tr = trim_level(aircraft, TrimCase(name=c.name, mach=c.mach, alt=c.alt, fuel=c.fuel), fingerprint=plant_fp)
+        return {"tr": tr, "seed": seed}
+
+    def get(self, aircraft, c: Condition, *, plant_fp: str, trim_fp: str) -> dict:
         key = (plant_fp, c.name, trim_fp)
         if key in self._d:
             self.reused += 1
             return self._d[key]
-        tr = trim_level(aircraft, TrimCase(name=c.name, mach=c.mach, alt=c.alt, fuel=c.fuel),
-                        fingerprint=plant_fp)
-        self._d[key] = {"tr": tr, "seed": "default"}
-        self.computed += 1
+        self._d[key] = {**self._solve(aircraft, c, plant_fp, "default"), "attempts": 1}
+        return self._d[key]
+
+    def retry(self, aircraft, c: Condition, *, plant_fp: str, trim_fp: str) -> dict:
+        """같은 조건을 다시 푼다 — 시도 횟수는 늘고 고유 조건 수는 그대로다(시드 전략은 이관 과제)."""
+        key = (plant_fp, c.name, trim_fp)
+        prev = self._d.get(key, {}).get("attempts", 0)
+        self._d[key] = {**self._solve(aircraft, c, plant_fp, "retry:default"), "attempts": prev + 1}
         return self._d[key]
 
     def __len__(self):
@@ -361,6 +383,7 @@ class Evaluator:
     lms: object = None
     trim_fp: str = ""
     _ctx: dict = field(default_factory=dict)
+    _vs: dict = field(default_factory=dict)  # (alt, fuel) → (V_S 마하, 귀속) — 받음각 상한 미수렴 판정용
 
     def __post_init__(self):
         from claw.design.linmodels import LinearModelSet
@@ -387,23 +410,47 @@ class Evaluator:
         rec = self.store.get(self._ctx["aircraft"], c, plant_fp=self.built.plant_fingerprint,
                              trim_fp=self.trim_fp)
         tr = rec["tr"]
-        # 미수렴이어도 조종량·받음각이 한계에 붙어 잔차가 남았으면 물리적 불가다(추력 부족·양력 부족) — 계산 실패와
-        # 가른다(05 §11.3). 한계에 안 붙었는데 미수렴이면 그때가 계산 실패다
+        # 미수렴 귀속 (05 §11.3). 조종량(δe·스로틀)의 한계는 작동기·추진의 **물리 한계**라, 거기 붙어
+        # 잔차가 남으면 물리적 불가(추력 부족 등)다. 받음각은 다르다 — 트림 **탐색** 상한은 실속 받음각·
+        # 모델 유효 상한과 다른 값이라(예제: 탐색 0.35 < 실속 0.40 < DB 0.45), 거기 붙었다는 것만으로는
+        # 날 수 없다고 못 한다. 실속표로 잰 1g 실속 속도 V_S보다 느리다는 **별도 근거**가 있을 때만
+        # 물리적 불가이고, 아니면 「제약 도달·미수렴」으로 남긴다.
         from claw.trim.trim import saturation_detail
 
         tb = self.built.trim_bounds
         sat = [ch for ch, on in saturation_detail(tr, tb["de"]).items() if on]
-        # 받음각이 트림 탐색 한계에 붙은 것도 같은 뜻이다 — 양력(저속)·음의 양력 한계
-        alpha = math.atan2(float(tr.state.vel_b[2]), float(tr.state.vel_b[0]))
-        a_lo, a_hi = tb["alpha"]
-        if alpha >= a_hi - 1e-6 or alpha <= a_lo + 1e-6:
-            sat.append("alpha_limit")
         if not tr.converged:
-            return (INFEASIBLE, rec, [*sat, "not_converged"]) if sat else (CALC_FAILED, rec, ["not_converged"])
+            if sat:
+                return INFEASIBLE, rec, [*sat, "not_converged"]
+            alpha = math.atan2(float(tr.state.vel_b[2]), float(tr.state.vel_b[0]))
+            a_lo, a_hi = tb["alpha"]
+            if alpha >= a_hi - 1e-6 or alpha <= a_lo + 1e-6:
+                return self._alpha_bound(c, rec, model)
+            return CALC_FAILED, rec, ["not_converged"]
         why = sat + (["alpha_margin"] if not tr.flags.get("alpha_margin_ok") else [])
         if why:
             return INFEASIBLE, rec, why
         return COMPUTABLE, rec, []
+
+    def _alpha_bound(self, c: Condition, rec, model: ModelRange):
+        """받음각 탐색 상한에 붙은 미수렴 — V_S 근거가 있으면 물리적 불가, 없으면 제약 도달·미수렴."""
+        from claw.analysis.envelope import stall_mach_lo
+
+        st = self.built.stall_table()
+        base = ["alpha_search_bound", "not_converged"]
+        if c.mach < float(st.axes[0][0]) - _EPS:
+            return CONSTRAINT_HIT, rec, [*base, "stall_basis_missing"]  # 실속표 밖 — 판단 미완료
+        key = (c.alt, c.fuel)
+        if key not in self._vs:
+            self._vs[key] = stall_mach_lo(self._ctx["aircraft"], st, c.alt, c.fuel, mach_hi=float(model.mach[1]),
+                                          mach_margin=1.0)
+        vs, src = self._vs[key]
+        if src == "n_reach":
+            return INFEASIBLE, rec, [*base, "1g_unreachable"]
+        if src == "stall" and c.mach < vs - _EPS:
+            return INFEASIBLE, rec, [*base, "below_V_S"]
+        # src "stall"이고 V_S 이상이거나, "db"(V_S가 실속표 축 아래 — 이 마하는 V_S보다 빠르다)
+        return CONSTRAINT_HIT, rec, [*base, "above_V_S"]
 
     def judge(self, c: Condition, rec, schedule: Schedule, tables=None):
         """실제 스케줄 평가 게인으로 자리별 판정 — (verdict, slots, gains)."""
@@ -606,3 +653,29 @@ def reinforce(measure, rows, union, scales, *, tol, max_points, max_depth) -> di
             "remaining": [{"row": r, "interval": (a, b), "d": d} for r, a, b, d in remaining],
             "max_d_remaining": remaining[0][3] if remaining else 0.0,
             "budget": {"tol": tol, "max_points": max_points, "max_depth": max_depth}}
+
+
+def subdivision_d(measure, rows, union, scales, *, levels=(1, 2, 4)) -> dict:
+    """같은 구간을 k등분한 d — {자리: {k: 행·구간·조각 전체의 최대 d}}. 게인·조건·척도를 고정하고 **점
+    간격만** 바꿔 보강 지표가 간격에 얼마나 민감한지 본다(재튜닝 없음 — 05 §11.10)."""
+    cache: dict = {}
+
+    def m(mach, row):
+        c = Condition(float(mach), row[0], row[1])
+        if c.name not in cache:
+            cache[c.name] = measure(c)
+        return cache[c.name]
+
+    out = {slot: {} for slot in scales}
+    for k in levels:
+        for row in rows:
+            for a, b in zip(union, union[1:]):
+                h = (b - a) / k
+                for i in range(k):
+                    lo, hi = a + i * h, a + (i + 1) * h
+                    ma, mm, mb = m(lo, row), m((lo + hi) / 2, row), m(hi, row)
+                    for slot, sc in scales.items():
+                        d, _ = _seg_d(ma, mm, mb, {slot: sc})
+                        if d is not None:
+                            out[slot][k] = max(out[slot].get(k, 0.0), d)
+    return out

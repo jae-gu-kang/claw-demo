@@ -7,7 +7,7 @@
   "pm_deg": 45.0,
   "gm_db": 6.0
  },
- "code": "26bd656",
+ "code": "33c4ad2",
  "region": {
   "mach": [
    0.09,
@@ -47,7 +47,7 @@
     ]
    ]
   },
-  "source": "user(experiment)",
+  "source": "experiment:schedule_range",
   "draft": {
    "mach": [
     0.12,
@@ -8760,6 +8760,24 @@
    "intervals": 6,
    "ok": true
   },
+  "model_gap_e2e": {
+   "data": "synthetic:model_mach_limited_80pct",
+   "model_mach": [
+    0.0,
+    0.202
+   ],
+   "region_mach": [
+    0.09,
+    0.23
+   ],
+   "model_gap": 12,
+   "gap_trimmed": 0,
+   "candidates": [
+    120,
+    120
+   ],
+   "ok": true
+  },
   "no_omission": {
    "candidates": 120,
    "by_state": {
@@ -8783,6 +8801,38 @@
    "expected_new": 18,
    "reused_second_run": 53,
    "ok": true
+  }
+ },
+ "trim_counts": {
+  "unique_conditions": 90,
+  "attempts": 90,
+  "reused": 9
+ },
+ "subdivision_d": {
+  "pitch_rate": {
+   "1": 0.042983636592272,
+   "2": 0.01373283097848288,
+   "4": 0.008979239037857911
+  },
+  "yaw_rate": {
+   "1": 0.08064791311849118,
+   "2": 0.020327515781675687,
+   "4": 0.018147846044334615
+  },
+  "roll_rate": {
+   "1": 0.12094726156901103,
+   "2": 0.033907777988984276,
+   "4": 0.00893893815548225
+  },
+  "pitch_att": {
+   "1": 0.918424615028482,
+   "2": 0.41553457113705006,
+   "4": 0.18790004146349587
+  },
+  "roll_att": {
+   "1": 0.19623627850664604,
+   "2": 0.05513410103292813,
+   "4": 0.041760281814890735
   }
  },
  "d_scales": {
@@ -9506,5 +9556,5 @@
    }
   }
  },
- "elapsed_s": 12.1
+ "elapsed_s": 20.5
 }

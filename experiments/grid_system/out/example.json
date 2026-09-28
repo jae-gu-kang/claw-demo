@@ -7,7 +7,7 @@
   "pm_deg": 45.0,
   "gm_db": 6.0
  },
- "code": "26bd656",
+ "code": "33c4ad2",
  "region": {
   "mach": [
    0.0612,
@@ -47,7 +47,7 @@
     ]
    ]
   },
-  "source": "user(experiment)",
+  "source": "experiment:schedule_range",
   "draft": {
    "mach": [
     0.14,
@@ -369,10 +369,11 @@
    "origin": "breakpoint",
    "verdict": null,
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
-   "state": "infeasible",
+   "state": "constraint_hit",
    "cond": {
     "mach": 0.0612,
     "alt": 100.0,
@@ -1377,10 +1378,11 @@
    "origin": "midpoint",
    "verdict": null,
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
-   "state": "infeasible",
+   "state": "constraint_hit",
    "cond": {
     "mach": 0.0816125,
     "alt": 1550.0,
@@ -2863,10 +2865,11 @@
    "origin": "midpoint",
    "verdict": null,
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
-   "state": "infeasible",
+   "state": "constraint_hit",
    "cond": {
     "mach": 0.0816125,
     "alt": 1550.0,
@@ -3669,10 +3672,11 @@
    "origin": "midpoint",
    "verdict": null,
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
-   "state": "infeasible",
+   "state": "constraint_hit",
    "cond": {
     "mach": 0.0816125,
     "alt": 100.0,
@@ -4254,10 +4258,11 @@
    "origin": "midpoint",
    "verdict": null,
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
-   "state": "infeasible",
+   "state": "constraint_hit",
    "cond": {
     "mach": 0.0816125,
     "alt": 1550.0,
@@ -4732,10 +4737,11 @@
    "origin": "boundary:region",
    "verdict": null,
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
-   "state": "infeasible",
+   "state": "constraint_hit",
    "cond": {
     "mach": 0.06732,
     "alt": 1550.0,
@@ -4749,10 +4755,11 @@
    "origin": "boundary:region",
    "verdict": null,
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
-   "state": "infeasible",
+   "state": "constraint_hit",
    "cond": {
     "mach": 0.06732,
     "alt": 100.0,
@@ -4766,10 +4773,11 @@
    "origin": "boundary:region",
    "verdict": null,
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
-   "state": "infeasible",
+   "state": "constraint_hit",
    "cond": {
     "mach": 0.07343999999999999,
     "alt": 1550.0,
@@ -4780,10 +4788,11 @@
  "trim_points": [
   {
    "name": "M0.0612_h100.0_f10.0",
-   "state": "infeasible",
+   "state": "constraint_hit",
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
    "used_by": [
     "design",
@@ -4890,10 +4899,11 @@
   },
   {
    "name": "M0.06732_h1550.0_f10.0",
-   "state": "infeasible",
+   "state": "constraint_hit",
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
    "used_by": [
     "design",
@@ -4999,10 +5009,11 @@
   },
   {
    "name": "M0.06732_h100.0_f50.0",
-   "state": "infeasible",
+   "state": "constraint_hit",
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
    "used_by": [
     "design",
@@ -5110,10 +5121,11 @@
   },
   {
    "name": "M0.07343999999999999_h1550.0_f50.0",
-   "state": "infeasible",
+   "state": "constraint_hit",
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
    "used_by": [
     "design",
@@ -5440,10 +5452,11 @@
   },
   {
    "name": "M0.0816125_h1550.0_f10.0",
-   "state": "infeasible",
+   "state": "constraint_hit",
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
    "used_by": [
     "validation"
@@ -5799,10 +5812,11 @@
   },
   {
    "name": "M0.0816125_h1550.0_f25.0",
-   "state": "infeasible",
+   "state": "constraint_hit",
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
    "used_by": [
     "validation"
@@ -5964,10 +5978,11 @@
   },
   {
    "name": "M0.0816125_h100.0_f50.0",
-   "state": "infeasible",
+   "state": "constraint_hit",
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
    "used_by": [
     "validation"
@@ -6129,10 +6144,11 @@
   },
   {
    "name": "M0.0816125_h1550.0_f50.0",
-   "state": "infeasible",
+   "state": "constraint_hit",
    "reasons": [
-    "alpha_limit",
-    "not_converged"
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
    ],
    "used_by": [
     "validation"
@@ -6249,11 +6265,11 @@
     "n": 1,
     "done": 0,
     "states": {
-     "infeasible": 1
+     "constraint_hit": 1
     },
     "verdicts": {},
     "headline": "미완료",
-    "text": "완료 0/1 · 물리적 불가 1"
+    "text": "완료 0/1 · 제약 도달·미수렴 1"
    },
    {
     "row": [
@@ -6560,11 +6576,11 @@
     "n": 1,
     "done": 0,
     "states": {
-     "infeasible": 1
+     "constraint_hit": 1
     },
     "verdicts": {},
     "headline": "미완료",
-    "text": "완료 0/1 · 물리적 불가 1"
+    "text": "완료 0/1 · 제약 도달·미수렴 1"
    },
    {
     "row": [
@@ -7147,11 +7163,11 @@
     "n": 1,
     "done": 0,
     "states": {
-     "infeasible": 1
+     "constraint_hit": 1
     },
     "verdicts": {},
     "headline": "미완료",
-    "text": "완료 0/1 · 물리적 불가 1"
+    "text": "완료 0/1 · 제약 도달·미수렴 1"
    },
    {
     "row": [
@@ -7536,11 +7552,11 @@
     "n": 1,
     "done": 0,
     "states": {
-     "infeasible": 1
+     "constraint_hit": 1
     },
     "verdicts": {},
     "headline": "미완료",
-    "text": "완료 0/1 · 물리적 불가 1"
+    "text": "완료 0/1 · 제약 도달·미수렴 1"
    },
    {
     "row": [
@@ -7730,11 +7746,11 @@
     "n": 1,
     "done": 0,
     "states": {
-     "infeasible": 1
+     "constraint_hit": 1
     },
     "verdicts": {},
     "headline": "미완료",
-    "text": "완료 0/1 · 물리적 불가 1"
+    "text": "완료 0/1 · 제약 도달·미수렴 1"
    },
    {
     "row": [
@@ -8018,11 +8034,11 @@
     "n": 3,
     "done": 0,
     "states": {
-     "infeasible": 3
+     "constraint_hit": 3
     },
     "verdicts": {},
     "headline": "미완료",
-    "text": "완료 0/3 · 물리적 불가 3"
+    "text": "완료 0/3 · 제약 도달·미수렴 3"
    }
   ]
  },
@@ -8103,11 +8119,30 @@
    "intervals": 6,
    "ok": true
   },
+  "model_gap_e2e": {
+   "data": "synthetic:model_mach_limited_80pct",
+   "model_mach": [
+    0.0,
+    0.32248
+   ],
+   "region_mach": [
+    0.0612,
+    0.3878
+   ],
+   "model_gap": 12,
+   "gap_trimmed": 0,
+   "candidates": [
+    120,
+    120
+   ],
+   "ok": true
+  },
   "no_omission": {
    "candidates": 120,
    "by_state": {
-    "물리적 불가": 30,
+    "제약 도달·미수렴": 8,
     "완료": 46,
+    "물리적 불가": 22,
     "요구영역 밖": 5,
     "요구 미정의": 39
    },
@@ -8126,6 +8161,38 @@
    "expected_new": 18,
    "reused_second_run": 58,
    "ok": true
+  }
+ },
+ "trim_counts": {
+  "unique_conditions": 95,
+  "attempts": 95,
+  "reused": 9
+ },
+ "subdivision_d": {
+  "pitch_rate": {
+   "1": 0.11436645298062209,
+   "2": 0.029047343918596757,
+   "4": 0.0073631250626415845
+  },
+  "yaw_rate": {
+   "1": 0.14489351102099202,
+   "2": 0.03772988272593425,
+   "4": 0.009707928054075166
+  },
+  "roll_rate": {
+   "1": 0.3547631307704746,
+   "2": 0.11101357234718279,
+   "4": 0.03054780200912186
+  },
+  "pitch_att": {
+   "1": 0.8786554693475808,
+   "2": 0.5496759726516075,
+   "4": 0.1907016975758154
+  },
+  "roll_att": {
+   "1": 0.29353397603297254,
+   "2": 0.11008927221983242,
+   "4": 0.03474547819168947
   }
  },
  "d_scales": {
@@ -9365,5 +9432,5 @@
    }
   }
  },
- "elapsed_s": 11.3
+ "elapsed_s": 20.4
 }

@@ -95,3 +95,19 @@ def test_compare_reinforce_reports_points_order_and_status():
     assert cmp["added"] == {"before": 2, "after": 2, "only_before": [c(0.1).name], "only_after": [c(0.5).name]}
     assert cmp["first_order_difference"] == 0
     assert cmp["status"] == {"before": g.REINFORCE_DONE, "after": g.REINFORCE_BUDGET}
+
+
+def test_synthetic_model_limit_keeps_region_and_is_labelled(built):
+    _, region, model, *_ = rx.setup(built)
+    syn = rx.synthetic_limited_model(region, model)
+    assert syn.source.startswith("synthetic:")  # 실제 기체 데이터와 구분
+    assert syn.mach[1] < region.mach[1]  # 요구영역은 그대로, 모델 범위만 줄인다
+    assert not syn.covers(g.Condition(region.mach[1], region.alt[0], region.fuel[0]))
+
+
+def test_trim_attempt_points_include_constraint_hits(built):
+    _, region, model, bps, alts, fuels = rx.setup(built)
+    ev = g.Evaluator(built, g.TrimStore())
+    c = g.Condition(bps[1], alts[0], fuels[0])
+    recs = [{"cond": c, "name": c.name, "state": g.CONSTRAINT_HIT, "reasons": ["alpha_search_bound"]}]
+    assert [t["name"] for t in rx.trim_points(ev, region, model, [], recs)] == [c.name]
