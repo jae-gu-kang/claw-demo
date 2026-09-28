@@ -98,6 +98,14 @@ test("marginCellStatus: 폐루프 발산 칸도 색은 서버 판정 그대로 �
   assert.equal(marginCellStatus(exempt, "gm_db"), "warn");
 });
 
+test("marginCellStatus: 엔진이 발산 불합격으로 표시한 칸(diverged)은 축별 판독이 합격이어도 두 히트맵 모두 불합격", () => {
+  // judge_cell은 축별 판정을 잰 그대로 두고 칸 status만 fail로 바꾼다 — 표시가 없으면 발산 칸이 합격색으로 보였다
+  const div = { pm_deg: 80, gm_db: 12, pm_status: "ok", gm_status: "ok", status: "fail", diverged: true,
+    closed_loop: { stable: false } };
+  assert.equal(marginCellStatus(div, "pm_deg"), "fail");
+  assert.equal(marginCellStatus(div, "gm_db"), "fail");
+});
+
 test("hasMarginStatuses: 옛 결과 가리기", () => {
   const fresh = { cases: [{ margins: { q: { pm_deg: 50, pm_status: "ok" } } }] };
   const old = { cases: [{ margins: { q: { pm_deg: 50 } } }, { margins: {} }] };

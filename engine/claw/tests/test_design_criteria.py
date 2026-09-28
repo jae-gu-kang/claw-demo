@@ -387,7 +387,8 @@ def test_judge_cell_divergence_fails_the_cell_but_keeps_axis_readings(demo_axes)
     c = MarginCriteria()
     m = {"pm_deg": 60.0, "gm_db": 12.0}
     osc = {"stable": False, "unstable": [[0.3, 4.0]]}
-    assert c.judge_cell(m, osc, lat) == {"pm_status": "ok", "gm_status": "ok", "status": "fail"}
+    # 발산 fail 칸에는 diverged 표시 — 화면이 축별 색으로 칠해도 합격색이 되지 않게(문서화 중 발견)
+    assert c.judge_cell(m, osc, lat) == {"pm_status": "ok", "gm_status": "ok", "status": "fail", "diverged": True}
     assert c.judge_cell(m, {"stable": False, "unstable": [[0.05, 0.0]]}, lon)["status"] == "fail"  # 종축엔 면제 없음
     assert c.judge_cell(m, {"stable": False, "unstable": [[5.0, 0.0]]}, lat)["status"] == "fail"  # 느린 근이 아니다
     assert c.judge_cell(m, {"stable": False, "unstable": [[0.01, 0.0], [0.002, 0.0]]}, lat)["status"] == "fail"
@@ -410,7 +411,7 @@ def test_judge_cell_single_slow_spiral_is_exempt_like_auto_design(demo_axes):
     for re in (0.05, 0.1):  # 배가 13.9 s(면제) · 6.9 s(bound spiral)
         cl = {"stable": False, "unstable": [[re, 0.0]]}
         assert spiral_exempt_verdict([complex(re, 0.0)], lat)["bound"] != "unstable"
-        assert c.judge_cell(m, cl, lat) == {"pm_status": "ok", "gm_status": "ok", "status": "ok"}
+        assert c.judge_cell(m, cl, lat) == {"pm_status": "ok", "gm_status": "ok", "status": "ok"}  # diverged 없음
     # 면제여도 여유 판정은 그대로 산다
     assert c.judge_cell({"pm_deg": 40.0, "gm_db": 12.0}, {"stable": False, "unstable": [[0.05, 0.0]]},
                         lat)["status"] == "fail"

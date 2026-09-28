@@ -200,6 +200,9 @@ class MarginCriteria:
           않는다(judge_rate_loop의 divergent와 같다). pm_status·gm_status는 **잰 그대로** 둔다: 불안정 칸의 PM·GM은
           루프 교차의 부호 있는 고전 판독(nyquist_margins)이라 축별 색은 그 판독의 판정이고, 칸 합산만 발산이 이긴다.
         - lm_axis가 없으면 면제를 가를 수 없다 — 발산은 전부 fail(모르는 것을 통과로 만들지 않는다).
+        그 발산 fail 칸에는 **"diverged": True**를 붙인다 — 화면은 축별 색(pm_status·gm_status)으로 칠하므로, 이 표시가
+        없으면 발산한 칸이 PM·GM 히트맵에서 합격색으로 보인다(문서화 중 발견). 표시는 발산 fail일 때만 붙는다 —
+        안정·면제 칸의 모양(서버 골든)은 그대로다.
         closed_loop이 없거나 stable이면 judge()와 같다(pm_status·gm_status는 judge_pm·judge_gm)."""
         out = {
             "pm_status": self.judge_pm(margins["pm_deg"]),
@@ -213,6 +216,7 @@ class MarginCriteria:
                   and spiral_exempt_verdict(poles, lm_axis)["bound"] != "unstable")
         if not exempt:
             out["status"] = "fail"
+            out["diverged"] = True
         return out
 
     def judge_rate_loop(self, metric_status: str, margins) -> str:

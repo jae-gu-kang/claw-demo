@@ -58,6 +58,9 @@ const isStatus = (s) => Object.prototype.hasOwnProperty.call(STATUS_LABEL, s);
  *  (판정은 한 자리). 판정 필드가 없는 옛 결과·마진 없음은 na — 브라우저에서 다시 판정하지 않는다. key "pm_deg" | "gm_db". */
 export function marginCellStatus(m, key) {
   if (!m) return "na";
+  // 엔진이 「면제 안 되는 발산이라 불합격」이라고 표시한 칸 — 축별 판정(잰 그대로의 부호 있는 판독)보다 칸 판정이 이긴다.
+  // 판정을 여기서 다시 짜는 것이 아니라 엔진 표시(design/criteria.py judge_cell)를 읽는다
+  if (m.diverged === true) return "fail";
   const s = m[key === "pm_deg" ? "pm_status" : "gm_status"];
   return isStatus(s) ? s : "na";
 }
