@@ -266,3 +266,18 @@ def test_unconverged_trim_pinned_at_alpha_bound_is_infeasible(example):
     st, rec, why = ev.state(cond(0.0612, a=100.0, f=10.0), region, model)
     assert rec["tr"].converged is False
     assert st == g.INFEASIBLE and "alpha_limit" in why
+
+
+def test_d_scales_are_independent_of_tuning_targets(example):
+    # 05 §11.7: 척도 s는 튜닝 목표와 독립 — 목표만 바꿨는데 보강 우선순위가 달라지면 안 된다
+    import dataclasses
+
+    crit = example.eval_criteria
+    s0 = g.d_scales(crit)
+    t2 = dataclasses.replace(crit.targets, zeta_sp=0.9, zeta_dr=0.9, pm_deg=70.0, roll_lambda=20.0)
+    assert g.d_scales(dataclasses.replace(crit, targets=t2)) == s0
+    m = crit.margin
+    assert s0["pitch_rate"] == pytest.approx(m.zeta_good - m.zeta_min)  # ζ: 권장선 − 합격선
+    assert s0["yaw_rate"] == pytest.approx(m.zeta_good - m.zeta_min)
+    assert s0["pitch_att"] == s0["roll_att"] == g.PM_SCALE_PROVISIONAL  # PM: 권장선 없음 → 독립 잠정 척도
+    assert s0["roll_rate"] == g.ROLL_LAMBDA_SCALE_PROVISIONAL  # λ: 당시 값으로 고정한 잠정 척도

@@ -324,13 +324,20 @@ _D_METRIC = {  # 보강 지표 d에 쓰는 자리별 대표 지표 (05 §11.7)
 }
 
 
+# 권장선이 없는 PM의 보강 척도 — 튜닝 목표(50° − 45°)에서 계산하지 않는 독립 잠정값 (05 §11.7)
+PM_SCALE_PROVISIONAL = 5.0  # [deg]
+# λ_roll 판정선은 아직 목표의 비율이라 두 선의 폭도 목표에 매인다 — 기준값이 독립될 때까지 당시 값
+# (목표 12 × (권장 0.8 − 합격 0.5))으로 고정해, 목표를 바꿔도 척도가 움직이지 않게 한다 (05 §11.7)
+ROLL_LAMBDA_SCALE_PROVISIONAL = 3.6  # [rad/s]
+
+
 def d_scales(crit) -> dict:
-    """자리별 척도 s = 목표선 − 합격선 (04 참조 — 이 모듈은 값을 갖지 않는다)."""
-    m, t = crit.margin, crit.targets
+    """자리별 보강 척도 s — **튜닝 목표와 독립** (05 §11.7). ζ는 권장선 − 합격선, PM·λ는 독립 잠정값."""
+    m = crit.margin
+    zeta = abs(m.zeta_good - m.zeta_min)
     return {
-        "pitch_rate": t.zeta_sp - m.zeta_min, "yaw_rate": t.zeta_dr - m.zeta_min,
-        "roll_rate": t.roll_lambda * (m.lam_good_frac - m.lam_min_frac),
-        "pitch_att": t.pm_deg - m.pm_min_deg, "roll_att": t.pm_deg - m.pm_min_deg,
+        "pitch_rate": zeta, "yaw_rate": zeta, "roll_rate": ROLL_LAMBDA_SCALE_PROVISIONAL,
+        "pitch_att": PM_SCALE_PROVISIONAL, "roll_att": PM_SCALE_PROVISIONAL,
     }
 
 
