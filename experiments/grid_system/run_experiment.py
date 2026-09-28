@@ -196,8 +196,16 @@ def base_refine(built, *, n_mach=9, budget=REINFORCE_MAX_POINTS, common_axis=Fal
     spec = g.ValidationSpec(alts=base_alts, fuels=fuels)
     val = g.generate_validation(region, sch, spec)
     a0, h0 = store.attempts, store.reused
+    base_names = {k[1] for k in base_keys}
+    pre = set(store._d)
     recs = g.evaluate(ev, region, model, sch, val["points"])
     role_new, role_hits = store.attempts - a0, store.reused - h0
+    trimmed_now = {k[1] for k in set(store._d) - pre}
+    tried = (g.COMPUTABLE, *g._TRIED_FAIL)
+    validation = [{"mach": r["cond"].mach, "alt": r["cond"].alt, "fuel": r["cond"].fuel, "kind": r["kind"],
+                   "state": r["state"], "verdict": r["verdict"], "reasons": r["reasons"],
+                   "trim_origin": "base" if r["state"] in tried and r["name"] in base_names
+                   else "new" if r["name"] in trimmed_now else "none"} for r in recs]
 
     # 보강
     a1 = store.attempts
@@ -231,7 +239,7 @@ def base_refine(built, *, n_mach=9, budget=REINFORCE_MAX_POINTS, common_axis=Fal
         "reinforce_unmeasured": len(re_["unmeasured"]),
         "unique_conditions": store.unique_conditions, "attempts": store.attempts,
     }
-    return {"metrics": metrics, "bps": bps, "quality": quality,
+    return {"metrics": metrics, "bps": bps, "quality": quality, "validation": validation,
             "added": [{"mach": a["cond"].mach, "alt": a["cond"].alt, "fuel": a["cond"].fuel,
                        "reason": a["reason"], **({"slot": a["slot"]} if "slot" in a else {})} for a in added],
             "base": [{"mach": b["cond"].mach, "alt": b["cond"].alt, "fuel": b["cond"].fuel, "state": b["state"]}

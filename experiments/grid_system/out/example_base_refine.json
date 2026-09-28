@@ -330,6 +330,730 @@
   "anomaly": [],
   "unjudged_rows": []
  },
+ "validation": [
+  {
+   "mach": 0.063495,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "breakpoint",
+   "state": "constraint_hit",
+   "verdict": null,
+   "reasons": [
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.14457124999999998,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.22564749999999997,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.30672374999999996,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.3878,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.10403312499999999,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.18510937499999996,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "불합격",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.266185625,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.34726187499999994,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "midpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.0623475,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "clip",
+   "state": "constraint_hit",
+   "verdict": null,
+   "reasons": [
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.063495,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "breakpoint",
+   "state": "out_of_region",
+   "verdict": null,
+   "reasons": [],
+   "trim_origin": "none"
+  },
+  {
+   "mach": 0.14457124999999998,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.22564749999999997,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·권장 충족",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.30672374999999996,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.3878,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.10403312499999999,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "불합격",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.18510937499999996,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.266185625,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.34726187499999994,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "midpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.0623475,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "clip",
+   "state": "out_of_region",
+   "verdict": null,
+   "reasons": [],
+   "trim_origin": "none"
+  },
+  {
+   "mach": 0.063495,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "kind": "breakpoint",
+   "state": "constraint_hit",
+   "verdict": null,
+   "reasons": [
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.14457124999999998,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.22564749999999997,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.30672374999999996,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.3878,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.10403312499999999,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.18510937499999996,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "불합격",
+   "reasons": [],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.266185625,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.34726187499999994,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "kind": "midpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.0623475,
+   "alt": 100.0,
+   "fuel": 25.0,
+   "kind": "clip",
+   "state": "out_of_region",
+   "verdict": null,
+   "reasons": [],
+   "trim_origin": "none"
+  },
+  {
+   "mach": 0.063495,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "kind": "breakpoint",
+   "state": "out_of_region",
+   "verdict": null,
+   "reasons": [],
+   "trim_origin": "none"
+  },
+  {
+   "mach": 0.14457124999999998,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.22564749999999997,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·권장 충족",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.30672374999999996,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.3878,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.10403312499999999,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "불합격",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.18510937499999996,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.266185625,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.34726187499999994,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "kind": "midpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.0623475,
+   "alt": 1550.0,
+   "fuel": 25.0,
+   "kind": "clip",
+   "state": "out_of_region",
+   "verdict": null,
+   "reasons": [],
+   "trim_origin": "none"
+  },
+  {
+   "mach": 0.063495,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "breakpoint",
+   "state": "out_of_region",
+   "verdict": null,
+   "reasons": [],
+   "trim_origin": "none"
+  },
+  {
+   "mach": 0.14457124999999998,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.22564749999999997,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.30672374999999996,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.3878,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.10403312499999999,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.18510937499999996,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "불합격",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.266185625,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.34726187499999994,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "midpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.0623475,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "clip",
+   "state": "out_of_region",
+   "verdict": null,
+   "reasons": [],
+   "trim_origin": "none"
+  },
+  {
+   "mach": 0.063495,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "breakpoint",
+   "state": "out_of_region",
+   "verdict": null,
+   "reasons": [],
+   "trim_origin": "none"
+  },
+  {
+   "mach": 0.14457124999999998,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.22564749999999997,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "breakpoint",
+   "state": "computable",
+   "verdict": "합격·권장 충족",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.30672374999999996,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.3878,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "breakpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.10403312499999999,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "불합격",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.18510937499999996,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.266185625,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "midpoint",
+   "state": "computable",
+   "verdict": "합격·주의",
+   "reasons": [],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.34726187499999994,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "midpoint",
+   "state": "infeasible",
+   "verdict": null,
+   "reasons": [
+    "throttle_high",
+    "not_converged"
+   ],
+   "trim_origin": "new"
+  },
+  {
+   "mach": 0.0623475,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "clip",
+   "state": "out_of_region",
+   "verdict": null,
+   "reasons": [],
+   "trim_origin": "none"
+  },
+  {
+   "mach": 0.0612,
+   "alt": 100.0,
+   "fuel": 10.0,
+   "kind": "boundary",
+   "state": "constraint_hit",
+   "verdict": null,
+   "reasons": [
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.06732,
+   "alt": 1550.0,
+   "fuel": 10.0,
+   "kind": "boundary",
+   "state": "constraint_hit",
+   "verdict": null,
+   "reasons": [
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.06732,
+   "alt": 100.0,
+   "fuel": 50.0,
+   "kind": "boundary",
+   "state": "constraint_hit",
+   "verdict": null,
+   "reasons": [
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
+   ],
+   "trim_origin": "base"
+  },
+  {
+   "mach": 0.07343999999999999,
+   "alt": 1550.0,
+   "fuel": 50.0,
+   "kind": "boundary",
+   "state": "constraint_hit",
+   "verdict": null,
+   "reasons": [
+    "alpha_search_bound",
+    "not_converged",
+    "stall_basis_missing"
+   ],
+   "trim_origin": "base"
+  }
+ ],
  "added": [
   {
    "mach": 0.16484031249999997,

@@ -70,13 +70,18 @@
       <span>연료 <span class="seg" id="fuelSeg"></span></span>
       <span>보기 <span class="seg" id="viewSeg"></span></span>
     </div>
+    <div class="bar">
+      <span>시나리오 <span class="seg" id="modeSeg"></span></span>
+    </div>
     <div class="kinds" id="kinds"></div>
     <svg id="mh" viewBox="0 0 900 420" role="img" aria-label="마하-고도 운용영역"></svg>
     <div class="legend" id="legend"></div>
     <div class="caption" id="caption"></div>
   </section>
   <section class="card">
-    <div class="bar"><strong>검증 결과 요약</strong><span class="sub" id="sumSub"></span></div>
+    <div class="bar"><strong id="sumTitle">검증 결과 요약</strong><span class="sub" id="sumSub"></span>
+      <label id="refBox" title="분석 참조선 — 판정은 바꾸지 않고 차이만 보인다(04 §1)">분석 참조선 PM
+        <input id="refPm" type="number" step="1" style="width:56px" placeholder="없음">°</label></div>
     <div class="scroll"><table id="sum"></table></div>
     <div id="detail" class="caption"></div>
   </section>
@@ -101,7 +106,16 @@ const CHECK_LABEL = {
   reuse: "계산 재사용(새 좌표만 트림)",
 };
 const $ = (id) => document.getElementById(id);
-const S = { ac: "example", data: {}, fuel: null, sel: null, view: "all" };
+const Q = new URLSearchParams(location.search);  // 주소로 시나리오를 고른다(공유·헤드리스 확인용)
+const S = { ac: Q.get("ac") ?? "example", data: {}, fuel: null, sel: null, view: Q.get("view") ?? "all",
+  mode: Q.get("mode") ?? "val", br: {} };
+const REASON = { NONLINEAR_METRIC: ["지표 비선형", "#7d3c98"], VERDICT_CHANGE: ["판정 변화", "#c0392b"],
+  TRIM_FAILURE_BOUNDARY: ["트림 실패 경계", "#8e5a2b"] };
+async function loadBR(ac, axis) {
+  const k = `${ac}|${axis}`;
+  if (!S.br[k]) S.br[k] = await (await fetch(`../out/${ac}_base_refine${axis === "common" ? "_common_axis" : ""}.json`)).json();
+  return S.br[k];
+}
 const near = (a, b) => Math.abs(a - b) < 1e-6;
 const fmt = (x, d = 3) => Number(x).toFixed(d).replace(/\.?0+$/, "");
 
@@ -280,6 +294,81 @@ function drawMH(d) {
     ...bpLegend.map(([n, c, txt, indep]) => span(`<span style="color:${c}">${indep ? "┆" : "│"}</span> 절점 ${n} (${txt})`)));
 }
 
+function drawBase(d, br) {
+  // 캔버스는 검증 실험과 같은 틀(요구영역·빗금·축)을 쓰고, 점만 기본 격자 시나리오 것으로 바꾼다
+  const keep = { ...ON };
+  Object.assign(ON, { trim: false, design: false, bp: false, val: false });
+  drawMH(d);
+  Object.assign(ON, keep);
+  const svg = $("mh"), plot = svg.querySelector("g[clip-path]");
+  const W = 900, H = 420, L = 62, R = 18, T = 40, B = 44;
+  const u = br.bps, pad = (u[u.length - 1] - u[0]) * 0.12;
+  const mMin = S.view === "all" ? 0 : Math.max(0, Math.min(u[0], d.region.mach[0]) - pad);
+  const mMax = S.view === "all" ? Math.max(d.region.mach[1], u[u.length - 1]) * 1.25 : Math.max(u[u.length - 1], d.region.mach[1]) + pad;
+  const aMax = d.region.alt[1] * 1.12;
+  const x = (m) => L + ((m - mMin) / (mMax - mMin)) * (W - L - R), y = (a) => H - B - (a / aMax) * (H - T - B);
+  const f = S.fuel;
+  if (ON.bp) u.forEach((m) => {
+    plot.append(el("line", { x1: x(m), y1: T, x2: x(m), y2: H - B, stroke: "var(--bp-a)", "stroke-width": 1.2, opacity: 0.6 }));
+    svg.append(el("path", { d: `M${x(m) - 4} ${T - 14}h8l-4 5z`, fill: "var(--bp-a)" }));
+    svg.append(el("text", { x: x(m) + 6, y: T - 7, "font-size": 10, fill: "var(--bp-a)" }, fmt(m, 3)));
+  });
+  if (ON.trim) br.base.filter((b) => near(b.fuel, f)).forEach((b) => {
+    const ok = b.state === "computable";
+    const e = el("circle", { cx: x(b.mach), cy: y(b.alt), r: 2.6, fill: ok ? "#8a8a84" : "#fff", stroke: "#8a8a84", "stroke-width": 1.2 });
+    e.append(el("title", {}, `기본 격자 M${fmt(b.mach, 4)} · ${b.alt} m\n${STATE[b.state][0]}`)); plot.append(e);
+  });
+  if (ON.val) br.validation.filter((v) => near(v.fuel, f)).forEach((v) => {
+    const c = v.state === "computable" ? VERDICT[v.verdict] : STATE[v.state][1];
+    if (v.trim_origin === "new") plot.append(el("circle", { cx: x(v.mach), cy: y(v.alt), r: 8, fill: "none", stroke: "#1d1d1b", "stroke-width": 1.4 }));
+    const e = el("circle", { cx: x(v.mach), cy: y(v.alt), r: 4.5, fill: v.state === "computable" ? c : "#fff", stroke: c, "stroke-width": 2 });
+    e.append(el("title", {}, `검증점 M${fmt(v.mach, 4)} · ${v.alt} m\n${STATE[v.state][0]}${v.verdict ? " · " + v.verdict : ""}\n트림: ${{ base: "기본 격자에서 재사용", new: "새로 트림(기본 격자에 없음)", none: "트림 없음" }[v.trim_origin]}`));
+    plot.append(e);
+  });
+  if (ON.design) br.added.filter((a) => near(a.fuel, f)).forEach((a) => {
+    const [name, col] = REASON[a.reason] ?? [a.reason, "#555"];
+    const e = el("path", { d: `M${x(a.mach)} ${y(a.alt) - 6}l5.5 9.5h-11z`, fill: col, opacity: 0.9 });
+    e.append(el("title", {}, `보강 추가점 M${fmt(a.mach, 4)} · ${a.alt} m\n사유: ${name}${a.slot ? " (" + a.slot + ")" : ""}`));
+    plot.append(e);
+  });
+  const m = br.metrics, span = (h) => { const e = document.createElement("span"); e.innerHTML = h; return e; };
+  const cnt = (arr) => arr.filter((z) => near(z.fuel, f)).length;
+  const reasons = Object.entries(m.refinement_reasons).map(([k, n]) => `<span style="color:${REASON[k]?.[1]}">▲</span> ${REASON[k]?.[0] ?? k} ${n}`).join(" · ");
+  const card = (k, glyphHtml, name, def, cntHtml) => { const e = document.createElement("div"); e.className = `kind${ON[k] ? "" : " off"}`;
+    e.innerHTML = `<svg viewBox="0 0 20 20">${glyphHtml}</svg><b>${name}</b><div class="def">${def}</div><div class="cnt">${cntHtml}</div>`;
+    e.onclick = () => { ON[k] = !ON[k]; render(); }; return e; };
+  $("kinds").replaceChildren(
+    card("trim", '<circle cx="10" cy="10" r="4" fill="#8a8a84"/>', "기본 모델 격자", "먼저 트림·선형화해 두는 점. 채운 점 = 계산 완료, 빈 점 = 실패",
+      `이 연료 ${cnt(br.base)} · 전체 ${m.base_points} · 설계점(계산 완료) ${m.design_points} · 조밀화 필요 쌍 ${m.quality_dense_pairs} · 국소 이상 ${m.quality_anomalies}`),
+    card("bp", '<path d="M10 2v16" stroke="#1d1d1b" stroke-width="1.6"/><path d="M6 2h8l-4 5z" fill="#1d1d1b"/>', "게인 분할점(절점)", "기본 격자 마하에서 한 칸 건너 고른 좌표", `${u.length}개`),
+    card("val", '<circle cx="10" cy="10" r="4.5" fill="#2f8a4c"/><circle cx="10" cy="10" r="8" fill="none" stroke="#1d1d1b" stroke-width="1.4"/>', "검증점",
+      "단일 원 = 기본 격자에서 골라 재사용, 이중 원 = 기본 격자에 없어 새로 트림",
+      `이 연료 ${cnt(br.validation)} · 재사용 ${m.role_reused} · 새 트림 ${m.role_new_trims} · <b>재사용률 ${fmt(m.base_reuse_ratio, 2)}</b>`),
+    card("design", '<path d="M10 3l6 11H4z" fill="#7d3c98"/>', "보강 추가점", "왜 더했는지 사유별 색", `${reasons} · 보강 새 트림 ${m.refine_new_trims} · ${m.reinforce_status}${m.reinforce_unmeasured ? ` (잴 수 없는 구간 ${m.reinforce_unmeasured})` : ""}`));
+  $("legend").replaceChildren(span("<b>검증점 색</b> = 판정(계산 완료) 또는 계산 상태"),
+    ...Object.entries(REASON).map(([k, [n, c]]) => span(`<span style="color:${c}">▲</span> ${n}`)));
+}
+
+function drawBaseMetrics(br) {
+  const m = br.metrics;
+  $("sumTitle").textContent = "기본 격자 + 보강 지표";
+  $("sumSub").textContent = " 추가 트림 = 역할 요청(검증점) + 보강 · 실패는 추가 트림 중 계산 불가";
+  $("refBox").style.display = "none";
+  const rows = [
+    ["기본 격자 점 / 트림", `${m.base_points} / ${m.base_trims}`], ["기본 격자 재사용률", fmt(m.base_reuse_ratio, 2)],
+    ["검증 요청 — 재사용 / 새 트림", `${m.role_reused} / ${m.role_new_trims}`], ["보강 새 트림", m.refine_new_trims],
+    ["추가 트림 합 (실패)", `${m.additional_trims} (${m.additional_trim_failures})`],
+    ["설계점 / 검증점", `${m.design_points} / ${m.validation_points}`],
+    ["검증점 게인 출처 — 절점 위 / 보간 / clip", `${m.interpolation.breakpoint} / ${m.interpolation.interpolated} / ${m.interpolation.clip}`],
+    ["보강 사유", Object.entries(m.refinement_reasons).map(([k, n]) => `${REASON[k]?.[0] ?? k} ${n}`).join(" · ")],
+    ["보강 종료", `${m.reinforce_status}${m.reinforce_unmeasured ? ` — 잴 수 없는 구간 ${m.reinforce_unmeasured}` : ""}`],
+    ["트림 품질 — 조밀화 필요 쌍 / 국소 이상 / 판단 불가 행", `${m.quality_dense_pairs} / ${m.quality_anomalies} / ${m.quality_unjudged_rows ?? 0}`],
+    ["고유 조건 / 계산 시도", `${m.unique_conditions} / ${m.attempts}`],
+  ];
+  $("sum").innerHTML = rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("");
+  $("detail").textContent = "";
+}
+
 function drawSummary(d) {
   const t = $("sum"), cols = d.summary.columns, u = d.validation.union;
   const colLabel = (c) => c === "clip<" ? "clip 하한" : c === "clip>" ? "clip 상한"
@@ -321,7 +410,9 @@ function worst(r) {
   const pl = S.data[S.ac].pass_lines ?? {}, parts = [];
   if (s.metric != null) parts.push(`지표 ${fmt(s.metric, 3)}`);
   const mark = (v, line) => (line != null && v < line ? " ✗" : "");
-  if (s.pm_deg != null && Number.isFinite(s.pm_deg)) parts.push(`PM ${fmt(s.pm_deg, 1)}°${mark(s.pm_deg, pl.pm_deg)}`);
+  const ref = parseFloat($("refPm").value);
+  if (s.pm_deg != null && Number.isFinite(s.pm_deg)) parts.push(`PM ${fmt(s.pm_deg, 1)}°${mark(s.pm_deg, pl.pm_deg)}`
+    + (Number.isFinite(ref) ? ` (참조선 ${fmt(ref, 1)}°보다 ${s.pm_deg - ref >= 0 ? "+" : ""}${fmt(s.pm_deg - ref, 1)}°)` : ""));
   if (s.gm_db != null && Number.isFinite(s.gm_db)) parts.push(`GM ${fmt(s.gm_db, 2)} dB${mark(s.gm_db, pl.gm_db)}`);
   return `${slot} ${s.verdict}${parts.length ? ` — ${parts.join(" · ")}` : ""}`;
 }
@@ -345,9 +436,21 @@ async function render() {
   seg($("acSeg"), [["example", "예제 기체"], ["showcase", "쇼케이스 기체"]], S.ac, (v) => { S.ac = v; S.fuel = null; render(); });
   seg($("viewSeg"), [["all", "전체"], ["bp", "절점 구간 확대"]], S.view, (v) => { S.view = v; render(); });
   seg($("fuelSeg"), d.validation.fuels.map((f) => [f, `${fmt(f, 1)} kg`]), S.fuel, (v) => { S.fuel = v; render(); });
-  drawKinds(d); drawMH(d); drawSummary(d); drawChecks(d);
+  seg($("modeSeg"), [["val", "검증 실험"], ["row", "기본 격자 + 보강 (행별 축)"], ["common", "기본 격자 + 보강 (공통 축)"]],
+    S.mode, (v) => { S.mode = v; render(); });
+  if (S.mode === "val") {
+    $("sumTitle").textContent = "검증 결과 요약"; $("refBox").style.display = "";
+    drawKinds(d); drawMH(d); drawSummary(d); drawChecks(d);
+  } else {
+    const br = await loadBR(S.ac, S.mode);
+    drawBase(d, br); drawBaseMetrics(br); drawChecks(d);
+  }
 }
-render().catch((e) => { document.body.insertAdjacentHTML("afterbegin", `<pre style="color:#c0392b">${e}</pre>`); });
+$("refPm").oninput = () => document.querySelector("#sum td.sel")?.click();
+if (Q.get("refpm")) $("refPm").value = Q.get("refpm");
+render().then(() => {  // ?pick=fail — 첫 불합격 칸을 연다(공유 링크·헤드리스 확인용)
+  if (Q.get("pick") === "fail") [...document.querySelectorAll("#sum td.cell")].find((t) => t.textContent.startsWith("불합격"))?.click();
+}).catch((e) => { document.body.insertAdjacentHTML("afterbegin", `<pre style="color:#c0392b">${e}</pre>`); });
 </script>
 </body>
 </html>

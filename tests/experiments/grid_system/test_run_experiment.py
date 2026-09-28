@@ -125,6 +125,12 @@ def test_base_refine_metrics_are_consistent(built):
     assert set(m["refinement_reasons"]) <= {g.R_NONLINEAR_METRIC, g.R_VERDICT_CHANGE, g.R_TRIM_FAILURE_BOUNDARY}
     assert set(m["interpolation"]) == {"breakpoint", "interpolated", "clip"}
     assert m["design_points"] <= m["base_points"]  # 설계점은 기본 격자에서 고른다
+    # 검증점마다 트림 출처 — 기본 격자 재사용 / 새 트림 / 트림 없음. 개수가 지표와 맞는다
+    v = out["validation"]
+    assert len(v) == m["validation_points"]
+    assert {x["trim_origin"] for x in v} <= {"base", "new", "none"}
+    assert sum(x["trim_origin"] == "base" for x in v) == m["role_reused"]
+    assert sum(x["trim_origin"] == "new" for x in v) == m["role_new_trims"]
 
 
 def test_common_axis_base_grid_is_reused_more_than_per_row(built):
