@@ -281,3 +281,53 @@ def test_d_scales_are_independent_of_tuning_targets(example):
     assert s0["yaw_rate"] == pytest.approx(m.zeta_good - m.zeta_min)
     assert s0["pitch_att"] == s0["roll_att"] == g.PM_SCALE_PROVISIONAL  # PM: 권장선 없음 → 독립 잠정 척도
     assert s0["roll_rate"] == g.ROLL_LAMBDA_SCALE_PROVISIONAL  # λ: 당시 값으로 고정한 잠정 척도
+
+
+# ── 보강 절차 (05 §11.7) — 지표 측정은 주입해 순서·예산·종료 상태를 고정한다 ──────────
+def _bump(center, height, width=0.02):
+    """center에서 봉우리가 있는 가짜 지표 — 그 구간만 선형 보간에서 벗어난다."""
+    def measure(c):
+        return {"pitch_att": {"metric": height * math.exp(-((c.mach - center) / width) ** 2)}}
+    return measure
+
+
+import math  # noqa: E402
+
+
+def test_reinforce_bisects_worst_interval_first_until_tolerance():
+    measure = _bump(0.15, 1.0)
+    row = (1000.0, 25.0)
+    out = g.reinforce(measure, [row], (0.1, 0.2, 0.3), {"pitch_att": 1.0}, tol=0.05, max_points=50, max_depth=6)
+    assert out["status"] == g.REINFORCE_DONE
+    assert out["added"], "봉우리가 있는 구간은 보강돼야 한다"
+    first = out["added"][0]
+    assert first["interval"] == (0.1, 0.2) and first["row"] == row  # 최악 구간부터
+    assert first["slot"] == "pitch_att"  # 어느 자리가 보강을 일으켰는지 남긴다
+    assert all(0.1 <= a["cond"].mach <= 0.2 for a in out["added"])  # 평평한 0.2–0.3 구간은 건드리지 않는다
+    assert out["remaining"] == []
+
+
+def test_reinforce_stops_on_budget_with_remaining_and_max_d():
+    measure = _bump(0.15, 1.0)
+    out = g.reinforce(measure, [(1000.0, 25.0)], (0.1, 0.2, 0.3), {"pitch_att": 1.0}, tol=0.001,
+                      max_points=3, max_depth=10)
+    assert out["status"] == g.REINFORCE_BUDGET  # 「보강 종료 · 추가 검증 필요」 — 합격·불가로 바꾸지 않는다
+    assert len(out["added"]) <= 3 and out["remaining"] and out["max_d_remaining"] > 0.001
+
+
+def test_reinforce_order_changes_with_scale():
+    # 척도가 달라지면 같은 지표에서도 보강 순서가 달라진다 — 두 자리 중 척도 작은 쪽이 먼저
+    def measure(c):
+        return {"a": {"metric": 0.3 * math.exp(-((c.mach - 0.15) / 0.02) ** 2)},
+                "b": {"metric": 0.2 * math.exp(-((c.mach - 0.25) / 0.02) ** 2)}}
+    rows = [(0.0, 10.0)]
+    o1 = g.reinforce(measure, rows, (0.1, 0.2, 0.3), {"a": 1.0, "b": 1.0}, tol=0.05, max_points=2, max_depth=4)
+    o2 = g.reinforce(measure, rows, (0.1, 0.2, 0.3), {"a": 1.0, "b": 0.2}, tol=0.05, max_points=2, max_depth=4)
+    assert o1["added"][0]["interval"] == (0.1, 0.2) and o2["added"][0]["interval"] == (0.2, 0.3)
+
+
+def test_d_scale_sources_are_recorded(example):
+    src = g.d_scale_sources(example.eval_criteria)
+    assert set(src) == {"pitch_rate", "yaw_rate", "roll_rate", "pitch_att", "roll_att"}
+    assert "권장선" in src["pitch_rate"] and "잠정" in src["pitch_att"]
+    assert "12" in src["roll_rate"] and "0.8" in src["roll_rate"] and "0.5" in src["roll_rate"]  # 고정한 당시 값

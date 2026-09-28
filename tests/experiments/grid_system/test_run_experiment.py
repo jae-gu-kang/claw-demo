@@ -73,3 +73,25 @@ def test_dump_writes_non_finite_as_null_so_browsers_can_parse():
     text = rx.dump({"a": math.inf, "b": [math.nan, 1.0], "c": {"d": -math.inf}})
     assert json.loads(text) == {"a": None, "b": [None, 1.0], "c": {"d": None}}
     assert "Infinity" not in text and "NaN" not in text
+
+
+def test_legacy_scales_follow_targets_and_differ_from_rule(built):
+    # 이전 규칙(비교 전용)은 튜닝 목표에 매인다 — 새 규칙과 ζ 자리에서 갈린다
+    crit = built.eval_criteria
+    old, new = rx.d_scales_legacy_target_based(crit), g.d_scales(crit)
+    assert old["pitch_rate"] == pytest.approx(crit.targets.zeta_sp - crit.margin.zeta_min)
+    assert old["pitch_rate"] != new["pitch_rate"]
+
+
+def test_compare_reinforce_reports_points_order_and_status():
+    c = lambda m: g.Condition(m, 0.0, 10.0)  # noqa: E731
+    old = {"status": g.REINFORCE_DONE, "added": [{"cond": c(0.1), "row": (0.0, 10.0), "interval": (0.0, 0.2)},
+                                                  {"cond": c(0.3), "row": (0.0, 10.0), "interval": (0.2, 0.4)}],
+           "remaining": []}
+    new = {"status": g.REINFORCE_BUDGET, "added": [{"cond": c(0.3), "row": (0.0, 10.0), "interval": (0.2, 0.4)},
+                                                    {"cond": c(0.5), "row": (0.0, 10.0), "interval": (0.4, 0.6)}],
+           "remaining": [{"row": (0.0, 10.0), "interval": (0.0, 0.2), "d": 0.4}]}
+    cmp = rx.compare_reinforce(old, new)
+    assert cmp["added"] == {"before": 2, "after": 2, "only_before": [c(0.1).name], "only_after": [c(0.5).name]}
+    assert cmp["first_order_difference"] == 0
+    assert cmp["status"] == {"before": g.REINFORCE_DONE, "after": g.REINFORCE_BUDGET}

@@ -79,6 +79,53 @@ def trim_points(ev, region, model, design_points, recs) -> list:
     return list(out.values())
 
 
+# 보강 비교용 잠정 예산·허용치 — 허용치는 05 §11.7 [TBD]라 **두 규칙에 똑같이** 쓰는 비교 전용 값이다
+REINFORCE_TOL = 0.25
+REINFORCE_MAX_POINTS = 24
+REINFORCE_MAX_DEPTH = 3
+
+
+def d_scales_legacy_target_based(crit) -> dict:
+    """**이전 규칙(v1.59, 폐기)** — 척도를 튜닝 목표에서 끌어왔다. 변경 전후 비교에만 쓴다 (05 §11.7 v1.60)."""
+    m, t = crit.margin, crit.targets
+    return {"pitch_rate": t.zeta_sp - m.zeta_min, "yaw_rate": t.zeta_dr - m.zeta_min,
+            "roll_rate": t.roll_lambda * (m.lam_good_frac - m.lam_min_frac),
+            "pitch_att": t.pm_deg - m.pm_min_deg, "roll_att": t.pm_deg - m.pm_min_deg}
+
+
+def compare_reinforce(before, after) -> dict:
+    """두 보강 결과 비교 — 추가점(개수·한쪽에만 있는 점) · 보강 순서(처음 갈린 위치) · 종료 상태."""
+    nb = [a["cond"].name for a in before["added"]]
+    na = [a["cond"].name for a in after["added"]]
+    first = next((i for i, (x, y) in enumerate(zip(nb, na)) if x != y), None)
+    if first is None and len(nb) != len(na):
+        first = min(len(nb), len(na))
+    return {
+        "added": {"before": len(nb), "after": len(na), "only_before": [n for n in nb if n not in set(na)],
+                  "only_after": [n for n in na if n not in set(nb)]},
+        "first_order_difference": first,
+        "status": {"before": before["status"], "after": after["status"]},
+        "remaining": {"before": len(before["remaining"]), "after": len(after["remaining"])},
+    }
+
+
+def run_reinforce(ev, region, model, schedule, rows, union, scales, tol=None):
+    tables = schedule.tables()
+
+    def measure(c):
+        st, rec, _ = ev.state(c, region, model)
+        return ev.judge(c, rec, schedule, tables)[1] if st == g.COMPUTABLE else None
+
+    return g.reinforce(measure, rows, union, scales, tol=REINFORCE_TOL if tol is None else tol,
+                       max_points=REINFORCE_MAX_POINTS,
+                       max_depth=REINFORCE_MAX_DEPTH)
+
+
+def reinforce_json(r) -> dict:
+    return {**r, "added": [{**a, "cond": {"mach": a["cond"].mach, "alt": a["cond"].alt, "fuel": a["cond"].fuel},
+                             "name": a["cond"].name} for a in r["added"]]}
+
+
 def run_case(built, store, region, model, schedule, spec):
     ev = g.Evaluator(built, store)
     val = g.generate_validation(region, schedule, spec)
@@ -191,6 +238,24 @@ def experiment(name, built):
         "ok": store.computed - before == len(need) and store.reused > reused_before,
     }
 
+    # 보강 — 새 규칙(튜닝 목표 독립 척도)과 이전 규칙을 같은 설정·같은 잠정 허용치로 (05 §11.7 v1.60)
+    rows_v = [(float(a), float(f)) for f in fuels for a in alts]
+    re_new = run_reinforce(ev, region, model, sch2, rows_v, union, g.d_scales(ev.criteria))
+    re_old = run_reinforce(ev, region, model, sch2, rows_v, union, d_scales_legacy_target_based(ev.criteria))
+    reinforce_cmp = compare_reinforce(re_old, re_new)
+    # 허용치 민감도 — 허용치는 [TBD]라, 규칙 차이가 어느 허용치부터 드러나는지 본다
+    tol_sweep = {}
+    for tol in (0.25, 0.1, 0.05):
+        a = run_reinforce(ev, region, model, sch2, rows_v, union, d_scales_legacy_target_based(ev.criteria), tol)
+        b = run_reinforce(ev, region, model, sch2, rows_v, union, g.d_scales(ev.criteria), tol)
+        cnt = lambda r: {s: sum(x["slot"] == s for x in r["added"]) for s in sorted({x["slot"] for x in r["added"]})}  # noqa: E731
+        # 처음 구간(절점 합집합의 인접쌍) 중 허용치를 넘는 것 — 자리별. 예산에 가려 순서에 안 드러난 차이를 본다
+        over = lambda sc: {sl: sum(1 for x in g.d_values(recs, union, sc) if x["slot"] == sl and x["d"] > tol)  # noqa: E731
+                           for sl in sorted(sc)}
+        tol_sweep[str(tol)] = {**compare_reinforce(a, b), "slots_before": cnt(a), "slots_after": cnt(b),
+                               "initial_over_before": over(d_scales_legacy_target_based(ev.criteria)),
+                               "initial_over_after": over(g.d_scales(ev.criteria))}
+
     # 부산물 — 보강 지표 d 분포 (허용치 보정 자료, 05 §11.7)
     ds = g.d_values(recs, union, g.d_scales(ev.criteria))
     d_stats = {}
@@ -221,7 +286,12 @@ def experiment(name, built):
         "summary": {"columns": summ["columns"], "out_of_region": summ["out_of_region"],
                     "cells": [{"row": list(k[0]) if isinstance(k[0], tuple) else k[0], "col": k[1], **c}
                               for k, c in summ["cells"].items()]},
-        "d": d_stats, "checks": checks, "elapsed_s": round(time.time() - t0, 1),
+        "d": d_stats, "checks": checks,
+        "d_scales": {k: {"value": v, "source": g.d_scale_sources(ev.criteria)[k]}
+                     for k, v in g.d_scales(ev.criteria).items()},
+        "d_scales_legacy": d_scales_legacy_target_based(ev.criteria),
+        "reinforce": {"rule_v1_60": reinforce_json(re_new), "legacy_v1_59": reinforce_json(re_old),
+                      "comparison": reinforce_cmp, "tol_sweep": tol_sweep}, "elapsed_s": round(time.time() - t0, 1),
     }
 
 
@@ -239,6 +309,15 @@ def main():
             all_ok &= v["ok"]
             print(f"  [{'OK' if v['ok'] else 'NG'}] {k}: "
                   + json.dumps({kk: vv for kk, vv in v.items() if kk != "ok"}, ensure_ascii=False, default=str))
+        rc = res["reinforce"]["comparison"]
+        print("  보강 비교(이전 → 새):", json.dumps({"추가점": [rc["added"]["before"], rc["added"]["after"]],
+              "처음 갈린 순서": rc["first_order_difference"], "종료": [rc["status"]["before"], rc["status"]["after"]],
+              "남은 구간": [rc["remaining"]["before"], rc["remaining"]["after"]]}, ensure_ascii=False))
+        for tol, v in res["reinforce"]["tol_sweep"].items():
+            print(f"   tol {tol}: 추가점 {v['added']['before']}→{v['added']['after']} · 처음 갈린 순서 "
+                  f"{v['first_order_difference']} · 종료 {v['status']['before']}→{v['status']['after']} · "
+                  f"자리별 {v['slots_before']}→{v['slots_after']}")
+            print(f"      처음 구간 중 허용치 초과(자리별): {v['initial_over_before']} → {v['initial_over_after']}")
         print("  d:", json.dumps({k: {kk: round(vv, 3) for kk, vv in v.items()} for k, v in res["d"].items()},
                                  ensure_ascii=False))
     print("\n전체:", "통과" if all_ok else "실패 있음")

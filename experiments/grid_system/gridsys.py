@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import heapq
 import math
 from dataclasses import dataclass, field
 
@@ -331,6 +332,16 @@ PM_SCALE_PROVISIONAL = 5.0  # [deg]
 ROLL_LAMBDA_SCALE_PROVISIONAL = 3.6  # [rad/s]
 
 
+def d_scale_sources(crit) -> dict:
+    """자리별 척도의 출처 — 결과에 함께 싣는다 (λ는 고정한 당시 값을 적는다)."""
+    m = crit.margin
+    z = f"권장선 ζ_good {m.zeta_good!r} − 합격선 ζ_min {m.zeta_min!r} (기체 기준, 튜닝 목표 무관)"
+    pm = f"독립 잠정 척도 {PM_SCALE_PROVISIONAL!r}° — PM은 권장선이 없다(합격 아니면 불합격). 튜닝 목표에서 계산하지 않는다"
+    lam = (f"잠정 고정 {ROLL_LAMBDA_SCALE_PROVISIONAL!r} rad/s = 당시 목표 12 × (권장 비율 0.8 − 합격 비율 0.5) "
+           "(v1.60 규칙 확정 시점의 값 — λ 판정선의 기준 독립화 전까지)")
+    return {"pitch_rate": z, "yaw_rate": z, "roll_rate": lam, "pitch_att": pm, "roll_att": pm}
+
+
 def d_scales(crit) -> dict:
     """자리별 보강 척도 s — **튜닝 목표와 독립** (05 §11.7). ζ는 권장선 − 합격선, PM·λ는 독립 잠정값."""
     m = crit.margin
@@ -523,3 +534,75 @@ def d_values(recs, union, scales) -> list:
             out.append({"interval": f"iv{i + 1}-{i + 2}", "row": r["row"], "slot": slot,
                         "d": abs(m - (ma + t * (mb - ma))) / s})
     return out
+
+
+# ── 보강 절차 (05 §11.7) — 허용치·예산·합격 기준 분리 ─────────────────────────────
+REINFORCE_DONE = "보강 완료"
+REINFORCE_BUDGET = "보강 종료 · 추가 검증 필요"
+
+
+def _seg_d(ma, mm, mb, scales, t=0.5):
+    """구간 [a, b]의 보강 지표 — (자리별 |m_mid − lerp| / s의 최대, 그 자리). 잴 자리가 없으면 (None, None)."""
+    best, arg = None, None
+    for slot, s in scales.items():
+        vals = [x.get(slot, {}).get("metric") if x else None for x in (ma, mm, mb)]
+        if s <= 0 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in vals):
+            continue
+        d = abs(vals[1] - (vals[0] + t * (vals[2] - vals[0]))) / s
+        if best is None or d > best:
+            best, arg = d, slot
+    return best, arg
+
+
+def reinforce(measure, rows, union, scales, *, tol, max_points, max_depth) -> dict:
+    """구간 이분 보강 — 최악 d 구간부터(우선순위 큐). measure(Condition) → 자리 지표 dict | None(계산 불가).
+
+    처음 구간 = 절점 합집합의 인접쌍(중점은 기존 검증점이라 추가점이 아니다). d > tol인 구간을 둘로 나누고
+    두 반쪽의 중점 2점을 **추가점**으로 잰다. 예산(추가점 수·이분 깊이)은 실행 전에 받는다. 예산이 끊기면
+    「보강 종료 · 추가 검증 필요」와 남은 구간을 낸다 — 합격이나 설계 불가로 바꾸지 않는다(05 §11.7).
+    """
+    cache: dict = {}
+
+    def m(mach, row):
+        c = Condition(float(mach), row[0], row[1])
+        if c.name not in cache:
+            cache[c.name] = measure(c)
+        return cache[c.name]
+
+    heap, seq = [], 0
+    for row in rows:
+        for a, b in zip(union, union[1:]):
+            d, slot = _seg_d(m(a, row), m((a + b) / 2, row), m(b, row), scales)
+            if d is not None:
+                heapq.heappush(heap, (-d, seq, row, a, b, 0, slot))
+                seq += 1
+    added, status, depth_capped = [], REINFORCE_DONE, []
+    while heap:
+        neg, _, row, a, b, depth, slot = heap[0]
+        if -neg <= tol:
+            break
+        if depth >= max_depth:
+            heapq.heappop(heap)
+            depth_capped.append((row, a, b, -neg))
+            continue
+        if len(added) + 2 > max_points:
+            status = REINFORCE_BUDGET
+            break
+        heapq.heappop(heap)
+        mid = (a + b) / 2
+        for lo, hi in ((a, mid), (mid, b)):
+            q = (lo + hi) / 2
+            added.append({"cond": Condition(float(q), row[0], row[1]), "row": row, "interval": (a, b),
+                          "depth": depth + 1, "d_trigger": -neg, "slot": slot})
+            d, s2 = _seg_d(m(lo, row), m(q, row), m(hi, row), scales)
+            if d is not None:
+                heapq.heappush(heap, (-d, seq, row, lo, hi, depth + 1, s2))
+                seq += 1
+    remaining = [(r, a, b, -n) for n, _, r, a, b, _, _ in heap if -n > tol] + depth_capped
+    if remaining:
+        status = REINFORCE_BUDGET
+    remaining.sort(key=lambda x: -x[3])
+    return {"status": status, "added": added,
+            "remaining": [{"row": r, "interval": (a, b), "d": d} for r, a, b, d in remaining],
+            "max_d_remaining": remaining[0][3] if remaining else 0.0,
+            "budget": {"tol": tol, "max_points": max_points, "max_depth": max_depth}}
