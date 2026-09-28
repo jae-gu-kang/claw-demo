@@ -3,12 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  FALLBACK_CRITERIA,
   SERIES_COLORS,
   STATUS,
   fuelsOf,
   gainPlotGroups,
-  gmColor,
   HEATMAP_LAYOUT,
   bodeSeries,
   decadeTicks,
@@ -18,8 +16,13 @@ import {
   interpLogAt,
   linScale,
   logScale,
-  marginColor,
+  OLD_RESULT_HINT,
+  STATUS_LABEL,
+  criteriaLineText,
+  hasMarginStatuses,
+  marginCellStatus,
   marginLegendText,
+  statusColor,
   marginWorst,
   niceTicks,
   pivotCases,
@@ -53,50 +56,75 @@ test("niceTicks: 1-2-5 스텝, 범위 포함", () => {
   assert.deepEqual(niceTicks(5, 5, 5), [5]); // 퇴화 구간
 });
 
-test("marginColor: 여유 구간 상태색 + 비유한값 정책 (criteria 생략 = 폴백)", () => {
-  assert.equal(marginColor(60), STATUS.ok); // 양호 (≥45°)
-  assert.equal(marginColor(35), STATUS.warn); // 주의 (30~45°)
-  assert.equal(marginColor(10), STATUS.bad); // 부족 (<30°)
-  assert.equal(marginColor("inf"), STATUS.ok); // 무한 여유
-  assert.equal(marginColor(null), STATUS.na); // 판정 불가 (NaN 직렬화)
+test("statusColor: 판정 넷 → 상태색, 모르는 값은 판정 불가", () => {
+  assert.equal(statusColor("fail"), STATUS.bad);
+  assert.equal(statusColor("warn"), STATUS.warn);
+  assert.equal(statusColor("ok"), STATUS.ok);
+  assert.equal(statusColor("na"), STATUS.na);
+  assert.equal(statusColor(undefined), STATUS.na);
+  assert.equal(statusColor("bogus"), STATUS.na);
 });
 
-test("marginColor: 문턱은 인자가 정한다 — 탭마다 다른 판정선을 없앤다", () => {
-  // 자동 설계 탭에서 criteria.pm_min_deg를 50으로 올리면 마진 탭도 같이 올라가야
-  // 한다. 종전에는 45가 이 함수에 박혀 있어 같은 47° 점을 설계 탭은 fail로,
-  // 마진 탭은 초록으로 칠했다 — 한 수치를 두 화면이 다르게 판정한 셈
-  const strict = { pm_min_deg: 50, pm_bad_deg: 35 };
-  assert.equal(marginColor(47, strict), STATUS.warn); // 폴백이면 ok였을 값
-  assert.equal(marginColor(50, strict), STATUS.ok);
-  assert.equal(marginColor(34, strict), STATUS.bad); // 폴백이면 warn이었을 값
-  // 일부만 넘겨도 나머지는 폴백으로 메운다 (부분 응답에 터지지 않는다)
-  assert.equal(marginColor(32, { pm_min_deg: 50 }), STATUS.warn);
-  // 비수치 문턱은 무시하고 폴백 — 서버가 null을 내려도 색이 무너지지 않는다
-  assert.equal(marginColor(40, { pm_min_deg: null, pm_bad_deg: undefined }), STATUS.warn);
+test("STATUS_LABEL: 엔진 STATUSES 순서·화면 이름 넷", () => {
+  assert.deepEqual(Object.keys(STATUS_LABEL), ["fail", "warn", "ok", "na"]);
+  assert.deepEqual(Object.values(STATUS_LABEL), ["불합격", "합격·주의", "합격·권장 충족", "판정 불가"]);
 });
 
-test("gmColor: 합격선·목표선 두 층 + 인자 문턱", () => {
-  // 목표선(gm_good_db)은 튜너 목표(TuneTargets.gm_db)와 같은 값이라 세 자리가 한
-  // 수치를 공유한다 — 화면이 자기 값을 따로 들고 있으면 안 되는 이유
-  assert.equal(gmColor(9), STATUS.ok); // ≥8 dB 양호
-  assert.equal(gmColor(7), STATUS.warn); // 6~8 주의
-  assert.equal(gmColor(3), STATUS.bad); // <6 부족
-  assert.equal(gmColor("inf"), STATUS.ok);
-  assert.equal(gmColor(null), STATUS.na);
-  const strict = { gm_min_db: 8, gm_good_db: 12 };
-  assert.equal(gmColor(9, strict), STATUS.warn);
-  assert.equal(gmColor(7, strict), STATUS.bad);
-  assert.equal(gmColor(12, strict), STATUS.ok);
+test("marginCellStatus: 서버 판정을 읽는다 — PM 35° + fail은 불합격(주의가 아니다)", () => {
+  const m = { pm_deg: 35, gm_db: 7, pm_status: "fail", gm_status: "warn", status: "fail" };
+  assert.equal(marginCellStatus(m, "pm_deg"), "fail");
+  assert.equal(statusColor(marginCellStatus(m, "pm_deg")), STATUS.bad); // 종전 문턱 색칠은 주의(주황)였다
+  assert.equal(marginCellStatus(m, "gm_db"), "warn");
+  // 수치가 아니라 판정을 따른다 — 기체 기준이 PM 30°면 서버가 ok를 싣고 화면도 ok
+  assert.equal(marginCellStatus({ pm_deg: 35, pm_status: "ok" }, "pm_deg"), "ok");
 });
 
-test("marginLegendText: 문턱을 문장에 박는다 (수치를 두 번 적지 않는다)", () => {
-  assert.match(marginLegendText(FALLBACK_CRITERIA), /PM ≥45° 양호/);
-  assert.match(marginLegendText(FALLBACK_CRITERIA), /GM ≥8 dB 양호/);
-  const t = marginLegendText({ pm_min_deg: 50, pm_bad_deg: 35, gm_min_db: 8, gm_good_db: 12 });
-  assert.match(t, /PM ≥50° 양호 · 35~50° 주의 · <35° 부족/);
-  assert.match(t, /GM ≥12 dB 양호 · 8~12 dB 주의 · <8 dB 부족/);
-  // 인자 없으면 폴백 수치가 그대로 문장에 온다 — 화면이 그때 폴백임을 밝힌다
-  assert.equal(marginLegendText(undefined), marginLegendText(FALLBACK_CRITERIA));
+test("marginCellStatus: 옛 결과(판정 없음)·마진 없음은 na — 브라우저가 다시 판정하지 않는다", () => {
+  assert.equal(marginCellStatus({ pm_deg: 35, gm_db: 3 }, "pm_deg"), "na");
+  assert.equal(marginCellStatus({ pm_deg: 60, gm_db: 12 }, "gm_db"), "na");
+  assert.equal(statusColor(marginCellStatus({ pm_deg: 60 }, "pm_deg")), STATUS.na);
+  assert.equal(marginCellStatus(undefined, "pm_deg"), "na");
+  assert.equal(marginCellStatus({ pm_deg: 60, pm_status: "weird" }, "pm_deg"), "na");
+});
+
+test("marginCellStatus: 폐루프 발산 칸도 색은 서버 판정 그대로 — 웹이 덮어쓰지 않는다", () => {
+  // 서버가 발산을 판정에 접어 넣는다(나선 예외 규칙 포함) — 서버가 fail이라 했으면 fail
+  const failed = { pm_deg: 80, pm_status: "fail", gm_status: "fail", closed_loop: { stable: false } };
+  assert.equal(marginCellStatus(failed, "pm_deg"), "fail");
+  assert.equal(statusColor(marginCellStatus(failed, "gm_db")), STATUS.bad);
+  // 서버가 예외(예: 느린 나선)로 합격을 줬다면 웹이 불합격으로 뒤집지 않는다
+  const exempt = { pm_deg: 80, pm_status: "ok", gm_status: "warn", closed_loop: { stable: false } };
+  assert.equal(marginCellStatus(exempt, "pm_deg"), "ok");
+  assert.equal(marginCellStatus(exempt, "gm_db"), "warn");
+});
+
+test("hasMarginStatuses: 옛 결과 가리기", () => {
+  const fresh = { cases: [{ margins: { q: { pm_deg: 50, pm_status: "ok" } } }] };
+  const old = { cases: [{ margins: { q: { pm_deg: 50 } } }, { margins: {} }] };
+  assert.equal(hasMarginStatuses(fresh), true);
+  assert.equal(hasMarginStatuses(old), false);
+  assert.equal(hasMarginStatuses({ cases: [{ margins: {} }] }), true); // 마진이 없으면 말할 게 없다
+  assert.match(OLD_RESULT_HINT, /옛 결과/);
+});
+
+const CRIT = {
+  applied: { margin: { pm_min_deg: 45, gm_min_db: 6, gm_good_db: 8 } },
+  lines: [
+    { metric: "pm_deg", label: "위상여유 PM", unit: "°", direction: "min", pass_key: "pm_min_deg", rec_key: null },
+    { metric: "gm_db", label: "이득여유 GM", unit: "dB", direction: "min", pass_key: "gm_min_db", rec_key: "gm_good_db" },
+  ],
+  echo: { judgement_fingerprint: "aaa" },
+};
+
+test("criteriaLineText·marginLegendText: 기체 기준(applied·lines)에서 판정선 문장", () => {
+  assert.equal(criteriaLineText(CRIT, "pm_deg"), "위상여유 PM ≥45° 합격");
+  assert.equal(criteriaLineText(CRIT, "gm_db"), "이득여유 GM ≥6 dB 합격 · ≥8 dB 권장");
+  const strict = { ...CRIT, applied: { margin: { pm_min_deg: 50, gm_min_db: 8, gm_good_db: 12 } } };
+  assert.match(marginLegendText(strict), /PM ≥50° 합격.*GM ≥8 dB 합격 · ≥12 dB 권장/);
+  assert.match(marginLegendText(CRIT), /불합격 · 합격·주의 · 합격·권장 충족 · 판정 불가/);
+  // 기준을 못 읽으면 수치를 지어내지 않는다 — 색 이름만
+  assert.equal(criteriaLineText(null, "pm_deg"), null);
+  assert.doesNotMatch(marginLegendText(null), /≥/);
 });
 
 test("trimEnvelopeCell: 판정 우선순위 — 불가 > 실속 근접 > 포화 > 가능", () => {

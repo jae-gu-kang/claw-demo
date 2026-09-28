@@ -95,6 +95,8 @@ import { conePlayback, summaryOf } from "../lib/influenceplay.js";
 import { cascadeLayout, layeredLayout } from "../lib/influencelayout.js";
 import { createInfluenceCanvas } from "./influencecanvas.js";
 import { store } from "../store.js";
+import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
+import { criteriaBadgeSpec, criteriaEchoCache, criteriaFreshness } from "../lib/freshness.js";
 import { fillGridFromProfile, firstTimeThisPage, selectedDefaults } from "./missionfill.js";
 
 // 그래프가 카드 밖으로 나오면서 폭이 늘었다 (app.css가 이 탭만 main을 1580까지
@@ -115,7 +117,7 @@ const state = {
   diag: null, openloop: null, scan: null, sweep: null,
   // 게인 평가 — 어휘·기준(서버 정본 echo), 카드 강조(null = 전체 — 표시 전용:
   // 비용 게이트는 depth·verify가 대신한다), 마지막 평가 런·검증 런
-  evalMeta: null, evalSel: null, evalRun: null, verifyRun: null,
+  evalMeta: null, evalVocab: null, evalSel: null, evalRun: null, verifyRun: null,
   // 실행 버튼(평가 1·2·3단계, 감도 셋)의 진행·끝 상태 — 키마다 {jobId, kind, n, t0, job, end}.
   // 버튼 자체가 진행 막대라 탭을 떠났다 와도 도는 중인지·어떻게 끝났는지가 버튼에 남는다
   runs: {},
@@ -1107,14 +1109,38 @@ export function render() {
   const verifyBox = el("div");
   const evalChipBtns = new Map();
 
+  // ── 판정 기준 — 어휘(카드·체크·항목 이름·지표 척도)는 도구 정본(/influence/criteria/defaults), 기준 값은
+  //    **고른 기체의 기준**(/profiles/{id}/criteria의 applied·echo)이다 — 서버가 평가를 그 기준으로 판정하므로
+  //    (기준 통합 ① S3a) 화면이 도구 기본값을 말하면 판정과 어긋난다. 기체 기준은 render마다 한 번 다시 받는다
+  //    (기체 탭에서 기준을 고치고 돌아올 수 있다). metric_scales는 defaults 라우트만 주므로 도구 기본값 자 그대로다
+  const lookCriteria = criteriaEchoCache((path) => api.get(path));
+  let evalMetaFor = null;   // 이 render에서 기준을 받은 기체 id
+  let evalMetaLoading = null;
+  const selectedProfileId = () => currentSelection()?.id ?? EXAMPLE_ID;
+
   async function ensureEvalMeta() {
-    if (state.evalMeta) return;
-    evalStatus.textContent = "기준·어휘 불러오는 중…";
+    const pid = selectedProfileId();
+    if (state.evalMeta && evalMetaFor === pid) return;
+    if (evalMetaLoading) return;
+    evalMetaLoading = pid;
+    if (!state.evalMeta) evalStatus.textContent = "기준·어휘 불러오는 중…";
     try {
-      state.evalMeta = await api.get("/influence/criteria/defaults");
+      const [vocab, prof] = await Promise.all([
+        state.evalVocab ?? api.get("/influence/criteria/defaults"),
+        api.get(`/profiles/${encodeURIComponent(pid)}/criteria`).catch(() => null),
+      ]);
+      state.evalVocab = vocab;
+      state.evalMeta = prof?.applied
+        ? { ...vocab, criteria: prof.applied, fingerprint: prof.echo?.judgement_fingerprint ?? null,
+            echo: prof.echo ?? null, profileId: pid }
+        // 기체 기준을 못 받으면 도구 기본값을 보이되 그 사실을 줄이 말한다(판정은 서버가 기체 기준으로 했다)
+        : { ...vocab, echo: null, profileId: pid, profileMissing: true };
+      evalMetaFor = pid;
     } catch (e) {
       evalStatus.textContent = `기준을 불러오지 못했다 — ${errorText(e)}`;
       return;
+    } finally {
+      evalMetaLoading = null;
     }
     renderEvalChips();
     renderEval();
@@ -1227,7 +1253,9 @@ export function render() {
       state.evalPrev =
         (prevResult && prevResult.depth === next.depth) ? prevResult : null;
       state.evalRun = { status: "완료", submitted: true, result: next, error: null,
-                        resultId: done.result_id };
+                        resultId: done.result_id,
+                        // 판정 기준 대조 재료(criteriaChip) — 결과가 실은 기준 블록과 그 결과의 기체
+                        criteriaEcho: res.criteria_echo ?? null, profileId: res.profile?.id ?? null };
       applyEvalFocus(next);
       renderEval();
       runEnd(depth, true, runVerdictMark(next));
@@ -1353,7 +1381,8 @@ export function render() {
       }
       const res = await api.get(`/results/${done.result_id}`);
       state.prescribe = { status: "완료", result: normalizePrescribe(res),
-                          error: null, resultId: done.result_id };
+                          error: null, resultId: done.result_id,
+                          criteriaEcho: res.criteria_echo ?? null, profileId: res.profile?.id ?? null };
       // 부채꼴의 근거가 방금 바뀌었다(감도 → 지렛대) — 다시 세우지 않으면 그림은
       // 옛 근거로 켜져 있으면서 자막만 새 말을 하게 된다
       recompute();
@@ -1394,6 +1423,8 @@ export function render() {
     if (pr.error) prescribeBox.append(el("div", { class: "error-box" }, pr.error));
     const m = pr.result;
     if (!m) return;
+    const prChip = criteriaChip(pr, "influence_prescribe");
+    if (prChip) prescribeBox.append(el("p", { style: "margin:6px 0 0" }, prChip));
 
     // 단일 — 설계변수 하나씩의 필요 변화량 (사유가 값 자리다)
     const rows = singleRows(m);
@@ -1615,16 +1646,40 @@ export function render() {
     canvas?.invalidate();
   }
 
+  /** 판정 기준 배지 — 결과의 criteria_echo를 **그 결과의 기체**의 지금 기준과 대조(lib/freshness.js).
+   *  지금 기준이 아직 없으면 받아 온 뒤 다시 그린다(조회 중엔 배지 없음). fresh는 조용하다. */
+  const critNow = new Map();  // 기체 id → echo | null (이 render 안에서만)
+  function criteriaChip(run, kind) {
+    if (!run?.result) return null;
+    const pid = run.profileId;
+    let st;
+    if (!run.criteriaEcho?.scheme || !pid) st = "unknown";
+    else if (!critNow.has(pid)) {
+      lookCriteria(pid).then((echo) => {
+        critNow.set(pid, echo);
+        if (kind === "influence_prescribe") renderPrescribe(); else renderEval();
+      });
+      return null;
+    } else st = criteriaFreshness(run.criteriaEcho, critNow.get(pid), kind);
+    const spec = criteriaBadgeSpec(st);
+    return spec
+      ? el("span", { class: `flag ${spec.tone}`, style: "margin-left:8px", title: spec.tip }, spec.label)
+      : null;
+  }
+
   function renderEval() {
     renderTabCounts();  // PASS/FAIL 배지가 패널이 닫혀 있어도 먼저 보인다
     evalVerdictNode = null;
     clear(evalCardsBox);
     clear(evalBox);
     clear(verifyBox);
-    const metaLine = state.evalMeta
-      ? `기준 지문 ${state.evalMeta.fingerprint} (서버 기본값 v${
-          state.evalMeta.criteria?.schema_version ?? "?"})`
-      : "기준 미로드 — 패널을 열면 불러온다";
+    const em = state.evalMeta;
+    const metaLine = !em ? "기준 미로드 — 패널을 열면 불러온다"
+      : em.profileMissing
+        ? `기체 ${em.profileId} 기준 미수신 — 도구 기본값 표시(지문 ${em.fingerprint}, v${
+            em.criteria?.schema_version ?? "?"}) · 판정은 서버가 기체 기준으로 한다`
+        : `기체 ${em.profileId} 기준(${em.echo?.source === "profile" ? "기체 문서" : "도구 기본값"}, v${
+            em.criteria?.schema_version ?? "?"}) · 판정 지문 ${String(em.fingerprint ?? "—").slice(0, 8)}`;
     const run = state.evalRun;
     if (!run) {
       evalStatus.textContent =
@@ -1674,7 +1729,8 @@ export function render() {
         // 기동은 lib이 문장으로 만든다 — 세 갈래(선형/기록 있음/없음)를 여기
         // 인라인으로 두면 테스트가 못 묶는다 (compositionLine·checksSummary 선례)
         + (maneuverLine(m) ? ` · ${maneuverLine(m)}` : "")
-        + (m.aborted ? " · 취소됨 — 완료 단계만" : "")));
+        + (m.aborted ? " · 취소됨 — 완료 단계만" : ""),
+        criteriaChip(run, "influence_evaluate")));
 
       // 나머지 판정 — 요약 한 줄이 정본 표면, 문제 항목만 전개 (na도 병기·전개)
       const ch = m.checks;

@@ -14,7 +14,9 @@
 */
 
 import { lineageText } from "../lib/lineage.js";
-import { resultFreshness } from "../lib/freshness.js";
+import {
+  CRITERIA_JUDGED_KINDS, criteriaBadgeSpec, criteriaEchoCache, criteriaFreshness, resultFreshness,
+} from "../lib/freshness.js";
 import { briefModel, jsonPreview, kindLabel } from "../lib/resultbrief.js";
 import { STATUS } from "../lib/plot.js";
 import { revealPanel } from "../lib/reveal.js";
@@ -41,6 +43,9 @@ let showAll = false;
 // 브리핑 — 마지막으로 연 결과의 결정적 요약 {meta, model, preview} (재진입 유지)
 let lastView = null;
 let profileRows = null; // GET /profiles — 결과 신선도 대조용(lib/freshness.js). 못 받으면 판정하지 않는다
+// 기체 id → 지금 판정 기준 echo(GET /profiles/{id}/criteria). 키 없음 = 아직 조회 중(배지 없음), null = 조회 실패
+// (→ 판정 기준 미상). 목록을 불러올 때마다 새로 받는다 — 기준은 기체 탭에서 언제든 바뀐다
+let criteriaNow = new Map();
 let viewSeq = 0; // 늦게 온 옛 본문이 새로 고른 결과의 브리핑을 덮지 않게
 // 탭을 열면 최신 결과의 브리핑이 자동으로 선다 — 세션에 한 번, 이미 보던 브리핑·열어 둔
 // 패널이 있으면 끼어들지 않는다 (기체 탭 목록 자동 열림과 같은 규약)
@@ -119,6 +124,7 @@ export function render() {
       fresh.state === "stale" ? el("p", { class: "error-box", style: "margin:0 0 8px" }, fresh.label) : null,
       fresh.state === "gone" || fresh.state === "unreadable" || fresh.state === "applied"
         ? el("p", { class: "hint", style: "margin:0 0 8px" }, fresh.label) : null,
+      criteriaNote(view.meta),
       model.verdict
         ? el("p", { style: "margin:0 0 8px" },
             el("span", { class: "flag",
@@ -329,6 +335,21 @@ export function render() {
     }, opinionCtl(), onView, profileRows);
   };
 
+  // 판정 기준 대조 재료 — 목록의 판정 결과가 가리키는 기체마다 한 번(lib/freshness.js criteriaEchoCache).
+  // 목록을 먼저 세우고, 다 오면 칩이 선다(조회 중엔 배지 없음 — 「미상」으로 깜빡이지 않게)
+  let criteriaSeq = 0;
+  const loadCriteria = async (list) => {
+    const my = ++criteriaSeq;
+    const look = criteriaEchoCache((path) => api.get(path));
+    const ids = [...new Set(list.filter((m) => CRITERIA_JUDGED_KINDS.has(m.kind) && m.criteria_echo && m.profile?.id)
+      .map((m) => m.profile.id))];
+    const pairs = await Promise.all(ids.map(async (id) => [id, await look(id)]));
+    if (my !== criteriaSeq) return;
+    criteriaNow = new Map(pairs);
+    paintList();
+    if (lastView && !lastView.loading) paintBriefDoc();
+  };
+
   const load = async () => {
     try {
       clear(errBox);
@@ -339,6 +360,7 @@ export function render() {
       ]);
       items = res;
       profileRows = rows;
+      loadCriteria(items);
       statusLine.textContent = items.length
         ? `${items.length}건 · 최근순`
         : "";
@@ -516,7 +538,7 @@ function renderList(box, list, all, onToggle, opinion, onView, rows) {
       el("td", {}, kindLabel(m.kind),
         // 코드도 함께 낸다 — 우리말 이름만 내면 API·다른 화면과 대조가 안 된다
         el("span", { class: "hint", style: "margin-left:6px" }, m.kind ?? "")),
-      el("td", {}, aircraftCell(m.profile), freshnessChip(m.profile, rows, m.id)),
+      el("td", {}, aircraftCell(m.profile), freshnessChip(m.profile, rows, m.id), criteriaChip(m)),
       el("td", { class: "num" }, m.id),
       el("td", { class: "num" }, m.n ?? "—"),
       el("td", { class: "num" }, lineageText(m)),
@@ -546,6 +568,30 @@ function freshnessChip(p, rows, resultId) {
     return el("span", { class: "flag na", style: "margin-left:6px", title: f.label }, "읽을 수 없음");
   }
   return null;
+}
+
+/** 판정 기준 상태 — 결과의 criteria_echo를 **그 결과를 계산한 기체**의 지금 기준과 대조(lib/freshness.js).
+ *  기준으로 판정하는 종류만 본다(시뮬·트림에 「미상」을 달면 거짓이다). 조회 중이면 null. */
+function criteriaStateOf(m) {
+  if (!m || !CRITERIA_JUDGED_KINDS.has(m.kind)) return null;
+  const pid = m.profile?.id;
+  if (!m.criteria_echo || !pid) return "unknown";
+  if (!criteriaNow.has(pid)) return null;
+  return criteriaFreshness(m.criteria_echo, criteriaNow.get(pid), m.kind);
+}
+
+function criteriaChip(m) {
+  const spec = criteriaBadgeSpec(criteriaStateOf(m));
+  return spec ? el("span", { class: `flag ${spec.tone}`, style: "margin-left:6px", title: spec.tip }, spec.label)
+    : null;
+}
+
+/** 브리핑의 기준 줄 — 칩과 같은 판단, 툴팁 문구를 본문으로 낸다. */
+function criteriaNote(m) {
+  const spec = criteriaBadgeSpec(criteriaStateOf(m));
+  if (!spec) return null;
+  return el("p", { class: "hint", style: "margin:0 0 8px" },
+    el("span", { class: `flag ${spec.tone}`, style: "margin-right:6px" }, spec.label), spec.tip);
 }
 
 /** 그 결과를 계산한 기체 — 결과 meta의 profile 블록(02 §5.6). 지금 헤더에서 고른 기체가 아니다.

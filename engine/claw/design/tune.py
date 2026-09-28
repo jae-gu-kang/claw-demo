@@ -39,7 +39,7 @@ from dataclasses import asdict, dataclass, replace
 
 import numpy as np
 
-from claw.analysis.fq import LN2, FQCriteria
+from claw.analysis.fq import FQCriteria
 from claw.analysis.margins import broken_loop, nyquist_margins
 from claw.design.closure import (
     _WN_FLOOR_FRAC,
@@ -52,7 +52,7 @@ from claw.design.closure import (
     rate_loop_crossover,
     wn_reference,
 )
-from claw.design.criteria import MarginCriteria
+from claw.design.criteria import SPIRAL_T2_MIN_S, MarginCriteria, spiral_exempt_verdict
 from claw.trim import split_axes
 
 _SCAN_N = 33  # 레이트 게인 브래킷 스캔 밀도
@@ -268,15 +268,9 @@ _DIRECTION_PROBE = 0.1
 # 튜너는 criteria를 받지 않으므로(분류기·시드도 tune_point를 부른다) 기본값을 한 자리에서 물려받는다.
 # 판정 문턱이 아니라 "롤 모드가 실근으로 있나"의 문턱이라 설정 덧씀을 따라가지 않아도 판정이 갈리지 않는다
 _DIRECTION_PART_MIN = MarginCriteria.lam_part_min
-# 댐퍼 가드의 나선 면제선 [s] — 기체 비행성 기준(analysis.fq.FQCriteria — MIL-F-8785C Class I·Cat B [기본값])의
-# 나선 **수준 2** 최소 배가시간을 그대로 쓴다(8 s). 새 수를 만들지 않는다 — 기준을 바꾸면(다른 급·비행단계) 따라간다.
-# 수준을 가르는 것은 **어느 상태를 재는가**다. 8785C의 나선 요구는 비행제어계를 켠 채 조종간을 놓은 기체에 걸리고,
-# 이 SCAS에서 그 정상 상태는 자세 루프까지 닫힌 조성이다 — tune_point 3단이 그 조성을 극 전부 안정(나선 안정 —
-# 수준 1보다 강하다)으로 따로 확인한다. 댐퍼만 닫힌 조성은 자세 루프가 빠진 **고장 상태**이고, 8785C는 고장
-# 상태에 한 단계 낮은 수준을 허용한다. 수준 1을 여기 걸면 고장 상태의 나선 요구가 정상 상태의 롤 댐퍼를 깎는다 —
-# 예제 기체 기본 설정 실측: 앵커 135점 중 41점에서 롤 댐퍼가 나선 20 s 선에 묶여(λ 2.7~8.6, 목표 12) 검증 실패
-# 37건이 남았고, 수준 2 선에서는 0건(전 점 전체 폐루프 안정)이다
-_SPIRAL_T2_MIN_S = FQCriteria().spiral_t2_l2
+# 댐퍼 가드의 나선 면제선 [s] — 비행성 기준 나선 수준 2 배가시간. 근거·값은 design.criteria.SPIRAL_T2_MIN_S가 정본이다
+# (나선 면제 규칙 spiral_exempt_verdict와 한 자리에 — 마진 맵 칸 판정도 같은 선을 쓴다)
+_SPIRAL_T2_MIN_S = SPIRAL_T2_MIN_S
 # 작동기 대역 진동극의 최소 감쇠 — 간신히 안정한 작동기 공진을 합격으로 두지 않는다. 댐퍼 가드와 전체 폐루프 확인이
 # 같은 선을 쓴다(대역 = 0.3 × 작동기 wn 위)
 _ZETA_ACT_MIN = 0.10
@@ -440,25 +434,9 @@ def _failing_pole(poles, bound, act_kw) -> dict:
 
 
 def _spiral_exempt_verdict(poles, lm_axis) -> dict:
-    """극 집합 → 나선 면제를 적용한 안정 판정 {"stable", "bound", "spiral_t2_s", "max_re"} (_damper_loop_verdict 규칙).
-
-    발산극(Re ≥ −1e-9)이 없으면 안정. 횡축에서 발산극이 정확히 하나이고 느린 실근(|Re| < _WN_FLOOR_FRAC ×
-    기준 wn — 모드 지표가 장주기·나선으로 보고 빼는 저주파 문턱)이면 그것이 나선이다: 배가시간이 비행성 기준
-    선(_SPIRAL_T2_MIN_S) 이상이면 안정(면제), 아니면 bound "spiral". 나머지 발산은 전부 bound "unstable"."""
-    poles = np.asarray(poles)
-    max_re = float(np.max(poles.real)) if poles.size else -math.inf
-    bad = [p for p in poles if p.real >= -1e-9]
-    if not bad:
-        return {"stable": True, "bound": None, "spiral_t2_s": None, "max_re": max_re}
-    p = bad[0]
-    slow_real = (lm_axis.axis == "lat" and len(bad) == 1 and abs(p.imag) <= 1e-9
-                 and abs(p.real) < _WN_FLOOR_FRAC * wn_reference(lm_axis))
-    if not slow_real:
-        return {"stable": False, "bound": "unstable", "spiral_t2_s": None, "max_re": max_re}
-    t2 = LN2 / p.real if p.real > 0.0 else math.inf
-    if t2 < _SPIRAL_T2_MIN_S:
-        return {"stable": False, "bound": "spiral", "spiral_t2_s": t2, "max_re": max_re}
-    return {"stable": True, "bound": None, "spiral_t2_s": t2, "max_re": max_re}
+    """나선 면제 판정 — 규칙은 엔진 한 자리(design.criteria.spiral_exempt_verdict)다. 마진 맵 칸 판정(judge_cell)이 같은
+    규칙을 쓴다. 면제선은 호출 때의 이 모듈 _SPIRAL_T2_MIN_S를 넘긴다(동작 불변 — 테스트가 이 선을 바꿔 잰다)."""
+    return spiral_exempt_verdict(poles, lm_axis, t2_min_s=_SPIRAL_T2_MIN_S)
 
 
 def _strict_verdict(poles, act_kw) -> dict:

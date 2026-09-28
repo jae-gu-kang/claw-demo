@@ -289,16 +289,14 @@ def _with_closed(margins, others) -> dict:
     return {**margins, "closed_with": [o.name for o, _g in others]}
 
 
-def _with_status(margins: dict, mc) -> dict:
+def _with_status(margins: dict, mc, lm_axis=None) -> dict:
     """칸의 마진 dict + 엔진 판정(프로파일 기준) — 화면이 PM·GM 색을 다시 짜지 않게 판정을 싣는다.
-    pm_status = judge_pm, gm_status = judge_gm, status = judge({pm_deg, gm_db}) (= 둘의 합산). nan이면 na(judge와 같다).
+    판정은 엔진 MarginCriteria.judge_cell 한 자리다: 폐루프 발산(margins["closed_loop"])을 자동 설계와 같은 나선 면제
+    규칙(spiral_exempt_verdict)으로 접어 넣는다 — 느린 나선 실근 하나가 아닌 발산이면 status fail(pm·gm_status는 잰
+    그대로). 면제에 필요한 축·기준 wn은 페이로드에 없으므로 이 칸을 조립한 축 모델(lm_axis)을 넘긴다.
+    발산이 없으면 pm_status = judge_pm, gm_status = judge_gm, status = judge (= 둘의 합산). nan이면 na.
     to_jsonable 전의 날 수치로 판정한다(nan·inf가 JSON 표현으로 바뀌기 전)."""
-    return {
-        **margins,
-        "pm_status": mc.judge_pm(margins["pm_deg"]),
-        "gm_status": mc.judge_gm(margins["gm_db"]),
-        "status": mc.judge({"pm_deg": margins["pm_deg"], "gm_db": margins["gm_db"]}),
-    }
+    return {**margins, **mc.judge_cell(margins, margins.get("closed_loop"), lm_axis)}
 
 
 def _trim_only_entry(tr) -> dict:
@@ -759,7 +757,7 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                         # 루프는 닫고 끊는다(broken_loop) — 연 채로 재면 기체가 실제로 나는 폐루프가 아니다(요 댐퍼를 연
                         # roll_p의 나선 발산). 루프가 축마다 하나이고 교차가 하나씩이며 폐루프가 안정이면 종전과 비트 같다(골든)
                         entry["margins"][spec.name] = to_jsonable(
-                            _with_status(_with_closed(nyquist_margins(loop), others), crit.margin))
+                            _with_status(_with_closed(nyquist_margins(loop), others), crit.margin, model))
                     if zero:
                         entry["note"] = f"법칙 게인이 이 칸에서 0 — 제로 개루프라 마진 없음: {', '.join(zero)}"
                 except (ValueError, ArithmeticError) as e:

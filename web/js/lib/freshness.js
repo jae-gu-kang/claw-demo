@@ -52,3 +52,74 @@ export function resultFreshness(echo, rows, resultId = null) {
     label: `이 결과는 리비전 ${echo.revision ?? "—"}·지문 ${echo.fingerprint}로 계산했습니다 — `
       + `지금 문서(리비전 ${row.revision}·지문 ${fp})와 다릅니다. 다시 계산해야 지금 기체를 말합니다` };
 }
+
+/** 판정 기준 신선도 (기준 통합 ① S4c) — 결과의 criteria_echo를 **그 결과를 계산한 기체의 지금 기준**
+(GET /profiles/{id}/criteria의 echo)과 대조한다. 재료는 전부 서버 것이다: 판정 기준 지문·목표 지문·판정 함수
+버전(scheme). 여기는 대조와 문구뿐이다.
+
+상태 다섯 — fresh(같음: 조용) · reeval(판정 기준 지문 또는 판정 함수 버전이 다름: 합격·불합격이 지금 기준과
+다를 수 있다) · rescore(목표 지문만 다르고 결과가 목표로 J를 매긴 종류 — 영향성 평가·처방) ·
+target_changed(목표 지문만 다르고 자동 설계 — 게인은 여전히 유효하되 다른 목표로 설계했다) ·
+unknown(echo·scheme 없는 옛 결과, 지금 기준 미수신 — 낡음으로 위장하지 않는다. 옛 결과의
+`criteria_fingerprint`는 정의가 달라 대조하지 않는다). 목표를 안 쓰는 종류(마진 맵·스캔·진단·검증)는 목표만
+다르면 fresh다. */
+
+/** 판정에 목표(J)를 쓰는 결과 종류 — 목표만 달라져도 J를 다시 매겨야 한다. */
+export const TARGET_SCORED_KINDS = new Set(["influence_evaluate", "influence_prescribe"]);
+/** 목표로 설계한 결과 종류 — 목표만 달라지면 "다른 목표로 설계함"(무효는 아니다). */
+export const TARGET_DESIGNED_KINDS = new Set(["auto_design"]);
+/** 기준으로 판정하는 저장 결과 종류 — 결과 목록은 이 종류에만 기준 배지를 판단한다(시뮬·트림 등은 기준과 무관이라
+ *  「미상」을 달면 거짓이다). */
+export const CRITERIA_JUDGED_KINDS = new Set([
+  "influence_scan", "influence_evaluate", "influence_verify", "influence_prescribe", "influence_diagnose",
+  "auto_design", "margin_map",
+]);
+
+export const CRITERIA_FRESHNESS = {
+  fresh: { label: null, tone: null, tip: null },
+  unknown: { label: "판정 기준 미상", tone: "na",
+    tip: "이 결과에는 어느 판정 기준으로 판정했는지 기록(criteria_echo)이 없거나, 지금 기체의 기준을 받지 못했습니다 "
+      + "— 기준 통합(v1.52) 이전 결과일 수 있습니다. 낡았다는 뜻은 아닙니다" },
+  reeval: { label: "재평가 필요", tone: "bad",
+    tip: "이 결과를 판정한 기준(합격·권장선 또는 판정 함수 버전)이 지금 기체 프로파일의 기준과 다릅니다 — "
+      + "합격·불합격이 지금 기준과 다를 수 있으니 다시 실행하십시오" },
+  rescore: { label: "J 재계산 필요", tone: "warn",
+    tip: "판정선은 같지만 튜닝 목표(목표·가중치)가 지금 기체 프로파일과 다릅니다 — 판정은 유효하나 "
+      + "목표로 매긴 J 점수는 다시 계산해야 지금 목표를 말합니다" },
+  target_changed: { label: "현재 튜닝 목표와 다름", tone: "na",
+    tip: "판정선은 같지만 이 설계는 지금과 다른 튜닝 목표로 만들었습니다 — 게인이 무효인 것은 아니고, "
+      + "지금 목표로 설계하면 다른 게인이 나올 수 있습니다" },
+};
+
+/** resultEcho — 결과의 criteria_echo · currentEcho — 지금 기준의 echo · kind — 결과 종류(meta.kind). */
+export function criteriaFreshness(resultEcho, currentEcho, kind) {
+  if (!resultEcho?.scheme || !currentEcho?.scheme) return "unknown";
+  if (resultEcho.scheme !== currentEcho.scheme) return "reeval";
+  if (!resultEcho.judgement_fingerprint || !currentEcho.judgement_fingerprint) return "unknown";
+  if (resultEcho.judgement_fingerprint !== currentEcho.judgement_fingerprint) return "reeval";
+  if (resultEcho.targets_fingerprint === currentEcho.targets_fingerprint) return "fresh";
+  if (TARGET_SCORED_KINDS.has(kind)) return "rescore";
+  if (TARGET_DESIGNED_KINDS.has(kind)) return "target_changed";
+  return "fresh";
+}
+
+/** 배지 재료 {label, tone, tip} — fresh·모르는 상태는 null(배지 없음). */
+export function criteriaBadgeSpec(state) {
+  const s = CRITERIA_FRESHNESS[state];
+  return s?.label ? s : null;
+}
+
+/** 기체 id → 지금 기준 echo 조회기 — 한 화면 그리기(render) 동안 기체당 한 번만 부른다.
+ *  get(path) → Promise. 실패는 null(→ unknown)로 조용히 — 판정 불가를 낡음으로 위장하지 않는다. */
+export function criteriaEchoCache(get) {
+  const memo = new Map();
+  return (profileId) => {
+    if (!profileId) return Promise.resolve(null);
+    if (!memo.has(profileId)) {
+      memo.set(profileId, Promise.resolve()
+        .then(() => get(`/profiles/${encodeURIComponent(profileId)}/criteria`))
+        .then((r) => r?.echo ?? null, () => null));
+    }
+    return memo.get(profileId);
+  };
+}

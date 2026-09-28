@@ -43,11 +43,12 @@ import {
   requestLoops, runGainInfo, stableMarginEntries, unstableCells, unstableTail, validateActuatorDelay,
   validateLoops,
 } from "../lib/loops.js";
+import { criteriaBadgeSpec, criteriaFreshness } from "../lib/freshness.js";
 import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
 import { effectiveOf } from "../lib/profileform.js";
 import {
-  FALLBACK_CRITERIA, STATUS, fuelsOf, gmColor, heatmapCanvasHeight, heatmapCellAt, marginColor,
-  marginLegendText, marginWorst, pivotCases, threshold,
+  OLD_RESULT_HINT, STATUS, STATUS_LABEL, criteriaLineText, fuelsOf, hasMarginStatuses,
+  heatmapCanvasHeight, heatmapCellAt, marginCellStatus, marginLegendText, marginWorst, pivotCases, statusColor,
 } from "../lib/plot.js";
 import { revealPanel } from "../lib/reveal.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
@@ -87,16 +88,43 @@ let lastGains = null;
 // 제출·완료한 실행의 지연 출처(lib/loops.js delaySourceText — 툴 기본값 | 입력값) — 게인 기록과 같은 짝 규약
 let runningDelaySrc = null;
 let lastDelaySrc = null;
-// 판정선 — 정본은 /design/defaults(엔진 MarginCriteria). 하드코딩 폴백을 쓰면
-// 자동 설계 탭에서 기준을 바꿨을 때 같은 점을 두 탭이 다르게 칠한다 (lib/plot.js
-// FALLBACK_CRITERIA 머리말). 탭 재진입마다 다시 부르지 않도록 모듈에 남긴다
+// 판정선 — 고른 기체의 평가 기준(GET /profiles/{id}/criteria, 기준 통합 ①). **칸의 색은 이것으로 짜지 않는다**:
+// 칸 색은 결과에 실린 서버 판정(margins[loop].pm_status·gm_status)이고, 이것은 범례·제목에 판정선을 적는 데만 쓴다.
+// 탭을 그릴 때마다 다시 받는다(기체 편집기에서 기준을 바꿨을 수 있다). criteriaFor = 받은 기체 id
 let criteria = null;
 let criteriaErr = null;
+let criteriaFor = null;
+// 결과를 **계산한** 기체(body.profile.id)의 평가 기준 — id → {resp}(resp = GET /profiles/{id}/criteria 응답, 실패·404는
+// null → 판정 기준 미상). 히트맵 제목의 판정선과 「기준 다름」 대조는 이것으로 한다 — 지금 고른 기체가 아니다(lastBody는
+// 기체를 바꿔도 남는다). 탭을 그릴 때마다 비운다(기체 편집기에서 기준을 바꿨을 수 있다). 받는 중인 id는 resultCritPending
+let resultCritCache = new Map();
+let resultCritPending = new Set();
+// 기준이 도착하면 부를 지금 화면의 결과 다시 그리기 — draw()가 갈아 끼운다(옛 클로저는 떨어진 DOM이라 부르지 않는다)
+let redrawResult = null;
+
+/** 결과를 계산한 기체의 기준 {ready, resp}. 캐시에 없으면 받기 시작하고 ready=false — 도착하면 redrawResult. */
+function resultCriteriaOf(body) {
+  const id = body?.profile?.id;
+  if (!id) return { ready: true, resp: null };
+  const hit = resultCritCache.get(id);
+  if (hit) return { ready: true, resp: hit.resp };
+  if (!resultCritPending.has(id)) {
+    const cache = resultCritCache;
+    const pending = resultCritPending;
+    pending.add(id);
+    api.get(`/profiles/${encodeURIComponent(id)}/criteria`).catch(() => null).then((resp) => {
+      pending.delete(id);
+      if (!cache.has(id)) cache.set(id, { resp: resp ?? null });
+      if (cache === resultCritCache) redrawResult?.(); // 버려진 방문의 캐시면 그리지 않는다
+    });
+  }
+  return { ready: false, resp: null };
+}
 // 보드선도 요청 시퀀스 — **모듈 스코프**여야 한다. renderResults 지역이면 재진입이
 // bodeSeq=0인 새 클로저를 만들어, 옛 클로저의 진행 중 요청이 자기 카운터로는
 // 유효(seq === bodeSeq)라 **DOM에서 떨어진 슬롯**에 곡선을 그린다 — 사용자는
 // "계산 중"만 보고 곡선은 영영 안 온다(조용한 비표시). 대시보드 재렌더 경로는
-// /design/defaults 응답 뒤와 탭 재진입 둘 다 있다. 인스턴스는 동시에 하나뿐이라
+// 기체 평가 기준 응답 뒤와 탭 재진입 둘 다 있다. 인스턴스는 동시에 하나뿐이라
 // 모듈로 올려도 서로 간섭하지 않는다
 let bodeSeq = 0;
 // 탭을 떠났다 와도 열어 둔 패널은 그대로 (모듈 스코프 규약)
@@ -104,6 +132,8 @@ let openDrawer = null;
 
 export function render() {
   const visit = ++marginsVisit;
+  resultCritCache = new Map(); // 기준 편집을 따라 다시 받는다
+  resultCritPending = new Set();
   const errBox = el("div");
   const progressBox = el("div");
   const loopBox = el("div");
@@ -262,33 +292,36 @@ export function render() {
   const showErr = (e) =>
     clear(errBox).append(el("div", { class: "error-box" }, errorText(e)));
 
-  // 판정선 한 줄 — 폴백을 썼다는 사실을 숨기지 않는다. 숨기면 화면이 자기 기준을
-  // 정본인 척하게 되고, 그게 두 탭이 어긋나는 것보다 나쁘다
-  const criteriaBox = el("p", { class: "tab-status" },
-    "판정선 불러오는 중… (엔진 기본값 /design/defaults)");
+  // 판정선 한 줄 — 고른 기체의 기준(applied.margin + lines)에서. 칸 색은 서버 판정이라 이 조회가 실패해도 색은
+  // 그대로다 — 실패하면 판정선 수치만 못 적는다는 사실을 밝힌다(수치를 지어내지 않는다)
+  const selId = () => currentSelection()?.id ?? EXAMPLE_ID;
+  const criteriaBox = el("p", { class: "tab-status" }, "판정선 불러오는 중… (기체 평가 기준)");
   const drawCriteria = () => {
     clear(criteriaBox).append(
-      marginLegendText(criteria ?? FALLBACK_CRITERIA),
+      marginLegendText(criteria),
       criteria
-        ? " — 엔진 기본값(/design/defaults). 자동 설계 실행이 요구를 덮어썼다면"
-          + " 그 실행의 판정선은 결과의 margin_out.criteria다"
-        : ` — 판정선 조회 실패로 웹 폴백값을 쓰는 중이다 (${criteriaErr}). `
-          + "자동 설계 탭에서 기준을 바꿨다면 이 색은 그 기준이 아니다.",
+        ? ` — 기체 ${criteriaFor}의 평가 기준(${criteria?.echo?.source === "profile" ? "문서" : "도구 기본값"})`
+        : ` — 기체 평가 기준 조회 실패로 판정선 수치는 적지 못한다 (${criteriaErr}). 칸 색은 서버 판정 그대로다.`,
     );
   };
 
   const loadCriteria = async () => {
+    const id = selId();
     try {
-      const d = await api.get("/design/defaults");
-      criteria = d?.config?.criteria ?? null;
-      criteriaErr = criteria ? null : "응답에 config.criteria가 없다";
+      const d = await api.get(`/profiles/${encodeURIComponent(id)}/criteria`);
+      if (visit !== marginsVisit) return; // 버려진 화면의 늦은 응답
+      criteria = d?.applied?.margin && Array.isArray(d?.lines) ? d : null;
+      criteriaErr = criteria ? null : "응답에 applied.margin·lines가 없다";
+      // 같은 기체로 계산한 결과가 있으면 그 대조 재료로도 쓴다(중복 조회 방지). 받는 중인 조회는 스스로 다시 그린다
+      if (!resultCritCache.has(id)) resultCritCache.set(id, { resp: d ?? null });
     } catch (e) {
+      if (visit !== marginsVisit) return;
       criteria = null;
       criteriaErr = errorText(e);
     }
+    criteriaFor = id;
+    // 범례만 — 히트맵 제목의 판정선·「기준 다름」은 결과를 계산한 기체의 기준이라(resultCriteriaOf) 여기서 다시 그리지 않는다
     drawCriteria();
-    // 문턱이 바뀌었으니 이미 그려진 히트맵도 다시 칠한다 (조용히 옛 색으로 두지 않는다)
-    if (lastBody) renderResults(slots, lastBody);
   };
 
   const watch = () => {
@@ -533,8 +566,8 @@ export function render() {
       + "칸을 누르면 그 점의 보드선도가 열립니다."));
   }
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
-  if (criteria) drawCriteria(); // 이미 받아 둔 판정선 — 재진입마다 다시 부르지 않는다
-  else loadCriteria();
+  if (criteria && criteriaFor === selId()) drawCriteria(); // 받아 둔 것을 먼저 보이고, 기준 편집을 따라 다시 받는다
+  loadCriteria();
 
   // 쇼케이스 신호 — 격자는 미션 템플릿 격자, 루프는 문서 게인(서버가 칸마다 읽는 법칙 게인 — 편집 표는 가운데 마하 값),
   // 작동기는 문서 값으로 세운 뒤(손댄 칸도 — 진행기는 「문서의 기체」를 잰다) [실행]과 같은 길로. 템플릿·게인이
@@ -797,8 +830,23 @@ function renderResults(slots, body) {
   };
 
   const draw = () => {
-    // 판정선은 그릴 때마다 읽는다 — /design/defaults가 뒤늦게 도착해도 다시 칠해진다
-    const cr = criteria ?? FALLBACK_CRITERIA;
+    // 칸 색은 결과에 실린 서버 판정(lib/plot.js marginCellStatus). 판정선은 제목에만 — **이 결과를 계산한 기체**의
+    // 기준에서(지금 고른 기체가 아니다). 기준이 뒤늦게 오면 다시 그린다
+    // 단, 보드선도가 열려 있거나 요청 중이면(슬롯에 「계산 중」·곡선이 있다) 다시 그리지 않는다 — draw가 bodeSeq를
+    // 올리고 슬롯을 새로 만들어 그 상세를 조용히 버린다(리뷰 지적). 제목의 판정선은 다음 그리기에 맞춰진다
+    redrawResult = () => {
+      if (!plotBox.isConnected) return;
+      if ([...detailBoxes.values()].some((b) => b.childNodes.length > 0)) return;
+      draw();
+    };
+    const rc = resultCriteriaOf(body);
+    const pmLine = criteriaLineText(rc.resp, "pm_deg");
+    const gmLine = criteriaLineText(rc.resp, "gm_db");
+    // 결과 기준 ↔ 그 기체의 지금 기준 — 공용 대조기(lib/freshness.js). 받는 중엔 말하지 않는다
+    const critState = rc.ready ? criteriaFreshness(body.criteria_echo, rc.resp?.echo ?? null, "margin_map") : "fresh";
+    const critSpec = criteriaBadgeSpec(critState);
+    const resultPid = body?.profile?.id ?? null;
+    const selPid = currentSelection()?.id ?? EXAMPLE_ID;
     const fuel = Number(fuelSel.value);
     const pivot = pivotCases(entries, fuel);
     // 연료가 바뀌면 다른 격자다 — 옛 상세도, **진행 중인 요청도** 무효다
@@ -816,18 +864,20 @@ function renderResults(slots, body) {
       const label = lp.x_out
         ? `${lp.name} — ${lp.sign < 0 ? "−" : "+"}PI·G(${lp.x_out} ← ${lp.u_in}) [${lp.axis}]${gains}`
         : lp.name;
-      // 칸의 수는 나이퀴스트 여유(−1까지의 거리 — 엔진 nyquist_margins). 이 루프를 닫은 폐루프가 발산하는 칸은 수와
-      // 무관하게 「발산」·부족 색(lib/loops.js marginCellView) — 교차 판독이 좋아 보여도 여유가 아니다
+      // 칸의 수는 나이퀴스트 여유(−1까지의 거리 — 엔진 nyquist_margins). 이 루프를 닫은 폐루프가 발산하는 칸은 글이
+      // 「발산」(lib/loops.js marginCellView)이고, 색은 다른 칸처럼 서버 판정 — 서버가 발산을 판정에 접어 넣는다
       const pmCanvas = heatmapCanvas(pivot, (e) => {
         if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
         const v = marginCellView(e.margins[lp.name], "pm_deg");
-        return v ? { color: marginColor(v.value, cr), text: v.text } : { color: STATUS.na, text: "—" };
-      }, { title: `위상여유 PM [deg] — ${lp.name} (≥${threshold(cr, "pm_min_deg")}°)`, width: HEAT_W });
+        return v ? { color: statusColor(marginCellStatus(e.margins[lp.name], "pm_deg")), text: v.text }
+          : { color: STATUS.na, text: "—" };
+      }, { title: `위상여유 PM [deg] — ${lp.name}${pmLine ? ` (${pmLine})` : ""}`, width: HEAT_W });
       const gmCanvas = heatmapCanvas(pivot, (e) => {
         if (!e.trim.converged) return { color: STATUS.na, text: "트림×" };
         const v = marginCellView(e.margins[lp.name], "gm_db");
-        return v ? { color: gmColor(v.value, cr), text: v.text } : { color: STATUS.na, text: "—" };
-      }, { title: `이득여유 GM [dB] — ${lp.name} (≥${threshold(cr, "gm_min_db")} dB)`, width: HEAT_W });
+        return v ? { color: statusColor(marginCellStatus(e.margins[lp.name], "gm_db")), text: v.text }
+          : { color: STATUS.na, text: "—" };
+      }, { title: `이득여유 GM [dB] — ${lp.name}${gmLine ? ` (${gmLine})` : ""}`, width: HEAT_W });
       // PM·GM 두 장 다 같은 루프의 같은 칸이므로 어느 쪽을 눌러도 같은 선도가 뜬다
       wireCells(pmCanvas, pivot, lp);
       wireCells(gmCanvas, pivot, lp);
@@ -848,10 +898,24 @@ function renderResults(slots, body) {
       // el() 래핑 필수 — 네이티브 append는 배열을 문자열화 (리뷰 Must: 상습 함정군)
       el("div", {}, loopPlots),
       el("div", { class: "legend" },
-        el("span", {}, el("span", { class: "chip", style: `background:${STATUS.ok}` }), "양호"),
-        el("span", {}, el("span", { class: "chip", style: `background:${STATUS.warn}` }), "주의"),
-        el("span", {}, el("span", { class: "chip", style: `background:${STATUS.bad}` }), "부족"),
-        el("span", {}, el("span", { class: "chip", style: `background:${STATUS.na}` }), "트림 불가/판정 불가")),
+        Object.entries(STATUS_LABEL).map(([k, name]) => el("span", {},
+          el("span", { class: "chip", style: `background:${statusColor(k)}` }),
+          k === "na" ? `${name} · 트림 불가` : name))),
+      // 옛 결과(칸 판정 없음)는 전 칸 판정 불가 — 브라우저가 다시 판정하지 않고 사실을 말한다.
+      // 판정이 있어도 지금 기체 기준과 다른 기준으로 낸 결과면 그 사실을 말한다
+      // (네이티브 append라 null을 넘기면 글자 "null"이 된다 — 배열로 걸러 펼친다)
+      ...[
+        !hasMarginStatuses(body) ? OLD_RESULT_HINT
+          : critSpec
+            ? `${critSpec.label} — ` + (critState === "reeval"
+              ? `이 결과는 기체 ${resultPid}의 지금 평가 기준과 다른 기준으로 판정됐다 — 칸 색은 계산할 때의 기준이다, `
+                + "다시 계산하면 지금 기준으로 선다"
+              : critSpec.tip)
+            : null,
+        resultPid && resultPid !== selPid
+          ? `이 결과는 기체 ${resultPid}로 계산했다 — 제목의 판정선도 그 기체의 기준이다 (지금 고른 기체: ${selPid})`
+          : null,
+      ].filter(Boolean).map((t) => el("p", { class: "hint", style: "margin:6px 0 0" }, t)),
       // 칸의 수가 무엇인가(끊는 자리·나이퀴스트 거리·발산·게인 탭 판정 범위)와 루프 게인 출처 — 그림 아래 캡션
       ...[marginSemanticsText(body), gainSourceText(gainsInfo, law)].filter(Boolean)
         .map((t) => el("p", { class: "hint", style: "margin:6px 0 0" }, t)),

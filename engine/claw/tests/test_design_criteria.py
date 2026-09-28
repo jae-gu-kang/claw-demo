@@ -355,3 +355,62 @@ def test_목표_정합_검사는_상한_지표에서_부등호를_뒤집는다(m
     assert cr.target_conflicts(crit, SimpleNamespace(os_target=0.05)) == []
     assert cr.target_conflicts(crit, SimpleNamespace(os_target=0.15))[0]["level"] == "rec"
     assert cr.target_conflicts(crit, SimpleNamespace(os_target=0.25))[0]["level"] == "pass"
+
+
+# ── 마진 맵 칸 판정 judge_cell — 폐루프 발산을 자동 설계와 같은 나선 면제 규칙으로 접는다 ──
+
+@pytest.fixture(scope="module")
+def demo_axes():
+    from claw.trim import split_axes
+
+    ac = make_demo_aircraft()
+    tr = trim_level(ac, TrimCase("t", mach=0.45, alt=1000.0, fuel=200.0), fingerprint="fp")
+    return split_axes(linearize(ac, tr))
+
+
+def test_judge_cell_stable_equals_axis_judges(demo_axes):
+    """발산이 없으면 judge_pm·judge_gm·judge 그대로 — closed_loop 없음·stable 둘 다."""
+    _lon, lat = demo_axes
+    c = MarginCriteria()
+    m = {"pm_deg": 60.0, "gm_db": 12.0}
+    want = {"pm_status": "ok", "gm_status": "ok", "status": "ok"}
+    assert c.judge_cell(m) == want
+    assert c.judge_cell(m, {"stable": True, "unstable": []}, lat) == want
+    w = {"pm_deg": 60.0, "gm_db": 7.0}
+    assert c.judge_cell(w) == {"pm_status": "ok", "gm_status": "warn", "status": c.judge(w)}
+    assert c.judge_cell({"pm_deg": math.nan, "gm_db": 12.0})["status"] == "na"
+
+
+def test_judge_cell_divergence_fails_the_cell_but_keeps_axis_readings(demo_axes):
+    """진동 발산·종축 발산·빠른 실근은 칸 status fail — 여유가 좋아도. 축별 판정은 잰 판독 그대로."""
+    lon, lat = demo_axes
+    c = MarginCriteria()
+    m = {"pm_deg": 60.0, "gm_db": 12.0}
+    osc = {"stable": False, "unstable": [[0.3, 4.0]]}
+    assert c.judge_cell(m, osc, lat) == {"pm_status": "ok", "gm_status": "ok", "status": "fail"}
+    assert c.judge_cell(m, {"stable": False, "unstable": [[0.05, 0.0]]}, lon)["status"] == "fail"  # 종축엔 면제 없음
+    assert c.judge_cell(m, {"stable": False, "unstable": [[5.0, 0.0]]}, lat)["status"] == "fail"  # 느린 근이 아니다
+    assert c.judge_cell(m, {"stable": False, "unstable": [[0.01, 0.0], [0.002, 0.0]]}, lat)["status"] == "fail"
+    # 축 모델이 없으면 면제를 가를 수 없다 — 발산은 fail
+    assert c.judge_cell(m, {"stable": False, "unstable": [[0.05, 0.0]]})["status"] == "fail"
+
+
+def test_judge_cell_single_slow_spiral_is_exempt_like_auto_design(demo_axes):
+    """횡축의 느린 나선 실근 하나는 발산으로 치지 않는다 — tune.rate_loop_margins(divergent = bound "unstable")와 같은
+    규칙. 배가시간이 면제선보다 짧아도(bound "spiral") 칸은 여유 판정 그대로다(나선은 가드·전체 폐루프 확인의 몫)."""
+    from claw.design.criteria import spiral_exempt_verdict
+    from claw.design.tune import _spiral_exempt_verdict
+
+    _lon, lat0 = demo_axes
+    for re in (0.05, 0.1, 0.3j, 5.0):  # 튜너 별칭과 한 자리(같은 결과)
+        assert _spiral_exempt_verdict([complex(re)], lat0) == spiral_exempt_verdict([complex(re)], lat0)
+    _lon, lat = demo_axes
+    c = MarginCriteria()
+    m = {"pm_deg": 60.0, "gm_db": 12.0}
+    for re in (0.05, 0.1):  # 배가 13.9 s(면제) · 6.9 s(bound spiral)
+        cl = {"stable": False, "unstable": [[re, 0.0]]}
+        assert spiral_exempt_verdict([complex(re, 0.0)], lat)["bound"] != "unstable"
+        assert c.judge_cell(m, cl, lat) == {"pm_status": "ok", "gm_status": "ok", "status": "ok"}
+    # 면제여도 여유 판정은 그대로 산다
+    assert c.judge_cell({"pm_deg": 40.0, "gm_db": 12.0}, {"stable": False, "unstable": [[0.05, 0.0]]},
+                        lat)["status"] == "fail"

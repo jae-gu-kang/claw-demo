@@ -34,7 +34,7 @@ import {
   statusText, trimLabel, verdictLegend, warnNoteText,
 } from "../lib/autodesign.js";
 import { applyFreshnessBlock } from "../lib/flowsteps.js";
-import { resultFreshness } from "../lib/freshness.js";
+import { criteriaBadgeSpec, criteriaFreshness, resultFreshness } from "../lib/freshness.js";
 import { slotIndex, withConstant } from "../lib/gainsync.js";
 import { haltReason } from "../lib/showcase.js";
 import { revealPanel } from "../lib/reveal.js";
@@ -858,13 +858,24 @@ function renderResult(box, body, resultId, ctx) {
   };
   const adoptMsg = el("span");
   const applyMsg = el("span");
+  // 판정 기준 배지 — 결과의 criteria_echo를 그 기체의 지금 기준과 대조(lib/freshness.js). 조회는 비동기로 채운다
+  const critSlot = el("span", { style: "font-size:12px;font-weight:normal" });
+  (async () => {
+    const pid = body.profile?.id;
+    const now = pid && body.criteria_echo?.scheme
+      ? await api.get(`/profiles/${encodeURIComponent(pid)}/criteria`).then((r) => r?.echo ?? null, () => null)
+      : null;
+    const spec = criteriaBadgeSpec(criteriaFreshness(body.criteria_echo, now, "auto_design"));
+    if (spec) critSlot.append(el("span", { class: `flag ${spec.tone}`, style: "margin-left:8px", title: spec.tip },
+      spec.label));
+  })();
 
   const covBox = coverageBox(report);
   // 상태 줄 아래 사실 셋 — 무엇으로 설계했나(작동기)·표에서 무엇을 뺐나(튜닝 실패 표본)·표가 무엇을
   // 뭉갰나(스케줄 축 밖 변동·톱니). sections는 native append라 null을 걸러 넣는다
   const facts = [actuatorBox(body), excludedBox(body), fitFactsBox(body.fits)].filter(Boolean);
   const sections = [
-    el("h3", {}, `결과 ${resultId}`),
+    el("h3", {}, `결과 ${resultId}`, critSlot),
     el("p", {},
       "상태 ", sevChip(statusSeverity(report.status)), ` ${report.status ?? "?"} · `,
       // 계산해 놓고 안 내던 수치들 — 특히 판정 수가 없으면 "실패 0"의 뜻이 갈리지 않는다
