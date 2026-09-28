@@ -4,6 +4,7 @@
   "base_trims": 53,
   "quality_dense_pairs": 40,
   "quality_anomalies": 0,
+  "quality_unjudged_rows": 0,
   "breakpoints": 5,
   "design_points": 46,
   "validation_points": 64,
@@ -23,7 +24,8 @@
    "VERDICT_CHANGE": 15,
    "TRIM_FAILURE_BOUNDARY": 6
   },
-  "reinforce_status": "보강 완료",
+  "reinforce_status": "보강 종료 · 잴 수 없는 구간 있음",
+  "reinforce_unmeasured": 10,
   "unique_conditions": 95,
   "attempts": 95
  },
@@ -517,7 +519,8 @@
     "worst": "d_trim"
    }
   ],
-  "anomaly": []
+  "anomaly": [],
+  "unjudged_rows": []
  },
  "added": [
   {

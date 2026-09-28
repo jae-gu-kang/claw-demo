@@ -125,3 +125,15 @@ def test_base_refine_metrics_are_consistent(built):
     assert set(m["refinement_reasons"]) <= {g.R_NONLINEAR_METRIC, g.R_VERDICT_CHANGE, g.R_TRIM_FAILURE_BOUNDARY}
     assert set(m["interpolation"]) == {"breakpoint", "interpolated", "clip"}
     assert m["design_points"] <= m["base_points"]  # 설계점은 기본 격자에서 고른다
+
+
+def test_common_axis_base_grid_is_reused_more_than_per_row(built):
+    own = rx.base_refine(built, n_mach=7, budget=4)["metrics"]
+    com = rx.base_refine(built, n_mach=7, budget=4, common_axis=True)["metrics"]
+    assert com["base_reuse_ratio"] > own["base_reuse_ratio"]
+    assert com["role_reused"] / (com["role_reused"] + com["role_new_trims"]) == pytest.approx(com["base_reuse_ratio"])
+
+
+def test_base_refine_budget_reaches_reinforce(built):
+    m = rx.base_refine(built, n_mach=5, budget=4)["metrics"]
+    assert m["refinement_reasons"].get(g.R_NONLINEAR_METRIC, 0) <= 4

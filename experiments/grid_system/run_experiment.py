@@ -129,10 +129,10 @@ def make_measure(ev, region, model, schedule):
     return measure
 
 
-def run_reinforce(ev, region, model, schedule, rows, union, scales, tol=None):
+def run_reinforce(ev, region, model, schedule, rows, union, scales, tol=None, max_points=None):
     measure = make_measure(ev, region, model, schedule)
     return g.reinforce(measure, rows, union, scales, tol=REINFORCE_TOL if tol is None else tol,
-                       max_points=REINFORCE_MAX_POINTS,
+                       max_points=REINFORCE_MAX_POINTS if max_points is None else max_points,
                        max_depth=REINFORCE_MAX_DEPTH)
 
 
@@ -202,7 +202,7 @@ def base_refine(built, *, n_mach=9, budget=REINFORCE_MAX_POINTS, common_axis=Fal
     # 보강
     a1 = store.attempts
     rows_v = [(float(a), float(f)) for f in fuels for a in base_alts]
-    re_ = run_reinforce(ev, region, model, sch, rows_v, sch.union_coords(), g.d_scales(ev.criteria))
+    re_ = run_reinforce(ev, region, model, sch, rows_v, sch.union_coords(), g.d_scales(ev.criteria), max_points=budget)
     added = [{"cond": x["cond"], "row": x["row"], "reason": g.R_NONLINEAR_METRIC, "slot": x["slot"]}
              for x in re_["added"]]
     extra = g.verdict_change_points(recs, max_points=budget) + g.trim_boundary_points(recs, max_points=budget)
@@ -221,12 +221,14 @@ def base_refine(built, *, n_mach=9, budget=REINFORCE_MAX_POINTS, common_axis=Fal
     metrics = {
         "base_points": len(base), "base_trims": base_trims,
         "quality_dense_pairs": len(quality["dense"]), "quality_anomalies": len(quality["anomaly"]),
+        "quality_unjudged_rows": len(quality["unjudged_rows"]),
         "breakpoints": len(bps), "design_points": len(design), "validation_points": len(recs),
         "role_new_trims": role_new, "role_reused": role_hits,
         "base_reuse_ratio": role_hits / tried if tried else 0.0,
         "refine_new_trims": refine_new, "additional_trims": role_new + refine_new,
         "additional_trim_failures": new_fail, "interpolation": g.interpolation_share(recs, sch.union_coords()),
         "refinement_reasons": reasons, "reinforce_status": re_["status"],
+        "reinforce_unmeasured": len(re_["unmeasured"]),
         "unique_conditions": store.unique_conditions, "attempts": store.attempts,
     }
     return {"metrics": metrics, "bps": bps, "quality": quality,

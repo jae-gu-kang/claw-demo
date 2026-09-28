@@ -425,31 +425,35 @@ class Evaluator:
             alpha = math.atan2(float(tr.state.vel_b[2]), float(tr.state.vel_b[0]))
             a_lo, a_hi = tb["alpha"]
             if alpha >= a_hi - 1e-6 or alpha <= a_lo + 1e-6:
-                return self._alpha_bound(c, rec, model)
+                return self._alpha_bound(c, rec, model, at_upper=alpha >= a_hi - 1e-6)
             return CALC_FAILED, rec, ["not_converged"]
         why = sat + (["alpha_margin"] if not tr.flags.get("alpha_margin_ok") else [])
         if why:
             return INFEASIBLE, rec, why
         return COMPUTABLE, rec, []
 
-    def _alpha_bound(self, c: Condition, rec, model: ModelRange):
-        """받음각 탐색 상한에 붙은 미수렴 — V_S 근거가 있으면 물리적 불가, 없으면 제약 도달·미수렴."""
+    def _alpha_bound(self, c: Condition, rec, model: ModelRange, *, at_upper: bool = True):
+        """받음각 탐색 한계에 붙은 미수렴. **하한**은 양력이 남는 쪽이라 실속 논리를 쓰지 않고 제약 도달이다.
+        **상한**은 실속표로 잰 1g 실속 속도 V_S보다 느리다는 근거(또는 1g 도달 불가)가 있을 때만 물리적
+        불가이고, 아니면 제약 도달·미수렴이다(V_S보다 빠름 — 탐색 상한이 좁을 수 있음 / 근거 자료 없음)."""
         from claw.analysis.envelope import stall_mach_lo
 
-        st = self.built.stall_table()
+        if not at_upper:
+            return CONSTRAINT_HIT, rec, ["alpha_search_lower", "not_converged"]
         base = ["alpha_search_bound", "not_converged"]
-        if c.mach < float(st.axes[0][0]) - _EPS:
-            return CONSTRAINT_HIT, rec, [*base, "stall_basis_missing"]  # 실속표 밖 — 판단 미완료
-        key = (c.alt, c.fuel)
+        key = (c.alt, c.fuel, float(model.mach[1]))  # mach_hi가 결과를 바꾸므로 키에 든다
         if key not in self._vs:
-            self._vs[key] = stall_mach_lo(self._ctx["aircraft"], st, c.alt, c.fuel, mach_hi=float(model.mach[1]),
-                                          mach_margin=1.0)
+            self._vs[key] = stall_mach_lo(self._ctx["aircraft"], self.built.stall_table(), c.alt, c.fuel,
+                                          mach_hi=float(model.mach[1]), mach_margin=1.0)
         vs, src = self._vs[key]
         if src == "n_reach":
             return INFEASIBLE, rec, [*base, "1g_unreachable"]
-        if src == "stall" and c.mach < vs - _EPS:
-            return INFEASIBLE, rec, [*base, "below_V_S"]
-        # src "stall"이고 V_S 이상이거나, "db"(V_S가 실속표 축 아래 — 이 마하는 V_S보다 빠르다)
+        if src == "stall":  # V_S 확정 — 실속표 축 밖(더 느린 쪽)이라도 V_S보다 느리면 불가다
+            return (INFEASIBLE, rec, [*base, "below_V_S"]) if c.mach < vs - _EPS else \
+                (CONSTRAINT_HIT, rec, [*base, "above_V_S"])
+        # "db": V_S가 실속표 축 아래라는 것만 안다 — 축 안의 마하는 V_S보다 빠르고, 축 밖은 근거가 없다
+        if c.mach < float(self.built.stall_table().axes[0][0]) - _EPS:
+            return CONSTRAINT_HIT, rec, [*base, "stall_basis_missing"]
         return CONSTRAINT_HIT, rec, [*base, "above_V_S"]
 
     def judge(self, c: Condition, rec, schedule: Schedule, tables=None):
@@ -586,6 +590,7 @@ def d_values(recs, union, scales) -> list:
 # ── 보강 절차 (05 §11.7) — 허용치·예산·합격 기준 분리 ─────────────────────────────
 REINFORCE_DONE = "보강 완료"
 REINFORCE_BUDGET = "보강 종료 · 추가 검증 필요"
+REINFORCE_UNMEASURED = "보강 종료 · 잴 수 없는 구간 있음"  # 모르는 것을 완료로 둔갑시키지 않는다
 
 
 def _seg_d(ma, mm, mb, scales, t=0.5):
@@ -616,11 +621,13 @@ def reinforce(measure, rows, union, scales, *, tol, max_points, max_depth) -> di
             cache[c.name] = measure(c)
         return cache[c.name]
 
-    heap, seq = [], 0
+    heap, seq, unmeasured = [], 0, []
     for row in rows:
         for a, b in zip(union, union[1:]):
             d, slot = _seg_d(m(a, row), m((a + b) / 2, row), m(b, row), scales)
-            if d is not None:
+            if d is None:  # 양끝·중점 중 계산 불가가 있다 — 사라지게 두지 않고 잴 수 없는 구간으로 남긴다
+                unmeasured.append({"row": row, "interval": (a, b), "depth": 0})
+            else:
                 heapq.heappush(heap, (-d, seq, row, a, b, 0, slot))
                 seq += 1
     added, status, depth_capped = [], REINFORCE_DONE, []
@@ -642,14 +649,18 @@ def reinforce(measure, rows, union, scales, *, tol, max_points, max_depth) -> di
             added.append({"cond": Condition(float(q), row[0], row[1]), "row": row, "interval": (a, b),
                           "depth": depth + 1, "d_trigger": -neg, "slot": slot})
             d, s2 = _seg_d(m(lo, row), m(q, row), m(hi, row), scales)
-            if d is not None:
+            if d is None:
+                unmeasured.append({"row": row, "interval": (lo, hi), "depth": depth + 1})
+            else:
                 heapq.heappush(heap, (-d, seq, row, lo, hi, depth + 1, s2))
                 seq += 1
     remaining = [(r, a, b, -n) for n, _, r, a, b, _, _ in heap if -n > tol] + depth_capped
     if remaining:
         status = REINFORCE_BUDGET
+    elif unmeasured:
+        status = REINFORCE_UNMEASURED
     remaining.sort(key=lambda x: -x[3])
-    return {"status": status, "added": added,
+    return {"status": status, "added": added, "unmeasured": unmeasured,
             "remaining": [{"row": r, "interval": (a, b), "d": d} for r, a, b, d in remaining],
             "max_d_remaining": remaining[0][3] if remaining else 0.0,
             "budget": {"tol": tol, "max_points": max_points, "max_depth": max_depth}}
@@ -769,15 +780,19 @@ def classify_pair_distances(rows: dict, *, tol_plant: float, anomaly_ratio: floa
 
     전반적으로 큰 거리는 격자가 성긴 것이지 트림 결함이 아니다 — 둘을 섞으면 품질 경고가 조밀화 요구로
     뒤덮인다(실측: 기본 격자 9점에서 인접 쌍 대부분이 tol을 넘었고 모두 매끄러운 트림 기울기였다)."""
-    dense, anomaly = [], []
+    dense, anomaly, unjudged = [], [], []
     for row, pairs in rows.items():
-        med = float(np.median([dd for _, dd in pairs])) if pairs else 0.0
-        for between, dd in pairs:
-            if dd > tol_plant:
-                dense.append({"row": row, "between": between, "d_total": dd})
-                if med > 0 and dd > anomaly_ratio * med:
-                    anomaly.append({"row": row, "between": between, "d_total": dd, "ratio": dd / med})
-    return {"dense": dense, "anomaly": anomaly}
+        if len(pairs) < 2:
+            unjudged.append(row)  # 비교할 이웃 쌍이 없다 — 국소 이상을 판단할 수 없다
+        for i, (between, dd) in enumerate(pairs):
+            if dd <= tol_plant:
+                continue
+            dense.append({"row": row, "between": between, "d_total": dd})
+            others = [x for j, (_, x) in enumerate(pairs) if j != i]  # 기준에서 자기 자신을 뺀다
+            ref = float(np.median(others)) if others else 0.0
+            if ref > 0 and dd > anomaly_ratio * ref:
+                anomaly.append({"row": row, "between": between, "d_total": dd, "ratio": dd / ref})
+    return {"dense": dense, "anomaly": anomaly, "unjudged_rows": unjudged}
 
 
 def quality_warnings(ev, points_by_row: dict, *, tol_plant: float) -> dict:
@@ -796,7 +811,7 @@ def quality_warnings(ev, points_by_row: dict, *, tol_plant: float) -> dict:
             rows.setdefault(row, []).append((key, dist["d_total"]))
             worst[(row, key)] = max(("d_trim", "d_mode", "d_ctrl"), key=lambda k: dist.get(k, 0.0))
     out = classify_pair_distances(rows, tol_plant=tol_plant)
-    for grp in out.values():
-        for x in grp:
+    for grp in ("dense", "anomaly"):
+        for x in out[grp]:
             x["worst"] = worst[(x["row"], x["between"])]
     return out

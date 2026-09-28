@@ -433,3 +433,56 @@ def test_base_grid_common_axis_shares_mach_coordinates_across_rows():
     assert per_row(own, 1000.0) == [0.12, 0.165, 0.21, 0.255, 0.3]  # 행마다 따로 — 좌표가 다르다
     assert per_row(common, 0.0) == [0.1, 0.15, 0.2, 0.25, 0.3]
     assert per_row(common, 1000.0) == [0.12, 0.15, 0.2, 0.25, 0.3]  # 공통 좌표 + 행 하한 끝점
+
+
+# ── 리뷰 반영 ────────────────────────────────────────────────────────────────
+def test_reinforce_reports_unmeasurable_intervals_instead_of_done():
+    # 중점을 잴 수 없는 구간(계산 불가)은 사라지지 않는다 — 「보강 완료」가 아니라 잴 수 없음으로 남는다
+    def measure(c):
+        return None if 0.14 < c.mach < 0.16 else {"s": {"metric": 0.0}}
+    out = g.reinforce(measure, [(0.0, 10.0)], (0.1, 0.2, 0.3), {"s": 1.0}, tol=0.05, max_points=10, max_depth=3)
+    assert out["status"] == g.REINFORCE_UNMEASURED
+    assert [u["interval"] for u in out["unmeasured"]] == [(0.1, 0.2)]
+
+
+def test_reinforce_depth_cap_ends_in_budget_status():
+    def measure(c):
+        return {"s": {"metric": abs(c.mach - 0.15) ** 0.5}}  # 뾰족 — 몇 번 나눠도 d가 안 준다
+    out = g.reinforce(measure, [(0.0, 10.0)], (0.1, 0.2), {"s": 0.01}, tol=0.05, max_points=100, max_depth=2)
+    assert out["status"] == g.REINFORCE_BUDGET and out["remaining"]
+
+
+def test_alpha_lower_bound_is_constraint_hit_never_stall_reasoning(example):
+    ev = g.Evaluator(example, g.TrimStore())
+    model = g.ModelRange(mach=example.db_ranges()["mach"], fuel=(0.0, 50.0))
+    st, _, why = ev._alpha_bound(cond(0.5, a=100.0, f=25.0), None, model, at_upper=False)
+    assert st == g.CONSTRAINT_HIT and "alpha_search_lower" in why and "above_V_S" not in why
+
+
+def test_alpha_upper_uses_known_stall_speed_even_below_stall_axis_and_n_reach(example):
+    ev = g.Evaluator(example, g.TrimStore())
+    model = g.ModelRange(mach=example.db_ranges()["mach"], fuel=(0.0, 50.0))
+    c = cond(0.05, a=100.0, f=25.0)
+    key = (c.alt, c.fuel, float(model.mach[1]))
+    ev._vs[key] = (0.12, "stall")  # V_S가 확정됐으면 축 밖이라도 그보다 느린 점은 불가다
+    assert ev._alpha_bound(c, None, model, at_upper=True)[0] == g.INFEASIBLE
+    ev._vs[key] = (0.9, "n_reach")
+    st, _, why = ev._alpha_bound(c, None, model, at_upper=True)
+    assert st == g.INFEASIBLE and "1g_unreachable" in why
+    ev._vs[key] = (0.1, "db")  # 축 밖이고 V_S는 축 아래라는 것만 안다 — 판단 근거 없음
+    assert "stall_basis_missing" in ev._alpha_bound(c, None, model, at_upper=True)[2]
+
+
+def test_vs_cache_is_keyed_by_model_upper_mach(example):
+    ev = g.Evaluator(example, g.TrimStore())
+    for hi in (0.9, 0.45):
+        ev._alpha_bound(cond(0.2, a=100.0, f=25.0), None, g.ModelRange(mach=(0.0, hi), fuel=(0.0, 50.0)), at_upper=True)
+    assert {k[2] for k in ev._vs} == {0.9, 0.45}
+
+
+def test_short_row_anomaly_uses_other_pairs_as_reference():
+    rows = {(0.0, 10.0): [((0.1, 0.2), 1.0), ((0.2, 0.3), 5.0)]}
+    out = g.classify_pair_distances(rows, tol_plant=0.25, anomaly_ratio=3.0)
+    assert [a["between"] for a in out["anomaly"]] == [(0.2, 0.3)]  # 자기 자신을 뺀 기준
+    one = g.classify_pair_distances({(0.0, 10.0): [((0.1, 0.2), 5.0)]}, tol_plant=0.25)
+    assert one["anomaly"] == [] and one["unjudged_rows"] == [(0.0, 10.0)]  # 비교할 쌍이 없으면 판단 불가로 남긴다
