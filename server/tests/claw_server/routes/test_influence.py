@@ -3,6 +3,19 @@
 import json
 
 
+def _criteria_profile(client, pid, criteria):
+    """시험용 기준을 적은 기체를 만들어 그 선택(ref)을 돌려준다 — 요청 기준은 거절되므로(v1.54) 다른 기준으로
+    돌리려면 그 기준을 적은 기체를 고른다(기준 통합 ① 결정)."""
+    from claw.profile import load_example
+
+    doc = load_example()
+    doc.update(id=pid, name=f"시험 기준 {pid}", description="시험용", is_example=False)
+    doc["criteria"] = criteria
+    r = client.post("/api/profiles", json={"document": doc})
+    assert r.status_code == 201, r.text
+    return {"id": pid}
+
+
 def _post(client, body=None):
     r = client.post("/api/influence/structural", json=body or {})
     assert r.status_code == 200, r.text
@@ -524,8 +537,8 @@ def test_verify_midpoints_multi_fuel_names_are_unique(client, wait_job):
         ],
         "depth": "linear",
         # 코너 없이 중간점만 — 축이 0이면 코너를 만들지 않는다(흔드는 시늉 금지)
-        "criteria": {"robustness": {"mass_frac": 0.0, "cmalpha_frac": 0.0,
-                                    "cmq_frac": 0.0}},
+        "profile": _criteria_profile(client, "no-corners", {"robustness": {
+            "mass_frac": 0.0, "cmalpha_frac": 0.0, "cmq_frac": 0.0}}),
     })
     assert r.status_code == 202, r.text
     j = wait_job(r.json()["id"], timeout=300.0)
@@ -544,8 +557,8 @@ def test_verify_corner_round_trip(client, wait_job):
     r = client.post("/api/influence/verify", json={
         "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
         "depth": "linear", "midpoints": False,
-        "criteria": {"robustness": {"mass_frac": 0.2, "cmalpha_frac": 0.0,
-                                    "cmq_frac": 0.0}},
+        "profile": _criteria_profile(client, "mass-only", {"robustness": {
+            "mass_frac": 0.2, "cmalpha_frac": 0.0, "cmq_frac": 0.0}}),
     })
     assert r.status_code == 202, r.text
     j = wait_job(r.json()["id"], timeout=300.0)
@@ -707,8 +720,8 @@ def test_verify_mission_profile_crosses_the_schedule(client, wait_job):
                   {"name": "b", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
         "depth": "full", "midpoints": False,
         "t_settle": 2.0, "t_step": 10.0, "t_mission": 60.0,
-        "criteria": {"robustness": {"mass_frac": 0.0, "cmalpha_frac": 0.0,
-                                    "cmq_frac": 0.0}},
+        "profile": _criteria_profile(client, "mission-only", {"robustness": {
+            "mass_frac": 0.0, "cmalpha_frac": 0.0, "cmq_frac": 0.0}}),
     })
     assert r.status_code == 202, r.text
     j = wait_job(r.json()["id"], timeout=300.0)
@@ -733,7 +746,7 @@ def test_verify_mission_knob_validation(client):
     # 스위치 끔은 유효한 요청 — na + 사유가 결과에 남는다 (제출은 202)
     assert client.post("/api/influence/verify", json={
         **base, "depth": "linear",
-        "criteria": {"schedule": {"mission": False}},
+        "profile": _criteria_profile(client, "mission-off", {"schedule": {"mission": False}}),
     }).status_code == 202
 
 
@@ -800,21 +813,35 @@ def test_evaluate_uses_profile_criteria(client, wait_job):
                for f in res["cases"][0]["hard_fails"])
 
 
-def test_evaluate_request_criteria_are_still_accepted(client, wait_job):
-    """요청 기준은 옮겨 가는 동안 받는다 — 출처 request. 형식 오류는 여전히 422."""
-    res, meta = _linear_evaluate(client, wait_job, criteria={"margin": {"pm_min_deg": 50.0}})
-    assert res["criteria_echo"]["source"] == meta["criteria_echo"]["source"] == "request"
-    assert res["criteria"]["margin"]["pm_min_deg"] == 50.0
-    assert client.post("/api/influence/evaluate", json={
-        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
-        "depth": "linear", "criteria": {"margin": {"pm_min": 1.0}},
-    }).status_code == 422
+def test_request_criteria_are_rejected(client):
+    """요청 기준은 거절한다(v1.54 S3b) — 판정하는 영향성 라우트 전부. 형식이 맞아도 422이고, 사유가 기체 편집을 가리킨다.
+    같은 기체의 결과가 요청마다 다른 기준으로 판정되면 탭마다 같은 점이 다르게 판정되던 문제로 돌아간다."""
+    from claw_server.refs import REQUEST_CRITERIA_REJECTED
+
+    case = [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}]
+    good = {"margin": {"pm_min_deg": 50.0}}
+    for route, body in (("evaluate", {"cases": case, "depth": "linear"}),
+                        ("verify", {"cases": case, "depth": "linear"}),
+                        ("scan", {"cases": case})):
+        r = client.post(f"/api/influence/{route}", json={**body, "criteria": good})
+        assert r.status_code == 422, (route, r.text)
+        assert REQUEST_CRITERIA_REJECTED in r.text
+    # 명시적 null은 「안 보냄」이다 — 거절하지 않는다
+    assert client.post("/api/influence/evaluate",
+                       json={"cases": case, "depth": "linear", "criteria": None}).status_code == 202
 
 
 def test_diagnose_echoes_criteria_source(client, wait_job):
     rid = _run_sim(client, wait_job)
     body = client.post("/api/influence/diagnose", json={"result_id": rid}).json()
     assert body["criteria_echo"]["source"] == "default"
-    body = client.post("/api/influence/diagnose",
-                       json={"result_id": rid, "criteria": {"margin": {"pm_min_deg": 50.0}}}).json()
-    assert body["criteria_echo"]["source"] == "request"
+    from claw_server.refs import REQUEST_CRITERIA_REJECTED
+
+    r = client.post("/api/influence/diagnose",
+                    json={"result_id": rid, "criteria": {"margin": {"pm_min_deg": 50.0}}})
+    assert r.status_code == 422 and REQUEST_CRITERIA_REJECTED in r.text  # 요청 기준 거절(v1.54)
+    # 처방도 같다 — 판정하는 영향성 라우트 다섯 모두(evaluate·verify·scan은 test_request_criteria_are_rejected)
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "criteria": {"margin": {"pm_min_deg": 50.0}}})
+    assert r.status_code == 422 and REQUEST_CRITERIA_REJECTED in r.text, r.text[:300]

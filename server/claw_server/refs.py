@@ -135,17 +135,22 @@ def _seeded(built) -> bool:
 CRITERIA_SOURCES = ("profile", "default", "request", "snapshot")
 
 
+REQUEST_CRITERIA_REJECTED = ("판정선·튜닝 목표는 요청에 싣지 않는다 — 선택한 기체 프로파일의 /criteria·/tuning이 "
+                             "정본이다(기체 탭에서 편집). 다른 기준으로 보려면 그 기준을 적은 기체(복제)를 고른다")
+
+
 def resolve_criteria(built, request_criteria: dict | None = None):
-    """(GainEvalCriteria, source). 요청이 기준을 주면 그 기준(source "request" — 옮겨 가는 동안만 받는다, S3b에서
-    거절), 아니면 프로파일 기준("profile" | 없으면 도구 기본값 "default").
+    """(GainEvalCriteria, source) — 선택 기체의 기준("profile" | 없으면 도구 기본값 "default").
+
+    요청 기준은 **거절한다**(기준 통합 ① S3b, v1.54): 같은 기체의 결과가 요청마다 다른 기준으로 판정되면 탭마다 같은
+    점이 다르게 판정되던 문제로 돌아간다. 시험용 「가정 기준」이 필요하면 시험 모드를 따로 설계한다(결정 — 이번 범위
+    밖). 거절은 ValueError다(라우트가 422). 출처 "request"는 v1.52~v1.53 사이에 저장된 결과를 읽기 위해 어휘에 남는다.
 
     스냅숏에서 되살린 기체(built.source == "snapshot")는 source를 "snapshot"으로 밝힌다: 스냅숏은 기체 지문 키로
     저장되는데 기준은 지문 밖이라, 그 문서의 기준은 **이 기체를 처음 남긴 문서의 기준**일 뿐 그 결과를 낸 기준이라는
     보장이 없다. 재개 경로는 저장된 결과가 실은 기준을 써야 한다. 요청 기준 형식 오류는 ValueError다(라우트가 422)."""
-    from claw.pipeline.criteria import GainEvalCriteria
-
     if request_criteria is not None:
-        return GainEvalCriteria.from_dict(request_criteria), "request"
+        raise ValueError(REQUEST_CRITERIA_REJECTED)
     if getattr(built, "source", None) == "snapshot":
         return built.eval_criteria, "snapshot"
     return built.eval_criteria, built.criteria_source

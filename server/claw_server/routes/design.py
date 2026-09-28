@@ -31,7 +31,7 @@ from claw.design.tune import REASON_TEXT
 from claw.profile import ProfileError, build_profile
 from claw.profile.fingerprint import gain_tables_basis_fingerprint
 from claw_server.profiles import EXAMPLE_ID, ProfileConflict, ProfileReadOnly, ProfileUnreadable
-from claw_server.refs import (ProfileRef, criteria_echo, profile_echo, profile_error_detail, resolve_criteria,
+from claw_server.refs import (REQUEST_CRITERIA_REJECTED, ProfileRef, criteria_echo, profile_echo, profile_error_detail, resolve_criteria,
                               resolve_profile, resolve_snapshot)
 from claw.tables import PolyTable
 from claw_server.serialize import to_jsonable
@@ -117,8 +117,8 @@ def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
 
     바탕은 엔진 기본값이되 **판정선(criteria)·튜닝 목표(targets)는 기체 프로파일의 기준**
     (`profile_criteria` = GainEvalCriteria — 그 margin·targets)이다 (기준 통합 ① S3a). 없으면
-    (테스트 등) 엔진 기본값 그대로다. 요청의 criteria·targets는 아직 받아 그 위에 한 단계로
-    얹는다 — 거절은 다음 단계(S3b)다."""
+    (테스트 등) 엔진 기본값 그대로다. 요청의 criteria·targets는 거절한다(S3b, v1.54) — 재개는 저장된
+    세션 설정을 그대로 쓰므로 이 함수를 거치지 않는다."""
     base = AutoDesignConfig().to_dict()
     if profile_criteria is not None:
         base["criteria"] = profile_criteria.margin.to_dict()
@@ -126,15 +126,10 @@ def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
     unknown = sorted(set(overrides) - set(base))
     if unknown:
         raise ValueError(f"미정의 config 키 {unknown} — 허용: {sorted(base)}")
+    if "criteria" in overrides or "targets" in overrides:
+        # 라우트가 먼저 거절한다 — 여기 닿으면 새 호출 경로가 거절을 건너뛴 것이다(심층 방어)
+        raise ValueError(REQUEST_CRITERIA_REJECTED)
     merged = {**base, **overrides}
-    for nested in ("criteria", "targets"):
-        if nested in overrides:
-            if not isinstance(overrides[nested], dict):
-                raise ValueError(f"{nested}는 dict여야 함")
-            bad = sorted(set(overrides[nested]) - set(base[nested]))
-            if bad:
-                raise ValueError(f"미정의 {nested} 키 {bad}")
-            merged[nested] = {**base[nested], **overrides[nested]}
     # 타입 검증 — 데이터클래스는 강제 변환을 하지 않으므로 여기서 걸러야 한다.
     # 안 걸리는 값은 잡 스레드 안에서 터져 202 뒤 원인 없는 실패가 된다
     for key, want in (("mode", str), ("fit_mode", str),
@@ -372,7 +367,8 @@ def submit_auto_design(req: AutoDesignIn, request: Request, response: Response) 
     profile = resolve_profile(request, req.profile)
     base_crit, source = resolve_criteria(profile)
     if "criteria" in req.config or "targets" in req.config:
-        source = "request"  # 옮겨 가는 동안만 받는 덮어쓰기 (S3b에서 거절)
+        # 요청 판정선·목표는 거절한다(기준 통합 ① S3b) — 같은 기체의 설계가 요청마다 다른 기준이면 탭마다 판정이 갈린다
+        raise HTTPException(status_code=422, detail=REQUEST_CRITERIA_REJECTED)
     try:
         cfg = _build_config(req.config, base_crit)
     except (ValueError, TypeError) as e:
