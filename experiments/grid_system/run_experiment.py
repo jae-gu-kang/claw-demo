@@ -5,6 +5,7 @@
 """
 
 import json
+import math
 import pathlib
 import statistics
 import subprocess
@@ -54,6 +55,22 @@ def run_case(built, store, region, model, schedule, spec):
     return ev, val, g.evaluate(ev, region, model, schedule, val["points"])
 
 
+def _finite(x):
+    """비유한값(inf·nan)은 null — 브라우저 JSON.parse가 Infinity/NaN을 못 읽고, 0으로 바꾸면 판정 불가가 숫자로 둔갑한다."""
+    if isinstance(x, float) and not math.isfinite(x):
+        return None
+    if isinstance(x, dict):
+        return {k: _finite(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_finite(v) for v in x]
+    return x
+
+
+def dump(obj) -> str:
+    return json.dumps(_finite(json.loads(json.dumps(obj, default=str))), ensure_ascii=False, indent=1,
+                      allow_nan=False)
+
+
 def jsonable(recs):
     out = []
     for r in recs:
@@ -70,13 +87,20 @@ def experiment(name, built):
     names = tuple(built.doc["law"]["schedule"]["scheduled"])
     checks = {}
 
-    # ① 설계점·절점 분리 — 설계점 수와 무관하게 지정한 절점대로 표가 나온다
-    dps = g.auto_design_points(region, n_mach=9, alts=alts, fuels=fuels)
+    # ① 설계점·절점 분리 — 설계점 수를 바꿔도 절점은 그대로이고, 설계점의 절점 구간 연결은 저장 없이
+    # 절점에서 계산된다. 표 값이 설계점과 무관한 것은 샘플 표라 구성상 참이다(튜닝 연결은 이관 과제)
     bset = {"A": g.BreakpointSet("A", "mach", bps)}
+    few = g.auto_design_points(region, n_mach=3, alts=alts, fuels=fuels)
+    dps = g.auto_design_points(region, n_mach=9, alts=alts, fuels=fuels)
     sch1 = g.sample_schedule(built, bset, {n: "A" for n in names})
+    links = g.design_links(dps, bps)
+    moved_links = g.design_links(dps, (bps[0], bps[-1]))
     checks["separation"] = {
-        "design_points": len(dps), "breakpoints": len(bps),
-        "ok": all(tuple(t.axes[0]) == bps for t in sch1.tables().values()),
+        "design_points": [len(few), len(dps)], "breakpoints": len(bps), "links": links,
+        "links_two_breakpoints": moved_links,
+        "note": "표 값의 설계점 무관성은 샘플 표라 구성상 참 — 확인 대상은 절점 불변·연결 파생",
+        "ok": all(tuple(t.axes[0]) == bps for t in sch1.tables().values())
+        and sum(links.values()) == sum(moved_links.values()) == len(dps),
     }
 
     # ② 표별 절점 — roll.k_rate만 독립 절점(가운데 두 절점을 다르게)으로 분리
@@ -145,10 +169,11 @@ def experiment(name, built):
     return {
         "aircraft": name, "fingerprint": built.fingerprint, "plant_fingerprint": built.plant_fingerprint,
         "criteria_source": built.criteria_source,
+        "pass_lines": {"pm_deg": ev.criteria.margin.pm_min_deg, "gm_db": ev.criteria.margin.gm_min_db},
         "code": subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],
                                capture_output=True, text=True).stdout.strip(),
         "region": {"mach": region.mach, "alt": region.alt, "fuel": region.fuel,
-                   "boundary": {str(k): v for k, v in region.boundary.items()}, "source": region.source,
+                   "boundary": {str(k): v for k, v in (region.boundary or {}).items()}, "source": region.source,
                    "draft": {"mach": draft.mach, "alt": draft.alt, "fuel": draft.fuel,
                              "confirmed": draft.confirmed}},
         "model": {"mach": model.mach, "fuel": model.fuel},
@@ -174,7 +199,7 @@ def main():
     all_ok = True
     for name, loader in (("example", load_example), ("showcase", load_showcase)):
         res = experiment(name, build_profile(loader()))
-        (OUT / f"{name}.json").write_text(json.dumps(res, ensure_ascii=False, indent=1, default=str))
+        (OUT / f"{name}.json").write_text(dump(res))
         print(f"\n== {name} ({res['elapsed_s']} s, code {res['code']}) ==")
         for k, v in res["checks"].items():
             all_ok &= v["ok"]

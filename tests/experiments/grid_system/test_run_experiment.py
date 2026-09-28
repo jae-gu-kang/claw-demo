@@ -38,3 +38,12 @@ def test_jsonable_flattens_conditions():
     r = {"name": "n", "cond": g.Condition(0.2, 100.0, 10.0), "row": (100.0, 10.0), "state": g.NOT_RUN}
     (x,) = rx.jsonable([r])
     assert x["cond"] == {"mach": 0.2, "alt": 100.0, "fuel": 10.0} and x["row"] == [100.0, 10.0]
+
+
+def test_dump_writes_non_finite_as_null_so_browsers_can_parse():
+    import json
+    import math
+
+    text = rx.dump({"a": math.inf, "b": [math.nan, 1.0], "c": {"d": -math.inf}})
+    assert json.loads(text) == {"a": None, "b": [None, 1.0], "c": {"d": None}}
+    assert "Infinity" not in text and "NaN" not in text

@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>격자 체계 프로토타입</title>
+<style>
+  :root {
+    --bg: #fbfbf9; --ink: #1d1d1b; --muted: #6b6b66; --line: #d9d8d2; --panel: #ffffff;
+    --region: rgba(46, 110, 180, 0.13); --region-edge: #2e6eb4; --undef: #b58a1b;
+    --model: #8d8d88; --bp-a: #1d1d1b; --bp-b: #b0412e;
+    --ok: #2f8a4c; --caution: #c28a12; --fail: #c0392b; --na: #7a5ea8;
+    --gap: #8d8d88; --calc: #d35400; --infeasible: #555; --notrun: #bbb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+  header { padding: 14px 20px 6px; }
+  h1 { font-size: 17px; margin: 0 0 2px; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  main { padding: 0 20px 28px; display: grid; gap: 16px; max-width: 1180px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-bottom: 8px; }
+  .bar label { display: inline-flex; gap: 5px; align-items: center; }
+  .seg button { border: 1px solid var(--line); background: #f3f2ee; padding: 3px 10px; cursor: pointer; }
+  .seg button:first-child { border-radius: 5px 0 0 5px; }
+  .seg button:last-child { border-radius: 0 5px 5px 0; }
+  .seg button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  svg { width: 100%; height: auto; display: block; }
+  .caption { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 4px;
+              vertical-align: -1px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th, td { border: 1px solid var(--line); padding: 5px 6px; text-align: left; vertical-align: top; }
+  th { background: #f3f2ee; font-weight: 600; white-space: nowrap; }
+  td.cell { cursor: pointer; min-width: 92px; }
+  td.cell:hover { outline: 2px solid var(--region-edge); outline-offset: -2px; }
+  td.cell .h { font-weight: 600; }
+  td.cell.h-fail { background: #fbe9e7; }
+  td.cell.h-incomplete { background: repeating-linear-gradient(135deg, #fff, #fff 5px, #f1efe8 5px, #f1efe8 10px); }
+  td.cell.h-ok { background: #edf6ef; }
+  td.cell.h-na { background: #f1ecf8; }
+  td.sel { outline: 2px solid var(--ink); outline-offset: -2px; }
+  .checks li { margin: 2px 0; }
+  .okmark { color: var(--ok); font-weight: 700; } .ngmark { color: var(--fail); font-weight: 700; }
+  #detail table td:first-child { white-space: nowrap; }
+  .scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>격자 체계 프로토타입</h1>
+  <div class="sub">05 §11 · 06 §10 첫 구현 범위 — 실험 결과(<code>out/*.json</code>)를 그대로 읽는다. 게인은 샘플 표다.</div>
+</header>
+<main>
+  <section class="card">
+    <div class="bar">
+      <span class="seg" id="acSeg"></span>
+      <span>연료 <span class="seg" id="fuelSeg"></span></span>
+      <label><input type="checkbox" id="tDesign" checked> 설계점</label>
+      <label><input type="checkbox" id="tVal" checked> 검증점</label>
+      <span>보기 <span class="seg" id="viewSeg"></span></span>
+    </div>
+    <svg id="mh" viewBox="0 0 900 420" role="img" aria-label="마하-고도 운용영역"></svg>
+    <div class="legend" id="legend"></div>
+    <div class="caption" id="caption"></div>
+  </section>
+  <section class="card">
+    <div class="bar"><strong>검증 결과 요약</strong><span class="sub" id="sumSub"></span></div>
+    <div class="scroll"><table id="sum"></table></div>
+    <div id="detail" class="caption"></div>
+  </section>
+  <section class="card">
+    <strong>실험 확인 항목</strong>
+    <ul class="checks" id="checks"></ul>
+  </section>
+</main>
+<script>
+const STATE = {
+  computable: ["완료", "var(--ok)"], calc_failed: ["계산 실패", "var(--calc)"],
+  infeasible: ["물리적 불가", "var(--infeasible)"], model_gap: ["모델 부족", "var(--gap)"],
+  undefined: ["요구 미정의", "var(--undef)"], out_of_region: ["요구영역 밖", "#ddd"],
+  not_run: ["미계산", "var(--notrun)"],
+};
+const VERDICT = { "불합격": "var(--fail)", "합격·주의": "var(--caution)", "합격·권장 충족": "var(--ok)",
+                  "판정 불가": "var(--na)" };
+const CHECK_LABEL = {
+  separation: "설계점·절점 분리", per_table: "표별 절점(합집합으로 구간)", validation_rows: "검증조건 생성(독립 조합)",
+  no_omission: "누락 방지(상태 합 = 후보 수)", scheduled_gains: "스케줄 게인 사용(비트 일치)",
+  reuse: "계산 재사용(새 좌표만 트림)",
+};
+const $ = (id) => document.getElementById(id);
+const S = { ac: "example", data: {}, fuel: null, sel: null, view: "all" };
+const near = (a, b) => Math.abs(a - b) < 1e-6;
+const fmt = (x, d = 3) => Number(x).toFixed(d).replace(/\.?0+$/, "");
+
+async function load(ac) {
+  if (!S.data[ac]) S.data[ac] = await (await fetch(`../out/${ac}.json`)).json();
+  return S.data[ac];
+}
+
+// 경계표 보간 — gridsys.Region.mach_bounds와 같은 규칙(행·층 선형, 표 밖은 null = 요구 미정의)
+function machBounds(region, alt, fuel) {
+  const b = region.boundary;
+  if (!b || !Object.keys(b).length) return [region.mach[0], region.mach[1]];
+  const layers = Object.keys(b).map(Number).sort((x, y) => x - y);
+  if (fuel < layers[0] - 1e-9 || fuel > layers[layers.length - 1] + 1e-9) return null;
+  const rowsOf = (f) => (b[Object.keys(b).find((k) => near(Number(k), f))]).slice().sort((p, q) => p[0] - q[0]);
+  const at = (f) => {
+    const rows = rowsOf(f), alts = rows.map((r) => r[0]);
+    if (alt < alts[0] - 1e-9 || alt > alts[alts.length - 1] + 1e-9) return null;
+    const lerp = (col) => { if (rows.length === 1) return rows[0][col];
+      for (let i = 0; i < rows.length - 1; i++) {
+        if (alt <= rows[i + 1][0] + 1e-9) { const t = (alt - rows[i][0]) / (rows[i + 1][0] - rows[i][0]);
+          return rows[i][col] + t * (rows[i + 1][col] - rows[i][col]); } } return rows[rows.length - 1][col]; };
+    return [lerp(1), lerp(2)];
+  };
+  // 층 값 그대로의 연료는 그 층만 — gridsys.Region.mach_bounds와 같은 규칙
+  const on = layers.find((f) => Math.abs(fuel - f) <= 1e-9);
+  if (on !== undefined) return at(on);
+  // 층 사이: Python searchsorted(side="right") − 1을 [0, len−2]로 묶은 것과 같은 아래 층
+  let j = layers.filter((f) => f <= fuel).length - 1;
+  j = Math.min(Math.max(j, 0), layers.length - 2);
+  const f0 = layers[j], f1 = layers[j + 1], b0 = at(f0), b1 = at(f1);
+  if (!b0 || !b1) return null;
+  const t = (fuel - f0) / (f1 - f0);
+  return [b0[0] + t * (b1[0] - b0[0]), b0[1] + t * (b1[1] - b0[1])];
+}
+
+function el(tag, attrs = {}, text) {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function drawMH(d) {
+  const svg = $("mh"); svg.replaceChildren();
+  const W = 900, H = 420, L = 62, R = 18, T = 18, B = 44;
+  const u = d.validation.union, pad = (u[u.length - 1] - u[0]) * 0.35;
+  // 보기 — 전체(요구영역 끝까지) / 절점 구간 확대. 확대해도 좌표는 옮기지 않고 창만 좁힌다
+  const mMin = S.view === "all" ? 0 : Math.max(0, u[0] - pad);
+  const mMax = S.view === "all" ? d.region.mach[1] * 1.04 : u[u.length - 1] + pad, aMin = 0, aMax = d.region.alt[1] * 1.12;
+  const x = (m) => L + ((Math.min(Math.max(m, mMin - 0.02 * (mMax - mMin)), mMax + 0.02 * (mMax - mMin)) - mMin) / (mMax - mMin)) * (W - L - R), y = (a) => H - B - ((a - aMin) / (aMax - aMin)) * (H - T - B);
+  const clipId = "plotClip"; const defs = el("defs");
+  const cp = el("clipPath", { id: clipId }); cp.append(el("rect", { x: L, y: T, width: W - L - R, height: H - B - T })); defs.append(cp);
+  const hatch = (id, color) => { const p = el("pattern", { id, width: 8, height: 8, patternUnits: "userSpaceOnUse",
+    patternTransform: "rotate(45)" }); p.append(el("line", { x1: 0, y1: 0, x2: 0, y2: 8, stroke: color, "stroke-width": 2 }));
+    defs.append(p); };
+  hatch("hModel", "#b9b9b3"); hatch("hUndef", "#e3c77a"); svg.append(defs);
+  // 축
+  svg.append(el("line", { x1: L, y1: H - B, x2: W - R, y2: H - B, stroke: "#999" }));
+  svg.append(el("line", { x1: L, y1: T, x2: L, y2: H - B, stroke: "#999" }));
+  for (let k = 0; k <= 10; k++) { const m = mMin + ((mMax - mMin) * k) / 10;
+    svg.append(el("text", { x: x(m), y: H - B + 16, "text-anchor": "middle", "font-size": 11, fill: "#6b6b66" }, fmt(m, 2))); }
+  for (let k = 0; k <= 5; k++) { const a = (aMax * k) / 5;
+    svg.append(el("text", { x: L - 8, y: y(a) + 4, "text-anchor": "end", "font-size": 11, fill: "#6b6b66" }, Math.round(a))); }
+  svg.append(el("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle", "font-size": 12, fill: "#6b6b66" }, "마하"));
+  svg.append(el("text", { x: 14, y: (T + H - B) / 2, "font-size": 12, fill: "#6b6b66",
+    transform: `rotate(-90 14 ${(T + H - B) / 2})`, "text-anchor": "middle" }, "고도 [m]"));
+  // 모델 미지원 — 회색 빗금 (요구영역을 자르지 않고 겹쳐 보인다)
+  const mm = d.model.mach[1];
+  const plot = el("g", { "clip-path": `url(#${clipId})` }); svg.append(plot);
+  if (mm < mMax) { plot.append(el("rect", { x: x(mm), y: T, width: x(mMax) - x(mm), height: H - B - T, fill: "url(#hModel)" }));
+    svg.append(el("text", { x: x(mm) + 6, y: T + 14, "font-size": 11, fill: "#6b6b66" }, "모델 미지원")); }
+  // 요구영역 — 이 연료에서 경계표 보간, 표가 덮지 않는 고도는 요구 미정의 무늬
+  const f = S.fuel, alts = [];
+  for (let k = 0; k <= 60; k++) alts.push(d.region.alt[0] + ((d.region.alt[1] - d.region.alt[0]) * k) / 60);
+  const def = alts.map((a) => [a, machBounds(d.region, a, f)]).filter(([, b]) => b);
+  if (def.length) {
+    const pts = [...def.map(([a, b]) => `${x(b[0])},${y(a)}`), ...def.slice().reverse().map(([a, b]) => `${x(b[1])},${y(a)}`)];
+    plot.append(el("polygon", { points: pts.join(" "), fill: "var(--region)", stroke: "var(--region-edge)", "stroke-width": 1.5 }));
+    const aTop = def[def.length - 1][0];
+    if (aTop < d.region.alt[1] - 1e-6)
+      plot.append(el("rect", { x: x(d.region.mach[0]), y: y(d.region.alt[1]), width: x(d.region.mach[1]) - x(d.region.mach[0]),
+        height: y(aTop) - y(d.region.alt[1]), fill: "url(#hUndef)", stroke: "var(--undef)", "stroke-dasharray": "4 3" }));
+  }
+  // 절점 — 세로선 (비행조건이 아니다). 표별 절점 집합마다 다른 선
+  const bpLegend = [];
+  const sets = d.schedule.bp_sets, sharing = d.schedule.sharing, refs = d.schedule.refs;
+  Object.entries(sets).forEach(([name, s], i) => {
+    const users = Object.keys(refs).filter((g) => refs[g] === name);
+    const indep = users.every((g) => sharing[g] === "independent");
+    s.coords.forEach((m) => plot.append(el("line", { x1: x(m), y1: T, x2: x(m), y2: H - B,
+      stroke: i ? "var(--bp-b)" : "var(--bp-a)", "stroke-width": 1, "stroke-dasharray": indep ? "5 4" : "none", opacity: 0.55 })));
+    bpLegend.push([name, i ? "var(--bp-b)" : "var(--bp-a)", indep ? `독립: ${users.join(", ")}` : `공유 ${users.length}표`, indep]);
+  });
+  // 설계점 — 속 빈 회색 네모
+  if ($("tDesign").checked) d.design_points.filter((p) => near(p.fuel, f)).forEach((p) =>
+    plot.append(el("rect", { x: x(p.mach) - 3, y: y(p.alt) - 3, width: 6, height: 6, fill: "none", stroke: "#8a8a84" })));
+  // 검증점 — 원, 색 = 계산 상태(완료면 판정 색)
+  if ($("tVal").checked) d.records.filter((r) => near(r.cond.fuel, f)).forEach((r) => {
+    const c = r.state === "computable" ? VERDICT[r.verdict] : STATE[r.state][1];
+    const g = el("circle", { cx: x(r.cond.mach), cy: y(r.cond.alt), r: r.kind === "midpoint" ? 4.5 : 3.5,
+      fill: r.state === "computable" ? c : "#fff", stroke: c, "stroke-width": 2 });
+    g.append(el("title", {}, `${r.name}\n${r.kind} · ${STATE[r.state][0]}${r.verdict ? " · " + r.verdict : ""}${r.reasons.length ? "\n사유: " + r.reasons.join(", ") : ""}`));
+    plot.append(g);
+  });
+  $("caption").textContent = `연료 ${fmt(f, 1)} kg · 요구영역 마하 ${fmt(d.region.mach[0])}–${fmt(d.region.mach[1])}, `
+    + `고도 ${d.region.alt[0]}–${d.region.alt[1]} m · 모델 마하 ${d.model.mach[0]}–${d.model.mach[1]} · 기준 ${d.criteria_source}`
+    + ` · 코드 ${d.code}`;
+  $("legend").replaceChildren(...[
+    ...Object.entries(VERDICT).map(([k, c]) => [k, c, true]),
+    ...["calc_failed", "infeasible", "model_gap", "undefined", "out_of_region"].map((s) => [STATE[s][0], STATE[s][1], false]),
+  ].map(([k, c, fill]) => { const s = document.createElement("span");
+    s.innerHTML = `<i style="background:${fill ? c : "#fff"};border:2px solid ${c}"></i>${k}`; return s; }),
+    Object.assign(document.createElement("span"), { textContent: "□ 설계점" }),
+    ...bpLegend.map(([n, c, txt, indep]) => { const s = document.createElement("span");
+      s.innerHTML = `<span style="color:${c}">${indep ? "┆" : "│"}</span> 절점 ${n} (${txt})`; return s; }));
+}
+
+function drawSummary(d) {
+  const t = $("sum"), cols = d.summary.columns, u = d.validation.union;
+  const colLabel = (c) => c === "clip<" ? "clip 하한" : c === "clip>" ? "clip 상한"
+    : c.startsWith("bp") ? `절점 ${fmt(u[+c.slice(2) - 1])}` : `구간 ${c.slice(2)}`;
+  const rows = [...d.validation.fuels.flatMap((f) => d.validation.alts.map((a) => [a, f])), "경계·추가"];
+  const key = (r) => Array.isArray(r) ? `${r[0]}|${r[1]}` : r;
+  const cells = new Map(d.summary.cells.map((c) => [`${key(c.row)}@${c.col}`, c]));
+  const head = `<tr><th>고도 · 연료</th>${cols.map((c) => `<th>${colLabel(c)}</th>`).join("")}</tr>`;
+  const body = rows.map((r) => `<tr><th>${Array.isArray(r) ? `${r[0]} m · ${fmt(r[1], 1)} kg` : r}</th>${cols.map((c) => {
+    const x = cells.get(`${key(r)}@${c}`);
+    if (!x) return "<td></td>";
+    const cls = { "불합격": "h-fail", "미완료": "h-incomplete", "판정 불가 포함": "h-na" }[x.headline] ?? "h-ok";
+    return `<td class="cell ${cls}" data-k="${key(r)}@${c}"><div class="h">${x.headline}</div>${x.text}</td>`;
+  }).join("")}</tr>`).join("");
+  t.innerHTML = head + body;
+  $("sumSub").textContent = ` 열 = clip·절점·구간 교대(절점은 평가 대상 표들의 합집합) · 분모는 요청 점 전부 · `
+    + `요구영역 밖 ${d.summary.out_of_region}점은 분모에서 빼고 여기 적는다 · 조합 방식: ${d.validation.mode === "full" ? "전체" : "대표"}`;
+  t.querySelectorAll("td.cell").forEach((td) => td.onclick = () => {
+    t.querySelectorAll("td.sel").forEach((x) => x.classList.remove("sel")); td.classList.add("sel");
+    const [rk, col] = td.dataset.k.split("@");
+    const pts = d.records.filter((r) => (r.row ? `${r.row[0]}|${r.row[1]}` : "경계·추가") === rk
+      && colOf(r.cond.mach, u) === col && r.state !== "out_of_region");
+    $("detail").innerHTML = `<table><tr><th>조건</th><th>종류</th><th>계산 상태</th><th>판정</th><th>최악 자리</th><th>사유</th></tr>${
+      pts.map((r) => `<tr><td>M ${fmt(r.cond.mach, 4)} · ${r.cond.alt} m · ${fmt(r.cond.fuel, 1)} kg</td><td>${r.kind}</td>`
+        + `<td>${STATE[r.state][0]}</td><td>${r.verdict ?? "—"}</td><td>${worst(r)}</td><td>${r.reasons.join(", ") || "—"}</td></tr>`).join("")}</table>`;
+  });
+}
+
+function colOf(m, u) {
+  if (m < u[0] - 1e-9) return "clip<"; if (m > u[u.length - 1] + 1e-9) return "clip>";
+  const i = u.findIndex((x) => near(x, m)); if (i >= 0) return `bp${i + 1}`;
+  const j = u.findIndex((x) => x > m) - 1; return `iv${j + 1}-${j + 2}`;
+}
+function worst(r) {
+  if (!r.slots) return "—";
+  const rank = { "불합격": 3, "판정 불가": 2, "합격·주의": 1, "합격·권장 충족": 0 };
+  const [slot, s] = Object.entries(r.slots).sort((a, b) => rank[b[1].verdict] - rank[a[1].verdict])[0];
+  // 대표 지표와 루프 마진을 함께 — 합격선 아래 값에 ✗ (불합격 원인이 대표 지표가 아닐 수 있다)
+  const pl = S.data[S.ac].pass_lines ?? {}, parts = [];
+  if (s.metric != null) parts.push(`지표 ${fmt(s.metric, 3)}`);
+  const mark = (v, line) => (line != null && v < line ? " ✗" : "");
+  if (s.pm_deg != null && Number.isFinite(s.pm_deg)) parts.push(`PM ${fmt(s.pm_deg, 1)}°${mark(s.pm_deg, pl.pm_deg)}`);
+  if (s.gm_db != null && Number.isFinite(s.gm_db)) parts.push(`GM ${fmt(s.gm_db, 2)} dB${mark(s.gm_db, pl.gm_db)}`);
+  return `${slot} ${s.verdict}${parts.length ? ` — ${parts.join(" · ")}` : ""}`;
+}
+
+function drawChecks(d) {
+  $("checks").innerHTML = Object.entries(d.checks).map(([k, v]) => {
+    const { ok, ...rest } = v;
+    return `<li><span class="${ok ? "okmark" : "ngmark"}">${ok ? "통과" : "실패"}</span> ${CHECK_LABEL[k] ?? k} — `
+      + `<code>${JSON.stringify(rest)}</code></li>`;
+  }).join("");
+}
+
+function seg(host, items, cur, on) {
+  host.replaceChildren(...items.map(([v, label]) => { const b = document.createElement("button");
+    b.textContent = label; b.className = v === cur ? "on" : ""; b.onclick = () => on(v); return b; }));
+}
+
+async function render() {
+  const d = await load(S.ac);
+  if (S.fuel == null || !d.validation.fuels.some((f) => near(f, S.fuel))) S.fuel = d.validation.fuels[0];
+  seg($("acSeg"), [["example", "예제 기체"], ["showcase", "쇼케이스 기체"]], S.ac, (v) => { S.ac = v; S.fuel = null; render(); });
+  seg($("viewSeg"), [["all", "전체"], ["bp", "절점 구간 확대"]], S.view, (v) => { S.view = v; render(); });
+  seg($("fuelSeg"), d.validation.fuels.map((f) => [f, `${fmt(f, 1)} kg`]), S.fuel, (v) => { S.fuel = v; render(); });
+  drawMH(d); drawSummary(d); drawChecks(d);
+}
+$("tDesign").onchange = render; $("tVal").onchange = render;
+render().catch((e) => { document.body.insertAdjacentHTML("afterbegin", `<pre style="color:#c0392b">${e}</pre>`); });
+</script>
+</body>
+</html>

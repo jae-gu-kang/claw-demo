@@ -46,6 +46,38 @@ def test_boundary_table_interpolates_and_leaves_gaps_undefined():
     assert r.classify(cond(0.11, a=1000.0, f=30.0)) == g.OUT_OF_REGION
 
 
+def test_fuel_exactly_on_a_layer_uses_that_layer_only():
+    # 층 값 그대로의 연료는 그 층만 본다 — 이웃 층이 그 고도를 안 덮어도 미정의가 아니다
+    bt = {10.0: [(0.0, 0.10, 0.30), (2000.0, 0.14, 0.34)], 50.0: [(0.0, 0.12, 0.30), (1000.0, 0.14, 0.32)]}
+    r = g.Region(mach=(0.0, 1.0), alt=(0.0, 3000.0), fuel=(0.0, 50.0), boundary=bt)
+    assert r.mach_bounds(1500.0, 10.0) == pytest.approx((0.13, 0.33))
+    assert r.classify(cond(0.2, a=1500.0, f=10.0)) is None
+    assert r.classify(cond(0.2, a=1500.0, f=30.0)) == g.UNDEFINED  # 층 사이는 두 층 모두 덮어야 한다
+
+
+def test_boundary_rows_order_does_not_matter_and_null_boundary_uses_base():
+    bt = {10.0: [(2000.0, 0.14, 0.34), (0.0, 0.10, 0.30)]}
+    assert g.Region(mach=(0.0, 1.0), alt=(0.0, 3000.0), fuel=(0.0, 50.0), boundary=bt).mach_bounds(
+        1000.0, 10.0) == pytest.approx((0.12, 0.32))
+    assert g.Region(mach=(0.1, 0.3), alt=(0.0, 1.0), fuel=(0.0, 1.0)).mach_bounds(0.5, 0.5) == (0.1, 0.3)
+
+
+def test_unconfirmed_draft_region_is_not_used_for_judgement(example):
+    draft = g.region_draft_from_trim_grid(example.doc["mission_template"]["trim_grid"])
+    model = g.ModelRange(mach=example.db_ranges()["mach"], fuel=(0.0, 50.0))
+    with pytest.raises(ValueError, match="미확정"):
+        g.evaluate(g.Evaluator(example, g.TrimStore()), draft, model, None, [])
+
+
+def test_boundary_points_cover_every_defined_boundary_row():
+    bt = {10.0: [(0.0, 0.10, 0.30), (1500.0, 0.14, 0.34)]}
+    r = g.Region(mach=(0.0, 1.0), alt=(0.0, 3000.0), fuel=(10.0, 10.0), boundary=bt)
+    sch = g.Schedule({"M": g.BreakpointSet("M", "mach", (0.15, 0.25))}, {"pitch.kp": "M"}, {"pitch.kp": [1, 2]})
+    pts = g.generate_validation(r, sch, g.ValidationSpec(alts=(0.0,), fuels=(10.0,)))["points"]
+    bnd = {(round(p.cond.mach, 6), p.cond.alt) for p in pts if p.kind == "boundary"}
+    assert {(0.1, 0.0), (0.3, 0.0), (0.14, 1500.0), (0.34, 1500.0)} <= bnd  # 정의된 가장 높은 행도 경계점을 받는다
+
+
 def test_trim_grid_gives_unconfirmed_draft():
     tg = {"mach": {"from": 0.14, "to": 0.22, "step": 0.02}, "alt": [100.0, 3000.0], "fuel": [25.0]}
     r = g.region_draft_from_trim_grid(tg)
@@ -61,6 +93,14 @@ def test_design_points_do_not_create_breakpoints():
     bs = g.BreakpointSet("M", "mach", (0.1, 0.2, 0.3))
     sch = g.Schedule({"M": bs}, {"pitch.kp": "M"}, {"pitch.kp": [1.0, 2.0, 3.0]})
     assert sch.union_coords() == (0.1, 0.2, 0.3)  # 설계점 42개와 무관
+
+
+def test_design_point_links_are_derived_from_breakpoints():
+    # 설계점이 어느 절점 구간에 속하는지는 저장하지 않고 계산한다 — 절점을 바꾸면 연결이 따라 바뀐다
+    dps = [g.DesignPoint(cond(m), "user") for m in (0.05, 0.1, 0.15, 0.2, 0.25, 0.35)]
+    links = g.design_links(dps, (0.1, 0.2, 0.3))
+    assert links == {"clip<": 1, "bp1": 1, "iv1-2": 1, "bp2": 1, "iv2-3": 1, "clip>": 1}
+    assert g.design_links(dps, (0.1, 0.3)) == {"clip<": 1, "bp1": 1, "iv1-2": 3, "clip>": 1}
 
 
 def test_breakpoint_set_must_increase():
@@ -202,7 +242,10 @@ def test_judge_uses_evaluated_schedule_gains(example):
     tabs = sch.tables()
     for name, t in tabs.items():
         assert gains[name] == t.interp(mach=0.18)  # 비트 일치 — 실제 표 평가값
-    assert verdict in (g.FAIL, g.CAUTION, g.GOOD, g.NA) and set(slots) >= {"pitch_rate", "roll_att"}
+    assert verdict == max((s["verdict"] for s in slots.values()), key=g._VERDICT_RANK.get)  # 점 판정 = 최악 자리
+    assert set(slots) >= {"pitch_rate", "roll_att"}
+    # 불합격 원인이 대표 지표가 아닐 수 있다(롤 레이트는 λ가 좋아도 GM 가드로 떨어진다) — 마진도 싣는다
+    assert all({"metric", "pm_deg", "gm_db"} <= set(s) for s in slots.values())
 
 
 def test_unconverged_trim_pinned_at_control_limit_is_infeasible_not_calc_failure(example):

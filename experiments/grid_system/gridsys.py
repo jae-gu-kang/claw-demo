@@ -86,8 +86,10 @@ class Region:
             return (float(np.interp(alt, alts, [r[1] for r in rows])),
                     float(np.interp(alt, alts, [r[2] for r in rows])))
 
-        if len(layers) == 1:
-            return layer_bounds(layers[0])
+        # 층 값 그대로의 연료는 그 층만 본다 — 이웃 층까지 요구하면 이웃이 안 덮는 고도가 미정의로 둔갑한다
+        on = [f for f in layers if abs(fuel - f) <= _EPS]
+        if on:
+            return layer_bounds(on[0])
         j = int(np.searchsorted(layers, fuel, side="right")) - 1
         j = min(max(j, 0), len(layers) - 2)
         f0, f1 = layers[j], layers[j + 1]
@@ -149,6 +151,15 @@ def auto_design_points(region: Region, *, n_mach: int, alts, fuels) -> list:
                 continue
             for m in np.linspace(b[0], b[1], n_mach):
                 out.append(DesignPoint(Condition(float(m), float(alt), float(fuel)), "auto:grid"))
+    return out
+
+
+def design_links(design_points, bp_union) -> dict:
+    """설계점 → 절점·구간 열 연결 개수 — 저장하지 않는 파생값 (05 §11.4). 열 이름은 요약 격자와 같다."""
+    out: dict = {}
+    for d in design_points:
+        k = column_of(d.cond.mach, bp_union)
+        out[k] = out.get(k, 0) + 1
     return out
 
 
@@ -262,9 +273,12 @@ def generate_validation(region: Region, schedule: Schedule, spec: ValidationSpec
     for alt, fuel in rows:
         for m, kind in machs:
             add(ValidationPoint(Condition(float(m), alt, fuel), kind, (alt, fuel), kind))
-    # 요구영역 경계점 — 행별 마하 하한·상한, 고도·연료 끝값 (05 §11.6 ⑥)
-    for fuel in sorted(set(region.fuel)):
-        for alt in sorted(set(region.alt)):
+    # 요구영역 경계점 — 행별 마하 하한·상한 (05 §11.6 ⑥). 행 = 기본 범위 끝값 + 경계표의 층·행
+    # (끝값만 쓰면 경계표가 끝값까지 안 닿을 때 정의된 가장 높은 행이 경계점을 못 받는다)
+    b_fuels = set(region.fuel) | set(region.boundary or {})
+    b_alts = set(region.alt) | {r[0] for rows in (region.boundary or {}).values() for r in rows}
+    for fuel in sorted(b_fuels):
+        for alt in sorted(b_alts):
             b = region.mach_bounds(alt, fuel)
             if b is None:
                 continue
@@ -379,8 +393,10 @@ class Evaluator:
         out = scheduled_margin_point(lm, tables, x["design"], case, criteria=x["crit"].margin,
                                      targets=x["crit"].targets, **x["act"])
         gains = scheduled_gains(tables, x["design"], case)
+        # 대표 지표만 실으면 원인을 가린다 — 롤 레이트는 λ가 목표를 넘어도 루프 GM 가드로 불합격한다
         slots = {slot: {"verdict": _STATUS_TO_VERDICT.get(e.get("status"), NA),
-                        "metric": e.get(_D_METRIC.get(slot, ""))}
+                        "metric": e.get(_D_METRIC.get(slot, "")),
+                        "pm_deg": e.get("pm_deg"), "gm_db": e.get("gm_db")}
                  for slot, e in out.items()}
         verdict = max((s["verdict"] for s in slots.values()), key=_VERDICT_RANK.get) if slots else NA
         return verdict, slots, gains
@@ -389,6 +405,8 @@ class Evaluator:
 def evaluate(ev: Evaluator, region: Region, model: ModelRange, schedule: Schedule, vpoints, *,
              run=True) -> list:
     """검증점 전부의 레코드 — 계산 못 한 점도 남긴다 (05 §11.8 「사라지지 않는다」)."""
+    if not region.confirmed:
+        raise ValueError(f"요구영역이 미확정({region.source}) — 초안은 판정에 쓰지 않는다 (05 §11.2)")
     tables = schedule.tables()
     recs = []
     for vp in vpoints:
