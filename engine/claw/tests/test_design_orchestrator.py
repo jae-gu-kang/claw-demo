@@ -125,23 +125,37 @@ def test_config_validation():
 
 
 def test_targets_must_meet_criteria():
-    """튜닝 목표가 판정선보다 낮으면 제출 시점에 막는다 — 성공점이 warn/fail로 찍힌다.
+    """튜닝 목표가 합격선보다 느슨하면 제출 시점에 막고, 권장선보다만 느슨하면 경고로 남긴다.
 
     기본값끼리 이미 정합이라는 첫 단정이 핵심이다: 종전에는 gm_good_db 10 dB >
     targets.gm_db 8 dB로 어긋나 있어 튜닝 성공점이 구조적으로 warn이었다.
+    권장선 충돌은 기준 통합 ⑤ S5부터 거절이 아니라 경고다(사용자 승인 동작 변경) —
+    합격은 지키는 설정이라 모순이 아니고, 대신 report가 그 사실을 말해야 한다.
     """
     from claw.design import MarginCriteria, TuneTargets
 
-    AutoDesignConfig()  # 출하 기본값은 정합이어야 한다
+    assert AutoDesignConfig().target_warnings() == []  # 출하 기본값은 정합이어야 한다
+    # 권장선(gm_good_db 8·zeta_good 0.5)보다만 느슨 → 만들어지고 경고가 붙는다
+    cfg = AutoDesignConfig(targets=TuneTargets(gm_db=7.0))
+    (w,) = cfg.target_warnings()
+    assert "gm_db 7" in w and "gm_good_db 8" in w and "권장선" in w
+    cfg2 = AutoDesignConfig(targets=TuneTargets(zeta_dr=0.4))
+    (w2,) = cfg2.target_warnings()
+    assert "zeta_dr 0.4" in w2 and "zeta_good" in w2
+    # 경고는 저장 필드가 아니라 criteria·targets에서 다시 계산된다 — 왕복해도 그대로
+    assert AutoDesignConfig.from_dict(cfg.to_dict()).target_warnings() == [w]
+    assert "target_warnings" not in cfg.to_dict()
+    # report가 싣는다 — 화면·저장물이 warn의 원인이 설정임을 알 수 있어야 한다
+    assert DesignSession(cfg).report()["target_warnings"] == [w]
+    assert DesignSession(AutoDesignConfig()).report()["target_warnings"] == []
+    # 합격선보다 느슨하면 여전히 거절이다 (서버 422)
     with pytest.raises(ValueError, match="gm_db"):
-        AutoDesignConfig(targets=TuneTargets(gm_db=7.0))
+        AutoDesignConfig(targets=TuneTargets(gm_db=5.0))  # < gm_min_db 6
     with pytest.raises(ValueError, match="pm_deg"):
         AutoDesignConfig(criteria=MarginCriteria(pm_min_deg=60.0))
-    with pytest.raises(ValueError, match="zeta_dr"):
-        AutoDesignConfig(targets=TuneTargets(zeta_dr=0.4))
-    # 금지가 아니라 **정합 요구**다 — 판정선을 올리면서 목표도 함께 올리면 통과한다
-    AutoDesignConfig(criteria=MarginCriteria(gm_good_db=12.0),
-                     targets=TuneTargets(gm_db=12.0))
+    # 금지가 아니라 **정합 요구**다 — 판정선을 올리면서 목표도 함께 올리면 경고도 없다
+    assert AutoDesignConfig(criteria=MarginCriteria(gm_good_db=12.0),
+                            targets=TuneTargets(gm_db=12.0)).target_warnings() == []
 
 
 def test_add_validation_inserts_flanking_midpoints(env):

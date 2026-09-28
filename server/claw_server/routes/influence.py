@@ -35,7 +35,8 @@ from claw.pipeline.prescribe import (
 )
 from claw.pipeline.sweep import nonadditivity, plan_shapes, run_sweep, sweep_plan
 from claw.sim import check_law_plant_pairing
-from claw_server.refs import criteria_echo, profile_echo, resolve_criteria, resolve_profile
+from claw_server.refs import (REQUEST_CRITERIA_REJECTED, criteria_echo, profile_echo, resolve_criteria,
+                               resolve_profile)
 from claw.trim import trim_batch
 from claw_server.routes.codegen import FlightCodeIn
 from claw_server.routes.sim import _load_sim, build_gain_tables
@@ -718,6 +719,9 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
     풀이는 저장 스윕의 순수 변환이라 즉시고, 비용은 확인 런(트림 + evaluate)뿐이다.
     확정은 실측이다: 제안이 좋아 보여도 confirm 결과의 하드 게이트가 판정자다.
     """
+    if req.criteria is not None:
+        # 요청 기준은 거절한다(v1.54) — 저장 결과를 읽기 **전에**: 입력 형식의 문제라 결과 종류(409)보다 먼저 말한다
+        raise HTTPException(status_code=422, detail=REQUEST_CRITERIA_REJECTED)
     store = request.app.state.store
     try:
         payload = store.load(req.result_id)

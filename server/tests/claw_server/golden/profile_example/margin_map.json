@@ -1,7 +1,7 @@
 {
  "golden": "margin_map",
  "mode": "full",
- "captured_at": "580091d+dirty",
+ "captured_at": "13eabbc+dirty",
  "value": {
   "dict": {
    "kind": "margin_map",
@@ -952,9 +952,9 @@
    },
    "criteria_echo": {
     "dict": {
-     "judgement_fingerprint": "f8bd767344930845",
-     "targets_fingerprint": "cecc725030d7ef9a",
-     "scheme": "crit-v1",
+     "judgement_fingerprint": "de87499b3f3f5b88",
+     "targets_fingerprint": "a7d8e3760f09a2b7",
+     "scheme": "crit-v2",
      "source": "default"
     }
    }

@@ -34,7 +34,7 @@ import {
   statusText, trimLabel, verdictLegend, warnNoteText,
 } from "../lib/autodesign.js";
 import { applyFreshnessBlock } from "../lib/flowsteps.js";
-import { resultFreshness } from "../lib/freshness.js";
+import { criteriaBadgeSpec, criteriaFreshness, resultFreshness } from "../lib/freshness.js";
 import { slotIndex, withConstant } from "../lib/gainsync.js";
 import { haltReason } from "../lib/showcase.js";
 import { revealPanel } from "../lib/reveal.js";
@@ -537,13 +537,17 @@ function criteriaSummary(body) {
       + m.extra.map((x) => `${x.key} ${x.text}${x.source === "profile" ? " (이 기체)" : ""}`).join(" · ")));
   }
   for (const c of m.conflicts) {
-    out.push(el("p", { class: "error-box" },
-      `튜닝 목표 ${c.target_key} ${c.target}가 ${c.level === "pass" ? "합격선" : "권장선"} ${c.line_key} ${c.line}보다`
-      + " 느슨하다 — 자동 설계가 거절한다. 기체 문서의 /criteria·/tuning을 고친다."));
+    // 합격선 충돌만 거절이다(v1.56) — 권장선 충돌은 설계가 돌고 결과 보고에 경고로 남는다
+    out.push(c.level === "pass"
+      ? el("p", { class: "error-box" },
+        `튜닝 목표 ${c.target_key} ${c.target}가 합격선 ${c.line_key} ${c.line}보다 느슨하다 — 자동 설계가 거절한다`
+        + "(튜닝에 성공한 점이 곧바로 불합격). 기체 탭 「평가 기준」에서 고친다.")
+      : el("p", { style: `color:${SEV_COLOR.warn}` },
+        `튜닝 목표 ${c.target_key} ${c.target}가 권장선 ${c.line_key} ${c.line}보다 느슨하다 — 설계는 되지만 튜닝에`
+        + " 성공한 점이 합격·주의로 찍힌다."));
   }
   out.push(el("p", { class: "hint" },
-    "자동 설계는 이 값으로 튜닝·판정한다 — 이 탭에서 바꾸지 않는다. 값은 기체마다 기체 문서에서 편집한다"
-    + "(기체 탭의 전용 편집기는 준비 중이다)."));
+    "자동 설계는 이 값으로 튜닝·판정한다 — 이 탭에서 바꾸지 않는다. 값은 기체마다 기체 탭 「평가 기준」에서 편집한다."));
   return out;
 }
 
@@ -858,13 +862,24 @@ function renderResult(box, body, resultId, ctx) {
   };
   const adoptMsg = el("span");
   const applyMsg = el("span");
+  // 판정 기준 배지 — 결과의 criteria_echo를 그 기체의 지금 기준과 대조(lib/freshness.js). 조회는 비동기로 채운다
+  const critSlot = el("span", { style: "font-size:12px;font-weight:normal" });
+  (async () => {
+    const pid = body.profile?.id;
+    const now = pid && body.criteria_echo?.scheme
+      ? await api.get(`/profiles/${encodeURIComponent(pid)}/criteria`).then((r) => r?.echo ?? null, () => null)
+      : null;
+    const spec = criteriaBadgeSpec(criteriaFreshness(body.criteria_echo, now, "auto_design"));
+    if (spec) critSlot.append(el("span", { class: `flag ${spec.tone}`, style: "margin-left:8px", title: spec.tip },
+      spec.label));
+  })();
 
   const covBox = coverageBox(report);
   // 상태 줄 아래 사실 셋 — 무엇으로 설계했나(작동기)·표에서 무엇을 뺐나(튜닝 실패 표본)·표가 무엇을
   // 뭉갰나(스케줄 축 밖 변동·톱니). sections는 native append라 null을 걸러 넣는다
   const facts = [actuatorBox(body), excludedBox(body), fitFactsBox(body.fits)].filter(Boolean);
   const sections = [
-    el("h3", {}, `결과 ${resultId}`),
+    el("h3", {}, `결과 ${resultId}`, critSlot),
     el("p", {},
       "상태 ", sevChip(statusSeverity(report.status)), ` ${report.status ?? "?"} · `,
       // 계산해 놓고 안 내던 수치들 — 특히 판정 수가 없으면 "실패 0"의 뜻이 갈리지 않는다
@@ -891,6 +906,8 @@ function renderResult(box, body, resultId, ctx) {
     countsLine(rows),
     pointsTable,
     legendBox(body.margin_out?.criteria, report.fit_mode),
+    // 권장선보다 느슨한 목표로 설계했다 — warn 판정이 「목표 미달」이 아니라 설정이 예고한 결과임을 결과 곁에 둔다
+    ...(report.target_warnings ?? []).map((w) => el("p", { style: `color:${SEV_COLOR.warn}` }, w)),
   ];
 
   // 실패가 0이어도 원장이 비지 않으면 뜬다 — 실패 0이 곧 미달 0이 아니다

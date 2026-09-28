@@ -32,53 +32,75 @@ export const STATUS = {
   na: "#aeaeb2", // 판정 불가·트림 불가
 };
 
-/** 판정 문턱 [폴백] — **정본은 서버 GET /design/defaults**(엔진 MarginCriteria).
- *
- * 여기 수치는 그 조회가 실패했을 때만 쓴다. 종전에는 이 값이 하드코딩된 판정선
- * 자체였고, 자동 설계 탭에서 criteria.pm_min_deg를 50으로 올려도 마진 탭은 그대로
- * 45로 칠했다 — 같은 47° 점을 한 탭은 초록, 다른 탭은 fail로 보이게 하는 어긋남이다.
- * 폴백을 쓴 화면은 그 사실을 힌트로 밝힌다 (조용한 폴백 금지). */
-export const FALLBACK_CRITERIA = Object.freeze({
-  pm_min_deg: 45, // 합격선
-  pm_bad_deg: 30, // 표시용 심각선
-  gm_min_db: 6, // 합격선
-  gm_good_db: 8, // 목표선
+/** 판정 상태 넷 → 화면 이름 — 엔진 design/criteria.py STATUSES와 그 머리말의 이름 그대로(한 표).
+ *  키 순서가 범례 순서다. 다른 탭(영향성·결과·게인)도 이 표를 쓴다 — 이름을 탭마다 다시 적지 않는다. */
+export const STATUS_LABEL = Object.freeze({
+  fail: "불합격",
+  warn: "합격·주의",
+  ok: "합격·권장 충족",
+  na: "판정 불가",
 });
 
-export function threshold(criteria, key) {
-  const v = criteria?.[key];
-  return typeof v === "number" && Number.isFinite(v) ? v : FALLBACK_CRITERIA[key];
+/** 판정 상태 → 상태색. 모르는 값·없음은 판정 불가(회색) — 색을 짐작하지 않는다. */
+export function statusColor(status) {
+  if (status === "fail") return STATUS.bad;
+  if (status === "warn") return STATUS.warn;
+  if (status === "ok") return STATUS.ok;
+  return STATUS.na;
 }
 
-/** PM[deg] → 상태색 — 문턱은 인자로 받는다 (criteria 생략 시 폴백).
- * ≥pm_min_deg 양호 · pm_bad_deg~pm_min_deg 주의 · <pm_bad_deg 부족. */
-export function marginColor(pm, criteria) {
-  if (pm === "inf") return STATUS.ok;
-  if (typeof pm !== "number") return STATUS.na; // null(NaN)·문자열 — 판정 불가
-  if (pm < threshold(criteria, "pm_bad_deg")) return STATUS.bad;
-  if (pm < threshold(criteria, "pm_min_deg")) return STATUS.warn;
-  return STATUS.ok;
+const isStatus = (s) => Object.prototype.hasOwnProperty.call(STATUS_LABEL, s);
+
+/** 마진 칸 하나의 판정 — **서버가 실은 판정**(margins[loop].pm_status | gm_status, 엔진 MarginCriteria.judge_pm·
+ *  judge_gm, 고른 기체 프로파일의 기준)을 읽는다. 화면이 PM·GM 문턱으로 다시 짜지 않는다 — 종전엔 웹이 PM 30~45°를
+ *  주의로 칠했는데 엔진은 PM<45를 불합격으로 판정해 두 탭이 같은 칸을 다르게 불렀다.
+ *  폐루프 발산 칸도 서버 판정이 이미 접어 넣었다(엔진의 나선 모드 예외 규칙 포함) — 웹이 따로 덮어쓰지 않는다
+ *  (판정은 한 자리). 판정 필드가 없는 옛 결과·마진 없음은 na — 브라우저에서 다시 판정하지 않는다. key "pm_deg" | "gm_db". */
+export function marginCellStatus(m, key) {
+  if (!m) return "na";
+  // 엔진이 「면제 안 되는 발산이라 불합격」이라고 표시한 칸 — 축별 판정(잰 그대로의 부호 있는 판독)보다 칸 판정이 이긴다.
+  // 판정을 여기서 다시 짜는 것이 아니라 엔진 표시(design/criteria.py judge_cell)를 읽는다
+  if (m.diverged === true) return "fail";
+  const s = m[key === "pm_deg" ? "pm_status" : "gm_status"];
+  return isStatus(s) ? s : "na";
 }
 
-/** GM[dB] → 상태색 — 합격선 gm_min_db, 목표선 gm_good_db.
- *
- * 목표선은 튜너 목표(TuneTargets.gm_db)와도 같은 값이라 세 자리가 한 수치를
- * 공유한다 — 그래서 이 문턱을 화면이 따로 들고 있으면 안 된다. */
-export function gmColor(gm, criteria) {
-  if (gm === "inf") return STATUS.ok;
-  if (typeof gm !== "number") return STATUS.na;
-  if (gm < threshold(criteria, "gm_min_db")) return STATUS.bad;
-  if (gm < threshold(criteria, "gm_good_db")) return STATUS.warn;
-  return STATUS.ok;
+/** 옛 결과 안내 — 칸 판정(pm_status)이 실리기 전에 저장된 결과는 전 칸이 판정 불가로 보인다. */
+export const OLD_RESULT_HINT = "옛 결과 — 판정이 실리기 전에 저장됐다, 다시 계산하면 선다";
+
+/** 결과에 칸 판정이 실렸나 — 마진이 있는 칸 중 하나라도 pm_status를 가지면 true. 마진이 하나도 없으면 true(말할 게 없다). */
+export function hasMarginStatuses(body) {
+  let any = false;
+  for (const e of body?.cases ?? []) {
+    for (const m of Object.values(e?.margins ?? {})) {
+      if (!m || typeof m !== "object") continue;
+      if (isStatus(m.pm_status)) return true;
+      any = true;
+    }
+  }
+  return !any;
 }
 
-/** 상태색 범례 문장 — 문턱을 문장에 박아 낸다 (수치를 두 번 적지 않는다). */
-export function marginLegendText(criteria) {
-  const t = (k) => threshold(criteria, k);
-  return `상태색: PM ≥${t("pm_min_deg")}° 양호 · ${t("pm_bad_deg")}~${t("pm_min_deg")}° 주의 `
-    + `· <${t("pm_bad_deg")}° 부족 · GM ≥${t("gm_good_db")} dB 양호 · `
-    + `${t("gm_min_db")}~${t("gm_good_db")} dB 주의 · <${t("gm_min_db")} dB 부족 · `
-    + "회색 = 트림 불가/판정 불가";
+/** 판정선 한 줄 — GET /profiles/{id}/criteria의 적용값(applied.margin)과 판정선 뜻(lines)에서.
+ *  metric "pm_deg" | "gm_db". 선을 못 읽으면 null(수치를 지어내지 않는다). */
+export function criteriaLineText(criteriaResp, metric) {
+  const ln = (criteriaResp?.lines ?? []).find((l) => l?.metric === metric);
+  const mc = criteriaResp?.applied?.margin;
+  if (!ln || !mc) return null;
+  const op = ln.direction === "max" ? "≤" : "≥";
+  const val = (k) => (k && typeof mc[k] === "number" && Number.isFinite(mc[k]) ? mc[k] : null);
+  const u = ln.unit === "°" ? "°" : ln.unit ? ` ${ln.unit}` : "";
+  const pass = val(ln.pass_key);
+  if (pass == null) return null;
+  const rec = val(ln.rec_key);
+  return `${ln.label} ${op}${pass}${u} 합격` + (rec != null ? ` · ${op}${rec}${u} 권장` : "");
+}
+
+/** 마진 탭 판정선 범례 — 판정선(기체 기준)과 색 넷의 이름. 기준을 못 읽었으면 색 이름만. */
+export function marginLegendText(criteriaResp) {
+  const lines = ["pm_deg", "gm_db"].map((k) => criteriaLineText(criteriaResp, k)).filter(Boolean);
+  const colours = `색 = 서버 판정: ${Object.values(STATUS_LABEL).join(" · ")}`;
+  return lines.length ? `판정선: ${lines.join(" · ")} — ${colours}` : colours;
 }
 
 /** 트림 판정 → 비행 엔벨로프 셀 (01 §4.1 자동 판정 플래그 기반 근사).

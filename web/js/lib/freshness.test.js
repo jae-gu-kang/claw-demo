@@ -65,3 +65,72 @@ test("판정 불가 — 기체 기록 없는 옛 결과·목록 미수신은 모
   assert.equal(resultFreshness({ id: "alpha" }, ROWS).state, "unknown");  // 지문 없는 옛 echo
   assert.equal(resultFreshness({ id: "alpha", fingerprint: "fp-a3" }, null).state, "unknown");
 });
+
+// ── 판정 기준 신선도 (기준 통합 ① S4c) ──
+import { CRITERIA_FRESHNESS, criteriaBadgeSpec, criteriaEchoCache, criteriaFreshness } from "./freshness.js";
+
+const ECHO = { judgement_fingerprint: "j1", targets_fingerprint: "t1", scheme: "judge-v1", source: "profile" };
+
+test("기준 미상 — echo·scheme 없는 옛 결과와 지금 기준 미수신은 낡음으로 위장하지 않는다", () => {
+  assert.equal(criteriaFreshness(null, ECHO, "influence_evaluate"), "unknown");
+  assert.equal(criteriaFreshness(undefined, ECHO, "margin_map"), "unknown");
+  // 옛 정의의 criteria_fingerprint만 있는 결과 — 대조하지 않는다
+  assert.equal(criteriaFreshness({ criteria_fingerprint: "old" }, ECHO, "influence_evaluate"), "unknown");
+  assert.equal(criteriaFreshness({ ...ECHO, scheme: undefined }, ECHO, "auto_design"), "unknown");
+  assert.equal(criteriaFreshness(ECHO, null, "influence_evaluate"), "unknown");
+  assert.equal(criteriaFreshness({ ...ECHO, judgement_fingerprint: "zz" }, null, "margin_map"), "unknown");
+  assert.equal(criteriaFreshness({ ...ECHO, judgement_fingerprint: null }, ECHO, "margin_map"), "unknown");
+});
+
+test("신선 — 같으면 조용하다", () => {
+  for (const k of ["influence_evaluate", "influence_prescribe", "auto_design", "margin_map", "influence_scan"]) {
+    assert.equal(criteriaFreshness({ ...ECHO, source: "default" }, ECHO, k), "fresh");
+  }
+  assert.equal(criteriaBadgeSpec("fresh"), null);
+});
+
+test("재평가 필요 — 판정 기준 지문 또는 판정 함수 버전이 다르면 종류 무관", () => {
+  for (const k of ["influence_evaluate", "auto_design", "margin_map", "influence_verify"]) {
+    assert.equal(criteriaFreshness({ ...ECHO, judgement_fingerprint: "j0" }, ECHO, k), "reeval");
+    assert.equal(criteriaFreshness({ ...ECHO, scheme: "judge-v0" }, ECHO, k), "reeval");
+    // 판정도 목표도 다르면 판정이 먼저다
+    assert.equal(criteriaFreshness({ ...ECHO, judgement_fingerprint: "j0", targets_fingerprint: "t0" }, ECHO, k),
+      "reeval");
+  }
+});
+
+test("목표만 다름 — J를 매긴 종류는 J 재계산, 자동 설계는 목표와 다름, 목표 안 쓰는 종류는 신선", () => {
+  const r = { ...ECHO, targets_fingerprint: "t0" };
+  assert.equal(criteriaFreshness(r, ECHO, "influence_evaluate"), "rescore");
+  assert.equal(criteriaFreshness(r, ECHO, "influence_prescribe"), "rescore");
+  assert.equal(criteriaFreshness(r, ECHO, "auto_design"), "target_changed");
+  for (const k of ["margin_map", "influence_scan", "influence_diagnose", "influence_verify", undefined]) {
+    assert.equal(criteriaFreshness(r, ECHO, k), "fresh");
+  }
+});
+
+test("배지 문구 — 넷 모두 우리말 이름과 툴팁을 가진다", () => {
+  assert.equal(criteriaBadgeSpec("unknown").label, "판정 기준 미상");
+  assert.equal(criteriaBadgeSpec("reeval").label, "재평가 필요");
+  assert.equal(criteriaBadgeSpec("rescore").label, "J 재계산 필요");
+  assert.equal(criteriaBadgeSpec("target_changed").label, "현재 튜닝 목표와 다름");
+  for (const s of ["unknown", "reeval", "rescore", "target_changed"]) {
+    assert.ok(CRITERIA_FRESHNESS[s].tip.length > 10);
+    assert.ok(["na", "bad", "warn"].includes(CRITERIA_FRESHNESS[s].tone));
+  }
+  assert.equal(criteriaBadgeSpec("nope"), null);
+});
+
+test("지금 기준 조회 — 기체당 한 번, 실패는 null, id 없으면 부르지 않는다", async () => {
+  const calls = [];
+  const look = criteriaEchoCache(async (path) => {
+    calls.push(path);
+    if (path.includes("bad")) throw new Error("404");
+    return { applied: {}, echo: ECHO };
+  });
+  assert.deepEqual(await look("alpha"), ECHO);
+  assert.deepEqual(await look("alpha"), ECHO);
+  assert.equal(await look("bad"), null);
+  assert.equal(await look(null), null);
+  assert.deepEqual(calls, ["/profiles/alpha/criteria", "/profiles/bad/criteria"]);
+});

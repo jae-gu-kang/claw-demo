@@ -28,11 +28,11 @@ export function statusInk(status) {
 
 /** 형상 + 케이스 + 깊이 → /influence/evaluate 본문 (v2 — items 선택은 없다:
  *  비용 게이트는 depth와 별도 검증(verify)이 대신한다). */
-export function evaluateRequest(state, { cases, criteria, depth, tSettle, tStep,
+export function evaluateRequest(state, { cases, depth, tSettle, tStep,
                                          tHold, fingerprint } = {}) {
+  // 판정선은 싣지 않는다 — 서버가 선택 기체의 /criteria·/tuning으로 판정하고 요청 기준은 거절한다(v1.54)
   const body = { ...structuralRequest(state), cases };
   if (depth != null) body.depth = depth;
-  if (criteria != null) body.criteria = criteria;
   if (tSettle != null) body.t_settle = tSettle;
   if (tStep != null) body.t_step = tStep;
   if (tHold != null) body.t_hold = tHold;
@@ -81,13 +81,12 @@ export function maneuverLine(model) {
 }
 
 /** 형상 + 케이스 → /influence/verify 본문 (3단계 검증 — 후보 확정 후 별도 실행). */
-export function verifyRequest(state, { cases, criteria, depth, midpoints,
+export function verifyRequest(state, { cases, depth, midpoints,
                                        tSettle, tStep, tHold, tMission,
                                        fingerprint } = {}) {
-  const body = { ...structuralRequest(state), cases };
+  const body = { ...structuralRequest(state), cases };  // 판정선은 싣지 않는다(evaluateRequest와 같은 이유)
   if (depth != null) body.depth = depth;
   if (midpoints != null) body.midpoints = midpoints;
-  if (criteria != null) body.criteria = criteria;
   if (tSettle != null) body.t_settle = tSettle;
   if (tStep != null) body.t_step = tStep;
   if (tHold != null) body.t_hold = tHold;

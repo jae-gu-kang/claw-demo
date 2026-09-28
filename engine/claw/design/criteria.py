@@ -19,8 +19,10 @@ warn이 뜻하는 것: "합격선은 넘겼으나 튜너가 겨냥한 설계 목
 그러려면 목표선이 튜너 목표(TuneTargets) **이하**여야 한다 — 그렇지 않으면 튜닝이
 완벽히 성공한 점조차 warn으로 찍혀 warn이 아무 정보도 못 준다. 실제로 그랬다:
 gm_good_db 10 dB > TuneTargets.gm_db 8 dB라 자유 게인 최적점이 구조적으로 warn이었고,
-사용자에게는 "경고가 압도적으로 많다"로 보였다. 이 정합은 AutoDesignConfig.__post_init__이
-강제한다 (기준과 목표가 만나는 유일한 자리 — 한쪽만 조정하면 거기서 걸린다).
+사용자에게는 "경고가 압도적으로 많다"로 보였다. 이 정합은 AutoDesignConfig가 검사한다
+(기준과 목표가 만나는 유일한 자리 — 한쪽만 조정하면 거기서 걸린다): 합격선보다 느슨한 목표는
+__post_init__이 거절하고, 권장선보다만 느슨한 목표는 경고(target_warnings → report의
+target_warnings)로 남긴다.
 감쇠는 같기만 해도 모자라다 — 튜너는 앵커에서 목표를 맞추고 출하되는 스케줄은 검증점에서 그보다
 내려가므로, 여유 0이면 표현 손실이 곧 warn이다. 그래서 감쇠 목표는 목표선 위에 잰 표현 손실만큼
 여유를 둔다 (TuneTargets.zeta_dr 주석 — 요 목표를 목표선과 같던 0.5에서 0.6으로 올린 근거).
@@ -41,6 +43,10 @@ loop_margins가 nan을 nan으로 유지하는 이유(margins.py — 무한 여�
 import math
 from dataclasses import asdict, dataclass
 
+import numpy as np
+
+from claw.analysis.fq import LN2, FQCriteria
+from claw.design.closure import _WN_FLOOR_FRAC, wn_reference
 from claw.params.paramset import canonical_hash
 
 # 감쇠 지표가 entry에 실리는 키들 — 자리 종류마다 이름이 다르다 (schedmap은 "zeta",
@@ -180,6 +186,39 @@ class MarginCriteria:
             return "warn"
         return "ok"
 
+    def judge_cell(self, margins: dict, closed_loop=None, lm_axis=None) -> dict:
+        """마진 맵 칸 하나의 판정 — {"pm_status", "gm_status", "status"}. 칸 판정의 **유일한 출처**다(화면은 색만 칠한다).
+
+        margins는 nyquist_margins 결과({pm_deg, gm_db, …}), closed_loop은 그 결과의 `closed_loop`(이 루프를 닫은
+        폐루프가 발산할 때만 있다 — {"stable": False, "unstable": [[Re, Im≥0], …]}), lm_axis는 그 루프를 조립한 축
+        모델(나선 면제의 축·느림 문턱을 정한다).
+
+        발산은 자동 설계와 **같은 규칙**(spiral_exempt_verdict — 튜너 댐퍼 가드·rate_loop_margins가 쓰는 것)으로 가른다:
+        - 횡축의 느린 나선 실근 하나(배가시간과 무관 — 나선 판정은 가드·전체 폐루프 확인의 몫, rate_loop_margins와
+          같다)는 발산으로 치지 않는다 — 여유를 잰 그대로 판정한다(judge_pm·judge_gm·judge).
+        - 그 밖의 발산(진동 발산·빠른 실근·둘 이상의 발산극·종축 발산)은 **status "fail"**이다 — 안정 여유가 정의되지
+          않는다(judge_rate_loop의 divergent와 같다). pm_status·gm_status는 **잰 그대로** 둔다: 불안정 칸의 PM·GM은
+          루프 교차의 부호 있는 고전 판독(nyquist_margins)이라 축별 색은 그 판독의 판정이고, 칸 합산만 발산이 이긴다.
+        - lm_axis가 없으면 면제를 가를 수 없다 — 발산은 전부 fail(모르는 것을 통과로 만들지 않는다).
+        그 발산 fail 칸에는 **"diverged": True**를 붙인다 — 화면은 축별 색(pm_status·gm_status)으로 칠하므로, 이 표시가
+        없으면 발산한 칸이 PM·GM 히트맵에서 합격색으로 보인다(문서화 중 발견). 표시는 발산 fail일 때만 붙는다 —
+        안정·면제 칸의 모양(서버 골든)은 그대로다.
+        closed_loop이 없거나 stable이면 judge()와 같다(pm_status·gm_status는 judge_pm·judge_gm)."""
+        out = {
+            "pm_status": self.judge_pm(margins["pm_deg"]),
+            "gm_status": self.judge_gm(margins["gm_db"]),
+            "status": self.judge({"pm_deg": margins["pm_deg"], "gm_db": margins["gm_db"]}),
+        }
+        if closed_loop is None or closed_loop.get("stable", True):
+            return out
+        poles = np.array([complex(re, im) for re, im in closed_loop.get("unstable") or []])
+        exempt = (lm_axis is not None and poles.size > 0
+                  and spiral_exempt_verdict(poles, lm_axis)["bound"] != "unstable")
+        if not exempt:
+            out["status"] = "fail"
+            out["diverged"] = True
+        return out
+
     def judge_rate_loop(self, metric_status: str, margins) -> str:
         """레이트 자리의 합산 판정 — 모드 지표 판정(judge_damping·judge_bandwidth) + AS94900 끊은 루프 여유.
 
@@ -310,6 +349,42 @@ STATUSES = ("fail", "warn", "ok", "na")
 # 합산 순위 — na가 fail보다 앞선다(judge()와 같은 규칙: 한 축이라도 못 재면 판정 불가다.
 # fail로 뭉개면 분류기가 엉뚱한 처방을 낸다)
 _COMBINE_RANK = {"na": 3, "fail": 2, "warn": 1, "ok": 0}
+
+
+# 나선 면제선 [s] — 기체 비행성 기준(analysis.fq.FQCriteria — MIL-F-8785C Class I·Cat B [기본값])의
+# 나선 **수준 2** 최소 배가시간을 그대로 쓴다(8 s). 새 수를 만들지 않는다 — 기준을 바꾸면(다른 급·비행단계) 따라간다.
+# 수준을 가르는 것은 **어느 상태를 재는가**다. 8785C의 나선 요구는 비행제어계를 켠 채 조종간을 놓은 기체에 걸리고,
+# 이 SCAS에서 그 정상 상태는 자세 루프까지 닫힌 조성이다 — tune_point 3단이 그 조성을 극 전부 안정(나선 안정 —
+# 수준 1보다 강하다)으로 따로 확인한다. 댐퍼만 닫힌 조성은 자세 루프가 빠진 **고장 상태**이고, 8785C는 고장
+# 상태에 한 단계 낮은 수준을 허용한다. 수준 1을 여기 걸면 고장 상태의 나선 요구가 정상 상태의 롤 댐퍼를 깎는다 —
+# 예제 기체 기본 설정 실측: 앵커 135점 중 41점에서 롤 댐퍼가 나선 20 s 선에 묶여(λ 2.7~8.6, 목표 12) 검증 실패
+# 37건이 남았고, 수준 2 선에서는 0건(전 점 전체 폐루프 안정)이다. (tune._SPIRAL_T2_MIN_S가 이 값이다)
+SPIRAL_T2_MIN_S = FQCriteria().spiral_t2_l2
+
+
+def spiral_exempt_verdict(poles, lm_axis, t2_min_s: float = SPIRAL_T2_MIN_S) -> dict:
+    """극 집합 → 나선 면제를 적용한 안정 판정 {"stable", "bound", "spiral_t2_s", "max_re"} — 발산 판정의 한 자리.
+
+    자동 설계(tune — 댐퍼 가드 _damper_loop_verdict, 레이트 루프 여유 rate_loop_margins, 방향 판정 _closure_diverges)와
+    마진 맵 칸 판정(MarginCriteria.judge_cell)이 같은 규칙을 쓴다 — 같은 루프를 두 곳이 다르게 판정하지 않게.
+
+    발산극(Re ≥ −1e-9)이 없으면 안정. 횡축에서 발산극이 정확히 하나이고 느린 실근(|Re| < _WN_FLOOR_FRAC ×
+    기준 wn — 모드 지표가 장주기·나선으로 보고 빼는 저주파 문턱)이면 그것이 나선이다: 배가시간이 비행성 기준
+    선(t2_min_s — 기본 SPIRAL_T2_MIN_S) 이상이면 안정(면제), 아니면 bound "spiral". 나머지 발산은 전부 bound "unstable"."""
+    poles = np.asarray(poles)
+    max_re = float(np.max(poles.real)) if poles.size else -math.inf
+    bad = [p for p in poles if p.real >= -1e-9]
+    if not bad:
+        return {"stable": True, "bound": None, "spiral_t2_s": None, "max_re": max_re}
+    p = bad[0]
+    slow_real = (lm_axis.axis == "lat" and len(bad) == 1 and abs(p.imag) <= 1e-9
+                 and abs(p.real) < _WN_FLOOR_FRAC * wn_reference(lm_axis))
+    if not slow_real:
+        return {"stable": False, "bound": "unstable", "spiral_t2_s": None, "max_re": max_re}
+    t2 = LN2 / p.real if p.real > 0.0 else math.inf
+    if t2 < t2_min_s:
+        return {"stable": False, "bound": "spiral", "spiral_t2_s": t2, "max_re": max_re}
+    return {"stable": True, "bound": None, "spiral_t2_s": t2, "max_re": max_re}
 
 
 def combine_margin_status(*statuses: str) -> str:

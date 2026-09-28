@@ -683,7 +683,13 @@ def _criteria_value(v, default, path):
     def num(x, p_):
         if isinstance(x, bool) or not isinstance(x, (int, float)):
             _fail(p_, "수치여야 함")
-        return float(x)
+        try:
+            f = float(x)
+        except OverflowError:  # JSON의 임의 정밀도 정수 — 변환에서 500이 나지 않게
+            _fail(p_, "double 범위를 넘는 수치")
+        if not math.isfinite(f):  # 판정선이 NaN이면 모든 비교가 거짓이라 조용한 허위 합격이 된다
+            _fail(p_, "유한한 수치여야 함")
+        return f
 
     if isinstance(default, bool):
         if not isinstance(v, bool):

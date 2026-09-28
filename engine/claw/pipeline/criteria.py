@@ -43,7 +43,7 @@ SCHEMA_VERSION = 2
 # (판정선 값이 같아도 부등호·합산 규칙·na 처리가 바뀌면 옛 결과의 판정은 새 판정이 아니다).
 # 판정 로직 = design/criteria.py의 judge*·combine_margin_status·target_conflicts와 pipeline/evaluate.py의
 # 단계 판정. 기준 dict의 모양(SCHEMA_VERSION)과는 다른 축이다.
-JUDGEMENT_SCHEME = "crit-v1"
+JUDGEMENT_SCHEME = "crit-v2"
 
 # 판정이 아니라 튜닝 쪽에 속한 묶음 — 목표 지문으로 간다. 기체 프로파일에서는 /tuning 절이다(/criteria가 나머지)
 _TUNING_SUBS = ("targets", "weights")

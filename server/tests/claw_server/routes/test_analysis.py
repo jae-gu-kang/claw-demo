@@ -919,3 +919,50 @@ def test_margin_map_verdict_follows_the_profile_criteria(client, wait_job):
     assert body["criteria_echo"]["source"] == "profile"
     assert body["criteria_echo"]["judgement_fingerprint"] != base["criteria_echo"]["judgement_fingerprint"]
     assert body["profile"]["id"] == "pm30-delta"
+
+
+# ── 칸 판정이 폐루프 발산을 접는다 (judge_cell — 자동 설계와 같은 나선 면제 규칙) ────────────────────
+def test_margin_map_divergent_cell_is_fail_in_the_payload(client, wait_job):
+    """칸 판정은 엔진 한 자리(judge_cell)다 — 폐루프 발산을 자동 설계와 같은 나선 면제 규칙으로 접는다. 종전에는 서버가
+    PM·GM만 판정해 발산 칸에 ok를 싣고 화면이 closed_loop.stable을 따로 보고 fail로 칠했다(판정 두 출처).
+
+    pitch_q(양의 되먹임·적분): 여유는 PM 170°대·GM 40 dB대로 통과인데 빠른 실근이 발산 → fail.
+    roll_p(kp 0.05·ki 0.1): 발산극이 느린 나선 실근 하나(Re ≈ 0.0013)뿐 → 면제, 여유 판정 그대로 ok."""
+    from claw.design.criteria import MarginCriteria
+
+    req = _pm41_request()
+    req["loops"] = [{"name": "pitch_q", "axis": "lon", "x_out": "q", "u_in": "de", "sign": 1.0, "kp": 0.01, "ki": 2.0},
+                    {"name": "roll_p", "axis": "lat", "x_out": "p", "u_in": "da", "sign": 1.0, "kp": 0.05, "ki": 0.1}]
+    body = _map_body(client, wait_job, req)
+    mc = MarginCriteria()
+    m = body["cases"][0]["margins"]["pitch_q"]
+    assert m["closed_loop"]["stable"] is False and m["closed_loop"]["unstable"]  # 이 칸의 전제
+    assert mc.judge(m) == "ok"  # 여유만 보면 통과인 칸이다 — 발산을 접지 않으면 ok가 실렸다
+    assert (m["pm_status"], m["gm_status"], m["status"]) == ("ok", "ok", "fail")  # 축별은 잰 판독 그대로
+    r = body["cases"][0]["margins"]["roll_p"]
+    assert r["closed_loop"]["stable"] is False and len(r["closed_loop"]["unstable"]) == 1
+    re_, im_ = r["closed_loop"]["unstable"][0]
+    assert im_ == 0.0 and 0.0 < re_ < 0.01  # 느린 나선 실근 하나 — 이 칸의 전제
+    assert r["status"] == mc.judge(r) == "ok"
+
+
+def test_with_status_uses_the_engine_cell_verdict():
+    """_with_status는 엔진 judge_cell 한 자리다 — 발산(진동)은 여유가 좋아도 fail, 횡축 느린 나선 하나는 면제."""
+    from claw.common.contracts import TrimCase
+    from claw.design.criteria import MarginCriteria
+    from claw.plant import make_demo_aircraft
+    from claw.trim import linearize, split_axes, trim_level
+    from claw_server.routes.analysis import _with_status
+
+    ac = make_demo_aircraft()
+    tr = trim_level(ac, TrimCase("t", mach=0.45, alt=1000.0, fuel=200.0), fingerprint="fp")
+    _lon, lat = split_axes(linearize(ac, tr))
+    mc = MarginCriteria()
+    good = {"pm_deg": 60.0, "gm_db": 12.0, "wcp": 3.0, "wcg": 9.0}
+    assert _with_status(good, mc, lat)["status"] == "ok"
+    osc = {**good, "closed_loop": {"stable": False, "unstable": [[0.3, 4.0]]}}
+    out = _with_status(osc, mc, lat)
+    assert (out["pm_status"], out["gm_status"], out["status"]) == ("ok", "ok", "fail")
+    assert out["closed_loop"] == osc["closed_loop"] and out["pm_deg"] == 60.0  # 수치는 그대로 싣는다
+    spiral = {**good, "closed_loop": {"stable": False, "unstable": [[0.05, 0.0]]}}
+    assert _with_status(spiral, mc, lat)["status"] == "ok"

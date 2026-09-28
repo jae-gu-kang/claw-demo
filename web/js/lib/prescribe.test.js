@@ -206,3 +206,9 @@ test("applyExport: [적용]이 못 싣는 지렛대는 적용 문장에 이름�
   assert.equal(unappliedNote(null), null);
   assert.match(unappliedNote(["a", "b"]), /^\[적용\]이 싣지 못하는 지렛대 2개: a, b — /);
 });
+
+
+test("처방 요청은 판정선을 싣지 않는다 — 서버가 요청 기준을 거절한다(v1.54)", () => {
+  const b = prescribeRequest({}, { resultId: "r", cases: [], criteria: { margin: { pm_min_deg: 50 } } });
+  assert.equal("criteria" in b, false);
+});

@@ -13,12 +13,12 @@ import { normalizeEvalReport } from "./evaluate.js";
 import { fmtPercent, structuralRequest } from "./influence.js";
 
 export function prescribeRequest(state, { resultId, evalResultId, cases,
-                                          knobs, criteria, confirm, tSettle,
+                                          knobs, confirm, tSettle,
                                           tStep, tHold, fingerprint } = {}) {
+  // 판정선은 싣지 않는다 — 서버가 선택 기체의 기준으로 판정하고 요청 기준은 거절한다(v1.54)
   const body = { ...structuralRequest(state), result_id: resultId, cases };
   if (evalResultId) body.eval_result_id = evalResultId;
   if (knobs != null) body.knobs = knobs;
-  if (criteria != null) body.criteria = criteria;
   if (confirm != null) body.confirm = confirm;
   if (tSettle != null) body.t_settle = tSettle;
   if (tStep != null) body.t_step = tStep;

@@ -82,16 +82,25 @@ def test_defaults_expose_lambda_fracs(client):
     assert cr["lam_good_frac"] == MarginCriteria().lam_good_frac == 0.8
 
 
-def test_criteria_override_reaches_saved_config(client, wait_job):
-    """중첩 criteria 덮어쓰기가 **저장된 세션 config까지** 실제로 도달하는지.
+def _criteria_doc(pid, criteria=None, tuning=None):
+    from claw.profile import load_example
 
-    202만 보면 부족하다 — _build_config가 중첩 override를 조용히 무시해도 요청은
-    수락되고, 사용자는 0.6으로 판정했다고 믿은 채 0.5로 판정한 결과를 읽는다.
-    안 적은 형제 필드가 엔진 기본값으로 남는 것도 함께 본다 (덮어쓰기가 판정선
-    전체를 갈아 끼우면 안 된다).
+    d = load_example()
+    d.update(id=pid, name=f"기준 시험 {pid}", is_example=False, variants=[])
+    d["criteria"], d["tuning"] = criteria, tuning
+    return d
+
+
+def test_criteria_override_reaches_saved_config(client, wait_job):
+    """기체 /criteria의 판정선이 **저장된 세션 config까지** 실제로 도달하는지 (v1.54 — 요청 덮어쓰기는 거절되고
+    기준은 기체에서 온다).
+
+    202만 보면 부족하다 — 조용히 무시돼도 요청은 수락되고, 사용자는 0.6으로 판정했다고 믿은 채 0.5로 판정한
+    결과를 읽는다. 안 적은 형제 필드가 도구 기본값으로 남는 것도 함께 본다 (한 칸이 판정선 전체를 갈아 끼우면 안 된다).
     """
-    cfg = _small_config(criteria={"lam_min_frac": 0.6})
-    r = client.post("/api/design/auto", json={"config": cfg})
+    assert client.post("/api/profiles", json={"document": _criteria_doc(
+        "ad-lam", {"margin": {"lam_min_frac": 0.6}})}).status_code == 201
+    r = client.post("/api/design/auto", json={"config": _small_config(), "profile": {"id": "ad-lam"}})
     assert r.status_code == 202, r.text
     j = wait_job(r.json()["id"], timeout=300.0)
     assert j["status"] == "done"
@@ -102,20 +111,53 @@ def test_criteria_override_reaches_saved_config(client, wait_job):
 
 
 def test_invalid_lambda_fracs_are_422_before_202(client):
-    """모순된 λ 비율은 제출 시점에 막는다 — 202로 새면 워커를 돌린 뒤에야 안다.
+    """모순된 λ 비율은 **기체에 저장할 때** 막는다(v1.54 — 기준은 기체에 산다). 저장된 뒤 설계 제출에서 알면 늦다.
 
-    MarginCriteria.__post_init__의 ValueError가 _build_config →
-    submit_auto_design의 except (ValueError, TypeError)까지 도달하는 경로를 고정한다.
-    놓치면 500이거나(예외가 새는 경우) 잡 스레드 안에서 터져 원인 없는 실패가 된다.
+    MarginCriteria.__post_init__의 ValueError가 기체 검증(/criteria/margin 경로)까지 도달하는 경로를 고정한다.
     """
-    for criteria in (
+    for i, margin in enumerate((
         {"lam_min_frac": 0.9},  # > lam_good_frac(0.8) — 합격선이 목표선보다 높다
         {"lam_good_frac": 1.5},  # > 1 — 목표의 150%를 목표선으로 삼을 수는 없다
         {"lam_min_frac": 0.0},  # 0 이하 — 무엇이든 통과하는 합격선
         {"lam_min_frac": 0.9, "lam_good_frac": 0.85},  # 둘 다 적어도 순서는 지켜야 한다
-    ):
-        r = client.post("/api/design/auto", json={"config": {"criteria": criteria}})
-        assert r.status_code == 422, f"{criteria} → {r.status_code}"
+    )):
+        r = client.post("/api/profiles", json={"document": _criteria_doc(f"lam-bad-{i}", {"margin": margin})})
+        assert r.status_code == 422, f"{margin} → {r.status_code}"
+        assert r.json()["detail"]["path"] == "/criteria/margin"
+
+
+def test_request_criteria_and_targets_are_rejected(client):
+    """요청 config의 판정선·목표는 형식이 맞아도 거절한다(v1.54 S3b) — 사유가 기체 편집을 가리킨다.
+    아래 형식 오류 테스트들(NaN·큰 수·모르는 키)도 이제 이 거절로 먼저 422다: 기준 값의 형식 검사는 기체 저장
+    (engine profile/schema — test_profile_criteria)이 맡는다."""
+    from claw_server.refs import REQUEST_CRITERIA_REJECTED
+
+    for cfg in ({"criteria": {"pm_min_deg": 45.0}}, {"targets": {"zeta_sp": 0.9}}, {"criteria": {}}):
+        r = client.post("/api/design/auto", json={"config": _small_config(**cfg)})
+        assert r.status_code == 422, (cfg, r.text)
+        assert REQUEST_CRITERIA_REJECTED in r.text
+
+
+def test_target_below_pass_line_is_422_but_below_rec_line_is_warning(client, wait_job):
+    """튜닝 목표 대 판정선 — 합격선보다 느슨하면 422, 권장선보다만 느슨하면 수락 + 경고 (기준 통합 ① S5, v1.56).
+
+    권장선 충돌은 설정 모순이 아니라 선택이다 — 거절하면 사용자가 일부러 고른 목표를 못 돌린다.
+    대신 저장된 report.target_warnings가 "성공한 점이 warn으로 찍힌다"를 말해야 한다.
+    """
+    # 목표는 기체 /tuning에 산다(v1.54 — 요청 목표는 거절). 합격선보다 느슨한 목표도 기체 저장은 된다(문서 경고) —
+    # 거절은 그 목표로 설계를 제출할 때다
+    for pid, gm in (("tgt-pass", 5.0), ("tgt-rec", 7.0)):
+        r = client.post("/api/profiles", json={"document": _criteria_doc(pid, tuning={"targets": {"gm_db": gm}})})
+        assert r.status_code == 201, r.text
+    r = client.post("/api/design/auto", json={"config": _small_config(), "profile": {"id": "tgt-pass"}})
+    assert r.status_code == 422, r.text  # < gm_min_db 6 — 성공점이 곧 fail
+    assert "gm_db" in r.json()["detail"]
+    r2 = client.post("/api/design/auto", json={"config": _small_config(), "profile": {"id": "tgt-rec"}})
+    assert r2.status_code == 202, r2.text  # < gm_good_db 8이지만 합격선은 지킨다
+    j = wait_job(r2.json()["id"], timeout=300.0)
+    assert j["status"] == "done"
+    (w,) = client.get(f"/api/results/{j['result_id']}").json()["report"]["target_warnings"]
+    assert "gm_db 7" in w and "gm_good_db 8" in w
 
 
 def test_budget_and_unknown_key_rejected(client):
@@ -123,8 +165,6 @@ def test_budget_and_unknown_key_rejected(client):
     assert r.status_code == 422
     r2 = client.post("/api/design/auto", json={"config": {"nope": 1}})
     assert r2.status_code == 422
-    r3 = client.post("/api/design/auto", json={"config": {"criteria": {"bad_key": 1}}})
-    assert r3.status_code == 422
 
 
 def test_auto_design_end_to_end(client, wait_job):
@@ -220,8 +260,6 @@ def test_bad_types_are_422_not_500(client):
         {"refine_tol": "x"},
         {"alts": "notalist"},
         {"alts": ["x"]},
-        {"targets": {"pm_deg": None}},
-        {"criteria": {"pm_min_deg": "abc"}},
         {"mode": 3},
         # 문자열 필드는 수치 검사에서 빼되 **타입·허용값은 봐야** 한다 — 빠뜨리면
         # 엔진 __post_init__까지 가서 잡 스레드에서 터지거나(500) 조용히 통과한다
@@ -260,17 +298,15 @@ def test_nonfinite_config_is_422(client):
     # 원시 본문으로 보낸다 — httpx의 json= 인코더는 NaN을 거부하지만 파이썬
     # json.loads(서버 파싱 경로)는 NaN·Infinity 리터럴을 받아들인다. 즉 이 경로는
     # 표준 클라이언트로 막히지 않는다
-    # delay_s·criteria 두 줄은 엔진 __post_init__(delay_s < 0, pm_bad <= pm_min)이
-    # 먼저 잡아 이 가드가 없어도 422다 — 계약 표현이지 가드의 증거는 아니다.
-    # 나머지 다섯이 가드를 고정한다(빼면 전부 202로 샌다)
+    # delay_s 줄은 엔진 __post_init__(delay_s < 0)이 먼저 잡아 이 가드가 없어도 422다 — 계약 표현이지 가드의
+    # 증거는 아니다. 나머지 넷이 가드를 고정한다(빼면 전부 202로 샌다). 판정선·목표의 NaN은 이제 요청이 아니라
+    # 기체 저장에서 막는다(test_profile_criteria_rejects_nonfinite_and_huge)
     for body in (
         '{"config": {"actuator_wn": NaN}}',
         '{"config": {"refine_tol": Infinity}}',
         '{"config": {"delay_s": -Infinity}}',
         '{"config": {"alts": [1000.0, NaN]}}',
         '{"config": {"fuels": [Infinity]}}',
-        '{"config": {"criteria": {"pm_min_deg": NaN}}}',
-        '{"config": {"targets": {"pm_deg": Infinity}}}',
     ):
         r = client.post("/api/design/auto", content=body,
                         headers={"content-type": "application/json"})
@@ -284,7 +320,8 @@ def test_huge_int_stays_422(client):
     통과시킨다. 서버가 안 막으면 새는 방식이 자리마다 다르다: 중첩(criteria·
     targets)은 엔진 from_dict의 float()에서 OverflowError → **500**, top-level
     스칼라와 alts/fuels 항목은 config 층에 변환 자리가 없어 **조용히 202**로
-    수용된 뒤 잡 스레드로 넘어간다. 아래 여섯은 그 두 갈래를 모두 덮는다 —
+    수용된 뒤 잡 스레드로 넘어간다. 중첩 갈래(판정선·목표)는 v1.54부터 요청에서 거절되고 기체 저장이
+    막는다(test_profile_criteria_rejects_nonfinite_and_huge). 아래 넷은 top-level 갈래를 덮는다 —
     다른 상한에 먼저 걸려 어차피 422가 되는 자리(budget_points·budget_iters)는
     이 검사를 고정하지 못해 뺐다.
     """
@@ -292,18 +329,17 @@ def test_huge_int_stays_422(client):
     for body in (f'{{"config": {{"actuator_wn": {big}}}}}',      # top-level → 202로 샘
                  f'{{"config": {{"pade_order": {big}}}}}',
                  f'{{"config": {{"budget_tune_evals": {big}}}}}',
-                 f'{{"config": {{"alts": [{big}]}}}}',
-                 f'{{"config": {{"criteria": {{"pm_min_deg": {big}}}}}}}',  # 중첩 → 500
-                 f'{{"config": {{"targets": {{"pm_deg": {big}}}}}}}'):
+                 f'{{"config": {{"alts": [{big}]}}}}'):
         r = client.post("/api/design/auto", content=body,
                         headers={"content-type": "application/json"})
         assert r.status_code == 422, f"큰 int → {r.status_code} (500 또는 조용한 202로 샌 것)"
 
 
 def test_nonterminating_targets_rejected(client):
-    """백오프가 끝나지 않는 목표값은 제출 시점에 막는다 — 워커 영구 점유 방지."""
-    for targets in ({"backoff": 1.0}, {"wc_att_floor_frac": 0.0}, {"wc_ratio_att": 0.0}):
-        r = client.post("/api/design/auto", json={"config": {"targets": targets}})
+    """백오프가 끝나지 않는 목표값은 기체에 저장할 때 막는다 — 설계 워커 영구 점유 방지(v1.54 — 목표는 기체에 산다)."""
+    for i, targets in enumerate(({"backoff": 1.0}, {"wc_att_floor_frac": 0.0}, {"wc_ratio_att": 0.0})):
+        r = client.post("/api/profiles", json={"document": _criteria_doc(
+            f"tgt-bad-{i}", tuning={"targets": targets})})
         assert r.status_code == 422, f"{targets} → {r.status_code}"
 
 
@@ -1149,8 +1185,9 @@ def _spy_design_run(monkeypatch):
 
 
 def test_profile_tuning_targets_drive_auto_design(client, wait_job, monkeypatch):
-    """/tuning.targets.zeta_sp가 요청 없이도 설계 목표가 되고(source "profile"), 요청 targets는 아직 그 위에
-    얹힌다(source "request"). 기준 블록은 저장물 본문과 meta에 함께 실리고, 지문은 실제로 쓴 목표를 반영한다."""
+    """/tuning.targets.zeta_sp가 요청 없이도 설계 목표가 되고(source "profile"), 목표를 바꾼 기체는 목표 지문만
+    달라진다. 기준 블록은 저장물 본문과 meta에 함께 실리고, 지문은 실제로 쓴 목표를 반영한다. 요청 targets는
+    거절된다(v1.54 — test_request_criteria_and_targets_are_rejected)."""
     from claw.profile import load_example
 
     _spy_design_run(monkeypatch)
@@ -1174,16 +1211,16 @@ def test_profile_tuning_targets_drive_auto_design(client, wait_job, monkeypatch)
     assert meta["criteria_echo"] == body["criteria_echo"]
     fp_profile = body["criteria_echo"]["targets_fingerprint"]
 
-    # 쇼케이스 재현처럼 같은 값을 요청으로도 보내면 — 설정은 같고 출처만 "request"
-    body_req, _ = run(_small_config(targets={"zeta_sp": 0.9}))
-    assert body_req["config"] == body["config"]
-    assert body_req["criteria_echo"]["source"] == "request"
-    assert body_req["criteria_echo"]["targets_fingerprint"] == fp_profile
-
-    # 다른 값을 요청하면 그 값이 이기고 목표 지문이 달라진다 (판정 기준 지문은 그대로)
-    body_other, _ = run(_small_config(targets={"zeta_sp": 0.8}))
+    # 목표만 다른 기체 — 그 값으로 설계하고 목표 지문만 달라진다 (판정 기준 지문은 그대로)
+    d2 = load_example()
+    d2.update(id="ad-tuning-08", name="목표 시험 0.8", is_example=False, variants=[])
+    d2["tuning"] = {"targets": {"zeta_sp": 0.8}}
+    assert client.post("/api/profiles", json={"document": d2}).status_code == 201
+    r = client.post("/api/design/auto", json={"config": _small_config(), "profile": {"id": "ad-tuning-08"}})
+    j = wait_job(r.json()["id"], timeout=120.0)
+    body_other = client.get(f"/api/results/{j['result_id']}").json()
     assert body_other["config"]["targets"]["zeta_sp"] == 0.8
-    assert body_other["criteria_echo"]["source"] == "request"
+    assert body_other["criteria_echo"]["source"] == "profile"
     assert body_other["criteria_echo"]["targets_fingerprint"] != fp_profile
     assert body_other["criteria_echo"]["judgement_fingerprint"] == body["criteria_echo"]["judgement_fingerprint"]
 
@@ -1197,3 +1234,25 @@ def test_example_design_echoes_default_criteria(client, wait_job, monkeypatch):
     crit = client.get(f"/api/results/{j['result_id']}").json()["criteria_echo"]
     assert crit["source"] == "default"
     assert set(crit) == {"judgement_fingerprint", "targets_fingerprint", "scheme", "source"}
+
+
+def test_profile_criteria_rejects_nonfinite_and_huge(client):
+    """판정선·목표의 NaN·Infinity·double 범위 밖 정수는 기체 저장에서 422다(경로를 짚는다) — 요청 config에서 막던
+    가드가 기준과 함께 기체로 옮겨 왔다(v1.54). 큰 정수는 float 변환에서 500이, NaN 판정선은 모든 비교가 거짓이라
+    조용한 허위 합격이 되던 자리다."""
+    import json as _json
+
+    from claw.profile import load_example
+
+    base = load_example()
+    base.update(id="nf-{i}", name="비유한 시험", is_example=False, variants=[])
+    big = "9" * 400
+    for i, (sec, frag) in enumerate((("criteria", '{"margin": {"pm_min_deg": NaN}}'),
+                                     ("tuning", '{"targets": {"pm_deg": Infinity}}'),
+                                     ("criteria", f'{{"margin": {{"pm_min_deg": {big}}}}}'),
+                                     ("tuning", f'{{"targets": {{"pm_deg": {big}}}}}'))):
+        doc = dict(base, id=f"nf-{i}")
+        text = _json.dumps({"document": {**doc, sec: "__X__"}}).replace('"__X__"', frag)
+        r = client.post("/api/profiles", content=text, headers={"content-type": "application/json"})
+        assert r.status_code == 422, (frag[:40], r.status_code, r.text[:200])
+        assert r.json()["detail"]["path"].startswith(f"/{sec}/")

@@ -35,6 +35,9 @@ import {
   aeroCurveStats, effectiveOf, formUpdate, overlayValues, sliceBody, stabilityBody,
   stabilityVerdictText, stallNote, violationSeries, warningLine, writeValues,
 } from "../lib/profileform.js";
+import {
+  buildRows, commitValue, conflictText, writtenDiffers as criteriaDiffers, effectiveCriteria, setCriteriaValue, targetConflicts,
+} from "../lib/criteriaedit.js";
 import { withJosa } from "../lib/josa.js";
 import { revealPanel } from "../lib/reveal.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
@@ -113,6 +116,9 @@ const STABILITY_LABELS = [
 let seedJob = null; // {id, profileId, kind: "quick_seed"|"derive_de_trim"}
 let seedResult = null; // {profileId, kind, body}
 let seedSimCheck = false;
+// 「평가 기준 · 튜닝 목표」 패널 — 연 기체·리비전의 GET /profiles/{id}/criteria 응답(key로 대조). 편집은 문서(opened)에
+// 쓰고 [저장]은 문서 패널과 같은 PUT이다 — 여기 따로 저장 길을 두지 않는다
+const crit = { key: null, busy: false, body: null, error: null, msg: null };
 // 대표 그림 — 가상환경 번들(three)의 두 번째 진입점을 쓴다. 떠날 때 WebGL 컨텍스트를 반납한다(main.js dispose 규약)
 const BUNDLE = "/world/build/world.js";
 let hero = null; // {session, handle} — 늦게 도착한 문서·번들이 떠난 화면에 렌더러를 만들지 않게 세션으로 대조한다
@@ -167,6 +173,7 @@ export function render() {
   const listBox = el("div");
   const docBox = el("div");
   const variantBox = el("div");
+  const critBox = el("div");
   const viewerBox = el("div");
   const stabilityBox = el("div");
   // 「공력」 패널 모드 바 — 두 모드는 같은 고정 입력점(viewer.fixed)을 쓰므로 전환 때
@@ -309,6 +316,7 @@ export function render() {
       // 실패해도 다시 그린다 — 최신 불러오기가 비운 자리에 옛 편집기가 남으면 키 입력마다 오류가 난다
       paintDoc();
       paintVariants();
+      paintCriteria();
       paintViewer();
       paintStability();
       paintSeed();
@@ -372,6 +380,7 @@ export function render() {
       }
       paintDoc();
       paintVariants();
+      paintCriteria();
       paintSeed(); // 리비전이 바뀌었다 — 탐색은 저장한 리비전에서 돈다
       await load();
       refreshPicker();
@@ -656,6 +665,218 @@ export function render() {
             drawers.open("doc");
           },
         }, "폼에서 고치기")))))));
+  };
+
+  // ── 평가 기준 · 튜닝 목표 (패널) ────────────────────────────────────────
+  // 이 기체의 판정선(합격·권장)과 자동 설계 목표를 고치는 **한 자리**(기준 통합 ①). 행의 뜻(지표·방향·어느 칸이
+  // 합격·권장·목표인가)은 서버 lines가 정본이고, 칸마다 「기본값」/「이 기체 값」을 가른다. 편집은 문서(opened)에
+  // 적은 칸만 쓴다(lib/criteriaedit.js — 빈 절은 null) — [저장]은 문서 패널과 같은 PUT(base_revision)이다.
+  // 수치 칸 쓰기는 문서 패널 폼과 같은 규약: 다시 그리지 않고 제자리만 고친다(change가 [저장] mousedown에 온다)
+  const loadCriteria = async (target) => {
+    const key = `${target.id}@${target.body.revision}`;
+    if (crit.key === key && (crit.busy || crit.body || crit.error)) return;
+    Object.assign(crit, { key, busy: true, body: null, error: null });
+    try {
+      const body = await api.get(`${path(target.id)}/criteria?revision=${target.body.revision}`);
+      if (crit.key === key) crit.body = body;
+    } catch (e) {
+      if (crit.key === key) crit.error = failText(e);
+    } finally {
+      if (crit.key === key) crit.busy = false;
+    }
+    if (opened === target) paintCriteria();
+  };
+  // 편집 중 문서 — 폼이면 obj, JSON 글이면 읽어서 (틀린 글이면 사유)
+  const workingDoc = () => (opened.mode === "json" ? parseDocumentText(opened.text) : { doc: opened.obj });
+  const writeCriteriaDoc = (next) => {
+    opened.obj = next;
+    opened.text = JSON.stringify(next, null, 1);
+    opened.dirty = true;
+    opened.check = null;
+    paintDoc(); // 문서 패널(폼·JSON 글)이 같은 문서를 보이게 — 닫힌 패널이라 포커스·클릭과 무관하다
+  };
+
+  const paintCriteria = () => {
+    if (!opened) {
+      clear(critBox).append(el("p", { class: "hint" },
+        "목록에서 [열기]로 기체를 열면 그 기체의 평가 기준과 튜닝 목표가 여기 섭니다."));
+      return;
+    }
+    const target = opened;
+    const key = `${target.id}@${target.body.revision}`;
+    if (crit.key !== key || crit.busy) {
+      clear(critBox).append(el("p", { class: "hint" }, "평가 기준을 불러오는 중…"));
+      loadCriteria(target);
+      return;
+    }
+    if (crit.error || !crit.body) {
+      clear(critBox).append(el("div", { class: "error-box" }, crit.error ?? "평가 기준을 받지 못했습니다"),
+        el("button", { style: "margin-top:8px", onclick: () => { crit.key = null; paintCriteria(); } }, "다시 받기"));
+      return;
+    }
+    const body = crit.body;
+    const { doc, error } = workingDoc();
+    if (error) {
+      clear(critBox).append(el("div", { class: "error-box" },
+        `JSON 글이 문서로 읽히지 않아 이 표를 그릴 수 없습니다 — 문서 패널에서 글을 고치세요 (${error})`));
+      return;
+    }
+    const readOnly = !!target.body.is_example;
+    const cellRefreshers = [];
+    const conflictBox = el("div", { style: "margin-top:8px" });
+    const msgEl = el("div", { class: "error-box", style: "margin:8px 0 0; visibility:hidden" }, " ");
+    const current = () => workingDoc().doc ?? doc;
+
+    const paintConflicts = () => {
+      const d = current();
+      const preview = criteriaDiffers(d, body.written);
+      const list = preview ? targetConflicts(body.lines, effectiveCriteria(d, body.defaults))
+        : (body.target_conflicts ?? []);
+      const src = preview ? "저장 전 미리 보기 — 저장 뒤 서버 판정이 정본입니다"
+        : `서버 판정 · 리비전 ${body.revision} 저장본`;
+      clear(conflictBox).append(list.length
+        ? el("div", { class: list.some((c) => c.level === "pass") ? "error-box" : "notice", "data-crit-conflicts": "" },
+          el("strong", {}, `목표 ↔ 판정선 충돌 ${list.length}건`), ` (${src})`,
+          el("ul", { style: "margin:4px 0 0; padding-left:18px" }, list.map((c) => el("li", {}, conflictText(c, body.lines)))))
+        : el("p", { class: "hint", style: "margin:0" }, `목표가 모두 판정선 이상으로 엄격합니다 (${src}).`));
+    };
+
+    // 칸 하나 — 입력 + 출처(기본값/이 기체 값) + [기본값으로]. note(cell, d)는 칸 밑 보조 한 줄(비율 판정선의 절대값 등)
+    const cellNode = (cell, { title = "", note = null } = {}) => {
+      if (!cell) return el("span", { class: "hint" }, "—");
+      const origin = el("span", { class: "hint", style: "display:block; font-size:11px" });
+      const noteEl = note ? el("span", { class: "hint", style: "display:block; font-size:11px" }) : null;
+      const input = el("input", {
+        class: "pf-num", value: String(cell.value ?? ""), spellcheck: "false", disabled: readOnly || !cell.editable,
+        title: `${cell.path} — 도구 기본값 ${cell.def}${title ? `. ${title}` : ""}`,
+        onchange: (e) => {
+          if (opened !== target) return;
+          const base = workingDoc();
+          if (base.error) {
+            // 문서 칸의 JSON이 깨졌으면 여기서 고친 값을 실을 곳이 없다 — 조용히 버리면 칸에는 값이 보여 반영된 것처럼 읽힌다
+            msgEl.textContent = `문서 JSON을 읽을 수 없어 이 칸을 반영하지 않았다 — 「문서」 칸의 JSON부터 고친다 (${base.error})`;
+            msgEl.style.visibility = "visible";
+            return;
+          }
+          const live = { ...cell, ...liveCell(base.doc, cell) };
+          const out = commitValue(base.doc, live, e.target.value);
+          if (out.error) {
+            msgEl.textContent = out.error;
+            msgEl.style.visibility = "visible";
+            return;
+          }
+          msgEl.style.visibility = "hidden";
+          if (out.noop) return;
+          writeCriteriaDoc(out.doc);
+          refreshAll();
+        },
+      });
+      const reset = el("button", {
+        style: "font-size:11px; padding:1px 6px",
+        title: `문서에서 ${cell.path}를 지운다 — 도구 기본값 ${cell.def}을 따른다(기본값이 바뀌면 같이 바뀐다)`,
+        onclick: () => {
+          if (opened !== target) return;
+          const base = workingDoc();
+          if (base.error) {
+            // 문서 칸의 JSON이 깨졌으면 여기서 고친 값을 실을 곳이 없다 — 조용히 버리면 칸에는 값이 보여 반영된 것처럼 읽힌다
+            msgEl.textContent = `문서 JSON을 읽을 수 없어 이 칸을 반영하지 않았다 — 「문서」 칸의 JSON부터 고친다 (${base.error})`;
+            msgEl.style.visibility = "visible";
+            return;
+          }
+          writeCriteriaDoc(setCriteriaValue(base.doc, cell.group, cell.key, undefined));
+          paintCriteria(); // 클릭이 끝난 뒤라 다시 그려도 잃을 것이 없다
+        },
+      }, "기본값으로");
+      const refresh = (d) => {
+        const c = liveCell(d, cell);
+        if (document.activeElement !== input) input.value = String(c.value ?? "");
+        origin.textContent = c.written ? `이 기체가 바꾼 값 · 기본 ${cell.def}` : "기본값";
+        origin.style.fontWeight = c.written ? "600" : "";
+        // 자리를 남긴 채 감춘다 — 버튼이 나타나고 사라지며 [저장]이 포인터 밑에서 밀리지 않게
+        reset.style.visibility = c.written && !readOnly ? "visible" : "hidden";
+        if (noteEl) noteEl.textContent = note(c, d);
+      };
+      cellRefreshers.push(refresh);
+      return el("div", {}, el("div", { class: "row", style: "gap:4px; align-items:center" }, input, reset), origin, noteEl);
+    };
+    const liveCell = (d, cell) => {
+      const sec = d?.[cell.section];
+      const grp = sec && typeof sec === "object" ? sec[cell.group] : null;
+      const written = !!grp && typeof grp === "object" && Object.prototype.hasOwnProperty.call(grp, cell.key);
+      return { written, value: written ? grp[cell.key] : cell.def };
+    };
+    const refreshAll = () => {
+      const d = current();
+      for (const f of cellRefreshers) f(d);
+      paintConflicts();
+    };
+
+    const { rows, extras, others } = buildRows(body, doc);
+    const targetOf = (row, d) => (row.target ? liveCell(d, row.target).value : null);
+    const ratioNote = (row) => (c, d) => {
+      const t = targetOf(row, d);
+      return typeof t === "number" && typeof c.value === "number"
+        ? `목표 × ${c.value} = ${fmt(t * c.value, 3)} ${row.unit}`.trim() : "목표의 비율";
+    };
+    const lineCell = (row, which) => {
+      const cell = row[which];
+      const shared = row.shared[which];
+      const bits = [];
+      if (row.ratio) bits.push("목표 대비 비율 — 합격·권장선이 튜닝 목표 × 이 값이다");
+      if (shared.length) bits.push(`${shared.join("·")}와 같은 칸이다 — 고치면 같이 바뀐다`);
+      return cellNode(cell, { title: bits.join(". "), note: row.ratio && cell ? ratioNote(row) : null });
+    };
+    const table = el("div", { class: "scroll-x" }, el("table", {},
+      el("thead", {}, el("tr", {},
+        el("th", {}, "지표"),
+        el("th", { title: "≥ — 값이 선 이상이어야 합격(클수록 좋다) · ≤ — 이하여야 합격" }, "방향"),
+        el("th", { title: "이보다 나쁘면 불합격(fail)" }, "합격선"),
+        el("th", { title: "합격이되 이보다 나쁘면 주의(warn) — 없는 지표도 있다" }, "권장선"),
+        el("th", { title: "자동 설계가 겨냥하는 값 — 판정선보다 엄격해야 한다" }, "튜닝 목표"))),
+      el("tbody", {}, rows.map((row) => el("tr", {},
+        el("td", {}, row.label, row.unit ? el("span", { class: "hint" }, ` [${row.unit}]`) : null,
+          row.ratio ? el("span", { class: "hint", style: "display:block; font-size:11px" }, "판정선 = 목표 × 비율") : null),
+        el("td", { class: "num", title: row.direction === "max" ? "이하여야 합격" : "이상이어야 합격" }, row.hint),
+        el("td", {}, lineCell(row, "pass")),
+        el("td", {}, lineCell(row, "rec")),
+        el("td", {}, cellNode(row.target, { title: "자동 설계 목표 — 합격·권장선보다 엄격하게" })))))));
+    const extraTable = extras.length
+      ? el("details", { style: "margin-top:10px" },
+        el("summary", { class: "hint" }, `그 밖의 판정선 칸 ${extras.length}개`),
+        el("table", {}, el("tbody", {}, extras.map((c) => el("tr", {},
+          el("td", { class: "num" }, `${c.group}.${c.key}`), el("td", {}, cellNode(c)))))))
+      : null;
+
+    clear(critBox).append(...[
+      readOnly
+        ? el("p", { class: "notice" }, "예제 기체는 읽기 전용입니다 — 값을 보기만 합니다. 고치려면 목록에서 복제합니다.")
+        : null,
+      table,
+      extraTable,
+      others.length
+        ? el("p", { class: "hint", style: "margin:8px 0 0" },
+          `이 표 밖에 이 기체가 적은 칸 ${others.length}개 — ${others.join(", ")} (문서 패널 JSON 글에서 고친다)`)
+        : null,
+      readOnly ? null : el("div", { class: "row", style: "gap:8px; margin-top:10px; align-items:center" },
+        el("button", {
+          class: "primary",
+          title: `리비전 ${target.body.revision} 위에 문서를 저장한다 — 문서 패널의 [저장]과 같다(다른 편집도 함께 저장된다)`,
+          onclick: async () => {
+            const out = await save();
+            crit.msg = out.ok ? null : out.error;
+            paintCriteria();
+          },
+        }, "저장"),
+        el("span", { class: "hint" }, target.dirty ? "저장하지 않은 편집 있음" : "")),
+      crit.msg ? el("div", { class: "error-box", style: "margin-top:8px" }, crit.msg) : null,
+      msgEl,
+      conflictBox,
+      el("p", { class: "hint", style: "margin:8px 0 0" },
+        "적지 않은 칸은 도구 기본값을 따릅니다 — 저장하면 바꾼 칸만 문서의 criteria·tuning에 들어갑니다. "
+        + "모든 탭의 판정과 자동 설계가 이 한 벌을 씁니다. 형상 변형은 이 절을 덮어쓸 수 없습니다."),
+    ].filter(Boolean));
+    crit.msg = null;
+    refreshAll();
   };
 
   // ── 공력 DB 뷰어 (패널) ─────────────────────────────────────────────────
@@ -1051,6 +1272,7 @@ export function render() {
       opened = fresh(await api.get(path(profileId)));
       paintDoc();
       paintVariants();
+      paintCriteria();
       paintViewer();
       paintStability();
     }
@@ -1411,6 +1633,7 @@ export function render() {
       refreshPicker();
       paintDoc();
       paintVariants();
+      paintCriteria();
       paintViewer(); // 옛 기체의 곡선이 새 문서 밑에 남지 않게
       paintStability();
       paintSeed();
@@ -1453,6 +1676,7 @@ export function render() {
       paintImport();
       paintDoc();
       paintVariants();
+      paintCriteria();
       paintViewer();
       paintStability();
       paintSeed();
@@ -1513,6 +1737,7 @@ export function render() {
       refreshPicker();
       paintDoc();
       paintVariants();
+      paintCriteria();
       paintViewer(); // 지운 문서의 곡선·[그리기]가 남으면 누를 때 빈 문서를 읽는다
       paintStability();
       paintSeed();
@@ -1701,6 +1926,12 @@ export function render() {
         title: "연 기체의 게인 출처와 할당 표 — 초기 게인 빠른 탐색(조종효율 부호·앵커 튜닝 크기)·산출 근거"
           + "(저차 근사 닫힌꼴·예산 점검)·δe_trim 표 도출",
         build: () => seedBox },
+      { key: "criteria", label: "평가 기준", group: "설계",
+        title: "연 기체의 평가 기준 · 튜닝 목표 — 합격선·권장선과 자동 설계 목표(모든 탭의 판정이 이 한 벌을 쓴다)",
+        build: () => {
+          paintCriteria(); // 문서 패널에서 고친 값도 보이게 — 열 때마다 편집 중 문서로 다시 그린다
+          return critBox;
+        } },
       { key: "aero", label: "공력", group: "보기",
         title: "편집 중 문서로 계산 — 계수 곡선(겹치기·극선·L/D·실속 대조)과 정적 안정성(Clβ·Cnβ·Cmα 부호 판정)",
         build: () => [aeroModeBox, viewerBox, stabilityBox] },
@@ -1718,6 +1949,7 @@ export function render() {
   paintNotices();
   paintDoc();
   paintVariants();
+  paintCriteria();
   paintViewer();
   paintStability();
   syncAeroMode();
@@ -1755,6 +1987,7 @@ export function render() {
     opened = fresh(body);
     paintDoc();
     paintVariants();
+    paintCriteria();
     paintViewer();
     paintStability();
     paintSeed();

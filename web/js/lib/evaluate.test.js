@@ -601,3 +601,11 @@ test("runVerdictMark: 칩 배지와 같은 말 + 기호, 판정 없음은 PASS�
   assert.equal(runVerdictMark({ aggregate: { hard_fail: null } }), "— 판정 없음");
   assert.equal(runVerdictMark(null), "— 판정 없음");
 });
+
+
+test("평가·검증 요청은 판정선을 싣지 않는다 — 서버가 요청 기준을 거절한다(v1.54)", () => {
+  const e = evaluateRequest({}, { cases: [], depth: "linear", criteria: { margin: { pm_min_deg: 50 } } });
+  const v = verifyRequest({}, { cases: [], criteria: { margin: { pm_min_deg: 50 } } });
+  assert.equal("criteria" in e, false);
+  assert.equal("criteria" in v, false);
+});

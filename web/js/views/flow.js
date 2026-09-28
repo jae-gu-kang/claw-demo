@@ -39,7 +39,7 @@ import {
   FLOW_STAGES, applyFreshnessBlock, applyStateVerdict, designVerdict, docVerdict, envelopeVerdict,
   evalVerdict, flowStepStates, flowSummaryLine, latestResultFor, seedStateVerdict, stageArtifact,
 } from "../lib/flowsteps.js";
-import { resultFreshness } from "../lib/freshness.js";
+import { criteriaBadgeSpec, criteriaFreshness, resultFreshness } from "../lib/freshness.js";
 import { defaultGridCases } from "../lib/grid.js";
 // 잡 상태 코드 → 한국어 한 줄(「평가 취소됨」) — 영향성 탭과 같은 말(서버 jobs.py 어휘와 한 벌, 테스트 가드)
 import { jobEndLine } from "../lib/influence.js";
@@ -67,12 +67,29 @@ let revealRail = () => {}; // 지금 화면의 레일을 화면에 올린다(신
 const selectedId = () => currentSelection()?.id ?? EXAMPLE_ID;
 const selectedVariant = () => currentSelection()?.variant ?? null;
 
+// 고른 기체의 지금 판정 기준 echo(GET /profiles/{id}/criteria) — 단계 결과의 criteria_echo 대조 재료
+// (lib/freshness.js criteriaFreshness). 목록과 같이 새로 받는다. null = 못 받음(→ 판정 기준 미상)
+let criteriaNow = null;
+
 const refreshRows = async () => {
-  try {
-    profileRows = await api.get("/profiles");
-  } catch {
-    profileRows = null; // 낡음 대조·확정 표 상태 없이 판정 줄만 — 다음 새로고침이 잡는다
-  }
+  const pid = selectedId();
+  const [rows, crit] = await Promise.all([
+    api.get("/profiles").catch(() => null), // 못 받으면 낡음 대조·확정 표 상태 없이 판정 줄만 — 다음 새로고침이 잡는다
+    api.get(`/profiles/${encodeURIComponent(pid)}/criteria`).catch(() => null),
+  ]);
+  profileRows = rows;
+  criteriaNow = crit?.echo ?? null;
+};
+
+/** 단계 결과의 판정 기준 배지 — 결과가 실은 기준 블록과 지금 기체 기준 대조. fresh·결과 없음은 조용하다. */
+const criteriaChipOf = (st) => {
+  if (!st?.resultId || !st.critKind || st.state !== "done") return null;
+  // criteriaNow는 **고른 기체**의 기준이다 — 결과를 계산한 기체(st.echo = body.profile)가 다르면 대조하지 않는다
+  // (다른 기체 기준과 대면 거짓 「재평가 필요」가 된다). 기체 전환은 페이지를 다시 읽어 stages가 비므로 드문 틈이다
+  if (!st.echo?.id || st.echo.id !== selectedId()) return null;
+  const spec = criteriaBadgeSpec(criteriaFreshness(st.critEcho, criteriaNow, st.critKind));
+  return spec ? el("span", { class: `flag ${spec.tone}`, style: "margin-left:6px", title: spec.tip }, spec.label)
+    : null;
 };
 
 const set = (seq, key, patch) => {
@@ -194,7 +211,8 @@ const settleDesign = async (seq, resultId) => {
   const body = await api.get(`/results/${resultId}`);
   const v = designVerdict(body);
   set(seq, "design", { state: "done", verdict: v, resultId,
-    report: body.report ?? null, echo: body.profile ?? null });
+    report: body.report ?? null, echo: body.profile ?? null,
+    critEcho: body.criteria_echo ?? null, critKind: "auto_design" });
   return v;
 };
 
@@ -217,7 +235,7 @@ const runEval = async (seq) => {
   const body = await api.get(`/results/${done.result_id}`);
   const v = evalVerdict(normalizeEvalReport(body));
   set(seq, "eval", { state: "done", verdict: v, resultId: done.result_id,
-    echo: body.profile ?? null });
+    echo: body.profile ?? null, critEcho: body.criteria_echo ?? null, critKind: "influence_evaluate" });
   return v;
 };
 
@@ -388,7 +406,8 @@ export function render() {
               ? el("span", { class: "flag bad", style: "margin-left:6px", title: fresh.label }, "낡음")
               : fresh.state === "applied"
                 ? el("span", { class: "flag ok", style: "margin-left:6px", title: fresh.label }, "문서에 반영됨")
-                : null),
+                : null,
+            busy ? null : criteriaChipOf(st)),
           busy && typeof st?.progress === "number"
             ? el("div", { class: "fd-prog" },
                 el("i", { style: `width:${Math.round(st.progress * 100)}%` }))

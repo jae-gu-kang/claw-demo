@@ -301,13 +301,14 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
   판정 레코드). 원장 결합은 `to_jsonable` **안쪽**에서 한다 — `severity`·`deficit`이 ±inf·nan이
   될 수 있어 비유한값 정책을 우회한 원시 float가 하나라도 있으면 `allow_nan=False`인 저장 시점에
   터진다. 행 조립·정렬은 엔진 몫이고 라우트는 상한에서 **앞부분만** 남긴다(엔진이 심각도 순으로
-  주므로 잘린 뒤에도 최악 행이 남는다). 서버 소비:
-  `POST /api/design/auto`(202)·`/design/{id}/resume`·`GET /design/defaults`(criteria·targets
-  기본값 + **사유 코드 문구** `reason_text` ← `tune.REASON_TEXT` — 웹이 문구를 다시 적지 않는다:
-  마진 탭·설계 탭의 판정선 단일 정본이다). 결과의 `gain_export`는 다항 정본(`tables`)·재샘플
-  테이블(`tables_resampled`)에 더해 실제로 쓴 허용치(`resample_tol`)와 자리별 **실측**
-  어긋남(`resample_error`)을 함께 실어 "확정이 주입하는 형상 ≠ 검증한 형상"을 수치로 말한다
-  (01 §3.4)
+  주므로 잘린 뒤에도 최악 행이 남는다). 서버 소비: `POST
+  /api/design/auto`(202)·`/design/{id}/resume`·`GET /design/defaults`(criteria·targets **도구**
+  기본값 + **사유 코드 문구** `reason_text` ← `tune.REASON_TEXT` — 웹이 문구를 다시 적지
+  않는다). 설계의 판정선·목표는 요청이 아니라 선택 기체의 `/criteria`·`/tuning`이고(요청
+  config의 criteria·targets는 422), 한 기체의 적용값은 `GET /profiles/{id}/criteria`다(04 §1).
+  결과의 `gain_export`는 다항 정본(`tables`)·재샘플 테이블(`tables_resampled`)에 더해 실제로 쓴
+  허용치(`resample_tol`)와 자리별 **실측** 어긋남(`resample_error`)을 함께 실어 "확정이 주입하는
+  형상 ≠ 검증한 형상"을 수치로 말한다 (01 §3.4)
 - **초기 게인 빠른 탐색** `design/seed.py quick_seed`(v1.06, 05 §10) — 게인이 빈 기체의 SCAS
   부호를 조종효율 B에서, 크기를 설계 격자 앵커(q̄ 중앙·최저·최고) 튜닝의 중앙값에서 재고
   자동조종은 시간척도 분리 휴리스틱으로 채운다. 문서에 쓰지 않고 결과를 돌려준다 — 저장은 서버
@@ -338,6 +339,10 @@ Dynamics)은 아래 M5~M8에 대응된다 (Actuator·Sensor는 plant의 서브�
   예제 그대로 — 제품 예제 검사용). 제품은 환경변수를 설정하지 않는다(02 §5.6)
 - 선택 절 `mission_template`(화면 기본값) · `display`(표시 모델) — 계산에 쓰이지 않아 지문
   밖이고, 문서에 없으면 없음으로 채운다(스키마 버전 불변, 02 §5.6)
+- 선택 절 `criteria`(합격선·권장선) · `tuning`(튜닝 목표·J 가중치) — 설계 작업 단위의 기준
+  (기준 통합 ①). 적지 않은 칸은 도구 기본값이고, 지문 밖·형상 변형 금지·칸 형식 검사다(02 §5.6).
+  `BuiltProfile.eval_criteria`가 둘을 `GainEvalCriteria` 한 벌로 합치고 `criteria_source`가
+  `profile`/`default`를 말한다. 판정 규칙은 04 §1
 - 공력 표 항(k = 표, 02 §5.6)과 공력 DB 뷰어 계산 `aeroview.aero_slice` — 문서의 계수 계산기로
   한 축 곡선·풍축 역변환·실속 표 대조(02 §5.2). 서버 창구는 `POST /profiles/aero-slice`
 - δe_trim 표 도출 `derive.derive_de_trim`(02 §5.6.1) — 마하마다 연료 × 고도 격자의 최악 |δe|를

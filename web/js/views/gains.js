@@ -42,6 +42,7 @@ import {
   slotIndex, withConstant, workingCopyLine,
 } from "../lib/gainsync.js";
 import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
+import { criteriaBadgeSpec, criteriaEchoCache, criteriaFreshness } from "../lib/freshness.js";
 import { gainTablesStatus } from "../lib/quickseed.js";
 import { effectiveOf } from "../lib/profileform.js";
 import { josaOf } from "../lib/josa.js";
@@ -121,6 +122,23 @@ export function render() {
     if (!evalStrip.status) paintStrip(); // 아직 안 잰 상태의 케이스 수가 그 격자를 말하게
   });
 
+  // 판정 기준 배지 — 평가 결과의 criteria_echo를 그 결과 기체의 지금 기준과 대조(lib/freshness.js).
+  // 기체당 이 render에서 한 번 받는다. 조회 중엔 배지 없음, 받으면 띠를 다시 그린다. fresh는 조용하다
+  const lookCriteria = criteriaEchoCache((path) => api.get(path));
+  const critNow = new Map();
+  const stripCriteriaChip = () => {
+    const pid = evalStrip.profileId;
+    let st;
+    if (!evalStrip.criteriaEcho?.scheme || !pid) st = "unknown";
+    else if (!critNow.has(pid)) {
+      lookCriteria(pid).then((echo) => { critNow.set(pid, echo); paintStrip(); });
+      return null;
+    } else st = criteriaFreshness(evalStrip.criteriaEcho, critNow.get(pid), "influence_evaluate");
+    const spec = criteriaBadgeSpec(st);
+    return spec ? el("span", { class: `flag ${spec.tone}`, style: "margin-left:8px", title: spec.tip }, spec.label)
+      : null;
+  };
+
   function paintStrip() {
     clear(stripCards);
     const stale = evalStrip.stale
@@ -141,7 +159,7 @@ export function render() {
     if (!m) return;
     renderEvalCards(stripCards, m.cards);
     stripCards.append(el("p", { class: "hint", style: "margin:8px 0 0" },
-      `${evalStripLine(m)} · 상세는 영향성 탭 「평가」 패널`));
+      `${evalStripLine(m)} · 상세는 영향성 탭 「평가」 패널`, stripCriteriaChip()));
   }
 
   // 평가 한 번 — {resultId, model} 또는 {error}. cue가 오면 잡을 건 순간 started를 알린다(진행기 [중단]용)
@@ -169,6 +187,8 @@ export function render() {
       const res = await api.get(`/results/${done.result_id}`);
       evalStrip.status = "완료";
       evalStrip.result = normalizeEvalReport(res);
+      evalStrip.criteriaEcho = res.criteria_echo ?? null;
+      evalStrip.profileId = res.profile?.id ?? null;
       paintStrip();
       return { resultId: done.result_id, model: evalStrip.result };
     } catch (e) {
