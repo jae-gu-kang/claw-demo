@@ -38,34 +38,197 @@ def pre_state(region, model, mach: float, alt: float, fuel: float) -> str:
 
 
 def trim_state(tr, built, model, *, vs_cache: dict | None = None) -> tuple:
-    """수평비행 트림 해 → (상태, 사유 목록). 사유는 해당되는 것 전부다.
+    """수평비행 트림 해 → (상태, 사유 목록). `trim_assessment`의 상태·사유만 — 여유 판정·근거는 거기 있다."""
+    a = trim_assessment(tr, built, model, cache=vs_cache)
+    return a["state"], a["reasons"]
 
-    미수렴의 귀속은 **한계의 종류**로 가른다 (05 §11.3 [기본값]):
-    - 조종량(δe·스로틀)의 한계는 작동기·추진의 물리 한계다 — 거기 붙어 잔차가 남으면 물리적 불가.
+
+def trim_assessment(tr, built, model, *, cache: dict | None = None) -> dict:
+    """수평비행 트림 해 → {"state", "reasons", "margin", "evidence"} (05 §11.3).
+
+    **상태와 여유 판정은 따로다.** 상태는 그 조건에서 트림이 성립하는지, margin은 성립한 트림이 판정선(스로틀·
+    엘레본 포화 SAT_FRAC, 트림 α 여유)을 넘는지다. 수렴한 해는 판정선을 넘어도 계산 가능이다 — 날 수 있는 평형이고
+    선형화 자료로 남는다. 여유 미달은 margin이 말한다: {"status": "met"|"short"|"unevaluated", "reasons": [...]}.
+    판정선을 바꾸면 트림을 다시 풀지 않고 margin만 다시 정하면 된다. 계산 가능은 합격이나 자동 설계 채택을 뜻하지
+    않는다 — 자동 설계의 점 채택은 설계 기준(design/points.py envelope_ok)이 따로 정한다.
+
+    미수렴의 귀속은 **한계의 종류와 별도 근거**로 가른다 (05 §11.3 [기본값]):
+    - 조종량의 물리 한계(스로틀 0·1, 엘레본 끝)에 붙은 미수렴은 그것만으로 불가가 아니다 — 풀이기가 거기서 멈췄을
+      뿐일 수 있다. 그 채널을 한계에 고정하고 나머지 평형을 모델 유효범위 안에서 다시 풀어(`_limit_evidence`), 찾은
+      평형 해 **전부**에서 그 채널의 식이 허용치를 넘게 남을 때만 물리적 불가다(사유와 근거 수치를 싣는다). 평형을
+      못 찾으면 제약 도달·미수렴(원인 미확인), 남지 않는 해가 있으면 트림이 있는데 못 푼 것이라 계산 실패다.
     - 받음각 탐색 상한은 실속 받음각·모델 유효 상한과 다른 값이라, 붙었다는 것만으로 날 수 없다고 못 한다.
       실속표로 잰 1g 실속 속도 V_S보다 느리다는 별도 근거(또는 1g 도달 불가)가 있을 때만 물리적 불가이고,
       아니면 제약 도달·미수렴이다. 하한에 붙은 미수렴은 양력이 남는 쪽이라 실속 논리를 쓰지 않는다.
     - 어느 한계에도 붙지 않은 미수렴은 계산 실패다.
-    수렴했어도 포화·α 여유 미달이면 물리적 불가다(envelope_ok와 같은 판정).
+    수렴한 해가 실속표 축 안에서 실속각 이상이면 물리적 불가다(실속표가 근거다).
     """
     from claw.trim import saturation_detail
 
+    cache = {} if cache is None else cache
     tb = built.trim_bounds
-    sat = [ch for ch, on in saturation_detail(tr, tb["de"]).items() if on]
+    unevaluated = {"status": "unevaluated", "reasons": []}
     if not tr.converged:
-        if sat:
-            return INFEASIBLE, [*sat, "not_converged"]
+        limits = _at_physical_limits(tr, tb)
+        if len(limits) == 1:
+            state, reasons, evidence = _limit_evidence(tr, built, limits[0], cache)
+            return {"state": state, "reasons": reasons, "margin": unevaluated, "evidence": evidence}
+        if limits:  # 둘 이상이 한계 — 한 채널을 고정해 나머지를 푸는 근거가 서지 않는다
+            return {"state": CONSTRAINT_HIT, "reasons": [*limits, "not_converged", "balance_not_found"],
+                    "margin": unevaluated, "evidence": None}
         alpha = math.atan2(float(tr.state.vel_b[2]), float(tr.state.vel_b[0]))
         a_lo, a_hi = tb["alpha"]
         if alpha <= a_lo + 1e-6:
-            return CONSTRAINT_HIT, ["alpha_search_lower", "not_converged"]
-        if alpha >= a_hi - 1e-6:
-            return _alpha_upper(tr.case, built, model, {} if vs_cache is None else vs_cache)
-        return CALC_FAILED, ["not_converged"]
-    why = sat + ([] if tr.flags.get("alpha_margin_ok") else ["alpha_margin"])
-    if why:
-        return INFEASIBLE, why
-    return COMPUTABLE, []
+            state, reasons = CONSTRAINT_HIT, ["alpha_search_lower", "not_converged"]
+        elif alpha >= a_hi - 1e-6:
+            state, reasons = _alpha_upper(tr.case, built, model, cache)
+        else:
+            state, reasons = CALC_FAILED, ["not_converged"]
+        return {"state": state, "reasons": reasons, "margin": unevaluated, "evidence": None}
+    axis = tb["stall"].axes[0]
+    in_axis = float(axis[0]) - _EPS <= tr.case.mach <= float(axis[-1]) + _EPS
+    if in_axis and float(tr.reserve["alpha"]["stall_reserve"]) <= 0.0:
+        return {"state": INFEASIBLE, "reasons": ["above_stall"], "margin": unevaluated, "evidence": None}
+    sat = [ch for ch, on in saturation_detail(tr, tb["de"]).items() if on]
+    short = sat + ([] if tr.flags.get("alpha_margin_ok") else ["alpha_margin"])
+    return {"state": COMPUTABLE, "reasons": [],
+            "margin": {"status": "short" if short else "met", "reasons": short}, "evidence": None}
+
+
+# 한계에 「붙었다」의 판정 폭 — 풀이기(SLSQP)의 경계 해는 경계값 그대로 나온다
+_LIMIT_TOL = 1e-6
+_UNKNOWNS = ("alpha", "de", "throttle")
+# 한계 채널 → (고정할 미지수 번호, 그 채널이 맡은 평형식, 한계 너머의 방향, 불가 사유). 평형식은 경로축 — 비행경로
+# 가속도 V̇ · 경로 수직 가속도 · q̇. 스로틀은 V̇를, 엘레본은 q̇를 맡는다. 방향 +1은 상한(더 올려야 하면 불가), −1은 하한
+_LIMIT_CHANNEL = {
+    "throttle_high": (2, "vdot", +1, "thrust_deficit"),  # 최대 추력에서도 감속
+    "throttle_low": (2, "vdot", -1, "idle_thrust_excess"),  # 아이들에서도 가속 — 수평으로는 그 속도를 못 지킨다
+    "de_high": (1, "qdot", +1, "pitch_moment_short"),  # 엘레본 끝에서도 피치 모멘트가 남는다
+    "de_low": (1, "qdot", -1, "pitch_moment_short"),
+}
+_FD_STEP = 1e-4  # 고정 채널의 편미분 유한차분 폭 [rad · 스로틀 비]
+
+
+def _at_physical_limits(tr, tb) -> list:
+    """미수렴 해가 붙은 **물리** 한계 채널 — 스로틀 0·1, 엘레본 한계(판정선 SAT_FRAC이 아니다)."""
+    from claw.trim.trim import THR_BOUNDS
+
+    thr = float(tr.control.throttle[0])
+    de = float(tr.control.elevon[0])
+    de_lo, de_hi = tb["de"]
+    out = []
+    if thr >= THR_BOUNDS[1] - _LIMIT_TOL:
+        out.append("throttle_high")
+    if thr <= THR_BOUNDS[0] + _LIMIT_TOL:
+        out.append("throttle_low")
+    if de >= de_hi - _LIMIT_TOL:
+        out.append("de_high")
+    if de <= de_lo + _LIMIT_TOL:
+        out.append("de_low")
+    return out
+
+
+def _limit_evidence(tr, built, channel: str, cache: dict) -> tuple:
+    """한계 채널을 고정하고 나머지 평형을 다시 풀어 불가 근거를 잰다 → (상태, 사유, 근거).
+
+    수평비행(γ = 0, θ = α)을 지키고 트림과 같은 운동방정식(추력 성분 포함)을 쓰되, 식은 **경로축**으로 본다 — 비행경로
+    가속도 V̇, 경로 수직 가속도, q̇. 기체축 ẇ = 0으로 풀면 V̇ ≠ 0인 해(바로 추력 부족인 해)에서 경로 수직 가속도가
+    −tanα·V̇로 남아 받음각이 어긋난다. 고정한 채널이 맡은 식은 빼고 나머지 두 식을 나머지 두 미지수로 푼다 — 받음각은
+    **모델 유효범위**(DB 받음각 범위, 없으면 트림 탐색 범위)에서, 조종량은 물리 한계 안에서. 초기값 여러 개에서 찾은
+    서로 다른 평형 해를 모두 싣는다.
+
+    남은 식을 없애는 데 필요한 고정 채널의 변화 −r/(∂r/∂채널)을 해마다 유한차분으로 잰다 — 그 변화가 **한계 너머**를
+    가리켜야 부족이다(엘레본은 양 끝 어느 쪽에서도 q̇가 남으므로 크기만 보면 풀이기가 끝에서 멈춘 해도 불가가 된다). 판정:
+    - 평형 해가 없다 → 제약 도달·미수렴(원인 미확인). 풀이 자체가 수치 오류면 그 사유(balance_error)
+    - 해 가운데 한계 안쪽으로 식을 없앨 수 있는 것이 있다 → 한계 안쪽에 트림이 있다 → 계산 실패(다시 풀 대상)
+    - 그 채널이 식을 움직이지 못한다(기울기 0) → 제약 도달·미수렴(limit_sensitivity_zero)
+    - 실속표 축 밖의 마하 → 해가 실속 아래인지 근거가 없다 → 제약 도달·미수렴(stall_basis_missing)
+    - 실속각 아래 해 전부가 한계 너머를 가리킨다 → 물리적 불가(사유 + 근거). 실속 아래 해가 없으면 제약 도달·미수렴
+    """
+    import numpy as np
+    import scipy.optimize
+
+    from claw.env import isa_atmosphere
+    from claw.trim.trim import RESID_TOL, THR_BOUNDS, XE_Q, XE_U, XE_W, _xe
+
+    fixed_i, eq, beyond, reason = _LIMIT_CHANNEL[channel]
+    tb = built.trim_bounds
+    case = tr.case
+    pinned = (math.atan2(float(tr.state.vel_b[2]), float(tr.state.vel_b[0])),
+              float(tr.control.elevon[0]), float(tr.control.throttle[0]))[fixed_i]
+    if "aircraft" not in cache:
+        cache["aircraft"] = built.aircraft()
+    ac = cache["aircraft"]
+    v = case.mach * isa_atmosphere(case.alt).a
+    a_rng = tuple(built.db_ranges().get("alpha") or tb["alpha"])
+    bounds = {0: a_rng, 1: tuple(tb["de"]), 2: THR_BOUNDS}
+    free = [i for i in (0, 1, 2) if i != fixed_i]
+
+    def eqs(z):
+        xd = ac.deriv_euler(_xe(np.array(z), v, case.alt),
+                            {"de": z[1], "da": 0.0, "dr": 0.0, "throttle": (z[2], z[2])}, case.fuel)
+        c, s_ = math.cos(z[0]), math.sin(z[0])
+        return {"vdot": float(c * xd[XE_U] + s_ * xd[XE_W]), "ndot": float(-s_ * xd[XE_U] + c * xd[XE_W]),
+                "qdot": float(xd[XE_Q])}
+
+    def full(zf):
+        z = [0.0, 0.0, 0.0]
+        z[fixed_i] = pinned
+        z[free[0]], z[free[1]] = float(zf[0]), float(zf[1])
+        return z
+
+    solve_for = [k for k in ("vdot", "ndot", "qdot") if k != eq]
+    lo = [bounds[i][0] for i in free]
+    hi = [bounds[i][1] for i in free]
+    evidence = {"channel": channel, "fixed": {_UNKNOWNS[fixed_i]: pinned}, "equation": eq, "tol": RESID_TOL,
+                "alpha_range": list(a_rng), "solutions": []}
+    found, errors = {}, 0
+    if all(lo_i < hi_i for lo_i, hi_i in zip(lo, hi)):
+        for s0 in np.linspace(0.05, 0.95, 5):
+            for s1 in (0.2, 0.5, 0.8):
+                x0 = [lo[0] + s0 * (hi[0] - lo[0]), lo[1] + s1 * (hi[1] - lo[1])]
+                try:
+                    r = scipy.optimize.least_squares(lambda zf: [eqs(full(zf))[k] for k in solve_for], x0,
+                                                     bounds=(lo, hi), xtol=1e-12, ftol=1e-12, gtol=1e-12)
+                except (ValueError, ArithmeticError, FloatingPointError):
+                    errors += 1  # 이 초기값만 버린다 — 다른 초기값의 해까지 잃지 않게
+                    continue
+                z = full(r.x)
+                d = eqs(z)
+                if max(abs(d[k]) for k in solve_for) < RESID_TOL:
+                    found.setdefault(tuple(round(x, 4) for x in z), (z, d))
+    else:
+        errors += 1  # 풀 범위가 비었다(퇴화한 DB 받음각 범위 등)
+    if not found:
+        why = "balance_error" if errors else "balance_not_found"
+        return CONSTRAINT_HIT, [channel, "not_converged", why], evidence
+
+    stall = built.stall_table()
+    axis = stall.axes[0]
+    in_axis = float(axis[0]) - _EPS <= case.mach <= float(axis[-1]) + _EPS
+    a_stall = float(stall.interp(mach=case.mach)) if in_axis else None
+    sols = []
+    for z, d in found.values():
+        # 남은 식을 없애려면 고정 채널을 얼마나 움직여야 하나 — 한계 너머(beyond 방향)를 가리키면 부족이다. 차분은 한계
+        # **안쪽**으로 잰다: 스로틀은 1을 넘으면 잘려(0~1 클립) 바깥 차분의 기울기가 0이 된다
+        zp = list(z)
+        zp[fixed_i] -= beyond * _FD_STEP
+        slope = (eqs(zp)[eq] - d[eq]) / (-beyond * _FD_STEP)
+        need = -d[eq] / slope if slope != 0.0 else None
+        # 기울기 0 — 그 채널이 식을 움직이지 못한다: 어느 쪽인지 판단하지 않는다(None)
+        short = None if need is None else bool(abs(d[eq]) > RESID_TOL and beyond * need > 0.0)
+        sols.append({**dict(zip(_UNKNOWNS, z)), **d, "slope": slope, "need": need, "short": short,
+                     "alpha_stall": a_stall, "below_stall": None if a_stall is None else bool(z[0] < a_stall)})
+    evidence["solutions"] = sols
+    if any(s["short"] is False for s in sols):
+        return CALC_FAILED, [channel, "not_converged", "trim_inside_limit"], evidence
+    if any(s["short"] is None for s in sols):
+        return CONSTRAINT_HIT, [channel, "not_converged", "limit_sensitivity_zero"], evidence
+    if a_stall is None:
+        return CONSTRAINT_HIT, [channel, "not_converged", "stall_basis_missing"], evidence
+    if not any(s["below_stall"] for s in sols):
+        return CONSTRAINT_HIT, [channel, "not_converged", "balance_not_found"], evidence
+    return INFEASIBLE, [reason, channel], evidence
 
 
 def _alpha_upper(case, built, model, cache: dict) -> tuple:

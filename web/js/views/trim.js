@@ -22,7 +22,7 @@ import {
 } from "../lib/opspace.js";
 import {
   SERIES_COLORS, STATUS, TRIM_CELL_LABEL, TRIM_FLAG_LABEL, TRIM_STATE_CELL, fuelsOf, pctText, pivotCases,
-  stateReasonText, trimCueReport, trimCurves, trimEnvelopeCell, trimFlagSummary,
+  stateEvidenceText, stateReasonText, trimCueReport, trimCurves, trimEnvelopeCell, trimFlagSummary, trimStateLabel,
 } from "../lib/plot.js";
 import { revealPanel } from "../lib/reveal.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
@@ -396,8 +396,9 @@ function renderMap(mapBox, summaryLine, body, grid) {
   const stateLegend = el("div", { class: "legend" },
     Object.values(TRIM_STATE_CELL).map((c) => el("span", {},
       el("span", { class: "chip", style: `background:${c.color}` }), c.label)),
-    el("span", { class: "hint" }, "— 물리적 불가 칸의 글은 첫 근거(추력·타면·실속). 계산 실패는 다시 풀 대상, ",
-      "제약 도달은 트림 탐색 제약에 걸린 것이라 날 수 없다는 근거가 아니다"));
+    el("span", { class: "hint" }, "— 여유 미달은 날 수 있는 평형이 판정선(스로틀·엘레본·α 여유)을 넘은 것이다. ",
+      "물리적 불가는 별도 근거가 있는 것만이고 칸의 글은 첫 근거(추력·타면·실속). 계산 실패는 다시 풀 대상, ",
+      "제약 도달은 한계에 걸렸지만 날 수 없다는 근거가 아직 없는 것이다"));
   clear(mapBox).append(
     el("div", { class: "stage-pair" }, ...maps),
     byState ? stateLegend : el("div", { class: "legend" },
@@ -430,10 +431,11 @@ function renderRows(tableBox, body) {
     el("tbody", {}, body.results.map((r) => el("tr", {},
       el("td", {}, r.case.name),
       el("td", {}, flagBadge(r.converged, "수렴", "실패")),
-      el("td", {}, r.state ? (TRIM_STATE_CELL[r.state]?.label ?? r.state)
+      el("td", {}, r.state ? trimStateLabel(r)
         + (r.region_state ? ` · ${PRE_STATE_LABEL[r.region_state] ?? r.region_state}` : "")
         : "—"),
-      el("td", { class: "hint" }, stateReasonText(r.state_reasons)),
+      el("td", { class: "hint" }, [stateReasonText(r.state_reasons), stateEvidenceText(r.state_evidence)]
+        .filter(Boolean).join(" — ")),
       el("td", { class: "num" }, fmt(r.euler[1], 4)),
       el("td", { class: "num" }, fmt(r.control.elevon[0], 4)),
       el("td", { class: "num" }, fmt(r.control.throttle[0], 3)),

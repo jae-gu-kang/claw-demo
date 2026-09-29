@@ -1,7 +1,7 @@
 {
  "golden": "trim_batch",
  "mode": "full",
- "captured_at": "4c8c759+dirty",
+ "captured_at": "c611cef+dirty",
  "value": {
   "dict": {
    "kind": "trim_batch",
@@ -88,6 +88,13 @@
       },
       "state": "computable",
       "state_reasons": [],
+      "margin": {
+       "dict": {
+        "status": "met",
+        "reasons": []
+       }
+      },
+      "state_evidence": null,
       "region_state": null
      }
     },
@@ -173,6 +180,13 @@
       },
       "state": "computable",
       "state_reasons": [],
+      "margin": {
+       "dict": {
+        "status": "met",
+        "reasons": []
+       }
+      },
+      "state_evidence": null,
       "region_state": null
      }
     },
@@ -258,6 +272,13 @@
       },
       "state": "computable",
       "state_reasons": [],
+      "margin": {
+       "dict": {
+        "status": "met",
+        "reasons": []
+       }
+      },
+      "state_evidence": null,
       "region_state": null
      }
     },
@@ -341,10 +362,17 @@
         "elevon_roll_avail": "f:0x1.5808fbf6f6ec0p-2"
        }
       },
-      "state": "infeasible",
-      "state_reasons": [
-       "throttle_high"
-      ],
+      "state": "computable",
+      "state_reasons": [],
+      "margin": {
+       "dict": {
+        "status": "short",
+        "reasons": [
+         "throttle_high"
+        ]
+       }
+      },
+      "state_evidence": null,
       "region_state": "out_of_region"
      }
     },
@@ -430,9 +458,48 @@
       },
       "state": "infeasible",
       "state_reasons": [
-       "throttle_high",
-       "not_converged"
+       "thrust_deficit",
+       "throttle_high"
       ],
+      "margin": {
+       "dict": {
+        "status": "unevaluated",
+        "reasons": []
+       }
+      },
+      "state_evidence": {
+       "dict": {
+        "channel": "throttle_high",
+        "fixed": {
+         "dict": {
+          "throttle": "f:0x1.0000000000000p+0"
+         }
+        },
+        "equation": "vdot",
+        "tol": "f:0x1.a36e2eb1c432dp-14",
+        "alpha_range": [
+         "f:-0x1.999999999999ap-3",
+         "f:0x1.ccccccccccccdp-2"
+        ],
+        "solutions": [
+         {
+          "dict": {
+           "alpha": "f:0x1.f67cb7e622b77p-6",
+           "de": "f:-0x1.293d2dc1b6c63p-8",
+           "throttle": "f:0x1.0000000000000p+0",
+           "vdot": "f:-0x1.220caa9007463p-1",
+           "ndot": "f:-0x1.3b60000000000p-47",
+           "qdot": "f:-0x1.157159bfef0a8p-53",
+           "slope": "f:0x1.8a640f97d6c40p+0",
+           "need": "f:0x1.788b259411e4bp-2",
+           "short": true,
+           "alpha_stall": "f:0x1.3333333333333p-2",
+           "below_stall": true
+          }
+         }
+        ]
+       }
+      },
       "region_state": "out_of_region"
      }
     }

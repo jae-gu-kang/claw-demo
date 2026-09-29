@@ -164,7 +164,7 @@ test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은
     assert.equal(r.phase, "done", r.error);
     assert.match(r.summary, /^3 케이스 — 계산 가능 2 · 물리적 불가 1 · 판정 플래그 위반 2건 확인 필요/);
     assert.match(textOf(root), /수렴 3\/3 · 판정 플래그 위반 2건/, "머리줄과 보고가 같은 말");
-    assert.match(textOf(root), /추력 상한 포화/, "표가 물리적 불가의 근거를 싣는다");
+    assert.match(textOf(root), /스로틀 상한/, "표가 물리적 불가의 근거를 싣는다");
     const hit = scrolled.find((s) => s.node.attrs?.id === "trim-drawer");
     assert.ok(hit, "수치 패널을 굴리지 않았다");
     assert.deepEqual(hit.o, { block: "start", behavior: "smooth" });

@@ -68,13 +68,20 @@ def test_aircraft_without_region_or_template_says_so(client):
 
 
 def test_trim_batch_results_carry_the_condition_state(client, wait_job):
-    # 1000 m·연료 200: M0.40은 계산 가능, M0.60은 수렴하지만 추력 포화 — 물리적 불가(사유 전량)
-    cases = [{"mach": m, "alt": 1000.0, "fuel": 200.0} for m in (0.40, 0.60)]
+    # 1000 m·연료 200: M0.40은 계산 가능·여유 충족, M0.60은 수렴한 평형이 스로틀 판정선을 넘는다 — 계산 가능·여유 미달
+    # (날 수 있는 조건이다 — 판정선 미달을 물리적 불가로 부르지 않는다). M0.70은 스로틀 100 %·미수렴이고, 최대 추력
+    # 평형을 다시 풀어 감속이 남는다는 근거가 있어 물리적 불가(추력 부족)다
+    cases = [{"mach": m, "alt": 1000.0, "fuel": 200.0} for m in (0.40, 0.60, 0.70)]
     j = wait_job(client.post("/api/trim/batch", json={"cases": cases}).json()["id"])
     body = client.get(f"/api/results/{j['result_id']}").json()
     by_mach = {res["case"]["mach"]: res for res in body["results"]}
     assert by_mach[0.4]["state"] == "computable" and by_mach[0.4]["state_reasons"] == []
-    assert by_mach[0.6]["state"] == "infeasible" and "throttle_high" in by_mach[0.6]["state_reasons"]
+    assert by_mach[0.4]["margin"] == {"status": "met", "reasons": []} and by_mach[0.4]["state_evidence"] is None
+    assert by_mach[0.6]["state"] == "computable" and by_mach[0.6]["state_reasons"] == []
+    assert by_mach[0.6]["margin"] == {"status": "short", "reasons": ["throttle_high"]}
+    assert by_mach[0.7]["state"] == "infeasible" and by_mach[0.7]["state_reasons"] == ["thrust_deficit", "throttle_high"]
+    ev = by_mach[0.7]["state_evidence"]
+    assert ev["fixed"] == {"throttle": 1.0} and all(s["vdot"] < -ev["tol"] for s in ev["solutions"])
     # 요구영역 판정도 함께 — 손으로 더한 케이스는 영역 밖일 수 있다(초안 영역 M0.30~0.55)
     assert by_mach[0.4]["region_state"] is None and by_mach[0.6]["region_state"] == "out_of_region"
     assert body["region"]["confirmed"] is False  # 초안으로 계산한 결과는 그 사실을 싣는다

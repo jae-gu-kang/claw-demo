@@ -4,7 +4,7 @@
 둘지와 각 점이 어떤 상태인지**만 정한다 — 트림 풀기는 claw.trim, 성능 판정은 기준(04)이 한다.
 
 - region: 요구 운용영역(기본 범위 + 경계표)과 모델 유효영역 — 둘은 별개 객체다 (05 §11.2)
-- states: 조건 상태 8가지와 미수렴 트림의 귀속 (05 §11.3)
+- states: 조건 상태 8가지, 미수렴 트림의 귀속과 그 근거, 상태와 따로 가는 여유 판정 (05 §11.3)
 - basegrid: 기본 모델 격자 — 공통 마하 좌표 + 행 끝점 (05 §11.11)
 """
 
@@ -22,11 +22,12 @@ from claw.opspace.states import (
     STATE_ORDER,
     UNDEFINED,
     pre_state,
+    trim_assessment,
     trim_state,
 )
 
 __all__ = [
     "CALC_FAILED", "COMPUTABLE", "CONSTRAINT_HIT", "INFEASIBLE", "MODEL_GAP", "NOT_RUN", "OUT_OF_REGION",
     "STATE_LABEL", "STATE_ORDER", "UNDEFINED",
-    "ModelRange", "Region", "base_grid", "model_range_of", "pre_state", "region_of", "trim_state",
+    "ModelRange", "Region", "base_grid", "model_range_of", "pre_state", "region_of", "trim_assessment", "trim_state",
 ]

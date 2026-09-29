@@ -3,12 +3,13 @@
 import copy
 import dataclasses
 
+import numpy as np
 import pytest
 
 from claw.common.contracts import TrimCase
 from claw.opspace import (
     CALC_FAILED, COMPUTABLE, CONSTRAINT_HIT, INFEASIBLE, MODEL_GAP, NOT_RUN, OUT_OF_REGION, UNDEFINED,
-    ModelRange, Region, base_grid, model_range_of, pre_state, region_of, trim_state,
+    ModelRange, Region, base_grid, model_range_of, pre_state, region_of, trim_assessment, trim_state,
 )
 from claw.opspace.states import _alpha_upper
 from claw.profile import ProfileError, build_profile, validate_document
@@ -175,11 +176,139 @@ def test_converged_trim_with_margin_is_computable(example):
     assert trim_state(_trim(example, 0.18, 1000.0, 25.0), example, WIDE_MODEL) == (COMPUTABLE, [])
 
 
-def test_unconverged_trim_pinned_at_throttle_limit_is_infeasible_not_calc_failure(example):
+def test_unconverged_trim_pinned_at_throttle_limit_is_infeasible_only_with_evidence(example):
+    # 스로틀 100 %에 붙은 미수렴 — 그것만으로가 아니라, 최대 추력에서 수직력·피치 모멘트 평형을 다시 풀어 찾은 해
+    # 전부에서 비행경로 가속도가 허용치를 넘게 음수라는 근거로 불가다. 근거 수치가 결과에 실린다
     tr = _trim(example, 0.5, 100.0, 25.0)
     assert tr.converged is False
-    st, why = trim_state(tr, example, WIDE_MODEL)
-    assert st == INFEASIBLE and "throttle_high" in why and "not_converged" in why
+    a = trim_assessment(tr, example, WIDE_MODEL)
+    assert a["state"] == INFEASIBLE and a["reasons"] == ["thrust_deficit", "throttle_high"]
+    ev = a["evidence"]
+    assert ev["channel"] == "throttle_high" and ev["fixed"] == {"throttle": 1.0} and ev["equation"] == "vdot"
+    assert ev["solutions"] and all(s["below_stall"] and s["vdot"] < -ev["tol"] for s in ev["solutions"])
+    assert all(abs(s["ndot"]) < ev["tol"] and abs(s["qdot"]) < ev["tol"] for s in ev["solutions"])
+    assert a["margin"]["status"] == "unevaluated"
+
+
+# ── 여유 판정은 상태와 따로 (05 §11.3) — 검토 회귀 3종 ──────────────────────────
+@pytest.fixture(scope="module")
+def eoir():
+    return build_profile(load_example(), "eoir")
+
+
+def test_converged_trim_past_the_throttle_line_is_computable_with_margin_short(eoir):
+    # EO/IR형 M0.28 2000 m·25 kg — 수렴한 평형(스로틀 95.1 %)이다. 판정선 95 %를 넘었을 뿐 날 수 있는 조건이다
+    tr = _trim(eoir, 0.28, 2000.0, 25.0)
+    assert tr.converged and float(tr.control.throttle[0]) > 0.95
+    a = trim_assessment(tr, eoir, WIDE_MODEL)
+    assert a["state"] == COMPUTABLE and a["reasons"] == []
+    assert a["margin"] == {"status": "short", "reasons": ["throttle_high"]}
+    assert trim_state(tr, eoir, WIDE_MODEL) == (COMPUTABLE, [])
+
+
+def test_marginal_thrust_deficit_is_confirmed_by_the_balance_check(eoir):
+    # EO/IR형 M0.28 3000 m·37.5 kg — 스로틀 100 %·미수렴. 최대 추력 평형 해의 V̇가 −0.0066 m/s²로 작지만 허용치를 넘는다
+    tr = _trim(eoir, 0.28, 3000.0, 37.5)
+    assert not tr.converged
+    a = trim_assessment(tr, eoir, WIDE_MODEL)
+    assert a["state"] == INFEASIBLE and a["reasons"][0] == "thrust_deficit"
+    assert all(s["vdot"] < -1e-3 for s in a["evidence"]["solutions"])
+
+
+def test_limit_without_a_balance_is_constraint_hit_not_infeasible(example, monkeypatch):
+    # 평형을 풀 받음각 범위에 해가 없다 — 한계에 붙었다는 사실만 남는다: 원인 미확인
+    tr = _trim(example, 0.5, 100.0, 25.0)
+    monkeypatch.setattr(example, "db_ranges", lambda: {"alpha": (0.30, 0.31)})
+    a = trim_assessment(tr, example, WIDE_MODEL)
+    assert a["state"] == CONSTRAINT_HIT
+    assert a["reasons"] == ["throttle_high", "not_converged", "balance_not_found"]
+    assert a["evidence"]["solutions"] == []
+
+
+def test_limit_with_spare_thrust_at_full_throttle_is_a_solver_failure(example):
+    # 추력이 남는 조건(M0.18)의 해를 스로틀 100 %·미수렴으로 꾸민다 — 한계 안쪽에 트림이 있으니 다시 풀 대상이다
+    tr = _trim(example, 0.18, 1000.0, 25.0)
+    pinned = dataclasses.replace(tr, converged=False,
+                                 control=dataclasses.replace(tr.control, throttle=np.array([1.0, 1.0])))
+    a = trim_assessment(pinned, example, WIDE_MODEL)
+    assert a["state"] == CALC_FAILED and "trim_inside_limit" in a["reasons"]
+    assert any(s["vdot"] > 0.0 for s in a["evidence"]["solutions"])
+
+
+@pytest.mark.parametrize("bound", [0, 1])
+def test_elevon_stop_with_a_trim_inside_the_travel_is_a_solver_failure(example, bound):
+    # 수렴한 해(δe −0.048)를 엘레본 끝(±0.35)·미수렴으로 꾸민다 — q̇가 남아도 엘레본을 안쪽으로 되돌리면 상쇄되는 방향이다.
+    # 부호를 안 보고 |q̇|만 보면 양 끝 모두 「피치 모멘트 부족」이 된다(리뷰가 잡은 결함)
+    tr = _trim(example, 0.18, 1000.0, 25.0)
+    lim = example.trim_bounds["de"][bound]
+    pinned = dataclasses.replace(tr, converged=False, control=dataclasses.replace(tr.control, elevon=np.full(4, lim)))
+    a = trim_assessment(pinned, example, WIDE_MODEL)
+    assert a["state"] == CALC_FAILED and "trim_inside_limit" in a["reasons"], a["reasons"]
+    assert a["evidence"]["equation"] == "qdot" and a["evidence"]["solutions"]
+
+
+def test_elevon_too_short_to_trim_is_pitch_moment_short():
+    # 엘레본 음의 한계를 −0.01로 좁힌 기체 — 트림에 필요한 δe(약 −0.048)가 한계 밖이라 엘레본 하한에 붙는다.
+    # 한계 고정 평형에서 q̇를 없애려면 더 음으로 가야 한다 — 불가 방향이므로 물리적 불가다
+    doc = load_example()
+    doc["surfaces"]["elevon"] = [-0.01, 0.35]
+    doc["law"]["alloc"] = None  # 좁힌 한계로는 도출 표가 낡는다 — 이 시험은 트림만 본다
+    built = build_profile(doc)
+    tr = _trim(built, 0.18, 1000.0, 25.0)
+    assert not tr.converged and float(tr.control.elevon[0]) == pytest.approx(-0.01)
+    a = trim_assessment(tr, built, WIDE_MODEL)
+    assert a["state"] == INFEASIBLE and a["reasons"] == ["pitch_moment_short", "de_low"], a["reasons"]
+
+
+def test_throttle_evidence_balances_the_path_normal_axis(example):
+    # 추력 부족 해는 V̇ ≠ 0이다 — 기체축 ẇ = 0으로 풀면 경로 수직 가속도가 −tanα·V̇로 남는다. 경로축 짝(V̇ · 경로 수직)으로 푼다
+    a = trim_assessment(_trim(example, 0.5, 100.0, 25.0), example, WIDE_MODEL)
+    assert all(abs(s["ndot"]) < a["evidence"]["tol"] for s in a["evidence"]["solutions"])
+
+
+def test_limit_evidence_outside_the_stall_axis_does_not_claim_infeasible(example, monkeypatch):
+    # 실속표 축 밖의 마하 — 찾은 평형이 실속 아래인지 근거가 없다: 불가를 주장하지 않는다
+    from claw.tables import Table
+
+    monkeypatch.setattr(example, "stall_table", lambda: Table({"mach": (0.6, 0.9)}, (0.30, 0.27), name="alpha_stall",
+                                                               extrapolate="clip"))
+    a = trim_assessment(_trim(example, 0.5, 100.0, 25.0), example, WIDE_MODEL)
+    assert a["state"] == CONSTRAINT_HIT and "stall_basis_missing" in a["reasons"]
+    assert all(s["below_stall"] is None for s in a["evidence"]["solutions"])
+
+
+def test_limit_evidence_solver_error_degrades_to_a_reason(example, monkeypatch):
+    import scipy.optimize
+
+    def boom(*a, **k):
+        raise ValueError("수치 실패")
+
+    monkeypatch.setattr(scipy.optimize, "least_squares", boom)
+    a = trim_assessment(_trim(example, 0.5, 100.0, 25.0), example, WIDE_MODEL)
+    assert a["state"] == CONSTRAINT_HIT and a["reasons"][-1] == "balance_error"
+
+
+def test_two_limits_at_once_do_not_claim_a_cause(example):
+    tr = _trim(example, 0.18, 1000.0, 25.0)
+    hi = example.trim_bounds["de"][1]
+    pinned = dataclasses.replace(tr, converged=False, control=dataclasses.replace(
+        tr.control, throttle=np.array([1.0, 1.0]), elevon=np.full(4, hi)))
+    a = trim_assessment(pinned, example, WIDE_MODEL)
+    assert a["state"] == CONSTRAINT_HIT and a["reasons"] == ["throttle_high", "de_high", "not_converged",
+                                                             "balance_not_found"]
+
+
+def test_converged_trim_at_or_past_stall_is_infeasible(example):
+    tr = _trim(example, 0.18, 1000.0, 25.0)
+    reserve = copy.deepcopy(tr.reserve)
+    reserve["alpha"]["stall_reserve"] = -0.01
+    a = trim_assessment(dataclasses.replace(tr, reserve=reserve), example, WIDE_MODEL)
+    assert a["state"] == INFEASIBLE and a["reasons"] == ["above_stall"]
+
+
+def test_margin_is_met_for_a_comfortable_trim(example):
+    a = trim_assessment(_trim(example, 0.18, 1000.0, 25.0), example, WIDE_MODEL)
+    assert a["margin"] == {"status": "met", "reasons": []} and a["evidence"] is None
 
 
 def test_alpha_search_bound_without_stall_basis_is_constraint_hit(example):

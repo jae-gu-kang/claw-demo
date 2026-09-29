@@ -128,20 +128,29 @@ export function trimEnvelopeCell(r) {
  *  한 칸이 셋을 섞었다. 모델 부족은 트림하지 않은 점이다(요구 안인데 모델 유효영역 밖). */
 export const TRIM_STATE_CELL = Object.freeze({
   computable: { color: STATUS.ok, text: "가능", label: "계산 가능" },
+  // 상태가 아니라 칸 종류 — 계산 가능한 트림(날 수 있는 평형)이 판정선(스로틀·엘레본 포화, α 여유)을 넘은 것. 엔진은 이것을
+  // 상태와 따로 margin으로 싣는다(05 §11.3). 물리적 불가와 섞으면 날 수 있는 조건이 불가로 보인다
+  margin_short: { color: "#ffcc00", text: "여유↓", label: "계산 가능·여유 미달" },
   infeasible: { color: STATUS.bad, text: "불가", label: "물리적 불가" },
   constraint_hit: { color: STATUS.warn, text: "제약", label: "제약 도달·미수렴" },
   calc_failed: { color: "#636366", text: "실패", label: "계산 실패" },
   model_gap: { color: STATUS.na, text: "모델밖", label: "모델 부족 (트림 안 함)" },
 });
 
-// 물리적 불가 셀의 글 — 첫 근거(엔진 사유 순서)를 짧게. 표·툴팁은 사유 전량을 싣는다
+// 물리적 불가 셀의 글 — 첫 근거(엔진 사유 순서)를 짧게. 표·툴팁은 사유 전량을 싣는다. 옛 결과의 사유(판정선 포화·
+// α 여유)도 읽을 수 있게 남긴다
 const INFEASIBLE_TEXT = {
+  thrust_deficit: "추력", idle_thrust_excess: "추력↑", pitch_moment_short: "타면", above_stall: "실속",
   throttle_high: "추력", de: "타면", throttle_low: "추력↓", alpha_margin: "실속≈", below_V_S: "실속", "1g_unreachable": "1g",
 };
 
 /** 조건 상태 사유 코드 → 사람 글 (엔진 claw.opspace.states). 모르는 코드는 그대로. */
 export const STATE_REASON_LABEL = Object.freeze({
-  throttle_high: "추력 상한 포화", throttle_low: "추력 하한 포화", de: "엘레본 포화", alpha_margin: "α 여유 미달",
+  thrust_deficit: "최대 추력에서도 감속 — 추력 부족 확인", idle_thrust_excess: "아이들에서도 가속 — 수평 감속 불가 확인",
+  pitch_moment_short: "엘레본 한계에서 피치 모멘트 부족 확인", above_stall: "실속각 이상",
+  balance_not_found: "한계 고정 평형 해 없음 — 원인 미확인", trim_inside_limit: "한계 안쪽에 트림이 있음 — 다시 풀 대상",
+  throttle_high: "스로틀 상한", throttle_low: "스로틀 하한", de_high: "엘레본 상한", de_low: "엘레본 하한",
+  de: "엘레본 포화", alpha_margin: "α 여유 미달",
   not_converged: "미수렴", alpha_search_bound: "받음각 탐색 상한", alpha_search_lower: "받음각 탐색 하한",
   below_V_S: "1g 실속 속도 V_S보다 느림", above_V_S: "V_S보다 빠름 (탐색 상한이 좁을 수 있음)",
   stall_basis_missing: "실속 근거 자료 없음 (판단 미완료)", "1g_unreachable": "1g 도달 불가",
@@ -149,14 +158,52 @@ export const STATE_REASON_LABEL = Object.freeze({
 
 export const stateReasonText = (codes) => (codes ?? []).map((c) => STATE_REASON_LABEL[c] ?? c).join(" · ");
 
+// 여유 판정 사유 → 글. 스로틀 상한 판정선은 추진 여유다(추력이 모자란 것이 아니다)
+const MARGIN_REASON_LABEL = Object.freeze({
+  throttle_high: "추진 여유 미달", throttle_low: "스로틀 하한 여유 미달", de: "엘레본 여유 미달",
+  alpha_margin: "α 여유 미달",
+});
+
+const isMarginShort = (r) => r.state === "computable" && r.margin?.status === "short";
+
 /** 트림 결과 행(state 있음) 또는 기본 격자 점(state = model_gap) → 지도 셀. 모르는 상태는 null(빈 칸). */
 export function trimStateCell(r) {
   const base = TRIM_STATE_CELL[r.state];
   if (!base) return null;
+  if (isMarginShort(r)) return { kind: "margin_short", color: TRIM_STATE_CELL.margin_short.color,
+    text: TRIM_STATE_CELL.margin_short.text };
   const reasons = r.state_reasons ?? [];
   const first = reasons.find((c) => INFEASIBLE_TEXT[c]);
   return { kind: r.state, color: base.color,
     text: r.state === "infeasible" && first ? INFEASIBLE_TEXT[first] : base.text };
+}
+
+/** 표의 상태 글 — 상태에 여유 판정을 붙인다(「계산 가능 · 추진 여유 미달」). */
+export function trimStateLabel(r) {
+  const base = TRIM_STATE_CELL[r.state]?.label ?? r.state;
+  if (!isMarginShort(r)) return base;
+  return `${base} · ${r.margin.reasons.map((c) => MARGIN_REASON_LABEL[c] ?? c).join(" · ")}`;
+}
+
+// 근거 글의 수치 — 유효 3자리(0.0525 · −0.022). 고정한 채널의 한계값은 그 단위로
+const sig = (x) => String(Number(Number(x).toPrecision(3)));
+const FIXED_TEXT = {
+  throttle: (v) => `스로틀 ${Math.round(v * 100)} %`,
+  de: (v) => `엘레본 ${sig(v)} rad`,
+};
+const FREE_TEXT = { alpha: (v) => `α ${sig(v)}`, de: (v) => `δe ${sig(v)}`, throttle: (v) => `스로틀 ${sig(v)}` };
+const EQUATION_TEXT = { vdot: (v) => `V̇ ${sig(v)} m/s²`, qdot: (v) => `q̇ ${sig(v)} rad/s²` };
+
+/** 물리 한계에 붙은 미수렴의 판정 근거(엔진 state_evidence) → 글 — 한계를 고정하고 다시 푼 평형 해마다 수치. */
+export function stateEvidenceText(ev) {
+  if (!ev) return "";
+  const [[fixedKey, fixedVal]] = Object.entries(ev.fixed);
+  const head = `${FIXED_TEXT[fixedKey]?.(fixedVal) ?? `${fixedKey} ${fixedVal}`} 고정 평형 해`;
+  if (!ev.solutions?.length) return `${head} 없음`;
+  const free = ["alpha", "de", "throttle"].filter((k) => k !== fixedKey);
+  const one = (s) => [...free.map((k) => FREE_TEXT[k](s[k])), EQUATION_TEXT[ev.equation](s[ev.equation])].join(" · ")
+    + (s.alpha_stall == null ? " (실속 근거 없음)" : ` (실속각 ${sig(s.alpha_stall)} ${s.below_stall ? "아래" : "이상"})`);
+  return `${head} ${ev.solutions.length}개 — ${ev.solutions.map(one).join(" / ")}`;
 }
 
 /** 비행 엔벨로프 셀 종류 → 범례 라벨 — 트림 탭 범례와 쇼케이스 보고가 **같은 말**을 쓴다(한 표).

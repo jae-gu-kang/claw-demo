@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from claw.common.contracts import TrimCase
 from claw_server.refs import ProfileRef, profile_echo, resolve_profile
-from claw.opspace import model_range_of, pre_state, region_of, trim_state
+from claw.opspace import model_range_of, pre_state, region_of, trim_assessment
 from claw.trim import trim_batch
 from claw_server.routes.grid import region_context
 from claw_server.serialize import trim_result_dict
@@ -77,18 +77,21 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
     cases = build_cases(req.cases)
     store = request.app.state.store
 
-    region, model, vs_cache = region_of(profile.doc), model_range_of(profile), {}
+    # 근거 계산이 기체를 다시 조립하지 않게 이미 만든 것을 넘긴다(opspace/states.py 캐시 키 "aircraft")
+    region, model, vs_cache = region_of(profile.doc), model_range_of(profile), {"aircraft": ac}
 
     def with_state(tr) -> dict:
-        """트림 해 + 조건 상태(05 §11.3) — 계산 실패·제약 도달·물리적 불가를 가른다. 요구영역 판정(region_state)은
-        따로 싣는다: 손으로 더한 케이스는 영역 밖일 수 있고, 그래도 사용자가 요청했으니 푼다."""
+        """트림 해 + 조건 상태(05 §11.3) — 계산 실패·제약 도달·물리적 불가를 가른다. 여유 판정(margin)은 상태와 따로
+        싣고, 물리 한계에 붙은 미수렴의 판정 근거(state_evidence — 한계 고정 평형 해들)도 싣는다. 요구영역 판정
+        (region_state)도 따로다: 손으로 더한 케이스는 영역 밖일 수 있고, 그래도 사용자가 요청했으니 푼다."""
         out = trim_result_dict(tr)
         if tr.case.condition != "level":
-            return {**out, "state": None, "state_reasons": [], "region_state": None}
-        state, reasons = trim_state(tr, profile, model, vs_cache=vs_cache)
+            return {**out, "state": None, "state_reasons": [], "margin": None, "state_evidence": None,
+                    "region_state": None}
+        a = trim_assessment(tr, profile, model, cache=vs_cache)
         rs = None if region is None else pre_state(region, model, tr.case.mach, tr.case.alt, tr.case.fuel)
-        return {**out, "state": state, "state_reasons": reasons,
-                "region_state": None if rs == "not_run" else rs}
+        return {**out, "state": a["state"], "state_reasons": a["reasons"], "margin": a["margin"],
+                "state_evidence": a["evidence"], "region_state": None if rs == "not_run" else rs}
 
     def work(job):
         results = trim_batch(

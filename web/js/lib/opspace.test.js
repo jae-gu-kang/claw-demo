@@ -6,7 +6,9 @@ import {
   STATE_MAP_LAYOUT, casesFromBaseGrid, gridMapEntries, parseGridSpec, regionLines, stateCountText, stateMapLayout,
   untrimmedSummary,
 } from "./opspace.js";
-import { TRIM_STATE_CELL, trimCueReport, trimEnvelopeCell, trimStateCell } from "./plot.js";
+import {
+  TRIM_STATE_CELL, stateEvidenceText, trimCueReport, trimEnvelopeCell, trimStateCell, trimStateLabel,
+} from "./plot.js";
 
 const LABELS = { not_run: "미계산", model_gap: "모델 부족", undefined: "요구 미정의" };
 const pt = (mach, alt, state = "not_run", fuel = 25) => ({ mach, alt, fuel, name: `M${mach}_h${alt}_f${fuel}`, state });
@@ -65,6 +67,41 @@ test("상태 셀: 물리적 불가는 첫 근거를 짧게, 계산 실패·제�
     .map((s) => trimStateCell({ state: s }).color));
   assert.equal(colors.size, 5);
   assert.equal(trimStateCell({ state: "nope" }), null);
+});
+
+test("여유 판정은 상태와 따로 — 수렴한 여유 미달 해는 계산 가능 안의 다른 칸이고, 새 불가 사유는 짧은 글로", () => {
+  const short = { state: "computable", state_reasons: [], margin: { status: "short", reasons: ["throttle_high"] } };
+  const met = { state: "computable", state_reasons: [], margin: { status: "met", reasons: [] } };
+  assert.equal(trimStateCell(short).kind, "margin_short");
+  assert.notEqual(trimStateCell(short).color, trimStateCell(met).color);
+  assert.equal(trimStateCell(met).kind, "computable");
+  assert.equal(trimStateCell({ state: "computable" }).kind, "computable"); // 옛 결과(margin 없음)는 종전대로
+  assert.equal(trimStateCell({ state: "infeasible", state_reasons: ["thrust_deficit", "throttle_high"] }).text, "추력");
+  assert.equal(trimStateCell({ state: "infeasible", state_reasons: ["above_stall"] }).text, "실속");
+  assert.equal(trimStateLabel(short), `${TRIM_STATE_CELL.computable.label} · 추진 여유 미달`);
+  assert.equal(trimStateLabel({ state: "infeasible", state_reasons: ["thrust_deficit"] }), TRIM_STATE_CELL.infeasible.label);
+});
+
+test("판정 근거 글 — 한계를 고정해 다시 푼 평형 해의 수치를 싣고, 해가 없으면 그렇다고 말한다", () => {
+  const ev = { channel: "throttle_high", fixed: { throttle: 1 }, equation: "vdot", tol: 1e-4,
+    solutions: [{ alpha: 0.0525, de: -0.022, throttle: 1, vdot: -0.0066, wdot: 0, qdot: 0, alpha_stall: 0.355,
+      below_stall: true }] };
+  assert.equal(stateEvidenceText(ev),
+    "스로틀 100 % 고정 평형 해 1개 — α 0.0525 · δe -0.022 · V̇ -0.0066 m/s² (실속각 0.355 아래)");
+  assert.equal(stateEvidenceText({ ...ev, solutions: [] }), "스로틀 100 % 고정 평형 해 없음");
+  assert.match(stateEvidenceText({ ...ev, solutions: [{ ...ev.solutions[0], alpha_stall: null, below_stall: null }] }),
+    /\(실속 근거 없음\)$/);
+  assert.equal(stateEvidenceText(null), "");
+  const deEv = { ...ev, channel: "de_high", fixed: { de: 0.35 }, equation: "qdot",
+    solutions: [{ ...ev.solutions[0], de: 0.35, throttle: 0.6, qdot: 0.8 }] };
+  assert.match(stateEvidenceText(deEv), /^엘레본 0\.35 rad 고정 평형 해 1개 — α 0\.0525 · 스로틀 0\.6 · q̇ 0\.8 rad\/s²/);
+});
+
+test("쇼케이스 보고 — 여유 미달 해는 계산 가능과 따로 센다", () => {
+  const row = (name, margin) => ({ case: { name, fuel: 25 }, converged: true, flags: {}, state: "computable",
+    margin: { status: margin, reasons: margin === "short" ? ["throttle_high"] : [] } });
+  assert.equal(trimCueReport([row("a", "met"), row("b", "short"), row("c", "short")]).summary,
+    `3 케이스 — ${TRIM_STATE_CELL.computable.label} 1 · ${TRIM_STATE_CELL.margin_short.label} 2`);
 });
 
 test("쇼케이스 보고 — 상태가 실린 결과는 상태 라벨로 센다(계산 가능은 0이어도 적는다)", () => {
