@@ -5,6 +5,7 @@ import {
   HEATMAP_LAYOUT, decadeTicks, heatmapCanvasHeight, heatmapCellWidth, interpLogAt,
   linScale, logScale, niceTicks,
 } from "../lib/plot.js";
+import { stateMapLayout } from "../lib/opspace.js";
 import { extent } from "../lib/replay.js";
 
 const FONT = "11px -apple-system, 'Segoe UI', sans-serif";
@@ -22,6 +23,56 @@ export function makeCanvas(width, height) {
   ctx.scale(dpr, dpr);
   ctx.font = FONT;
   return { canvas, ctx };
+}
+
+/** 조건 상태 지도 (연료 한 장) — 가로 실제 마하 · 세로 고도 행. 행마다 요구 마하 띠를 깔고 점을 상태색으로 찍는다.
+ *  배치는 lib/opspace.js stateMapLayout이 정본이다. cellOf(entry) → {color, text} (plot.js trimEnvelopeCell). */
+export function stateMapCanvas({ rows, entries, machRange, fuel }, cellOf, { title = "", width = 640 } = {}) {
+  const L = stateMapLayout({ rows, entries, machRange, fuel, width });
+  const { canvas, ctx } = makeCanvas(width, L.height);
+  ctx.font = "600 12px -apple-system, 'Segoe UI', sans-serif";
+  ctx.fillStyle = "#1d1d1f";
+  ctx.fillText(title, 64, 16);
+  ctx.font = FONT;
+  // 가로 눈금 — 실제 마하
+  ctx.strokeStyle = "#e5e5ea";
+  ctx.beginPath();
+  for (const t of niceTicks(L.domain[0], L.domain[1], 8)) {
+    ctx.moveTo(L.x(t), 24);
+    ctx.lineTo(L.x(t), L.height - 30);
+    ctx.fillStyle = "#86868b";
+    ctx.fillText(`M${t}`, L.x(t) - 12, L.height - 14);
+  }
+  ctx.stroke();
+  for (const alt of L.alts) {
+    ctx.fillStyle = "#86868b";
+    ctx.fillText(`${alt} m`, 6, L.rowY(alt) + 4);
+  }
+  // 요구 마하 띠 — 경계표가 정한 행 범위. 미정의 행은 띠 없이 글로
+  for (const b of L.bands) {
+    const y = L.rowY(b.alt);
+    if (b.undefined) {
+      ctx.fillStyle = "#86868b";
+      ctx.fillText("요구 미정의 — 경계표가 덮지 않음", 70, y + 4);
+      continue;
+    }
+    ctx.fillStyle = "rgba(0, 113, 227, 0.10)";
+    ctx.strokeStyle = "rgba(0, 113, 227, 0.45)";
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(b.x0 - 7, y - 11, b.x1 - b.x0 + 14, 22, 11);
+    else ctx.rect(b.x0 - 7, y - 11, b.x1 - b.x0 + 14, 22);
+    ctx.fill();
+    ctx.stroke();
+  }
+  for (const d of L.dots) {
+    const cell = cellOf(d.entry);
+    if (!cell) continue;
+    ctx.fillStyle = cell.color;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, 6, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  return canvas;
 }
 
 /**

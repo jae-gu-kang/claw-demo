@@ -1,7 +1,7 @@
 {
  "golden": "trim_batch",
  "mode": "full",
- "captured_at": "e75a09f+dirty",
+ "captured_at": "4c8c759+dirty",
  "value": {
   "dict": {
    "kind": "trim_batch",
@@ -85,7 +85,10 @@
         },
         "elevon_roll_avail": "f:0x1.2a70ebb481d70p-2"
        }
-      }
+      },
+      "state": "computable",
+      "state_reasons": [],
+      "region_state": null
      }
     },
     {
@@ -167,7 +170,10 @@
         },
         "elevon_roll_avail": "f:0x1.3b8fa096f84d8p-2"
        }
-      }
+      },
+      "state": "computable",
+      "state_reasons": [],
+      "region_state": null
      }
     },
     {
@@ -249,7 +255,10 @@
         },
         "elevon_roll_avail": "f:0x1.47e41dfc98917p-2"
        }
-      }
+      },
+      "state": "computable",
+      "state_reasons": [],
+      "region_state": null
      }
     },
     {
@@ -331,7 +340,12 @@
         },
         "elevon_roll_avail": "f:0x1.5808fbf6f6ec0p-2"
        }
-      }
+      },
+      "state": "infeasible",
+      "state_reasons": [
+       "throttle_high"
+      ],
+      "region_state": "out_of_region"
      }
     },
     {
@@ -413,7 +427,13 @@
         },
         "elevon_roll_avail": "f:0x1.61d671f2f9492p-2"
        }
-      }
+      },
+      "state": "infeasible",
+      "state_reasons": [
+       "throttle_high",
+       "not_converged"
+      ],
+      "region_state": "out_of_region"
      }
     }
    ],
@@ -427,6 +447,50 @@
      "plant_fingerprint": "dc86fad3932a3446",
      "is_example": true,
      "source": "default-example"
+    }
+   },
+   "region": {
+    "dict": {
+     "mach": [
+      "f:0x1.3333333333333p-2",
+      "f:0x1.199999999999ap-1"
+     ],
+     "alt": [
+      "f:0x1.9000000000000p+6",
+      "f:0x1.7700000000000p+11"
+     ],
+     "fuel": [
+      "f:0x1.9000000000000p+7",
+      "f:0x1.9000000000000p+7"
+     ],
+     "boundary": null,
+     "grid": {
+      "dict": {
+       "n_mach": 6,
+       "alts": [
+        "f:0x1.9000000000000p+6",
+        "f:0x1.f400000000000p+9",
+        "f:0x1.7700000000000p+11"
+       ],
+       "fuels": [
+        "f:0x1.9000000000000p+7"
+       ]
+      }
+     },
+     "confirmed": false,
+     "source": "draft:trim_grid"
+    }
+   },
+   "model": {
+    "dict": {
+     "mach": [
+      "f:0x0.0p+0",
+      "f:0x1.ccccccccccccdp-1"
+     ],
+     "fuel": [
+      "f:0x0.0p+0",
+      "f:0x1.9000000000000p+8"
+     ]
     }
    }
   }

@@ -11,7 +11,9 @@ from pydantic import BaseModel, Field, model_validator
 
 from claw.common.contracts import TrimCase
 from claw_server.refs import ProfileRef, profile_echo, resolve_profile
+from claw.opspace import model_range_of, pre_state, region_of, trim_state
 from claw.trim import trim_batch
+from claw_server.routes.grid import region_context
 from claw_server.serialize import trim_result_dict
 
 router = APIRouter(tags=["trim"])
@@ -75,6 +77,19 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
     cases = build_cases(req.cases)
     store = request.app.state.store
 
+    region, model, vs_cache = region_of(profile.doc), model_range_of(profile), {}
+
+    def with_state(tr) -> dict:
+        """트림 해 + 조건 상태(05 §11.3) — 계산 실패·제약 도달·물리적 불가를 가른다. 요구영역 판정(region_state)은
+        따로 싣는다: 손으로 더한 케이스는 영역 밖일 수 있고, 그래도 사용자가 요청했으니 푼다."""
+        out = trim_result_dict(tr)
+        if tr.case.condition != "level":
+            return {**out, "state": None, "state_reasons": [], "region_state": None}
+        state, reasons = trim_state(tr, profile, model, vs_cache=vs_cache)
+        rs = None if region is None else pre_state(region, model, tr.case.mach, tr.case.alt, tr.case.fuel)
+        return {**out, "state": state, "state_reasons": reasons,
+                "region_state": None if rs == "not_run" else rs}
+
     def work(job):
         results = trim_batch(
             ac,
@@ -86,8 +101,8 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
         )
         store.save(
             job.id,
-            {"kind": "trim_batch", "results": [trim_result_dict(r) for r in results],
-             "profile": echo},
+            {"kind": "trim_batch", "results": [with_state(r) for r in results],
+             "profile": echo, **region_context(profile)},
             meta={
                 "kind": "trim_batch",
                 "created": job.created,

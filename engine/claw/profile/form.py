@@ -26,7 +26,10 @@ from claw.profile.schema import (
 # 문서 머리 — 폼 절이 아니라 탭의 이름표·형상 변형 편집이 다룬다. 평가 기준·튜닝 목표(criteria·tuning)도 여기다:
 # 이 범용 폼이 아니라 판정선 표(design.criteria.LINES — 방향·합격선·권장선·목표를 한 줄로)로 서는 전용 기준 편집이
 # 다룬다. 범용 폼 칸으로 세우면 모든 칸이 예제 문서에 실재해야 해서, 「없음 = 도구 기본값」인 절에 기본값을 굳혀 적게 된다
-META_KEYS = ("schema_version", "id", "name", "description", "is_example", "criteria", "tuning", "variants")
+# 요구 운용영역(operating_region)도 여기다 — 경계표(연료 층 × 고도 행)는 범용 칸이 아니라 전용 편집(웹 트림 탭 「요구
+# 운용영역」)이 다루고, 「없음 = trim_grid 초안(미확정)」인 절이라 예제 문서에 값을 굳혀 적게 하지 않는다
+META_KEYS = ("schema_version", "id", "name", "description", "is_example", "criteria", "tuning", "operating_region",
+             "variants")
 
 
 def _f(kind, path, label, unit="", **extra):

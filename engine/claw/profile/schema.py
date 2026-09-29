@@ -28,18 +28,22 @@ SECTIONS = (
     "schema_version", "id", "name", "description", "is_example",
     "geometry", "aero", "stall", "mass", "propulsion", "actuator", "surfaces",
     "structural", "operating", "ground", "trim", "law", "mission_template", "display", "criteria", "tuning",
-    "variants",
+    "operating_region", "variants",
 )
 # 스키마 v1에 나중에 더한 **선택 절** — 문서에 없으면 null(없음)로 채운다. 버전을 올리는 대신 이렇게 한
 # 이유: 이 절들은 계산에 쓰이지 않아 지문 밖인데(fingerprint.py), 버전을 올리면 버전 값이 지문에 들어가 옛
 # 결과·설계 세션의 계보(스냅숏 지문)가 통째로 끊긴다. 계산에 쓰이는 절이 생기면 그때 버전을 올린다
-OPTIONAL_SECTIONS = ("mission_template", "display", "criteria", "tuning")
+OPTIONAL_SECTIONS = ("mission_template", "display", "criteria", "tuning", "operating_region")
 # 평가 기준(합격선·권장선)과 튜닝 목표 — 이 설계 작업 단위(프로파일)의 모든 탭이 공유한다(기준 통합 ①, v1.51).
 # 없음(null)이면 도구 기본값이고, 부분만 적으면 나머지는 기본값이다. 둘 다 **지문 밖**이다(fingerprint.py) — 기준을
 # 바꿨다고 트림·게인 표가 낡지 않는다. 판정·결과가 어느 기준으로 났는지는 기준 지문 둘이 따로 말한다
 # (pipeline/criteria.py judgement_fingerprint·targets_fingerprint). 형상 변형은 이 둘을 고칠 수 없다 — 기준은
 # 형상 하나가 아니라 작업 단위 전체의 요구조건이다
-VARIANT_FORBIDDEN = ("criteria", "tuning")
+# 요구 운용영역(operating_region)도 같다 — 성능을 확보해야 할 범위는 작업 단위의 요구조건이지 형상 하나의 값이 아니다
+# (형상마다 날 수 있는 범위가 다른 것은 조건 상태 — 물리적 불가·모델 부족 — 가 말한다, 05 §11.2)
+VARIANT_FORBIDDEN = ("criteria", "tuning", "operating_region")
+# 요구 운용영역 기본 격자의 마하 점 수 상한 — 행마다 이 수 + 끝점 둘이다. 점 총수는 MAX_TEMPLATE_CASES가 막는다
+MAX_REGION_MACH_POINTS = 50
 # 미션 템플릿 격자의 케이스 상한 — 서버 스캔·영향성 격자 상한(MAX_SCAN_CASES·MAX_CASES)과 같은 자리.
 # 간격 오타 하나로 수만 케이스가 되면 그 기체를 고른 모든 화면이 격자를 만들다 멈춘다
 MAX_TEMPLATE_CASES = 200
@@ -639,6 +643,90 @@ def _mission_template(t, p):
     }
 
 
+def _operating_region(r, p):
+    """요구 운용영역 (05 §11.2) — **성능을 확보해야 할 범위**. 계산할 점 목록(mission_template.trim_grid)이 아니다.
+
+    기본 범위(마하·고도·연료 [최솟값, 최댓값]) + 선택적 경계표(연료 층마다 고도 행 [alt, mach_lo, mach_hi] —
+    행 사이·층 사이 선형 보간, 표가 덮지 않는 조건은 「요구 미정의」) + 기본 격자 명세(마하 점 수 · 고도 목록 ·
+    연료 목록 — 05 §11.11). 연료는 kg다. 모델 범위(공력 DB · 연료 만재)를 넘어도 거부하지 않는다 — 넘친 부분은
+    「모델 부족」 상태로 남는다(요구를 모델에 맞춰 줄이지 않는다). 절이 없으면(null) 화면이 trim_grid에서 만든
+    초안을 「미확정」으로 보인다(claw.opspace.region). 계산 입력이 아니라 지문 밖이다(fingerprint.py)."""
+    if r is None:
+        return None
+    lo_alt, hi_alt = ISA_ALT_RANGE
+    _keys(r, p, ("mach", "alt", "fuel", "boundary", "base_grid"))
+
+    def pair(v, path, *, lo=None, hi=None, lo_open=False, strict):
+        if not isinstance(v, list) or len(v) != 2:
+            _fail(path, "[최솟값, 최댓값] 두 수치여야 함")
+        a = _num(v[0], f"{path}/0", lo=lo, hi=hi, lo_open=lo_open)
+        b = _num(v[1], f"{path}/1", lo=lo, hi=hi, lo_open=lo_open)
+        if not (a < b if strict else a <= b):
+            _fail(f"{path}/1", f"최솟값 {'<' if strict else '≤'} 최댓값이어야 함: [{a}, {b}]")
+        return [a, b]
+
+    mach = pair(r["mach"], f"{p}/mach", lo=0.0, lo_open=True, strict=True)
+    alt = pair(r["alt"], f"{p}/alt", lo=lo_alt, hi=hi_alt, strict=False)
+    fuel = pair(r["fuel"], f"{p}/fuel", lo=0.0, strict=False)
+
+    def inside(v, span, path, what):
+        if not span[0] - 1e-9 <= v <= span[1] + 1e-9:
+            _fail(path, f"{what} {v}이 기본 범위 [{span[0]}, {span[1]}] 밖 — 경계표·격자는 기본 범위 안에 둔다")
+        return v
+
+    boundary = r["boundary"]
+    if boundary is not None:
+        bp = f"{p}/boundary"
+        if not isinstance(boundary, list) or not boundary:
+            _fail(bp, "연료 층 1개 이상 목록이어야 함 (경계표가 없으면 null)")
+        layers, seen = [], set()
+        for i, layer in enumerate(boundary):
+            lp = f"{bp}/{i}"
+            _keys(layer, lp, ("fuel", "rows"))
+            f = inside(_num(layer["fuel"], f"{lp}/fuel", lo=0.0), fuel, f"{lp}/fuel", "연료 층")
+            if f in seen:
+                _fail(f"{lp}/fuel", f"연료 층 {f}이 두 번 있다")
+            seen.add(f)
+            rows = layer["rows"]
+            if not isinstance(rows, list) or not rows:
+                _fail(f"{lp}/rows", "고도 행 [alt, mach_lo, mach_hi] 1개 이상이어야 함")
+            out_rows, alts_seen = [], set()
+            for j, row in enumerate(rows):
+                rp = f"{lp}/rows/{j}"
+                if not isinstance(row, list) or len(row) != 3:
+                    _fail(rp, "[고도, 마하 하한, 마하 상한] 세 수치여야 함")
+                a = inside(_num(row[0], f"{rp}/0", lo=lo_alt, hi=hi_alt), alt, f"{rp}/0", "고도")
+                m_lo = inside(_num(row[1], f"{rp}/1", lo=0.0, lo_open=True), mach, f"{rp}/1", "마하 하한")
+                m_hi = inside(_num(row[2], f"{rp}/2", lo=0.0, lo_open=True), mach, f"{rp}/2", "마하 상한")
+                if not m_lo < m_hi:
+                    _fail(f"{rp}/2", f"마하 하한 < 상한이어야 함: {m_lo} ≥ {m_hi}")
+                if a in alts_seen:
+                    _fail(f"{rp}/0", f"고도 행 {a}이 두 번 있다")
+                alts_seen.add(a)
+                out_rows.append([a, m_lo, m_hi])
+            layers.append({"fuel": f, "rows": out_rows})
+        boundary = layers
+
+    g = r["base_grid"]
+    gp = f"{p}/base_grid"
+    _keys(g, gp, ("n_mach", "alts", "fuels"))
+    n = g["n_mach"]
+    if isinstance(n, bool) or not isinstance(n, int) or not 2 <= n <= MAX_REGION_MACH_POINTS:
+        _fail(f"{gp}/n_mach", f"2~{MAX_REGION_MACH_POINTS} 정수여야 함: {n!r}")
+    alts = [inside(a, alt, f"{gp}/alts/{i}", "고도")
+            for i, a in enumerate(_numlist(g["alts"], f"{gp}/alts", lo=lo_alt, hi=hi_alt))]
+    fuels = [inside(f, fuel, f"{gp}/fuels/{i}", "연료")
+             for i, f in enumerate(_numlist(g["fuels"], f"{gp}/fuels", lo=0.0))]
+    for key, vals in (("alts", alts), ("fuels", fuels)):
+        # 같은 값이 두 번이면 같은 이름의 케이스가 두 번 생긴다(이름 = 케이스 매핑 키)
+        if len(set(vals)) != len(vals):
+            _fail(f"{gp}/{key}", f"같은 값이 두 번 있다: {vals}")
+    if (n + 2) * len(alts) * len(fuels) > MAX_TEMPLATE_CASES:
+        _fail(gp, f"기본 격자가 최대 {(n + 2) * len(alts) * len(fuels)}점 — {MAX_TEMPLATE_CASES}점까지 (마하 점 수·목록 확인)")
+    return {"mach": mach, "alt": alt, "fuel": fuel, "boundary": boundary,
+            "base_grid": {"n_mach": n, "alts": alts, "fuels": fuels}}
+
+
 def _body(d, *, with_variants):
     top = SECTIONS if with_variants else tuple(k for k in SECTIONS if k != "variants")
     if isinstance(d, dict):
@@ -674,6 +762,7 @@ def _body(d, *, with_variants):
         "display": _display(d["display"], "/display"),
         "criteria": _criteria(d["criteria"], "/criteria"),
         "tuning": _tuning(d["tuning"], "/tuning"),
+        "operating_region": _operating_region(d["operating_region"], "/operating_region"),
     }
 
 
@@ -830,8 +919,8 @@ def _variants(v, base):
         for ptr in patch:
             head = ptr.split("/")[1] if isinstance(ptr, str) and ptr.startswith("/") else None
             if head in VARIANT_FORBIDDEN:
-                _fail(f"{p}/patch", f"형상 변형은 /{head}를 고칠 수 없다 — 평가 기준·튜닝 목표는 형상이 아니라 "
-                                    f"작업 단위(프로파일) 전체의 요구조건이다 ({ptr})")
+                _fail(f"{p}/patch", f"형상 변형은 /{head}를 고칠 수 없다 — 평가 기준·튜닝 목표·요구 운용영역은 형상이 "
+                                    f"아니라 작업 단위(프로파일) 전체의 요구조건이다 ({ptr})")
         try:
             effective = _body(apply_patch(base, patch), with_variants=False)
         except ProfileError as e:

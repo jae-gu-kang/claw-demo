@@ -1,10 +1,11 @@
-// 트림 탭 쇼케이스 신호의 관문 — 칸·케이스를 덮기 전에 거른다 (node --test, 가짜 DOM·가짜 fetch)
+// 트림 탭 — 첫 진입의 기본 격자, 쇼케이스 신호의 관문 (node --test, 가짜 DOM·가짜 fetch)
 //
-// 신호는 문서 도착을 기다린 뒤 격자 칸을 템플릿 격자로 덮고 케이스를 다시 만든다. 그 기다림 사이에
-// (1) 사용자의 배치가 이미 돌고 있으면 — 덮은 뒤 runBatch가 거절해 사용자가 돌리던 케이스 목록만 잃는다
-// (2) 탭이 다시 그려졌으면 — 버려진 화면의 칸으로 잡을 걸어 지금 화면엔 진행바가 없다
-// 둘 다 덮기 전에 사유를 달고 실패해야 한다(엔벨로프 신호와 같은 관문).
-import { readFileSync } from "node:fs";
+// 격자는 서버 `POST /grid/base`(엔진 claw.opspace)가 요구 운용영역에서 만든다. 이 탭은
+// (0) 처음 들어오면 격자를 받아 케이스를 채운다 — 빈 케이스 목록으로 시작하지 않는다(종전 결함: 0케이스)
+// (1) 모델 부족 점은 트림 케이스로 보내지 않는다
+// 신호는 격자를 다시 받고 케이스를 덮는다. 그 사이에
+// (2) 사용자의 배치가 이미 돌고 있으면 — 덮기 전에 사유를 달고 실패한다(사용자가 고친 케이스를 잃지 않게)
+// (3) 탭이 다시 그려졌으면 — 버려진 화면으로 잡을 걸지 않는다
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -16,27 +17,37 @@ const { store } = await import("../store.js");
 const { REPORT_KEY, postCue } = await import("../lib/showcasecue.js");
 const { render } = await import("./trim.js");
 
-// 고른 기체 문서 — 템플릿 격자를 폴백(DEFAULT_GRID, 15건)과 다르게(3건) 둬 누가 케이스를 만들었는지 가린다
-const DOC = JSON.parse(readFileSync(
-  new URL("../../../engine/claw/profile/examples/delta_demo.json", import.meta.url), "utf8"));
-DOC.mission_template.trim_grid = { mach: { from: 0.12, to: 0.2, step: 0.04 }, alt: [500], fuel: [20] };
+// 가짜 기본 격자 — 트림 대상 3점 + 모델 부족 1점
+const pt = (mach, state = "not_run") => ({ mach, alt: 500, fuel: 20, name: `M${mach}_h500_f20`, state });
+const GRID = {
+  region: { confirmed: true, source: "profile", mach: [0.12, 0.5], alt: [500, 500], fuel: [20, 20], boundary: null,
+    grid: { n_mach: 3, alts: [500], fuels: [20] } },
+  model: { mach: [0, 0.45], fuel: [0, 50] }, reason: null, axis: [0.12, 0.16, 0.2],
+  rows: [{ alt: 500, fuel: 20, bounds: [0.12, 0.5], n: 4, state: "not_run" }],
+  points: [pt(0.12), pt(0.16), pt(0.2), pt(0.5, "model_gap")],
+  counts: { not_run: 3, model_gap: 1 }, labels: { not_run: "미계산", model_gap: "모델 부족" },
+};
 
 // 가짜 서버 — /jobs/ 조회는 붙잡아 두고(타이머 없음 — 되돌린 코드가 매달려도 프로세스가 끝난다) 손으로 푼다
 const posts = [];
+let gridGate = null; // 설정되면 /grid/base 응답을 붙잡아 둔다 — 같은 방문 안의 요청 경쟁을 손으로 푼다
 const heldJobs = [];
-let profileFails = true;
 const reply = (status, data) => ({ ok: status < 400, status, text: async () => JSON.stringify(data) });
 globalThis.fetch = (url, opts = {}) => {
   const path = url.replace(/^\/api/, "");
   const method = opts.method ?? "GET";
   if (method === "POST") posts.push({ path, body: JSON.parse(opts.body) });
-  if (path.startsWith("/profiles/")) {
-    return Promise.resolve(profileFails ? reply(500, { detail: "문서 없음" }) : reply(200, { document: DOC }));
+  if (method === "POST" && path === "/grid/base") {
+    const body = JSON.parse(opts.body);
+    if (gridGate) return new Promise((resolve) => gridGate.push({ body, resolve }));
+    return Promise.resolve(reply(200, GRID));
   }
   if (method === "POST" && path === "/trim/batch") return Promise.resolve(reply(200, { id: `job${posts.length}` }));
   if (path.startsWith("/jobs/")) return new Promise((resolve) => heldJobs.push({ path, resolve }));
   return Promise.resolve(reply(404, { detail: `stub에 없는 경로: ${method} ${path}` }));
 };
+const batches = () => posts.filter((p) => p.path === "/trim/batch");
+const gridPosts = () => posts.filter((p) => p.path === "/grid/base");
 
 const reports = [];
 store.subscribe((k, v) => { if (k === REPORT_KEY && v) reports.push(v); });
@@ -52,9 +63,14 @@ async function waitFor(cond, what, ms = 2000) {
 }
 // 글자 — 뷰가 네이티브 append로 붙인 문자열(가짜 노드에선 날 문자열)도 읽는다
 const textOf = (n) => (typeof n === "string" ? n : n?.nodeType === 3 ? n.data : (n?.children ?? []).map(textOf).join(""));
-const buttons = (root, prefix) => root.find("button").filter((b) => textOf(b).startsWith(prefix));
 // [배치 실행] — 도는 동안 라벨이 「실행 중…」으로 바뀌므로 글자가 아니라 자리(머리줄의 주 버튼)로 찾는다
 const runBtnOf = (root) => root.find("button").find((b) => b.className === "primary");
+// 패널 열기 — 패널 내용은 열 때 그린다
+const openDrawer = (root, label) => {
+  const b = root.find("button").find((x) => textOf(x).startsWith(label));
+  assert.ok(b, `패널 단추 없음: ${label}`);
+  b.emit("click");
+};
 const releaseJobs = () => {
   for (const h of heldJobs.splice(0)) {
     const id = h.path.split("/").pop();
@@ -62,69 +78,81 @@ const releaseJobs = () => {
   }
 };
 
-test("사용자 배치가 도는 중에 온 신호 — 칸·케이스를 덮지 않고 사유를 단다", async () => {
-  // 문서를 못 받은 화면 — 칸은 폴백 격자, 사용자가 그 격자로 케이스를 만들어 배치를 건다
+test("첫 진입 — 요구영역의 기본 격자를 받아 케이스를 채운다, 모델 부족 점은 트림하지 않는다", async () => {
+  const root = render();
+  await waitFor(() => textOf(runBtnOf(root)).includes("3케이스"), "기본 격자 케이스 3건");
+  assert.deepEqual(gridPosts()[0].body, {}, "첫 진입은 칸이 아니라 요구영역의 명세로 받는다");
+  openDrawer(root, "운용영역·기본 격자");
+  assert.match(textOf(root), /기본 격자 4점 — 미계산 3 · 모델 부족 1/);
+  runBtnOf(root).onclick();
+  await waitFor(() => heldJobs.length === 1, "배치의 진행 구독");
+  assert.deepEqual(batches()[0].body.cases.map((c) => c.name), ["M0.12_h500_f20", "M0.16_h500_f20", "M0.2_h500_f20"]);
+  releaseJobs();
+  await waitFor(() => !runBtnOf(root).disabled, "배치 종료 반영");
+});
+
+test("사용자 배치가 도는 중에 온 신호 — 케이스를 덮지 않고 사유를 단다", async () => {
+  // 사용자가 케이스 하나를 지우고 배치를 건다(모듈 상태라 탭에 다시 들어와도 케이스가 남는다)
   const rootA = render();
   await tick();
-  buttons(rootA, "격자 생성")[0].emit("click");
+  openDrawer(rootA, "케이스 목록");
+  rootA.find("button").filter((b) => textOf(b) === "삭제")[0].emit("click");
   runBtnOf(rootA).onclick();
   await waitFor(() => heldJobs.length === 1, "사용자 배치의 진행 구독");
-  assert.equal(posts.length, 1);
-  const userCases = posts[0].body.cases.length;
-  assert.equal(userCases, 15, "폴백 격자(예제 기체) 15건");
+  const userCases = batches().at(-1).body.cases.length;
+  assert.equal(userCases, 2);
 
-  // 그사이 문서가 서고, 진행기가 트림 신호를 건다(탭 재진입 — 진행 감시가 새 화면에 다시 붙는다)
-  profileFails = false;
+  const before = batches().length;
   postCue({ token: "busy", tab: "trim", action: "run" });
   const rootB = render();
   await waitFor(() => finalReport("busy"), "신호 끝 보고");
   const r = finalReport("busy");
   assert.equal(r.phase, "failed");
   assert.match(r.error, /이미 실행 중/);
-  assert.equal(posts.length, 1, "신호가 배치를 새로 걸지 않았다");
+  assert.equal(batches().length, before, "신호가 배치를 새로 걸지 않았다");
 
-  // 사용자 배치가 끝난 뒤 다시 누르면 **사용자가 만든 케이스 그대로** 나간다 — 신호가 템플릿 격자(3건)로 덮지 않았다
+  // 사용자 배치가 끝난 뒤 다시 누르면 **사용자가 고친 케이스 그대로** 나간다
   releaseJobs();
   await waitFor(() => !runBtnOf(rootB).disabled, "배치 종료 반영");
   runBtnOf(rootB).onclick();
   await waitFor(() => heldJobs.length === 1, "두 번째 배치의 진행 구독");
-  assert.equal(posts.length, 2);
-  assert.equal(posts[1].body.cases.length, userCases);
+  assert.equal(batches().at(-1).body.cases.length, userCases);
   releaseJobs();
   await waitFor(() => !runBtnOf(rootB).disabled, "두 번째 배치 종료");
 });
 
-test("신호를 읽은 화면이 문서를 기다리는 사이 다시 그려졌다 — 버려진 칸으로 잡을 걸지 않는다", async () => {
-  const before = posts.length;
+test("신호가 격자를 받는 사이 탭이 다시 그려졌다 — 버려진 화면으로 잡을 걸지 않는다", async () => {
+  const before = batches().length;
   postCue({ token: "stale", tab: "trim", action: "run" });
-  render(); // 신호를 읽고 문서를 기다린다
+  render(); // 신호를 읽고 격자를 기다린다
   render(); // 그사이 탭이 다시 그려졌다(같은 해시로 다시 이동 등)
   await waitFor(() => finalReport("stale"), "신호 끝 보고");
   const r = finalReport("stale");
   assert.equal(r.phase, "failed");
   assert.match(r.error, /다시 그려졌다/);
-  assert.equal(posts.length, before, "버려진 화면이 배치를 걸지 않았다");
+  assert.equal(batches().length, before, "버려진 화면이 배치를 걸지 않았다");
   assert.equal(heldJobs.length, 0);
 });
 
 // 쇼케이스 결함 D4·D6·D8 — 신호가 끝나면 수치 패널을 화면 안으로 굴리고, 보고 줄이 탭 머리줄의 경고(판정 플래그 위반)를
-// 가리지 않으며, 표의 백분율이 「2e+1 %」가 아니다
-test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은 플래그 위반을 말하고, 백분율이 고정 소수다", async () => {
+// 가리지 않으며, 표의 백분율이 「2e+1 %」가 아니다. 보고의 개수는 조건 상태 라벨이다
+test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은 플래그 위반을 말하고, 상태로 센다", async () => {
   const scrolled = [];
   const proto = Object.getPrototypeOf(document.createElement("div"));
   proto.scrollIntoView = function scrollIntoView(o) { scrolled.push({ node: this, o }); };
-  const row = (mach, flags) => ({
+  const row = (mach, flags, state = "computable", reasons = []) => ({
     case: { name: `M${mach}_h500_f20`, mach, alt: 500, fuel: 20 }, converged: true,
     flags: { residual_ok: true, saturation_ok: true, alpha_margin_ok: true, continuity_ok: true, ...flags },
     euler: [0, 0.05, 0], control: { elevon: [-0.02], throttle: [0.4] },
     reserve: { de: { frac: 0.2 }, thr: { reserve_hi: 0.6 }, alpha: { stall_reserve: 0.1 } },
+    state, state_reasons: reasons, region_state: null,
   });
-  const results = [row(0.12, { continuity_ok: false }), row(0.16, {}), row(0.2, {})];
+  const results = [row(0.12, { continuity_ok: false }), row(0.16, {}),
+    row(0.2, { saturation_ok: false }, "infeasible", ["throttle_high"])];
   const prevFetch = globalThis.fetch;
   globalThis.fetch = (url, opts = {}) => (url.replace(/^\/api/, "").startsWith("/results/")
     ? Promise.resolve(reply(200, { results })) : prevFetch(url, opts));
   try {
-    profileFails = false;
     postCue({ token: "run-ok", tab: "trim", action: "run" });
     const root = render();
     await waitFor(() => heldJobs.length === 1, "신호 배치의 진행 구독");
@@ -134,8 +162,9 @@ test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은
     await waitFor(() => finalReport("run-ok"), "신호 끝 보고");
     const r = finalReport("run-ok");
     assert.equal(r.phase, "done", r.error);
-    assert.match(r.summary, /판정 플래그 위반 1건 확인 필요 \(연속성 1\)$/);
-    assert.match(textOf(root), /수렴 3\/3 · 판정 플래그 위반 1건 \(연속성 1\)/, "머리줄과 보고가 같은 말");
+    assert.match(r.summary, /^3 케이스 — 계산 가능 2 · 물리적 불가 1 · 판정 플래그 위반 2건 확인 필요/);
+    assert.match(textOf(root), /수렴 3\/3 · 판정 플래그 위반 2건/, "머리줄과 보고가 같은 말");
+    assert.match(textOf(root), /추력 상한 포화/, "표가 물리적 불가의 근거를 싣는다");
     const hit = scrolled.find((s) => s.node.attrs?.id === "trim-drawer");
     assert.ok(hit, "수치 패널을 굴리지 않았다");
     assert.deepEqual(hit.o, { block: "start", behavior: "smooth" });
@@ -147,4 +176,51 @@ test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은
     globalThis.fetch = prevFetch;
     delete proto.scrollIntoView;
   }
+});
+
+test("같은 방문의 격자 요청 경쟁 — 늦게 온 옛 응답이 새 응답을 덮지 않는다", async () => {
+  gridGate = [];
+  const root = render(); // 재진입 — 케이스가 요구영역 명세 그대로가 아니면 자동 요청은 없다
+  await tick();
+  const auto = gridGate.length;
+  // 명세를 적고 [격자 생성] 두 번 — 첫 요청(옛)과 둘째 요청(새)
+  const gen = root.find("button").filter((b) => textOf(b) === "격자 생성")[0];
+  gen.emit("click");
+  gen.emit("click");
+  await waitFor(() => gridGate.length === auto + 2, "두 요청");
+  const [oldReq, newReq] = gridGate.slice(auto);
+  const NEW = { ...GRID, points: [pt(0.3)], counts: { not_run: 1 } };
+  newReq.resolve(reply(200, NEW));
+  await waitFor(() => textOf(runBtnOf(root)).includes("1케이스"), "새 응답 반영");
+  oldReq.resolve(reply(200, GRID)); // 옛 응답이 늦게 온다
+  for (const g of gridGate.slice(0, auto)) g.resolve(reply(200, GRID));
+  await tick();
+  await tick();
+  assert.match(textOf(runBtnOf(root)), /1케이스/, "옛 응답이 케이스를 덮었다");
+  gridGate = null;
+});
+
+test("재진입 — 요구영역 명세 그대로 받은 케이스면 격자를 다시 받는다(문서가 바뀌었을 수 있다), 손으로 고친 목록은 둔다", async () => {
+  // 패널은 모듈 상태라 이미 열려 있을 수 있다 — 삭제 단추가 없을 때만 연다
+  const deleteButtons = (root) => {
+    if (!root.find("button").some((x) => textOf(x) === "삭제")) openDrawer(root, "케이스 목록");
+    return root.find("button").filter((x) => textOf(x) === "삭제");
+  };
+  // 앞 시험이 [격자 생성]으로 받은 목록(명세 칸) — 요구영역 명세 그대로가 아니라 재진입이 다시 받지 않는다
+  const before = gridPosts().length;
+  render();
+  await tick();
+  assert.equal(gridPosts().length, before, "명세 칸으로 받은 목록을 재진입이 덮었다");
+  // 목록을 비우면 재진입이 요구영역 명세로 받는다 — 그 목록은 다시 들어올 때마다 새로 받는다
+  for (const b of deleteButtons(render())) b.emit("click");
+  render();
+  await waitFor(() => gridPosts().length === before + 1, "빈 목록 재진입의 자동 요청");
+  await tick();
+  const r = render();
+  await waitFor(() => gridPosts().length === before + 2, "명세 그대로인 목록의 재요청");
+  await tick();
+  deleteButtons(r)[0].emit("click"); // 손으로 고친다
+  render();
+  await tick();
+  assert.equal(gridPosts().length, before + 2, "손으로 고친 목록을 덮으러 다시 받았다");
 });

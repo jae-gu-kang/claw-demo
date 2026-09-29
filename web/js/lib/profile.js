@@ -18,6 +18,7 @@ const ID_RE = /^[A-Za-z0-9_-]{1,64}$/; // 서버 기체 id 규칙과 같다(`_` 
 
 /** 본문에 `profile`을 싣는 계산 라우트 (서버 요청 모델의 `profile: ProfileRef`). */
 export const COMPUTE_POST = new Set([
+  "/grid/base", // 요구 운용영역 → 기본 격자 — 고른 기체의 영역이어야 한다(05 §11)
   "/trim/batch",
   "/analysis/margin-map", "/analysis/bode", "/analysis/design-envelope-scan",
   "/design/auto",

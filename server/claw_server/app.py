@@ -29,6 +29,7 @@ from claw_server.routes import profiles as profiles_routes
 from claw_server.routes import results as results_routes
 from claw_server.routes import sim as sim_routes
 from claw_server.routes import system as system_routes
+from claw_server.routes import grid as grid_routes
 from claw_server.routes import trim as trim_routes
 from claw_server.routes import verify as verify_routes
 from claw_server.routes import world as world_routes
@@ -168,6 +169,7 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
         profiles_routes.router,
         jobs_routes.router,
         results_routes.router,
+        grid_routes.router,
         trim_routes.router,
         analysis_routes.router,
         sim_routes.router,

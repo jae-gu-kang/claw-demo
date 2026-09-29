@@ -109,6 +109,7 @@ export function marginLegendText(criteriaResp) {
 실속 경계 테이블 기반 정밀 경계선은 공력 정본 확정 후 [백로그].
 */
 export function trimEnvelopeCell(r) {
+  if (r.state) return trimStateCell(r);
   if (!r.converged || r.flags.residual_ok === false) {
     return { kind: "infeasible", color: STATUS.na, text: "불가" };
   }
@@ -119,6 +120,43 @@ export function trimEnvelopeCell(r) {
     return { kind: "saturated", color: STATUS.warn, text: "포화" };
   }
   return { kind: "ok", color: STATUS.ok, text: "가능" };
+}
+
+/** 조건 상태(05 §11.3 — 엔진 claw.opspace.states) → 지도 셀. 서버가 트림 결과에 state를 실으면(격자 체계 ②) 이
+ *  표를 쓰고, 옛 결과(state 없음)는 위 판정 플래그 규칙을 쓴다. 키 순서가 범례 순서다. 계산 실패(다시 풀 대상)와
+ *  물리적 불가(그 조건의 답)와 제약 도달(탐색 제약 — 불가 근거 없음)을 **다른 색**으로 가른다 — 종전 「트림 불가」
+ *  한 칸이 셋을 섞었다. 모델 부족은 트림하지 않은 점이다(요구 안인데 모델 유효영역 밖). */
+export const TRIM_STATE_CELL = Object.freeze({
+  computable: { color: STATUS.ok, text: "가능", label: "계산 가능" },
+  infeasible: { color: STATUS.bad, text: "불가", label: "물리적 불가" },
+  constraint_hit: { color: STATUS.warn, text: "제약", label: "제약 도달·미수렴" },
+  calc_failed: { color: "#636366", text: "실패", label: "계산 실패" },
+  model_gap: { color: STATUS.na, text: "모델밖", label: "모델 부족 (트림 안 함)" },
+});
+
+// 물리적 불가 셀의 글 — 첫 근거(엔진 사유 순서)를 짧게. 표·툴팁은 사유 전량을 싣는다
+const INFEASIBLE_TEXT = {
+  throttle_high: "추력", de: "타면", throttle_low: "추력↓", alpha_margin: "실속≈", below_V_S: "실속", "1g_unreachable": "1g",
+};
+
+/** 조건 상태 사유 코드 → 사람 글 (엔진 claw.opspace.states). 모르는 코드는 그대로. */
+export const STATE_REASON_LABEL = Object.freeze({
+  throttle_high: "추력 상한 포화", throttle_low: "추력 하한 포화", de: "엘레본 포화", alpha_margin: "α 여유 미달",
+  not_converged: "미수렴", alpha_search_bound: "받음각 탐색 상한", alpha_search_lower: "받음각 탐색 하한",
+  below_V_S: "1g 실속 속도 V_S보다 느림", above_V_S: "V_S보다 빠름 (탐색 상한이 좁을 수 있음)",
+  stall_basis_missing: "실속 근거 자료 없음 (판단 미완료)", "1g_unreachable": "1g 도달 불가",
+});
+
+export const stateReasonText = (codes) => (codes ?? []).map((c) => STATE_REASON_LABEL[c] ?? c).join(" · ");
+
+/** 트림 결과 행(state 있음) 또는 기본 격자 점(state = model_gap) → 지도 셀. 모르는 상태는 null(빈 칸). */
+export function trimStateCell(r) {
+  const base = TRIM_STATE_CELL[r.state];
+  if (!base) return null;
+  const reasons = r.state_reasons ?? [];
+  const first = reasons.find((c) => INFEASIBLE_TEXT[c]);
+  return { kind: r.state, color: base.color,
+    text: r.state === "infeasible" && first ? INFEASIBLE_TEXT[first] : base.text };
 }
 
 /** 비행 엔벨로프 셀 종류 → 범례 라벨 — 트림 탭 범례와 쇼케이스 보고가 **같은 말**을 쓴다(한 표).
@@ -164,14 +202,26 @@ export function trimFlagSummary(results) {
  *  「가능」은 0이어도 적고, 나머지는 있는 종류만 적는다(없는 실패를 0건으로 늘어놓지 않는다).
  *  판정 플래그 위반이 있으면 **탭 머리줄과 같은 말**(「판정 플래그 위반 N건 확인 필요」)을 플래그별 수와 함께 붙인다 —
  *  지도 셀은 연속성 플래그를 보지 않아, 셀 집계만 말하면 「가능 20」이 탭 자신의 경고를 가린다(쇼케이스 D6). */
-export function trimCueReport(results) {
-  const counts = Object.fromEntries(Object.keys(TRIM_CELL_LABEL).map((k) => [k, 0]));
-  for (const r of results) counts[trimEnvelopeCell(r).kind] += 1;
-  const parts = Object.keys(TRIM_CELL_LABEL)
-    .filter((k) => k === "ok" || counts[k] > 0)
-    .map((k) => `${TRIM_CELL_LABEL[k]} ${counts[k]}`);
+export function trimCueReport(results, untrimmed = null) {
+  // 조건 상태가 실린 결과면 상태 표로, 옛 결과면 판정 플래그 셀 표로 센다 — 한 보고에 두 어휘를 섞지 않는다
+  const byState = results.length > 0 && results.every((r) => r.state);
+  const labels = byState
+    ? Object.fromEntries(Object.entries(TRIM_STATE_CELL).map(([k, v]) => [k, v.label])) : TRIM_CELL_LABEL;
+  const first = byState ? "computable" : "ok";
+  const counts = Object.fromEntries(Object.keys(labels).map((k) => [k, 0]));
+  for (const r of results) {
+    const kind = trimEnvelopeCell(r)?.kind;
+    if (kind in counts) counts[kind] += 1;
+  }
+  // 모델 부족은 트림하지 않는 점이라 결과 행에 없다 — 기본 격자의 수로 채운다(0으로 두면 없다는 거짓말이 된다)
+  if (byState && untrimmed) counts.model_gap = untrimmed.modelGap;
+  const parts = Object.keys(labels)
+    // 모델 부족은 결과 행이 아니라 아래 「트림하지 않음」 글이 말한다(두 번 세지 않게)
+    .filter((k) => k !== "model_gap" && (k === first || counts[k] > 0))
+    .map((k) => `${labels[k]} ${counts[k]}`);
   const f = trimFlagSummary(results);
   if (f.bad > 0) parts.push(`판정 플래그 위반 ${f.bad}건 확인 필요 (${f.detail})`);
+  if (untrimmed?.text) parts.push(untrimmed.text);
   return {
     summary: `${results.length} 케이스 — ${parts.join(" · ")}`,
     data: {
@@ -180,6 +230,7 @@ export function trimCueReport(results) {
       fuels: [...new Set(results.map((r) => r.case.fuel))].sort((a, b) => a - b),
       counts,
       flag_violations: { cases: f.bad, by_flag: f.byFlag, names: f.badNames },
+      ...(untrimmed ? { untrimmed: { model_gap: untrimmed.modelGap, rows: untrimmed.rows } } : {}),
     },
   };
 }

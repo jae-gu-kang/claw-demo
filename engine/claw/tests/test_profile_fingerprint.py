@@ -22,7 +22,16 @@ def test_excluded_fields_are_pinned():
                            "/law/design/provenance", "/law/alloc/de_trim/provenance",
                            "/law/gain_tables/provenance",  # v2 — 표는 지문 안, 출처 기록만 밖
                            "/mission_template", "/display",
-                           "/criteria", "/tuning")  # v1.51 기준 통합 ① — 판정·설계 목표이지 기체가 아니다
+                           "/criteria", "/tuning",  # v1.51 기준 통합 ① — 판정·설계 목표이지 기체가 아니다
+                           "/operating_region")  # 격자 체계 ② — 요구 운용영역은 요구이지 기체가 아니다
+
+
+def test_operating_region_changes_neither_fingerprint():
+    """요구 운용영역을 적어도 같은 기체다 — 요구를 바꿨다고 트림이 낡으면 안 된다(05 §11.8 변경 영향표)."""
+    doc = load_example()
+    region = {"mach": [0.1, 0.28], "alt": [100.0, 3000.0], "fuel": [5.0, 25.0], "boundary": None,
+              "base_grid": {"n_mach": 5, "alts": [100.0, 3000.0], "fuels": [25.0]}}
+    assert _fps({**doc, "operating_region": region}) == _fps(doc)
 
 
 def test_criteria_and_tuning_change_neither_fingerprint():
