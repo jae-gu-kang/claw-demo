@@ -83,6 +83,16 @@ def test_δe_trim_표는_이_플랜트에서_기본과_EO_IR형을_함께_재어
     assert de["provenance"]["configurations"] == ["base", "eoir"] and de["provenance"]["shortfall"] == 0
     assert not build_profile(doc, validated=True).de_trim_stale
     assert not build_profile(doc, "eoir", validated=True).de_trim_stale
+    # 이관 9·10단계 — 격자는 요구영역(M0.10~0.28) 기본 격자이고, 표가 요구 마하 전 구간을 덮으며 그 구간 전부에 도출 근거가
+    # 있다(근거 없는 구간·표 밖 구간 없음). v1.65 표는 M0.245에서 끝나 요구 상한 0.28을 끝값으로 답했다
+    from claw.profile.derive import de_trim_coverage
+
+    cov = de["provenance"]["coverage"]
+    assert de["provenance"]["grid_source"] == "region"
+    assert cov == {"required_mach": [0.1, 0.28], "table_mach": [0.1, 0.28], "undefined_machs": [],
+                   "unsupported": [], "beyond_table": []}
+    assert de_trim_coverage(build_profile(doc, validated=True)) == {**cov, "basis": "derived", "basis_current": True,
+                                                                     "stale": False}
 
 
 # 해면 자동 설계 채택 대역(v1.65 — 조건 판정의 채택, 트림 탭과 같은 판정). 채택이 여유 미달을 막지 않게 되어 상한이

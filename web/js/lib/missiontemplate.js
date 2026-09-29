@@ -19,11 +19,11 @@ export const MISSING_TEMPLATE_HINT = "이 기체 문서에는 미션 템플릿�
 export const DOC_FAILED_HINT = "고른 기체 문서를 받지 못해 예제 기체에 맞춘 값입니다 — 새로고침하거나 기체 탭을 "
   + "확인합니다.";
 
-/** 엔벨로프 폼 폴백 — 예제 기체 사본. margin은 제어법칙의 α 리미터 여유(law.alpha_margin)다.
+/** 엔벨로프 폼 폴백 — 예제 기체 사본. margin은 제어법칙의 α 리미터 여유(law.alpha_margin)다. 스캔 격자 칸은 없다
+ *  — 요구영역의 기본 격자(서버 /grid/base)에서 받는다(05 §11.13 이관 9단계).
  *  qMax·altMin·altMax는 예제 문서가 null(미기재 — 경계 없음)이라 빈칸이 곧 예제 값이다. */
 export const ENVELOPE_FALLBACK = Object.freeze({
   alt: "1000", fuel: "25", margin: "0.05",
-  scanFrom: "0.08", scanTo: "0.28", scanStep: "0.02", scanAlts: "0, 1000, 3000, 5000",
   qMax: "", altMin: "", altMax: "",
 });
 
@@ -60,8 +60,7 @@ export function templateDefaults(doc) {
   Object.assign(out.envelope, {
     // V-n 고도는 수 하나 또는 목록(고도별 병렬 비교) — 폼 칸은 콤마 목록 글이다
     alt: Array.isArray(e.alt) ? e.alt.join(", ") : String(e.alt), fuel: String(e.fuel),
-    scanFrom: String(e.scan_mach.from), scanTo: String(e.scan_mach.to), scanStep: String(e.scan_mach.step),
-    scanAlts: e.scan_alt.join(", "),
+    // scan_mach·scan_alt는 읽지 않는다 — 엔벨로프 스캔 격자는 요구영역의 기본 격자에서 받는다(05 §11.13 이관 9단계)
   });
   const s = tpl.sim;
   out.sim = {

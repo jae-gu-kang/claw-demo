@@ -39,8 +39,10 @@ import {
   mToFt, msToKt, opsSourceLabel, optNum, outlineCaps, prefillValue, outsideRegion, regionPolygons,
   scanCells, scanCueSummary, scanSummary, spreadLabels, tasAxisTicks, throttleCell, thrustFrontier,
   vnCueReport, lineLabelCandidates, placeLabels, pointObstacles, textBox,
+  ANALYZABLE_LABEL, requirementBands, requirementStatus, scanGridRequest,
 } from "../lib/envelope.js";
-import { machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
+import { parseNumberList } from "../lib/grid.js";
+import { casesFromBaseGrid, untrimmedSummary } from "../lib/opspace.js";
 import { fuelsOf, linScale, niceTicks, pivotCases } from "../lib/plot.js";
 import { heatmapCanvas, makeCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
@@ -59,16 +61,21 @@ let lastVn = null; // V-n 응답 목록 — 고도마다 한 장 (값 하나면 
 const MAX_VN_ALTS = 6; // V-n 병렬 비교 고도 상한 — 한 줄에서 읽을 수 있는 장 수
 let lastMh = null;
 let lastScan = null; // /results 페이로드 {kind: "envelope_scan", cases, n_requested}
+// 마지막 스캔이 받은 기본 격자(서버 /grid/base) — 트림하지 않은 점(모델 부족·점 없는 행)이 표·선도에서 사라지지 않게
+let lastScanGrid = null;
+let runningScanGrid = null; // 도는 스캔 잡의 격자 — 결과가 도착할 때 lastScanGrid가 된다(옛 결과에 새 격자를 붙이지 않게)
 let runningJobId = null;
 let scanCue = null; // 스캔 잡을 건 진행기 신호 — 잡이 끝나면 한 번 보고하고 지운다 (감시자가 둘이어도 한 번)
 // 폼 문자열 — 재진입 유지. 구조 5종은 첫 응답 echo로 프리필(02 §5.5 자기 정렬)
 // 선도 조건·α 보호 마진·스캔 격자·동압·운용 고도는 **예제 기체 사본(폴백)**으로 먼저 선다 — 고른 기체 문서가
 // 오면 손대지 않은 칸만 그 기체 값(미션 템플릿·law.alpha_margin·structural.q_max·operating)으로 바뀐다
 // (lib/missiontemplate.js)
+// 스캔 격자는 요구영역의 기본 격자(05 §11.11)에서 받는다 — 칸을 비우면 영역의 기본 명세, 적으면 그 명세로 다시 받는다
+// (이관 9단계: 종전 mission_template.envelope.scan_* 사각 격자는 요구영역과 무관한 점을 보냈다)
 const form = {
   ...ENVELOPE_FALLBACK,
   nPos: "", nNeg: "", sf: "", machNo: "", machD: "",
-  machMargin: "", nz: "",
+  machMargin: "", nz: "", scanNMach: "", scanAlts: "",
 };
 const touched = new Set(); // 구조·운용 필드 중 사용자가 손댄 것 — 이것만 서버로 보낸다
 const liveInputs = {}; // 지금 화면의 폼 칸 — 기체 기본값이 도착하면 그 자리에서 고친다
@@ -177,12 +184,13 @@ export function render() {
   // (영향성 칩이 겪고 고친 그 자리와 같은 종류다). 그래서 격자는 패널이 직접 들고,
   // renderScanTable은 **그 아래 결과만** 갈아 끼운다
   const scanGrid = el("div", { class: "opt-group" },
-    el("div", { class: "g-title" }, "제어 가능 스캔 격자 (트림 잡 — 점당 트림 1회)"),
+    el("div", { class: "g-title" }, "제어 가능 스캔 격자 — 요구영역의 기본 격자 (트림 잡 — 점당 트림 1회)"),
     el("div", { class: "row-inner" },
-      el("label", { class: "field" }, "마하 시작", scanInput("scanFrom", "num-sm")),
-      el("label", { class: "field" }, "끝", scanInput("scanTo", "num-sm")),
-      el("label", { class: "field" }, "간격", scanInput("scanStep", "num-sm")),
-      el("label", { class: "field grow" }, "고도 목록 [m]", scanInput("scanAlts", ""))));
+      el("label", { class: "field" }, "마하 점 수", scanInput("scanNMach", "num-sm", "영역 명세")),
+      el("label", { class: "field grow" }, "고도 목록 [m]", scanInput("scanAlts", "", "영역 명세"))),
+    el("p", { class: "hint", style: "margin:4px 0 0" },
+      "빈 칸은 요구 운용영역의 기본 격자 명세(공통 마하 좌표 + 행 끝점)입니다. 연료는 선도의 연료 하나이고, ",
+      "요구영역 밖·요구 미정의 행은 점이 없으며 모델 부족 점은 트림하지 않고 목록에 남깁니다."));
   const formBox = el("div");
   const templateHint = el("p", { class: "hint" });
   const l1Box = el("div");
@@ -291,6 +299,7 @@ export function render() {
           return;
         }
         lastScan = await api.get(`/results/${job.result_id}`);
+        lastScanGrid = runningScanGrid;
         renderAll();
         drawers.open("L2"); // 결과가 사는 층을 열어 준다 — 찾아 헤매게 하지 않는다
         if (cue) revealPanel(drawers.box); // 신호면 그 층을 화면 안으로 — 청중이 판정 표를 본다 (06 §2)
@@ -325,14 +334,19 @@ export function render() {
     }
     try {
       clear(errBox);
-      const cases = nameCases(serpentineCases(
-        machRange(Number(form.scanFrom), Number(form.scanTo), Number(form.scanStep)),
-        parseNumberList(form.scanAlts),
-        [Number(form.fuel)],
-      ));
+      // 격자는 요구영역의 기본 격자 — 요구영역 밖 점은 애초에 없고, 모델 부족 점은 보내지 않는다(트림 탭과 같은 규칙)
+      const grid = await api.post("/grid/base",
+        scanGridRequest({ nMach: form.scanNMach, alts: form.scanAlts, fuel: form.fuel }));
+      if (!grid.region) throw new Error(grid.reason ?? "요구영역 미정의 — 기본 격자를 만들 수 없습니다");
+      const cases = casesFromBaseGrid(grid);
+      if (!cases.length) {
+        const why = untrimmedSummary(grid).text;
+        throw new Error(`연료 ${form.fuel} kg에서 트림할 요구영역 점이 없습니다${why ? ` — ${why}` : ""}`);
+      }
       const submitted = await api.post("/analysis/design-envelope-scan",
         { cases, fingerprint: "web-envelope-v1" });
       runningJobId = submitted.id;
+      runningScanGrid = grid;
       if (cue) {
         scanCue = cue;
         reportCue(cue, { phase: "started", jobId: submitted.id });
@@ -683,6 +697,13 @@ function renderScanTable(box) {
   }
   const cells = scanCells(lastScan.cases);
   const s = scanSummary(cells);
+  // 격자는 요구영역의 기본 격자 — 트림하지 않은 것(모델 부족 점 · 점 없는 행)은 결과 행에 없으니 따로 센다
+  const untrimmed = lastScanGrid ? untrimmedSummary(lastScanGrid) : null;
+  if (lastScanGrid?.region && !lastScanGrid.region.confirmed) {
+    kids.push(el("div", { class: "error-box" }, "이 스캔의 격자는 미확정 초안 요구영역(trim_grid 범위)에서 만들었습니다 — "
+      + "기체 문서에 요구 운용영역을 적어야 확정됩니다."));
+  }
+  if (untrimmed?.text) kids.push(el("p", { class: "hint" }, untrimmed.text));
   kids.push(
     el("div", { class: "legend" },
       el("span", {}, el("span", { class: "chip", style: `background:${kindColor("ok")}` }),
@@ -715,8 +736,8 @@ function renderScanTable(box) {
 
 /** 스캔 격자 입력 한 칸 — 폼 상태(form)를 직접 물고, 만든 노드가 화면의 수명 내내
  *  그대로 산다(위 scanGrid 참조). 값의 정본은 form이라 탭을 떠났다 와도 남는다. */
-function scanInput(key, cls) {
-  const inp = el("input", { class: cls, value: form[key] });
+function scanInput(key, cls, placeholder = "") {
+  const inp = el("input", { class: cls, value: form[key], placeholder });
   inp.oninput = () => { form[key] = inp.value; };
   liveInputs[key] = inp;
   return inp;
@@ -767,7 +788,7 @@ function renderL6(box) {
   if (lastMh?.schedule_grid) {
     const g = lastMh.schedule_grid;
     kids.push(el("p", { class: "hint", style: "max-width:96ch" },
-      `지금 설계(스케줄) 격자는 고도당 마하 ${g.n_mach}점 · 고도 ${g.alts.length}단이다. `
+      `지금 설계(스케줄) 격자는 고도당 마하 ${g.n_mach}점${g.source === "region_base_grid" ? "(공통 좌표 — 행 끝점 별도)" : ""} · 고도 ${g.alts.length}단이다. `
       + "검증 격자는 마진 맵 탭에서 따로 정한다 — 같은 수를 쓰면 설계점만 통과하는 "
       + "게인이 통과로 보이고, 그것이 이 층을 따로 두는 이유다."));
   }
@@ -798,13 +819,16 @@ function renderL4(box) {
   // 고도별 한 줄 — 20점을 세로로 늘어놓으면 격자라는 사실이 표에서 사라진다
   const byAlt = g.alts.map((alt) => ({
     alt,
-    pts: g.points.filter((p) => p.alt === alt),
+    // 요구영역 기본 격자는 행 끝점이 공통 좌표 사이에 끼고 서펜타인 순서라 — 마하 오름으로 정렬하고 열 수는 가장 긴 행
+    pts: g.points.filter((p) => p.alt === alt).sort((a, b) => a.mach - b.mach),
   }));
+  const nCols = Math.max(g.n_mach, ...byAlt.map((r) => r.pts.length));
+  const fromRegion = g.source === "region_base_grid";
   kids.push(
     el("div", { class: "scroll-x" }, el("table", {},
       el("thead", {}, el("tr", {},
         el("th", {}, "고도 [m]"),
-        ...Array.from({ length: g.n_mach }, (_, i) => el("th", {}, `P${i + 1}`)),
+        ...Array.from({ length: nCols }, (_, i) => el("th", {}, `P${i + 1}`)),
         el("th", {}, "영역 밖"))),
       el("tbody", {}, byAlt.map(({ alt, pts }) => el("tr", {},
         el("td", { class: "num" }, fmt(alt, 5)),
@@ -812,16 +836,23 @@ function renderL4(box) {
           outsideRegion(p, lastMh.region)
             ? el("span", { style: `color:${C.limitLine}` }, `M ${fmt(p.mach, 4)} ×`)
             : `M ${fmt(p.mach, 4)}`)),
+        ...Array.from({ length: nCols - pts.length }, () => el("td", {}, "")),
         el("td", { class: "num" },
           pts.filter((p) => outsideRegion(p, lastMh.region)).length || "—"),
       )))),
     ),
+    fromRegion
+      ? el("p", { class: "hint" }, `요구영역의 기본 격자(자동 설계 COARSE와 같은 규칙 — 공통 마하 좌표 + 행 끝점, 연료 층 `
+        + `${fmt(g.fuel, 4)} kg)입니다. 자동 설계는 이 가운데 대표점을 골라 트림하고, 채택된 점에서만 설계합니다.`)
+      : null,
     out.length
-      ? el("p", { class: "hint", style: `color:${C.limitLine}` },
-        `⚠ ${out.length}점이 합성 영역 밖(×)입니다 — 격자 좌표는 coarse 격자(design.grid)와 `
-        + "맞추려고 q̄를 보지 않고 만들어지므로, 이것이 실제 설계점 위치입니다. "
-        + "좌표를 옮기지 않고 표시만 합니다.")
-      : el("p", { class: "hint" }, "설계점 전부가 합성 영역 안입니다."),
+      ? el("p", { class: "hint", style: `color:${C.limitLine}` }, fromRegion
+        ? `${out.length}점이 ${ANALYZABLE_LABEL} 밖(×)입니다 — 요구영역을 물리 경계로 깎지 않으므로(05 §11.2) 이것도 `
+          + "설계 대상 조건이고, 날 수 있는지는 트림 판정이 말합니다."
+        : `⚠ ${out.length}점이 합성 영역 밖(×)입니다 — 격자 좌표는 coarse 격자(design.grid)와 `
+          + "맞추려고 q̄를 보지 않고 만들어지므로, 이것이 실제 설계점 위치입니다. "
+          + "좌표를 옮기지 않고 표시만 합니다.")
+      : el("p", { class: "hint" }, `설계점 전부가 ${fromRegion ? ANALYZABLE_LABEL : "합성 영역"} 안입니다.`),
     el("h3", {}, "게인을 무엇의 함수로 둘 것인가"),
     el("p", { class: "hint", style: "max-width:96ch" },
       "지금 스케줄은 ", el("code", {}, "K = f(M)"),
@@ -844,6 +875,9 @@ const C = {
   frame: "#d2d2d7", opsLine: "#007aff", dbTint: "#f6effc", schedPt: "#8e8e93",
   manFill: "rgba(10, 132, 255, 0.16)", manLine: "#0a84ff",
   isoLine: "#c7c7cc", tropo: "#8e8e93", thrustLine: "#ff6b00",
+  // 요구 운용영역(주) — 선도의 주인. 분석 가능 영역(구조·공력 교집합)은 옅은 보조 층이다(이관 9단계)
+  reqFill: "rgba(0, 64, 221, 0.10)", reqLine: "#0040dd", anaFill: "rgba(52, 199, 89, 0.16)",
+  gapPt: "#8e8e93", undefText: "#c93400",
 };
 const FONT_BASE = "11px -apple-system, 'Segoe UI', sans-serif";
 const FONT_LABEL = "600 11px -apple-system, 'Segoe UI', sans-serif";
@@ -880,7 +914,7 @@ const placeholderHint = (body) => {
 
 // ── 합성 (M-h) ────────────────────────────────────────────────────────────
 
-function mhEnvelopeCanvas(mh, cells) {
+function mhEnvelopeCanvas(mh, cells, gaps = []) {
   const W = 780;
   const H = 544; // 상단 축이 먹은 24 px만큼 키운다 — 플롯 영역을 줄이지 않는다
   const { canvas, ctx } = makeCanvas(W, H);
@@ -944,7 +978,18 @@ function mhEnvelopeCanvas(mh, cells) {
       ctx.fill();
     }
   };
-  fillRegion(r, C.ok);
+  // 분석 가능 영역(구조·공력 — 추력 미포함)은 보조 층 — 요구를 깎는 선이 아니라 지금 계산할 수 있는 범위다
+  fillRegion(r, C.anaFill);
+  // 요구 운용영역 띠 — 선도의 주인(05 §11.13 이관 9단계). 윤곽은 경계선들 위에 다시 긋는다(아래)
+  const req = requirementBands(mh.requirement, mh.fuel);
+  const reqStatus = requirementStatus(mh);
+  ctx.fillStyle = C.reqFill;
+  for (const poly of req.polys) {
+    ctx.beginPath();
+    poly.forEach((p, i) => (i === 0 ? ctx.moveTo(px(p.mach), py(p.alt)) : ctx.lineTo(px(p.mach), py(p.alt))));
+    ctx.closePath();
+    ctx.fill();
+  }
   // 기동 엔벨로프 — 1g 안쪽 (하한만 올라간다). 그림 17의 내부 엔벨로프 자리
   if (man) {
     fillRegion(man.region, C.manFill);
@@ -1091,6 +1136,31 @@ function mhEnvelopeCanvas(mh, cells) {
   }
   ctx.textAlign = "left";
 
+  // 요구 운용영역 윤곽 — 합성 경계선 위에(주). 미확정 초안은 점선(06 §10 ①)
+  ctx.strokeStyle = C.reqLine;
+  ctx.lineWidth = 2.4;
+  ctx.setLineDash(reqStatus.kind === "draft" ? [7, 4] : []);
+  for (const poly of req.polys) {
+    ctx.beginPath();
+    poly.forEach((p, i) => (i === 0 ? ctx.moveTo(px(p.mach), py(p.alt)) : ctx.lineTo(px(p.mach), py(p.alt))));
+    ctx.closePath();
+    ctx.stroke();
+  }
+  for (const ln of req.lines) {
+    ctx.beginPath();
+    ctx.moveTo(px(ln.mach0), py(ln.alt));
+    ctx.lineTo(px(ln.mach1), py(ln.alt));
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  if (req.polys.length || req.lines.length) {
+    const top = req.polys.length
+      ? req.polys.flat().reduce((a, p) => (p.alt > a.alt ? p : a))
+      : { mach: req.lines[0].mach0, alt: req.lines[0].alt };
+    ctx.font = FONT_LABEL;
+    haloText(reqStatus.label, px(top.mach) + 4, py(top.alt) - 6, C.reqLine);
+  }
+
   // 추력 한계 경계 — 스캔의 스로틀 상한 포화 전선. 프로펠러 추력 모델이 들어와
   // 포화가 곧 진짜 한계다. 해석 곡선이 아니라 측정점이라 격자 해상도가 곧 경계 해상도
   // 저속(backside)·고속 전선은 서로 다른 곡선이다 — 한 줄로 이으면 평면을 가로지른다
@@ -1159,6 +1229,12 @@ function mhEnvelopeCanvas(mh, cells) {
       ctx.arc(px(c.mach), py(c.alt), 3.2, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+  // 트림하지 않은 요구영역 점(모델 부족) — 속 빈 네모. 지우면 요구 안의 점이 조용히 사라진다(05 §11.8)
+  if (layers.scan) {
+    ctx.strokeStyle = C.gapPt;
+    ctx.lineWidth = 1.3;
+    for (const g of gaps) ctx.strokeRect(px(g.mach) - 3, py(g.alt) - 3, 6, 6);
   }
 
   // 귀속 라벨 — source별 가장 긴 세그먼트에 지시선을 달고, 좌·우 무리를 각각 벌린다
@@ -1262,7 +1338,15 @@ function mhEnvelopeCanvas(mh, cells) {
   ctx.font = FONT_LABEL;
   ctx.fillStyle = C.sub;
   if (!r.empty.some((e) => !e)) {
-    ctx.fillText("설계 영역 없음 — 경계가 전 고도에서 닫힘", mL + 20, (mT + H - mB) / 2);
+    ctx.fillText("분석 가능한 영역 없음 — 구조·공력 경계가 전 고도에서 닫힘", mL + 20, (mT + H - mB) / 2 + 18);
+  }
+  // 요구가 없으면 크게 말한다 — 표시 고도 범위가 요구처럼 읽히지 않게(이관 9단계)
+  if (reqStatus.kind.startsWith("undefined")) {
+    ctx.font = "700 16px -apple-system, 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    haloText(reqStatus.label, (mL + W - mR) / 2, (mT + H - mB) / 2 - 8, C.undefText);
+    ctx.textAlign = "left";
+    ctx.font = FONT_LABEL;
   }
   ctx.font = FONT_BASE;
   for (const t of niceTicks(xMin, xMax, 7)) {
@@ -1327,6 +1411,12 @@ function renderMh(box) {
   // 차트 연료와 일치하는 스캔 셀만 — 집계도 같은 것만 세야 점과 숫자가 같은 말을 한다
   const allCells = lastScan ? scanCells(lastScan.cases) : null;
   const cells = allCells ? allCells.filter((c) => c.fuel === lastMh.fuel) : null;
+  // 스캔 격자에서 트림하지 않은 점(모델 부족) — 차트 연료와 같은 것만
+  const gaps = (lastScan && lastScanGrid?.points ? lastScanGrid.points : [])
+    .filter((p) => p.state === "model_gap" && p.fuel === lastMh.fuel);
+  const reqStatus = requirementStatus(lastMh);
+  // 격자점 출처 — 요구영역이 있으면 자동 설계 COARSE와 같은 기본 격자(이관 2·9단계), 없으면 옛 coarse 좌표
+  const schedFromRegion = lastMh.schedule_grid?.source === "region_base_grid";
   // 범례 귀속 칩은 실제로 그려진(비어 있지 않은) 행의 승자만
   const sources = new Set();
   lastMh.region.empty.forEach((e, i) => {
@@ -1336,18 +1426,32 @@ function renderMh(box) {
   });
   const man = layers.maneuver ? lastMh.maneuver : null;
   const legend = el("div", { class: "legend" },
-    el("span", {}, el("span", { class: "chip", style: `background:${C.ok}` }), "설계 영역 (1g 합성)"),
+    el("span", {}, el("span", { class: "chip",
+      style: `background:${C.reqFill}; border:2px ${reqStatus.kind === "draft" ? "dashed" : "solid"} ${C.reqLine}` }),
+    reqStatus.label),
+    el("span", {}, el("span", { class: "chip", style: `background:${C.anaFill}` }), `${ANALYZABLE_LABEL} — 1g`),
+    ...(gaps.length && layers.scan ? [el("span", {}, el("span", { class: "chip",
+      style: `border:1.3px solid ${C.gapPt}; background:transparent; border-radius:0` }),
+    `모델 부족 — 트림 안 함 ${gaps.length}점`)] : []),
     ...(man ? [el("span", {}, el("span", { class: "chip", style: `background:${C.manLine}` }),
       `기동 엔벨로프 n_z=${fmt(man.nz, 3)} g`)] : []),
     ...[...sources].map((s) => el("span", {},
       el("span", { class: "chip", style: `background:${boundColor(s)}` }), boundLabel(s))),
     el("span", {}, el("span", { class: "chip", style: `border:1.4px solid ${C.schedPt}; background:transparent` }),
-      "게인 스케줄 격자점 (coarse [기본값] — trimmable 미판정)"),
+      schedFromRegion
+        ? `자동 설계 기본 격자점 (요구영역 기본 격자 · 연료 층 ${fmt(lastMh.schedule_grid.fuel, 4)} kg — 트림 미판정)`
+        : "게인 스케줄 격자점 (coarse [기본값] — trimmable 미판정)"),
     // 꺼진 층은 범례에서도 뺀다 — 화면에 없는 표시를 설명하면 범례가 거짓말이 된다
     ...(layers.thrust ? [el("span", {}, el("span", { class: "chip", style: `background:${C.thrustLine}` }),
       "추력 한계 경계 (스로틀 상한 포화)")] : []),
   );
-  const kids = [el("div", { class: "scroll-x" }, mhEnvelopeCanvas(lastMh, cells)), legend];
+  // 요구영역 상태를 선도 위에 먼저 — 미정의·미확정이면 경고 상자(표시 범위를 요구로 읽지 않게)
+  const kids = [
+    el("div", { class: reqStatus.kind === "confirmed" ? "notice" : "error-box" }, reqStatus.text),
+    el("div", { class: "scroll-x" }, mhEnvelopeCanvas(lastMh, cells, gaps)), legend,
+    el("p", { class: "hint" }, `${ANALYZABLE_LABEL}은 구조·공력 경계의 교집합입니다 — 추력 조건이 없으므로 지속 비행 `
+      + "가능 영역이 아니고, 요구영역을 깎는 선도 아닙니다. 날 수 있는지는 조건마다 트림 판정(스캔 점)이 말합니다."),
+  ];
   // 상단 kt 축의 기준과 오차 폭 — 축은 자기가 놓인 윗변에서만 참이므로, 아래로
   // 갈수록 얼마나 어긋나는지를 화면이 스스로 말해야 한다. 두 모서리 음속이 엔진
   // echo로 오므로 어긋남을 지어내지 않고 계산해 적는다 (02 §5.5)
@@ -1470,9 +1574,11 @@ function renderMh(box) {
   }
   const outCount = lastMh.schedule_grid.points.filter((p) => outsideRegion(p, lastMh.region)).length;
   if (outCount) {
-    kids.push(el("p", { class: "hint" },
-      `⚠ 스케줄 격자점 ${outCount}개가 합성 영역 밖(×)입니다 — 격자 좌표는 coarse 격자(design.grid)와 `
-      + "맞추려고 q̄를 보지 않고 만들어지므로, 이것이 실제 설계점 위치입니다. 좌표를 옮기지 않고 표시만 합니다."));
+    kids.push(el("p", { class: "hint" }, schedFromRegion
+      ? `격자점 ${outCount}개가 ${ANALYZABLE_LABEL} 밖(×)입니다 — 격자는 요구영역에서 나오고 물리 경계로 깎지 않으므로 `
+        + "(05 §11.2) 이것이 실제 설계 대상 조건입니다. 날 수 있는지는 트림 판정이 조건마다 말합니다."
+      : `⚠ 스케줄 격자점 ${outCount}개가 합성 영역 밖(×)입니다 — 격자 좌표는 coarse 격자(design.grid)와 `
+        + "맞추려고 q̄를 보지 않고 만들어지므로, 이것이 실제 설계점 위치입니다. 좌표를 옮기지 않고 표시만 합니다."));
   }
   if (cells && cells.length) {
     // 범례·집계도 층 토글을 따른다 — 안 그리는 점의 개수를 세어 주면 화면과 어긋난다
@@ -1511,7 +1617,7 @@ function renderMh(box) {
   }
   if (lastMh.bounds.alt_max_is_display_default) {
     kids.push(el("p", { class: "hint" },
-      `표시 고도 상한 ${fmt(lastMh.bounds.alt_max_used, 5)} m는 표시용 [기본값] — 운용 상한이 아님 `
+      `표시 고도 상한 ${fmt(lastMh.bounds.alt_max_used, 5)} m는 표시용 [기본값] — 운용 상한도 요구도 아님 `
       + "(운용 상한을 입력하면 그 값으로 잘림)."));
   }
   kids.push(placeholderHint(lastMh));

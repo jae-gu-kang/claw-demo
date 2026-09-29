@@ -9,6 +9,7 @@ import {
   limitSourceLabel, opsSourceLabel, outsideRegion, prefillValue, regionPolygons, scanCells, scanCueSummary,
   scanSummary, spreadLabels, tasAxisTicks, throttleCell, thrustFrontier, vnCueReport,
   boxOverlap, lineLabelCandidates, placeLabels, pointObstacles, textBox,
+  ANALYZABLE_LABEL, REQUIREMENT_UNDEFINED, requirementBands, requirementStatus, scanGridRequest,
 } from "./envelope.js";
 import { linScale } from "./plot.js";
 
@@ -672,4 +673,96 @@ test("lineLabelCandidates — 가로선은 선 바로 위·아래(왼쪽 끝·�
   assert.deepEqual(v[0], { x: 123, y: 12, align: "left" }); // 종전 자리(선 오른쪽 윗줄)가 첫 후보
   assert.deepEqual(v[1], { x: 117, y: 12, align: "right" });
   assert.ok(v.some((c) => c.y > 50), "아래 줄 후보도 있다");
+});
+
+// ── 요구 운용영역 (이관 9단계) ─────────────────────────────────────────────
+
+const reqRow = (alt, lo, hi) => ({ alt, fuel: 25, mach_lo: lo, mach_hi: hi });
+
+test("requirementBands — 요구 미정의 행에서 끊고, 한 행 조각은 선으로 남긴다", () => {
+  const b = requirementBands({ rows: [reqRow(1000, 0.12, 0.28), reqRow(100, 0.1, 0.28),
+    reqRow(2000, null, null), reqRow(3000, 0.15, 0.25)] });
+  // 고도 오름으로 정렬 — lo 오름, hi 내림 폐곡선
+  assert.deepEqual(b.polys, [[
+    { mach: 0.1, alt: 100 }, { mach: 0.12, alt: 1000 }, { mach: 0.28, alt: 1000 }, { mach: 0.28, alt: 100 }]]);
+  assert.deepEqual(b.lines, [{ alt: 3000, mach0: 0.15, mach1: 0.25 }]);
+  assert.deepEqual(b.undefinedAlts, [2000]);
+  assert.deepEqual(requirementBands(null), { polys: [], lines: [], undefinedAlts: [] });
+  // 경계표 행은 층마다 온다 — 선도 연료 층만
+  assert.equal(requirementBands({ rows: [reqRow(100, 0.1, 0.28), { ...reqRow(1000, 0.2, 0.3), fuel: 45 },
+    reqRow(1000, 0.12, 0.28)] }, 25).polys[0].length, 4);
+});
+
+test("requirementBands — 엔진 band(선도 연료·표시 고도)가 정본, 요구영역 밖 고도는 미정의로 세지 않는다", () => {
+  const band = { fuel: 25, alt: [0, 1000, 2000, 3000, 4000], mach_lo: [null, 0.1, 0.11, null, null],
+    mach_hi: [null, 0.28, 0.27, null, null], state: ["out_of_region", "in", "in", "undefined", "out_of_region"] };
+  const b = requirementBands({ rows: [reqRow(100, 0.5, 0.6)], band }, 25);
+  assert.deepEqual(b.polys, [[{ mach: 0.1, alt: 1000 }, { mach: 0.11, alt: 2000 }, { mach: 0.27, alt: 2000 },
+    { mach: 0.28, alt: 1000 }]]);
+  assert.deepEqual(b.undefinedAlts, [3000]);
+  const nothing = { ...band, mach_lo: band.alt.map(() => null), mach_hi: band.alt.map(() => null) };
+  assert.equal(requirementStatus({ requirement: { mach: [0.1, 0.3], alt: [0, 1], fuel: [0, 45], confirmed: true,
+    rows: [reqRow(100, 0.1, 0.2)], band: nothing }, bounds: {}, fuel: 25 }).kind, "undefined_at_fuel");
+});
+
+test("requirementStatus — 요구가 없으면 표시 범위가 요구가 아니라고 먼저 말한다", () => {
+  const bounds = { alt_min_used: 0, alt_max_used: 12000, requirement_undefined: true };
+  const u = requirementStatus({ requirement: null, bounds, fuel: 25 });
+  assert.equal(u.kind, "undefined");
+  assert.equal(u.label, REQUIREMENT_UNDEFINED);
+  assert.match(u.text, /0~12000 m는 표시 범위일 뿐 요구가 아닙니다\.$/);
+  const req = { mach: [0.1, 0.28], alt: [100, 3000], fuel: [0, 45], confirmed: true, source: "profile",
+    rows: [reqRow(100, 0.1, 0.28), reqRow(3000, 0.12, 0.26)] };
+  const c = requirementStatus({ requirement: req, bounds, fuel: 25 });
+  assert.equal(c.kind, "confirmed");
+  assert.match(c.text, /마하 0\.1–0\.28 · 고도 100–3000 m · 연료 0–45 kg/);
+  const d = requirementStatus({ requirement: { ...req, confirmed: false, source: "draft:trim_grid" }, bounds, fuel: 25 });
+  assert.equal(d.kind, "draft");
+  assert.match(d.text, /미확정 초안/);
+  // 이 연료에서 경계표가 아무 행도 안 덮으면 — 요구가 있는 기체라도 이 선도에는 요구가 없다
+  const f = requirementStatus({ requirement: { ...req, rows: [reqRow(100, null, null)] }, bounds, fuel: 25 });
+  assert.equal(f.kind, "undefined_at_fuel");
+  assert.match(f.label, /요구영역 미정의 \(연료 25 kg\)/);
+});
+
+test("requirementStatus — 선도 연료가 요구 연료 범위 밖이면 미정의가 아니라 범위 밖이라고 말한다", () => {
+  // 엔진 band: 요구 연료 밖이면 전 고도 out_of_region(요구가 없는 게 정상 — 미정의와 다르다)
+  const alt = [0, 1000, 2000];
+  const band = { fuel: 80, alt, mach_lo: alt.map(() => null), mach_hi: alt.map(() => null),
+    state: alt.map(() => "out_of_region") };
+  const req = { mach: [0.1, 0.28], alt: [100, 3000], fuel: [10, 50], confirmed: true, source: "profile",
+    rows: [reqRow(100, 0.1, 0.28)], band };
+  const o = requirementStatus({ requirement: req, bounds: {}, fuel: 80 });
+  assert.equal(o.kind, "out_of_region_fuel");
+  assert.equal(o.label, "요구영역 밖 (연료 80 kg)");
+  assert.match(o.text, /^연료 80 kg는 요구 연료 범위\(10–50 kg\) 밖/);
+  assert.doesNotMatch(o.text, /미정의|어느 고도도 덮지/);
+  // 범위 안인데 경계표가 안 덮으면 종전대로 미정의
+  const inside = { ...band, fuel: 30, state: alt.map(() => "undefined") };
+  assert.equal(requirementStatus({ requirement: { ...req, band: inside }, bounds: {}, fuel: 30 }).kind,
+    "undefined_at_fuel");
+});
+
+test("ANALYZABLE_LABEL — 교집합은 추력이 빠진 「현재 분석 가능한 영역」이다(지속 비행 가능 영역이라 부르지 않는다)", () => {
+  assert.equal(ANALYZABLE_LABEL, "현재 분석 가능한 영역 (구조·공력 — 추력 미포함)");
+  assert.doesNotMatch(ANALYZABLE_LABEL, /지속 비행/);
+});
+
+test("scanGridRequest — 빈 명세는 요구영역 기본 명세, 연료는 선도 연료 하나", () => {
+  assert.deepEqual(scanGridRequest({ nMach: "", alts: "", fuel: "25" }), { fuels: [25] });
+  assert.deepEqual(scanGridRequest({ nMach: "8", alts: "0, 1000", fuel: "25" }),
+    { n_mach: 8, alts: [0, 1000], fuels: [25] });
+  assert.throws(() => scanGridRequest({ nMach: "1", fuel: "25" }), /2 이상/);
+  assert.throws(() => scanGridRequest({ fuel: "" }), /연료/);
+});
+
+test("outlineCaps — 표시 고도 끝이 요구영역 고도면 그렇게 부른다(운용 한계도 표시 기본값도 아니다)", () => {
+  const r = region([[100, 0.1, 0.3, "stall", "db"], [3000, 0.12, 0.28, "stall", "db"]]);
+  const caps = outlineCaps(r, bounds({ alt_min_used: 100, alt_max_used: 3000, alt_max_is_display_default: false,
+    alt_min_source: "region", alt_max_source: "region" }));
+  assert.deepEqual(caps.map((c) => c.source), ["region_alt_min", "region_alt_max"]);
+  assert.match(capLabel("region_alt_max"), /요구영역 고도 상한/);
+  const ops = outlineCaps(r, bounds({ alt_min: 100, alt_max: 3000, alt_min_used: 100, alt_max_used: 3000,
+    alt_max_is_display_default: false, alt_min_source: "operating", alt_max_source: "operating" }));
+  assert.deepEqual(ops.map((c) => c.source), ["ops_alt_min", "ops_alt_max"]);
 });

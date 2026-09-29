@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  deriveSummary, deTrimStatus, designSource, gainTablesStatus, seedSummary, variantTableSource,
+  deriveSummary, deTrimCoverageLines, deTrimStatus, designSource, gainTablesStatus, seedSummary, variantTableSource,
 } from "./quickseed.js";
 
 const SEED = {
@@ -68,7 +68,8 @@ test("도출 요약 — 표 줄과 검사 통계", () => {
   const s = deriveSummary(body);
   assert.match(s.headline, /리비전 3로 저장/);
   assert.deepEqual(s.rows, [{ mach: 0.2, value: 0.25 }, { mach: 0.3, value: 0.19 }]);
-  assert.deepEqual(s.stats, { checks: 3, shortfall: 0, excessMax: 0.004, iterations: 2, excluded: 5, undefined: [] });
+  assert.deepEqual(s.stats, { checks: 3, shortfall: 0, excessMax: 0.004, iterations: 2, excluded: 5, undefined: [],
+    coverage: null });
   const failed = deriveSummary({ derive: { ok: false, reason: "de_trim_no_requirement", reason_text: "트림이 없다" } });
   assert.equal(failed.stats, null);
   assert.match(failed.headline, /트림이 없다/);
@@ -148,4 +149,47 @@ test("확정 게인 표 배너 배선 — 기체 탭·게인 탭이 고른 형�
   // 게인 탭: 카탈로그(변형 적용 문서)에 확정 표가 없고 변형을 골랐으면 목록 요약으로 「규칙 스케줄」을 말한다
   assert.match(gains, /import \{ gainTablesStatus \} from "\.\.\/lib\/quickseed\.js";/);
   assert.match(gains, /if \(!c\) \{[\s\S]{0,600}?gainTablesStatus\(row, \{ variant: sel\.variant, effectiveTables: null \}\)[\s\S]{0,200}?st\.kind !== "rule"/);
+});
+
+test("δe_trim 표 커버리지 — 표 밖·근거 없음·보간 구간을 덮은 것으로 말하지 않는다 (이관 10단계)", () => {
+  const cov = { required_mach: [0.1, 0.28], table_mach: [0.082, 0.245], undefined_machs: [0.143],
+    unsupported: [[0.1, 0.104]], beyond_table: [[0.245, 0.28]] };
+  const lines = deTrimCoverageLines(cov);
+  const texts = lines.map((l) => l.text);
+  assert.equal(texts[0], "요구 마하 0.1–0.28 · 표 마하 0.082–0.245");
+  assert.ok(texts.includes("M0.245–0.28 표 범위 밖 · 끝값 사용 · 성능 미확인"));
+  // 근거 없음은 트림 실패·모델 부족만이 아니다 — 제한 위반·요구영역 밖 제외도 「유효 트림 없음」(엔진 need None)
+  assert.ok(texts.includes("M0.1–0.104 도출 근거 없음(유효 트림 없음 — 트림 실패·모델 부족·제한 위반)"));
+  assert.ok(texts.includes("M0.143 보간으로 채움"));
+  assert.ok(lines.slice(1).every((l) => l.tone !== "ok"), "빈 구간이 있으면 어느 줄도 「덮음」이 아니다");
+  assert.ok(!texts.some((t) => /덮습니다/.test(t)));
+  // 마하 목록으로 와도 범위로 읽는다
+  assert.equal(deTrimCoverageLines({ ...cov, required_mach: [0.1, 0.2, 0.28], table_mach: [0.082, 0.1, 0.245] })[0].text,
+    "요구 마하 0.1–0.28 · 표 마하 0.082–0.245");
+  // 빈 구간이 없을 때만 덮었다고 말한다
+  const full = deTrimCoverageLines({ required_mach: [0.1, 0.2], table_mach: [0.05, 0.25], undefined_machs: [],
+    unsupported: [], beyond_table: [] });
+  assert.equal(full.at(-1).tone, "ok");
+  assert.match(full.at(-1).text, /요구 마하를 표가 덮고 도출 근거가 있습니다/);
+  // 낡은 표(플랜트가 도출 뒤 바뀜 — stale)는 커버리지가 옛 도출의 것이다: 초록 「덮음」을 말하지 않는다
+  const stale = deTrimCoverageLines({ required_mach: [0.1, 0.2], table_mach: [0.05, 0.25], undefined_machs: [],
+    unsupported: [], beyond_table: [], basis: "derived", basis_current: true, stale: true });
+  assert.ok(stale.every((l) => l.tone !== "ok"), "낡은 표에 초록 줄");
+  assert.ok(!stale.some((l) => /도출 근거가 있습니다/.test(l.text)));
+  assert.match(stale.at(-1).text, /낡은 도출/);
+  // 근거를 잰 기록이 없으면(unsupported null) 덮었다고 하지 않는다 — 손으로 넣은 표 · 요구영역 변경
+  const hand = deTrimCoverageLines({ required_mach: [0.1, 0.2], table_mach: [0.05, 0.25], undefined_machs: [],
+    unsupported: null, beyond_table: [], basis: "document", basis_current: false });
+  assert.ok(hand.every((l) => l.tone !== "ok"));
+  assert.match(hand.at(-1).text, /도출 근거 미확인 — 손으로 넣은 표/);
+  assert.match(deTrimCoverageLines({ required_mach: [0.1, 0.2], table_mach: [0.05, 0.25], undefined_machs: [],
+    unsupported: null, beyond_table: [], basis: "derived", basis_current: false }).at(-1).text, /요구영역이 바뀌어/);
+  // 요구가 없거나 표가 없으면 모른다고
+  assert.match(deTrimCoverageLines({ ...cov, required_mach: null })[0].text, /요구영역 미정의/);
+  assert.deepEqual(deTrimCoverageLines(null, "표가 없습니다"), [{ tone: "hint", text: "표가 없습니다" }]);
+  assert.deepEqual(deTrimCoverageLines(null), []);
+  // 도출 결과 출처의 coverage도 같은 모양 — deriveSummary가 싣는다
+  const s = deriveSummary({ derive: { ok: true, alloc: { de_trim: { table: { axes: { mach: [0.1, 0.2] }, data: [1, 2] },
+    provenance: { coverage: cov } } }, requirement: { mach: [0.1] } }, written: true, profile: { revision: 1 } });
+  assert.deepEqual(s.stats.coverage, cov);
 });

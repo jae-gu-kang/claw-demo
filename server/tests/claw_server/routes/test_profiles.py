@@ -4,6 +4,8 @@
 보지 않고, 더 무거운 기체를 고르면 트림 받음각과 실속속도가 실제로 커지는지를 본다.
 """
 
+import pytest
+
 from claw.profile import EXAMPLE_ID, load_example
 
 
@@ -784,3 +786,38 @@ def test_기준_조회의_판정_척도는_그_기체의_적용_기준에서(cli
     s = client.get("/api/profiles/rms-tight/criteria").json()["metric_scales"]
     assert s["alt_rms"] == 5.0 and base["metric_scales"]["alt_rms"] != 5.0
     assert s["hdg_rms"] == base["metric_scales"]["hdg_rms"]  # 안 적은 칸은 기본값 그대로
+
+
+def test_de_trim_coverage_says_where_the_table_does_not_reach_the_requirement(client):
+    """이관 10단계(05 §11.13) — 표의 축이 요구 마하를 덮는지와 그 구간의 도출 근거를 엔진 `de_trim_coverage`가 재고, 이
+    경로는 그것을 그대로 낸다. 끝값(clip)으로 답하는 구간은 「표 범위 밖」이지 덮은 것이 아니다."""
+    import copy
+
+    keys = {"required_mach", "table_mach", "undefined_machs", "unsupported", "beyond_table"}
+    # 서버 예제(구 합성 기체): 요구(trim_grid 초안) M0.30~0.55, 표 M0.2~0.6 — 표가 요구를 덮는다
+    ex = client.get(f"/api/profiles/{EXAMPLE_ID}/de-trim-coverage")
+    assert ex.status_code == 200, ex.text
+    body = ex.json()
+    assert body["id"] == EXAMPLE_ID and keys <= set(body["coverage"])
+    assert body["coverage"]["beyond_table"] == []
+
+    # 표를 요구 안쪽으로 좁히면 양 끝이 표 범위 밖(끝값 사용)이다
+    d = copy.deepcopy(load_example())
+    d.update(id="narrow-trim", name="좁은 표", is_example=False, variants=[])
+    t = d["law"]["alloc"]["de_trim"]["table"]
+    t["axes"]["mach"], t["data"] = [0.35, 0.5], [0.2, 0.1]
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    cov = client.get("/api/profiles/narrow-trim/de-trim-coverage").json()["coverage"]
+    beyond = cov["beyond_table"]
+    assert len(beyond) == 2
+    assert beyond[0][0] == pytest.approx(0.3) and beyond[0][1] == pytest.approx(0.35)
+    assert beyond[1][0] == pytest.approx(0.5) and beyond[1][1] == pytest.approx(0.55)
+
+    # 표가 없으면 잴 것이 없다 — 덮었다고도 못 덮었다고도 하지 않는다
+    n = copy.deepcopy(d)
+    n.update(id="no-trim-table")
+    n["law"]["alloc"] = None
+    assert client.post("/api/profiles", json={"document": n}).status_code == 201
+    none = client.get("/api/profiles/no-trim-table/de-trim-coverage").json()
+    assert none["coverage"] is None and none["reason"]
+    assert client.get("/api/profiles/nope/de-trim-coverage").status_code == 404

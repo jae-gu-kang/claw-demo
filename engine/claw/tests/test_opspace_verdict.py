@@ -167,3 +167,32 @@ def test_region_is_classified_from_the_context_not_the_model_state(example):
     assert outside["adopted"] is True  # 요구영역은 아직 채택에 쓰지 않는다(이관 2단계에서 격자가 요구영역에서 나온다)
     bare = dataclasses.replace(ctx, region=None)
     assert condition_verdict(_trim(example, 0.18, 1000.0, 25.0), bare)["region"] is None
+
+
+# ── 트림 전 제외 (이관 2단계) — 기본 격자가 모델 부족·요구영역 밖·요구 미정의로 표시한 점 ─────────────────
+@pytest.mark.parametrize("state, category, region_status", [
+    ("model_gap", "model", "in"),  # 모델 부족은 요구 **안**이다 — 요구영역 칸에 모델 상태가 섞이지 않는다
+    ("out_of_region", "region", "out_of_region"),
+    ("undefined", "region", "undefined"),
+])
+def test_pre_trim_verdict_has_the_condition_verdict_shape_and_says_why(example, state, category, region_status):
+    from claw.opspace.verdict import pre_trim_verdict
+
+    ctx = VerdictContext.from_profile(example)
+    v = pre_trim_verdict(state, ctx)
+    ref = condition_verdict(_trim(example, 0.18, 1000.0, 25.0), ctx)
+    assert set(v) == set(ref)  # 같은 모양 — 화면·보고가 한 형식으로 읽는다
+    assert v["trim"] == {"status": state, "reasons": [state]}
+    for item in ("model", "limits", "margin"):
+        assert v[item] == {"status": "unevaluated", "reasons": []}  # 트림을 안 돌렸다 — 통과가 아니다
+    assert v["region"] == {"status": region_status, "confirmed": True}
+    assert v["adopted"] is False
+    assert v["exclusion"] == {"category": category, "reasons": [state]}
+    assert pre_trim_verdict(state, dataclasses.replace(ctx, region=None))["region"] is None
+
+
+def test_pre_trim_verdict_refuses_states_decided_by_a_trim(example):
+    from claw.opspace.verdict import pre_trim_verdict
+
+    with pytest.raises(ValueError, match="트림 전"):
+        pre_trim_verdict(COMPUTABLE, VerdictContext.from_profile(example))

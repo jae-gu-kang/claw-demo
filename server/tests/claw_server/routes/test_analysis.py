@@ -157,7 +157,11 @@ def test_design_envelope_endpoint(client):
     # q̄·운용 고도 미지정 — 경계 없음 (없는 데이터를 만들지 않는다)
     assert b["bounds"]["qbar_mach"] is None and b["bounds"]["q_max"] is None
     assert b["bounds"]["alt_min"] is None and b["bounds"]["alt_max"] is None
-    assert b["bounds"]["alt_max_is_display_default"] is True
+    # 운용 고도가 없으면 표시 고도 끝은 요구영역(여기선 trim_grid 초안 100~3000 m)의 고도 끝이다 — 이관 9단계.
+    # 표시 기본값 0~12,000 m는 요구영역도 없을 때만(test_design_envelope_draws_the_requirement_not_the_display_range)
+    assert b["bounds"]["alt_max_is_display_default"] is False
+    assert (b["bounds"]["alt_min_source"], b["bounds"]["alt_max_source"]) == ("region", "region")
+    assert (b["bounds"]["alt_min_used"], b["bounds"]["alt_max_used"]) == (100.0, 3000.0)
     assert b["limits_source"] == "demo-placeholder" and b["limits_overridden"] == []
     # 스케줄 격자 좌표 존재 (coarse 격자 정본 — trimmable 미판정 좌표)
     assert len(b["schedule_grid"]["points"]) > 0
@@ -223,6 +227,50 @@ def test_design_envelope_takes_q_max_and_operating_altitudes_from_the_document(c
     assert "bounds_source" not in client.get("/api/analysis/design-envelope", params={"fuel": 200.0}).json()
 
 
+def test_design_envelope_draws_the_requirement_not_the_display_range(client):
+    """이관 9단계(05 §11.13) — 선도는 요구 운용영역(region_of)을 싣고, 구조·공력 교집합(region)은 「현재 분석 가능한
+    영역」이다. 요구영역도 운용 고도도 없으면 requirement_undefined — 표시 기본값 0~12,000 m를 요구로 읽히지 않게."""
+    import copy
+
+    from claw.profile import load_example
+
+    # 서버 예제(구 합성 기체)는 operating_region 절이 없다 — trim_grid 초안(미확정)이 요구다
+    b = client.get("/api/analysis/design-envelope", params={"fuel": 200.0}).json()
+    req = b["requirement"]
+    assert req["confirmed"] is False and req["source"] == "draft:trim_grid"
+    assert req["mach"] == [0.3, 0.55] and req["alt"] == [100.0, 3000.0]
+    assert req["rows"] and all(r["fuel"] == 200.0 for r in req["rows"])
+    assert b["bounds"]["requirement_undefined"] is False
+
+    # 확정 요구영역 — 경계표가 덮는 행은 그 마하, 덮지 않는 고도는 행에 없다(가까운 행으로 늘리지 않는다)
+    d = copy.deepcopy(load_example())
+    d.update(id="req-delta", name="요구영역 기체", is_example=False, variants=[])
+    d["operating_region"] = {
+        "mach": [0.3, 0.6], "alt": [100.0, 3000.0], "fuel": [100.0, 300.0],
+        "boundary": [{"fuel": 200.0, "rows": [[100.0, 0.3, 0.6], [1000.0, 0.35, 0.55]]}],
+        "base_grid": {"n_mach": 5, "alts": [100.0, 1000.0], "fuels": [200.0]},
+    }
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    c = client.get("/api/analysis/design-envelope", params={"fuel": 200.0, "profile_id": "req-delta"}).json()
+    assert c["requirement"]["confirmed"] is True and c["requirement"]["source"] == "profile"
+    rows = {r["alt"]: r for r in c["requirement"]["rows"] if r["mach_lo"] is not None}
+    assert rows[100.0]["mach_lo"] == pytest.approx(0.3) and rows[1000.0]["mach_hi"] == pytest.approx(0.55)
+    assert all(r["alt"] <= 1000.0 for r in rows.values())
+    assert c["bounds"]["requirement_undefined"] is False
+
+    # 요구영역도 운용 고도도 없는 기체 — 선도는 표시 범위만 있고 요구는 미정의다
+    u = copy.deepcopy(load_example())
+    u.update(id="noreq-delta", name="요구 없는 기체", is_example=False, variants=[])
+    u["mission_template"] = None
+    u.pop("operating_region", None)
+    assert client.post("/api/profiles", json={"document": u}).status_code == 201
+    n = client.get("/api/analysis/design-envelope", params={"fuel": 200.0, "profile_id": "noreq-delta"}).json()
+    assert n["requirement"] is None and n["bounds"]["requirement_undefined"] is True
+    assert n["bounds"]["alt_max_is_display_default"] is True and n["bounds"]["alt_max_source"] == "display_default"
+    # 분석 가능 영역(구조·공력 교집합)은 그대로 낸다 — 요구가 없다고 계산을 멈추지 않는다
+    assert any(not e for e in n["region"]["empty"])
+
+
 def test_design_envelope_maneuver_and_iso_params(client):
     """n_z·등고선 파라미터 — 미지정이면 엔진이 정하고, 지정하면 그대로 전달."""
     base = client.get("/api/analysis/design-envelope", params={"fuel": 200.0}).json()
@@ -230,11 +278,13 @@ def test_design_envelope_maneuver_and_iso_params(client):
     assert [c["q"] for c in base["iso"]["qbar"]] == [5000.0, 10000.0, 20000.0, 40000.0]
     assert base["bounds"]["tropopause_alt"] == 11000.0  # 웹이 11000을 재기술하지 않도록
     # 상단 대기속도 보조축 기준 — 웹이 ISA 음속을 재기술하지 않도록 모서리 값이 온다
-    assert base["bounds"]["speed_of_sound"]["alt_min_used"] == pytest.approx(340.294, abs=1e-3)
-    assert base["bounds"]["speed_of_sound"]["alt_max_used"] == pytest.approx(295.070, abs=1e-3)
+    # 표시 고도 끝 = 요구영역 고도 끝(100·3000 m — 이관 9단계). 종전 0·12,000 m(표시 기본값)은 340.294·295.070
+    assert base["bounds"]["speed_of_sound"]["alt_min_used"] == pytest.approx(339.910, abs=1e-3)
+    assert base["bounds"]["speed_of_sound"]["alt_max_used"] == pytest.approx(328.578, abs=1e-3)
 
+    # 고고도(표시 끝 12,000 m)까지 봐야 n_reach 행이 선다 — 운용 상한을 질의로 준다(요구영역 끝 3000 m에서는 닫힌 행이 없다)
     man = client.get("/api/analysis/design-envelope",
-                     params={"fuel": 200.0, "nz": 3.0}).json()
+                     params={"fuel": 200.0, "nz": 3.0, "alt_max": 12000.0}).json()
     assert man["maneuver"]["nz"] == 3.0 and man["maneuver"]["nz_over_limit"] is False
     mreg, reg = man["maneuver"]["region"], man["region"]
     assert all(a > b for a, b in zip(mreg["mach_lo"], reg["mach_lo"]))  # 안쪽

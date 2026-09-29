@@ -887,8 +887,9 @@
   `/law/gain_tables`) → 기록 설정 자동 설계 약 7 s(수렴·판정 395·실패 0) → apply-gains 200 →
   전부 신선. **재설계 표는 출하 표와 비트 단위로 같다** — ΔCD0는 EO/IR형 플랜트만 바꾸고 표는
   기본형 설계이기 때문이다
-- **결함 시연 창**(06 §9.4 단계 12) — `autopilot.alt.k_rate` ×5.2~5.85에서 FAIL → 처방 → PASS,
-  설치 직후와 단계 8 뒤가 같다. 값과 근거는 `web/js/lib/showcase.js SHOWCASE_FAULT` 주석이
+- **결함 시연 창**(06 §9.4 단계 12) — `autopilot.alt.k_rate` ×5.3~6.0에서 FAIL → 처방 → PASS(v1.66
+  요구영역 격자 재생성본, 설치 직후 문서에서 잼 — 단계 7·8 뒤는 이번에 다시 재지 않았다. 종전 표에서는
+  ×5.2~5.85였고 설치 직후와 단계 8 뒤가 같았다). 값과 근거는 `web/js/lib/showcase.js SHOWCASE_FAULT` 주석이
   정본이다
 
 ## 6. 시뮬레이션 프레임

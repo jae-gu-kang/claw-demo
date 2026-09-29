@@ -55,7 +55,8 @@ GENERATOR = "claw.profile.showcase"
 STAGES = ("de_trim", "seed", "design")
 # 툴이 낸 설계 게인의 출처 — 빠른 탐색(design.seed.SEED_SOURCE)과 산출 근거 직행(design.basis가 적는 값)
 SEED_SOURCES = ("quick_seed", "seed_basis")
-# 자동 설계 덧씀 중 **기체 값이 아닌** 예산·밀도 [기본값] — 고도·연료 격자는 문서에서 뽑는다(design_overrides).
+# 자동 설계 덧씀 중 **기체 값이 아닌** 예산·밀도 [기본값] — 격자는 문서에서 뽑는다(design_overrides — 요구영역이 있으면
+# 그 기본 격자 명세 그대로라 n_mach도 쓰지 않는다. n_mach는 요구영역 없는 기체의 옛 격자용).
 # 이터 3: 처방 두 바퀴를 받고 끝낸다(가벼운 설정 — 쇼케이스 진행기의 자동 설계 단계와 같은 결)
 DESIGN_BUDGET = {"n_mach": 5, "budget_iters": 3}
 # 승인·재개 상한 — 웹 views/autodesign.js MAX_APPROVAL_ROUNDS와 같은 값(엔진 이터 예산이 먼저 끊는다)
@@ -216,14 +217,20 @@ def _stage_seed(doc: dict, log, *, seed: str, sim_check: bool) -> tuple:
 
 
 def design_overrides(doc: dict) -> dict:
-    """생성용 자동 설계 덧씀 — 예산·밀도(DESIGN_BUDGET) + 문서에서 뽑은 고도·연료 격자.
+    """생성용 자동 설계 덧씀 — 예산·밀도 + 격자.
 
-    고도는 설계 기본 고도(design.grid.DEFAULT_ALTS)를 운용 고도 범위로 거르고 끝을 더한 것(BuiltProfile.alts_within —
-    δe_trim 도출·빠른 탐색과 같은 규칙), 연료는 기본 비율 × 문서 fuel_max다. 운용 천장 위 고도에 설계점을 두지 않는다.
-    예산은 격자 점 수 + 여유(REFINE·검증점 몫)로 정한다 — 서버 상한(MAX_POINTS 200)을 넘지 않는다."""
+    요구영역이 있으면(이관 2단계) 격자는 그 기본 격자 명세 그대로라 n_mach·alts·fuels를 덧쓰지 않고, 예산만 기본 격자 점 수의
+    두 배(COARSE 몫이 절반이라 기본 격자 전부가 들어가고 나머지를 REFINE·검증점이 나눈다 — 서버 상한 200을 넘지 않는다)로
+    정한다. 요구영역이 없으면 옛 규칙: 설계 기본 고도(design.grid.DEFAULT_ALTS)를 운용 고도 범위로 거르고 끝을 더한 것
+    (BuiltProfile.alts_within), 연료는 기본 비율 × fuel_max, 예산은 격자 점 수 + 여유."""
     from claw.design.grid import DEFAULT_ALTS, DEFAULT_FUEL_FRACS
+    from claw.opspace import base_grid, model_range_of, region_of
 
     built = build_profile(doc, validated=True)
+    region = region_of(built.doc)
+    if region is not None:
+        n_base = len(base_grid(region, model_range_of(built))["points"])
+        return {"budget_iters": DESIGN_BUDGET["budget_iters"], "budget_points": min(200, 2 * n_base)}
     alts = built.alts_within(DEFAULT_ALTS)
     fuels = [round(doc["mass"]["fuel_max"] * f, 6) for f in DEFAULT_FUEL_FRACS]
     n_coarse = DESIGN_BUDGET["n_mach"] * len(alts) * len(fuels)

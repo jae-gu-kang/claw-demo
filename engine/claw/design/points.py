@@ -87,6 +87,20 @@ def envelope_verdict(tr, ctx) -> dict:
     return {"ok": verdict["adopted"], "reasons": reasons, "reserve": reserve, "verdict": verdict}
 
 
+# 트림 전 제외 상태 — 기본 격자가 트림 전에 정한 모델 부족·요구영역 밖·요구 미정의(opspace/verdict.py PRE_TRIM_CATEGORY와
+# 같은 셋. 순환 import를 피해 값으로 적는다 — test_design_points가 둘이 같은지 본다)
+PRE_TRIM_STATES = frozenset({"model_gap", "out_of_region", "undefined"})
+
+
+def pre_excluded(pt) -> bool:
+    """트림 전에 제외된 점인가 — 판정의 트림 상태가 트림 전 제외 상태(pre_trim_verdict가 실은 것).
+
+    이 점은 트림도 선형화도 하지 않는다(05 §11.13 2단계 — 버리지 않고 목록에 남기되 설계하지 않는다). 튜닝·검증점 생성·
+    마진 맵은 `PointSet.designable()`로 이 점을 뺀 집합을 본다 — 빼지 않으면 마진 맵이 이 점을 트림하려 든다."""
+    v = pt.verdict
+    return v is not None and v["trim"]["status"] in PRE_TRIM_STATES
+
+
 def case_name(mach: float, alt: float, fuel: float) -> str:
     """격자 값 그대로의 정본 이름 — 반올림하지 않는다 (web grid.js nameCases 원칙).
 
@@ -202,6 +216,12 @@ class PointSet:
         pt.role = new_role
         pt.origin = pt.origin or f"promoted:{reason}"
         return pt
+
+    def designable(self) -> "PointSet":
+        """트림 전 제외 점(pre_excluded)을 뺀 집합 — 같은 OperatingPoint 객체를 나눈다(판정·승격이 원본에 그대로 반영).
+
+        튜닝·검증점 생성·마진 맵이 쓴다. 점을 **더하는** 쪽(보강·검증점 추가)은 원본 집합에 더한다 — 이 집합은 보기다."""
+        return PointSet(p for p in self._points.values() if not pre_excluded(p))
 
     def by_role(self, role: str) -> list:
         """정확히 그 역할인 점들 (선언 순서)."""

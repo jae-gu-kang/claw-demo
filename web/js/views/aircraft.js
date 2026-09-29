@@ -47,7 +47,9 @@ import {
   browserStorage, refresh as refreshPicker, restoredNotice, selectedDocument, switchTo,
 } from "./profilepick.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
-import { deriveSummary, deTrimStatus, designSource, gainTablesStatus, seedSummary } from "../lib/quickseed.js";
+import {
+  deriveSummary, deTrimCoverageLines, deTrimStatus, designSource, gainTablesStatus, seedSummary,
+} from "../lib/quickseed.js";
 import { achievedText, basisAttitude, basisHead, basisRates, designGain } from "../lib/seedbasis.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 
@@ -119,6 +121,8 @@ let seedSimCheck = false;
 // 「평가 기준 · 튜닝 목표」 패널 — 연 기체·리비전의 GET /profiles/{id}/criteria 응답(key로 대조). 편집은 문서(opened)에
 // 쓰고 [저장]은 문서 패널과 같은 PUT이다 — 여기 따로 저장 길을 두지 않는다
 const crit = { key: null, busy: false, body: null, error: null, msg: null };
+// δe_trim 표 커버리지(서버 /profiles/{id}/de-trim-coverage — 이관 10단계). 리비전마다 한 번 받는다
+const deCov = { key: null, busy: false, body: null, error: null };
 // 대표 그림 — 가상환경 번들(three)의 두 번째 진입점을 쓴다. 떠날 때 WebGL 컨텍스트를 반납한다(main.js dispose 규약)
 const BUNDLE = "/world/build/world.js";
 let hero = null; // {session, handle} — 늦게 도착한 문서·번들이 떠난 화면에 렌더러를 만들지 않게 세션으로 대조한다
@@ -1214,7 +1218,8 @@ export function render() {
       st ? el("p", { class: "hint" },
         `검사 ${st.checks}점 · 요구 미달 ${st.shortfall} · 과잉 최대 ${deg(st.excessMax)} · 보정 ${st.iterations}회 · `
         + `뺀 트림(미수렴·포화) ${st.excluded}`
-        + (st.undefined.length ? ` · 요구가 없어 이웃 값으로 채운 마하 ${st.undefined.join(", ")}` : "")) : null);
+        + (st.undefined.length ? ` · 요구가 없어 이웃 값으로 채운 마하 ${st.undefined.join(", ")}` : "")) : null,
+      st ? coverageView(deTrimCoverageLines(st.coverage)) : null);
   };
 
   const seedDone = async (job) => {
@@ -1546,6 +1551,36 @@ export function render() {
       basisResultView());
   };
 
+  // 커버리지 줄 — 표 범위 밖·근거 없음·보간 구간은 경고 색(덮은 것으로 말하지 않는다), 전부 덮을 때만 초록
+  const coverageView = (lines) => (lines.length ? el("div", { style: "margin:4px 0" }, lines.map((l) =>
+    el("div", { class: l.tone === "hint" ? "hint" : null,
+      style: l.tone === "warn" ? "color:#c93400" : l.tone === "ok" ? "color:#248a3d" : null }, l.text))) : null);
+  const loadDeCov = async (target) => {
+    const key = `${target.id}@${target.body.revision}`;
+    if (deCov.key === key && (deCov.busy || deCov.body || deCov.error)) return;
+    Object.assign(deCov, { key, busy: true, body: null, error: null });
+    try {
+      const body = await api.get(`${path(target.id)}/de-trim-coverage?revision=${target.body.revision}`);
+      if (deCov.key === key) deCov.body = body;
+    } catch (e) {
+      if (deCov.key === key) deCov.error = failText(e);
+    } finally {
+      if (deCov.key === key) deCov.busy = false;
+    }
+    if (opened === target) paintSeed();
+  };
+  const deCovView = () => {
+    if (!opened) return null;
+    const key = `${opened.id}@${opened.body.revision}`;
+    if (deCov.key !== key) {
+      loadDeCov(opened);
+      return el("p", { class: "hint" }, "표가 요구 마하를 덮는지 재는 중…");
+    }
+    if (deCov.busy) return el("p", { class: "hint" }, "표가 요구 마하를 덮는지 재는 중…");
+    if (deCov.error) return el("p", { class: "hint" }, `표 커버리지를 받지 못했습니다 — ${deCov.error}`);
+    return coverageView(deTrimCoverageLines(deCov.body?.coverage, deCov.body?.reason));
+  };
+
   const paintSeed = () => {
     if (!opened) {
       clear(seedBox).append(el("p", { class: "hint" }, "목록에서 [열기]로 기체를 열면 게인 출처와 초기 게인 빠른 탐색이 여기 섭니다."));
@@ -1587,6 +1622,8 @@ export function render() {
       basisSection(),
       el("h4", { style: "margin:14px 0 4px" }, "할당 δe_trim 표"),
       el("p", {}, el("strong", { class: trim.stale ? "error-box" : null }, trim.label)),
+      // 요구 마하 대비 표 범위와 도출 근거(이관 10단계) — 끝값 사용·근거 없음·보간 구간을 덮은 것으로 말하지 않는다
+      deCovView(),
       el("p", { class: "hint" },
         "선회 하중에서 롤 예산의 피치 몫을 먼저 떼는 1g 트림 승강타 표입니다(R = δe_trim(M)·n). 마하마다 연료 × 고도 "
         + "격자의 최악 |δe|를 요구로 삼고, 표 보간이 검사 격자(마하 0.005 간격)의 요구를 밑돌지 않을 때까지 올립니다. "

@@ -180,6 +180,33 @@ def get_profile(profile_id: str, request: Request, revision: int | None = None) 
     return _body(doc, rev)
 
 
+NO_DE_TRIM_TABLE = "이 기체 문서에는 할당 δe_trim 표가 없어 요구 마하를 덮는지 잴 것이 없습니다."
+
+
+@router.get("/profiles/{profile_id}/de-trim-coverage")
+def get_de_trim_coverage(profile_id: str, request: Request, revision: int | None = None) -> dict:
+    """할당 δe_trim 표가 요구 마하를 덮는가 (05 §11.13 이관 10단계) — 엔진 `de_trim_coverage`가 정본이다.
+
+    표의 축이 요구를 덮는 것과 그 구간의 도출 근거가 있는 것은 다르다: 표 밖은 끝값(clip)으로 답하고(beyond_table),
+    트림 실패·모델 부족으로 근거가 없는 구간(unsupported)과 보간으로 채운 마하(undefined_machs)도 따로 낸다. 조회
+    응답(GET /profiles/{id})에 섞지 않는다 — 문서 조회마다 도출 근거를 재지 않게, 기체 탭 δe_trim 패널이 따로 부른다."""
+    from claw.profile.derive import de_trim_coverage
+
+    try:
+        doc, rev = request.app.state.profiles.get(profile_id, revision)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"기체 프로파일 없음: {profile_id}")
+    except ProfileUnreadable as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    alloc = doc["law"].get("alloc")
+    if alloc is None or alloc.get("de_trim") is None:
+        return {"id": doc["id"], "revision": rev, "coverage": None, "reason": NO_DE_TRIM_TABLE}
+    built = build_profile(doc, validated=True)
+    return to_jsonable({"id": doc["id"], "revision": rev, "coverage": de_trim_coverage(built), "reason": None})
+
+
 @router.get("/profiles/{profile_id}/criteria")
 def get_profile_criteria(profile_id: str, request: Request, revision: int | None = None) -> dict:
     """이 작업 단위의 평가 기준 — 모든 탭이 판정에 쓰는 한 벌(기준 통합 ①).

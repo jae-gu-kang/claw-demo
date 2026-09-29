@@ -36,7 +36,10 @@ STRUCTURE_FP = "f94329070fbecd39"
 # + 승강률 명령필터 tau_vs 0.5, 구조 지문 불변). EO/IR형은 질량·관성만 바꾸는 변형이라 법칙 값·파라미터 지문이 기본형과 같다
 # → c6e9aea2a4cb00fe (v1.65 이관 8단계 — δe_trim 표 재도출: EO/IR형 M0.102·2000 m·만재 트림이 α 리미터에 잘려
 # (limiter_clips_trim) 요구에서 빠졌다. 표 앞 세 점만 움직였고 구조 지문 불변)
-PARAM_FP = {"example": "c6e9aea2a4cb00fe", "eoir": "c6e9aea2a4cb00fe", "legacy": "41eceddd3279a2c1"}
+# → a246cdf17ebfcb5e (이관 9·10단계 — δe_trim 표를 요구영역에서 재도출: 마하 격자가 요구영역 M0.10~0.28의 기본 격자 공통
+# 좌표 10점(종전 문서 격자 M0.082~0.245 7점 — 요구 상한 0.28을 못 덮었다), 검사 고도·연료가 요구영역 기본 격자(100/1000/
+# 3000 m × 10/25/50 kg)이고 확정 요구영역 밖 조건을 뺀다. 표 길이만 바뀌어 구조 지문·C 파일 불변)
+PARAM_FP = {"example": "a246cdf17ebfcb5e", "eoir": "a246cdf17ebfcb5e", "legacy": "41eceddd3279a2c1"}
 
 
 def _profiles():

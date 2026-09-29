@@ -26,10 +26,16 @@ const BODY = {
     exclusion_withheld: ["pitch.ki"],
     actuator: { source: { wn: "profile", zeta: "profile" }, wn: 30, zeta: 0.7, delay_s: 0.035, pade_order: 2 },
     coverage: null, coverage_gaps: [], ledger_size: 1,
+    // 이관 2단계 — 요구영역 커버리지: 채택 2 · 요구영역 제외 1(트림하지 않은 점) → 완료 아님
+    region_coverage: { source: "profile", confirmed: true, points: 3, complete: false,
+      by_category: { adopted: 2, trim: 0, model: 0, limits: 0, region: 1 } },
   },
   points: { points: [
     { name: "M0.1_h500_f25", mach: 0.1, alt: 500, fuel: 25, role: "anchor", trimmable: true },
     { name: "M0.2_h500_f25", mach: 0.2, alt: 500, fuel: 25, role: "anchor", trimmable: true },
+    { name: "M0.3_h3000_f25", mach: 0.3, alt: 3000, fuel: 25, role: "anchor", trimmable: false,
+      verdict: { adopted: false, exclusion: { category: "region", reasons: ["undefined"] },
+        trim: { status: "undefined", reasons: [] } } },
   ] },
   margin_out: { cases: {
     "M0.1_h500_f25": { loops: { roll_rate: { status: "fail" }, pitch_att: { status: "ok" } } },
@@ -88,6 +94,11 @@ test("보고서에 작동기·표본 제외(보류 포함)·적합 보고·원�
   assert.match(text, /적합 보고 — 스케줄 축 밖 변동 1\/2자리\(alt\) · 교차축 잔차 최대 55% \(roll\.ki\)/);
   assert.match(text, /적합에서 뺐다 — roll\.k_rate, roll\.kp \(이 점의 스케줄 값은 튜닝값이 아니라 이웃 보간\)/);
   assert.match(text, /적합 허용치 조이기는 표 모드에 없다/);
+  // 요구영역 — 부분 성공을 완료로 읽히지 않게, 트림하지 않은 점은 판정 사유로
+  assert.match(text, /요구영역 완료 아님 — 미해결 조건 남음/);
+  assert.match(text, /요구영역 3점 중 채택 2 · 제외\(트림 0 · 모델 0 · 제한 0 · 요구영역 1\)/);
+  assert.match(text, /제외 — 요구영역 판정 대상 아님 — 요구 미정의/);
+  assert.match(text, /트림하지 않음 1/);
   // 조건부 조각이 글자 "null"로 새지 않는다 (DOM append(null) 함정)
   assert.doesNotMatch(text, /null|undefined/);
 });

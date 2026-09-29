@@ -177,3 +177,24 @@ def test_envelope_verdict_reasons_priority():
     multi = _fake_tr(converged=False, alpha_ok=False, thr=0.97)
     assert envelope_verdict(multi, ctx)["reasons"] == [
         "not_converged", "alpha_margin", "saturated_throttle_high"]
+
+
+def test_pre_trim_states_match_the_verdict_and_designable_leaves_them_out():
+    """트림 전 제외 점은 목록에 남고(보고) 설계 보기(designable)에서만 빠진다 — 같은 객체를 나눈다(이관 2단계)."""
+    from claw.design.points import PRE_TRIM_STATES, pre_excluded
+    from claw.opspace.verdict import PRE_TRIM_CATEGORY, pre_trim_verdict
+
+    assert PRE_TRIM_STATES == frozenset(PRE_TRIM_CATEGORY)
+
+    class _Ctx:
+        region = None
+
+    ps = PointSet()
+    for m in (0.3, 0.4, 0.5):
+        ps.add(OperatingPoint(case=TrimCase(name=case_name(m, 0.0, 0.0), mach=m, alt=0.0, fuel=0.0), role=ROLE_ANCHOR))
+    gap = ps.get(case_name(0.5, 0.0, 0.0))
+    gap.verdict, gap.trimmable = pre_trim_verdict("model_gap", _Ctx()), False
+    view = ps.designable()
+    assert pre_excluded(gap) and not pre_excluded(ps.get(case_name(0.3, 0.0, 0.0)))
+    assert view.names() == (case_name(0.3, 0.0, 0.0), case_name(0.4, 0.0, 0.0)) and len(ps) == 3
+    assert view.get(case_name(0.3, 0.0, 0.0)) is ps.get(case_name(0.3, 0.0, 0.0))

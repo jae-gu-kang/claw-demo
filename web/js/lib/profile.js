@@ -71,6 +71,7 @@ export const NOT_AIRCRAFT = {
   "POST /profiles": "기체 문서 자체 — id가 경로·본문에 있다",
   "GET /profiles/{profile_id}": "기체 문서 자체 — id가 경로·본문에 있다",
   "GET /profiles/{profile_id}/criteria": "그 기체의 평가 기준 — id가 경로에 있다",
+  "GET /profiles/{profile_id}/de-trim-coverage": "그 기체 δe_trim 표의 요구 마하 커버리지 — id가 경로에 있다",
   "PUT /profiles/{profile_id}": "기체 문서 자체 — id가 경로·본문에 있다",
   "DELETE /profiles/{profile_id}": "기체 문서 자체 — id가 경로·본문에 있다",
   "POST /profiles/validate": "기체 문서 자체 — id가 경로·본문에 있다",

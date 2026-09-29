@@ -12,7 +12,9 @@ vn_envelope가 한계선·특성 속도(V_S·V_A)까지 산출한다. Nz 제한 
 
 설계 엔벨로프(01 §2.6): design_envelope가 M-h 평면에서 구조(마하·동압 한계)·
 공력(실속·DB 범위)·운용(고도 상하한) 경계를 합성해 행별 승자 귀속과 함께
-반환한다. 제어 가능 영역(트림 성립)은 여기 없다 — 조건 판정(opspace/verdict.py —
+반환한다 — 그 합성(region)의 뜻은 「현재 분석 가능한 영역」(구조·공력 교집합)이다. 추력 조건이
+없으므로 지속 비행 가능 영역이 아니고, 요구 운용영역도 아니다 — 요구는 requirement(opspace Region,
+05 §11.2)로 따로 받아 따로 싣는다(이관 9단계). 제어 가능 영역(트림 성립)은 여기 없다 — 조건 판정(opspace/verdict.py —
 design.points.envelope_ok)을 트림 격자에 적용하는 별도 스캔의 몫. stall_mach_lo·row_machs는
 coarse 격자(design.grid)와 이 합성이 공유하는 mach 경계의 단일 정본이다.
 """
@@ -298,9 +300,22 @@ def design_envelope(
     aircraft, stall_table, limits, db_ranges, *, fuel,
     q_max=None, alt_min=None, alt_max=None, mach_margin=1.1,
     n_alt=41, schedule_n_mach=5, schedule_alts=None,
-    nz=None, iso_qbar=None, iso_tas=None,
+    nz=None, iso_qbar=None, iso_tas=None, requirement=None,
 ) -> dict:
-    """제어법칙 설계 엔벨로프 M-h 합성 (01 §2.6) — 행별 경계와 승자 귀속.
+    """제어법칙 설계 엔벨로프 M-h 합성 (01 §2.6) — 행별 경계와 승자 귀속 + 요구 운용영역.
+
+    **region은 「현재 분석 가능한 영역」이다** — 구조(M_NO·q̄)와 공력(실속 V_S × 여유·DB·실속표) 경계의 교집합. 추력
+    조건을 보지 않으므로 지속 비행 가능 영역이 아니고, 요구를 뜻하지도 않는다(05 §11.2 — 물리 경계는 영역이 아니라 조건의
+    판정 결과다).
+
+    requirement: 요구 운용영역(opspace.Region — region_of(doc), 이관 9단계). 주면 응답 requirement에 기본 범위·확정 여부·
+    출처와 행별 요구 마하(rows — 경계표의 (고도, 연료) 행마다, 경계표가 없으면 기본 범위의 고도·연료 끝 네 모서리)와 이
+    연료에서 고도 표본마다의 요구 마하 띠(band — 층 사이 보간, 경계표가 덮지 않으면 None · state "undefined", 요구 고도
+    밖이면 "out_of_region")를 싣는다 — 화면이 요구영역과 조건 상태를 그린다. 운용 고도 상하한(alt_min·alt_max)이 없는 끝은
+    요구영역 고도 끝으로 그린다. requirement도 없으면 bounds.requirement_undefined가 True이고, 0~12,000 m는 표시 범위일
+    뿐이다(alt_*_source "display_default") — 요구인 척 그리지 않는다. schedule_grid는 requirement가 있으면 자동 설계
+    COARSE와 같은 요구영역 기본 격자(이 연료에 가장 가까운 기본 격자 연료 층 — source "region_base_grid"), 없으면 옛
+    coarse 격자 좌표(source "coarse_grid")다.
 
     합성: mach_lo(h) = max(실속 V_S×여유, DB 하한), mach_hi(h) = min(M_NO,
     DB 상한, 실속표 축 상한, M_q̄(h)). lo_source/hi_source가 행마다 어느
@@ -344,8 +359,28 @@ def design_envelope(
             raise ValueError(
                 f"{name} {v} m가 ISA 유효범위({ISA_MIN_ALT:.0f}~{ISA_STRATO1_TOP_ALT:.0f} m) 밖"
             )
-    alt_lo_used = float(alt_min) if alt_min is not None else 0.0
-    alt_hi_used = float(alt_max) if alt_max is not None else _ALT_DISPLAY_MAX
+    # 고도 끝 — 운용 고도가 이기고, 없으면 요구영역 고도 끝(범위가 한 점이면 쓰지 않는다), 그것도 없으면 표시 기본값
+    req_alt = None
+    if requirement is not None and float(requirement.alt[0]) < float(requirement.alt[1]):
+        req_alt = (float(requirement.alt[0]), float(requirement.alt[1]))
+    if alt_min is not None:
+        alt_lo_used, lo_src = float(alt_min), "operating"
+    elif req_alt is not None:
+        alt_lo_used, lo_src = req_alt[0], "region"
+    else:
+        alt_lo_used, lo_src = 0.0, "display_default"
+    if alt_max is not None:
+        alt_hi_used, hi_src = float(alt_max), "operating"
+    elif req_alt is not None:
+        alt_hi_used, hi_src = req_alt[1], "region"
+    else:
+        alt_hi_used, hi_src = _ALT_DISPLAY_MAX, "display_default"
+    # 섞인 출처(운용 한쪽 + 요구영역 한쪽)가 뒤집히면 요구영역 쪽 끝을 표시 기본값으로 물린다 — 운용 고도가 요구영역
+    # 밖에 있는 것은 판정 재료이지 거부 사유가 아니다(요구영역 전엔 상한이 12,000 m라 그려졌다). 둘 다 운용이면 문서 모순
+    if not alt_lo_used < alt_hi_used and lo_src == "operating" and hi_src == "region":
+        alt_hi_used, hi_src = _ALT_DISPLAY_MAX, "display_default"
+    elif not alt_lo_used < alt_hi_used and lo_src == "region" and hi_src == "operating":
+        alt_lo_used, lo_src = 0.0, "display_default"
     if not alt_lo_used < alt_hi_used:
         raise ValueError(f"운용 고도 하한 ≥ 상한: {alt_lo_used} ≥ {alt_hi_used} m")
 
@@ -388,18 +423,23 @@ def design_envelope(
     if iso_tas is None:
         iso_tas = list(_ISO_TAS_DEFAULT)
 
-    sched_alts = tuple(
-        float(a) for a in (schedule_alts if schedule_alts is not None else DEFAULT_SCHEDULE_ALTS)
-        if alt_lo_used <= float(a) <= alt_hi_used
-    )
-    points = []
-    for alt in sched_alts:
-        for m in row_machs(
-            aircraft, stall_table, alt, fuel,
-            mach_hi=static_hi, db_mach_lo=db_mach_lo,
-            mach_margin=mach_margin, n_mach=schedule_n_mach,
-        ):
-            points.append({"mach": m, "alt": alt})
+    if requirement is not None:
+        schedule_grid = _region_schedule_grid(requirement, db_mach_lo, db_mach_hi, fuel)
+    else:
+        sched_alts = tuple(
+            float(a) for a in (schedule_alts if schedule_alts is not None else DEFAULT_SCHEDULE_ALTS)
+            if alt_lo_used <= float(a) <= alt_hi_used
+        )
+        points = []
+        for alt in sched_alts:
+            for m in row_machs(
+                aircraft, stall_table, alt, fuel,
+                mach_hi=static_hi, db_mach_lo=db_mach_lo,
+                mach_margin=mach_margin, n_mach=schedule_n_mach,
+            ):
+                points.append({"mach": m, "alt": alt})
+        schedule_grid = {"source": "coarse_grid", "n_mach": int(schedule_n_mach), "alts": list(sched_alts),
+                         "fuel": float(fuel), "points": points}
 
     return {
         "fuel": float(fuel),
@@ -414,7 +454,12 @@ def design_envelope(
             "alt_max": float(alt_max) if alt_max is not None else None,
             "alt_min_used": alt_lo_used,
             "alt_max_used": alt_hi_used,
-            "alt_max_is_display_default": alt_max is None,
+            "alt_max_is_display_default": hi_src == "display_default",
+            # 고도 끝의 출처 — operating(운용 고도) · region(요구영역) · display_default(표시 기본값 — 요구가 아니다)
+            "alt_min_source": lo_src,
+            "alt_max_source": hi_src,
+            # 요구 운용영역이 없다 — 이 도표의 어떤 선도 요구를 뜻하지 않는다(05 §11.13 9단계 「요구영역 미정의」)
+            "requirement_undefined": requirement is None,
             "tropopause_alt": ISA_TROPOPAUSE_ALT,  # 소비자가 11000을 재기술하지 않도록 (02 §5.5)
             # 표시 고도 상·하 모서리의 음속 — 상단 대기속도 보조축(M ↔ V = M·a)의
             # 기준. 교과서 도해(Fig 1)는 마하축 위에 kt 축을 겹쳐 그리는데 그 대응은
@@ -427,15 +472,50 @@ def design_envelope(
                 "alt_max_used": float(isa_atmosphere(alt_hi_used).a),
             },
         },
+        # 현재 분석 가능한 영역 — 구조·공력 교집합(추력 미포함, 요구 아님)
         "region": region,
         "maneuver": maneuver,
+        "requirement": None if requirement is None else _requirement_echo(requirement, alts, fuel),
         "iso": iso_curves(alts, qbar=iso_qbar, tas=iso_tas),
-        "schedule_grid": {
-            "n_mach": int(schedule_n_mach),
-            "alts": list(sched_alts),
-            "points": points,
-        },
+        "schedule_grid": schedule_grid,
     }
+
+
+def _requirement_echo(req, alts, fuel) -> dict:
+    """요구 운용영역 응답 — 기본 범위 + 행별 요구 마하 + 이 연료의 고도별 요구 띠 (design_envelope 머리말)."""
+    if req.boundary:
+        rows = [{"alt": float(r[0]), "fuel": float(f), "mach_lo": float(r[1]), "mach_hi": float(r[2])}
+                for f, layer in req.boundary for r in layer]
+    else:
+        rows = [{"alt": float(a), "fuel": float(f), "mach_lo": float(req.mach[0]), "mach_hi": float(req.mach[1])}
+                for f in sorted(set(req.fuel)) for a in sorted(set(req.alt))]
+    band = {"fuel": float(fuel), "alt": [float(a) for a in alts], "mach_lo": [], "mach_hi": [], "state": []}
+    for a in alts:
+        if not (req.alt[0] - 1e-9 <= a <= req.alt[1] + 1e-9) or not (req.fuel[0] - 1e-9 <= fuel <= req.fuel[1] + 1e-9):
+            b, state = None, "out_of_region"
+        else:
+            b = req.mach_bounds(a, fuel)
+            state = "undefined" if b is None else "in"
+        band["mach_lo"].append(None if b is None else float(b[0]))
+        band["mach_hi"].append(None if b is None else float(b[1]))
+        band["state"].append(state)
+    return {"mach": [float(x) for x in req.mach], "alt": [float(x) for x in req.alt],
+            "fuel": [float(x) for x in req.fuel], "rows": rows, "band": band,
+            "confirmed": bool(req.confirmed), "source": req.source}
+
+
+def _region_schedule_grid(req, db_mach_lo, db_mach_hi, fuel) -> dict:
+    """자동 설계 COARSE와 같은 요구영역 기본 격자 — 이 연료에 가장 가까운 기본 격자 연료 층 하나(표시용)."""
+    from claw.opspace.basegrid import base_grid
+    from claw.opspace.region import ModelRange
+
+    layer = float(min(req.grid["fuels"], key=lambda f: (abs(float(f) - float(fuel)), float(f))))
+    model = ModelRange(mach=(float(db_mach_lo), float(db_mach_hi)), fuel=(-math.inf, math.inf))  # 연료 모델 범위는 여기 없다
+    g = base_grid(req, model, fuels=(layer,))
+    return {"source": "region_base_grid", "n_mach": int(req.grid["n_mach"]),
+            "alts": sorted({float(a) for a in req.grid["alts"]}), "fuel": layer,
+            "points": [{"mach": p["mach"], "alt": p["alt"], "state": p["state"]} for p in g["points"]],
+            "rows": [dict(r) for r in g["rows"]]}
 
 
 def pitch_limit_table(stall_table, *, alpha_margin):

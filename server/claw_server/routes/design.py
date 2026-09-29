@@ -75,8 +75,9 @@ class ResumeIn(BaseModel):
 _INT_KEYS = ("budget_points", "budget_iters", "budget_tune_evals", "n_mach",
              "n_validation_between", "max_degree", "max_segments", "pade_order")
 # 없음(null)이 뜻을 갖는 수치 — 작동기 동특성은 null이면 **기체 문서의 작동기**다(엔진
-# AutoDesignConfig 주석). 수치를 주면 그 값이 이긴다(작동기 가정 연구)
-_NULLABLE_KEYS = ("actuator_wn", "actuator_zeta")
+# AutoDesignConfig 주석). 수치를 주면 그 값이 이긴다(작동기 가정 연구). n_mach는 null이면 요구영역의 기본 격자
+# 명세(operating_region.base_grid — 05 §11.13 이관 2단계), 요구영역이 없으면 엔진의 옛 격자 기본값이다
+_NULLABLE_KEYS = ("actuator_wn", "actuator_zeta", "n_mach")
 
 
 def _check_number(where: str, v) -> None:
@@ -324,6 +325,12 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
         inp = design_inputs(profile)
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
+    try:
+        # COARSE 격자 사전 검사 — 행 끝점(요구 경계)이 COARSE 몫을 넘거나 명세 덮음이 기본 격자 상한을 넘으면 잡 안에서
+        # 처음 터지던 ValueError를 202 전에 422로 낸다(엔진 grid.select_coarse 「제출 시점에 거부」). 재개는 건너뛴다
+        session.preflight(inp["verdict_ctx"])
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     def work(job):
         # job.report의 반환값이 취소 요청 여부 — 엔진 협조적 취소 규약과 그대로 맞물린다

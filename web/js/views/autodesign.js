@@ -26,11 +26,11 @@ config 덮어쓰기로 보낸다. "게인 확정"은 결과의 반출 표(표 �
 import { ApiError, api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
-  DEFAULT_FUEL_FRACS, VERDICT_LABEL, actionCards, actuatorLine,
+  VERDICT_LABEL, actionCards, actuatorLine,
   adoptBlockedText, adoptStorePayload, adoptWarnText, applyGateReason, approvedByDefault, buildConfig,
   configFormValues, coverageLines, criteriaSummaryModel, designCueSummary, emptyResultNotice, evidenceLines, excludedSamplesModel, fitFactsModel,
-  fitQualityLines, fuelsPlaceholder, ledgerRows, ledgerTruncatedText, mergeDesignConfig, pointRows,
-  reasonText, reportLine, resumable, resumeBlockedText, reverifyLines, statusCounts, statusSeverity,
+  fitQualityLines, gridPlaceholders, ledgerRows, ledgerTruncatedText, mergeDesignConfig, pointRows,
+  reasonText, regionCoverageLines, reportLine, resumable, resumeBlockedText, reverifyLines, statusCounts, statusSeverity,
   statusText, trimLabel, verdictLegend, warnNoteText,
 } from "../lib/autodesign.js";
 import { applyFreshnessBlock } from "../lib/flowsteps.js";
@@ -140,7 +140,9 @@ export function render() {
     ),
     budgetPoints: el("input", { size: 5, placeholder: "200" }),
     budgetIters: el("input", { size: 3, placeholder: "5" }),
-    nMach: el("input", { size: 3, placeholder: "5" }),
+    // 비우면 요구영역의 기본 격자 명세(이관 2단계) — 예전 고정 5점을 자리표시로 보이면 그 값을 쓰는 줄로 읽힌다
+    nMach: el("input", { size: 5, placeholder: "영역 명세",
+      title: "비우면 요구 운용영역의 기본 격자 명세(마하 점 수)를 씁니다 — 요구영역이 없는 기체는 엔진 기본값" }),
     nValidationBetween: el("input", { size: 3, placeholder: "1" }),
     altsText: el("input", { size: 16, placeholder: "0 1000 3000 5000" }),
     // 연료 기본은 기체 값이다(엔진: fuel_max × 비율) — 고른 기체 문서가 도착하면 loadDefaults가
@@ -169,14 +171,16 @@ export function render() {
       // 나가고, 서버 기본값이 바뀌어도 화면이 옛 수치를 계속 보낸다
       const ph = (input, v) => { if (v != null) input.placeholder = String(v); };
       ph(form.delayS, c.delay_s);
-      // 격자 기본 — 서버가 내면(grid) 그쪽이 정본, 아니면 엔진 기본의 사본
-      ph(form.altsText, Array.isArray(d.grid?.alts) ? d.grid.alts.join(" ") : null);
       defaultsBox.textContent = "판정선·튜닝 목표는 고른 기체 문서의 값으로 설계한다 — [판정선·튜닝 목표] 패널."
         + " 나머지 칸의 회색 수치가 서버 기본값이다(정본: 엔진 AutoDesignConfig).";
       // 연료·작동기 기본은 **고른 기체 문서**에서 — config 기본이 비어 있으면(기체 작동기를 쓰는 엔진)
       // 문서 actuator.params가 자리표시다. 문서를 못 받으면 칸을 비워 둔다(모르는 값을 수치로 위장 않음)
       const doc = await selectedDocument().catch(() => null);
-      ph(form.fuelsText, fuelsPlaceholder(doc?.mass?.fuel_max, d.grid?.fuel_fracs ?? DEFAULT_FUEL_FRACS) || null);
+      // 격자 칸 — 비우면 요구영역의 기본 격자 명세(이관 2단계), 요구영역이 없는 기체만 옛 coarse 기본값
+      const gp = gridPlaceholders(doc, d);
+      ph(form.nMach, gp.nMach);
+      ph(form.altsText, gp.alts);
+      ph(form.fuelsText, gp.fuels);
       ph(form.actuatorWn, c.actuator_wn ?? doc?.actuator?.params?.wn);
       ph(form.actuatorZeta, c.actuator_zeta ?? doc?.actuator?.params?.zeta);
     } catch (e) {
@@ -573,6 +577,10 @@ function countsLine(rows) {
       ` · 채택 제외 ${c.outside} (제한 위반·모델 범위 밖 — 튜닝·처방 대상 밖이라 판정에서 제외, `
       + "까닭은 점 표의 자동 설계 채택 열)"));
   }
+  if (c.untrimmed) {
+    parts.push(el("span", { class: "hint" },
+      ` · 트림하지 않음 ${c.untrimmed} (요구영역 밖·요구 미정의·모델 부족 — 까닭은 점 표의 자동 설계 채택 열)`));
+  }
   if (c.unjudged) parts.push(el("span", { class: "hint" }, ` · 미판정 ${c.unjudged}`));
   return el("p", {}, "점 판정", ...parts);
 }
@@ -661,6 +669,17 @@ function coverageBox(report) {
         l.tone === "fail" ? el("strong", {}, l.text) : l.text);
     }),
   );
+}
+
+/** 요구영역 커버리지(이관 2단계) — 상태 줄 바로 아래. 일부 점의 성공이 요구영역 완료로 읽히지 않게 「완료 아님」을
+ *  굵게 먼저 세운다. 옛 결과(없음)는 null. */
+function regionCoverageBox(report) {
+  const lines = regionCoverageLines(report);
+  if (!lines.length) return null;
+  return el("div", {}, ...lines.map((l) => (l.tone === "hint"
+    ? el("div", { class: "hint" }, l.text)
+    : el("div", { style: `color:${l.tone === "fail" ? SEV_COLOR.fail : SEV_COLOR.warn}` },
+      l.tone === "fail" ? el("strong", {}, l.text) : l.text))));
 }
 
 /** 원장 표 한 벌 — 상위 N행과 접힌 나머지가 같은 모양이라 함수로 뽑는다. */
@@ -883,6 +902,7 @@ function renderResult(box, body, resultId, ctx) {
   })();
 
   const covBox = coverageBox(report);
+  const regionBox = regionCoverageBox(report);
   // 상태 줄 아래 사실 셋 — 무엇으로 설계했나(작동기)·표에서 무엇을 뺐나(튜닝 실패 표본)·표가 무엇을
   // 뭉갰나(스케줄 축 밖 변동·톱니). sections는 native append라 null을 걸러 넣는다
   const facts = [actuatorBox(body), excludedBox(body), fitFactsBox(body.fits)].filter(Boolean);
@@ -892,6 +912,8 @@ function renderResult(box, body, resultId, ctx) {
       "상태 ", sevChip(statusSeverity(report.status)), ` ${report.status ?? "?"} · `,
       // 계산해 놓고 안 내던 수치들 — 특히 판정 수가 없으면 "실패 0"의 뜻이 갈리지 않는다
       reportLine(report, rows.length).join(" · ")),
+    // 요구영역 — 상태(converged 등)는 판정한 점만의 말이다. 요구영역 전체가 끝났는지는 이 줄이 말한다
+    ...(regionBox ? [regionBox] : []),
     // 평가 체계(영향성 탭 「평가」·게인 탭 카드)와의 정렬 — 이 화면의 미달
     // 원장·조치 카드가 곧 "나머지 판정: 항상 판정하되 문제일 때만 전개"의 자동설계판이고,
     // 판정선(pm·gm·ζ)은 같은 MarginCriteria 한 정의를 쓴다 (pipeline/criteria.py 합성)

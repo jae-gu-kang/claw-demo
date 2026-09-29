@@ -4,8 +4,9 @@
 자동 설계(tune_point)는 설계값에서 **부호와 탐색 브래킷**만 읽는다(05 §7). 게인이 비어 있는 새 기체는 그
 출발점이 없어 튜닝 자체가 성립하지 않는다(seed_required). 여기서 출발점을 기체에서 **재서** 만든다:
 
-1. 앵커 — 설계 격자(coarse_grid, 중간 연료 한 벌)에서 채택한 점(조건 판정 — 트림 탭과 같은 판정)을 q̄ 순으로 세우고
-   중앙·최저·최고를 쓴다. 앵커마다 튜닝한 게인을 스케줄 규칙(q̄ 역비)으로 설계 마하 값으로 되돌려 자리마다
+1. 앵커 — 요구영역의 기본 격자(design.grid.region_grid — 연료는 한 층: 요구 연료 범위의 가운데에 가장 가까운 기본
+   격자 연료, 이관 9단계)에서 채택한 점(조건 판정 — 트림 탭과 같은 판정)을 q̄ 순으로 세우고 중앙·최저·최고를 쓴다.
+   요구영역이 없는 기체만 옛 설계 격자(coarse_grid — 설계 기본 고도를 운용 고도로 거름 × fuel_max·fuel_frac)다. 앵커마다 튜닝한 게인을 스케줄 규칙(q̄ 역비)으로 설계 마하 값으로 되돌려 자리마다
    중앙값을 쓴다.
 2. 부호 — 선형 모델 B의 조종효율에서: 레이트 댐퍼 k = −sign(B[ṙate, u])(u = +k·rate가 감쇠를 더한다),
    자세 kp = +sign(B). 레이트는 ±로 조금 닫아 지표가 실제로 좋아지는 쪽인지 확인한다. 앵커끼리 부호가
@@ -43,7 +44,7 @@ from claw.analysis.envelope import DEFAULT_SCHEDULE_ALTS
 from claw.common.constants import G0
 from claw.design.closure import AXIS_SPECS, axis_metrics, wn_reference
 from claw.design.criteria import MarginCriteria
-from claw.design.grid import coarse_grid
+from claw.design.grid import coarse_grid, region_grid
 from claw.design.schedmap import scheduled_margin_point
 from claw.design.tune import (
     _RATE_PLAN,
@@ -55,6 +56,7 @@ from claw.design.tune import (
 )
 from claw.design.tune import REASON_TEXT as TUNE_REASON_TEXT
 from claw.env import isa_atmosphere
+from claw.opspace.region import region_of
 from claw.opspace.verdict import VerdictContext
 from claw.trim import linearize, split_axes
 
@@ -316,13 +318,23 @@ def _autopilot(built, center, lon, wc, act_existing):
     return values, source, notes
 
 
-def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=5, delay_s=0.035, pade_order=2,
+LEGACY_N_MACH = 5  # 요구영역 없는 기체의 옛 격자 마하 점 수
+
+
+def seed_fuel_layer(region) -> float:
+    """요구영역에서 앵커를 둘 연료 층 — 기본 격자 연료 중 요구 연료 범위의 가운데에 가장 가까운 것(같으면 작은 쪽)."""
+    mid = 0.5 * (region.fuel[0] + region.fuel[1])
+    return float(min(region.grid["fuels"], key=lambda f: (abs(float(f) - mid), float(f))))
+
+
+def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=None, delay_s=0.035, pade_order=2,
                sim_check=False, on_progress=None) -> dict:
     """BuiltProfile → {"ok", "reason", "reason_text", "design", "schedule", "schedule_created", "anchors",
     "slots", "verification", "failed_loops", "warnings", "autopilot_notes", "sim_check", "elapsed_s"}.
 
     design은 law.design 모양(provenance 포함)이고 schedule은 문서에 스케줄이 없을 때만 새로 만든 것(있으면 None —
-    문서의 것을 쓴다). ok가 False여도 design은 싣는다(화면이 무엇이 안 됐는지 보인다) — 저장은 호출자가 ok일 때만."""
+    문서의 것을 쓴다). n_mach None = 요구영역 기본 격자 명세(없는 기체는 LEGACY_N_MACH). fuel_frac은 요구영역 없는 기체의
+    옛 격자에만 쓴다 — 요구영역이 있으면 연료 층은 seed_fuel_layer다. ok가 False여도 design은 싣는다(화면이 무엇이 안 됐는지 보인다) — 저장은 호출자가 ok일 때만."""
     t0 = time.perf_counter()
     targets = targets if targets is not None else TuneTargets()
     doc = built.doc
@@ -340,15 +352,22 @@ def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=5, delay_s=0.
                        "sim_check": None,
                        "elapsed_s": time.perf_counter() - t0, **extra})
 
-    db = built.db_ranges()
-    if "mach" not in db:
-        return fail(REASON_SEED_NO_GRID)
-    alts = built.alts_within(DEFAULT_SCHEDULE_ALTS)
     ac = built.aircraft()
-    fuel = doc["mass"]["fuel_max"] * fuel_frac
-    grid = coarse_grid(ac, built.stall_table(), built.structural_limits(), db, ctx=VerdictContext.from_profile(built),
-                       n_mach=n_mach, alts=alts, fuels=(fuel,), fingerprint=built.plant_fingerprint,
-                       on_progress=on_progress)
+    ctx = VerdictContext.from_profile(built)
+    region = region_of(doc)
+    if region is not None:
+        # 요구영역의 기본 격자에서 — 요구를 실속 하한·DB 상한으로 깎지 않는다(05 §11.2). 모델 부족 점은 트림 전 제외
+        grid = region_grid(ac, region, ctx.model, ctx=ctx, n_mach=n_mach, fuels=(seed_fuel_layer(region),),
+                           fingerprint=built.plant_fingerprint, on_progress=on_progress)
+    else:
+        db = built.db_ranges()
+        if "mach" not in db:
+            return fail(REASON_SEED_NO_GRID)
+        grid = coarse_grid(ac, built.stall_table(), built.structural_limits(), db, ctx=ctx,
+                           n_mach=LEGACY_N_MACH if n_mach is None else n_mach,
+                           alts=built.alts_within(DEFAULT_SCHEDULE_ALTS),
+                           fuels=(doc["mass"]["fuel_max"] * fuel_frac,), fingerprint=built.plant_fingerprint,
+                           on_progress=on_progress)
     if grid["aborted"]:
         return fail(REASON_SEED_CANCELLED)
     inside = [pt for pt in grid["points"] if pt.trimmable]

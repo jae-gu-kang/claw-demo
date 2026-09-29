@@ -834,3 +834,78 @@ def test_fq_criteria_ordering_and_fingerprint():
         FQCriteria(dr_wn_l3=0.5)  # 서열 위반: l3 > l2(0.4)
     with pytest.raises(ValueError):
         FQCriteria(roll_tau_l1=0.0)
+
+
+# ── 이관 9단계 — 설계 엔벨로프는 요구영역을 읽는다 (05 §11.13) ────────────────────────────────────────────
+def _env_inputs():
+    from claw.plant import make_demo_db_ranges, make_demo_structural_limits
+
+    return make_demo_aircraft(), make_demo_stall_table(), make_demo_structural_limits(), make_demo_db_ranges()
+
+
+def _req(boundary=None, confirmed=True):
+    from claw.opspace import Region
+
+    return Region(mach=(0.3, 0.55), alt=(100.0, 3000.0), fuel=(100.0, 300.0), boundary=boundary,
+                  grid={"n_mach": 6, "alts": (100.0, 1000.0, 3000.0), "fuels": (100.0, 300.0)},
+                  confirmed=confirmed, source="profile" if confirmed else "draft:trim_grid")
+
+
+def test_design_envelope_without_a_requirement_says_it_is_undefined():
+    """요구영역이 없으면 0~12,000 m는 표시 범위일 뿐 요구가 아니다 — 응답이 그렇게 말한다."""
+    from claw.analysis import design_envelope
+
+    env = design_envelope(*_env_inputs(), fuel=200.0)
+    b = env["bounds"]
+    assert b["requirement_undefined"] is True and env["requirement"] is None
+    assert (b["alt_min_source"], b["alt_max_source"]) == ("display_default", "display_default")
+    assert b["alt_max_is_display_default"] is True
+    assert env["schedule_grid"]["source"] == "coarse_grid"
+
+
+def test_design_envelope_takes_its_altitudes_and_requirement_rows_from_the_region():
+    from claw.analysis import design_envelope
+
+    boundary = ((100.0, ((100.0, 0.3, 0.5), (3000.0, 0.35, 0.55))), (300.0, ((100.0, 0.32, 0.5), (1000.0, 0.36, 0.52))))
+    env = design_envelope(*_env_inputs(), fuel=200.0, requirement=_req(boundary))
+    b = env["bounds"]
+    assert b["requirement_undefined"] is False
+    assert (b["alt_min_used"], b["alt_max_used"]) == (100.0, 3000.0)  # 운용 고도가 없으면 요구영역 고도
+    assert (b["alt_min_source"], b["alt_max_source"]) == ("region", "region") and b["alt_max_is_display_default"] is False
+    req = env["requirement"]
+    assert (req["mach"], req["alt"], req["fuel"], req["confirmed"], req["source"]) == (
+        [0.3, 0.55], [100.0, 3000.0], [100.0, 300.0], True, "profile")
+    assert req["rows"][0] == {"alt": 100.0, "fuel": 100.0, "mach_lo": 0.3, "mach_hi": 0.5}
+    assert len(req["rows"]) == 4
+    band = req["band"]  # 이 연료(200 kg)에서 고도 표본마다 요구 마하 — 층 사이 보간, 덮지 않는 고도는 미정의
+    assert band["fuel"] == 200.0 and len(band["alt"]) == len(env["region"]["alt"])
+    assert band["state"][0] == "in" and band["mach_lo"][0] == pytest.approx(0.31)
+    assert band["state"][-1] == "undefined" and band["mach_lo"][-1] is None  # 3000 m — 300 kg 층이 1000 m까지만
+    # 스케줄 격자는 COARSE와 같은 요구영역 기본 격자(이 연료에 가장 가까운 격자 연료 층)
+    sg = env["schedule_grid"]
+    assert sg["source"] == "region_base_grid" and sg["fuel"] in (100.0, 300.0)
+    assert {p["alt"] for p in sg["points"]} <= {100.0, 1000.0, 3000.0}
+    # 운용 고도가 있으면 그것이 이긴다 — 요구영역은 요구, 운용 고도는 기체 한계다
+    env2 = design_envelope(*_env_inputs(), fuel=200.0, alt_min=0.0, alt_max=4000.0, requirement=_req())
+    assert (env2["bounds"]["alt_min_used"], env2["bounds"]["alt_max_source"]) == (0.0, "operating")
+    no_b = env2["requirement"]["rows"]  # 경계표가 없으면 기본 범위의 고도·연료 끝 네 모서리
+    assert {(r["alt"], r["fuel"]) for r in no_b} == {(100.0, 100.0), (100.0, 300.0), (3000.0, 100.0), (3000.0, 300.0)}
+    assert all((r["mach_lo"], r["mach_hi"]) == (0.3, 0.55) for r in no_b)
+
+
+def test_design_envelope_mixed_altitude_sources_do_not_invert():
+    """운용 하한만 있고(요구영역 위쪽) 상한을 요구영역 끝에서 가져오면 하한 ≥ 상한이 될 수 있다 — 전엔 상한이 12,000 m라
+    됐는데 요구영역이 생기며 거부되던 조합. 뒤집히면 그 끝은 표시 기본값으로 물러난다(출처 display_default)."""
+    from claw.analysis import design_envelope
+
+    env = design_envelope(*_env_inputs(), fuel=200.0, alt_min=5000.0, requirement=_req())  # 요구 100~3000 m
+    b = env["bounds"]
+    assert (b["alt_min_used"], b["alt_min_source"]) == (5000.0, "operating")
+    assert (b["alt_max_used"], b["alt_max_source"]) == (12000.0, "display_default")
+    assert b["alt_max_is_display_default"] is True
+    env = design_envelope(*_env_inputs(), fuel=200.0, alt_max=50.0, requirement=_req())
+    b = env["bounds"]
+    assert (b["alt_min_used"], b["alt_min_source"], b["alt_max_source"]) == (0.0, "display_default", "operating")
+    # 둘 다 운용 고도면 종전대로 거부한다 — 기체 문서의 모순이다
+    with pytest.raises(ValueError, match="하한 ≥ 상한"):
+        design_envelope(*_env_inputs(), fuel=200.0, alt_min=5000.0, alt_max=4000.0, requirement=_req())

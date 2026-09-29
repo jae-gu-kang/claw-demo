@@ -92,8 +92,9 @@ def test_thin_anchor_seed_is_not_adopted(monkeypatch):
     for name in ("roll.k_rate", "roll.kp", "roll.ki"):
         assert out["slots"][name]["reason"] == REASON_SEED_THIN_ANCHORS, (name, out["slots"][name])
         assert out["slots"][name]["anchors_used"] == 1 and out["slots"][name]["reason_text"]
-    # 피치 자세는 두 앵커다 — v1.65(여유 미달 채택)부터 최고 q̄ 앵커가 M0.4775에서 스로틀 95~99 % 해면 M0.6138로
-    # 옮겼고, 거기서 pitch_att 튜닝이 bandwidth_collapse라 그 앵커를 뺀다(롤처럼 한 점으로 줄지는 않아 채택)
+    # 피치 자세는 두 앵커다 — 이관 9단계부터 앵커는 요구영역(trim_grid 초안 M0.3~0.55 · 200 kg) 기본 격자에서 나온다
+    # (중앙 M0.4/100 m · 최저 q̄ M0.3/3000 m · 최고 q̄ M0.55/100 m). 한 앵커의 pitch_att 튜닝이 설계 실패라 그 앵커를 뺀다
+    # (롤처럼 한 점으로 줄지는 않아 채택)
     assert out["slots"]["pitch.kp"]["reason"] is None and out["slots"]["pitch.kp"]["anchors_used"] == 2
 
 
@@ -201,8 +202,11 @@ def test_seed_signs_flip_with_the_control_derivatives(blank_seed):
 
 
 def test_seed_names_what_is_missing():
+    # DB 마하 범위가 없으면 옛 격자(요구영역 없는 기체)는 못 만든다. 요구영역이 있으면 격자는 요구영역에서 나오고 DB 범위
+    # 미기재는 「모델 범위를 판단하지 않음」이다(opspace ModelRange) — 이관 9단계부터 이 사유는 요구영역 없는 기체의 것
     no_range = _blank()
     no_range["aero"]["db_ranges"]["mach"] = None
+    no_range["mission_template"] = None
     out = quick_seed(build_profile(no_range))
     assert (out["ok"], out["reason"], out["design"]) == (False, REASON_SEED_NO_GRID, None)
     assert "db_ranges.mach" in out["reason_text"]
@@ -331,3 +335,30 @@ def test_autopilot_says_so_when_the_speed_gain_formula_goes_negative():
     assert len(notes) == 1 and "0으로" in notes[0] and "−A_uu" in notes[0], notes
     live, _, notes = _autopilot(built, centre, lon, {"pitch": 1.17, "roll": 3.14}, None)
     assert live["kp_spd"] > 0.0 and notes == []
+
+
+# ── 이관 9단계 — 앵커는 요구영역의 기본 격자(연료 한 층)에서 ─────────────────────────────────────────────
+def test_seed_anchors_come_from_the_region_base_grid_at_the_middle_fuel_layer():
+    """제품 예제 — 요구영역 M0.10~0.28 · 100/1000/3000 m, 기본 격자 연료 층 25 kg(연료 범위 10~50의 가운데에 가장 가까운 층).
+    종전에는 coarse_grid(0/1000/3000/5000 m를 운용 고도로 거름 × fuel_max·0.5)였다."""
+    from claw.opspace import region_of
+    from claw.profile import load_shipped_example
+
+    built = build_profile(_blank(load_shipped_example()))
+    region = region_of(built.doc)
+    out = quick_seed(built)
+    assert out["anchors"]
+    for a in out["anchors"]:
+        assert a["fuel"] == 25.0 and a["alt"] in region.grid["alts"]
+        assert region.classify(a["mach"], a["alt"], a["fuel"]) is None  # 요구영역 안
+
+
+def test_seed_without_a_region_keeps_the_legacy_grid():
+    doc = _blank()
+    doc["mission_template"] = None
+    built = build_profile(doc)
+    from claw.opspace import region_of
+
+    assert region_of(built.doc) is None
+    out = quick_seed(built)
+    assert out["anchors"] and all(a["fuel"] == built.doc["mass"]["fuel_max"] * 0.5 for a in out["anchors"])

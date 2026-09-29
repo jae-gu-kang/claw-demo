@@ -28,6 +28,21 @@ globalThis.fetch = (url, opts = {}) => {
   const method = opts.method ?? "GET";
   if (method === "POST") posts.push({ path, body: JSON.parse(opts.body) });
   if (path.startsWith("/profiles/")) return Promise.resolve(reply(200, { document: DOC }));
+  // 스캔 격자는 요구영역의 기본 격자(이관 9단계) — 미계산 둘 + 모델 부족 하나. 모델 부족 점은 보내지 않는다
+  if (method === "POST" && path === "/grid/base") {
+    const f = JSON.parse(opts.body).fuels?.[0];
+    return Promise.resolve(reply(200, {
+      region: { mach: [0.1, 0.24], alt: [0, 3000], fuel: [0, 45], confirmed: true, source: "profile" },
+      reason: null, axis: [0.1, 0.24],
+      rows: [{ alt: 0, fuel: f, bounds: [0.1, 0.24], n: 3, state: "not_run" }],
+      points: [
+        { name: `M0.1_h0_f${f}`, mach: 0.1, alt: 0, fuel: f, state: "not_run" },
+        { name: `M0.24_h0_f${f}`, mach: 0.24, alt: 0, fuel: f, state: "not_run" },
+        { name: `M0.3_h0_f${f}`, mach: 0.3, alt: 0, fuel: f, state: "model_gap" },
+      ],
+      counts: { not_run: 2, model_gap: 1 }, labels: { model_gap: "모델 부족" },
+    }));
+  }
   if (method === "POST" && path === "/analysis/design-envelope-scan") {
     return Promise.resolve(reply(200, { id: `job${posts.length}` }));
   }
@@ -77,6 +92,16 @@ test("[제어 가능 판정] 클릭 — MouseEvent가 신호로 둔갑하지 않
   await tick();
   assert.deepEqual(reports, [], "클릭이 쇼케이스 보고를 썼다 — 이벤트가 신호로 둔갑");
   assert.deepEqual(scrolled, [], "평범한 클릭은 화면을 굴리지 않는다(신호일 때만)");
+});
+
+test("스캔 격자는 요구영역의 기본 격자 — 선도 연료 하나로 받고, 모델 부족 점은 보내지 않는다", () => {
+  const grid = posts.filter((p) => p.path === "/grid/base");
+  assert.ok(grid.length >= 1, "기본 격자를 받지 않고 스캔했다");
+  assert.equal(grid[0].body.fuels.length, 1, "선도 연료 하나");
+  assert.equal("n_mach" in grid[0].body, false, "빈 칸은 요구영역 명세 — 명세를 지어 보내지 않는다");
+  const sent = scanPosts()[0].body.cases;
+  assert.deepEqual(sent.map((c) => c.mach), [0.1, 0.24]);
+  assert.ok(sent.every((c) => c.name.startsWith("M0.")), "기본 격자 이름(값 그대로)을 싣는다");
 });
 
 test("scan 신호 — 자기 토큰으로 started·done, 결과가 사는 ② 층을 부드럽게 화면 위로", async () => {

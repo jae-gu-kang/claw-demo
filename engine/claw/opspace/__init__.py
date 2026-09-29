@@ -26,11 +26,11 @@ from claw.opspace.states import (
     trim_assessment,
     trim_state,
 )
-from claw.opspace.verdict import VerdictContext, condition_verdict, margin_of
+from claw.opspace.verdict import PRE_TRIM_CATEGORY, VerdictContext, condition_verdict, margin_of, pre_trim_verdict
 
 __all__ = [
     "CALC_FAILED", "COMPUTABLE", "CONSTRAINT_HIT", "INFEASIBLE", "MODEL_GAP", "NOT_RUN", "OUT_OF_REGION",
     "STATE_LABEL", "STATE_ORDER", "UNDEFINED",
     "ModelRange", "Region", "base_grid", "model_range_of", "pre_state", "region_of", "trim_assessment", "trim_state",
-    "VerdictContext", "condition_verdict", "margin_of",
+    "PRE_TRIM_CATEGORY", "VerdictContext", "condition_verdict", "margin_of", "pre_trim_verdict",
 ]

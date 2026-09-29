@@ -29,7 +29,8 @@ from claw.common.attitude import euler_to_quat
 from claw.design.classify import classify_failures
 from claw.design.criteria import MIN, MarginCriteria, target_conflicts
 from claw.design.fit import fit_quality, fit_slots
-from claw.design.grid import coarse_grid
+from claw.design.grid import DEFAULT_ALTS, DEFAULT_FUEL_FRACS, coarse_grid, coarse_preflight, region_grid
+from claw.opspace.basegrid import base_grid
 from claw.design.linmodels import LinearModelSet
 from claw.design.points import (
     AXES,
@@ -40,6 +41,7 @@ from claw.design.points import (
     OperatingPoint,
     PointSet,
     case_name,
+    pre_excluded,
 )
 from claw.design.refine import refine_trim_points
 from claw.design.schedmap import margin_delta, midpoint_validation_points, scheduled_margin_map
@@ -62,6 +64,14 @@ _SEAL_AFTER = 2  # 연속 무효 횟수 — 이 이상이면 그 (점, 자리, v
 # (예산 60)에서 요구 60개 중 0개, 기본 테스트 설정(예산 24)에서도 21개 중 2개만
 # 들어갔다. REFINE에 예산을 다 주지 않고 이 비율만큼 남긴다 [기본값]
 _VALIDATION_RESERVE_FRAC = 0.25
+# 점 예산 중 **COARSE 몫** (이관 2단계 [기본값]) — 요구영역 기본 격자가 이보다 크면 대표점을 고른다(grid.select_coarse:
+# 행 끝점·필수 조건은 늘 남긴다). 종전 coarse_grid는 예산 전체를 넘을 때만 거부했는데, 기본 격자는 요구영역 전체라
+# 그 규칙이면 COARSE가 예산을 다 먹고 REFINE(최대 1 − 검증 몫)·VERIFY가 들어갈 자리가 없다. 절반을 COARSE에,
+# 나머지를 REFINE 삽입과 검증점이 나눈다
+_COARSE_BUDGET_FRAC = 0.5
+# 요구영역이 없는 기체의 옛 coarse_grid 마하 점 수 — config.n_mach가 없음(None)이면 이 값. 요구영역이 있으면 None은
+# 영역의 기본 격자 명세(operating_region.base_grid.n_mach)다
+LEGACY_N_MACH = 5
 # 작동기 동특성의 마지막 폴백 — config도 기체 작동기도 없을 때(프로파일 없이 엔진을 직접
 # 부르는 경우)만 쓴다. 서버 경로는 늘 기체 문서의 actuator를 넘긴다(design_inputs). 값은
 # 마진 조성 기본값(pipeline.criteria.MarginComposition)과 같다 — 두 화면이 같은 점에서
@@ -77,6 +87,13 @@ ACTUATOR_FALLBACK = {"wn": 30.0, "zeta": 0.7}
 # 선택(v1.47 "1축 = 지배 축")은 이 축 안에서 한다. 표 모드에서 제한 밖 변동은 마하 분할점
 # 값의 톱니·cross_axis_residual로 드러나고(fit_quality가 잰다), 반출 표는 그대로 검증한 표다
 DEFAULT_SCHED_AXES = ("mach",)
+
+
+def _grid_spec(grid: dict, n_mach=None, alts=None, fuels=None) -> dict:
+    """격자 명세의 정규형 {n_mach, alts, fuels} — 덮음(설정) 우선, 없으면 영역 명세. 정렬·중복 제거는 base_grid와 같다."""
+    return {"n_mach": int(grid["n_mach"] if n_mach is None else n_mach),
+            "alts": sorted({float(a) for a in (grid["alts"] if alts is None else alts)}),
+            "fuels": sorted({float(f) for f in (grid["fuels"] if fuels is None else fuels)})}
 
 
 @dataclass
@@ -114,7 +131,9 @@ class AutoDesignConfig:
     fit_cross_axis_max: float = 0.0
     max_degree: int = 4
     max_segments: int = 4
-    n_mach: int = 5
+    # COARSE 격자 명세 — None이면 요구영역의 기본 격자 명세(operating_region.base_grid — n_mach·alts·fuels)를 쓰고, 값을
+    # 주면 그 값이 명세를 덮는다(이관 2단계). 요구영역이 없는 기체는 옛 coarse_grid(n_mach None → LEGACY_N_MACH)
+    n_mach: int | None = None
     # 보간 구간당 검증점 수 [기본값 1 = 중점] — 05 §3. 상한 4: MAX_POINTS 200에서
     # breakpoint 인접쌍이 수십 개면 4점만으로도 검증점이 예산 몫(_VALIDATION_RESERVE_FRAC)
     # 을 다 쓴다 — 더 촘촘한 탐색은 밀도가 아니라 worst_case_search(04 §5.5 [자리])의 몫
@@ -157,8 +176,8 @@ class AutoDesignConfig:
             v = getattr(self, name)
             if v < 0.0:
                 raise ValueError(f"{name}은 0(끔) 이상: {v}")
-        if self.n_mach < 2:
-            raise ValueError(f"n_mach는 2 이상: {self.n_mach}")
+        if self.n_mach is not None and self.n_mach < 2:
+            raise ValueError(f"n_mach는 2 이상 또는 없음(요구영역 기본 격자 명세): {self.n_mach}")
         if not 1 <= self.n_validation_between <= 4:
             raise ValueError(f"n_validation_between은 1~4: {self.n_validation_between}")
         if self.budget_tune_evals < 0:
@@ -415,6 +434,11 @@ class DesignSession:
         self.refine_report: dict = {}
         self.validation_wanted = 0
         self.validation_added = 0
+        # COARSE 격자 출처 — "region_base_grid"(요구영역 기본 격자, 이관 2단계) | "coarse_grid"(요구영역 없는 기체의 옛 경로)
+        # | None(COARSE 전·옛 세션). region_grid는 그 기본 격자 기록(점마다 트림 전 상태·선택 여부, 행, 선택 규칙 결과) —
+        # 요구영역 커버리지(region_coverage)의 분모다. 옛 경로면 None
+        self.coarse_source = None
+        self.region_grid = None
         self.stage = "COARSE"
         self.status = "running"
         self.iter_n = 0
@@ -453,14 +477,75 @@ class DesignSession:
                     rate_filters=dict(self.rate_filters))
 
     # ── 스테이지 ──
-    def _stage_coarse(self, aircraft, stall_table, limits, db_ranges, fingerprint, cb):
+    def coarse_budget(self) -> int:
+        """COARSE 점 예산 — 점 예산 × _COARSE_BUDGET_FRAC (최소 4 — config 하한과 같다)."""
+        return max(4, int(self.config.budget_points * _COARSE_BUDGET_FRAC))
+
+    def preflight(self, verdict_ctx) -> dict | None:
+        """제출 전 COARSE 격자 검사 — 잡 안에서 처음 터질 ValueError(예산 바닥·기본 격자 상한)를 미리 낸다(서버 422).
+
+        COARSE 전의 새 세션만 잰다(재개는 이미 격자가 있다). 요구영역 경로는 grid.coarse_preflight(같은 규칙), 옛 경로는
+        coarse_grid의 점 수 검사와 같은 곱이다. 돌려주는 값은 잰 결과(요구영역 경로) — 옛 경로·재개는 None."""
+        if self.stage != "COARSE":
+            return None
         c = self.config
-        out = coarse_grid(
-            aircraft, stall_table, limits, db_ranges, ctx=self.verdict_ctx,
-            n_mach=c.n_mach, alts=c.alts, fuels=c.fuels,
-            budget=c.budget_points, fingerprint=fingerprint,
-            on_progress=lambda d, t, m: cb(d, t, m),
-        )
+        if verdict_ctx.region is not None:
+            return coarse_preflight(verdict_ctx.region, verdict_ctx.model, n_mach=c.n_mach, alts=c.alts,
+                                    fuels=c.fuels, budget=self.coarse_budget())
+        n = LEGACY_N_MACH if c.n_mach is None else c.n_mach
+        total = n * len(DEFAULT_ALTS if c.alts is None else c.alts) * len(
+            DEFAULT_FUEL_FRACS if c.fuels is None else c.fuels)
+        if total > c.budget_points:
+            raise ValueError(f"coarse 격자 {total}점이 예산 {c.budget_points}을 초과 — n_mach·alts·fuels를 줄이거나 "
+                             "budget을 명시적으로 올려라")
+        return None
+
+    def _stage_coarse(self, aircraft, stall_table, limits, db_ranges, fingerprint, cb):
+        """COARSE — 요구영역이 있으면 그 기본 격자(05 §11.13 2단계), 없으면 옛 coarse_grid.
+
+        요구영역 경로: 기본 격자를 COARSE 예산에 맞춰 대표점으로 고르고(grid.select_coarse — 행 끝점·필수 조건은 늘 남긴다)
+        트림한다. 모델 부족·요구영역 밖·요구 미정의 점은 목록에 남기되 트림하지 않고 판정에 사유를 싣는다(pre_trim_verdict).
+        설계는 채택점에서만 돈다(trimmable = verdict.adopted — 종전과 같은 메커니즘). 초안 요구영역(draft:trim_grid)도 쓰되
+        region_coverage가 미확정이라고 말한다. 요구영역이 없으면(문맥 region None) 옛 격자로 돌고 region_coverage가
+        「요구영역 미정의」라고 말한다 — 조용히 옛 격자를 요구인 척하지 않는다."""
+        c = self.config
+        region = self.verdict_ctx.region
+        progress = lambda d, t, m: cb(d, t, m)  # noqa: E731
+        if region is not None:
+            out = region_grid(
+                aircraft, region, self.verdict_ctx.model, ctx=self.verdict_ctx,
+                n_mach=c.n_mach, alts=c.alts, fuels=c.fuels, budget=self.coarse_budget(),
+                fingerprint=fingerprint, on_progress=progress,
+            )
+            base = out["base"]
+            self.coarse_source = "region_base_grid"
+            spec = _grid_spec(region.grid, c.n_mach, c.alts, c.fuels)
+            req_spec = _grid_spec(region.grid)
+            # 설정이 명세를 덮으면 요구(분모)는 영역 자신의 명세로 따로 센다 — 덮은 격자가 요구를 줄이지 않게.
+            # 같으면 기본 격자가 곧 요구라 싣지 않는다(None)
+            requirement = None
+            if spec != req_spec:
+                req = base_grid(region, self.verdict_ctx.model)
+                requirement = {"points": [{k: p[k] for k in ("name", "mach", "alt", "fuel", "state")}
+                                          for p in req["points"]],
+                               "rows": [dict(r) for r in req["rows"]]}
+            self.region_grid = {
+                "source": region.source, "confirmed": bool(region.confirmed),
+                "points": [{k: p[k] for k in ("name", "mach", "alt", "fuel", "state", "selected")}
+                           for p in base["points"]],
+                "rows": [dict(r) for r in base["rows"]],
+                "axis": list(base["axis"]),
+                "selection": out["selection"],
+                "spec": spec, "requirement_spec": req_spec, "requirement": requirement,
+            }
+        else:
+            out = coarse_grid(
+                aircraft, stall_table, limits, db_ranges, ctx=self.verdict_ctx,
+                n_mach=LEGACY_N_MACH if c.n_mach is None else c.n_mach, alts=c.alts, fuels=c.fuels,
+                budget=c.budget_points, fingerprint=fingerprint, on_progress=progress,
+            )
+            self.coarse_source = "coarse_grid"
+            self.region_grid = None
         self.points, new_trims = out["points"], out["trims"]
         self.trims.update(new_trims)
         if out["aborted"]:
@@ -491,7 +576,8 @@ class DesignSession:
     def _stage_tune(self, aircraft, cb):
         c = self.config
         out = tune_points(
-            aircraft, self.points, self.lms, self.trims,
+            # 트림 전 제외 점(모델 부족 등)은 튜닝 대상도 건너뜀 목록도 아니다 — region_coverage가 센다
+            aircraft, self.points.designable(), self.lms, self.trims,
             design=self.design, targets=c.targets, max_evals=c.budget_tune_evals,
             on_progress=lambda d, t, m: cb(d, t, m), **self._act_kw(),
         )
@@ -609,7 +695,8 @@ class DesignSession:
 
     def _stage_verify(self, aircraft, fingerprint, cb):
         c = self.config
-        wanted = midpoint_validation_points(self.points, n_between=c.n_validation_between)
+        # 트림 전 제외 점을 낀 구간에는 검증점을 두지 않는다 — 그 구간 한쪽은 설계하지 않은 점이다
+        wanted = midpoint_validation_points(self.points.designable(), n_between=c.n_validation_between)
         self.validation_wanted = len(wanted)
         added = 0
         for pt in wanted:
@@ -620,7 +707,7 @@ class DesignSession:
         self.validation_added = added
         design_eff = {**self.design, **self.sched_constants}
         out = scheduled_margin_map(
-            aircraft, self.points, self.lms, self.sched_tables, design_eff,
+            aircraft, self.points.designable(), self.lms, self.sched_tables, design_eff,
             # targets는 λ 판정에만 쓴다 — 롤 대역폭 요구가 튜닝 목표에서 온다.
             # 튜닝과 검증이 **같은 목표**를 보게 하는 유일한 배선이다
             criteria=c.criteria, targets=c.targets, trims=self.trims,
@@ -670,7 +757,7 @@ class DesignSession:
                             " 세션 검증이 곧 이 표의 검증이다 (재계산 생략)"}
         design_eff = {**self.design, **self.sched_constants}
         out = scheduled_margin_map(
-            aircraft, self.points, self.lms, tables, design_eff,
+            aircraft, self.points.designable(), self.lms, tables, design_eff,
             criteria=c.criteria, targets=c.targets, trims=self.trims, ctx=self.verdict_ctx,
             on_progress=on_progress, **self._act_kw(),
         )
@@ -730,6 +817,8 @@ class DesignSession:
             "refine_tol": self.config.refine_tol,
             "refine_aborted": rr.get("aborted"),
             "not_trimmed": self.not_trimmed_count(),
+            # 트림 전에 제외한 점(모델 부족·요구영역 밖·요구 미정의) — 목록에 남고 설계하지 않았다(이관 2단계)
+            "pre_trim_excluded": sum(1 for p in self.points if pre_excluded(p)),
         }
 
     def coverage_gaps(self) -> list:
@@ -755,6 +844,17 @@ class DesignSession:
                 f"트림 격자 세분화가 허용치 전에 끊겼다 (남은 플랜트 거리 {rem:.3g} >"
                 f" 허용 {tol:g}, 사유 {cov['refine_aborted'] or '미상'}) — 그 구간의"
                 " 플랜트 변화는 격자가 담지 못한다"
+            )
+        if cov["pre_trim_excluded"]:
+            by_state: dict = {}
+            for p in self.points:
+                if pre_excluded(p):
+                    st = p.verdict["trim"]["status"]
+                    by_state[st] = by_state.get(st, 0) + 1
+            out.append(
+                f"요구영역 기본 격자점 {cov['pre_trim_excluded']}개는 트림 전에 제외했다 ("
+                + " · ".join(f"{k} {n}" for k, n in sorted(by_state.items()))
+                + ") — 설계하지 않았고, 요구영역 완료 여부(region_coverage)에서 미해결로 센다"
             )
         if cov["not_trimmed"]:
             out.append(
@@ -1099,7 +1199,8 @@ class DesignSession:
         return {"applied": applied, "next_stage": self.stage}
 
     def _add_validation_around(self, v_name):
-        flank = self.points.flanking(v_name, ROLE_VALIDATION)
+        # 트림 전 제외 점은 이웃이 아니다 — 설계하지 않은 점 쪽으로 검증점을 늘리지 않는다
+        flank = self.points.designable().flanking(v_name, ROLE_VALIDATION)
         if flank is None:
             return
         lo, hi, axis = flank
@@ -1243,7 +1344,113 @@ class DesignSession:
             "target_warnings": c.target_warnings(),
             # 튜닝·검증이 본 작동기와 그 출처(config·profile·default) — 판정 조성의 일부다
             "actuator": self.actuator_used(),
+            # COARSE 격자 출처와 요구영역 커버리지 — 일부 점의 설계 성공이 요구영역 완료로 읽히지 않게(05 §11.13 2단계)
+            "coarse_source": self.coarse_source,
+            "region_coverage": self.region_coverage(),
         }
+
+    _COVERAGE_KEYS = ("adopted", "trim", "model", "limits", "region", "unselected", "omitted", "not_run")
+
+    def region_coverage(self) -> dict:
+        """요구영역 커버리지 — {"source", "confirmed", "points", "by_category", "rows_undefined", "complete", "reasons"}.
+
+        요구 조건(분모 points)은 기본 격자의 요구영역 안 점 전부(선택하지 않은 점 포함 — 모델 부족 점도 요구 안이다)와,
+        기본 격자 밖에서 세션이 더한 요구영역 안 점(보강·검증점 — 판정 region "in")이다. by_category는 그 점마다 하나:
+        adopted(채택) · trim/model/limits/region(채택 제외 범주 — condition_verdict·pre_trim_verdict의 exclusion) ·
+        unselected(예산 때문에 COARSE가 고르지 않은 기본 격자점) · omitted(설정의 격자 명세 덮음이 COARSE 격자에서 뺀 요구
+        조건 — 분모는 늘 영역 자신의 명세라서다) · not_run(아직 판정 전 — 취소 등).
+
+        **complete 규칙** (05 §11.13 2단계 — 일부 점의 설계 성공이 요구영역 전체의 완료가 아니다). 다음이 모두 참일 때만 True:
+        ① 요구영역이 확정(operating_region)이다 — 초안(draft:trim_grid)은 미확정이라 완료라 하지 않는다(05 §11.2)
+        ② 설계가 끝났다(status "converged" — 판정한 전 점 통과)
+        ③ 요구 미정의 행이 없다(경계표가 덮지 않는 고도·연료 — 요구 자체가 없다)
+        ④ 모든 요구 조건이 덮였다: 채택되고 검증 판정(마진 맵 loops, 엔벨로프 밖 아님)을 받았거나, 고르지 않은 점이면 같은
+           행(고도·연료)에서 그런 점 둘 사이(마하)에 있다(끼인 구간은 스케줄 보간이 덮고 검증은 그 구간이 한다).
+           채택하지 못한 요구 조건이 하나라도 있으면 거짓이다.
+        요구영역 없는 기체(옛 coarse_grid 경로)는 source None · complete False · 사유 「요구영역 미정의」다. 기본 격자
+        기록이 없는 세션(COARSE 전·이관 2단계 전)도 source None이지만 사유는 「요구영역 커버리지 모름」이다 — 기체에
+        요구영역이 있을 수 있어 「미정의」라 부르지 않는다(보고의 coarse_source가 둘을 가른다).
+        """
+        by = {k: 0 for k in self._COVERAGE_KEYS}
+        if self.region_grid is None:
+            why = ("요구영역 미정의 — 기체에 요구 운용영역(operating_region)도 trim_grid 초안도 없어 COARSE가 옛 coarse_grid로"
+                   " 돌았다" if self.coarse_source == "coarse_grid"
+                   else "요구영역 커버리지 모름 — 이 세션에 요구영역 기본 격자 기록이 없다(COARSE 전이거나 이관 2단계 전"
+                   " 세션). 기체에 요구영역이 없다는 뜻이 아니다")
+            return {"source": None, "confirmed": None, "points": 0, "by_category": by, "rows_undefined": [],
+                    "complete": False, "reasons": [why]}
+        rg = self.region_grid
+        cases = self.margin_out.get("cases", {})
+        # 요구 = 영역 자신의 기본 격자 명세. 설정이 덮은 세션은 따로 실린 요구(requirement)를, 아니면 기본 격자를 쓴다
+        req = rg.get("requirement") or {"points": rg["points"], "rows": rg["rows"]}
+        base_names = {p["name"] for p in rg["points"]}
+        base_rows = {(r["alt"], r["fuel"]) for r in rg["rows"]}
+
+        def judged(name):
+            e = cases.get(name)
+            return e is not None and bool(e.get("loops")) and not e.get("outside_envelope")
+
+        required = [(p["name"], p["mach"], p["alt"], p["fuel"]) for p in req["points"]
+                    if p["state"] not in ("out_of_region", "undefined")]
+        seen = {r[0] for r in required}
+        for p in self.points:
+            reg = (p.verdict or {}).get("region") or {}
+            if p.name not in seen and reg.get("status") == "in":
+                required.append((p.name, p.case.mach, p.case.alt, p.case.fuel))
+                seen.add(p.name)
+        covered_rows: dict = {}
+        for p in self.points:
+            if p.trimmable and judged(p.name):
+                covered_rows.setdefault((p.case.alt, p.case.fuel), []).append(p.case.mach)
+        # 채택 제외는 by_category가 범주로 세고, 여기는 채택됐거나 고르지 않았는데도 설계·검증이 덮지 못한 점을 센다
+        unverified = 0
+        missing_rows, missing_pts = set(), 0
+        for name, mach, alt, fuel in required:
+            if name not in self.points:
+                if name in base_names:
+                    by["unselected"] += 1
+                else:
+                    by["omitted"] += 1
+                    if (alt, fuel) not in base_rows:  # 행째 빠졌다 — 끼인 구간 보간도 없다
+                        missing_rows.add((alt, fuel))
+                        missing_pts += 1
+                        continue
+                row = covered_rows.get((alt, fuel), ())
+                if not (any(m < mach for m in row) and any(m > mach for m in row)):
+                    unverified += 1
+                continue
+            pt = self.points.get(name)
+            if pt.verdict is None:
+                by["not_run"] += 1
+                unverified += 1
+            elif pt.trimmable:
+                by["adopted"] += 1
+                if not judged(name):
+                    unverified += 1
+            else:
+                by[pt.verdict["exclusion"]["category"]] += 1
+        rows_undefined = [{"alt": r["alt"], "fuel": r["fuel"], "state": r["state"]} for r in req["rows"]
+                          if r["state"] == "undefined"]
+        reasons = []
+        if not rg["confirmed"]:
+            reasons.append(f"요구영역 미확정 — 초안({rg['source']})이다. 확정 전에는 완료라 하지 않는다")
+        if self.status != "converged":
+            reasons.append(f"설계 미완료 — 상태 {self.status}")
+        if rows_undefined:
+            reasons.append(f"요구 미정의 행 {len(rows_undefined)}개 — 경계표가 덮지 않는 고도·연료")
+        excluded = {k: by[k] for k in ("trim", "model", "limits", "region") if by[k]}
+        if excluded:
+            reasons.append(f"채택하지 못한 요구 조건 {sum(excluded.values())}점 ("
+                           + " · ".join(f"{k} {n}" for k, n in excluded.items()) + ")")
+        if missing_rows:
+            reasons.append(f"격자 명세를 설정이 덮음 — 요구 행 {len(missing_rows)}개 미포함 ({missing_pts}점). 요구영역"
+                           " 명세의 고도·연료를 설정에서 빼면 그 행은 설계되지 않는다")
+        if unverified:
+            reasons.append(f"설계·검증이 덮지 못한 요구 조건 {unverified}점 (미판정·검증 판정 없음·채택점 사이 밖의"
+                           " 미선택점·설정이 뺀 점)")
+        return {"source": rg["source"], "confirmed": rg["confirmed"], "points": len(required), "by_category": by,
+                "rows_undefined": rows_undefined, "complete": not reasons, "reasons": reasons,
+                "spec": rg.get("spec"), "requirement_spec": rg.get("requirement_spec")}
 
     # ── 직렬화 ──
     def to_dict(self) -> dict:
@@ -1274,6 +1481,8 @@ class DesignSession:
             "escalations": self.escalations,
             "iterations": self.iterations,
             "stage": self.stage, "status": self.status, "iter_n": self.iter_n,
+            "coarse_source": self.coarse_source,
+            "region_grid": self.region_grid,
         }
 
     @classmethod
@@ -1307,4 +1516,7 @@ class DesignSession:
         s.stage = d["stage"]
         s.status = d["status"]
         s.iter_n = int(d.get("iter_n", 0))
+        # 이관 2단계 전 세션에는 없다 — 요구영역 커버리지는 「기록 없음」으로 말한다
+        s.coarse_source = d.get("coarse_source")
+        s.region_grid = d.get("region_grid")
         return s

@@ -5,7 +5,9 @@ import functools
 import numpy as np
 import pytest
 
+from claw.common.contracts import TrimCase
 from claw.design import AutoDesignConfig, DesignSession, TuneTargets
+from claw.design.points import ROLE_ANCHOR, OperatingPoint, case_name
 from claw.fcl.demo import demo_design_gains
 from claw.plant import (
     make_demo_aircraft,
@@ -823,7 +825,7 @@ def test_yaw_target_headroom_absorbs_the_altitude_interleave_of_a_mach_table():
     튜너는 앵커마다 목표에 처음 닿는 크기를 고르지만, 1축 표는 같은 마하 근처의 두 고도 값을 한 축에 섞는다 — 한
     고도의 앵커가 다른 고도의 분할점 값을 받는 자리에서 요 ζ가 목표 아래로 내려간다(제품 예제 500·1500 m 소격자:
     최저 목표의 97 %). 목표가 판정 목표선과 같으면(종전 0.5 = zeta_good) 그 표현 손실이 곧 warn이다 — 실측 요 판정
-    58건 중 20건 warn. 목표를 목표선 위에 두면(TuneTargets.zeta_dr — 잰 표현 손실 최대 16.4 %를 덮는 0.6) 0건이다.
+    60건 중 15건 warn(이관 2단계 — 격자가 요구영역 기본 격자 M0.106~0.28에서 나온다. 종전 coarse_grid 58건 중 20건). 목표를 목표선 위에 두면(TuneTargets.zeta_dr — 잰 표현 손실 최대 16.4 %를 덮는 0.6) 0건이다.
     둘 다 수렴·실패 0이라, 목표만이 판정을 가른다."""
     from claw.design import MarginCriteria, design_inputs
     from claw.profile import build_profile
@@ -844,12 +846,12 @@ def test_yaw_target_headroom_absorbs_the_altitude_interleave_of_a_mach_table():
 
     crit = MarginCriteria()
     at_goal = yaw_verdicts(TuneTargets(zeta_dr=crit.zeta_good))
-    assert sum(st == "warn" for _, st in at_goal) == 20 and len(at_goal) == 58
-    assert min(z for z, _ in at_goal) == pytest.approx(0.4872, abs=1e-3)
+    assert sum(st == "warn" for _, st in at_goal) == 15 and len(at_goal) == 60
+    assert min(z for z, _ in at_goal) == pytest.approx(0.4870, abs=1e-3)
     default = yaw_verdicts(TuneTargets())
     assert TuneTargets().zeta_dr > crit.zeta_good
-    assert [st for _, st in default] == ["ok"] * 58, sorted(default)[:5]
-    assert min(z for z, _ in default) == pytest.approx(0.5846, abs=1e-3)
+    assert [st for _, st in default] == ["ok"] * 60, sorted(default)[:5]
+    assert min(z for z, _ in default) == pytest.approx(0.5844, abs=1e-3)
 
 
 def test_table_mode_adopts_the_table_it_verified(env):
@@ -950,7 +952,8 @@ def test_validation_density_reaches_the_verify_stage(env):
     ac, stall, limits, db, design = env
     counts = {}
     for n in (1, 2):
-        s = DesignSession(_small(budget_points=40, n_validation_between=n))
+        # 예산 60 — 요구영역 격자(M0.3~0.55)에서는 REFINE이 좁은 구간을 더 채워 40이면 밀도 2의 검증점이 예산에 막혔다(이관 2단계)
+        s = DesignSession(_small(budget_points=60, n_validation_between=n))
         s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
         counts[n] = s.coverage()["validation_points"]
     assert counts[2] > counts[1] > 0
@@ -1071,9 +1074,11 @@ def test_fit_stage_schedules_on_mach_even_when_altitude_dominates():
 def test_multi_altitude_run_exports_only_mach_tables(env):
     """고도 둘로 실제로 돌려도 반출 표는 전부 마하 표다 (재검증도 그 표로 한다)."""
     ac, stall, limits, db, design = env
-    s = DesignSession(_small(alts=(1000.0, 5000.0), budget_iters=1))
+    # 두 고도 모두 요구영역(초안 100~3000 m) 안이어야 한다 — 5000 m는 요구영역 밖 행이라 점이 없다(이관 2단계)
+    s = DesignSession(_small(alts=(1000.0, 3000.0), budget_iters=1))
     s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     assert s.sched_tables, "스케줄 표가 없다 — 전제가 바뀌었다"
+    assert {p.case.alt for p in s.points if p.origin == "coarse"} == {1000.0, 3000.0}
     assert {t.axis_names for t in s.sched_tables.values()} == {("mach",)}
 
 
@@ -1347,3 +1352,179 @@ def test_fit_exclusion_map_follows_the_axis_and_keeps_working_dampers():
     # P2의 요는 target_unreached(작동하는 댐퍼)라 롤 댐퍼를 끌고 가지 않는다
     assert "P2" not in ex["roll.k_rate"]
     assert "P2" not in ex.get("yaw.k_rate", {}) and "P1" not in ex["pitch.k_rate"]
+
+
+# ── 이관 2단계 — COARSE는 요구영역의 기본 격자, 커버리지는 요구영역 기준 (05 §11.13) ──────────────────────────────
+
+
+def _region_ctx(**over):
+    """예제 판정 문맥의 요구영역만 바꾼 것 — 기본값은 확정 영역(초안 대신)."""
+    import dataclasses
+
+    ctx = _vctx()
+    region = dataclasses.replace(ctx.region, confirmed=True, source="profile", **over)
+    return dataclasses.replace(ctx, region=region, cache={})
+
+
+def test_coarse_uses_the_region_base_grid_and_reports_a_draft_as_unconfirmed(env):
+    """구 합성 기체는 operating_region이 없어 trim_grid 초안(M0.3~0.55 · 100/1000/3000 m · 200 kg)이 요구영역이다 — 쓰되
+    미확정이라 완료라 하지 않는다. 격자는 초안의 기본 격자에서 나온다(옛 coarse_grid는 실속 하한 × 1.1 ~ M_NO 0.75)."""
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small())  # n_mach 3 · 1000 m · 200 kg — 설정이 영역의 격자 명세를 덮는다
+    report = s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
+    coarse = [p for p in s.points if p.origin == "coarse"]
+    assert [p.case.mach for p in coarse] == [0.3, 0.425, 0.55]  # 요구 마하 전 구간 — 물리로 깎지 않는다
+    assert report["coarse_source"] == "region_base_grid"
+    rc = report["region_coverage"]
+    assert (rc["source"], rc["confirmed"], rc["complete"]) == ("draft:trim_grid", False, False)
+    assert any("미확정" in r for r in rc["reasons"])
+    assert rc["points"] >= 3 and sum(rc["by_category"].values()) == rc["points"]
+    assert s.region_grid["selection"]["rule"] == "all"
+
+
+def test_model_gap_points_stay_in_the_session_untrimmed_and_the_region_is_not_complete(env):
+    """모델 부족 점(DB 마하 0.9 밖)은 버리지 않고 목록에 남는다 — 트림·튜닝·검증은 하지 않고, 요구영역은 완료가 아니다."""
+    ac, stall, limits, db, design = env
+    ctx = _region_ctx(mach=(0.5, 0.95), alt=(1000.0, 1000.0))
+    s = DesignSession(_small(n_mach=4, budget_iters=1))
+    report = s.run(ac, stall, limits, db, design, verdict_ctx=ctx, fingerprint="fp")
+    gap = next(p for p in s.points if p.case.mach == 0.95)
+    assert gap.trimmable is False and gap.verdict["exclusion"] == {"category": "model", "reasons": ["model_gap"]}
+    assert gap.name not in s.trims and gap.name not in s.margin_out["cases"]
+    assert gap.name not in report["skipped"]  # 튜닝 「건너뜀」(트림 미수렴·경계)과 다르다 — 요구영역 커버리지가 센다
+    assert report["coverage"]["pre_trim_excluded"] == 1
+    assert any("트림 전에 제외" in g for g in report["coverage_gaps"])
+    rc = report["region_coverage"]
+    assert rc["confirmed"] is True and rc["by_category"]["model"] == 1 and rc["complete"] is False
+    assert any("채택하지 못한 요구 조건" in r for r in rc["reasons"])
+    s2 = DesignSession.from_dict(s.to_dict())
+    assert s2.to_dict() == s.to_dict() and s2.report()["region_coverage"] == rc
+
+
+def test_without_a_region_the_legacy_grid_runs_and_says_the_requirement_is_undefined(env):
+    import dataclasses
+
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small(budget_iters=1))
+    report = s.run(ac, stall, limits, db, design, verdict_ctx=dataclasses.replace(_vctx(), region=None, cache={}),
+                   fingerprint="fp")
+    assert report["coarse_source"] == "coarse_grid" and s.region_grid is None
+    assert max(p.case.mach for p in s.points if p.origin == "coarse") == pytest.approx(0.75)  # 옛 규칙 — M_NO까지
+    rc = report["region_coverage"]
+    assert (rc["source"], rc["complete"], rc["points"]) == (None, False, 0)
+    assert rc["reasons"][0].startswith("요구영역 미정의")
+
+
+def test_coarse_picks_representative_points_within_its_budget(env):
+    """기본 격자가 COARSE 몫(점 예산의 절반)을 넘으면 행 끝점을 남기고 공통 좌표를 솎는다 — 뺀 점은 커버리지가 센다."""
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small(n_mach=11, alts=(100.0, 3000.0), budget_points=20, budget_iters=1))
+    s.run(ac, stall, limits, db, design, verdict_ctx=_region_ctx(), fingerprint="fp")
+    sel = s.region_grid["selection"]
+    assert sel["rule"] == "thinned" and sel["budget"] == 10 and sel["selected"] <= 10
+    coarse = [p for p in s.points if p.origin == "coarse"]
+    for alt in (100.0, 3000.0):
+        row = sorted(p.case.mach for p in coarse if p.case.alt == alt)
+        assert (row[0], row[-1]) == (0.3, 0.55)
+    rc = s.report()["region_coverage"]
+    # 뺀 점 중 보강·검증점으로 나중에 세션에 들어온 것(같은 좌표)은 더는 미선택이 아니다. 설정이 명세를 덮었으므로
+    # 요구(분모)는 영역 자신의 명세(6점 마하 · 3고도)다 — 덮은 격자에만 있는 좌표는 미선택으로 세지 않는다
+    req = {p["name"] for p in s.region_grid["requirement"]["points"]}
+    assert rc["by_category"]["unselected"] == sum(n not in s.points and n in req for n in sel["dropped"]) > 0
+    assert rc["by_category"]["omitted"] > 0 and rc["complete"] is False
+
+
+def _coverage_session(**state):
+    """region_coverage를 상태만으로 재는 세션 — 확정 영역 한 행 M0.3·0.4·0.5, 0.4는 고르지 않았다."""
+    s = DesignSession(_small())
+    s.region_grid = {"source": "profile", "confirmed": True, "axis": [0.3, 0.4, 0.5], "selection": {},
+                     "rows": [{"alt": 1000.0, "fuel": 200.0, "bounds": [0.3, 0.5], "n": 3, "state": "not_run"}],
+                     "points": [{"name": case_name(m, 1000.0, 200.0), "mach": m, "alt": 1000.0, "fuel": 200.0,
+                                 "state": "not_run", "selected": m != 0.4} for m in (0.3, 0.4, 0.5)]}
+    s.coarse_source = "region_base_grid"
+    for m in (0.3, 0.5):
+        pt = OperatingPoint(case=TrimCase(name=case_name(m, 1000.0, 200.0), mach=m, alt=1000.0, fuel=200.0),
+                            role=ROLE_ANCHOR, origin="coarse")
+        pt.verdict = {"region": {"status": "in", "confirmed": True}, "adopted": True, "exclusion": None,
+                      "trim": {"status": "computable", "reasons": []}}
+        pt.trimmable = True
+        s.points.add(pt)
+    s.margin_out = {"cases": {p.name: {"loops": {"pitch_rate": {"status": "ok"}}} for p in s.points}}
+    s.status = "converged"
+    for k, v in state.items():
+        setattr(s, k, v)
+    return s
+
+
+def test_region_is_complete_only_when_every_required_condition_is_adopted_and_verified():
+    rc = _coverage_session().region_coverage()
+    assert rc["complete"] is True and rc["reasons"] == []
+    assert rc["by_category"] == {"adopted": 2, "trim": 0, "model": 0, "limits": 0, "region": 0, "unselected": 1, "omitted": 0,
+                                 "not_run": 0}
+    # 설계가 끝나지 않았으면
+    assert _coverage_session(status="budget_exhausted").region_coverage()["complete"] is False
+    # 채택점 하나가 검증 판정을 못 받았으면 — 그 점도, 그 사이의 고르지 않은 점도 덮이지 않는다
+    s = _coverage_session()
+    s.margin_out["cases"][case_name(0.5, 1000.0, 200.0)]["outside_envelope"] = True
+    rc = s.region_coverage()
+    assert rc["complete"] is False and any("덮지 못한 요구 조건 2점" in r for r in rc["reasons"])
+    # 한 점이 채택되지 않았으면(부분 성공) — 나머지가 다 통과해도 요구영역 완료가 아니다
+    s = _coverage_session()
+    pt = s.points.get(case_name(0.5, 1000.0, 200.0))
+    pt.trimmable, pt.verdict = False, {**pt.verdict, "adopted": False,
+                                       "exclusion": {"category": "limits", "reasons": ["q_max"]}}
+    rc = s.region_coverage()
+    assert rc["complete"] is False and rc["by_category"]["limits"] == 1
+    # 경계표가 덮지 않는 행이 있으면
+    s = _coverage_session()
+    s.region_grid["rows"].append({"alt": 3000.0, "fuel": 200.0, "bounds": None, "n": 0, "state": "undefined"})
+    assert s.region_coverage()["rows_undefined"] == [{"alt": 3000.0, "fuel": 200.0, "state": "undefined"}]
+    assert s.region_coverage()["complete"] is False
+
+
+def test_a_config_grid_override_does_not_shrink_the_requirement(env):
+    """설정의 고도 목록(1000 m 하나)이 요구영역 명세(100/1000/3000 m)를 덮어도 요구는 줄지 않는다 — 분모는 영역 자신의
+    기본 격자 명세다. 설정이 뺀 요구 행의 점은 「덮지 못함」이고 완료가 아니다(리뷰 재현: 이전엔 complete True)."""
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small(budget_iters=1))
+    report = s.run(ac, stall, limits, db, design, verdict_ctx=_region_ctx(), fingerprint="fp")
+    rc = report["region_coverage"]
+    assert rc["complete"] is False
+    assert any(r.startswith("격자 명세를 설정이 덮음 — 요구 행 2개 미포함") for r in rc["reasons"]), rc["reasons"]
+    assert rc["by_category"]["omitted"] > 0 and sum(rc["by_category"].values()) == rc["points"]
+    # COARSE가 실제로 쓴 명세와 요구 명세를 세션에 남긴다(직렬화 왕복)
+    assert s.region_grid["spec"] == {"n_mach": 3, "alts": [1000.0], "fuels": [200.0]}
+    assert s.region_grid["requirement_spec"] == {"n_mach": 6, "alts": [100.0, 1000.0, 3000.0], "fuels": [200.0]}
+    s2 = DesignSession.from_dict(s.to_dict())
+    assert s2.report()["region_coverage"] == rc
+
+
+def test_without_an_override_the_requirement_is_the_coarse_base_grid():
+    """덮지 않으면(요구 기록 없음 — 옛 기록 포함) 기본 격자가 곧 요구다 — 설정 덮음 사유가 서지 않는다."""
+    rc = _coverage_session().region_coverage()
+    assert rc["by_category"]["omitted"] == 0 and not any("설정이 덮음" in r for r in rc["reasons"])
+
+
+def test_preflight_rejects_a_coarse_budget_below_the_row_ends_before_the_job():
+    """COARSE 몫(4)이 행 끝점 6점(3고도 × 2)보다 작으면 제출 전 검사가 ValueError — 서버가 202 전에 422로 낸다."""
+    import dataclasses
+
+    s = DesignSession(_small(alts=(100.0, 1000.0, 3000.0), budget_points=4))
+    with pytest.raises(ValueError, match="예산"):
+        s.preflight(_region_ctx())
+    assert DesignSession(_small()).preflight(_region_ctx())["floor"] == 2
+    # 옛 경로(요구영역 없음)는 coarse_grid의 점 수 곱과 같은 검사
+    with pytest.raises(ValueError, match="초과"):
+        DesignSession(_small(n_mach=5, alts=(100.0, 1000.0, 3000.0), budget_points=12)).preflight(
+            dataclasses.replace(_vctx(), region=None, cache={}))
+    # 재개(COARSE 뒤)는 이미 격자가 있다 — 재지 않는다
+    s.stage = "TUNE"
+    assert s.preflight(_region_ctx()) is None
+
+
+def test_a_session_without_a_base_grid_record_is_unknown_not_undefined():
+    """이관 2단계 전 세션(기본 격자 기록 없음·coarse_source None)은 기체에 요구영역이 있을 수 있다 — 「미정의」가 아니라 「모름」."""
+    s = DesignSession(_small())
+    rc = s.region_coverage()
+    assert rc["source"] is None and rc["complete"] is False
+    assert rc["reasons"][0].startswith("요구영역 커버리지 모름")

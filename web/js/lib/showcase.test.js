@@ -131,11 +131,35 @@ test("자동 설계 config 폴백 — 기록이 없으면 예산 + 선택 기체
   assert.equal(da(null).notes.length, 1);
 });
 
-// S1 생성기가 law.gain_tables.provenance.design.config에 적는 모양 그대로(표 표현 재생성본 — P5-s1: 설계 고도 해면
-// 한 줄 · 점 예산 90. 마하 1축 표라 두 고도를 주면 톱니가 됐다). 표 표현은 다항 적합 제한(max_degree·max_segments)을
-// 쓰지 않아 적지 않는다
+test("자동 설계 config 폴백 — 요구영역이 있는 문서는 n_mach를 싣지 않는다(마하 격자는 영역 기본 격자 명세)", () => {
+  // 엔진 AutoDesignConfig.n_mach None = 요구영역 명세 — 예산의 n_mach를 실으면 그 명세를 덮는다
+  const base = { mission_template: { envelope: { alt: [111, 2222] }, trim_grid: { fuel: [7, 33] } } };
+  const region = { ...base, operating_region: { mach: [0.1, 0.24], alt: [200, 3000], fuel: [10, 50],
+    base_grid: { n_mach: 8, alts: [200, 3000], fuels: [10, 50] } } };
+  const r = autodesignConfigFor(region);
+  assert.equal(r.source, "template");
+  assert.equal("n_mach" in r.config, false);
+  const { n_mach: _n, ...budgetRest } = AUTODESIGN_BUDGET;
+  assert.deepEqual(r.config, { ...budgetRest, alts: [111, 2222], fuels: [7, 33] });
+  assert.match(r.note, /^설정 출처: 미션 템플릿 축/);
+  assert.match(r.note, /요구영역 기본 격자 명세/);
+  // 요구영역이 없는 문서(옛 기체)는 예산의 n_mach 그대로 — 옛 coarse_grid의 마하 점 수
+  const legacy = autodesignConfigFor(base);
+  assert.equal(legacy.config.n_mach, AUTODESIGN_BUDGET.n_mach);
+  assert.doesNotMatch(legacy.note, /요구영역/);
+  // 객체가 아닌 영역 칸은 영역이 아니다
+  for (const bad of [null, [1], "x"]) {
+    assert.equal(autodesignConfigFor({ ...base, operating_region: bad }).config.n_mach, AUTODESIGN_BUDGET.n_mach);
+  }
+  // 단계 표의 문서 인자도 같은 규칙
+  assert.deepEqual(acts("autodesign")[0].docArgs(region).args, { config: r.config });
+});
+
+// S1 생성기가 law.gain_tables.provenance.design.config에 적는 모양 그대로(v1.66 요구영역 격자 재생성본: 설계 줄
+// 200 m / 25 kg · 점 예산 90, n_mach 없음 — 마하 격자는 요구영역 기본 격자 명세. 마하 1축 표라 두 고도를 주면 톱니가
+// 됐다 — P5-s1). 표 표현은 다항 적합 제한(max_degree·max_segments)을 쓰지 않아 적지 않는다
 const S1_DESIGN_CONFIG = {
-  n_mach: 7, budget_points: 90, budget_iters: 2, alts: [0], fuels: [25],
+  budget_points: 90, budget_iters: 2, alts: [200], fuels: [25],
   targets: { zeta_sp: 0.9 }, fit_mode: "table",
 };
 // 요청으로 옮긴 모양 — 판정선·목표(criteria·targets)는 뗀다(기준 통합 ①: 목표는 기체 문서 /tuning이 정본)
@@ -152,13 +176,14 @@ test("자동 설계 config — 문서가 적어 둔 설계 설정(provenance.des
   const r = autodesignConfigFor(doc);
   // 게인 표현까지 그대로 — 템플릿 축(111·2222 / 7·33)도 진행기 예산(n_mach 5)도 섞이지 않는다. 목표 ζsp는 뗀다
   assert.deepEqual(r.config, S1_REQUEST_CONFIG);
+  assert.equal("n_mach" in r.config, false, "기록에 없는 마하 점 수를 예산에서 채우지 않는다(요구영역 명세가 원천)");
   assert.equal("targets" in r.config, false);
   assert.equal(r.source, "document");
   assert.match(r.note, /^설정 출처: 문서 확정 게인 표를 만든 설정\(law\.gain_tables\.provenance\.design\.config\)/);
   // 사본이다 — 신호 args를 고쳐도 문서 캐시(selectedDocument)가 안 바뀐다
   r.config.alts.push(9);
   assert.equal(doc.law.gain_tables.provenance.design.config.targets.zeta_sp, 0.9);
-  assert.deepEqual(doc.law.gain_tables.provenance.design.config.alts, [0]);
+  assert.deepEqual(doc.law.gain_tables.provenance.design.config.alts, [200]);
   assert.deepEqual(designConfigRecord(doc), S1_DESIGN_CONFIG);
   // 단계 표의 문서 인자도 같은 출처
   const da = acts("autodesign")[0].docArgs(doc);
@@ -186,7 +211,7 @@ test("자동 설계 config — 반영 뒤 기록이 빠진 쇼케이스 문서�
   assert.equal(r.source, "package");
   assert.match(r.note, new RegExp(`^설정 출처: ${SHOWCASE_ID} 패키지 문서의 확정 표 설정`));
   r.config.alts.push(9);
-  assert.deepEqual(packaged.law.gain_tables.provenance.design.config.alts, [0], "패키지 문서도 사본으로");
+  assert.deepEqual(packaged.law.gain_tables.provenance.design.config.alts, [200], "패키지 문서도 사본으로");
   assert.equal(packaged.law.gain_tables.provenance.design.config.targets.zeta_sp, 0.9, "기록 자체는 그대로");
   // id가 다른 패키지(남의 기체)의 설정은 물려주지 않는다 — 템플릿 규칙
   const other = autodesignConfigFor({ ...applied, id: "other-plane" }, { packaged });
@@ -220,13 +245,14 @@ const tablesDigest = (tables) => createHash("sha256")
   .update(JSON.stringify(Object.keys(tables).sort().map((n) => [n, tables[n].axes, tables[n].data])))
   .digest("hex").slice(0, 16);
 
-test("결함 시연 상수 — S1 확정본에서 잰 창(×5.2~5.85, FAIL → 처방 → PASS)의 가운데다", () => {
-  // P5-s1 실측(lib/showcase.js 머리 주석) — 설계 격자를 해면 한 줄로 바꿔 확정 표의 톱니를 없애자 창이 ×5.4~6.6에서
-  // 옮았다(3000 m에서 게인이 해면 값이라 M0.18_h3000_f10의 동적 여유가 먼저 닳는다). 그 전의 창: 피치 명령 상한 0.35 rad
-  // ×4.8~5.8, 0.3 rad ×5.4~6.6(요 댐퍼 표 수리·발진 웜스타트·요 목표 ζ_dr 0.6에서 그대로). 예제에서 잰 피치 댐퍼 ×4.8은
-  // S1에서 FAIL이 안 난다. 창 폭이 0.65라 양끝 여유는 0.3 — 새 측정에서 어느 끝이 0.3 안으로 들어오면 창을 다시 고른다
-  assert.deepEqual(SHOWCASE_FAULT, { path: "autopilot.alt.k_rate", factor: 5.5 });
-  const [lo, hi] = [5.2, 5.85];
+test("결함 시연 상수 — S1 확정본에서 잰 창(×5.3~6.0, FAIL → 처방 → PASS)의 가운데다", () => {
+  // v1.66 실측(lib/showcase.js 머리 주석) — 요구영역 격자 재생성(설계 줄 200 m / 25 kg)으로 창이 ×5.2~5.85에서 옮았다:
+  // ×5.25 이하는 첫 카드가 고도 PI(제안 변화 0 — 확인 런 없음), ×6.05 이상은 확인 런 FAIL. 옛 가운데 ×5.5는 아래 끝에서
+  // 0.2라 ×5.65로 옮겼다. 그 전의 창: 해면 한 줄 표 ×5.2~5.85, 톱니 표 ×5.4~6.6, 피치 명령 상한 0.35 rad ×4.8~5.8.
+  // 예제에서 잰 피치 댐퍼 ×4.8은 S1에서 FAIL이 안 난다. 양끝 여유 0.3 — 새 측정에서 어느 끝이 0.3 안으로 들어오면 창을
+  // 다시 고른다
+  assert.deepEqual(SHOWCASE_FAULT, { path: "autopilot.alt.k_rate", factor: 5.65 });
+  const [lo, hi] = [5.3, 6.0];
   assert.ok(SHOWCASE_FAULT.factor - lo >= 0.3 - 1e-9 && hi - SHOWCASE_FAULT.factor >= 0.3 - 1e-9, "창 끝에서 떨어져 있다");
 });
 
@@ -237,9 +263,10 @@ test("결함 시연 상수 — 잰 기준(자동조종 설계값·확정 표·�
   assert.ok(!Object.hasOwn(s1.law.gain_tables.tables, "alt.k_rate"), fix);
   // 곱해지는 설계점 상수(k_hdot)와 확정 표를 설계한 바탕 문서(기준 지문 — 표 값은 담지 않는다)
   assert.ok(Math.abs(s1.law.design.autopilot.k_hdot - -0.029986076721022634) < 1e-12, fix);
-  // v1.65 재생성: δe_trim 도출 규칙이 바뀌어 바탕 문서 지문만 바뀌었다 — 초기 게인·설계 게인 표·설계 설정은 바이트 그대로이고,
-  // 결함 창의 실패 쪽(×5.1~5.9 대표 네 케이스 dynamic_reserve)도 옛 문서와 같게 재확인했다
-  assert.equal(s1.law.gain_tables.provenance.basis_fingerprint, "e027b5b0897f2254", fix);
+  // v1.65 재생성: δe_trim 도출 규칙이 바뀌어 바탕 문서 지문만 바뀌었다(e027…) — 초기 게인·설계 게인 표·설계 설정은 바이트
+  // 그대로였다. v1.66 요구영역 격자 재생성(이관 2·9·10단계 — 설계 줄 200 m / 25 kg, 기록 설정에서 n_mach가 빠졌다)은 기준
+  // 지문과 표 값을 함께 바꿨다 — 창을 다시 쟀다(×5.3~6.0, 머리 주석)
+  assert.equal(s1.law.gain_tables.provenance.basis_fingerprint, "0035a045dcbe559f", fix);
   // 그 창을 만든 확정 표 값 자체 — 표 표현 재생성은 k_hdot·기준 지문을 그대로 두고 창만 옮겼다(×5.2~6.4 →
   // ×4.8~5.8). 요 댐퍼 표 수리(튜너 2차 패스 — yaw.k_rate·roll.kp·roll.ki 29점씩)도 기준 지문을 두고 표 값만 바꿨다(창은 그대로).
   // 요 설계 목표 ζ_dr 0.5 → 0.6은 시드 요·롤 게인이 바뀌어 기준 지문과 표 4자리(yaw.k_rate·roll.k_rate·roll.kp·
@@ -247,9 +274,13 @@ test("결함 시연 상수 — 잰 기준(자동조종 설계값·확정 표·�
   // → 40점) CL 표에 실속 꼭대기 행·열을 더한 재생성(P5-s1 — 기준 지문 2ecb… → 1ef8…)도 다시 쟀다(lib/showcase.js 머리
   // 주석). 단계 8 재설계 표도 같은 값이라 두 상태가 같은 창을 낸다(표 7자리 × 40점). 롤 속도 루프 마진 가드(Q1-gate —
   // AS94900 끊는 자리에서 GM 8 dB·PM 50°로 롤 댐퍼를 캡) 뒤 재생성(Q3-s1)은 기준 지문을 두고 roll.k_rate·roll.kp·
-  // roll.ki·yaw.k_rate 값만 바꿨다(피치 3자리·설계 게인 그대로) — 다시 잰 창은 머리 주석
+  // roll.ki·yaw.k_rate 값만 바꿨다(피치 3자리·설계 게인 그대로). v1.66 요구영역 격자 재생성은 설계 줄을 해면 → 200 m로
+  // 옮겨 표 7자리 × 36점이 됐다(07dd… → ffef…) — 다시 잰 창은 머리 주석
   assert.equal(s1.law.gain_tables.provenance.design?.config?.fit_mode, "table", fix);
-  assert.equal(tablesDigest(s1.law.gain_tables.tables), "07dd528f85175841", fix);
+  assert.equal(tablesDigest(s1.law.gain_tables.tables), "ffef0fccb95fc788", fix);
+  // 그 표를 만든 기록 설정 — 설계 줄 200 m / 25 kg, 마하 격자는 요구영역 기본 격자 명세(n_mach 없음)
+  const rec = s1.law.gain_tables.provenance.design.config;
+  assert.deepEqual([rec.alts, rec.fuels, "n_mach" in rec], [[200], [25], false], fix);
   // 자동조종 상자 — 고도·승강률 PI의 출력 한계(θ 명령 상한)가 창에 든다. 레지스트리 기본값으로 잰 창이다
   assert.equal(s1.law.design.autopilot.theta_hi, 0.3, fix);
   assert.equal(s1.law.design.autopilot.tau_spd, 2.0, fix);

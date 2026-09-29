@@ -49,6 +49,8 @@ import {
   statusSeverity,
   statusText,
   trimLabel,
+  regionCoverageLines,
+  gridPlaceholders,
   tunedLines,
   verdictLegend,
   warnNoteText,
@@ -196,9 +198,9 @@ test("statusCounts — 미판정을 통과로 세지 않는다", () => {
   // 트림 불가·판정 불가 점이 ok 개수에 섞여 실행이 실제보다 건강해 보인다
   // A는 pitch_att ok + pitch_rate warn → 점 판정은 최악값 warn (worstStatus 규약)
   const c = statusCounts(pointRows(RESULT));
-  assert.deepEqual(c, { ok: 0, warn: 1, fail: 1, na: 0, outside: 0, unjudged: 1 });
+  assert.deepEqual(c, { ok: 0, warn: 1, fail: 1, na: 0, outside: 0, untrimmed: 0, unjudged: 1 });
   assert.deepEqual(statusCounts(undefined),
-    { ok: 0, warn: 0, fail: 0, na: 0, outside: 0, unjudged: 0 });
+    { ok: 0, warn: 0, fail: 0, na: 0, outside: 0, untrimmed: 0, unjudged: 0 });
 });
 
 test("엔벨로프 경계 점은 판정 칸이 아니라 자기 칸에 센다", () => {
@@ -216,7 +218,7 @@ test("엔벨로프 경계 점은 판정 칸이 아니라 자기 칸에 센다", 
   };
   const rows = pointRows(withOutside);
   assert.deepEqual(statusCounts(rows),
-    { ok: 0, warn: 1, fail: 0, na: 0, outside: 1, unjudged: 1 });
+    { ok: 0, warn: 1, fail: 0, na: 0, outside: 1, untrimmed: 0, unjudged: 1 });
   const v = rows.find((r) => r.name === "V");
   assert.equal(v.outsideEnvelope, true);
   assert.equal(v.status, "fail"); // 수치는 남긴다 — 경계의 마진은 자료다
@@ -263,6 +265,96 @@ test("trimLabel — 조건 판정이 실리면 제외 항목과 사유로, 트�
     .split(" · ").slice(1).join(" · ");
   assert.ok(trimLabel(rows[1]).endsWith(tab(rows[1].verdict)));
   assert.ok(trimLabel(rows[3]).endsWith(tab(rows[3].verdict)));
+});
+
+test("트림하지 않은 요구영역 점 — 판정(요구영역·모델)으로 제외 사유를 말하고, 미판정이 아니라 자기 칸에 센다", () => {
+  // 이관 2단계: 자동 설계 점 목록에 트림하지 않은 요구영역 점이 판정(pre_trim_verdict)과 함께 실린다
+  const pre = (category, reasons, status) => ({ adopted: false, exclusion: { category, reasons },
+    trim: { status, reasons: [] } });
+  const rows = pointRows({ points: { points: [
+    { name: "G", trimmable: false, verdict: pre("model", ["model_gap"], "model_gap") },
+    { name: "U", trimmable: false, verdict: pre("region", ["undefined"], "undefined") },
+    { name: "X", trimmable: false, verdict: pre("region", ["out_of_region"], "out_of_region") },
+    // 트림한 해가 모델 범위 밖 — 트림은 했다(untrimmed가 아니다)
+    { name: "M", trimmable: false, verdict: { adopted: false, exclusion: { category: "model", reasons: ["db_alpha"] },
+      trim: { status: "computable", reasons: [] } } },
+  ] } });
+  assert.deepEqual(rows.map(trimLabel), [
+    "제외 — 모델 범위 밖 — 모델 부족 (트림 안 함)",
+    "제외 — 요구영역 판정 대상 아님 — 요구 미정의",
+    "제외 — 요구영역 판정 대상 아님 — 요구영역 밖",
+    "제외 — 모델 범위 밖 — DB 받음각 범위 밖",
+  ]);
+  assert.deepEqual(rows.map((r) => r.untrimmed), [true, true, true, false]);
+  const c = statusCounts(rows);
+  assert.equal(c.untrimmed, 3);
+  assert.equal(c.unjudged, 1, "트림한 모델 범위 밖 점만 미판정 — 트림하지 않은 점은 자기 칸");
+});
+
+// 엔진 orchestrator.region_coverage가 실제로 내는 모양(키·사유 문장 그대로) — 지어낸 키(reason 단수)를 쓰지 않는다
+const RC_KEYS0 = { adopted: 0, trim: 0, model: 0, limits: 0, region: 0, unselected: 0, omitted: 0, not_run: 0 };
+const RC_OVERRIDE = { source: "profile", confirmed: true, points: 40, rows_undefined: [], complete: false,
+  by_category: { ...RC_KEYS0, adopted: 24, omitted: 16 },
+  reasons: ["격자 명세를 설정이 덮음 — 요구 행 2개 미포함 (12점). 요구영역 명세의 고도·연료를 설정에서 빼면 그 행은 설계되지 않는다"],
+  spec: { n_mach: 3, alts: [1000], fuels: [200] }, requirement_spec: { n_mach: 6, alts: [100, 1000, 3000], fuels: [200] } };
+const RC_LEGACY = { source: null, confirmed: null, points: 0, by_category: { ...RC_KEYS0 }, rows_undefined: [],
+  complete: false,
+  reasons: ["요구영역 미정의 — 기체에 요구 운용영역(operating_region)도 trim_grid 초안도 없어 COARSE가 옛 coarse_grid로 돌았다"] };
+const RC_NO_RECORD = { ...RC_LEGACY,
+  reasons: ["요구영역 커버리지 모름 — 이 세션에 요구영역 기본 격자 기록이 없다(COARSE 전이거나 이관 2단계 전 세션). 기체에 요구영역이 없다는 뜻이 아니다"] };
+
+test("regionCoverageLines — 요구영역 N점 중 각 범주, 완료 아니면 그렇다고 먼저 말하고 엔진 사유를 싣는다", () => {
+  assert.deepEqual(regionCoverageLines({}), [], "옛 결과(region_coverage 없음)는 말하지 않는다");
+  const rc = { source: "profile", confirmed: true, points: 40, complete: false, rows_undefined: [],
+    by_category: { ...RC_KEYS0, adopted: 26, trim: 4, model: 3, limits: 2, region: 1, unselected: 3, not_run: 1 },
+    reasons: ["설계 미완료 — 상태 budget_exhausted",
+      "요구 미정의 행 1개 — 경계표가 덮지 않는 고도·연료",
+      "채택하지 못한 요구 조건 10점 (trim 4 · model 3 · limits 2 · region 1)",
+      "설계·검증이 덮지 못한 요구 조건 2점 (미판정·검증 판정 없음·채택점 사이 밖의 미선택점·설정이 뺀 점)"] };
+  const lines = regionCoverageLines({ coarse_source: "region_base_grid", region_coverage: rc });
+  assert.deepEqual(lines.map((l) => l.key), ["region_incomplete", "region_coverage",
+    "region_reason_0", "region_reason_1", "region_reason_2", "region_reason_3"]);
+  assert.equal(lines[0].tone, "fail");
+  assert.equal(lines[0].text, "요구영역 완료 아님 — 미해결 조건 남음");
+  // 범주를 다 더하면 N — 미선택·미판정도 센다
+  assert.equal(lines[1].text,
+    "요구영역 40점 중 채택 26 · 제외(트림 4 · 모델 3 · 제한 2 · 요구영역 1) · 미선택 3 · 미판정 1");
+  assert.deepEqual(lines.slice(2).map((l) => [l.tone, l.text]), rc.reasons.map((r) => ["warn", r]));
+  // 설정이 격자 명세를 덮어 뺀 요구 조건 — 범주에 「설정이 뺌」, 사유는 엔진 문장 그대로
+  const ov = regionCoverageLines({ coarse_source: "region_base_grid", region_coverage: RC_OVERRIDE });
+  assert.equal(ov[1].text, "요구영역 40점 중 채택 24 · 제외(트림 0 · 모델 0 · 제한 0 · 요구영역 0) · 미선택 0 · 미판정 0"
+    + " · 설정이 뺌 16");
+  assert.equal(ov[2].text, RC_OVERRIDE.reasons[0]);
+  // 완료면 한 줄, 회색 — 부분 성공을 완료로 읽히지 않게 하는 것은 완료 아님 줄의 몫이다
+  const done = regionCoverageLines({ region_coverage: { ...rc, complete: true, reasons: [],
+    by_category: { ...RC_KEYS0, adopted: 38, unselected: 2 } } });
+  assert.deepEqual(done.map((l) => [l.key, l.tone]), [["region_coverage", "hint"]]);
+  assert.match(done[0].text, /^요구영역 40점 중 채택 38 · 제외\(트림 0 · 모델 0 · 제한 0 · 요구영역 0\) · 미선택 2 · 미판정 0$/);
+  // 미확정 초안 — 그 사실을 붙인다(엔진 사유도 따로 선다)
+  const draft = regionCoverageLines({ region_coverage: { ...rc, confirmed: false, source: "draft:trim_grid" } });
+  assert.match(draft[1].text, /미확정 초안/);
+  // 요구영역이 없는 기체(옛 격자) — 미정의. 개수를 지어내지 않고 엔진 사유를 싣는다
+  const none = regionCoverageLines({ coarse_source: "coarse_grid", region_coverage: RC_LEGACY });
+  assert.deepEqual(none.map((l) => [l.key, l.tone, l.text]), [["region_undefined", "fail", RC_LEGACY.reasons[0]]]);
+  // 기본 격자 기록이 없는 세션(이관 2단계 전) — 기체엔 요구영역이 있을 수 있다: 미정의라 하지 않는다
+  const old = regionCoverageLines({ coarse_source: null, region_coverage: RC_NO_RECORD });
+  assert.deepEqual(old.map((l) => [l.key, l.tone, l.text]), [["region_unknown", "warn", RC_NO_RECORD.reasons[0]]]);
+  assert.doesNotMatch(old[0].text, /미정의 —/);
+});
+
+test("designCueSummary — 요구영역 완료가 아니면 신호 한 줄도 그렇게 말한다", () => {
+  const rc = { source: "profile", confirmed: true, points: 4, complete: false, rows_undefined: [],
+    by_category: { ...RC_KEYS0, adopted: 3, trim: 1 }, reasons: ["채택하지 못한 요구 조건 1점 (trim 1)"] };
+  assert.match(designCueSummary({ report: { status: "converged", judged: 3, region_coverage: rc } }),
+    / · 요구영역 완료 아님 \(채택 3\/4\)$/);
+  assert.match(designCueSummary({ report: { status: "converged", coarse_source: "coarse_grid",
+    region_coverage: RC_LEGACY } }), / · 요구영역 미정의$/);
+  // 요구영역이 있는 기체의 옛 세션 — 「미정의」가 아니다
+  const old = designCueSummary({ report: { status: "converged", coarse_source: null, region_coverage: RC_NO_RECORD } });
+  assert.match(old, / · 요구영역 커버리지 모름$/);
+  assert.doesNotMatch(old, /미정의/);
+  assert.doesNotMatch(designCueSummary({ report: { status: "converged",
+    region_coverage: { ...rc, complete: true, reasons: [] } } }), /요구영역/);
 });
 
 test("verdictLegend — 기준 수치를 결과에서 읽어 문장에 박는다", () => {
@@ -1408,4 +1500,14 @@ test("emptyResultNotice — 잡이 서 있으면 「아직 결과가 없습니�
   assert.doesNotMatch(busy, /아직 결과가 없습니다/);
   assert.match(busy, /진행/); // 경과는 위 진행줄에 있다고 가리킨다
   assert.equal(emptyResultNotice(), idle); // 인자 없으면 쉬는 중
+});
+
+test("gridPlaceholders — 빈 격자 칸은 요구영역의 기본 격자 명세다(없으면 초안 모양, 그것도 없으면 옛 기본값)", () => {
+  const region = { operating_region: { base_grid: { n_mach: 10, alts: [100, 1000], fuels: [5, 45] } },
+    mission_template: { trim_grid: { mach: { from: 0.1, to: 0.3, step: 0.05 }, alt: [0], fuel: [20] } } };
+  assert.deepEqual(gridPlaceholders(region, {}), { nMach: "10", alts: "100 1000", fuels: "5 45", source: "region" });
+  const draft = { mission_template: region.mission_template };
+  assert.deepEqual(gridPlaceholders(draft, {}), { nMach: "5", alts: "0", fuels: "20", source: "draft" });
+  assert.deepEqual(gridPlaceholders({ mass: { fuel_max: 50 } }, { grid: { alts: [0, 1000], fuel_fracs: [0.5, 1] } }),
+    { nMach: null, alts: "0 1000", fuels: "25 50", source: "legacy" });
 });

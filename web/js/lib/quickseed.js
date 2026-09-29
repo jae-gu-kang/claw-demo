@@ -157,6 +157,47 @@ export function deriveSummary(body) {
     stats: t ? {
       checks: d.requirement?.mach?.length ?? 0, shortfall: prov.shortfall ?? null, excessMax: prov.excess_max ?? null,
       iterations: prov.iterations ?? null, excluded: prov.excluded_trims ?? null, undefined: prov.undefined_machs ?? [],
+      coverage: prov.coverage ?? null,
     } : null,
   };
+}
+
+const machSpanText = (v) => {
+  const ms = (v ?? []).filter((m) => Number.isFinite(m));
+  return ms.length ? `${Math.min(...ms)}–${Math.max(...ms)}` : null;
+};
+
+/** δe_trim 표 커버리지(엔진 de_trim_coverage — 05 §11.13 이관 10단계) → 줄 [{tone, text}].
+ *  표의 축이 요구 마하를 덮는 것과 그 구간의 도출 근거가 있는 것은 다르다 — 끝값(clip)으로 답하는 구간, 유효 트림이
+ *  없어(트림 실패·모델 부족·제한 위반) 근거가 없는 구간, 보간으로 채운 마하를 각각 따로 적고, 셋 다 없고 표가 낡지
+ *  않았을(stale 아님) 때만 「덮는다」고 말한다.
+ *  coverage가 없으면 reason(서버가 말한 까닭)만, 그것도 없으면 []. */
+export function deTrimCoverageLines(coverage, reason = null) {
+  // 엔진이 null이면 「모른다」다(비교할 요구·기록 없음) — 빈 목록 [](「없다」)과 가른다
+  if (!coverage) return reason ? [{ tone: "hint", text: reason }] : [];
+  const req = machSpanText(coverage.required_mach);
+  const tab = machSpanText(coverage.table_mach);
+  const out = [{ tone: "hint", text: req
+    ? `요구 마하 ${req} · 표 마하 ${tab ?? "—"}`
+    : `요구영역 미정의 — 표(마하 ${tab ?? "—"})가 덮어야 할 요구 마하를 모릅니다` }];
+  const seg = ([lo, hi]) => (lo === hi ? `M${lo}` : `M${lo}–${hi}`);
+  for (const s of coverage.beyond_table ?? []) out.push({ tone: "warn", text: `${seg(s)} 표 범위 밖 · 끝값 사용 · 성능 미확인` });
+  // 엔진 need None = 날 수 있는 트림이 없음 — 트림 실패·모델 부족뿐 아니라 제한 위반·요구영역 밖 제외도 여기다
+  for (const s of coverage.unsupported ?? []) {
+    out.push({ tone: "warn", text: `${seg(s)} 도출 근거 없음(유효 트림 없음 — 트림 실패·모델 부족·제한 위반)` });
+  }
+  const und = coverage.undefined_machs ?? [];
+  if (und.length) out.push({ tone: "warn", text: `M${und.join(", ")} 보간으로 채움` });
+  // 근거를 잰 기록이 없다(손으로 넣은 표 · 도출 뒤 요구영역이 바뀜) — 모르는 것을 「근거 있음」으로 말하지 않는다
+  if (req && coverage.unsupported == null) {
+    out.push({ tone: "warn", text: coverage.basis === "document"
+      ? "도출 근거 미확인 — 손으로 넣은 표라 요구 마하마다 트림 근거를 잰 기록이 없습니다(도출하면 잽니다)"
+      : "도출 근거 미확인 — 도출한 뒤 요구영역이 바뀌어 지금 요구에서 잰 기록이 없습니다(다시 도출하면 잽니다)" });
+  }
+  // 낡은 표(도출 뒤 플랜트가 바뀜) — 위 커버리지는 옛 도출의 것이다. 초록 「덮음」을 말하지 않는다
+  if (coverage.stale) {
+    out.push({ tone: "warn", text: "이 커버리지는 낡은 도출의 것입니다 — 도출 뒤 기체가 바뀌어 지금 기체에서 잰 근거가 아닙니다(다시 도출하면 잽니다)" });
+  }
+  if (req && out.length === 1) out.push({ tone: "ok", text: "요구 마하를 표가 덮고 도출 근거가 있습니다" });
+  return out;
 }

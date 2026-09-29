@@ -36,6 +36,7 @@ from claw.fcl.assemble import assemble_law
 from claw.pipeline.openloop import GROUP_LOOPS, effective_gain
 from claw.profile import ProfileError
 from claw.design.points import envelope_verdict
+from claw.opspace import region_of
 from claw.opspace.verdict import VerdictContext
 from claw.trim import trim_level
 from claw.trim import (
@@ -483,7 +484,9 @@ def design_envelope_endpoint(
         if v is not None
     }
     try:
-        env = design_envelope(ac, stall, limits, db_ranges, fuel=fuel, **kwargs)
+        # 선도의 주인은 요구 운용영역(05 §11.13 이관 9단계) — 없으면 엔진이 requirement null + requirement_undefined로
+        # 말한다. 구조·공력 교집합(region)은 「현재 분석 가능한 영역」으로 뜻이 좁아졌다(추력 미포함)
+        env = design_envelope(ac, stall, limits, db_ranges, fuel=fuel, requirement=region_of(profile.doc), **kwargs)
         env["aero"] = aero_envelope(
             stall, db_ranges, alpha_margin=alpha_margin, trim_alpha_bounds=profile.trim_alpha_bounds
         )

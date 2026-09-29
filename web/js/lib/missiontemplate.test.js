@@ -25,6 +25,14 @@ test("웹의 폴백은 예제 기체 문서의 사본이다 — 예제 문서가
   assert.equal(d.rolloutM, GOHEUNG.rolloutM, "착륙 미끄럼 (lib/site.js)");
 });
 
+test("엔벨로프 스캔 격자는 템플릿에서 읽지 않는다 — 요구영역의 기본 격자에서 받는다(이관 9단계)", () => {
+  const d = templateDefaults(EXAMPLE);
+  for (const k of ["scanFrom", "scanTo", "scanStep", "scanAlts"]) {
+    assert.equal(k in d.envelope, false, `템플릿 스캔 칸 ${k}이 폼으로 새면 요구영역과 무관한 사각 격자가 되살아난다`);
+    assert.equal(k in ENVELOPE_FALLBACK, false, k);
+  }
+});
+
 test("템플릿이 없는 기체 — 격자·미션은 없고(폴백을 쓰되 화면이 말한다), 본문 값(α 여유·작동기)은 읽는다", () => {
   const doc = JSON.parse(JSON.stringify(EXAMPLE));
   doc.mission_template = null;

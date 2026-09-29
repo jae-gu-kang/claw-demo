@@ -207,9 +207,10 @@ test("조건 판정 근거 글 — 채택하지 않은 까닭을 항목 이름�
   assert.equal(verdictEvidenceText(judged(null)), "");
   assert.equal(verdictEvidenceText({ state: "computable" }), "");
   // 여유는 제외 항목이 아니다(v1.65 채택 정책)
-  assert.deepEqual(Object.keys(EXCLUSION_CATEGORY_LABEL), ["trim", "model", "limits"]);
+  // 요구영역 항목(이관 2단계 — 트림하지 않은 점의 판정)이 맨 앞: 엔진 항목 순서
+  assert.deepEqual(Object.keys(EXCLUSION_CATEGORY_LABEL), ["region", "trim", "model", "limits"]);
   for (const c of ["stall_boundary", "limiter_clips_trim", "q_max", "mach_no", "db_mach", "db_alpha", "fuel_range",
-    "stall_basis_missing"]) assert.ok(STATE_REASON_LABEL[c], c);
+    "stall_basis_missing", "out_of_region", "undefined", "model_gap"]) assert.ok(STATE_REASON_LABEL[c], c);
 });
 
 test("α 리미터 제외 — 작동식이 트림을 못 쥐는 수치(limits.detail.limiter)를 근거 글에 싣는다", () => {

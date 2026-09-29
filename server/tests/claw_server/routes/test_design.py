@@ -276,6 +276,18 @@ def test_bad_types_are_422_not_500(client):
         assert r.status_code == 422, f"{cfg} → {r.status_code} (500이면 잡 스레드에서 터진다)"
 
 
+def test_n_mach_null_means_the_region_base_grid_spec():
+    """n_mach null = 요구영역 기본 격자 명세(이관 2단계 — 엔진 기본값이 None이 됐다). 수치 검사가 null을 거절하면 기본
+    설정 자체가 422가 된다. 수치를 주면 여전히 정수 검사를 받는다."""
+    from claw_server.routes.design import _build_config
+
+    assert _build_config({}).n_mach is None
+    assert _build_config({"n_mach": None}).n_mach is None
+    assert _build_config({"n_mach": 4}).n_mach == 4
+    with pytest.raises(ValueError):
+        _build_config({"n_mach": 2.5})
+
+
 def test_fit_mode_override_reaches_the_session(client, wait_job):
     """게인 표현 전환이 제출에서 세션까지 닿는가 — 저장물의 config·report로 확인.
 
@@ -1262,3 +1274,20 @@ def test_profile_criteria_rejects_nonfinite_and_huge(client):
         r = client.post("/api/profiles", content=text, headers={"content-type": "application/json"})
         assert r.status_code == 422, (frag[:40], r.status_code, r.text[:200])
         assert r.json()["detail"]["path"].startswith(f"/{sec}/")
+
+
+def test_coarse_budget_floor_is_rejected_at_submit(client):
+    """행 끝점(요구 경계)만으로 COARSE 몫을 넘는 설정은 202 전에 422다 — 잡 안에서 처음 터지던 ValueError(05 §11.13
+    2단계 「제출 시점에 거부」). 예산 4 → COARSE 몫 4, 고도 3행 × 끝점 2 = 6점."""
+    r = client.post("/api/design/auto", json={"config": _small_config(
+        alts=[100.0, 1000.0, 3000.0], budget_points=4, budget_iters=1)})
+    assert r.status_code == 422, r.text
+    assert "예산" in r.json()["detail"]
+
+
+def test_base_grid_cap_from_an_override_is_rejected_at_submit(client):
+    """설정의 격자 명세 덮음이 기본 격자 상한(400점)을 넘기면 202 전에 422다."""
+    alts = [100.0 + 10.0 * i for i in range(290)]
+    r = client.post("/api/design/auto", json={"config": _small_config(n_mach=20, alts=alts)})
+    assert r.status_code == 422, r.text
+    assert "400" in r.json()["detail"]

@@ -1,7 +1,7 @@
 {
  "golden": "envelopes",
  "mode": "full",
- "captured_at": "388cc91",
+ "captured_at": "2e24847+dirty",
  "value": {
   "dict": {
    "vn_prot": {
@@ -901,6 +901,9 @@
        "alt_min_used": "f:0x0.0p+0",
        "alt_max_used": "f:0x1.7700000000000p+13",
        "alt_max_is_display_default": true,
+       "alt_min_source": "display_default",
+       "alt_max_source": "display_default",
+       "requirement_undefined": true,
        "tropopause_alt": "f:0x1.57c0000000000p+13",
        "speed_of_sound": {
         "dict": {
@@ -1173,6 +1176,7 @@
       }
      },
      "maneuver": null,
+     "requirement": null,
      "iso": {
       "dict": {
        "qbar": [
@@ -1567,6 +1571,7 @@
      },
      "schedule_grid": {
       "dict": {
+       "source": "coarse_grid",
        "n_mach": 5,
        "alts": [
         "f:0x0.0p+0",
@@ -1574,6 +1579,7 @@
         "f:0x1.7700000000000p+11",
         "f:0x1.3880000000000p+12"
        ],
+       "fuel": "f:0x1.9000000000000p+7",
        "points": [
         {
          "dict": {
@@ -1761,6 +1767,9 @@
        "alt_min_used": "f:0x0.0p+0",
        "alt_max_used": "f:0x1.1940000000000p+13",
        "alt_max_is_display_default": false,
+       "alt_min_source": "operating",
+       "alt_max_source": "operating",
+       "requirement_undefined": true,
        "tropopause_alt": "f:0x1.57c0000000000p+13",
        "speed_of_sound": {
         "dict": {
@@ -2300,6 +2309,7 @@
        }
       }
      },
+     "requirement": null,
      "iso": {
       "dict": {
        "qbar": [
@@ -2646,6 +2656,7 @@
      },
      "schedule_grid": {
       "dict": {
+       "source": "coarse_grid",
        "n_mach": 5,
        "alts": [
         "f:0x0.0p+0",
@@ -2653,6 +2664,7 @@
         "f:0x1.7700000000000p+11",
         "f:0x1.3880000000000p+12"
        ],
+       "fuel": "f:0x1.2c00000000000p+8",
        "points": [
         {
          "dict": {

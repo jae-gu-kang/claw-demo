@@ -6,7 +6,103 @@
 숨기면 엔진이 코드를 늘렸을 때 화면이 거짓말을 한다).
 */
 
+import { parseGridSpec } from "./opspace.js";
 import { niceTicks, STATE_REASON_LABEL, STATUS, TRIM_STATE_CELL } from "./plot.js";
+
+// ── 요구 운용영역 (05 §11.13 이관 9단계 — 엔진 design_envelope requirement가 정본) ──────────
+// 선도의 주인은 요구영역이다. 구조·공력 교집합(응답 region)은 추력 조건이 없어 「지속 비행 가능 영역」이 아니고,
+// 요구를 깎는 선도 아니다 — 그 뜻 그대로의 이름을 한 곳에 둔다(범례·캔버스·캡션이 같은 말을 하게)
+export const ANALYZABLE_LABEL = "현재 분석 가능한 영역 (구조·공력 — 추력 미포함)";
+export const REQUIREMENT_UNDEFINED = "요구영역 미정의";
+
+const finiteMach = (r) => Number.isFinite(r?.mach_lo) && Number.isFinite(r?.mach_hi);
+
+/** 선도 연료의 요구 행 [{alt, mach_lo, mach_hi}] — 엔진 requirement.band(이 연료·표시 고도마다 보간한 요구 마하, 밖·미정의는
+ *  null)가 정본이다. band가 없으면(옛 응답) 경계표 행 중 선도 연료 층의 것만 — 다른 층을 섞으면 다른 무게의 요구를 그린다. */
+function requirementRowsAtFuel(requirement, fuel) {
+  const b = requirement?.band;
+  if (b?.alt) return b.alt.map((alt, i) => ({ alt, mach_lo: b.mach_lo[i], mach_hi: b.mach_hi[i], state: b.state?.[i] }));
+  return (requirement?.rows ?? []).filter((r) => fuel == null || r.fuel === fuel);
+}
+
+/** 요구영역 → 선도 연료의 띠 {polys: [[{mach, alt}, …]], lines: [{alt, mach0, mach1}], undefinedAlts: [alt]}.
+ *  마하가 없는 행(요구 미정의 · 요구영역 밖)에서 끊는다: 이웃 행으로 이어 칠하면 없는 요구를 그린다. undefinedAlts는
+ *  미정의만(요구영역 밖 고도는 요구가 없는 게 정상이다). 한 행짜리 조각은 면이 못 되므로 가로선으로 남긴다. */
+export function requirementBands(requirement, fuel = null) {
+  const rows = [...requirementRowsAtFuel(requirement, fuel)].sort((a, b) => a.alt - b.alt);
+  const polys = [];
+  const lines = [];
+  const undefinedAlts = [];
+  let run = [];
+  const flush = () => {
+    if (run.length >= 2) {
+      polys.push([
+        ...run.map((r) => ({ mach: r.mach_lo, alt: r.alt })),
+        ...[...run].reverse().map((r) => ({ mach: r.mach_hi, alt: r.alt })),
+      ]);
+    } else if (run.length === 1) {
+      lines.push({ alt: run[0].alt, mach0: run[0].mach_lo, mach1: run[0].mach_hi });
+    }
+    run = [];
+  };
+  for (const r of rows) {
+    if (finiteMach(r)) run.push(r);
+    else {
+      flush();
+      if (r.state !== "out_of_region") undefinedAlts.push(r.alt);
+    }
+  }
+  flush();
+  return { polys, lines, undefinedAlts };
+}
+
+/** 선도 응답 → 요구영역 상태 {kind, label, text}. kind: "confirmed" | "draft" | "undefined" | "out_of_region_fuel"
+ *  (선도 연료가 요구 연료 범위 밖 — 미정의가 아니다) | "undefined_at_fuel"(범위 안인데 경계표가 안 덮음).
+ *  요구가 없으면 표시 고도 범위(0~12,000 m [기본값])가 요구처럼 읽히지 않게 그 사실을 먼저 말한다. */
+export function requirementStatus(mh) {
+  const req = mh?.requirement ?? null;
+  const b = mh?.bounds ?? {};
+  const shown = Number.isFinite(b.alt_min_used) && Number.isFinite(b.alt_max_used)
+    ? `${b.alt_min_used}~${b.alt_max_used} m` : "표시 고도";
+  if (!req) {
+    return {
+      kind: "undefined", label: REQUIREMENT_UNDEFINED,
+      text: `${REQUIREMENT_UNDEFINED} — 기체 문서에 요구 운용영역(operating_region)도 미션 템플릿 격자(trim_grid)도 `
+        + `없어 성능을 확보해야 할 범위가 정해지지 않았습니다. 선도의 고도 ${shown}는 표시 범위일 뿐 요구가 아닙니다.`,
+    };
+  }
+  const f = Number(mh.fuel);
+  const [fLo, fHi] = (req.fuel ?? []).map(Number);
+  if (Number.isFinite(f) && Number.isFinite(fLo) && Number.isFinite(fHi) && (f < fLo - 1e-9 || f > fHi + 1e-9)) {
+    // 요구 연료 밖 — 요구가 없는 게 정상이다(엔진 band state out_of_region). 경계표 미정의와 섞으면 문서를 고치라는 말이 된다
+    return {
+      kind: "out_of_region_fuel", label: `요구영역 밖 (연료 ${mh.fuel} kg)`,
+      text: `연료 ${mh.fuel} kg는 요구 연료 범위(${req.fuel[0]}–${req.fuel[1]} kg) 밖입니다 — 이 선도에는 요구가 없습니다. `
+        + "요구 연료 범위 안의 연료로 보면 요구 띠가 그려집니다.",
+    };
+  }
+  if (!requirementRowsAtFuel(req, mh.fuel).some(finiteMach)) {
+    return {
+      kind: "undefined_at_fuel", label: `${REQUIREMENT_UNDEFINED} (연료 ${mh.fuel} kg)`,
+      text: `이 연료(${mh.fuel} kg)에서는 요구영역의 경계표가 어느 고도도 덮지 않아 요구가 미정의입니다 — `
+        + "가까운 연료 층으로 늘리지 않습니다(05 §11.2).",
+    };
+  }
+  const range = `마하 ${req.mach[0]}–${req.mach[1]} · 고도 ${req.alt[0]}–${req.alt[1]} m · 연료 ${req.fuel[0]}–${req.fuel[1]} kg`;
+  return req.confirmed
+    ? { kind: "confirmed", label: "요구 운용영역", text: `요구 운용영역 (기체 문서 확정) — ${range}` }
+    : { kind: "draft", label: "요구 운용영역 — 미확정 초안",
+      text: `요구 운용영역 미확정 초안 — 기체 문서에 요구 운용영역이 없어 미션 템플릿 격자(trim_grid)의 범위로 만든 `
+        + `초안입니다(${range}). 기체 문서에 적어야 확정됩니다.` };
+}
+
+/** 스캔 격자 명세 칸 → POST /grid/base 본문 — 마하 점 수·고도는 비우면 요구영역의 기본 격자 명세, 연료는 선도의
+ *  연료 하나(판정 점은 선도 연료와 같을 때만 겹쳐 그린다). 좌표 규칙(공통 마하 좌표 + 행 끝점)은 엔진 한 곳이다. */
+export function scanGridRequest({ nMach = "", alts = "", fuel }) {
+  const f = Number(fuel);
+  if (!Number.isFinite(f) || String(fuel ?? "").trim() === "") throw new Error(`연료가 숫자가 아님: ${fuel}`);
+  return { ...parseGridSpec({ nMach, alts }), fuels: [f] };
+}
 
 // ── 경계 귀속 (엔진 lo_source/hi_source 코드가 정본) ──────────────────────
 export const BOUND_META = {
@@ -29,6 +125,9 @@ export const boundColor = (code) => BOUND_META[code]?.color ?? "#8e8e93";
 export const CAP_META = {
   ops_alt_max: { label: "운용 고도 상한", color: "#007aff", dashed: false },
   ops_alt_min: { label: "운용 고도 하한", color: "#007aff", dashed: false },
+  // 운용 고도가 없으면 표시 고도 끝을 요구영역 고도 끝으로 잡는다(엔진 alt_*_source "region" — 이관 9단계)
+  region_alt_max: { label: "요구영역 고도 상한 — 운용 한계 아님", color: "#0040dd", dashed: true },
+  region_alt_min: { label: "요구영역 고도 하한 — 운용 한계 아님", color: "#0040dd", dashed: true },
   display_max: { label: "표시 상한 [기본값] — 운용 한계 아님", color: "#aeaeb2", dashed: true },
   display_min: { label: "표시 하한 — 운용 하한 미입력", color: "#aeaeb2", dashed: true },
   natural_ceiling: { label: "자연 천장 (설계 영역 소멸)", color: "#8e8e93", dashed: true },
@@ -48,12 +147,15 @@ export function outlineCaps(region, bounds) {
   let run = [];
   const capAt = (i, side) => {
     const alt = region.alt[i];
+    // 끝의 출처는 엔진 alt_*_source가 정본(operating · region · display_default), 없으면(옛 응답) 종전 추론
+    const src = (s, ops, reg, disp, legacyOps) => (s === "operating" ? ops : s === "region" ? reg
+      : s === "display_default" ? disp : (legacyOps ? ops : disp));
     const source = side === "bottom"
       ? (Math.abs(alt - bounds.alt_min_used) < EPS
-        ? (bounds.alt_min != null ? "ops_alt_min" : "display_min")
+        ? src(bounds.alt_min_source, "ops_alt_min", "region_alt_min", "display_min", bounds.alt_min != null)
         : "natural_floor")
       : (Math.abs(alt - bounds.alt_max_used) < EPS
-        ? (bounds.alt_max_is_display_default ? "display_max" : "ops_alt_max")
+        ? src(bounds.alt_max_source, "ops_alt_max", "region_alt_max", "display_max", !bounds.alt_max_is_display_default)
         : "natural_ceiling");
     return { side, alt, mach0: region.mach_lo[i], mach1: region.mach_hi[i], source };
   };

@@ -171,7 +171,14 @@ export function pointRows(result) {
     status: worstStatus(cases[p.name]?.loops),
     // 조건 판정(05 §11.3 · 이관 8단계 — 엔진 OperatingPoint.verdict). 옛 결과에는 없다(null)
     verdict: p.verdict ?? null,
+    // 트림하지 않은 요구영역 점(이관 2단계 — 요구영역 밖·미정의, 모델 부족). 트림한 해의 모델 범위 밖과 다르다
+    untrimmed: isUntrimmed(p.verdict),
   }));
+}
+
+function isUntrimmed(v) {
+  const cat = v && !v.adopted ? v.exclusion?.category : null;
+  return cat === "region" || (cat === "model" && v.trim?.status !== "computable");
 }
 
 /** 점 표 「자동 설계 채택」 열 — 조건 판정의 채택 여부(성능 판정이 아니다: 마진 판정은 옆 「판정」 열).
@@ -211,9 +218,11 @@ export function trimLabel(row) {
  * 제외하므로(schedmap.outside_envelope), 개수에만 섞으면 화면이 세는 실패와
  * 처방 카드 수가 어긋난다. 빼되 자기 칸에 세어 조용한 누락은 만들지 않는다. */
 export function statusCounts(rows) {
-  const out = { ok: 0, warn: 0, fail: 0, na: 0, outside: 0, unjudged: 0 };
+  const out = { ok: 0, warn: 0, fail: 0, na: 0, outside: 0, untrimmed: 0, unjudged: 0 };
   for (const r of rows ?? []) {
     if (r?.outsideEnvelope) { out.outside += 1; continue; }
+    // 트림하지 않은 요구영역 점 — 판정할 해가 없으니 미판정과 섞지 않고 자기 칸에(개수는 남는다)
+    if (r?.untrimmed) { out.untrimmed += 1; continue; }
     const s = r?.status;
     if (s == null) out.unjudged += 1;
     else if (s in out) out[s] += 1;
@@ -1179,6 +1188,37 @@ function refineAbortText(code) {
 
 const _TONE_RANK = { fail: 2, warn: 1, hint: 0 };
 
+/** report.region_coverage → 줄 [{key, tone, text}] (05 §11.13 이관 2단계). 옛 결과(없음)는 [].
+ *  일부 점에서 설계가 성공해도 미해결 요구 조건이 남으면 요구영역 전체를 완료로 읽히면 안 된다 — 그래서 완료가 아니면
+ *  「완료 아님」 줄이 먼저 서고(fail), 개수 줄과 엔진 사유(reasons — 문장은 엔진이 정본)가 뒤따른다.
+ *  source가 없으면 개수를 지어내지 않는다: 옛 격자로 돈 기체(coarse_source "coarse_grid")는 요구영역 미정의이고, 기본
+ *  격자 기록이 없는 세션(이관 2단계 전·COARSE 전)은 기체에 요구영역이 있을 수 있어 「모름」이다 — 미정의라 하지 않는다. */
+export function regionCoverageLines(report) {
+  const rc = report?.region_coverage;
+  if (!rc) return [];
+  const reasons = Array.isArray(rc.reasons) ? rc.reasons.map(String) : [];
+  if (rc.source == null) {
+    if (report?.coarse_source === "coarse_grid") {
+      return [{ key: "region_undefined", tone: "fail",
+        text: reasons[0] ?? "요구영역 미정의 — 기체 문서에 요구 운용영역이 없어 이 설계가 덮어야 할 범위를 판정하지 못했다" }];
+    }
+    return [{ key: "region_unknown", tone: "warn",
+      text: reasons[0] ?? "요구영역 커버리지 모름 — 이 결과에 요구영역 기본 격자 기록이 없다" }];
+  }
+  const c = rc.by_category ?? {};
+  const n = (k) => Number(c[k]) || 0;
+  // 범주를 다 더하면 N이다 — 미선택(예산)·미판정(취소 등)·설정이 뺌(격자 명세 덮음, 있을 때만)까지 센다
+  const text = `요구영역 ${Number(rc.points) || 0}점 중 채택 ${n("adopted")} · 제외(트림 ${n("trim")} · 모델 ${n("model")} · `
+    + `제한 ${n("limits")} · 요구영역 ${n("region")}) · 미선택 ${n("unselected")} · 미판정 ${n("not_run")}`
+    + (n("omitted") ? ` · 설정이 뺌 ${n("omitted")}` : "")
+    + (rc.confirmed ? "" : " — 미확정 초안 요구영역(trim_grid 범위) 기준");
+  const out = [];
+  if (rc.complete !== true) out.push({ key: "region_incomplete", tone: "fail", text: "요구영역 완료 아님 — 미해결 조건 남음" });
+  out.push({ key: "region_coverage", tone: rc.complete === true ? "hint" : "warn", text });
+  if (rc.complete !== true) reasons.forEach((r, i) => out.push({ key: `region_reason_${i}`, tone: "warn", text: r }));
+  return out;
+}
+
 /** report.coverage·coverage_gaps → 줄 목록 [{key, tone, text}] — 없으면 [].
  *
  * "무엇을 봤나"가 아니라 **무엇을 안 봤나**를 세는 줄이다. 판정·실패 수는 본 것만
@@ -1345,6 +1385,13 @@ export function designCueSummary(body) {
   if (cards.escalations.length) parts.push(`에스컬레이션 ${cards.escalations.length}`);
   const nExcluded = Array.isArray(r.excluded_samples) ? r.excluded_samples.length : 0;
   if (nExcluded) parts.push(`튜닝 실패 표본 제외 ${nExcluded}`);
+  // 요구영역 — 부분 성공이 완료로 읽히지 않게 신호 한 줄에도(이관 2단계). 옛 결과(없음)는 말하지 않는다
+  const rc = r.region_coverage;
+  // source 없음은 둘이다 — 옛 격자로 돈 기체(미정의)와 기본 격자 기록이 없는 세션(모름: 기체엔 요구영역이 있을 수 있다)
+  if (rc && rc.source == null) parts.push(r.coarse_source === "coarse_grid" ? "요구영역 미정의" : "요구영역 커버리지 모름");
+  else if (rc && rc.complete !== true) {
+    parts.push(`요구영역 완료 아님 (채택 ${Number(rc.by_category?.adopted) || 0}/${Number(rc.points) || 0})`);
+  }
   return parts.join(" · ");
 }
 
@@ -1365,6 +1412,26 @@ export function fuelsPlaceholder(fuelMax, fracs = DEFAULT_FUEL_FRACS) {
     // 0.1 × 45 = 4.5000000001 같은 부동소수 꼬리를 떼고, 정수면 정수로
     return String(Number(v.toPrecision(4)));
   }).join(" ");
+}
+
+/** 격자 칸 자리표시 — 비웠을 때 COARSE가 실제로 쓰는 명세 {nMach, alts, fuels, source} (05 §11.13 이관 2단계).
+ * 요구영역이 있으면 그 기본 격자 명세(operating_region.base_grid), 절이 없으면 trim_grid 초안의 모양(엔진 region_of 규칙 —
+ * 마하 점 수 = 범위/간격 + 1), 둘 다 없으면 옛 coarse 기본값(서버 grid · fuel_max × 비율). 모르는 칸은 null. */
+export function gridPlaceholders(doc, defaults) {
+  const r = doc?.operating_region;
+  if (r?.base_grid) {
+    const g = r.base_grid;
+    return { nMach: String(g.n_mach), alts: g.alts.join(" "), fuels: g.fuels.join(" "), source: "region" };
+  }
+  const tg = doc?.mission_template?.trim_grid;
+  if (tg) {
+    const n = Math.max(2, Math.floor((tg.mach.to - tg.mach.from) / tg.mach.step + 1e-9) + 1);
+    return { nMach: String(n), alts: tg.alt.join(" "), fuels: tg.fuel.join(" "), source: "draft" };
+  }
+  const alts = Array.isArray(defaults?.grid?.alts) ? defaults.grid.alts.join(" ") : null;
+  return { nMach: null, alts,
+    fuels: fuelsPlaceholder(doc?.mass?.fuel_max, defaults?.grid?.fuel_fracs ?? DEFAULT_FUEL_FRACS) || null,
+    source: "legacy" };
 }
 
 /** 보고서 자리의 빈 안내 — 결과가 아직 없을 때만 쓴다(결과가 서 있으면 보고서가 스스로 말한다).

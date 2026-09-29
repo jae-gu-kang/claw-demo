@@ -166,6 +166,8 @@ export const STATE_REASON_LABEL = Object.freeze({
   // 조건 판정(opspace/verdict.py) 사유 — 제한·모델 항목
   stall_boundary: "실속 경계 위반", limiter_clips_trim: "α 리미터가 트림을 유지하지 못함", q_max: "최대 동압 초과",
   mach_no: "M_NO 초과", db_mach: "DB 마하 범위 밖", db_alpha: "DB 받음각 범위 밖", fuel_range: "연료 범위 밖",
+  // 트림하지 않은 점의 판정(opspace/verdict.py pre_trim_verdict — 이관 2단계) 사유. 글은 트림 전 상태 이름과 같다
+  out_of_region: "요구영역 밖", undefined: "요구 미정의", model_gap: "모델 부족 (트림 안 함)",
 });
 
 export const stateReasonText = (codes) => (codes ?? []).map((c) => STATE_REASON_LABEL[c] ?? c).join(" · ");
@@ -197,6 +199,8 @@ function verdictKind(r) {
 /** 조건 판정 제외 항목 → 이름 (opspace/verdict.py 항목 순서). 트림 탭 근거 열과 자동 설계 점 표가 같은 이름을 쓴다.
  *  여유는 제외 항목이 아니다(v1.65) — 여유 미달 글은 marginShortText. */
 export const EXCLUSION_CATEGORY_LABEL = Object.freeze({
+  // 요구영역 — 트림하지 않은 점이 요구영역 밖·요구 미정의라 판정 대상이 아님(이관 2단계 pre_trim_verdict)
+  region: "요구영역 판정 대상 아님",
   trim: "트림 불성립", model: "모델 범위 밖", limits: "제한 위반",
 });
 

@@ -25,8 +25,10 @@
 **트림 탭과 자동 설계는 같은 판정을 낸다** — 기체를 아는 문맥(`from_profile`)이면 미수렴 트림도 트림 탭과 같은 근거
 판정(opspace/states.py `trim_assessment` — 한계 고정 평형·V_S)을 거쳐 트림 사유가 「미수렴」 한 낱말로 뭉치지 않는다.
 
-요구영역 포함 여부는 문맥의 요구영역으로 분류해 `region`에 싣되 아직 채택에 쓰지 않는다 — 자동 설계 격자가 요구영역에서
-나오는 것은 이관 2단계다(05 §11.13). 그 전에 채택에 넣으면 요구영역 밖 격자점이 조용히 빠진다.
+요구영역 포함 여부는 문맥의 요구영역으로 분류해 `region`에 싣되 채택에는 쓰지 않는다 — 자동 설계 격자는 이관 2단계부터
+요구영역의 기본 격자에서 나오므로(design/grid.py `region_grid`) 격자점은 애초에 요구영역 안이다. 기본 격자가 트림 **전에**
+모델 부족·요구영역 밖·요구 미정의로 표시한 점은 트림을 돌리지 않고 `pre_trim_verdict`로 같은 모양의 판정을 싣는다 —
+버리지 않고 왜 설계하지 않았는지를 남긴다(05 §11.13 2단계).
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from claw.opspace.states import COMPUTABLE
+from claw.opspace.states import COMPUTABLE, MODEL_GAP, OUT_OF_REGION, UNDEFINED
 
 _EPS = 1e-9
 
@@ -176,3 +178,23 @@ def condition_verdict(tr, ctx: VerdictContext, *, trim=None, assess: bool = True
             break
     return {"trim": t, "model": model, "limits": limits, "margin": margin, "region": _region(tr, ctx),
             "adopted": exclusion is None, "exclusion": exclusion}
+
+
+# 트림 전 제외 상태 → 채택 제외 범주. 모델 부족은 요구 안이라 모델 범주, 요구영역 밖·미정의는 요구영역 범주다
+PRE_TRIM_CATEGORY = {MODEL_GAP: "model", OUT_OF_REGION: "region", UNDEFINED: "region"}
+
+
+def pre_trim_verdict(state: str, ctx: VerdictContext) -> dict:
+    """트림 전 제외 상태(model_gap · out_of_region · undefined) → condition_verdict와 같은 모양의 판정.
+
+    기본 격자(opspace/basegrid.py)가 트림 전에 정한 상태라 트림을 돌리지 않는다 — 모델·제한·여유는 미평가(통과가 아니다),
+    채택하지 않고, 제외 사유는 그 상태 하나다. 모델 부족은 요구영역 **안**이라 region은 "in"이고 제외 범주는 model,
+    요구영역 밖·미정의는 region 범주다. 문맥에 요구영역이 없으면 region은 None(condition_verdict와 같은 규약)."""
+    if state not in PRE_TRIM_CATEGORY:
+        raise ValueError(f"트림 전 제외 상태가 아니다: {state!r} — 허용: {sorted(PRE_TRIM_CATEGORY)}")
+    unevaluated = {"status": "unevaluated", "reasons": []}
+    region = None if ctx.region is None else {
+        "status": "in" if state == MODEL_GAP else state, "confirmed": bool(ctx.region.confirmed)}
+    return {"trim": {"status": state, "reasons": [state]}, "model": dict(unevaluated), "limits": dict(unevaluated),
+            "margin": dict(unevaluated), "region": region, "adopted": False,
+            "exclusion": {"category": PRE_TRIM_CATEGORY[state], "reasons": [state]}}

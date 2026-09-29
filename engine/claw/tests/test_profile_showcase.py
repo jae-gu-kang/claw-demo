@@ -142,6 +142,11 @@ def test_δe_trim_표는_도출한_것이고_기본과_EO_IR형에서_낡지_않
     assert base.de_trim_stale is False
     assert eoir.de_trim_stale is False
     assert base.alloc_trim_table() is not None and eoir.alloc_trim_table() is not None
+    # 이관 10단계 — 요구 마하 M0.10~0.24 중 M0.225~0.24는 어느 요구 조건에서도 날 수 있는 트림이 없다(추력·제한). 표는
+    # M0.22에서 끝나고 그 위 요구 구간은 런타임이 끝값을 쓴다 — 끝값으로 채워 완료라 하지 않고 두 구간을 따로 적는다
+    cov = prov["coverage"]
+    assert cov["required_mach"] == [0.1, 0.24] and cov["table_mach"] == [0.1, 0.22]
+    assert cov["unsupported"] == [[0.225, 0.24]] and cov["beyond_table"] == [[0.22, 0.24]]
 
 
 def test_생성기가_자기_출처에서_시드_경로와_설계_설정을_되짚는다(doc):
@@ -165,7 +170,8 @@ def test_생성기의_판정선_튜닝_목표는_문서의_것이다(doc):
         c = _config(cfg, doc)
         assert c.targets.to_dict() == ev.targets.to_dict() and c.targets.zeta_sp == 0.9
         assert c.criteria.to_dict() == ev.margin.to_dict()
-        assert c.n_mach == rec["n_mach"] and c.fit_mode == rec["fit_mode"]
+        # 기록에 n_mach가 없으면 요구영역 기본 격자 명세(None) — 이관 2단계 재생성은 격자를 요구영역에 맡겼다
+        assert c.n_mach == rec.get("n_mach") and c.fit_mode == rec["fit_mode"]
     with pytest.raises(ValueError, match=r"targets\.zeta_sp"):
         _config({**rec, "targets": {"zeta_sp": 0.7}}, doc)
     # 문서가 목표를 안 적었으면 도구 기본값 — 설정의 목표가 그것을 덮지 않는다
@@ -261,9 +267,13 @@ def test_확정_게인_표는_한_설계_고도_줄의_스케줄이다(doc):
     「톱니 최대 40회/분할점 66」, roll.ki 띠 비 2.63). 톱니 수는 fit.table_surface와 같은 자로 잰다(스케일 0.5 % 미만 변화 무시)."""
     from claw.design.fit import table_surface
 
+    # 설계 고도 줄은 요구영역의 가장 낮은 행(200 m)이다 — 이관 2단계부터 COARSE는 요구영역 기본 격자에서 나와 요구영역
+    # 밖 해면(산출 근거 직행의 점)에는 설계점이 서지 않는다. 연료는 산출 근거 직행과 같은 절반
+    from claw.opspace import region_of
+
     cfg = doc["law"]["gain_tables"]["provenance"]["design"]["config"]
-    _, alt, fuel = basis_point(doc)
-    assert cfg["alts"] == [alt] and cfg["fuels"] == [fuel], cfg
+    _, _alt, fuel = basis_point(doc)
+    assert cfg["alts"] == [min(region_of(doc).grid["alts"])] and cfg["fuels"] == [fuel], cfg
     for name, t in doc["law"]["gain_tables"]["tables"].items():
         zig = table_surface(t["axes"]["mach"], t["data"])["zigzag"]
         assert zig <= TABLE_ZIGZAG_MAX, (name, zig)
@@ -286,8 +296,13 @@ def test_확정_게인_표가_운용_범위_전부에서_자동_설계_검증을
     assert doc["mission_template"]["sim"]["fuel"] in fuels
     cfg = {**doc["law"]["gain_tables"]["provenance"]["design"]["config"], "alts": alts, "fuels": fuels,
            "budget_points": 200, "budget_iters": 1}
+    import dataclasses
+
     for b, tables in ((base, base.confirmed_gain_tables()), (eoir, eoir.gain_tables())):
         inp = design_inputs(b)
+        # 운용 범위(0~3500 m)는 요구영역(200~3000 m)보다 넓다 — 이 세션은 운용 범위 전부의 점을 얻는 검사 수레라 요구영역
+        # 기본 격자(요구영역 밖 행에 점을 두지 않는다 — 이관 2단계)가 아니라 요구영역 없는 옛 격자로 돈다
+        inp["verdict_ctx"] = dataclasses.replace(inp["verdict_ctx"], region=None, cache={})
         session = DesignSession(_config(cfg, doc))
         session.run(inp["aircraft"], inp["stall_table"], inp["limits"], inp["db_ranges"], inp["design"],
                     verdict_ctx=inp["verdict_ctx"], rate_filters=inp["rate_filters"], actuator=inp["actuator"],
