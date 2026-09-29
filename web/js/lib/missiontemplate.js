@@ -1,6 +1,6 @@
 /** 미션 템플릿 — 기체 문서의 `mission_template`(화면 폼 초기값)을 폼 글로 옮긴다 (02 §5.6 · 06 §8).
 
-미션 템플릿은 계산에 쓰이지 않는 **화면 기본값**이다 — 해석 격자(트림·마진 맵·영향성·게인 카드), 엔벨로프
+미션 템플릿은 계산에 쓰이지 않는 **화면 기본값**이다 — 해석 격자(마진 맵·게인 카드), 엔벨로프
 폼, 시뮬 기본 미션의 속도·상승각·고도·연료, 착륙 미끄럼 거리. 기체 성능에 맞춰 잰 값이라 기체마다 다르다.
 그래서 웹의 상수는 **예제 기체의 사본(폴백)**으로만 남고, 고른 기체 문서가 도착하면 **손대지 않은 칸만** 그
 기체 값으로 바뀐다. 템플릿이 없는 기체(null)는 폴백을 쓰되 화면이 그렇다고 말한다 — 예제 값을 그 기체
@@ -30,7 +30,7 @@ export const ENVELOPE_FALLBACK = Object.freeze({
 /** 마진 맵 작동기 칸 폴백 — 예제 기체 actuator.params 사본. */
 export const MARGIN_ACT_FALLBACK = Object.freeze({ wn: "30", zeta: "0.7" });
 
-/** 격자(수치) → 폼 글 — 트림·마진 맵·영향성 격자 칸과 같은 모양. */
+/** 격자(수치) → 폼 글 — 마진 맵 격자 칸과 같은 모양. */
 export const gridStrings = (grid) => ({
   machFrom: String(grid.machFrom), machTo: String(grid.machTo), machStep: String(grid.machStep),
   alts: grid.alts.join(", "), fuels: grid.fuels.join(", "),

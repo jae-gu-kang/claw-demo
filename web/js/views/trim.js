@@ -30,6 +30,7 @@ import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.j
 import { heatmapCanvas, lineChartCanvas, stateMapCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createDrawers, tabStage, tabTop } from "./stage.js";
+import { store } from "../store.js";
 
 // 신호 실패 사유 — 서버 오류는 errorText(422 배열·엔진 detail을 사람 글로), 그 밖은 메시지만("Error: " 접두 없이)
 const cueReason = (e) => (e instanceof ApiError ? errorText(e) : (e?.message ?? String(e)));
@@ -177,6 +178,10 @@ export function render() {
           failCue(cue, `취소됨 — 완료분 ${body.results.length}케이스만 저장`);
           return;
         }
+        // 영향성 탭이 기본 격자 점마다 이 판정을 붙인다(05 §11.13 5단계 — 트림 결과 참조). 끝난 배치만 — 취소된 배치의
+        // 완료분을 넘기면 나머지 점이 「트림 안 함」으로 읽히고 「트림 채택점만」이 반쪽에서 고른다. 기체 리비전 대조는
+        // 받는 쪽(lib/opspace.js trimResultsByName)이 결과의 profile 블록으로 한다
+        store.set("trimBatch", body);
         reportCue(cue, { phase: "done", resultId: job.result_id,
           ...trimCueReport(body.results, untrimmedSummary(baseGrid)) });
       } catch (e) {

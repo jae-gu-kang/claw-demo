@@ -111,3 +111,75 @@ export function stateMapLayout({ rows, entries, machRange, fuel, width }) {
   const dots = dotsIn.map((e) => ({ x: x(e.trim.case.mach), y: rowY(e.trim.case.alt), entry: e }));
   return { x, rowY, height, alts, bands, dots, domain: [m0, m1] };
 }
+
+
+// ── 영향성 탭의 비행조건 — 기본 격자에서 고른다 (05 §11.13 5단계 결정) ─────────────────────────
+// 영향성 탭은 비행조건 구간을 따로 정하지 않는다: 「같은 조건에서 게인을 바꾸면」의 바닥인 조건이 탭마다 다르면
+// 설계·평가와 다른 점에서 잰 감도가 된다. 점은 기본 격자(casesFromBaseGrid — 미계산 점만, 모델 부족·영역 밖은 안
+// 보낸다)에서 **고르거나 거른다**. 없는 조건을 더하는 길은 두지 않는다(더하면 05 §11.11 보강 사유를 남겨야 한다).
+
+/** 기본 격자 점의 필터 칸 — 고도·연료 값 목록(오름차순)과 마하 범위. */
+export function pointAxes(points) {
+  const uniq = (k) => [...new Set((points ?? []).map((p) => p[k]))].sort((a, b) => a - b);
+  const ms = (points ?? []).map((p) => p.mach);
+  return { alts: uniq("alt"), fuels: uniq("fuel"), mach: ms.length ? [Math.min(...ms), Math.max(...ms)] : null };
+}
+
+/** 거르기 — {alts, fuels}는 남길 값 목록(null = 전부, 빈 목록 = 없음 — 칩을 다 끄면 아무것도 안 보여야 한다),
+ *  machLo·machHi는 포함 경계(null = 열림).
+ *  돌려주는 순서는 입력 순서(기본 격자의 서펜타인 — 인접 트림 시드)다. */
+export function filterPoints(points, { alts = null, fuels = null, machLo = null, machHi = null } = {}) {
+  const inSet = (list, v) => list == null || list.includes(v);
+  const lo = Number.isFinite(machLo) ? machLo - 1e-9 : -Infinity;
+  const hi = Number.isFinite(machHi) ? machHi + 1e-9 : Infinity;
+  return (points ?? []).filter((p) => inSet(alts, p.alt) && inSet(fuels, p.fuel) && p.mach >= lo && p.mach <= hi);
+}
+
+/** 대표점 — 종전 대표 부분 격자(lib/grid.js representativeGrid n=4: 마하 양끝 × 고도 양끝 × 연료 가운데)의 규칙을
+ *  기본 격자 점 위에 옮긴 것. 기본 격자는 사각이 아니라(행마다 요구 마하 범위가 다르다) 규칙을 행 단위로 읽는다:
+ *   ① 연료 — 있는 연료 값 중 [최소, 최대]의 가운데에 가장 가까운 것(같으면 낮은 쪽 — 옛 pickSpread가 짝수 개에서
+ *      아래 가운데를 골랐다)
+ *   ② 고도 — 그 연료의 행 중 가장 낮은 고도와 가장 높은 고도
+ *   ③ 마하 — 그 두 행 각각의 가장 낮은 마하와 가장 높은 마하(행 끝점 — 동압 최저·최고, 게인 스케줄이 가장 멀리 가는 자리)
+ *  최대 4점(겹치면 줄어든다). 돌려주는 것은 입력 점의 부분집합(입력 순서). */
+export function representativePoints(points) {
+  const list = points ?? [];
+  if (!list.length) return [];
+  const { fuels } = pointAxes(list);
+  const mid = (fuels[0] + fuels[fuels.length - 1]) / 2;
+  const fuel = fuels.reduce((best, f) => (Math.abs(f - mid) < Math.abs(best - mid) - 1e-12 ? f : best), fuels[0]);
+  const atFuel = list.filter((p) => p.fuel === fuel);
+  const alts = pointAxes(atFuel).alts;
+  const pick = new Set();
+  for (const alt of new Set([alts[0], alts[alts.length - 1]])) {
+    const row = atFuel.filter((p) => p.alt === alt);
+    const ms = row.map((p) => p.mach);
+    for (const m of new Set([Math.min(...ms), Math.max(...ms)])) pick.add(row.find((p) => p.mach === m).name);
+  }
+  return list.filter((p) => pick.has(p.name));
+}
+
+/** 이름으로 고르기 — 이름이 하나라도 격자에 없으면 던진다(조용히 빠지면 「그 점을 쟀다」는 기록이 거짓이 된다).
+ *  돌려주는 순서는 격자 순서다. */
+export function pickNamed(points, names) {
+  const have = new Set((points ?? []).map((p) => p.name));
+  const missing = (names ?? []).filter((n) => !have.has(n));
+  if (missing.length) {
+    throw new Error(`기본 격자에 없는 점 ${missing.length}건: ${missing.join(", ")} — 요구영역·격자 명세를 확인한다`);
+  }
+  const want = new Set(names);
+  return points.filter((p) => want.has(p.name));
+}
+
+/** 같은 기체 리비전의 응답인가 — 서버 profile 블록(id·variant·revision)을 대조한다. 한쪽이라도 없으면 아니다. */
+export function sameProfileEcho(a, b) {
+  if (!a || !b) return false;
+  return a.id === b.id && (a.variant ?? null) === (b.variant ?? null) && (a.revision ?? null) === (b.revision ?? null);
+}
+
+/** 트림 배치 결과 → 이름별 결과 — 기본 격자와 **같은 기체 리비전**의 결과일 때만(다른 리비전의 트림 상태를 이 격자
+ *  점에 붙이면 옛 판정을 지금 것으로 읽는다). 아니면 null. */
+export function trimResultsByName(trimBody, grid) {
+  if (!trimBody?.results || !sameProfileEcho(trimBody.profile, grid?.profile)) return null;
+  return new Map(trimBody.results.map((r) => [r.case?.name, r]));
+}

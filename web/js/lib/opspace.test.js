@@ -3,7 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  STATE_MAP_LAYOUT, casesFromBaseGrid, gridMapEntries, parseGridSpec, regionLines, stateCountText, stateMapLayout,
+  STATE_MAP_LAYOUT, casesFromBaseGrid, filterPoints, gridMapEntries, parseGridSpec, pickNamed, pointAxes,
+  regionLines, representativePoints, sameProfileEcho, stateCountText, stateMapLayout, trimResultsByName,
   untrimmedSummary,
 } from "./opspace.js";
 import {
@@ -250,4 +251,58 @@ test("쇼케이스 보고 — 조건 판정 칸으로 센다, 옛 결과(판정 
     margin: { status: "short", reasons: ["throttle_high"] } };
   assert.equal(trimCueReport([old]).summary,
     `1 케이스 — ${TRIM_STATE_CELL.computable.label} 0 · ${TRIM_STATE_CELL.margin_short.label} 1`);
+});
+
+
+// ── 영향성 탭의 비행조건 고르기 (05 §11.13 5단계) ─────────────────────────────────────────
+// 엔진 opspace.base_grid(쇼케이스 문서)가 낸 점 — 행마다 요구 마하 범위가 다르다(3000 m 행 하한 M0.11)
+const row = (alt, fuel, machs) => machs.map((m) => pt(m, alt, "not_run", fuel));
+const SC = [
+  ...row(200, 10, [0.1, 0.12, 0.14, 0.16, 0.18, 0.2, 0.22, 0.24]),
+  ...row(3000, 10, [0.24, 0.22, 0.2, 0.18, 0.16, 0.14, 0.12, 0.11]),
+  ...row(200, 50, [0.11, 0.12, 0.14, 0.16, 0.18, 0.2, 0.22, 0.24]),
+  ...row(3000, 50, [0.24, 0.22, 0.2, 0.18, 0.16, 0.14, 0.12]),
+];
+
+test("필터 칸: 고도·연료 값(오름차순)과 마하 범위", () => {
+  assert.deepEqual(pointAxes(SC), { alts: [200, 3000], fuels: [10, 50], mach: [0.1, 0.24] });
+  assert.deepEqual(pointAxes([]), { alts: [], fuels: [], mach: null });
+});
+
+test("거르기: 고도·연료 목록과 마하 포함 경계 — 순서는 격자 순서 그대로", () => {
+  const f = filterPoints(SC, { alts: [3000], fuels: [10], machLo: 0.2, machHi: 0.24 });
+  assert.deepEqual(f.map((p) => p.name), ["M0.24_h3000_f10", "M0.22_h3000_f10", "M0.2_h3000_f10"]);
+  assert.equal(filterPoints(SC, {}).length, SC.length, "빈 필터 = 전부");
+  assert.equal(filterPoints(SC, { alts: null, fuels: null }).length, SC.length, "null = 전부");
+  assert.equal(filterPoints(SC, { alts: [] }).length, 0, "빈 목록 = 없음(칩을 다 껐다)");
+});
+
+test("대표점: 가운데 연료(같으면 낮은 쪽) × 최저·최고 고도 행 × 각 행의 마하 끝점", () => {
+  assert.deepEqual(representativePoints(SC).map((p) => p.name),
+    ["M0.1_h200_f10", "M0.24_h200_f10", "M0.24_h3000_f10", "M0.11_h3000_f10"]);
+  // 연료 셋이면 가운데 — 행 끝점은 그 연료 행에서 읽는다
+  const three = [...row(100, 5, [0.1, 0.2]), ...row(100, 25, [0.12, 0.2, 0.3]), ...row(900, 25, [0.13, 0.3]),
+    ...row(100, 50, [0.14, 0.2])];
+  assert.deepEqual(representativePoints(three).map((p) => p.name),
+    ["M0.12_h100_f25", "M0.3_h100_f25", "M0.13_h900_f25", "M0.3_h900_f25"]);
+  // 거른 뒤의 점에 적용한다 — 한 행만 남으면 그 행의 두 끝
+  assert.deepEqual(representativePoints(filterPoints(SC, { alts: [200], fuels: [50] })).map((p) => p.name),
+    ["M0.11_h200_f50", "M0.24_h200_f50"]);
+  assert.deepEqual(representativePoints([]), []);
+});
+
+test("이름으로 고르기: 격자 순서로 돌려주고, 없는 이름은 조용히 빼지 않고 던진다", () => {
+  assert.deepEqual(pickNamed(SC, ["M0.12_h3000_f10", "M0.12_h200_f10"]).map((p) => p.name),
+    ["M0.12_h200_f10", "M0.12_h3000_f10"]);
+  assert.throws(() => pickNamed(SC, ["M0.12_h200_f10", "M0.13_h200_f10"]), /없는 점 1건: M0.13_h200_f10/);
+});
+
+test("트림 결과는 같은 기체 리비전일 때만 격자 점에 붙는다", () => {
+  const echo = { id: "s1", variant: null, revision: 3 };
+  const trim = { profile: echo, results: [{ case: { name: "M0.1_h200_f10" }, state: "computable" }] };
+  assert.equal(trimResultsByName(trim, { profile: { ...echo } }).get("M0.1_h200_f10").state, "computable");
+  assert.equal(trimResultsByName(trim, { profile: { ...echo, revision: 4 } }), null, "옛 리비전의 트림");
+  assert.equal(trimResultsByName(trim, { profile: { ...echo, id: "x" } }), null);
+  assert.equal(trimResultsByName(null, { profile: echo }), null);
+  assert.equal(sameProfileEcho(null, echo), false);
 });

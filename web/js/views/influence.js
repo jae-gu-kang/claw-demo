@@ -84,10 +84,9 @@ import {
 } from "../lib/prescribe.js";
 import { EVAL_MARK, renderEvalCards } from "./evalcards.js";
 import {
-  DEFAULT_GRID, REPRESENTATIVE_CASES, machRange, nameCases, parseNumberList, representativeGrid,
-  serpentineCases,
-} from "../lib/grid.js";
-import { DOC_FAILED_HINT, MISSING_TEMPLATE_HINT, gridStrings } from "../lib/missiontemplate.js";
+  casesFromBaseGrid, filterPoints, pickNamed, pointAxes, representativePoints, trimResultsByName, untrimmedSummary,
+} from "../lib/opspace.js";
+import { trimStateLabel } from "../lib/plot.js";
 import { revealPanel } from "../lib/reveal.js";
 import { haltReason } from "../lib/showcase.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
@@ -97,7 +96,6 @@ import { createInfluenceCanvas } from "./influencecanvas.js";
 import { store } from "../store.js";
 import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
 import { criteriaBadgeSpec, criteriaEchoCache, criteriaFreshness } from "../lib/freshness.js";
-import { fillGridFromProfile, firstTimeThisPage, selectedDefaults } from "./missionfill.js";
 
 // 그래프가 카드 밖으로 나오면서 폭이 늘었다 (app.css가 이 탭만 main을 1580까지
 // 연다). 캔버스는 `width:논리폭 + max-width:100%`라 좁은 화면에서는 비율을 지킨
@@ -139,20 +137,26 @@ const state = {
   // 구간 경향(3단 C)이 보고 있는 설계변수·지표 — 결과가 아니라 **보는 자리**라
   // 스윕과 수명이 다르다(같은 스윕을 설계변수별로 훑는 것이 이 표의 용법이다)
   trendKnob: null, trendMetric: null,
-  // 케이스 격자 입력 — 결과(scan.selected)와 수명이 같아야 한다. 입력만 기본값으로
-  // 되돌아가면 재진입 직후 3단 B가 "격자가 바뀌었다"고 거절한다(사용자는 안 건드렸다)
-  // 격자 기본값의 정본은 lib/grid.js DEFAULT_GRID다 — 게인 탭 지표 카드와 같은
-  // 격자여야 "최악 운용점"이 탭마다 다른 말을 하지 않는다
-  gridForm: { machFrom: String(DEFAULT_GRID.machFrom),
-    machTo: String(DEFAULT_GRID.machTo), machStep: String(DEFAULT_GRID.machStep),
-    alts: DEFAULT_GRID.alts.join(", "), fuels: DEFAULT_GRID.fuels.join(", "),
-    tStep: "15" },
+  // 비행조건 — 이 탭은 구간을 따로 정하지 않는다(05 §11.13 5단계): 고른 기체의 요구영역 기본 격자(서버 /grid/base,
+  // 트림 탭과 같은 점·같은 이름)에서 고르거나 거른다. 선택은 이름 집합이라 격자를 다시 받아도 같은 점이 남는다 —
+  // 결과(scan.selected)와 수명이 같아야 재진입 직후 3단 B가 「격자가 바뀌었다」고 거절하지 않는다.
+  // selected: null = 보낼 수 있는 점 전부(손대지 않음 — 요구영역이 바뀌면 새 점도 따라온다)
+  // filter: 표에 보일 점 — alts·fuels null = 전부, machLo·machHi 빈 칸 = 열림. 고르기 버튼은 보이는 점에만 작용한다
+  // pruned: 다시 받은 격자에 없어 선택에서 뺀 이름(사용자가 다시 고를 때까지 요약에 남긴다 — 조용히 줄지 않게)
+  cond: { grid: null, error: null, loading: false, selected: null, open: false, pruned: [],
+    filter: { alts: null, fuels: null, machLo: "", machHi: "" } },
+  tStep: "15",
 };
 let canvas = null;
 // 지금 뷰의 실행 버튼 다시 그리기 — 잡 감시는 **제출한 뷰의 클로저**에서 돌므로, 탭을 떠났다
 // 오면 새 뷰의 버튼은 그 콜백을 모른다. 콜백은 이 자리로 부른다(새 뷰가 render마다 갈아 끼운다)
 let renderRunsHook = null;
-let gridVisit = 0; // 격자 패널을 그린 차례 — 떠난 방문의 늦은 콜백이 지금 칸·상태를 건드리지 않게
+let condSeq = 0; // 기본 격자 요청 차례 — 늦게 온 옛 응답이 새 응답을 덮지 않게
+let condLatest = null; // 가장 나중 요청의 약속 — 밀린 요청을 기다리던 쪽(신호)이 이것을 기다린다
+// 밀린 요청의 결과 — 「받았다」도 「못 받았다」도 아니다(격자는 더 나중 요청이 채운다)
+const SUPERSEDED = Object.freeze({ status: "superseded" });
+// screen·evaluate 신호가 받는 인자 — 그 밖(옛 cases 포함)은 거절한다
+const CUE_EVAL_ARGS = Object.freeze(["points", "label"]);
 
 // 성운(radial)은 삭제됐고 **전파 폭포가 기본**이다. 재생 일정은 배치와 무관한 위상
 // 랭크이므로(influenceplay.js) 「프로세스 뷰」(레이어 활성망)로 전환해도 같은 재생·
@@ -862,67 +866,214 @@ export function render() {
     diagBox);
   const numIn = (val, width = 70) =>
     el("input", { type: "number", value: val, step: "any", style: `width:${width}px` });
-  // 케이스 격자 — margins 탭과 같은 기본값(18케이스). 2단은 케이스당 ~10 ms라
-  // 격자 전체가 공짜지만, 3단은 케이스 × 런 곱이라 A(전 케이스 base 스캔)로
-  // 결함 케이스를 좁힌 뒤 B(부분 풀 스윕)로 간다.
-  const gridVisitNow = ++gridVisit;
-  const g = state.gridForm;
-  const machFromIn = numIn(g.machFrom, 55);
-  const machToIn = numIn(g.machTo, 55);
-  const machStepIn = numIn(g.machStep, 55);
-  const altsIn = el("input", { type: "text", value: g.alts, style: "width:120px" });
-  const fuelsIn = el("input", { type: "text", value: g.fuels, style: "width:60px" });
-  const stepIn = numIn(g.tStep, 55);
-  const caseCountHint = el("span", { class: "hint" });
-
-  // 이름은 클라이언트가 명시 부여한다(lib/grid.js nameCases — 유일성 보장) —
-  // 스캔 결과의 bad_cases(이름 문자열)를 3단 B의 케이스 객체로 되돌리는 매핑이
-  // 서버 자동 명명 형식에 묶이지 않게
-  function gridCases() {
-    return nameCases(serpentineCases(
-      machRange(Number(machFromIn.value), Number(machToIn.value),
-        Number(machStepIn.value)),
-      parseNumberList(altsIn.value),
-      parseNumberList(fuelsIn.value),
-    ));
-  }
-  // 템플릿 없는 기체면 케이스 수 옆에 그렇다고 적는다 — 격자가 예제 기체에 맞춘 폴백이다
-  const templateNote = el("span");
-  function renderCaseCount() {
+  // 비행조건 — 기본 격자에서 고른 점(lib/opspace.js). 2단은 케이스당 ~10 ms라 고른 점 전부가 공짜지만,
+  // 3단은 케이스 × 런 곱이라 A(전 케이스 base 스캔)로 결함 케이스를 좁힌 뒤 B(부분 풀 스윕)로 간다.
+  const stepIn = numIn(state.tStep, 55);
+  stepIn.addEventListener("input", () => { state.tStep = stepIn.value; });
+  const condSummary = el("span", { class: "hint" });
+  // 평가 패널의 케이스 수 줄 — 격자는 비동기로 오므로 패널을 연 뒤에도 renderCond가 고쳐 쓴다
+  const caseTextEl = el("span", { class: "hint" });
+  function paintCaseText() {
     try {
-      caseCountHint.textContent = `케이스 ${gridCases().length}건`;
-    } catch {
-      caseCountHint.textContent = "격자 입력 오류";
+      caseTextEl.textContent = `케이스 ${selectedCases().length}건 (비행조건은 바로 위 무대에서 고른다)`;
+    } catch (e) {
+      caseTextEl.textContent = `비행조건 오류 — ${e.message}`;
     }
-    caseCountHint.append(templateNote);
   }
-  for (const [key, inp] of Object.entries({
-    machFrom: machFromIn, machTo: machToIn, machStep: machStepIn,
-    alts: altsIn, fuels: fuelsIn, tStep: stepIn,
-  })) {
-    inp.addEventListener("input", () => {
-      state.gridForm[key] = inp.value;  // 재진입 때 되살릴 값
-      renderCaseCount();
+  const condBox = el("div");
+  const condDetails = el("details", { style: "margin-top:6px" },
+    el("summary", { class: "hint", style: "cursor:pointer" }, "점 고르기 — 고도·연료·마하로 거르고 고른다"),
+    condBox);
+  if (state.cond.open) condDetails.open = true;
+  condDetails.addEventListener("toggle", () => { state.cond.open = condDetails.open; });
+
+  // 보낼 수 있는 점 — 미계산 점만(모델 부족은 트림 근거가 없어 보내지 않는다 — 트림 탭과 같은 규칙).
+  // 이름은 서버(엔진 case_name)가 값 그대로 지은 것 — 스캔의 bad_cases(이름)를 3단 B 케이스로 되돌리는 키다
+  const condPool = () => casesFromBaseGrid(state.cond.grid);
+  function selectedCases() {
+    const g = state.cond.grid;
+    // 받는 중·못 받음이면 남아 있는 격자는 옛 리비전일 수 있다 — 그 점으로 돌면 결과가 지금 요구영역의 것이라 읽힌다
+    if (state.cond.loading) throw new Error("기본 격자를 다시 받는 중 — 옛 점을 보내지 않는다. 받은 뒤 다시 누른다");
+    if (state.cond.error) throw new Error(`${state.cond.error} — 옛 점을 보내지 않는다`);
+    if (!g) throw new Error("기본 격자를 아직 받지 못했다 — 잠시 뒤 다시 누른다");
+    if (!g.region) throw new Error(`요구영역 미정의 — ${g.reason}`);
+    const sel = state.cond.selected;
+    const out = sel ? condPool().filter((p) => sel.has(p.name)) : condPool();
+    if (!out.length) throw new Error("고른 비행조건이 없다 — 무대의 「비행조건」에서 점을 고른다");
+    return out;
+  }
+  // 선택을 이름 목록으로 — 보낼 점 전부면 null(손대지 않은 상태로 되돌린다)
+  function setSelected(names) {
+    const pool = condPool();
+    const want = new Set(names);
+    state.cond.selected = pool.every((p) => want.has(p.name)) ? null : want;
+    state.cond.pruned = []; // 다시 골랐다 — 뺀 점 알림은 할 일을 다했다
+    renderCond();
+  }
+  const selectedNames = () => new Set(state.cond.selected ?? condPool().map((p) => p.name));
+
+  // 받은 격자를 싣는다. 요구 미정의(region null)면 고른 이름을 건드리지 않는다 — 점이 없는 응답으로 선택을 지우면
+  // 요구영역을 되살려도 사용자가 고른 것이 영영 사라진다(보류로 두고 요약이 그렇다고 말한다)
+  function applyGrid(body) {
+    state.cond.grid = body;
+    state.cond.error = null;
+    if (!body.region || !state.cond.selected) return;
+    // 손으로 고른 이름 중 새 격자에서 보낼 수 없는 것(요구영역이 바뀌었다·모델 부족이 됐다)은 빼고 남긴다 — 없는
+    // 점을 고른 채로 두면 개수가 거짓이고, 조용히 빼면 사용자가 모른 채 다른 점 집합으로 돈다
+    const have = new Set(casesFromBaseGrid(body).map((p) => p.name));
+    const gone = [...state.cond.selected].filter((n) => !have.has(n));
+    if (!gone.length) return;
+    state.cond.selected = new Set([...state.cond.selected].filter((n) => have.has(n)));
+    state.cond.pruned = [...new Set([...state.cond.pruned, ...gone])];
+  }
+
+  // 기본 격자 받기 — 요구영역의 기본 명세 그대로(명세 칸은 트림 탭 몫이다).
+  // 결과 {status: "ok"|"undefined"|"error"|"superseded", reason?} — 밀린 요청은 superseded(성공으로 읽지 않는다)
+  function fetchBaseGrid() {
+    const seq = ++condSeq;
+    state.cond.loading = true;
+    renderCond();
+    const p = (async () => {
+      try {
+        const body = await api.post("/grid/base", {});
+        if (seq !== condSeq) return SUPERSEDED; // 더 나중 요청이 있다 — 그쪽이 채운다
+        applyGrid(body);
+        return body.region ? { status: "ok" } : { status: "undefined", reason: `요구영역 미정의 — ${body.reason}` };
+      } catch (e) {
+        if (seq !== condSeq) return SUPERSEDED;
+        // 옛 격자는 표에 남기되(고른 이름을 잃지 않게) 못 받았다고 표시한다 — selectedCases가 옛 점을 보내지 않는다
+        state.cond.error = `기본 격자를 받지 못했다 — ${errorText(e)}`;
+        return { status: "error", reason: state.cond.error };
+      } finally {
+        if (seq === condSeq) {
+          state.cond.loading = false;
+          renderCond();
+        }
+      }
+    })();
+    condLatest = p;
+    return p;
+  }
+
+  // 가장 나중 요청의 결과까지 기다린다 — 자기 요청이 밀렸으면 이긴 요청을 기다린다(밀린 응답을 받았다고 치면
+  // 받는 중인 옛 격자로 고른다)
+  async function latestBaseGrid() {
+    let r = await fetchBaseGrid();
+    while (r.status === "superseded") r = await condLatest;
+    return r;
+  }
+
+  // 트림 탭이 이 기체 리비전으로 돌린 배치가 있으면 점마다 그 상태를 붙인다(트림 결과 참조 — 없으면 열이 없다)
+  const trimByName = () => trimResultsByName(store.get("trimBatch"), state.cond.grid);
+
+  function renderCond() {
+    const g = state.cond.grid;
+    paintCaseText();
+    clear(condSummary);
+    clear(condBox);
+    // 못 받았으면 옛 격자가 있어도 맨 앞에 크게 — 표의 점이 지금 요구영역의 것이라 읽히지 않게
+    if (state.cond.error) {
+      condSummary.append(el("strong", { style: `color:${WARN_INK}` },
+        `${state.cond.error} — 옛 점을 보내지 않는다${g ? " (아래 표는 옛 격자)" : ""}`), g ? " · " : "");
+    }
+    if (!g) {
+      if (!state.cond.error) condSummary.append("요구영역 기본 격자를 받는 중…");
+      return;
+    }
+    if (!g.region) {
+      const held = state.cond.selected?.size;
+      condSummary.append(el("span", { style: `color:${WARN_INK}` }, `요구영역 미정의 — ${g.reason}`),
+        held ? ` · 고른 점 ${held}개는 보류 — 요구영역이 정해지면 다시 적용한다` : "",
+        state.cond.loading ? " · 다시 받는 중…" : "");
+      return;
+    }
+    const pool = condPool();
+    const sel = selectedNames();
+    const nSel = pool.filter((p) => sel.has(p.name)).length;
+    const untrimmed = untrimmedSummary(g);
+    condSummary.append(
+      el("strong", {}, `${nSel}점`), ` / 기본 격자 ${pool.length}점`,
+      state.cond.selected ? " (고름)" : " (전부)",
+      // 보내지 않는 점 — 모델 부족·요구영역 밖·요구 미정의 행. 트림 탭과 같은 글로 사라지지 않게 남긴다
+      untrimmed.text ? ` · ${untrimmed.text.replace("트림하지 않음", "보내지 않음")}` : "",
+      g.region.confirmed ? "" : " · 요구영역 미확정 초안(트림 탭 「운용영역·기본 격자」)",
+      state.cond.loading ? " · 다시 받는 중…" : "",
+      state.cond.pruned.length
+        ? el("span", { style: `color:${WARN_INK}`, title: state.cond.pruned.join(", ") },
+          ` · 고른 점 ${state.cond.pruned.length}개가 새 기본 격자에 없어 뺐다 (${state.cond.pruned.join(", ")})`)
+        : "");
+
+    const axes = pointAxes(pool);
+    const f = state.cond.filter;
+    const visible = filterPoints(pool, {
+      alts: f.alts, fuels: f.fuels,
+      machLo: f.machLo === "" ? null : Number(f.machLo), machHi: f.machHi === "" ? null : Number(f.machHi),
     });
-  }
-  renderCaseCount();
-  // 격자 칸은 예제 기체 격자(폴백)로 먼저 선다 — 스캔 결과가 아직 없을 때만 고른 기체의 미션 템플릿 격자로
-  // 손대지 않은 칸을 바꾼다(결과가 있으면 입력이 결과와 같아야 3단 B가 받는다)
-  if (!state.scan?.result) {
-    const gridInputs = { machFrom: machFromIn, machTo: machToIn, machStep: machStepIn, alts: altsIn, fuels: fuelsIn };
-    // 템플릿 없음 안내는 케이스 수 줄에 붙인다 — 받는 쪽이 글을 쓰는 순간 옮겨 단다(응답을 기다린 뒤다)
-    const note = {
-      set textContent(text) {
-        templateNote.textContent = text ? ` · ${text}` : "";
-        renderCaseCount();
-      },
+    // 값 칩 — 체크 = 표에 보인다. 전부 켜지면 null(새 값도 보인다)
+    const chips = (key, values, unit) => values.map((v) => {
+      const on = !f[key] || f[key].includes(v);
+      const box = el("input", { type: "checkbox" });
+      box.checked = on;
+      box.addEventListener("change", () => {
+        const cur = new Set(f[key] ?? values);
+        if (box.checked) cur.add(v); else cur.delete(v);
+        f[key] = values.every((x) => cur.has(x)) ? null : values.filter((x) => cur.has(x));
+        renderCond();
+      });
+      return el("label", { class: "hint", style: "margin-right:8px" }, box, ` ${v} ${unit}`);
+    });
+    const machIn = (key) => {
+      const inp = el("input", { type: "number", step: "any", value: f[key], placeholder: "—", style: "width:62px" });
+      inp.addEventListener("change", () => { f[key] = inp.value.trim(); renderCond(); }); // input마다 다시 그리면 칸이 초점을 잃는다
+      return inp;
     };
-    // 격자 칸은 모듈 상태라 페이지당 한 번만 채운다 — 안내는 들어올 때마다 단다
-    fillGridFromProfile(gridInputs, note, (changed) => {
-      for (const k of changed) state.gridForm[k] = gridInputs[k].value;
-      renderCaseCount();
-    }, { fill: () => gridVisitNow === gridVisit && firstTimeThisPage("influence.grid") });
+    const trim = trimByName();
+    const visNames = visible.map((p) => p.name);
+    const btn = (label, title, fn) => el("button", { title, onclick: fn }, label);
+    condBox.append(
+      el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
+        el("span", { class: "hint" }, "고도 "), ...chips("alts", axes.alts, "m"),
+        el("span", { class: "hint" }, "연료 "), ...chips("fuels", axes.fuels, "kg"),
+        el("label", { class: "hint" }, "마하 ", machIn("machLo"), " ~ ", machIn("machHi"))),
+      el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" },
+        btn(`보이는 ${visible.length}점 고르기`, "표에 보이는 점을 선택에 더한다",
+          () => setSelected([...selectedNames(), ...visNames])),
+        btn("보이는 점 빼기", "표에 보이는 점을 선택에서 뺀다",
+          () => { const s2 = selectedNames(); visNames.forEach((n) => s2.delete(n)); setSelected([...s2]); }),
+        btn("대표점만", "보이는 점 중 가운데 연료 × 최저·최고 고도 행 × 각 행의 마하 양끝(최대 4점)만 고른다 "
+          + "— lib/opspace.js representativePoints", () => setSelected(representativePoints(visible).map((p) => p.name))),
+        trim ? btn("트림 채택점만", "보이는 점 중 트림 탭 배치에서 조건 판정이 채택한 점만 고른다",
+          () => setSelected(visible.filter((p) => trim.get(p.name)?.verdict?.adopted === true).map((p) => p.name)))
+          : null,
+        btn("전부", "필터를 풀고 보낼 수 있는 점 전부를 고른다", () => {
+          state.cond.filter = { alts: null, fuels: null, machLo: "", machHi: "" };
+          setSelected(pool.map((p) => p.name));
+        }),
+        btn("기본 격자 다시 받기", "기체 탭에서 요구영역을 고쳤으면 — 고른 점은 이름으로 유지된다", () => fetchBaseGrid())),
+      el("div", { class: "scroll-x", style: "max-height:260px;overflow-y:auto;margin-top:6px" }, el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, ""), el("th", {}, "점"), el("th", {}, "마하"), el("th", {}, "고도 [m]"),
+          el("th", {}, "연료 [kg]"), trim ? el("th", { title: "트림 탭 배치(같은 기체 리비전)의 조건 상태" }, "트림") : null)),
+        el("tbody", {}, visible.map((p) => {
+          const box = el("input", { type: "checkbox" });
+          box.checked = sel.has(p.name);
+          box.addEventListener("change", () => {
+            const s2 = selectedNames();
+            if (box.checked) s2.add(p.name); else s2.delete(p.name);
+            setSelected([...s2]);
+          });
+          const tr = trim?.get(p.name);
+          return el("tr", {}, el("td", {}, box), el("td", { style: mono() }, p.name),
+            el("td", { class: "num" }, String(p.mach)), el("td", { class: "num" }, String(p.alt)),
+            el("td", { class: "num" }, String(p.fuel)),
+            trim ? el("td", { class: "hint" }, tr ? trimStateLabel(tr) : "트림 안 함") : null);
+        })))),
+      el("p", { class: "hint", style: "margin:6px 0 0" },
+        "점은 고른 기체의 요구 운용영역에서 만든 기본 격자다(트림 탭과 같은 점·같은 이름, 05 §11.11). ",
+        "이 탭은 조건을 더하지 않는다 — 없는 조건이 필요하면 요구영역·기본 격자 명세를 고친다. ",
+        trim ? "트림 열은 트림 탭이 이 기체 리비전으로 돌린 배치의 판정이다." : "트림 탭에서 배치를 돌리면 점마다 그 판정이 붙는다."),
+    );
   }
+  renderCond();
 
   const metricDef = (key) => (state.model?.metrics ?? []).find((m) => m.key === key);
   const metricLabel = (key) => metricDef(key)?.label ?? key;
@@ -1211,13 +1362,13 @@ export function render() {
     }
     let cases;
     try {
-      cases = gridCases();
+      cases = selectedCases();
     } catch (e) {
       state.evalRun = { status: "제출 불가", submitted: false,
                         result: null, error: errorText(e) };
       renderEval();
-      runEnd(depth, false, "격자 입력 오류");
-      runStatus("평가: 격자 입력 오류", { open: "eval", bad: true });
+      runEnd(depth, false, "비행조건 오류");
+      runStatus("평가: 비행조건 오류", { open: "eval", bad: true });
       return state.evalRun;
     }
     // 직전 결과는 여기서 잡는다 — 아래 제출이 state.evalRun을 갈아 끼우므로
@@ -1285,12 +1436,12 @@ export function render() {
     if (runRefused()) return;
     let cases;
     try {
-      cases = gridCases();
+      cases = selectedCases();
     } catch (e) {
       state.verifyRun = { status: "제출 불가", result: null, error: errorText(e) };
       renderEval();
-      runEnd("verify", false, "격자 입력 오류");
-      runStatus("검증: 격자 입력 오류", { open: "eval", bad: true });
+      runEnd("verify", false, "비행조건 오류");
+      runStatus("검증: 비행조건 오류", { open: "eval", bad: true });
       return;
     }
     runStatus(`검증 제출 중 — 코너 × ${cases.length}케이스 재트림(비쌈)`);
@@ -1347,11 +1498,11 @@ export function render() {
     }
     let cases;
     try {
-      cases = sweepCases(gridCases(), state.scan);
+      cases = sweepCases(selectedCases(), state.scan);
     } catch (e) {
       state.prescribe = { status: "제출 불가", result: null, error: errorText(e) };
       renderPrescribe();
-      runStatus("수정안: 격자 입력 오류", { open, bad: true });
+      runStatus("수정안: 비행조건 오류", { open, bad: true });
       return state.prescribe;
     }
     // 스윕이 끝나고 여기 오기 전에 진행기가 중단됐다 — 수정안 잡을 걸지 않는다(패널의 지난 수정안은 그대로)
@@ -1523,10 +1674,10 @@ export function render() {
   function howMuchTitle(knobs) {
     let n;
     try {
-      n = gridCases().length;
+      n = selectedCases().length;
     } catch {
-      return "감도 스윕 → 수정안 → 확인 런까지 이어 돈다 — 지금은 격자 입력이 "
-        + "오류라 규모를 셀 수 없다 (무대의 「케이스 격자」를 고친다)";
+      return "감도 스윕 → 수정안 → 확인 런까지 이어 돈다 — 지금은 비행조건이 "
+        + "오류라 규모를 셀 수 없다 (무대의 「비행조건」에서 점을 고른다)";
     }
     return `감도 스윕 → 수정안 풀이 → 확인 런까지 이어 돈다 — `
       + `설계변수 ${knobs?.length ?? 0}개 × 케이스 ${n}건. 6DOF 런이 곱으로 붙어 `
@@ -1543,11 +1694,11 @@ export function render() {
     if (!knobs?.length) return { status: "제출 불가", result: null, error: "설계변수가 없다" };
     let cases;
     try {
-      cases = gridCases();
+      cases = selectedCases();
     } catch (e) {
-      runStatus(`얼마나: 격자 입력 오류 — ${errorText(e)}`,
+      runStatus(`얼마나: 비행조건 오류 — ${errorText(e)}`,
         { open: "eval", bad: true });
-      return { status: "제출 불가", result: null, error: `격자 입력 오류 — ${errorText(e)}` };
+      return { status: "제출 불가", result: null, error: `비행조건 오류 — ${errorText(e)}` };
     }
     // 있는 스윕을 다시 쓰는 것은 **같은 형상·같은 격자**에서 그 설계변수를 흔들었을 때뿐이다 —
     // 게인을 고치고(결함 주입·처방 적용) 다시 평가한 뒤에도 옛 스윕을 물려 쓰면 수정안이 다른 형상의
@@ -2070,12 +2221,12 @@ export function render() {
     if (runRefused()) return;
     let cases;
     try {
-      cases = gridCases();
+      cases = selectedCases();
     } catch (e) {
       state.openloop = { card, result: null, error: errorText(e) };
       renderOpenloop();
-      runEnd("openloop", false, "격자 입력 오류");
-      runStatus("개루프: 격자 입력 오류", { open: "sens", bad: true });
+      runEnd("openloop", false, "비행조건 오류");
+      runStatus("개루프: 비행조건 오류", { open: "sens", bad: true });
       return;
     }
     runStatus(`개루프 Δ 계산 중 — 케이스 ${cases.length}건…`);
@@ -2227,13 +2378,13 @@ export function render() {
     if (runRefused()) return;
     let cases;
     try {
-      cases = gridCases();
+      cases = selectedCases();
     } catch (e) {
-      state.scan = { status: "격자 입력 오류", result: null,
+      state.scan = { status: "비행조건 오류", result: null,
         error: errorText(e), selected: null };
       renderScan();
-      runEnd("scan", false, "격자 입력 오류");
-      runStatus("스캔: 격자 입력 오류", { open: "sens", bad: true });
+      runEnd("scan", false, "비행조건 오류");
+      runStatus("스캔: 비행조건 오류", { open: "sens", bad: true });
       return;
     }
     state.scan = { status: `전 케이스 스캔 제출 — 케이스 ${cases.length}건`,
@@ -2418,7 +2569,7 @@ export function render() {
     let cases;
     try {
       // 대상 결정은 순수 로직 — lib이 쥔다 (격자·스캔·선택 → 케이스 목록)
-      cases = sweepCases(gridCases(), state.scan);
+      cases = sweepCases(selectedCases(), state.scan);
     } catch (e) {
       // submitted는 **표시 문자열과 분리된 판정**이다 — 구간 경향의 빈 상태가
       // "재지 않았다"와 "돌다가 깨졌다"를 갈라야 하는데, status 리터럴로 가르면
@@ -3013,31 +3164,20 @@ export function render() {
   }
 
   // ── 쇼케이스 신호 (lib/showcasecue.js) — 탭 버튼과 **같은 함수**로 돈다 ───────────
-  // 진단 = [진단 실행](runDiagnose) · 선별 = [1단계 · 선별](runEvaluate linear, 템플릿 격자 전체) ·
-  // 평가 = [2단계 · 평가](runEvaluate full, 대표 부분 격자 — lib/grid representativeGrid) ·
+  // 진단 = [진단 실행](runDiagnose) · 선별 = [1단계 · 선별](runEvaluate linear, 기본 격자의 보낼 점 전부) ·
+  // 평가 = [2단계 · 평가](runEvaluate full, args.points 이름 목록 — 없으면 대표점 lib/opspace representativePoints) ·
   // 처방 = 소견의 [얼마나 →](runPrescribeFromEval) → 확인 런 PASS면 [이 수정안 적용](applyExport).
-  // 격자는 폼 칸에 그대로 적는다 — 청중이 무엇을 쟀는지 칸에서 읽고, 처방·감도가 같은 격자(gridCases)를 쓴다
+  // 고른 점은 무대의 비행조건 선택에 그대로 남는다 — 청중이 무엇을 쟀는지 거기서 읽고, 처방·감도가 같은 점을 쓴다
 
-  /** 고른 기체의 미션 템플릿 격자(수치). 격자 칸 채우기(fillGridFromProfile)가 같은 문서 약속에 먼저 걸려
-   *  있으므로 한 박자 넘겨 그쪽이 끝난 뒤에 칸을 쓴다 — 늦게 온 채우기가 방금 적은 칸을 덮지 않게 */
-  async function cueTemplateGrid() {
-    const d = await selectedDefaults();
-    await new Promise((r) => setTimeout(r, 0));
-    if (!d) throw new Error(DOC_FAILED_HINT);
-    if (!d.hasTemplate || !d.grid) throw new Error(MISSING_TEMPLATE_HINT);
-    return d.grid;
-  }
-
-  /** 격자 칸을 grid(수치)로 — 손 입력과 같은 자리(state.gridForm)에 남겨 재진입해도 같은 격자다. */
-  function setGridForm(grid) {
-    const text = gridStrings(grid);
-    const inputs = { machFrom: machFromIn, machTo: machToIn, machStep: machStepIn,
-      alts: altsIn, fuels: fuelsIn };
-    for (const [k, inp] of Object.entries(inputs)) {
-      inp.value = text[k];
-      state.gridForm[k] = text[k];
-    }
-    renderCaseCount();
+  /** 신호의 점 고르기 — 요구영역의 지금 기본 격자를 다시 받고 그 위에서 고른다. 이름 목록이 격자에 없으면(요구영역이
+   *  바뀌었다) 던진다 — 쇼케이스 결함 창은 정해진 네 점에서 쟀으므로 다른 점으로 조용히 바꿔 돌지 않는다 */
+  async function cueSelect(names, full) {
+    const r = await latestBaseGrid();
+    if (r.status !== "ok") throw new Error(r.reason);
+    const pool = condPool();
+    const pts = names ? pickNamed(pool, names) : (full ? representativePoints(pool) : pool);
+    state.cond.filter = { alts: null, fuels: null, machLo: "", machHi: "" };
+    setSelected(pts.map((p) => p.name));
   }
 
   /** 수정안 형상(지문 fp)의 설계변수 기준값 — 떠 있는 구조 모델이 그 형상이면 그것, 아니면 지금 작업 사본으로
@@ -3085,9 +3225,20 @@ export function render() {
         });
       } else if (c.action === "screen" || c.action === "evaluate") {
         const full = c.action === "evaluate";
-        const tpl = await cueTemplateGrid();
-        const n = c.args?.cases ?? (full ? REPRESENTATIVE_CASES : null);
-        setGridForm(n == null ? tpl : representativeGrid(tpl, n));
+        // 모르는 인자는 크게 거절한다 — 옛 args.cases(대표 부분 격자 개수)를 무시하고 대표점으로 돌면 진행기는
+        // 자기가 준 격자로 쟀다고 읽는다
+        const extra = Object.keys(c.args ?? {}).filter((k) => !CUE_EVAL_ARGS.includes(k));
+        if (extra.length) {
+          throw new Error(`알 수 없는 신호 인자 ${extra.map((k) => `args.${k}`).join(", ")} — `
+            + (extra.includes("cases")
+              ? "args.cases(대표 부분 격자 개수)는 폐기됐다: 점은 args.points(기본 격자 점 이름 목록)로 준다"
+              : `${c.action}은(는) ${CUE_EVAL_ARGS.map((k) => `args.${k}`).join("·")}만 받는다`));
+        }
+        const pts = c.args?.points ?? null;
+        if (pts != null && !(Array.isArray(pts) && pts.every((n) => typeof n === "string"))) {
+          throw new Error("args.points는 기본 격자 점 이름(문자열) 목록이다");
+        }
+        await cueSelect(pts, full);
         const run = await runEvaluate(full ? "full" : "linear", hooks);
         const m = run?.result;
         if (!m) throw new Error(run?.error ?? "평가 결과가 없다");
@@ -3185,7 +3336,7 @@ export function render() {
     clear(handoffNote).append(
       `시뮬레이션 탭에서 넘어온 런이다 — 아래 칸의 ${h.resultId}가 그것이다. `
       + "[진단 실행]이 이 런의 결함을 설계변수에 귀속한다. 격자 전체 판정은 "
-      + "「평가·처방」의 평가 실행이 따로 돈다(이 런이 아니라 무대의 케이스 격자로).");
+      + "「평가·처방」의 평가 실행이 따로 돈다(이 런이 아니라 무대의 비행조건로).");
   }
 
   const DRAWERS = [
@@ -3209,7 +3360,7 @@ export function render() {
         el("p", { class: "hint", style: "margin:0 0 8px" },
           "행을 누르면 그 파라미터가 그래프·전파 경로·판독대의 대상이 되고, " +
           "「감도」 실행 줄도 이것을 흔든다 — 이 탭의 첫 동작이 그것이다. " +
-          "판정(「평가·처방」)은 이 선택을 쓰지 않는다: 무대의 케이스 격자로 돈다."),
+          "판정(「평가·처방」)은 이 선택을 쓰지 않는다: 무대의 비행조건로 돈다."),
         tableBox,
       ] },
     // 평가는 두 번째다 — "이 형상이 기준을 넘나"가 이 탭의 **주 흐름**이고,
@@ -3223,12 +3374,7 @@ export function render() {
       },
       build: () => {
         ensureEvalMeta();  // 카드·체크 어휘와 기준은 서버 정본 — 처음 열 때 받아 온다
-        let caseText;
-        try {
-          caseText = `케이스 ${gridCases().length}건 (격자는 바로 위 무대에서 고친다)`;
-        } catch {
-          caseText = "격자 입력 오류 — 바로 위 무대의 「케이스 격자」에서 고친다";
-        }
+        paintCaseText();
         return [
           el("h2", {}, "평가 → 처방 → 확정 — 이 탭의 주 흐름"),
           el("p", { class: "hint", style: "margin:0 0 10px" },
@@ -3243,7 +3389,7 @@ export function render() {
             "실행 — 1 선별 → 2 평가 → 3 검증"),
           el("p", { class: "hint", style: "margin:0 0 8px" },
             "왼쪽에서 오른쪽이 도는 순서이고, 오른쪽으로 갈수록 비싸다. " +
-            "셋 다 위 무대의 같은 케이스 격자를 대상으로 돈다."),
+            "셋 다 위 무대의 같은 비행조건을 대상으로 돈다."),
           el("div", {
             class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap",
           },
@@ -3265,7 +3411,7 @@ export function render() {
               title: "그 판정이 섭동에도 버티나? — 강건성 코너마다 재트림 + "
                 + "격자 중간점. 후보 확정 후 한 번",
             }),
-            el("span", { class: "hint" }, caseText)),
+            caseTextEl),
           runDetail.eval,
           el("p", { class: "hint", style: "margin:8px 0 0" },
             el("b", {}, "1단계"), "는 시뮬을 한 번도 안 돈다 — 폐루프 안정성·감쇠비·" +
@@ -3298,7 +3444,7 @@ export function render() {
           prescribeStatus,
           prescribeBox,
           // 수동 진단(자기 미션 귀속)과 전 케이스 스캔은 **감도로 갔다**(v0.69):
-          // 평가는 무대의 케이스 격자를 판정하고 끝나고, 설계변수를 골라 흔들거나
+          // 평가는 무대의 비행조건를 판정하고 끝나고, 설계변수를 골라 흔들거나
           // 전 케이스 경향을 보는 일은 보조 진단의 몫이다
         ];
       } },
@@ -3459,6 +3605,9 @@ export function render() {
   receiveHandoff();  // 인계로 왔으면 패널·펼침을 정한다 — renderDrawer보다 먼저
   renderTabCounts();
   renderDrawer();
+  // 들어올 때마다 요구영역의 기본 격자를 다시 받는다(동기·좌표만) — 그사이 기체 탭에서 요구영역을 고쳤으면 새 점을
+  // 따른다(고른 점은 이름으로 남는다). 평가 신호는 스스로 다시 받는다 — 나중 요청이 이긴다(condSeq)
+  fetchBaseGrid();
   if (cue) handleCue(cue);
 
   return el("div", { class: "inf-dark tab-dark tab-page" },
@@ -3482,26 +3631,21 @@ export function render() {
       el("div", { style: "margin-top:10px" }, legendBox),
       conservedNote),
     readoutBox,
-    // 케이스 격자·실행 줄은 **무대**다 — 평가·검증·처방·감도가 전부 이 격자를
+    // 비행조건·실행 줄은 **무대**다 — 평가·검증·처방·감도가 전부 이 점들을
     // 쓰는데 패널 안에 있으면, 패널을 닫는 순간 "지금 무엇을 대상으로 도는지"가
     // 화면에서 사라진다(v0.53 전 탭 규약: 실행 버튼과 상태는 무대에 남긴다).
-    // 종전에는 이것이 「진단·처방」 패널 안에 있어 평가 버튼 옆에 "격자 입력은
-    // 「진단·처방」 패널" 같은 길 안내가 붙어 있었다
+    // 조건은 이 탭이 정하지 않는다 — 기본 격자에서 고른다(05 §11.13 5단계)
     el("div", { class: "tab-sheet" },
       el("div", {
         class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap",
       },
-        el("strong", {}, "케이스 격자"),
-        el("label", { class: "hint" }, "mach ", machFromIn, " ~ ", machToIn),
-        el("label", { class: "hint" }, "간격 ", machStepIn),
-        el("label", { class: "hint" }, "alt[m] ", altsIn),
-        el("label", { class: "hint" }, "fuel[kg] ", fuelsIn),
-        el("label", { class: "hint" }, "스텝 s ", stepIn),
-        caseCountHint),
+        el("strong", {}, "비행조건"),
+        condSummary,
+        el("label", { class: "hint" }, "스텝 s ", stepIn)),
+      condDetails,
       el("p", { class: "hint", style: "margin:6px 0 0" },
-        "이 격자가 평가·검증·감도의 공통 대상이다 — 기본값은 게인 탭 지표 카드와 "
-        + "같은 격자라(lib/grid.js DEFAULT_GRID) 「최악 운용점」이 탭마다 다른 "
-        + "격자를 말하지 않는다.")),
+        "이 점들이 평가·검증·감도의 공통 대상이다. 조건은 이 탭이 정하지 않는다 — 고른 기체의 요구 운용영역 "
+        + "기본 격자(트림 탭과 같은 점)에서 고르거나 거른다. 이 탭이 정하는 것은 흔들 게인과 그 변화 범위뿐이다.")),
     tabBar,
     runLine,  // 잡 상태는 패널 밖 — 버튼이 있는 패널과 결과가 사는 패널이 다르다
     drawerBox,

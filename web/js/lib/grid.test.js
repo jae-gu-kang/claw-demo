@@ -98,7 +98,7 @@ test("기본 격자는 한 곳 정의 — 15케이스·이름 유일", () => {
   const cases = defaultGridCases();
   assert.equal(cases.length, 15);
   assert.equal(new Set(cases.map((c) => c.name)).size, 15);
-  // 영향성 폼 기본값과 게인 카드가 같은 격자를 쓴다는 계약의 최소 핀
+  // 마진 맵 폼 기본값과 게인 카드가 같은 격자를 쓴다는 계약의 최소 핀 (영향성 탭은 요구영역 기본 격자에서 고른다)
   assert.equal(DEFAULT_GRID.machFrom, 0.14);
 });
 

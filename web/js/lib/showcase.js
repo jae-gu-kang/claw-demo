@@ -82,10 +82,14 @@ export const AUTODESIGN_BUDGET = Object.freeze({ n_mach: 5, budget_points: 90, b
  *    약화(ζ_dr FAIL — 선형)는 예제에서 이미 같은 이유로 뺐다(W4b).
  *  S1 문서(자동조종 설계값·상자·확정 표 값·템플릿 격자)가 바뀌면 창을 다시 잰다 — 잰 기준을 테스트가 붙잡는다. */
 export const SHOWCASE_FAULT = Object.freeze({ path: "autopilot.alt.k_rate", factor: 5.65 });
-/** 영향성 2단 평가 케이스 수 — 템플릿 격자의 대표 부분 격자(lib/grid.js representativeGrid 기본값과 같다:
- *  마하 양끝 × 고도 양끝 × 연료 가운데). S1 템플릿에서는 M0.12·0.18 × 200·3000 m × 10 kg이고, 위 결함의
- *  FAIL은 이 안의 고마하 두 모서리(M0.18)에서 난다(실측 — 4건 평가 약 20 s). */
-export const SHOWCASE_EVAL_CASES = 4;
+/** 영향성 2단 평가 점 — 요구영역 기본 격자에서 **이름으로** 고른다(05 §11.13 5단계: 영향성 탭은 조건 구간을 따로 두지
+ *  않는다). 위 결함 창(×5.3~6.0)은 정확히 이 네 점에서 쟀다 — 종전 템플릿 격자의 대표 부분 격자(마하 양끝 × 고도 양끝 ×
+ *  연료 가운데 = M0.12·0.18 × 200·3000 m × 10 kg)다. 기본 격자의 일반 대표점 규칙(lib/opspace.js representativePoints —
+ *  행 끝점)으로는 M0.10·0.24·0.11이 골라져 **다른 점**이 되므로 규칙으로 파생하지 않고 적어 둔다. 네 점은 S1 기본 격자
+ *  (M0.10~0.24, n_mach 8 → 0.02 간격)에 그대로 있다(showcase.test.js가 좌표 규칙까지 대조). 순서는 기본 격자 서펜타인
+ *  순서이고 종전 부분 격자의 실행 순서와 같다. FAIL은 이 안의 고마하 두 모서리(M0.18)에서 난다(실측 — 4건 평가 약 20 s).
+ *  이 목록을 바꾸면 결함 창을 다시 잰다. */
+export const SHOWCASE_EVAL_POINTS = Object.freeze(["M0.12_h200_f10", "M0.18_h200_f10", "M0.18_h3000_f10", "M0.12_h3000_f10"]);
 /** 미션 초안 의도 문장(LLM) — 투어 입력 칸 예시와 같은 꼴. TODO(통합): S1 미션(착륙 방식)에 맞춰 확정. */
 export const SHOWCASE_INTENT = "발사해서 북쪽 4 km를 돌고 활주로에 착륙";
 /** 질문 위젯에 던질 질문(LLM). TODO(통합): 답이 화면을 옮기는 것이 잘 보이는 문장으로 확정. */
@@ -270,7 +274,7 @@ const autodesignArgs = (doc, ctx = {}) => {
 const nav = (hash, label) => ({ kind: "nav", hash, label, dwellMs: NAV_DWELL_MS });
 // 동작 이름에 label을 싣지 않는다 — 탭 summary가 label로 시작한다(「기준 — PASS …」)
 const evalCase = (label, expect) => cue("influence", "evaluate", "2단 평가",
-  { args: { cases: SHOWCASE_EVAL_CASES, label }, ...(expect ? { expect } : {}) });
+  { args: { points: [...SHOWCASE_EVAL_POINTS], label }, ...(expect ? { expect } : {}) });
 
 /** 단계 표 — 순서 = 탭 순서 + 설계 사슬(06 §9.4). `needs`는 **데이터가 실제로 이어지는** 앞 단계만
  *  (행을 따로 누를 때 안내용 — 막지는 않는다. 없으면 탭이 사유와 함께 실패한다). */

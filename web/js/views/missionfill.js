@@ -18,7 +18,7 @@ export function applyUntouched(inputs, fallback, next) {
   return Object.keys(up);
 }
 
-// 탭을 떠났다 와도 모듈에 사는 상태(엔벨로프 폼·영향성 격자·시뮬 모드 표)는 **페이지당 한 번만** 채운다 —
+// 탭을 떠났다 와도 모듈에 사는 상태(엔벨로프 폼·시뮬 모드 표)는 **페이지당 한 번만** 채운다 —
 // 다시 들어올 때마다 채우면, 사용자가 일부러 폴백과 같은 값으로 고친 칸을 「손대지 않았다」로 읽고 덮는다.
 // 기체를 바꾸면 페이지를 다시 읽으므로(profilepick.js) 이 기록도 함께 비워진다
 const filledOnce = new Set();

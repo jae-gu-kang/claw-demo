@@ -827,3 +827,20 @@ def test_EO_IR형_패치에는_CD_치환이_없다(doc):
     cd = "/aero/coefficients/CD"
     # 그 자리 아래(…/CD/0/k)도, 그 자리를 통째로 덮는 윗자리(/aero 등)도 없어야 한다
     assert not [p for p in patch if p == cd or p.startswith(cd + "/") or cd.startswith(p + "/")]
+
+
+# 쇼케이스 결함 창(web lib/showcase.js SHOWCASE_EVAL_POINTS)은 이 네 이름을 영향성 탭 평가 신호의 args.points로 보낸다 — 탭은
+# 이름이 기본 격자에 없으면 실패하고(다른 점으로 조용히 돌지 않는다) 모델 부족 점은 보내지 않는다. 요구영역·기본 격자 명세·
+# 이름 규칙이 바뀌어 이 점이 빠지거나 상태가 바뀌면 쇼케이스가 무대에서 깨진다 — 엔진 쪽에서 먼저 잡는다
+SHOWCASE_EVAL_POINTS = ["M0.12_h200_f10", "M0.18_h200_f10", "M0.18_h3000_f10", "M0.12_h3000_f10"]
+
+
+def test_쇼케이스_평가점_네_개가_기본_격자에_미계산으로_서펜타인_순서대로_있다(doc, base):
+    from claw.opspace import NOT_RUN, base_grid, model_range_of, region_of
+
+    grid = base_grid(region_of(doc), model_range_of(base))
+    picked = [p for p in grid["points"] if p["name"] in SHOWCASE_EVAL_POINTS]
+    # 이름이 유일해야 한다 — 같은 이름이 둘이면 평가 결과가 다른 점에 귀속된다
+    assert sorted(p["name"] for p in picked) == sorted(SHOWCASE_EVAL_POINTS), [p["name"] for p in grid["points"]]
+    assert [p["name"] for p in picked] == SHOWCASE_EVAL_POINTS, "서펜타인 순서(200 m 행 증가 → 3000 m 행 감소)"
+    assert all(p["state"] == NOT_RUN for p in picked), [(p["name"], p["state"]) for p in picked]

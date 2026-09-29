@@ -8,7 +8,7 @@ import { EXAMPLE_ID } from "./profile.js";
 import { TAB_HASHES } from "./ask.js";
 import {
   AUTODESIGN_BUDGET, CAP_FACTOR, DWELL_MS, FIGURE_DWELL_MS, LINE_FULL_MAX, LINE_MAX, NAV_DWELL_MS, RESUME_WINDOW_MS,
-  SHOWCASE_CD0_DELTA, SHOWCASE_EVAL_CASES, SHOWCASE_FAULT, SHOWCASE_ID, STATE_LABEL, STATE_VERSION, STEPS,
+  SHOWCASE_CD0_DELTA, SHOWCASE_EVAL_POINTS, SHOWCASE_FAULT, SHOWCASE_ID, STATE_LABEL, STATE_VERSION, STEPS,
   WORLD_REPLAY_TARGET_S, WORLD_SPEEDS, actionTimeout, advance, applyOutcome, autodesignConfigFor, beginStep,
   cancelCleanup, cancelStep, cardCompact, cardRows, cleanupLine, clearResume, clip, decodeState, designConfigRecord, dwellFor,
   listScrollTop, runEnded,
@@ -72,7 +72,12 @@ test("동작 이름·인자가 계약(06 §9.3)과 같다", () => {
   assert.deepEqual(acts("influence")[3].args, SHOWCASE_FAULT);
   assert.deepEqual(acts("influence").map((a) => a.expect ?? null),
     [null, null, null, null, "FAIL", null, "PASS", null]);
-  for (const i of [2, 4, 6]) assert.equal(acts("influence")[i].args.cases, SHOWCASE_EVAL_CASES);
+  // 세 평가(기준·결함·처방 후)가 같은 네 점 — 이름으로 기본 격자에서 고른다(케이스 수·대표 규칙이 아니다)
+  for (const i of [2, 4, 6]) {
+    assert.deepEqual(acts("influence")[i].args.points,
+      ["M0.12_h200_f10", "M0.18_h200_f10", "M0.18_h3000_f10", "M0.12_h3000_f10"]);
+    assert.equal("cases" in acts("influence")[i].args, false);
+  }
   assert.deepEqual(sig("autocode"), ["autocode:overview"]);
   assert.deepEqual(acts("autocode")[0].args, { compareWith: EXAMPLE_ID });
   assert.deepEqual(sig("verify"), ["verify:run"]);
@@ -96,7 +101,7 @@ test("자리값 상수 — 결함 경로 꼴과 케이스 수가 계약 형식�
   assert.match(SHOWCASE_FAULT.path, /^[a-z_]+\.[a-z_]+\.[a-z_]+$/);
   // 약화든 과대든 공학 결함이다(지금은 고도 루프 ḣ 되먹임 과대) — 배율 1은 결함이 아니다
   assert.ok(Number.isFinite(SHOWCASE_FAULT.factor) && SHOWCASE_FAULT.factor > 0 && SHOWCASE_FAULT.factor !== 1);
-  assert.ok(Number.isInteger(SHOWCASE_EVAL_CASES) && SHOWCASE_EVAL_CASES > 0);
+  assert.ok(Object.isFrozen(SHOWCASE_EVAL_POINTS) && SHOWCASE_EVAL_POINTS.length === 4);
   assert.ok(Object.isFrozen(AUTODESIGN_BUDGET) && Object.isFrozen(SHOWCASE_FAULT));
   assert.equal(SHOWCASE_ID, "showcase-delta");
 });
@@ -284,13 +289,30 @@ test("결함 시연 상수 — 잰 기준(자동조종 설계값·확정 표·�
   // 자동조종 상자 — 고도·승강률 PI의 출력 한계(θ 명령 상한)가 창에 든다. 레지스트리 기본값으로 잰 창이다
   assert.equal(s1.law.design.autopilot.theta_hi, 0.3, fix);
   assert.equal(s1.law.design.autopilot.tau_spd, 2.0, fix);
-  // 대표 4케이스(웹 representativeGrid) — FAIL이 나는 고마하 두 모서리(M0.18)가 들어 있다
+  // 평가 네 점(SHOWCASE_EVAL_POINTS) — 결함 창을 잰 바로 그 점들이다: 종전 템플릿 격자 대표 부분 격자(representativeGrid)의
+  // 이름과 **같은 문자열·같은 순서**여야 창이 그대로 성립한다. FAIL이 나는 고마하 두 모서리(M0.18)가 들어 있다
   const g = s1.mission_template.trim_grid;
   const r = representativeGrid({ machFrom: g.mach.from, machTo: g.mach.to, machStep: g.mach.step,
-    alts: g.alt, fuels: g.fuel }, SHOWCASE_EVAL_CASES);
+    alts: g.alt, fuels: g.fuel }, 4);
   const names = nameCases(serpentineCases(machRange(r.machFrom, r.machTo, r.machStep), r.alts, r.fuels))
     .map((c) => c.name);
-  assert.deepEqual(names, ["M0.12_h200_f10", "M0.18_h200_f10", "M0.18_h3000_f10", "M0.12_h3000_f10"], fix);
+  assert.deepEqual(names, [...SHOWCASE_EVAL_POINTS], fix);
+  // 그 네 점이 S1 요구영역의 기본 격자에 그대로 있다 — 엔진 opspace.base_grid의 좌표 규칙(요구 마하 n_mach 등간격,
+  // 소수 9자리 반올림, 행 요구 범위 안, 이름 %.12g)을 여기서 한 번 더 세워 대조한다. 실측(엔진 호출): 31점 중
+  // M0.12_h200_f10 · M0.18_h200_f10 · M0.18_h3000_f10 · M0.12_h3000_f10 이 이 순서(서펜타인)로 나온다
+  const reg = s1.operating_region;
+  const n = reg.base_grid.n_mach;
+  const axis = Array.from({ length: n }, (_, i) =>
+    Math.round((reg.mach[0] + (i * (reg.mach[1] - reg.mach[0])) / (n - 1)) * 1e9) / 1e9);
+  const f10 = reg.boundary.find((b) => b.fuel === 10).rows;
+  const onGrid = [];
+  for (const [k, [alt, lo, hi]] of f10.entries()) {
+    const ms = [...new Set([lo, hi, ...axis.filter((m) => m >= lo - 1e-9 && m <= hi + 1e-9)])].sort((a, b) => a - b);
+    if (k % 2) ms.reverse();
+    onGrid.push(...ms.map((m) => `M${m}_h${alt}_f10`));
+  }
+  assert.deepEqual(onGrid.filter((x) => SHOWCASE_EVAL_POINTS.includes(x)), [...SHOWCASE_EVAL_POINTS], fix);
+  assert.deepEqual([reg.mach, n, reg.base_grid.alts, reg.base_grid.fuels], [[0.1, 0.24], 8, [200, 3000], [10, 50]], fix);
 });
 
 test("실물 S1 패키지 문서 — 자동 설계 config는 생성기가 적은 기록에서 온다", () => {

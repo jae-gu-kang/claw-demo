@@ -232,3 +232,41 @@ test("재진입 — 요구영역 명세 그대로 받은 케이스면 격자를 
   await tick();
   assert.equal(gridPosts().length, before + 2, "손으로 고친 목록을 덮으러 다시 받았다");
 });
+
+// 영향성 탭이 점마다 붙이는 트림 판정(store trimBatch)은 **끝난 배치**만이다 — 취소된 배치의 완료분을 올리면 영향성 탭이
+// 나머지 점을 「트림 안 함」으로 읽고, 「트림 채택점만」이 반쪽 배치에서 고른다
+test("취소된 배치의 완료분은 영향성 탭에 넘기지 않는다, 끝난 배치만 넘긴다", async () => {
+  const done = { profile: { id: "p", variant: null, revision: 1 },
+    results: [{ case: { name: "M0.12_h500_f20", mach: 0.12, alt: 500, fuel: 20 }, converged: true,
+      flags: { residual_ok: true, saturation_ok: true, alpha_margin_ok: true, continuity_ok: true },
+      euler: [0, 0.05, 0], control: { elevon: [-0.02], throttle: [0.4] },
+      reserve: { de: { frac: 0.2 }, thr: { reserve_hi: 0.6 }, alpha: { stall_reserve: 0.1 } },
+      state: "computable", state_reasons: [], region_state: null }] };
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = (url, opts = {}) => (url.replace(/^\/api/, "").startsWith("/results/")
+    ? Promise.resolve(reply(200, done)) : prevFetch(url, opts));
+  const finish = (status) => {
+    for (const h of heldJobs.splice(0)) {
+      h.resolve(reply(200, { id: "j", status, result_id: `r-${status}`, progress: 1, done: 1, total: 3, message: null }));
+    }
+  };
+  try {
+    store.set("trimBatch", null);
+    postCue({ token: "part", tab: "trim", action: "run" });
+    render();
+    await waitFor(() => heldJobs.length === 1, "신호 배치의 진행 구독");
+    finish("cancelled"); // 완료분 1케이스를 저장하고 취소됐다
+    await waitFor(() => finalReport("part"), "신호 끝 보고");
+    assert.equal(finalReport("part").phase, "failed");
+    assert.equal(store.get("trimBatch"), null, "반쪽 배치가 영향성 탭의 트림 열로 갔다");
+
+    postCue({ token: "full", tab: "trim", action: "run" });
+    render();
+    await waitFor(() => heldJobs.length === 1, "두 번째 배치의 진행 구독");
+    finish("done");
+    await waitFor(() => finalReport("full"), "신호 끝 보고");
+    assert.equal(store.get("trimBatch")?.results?.length, 1, "끝난 배치는 넘긴다");
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+});

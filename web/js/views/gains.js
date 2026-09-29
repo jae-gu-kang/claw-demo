@@ -88,8 +88,8 @@ const EVAL_DEPTHS = ["linear", "full"];
 
 // 지표 카드(평가 어휘·값은 서버 정본) — 마지막 계산 결과와 신선도.
 // 편집이 생기면 **stale 배지만** 켠다: 자동 재계산은 없다(서버 왕복 비용 — 버튼이
-// 명시적 트리거다). 격자는 lib/grid.js DEFAULT_GRID 한 곳 정의(영향성 폼과 동일)라
-// "최악 운용점"이 탭마다 다른 격자를 말하지 않는다.
+// 명시적 트리거다). 격자는 미션 템플릿 격자(없으면 lib/grid.js DEFAULT_GRID)다 — 영향성 탭은 이관 5단계부터 요구영역
+// 기본 격자에서 점을 고른다(05 §11.13 5단계). 이 카드의 격자 이관은 5단계 나머지다.
 let evalStrip = { status: null, result: null, error: null, stale: false, depth: null };
 // 형상·값 편집 핸들러(모듈 함수)에서 카드 stale을 켜는 통로 — render()가 실제
 // 구현으로 갈아 끼운다 (핸들러가 렌더 클로저 밖에 살기 때문)
@@ -147,7 +147,7 @@ export function render() {
       // 케이스 수는 세어서 쓴다 — 손으로 적으면 DEFAULT_GRID가 바뀔 때
       // 화면만 옛 수를 말한다(v0.72까지 「15케이스」로 남아 있었다)
       stripStatus.textContent =
-        `아직 안 쟀다 — 기본 격자 ${defaultGridCases(templateGrid ?? undefined).length}케이스(영향성 탭과 동일), `
+        `아직 안 쟀다 — 미션 템플릿 격자 ${defaultGridCases(templateGrid ?? undefined).length}케이스, `
         + "미적용 편집 포함 형상으로 잰다" + stale + (templateNote ? ` · ${templateNote}` : "");
       return;
     }
