@@ -397,9 +397,9 @@ def test_session_round_trips_rate_filters():
     # 복원해 놓고 첫 재개에서 도로 비운다. awaiting_approval은 대입 직후 조기
     # 반환하므로 모델 없이도 이 규약만 확인할 수 있다
     restored.status = "awaiting_approval"
-    restored.run(None, None, None, None, {})
+    restored.run(None, None, None, None, {}, verdict_ctx=None)
     assert restored.rate_filters == demo_rate_filters(), "재개가 저장된 필터를 지웠다"
     # 비우려면 빈 dict를 **명시**한다 (None과 다른 뜻)
     restored.status = "awaiting_approval"
-    restored.run(None, None, None, None, {}, rate_filters={})
+    restored.run(None, None, None, None, {}, verdict_ctx=None, rate_filters={})
     assert restored.rate_filters == {}

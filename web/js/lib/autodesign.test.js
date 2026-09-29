@@ -54,6 +54,7 @@ import {
   warnNoteText,
   worstStatus,
 } from "./autodesign.js";
+import { trimStateLabel } from "./plot.js";
 
 const RESULT = {
   points: {
@@ -221,13 +222,47 @@ test("엔벨로프 경계 점은 판정 칸이 아니라 자기 칸에 센다", 
   assert.equal(v.status, "fail"); // 수치는 남긴다 — 경계의 마진은 자료다
 });
 
-test("trimLabel — 미수렴과 엔벨로프 경계를 한 낱말로 뭉치지 않는다", () => {
-  assert.equal(trimLabel({ trimmable: true }), "OK");
+test("trimLabel — 미수렴과 엔벨로프 경계를 한 낱말로 뭉치지 않는다, 채택은 OK가 아니다", () => {
+  // 채택은 성능 합격이 아니다 — 옆 판정 열의 ok와 같은 낱말을 쓰지 않는다
+  assert.equal(trimLabel({ trimmable: true }), "채택");
   assert.equal(trimLabel({ trimmable: null }), "미판정");
-  assert.equal(trimLabel({ trimmable: false }), "미수렴");
+  assert.equal(trimLabel({ trimmable: false }), "제외 — 미수렴");
   // 엔벨로프 경계는 trimmable=false로도 오지만 트림해는 있다 — 종전엔 둘 다 "불가"였다
-  assert.equal(trimLabel({ trimmable: false, outsideEnvelope: true }), "엔벨로프 경계");
+  assert.equal(trimLabel({ trimmable: false, outsideEnvelope: true }), "제외 — 엔벨로프 경계");
   assert.equal(trimLabel(undefined), "미판정");
+});
+
+test("trimLabel — 조건 판정이 실리면 제외 항목과 사유로, 트림 탭과 같은 사유 글", () => {
+  const met = { status: "met", reasons: [] };
+  const verdict = (exclusion, margin = met, limits = met) => ({ adopted: exclusion == null, exclusion, margin, limits });
+  const short = { status: "short", reasons: ["throttle_high"] };
+  const limiter = { alpha_trim: 0.34123, alpha_max: 0.33491, law: "theta_cmd <= theta + (alpha_max - alpha)" };
+  const rows = pointRows({ points: { points: [
+    { name: "A", trimmable: true, verdict: verdict(null) },
+    // 여유 미달은 채택이다(v1.65) — 채택에 미달을 붙인다
+    { name: "S", trimmable: true, verdict: verdict(null, short) },
+    { name: "L", trimmable: false, verdict: verdict({ category: "limits", reasons: ["stall_boundary"] }) },
+    { name: "R", trimmable: false, verdict: verdict({ category: "limits", reasons: ["limiter_clips_trim"] }, met,
+      { status: "violated", reasons: ["limiter_clips_trim"], detail: { limiter } }) },
+    { name: "M", trimmable: false, verdict: verdict({ category: "model", reasons: ["db_alpha", "fuel_range"] }) },
+    { name: "T", trimmable: false, verdict: verdict({ category: "trim", reasons: ["not_converged"] }) },
+    { name: "O", trimmable: false },
+  ] }, margin_out: { cases: { L: { outside_envelope: true, exclusion: { category: "limits",
+    reasons: ["stall_boundary"] } } } } });
+  assert.deepEqual(rows.map(trimLabel), [
+    "채택", "채택 · 추진 여유 미달", "제외 — 제한 위반 — 실속 경계 위반",
+    "제외 — 제한 위반 — α 리미터가 트림을 유지하지 못함 — α_trim 0.341 > α_max 0.335",
+    "제외 — 모델 범위 밖 — DB 받음각 범위 밖 · 연료 범위 밖", "제외 — 트림 불성립 — 미수렴", "제외 — 미수렴",
+  ]);
+  assert.equal(rows[6].verdict, null, "옛 결과는 판정 없음");
+  // 채택된 여유 미달 점은 판정 칸에서 빠지지 않는다 — 엔진이 outside_envelope를 달지 않는다
+  assert.equal(rows[1].outsideEnvelope, false);
+  assert.equal(rows[2].outsideEnvelope, true);
+  // 트림 탭 상태 글과 사유가 같다 — 같은 조건, 같은 말
+  const tab = (v) => trimStateLabel({ state: "computable", verdict: { trim: { status: "computable" }, ...v } })
+    .split(" · ").slice(1).join(" · ");
+  assert.ok(trimLabel(rows[1]).endsWith(tab(rows[1].verdict)));
+  assert.ok(trimLabel(rows[3]).endsWith(tab(rows[3].verdict)));
 });
 
 test("verdictLegend — 기준 수치를 결과에서 읽어 문장에 박는다", () => {
@@ -332,7 +367,7 @@ test("reportLine — 0인 항목은 생략하되 판정·실패는 0이어도 �
   assert.match(text, /실패 0/);
   assert.match(text, /튜닝 12/);
   assert.match(text, /적합 조이기 1/);
-  assert.doesNotMatch(text, /엔벨로프 밖/); // 0 — 생략
+  assert.doesNotMatch(text, /채택 제외/); // 0 — 생략
   assert.doesNotMatch(text, /무효 처방/);
   assert.doesNotMatch(text, /봉인/);
   assert.doesNotMatch(text, /건너뜀/);
@@ -352,7 +387,7 @@ test("reportLine — 신규 카운터와 건너뛴 점 이름", () => {
     outside_envelope: 3, escalations: 1, ineffective_actions: 2, sealed: 1,
     skipped: ["p1", "p2", "p3", "p4", "p5"],
   }).join(" · ");
-  assert.match(text, /엔벨로프 밖 3/);
+  assert.match(text, /채택 제외 3/);
   assert.match(text, /에스컬레이션 1/);
   assert.match(text, /무효 처방 2/);
   assert.match(text, /봉인 1/);
@@ -860,6 +895,9 @@ test("ledgerKindText — 7종 전부 뜻과 다음 행동이 있다", () => {
   }
   assert.match(ledgerKindText("tune"), /예산을 늘리거나 목표를 낮춘다/);
   assert.match(ledgerKindText("unjudged"), /통과가 아니다/);
+  // 채택 제외는 여유 미달이 아니다(v1.65 — 여유 미달은 채택) — 제한·모델 사유로 읽는다
+  assert.match(ledgerKindText("outside_envelope"), /제한 위반·모델 범위 밖/);
+  assert.doesNotMatch(ledgerKindText("outside_envelope"), /포화|여유/);
 });
 
 // ── 검증 커버리지 ──────────────────────────────────────────────────────

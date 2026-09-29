@@ -309,7 +309,8 @@ function autoDesignBrief(body, meta) {
   const pts = r.points ?? {};
   const pointText = ["ok", "warn", "fail"].map((k) => `${k} ${c[k]}`)
     .concat(c.na ? [`na ${c.na}`] : [], c.unjudged ? [`미판정 ${c.unjudged}`] : [],
-      c.outside ? [`엔벨로프 경계 ${c.outside}(판정 제외)`] : []).join(" · ");
+      // 조건 판정이 채택하지 않은 수렴 점(자동 설계 탭 「채택 제외」와 같은 말 — 여유 미달은 v1.65부터 채택이라 아니다)
+      c.outside ? [`채택 제외 ${c.outside}(판정 제외)`] : []).join(" · ");
   const ge = body.gain_export ?? null;
   const nSched = Object.keys(ge?.tables ?? {}).length;
   const nConst = Object.keys(ge?.constants ?? {}).length;

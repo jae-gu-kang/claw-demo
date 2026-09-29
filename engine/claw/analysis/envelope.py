@@ -12,8 +12,8 @@ vn_envelope가 한계선·특성 속도(V_S·V_A)까지 산출한다. Nz 제한 
 
 설계 엔벨로프(01 §2.6): design_envelope가 M-h 평면에서 구조(마하·동압 한계)·
 공력(실속·DB 범위)·운용(고도 상하한) 경계를 합성해 행별 승자 귀속과 함께
-반환한다. 제어 가능 영역(트림 성립)은 여기 없다 — envelope_ok(design.points
-정본)를 트림 격자에 적용하는 별도 스캔의 몫. stall_mach_lo·row_machs는
+반환한다. 제어 가능 영역(트림 성립)은 여기 없다 — 조건 판정(opspace/verdict.py —
+design.points.envelope_ok)을 트림 격자에 적용하는 별도 스캔의 몫. stall_mach_lo·row_machs는
 coarse 격자(design.grid)와 이 합성이 공유하는 mach 경계의 단일 정본이다.
 """
 
@@ -316,7 +316,7 @@ def design_envelope(
     말할 수 있게 한다.
 
     schedule_grid는 coarse 격자(design.grid)와 같은 row_machs 좌표 —
-    trimmable 판정 없는 좌표 표시용(판정은 트림 스캔 + envelope_ok 정본).
+    trimmable 판정 없는 좌표 표시용(판정은 트림 스캔 + 조건 판정 정본).
     좌표를 맞추려고 **q̄를 보지 않는다**(design.grid에는 q_max 입력이 없다) —
     q_max가 낮으면 격자점이 region 밖에 놓일 수 있고, 그것이 실제 설계점 위치다.
 

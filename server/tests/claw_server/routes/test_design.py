@@ -180,6 +180,12 @@ def test_auto_design_end_to_end(client, wait_job):
     assert body["report"]["status"] in ("converged", "escalated", "budget_exhausted")
     roles = {p["role"] for p in body["points"]["points"]}
     assert "anchor" in roles
+    # 점마다 조건 판정(05 §11.3 · 이관 8단계)이 실리고 채택 비트가 곧 그 판정이다 — 서버가 기체 문맥을 넘겼다는 증거.
+    # 트림 탭 /trim/batch의 verdict와 같은 모양이라 웹 두 표가 같은 말을 한다
+    judged = [p for p in body["points"]["points"] if p["verdict"] is not None]
+    assert judged
+    assert all(p["trimmable"] == p["verdict"]["adopted"] for p in judged)
+    assert {"trim", "model", "limits", "margin", "adopted", "exclusion"} <= set(judged[0]["verdict"])
     # 스케줄 인지 검증 결과와 게인 반출이 실려 있다
     assert body["margin_out"]["cases"]
     # 처방 효과 회계 — "처방을 냈다"와 "고쳤다"는 다르다 (실제 실행에서도 실린다)

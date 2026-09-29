@@ -6,7 +6,7 @@
 숨기면 엔진이 코드를 늘렸을 때 화면이 거짓말을 한다).
 */
 
-import { niceTicks, STATUS } from "./plot.js";
+import { niceTicks, STATE_REASON_LABEL, STATUS, TRIM_STATE_CELL } from "./plot.js";
 
 // ── 경계 귀속 (엔진 lo_source/hi_source 코드가 정본) ──────────────────────
 export const BOUND_META = {
@@ -126,11 +126,31 @@ export function boundarySegments(region) {
 // ── 제어 가능 영역 스캔 (엔진 envelope_verdict 사유 코드가 정본) ──────────
 export const KIND_META = {
   ok: { label: "제어 가능 (트림 성립)", color: STATUS.ok },
+  // 채택됐지만 판정선 여유가 미달인 칸 — 트림 탭의 「계산 가능·여유 미달」과 같은 색·같은 뜻(05 §11.3 채택 정책: 여유는
+  // 채택을 막지 않고 표시만). 초록으로 칠하면 같은 조건에 두 탭이 다른 말을 한다
+  ok_margin_short: { label: "여유 미달 (채택)", color: "#ffcc00" },
   not_converged: { label: "트림 미수렴", color: STATUS.na },
   alpha_margin: { label: "α 여유 부족 (실속 근접)", color: STATUS.bad },
   saturated_throttle_high: { label: "스로틀 상한 포화 (추진 한계)", color: "#ff9500" },
   saturated_de: { label: "타면 포화", color: "#ffcc00" },
   saturated_throttle_low: { label: "스로틀 하한 포화 (아이들)", color: "#5ac8fa" },
+  // 조건 판정(05 §11.3 · 이관 8단계) 사유 — 엔진이 종전 사유 뒤에 덧붙인다(종전 사유가 있으면 대표는 종전 사유).
+  // 종전 사유가 없는 실패의 대표가 이것들이다. 글은 트림 탭 표 한 벌(plot.js STATE_REASON_LABEL)에서 — 다시 적지 않는다
+  ...Object.fromEntries([
+    ...["stall_boundary", "limiter_clips_trim", "q_max", "mach_no"].map((k) => [k, "#af52de"]), // 제한 위반
+    ...["db_mach", "db_alpha", "fuel_range"].map((k) => [k, "#8e8e93"]), // 모델 범위 밖
+    ["stall_basis_missing", "#d1d1d6"], // 판정 미완료
+  ].map(([k, color]) => [k, { label: STATE_REASON_LABEL[k], color }])),
+  // 트림 범주 제외 — 글은 트림 탭 표 한 벌(plot.js)에서
+  ...Object.fromEntries(["thrust_deficit", "idle_thrust_excess", "pitch_moment_short", "below_V_S", "1g_unreachable"]
+    .map((k) => [k, { label: STATE_REASON_LABEL[k], color: STATUS.bad }])),
+  ...Object.fromEntries([["constraint_hit", "#ff9500"], ["calc_failed", "#636366"]]
+    .map(([k, color]) => [k, { label: TRIM_STATE_CELL[k].label, color }])),
+  unassessed: { label: "트림 미수렴 (근거 미평가)", color: STATUS.na },
+  // 여유 사유는 판정선 여유다(스로틀 상한 = 추진 여유 미달 — 추력이 모자란 것이 아니다)
+  throttle_high: { label: "추진 여유 미달", color: "#ff9500" },
+  throttle_low: { label: "스로틀 하한 여유 미달", color: "#5ac8fa" },
+  de: { label: "엘레본 여유 미달", color: "#ffcc00" },
 };
 
 export const kindLabel = (kind) => KIND_META[kind]?.label ?? kind;
@@ -139,13 +159,27 @@ export const kindColor = (kind) => KIND_META[kind]?.color ?? "#8e8e93";
 /** 스캔 entries → 판정 셀 {mach, alt, fuel, ok, kind}.
  * kind는 엔진 reasons의 첫 항목(우선순위 대표 — points.envelope_verdict 순서).
  * 실패인데 사유가 비면 "unknown" — 성공으로 위장하지 않는다. */
+// 판정의 제외 → 스캔 칸 대표. 트림 범주는 물리적 불가면 근거 사유(추력 부족·V_S 미만 …), 그 밖은 트림 상태 — 채널 코드
+// (제약 도달의 throttle_high 등)는 여유 사유와 이름이 같아 대표로 쓰면 뜻이 틀린다. 판정이 없으면 null(옛 결과)
+function exclusionKind(v) {
+  const ex = v?.exclusion;
+  if (!ex) return null;
+  if (ex.category !== "trim") return ex.reasons?.[0] ?? ex.category;
+  const status = v.trim?.status;
+  return status === "infeasible" ? (ex.reasons?.[0] ?? status) : (status ?? "unassessed");
+}
+
 export function scanCells(entries) {
   return entries.map((e) => ({
     mach: e.trim.case.mach,
     alt: e.trim.case.alt,
     fuel: e.trim.case.fuel,
     ok: e.verdict.ok === true,
-    kind: e.verdict.ok === true ? "ok" : (e.verdict.reasons?.[0] ?? "unknown"),
+    kind: e.verdict.ok === true
+      ? (e.verdict.verdict?.margin?.status === "short" ? "ok_margin_short" : "ok")
+      // 채택 제외면 판정의 제외 사유가 대표다 — 종전 사유 첫 항목(α 여유·포화)은 v1.65에서 채택을 막지 않으므로 그것으로
+      // 칠하면 트림 탭(「제한 위반 — α 리미터」)과 다른 말을 한다. 판정 없는 옛 결과만 종전 첫 사유
+      : (exclusionKind(e.verdict.verdict) ?? e.verdict.reasons?.[0] ?? "unknown"),
     // 대표 kind는 우선순위 첫 사유뿐 — 스로틀 포화(3순위)는 미수렴에 가려진다.
     // 추력 한계 경계가 그 가려진 사유를 봐야 하므로 전량을 함께 싣는다.
     reasons: e.verdict.reasons ?? [],
@@ -223,15 +257,22 @@ export function thrustFrontier(cells) {
 }
 
 const KIND_ORDER = [
+  "ok_margin_short", // 실패가 아니라 채택 수의 일부 — 요약에서 「그중」으로 먼저 센다
+  "thrust_deficit", "idle_thrust_excess", "pitch_moment_short", "below_V_S", "1g_unreachable",
+  "constraint_hit", "calc_failed", "unassessed",
   "not_converged", "alpha_margin", "saturated_throttle_high",
   "saturated_de", "saturated_throttle_low",
+  // 조건 판정 사유 — 엔진 opspace/verdict.py 항목 순서(모델 → 제한 → 여유)
+  "db_mach", "db_alpha", "fuel_range", "stall_boundary", "limiter_clips_trim", "q_max", "mach_no",
+  "stall_basis_missing", "throttle_high", "de", "throttle_low",
 ];
 
-/** 판정 셀 → 종류별 집계 {total, ok, byKind: [{kind, n}]} — byKind는 실패만,
- * 엔진 우선순위 순. 미정의 코드는 뒤에 그대로 덧붙인다. */
+/** 판정 셀 → 종류별 집계 {total, ok, byKind: [{kind, n}]} — ok는 채택 수(여유 미달 채택 포함), byKind는 채택 중
+ * 여유 미달(ok_margin_short)과 실패를 엔진 우선순위 순으로. 미정의 코드는 뒤에 그대로 덧붙인다. */
 export function scanSummary(cells) {
   const counts = new Map();
   for (const c of cells) counts.set(c.kind, (counts.get(c.kind) ?? 0) + 1);
+  const adopted = (counts.get("ok") ?? 0) + (counts.get("ok_margin_short") ?? 0);
   const byKind = [];
   for (const k of KIND_ORDER) {
     if (counts.has(k)) byKind.push({ kind: k, n: counts.get(k) });
@@ -239,7 +280,7 @@ export function scanSummary(cells) {
   for (const [k, n] of counts) {
     if (k !== "ok" && !KIND_ORDER.includes(k)) byKind.push({ kind: k, n });
   }
-  return { total: cells.length, ok: counts.get("ok") ?? 0, byKind };
+  return { total: cells.length, ok: adopted, byKind };
 }
 
 /** 추진 히트맵 셀 — 트림 스로틀 소요(연속 색: 초록→주황) + 포화·불가 구분.

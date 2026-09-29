@@ -92,7 +92,9 @@ def test_thin_anchor_seed_is_not_adopted(monkeypatch):
     for name in ("roll.k_rate", "roll.kp", "roll.ki"):
         assert out["slots"][name]["reason"] == REASON_SEED_THIN_ANCHORS, (name, out["slots"][name])
         assert out["slots"][name]["anchors_used"] == 1 and out["slots"][name]["reason_text"]
-    assert out["slots"]["pitch.kp"]["reason"] is None and out["slots"]["pitch.kp"]["anchors_used"] == 3
+    # 피치 자세는 두 앵커다 — v1.65(여유 미달 채택)부터 최고 q̄ 앵커가 M0.4775에서 스로틀 95~99 % 해면 M0.6138로
+    # 옮겼고, 거기서 pitch_att 튜닝이 bandwidth_collapse라 그 앵커를 뺀다(롤처럼 한 점으로 줄지는 않아 채택)
+    assert out["slots"]["pitch.kp"]["reason"] is None and out["slots"]["pitch.kp"]["anchors_used"] == 2
 
 
 def test_blank_aircraft_gets_a_design_and_schedule_that_assemble(blank_seed):

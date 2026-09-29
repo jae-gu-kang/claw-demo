@@ -329,7 +329,8 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
         # job.report의 반환값이 취소 요청 여부 — 엔진 협조적 취소 규약과 그대로 맞물린다
         session.run(
             inp["aircraft"], inp["stall_table"], inp["limits"], inp["db_ranges"], inp["design"],
-            rate_filters=inp["rate_filters"], actuator=inp["actuator"],
+            # 조건 판정 문맥(05 §11.3 · 이관 8단계) — 트림 탭과 같은 생성자로 만든 기체 값. 재개도 이 길이다
+            verdict_ctx=inp["verdict_ctx"], rate_filters=inp["rate_filters"], actuator=inp["actuator"],
             fingerprint=fingerprint,
             on_progress=lambda done, total, msg: job.report(done, total, message=msg),
         )

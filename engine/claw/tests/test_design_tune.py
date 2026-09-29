@@ -804,15 +804,14 @@ def test_envelope_check_is_one_helper_for_all_three_stages():
             self.converged, self.flags = conv, {
                 "saturation_ok": sat, "alpha_margin_ok": alpha}
 
-    assert envelope_ok(_T(True, True, True)) is True
-    assert envelope_ok(_T(True, False, True)) is False  # 포화 — 엔벨로프 경계다
-    assert envelope_ok(_T(True, True, False)) is False  # α 여유 미달
-    assert envelope_ok(_T(False, True, True)) is False  # 미수렴
+    # 판정 문맥 없이는 판정하지 않는다 — 옛 한 비트 정의로 되돌아가는 길이 없다(이관 8단계)
+    with pytest.raises(TypeError):
+        envelope_ok(_T(True, True, True))
 
-    # 세 모듈이 **그 헬퍼를 부른다** — 각자 다시 적으면 이 단정이 무의미해진다
+    # 세 모듈이 **같은 판정**(opspace/verdict.py condition_verdict)을 부른다 — 각자 다시 적으면 경로가 갈린다
     for mod in (grid, refine, schedmap):
         src = inspect.getsource(mod)
-        assert "envelope_ok(" in src, mod.__name__
+        assert "condition_verdict(tr, ctx)" in src, mod.__name__
         assert 'flags.get("saturation_ok")' not in src, (
             f"{mod.__name__}이 엔벨로프 조건을 다시 적었다")
 

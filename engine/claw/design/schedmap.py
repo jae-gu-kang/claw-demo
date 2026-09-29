@@ -27,8 +27,9 @@ closure 조성(closure.py) × pi_loop 전체 조성(작동기 2차계 + Padé �
 겸하므로(points.at_least 서열) 트림 앵커 인접 구간의 검증점도 함께 나온다.
 
 점의 세 상태를 구분해 낸다 (종전에는 뒤 둘이 한 덩어리였다):
-- 트림 수렴 + 엔벨로프 안 → 정상 판정, 실패는 처방으로
-- 트림 수렴 + 포화·α 여유 미달 → `outside_envelope` — 마진은 내되 실패 목록에서 제외
+- 트림 수렴 + 채택 → 정상 판정, 실패는 처방으로
+- 트림 수렴 + 채택 안 함(제한 위반·모델 부족 — 여유 미달은 채택이라 여기 없다) → `outside_envelope` — 마진은 내되 실패 목록에서 제외.
+  `exclusion`에 조건 판정(opspace/verdict.py)의 범주·사유를 싣는다 — 트림 탭이 같은 조건에 내는 그 사유다
 - 트림 미수렴 → loops 비움 (판정 불가)
 """
 
@@ -48,11 +49,15 @@ from claw.design.points import (
     ROLE_VALIDATION,
     OperatingPoint,
     case_name,
-    envelope_ok,
 )
 from claw.design.tune import TuneTargets, rate_loop_margins
+from claw.opspace.verdict import condition_verdict
 from claw.trim import split_axes
 from claw.trim.trim import trim_batch
+
+
+# 제외 범주 → 마진 맵 주석 문구. 트림 범주는 수렴했는데 근거 판정이 불가를 낸 경우(트림 탭이 조건 상태를 넘길 때)뿐이다
+_EXCLUSION_TEXT = {"trim": "트림 불가", "model": "모델 부족", "limits": "제한 위반", "margin": "여유 미달"}
 
 
 def scheduled_gains(tables: dict, design: dict, case) -> dict:
@@ -241,7 +246,7 @@ def midpoint_validation_points(points, *, n_between: int = 1) -> list:
 
 def scheduled_margin_map(
     aircraft, points, lms, tables, design, *,
-    criteria, targets=None, trims=None, fingerprint="",
+    criteria, targets=None, trims=None, ctx=None, fingerprint="",
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
     rate_filters=None, on_progress=None,
 ) -> dict:
@@ -250,6 +255,9 @@ def scheduled_margin_map(
     trims: {이름: TrimResult} — 있는 것은 재사용, 없는 점은 서펜타인 순서로
     trim_batch(인접 시드) 후 병합한다 (호출자 dict를 제자리 갱신).
     on_progress(done, total, message) truthy 반환 = 협조적 취소 — 완료분 보존.
+    ctx: 조건 판정 문맥(VerdictContext) — 아직 판정 안 된 점(trimmable None, 새 검증점)을 판정할 때 쓴다. 전 점이
+    이미 판정돼 있으면(반출 표 재검증 — 같은 점집합) 없어도 되고, 판정할 점이 있는데 없으면 ValueError다 — 문맥 없이
+    옛 한 비트 정의로 되돌아가지 않는다.
     """
     trims = trims if trims is not None else {}
     todo = [p for p in points if p.case.name not in trims]
@@ -276,16 +284,21 @@ def scheduled_margin_map(
     for done, pt in enumerate(pts, start=1):
         name = pt.case.name
         tr = trims[name]
+        if pt.trimmable is None:
+            # 종전에는 `converged`만 보고 True를 박았다 — 그래서 **트림은 되지만 여유가 미달인 중점 검증점**이
+            # 엔벨로프 안으로 취급돼 판정·승격·튜닝까지 흘러갔다. 같은 조건의 coarse 앵커는 TUNE이 건너뛰는데 두
+            # 경로가 갈렸다. 판정은 격자·보강과 같은 조건 판정 하나다
+            if ctx is None:
+                raise ValueError(f"{name}: 판정 안 된 점인데 판정 문맥(ctx)이 없다 — VerdictContext를 넘긴다")
+            pt.verdict = condition_verdict(tr, ctx)
+            pt.trimmable = pt.verdict["adopted"]
+        exclusion = pt.verdict["exclusion"] if pt.verdict is not None else None
         if not tr.converged:
             pt.trimmable = False
             cases[name] = {"role": pt.role, "note": "미수렴 트림 — 마진 판정 불가", "loops": {}}
+            if exclusion is not None:
+                cases[name]["exclusion"] = exclusion
         else:
-            # 종전에는 `converged`만 보고 True를 박았다 — 그래서 **트림은 되지만
-            # 포화·α 여유가 미달인 중점 검증점**이 엔벨로프 안으로 취급돼 판정·승격·
-            # 튜닝까지 흘러갔다. 같은 조건의 coarse 앵커는 TUNE이 건너뛰는데 두 경로가
-            # 갈렸다. 판정은 한 헬퍼가 한다 (points.envelope_ok)
-            if pt.trimmable is None:
-                pt.trimmable = envelope_ok(tr)
             lm = lms.get(aircraft, tr)
             entry = {
                 "role": pt.role,
@@ -296,18 +309,21 @@ def scheduled_margin_map(
                     rate_filters=rate_filters,
                 ),
             }
-            # 트림은 수렴했으나 포화·α 여유 미달 = 엔벨로프 실경계. 마진은 참고로 내되
+            # 트림은 수렴했으나 채택하지 않은 점 = 엔벨로프 실경계. 마진은 참고로 내되
             # **처방 대상에서는 뺀다** — 튜닝(tune_points)이 이미 이 점을 건너뛰므로
             # 스케줄은 애초에 이 조건을 덮으라고 요구받은 적이 없다. 그런데도 채점만
             # 하면 처방이 나오는데, 앵커로 승격해도 TUNE이 다시 건너뛰어 게인 샘플이
             # 하나도 안 늘어난다 — 반영해도 결과가 그대로인 카드를 사용자에게 계속
             # 내미는 셈이다(래칫·예산으로만 겨우 멈춘다). 판정 자체는 남긴다:
-            # 엔벨로프 경계의 마진은 "왜 여기가 경계인가"의 자료다
+            # 엔벨로프 경계의 마진은 "왜 여기가 경계인가"의 자료다. 왜 뺐는지는 조건 판정의 범주가 말한다 —
+            # 제한 위반·모델 부족은 후속 조치가 다르다(05 §11.3)
             if pt.trimmable is False:
                 entry["outside_envelope"] = True
+                if exclusion is not None:
+                    entry["exclusion"] = exclusion
                 entry["note"] = (
-                    "포화·α 여유 미달 — 엔벨로프 실경계다. 마진은 참고값이며 처방·수렴"
-                    " 판정에서 제외한다 (튜닝도 이 점을 건너뛴다)"
+                    f"{_EXCLUSION_TEXT.get((exclusion or {}).get('category'), '채택 안 함')} — 엔벨로프 실경계다."
+                    " 마진은 참고값이며 처방·수렴 판정에서 제외한다 (튜닝도 이 점을 건너뛴다)"
                 )
             cases[name] = entry
         if on_progress is not None and on_progress(done, total, f"margin {name}"):
@@ -336,7 +352,7 @@ def margin_delta(cases_before: dict, cases_after: dict, criteria) -> dict:
     changed에는 등급이 움직인 자리만 수치를 동봉한다(criteria.severity — 비유한은
     None으로: JSON에 inf를 싣지 않는다). 전 자리 수치 덤프는 저장물만 불린다.
 
-    엔벨로프 밖(포화·α 여유 미달) 점은 **판정 우주 자체에서** 뺀다 — `_worst_failures`·
+    엔벨로프 밖(채택 안 한 — 제한 위반·모델 부족) 점은 **판정 우주 자체에서** 뺀다 — `_worst_failures`·
     `judged_count`와 같은 이유다(그 점의 fail에는 반영해도 듣지 않는다). before·after
     어느 쪽에서든 엔벨로프 밖이면 그 점은 세지 않는다: n_judged·changed·worse·better는
     물론 dropped에도 안 잡힌다(dropped는 "판정하다 못하게 된" 것이지 "애초에 판정
@@ -395,7 +411,7 @@ def _worst_failures(cases: dict, criteria) -> list:
     ζ·λ)가 섞여도 한 축에서 비교된다. 크기가 곧 심각도이므로 내림차순이다.
     부족량 레코드(shortfall)를 함께 실어 분류기·원장이 다시 계산하지 않게 한다.
 
-    엔벨로프 밖(포화·α 여유 미달) 점은 제외한다 — 그 점의 fail에는 반영해도 듣지
+    엔벨로프 밖(채택 안 한 — 제한 위반·모델 부족) 점은 제외한다 — 그 점의 fail에는 반영해도 듣지
     않는 처방밖에 낼 수 없다(위 outside_envelope 주석). 목록이 곧 작업 목록이므로
     여기서 빼는 것이 곧 "처방·수렴 판정에서 제외"다.
     """

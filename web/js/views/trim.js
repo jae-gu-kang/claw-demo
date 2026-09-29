@@ -23,6 +23,7 @@ import {
 import {
   SERIES_COLORS, STATUS, TRIM_CELL_LABEL, TRIM_FLAG_LABEL, TRIM_STATE_CELL, fuelsOf, pctText, pivotCases,
   stateEvidenceText, stateReasonText, trimCueReport, trimCurves, trimEnvelopeCell, trimFlagSummary, trimStateLabel,
+  verdictEvidenceText,
 } from "../lib/plot.js";
 import { revealPanel } from "../lib/reveal.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
@@ -396,7 +397,12 @@ function renderMap(mapBox, summaryLine, body, grid) {
   const stateLegend = el("div", { class: "legend" },
     Object.values(TRIM_STATE_CELL).map((c) => el("span", {},
       el("span", { class: "chip", style: `background:${c.color}` }), c.label)),
-    el("span", { class: "hint" }, "— 여유 미달은 날 수 있는 평형이 판정선(스로틀·엘레본·α 여유)을 넘은 것이다. ",
+    // 채택 정책(v1.65): 여유 미달은 채택하고 표시만 한다 — 날 수 있는 평형이라 설계에 쓴다
+    el("span", { class: "hint" }, "— 여유 미달은 날 수 있는 평형이 판정선(스로틀·엘레본·α 여유)을 넘은 것이다 — ",
+      "자동 설계는 이것을 채택하고 미달을 표시한다. ",
+      "제한 위반은 풀린 평형이 적용 제한(실속 경계·α 리미터가 트림을 유지하지 못함·최대 동압·M_NO)을 넘은 것, ",
+      "모델 범위 밖은 트림한 해가 DB·연료 범위를 벗어난 것(모델 부족은 아예 트림하지 않은 점), 판정 미완료는 잴 ",
+      "근거(실속표)가 없는 것이다 — 이 셋은 자동 설계가 채택하지 않는다. ",
       "물리적 불가는 별도 근거가 있는 것만이고 칸의 글은 첫 근거(추력·타면·실속). 계산 실패는 다시 풀 대상, ",
       "제약 도달은 한계에 걸렸지만 날 수 없다는 근거가 아직 없는 것이다"));
   clear(mapBox).append(
@@ -434,8 +440,9 @@ function renderRows(tableBox, body) {
       el("td", {}, r.state ? trimStateLabel(r)
         + (r.region_state ? ` · ${PRE_STATE_LABEL[r.region_state] ?? r.region_state}` : "")
         : "—"),
-      el("td", { class: "hint" }, [stateReasonText(r.state_reasons), stateEvidenceText(r.state_evidence)]
-        .filter(Boolean).join(" — ")),
+      // 조건 판정(05 §11.3)이 채택하지 않은 까닭도 — 자동 설계 점 표가 같은 조건에 같은 말을 한다
+      el("td", { class: "hint" }, [stateReasonText(r.state_reasons), stateEvidenceText(r.state_evidence),
+        verdictEvidenceText(r)].filter(Boolean).join(" — ")),
       el("td", { class: "num" }, fmt(r.euler[1], 4)),
       el("td", { class: "num" }, fmt(r.control.elevon[0], 4)),
       el("td", { class: "num" }, fmt(r.control.throttle[0], 3)),

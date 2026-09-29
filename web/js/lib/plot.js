@@ -129,8 +129,17 @@ export function trimEnvelopeCell(r) {
 export const TRIM_STATE_CELL = Object.freeze({
   computable: { color: STATUS.ok, text: "가능", label: "계산 가능" },
   // 상태가 아니라 칸 종류 — 계산 가능한 트림(날 수 있는 평형)이 판정선(스로틀·엘레본 포화, α 여유)을 넘은 것. 엔진은 이것을
-  // 상태와 따로 margin으로 싣는다(05 §11.3). 물리적 불가와 섞으면 날 수 있는 조건이 불가로 보인다
+  // 상태와 따로 margin으로 싣는다(05 §11.3). 물리적 불가와 섞으면 날 수 있는 조건이 불가로 보인다. 조건 판정은 이것을
+  // 채택한다(v1.65 — 날 수 있는 평형이라 설계에 쓴다) — 칸은 채택된 채 미달을 표시한다
   margin_short: { color: "#ffcc00", text: "여유↓", label: "계산 가능·여유 미달" },
+  // 이 셋도 상태가 아니라 칸 종류 — 조건 판정(05 §11.3 · 이관 8단계, 서버 verdict)이 계산 가능한 트림을 채택하지
+  // 않은 까닭. 제한 위반은 풀린 평형이 적용 제한(실속 경계·α 리미터·최대 동압·M_NO)을 넘은 것 — v1.64까지 「물리적
+  // 불가(실속각 이상)」로 부르던 수렴 해가 여기다. 모델 범위 밖은 **트림한** 해가 DB 받음각·마하·연료 범위를 벗어난
+  // 것이라 트림하지 않은 model_gap과 다르다(후속 조치가 다르다 — 모델 보강 대 격자 조정). 판정 미완료는 잴 근거
+  // (실속표 축)가 없는 것 — 통과도 위반도 아니다
+  limit_violation: { color: "#af52de", text: "제한", label: "계산 가능·제한 위반" },
+  model_invalid: { color: "#5ac8fa", text: "범위밖", label: "계산 가능·모델 범위 밖" },
+  unevaluated: { color: "#d1d1d6", text: "미평가", label: "계산 가능·판정 미완료" },
   infeasible: { color: STATUS.bad, text: "불가", label: "물리적 불가" },
   constraint_hit: { color: STATUS.warn, text: "제약", label: "제약 도달·미수렴" },
   calc_failed: { color: "#636366", text: "실패", label: "계산 실패" },
@@ -154,6 +163,9 @@ export const STATE_REASON_LABEL = Object.freeze({
   not_converged: "미수렴", alpha_search_bound: "받음각 탐색 상한", alpha_search_lower: "받음각 탐색 하한",
   below_V_S: "1g 실속 속도 V_S보다 느림", above_V_S: "V_S보다 빠름 (탐색 상한이 좁을 수 있음)",
   stall_basis_missing: "실속 근거 자료 없음 (판단 미완료)", "1g_unreachable": "1g 도달 불가",
+  // 조건 판정(opspace/verdict.py) 사유 — 제한·모델 항목
+  stall_boundary: "실속 경계 위반", limiter_clips_trim: "α 리미터가 트림을 유지하지 못함", q_max: "최대 동압 초과",
+  mach_no: "M_NO 초과", db_mach: "DB 마하 범위 밖", db_alpha: "DB 받음각 범위 밖", fuel_range: "연료 범위 밖",
 });
 
 export const stateReasonText = (codes) => (codes ?? []).map((c) => STATE_REASON_LABEL[c] ?? c).join(" · ");
@@ -166,11 +178,64 @@ const MARGIN_REASON_LABEL = Object.freeze({
 
 const isMarginShort = (r) => r.state === "computable" && r.margin?.status === "short";
 
-/** 트림 결과 행(state 있음) 또는 기본 격자 점(state = model_gap) → 지도 셀. 모르는 상태는 null(빈 칸). */
+// 조건 판정의 제외 항목 → 칸 종류. 트림 항목 제외는 상태 표 그대로(물리적 불가·계산 실패·제약 도달)라 여기 없다.
+// 여유 미달은 제외가 아니다(v1.65 채택 정책 — 채택된 해에 margin으로만 붙는다). 제한 항목이 「미평가」로 빠진 것(잴
+// 근거 없음)은 위반이 아니다 — 판정 미완료로 따로 둔다
+const EXCLUSION_KIND = { limits: "limit_violation", model: "model_invalid" };
+
+/** 조건 판정(서버 verdict)이 실린 계산 가능 결과 → 칸 종류, 판정이 없거나 트림 항목이 계산 가능이 아니면 null
+ *  (조건 상태 규칙으로). 채택 → computable(여유 미달이면 margin_short — 채택된 채 표시), 아니면 제외 항목의 칸. */
+function verdictKind(r) {
+  const v = r.verdict;
+  if (!v || r.state !== "computable" || v.trim?.status !== "computable") return null;
+  if (v.adopted || !v.exclusion) return v.margin?.status === "short" ? "margin_short" : "computable";
+  const cat = v.exclusion.category;
+  if (cat === "limits" && v.limits?.status === "unevaluated") return "unevaluated";
+  return EXCLUSION_KIND[cat] ?? null;
+}
+
+/** 조건 판정 제외 항목 → 이름 (opspace/verdict.py 항목 순서). 트림 탭 근거 열과 자동 설계 점 표가 같은 이름을 쓴다.
+ *  여유는 제외 항목이 아니다(v1.65) — 여유 미달 글은 marginShortText. */
+export const EXCLUSION_CATEGORY_LABEL = Object.freeze({
+  trim: "트림 불성립", model: "모델 범위 밖", limits: "제한 위반",
+});
+
+/** 여유 미달 사유 글(「추진 여유 미달」) — 판정이 있으면 verdict.margin, 옛 결과는 margin. 미달이 아니면 빈 글. */
+export function marginShortText(r) {
+  const m = r?.verdict ? r.verdict.margin : r?.margin;
+  if (m?.status !== "short") return "";
+  return m.reasons.map((c) => MARGIN_REASON_LABEL[c] ?? STATE_REASON_LABEL[c] ?? c).join(" · ");
+}
+
+// α 리미터 제외의 근거 — 문턱을 넘었다는 말만이 아니라 작동식이 트림을 못 쥐는 수치(엔진 limits.detail.limiter)
+const limiterText = (d) => d ? `${STATE_REASON_LABEL.limiter_clips_trim} — α_trim ${sig(d.alpha_trim)} > α_max `
+  + `${sig(d.alpha_max)}` : STATE_REASON_LABEL.limiter_clips_trim;
+
+/** 조건 판정이 채택하지 않은 까닭 글 — 제외 항목의 사유(「실속 경계 위반」). 채택·판정 없음이면 빈 글. */
+export function verdictExclusionText(r) {
+  const ex = r?.verdict && !r.verdict.adopted ? r.verdict.exclusion : null;
+  if (!ex) return "";
+  const lim = ex.category === "limits" ? r.verdict.limits?.detail?.limiter : undefined;
+  return ex.reasons.map((c) => c === "limiter_clips_trim" ? limiterText(lim) : STATE_REASON_LABEL[c] ?? c).join(" · ");
+}
+
+/** 표 근거 열의 조건 판정 글 — 채택하지 않은 결과만 「자동 설계 제외 (제한 위반) — 실속 경계 위반」. 트림 항목
+ *  제외는 조건 상태 사유(같은 사유)가 이미 적혀 있어 되풀이하지 않는다. */
+export function verdictEvidenceText(r) {
+  const ex = r?.verdict && !r.verdict.adopted ? r.verdict.exclusion : null;
+  if (!ex || ex.category === "trim") return "";
+  const reasons = verdictExclusionText(r);
+  return `자동 설계 제외 (${EXCLUSION_CATEGORY_LABEL[ex.category] ?? ex.category})${reasons ? ` — ${reasons}` : ""}`;
+}
+
+/** 트림 결과 행(state 있음) 또는 기본 격자 점(state = model_gap) → 지도 셀. 모르는 상태는 null(빈 칸).
+ *  조건 판정이 실린 결과는 그 판정으로(채택·채택된 여유 미달·제한 위반·모델 범위 밖), 옛 결과는 margin으로 가른다. */
 export function trimStateCell(r) {
   const base = TRIM_STATE_CELL[r.state];
   if (!base) return null;
-  if (isMarginShort(r)) return { kind: "margin_short", color: TRIM_STATE_CELL.margin_short.color,
+  const vk = verdictKind(r);
+  if (vk) return { kind: vk, color: TRIM_STATE_CELL[vk].color, text: TRIM_STATE_CELL[vk].text };
+  if (!r.verdict && isMarginShort(r)) return { kind: "margin_short", color: TRIM_STATE_CELL.margin_short.color,
     text: TRIM_STATE_CELL.margin_short.text };
   const reasons = r.state_reasons ?? [];
   const first = reasons.find((c) => INFEASIBLE_TEXT[c]);
@@ -178,11 +243,16 @@ export function trimStateCell(r) {
     text: r.state === "infeasible" && first ? INFEASIBLE_TEXT[first] : base.text };
 }
 
-/** 표의 상태 글 — 상태에 여유 판정을 붙인다(「계산 가능 · 추진 여유 미달」). */
+/** 표의 상태 글 — 상태에 채택하지 않은 까닭을 붙인다(「계산 가능 · 실속 경계 위반」·「계산 가능 · 추진 여유 미달」).
+ *  조건 판정이 있으면 그 제외 사유로, 옛 결과는 여유 판정으로. */
 export function trimStateLabel(r) {
   const base = TRIM_STATE_CELL[r.state]?.label ?? r.state;
-  if (!isMarginShort(r)) return base;
-  return `${base} · ${r.margin.reasons.map((c) => MARGIN_REASON_LABEL[c] ?? c).join(" · ")}`;
+  const vk = verdictKind(r);
+  if (vk === "computable") return base;
+  if (vk === "margin_short") return `${base} · ${marginShortText(r)}`;
+  if (vk) return `${base} · ${verdictExclusionText(r)}`;
+  if (r.verdict || !isMarginShort(r)) return base;
+  return `${base} · ${marginShortText(r)}`;
 }
 
 // 근거 글의 수치 — 유효 3자리(0.0525 · −0.022). 고정한 채널의 한계값은 그 단위로

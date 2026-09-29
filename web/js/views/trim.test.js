@@ -147,7 +147,12 @@ test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은
     reserve: { de: { frac: 0.2 }, thr: { reserve_hi: 0.6 }, alpha: { stall_reserve: 0.1 } },
     state, state_reasons: reasons, region_state: null,
   });
-  const results = [row(0.12, { continuity_ok: false }), row(0.16, {}),
+  // M0.16은 조건 판정(05 §11.3 · 이관 8단계)이 실린 결과 — 수렴했지만 실속 경계를 넘어 자동 설계가 채택하지 않는다
+  const stalled = { ...row(0.16, {}), verdict: {
+    trim: { status: "computable", reasons: [] }, model: { status: "valid", reasons: [] },
+    limits: { status: "violated", reasons: ["stall_boundary"] }, margin: { status: "met", reasons: [] }, region: null,
+    adopted: false, exclusion: { category: "limits", reasons: ["stall_boundary"] } } };
+  const results = [row(0.12, { continuity_ok: false }), stalled,
     row(0.2, { saturation_ok: false }, "infeasible", ["throttle_high"])];
   const prevFetch = globalThis.fetch;
   globalThis.fetch = (url, opts = {}) => (url.replace(/^\/api/, "").startsWith("/results/")
@@ -162,7 +167,10 @@ test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은
     await waitFor(() => finalReport("run-ok"), "신호 끝 보고");
     const r = finalReport("run-ok");
     assert.equal(r.phase, "done", r.error);
-    assert.match(r.summary, /^3 케이스 — 계산 가능 2 · 물리적 불가 1 · 판정 플래그 위반 2건 확인 필요/);
+    assert.match(r.summary,
+      /^3 케이스 — 계산 가능 1 · 계산 가능·제한 위반 1 · 물리적 불가 1 · 판정 플래그 위반 2건 확인 필요/);
+    assert.match(textOf(root), /계산 가능 · 실속 경계 위반/, "상태 열이 채택하지 않은 까닭을 싣는다");
+    assert.match(textOf(root), /자동 설계 제외 \(제한 위반\) — 실속 경계 위반/, "근거 열이 조건 판정을 싣는다");
     assert.match(textOf(root), /수렴 3\/3 · 판정 플래그 위반 2건/, "머리줄과 보고가 같은 말");
     assert.match(textOf(root), /스로틀 상한/, "표가 물리적 불가의 근거를 싣는다");
     const hit = scrolled.find((s) => s.node.attrs?.id === "trim-drawer");

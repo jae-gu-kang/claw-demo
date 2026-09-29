@@ -1,7 +1,7 @@
 {
  "golden": "envelope_scan",
  "mode": "full",
- "captured_at": "e75a09f+dirty",
+ "captured_at": "7c92755+dirty",
  "value": {
   "dict": {
    "kind": "envelope_scan",
@@ -100,6 +100,42 @@
           "thr_reserve": "f:0x1.0e5de15dde8f1p-1",
           "alpha_stall_reserve": "f:0x1.694134b91b93dp-3",
           "alpha_limit": "f:0x1.428f5c28f5c28p-2"
+         }
+        },
+        "verdict": {
+         "dict": {
+          "trim": {
+           "dict": {
+            "status": "computable",
+            "reasons": []
+           }
+          },
+          "model": {
+           "dict": {
+            "status": "valid",
+            "reasons": []
+           }
+          },
+          "limits": {
+           "dict": {
+            "status": "met",
+            "reasons": []
+           }
+          },
+          "margin": {
+           "dict": {
+            "status": "met",
+            "reasons": []
+           }
+          },
+          "region": {
+           "dict": {
+            "status": "in",
+            "confirmed": false
+           }
+          },
+          "adopted": true,
+          "exclusion": null
          }
         }
        }
@@ -200,6 +236,42 @@
           "thr_reserve": "f:0x1.b0ec42674d850p-2",
           "alpha_stall_reserve": "f:0x1.07e42cd3c440ep-2",
           "alpha_limit": "f:0x1.3333333333334p-2"
+         }
+        },
+        "verdict": {
+         "dict": {
+          "trim": {
+           "dict": {
+            "status": "computable",
+            "reasons": []
+           }
+          },
+          "model": {
+           "dict": {
+            "status": "valid",
+            "reasons": []
+           }
+          },
+          "limits": {
+           "dict": {
+            "status": "met",
+            "reasons": []
+           }
+          },
+          "margin": {
+           "dict": {
+            "status": "met",
+            "reasons": []
+           }
+          },
+          "region": {
+           "dict": {
+            "status": "in",
+            "confirmed": false
+           }
+          },
+          "adopted": true,
+          "exclusion": null
          }
         }
        }
@@ -303,6 +375,55 @@
           "alpha_stall_reserve": "f:0x1.70a3d70a3d710p-5",
           "alpha_limit": "f:0x1.70a3d70a3d70ap-2"
          }
+        },
+        "verdict": {
+         "dict": {
+          "trim": {
+           "dict": {
+            "status": "infeasible",
+            "reasons": [
+             "alpha_search_bound",
+             "not_converged",
+             "below_V_S"
+            ]
+           }
+          },
+          "model": {
+           "dict": {
+            "status": "valid",
+            "reasons": []
+           }
+          },
+          "limits": {
+           "dict": {
+            "status": "met",
+            "reasons": []
+           }
+          },
+          "margin": {
+           "dict": {
+            "status": "unevaluated",
+            "reasons": []
+           }
+          },
+          "region": {
+           "dict": {
+            "status": "out_of_region",
+            "confirmed": false
+           }
+          },
+          "adopted": false,
+          "exclusion": {
+           "dict": {
+            "category": "trim",
+            "reasons": [
+             "alpha_search_bound",
+             "not_converged",
+             "below_V_S"
+            ]
+           }
+          }
+         }
         }
        }
       }
@@ -394,7 +515,7 @@
       },
       "verdict": {
        "dict": {
-        "ok": false,
+        "ok": true,
         "reasons": [
          "saturated_throttle_high"
         ],
@@ -404,6 +525,44 @@
           "thr_reserve": "f:0x1.0704b2a4da560p-5",
           "alpha_stall_reserve": "f:0x1.16fe1f6e950aep-2",
           "alpha_limit": "f:0x1.1df3b645a1cacp-2"
+         }
+        },
+        "verdict": {
+         "dict": {
+          "trim": {
+           "dict": {
+            "status": "computable",
+            "reasons": []
+           }
+          },
+          "model": {
+           "dict": {
+            "status": "valid",
+            "reasons": []
+           }
+          },
+          "limits": {
+           "dict": {
+            "status": "met",
+            "reasons": []
+           }
+          },
+          "margin": {
+           "dict": {
+            "status": "short",
+            "reasons": [
+             "throttle_high"
+            ]
+           }
+          },
+          "region": {
+           "dict": {
+            "status": "out_of_region",
+            "confirmed": false
+           }
+          },
+          "adopted": true,
+          "exclusion": null
          }
         }
        }

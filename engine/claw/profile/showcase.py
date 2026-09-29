@@ -379,7 +379,8 @@ def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
 
     def run(s):
         s.run(inp["aircraft"], inp["stall_table"], inp["limits"], inp["db_ranges"], inp["design"],
-              rate_filters=inp["rate_filters"], actuator=inp["actuator"], fingerprint="")
+              verdict_ctx=inp["verdict_ctx"], rate_filters=inp["rate_filters"], actuator=inp["actuator"],
+              fingerprint="")
 
     t0 = time.perf_counter()
     run(session)

@@ -36,6 +36,7 @@ from claw.fcl.assemble import assemble_law
 from claw.pipeline.openloop import GROUP_LOOPS, effective_gain
 from claw.profile import ProfileError
 from claw.design.points import envelope_verdict
+from claw.opspace.verdict import VerdictContext
 from claw.trim import trim_level
 from claw.trim import (
     LAT_INPUTS,
@@ -503,7 +504,7 @@ MAX_SCAN_CASES = 200  # 영향성 라우트 MAX_CASES와 같은 지위 — 오�
 
 
 class EnvelopeScanIn(BaseModel):
-    """제어 가능 영역 스캔 — 케이스 격자 트림 + envelope_ok 판정 (01 §2.6)."""
+    """제어 가능 영역 스캔 — 케이스 격자 트림 + 조건 판정 채택 (01 §2.6 · 05 §11.3)."""
 
     profile: ProfileRef | None = None
     fingerprint: str = ""
@@ -514,7 +515,7 @@ class EnvelopeScanIn(BaseModel):
 def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Response) -> dict:
     """설계 엔벨로프의 제어 가능 영역 — 격자 트림 잡 (마진 맵과 같은 202 골격).
 
-    점별 판정은 엔진 envelope_verdict(envelope_ok 정본 + 사유 귀속) —
+    점별 판정은 엔진 envelope_verdict(조건 판정 condition_verdict의 채택 + 사유 귀속, 판정 전체는 verdict) —
     saturated_throttle_high는 대리 지표가 아니라 추진 한계 자체다 (plant/prop.py PropEngine).
     취소는 trim_batch 협조적 중단 — 완료분 보존.
     """
@@ -522,6 +523,8 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
     ac = profile.aircraft()
     cases = build_cases(req.cases)
     store = request.app.state.store
+    # 조건 판정 문맥(05 §11.3 · 이관 8단계) — 트림 탭·자동 설계와 같은 기체 값으로 판정한다
+    vctx = VerdictContext.from_profile(profile)
 
     def work(job):
         trs = trim_batch(
@@ -533,7 +536,7 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
             ),
         )
         entries = [
-            {"trim": trim_result_dict(tr), "verdict": to_jsonable(envelope_verdict(tr, ac.trim_bounds["de"]))}
+            {"trim": trim_result_dict(tr), "verdict": to_jsonable(envelope_verdict(tr, vctx))}
             for tr in trs
         ]
         store.save(

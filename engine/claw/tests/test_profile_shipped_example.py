@@ -14,6 +14,7 @@ import pytest
 from claw.common.contracts import TrimCase
 from claw.design.basis import apply_seed_basis
 from claw.design.points import envelope_ok
+from claw.opspace.verdict import VerdictContext, condition_verdict
 from claw.design.tune import TuneTargets
 from claw.env import isa_atmosphere
 from claw.pipeline.criteria import GainEvalCriteria
@@ -36,6 +37,11 @@ def doc():
 @pytest.fixture(scope="module")
 def ac(doc):
     return build_profile(doc, validated=True).aircraft()
+
+
+@pytest.fixture(scope="module")
+def ctx(doc):
+    return VerdictContext.from_profile(build_profile(doc, validated=True))
 
 
 def test_만재_200_kg_EO_IR형은_220_kg이고_계산이_달라지는_변형이다(doc):
@@ -79,24 +85,53 @@ def test_δe_trim_표는_이_플랜트에서_기본과_EO_IR형을_함께_재어
     assert not build_profile(doc, "eoir", validated=True).de_trim_stale
 
 
-SHIPPED_SEA_LEVEL_BAND = {  # 연료(kg): (하한, 상한) — 0.001 격자 실측을 안쪽으로 반올림
-    0.0: (0.08, 0.28),    # 실측 0.075 ~ 0.287 (M0.282 한 점은 트림이 안 풀린다 — 두 끝 판정과 웹 인용에는 무관)
-    25.0: (0.09, 0.28),    # 실측 0.081 ~ 0.284  ← 앱 기본값
-    50.0: (0.09, 0.28),    # 실측 0.087 ~ 0.280
+# 해면 자동 설계 채택 대역(v1.65 — 조건 판정의 채택, 트림 탭과 같은 판정). 채택이 여유 미달을 막지 않게 되어 상한이
+# 트림이 풀리는 끝(0.001 탐색 격자에서 확인한 끝 — 기체의 절대 최고 속도가 아니다)으로 올라갔다: 기체 성능이 아니라
+# 채택 조건이 바뀐 것이다. 이 기체는 해면에서 α 리미터가 트림을 자르는 점이 없어 하한은 그대로다.
+# 옛 상한(스로틀 95 % 등고선)은 추진 여유 충족 끝으로 따로 못박는다(SHIPPED_SEA_LEVEL_THRUST_EDGE) — 두 상한 사이가
+# 「설계 채택 가능 · 추진 여유 미달」 구간이다.
+SHIPPED_SEA_LEVEL_BAND = {  # 연료(kg): (하한, 상한) — 0.001 격자 실측을 안쪽으로 반올림 (v1.65 전 상한은 95 % 끝)
+    0.0: (0.08, 0.29),    # 실측 0.075 ~ 0.293 (M0.282 한 점은 트림이 안 풀린다 — 두 끝 판정과 웹 인용에는 무관)
+    25.0: (0.09, 0.29),    # 실측 0.081 ~ 0.290  ← 앱 기본값
+    50.0: (0.09, 0.28),    # 실측 0.087 ~ 0.286
+}
+SHIPPED_SEA_LEVEL_THRUST_EDGE = {  # 연료(kg): (추진 여유 충족 끝 — 안쪽 내림, 그 위 여유 미달 구간 안 한 점)
+    0.0: (0.28, 0.29),     # 실측 0.287
+    25.0: (0.28, 0.29),    # 실측 0.284
+    50.0: (0.28, 0.285),   # 실측 0.280 — 채택 상한이 0.286이라 한 칸(0.01) 위는 대역 밖이다
 }
 
 
+def _design_ok(tr, ctx) -> bool:
+    """채택 ∧ 여유 충족 — 95 % 등고선 안. 채택(envelope_ok)은 여유 미달을 막지 않는다(v1.65)."""
+    v = condition_verdict(tr, ctx)
+    return v["adopted"] and v["margin"]["status"] == "met"
+
+
 @pytest.mark.parametrize("fuel", sorted(SHIPPED_SEA_LEVEL_BAND))
-def test_해면_수평비행_범위가_적어_둔_수치와_같다(ac, fuel):
+def test_해면_자동_설계_채택_대역이_적어_둔_수치와_같다(ac, ctx, fuel):
     """적어 둔 두 끝은 안에, 한 칸(0.01) 밖은 밖에 — 안쪽만 보면 범위를 넓게 적어도 통과한다."""
     lo, hi = SHIPPED_SEA_LEVEL_BAND[fuel]
 
     def ok(m):
-        return envelope_ok(trim_level(ac, TrimCase(f"m{m}", mach=m, alt=0.0, fuel=fuel)))
+        return envelope_ok(trim_level(ac, TrimCase(f"m{m}", mach=m, alt=0.0, fuel=fuel)), ctx)
     assert ok(lo) and ok(hi)
     assert not ok(round(lo - 0.01, 2)) and not ok(round(hi + 0.01, 2))
 
 
+@pytest.mark.parametrize("fuel", sorted(SHIPPED_SEA_LEVEL_THRUST_EDGE))
+def test_해면_추진_여유_충족_끝이_적어_둔_수치와_같다(ac, ctx, fuel):
+    """끝은 채택 ∧ 여유 충족, 그 위 한 점은 채택 ∧ 여유 미달(「설계 채택 가능 · 추진 여유 미달」)."""
+    edge, over = SHIPPED_SEA_LEVEL_THRUST_EDGE[fuel]
+    assert edge < over  # over는 채택 대역 실측 상한 안 — 0.001 실측이라 안쪽 반올림한 표 상한보다 클 수 있다
+    assert _design_ok(trim_level(ac, TrimCase(f"t{edge}", mach=edge, alt=0.0, fuel=fuel)), ctx)
+    v = condition_verdict(trim_level(ac, TrimCase(f"t{over}", mach=over, alt=0.0, fuel=fuel)), ctx)
+    assert v["adopted"] and v["margin"] == {"status": "short", "reasons": ["throttle_high"]}, (fuel, v["margin"])
+
+
+# 설계 천장은 스로틀 95 % 등고선(여유 충족) 기준이다 — v1.65부터 채택이 여유를 보지 않으므로 "난다"를 채택 ∧ 여유
+# 충족(_design_ok)으로 잰다. 채택만으로 재면 트림이 풀리는 끝까지 올라간다(이분법 실측: 공허 ~8.89 · 25 kg ~7.58 ·
+# 만재 ~6.40 km) — 인용문이 말하는 천장은 이것이 아니다.
 SHIPPED_CEILING = {  # 연료(kg): (인용값, 여기서는 난다, 여기서는 못 난다) [m] — 스로틀 95% 등고선 기준
     0.0: (8600.0, 8500.0, 8700.0),     # 실측 8,596 m는 나고 8,602 m는 못 난다
     25.0: (7300.0, 7200.0, 7400.0),     # 실측 7,277 m는 나고 7,283 m는 못 난다  ← 앱 기본값
@@ -105,14 +140,14 @@ SHIPPED_CEILING = {  # 연료(kg): (인용값, 여기서는 난다, 여기서는
 
 
 @pytest.mark.parametrize("fuel", sorted(SHIPPED_CEILING))
-def test_설계_천장이_적어_둔_수치_근방이다(ac, fuel):
+def test_설계_천장이_적어_둔_수치_근방이다(ac, ctx, fuel):
     cited, below, above = SHIPPED_CEILING[fuel]
     assert below < cited < above
 
     def flies(alt):
         m = 0.06
         while m <= 0.30001:
-            if envelope_ok(trim_level(ac, TrimCase(f"c{m:.3f}", mach=m, alt=alt, fuel=fuel))):
+            if _design_ok(trim_level(ac, TrimCase(f"c{m:.3f}", mach=m, alt=alt, fuel=fuel)), ctx):
                 return True
             m = round(m + 0.005, 4)
         return False
@@ -200,9 +235,10 @@ def test_기본_격자_게인_평가_게이트에_hard_fail이_없다(doc):
 def test_EO_IR형은_3000_m_만재에서도_수평비행점이_있다(doc):
     """추력·동력 상향(사용자 결정)의 기준 하나 — 짐벌 20 kg를 싣고 연료를 가득 채워도 3000 m에서 수평비행점이 있다.
     상사 축소 그대로(정지추력 1 kN · 축동력 34 kW)였을 때는 한 점도 없었다."""
-    ac = build_profile(doc, "eoir", validated=True).aircraft()
+    built = build_profile(doc, "eoir", validated=True)
+    ac, ctx = built.aircraft(), VerdictContext.from_profile(built)
     ok = [m / 1000 for m in range(100, 300, 5)
-          if envelope_ok(trim_level(ac, TrimCase(f"e{m}", mach=m / 1000, alt=3000.0, fuel=50.0)))]
+          if envelope_ok(trim_level(ac, TrimCase(f"e{m}", mach=m / 1000, alt=3000.0, fuel=50.0)), ctx)]
     assert ok, "EO/IR형 3000 m 만재 수평비행점이 없다"
 
 

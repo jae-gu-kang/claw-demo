@@ -1,7 +1,7 @@
 {
  "golden": "trim_grid",
  "mode": "full",
- "captured_at": "654ec14+dirty",
+ "captured_at": "7c92755+dirty",
  "value": [
   {
    "tuple": [
@@ -159,6 +159,55 @@
         "thr_reserve": "f:0x1.3491bef6cfee6p-1",
         "alpha_stall_reserve": "f:0x1.33333333576e8p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
        }
       }
      }
@@ -320,6 +369,42 @@
         "alpha_stall_reserve": "f:0x1.b09dc007fa364p-4",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -479,6 +564,42 @@
         "thr_reserve": "f:0x1.6a5c5649a8eddp-1",
         "alpha_stall_reserve": "f:0x1.7b5cba919d41bp-3",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -640,6 +761,42 @@
         "alpha_stall_reserve": "f:0x1.cef6cc9c77249p-3",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -799,6 +956,42 @@
         "thr_reserve": "f:0x1.581d56d52f822p-1",
         "alpha_stall_reserve": "f:0x1.042bfcfee3158p-2",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -960,6 +1153,42 @@
         "alpha_stall_reserve": "f:0x1.1544e970a3129p-2",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -1119,6 +1348,42 @@
         "thr_reserve": "f:0x1.11e8a1340743dp-1",
         "alpha_stall_reserve": "f:0x1.1f7a62428af7ep-2",
         "alpha_limit": "f:0x1.3333333333334p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -1280,6 +1545,42 @@
         "alpha_stall_reserve": "f:0x1.255c6d5c3852ep-2",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -1440,6 +1741,42 @@
         "alpha_stall_reserve": "f:0x1.25d6b2f6b9c88p-2",
         "alpha_limit": "f:0x1.2666666666666p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -1599,6 +1936,42 @@
         "thr_reserve": "f:0x1.dcc49ec8c32d8p-4",
         "alpha_stall_reserve": "f:0x1.245efc0a1cd1fp-2",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -1763,6 +2136,53 @@
         "alpha_stall_reserve": "f:0x1.218a41f8892d1p-2",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -1925,6 +2345,53 @@
         "thr_reserve": "f:0x1.8000000000000p-51",
         "alpha_stall_reserve": "f:0x1.1db7f122f0b2dp-2",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -2089,6 +2556,53 @@
         "alpha_stall_reserve": "f:0x1.1925e8c6a6a83p-2",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -2251,6 +2765,55 @@
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -2410,6 +2973,42 @@
         "thr_reserve": "f:0x1.43a61e75ba500p-1",
         "alpha_stall_reserve": "f:0x1.33ca48fc2a7f0p-4",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -2571,6 +3170,42 @@
         "alpha_stall_reserve": "f:0x1.4f202a67bd090p-3",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -2730,6 +3365,42 @@
         "thr_reserve": "f:0x1.527fbf0d4ca22p-1",
         "alpha_stall_reserve": "f:0x1.aeee2eaa78a7dp-3",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -2891,6 +3562,42 @@
         "alpha_stall_reserve": "f:0x1.f05ba8b94c1dfp-3",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -3050,6 +3757,42 @@
         "thr_reserve": "f:0x1.2e1cd429acde9p-1",
         "alpha_stall_reserve": "f:0x1.0c000b32f0bcdp-2",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -3211,6 +3954,42 @@
         "alpha_stall_reserve": "f:0x1.181dfc5f93082p-2",
         "alpha_limit": "f:0x1.3333333333334p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -3370,6 +4149,42 @@
         "thr_reserve": "f:0x1.a724dc98cb1b4p-2",
         "alpha_stall_reserve": "f:0x1.1f619c7e927eep-2",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -3531,6 +4346,42 @@
         "alpha_stall_reserve": "f:0x1.20e3543413767p-2",
         "alpha_limit": "f:0x1.2666666666666p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -3690,6 +4541,42 @@
         "thr_reserve": "f:0x1.e9b92f09db2f0p-4",
         "alpha_stall_reserve": "f:0x1.2034da4af3307p-2",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -3854,6 +4741,53 @@
         "alpha_stall_reserve": "f:0x1.1dfd254edd9b5p-2",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -4016,6 +4950,53 @@
         "thr_reserve": "f:0x1.0000000000000p-53",
         "alpha_stall_reserve": "f:0x1.1aa82f6970cbfp-2",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -4180,6 +5161,53 @@
         "alpha_stall_reserve": "f:0x1.167b4866f63f3p-2",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -4341,6 +5369,55 @@
         "thr_reserve": "f:0x1.bbad1d8ab1c7ap-2",
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
        }
       }
      }
@@ -4505,6 +5582,55 @@
         "alpha_stall_reserve": "f:0x1.99999999999a0p-6",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -4664,6 +5790,42 @@
         "thr_reserve": "f:0x1.0a96be93d3901p-1",
         "alpha_stall_reserve": "f:0x1.c91f93db62efcp-4",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -4825,6 +5987,42 @@
         "alpha_stall_reserve": "f:0x1.607b94b12ee2ep-3",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -4984,6 +6182,42 @@
         "thr_reserve": "f:0x1.13dbaac9f6456p-1",
         "alpha_stall_reserve": "f:0x1.b524132c02646p-3",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -5145,6 +6379,42 @@
         "alpha_stall_reserve": "f:0x1.ea0a236fd31cep-3",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -5304,6 +6574,42 @@
         "thr_reserve": "f:0x1.ccb49b9cf475ep-2",
         "alpha_stall_reserve": "f:0x1.05d33ac7f8468p-2",
         "alpha_limit": "f:0x1.3333333333334p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -5465,6 +6771,42 @@
         "alpha_stall_reserve": "f:0x1.108062ad73f24p-2",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -5625,6 +6967,42 @@
         "alpha_stall_reserve": "f:0x1.148f0e850775ap-2",
         "alpha_limit": "f:0x1.2666666666666p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -5784,6 +7162,42 @@
         "thr_reserve": "f:0x1.af0b5b4d5c0d0p-4",
         "alpha_stall_reserve": "f:0x1.15d45b0b9e376p-2",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -5948,6 +7362,53 @@
         "alpha_stall_reserve": "f:0x1.1523d873f1812p-2",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -6110,6 +7571,53 @@
         "thr_reserve": "f:0x1.4000000000000p-51",
         "alpha_stall_reserve": "f:0x1.13069999e0910p-2",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -6274,6 +7782,53 @@
         "alpha_stall_reserve": "f:0x1.0fd561ace56f8p-2",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -6435,6 +7990,55 @@
         "thr_reserve": "f:0x1.1d5c293750c2ap-2",
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
        }
       }
      }
@@ -6599,6 +8203,55 @@
         "alpha_stall_reserve": "f:0x1.99999999999a0p-6",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -6750,14 +8403,72 @@
     },
     {
      "dict": {
-      "ok": true,
-      "reasons": [],
+      "ok": false,
+      "reasons": [
+       "limiter_clips_trim"
+      ],
       "reserve": {
        "dict": {
         "de_frac": "f:0x1.557f48772fe3fp-1",
         "thr_reserve": "f:0x1.3c702e38404eap-2",
         "alpha_stall_reserve": "f:0x1.7651d82a10a28p-5",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "violated",
+          "reasons": [
+           "limiter_clips_trim"
+          ],
+          "detail": {
+           "dict": {
+            "limiter": {
+             "dict": {
+              "alpha_trim": "f:0x1.4468f82df11edp-2",
+              "alpha_max": "f:0x1.3ffffffffffffp-2",
+              "law": "theta_cmd <= theta + (alpha_max - alpha)"
+             }
+            }
+           }
+          }
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "limits",
+          "reasons": [
+           "limiter_clips_trim"
+          ]
+         }
+        }
        }
       }
      }
@@ -6919,6 +8630,42 @@
         "alpha_stall_reserve": "f:0x1.f4354f95a8c98p-4",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -7078,6 +8825,42 @@
         "thr_reserve": "f:0x1.7ee4cd952a6c6p-2",
         "alpha_stall_reserve": "f:0x1.66a38c53e3dadp-3",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -7239,6 +9022,42 @@
         "alpha_stall_reserve": "f:0x1.ac98d9469f19dp-3",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -7398,6 +9217,42 @@
         "thr_reserve": "f:0x1.526998d80cdb8p-2",
         "alpha_stall_reserve": "f:0x1.da8316be7abfap-3",
         "alpha_limit": "f:0x1.3333333333334p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -7559,6 +9414,42 @@
         "alpha_stall_reserve": "f:0x1.f8eb9b5bb4cc4p-3",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -7719,6 +9610,42 @@
         "alpha_stall_reserve": "f:0x1.03ecaf2666344p-2",
         "alpha_limit": "f:0x1.2666666666666p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -7870,7 +9797,7 @@
     },
     {
      "dict": {
-      "ok": false,
+      "ok": true,
       "reasons": [
        "saturated_throttle_high"
       ],
@@ -7880,6 +9807,44 @@
         "thr_reserve": "f:0x1.8ebcf444acfb0p-5",
         "alpha_stall_reserve": "f:0x1.07d05d9781acbp-2",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "short",
+          "reasons": [
+           "throttle_high"
+          ]
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -8044,6 +10009,53 @@
         "alpha_stall_reserve": "f:0x1.09308120164cep-2",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -8206,6 +10218,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.08b65a3c8b2fdp-2",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -8370,6 +10429,53 @@
         "alpha_stall_reserve": "f:0x1.06d8248eb92dap-2",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -8532,6 +10638,55 @@
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -8683,14 +10838,72 @@
     },
     {
      "dict": {
-      "ok": true,
-      "reasons": [],
+      "ok": false,
+      "reasons": [
+       "limiter_clips_trim"
+      ],
       "reserve": {
        "dict": {
         "de_frac": "f:0x1.62b3aeb6fe43dp-1",
         "thr_reserve": "f:0x1.17e880bc123a0p-1",
         "alpha_stall_reserve": "f:0x1.80496a4bec208p-5",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "violated",
+          "reasons": [
+           "limiter_clips_trim"
+          ],
+          "detail": {
+           "dict": {
+            "limiter": {
+             "dict": {
+              "alpha_trim": "f:0x1.4ff6d2b6827bfp-2",
+              "alpha_max": "f:0x1.4cccccccccccdp-2",
+              "law": "theta_cmd <= theta + (alpha_max - alpha)"
+             }
+            }
+           }
+          }
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "limits",
+          "reasons": [
+           "limiter_clips_trim"
+          ]
+         }
+        }
        }
       }
      }
@@ -8852,6 +11065,42 @@
         "alpha_stall_reserve": "f:0x1.255c75ad763d6p-3",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -9011,6 +11260,42 @@
         "thr_reserve": "f:0x1.2f86450f68e30p-1",
         "alpha_stall_reserve": "f:0x1.90698315c1e1ep-3",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -9172,6 +11457,42 @@
         "alpha_stall_reserve": "f:0x1.d96816a8bb199p-3",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -9331,6 +11652,42 @@
         "thr_reserve": "f:0x1.1065f57236cbdp-1",
         "alpha_stall_reserve": "f:0x1.031c5a4abf186p-2",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -9492,6 +11849,42 @@
         "alpha_stall_reserve": "f:0x1.110c85b6ca020p-2",
         "alpha_limit": "f:0x1.3333333333334p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -9651,6 +12044,42 @@
         "thr_reserve": "f:0x1.6e0b237b2062cp-2",
         "alpha_stall_reserve": "f:0x1.19a29d68ae38ap-2",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -9812,6 +12241,42 @@
         "alpha_stall_reserve": "f:0x1.1c20f34ddc350p-2",
         "alpha_limit": "f:0x1.2666666666666p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -9971,6 +12436,42 @@
         "thr_reserve": "f:0x1.e650adca2e430p-5",
         "alpha_stall_reserve": "f:0x1.1c33a5e5ae746p-2",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -10135,6 +12636,53 @@
         "alpha_stall_reserve": "f:0x1.1a9555d1ee308p-2",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -10297,6 +12845,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.17b81366a70b9p-2",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -10461,6 +13056,53 @@
         "alpha_stall_reserve": "f:0x1.13ebe337cb6eap-2",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -10622,6 +13264,55 @@
         "thr_reserve": "f:0x1.b3e423d0a90b8p-2",
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
        }
       }
      }
@@ -10786,6 +13477,55 @@
         "alpha_stall_reserve": "f:0x1.99999999999a0p-6",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "constraint_hit",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "above_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "above_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -10945,6 +13685,42 @@
         "thr_reserve": "f:0x1.0376084b38e1bp-1",
         "alpha_stall_reserve": "f:0x1.e0b1822138570p-4",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -11106,6 +13882,42 @@
         "alpha_stall_reserve": "f:0x1.694134ea57b3fp-3",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -11265,6 +14077,42 @@
         "thr_reserve": "f:0x1.0b0cb8d842400p-1",
         "alpha_stall_reserve": "f:0x1.bbccaeabf48efp-3",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -11426,6 +14274,42 @@
         "alpha_stall_reserve": "f:0x1.ef3905f130beep-3",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -11585,6 +14469,42 @@
         "thr_reserve": "f:0x1.b0ec426516536p-2",
         "alpha_stall_reserve": "f:0x1.07e42cd3455dcp-2",
         "alpha_limit": "f:0x1.3333333333334p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -11746,6 +14666,42 @@
         "alpha_stall_reserve": "f:0x1.122f1141172f9p-2",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -11906,6 +14862,42 @@
         "alpha_stall_reserve": "f:0x1.15f41ec3f81d4p-2",
         "alpha_limit": "f:0x1.2666666666666p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -12057,7 +15049,7 @@
     },
     {
      "dict": {
-      "ok": false,
+      "ok": true,
       "reasons": [
        "saturated_throttle_high"
       ],
@@ -12067,6 +15059,44 @@
         "thr_reserve": "f:0x1.9603acd37fe90p-5",
         "alpha_stall_reserve": "f:0x1.1700fdc4fd0b2p-2",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "short",
+          "reasons": [
+           "throttle_high"
+          ]
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -12231,6 +15261,53 @@
         "alpha_stall_reserve": "f:0x1.1626fe1917bb3p-2",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -12393,6 +15470,53 @@
         "thr_reserve": "f:0x1.0000000000000p-50",
         "alpha_stall_reserve": "f:0x1.13e5b2bf03000p-2",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -12557,6 +15681,53 @@
         "alpha_stall_reserve": "f:0x1.10977a553e618p-2",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -12718,6 +15889,55 @@
         "thr_reserve": "f:0x1.1cdf889fdbb1ep-2",
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
        }
       }
      }
@@ -12882,6 +16102,55 @@
         "alpha_stall_reserve": "f:0x1.99999999999a0p-6",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -13041,6 +16310,42 @@
         "thr_reserve": "f:0x1.34b44f5be402ep-2",
         "alpha_stall_reserve": "f:0x1.ca0d16cdc3c80p-5",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -13202,6 +16507,42 @@
         "alpha_stall_reserve": "f:0x1.0a38be71cabb5p-3",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -13361,6 +16702,42 @@
         "thr_reserve": "f:0x1.73dd9c20334d2p-2",
         "alpha_stall_reserve": "f:0x1.73198db24ce39p-3",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -13522,6 +16899,42 @@
         "alpha_stall_reserve": "f:0x1.b664f29d13fd3p-3",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -13681,6 +17094,42 @@
         "thr_reserve": "f:0x1.3c8a88811a060p-2",
         "alpha_stall_reserve": "f:0x1.e25e1492802d4p-3",
         "alpha_limit": "f:0x1.3333333333334p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -13842,6 +17291,42 @@
         "alpha_stall_reserve": "f:0x1.ff567fb10d405p-3",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -14001,6 +17486,42 @@
         "thr_reserve": "f:0x1.1161130f0289cp-3",
         "alpha_stall_reserve": "f:0x1.06971fa8632abp-2",
         "alpha_limit": "f:0x1.2666666666666p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -14165,6 +17686,53 @@
         "alpha_stall_reserve": "f:0x1.0a0fdb5bbe138p-2",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -14327,6 +17895,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.0b1ec5619498cp-2",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -14491,6 +18106,53 @@
         "alpha_stall_reserve": "f:0x1.0a607b8b6e4c1p-2",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -14654,6 +18316,53 @@
         "alpha_stall_reserve": "f:0x1.084b4406107f2p-2",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -14815,6 +18524,55 @@
         "thr_reserve": "f:0x1.66d5b5ecd1da8p-4",
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
        }
       }
      }
@@ -14978,6 +18736,55 @@
         "thr_reserve": "f:0x1.1ebbe5df39070p-3",
         "alpha_stall_reserve": "f:0x1.9999999c0be60p-6",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
        }
       }
      }
@@ -15143,6 +18950,55 @@
         "alpha_stall_reserve": "f:0x1.9999999999980p-7",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -15302,6 +19158,42 @@
         "thr_reserve": "f:0x1.ecfc721d122b0p-5",
         "alpha_stall_reserve": "f:0x1.207de9561a898p-4",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -15463,6 +19355,42 @@
         "alpha_stall_reserve": "f:0x1.13bcbbec972dbp-3",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -15622,6 +19550,42 @@
         "thr_reserve": "f:0x1.020e090e68ce4p-3",
         "alpha_stall_reserve": "f:0x1.6aef00575a009p-3",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -15783,6 +19747,42 @@
         "alpha_stall_reserve": "f:0x1.a5a2d225db6cap-3",
         "alpha_limit": "f:0x1.3333333333334p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -15942,6 +19942,42 @@
         "thr_reserve": "f:0x1.173746e9cddd8p-4",
         "alpha_stall_reserve": "f:0x1.cd9c647ce9850p-3",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -16106,6 +20142,53 @@
         "alpha_stall_reserve": "f:0x1.e3d26a0a1e1cep-3",
         "alpha_limit": "f:0x1.2666666666666p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -16268,6 +20351,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.f1510c283e7b0p-3",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -16432,6 +20562,53 @@
         "alpha_stall_reserve": "f:0x1.f87e0be5d6357p-3",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -16594,6 +20771,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.fb0d89b30d043p-3",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -16758,6 +20982,53 @@
         "alpha_stall_reserve": "f:0x1.fa2b813b9fe48p-3",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -16919,6 +21190,55 @@
         "thr_reserve": "f:0x1.7d0d1c18ef910p-2",
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
        }
       }
      }
@@ -17083,6 +21403,55 @@
         "alpha_stall_reserve": "f:0x1.99999999999a0p-6",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -17242,6 +21611,42 @@
         "thr_reserve": "f:0x1.bba60819de920p-2",
         "alpha_stall_reserve": "f:0x1.a5932c3e7ad04p-4",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -17403,6 +21808,42 @@
         "alpha_stall_reserve": "f:0x1.5334602b4c52dp-3",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -17562,6 +22003,42 @@
         "thr_reserve": "f:0x1.d7b7999c803c2p-2",
         "alpha_stall_reserve": "f:0x1.ab0aed5af46a4p-3",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -17723,6 +22200,42 @@
         "alpha_stall_reserve": "f:0x1.e22bcd8721264p-3",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -17882,6 +22395,42 @@
         "thr_reserve": "f:0x1.7839bac263e44p-2",
         "alpha_stall_reserve": "f:0x1.02afca099cd1ap-2",
         "alpha_limit": "f:0x1.3333333333334p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -18043,6 +22592,42 @@
         "alpha_stall_reserve": "f:0x1.0df1fc97791cbp-2",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -18202,6 +22787,42 @@
         "thr_reserve": "f:0x1.31038bd7fd860p-3",
         "alpha_stall_reserve": "f:0x1.127068326ea7dp-2",
         "alpha_limit": "f:0x1.2666666666666p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -18366,6 +22987,53 @@
         "alpha_stall_reserve": "f:0x1.140c0d7c33ddep-2",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -18528,6 +23196,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.13a3801c45cbap-2",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -18692,6 +23407,53 @@
         "alpha_stall_reserve": "f:0x1.11ba30bc59882p-2",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -18855,6 +23617,53 @@
         "alpha_stall_reserve": "f:0x1.0eb32c546e695p-2",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -19016,6 +23825,55 @@
         "thr_reserve": "f:0x1.3270d84bfd164p-2",
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
        }
       }
      }
@@ -19180,6 +24038,55 @@
         "alpha_stall_reserve": "f:0x1.99999999999a0p-6",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -19339,6 +24246,42 @@
         "thr_reserve": "f:0x1.515c2818fd622p-2",
         "alpha_stall_reserve": "f:0x1.2c3bea4fc255cp-4",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -19500,6 +24443,42 @@
         "alpha_stall_reserve": "f:0x1.256d5f99ee591p-3",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -19659,6 +24638,42 @@
         "thr_reserve": "f:0x1.85e29a883b262p-2",
         "alpha_stall_reserve": "f:0x1.880b2240e8b49p-3",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -19820,6 +24835,42 @@
         "alpha_stall_reserve": "f:0x1.c6d266e490e94p-3",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -19979,6 +25030,42 @@
         "thr_reserve": "f:0x1.3da16ed577144p-2",
         "alpha_stall_reserve": "f:0x1.ef856e627dee8p-3",
         "alpha_limit": "f:0x1.3333333333334p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -20140,6 +25227,42 @@
         "alpha_stall_reserve": "f:0x1.0509a04305f17p-2",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -20299,6 +25422,42 @@
         "thr_reserve": "f:0x1.cdaed39319850p-4",
         "alpha_stall_reserve": "f:0x1.0b0c5ab60bf14p-2",
         "alpha_limit": "f:0x1.2666666666666p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -20463,6 +25622,53 @@
         "alpha_stall_reserve": "f:0x1.0dd42c8d83132p-2",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -20625,6 +25831,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.0e553fa993006p-2",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -20789,6 +26042,53 @@
         "alpha_stall_reserve": "f:0x1.0d260a6bda22ap-2",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -20952,6 +26252,53 @@
         "alpha_stall_reserve": "f:0x1.0ab58bc423ce2p-2",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -21113,6 +26460,55 @@
         "thr_reserve": "f:0x1.fb7c8e774f8e8p-4",
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
        }
       }
      }
@@ -21277,6 +26673,55 @@
         "alpha_stall_reserve": "f:0x1.99999999999a0p-6",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -21440,6 +26885,55 @@
         "alpha_stall_reserve": "f:0x1.9999999999980p-7",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "alpha_search_bound",
+           "not_converged",
+           "below_V_S"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -21599,6 +27093,42 @@
         "thr_reserve": "f:0x1.ce9ea3959b148p-4",
         "alpha_stall_reserve": "f:0x1.6ed621d7327e0p-4",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -21760,6 +27290,42 @@
         "alpha_stall_reserve": "f:0x1.32a3091d33dd0p-3",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -21919,6 +27485,42 @@
         "thr_reserve": "f:0x1.4c4a0655fd51cp-3",
         "alpha_stall_reserve": "f:0x1.8382c23afe770p-3",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -22080,6 +27682,42 @@
         "alpha_stall_reserve": "f:0x1.b979c27552080p-3",
         "alpha_limit": "f:0x1.3333333333334p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
       }
      }
     }
@@ -22239,6 +27877,42 @@
         "thr_reserve": "f:0x1.4f1dd8f662538p-4",
         "alpha_stall_reserve": "f:0x1.dde29733251e8p-3",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
        }
       }
      }
@@ -22403,6 +28077,53 @@
         "alpha_stall_reserve": "f:0x1.f15fde7353362p-3",
         "alpha_limit": "f:0x1.2666666666666p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -22565,6 +28286,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.fcc28a67be798p-3",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -22729,6 +28497,53 @@
         "alpha_stall_reserve": "f:0x1.0122e29d35719p-2",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -22891,6 +28706,53 @@
         "thr_reserve": "f:0x1.0000000000000p-51",
         "alpha_stall_reserve": "f:0x1.01c0485f1ff79p-2",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -23055,6 +28917,53 @@
         "alpha_stall_reserve": "f:0x1.00c5124373d1bp-2",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -23217,6 +29126,55 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.3333333333338p-5",
         "alpha_limit": "f:0x1.68f5c28f5c290p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "constraint_hit",
+          "reasons": [
+           "throttle_high",
+           "not_converged",
+           "balance_not_found"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "throttle_high",
+           "not_converged",
+           "balance_not_found"
+          ]
+         }
+        }
        }
       }
      }
@@ -23382,6 +29340,55 @@
         "alpha_stall_reserve": "f:0x1.99999999999a0p-6",
         "alpha_limit": "f:0x1.5c28f5c28f5c2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "constraint_hit",
+          "reasons": [
+           "throttle_high",
+           "not_converged",
+           "balance_not_found"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "throttle_high",
+           "not_converged",
+           "balance_not_found"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -23545,6 +29552,55 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.9999999999980p-7",
         "alpha_limit": "f:0x1.4f5c28f5c28f4p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "constraint_hit",
+          "reasons": [
+           "throttle_high",
+           "not_converged",
+           "balance_not_found"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "throttle_high",
+           "not_converged",
+           "balance_not_found"
+          ]
+         }
+        }
        }
       }
      }
@@ -23710,6 +29766,53 @@
         "alpha_stall_reserve": "f:0x1.8ea85d56917a0p-6",
         "alpha_limit": "f:0x1.428f5c28f5c28p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -23872,6 +29975,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.8c59f1b8eba32p-4",
         "alpha_limit": "f:0x1.3d70a3d70a3d6p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -24036,6 +30186,53 @@
         "alpha_stall_reserve": "f:0x1.2bdc8f4f7d3a5p-3",
         "alpha_limit": "f:0x1.3851eb851eb84p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -24198,6 +30395,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.7227e1f978596p-3",
         "alpha_limit": "f:0x1.3333333333334p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -24362,6 +30606,53 @@
         "alpha_stall_reserve": "f:0x1.a32aa8b3b029ep-3",
         "alpha_limit": "f:0x1.2e147ae147ae2p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -24524,6 +30815,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.c063427777bdap-3",
         "alpha_limit": "f:0x1.2666666666666p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -24688,6 +31026,53 @@
         "alpha_stall_reserve": "f:0x1.d349295223fbap-3",
         "alpha_limit": "f:0x1.1eb851eb851ecp-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -24850,6 +31235,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.dec27bc329b69p-3",
         "alpha_limit": "f:0x1.170a3d70a3d70p-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }
@@ -25014,6 +31446,53 @@
         "alpha_stall_reserve": "f:0x1.e4c7de2ce9ddep-3",
         "alpha_limit": "f:0x1.0f5c28f5c28f6p-2"
        }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
       }
      }
     }
@@ -25176,6 +31655,53 @@
         "thr_reserve": "f:0x0.0p+0",
         "alpha_stall_reserve": "f:0x1.e6b7afd24acebp-3",
         "alpha_limit": "f:0x1.07ae147ae147ap-2"
+       }
+      },
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
        }
       }
      }

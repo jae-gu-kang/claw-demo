@@ -16,6 +16,7 @@ nameCases와 같은 원칙(비반올림 — 반올림 이름은 정밀 격자에
 이름은 매핑을 조용히 오귀속시킨다)을 따른다.
 """
 
+import copy
 from dataclasses import dataclass, field
 
 from claw.common.contracts import TrimCase
@@ -29,49 +30,61 @@ ROLE_RANK = {ROLE_VALIDATION: 0, ROLE_BREAKPOINT: 1, ROLE_ANCHOR: 2}
 AXES = ("mach", "alt", "fuel")  # fcl/schedule.py SCHED_VARS와 같은 축 — 스케줄 변수가 곧 격자 축
 
 
-def envelope_ok(tr) -> bool:
-    """이 트림해가 **엔벨로프 안**인가 — 수렴 + 포화 여유 + α 여유.
+def envelope_ok(tr, ctx) -> bool:
+    """이 트림해를 자동 설계가 **채택**하는가 — 공통 조건 판정의 채택(opspace/verdict.py condition_verdict).
 
-    세 곳(grid·refine·schedmap)이 각자 판정하던 것을 한 자리로 모은다. schedmap만
-    `converged`만 봤고, 그래서 **트림은 되지만 포화·α 여유가 미달인 중점 검증점**이
-    엔벨로프 안으로 취급돼 판정·승격·튜닝까지 흘러갔다 — 같은 조건의 coarse 앵커는
-    TUNE이 건너뛰고 실패 목록에서도 빠지는데, 두 경로가 갈렸다.
+    트림 계산 가능 ∧ 모델 유효 ∧ 제한 충족, 미평가는 통과가 아니다(05 §11.3 · 이관 8단계). 여유 미달은 채택을 막지
+    않는다(v1.65 채택 정책 — 판정의 margin 항목에 표시만 남는다). 종전에는
+    여기서 수렴 ∧ 포화 여유 ∧ α 여유 한 비트를 따로 냈고, 트림 탭은 조건 상태를 따로 냈다 — 같은 조건에 두 판정이
+    섰다. ctx(VerdictContext)는 필수다: 문맥 없는 옛 정의로 되돌아가는 길을 두면 정의가 다시 둘이 된다.
+    격자·보강·마진 맵(grid·refine·schedmap)은 이 함수가 아니라 condition_verdict를 직접 불러 판정 전체를 점에 싣는다
+    (OperatingPoint.verdict) — 채택 비트는 늘 그 판정의 adopted다.
     """
-    return bool(tr.converged
-                and tr.flags.get("saturation_ok")
-                and tr.flags.get("alpha_margin_ok"))
+    from claw.opspace.verdict import condition_verdict  # opspace.basegrid가 이 모듈을 import한다 — 순환을 늦춰 끊는다
+
+    return bool(condition_verdict(tr, ctx)["adopted"])
 
 
-def envelope_verdict(tr, de_bounds) -> dict:
-    """envelope_ok + 실패 사유 귀속 + 여유 수치 — {"ok", "reasons", "reserve"} (설계 엔벨로프 스캔용).
+_LEGACY_ONLY = frozenset({"throttle_high", "throttle_low", "de", "alpha_margin", "not_converged"})
 
+
+def envelope_verdict(tr, ctx) -> dict:
+    """채택 + 실패 사유 귀속 + 여유 수치 — {"ok", "reasons", "reserve", "verdict"} (설계 엔벨로프 스캔용).
+
+    ok·verdict는 condition_verdict 그대로다 — 판정 정본(05 §11.3)을 재기술하지 않는다.
     reserve는 판정의 근거 수치다(TrimResult.reserve 요약 — δe 소모율·트림 추력 여유·실속 여유·α 판정 한계). 트림이
     여유를 계산하지 않았으면(지상 평형·옛 해) None.
-
-    ok는 반드시 envelope_ok() 호출 — 판정 정본(01 §4.1)을 재기술하지 않는다.
-    reasons는 해당되는 사유 전부, 우선순위 순(첫 항목이 표시 대표):
-    not_converged → alpha_margin → saturated_throttle_high(**진짜 추진 한계** —
-    프로펠러 추력 곡선 plant/prop.py PropEngine. 다만 SAT_FRAC 0.95 등고선이라
-    한계보다 설계 여유만큼 안쪽이다) → saturated_de → saturated_throttle_low.
+    reasons는 해당되는 사유 전부 — 웹 스캔 라벨(web/js/lib/envelope.js)이 첫 항목을 대표로 쓰므로 옛 코드와 순서를
+    먼저 둔다: not_converged → alpha_margin → saturated_throttle_high(**진짜 추진 한계** — 프로펠러 추력 곡선
+    plant/prop.py PropEngine. 다만 SAT_FRAC 0.95 등고선이라 한계보다 설계 여유만큼 안쪽이다) → saturated_de →
+    saturated_throttle_low. 그 뒤에 판정의 모델·제한·여유 사유 중 옛 코드가 말하지 않은 것(db_mach·db_alpha·
+    fuel_range·stall_boundary·limiter_clips_trim·q_max·mach_no·stall_basis_missing)을 판정 순서대로 중복 없이 붙인다.
     """
+    from claw.opspace.verdict import condition_verdict
+
+    verdict = condition_verdict(tr, ctx)
     reasons = []
     if not tr.converged:
         reasons.append("not_converged")
     if not tr.flags.get("alpha_margin_ok"):
         reasons.append("alpha_margin")
-    sat = saturation_detail(tr, de_bounds)
+    sat = saturation_detail(tr, ctx.trim_bounds["de"])
     if sat["throttle_high"]:
         reasons.append("saturated_throttle_high")
     if sat["de"]:
         reasons.append("saturated_de")
     if sat["throttle_low"]:
         reasons.append("saturated_throttle_low")
+    for item in ("model", "limits", "margin"):
+        for code in verdict[item]["reasons"]:
+            if code not in _LEGACY_ONLY and code not in reasons:
+                reasons.append(code)
     r = getattr(tr, "reserve", None) or {}
     reserve = None if not r else {
         "de_frac": r["de"]["frac"], "thr_reserve": r["thr"]["reserve_hi"],
         "alpha_stall_reserve": r["alpha"]["stall_reserve"], "alpha_limit": r["alpha"]["limit"],
     }
-    return {"ok": envelope_ok(tr), "reasons": reasons, "reserve": reserve}
+    return {"ok": verdict["adopted"], "reasons": reasons, "reserve": reserve, "verdict": verdict}
 
 
 def case_name(mach: float, alt: float, fuel: float) -> str:
@@ -89,8 +102,10 @@ def case_name(mach: float, alt: float, fuel: float) -> str:
 class OperatingPoint:
     """운영점 하나 — TrimCase(기존 계약) + 역할 + 계보.
 
-    trimmable: None=미판정, False=트림 실패/포화(엔벨로프 실경계의 데이터화 —
-    버리지 않고 "여기는 안 된다"를 남긴다), True=수렴·여유 확보.
+    trimmable: None=미판정, False=채택 안 함(트림 실패·모델 밖·제한 위반 — 여유 미달은 채택이다 — 엔벨로프 실경계의 데이터화 —
+    버리지 않고 "여기는 안 된다"를 남긴다), True=채택. 판정에서 세울 때는 verdict["adopted"] 그대로다.
+    verdict: 그 채택을 낸 조건 판정 전체(opspace/verdict.py condition_verdict) — 제외 범주·사유가 여기 있다.
+    None이면 판정 없이 세운 trimmable(옛 결과·손으로 세운 점)이다.
     history: 승격 이력 [{"from","to","reason"}] — 감사 추적.
     """
 
@@ -99,6 +114,7 @@ class OperatingPoint:
     origin: str = ""  # 'coarse' | 'refine' | 'midpoint' | 'promoted:<사유>'
     history: list = field(default_factory=list)
     trimmable: bool | None = None
+    verdict: dict | None = None
 
     def __post_init__(self):
         if self.role not in ROLE_RANK:
@@ -121,6 +137,7 @@ class OperatingPoint:
             "origin": self.origin,
             "history": list(self.history),
             "trimmable": self.trimmable,
+            "verdict": copy.deepcopy(self.verdict),
         }
 
     @classmethod
@@ -134,6 +151,7 @@ class OperatingPoint:
             origin=d.get("origin", ""),
             history=list(d.get("history", ())),
             trimmable=d.get("trimmable"),
+            verdict=copy.deepcopy(d.get("verdict")),  # 옛 결과에는 없다 — 미판정
         )
 
 

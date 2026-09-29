@@ -91,6 +91,12 @@ test("bound/kind 라벨·색 — 모르는 코드는 코드 그대로 (조용히
   assert.match(boundColor("warp_drive"), /^#/); // 폴백 색도 유효한 색
   assert.equal(kindLabel("saturated_throttle_high"), "스로틀 상한 포화 (추진 한계)");
   assert.equal(kindLabel("future_reason"), "future_reason");
+  // 조건 판정 사유(이관 8단계 — 엔진이 종전 사유 뒤에 덧붙인다)도 사람 글로, 트림 탭과 같은 말
+  assert.equal(kindLabel("stall_boundary"), "실속 경계 위반");
+  assert.equal(kindLabel("db_alpha"), "DB 받음각 범위 밖");
+  assert.equal(kindLabel("throttle_high"), "추진 여유 미달");
+  for (const k of ["limiter_clips_trim", "q_max", "mach_no", "db_mach", "fuel_range", "stall_basis_missing",
+    "throttle_low", "de"]) assert.notEqual(kindLabel(k), k, k);
 });
 
 const entry = (mach, alt, ok, reasons = [], { converged = true, thr = 0.3 } = {}) => ({
@@ -113,6 +119,52 @@ test("scanCells — kind는 엔진 reasons 첫 항목 (우선순위 대표), ok�
     ["ok", "alpha_margin", "saturated_throttle_high", "unknown"]);
   assert.deepEqual(cells.map((c) => c.ok), [true, false, false, false]);
   assert.equal(cells[0].mach, 0.5);
+});
+
+test("scanCells — 채택됐지만 여유 미달인 칸은 트림 탭처럼 따로 — 초록 「제어 가능」으로 칠하지 않는다", () => {
+  // 스로틀 95 % 등고선 밖에서 수렴한 해 — 채택(ok)이고 종전 사유 saturated_throttle_high가 남는다(추력 전선이 그것을 본다)
+  const e = entry(0.6, 1000, true, ["saturated_throttle_high"]);
+  e.verdict.verdict = { adopted: true, exclusion: null, margin: { status: "short", reasons: ["throttle_high"] } };
+  const [c] = scanCells([e]);
+  assert.equal(c.ok, true);
+  assert.equal(c.kind, "ok_margin_short");
+  assert.notEqual(kindColor("ok_margin_short"), kindColor("ok"));
+  // 요약: 채택 수에 포함하고, 그중 여유 미달을 따로 센다(실패 목록이 아니다)
+  const s = scanSummary([c, { kind: "ok", ok: true }, { kind: "not_converged", ok: false }]);
+  assert.equal(s.ok, 2);
+  assert.deepEqual(s.byKind, [{ kind: "ok_margin_short", n: 1 }, { kind: "not_converged", n: 1 }]);
+  assert.match(scanCueSummary(s), /여유 미달 \(채택\) 1/);
+});
+
+test("scanCells — 채택 제외 칸의 대표는 판정의 제외 사유다 — 종전 사유 첫 항목(α 여유)이 아니라", () => {
+  // 실속 근처 리미터 제외 — 종전 사유는 alpha_margin이 먼저 오지만 v1.65에서 여유는 채택을 막지 않는다. 트림 탭처럼
+  // 「제한 위반 — α 리미터」로 말해야 한다
+  const e = entry(0.12, 3000, false, ["alpha_margin", "limiter_clips_trim"]);
+  e.verdict.verdict = { adopted: false, exclusion: { category: "limits", reasons: ["limiter_clips_trim"] },
+    margin: { status: "short", reasons: ["alpha_margin"] } };
+  const [c] = scanCells([e]);
+  assert.equal(c.kind, "limiter_clips_trim");
+  assert.deepEqual(c.reasons, ["alpha_margin", "limiter_clips_trim"]); // 전량은 그대로(추력 전선이 본다)
+  // 옛 결과(판정 없음)는 종전대로 첫 사유
+  assert.equal(scanCells([entry(0.12, 3000, false, ["alpha_margin"])])[0].kind, "alpha_margin");
+  // 트림 범주 — 물리적 불가면 근거 사유(추력 부족), 그 밖은 트림 상태. 채널 코드(throttle_high)를 대표로 쓰면 스캔 표의
+  // 「추진 여유 미달」 글이 붙어 뜻이 틀린다
+  const trimEx = (status, reasons) => {
+    const t = entry(0.7, 100, false, ["not_converged", "saturated_throttle_high"], { converged: false });
+    t.verdict.verdict = { adopted: false, trim: { status, reasons }, exclusion: { category: "trim", reasons } };
+    return scanCells([t])[0];
+  };
+  assert.equal(trimEx("infeasible", ["thrust_deficit", "throttle_high"]).kind, "thrust_deficit");
+  assert.equal(trimEx("constraint_hit", ["throttle_high", "not_converged", "balance_not_found"]).kind, "constraint_hit");
+  assert.equal(trimEx("unassessed", ["not_converged"]).kind, "unassessed");
+  assert.match(kindLabel("thrust_deficit"), /추력 부족/);
+  assert.match(kindLabel("constraint_hit"), /제약 도달/);
+});
+
+test("scanSummary — 조건 판정 사유는 종전 사유 뒤, 판정 항목 순(모델 → 제한 → 여유)", () => {
+  const s = scanSummary([{ kind: "throttle_high" }, { kind: "stall_boundary" }, { kind: "db_mach" },
+    { kind: "alpha_margin" }]);
+  assert.deepEqual(s.byKind.map((b) => b.kind), ["alpha_margin", "db_mach", "stall_boundary", "throttle_high"]);
 });
 
 test("scanSummary — 실패만 엔진 우선순위 순, 미정의 코드는 뒤에 그대로", () => {

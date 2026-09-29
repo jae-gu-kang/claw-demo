@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 from claw.common.contracts import TrimCase
 from claw_server.refs import ProfileRef, profile_echo, resolve_profile
 from claw.opspace import model_range_of, pre_state, region_of, trim_assessment
+from claw.opspace.verdict import VerdictContext, condition_verdict
 from claw.trim import trim_batch
 from claw_server.routes.grid import region_context
 from claw_server.serialize import trim_result_dict
@@ -78,20 +79,29 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
     store = request.app.state.store
 
     # 근거 계산이 기체를 다시 조립하지 않게 이미 만든 것을 넘긴다(opspace/states.py 캐시 키 "aircraft")
-    region, model, vs_cache = region_of(profile.doc), model_range_of(profile), {"aircraft": ac}
+    region, model = region_of(profile.doc), model_range_of(profile)
+    # 조건 판정 문맥(05 §11.3 · 이관 8단계)은 작업당 한 번 — 점마다 기체 문서를 다시 읽지 않는다. 근거 계산 캐시도 그
+    # 문맥의 것을 같이 쓴다(자동 설계와 같은 캐시 규약)
+    vctx = VerdictContext.from_profile(profile, cache={"aircraft": ac})
 
     def with_state(tr) -> dict:
         """트림 해 + 조건 상태(05 §11.3) — 계산 실패·제약 도달·물리적 불가를 가른다. 여유 판정(margin)은 상태와 따로
         싣고, 물리 한계에 붙은 미수렴의 판정 근거(state_evidence — 한계 고정 평형 해들)도 싣는다. 요구영역 판정
-        (region_state)도 따로다: 손으로 더한 케이스는 영역 밖일 수 있고, 그래도 사용자가 요청했으니 푼다."""
+        (region_state)도 따로다: 손으로 더한 케이스는 영역 밖일 수 있고, 그래도 사용자가 요청했으니 푼다.
+
+        verdict는 항목별 조건 판정(trim·model·limits·margin·채택) — 자동 설계와 같은 규칙(opspace/verdict.py)이라
+        트림 탭과 자동 설계 표가 같은 조건에 같은 말을 한다. 트림 항목은 방금 잰 조건 상태를 그대로 넘긴다."""
         out = trim_result_dict(tr)
         if tr.case.condition != "level":
             return {**out, "state": None, "state_reasons": [], "margin": None, "state_evidence": None,
-                    "region_state": None}
-        a = trim_assessment(tr, profile, model, cache=vs_cache)
+                    "region_state": None, "verdict": None}
+        a = trim_assessment(tr, profile, model, cache=vctx.cache)
         rs = None if region is None else pre_state(region, model, tr.case.mach, tr.case.alt, tr.case.fuel)
+        rs = None if rs == "not_run" else rs
+        # 요구영역 항목은 문맥이 요구영역으로 분류한다(region_state와 달리 모델 부족을 섞지 않는다)
+        verdict = condition_verdict(tr, vctx, trim=(a["state"], a["reasons"]))
         return {**out, "state": a["state"], "state_reasons": a["reasons"], "margin": a["margin"],
-                "state_evidence": a["evidence"], "region_state": None if rs == "not_run" else rs}
+                "state_evidence": a["evidence"], "region_state": rs, "verdict": verdict}
 
     def work(job):
         results = trim_batch(

@@ -12,8 +12,6 @@ from claw.design import (
     case_name,
 )
 
-_DE = (-0.35, 0.35)  # 예제 기체 엘레본 범위 — 판정 입력 대역이 쓰는 기체 한계
-
 
 def _pt(mach, alt, fuel, role=ROLE_ANCHOR, origin="coarse"):
     return OperatingPoint(
@@ -121,45 +119,61 @@ def test_case_name_precision_survives_refine_midpoints():
 
 
 def _fake_tr(converged=True, alpha_ok=True, de=0.0, thr=0.3):
-    """판정 입력만 갖춘 최소 TrimResult 대역 — envelope_verdict가 보는 필드는
-    converged·flags·control 뿐이라 사유 조합을 자유로 만든다."""
+    """판정 입력만 갖춘 최소 TrimResult 대역 — 조건 판정(opspace/verdict.py)이 보는 필드는
+    converged·flags·control·case·state(받음각)뿐이라 사유 조합을 자유로 만든다. 조건은 예제 기체의
+    편한 순항(M0.4 1000 m 200 kg, α ≈ 0.04 rad)이라 모델·제한 항목은 늘 통과다."""
     from types import SimpleNamespace
+
+    import numpy as np
 
     sat_ok = abs(de) < 0.95 * 0.35 and 0.02 < thr < 0.95
     return SimpleNamespace(
         converged=converged,
         flags={"saturation_ok": sat_ok, "alpha_margin_ok": alpha_ok},
         control=SimpleNamespace(elevon=[de], throttle=[thr]),
+        case=TrimCase(name="fake", mach=0.4, alt=1000.0, fuel=200.0),
+        state=SimpleNamespace(vel_b=np.array([130.0, 0.0, 5.0])),
     )
 
 
 def test_envelope_verdict_reasons_priority():
-    """envelope_verdict — ok는 envelope_ok 정본, reasons는 우선순위 순 전체 귀속.
+    """envelope_verdict — ok는 조건 판정의 채택, reasons는 옛 코드를 우선순위 순으로 먼저 전체 귀속.
 
     saturated_throttle_high는 이제 **대리 지표가 아니라 추진 한계 그 자체**다 —
     프로펠러 추력 모델(plant/prop.py PropEngine)이 들어오면서 포화가 곧 "이 조건에서
     프로펠러가 더 못 낸다"가 됐다 (trim.py SAT_FRAC 95% 등고선 기준).
     """
     from claw.design.points import envelope_ok, envelope_verdict
+    from claw.opspace.verdict import VerdictContext, condition_verdict
+    from claw.profile import example_profile
 
+    ctx = VerdictContext.from_profile(example_profile())
     good = _fake_tr()
     # 대역에는 트림 여유 수치가 없다 — reserve는 None(미계산)이지 0이 아니다
-    assert envelope_verdict(good, _DE) == {"ok": True, "reasons": [], "reserve": None}
+    assert envelope_verdict(good, ctx) == {"ok": True, "reasons": [], "reserve": None,
+                                           "verdict": condition_verdict(good, ctx)}
 
+    # 여유 미달(α 여유·포화)은 채택을 막지 않는다(v1.65 채택 정책) — ok는 참, 사유는 옛 코드 그대로, 판정의 margin이
+    # 미달이다. 트림 실패만 제외다(가짜 해라 모델·제한은 통과)
+    tr = _fake_tr(converged=False)
+    v = envelope_verdict(tr, ctx)
+    assert v["ok"] is False and v["ok"] == envelope_ok(tr, ctx)
+    assert v["reasons"][0] == "not_converged" and v["verdict"]["exclusion"]["category"] == "trim"
     cases = [
-        (_fake_tr(converged=False), "not_converged"),
-        (_fake_tr(alpha_ok=False), "alpha_margin"),
-        (_fake_tr(thr=0.97), "saturated_throttle_high"),
-        (_fake_tr(de=0.34), "saturated_de"),
-        (_fake_tr(de=-0.34), "saturated_de"),  # 음의 한계 쪽 — 방향별 한계식의 lo 가지
-        (_fake_tr(thr=0.01), "saturated_throttle_low"),
+        (_fake_tr(alpha_ok=False), "alpha_margin", "alpha_margin"),
+        (_fake_tr(thr=0.97), "saturated_throttle_high", "throttle_high"),
+        (_fake_tr(de=0.34), "saturated_de", "de"),
+        (_fake_tr(de=-0.34), "saturated_de", "de"),  # 음의 한계 쪽 — 방향별 한계식의 lo 가지
+        (_fake_tr(thr=0.01), "saturated_throttle_low", "throttle_low"),
     ]
-    for tr, reason in cases:
-        v = envelope_verdict(tr, _DE)
-        assert v["ok"] is False and v["ok"] == envelope_ok(tr)
+    for tr, reason, margin_code in cases:
+        v = envelope_verdict(tr, ctx)
+        assert v["ok"] is True and v["ok"] == envelope_ok(tr, ctx), reason
         assert v["reasons"] == [reason], reason
+        assert v["verdict"]["exclusion"] is None, reason
+        assert v["verdict"]["margin"] == {"status": "short", "reasons": [margin_code]}, reason
 
     # 복합 실패 — 우선순위 순서 유지 (첫 항목이 표시 대표)
     multi = _fake_tr(converged=False, alpha_ok=False, thr=0.97)
-    assert envelope_verdict(multi, _DE)["reasons"] == [
+    assert envelope_verdict(multi, ctx)["reasons"] == [
         "not_converged", "alpha_margin", "saturated_throttle_high"]

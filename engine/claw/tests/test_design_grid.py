@@ -1,5 +1,7 @@
 """M17 grid 검증 — 엔벨로프 유도 하한, 행별 비직사각 격자, 예산·취소, 결정론."""
 
+import functools
+
 import pytest
 
 from claw.design import coarse_grid
@@ -9,6 +11,14 @@ from claw.plant import (
     make_demo_stall_table,
     make_demo_structural_limits,
 )
+from claw.opspace.verdict import VerdictContext
+from claw.profile import example_profile
+
+
+@functools.lru_cache(maxsize=None)
+def _ctx():
+    """예제 기체의 조건 판정 문맥 — 트림 탭과 같은 생성자(from_profile)."""
+    return VerdictContext.from_profile(example_profile())
 
 
 @pytest.fixture(scope="module")
@@ -24,7 +34,7 @@ def env():
 def test_coarse_grid_basic(env):
     ac, stall, limits, db = env
     out = coarse_grid(
-        ac, stall, limits, db, n_mach=4, alts=(0.0, 3000.0), fuels=(40.0, 400.0),
+        ac, stall, limits, db, ctx=_ctx(), n_mach=4, alts=(0.0, 3000.0), fuels=(40.0, 400.0),
     )
     points, trims = out["points"], out["trims"]
     assert out["aborted"] is None
@@ -41,7 +51,7 @@ def test_coarse_grid_basic(env):
 def test_mach_lo_reflects_stall_speed(env):
     """중량·고도가 크면 V_S가 커져 행의 mach 하한이 올라간다 (여유 1.1 포함)."""
     ac, stall, limits, db = env
-    out = coarse_grid(ac, stall, limits, db, n_mach=3, alts=(0.0, 5000.0), fuels=(40.0, 400.0))
+    out = coarse_grid(ac, stall, limits, db, ctx=_ctx(), n_mach=3, alts=(0.0, 5000.0), fuels=(40.0, 400.0))
 
     def row_lo(alt, fuel):
         return min(
@@ -57,14 +67,14 @@ def test_mach_lo_reflects_stall_speed(env):
 def test_budget_rejected_at_submit(env):
     ac, stall, limits, db = env
     with pytest.raises(ValueError, match="예산"):
-        coarse_grid(ac, stall, limits, db, n_mach=10, budget=30)
+        coarse_grid(ac, stall, limits, db, ctx=_ctx(), n_mach=10, budget=30)
 
 
 def test_deterministic(env):
     ac, stall, limits, db = env
     kw = dict(n_mach=3, alts=(1000.0,), fuels=(200.0,))
-    a = coarse_grid(ac, stall, limits, db, **kw)
-    b = coarse_grid(ac, stall, limits, db, **kw)
+    a = coarse_grid(ac, stall, limits, db, ctx=_ctx(), **kw)
+    b = coarse_grid(ac, stall, limits, db, ctx=_ctx(), **kw)
     assert a["points"].names() == b["points"].names()
     assert [p.trimmable for p in a["points"]] == [p.trimmable for p in b["points"]]
 
@@ -72,7 +82,7 @@ def test_deterministic(env):
 def test_cancel_preserves_partial(env):
     ac, stall, limits, db = env
     out = coarse_grid(
-        ac, stall, limits, db, n_mach=3, alts=(1000.0,), fuels=(200.0,),
+        ac, stall, limits, db, ctx=_ctx(), n_mach=3, alts=(1000.0,), fuels=(200.0,),
         on_progress=lambda done, total, msg: done >= 2,
     )
     assert out["aborted"] == "cancelled"

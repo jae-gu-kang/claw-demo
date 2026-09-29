@@ -7,7 +7,8 @@ import {
   untrimmedSummary,
 } from "./opspace.js";
 import {
-  TRIM_STATE_CELL, stateEvidenceText, trimCueReport, trimEnvelopeCell, trimStateCell, trimStateLabel,
+  EXCLUSION_CATEGORY_LABEL, STATE_REASON_LABEL, TRIM_STATE_CELL, stateEvidenceText, trimCueReport, trimEnvelopeCell,
+  marginShortText, trimStateCell, trimStateLabel, verdictEvidenceText, verdictExclusionText,
 } from "./plot.js";
 
 const LABELS = { not_run: "미계산", model_gap: "모델 부족", undefined: "요구 미정의" };
@@ -148,4 +149,104 @@ test("트림하지 않은 것 — 모델 부족 점과 점 없는 행이 보고�
   assert.equal(r.data.counts.model_gap, 2);
   assert.equal(r.summary, `1 케이스 — ${TRIM_STATE_CELL.computable.label} 1 · ${u.text}`);
   assert.deepEqual(r.data.untrimmed, { model_gap: 2, rows: u.rows });
+});
+
+// 조건 판정(05 §11.3 · 이관 8단계) — 서버 /trim/batch가 결과마다 싣는 verdict 모양 그대로
+const verdict = (exclusion, over = {}) => ({
+  trim: { status: "computable", reasons: [] }, model: { status: "valid", reasons: [] },
+  limits: { status: "met", reasons: [] }, margin: { status: "met", reasons: [] }, region: null,
+  adopted: exclusion == null, exclusion, ...over,
+});
+const judged = (exclusion, over) => ({ case: { name: "a", fuel: 25 }, converged: true, flags: {}, state: "computable",
+  state_reasons: [], margin: { status: "met", reasons: [] }, verdict: verdict(exclusion, over) });
+
+test("조건 판정이 실린 결과: 채택은 계산 가능(여유 미달은 채택된 채 다른 칸), 제외는 항목별 칸 — 제한 위반·모델 범위 밖", () => {
+  assert.equal(trimStateCell(judged(null)).kind, "computable");
+  const lim = judged({ category: "limits", reasons: ["stall_boundary"] },
+    { limits: { status: "violated", reasons: ["stall_boundary"] } });
+  assert.deepEqual(trimStateCell(lim), { kind: "limit_violation", color: TRIM_STATE_CELL.limit_violation.color,
+    text: "제한" });
+  assert.equal(trimStateLabel(lim), "계산 가능 · 실속 경계 위반");
+  const mod = judged({ category: "model", reasons: ["db_alpha"] }, { model: { status: "gap", reasons: ["db_alpha"] } });
+  assert.equal(trimStateCell(mod).kind, "model_invalid");
+  assert.equal(trimStateLabel(mod), "계산 가능 · DB 받음각 범위 밖");
+  // 여유 미달은 채택된 채 표시된다(v1.65) — 여유 사유 글로(스로틀 상한 판정선은 추진 여유다), 제외 근거 글은 없다
+  const mar = judged(null, { margin: { status: "short", reasons: ["throttle_high"] } });
+  assert.deepEqual(trimStateCell(mar), { kind: "margin_short", color: TRIM_STATE_CELL.margin_short.color,
+    text: TRIM_STATE_CELL.margin_short.text });
+  assert.equal(trimStateLabel(mar), "계산 가능 · 추진 여유 미달");
+  assert.equal(verdictEvidenceText(mar), "");
+  assert.equal(marginShortText(mar), "추진 여유 미달");
+  // 칸 색은 모두 다르다 — 트림하지 않은 model_gap과 트림한 모델 범위 밖도
+  const kinds = ["computable", "limit_violation", "model_invalid", "margin_short", "model_gap", "infeasible", "unevaluated"];
+  assert.equal(new Set(kinds.map((k) => TRIM_STATE_CELL[k].color)).size, kinds.length);
+});
+
+test("조건 판정: 잴 근거가 없는 제한은 위반이 아니라 판정 미완료, 트림 항목 제외는 조건 상태 규칙 그대로", () => {
+  const unev = judged({ category: "limits", reasons: ["stall_basis_missing"] },
+    { limits: { status: "unevaluated", reasons: ["stall_basis_missing"] } });
+  assert.equal(trimStateCell(unev).kind, "unevaluated");
+  assert.equal(trimStateLabel(unev), `계산 가능 · ${STATE_REASON_LABEL.stall_basis_missing}`);
+  const inf = { state: "infeasible", state_reasons: ["thrust_deficit", "throttle_high"],
+    verdict: verdict({ category: "trim", reasons: ["thrust_deficit", "throttle_high"] },
+      { trim: { status: "infeasible", reasons: ["thrust_deficit", "throttle_high"] } }) };
+  assert.deepEqual(trimStateCell(inf), { kind: "infeasible", color: TRIM_STATE_CELL.infeasible.color, text: "추력" });
+  assert.equal(trimStateLabel(inf), TRIM_STATE_CELL.infeasible.label);
+  assert.equal(verdictEvidenceText(inf), "", "트림 항목 사유는 상태 근거가 이미 말한다");
+  // 판정이 여유 미달을 말하지 않으면 옛 margin 필드로 여유 미달을 만들지 않는다 — 판정이 정본
+  const adoptedButOldShort = { ...judged(null), margin: { status: "short", reasons: ["throttle_high"] } };
+  assert.equal(trimStateCell(adoptedButOldShort).kind, "computable");
+  assert.equal(trimStateLabel(adoptedButOldShort), TRIM_STATE_CELL.computable.label);
+});
+
+test("조건 판정 근거 글 — 채택하지 않은 까닭을 항목 이름과 사유로, 채택·옛 결과는 빈 글", () => {
+  const lim = judged({ category: "limits", reasons: ["stall_boundary", "q_max"] },
+    { limits: { status: "violated", reasons: ["stall_boundary", "q_max"] } });
+  assert.equal(verdictExclusionText(lim), "실속 경계 위반 · 최대 동압 초과");
+  assert.equal(verdictEvidenceText(lim), "자동 설계 제외 (제한 위반) — 실속 경계 위반 · 최대 동압 초과");
+  assert.equal(verdictEvidenceText(judged(null)), "");
+  assert.equal(verdictEvidenceText({ state: "computable" }), "");
+  // 여유는 제외 항목이 아니다(v1.65 채택 정책)
+  assert.deepEqual(Object.keys(EXCLUSION_CATEGORY_LABEL), ["trim", "model", "limits"]);
+  for (const c of ["stall_boundary", "limiter_clips_trim", "q_max", "mach_no", "db_mach", "db_alpha", "fuel_range",
+    "stall_basis_missing"]) assert.ok(STATE_REASON_LABEL[c], c);
+});
+
+test("α 리미터 제외 — 작동식이 트림을 못 쥐는 수치(limits.detail.limiter)를 근거 글에 싣는다", () => {
+  const limiter = { alpha_trim: 0.34123, alpha_max: 0.33491, law: "theta_cmd <= theta + (alpha_max - alpha)" };
+  const lim = judged({ category: "limits", reasons: ["limiter_clips_trim"] },
+    { limits: { status: "violated", reasons: ["limiter_clips_trim"], detail: { limiter } } });
+  assert.equal(trimStateCell(lim).kind, "limit_violation");
+  assert.equal(verdictExclusionText(lim), "α 리미터가 트림을 유지하지 못함 — α_trim 0.341 > α_max 0.335");
+  assert.equal(verdictEvidenceText(lim),
+    "자동 설계 제외 (제한 위반) — α 리미터가 트림을 유지하지 못함 — α_trim 0.341 > α_max 0.335");
+  assert.equal(trimStateLabel(lim), "계산 가능 · α 리미터가 트림을 유지하지 못함 — α_trim 0.341 > α_max 0.335");
+  // 근거 수치가 없는 결과는 사유 글만
+  const bare = judged({ category: "limits", reasons: ["limiter_clips_trim", "q_max"] },
+    { limits: { status: "violated", reasons: ["limiter_clips_trim", "q_max"] } });
+  assert.equal(verdictExclusionText(bare), "α 리미터가 트림을 유지하지 못함 · 최대 동압 초과");
+});
+
+test("판정 없는 옛 결과는 종전대로 — margin 필드로 여유 미달, 없으면 계산 가능", () => {
+  const old = { state: "computable", state_reasons: [], margin: { status: "short", reasons: ["de"] } };
+  assert.equal(trimStateCell(old).kind, "margin_short");
+  assert.equal(trimStateLabel(old), "계산 가능 · 엘레본 여유 미달");
+  assert.equal(verdictExclusionText(old), "");
+  assert.equal(trimStateCell({ state: "computable" }).kind, "computable");
+  assert.equal(trimStateLabel({ state: "computable" }), TRIM_STATE_CELL.computable.label);
+});
+
+test("쇼케이스 보고 — 조건 판정 칸으로 센다, 옛 결과(판정 없음)는 종전대로", () => {
+  const lim = judged({ category: "limits", reasons: ["limiter_clips_trim"] },
+    { limits: { status: "violated", reasons: ["limiter_clips_trim"] } });
+  const mod = judged({ category: "model", reasons: ["db_mach"] }, { model: { status: "gap", reasons: ["db_mach"] } });
+  const short = judged(null, { margin: { status: "short", reasons: ["throttle_high"] } });
+  const r = trimCueReport([judged(null), short, lim, lim, mod]);
+  assert.equal(r.summary, `5 케이스 — ${TRIM_STATE_CELL.computable.label} 1 · ${TRIM_STATE_CELL.margin_short.label} 1 · `
+    + `${TRIM_STATE_CELL.limit_violation.label} 2 · ${TRIM_STATE_CELL.model_invalid.label} 1`);
+  assert.equal(r.data.counts.limit_violation, 2);
+  const old = { case: { name: "o", fuel: 25 }, converged: true, flags: {}, state: "computable",
+    margin: { status: "short", reasons: ["throttle_high"] } };
+  assert.equal(trimCueReport([old]).summary,
+    `1 케이스 — ${TRIM_STATE_CELL.computable.label} 0 · ${TRIM_STATE_CELL.margin_short.label} 1`);
 });

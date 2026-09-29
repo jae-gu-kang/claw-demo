@@ -1333,7 +1333,7 @@
           "changed": 0,
           "note": "반출 표가 세션이 검증한 표와 동일 — 재양자화가 없어 세션 검증이 곧 이 표의 검증이다 (재계산 생략)"
         },
-        "basis_fingerprint": "1ef8f8c05f21e515",
+        "basis_fingerprint": "e027b5b0897f2254",
         "rule_schedule_variants": [
           "eoir"
         ],
@@ -1354,10 +1354,10 @@
             ]
           },
           "data": [
-            0.21338181801193082,
-            0.25304226175684263,
-            0.1266958035584975,
-            0.02172847176617753
+            0.18281231946399334,
+            0.22172168152168123,
+            0.1380253506395437,
+            0.02701506059968838
           ],
           "extrapolate": "clip"
         },
@@ -1392,8 +1392,12 @@
           "check_step": 0.005,
           "iterations": 2,
           "shortfall": 0,
-          "excess_max": 0.026976972794175658,
-          "excluded_trims": 864,
+          "excess_max": 0.030188303528134938,
+          "excluded_trims": 920,
+          "excluded_by": {
+            "limits": 104,
+            "trim": 816
+          },
           "undefined_machs": [
             0.05
           ],

@@ -15,6 +15,7 @@
 */
 
 import { parseNumberList } from "./grid.js";
+import { EXCLUSION_CATEGORY_LABEL, marginShortText, verdictExclusionText } from "./plot.js";
 import { EXAMPLE_ID } from "./profile.js";
 
 /** 수치 표기 — dom.js의 fmt와 같은 정책(null=—, "inf"=∞, 유효자릿수).
@@ -164,21 +165,40 @@ export function pointRows(result) {
     fuel: p.fuel,
     role: p.role,
     trimmable: p.trimmable,
-    // 엔진이 처방·수렴 판정에서 뺀 점(포화·α 여유 미달) — 미수렴과 다른 상태다
+    // 엔진이 처방·수렴 판정에서 뺀 점(트림은 수렴했으나 조건 판정이 채택하지 않음 — 제한 위반·모델 범위 밖) —
+    // 미수렴과 다른 상태다. 여유 미달은 채택이라 여기 없다(v1.65)
     outsideEnvelope: Boolean(cases[p.name]?.outside_envelope),
     status: worstStatus(cases[p.name]?.loops),
+    // 조건 판정(05 §11.3 · 이관 8단계 — 엔진 OperatingPoint.verdict). 옛 결과에는 없다(null)
+    verdict: p.verdict ?? null,
   }));
 }
 
-/** 트림 상태 표기 — 세 상태를 한 낱말로 뭉치지 않는다.
+/** 점 표 「자동 설계 채택」 열 — 조건 판정의 채택 여부(성능 판정이 아니다: 마진 판정은 옆 「판정」 열).
  *
  * 종전에는 "불가" 하나가 **미수렴**과 **엔벨로프 경계**를 함께 가리켰다. 둘은
  * 성격이 전혀 다르다: 앞은 트림해가 없어 볼 것이 없는 점이고, 뒤는 트림해는
- * 있으나 포화·α 여유가 없어 설계 대상에서 빠진 점이다(마진 수치는 나온다). */
+ * 있으나 조건 판정이 채택하지 않아 설계 대상에서 빠진 점이다(마진 수치는 나온다).
+ * 채택은 「OK」라 쓰지 않는다 — 옆 판정 열의 ok(성능 합격)와 같은 낱말이면 채택이 합격으로 읽힌다.
+ * 채택된 여유 미달 점은 「채택 · 추진 여유 미달」 — 설계에 쓰되 미달을 표시한다(v1.65). */
 export function trimLabel(row) {
-  if (row?.outsideEnvelope) return "엔벨로프 경계";
-  if (row?.trimmable === false) return "미수렴";
-  if (row?.trimmable) return "OK";
+  // 조건 판정이 실린 결과는 그 제외 항목과 사유로 — 트림 탭 표(plot.js trimStateLabel·verdictEvidenceText)와 같은
+  // 사유 글이라, 같은 조건에 두 탭이 다른 말을 하지 않는다(이관 8단계 완료 기준). 「엔벨로프 경계」 한 낱말은
+  // 여유 미달·제한 위반·모델 범위 밖을 뭉쳤다. 여유 미달은 채택이라 채택에 붙인다
+  const v = row?.verdict;
+  if (v) {
+    if (v.adopted || !v.exclusion) {
+      const short = marginShortText(row);
+      return short ? `채택 · ${short}` : "채택";
+    }
+    const cat = EXCLUSION_CATEGORY_LABEL[v.exclusion.category] ?? v.exclusion.category;
+    const why = verdictExclusionText(row);
+    return why ? `제외 — ${cat} — ${why}` : `제외 — ${cat}`;
+  }
+  // 판정 없는 옛 결과 — 그때의 엔벨로프 경계는 여유 미달 제외였다(옛 정책)
+  if (row?.outsideEnvelope) return "제외 — 엔벨로프 경계";
+  if (row?.trimmable === false) return "제외 — 미수렴";
+  if (row?.trimmable) return "채택";
   return "미판정";
 }
 
@@ -643,7 +663,7 @@ export function reportLine(report, nPointsFallback) {
   const nHeld = Array.isArray(r.exclusion_withheld) ? r.exclusion_withheld.length : 0;
   if (nHeld) parts.push(`제외 보류 ${nHeld}자리`);
   const optional = [
-    ["outside_envelope", "엔벨로프 밖"],
+    ["outside_envelope", "채택 제외"],
     ["tuned", "튜닝"],
     ["escalations", "에스컬레이션"],
     ["ineffective_actions", "무효 처방"],
@@ -952,7 +972,7 @@ export function evidenceLines(a, reasonMap) {
 /** 원장 행 종류 → {label, text}. label은 표 칸, text는 "무슨 뜻이고 다음에 뭘 하나".
  *
  * 처방 카드가 붙는 실패는 미달의 일부일 뿐이다 — 처방이 나오지 않는 미달(튜닝이
- * 설계 목표를 못 채운 자리, 판정 불가, 엔벨로프 경계, 튜닝을 건너뛴 점, 트림
+ * 설계 목표를 못 채운 자리, 판정 불가, 채택 제외, 튜닝을 건너뛴 점, 트림
  * 미수렴, 반영했는데 안 바뀐 처방)이 오히려 더 많다. 종전 화면은 그중 카드가 있는
  * 것만 그려서, **처방이 안 나온 미달은 화면 어디에도 없었다.**
  *
@@ -975,9 +995,11 @@ export const LEDGER_KIND = {
       + "이 자리는 검증되지 않은 채로 남는다",
   },
   outside_envelope: {
-    label: "엔벨로프 경계",
-    text: "포화·α 여유가 없어 처방·수렴 판정에서 뺀 점이다 — 마진은 참고값이다. "
-      + "설계 범위에서 뺄 점인지 먼저 정할 것",
+    // 조건 판정(05 §11.3)이 채택하지 않은 수렴 점 — 여유 미달은 v1.65부터 채택이라 여기 오지 않는다
+    label: "채택 제외",
+    text: "트림은 수렴했으나 조건 판정이 채택하지 않은 점이다(제한 위반·모델 범위 밖 — 까닭은 점 표의 「자동 설계 채택」 열) — "
+      + "처방·수렴 판정에서 뺐고 마진은 참고값이다. 제한 위반이면 설계 범위에서 뺄 점인지, 모델 범위 밖이면 "
+      + "모델 보강인지 격자 조정인지 먼저 정할 것",
   },
   not_trimmed: {
     label: "트림 미수렴",

@@ -237,7 +237,9 @@ test("결함 시연 상수 — 잰 기준(자동조종 설계값·확정 표·�
   assert.ok(!Object.hasOwn(s1.law.gain_tables.tables, "alt.k_rate"), fix);
   // 곱해지는 설계점 상수(k_hdot)와 확정 표를 설계한 바탕 문서(기준 지문 — 표 값은 담지 않는다)
   assert.ok(Math.abs(s1.law.design.autopilot.k_hdot - -0.029986076721022634) < 1e-12, fix);
-  assert.equal(s1.law.gain_tables.provenance.basis_fingerprint, "1ef8f8c05f21e515", fix);
+  // v1.65 재생성: δe_trim 도출 규칙이 바뀌어 바탕 문서 지문만 바뀌었다 — 초기 게인·설계 게인 표·설계 설정은 바이트 그대로이고,
+  // 결함 창의 실패 쪽(×5.1~5.9 대표 네 케이스 dynamic_reserve)도 옛 문서와 같게 재확인했다
+  assert.equal(s1.law.gain_tables.provenance.basis_fingerprint, "e027b5b0897f2254", fix);
   // 그 창을 만든 확정 표 값 자체 — 표 표현 재생성은 k_hdot·기준 지문을 그대로 두고 창만 옮겼다(×5.2~6.4 →
   // ×4.8~5.8). 요 댐퍼 표 수리(튜너 2차 패스 — yaw.k_rate·roll.kp·roll.ki 29점씩)도 기준 지문을 두고 표 값만 바꿨다(창은 그대로).
   // 요 설계 목표 ζ_dr 0.5 → 0.6은 시드 요·롤 게인이 바뀌어 기준 지문과 표 4자리(yaw.k_rate·roll.k_rate·roll.kp·

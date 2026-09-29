@@ -4,9 +4,13 @@
 _roll_budget_nodes). 그 표는 기체의 1g 트림 승강타 요구다 — 예제 기체에서 M0.23의 14.88°부터 M0.6의 0.68°까지
 22배 움직여 상수로는 양 끝을 못 맞춘다. 예제 표를 만든 절차(02 §5.6.1 `/law/alloc/de_trim`)를 코드로 옮겼다:
 
-1. 요구 — 마하마다 연료 × 고도 격자로 trim_level을 돌려 최악 |δe|를 취한다. 수렴하지 않았거나 포화한 트림은
-   뺀다(포화 트림의 δe는 요구가 아니라 한계다). 뺀 수를 출처에 적는다. 플랜트가 다른 형상 변형이 있으면 그
-   변형들까지 재어 최악을 취하고, 잰 플랜트 지문을 모두 출처에 남긴다 — 표는 문서에 하나라 변형이 함께 쓴다.
+1. 요구 — 마하마다 연료 × 고도 격자로 trim_level을 돌려 최악 |δe|를 취한다. 넣는 트림은 조건 판정
+   (opspace/verdict.py — 트림 탭과 같은 판정)이 트림 계산 가능 ∧ 모델 유효 ∧ 제한 충족이라 한 것이다. **여유 판정은
+   보지 않는다** — 스로틀 96 %에서 수렴한 트림도 날 수 있는 평형이라 그 δe는 예약해야 할 요구다(종전에는 포화라며
+   뺐다 — 이관 8단계). 제한 밖(실속 경계·리미터·M_NO·최대 동압)이나 모델 밖(DB·연료 범위) 트림은 기체가 거기서
+   날지 않으니 요구가 아니다. 근거가 없어 판정 못 한 제한(실속표 축 밖)도 통과가 아니라 뺀다. 뺀 수를 범주별로
+   출처에 적는다(excluded_by). 플랜트가 다른 형상 변형이 있으면 그 변형들까지 재어 최악을 취하고, 잰 플랜트
+   지문을 모두 출처에 남긴다 — 표는 문서에 하나라 변형이 함께 쓴다.
    고도 격자는 기체의 운용 고도 범위로 거른다(범위 밖 고고도 트림이 요구를 부풀리면 선회 롤 권한을 더 묶는다).
 2. 보정 — 표 격자 사이 선형보간(표는 clip 룩업이다)이 검사 격자(check_step 간격)의 요구를 밑돌면, 그 구간 양
    끝을 부족분만큼 올리기를 부족이 없어질 때까지 반복한다. 공유 끝점은 두 구간 중 큰 쪽만큼 올린다.
@@ -24,6 +28,7 @@ import numpy as np
 
 from claw.common.contracts import TrimCase
 from claw.design.points import case_name
+from claw.opspace.verdict import VerdictContext, condition_verdict
 from claw.trim import trim_level
 
 DEFAULT_FUEL_FRACS = (0.0, 0.25, 0.5, 0.75, 1.0)  # × fuel_max [기본값] — 무게 전 범위에서 최악을 취한다
@@ -39,7 +44,7 @@ REASON_NOT_CONVERGED = "de_trim_not_converged"
 REASON_CANCELLED = "de_trim_cancelled"
 REASON_TEXT = {
     REASON_NO_RANGE: "표 마하 격자를 정할 수 없다 — 문서에 δe_trim 표가 없고 공력 DB 마하 범위(aero.db_ranges.mach)도 없다",
-    REASON_NO_REQUIREMENT: "표 격자에서 수렴·비포화 트림이 있는 마하가 둘 미만이다 — 트림 탭에서 성립 영역을 먼저 확인한다",
+    REASON_NO_REQUIREMENT: "표 격자에서 날 수 있는 트림(계산 가능·모델 안·제한 안)이 있는 마하가 둘 미만이다 — 트림 탭에서 성립 영역을 먼저 확인한다",
     REASON_NOT_CONVERGED: "보정을 다 돌려도 검사 격자에 요구를 밑도는 점이 남았다",
     REASON_CANCELLED: "취소됐다",
 }
@@ -88,20 +93,23 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=DEFA
             continue
         seen.add(cfg.plant_fingerprint)
         cfg_alts = cfg.alts_within(DEFAULT_ALTS) if alts is None else [float(a) for a in alts]
-        configs.append((cfg, cfg.aircraft(), [cfg.doc["mass"]["fuel_max"] * f for f in fuel_fracs], cfg_alts))
+        configs.append((cfg, cfg.aircraft(), [cfg.doc["mass"]["fuel_max"] * f for f in fuel_fracs], cfg_alts,
+                        VerdictContext.from_profile(cfg)))
     n_check = int(math.floor((grid[-1] - grid[0]) / check_step + 1e-9)) + 1
     checks = sorted({round(grid[0] + i * check_step, 6) for i in range(n_check)} | {round(g, 6) for g in grid})
-    need, excluded = {}, 0
+    need, excluded_by = {}, {}
     for k, m in enumerate(checks):
         if on_progress is not None and on_progress(k, len(checks), f"δe_trim 요구 M{m:g}"):
             return {"ok": False, "reason": REASON_CANCELLED, "reason_text": REASON_TEXT[REASON_CANCELLED],
                     "alloc": None, "requirement": None, "elapsed_s": time.perf_counter() - t0}
         worst = None
-        for _cfg, ac, fuels, cfg_alts in configs:
+        for _cfg, ac, fuels, cfg_alts, ctx in configs:
             for fuel, alt in ((f, a) for f in fuels for a in cfg_alts):
                 tr = trim_level(ac, TrimCase(name=case_name(m, alt, fuel), mach=m, alt=alt, fuel=fuel))
-                if not tr.converged or not tr.flags.get("saturation_ok"):
-                    excluded += 1
+                # 범주만 쓴다 — 미수렴의 근거 판정(한계 고정 평형)은 도출에 필요 없어 비용을 치르지 않는다
+                category = ((condition_verdict(tr, ctx, assess=False)["exclusion"]) or {}).get("category")
+                if category is not None:
+                    excluded_by[category] = excluded_by.get(category, 0) + 1
                     continue
                 de = abs(float(tr.control.elevon[0]))
                 worst = de if worst is None else max(worst, de)
@@ -161,7 +169,8 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=DEFA
                     "configurations": [cfg.variant or "base" for cfg, *_ in configs],
                     "fuels": configs[0][2], "alts": configs[0][3], "check_step": check_step,
                     "iterations": iterations, "shortfall": len(short), "excess_max": excess,
-                    "excluded_trims": excluded, "undefined_machs": undefined, "trimmed_machs": trimmed,
+                    "excluded_trims": sum(excluded_by.values()), "excluded_by": dict(sorted(excluded_by.items())),
+                    "undefined_machs": undefined, "trimmed_machs": trimmed,
                 },
             },
         },

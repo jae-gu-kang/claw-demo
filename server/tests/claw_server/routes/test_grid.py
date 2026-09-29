@@ -85,3 +85,29 @@ def test_trim_batch_results_carry_the_condition_state(client, wait_job):
     # 요구영역 판정도 함께 — 손으로 더한 케이스는 영역 밖일 수 있다(초안 영역 M0.30~0.55)
     assert by_mach[0.4]["region_state"] is None and by_mach[0.6]["region_state"] == "out_of_region"
     assert body["region"]["confirmed"] is False  # 초안으로 계산한 결과는 그 사실을 싣는다
+
+
+def test_trim_batch_results_carry_the_condition_verdict(client, wait_job):
+    # 조건 판정(05 §11.3 · 이관 8단계) — 트림 탭 결과에도 자동 설계와 같은 항목별 판정이 붙는다. 같은 세 조건:
+    # M0.40은 채택, M0.60은 추진 여유 미달이지만 채택(v1.65 — 날 수 있는 평형이라 설계에 쓰고 여유 미달은 표시만),
+    # M0.70은 트림 불성립으로 제외(트림 항목 —
+    # 방금 잰 조건 상태를 그대로 싣는다). 요구영역 판정은 싣되 채택에 쓰지 않는다(이관 2단계 전)
+    cases = [{"mach": m, "alt": 1000.0, "fuel": 200.0} for m in (0.40, 0.60, 0.70)]
+    cases.append({"mach": 0.0, "alt": 0.0, "fuel": 200.0, "condition": "ground"})
+    j = wait_job(client.post("/api/trim/batch", json={"cases": cases}).json()["id"])
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    by_mach = {res["case"]["mach"]: res for res in body["results"]}
+    ok = by_mach[0.4]["verdict"]
+    # 요구영역은 초안(trim_grid M0.30~0.55)으로 분류된다 — 미확정이라 confirmed False
+    assert ok["adopted"] is True and ok["exclusion"] is None and ok["region"] == {"status": "in", "confirmed": False}
+    assert ok["trim"] == {"status": "computable", "reasons": []} and ok["margin"]["status"] == "met"
+    assert ok["model"]["status"] == "valid" and ok["limits"]["status"] == "met"
+    short = by_mach[0.6]["verdict"]
+    assert short["adopted"] is True and short["exclusion"] is None
+    assert short["margin"] == {"status": "short", "reasons": ["throttle_high"]}
+    assert short["limits"]["status"] == "met" and short["model"]["status"] == "valid"
+    assert short["trim"]["status"] == "computable" and short["region"] == {"status": "out_of_region", "confirmed": False}
+    bad = by_mach[0.7]["verdict"]
+    assert bad["exclusion"] == {"category": "trim", "reasons": ["thrust_deficit", "throttle_high"]}
+    assert bad["trim"] == {"status": "infeasible", "reasons": ["thrust_deficit", "throttle_high"]}
+    assert by_mach[0.0]["verdict"] is None  # 지상 평형은 조건 판정 대상이 아니다

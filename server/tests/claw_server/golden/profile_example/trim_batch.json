@@ -1,7 +1,7 @@
 {
  "golden": "trim_batch",
  "mode": "full",
- "captured_at": "c611cef+dirty",
+ "captured_at": "7c92755+dirty",
  "value": {
   "dict": {
    "kind": "trim_batch",
@@ -95,7 +95,43 @@
        }
       },
       "state_evidence": null,
-      "region_state": null
+      "region_state": null,
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
+      }
      }
     },
     {
@@ -187,7 +223,43 @@
        }
       },
       "state_evidence": null,
-      "region_state": null
+      "region_state": null,
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
+      }
      }
     },
     {
@@ -279,7 +351,43 @@
        }
       },
       "state_evidence": null,
-      "region_state": null
+      "region_state": null,
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "in",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
+      }
      }
     },
     {
@@ -373,7 +481,45 @@
        }
       },
       "state_evidence": null,
-      "region_state": "out_of_region"
+      "region_state": "out_of_region",
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "computable",
+          "reasons": []
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "short",
+          "reasons": [
+           "throttle_high"
+          ]
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": true,
+        "exclusion": null
+       }
+      }
      }
     },
     {
@@ -500,7 +646,54 @@
         ]
        }
       },
-      "region_state": "out_of_region"
+      "region_state": "out_of_region",
+      "verdict": {
+       "dict": {
+        "trim": {
+         "dict": {
+          "status": "infeasible",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        },
+        "model": {
+         "dict": {
+          "status": "valid",
+          "reasons": []
+         }
+        },
+        "limits": {
+         "dict": {
+          "status": "met",
+          "reasons": []
+         }
+        },
+        "margin": {
+         "dict": {
+          "status": "unevaluated",
+          "reasons": []
+         }
+        },
+        "region": {
+         "dict": {
+          "status": "out_of_region",
+          "confirmed": false
+         }
+        },
+        "adopted": false,
+        "exclusion": {
+         "dict": {
+          "category": "trim",
+          "reasons": [
+           "thrust_deficit",
+           "throttle_high"
+          ]
+         }
+        }
+       }
+      }
      }
     }
    ],

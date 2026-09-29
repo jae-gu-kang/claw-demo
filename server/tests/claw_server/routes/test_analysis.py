@@ -303,15 +303,24 @@ def test_envelope_scan_round_trip(client, wait_job):
     ok0, ok1, slow, fast = entries
     for e in (ok0, ok1):
         assert e["verdict"]["ok"] is True and e["verdict"]["reasons"] == []
+        # 항목별 조건 판정(05 §11.3 · 이관 8단계)도 함께 — 트림 탭·자동 설계와 같은 판정이다
+        assert e["verdict"]["verdict"]["adopted"] is True and e["verdict"]["verdict"]["exclusion"] is None
     assert slow["trim"]["case"]["name"] == "slow"
     assert slow["verdict"]["ok"] is False
-    assert slow["verdict"]["reasons"] == ["not_converged", "alpha_margin"]
+    # 종전 사유가 앞(표시 대표), 조건 판정 사유는 그 뒤에 덧붙는다 — 종전 소비자가 첫 사유로 읽는 것을 지킨다
+    assert slow["verdict"]["reasons"][:2] == ["not_converged", "alpha_margin"]
+    assert slow["verdict"]["verdict"]["exclusion"]["category"] == "trim"
     # 수렴 여부로 밖을 판정하면 이 케이스가 통과해 버린다 — 프로펠러 상단은 **수렴하는데
     # 포화하는** 자리라 사유가 갈려야 한다 (engine design/points.py envelope_verdict)
     assert fast["trim"]["case"]["name"] == "fast"
     assert fast["trim"]["converged"] is True, "상단 밖은 미수렴이 아니라 포화다"
-    assert fast["verdict"]["ok"] is False
-    assert fast["verdict"]["reasons"] == ["saturated_throttle_high"]
+    # 날 수 있는 평형이다 — v1.65 채택 정책(트림 ∧ 모델 ∧ 제한)으로 채택(ok = adopted)되고, 추진 여유 미달은 표시만
+    # 남는다: 종전 사유 목록은 그대로라 스캔 추력 한계 경계(web thrustFrontier)는 이 포화를 여전히 본다
+    assert fast["verdict"]["ok"] is True
+    assert fast["verdict"]["reasons"][0] == "saturated_throttle_high"
+    fv = fast["verdict"]["verdict"]
+    assert fv["trim"]["status"] == "computable" and fv["adopted"] is True and fv["exclusion"] is None
+    assert fv["margin"] == {"status": "short", "reasons": ["throttle_high"]}
     # 스로틀 소요가 페이로드에 있음 — 추진 선도(스로틀 히트맵)의 데이터 근거
     assert 0.0 <= ok0["trim"]["control"]["throttle"][0] <= 1.0
     meta = client.get("/api/results").json()[0]
@@ -376,7 +385,7 @@ def test_margin_map_loop_spec_validation_422(client):
 def test_margin_map_actuator_and_delay_included_reduce_margins(client, wait_job):
     """actuator·delay_s 지정 시 엔진 pi_loop로 전달되어 마진이 낮아짐 (01 §4.2
     [기본값] — 제외 마진은 낙관적). 결과에 적용값이 echo되어 열람 시 재확인 가능."""
-    # M0.6은 h1000·f200에서 스로틀 95.04%로 엔벨로프 밖이다(수렴은 한다).
+    # M0.6은 h1000·f200에서 스로틀 95.04%로 추진 여유 판정선 밖이다(수렴하고, v1.65부터 채택 · 여유 미달).
     # test_margin_map_cancel_preserves_trim_results가 같은 이유로 격자를 옮겼으므로
     # 여기도 안쪽 점으로 둔다 — 지금은 통과하지만 엔벨로프가 더 조여지면 마진
     # 회귀처럼 보이는 실패가 난다
@@ -452,8 +461,8 @@ def test_margin_map_cancel_preserves_trim_results(client, wait_job, monkeypatch)
     assert entry["lon"] is None and entry["margins"] == {}
 
 
-# 마진맵 쪽과 같은 이유로 안쪽 점이다 — M0.6 h1000 f200은 스로틀 95.04%로 엔벨로프
-# 밖이고, Bode는 수렴만 요구해 통과하지만 엔벨로프가 더 조여지면 실패가 난다
+# 마진맵 쪽과 같은 이유로 안쪽 점이다 — M0.6 h1000 f200은 스로틀 95.04%로 추진 여유
+# 판정선 밖이고(v1.65부터 채택 · 여유 미달), Bode는 수렴만 요구해 통과하지만 엔벨로프가 더 조여지면 실패가 난다
 _BODE_CASE = {"name": "", "mach": 0.5, "alt": 1000.0, "fuel": 200.0}
 _YAW_LOOP = {"name": "yaw_rate", "axis": "lat", "x_out": "r", "u_in": "dr",
              "kp": 0.8, "ki": 0.0, "sign": -1.0}

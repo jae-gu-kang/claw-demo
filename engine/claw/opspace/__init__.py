@@ -6,6 +6,7 @@
 - region: 요구 운용영역(기본 범위 + 경계표)과 모델 유효영역 — 둘은 별개 객체다 (05 §11.2)
 - states: 조건 상태 8가지, 미수렴 트림의 귀속과 그 근거, 상태와 따로 가는 여유 판정 (05 §11.3)
 - basegrid: 기본 모델 격자 — 공통 마하 좌표 + 행 끝점 (05 §11.11)
+- verdict: 조건 판정 — 트림·모델·제한·여유 항목과 자동 설계 채택(트림 탭과 자동 설계가 같이 쓴다)
 """
 
 from claw.opspace.basegrid import base_grid
@@ -25,9 +26,11 @@ from claw.opspace.states import (
     trim_assessment,
     trim_state,
 )
+from claw.opspace.verdict import VerdictContext, condition_verdict, margin_of
 
 __all__ = [
     "CALC_FAILED", "COMPUTABLE", "CONSTRAINT_HIT", "INFEASIBLE", "MODEL_GAP", "NOT_RUN", "OUT_OF_REGION",
     "STATE_LABEL", "STATE_ORDER", "UNDEFINED",
     "ModelRange", "Region", "base_grid", "model_range_of", "pre_state", "region_of", "trim_assessment", "trim_state",
+    "VerdictContext", "condition_verdict", "margin_of",
 ]

@@ -34,7 +34,9 @@ LEGACY_DOC = Path(__file__).resolve().parents[2] / "engine" / "claw" / "tests" /
 STRUCTURE_FP = "f94329070fbecd39"
 # 제품 예제 9434b43ca18a887d → 73abdc9a7464b512 (2026-09 재튜닝 — 툴이 다시 도출한 SCAS·자동조종 + yaw.k_rate 스케줄 편입
 # + 승강률 명령필터 tau_vs 0.5, 구조 지문 불변). EO/IR형은 질량·관성만 바꾸는 변형이라 법칙 값·파라미터 지문이 기본형과 같다
-PARAM_FP = {"example": "73abdc9a7464b512", "eoir": "73abdc9a7464b512", "legacy": "41eceddd3279a2c1"}
+# → c6e9aea2a4cb00fe (v1.65 이관 8단계 — δe_trim 표 재도출: EO/IR형 M0.102·2000 m·만재 트림이 α 리미터에 잘려
+# (limiter_clips_trim) 요구에서 빠졌다. 표 앞 세 점만 움직였고 구조 지문 불변)
+PARAM_FP = {"example": "c6e9aea2a4cb00fe", "eoir": "c6e9aea2a4cb00fe", "legacy": "41eceddd3279a2c1"}
 
 
 def _profiles():

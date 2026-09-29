@@ -6,8 +6,8 @@
 가장 필요한 곳부터 세분화돼 있다** (anytime — 협조적 취소·예산 소진과 정합).
 
 종료 3겹: 큐 소진(전 쌍 d ≤ tol) ∨ max_points ∨ 쌍별 분할 깊이 max_depth
-(기본 3 = 초기 간격의 1/8). 미수렴 중점은 삽입하되 trimmable=False로 남기고 그
-쌍은 더 쪼개지 않는다 — "비수렴 갭"의 데이터화 (엔벨로프 구멍을 조용히 메우지
+(기본 3 = 초기 간격의 1/8). 중점마다 조건 판정(opspace/verdict.py)을 싣는다. 미수렴 중점은
+삽입하되 trimmable=False로 남기고 그 쌍은 더 쪼개지 않는다 — "비수렴 갭"의 데이터화 (엔벨로프 구멍을 조용히 메우지
 않는다).
 """
 
@@ -18,7 +18,8 @@ import numpy as np
 
 from claw.common.contracts import TrimCase
 from claw.design.linmodels import model_distance
-from claw.design.points import AXES, ROLE_ANCHOR, OperatingPoint, case_name, envelope_ok
+from claw.design.points import AXES, ROLE_ANCHOR, OperatingPoint, case_name
+from claw.opspace.verdict import condition_verdict
 from claw.trim import trim_level
 
 _ROUND = 6  # 중점 좌표 반올림 자릿수 — depth 3(간격 1/8)까지 이름 안정
@@ -57,7 +58,7 @@ def _seed_z(trims, name_a, name_b, ca, cb, mid, axis):
 
 
 def refine_trim_points(
-    aircraft, points, lms, trims, *,
+    aircraft, points, lms, trims, *, ctx,
     tol=0.25, max_points=120, max_depth=3,
     fingerprint="", on_progress=None,
 ) -> dict:
@@ -66,6 +67,7 @@ def refine_trim_points(
     points·lms·trims를 제자리 갱신한다. tol 0.25 [기본값] = "인접점 간 25% 이상
     플랜트 변화면 격자가 성기다". 이 상수는 분류기의 plant_variation 판정
     (classify.tol_plant)과 **같은 값을 공유해야 한다** — 기준 이원화 금지.
+    ctx: 조건 판정 문맥(VerdictContext) — 격자(coarse_grid)와 같은 것이라야 두 경로의 채택이 갈리지 않는다.
     """
     if tol <= 0:
         raise ValueError(f"tol은 양수: {tol}")
@@ -105,7 +107,8 @@ def refine_trim_points(
         tr = trim_level(aircraft, mid, z0=z0, fingerprint=fingerprint)
         trims[mid.name] = tr
         pt = OperatingPoint(case=mid, role=ROLE_ANCHOR, origin="refine")
-        pt.trimmable = envelope_ok(tr)
+        pt.verdict = condition_verdict(tr, ctx)
+        pt.trimmable = pt.verdict["adopted"]
         points.add(pt)
         inserted.append(mid.name)
         if tr.converged:

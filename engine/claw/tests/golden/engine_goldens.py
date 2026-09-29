@@ -12,6 +12,7 @@ import numpy as np
 from claw.analysis import aero_envelope, design_envelope, vn_envelope
 from claw.common.contracts import TrimCase
 from claw.design.points import envelope_verdict
+from claw.opspace.verdict import VerdictContext
 from claw.fcl.demo import demo_design_gains, demo_rate_filters, make_demo_gain_tables
 from claw.pipeline.criteria import GainEvalCriteria
 from claw.pipeline.evaluate import _corner_dispersions, evaluate, verify
@@ -150,7 +151,8 @@ def _grid_cases():
 def trim_grid():
     ac = _aircraft()
     trs = trim_batch(ac, _grid_cases(), fingerprint="golden")
-    return [(tr, envelope_verdict(tr, ac.trim_bounds["de"])) for tr in trs]
+    ctx = VerdictContext.from_profile(example_profile())  # 트림 탭과 같은 판정 문맥 (이관 8단계)
+    return [(tr, envelope_verdict(tr, ctx)) for tr in trs]
 
 
 def trim_special():

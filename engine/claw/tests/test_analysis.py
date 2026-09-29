@@ -327,7 +327,9 @@ def test_design_envelope_composition_and_attribution():
     """M-h 합성 (01 §2.6) — 행별 min/max 승자 귀속과 q̄ 경계의 고도 교대."""
     from claw.analysis import design_envelope, mach_qbar_limit
     from claw.design.grid import coarse_grid
+    from claw.opspace.verdict import VerdictContext
     from claw.plant import make_demo_db_ranges, make_demo_structural_limits
+    from claw.profile import example_profile
 
     ac = make_demo_aircraft()
     st = make_demo_stall_table()
@@ -358,7 +360,7 @@ def test_design_envelope_composition_and_attribution():
     assert set(env0["region"]["hi_source"]) == {"mach_no"}
 
     # 스케줄 격자 좌표 = coarse 격자 좌표 (row_machs 단일 정본 — 리팩토링 등가)
-    grid = coarse_grid(ac, st, lim, db, fuels=(200.0,))
+    grid = coarse_grid(ac, st, lim, db, ctx=VerdictContext.from_profile(example_profile()), fuels=(200.0,))
     coarse_coords = {(p.case.mach, p.case.alt) for p in grid["points"]}
     sched_coords = {(p["mach"], p["alt"]) for p in env0["schedule_grid"]["points"]}
     assert sched_coords == coarse_coords

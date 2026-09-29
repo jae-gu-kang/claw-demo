@@ -45,6 +45,7 @@ from claw.design.refine import refine_trim_points
 from claw.design.schedmap import margin_delta, midpoint_validation_points, scheduled_margin_map
 from claw.design.tune import REASON_TEXT, TuneTargets, failed_gain_slots, tune_points
 from claw.env import isa_atmosphere
+from claw.opspace.verdict import VerdictContext
 from claw.tables import PolyTable, Table
 
 STAGES = ("COARSE", "REFINE", "TUNE", "FIT", "VERIFY", "CLASSIFY", "DONE")
@@ -330,11 +331,12 @@ class _Cancelled(Exception):
 def design_inputs(built) -> dict:
     """BuiltProfile → DesignSession.run의 기체 인자 묶음 — 서버 라우트·생성 스크립트의 한 경로.
 
-    {aircraft, stall_table, limits, db_ranges, design, rate_filters, actuator}. 기체가 주는 값은
+    {aircraft, stall_table, limits, db_ranges, design, rate_filters, actuator, verdict_ctx}. 기체가 주는 값은
     **전부 여기서** 뽑는다 — 호출자마다 따로 뽑으면 한 곳이 빠뜨린다(종전에는 작동기가 빠져 설계·
     검증이 늘 config의 30·0.7을 봤다). 게인 미설계 등 문서 문제는 ProfileError로 그대로 올린다
     (서버가 202 전에 422로 낸다). 작동기는 wn·zeta 두 칸만 싣는다 — 위치·속도 한계는 선형 마진
-    조성에 들어가지 않는다(선형 모델은 포화를 모른다)."""
+    조성에 들어가지 않는다(선형 모델은 포화를 모른다). verdict_ctx는 조건 판정 문맥 — 트림 탭과 **같은 생성자**
+    (VerdictContext.from_profile)라야 같은 조건에 같은 채택·제외 사유가 선다(이관 8단계 완료 기준)."""
     act = built.actuator_params()
     return {
         "aircraft": built.aircraft(),
@@ -344,6 +346,7 @@ def design_inputs(built) -> dict:
         "design": built.design_gains(),
         "rate_filters": built.rate_filters(),
         "actuator": {k: act.get(k) for k in ("wn", "zeta")},
+        "verdict_ctx": VerdictContext.from_profile(built),
     }
 
 
@@ -366,6 +369,10 @@ def _effect_changed(before, after) -> bool:
     if b is None or a is None:
         return True
     return abs(a - b) > _EFFECT_EPS
+
+
+# 점을 판정하는 스테이지 — 조건 판정 문맥(verdict_ctx)이 있어야 시작한다
+_JUDGING_STAGES = ("COARSE", "REFINE", "VERIFY")
 
 
 class DesignSession:
@@ -411,6 +418,9 @@ class DesignSession:
         self.stage = "COARSE"
         self.status = "running"
         self.iter_n = 0
+        # 조건 판정 문맥(VerdictContext) — run()이 받는 기체 값이라 직렬화하지 않는다(재개 호출이 다시 넘긴다).
+        # 없으면 점을 판정하는 스테이지(_JUDGING_STAGES)가 시작 전에 ValueError로 멈춘다 — 옛 한 비트 판정으로 되돌아가지 않는다
+        self.verdict_ctx = None
 
     # ── 진행/취소 ──
     def _progress(self, on_progress, done, total, message):
@@ -446,7 +456,7 @@ class DesignSession:
     def _stage_coarse(self, aircraft, stall_table, limits, db_ranges, fingerprint, cb):
         c = self.config
         out = coarse_grid(
-            aircraft, stall_table, limits, db_ranges,
+            aircraft, stall_table, limits, db_ranges, ctx=self.verdict_ctx,
             n_mach=c.n_mach, alts=c.alts, fuels=c.fuels,
             budget=c.budget_points, fingerprint=fingerprint,
             on_progress=lambda d, t, m: cb(d, t, m),
@@ -464,7 +474,7 @@ class DesignSession:
         refine_budget = max(len(self.points) + 1,
                             int(c.budget_points * (1.0 - _VALIDATION_RESERVE_FRAC)))
         report = refine_trim_points(
-            aircraft, self.points, self.lms, self.trims,
+            aircraft, self.points, self.lms, self.trims, ctx=self.verdict_ctx,
             tol=c.refine_tol, max_points=refine_budget,
             fingerprint=fingerprint, on_progress=lambda d, t, m: cb(d, t, m),
         )
@@ -614,7 +624,7 @@ class DesignSession:
             # targets는 λ 판정에만 쓴다 — 롤 대역폭 요구가 튜닝 목표에서 온다.
             # 튜닝과 검증이 **같은 목표**를 보게 하는 유일한 배선이다
             criteria=c.criteria, targets=c.targets, trims=self.trims,
-            fingerprint=fingerprint,
+            ctx=self.verdict_ctx, fingerprint=fingerprint,
             on_progress=lambda d, t, m: cb(d, t, m), **self._act_kw(),
         )
         if out["aborted"]:
@@ -661,7 +671,7 @@ class DesignSession:
         design_eff = {**self.design, **self.sched_constants}
         out = scheduled_margin_map(
             aircraft, self.points, self.lms, tables, design_eff,
-            criteria=c.criteria, targets=c.targets, trims=self.trims,
+            criteria=c.criteria, targets=c.targets, trims=self.trims, ctx=self.verdict_ctx,
             on_progress=on_progress, **self._act_kw(),
         )
         if out["aborted"]:
@@ -1109,7 +1119,7 @@ class DesignSession:
             ))
 
     # ── 실행 ──
-    def run(self, aircraft, stall_table, limits, db_ranges, design, *,
+    def run(self, aircraft, stall_table, limits, db_ranges, design, *, verdict_ctx,
             rate_filters=None, actuator=None, fingerprint="", on_progress=None) -> dict:
         """현 스테이지부터 계속 실행 — DONE·awaiting_approval·취소에서 멈춘다.
 
@@ -1125,8 +1135,19 @@ class DesignSession:
         actuator: 기체 작동기 {wn, zeta}(BuiltProfile.actuator_params()의 그 두 칸) —
         rate_filters와 같은 규약(None = 안 바꾼다). config.actuator_wn·zeta가 수치면
         그쪽이 이긴다(actuator_used).
+
+        verdict_ctx: 조건 판정 문맥(VerdictContext — design_inputs가 BuiltProfile에서 만든다). 격자·보강·검증점의
+        채택이 이것으로 정해진다 — 트림 탭과 같은 판정이다(opspace/verdict.py). 필수다: 기체 값이라 재개 호출도 넘긴다.
+        점을 판정하는 스테이지(COARSE·REFINE·VERIFY)가 문맥 없이 시작되면 이름으로 멈춘다. 문맥이 오면 판정 없이 저장된
+        옛 점(v1.65 전 세션)을 지금 정책으로 다시 판정한다 — 한 세션 안에 두 채택 정책이 섞이지 않게.
         """
+        # 승인 대기는 아래에서 판정 없이 바로 돌아간다 — 그 경로는 문맥이 없어도 된다
+        if verdict_ctx is None and self.stage in _JUDGING_STAGES and self.status != "awaiting_approval":
+            raise ValueError(f"verdict_ctx가 없다 — {self.stage} 스테이지는 점을 판정한다(design_inputs의 verdict_ctx를 넘긴다)")
         self.design = dict(design)
+        self.verdict_ctx = verdict_ctx
+        if verdict_ctx is not None:
+            self._rejudge_legacy_points()
         # None은 "안 바꾼다" — 재개 호출이 인자를 안 주면 저장된 값을 이어간다.
         # dict(rate_filters or {})로 덮으면 재개가 조용히 필터 없는 플랜트로 돌아간다.
         if rate_filters is not None:
@@ -1143,6 +1164,8 @@ class DesignSession:
 
         try:
             while self.stage != "DONE":
+                if self.verdict_ctx is None and self.stage in _JUDGING_STAGES:
+                    raise ValueError(f"verdict_ctx가 없다 — {self.stage} 스테이지는 점을 판정한다")
                 if self.stage == "COARSE":
                     self._stage_coarse(aircraft, stall_table, limits, db_ranges,
                                        fingerprint, cb)
@@ -1161,6 +1184,16 @@ class DesignSession:
         except _Cancelled:
             self.status = "cancelled"
         return self.report()
+
+    def _rejudge_legacy_points(self):
+        """판정(verdict) 없이 저장된 점을 지금 정책으로 다시 판정한다 — 트림이 남아 있는 점만(없으면 미판정 그대로)."""
+        from claw.opspace.verdict import condition_verdict
+
+        for pt in self.points:
+            tr = self.trims.get(pt.name)
+            if pt.verdict is None and tr is not None:
+                pt.verdict = condition_verdict(tr, self.verdict_ctx)
+                pt.trimmable = pt.verdict["adopted"]
 
     def report(self) -> dict:
         c = self.config

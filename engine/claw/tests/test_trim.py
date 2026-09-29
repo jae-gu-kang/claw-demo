@@ -6,12 +6,19 @@ import pytest
 from claw.common.contracts import TrimCase
 from claw.plant import XE_H, XE_Q, XE_THETA, XE_U, XE_W, make_demo_aircraft
 from claw.design.points import envelope_ok
+from claw.opspace.verdict import VerdictContext, condition_verdict
+from claw.profile import example_profile
 from claw.trim import trim_batch, trim_level
 
 
 @pytest.fixture(scope="module")
 def ac():
     return make_demo_aircraft()
+
+
+@pytest.fixture(scope="module")
+def ctx():
+    return VerdictContext.from_profile(example_profile())
 
 
 def test_level_trim_converges_and_balances(ac):
@@ -240,19 +247,40 @@ def test_trim_dispatcher_reads_the_condition_field(ac, ac_ground):
 # v1.07에서 α 판정이 실속 표 기준으로 바뀌어 하한이 M0.01씩 내려왔다(실속각이 트림 탐색 상한보다 큰 저속에서
 # 탐색 상한 상수에 막히던 점이 풀렸다). 상한·천장은 추력이 정해 그대로다.
 #
-# 반올림은 **안쪽으로** 한다. 실측 하한 0.196을 "M0.19"로 적으면 화면이 못 나는
-# 점을 난다고 말하게 된다 — 이 저장소가 계속 걸러 온 방향의 오류다. 상한도 같은
-# 이유로 내림이다(0.602 → 0.60).
-SEA_LEVEL_BAND = {  # 연료(kg): (하한, 상한) — 0.001 격자 실측을 안쪽으로 반올림
-    0.0: (0.18, 0.61),    # 실측 0.174 ~ 0.617
-    200.0: (0.20, 0.60),  # 실측 0.196 ~ 0.602  ← 앱 기본값
-    300.0: (0.21, 0.59),  # 실측 0.206 ~ 0.593
-    400.0: (0.22, 0.58),  # 실측 0.217 ~ 0.582
+# v1.65(이관 8단계)부터 이 범위는 **해면 자동 설계 채택 대역**이다 — 조건 판정(opspace/verdict.py, 트림 탭과 자동
+# 설계가 같이 쓰는 판정)의 채택으로 잰다. 기체 성능이 바뀐 것이 아니라 채택 조건이 바뀌었다:
+# - 하한은 α 리미터를 켠 법칙과 양립하는 저속 끝이다(limiter_clips_trim — α_trim > α_stall − 리미터 여유면 리미터
+#   작동식이 정상 받음각을 α_max에 묶어 그 수평 트림을 유지하지 못한다). 옛 하한(α 여유 끝)보다 0.005~0.007 위다.
+# - 상한은 여유 미달(스로틀 95 % 등고선 밖)이 채택을 막지 않게 되어 트림이 풀리는 끝까지 올라갔다 — 0.001 탐색
+#   격자에서 확인한 끝이지 기체의 절대 최고 속도가 아니다.
+# - 옛 상한은 **추진 여유 충족 끝**(스로틀 95 % 등고선)으로 따로 못박는다(SEA_LEVEL_THRUST_EDGE). 두 상한 사이는
+#   「설계 채택 가능 · 추진 여유 미달」 구간이다.
+#
+# 반올림은 **안쪽으로** 한다. 실측 하한 0.202를 "M0.20"으로 적으면 화면이 채택 안 하는
+# 점을 채택한다고 말하게 된다 — 이 저장소가 계속 걸러 온 방향의 오류다. 상한도 같은
+# 이유로 내림이다(0.615 → 0.61).
+SEA_LEVEL_BAND = {  # 연료(kg): (하한, 상한) — 0.001 격자 실측을 안쪽으로 반올림 (v1.65 전 α 여유·95 % 끝: 0.174~0.617 등)
+    0.0: (0.18, 0.62),    # 실측 0.179 ~ 0.629
+    200.0: (0.21, 0.61),  # 실측 0.202 ~ 0.615  ← 앱 기본값
+    300.0: (0.22, 0.60),  # 실측 0.213 ~ 0.607
+    400.0: (0.23, 0.59),  # 실측 0.223 ~ 0.597
+}
+SEA_LEVEL_THRUST_EDGE = {  # 연료(kg): 추진 여유 충족 끝(스로틀 95 % 등고선) — 0.001 격자 실측을 안쪽(내림)으로
+    0.0: 0.61,    # 실측 0.617
+    200.0: 0.60,  # 실측 0.602  ← 앱 기본값
+    300.0: 0.59,  # 실측 0.593
+    400.0: 0.58,  # 실측 0.582
 }
 
 
+def _design_ok(tr, ctx) -> bool:
+    """채택 ∧ 여유 충족 — 95 % 등고선 안. 채택(envelope_ok)은 여유 미달을 막지 않는다(v1.65)."""
+    v = condition_verdict(tr, ctx)
+    return v["adopted"] and v["margin"]["status"] == "met"
+
+
 @pytest.mark.parametrize("fuel", sorted(SEA_LEVEL_BAND))
-def test_해면_수평비행_범위가_적어_둔_수치와_같다(ac, fuel):
+def test_해면_자동_설계_채택_대역이_적어_둔_수치와_같다(ac, ctx, fuel):
     """적어 둔 두 끝은 **안에** 있고, 한 칸 밖은 **밖에** 있어야 한다.
 
     양쪽을 다 보는 것이 요점이다: 안쪽만 보면 범위를 넓게 적어도 통과하고,
@@ -262,10 +290,22 @@ def test_해면_수평비행_범위가_적어_둔_수치와_같다(ac, fuel):
     inside = [(lo, True), (hi, True), (round(lo - 0.01, 2), False),
               (round(hi + 0.01, 2), False)]
     for mach, want in inside:
-        got = envelope_ok(trim_level(ac, TrimCase(f"m{mach:.2f}", mach=mach, alt=0.0, fuel=fuel)))
+        got = envelope_ok(trim_level(ac, TrimCase(f"m{mach:.2f}", mach=mach, alt=0.0, fuel=fuel)), ctx)
         assert got is want, (
-            f"연료 {fuel:.0f} kg 해면 M{mach:.2f}: 적어 둔 범위는 M{lo:.2f}~M{hi:.2f}인데 "
-            f"실제로는 {'난다' if got else '못 난다'} — 인용한 문장들을 같이 고쳐야 한다")
+            f"연료 {fuel:.0f} kg 해면 M{mach:.2f}: 적어 둔 채택 대역은 M{lo:.2f}~M{hi:.2f}인데 "
+            f"실제로는 {'채택한다' if got else '채택 안 한다'} — 인용한 문장들을 같이 고쳐야 한다")
+
+
+@pytest.mark.parametrize("fuel", sorted(SEA_LEVEL_THRUST_EDGE))
+def test_해면_추진_여유_충족_끝이_적어_둔_수치와_같다(ac, ctx, fuel):
+    """끝은 채택 ∧ 여유 충족, 한 칸 위는 채택 ∧ 여유 미달(「설계 채택 가능 · 추진 여유 미달」) — 채택 대역 안이다."""
+    edge = SEA_LEVEL_THRUST_EDGE[fuel]
+    assert edge < SEA_LEVEL_BAND[fuel][1], "추진 여유 충족 끝은 채택 대역 상한보다 안쪽이어야 한다"
+    at = trim_level(ac, TrimCase(f"t{edge:.2f}", mach=edge, alt=0.0, fuel=fuel))
+    over = trim_level(ac, TrimCase(f"t{edge + 0.01:.2f}", mach=round(edge + 0.01, 2), alt=0.0, fuel=fuel))
+    assert _design_ok(at, ctx), f"연료 {fuel:.0f} kg 해면 M{edge:.2f}은 추진 여유 충족이어야 한다"
+    v = condition_verdict(over, ctx)
+    assert v["adopted"] and v["margin"] == {"status": "short", "reasons": ["throttle_high"]}, (fuel, v["margin"])
 
 
 # 설계 천장도 같은 문제였다 — 문서·웹·테스트가 각자 인용하다 **세 벌**로 갈렸다
@@ -276,6 +316,10 @@ def test_해면_수평비행_범위가_적어_둔_수치와_같다(ac, fuel):
 # 쌍을 못박는다 — 인용값 자체를 핀하면 연료 200 kg가 천장에서 2 m 떨어진 칼날 위가 된다.
 # 인용값도 **데이터로** 둔다 — 주석에 두면 테스트가 안 읽어서, 문서가 ~5.4든 ~5.6이든
 # 괄호 안이라 초록이다. 이 상수를 만든 이유가 정확히 그 상황(세 벌로 갈림)이었다.
+#
+# 설계 천장은 95 % 등고선(여유 충족) 기준이다 — v1.65에서 채택이 여유를 보지 않게 되어, 여기서 "난다"는 채택 ∧ 여유
+# 충족으로 잰다(_design_ok). 채택만으로 재면 트림이 풀리는 끝까지 올라간다(이분법 실측: 공허 ~7.79 · 연료 200 kg
+# ~5.82 · 만재 ~4.14 km) — 인용문이 말하는 천장은 이것이 아니다.
 CEILING = {  # 연료(kg): (인용값, 여기서는 난다, 여기서는 못 난다) [m]
     0.0: (7500.0, 7400.0, 7600.0),
     200.0: (5500.0, 5400.0, 5700.0),  # ← 앱 기본값
@@ -284,7 +328,7 @@ CEILING = {  # 연료(kg): (인용값, 여기서는 난다, 여기서는 못 난
 
 
 @pytest.mark.parametrize("fuel", sorted(CEILING))
-def test_설계_천장이_적어_둔_수치_근방이다(ac, fuel):
+def test_설계_천장이_적어_둔_수치_근방이다(ac, ctx, fuel):
     """천장 아래에서는 나는 마하가 **하나라도** 있고, 위에서는 하나도 없다.
 
     이 천장은 스로틀 95% 등고선(SAT_FRAC) 기준이라 서비스 실링 정의와 같지 않다 —
@@ -297,7 +341,7 @@ def test_설계_천장이_적어_둔_수치_근방이다(ac, fuel):
     def flies(alt):
         m = 0.15
         while m <= 0.70001:
-            if envelope_ok(trim_level(ac, TrimCase(f"c{m:.3f}", mach=m, alt=alt, fuel=fuel))):
+            if _design_ok(trim_level(ac, TrimCase(f"c{m:.3f}", mach=m, alt=alt, fuel=fuel)), ctx):
                 return True
             m = round(m + 0.005, 4)
         return False
@@ -306,7 +350,7 @@ def test_설계_천장이_적어_둔_수치_근방이다(ac, fuel):
 
 
 # 게인 **설계점**도 같은 부류다. 프로펠러 추력 모델 이후 M0.6 h1000 fuel200이
-# 엔벨로프 **밖**으로 나갔고, 그 사실과 스로틀 수치를 여섯 군데가 문장으로 인용한다:
+# 95 % 등고선 **밖**(여유 미달)으로 나갔고, 그 사실과 스로틀 수치를 여섯 군데가 문장으로 인용한다:
 # fcl/demo.py 머리말과 _M_DESIGN 주석, tests/test_design_schedmap.py 둘,
 # server/tests/.../test_analysis.py 둘.
 #
@@ -317,22 +361,25 @@ def test_설계_천장이_적어_둔_수치_근방이다(ac, fuel):
 #
 # 해면·연료 300도 함께 둔다: 인용문이 "고도를 바꿔 재면 안심되는 숫자가 나온다"는
 # 함정을 경고하는 근거가 그 둘이라, 셋이 같이 움직여야 그 문장이 성립한다.
-DESIGN_POINT = {  # (mach, alt[m], fuel[kg]): (인용 스로틀 문자열, 엔벨로프 안인가)
-    (0.6, 1000.0, 200.0): ("95.04%", False),  # ← 게인 설계점. SAT_FRAC 0.95를 0.04%p 넘긴다
-    (0.6, 0.0, 200.0): ("94.06%", True),      # 해면이면 아슬하게 안 — 설계점은 해면이 아니다
-    (0.6, 1000.0, 300.0): ("99.12%", False),  # 연료 100 kg만 더 실어도 이만큼 간다
+#
+# v1.65(이관 8단계)부터 여유 미달은 채택을 막지 않는다 — 셋 다 수렴한 평형이라 자동 설계가 **채택**하고, 여유 미달
+# 표시만 남는다. 그래서 판정을 둘로 나눠 건다: 채택(envelope_ok)과 여유 충족(95 % 등고선 안).
+DESIGN_POINT = {  # (mach, alt[m], fuel[kg]): (인용 스로틀 문자열, 채택하는가, 여유 충족인가)
+    (0.6, 1000.0, 200.0): ("95.04%", True, False),  # ← 게인 설계점. SAT_FRAC 0.95를 0.04%p 넘긴다
+    (0.6, 0.0, 200.0): ("94.06%", True, True),      # 해면이면 아슬하게 안 — 설계점은 해면이 아니다
+    (0.6, 1000.0, 300.0): ("99.12%", True, False),  # 연료 100 kg만 더 실어도 이만큼 간다
 }
 
 
 @pytest.mark.parametrize("key", sorted(DESIGN_POINT))
-def test_설계점_스로틀이_인용한_수치와_같고_판정도_그대로다(ac, key):
+def test_설계점_스로틀이_인용한_수치와_같고_판정도_그대로다(ac, ctx, key):
     """인용한 스로틀 문자열과 엔벨로프 판정을 **함께** 못박는다.
 
     판정만 걸면 수치가 95.04 → 95.9로 흘러도 초록이라 인용문이 낡는다. 수치만 걸면
     SAT_FRAC이 바뀔 때 "엔벨로프 밖"이라는 인용문이 조용히 거짓이 된다. 둘 다 건다.
     """
     mach, alt, fuel = key
-    cited, want_ok = DESIGN_POINT[key]
+    cited, want_ok, want_met = DESIGN_POINT[key]
     tr = trim_level(ac, TrimCase("design", mach=mach, alt=alt, fuel=fuel))
     # 수렴은 한다 — "수렴하지만 포화"가 인용문 전체의 전제다(못 푸는 점이 아니다)
     assert tr.converged, f"M{mach} h{alt:.0f} f{fuel:.0f}이 수렴하지 않는다 — 인용문의 전제가 깨졌다"
@@ -340,9 +387,11 @@ def test_설계점_스로틀이_인용한_수치와_같고_판정도_그대로�
     assert f"{thr:.2%}" == cited, (
         f"M{mach} h{alt:.0f} f{fuel:.0f} 스로틀이 {thr:.2%} — 인용은 {cited}다. "
         f"여섯 군데 인용문을 같이 고쳐야 한다 (이 상수 위 주석에 목록이 있다)")
-    assert envelope_ok(tr) is want_ok, (
-        f"M{mach} h{alt:.0f} f{fuel:.0f}의 엔벨로프 판정이 뒤집혔다 — "
-        f"'설계점은 엔벨로프 밖'이라고 적은 문장들이 거짓이 됐다")
+    assert envelope_ok(tr, ctx) is want_ok, (
+        f"M{mach} h{alt:.0f} f{fuel:.0f}의 채택 판정이 뒤집혔다 — 여유 미달은 채택을 막지 않는다(v1.65)")
+    assert _design_ok(tr, ctx) is want_met, (
+        f"M{mach} h{alt:.0f} f{fuel:.0f}의 여유 판정이 뒤집혔다 — "
+        f"'설계점은 95 % 등고선 밖'이라고 적은 문장들이 거짓이 됐다")
 
 
 def test_saturation_channels_use_the_limit_on_each_side():

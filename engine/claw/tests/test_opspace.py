@@ -298,12 +298,14 @@ def test_two_limits_at_once_do_not_claim_a_cause(example):
                                                              "balance_not_found"]
 
 
-def test_converged_trim_at_or_past_stall_is_infeasible(example):
+def test_converged_trim_past_stall_stays_computable(example):
+    # 수치 평형이 있다는 사실과 운용 제한 위반은 따로다 — 실속 경계 위반은 조건 판정의 제한 항목이 말한다
+    # (test_opspace_verdict.py)
     tr = _trim(example, 0.18, 1000.0, 25.0)
     reserve = copy.deepcopy(tr.reserve)
     reserve["alpha"]["stall_reserve"] = -0.01
     a = trim_assessment(dataclasses.replace(tr, reserve=reserve), example, WIDE_MODEL)
-    assert a["state"] == INFEASIBLE and a["reasons"] == ["above_stall"]
+    assert a["state"] == COMPUTABLE and a["reasons"] == []
 
 
 def test_margin_is_met_for_a_comfortable_trim(example):

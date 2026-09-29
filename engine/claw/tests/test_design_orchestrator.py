@@ -1,5 +1,7 @@
 """M17 orchestrator 검증 — 전자동 종결, gated 일시정지·승인·재개, 왕복, 취소."""
 
+import functools
+
 import numpy as np
 import pytest
 
@@ -11,6 +13,8 @@ from claw.plant import (
     make_demo_stall_table,
     make_demo_structural_limits,
 )
+from claw.opspace.verdict import VerdictContext
+from claw.profile import example_profile
 
 
 @pytest.fixture(scope="module")
@@ -24,6 +28,12 @@ def env():
     )
 
 
+@functools.lru_cache(maxsize=None)
+def _vctx():
+    """예제 기체의 조건 판정 문맥 — 트림 탭과 같은 생성자(from_profile)."""
+    return VerdictContext.from_profile(example_profile())
+
+
 def _small(**over):
     base = dict(n_mach=3, alts=(1000.0,), fuels=(200.0,), budget_points=24,
                 budget_iters=3, mode="auto")
@@ -35,7 +45,7 @@ def test_auto_mode_reaches_terminal(env):
     """전자동 — 예산 내에서 converged/escalated/budget_exhausted 중 하나로 끝난다."""
     ac, stall, limits, db, design = env
     s = DesignSession(_small())
-    report = s.run(ac, stall, limits, db, design, fingerprint="fp")
+    report = s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     assert s.stage == "DONE"
     assert report["status"] in ("converged", "escalated", "budget_exhausted")
     # "실패 0"이 통과인지 미검증인지 — 판정 수가 갈라 준다 (vacuous pass 배제)
@@ -54,7 +64,7 @@ def test_gated_pauses_then_resumes(env):
     """
     ac, stall, limits, db, design = env
     s = DesignSession(_small(mode="gated", fit_tol=0.99, max_segments=1, max_degree=1))
-    report = s.run(ac, stall, limits, db, design, fingerprint="fp")
+    report = s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     if report["status"] in ("converged", "escalated"):
         pytest.skip("조악한 적합으로도 실패가 없다 — gated 경로는 왕복 테스트가 덮는다")
     assert report["status"] == "awaiting_approval"
@@ -65,7 +75,7 @@ def test_gated_pauses_then_resumes(env):
     out = s.apply_actions(approvable)
     assert out["next_stage"] in ("REFINE", "TUNE")
     assert s.iter_n == 1
-    report2 = s.run(ac, stall, limits, db, design, fingerprint="fp")
+    report2 = s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     assert report2["status"] in (
         "converged", "escalated", "budget_exhausted", "awaiting_approval"
     )
@@ -74,7 +84,7 @@ def test_gated_pauses_then_resumes(env):
 def test_roundtrip_preserves_session(env):
     ac, stall, limits, db, design = env
     s = DesignSession(_small())
-    s.run(ac, stall, limits, db, design, fingerprint="fp")
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     d = s.to_dict()
     s2 = DesignSession.from_dict(d)
     assert s2.to_dict() == d  # 완전 왕복
@@ -90,12 +100,12 @@ def test_cancel_preserves_and_resumes(env):
         calls.append(message)
         return len(calls) >= 2
 
-    report = s.run(ac, stall, limits, db, design, fingerprint="fp",
+    report = s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp",
                    on_progress=cancel_early)
     assert report["status"] == "cancelled"
     # 왕복 후 재개 — 처음부터가 아니라 남은 스테이지부터
     s2 = DesignSession.from_dict(s.to_dict())
-    report2 = s2.run(ac, stall, limits, db, design, fingerprint="fp")
+    report2 = s2.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     assert report2["status"] in (
         "converged", "escalated", "budget_exhausted", "awaiting_approval"
     )
@@ -581,7 +591,7 @@ def test_refine_leaves_room_for_interpolation_checks(env):
     """
     ac, stall, limits, db, design = env
     s = DesignSession(_small())
-    s.run(ac, stall, limits, db, design, fingerprint="fp")
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     mids = [p for p in s.points if str(p.origin).startswith("midpoint:")]
     assert mids, "보간 구간 검증점이 하나도 없다 — 예약이 듣지 않았다"
     assert s.coverage()["validation_points"] == len(mids)
@@ -767,7 +777,7 @@ def test_reverify_resampled_judges_the_adopted_tables(env):
     # 재양자화가 끼는 것은 **다항 모드**다 — 표 모드는 반출 표가 검증한 표 그 자체라
     # 재검증이 생략된다(그 경로는 test_table_mode_adopts_the_table_it_verified)
     s = DesignSession(_small(fit_mode="poly"))
-    s.run(ac, stall, limits, db, design, fingerprint="fp")
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
 
     def export_tables(scale=1.0):
         out = {}
@@ -825,7 +835,8 @@ def test_yaw_target_headroom_absorbs_the_altitude_interleave_of_a_mach_table():
         s = DesignSession(AutoDesignConfig(n_mach=5, alts=(500.0, 1500.0), fuels=(25.0,), budget_points=60,
                                            budget_iters=1, targets=targets))
         s.run(inp["aircraft"], inp["stall_table"], inp["limits"], inp["db_ranges"], inp["design"],
-              rate_filters=inp["rate_filters"], actuator=inp["actuator"], fingerprint="")
+              verdict_ctx=inp["verdict_ctx"], rate_filters=inp["rate_filters"], actuator=inp["actuator"],
+              fingerprint="")
         assert s.status == "converged" and s.report()["failures"] == 0
         assert s.sched_tables["yaw.k_rate"].axis_names == ("mach",), "1축 마하 표가 아니면 이 검사의 전제가 아니다"
         return [(m["zeta"], m["status"]) for e in s.margin_out["cases"].values()
@@ -854,7 +865,7 @@ def test_table_mode_adopts_the_table_it_verified(env):
     ac, stall, limits, db, design = env
     s = DesignSession(_small())
     assert s.config.fit_mode == "table"
-    s.run(ac, stall, limits, db, design, fingerprint="fp")
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     assert s.sched_tables, "표 모드에서 스케줄 자리가 하나도 안 섰다"
     assert all(isinstance(t, Table) and not isinstance(t, PolyTable)
                for t in s.sched_tables.values())
@@ -940,7 +951,7 @@ def test_validation_density_reaches_the_verify_stage(env):
     counts = {}
     for n in (1, 2):
         s = DesignSession(_small(budget_points=40, n_validation_between=n))
-        s.run(ac, stall, limits, db, design, fingerprint="fp")
+        s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
         counts[n] = s.coverage()["validation_points"]
     assert counts[2] > counts[1] > 0
 
@@ -996,7 +1007,7 @@ def test_fit_quality_flows_through_a_real_run(env):
     """실행 통합 — 기본값(끔)으로 돌아도 전 자리에 지표·status가 붙고 warns는 0이다."""
     ac, stall, limits, db, design = env
     s = DesignSession(_small())
-    s.run(ac, stall, limits, db, design, fingerprint="fp")
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     assert s.fits, "적합 보고가 비어 있다"
     for slot, rep in s.fits.items():
         assert rep["quality"]["status"] in ("na", "ok", "warn"), slot
@@ -1061,7 +1072,7 @@ def test_multi_altitude_run_exports_only_mach_tables(env):
     """고도 둘로 실제로 돌려도 반출 표는 전부 마하 표다 (재검증도 그 표로 한다)."""
     ac, stall, limits, db, design = env
     s = DesignSession(_small(alts=(1000.0, 5000.0), budget_iters=1))
-    s.run(ac, stall, limits, db, design, fingerprint="fp")
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     assert s.sched_tables, "스케줄 표가 없다 — 전제가 바뀌었다"
     assert {t.axis_names for t in s.sched_tables.values()} == {("mach",)}
 
@@ -1135,7 +1146,7 @@ def test_run_hands_the_aircraft_actuator_to_tune_and_verify(env, monkeypatch):
     monkeypatch.setattr(O, "tune_points", spy_tune)
     monkeypatch.setattr(O, "scheduled_margin_map", spy_map)
     s = DesignSession(_small(budget_iters=1))
-    s.run(ac, stall, limits, db, design, actuator={"wn": 18.0, "zeta": 0.5}, fingerprint="fp")
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), actuator={"wn": 18.0, "zeta": 0.5}, fingerprint="fp")
     assert seen["tune"] and set(seen["tune"]) == {(18.0, 0.5)}
     assert seen["verify"] and set(seen["verify"]) == {(18.0, 0.5)}
     # 왕복 뒤 재개 호출이 작동기를 안 줘도(None = 안 바꾼다) 저장된 기체 값을 이어 간다
@@ -1154,7 +1165,12 @@ def test_design_inputs_reads_the_actuator_from_the_document():
     inp = design_inputs(build_profile(doc))
     assert inp["actuator"] == {"wn": 18.0, "zeta": 0.55}
     assert set(inp) == {"aircraft", "stall_table", "limits", "db_ranges", "design",
-                        "rate_filters", "actuator"}
+                        "rate_filters", "actuator", "verdict_ctx"}
+    # 조건 판정 문맥은 트림 탭과 같은 생성자에서 — 같은 조건에 같은 채택·제외 사유 (이관 8단계)
+    from claw.opspace.verdict import VerdictContext
+    want, got = VerdictContext.from_profile(build_profile(doc)), inp["verdict_ctx"]
+    for f in ("db_ranges", "q_max", "mach_no", "limiter_margin", "fuel_max"):
+        assert getattr(got, f) == getattr(want, f), f  # trim_bounds는 표 객체라 값 비교가 없다
 
 
 # ── CLASSIFY 진행 보고·협조적 취소 ──
@@ -1194,7 +1210,7 @@ def test_classify_reports_progress_and_cancel_resumes_at_classify(monkeypatch):
         msgs.append(message)
         return message.startswith("[CLASSIFY] classify p1")
 
-    report = s.run(None, None, None, None, {}, on_progress=cancel_in_classify)
+    report = s.run(None, None, None, None, {}, verdict_ctx=None, on_progress=cancel_in_classify)
     assert report["status"] == "cancelled" and s.stage == "CLASSIFY"
     assert calls == [0, 1], "취소 뒤에도 분류를 계속했다"
     assert s.actions == before, "취소된 분류가 처방 목록을 바꿨다"
@@ -1203,7 +1219,7 @@ def test_classify_reports_progress_and_cancel_resumes_at_classify(monkeypatch):
     # 왕복 후 재개 — CLASSIFY를 처음부터 다시 돌아 승인 대기로 간다
     s2 = DesignSession.from_dict(s.to_dict())
     calls.clear()
-    report2 = s2.run(None, None, None, None, {}, on_progress=lambda *a: False)
+    report2 = s2.run(None, None, None, None, {}, verdict_ctx=None, on_progress=lambda *a: False)
     assert calls == [0, 1, 2]
     assert report2["status"] == "awaiting_approval"
     assert [a["id"] for a in s2.proposed_actions()] == ["a9"]

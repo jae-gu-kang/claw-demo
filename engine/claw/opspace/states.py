@@ -1,8 +1,8 @@
 """조건 상태 (05 §11.3) — 조건마다 정확히 하나, 위에서부터 판정한다.
 
 앞의 셋(요구영역 밖 · 요구 미정의 · 모델 부족)은 트림 **전에** 정해지고 그 점은 트림을 돌리지 않는다(`pre_state`).
-나머지는 트림 해로 정한다(`trim_state`). 현행 `envelope_ok`(design/points.py)는 계산 실패와 물리적 불가를 한
-`False`로 내는데, 여기서는 갈라 낸다 — 계산 실패는 다시 풀 대상이고 물리적 불가는 그 조건의 답이다.
+나머지는 트림 해로 정한다(`trim_state`). 종전 `envelope_ok`는 계산 실패와 물리적 불가를 한 `False`로 냈는데, 여기서는
+갈라 낸다 — 계산 실패는 다시 풀 대상이고 물리적 불가는 그 조건의 답이다. 자동 설계 채택도 이 상태를 쓴다(opspace/verdict.py).
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def trim_assessment(tr, built, model, *, cache: dict | None = None) -> dict:
     엘레본 포화 SAT_FRAC, 트림 α 여유)을 넘는지다. 수렴한 해는 판정선을 넘어도 계산 가능이다 — 날 수 있는 평형이고
     선형화 자료로 남는다. 여유 미달은 margin이 말한다: {"status": "met"|"short"|"unevaluated", "reasons": [...]}.
     판정선을 바꾸면 트림을 다시 풀지 않고 margin만 다시 정하면 된다. 계산 가능은 합격이나 자동 설계 채택을 뜻하지
-    않는다 — 자동 설계의 점 채택은 설계 기준(design/points.py envelope_ok)이 따로 정한다.
+    않는다 — 채택은 조건 판정(opspace/verdict.py — 트림·모델·제한 항목)의 채택 정책이 정한다.
 
     미수렴의 귀속은 **한계의 종류와 별도 근거**로 가른다 (05 §11.3 [기본값]):
     - 조종량의 물리 한계(스로틀 0·1, 엘레본 끝)에 붙은 미수렴은 그것만으로 불가가 아니다 — 풀이기가 거기서 멈췄을
@@ -61,10 +61,7 @@ def trim_assessment(tr, built, model, *, cache: dict | None = None) -> dict:
       실속표로 잰 1g 실속 속도 V_S보다 느리다는 별도 근거(또는 1g 도달 불가)가 있을 때만 물리적 불가이고,
       아니면 제약 도달·미수렴이다. 하한에 붙은 미수렴은 양력이 남는 쪽이라 실속 논리를 쓰지 않는다.
     - 어느 한계에도 붙지 않은 미수렴은 계산 실패다.
-    수렴한 해가 실속표 축 안에서 실속각 이상이면 물리적 불가다(실속표가 근거다).
     """
-    from claw.trim import saturation_detail
-
     cache = {} if cache is None else cache
     tb = built.trim_bounds
     unevaluated = {"status": "unevaluated", "reasons": []}
@@ -85,14 +82,11 @@ def trim_assessment(tr, built, model, *, cache: dict | None = None) -> dict:
         else:
             state, reasons = CALC_FAILED, ["not_converged"]
         return {"state": state, "reasons": reasons, "margin": unevaluated, "evidence": None}
-    axis = tb["stall"].axes[0]
-    in_axis = float(axis[0]) - _EPS <= tr.case.mach <= float(axis[-1]) + _EPS
-    if in_axis and float(tr.reserve["alpha"]["stall_reserve"]) <= 0.0:
-        return {"state": INFEASIBLE, "reasons": ["above_stall"], "margin": unevaluated, "evidence": None}
-    sat = [ch for ch, on in saturation_detail(tr, tb["de"]).items() if on]
-    short = sat + ([] if tr.flags.get("alpha_margin_ok") else ["alpha_margin"])
-    return {"state": COMPUTABLE, "reasons": [],
-            "margin": {"status": "short" if short else "met", "reasons": short}, "evidence": None}
+    # 수렴한 해는 계산 가능이다 — 실속 경계·리미터·동압 같은 운용 제한 위반은 수치 평형의 존재와 따로 조건 판정
+    # (opspace/verdict.py)의 제한 항목이 말한다. 여유 판정은 자동 설계와 같은 한 규칙(margin_of)이다
+    from claw.opspace.verdict import margin_of
+
+    return {"state": COMPUTABLE, "reasons": [], "margin": margin_of(tr, tb), "evidence": None}
 
 
 # 한계에 「붙었다」의 판정 폭 — 풀이기(SLSQP)의 경계 해는 경계값 그대로 나온다

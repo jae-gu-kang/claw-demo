@@ -21,6 +21,7 @@ from claw.common.constants import G0
 from claw.common.contracts import TrimCase
 from claw.design import DesignSession, design_inputs
 from claw.design.points import envelope_ok
+from claw.opspace.verdict import VerdictContext
 from claw.analysis import broken_loop, nyquist_margins
 from claw.design.criteria import MarginCriteria
 from claw.design.tune import TuneTargets
@@ -289,7 +290,8 @@ def test_확정_게인_표가_운용_범위_전부에서_자동_설계_검증을
         inp = design_inputs(b)
         session = DesignSession(_config(cfg, doc))
         session.run(inp["aircraft"], inp["stall_table"], inp["limits"], inp["db_ranges"], inp["design"],
-                    rate_filters=inp["rate_filters"], actuator=inp["actuator"], fingerprint="")
+                    verdict_ctx=inp["verdict_ctx"], rate_filters=inp["rate_filters"], actuator=inp["actuator"],
+                    fingerprint="")
         assert session.status in ("converged", "budget_exhausted"), (b.variant, session.report()["status"])
         assert session.margin_out.get("cases"), b.variant  # 검증이 실제로 돌았다(재판정 재료)
         assert {p.case.alt for p in session.points} >= set(alts)
@@ -457,10 +459,10 @@ def test_실속표가_CL_표의_꼭대기와_맞는다(doc, base):
 def _min_trim_speed(built, fuel, alt=0.0, coarse=0.005, fine=0.0005):
     """해면(기본) 최소 트림 속도 [m/s] — 엔벨로프 안(수렴·포화 여유·α 여유) 첫 마하. 성긴 격자로 첫 점을 찾고 그 앞 한 칸을
     촘촘히 되짚는다. 찾은 격자점(참값의 위쪽 — fine 한 칸 안)을 쓴다: 비율 판정이 보수 쪽으로 기운다."""
-    ac = built.aircraft()
+    ac, ctx = built.aircraft(), VerdictContext.from_profile(built)
 
     def ok(m):
-        return envelope_ok(trim_level(ac, TrimCase(f"v{m:.4f}", mach=m, alt=alt, fuel=fuel)))
+        return envelope_ok(trim_level(ac, TrimCase(f"v{m:.4f}", mach=m, alt=alt, fuel=fuel)), ctx)
     m = 0.03
     while m <= built.doc["structural"]["mach_no"]:
         if ok(m):
@@ -623,7 +625,8 @@ def test_속도_루프의_하드_FAIL은_문서가_적어_둔_최소_속도_근�
         cases = [TrimCase(f"M{m:.4f}_h{a:g}_f{f:g}", mach=float(m), alt=a, fuel=f)
                  for a in alts for f in fuels for m in machs]
         trims, fails = _linear_hard_fails(b, cases)
-        inside = [tr for tr in trims if tr.converged and envelope_ok(tr)]
+        ctx = VerdictContext.from_profile(b)
+        inside = [tr for tr in trims if tr.converged and envelope_ok(tr, ctx)]
         m_min = {}
         for tr in inside:
             key = (tr.case.alt, tr.case.fuel)
@@ -643,7 +646,7 @@ def test_속도_루프의_하드_FAIL은_문서가_적어_둔_최소_속도_근�
         grid = [TrimCase(f"M{m:g}_h{a:g}_f{f:g}", mach=float(m), alt=a, fuel=f)
                 for a in g["alt"] for f in g["fuel"] for m in tm]
         trims, fails = _linear_hard_fails(b, grid)
-        env = {tr.case.name: envelope_ok(tr) for tr in trims}
+        env = {tr.case.name: envelope_ok(tr, ctx) for tr in trims}
         assert not [n for n in fails if env[n]], (b.variant, fails)
         if b.variant is None:
             assert fails == {}

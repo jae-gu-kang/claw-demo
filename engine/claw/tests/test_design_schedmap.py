@@ -1,5 +1,7 @@
 """M17 schedmap 검증 — 실효 게인 보간, 상수 게인 마진맵과의 차이, actuator/delay 조성 일치."""
 
+import functools
+
 import numpy as np
 import pytest
 
@@ -27,9 +29,17 @@ from claw.fcl.demo import (
     demo_design_gains,
     make_demo_gain_tables,
 )
+from claw.opspace.verdict import VerdictContext
 from claw.plant import make_demo_aircraft
+from claw.profile import example_profile
 from claw.tables import Table
 from claw.trim import linearize, split_axes, trim_level
+
+
+@functools.lru_cache(maxsize=None)
+def _ctx():
+    """예제 기체의 조건 판정 문맥 — 트림 탭과 같은 생성자(from_profile)."""
+    return VerdictContext.from_profile(example_profile())
 
 
 @pytest.fixture(scope="module")
@@ -122,8 +132,9 @@ def test_design_point_composition_is_sane(setup):
     (closure.py 머리말) — successive closure 조성이 그 병리를 벗어났는지 핀한다.
 
     **"설계점"이라 부르지 않는다**: 프로펠러 추력 모델 이후 M0.6 h1000 fuel200은
-    스로틀 95.04%로 엔벨로프 밖이고(fcl/demo.py 머리말), 설계 파이프라인은 이 점을
-    trimmable=False로 걸러낸다. 그 수치와 판정은 **test_trim.py DESIGN_POINT**가
+    스로틀 95.04%로 추진 여유 미달(95 % 등고선 밖)이다(fcl/demo.py 머리말). v1.65(이관 8단계)부터
+    설계 파이프라인은 이 점을 **채택**하고 여유 미달 표시만 남긴다(종전에는 trimmable=False로
+    걸렀다). 그 수치와 두 판정(채택·여유)은 **test_trim.py DESIGN_POINT**가
     못박는다 — 이 테스트는 트림 **수렴**만 요구하므로 판정이 뒤집혀도 초록이고,
     그래서 여기 적은 문장이 조용히 거짓이 될 수 있는 자리였다.
     여기서 계속 쓰는 이유는 게인이 실제로 그 조건에서
@@ -201,7 +212,8 @@ def test_margin_map_end_to_end_and_cancel(setup):
     ac, tables, design = setup
     ps = PointSet([
         OperatingPoint(case=_case(m), role=ROLE_ANCHOR, origin="coarse")
-        # 0.6은 엔벨로프 밖이다(스로틀 95.04% — test_trim.py DESIGN_POINT가 못박는다).
+        # 0.6은 추진 여유 미달이다(스로틀 95.04% — test_trim.py DESIGN_POINT가 못박는다. v1.65부터
+        # 채택은 한다).
         # **이 테스트가 그 사실을 검사하지는 않는다**: 아래 단언은 중단 없음·케이스 집합·
         # M0.5 검증점의 loops·지문·취소뿐이라, 0.6이 안쪽으로 흘러도 하나도 안 바뀐다.
         # 밖 점의 처리(측정은 하되 처방은 안 한다)를 실제로 핀하는 것은
@@ -217,7 +229,7 @@ def test_margin_map_end_to_end_and_cancel(setup):
     crit = MarginCriteria()
     trims = {}
     out = scheduled_margin_map(
-        ac, ps, lms, tables, design, criteria=crit, trims=trims,
+        ac, ps, lms, tables, design, criteria=crit, trims=trims, ctx=_ctx(),
         actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035,
     )
     assert out["aborted"] is None
@@ -229,7 +241,7 @@ def test_margin_map_end_to_end_and_cancel(setup):
     assert out["criteria_fingerprint"] == crit.fingerprint()
     # 협조적 취소 — 첫 마진 계산 후 중단해도 완료분은 남는다
     cancelled = scheduled_margin_map(
-        ac, ps, lms, tables, design, criteria=crit, trims=dict(trims),
+        ac, ps, lms, tables, design, criteria=crit, trims=dict(trims), ctx=_ctx(),
         on_progress=lambda done, total, msg: msg.startswith("margin"),
     )
     assert cancelled["aborted"] == "cancelled"
@@ -291,7 +303,7 @@ def test_outside_envelope_point_is_measured_but_not_prescribed(setup):
     # 한 점을 엔벨로프 밖으로 표시 — 격자·리파인이 포화/α 여유로 세우는 플래그와 같다
     ps.get(case_name(0.4, 1000.0, 200.0)).trimmable = False
     out = scheduled_margin_map(
-        ac, ps, LinearModelSet(), tables, design, criteria=MarginCriteria(), trims={},
+        ac, ps, LinearModelSet(), tables, design, criteria=MarginCriteria(), trims={}, ctx=_ctx(),
         actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035,
     )
     marked = out["cases"][case_name(0.4, 1000.0, 200.0)]

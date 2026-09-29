@@ -4,7 +4,7 @@
 자동 설계(tune_point)는 설계값에서 **부호와 탐색 브래킷**만 읽는다(05 §7). 게인이 비어 있는 새 기체는 그
 출발점이 없어 튜닝 자체가 성립하지 않는다(seed_required). 여기서 출발점을 기체에서 **재서** 만든다:
 
-1. 앵커 — 설계 격자(coarse_grid, 중간 연료 한 벌)에서 엔벨로프 안(envelope_ok) 점을 q̄ 순으로 세우고
+1. 앵커 — 설계 격자(coarse_grid, 중간 연료 한 벌)에서 채택한 점(조건 판정 — 트림 탭과 같은 판정)을 q̄ 순으로 세우고
    중앙·최저·최고를 쓴다. 앵커마다 튜닝한 게인을 스케줄 규칙(q̄ 역비)으로 설계 마하 값으로 되돌려 자리마다
    중앙값을 쓴다.
 2. 부호 — 선형 모델 B의 조종효율에서: 레이트 댐퍼 k = −sign(B[ṙate, u])(u = +k·rate가 감쇠를 더한다),
@@ -55,6 +55,7 @@ from claw.design.tune import (
 )
 from claw.design.tune import REASON_TEXT as TUNE_REASON_TEXT
 from claw.env import isa_atmosphere
+from claw.opspace.verdict import VerdictContext
 from claw.trim import linearize, split_axes
 
 SEED_SOURCE = "quick_seed"
@@ -345,8 +346,9 @@ def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=5, delay_s=0.
     alts = built.alts_within(DEFAULT_SCHEDULE_ALTS)
     ac = built.aircraft()
     fuel = doc["mass"]["fuel_max"] * fuel_frac
-    grid = coarse_grid(ac, built.stall_table(), built.structural_limits(), db, n_mach=n_mach, alts=alts,
-                       fuels=(fuel,), fingerprint=built.plant_fingerprint, on_progress=on_progress)
+    grid = coarse_grid(ac, built.stall_table(), built.structural_limits(), db, ctx=VerdictContext.from_profile(built),
+                       n_mach=n_mach, alts=alts, fuels=(fuel,), fingerprint=built.plant_fingerprint,
+                       on_progress=on_progress)
     if grid["aborted"]:
         return fail(REASON_SEED_CANCELLED)
     inside = [pt for pt in grid["points"] if pt.trimmable]

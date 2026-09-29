@@ -13,8 +13,10 @@ PointSet이 격자가 아니라 목록인 이유가 이것이다 (points.py).
   으로 5점이 0점으로 바뀌었다. 설계 엔벨로프 표시(01 §2.6)와 같은 좌표를 공유한다.
 - mach 상한: min(구조 순항 한계 mach_no, DB 유효 상한, 실속표 축 상한) — 실 DB
   결선 시 db_ranges를 Table.axes에서 유도하는 어댑터가 이 인자 계약으로 들어온다.
-- 격자 생성 후 trim_batch 1회(서펜타인 인접 시드)로 trimmable 플래그를 채운다 —
-  포화·α여유 실패점은 버리지 않고 False로 남긴다 (엔벨로프 실경계의 데이터화).
+- 격자 생성 후 trim_batch 1회(서펜타인 인접 시드)로 점마다 조건 판정(opspace/verdict.py)을 싣고 채택을
+  trimmable로 세운다 — 채택 안 한 점(트림 실패·모델 밖·제한 위반 — 여유 미달은 채택)은 버리지 않고 False로 남긴다
+  (엔벨로프 실경계의 데이터화). 판정 문맥 ctx는 트림 탭과 같은 것(VerdictContext.from_profile)이라야 같은
+  조건에 같은 사유가 선다(이관 8단계).
 """
 
 from claw.analysis.envelope import DEFAULT_SCHEDULE_ALTS, row_machs
@@ -24,8 +26,8 @@ from claw.design.points import (
     OperatingPoint,
     PointSet,
     case_name,
-    envelope_ok,
 )
+from claw.opspace.verdict import condition_verdict
 from claw.trim import trim_batch
 
 DEFAULT_ALTS = DEFAULT_SCHEDULE_ALTS  # 정본은 analysis.envelope — 설계 엔벨로프 표시와 공유
@@ -33,7 +35,7 @@ DEFAULT_FUEL_FRACS = (0.1, 0.5, 1.0)  # × fuel_max [기본값]
 
 
 def coarse_grid(
-    aircraft, stall_table, limits, db_ranges, *,
+    aircraft, stall_table, limits, db_ranges, *, ctx,
     n_mach=5, alts=None, fuels=None, mach_margin=1.1, budget=60,
     fingerprint="", on_progress=None,
 ) -> dict:
@@ -41,7 +43,7 @@ def coarse_grid(
 
     budget 초과는 제출 시점 ValueError (influence.py MAX_CASES 원칙 — 오타 예산이
     단일 워커를 점유하기 전에 차단). on_progress는 trim_batch 규약 그대로
-    (truthy 반환 = 협조적 취소, 완료분 보존).
+    (truthy 반환 = 협조적 취소, 완료분 보존). ctx: 조건 판정 문맥(VerdictContext) — 필수다.
     """
     if n_mach < 2:
         raise ValueError(f"n_mach는 2 이상: {n_mach}")
@@ -88,7 +90,8 @@ def coarse_grid(
     def _progress(done, total_, tr):
         trims[tr.case.name] = tr
         pt = points.get(tr.case.name)
-        pt.trimmable = envelope_ok(tr)
+        pt.verdict = condition_verdict(tr, ctx)
+        pt.trimmable = pt.verdict["adopted"]
         if on_progress is not None and on_progress(done, total_, f"trim {tr.case.name}"):
             return True
         return False
