@@ -305,9 +305,8 @@ export function render() {
     if (runMetrics) opts.runMetrics = runMetrics;
     // 판정 척도는 **엔진이 기준에서 파생한 것**을 그대로 쓴다 (재기술 금지, 02 §5.5).
     // 기준 dict에서 웹이 직접 척도를 만들면 그 매핑이 두 곳에 살게 된다.
-    // 이 탭은 사용자 기준을 보내지 않으므로(서버 기본값으로 평가한다) 기본값
-    // echo가 곧 이 런의 척도다 — 사용자 기준을 보내게 되면 그 응답에 척도를
-    // 실어 받아야 한다. 없으면 안 넘긴다: 자기 값 대비로 물러서고 자막이 말한다
+    // 척도는 고른 기체의 **적용 기준**에서 파생한 것이다(/profiles/{id}/criteria의 metric_scales —
+    // ensureEvalMeta). 없으면 안 넘긴다: 자기 값 대비로 물러서고 자막이 말한다
     const scales = state.evalMeta?.metric_scales;
     if (scales && Object.keys(scales).length) opts.scales = scales;
     return opts;
@@ -1112,7 +1111,8 @@ export function render() {
   // ── 판정 기준 — 어휘(카드·체크·항목 이름·지표 척도)는 도구 정본(/influence/criteria/defaults), 기준 값은
   //    **고른 기체의 기준**(/profiles/{id}/criteria의 applied·echo)이다 — 서버가 평가를 그 기준으로 판정하므로
   //    (기준 통합 ① S3a) 화면이 도구 기본값을 말하면 판정과 어긋난다. 기체 기준은 render마다 한 번 다시 받는다
-  //    (기체 탭에서 기준을 고치고 돌아올 수 있다). metric_scales는 defaults 라우트만 주므로 도구 기본값 자 그대로다
+  //    (기체 탭에서 기준을 고치고 돌아올 수 있다). 그래프의 판정 척도(metric_scales)도 그 기체 적용 기준에서 온다 —
+  //    도구 기본값 자를 쓰면 기체가 한계를 바꿔도 그래프가 옛 한계로 켜진다(분석용 자 — 판정 무영향, 04 §1)
   const lookCriteria = criteriaEchoCache((path) => api.get(path));
   let evalMetaFor = null;   // 이 render에서 기준을 받은 기체 id
   let evalMetaLoading = null;
@@ -1132,9 +1132,13 @@ export function render() {
       state.evalVocab = vocab;
       state.evalMeta = prof?.applied
         ? { ...vocab, criteria: prof.applied, fingerprint: prof.echo?.judgement_fingerprint ?? null,
+            // 척도가 없는 응답(옛 서버)이면 비운다 — 도구 기본값 자로 물러서면 기체 한계와 다른 자를 조용히 쓴다.
+            // 비면 그래프가 자기 값 대비로 물러서고 자막이 그렇다고 말한다
+            metric_scales: prof.metric_scales ?? null,
             echo: prof.echo ?? null, profileId: pid }
-        // 기체 기준을 못 받으면 도구 기본값을 보이되 그 사실을 줄이 말한다(판정은 서버가 기체 기준으로 했다)
-        : { ...vocab, echo: null, profileId: pid, profileMissing: true };
+        // 기체 기준을 못 받으면 도구 기본값을 보이되 그 사실을 줄이 말한다(판정은 서버가 기체 기준으로 했다).
+        // 척도는 비운다 — 같은 이유
+        : { ...vocab, metric_scales: null, echo: null, profileId: pid, profileMissing: true };
       evalMetaFor = pid;
     } catch (e) {
       evalStatus.textContent = `기준을 불러오지 못했다 — ${errorText(e)}`;
@@ -1144,6 +1148,9 @@ export function render() {
     }
     renderEvalChips();
     renderEval();
+    recompute();  // 그래프의 판정 척도가 이 응답에서 왔다 — 이미 그린 부채꼴·선을 새 자로 다시 가른다
+    // 다시 칠한다 — 움직임 줄이기 설정이면 프레임 타이머가 없어 다음 클릭까지 옛 원뿔이 남는다(다른 recompute 자리와 같다)
+    canvas?.invalidate();
     // 등급표의 항목 이름도 이 응답에서 온다 — 패널을 다시 그리지 않으면 처음
     // 연 사람에게는 「…」인 채로 남는다. 재귀는 위 이른 반환이 막는다
     renderDrawer();

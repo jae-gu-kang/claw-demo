@@ -475,8 +475,14 @@ class GainEvalCriteria:
     def from_profile(cls, doc: dict) -> "GainEvalCriteria":
         """기체 프로파일(검증된 문서) → 적용 기준. /criteria(합격·권장선) + /tuning(목표·가중치)을 한 벌로
         합친다 — 어느 쪽이든 없음(null)이거나 적지 않은 칸은 도구 기본값이다. 기준 통합 ①: 이 프로파일의
-        모든 탭이 이 한 벌로 판정한다."""
-        return cls.from_dict({**(doc.get("criteria") or {}), **(doc.get("tuning") or {})})
+        모든 탭이 이 한 벌로 판정한다.
+
+        **축별 한계 칸(dict — rms_max 등)은 축 단위로 기본값 위에 덧붙인다.** 칸 하나를 통째로 갈아 끼우면
+        `rms_max: {"alt": 5}`만 적은 기체에서 속도·헤딩 RMS 한계가 **조용히 사라진다** — 고도 한 칸을 고쳤는데 다른
+        축의 판정이 빠진다(판정 척도 테스트가 드러냈다). 문서에는 적은 축만 남고(기본값을 굳히지 않는다), 적용값은
+        적지 않은 축을 기본값으로 채운다. 축을 판정에서 빼는 표현은 아직 없다([TBD] — 필요해지면 명시적 표지로)."""
+        written = {**(doc.get("criteria") or {}), **(doc.get("tuning") or {})}
+        return cls.from_dict(_merge_axis_dicts(written))
 
     def to_diagnose_thresholds(self) -> dict:
         """단일런 진단(diagnose_run)이 쓰는 문턱 — **이 정본에서 파생**한다.
@@ -592,6 +598,20 @@ class GainEvalCriteria:
         이 클래스는 아직 **거절하지 않는다**(보고만 — 기준 통합 ① S1은 동작 불변). 거절·경고 정책은
         기준이 프로파일로 옮겨 가는 단계에서 정한다."""
         return target_conflicts(self.margin, self.targets)
+
+
+def _merge_axis_dicts(written: dict) -> dict:
+    """문서가 적은 기준 → from_dict 입력. 기본값이 dict인 칸(축별 한계)은 기본 dict 위에 적은 축만 덧붙인다
+    (GainEvalCriteria.from_profile 참조). 그 밖의 칸은 적은 값 그대로다."""
+    defaults = GainEvalCriteria().to_dict()
+    out = {}
+    for g, grp in written.items():
+        if not isinstance(grp, dict) or not isinstance(defaults.get(g), dict):
+            out[g] = grp
+            continue
+        out[g] = {k: ({**defaults[g][k], **v} if isinstance(defaults[g].get(k), dict) and isinstance(v, dict) else v)
+                  for k, v in grp.items()}
+    return out
 
 
 # 기체 프로파일 /criteria 절이 받는 그룹 — 튜닝(목표·가중치)을 뺀 전부

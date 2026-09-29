@@ -187,7 +187,10 @@ def get_profile_criteria(profile_id: str, request: Request, revision: int | None
     `applied`는 도구 기본값을 펼친 적용값, `written`은 문서가 실제로 적은 칸(없음 = 기본값을 따른다), `defaults`는
     도구 기본값이다 — 편집 화면이 「기본값을 따르는 칸」과 「이 기체가 바꾼 칸」을 가를 수 있게. `lines`는 판정선의
     뜻(방향·합격선·권장선·목표 필드 — design.criteria.LINES)이라 화면이 방향을 다시 적지 않는다. `echo`는 결과에
-    실리는 기준 블록과 같은 모양이다 — 화면은 결과의 echo를 이것과 대조해 「재평가 필요」를 가린다."""
+    실리는 기준 블록과 같은 모양이다 — 화면은 결과의 echo를 이것과 대조해 「재평가 필요」를 가린다.
+    `metric_scales`는 이 기체 **적용 기준**의 합격선에서 파생한 지표별 자(GainEvalCriteria.to_metric_scales)다 —
+    영향성 그래프가 「유의미하게 움직이나」를 가르는 분석용이라 판정에는 영향이 없다(04 §1). 도구 기본값
+    경로(/influence/criteria/defaults)의 자를 쓰면 기체가 한계를 바꿔도 그래프는 옛 한계로 켜진다."""
     from dataclasses import asdict
 
     from claw.design.criteria import LINES, STATUSES
@@ -212,6 +215,7 @@ def get_profile_criteria(profile_id: str, request: Request, revision: int | None
         "lines": [asdict(ln) for ln in LINES],
         "statuses": list(STATUSES),
         "target_conflicts": crit.target_conflicts(),
+        "metric_scales": crit.to_metric_scales(),
         "echo": criteria_echo(crit, built.criteria_source),
     })
 

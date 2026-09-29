@@ -125,13 +125,17 @@ export function commitValue(doc, cell, raw) {
   return { doc: setCriteriaValue(doc, cell.group, cell.key, r.value) };
 }
 
-/** 문서 + 기본값 → 적용값 한 벌 {group: {key: value}} (서버 from_profile과 같은 병합 — 칸 단위로 덮는다) */
+/** 문서 + 기본값 → 적용값 한 벌 {group: {key: value}} — 서버 GainEvalCriteria.from_profile과 같은 병합: 칸 단위로
+ *  덮되, 기본값이 {축: 수치}인 칸(rms_max 등)은 적은 축만 기본값 위에 덧붙인다(v1.63 — 통째 교체면 다른 축이 사라진다). */
 export function effectiveCriteria(doc, defaults) {
   const out = {};
   for (const g of groupsOf(defaults)) {
     const sec = doc?.[sectionOf(g)];
     const w = isObj(sec) && isObj(sec[g]) ? sec[g] : {};
-    out[g] = { ...defaults[g], ...w };
+    out[g] = { ...defaults[g] };
+    for (const [k, v] of Object.entries(w)) {
+      out[g][k] = isObj(defaults[g]?.[k]) && isObj(v) ? { ...defaults[g][k], ...v } : v;
+    }
   }
   return out;
 }

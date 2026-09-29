@@ -168,3 +168,12 @@ test("writtenDiffers: 없음·빈 절·키 순서는 같은 것으로 본다", (
   assert.equal(writtenDiffers({ criteria: null, tuning: {} }, { criteria: null, tuning: null }), false);
   assert.equal(writtenDiffers({ tuning: { targets: { pm_deg: 1 } } }, { criteria: null, tuning: null }), true);
 });
+
+
+test("effectiveCriteria — 축별 한계 칸은 적은 축만 기본값 위에 덧붙는다(서버 from_profile과 같다)", () => {
+  const defaults = { response: { rms_max: { alt: 10, spd: 2, hdg: 0.1 } }, margin: { pm_min_deg: 45 } };
+  const doc = { criteria: { response: { rms_max: { alt: 5 } } } };
+  const eff = effectiveCriteria(doc, defaults);
+  assert.deepEqual(eff.response.rms_max, { alt: 5, spd: 2, hdg: 0.1 });
+  assert.equal(eff.margin.pm_min_deg, 45);
+});

@@ -125,3 +125,15 @@ def test_형식은_정규화된다_그리고_빈_그룹은_적은_것이_아니�
     doc = load_example()
     doc["criteria"] = {"margin": {}}
     assert _built(doc).criteria_source == "default"
+
+
+def test_축별_한계는_적은_축만_기본값_위에_덧붙는다():
+    """rms_max: {"alt": 5}만 적어도 속도·헤딩 RMS 한계는 기본값으로 남는다 — 칸 통째 교체면 다른 축 판정이 조용히
+    사라진다. 문서에는 적은 축만 남는다(기본값을 굳히지 않는다)."""
+    doc = load_example()
+    doc["criteria"] = {"response": {"rms_max": {"alt": 5.0}}}
+    v = validate_document(doc)
+    assert v["criteria"] == {"response": {"rms_max": {"alt": 5.0}}}
+    applied = build_profile(v, validated=True).eval_criteria.response.rms_max
+    default = GainEvalCriteria().response.rms_max
+    assert applied == {**default, "alt": 5.0} and set(applied) == set(default)

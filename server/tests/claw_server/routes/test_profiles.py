@@ -769,3 +769,18 @@ def test_기준_조회는_적용값·적은_칸·기본값·판정선_뜻을_함
     assert s["echo"]["judgement_fingerprint"] != b["echo"]["judgement_fingerprint"]
     assert [c["level"] for c in s["target_conflicts"]] == ["pass"]
     assert client.get("/api/profiles/nope/criteria").status_code == 404
+
+
+def test_기준_조회의_판정_척도는_그_기체의_적용_기준에서(client):
+    """영향성 그래프의 「유의미」 자(metric_scales)는 도구 기본값이 아니라 기체 적용 기준의 합격선에서 — 기체가 고도
+    RMS 한계를 5 m로 적으면 자도 5 m다. 판정에는 영향이 없는 분석용 자다(04 §1 분석 참조선과 같은 결)."""
+    from claw.pipeline.criteria import GainEvalCriteria
+
+    base = client.get(f"/api/profiles/{EXAMPLE_ID}/criteria").json()
+    assert base["metric_scales"] == GainEvalCriteria().to_metric_scales()
+    doc = _doc("rms-tight")
+    doc["criteria"] = {"response": {"rms_max": {"alt": 5.0}}}
+    assert client.post("/api/profiles", json={"document": doc}).status_code == 201
+    s = client.get("/api/profiles/rms-tight/criteria").json()["metric_scales"]
+    assert s["alt_rms"] == 5.0 and base["metric_scales"]["alt_rms"] != 5.0
+    assert s["hdg_rms"] == base["metric_scales"]["hdg_rms"]  # 안 적은 칸은 기본값 그대로
