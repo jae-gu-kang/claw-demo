@@ -277,7 +277,10 @@ def test_sweep_job_round_trip(client, wait_job):
     assert j["status"] == "done"
     res = client.get(f"/api/results/{j['result_id']}").json()
     assert res["kind"] == "influence_sweep"
-    assert res["conditions"] == {"cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0, "condition": "level"}]}  # 스윕 저장물에 케이스 좌표가 없던 자리(이관 13단계)
+    assert res["conditions"] == {  # 스윕 저장물에 케이스 좌표가 없던 자리(이관 13단계)
+        "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0, "condition": "level"}],
+        # 실행한 기동 — 처방 확인 런의 실측 비교가 같은 기동인지 대조하는 근거(요청 t_settle·t_step·dt_plant)
+        "maneuver": {"dv": 3.0, "dh": 30.0, "dpsi": 0.3, "t_settle": 2.0, "t_step": 4.0, "dt_plant": 0.01}}
     labels = [row["label"] for row in res["rows"]]
     assert labels == ["base", "table.pitch.kp@+0.1"]
     base, run = res["rows"]
@@ -635,6 +638,10 @@ def test_prescribe_round_trip(client, wait_job):
         if not rec["solvable"]:
             assert rec["reason"]
     assert "spans" in res["joint"]
+    # 목적 선택(04 §7.3) — 기본은 최소 수정이고, 엔진은 정보 키(바뀐 게인)만 더한다
+    assert res["objective"] == "min_change" and res["joint"]["objective"] == "min_change"
+    assert res["joint"]["changed_count"] == len(res["joint"]["changed_knobs"])
+    assert "perf" not in res["confirm"]  # 성능 비교는 성능 목적에만
     # 확인 런은 evaluate v2 페이로드다 — 카드가 실린다
     assert [c["key"] for c in res["confirm"]["cards"]][:2] == ["mode_stability", "gm"]
     # 적용 페이로드 — 배율이 이미 곱힌 실효 테이블 (웹은 다시 곱하지 않는다)
@@ -718,6 +725,299 @@ def test_prescribe_inherit_guards(client, wait_job):
     # 종류가 다른 저장물을 승계원으로 주면 409 — 조용히 무시하면 승계한 척이 된다
     assert client.post("/api/influence/prescribe", json={
         **base, "result_id": rid, "eval_result_id": rid}).status_code == 409
+
+
+# ---------- 처방 목적 선택 — 기준 충족 최소 수정 / 성능 개선 (04 §7.3) ----------
+
+_CASE = {"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}
+_OK_METRICS = {"alt_rms": 5.0, "spd_rms": 1.0, "hdg_rms": 0.05, "surf_sat_frac": 0.0,
+               "worst_stall_margin": 0.2, "de_dyn_reserve_min_frac": 0.5,
+               "alt_ts": 10.0, "spd_ts": 12.0, "hdg_ts": 8.0,
+               "alt_mp": 0.1, "spd_mp": 0.05, "hdg_mp": 0.02}
+
+
+# 확인 런(t_settle 2·t_step 4·기본 dt_plant·표준 기동)과 같은 기동 기록 — 스윕 라우트가 싣는 conditions.maneuver 모양
+_MANEUVER = {"dv": 3.0, "dh": 30.0, "dpsi": 0.3, "t_settle": 2.0, "t_step": 4.0, "dt_plant": 0.01}
+
+
+def _fake_sweep(client, rid="sweep-fake", case="design", conditions=None, base_fp=None):
+    """합성 스윕 저장물 — 6DOF 없이 풀이 경로만 시험한다(목적 전달·에코·422).
+
+    conditions: 실행 조건 기록(없으면 옛 스윕처럼 뺀다). base_fp: base 행 형상 지문."""
+    rows = [{"case": case, "label": "base", "role": "base", "overrides": {}, "aborted": False,
+             "metrics": dict(_OK_METRICS), **({"fingerprint": base_fp} if base_fp else {})}]
+    for s in (-0.1, 0.1):
+        m = dict(_OK_METRICS, alt_ts=10.0 - 20.0 * s, alt_rms=5.0 - 5.0 * s)
+        rows.append({"case": case, "label": f"table.pitch.kp@{s:+g}", "role": "single",
+                     "overrides": {"table.pitch.kp": 1.0 + s}, "aborted": False, "metrics": m})
+    payload = {"kind": "influence_sweep", "rows": rows}
+    if conditions is not None:
+        payload["conditions"] = conditions
+    client.app.state.store.save(rid, payload, meta={"kind": "influence_sweep"})
+    return rid
+
+
+def _shape_fp(client, wait_job, monkeypatch):
+    """요청 형상의 지문 — 확인 런 없는 처방 한 번(시뮬 0)의 결과 fingerprint."""
+    rid = _fake_sweep(client, rid="sweep-fp")
+    _spy_joint(monkeypatch, {"solvable": True, "spans": {"table.pitch.kp": 0.0}})
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "cases": [_CASE], "confirm": "none"})
+    j = wait_job(r.json()["id"])
+    return client.get(f"/api/results/{j['result_id']}").json()["fingerprint"]
+
+
+def _perf_confirm(client, wait_job, rid, **extra):
+    """성능 목적 + full 확인 런(짧은 기동) → confirm.perf."""
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "cases": [_CASE], "confirm": "full", "objective": "performance",
+        "t_settle": 2.0, "t_step": 4.0, **extra})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done", j
+    return client.get(f"/api/results/{j['result_id']}").json()["confirm"]["perf"]
+
+
+def _spy_joint(monkeypatch, out):
+    """라우트의 solve_joint를 가로채 받은 인자를 기록한다 — 엔진 풀이는 엔진 테스트의 몫."""
+    from claw_server.routes import influence as influence_route
+
+    seen = {}
+
+    def fake(rows, knobs, criteria, **kw):
+        seen.update(kw, knobs=list(knobs))
+        return {"objective": kw.get("objective", "min_change"), "changed_knobs": [],
+                "changed_count": 0, **out}
+    monkeypatch.setattr(influence_route, "solve_joint", fake)
+    return seen
+
+
+def test_prescribe_기본_목적은_최소_수정이고_성능_인자를_넘기지_않는다(client, wait_job, monkeypatch):
+    rid = _fake_sweep(client)
+    seen = _spy_joint(monkeypatch, {"solvable": True, "spans": {"table.pitch.kp": 0.0}})
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "cases": [_CASE], "confirm": "none"})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"])
+    assert j["status"] == "done", j
+    assert seen["objective"] == "min_change"
+    # 최소 수정에는 성능 인자가 가지 않는다 — 엔진 기본값 그대로(종전 호출과 같은 해)
+    assert not {"perf_metrics", "perf_weights", "smooth_weight"} & set(seen)
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    assert res["objective"] == "min_change"
+    assert "note" not in res["inherited"]
+    meta = next(m for m in client.get("/api/results").json() if m["id"] == j["result_id"])
+    assert meta["objective"] == "min_change"
+
+
+def test_prescribe_성능_목적은_인자를_넘기고_에코한다(client, wait_job, monkeypatch):
+    rid = _fake_sweep(client)
+    seen = _spy_joint(monkeypatch, {"solvable": True, "spans": {"table.pitch.kp": 0.0}})
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "cases": [_CASE], "confirm": "none",
+        "objective": "performance", "perf_metrics": ["alt_ts", "alt_rms"],
+        "perf_weights": {"alt_ts": 2.0, "alt_rms": 0.0}, "smooth_weight": 0.5})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"])
+    assert j["status"] == "done", j
+    assert seen["objective"] == "performance"
+    assert seen["perf_metrics"] == ["alt_ts", "alt_rms"]
+    assert seen["perf_weights"] == {"alt_ts": 2.0, "alt_rms": 0.0}
+    assert seen["smooth_weight"] == 0.5
+    # 성능은 하드 기준 전부를 지킨다 — 실패 지표 좁히기(승계)를 넘기지 않는다
+    assert seen.get("metrics") is None
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    assert res["objective"] == "performance"
+    assert "하드 기준 전부" in res["inherited"]["note"]
+    meta = next(m for m in client.get("/api/results").json() if m["id"] == j["result_id"])
+    assert meta["objective"] == "performance"
+
+
+
+def test_prescribe_성능_목적_실엔진_풀이(client, wait_job):
+    """가로채지 않은 엔진 풀이 — 합성 스윕에서 alt_ts를 줄이는 쪽으로 밀고 결과가 JSON 안전하다."""
+    rid = _fake_sweep(client)
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "cases": [_CASE], "confirm": "none", "objective": "performance",
+        "perf_metrics": ["alt_ts", "alt_rms"], "smooth_weight": 0.0})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"])
+    assert j["status"] == "done", j
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    jt = res["joint"]
+    assert jt["objective"] == "performance" and jt["perf_metrics"] == ["alt_ts", "alt_rms"]
+    assert jt["spans"]["table.pitch.kp"] > 0  # 두 지표 다 kp↑로 준다
+    assert jt["objective_value"]["predicted"] < jt["objective_value"]["base"]
+    assert jt["changed_knobs"] == ["table.pitch.kp"]
+    json.dumps(res, allow_nan=False)
+    # 엔진이 모르는 지표는 제출 시점 422 (실엔진 ValueError)
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "cases": [_CASE], "confirm": "none", "objective": "performance",
+        "perf_metrics": ["no_such_metric"]})
+    assert r.status_code == 422 and "no_such_metric" in r.json()["detail"], r.text
+
+def test_prescribe_최소_수정에_성능_인자를_보내면_422(client):
+    rid = _fake_sweep(client)
+    for extra in ({"perf_metrics": ["alt_ts"]}, {"perf_weights": {"alt_ts": 2.0}},
+                  {"smooth_weight": 0.1}, {"objective": "min_change", "smooth_weight": 0.5}):
+        r = client.post("/api/influence/prescribe", json={
+            "result_id": rid, "cases": [_CASE], "confirm": "none", **extra})
+        assert r.status_code == 422, (extra, r.text)
+        assert "performance" in r.text and "min_change" in r.text, r.text
+
+
+def test_prescribe_성능_해가_안_풀리면_확인_런을_생략한다(client, wait_job, monkeypatch):
+    rid = _fake_sweep(client)
+    _spy_joint(monkeypatch, {"solvable": False, "spans": {"table.pitch.kp": 0.2},
+                             "reason": "선형 모델에서 하드 문턱을 전부 만족하는 해가 표본 스팬 안에 없다"})
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "cases": [_CASE], "confirm": "full", "objective": "performance"})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"])
+    assert j["status"] == "done", j
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    assert res["confirm"] is None and res["gain_export"] is None
+    assert any("풀리지 않았다" in w and "확인 런 생략" in w for w in res["warnings"]), res["warnings"]
+
+
+def test_prescribe_성능_인자_검증은_제출_시점_422(client, monkeypatch):
+    rid = _fake_sweep(client)
+    base = {"result_id": rid, "cases": [_CASE], "confirm": "none", "objective": "performance"}
+    for bad in ({"perf_weights": {"alt_ts": -1.0}}, {"smooth_weight": -0.1},
+                {"smooth_weight": 11.0}, {"objective": "fastest"}):
+        r = client.post("/api/influence/prescribe", json={**base, **bad})
+        assert r.status_code == 422, (bad, r.text)
+    # 비유한 가중은 JSON에 못 싣는다 — 문자열 "inf"로 와도 거절
+    r = client.post("/api/influence/prescribe", json={**base, "perf_weights": {"alt_ts": "inf"}})
+    assert r.status_code == 422, r.text
+
+    # 엔진이 모르는 지표·가중 키는 엔진 ValueError → 422 (잡 안에서 터지면 사유가 잡 오류로 묻힌다)
+    from claw_server.routes import influence as influence_route
+
+    def boom(*_a, **_k):
+        raise ValueError("알 수 없는 성능 지표: ['nope']")
+    monkeypatch.setattr(influence_route, "solve_joint", boom)
+    r = client.post("/api/influence/prescribe", json={**base, "perf_metrics": ["nope"]})
+    assert r.status_code == 422 and "nope" in r.json()["detail"], r.text
+
+
+def test_prescribe_성능_확인_런은_실측_변화를_싣는다(client, wait_job, monkeypatch):
+    """confirm.perf — 스윕 base(같은 이름·같은 좌표) 대비 확인 런 실측 성능 지표. 판정자는 여전히 evaluate."""
+    rid = _small_sweep(client, wait_job, span=[-0.1, 0.1])
+    _spy_joint(monkeypatch, {"solvable": True, "spans": {"table.pitch.kp": 0.05},
+                             "perf_metrics": ["alt_rms", "alt_ts", "alt_mp"]})
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "cases": [_CASE], "confirm": "full",
+        "objective": "performance", "t_settle": 2.0, "t_step": 4.0})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done", j
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    perf = res["confirm"]["perf"]
+    assert perf["base_source"] == "sweep"
+    got = perf["cases"]["design"]
+    assert set(got) == {"alt_rms", "alt_ts", "alt_mp"}  # 풀이가 쓴 지표만
+    # 스윕은 실행한 기동을 기록한다 — 확인 런 대조의 근거
+    sweep = client.get(f"/api/results/{rid}").json()
+    assert sweep["conditions"]["maneuver"] == _MANEUVER
+    # 실제 수치 — 기준은 스윕 base 행, 새 값은 확인 런 표준 기동 실측, 목적함수와 같은 정규화
+    from claw.pipeline.prescribe import _num, _perf_floor
+
+    base_m = next(r for r in sweep["rows"] if r["label"] == "base")["metrics"]
+    new_m = res["confirm"]["cases"][0]["metrics_raw"]
+    moved = 0
+    for m, rec in got.items():
+        b, v = _num(base_m[m]), _num(new_m[m])  # 저장물의 비유한은 "inf" 문자열 → None
+        assert rec["base"] == b and rec["new"] == v, (m, rec, base_m[m], new_m[m])
+        if rec["delta_frac"] is None:
+            assert "inf" in (rec["base_state"], rec["new_state"]), (m, rec)
+            continue
+        want = (v - b) / max(abs(b), _perf_floor(m))
+        assert abs(rec["delta_frac"] - want) < 1e-12, (m, rec, want)
+        moved += rec["delta_frac"] != 0.0
+    assert moved, got  # +5 % kp는 무언가를 움직인다 — 0이면 같은 형상을 비교한 것
+    assert perf["omitted"] == [] and perf["notes"] == []
+    # 판정은 그대로 evaluate — 카드가 실린다
+    assert res["confirm"]["cards"]
+    json.dumps(res, allow_nan=False)
+
+
+def test_prescribe_성능_확인_기준을_못_찾으면_사유와_함께_뺀다(client, wait_job, monkeypatch):
+    """확인 케이스 이름이 스윕 케이스와 안 맞고 평가 결과도 없으면 비교를 지어내지 않는다 (full 확인 런)."""
+    rid = _fake_sweep(client, case="other", conditions={
+        "cases": [{"name": "other", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
+        "maneuver": dict(_MANEUVER)})
+    _spy_joint(monkeypatch, {"solvable": True, "spans": {"table.pitch.kp": 0.05}})
+    perf = _perf_confirm(client, wait_job, rid)
+    assert perf["cases"] == {} and perf["base_source"] is None
+    assert [o["case"] for o in perf["omitted"]] == ["design"]
+    reason = perf["omitted"][0]["reason"]
+    assert "같은 이름의 케이스가 없다" in reason and "승계한 평가 결과가 없다" in reason, reason
+
+
+def test_prescribe_성능_확인_옛_스윕은_기동_기록이_없어_뺀다(client, wait_job, monkeypatch):
+    rid = _fake_sweep(client, conditions={"cases": [dict(_CASE)]})  # maneuver 없음
+    _spy_joint(monkeypatch, {"solvable": True, "spans": {"table.pitch.kp": 0.05}})
+    perf = _perf_confirm(client, wait_job, rid)
+    assert perf["cases"] == {}
+    assert "기동 기록" in perf["omitted"][0]["reason"], perf
+
+
+def test_prescribe_성능_확인_스윕_기동이_다르면_뺀다(client, wait_job, monkeypatch):
+    rid = _fake_sweep(client, conditions={"cases": [dict(_CASE)],
+                                          "maneuver": dict(_MANEUVER, dt_plant=0.02)})
+    _spy_joint(monkeypatch, {"solvable": True, "spans": {"table.pitch.kp": 0.05}})
+    perf = _perf_confirm(client, wait_job, rid)
+    assert perf["cases"] == {}
+    assert "기동이 다르다" in perf["omitted"][0]["reason"]
+    assert "dt_plant 0.02≠0.01" in perf["omitted"][0]["reason"], perf
+
+
+def test_prescribe_성능_확인_스윕_base_형상이_다르면_뺀다(client, wait_job, monkeypatch):
+    rid = _fake_sweep(client, conditions={"cases": [dict(_CASE)], "maneuver": dict(_MANEUVER)},
+                      base_fp="다른형상")
+    _spy_joint(monkeypatch, {"solvable": True, "spans": {"table.pitch.kp": 0.05}})
+    perf = _perf_confirm(client, wait_job, rid)
+    assert perf["cases"] == {}
+    assert "형상 지문" in perf["omitted"][0]["reason"], perf
+
+
+def _fake_eval(client, fp, maneuver, rid="eval-fake", conditions=True):
+    ev = {"kind": "influence_evaluate", "fingerprint": fp, "aggregate": {},
+          "cases": [{"case": "design", "hard_fails": [], "metrics_raw": dict(_OK_METRICS)}]}
+    if maneuver is not None:
+        ev["maneuver"] = maneuver
+    if conditions:
+        ev["conditions"] = {"cases": [dict(_CASE, condition=None)]}
+    client.app.state.store.save(rid, ev, meta={"kind": "influence_evaluate"})
+    return rid
+
+
+def test_prescribe_성능_확인_평가_대체는_같은_기동일_때만(client, wait_job, monkeypatch):
+    fp = _shape_fp(client, wait_job, monkeypatch)
+    rid = _fake_sweep(client, conditions={"cases": [dict(_CASE)],
+                                          "maneuver": dict(_MANEUVER, t_step=9.0)})
+    _spy_joint(monkeypatch, {"solvable": True, "spans": {"table.pitch.kp": 0.05}})
+    ev_man = {k: _MANEUVER[k] for k in ("dv", "dh", "dpsi", "t_settle", "t_step")}
+    # 같은 형상·같은 기동(t_hold는 동시명령 런만 정해 대조하지 않는다) → 평가가 기준, dt_plant 미대조는 노트로
+    ok = _fake_eval(client, fp, dict(ev_man, t_hold=4.0), rid="eval-ok")
+    perf = _perf_confirm(client, wait_job, rid, eval_result_id=ok)
+    assert perf["base_source"] == "evaluate" and set(perf["cases"]) == {"design"}
+    assert perf["cases"]["design"]["alt_ts"]["base"] == _OK_METRICS["alt_ts"]
+    assert any("dt_plant" in n for n in perf["notes"]), perf
+    # 기동이 다르면 뺀다
+    bad = _fake_eval(client, fp, dict(ev_man, t_settle=5.0), rid="eval-bad")
+    perf = _perf_confirm(client, wait_job, rid, eval_result_id=bad)
+    assert perf["cases"] == {}
+    assert "평가와 확인 런의 기동이 다르다: t_settle" in perf["omitted"][0]["reason"], perf
+    # 기동 기록 없는 옛 평가도 추측하지 않는다
+    old = _fake_eval(client, fp, None, rid="eval-old")
+    perf = _perf_confirm(client, wait_job, rid, eval_result_id=old)
+    assert perf["cases"] == {} and "평가 결과에 기동 기록이 없다" in perf["omitted"][0]["reason"]
+    # 좌표 기록 없는 평가도 뺀다
+    nocoord = _fake_eval(client, fp, dict(ev_man), rid="eval-nocoord", conditions=False)
+    perf = _perf_confirm(client, wait_job, rid, eval_result_id=nocoord)
+    assert perf["cases"] == {} and "좌표 기록이 없다" in perf["omitted"][0]["reason"]
 
 
 def test_verify_mission_profile_crosses_the_schedule(client, wait_job):

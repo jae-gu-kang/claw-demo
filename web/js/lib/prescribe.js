@@ -12,11 +12,55 @@
 import { normalizeEvalReport } from "./evaluate.js";
 import { fmtPercent, structuralRequest } from "./influence.js";
 
+// ── 목적 선택 (04 §7.3) — 기준 충족 최소 수정(종전) / 성능 개선 ─────────────────
+export const OBJECTIVE_LABEL = { min_change: "기준 충족 최소 수정", performance: "성능 개선" };
+
+// 성능 목적의 세 묶음 — 화면은 묶음 가중 셋만 받고 엔진 지표 아홉(PERF_METRICS_DEFAULT)으로 펼친다
+export const PERF_FAMILIES = {
+  rms: { label: "추종 RMS", metrics: ["alt_rms", "spd_rms", "hdg_rms"] },
+  ts: { label: "정착시간", metrics: ["alt_ts", "spd_ts", "hdg_ts"] },
+  mp: { label: "오버슈트", metrics: ["alt_mp", "spd_mp", "hdg_mp"] },
+};
+export const SMOOTH_MAX = 10;  // 서버 PrescribeIn.smooth_weight 상한과 같다
+
+/** 목적 입력 → 요청 필드. 최소 수정이면 목적만(성능 인자는 뜻이 없다). 잘못된 입력은 사유와 함께 throw —
+ *  서버 422보다 먼저, 누른 자리에서 말한다. */
+// 입력칸 값(문자열) 또는 수 → 수. 빈 칸은 오류다 — Number("")은 0이라 「가중 0(목적에서 뺌)」·
+// 「급변 억제 없음」으로 조용히 바뀐다. 수가 아닌 글자는 NaN으로 넘겨 아래 범위 검사가 사유를 낸다
+function fieldNum(v, what) {
+  if (v == null || (typeof v === "string" && v.trim() === "")) throw new Error(`${what} 비었다`);
+  return typeof v === "string" ? Number(v) : v;
+}
+
+export function objectiveFields({ objective = "min_change", weights = {}, smooth = 0.1 } = {}) {
+  if (!(objective in OBJECTIVE_LABEL)) throw new Error(`알 수 없는 목적: ${objective}`);
+  if (objective === "min_change") return { objective };
+  const perf_weights = {};
+  let any = false;
+  for (const [fam, { label, metrics }] of Object.entries(PERF_FAMILIES)) {
+    // 키가 없으면 1(엔진 기본값과 같은 뜻), 키가 있는데 비었으면 오류
+    const w = fam in weights ? fieldNum(weights[fam], `${label} 가중이`) : 1;
+    if (typeof w !== "number" || !Number.isFinite(w) || w < 0) {
+      throw new Error(`${label} 가중은 0 이상 유한값이어야 한다: ${w}`);
+    }
+    if (w > 0) any = true;
+    for (const m of metrics) perf_weights[m] = w;
+  }
+  // 가중이 전부 0이면 남는 것은 급변 억제뿐 — 답은 늘 「안 바꾼다」라 목적이 없다
+  if (!any) throw new Error("성능 가중이 전부 0 — 줄일 목적이 없다");
+  smooth = fieldNum(smooth, "급변 억제가");
+  if (typeof smooth !== "number" || !Number.isFinite(smooth) || smooth < 0 || smooth > SMOOTH_MAX) {
+    throw new Error(`급변 억제는 0~${SMOOTH_MAX} 사이여야 한다: ${smooth}`);
+  }
+  return { objective, perf_weights, smooth_weight: smooth };
+}
+
 export function prescribeRequest(state, { resultId, evalResultId, cases,
                                           knobs, confirm, tSettle,
-                                          tStep, tHold, fingerprint } = {}) {
+                                          tStep, tHold, fingerprint, objective } = {}) {
   // 판정선은 싣지 않는다 — 서버가 선택 기체의 기준으로 판정하고 요청 기준은 거절한다(v1.54)
-  const body = { ...structuralRequest(state), result_id: resultId, cases };
+  const body = { ...structuralRequest(state), result_id: resultId, cases,
+                 ...(objective ?? {}) };  // objectiveFields의 결과 — 없으면 서버 기본(최소 수정)
   if (evalResultId) body.eval_result_id = evalResultId;
   if (knobs != null) body.knobs = knobs;
   if (confirm != null) body.confirm = confirm;
@@ -29,10 +73,14 @@ export function prescribeRequest(state, { resultId, evalResultId, cases,
 
 export function normalizePrescribe(payload) {
   return {
+    // 옛 결과(목적 키 없음)는 최소 수정이다 — 목적 선택 전에는 그것뿐이었다
+    objective: payload?.objective ?? payload?.joint?.objective ?? "min_change",
     knobs: payload?.knobs ?? [],
     singles: payload?.singles ?? {},
     joint: payload?.joint ?? null,
     confirm: payload?.confirm ? normalizeEvalReport(payload.confirm) : null,
+    // 확인 런 실측 성능 변화(성능 목적에만) — 판정자는 confirm의 evaluate다, 이것은 정보
+    confirmPerf: payload?.confirm?.perf ?? null,
     gainExport: payload?.gain_export ?? null,
     proposalNotes: payload?.proposal_notes ?? [],
     warnings: payload?.warnings ?? [],
@@ -73,12 +121,63 @@ export function singleRows(model) {
   return rows;
 }
 
-/** 조합 해 → 문장 목록 — 스팬·제외·위반·한계를 전부 낸다 (숨기지 않는다). */
+const sig = (v) => String(Number(Number(v).toPrecision(4)));
+
+/** 예측 지표 변화 중 가장 좋아진 것·가장 나빠진 것 — 아홉 지표 × 케이스를 다 늘어놓지 않는다. */
+function bestWorst(perfPredicted) {
+  let best = null;
+  let worst = null;
+  for (const [c, ms] of Object.entries(perfPredicted ?? {})) {
+    for (const [m, r] of Object.entries(ms ?? {})) {
+      const d = r?.delta_frac;
+      if (!Number.isFinite(d)) continue;
+      if (d < 0 && (!best || d < best.d)) best = { m, c, d };
+      if (d > 0 && (!worst || d > worst.d)) worst = { m, c, d };
+    }
+  }
+  return { best, worst };
+}
+
+/** 성능 목적 제외 — 사유별로 묶는다(같은 사유가 지표마다 되풀이되면 표가 된다). case null은 전 케이스. */
+function perfExcludedLines(list) {
+  const by = new Map();
+  for (const e of list ?? []) {
+    const who = e.case == null ? `${e.metric}(전 케이스)` : `${e.metric}@${e.case}`;
+    by.set(e.reason, [...(by.get(e.reason) ?? []), who]);
+  }
+  return [...by].map(([reason, who]) => `성능 목적 제외(${reason}): ${who.join(", ")}`);
+}
+
+/** 조합 해 → 문장 목록 — 목적·스팬·제외·위반·한계를 전부 낸다 (숨기지 않는다). */
 export function jointLines(joint) {
   if (!joint) return ["조합 해 없음"];
-  const lines = [];
+  const objective = joint.objective ?? "min_change";
+  const lines = [`목적: ${OBJECTIVE_LABEL[objective] ?? objective}`];
   for (const [knob, s] of Object.entries(joint.spans ?? {})) {
     lines.push(`${knob} ${signed(s)}`);
+  }
+  // 바뀐 게인 수는 두 목적 모두 정보다(엔진 CHANGED_TOL 기준) — 옛 결과엔 없어 지어내지 않는다
+  if (Number.isFinite(joint.changed_count)) lines.push(`바뀐 게인 ${joint.changed_count}개`);
+  if (objective === "performance") {
+    const ov = joint.objective_value;
+    if (ov && Number.isFinite(ov.base) && Number.isFinite(ov.predicted)) {
+      const rel = ov.base !== 0 ? (ov.predicted - ov.base) / Math.abs(ov.base) : null;
+      lines.push(`예측 목적값 ${sig(ov.base)} → ${sig(ov.predicted)}`
+        + (rel != null ? ` (${signed(rel)})` : ""));
+      // 기준 형상이 하드 위반이면 제약이 요구한 변화가 목적값을 올릴 수 있다 — 개선이라 말하지 않는다
+      if (ov.predicted > ov.base) lines.push("기준을 넘기느라 성능이 나빠진다 — 예측 목적값이 오른다");
+    }
+    const { best, worst } = bestWorst(joint.perf_predicted);
+    if (best) lines.push(`가장 좋아짐 ${best.m}@${best.c} ${signed(best.d)}`);
+    if (worst) lines.push(`가장 나빠짐 ${worst.m}@${worst.c} ${signed(worst.d)}`);
+    if (joint.bound_active?.length) lines.push(`탐색 한계에 닿음: ${joint.bound_active.join(", ")}`);
+    // 탐색 경계를 스윕 유효 표본까지 줄인 사유 — 한계에 닿은 자리가 「스윕이 실패로 본 게인」 앞이라는 말
+    for (const r of joint.bound_reasons ?? []) lines.push(`탐색 경계: ${r}`);
+    if (joint.hard_unmodelled?.length) {
+      lines.push(`선형 모델 밖 하드 지표: ${joint.hard_unmodelled.map((h) => `${h.knob}×${h.metric}`).join(", ")}`
+        + " — 비단조라 경계를 최소 표본까지 줄였다");
+    }
+    lines.push(...perfExcludedLines(joint.perf_excluded));
   }
   for (const e of joint.excluded ?? []) {
     lines.push(`제외: ${e.knob} × ${e.metric} — ${e.reason}`);
@@ -91,6 +190,44 @@ export function jointLines(joint) {
   if (joint.span_bound != null) {
     lines.push(`탐색 한계 ±${fmtPercent(joint.span_bound, 0)}`);
   }
+  return lines;
+}
+
+const BASE_SOURCE_LABEL = { sweep: "스윕 base", evaluate: "같은 형상의 평가", "evaluate+sweep": "스윕 base·같은 형상의 평가" };
+const STATE_WORD = { inf: "미정착", none: "판정 불가" };
+
+/** 확인 런 실측 성능 변화 → 문장 목록 — 지표마다 **가장 덜 좋아진** 케이스 한 줄과 그 자리의 예측.
+ *  실측이 판정자가 아니다(확인 런 evaluate가 판정한다) — 예측이 맞았는지 보는 정보다. */
+export function confirmPerfLines(confirmPerf, joint) {
+  if (!confirmPerf) return [];
+  const src = confirmPerf.base_source;
+  const lines = [`실측 성능 변화 (기준: ${src ? BASE_SOURCE_LABEL[src] ?? src : "없음"})`];
+  const cases = confirmPerf.cases ?? {};
+  const metrics = confirmPerf.metrics
+    ?? [...new Set(Object.values(cases).flatMap((ms) => Object.keys(ms ?? {})))];
+  const odd = [];
+  for (const m of metrics) {
+    let worst = null;
+    for (const [c, ms] of Object.entries(cases)) {
+      const r = ms?.[m];
+      if (!r) continue;
+      if (Number.isFinite(r.delta_frac)) {
+        if (!worst || r.delta_frac > worst.d) worst = { c, d: r.delta_frac };
+        continue;
+      }
+      // 미정착(느림의 극한)과 판정 불가(값 없음)는 다른 말이다 — 뭉치지 않는다
+      const side = r.new_state !== "ok" ? ["확인 런", r.new_state] : ["기준 런", r.base_state];
+      odd.push(side[1] === "none" ? `${m}@${c} 판정 불가`
+        : `${m}@${c} ${side[0]} ${STATE_WORD[side[1]] ?? side[1]}`);
+    }
+    if (!worst) continue;
+    const p = joint?.perf_predicted?.[worst.c]?.[m]?.delta_frac;
+    lines.push(`${m} 실측 ${signed(worst.d)} @${worst.c} (${Number.isFinite(p) ? `예측 ${signed(p)}` : "예측 없음"})`);
+  }
+  if (odd.length) lines.push(`비교 불가: ${odd.join(", ")}`);
+  for (const o of confirmPerf.omitted ?? []) lines.push(`비교 제외 — ${o.case}: ${o.reason}`);
+  // 기준을 썼지만 대조하지 못한 조건(평가 결과의 dt_plant 등) — 숨기지 않는다
+  for (const n of confirmPerf.notes ?? []) lines.push(`주의: ${n}`);
   return lines;
 }
 

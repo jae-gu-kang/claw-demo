@@ -16,6 +16,7 @@ import {
 } from "./autodesign.js";
 import { FQ_BADGE, FQ_RANK, fqMeasureText, fqWorst } from "./fq.js";
 import { lineageText } from "./lineage.js";
+import { OBJECTIVE_LABEL } from "./prescribe.js";
 import { marginUnstable, unstableCells, unstableTail } from "./loops.js";
 import { FLAG_LABEL, landingSummary, siteRunwayWidth } from "./replay.js";
 import { covCell, identLine, mcdcCell, statusFlag, verdictModel } from "./verify.js";
@@ -44,6 +45,12 @@ export const KIND_LABEL = {
 };
 export const kindLabel = (k) => KIND_LABEL[k] ?? k ?? "—";
 
+/** 종류 옆 세부 — 처방 결과의 목적(04 §7.3). 같은 종류라도 목적이 다르면 다른 답이다. 없으면 null. */
+export function kindDetail(meta) {
+  if (meta?.kind !== "influence_prescribe" || !meta.objective) return null;
+  return OBJECTIVE_LABEL[meta.objective] ?? meta.objective;
+}
+
 // 트림 판정 플래그의 우리말 — 트림 탭 표의 열 이름과 같은 어휘.
 // (시뮬 엔벨로프 플래그 어휘는 replay.js FLAG_LABEL — 다른 축이라 표도 다르다)
 const TRIM_FLAG_LABEL = {
@@ -63,7 +70,7 @@ const uniqSorted = (xs) => [...new Set(xs)].sort((a, b) => a - b);
 function headRows(meta) {
   const p = meta.profile;
   return [
-    ["종류", `${kindLabel(meta.kind)} (${meta.kind ?? "—"})`],
+    ["종류", `${kindLabel(meta.kind)}${kindDetail(meta) ? ` · ${kindDetail(meta)}` : ""} (${meta.kind ?? "—"})`],
     ["생성", meta.created ? new Date(meta.created * 1000).toLocaleString() : "—"],
     ["기체", p ? `${p.name ?? p.id}${p.variant ? ` · ${p.variant}` : ""} · 리비전 ${p.revision ?? "—"} · 지문 ${p.fingerprint ?? "—"}` : "—"],
     // 결과 목록의 계보 칸과 같은 표기 — 탑재 C 검증은 엔진 발급 두 지문(구조·값)이다(lib/lineage.js)

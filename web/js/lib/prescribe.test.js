@@ -9,8 +9,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  applyExport, jointLines, leverBase, leverChange, leverLine, mergeConstants, normalizePrescribe,
-  prescribeRequest, singleRows, unappliedLevers, unappliedNote,
+  OBJECTIVE_LABEL, PERF_FAMILIES, applyExport, confirmPerfLines, jointLines, leverBase, leverChange,
+  leverLine, mergeConstants, normalizePrescribe, objectiveFields, prescribeRequest, singleRows,
+  unappliedLevers, unappliedNote,
 } from "./prescribe.js";
 
 const payload = {
@@ -211,4 +212,188 @@ test("applyExport: [적용]이 못 싣는 지렛대는 적용 문장에 이름�
 test("처방 요청은 판정선을 싣지 않는다 — 서버가 요청 기준을 거절한다(v1.54)", () => {
   const b = prescribeRequest({}, { resultId: "r", cases: [], criteria: { margin: { pm_min_deg: 50 } } });
   assert.equal("criteria" in b, false);
+});
+
+
+// ── 목적 선택 — 기준 충족 최소 수정 / 성능 개선 (04 §7.3) ─────────────────────
+
+const perfJoint = {
+  objective: "performance", solvable: true, reason: null,
+  spans: { "table.pitch.kp": 0.2, "table.spd.kp": 0.0004 },
+  changed_knobs: ["table.pitch.kp"], changed_count: 1,
+  excluded: [], violated: [], span_bound: 0.2,
+  perf_metrics: ["alt_rms", "alt_ts", "spd_ts", "alt_mp"],
+  perf_weights: { alt_rms: 1, alt_ts: 1, spd_ts: 1, alt_mp: 1 }, smooth_weight: 0.1,
+  objective_value: { base: 2.0, predicted: 1.7, smoothing: 0.1 },
+  perf_predicted: {
+    A: { alt_rms: { base: 5, predicted: 4.5, delta_frac: -0.1 },
+         alt_ts: { base: 10, predicted: 7.5, delta_frac: -0.25 },
+         spd_ts: { base: 10, predicted: 10.3, delta_frac: 0.03 } },
+    B: { alt_ts: { base: 12, predicted: 11, delta_frac: -0.0833 } },
+  },
+  perf_excluded: [
+    { metric: "alt_mp", case: null, reason: "비단조 — 스팬 안 경향이 뒤집혀 선형 모델에서 제외",
+      knobs: ["table.pitch.kp"] },
+    { metric: "spd_ts", case: "B", reason: "창 안 미정착·발산 — 선형 모델 정의역 밖" },
+    { metric: "alt_rms", case: "B", reason: "창 안 미정착·발산 — 선형 모델 정의역 밖" },
+  ],
+  bound_active: ["table.pitch.kp"],
+};
+
+test("목적 이름 — 두 목적 우리말, 기본은 최소 수정", () => {
+  assert.equal(OBJECTIVE_LABEL.min_change, "기준 충족 최소 수정");
+  assert.equal(OBJECTIVE_LABEL.performance, "성능 개선");
+  assert.equal(normalizePrescribe({}).objective, "min_change");
+  assert.equal(normalizePrescribe({ objective: "performance" }).objective, "performance");
+});
+
+test("objectiveFields: 최소 수정은 목적만 — 성능 인자를 싣지 않는다", () => {
+  assert.deepEqual(objectiveFields({ objective: "min_change", weights: { rms: 5 }, smooth: 3 }),
+    { objective: "min_change" });
+  assert.deepEqual(objectiveFields(), { objective: "min_change" });
+});
+
+test("objectiveFields: 성능은 세 묶음 가중을 아홉 지표 가중으로 펼친다", () => {
+  const f = objectiveFields({ objective: "performance", weights: { rms: 2, ts: 1, mp: 0 }, smooth: 0.3 });
+  assert.equal(f.objective, "performance");
+  assert.equal(f.smooth_weight, 0.3);
+  assert.equal(Object.keys(f.perf_weights).length, 9);
+  for (const m of PERF_FAMILIES.rms.metrics) assert.equal(f.perf_weights[m], 2);
+  for (const m of PERF_FAMILIES.mp.metrics) assert.equal(f.perf_weights[m], 0);
+  assert.deepEqual(PERF_FAMILIES.ts.metrics, ["alt_ts", "spd_ts", "hdg_ts"]);
+  // 빈 가중은 1(엔진 기본값과 같은 뜻)
+  const d = objectiveFields({ objective: "performance" });
+  assert.equal(d.perf_weights.hdg_mp, 1);
+  assert.equal(d.smooth_weight, 0.1);
+});
+
+test("objectiveFields: 잘못된 입력은 제출 전에 사유와 함께 막는다", () => {
+  const bad = (o) => assert.throws(() => objectiveFields({ objective: "performance", ...o }));
+  bad({ weights: { rms: -1 } });
+  bad({ weights: { ts: Number.NaN } });
+  bad({ weights: { rms: 0, ts: 0, mp: 0 } });  // 목적이 없다
+  bad({ smooth: -0.1 });
+  bad({ smooth: 11 });
+  bad({ smooth: Number.POSITIVE_INFINITY });
+  assert.throws(() => objectiveFields({ objective: "fastest" }), /목적/);
+  assert.throws(() => objectiveFields({ objective: "performance", weights: { rms: 0, ts: 0, mp: 0 } }),
+    /전부 0/);
+});
+
+test("요청 본문 — 목적 필드가 실린다(최소 수정이면 목적만)", () => {
+  const perf = prescribeRequest({}, { resultId: "r", cases: [],
+    objective: objectiveFields({ objective: "performance", smooth: 0.5 }) });
+  assert.equal(perf.objective, "performance");
+  assert.equal(perf.smooth_weight, 0.5);
+  assert.equal(perf.perf_weights.alt_rms, 1);
+  const mc = prescribeRequest({}, { resultId: "r", cases: [] });
+  assert.equal("objective" in mc, false);  // 안 보내면 서버 기본(최소 수정)
+});
+
+test("조합 줄(최소 수정) — 목적 이름과 바뀐 게인 수가 정보로 선다", () => {
+  const lines = jointLines({ ...payload.joint, objective: "min_change",
+    changed_knobs: ["table.pitch.kp"], changed_count: 1 });
+  assert.equal(lines[0], "목적: 기준 충족 최소 수정");
+  assert.ok(lines.includes("바뀐 게인 1개"));
+  assert.ok(!lines.some((l) => /목적값/.test(l)));
+  // 옛 결과(목적 키 없음)는 최소 수정으로 읽는다 — 바뀐 게인 수는 지어내지 않는다
+  const old = jointLines(payload.joint);
+  assert.equal(old[0], "목적: 기준 충족 최소 수정");
+  assert.ok(!old.some((l) => /바뀐 게인/.test(l)));
+});
+
+test("조합 줄(성능) — 예측 목적값·최선/최악 지표·탐색 한계·제외 사유를 요약한다", () => {
+  const lines = jointLines(perfJoint);
+  const all = lines.join(" | ");
+  assert.equal(lines[0], "목적: 성능 개선");
+  assert.match(all, /예측 목적값 2 → 1\.7 \(−15%\)/);
+  assert.match(all, /가장 좋아짐 alt_ts@A −25%/);
+  assert.match(all, /가장 나빠짐 spd_ts@A \+3\.0%/);
+  assert.match(all, /탐색 한계에 닿음: table\.pitch\.kp/);
+  // 제외는 사유별로 묶는다 — 같은 사유가 줄마다 되풀이되지 않는다
+  assert.equal(lines.filter((l) => /미정착/.test(l)).length, 1);
+  assert.match(all, /성능 목적 제외\(창 안 미정착·발산 — 선형 모델 정의역 밖\): spd_ts@B, alt_rms@B/);
+  assert.match(all, /alt_mp\(전 케이스\)/);
+  assert.ok(lines.includes("바뀐 게인 1개"));
+  assert.ok(!/null|undefined|NaN/.test(all), all);
+});
+
+test("조합 줄(성능) — 기준을 넘기느라 목적값이 오르면 개선이라 말하지 않는다", () => {
+  const lines = jointLines({ ...perfJoint, objective_value: { base: 1.0, predicted: 1.2, smoothing: 0 },
+    perf_predicted: { A: { alt_ts: { base: 10, predicted: 12, delta_frac: 0.2 } } } });
+  const all = lines.join(" | ");
+  assert.match(all, /예측 목적값 1 → 1\.2 \(\+20%\)/);
+  assert.match(all, /기준을 넘기느라 성능이 나빠진다/);
+  assert.doesNotMatch(all, /가장 좋아짐/);  // 좋아진 지표가 없으면 그 칸을 세우지 않는다
+});
+
+test("조합 줄(성능) — 쓸 지표가 없으면 목적값 없이 사유만", () => {
+  const lines = jointLines({ objective: "performance", solvable: false, spans: null,
+    objective_value: null, perf_predicted: {}, bound_active: [], changed_knobs: [], changed_count: 0,
+    perf_excluded: [], reason: "성능 목적 지표가 하나도 선형 모델에 들지 않는다", span_bound: 0.2 });
+  const all = lines.join(" | ");
+  assert.match(all, /하나도 선형 모델에 들지 않는다/);
+  assert.doesNotMatch(all, /목적값/);
+  assert.ok(!/null|undefined|NaN/.test(all), all);
+});
+
+test("confirmPerfLines: 실측 변화와 예측을 나란히 — 지표별 최악 케이스 한 줄", () => {
+  const cp = {
+    base_source: "sweep", metrics: ["alt_ts", "spd_ts", "alt_rms"],
+    cases: {
+      A: { alt_ts: { base: 10, new: 8, delta_frac: -0.2, base_state: "ok", new_state: "ok" },
+           spd_ts: { base: 10, new: null, delta_frac: null, base_state: "ok", new_state: "inf" },
+           alt_rms: { base: null, new: 4, delta_frac: null, base_state: "none", new_state: "ok" } },
+      B: { alt_ts: { base: 12, new: 11.4, delta_frac: -0.05, base_state: "ok", new_state: "ok" } },
+    },
+    omitted: [{ case: "C", reason: "기준 형상의 실측이 없다" }],
+  };
+  const lines = confirmPerfLines(cp, perfJoint);
+  const all = lines.join(" | ");
+  assert.match(lines[0], /스윕 base/);
+  // 지표별 가장 나쁜(가장 덜 좋아진) 케이스 — alt_ts는 B(−5 %), 예측은 B −8.3 %
+  assert.match(all, /alt_ts 실측 −5\.0% @B \(예측 −8\.3%\)/);
+  // 미정착과 판정 불가는 다른 말이다
+  assert.match(all, /spd_ts@A 확인 런 미정착/);
+  assert.match(all, /alt_rms@A 판정 불가/);
+  assert.match(all, /C: 기준 형상의 실측이 없다/);
+  assert.ok(!/null|undefined|NaN/.test(all), all);
+  assert.deepEqual(confirmPerfLines(null, perfJoint), []);
+  assert.deepEqual(normalizePrescribe({ confirm: { cards: [], perf: cp } }).confirmPerf, cp);
+  assert.equal(normalizePrescribe(payload).confirmPerf, null);
+});
+
+test("objectiveFields: 빈 칸은 0이 아니라 입력 오류 — 입력칸 문자열은 수로 읽는다", () => {
+  const perf = (o) => objectiveFields({ objective: "performance", ...o });
+  // 입력칸은 문자열을 준다 — Number("")은 0이라 「가중 0(목적에서 뺌)」으로 조용히 바뀐다
+  assert.throws(() => perf({ weights: { rms: "" } }), /추종 RMS 가중이 비었다/);
+  assert.throws(() => perf({ weights: { ts: "  " } }), /정착시간 가중이 비었다/);
+  assert.throws(() => perf({ weights: { mp: null } }), /오버슈트 가중이 비었다/);
+  assert.throws(() => perf({ smooth: "" }), /급변 억제가 비었다/);
+  assert.throws(() => perf({ weights: { rms: "abc" } }), /추종 RMS 가중/);
+  const f = perf({ weights: { rms: "2", ts: "0.5", mp: "0" }, smooth: "0.25" });
+  assert.equal(f.perf_weights.alt_rms, 2);
+  assert.equal(f.perf_weights.spd_ts, 0.5);
+  assert.equal(f.perf_weights.hdg_mp, 0);
+  assert.equal(f.smooth_weight, 0.25);
+});
+
+test("조합 줄(성능) — 탐색 경계 축소 사유와 선형 모델 밖 하드 지표를 짧게 든다", () => {
+  const lines = jointLines({ ...perfJoint,
+    bound_limits: { "table.pitch.kp": { lo: -0.2, hi: 0.1,
+      reason: "+20 % 표본이 미정착(alt_ts)@A — 탐색을 +10 %로 줄였다" } },
+    bound_reasons: ["table.pitch.kp: +20 % 표본이 미정착(alt_ts)@A — 탐색을 +10 %로 줄였다"],
+    hard_unmodelled: [{ knob: "table.spd.kp", metric: "surf_sat_frac" }] });
+  const all = lines.join(" | ");
+  assert.match(all, /탐색 경계: table\.pitch\.kp: \+20 % 표본이 미정착\(alt_ts\)@A — 탐색을 \+10 %로 줄였다/);
+  assert.match(all, /선형 모델 밖 하드 지표: table\.spd\.kp×surf_sat_frac/);
+  // 옛 결과(키 없음)는 그 줄을 세우지 않는다
+  assert.doesNotMatch(jointLines(perfJoint).join(" | "), /탐색 경계|선형 모델 밖/);
+});
+
+test("confirmPerfLines: 대조하지 못한 조건(노트)을 든다", () => {
+  const lines = confirmPerfLines({ base_source: "evaluate", metrics: [], cases: {}, omitted: [],
+    notes: ["평가 결과는 dt_plant를 기록하지 않는다 — 확인 런(dt_plant=0.01)과 적분 간격이 같은지는 대조하지 못했다"] },
+  perfJoint);
+  assert.match(lines.join(" | "), /주의: 평가 결과는 dt_plant를 기록하지 않는다/);
 });

@@ -79,7 +79,8 @@ import {
   durText, runVerdictMark, stageProgress,
 } from "../lib/evaluate.js";
 import {
-  applyExport, jointLines, leverBase, leverChange, leverLine, normalizePrescribe, prescribeRequest,
+  OBJECTIVE_LABEL, PERF_FAMILIES, SMOOTH_MAX, applyExport, confirmPerfLines, jointLines, leverBase,
+  leverChange, leverLine, normalizePrescribe, objectiveFields, prescribeRequest,
   singleRows, unappliedLevers, unappliedNote,
 } from "../lib/prescribe.js";
 import { EVAL_MARK, renderEvalCards } from "./evalcards.js";
@@ -134,6 +135,8 @@ const state = {
   evalPrev: null,
   // 정량 처방 — "얼마나"의 답 (스윕 결과 참조 + 확인 런)
   prescribe: null,
+  // 처방 목적(04 §7.3) — 버튼 경로의 [얼마나 →]가 이 선택으로 푼다. 가중은 세 묶음(lib/prescribe PERF_FAMILIES)
+  prescribeObj: { objective: "min_change", weights: { rms: 1, ts: 1, mp: 1 }, smooth: 0.1 },
   // 구간 경향(3단 C)이 보고 있는 설계변수·지표 — 결과가 아니라 **보는 자리**라
   // 스윕과 수명이 다르다(같은 스윕을 설계변수별로 훑는 것이 이 표의 용법이다)
   trendKnob: null, trendMetric: null,
@@ -1488,8 +1491,44 @@ export function render() {
   const prescribeStatus = el("p", { class: "hint", style: "margin:10px 0 0" });
   const prescribeBox = el("div");
 
+  // 목적 줄 — 조작만 두고 뜻은 툴팁에 (그림·조작이 먼저). 두 패널에 같은 노드로 얹힌다(prescribeBox와 같다)
+  const OBJ_TIP = {
+    min_change: "하드 기준을 넘는 가장 작은 수정 — 이미 통과면 바꾸지 않는다",
+    performance: "하드 기준을 전부 지키면서 추종 RMS·정착시간·오버슈트(가중 합)를 줄인다 — "
+      + "선형 예측이고 판정은 확인 런이 한다",
+  };
+  const objSel = el("select", { title: OBJ_TIP.min_change },
+    Object.entries(OBJECTIVE_LABEL).map(([k, label]) => el("option", { value: k }, label)));
+  const perfBox = el("span", { style: "gap:8px;align-items:center;flex-wrap:wrap" });
+  const weightIn = {};
+  for (const [fam, { label, metrics }] of Object.entries(PERF_FAMILIES)) {
+    const inp = el("input", { type: "number", min: "0", step: "0.5", style: "width:48px",
+      value: state.prescribeObj.weights[fam] });
+    // 문자열 그대로 둔다 — 빈 칸을 Number()로 접으면 0(목적에서 뺌)이 된다. 해석·검증은 objectiveFields
+    inp.addEventListener("input", () => { state.prescribeObj.weights[fam] = inp.value; });
+    weightIn[fam] = inp;
+    perfBox.append(el("label", { title: `${label} 가중 (${metrics.join("·")}) — 0이면 목적에서 뺀다`,
+      style: "font-size:12px;white-space:nowrap" }, `${label} `, inp));
+  }
+  const smoothIn = el("input", { type: "number", min: "0", max: String(SMOOTH_MAX), step: "0.05",
+    style: "width:52px", value: state.prescribeObj.smooth });
+  smoothIn.addEventListener("input", () => { state.prescribeObj.smooth = smoothIn.value; });
+  perfBox.append(el("label", { title: "급변 억제 — 크면 게인을 덜 움직인다(탐색 한계로 치닫는 것을 막는다). "
+    + `0~${SMOOTH_MAX}`, style: "font-size:12px;white-space:nowrap" }, "급변 억제 ", smoothIn));
+  function paintObjRow() {
+    const o = state.prescribeObj.objective;
+    objSel.value = o;
+    objSel.title = OBJ_TIP[o];
+    // hidden 속성은 display 인라인 스타일에 진다 — 스타일로 접는다
+    perfBox.style.display = o === "performance" ? "inline-flex" : "none";
+  }
+  objSel.addEventListener("change", () => { state.prescribeObj.objective = objSel.value; paintObjRow(); });
+  const prescribeObjRow = el("div", { class: "row", style: "gap:10px;margin:10px 0 0;flex-wrap:wrap" },
+    el("span", { style: "font-size:13px;font-weight:600" }, "수정안 목적"), objSel, perfBox);
+  paintObjRow();
+
   async function runPrescribe(card, { open = state.drawer === "sens" ? "sens" : "eval",
-                                     hooks = {} } = {}) {
+                                     hooks = {}, objective = null } = {}) {
     const rid = state.sweep?.resultId;
     if (!rid) {
       runStatus("수정안: 먼저 감도(스윕)가 돌아 있어야 한다 — "
@@ -1497,12 +1536,15 @@ export function render() {
       return { status: "제출 불가", result: null, error: "감도(스윕)가 없다" };
     }
     let cases;
+    let objFields;
     try {
       cases = sweepCases(selectedCases(), state.scan);
+      // 목적 — 호출자가 정하면 그것(쇼케이스는 최소 수정), 아니면 패널의 선택
+      objFields = objectiveFields(objective ? { objective } : state.prescribeObj);
     } catch (e) {
       state.prescribe = { status: "제출 불가", result: null, error: errorText(e) };
       renderPrescribe();
-      runStatus("수정안: 비행조건 오류", { open, bad: true });
+      runStatus(`수정안: 입력 오류 — ${errorText(e)}`, { open, bad: true });
       return state.prescribe;
     }
     // 스윕이 끝나고 여기 오기 전에 진행기가 중단됐다 — 수정안 잡을 걸지 않는다(패널의 지난 수정안은 그대로)
@@ -1519,7 +1561,7 @@ export function render() {
           // 평가가 실패라고 한 지표만 푼다 — 통과 지표까지 풀면 표에 답이 묻힌다
           evalResultId: state.evalRun?.resultId,
           tSettle: 5, tStep: Number(stepIn.value) || 15,
-          fingerprint: state.diag?.fingerprint,
+          fingerprint: state.diag?.fingerprint, objective: objFields,
         }));
       hooks.onJob?.(job.id);
       const done = await watchJob(job.id, (j) => {
@@ -1606,7 +1648,9 @@ export function render() {
     const j = m.joint;
     prescribeBox.append(
       el("h3", { style: "margin:12px 0 4px;font-size:14px" },
-        "조합 — 여러 개를 조금씩 (최소 변화, 선형 후보)"),
+        m.objective === "performance"
+          ? "조합 — 성능 개선 (하드 기준 유지, 선형 후보)"
+          : "조합 — 여러 개를 조금씩 (최소 변화, 선형 후보)"),
       el("p", {
         style: `margin:0;${mono()}`
           + (j?.solvable ? "" : `;color:${WARN_INK}`),
@@ -1638,6 +1682,14 @@ export function render() {
       if (fails.length) {
         prescribeBox.append(el("ul", { style: "margin:4px 0 0;padding-left:18px" },
           fails.map((t) => el("li", { style: `${mono()};margin:2px 0` }, t))));
+      }
+      // 성능 목적의 실측 변화 — 판정이 아니라 예측이 맞았는지 보는 정보(판정은 위 하드 게이트)
+      const perfLines = confirmPerfLines(m.confirmPerf, m.joint);
+      if (perfLines.length) {
+        prescribeBox.append(el("p", {
+          style: `margin:4px 0 0;${mono()};font-size:12px`,
+          title: "지표마다 가장 덜 좋아진 케이스의 실측 변화와 그 자리의 선형 예측 — 음수가 개선",
+        }, perfLines.join(" · ")));
       }
       if (m.gainExport) {
         const applied = el("p", { class: "hint", style: "margin:4px 0 0" });
@@ -1690,7 +1742,7 @@ export function render() {
    * 돌리세요"라는 말을 듣고 다른 패널로 가서 카드를 찾아 누르는 단계가 이
    * 연계의 이유라, 여기서 그 단계를 대신한다.
    */
-  async function runPrescribeFromEval(knobs, hooks = {}) {
+  async function runPrescribeFromEval(knobs, hooks = {}, { objective = null } = {}) {
     if (!knobs?.length) return { status: "제출 불가", result: null, error: "설계변수가 없다" };
     let cases;
     try {
@@ -1738,7 +1790,7 @@ export function render() {
                         resultId: sdone.result_id, error: null };
         renderSweep();
       }
-      return await runPrescribe({ knobs }, { open: "eval", hooks });
+      return await runPrescribe({ knobs }, { open: "eval", hooks, objective });
     } catch (e) {
       setLeverBusy(null);
       runStatus(`얼마나: 실패 — ${errorText(e)}`, { open: "eval", bad: true });
@@ -3271,7 +3323,8 @@ export function render() {
         if (!target) throw new Error("FAIL 케이스의 소견에 처방 카드가 없다 — [얼마나 →]를 걸 자리가 없다");
         reportCue(c, { phase: "progress",
           summary: `[얼마나 →] ${target.knobs.join(", ")} @${target.case}` });
-        const pr = await runPrescribeFromEval(target.knobs, hooks);
+        // 쇼케이스는 FAIL을 고치는 시연이다 — 패널의 목적 선택과 무관하게 최소 수정으로 푼다
+        const pr = await runPrescribeFromEval(target.knobs, hooks, { objective: "min_change" });
         const pm = pr?.result;
         if (!pm) throw new Error(pr?.error ?? "수정안 결과가 없다");
         if (!pm.confirm) {
@@ -3441,6 +3494,7 @@ export function render() {
           verifyStatus,
           verifyBox,
           // 처방(얼마나)은 이 깔때기의 다음 칸이다 — 소견의 [얼마나 →]가 여기를 채운다
+          prescribeObjRow,
           prescribeStatus,
           prescribeBox,
           // 수동 진단(자기 미션 귀속)과 전 케이스 스캔은 **감도로 갔다**(v0.69):
@@ -3480,7 +3534,7 @@ export function render() {
         // 실제로는 열린 쪽으로 옮겨 간다). 처방 카드가 이 패널로 온 뒤에도 표만
         // 평가 쪽에 있으면, 방금 [수정안 계산]을 누른 화면에서는 아무것도 안
         // 보인다 — v0.58에 똑같이 겪고 고친 자리다
-        prescribeStatus, prescribeBox,
+        prescribeObjRow, prescribeStatus, prescribeBox,
         el("h3", { style: "margin:14px 0 4px;font-size:14px" },
           "마진 민감도 — 게인 Δ가 PM·GM을 얼마나 움직이나"),
         el("p", { class: "hint", style: "margin:0 0 6px" },

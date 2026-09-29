@@ -14,7 +14,7 @@ import time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from claw.analysis.schedule import mach_midpoints
 from claw.pipeline.criteria import GainEvalCriteria
@@ -33,7 +33,8 @@ from claw.pipeline.prescribe import (
     solve_joint,
     solve_single_knob,
 )
-from claw.pipeline.sweep import nonadditivity, plan_shapes, run_sweep, sweep_plan
+from claw.pipeline.sweep import (PROBE_DH, PROBE_DPSI, PROBE_DV, nonadditivity, plan_shapes, run_sweep,
+                                 sweep_plan)
 from claw.sim import check_law_plant_pairing
 from claw_server.refs import (REQUEST_CRITERIA_REJECTED, criteria_echo, profile_echo, resolve_criteria,
                                resolve_profile)
@@ -335,6 +336,10 @@ def submit_sweep(req: SweepIn, request: Request, response: Response) -> dict:
     store = request.app.state.store
     n = len(cases)
     n_runs = len(plan["runs"])
+    # 기동을 명시해 넘기고 **그 dict를 그대로** 기록한다 — 처방의 확인 런 실측 비교가 같은 기동인지
+    # 대조하는 근거다(evaluate의 "maneuver"와 같은 뜻 + 적분 간격). 기록과 실행이 갈라질 틈을 없앤다
+    maneuver = {"dv": PROBE_DV, "dh": PROBE_DH, "dpsi": PROBE_DPSI,
+                "t_settle": req.t_settle, "t_step": req.t_step, "dt_plant": req.dt_plant}
     total = n + n * n_runs
 
     def work(job):
@@ -345,8 +350,7 @@ def submit_sweep(req: SweepIn, request: Request, response: Response) -> dict:
             ),
         )
         out = run_sweep(
-            ac, trs, shape, plan,
-            dt_plant=req.dt_plant, t_settle=req.t_settle, t_step=req.t_step,
+            ac, trs, shape, plan, **maneuver,
             on_progress=lambda done, run_total: job.report(
                 n + done, n + run_total, message=f"스윕: {done}/{run_total}"
             ),
@@ -378,7 +382,8 @@ def submit_sweep(req: SweepIn, request: Request, response: Response) -> dict:
         payload = to_jsonable(out)
         payload["kind"] = "influence_sweep"
         payload["profile"] = profile_echo(profile)
-        payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
+        payload["conditions"] = {"cases": cases_echo(cases),  # 실행 조건 기록(이관 13단계)
+                                 "maneuver": dict(maneuver)}
         payload["nonadditivity"] = to_jsonable(nonadd)
         store.save(
             job.id, payload,
@@ -712,10 +717,139 @@ class PrescribeIn(InfluenceIn):
     cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
     criteria: dict | None = None
     confirm: Literal["none", "linear", "full"] = "full"
+    # 목적(04 §7.3) — min_change는 하드 기준을 넘는 최소 수정(종전), performance는 하드 기준을
+    # 전부 지키며 추종 RMS·정착시간·오버슈트를 줄인다. 지표 이름·가중 키 검증은 엔진이 한다
+    objective: Literal["min_change", "performance"] = "min_change"
+    perf_metrics: list[str] | None = None
+    perf_weights: dict[str, float] | None = None
+    smooth_weight: float = Field(default=0.1, ge=0.0, le=10.0, allow_inf_nan=False)
     t_settle: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
     t_step: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
     t_hold: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
+
+    @field_validator("perf_weights")
+    @classmethod
+    def _finite_nonneg_weights(cls, v):
+        # 음의 가중은 「나빠지게 하라」가 된다 — 목적의 뜻이 뒤집히므로 받지 않는다
+        for k, w in (v or {}).items():
+            if not math.isfinite(w) or w < 0.0:
+                raise ValueError(f"perf_weights는 0 이상 유한값만: {k}={w}")
+        return v
+
+    @model_validator(mode="after")
+    def _perf_args_need_performance(self):
+        # 최소 수정에 성능 인자를 보내면 조용히 버려진다 — 사용자는 가중을 준 줄 안다. 보낸 것만 센다
+        # (smooth_weight는 기본값이 있어 model_fields_set으로 「명시했나」를 가린다)
+        if self.objective == "min_change":
+            given = sorted({"perf_metrics", "perf_weights", "smooth_weight"} & self.model_fields_set)
+            if given:
+                raise ValueError(f"{', '.join(given)}는 objective='performance'에서만 뜻이 있다 — "
+                                 "최소 수정(min_change)은 성능 인자를 쓰지 않는다")
+        return self
+
+
+# 스윕 기록(conditions.maneuver)과 확인 런이 같아야 하는 기동 키 — 스윕 지표는 표준 기동 런
+# 하나이고, 이 여섯이 그 런의 시간축·명령·적분 간격을 정한다
+_SWEEP_MANEUVER_KEYS = ("dv", "dh", "dpsi", "t_settle", "t_step", "dt_plant")
+# evaluate 결과의 "maneuver"와 대조하는 키 — evaluate는 dt_plant를 기록하지 않고, t_hold는 동시명령 런만
+# 정한다(metrics_raw는 표준 기동 런 — evaluate._eval_case)
+_EVAL_MANEUVER_KEYS = ("dv", "dh", "dpsi", "t_settle", "t_step")
+
+
+def _diff_keys(a: dict, b: dict, keys) -> list:
+    return [k for k in keys if a.get(k) != b.get(k)]
+
+
+def _confirm_perf(rows, sweep_conditions, ev, shape_fp, confirm, cases, perf_metrics, dt_plant):
+    """확인 런 실측 성능 변화 — 케이스별 perf_compare(기준 형상 지표, 확인 런 지표).
+
+    기준은 확인 런과 **같은 형상·같은 점·같은 기동**의 실측이어야 한다. ① 스윕 base 행 — 스윕이 기록한
+    기동(conditions.maneuver)이 확인 런과 같고, base 행 형상 지문이 현재 형상과 같고, 같은 이름의 좌표가
+    같을 때 ② 아니면 평가 결과 — 형상 지문·기록 기동(dt_plant 제외 — 기록이 없다)·좌표가 같을 때.
+    어느 쪽도 못 맞추면 비교를 지어내지 않고 사유와 함께 뺀다(기록 없는 옛 결과도 추측하지 않는다).
+    판정자는 여전히 확인 런의 evaluate다 — 이 수는 정보다.
+    """
+    from claw.pipeline.prescribe import PERF_METRICS_DEFAULT, perf_compare
+
+    metrics = list(perf_metrics or PERF_METRICS_DEFAULT)
+    man = dict(confirm.get("maneuver") or {}, dt_plant=dt_plant)
+    coords = {c.name: {"mach": float(c.mach), "alt": float(c.alt), "fuel": float(c.fuel)} for c in cases}
+
+    def coord_map(conds):
+        return {c.get("name"): {k: c.get(k) for k in ("mach", "alt", "fuel")}
+                for c in (conds or {}).get("cases") or []}
+
+    # ── 스윕 base — 기록 기동이 전 케이스 공통이라 한 번만 대조한다 ──
+    sweep_conditions = sweep_conditions or {}
+    sweep_man = sweep_conditions.get("maneuver")
+    if sweep_man is None:
+        sweep_block = "스윕에 기동 기록(conditions.maneuver)이 없다 — 옛 스윕이라 같은 기동인지 대조할 수 없다"
+    elif _diff_keys(sweep_man, man, _SWEEP_MANEUVER_KEYS):
+        diff = _diff_keys(sweep_man, man, _SWEEP_MANEUVER_KEYS)
+        sweep_block = ("스윕과 확인 런의 기동이 다르다: "
+                       + ", ".join(f"{k} {sweep_man.get(k)}≠{man.get(k)}" for k in diff))
+    else:
+        sweep_block = None
+    sweep_rows = {r["case"]: r for r in rows if r.get("label") == "base" and not r.get("aborted")}
+    sweep_coord = coord_map(sweep_conditions)
+
+    # ── 평가 결과 — 같은 형상·같은 기동일 때만 ──
+    ev_cases, ev_coord, ev_block = {}, {}, None
+    if not ev:
+        ev_block = "승계한 평가 결과가 없다"
+    elif ev.get("fingerprint") != shape_fp:
+        ev_block = "평가 결과의 형상 지문이 현재 형상과 다르다"
+    elif ev.get("maneuver") is None:
+        ev_block = "평가 결과에 기동 기록이 없다"
+    elif _diff_keys(ev["maneuver"], man, _EVAL_MANEUVER_KEYS):
+        diff = _diff_keys(ev["maneuver"], man, _EVAL_MANEUVER_KEYS)
+        ev_block = ("평가와 확인 런의 기동이 다르다: "
+                    + ", ".join(f"{k} {ev['maneuver'].get(k)}≠{man.get(k)}" for k in diff))
+    else:
+        ev_cases = {c["case"]: c.get("metrics_raw") or {} for c in ev.get("cases") or []}
+        ev_coord = coord_map(ev.get("conditions"))
+
+    out, omitted, sources, notes = {}, [], set(), []
+    for c in confirm.get("cases") or []:
+        name = c.get("case")
+        new = c.get("metrics_raw") or {}
+        if not new:
+            omitted.append({"case": name, "reason": "확인 런이 성능 지표를 재지 않았다(linear 또는 중단)"})
+            continue
+        # 스윕 base 후보
+        why_sweep = sweep_block
+        if why_sweep is None:
+            row = sweep_rows.get(name)
+            if row is None:
+                why_sweep = "스윕 base에 같은 이름의 케이스가 없다"
+            elif sweep_coord.get(name) != coords.get(name):
+                why_sweep = "스윕의 같은 이름 케이스가 다른 좌표다"
+            elif row.get("fingerprint") != shape_fp:
+                why_sweep = "스윕 base 행의 형상 지문이 현재 형상과 다르다"
+        if why_sweep is None:
+            out[name] = perf_compare(sweep_rows[name].get("metrics") or {}, new, metrics)
+            sources.add("sweep")
+            continue
+        # 평가 결과 후보
+        why_ev = ev_block
+        if why_ev is None:
+            if not ev_cases.get(name):
+                why_ev = "평가 결과에 이 케이스의 표준 기동 실측이 없다"
+            elif ev_coord.get(name) != coords.get(name):
+                why_ev = ("평가 결과에 좌표 기록이 없다" if name not in ev_coord
+                          else "평가의 같은 이름 케이스가 다른 좌표다")
+        if why_ev is None:
+            out[name] = perf_compare(ev_cases[name], new, metrics)
+            sources.add("evaluate")
+            continue
+        omitted.append({"case": name,
+                        "reason": f"기준 형상의 같은 기동 실측이 없다 — 스윕: {why_sweep} / 평가: {why_ev}"})
+    if "evaluate" in sources:
+        notes.append(f"평가 결과는 dt_plant를 기록하지 않는다 — 확인 런(dt_plant={dt_plant:g})과 적분 간격이 "
+                     "같은지는 대조하지 못했다")
+    return {"base_source": "+".join(sorted(sources)) or None, "metrics": metrics,
+            "cases": out, "omitted": omitted, "notes": notes}
 
 
 @router.post("/influence/prescribe", status_code=202)
@@ -755,6 +889,7 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
         # ── 승계 — 평가가 좁혀 준 것을 사용자가 다시 고르지 않는다 ──────────
         inherited = {"metrics": None, "knobs": None, "cases": None,
                      "from": req.eval_result_id or None}
+        ev = None
         if req.eval_result_id:
             try:
                 ev = store.load(req.eval_result_id)
@@ -817,6 +952,27 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
         unknown = [k for k in knobs if k not in universe]
         if unknown:
             raise ValueError(f"알 수 없는 파라미터 id: {unknown}")
+
+        targets = prescribe_targets(criteria)
+        want = inherited["metrics"]
+        if want:
+            # 평가가 실패라고 한 지표만 — 통과한 지표까지 풀면 표의 절반이
+            # "이미 문턱 안"으로 채워져 답이 묻힌다
+            focused = [t for t in targets if t[0] in set(want)]
+            if focused:
+                targets = focused
+        # 조합 해는 저장 스윕의 순수 변환(즉시)이라 제출 시점에 푼다 — 엔진이 모르는 성능 지표·가중
+        # 키(ValueError)가 잡 안에서 터지면 사유가 잡 오류로 묻힌다. 성능 목적은 하드 기준 전부를
+        # 지키므로 실패 지표 좁히기를 넘기지 않는다
+        if req.objective == "performance":
+            joint = solve_joint(rows, knobs, criteria, objective="performance",
+                                perf_metrics=req.perf_metrics, perf_weights=req.perf_weights,
+                                smooth_weight=req.smooth_weight)
+            inherited["note"] = ("성능 개선은 하드 기준 전부를 지킨다 — 평가가 좁힌 실패 지표는 "
+                                 "단일 필요 변화량 표에만 쓴다")
+        else:
+            joint = solve_joint(rows, knobs, criteria, objective="min_change",
+                                metrics=[t[0] for t in targets])
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -826,22 +982,12 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
 
     def work(job):
         job.report(0, total, message="처방 풀이(저장 스윕 재계산)")
-        targets = prescribe_targets(criteria)
-        want = inherited["metrics"]
-        if want:
-            # 평가가 실패라고 한 지표만 — 통과한 지표까지 풀면 표의 절반이
-            # "이미 문턱 안"으로 채워져 답이 묻힌다
-            focused = [t for t in targets if t[0] in set(want)]
-            if focused:
-                targets = focused
         singles = {}
         for knob in knobs:
             singles[knob] = {}
             for metric, limit, above in targets:
                 singles[knob][metric] = solve_single_knob(
                     rows, knob, metric, limit, above_is_bad=above)
-        joint = solve_joint(rows, knobs, criteria,
-                            metrics=[t[0] for t in targets])
         warnings = list(nonadditivity_warnings(payload, knobs))
         sweep_fp = payload.get("fingerprint") or ""
         shape_fp = shape.fingerprint()
@@ -860,6 +1006,11 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
         if all(abs(v) < 1e-6 for v in spans.values()) and spans:
             warnings.append("제안 변화가 0 — 확인 런 생략(확인할 새 형상이 없다)")
             spans = {}
+        # 성능 목적의 풀리지 않은 해는 후보가 아니다 — 하드 위반을 예측한 최선해를 확인하면 「성능 수정안」이
+        # 실측된 것처럼 읽힌다. 최소 수정은 종전대로(최선해도 확인해 판정을 본다)
+        if req.objective == "performance" and spans and not joint.get("solvable"):
+            warnings.append(f"성능 수정안이 풀리지 않았다 — 확인 런 생략({joint.get('reason')})")
+            spans = {}
         if req.confirm != "none" and spans:
             shape2, proposal_notes = proposal_shape(shape, spans)
             trs = trim_batch(
@@ -873,9 +1024,14 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
                 on_progress=lambda done, ev_total, msg: job.report(
                     1 + n + done, 1 + n + ev_total, message=f"확인: {msg}"))
             gain_export = proposal_export(shape2)
+            if req.objective == "performance":
+                confirm_report["perf"] = _confirm_perf(
+                    rows, payload.get("conditions"), ev, shape_fp,
+                    confirm_report, cases, joint.get("perf_metrics"), req.dt_plant)
 
         out = to_jsonable({
             "kind": "influence_prescribe",
+            "objective": req.objective,
             "sweep_result_id": req.result_id,
             "knobs": knobs,
             "inherited": inherited,
@@ -896,6 +1052,7 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
                    meta={"kind": "influence_prescribe", "profile": profile_echo(profile),
                          "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
                          "n": len(knobs), "fingerprint": req.fingerprint,
+                         "objective": req.objective,
                          "criteria_fingerprint": criteria.fingerprint()})
         job.result_id = job.id
 

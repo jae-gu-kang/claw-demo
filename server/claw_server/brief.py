@@ -224,7 +224,10 @@ JSON 하나를 읽고, 엔지니어가 30초 안에 상황을 잡는 한국어 �
   aggregate(hard_fail이면 불합격)
 - influence_verify: 3단계 검증(강건성 코너 재트림) / influence_scan·sweep·
   openloop: 감도(흔들면 얼마나 움직이나)
-- influence_prescribe: 정량 처방 — 수정안(singles/joint)·확인 런(confirm)
+- influence_prescribe: 정량 처방 — 수정안(singles/joint)·확인 런(confirm).
+  objective: min_change(하드 기준을 넘는 최소 수정) | performance(하드 기준을
+  지키며 RMS·정착시간·오버슈트 목적값을 줄임 — joint.objective_value·
+  perf_predicted는 선형 예측, confirm.perf는 확인 런 실측 변화. 합격은 confirm 판정)
 - llm_brief: 이 소견서 자신 / mission_draft: LLM 미션 초안
 
 ## 규칙

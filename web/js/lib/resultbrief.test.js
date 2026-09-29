@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { briefModel, jsonPreview, kindLabel } from "./resultbrief.js";
+import { briefModel, jsonPreview, kindDetail, kindLabel } from "./resultbrief.js";
 import { GOHEUNG } from "./site.js";
 
 const META = {
@@ -24,6 +24,15 @@ const trimRow = (name, mach, alt, fuel, { converged = true, bad = null } = {}) =
 test("kindLabel: 아는 코드는 우리말, 모르는 코드는 그대로 — 뭉개지 않는다", () => {
   assert.equal(kindLabel("trim_batch"), "트림 배치");
   assert.equal(kindLabel("brand_new_kind"), "brand_new_kind");
+});
+
+test("kindDetail: 처방 결과는 목적을 덧붙인다 — 옛 결과(목적 없음)·다른 종류는 빈칸", () => {
+  assert.equal(kindDetail({ kind: "influence_prescribe", objective: "performance" }), "성능 개선");
+  assert.equal(kindDetail({ kind: "influence_prescribe", objective: "min_change" }), "기준 충족 최소 수정");
+  assert.equal(kindDetail({ kind: "influence_prescribe" }), null);
+  assert.equal(kindDetail({ kind: "sim", objective: "performance" }), null);
+  const head = briefModel({ id: "p1", kind: "influence_prescribe", objective: "performance" }, {}).head;
+  assert.match(head.find(([k]) => k === "종류")[1], /성능 개선/);
 });
 
 test("트림 배치 — 수렴·판정 위반 집계와 격자 범위, 위반 케이스 목록", () => {

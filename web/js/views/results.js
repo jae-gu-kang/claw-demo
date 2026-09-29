@@ -17,7 +17,7 @@ import { lineageText } from "../lib/lineage.js";
 import {
   CRITERIA_JUDGED_KINDS, criteriaBadgeSpec, criteriaEchoCache, criteriaFreshness, resultFreshness,
 } from "../lib/freshness.js";
-import { briefModel, jsonPreview, kindLabel } from "../lib/resultbrief.js";
+import { briefModel, jsonPreview, kindDetail, kindLabel } from "../lib/resultbrief.js";
 import { STATUS } from "../lib/plot.js";
 import { revealPanel } from "../lib/reveal.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
@@ -535,7 +535,7 @@ function renderList(box, list, all, onToggle, opinion, onView, rows) {
       el("th", {}, "건수"), el("th", {}, "지문(계보)"), el("th", {}, ""))),
     el("tbody", {}, shown.map((m) => el("tr", {},
       el("td", {}, m.created ? new Date(m.created * 1000).toLocaleString() : "—"),
-      el("td", {}, kindLabel(m.kind),
+      el("td", {}, kindLabel(m.kind), kindDetail(m) ? ` · ${kindDetail(m)}` : null,
         // 코드도 함께 낸다 — 우리말 이름만 내면 API·다른 화면과 대조가 안 된다
         el("span", { class: "hint", style: "margin-left:6px" }, m.kind ?? "")),
       el("td", {}, aircraftCell(m.profile), freshnessChip(m.profile, rows, m.id), criteriaChip(m)),

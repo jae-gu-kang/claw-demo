@@ -1,7 +1,7 @@
 {
  "golden": "influence_sweep",
  "mode": "full",
- "captured_at": "3a2bd4c+dirty",
+ "captured_at": "dfba11a+dirty",
  "value": {
   "dict": {
    "fingerprint": "c48da3269a9a8e4c",
@@ -177,7 +177,17 @@
         "condition": "level"
        }
       }
-     ]
+     ],
+     "maneuver": {
+      "dict": {
+       "dv": "f:0x1.8000000000000p+1",
+       "dh": "f:0x1.e000000000000p+4",
+       "dpsi": "f:0x1.3333333333333p-2",
+       "t_settle": "f:0x1.0000000000000p+1",
+       "t_step": "f:0x1.0000000000000p+2",
+       "dt_plant": "f:0x1.47ae147ae147bp-7"
+      }
+     }
     }
    },
    "nonadditivity": []
