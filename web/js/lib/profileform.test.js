@@ -316,3 +316,53 @@ test("정적 안정성 위반 구간 곡선 — 위반 α 구간 안의 점만 �
   // 구간이 여럿이면 전부 — 한 점짜리 구간도 그 점을 싣는다
   assert.deepEqual(violationSeries(x, v, [[0.3, 0.3], [0.5, 0.5]]), [0.05, null, null, -0.01, null]);
 });
+
+test("loadingsNote — 문서가 탑재 구성(mass.loadings)을 적었으면 질량 절에 「CG 영향 미지원 — 대표 구성으로 계산」", async () => {
+  const { loadingsNote } = await import("./profileform.js");
+  assert.equal(loadingsNote({ mass: { loadings: null } }), null);
+  assert.equal(loadingsNote({ mass: { loadings: [] } }), null);
+  assert.equal(loadingsNote({ mass: {} }), null);
+  assert.equal(loadingsNote(null), null);
+  const t = loadingsNote({ mass: { loadings: [
+    { id: "eoir", name: "EO/IR", payload_kg: 3, cg: [0.1, 0, 0] }, { id: "empty", name: "무장 없음", payload_kg: 0, cg: null }] } });
+  assert.ok(t.startsWith("CG 영향 미지원 — 대표 구성으로 계산"), t);
+  assert.match(t, /EO\/IR/);
+  assert.match(t, /2개/);
+});
+
+test("upgradeNotice — 옛 스키마 문서를 올렸다는 서버 사유를 한 덩어리 안내로 (이관 11단계)", async () => {
+  const { upgradeNotice } = await import("./profileform.js");
+  assert.equal(upgradeNotice({ upgrade_notes: [] }), null);
+  assert.equal(upgradeNotice({}), null);
+  assert.equal(upgradeNotice(null), null);
+  // 서버가 주는 모양 그대로 — 엔진 upgrade_document의 {path, message}(server profiles.upgraded)
+  const notes = [
+    { path: "/operating", message: "운용 고도 [0 m, 3500 m]를 버렸다 — 요구영역 고도 [200, 3000] m와 달라 그 차이는 잃었다" },
+    { path: "/trim/alpha_bounds", message: "트림 받음각 탐색 범위를 해석 설정 /solver/trim_alpha_bounds로 옮겼다" },
+  ];
+  const lines = [
+    "/operating — 운용 고도 [0 m, 3500 m]를 버렸다 — 요구영역 고도 [200, 3000] m와 달라 그 차이는 잃었다",
+    "/trim/alpha_bounds — 트림 받음각 탐색 범위를 해석 설정 /solver/trim_alpha_bounds로 옮겼다",
+  ];
+  // 조회 — 저장본은 아직 옛 버전: 저장해야 새 리비전이 된다고 말한다
+  const got = upgradeNotice({ upgrade_notes: notes, stored_schema_version: 2, revision: 4,
+    document: { schema_version: 3 } });
+  assert.match(got.title, /스키마 v2 → v3/);
+  assert.match(got.text, /리비전 4 저장본은 스키마 v2/);
+  assert.match(got.text, /\[저장\]/);
+  assert.deepEqual(got.notes, lines);
+  assert.ok(got.notes.every((l) => !l.includes("[object") && !l.includes("{'")), got.notes);
+  // 생성·갱신 응답 — 이미 올려 저장했다
+  const put = upgradeNotice({ upgrade_notes: notes, revision: 5, document: { schema_version: 3 } });
+  assert.match(put.text, /올려 리비전 5로 저장/);
+  assert.doesNotMatch(put.text, /\[저장\]하면/);
+});
+
+test("upgradeNoteLine — {path, message} → 「경로 — 문장」, 경로 없으면 문장만, 모양이 다르면 null", async () => {
+  const { upgradeNoteLine } = await import("./profileform.js");
+  assert.equal(upgradeNoteLine({ path: "/law/alloc/de_trim", message: "다시 찍었다" }), "/law/alloc/de_trim — 다시 찍었다");
+  assert.equal(upgradeNoteLine({ path: "", message: "문장" }), "문장");
+  for (const bad of [null, undefined, "문자열", {}, { path: "/x" }, { path: "/x", message: "" }]) {
+    assert.equal(upgradeNoteLine(bad), null);
+  }
+});

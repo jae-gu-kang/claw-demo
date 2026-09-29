@@ -9,6 +9,8 @@
 쓴다 — 상위 경로가 통째로 덮어썼는데 하위 경로를 새로 만들면, 적용 순서에 따라 한쪽이 조용히 사라진다.
 */
 
+import { withJosa } from "./josa.js";
+
 export const FORBIDDEN_PATCH_ROOTS = ["schema_version", "id", "is_example", "variants"];
 
 /** "/a/b~1c" → ["a", "b/c"] (RFC 6901). */
@@ -403,4 +405,43 @@ export function stallNote(slice) {
   }
   if (slice.along === "mach" && st.table_curve) return "아래 그림은 실속 표 α_stall(M) — 같은 마하 축";
   return "";
+}
+
+/** 질량 절 안내 — 문서가 탑재 구성(mass.loadings)을 적었으면 한 줄, 아니면 null (스키마 v3 — 이관 11단계).
+ *  구성은 기록일 뿐 계산은 기본 질량 모델이다 — 조건 판정의 mass_condition과 같은 말(lib/plot.js CG_UNSUPPORTED). */
+export function loadingsNote(doc) {
+  const list = doc?.mass?.loadings;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const names = list.map((l) => l?.name || l?.id).filter(Boolean).join("·");
+  return `CG 영향 미지원 — 대표 구성으로 계산 · 탑재 구성 ${list.length}개(${names})는 기록만 — 트림·동역학은 `
+    + "기본 질량 모델(공허·연료 보간)로 계산하고, CG에 매인 검증은 통과로 집계하지 않는다";
+}
+
+/** 올림 사유 한 줄 — 서버 upgrade_notes 항목({path, message} — 엔진 upgrade_document 모양 그대로) → 「경로 — 문장」.
+ *  경로가 없으면 문장만. 모양이 다른 값은 거짓 문장을 만들지 않고 null(호출자가 거른다). */
+export function upgradeNoteLine(n) {
+  if (!n || typeof n.message !== "string" || !n.message) return null;
+  return n.path ? `${n.path} — ${n.message}` : n.message;
+}
+
+/** 스키마 올림 안내 — 서버 응답(GET·POST·PUT /profiles…)의 upgrade_notes → {title, text, notes(「경로 — 문장」 줄)} | null
+ *  (이관 11단계).
+ *  조회 응답의 stored_schema_version이 문서 버전보다 낮으면 **저장본은 아직 옛 버전**이다: 서버는 읽을 때마다 올려 보이고
+ *  계산하지만 디스크는 그대로다 — [저장]해야 올린 문서가 새 리비전이 된다(원본 리비전은 남는다). 생성·갱신 응답은 이미
+ *  올린 문서를 저장한 것이다(원본·사유는 서버 upgrade-{n}.json에 남는다). */
+export function upgradeNotice(body) {
+  const notes = Array.isArray(body?.upgrade_notes) ? body.upgrade_notes.map(upgradeNoteLine).filter(Boolean) : [];
+  if (!notes.length) return null;
+  const to = body?.document?.schema_version;
+  const from = body?.stored_schema_version;
+  const pending = typeof from === "number" && typeof to === "number" && from < to;
+  return {
+    title: pending ? `스키마 v${from} → v${to} 올림` : `스키마 v${to ?? "?"}로 올림`,
+    text: pending
+      ? `리비전 ${body.revision} 저장본은 스키마 v${from}입니다 — 올린 문서를 보이고 계산에도 씁니다. [저장]하면 올린 `
+        + "문서가 새 리비전이 되고, 옛 리비전은 그대로 남습니다."
+      : `들어온 옛 스키마 문서를 올려 리비전 ${withJosa(body?.revision ?? "?", "으로/로")} 저장했습니다 — 원본과 사유는 `
+        + "서버에 함께 남았습니다.",
+    notes,
+  };
 }

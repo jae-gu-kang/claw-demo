@@ -3,8 +3,9 @@
 - profile_fp: 적용된 문서(형상 변형 반영) 전체에서 **이름표만** 뺀 것. "어느 기체에서 나왔는가"를
   말하는 계보 지문이다 — 서버 결과 meta·응답의 `profile` 블록이 싣고, 스냅숏이 이 지문을 이름으로
   남는다. 이름을 바꿔도 같은 기체는 같은 지문이다(그래서 스냅숏의 이름표는 믿지 않는다).
-- plant_fp: 트림·선형화가 보는 섹션만. δe_trim 도출 표가 낡았는지(플랜트가 바뀌었는지)를
-  이것으로 판정한다 — 게인을 고쳤다고 표가 낡지는 않는다.
+- plant_fp: 트림·선형화가 보는 **기체** 섹션만. δe_trim 도출 표가 낡았는지(플랜트가 바뀌었는지)를
+  이것으로 판정한다 — 게인을 고쳤다고 표가 낡지는 않는다. 트림 풀이 설정(solver — 탐색 범위·잔차 허용치)은 기체가 아니라
+  풀이 방법이라 v3부터 여기 없다(05 §11.8) — 트림 결과의 키는 trim_fp(플랜트 지문 + 풀이 설정)다.
 
 해시 규격은 `claw.params.paramset.canonical_hash` 하나다(M15와 공유).
 """
@@ -14,7 +15,11 @@ import copy
 from claw.params.paramset import canonical_hash
 from claw.profile.patch import parse_pointer
 
-PLANT_SECTIONS = ("geometry", "aero", "stall", "mass", "propulsion", "ground", "trim", "surfaces")
+# v3: "trim" 절이 빠졌다 — 풀이 설정(solver)은 trim_fingerprint가, 판정선(criteria.trim_margin)은 판정 지문이 말한다
+PLANT_SECTIONS = ("geometry", "aero", "stall", "mass", "propulsion", "ground", "surfaces")
+# 플랜트 섹션 안이지만 트림·동역학이 읽지 않는 칸 — 탑재 구성(mass.loadings)은 자리만 있고 계산은 기본 질량 모델이다
+# (schema._loadings). 구성을 적었다고 δe_trim 표가 낡으면 안 된다. 계보 지문(profile_fp)에는 든다
+PLANT_EXCLUDED = (("mass", "loadings"),)
 
 # 지문에서 빼는 자리 — 이름표와 자유 텍스트 출처, 그리고 계산에 쓰이지 않는 화면 기본값(미션 템플릿 —
 # 결과는 실제로 보낸 요청을 싣는다)과 표시 모델(화면이 기체를 그리는 방법). 목록은 테스트가 고정한다
@@ -55,7 +60,18 @@ def _ordered_axes(aero: dict) -> dict:
 
 
 def plant_fingerprint(effective: dict) -> str:
-    return canonical_hash({k: (_ordered_axes(effective[k]) if k == "aero" else effective[k]) for k in PLANT_SECTIONS})
+    sections = {k: (_ordered_axes(effective[k]) if k == "aero" else effective[k]) for k in PLANT_SECTIONS}
+    for sec, key in PLANT_EXCLUDED:
+        if isinstance(sections.get(sec), dict) and key in sections[sec]:
+            sections[sec] = {k: v for k, v in sections[sec].items() if k != key}
+    return canonical_hash(sections)
+
+
+def trim_fingerprint(effective: dict) -> str:
+    """트림 결과의 키 — 플랜트 지문 + 풀이 설정(solver). 같은 기체라도 탐색 범위·잔차 허용치가 다르면 다른 트림이다
+    (05 §11.8 트림·모델 저장소 「키는 플랜트 지문 + 조건 식별자 + 트림 설정」). 판정선(criteria.trim_margin)은 넣지 않는다 —
+    판정선을 바꿔도 트림은 그대로 두고 여유 판정만 다시 한다."""
+    return canonical_hash({"plant": plant_fingerprint(effective), "solver": effective["solver"]})
 
 
 def gain_tables_basis_fingerprint(effective: dict) -> str:

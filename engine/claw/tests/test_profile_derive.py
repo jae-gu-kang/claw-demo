@@ -99,23 +99,23 @@ def test_derived_table_covers_plant_changing_variants_and_goes_stale_only_for_ne
     assert build_profile(doc).de_trim_stale is False
 
 
-def test_derivation_keeps_to_the_operating_altitudes_and_trims_at_the_ceiling():
-    """운용 범위 밖 고도는 재지 않고, 격자 사이에 있는 상한은 반드시 잰다 — 1g 요구가 가장 큰 곳이 상한이다.
-    요구영역이 없는 기체의 규칙이다(있으면 검사 고도는 요구영역 기본 격자 — 이관 9단계)."""
+def test_derivation_keeps_to_the_required_altitudes_and_trims_at_the_ceiling():
+    """요구 고도 밖은 재지 않고, 격자 사이에 있는 상한은 반드시 잰다 — 1g 요구가 가장 큰 곳이 상한이다. 스키마 v3에서
+    운용 고도는 요구영역 고도다(이관 11단계 — 옛 operating 절·alts_within 폐지). 요구영역이 없으면 DEFAULT_ALTS 그대로다."""
+    from claw.profile.derive import DEFAULT_ALTS
+
     doc = load_example()
     doc["mission_template"] = None  # trim_grid 초안도 없는 기체 — 요구영역 미정의
-    doc["operating"]["alt_max"] = 1000.0
     out = derive_de_trim(build_profile(doc), machs=(0.3, 0.5), fuel_fracs=(1.0,), check_step=0.1)
-    assert out["alloc"]["de_trim"]["provenance"]["alts"] == [0.0, 500.0, 1000.0]
+    assert out["alloc"]["de_trim"]["provenance"]["alts"] == list(DEFAULT_ALTS)
 
-    doc["operating"].update(alt_min=200.0, alt_max=2900.0)
+    doc["operating_region"] = {"mach": [0.2, 0.6], "alt": [200.0, 2900.0], "fuel": [0.0, 400.0], "boundary": None,
+                               "base_grid": {"n_mach": 5, "alts": [500.0, 1000.0, 1500.0, 2000.0, 2500.0],
+                                             "fuels": [400.0]}}
     built = build_profile(doc)
-    assert built.alts_within((0.0, 500.0, 1000.0, 1500.0, 2000.0, 2500.0, 3000.0)) == [
-        200.0, 500.0, 1000.0, 1500.0, 2000.0, 2500.0, 2900.0]
-    assert build_profile(dict(doc, operating={"alt_min": 4000.0, "alt_max": 5000.0})).alts_within((0.0, 3000.0)) == [
-        4000.0, 4500.0, 5000.0]
-    # 상한에서 요구를 덮는다 — 격자 사이 상한(2900 m)이 빠지면 M0.30에서 표가 요구를 0.53° 밑돌았다
     out = derive_de_trim(built, machs=(0.3, 0.4), fuel_fracs=(1.0,), check_step=0.05)
+    assert out["alloc"]["de_trim"]["provenance"]["alts"] == [200.0, 500.0, 1000.0, 1500.0, 2000.0, 2500.0, 2900.0]
+    # 상한에서 요구를 덮는다 — 격자 사이 상한(2900 m)이 빠지면 M0.30에서 표가 요구를 0.53° 밑돌았다
     from claw.common.contracts import TrimCase
     from claw.trim import trim_level
 

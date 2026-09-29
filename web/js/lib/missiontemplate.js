@@ -7,8 +7,10 @@
 값인 척하지 않는다. 사본과 예제 문서가 어긋나면 missiontemplate.test.js가 빨개진다.
 
 엔벨로프 α 여유와 마진 맵 작동기 칸은 템플릿이 아니라 기체 문서 본문(`law.alpha_margin`·`actuator`)에서
-읽는다 — 계산 입력이라 이미 문서에 있다. 엔벨로프 동압 한계·운용 고도 칸도 같다(`structural.q_max`·
-`operating`) — 문서가 null이면 빈칸(= 경계 없음)이 곧 그 기체의 값이다.
+읽는다 — 계산 입력이라 이미 문서에 있다. 엔벨로프 동압 한계 칸도 같다(`structural.q_max`) — 문서가 null이면
+빈칸(= 경계 없음)이 곧 그 기체의 값이다. 운용 고도 칸은 문서에서 채우지 않는다: 스키마 v3는 운용 고도가 요구영역
+고도(`operating_region.alt`)이고(05 §11.13 이관 11단계), 서버·엔진이 그 끝을 선도 끝으로 그린다 — 칸에 같은 값을
+채워 보내면 요구영역 끝이 「운용 입력」으로 두 번 그려진다. 칸은 연구용 덮어쓰기로만 남는다.
 */
 
 import { machRange } from "./grid.js";
@@ -21,7 +23,8 @@ export const DOC_FAILED_HINT = "고른 기체 문서를 받지 못해 예제 기
 
 /** 엔벨로프 폼 폴백 — 예제 기체 사본. margin은 제어법칙의 α 리미터 여유(law.alpha_margin)다. 스캔 격자 칸은 없다
  *  — 요구영역의 기본 격자(서버 /grid/base)에서 받는다(05 §11.13 이관 9단계).
- *  qMax·altMin·altMax는 예제 문서가 null(미기재 — 경계 없음)이라 빈칸이 곧 예제 값이다. */
+ *  qMax는 예제 문서가 null(미기재 — 경계 없음)이라 빈칸이 곧 예제 값이다. altMin·altMax는 문서에서 채우지 않는 연구용
+ *  덮어쓰기 칸이다(빈칸 = 요구영역 고도 끝). */
 export const ENVELOPE_FALLBACK = Object.freeze({
   alt: "1000", fuel: "25", margin: "0.05",
   qMax: "", altMin: "", altMax: "",
@@ -42,13 +45,8 @@ export function templateDefaults(doc) {
   const tpl = doc?.mission_template ?? null;
   const out = { hasTemplate: tpl != null, grid: null, envelope: {}, margins: {}, sim: null, rolloutM: null };
   if (typeof doc?.law?.alpha_margin === "number") out.envelope.margin = String(doc.law.alpha_margin);
-  // 동압 한계·운용 고도 — 문서 본문 값(템플릿 아님). null은 빈칸: 「경계 없음」도 그 기체의 값이다
-  if (doc?.structural || doc?.operating) {
-    const txt = (v) => (typeof v === "number" ? String(v) : "");
-    out.envelope.qMax = txt(doc.structural?.q_max);
-    out.envelope.altMin = txt(doc.operating?.alt_min);
-    out.envelope.altMax = txt(doc.operating?.alt_max);
-  }
+  // 동압 한계 — 문서 본문 값(템플릿 아님). null은 빈칸: 「경계 없음」도 그 기체의 값이다
+  if (doc?.structural) out.envelope.qMax = typeof doc.structural.q_max === "number" ? String(doc.structural.q_max) : "";
   const act = doc?.actuator;
   if (act?.type === "SecondOrderActuator" && act.params) {
     for (const k of ["wn", "zeta"]) if (typeof act.params[k] === "number") out.margins[k] = String(act.params[k]);

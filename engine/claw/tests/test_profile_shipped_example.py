@@ -59,7 +59,7 @@ def test_구_합성_기체를_무게비_상사로_줄였다(doc):
     속도류는 √무게비다. 법칙 설계 게인(SCAS·자동조종)은 상사가 아니다 — 2026-09 재튜닝에서 툴이 이 기체로 다시 도출했다
     (아래 test_법칙_설계는_툴_산출_근거_직행의_출력_그대로다)."""
     old = validate_document(json.loads(LEGACY.read_text(encoding="utf-8")))
-    for sec in ("geometry", "aero", "stall", "surfaces", "trim", "actuator"):
+    for sec in ("geometry", "aero", "stall", "surfaces", "solver", "actuator"):  # solver — v3 해석 설정(옛 trim 절)
         assert doc[sec] == old[sec], sec
     flat = lambda J: [v for row in J for v in row]  # noqa: E731 — approx는 중첩 목록을 못 받는다
     assert flat(doc["mass"]["J_full"]) == pytest.approx([v * R for v in flat(old["mass"]["J_full"])], abs=0.006)

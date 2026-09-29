@@ -25,6 +25,12 @@
 **트림 탭과 자동 설계는 같은 판정을 낸다** — 기체를 아는 문맥(`from_profile`)이면 미수렴 트림도 트림 탭과 같은 근거
 판정(opspace/states.py `trim_assessment` — 한계 고정 평형·V_S)을 거쳐 트림 사유가 「미수렴」 한 낱말로 뭉치지 않는다.
 
+**질량 조건**(v3 — 05 §11.13 11단계): 판정은 늘 기본 질량 모델(탑재 없음 = 대표 구성)의 트림이고 CG는 동역학에 없다
+(02 §5.6 [한계]). 문서가 탑재 구성(mass.loadings)을 적었어도 계산은 그 구성을 반영하지 않으므로 `mass_condition`
+{"loading": None, "loadings_declared": n, "cg_supported": False}로 그렇다고 싣는다 — **CG에 매인 검증은 이 판정으로 통과한
+것이 아니다**(구성별·CG 범위 검증은 「CG 영향 미지원」이고 합격으로 세지 않는다). 채택 정책은 바꾸지 않는다(기본 구성의
+판정은 그대로 유효하다).
+
 요구영역 포함 여부는 문맥의 요구영역으로 분류해 `region`에 싣되 채택에는 쓰지 않는다 — 자동 설계 격자는 이관 2단계부터
 요구영역의 기본 격자에서 나오므로(design/grid.py `region_grid`) 격자점은 애초에 요구영역 안이다. 기본 격자가 트림 **전에**
 모델 부족·요구영역 밖·요구 미정의로 표시한 점은 트림을 돌리지 않고 `pre_trim_verdict`로 같은 모양의 판정을 싣는다 —
@@ -55,6 +61,7 @@ class VerdictContext:
     mach_no: float | None
     limiter_margin: float | None
     fuel_max: float | None
+    loadings_declared: int = 0
     built: object = field(default=None, compare=False, repr=False)
     region: object = field(default=None, compare=False, repr=False)
     model: object = field(default=None, compare=False, repr=False)
@@ -66,7 +73,8 @@ class VerdictContext:
 
         return cls(trim_bounds=built.trim_bounds, db_ranges=dict(built.db_ranges()), q_max=built.q_max,
                    mach_no=built.structural_limits()["mach_no"], limiter_margin=built.law["alpha_margin"],
-                   fuel_max=float(built.doc["mass"]["fuel_max"]), built=built, region=region_of(built.doc),
+                   fuel_max=float(built.doc["mass"]["fuel_max"]), loadings_declared=built.loadings_declared,
+                   built=built, region=region_of(built.doc),
                    model=model_range_of(built), cache={} if cache is None else cache)
 
 
@@ -80,17 +88,33 @@ def _stall_at(trim_bounds, mach: float):
     return None if stall is None else float(stall.interp(mach=mach))
 
 
+def alpha_margin_short(tr, trim_bounds) -> bool | None:
+    """트림 α 여유 미달인가 — α_trim ≥ α_stall(M) − trim_bounds["alpha_margin"](지금 기준의 판정선). 실속표가 없으면 None.
+
+    트림이 풀 때 찍은 플래그(alpha_margin_ok)를 읽지 않고 지금 판정선으로 다시 잰다 — 판정선을 바꿔도 트림을 다시 풀지 않고
+    여유 판정만 다시 한다(05 §11.3). α는 트림 여유 수치(reserve)의 값을 써 trim_level 플래그와 같은 산술이다(자세에서 되짚으면
+    1 ulp가 갈려 경계 해의 판정이 뒤집힐 수 있다). 여유 수치가 없는 옛 해만 자세에서 잰다."""
+    a_stall = _stall_at(trim_bounds, tr.case.mach)
+    if a_stall is None:
+        return None
+    r = getattr(tr, "reserve", None) or {}
+    alpha = float(r["alpha"]["trim"]) if r.get("alpha") else _alpha(tr)
+    return not bool(alpha < a_stall - float(trim_bounds["alpha_margin"]))
+
+
 def margin_of(tr, trim_bounds) -> dict:
-    """여유 판정 {"status": "met"|"short"|"unevaluated", "reasons"} — 트림 탭 조건 상태와 자동 설계가 같이 쓰는 한 규칙."""
+    """여유 판정 {"status": "met"|"short"|"unevaluated", "reasons"} — 트림 탭 조건 상태와 자동 설계가 같이 쓰는 한 규칙.
+    판정선(sat_frac·thr_margin·alpha_margin)은 trim_bounds가 싣는 적용 기준이다(criteria.trim_margin, 이관 12단계)."""
     from claw.trim import saturation_detail
 
     if not tr.converged:
         return {"status": "unevaluated", "reasons": []}
-    short = [ch for ch, on in saturation_detail(tr, trim_bounds["de"]).items() if on]
+    short = [ch for ch, on in saturation_detail(tr, trim_bounds).items() if on]
     missing = []
-    if _stall_at(trim_bounds, tr.case.mach) is None:
+    a_short = alpha_margin_short(tr, trim_bounds)
+    if a_short is None:
         missing.append("stall_basis_missing")
-    elif not tr.flags.get("alpha_margin_ok"):
+    elif a_short:
         short.append("alpha_margin")
     status = "short" if short else ("unevaluated" if missing else "met")
     return {"status": status, "reasons": short + missing}
@@ -146,8 +170,13 @@ def _region(tr, ctx) -> dict | None:
     return {"status": cls or "in", "confirmed": bool(ctx.region.confirmed)}
 
 
+def mass_condition(ctx: VerdictContext) -> dict:
+    """판정이 가정한 질량 조건 — 기본 질량 모델(탑재 구성 없음). CG는 동역학에 없어 늘 cg_supported False(머리말)."""
+    return {"loading": None, "loadings_declared": int(ctx.loadings_declared), "cg_supported": False}
+
+
 def condition_verdict(tr, ctx: VerdictContext, *, trim=None, assess: bool = True) -> dict:
-    """트림 해 → {"trim", "model", "limits", "margin", "region", "adopted", "exclusion"}.
+    """트림 해 → {"trim", "model", "limits", "margin", "region", "mass_condition", "adopted", "exclusion"}.
 
     trim: 이미 잰 조건 상태 (state, reasons) — 트림 탭처럼 근거까지 잰 호출자가 넘긴다. 없으면 수렴 → 계산 가능, 미수렴은
     문맥이 기체를 알면(built) `trim_assessment`로 근거까지 재고, 모르거나 assess=False면 미평가(수렴 여부만 — δe_trim 도출처럼
@@ -177,7 +206,7 @@ def condition_verdict(tr, ctx: VerdictContext, *, trim=None, assess: bool = True
             exclusion = {"category": category, "reasons": list(item["reasons"])}
             break
     return {"trim": t, "model": model, "limits": limits, "margin": margin, "region": _region(tr, ctx),
-            "adopted": exclusion is None, "exclusion": exclusion}
+            "mass_condition": mass_condition(ctx), "adopted": exclusion is None, "exclusion": exclusion}
 
 
 # 트림 전 제외 상태 → 채택 제외 범주. 모델 부족은 요구 안이라 모델 범주, 요구영역 밖·미정의는 요구영역 범주다
@@ -196,5 +225,5 @@ def pre_trim_verdict(state: str, ctx: VerdictContext) -> dict:
     region = None if ctx.region is None else {
         "status": "in" if state == MODEL_GAP else state, "confirmed": bool(ctx.region.confirmed)}
     return {"trim": {"status": state, "reasons": [state]}, "model": dict(unevaluated), "limits": dict(unevaluated),
-            "margin": dict(unevaluated), "region": region, "adopted": False,
+            "margin": dict(unevaluated), "region": region, "mass_condition": mass_condition(ctx), "adopted": False,
             "exclusion": {"category": PRE_TRIM_CATEGORY[state], "reasons": [state]}}

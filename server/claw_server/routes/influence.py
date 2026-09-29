@@ -40,7 +40,7 @@ from claw_server.refs import (REQUEST_CRITERIA_REJECTED, criteria_echo, profile_
 from claw.trim import trim_batch
 from claw_server.routes.codegen import FlightCodeIn
 from claw_server.routes.sim import _load_sim, build_gain_tables
-from claw_server.routes.trim import TrimCaseIn, build_cases
+from claw_server.routes.trim import TrimCaseIn, build_cases, cases_echo
 from claw_server.serialize import to_jsonable
 
 router = APIRouter(tags=["influence"])
@@ -264,6 +264,7 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
         payload = to_jsonable(out)
         payload["kind"] = "influence_openloop"
         payload["profile"] = profile_echo(profile)
+        payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         store.save(
             job.id, payload,
             meta={"kind": "influence_openloop", "profile": profile_echo(profile), "created": job.created,
@@ -377,6 +378,7 @@ def submit_sweep(req: SweepIn, request: Request, response: Response) -> dict:
         payload = to_jsonable(out)
         payload["kind"] = "influence_sweep"
         payload["profile"] = profile_echo(profile)
+        payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         payload["nonadditivity"] = to_jsonable(nonadd)
         store.save(
             job.id, payload,
@@ -457,6 +459,7 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
         payload = to_jsonable(out)
         payload["kind"] = "influence_scan"
         payload["profile"] = profile_echo(profile)
+        payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         payload["criteria_echo"] = criteria_echo(criteria, crit_source)
         # 문턱은 평가 기준 정본에서 — 진단·평가·스캔이 각자 상수를 들면 같은 런이
         # 화면마다 다른 판정을 받는다 (02 §5.5)
@@ -566,6 +569,7 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
         payload = to_jsonable(out)
         payload["kind"] = "influence_evaluate"
         payload["profile"] = profile_echo(profile)
+        payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         # 본문의 "criteria"는 엔진이 실은 기준 전문(화면이 판정선을 읽는다)이다 — 기준 블록은 모든 라우트가 본문·meta
         # 둘 다 "criteria_echo"로 싣는다(이름 하나로 화면이 결과 종류를 가리지 않고 대조한다)
         payload["criteria_echo"] = criteria_echo(criteria, crit_source)
@@ -674,6 +678,8 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
         payload = to_jsonable(out)
         payload["kind"] = "influence_verify"
         payload["profile"] = profile_echo(profile)
+        # 실행 조건 — 요청 케이스와 서버가 부가한 격자 중간점(이관 13단계)
+        payload["conditions"] = {"cases": cases_echo(cases), "midpoints": cases_echo(mids)}
         payload["criteria_echo"] = criteria_echo(criteria, crit_source)
         store.save(
             job.id, payload,
@@ -884,6 +890,7 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
             "warnings": warnings,
             "profile": profile_echo(profile),
             "criteria_echo": criteria_echo(criteria, crit_source),
+            "conditions": {"cases": cases_echo(cases)},  # 확인 런의 격자(이관 13단계)
         })
         store.save(job.id, out,
                    meta={"kind": "influence_prescribe", "profile": profile_echo(profile),

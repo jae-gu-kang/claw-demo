@@ -54,6 +54,8 @@ export function cellOf(doc, defaults, group, key) {
 /** 응답 본문(lines·defaults) + 편집 중 문서 → 표의 행.
  *  rows: 판정선마다 {metric,label,unit,direction,hint,ratio, pass,rec,target(칸|null), shared:{pass,rec}(같은 칸을 쓰는
  *  다른 지표 이름)}. extras: 판정선 그룹(margin 등) 칸 중 어느 판정선도 쓰지 않는 수치 칸 — 한 줄씩 고친다.
+ *  groups: 판정선 표 밖 그룹 중 서버가 이름표를 준 것(body.groups — 트림 여유 판정선, 이관 12단계) — {group, title,
+ *  cells: 칸 + {label, unit, help}}. 이름·단위·뜻은 엔진이 정본이라 여기서 적지 않는다(기본값에 없는 그룹은 세우지 않는다).
  *  others: 이 표 밖의 칸에 문서가 적은 경로(JSON 글에서 고친다) */
 export function buildRows(body, doc) {
   const lines = Array.isArray(body?.lines) ? body.lines : [];
@@ -89,7 +91,16 @@ export function buildRows(body, doc) {
       if (c.editable) extras.push(c);
     }
   }
-  const shown = new Set([...used, ...extras.map((c) => `${c.group}/${c.key}`)]);
+  const groups = (Array.isArray(body?.groups) ? body.groups : [])
+    .filter((g) => isObj(defaults[g?.group]) && !TUNING_GROUPS.includes(g.group))
+    .map((g) => ({
+      group: g.group, title: g.title ?? g.group,
+      cells: (g.cells ?? []).filter((c) => c?.key in defaults[g.group])
+        .map((c) => ({ ...cellOf(doc, defaults, g.group, c.key), label: c.label ?? c.key, unit: c.unit ?? "",
+          help: c.help ?? "" })),
+    }));
+  const shown = new Set([...used, ...extras.map((c) => `${c.group}/${c.key}`),
+    ...groups.flatMap((g) => g.cells.map((c) => `${c.group}/${c.key}`))]);
   const others = [];
   for (const sec of ["criteria", "tuning"]) {
     const s = doc?.[sec];
@@ -99,7 +110,7 @@ export function buildRows(body, doc) {
       for (const k of Object.keys(grp)) if (!shown.has(`${g}/${k}`)) others.push(`/${sec}/${g}/${k}`);
     }
   }
-  return { rows, extras, others };
+  return { rows, extras, groups, others };
 }
 
 /** 문서에 칸 하나를 쓰거나(value) 지운다(undefined — 기본값을 따르게). **새 문서**를 돌려준다(원본 불변).

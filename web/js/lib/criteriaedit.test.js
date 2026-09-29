@@ -73,7 +73,7 @@ test("buildRows: 판정선마다 합격·권장·목표 칸, 비율 판정선 �
 });
 
 test("buildRows: 빈 본문이면 빈 표", () => {
-  assert.deepEqual(buildRows(null, {}), { rows: [], extras: [], others: [] });
+  assert.deepEqual(buildRows(null, {}), { rows: [], extras: [], groups: [], others: [] });
 });
 
 test("setCriteriaValue: 희소하게 쓰고 원본은 그대로", () => {
@@ -176,4 +176,30 @@ test("effectiveCriteria — 축별 한계 칸은 적은 축만 기본값 위에 
   const eff = effectiveCriteria(doc, defaults);
   assert.deepEqual(eff.response.rms_max, { alt: 5, spd: 2, hdg: 0.1 });
   assert.equal(eff.margin.pm_min_deg, 45);
+});
+
+test("buildRows: 판정선 표 밖 그룹(트림 여유 판정선)은 서버 이름표대로 칸을 세우고 「표 밖」 목록에서 빠진다", () => {
+  // 서버 groups — 이름·단위·뜻은 엔진 TRIM_MARGIN_LABELS가 정본(이관 12단계)
+  const groups = [{ group: "trim_margin", title: "트림 여유 판정선", cells: [
+    { key: "sat_frac", label: "포화 등고선", unit: "-", help: "한계의 이 비율 이상이면 미달" },
+    { key: "thr_margin", label: "스로틀 하한 여유", unit: "-", help: "아이들 + 이 값 이하" },
+    { key: "alpha_margin", label: "트림 α 여유", unit: "rad", help: "α_stall − 이 값" },
+  ] }, { group: "없는그룹", title: "?", cells: [{ key: "x", label: "x", unit: "", help: "" }] }];
+  const body = { ...BODY, groups,
+    defaults: { ...DEFAULTS, trim_margin: { sat_frac: 0.95, thr_margin: 0.02, alpha_margin: 0.035 } } };
+  const doc = { criteria: { trim_margin: { sat_frac: 0.9 } }, tuning: null };
+  const { groups: out, others } = buildRows(body, doc);
+  assert.equal(out.length, 1, "기본값에 없는 그룹은 세우지 않는다");
+  const g = out[0];
+  assert.equal(g.title, "트림 여유 판정선");
+  assert.deepEqual(g.cells.map((c) => [c.key, c.label, c.unit, c.value, c.written]), [
+    ["sat_frac", "포화 등고선", "-", 0.9, true],
+    ["thr_margin", "스로틀 하한 여유", "-", 0.02, false],
+    ["alpha_margin", "트림 α 여유", "rad", 0.035, false],
+  ]);
+  assert.equal(g.cells[0].path, "/criteria/trim_margin/sat_frac");
+  assert.ok(g.cells.every((c) => c.editable && c.help));
+  assert.deepEqual(others, [], "그룹 칸은 이제 표 안이다 — JSON 글로 미루지 않는다");
+  // 옛 서버(groups 없음) — 종전처럼 적은 칸이 「표 밖」에 남는다
+  assert.deepEqual(buildRows({ ...body, groups: undefined }, doc).others, ["/criteria/trim_margin/sat_frac"]);
 });

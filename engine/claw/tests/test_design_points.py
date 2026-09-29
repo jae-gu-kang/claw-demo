@@ -141,13 +141,22 @@ def test_envelope_verdict_reasons_priority():
 
     saturated_throttle_high는 이제 **대리 지표가 아니라 추진 한계 그 자체**다 —
     프로펠러 추력 모델(plant/prop.py PropEngine)이 들어오면서 포화가 곧 "이 조건에서
-    프로펠러가 더 못 낸다"가 됐다 (trim.py SAT_FRAC 95% 등고선 기준).
+    프로펠러가 더 못 낸다"가 됐다 (판정선 criteria.trim_margin.sat_frac 95% 등고선 기준).
+
+    α 여유는 트림 때 찍힌 플래그가 아니라 **지금 기준의 판정선**으로 다시 잰다(이관 12단계) — 대역의 받음각(≈ 0.038 rad)이
+    판정 한계를 넘도록 트림 α 여유를 크게 적은 기체 문맥(strict)에서 본다. 실제 기체에서는 트림 α 여유(0.035)가 리미터
+    여유(0.05)보다 작아 α 여유 미달 해가 모두 리미터 제한에 먼저 걸린다(05 §11.3) — 채택을 막지 않는 여유 사유만 떼어
+    보려고 판정선을 옮긴다.
     """
     from claw.design.points import envelope_ok, envelope_verdict
     from claw.opspace.verdict import VerdictContext, condition_verdict
-    from claw.profile import example_profile
+    from claw.profile import build_profile, example_profile, load_example
 
     ctx = VerdictContext.from_profile(example_profile())
+    doc = load_example()
+    a_stall = float(example_profile().stall_table().interp(mach=0.4))
+    doc["criteria"] = {"trim_margin": {"alpha_margin": a_stall - 0.02}}
+    strict = VerdictContext.from_profile(build_profile(doc))
     good = _fake_tr()
     # 대역에는 트림 여유 수치가 없다 — reserve는 None(미계산)이지 0이 아니다
     assert envelope_verdict(good, ctx) == {"ok": True, "reasons": [], "reserve": None,
@@ -160,22 +169,22 @@ def test_envelope_verdict_reasons_priority():
     assert v["ok"] is False and v["ok"] == envelope_ok(tr, ctx)
     assert v["reasons"][0] == "not_converged" and v["verdict"]["exclusion"]["category"] == "trim"
     cases = [
-        (_fake_tr(alpha_ok=False), "alpha_margin", "alpha_margin"),
-        (_fake_tr(thr=0.97), "saturated_throttle_high", "throttle_high"),
-        (_fake_tr(de=0.34), "saturated_de", "de"),
-        (_fake_tr(de=-0.34), "saturated_de", "de"),  # 음의 한계 쪽 — 방향별 한계식의 lo 가지
-        (_fake_tr(thr=0.01), "saturated_throttle_low", "throttle_low"),
+        (_fake_tr(alpha_ok=False), "alpha_margin", "alpha_margin", strict),
+        (_fake_tr(thr=0.97), "saturated_throttle_high", "throttle_high", ctx),
+        (_fake_tr(de=0.34), "saturated_de", "de", ctx),
+        (_fake_tr(de=-0.34), "saturated_de", "de", ctx),  # 음의 한계 쪽 — 방향별 한계식의 lo 가지
+        (_fake_tr(thr=0.01), "saturated_throttle_low", "throttle_low", ctx),
     ]
-    for tr, reason, margin_code in cases:
-        v = envelope_verdict(tr, ctx)
-        assert v["ok"] is True and v["ok"] == envelope_ok(tr, ctx), reason
+    for tr, reason, margin_code, c in cases:
+        v = envelope_verdict(tr, c)
+        assert v["ok"] is True and v["ok"] == envelope_ok(tr, c), reason
         assert v["reasons"] == [reason], reason
         assert v["verdict"]["exclusion"] is None, reason
         assert v["verdict"]["margin"] == {"status": "short", "reasons": [margin_code]}, reason
 
     # 복합 실패 — 우선순위 순서 유지 (첫 항목이 표시 대표)
     multi = _fake_tr(converged=False, alpha_ok=False, thr=0.97)
-    assert envelope_verdict(multi, ctx)["reasons"] == [
+    assert envelope_verdict(multi, strict)["reasons"] == [
         "not_converged", "alpha_margin", "saturated_throttle_high"]
 
 
@@ -188,6 +197,7 @@ def test_pre_trim_states_match_the_verdict_and_designable_leaves_them_out():
 
     class _Ctx:
         region = None
+        loadings_declared = 0
 
     ps = PointSet()
     for m in (0.3, 0.4, 0.5):

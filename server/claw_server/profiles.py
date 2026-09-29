@@ -5,6 +5,7 @@
     {root}/{id}/rev-{n}.json   검증·정규화된 문서 전체 (형상 변형 포함)
     {root}/{id}/head.json      {"revision": n}
     {root}/_snapshots/{fp}.json 계산에 실제로 쓴 **적용 문서**(형상 변형 반영) — 지문으로 찾는다
+    {root}/_snapshots/{fp}-{h}.json 같은 지문인데 내용이 다른 적용 문서 — h는 이름표를 뺀 문서 전체의 해시(snapshot_hash)
 
 기체 id는 `_`로 시작할 수 없다(내부 폴더 자리). 삭제는 head만 지워 목록·조회에서 빼고 리비전 파일은
 남긴다 — 같은 id로 다시 만들면 리비전 번호를 이어 세어, 옛 결과의 (id, 리비전)이 새 문서를 가리키지
@@ -16,11 +17,21 @@
 문서와 스냅숏은 결과·설계 재개가 기대는 원본이라 지우면 안 된다. 스냅숏은 기체를 지워도 남는다 —
 그 기체로 계산한 옛 결과가 무엇으로 계산됐는지를 말할 수 있어야 하기 때문이다.
 
+스키마 올림(v2 → v3, 05 §11.13 이관 11단계 — 엔진 `upgrade_document`)은 거부가 아니라 올림이다:
+
+- **저장된 옛 리비전은 디스크에서 고치지 않는다.** 읽을 때마다 올려서 검증하고(결정적이라 같은 리비전은 늘 같은
+  v3 문서다), 조회가 사유(upgrade_notes)를 함께 준다. 사용자가 저장해야(PUT·잡 저장) v3 새 리비전이 생긴다 —
+  읽기만으로 리비전이 늘면 두 화면의 base_revision 대조가 까닭 없이 깨지고, (id, 리비전)이 가리키던 원본이 바뀐다.
+- **생성·갱신으로 들어온 옛 문서**(가져오기 포함)는 올린 v3를 리비전으로 쓰고, 원본과 사유를 `upgrade-{n}.json`에
+  남긴다 — 올림이 버린 칸(스캔 격자 등)을 되짚을 길이 없으면 조용한 손실이다.
+- 스냅숏의 올림은 refs.resolve_snapshot 몫이다(옛 결과의 계보).
+
 예제 기체는 엔진 패키지 데이터이고 읽기 전용이다(리비전 0). 저장은 tmp→rename 원자 쓰기이고,
 갱신은 base_revision이 head와 같을 때만 받는다 — 두 화면이 같은 기체를 고치면 나중 저장이 앞의 것을
 조용히 덮지 않고 충돌로 드러난다.
 """
 
+import copy
 import json
 import math
 import re
@@ -28,6 +39,7 @@ import threading
 from pathlib import Path
 
 from claw.profile import EXAMPLE_ID, ProfileError, build_profile, load_example, validate_document
+from claw.profile.schema import SCHEMA_VERSION
 
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")  # 스키마의 id 규칙과 같다 — 경로 조작 차단을 겸한다
 EXAMPLE_REVISION = 0
@@ -68,6 +80,34 @@ def _nonfinite_path(obj, path: str = "") -> str | None:
         if found:
             return found
     return None
+
+
+# 스냅숏 내용 해시에서 빼는 이름표 — 이름만 다른 기체(예제 복제)는 같은 스냅숏을 쓰고 이름표는 결과 echo가 말한다
+# (refs.resolve_snapshot). 계보 지문이 빼는 것 중 **이름표만** 뺀다 — 기준·템플릿·출처 기록은 계산·낡음 판정에 든다
+_SNAPSHOT_LABELS = ("id", "name", "description", "is_example")
+
+
+def snapshot_hash(doc) -> str:
+    """스냅숏 내용 해시 — 같은 지문·다른 내용을 가르는 두 번째 열쇠(ProfileStore.snapshot)."""
+    from claw.params.paramset import canonical_hash
+
+    return canonical_hash({k: v for k, v in doc.items() if k not in _SNAPSHOT_LABELS})
+
+
+def upgraded(raw) -> tuple:
+    """옛 스키마 문서 → (올린 문서, 사유 [{"path", "message"}], 원래 버전 | None). 사유는 엔진 모양 그대로 싣는다 —
+    화면이 경로와 문장을 갈라 그린다(「경로 — 문장」). 지금 버전·판정 불가(객체 아님·버전 없음)는 그대로 돌려준다.
+    엔진이 올리지 않는 옛 버전(v1 등)은 엔진이 원문 그대로 돌려주고(사유 없음) 검증기가 「지원 스키마 버전」으로
+    거부한다 — 여기서는 원래 버전을 None으로 둔다(올리지 않았다)."""
+    sv = raw.get("schema_version") if isinstance(raw, dict) else None
+    if isinstance(sv, bool) or not isinstance(sv, int) or sv >= SCHEMA_VERSION:
+        return raw, [], None
+    from claw.profile.schema import upgrade_document
+
+    doc, notes = upgrade_document(copy.deepcopy(raw))
+    if not notes and doc.get("schema_version") == sv:
+        return raw, [], None  # 엔진이 옮기지 않은 버전 — 검증기가 말한다
+    return doc, [{"path": n["path"], "message": n["message"]} for n in notes], sv
 
 
 def _de_trim_summary(doc: dict, built, variant_builts: dict) -> dict | None:
@@ -160,6 +200,7 @@ class ProfileStore:
         self._snapshots = self.root / "_snapshots"
         self._snapshots.mkdir(exist_ok=True)
         self._lock = threading.Lock()
+        self._snap_hash = {}  # 스냅숏 파일 이름 → 내용 해시 (계산마다 파일을 다시 읽지 않게)
 
     # ── 조회 ────────────────────────────────────────────────────────────────
     @staticmethod
@@ -198,11 +239,12 @@ class ProfileStore:
                       if d.is_dir() and _ID_RE.fullmatch(d.name) and not d.name.startswith("_")
                       and (d / "head.json").exists())
 
-    def get(self, profile_id: str, revision: int | None = None) -> tuple:
+    def get(self, profile_id: str, revision: int | None = None, *, notes_out=None) -> tuple:
         """(**다시 검증한** 문서, 리비전). 없으면 KeyError, id 형식이 틀리면 ValueError, 저장본이
         손상됐거나 지금 스키마를 못 넘으면 ProfileUnreadable.
 
-        읽을 때마다 검증한다 — 저장 시점에 통과한 문서도 스키마가 바뀌면 조립 도중 예외로 터진다."""
+        읽을 때마다 검증한다 — 저장 시점에 통과한 문서도 스키마가 바뀌면 조립 도중 예외로 터진다. 옛 스키마
+        저장본은 올려서 검증하고 파일은 두며, 사유를 notes_out에 덧붙인다(머리말 — 올림 정책)."""
         if profile_id == EXAMPLE_ID:
             if revision not in (None, EXAMPLE_REVISION):
                 raise KeyError(f"{profile_id}@{revision}")
@@ -216,13 +258,26 @@ class ProfileStore:
         except (ValueError, OSError) as e:  # ValueError: 손상 JSON과 UTF-8이 아닌 파일 둘 다
             raise ProfileUnreadable(f"기체 문서를 읽을 수 없다: {profile_id}@{rev} ({type(e).__name__})") from None
         try:
-            doc = validate_document(raw)
+            up, notes, _ = upgraded(raw)
+            doc = validate_document(up)
         except ProfileError as e:
             raise ProfileUnreadable(f"저장된 기체 문서가 현재 스키마를 넘지 못한다: {profile_id}@{rev} — {e}") from None
         bad = _nonfinite_path(doc)  # 손으로 고친 파일의 NaN — 두면 조회는 null로 조용히 내보내고 계산의 스냅숏 쓰기는 500이다
         if bad:
             raise ProfileUnreadable(f"저장된 기체 문서에 NaN·Infinity가 있다: {profile_id}@{rev} {bad}")
+        if notes_out is not None:
+            notes_out.extend(notes)
         return doc, rev
+
+    def stored_schema_version(self, profile_id: str, revision: int):
+        """저장 파일에 적힌 스키마 버전 — 조회 응답이 「옛 버전 저장본을 올려 보인다」를 말할 근거. 못 읽으면 None."""
+        if profile_id == EXAMPLE_ID:
+            return SCHEMA_VERSION
+        try:
+            raw = json.loads((self._dir(profile_id) / f"rev-{revision}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return raw.get("schema_version") if isinstance(raw, dict) else None
 
     def written_gain_tables(self, profile_id: str, doc: dict, revision: int) -> dict | None:
         """반영이 쓴 리비전의 확정 표 절 — 요약의 `applied_design` 재료. 반영 기록이 아니거나 그 리비전을
@@ -272,8 +327,9 @@ class ProfileStore:
         사라지면 화면이 지울 id를 알 길이 없다."""
         out = [self.summary(*self.get(EXAMPLE_ID))]
         for pid in self.ids():
+            notes = []
             try:
-                doc, revision = self.get(pid)
+                doc, revision = self.get(pid, notes_out=notes)
             except KeyError as e:
                 # head가 없으면 목록을 훑는 사이 지워진 것이다. head는 있는데 리비전 파일이 없으면 손상이다 —
                 # 건너뛰면 목록에서 사라지는데 같은 id 생성은 head 때문에 409라, 지울 id를 화면이 모르게 된다
@@ -284,7 +340,10 @@ class ProfileStore:
                 out.append({"id": pid, "unreadable": True, "reason": str(e)})
                 continue
             try:
-                out.append(self.summary(doc, revision, self.written_gain_tables(pid, doc, revision)))
+                row = self.summary(doc, revision, self.written_gain_tables(pid, doc, revision))
+                if notes:  # 옛 스키마 저장본 — 저장하면 올린 문서가 새 리비전이 된다(키는 그때만 — 종전 줄 모양 보존)
+                    row["upgrade_notes"] = notes
+                out.append(row)
             except (KeyError, ValueError, TypeError) as e:
                 # 조립 실패 — 레지스트리 오류(RegistryError)는 KeyError라, 위와 한 except로 묶으면 지운 기체로
                 # 오인돼 목록에서 사라진다
@@ -293,10 +352,12 @@ class ProfileStore:
 
     # ── 쓰기 ────────────────────────────────────────────────────────────────
     @classmethod
-    def checked(cls, document) -> dict:
+    def checked(cls, document, *, notes_out=None) -> dict:
         """저장 규칙으로 검증한 문서 — 생성·갱신과 `/profiles/validate`가 같은 규칙을 쓴다(검증은 통과했는데
-        저장이 거부하는 문서가 없게). 어긋나면 경로가 붙은 ProfileError."""
-        doc = validate_document(document)
+        저장이 거부하는 문서가 없게). 어긋나면 경로가 붙은 ProfileError. 옛 스키마 문서는 올려서 검증하고 사유를
+        notes_out에 덧붙인다."""
+        up, notes, _ = upgraded(document)
+        doc = validate_document(up)
         if doc["is_example"]:
             raise ProfileError("/is_example", "서버에 저장하는 기체는 예제일 수 없다 — 예제는 엔진 패키지 데이터다")
         if doc["id"] == EXAMPLE_ID:
@@ -307,7 +368,18 @@ class ProfileStore:
         bad = _nonfinite_path(doc)
         if bad:
             raise ProfileError(bad, "JSON으로 저장할 수 없는 값(NaN·Infinity) — 저장본은 표준 JSON이다")
+        if notes_out is not None:
+            notes_out.extend(notes)
         return doc
+
+    def _record_upgrade(self, d: Path, rev: int, original, notes: list) -> None:
+        """들어온 옛 문서의 원본·사유 — 올린 리비전 옆에 남긴다(rev-*.json 셈에 끼지 않는 이름)."""
+        if not notes:
+            return
+        rec = {"revision": rev, "from_schema_version": original.get("schema_version"), "notes": notes,
+               # 원본에 NaN이 있으면 표준 JSON으로 못 쓴다 — 사유는 남기고 원본은 뺀다(저장을 500으로 죽이지 않는다)
+               "original": None if _nonfinite_path(original) else original}
+        self._write(d / f"upgrade-{rev}.json", rec)
 
     @staticmethod
     def _max_revision(d: Path) -> int:
@@ -316,8 +388,9 @@ class ProfileStore:
                 if (m := re.fullmatch(r"rev-([0-9]+)", p.stem))]
         return max(revs, default=0)
 
-    def create(self, document) -> tuple:
-        doc = self.checked(document)
+    def create(self, document, *, notes_out=None) -> tuple:
+        notes = []
+        doc = self.checked(document, notes_out=notes)
         with self._lock:
             d = self._dir(doc["id"])
             if (d / "head.json").exists():
@@ -332,14 +405,18 @@ class ProfileStore:
             # 가리키면 안 된다 (지운 기체의 리비전 파일은 스냅숏처럼 남긴다)
             rev = self._max_revision(d) + 1
             self._write(d / f"rev-{rev}.json", doc)
+            self._record_upgrade(d, rev, document, notes)
             self._write(d / "head.json", {"revision": rev})
+        if notes_out is not None:
+            notes_out.extend(notes)
         return doc, rev
 
-    def update(self, profile_id: str, document, base_revision: int) -> tuple:
+    def update(self, profile_id: str, document, base_revision: int, *, notes_out=None) -> tuple:
         if profile_id == EXAMPLE_ID:
             raise ProfileReadOnly("예제 기체는 고칠 수 없다 — 복제해서 새 기체로 만든다")
         self._dir(profile_id)  # id 형식 검사 — 문서 검증보다 먼저
-        doc = self.checked(document)
+        notes = []
+        doc = self.checked(document, notes_out=notes)
         if doc["id"] != profile_id:
             raise ProfileError("/id", f"경로의 id({profile_id})와 문서의 id({doc['id']})가 다르다")
         with self._lock:
@@ -351,7 +428,10 @@ class ProfileStore:
             rev = head + 1
             d = self._dir(profile_id)
             self._write(d / f"rev-{rev}.json", doc)
+            self._record_upgrade(d, rev, document, notes)
             self._write(d / "head.json", {"revision": rev})
+        if notes_out is not None:
+            notes_out.extend(notes)
         return doc, rev
 
     def install(self, document) -> tuple:
@@ -402,16 +482,37 @@ class ProfileStore:
 
     # ── 스냅숏 ──────────────────────────────────────────────────────────────
     def snapshot(self, built) -> None:
-        """계산에 쓴 적용 문서를 지문으로 남긴다 — 같은 지문이면 이미 있는 것을 둔다."""
-        path = self._snapshots / f"{built.fingerprint}.json"
-        if not path.exists():
-            with self._lock:
-                if not path.exists():
-                    self._snapshots.mkdir(parents=True, exist_ok=True)
-                    self._write(path, built.doc)
+        """계산에 쓴 적용 문서를 지문으로 남긴다 — 같은 지문·같은 내용이면 이미 있는 것을 둔다.
+
+        지문(계보 지문)은 기준·미션 템플릿·표시 모델 등을 뺀 해시라, **내용이 다른 두 문서가 같은 지문**일 수 있다(기준만
+        다른 두 기체, 트림 α 여유만 달랐던 두 v2 문서를 올린 것 — 여유는 지문 밖 기준으로 옮겨 간다). 먼저 남은 것을 두고
+        조용히 넘어가면 뒤 결과의 재개가 **다른 문서**로 조립된다. 그래서 내용이 다르면 `{지문}-{내용 해시}`로 따로 남기고
+        built.snapshot_key에 적는다 — 결과 echo(refs.profile_echo)가 그 키를 싣고 재개(resolve_snapshot)가 그 파일을 읽는다."""
+        fp = built.fingerprint
+        h = snapshot_hash(built.doc)
+        with self._lock:
+            self._snapshots.mkdir(parents=True, exist_ok=True)
+            path = self._snapshots / f"{fp}.json"
+            if not path.exists():
+                self._write(path, built.doc)
+                self._snap_hash[fp] = h
+                return
+            if fp not in self._snap_hash:
+                try:
+                    self._snap_hash[fp] = snapshot_hash(json.loads(path.read_text(encoding="utf-8")))
+                except (OSError, ValueError, TypeError, AttributeError):
+                    self._snap_hash[fp] = None  # 손상 — 덮지 않는다(옛 결과의 재개가 409로 말한다), 새 것은 따로 둔다
+            if self._snap_hash[fp] == h:
+                return
+            key = f"{fp}-{h}"
+            alt = self._snapshots / f"{key}.json"
+            if not alt.exists():
+                self._write(alt, built.doc)
+            built.snapshot_key = key
 
     def load_snapshot(self, fingerprint: str) -> dict:
-        if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{16}", fingerprint):
+        """지문(또는 같은 지문·다른 내용의 `{지문}-{내용 해시}` 키) → 스냅숏 문서."""
+        if not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{16}(-[0-9a-f]{16})?", fingerprint):
             raise ValueError(f"잘못된 지문: {fingerprint!r}")
         path = self._snapshots / f"{fingerprint}.json"
         try:

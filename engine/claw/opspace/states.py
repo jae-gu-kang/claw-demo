@@ -47,7 +47,7 @@ def trim_assessment(tr, built, model, *, cache: dict | None = None) -> dict:
     """수평비행 트림 해 → {"state", "reasons", "margin", "evidence"} (05 §11.3).
 
     **상태와 여유 판정은 따로다.** 상태는 그 조건에서 트림이 성립하는지, margin은 성립한 트림이 판정선(스로틀·
-    엘레본 포화 SAT_FRAC, 트림 α 여유)을 넘는지다. 수렴한 해는 판정선을 넘어도 계산 가능이다 — 날 수 있는 평형이고
+    엘레본 포화 등고선 sat_frac, 트림 α 여유 — 기준 criteria.trim_margin)을 넘는지다. 수렴한 해는 판정선을 넘어도 계산 가능이다 — 날 수 있는 평형이고
     선형화 자료로 남는다. 여유 미달은 margin이 말한다: {"status": "met"|"short"|"unevaluated", "reasons": [...]}.
     판정선을 바꾸면 트림을 다시 풀지 않고 margin만 다시 정하면 된다. 계산 가능은 합격이나 자동 설계 채택을 뜻하지
     않는다 — 채택은 조건 판정(opspace/verdict.py — 트림·모델·제한 항목)의 채택 정책이 정한다.
@@ -104,7 +104,7 @@ _FD_STEP = 1e-4  # 고정 채널의 편미분 유한차분 폭 [rad · 스로틀
 
 
 def _at_physical_limits(tr, tb) -> list:
-    """미수렴 해가 붙은 **물리** 한계 채널 — 스로틀 0·1, 엘레본 한계(판정선 SAT_FRAC이 아니다)."""
+    """미수렴 해가 붙은 **물리** 한계 채널 — 스로틀 0·1, 엘레본 한계(판정선 sat_frac이 아니다)."""
     from claw.trim.trim import THR_BOUNDS
 
     thr = float(tr.control.throttle[0])
@@ -143,10 +143,13 @@ def _limit_evidence(tr, built, channel: str, cache: dict) -> tuple:
     import scipy.optimize
 
     from claw.env import isa_atmosphere
-    from claw.trim.trim import RESID_TOL, THR_BOUNDS, XE_Q, XE_U, XE_W, _xe
+    from claw.trim.trim import THR_BOUNDS, XE_Q, XE_U, XE_W, _xe
 
     fixed_i, eq, beyond, reason = _LIMIT_CHANNEL[channel]
     tb = built.trim_bounds
+    # 평형 허용치는 트림 풀이와 같은 값 — 해석 설정 solver.resid_tol(v2까지 상수 RESID_TOL). 트림이 「수렴」이라 부르는 문턱과
+    # 근거 풀이가 「평형」이라 부르는 문턱이 갈리면 같은 조건이 두 판정을 받는다
+    resid_tol = float(tb["resid_tol"])
     case = tr.case
     pinned = (math.atan2(float(tr.state.vel_b[2]), float(tr.state.vel_b[0])),
               float(tr.control.elevon[0]), float(tr.control.throttle[0]))[fixed_i]
@@ -174,7 +177,7 @@ def _limit_evidence(tr, built, channel: str, cache: dict) -> tuple:
     solve_for = [k for k in ("vdot", "ndot", "qdot") if k != eq]
     lo = [bounds[i][0] for i in free]
     hi = [bounds[i][1] for i in free]
-    evidence = {"channel": channel, "fixed": {_UNKNOWNS[fixed_i]: pinned}, "equation": eq, "tol": RESID_TOL,
+    evidence = {"channel": channel, "fixed": {_UNKNOWNS[fixed_i]: pinned}, "equation": eq, "tol": resid_tol,
                 "alpha_range": list(a_rng), "solutions": []}
     found, errors = {}, 0
     if all(lo_i < hi_i for lo_i, hi_i in zip(lo, hi)):
@@ -189,7 +192,7 @@ def _limit_evidence(tr, built, channel: str, cache: dict) -> tuple:
                     continue
                 z = full(r.x)
                 d = eqs(z)
-                if max(abs(d[k]) for k in solve_for) < RESID_TOL:
+                if max(abs(d[k]) for k in solve_for) < resid_tol:
                     found.setdefault(tuple(round(x, 4) for x in z), (z, d))
     else:
         errors += 1  # 풀 범위가 비었다(퇴화한 DB 받음각 범위 등)
@@ -210,7 +213,7 @@ def _limit_evidence(tr, built, channel: str, cache: dict) -> tuple:
         slope = (eqs(zp)[eq] - d[eq]) / (-beyond * _FD_STEP)
         need = -d[eq] / slope if slope != 0.0 else None
         # 기울기 0 — 그 채널이 식을 움직이지 못한다: 어느 쪽인지 판단하지 않는다(None)
-        short = None if need is None else bool(abs(d[eq]) > RESID_TOL and beyond * need > 0.0)
+        short = None if need is None else bool(abs(d[eq]) > resid_tol and beyond * need > 0.0)
         sols.append({**dict(zip(_UNKNOWNS, z)), **d, "slope": slope, "need": need, "short": short,
                      "alpha_stall": a_stall, "below_stall": None if a_stall is None else bool(z[0] < a_stall)})
     evidence["solutions"] = sols

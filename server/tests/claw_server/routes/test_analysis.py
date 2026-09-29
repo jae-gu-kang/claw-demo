@@ -194,35 +194,41 @@ def test_design_envelope_endpoint(client):
                       params={"alt": 1000.0, "fuel": "inf"}).status_code == 422
 
 
-def test_design_envelope_takes_q_max_and_operating_altitudes_from_the_document(client):
-    """질의가 비면 기체 문서의 q_max·운용 고도 — 문서에 실기체 값이 있는데 폼이 비었다고 경계를 빼면 그 기체의
-    엔벨로프가 아니다. 출처는 bounds_source로 칸마다, 문서 값을 하나라도 쓴 응답에만 싣는다(예제 골든 보존)."""
+def test_design_envelope_takes_q_max_from_the_document_and_altitudes_from_the_region(client):
+    """질의가 비면 기체 문서의 q_max — 문서에 실기체 값이 있는데 폼이 비었다고 경계를 빼면 그 기체의 엔벨로프가 아니다.
+    운용 고도는 스키마 v3에서 문서 절(operating)이 없어지고 요구영역 고도(operating_region.alt)가 됐다(05 §11.13 이관
+    11단계) — 서버는 문서에서 운용 고도를 채우지 않고, 엔진이 요구영역 고도 끝을 선도 끝으로 그린다(alt_*_source "region").
+    질의 운용 고도는 그대로 이긴다(연구용 덮어쓰기). 출처는 bounds_source로 칸마다, 문서 값을 하나라도 쓴 응답에만 싣는다."""
     from claw.profile import load_example
 
     d = load_example()
     d.update(id="ops-delta", name="운용 한계 기체", is_example=False, variants=[])
     d["structural"]["q_max"] = 20000.0
-    d["operating"].update(alt_min=500.0, alt_max=6000.0)
+    d["operating_region"] = {
+        "mach": [0.3, 0.6], "alt": [500.0, 6000.0], "fuel": [100.0, 300.0], "boundary": None,
+        "base_grid": {"n_mach": 5, "alts": [500.0, 3000.0], "fuels": [200.0]},
+    }
+    assert "operating" not in d  # v3 — 운용 고도 절 없음
     assert client.post("/api/profiles", json={"document": d}).status_code == 201
     base = {"fuel": 200.0, "profile_id": "ops-delta"}
 
     b = client.get("/api/analysis/design-envelope", params=base).json()
-    assert (b["bounds"]["q_max"], b["bounds"]["alt_min"], b["bounds"]["alt_max"]) == (20000.0, 500.0, 6000.0)
+    assert (b["bounds"]["q_max"], b["bounds"]["alt_min"], b["bounds"]["alt_max"]) == (20000.0, None, None)
+    # 선도 고도 끝 = 요구영역 고도(운용 고도 범위) — 표시 기본값이 아니다
+    assert (b["bounds"]["alt_min_source"], b["bounds"]["alt_max_source"]) == ("region", "region")
+    assert (b["bounds"]["alt_min_used"], b["bounds"]["alt_max_used"]) == (500.0, 6000.0)
     assert b["bounds"]["alt_max_is_display_default"] is False
     assert b["bounds"]["qbar_mach"] is not None and "qbar" in b["region"]["hi_source"]
-    assert b["bounds_source"] == {"q_max": "profile", "alt_min": "profile", "alt_max": "profile"}
+    assert b["bounds_source"] == {"q_max": "profile", "alt_min": None, "alt_max": None}
     assert b["limits_source"] == "profile"  # 구조 한계 출처(±n·M_NO·M_D)는 종전 필드 그대로
     # 질의가 이긴다 — 칸마다
-    q = client.get("/api/analysis/design-envelope", params={**base, "q_max": 15000.0, "alt_max": 4000.0}).json()
-    assert (q["bounds"]["q_max"], q["bounds"]["alt_min"], q["bounds"]["alt_max"]) == (15000.0, 500.0, 4000.0)
-    assert q["bounds_source"] == {"q_max": "query", "alt_min": "profile", "alt_max": "query"}
-    # 전부 질의가 주면 문서 값을 쓰지 않은 응답 — 종전 모양(키 없음)
-    allq = client.get("/api/analysis/design-envelope",
-                      params={**base, "q_max": 15000.0, "alt_min": 0.0, "alt_max": 4000.0}).json()
+    q = client.get("/api/analysis/design-envelope", params={**base, "alt_max": 4000.0}).json()
+    assert (q["bounds"]["q_max"], q["bounds"]["alt_min"], q["bounds"]["alt_max"]) == (20000.0, None, 4000.0)
+    assert q["bounds_source"] == {"q_max": "profile", "alt_min": None, "alt_max": "query"}
+    assert (q["bounds"]["alt_min_source"], q["bounds"]["alt_max_source"]) == ("region", "override")
+    # q_max까지 질의가 주면 문서 값을 쓰지 않은 응답 — 종전 모양(키 없음). 운용 고도는 이제 문서에서 오지 않는다
+    allq = client.get("/api/analysis/design-envelope", params={**base, "q_max": 15000.0, "alt_max": 4000.0}).json()
     assert "bounds_source" not in allq
-    # 섞여서 서열이 어긋나면 사용자가 넣지 않은 문서 값을 사유에 밝힌다
-    bad = client.get("/api/analysis/design-envelope", params={**base, "alt_min": 7000.0})
-    assert bad.status_code == 422 and "기체 문서 값" in bad.json()["detail"] and "alt_max=6000" in bad.json()["detail"]
     # 문서 값이 전부 null인 예제는 종전 응답 그대로(서버 골든 design_envelope가 바이트로 지킨다)
     assert "bounds_source" not in client.get("/api/analysis/design-envelope", params={"fuel": 200.0}).json()
 
@@ -348,6 +354,12 @@ def test_envelope_scan_round_trip(client, wait_job):
     assert j["status"] == "done"
     body = client.get(f"/api/results/{j['result_id']}").json()
     assert body["kind"] == "envelope_scan" and body["n_requested"] == 4
+    # 점별 여유 사유가 판정선 criteria.trim_margin으로 난다(스키마 v3) — 결과·목록 meta가 그 기준 블록을 싣는다
+    from claw.profile import EXAMPLE_ID
+
+    crit_now = client.get(f"/api/profiles/{EXAMPLE_ID}/criteria").json()["echo"]
+    assert body["criteria_echo"] == crit_now
+    assert next(m for m in client.get("/api/results").json() if m["id"] == j["result_id"])["criteria_echo"] == crit_now
     entries = body["cases"]
     assert len(entries) == 4
     ok0, ok1, slow, fast = entries

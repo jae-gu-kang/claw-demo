@@ -81,6 +81,14 @@ def heading_gain(built, sim) -> dict | None:
     return out
 
 
+def _operating_alts(doc: dict) -> dict | None:
+    region = doc.get("operating_region")
+    if region is None:
+        return None
+    lo, hi = region["alt"]
+    return {"alt_min": float(lo), "alt_max": float(hi)}
+
+
 def aircraft_facts(built) -> dict:
     """초안이 알아야 할 기체 사실 — 전부 적용 문서(형상 변형 반영)와 엔진 계산에서. 없는 칸은 None.
 
@@ -113,7 +121,9 @@ def aircraft_facts(built) -> dict:
         "a0": a0,
         "rail": None if rail is None else {k: rail[k] for k in ("length", "elev_angle", "exit_speed")},
         "skid": doc["ground"]["skid"] is not None,
-        "operating": dict(doc["operating"]),
+        # 운용 고도 = 요구영역 고도(스키마 v3 — 문서 operating 절은 요구영역으로 흡수됐다, 05 §11.13 이관 11단계).
+        # 요구영역이 없으면 None — trim_grid 초안(미확정)을 운용 경계로 말하지 않는다
+        "operating": _operating_alts(doc),
         "phi_max": phi,
         "cruise_speed": cruise,
         "turn_radius": cruise ** 2 / (G0 * math.tan(phi)) if cruise is not None and phi else None,
@@ -200,9 +210,9 @@ def _aircraft_section(f: dict) -> str:
                          f"동안 나는 거리다(규칙 8).{approx}")
         elif h["kp"] > 0:
             lines.append(f"- 마지막 웨이포인트 넘김 거리 = V²/(g·{at}) — V는 순항 속도(규칙 8).{approx}")
-    lo, hi = f["operating"].get("alt_min"), f["operating"].get("alt_max")
-    if lo is not None or hi is not None:
-        lines.append(f"- 운용 고도 {'—' if lo is None else f'{lo:g}'} ~ {'—' if hi is None else f'{hi:g}'} m.")
+    ops = f["operating"]
+    if ops is not None:
+        lines.append(f"- 운용 고도(요구영역) {ops['alt_min']:g} ~ {ops['alt_max']:g} m.")
     s = f["sim"]
     if s is None:
         lines.append("- 미션 템플릿 없음 — 속도·고도·강하율은 위 사실에서 보수적으로 정하고 assumptions에 적는다.")

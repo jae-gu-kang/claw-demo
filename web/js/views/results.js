@@ -571,7 +571,7 @@ function freshnessChip(p, rows, resultId) {
 }
 
 /** 판정 기준 상태 — 결과의 criteria_echo를 **그 결과를 계산한 기체**의 지금 기준과 대조(lib/freshness.js).
- *  기준으로 판정하는 종류만 본다(시뮬·트림에 「미상」을 달면 거짓이다). 조회 중이면 null. */
+ *  기준으로 판정하는 종류만 본다(시뮬에 「미상」을 달면 거짓이다 — 트림·스캔은 v3부터 여유 판정을 굳혀 든다). 조회 중이면 null. */
 function criteriaStateOf(m) {
   if (!m || !CRITERIA_JUDGED_KINDS.has(m.kind)) return null;
   const pid = m.profile?.id;

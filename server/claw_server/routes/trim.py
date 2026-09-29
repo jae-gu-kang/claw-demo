@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
 from claw.common.contracts import TrimCase
-from claw_server.refs import ProfileRef, profile_echo, resolve_profile
+from claw_server.refs import ProfileRef, criteria_echo, profile_echo, resolve_criteria, resolve_profile
 from claw.opspace import model_range_of, pre_state, region_of, trim_assessment
 from claw.opspace.verdict import VerdictContext, condition_verdict
 from claw.trim import trim_batch
@@ -70,6 +70,15 @@ def build_cases(case_inputs: list[TrimCaseIn]) -> list[TrimCase]:
     ]
 
 
+def cases_echo(cases) -> list:
+    """실제로 푼 케이스의 조건 — 결과에 싣는 실행 조건 기록(05 §11.13 이관 13단계).
+
+    화면 기본값(요구영역 기본 격자·연료·고도)으로 고른 점은 지문 밖이라, 결과가 조건을 직접 싣지 않으면 나중에 무엇을
+    풀었는지 되짚을 길이 없다 — 케이스 이름(자동 이름 포함)만으로는 좌표를 복원할 수 없다."""
+    return [{"name": c.name, "mach": float(c.mach), "alt": float(c.alt), "fuel": float(c.fuel),
+             "condition": c.condition} for c in cases]
+
+
 @router.post("/trim/batch", status_code=202)
 def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) -> dict:
     profile = resolve_profile(request, req.profile)
@@ -83,6 +92,10 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
     # 조건 판정 문맥(05 §11.3 · 이관 8단계)은 작업당 한 번 — 점마다 기체 문서를 다시 읽지 않는다. 근거 계산 캐시도 그
     # 문맥의 것을 같이 쓴다(자동 설계와 같은 캐시 규약)
     vctx = VerdictContext.from_profile(profile, cache={"aircraft": ac})
+    # 여유 판정(margin·verdict)이 기준 criteria.trim_margin으로 난다(이관 12단계) — 어느 기준으로 판정했는지 결과가 싣는다.
+    # 판정 문맥(vctx)이 읽는 것과 같은 기체 기준 한 벌이다(refs.resolve_criteria)
+    crit, crit_source = resolve_criteria(profile)
+    crit_block = criteria_echo(crit, crit_source)
 
     def with_state(tr) -> dict:
         """트림 해 + 조건 상태(05 §11.3) — 계산 실패·제약 도달·물리적 불가를 가른다. 여유 판정(margin)은 상태와 따로
@@ -115,13 +128,14 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
         store.save(
             job.id,
             {"kind": "trim_batch", "results": [with_state(r) for r in results],
-             "profile": echo, **region_context(profile)},
+             "profile": echo, "criteria_echo": crit_block, **region_context(profile)},
             meta={
                 "kind": "trim_batch",
                 "created": job.created,
                 "n": len(results),
                 "fingerprint": req.fingerprint,
                 "profile": echo,
+                "criteria_echo": crit_block,
             },
         )
         job.result_id = job.id

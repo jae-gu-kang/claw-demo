@@ -123,11 +123,13 @@ export const boundColor = (code) => BOUND_META[code]?.color ?? "#8e8e93";
  * 마하 상한을 만나 설계 영역이 사라진 지점). 셋을 같은 선으로 그리면 화면이
  * 없는 상승한도를 있는 것처럼 말한다. */
 export const CAP_META = {
-  ops_alt_max: { label: "운용 고도 상한", color: "#007aff", dashed: false },
-  ops_alt_min: { label: "운용 고도 하한", color: "#007aff", dashed: false },
-  // 운용 고도가 없으면 표시 고도 끝을 요구영역 고도 끝으로 잡는다(엔진 alt_*_source "region" — 이관 9단계)
-  region_alt_max: { label: "요구영역 고도 상한 — 운용 한계 아님", color: "#0040dd", dashed: true },
-  region_alt_min: { label: "요구영역 고도 하한 — 운용 한계 아님", color: "#0040dd", dashed: true },
+  // 폼에 입력한 운용 고도 — 스키마 v3부터 문서 절이 없어 질의(연구용 덮어쓰기)로만 온다
+  ops_alt_max: { label: "운용 고도 상한 (입력)", color: "#007aff", dashed: false },
+  ops_alt_min: { label: "운용 고도 하한 (입력)", color: "#007aff", dashed: false },
+  // 입력이 없으면 표시 고도 끝 = 요구영역 고도 끝(엔진 alt_*_source "region" — 이관 9단계). 스키마 v3는 운용 고도가
+  // 곧 요구영역 고도다(이관 11단계 — 문서 operating 절 흡수)
+  region_alt_max: { label: "요구영역 고도 상한 (운용 고도)", color: "#0040dd", dashed: true },
+  region_alt_min: { label: "요구영역 고도 하한 (운용 고도)", color: "#0040dd", dashed: true },
   display_max: { label: "표시 상한 [기본값] — 운용 한계 아님", color: "#aeaeb2", dashed: true },
   display_min: { label: "표시 하한 — 운용 하한 미입력", color: "#aeaeb2", dashed: true },
   natural_ceiling: { label: "자연 천장 (설계 영역 소멸)", color: "#8e8e93", dashed: true },
@@ -147,8 +149,9 @@ export function outlineCaps(region, bounds) {
   let run = [];
   const capAt = (i, side) => {
     const alt = region.alt[i];
-    // 끝의 출처는 엔진 alt_*_source가 정본(operating · region · display_default), 없으면(옛 응답) 종전 추론
-    const src = (s, ops, reg, disp, legacyOps) => (s === "operating" ? ops : s === "region" ? reg
+    // 끝의 출처는 엔진 alt_*_source가 정본(override · region · display_default), 없으면(옛 응답) 종전 추론.
+    // 스키마 v3부터 덧쓴 끝은 "override"(질의)다 — v1.66~v1.67 응답의 "operating"도 같은 뜻으로 읽는다
+    const src = (s, ops, reg, disp, legacyOps) => (s === "override" || s === "operating" ? ops : s === "region" ? reg
       : s === "display_default" ? disp : (legacyOps ? ops : disp));
     const source = side === "bottom"
       ? (Math.abs(alt - bounds.alt_min_used) < EPS
@@ -296,7 +299,7 @@ export function scanCells(entries) {
  * T = δσ·min(T_static, ηP/V))이 들어오면서 포화가 곧 "이 조건에서 프로펠러가 더
  * 못 낸다"가 됐다.
  *
- * 전선은 스로틀 100%가 아니라 **95% 등고선**이다(trim.py SAT_FRAC): 진짜 한계보다
+ * 전선은 스로틀 100%가 아니라 **95% 등고선**이다(기준 trim_margin.sat_frac 기본값 — 기체 탭 「평가 기준」에서 기체마다 바꾼다): 진짜 한계보다
  * 설계 여유만큼 안쪽이다.
  *
  * **행마다 바깥쪽 포화 구간의 가장자리만** 낸다 — lo 하나, hi 하나가 최대다.
@@ -673,8 +676,13 @@ export function limitSourceLabel(param, limitsSource, overridden, isExample = nu
 
 /** 동압 한계·운용 고도 한 칸의 출처 {text, ok} — value는 응답 bounds의 값, source는 bounds_source의 그 칸
  * ("query"|"profile"|null). 서버는 문서 값을 하나라도 쓴 응답에만 bounds_source를 싣는다 — 없으면 값이 있는
- * 칸은 전부 질의(사용자 입력)에서 온 것이다. null 값은 문서에도 질의에도 없다는 뜻이라 경계 자체가 없다. */
-export function opsSourceLabel(value, source) {
+ * 칸은 전부 질의(사용자 입력)에서 온 것이다. null 값은 문서에도 질의에도 없다는 뜻이라 경계 자체가 없다.
+ * 운용 고도 칸(alt: true)은 스키마 v3부터 문서에서 오지 않는다 — 비었으면 선도 끝이 요구영역 고도(운용 고도)다
+ * (regionUsed: 응답 bounds.alt_*_used, 요구영역에서 왔을 때만). */
+export function opsSourceLabel(value, source, { alt = false, regionUsed = null } = {}) {
+  if (value == null && alt && regionUsed != null) {
+    return { text: `미입력 — 요구영역 고도 ${regionUsed} m를 씀`, ok: true };
+  }
   if (value == null) return { text: "미입력 — 경계 없음", ok: false };
   return source === "profile" ? { text: "기체 문서", ok: true } : { text: "사용자 입력", ok: true };
 }

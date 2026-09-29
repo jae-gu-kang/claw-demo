@@ -1,7 +1,7 @@
 {
  "golden": "verify_linear",
  "mode": "full",
- "captured_at": "9bba329+dirty",
+ "captured_at": "3a2bd4c+dirty",
  "value": {
   "dict": {
    "corners": [
@@ -57,7 +57,7 @@
    "result": {
     "dict": {
      "fingerprint": "c48da3269a9a8e4c",
-     "criteria_fingerprint": "285b1415cbf86dba",
+     "criteria_fingerprint": "8c1ed76ce0dbece1",
      "depth": "linear",
      "verify_meta": {
       "dict": {

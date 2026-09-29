@@ -63,7 +63,7 @@ def test_missing_and_unknown_keys_are_rejected():
     ("/surfaces/layout", lambda d: d["surfaces"].__setitem__("layout", "canard")),
     ("/surfaces/elevon", lambda d: d["surfaces"].__setitem__("elevon", [-0.35, 0.0])),
     ("/surfaces/rudder", lambda d: d["surfaces"].__setitem__("rudder", [0.05, 0.35])),
-    ("/operating/alt_max", lambda d: d["operating"].update(alt_min=3000.0, alt_max=1000.0)),
+    ("/solver/trim_alpha_bounds", lambda d: d["solver"].__setitem__("trim_alpha_bounds", [0.35, -0.1])),
     ("/ground/rail/elev_angle", lambda d: d["ground"]["rail"].__setitem__("elev_angle", 2.0)),
 ])
 def test_domain_rules_point_at_the_field(path, mutate):
@@ -171,8 +171,8 @@ def test_mission_template_is_optional_and_validated_with_paths():
         list(validate_document(load_example())).index("law") + 1
     e = _bad(lambda d: d["mission_template"]["trim_grid"]["mach"].__setitem__("step", 0.0))
     assert e.path == "/mission_template/trim_grid/mach/step"
-    e = _bad(lambda d: d["mission_template"]["envelope"]["scan_mach"].__setitem__("to", 0.1))
-    assert e.path == "/mission_template/envelope/scan_mach/to"
+    e = _bad(lambda d: d["mission_template"]["envelope"].__setitem__("fuel", -1.0))
+    assert e.path == "/mission_template/envelope/fuel"
     e = _bad(lambda d: d["mission_template"]["sim"]["approach"].__setitem__("hdot", 1.0))
     assert e.path == "/mission_template/sim/approach/hdot"
     e = _bad(lambda d: d["mission_template"]["sim"].__setitem__("extra", 1.0))
@@ -186,16 +186,15 @@ def test_mission_template_grids_are_capped():
     """간격 오타 하나로 수만 케이스가 되면 그 기체를 고른 화면이 격자를 만들다 멈춘다 — 경로와 함께 거부한다."""
     e = _bad(lambda d: d["mission_template"]["trim_grid"]["mach"].__setitem__("step", 0.0001))
     assert e.path == "/mission_template/trim_grid"
-    e = _bad(lambda d: d["mission_template"]["envelope"]["scan_mach"].__setitem__("step", 0.0001))
-    assert e.path == "/mission_template/envelope/scan_mach"
     # 비율이 inf가 되는 간격·범위 — 500(OverflowError)이 아니라 같은 경로의 거부다
     e = _bad(lambda d: d["mission_template"]["trim_grid"]["mach"].__setitem__("step", 1e-310))
     assert e.path == "/mission_template/trim_grid"
 
     def huge(d):
-        d["mission_template"]["envelope"]["scan_mach"].update({"to": 1e308, "step": 1e-5})
+        d["mission_template"]["trim_grid"]["mach"].update({"to": 1e308, "step": 1e-5})
     e = _bad(huge)
-    assert e.path == "/mission_template/envelope/scan_mach"
+    assert e.path == "/mission_template/trim_grid"
+    # 엔벨로프 스캔 격자 칸(scan_mach·scan_alt)은 v3에서 폐지 — 스캔 격자는 요구영역 기본 격자다(test_profile_schema_v3)
 
 
 def test_display_is_optional_and_takes_only_a_bare_glb_name():
@@ -222,13 +221,14 @@ def test_document_warns_when_the_trim_search_hides_the_low_speed_stall():
 
     doc = validate_document(load_example())
     warns = document_warnings(doc)
-    assert [w["path"] for w in warns] == ["/trim/alpha_bounds/1"] and "저속 가림" in warns[0]["message"]
-    doc["trim"]["alpha_bounds"] = [-0.1, 0.37]  # 판정 한계 최대 0.365 위 — 실속각 0.40 아래여도 가리는 것이 없다
+    # v3: 탐색 범위는 해석 설정(solver), 트림 α 여유는 판정선(criteria.trim_margin — 없으면 기본값 0.035)
+    assert [w["path"] for w in warns] == ["/solver/trim_alpha_bounds/1"] and "저속 가림" in warns[0]["message"]
+    doc["solver"]["trim_alpha_bounds"] = [-0.1, 0.37]  # 판정 한계 최대 0.365 위 — 실속각 0.40 아래여도 가리는 것이 없다
     assert document_warnings(validate_document(doc)) == []
     # 형상 변형이 탐색 상한을 낮추면 그 변형만 경고한다
-    doc["variants"] = [{"id": "narrow", "name": "좁은 탐색", "patch": {"/trim/alpha_bounds": [-0.1, 0.30]}}]
+    doc["variants"] = [{"id": "narrow", "name": "좁은 탐색", "patch": {"/solver/trim_alpha_bounds": [-0.1, 0.30]}}]
     warns = document_warnings(validate_document(doc))
-    assert [(w["variant"], w["path"]) for w in warns] == [("narrow", "/trim/alpha_bounds/1")]
+    assert [(w["variant"], w["path"]) for w in warns] == [("narrow", "/solver/trim_alpha_bounds/1")]
 
 
 def test_envelope_alt_takes_a_number_or_a_list_of_up_to_six():

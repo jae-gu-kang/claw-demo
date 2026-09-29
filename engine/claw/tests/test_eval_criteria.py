@@ -224,7 +224,9 @@ def test_옛_지문은_그대로다():
     """S1은 동작 불변 — 저장물의 criteria_fingerprint(전 항목 한 해시)는 옮겨 가는 동안 그대로다.
     값을 못박는다: 기본값이나 to_dict 모양이 바뀌면 저장된 평가 결과가 전부 「다른 기준」이 된다 —
     그 변경은 의도해서 여기 값을 고치는 커밋이어야 한다."""
-    assert GainEvalCriteria().fingerprint() == "285b1415cbf86dba"
+    # 285b1415cbf86dba → 8c1ed76ce0dbece1 (스키마 v3 · 이관 12단계 — 트림 여유 판정선 그룹 trim_margin을 기준에 더했다.
+    # 값은 v2 상수 그대로라 판정은 같지만 기준 dict 모양이 바뀌어 옛 저장물은 「다른 기준」으로 보인다 — 의도한 단절)
+    assert GainEvalCriteria().fingerprint() == "8c1ed76ce0dbece1"
 
 
 def test_목표의_비율인_판정선은_판정_지문에도_든다():

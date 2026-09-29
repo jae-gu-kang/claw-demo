@@ -60,6 +60,10 @@ HANDOVER_TOL = 0.1  # 마지막 웨이포인트 도달 반경 ↔ 헤딩 루프 
 TABLE_ZIGZAG_MAX = 1  # 확정 표 자리마다 방향 반전 상한 — 한 고도 줄의 스케줄은 단조에 가깝다(yaw.k_rate 1회 — 2차 패스 경계)
 # 운용 범위 검증 격자의 연료 — × fuel_max (설계 기본 비율 0.1·0.5·1.0 + 미션 연료 40 kg = 0.8)
 ENVELOPE_FUEL_FRACS = (0.1, 0.5, 0.8, 1.0)
+# [m] 운용 고도 — v2 문서의 operating 절 값(0~3500 m). 스키마 v3에서 절이 폐지됐고(운용 고도 = 요구영역 고도, 이관 11단계)
+# 이 기체의 요구영역(200~3000 m)과 다르다. 아래 검증들은 description이 이 범위에서 잰 서술(운용 범위 전부 재판정 실패 0 ·
+# 속도 루프 띠)을 붙잡으므로 그 범위를 여기 고정한다 — 요구영역을 넓히면 이 값을 그 고도로 바꾼다
+OPERATING_ALTS = (0.0, 3500.0)
 ENVELOPE_MIN_JUDGED = 600  # 그 격자에서 판정된 (점, 자리) 수 하한 — 격자가 엔벨로프 밖으로 새면 판정 없이 통과한다
 SPD_SCAN_MACH = (0.095, 0.1401, 0.0025)  # 속도 루프 띠를 훑는 마하 (시작, 끝, 간격) — 최소 트림 속도 근처
 SPD_BAND_RATIO = 1.05  # 속도 루프 하드 FAIL 띠 — 그 행 최소 트림 마하의 이 배 안 (description과 같은 값)
@@ -284,14 +288,14 @@ def test_확정_게인_표가_운용_범위_전부에서_자동_설계_검증을
     DesignSession의 점·트림·선형 모델 위에서 reverify_resampled)로 **출하 표 그대로** 운용 범위 격자를 다시 판정해 실패가
     없다. 격자: 운용 고도를 1000 m 간격 + 천장, 연료 fuel_max × ENVELOPE_FUEL_FRACS(미션 연료 40 kg 포함), 마하 7 + 세분화 +
     검증점(점 상한 200 — 서버 MAX_POINTS). EO/IR형은 규칙 스케줄(설계 게인 × q̄ 역비)을 같은 격자로 본다. 실측: 기본형 판정
-    770 · EO/IR형 665, 실패 0 (각 약 20 s).
+    865 · EO/IR형 805, 실패 0 (각 약 25 s — v1.66 요구영역 재설계 표).
 
     이 세션은 점·트림·선형 모델을 얻는 수레다 — 세션 **자신의** 설계(여러 고도를 마하 1축 표 하나로 적합)는 롤 속도 루프
     마진 가드(AS94900 끊는 자리 · 목표 GM 8 dB·PM 50° — tune._cap_by_margins) 뒤로 한 마하에서 해면과 고도를 함께 못 맞춰 budget_exhausted로
     끝난다(자기 표 실패 기본형 4 · EO/IR형 7). 판정 대상은 출하 표의 재판정(rv)뿐이라 전제는 "검증이 돌았다"(converged
     또는 budget_exhausted + 판정 케이스 있음)로 둔다. rv가 세션 검증 인용(identical)이면 출하 표를 안 본 것이라 막는다."""
-    op = doc["operating"]
-    alts = sorted({*np.arange(op["alt_min"], op["alt_max"], 1000.0).tolist(), op["alt_max"]})
+    lo, hi = OPERATING_ALTS
+    alts = sorted({*np.arange(lo, hi, 1000.0).tolist(), hi})
     fuels = [round(doc["mass"]["fuel_max"] * f, 6) for f in ENVELOPE_FUEL_FRACS]
     assert doc["mission_template"]["sim"]["fuel"] in fuels
     cfg = {**doc["law"]["gain_tables"]["provenance"]["design"]["config"], "alts": alts, "fuels": fuels,
@@ -631,8 +635,9 @@ def test_속도_루프의_하드_FAIL은_문서가_적어_둔_최소_속도_근�
     SPD_BAND_RATIO 배 안이며 ③ 기본형 SPD_BAND_ALT_MIN["base"] m · EO/IR형 ["eoir"] m 아래에는 없고 ④ 실제로 있다(고쳐지면
     description을 고치라는 신호). 실측(0.0025 격자): 최대 비 1.043 — 기본형 3500 m · 50 kg M0.1175–0.1225, EO/IR형 2500 m ·
     50 kg · 3500 m · 25 kg. 미션 템플릿 트림 격자에서는 기본형 하드 FAIL 0, EO/IR형은 엔벨로프 밖 점(M0.12 · 3000 m · 50 kg)뿐이다."""
-    op, fuel_max = doc["operating"], doc["mass"]["fuel_max"]
-    alts = sorted({*np.arange(op["alt_min"], op["alt_max"], 1000.0).tolist(), op["alt_max"]})
+    fuel_max = doc["mass"]["fuel_max"]
+    lo, hi = OPERATING_ALTS
+    alts = sorted({*np.arange(lo, hi, 1000.0).tolist(), hi})
     fuels = [round(fuel_max * f, 6) for f in ENVELOPE_FUEL_FRACS]
     machs = np.round(np.arange(*SPD_SCAN_MACH), 4)
     found = {}
@@ -670,15 +675,15 @@ def test_속도_루프의_하드_FAIL은_문서가_적어_둔_최소_속도_근�
 
 
 def test_미션_템플릿의_고도는_운용_고도_범위_안이다(doc):
-    """엔벨로프 스캔·선도·트림 격자·미션 고도가 운용 고도(operating) 안이고 스캔은 천장까지 닿는다 — 스캔 고도가 4000·5000 m까지
-    가던 때는 102점 중 34점이 M–h 그림 위 가장자리 밖이라 안 보이면서 「불가」 수만 부풀렸다(트림 미수렴 33 — e2e D3)."""
-    op, mt = doc["operating"], doc["mission_template"]
+    """선도·트림 격자·미션 고도가 운용 고도(OPERATING_ALTS) 안이다. 엔벨로프 스캔 고도 칸(scan_alt)은 v3에서 폐지됐다 —
+    스캔 격자는 요구영역 기본 격자다(이관 11단계 · v1.66부터 화면이 그 칸을 읽지 않았다)."""
+    mt = doc["mission_template"]
     env = mt["envelope"]
+    assert "scan_alt" not in env and "scan_mach" not in env
     vn = env["alt"] if isinstance(env["alt"], list) else [env["alt"]]
     sim = mt["sim"]
-    alts = [*env["scan_alt"], *vn, *mt["trim_grid"]["alt"], sim["cruise"]["alt"], sim["climb"]["exit_alt"]]
-    assert all(op["alt_min"] <= a <= op["alt_max"] for a in alts), alts
-    assert max(env["scan_alt"]) == op["alt_max"] and min(env["scan_alt"]) == op["alt_min"]
+    alts = [*vn, *mt["trim_grid"]["alt"], sim["cruise"]["alt"], sim["climb"]["exit_alt"]]
+    assert all(OPERATING_ALTS[0] <= a <= OPERATING_ALTS[1] for a in alts), alts
 
 
 def test_미션_시뮬_길이는_실측_정지_시각_뒤_여유다(doc):

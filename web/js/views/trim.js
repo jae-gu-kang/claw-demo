@@ -22,8 +22,8 @@ import {
 } from "../lib/opspace.js";
 import {
   SERIES_COLORS, STATUS, TRIM_CELL_LABEL, TRIM_FLAG_LABEL, TRIM_STATE_CELL, fuelsOf, pctText, pivotCases,
-  stateEvidenceText, stateReasonText, trimCueReport, trimCurves, trimEnvelopeCell, trimFlagSummary, trimStateLabel,
-  verdictEvidenceText,
+  massConditionNote, stateEvidenceText, stateReasonText, trimCueReport, trimCurves, trimEnvelopeCell, trimFlagSummary,
+  trimStateLabel, verdictEvidenceText,
 } from "../lib/plot.js";
 import { revealPanel } from "../lib/reveal.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
@@ -410,7 +410,10 @@ function renderMap(mapBox, summaryLine, body, grid) {
       "근거(실속표)가 없는 것이다 — 이 셋은 자동 설계가 채택하지 않는다. ",
       "물리적 불가는 별도 근거가 있는 것만이고 칸의 글은 첫 근거(추력·타면·실속). 계산 실패는 다시 풀 대상, ",
       "제약 도달은 한계에 걸렸지만 날 수 없다는 근거가 아직 없는 것이다"));
+  // 탑재 구성을 적은 기체 — 조건 판정이 CG 영향을 반영하지 못한다고 말한다(이관 11단계 mass_condition)
+  const massNote = massConditionNote(rows.map((r) => r.verdict));
   clear(mapBox).append(
+    ...(massNote ? [el("p", { class: "notice", "data-mass-condition": "" }, massNote)] : []),
     el("div", { class: "stage-pair" }, ...maps),
     byState ? stateLegend : el("div", { class: "legend" },
       el("span", {}, el("span", { class: "chip", style: `background:${STATUS.ok}` }), TRIM_CELL_LABEL.ok),

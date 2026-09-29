@@ -277,3 +277,23 @@ def test_넘김_거리는_조립이_쓰는_헤딩_게인으로_잰다():
     assert llm_draft.aircraft_facts(nb)["handover"] is None
     p = llm_draft.draft_system(nb)
     assert "넘김 거리(규칙 8)는 정할 수 없다" in p and "넘김 거리 약" not in p
+
+
+def test_운용_고도는_요구영역_고도에서_온다():
+    """스키마 v3(05 §11.13 이관 11단계) — 문서의 운용 고도 절(operating)이 없어지고 요구영역 고도(operating_region.alt)가
+    그 자리다. 요구영역이 없으면 운용 고도 줄을 쓰지 않는다(없는 경계를 지어내지 않는다)."""
+    def region(d):
+        d["operating_region"] = {
+            "mach": [0.3, 0.6], "alt": [400.0, 2600.0], "fuel": [100.0, 300.0], "boundary": None,
+            "base_grid": {"n_mach": 3, "alts": [400.0], "fuels": [200.0]}}
+
+    b = _built(region)
+    assert llm_draft.aircraft_facts(b)["operating"] == {"alt_min": 400.0, "alt_max": 2600.0}
+    assert "운용 고도(요구영역) 400 ~ 2600 m" in llm_draft.draft_system(b)
+
+    def no_region(d):
+        d["operating_region"] = None
+
+    n = _built(no_region)
+    assert llm_draft.aircraft_facts(n)["operating"] is None
+    assert "운용 고도" not in llm_draft.draft_system(n)

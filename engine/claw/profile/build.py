@@ -16,7 +16,7 @@ from claw.plant.ground import LaunchRail, SkidGear
 from claw.plant.mass import FuelMass
 from claw.profile.aero_terms import dispersion_axes, make_coef_fn
 from claw.profile.errors import ProfileError
-from claw.profile.fingerprint import plant_fingerprint, profile_fingerprint
+from claw.profile.fingerprint import plant_fingerprint, profile_fingerprint, trim_fingerprint
 from claw.profile.schema import effective_document, validate_document
 from claw.tables import Table
 
@@ -35,6 +35,8 @@ class BuiltProfile:
         self.is_example = self.doc["is_example"]
         self.fingerprint = profile_fingerprint(self.doc)
         self.plant_fingerprint = plant_fingerprint(self.doc)
+        # 트림 결과의 키 — 플랜트 + 풀이 설정(solver). 트림을 저장·재사용하는 쪽은 이것으로 대조한다(05 §11.8)
+        self.trim_fingerprint = trim_fingerprint(self.doc)
 
     # ── 플랜트 ─────────────────────────────────────────────────────────────
     @property
@@ -126,23 +128,36 @@ class BuiltProfile:
         return self.doc["structural"]["q_max"]
 
     @property
-    def operating(self) -> dict:
-        return dict(self.doc["operating"])
+    def solver(self) -> dict:
+        """해석 설정(v3 solver 절)의 사본 — {"trim_alpha_bounds": [lo, hi], "resid_tol"}. 결과·도출 기록이 이것을 싣는다."""
+        s = self.doc["solver"]
+        return {"trim_alpha_bounds": list(s["trim_alpha_bounds"]), "resid_tol": s["resid_tol"]}
 
     @property
     def trim_alpha_bounds(self) -> tuple:
-        return tuple(self.doc["trim"]["alpha_bounds"])
+        return tuple(self.doc["solver"]["trim_alpha_bounds"])
 
     @property
-    def trim_alpha_margin(self) -> float:
-        return self.doc["trim"]["alpha_margin"]
+    def trim_margin(self) -> dict:
+        """트림 여유 판정선 적용값 {sat_frac, thr_margin, alpha_margin} — 문서 criteria.trim_margin 위 도구 기본값(이관 12단계)."""
+        from dataclasses import asdict
+
+        return {k: float(v) for k, v in asdict(self.eval_criteria.trim_margin).items()}
 
     @property
     def trim_bounds(self) -> dict:
-        """트림 탐색 범위·판정 기준 — α는 trim 섹션, δe는 엘레본 한계(믹서와 같은 값, 중복 정의 금지), α 판정은
-        실속 표 기준이라 실속 표를 함께 싣는다(trim.trim_reserve)."""
+        """트림 풀이·여유 판정에 드는 값 한 벌 — Aircraft.trim_bounds가 싣는다(trim/trim.py가 이것만 읽는다).
+
+        물리 한계와 판정선을 섞지 않는다: 탐색 α 범위·잔차 허용치는 해석 설정(solver), δe는 엘레본 한계(믹서와 같은 값 — 중복
+        정의 금지), 실속 표는 α 판정의 기준(trim.trim_reserve), 판정선 sat_frac·thr_margin·alpha_margin은 적용 기준
+        (criteria.trim_margin — 없으면 도구 기본값)."""
         return {"alpha": self.trim_alpha_bounds, "de": tuple(self.doc["surfaces"]["elevon"]),
-                "alpha_margin": self.trim_alpha_margin, "stall": self.stall_table()}
+                "resid_tol": float(self.doc["solver"]["resid_tol"]), **self.trim_margin, "stall": self.stall_table()}
+
+    @property
+    def loadings_declared(self) -> int:
+        """문서가 적은 탑재 구성 수 — 계산은 기본 질량 모델이라 조건 판정이 mass_condition으로 그렇다고 말한다."""
+        return len(self.doc["mass"]["loadings"] or ())
 
     @property
     def surfaces(self) -> dict:
@@ -246,10 +261,10 @@ class BuiltProfile:
             return None
         if self.gain_tables_stale:
             raise ProfileError("/law/gain_tables",
-                               "확정 게인 표가 낡았다 — 반영한 뒤 문서(플랜트·설계·한계 등)가 바뀌었거나,"
-                               " 기준 지문 기록이 없거나, 문서를 바꾸는 형상 변형 위다(표는 기본 문서에서"
-                               " 확정된 것이라 그 변형에서는 쓸 수 없다). 자동 설계를 다시 돌려 반영하거나"
-                               " 표를 지운다")
+                               "확정 게인 표가 낡았다 — 반영한 뒤 문서(플랜트·설계·한계·풀이 설정 등)가 바뀌었거나,"
+                               " 기준 지문 기록이 없거나, 문서를 바꾸는 형상 변형 위이거나(표는 기본 문서에서"
+                               " 확정된 것이라 그 변형에서는 쓸 수 없다), 스키마 올림(v2 → v3)에서 v2 도장을 증명하지"
+                               " 못해 다시 찍지 않은 표다. 자동 설계를 다시 돌려 반영하거나 표를 지운다")
         return {name: _mach_table(t, name) for name, t in gt["tables"].items()}
 
     @property
@@ -268,22 +283,14 @@ class BuiltProfile:
         fps = prov.get("plant_fingerprints")
         if not isinstance(fps, list):
             fps = [prov.get("plant_fingerprint")]
-        return self.plant_fingerprint not in fps
-
-    def alts_within(self, candidates) -> list:
-        """해석 고도 후보를 운용 고도 범위(operating.alt_min·alt_max)로 거르고 **범위 끝을 더한다**.
-
-        끝을 더하는 이유: 격자점만 남기면 격자 사이에 있는 한계(예: 상한 2900 m, 격자 2500·3000)가 빠진다. 같은 마하의
-        1g 트림 요구는 동압이 낮은 상한에서 가장 크므로, 그 한 줄이 빠지면 도출 표가 상한에서 요구를 밑돈다(실측
-        M0.30에서 0.53°). 범위 안에 후보가 하나도 없으면 끝과 가운데를 쓴다."""
-        lo, hi = self.doc["operating"]["alt_min"], self.doc["operating"]["alt_max"]
-        alts = {float(a) for a in candidates if (lo is None or a >= lo) and (hi is None or a <= hi)}
-        ends = [float(x) for x in (lo, hi) if x is not None]
-        if not alts and not ends:
-            return sorted(float(a) for a in candidates)
-        if not alts and len(ends) == 2:
-            alts.add(0.5 * (ends[0] + ends[1]))
-        return sorted(alts | set(ends))
+        if self.plant_fingerprint not in fps:
+            return True
+        # 트림 설정이 바뀌어도 낡았다(05 §11.8 「트림 설정 → 결과 낡음」) — 도출이 잰 풀이 설정 기록(v3)과 대조한다. 기록이
+        # 없는 옛 도출은 어느 설정으로 풀었는지 모르므로 낡은 것으로 본다(v2 도출은 플랜트 지문부터 이미 다르다)
+        solvers = prov.get("solvers")
+        if isinstance(solvers, list) and len(solvers) == len(fps):
+            return not any(fp == self.plant_fingerprint and sv == self.solver for fp, sv in zip(fps, solvers))
+        return prov.get("solver") != self.solver
 
     def alloc_trim_table(self) -> Table | None:
         alloc = self.doc["law"]["alloc"]
@@ -292,8 +299,9 @@ class BuiltProfile:
         if self.de_trim_stale:
             # 낡은 표로 조립하지 않는다 — 1g 몫이 틀리면 선회에서 롤 권한을 과하게 묶거나 피치 몫이 모자란다
             raise ProfileError("/law/alloc/de_trim",
-                               "도출한 δe_trim 표가 낡았다 — 도출한 뒤 플랜트(공력·질량·추진·트림 등)가 바뀌었다."
-                               " 표를 다시 도출한다")
+                               "도출한 δe_trim 표가 낡았다 — 도출한 뒤 플랜트(공력·질량·추진 등)나 트림 풀이 설정"
+                               "(solver)이 바뀌었거나, 풀이 설정 기록이 없는 옛 도출이거나, 스키마 올림(v2 → v3)에서"
+                               " v2 도장을 증명하지 못해 다시 찍지 않은 표다(올림 알림이 까닭을 말한다). 표를 다시 도출한다")
         return _mach_table(alloc["de_trim"]["table"], "de_trim")
 
     @property

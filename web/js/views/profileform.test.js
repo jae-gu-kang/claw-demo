@@ -261,3 +261,15 @@ test("칸마다 「필수」·「선택」을 표시로 붙인다 — 체크박�
   assert.ok(counts.includes("필수 0 · 선택 1"), counts.join(" / "));
   assert.ok(root.text.includes("칸은 비울 수 없고"), "범례가 없다");
 });
+
+test("질량 절 — 탑재 구성(mass.loadings)을 적은 문서는 「CG 영향 미지원 — 대표 구성으로 계산」을 절 안에 말한다 (스키마 v3)", () => {
+  const notes = (doc) => mount(doc).root.find("p").filter((p) => p.getAttribute("data-loadings-note") != null);
+  const bare = JSON.parse(JSON.stringify(EXAMPLE));
+  bare.mass.loadings = null;
+  assert.equal(notes(bare).length, 0, "구성이 없으면 말하지 않는다");
+  const loaded = JSON.parse(JSON.stringify(EXAMPLE));
+  loaded.mass.loadings = [{ id: "eoir", name: "EO/IR", payload_kg: 3.0, cg: null }];
+  const n = notes(loaded);
+  assert.equal(n.length, 1);
+  assert.match(n[0].text, /^CG 영향 미지원 — 대표 구성으로 계산/);
+});

@@ -243,6 +243,8 @@ def test_openloop_job_round_trip(client, wait_job):
     assert j["status"] == "done"
     res = client.get(f"/api/results/{j['result_id']}").json()
     assert res["kind"] == "influence_openloop"
+    # 실행 조건 기록(05 §11.13 이관 13단계) — 화면 기본값으로 고른 점도 결과가 조건을 싣는다(이름만으로는 못 되짚는다)
+    assert res["conditions"] == {"cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0, "condition": "level"}]}
     assert res["cases"] == ["design"]
     assert res["params"]["fcl/ScasAxis.pitch.kp"]["status"] == "overridden"
     entry = res["params"]["table.pitch.k_rate"]["loops"]["pitch_rate"]["design"]
@@ -275,6 +277,7 @@ def test_sweep_job_round_trip(client, wait_job):
     assert j["status"] == "done"
     res = client.get(f"/api/results/{j['result_id']}").json()
     assert res["kind"] == "influence_sweep"
+    assert res["conditions"] == {"cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0, "condition": "level"}]}  # 스윕 저장물에 케이스 좌표가 없던 자리(이관 13단계)
     labels = [row["label"] for row in res["rows"]]
     assert labels == ["base", "table.pitch.kp@+0.1"]
     base, run = res["rows"]
@@ -335,6 +338,8 @@ def test_scan_job_round_trip(client, wait_job):
     assert j["status"] == "done"
     res = client.get(f"/api/results/{j['result_id']}").json()
     assert res["kind"] == "influence_scan"
+    assert [c["name"] for c in res["conditions"]["cases"]] == ["c1", "c2"]
+    assert [c["mach"] for c in res["conditions"]["cases"]] == [0.4, 0.5]
     assert [row["label"] for row in res["rows"]] == ["base", "base"]
     assert [row["case"] for row in res["rows"]] == ["c1", "c2"]
     g = res["grid"]["metrics"]["alt_rms"]
@@ -480,6 +485,7 @@ def test_evaluate_job_round_trip(client, wait_job):
     assert j["status"] == "done"
     res = client.get(f"/api/results/{j['result_id']}").json()
     assert res["kind"] == "influence_evaluate"
+    assert res["conditions"] == {"cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0, "condition": "level"}]}
     assert [c["key"] for c in res["cards"]][:3] == ["mode_stability", "gm", "pm"]
     ch = res["checks"]
     assert ch["n_pass"] + ch["n_warn"] + ch["n_fail"] + ch["n_na"] == 10
@@ -548,6 +554,10 @@ def test_verify_midpoints_multi_fuel_names_are_unique(client, wait_job):
     names = [c["case"] for c in gm["cases"]]
     assert len(names) == len(set(names))  # 겹침 금지
     assert "mid/M0.525_h1000_f100" in names and "mid/M0.525_h1000_f200" in names
+    # 실행 조건 — 요청 케이스와 서버가 만든 중간점 둘 다 좌표로 남는다(이관 13단계)
+    assert [c["name"] for c in res["conditions"]["cases"]] == ["a1", "a2", "b1"]
+    mids = {c["name"]: c for c in res["conditions"]["midpoints"]}
+    assert mids["mid/M0.525_h1000_f100"]["mach"] == 0.525 and mids["mid/M0.525_h1000_f100"]["fuel"] == 100.0
     assert res["verify"]["mass_cg"]["status"] == "na"  # 코너 0건 — na지 PASS가 아니다
     json.dumps(res, allow_nan=False)
 
@@ -616,6 +626,7 @@ def test_prescribe_round_trip(client, wait_job):
     assert j["status"] == "done"
     res = client.get(f"/api/results/{j['result_id']}").json()
     assert res["kind"] == "influence_prescribe"
+    assert res["conditions"] == {"cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0, "condition": "level"}]}  # 확인 런의 격자
     assert res["knobs"] == ["table.pitch.kp"]
     s = res["singles"]["table.pitch.kp"]
     # 대상 지표마다 solvable 아니면 사유가 있다 — 빈칸 없음

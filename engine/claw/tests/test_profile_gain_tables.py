@@ -33,7 +33,7 @@ def _with_tables(doc=None, *, slots=("pitch.kp",), factor=0.5, basis=True):
 
 def test_schema_v2_and_v1_documents_are_rejected_with_the_version_path():
     d = load_example()
-    assert d["schema_version"] == 2
+    assert d["schema_version"] == 3  # v3 (이관 11·12단계) — v2는 업그레이더(upgrade_document)가 옮긴다
     assert d["law"]["gain_tables"] is None  # 없으면 없음(null) — 예제는 확정 표 없이 출발
     old = copy.deepcopy(d)
     old["schema_version"] = 1

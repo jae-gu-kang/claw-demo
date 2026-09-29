@@ -56,19 +56,21 @@ def envelope_verdict(tr, ctx) -> dict:
     여유를 계산하지 않았으면(지상 평형·옛 해) None.
     reasons는 해당되는 사유 전부 — 웹 스캔 라벨(web/js/lib/envelope.js)이 첫 항목을 대표로 쓰므로 옛 코드와 순서를
     먼저 둔다: not_converged → alpha_margin → saturated_throttle_high(**진짜 추진 한계** — 프로펠러 추력 곡선
-    plant/prop.py PropEngine. 다만 SAT_FRAC 0.95 등고선이라 한계보다 설계 여유만큼 안쪽이다) → saturated_de →
+    plant/prop.py PropEngine. 다만 판정선 trim_margin.sat_frac(기본 0.95) 등고선이라 한계보다 설계 여유만큼 안쪽이다) → saturated_de →
     saturated_throttle_low. 그 뒤에 판정의 모델·제한·여유 사유 중 옛 코드가 말하지 않은 것(db_mach·db_alpha·
     fuel_range·stall_boundary·limiter_clips_trim·q_max·mach_no·stall_basis_missing)을 판정 순서대로 중복 없이 붙인다.
     """
-    from claw.opspace.verdict import condition_verdict
+    from claw.opspace.verdict import alpha_margin_short, condition_verdict
 
     verdict = condition_verdict(tr, ctx)
     reasons = []
     if not tr.converged:
         reasons.append("not_converged")
-    if not tr.flags.get("alpha_margin_ok"):
+    # 판정선은 문맥의 적용 기준(ctx.trim_bounds — criteria.trim_margin)으로 다시 잰다 — 트림 때 찍힌 플래그가 아니다
+    a_short = alpha_margin_short(tr, ctx.trim_bounds)
+    if a_short or (a_short is None and not tr.flags.get("alpha_margin_ok")):
         reasons.append("alpha_margin")
-    sat = saturation_detail(tr, ctx.trim_bounds["de"])
+    sat = saturation_detail(tr, ctx.trim_bounds)
     if sat["throttle_high"]:
         reasons.append("saturated_throttle_high")
     if sat["de"]:

@@ -134,3 +134,16 @@ test("지금 기준 조회 — 기체당 한 번, 실패는 null, id 없으면 �
   assert.equal(await look(null), null);
   assert.deepEqual(calls, ["/profiles/alpha/criteria", "/profiles/bad/criteria"]);
 });
+
+test("트림 탭·설계 엔벨로프 스캔 결과도 기준으로 판정한 종류다 — 여유 판정(criteria.trim_margin)을 결과에 굳힌다 (스키마 v3)", async () => {
+  const { CRITERIA_JUDGED_KINDS } = await import("./freshness.js");
+  for (const k of ["trim_batch", "envelope_scan"]) {
+    assert.ok(CRITERIA_JUDGED_KINDS.has(k), k);
+    // 판정선을 바꾸면 다시 판정해야 한다 — 목표만 다르면(여유 판정은 목표를 안 쓴다) 신선
+    assert.equal(criteriaFreshness({ ...ECHO, judgement_fingerprint: "j0" }, ECHO, k), "reeval");
+    assert.equal(criteriaFreshness({ ...ECHO, targets_fingerprint: "t0" }, ECHO, k), "fresh");
+    // echo 없는 v3 이전 결과는 미상이다(낡음으로 위장하지 않는다)
+    assert.equal(criteriaFreshness(undefined, ECHO, k), "unknown");
+  }
+  assert.ok(!CRITERIA_JUDGED_KINDS.has("sim"));
+});

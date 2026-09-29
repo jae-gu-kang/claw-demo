@@ -34,6 +34,7 @@ import {
   statusText, trimLabel, verdictLegend, warnNoteText,
 } from "../lib/autodesign.js";
 import { applyFreshnessBlock } from "../lib/flowsteps.js";
+import { massConditionNote } from "../lib/plot.js";
 import { criteriaBadgeSpec, criteriaFreshness, resultFreshness } from "../lib/freshness.js";
 import { slotIndex, withConstant } from "../lib/gainsync.js";
 import { haltReason } from "../lib/showcase.js";
@@ -934,6 +935,9 @@ function renderResult(box, body, resultId, ctx) {
     ...facts,
     el("h4", {}, "운영점"),
     countsLine(rows),
+    // 탑재 구성을 적은 기체 — 점 판정이 CG 영향을 반영하지 못한다(조건 판정 mass_condition — 이관 11단계)
+    ...[massConditionNote(rows.map((r) => r.verdict))].filter(Boolean)
+      .map((t) => el("p", { class: "notice", "data-mass-condition": "" }, t)),
     pointsTable,
     legendBox(body.margin_out?.criteria, report.fit_mode),
     // 권장선보다 느슨한 목표로 설계했다 — warn 판정이 「목표 미달」이 아니라 설정이 예고한 결과임을 결과 곁에 둔다

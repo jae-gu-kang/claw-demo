@@ -1,7 +1,7 @@
 {
  "golden": "trim_grid",
  "mode": "full",
- "captured_at": "7c92755+dirty",
+ "captured_at": "3a2bd4c+dirty",
  "value": [
   {
    "tuple": [
@@ -195,6 +195,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -402,6 +409,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -596,6 +610,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -794,6 +815,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -988,6 +1016,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -1186,6 +1221,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -1380,6 +1422,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -1578,6 +1627,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -1774,6 +1830,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -1968,6 +2031,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -2170,6 +2240,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -2382,6 +2459,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -2590,6 +2674,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -2802,6 +2893,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -3007,6 +3105,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -3201,6 +3306,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -3399,6 +3511,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -3593,6 +3712,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -3791,6 +3917,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -3985,6 +4118,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -4183,6 +4323,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -4379,6 +4526,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -4573,6 +4727,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -4775,6 +4936,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -4987,6 +5155,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -5197,6 +5372,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -5405,6 +5587,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -5619,6 +5808,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -5824,6 +6020,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -6018,6 +6221,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -6216,6 +6426,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -6410,6 +6627,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -6608,6 +6832,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -6802,6 +7033,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -7000,6 +7238,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -7194,6 +7439,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -7396,6 +7648,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -7608,6 +7867,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -7816,6 +8082,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -8028,6 +8301,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -8238,6 +8518,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -8460,6 +8747,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -8663,6 +8957,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -8857,6 +9158,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -9055,6 +9363,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -9249,6 +9564,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -9447,6 +9769,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -9641,6 +9970,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -9843,6 +10179,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -10043,6 +10386,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -10255,6 +10605,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -10465,6 +10822,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -10673,6 +11037,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -10895,6 +11266,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -11098,6 +11476,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -11292,6 +11677,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -11490,6 +11882,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -11684,6 +12083,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -11882,6 +12288,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -12076,6 +12489,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -12274,6 +12694,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -12468,6 +12895,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -12670,6 +13104,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -12882,6 +13323,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -13092,6 +13540,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -13300,6 +13755,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -13514,6 +13976,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -13719,6 +14188,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -13913,6 +14389,13 @@
          "dict": {
           "status": "in",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -14111,6 +14594,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -14305,6 +14795,13 @@
          "dict": {
           "status": "in",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -14503,6 +15000,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -14699,6 +15203,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -14893,6 +15404,13 @@
          "dict": {
           "status": "in",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -15095,6 +15613,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -15295,6 +15820,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -15507,6 +16039,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -15717,6 +16256,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -15925,6 +16471,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -16139,6 +16692,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -16344,6 +16904,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -16538,6 +17105,13 @@
          "dict": {
           "status": "in",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -16736,6 +17310,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -16930,6 +17511,13 @@
          "dict": {
           "status": "in",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -17128,6 +17716,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -17324,6 +17919,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -17518,6 +18120,13 @@
          "dict": {
           "status": "in",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -17720,6 +18329,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -17932,6 +18548,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -18140,6 +18763,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -18352,6 +18982,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -18560,6 +19197,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -18772,6 +19416,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -18987,6 +19638,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -19192,6 +19850,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -19386,6 +20051,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -19584,6 +20256,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -19780,6 +20459,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -19974,6 +20660,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -20176,6 +20869,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -20388,6 +21088,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -20596,6 +21303,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -20808,6 +21522,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -21018,6 +21739,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -21226,6 +21954,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -21440,6 +22175,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -21645,6 +22387,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -21839,6 +22588,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -22037,6 +22793,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -22231,6 +22994,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -22429,6 +23199,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -22625,6 +23402,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -22819,6 +23603,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -23021,6 +23812,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -23233,6 +24031,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -23441,6 +24246,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -23653,6 +24465,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -23861,6 +24680,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -24075,6 +24901,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -24280,6 +25113,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -24474,6 +25314,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -24672,6 +25519,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -24866,6 +25720,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -25064,6 +25925,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -25260,6 +26128,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -25454,6 +26329,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -25656,6 +26538,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -25868,6 +26757,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -26076,6 +26972,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -26288,6 +27191,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -26496,6 +27406,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -26710,6 +27627,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -26922,6 +27846,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -27127,6 +28058,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -27321,6 +28259,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -27519,6 +28464,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -27715,6 +28667,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": true,
         "exclusion": null
        }
@@ -27909,6 +28868,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": true,
@@ -28111,6 +29077,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -28323,6 +29296,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -28531,6 +29511,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -28743,6 +29730,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -28951,6 +29945,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -29162,6 +30163,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -29377,6 +30385,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -29588,6 +30603,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -29802,6 +30824,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -30010,6 +31039,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -30222,6 +31258,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -30430,6 +31473,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -30642,6 +31692,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -30850,6 +31907,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -31062,6 +32126,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -31270,6 +32341,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,
@@ -31482,6 +32560,13 @@
           "confirmed": false
          }
         },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
+         }
+        },
         "adopted": false,
         "exclusion": {
          "dict": {
@@ -31690,6 +32775,13 @@
          "dict": {
           "status": "out_of_region",
           "confirmed": false
+         }
+        },
+        "mass_condition": {
+         "dict": {
+          "loading": null,
+          "loadings_declared": 0,
+          "cg_supported": false
          }
         },
         "adopted": false,

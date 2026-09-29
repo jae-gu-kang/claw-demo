@@ -1,11 +1,11 @@
 {
  "golden": "evaluate_linear",
  "mode": "full",
- "captured_at": "9bba329+dirty",
+ "captured_at": "3a2bd4c+dirty",
  "value": {
   "dict": {
    "fingerprint": "c48da3269a9a8e4c",
-   "criteria_fingerprint": "285b1415cbf86dba",
+   "criteria_fingerprint": "8c1ed76ce0dbece1",
    "criteria": {
     "dict": {
      "schema_version": 2,
@@ -42,6 +42,13 @@
        "b_min_frac": "f:0x1.999999999999ap-4",
        "dyn_reserve_min_frac": "f:0x1.999999999999ap-5",
        "thr_trim_reserve_min": "f:0x1.999999999999ap-4"
+      }
+     },
+     "trim_margin": {
+      "dict": {
+       "sat_frac": "f:0x1.e666666666666p-1",
+       "thr_margin": "f:0x1.47ae147ae147bp-6",
+       "alpha_margin": "f:0x1.1eb851eb851ecp-5"
       }
      },
      "actuator": {

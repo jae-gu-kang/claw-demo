@@ -17,7 +17,10 @@ test("웹의 폴백은 예제 기체 문서의 사본이다 — 예제 문서가
   const d = templateDefaults(EXAMPLE);
   assert.equal(d.hasTemplate, true);
   assert.deepEqual(d.grid, DEFAULT_GRID, "해석 격자 (lib/grid.js)");
-  assert.deepEqual(d.envelope, { ...ENVELOPE_FALLBACK }, "엔벨로프 폼");
+  // 운용 고도 칸(altMin·altMax)은 문서가 채우지 않는 빈칸 폴백이다(스키마 v3 — 아래 시험)
+  const { altMin, altMax, ...fromDoc } = ENVELOPE_FALLBACK;
+  assert.deepEqual([altMin, altMax], ["", ""]);
+  assert.deepEqual(d.envelope, fromDoc, "엔벨로프 폼");
   assert.deepEqual(d.margins, { ...MARGIN_ACT_FALLBACK }, "마진 맵 작동기 칸");
   assert.deepEqual(d.sim.form, { fuel: DEFAULT_FORM.fuel, fuelFlow: DEFAULT_FORM.fuelFlow,
     tEnd: DEFAULT_FORM.tEnd, accept: DEFAULT_FORM.accept }, "시뮬 폼 미션 칸");
@@ -40,8 +43,8 @@ test("템플릿이 없는 기체 — 격자·미션은 없고(폴백을 쓰되 �
   doc.actuator.params.wn = 45;
   const d = templateDefaults(doc);
   assert.deepEqual([d.hasTemplate, d.grid, d.sim, d.rolloutM], [false, null, null, null]);
-  // 동압·운용 고도는 템플릿이 아니라 문서 본문 — 예제는 null이라 빈칸(경계 없음)
-  assert.deepEqual(d.envelope, { margin: "0.08", qMax: "", altMin: "", altMax: "" });
+  // 동압은 템플릿이 아니라 문서 본문 — 예제는 null이라 빈칸(경계 없음). 운용 고도는 문서에서 채우지 않는다(스키마 v3)
+  assert.deepEqual(d.envelope, { margin: "0.08", qMax: "" });
   assert.equal(d.margins.wn, "45");
   assert.equal(templateDefaults(null).hasTemplate, false);
 });
@@ -68,21 +71,27 @@ test("손대지 않은 칸만 바꾼다 — 사용자가 고친 칸·같은 값�
   assert.deepEqual(untouchedUpdates({ a: "1" }, fallback, null), {});
 });
 
-test("엔벨로프 칸 — 문서의 q̄_max·운용 고도와 템플릿 V-n 고도 목록을 손대지 않은 칸에 채운다", () => {
+test("엔벨로프 칸 — 문서의 q̄_max와 템플릿 V-n 고도 목록을 손대지 않은 칸에 채운다", () => {
   const doc = JSON.parse(JSON.stringify(EXAMPLE));
   doc.structural.q_max = 3000;
-  doc.operating = { alt_min: 0, alt_max: 4000 };
   doc.mission_template.envelope.alt = [0, 1500, 3000]; // 스키마가 목록도 받는다(스칼라도 계속)
   const d = templateDefaults(doc);
-  assert.deepEqual([d.envelope.qMax, d.envelope.altMin, d.envelope.altMax, d.envelope.alt],
-    ["3000", "0", "4000", "0, 1500, 3000"]);
+  assert.deepEqual([d.envelope.qMax, d.envelope.alt], ["3000", "0, 1500, 3000"]);
   // 폼이 폴백 그대로면 전부 바뀌고, 사용자가 고친 칸(여기선 q̄_max)은 남는다
   const form = { ...ENVELOPE_FALLBACK, qMax: "5000" };
   const up = untouchedUpdates(form, ENVELOPE_FALLBACK, d.envelope);
-  assert.deepEqual([up.qMax, up.altMin, up.altMax, up.alt], [undefined, "0", "4000", "0, 1500, 3000"]);
-  // 한쪽만 적힌 운용 고도 — 적힌 쪽만 선다(null은 빈칸 = 그 쪽 경계 없음)
-  doc.operating = { alt_min: null, alt_max: 2500 };
-  assert.deepEqual([templateDefaults(doc).envelope.altMin, templateDefaults(doc).envelope.altMax], ["", "2500"]);
+  assert.deepEqual([up.qMax, up.alt], [undefined, "0, 1500, 3000"]);
+});
+
+test("운용 고도 칸은 문서에서 채우지 않는다 — 스키마 v3는 운용 고도가 요구영역 고도다(이관 11단계)", () => {
+  // 요구영역 고도 끝은 서버·엔진이 선도 끝으로 그린다(bounds.alt_*_source "region"). 칸에 같은 값을 채워 보내면
+  // 요구영역 끝이 「운용 입력」으로 두 번 그려진다 — 칸은 연구용 덮어쓰기로만 남는다
+  const doc = JSON.parse(JSON.stringify(EXAMPLE));
+  doc.operating_region = { ...(doc.operating_region ?? {}), alt: [200, 3000] };
+  doc.operating = { alt_min: 0, alt_max: 4000 }; // 옛 절이 남아 있어도(올리기 전 v2 사본) 읽지 않는다
+  const d = templateDefaults(doc);
+  assert.equal("altMin" in d.envelope, false);
+  assert.equal("altMax" in d.envelope, false);
 });
 
 test("V-n 고도 — 템플릿 envelope.alt가 수 하나든 목록이든 폼 글이 엔벨로프 그리기의 고도 목록으로 되읽힌다", () => {

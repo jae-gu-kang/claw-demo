@@ -885,27 +885,27 @@ def test_design_envelope_takes_its_altitudes_and_requirement_rows_from_the_regio
     sg = env["schedule_grid"]
     assert sg["source"] == "region_base_grid" and sg["fuel"] in (100.0, 300.0)
     assert {p["alt"] for p in sg["points"]} <= {100.0, 1000.0, 3000.0}
-    # 운용 고도가 있으면 그것이 이긴다 — 요구영역은 요구, 운용 고도는 기체 한계다
+    # 덧쓴 고도 끝(서버 질의)이 있으면 그것이 이긴다 — 스키마 v3에는 운용 고도 절이 없다(운용 고도 = 요구영역 고도)
     env2 = design_envelope(*_env_inputs(), fuel=200.0, alt_min=0.0, alt_max=4000.0, requirement=_req())
-    assert (env2["bounds"]["alt_min_used"], env2["bounds"]["alt_max_source"]) == (0.0, "operating")
+    assert (env2["bounds"]["alt_min_used"], env2["bounds"]["alt_max_source"]) == (0.0, "override")
     no_b = env2["requirement"]["rows"]  # 경계표가 없으면 기본 범위의 고도·연료 끝 네 모서리
     assert {(r["alt"], r["fuel"]) for r in no_b} == {(100.0, 100.0), (100.0, 300.0), (3000.0, 100.0), (3000.0, 300.0)}
     assert all((r["mach_lo"], r["mach_hi"]) == (0.3, 0.55) for r in no_b)
 
 
 def test_design_envelope_mixed_altitude_sources_do_not_invert():
-    """운용 하한만 있고(요구영역 위쪽) 상한을 요구영역 끝에서 가져오면 하한 ≥ 상한이 될 수 있다 — 전엔 상한이 12,000 m라
+    """덧쓴 하한만 있고(요구영역 위쪽) 상한을 요구영역 끝에서 가져오면 하한 ≥ 상한이 될 수 있다 — 전엔 상한이 12,000 m라
     됐는데 요구영역이 생기며 거부되던 조합. 뒤집히면 그 끝은 표시 기본값으로 물러난다(출처 display_default)."""
     from claw.analysis import design_envelope
 
     env = design_envelope(*_env_inputs(), fuel=200.0, alt_min=5000.0, requirement=_req())  # 요구 100~3000 m
     b = env["bounds"]
-    assert (b["alt_min_used"], b["alt_min_source"]) == (5000.0, "operating")
+    assert (b["alt_min_used"], b["alt_min_source"]) == (5000.0, "override")
     assert (b["alt_max_used"], b["alt_max_source"]) == (12000.0, "display_default")
     assert b["alt_max_is_display_default"] is True
     env = design_envelope(*_env_inputs(), fuel=200.0, alt_max=50.0, requirement=_req())
     b = env["bounds"]
-    assert (b["alt_min_used"], b["alt_min_source"], b["alt_max_source"]) == (0.0, "display_default", "operating")
-    # 둘 다 운용 고도면 종전대로 거부한다 — 기체 문서의 모순이다
+    assert (b["alt_min_used"], b["alt_min_source"], b["alt_max_source"]) == (0.0, "display_default", "override")
+    # 둘 다 덧쓴 끝이면 종전대로 거부한다 — 입력의 모순이다
     with pytest.raises(ValueError, match="하한 ≥ 상한"):
         design_envelope(*_env_inputs(), fuel=200.0, alt_min=5000.0, alt_max=4000.0, requirement=_req())

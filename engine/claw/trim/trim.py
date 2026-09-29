@@ -10,9 +10,10 @@
 배치는 인접 케이스 시드(직전 수렴해를 초기값으로) [기본값] — 초기값 민감성 대응 (01 §4.1).
 
 자동 판정 플래그 (01 §4.1 [기본값], TrimResult.flags):
-- residual_ok    : |u̇|,|ẇ| < RESID_TOL, |q̇| < RESID_TOL
-- saturation_ok  : δe·스로틀이 한계의 SAT_FRAC 이내 (스로틀 하한 여유 THR_MARGIN 포함)
-- alpha_margin_ok: α < α_stall(M) − 기체의 trim.alpha_margin — **실속 표 기준**(v1.07). 종전에는 α 탐색 상한
+- residual_ok    : |u̇|,|ẇ|,|q̇| < resid_tol (해석 설정 solver.resid_tol — v2까지 상수 RESID_TOL 1e-4)
+- saturation_ok  : δe·스로틀이 한계의 sat_frac 이내 (스로틀 하한 여유 thr_margin 포함) — 판정선은 기준
+  criteria.trim_margin(v2까지 상수 SAT_FRAC·THR_MARGIN, 이관 12단계)
+- alpha_margin_ok: α < α_stall(M) − 트림 α 여유 criteria.trim_margin.alpha_margin — **실속 표 기준**(v1.07). 종전에는 α 탐색 상한
   기준이라(예제 0.35 − 0.035 = 0.315 rad) M0.6 이상에서는 실속각을 넘어도 통과했고, 실속각이 탐색 상한보다 큰
   저속에서는 실속과 무관한 상수에 막혔다
 
@@ -31,11 +32,10 @@ from claw.common.contracts import SurfaceCommand, TrimResult, VehicleState
 from claw.env import isa_atmosphere
 from claw.plant.aircraft import XE_H, XE_P, XE_PHI, XE_Q, XE_R, XE_THETA, XE_U, XE_V, XE_W
 
-# α·δe 탐색 범위와 α 여유는 **기체 데이터**라 여기 없다 — Aircraft.trim_bounds(기체 프로파일, 02 §5.6)
+# 탐색 범위·잔차 허용치(해석 설정)와 판정선(sat_frac·thr_margin·alpha_margin — 기준)은 여기 없다 — Aircraft.trim_bounds
+# (BuiltProfile.trim_bounds가 문서 solver 절과 적용 기준 criteria.trim_margin에서 싣는다, 05 §11.13 이관 11·12단계).
+# 스로틀 0~1은 물리 한계다(판정선이 아니다)
 THR_BOUNDS = (0.0, 1.0)
-RESID_TOL = 1e-4  # [m/s², rad/s²]
-SAT_FRAC = 0.95
-THR_MARGIN = 0.02  # 스로틀 하한 여유 — 아이들 포화 해 검출
 CONTINUITY_STEP = np.array([0.05, 0.05, 0.15])  # 인접 케이스 허용 Δ[α, δe, thr]
 
 _Z0_DEFAULT = np.array([0.05, 0.0, 0.3])
@@ -47,7 +47,7 @@ def trim_reserve(alpha, de, thr, mach, tb) -> dict:
     - de: 방향별 여유(reserve_hi·reserve_lo), 크기형 여유 reserve = 한계 − |δe|와 소모율 frac = |δe| / 한계.
       한계는 **δe 부호 쪽**이다(비대칭 엘레본에서 음의 δe를 상한으로 나누면 소모율이 틀린다)
     - thr: 상한·하한 여유
-    - alpha: 실속각 α_stall(M), 실속 여유 α_stall − α, 판정 한계 limit = α_stall − trim.alpha_margin
+    - alpha: 실속각 α_stall(M), 실속 여유 α_stall − α, 판정 한계 limit = α_stall − tb["alpha_margin"](기준 trim_margin)
     - elevon_roll_avail: 엘레본 예산 중 트림이 안 가져간 몫 = 상한 − |δe| (법칙 할당 R의 케이스별 짝)
     """
     lo, hi = (float(v) for v in tb["de"])
@@ -63,29 +63,32 @@ def trim_reserve(alpha, de, thr, mach, tb) -> dict:
     }
 
 
-def _saturation_channels(de, thr, de_bounds) -> dict:
-    """포화 채널별 판정 — saturation_ok의 부정과 동치인 세 갈래 (상수 단일 거처).
+def _saturation_channels(de, thr, tb) -> dict:
+    """포화 채널별 판정 — saturation_ok의 부정과 동치인 세 갈래. 판정선은 tb(Aircraft.trim_bounds)의 sat_frac·thr_margin
+    (기준 criteria.trim_margin), 한계는 tb["de"]·THR_BOUNDS다 — 판정선의 단일 거처는 기준이다(이관 12단계).
 
     throttle_high는 이제 **진짜 추진 한계**다 — 프로펠러 추력 모델
     (plant/prop.py PropEngine)이 들어오면서 T(δ, V, ρ)가 실제 곡선이 됐기 때문이다.
     종전 상수 추력에서는 이 플래그가 "전용 추력 모델 [TBD]이 없어 쓰는 대리 지표"였다
     (01 §2.6). 수평비행 추력 부족은 여전히 스로틀 상한 포화로 드러난다.
     """
+    sat, de_bounds = float(tb["sat_frac"]), tb["de"]
     return {
-        "de": bool(de >= SAT_FRAC * de_bounds[1] or de <= SAT_FRAC * de_bounds[0]),
-        "throttle_high": bool(thr >= SAT_FRAC * THR_BOUNDS[1]),
-        "throttle_low": bool(thr <= THR_BOUNDS[0] + THR_MARGIN),
+        "de": bool(de >= sat * de_bounds[1] or de <= sat * de_bounds[0]),
+        "throttle_high": bool(thr >= sat * THR_BOUNDS[1]),
+        "throttle_low": bool(thr <= THR_BOUNDS[0] + float(tb["thr_margin"])),
     }
 
 
-def saturation_detail(tr, de_bounds) -> dict:
-    """TrimResult → 포화 채널 상세 {"de", "throttle_high", "throttle_low"}.
+def saturation_detail(tr, trim_bounds) -> dict:
+    """TrimResult + 트림 범위·판정선(Aircraft.trim_bounds — 엘레본 한계 + sat_frac·thr_margin) → 포화 채널 상세
+    {"de", "throttle_high", "throttle_low"}.
 
     trim_level의 saturation_ok과 같은 식(_saturation_channels) — 어느 채널이
-    걸렸는지는 설계 엔벨로프 스캔(제어 가능 영역 귀속)의 입력이 된다.
+    걸렸는지는 설계 엔벨로프 스캔(제어 가능 영역 귀속)의 입력이 된다. 판정선을 지금 기준으로 다시 재므로 트림을 다시
+    풀지 않고 여유 판정만 바꿀 수 있다(05 §11.3).
     """
-    return _saturation_channels(float(tr.control.elevon[0]), float(tr.control.throttle[0]),
-                                de_bounds)
+    return _saturation_channels(float(tr.control.elevon[0]), float(tr.control.throttle[0]), trim_bounds)
 
 
 def _controls(z):
@@ -101,6 +104,10 @@ def _xe(z, v_true, alt):
     return xe
 
 
+# Aircraft.trim_bounds가 반드시 실어야 할 값 — 빠지면 상수로 되돌아가지 않고 거부한다(판정선·허용치의 출처가 문서·기준이다)
+TRIM_BOUNDS_KEYS = ("alpha", "de", "resid_tol", "sat_frac", "thr_margin", "alpha_margin", "stall")
+
+
 def _trim_bounds(aircraft) -> dict:
     tb = getattr(aircraft, "trim_bounds", None)
     if tb is None:
@@ -108,6 +115,10 @@ def _trim_bounds(aircraft) -> dict:
     if tb.get("stall") is None:
         # α 판정의 기준이 실속 표다 — 없으면 탐색 상한으로 되돌아가지 않는다(그 상수는 실속과 무관하다)
         raise ValueError("트림 범위에 실속 표(stall)가 없는 기체 — 기체 프로파일로 조립해야 한다 (02 §5.6)")
+    missing = [k for k in TRIM_BOUNDS_KEYS if k not in tb]
+    if missing:
+        raise ValueError(f"트림 범위에 {missing}가 없다 — 해석 설정(solver)·판정선(criteria.trim_margin)을 기체 프로파일에서 "
+                         "조립해야 한다 (BuiltProfile.trim_bounds)")
     return tb
 
 
@@ -133,9 +144,9 @@ def trim_level(aircraft, case, z0=None, fingerprint=""):
     alpha, de, thr = res.x
     r = resid(res.x)
 
-    residual_ok = bool(np.all(np.abs(r) < RESID_TOL))
+    residual_ok = bool(np.all(np.abs(r) < float(tb["resid_tol"])))
     reserve = trim_reserve(alpha, de, thr, case.mach, tb)
-    saturation_ok = not any(_saturation_channels(de, thr, tb["de"]).values())
+    saturation_ok = not any(_saturation_channels(de, thr, tb).values())
     alpha_margin_ok = bool(alpha < reserve["alpha"]["limit"])
     flags = {
         "residual_ok": residual_ok,

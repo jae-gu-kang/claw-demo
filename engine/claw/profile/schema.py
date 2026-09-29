@@ -11,6 +11,7 @@
 """
 
 import copy
+import json
 import math
 import re
 
@@ -21,13 +22,16 @@ from claw.profile.patch import apply_patch, get_pointer
 # 절이라 OPTIONAL_SECTIONS 방식(지문 밖·버전 불변)이 아니라 버전을 올렸다 — 예제 지문이 바뀌어
 # 옛 결과·스냅숏 계보가 끊기고, v1 저장 문서는 다음 검증에서 거부된다(공개 데모는 volatile이라
 # 영향 미미 — v1.17 마하 0 격자점 거부와 같은 정책)
-SCHEMA_VERSION = 2
+# v3 (05 §11.13 이관 11·12단계): operating 절 폐지(운용 고도 = 요구영역 고도), trim 절을 해석 설정(solver — 플랜트 지문
+# 밖)과 판정선(criteria.trim_margin)으로 가름, mass.loadings(탑재 구성 자리), mission_template.envelope.scan_* 폐지.
+# v2 문서는 upgrade_document가 옮긴다(저장·가져오기 경로가 부른다 — validate_document는 v3만 받는다)
+SCHEMA_VERSION = 3
 MAX_VARIANTS = 64  # 형상 변형 상한 — 읽을 때마다 변형마다 재검증하므로 단일 워커를 물지 않게
 
 SECTIONS = (
     "schema_version", "id", "name", "description", "is_example",
     "geometry", "aero", "stall", "mass", "propulsion", "actuator", "surfaces",
-    "structural", "operating", "ground", "trim", "law", "mission_template", "display", "criteria", "tuning",
+    "structural", "ground", "solver", "law", "mission_template", "display", "criteria", "tuning",
     "operating_region", "variants",
 )
 # 스키마 v1에 나중에 더한 **선택 절** — 문서에 없으면 null(없음)로 채운다. 버전을 올리는 대신 이렇게 한
@@ -347,8 +351,35 @@ def _mat3(v, path):
     return rows
 
 
+def _loadings(v, p):
+    """탑재 구성(이산) — null 또는 [{id, name, payload_kg ≥ 0, cg: [x,y,z] | null}] (v3, 05 §11.3 · 05 §11.13 11단계).
+
+    **자리만 있다** — 계산은 기본 질량 모델(탑재 없음 = 대표 구성)로 한다. 플랜트는 연료로 질량·관성만 바꾸고 CG를
+    동역학에 넣지 않으므로(02 §5.6 [한계]) 구성을 적어도 결과가 달라지지 않는다. 그래서 적힌 구성이 있으면 조건 판정이
+    `mass_condition`으로 그렇다고 말하고(opspace/verdict.py) CG 영향 검증은 통과로 세지 않는다. 트림이 보지 않으므로 플랜트
+    지문 밖이고(fingerprint.plant_fingerprint가 뺀다 — 구성을 적었다고 δe_trim 표가 낡지 않는다) 계보 지문 안이다."""
+    if v is None:
+        return None
+    if not isinstance(v, list):
+        _fail(p, "탑재 구성 목록이어야 함 (없으면 null)")
+    out, seen = [], set()
+    for i, item in enumerate(v):
+        ip = f"{p}/{i}"
+        _keys(item, ip, ("id", "name", "payload_kg", "cg"))
+        lid = item["id"]
+        if not isinstance(lid, str) or not _ID.fullmatch(lid):
+            _fail(f"{ip}/id", "영문·숫자·_·- 1~64자여야 함")
+        if lid in seen:
+            _fail(f"{ip}/id", f"탑재 구성 id 중복: {lid!r}")
+        seen.add(lid)
+        out.append({"id": lid, "name": _text(item["name"], f"{ip}/name", min_len=1),
+                    "payload_kg": _num(item["payload_kg"], f"{ip}/payload_kg", lo=0.0),
+                    "cg": None if item["cg"] is None else _vec(item["cg"], f"{ip}/cg", 3)})
+    return out
+
+
 def _mass(m, p):
-    _keys(m, p, ("m_empty", "fuel_max", "J_empty", "J_full", "cg_empty", "cg_full"))
+    _keys(m, p, ("m_empty", "fuel_max", "J_empty", "J_full", "cg_empty", "cg_full", "loadings"))
     return {
         "m_empty": _num(m["m_empty"], f"{p}/m_empty", lo=0.0, lo_open=True),
         "fuel_max": _num(m["fuel_max"], f"{p}/fuel_max", lo=0.0),
@@ -356,6 +387,7 @@ def _mass(m, p):
         "J_full": _mat3(m["J_full"], f"{p}/J_full"),
         "cg_empty": _vec(m["cg_empty"], f"{p}/cg_empty", 3),
         "cg_full": _vec(m["cg_full"], f"{p}/cg_full", 3),
+        "loadings": _loadings(m["loadings"], f"{p}/loadings"),
     }
 
 
@@ -393,16 +425,6 @@ def _structural(s, p):
     return out
 
 
-def _operating(o, p):
-    _keys(o, p, ("alt_min", "alt_max"))
-    lo, hi = ISA_ALT_RANGE
-    out = {k: _num(o[k], f"{p}/{k}", lo=lo, hi=hi, nullable=True) for k in ("alt_min", "alt_max")}
-    if out["alt_min"] is not None and out["alt_max"] is not None \
-            and not out["alt_min"] < out["alt_max"]:
-        _fail(f"{p}/alt_max", "운용 고도 하한 < 상한이어야 함")
-    return out
-
-
 def _ground(g, p):
     _keys(g, p, ("skid", "rail"))
     skid = g["skid"]
@@ -430,11 +452,15 @@ def _ground(g, p):
     return {"skid": skid, "rail": rail}
 
 
-def _trim(t, p):
-    _keys(t, p, ("alpha_bounds", "alpha_margin"))
+def _solver(t, p):
+    """해석 설정(v3) — 트림 풀이의 받음각 탐색 범위와 수렴 잔차 허용치. **기체가 아니라 풀이 방법**이라 플랜트 지문 밖이고
+    (fingerprint.PLANT_SECTIONS) 계보 지문 안이다 — 바꾸면 트림 결과가 낡는다(05 §11.8 「트림 설정 → 그 키만 재계산 ·
+    결과 낡음」: 트림 저장 키 = BuiltProfile.trim_fingerprint, δe_trim 도출은 solver 기록을 대조한다). 판정선(포화 등고선·
+    트림 α 여유)은 여기가 아니라 기준 criteria.trim_margin이다(이관 12단계)."""
+    _keys(t, p, ("trim_alpha_bounds", "resid_tol"))
     return {
-        "alpha_bounds": _range(t["alpha_bounds"], f"{p}/alpha_bounds"),
-        "alpha_margin": _num(t["alpha_margin"], f"{p}/alpha_margin", lo=0.0),
+        "trim_alpha_bounds": _range(t["trim_alpha_bounds"], f"{p}/trim_alpha_bounds"),
+        "resid_tol": _num(t["resid_tol"], f"{p}/resid_tol", lo=0.0, lo_open=True),
     }
 
 
@@ -583,7 +609,7 @@ def _mission_template(t, p):
     g, e, s = t["trim_grid"], t["envelope"], t["sim"]
     gp, ep, sp = f"{p}/trim_grid", f"{p}/envelope", f"{p}/sim"
     _keys(g, gp, ("mach", "alt", "fuel"))
-    _keys(e, ep, ("alt", "fuel", "scan_mach", "scan_alt"))
+    _keys(e, ep, ("alt", "fuel"))
     _keys(s, sp, ("fuel", "fuel_flow", "t_end", "accept_radius", "climb", "cruise", "approach", "flare",
                   "rollout_m"))
     for k, keys in (("climb", ("speed", "pitch", "exit_alt")), ("cruise", ("speed", "alt")),
@@ -612,12 +638,7 @@ def _mission_template(t, p):
         # 선도 고도 — 하나(종전) 또는 여럿(V-n 다중 고도 선도). 웹 엔벨로프 폼의 초기값이다
         "alt": _num_or_list(e["alt"], f"{ep}/alt", lo=lo, hi=hi, max_items=MAX_ENVELOPE_ALTS),
         "fuel": _num(e["fuel"], f"{ep}/fuel", lo=0.0),
-        "scan_mach": _span(e["scan_mach"], f"{ep}/scan_mach", lo=0.0),
-        "scan_alt": _numlist(e["scan_alt"], f"{ep}/scan_alt", lo=lo, hi=hi),
     }
-    n = points(envelope["scan_mach"], f"{ep}/scan_mach") * len(envelope["scan_alt"])
-    if n > MAX_TEMPLATE_CASES:
-        _fail(f"{ep}/scan_mach", f"스캔 케이스 {n}개 — {MAX_TEMPLATE_CASES}개까지 (간격·목록 확인)")
 
     return {
         "trim_grid": trim_grid,
@@ -731,10 +752,12 @@ def _body(d, *, with_variants):
     top = SECTIONS if with_variants else tuple(k for k in SECTIONS if k != "variants")
     if isinstance(d, dict):
         d = {**{k: None for k in OPTIONAL_SECTIONS}, **d}  # 선택 절이 없으면 없음(null)
+        # 버전부터 본다 — 옛 문서가 「/solver 필수 항목 누락」 같은 절 오류로 보이지 않게(옛 버전은 업그레이더 몫이다)
+        sv = d.get("schema_version")
+        if isinstance(sv, bool) or sv != SCHEMA_VERSION:
+            _fail("/schema_version", f"지원 스키마 버전은 {SCHEMA_VERSION}: {sv!r}"
+                  + (" — v2 문서는 upgrade_document로 옮긴다" if sv == 2 and not isinstance(sv, bool) else ""))
     _keys(d, "", top)
-    sv = d["schema_version"]
-    if isinstance(sv, bool) or sv != SCHEMA_VERSION:
-        _fail("/schema_version", f"지원 스키마 버전은 {SCHEMA_VERSION}: {sv!r}")
     if not isinstance(d["id"], str) or not _ID.fullmatch(d["id"]):
         _fail("/id", "영문·숫자·_·- 1~64자여야 함")
     if not isinstance(d["is_example"], bool):
@@ -754,9 +777,8 @@ def _body(d, *, with_variants):
                                reserved=ACTUATOR_RESERVED),
         "surfaces": _surfaces(d["surfaces"], "/surfaces"),
         "structural": _structural(d["structural"], "/structural"),
-        "operating": _operating(d["operating"], "/operating"),
         "ground": _ground(d["ground"], "/ground"),
-        "trim": _trim(d["trim"], "/trim"),
+        "solver": _solver(d["solver"], "/solver"),
         "law": _law(d["law"], "/law"),
         "mission_template": _mission_template(d["mission_template"], "/mission_template"),
         "display": _display(d["display"], "/display"),
@@ -940,25 +962,41 @@ def _variants(v, base):
 def document_warnings(doc: dict) -> list:
     """검증된 문서에서 알려야 할 것 — [{"path", "message"}]. 오류가 아니다(저장·계산은 된다).
 
-    - 트림 α 탐색 상한 < 판정 한계 최대(실속 표 최대 − trim.alpha_margin): 트림 α 판정은 실속 표 기준인데 해가 탐색
-      상한을 넘을 수 없어, 저속에서 트림이 판정 한계가 아니라 탐색 상한에 막힌다(저속 가림). 실속 표 최대와 비교하면
-      그 사이(판정 한계 위·실속각 아래)의 상한에도 경고하게 된다 — 그 상한은 아무것도 가리지 않는다.
-    형상 변형이 trim·stall을 덮어쓰면 달라지므로 변형마다도 본다(variant 키)."""
+    - 트림 α 탐색 상한(solver.trim_alpha_bounds) < 판정 한계 최대(실속 표 최대 − 트림 α 여유 criteria.trim_margin.alpha_margin
+      — 적용값, 없으면 도구 기본값): 트림 α 판정은 실속 표 기준인데 해가 탐색 상한을 넘을 수 없어, 저속에서 트림이 판정
+      한계가 아니라 탐색 상한에 막힌다(저속 가림). 실속 표 최대와 비교하면 그 사이(판정 한계 위·실속각 아래)의 상한에도
+      경고하게 된다 — 그 상한은 아무것도 가리지 않는다.
+    - 트림 잔차 허용치(solver.resid_tol) > RESID_TOL_WARN: 저장은 되지만(탐색용으로 느슨하게 둘 수 있다) 그 해를 트림으로 부르기
+      어렵다 — 경계값의 뜻은 RESID_TOL_WARN 주석.
+    형상 변형이 solver·stall을 덮어쓰면 달라지므로 변형마다도 본다(variant 키). 기준은 변형이 못 고친다(VARIANT_FORBIDDEN)."""
+    from claw.pipeline.criteria import GainEvalCriteria
+
+    margin = float(GainEvalCriteria.from_profile(doc).trim_margin.alpha_margin)
+
     def check(d, variant):
-        hi = float(d["trim"]["alpha_bounds"][1])
-        limit_max = max(float(v) for v in d["stall"]["table"]["data"]) - float(d["trim"]["alpha_margin"])
+        hi = float(d["solver"]["trim_alpha_bounds"][1])
+        limit_max = max(float(v) for v in d["stall"]["table"]["data"]) - margin
         if hi >= limit_max:
             return []
-        return [{"path": "/trim/alpha_bounds/1", "variant": variant,
+        return [{"path": "/solver/trim_alpha_bounds/1", "variant": variant,
                  "message": f"트림 α 탐색 상한 {hi:g} rad가 판정 한계 최대 {limit_max:g} rad(실속 표 최대 − 트림 α 여유)보다 "
                             "낮다 — 저속에서 트림이 판정 한계가 아니라 탐색 상한에 막힌다(저속 가림). 탐색 상한은 판정이 아니라 "
                             "풀이 범위다"}]
 
-    out = check(doc, None) + _target_warnings(doc)
+    def loose(d, variant):
+        tol = float(d["solver"]["resid_tol"])
+        if tol <= RESID_TOL_WARN:
+            return []
+        return [{"path": "/solver/resid_tol", "variant": variant,
+                 "message": f"트림 잔차 허용치 {tol:g}가 {RESID_TOL_WARN:g}보다 크다 — 잔차는 수평비행 평형의 u̇·ẇ[m/s²]·"
+                            "q̇[rad/s²]라, 이만큼 남은 해를 수렴으로 받으면 「트림」이 눈에 띄게 흐른다(q̇ 0.01 rad/s²면 1 s에 "
+                            f"약 0.6°/s 피치 각속도). v2까지의 상수는 {DEFAULT_RESID_TOL:g}였다"}]
+
+    out = check(doc, None) + loose(doc, None) + _target_warnings(doc)
     for item in doc.get("variants") or []:
         eff = effective_document(doc, item["id"])
-        warns = check(eff, item["id"])
-        if warns and not (out and eff["trim"] == doc["trim"] and eff["stall"] == doc["stall"]):
+        warns = check(eff, item["id"]) + loose(eff, item["id"])
+        if warns and not (out and eff["solver"] == doc["solver"] and eff["stall"] == doc["stall"]):
             out += warns
     return out
 
@@ -993,3 +1031,361 @@ def effective_document(doc: dict, variant: str | None = None) -> dict:
         if item["id"] == variant:
             return _body(apply_patch(doc, item["patch"]), with_variants=False)
     raise ProfileError("/variants", f"없는 형상 변형: {variant!r}")
+
+
+# ── v2 → v3 업그레이더 (05 §11.13 이관 11·12단계) ───────────────────────────────────────────────────────────────────
+
+# 해석 설정 기본값 — v2까지 코드 상수였던 수평비행 트림 잔차 허용치(trim/trim.py RESID_TOL 1e-4). v3부터는 문서 값이 정본이고
+# 이 값은 옮길 때 채우는 자리일 뿐이다(v2 문서는 이 값으로 풀렸다 — 옮겨도 트림이 바뀌지 않는다)
+DEFAULT_RESID_TOL = 1e-4
+# 잔차 허용치 경고 경계 [m/s²·rad/s²] — v2 상수의 100배. 잔차는 평형식의 가속도(u̇·ẇ·q̇)라 1e-2면 q̇가 1 s에 약 0.6°/s의
+# 피치 각속도를 쌓는다 — 그 위의 「수렴」은 시뮬에서 곧바로 흐르는 해다. 판정이 아니라 경고다(검증기 경계로 막지 않는다 —
+# 거친 탐색을 일부러 느슨하게 돌리는 쓰임을 막을 까닭이 없다)
+RESID_TOL_WARN = 1e-2
+_V2_SCAN_KEYS = ("scan_mach", "scan_alt")
+
+
+def _note(path, message):
+    return {"path": path, "message": message}
+
+
+def _alt_text(v):
+    return "없음" if v is None else f"{float(v):g} m"
+
+
+def _upgrade_operating(op, region, notes):
+    """operating 절을 버리며 그 값이 요구영역 고도로 덮였는지 말한다 — 값이 없으면(null 둘) 말할 것이 없다."""
+    if not isinstance(op, dict):
+        return
+    lo, hi = op.get("alt_min"), op.get("alt_max")
+    if lo is None and hi is None:
+        return
+    said = f"운용 고도 [{_alt_text(lo)}, {_alt_text(hi)}]"
+    alt = region.get("alt") if isinstance(region, dict) else None
+    if not isinstance(alt, list) or len(alt) != 2:
+        notes.append(_note("/operating", f"{said}를 버렸다 — v3에는 운용 고도 절이 없고 운용 고도는 요구영역 고도"
+                                         "(/operating_region/alt)인데 이 문서에는 요구영역이 없어 그 값을 옮길 자리가 없다. "
+                                         "요구영역을 정하면 그 고도가 운용 고도다"))
+        return
+    same = all(v is None or float(v) == float(a) for v, a in zip((lo, hi), alt))
+    if same:
+        notes.append(_note("/operating", f"{said}를 버렸다 — 요구영역 고도 [{float(alt[0]):g}, {float(alt[1]):g}] m가 "
+                                         "같은 값이라 잃은 것이 없다"))
+    else:
+        notes.append(_note("/operating", f"{said}를 버렸다 — 요구영역 고도 [{float(alt[0]):g}, {float(alt[1]):g}] m와 "
+                                         "달라 그 차이는 잃었다. v3부터 운용 고도는 요구영역 고도다(설계 엔벨로프·도출·"
+                                         "초기 게인 탐색이 그 값을 쓴다)"))
+
+
+def _strip_scan(env, path, notes):
+    """엔벨로프 템플릿 값에서 폐지한 스캔 칸을 뺀다 — 뺀 칸마다 적는다."""
+    if not isinstance(env, dict):
+        return env
+    dropped = [k for k in _V2_SCAN_KEYS if k in env]
+    if dropped:
+        notes.append(_note(path, f"{'·'.join(dropped)}를 버렸다 — v1.66부터 엔벨로프 스캔 격자는 요구영역 기본 격자이고 "
+                                 "화면이 이 칸을 읽지 않는다"))
+    return {k: v for k, v in env.items() if k not in _V2_SCAN_KEYS}
+
+
+def _upgrade_patch(vid, patch, base_margin, notes):
+    """형상 변형 패치의 v2 경로를 v3 경로로. 옮길 곳이 없는 값(운용 고도·스캔·트림 α 여유)은 버리고 적는다 — 트림 α 여유는
+    v3에서 기준(criteria)이라 형상 변형이 고칠 수 없다(VARIANT_FORBIDDEN)."""
+    if not isinstance(patch, dict):
+        return patch
+    vp = f"/variants/{vid}/patch"
+    out = {}
+    for ptr, val in patch.items():
+        if not isinstance(ptr, str):
+            out[ptr] = val
+            continue
+        if ptr == "/trim":
+            if isinstance(val, dict):
+                out["/solver"] = {"trim_alpha_bounds": copy.deepcopy(val.get("alpha_bounds")),
+                                  "resid_tol": DEFAULT_RESID_TOL}
+                m = val.get("alpha_margin")
+                if m is not None and m != base_margin:
+                    notes.append(_note(f"{vp}{ptr}", f"형상 변형의 트림 α 여유 {m!r}를 버렸다 — v3에서 트림 α 여유는 판정선"
+                                                     "(criteria.trim_margin)이라 형상 변형이 고칠 수 없다"))
+            else:
+                out["/solver"] = val
+            continue
+        if ptr == "/trim/alpha_bounds" or ptr.startswith("/trim/alpha_bounds/"):
+            out["/solver/trim_alpha_bounds" + ptr[len("/trim/alpha_bounds"):]] = val
+            continue
+        if ptr == "/trim/alpha_margin":
+            if val != base_margin:
+                notes.append(_note(f"{vp}{ptr}", f"형상 변형의 트림 α 여유 {val!r}를 버렸다 — v3에서 트림 α 여유는 판정선"
+                                                 "(criteria.trim_margin)이라 형상 변형이 고칠 수 없다"))
+            continue
+        if ptr == "/operating" or ptr.startswith("/operating/"):
+            if val is not None and val != {"alt_min": None, "alt_max": None}:
+                notes.append(_note(f"{vp}{ptr}", f"형상 변형의 운용 고도 {val!r}를 버렸다 — v3에는 운용 고도 절이 없고 "
+                                                 "요구영역은 형상 변형이 고칠 수 없다"))
+            continue
+        if any(ptr == f"/mission_template/envelope/{k}" or ptr.startswith(f"/mission_template/envelope/{k}/")
+               for k in _V2_SCAN_KEYS):
+            notes.append(_note(f"{vp}{ptr}", "형상 변형의 스캔 칸을 버렸다 — v3에서 폐지(스캔 격자는 요구영역 기본 격자)"))
+            continue
+        if ptr == "/mission_template/envelope":
+            val = _strip_scan(val, f"{vp}{ptr}", notes)
+        elif ptr == "/mission_template" and isinstance(val, dict) and "envelope" in val:
+            val = {**val, "envelope": _strip_scan(val["envelope"], f"{vp}{ptr}/envelope", notes)}
+        elif ptr == "/mass" and isinstance(val, dict) and "loadings" not in val:
+            val = {**val, "loadings": None}
+        out[ptr] = val
+    return out
+
+
+def upgrade_document(doc):
+    """저장·가져온 기체 문서 → (v3 문서, 알림 [{"path", "message"}]) — **검증 전** 원문을 받는다(검증은 호출자가 한다).
+
+    v2만 옮긴다: trim.alpha_bounds → solver.trim_alpha_bounds(resid_tol은 v2 코드 상수 DEFAULT_RESID_TOL — 같은 값이라
+    트림이 바뀌지 않는다), trim.alpha_margin → criteria.trim_margin.alpha_margin(도구 기본값과 다를 때만 — 기본값을 문서에
+    굳히지 않는다), operating 절 폐기(값이 있었으면 요구영역 고도로 덮였는지·잃었는지 적는다), mission_template.envelope의
+    scan_mach·scan_alt 폐기, mass.loadings 자리(없음), 형상 변형 패치 경로도 같은 규칙, schema_version 3. 그 밖의 칸은
+    건드리지 않는다. 계보 도장(도출 δe_trim plant_fingerprints·확정 게인 표 basis_fingerprint·초기 게인 출처 plant_fingerprint
+    — 형상 변형 패치 안의 것도)은 **v2에서 최신이었음을 v2 지문을 옛 정의로 다시 재서 증명할 수 있을 때만** v3 지문으로
+    다시 찍는다(_restamp_lineage). 증명이 안 되는 표(요구영역 없이 도출한 δe_trim — 운용 고도 절로 거른 검사 고도 — 이나
+    v2에서도 낡았던 표)는 낡음으로 두고 그 까닭을 알림에 적는다(다시 도출·설계해 반영한다).
+
+    v3(이미 옮김)와 v1·그 밖의 버전은 **그대로** 돌려준다(알림 없음) — 멱등이고, v1은 종전 정책대로 검증이 거부한다
+    (v1 → v2의 확정 게인 표는 옮길 원본이 없는 새 절이라 업그레이더가 없었다). dict가 아니면 그대로 돌려준다."""
+    if not isinstance(doc, dict) or isinstance(doc.get("schema_version"), bool) or doc.get("schema_version") != 2:
+        return copy.deepcopy(doc), []
+    from claw.pipeline.criteria import TrimMarginCriteria
+
+    default_margin = TrimMarginCriteria().alpha_margin
+    d = copy.deepcopy(doc)
+    notes = []
+    out = {}
+    trim = d.get("trim")
+    base_margin = trim.get("alpha_margin") if isinstance(trim, dict) else None
+    for k, v in d.items():
+        if k == "trim":
+            if isinstance(v, dict):
+                out["solver"] = {"trim_alpha_bounds": v.get("alpha_bounds"), "resid_tol": DEFAULT_RESID_TOL}
+                notes.append(_note("/trim/alpha_bounds", "트림 받음각 탐색 범위를 해석 설정 /solver/trim_alpha_bounds로 "
+                                                         f"옮겼다 — 잔차 허용치 resid_tol은 v2 코드 상수 {DEFAULT_RESID_TOL:g}"))
+            else:
+                out["solver"] = v  # 모양이 틀린 원문 — 검증이 경로와 함께 말한다
+            continue
+        if k == "operating":
+            _upgrade_operating(v, d.get("operating_region"), notes)
+            continue
+        if k == "mission_template" and isinstance(v, dict) and isinstance(v.get("envelope"), dict):
+            v = {**v, "envelope": _strip_scan(v["envelope"], "/mission_template/envelope", notes)}
+        if k == "mass" and isinstance(v, dict) and "loadings" not in v:
+            v = {**v, "loadings": None}
+        if k == "variants" and isinstance(v, list):
+            v = [{**item, "patch": _upgrade_patch(item.get("id", i), item.get("patch"), base_margin, notes)} if isinstance(item, dict) else item
+                 for i, item in enumerate(v)]
+        out[k] = v
+    if base_margin is not None and base_margin != default_margin:
+        crit = out.get("criteria")
+        crit = dict(crit) if isinstance(crit, dict) else {}
+        crit["trim_margin"] = {**(crit.get("trim_margin") or {}), "alpha_margin": base_margin}
+        out["criteria"] = crit
+        notes.append(_note("/trim/alpha_margin", f"트림 α 여유 {base_margin!r}를 판정선 /criteria/trim_margin/alpha_margin으로 "
+                                                 f"옮겼다(도구 기본값 {default_margin:g}와 달라서)"))
+    elif base_margin is not None:
+        notes.append(_note("/trim/alpha_margin", f"트림 α 여유 {base_margin!r}는 도구 기본값과 같아 문서에 적지 않았다 — "
+                                                 "판정선 criteria.trim_margin.alpha_margin의 기본값이 그 값이다"))
+    out["schema_version"] = SCHEMA_VERSION
+    _restamp_lineage(d, out, notes)
+    return out, notes
+
+
+# ── v2 계보 도장 다시 찍기 ─────────────────────────────────────────────────────────────────────────────────────────
+# 스키마가 바뀌면 지문 정의가 바뀐다(플랜트 지문에서 trim 절이 빠지고 계보 지문에 solver 절이 든다). 그대로 두면 v2에서
+# 최신이던 도출 δe_trim 표·확정 게인 표가 올리자마자 낡음으로 보여 시뮬·코드 생성이 막힌다(build.alloc_trim_table 거부).
+# 그래서 **v2에서 최신이었음을 증명할 수 있을 때만** v3 지문으로 다시 찍는다 — 증명은 v2 지문을 옛 정의 그대로 다시 재서
+# 기록과 대조하는 것이다. 증명이 안 되면 도장을 두고(낡음) 왜 그런지 적는다.
+
+_V2_PLANT_SECTIONS = ("geometry", "aero", "stall", "mass", "propulsion", "ground", "trim", "surfaces")  # v2 정의 그대로
+_DE_TRIM_PROV = ("law", "alloc", "de_trim", "provenance")
+_GAIN_PROV = ("law", "gain_tables", "provenance")
+_DESIGN_PROV = ("law", "design", "provenance")
+
+
+def _v2_shadow(eff, raw_eff):
+    """v3 적용 문서(검증·정규화) → v2 검증기가 냈을 정규화 문서 중 v2 지문 둘(플랜트·계보)이 읽는 부분.
+
+    올림은 trim·operating·mass.loadings·schema_version만 바꾸고 나머지 절의 검증기는 v2와 같다(같은 정규화) — 그래서 v3
+    적용 문서에서 그 칸만 v2 모양으로 되돌리면 v2 지문 입력이 된다. mission_template·criteria는 지문 밖이라 되돌리지
+    않는다. 트림 α 여유는 형상 변형마다 달 수 있었으므로(v3는 버린다) v2 원문의 적용값(raw_eff)에서 읽는다."""
+    d = copy.deepcopy(eff)
+    solver = d.pop("solver")
+    op = raw_eff.get("operating") or {}
+    d["schema_version"] = 2
+    d["trim"] = {"alpha_bounds": [float(x) for x in solver["trim_alpha_bounds"]],
+                 "alpha_margin": float(raw_eff["trim"]["alpha_margin"])}
+    d["operating"] = {k: None if op.get(k) is None else float(op[k]) for k in ("alt_min", "alt_max")}
+    d["mass"] = {k: v for k, v in d["mass"].items() if k != "loadings"}
+    return d
+
+
+def _v2_plant_fp(shadow):
+    from claw.params.paramset import canonical_hash
+    from claw.profile.fingerprint import _ordered_axes
+
+    return canonical_hash({k: (_ordered_axes(shadow[k]) if k == "aero" else shadow[k]) for k in _V2_PLANT_SECTIONS})
+
+
+def _v2_configs(raw, v):
+    """[{vid, name, eff(v3 적용), shadow(v2 그림자 | None — 증명 불가), patch(올린 패치 | None)}] — 기본 문서 먼저."""
+    raw_patches = {item.get("id"): item.get("patch") for item in raw.get("variants") or [] if isinstance(item, dict)}
+    out = []
+    for vid in [None] + [item["id"] for item in v["variants"] or []]:
+        eff = effective_document(v, vid)
+        try:
+            raw_eff = raw if vid is None else apply_patch(raw, raw_patches[vid])
+            shadow = _v2_shadow(eff, raw_eff)
+        except (ProfileError, KeyError, TypeError, ValueError, AttributeError):
+            shadow = None  # v2 원문이 v2 검증기도 못 넘었을 모양 — 증명하지 않는다
+        patch = None if vid is None else next(i["patch"] for i in v["variants"] if i["id"] == vid)
+        out.append({"vid": vid, "name": vid or "base", "eff": eff, "shadow": shadow, "patch": patch})
+    return out
+
+
+def _prov_owner(patch, target):
+    """형상 변형의 target(출처 기록) 값이 어디서 오나 — None(기본 문서), (패치 키, 키 아래 남은 토큰), "deep"(출처 기록
+    안쪽 칸을 고치는 키가 있다 — 기록이 기본 문서와 패치의 섞임이라 증명하지 않는다). 뒤 키가 앞 키를 덮는다(apply_patch)."""
+    from claw.profile.patch import parse_pointer
+
+    owner = None
+    for ptr in patch or {}:
+        toks = parse_pointer(ptr)
+        if len(toks) > len(target) and toks[:len(target)] == list(target):
+            return "deep"
+        if toks == list(target[:len(toks)]):
+            owner = (ptr, list(target[len(toks):]))
+    return owner
+
+
+def _node(root, tokens):
+    for t in tokens:
+        root = root.get(t) if isinstance(root, dict) else None
+    return root
+
+
+def _prov_groups(out, configs, target):
+    """출처 기록 자리별 형상 묶음 — [(알림 경로, 올린 문서 안의 기록 dict | None, 주인 형상, [형상…])]. 주인은 그 기록을
+    쓴 문서(기본 문서 또는 기록을 통째로 덮는 변형)다. "deep" 변형은 (경로, None, 그 형상, [그 형상])으로 — 증명 불가."""
+    by_variant = {item.get("id"): item for item in out.get("variants") or [] if isinstance(item, dict)}
+    base_path = "/" + "/".join(target[:-1])
+    groups = {None: (base_path, _node(out, target), configs[0], [])}
+    for cfg in configs:
+        owner = None if cfg["vid"] is None else _prov_owner(cfg["patch"], target)
+        if owner is None:
+            groups[None][3].append(cfg)
+        elif owner == "deep":
+            groups[(cfg["vid"], "deep")] = (f"/variants/{cfg['vid']}/patch", None, cfg, [cfg])
+        else:
+            ptr, rest = owner
+            raw_patch = (by_variant.get(cfg["vid"]) or {}).get("patch") or {}
+            groups[(cfg["vid"], ptr)] = (f"/variants/{cfg['vid']}/patch{ptr}", _node(raw_patch.get(ptr), rest),
+                                         cfg, [cfg])
+    return list(groups.values())
+
+
+def _restamp_de_trim(out, configs, notes):
+    """도출 δe_trim 표 — v2에서 주인 형상이 최신(v2 플랜트 지문이 기록에 있다)이고 도출이 요구영역으로 돌았으면(기록에
+    region이 있다 — 검사 고도가 운용 고도 절이 아니라 요구영역에서 났다) v3 플랜트 지문·풀이 설정으로 다시 찍는다.
+    풀이 설정은 v2 트림 탐색 범위 + 옛 상수 잔차 허용치 그대로라(올림이 그렇게 채운다) 트림 입력이 같다."""
+    from claw.profile.fingerprint import plant_fingerprint
+
+    for path, prov, owner, group in _prov_groups(out, configs, _DE_TRIM_PROV):
+        alloc = owner["eff"]["law"]["alloc"]
+        de = None if alloc is None else alloc["de_trim"]
+        if de is None or de["source"] != "derived":
+            continue
+        why = None
+        if not isinstance(prov, dict):
+            why = ("출처 기록 안쪽 칸을 형상 변형이 따로 고쳐 기록이 섞였다" if path.endswith("/patch")
+                   else "출처 기록이 없다")
+        elif not isinstance(prov.get("region"), dict):
+            why = ("도출 기록에 요구영역이 없다 — v2 도출은 요구영역이 없으면 검사 고도를 운용 고도 절(operating)로 걸렀는데 "
+                   "v3에는 그 절이 없어 같은 표를 다시 낼 수 없다")
+        elif owner["shadow"] is None or owner["eff"]["solver"]["resid_tol"] != DEFAULT_RESID_TOL:
+            why = "v2 플랜트 지문을 다시 잴 수 없다"
+        else:
+            old = prov.get("plant_fingerprints")
+            old = old if isinstance(old, list) else [prov.get("plant_fingerprint")]
+            if _v2_plant_fp(owner["shadow"]) not in old:
+                why = "v2에서 이미 낡은 표였다(도출 뒤 플랜트가 바뀌었다)"
+        if why is not None:
+            notes.append(_note(path, f"도출 δe_trim 표는 낡음으로 보인다 — {why}. 표를 다시 도출한다"))
+            continue
+        fresh, seen = [], set()
+        for cfg in [owner] + [c for c in group if c is not owner]:
+            if cfg["shadow"] is None or _v2_plant_fp(cfg["shadow"]) not in old:
+                continue
+            fp, sv = plant_fingerprint(cfg["eff"]), cfg["eff"]["solver"]
+            key = (fp, json.dumps(sv, sort_keys=True))
+            if key not in seen:
+                seen.add(key)
+                fresh.append((cfg["name"], fp, {"trim_alpha_bounds": list(sv["trim_alpha_bounds"]),
+                                                "resid_tol": sv["resid_tol"]}))
+        left = [c["name"] for c in group if c["shadow"] is None or _v2_plant_fp(c["shadow"]) not in old]
+        prov.update(plant_fingerprint=fresh[0][1], plant_fingerprints=[f for _, f, _ in fresh],
+                    solver=fresh[0][2], solvers=[s for *_, s in fresh], configurations=[n for n, *_ in fresh])
+        notes.append(_note(path, "도출 δe_trim 표의 플랜트 지문을 v3 정의로 다시 찍었다 — 이 문서의 v2 플랜트 지문이 도출 "
+                                 "기록과 같아 v2에서 최신이던 표이고, 도출이 요구영역으로 돌았으며, 풀이 설정은 v2 트림 탐색 "
+                                 f"범위와 옛 상수 잔차 허용치 {DEFAULT_RESID_TOL:g} 그대로라 트림 입력이 같다"
+                                 + (f". v2에서도 낡았던 형상({'·'.join(left)})은 그대로 낡음이다" if left else "")))
+
+
+def _restamp_gain_tables(out, configs, notes):
+    """확정 게인 표 — 기준 지문(표 절을 뺀 적용 문서의 계보 지문)을 v2 정의로 다시 재서 기록과 같으면(표를 확정한 문서가
+    올리기 전 이 문서와 같다) v3 기준 지문으로 다시 찍는다. 기록과 다르면(v2에서도 낡았다) 그대로 둔다."""
+    from claw.profile.fingerprint import gain_tables_basis_fingerprint
+
+    for path, prov, owner, group in _prov_groups(out, configs, _GAIN_PROV):
+        if owner["eff"]["law"]["gain_tables"] is None:
+            continue
+        if not isinstance(prov, dict):
+            why = "기준 지문 기록이 없거나 형상 변형이 기록 안쪽을 따로 고쳤다"
+        elif owner["shadow"] is None:
+            why = "v2 기준 지문을 다시 잴 수 없다"
+        elif prov.get("basis_fingerprint") != gain_tables_basis_fingerprint(owner["shadow"]):
+            why = "v2에서 이미 낡은 표였다(확정 뒤 문서가 바뀌었다)"
+        else:
+            prov["basis_fingerprint"] = gain_tables_basis_fingerprint(owner["eff"])
+            notes.append(_note(path, "확정 게인 표의 기준 지문을 v3 정의로 다시 찍었다 — v2 기준 지문이 기록과 같아(표를 확정한 "
+                                     "문서가 올리기 전 이 문서다) 올림이 바꾼 것은 절 모양뿐이다"))
+            continue
+        notes.append(_note(path, f"확정 게인 표는 낡음으로 보인다 — {why}. 자동 설계를 다시 돌려 반영하거나 표를 지운다"))
+
+
+def _restamp_design(out, configs, notes):
+    """초기 게인 출처의 플랜트 지문(산출 근거가 잰 플랜트 — 기록일 뿐 낡음 판정에 쓰지 않는다)도 같은 증명으로 다시 찍는다."""
+    from claw.profile.fingerprint import plant_fingerprint
+
+    for path, prov, owner, _ in _prov_groups(out, configs, _DESIGN_PROV):
+        if not isinstance(prov, dict) or "plant_fingerprint" not in prov or owner["shadow"] is None:
+            continue
+        if prov["plant_fingerprint"] == _v2_plant_fp(owner["shadow"]):
+            prov["plant_fingerprint"] = plant_fingerprint(owner["eff"])
+            notes.append(_note(path, "초기 게인 출처의 플랜트 지문을 v3 정의로 다시 찍었다 — v2 플랜트 지문이 기록과 같다"))
+
+
+def _restamp_lineage(raw, out, notes):
+    """올린 문서의 계보 도장을 v3 지문으로 — 증명이 되는 것만(머리말). 올린 문서가 검증을 못 넘으면 아무것도 찍지 않는다
+    (검증은 호출자가 경로와 함께 말한다) — 그때 표가 있으면 낡음으로 적는다."""
+    try:
+        v = validate_document(out)
+        configs = _v2_configs(raw, v)
+    except ProfileError:
+        law = out.get("law") if isinstance(out.get("law"), dict) else {}
+        alloc = law.get("alloc") if isinstance(law.get("alloc"), dict) else {}
+        if isinstance(alloc.get("de_trim"), dict) and alloc["de_trim"].get("source") == "derived":
+            notes.append(_note("/law/alloc/de_trim", "도출 δe_trim 표는 낡음으로 보인다 — 올린 문서가 검증을 넘지 못해 v2 "
+                                                     "지문을 다시 잴 수 없다. 표를 다시 도출한다"))
+        if law.get("gain_tables") is not None:
+            notes.append(_note("/law/gain_tables", "확정 게인 표는 낡음으로 보인다 — 올린 문서가 검증을 넘지 못해 v2 지문을 "
+                                                   "다시 잴 수 없다"))
+        return
+    _restamp_de_trim(out, configs, notes)
+    _restamp_gain_tables(out, configs, notes)
+    _restamp_design(out, configs, notes)

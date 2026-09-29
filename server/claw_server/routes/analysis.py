@@ -444,19 +444,22 @@ def design_envelope_endpoint(
     """설계 엔벨로프 M-h 합성 + 공력 선도 데이터 (01 §2.6, 동기 계산).
 
     합성·귀속·좌표는 전부 엔진(design_envelope·aero_envelope) — 서버는 데모
-    프로파일 조립과 비-None 전달만 (기본값 재기술 금지, 02 §5.5). q_max·운용
-    고도는 실기체 값이라 질의에도 기체 문서에도 없으면 경계 자체가 없다(엔진이 null echo).
-    trim_alpha_bounds는 trim 상수 정본을 조립 시점에 주입 (같은 L4 계층이라
-    엔진 analysis가 직접 import하지 않는다 — 03 §2 계층 규칙).
+    프로파일 조립과 비-None 전달만 (기본값 재기술 금지, 02 §5.5). q_max는 실기체
+    값이라 질의에도 기체 문서에도 없으면 경계 자체가 없다(엔진이 null echo).
+    trim_alpha_bounds는 기체 문서의 트림 풀이 설정(solver.trim_alpha_bounds — 스키마 v3)을
+    조립 시점에 주입 (엔진 analysis가 기체 조립을 직접 import하지 않는다 — 03 §2 계층 규칙).
 
     nz·iso_qbar·iso_tas도 같은 계약 — 미지정이면 전달하지 않고 엔진이 정한다
     (기동 엔벨로프는 아예 없는 것, 등고선은 엔진 [기본값]).
 
-    q_max·운용 고도를 질의가 주지 않으면 **기체 문서 값**(structural.q_max·operating)을 쓴다 — 실기체
-    값이 문서에 있는데 폼이 비었다고 경계를 빼면 그 기체의 엔벨로프가 아니다. 문서에도 없으면(null) 종전대로
-    경계가 없다. 어느 값이 문서에서 왔는지는 bounds_source({q_max·alt_min·alt_max: "query"|"profile"|null})로
-    말하되, 문서 값을 하나라도 쓴 응답에만 싣는다 — 문서 값이 전부 null인 예제 기체의 응답은 종전과 바이트
-    단위로 같아야 한다(서버 골든).
+    q_max를 질의가 주지 않으면 **기체 문서 값**(structural.q_max)을 쓴다 — 실기체 값이 문서에 있는데 폼이
+    비었다고 경계를 빼면 그 기체의 엔벨로프가 아니다. 문서에도 없으면(null) 종전대로 경계가 없다. 운용 고도는
+    스키마 v3에서 문서 절(operating)이 없어지고 요구영역 고도(operating_region.alt)가 됐다(05 §11.13 이관 11단계) —
+    문서에서 채우지 않는다: 질의가 없으면 엔진이 requirement의 고도 끝을 선도 끝으로 그린다(bounds.alt_*_source
+    "region"). 같은 값을 alt_min·alt_max로도 넘기면 요구영역 끝이 「운용 입력」으로 두 번 그려진다. 질의 운용 고도는
+    연구용 덮어쓰기로 남는다. 어느 값이 어디서 왔는지는 bounds_source({q_max·alt_min·alt_max: "query"|"profile"|
+    null} — 고도 칸은 "query"|null뿐)로 말하되, 문서 값을 하나라도 쓴 응답에만 싣는다 — 문서 값이 전부 null인
+    예제 기체의 응답은 종전과 바이트 단위로 같아야 한다(서버 골든).
     """
     profile = resolve_profile(request, profile_ref)
     alpha_margin = profile.law["alpha_margin"] if alpha_margin is None else alpha_margin
@@ -466,9 +469,9 @@ def design_envelope_endpoint(
     limits, source, overridden = _assemble_limits(
         profile, n_limit_pos, n_limit_neg, safety_factor, mach_no, mach_d
     )
-    # 동압 한계·운용 고도 — 질의 > 기체 문서 > 없음(경계 없음)
+    # 동압 한계 — 질의 > 기체 문서 > 없음(경계 없음). 운용 고도 — 질의 > 없음(엔진이 요구영역 고도 끝을 쓴다)
     query = {"q_max": q_max, "alt_min": alt_min, "alt_max": alt_max}
-    doc_bounds = {"q_max": profile.q_max, **profile.operating}
+    doc_bounds = {"q_max": profile.q_max}
     bounds = {k: v if v is not None else doc_bounds.get(k) for k, v in query.items()}
     bounds_source = {k: "query" if query[k] is not None else ("profile" if bounds[k] is not None else None)
                      for k in query}
@@ -528,6 +531,9 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
     store = request.app.state.store
     # 조건 판정 문맥(05 §11.3 · 이관 8단계) — 트림 탭·자동 설계와 같은 기체 값으로 판정한다
     vctx = VerdictContext.from_profile(profile)
+    # 점별 판정의 여유 사유(트림 여유 미달 등)가 기준 criteria.trim_margin으로 난다(이관 12단계) — 결과가 그 기준을 싣는다
+    crit, crit_source = resolve_criteria(profile)
+    crit_block = criteria_echo(crit, crit_source)
 
     def work(job):
         trs = trim_batch(
@@ -545,10 +551,11 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
         store.save(
             job.id,
             {"kind": "envelope_scan", "cases": entries, "n_requested": len(cases),
-             "profile": profile_echo(profile)},
+             "profile": profile_echo(profile), "criteria_echo": crit_block},
             meta={
                 "kind": "envelope_scan",
                 "profile": profile_echo(profile),
+                "criteria_echo": crit_block,
                 "created": job.created,
                 "n": len(entries),
                 "fingerprint": req.fingerprint,

@@ -626,3 +626,21 @@ test("nearOverlapNote — 차가 값 범위의 frac 아래인 그림만 캡션 �
   assert.equal(nearOverlapNote([{ name: "CL", spread: { maxDiff: 0, range: 1, rel: 0 } }]), null);
   assert.equal(nearOverlapNote([]), null);
 });
+
+test("massConditionNote — 탑재 구성을 적은 기체의 조건 판정은 「CG 영향 미지원 — 대표 구성으로 계산」을 말한다", async () => {
+  const { CG_UNSUPPORTED, massConditionNote } = await import("./plot.js");
+  assert.equal(CG_UNSUPPORTED, "CG 영향 미지원 — 대표 구성으로 계산");
+  const mc = (n, cg = false) => ({ mass_condition: { loading: null, loadings_declared: n, cg_supported: cg } });
+  // 구성을 적지 않은 기체·옛 결과(mass_condition 없음)·판정 없음 — 말하지 않는다
+  assert.equal(massConditionNote([mc(0), mc(0)]), null);
+  assert.equal(massConditionNote([{}, null, undefined]), null);
+  assert.equal(massConditionNote([]), null);
+  assert.equal(massConditionNote(null), null);
+  // 구성을 적었고 CG 영향을 반영하지 못한다 — 구성 수와 함께
+  const t = massConditionNote([null, mc(2)]);
+  assert.ok(t.startsWith(CG_UNSUPPORTED), t);
+  assert.match(t, /탑재 구성 2개/);
+  assert.match(t, /통과로 집계하지 않/);
+  // 언젠가 CG를 반영하면 말하지 않는다
+  assert.equal(massConditionNote([mc(2, true)]), null);
+});

@@ -707,13 +707,14 @@ test("추진 페이지 스키마 = 예제 기체가 실제로 쓰는 엔진 클�
     `추진 페이지가 ${SUBSYSTEMS.plant.children.prop.schema.name}인데 예제 기체는 ${type}`);
 });
 
-test("웹이 인용한 엔벨로프·천장·SAT_FRAC이 엔진 정본과 같다 (엔진 원문 대조)", () => {
+test("웹이 인용한 엔벨로프·천장·포화 등고선(sat_frac)이 엔진 정본과 같다 (엔진 원문 대조)", () => {
   // V_c와 같은 종류의 **죽은 문자열**이다: 매뉴얼과 블록도가 "해면 M0.21~0.60",
   // "천장 ~5.5 km", "스로틀 95% 등고선"을 본문에 적어 두었는데 어느 것도 계산해서
   // 넣은 값이 아니다. 엔진에서 SEA_LEVEL_BAND·CEILING·SAT_FRAC을 한 번 고치면
   // 엔진 테스트만 빨개지고, 그걸 고친 사람은 웹 문장이 있는 줄도 모른다.
   const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8");
-  const trimSrc = read("../../../engine/claw/trim/trim.py");
+  // 포화 등고선은 스키마 v3부터 판정 기준(criteria.trim_margin.sat_frac — 이관 12단계)이다 — 정본은 그 기본값
+  const critSrc = read("../../../engine/claw/pipeline/criteria.py");
   // 웹이 인용하는 것은 **제품 예제**(200 kg급)다 — 엔진 test_trim.py의 표는 회귀 픽스처(구 1200 kg) 몫이다
   const trimTest = read("../../../engine/claw/tests/test_profile_shipped_example.py");
   const table = (name) => {
@@ -726,7 +727,7 @@ test("웹이 인용한 엔벨로프·천장·SAT_FRAC이 엔진 정본과 같다
   const ceil = table("SHIPPED_CEILING");
   // 반올림 필수 — 0.55·0.57·0.28 같은 값이면 *100이 55.00000000000001로 떨어져
   // 아무도 본문에 쓸 수 없는 리터럴을 요구하는 빨간 테스트가 된다 (0.95는 우연히 정확)
-  const satPct = Math.round(Number(trimSrc.match(/^SAT_FRAC = ([\d.]+)/m)[1]) * 100);
+  const satPct = Math.round(Number(critSrc.match(/^\s*sat_frac: float = ([\d.]+)/m)[1]) * 100);
   // 웹이 인용하는 조합 — 앱 기본값(25 kg)과 만재(50 kg), 그리고 천장 셋
   const want = [
     `M${band[25][0].toFixed(2)}~${band[25][1].toFixed(2)}`,
@@ -747,7 +748,7 @@ test("웹이 인용한 엔벨로프·천장·SAT_FRAC이 엔진 정본과 같다
   // 95% 등고선을 말하는 자리들도 같은 상수를 인용해야 한다
   for (const rel of ["./envelope.js", "../views/envelope.js", "../views/subsystems.js"]) {
     assert.ok(read(rel).includes(`${satPct}%`),
-      `${rel}에 SAT_FRAC(${satPct}%) 인용이 없다`);
+      `${rel}에 sat_frac 기본값(${satPct}%) 인용이 없다`);
   }
 });
 

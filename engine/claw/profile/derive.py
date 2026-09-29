@@ -15,8 +15,8 @@ _roll_budget_nodes). 그 표는 기체의 1g 트림 승강타 요구다 — 예�
    좌표(opspace/basegrid.py와 같은 linspace — 문서 표의 격자를 이어 쓰지도, DB×M_NO로 잡지도 않는다), 검사 고도는 기본
    격자 고도 + 요구 고도 끝, 검사 연료는 요구 연료 끝 + 기본 격자 연료(kg). 확정 요구영역이면 요구영역 밖·요구 미정의
    조건은 요구가 아니라 재지 않고 excluded_by["region"]으로 센다(초안 draft:trim_grid는 판정에 쓰지 않는다 — 05 §11.2).
-   인자(machs·alts·fuel_fracs)를 주면 그 값이 이긴다. 요구영역이 없는 기체만 옛 규칙(문서 표 격자 → DB 범위, 운용 고도로
-   거른 DEFAULT_ALTS, 연료 DEFAULT_FUEL_FRACS × fuel_max)이다.
+   인자(machs·alts·fuel_fracs)를 주면 그 값이 이긴다. 요구영역이 없는 기체만 옛 규칙(문서 표 격자 → DB 범위, DEFAULT_ALTS,
+   연료 DEFAULT_FUEL_FRACS × fuel_max)이다 — 스키마 v3에는 운용 고도 절이 없다(운용 고도 = 요구영역 고도).
 2. 보정 — 표 격자 사이 선형보간(표는 clip 룩업이다)이 검사 격자(check_step 간격)의 요구를 밑돌면, 그 구간 양
    끝을 부족분만큼 올리기를 부족이 없어질 때까지 반복한다. 공유 끝점은 두 구간 중 큰 쪽만큼 올린다.
 
@@ -26,8 +26,9 @@ _roll_budget_nodes). 그 표는 기체의 1g 트림 승강타 요구다 — 예�
    표 격자점 중 자기 요구가 없어 보간값으로 시작한 점(undefined_machs)도 싣는다 — 끝값·보간값으로 채운 구간을 완료로
    세지 않는다. 저장된 표는 `de_trim_coverage`가 다시 도출하지 않고 같은 형식으로 답한다.
 
-문서에 쓰지 않는다 — 결과 dict를 돌려주고 저장(새 리비전)은 호출자(서버 잡)가 한다. 출처에 plant_fingerprint를
-남긴다: 플랜트가 바뀌면 BuiltProfile.alloc_trim_table이 낡은 표로 법칙을 조립하지 않는다.
+문서에 쓰지 않는다 — 결과 dict를 돌려주고 저장(새 리비전)은 호출자(서버 잡)가 한다. 출처에 plant_fingerprint와 풀이 설정
+(solver — 형상마다 solvers)을 남긴다: 플랜트나 트림 설정이 바뀌면 BuiltProfile.alloc_trim_table이 낡은 표로 법칙을 조립하지
+않는다(05 §11.8 「트림 설정 → 결과 낡음」). 여유 판정선(criteria.trim_margin)은 기록하지 않는다 — 도출은 여유를 보지 않는다(1).
 """
 
 import bisect
@@ -45,7 +46,7 @@ from claw.opspace.verdict import VerdictContext, condition_verdict
 from claw.trim import trim_level
 
 DEFAULT_FUEL_FRACS = (0.0, 0.25, 0.5, 0.75, 1.0)  # × fuel_max [기본값] — 무게 전 범위에서 최악을 취한다
-DEFAULT_ALTS = (0.0, 500.0, 1000.0, 1500.0, 2000.0, 2500.0, 3000.0)  # [m] [기본값] — 예제 표의 고도 7점(운용 범위로 거른다)
+DEFAULT_ALTS = (0.0, 500.0, 1000.0, 1500.0, 2000.0, 2500.0, 3000.0)  # [m] [기본값] — 요구영역 없는 기체의 검사 고도 7점
 CHECK_STEP = 0.005  # [기본값] 검사 격자 마하 간격 — 예제 표를 검사한 간격
 TABLE_STEP = 0.05  # [기본값] 표 격자가 문서에 없을 때 새로 만드는 간격
 MAX_ITER = 20
@@ -84,7 +85,8 @@ def region_echo(region) -> dict | None:
 
 
 def region_check_alts(region) -> list:
-    """검사 고도 — 기본 격자 고도 + 요구 고도 끝(격자 사이의 끝이 빠지면 상한의 1g 요구를 놓친다 — alts_within과 같은 이유)."""
+    """검사 고도 — 기본 격자 고도 + 요구 고도 끝. 끝을 더하는 이유: 격자 사이의 끝이 빠지면 상한의 1g 요구를 놓친다 — 같은
+    마하의 1g 트림 요구는 동압이 낮은 상한에서 가장 크다(실측 M0.30에서 0.53° 밑돌았다)."""
     return sorted({float(a) for a in region.grid["alts"]} | {float(a) for a in region.alt})
 
 
@@ -187,7 +189,7 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=None
     M0.25 요구 0.188을 0.128로 답했다). 남긴 격자점 중 자기 요구가 없는 점은 요구 검사점들의 보간값으로 시작하고
     보정이 덮는다(undefined_machs) — 이웃 격자값을 복사하지 않는다. variants는 같은 문서의 형상 변형 BuiltProfile들 — 플랜트
     지문이 기본 문서와 같은 변형은 다시 재지 않는다. 격자·검사 고도·연료는 요구영역에서(머리말 1), 인자가 이긴다 —
-    요구영역이 없고 alts를 주지 않으면 기체마다 운용 범위로 거른 DEFAULT_ALTS, fuel_fracs를 주지 않으면 DEFAULT_FUEL_FRACS."""
+    요구영역이 없고 alts를 주지 않으면 DEFAULT_ALTS, fuel_fracs를 주지 않으면 DEFAULT_FUEL_FRACS."""
     t0 = time.perf_counter()
     region = region_of(built.doc)
     grid_source = ("explicit" if machs is not None else "region" if region is not None
@@ -198,15 +200,16 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=None
                 "alloc": None, "requirement": None, "elapsed_s": time.perf_counter() - t0}
     configs, seen = [], set()
     for cfg in (built, *variants):
-        if cfg.plant_fingerprint in seen:
+        # 같은 플랜트·같은 풀이 설정이면 같은 트림이다 — 트림 키(trim_fingerprint)로 거른다(풀이 설정만 다른 변형은 다시 잰다)
+        if cfg.trim_fingerprint in seen:
             continue
-        seen.add(cfg.plant_fingerprint)
+        seen.add(cfg.trim_fingerprint)
         if alts is not None:
             cfg_alts = [float(a) for a in alts]
         elif region is not None:
             cfg_alts = region_check_alts(region)
         else:
-            cfg_alts = cfg.alts_within(DEFAULT_ALTS)
+            cfg_alts = [float(a) for a in DEFAULT_ALTS]
         if fuel_fracs is not None:
             cfg_fuels = [cfg.doc["mass"]["fuel_max"] * f for f in fuel_fracs]
         elif region is not None:
@@ -290,6 +293,8 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=None
                 "provenance": {
                     "source": DERIVE_SOURCE, "plant_fingerprint": built.plant_fingerprint,
                     "plant_fingerprints": [cfg.plant_fingerprint for cfg, *_ in configs],
+                    # 풀이 설정 기록 — solver는 기본 문서, solvers는 plant_fingerprints와 짝(형상마다). 낡음 대조가 둘을 본다
+                    "solver": built.solver, "solvers": [cfg.solver for cfg, *_ in configs],
                     "configurations": [cfg.variant or "base" for cfg, *_ in configs],
                     "fuels": configs[0][2], "alts": configs[0][3], "check_step": check_step,
                     "iterations": iterations, "shortfall": len(short), "excess_max": excess,

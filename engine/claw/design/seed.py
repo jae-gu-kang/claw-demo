@@ -330,8 +330,11 @@ def seed_fuel_layer(region) -> float:
 def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=None, delay_s=0.035, pade_order=2,
                sim_check=False, on_progress=None) -> dict:
     """BuiltProfile → {"ok", "reason", "reason_text", "design", "schedule", "schedule_created", "anchors",
-    "slots", "verification", "failed_loops", "warnings", "autopilot_notes", "sim_check", "elapsed_s"}.
+    "slots", "verification", "failed_loops", "warnings", "autopilot_notes", "sim_check", "grid", "elapsed_s"}.
 
+    grid는 **실제로 쓴 격자 조건**이다(05 §11.13 13단계 — 화면 기본값·문서 명세로 돈 조건도 결과에 남긴다): source
+    ("region_base_grid" | "coarse_grid"), n_mach, alts, fuels [kg], points(격자 점 수), trimmable(채택 점 수). 격자를
+    세우기 전에 실패하면 None.
     design은 law.design 모양(provenance 포함)이고 schedule은 문서에 스케줄이 없을 때만 새로 만든 것(있으면 None —
     문서의 것을 쓴다). n_mach None = 요구영역 기본 격자 명세(없는 기체는 LEGACY_N_MACH). fuel_frac은 요구영역 없는 기체의
     옛 격자에만 쓴다 — 요구영역이 있으면 연료 층은 seed_fuel_layer다. ok가 False여도 design은 싣는다(화면이 무엇이 안 됐는지 보인다) — 저장은 호출자가 ok일 때만."""
@@ -345,11 +348,13 @@ def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=None, delay_s
               "delay_s": delay_s, "pade_order": pade_order}
     rate_filters = built.rate_filters() if existing is not None else {}
 
+    grid_echo = None
+
     def fail(reason, **extra):
         return _clean({"ok": False, "reason": reason, "reason_text": reason_text(reason), "design": None,
                        "schedule": None, "schedule_created": False, "anchors": [], "slots": {},
                        "verification": {}, "failed_loops": [], "warnings": [], "autopilot_notes": [],
-                       "sim_check": None,
+                       "sim_check": None, "grid": grid_echo,
                        "elapsed_s": time.perf_counter() - t0, **extra})
 
     ac = built.aircraft()
@@ -357,17 +362,25 @@ def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=None, delay_s
     region = region_of(doc)
     if region is not None:
         # 요구영역의 기본 격자에서 — 요구를 실속 하한·DB 상한으로 깎지 않는다(05 §11.2). 모델 부족 점은 트림 전 제외
-        grid = region_grid(ac, region, ctx.model, ctx=ctx, n_mach=n_mach, fuels=(seed_fuel_layer(region),),
+        g_fuels = (seed_fuel_layer(region),)
+        g_n = int(region.grid["n_mach"]) if n_mach is None else int(n_mach)
+        grid_echo = {"source": "region_base_grid", "n_mach": g_n,
+                     "alts": sorted(float(a) for a in region.grid["alts"]), "fuels": [float(f) for f in g_fuels]}
+        grid = region_grid(ac, region, ctx.model, ctx=ctx, n_mach=n_mach, fuels=g_fuels,
                            fingerprint=built.plant_fingerprint, on_progress=on_progress)
     else:
         db = built.db_ranges()
         if "mach" not in db:
             return fail(REASON_SEED_NO_GRID)
-        grid = coarse_grid(ac, built.stall_table(), built.structural_limits(), db, ctx=ctx,
-                           n_mach=LEGACY_N_MACH if n_mach is None else n_mach,
-                           alts=built.alts_within(DEFAULT_SCHEDULE_ALTS),
-                           fuels=(doc["mass"]["fuel_max"] * fuel_frac,), fingerprint=built.plant_fingerprint,
+        # 요구영역 없는 기체의 옛 격자 — 고도는 설계 기본 고도 그대로(스키마 v3에는 운용 고도 절이 없다)
+        g_n = LEGACY_N_MACH if n_mach is None else int(n_mach)
+        g_alts = [float(a) for a in DEFAULT_SCHEDULE_ALTS]
+        g_fuels = (doc["mass"]["fuel_max"] * fuel_frac,)
+        grid_echo = {"source": "coarse_grid", "n_mach": g_n, "alts": g_alts, "fuels": [float(f) for f in g_fuels]}
+        grid = coarse_grid(ac, built.stall_table(), built.structural_limits(), db, ctx=ctx, n_mach=g_n,
+                           alts=g_alts, fuels=g_fuels, fingerprint=built.plant_fingerprint,
                            on_progress=on_progress)
+    grid_echo.update(points=len(grid["points"]), trimmable=sum(1 for pt in grid["points"] if pt.trimmable))
     if grid["aborted"]:
         return fail(REASON_SEED_CANCELLED)
     inside = [pt for pt in grid["points"] if pt.trimmable]
@@ -532,5 +545,6 @@ def quick_seed(built, *, targets=None, fuel_frac=FUEL_FRAC, n_mach=None, delay_s
         "slots": slots, "verification": verification, "failed_loops": failed_loops, "warnings": warnings,
         "autopilot_notes": ap_notes,
         "sim_check": sim,
+        "grid": grid_echo,
         "elapsed_s": time.perf_counter() - t0,
     })

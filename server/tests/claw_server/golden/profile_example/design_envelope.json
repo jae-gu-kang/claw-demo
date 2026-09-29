@@ -1,7 +1,7 @@
 {
  "golden": "design_envelope",
  "mode": "full",
- "captured_at": "2e24847+dirty",
+ "captured_at": "3a2bd4c+dirty",
  "value": {
   "dict": {
    "default": {
@@ -1222,8 +1222,8 @@
        "name": "예제 델타윙",
        "variant": null,
        "revision": 0,
-       "fingerprint": "9ddb480f9c5ddb03",
-       "plant_fingerprint": "dc86fad3932a3446",
+       "fingerprint": "a5c114c7d17cf12e",
+       "plant_fingerprint": "de786fbe5f5368fb",
        "is_example": true,
        "source": "default-example"
       }
@@ -1291,8 +1291,8 @@
        "alt_min_used": "f:0x0.0p+0",
        "alt_max_used": "f:0x1.1940000000000p+13",
        "alt_max_is_display_default": false,
-       "alt_min_source": "operating",
-       "alt_max_source": "operating",
+       "alt_min_source": "override",
+       "alt_max_source": "override",
        "requirement_undefined": false,
        "tropopause_alt": "f:0x1.57c0000000000p+13",
        "speed_of_sound": {
@@ -2615,8 +2615,8 @@
        "name": "예제 델타윙",
        "variant": null,
        "revision": 0,
-       "fingerprint": "9ddb480f9c5ddb03",
-       "plant_fingerprint": "dc86fad3932a3446",
+       "fingerprint": "a5c114c7d17cf12e",
+       "plant_fingerprint": "de786fbe5f5368fb",
        "is_example": true,
        "source": "default-example"
       }

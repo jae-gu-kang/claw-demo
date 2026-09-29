@@ -18,13 +18,15 @@ def test_example_identity_and_dispersion_axes():
 
 
 def test_trim_bounds_are_the_former_module_constants():
-    # 트림 모듈 상수(ALPHA_BOUNDS·DE_BOUNDS·ALPHA_MARGIN)는 프로파일로 옮겨 없어졌다 — 종전 값을 고정한다
+    # 트림 모듈 상수(ALPHA_BOUNDS·DE_BOUNDS·ALPHA_MARGIN·RESID_TOL·SAT_FRAC·THR_MARGIN)는 프로파일로 옮겨 없어졌다 —
+    # 탐색 범위·잔차 허용치는 해석 설정(solver), 판정선은 기준(criteria.trim_margin — 예제는 기본값). 종전 값을 고정한다
     p = example_profile()
-    assert p.trim_alpha_bounds == (-0.10, 0.35) and p.trim_alpha_margin == 0.035
+    assert p.trim_alpha_bounds == (-0.10, 0.35) and p.trim_margin["alpha_margin"] == 0.035
     assert p.surfaces["elevon"] == (-0.35, 0.35)
     tb = p.aircraft().trim_bounds
     stall = tb.pop("stall")  # α 판정이 실속 표 기준이라 함께 싣는다 (v1.07)
-    assert tb == {"alpha": (-0.10, 0.35), "de": (-0.35, 0.35), "alpha_margin": 0.035}
+    assert tb == {"alpha": (-0.10, 0.35), "de": (-0.35, 0.35), "resid_tol": 1e-4, "sat_frac": 0.95,
+                  "thr_margin": 0.02, "alpha_margin": 0.035}
     assert list(stall.data) == list(p.stall_table().data)
 
 

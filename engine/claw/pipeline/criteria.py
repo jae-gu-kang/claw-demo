@@ -128,7 +128,7 @@ class StabilityCriteria:
 class AuthorityCriteria:
     """카드 ⑦ 제어권한 — 트림 소모 + 비행 중 잔여 권한(엘레본 예산). 수렴 게이트와 별개.
 
-    trim/trim.py SAT_FRAC(0.95)은 "트림 해가 경계에 앉았나"(수렴 판정)이고, 여기는
+    trim_margin.sat_frac(0.95 — 트림 여유 판정선)은 "트림 해가 경계에 앉았나"이고, 여기는
     "트림 뒤·기동 중 여유가 남나"다 — 트림에서 이미 85 %를 쓰면 동특성 게인이
     아무리 좋아도 실질 기동 여유가 없다. b_min_frac은 **하드 게이트**의 문턱이다:
     비행 중 최소 잔여 권한(min_pitch/roll_authority_frac — 배분 신호 계측)이 이
@@ -143,7 +143,7 @@ class AuthorityCriteria:
     # 01 §4.1). 잔여 권한(배분 한계)은 롤 예산의 몫이라 "트림은 되지만 기동 여유가 없는 점"을 못 잡는다 — 예제
     # M0.3·3 km·만재 동시명령 런은 잔여 권한 24 %인데 가용 동적 여유 3.0 %였다(표준 런 31 %·4.4 %)
     dyn_reserve_min_frac: float = 0.05
-    # 트림 추력 여유 경고선 — 1 − thr_trim이 이 아래면 warn [기본값]. 트림 성립 판정(SAT_FRAC 0.95)은 여유 5 %까지
+    # 트림 추력 여유 경고선 — 1 − thr_trim이 이 아래면 warn [기본값]. 트림 여유 판정선(trim_margin.sat_frac 0.95)은 여유 5 %까지
     # 통과시킨다 — 그 사이는 "트림은 되지만 가속·상승 에너지가 얇은" 점이다(기동 몫은 thr_margin_min이 잰다)
     thr_trim_reserve_min: float = 0.10
 
@@ -155,6 +155,42 @@ class AuthorityCriteria:
         _frac("b_min_frac", self.b_min_frac)
         _frac("dyn_reserve_min_frac", self.dyn_reserve_min_frac)
         _frac("thr_trim_reserve_min", self.thr_trim_reserve_min)
+
+
+@dataclass(frozen=True)
+class TrimMarginCriteria:
+    """트림 여유 판정선 (이관 12단계 — 05 §11.3 여유 판정) — 수렴한 트림 해가 판정선을 넘는지. **물리 한계가 아니다.**
+
+    물리 한계(스로틀 0~1, 엘레본 한계 surfaces, 실속표 stall)는 기체·모델 데이터이고, 이 셋은 그 한계 **안쪽**에 긋는 판정선이다
+    (기준): 스로틀·엘레본 포화 등고선 sat_frac(한계의 이 비율 이상이면 포화 여유 미달), 스로틀 하한 여유 thr_margin(아이들 +
+    이 값 이하면 아이들 포화), 트림 α 여유 alpha_margin(α_trim ≥ α_stall(M) − 이 값이면 미달 — 리미터 여유 law.alpha_margin과
+    다른 선이다). v2까지 앞의 둘은 trim/trim.py 상수 SAT_FRAC·THR_MARGIN, 셋째는 기체 문서 trim.alpha_margin이었다 — 기본값은
+    그 값 그대로다(값의 출처만 옮긴다). 트림 풀이(Aircraft.trim_bounds — BuiltProfile이 적용 기준에서 싣는다)·여유 판정
+    (opspace/verdict.py margin_of)·설계 엔벨로프 사유가 여기서 읽는다. 판정선이라 바꿔도 트림을 다시 풀지 않고 여유 판정만
+    다시 한다(05 §11.8 「기준 → 판정만 재계산」). 여유 미달은 자동 설계 채택을 막지 않는다(v1.65 채택 정책)."""
+
+    sat_frac: float = 0.95  # 포화 등고선 — 한계의 이 비율 [기본값 — v2 SAT_FRAC]
+    thr_margin: float = 0.02  # 스로틀 하한 여유 — 아이들 포화 해 검출 [기본값 — v2 THR_MARGIN]
+    alpha_margin: float = 0.035  # 트림 α 여유 [rad] [기본값 — v2 예제 문서 trim.alpha_margin]
+
+    def __post_init__(self):
+        x = float(self.sat_frac)
+        if not 0.0 < x <= 1.0 or math.isnan(x):
+            raise ValueError(f"sat_frac은 (0, 1] 필요: {self.sat_frac}")
+        x = float(self.thr_margin)
+        if not 0.0 <= x < 1.0 or math.isnan(x):
+            raise ValueError(f"thr_margin은 [0, 1) 필요: {self.thr_margin}")
+        x = float(self.alpha_margin)
+        if not 0.0 <= x or not math.isfinite(x):
+            raise ValueError(f"alpha_margin은 0 이상 유한값: {self.alpha_margin}")
+
+
+# 판정선 표시 이름 — 화면(기체 탭 판정선 편집)이 칸 이름을 다시 적지 않게. (이름, 단위, 뜻)
+TRIM_MARGIN_LABELS = {
+    "sat_frac": ("포화 등고선", "-", "스로틀·엘레본이 한계의 이 비율 이상이면 트림 여유 미달"),
+    "thr_margin": ("스로틀 하한 여유", "-", "스로틀이 아이들 + 이 값 이하면 아이들 포화(여유 미달)"),
+    "alpha_margin": ("트림 α 여유", "rad", "α_trim ≥ α_stall(M) − 이 값이면 여유 미달 — 리미터 여유와 다른 선"),
+}
 
 
 @dataclass(frozen=True)
@@ -393,6 +429,7 @@ _SUBS = {
     "composition": MarginComposition,
     "stability": StabilityCriteria,
     "authority": AuthorityCriteria,
+    "trim_margin": TrimMarginCriteria,
     "actuator": ActuatorCriteria,
     "envelope": EnvelopeCriteria,
     "response": ResponseCriteria,
@@ -418,6 +455,7 @@ class GainEvalCriteria:
     composition: MarginComposition = field(default_factory=MarginComposition)  # 카드 ③ 조성
     stability: StabilityCriteria = field(default_factory=StabilityCriteria)  # B 극점
     authority: AuthorityCriteria = field(default_factory=AuthorityCriteria)  # 카드 ⑦
+    trim_margin: TrimMarginCriteria = field(default_factory=TrimMarginCriteria)  # 트림 여유 판정선 (05 §11.3)
     actuator: ActuatorCriteria = field(default_factory=ActuatorCriteria)  # 카드 ⑦(사용률)
     envelope: EnvelopeCriteria = field(default_factory=EnvelopeCriteria)  # B 엔벨로프
     response: ResponseCriteria = field(default_factory=ResponseCriteria)  # 카드 ④⑤⑥·판정

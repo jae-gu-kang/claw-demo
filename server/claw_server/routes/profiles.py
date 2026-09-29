@@ -20,7 +20,7 @@ from claw.profile.form import form_spec
 from claw.profile.schema import document_warnings
 from claw.tables import TableError
 from claw.tables.loader import parse_table_csv
-from claw_server.profiles import EXAMPLE_ID, ProfileConflict, ProfileReadOnly, ProfileUnreadable
+from claw_server.profiles import EXAMPLE_ID, ProfileConflict, ProfileReadOnly, ProfileUnreadable, upgraded
 from claw_server.refs import profile_echo, profile_error_detail
 from claw_server.serialize import table_dict, to_jsonable
 
@@ -108,9 +108,11 @@ def _fingerprints(doc: dict) -> dict:
     }
 
 
-def _body(doc: dict, revision: int) -> dict:
+def _body(doc: dict, revision: int, notes: list | None = None) -> dict:
+    """upgrade_notes — 옛 스키마 문서를 올린 사유(엔진 upgrade_document, 05 §11.13 이관 11단계). 비어 있으면 올림 없음.
+    조회에서 비어 있지 않으면 **저장본은 아직 옛 버전**이고, 저장해야 올린 문서가 새 리비전이 된다(profiles.py 머리말)."""
     return {"document": doc, "revision": revision, "is_example": doc["is_example"], **_fingerprints(doc),
-            "warnings": document_warnings(doc)}
+            "warnings": document_warnings(doc), "upgrade_notes": list(notes or [])}
 
 
 @router.get("/profiles")
@@ -169,15 +171,19 @@ def install_showcase(request: Request) -> dict:
 
 @router.get("/profiles/{profile_id}")
 def get_profile(profile_id: str, request: Request, revision: int | None = None) -> dict:
+    store = request.app.state.profiles
+    notes = []
     try:
-        doc, rev = request.app.state.profiles.get(profile_id, revision)
+        doc, rev = store.get(profile_id, revision, notes_out=notes)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"기체 프로파일 없음: {profile_id}")
     except ProfileUnreadable as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return _body(doc, rev)
+    # 저장 파일의 버전 — 올린 문서를 보여도 디스크는 옛 버전 그대로다(저장해야 바뀐다)
+    return {**_body(doc, rev, notes),
+            "stored_schema_version": store.stored_schema_version(profile_id, rev) if notes else doc["schema_version"]}
 
 
 NO_DE_TRIM_TABLE = "이 기체 문서에는 할당 δe_trim 표가 없어 요구 마하를 덮는지 잴 것이 없습니다."
@@ -215,6 +221,7 @@ def get_profile_criteria(profile_id: str, request: Request, revision: int | None
     도구 기본값이다 — 편집 화면이 「기본값을 따르는 칸」과 「이 기체가 바꾼 칸」을 가를 수 있게. `lines`는 판정선의
     뜻(방향·합격선·권장선·목표 필드 — design.criteria.LINES)이라 화면이 방향을 다시 적지 않는다. `echo`는 결과에
     실리는 기준 블록과 같은 모양이다 — 화면은 결과의 echo를 이것과 대조해 「재평가 필요」를 가린다.
+    `groups`는 판정선 표 밖 그룹의 칸 이름표(트림 여유 판정선 — 이관 12단계)다.
     `metric_scales`는 이 기체 **적용 기준**의 합격선에서 파생한 지표별 자(GainEvalCriteria.to_metric_scales)다 —
     영향성 그래프가 「유의미하게 움직이나」를 가르는 분석용이라 판정에는 영향이 없다(04 §1). 도구 기본값
     경로(/influence/criteria/defaults)의 자를 쓰면 기체가 한계를 바꿔도 그래프는 옛 한계로 켜진다."""
@@ -244,24 +251,37 @@ def get_profile_criteria(profile_id: str, request: Request, revision: int | None
         "target_conflicts": crit.target_conflicts(),
         "metric_scales": crit.to_metric_scales(),
         "echo": criteria_echo(crit, built.criteria_source),
+        "groups": _criteria_groups(),
     })
+
+
+def _criteria_groups() -> list:
+    """판정선 표(lines) 밖 그룹 중 이름표를 가진 것 — 칸 이름·단위·뜻은 엔진 정본(TRIM_MARGIN_LABELS)이라 화면이 다시
+    적지 않는다. 트림 여유 판정선(이관 12단계)은 트림 탭·조건 판정·자동 설계 채택 표의 「여유 미달」을 정하는 선이다."""
+    from claw.pipeline.criteria import TRIM_MARGIN_LABELS
+
+    return [{"group": "trim_margin", "title": "트림 여유 판정선 — 트림 탭·조건 판정의 「여유 미달」",
+             "cells": [{"key": k, "label": label, "unit": unit, "help": help_}
+                       for k, (label, unit, help_) in TRIM_MARGIN_LABELS.items()]}]
 
 
 @router.post("/profiles", status_code=201)
 def create_profile(req: ProfileDocIn, request: Request) -> dict:
+    notes = []
     try:
-        doc, rev = request.app.state.profiles.create(req.document)
+        doc, rev = request.app.state.profiles.create(req.document, notes_out=notes)
     except ProfileError as e:  # 저장 규칙의 id 검사도 경로(/id)가 붙은 ProfileError다
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
     except ProfileConflict as e:
         raise HTTPException(status_code=409, detail={"message": str(e), "head": e.head})
-    return _body(doc, rev)
+    return _body(doc, rev, notes)
 
 
 @router.put("/profiles/{profile_id}")
 def update_profile(profile_id: str, req: ProfileUpdateIn, request: Request) -> dict:
+    notes = []
     try:
-        doc, rev = request.app.state.profiles.update(profile_id, req.document, req.base_revision)
+        doc, rev = request.app.state.profiles.update(profile_id, req.document, req.base_revision, notes_out=notes)
     except ProfileReadOnly as e:
         raise HTTPException(status_code=403, detail=str(e))
     except KeyError:
@@ -274,7 +294,7 @@ def update_profile(profile_id: str, req: ProfileUpdateIn, request: Request) -> d
         raise HTTPException(status_code=409, detail={"message": str(e), "head": e.head})
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return _body(doc, rev)
+    return _body(doc, rev, notes)
 
 
 @router.delete("/profiles/{profile_id}", status_code=204)
@@ -421,11 +441,26 @@ def _submit_profile_job(request, response, kind, work) -> dict:
 def validate_profile(req: ProfileDocIn, request: Request) -> dict:
     """저장하지 않고 검증만 — 편집 중 문서의 오류 경로와 지문. 저장과 같은 규칙이다(예약 id·`_` 시작
     id·예제 표시) — 여기서 통과한 문서를 저장이 거부하면 편집기가 초록 표시 뒤에 실패한다."""
+    notes = []
     try:
-        doc = request.app.state.profiles.checked(req.document)
+        doc = request.app.state.profiles.checked(req.document, notes_out=notes)
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
-    return {"ok": True, **_fingerprints(doc), "warnings": document_warnings(doc)}
+    # 옛 스키마 문서는 올린 문서를 함께 준다 — 가져오기 미리 보기·편집기가 올린 모양으로 이어 고친다(저장은 아직 없다)
+    return {"ok": True, **_fingerprints(doc), "warnings": document_warnings(doc), "upgrade_notes": notes,
+            **({"document": doc} if notes else {})}
+
+
+def _preview_built(document, variant):
+    """미리 보기(곡선·산출 근거) 조립 — 저장·검증과 같은 올림 길(upgraded)을 탄다. 옛 스키마 문서(가져온 v2 등)를 편집기가
+    저장 전에 보는 길이라, 여기만 올리지 않으면 같은 문서가 검증은 통과하고 곡선은 422가 된다. → (built, 올림 사유)."""
+    doc, notes, _ = upgraded(document)
+    return build_profile(validate_document(doc), variant, validated=True), notes
+
+
+def _with_notes(out: dict, notes: list) -> dict:
+    # 올렸을 때만 단다 — 올리지 않은 문서의 응답은 종전과 바이트 단위로 같다
+    return {**out, "upgrade_notes": notes} if notes else out
 
 
 @router.post("/profiles/aero-slice")
@@ -433,10 +468,11 @@ def profile_aero_slice(req: AeroSliceIn) -> dict:
     """공력 DB 뷰어 곡선 — 문서의 계수 계산기로 한 축을 따라 CL·CD·동체축 계수와 실속 대조 (02 §5.2).
 
     기체 id가 아니라 **문서**를 받는다: 편집기에서 표를 반입한 직후 저장하지 않고 곡선을 봐야 하고, 읽기 전용
-    예제도 같은 길로 본다. 문서는 저장 규칙이 아니라 스키마로만 검증한다(보기일 뿐 저장이 아니다)."""
+    예제도 같은 길로 본다. 문서는 저장 규칙이 아니라 스키마로만 검증한다(보기일 뿐 저장이 아니다). 옛 스키마 문서는
+    저장·검증과 같이 올려서 보고 사유(upgrade_notes)를 함께 준다(_preview_built)."""
     try:
-        built = build_profile(validate_document(req.document), req.variant, validated=True)
-        return to_jsonable(aero_slice(built, req.along, req.start, req.stop, req.n, req.fixed))
+        built, notes = _preview_built(req.document, req.variant)
+        return _with_notes(to_jsonable(aero_slice(built, req.along, req.start, req.stop, req.n, req.fixed)), notes)
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
     except ValueError as e:  # 인자 판정·표 질의 오류(TableError도 ValueError)
@@ -450,8 +486,8 @@ def profile_aero_stability(req: AeroStabilityIn) -> dict:
     aero-slice와 같은 계약(문서 본문·스키마 검증만)이고, 도함수·부호 관례·위반 구간은
     전부 엔진(stability_slice) 산출 — 서버는 통과만 한다."""
     try:
-        built = build_profile(validate_document(req.document), req.variant, validated=True)
-        return to_jsonable(stability_slice(built, req.start, req.stop, req.n, req.fixed))
+        built, notes = _preview_built(req.document, req.variant)
+        return _with_notes(to_jsonable(stability_slice(built, req.start, req.stop, req.n, req.fixed)), notes)
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
     except ValueError as e:  # 인자 판정·표 질의 오류(TableError도 ValueError)
@@ -465,8 +501,8 @@ def profile_seed_basis(req: SeedBasisIn) -> dict:
     aero-slice와 같은 계약(문서 본문·스키마 검증만·저장 없음) — 편집 중 문서와 읽기 전용 예제도 같은 길로
     본다. 닫힌꼴·판정·사유 문구는 전부 엔진(seed_basis) 산출이고 시드 채택은 여전히 quick-seed 잡이 한다."""
     try:
-        built = build_profile(validate_document(req.document), req.variant, validated=True)
-        return to_jsonable(seed_basis(built, req.mach, req.alt, req.fuel, e_ref_dps=req.e_ref_dps))
+        built, notes = _preview_built(req.document, req.variant)
+        return _with_notes(to_jsonable(seed_basis(built, req.mach, req.alt, req.fuel, e_ref_dps=req.e_ref_dps)), notes)
     except ProfileError as e:
         raise HTTPException(status_code=422, detail=profile_error_detail(e))
     except ValueError as e:  # 인자 판정·표 질의 오류(TableError도 ValueError)

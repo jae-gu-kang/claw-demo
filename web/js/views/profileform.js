@@ -23,7 +23,7 @@ import { clear, el } from "../dom.js";
 import {
   FormNotice, aeroTableFromParsed, tableSummary,
   allowedInputs, applyPatch, clearInPatch, effectiveOf, formatNum, getAt, inputsText, isRequired, isUnder,
-  requirementCounts,
+  loadingsNote, requirementCounts,
   machTableFromParsed, paramsFromDefaults, parseInputs, parseNum, parseNumList, patchOwner, patchedBelow,
   sectionOverrides, setAt, setMatrixCell, tableFromRows, tableRows, writeValues,
 } from "../lib/profileform.js";
@@ -586,6 +586,8 @@ export function renderProfileForm(ctx) {
   const sections = spec.sections.map((s) => {
     const n = patch ? sectionOverrides(patch, s).length : 0;
     const req = requirementCounts(s.fields);
+    // 질량 절 — 탑재 구성을 적었으면 계산이 그 구성을 반영하지 않는다고 절 머리 밑에 말한다(스키마 v3 mass.loadings)
+    const note = s.key === "mass" ? loadingsNote(shown) : null;
     return el("details", {
       class: "pf-sect", open: openSections.has(s.key) ? "" : undefined,
       ontoggle: (e) => { if (e.target.open) openSections.add(s.key); else openSections.delete(s.key); },
@@ -594,6 +596,7 @@ export function renderProfileForm(ctx) {
       el("span", { class: "pf-count", title: "이 절의 필수 칸 수 · 「없음」으로 비워 둘 수 있는 칸 수 (선택 묶음은 하나로 센다)" },
         `필수 ${req.required} · 선택 ${req.optional}`),
       el("span", { class: "hint" }, s.help)),
+    ...(note ? [el("p", { class: "notice", "data-loadings-note": "" }, note)] : []),
     ...s.fields.map((f) => row(f)));
   });
   const legend = el("p", { class: "hint pf-legend" },

@@ -154,7 +154,7 @@ def test_saturation_detail_matches_saturation_ok(ac):
         TrimCase("high", mach=0.4, alt=3000.0, fuel=400.0),  # 설계 천장(만재 ~3.8 km, CEILING) 아래로
     ]
     for tr in trim_batch(ac, cases):
-        det = saturation_detail(tr, ac.trim_bounds["de"])
+        det = saturation_detail(tr, ac.trim_bounds)
         assert set(det) == {"de", "throttle_high", "throttle_low"}
         assert tr.flags["saturation_ok"] == (not any(det.values())), tr.case.name
 
@@ -398,11 +398,16 @@ def test_saturation_channels_use_the_limit_on_each_side():
     """δe 포화는 **부호 쪽 한계**로 판정한다 — 비대칭 엘레본에서 |δe|를 상한과 비교하면 틀린다."""
     from claw.trim.trim import _saturation_channels
 
-    asym = (-0.20, 0.35)  # 하한 0.95×0.20 = 0.19, 상한 0.95×0.35 = 0.3325
+    # 판정선은 트림 범위가 싣는 기준값(criteria.trim_margin — 기본 sat_frac 0.95·thr_margin 0.02, 이관 12단계)
+    asym = {"de": (-0.20, 0.35), "sat_frac": 0.95, "thr_margin": 0.02}  # 하한 0.95×0.20 = 0.19, 상한 0.95×0.35 = 0.3325
     assert _saturation_channels(-0.195, 0.5, asym)["de"] is True
     assert _saturation_channels(-0.18, 0.5, asym)["de"] is False
     assert _saturation_channels(0.30, 0.5, asym)["de"] is False  # |δe|=0.30 > 0.19여도 양의 쪽은 상한
     assert _saturation_channels(0.34, 0.5, asym)["de"] is True
+    # 판정선을 바꾸면 같은 해의 판정이 바뀐다 — 상수가 아니라 기준에서 읽는다
+    assert _saturation_channels(0.30, 0.5, {**asym, "sat_frac": 0.8})["de"] is True
+    assert _saturation_channels(0.0, 0.04, {**asym, "thr_margin": 0.05})["throttle_low"] is True
+    assert _saturation_channels(0.0, 0.04, asym)["throttle_low"] is False
 
 
 

@@ -1,7 +1,7 @@
 {
  "golden": "envelopes",
  "mode": "full",
- "captured_at": "2e24847+dirty",
+ "captured_at": "3a2bd4c+dirty",
  "value": {
   "dict": {
    "vn_prot": {
@@ -1767,8 +1767,8 @@
        "alt_min_used": "f:0x0.0p+0",
        "alt_max_used": "f:0x1.1940000000000p+13",
        "alt_max_is_display_default": false,
-       "alt_min_source": "operating",
-       "alt_max_source": "operating",
+       "alt_min_source": "override",
+       "alt_max_source": "override",
        "requirement_undefined": true,
        "tropopause_alt": "f:0x1.57c0000000000p+13",
        "speed_of_sound": {

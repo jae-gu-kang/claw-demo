@@ -311,8 +311,9 @@ def design_envelope(
     requirement: 요구 운용영역(opspace.Region — region_of(doc), 이관 9단계). 주면 응답 requirement에 기본 범위·확정 여부·
     출처와 행별 요구 마하(rows — 경계표의 (고도, 연료) 행마다, 경계표가 없으면 기본 범위의 고도·연료 끝 네 모서리)와 이
     연료에서 고도 표본마다의 요구 마하 띠(band — 층 사이 보간, 경계표가 덮지 않으면 None · state "undefined", 요구 고도
-    밖이면 "out_of_region")를 싣는다 — 화면이 요구영역과 조건 상태를 그린다. 운용 고도 상하한(alt_min·alt_max)이 없는 끝은
-    요구영역 고도 끝으로 그린다. requirement도 없으면 bounds.requirement_undefined가 True이고, 0~12,000 m는 표시 범위일
+    밖이면 "out_of_region")를 싣는다 — 화면이 요구영역과 조건 상태를 그린다. 고도 끝은 요구영역 고도다(스키마 v3 — 운용
+    고도 절을 요구영역으로 흡수, 05 §11.13 11단계). alt_min·alt_max는 **호출자가 덧쓴 고도 끝**(서버 질의)일 때만 준다 —
+    준 끝이 이기고 출처는 "override"다. requirement도 없으면 bounds.requirement_undefined가 True이고, 0~12,000 m는 표시 범위일
     뿐이다(alt_*_source "display_default") — 요구인 척 그리지 않는다. schedule_grid는 requirement가 있으면 자동 설계
     COARSE와 같은 요구영역 기본 격자(이 연료에 가장 가까운 기본 격자 연료 층 — source "region_base_grid"), 없으면 옛
     coarse 격자 좌표(source "coarse_grid")다.
@@ -322,8 +323,8 @@ def design_envelope(
     엔벨로프가 경계를 결정했는지 귀속한다("stall"|"db", "mach_no"|"db"|
     "stall_table"|"qbar"). lo ≥ hi인 행은 empty(자연 천장 — 설계 영역 없음).
 
-    q_max·alt_min·alt_max는 실기체 값이라 기본값이 없다 — None이면 해당
-    경계를 합성에서 제외하고 출력에도 null (없는 데이터를 그리지 않는다).
+    q_max는 실기체 값이라 기본값이 없다 — None이면 해당 경계를 합성에서 제외하고
+    출력에도 null (없는 데이터를 그리지 않는다). alt_min·alt_max(덧쓴 끝)도 없으면 null이다.
     표시 고도 상한만 _ALT_DISPLAY_MAX [기본값]로 채우고
     alt_max_is_display_default로 echo — 소비자(웹)가 자리표시임을 명기.
     bounds.speed_of_sound는 그 표시 상·하 모서리의 음속 — 상단 대기속도 보조축이
@@ -359,30 +360,30 @@ def design_envelope(
             raise ValueError(
                 f"{name} {v} m가 ISA 유효범위({ISA_MIN_ALT:.0f}~{ISA_STRATO1_TOP_ALT:.0f} m) 밖"
             )
-    # 고도 끝 — 운용 고도가 이기고, 없으면 요구영역 고도 끝(범위가 한 점이면 쓰지 않는다), 그것도 없으면 표시 기본값
+    # 고도 끝 — 덧쓴 끝(질의)이 이기고, 없으면 요구영역 고도 끝(범위가 한 점이면 쓰지 않는다), 그것도 없으면 표시 기본값
     req_alt = None
     if requirement is not None and float(requirement.alt[0]) < float(requirement.alt[1]):
         req_alt = (float(requirement.alt[0]), float(requirement.alt[1]))
     if alt_min is not None:
-        alt_lo_used, lo_src = float(alt_min), "operating"
+        alt_lo_used, lo_src = float(alt_min), "override"
     elif req_alt is not None:
         alt_lo_used, lo_src = req_alt[0], "region"
     else:
         alt_lo_used, lo_src = 0.0, "display_default"
     if alt_max is not None:
-        alt_hi_used, hi_src = float(alt_max), "operating"
+        alt_hi_used, hi_src = float(alt_max), "override"
     elif req_alt is not None:
         alt_hi_used, hi_src = req_alt[1], "region"
     else:
         alt_hi_used, hi_src = _ALT_DISPLAY_MAX, "display_default"
-    # 섞인 출처(운용 한쪽 + 요구영역 한쪽)가 뒤집히면 요구영역 쪽 끝을 표시 기본값으로 물린다 — 운용 고도가 요구영역
-    # 밖에 있는 것은 판정 재료이지 거부 사유가 아니다(요구영역 전엔 상한이 12,000 m라 그려졌다). 둘 다 운용이면 문서 모순
-    if not alt_lo_used < alt_hi_used and lo_src == "operating" and hi_src == "region":
+    # 섞인 출처(덧쓴 한쪽 + 요구영역 한쪽)가 뒤집히면 요구영역 쪽 끝을 표시 기본값으로 물린다 — 덧쓴 고도가 요구영역
+    # 밖에 있는 것은 판정 재료이지 거부 사유가 아니다. 둘 다 덧쓴 끝이면 입력 모순
+    if not alt_lo_used < alt_hi_used and lo_src == "override" and hi_src == "region":
         alt_hi_used, hi_src = _ALT_DISPLAY_MAX, "display_default"
-    elif not alt_lo_used < alt_hi_used and lo_src == "region" and hi_src == "operating":
+    elif not alt_lo_used < alt_hi_used and lo_src == "region" and hi_src == "override":
         alt_lo_used, lo_src = 0.0, "display_default"
     if not alt_lo_used < alt_hi_used:
-        raise ValueError(f"운용 고도 하한 ≥ 상한: {alt_lo_used} ≥ {alt_hi_used} m")
+        raise ValueError(f"고도 하한 ≥ 상한: {alt_lo_used} ≥ {alt_hi_used} m")
 
     db_mach_lo, db_mach_hi = (float(v) for v in db_ranges["mach"])
     axis_hi = float(stall_table.axes[0][-1])
@@ -455,7 +456,7 @@ def design_envelope(
             "alt_min_used": alt_lo_used,
             "alt_max_used": alt_hi_used,
             "alt_max_is_display_default": hi_src == "display_default",
-            # 고도 끝의 출처 — operating(운용 고도) · region(요구영역) · display_default(표시 기본값 — 요구가 아니다)
+            # 고도 끝의 출처 — override(호출자가 덧쓴 끝) · region(요구영역) · display_default(표시 기본값 — 요구가 아니다)
             "alt_min_source": lo_src,
             "alt_max_source": hi_src,
             # 요구 운용영역이 없다 — 이 도표의 어떤 선도 요구를 뜻하지 않는다(05 §11.13 9단계 「요구영역 미정의」)

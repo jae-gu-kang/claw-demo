@@ -112,3 +112,31 @@ def test_trim_batch_location_header(client):
         json={"cases": [{"mach": 0.6, "alt": 1000.0, "fuel": 200.0}]},
     )
     assert r.headers["location"] == f"/api/jobs/{r.json()['id']}"
+
+
+def _criteria_doc(pid, alpha_margin):
+    from claw.profile import load_example
+
+    d = load_example()
+    d.update(id=pid, name="판정선 다른 기체", is_example=False)
+    d["criteria"] = {**(d.get("criteria") or {}), "trim_margin": {"alpha_margin": alpha_margin}}
+    return d
+
+
+def test_trim_batch_carries_the_criteria_echo(client, wait_job):
+    """여유 판정(margin·verdict)은 판정선 criteria.trim_margin으로 난다(스키마 v3 · 이관 12단계) — 결과·목록 meta가 그 기준
+    블록을 싣고, 판정선을 바꾼 기체의 결과는 판정 기준 지문이 다르다(화면의 「재평가 필요」 재료)."""
+    from claw.profile import EXAMPLE_ID
+
+    cases = [{"mach": 0.45, "alt": 1000.0, "fuel": 200.0}]
+    j = wait_job(client.post("/api/trim/batch", json={"cases": cases}).json()["id"])
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    now = client.get(f"/api/profiles/{EXAMPLE_ID}/criteria").json()["echo"]
+    assert body["criteria_echo"] == now
+    [meta] = client.get("/api/results").json()
+    assert meta["criteria_echo"] == now
+    assert client.post("/api/profiles", json={"document": _criteria_doc("wide-margin", 0.06)}).status_code == 201
+    j = wait_job(client.post("/api/trim/batch", json={"cases": cases, "profile": {"id": "wide-margin"}}).json()["id"])
+    other = client.get(f"/api/results/{j['result_id']}").json()["criteria_echo"]
+    assert other["judgement_fingerprint"] != now["judgement_fingerprint"]
+    assert other == client.get("/api/profiles/wide-margin/criteria").json()["echo"]

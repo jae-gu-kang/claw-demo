@@ -47,8 +47,9 @@ def resolve_profile(request, ref: ProfileRef | None):
     ref = ref or ProfileRef(id=EXAMPLE_ID)
     from claw_server.profiles import ProfileUnreadable
 
+    notes = []
     try:
-        doc, revision = store.get(ref.id, ref.revision)
+        doc, revision = store.get(ref.id, ref.revision, notes_out=notes)
     except KeyError:
         at = "" if ref.revision is None else f"@{ref.revision}"
         raise HTTPException(status_code=404, detail=f"기체 프로파일 없음: {ref.id}{at}")
@@ -62,6 +63,9 @@ def resolve_profile(request, ref: ProfileRef | None):
         raise HTTPException(status_code=404, detail=f"없는 형상 변형: {ref.id}/{ref.variant}")
     built.revision = revision
     built.source = source
+    if notes:
+        # 옛 스키마 저장본을 읽을 때 올려서 계산했다 — (id, 리비전)은 옛 원본 파일을 가리키므로 그 사실을 결과가 싣는다
+        built.upgraded_from = {"schema_version": store.stored_schema_version(ref.id, revision), "notes": notes}
     store.snapshot(built)
     return built
 
@@ -77,22 +81,59 @@ def resolve_snapshot(request, echo: dict | None):
         built.source = "legacy-unrecorded"
         return built
     fp = echo.get("fingerprint", "")
+    # 같은 지문·다른 내용으로 따로 남은 스냅숏(ProfileStore.snapshot) — echo가 그 키를 실었으면 그 파일이다
+    key = echo.get("snapshot") or fp
+    if key != fp and not (isinstance(key, str) and key.startswith(f"{fp}-")):
+        raise HTTPException(status_code=409, detail=f"재개 불가 — 스냅숏 키가 지문과 맞지 않는다: {key!r} ≠ {fp!r}")
     try:
-        doc = request.app.state.profiles.load_snapshot(fp)
+        doc = request.app.state.profiles.load_snapshot(key)
     except KeyError:
-        raise HTTPException(status_code=409, detail=f"재개 불가 — 계산에 쓴 기체 스냅숏이 없다: {fp!r}")
+        raise HTTPException(status_code=409, detail=f"재개 불가 — 계산에 쓴 기체 스냅숏이 없다: {key!r}")
     except (ValueError, OSError) as e:  # 지문 형식이 틀림, 손상 JSON, UTF-8이 아닌 파일
-        raise HTTPException(status_code=409, detail=f"재개 불가 — 기체 스냅숏을 읽을 수 없다: {fp!r} ({e})")
+        raise HTTPException(status_code=409, detail=f"재개 불가 — 기체 스냅숏을 읽을 수 없다: {key!r} ({e})")
+    if key != fp:
+        from claw_server.profiles import snapshot_hash
+
+        # 내용 해시가 이름과 같아야 그 결과의 문서다 — 지문 대조는 지문 밖 칸(기준 등)을 못 본다
+        if not isinstance(doc, dict) or snapshot_hash(doc) != key.split("-", 1)[1]:
+            raise HTTPException(status_code=409, detail=f"재개 불가 — 스냅숏 내용 해시 불일치: {key!r}")
     # 저장소 문서처럼 다시 검증한다 — 스키마가 바뀐 뒤의 옛 스냅숏은 조립 도중 500이 아니라 409다.
     # 스냅숏은 적용 문서라 variants가 없다(지문 밖이라 빈 목록을 채워도 지문은 같다)
+    if not isinstance(doc, dict):
+        raise HTTPException(status_code=409, detail="재개 불가 — 기체 스냅숏이 객체가 아니다")
+    from claw_server.profiles import upgraded
+
+    upgraded_from = None
+    if upgraded(doc)[2] is not None:
+        # 옛 스키마 스냅숏(05 §11.13 이관 11단계) — 올리면 지문이 바뀐다(절이 옮겨 가므로). 무결성은 **올리기 전**
+        # 원본으로 잰다: 계보 지문은 이름표를 뺀 문서의 해시라 스키마를 가리지 않는다. 맞으면 올려서 조립하고 원래
+        # 지문·사유를 echo한다 — 옛 결과의 설계 재개가 스키마 변경으로 끊기지 않게
+        from claw.profile.fingerprint import profile_fingerprint
+
+        try:
+            raw_fp = profile_fingerprint({**doc, "variants": []})
+        except (KeyError, TypeError, AttributeError, ValueError):
+            raw_fp = None
+        if raw_fp != fp:
+            raise HTTPException(status_code=409, detail=f"재개 불가 — 옛 스키마 스냅숏 지문 불일치: {raw_fp} ≠ {fp}")
+        try:
+            doc, notes, old = upgraded(doc)
+        except ProfileError as e:
+            raise HTTPException(status_code=409, detail=f"재개 불가 — 옛 스키마 스냅숏을 올리지 못한다: {e}")
+        upgraded_from = {"schema_version": old, "fingerprint": fp, "notes": notes}
     try:
-        if not isinstance(doc, dict):
-            raise ProfileError("", "스냅숏이 객체가 아니다")
         built = build_profile({**doc, "variants": []})
     except ProfileError as e:
         raise HTTPException(status_code=409, detail=f"재개 불가 — 기체 스냅숏이 현재 스키마를 넘지 못한다: {e}")
-    if built.fingerprint != fp:
+    if upgraded_from is None and built.fingerprint != fp:
         raise HTTPException(status_code=409, detail=f"재개 불가 — 스냅숏 지문 불일치: {built.fingerprint} ≠ {fp}")
+    if upgraded_from is not None:
+        built.upgraded_from = upgraded_from
+        # 올린 문서도 제 지문으로 남긴다 — 재개 결과의 echo가 가리킨다. 올린 지문이 다른 문서와 겹치면(트림 α 여유만 달랐던
+        # 두 v2 문서) snapshot이 내용 해시 키로 따로 남기고 built.snapshot_key에 적는다
+        request.app.state.profiles.snapshot(built)
+    elif key != fp:
+        built.snapshot_key = key  # 재개 결과도 같은 파일을 가리킨다
     # 지문은 이름표를 뺀 계산 내용이라, 같은 지문의 스냅숏은 **다른 이름의 기체**가 먼저 남긴 것일 수
     # 있다(예제를 복제만 한 기체). 계산은 같으니 스냅숏으로 조립하되, 이름표는 저장된 echo의 것을 쓴다
     built.id = echo.get("id", built.id)
@@ -115,6 +156,12 @@ def profile_echo(built) -> dict:
         # 초기 탐색 게인으로 계산한 결과만 표시한다 — 자동 설계 전 게인이라는 사실이 결과와 함께 다녀야 한다.
         # 다른 출처에는 키를 달지 않는다: 예제 기체 결과의 서버 골든(바이트 동일 증명)이 이 블록을 싣는다
         **({"design_source": "quick_seed"} if _seeded(built) else {}),
+        # 옛 스키마 문서(저장본·스냅숏)를 올려서 계산했다 — {schema_version, notes, fingerprint?(스냅숏의 원래 지문)}.
+        # 올린 경우에만 단다(골든 보존과 같은 이유)
+        **({"upgraded_from": built.upgraded_from} if getattr(built, "upgraded_from", None) else {}),
+        # 같은 지문에 내용이 다른 스냅숏이 먼저 있었다 — 이 결과의 문서는 `{지문}-{내용 해시}` 파일이다(ProfileStore.snapshot).
+        # 없으면 지문 파일이 곧 이 문서다(키를 달지 않는다 — 골든 보존)
+        **({"snapshot": built.snapshot_key} if getattr(built, "snapshot_key", None) else {}),
     }
 
 

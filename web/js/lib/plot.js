@@ -699,3 +699,18 @@ export function bodeSeries(data) {
     phase: data.phase_deg.map(num),
   };
 }
+
+// ── 질량 조건 (05 §11.13 이관 11단계) ─────────────────────────────────────────
+// 문서가 탑재 구성(mass.loadings)을 적어도 트림·동역학은 기본 질량 모델로 계산한다 — CG 영향은 아직 반영하지 못한다.
+// 조건 판정(opspace/verdict.py)이 mass_condition으로 그 사실을 싣고, 화면은 그 판정을 가진 표마다 한 줄로 말한다
+// (CG에 매인 검증을 통과로 읽히게 두지 않는다)
+export const CG_UNSUPPORTED = "CG 영향 미지원 — 대표 구성으로 계산";
+
+/** 조건 판정 목록(서버 verdict — null·옛 결과 허용) → 한 줄 또는 null. 구성을 적지 않은 기체는 말하지 않는다. */
+export function massConditionNote(verdicts) {
+  const mc = (verdicts ?? []).map((v) => v?.mass_condition)
+    .find((m) => m && m.loadings_declared > 0 && m.cg_supported === false);
+  if (!mc) return null;
+  return `${CG_UNSUPPORTED} (문서의 탑재 구성 ${mc.loadings_declared}개는 기록만 — 트림·동역학은 기본 질량 모델이고, `
+    + "CG에 매인 검증은 통과로 집계하지 않는다)";
+}

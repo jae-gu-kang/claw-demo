@@ -84,6 +84,9 @@ def form_spec() -> dict:
             _f("mat3", "/mass/J_full", "관성 행렬 (연료 만재)", "kg·m²", symmetric=True),
             _f("vec3", "/mass/cg_empty", "무게중심 (연료 0) [x,y,z]", "m"),
             _f("vec3", "/mass/cg_full", "무게중심 (연료 만재) [x,y,z]", "m"),
+            _f("text_json", "/mass/loadings", "탑재 구성", nullable=True,
+               help="[{id, name, payload_kg, cg: [x,y,z] 또는 없음}] — 구성을 적어 두는 자리다. 계산은 기본 질량 모델(탑재 "
+                    "없음)로 하고 무게중심은 동역학에 없어, 조건 판정이 「CG 영향 미지원」이라고 말한다(통과로 세지 않는다)"),
         ]),
         _section("propulsion", "추진", "형식을 고르면 그 형식의 파라미터 칸이 선다 — 파라미터는 전부 명시한다", [
             _f("component", "/propulsion", "추진 형식", category="propulsion", reserved=[]),
@@ -105,10 +108,6 @@ def form_spec() -> dict:
             _f("number", "/structural/q_max", "최대 동압", "Pa", nullable=True),
             _f("number", "/structural/n_x_launch", "발사 축방향 하중배수 한계", "g", nullable=True),
         ]),
-        _section("operating", "운용", "설계 엔벨로프의 운용 고도 경계 — 없으면 경계를 그리지 않는다", [
-            _f("number", "/operating/alt_min", "운용 고도 하한", "m", nullable=True),
-            _f("number", "/operating/alt_max", "운용 고도 상한", "m", nullable=True),
-        ]),
         _section("ground", "지상·발사", "없음이면 그 지상 모델을 쓰지 않는다", [
             _group("/ground/skid", "스키드 접지", nullable=True, fields=[
                 _f("rows3", "/ground/skid/contacts", "접촉점 [x,y,z] (동체축)", "m"),
@@ -123,9 +122,12 @@ def form_spec() -> dict:
                 _f("number", "/ground/rail/origin_height", "레일 원점 높이", "m"),
             ]),
         ]),
-        _section("trim", "트림 판정", "트림 여유 — 리미터 여유(제어법칙 절)와 따로 간다", [
-            _f("range", "/trim/alpha_bounds", "트림 받음각 탐색 범위", "rad"),
-            _f("number", "/trim/alpha_margin", "트림 α 여유", "rad"),
+        _section("solver", "해석 설정", "트림 풀이 방법 — 기체 값이 아니라 플랜트 지문 밖이다. 바꾸면 트림 결과·도출 δe_trim 표가 "
+                 "낡는다. 판정선(포화 등고선·트림 α 여유)은 기준 편집의 트림 여유 판정선이다", [
+            _f("range", "/solver/trim_alpha_bounds", "트림 받음각 탐색 범위", "rad",
+               help="풀이 범위이지 판정이 아니다 — 판정 한계(실속 표 − 트림 α 여유)보다 낮으면 저속에서 트림이 탐색 상한에 막힌다"),
+            _f("number", "/solver/resid_tol", "트림 수렴 잔차 허용치", "m/s²·rad/s²",
+               help="수평비행 트림의 |u̇|·|ẇ|·|q̇|가 모두 이 값 아래면 수렴이다"),
         ]),
         _section("law", "제어법칙", "설계 게인이 없으면(없음) 시뮬·코드 생성이 거부한다 — 없는 게인을 지어내지 않는다", [
             _f("choice", "/law/template", "법칙 템플릿", choices=list(TEMPLATES)),
@@ -184,10 +186,6 @@ def form_spec() -> dict:
                        scalar_ok=True, max_items=MAX_ENVELOPE_ALTS,
                        help=f"V-n 선도를 그릴 고도 — 여럿이면 고도마다 선도를 겹쳐 그린다({MAX_ENVELOPE_ALTS}개까지)"),
                     _f("number", "/mission_template/envelope/fuel", "선도 연료", "kg"),
-                    _f("number", "/mission_template/envelope/scan_mach/from", "스캔 마하 시작", "-"),
-                    _f("number", "/mission_template/envelope/scan_mach/to", "스캔 마하 끝", "-"),
-                    _f("number", "/mission_template/envelope/scan_mach/step", "스캔 마하 간격", "-"),
-                    _f("numlist", "/mission_template/envelope/scan_alt", "스캔 고도 목록", "m"),
                 ]),
                 _group("/mission_template/sim", "시뮬 기본 미션 (발사 → 장주 → 착륙)", fields=[
                     _f("number", "/mission_template/sim/fuel", "시작 연료", "kg"),

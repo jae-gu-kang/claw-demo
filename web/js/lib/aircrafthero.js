@@ -15,7 +15,8 @@ const LAYOUT_LABEL = { elevon4_rudder1: "엘레본 4면·러더 1면" };
 // 형상 변형이 덮어쓴 절 → 사람이 읽는 이름 (절 이름은 엔진 schema.SECTIONS)
 const SECTION_LABEL = {
   geometry: "형상", aero: "공력", stall: "실속", mass: "질량·관성", propulsion: "추진", actuator: "작동기",
-  surfaces: "타면", structural: "구조 한계", operating: "운용 고도", ground: "지상장치", trim: "트림 범위",
+  // 스키마 v3 — 운용 고도(operating)는 요구영역으로 흡수, 트림(trim)은 해석 설정(solver)과 기준(trim_margin)으로 나뉘었다
+  surfaces: "타면", structural: "구조 한계", ground: "지상장치", solver: "해석 설정",
   law: "제어법칙", mission_template: "미션 템플릿", display: "표시 모델",
 };
 

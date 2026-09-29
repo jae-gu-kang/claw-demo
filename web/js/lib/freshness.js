@@ -68,11 +68,13 @@ unknown(echo·scheme 없는 옛 결과, 지금 기준 미수신 — 낡음으로
 export const TARGET_SCORED_KINDS = new Set(["influence_evaluate", "influence_prescribe"]);
 /** 목표로 설계한 결과 종류 — 목표만 달라지면 "다른 목표로 설계함"(무효는 아니다). */
 export const TARGET_DESIGNED_KINDS = new Set(["auto_design"]);
-/** 기준으로 판정하는 저장 결과 종류 — 결과 목록은 이 종류에만 기준 배지를 판단한다(시뮬·트림 등은 기준과 무관이라
- *  「미상」을 달면 거짓이다). */
+/** 기준으로 판정하는 저장 결과 종류 — 결과 목록은 이 종류에만 기준 배지를 판단한다(시뮬 등은 기준과 무관이라
+ *  「미상」을 달면 거짓이다). 트림 탭(trim_batch)·설계 엔벨로프 스캔(envelope_scan)은 스키마 v3부터 여유 판정(포화·스로틀·
+ *  트림 α 여유 — 판정선 criteria.trim_margin, 이관 12단계)을 결과에 굳히므로 든다 — 그 판정선을 바꾸면 다시 판정해야 한다.
+ *  그 전에 저장된 트림·스캔 결과는 echo가 없어 「판정 기준 미상」이다(낡음으로 위장하지 않는다). */
 export const CRITERIA_JUDGED_KINDS = new Set([
   "influence_scan", "influence_evaluate", "influence_verify", "influence_prescribe", "influence_diagnose",
-  "auto_design", "margin_map",
+  "auto_design", "margin_map", "trim_batch", "envelope_scan",
 ]);
 
 export const CRITERIA_FRESHNESS = {

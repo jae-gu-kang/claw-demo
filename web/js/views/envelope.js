@@ -24,8 +24,9 @@ Envelope는 하나가 아니다. 목적에 따라 층이 갈리고, 그 순서�
 표현 변환(다각형·세그먼트·셀 분류·프리필)은 lib/envelope.js(테스트).
 구조 한계 프리필은 응답 echo 자기 정렬(02 §5.5 — 기본값 재기술 금지):
 손대지 않은 필드만 echo로 갱신, 값을 보내는 건 손댄 필드뿐. 동압 한계·운용 고도도 같은
-계약이다 — 고른 기체 문서 값(structural.q_max·operating)으로 먼저 서고, 손대지 않은 칸은
-보내지 않아 서버가 문서 값을 쓰며(bounds_source로 출처를 말한다) 그 echo로 다시 맞춘다.
+계약이다 — 고른 기체 문서 값(structural.q_max)으로 먼저 서고, 손대지 않은 칸은
+보내지 않아 서버가 문서 값을 쓰며(bounds_source로 출처를 말한다) 그 echo로 다시 맞춘다. 운용 고도는
+스키마 v3부터 문서 절이 없다 — 요구영역 고도가 운용 고도이고 엔진이 선도 끝으로 그린다(칸은 연구용 덮어쓰기).
 
 쇼케이스 진행기 신호(lib/showcasecue.js): vn({alts?, nz?}) — 선도 조건을 기체 값으로 세운 뒤
 [그리기]와 같은 길로 그리고 ⑤ 층을 연다 · scan() — [제어 가능 판정]과 같은 길로 스캔 잡.
@@ -43,7 +44,7 @@ import {
 } from "../lib/envelope.js";
 import { parseNumberList } from "../lib/grid.js";
 import { casesFromBaseGrid, untrimmedSummary } from "../lib/opspace.js";
-import { fuelsOf, linScale, niceTicks, pivotCases } from "../lib/plot.js";
+import { fuelsOf, linScale, massConditionNote, niceTicks, pivotCases } from "../lib/plot.js";
 import { heatmapCanvas, makeCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
@@ -68,7 +69,7 @@ let runningJobId = null;
 let scanCue = null; // 스캔 잡을 건 진행기 신호 — 잡이 끝나면 한 번 보고하고 지운다 (감시자가 둘이어도 한 번)
 // 폼 문자열 — 재진입 유지. 구조 5종은 첫 응답 echo로 프리필(02 §5.5 자기 정렬)
 // 선도 조건·α 보호 마진·스캔 격자·동압·운용 고도는 **예제 기체 사본(폴백)**으로 먼저 선다 — 고른 기체 문서가
-// 오면 손대지 않은 칸만 그 기체 값(미션 템플릿·law.alpha_margin·structural.q_max·operating)으로 바뀐다
+// 오면 손대지 않은 칸만 그 기체 값(미션 템플릿·law.alpha_margin·structural.q_max)으로 바뀐다
 // (lib/missiontemplate.js)
 // 스캔 격자는 요구영역의 기본 격자(05 §11.11)에서 받는다 — 칸을 비우면 영역의 기본 명세, 적으면 그 명세로 다시 받는다
 // (이관 9단계: 종전 mission_template.envelope.scan_* 사각 격자는 요구영역과 무관한 점을 보냈다)
@@ -226,8 +227,11 @@ export function render() {
     for (const [key, param] of OPS_FIELDS) {
       form[key] = prefillValue(form[key], touched.has(key), bounds?.[param]);
       structInputs[key].value = form[key];
-      // 손대서 비운 칸은 서버가 기체 문서 값을 쓴다 — 빈칸이 곧 그 값임을 흐린 글로 보인다(문서 값일 때만)
-      structInputs[key].placeholder = boundsSource?.[param] === "profile" ? String(bounds[param]) : "";
+      // 손대서 비운 칸은 서버가 기체 문서 값을 쓴다 — 빈칸이 곧 그 값임을 흐린 글로 보인다(문서 값일 때만). 운용 고도
+      // 빈칸은 요구영역 고도 끝이 선도 끝이다(스키마 v3) — 그 값을 흐린 글로
+      const regionEnd = bounds?.[`${param}_source`] === "region" ? bounds[`${param}_used`] : null;
+      structInputs[key].placeholder = boundsSource?.[param] === "profile" ? String(bounds[param])
+        : regionEnd != null ? String(regionEnd) : "";
     }
   };
 
@@ -410,7 +414,8 @@ export function render() {
           el("label", { class: "field" }, "M_D", bindStruct("machD")))),
       el("div", { class: "opt-group" },
         el("div", { class: "g-title" },
-          "운용·동압 — 빈칸/미수정 = 기체 문서 값 (문서에도 없으면 경계 없음 · 기본값 없음)"),
+          "운용·동압 — q̄_max 빈칸/미수정 = 기체 문서 값 (문서에도 없으면 경계 없음 · 기본값 없음) · "
+          + "운용 고도 빈칸 = 요구영역 고도"),
         el("div", { class: "row-inner" },
           el("label", { class: "field" }, "q̄_max [Pa]", bindStruct("qMax")),
           el("label", { class: "field" }, "운용 하한 [m]", bindStruct("altMin")),
@@ -616,7 +621,10 @@ function renderLimits(box) {
         el("td", {}, name),
         el("td", { class: "num" }, b[param] == null ? "—" : fmt(b[param], 5)),
         el("td", {}, unit),
-        el("td", {}, flag(opsSourceLabel(b[param], lastMh.bounds_source?.[param]))))),
+        el("td", {}, flag(opsSourceLabel(b[param], lastMh.bounds_source?.[param], {
+          alt: param !== "q_max",
+          regionUsed: b[`${param}_source`] === "region" ? b[`${param}_used`] : null,
+        }))))),
     ))));
 }
 
@@ -704,6 +712,9 @@ function renderScanTable(box) {
       + "기체 문서에 요구 운용영역을 적어야 확정됩니다."));
   }
   if (untrimmed?.text) kids.push(el("p", { class: "hint" }, untrimmed.text));
+  // 스캔 판정 안의 조건 판정(envelope_verdict.verdict)이 싣는 질량 조건 — 탑재 구성을 적은 기체(이관 11단계)
+  const massNote = massConditionNote((lastScan.cases ?? []).map((e) => e?.verdict?.verdict));
+  if (massNote) kids.push(el("p", { class: "notice", "data-mass-condition": "" }, massNote));
   kids.push(
     el("div", { class: "legend" },
       el("span", {}, el("span", { class: "chip", style: `background:${kindColor("ok")}` }),
@@ -1600,7 +1611,7 @@ function renderMh(box) {
         ? `추력 한계 경계 — 고속 전이 ${frontier.length - nLo}점 · 저속(항력곡선 backside) 전이 ${nLo}점`
           + (nProv ? `, 그중 ${nProv}점은 미수렴 셀이라 잠정(속 빈 원) — 그 스로틀은 해가 아니라 솔버의 마지막 반복값입니다. ` : ". ")
           + "프로펠러 추력 곡선 T = δσ·min(T_static, ηP/V)에서 트림이 스로틀 상한에 닿은 지점입니다 — "
-          + "다만 그 상한은 100%가 아니라 스로틀 95% 등고선입니다(trim.py SAT_FRAC). 설계 여유만큼 진짜 한계보다 안쪽입니다. "
+          + "다만 그 상한은 100%가 아니라 스로틀 95% 등고선입니다(기준 trim_margin.sat_frac 기본값). 설계 여유만큼 진짜 한계보다 안쪽입니다. "
           + "해석 곡선이 아니므로 스캔 격자 해상도가 곧 경계 해상도이고, 격자를 촘촘히 하면 경계가 움직입니다."
         : "추력 한계 경계 없음 — 스캔 격자 안에서 스로틀 상한 포화가 나오지 않았습니다. "
           + "상한이 없다는 뜻이 아니라 격자가 거기 닿지 않았다는 뜻입니다."));
@@ -2017,7 +2028,7 @@ function renderProp(box) {
   kids.push(el("p", { class: "hint" },
     "추진 한계는 프로펠러 추력 곡선 T = δσ·min(T_static, ηP/V)이 정하고, 화면에는 ",
     "트림 스로틀 상한 포화(saturated_throttle_high, 엔진 판정)로 드러납니다 — 그 선은 ",
-    "스로틀 95% 등고선이라(SAT_FRAC) 진짜 한계보다 설계 여유만큼 안쪽입니다. ",
+    "스로틀 95% 등고선이라(기준 trim_margin.sat_frac 기본값) 진짜 한계보다 설계 여유만큼 안쪽입니다. ",
     "셀 % = 트림 스로틀 소요, ",
     "적색 = 포화(설계 영역 밖 — 95~100% 칸은 수평비행 자체는 되지만 여유가 없다), ",
     "회색 = 트림 미수렴."));
@@ -2095,9 +2106,9 @@ function renderOps(box) {
   const b = lastMh.bounds;
   if (b.alt_min == null && b.alt_max == null) {
     clear(box).append(el("p", { class: "hint" },
-      "운용 고도 한계 없음 — 기체 문서(operating)에도 폼에도 없어 경계 없음 (없는 값을 그리지 ",
-      "않습니다). 폼의 운용 하한·상한을 입력하면 여기와 합성 차트에 반영됩니다. 마하 방향 운용 ",
-      "한계는 구조 M_NO·M_D를 준용."));
+      "운용 고도 입력 없음 — 스키마 v3부터 운용 고도는 요구영역 고도이고(기체 탭·트림 탭 「요구 운용영역」), ",
+      "합성 차트의 요구영역 끝이 그것입니다. 폼의 운용 하한·상한은 연구용 덮어쓰기로, 입력하면 여기와 합성 차트에 ",
+      "반영됩니다. 마하 방향 운용 한계는 구조 M_NO·M_D를 준용."));
     return;
   }
   clear(box).append(

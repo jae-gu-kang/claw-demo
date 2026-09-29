@@ -510,6 +510,11 @@ test("opsSourceLabel — 동압·운용 고도 출처: bounds_source가 profile�
   // 서버는 문서 값을 쓴 응답에만 bounds_source를 싣는다 — 없는데 값이 있으면 질의 값이다
   assert.equal(opsSourceLabel(4000, undefined).text, "사용자 입력");
   assert.deepEqual(opsSourceLabel(null, null), { text: "미입력 — 경계 없음", ok: false });
+  // 스키마 v3 — 운용 고도 칸이 비면 선도 끝은 요구영역 고도(운용 고도)다. 요구영역이 없으면 종전대로 경계 없음
+  assert.deepEqual(opsSourceLabel(null, null, { alt: true, regionUsed: 3000 }),
+    { text: "미입력 — 요구영역 고도 3000 m를 씀", ok: true });
+  assert.deepEqual(opsSourceLabel(null, null, { alt: true }), { text: "미입력 — 경계 없음", ok: false });
+  assert.deepEqual(opsSourceLabel(null, null, { regionUsed: 3000 }), { text: "미입력 — 경계 없음", ok: false });
 });
 
 test("vnCueReport — 그린 고도·문서 한계를 진행기 계약 모양으로, 없는 경계는 없다고", () => {
@@ -763,6 +768,10 @@ test("outlineCaps — 표시 고도 끝이 요구영역 고도면 그렇게 부�
   assert.deepEqual(caps.map((c) => c.source), ["region_alt_min", "region_alt_max"]);
   assert.match(capLabel("region_alt_max"), /요구영역 고도 상한/);
   const ops = outlineCaps(r, bounds({ alt_min: 100, alt_max: 3000, alt_min_used: 100, alt_max_used: 3000,
-    alt_max_is_display_default: false, alt_min_source: "operating", alt_max_source: "operating" }));
+    alt_max_is_display_default: false, alt_min_source: "override", alt_max_source: "override" }));
   assert.deepEqual(ops.map((c) => c.source), ["ops_alt_min", "ops_alt_max"]);
+  // v1.66~v1.67 응답의 "operating"(스키마 v3 전 이름)도 같은 입력 끝으로 읽는다
+  const legacy = outlineCaps(r, bounds({ alt_min: 100, alt_max: 3000, alt_min_used: 100, alt_max_used: 3000,
+    alt_max_is_display_default: false, alt_min_source: "operating", alt_max_source: "operating" }));
+  assert.deepEqual(legacy.map((c) => c.source), ["ops_alt_min", "ops_alt_max"]);
 });

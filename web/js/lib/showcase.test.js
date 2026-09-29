@@ -270,8 +270,10 @@ test("결함 시연 상수 — 잰 기준(자동조종 설계값·확정 표·�
   assert.ok(Math.abs(s1.law.design.autopilot.k_hdot - -0.029986076721022634) < 1e-12, fix);
   // v1.65 재생성: δe_trim 도출 규칙이 바뀌어 바탕 문서 지문만 바뀌었다(e027…) — 초기 게인·설계 게인 표·설계 설정은 바이트
   // 그대로였다. v1.66 요구영역 격자 재생성(이관 2·9·10단계 — 설계 줄 200 m / 25 kg, 기록 설정에서 n_mach가 빠졌다)은 기준
-  // 지문과 표 값을 함께 바꿨다 — 창을 다시 쟀다(×5.3~6.0, 머리 주석)
-  assert.equal(s1.law.gain_tables.provenance.basis_fingerprint, "0035a045dcbe559f", fix);
+  // 지문과 표 값을 함께 바꿨다 — 창을 다시 쟀다(×5.3~6.0, 머리 주석). v1.68 스키마 v3는 지문 정의만 바꿨다(trim 절이
+  // 플랜트 지문에서 빠지고 solver 절이 생김) — 확정 표·설계 게인·k_hdot·δe_trim 표·설계 설정이 float 비트 단위로 같고 트림
+  // 탐색 범위·잔차 허용치·판정선 값도 그대로 옮겨져 창은 다시 재지 않았다(0035a045 → 9059b37a)
+  assert.equal(s1.law.gain_tables.provenance.basis_fingerprint, "9059b37a8b323c99", fix);
   // 그 창을 만든 확정 표 값 자체 — 표 표현 재생성은 k_hdot·기준 지문을 그대로 두고 창만 옮겼다(×5.2~6.4 →
   // ×4.8~5.8). 요 댐퍼 표 수리(튜너 2차 패스 — yaw.k_rate·roll.kp·roll.ki 29점씩)도 기준 지문을 두고 표 값만 바꿨다(창은 그대로).
   // 요 설계 목표 ζ_dr 0.5 → 0.6은 시드 요·롤 게인이 바뀌어 기준 지문과 표 4자리(yaw.k_rate·roll.k_rate·roll.kp·

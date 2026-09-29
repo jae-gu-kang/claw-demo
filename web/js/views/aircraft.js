@@ -33,7 +33,7 @@ import {
 } from "../lib/profile.js";
 import {
   aeroCurveStats, effectiveOf, formUpdate, overlayValues, sliceBody, stabilityBody,
-  stabilityVerdictText, stallNote, violationSeries, warningLine, writeValues,
+  stabilityVerdictText, stallNote, upgradeNoteLine, upgradeNotice, violationSeries, warningLine, writeValues,
 } from "../lib/profileform.js";
 import {
   buildRows, commitValue, conflictText, writtenDiffers as criteriaDiffers, effectiveCriteria, setCriteriaValue, targetConflicts,
@@ -272,6 +272,11 @@ export function render() {
             p.design_source === null ? el("span", { class: "hint", style: "margin-left:6px" }, "게인 미설계") : null,
             p.design_source === "quick_seed"
               ? el("span", { class: "hint", style: "margin-left:6px" }, "초기 탐색 게인 — 자동 설계 전") : null,
+            // 저장본이 옛 스키마 — 읽을 때 올려 쓴다. 열어서 [저장]하면 올린 문서가 새 리비전이 된다(이관 11단계)
+            p.upgrade_notes?.length
+              ? el("span", { class: "hint", style: "margin-left:6px", title: p.upgrade_notes.map(upgradeNoteLine).filter(Boolean).join("\n") },
+                "옛 스키마 저장본 — 열어서 저장하면 올린 문서로")
+              : null,
             p.id === sel ? el("span", { class: "hint", style: "margin-left:6px" }, "← 계산에 쓰는 중") : null),
           el("td", { class: "num" }, p.id),
           el("td", { class: "num" }, p.revision),
@@ -344,6 +349,9 @@ export function render() {
             + (vs.length ? ` · 형상 변형 ${vs.map(([k, fp]) => `${k} ${fp}`).join(", ")}` : ""),
           // 오류가 아닌 알림(저속 가림 등) — 저장·계산은 된다. 편집 중 글의 경고다(저장본 경고는 문서 머리에)
           ...(r.warnings ?? []).map(warningLine),
+          // 편집 중 글이 옛 스키마다 — 서버가 올려 검증했다. 저장하면 올린 문서가 저장된다(이관 11단계)
+          ...(r.upgrade_notes ?? []).map(upgradeNoteLine).filter(Boolean)
+            .map((line) => `스키마 올림 — ${line} (저장하면 올린 문서로 저장됩니다)`),
         ] };
       } catch (e) {
         target.check = { ok: false, lines: [failText(e)] };
@@ -570,6 +578,13 @@ export function render() {
         ` — 리비전 ${b.revision} 저장본 기준. 오류가 아니라 알림입니다(저장·계산은 됩니다).`,
         el("ul", { style: "margin:4px 0 0; padding-left:18px" }, warns.map((w) => el("li", {}, warningLine(w)))))
       : null;
+    // 옛 스키마 문서를 올렸다(이관 11단계) — 서버 사유 그대로. 조회면 저장본은 아직 옛 버전이다(저장해야 새 리비전)
+    const up = upgradeNotice(b);
+    const upBox = up
+      ? el("div", { class: "notice", "data-doc-upgrade": "" },
+        el("strong", {}, up.title), ` — ${up.text}`,
+        el("ul", { style: "margin:4px 0 0; padding-left:18px" }, up.notes.map((n) => el("li", {}, n))))
+      : null;
     const modeBar = el("div", { class: "row", style: "gap:6px;margin:0 0 8px;align-items:center" },
       el("button", { class: opened.mode === "form" ? "primary" : null, onclick: () => setMode("form") }, "절별 폼"),
       el("button", { class: opened.mode === "json" ? "primary" : null, onclick: () => setMode("json") }, "JSON 글"),
@@ -612,6 +627,7 @@ export function render() {
     // DOM append는 null을 "null" 글자로 찍는다(el()과 달리) — 조건부 조각은 걸러서 넘긴다
     clear(docBox).append(...[head,
       warnBox,
+      upBox,
       readOnly
         ? el("p", { class: "notice" }, "예제 기체는 읽기 전용입니다 — 엔진에 딸린 문서이고 실기체 값이 아닙니다. ",
           el("button", { onclick: () => clone({ id: b.document.id, name: b.document.name }) }, "복제해서 고치기"))
@@ -815,7 +831,7 @@ export function render() {
       paintConflicts();
     };
 
-    const { rows, extras, others } = buildRows(body, doc);
+    const { rows, extras, groups, others } = buildRows(body, doc);
     const targetOf = (row, d) => (row.target ? liveCell(d, row.target).value : null);
     const ratioNote = (row) => (c, d) => {
       const t = targetOf(row, d);
@@ -850,6 +866,16 @@ export function render() {
         el("table", {}, el("tbody", {}, extras.map((c) => el("tr", {},
           el("td", { class: "num" }, `${c.group}.${c.key}`), el("td", {}, cellNode(c)))))))
       : null;
+    // 판정선 표 밖 그룹(트림 여유 판정선 — 이관 12단계). 이름·단위·뜻은 서버(엔진 TRIM_MARGIN_LABELS)가 준다
+    const groupTables = groups.map((g) => el("div", { style: "margin-top:10px", "data-crit-group": g.group },
+      el("h4", { style: "margin:0 0 4px" }, g.title),
+      el("table", {}, el("tbody", {}, g.cells.map((c) => el("tr", {},
+        el("td", { title: `${c.path} — ${c.help}` }, c.label,
+          c.unit && c.unit !== "-" ? el("span", { class: "hint" }, ` [${c.unit}]`) : null,
+          c.help ? el("span", { class: "hint", style: "display:block; font-size:11px" }, c.help) : null),
+        el("td", {}, cellNode(c, { title: c.help })))))),
+      el("p", { class: "hint", style: "margin:4px 0 0" },
+        "판정선이다(물리 한계 아님) — 바꾸면 트림을 다시 풀지 않고 여유 판정만 다시 한다(판정 기준 지문이 바뀐다).")));
 
     clear(critBox).append(...[
       readOnly
@@ -857,6 +883,7 @@ export function render() {
         : null,
       table,
       extraTable,
+      ...groupTables,
       others.length
         ? el("p", { class: "hint", style: "margin:8px 0 0" },
           `이 표 밖에 이 기체가 적은 칸 ${others.length}개 — ${others.join(", ")} (문서 패널 JSON 글에서 고친다)`)

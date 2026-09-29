@@ -788,6 +788,29 @@ def test_기준_조회의_판정_척도는_그_기체의_적용_기준에서(cli
     assert s["hdg_rms"] == base["metric_scales"]["hdg_rms"]  # 안 적은 칸은 기본값 그대로
 
 
+def test_기준_조회는_판정선_밖_그룹의_이름표를_준다_트림_여유(client):
+    """이관 12단계 — 트림 여유 판정선(criteria.trim_margin: sat_frac·thr_margin·alpha_margin)은 판정선 표(lines) 밖 그룹이다.
+    칸 이름·단위·뜻은 엔진 TRIM_MARGIN_LABELS가 정본이라 화면이 다시 적지 않게 응답이 싣는다(groups)."""
+    from claw.pipeline.criteria import TRIM_MARGIN_LABELS
+
+    b = client.get(f"/api/profiles/{EXAMPLE_ID}/criteria").json()
+    assert b["defaults"]["trim_margin"] == {"sat_frac": 0.95, "thr_margin": 0.02, "alpha_margin": 0.035}
+    g = {x["group"]: x for x in b["groups"]}["trim_margin"]
+    assert g["title"]
+    assert [c["key"] for c in g["cells"]] == list(TRIM_MARGIN_LABELS)
+    for c in g["cells"]:
+        label, unit, help_ = TRIM_MARGIN_LABELS[c["key"]]
+        assert (c["label"], c["unit"], c["help"]) == (label, unit, help_)
+    # 문서가 적은 판정선은 적용값에 서고 판정 지문이 바뀐다(판정 재계산 대상)
+    doc = _doc("trim-margin-delta")
+    doc["criteria"] = {"trim_margin": {"sat_frac": 0.9}}
+    assert client.post("/api/profiles", json={"document": doc}).status_code == 201
+    s = client.get("/api/profiles/trim-margin-delta/criteria").json()
+    assert s["applied"]["trim_margin"]["sat_frac"] == 0.9
+    assert s["written"]["criteria"] == {"trim_margin": {"sat_frac": 0.9}}
+    assert s["echo"]["judgement_fingerprint"] != b["echo"]["judgement_fingerprint"]
+
+
 def test_de_trim_coverage_says_where_the_table_does_not_reach_the_requirement(client):
     """이관 10단계(05 §11.13) — 표의 축이 요구 마하를 덮는지와 그 구간의 도출 근거를 엔진 `de_trim_coverage`가 재고, 이
     경로는 그것을 그대로 낸다. 끝값(clip)으로 답하는 구간은 「표 범위 밖」이지 덮은 것이 아니다."""
