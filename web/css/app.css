@@ -1829,3 +1829,54 @@ body:has(.tab-page) main { max-width: 1580px; }
 .re-table input.re-sel { box-shadow: 0 0 0 2px #ff9500; }
 .re-table tr.re-virtual input { color: var(--muted); font-style: italic; }
 .re-lineage { margin-top: 10px; }
+
+/* 설계 흐름 엔티티 막대 목록 (views/flow.js · lib/flowentities.js · 06 §3) — .fd(레일)와 **따로** 산다.
+   줄의 칸 수는 .fd-rail의 repeat(6,1fr)과 **같은 수**여야 한다(단계를 늘리면 둘을 같이 고친다).
+   색은 lib/plot.js 한 벌이 인라인 style로 온다 — 여기서 색 값을 다시 적지 않는다(정본이 둘이 되지 않게).
+   여기가 그리는 것은 **무늬·테두리·그러데이션**뿐이다: 계산 상태는 무늬·테두리, 성능 판정은 색(06 §10 ⑥). */
+.fe-list { margin-bottom: 14px; }
+.fe-row { display: grid; grid-template-columns: 20ch repeat(6, 1fr); gap: 3px; align-items: stretch;
+  padding: 3px 2px; border-radius: 8px; }
+.fe-row + .fe-row { border-top: 1px solid #eef1f6; }
+.fe-row[data-selected="1"] { background: rgba(37, 99, 235, .06); }
+.fe-row .fe-name { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
+.fe-row .fe-name button { padding: 1px 7px; font-size: 11px; }
+.fe-row .fe-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 칸 — 글자 없음. 세그먼트는 폭 비율로만 갈린다 */
+.fe-cell { position: relative; display: flex; height: 18px; border-radius: 3px; overflow: hidden;
+  background: #d1d1d6; }
+.fe-cell[data-tone="reached"], .fe-cell[data-tone="warn"], .fe-cell[data-tone="unknown_verdict"] {
+  background: linear-gradient(90deg, #34d399, #2563eb); }
+.fe-cell[data-tone="running"] { background: linear-gradient(90deg, #60a5fa, #2563eb);
+  animation: fd-float 2.4s ease-in-out infinite; }
+/* 건너뜀 — 사선 무늬(안 돌림의 민무늬와 갈린다) */
+.fe-cell[data-tone="skipped"] { background-image: repeating-linear-gradient(135deg,
+  rgba(255, 255, 255, .55) 0 3px, rgba(255, 255, 255, 0) 3px 7px); }
+/* 기록 없는 조회 단계(①②) — 점 무늬 */
+.fe-cell[data-tone="no_record"] { background-image: radial-gradient(rgba(255, 255, 255, .8) 1px,
+  rgba(255, 255, 255, 0) 1.4px); background-size: 6px 6px; }
+/* 돌았으나 판정 모름 — 채움은 도달과 같고 테두리가 판정의 부재를 말한다 */
+.fe-cell[data-tone="unknown_verdict"] { outline: 2px dotted #636366; outline-offset: -2px; }
+.fe-seg { display: block; height: 100%; min-width: 2px; border-right: 1px solid rgba(255, 255, 255, .7); }
+.fe-seg[data-kind="trim_reused"] { background: rgba(255, 255, 255, .34); }
+.fe-seg[data-kind="trim_computed"] { background: rgba(255, 255, 255, .12); }
+.fe-seg[data-kind="trim_resolved_failed"] { background: rgba(0, 0, 0, .18); }
+.fe-seg[data-kind="iterations"] { background: rgba(0, 0, 0, .3); }
+/* 정지 사유 마커 — 막대 끝에 하나 */
+.fe-stop { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 6px;
+  height: 6px; border-radius: 50%; background: #1c1c1e; box-shadow: 0 0 0 1.5px #fff; }
+.fe-caption { margin: 6px 2px 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.fe-note { margin: 2px 2px; }
+/* 펼친 줄 아래 — 오늘의 레일과 두 저장소 패널 */
+.fe-open { margin: 6px 0 12px; padding: 8px 0 0; border-top: 2px solid #e5e9f0; }
+.fe-panels { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
+.fe-panel { flex: 1 1 420px; min-width: 0; }
+.fe-panel-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.fe-store-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 11.5px;
+  margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.fe-store-row { display: flex; align-items: center; gap: 3px; margin-bottom: 2px; }
+.fe-store-y { width: 16ch; font-size: 11px; color: #64748b; font-variant-numeric: tabular-nums; }
+.fe-store-cell { display: block; width: 14px; height: 14px; border-radius: 2px; }
+.fe-store-cell[data-tone="stored_unconverged"] { background-image: repeating-linear-gradient(135deg,
+  rgba(255, 255, 255, .6) 0 2px, rgba(255, 255, 255, 0) 2px 5px); }
+.fe-gain { font-size: 12px; }

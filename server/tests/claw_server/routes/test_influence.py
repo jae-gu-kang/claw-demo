@@ -498,7 +498,23 @@ def test_evaluate_job_round_trip(client, wait_job):
         assert c["J"] is None and c["J_reason"]
     assert res["criteria_fingerprint"]
     assert res["aggregate"]["hard_fail"] in (True, False)
+    # meta의 하드 게이트 두 칸 — 목록 화면이 본문을 열지 않고 합격 여부를 말하는 근거(설계 흐름 엔티티 막대 ⑤).
+    # 없으면 그 칸은 영원히 「판정 모름」이다
+    meta = next(m for m in client.get("/api/results").json() if m["id"] == j["result_id"])
+    assert meta["hard_fail"] == res["aggregate"]["hard_fail"]
+    assert meta["hard_fails"] == len(res["aggregate"]["hard_fails"])
     json.dumps(res, allow_nan=False)
+
+
+def test_hard_gate_meta_never_folds_no_verdict_into_a_pass():
+    """케이스 0건의 hard_fail은 None이다 — False(합격)로 접으면 아무것도 판정하지 않은 실행이 통과로 보인다."""
+    from claw_server.routes.influence import _hard_gate_meta
+
+    assert _hard_gate_meta({"aggregate": {"hard_fail": None, "hard_fails": []}}) == {
+        "hard_fail": None, "hard_fails": 0}
+    assert _hard_gate_meta({}) == {"hard_fail": None, "hard_fails": 0}
+    assert _hard_gate_meta({"aggregate": {"hard_fail": True, "hard_fails": [{"check": "gm"}, {"check": "pm"}]}}) == {
+        "hard_fail": True, "hard_fails": 2}
 
 
 def test_evaluate_depth_linear_is_sim_free(client, wait_job):

@@ -962,3 +962,30 @@ def test_region_history_reads_each_revision_once(client, monkeypatch):
     seen.clear()
     assert [r["revision"] for r in client.get("/api/profiles/heavy-delta/region-history").json()["rows"]] == [1, 2, 3]
     assert seen == [None, 3]
+
+
+def test_list_row_carries_the_pure_document_warning_count(client, monkeypatch):
+    """목록 행의 doc_warnings — 설계 흐름 엔티티 목록 ① 칸이 잡 없이 문서 건강을 말하는 근거(06 §3).
+
+    경고는 오류가 아니다(저장·계산은 된다) — 수만 싣는다. 못 재면 None이고, 그 때문에 줄이 「읽을 수 없음」이
+    되지는 않는다: 부수 정보가 본체를 죽이면 목록이 쓸모를 잃는다.
+    """
+    listing = client.get("/api/profiles").json()
+    assert isinstance(listing[0]["doc_warnings"], int), listing[0]
+    base = listing[0]["doc_warnings"]
+
+    doc = _doc()
+    # 트림 잔차 허용치를 느슨하게 — schema.document_warnings가 경고 하나를 낸다
+    doc["solver"]["resid_tol"] = 1.0
+    assert client.post("/api/profiles", json={"document": doc}).status_code == 201
+    row = next(p for p in client.get("/api/profiles").json() if p["id"] == "heavy-delta")
+    assert row["doc_warnings"] == base + 1, row
+
+    import claw_server.profiles as mod
+
+    monkeypatch.setattr(mod, "document_warnings",
+                        lambda d: (_ for _ in ()).throw(ValueError("못 잰다")))
+    rows = client.get("/api/profiles").json()
+    assert [p["id"] for p in rows] == [EXAMPLE_ID, "heavy-delta"]
+    assert all(p["doc_warnings"] is None for p in rows), rows
+    assert not any(p.get("unreadable") for p in rows), "경고 수를 못 재도 줄은 살아 있다"

@@ -557,6 +557,18 @@ class EvaluateIn(InfluenceIn):
     dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
 
 
+def _hard_gate_meta(out: dict) -> dict:
+    """평가 결과 meta의 하드 게이트 두 칸 — {"hard_fail": bool|None, "hard_fails": int}.
+
+    엔진 aggregate가 이미 센 값을 옮기는 것뿐이라 비용이 0이다. 목록 화면(설계 흐름 엔티티 막대 ⑤)이 결과
+    본문을 열지 않고 합격 여부를 말하려면 meta에 이것이 있어야 한다 — 없으면 그 칸은 영원히 「판정 모름」이다
+    (옛 결과가 실제로 그렇다). 케이스 0건이면 hard_fail이 None이다: 합격도 불합격도 아니므로 False로 접지 않는다.
+    """
+    agg = out.get("aggregate") or {}
+    fails = agg.get("hard_fails") or []
+    return {"hard_fail": agg.get("hard_fail"), "hard_fails": len(fails)}
+
+
 @router.post("/influence/evaluate", status_code=202)
 def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> dict:
     """대표 카드 7 + 나머지 판정 10 + 원자료 — 잡 기반 202.
@@ -616,6 +628,11 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
                   "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
                   "n": len(out["cases"]), "fingerprint": req.fingerprint,
                   "criteria_fingerprint": out["criteria_fingerprint"],
+                  # 하드 게이트 판정 — 이미 잰 aggregate를 옮긴다(비용 0). 목록 화면이 본문을 열지 않고
+                  # 「합격/불합격」을 말할 수 있는 유일한 근거다(설계 흐름 엔티티 막대 ⑤). hard_fail은
+                  # 케이스가 0건이면 None이다(엔진) — 그건 합격도 불합격도 아니고 화면이 「판정 보류」로 둔다.
+                  # hard_fails는 **위반 수**다(본문의 항목 목록이 아니다 — meta는 가벼워야 한다)
+                  **_hard_gate_meta(out),
                   "trim_reuse_counts": reuse_counts(reuse),
                   "trim_retry_counts": retry_counts(retried)},
         )

@@ -36,19 +36,23 @@ import { adoptBlockedText, applyGateReason } from "../lib/autodesign.js";
 import { envelopeQuery } from "../lib/envelope.js";
 import { evaluateRequest, normalizeEvalReport } from "../lib/evaluate.js";
 import {
+  FE_TOKENS, FE_TRIM_TOKENS, entityRows, gainLayersModel, trimStoreModel,
+} from "../lib/flowentities.js";
+import {
   FLOW_STAGES, applyFreshnessBlock, applyStateVerdict, designVerdict, docVerdict, envelopeVerdict,
   evalVerdict, flowStepStates, flowSummaryLine, latestResultFor, seedStateVerdict, stageArtifact,
 } from "../lib/flowsteps.js";
 import { criteriaBadgeSpec, criteriaFreshness, resultFreshness } from "../lib/freshness.js";
 // 잡 상태 코드 → 한국어 한 줄(「평가 취소됨」) — 영향성 탭과 같은 말(서버 jobs.py 어휘와 한 벌, 테스트 가드)
 import { jobEndLine } from "../lib/influence.js";
-import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
+import { EXAMPLE_ID, currentSelection, saveSelection, setSelection } from "../lib/profile.js";
 import { effectiveOf } from "../lib/profileform.js";
 import { defaultRoleSelection, draftTag, retryLine, reuseLine } from "../lib/opspace.js";
 import { designSource, seedSummary } from "../lib/quickseed.js";
 import { revealPanel } from "../lib/reveal.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { store } from "../store.js";
+import { mount as remountHeaderPick } from "./profilepick.js";
 import { tabStage, tabTop } from "./stage.js";
 
 // 단계 기록·실행 상태 — 탭 재진입에도 유지(모듈 스코프 규약). 기체 전환은 페이지를 다시 읽으므로
@@ -60,6 +64,13 @@ let flowSeq = 0; // 실행 차례 — 늦은 콜백이 새 실행의 기록을 �
 let flowStatus = ""; // 상태줄 — paint가 그린다(늦은 콜백이 옛 DOM의 상태줄을 잡지 않게)
 let flowError = null;
 let profileRows = null; // GET /profiles — 이름·확정 표 상태·낡음 대조 재료 (실행 뒤마다 새로 받음)
+let resultMetas = null; // GET /results — 엔티티 막대 목록의 ③④⑤ 칸 재료(최근순 meta). null = 못 받음
+// 펼쳐 놓은 엔티티 키("id" | "id::variant") — 그 줄 아래에 오늘의 레일과 두 저장소 패널이 선다.
+// 레일은 **하나**다: 러너가 전부 currentSelection()을 읽으므로 레일이 둘이면 어느 기체를 돌리는지 어긋난다
+let entityOpen = null;
+// 접힌 두 패널 — 열 때만 부른다(엔티티당 계산 0회 원칙은 목록의 것이고, 패널은 사용자가 열 때 한 번)
+let trimPanel = { open: false, model: null, error: null, loading: false };
+let gainPanel = { open: false, model: null, error: null, loading: false };
 let repaint = () => {}; // 지금 화면의 paint — render()가 갈아 끼운다
 let revealRail = () => {}; // 지금 화면의 레일을 화면에 올린다(신호 끝) — repaint와 같은 이유로 render()가 갈아 끼운다
 
@@ -72,12 +83,40 @@ let criteriaNow = null;
 
 const refreshRows = async () => {
   const pid = selectedId();
-  const [rows, crit] = await Promise.all([
+  const [rows, crit, metas] = await Promise.all([
     api.get("/profiles").catch(() => null), // 못 받으면 낡음 대조·확정 표 상태 없이 판정 줄만 — 다음 새로고침이 잡는다
     api.get(`/profiles/${encodeURIComponent(pid)}/criteria`).catch(() => null),
+    // 엔티티 막대 목록의 재료 — 이 탭이 이미 부르던 둘뿐이다(overview가 최근 결과를 찾을 때 쓰던 그 목록)
+    api.get("/results").catch(() => null),
   ]);
   profileRows = rows;
   criteriaNow = crit?.echo ?? null;
+  resultMetas = metas;
+};
+
+/** 목록의 [열기] — 이 엔티티를 **헤더 선택으로 삼고** 그 줄 아래에 레일을 펼친다.
+ *
+ *  모듈 stages에는 엔티티 키가 없다(이 탭의 상태는 본질적으로 「지금 고른 기체」의 것이다, 06 §8) —
+ *  선택을 바꿀 때 **반드시 비운다**. 안 비우면 A 기체의 판정이 B 줄의 레일에 선다. 상태줄·오류도 같이
+ *  비운다(옛 엔티티의 요약이 새 엔티티의 레일 위에 남지 않게).
+ */
+const switchEntity = (id, variant) => {
+  if (id === selectedId() && (variant ?? null) === selectedVariant()) return;
+  setSelection({ id, variant: variant ?? null });
+  // 다른 탭도 같은 엔티티를 보게 — 저장에 실패해도(사생활 창) 이 탭의 선택은 바뀐 채다
+  try {
+    const st = globalThis.localStorage ?? null;
+    if (st) saveSelection(st, { id, variant: variant ?? null });
+  } catch { /* 브라우저 저장소를 쓸 수 없는 환경 — 이 페이지 수명 동안만 유지된다 */ }
+  stages = {};
+  flowStatus = "";
+  flowError = null;
+  criteriaNow = null; // 다른 기체의 기준으로 판정 배지를 달지 않는다
+  trimPanel = { open: false, model: null, error: null, loading: false };
+  gainPanel = { open: false, model: null, error: null, loading: false };
+  // 헤더 선택기는 부팅에 한 번 붙는다(main.js) — 여기서 선택을 바꾸면 그 셀렉트가 옛 기체를 보인 채다.
+  // 다시 붙여 화면과 실제 선택을 맞춘다(가짜 DOM·드라이버엔 getElementById가 없어 있을 때만)
+  if (typeof document.getElementById === "function") remountHeaderPick().catch(() => {});
 };
 
 /** 단계 결과의 판정 기준 배지 — 결과가 실은 기준 블록과 지금 기체 기준 대조. fresh·결과 없음은 조용하다. */
@@ -281,6 +320,62 @@ const applyVerdictNow = () => applyStateVerdict(
 const stepStates = () => flowStepStates(stages, applyVerdictNow(),
   (echo, rid) => resultFreshness(echo, profileRows, rid).state);
 
+// ── 접힌 두 패널(엔티티 저장소) — 사용자가 열 때만 부른다 ──────────────────────
+//
+// 목록은 엔티티당 계산 0회다. 이 둘은 **한 엔티티**를 열 때의 조회이고 둘 다 트림을 풀지 않는다:
+// POST /grid/base는 좌표와 저장소 엿보기뿐이고, 게인 3층은 문서 + 이미 저장된 결과 본문이다.
+
+/** 저장소 창을 말할 수 있는 가장 최근 결과 — 트림 배치·엔진 평가만(둘이 트림 저장소를 쓴다). */
+const latestTrimLike = () => {
+  const sel = { id: selectedId(), variant: selectedVariant() };
+  const cands = ["trim_batch", "influence_evaluate"]
+    .map((k) => latestResultFor(resultMetas, k, sel)).filter(Boolean);
+  return cands.sort((a, b) => (b.created ?? 0) - (a.created ?? 0))[0] ?? null;
+};
+
+/** 확정 표 낡음 — **서버 목록 판정**을 그대로 쓴다(브라우저가 다시 판정하지 않는다). 변형이면 그 변형의 것. */
+const staleOf = (gt, variant) => {
+  if (!gt) return null;
+  if (!variant) return !!gt.stale;
+  const s = gt.variants?.[variant]?.source ?? null;
+  return s ? s === "stale" : null;
+};
+
+const loadTrimPanel = async () => {
+  trimPanel = { ...trimPanel, open: true, loading: true, error: null };
+  repaint();
+  try {
+    const grid = await api.post("/grid/base", {});
+    const last = latestTrimLike();
+    // 저장소 창 지문은 **결과 본문**의 trim_reuse에만 있다 — meta의 trim_reuse_counts는 세 수뿐이다
+    const body = last?.id ? await api.get(`/results/${last.id}`).catch(() => null) : null;
+    trimPanel = { open: true, loading: false, error: null, from: last?.id ?? null,
+      model: trimStoreModel(grid, body ?? last) };
+  } catch (e) {
+    trimPanel = { open: true, loading: false, error: errorText(e), model: null };
+  }
+  repaint();
+};
+
+const loadGainPanel = async () => {
+  gainPanel = { ...gainPanel, open: true, loading: true, error: null };
+  repaint();
+  try {
+    const got = await doc();
+    const last = latestResultFor(resultMetas, "auto_design",
+      { id: selectedId(), variant: selectedVariant() });
+    const body = last?.id ? await api.get(`/results/${last.id}`).catch(() => null) : null;
+    const gt = profileRows?.find((p) => p.id === selectedId())?.gain_tables ?? null;
+    gainPanel = { open: true, loading: false, error: null, from: last?.id ?? null,
+      // 적용 문서로 본다 — 변형 패치가 확정 표를 비우면 그 변형의 확정층은 **없는 것**이다
+      model: gainLayersModel(effectiveDoc(got), body,
+        { gainTablesStale: staleOf(gt, selectedVariant()) }) };
+  } catch (e) {
+    gainPanel = { open: true, loading: false, error: errorText(e), model: null };
+  }
+  repaint();
+};
+
 /** 쇼케이스 신호 `overview` — 잡을 걸지 않고 레일을 지금 문서·최근 결과로 채운다(머리말). */
 async function overview(cue) {
   if (running) {
@@ -437,15 +532,142 @@ export function render() {
             el("span", { class: "fd-art-t" }, "저장"),
             ...arts.flatMap((a, k) => [k ? " · " : null, artLink(s.key, a)]).filter(Boolean)))));
     });
-    clear(rowsBox).append(
+    // ── 엔티티 저장소 두 패널(접힘) — 트림 저장소 창 · 게인값 3층 ────────────────────
+    const trimTable = (m) => {
+      const head = el("div", { class: "fe-store-head" },
+        el("span", { class: "fd-art-t" }, "트림 저장소 창"),
+        el("span", {}, `지문 ${m.fingerprint ?? "모름"} · 저장된 수렴 ${m.counts.stored_converged}점`
+          + ` · 저장된 미수렴 ${m.counts.stored_unconverged}점 · 기록 없음 ${m.counts.not_run}점`
+          + ` · 모델 부족 ${m.counts.model_gap}점`
+          + (m.reuse ? ` · 마지막 실행 재사용 ${m.reuse.reused} · 새로 ${m.reuse.computed}` : "")));
+      const grid = el("div", { class: "fe-store" });
+      for (const r of m.rows) {
+        grid.append(el("div", { class: "fe-store-row" },
+          el("span", { class: "fe-store-y" }, `${r.alt} m · 연료 ${r.fuel} kg`),
+          ...r.cells.map((c) => el("i", { class: "fe-store-cell", "data-tone": c.tone,
+            style: `background:${FE_TRIM_TOKENS[c.tone].color}`,
+            title: `${c.name} (M${c.mach}) — ${c.text}` }))));
+      }
+      return el("div", {}, head, grid,
+        ...m.notes.map((n) => el("p", { class: "hint fe-note" }, n)));
+    };
+    const num = (v) => (v == null ? "모름" : (typeof v === "number" ? `${Number(v.toPrecision(4))}` : String(v)));
+    const gainTable = (m) => {
+      const head = el("div", { class: "fe-store-head" },
+        el("span", { class: "fd-art-t" }, "게인값 3층"),
+        el("span", {}, `자리 ${m.slots.length}개 · 시드(문서) → 설계(연 결과) → 확정(문서 표)`));
+      const table = el("table", { class: "table fe-gain" },
+        el("thead", {}, el("tr", {}, ...["자리", "시드", "설계", "확정"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...m.slots.map((s) => el("tr", {},
+          el("td", {}, s.slot),
+          el("td", { title: s.seed?.basis ?? "" },
+            s.seed
+              ? `${num(s.seed.value)}`
+                + (s.seed.anchors_used == null ? "" : ` (앵커 ${s.seed.anchors_used}점)`)
+                + (s.seed.kind ? ` · ${s.seed.kind}` : "")
+                + (s.seed.reason ? ` · ${s.seed.reason_text ?? s.seed.reason}` : "")
+              : el("span", { class: "hint" }, "기록 없음")),
+          el("td", { title: s.design?.reason ?? "" },
+            s.design
+              ? `${s.design.status ?? "판정 기록 없음"}`
+                + (s.design.target != null ? ` · 목표 ${num(s.design.target)} → ${num(s.design.achieved)}` : "")
+                + (s.design.point ? ` (가장 나쁜 점 ${s.design.point} / ${s.design.points}점)` : "")
+                + (s.design.value != null ? ` · 상수 ${num(s.design.value)}` : "")
+                + (s.design.fit_excluded ? ` · 적합 제외 ${s.design.fit_excluded}표본` : "")
+              : el("span", { class: "hint" }, "기록 없음")),
+          el("td", {},
+            s.confirmed
+              ? `출처 ${s.confirmed.source ?? "기록 없음"} · 절점 ${num(s.confirmed.n_knots)}`
+                + ` · ${s.confirmed.stale == null ? "낡음 모름" : (s.confirmed.stale ? "낡음" : "유효")}`
+              : el("span", { class: "hint" }, "표 없음"))))));
+      return el("div", {}, head, table,
+        ...m.notes.map((n) => el("p", { class: "hint fe-note" }, n)));
+    };
+    const panelBox = (title, state, load, body) => el("div", { class: "fe-panel" },
+      el("div", { class: "fe-panel-bar" },
+        el("button", { disabled: running,
+          title: state.open ? "이 패널을 접는다" : "이 엔티티의 저장물을 조회한다(트림을 풀지 않는다)",
+          onclick: () => {
+            if (state.open) { state.open = false; repaint(); return; }
+            load().catch(showErr);
+          } }, state.open ? `${title} 접기` : `${title} 보기`),
+        el("span", { class: "hint" }, state.loading ? "조회 중…" : "")),
+      // 본문은 열려 있고 모델이 왔을 때만 — 오류는 사유를 그대로 말한다(빈 표로 덮지 않는다)
+      state.error ? el("div", { class: "error-box" }, state.error) : null,
+      state.open && !state.loading && state.model ? body(state.model) : null);
+    const storePanels = () => el("div", { class: "fe-panels" },
+      panelBox("트림 저장소", trimPanel, loadTrimPanel, trimTable),
+      panelBox("게인값 3층", gainPanel, loadGainPanel, gainTable));
+
+    // ── 엔티티 막대 목록 — 위에 서고, 펼친 줄 아래로 오늘의 레일이 이어진다 ──────────
+    const list = entityRows(profileRows, resultMetas,
+      { sel: { id: selectedId(), variant: variant }, live: stages });
+    const cellNode = (r, c, i) => {
+      const t = FE_TOKENS[c.tone] ?? FE_TOKENS.not_run;
+      // 색은 lib(plot.js 한 벌)에서 오고 무늬·테두리·그러데이션은 app.css가 data-tone으로 그린다 —
+      // 색 값을 CSS에 다시 적으면 정본이 둘이 된다
+      const style = t.fill === "gradient"
+        ? (t.color ? `box-shadow: inset 0 0 0 2px ${t.color}` : "")
+        : `background:${t.color}`;
+      const stop = r.stop?.stageKey === c.stage ? r.stop.reason : null;
+      return el("div", { class: "fe-cell", "data-stage": c.stage, "data-state": c.state,
+        "data-tone": c.tone, "data-source": c.source, style,
+        // 막대 위엔 글자가 없다 — 이름·수·사유는 툴팁과 아래 캡션이 말한다(사용자 지적)
+        title: `${i + 1} ${FLOW_STAGES[i].label} — ${c.label}\n${c.tip}`
+          + (c.segments.length ? `\n${c.segments.map((s) => s.tip).join(" · ")}` : "")
+          + (stop ? `\n멈춘 곳: ${stop}` : "") },
+        ...c.segments.map((s) => el("i", { class: "fe-seg", "data-kind": s.kind,
+          style: `flex:${s.n}`, title: s.tip })),
+        stop && t.marker === "stop" ? el("span", { class: "fe-stop", title: `멈춘 곳: ${stop}` }) : null);
+    };
+    const rowNode = (r) => el("div", { class: "fe-row", "data-key": r.key,
+      "data-selected": r.selected ? "1" : "0", "data-open": entityOpen === r.key ? "1" : "0",
+      "data-reach": String(r.reach.index), title: r.tip },
+      el("div", { class: "fe-name" },
+        el("button", { disabled: running,
+          title: entityOpen === r.key
+            ? "이 엔티티의 레일을 접는다"
+            : "이 엔티티를 헤더 선택으로 삼고, 이 줄 아래에 오늘의 레일과 저장소 패널을 펼친다"
+              + "(실행 기록은 엔티티마다 따로다 — 선택이 바뀌면 비운다)",
+          onclick: () => {
+            if (entityOpen === r.key) { entityOpen = null; repaint(); return; }
+            switchEntity(r.id, r.variant);
+            entityOpen = r.key;
+            refreshRows().then(() => repaint());
+            repaint();
+          } }, entityOpen === r.key ? "닫기" : "열기"),
+        el("span", { class: "fe-label" }, r.label)),
+      ...r.cells.map((c, i) => cellNode(r, c, i)));
+    const openRow = list.rows.find((r) => r.key === entityOpen) ?? null;
+    const expansion = el("div", { class: "fe-open" },
       el("div", { class: "scroll-x" }, el("div", { class: "fd" }, docCard, rail)),
+      storePanels());
+    const listBox = el("div", { class: "fe-list" });
+    if (!profileRows) {
+      listBox.append(el("p", { class: "hint" }, "기체 목록을 불러오는 중이거나 조회에 실패했습니다"));
+    }
+    for (const r of list.rows) {
+      listBox.append(rowNode(r));
+      if (openRow && r.key === openRow.key) listBox.append(expansion);
+    }
+    // 네이티브 append는 null을 글자 "null"로 넣는다(el()과 다르다) — 없는 조각은 목록에서 뺀다
+    clear(rowsBox).append(...[
+      listBox,
+      el("p", { class: "fe-caption" }, list.caption),
+      ...list.notes.map((n) => el("p", { class: "hint fe-note" }, n)),
+      // 아무 줄도 펼치지 않았으면 레일은 목록 아래에 선다 — 레일은 언제나 **하나**(헤더 선택의 것)다
+      openRow ? null : expansion,
       el("p", { class: "hint", style: "margin-top:8px" },
         "각 단계는 정본(문서)에서 다시 잽니다 — 단계끼리 결과를 물려주지 않아 낡음 사고가 없고, "
         + "게인 탭·자동 설계의 확정(작업본)이 걸려 있어도 이 흐름은 문서로 잽니다(작업본 평가는 영향성 "
         + "탭). 실행 시점과 문서가 달라지면 「낡음」이 붙습니다(다시 실행) — 자동 설계 결과가 제 게인 표를 "
         + "반영해 달라진 것뿐이면 「문서에 반영됨」입니다. 카드 발치의 「저장」 줄이 "
         + "그 단계 산출물이 남는 곳입니다 — 잡 결과는 결과 탭에, 채택·반영은 정본 문서 새 리비전에. "
-        + "자동 설계가 승인 대기(gated)로 멈추면 자동 설계 탭에서 승인·재개한 뒤 이어 갑니다."));
+        + "자동 설계가 승인 대기(gated)로 멈추면 자동 설계 탭에서 승인·재개한 뒤 이어 갑니다. "
+        + "위 목록은 엔티티(기체·형상 변형 하나의 제어법칙 설계 하나) 한 줄씩이고, [열기]가 그 엔티티를 "
+        + "헤더 선택으로 삼아 이 레일을 그 줄 아래로 옮깁니다 — 레일은 하나입니다(실행 버튼이 지금 고른 "
+        + "기체를 돌리므로). 엔티티를 바꾸면 이 레일의 실행 기록은 비워집니다."),
+    ].filter(Boolean));
   };
   repaint = paint; // 이 화면이 지금 화면 — 이전 render의 늦은 콜백도 이제 여기 그린다
   revealRail = () => revealPanel(rowsBox);

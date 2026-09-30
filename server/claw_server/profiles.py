@@ -39,7 +39,7 @@ import threading
 from pathlib import Path
 
 from claw.profile import EXAMPLE_ID, ProfileError, build_profile, load_example, validate_document
-from claw.profile.schema import SCHEMA_VERSION
+from claw.profile.schema import SCHEMA_VERSION, document_warnings
 
 _ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")  # 스키마의 id 규칙과 같다 — 경로 조작 차단을 겸한다
 EXAMPLE_REVISION = 0
@@ -187,6 +187,19 @@ def _applied_design(doc: dict, built, written: dict | None) -> dict | None:
     return {"result_id": ref[0], "revision": ref[1]}
 
 
+def _doc_warnings_count(doc: dict) -> int | None:
+    """순수 문서 경고 수 — 트림·계산 없이 문서만 본다(schema.document_warnings, GET /profiles/{id}와 같은 자).
+
+    설계 흐름 목록의 ① 칸이 「이 기체 문서가 건강한가」를 잡 없이 말하는 근거다(06 §3 엔티티 막대). 경고는
+    오류가 아니다 — 저장·계산은 된다. 못 재면 None이고 화면이 「모름」으로 둔다: 목록 한 줄이 경고 수 하나
+    때문에 「읽을 수 없음」이 되면(summary의 예외는 목록에서 그렇게 읽힌다) 부수 정보가 본체를 죽인다.
+    """
+    try:
+        return len(document_warnings(doc))
+    except (KeyError, ValueError, TypeError, ArithmeticError):
+        return None
+
+
 def _design_source(doc: dict) -> str | None:
     design = doc["law"]["design"]
     prov = None if design is None else design["provenance"]
@@ -310,6 +323,9 @@ class ProfileStore:
                          for v in doc["variants"]],
             # 게인 출처 — null이면 미설계. "quick_seed"면 화면이 「초기 탐색 게인 — 자동 설계 전」을 단다
             "design_source": _design_source(doc),
+            # 순수 문서 경고 수 — 0이면 경고 없음, null이면 재지 못했다(화면은 「모름」). 설계 흐름 엔티티 목록의
+            # ① 칸이 잡 없이 문서 건강을 말하는 유일한 근거다(계산·트림 없음)
+            "doc_warnings": _doc_warnings_count(doc),
             # 할당 δe_trim 표 — null이면 없음. 도출 표는 플랜트가 바뀌면 stale(법칙 조립이 거부한다)
             "de_trim": _de_trim_summary(doc, built, variant_builts),
             # 확정 게인 표(v2) — null이면 없음. 반영 뒤 문서가 바뀌면 stale(법칙 조립이 거부한다). variants는 변형마다

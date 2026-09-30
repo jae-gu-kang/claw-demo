@@ -23,6 +23,11 @@ const GRID = {
 const REUSE = { reused: 2, computed: 1, resolved_failed: 0, policy: "converged" };
 
 let gridReply = () => GRID;
+let profilesReply = () => [];
+let metasReply = () => [];
+let docReply = () => ({ revision: 1, fingerprint: "fp1", variants: {},
+  document: { id: "x", name: "기체 X", is_example: false, law: { design: null, gain_tables: null } },
+  warnings: [] });
 let resultReply = () => ({ depth: "full", cards: [], aggregate: { hard_fail: false, hard_fails: [] }, trim_reuse: REUSE });
 const posts = [];
 const reply = (status, data) => ({ ok: status < 400, status, text: async () => JSON.stringify(data) });
@@ -35,7 +40,9 @@ globalThis.fetch = (url, opts = {}) => {
   if (method === "POST" && path === "/influence/evaluate") return ok({ id: "ej" });
   if (path === "/jobs/ej") return ok({ id: "ej", status: "done", result_id: "er", progress: 1, message: "" });
   if (path === "/results/er") return ok(resultReply());
-  if (path === "/profiles") return ok([]);
+  if (path === "/profiles") return ok(profilesReply());
+  if (path === "/results") return ok(metasReply());
+  if (/^\/profiles\/[^/]+$/.test(path)) return ok(docReply());
   if (path.endsWith("/criteria")) return ok({ echo: null });
   return Promise.resolve(reply(404, { detail: `stub에 없는 경로: ${method} ${path}` }));
 };
@@ -108,4 +115,81 @@ test("평가 — 확정 요구영역·재사용 되울림 없는 결과면 초�
   const t = textOf(evalStep(root));
   assert.match(t, /depth=full · 기본 격자 3점/);
   assert.doesNotMatch(t, /미확정 초안|트림 재사용/);
+});
+
+
+// ── 엔티티 막대 목록(v1.75) ──────────────────────────────────────────────────
+//
+// 목록은 GET /profiles·GET /results만으로 선다(엔티티당 계산 0회). 검사는 막대 위 글자가 아니라
+// data-state·캡션·툴팁으로 한다 — 막대에는 글자가 없다.
+const rowNodes = (root) => root.find("div").filter((d) => d.className === "fe-row");
+const rowFor = (root, key) => rowNodes(root).find((d) => d.getAttribute("data-key") === key);
+const cellFor = (row, stage) => row.find("div")
+  .find((d) => d.className === "fe-cell" && d.getAttribute("data-stage") === stage);
+const captionOf = (root) => textOf(root.find("p").find((p) => p.className === "fe-caption"));
+const openButton = (row) => row.find("button")[0];
+
+const LIST_ROWS = [
+  { id: "x", name: "기체 X", revision: 1, fingerprint: "fp1", is_example: false, variants: [],
+    design_source: "quick_seed", doc_warnings: 0,
+    gain_tables: { source: "auto_design", stale: true, stale_variants: [], variants: {} },
+    applied_design: null },
+  { id: "y", name: "기체 Y", revision: 1, fingerprint: "fp2", is_example: false, variants: [],
+    design_source: null, doc_warnings: 2, gain_tables: null, applied_design: null },
+];
+const LIST_METAS = [
+  { id: "d1", kind: "auto_design", created: 10, status: "converged", judged: 4, failures: 0,
+    profile: { id: "x", variant: null } },
+];
+
+test("목록 — 엔티티 한 줄씩 서고, 칸 상태·캡션이 목록 재료만으로 판정한다", async () => {
+  // 목록 재료만의 판정을 보려면 **어느 줄도 지금 선택이 아니어야** 한다 — 선택된 줄에는 이 세션이 돈
+  // 기록(모듈 stages)이 얹히기 때문이다(그 얹힘은 아래 테스트가 따로 본다)
+  setSelection({ id: "z" });
+  profilesReply = () => LIST_ROWS;
+  metasReply = () => LIST_METAS;
+  const root = render();
+  await waitFor(() => rowNodes(root).length === 2, "두 엔티티 줄");
+  const x = rowFor(root, "x");
+  // ①②는 기록 없는 조회 단계다 — 도달이 아니다
+  assert.equal(cellFor(x, "doc").getAttribute("data-state"), "reached", "doc_warnings 0은 판정이다");
+  assert.equal(cellFor(x, "envelope").getAttribute("data-state"), "no_record");
+  assert.equal(cellFor(x, "seed").getAttribute("data-state"), "skipped");
+  assert.equal(cellFor(x, "design").getAttribute("data-state"), "reached");
+  assert.equal(cellFor(x, "eval").getAttribute("data-state"), "not_run");
+  assert.equal(cellFor(x, "apply").getAttribute("data-state"), "blocked");
+  // 막대 위엔 글자가 없다 — 칸 안에 글이 들어가면 캡션·툴팁 규약이 깨진다
+  assert.equal(textOf(cellFor(x, "design")), "");
+  assert.match(cellFor(x, "design").getAttribute("title"), /전 판정 통과\(판정 4건\)/);
+  const y = rowFor(root, "y");
+  assert.equal(cellFor(y, "doc").getAttribute("data-tone"), "warn", "문서 경고는 주의다");
+  assert.equal(cellFor(y, "design").getAttribute("data-state"), "not_run");
+  assert.match(captionOf(root), /엔티티 2개/);
+  assert.match(captionOf(root), /막힌 줄 1개/);
+});
+
+test("목록 — [열기]가 그 줄 아래에 레일을 펼치고, 선택을 바꾸면 실행 기록을 비운다", async () => {
+  setSelection({ id: "x" });
+  profilesReply = () => LIST_ROWS;
+  metasReply = () => LIST_METAS;
+  const root = render();
+  await waitFor(() => rowNodes(root).length === 2, "두 엔티티 줄");
+  // x로 평가를 한 번 돌려 기록을 만든다
+  openButton(rowFor(root, "x")).emit("click");
+  await waitFor(() => rowFor(root, "x").getAttribute("data-open") === "1", "x 펼침");
+  runEval(root);
+  await waitFor(() => settled(root), "평가 판정");
+  await idle(root);
+  assert.match(textOf(evalStep(root)), /하드 게이트 전부 통과/);
+  // 같은 줄의 live 기록이 목록 칸으로도 올라온다(지금 세션이 돈 엔티티에서만)
+  assert.equal(cellFor(rowFor(root, "x"), "eval").getAttribute("data-source"), "live");
+  assert.equal(cellFor(rowFor(root, "y"), "eval").getAttribute("data-source"), "none");
+  // y를 열면 stages가 비고, x의 판정이 y의 레일에 서지 않는다
+  openButton(rowFor(root, "y")).emit("click");
+  await waitFor(() => rowFor(root, "y").getAttribute("data-open") === "1", "y 펼침");
+  assert.match(textOf(evalStep(root)), /아직 안 돌림/);
+  assert.equal(rowFor(root, "x").getAttribute("data-open"), "0");
+  assert.doesNotMatch(textOf(rowFor(root, "y")), /하드 게이트/);
+  profilesReply = () => [];
+  metasReply = () => [];
 });
