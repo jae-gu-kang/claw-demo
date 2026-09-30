@@ -56,8 +56,9 @@ async function waitFor(cond, what, ms = 2000) {
   assert.fail(`기다렸지만 오지 않았다: ${what}`);
 }
 const textOf = (n) => (typeof n === "string" ? n : n?.nodeType === 3 ? n.data : (n?.children ?? []).map(textOf).join(""));
-// 평가 단계 카드 — 레일의 data-key="eval" 칸
-const evalStep = (root) => root.find("div").find((d) => d.getAttribute("data-key") === "eval");
+// 평가 단계 실행 칸 — 머리 블록과 같은 data-key를 쓰므로 흰 작업면의 fd-control을 집는다.
+const evalStep = (root) => root.find("div")
+  .find((d) => d.className === "fd-panel fd-control" && d.getAttribute("data-key") === "eval");
 const evalButton = (root) => evalStep(root).find("button").find((b) => textOf(b) === "실행");
 const runEval = (root) => evalButton(root).emit("click");
 // 실행이 끝나 버튼이 풀릴 때까지 — 안 기다리면 다음 테스트의 클릭을 running 게이트가 삼킨다
@@ -128,6 +129,7 @@ const cellFor = (row, stage) => row.find("div")
   .find((d) => d.className === "fe-cell" && d.getAttribute("data-stage") === stage);
 const captionOf = (root) => textOf(root.find("p").find((p) => p.className === "fe-caption"));
 const openButton = (row) => row.find("button")[0];
+const trackButton = (row) => row.find("button").find((b) => b.className === "fe-track");
 
 const LIST_ROWS = [
   { id: "x", name: "기체 X", revision: 1, fingerprint: "fp1", is_example: false, variants: [],
@@ -150,7 +152,12 @@ test("목록 — 엔티티 한 줄씩 서고, 칸 상태·캡션이 목록 재�
   metasReply = () => LIST_METAS;
   const root = render();
   await waitFor(() => rowNodes(root).length === 2, "두 엔티티 줄");
+  assert.equal(root.find("div").filter((d) => d.className === "fd-stage").length, 6,
+    "붙은 단계 머리는 여섯 블록이다");
+  assert.ok(root.find("div").find((d) => d.className === "fd-deck"),
+    "엔티티 목록은 단계 블록의 흰 작업면 안에 있다");
   const x = rowFor(root, "x");
+  assert.equal(trackButton(x).children.length, 6, "진행 막대 한 개 안에 여섯 구간이 이어진다");
   // ①②는 기록 없는 조회 단계다 — 도달이 아니다
   assert.equal(cellFor(x, "doc").getAttribute("data-state"), "reached", "doc_warnings 0은 판정이다");
   assert.equal(cellFor(x, "envelope").getAttribute("data-state"), "no_record");
@@ -168,15 +175,19 @@ test("목록 — 엔티티 한 줄씩 서고, 칸 상태·캡션이 목록 재�
   assert.match(captionOf(root), /막힌 줄 1개/);
 });
 
-test("목록 — [열기]가 그 줄 아래에 레일을 펼치고, 선택을 바꾸면 실행 기록을 비운다", async () => {
+test("목록 — 진행 막대가 저장 상세를 열고, 선택을 바꾸면 실행 기록을 비운다", async () => {
   setSelection({ id: "x" });
   profilesReply = () => LIST_ROWS;
   metasReply = () => LIST_METAS;
   const root = render();
   await waitFor(() => rowNodes(root).length === 2, "두 엔티티 줄");
   // x로 평가를 한 번 돌려 기록을 만든다
-  openButton(rowFor(root, "x")).emit("click");
+  trackButton(rowFor(root, "x")).emit("click");
   await waitFor(() => rowFor(root, "x").getAttribute("data-open") === "1", "x 펼침");
+  await waitFor(() => root.find("div").some((d) => d.className === "fe-store"), "트림 저장 상세");
+  assert.equal(trackButton(rowFor(root, "x")).getAttribute("aria-expanded"), "true");
+  assert.ok(root.find("div").find((d) => d.className === "fe-detail"),
+    "상세는 선택한 막대 바로 아래에서 열린다");
   runEval(root);
   await waitFor(() => settled(root), "평가 판정");
   await idle(root);
