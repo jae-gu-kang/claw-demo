@@ -69,7 +69,21 @@ test("평가 — 기본 격자의 보낼 점 전부를 서버 이름으로 보�
   assert.equal(body.depth, "full");
   const t = textOf(evalStep(root));
   assert.match(t, /하드 게이트 전부 통과 · depth=full · 기본 격자 3점 · 요구영역 미확정 초안 · 트림 재사용 2 · 새로 1/);
+  assert.doesNotMatch(t, /계산 실패 재시도/, "다시 푼 점이 없으면 재시도 조각도 없다");
   await idle(root);
+});
+
+test("평가 — 계산 실패를 다시 푼 점이 있으면 판정 줄이 재사용 뒤에 재시도를 말한다", async () => {
+  const prev = resultReply;
+  resultReply = () => ({ ...prev(), trim_retry: { policy: "neighbour_v1", retried: 1, resolved_converged: 0,
+    resolved_infeasible: 1, resolved_constraint: 0, still_calc_failed: 0, names: ["M0.2_h200_f10"] } });
+  const n = evalPosts().length;
+  const root = render();
+  runEval(root);
+  await waitFor(() => evalPosts().length > n && settled(root), "평가 판정");
+  assert.match(textOf(evalStep(root)), /트림 재사용 2 · 새로 1 · 계산 실패 재시도 1 → 물리적 불가 1/);
+  await idle(root);
+  resultReply = prev;
 });
 
 test("평가 — 요구영역 미정의면 보내지 않고 사유로 멈춘다(템플릿 격자로 돌지 않는다)", async () => {

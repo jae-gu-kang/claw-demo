@@ -23,6 +23,9 @@
   (첫 케이스·비교 기준 부재) — 미판정을 합격으로 오인하지 않도록 3-상태
 """
 
+import math
+from dataclasses import dataclass
+
 import numpy as np
 from scipy.optimize import minimize
 
@@ -315,10 +318,171 @@ def trim(aircraft, case, fingerprint=""):
     return fn(aircraft, case, fingerprint=fingerprint)
 
 
+# 미수렴 해가 한계에 「붙었다」의 판정 폭 — 풀이기(SLSQP)의 경계 해는 경계값 그대로 나온다
+LIMIT_TOL = 1e-6
+
+
+def physical_limits(tr, tb) -> list:
+    """미수렴 해가 붙은 **물리** 한계 채널 — 스로틀 0·1, 엘레본 한계(판정선 sat_frac이 아니다).
+
+    조건 상태(opspace/states.py)와 배치 재시도가 같은 함수를 쓴다 — 「어느 한계에도 안 붙은 미수렴」의 뜻이 갈리면
+    재시도한 점과 계산 실패로 보고되는 점이 달라진다."""
+    thr = float(tr.control.throttle[0])
+    de = float(tr.control.elevon[0])
+    de_lo, de_hi = tb["de"]
+    out = []
+    if thr >= THR_BOUNDS[1] - LIMIT_TOL:
+        out.append("throttle_high")
+    if thr <= THR_BOUNDS[0] + LIMIT_TOL:
+        out.append("throttle_low")
+    if de >= de_hi - LIMIT_TOL:
+        out.append("de_high")
+    if de <= de_lo + LIMIT_TOL:
+        out.append("de_low")
+    return out
+
+
+def alpha_bound(tr, tb) -> str | None:
+    """해의 받음각이 탐색 범위 끝에 붙었나 — "lower" | "upper" | None. 탐색 범위는 해석 설정(solver)이지 물리 한계가 아니다."""
+    alpha = math.atan2(float(tr.state.vel_b[2]), float(tr.state.vel_b[0]))
+    a_lo, a_hi = tb["alpha"]
+    if alpha <= a_lo + LIMIT_TOL:
+        return "lower"
+    if alpha >= a_hi - LIMIT_TOL:
+        return "upper"
+    return None
+
+
+def interior_failure(tr, tb) -> bool:
+    """어느 한계에도 붙지 않은 미수렴 — 조건 상태 「계산 실패」의 풀이 쪽 정의(05 §11.3). 재시도 대상이다."""
+    return (not tr.converged) and not physical_limits(tr, tb) and alpha_bound(tr, tb) is None
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    """계산 실패 재시도 규칙 (05 §11.3 · 이관 7단계).
+
+    max_attempts는 추가 풀이 횟수 상한이다(시간이 아니라 풀이 수 — 같은 입력이면 같은 결과). scale은 「가장 가까운
+    수렴점」 거리의 (마하, 고도 m, 연료 kg) 척도, sweep은 인접 해가 모두 막혔을 때 쓰는 고정 시드 z = (α, δe, thr)다 —
+    스로틀을 끝까지 올린 시드가 먼저 온다: 실측 계산 실패는 추력이 모자란 고속 조건에서 저속 해 스로틀에 멈춘 것이었다."""
+
+    max_attempts: int = 6
+    scale: tuple = (0.1, 1000.0, 100.0)
+    sweep: tuple = ((0.02, 0.0, 1.0), (0.10, 0.0, 1.0), (0.02, 0.0, 0.5), (0.10, 0.0, 0.5))
+
+
+DEFAULT_RETRY = RetryPolicy()
+
+
+def _zkey(z) -> tuple:
+    return tuple(round(float(v), 6) for v in z)
+
+
+def _z_of(tr) -> np.ndarray:
+    return np.array([tr.state.euler()[1], tr.control.elevon[0], tr.control.throttle[0]])
+
+
+def retry_seeds(case, seed0, last, converged, policy) -> list:
+    """재시도 시드 후보 — 순서대로 last · nearest · cold · sweep, 중복(1e-6 반올림)과 처음 시드는 뺀다.
+
+    seed0: 처음 풀이의 시드 z(None이면 기본값). last: (이름, z) — 직전 케이스의 해(수렴 여부 무관 — 한계에 붙은 해도 옆
+    조건의 좋은 출발점이다). converged: [(case, z)] — 이 배치에서 앞서 수렴한 해(재사용 포함). 저장소 이웃은 쓰지
+    않는다(요청마다 시드가 달라지면 같은 점이 요청마다 다른 해를 낸다)."""
+    seen = {_zkey(_Z0_DEFAULT if seed0 is None else seed0)}
+    out = []
+
+    def add(kind, src, z):
+        k = _zkey(z)
+        if k not in seen:
+            seen.add(k)
+            out.append({"kind": kind, "from": src, "z0": [float(v) for v in z]})
+
+    if last is not None:
+        add("last", last[0], last[1])
+    if converged:
+        sm, sh, sf = policy.scale
+
+        def dist(item):
+            c = item[0]
+            return abs(c.mach - case.mach) / sm + abs(c.alt - case.alt) / sh + abs(c.fuel - case.fuel) / sf
+
+        # min은 동률에서 앞의 것을 고른다 — 동률이면 먼저 수렴한 점
+        c, z = min(converged, key=dist)
+        add("nearest", c.name, z)
+    add("cold", None, _Z0_DEFAULT)
+    for z in policy.sweep:
+        add("sweep", None, z)
+    return out
+
+
+RETRY_RESULTS = ("converged", "limit", "alpha_bound", "multi_limit", "failed")
+
+
+def retry_result(tr, tb) -> str:
+    """해 → 재시도 결과 라벨. 조건 상태(opspace/states.py)가 가르는 갈래 그대로 — 「limit」은 물리 한계(스로틀 0·1,
+    엘레본 끝) **하나**에만 닿은 해다. 받음각 탐색 경계(alpha_bound)는 해석 설정이라 물리 한계라 부르지 않고, 한계 둘
+    (multi_limit)은 한 채널을 고정한 근거가 서지 않는다. 물리 한계가 탐색 경계보다 앞선다(조건 상태와 같은 순서)."""
+    if tr.converged:
+        return "converged"
+    limits = physical_limits(tr, tb)
+    if len(limits) == 1:
+        return "limit"
+    if limits:
+        return "multi_limit"
+    return "alpha_bound" if alpha_bound(tr, tb) is not None else "failed"
+
+
+# 고르는 순서 — 수렴 > 한계 하나(조건 상태가 한계 근거를 잰다) > 탐색 경계·한계 둘(제약 도달 쪽 근거) > 한계 안(계산 실패)
+_RANK = {"converged": 0, "limit": 1, "alpha_bound": 2, "multi_limit": 2, "failed": 3}
+
+
+def _retry_level(aircraft, case, first, seeds, policy, fingerprint):
+    tb = _trim_bounds(aircraft)
+    best = (_RANK[retry_result(first, tb)], float(first.cost), -1)
+    tried, outcomes, sols = [], [], []
+    stop = "exhausted"
+    for i, seed in enumerate(seeds[: max(int(policy.max_attempts), 0)]):
+        x, ok, cost = solve_level(aircraft, case, z0=seed["z0"])
+        tr = assemble_level(aircraft, case, x, ok, cost, fingerprint=fingerprint)
+        label = retry_result(tr, tb)
+        tried.append(seed)
+        outcomes.append({"converged": bool(tr.converged), "result": label, "cost": float(cost)})
+        sols.append((tr, (x, ok, cost)))
+        if (_RANK[label], float(cost), i) < best:
+            best = (_RANK[label], float(cost), i)
+        # 첫 수렴에서 멈춘다 — 수렴 해끼리 비용으로 고르지 않는다(다 평형이다).
+        # 물리 한계 하나에 닿아도 멈춘다: 그 뒤 상태는 고정한 한계만의 함수라(states._limit_evidence가 따로 다시 푼다)
+        # 어느 시드로 닿았나가 판정을 바꾸지 않는다. 대가 — 뒤의 시드가 수렴했을 수도 있는데 풀지 않는다(풀이 수와 맞바꿈)
+        if label in ("converged", "limit"):
+            stop = label
+            break
+    rank, _cost, chosen = best
+    label = retry_result(first, tb) if chosen < 0 else outcomes[chosen]["result"]
+    record = {"attempts": len(tried), "seeds": tried, "outcomes": outcomes, "chosen": None if chosen < 0 else chosen,
+              "result": label, "stop": stop}
+    if chosen < 0:
+        return first, record, None, None
+    tr, raw = sols[chosen]
+    return tr, record, raw, tried[chosen]
+
+
+def retry_level(aircraft, case, first, seeds, policy=DEFAULT_RETRY, *, fingerprint=""):
+    """한계 안의 미수렴 해(first)를 시드 후보(retry_seeds)로 다시 푼다 → (고른 해, 재시도 기록).
+
+    풀이는 policy.max_attempts번까지, 첫 수렴 또는 첫 「물리 한계 하나」에서 멈춘다(앞에 온 쪽 — 수렴이 먼저면 수렴,
+    한계가 먼저면 뒤 시드의 수렴 가능성을 풀이 수와 맞바꾼다). 멈추지 못하면 retry_result 순서(수렴 > 한계 하나 > 탐색
+    경계·한계 둘 > 한계 안)로, 같은 갈래는 비용 최소, 동률은 앞의 시도(처음 해가 가장 앞)다. 기록은 고른 해의 retry
+    속성에도 실린다: {"attempts", "seeds": [{"kind","from","z0"}], "outcomes": [{"converged","result","cost"}],
+    "chosen": 시도 번호|None(처음 해), "result": RETRY_RESULTS 중 하나, "stop": "converged"|"limit"|"exhausted"}."""
+    tr, record, _raw, _seed = _retry_level(aircraft, case, first, seeds, policy, fingerprint)
+    tr.retry = record
+    return tr, record
+
+
 REUSE_POLICIES = ("converged", "none")
 
 
-def trim_batch(aircraft, cases, fingerprint="", on_progress=None, *, store=None, reuse="converged"):
+def trim_batch(aircraft, cases, fingerprint="", on_progress=None, *, store=None, reuse="converged", retry=None):
     """케이스 목록 순서대로 트림 — 직전 수렴해를 다음 초기값으로 시드, 연속성 판정 포함.
 
     on_progress(done, total, tr): 케이스마다 호출 (M13 서버 진행률 경로).
@@ -330,37 +494,55 @@ def trim_batch(aircraft, cases, fingerprint="", on_progress=None, *, store=None,
     지금 기준, continuity_ok는 이 배치 안의 직전 점과 다시 잰다), 새로 푼 해는 수렴 여부와 무관하게 저장한다.
     reuse="none"은 읽지 않고 쓰기만 한다. 재사용한 해도 다음 케이스의 시드다 — 새 좌표만 인접 해에서 이어 푼다.
     섭동 기체는 거부한다: 트림 지문이 섭동을 몰라 명목 키에 섭동 해가 들어간다.
+
+    retry(RetryPolicy | None): 새로 푼 수평비행 해가 어느 한계에도 붙지 않은 미수렴(interior_failure — 조건 상태 계산 실패)이면
+    시드를 바꿔 다시 푼다(retry_level, 05 §11.3). None이면 종전 그대로(엔진 골든·자동 설계). 재사용 해는 다시 풀지 않는다.
+    진행 콜백·연속성·다음 시드는 고른 해를 따르고, 저장소에는 고른 해가 그 시드와 재시도 기록으로 들어간다.
     """
     if reuse not in REUSE_POLICIES:
         raise ValueError(f"재사용 정책은 {REUSE_POLICIES} 중 하나: {reuse!r}")
     if store is not None and getattr(aircraft, "dispersed", False):
         raise ValueError("섭동(분산) 기체의 트림은 저장소를 쓰지 않는다 — 트림 지문이 섭동을 모른다")
+    tb = None if retry is None else _trim_bounds(aircraft)
     cases = list(cases)
     total = len(cases)
     results = []
     z_prev = None
     prev_name = None
+    last = None  # (이름, z) — 직전 케이스의 해(수렴 무관), 재시도 시드용
+    conv_hist = []  # [(case, z)] — 이 배치에서 수렴한 해, 재시도 「nearest」 시드용
     for case in cases:
-        if store is None:
-            tr = trim_level(aircraft, case, z0=z_prev, fingerprint=fingerprint)
+        rec = None
+        if store is not None and reuse == "converged":
+            rec = store.get(case)
+        if rec is not None and rec.converged:
+            tr = assemble_level(aircraft, case, np.array(rec.z, dtype=float), rec.success, rec.cost,
+                                fingerprint=fingerprint)
+            tr.origin = "reused"
         else:
-            rec = store.get(case) if reuse == "converged" else None
-            if rec is not None and rec.converged:
-                tr = assemble_level(aircraft, case, np.array(rec.z, dtype=float), rec.success, rec.cost,
-                                    fingerprint=fingerprint)
-                tr.origin = "reused"
-            else:
-                x, ok, cost = solve_level(aircraft, case, z0=z_prev)
-                tr = assemble_level(aircraft, case, x, ok, cost, fingerprint=fingerprint)
+            x, ok, cost = solve_level(aircraft, case, z0=z_prev)
+            tr = assemble_level(aircraft, case, x, ok, cost, fingerprint=fingerprint)
+            seed = {"kind": "cold", "from": None} if z_prev is None else {"kind": "neighbour", "from": prev_name}
+            # 수평비행만 — 재시도는 조건 상태 「계산 실패」의 처방이고, 다른 조건(지상)은 그 상태가 없다
+            if retry is not None and case.condition == "level" and interior_failure(tr, tb):
+                seeds = retry_seeds(case, z_prev, last, conv_hist, retry)
+                tr, record, raw, chosen = _retry_level(aircraft, case, tr, seeds, retry, fingerprint)
+                tr.retry = record
+                if raw is not None:
+                    x, ok, cost = raw
+                    seed = {"kind": chosen["kind"], "from": chosen["from"]}
+            if store is not None:
                 store.put(case, TrimRecord(
-                    z=tuple(float(v) for v in x), success=ok, cost=cost, converged=tr.converged,
-                    seed={"kind": "cold", "from": None} if z_prev is None else {"kind": "neighbour", "from": prev_name}))
-        z = np.array([tr.state.euler()[1], tr.control.elevon[0], tr.control.throttle[0]])
+                    z=tuple(float(v) for v in x), success=ok, cost=cost, converged=tr.converged, seed=seed,
+                    retry=tr.retry))
+        z = _z_of(tr)
         if z_prev is not None:
             tr.flags["continuity_ok"] = bool(np.all(np.abs(z - z_prev) < CONTINUITY_STEP))
         if tr.converged:
             z_prev = z
             prev_name = case.name
+            conv_hist.append((case, z))
+        last = (case.name, z)
         results.append(tr)
         if on_progress is not None and on_progress(len(results), total, tr):
             break

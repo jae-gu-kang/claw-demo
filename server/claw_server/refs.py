@@ -269,3 +269,57 @@ def reuse_echo(results, scope, policy: str, failed_before=frozenset(), *, trim_f
 def reuse_counts(echo: dict) -> dict:
     """meta용 요약 — 목록 화면이 본문을 열지 않고 「재사용 k · 새로 n」을 쓴다."""
     return {k: echo[k] for k in ("reused", "computed", "resolved_failed")}
+
+
+# ── 계산 실패 재시도 (05 §11.3 · 05 §11.13 7단계) ────────────────────────────────────
+#
+# 트림 저장소를 쓰는 명목 기체 라우트 여섯 곳이 엔진 trim_batch(retry=DEFAULT_RETRY)로 부른다 — 한계에도 탐색 경계에도
+# 붙지 않은 미수렴(계산 실패)을 이 배치의 인접 해·기본값·스로틀 훑기 시드로 다시 푼다. 설계·파이프라인 평가·영향성
+# 스윕·처방 확인 런은 끈 채다(엔진 기본 retry=None).
+
+RETRY_POLICY_NAME = "neighbour_v1"  # 엔진 DEFAULT_RETRY의 이름 — 시드 순서(직전·최근접 수렴·기본값·훑기)·멈춤 규칙이 바뀌면 올린다
+RETRY_POLICY_OFF = "off"
+# 최종 조건 상태(opspace/states.py) → 되울림 칸. 풀이 쪽 라벨로 세지 않는다: 「limit」은 한계에 닿았다는 것일 뿐이고
+# 불가(근거 있음)·제약 도달(근거 없음)·계산 실패(한계 안쪽에 트림 — trim_inside_limit)는 한계 근거를 잰 뒤에야 갈린다
+_RETRY_STATE_KEY = {"computable": "resolved_converged", "infeasible": "resolved_infeasible",
+                    "constraint_hit": "resolved_constraint", "calc_failed": "still_calc_failed"}
+_RETRY_RESULTS = ("converged", "limit", "alpha_bound", "multi_limit", "failed")  # 엔진 trim.RETRY_RESULTS
+
+
+def retry_echo(results, states, retry=True) -> dict:
+    """결과 본문 최상위 trim_retry — 몇 점을 다시 풀었고 **최종 조건 상태**가 무엇인가(계산 가능 / 물리적 불가 / 제약
+    도달 / 여전히 계산 실패). states는 results와 같은 순서의 조건 상태(trim_assessment["state"] — 다시 풀지 않은 점은
+    None이어도 된다; 라우트가 이미 잰 판정을 넘기거나 retried_states로 잰다). by_result는 풀이 쪽 라벨(엔진
+    retry.result) 집계, names는 다시 푼 케이스 이름(배치 순서). 재시도를 끈 호출(retry 거짓)은 policy "off"다."""
+    retried = []
+    if retry:
+        for tr, state in zip(results, states, strict=True):
+            if getattr(tr, "retry", None) is None:
+                continue
+            if state not in _RETRY_STATE_KEY:  # 셀 칸이 없으면 retried와 합이 어긋난다 — 조용히 빠뜨리지 않는다
+                raise ValueError(f"다시 푼 점의 조건 상태를 모른다: {tr.case.name} → {state!r}")
+            retried.append((tr, state))
+    out = {"policy": RETRY_POLICY_NAME if retry else RETRY_POLICY_OFF, "retried": len(retried)}
+    for key in _RETRY_STATE_KEY.values():
+        out[key] = 0
+    for _tr, state in retried:
+        out[_RETRY_STATE_KEY[state]] += 1
+    out["by_result"] = {k: sum(1 for tr, _s in retried if tr.retry.get("result") == k) for k in _RETRY_RESULTS}
+    out["names"] = [tr.case.name for tr, _s in retried]
+    return out
+
+
+def retried_states(results, profile, cache: dict | None = None) -> list:
+    """다시 푼 점만 조건 상태를 잰다(나머지 None) — 판정을 싣지 않는 라우트(마진 맵·영향성)의 trim_retry도 트림 탭과
+    같은 말(최종 상태)을 하게. 다시 푼 점은 드물어 한계 근거 풀이 비용이 작다."""
+    from claw.opspace import model_range_of, trim_assessment
+
+    model = model_range_of(profile)
+    cache = {} if cache is None else cache
+    return [trim_assessment(tr, profile, model, cache=cache)["state"] if getattr(tr, "retry", None) is not None else None
+            for tr in results]
+
+
+def retry_counts(echo: dict) -> dict:
+    """meta용 요약 — 목록 화면이 본문을 열지 않고 「재시도 n → 수렴 a · 불가 b · 제약 c · 실패 d」를 쓴다."""
+    return {k: echo[k] for k in ("retried", *_RETRY_STATE_KEY.values())}

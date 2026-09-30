@@ -1,7 +1,7 @@
 {
  "golden": "trim_batch",
  "mode": "full",
- "captured_at": "fca0f75+dirty",
+ "captured_at": "3f54401+dirty",
  "value": {
   "dict": {
    "kind": "trim_batch",
@@ -804,6 +804,26 @@
      "resolved_failed": 0,
      "policy": "converged",
      "reused_names": []
+    }
+   },
+   "trim_retry": {
+    "dict": {
+     "policy": "neighbour_v1",
+     "retried": 0,
+     "resolved_converged": 0,
+     "resolved_infeasible": 0,
+     "resolved_constraint": 0,
+     "still_calc_failed": 0,
+     "by_result": {
+      "dict": {
+       "converged": 0,
+       "limit": 0,
+       "alpha_bound": 0,
+       "multi_limit": 0,
+       "failed": 0
+      }
+     },
+     "names": []
     }
    }
   }

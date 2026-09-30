@@ -18,12 +18,12 @@ DOM 조립 전용 (얇게) — 격자 로직은 lib/grid.js, 수치·판정은 �
 import { ApiError, api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import {
-  PRE_STATE_LABEL, casesFromBaseGrid, gridMapEntries, parseGridSpec, regionLines, reuseLine, reuseTip, stateCountText,
+  PRE_STATE_LABEL, casesFromBaseGrid, gridMapEntries, parseGridSpec, regionLines, retryLine, retryTip, reuseLine, reuseTip, stateCountText,
   untrimmedSummary,
 } from "../lib/opspace.js";
 import {
   SERIES_COLORS, STATUS, TRIM_CELL_LABEL, TRIM_FLAG_LABEL, TRIM_STATE_CELL, fuelsOf, pctText, pivotCases,
-  massConditionNote, stateEvidenceText, stateReasonText, trimCueReport, trimCurves, trimEnvelopeCell, trimFlagSummary,
+  massConditionNote, retryEvidenceText, stateEvidenceText, stateReasonText, trimCueReport, trimCurves, trimEnvelopeCell, trimFlagSummary,
   trimStateLabel, verdictEvidenceText,
 } from "../lib/plot.js";
 import { revealPanel } from "../lib/reveal.js";
@@ -389,6 +389,11 @@ function renderMap(mapBox, summaryLine, body, grid) {
     // (네이티브 append라 null을 넘기면 「null」 글자가 붙는다 — 없으면 아예 넘기지 않는다)
     ...(reuseLine(body.trim_reuse)
       ? [el("span", { class: "hint", style: "margin-left:8px", title: reuseTip(body.trim_reuse) }, reuseLine(body.trim_reuse))]
+      : []),
+    // 계산 실패 재시도 되울림(서버 trim_retry) — 다시 푼 점이 있을 때만
+    ...(retryLine(body.trim_retry)
+      ? [el("span", { class: "hint", style: "margin-left:8px", "data-trim-retry": "", title: retryTip(body.trim_retry) },
+        retryLine(body.trim_retry))]
       : []));
   // 비행 엔벨로프 맵 — 조건 상태 (mach×alt, 연료별). 트림하지 않은 모델 부족 점도 그 상태로 칸을 차지한다 —
   // 요구영역과 모델 영역의 겹침을 눈으로 보이게(06 §10). 옛 결과(state 없음)는 판정 플래그 범례로 그린다
@@ -455,8 +460,9 @@ function renderRows(tableBox, body) {
         + (r.region_state ? ` · ${PRE_STATE_LABEL[r.region_state] ?? r.region_state}` : "")
         : "—"),
       // 조건 판정(05 §11.3)이 채택하지 않은 까닭도 — 자동 설계 점 표가 같은 조건에 같은 말을 한다
-      el("td", { class: "hint" }, [stateReasonText(r.state_reasons), stateEvidenceText(r.state_evidence),
-        verdictEvidenceText(r)].filter(Boolean).join(" — ")),
+      // 계산 실패를 다시 푼 점은 「재시도 n회 → 결과」도 — 한계 도달이면 뒤의 한계 근거가 그 판정이다
+      el("td", { class: "hint" }, [stateReasonText(r.state_reasons), retryEvidenceText(r.retry),
+        stateEvidenceText(r.state_evidence), verdictEvidenceText(r)].filter(Boolean).join(" — ")),
       el("td", { class: "num" }, fmt(r.euler[1], 4)),
       el("td", { class: "num" }, fmt(r.control.elevon[0], 4)),
       el("td", { class: "num" }, fmt(r.control.throttle[0], 3)),

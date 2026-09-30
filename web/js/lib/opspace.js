@@ -237,5 +237,44 @@ export function reuseTip(trimReuse) {
   return parts.join(" · ");
 }
 
+// 되울림 칸(서버가 최종 조건 상태로 센다) → 조건 상태 글
+const RETRY_STATE_PARTS = [["계산 가능", "resolved_converged"], ["물리적 불가", "resolved_infeasible"],
+  ["제약 도달", "resolved_constraint"], ["계산 실패", "still_calc_failed"]];
+// 풀이 쪽 라벨(by_result) → 툴팁 글. 탐색 경계는 해석 설정이라 물리 한계와 따로 말한다
+const RETRY_RESULT_PARTS = [["물리 한계 하나", "limit"], ["받음각 탐색 경계", "alpha_bound"],
+  ["물리 한계 둘 이상", "multi_limit"]];
+
+/** 서버 trim_retry 되울림 → 「계산 실패 재시도 n → 계산 가능 a · 물리적 불가 b · 제약 도달 c · 계산 실패 d」(0인 칸은
+ *  뺀다). 다시 푼 점이 없거나 모양이 다르면 null — 대부분의 배치는 다시 풀 점이 없어 줄을 내지 않는다(옛 결과·옛
+ *  서버·재시도를 끈 호출도). */
+export function retryLine(trimRetry) {
+  const r = trimRetry;
+  if (!r || !Number.isFinite(r.retried) || r.retried <= 0) return null;
+  const parts = RETRY_STATE_PARTS.map(([k, key]) => [k, r[key]])
+    .filter(([, n]) => Number.isFinite(n) && n > 0).map(([k, n]) => `${k} ${n}`);
+  return `계산 실패 재시도 ${r.retried}` + (parts.length ? ` → ${parts.join(" · ")}` : "");
+}
+
+const RETRY_TIP_NAMES = 8;
+
+/** 같은 되울림의 툴팁 — 무엇을 다시 풀었나(규칙·결과의 뜻·다시 푼 케이스). */
+export function retryTip(trimRetry) {
+  const r = trimRetry;
+  if (!retryLine(r)) return "";
+  const parts = ["한계에도 탐색 경계에도 붙지 않은 미수렴(계산 실패)을 이 배치의 인접 해·기본값·스로틀 훑기 시드로 "
+    + "다시 풀었다 — 수는 다시 푼 뒤의 조건 상태다(한계에 닿은 점은 한계 근거가 불가·제약 도달·계산 실패를 가른다)"];
+  const by = r.by_result ?? {};
+  const touched = RETRY_RESULT_PARTS.filter(([, key]) => Number.isFinite(by[key]) && by[key] > 0)
+    .map(([k, key]) => `${k} ${by[key]}`);
+  if (touched.length) parts.push(`닿은 곳 ${touched.join(" · ")}`);
+  if (r.policy) parts.push(`규칙 ${r.policy}`);
+  const names = Array.isArray(r.names) ? r.names : [];
+  if (names.length) {
+    const more = names.length - RETRY_TIP_NAMES;
+    parts.push(`다시 푼 점 ${names.slice(0, RETRY_TIP_NAMES).join(", ")}${more > 0 ? ` 외 ${more}점` : ""}`);
+  }
+  return parts.join(" · ");
+}
+
 /** 기본 격자 점 중 서버 트림 저장소에 수렴 기록이 있는 점 수(points[].stored — 없는 서버면 0). */
 export const storedCount = (grid) => (grid?.points ?? []).filter((p) => p.stored?.converged === true).length;

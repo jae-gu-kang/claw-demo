@@ -32,13 +32,16 @@ def case_key(case) -> tuple | None:
 @dataclass(frozen=True)
 class TrimRecord:
     """풀이 결과 한 건. converged = 풀이 당시 trim_level의 수렴(SLSQP 성공 ∧ 잔차) — 잔차 허용치는 트림 지문 안이라
-    같은 키에서는 다시 재도 같다. seed = {"kind": "cold"|"neighbour", "from": 시드 케이스 이름|None}."""
+    같은 키에서는 다시 재도 같다. seed = {"kind": "cold"|"neighbour"|"last"|"nearest"|"sweep", "from": 시드 케이스 이름|None}
+    — 뒤의 셋은 재시도(retry)가 고른 시도의 시드."""
 
     z: tuple
     success: bool
     cost: float
     converged: bool
     seed: dict = field(default_factory=lambda: {"kind": "cold", "from": None})
+    # 재시도 기록(trim.retry_level) — 계산 실패를 다시 풀어 고른 해면 그 기록, 아니면 None. seed는 고른 시도의 시드다
+    retry: dict | None = None
     created: float = field(default_factory=time.time)
 
 

@@ -252,3 +252,15 @@ def test_소견서_지시문이_검증점_계획과_요약_격자와_보강을_�
                  "boundary", "clip", "d_unmeasured", "구간 합격", "existing", "plan_point", "prior",
                  "summary_grid.notes"):
         assert word in BRIEF_SYSTEM, word
+
+
+def test_소견서_지시문이_계산_실패_재시도를_말한다():
+    """계산 실패 재시도(05 §11.3 · 이관 7단계) — 지시문이 trim_retry를 알아야 다시 풀어 수렴한 점·한계에 닿은 점·여전히
+    실패한 점을 가려 말하고, 다시 풀어 수렴한 점을 처음부터 수렴한 것처럼 쓰지 않는다."""
+    from claw_server.brief import BRIEF_SYSTEM
+
+    for word in ("trim_retry", "retried", "resolved_converged", "resolved_infeasible", "resolved_constraint",
+                 "still_calc_failed", "by_result", "alpha_bound", "multi_limit", "retry_exhausted"):
+        assert word in BRIEF_SYSTEM, word
+    # 탐색 경계는 해석 설정 — 지시문이 물리 한계라 부르지 않게 말한다
+    assert "물리 한계가 아니다" in BRIEF_SYSTEM

@@ -68,6 +68,8 @@ def trim_result_dict(tr) -> dict:
     않는다 (개별 필드의 원시 float 통과 금지).
     """
     phi, theta, psi = (float(v) for v in tr.state.euler())
+    # 계산 실패를 다시 푼 기록(엔진 TrimResult.retry — 시드·시도별 결과·고른 시도)은 다시 푼 점에만 싣는다(골든 불변)
+    retry = getattr(tr, "retry", None)
     return to_jsonable({
         "case": {
             "name": tr.case.name,
@@ -89,6 +91,7 @@ def trim_result_dict(tr) -> dict:
         "params_fingerprint": tr.params_fingerprint,
         # 트림 여유 수치(01 §4.1) — 플래그의 근거. 지상 평형·옛 해는 빈 dict(미계산)
         "reserve": dict(getattr(tr, "reserve", None) or {}),
+        **({} if retry is None else {"retry": retry}),
     })
 
 

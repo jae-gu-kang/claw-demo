@@ -44,7 +44,7 @@ import { criteriaBadgeSpec, criteriaFreshness, resultFreshness } from "../lib/fr
 import { jobEndLine } from "../lib/influence.js";
 import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
 import { effectiveOf } from "../lib/profileform.js";
-import { defaultRoleSelection, draftTag, reuseLine } from "../lib/opspace.js";
+import { defaultRoleSelection, draftTag, retryLine, reuseLine } from "../lib/opspace.js";
 import { designSource, seedSummary } from "../lib/quickseed.js";
 import { revealPanel } from "../lib/reveal.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
@@ -242,8 +242,9 @@ const runEval = async (seq) => {
   }
   const body = await api.get(`/results/${done.result_id}`);
   const reuse = reuseLine(body.trim_reuse);
+  const retry = retryLine(body.trim_retry); // 계산 실패를 다시 푼 점이 있을 때만
   const judged = evalVerdict(normalizeEvalReport(body));
-  const v = { ...judged, text: [judged.text, pts, reuse].filter(Boolean).join(" · ") };
+  const v = { ...judged, text: [judged.text, pts, reuse, retry].filter(Boolean).join(" · ") };
   set(seq, "eval", { state: "done", verdict: v, resultId: done.result_id,
     echo: body.profile ?? null, critEcho: body.criteria_echo ?? null, critKind: "influence_evaluate" });
   return v;

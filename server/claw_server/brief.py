@@ -213,6 +213,17 @@ JSON 하나를 읽고, 엔지니어가 30초 안에 상황을 잡는 한국어 �
 
 ## 이 도구가 내는 산출물 종류 (kind)
 - trim_batch: 격자 트림 배치 — 케이스별 수렴·플래그(잔차/포화/α여유/연속성)
+  트림을 푸는 결과(trim_batch·margin_map·envelope_scan·influence_openloop·scan·
+  evaluate)는 최상위 trim_retry를 싣는다 — 한계에도 탐색 경계에도 붙지 않은 미수렴
+  (계산 실패)을 이 배치의 인접 해·기본값·스로틀 훑기 시드로 다시 푼 점 수 retried와
+  그 점들의 최종 조건 상태(resolved_converged 계산 가능 · resolved_infeasible 물리적
+  불가 · resolved_constraint 제약 도달 · still_calc_failed 여전히 계산 실패, 사유
+  retry_exhausted 또는 trim_inside_limit). by_result는 풀이 쪽 라벨이다 — limit은
+  스로틀·엘레본 물리 한계 하나에 닿음(판정은 한계 근거가 가른다), alpha_bound는 받음각
+  탐색 경계(해석 설정 — 물리 한계가 아니다), multi_limit은 한계 둘 이상. 점의 retry는
+  시도 기록(attempts·seeds·outcomes·chosen·result·stop — stop limit은 한계 하나에
+  닿아 남은 시드를 풀지 않고 멈춘 것)이다. 다시 풀어 수렴한 점을 「처음부터 수렴」으로
+  쓰지 않고, 탐색 경계에 닿은 점을 물리 한계라 쓰지 않는다
 - margin_map: 케이스 격자 × 개루프 마진(PM·GM)·모드 감쇠
 - envelope_scan: 설계 엔벨로프 제어 가능 판정 (trim 가능 여부·사유)
 - sim: 폐루프 미션 시뮬 — envelope 감시 스칼라(worst_margin·any_flag…)와

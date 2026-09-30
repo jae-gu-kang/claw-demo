@@ -4,11 +4,12 @@ import assert from "node:assert/strict";
 
 import {
   DRAFT_TAG, STATE_MAP_LAYOUT, casesFromBaseGrid, centrePoint, defaultRoleSelection, draftTag, filterPoints, gridMapEntries, parseGridSpec, pickNamed, pointAxes,
-  regionLines, representativePoints, reuseLine, reuseTip, sameProfileEcho, stateCountText, stateMapLayout, storedCount,
+  regionLines, representativePoints, retryLine, retryTip, reuseLine, reuseTip, sameProfileEcho, stateCountText, stateMapLayout, storedCount,
   trimResultsByName, untrimmedSummary,
 } from "./opspace.js";
 import {
-  EXCLUSION_CATEGORY_LABEL, STATE_REASON_LABEL, TRIM_STATE_CELL, stateEvidenceText, trimCueReport, trimEnvelopeCell,
+  EXCLUSION_CATEGORY_LABEL, STATE_REASON_LABEL, TRIM_STATE_CELL, retryEvidenceText, stateEvidenceText, stateReasonText,
+  trimCueReport, trimEnvelopeCell,
   marginShortText, trimStateCell, trimStateLabel, verdictEvidenceText, verdictExclusionText,
 } from "./plot.js";
 
@@ -361,6 +362,51 @@ test("reuseLine·reuseTip — 서버 trim_reuse를 한 줄로, 없거나 모양�
   assert.equal(reuseLine(undefined), null);
   assert.equal(reuseLine({ reused: "3" }), null);
   assert.equal(reuseTip(null), "");
+});
+
+test("retryLine·retryTip — 서버 trim_retry를 한 줄로, 다시 푼 점이 없거나 모양이 다르면 null", () => {
+  // 서버는 최종 조건 상태로 센다 — 「한계에 닿음」이 아니라 불가·제약 도달·계산 실패로 갈린 뒤의 수
+  const r = { policy: "neighbour_v1", retried: 5, resolved_converged: 1, resolved_infeasible: 2, resolved_constraint: 1,
+    still_calc_failed: 1, by_result: { converged: 1, limit: 3, alpha_bound: 1, multi_limit: 0, failed: 0 },
+    names: ["M0.6_h100_f25", "M0.7_h100_f25", "M0.85_h100_f25", "M0.9_h100_f25", "M1.0_h100_f25"] };
+  assert.equal(retryLine(r), "계산 실패 재시도 5 → 계산 가능 1 · 물리적 불가 2 · 제약 도달 1 · 계산 실패 1");
+  // 0인 결과는 빼고 말한다
+  assert.equal(retryLine({ ...r, retried: 2, resolved_converged: 0, resolved_constraint: 0, still_calc_failed: 0 }),
+    "계산 실패 재시도 2 → 물리적 불가 2");
+  // 탐색 경계(alpha_bound)는 물리 한계가 아니다 — 툴팁이 그렇게 부르지 않는다
+  assert.doesNotMatch(retryTip(r), /물리 한계에 닿아/);
+  assert.match(retryTip(r), /받음각 탐색 경계 1/);
+  assert.match(retryTip(r), /인접/);
+  assert.match(retryTip(r), /neighbour_v1/);
+  assert.match(retryTip(r), /M0\.6_h100_f25/);
+  // 이름이 많으면 앞의 몇 개만 — 툴팁이 표가 되지 않게
+  const many = { ...r, retried: 12, names: Array.from({ length: 12 }, (_, i) => `c${i}`) };
+  assert.match(retryTip(many), /외 4점/);
+  // 다시 푼 점이 없으면(대부분의 배치) 줄을 내지 않는다 — 옛 결과·옛 서버·재시도를 끈 호출도
+  assert.equal(retryLine({ ...r, retried: 0 }), null);
+  assert.equal(retryLine({ ...r, policy: "off", retried: 0 }), null);
+  assert.equal(retryLine(null), null);
+  assert.equal(retryLine(undefined), null);
+  assert.equal(retryLine({ retried: "3" }), null);
+  assert.equal(retryTip(null), "");
+  assert.equal(retryTip({ ...r, retried: 0 }), "");
+});
+
+test("retryEvidenceText — 점의 재시도 기록을 근거 열에 「재시도 n회 → 결과」로, 사유 retry_exhausted는 사람 글로", () => {
+  assert.equal(retryEvidenceText({ attempts: 2, result: "limit", chosen: 1 }), "재시도 2회 → 물리 한계 하나에 닿음");
+  // 받음각 탐색 경계는 해석 설정 — 「물리 한계」라 쓰지 않는다
+  assert.equal(retryEvidenceText({ attempts: 6, result: "alpha_bound", chosen: 3 }), "재시도 6회 → 받음각 탐색 경계에 닿음");
+  assert.doesNotMatch(retryEvidenceText({ attempts: 6, result: "alpha_bound" }), /물리/);
+  assert.equal(retryEvidenceText({ attempts: 6, result: "multi_limit", chosen: 0 }), "재시도 6회 → 물리 한계 둘 이상에 닿음");
+  assert.equal(retryEvidenceText({ attempts: 1, result: "converged", chosen: 0 }), "재시도 1회 → 수렴");
+  assert.equal(retryEvidenceText({ attempts: 6, result: "failed", chosen: null }), "재시도 6회 → 실패");
+  assert.equal(retryEvidenceText({ attempts: 3, result: "odd" }), "재시도 3회 → odd");
+  assert.equal(retryEvidenceText(null), "");
+  assert.equal(retryEvidenceText(undefined), "");
+  assert.equal(retryEvidenceText({ result: "limit" }), "");
+  assert.ok(STATE_REASON_LABEL.retry_exhausted);
+  assert.equal(stateReasonText(["not_converged", "retry_exhausted"]),
+    `미수렴 · ${STATE_REASON_LABEL.retry_exhausted}`);
 });
 
 test("storedCount — points[].stored 수렴 기록 수, 없는 서버면 0", () => {

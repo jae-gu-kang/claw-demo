@@ -151,7 +151,24 @@ test("결과에 trim_reuse가 있으면 「트림 재사용 k · 새로 n」", a
   heldJobs.shift()(reply(200, DONE_JOB));
   await waitFor(() => finalReport("reuse"), "신호 끝 보고");
   assert.ok(textOf(root).includes("트림 재사용 2 · 새로 1"), textOf(root).slice(0, 300));
+  assert.ok(!textOf(root).includes("계산 실패 재시도"), "다시 푼 점이 없으면 재시도 줄도 없다");
   delete RESULT.trim_reuse;
+});
+
+test("결과에 다시 푼 점이 있으면 재사용 줄 옆에 「계산 실패 재시도 n → …」", async () => {
+  RESULT.trim_reuse = { trim_fingerprint: "abc", reused: 0, computed: 3, resolved_failed: 0, policy: "converged",
+    reused_names: [] };
+  RESULT.trim_retry = { policy: "neighbour_v1", retried: 2, resolved_converged: 1, resolved_infeasible: 0,
+    resolved_constraint: 0, still_calc_failed: 1, names: ["M0.12_h500_f20", "M0.2_h500_f20"] };
+  postCue({ token: "retry", tab: "margins", action: "run" });
+  const root = render();
+  await waitFor(() => heldJobs.length === 1, "감시자의 진행 구독");
+  heldJobs.shift()(reply(200, DONE_JOB));
+  await waitFor(() => finalReport("retry"), "신호 끝 보고");
+  assert.ok(textOf(root).includes("트림 재사용 0 · 새로 3 · 계산 실패 재시도 2 → 계산 가능 1 · 계산 실패 1"),
+    textOf(root).slice(0, 300));
+  delete RESULT.trim_reuse;
+  delete RESULT.trim_retry;
 });
 
 // 요구영역 미정의 — 템플릿 격자로 되돌아가 돌지 않는다. [실행]이 막히고 신호는 사유로 실패한다

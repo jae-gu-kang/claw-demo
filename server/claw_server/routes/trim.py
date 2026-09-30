@@ -12,13 +12,13 @@ from pydantic import BaseModel, Field, model_validator
 from claw.common.contracts import TrimCase
 from claw_server.refs import (
     ProfileRef, ReusePolicy, criteria_echo, profile_echo, resolve_criteria, resolve_profile, reuse_counts, reuse_echo,
-    stored_failures, trim_scope,
+    retry_counts, retry_echo, stored_failures, trim_scope,
 )
 from claw.opspace import model_range_of, pre_state, region_of, trim_assessment
 from claw.opspace.verdict import VerdictContext, condition_verdict
-from claw.trim import trim_batch
+from claw.trim import DEFAULT_RETRY, trim_batch
 from claw_server.routes.grid import region_context
-from claw_server.serialize import trim_result_dict
+from claw_server.serialize import to_jsonable, trim_result_dict
 
 router = APIRouter(tags=["trim"])
 
@@ -118,8 +118,10 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
         rs = None if rs == "not_run" else rs
         # 요구영역 항목은 문맥이 요구영역으로 분류한다(region_state와 달리 모델 부족을 섞지 않는다)
         verdict = condition_verdict(tr, vctx, trim=(a["state"], a["reasons"]))
+        # 계산 실패를 다시 푼 점은 판정이 그 기록을 되울린다(trim_assessment "retry") — 다시 푼 점에만 싣는다(골든 불변)
+        retry = {} if a.get("retry") is None else {"retry": to_jsonable(a["retry"])}
         return {**out, "state": a["state"], "state_reasons": a["reasons"], "margin": a["margin"],
-                "state_evidence": a["evidence"], "region_state": rs, "verdict": verdict}
+                "state_evidence": a["evidence"], "region_state": rs, "verdict": verdict, **retry}
 
     def work(job):
         failed = stored_failures(scope, cases)
@@ -132,12 +134,17 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
             ),
             store=scope,
             reuse=req.reuse,
+            retry=DEFAULT_RETRY,
         )
         reuse = reuse_echo(results, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
+        rows = [with_state(r) for r in results]
+        # 되울림은 방금 잰 조건 상태로 센다 — 풀이 쪽 「한계에 닿음」이 불가인지 제약 도달인지는 판정이 가른다
+        retried = retry_echo(results, [r["state"] for r in rows], DEFAULT_RETRY)
         store.save(
             job.id,
-            {"kind": "trim_batch", "results": [with_state(r) for r in results],
-             "profile": echo, "criteria_echo": crit_block, **region_context(profile), "trim_reuse": reuse},
+            {"kind": "trim_batch", "results": rows,
+             "profile": echo, "criteria_echo": crit_block, **region_context(profile), "trim_reuse": reuse,
+             "trim_retry": retried},
             meta={
                 "kind": "trim_batch",
                 "created": job.created,
@@ -146,6 +153,7 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
                 "profile": echo,
                 "criteria_echo": crit_block,
                 "trim_reuse_counts": reuse_counts(reuse),
+                "trim_retry_counts": retry_counts(retried),
             },
         )
         job.result_id = job.id

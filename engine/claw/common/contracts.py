@@ -111,6 +111,8 @@ class TrimResult:
     # 속성이라 dataclass 필드가 아니다: 엔진 골든이 필드 목록을 부호화하고, 서버 직렬화도 싣지 않는다(재사용 집계는
     # 서버가 trim_reuse로 따로 echo한다)
     origin = "computed"
+    # 계산 실패 재시도 기록(trim.retry_level, 05 §11.3) — 재시도한 해에만 인스턴스로 싣는다. origin과 같은 이유로 필드가 아니다
+    retry = None
 
 
 @dataclass

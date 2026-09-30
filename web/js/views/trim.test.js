@@ -152,12 +152,16 @@ test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은
     trim: { status: "computable", reasons: [] }, model: { status: "valid", reasons: [] },
     limits: { status: "violated", reasons: ["stall_boundary"] }, margin: { status: "met", reasons: [] }, region: null,
     adopted: false, exclusion: { category: "limits", reasons: ["stall_boundary"] } } };
+  // M0.2는 계산 실패를 다시 풀어 스로틀 상한에 닿은 점(05 §11.3 · 이관 7단계) — 근거 열이 「재시도 n회 → 결과」를 싣는다
   const results = [row(0.12, { continuity_ok: false }), stalled,
-    row(0.2, { saturation_ok: false }, "infeasible", ["throttle_high"])];
+    { ...row(0.2, { saturation_ok: false }, "infeasible", ["throttle_high"]),
+      retry: { attempts: 2, seeds: [], outcomes: [], chosen: 1, result: "limit" } }];
   const prevFetch = globalThis.fetch;
   globalThis.fetch = (url, opts = {}) => (url.replace(/^\/api/, "").startsWith("/results/")
     ? Promise.resolve(reply(200, { results,
-      trim_reuse: { trim_fingerprint: "f", reused: 1, computed: 2, resolved_failed: 0, policy: "converged" } }))
+      trim_reuse: { trim_fingerprint: "f", reused: 1, computed: 2, resolved_failed: 0, policy: "converged" },
+      trim_retry: { policy: "neighbour_v1", retried: 1, resolved_converged: 0, resolved_infeasible: 1,
+        resolved_constraint: 0, still_calc_failed: 0, names: ["M0.2_h500_f20"] } }))
     : prevFetch(url, opts));
   try {
     postCue({ token: "run-ok", tab: "trim", action: "run" });
@@ -176,6 +180,8 @@ test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은
     assert.match(textOf(root), /수렴 3\/3 · 판정 플래그 위반 2건/, "머리줄과 보고가 같은 말");
     assert.match(textOf(root), /스로틀 상한/, "표가 물리적 불가의 근거를 싣는다");
     assert.match(textOf(root), /트림 재사용 1 · 새로 2/, "서버 트림 저장소 되울림");
+    assert.match(textOf(root), /계산 실패 재시도 1 → 물리적 불가 1/, "서버 계산 실패 재시도 되울림");
+    assert.match(textOf(root), /스로틀 상한 — 재시도 2회 → 물리 한계 하나에 닿음/, "근거 열이 다시 푼 기록을 싣는다");
     assert.doesNotMatch(textOf(root), /null/);
     const hit = scrolled.find((s) => s.node.attrs?.id === "trim-drawer");
     assert.ok(hit, "수치 패널을 굴리지 않았다");

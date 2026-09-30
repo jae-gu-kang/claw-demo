@@ -37,8 +37,9 @@ from claw.pipeline.sweep import (PROBE_DH, PROBE_DPSI, PROBE_DV, nonadditivity, 
                                  sweep_plan)
 from claw.sim import check_law_plant_pairing
 from claw_server.refs import (REQUEST_CRITERIA_REJECTED, ReusePolicy, criteria_echo, profile_echo, resolve_criteria,
-                               resolve_profile, reuse_counts, reuse_echo, stored_failures, trim_scope)
-from claw.trim import trim_batch
+                               resolve_profile, retried_states, retry_counts, retry_echo, reuse_counts, reuse_echo,
+                               stored_failures, trim_scope)
+from claw.trim import DEFAULT_RETRY, trim_batch
 from claw_server.routes.codegen import FlightCodeIn
 from claw_server.routes.sim import _load_sim, build_gain_tables
 from claw_server.routes.trim import TrimCaseIn, build_cases, cases_echo
@@ -259,9 +260,10 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
             on_progress=lambda done, _t, tr: job.report(
                 done, total, message=f"트림: {tr.case.name}"
             ),
-            store=scope, reuse=req.reuse,
+            store=scope, reuse=req.reuse, retry=DEFAULT_RETRY,
         )
         reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
+        retried = retry_echo(trs, retried_states(trs, profile, {"aircraft": ac}), DEFAULT_RETRY)
         out = openloop_delta(
             ac, trs, shape, req.params, probe_rel=req.probe_rel,
             on_progress=lambda done, _t: job.report(
@@ -271,13 +273,15 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
         payload = to_jsonable(out)
         payload["kind"] = "influence_openloop"
         payload["trim_reuse"] = reuse
+        payload["trim_retry"] = retried
         payload["profile"] = profile_echo(profile)
         payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         store.save(
             job.id, payload,
             meta={"kind": "influence_openloop", "profile": profile_echo(profile), "created": job.created,
                   "n": len(out["cases"]), "fingerprint": req.fingerprint,
-                  "trim_reuse_counts": reuse_counts(reuse)},
+                  "trim_reuse_counts": reuse_counts(reuse),
+                  "trim_retry_counts": retry_counts(retried)},
         )
         job.result_id = job.id
 
@@ -457,9 +461,10 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
             on_progress=lambda done, _t, tr: job.report(
                 done, total, message=f"트림: {tr.case.name}"
             ),
-            store=scope, reuse=req.reuse,
+            store=scope, reuse=req.reuse, retry=DEFAULT_RETRY,
         )
         reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
+        retried = retry_echo(trs, retried_states(trs, profile, {"aircraft": ac}), DEFAULT_RETRY)
         out = run_sweep(
             ac, trs, shape, plan,
             dt_plant=req.dt_plant, t_settle=req.t_settle, t_step=req.t_step,
@@ -478,6 +483,7 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
         payload = to_jsonable(out)
         payload["kind"] = "influence_scan"
         payload["trim_reuse"] = reuse
+        payload["trim_retry"] = retried
         payload["profile"] = profile_echo(profile)
         payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         payload["criteria_echo"] = criteria_echo(criteria, crit_source)
@@ -491,7 +497,8 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
             meta={"kind": "influence_scan", "profile": profile_echo(profile),
                   "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
                   "n": len(out["rows"]), "fingerprint": req.fingerprint,
-                  "trim_reuse_counts": reuse_counts(reuse)},
+                  "trim_reuse_counts": reuse_counts(reuse),
+                  "trim_retry_counts": retry_counts(retried)},
         )
         job.result_id = job.id
 
@@ -582,9 +589,10 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
             on_progress=lambda done, _t, tr: job.report(
                 done, total, message=f"트림: {tr.case.name}"
             ),
-            store=scope, reuse=req.reuse,
+            store=scope, reuse=req.reuse, retry=DEFAULT_RETRY,
         )
         reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
+        retried = retry_echo(trs, retried_states(trs, profile, {"aircraft": ac}), DEFAULT_RETRY)
         out = evaluate(
             ac, trs, shape, criteria,
             depth=req.depth, dt_plant=req.dt_plant,
@@ -596,6 +604,7 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
         payload = to_jsonable(out)
         payload["kind"] = "influence_evaluate"
         payload["trim_reuse"] = reuse
+        payload["trim_retry"] = retried
         payload["profile"] = profile_echo(profile)
         payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         # 본문의 "criteria"는 엔진이 실은 기준 전문(화면이 판정선을 읽는다)이다 — 기준 블록은 모든 라우트가 본문·meta
@@ -607,7 +616,8 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
                   "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
                   "n": len(out["cases"]), "fingerprint": req.fingerprint,
                   "criteria_fingerprint": out["criteria_fingerprint"],
-                  "trim_reuse_counts": reuse_counts(reuse)},
+                  "trim_reuse_counts": reuse_counts(reuse),
+                  "trim_retry_counts": retry_counts(retried)},
         )
         job.result_id = job.id
 

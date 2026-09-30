@@ -36,7 +36,7 @@ import { ApiError, api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import { FQ_BADGE, fqKey, fqLegendText, fqMeasureText, fqWorst, marginsCueReport } from "../lib/fq.js";
 import { DOC_FAILED_HINT, MARGIN_ACT_FALLBACK } from "../lib/missiontemplate.js";
-import { centrePoint, reuseLine, reuseTip } from "../lib/opspace.js";
+import { centrePoint, retryLine, retryTip, reuseLine, reuseTip } from "../lib/opspace.js";
 import { applyUntouched, selectedDefaults } from "./missionfill.js";
 import { createCondPicker } from "./condpick.js";
 import {
@@ -960,7 +960,10 @@ function renderResults(slots, body) {
     el("p", { style: "margin:0 0 4px" },
       el("b", {}, `계산 완료 — 케이스 ${entries.length}건 · 루프 ${loops.length}개`),
       reuseLine(body.trim_reuse)
-        ? el("span", { class: "hint", title: reuseTip(body.trim_reuse) }, ` · ${reuseLine(body.trim_reuse)}`) : null),
+        ? el("span", { class: "hint", title: reuseTip(body.trim_reuse) }, ` · ${reuseLine(body.trim_reuse)}`) : null,
+      retryLine(body.trim_retry)
+        ? el("span", { class: "hint", "data-trim-retry": "", title: retryTip(body.trim_retry) },
+          ` · ${retryLine(body.trim_retry)}`) : null),
     el("p", { class: "hint", style: "margin:0 0 6px" }, appliedSummary(body, lastBody === body ? lastDelaySrc : null)),
     el("div", { class: "row" }, fuelSel),
     // 안내가 플롯 **앞**에 있어야 한다 — 상세가 루프 구간마다 열리므로 맨 아래

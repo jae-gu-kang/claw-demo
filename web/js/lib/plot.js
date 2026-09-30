@@ -160,7 +160,7 @@ export const STATE_REASON_LABEL = Object.freeze({
   balance_not_found: "한계 고정 평형 해 없음 — 원인 미확인", trim_inside_limit: "한계 안쪽에 트림이 있음 — 다시 풀 대상",
   throttle_high: "스로틀 상한", throttle_low: "스로틀 하한", de_high: "엘레본 상한", de_low: "엘레본 하한",
   de: "엘레본 포화", alpha_margin: "α 여유 미달",
-  not_converged: "미수렴", alpha_search_bound: "받음각 탐색 상한", alpha_search_lower: "받음각 탐색 하한",
+  not_converged: "미수렴", retry_exhausted: "인접 해·기본값 시드로 다시 풀어도 실패", alpha_search_bound: "받음각 탐색 상한", alpha_search_lower: "받음각 탐색 하한",
   below_V_S: "1g 실속 속도 V_S보다 느림", above_V_S: "V_S보다 빠름 (탐색 상한이 좁을 수 있음)",
   stall_basis_missing: "실속 근거 자료 없음 (판단 미완료)", "1g_unreachable": "1g 도달 불가",
   // 조건 판정(opspace/verdict.py) 사유 — 제한·모델 항목
@@ -278,6 +278,18 @@ export function stateEvidenceText(ev) {
   const one = (s) => [...free.map((k) => FREE_TEXT[k](s[k])), EQUATION_TEXT[ev.equation](s[ev.equation])].join(" · ")
     + (s.alpha_stall == null ? " (실속 근거 없음)" : ` (실속각 ${sig(s.alpha_stall)} ${s.below_stall ? "아래" : "이상"})`);
   return `${head} ${ev.solutions.length}개 — ${ev.solutions.map(one).join(" / ")}`;
+}
+
+// 재시도 기록(엔진 TrimResult.retry)의 결과 → 글. 받음각 탐색 경계는 해석 설정이라 「물리 한계」라 부르지 않는다
+const RETRY_RESULT_TEXT = {
+  converged: "수렴", limit: "물리 한계 하나에 닿음", alpha_bound: "받음각 탐색 경계에 닿음",
+  multi_limit: "물리 한계 둘 이상에 닿음", failed: "실패",
+};
+
+/** 계산 실패를 다시 푼 점의 기록(서버 결과 행 retry) → 근거 열 글 「재시도 n회 → 결과」. 다시 풀지 않은 점은 빈 글. */
+export function retryEvidenceText(retry) {
+  if (!retry || !Number.isFinite(retry.attempts)) return "";
+  return `재시도 ${retry.attempts}회 → ${RETRY_RESULT_TEXT[retry.result] ?? retry.result}`;
 }
 
 /** 비행 엔벨로프 셀 종류 → 범례 라벨 — 트림 탭 범례와 쇼케이스 보고가 **같은 말**을 쓴다(한 표).

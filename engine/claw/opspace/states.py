@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import math
 
+# 한계·탐색 끝에 붙었나는 풀이 쪽(trim.py)이 정의한다 — 배치 재시도가 고르는 점과 여기서 계산 실패라 부르는 점이 같게
+from claw.trim.trim import alpha_bound, physical_limits
+
 OUT_OF_REGION = "out_of_region"  # 요구영역 밖 — 판정 대상 아님
 UNDEFINED = "undefined"  # 요구 미정의 — 경계표가 덮지 않음
 MODEL_GAP = "model_gap"  # 모델 부족 — 요구 안인데 모델 유효영역 밖
@@ -44,7 +47,7 @@ def trim_state(tr, built, model, *, vs_cache: dict | None = None) -> tuple:
 
 
 def trim_assessment(tr, built, model, *, cache: dict | None = None) -> dict:
-    """수평비행 트림 해 → {"state", "reasons", "margin", "evidence"} (05 §11.3).
+    """수평비행 트림 해 → {"state", "reasons", "margin", "evidence", "retry"} (05 §11.3).
 
     **상태와 여유 판정은 따로다.** 상태는 그 조건에서 트림이 성립하는지, margin은 성립한 트림이 판정선(스로틀·
     엘레본 포화 등고선 sat_frac, 트림 α 여유 — 기준 criteria.trim_margin)을 넘는지다. 수렴한 해는 판정선을 넘어도 계산 가능이다 — 날 수 있는 평형이고
@@ -60,37 +63,39 @@ def trim_assessment(tr, built, model, *, cache: dict | None = None) -> dict:
     - 받음각 탐색 상한은 실속 받음각·모델 유효 상한과 다른 값이라, 붙었다는 것만으로 날 수 없다고 못 한다.
       실속표로 잰 1g 실속 속도 V_S보다 느리다는 별도 근거(또는 1g 도달 불가)가 있을 때만 물리적 불가이고,
       아니면 제약 도달·미수렴이다. 하한에 붙은 미수렴은 양력이 남는 쪽이라 실속 논리를 쓰지 않는다.
-    - 어느 한계에도 붙지 않은 미수렴은 계산 실패다.
+    - 어느 한계에도 붙지 않은 미수렴은 계산 실패다. 배치가 이미 시드를 바꿔 한 번 이상 다시 풀었으면(retry — trim.retry_level
+      기록, 그대로 싣는다) 사유에 retry_exhausted를 더한다.
     """
     cache = {} if cache is None else cache
     tb = built.trim_bounds
     unevaluated = {"status": "unevaluated", "reasons": []}
+    retry = getattr(tr, "retry", None)  # 배치 재시도 기록(trim.retry_level) — 없으면 None
     if not tr.converged:
-        limits = _at_physical_limits(tr, tb)
+        limits = physical_limits(tr, tb)
         if len(limits) == 1:
             state, reasons, evidence = _limit_evidence(tr, built, limits[0], cache)
-            return {"state": state, "reasons": reasons, "margin": unevaluated, "evidence": evidence}
+            return {"state": state, "reasons": reasons, "margin": unevaluated, "evidence": evidence, "retry": retry}
         if limits:  # 둘 이상이 한계 — 한 채널을 고정해 나머지를 푸는 근거가 서지 않는다
             return {"state": CONSTRAINT_HIT, "reasons": [*limits, "not_converged", "balance_not_found"],
-                    "margin": unevaluated, "evidence": None}
-        alpha = math.atan2(float(tr.state.vel_b[2]), float(tr.state.vel_b[0]))
-        a_lo, a_hi = tb["alpha"]
-        if alpha <= a_lo + 1e-6:
+                    "margin": unevaluated, "evidence": None, "retry": retry}
+        bound = alpha_bound(tr, tb)
+        if bound == "lower":
             state, reasons = CONSTRAINT_HIT, ["alpha_search_lower", "not_converged"]
-        elif alpha >= a_hi - 1e-6:
+        elif bound == "upper":
             state, reasons = _alpha_upper(tr.case, built, model, cache)
         else:
-            state, reasons = CALC_FAILED, ["not_converged"]
-        return {"state": state, "reasons": reasons, "margin": unevaluated, "evidence": None}
+            # 재시도하고도 한계 안에 남은 미수렴 — 「다시 풀 대상」이 아니라 이미 다시 풀어 본 점임을 사유에 남긴다
+            # 시도 0회(예산 0·시드 없음)의 기록은 다시 풀어 본 것이 아니다
+            tried = retry is not None and retry.get("attempts", 0) > 0
+            state, reasons = CALC_FAILED, ["not_converged", *(["retry_exhausted"] if tried else [])]
+        return {"state": state, "reasons": reasons, "margin": unevaluated, "evidence": None, "retry": retry}
     # 수렴한 해는 계산 가능이다 — 실속 경계·리미터·동압 같은 운용 제한 위반은 수치 평형의 존재와 따로 조건 판정
     # (opspace/verdict.py)의 제한 항목이 말한다. 여유 판정은 자동 설계와 같은 한 규칙(margin_of)이다
     from claw.opspace.verdict import margin_of
 
-    return {"state": COMPUTABLE, "reasons": [], "margin": margin_of(tr, tb), "evidence": None}
+    return {"state": COMPUTABLE, "reasons": [], "margin": margin_of(tr, tb), "evidence": None, "retry": retry}
 
 
-# 한계에 「붙었다」의 판정 폭 — 풀이기(SLSQP)의 경계 해는 경계값 그대로 나온다
-_LIMIT_TOL = 1e-6
 _UNKNOWNS = ("alpha", "de", "throttle")
 # 한계 채널 → (고정할 미지수 번호, 그 채널이 맡은 평형식, 한계 너머의 방향, 불가 사유). 평형식은 경로축 — 비행경로
 # 가속도 V̇ · 경로 수직 가속도 · q̇. 스로틀은 V̇를, 엘레본은 q̇를 맡는다. 방향 +1은 상한(더 올려야 하면 불가), −1은 하한
@@ -101,25 +106,6 @@ _LIMIT_CHANNEL = {
     "de_low": (1, "qdot", -1, "pitch_moment_short"),
 }
 _FD_STEP = 1e-4  # 고정 채널의 편미분 유한차분 폭 [rad · 스로틀 비]
-
-
-def _at_physical_limits(tr, tb) -> list:
-    """미수렴 해가 붙은 **물리** 한계 채널 — 스로틀 0·1, 엘레본 한계(판정선 sat_frac이 아니다)."""
-    from claw.trim.trim import THR_BOUNDS
-
-    thr = float(tr.control.throttle[0])
-    de = float(tr.control.elevon[0])
-    de_lo, de_hi = tb["de"]
-    out = []
-    if thr >= THR_BOUNDS[1] - _LIMIT_TOL:
-        out.append("throttle_high")
-    if thr <= THR_BOUNDS[0] + _LIMIT_TOL:
-        out.append("throttle_low")
-    if de >= de_hi - _LIMIT_TOL:
-        out.append("de_high")
-    if de <= de_lo + _LIMIT_TOL:
-        out.append("de_low")
-    return out
 
 
 def _limit_evidence(tr, built, channel: str, cache: dict) -> tuple:

@@ -40,6 +40,7 @@ from claw.opspace import region_of
 from claw.opspace.verdict import VerdictContext
 from claw.trim import trim_level
 from claw.trim import (
+    DEFAULT_RETRY,
     LAT_INPUTS,
     LAT_STATES,
     LON_INPUTS,
@@ -51,7 +52,7 @@ from claw.trim import (
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
 from claw_server.refs import (
     ProfileRef, ReusePolicy, criteria_echo, profile_echo, profile_error_detail, profile_query, resolve_criteria,
-    resolve_profile, reuse_counts, reuse_echo, stored_failures, trim_scope,
+    resolve_profile, reuse_counts, reuse_echo, retried_states, retry_counts, retry_echo, stored_failures, trim_scope,
 )
 from claw_server.serialize import to_jsonable, trim_result_dict
 
@@ -550,16 +551,21 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
             ),
             store=scope,
             reuse=req.reuse,
+            retry=DEFAULT_RETRY,
         )
         reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
+        verdicts = [envelope_verdict(tr, vctx) for tr in trs]
+        # 되울림은 점별 판정이 이미 잰 트림 상태로 센다(다시 재지 않는다)
+        retried = retry_echo(trs, [v["verdict"]["trim"]["status"] for v in verdicts], DEFAULT_RETRY)
         entries = [
-            {"trim": trim_result_dict(tr), "verdict": to_jsonable(envelope_verdict(tr, vctx))}
-            for tr in trs
+            {"trim": trim_result_dict(tr), "verdict": to_jsonable(v)}
+            for tr, v in zip(trs, verdicts)
         ]
         store.save(
             job.id,
             {"kind": "envelope_scan", "cases": entries, "n_requested": len(cases),
-             "profile": profile_echo(profile), "criteria_echo": crit_block, "trim_reuse": reuse},
+             "profile": profile_echo(profile), "criteria_echo": crit_block, "trim_reuse": reuse,
+             "trim_retry": retried},
             meta={
                 "kind": "envelope_scan",
                 "profile": profile_echo(profile),
@@ -568,6 +574,7 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
                 "n": len(entries),
                 "fingerprint": req.fingerprint,
                 "trim_reuse_counts": reuse_counts(reuse),
+                "trim_retry_counts": retry_counts(retried),
             },
         )
         job.result_id = job.id
@@ -743,8 +750,11 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
             ),
             store=scope,
             reuse=req.reuse,
+            retry=DEFAULT_RETRY,
         )
         reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
+        # 마진 맵은 조건 판정을 싣지 않는다 — 다시 푼 점만 상태를 재 되울림이 트림 탭과 같은 말을 하게
+        retried = retry_echo(trs, retried_states(trs, profile, {"aircraft": ac}), DEFAULT_RETRY)
         def trim_entry(t):
             # 이 칸의 법칙 게인 — 트림 수렴·취소와 무관하게 싣는다(칸의 기록). 법칙 게인 루프가 없으면 키도 없다(골든)
             e = _trim_only_entry(t)
@@ -811,6 +821,7 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                 # 법칙 게인 루프가 있을 때만 — 칸별 게인(entry.gains)을 어느 표에서 읽었나
                 **({"profile_gains": law_gains.provenance(profile)} if law_gains.loops else {}),
                 "trim_reuse": reuse,
+                "trim_retry": retried,
             },
             meta={
                 "kind": "margin_map",
@@ -820,6 +831,7 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                 "n": len(entries),
                 "fingerprint": req.fingerprint,
                 "trim_reuse_counts": reuse_counts(reuse),
+                "trim_retry_counts": retry_counts(retried),
             },
         )
         job.result_id = job.id
