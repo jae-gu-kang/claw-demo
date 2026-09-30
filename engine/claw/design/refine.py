@@ -24,7 +24,8 @@ from claw.common.contracts import TrimCase
 from claw.design.linmodels import model_distance
 from claw.design.points import AXES, ROLE_DESIGN, OperatingPoint, case_name
 from claw.opspace.verdict import condition_verdict
-from claw.trim import trim_level
+from claw.trim import assemble_level, solve_level, trim_level
+from claw.trim.store import TrimRecord
 
 _ROUND = 6  # 중점 좌표 반올림 자릿수 — depth 3(간격 1/8)까지 이름 안정
 
@@ -54,17 +55,18 @@ def _midpoint_case(ca, cb, axis):
 
 
 def _seed_z(trims, name_a, name_b, ca, cb, mid, axis):
-    """중점 초기값 — 축상 더 가까운 쪽 수렴해 (trim_batch 인접 시드와 같은 원리)."""
+    """중점 초기값 — 축상 더 가까운 쪽 수렴해 (trim_batch 인접 시드와 같은 원리). (z0, 시드 케이스 이름)을 낸다."""
     da = abs(getattr(mid, axis) - getattr(ca, axis))
     db = abs(getattr(mid, axis) - getattr(cb, axis))
-    tr = trims[name_a] if da <= db else trims[name_b]
-    return np.array([tr.state.euler()[1], tr.control.elevon[0], tr.control.throttle[0]])
+    name = name_a if da <= db else name_b
+    tr = trims[name]
+    return np.array([tr.state.euler()[1], tr.control.elevon[0], tr.control.throttle[0]]), name
 
 
 def refine_trim_points(
     aircraft, points, lms, trims, *, ctx,
     tol=0.25, max_points=120, max_depth=3,
-    fingerprint="", on_progress=None,
+    fingerprint="", on_progress=None, store=None,
 ) -> dict:
     """인접 설계점쌍 거리 > tol인 곳에 중점 설계점 삽입 (제자리 갱신) — 리포트 반환.
 
@@ -72,6 +74,8 @@ def refine_trim_points(
     플랜트 변화면 격자가 성기다". 이 상수는 분류기의 plant_variation 판정
     (classify.tol_plant)과 **같은 값을 공유해야 한다** — 기준 이원화 금지.
     ctx: 조건 판정 문맥(VerdictContext) — 격자(coarse_grid)와 같은 것이라야 두 경로의 채택이 갈리지 않는다.
+    store(TrimStoreScope | None): 트림 저장소 창(05 §11.10) — 중점의 수렴 기록이 있으면 풀지 않고 조립(origin
+    "reused"), 없으면 풀어 저장한다(시드 = 축상 더 가까운 끝점 — trim_batch의 nearest와 같은 뜻). None은 종전 그대로.
     """
     if tol <= 0:
         raise ValueError(f"tol은 양수: {tol}")
@@ -107,8 +111,20 @@ def refine_trim_points(
         mid = _midpoint_case(ca, cb, axis)
         if mid.name in points:
             continue  # 다른 축 경로로 이미 삽입된 좌표
-        z0 = _seed_z(trims, name_a, name_b, ca, cb, mid, axis)
-        tr = trim_level(aircraft, mid, z0=z0, fingerprint=fingerprint)
+        z0, seed_from = _seed_z(trims, name_a, name_b, ca, cb, mid, axis)
+        rec = None if store is None else store.get(mid)
+        if rec is not None and rec.converged:
+            tr = assemble_level(aircraft, mid, np.array(rec.z, dtype=float), rec.success, rec.cost,
+                                fingerprint=fingerprint)
+            tr.origin = "reused"
+        elif store is None:
+            tr = trim_level(aircraft, mid, z0=z0, fingerprint=fingerprint)  # 종전 경로 그대로 — 설계 골든
+        else:
+            # 풀이·조립 분리 — 원시 해 x를 저장한다 (조립 결과에서 되읽으면 쿼터니언 왕복이 마지막 비트를 흔든다)
+            x, ok, cost = solve_level(aircraft, mid, z0=z0)
+            tr = assemble_level(aircraft, mid, x, ok, cost, fingerprint=fingerprint)
+            store.put(mid, TrimRecord(z=tuple(float(v) for v in x), success=ok, cost=cost, converged=tr.converged,
+                                      seed={"kind": "nearest", "from": seed_from}))
         trims[mid.name] = tr
         pt = OperatingPoint(case=mid, role=ROLE_DESIGN, origin="refine")
         pt.verdict = condition_verdict(tr, ctx)

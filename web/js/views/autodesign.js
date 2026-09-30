@@ -29,7 +29,7 @@ import {
   VERDICT_LABEL, VALIDATION_KIND_LABEL, VALIDATION_MODE_LABEL, actionCards, labelMap, actuatorLine, knotModel, machText,
   reinforcementLines, summaryGridModel, validationSummaryText,
   adoptBlockedText, adoptStorePayload, adoptWarnText, applyGateReason, approvedByDefault, buildConfig,
-  configFormValues, coverageLines, criteriaSummaryModel, designCueSummary, emptyResultNotice, evidenceLines, excludedSamplesModel, fitFactsModel,
+  configFormValues, coverageLines, criteriaSummaryModel, designCueSummary, designReuseLine, emptyResultNotice, evidenceLines, excludedSamplesModel, fitFactsModel,
   fitQualityLines, gridPlaceholders, ledgerRows, ledgerTruncatedText, mergeDesignConfig, pointRows,
   reasonText, regionCoverageLines, reportLine, resumable, resumeBlockedText, reverifyLines, statusCounts, statusSeverity,
   statusText, trimLabel, verdictLegend, warnNoteText,
@@ -1108,6 +1108,7 @@ function renderResult(box, body, resultId, ctx) {
       spec.label));
   })();
 
+  const reuse = designReuseLine(body);
   const covBox = coverageBox(report);
   const gridBox = summaryGridBox(report);
   const rfBox = reinforcementBox(report);
@@ -1121,7 +1122,10 @@ function renderResult(box, body, resultId, ctx) {
     el("p", {},
       "상태 ", sevChip(statusSeverity(report.status)), ` ${report.status ?? "?"} · `,
       // 계산해 놓고 안 내던 수치들 — 특히 판정 수가 없으면 "실패 0"의 뜻이 갈리지 않는다
-      reportLine(report, rows.length).join(" · ")),
+      reportLine(report, rows.length).join(" · "),
+      // 트림 저장소 재사용(05 §11.10) — 트림 탭·마진 맵과 같은 함수·같은 문구. 말할 것이 없으면(옛 결과·트림 전
+      // 중단) 줄을 내지 않는다
+      ...(reuse ? [" · ", el("span", { class: "hint", title: reuse.tip }, reuse.text)] : [])),
     // 요구영역 — 상태(converged 등)는 판정한 점만의 말이다. 요구영역 전체가 끝났는지는 이 줄이 말한다
     ...(regionBox ? [regionBox] : []),
     // 평가 체계(영향성 탭 「평가」·게인 탭 카드)와의 정렬 — 이 화면의 미달

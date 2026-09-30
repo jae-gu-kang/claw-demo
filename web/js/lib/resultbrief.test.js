@@ -289,6 +289,12 @@ test("자동 설계 — 종료 상태·판정 규모·처방·반출, 탭과 같
   const run = m.sections.find((s) => s.title === "실행 요약");
   assert.ok(run.rows.some(([k, v]) => k === "재개 이력" && v.includes("d1")));
   assert.ok(run.rows.some(([k, v]) => k === "운영점 판정" && v.includes("ok 1") && v.includes("fail 1")));
+  // 트림 저장소 재사용(05 §11.10) — 블록이 없는 옛 결과는 「기록 없음」이다(0으로 위장하지 않는다)
+  assert.ok(run.rows.some(([k, v]) => k === "트림 재사용" && /기록 없음/.test(v)));
+  const reused = briefModel(meta, { ...body,
+    trim_reuse: { trim_fingerprint: "c".repeat(16), reused: 30, computed: 4, policy: "converged", enabled: true } });
+  assert.ok(reused.sections.find((s) => s.title === "실행 요약").rows
+    .some(([k, v]) => k === "트림 재사용" && v === "트림 재사용 30 · 새로 4"));
   const ge = m.sections.find((s) => s.title === "게인 반출");
   assert.ok(ge.rows.some(([k, v]) => k === "스케줄 · 상수 자리" && v === "1 · 1"));
   // 재개 결과(snapshot)도 반영 대상이다 — 예제로 읽지 않는다

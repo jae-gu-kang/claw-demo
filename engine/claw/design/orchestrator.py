@@ -528,6 +528,11 @@ class DesignSession:
         # 조건 판정 문맥(VerdictContext) — run()이 받는 기체 값이라 직렬화하지 않는다(재개 호출이 다시 넘긴다).
         # 없으면 점을 판정하는 스테이지(_JUDGING_STAGES)가 시작 전에 ValueError로 멈춘다 — 옛 한 비트 판정으로 되돌아가지 않는다
         self.verdict_ctx = None
+        # 트림 저장소 창(TrimStoreScope) — verdict_ctx와 같은 규약: 서버·호출자 값이라 직렬화하지 않는다(재개가 다시 준다)
+        self._trim_store = None
+        # 트림 재사용 집계(05 §11.10) — 스테이지가 self.trims에 넣은 트림의 origin을 센다. 왕복에 실려 재개가 이어 센다
+        # (재개 후 origin은 class 기본 "computed"로 돌아가므로 수만이 이력의 정본이다)
+        self.trim_reuse = {"reused": 0, "computed": 0}
 
     # ── 진행/취소 ──
     def _progress(self, on_progress, done, total, message):
@@ -598,7 +603,7 @@ class DesignSession:
             out = region_grid(
                 aircraft, region, self.verdict_ctx.model, ctx=self.verdict_ctx,
                 n_mach=c.n_mach, alts=c.alts, fuels=c.fuels, budget=self.coarse_budget(),
-                fingerprint=fingerprint, on_progress=progress,
+                fingerprint=fingerprint, on_progress=progress, store=self._trim_store,
             )
             base = out["base"]
             self.coarse_source = "region_base_grid"
@@ -625,7 +630,7 @@ class DesignSession:
             out = coarse_grid(
                 aircraft, stall_table, limits, db_ranges, ctx=self.verdict_ctx,
                 n_mach=LEGACY_N_MACH if c.n_mach is None else c.n_mach, alts=c.alts, fuels=c.fuels,
-                budget=c.budget_points, fingerprint=fingerprint, on_progress=progress,
+                budget=c.budget_points, fingerprint=fingerprint, on_progress=progress, store=self._trim_store,
             )
             self.coarse_source = "coarse_grid"
             self.region_grid = None
@@ -644,7 +649,7 @@ class DesignSession:
         report = refine_trim_points(
             aircraft, self.points, self.lms, self.trims, ctx=self.verdict_ctx,
             tol=c.refine_tol, max_points=refine_budget,
-            fingerprint=fingerprint, on_progress=lambda d, t, m: cb(d, t, m),
+            fingerprint=fingerprint, on_progress=lambda d, t, m: cb(d, t, m), store=self._trim_store,
         )
         self.refine_report = {k: report[k] for k in
                               ("inserted", "aborted", "max_d_remaining")}
@@ -819,7 +824,7 @@ class DesignSession:
             # targets는 λ 판정에만 쓴다 — 롤 대역폭 요구가 튜닝 목표에서 온다.
             # 튜닝과 검증이 **같은 목표**를 보게 하는 유일한 배선이다
             criteria=c.criteria, targets=c.targets, trims=self.trims,
-            ctx=self.verdict_ctx, fingerprint=fingerprint,
+            ctx=self.verdict_ctx, fingerprint=fingerprint, store=self._trim_store,
             on_progress=lambda d, t, m: cb(d, t, m), **self._act_kw(),
         )
         if out["aborted"]:
@@ -968,7 +973,8 @@ class DesignSession:
             out = scheduled_margin_map(
                 aircraft, PointSet(pts), self.lms, self.sched_tables, {**self.design, **self.sched_constants},
                 criteria=c.criteria, targets=c.targets, trims=self.trims, ctx=self.verdict_ctx,
-                fingerprint=fingerprint, on_progress=lambda d, t, m: cb(d, t, m), **self._act_kw(),
+                fingerprint=fingerprint, store=self._trim_store,
+                on_progress=lambda d, t, m: cb(d, t, m), **self._act_kw(),
             )
             if out["aborted"]:
                 raise _Cancelled()
@@ -1640,7 +1646,7 @@ class DesignSession:
 
     # ── 실행 ──
     def run(self, aircraft, stall_table, limits, db_ranges, design, *, verdict_ctx,
-            rate_filters=None, actuator=None, fingerprint="", on_progress=None) -> dict:
+            rate_filters=None, actuator=None, fingerprint="", on_progress=None, trim_store=None) -> dict:
         """현 스테이지부터 계속 실행 — DONE·awaiting_approval·취소에서 멈춘다.
 
         rate_filters: 법칙의 레이트 경로 필터 {그룹: 스펙}. `design`과 같이 **비행체
@@ -1660,12 +1666,19 @@ class DesignSession:
         채택이 이것으로 정해진다 — 트림 탭과 같은 판정이다(opspace/verdict.py). 필수다: 기체 값이라 재개 호출도 넘긴다.
         점을 판정하는 스테이지(COARSE·REFINE·VERIFY)가 문맥 없이 시작되면 이름으로 멈춘다. 문맥이 오면 판정 없이 저장된
         옛 점(v1.65 전 세션)을 지금 정책으로 다시 판정한다 — 한 세션 안에 두 채택 정책이 섞이지 않게.
+
+        trim_store: 트림 저장소 창(trim.store.TrimStoreScope | None — 05 §11.10 사용자 후속 ③). 주면 격자·세분화·
+        검증·보강의 트림이 저장소의 수렴 기록을 재사용하고 새 해를 저장한다 — 같은 모델·조건·풀이 설정의 트림은
+        재계산 0회, 새 좌표만 계산. verdict_ctx와 같은 규약으로 직렬화하지 않는다(서버가 재개 호출에 다시 준다 —
+        지문 창이라 프로파일이 바뀌면 다른 창이 온다). None이면 종전 그대로다(설계 골든). 집계는
+        report()["trim_reuse"]가 말한다.
         """
         # 승인 대기는 아래에서 판정 없이 바로 돌아간다 — 그 경로는 문맥이 없어도 된다
         if verdict_ctx is None and self.stage in _JUDGING_STAGES and self.status != "awaiting_approval":
             raise ValueError(f"verdict_ctx가 없다 — {self.stage} 스테이지는 점을 판정한다(design_inputs의 verdict_ctx를 넘긴다)")
         self.design = dict(design)
         self.verdict_ctx = verdict_ctx
+        self._trim_store = trim_store
         if verdict_ctx is not None:
             self._rejudge_legacy_points()
         # None은 "안 바꾼다" — 재개 호출이 인자를 안 주면 저장된 값을 이어간다.
@@ -1686,24 +1699,35 @@ class DesignSession:
             while self.stage != "DONE":
                 if self.verdict_ctx is None and self.stage in _JUDGING_STAGES:
                     raise ValueError(f"verdict_ctx가 없다 — {self.stage} 스테이지는 점을 판정한다")
-                if self.stage == "COARSE":
-                    self._stage_coarse(aircraft, stall_table, limits, db_ranges,
-                                       fingerprint, cb)
-                elif self.stage == "REFINE":
-                    self._stage_refine(aircraft, fingerprint, cb)
-                elif self.stage == "TUNE":
-                    self._stage_tune(aircraft, cb)
-                elif self.stage == "FIT":
-                    self._stage_fit(cb)
-                elif self.stage == "VERIFY":
-                    self._stage_verify(aircraft, fingerprint, cb)
-                elif self.stage == "CLASSIFY":
-                    self._stage_classify(aircraft, cb)
-                    if self.status == "awaiting_approval":
-                        break
+                # 재사용 집계는 스테이지 단위 — 취소로 끊겨도(finally) 그때까지 담긴 트림은 센다(재개가 이어 센다)
+                before = set(self.trims)
+                try:
+                    if self.stage == "COARSE":
+                        self._stage_coarse(aircraft, stall_table, limits, db_ranges,
+                                           fingerprint, cb)
+                    elif self.stage == "REFINE":
+                        self._stage_refine(aircraft, fingerprint, cb)
+                    elif self.stage == "TUNE":
+                        self._stage_tune(aircraft, cb)
+                    elif self.stage == "FIT":
+                        self._stage_fit(cb)
+                    elif self.stage == "VERIFY":
+                        self._stage_verify(aircraft, fingerprint, cb)
+                    elif self.stage == "CLASSIFY":
+                        self._stage_classify(aircraft, cb)
+                        if self.status == "awaiting_approval":
+                            break
+                finally:
+                    self._count_new_trims(before)
         except _Cancelled:
             self.status = "cancelled"
         return self.report()
+
+    def _count_new_trims(self, before: set):
+        """이번 스테이지가 self.trims에 새로 넣은 트림의 origin 집계 — 저장소에서 꺼냈나(reused) 새로 풀었나(computed)."""
+        for name, tr in self.trims.items():
+            if name not in before:
+                self.trim_reuse["reused" if getattr(tr, "origin", "computed") == "reused" else "computed"] += 1
 
     def _rejudge_legacy_points(self):
         """판정(verdict) 없이 저장된 점을 지금 정책으로 다시 판정한다 — 트림이 남아 있는 점만(없으면 미판정 그대로)."""
@@ -1757,6 +1781,9 @@ class DesignSession:
             "fit_quality_warns": sum(
                 1 for rep in self.fits.values()
                 if (rep.get("quality") or {}).get("status") == "warn"),
+            # 트림 저장소 재사용 집계(05 §11.10) — 서버 reuse_counts와 같은 칸 이름. enabled는 이 실행이 창을 받았는가
+            # (직렬화하지 않는 실행 인자 — 재개 전 보고는 False다)
+            "trim_reuse": {**self.trim_reuse, "enabled": self._trim_store is not None},
             "criteria_fingerprint": c.criteria.fingerprint(),
             # 권장선보다 느슨한 튜닝 목표 — 거절하지 않고 여기서 말한다(AutoDesignConfig.target_warnings).
             # 이게 있으면 warn 판정은 "목표 미달"이 아니라 설정이 예고한 결과다
@@ -1976,6 +2003,8 @@ class DesignSession:
             "stage": self.stage, "status": self.status, "iter_n": self.iter_n,
             "coarse_source": self.coarse_source,
             "region_grid": self.region_grid,
+            # 재사용 수만 싣는다 — 저장소 창(_trim_store)은 verdict_ctx처럼 실행 인자라 직렬화하지 않는다
+            "trim_reuse": dict(self.trim_reuse),
         }
 
     @classmethod
@@ -2031,4 +2060,7 @@ class DesignSession:
         # 이관 2단계 전 세션에는 없다 — 요구영역 커버리지는 「기록 없음」으로 말한다
         s.coarse_source = d.get("coarse_source")
         s.region_grid = d.get("region_grid")
+        # 이 단계 전 저장물에는 없다 — 0에서 시작(그 세션의 트림은 전부 이 저장소 밖에서 계산된 것이다)
+        tr = d.get("trim_reuse") or {}
+        s.trim_reuse = {"reused": int(tr.get("reused", 0)), "computed": int(tr.get("computed", 0))}
         return s

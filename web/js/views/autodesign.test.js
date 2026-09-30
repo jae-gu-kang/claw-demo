@@ -66,8 +66,14 @@ globalThis.fetch = (url) => {
     reason_text: { no_stable_gain: "서버 사전 문구" }, grid: { alts: [0, 1000], fuel_fracs: [0.1, 0.5, 1] } });
   }
   if (path.startsWith("/profiles/")) return ok({ document: { mass: { fuel_max: 50 }, actuator: { params: { wn: 30, zeta: 0.7 } } } });
-  if (path === "/results") return ok([{ id: "d1", kind: "auto_design", status: "escalated", stage: "DONE" }]);
+  if (path === "/results") return ok([{ id: "d1", kind: "auto_design", status: "escalated", stage: "DONE" },
+    { id: "d2", kind: "auto_design", status: "escalated", stage: "DONE" }]);
   if (path === "/results/d1") return ok(BODY);
+  // 트림 저장소 재사용을 실은 결과(서버 refs.design_reuse_echo 실물 모양) — d1은 블록이 없는 옛 결과다
+  if (path === "/results/d2") {
+    return ok({ ...BODY, trim_reuse: { trim_fingerprint: "e".repeat(16), reused: 30, computed: 4,
+      policy: "converged", enabled: true } });
+  }
   return Promise.resolve(reply(404, { detail: `stub에 없는 경로: ${path}` }));
 };
 
@@ -100,5 +106,16 @@ test("보고서에 작동기·표본 제외(보류 포함)·적합 보고·원�
   assert.match(text, /제외 — 요구영역 판정 대상 아님 — 요구 미정의/);
   assert.match(text, /트림하지 않음 1/);
   // 조건부 조각이 글자 "null"로 새지 않는다 (DOM append(null) 함정)
+  assert.doesNotMatch(text, /null|undefined/);
+  // 트림 저장소 재사용 블록이 없는 결과(이 단계 전)는 줄을 내지 않는다 — 0으로 위장하지 않는다
+  assert.doesNotMatch(text, /트림 재사용/);
+});
+
+test("트림 저장소 재사용을 실은 결과는 상태 줄에 「트림 재사용 k · 새로 n」이 선다", async () => {
+  store.set("designOpen", { resultId: "d2" });
+  const root = render();
+  await waitFor(() => textOf(root).includes("결과 d2"), "인계된 보고서");
+  const text = textOf(root);
+  assert.match(text, /트림 재사용 30 · 새로 4/);
   assert.doesNotMatch(text, /null|undefined/);
 });

@@ -271,6 +271,35 @@ def reuse_counts(echo: dict) -> dict:
     return {k: echo[k] for k in ("reused", "computed", "resolved_failed")}
 
 
+def design_reuse_echo(report: dict | None, scope, *, trim_fingerprint: str | None = None) -> dict | None:
+    """자동 설계용 trim_reuse 되울림 — 엔진 report()["trim_reuse"]({reused, computed, enabled})를 형제 라우트와 **같은
+    칸 이름**으로 옮긴다(웹 lib/opspace.js reuseLine이 그대로 읽는다). 블록이 없는 옛 결과·옛 세션은 None이다.
+
+    reuse_echo와 다른 점은 없는 칸뿐이다 — 설계는 트림 해 목록을 저장물에 싣지 않아 reused_names를 모르고(집계는
+    스테이지가 self.trims에 넣은 트림의 origin으로 센다), 재시도를 끈 채라(엔진 기본 retry=None) 저장된 미수렴을
+    다시 풀어 냈는지(resolved_failed)를 재지 않는다. 있는 척 0을 싣지 않는다 — reuseTip은 없는 칸을 건너뛴다.
+    """
+    if not isinstance(report, dict) or not isinstance(report.get("trim_reuse"), dict):
+        return None
+    tr = report["trim_reuse"]
+    return {
+        # 꺼진 저장소에서도 지문은 싣는다(reuse_echo와 같은 규약)
+        "trim_fingerprint": trim_fingerprint or (None if scope is None else scope.trim_fingerprint),
+        "reused": int(tr.get("reused", 0)),
+        "computed": int(tr.get("computed", 0)),
+        "policy": REUSE_POLICY_OFF if scope is None else "converged",
+        # 이 실행이 저장소 창을 받았나 — 재개도 서버가 매번 다시 준다(직렬화하지 않는 실행 인자)
+        "enabled": bool(tr.get("enabled")),
+    }
+
+
+def design_reuse_counts(echo: dict | None) -> dict | None:
+    """meta용 요약 — reuse_counts와 같은 자리(meta.trim_reuse_counts)의 설계판. 설계가 재지 않는 resolved_failed는 없다."""
+    if echo is None:
+        return None
+    return {k: echo[k] for k in ("reused", "computed")}
+
+
 # ── 계산 실패 재시도 (05 §11.3 · 05 §11.13 7단계) ────────────────────────────────────
 #
 # 트림 저장소를 쓰는 명목 기체 라우트 여섯 곳이 엔진 trim_batch(retry=DEFAULT_RETRY)로 부른다 — 한계에도 탐색 경계에도

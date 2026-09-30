@@ -314,7 +314,7 @@ def scheduled_margin_map(
     aircraft, points, lms, tables, design, *,
     criteria, targets=None, trims=None, ctx=None, fingerprint="",
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
-    rate_filters=None, on_progress=None,
+    rate_filters=None, on_progress=None, store=None,
 ) -> dict:
     """전 점(설계점 + 검증점)의 스케줄 인지 검증 + 판정 — 설계점도 표를 평가한 게인으로 본다(설계점은 절점이 아니다).
 
@@ -324,6 +324,7 @@ def scheduled_margin_map(
     ctx: 조건 판정 문맥(VerdictContext) — 아직 판정 안 된 점(trimmable None, 새 검증점)을 판정할 때 쓴다. 전 점이
     이미 판정돼 있으면(반출 표 재검증 — 같은 점집합) 없어도 되고, 판정할 점이 있는데 없으면 ValueError다 — 문맥 없이
     옛 한 비트 정의로 되돌아가지 않는다.
+    store(TrimStoreScope | None): 트림 저장소 창(05 §11.10) — 없는 점의 trim_batch에 그대로 넘긴다. None은 종전 그대로.
     """
     trims = trims if trims is not None else {}
     todo = [p for p in points if p.case.name not in trims]
@@ -339,7 +340,7 @@ def scheduled_margin_map(
                 return True
             return False
 
-        trim_batch(aircraft, todo_cases, fingerprint=fingerprint, on_progress=_trim_progress)
+        trim_batch(aircraft, todo_cases, fingerprint=fingerprint, on_progress=_trim_progress, store=store)
         if aborted:
             return {"cases": {}, "aborted": "cancelled", "criteria": criteria.to_dict()}
 

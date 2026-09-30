@@ -252,7 +252,10 @@ JSON 하나를 읽고, 엔지니어가 30초 안에 상황을 잡는 한국어 �
   종료 · 추가 검증 필요 — 합격도 설계 불가도 아니다)·unmeasured(잴 수 없는 구간
   있음). coverage.validation_requested·validation_done·validation_not_run·
   validation_omitted_rows·d_unmeasured는 안 본 것을 센다. summary_grid.notes는 격자
-  밖 사정(계획 밖 점의 실패·계획 뒤 절점 바뀜)이다
+  밖 사정(계획 밖 점의 실패·계획 뒤 절점 바뀜)이다. 최상위 trim_reuse는 트림을 몇 점
+  저장소에서 꺼내고(reused) 몇 점을 새로 풀었나(computed)다 — 같은 기체·같은 풀이
+  설정의 **수렴한** 트림만 저장소가 내주므로 미수렴 좌표는 매번 다시 푼다(재개는 부모
+  수를 이어 센다). 풀이를 누가 했나일 뿐이라 수렴률·설계 규모로 읽지 않는다
 - verify_flight: 탑재 C의 DAL A 검증 — report.summary 5행 + verdict
 - influence_evaluate: 케이스 격자 전체 6DOF 평가 — cards(대표 7)·checks·
   aggregate(hard_fail이면 불합격)

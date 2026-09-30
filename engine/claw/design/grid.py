@@ -48,13 +48,16 @@ DEFAULT_FUEL_FRACS = (0.1, 0.5, 1.0)  # × fuel_max [기본값]
 def coarse_grid(
     aircraft, stall_table, limits, db_ranges, *, ctx,
     n_mach=5, alts=None, fuels=None, mach_margin=1.1, budget=60,
-    fingerprint="", on_progress=None,
+    fingerprint="", on_progress=None, store=None,
 ) -> dict:
     """엔벨로프·DB 유도 coarse 격자 + 1회 트림 — {"points", "trims", "aborted"}.
 
     budget 초과는 제출 시점 ValueError (influence.py MAX_CASES 원칙 — 오타 예산이
     단일 워커를 점유하기 전에 차단). on_progress는 trim_batch 규약 그대로
     (truthy 반환 = 협조적 취소, 완료분 보존). ctx: 조건 판정 문맥(VerdictContext) — 필수다.
+    store(TrimStoreScope | None): 트림 저장소 창(05 §11.10) — trim_batch에 그대로: 수렴 기록은 풀지 않고
+    조립(origin "reused", 판정은 지금 기준), 새로 푼 해는 저장. None이면 종전 그대로다(설계 골든). 재시도는
+    안 켠다(retry=None — 설계 경로는 종전과 같은 풀이 구성이라야 저장소 유무가 해를 못 바꾼다).
     """
     if n_mach < 2:
         raise ValueError(f"n_mach는 2 이상: {n_mach}")
@@ -108,7 +111,7 @@ def coarse_grid(
         return False
 
     results = trim_batch(
-        aircraft, points.serpentine(), fingerprint=fingerprint, on_progress=_progress
+        aircraft, points.serpentine(), fingerprint=fingerprint, on_progress=_progress, store=store
     )
     if len(results) < len(points):
         aborted = "cancelled"
@@ -182,7 +185,7 @@ def coarse_preflight(region, model, *, n_mach=None, alts=None, fuels=None, budge
 
 def region_grid(
     aircraft, region, model, *, ctx, n_mach=None, alts=None, fuels=None, budget=MAX_BASE_POINTS, required=(),
-    fingerprint="", on_progress=None,
+    fingerprint="", on_progress=None, store=None,
 ) -> dict:
     """요구영역 기본 격자 COARSE + 1회 트림 — {"points", "trims", "aborted", "base", "selection"}.
 
@@ -192,6 +195,7 @@ def region_grid(
     조건 판정(ctx)을 싣고 채택을 trimmable로 세운다. required: 늘 넣을 조건 [(mach, alt, fuel)] — 기본 격자에 없으면
     그 좌표를 더한다(05 §11.4 고정점 자리 — 아직 부르는 곳은 없다).
     base는 기본 격자 dict에 점마다 selected를 붙인 것 — 요구영역 커버리지 보고(orchestrator region_coverage)의 분모다.
+    store: coarse_grid와 같은 계약(트림 저장소 창, 05 §11.10) — 트림 탭이 같은 기본 격자를 먼저 풀었으면 여기서 재사용된다.
     """
     base = base_grid(region, model, n_mach=n_mach, alts=alts, fuels=fuels)
     names = {p["name"] for p in base["points"]}
@@ -234,7 +238,8 @@ def region_grid(
         return False
 
     if len(targets):
-        results = trim_batch(aircraft, targets.serpentine(), fingerprint=fingerprint, on_progress=_progress)
+        results = trim_batch(aircraft, targets.serpentine(), fingerprint=fingerprint, on_progress=_progress,
+                             store=store)
         if len(results) < len(targets):
             aborted = "cancelled"
     selection = {k: sel[k] for k in ("dropped", "axis_interior", "axis_kept", "rule")}

@@ -35,8 +35,9 @@ from claw.design.tune import REASON_TEXT
 from claw.profile import ProfileError, build_profile
 from claw.profile.fingerprint import gain_tables_basis_fingerprint
 from claw_server.profiles import EXAMPLE_ID, ProfileConflict, ProfileReadOnly, ProfileUnreadable
-from claw_server.refs import (REQUEST_CRITERIA_REJECTED, ProfileRef, criteria_echo, profile_echo, profile_error_detail, resolve_criteria,
-                              resolve_profile, resolve_snapshot)
+from claw_server.refs import (REQUEST_CRITERIA_REJECTED, ProfileRef, criteria_echo, design_reuse_counts,
+                              design_reuse_echo, profile_echo, profile_error_detail, resolve_criteria,
+                              resolve_profile, resolve_snapshot, trim_scope)
 from claw.tables import PolyTable
 from claw_server.serialize import to_jsonable
 
@@ -372,9 +373,11 @@ def _config_criteria_echo(profile, cfg: AutoDesignConfig, source: str) -> dict:
 
 
 def _save_session(store, job, session: DesignSession, fingerprint: str,
-                  parent: str | None = None, *, profile, criteria: dict) -> None:
+                  parent: str | None = None, *, profile, criteria: dict, scope=None) -> None:
     """criteria — 기준 블록(criteria_echo). 부르는 쪽이 판정·튜닝에 **실제로 쓴** 설정에서 재 넘긴다(제출·재개가
-    출처를 안다) — 여기서 기체 기준으로 다시 재면 재개 세션의 저장된 설정과 어긋날 수 있다."""
+    출처를 안다) — 여기서 기체 기준으로 다시 재면 재개 세션의 저장된 설정과 어긋날 수 있다.
+
+    scope — 이 실행이 받은 트림 저장소 창(refs.trim_scope, 꺼진 서버면 None). 되울림의 지문·정책 칸이 이것으로 난다."""
     payload = session.to_dict()
     payload["report"] = session.report()
     payload["proposed_actions"] = session.proposed_actions()
@@ -388,6 +391,12 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
     payload["profile"] = profile_echo(profile)
     # 어느 기준으로 판정·튜닝했나 — profile 블록과 따로 둔다(refs.criteria_echo 머리말)
     payload["criteria_echo"] = criteria
+    # 트림 저장소 재사용(05 §11.10 사용자 후속 ③) — 형제 라우트 여섯 곳과 같은 자리·같은 칸 이름(refs.reuse_echo).
+    # 재개는 부모의 수를 이어 센다(엔진이 왕복에 싣는다) — 이 블록은 「이 계보가 몇 점을 다시 풀지 않았나」다.
+    # 이 단계 전 결과·옛 세션은 블록이 없다(None) — 0으로 위장하지 않는다(웹이 줄을 내지 않는다)
+    reuse = design_reuse_echo(payload["report"], scope, trim_fingerprint=profile.trim_fingerprint)
+    if reuse is not None:
+        payload["trim_reuse"] = reuse
     store.save(
         job.id,
         to_jsonable(payload),
@@ -400,6 +409,12 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
             "stage": session.stage,
             "fingerprint": fingerprint,
             "parent": parent,
+            **({} if reuse is None else {"trim_reuse_counts": design_reuse_counts(reuse)}),
+            # 이미 센 규모 셋을 meta에도 — 목록 화면(설계 흐름 개체 목록)이 본문을 열지 않고 「판정 n · 미달 m ·
+            # 이터레이션 k」를 쓴다. 보고에 없으면 키를 넣지 않는다(옛 결과와 같은 자리 = 「모름」) — 0으로 위장하면
+            # 화면이 미달 없음을 주장하게 된다. 보고 칸 이름 그대로다(엔진 report() — 두 곳이 갈리지 않게)
+            **{k: payload["report"][k] for k in ("judged", "failures", "iterations")
+               if isinstance(payload["report"], dict) and k in payload["report"]},
         },
     )
     job.result_id = job.id
@@ -427,6 +442,12 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    # 트림 저장소 창(05 §11.10 사용자 후속 ③) — 이 기체의 트림 지문 창이다. 제출도 재개도 이 한 길로 지나므로
+    # 여기 한 번이면 둘 다 받는다(재개는 스냅숏 기체의 지문이라 문서가 바뀌면 다른 창이 온다). 저장소가 꺼진
+    # 서버(CLAW_TRIM_STORE_LIMIT=0)면 None — 종전 그대로 전부 새로 푼다.
+    # verdict_ctx와 같은 규약으로 직렬화되지 않는 실행 인자라 **재개 호출도 다시 줘야** 한다
+    scope = trim_scope(request, profile)
+
     def work(job):
         # job.report의 반환값이 취소 요청 여부 — 엔진 협조적 취소 규약과 그대로 맞물린다
         session.run(
@@ -435,8 +456,10 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
             verdict_ctx=inp["verdict_ctx"], rate_filters=inp["rate_filters"], actuator=inp["actuator"],
             fingerprint=fingerprint,
             on_progress=lambda done, total, msg: job.report(done, total, message=msg),
+            trim_store=scope,
         )
-        _save_session(store, job, session, fingerprint, parent=parent, profile=profile, criteria=criteria)
+        _save_session(store, job, session, fingerprint, parent=parent, profile=profile, criteria=criteria,
+                      scope=scope)
 
     job = request.app.state.jobs.submit("auto_design", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"

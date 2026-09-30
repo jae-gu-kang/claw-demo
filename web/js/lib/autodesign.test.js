@@ -56,6 +56,7 @@ import {
   pointRows,
   reasonText,
   reliefLines,
+  designReuseLine,
   reportLine,
   resumable,
   resumeBlockedText,
@@ -1151,6 +1152,25 @@ test("reportLine — 원장 크기도 줄에 오른다 (카드 수와 다른 수
   assert.match(reportLine({ ledger_size: 7 }).join(" · "), /미달 원장 7/);
   // 0이면 생략 — 원장 없는 구형 결과가 "미달 원장 0"으로 뜨면 거짓말이다
   assert.doesNotMatch(reportLine({ judged: 3, failures: 0 }).join(" · "), /미달 원장/);
+});
+
+test("designReuseLine — 서버 trim_reuse를 트림 탭과 같은 문구로, 없거나 말할 것이 없으면 조용하다", () => {
+  // 서버 refs.design_reuse_echo가 싣는 실물 모양 — 형제 라우트와 같은 칸 이름이라 opspace reuseLine이 그대로 읽는다
+  const body = { trim_reuse: { trim_fingerprint: "b".repeat(16), reused: 30, computed: 4,
+    policy: "converged", enabled: true } };
+  const line = designReuseLine(body);
+  assert.equal(line.text, "트림 재사용 30 · 새로 4");
+  assert.match(line.tip, /converged/);
+  assert.match(line.tip, /다시 풀지 않는다/);
+  // 저장소가 꺼진 서버 — 하나도 재사용하지 않았다는 것도 사실이라 낸다
+  assert.equal(designReuseLine({ trim_reuse: { reused: 0, computed: 34, policy: "off", enabled: false } }).text,
+    "트림 재사용 0 · 새로 34");
+  // 옛 결과(블록 없음)·재사용도 계산도 0인 실행은 null — retryLine처럼 조용하다(0으로 위장하지 않는다)
+  assert.equal(designReuseLine({}), null);
+  assert.equal(designReuseLine(null), null);
+  assert.equal(designReuseLine({ trim_reuse: { reused: 0, computed: 0, policy: "converged", enabled: true } }), null);
+  // 모양이 다르면(문자열 수) null — reuseLine의 규약 그대로
+  assert.equal(designReuseLine({ trim_reuse: { reused: "3", computed: 1 } }), null);
 });
 
 test("reliefLines — 통과한 축은 **임계값**을 말한다 (×3이 아니라 ≥47 rad/s)", () => {

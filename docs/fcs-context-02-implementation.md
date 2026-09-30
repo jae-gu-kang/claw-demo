@@ -544,6 +544,15 @@
     않는다. 예제 기체는 엔진 패키지 데이터라 읽기 전용(리비전 0)이고, 고치려면 복제한다.
   - 트림 저장소(`claw.trim.store`, `app.state.trim_store`, v1.72)는 결과 저장소·기체 저장소와 달리 **프로세스 메모리**다 —
     재시작이면 비고, `$CLAW_TRIM_STORE_LIMIT`(기본 20000, 0 = 끔)가 LRU 상한이다(05 §11.8).
+  - 자동 설계도 트림 저장소를 쓴다(v1.75, 05 §11.10). 라우트는 `_run_session_job` 한 곳에서 `refs.trim_scope(request, profile)`로 그 기체의
+    트림 지문 창을 열어 `DesignSession.run(trim_store=…)`에 넘긴다 — 제출도 재개도 같은 길이며, `verdict_ctx`와 같이 **직렬화되지 않는
+    실행 인자**라 재개 호출이 다시 주지 않으면 재개 실행만 조용히 저장소를 못 쓴다(재개는 스냅숏 기체의 지문이라 문서가 바뀌면 다른
+    창이 온다). 저장물은 최상위 `trim_reuse {trim_fingerprint, reused, computed, policy, enabled}`와 meta `trim_reuse_counts`를 형제 라우트
+    여섯 곳과 같은 칸 이름으로 싣는다 — 설계는 트림 해 목록을 싣지 않아 `reused_names`가 없고, 재시도를 끈 채라 `resolved_failed`를
+    재지 않는다: **없는 칸을 0으로 위장하지 않는다.** 저장소가 꺼진 서버(`CLAW_TRIM_STORE_LIMIT=0`)는 창이 `None`이라 종전 그대로 전부
+    새로 풀고 `policy "off"`·`enabled false`로 그 사실을 말한다. 수렴한 트림만 저장소가 내주므로 미수렴 좌표는 매번 다시 푼다. meta에는
+    보고가 이미 센 규모 셋(`judged`·`failures`·`iterations`)도 함께 실린다 — 목록 화면이 본문을 열지 않고 규모를 쓰기 위한 것이고, 보고에
+    없으면 키를 넣지 않는다(「모름」)
   - 요구영역 절만 고치는 길(v1.74, 05 §11.2): `POST /grid/region/preview`는 저장 없이 윤곽 · 기본 격자 · 「바꾸면 영향」을 내고,
     `PUT /profiles/{id}/operating-region` `{base_revision, operating_region}`은 그 절만 새 리비전으로 쓴다(전체 PUT과 같은 가드 ·
     같은 저장 문서 — `_store_update` 공유), `GET /profiles/{id}/region-history`는 리비전별 요구영역 판(`region_key`) 계보다 — `{rows, omitted}`,

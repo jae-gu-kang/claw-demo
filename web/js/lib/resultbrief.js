@@ -10,7 +10,7 @@
  */
 
 import {
-  actionCards, actuatorLine, adoptBlockedText, applyGateReason, coverageLines, excludedSamplesModel,
+  actionCards, actuatorLine, adoptBlockedText, applyGateReason, coverageLines, designReuseLine, excludedSamplesModel,
   failureRoleText, fitFactsModel, fitModeLabel, knotModel, pointCountText, pointRows, reinforcementLines, resumable,
   resumeBlockedText, reverifyLines, statusCounts, statusSeverity, statusText, summaryGridModel, validationSummaryText,
 } from "./autodesign.js";
@@ -366,6 +366,8 @@ function autoDesignBrief(body, meta) {
       ["에스컬레이션", cards.escalations.length ? `${cards.escalations.length}건 — 상위 설계 변경 검토(자동 적용 없음)` : "없음"],
       ["미달 원장", r.ledger_size != null ? `${r.ledger_size}행` : "—"],
       ["재개 이력", meta?.parent ? `재개한 실행 — 부모 ${meta.parent}` : "처음 실행(재개 아님)"],
+      // 트림 저장소 재사용(05 §11.10) — 자동 설계 탭 상태 줄과 같은 함수. 블록이 없는 옛 결과는 기록 없음이다
+      ["트림 재사용", designReuseLine(body)?.text ?? "기록 없음 — 트림 저장소 재사용 이전 결과"],
       ["기준 지문", r.criteria_fingerprint ? String(r.criteria_fingerprint).slice(0, 8) : "—"],
     ] },
   ];

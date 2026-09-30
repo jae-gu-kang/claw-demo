@@ -15,6 +15,7 @@
 */
 
 import { parseNumberList } from "./grid.js";
+import { reuseLine, reuseTip } from "./opspace.js";
 import { EXCLUSION_CATEGORY_LABEL, marginShortText, verdictExclusionText } from "./plot.js";
 import { EXAMPLE_ID } from "./profile.js";
 
@@ -980,6 +981,21 @@ export function reportLine(report, nPointsFallback) {
     parts.push(`기준 지문 ${String(r.criteria_fingerprint).slice(0, 8)}`);
   }
   return parts;
+}
+
+/** 본문 최상위 trim_reuse(서버 refs.design_reuse_echo) → {text, tip} — 「트림 재사용 k · 새로 n」.
+ *
+ * 트림 탭·마진 맵과 **같은 함수**(lib/opspace.js reuseLine·reuseTip)를 쓴다 — 서버가 형제 라우트와 같은 칸 이름으로
+ * 싣기 때문이고, 같은 사실을 화면마다 다르게 말하지 않기 위해서다.
+ *
+ * 블록이 없는 옛 결과, 그리고 **재사용도 계산도 0인 실행**(트림 스테이지 전에 멈춘 세션)은 null이다 — retryLine이
+ * 다시 푼 점이 없을 때 조용한 것과 같은 규약: 말할 것이 없으면 줄을 내지 않는다. 저장소가 꺼진 서버(policy "off")는
+ * 새로 푼 수가 있으면 낸다 — 「하나도 재사용하지 않았다」도 사실이고, 툴팁이 규칙을 말한다. */
+export function designReuseLine(body) {
+  const r = body?.trim_reuse;
+  const text = reuseLine(r);
+  if (!text || (!r.reused && !r.computed)) return null;
+  return { text, tip: reuseTip(r) };
 }
 
 // ── 사유 코드 ──────────────────────────────────────────────────────────
