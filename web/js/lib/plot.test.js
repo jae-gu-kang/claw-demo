@@ -3,8 +3,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MARK_PAD,
   SERIES_COLORS,
   STATUS,
+  clampTextX,
+  insetScale,
+  tickAlign,
   fuelsOf,
   gainPlotGroups,
   HEATMAP_LAYOUT,
@@ -41,6 +45,38 @@ import {
   wpAlt,
   wpMarks,
 } from "./plot.js";
+
+// ── 그림 가장자리 (사용자 지적: 맨 위·맨 아래 점이 잘리고 글씨가 잘린다) ─────────────────────
+test("insetScale: 양 끝 값이 표지 여유만큼 안쪽 — 축은 여전히 참값을 가리킨다", () => {
+  // M-h 합성 선도의 실제 여백 (H 544 · mT 54 · mB 40)
+  const py = insetScale(0, 12000, 544 - 40, 54);
+  assert.equal(py(0), 544 - 40 - MARK_PAD, "맨 아래 고도가 프레임 선에 앉았다");
+  assert.equal(py(12000), 54 + MARK_PAD, "맨 위 고도가 프레임 선에 앉았다");
+  // 가장 큰 표지(반지름 4 + 고리 굵기)가 클립 사각형 안에 온전히 든다
+  for (const alt of [0, 6000, 12000]) {
+    assert.ok(py(alt) - 5 >= 54 && py(alt) + 5 <= 544 - 40, `표지가 클립에 잘린다: ${alt} m`);
+  }
+  assert.ok(MARK_PAD > 4, "여유가 가장 큰 표지 반지름보다 작다");
+  // 가운데는 선형 그대로(축이 늘어나지 않는다), 방향이 반대인 축도 같다
+  assert.equal(py(6000), (py(0) + py(12000)) / 2);
+  const up = insetScale(0, 10, 100, 300, 5);
+  assert.deepEqual([up(0), up(10)], [105, 295]);
+});
+
+test("tickAlign: 끝 눈금은 프레임 안으로 접는다", () => {
+  assert.equal(tickAlign(400, 56, 726), "center");
+  assert.equal(tickAlign(720, 56, 726), "right", "끝 눈금을 가운데 정렬로 두면 절반이 잘린다");
+  assert.equal(tickAlign(60, 56, 726), "left");
+  assert.equal(tickAlign(712, 56, 726, 5), "center", "여유를 줄이면 접지 않는다");
+});
+
+test("clampTextX: 글자 상자가 창을 넘으면 넘은 만큼만 민다 (정렬은 그대로)", () => {
+  assert.equal(clampTextX(400, "center", 60, 56, 726), 400, "안쪽은 그대로");
+  assert.equal(clampTextX(60, "right", 40, 56, 726), 96, "왼쪽으로 넘친 만큼만");
+  assert.equal(clampTextX(720, "left", 40, 56, 726), 686, "오른쪽으로 넘친 만큼만");
+  assert.equal(clampTextX(70, "center", 40, 56, 726), 76);
+  assert.equal(clampTextX(400, "left", 800, 56, 726), 400, "창보다 넓은 상자는 밀어도 소용없다 — 그대로 둔다");
+});
 
 test("linScale: 선형 사상·역방향 범위", () => {
   const s = linScale(0, 10, 0, 100);

@@ -129,3 +129,34 @@ test("vn 신호 — 끝 보고 앞에서 V-n 선도 절을 공용 revealPanel로
   assert.ok(reveal > 0 && done > reveal, "V-n 절을 굴리지 않고 보고한다");
   assert.doesNotMatch(src, /scrollIntoView/);
 });
+
+// ── 그림 가장자리 규약 (사용자 지적: 맨 위·맨 아래 점이 잘리고 글씨가 잘린다) ─────────────────────────
+//
+// 이 선도들은 가짜 서버로 그리게 하기엔 응답이 크고(선도 GET을 일부러 실패시킨다), 가짜 ctx는 textAlign을 기록하지
+// 않아 「글자 상자가 넘쳤나」를 그림에서 되읽을 수 없다. 판단 자체는 lib/plot.js(insetScale·tickAlign·clampTextX)에
+// 수치로 고정돼 있으므로, 여기서는 **네 선도가 그 판단을 지나는지**를 원문으로 대조한다 — 규약을 공유하니 한 곳만
+// 고치고 다른 곳이 어긋나는 것이 이 파일에서 막힐 일이다.
+const SRC = readFileSync(new URL("./envelope.js", import.meta.url), "utf8");
+
+test("네 선도의 세로 사상은 표지 여유를 둔다 — 프레임에 앉은 점이 없다 (원문 대조)", () => {
+  const inset = SRC.match(/const py = insetScale\(/g) ?? [];
+  assert.equal(inset.length, 4, "세로 사상 넷(M-h · V-n · α-M · 운용 한계)이 모두 insetScale이어야 한다");
+  assert.equal(SRC.match(/const py = linScale\(/g), null, "여유 없는 세로 사상이 남았다 — 끝 점이 클립에 잘린다");
+});
+
+test("가로축 눈금 숫자는 한 규약(xTick — tickAlign + clampTextX)을 지난다 (원문 대조)", () => {
+  // 직접 fillText로 바닥 눈금을 찍는 자리가 없어야 한다: 왼쪽 정렬 −10은 끝 눈금이 캔버스 밖으로 넘쳐 잘렸다
+  const raw = SRC.match(/ctx\.fillText\([^)]*,\s*px\(t\)[^)]*,\s*H - mB \+ 16\)/g) ?? [];
+  assert.deepEqual(raw, [], `바닥 눈금을 직접 찍는 자리가 남았다: ${raw.join(" · ")}`);
+  assert.equal((SRC.match(/xTick\(ctx,/g) ?? []).length, 4, "선도 넷의 가로 눈금이 모두 같은 규약을 써야 한다");
+  assert.match(SRC, /const xTick = \(ctx, text, x, y, \{ x0, x1, W \}\) => \{[\s\S]*tickAlign\(x, x0, x1\)[\s\S]*clampTextX\(/,
+    "xTick이 lib의 판단(tickAlign·clampTextX)을 쓰지 않는다");
+});
+
+test("그림 안 이름표는 프레임 안으로 물린다 — 클립에 잘리지 않는다 (원문 대조)", () => {
+  // 귀속 라벨(저속 쪽은 오른쪽 정렬이라 왼쪽 틀 밖으로 나간다) · 닫힌 경계 캡 이름(가운데 정렬) · α-M 이름표
+  assert.match(SRC, /const tx = inBox\(ctx, a\.text, a\.ax \+ \(side === "lo" \? -10 : 10\), align, mL \+ 2, W - mR - 2\);/);
+  assert.match(SRC, /haloText\(capLabel\(cap\.source\),\s*\n\s*inBox\(ctx, capLabel\(cap\.source\)/);
+  assert.match(SRC, /const nameAt = \(text, x, y\) => ctx\.fillText\(text, inBox\(/);
+  assert.match(SRC, /const inBox = \(ctx, text, x, align, x0, x1\) => clampTextX\(/);
+});

@@ -10,6 +10,38 @@ export function linScale(d0, d1, r0, r1) {
   return (v) => r0 + (v - d0) * k;
 }
 
+/** 점 표지의 여유 [px] — 가장 큰 표지(반지름 4 px + 굵기 1.4의 고리)보다 크게 잡는다. 사용자 지적: 맨 위·맨 아래
+ *  고도의 점이 프레임 선에 정확히 앉아 클립에 반이 잘려 안 보였다. */
+export const MARK_PAD = 6;
+
+/** 데이터→픽셀 사상에 **표지 여유**를 둔 스케일 — 양 끝 값이 그림 사각형에서 pad px 안쪽에 앉는다.
+ *
+ *  클립을 넓히거나 표지를 클립 밖에서 그리는 대신 사상을 안으로 물리는 쪽을 고른다: 클립을 넓히면 면 칠(빗금·틴트)이
+ *  프레임 밖으로 새고, 표지만 따로 그리면 「어디까지가 그림인가」가 단계마다 달라진다. 눈금 숫자는 여전히 같은 사상을
+ *  지나므로 **축이 거짓말하지 않는다** — 축 전체가 pad만큼 안으로 들어올 뿐이다.
+ *  from·to는 픽셀 양끝(세로축은 from = 아래 = 큰 수)이고 방향은 알아서 본다. */
+export function insetScale(d0, d1, from, to, pad = MARK_PAD) {
+  const d = Math.sign(from - to) || 1;
+  return linScale(d0, d1, from - d * pad, to + d * pad);
+}
+
+/** 가로축 눈금 숫자의 정렬 — 끝 눈금은 프레임 안으로 접는다. 가운데 정렬로 두면 첫·끝 눈금의 글자가 캔버스 밖으로
+ *  넘쳐 잘리고(왼쪽은 세로축 숫자와, 오른쪽은 보조축과 뭉친다), 왼쪽 정렬로 두면 끝 눈금이 통째로 잘린다. */
+export function tickAlign(x, x0, x1, slack = 14) {
+  if (x > x1 - slack) return "right";
+  if (x < x0 + slack) return "left";
+  return "center";
+}
+
+/** 글자의 닻을 [x0, x1] 안으로 물린다 — 그 정렬로 글자 상자(폭 w)가 경계를 넘으면 넘은 만큼만 옮긴다.
+ *  정렬을 바꾸지 않는다(바꾸면 지시선·닻과 글자의 관계가 끊긴다) — 자리만 민다. */
+export function clampTextX(x, align, w, x0, x1) {
+  const left = align === "right" ? x - w : align === "center" ? x - w / 2 : x;
+  if (w > x1 - x0) return x; // 상자가 창보다 넓다 — 밀어도 넘친다(호출측이 글을 줄일 일이다)
+  const shift = left < x0 ? x0 - left : left + w > x1 ? x1 - (left + w) : 0;
+  return x + shift;
+}
+
 export function niceTicks(min, max, n = 5) {
   if (!(max > min)) return [min];
   const span = max - min;

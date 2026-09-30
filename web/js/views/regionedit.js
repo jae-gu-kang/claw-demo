@@ -1,13 +1,16 @@
 /** 요구영역 편집 화면 (05 §11.13 이관 6단계 · 06 §10 ①) — 엔벨로프 탭 ① 선도 자리에 선다.
 
 숫자 표가 정본이다. 그림은 그 표를 서버 미리 보기(`POST /grid/region/preview` — 엔진이 검증·윤곽·기본 격자·영향을 낸다)로
-그린 것이고, 이번 단계엔 끌기가 없다 — 꼭짓점을 누르면 그 표 칸이 골라진다. 칸 쓰기 규칙(전체 연료 / 현재 연료만 ·
-경계표 세우기 · 오류 칸)은 lib/regionedit.js, 여기는 배선·그리기만.
+그린 것이다 — 꼭짓점을 누르면 그 표 칸이 골라지고, **좌우로 끌면 그 칸의 마하가 바뀐다**(고도는 표에서만 — 끌어서 고도를
+바꾸면 행 순서가 뒤바뀌어 422 경로 짝짓기가 손 안에서 흔들린다). 끌기는 타자의 대체가 아니라 덧붙임이고, 놓을 때의 값은
+타자와 **같은 길**(edit → applyCell)로 간다. 칸 쓰기 규칙(전체 연료 / 현재 연료만 · 경계표 세우기 · 오류 칸)과 끌기의
+눈금·창(dragGrab·dragMach)은 lib/regionedit.js, 여기는 배선·그리기만.
 
 화면 규약(사용자 지적): 그림 위엔 조작만([요구영역 편집] · 연료 칩 · 「전체 연료 / 현재 연료만」 · 저장 버튼) — 이름·값·
 수는 그림 아래 **캡션 한 줄**에, 설명은 툴팁에. 그림 안에는 글자를 쓰지 않는다(눈금 숫자는 여백).
 
-- 미리 보기는 입력마다 ~250 ms 뒤에 한 번. 차례(seq) 가드: 늦게 온 옛 답이 새 답을 덮지 않는다.
+- 미리 보기는 입력마다 ~250 ms 뒤에 한 번. 차례(seq) 가드: 늦게 온 옛 답이 새 답을 덮지 않는다. 끄는 동안엔 서버를
+  부르지 않는다 — 유령 윤곽·캡션 읽음만 그리고, 놓을 때 한 번 쓰면 그 뒤는 평소의 물린 미리 보기다.
 - 422 {path, message} → 그 칸 강조 + 캡션에 메시지. 수치가 아닌 칸은 보내지 않고 그 자리에서 말한다.
 - 미확정(저장본에 절이 없어 trim_grid 초안이거나, 저장하지 않은 편집) → 점선 윤곽 + 캡션 「미확정」.
 - [저장]/[확정] = `PUT /profiles/{id}/operating-region` (base_revision) — 저장이 곧 확정. [요구영역 지우기] = null.
@@ -27,10 +30,12 @@ import { boundColor, boundarySegments, requirementBands } from "../lib/envelope.
 import { niceTicks } from "../lib/plot.js";
 import { currentSelection, EXAMPLE_ID } from "../lib/profile.js";
 import {
-  SCOPE_ALL, SCOPE_LABEL, SCOPE_LAYER, addRow, applyCell, boundarySummary, errorCell, errorTarget, fuelChoices, hitVertex,
-  impactLine, impactTip, isLayerFuel, lineageRows, plotScale, removeRow, sameSection, shownFuels, tableRows, vertexCell,
-  workingFromRegion,
+  SCOPE_ALL, SCOPE_LABEL, SCOPE_LAYER, addRow, applyCell, boundarySummary, dragGrab, dragMach, errorCell, errorTarget,
+  fuelChoices, hitVertex, impactLine, impactTip, isLayerFuel, lineageRows, plotScale, removeRow, sameSection, shownFuels,
+  tableRows, vertexCell, workingFromRegion,
 } from "../lib/regionedit.js";
+// 클릭↔드래그 문턱은 지도 편집기와 같은 정본을 쓴다 — 여기 px을 따로 적으면 한쪽만 고쳐졌을 때 제스처가 갈린다
+import { isDrag } from "../lib/wpmap.js";
 import { makeCanvas } from "./plots.js";
 
 const W = 780;
@@ -52,6 +57,9 @@ const CONFIRM_TIP = "기체 문서(기본 형상)의 trim_grid에서 만든 초�
   + "δe_trim 표는 낡음이 됩니다 — 도출 기록(provenance.region)이 확정 여부·출처까지 대조하므로 초안에서 도출한 표는 "
   + "다시 도출해야 합니다";
 const near = (a, b) => Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) < 1e-9;
+const SIDE_NAME = { lo: "마하 하한", hi: "마하 상한" };
+const DRAG_TIP = "꼭짓점을 좌우로 끌면 그 표 칸의 마하가 바뀝니다 — 놓을 때 한 번, 표에 친 것과 똑같이 씁니다"
+  + "(「전체 연료 / 현재 연료만」도 그대로). Escape나 그림 밖에서 놓으면 쓰지 않습니다. 고도는 표에서 고칩니다";
 
 const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
 // 캡션·표의 수 — 적은 값 그대로(0.1을 0.1000으로 늘리지 않는다)
@@ -106,6 +114,9 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
   let focusId = null; // 포커스 칸 — {path} 또는 {fuel, alt, col}(재정렬돼도 같은 칸으로 되돌린다)
   let rebuild = null;
   let geom = null;
+  let cv = null; // 캔버스 한 장 {canvas, ctx} — 끌기 중 다시 만들지 않는다(setPointerCapture가 요소에 붙는다)
+  // 끌기 — {grab(lib dragGrab: 칸·창·눈금), scale(잡을 때의 축 — 얼린다), x0, from(잡은 값), mach, moved, pointerId}
+  let drag = null;
 
   // soft — 미리 보기 답: 표는 다시 짜지 않는다(타자 중인 칸의 글자·포커스를 지킨다). 표가 아직 없으면 짠다
   const view = {
@@ -244,6 +255,7 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
     const id = st.id;
     st.busy = true;
     st.message = null;
+    st.note = null; // 앞선 끌기·고르기 안내가 저장 알림 옆에 남지 않게
     clearTimeout(st.timer); // 저장 중 미리 보기가 끼면 저장 전 사본의 답이 저장 뒤 화면을 덮는다
     paintBar();
     paintMarks(); // 칸을 막는다 — 저장 중 타자가 저장 뒤 사본에 덮여 사라지지 않게
@@ -402,12 +414,26 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
     );
   }
 
+  // 캔버스는 **한 장을 지킨다** — 다시 만들면 setPointerCapture가 붙은 요소가 사라져 끌기가 손에서 끊긴다
+  // (views/wpmap.js·plot3d.js와 같은 규약). 그려진 것은 clearRect로 지운다
+  function ensureCanvas() {
+    if (cv) return cv;
+    cv = makeCanvas(W, H);
+    const { canvas } = cv;
+    canvas.style.touchAction = "none"; // 터치·펜도 끈다 — 스크롤이 제스처를 삼키지 않게
+    canvas.setAttribute("aria-label", "요구영역 선도 — 꼭짓점을 누르면 그 표 칸이 골라지고, 좌우로 끌면 그 칸의 마하가 "
+      + "바뀝니다(고도는 표에서 고칩니다)");
+    wireCanvas(canvas);
+    return cv;
+  }
+
   function paintCanvas() {
-    const { canvas, ctx } = makeCanvas(W, H);
+    const { canvas, ctx } = ensureCanvas();
     canvas.setAttribute("title", "가로 마하 · 세로 고도 [m] — 파란 면은 보이는 연료의 요구영역(점선이면 미확정), 빗금은 "
       + "모델 부족(공력 DB 마하 밖), 주황 점선 행은 요구 미정의, 점은 기본 격자(초록 고리 = 트림 저장소 수렴 기록, 회색 "
-      + "네모 = 모델 부족), 파란 네모는 경계표 꼭짓점 — 누르면 그 표 칸을 고릅니다");
-    clear(stage).append(canvas);
+      + "네모 = 모델 부족), 파란 네모는 경계표 꼭짓점 — 누르면 그 표 칸을 고르고, 좌우로 끌면 마하를 고칩니다");
+    if (stage.children?.[0] !== canvas) clear(stage).append(canvas);
+    ctx.clearRect(0, 0, W, H);
     const p = st.preview;
     const points = (p?.grid?.points ?? []).filter((q) => Math.abs(q.fuel - (st.fuel ?? NaN)) < 1e-9);
     geom = plotScale({ work: st.work, model: p?.model, points, width: W, height: H });
@@ -467,9 +493,7 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
     }
     // 요구영역 — 엔진 윤곽(보이는 연료)
     const ol = outline();
-    const band = { alt: ol.map((r) => r.alt), mach_lo: ol.map((r) => r.mach_lo), mach_hi: ol.map((r) => r.mach_hi),
-      state: ol.map((r) => r.state) };
-    const req = requirementBands({ band });
+    const req = bandsOf(ol);
     ctx.fillStyle = C.reqFill;
     for (const poly of req.polys) {
       ctx.beginPath();
@@ -534,15 +558,62 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
         ctx.fillRect(x(m) - s, y(r.alt) - s, 2 * s, 2 * s);
       }
     }
+    // 끄는 중 — 놓을 자리의 윤곽(유령 점선)과 그 꼭짓점만 이 자리에서 보인다(서버는 놓을 때 한 번 부른다).
+    // 사본(st.work)은 건드리지 않으므로 실선 윤곽이 지금 값으로 남아 무엇이 어디로 가는지 함께 보인다
+    if (drag?.moved && drag.mach != null) {
+      const ghost = ol.map((r) => (near(r.alt, drag.grab.alt) ? { ...r, [`mach_${drag.grab.side}`]: drag.mach } : r));
+      const gb = bandsOf(ghost);
+      ctx.strokeStyle = C.sel;
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([5, 3]);
+      for (const poly of gb.polys) {
+        ctx.beginPath();
+        poly.forEach((q, i) => (i ? ctx.lineTo(x(q.mach), y(q.alt)) : ctx.moveTo(x(q.mach), y(q.alt))));
+        ctx.closePath();
+        ctx.stroke();
+      }
+      for (const ln of gb.lines) {
+        ctx.beginPath();
+        ctx.moveTo(x(ln.mach0), y(ln.alt));
+        ctx.lineTo(x(ln.mach1), y(ln.alt));
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.fillStyle = C.sel;
+      ctx.fillRect(x(drag.mach) - 5, y(drag.grab.alt) - 5, 10, 10);
+    }
     ctx.restore();
+  }
 
-    canvas.addEventListener("click", (ev) => {
-      if (!geom) return;
+  const bandsOf = (rows) => requirementBands({ band: { alt: rows.map((r) => r.alt), mach_lo: rows.map((r) => r.mach_lo),
+    mach_hi: rows.map((r) => r.mach_hi), state: rows.map((r) => r.state) } });
+
+  // ── 꼭짓점 고르기·끌기 ──────────────────────────────────────────────────
+  // 누르면 고르고(옛 click과 같다), 좌우로 끌면 **마하만** 바뀐다. 고도를 끌지 않는 이유: 고도를 끌면 행 순서가 뒤바뀌고,
+  // 422의 행 색인 → 화면 칸 짝짓기(errorTarget)가 기대는 고도 오름차순이 손 안에서 흔들린다. 고도는 표 칸으로 고친다.
+  // 놓을 때 쓰는 값은 **타자와 같은 길**로 간다(edit → applyCell) — 전체 연료/현재 연료만, 경계표 세우기, 층 윤곽 거부,
+  // 물린 미리 보기, 422 칸 강조, 낡음 가드, 예제 기체 저장 막힘이 모두 그대로다
+  function wireCanvas(canvas) {
+    const at = (ev) => {
       const rect = canvas.getBoundingClientRect();
-      const px = (ev.clientX - rect.left) * (W / (rect.width || W));
-      const py = (ev.clientY - rect.top) * (H / (rect.height || H));
-      const hit = hitVertex(outline(), px, py, { x: geom.x, y: geom.y, r: 9 });
-      if (!hit) return;
+      return { px: (ev.clientX - rect.left) * (W / (rect.width || W)),
+        py: (ev.clientY - rect.top) * (H / (rect.height || H)) };
+    };
+    const inPlot = ({ px, py }) => !!geom && px >= geom.mL && px <= W - geom.mR && py >= geom.mT && py <= H - geom.mB;
+    // 히트테스트는 **그려진 꼭짓점과 같은 값**을 본다: 경계표 행은 편집 사본이 정본이고(방금 끈 값이 곧바로 다시
+    // 잡힌다 — 미리 보기가 돌아올 때까지 옛 자리에서만 잡히면 연속으로 끌 수 없다), 사본에 없는 고도(행 사이 보간)는
+    // 엔진 윤곽에서 온다 — 그 꼭짓점은 고르기만 되고 끌 칸이 없다(dragGrab이 거부한다)
+    function hitRows() {
+      const ol = outline();
+      const rows = tableRows(st.work, st.fuel, ol)
+        .filter((r) => Number.isFinite(r.lo) || Number.isFinite(r.hi))
+        .map((r) => ({ alt: r.alt, mach_lo: r.lo, mach_hi: r.hi, state: "in" }));
+      return [...rows, ...ol.filter((o) => !rows.some((r) => near(r.alt, o.alt)))];
+    }
+    const hitAt = (px, py) => (geom ? hitVertex(hitRows(), px, py, { x: geom.x, y: geom.y, r: 9 }) : null);
+
+    // 누른 꼭짓점의 표 칸을 고른다(끌지 않아도) — 골라진 칸에 타자할 수 있어야 끌기가 대체가 아닌 덧붙임이 된다
+    function select(hit) {
       const c = vertexCell(st.work, st.fuel, hit, outline());
       st.selected = c;
       st.note = c ? null : `고도 ${num(hit.alt)} m는 경계표 행이 아니다(행·층 사이 보간)`;
@@ -550,7 +621,91 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
       paintCaption();
       paintMarks();
       if (c) inputs.get(c)?.focus();
+      return c;
+    }
+
+    const onKey = (ev) => {
+      if (ev.key !== "Escape" || !drag) return;
+      ev.preventDefault?.();
+      endDrag(null, true);
+    };
+
+    function endDrag(ev, cancel) {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      globalThis.window?.removeEventListener?.("keydown", onKey);
+      if (ev && canvas.hasPointerCapture?.(ev.pointerId)) canvas.releasePointerCapture?.(ev.pointerId);
+      canvas.style.cursor = "default";
+      // 취소(Escape·그림 밖에서 놓기·pointercancel)거나 문턱을 넘지 않았으면 **아무것도 쓰지 않는다**
+      if (cancel || !d.moved || d.mach == null) {
+        if (cancel && d.moved) st.note = "끌기를 취소했습니다 — 아무것도 쓰지 않았습니다";
+        paintCanvas();
+        paintCaption();
+        return;
+      }
+      commitDrag(d);
+    }
+
+    // 놓을 때 한 번 — 타자와 같은 길(edit)로 쓴다. 표 칸의 글도 같이 바꿔 둔다(끌기와 타자가 같은 칸이다)
+    function commitDrag(d) {
+      const inp = inputs.get(d.grab.cell);
+      const text = String(d.mach);
+      if (inp) inp.value = text;
+      edit(d.grab.cell, text);
+      st.cellBase = null; // 한 번 쓰고 기준 사본을 놓는다 — 다음 끌기·타자는 새 기준(칸을 떠난 것과 같다)
+      if (!st.err) {
+        st.note = `끌어 고침 — 고도 ${num(d.grab.alt)} m ${SIDE_NAME[d.grab.side]} ${num(d.from)} → ${num(d.mach)}`
+          + (d.mach === d.grab.min || d.mach === d.grab.max ? " (한계에 물림)" : "");
+      }
+      paintTable(); // 경계표를 막 세웠으면(가상 행 → 실제 행) 표가 달라진다 — 고도 순서는 끌기로 바뀌지 않는다
+      paintCaption();
+    }
+
+    canvas.addEventListener("pointerdown", (ev) => {
+      if (ev.button != null && ev.button !== 0) return;
+      if (!geom || st.busy) return;
+      const { px, py } = at(ev);
+      const hit = hitAt(px, py);
+      if (!hit) return;
+      const cell = select(hit);
+      const grab = dragGrab(st.work, st.fuel, hit, outline());
+      if (!grab.cell) {
+        if (cell) {
+          st.note = grab.reason; // 고르기는 됐지만 끌 수는 없다 — 왜인지 캡션이 말한다
+          paintCaption();
+        }
+        return;
+      }
+      drag = { grab, scale: geom, x0: px, from: hit.mach, mach: hit.mach, moved: false, pointerId: ev.pointerId };
+      canvas.setPointerCapture?.(ev.pointerId);
+      globalThis.window?.addEventListener?.("keydown", onKey);
     });
+
+    canvas.addEventListener("pointermove", (ev) => {
+      const { px, py } = at(ev);
+      if (!drag) {
+        // 끌 수 있는 꼭짓점 위에서만 커서를 바꾼다(app.css는 건드리지 않는다 — wpmap 관례)
+        if (!st.busy) {
+          const h = hitAt(px, py);
+          canvas.style.cursor = h && dragGrab(st.work, st.fuel, h, outline()).cell ? "ew-resize" : "default";
+        }
+        return;
+      }
+      // 문턱(lib/wpmap DRAG_PX — 클릭↔드래그 판별의 정본)을 넘기 전엔 고르기다: 누르기만 해도 값이 눈금에 붙어
+      // 슬쩍 바뀌면(0.123 → 0.125) 고르려던 손이 문서를 고친다
+      if (!drag.moved && !isDrag(px - drag.x0, 0)) return;
+      drag.moved = true;
+      const m = dragMach(drag.grab, px, drag.scale);
+      if (m == null) return;
+      drag.mach = m;
+      paintCanvas();
+      paintCaption();
+    });
+
+    canvas.addEventListener("pointerup", (ev) => endDrag(ev, !inPlot(at(ev))));
+    canvas.addEventListener("pointercancel", (ev) => endDrag(ev, true));
+    canvas.addEventListener("keydown", onKey); // 캔버스가 포커스를 가진 경우에도 Escape
   }
 
   function paintCaption() {
@@ -603,7 +758,14 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
     } else if (p?.impact && w) {
       parts.push(tip(impactLine(p.impact, { changes: st.changes }), impactTip(p.impact)));
     }
-    if (st.note) parts.push(tip(st.note, ""));
+    // 끄는 중의 읽음 — 값은 캡션에만 둔다(그림 위엔 글자를 쓰지 않는다). 영향 줄은 늘리지 않는다(놓으면 그 줄이 다시 잰다)
+    if (drag?.moved && drag.mach != null) {
+      parts.push(tip(`끄는 중 — 고도 ${num(drag.grab.alt)} m ${SIDE_NAME[drag.grab.side]} ${num(drag.from)} → `
+        + `${num(drag.mach)}${drag.mach === drag.grab.min || drag.mach === drag.grab.max ? " (한계에 물림)" : ""}`
+        + " · 놓으면 씁니다", DRAG_TIP));
+    }
+    // 오류가 있으면 안내(끌어 고침 등)는 내지 않는다 — 방금 쓴 값을 서버가 거부했다면 말할 것은 ⚠ 한 줄이다
+    if (st.note && !st.err) parts.push(tip(st.note, ""));
     if (st.message) parts.push(tip(st.message, ""));
     clear(cap).append(...parts.flatMap((s, i) => (i ? [" · ", s] : [s])));
   }

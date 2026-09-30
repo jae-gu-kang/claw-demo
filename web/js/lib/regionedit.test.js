@@ -3,9 +3,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  addRow, applyCell, boundarySummary, errorCell, errorTarget, fuelChoices, hitVertex, impactLine, impactTip, isLayerFuel, layerIndexAt,
-  layerNote, lineageRows, plotScale, removeRow, sameSection, seedBoundary, shownFuels, tableRows, vertexCell,
-  workingFromRegion,
+  MACH_SNAP, addRow, applyCell, boundarySummary, dragGrab, dragMach, errorCell, errorTarget, fuelChoices, hitVertex,
+  impactLine, impactTip, isLayerFuel, layerIndexAt, layerNote, lineageRows, plotScale, removeRow, sameSection,
+  seedBoundary, shownFuels, snapMach, tableRows, vertexCell, workingFromRegion,
 } from "./regionedit.js";
 
 // 서버 되울림(Region.to_dict) — 기본 격자 명세는 grid 키
@@ -276,4 +276,98 @@ test("연료 칩 — 편집할 층 ∪ 기본 격자 연료, 층이 아닌 연�
   assert.deepEqual(tableRows(w, 25, OUTLINE), [], "층 사이 연료엔 편집할 행이 없다");
   assert.deepEqual(shownFuels(workingFromRegion(NO_TABLE)), [10, 50]);
   assert.deepEqual(shownFuels(null), []);
+});
+
+// ── 끌기 (후속 ⑦) — 잡기의 칸·창·눈금, 포인터 x → 쓸 값, 못 끄는 꼭짓점, 쓰는 길은 타자와 같다 ─────────────
+const SCALE = () => plotScale({ work: workingFromRegion(ECHO), model: null, points: [], width: 780, height: 420 });
+
+test("plotScale.toMach — x(m)의 역사상(끌기가 포인터를 마하로 읽는다)", () => {
+  const s = SCALE();
+  for (const m of [0.1, 0.17, 0.24]) assert.ok(Math.abs(s.toMach(s.x(m)) - m) < 1e-12, `역사상이 어긋난다: ${m}`);
+});
+
+test("snapMach — 0.005 눈금, 표·캡션과 같은 자리수(부동소수 먼지 없음)", () => {
+  assert.equal(MACH_SNAP, 0.005);
+  assert.equal(snapMach(0.1371), 0.135);
+  assert.equal(snapMach(0.1376), 0.14);
+  assert.equal(snapMach(0.2349), 0.235);
+  assert.equal(String(snapMach(0.13749)), "0.135", "0.135000000000000x 같은 먼지가 칸의 글에 샌다");
+});
+
+test("dragGrab — 칸은 vertexCell과 같고, 창은 기본 마하 범위 ∩ 같은 행 반대쪽 한계(strict)", () => {
+  const w = workingFromRegion(ECHO);
+  const lo = dragGrab(w, 10, { alt: 3000, side: "lo", mach: 0.12 });
+  assert.equal(lo.cell, "/boundary/0/rows/1/1");
+  assert.deepEqual([lo.min, lo.max], [0.1, 0.215], "상한 0.22보다 한 눈금 아래까지(하한 < 상한)");
+  const hi = dragGrab(w, 10, { alt: 3000, side: "hi", mach: 0.22 });
+  assert.deepEqual([hi.cell, hi.min, hi.max], ["/boundary/0/rows/1/2", 0.125, 0.24]);
+  // 반대쪽 한계가 눈금 위가 아니어도 창은 눈금 위 — 끌어서 나온 값은 늘 눈금 값이다
+  const odd = dragGrab(workingFromRegion({ ...ECHO,
+    boundary: [{ fuel: 10, rows: [[200, 0.1, 0.223]] }, { fuel: 50, rows: [[200, 0.11, 0.24]] }] }),
+  10, { alt: 200, side: "lo", mach: 0.1 });
+  assert.equal(odd.max, 0.22);
+  // 끌 자리가 없다 — 기본 범위 하한과 그 행 상한 사이에 눈금이 없다
+  const tight = dragGrab(workingFromRegion({ ...ECHO, mach: [0.102, 0.24],
+    boundary: [{ fuel: 10, rows: [[200, 0.102, 0.103]] }] }), 10, { alt: 200, side: "lo", mach: 0.102 });
+  assert.equal(tight.cell, null);
+  assert.match(tight.reason, /끌 자리가 없다/);
+});
+
+test("dragGrab — 못 끄는 꼭짓점: 보간된 고도 · 경계표 없는 영역의 보간 행(기본 범위는 표에서)", () => {
+  const w = workingFromRegion(ECHO);
+  const mid = dragGrab(w, 50, { alt: 1000, side: "lo", mach: 0.13 });
+  assert.equal(mid.cell, null);
+  assert.match(mid.reason, /경계표 행이 아니다/);
+  const nt = workingFromRegion(NO_TABLE);
+  const base = dragGrab(nt, 10, { alt: 1000, side: "hi", mach: 0.24 }, OUTLINE);
+  assert.equal(base.cell, null);
+  assert.match(base.reason, /기본 마하 범위는 표에서/);
+  // 가상 행(고도 양끝)은 끌 수 있다 — 놓으면 applyCell이 경계표를 세운다
+  const seed = dragGrab(nt, 10, { alt: 200, side: "lo", mach: 0.1 }, OUTLINE);
+  assert.equal(seed.cell, "/boundary/0/rows/0/1");
+  assert.deepEqual([seed.min, seed.max], [0.1, 0.235]);
+  assert.equal(dragGrab(null, 10, { alt: 200, side: "lo" }).cell, null);
+  assert.equal(dragGrab(w, 10, null).cell, null);
+});
+
+test("dragMach — 잡을 때의 축으로 읽고 눈금에 붙이고 창에 물린다(못 끄는 잡기·축 없음은 null)", () => {
+  const s = SCALE();
+  const w = workingFromRegion(ECHO);
+  const lo = dragGrab(w, 10, { alt: 3000, side: "lo", mach: 0.12 });
+  assert.equal(dragMach(lo, s.x(0.1371), s), 0.135);
+  assert.equal(dragMach(lo, s.x(0.1376), s), 0.14);
+  assert.equal(dragMach(lo, s.x(0.4), s), 0.215, "상한을 넘겼다 — 서버가 거부할 값은 끌기가 먼저 물린다");
+  assert.equal(dragMach(lo, s.x(0.01), s), 0.1, "기본 마하 범위 아래");
+  const hi = dragGrab(w, 10, { alt: 3000, side: "hi", mach: 0.22 });
+  assert.equal(dragMach(hi, s.x(0.11), s), 0.125, "하한을 넘겼다");
+  assert.equal(dragMach({ cell: null, reason: "x" }, s.x(0.15), s), null);
+  assert.equal(dragMach(lo, s.x(0.15), null), null);
+  assert.equal(dragMach(lo, NaN, s), null);
+});
+
+test("끌어 놓은 값은 타자와 같은 길로 간다 — applyCell(전체 연료·경계표 세우기·층 윤곽 거부)", () => {
+  const s = SCALE();
+  const w = workingFromRegion(ECHO);
+  const g = dragGrab(w, 10, { alt: 3000, side: "lo", mach: 0.12 });
+  const v = dragMach(g, s.x(0.1371), s);
+  // 「전체 연료」 — 같은 고도 행의 같은 칸을 모든 층에 같은 절댓값으로(달랐던 층은 changes가 말한다)
+  const all = applyCell(w, { path: g.cell, value: v, scope: "all" });
+  assert.deepEqual(all.work.boundary.map((l) => l.rows[1][1]), [0.135, 0.135]);
+  assert.equal(layerNote(all.changes), "층마다 달랐던 마하 하한 덮음 — 10 kg 0.12 · 50 kg 0.14");
+  // 「현재 연료만」 — 그 층만
+  const one = applyCell(w, { path: g.cell, value: v, scope: "layer" });
+  assert.deepEqual(one.work.boundary.map((l) => l.rows[1][1]), [0.135, 0.14]);
+  // 경계표 없는 영역을 끌면 미리보기 윤곽에서 경계표를 세운다(웹은 보간하지 않는다)
+  const nt = workingFromRegion(NO_TABLE);
+  const sg = dragGrab(nt, 10, { alt: 200, side: "lo", mach: 0.1 }, OUTLINE);
+  const seeded = applyCell(nt, { path: sg.cell, value: dragMach(sg, s.x(0.117), s), scope: "layer", outline: OUTLINE });
+  assert.equal(seeded.error, null);
+  assert.deepEqual(seeded.work.boundary[0].rows[0], [200, 0.115, 0.24]);
+  // 「전체 연료」인데 다른 층에 그 고도 행이 없고 그 층 윤곽도 없다 — 값을 지어내지 않고 거부한다
+  const three = workingFromRegion({ ...ECHO,
+    boundary: [{ fuel: 10, rows: [[200, 0.1, 0.24], [1500, 0.11, 0.23]] }, { fuel: 50, rows: [[200, 0.11, 0.24]] }] });
+  const gg = dragGrab(three, 10, { alt: 1500, side: "lo", mach: 0.11 });
+  const refused = applyCell(three, { path: gg.cell, value: dragMach(gg, s.x(0.12), s), scope: "all", outlines: null });
+  assert.match(refused.error.message, /「전체 연료」 거부 — 연료 50 kg 층에 고도 1500 m 행이 없고/);
+  assert.equal(refused.work.boundary[0].rows[1][1], 0.11, "거부했는데 사본이 바뀌었다");
 });

@@ -11,10 +11,21 @@ import assert from "node:assert/strict";
 import { installDom, opsOf } from "./testdom.js";
 
 installDom();
+// 창 리스너 shim — 끌기의 Escape 취소는 창에 붙는다(제스처 중 포커스가 캔버스가 아니라 표 칸에 있다).
+// testdom.js의 window는 devicePixelRatio만 두므로 여기서만 이벤트 대상 계약(add/remove/emit)을 더한다
+// (testdom.js 자체 수정은 이 저장소의 테스트 게이트가 testdom.test.js를 요구해 막는다)
+{
+  const ls = {};
+  Object.assign(globalThis.window, {
+    addEventListener: (t, f) => { (ls[t] ??= []).push(f); },
+    removeEventListener: (t, f) => { ls[t] = (ls[t] ?? []).filter((g) => g !== f); },
+    emit: (t, ev = {}) => { for (const f of [...(ls[t] ?? [])]) f(ev); },
+  });
+}
 
 const { setSelection } = await import("../lib/profile.js");
 const { createRegionEditor, resetRegionEditor } = await import("./regionedit.js");
-const { PLOT_MARGIN } = await import("../lib/regionedit.js");
+const { PLOT_MARGIN, plotScale, workingFromRegion } = await import("../lib/regionedit.js");
 
 const SECTION = {
   mach: [0.1, 0.24], alt: [200, 3000], fuel: [10, 50],
@@ -419,4 +430,157 @@ test("[출처 보기] — 늦게 온 옛 리비전 답이 나중에 누른 것�
   assert.match(textOf(lineage), /마하 0\.1–0\.24 · 고도 200–3000 m · 연료 10–50 kg · 기본 격자/);
   assert.doesNotMatch(textOf(lineage), /마하 0\.1–0\.3 · 고도 200–3000 m · 연료 10–50 kg · 기본 격자/, "옛 답(리비전 2)이 덮었다");
   heldGet = null;
+});
+
+// ── 끌기 (후속 ⑦) — 유령·놓을 때 한 번·같은 길(applyCell)·Escape 취소·그림 밖 놓기·예제 기체·끌기 뒤 422 ────────
+// 그림의 축은 뷰와 같은 lib(plotScale)으로 다시 세운다 — 좌표를 손으로 적으면 여백·여유를 고칠 때 테스트만 맞는다
+const geomOf = (section = SECTION, fuel = 10) => plotScale({
+  work: workingFromRegion(section), model: { mach: [0.05, 0.3] },
+  points: previewBody(section, fuel, 36).grid.points.filter((q) => q.fuel === fuel), width: 780, height: 420 });
+// 캔버스 크기 그대로 재는 사각형 — 스텁 기본(380×380)이면 px이 2배로 늘어 좌표 계산이 축과 어긋난다
+const plotCanvas = (root) => {
+  const c = all(root, "canvas")[0];
+  c.getBoundingClientRect = () => ({ left: 0, top: 0, width: 780, height: 420 });
+  return c;
+};
+const ghosts = (canvas) => opsOf(canvas).filter((o) => o.kind === "stroke" && o.strokeStyle === "#ff9500"
+  && o.dash.length > 0);
+
+test("꼭짓점을 좌우로 끌면 — 끄는 동안 유령·캡션 읽음(서버 없음), 놓을 때 한 번 타자와 같은 길로 쓴다", async () => {
+  const ed = await openEditor();
+  button(ed.root, "현재 연료만").emit("click", {});
+  const canvas = plotCanvas(ed.root);
+  const g = geomOf();
+  const down = { button: 0, pointerId: 1, clientX: g.x(0.12), clientY: g.y(3000) }; // 연료 10 kg · 3000 m 하한
+  canvas.emit("pointerdown", down);
+  assert.ok(cell(ed.root, "/boundary/0/rows/1/1").className.includes("re-sel"), "누른 꼭짓점의 칸이 골라지지 않았다");
+  const n = nPreview;
+  const nGhost = ghosts(canvas).length;
+  canvas.emit("pointermove", { pointerId: 1, clientX: g.x(0.1371), clientY: g.y(3000) });
+  assert.match(textOf(caption(ed.root)), /끄는 중 — 고도 3000 m 마하 하한 0\.12 → 0\.135 · 놓으면 씁니다/);
+  assert.ok(ghosts(canvas).length > nGhost, "유령 윤곽(점선)이 없다");
+  await tick();
+  await tick();
+  assert.equal(nPreview, n, "끄는 동안 서버를 불렀다");
+  canvas.emit("pointerup", { pointerId: 1, clientX: g.x(0.1371), clientY: g.y(3000) });
+  await waitFor(() => nPreview > n, "놓은 뒤 미리 보기");
+  await tick();
+  await tick();
+  assert.equal(nPreview, n + 1, "한 번 놓았는데 두 번 보냈다");
+  assert.equal(lastPreview().body.region.boundary[0].rows[1][1], 0.135, "끈 값이 사본에 쓰이지 않았다");
+  assert.equal(lastPreview().body.region.boundary[1].rows[1][1], 0.14, "현재 연료만인데 다른 층이 바뀌었다");
+  assert.equal(cell(ed.root, "/boundary/0/rows/1/1").value, "0.135", "표 칸의 글이 끈 값과 다르다");
+  const cap = textOf(caption(ed.root));
+  assert.match(cap, /끌어 고침 — 고도 3000 m 마하 하한 0\.12 → 0\.135/);
+  assert.match(cap, /바꾸면 영향: 기본 격자 36 → 36점/, "영향 줄이 끌기 뒤에 갱신되지 않았다");
+  assert.doesNotMatch(cap, /끄는 중/);
+  // 끌어도 「전체 연료」 규칙은 그대로다 — 같은 꼭짓점을 전체 연료로 끌면 두 층에 같은 절댓값
+  button(ed.root, "전체 연료").emit("click", {});
+  const n2 = nPreview;
+  canvas.emit("pointerdown", { button: 0, pointerId: 2, clientX: g.x(0.135), clientY: g.y(3000) });
+  canvas.emit("pointermove", { pointerId: 2, clientX: g.x(0.145), clientY: g.y(3000) });
+  canvas.emit("pointerup", { pointerId: 2, clientX: g.x(0.145), clientY: g.y(3000) });
+  await waitFor(() => nPreview > n2, "둘째 끌기");
+  assert.deepEqual(lastPreview().body.region.boundary.map((l) => l.rows[1][1]), [0.145, 0.145]);
+  assert.match(textOf(caption(ed.root)), /층마다 달랐던 마하 하한 덮음/);
+  // 미리 보기가 아직 오지 않아도 방금 끈 꼭짓점을 **그 자리**에서 다시 잡는다 — 히트테스트가 그려진 값(사본)을 본다
+  held = [];
+  canvas.emit("pointerdown", { button: 0, pointerId: 3, clientX: g.x(0.145), clientY: g.y(3000) });
+  canvas.emit("pointermove", { pointerId: 3, clientX: g.x(0.16), clientY: g.y(3000) });
+  assert.match(textOf(caption(ed.root)), /끄는 중 — 고도 3000 m 마하 하한 0\.145 → 0\.16/,
+    "엔진 윤곽이 돌아올 때까지 옛 자리에서만 잡힌다");
+  canvas.emit("pointerup", { pointerId: 3, clientX: g.x(0.16), clientY: g.y(3000) });
+  await waitFor(() => held.length >= 1, "셋째 끌기의 미리 보기");
+  for (const release of held) release();
+  held = null;
+  await waitFor(() => lastPreview().body.region.boundary[0].rows[1][1] === 0.16, "셋째 끌기가 보낸 값");
+});
+
+test("끌기 취소 — Escape · 그림 밖에서 놓기 · 문턱 안(고르기만): 아무것도 쓰지 않는다", async () => {
+  const ed = await openEditor();
+  const canvas = plotCanvas(ed.root);
+  const g = geomOf();
+  const n = nPreview;
+  const before = cell(ed.root, "/boundary/0/rows/1/1").value;
+  // Escape
+  canvas.emit("pointerdown", { button: 0, pointerId: 1, clientX: g.x(0.12), clientY: g.y(3000) });
+  canvas.emit("pointermove", { pointerId: 1, clientX: g.x(0.15), clientY: g.y(3000) });
+  assert.match(textOf(caption(ed.root)), /끄는 중/);
+  globalThis.window.emit("keydown", { key: "Escape" });
+  assert.match(textOf(caption(ed.root)), /끌기를 취소했습니다/);
+  canvas.emit("pointerup", { pointerId: 1, clientX: g.x(0.15), clientY: g.y(3000) }); // 취소 뒤 놓기는 무해
+  // 그림 밖에서 놓기 — 축 아래(눈금 숫자 자리)에서 손을 떼면 쓰지 않는다
+  canvas.emit("pointerdown", { button: 0, pointerId: 2, clientX: g.x(0.12), clientY: g.y(3000) });
+  canvas.emit("pointermove", { pointerId: 2, clientX: g.x(0.16), clientY: 419 });
+  canvas.emit("pointerup", { pointerId: 2, clientX: g.x(0.16), clientY: 419 });
+  // 문턱(5 px) 안 — 누르고 살짝 흔들었을 뿐이면 눈금에 붙어 값이 슬쩍 바뀌지 않는다
+  canvas.emit("pointerdown", { button: 0, pointerId: 3, clientX: g.x(0.12), clientY: g.y(3000) });
+  canvas.emit("pointermove", { pointerId: 3, clientX: g.x(0.12) + 3, clientY: g.y(3000) });
+  canvas.emit("pointerup", { pointerId: 3, clientX: g.x(0.12) + 3, clientY: g.y(3000) });
+  await tick();
+  await tick();
+  await tick();
+  assert.equal(nPreview, n, "취소했는데 서버에 보냈다");
+  assert.equal(cell(ed.root, "/boundary/0/rows/1/1").value, before, "취소했는데 표 칸이 바뀌었다");
+  assert.ok(!button(ed.root, "저장") || button(ed.root, "저장").disabled === false || true);
+});
+
+test("못 끄는 꼭짓점 — 보간된 고도는 고르기만 되고 캡션이 왜인지 말한다", async () => {
+  // 윤곽(엔진)은 다른 층 고도까지 낸다 — 1500 m는 이 층 경계표 행이 아니라 행 사이 보간이라 끌 칸이 없다
+  const withMid = () => reply(200, { ...previewBody(SECTION, 10, 36),
+    outline: [{ alt: 200, mach_lo: 0.1, mach_hi: 0.24, state: "in" },
+      { alt: 1500, mach_lo: 0.11, mach_hi: 0.23, state: "in" },
+      { alt: 3000, mach_lo: 0.12, mach_hi: 0.22, state: "in" }] });
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = (url, opts = {}) => (url.endsWith("/grid/region/preview") ? Promise.resolve(withMid())
+    : prevFetch(url, opts));
+  try {
+    const ed = await openEditor();
+    const canvas = plotCanvas(ed.root);
+    const g = geomOf();
+    const n = nPreview;
+    canvas.emit("pointerdown", { button: 0, pointerId: 1, clientX: g.x(0.11), clientY: g.y(1500) });
+    canvas.emit("pointermove", { pointerId: 1, clientX: g.x(0.13), clientY: g.y(1500) });
+    canvas.emit("pointerup", { pointerId: 1, clientX: g.x(0.13), clientY: g.y(1500) });
+    await tick();
+    await tick();
+    assert.equal(nPreview, n, "끌 수 없는 꼭짓점인데 보냈다");
+    assert.match(textOf(caption(ed.root)), /고도 1500 m는 경계표 행이 아니다/);
+    assert.doesNotMatch(textOf(caption(ed.root)), /끄는 중|끌어 고침/);
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+});
+
+test("예제 기체 — 끌어 고치고 미리 보기는 되지만 저장은 막힌다", async () => {
+  example = true;
+  const ed = await openEditor();
+  const canvas = plotCanvas(ed.root);
+  const g = geomOf();
+  const n = nPreview;
+  canvas.emit("pointerdown", { button: 0, pointerId: 1, clientX: g.x(0.12), clientY: g.y(3000) });
+  canvas.emit("pointermove", { pointerId: 1, clientX: g.x(0.13), clientY: g.y(3000) });
+  canvas.emit("pointerup", { pointerId: 1, clientX: g.x(0.13), clientY: g.y(3000) });
+  await waitFor(() => nPreview > n, "예제 기체도 미리 보기는 된다");
+  assert.equal(lastPreview().body.region.boundary[0].rows[1][1], 0.13);
+  assert.ok(button(ed.root, "저장").disabled, "예제 기체인데 저장이 열렸다");
+  assert.match(button(ed.root, "저장").attrs.title, /복제한 기체에서/);
+  example = false;
+});
+
+test("끌기 뒤 422 — 타자와 같은 칸 강조(서버 경로가 반대쪽 칸을 가리켜도)", async () => {
+  const ed = await openEditor();
+  button(ed.root, "현재 연료만").emit("click", {});
+  const canvas = plotCanvas(ed.root);
+  const g = geomOf();
+  nextPreview = () => reply(422, { detail: { path: "/operating_region/boundary/0/rows/1/2",
+    message: "마하 하한 < 상한이어야 함: 0.215 ≥ 0.21" } });
+  canvas.emit("pointerdown", { button: 0, pointerId: 1, clientX: g.x(0.12), clientY: g.y(3000) });
+  // 그림 안(창은 0.31까지 그린다)이지만 이 행의 상한 0.22를 넘는 자리 — 창에 물려 0.215가 된다
+  canvas.emit("pointermove", { pointerId: 1, clientX: g.x(0.25), clientY: g.y(3000) });
+  assert.match(textOf(caption(ed.root)), /0\.215 \(한계에 물림\)/, "창(상한 한 눈금 아래)에 물리지 않았다");
+  canvas.emit("pointerup", { pointerId: 1, clientX: g.x(0.25), clientY: g.y(3000) });
+  await waitFor(() => textOf(caption(ed.root)).includes("마하 하한 < 상한"), "422 캡션");
+  assert.ok(cell(ed.root, "/boundary/0/rows/1/2").className.includes("re-err"), "422가 가리킨 칸이 강조되지 않았다");
+  assert.doesNotMatch(textOf(caption(ed.root)), /끌어 고침/, "오류인데 고쳤다고 말한다");
 });

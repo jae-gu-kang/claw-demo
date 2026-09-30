@@ -410,5 +410,64 @@ export function plotScale({ work, model = null, points = [], width, height }) {
     mL, mR, mT, mB, width, height, domain: { mach: [m0, m1], alt: [a0, a1] },
     x: (m) => mL + ((m - m0) / (m1 - m0)) * (width - mL - mR),
     y: (a) => height - mB - ((a - a0) / (a1 - a0)) * (height - mT - mB),
+    // 역사상 — 끌기가 포인터 x를 마하로 읽는다(고도 역사상은 두지 않는다: 끌기는 마하만이다)
+    toMach: (px) => m0 + ((px - mL) / (width - mL - mR)) * (m1 - m0),
   };
+}
+
+/** 끌기의 마하 눈금 [Mach] — 고정 0.005다.
+ *
+ *  요구영역의 기본 격자 마하 간격((mach[1]-mach[0])/(n_mach-1) — 200 kg 예제로 0.047)을 쓰지 않는 이유: 그것은 **계산할
+ *  점의 좌표 간격**이고 경계값의 분해능이 아니다. 격자 간격에 붙이면 손으로 칠 수 있는 값(0.135)을 끌어서는 만들 수
+ *  없고, n_mach를 고치면 이미 끈 값의 자리가 따라 움직이는 것처럼 보인다. 0.005는 예제 범위(0.1–0.24)에서 약 28칸 ·
+ *  한 칸 약 23 px(W 780)이라 손으로 집기 쉽고, 십진 세 자리로 끝나 표 칸의 글(num — toPrecision(6))과 서버에 보내는
+ *  수가 타자한 값과 똑같이 적힌다. 범위가 아주 좁으면(0.02 등) 칸이 적어지지만 정확한 값은 그대로 표에서 친다. */
+export const MACH_SNAP = 0.005;
+
+// 눈금에 붙인 뒤 표·캡션과 같은 자리수(num — toPrecision(6))로 — 부동소수 먼지가 칸의 글·서버 값에 새지 않게
+const round6 = (v) => Number(Number(v).toPrecision(6));
+const stepDown = (v, step) => round6(Math.floor((v - step * 1e-6) / step) * step); // v보다 작은 가장 큰 눈금
+const stepUp = (v, step) => round6(Math.ceil((v + step * 1e-6) / step) * step); // v보다 큰 가장 작은 눈금
+
+/** 마하를 눈금에 붙인다. */
+export const snapMach = (mach, step = MACH_SNAP) => round6(Math.round(mach / step) * step);
+
+/** 끌기를 잡는다 — 꼭짓점 hit {alt, side} → {cell, alt, side, other, min, max, step}(끌 수 있다) 또는
+ *  {cell: null, reason}(못 끈다: 호출측이 캡션에 사유를 낸다).
+ *
+ *  창(min·max)은 **잡을 때 한 번** 잰다 — 끄는 동안 사본이 바뀌지 않으니(놓을 때 한 번 쓴다) 다시 잴 것도 없고,
+ *  얼려 두면 끌리는 점이 손에서 달아나지 않는다(views/wpmap.js 세로 프로파일과 같은 규약).
+ *
+ *  창은 서버 검증기(schema.py `_operating_region`)가 이 칸 하나에 대해 거부하는 것과 같다 — 기본 마하 범위 안
+ *  (`inside`)이고 같은 행의 하한 < 상한(strict). 그래서 끌어서는 그 두 가지로 422를 받지 않는다. 층을 넘는 규칙
+ *  (「전체 연료」가 다른 층 행의 반대쪽 한계를 넘는 경우)은 타자와 똑같이 서버가 본다 — 여기서 다르게 막으면
+ *  끌기와 타자의 규칙이 갈린다. */
+export function dragGrab(work, fuel, hit, outline = null, step = MACH_SNAP) {
+  if (!work || !hit) return { cell: null, reason: "끌 꼭짓점이 없다" };
+  const cell = vertexCell(work, fuel, hit, outline);
+  if (cell == null) return { cell: null, reason: `고도 ${fmtN(hit.alt)} m는 경계표 행이 아니다(행·층 사이 보간)` };
+  if (!cell.startsWith("/boundary/")) {
+    return { cell: null, reason: "기본 마하 범위는 표에서 고친다 — 끌기는 경계표 행의 꼭짓점만" };
+  }
+  const row = tableRows(work, fuel, outline).find((r) => same(r.alt, hit.alt));
+  const other = hit.side === "lo" ? row?.hi : row?.lo;
+  if (!Number.isFinite(other)) return { cell: null, reason: "그 행의 반대쪽 한계가 없다 — 표에서 먼저 채운다" };
+  const [b0, b1] = work.mach;
+  const min = hit.side === "lo" ? b0 : Math.max(b0, stepUp(other, step));
+  const max = hit.side === "lo" ? Math.min(b1, stepDown(other, step)) : b1;
+  if (!(min <= max)) {
+    return { cell: null, reason: `기본 마하 범위 ${fmtN(b0)}–${fmtN(b1)} 안에 ${COL_NAME[hit.side === "lo" ? 1 : 2]}을 `
+      + `끌 자리가 없다(반대쪽 한계 ${fmtN(other)}) — 표에서 고친다` };
+  }
+  return { cell, alt: hit.alt, side: hit.side, other, min, max, step };
+}
+
+/** 끄는 중 포인터 x [px] → 쓸 마하 — 잡을 때의 축(scale)으로 읽고, 눈금에 붙이고, 창에 물린다.
+ *  끌 수 없는 잡기·축이 없으면 null. */
+export function dragMach(grab, px, scale) {
+  if (!grab?.cell || !scale?.toMach) return null;
+  const raw = scale.toMach(px);
+  if (!Number.isFinite(raw)) return null;
+  const s = snapMach(raw, grab.step ?? MACH_SNAP);
+  return round6(Math.min(Math.max(s, grab.min), grab.max));
 }

@@ -44,7 +44,8 @@ import {
 } from "../lib/envelope.js";
 import { parseNumberList } from "../lib/grid.js";
 import { casesFromBaseGrid, untrimmedSummary } from "../lib/opspace.js";
-import { fuelsOf, linScale, massConditionNote, niceTicks, pivotCases } from "../lib/plot.js";
+import { clampTextX, fuelsOf, insetScale, linScale, massConditionNote, niceTicks, pivotCases, tickAlign }
+  from "../lib/plot.js";
 import { heatmapCanvas, makeCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
 import { createDrawers, drawerSection, tabStage, tabTop } from "./stage.js";
@@ -933,6 +934,18 @@ const placeholderHint = (body) => {
     "아님, 01 §2.6]: 기체 탭에서 실기체 프로파일을 만들어 고르면 그 값으로 계산. 폼에 값을 넣으면 그 값으로 계산.");
 };
 
+// 네 선도가 공유하는 글자 규약 (사용자 지적: 「글씨들 짤린 거 다 보이게」) — 판단은 lib/plot.js가 정본이다.
+// 가로축 눈금 숫자: 끝 눈금은 프레임 안으로 접고(tickAlign), 그래도 넘치면 닻을 민다(clampTextX).
+const xTick = (ctx, text, x, y, { x0, x1, W }) => {
+  const align = tickAlign(x, x0, x1);
+  ctx.textAlign = align;
+  // 접은 뒤에도 캔버스를 넘지 않게 닻을 민다 — 여백이 좁은 선도에서 첫·끝 눈금이 그렇다
+  ctx.fillText(text, clampTextX(x, align, ctx.measureText(text).width, 2, W - 2), y);
+  ctx.textAlign = "left";
+};
+// 그림 안 이름 — 정렬 그대로 닻만 그림 사각형 안으로 민다(지시선이 가리키는 곳은 그대로다)
+const inBox = (ctx, text, x, align, x0, x1) => clampTextX(x, align, ctx.measureText(text).width, x0, x1);
+
 // ── 합성 (M-h) ────────────────────────────────────────────────────────────
 
 function mhEnvelopeCanvas(mh, cells, gaps = []) {
@@ -947,7 +960,8 @@ function mhEnvelopeCanvas(mh, cells, gaps = []) {
   // 창 계산은 lib 정본 — renderMh의 "창 밖" 안내가 같은 창을 봐야 한 말이 된다
   const { xMin, xMax } = machWindow(b, r);
   const px = linScale(xMin, xMax, mL, W - mR);
-  const py = linScale(b.alt_min_used, b.alt_max_used, H - mB, mT);
+  // 세로는 표지 여유를 둔 사상 — 맨 아래·맨 위 고도의 점이 프레임 선에 앉아 반이 잘리지 않게(lib/plot insetScale)
+  const py = insetScale(b.alt_min_used, b.alt_max_used, H - mB, mT);
   // 채움 위에 얹히는 글자는 흰 테두리를 깔아야 읽힌다.
   // save/restore로 감싼다 — 안 그러면 흰 strokeStyle·굵기 3이 남아, 다음에 라벨
   // 뒤에 선을 긋는 사람이 흰 선을 보게 된다 (지금은 호출부마다 우연히 다시 세운다)
@@ -1150,7 +1164,9 @@ function mhEnvelopeCanvas(mh, cells, gaps = []) {
     // — 그 경우 안쪽으로 접는다. 라이브 확인 전에는 두 라벨 다 보이지 않았다
     const y = py(cap.alt);
     const above = y - 6, below = y + 13;
-    haloText(capLabel(cap.source), (px(cap.mach0) + px(cap.mach1)) / 2,
+    // 좌우도 같다 — 캡이 창 끝에 걸치면 가운데 정렬 글자의 절반이 클립된다
+    haloText(capLabel(cap.source),
+      inBox(ctx, capLabel(cap.source), (px(cap.mach0) + px(cap.mach1)) / 2, "center", mL + 2, W - mR - 2),
       cap.side === "top" ? (above < mT + 10 ? below : above)
         : (below > H - mB - 4 ? above : below),
       capColor(cap.source));
@@ -1289,16 +1305,18 @@ function mhEnvelopeCanvas(mh, cells, gaps = []) {
   for (const side of ["lo", "hi"]) {
     const group = spreadLabels(anchors.filter((a) => a.side === side), 15);
     for (const a of group) {
-      const tx = a.ax + (side === "lo" ? -10 : 10);
+      const align = side === "lo" ? "right" : "left";
+      // 닻이 프레임 가장자리면 글자가 클립에 잘린다(저속 쪽은 왼쪽 틀 밖으로 나간다) — 넘은 만큼만 안으로 민다
+      const tx = inBox(ctx, a.text, a.ax + (side === "lo" ? -10 : 10), align, mL + 2, W - mR - 2);
       ctx.strokeStyle = a.color;
       ctx.lineWidth = 0.8;
       ctx.beginPath(); // 지시선 — 라벨이 밀려도 어느 곡선인지 남는다
       ctx.moveTo(a.ax, a.ay);
       ctx.lineTo(tx, a.y - 3);
       ctx.stroke();
-      ctx.textAlign = side === "lo" ? "right" : "left";
+      ctx.textAlign = align;
       haloText(a.text, tx, a.y, a.color);
-      attrBoxes.push(textBox(tx, a.y, ctx.measureText(a.text).width, 11, side === "lo" ? "right" : "left"));
+      attrBoxes.push(textBox(tx, a.y, ctx.measureText(a.text).width, 11, align));
     }
   }
   ctx.textAlign = "left";
@@ -1373,9 +1391,7 @@ function mhEnvelopeCanvas(mh, cells, gaps = []) {
   for (const t of niceTicks(xMin, xMax, 7)) {
     // 끝 눈금은 프레임 안으로 접는다 — 가운데 정렬로 두면 우측 ft 축의 바닥 라벨과
     // 겹쳐 "0.350"과 "0"이 한 덩어리로 읽힌다 (마하 창이 좁을 때 라이브 확인)
-    const x = px(t);
-    ctx.textAlign = x > W - mR - 14 ? "right" : (x < mL + 14 ? "left" : "center");
-    ctx.fillText(fmt(t, 3), x, H - mB + 16);
+    xTick(ctx, fmt(t, 3), px(t), H - mB + 16, { x0: mL, x1: W - mR, W });
   }
   ctx.textAlign = "left";
   for (const t of niceTicks(b.alt_min_used, b.alt_max_used, 7)) {
@@ -1671,7 +1687,7 @@ function vnDiagramCanvas(body, { width = 780, height = 470 } = {}) {
   const nTop = L.n_ultimate_pos * 1.1;
   const nBot = L.n_ultimate_neg * 1.15;
   const px = linScale(V[0], vMax, mL, W - mR);
-  const py = linScale(nBot, nTop, H - mB, mT);
+  const py = insetScale(nBot, nTop, H - mB, mT); // 표지 여유 — 맨 위·맨 아래 하중배수가 프레임에 앉지 않게
   const interpAt = (arr) => (v) => {
     for (let i = 1; i < V.length; i += 1) {
       if (V[i] >= v) {
@@ -1886,9 +1902,7 @@ function vnDiagramCanvas(body, { width = 780, height = 470 } = {}) {
   // 축
   ctx.font = FONT_BASE;
   ctx.fillStyle = C.sub;
-  for (const t of niceTicks(V[0], vMax, 7)) {
-    ctx.fillText(`${Math.round(t)}`, px(t) - 10, H - mB + 16);
-  }
+  for (const t of niceTicks(V[0], vMax, 7)) xTick(ctx, `${Math.round(t)}`, px(t), H - mB + 16, { x0: mL, x1: W - mR, W });
   for (const t of niceTicks(nBot, nTop, 8)) {
     ctx.fillText(`${Math.round(t * 10) / 10}`, 8, py(t) + 3);
   }
@@ -1945,7 +1959,7 @@ function aeroCanvas(aero) {
   const aTop = Math.max(aero.db.alpha[1], ...aero.alpha_stall) + 0.06;
   const aBot = Math.min(aero.db.alpha[0], aero.trim_alpha_bounds?.[0] ?? 0) - 0.06;
   const px = linScale(xMin, xMax, mL, W - mR);
-  const py = linScale(aBot, aTop, H - mB, mT);
+  const py = insetScale(aBot, aTop, H - mB, mT); // 표지 여유(위·아래 끝 α)
 
   // 공력 DB 유효범위 박스 (α×Mach)
   ctx.fillStyle = C.dbTint;
@@ -1990,20 +2004,21 @@ function aeroCanvas(aero) {
 
   ctx.font = FONT_LABEL;
   ctx.fillStyle = C.stallLine;
-  ctx.fillText("실속 경계 α_stall(M)", px(aero.mach[2] ?? aero.mach[0]), py(aero.alpha_stall[2] ?? aero.alpha_stall[0]) - 8);
+  const box = { x0: mL + 2, x1: W - mR - 2 };
+  const nameAt = (text, x, y) => ctx.fillText(text, inBox(ctx, text, x, "left", box.x0, box.x1), y);
+  nameAt("실속 경계 α_stall(M)", px(aero.mach[2] ?? aero.mach[0]), py(aero.alpha_stall[2] ?? aero.alpha_stall[0]) - 8);
   ctx.fillStyle = C.protLine;
-  ctx.fillText(`보호선 (−${fmt(aero.alpha_margin, 3)} rad)`,
-    px(aero.mach[Math.floor(aero.mach.length / 2)]),
+  nameAt(`보호선 (−${fmt(aero.alpha_margin, 3)} rad)`, px(aero.mach[Math.floor(aero.mach.length / 2)]),
     py(aero.alpha_prot[Math.floor(aero.mach.length / 2)]) + 14);
   ctx.fillStyle = "#af52de";
-  ctx.fillText("공력 DB 유효범위", px(aero.db.mach[0]) + 6, py(aero.db.alpha[0]) - 6);
+  nameAt("공력 DB 유효범위", px(aero.db.mach[0]) + 6, py(aero.db.alpha[0]) - 6);
 
   ctx.strokeStyle = C.frame;
   ctx.lineWidth = 1;
   ctx.strokeRect(mL, mT, W - mL - mR, H - mT - mB);
   ctx.font = FONT_BASE;
   ctx.fillStyle = C.sub;
-  for (const t of niceTicks(xMin, xMax, 7)) ctx.fillText(fmt(t, 3), px(t) - 10, H - mB + 16);
+  for (const t of niceTicks(xMin, xMax, 7)) xTick(ctx, fmt(t, 3), px(t), H - mB + 16, { x0: mL, x1: W - mR, W });
   for (const t of niceTicks(aBot, aTop, 7)) ctx.fillText(fmt(t, 3), 8, py(t) + 3);
   ctx.fillText("Mach", W / 2 - 14, H - 8);
   ctx.font = FONT_TITLE;
@@ -2063,7 +2078,7 @@ function opsCanvas(b) {
   const xMin = 0;
   const xMax = b.mach_d + 0.06;
   const px = linScale(xMin, xMax, mL, W - mR);
-  const py = linScale(b.alt_min_used, b.alt_max_used, H - mB, mT);
+  const py = insetScale(b.alt_min_used, b.alt_max_used, H - mB, mT); // 표지 여유(위·아래 끝 고도)
 
   const yTop = b.alt_max != null ? py(b.alt_max) : mT;
   const yBot = b.alt_min != null ? py(b.alt_min) : H - mB;
@@ -2107,7 +2122,7 @@ function opsCanvas(b) {
   ctx.strokeRect(mL, mT, W - mL - mR, H - mT - mB);
   ctx.font = FONT_BASE;
   ctx.fillStyle = C.sub;
-  for (const t of niceTicks(xMin, xMax, 7)) ctx.fillText(fmt(t, 3), px(t) - 10, H - mB + 16);
+  for (const t of niceTicks(xMin, xMax, 7)) xTick(ctx, fmt(t, 3), px(t), H - mB + 16, { x0: mL, x1: W - mR, W });
   for (const t of niceTicks(b.alt_min_used, b.alt_max_used, 6)) ctx.fillText(`${Math.round(t)}`, 6, py(t) + 3);
   ctx.fillText("Mach", W / 2 - 14, H - 8);
   ctx.font = FONT_TITLE;
