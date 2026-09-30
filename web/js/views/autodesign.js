@@ -1051,7 +1051,8 @@ function renderResult(box, body, resultId, ctx) {
     store.set("gainTables", payload.tables && JSON.parse(JSON.stringify(payload.tables)));
     store.set("gainScheduleOff", payload.scheduleOff);
     // 출처 — 게인 탭이 되읽을 때 "무엇이 걸려 있는지"를 이름으로 말해 준다
-    store.set("gainTablesSource", { kind: "autodesign", resultId });
+    store.set("gainTablesSource", { kind: "autodesign", resultId,
+      profile: { id: body.profile?.id ?? EXAMPLE_ID, variant: body.profile?.variant ?? null } });
 
     // **상수 자리도 함께 채택한다.** 적합이 평탄하다고 판정한 자리는 테이블이 아니라
     // 상수로 나오는데(gain_export.constants), 그걸 빠뜨리면 시뮬·Autocode가 새 스케줄과

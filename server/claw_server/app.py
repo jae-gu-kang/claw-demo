@@ -17,11 +17,13 @@ from claw_server import sessions
 from claw_server.auth import BasicAuthProtect, SessionAuthProtect
 from claw_server.jobs import JobManager
 from claw_server.profiles import ProfileStore
+from claw_server.design_entities import DesignEntityStore
 from claw_server.routes import admin as admin_routes
 from claw_server.routes import analysis as analysis_routes
 from claw_server.routes import auth as auth_routes
 from claw_server.routes import codegen as codegen_routes
 from claw_server.routes import design as design_routes
+from claw_server.routes import design_entities as design_entities_routes
 from claw_server.routes import gains as gains_routes
 from claw_server.routes import influence as influence_routes
 from claw_server.routes import jobs as jobs_routes
@@ -165,6 +167,7 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
         profile_dir if profile_dir is not None
         else os.environ.get("CLAW_PROFILE_DATA") or Path(data_root) / "profiles"
     )
+    app.state.design_entities = DesignEntityStore(Path(data_root) / "design_entities")
     app.state.profile_volatile = _flag(
         profile_volatile if profile_volatile is not None else os.environ.get("CLAW_PROFILE_VOLATILE", ""))
     for router in (
@@ -185,6 +188,7 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
         influence_routes.router,
         verify_routes.router,
         design_routes.router,
+        design_entities_routes.router,
         world_routes.router,
         # LLM 프록시(초안·브리핑·교신·질문) — 이 리포의 유일한 런타임 아웃바운드
         # (routes/llm.py 머리말). 목적지는 Anthropic 또는 사내 OpenAI 호환 서버,

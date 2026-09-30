@@ -618,6 +618,11 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
         payload["trim_reuse"] = reuse
         payload["trim_retry"] = retried
         payload["profile"] = profile_echo(profile)
+        # 설계 버전에 붙일 때 실제로 평가한 형상과 대조한다. 옛 결과에는 이 기록이 없으므로
+        # 버전 일치를 증명할 수 없고, 그 결과는 연결 API가 거절한다.
+        shape_keys = ("gain_tables", "scas", "autopilot", "with_schedule", "with_limiter")
+        payload["design_input"] = to_jsonable({key: getattr(req, key) for key in shape_keys
+                                                 if key in req.model_fields_set})
         payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         # 본문의 "criteria"는 엔진이 실은 기준 전문(화면이 판정선을 읽는다)이다 — 기준 블록은 모든 라우트가 본문·meta
         # 둘 다 "criteria_echo"로 싣는다(이름 하나로 화면이 결과 종류를 가리지 않고 대조한다)

@@ -352,7 +352,7 @@ export function render() {
     const payload = applied && JSON.parse(JSON.stringify(applied));
     store.set("gainTables", payload);
     store.set("gainScheduleOff", scheduleOff);
-    store.set("gainTablesSource", { kind: "gains" });
+    store.set("gainTablesSource", { kind: "gains", profile: currentSelection() ?? { id: EXAMPLE_ID, variant: null } });
     markSeen();
     adopted = null; // 이제 이 화면이 곧 적용된 형상이다 — 되읽기 배너를 내린다
     // 끈 자리의 상수 — 블록도 폼이 읽는 바로 그 스토어. 여기서 고친 값이 저기 보인다

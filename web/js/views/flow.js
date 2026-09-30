@@ -54,6 +54,7 @@ import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.j
 import { store } from "../store.js";
 import { mount as remountHeaderPick } from "./profilepick.js";
 import { tabStage, tabTop } from "./stage.js";
+import { recordFlowResult, renderDesignEntities } from "./designentities.js";
 
 // 단계 기록·실행 상태 — 탭 재진입에도 유지(모듈 스코프 규약). 기체 전환은 페이지를 다시 읽으므로
 // (06 §8) 이 상태는 본질적으로 "지금 고른 기체"의 것이다.
@@ -65,6 +66,7 @@ let flowStatus = ""; // 상태줄 — paint가 그린다(늦은 콜백이 옛 DO
 let flowError = null;
 let profileRows = null; // GET /profiles — 이름·확정 표 상태·낡음 대조 재료 (실행 뒤마다 새로 받음)
 let resultMetas = null; // GET /results — 엔티티 막대 목록의 ③④⑤ 칸 재료(최근순 meta). null = 못 받음
+let designEntities = []; // 장기 보존 설계안 — 결과 저장소의 보존 상한과 별개
 // 펼쳐 놓은 엔티티 키("id" | "id::variant") — 그 막대 아래에 두 저장소 패널이 선다.
 // 실행 칸은 **한 벌**이다: 러너가 전부 currentSelection()을 읽으므로 엔티티를 열 때 헤더 선택도 맞춘다.
 let entityOpen = null;
@@ -85,15 +87,17 @@ let criteriaNow = null;
 
 const refreshRows = async () => {
   const pid = selectedId();
-  const [rows, crit, metas] = await Promise.all([
+  const [rows, crit, metas, designs] = await Promise.all([
     api.get("/profiles").catch(() => null), // 못 받으면 낡음 대조·확정 표 상태 없이 판정 줄만 — 다음 새로고침이 잡는다
     api.get(`/profiles/${encodeURIComponent(pid)}/criteria`).catch(() => null),
-    // 엔티티 막대 목록의 재료 — 이 탭이 이미 부르던 둘뿐이다(overview가 최근 결과를 찾을 때 쓰던 그 목록)
+    // 실행 막대는 기체·결과 목록, 펼친 설계안은 별도 영속 목록에서 읽는다.
     api.get("/results").catch(() => null),
+    api.get("/design-entities").catch(() => []),
   ]);
   profileRows = rows;
   criteriaNow = crit?.echo ?? null;
   resultMetas = metas;
+  designEntities = designs;
 };
 
 /** 목록의 [열기] — 이 엔티티를 **헤더 선택으로 삼고** 그 줄 아래에 레일을 펼친다.
@@ -242,7 +246,19 @@ const runDesign = async (seq) => {
     set(seq, "design", { state: "done", verdict: v, echo: null, resultId: null, report: null });
     return v;
   }
-  return settleDesign(seq, done.result_id);
+  const verdict = await settleDesign(seq, done.result_id);
+  try {
+    if (await recordFlowResult({ id: selectedId(), variant: selectedVariant() },
+      designEntities, "design", done.result_id)) {
+      flowStatus = "자동 설계 결과를 열린 설계안의 새 버전으로 저장했습니다";
+      await refreshRows();
+      repaint();
+    }
+  } catch (e) {
+    flowStatus = `자동 설계 결과는 저장됐지만 설계안 연결은 실패했습니다 — ${errorText(e)}`;
+    repaint();
+  }
+  return verdict;
 };
 
 /** 자동 설계 결과 하나를 이 단계의 기록으로 — 이 탭이 돈 실행과 개요(overview)가 싣는 최근 결과가
@@ -288,6 +304,17 @@ const runEval = async (seq) => {
   const v = { ...judged, text: [judged.text, pts, reuse, retry].filter(Boolean).join(" · ") };
   set(seq, "eval", { state: "done", verdict: v, resultId: done.result_id,
     echo: body.profile ?? null, critEcho: body.criteria_echo ?? null, critKind: "influence_evaluate" });
+  try {
+    if (await recordFlowResult({ id: selectedId(), variant: selectedVariant() },
+      designEntities, "eval", done.result_id)) {
+      flowStatus = "평가 결과를 열린 설계안의 최신 버전에 연결했습니다";
+      await refreshRows();
+      repaint();
+    }
+  } catch (e) {
+    flowStatus = `평가 결과는 저장됐지만 설계 버전과 연결하지 못했습니다 — ${errorText(e)}`;
+    repaint();
+  }
   return v;
 };
 
@@ -502,7 +529,7 @@ export function render() {
           el("div", { class: "f-top" }), el("div", { class: "f-side" }),
           el("div", { class: "f-front" },
             el("span", { class: "fd-stage-num" }, String(i + 1)),
-            el("span", { class: "fd-stage-label" }, s.label),
+            el("span", { class: "fd-stage-label" }, s.key === "design" ? "설계" : s.label),
             s.manual ? el("span", { class: "fd-manual" }, "수동 관문") : null),
           el("div", { class: "fd-ground" }))));
       controls.append(el("div", { class: "fd-panel fd-control", "data-key": s.key,
@@ -529,7 +556,8 @@ export function render() {
                     ?? "이 흐름의 자동 설계 결과를 문서(law.gain_tables) 새 리비전으로 반영한다 — 정본 되쓰기",
                   onclick: () => runApply().catch(showErr),
                 }, "문서에 반영")
-              : el("button", { disabled: running, onclick: () => runOne(s.key) }, "실행"),
+              : el("button", { disabled: running, onclick: () => runOne(s.key) },
+                s.key === "design" ? "자동 실행" : "실행"),
             el("a", { href: s.tab }, "탭 열기 →")),
           el("div", { class: "fd-art" },
             el("span", { class: "fd-art-t" }, "저장"),
@@ -668,6 +696,7 @@ export function render() {
             el("div", {}, el("strong", {}, `${r.label} 저장 설계값`),
               el("span", {}, "트림 저장소와 게인 3층을 현재 정본 기준으로 조회했습니다")),
             el("button", { class: "secondary", onclick: () => toggleEntity(r) }, "닫기")),
+          renderDesignEntities(r, designEntities, resultMetas, refreshRows, repaint),
           storePanels()));
       }
     }
@@ -779,7 +808,7 @@ export function render() {
   return el("div", { class: "tab-page" },
     tabTop({
       title: "설계 흐름",
-      lead: "헤더에서 고른 기체를 사슬 하나로: 검증 → 엔벨로프 → 초기 게인 → 자동 설계 → 평가 → "
+      lead: "헤더에서 고른 기체를 사슬 하나로: 검증 → 엔벨로프 → 초기 게인 → 설계 → 평가 → "
         + "채택·문서 반영. 실행은 자동으로 잇고, 정본에 쓰는 마지막 관문만 사람이 누릅니다.",
       actions: [el("button", { class: "primary", disabled: running,
         onclick: () => runAll().catch(showErr) }, running ? "실행 중…" : "끝까지 실행")],
