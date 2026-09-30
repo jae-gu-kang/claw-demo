@@ -19,7 +19,9 @@
   완료분을 보존한 채 멈춘다 (JobManager 협조적 취소 패턴).
 """
 
+import copy
 import math
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -54,9 +56,36 @@ from claw.design.points import (
     was_midpoint,
 )
 from claw.design.refine import refine_trim_points
-from claw.design.schedmap import margin_delta, scheduled_margin_map, validation_candidates, validation_points
+from claw.design.reinforce import (
+    DEFAULT_REINFORCE,
+    check_reinforce_config,
+    d_distribution,
+    d_scale_sources,
+    d_scales,
+    reinforce_candidates,
+    reinforce_status,
+    segment_d,
+)
+from claw.design.schedmap import (
+    _worst_failures,
+    margin_delta,
+    scheduled_margin_map,
+    validation_candidates,
+    validation_points,
+)
+from claw.design.validation import (
+    DEFAULT_VALIDATION,
+    PLAN_ONLY_STATES,
+    VALIDATION_KINDS,
+    check_validation_config,
+    entry_state,
+    summary_grid,
+    validation_conditions,
+    validation_plan,
+)
 from claw.design.tune import REASON_TEXT, TuneTargets, failed_gain_slots, tune_points
 from claw.env import isa_atmosphere
+from claw.opspace.states import NOT_RUN
 from claw.opspace.verdict import VerdictContext
 from claw.tables import PolyTable, Table
 
@@ -104,6 +133,12 @@ def _grid_spec(grid: dict, n_mach=None, alts=None, fuels=None) -> dict:
     return {"n_mach": int(grid["n_mach"] if n_mach is None else n_mach),
             "alts": sorted({float(a) for a in (grid["alts"] if alts is None else alts)}),
             "fuels": sorted({float(f) for f in (grid["fuels"] if fuels is None else fuels)})}
+
+
+# 계획한 검증점 실패의 처리 — 부모 결정(이관 4단계 리뷰): 요청한 영역 어디서든 실패는 실제 실패라 CLASSIFY로 간다
+CLASSIFY_PLAN_NOTE = ("계획한 검증점(경계·clip·절점·추가 조건·검증조건 행·보강·이전 계획) 어디서든 실패는 CLASSIFY 처방 대상이다 —"
+                      " 요구영역 안 실패는 실제 실패다. 처방 근거에 그 점의 계획 종류·출처가 붙고, gated 모드는 처방마다 승인을"
+                      " 받는다")
 
 
 @dataclass
@@ -163,6 +198,12 @@ class AutoDesignConfig:
     # 요구영역 기본 격자의 공통 마하 좌표(knots.DEFAULT_KNOTS). 절점은 설계점과 독립이라 REFINE·편입이 점을 늘려도 표의
     # 분할점은 그대로고, 늘리는 길은 CLASSIFY의 add_knot 처방뿐이다(상한 max_per_table)
     knots: dict = field(default_factory=lambda: dict(DEFAULT_KNOTS))
+    # 검증점 생성 규칙 (05 §11.6 · 이관 4단계) — {"rule", "conditions", "mode", "boundary", "extras"}(validation.py). 새 기본은
+    # rule "plan"(생성 절차 전부), "midpoint"는 v1.70 규칙 그대로다 — 설정이 없는 저장본(v1.70 이전 세션)은 from_dict가
+    # midpoint로 읽는다(재개한 세션의 검증점이 조용히 바뀌지 않게)
+    validation: dict = field(default_factory=lambda: copy.deepcopy(DEFAULT_VALIDATION))
+    # 보강 (05 §11.7) — {"tol", "max_points", "max_depth", "max_time_s"}(reinforce.py). tol None = 이분 없이 d 분포만 [기본값]
+    reinforce: dict = field(default_factory=lambda: dict(DEFAULT_REINFORCE))
 
     def __post_init__(self):
         if self.mode not in ("gated", "auto"):
@@ -207,6 +248,8 @@ class AutoDesignConfig:
         if self.delay_s < 0 or self.pade_order < 1:
             raise ValueError("delay_s는 음수 불가, pade_order는 1 이상")
         self.knots = check_knots_config(dict(self.knots))
+        self.validation = check_validation_config(copy.deepcopy(dict(self.validation)))
+        self.reinforce = check_reinforce_config(dict(self.reinforce))
         self._check_targets_meet_criteria()
 
     # 충돌 수준별 사유 — 합격선 충돌은 거절(ValueError)의 사유, 권장선 충돌은 경고 문구의 꼬리다
@@ -261,6 +304,8 @@ class AutoDesignConfig:
         d["fuels"] = list(self.fuels) if self.fuels is not None else None
         d["sched_axes"] = list(self.sched_axes)
         d["knots"] = {k: (list(v) if isinstance(v, (list, tuple)) else v) for k, v in self.knots.items()}
+        d["validation"] = copy.deepcopy(self.validation)
+        d["reinforce"] = dict(self.reinforce)
         d["criteria"] = self.criteria.to_dict()
         d["targets"] = self.targets.to_dict()
         return d
@@ -271,6 +316,10 @@ class AutoDesignConfig:
         # 절점 설정이 없는 저장본은 이관 3단계 전 세션이다 — 그때 표는 튜닝한 마하마다 분할점이었다(samples 규칙).
         # 새 기본값(base_axis)으로 읽으면 재개한 세션의 표 형상이 조용히 바뀐다
         d.setdefault("knots", {**DEFAULT_KNOTS, "rule": "samples"})
+        # 검증점 설정이 없는 저장본은 이관 4단계 전 세션이다 — 그때 검증점은 설계점 행의 절점 구간 내분점뿐이었다(midpoint 규칙).
+        # 새 기본값(plan)으로 읽으면 재개한 세션에 경계점·clip 점이 조용히 붙는다
+        d.setdefault("validation", {**copy.deepcopy(DEFAULT_VALIDATION), "rule": "midpoint"})
+        d.setdefault("reinforce", dict(DEFAULT_REINFORCE))
         d["criteria"] = MarginCriteria.from_dict(d["criteria"])
         d["targets"] = TuneTargets.from_dict(d["targets"])
         for k in ("alts", "fuels", "sched_axes"):
@@ -460,6 +509,14 @@ class DesignSession:
         # 검증 후보 중 이미 설계점인 자리 수(마지막 VERIFY) — 그 설계점이 그 구간의 검증을 겸한다
         self.validation_moved = 0
         self.validation_unplaceable = 0
+        # 검증점 계획(05 §11.6 — rule "plan") — 마지막 VERIFY의 계획 항목 전부(validation.validation_plan의 entries + 보강 항목,
+        # 항목마다 added: 이 계획이 점 집합에 넣었는가). 계획에만 남는 점(요구영역 밖·미정의·모델 부족)과 예산에 막힌 점도
+        # 여기 남는다 — 요약 격자의 분모다. meta는 검증조건·조합 방식·생략 행, reinforce_state는 보강 상태·추가점·걸린 시간
+        self.validation_plan: list = []
+        self.validation_meta: dict = {}
+        self.reinforce_state: dict = {}
+        # 보강 시간 예산(max_time_s)을 재는 시계 — 테스트가 바꿔 끼운다(직렬화하지 않는다)
+        self._clock = time.monotonic
         # COARSE 격자 출처 — "region_base_grid"(요구영역 기본 격자, 이관 2단계) | "coarse_grid"(요구영역 없는 기체의 옛 경로)
         # | None(COARSE 전·옛 세션). region_grid는 그 기본 격자 기록(점마다 트림 전 상태·선택 여부, 행, 선택 규칙 결과) —
         # 요구영역 커버리지(region_coverage)의 분모다. 옛 경로면 None
@@ -752,6 +809,33 @@ class DesignSession:
         # 트림 전 제외 점은 행·범위에 들지 않는다 — 설계하지 않은 점 쪽으로 검증점을 늘리지 않는다
         view = self.points.designable()
         union = union_knots(self.knot_sets, self.table_knots)
+        if c.validation["rule"] == "midpoint":
+            self._add_midpoint_validation(view, union)
+        else:
+            self._add_planned_validation(view, union)
+        design_eff = {**self.design, **self.sched_constants}
+        out = scheduled_margin_map(
+            aircraft, self.points.designable(), self.lms, self.sched_tables, design_eff,
+            # targets는 λ 판정에만 쓴다 — 롤 대역폭 요구가 튜닝 목표에서 온다.
+            # 튜닝과 검증이 **같은 목표**를 보게 하는 유일한 배선이다
+            criteria=c.criteria, targets=c.targets, trims=self.trims,
+            ctx=self.verdict_ctx, fingerprint=fingerprint,
+            on_progress=lambda d, t, m: cb(d, t, m), **self._act_kw(),
+        )
+        if out["aborted"]:
+            raise _Cancelled()
+        self.margin_out = out
+        if c.validation["rule"] != "midpoint":
+            self._reinforce(aircraft, fingerprint, cb, union)
+        # 새 판정이 나왔으니 직전에 반영한 처방들을 채점한다 — "applied"만 찍고
+        # 결과를 안 보면 무효 처방이 예산을 태우는 것을 아무도 모른다
+        self._score_applied_actions()
+        self.stage = "CLASSIFY"
+
+    def _add_midpoint_validation(self, view, union):
+        """v1.70 검증점 규칙(rule "midpoint") — 설계점 행의 채택 설계점 마하 범위 안 절점 구간 내분점 + 고도·연료 축 인접쌍
+        내분점. 옛 세션 재개가 같은 검증점을 내게 그대로 둔다(비트 단위 — 테스트가 고정한다)."""
+        c = self.config
         wanted = validation_points(view, union, n_between=c.n_validation_between)
         # 내분점 자리에 설계점이 있어 옮긴 수·빈 자리를 못 찾은 구간 수 — 정보용이다. 설계점은 적합의 표본이라 그 자리
         # 판정은 적합 잔차지 보간 검증이 아니다 — 검증 수에 더하지 않는다
@@ -765,22 +849,134 @@ class DesignSession:
             self.points.add(pt)
             added += 1
         self.validation_added = added
-        design_eff = {**self.design, **self.sched_constants}
-        out = scheduled_margin_map(
-            aircraft, self.points.designable(), self.lms, self.sched_tables, design_eff,
-            # targets는 λ 판정에만 쓴다 — 롤 대역폭 요구가 튜닝 목표에서 온다.
-            # 튜닝과 검증이 **같은 목표**를 보게 하는 유일한 배선이다
-            criteria=c.criteria, targets=c.targets, trims=self.trims,
-            ctx=self.verdict_ctx, fingerprint=fingerprint,
-            on_progress=lambda d, t, m: cb(d, t, m), **self._act_kw(),
-        )
-        if out["aborted"]:
-            raise _Cancelled()
-        self.margin_out = out
-        # 새 판정이 나왔으니 직전에 반영한 처방들을 채점한다 — "applied"만 찍고
-        # 결과를 안 보면 무효 처방이 예산을 태우는 것을 아무도 모른다
-        self._score_applied_actions()
-        self.stage = "CLASSIFY"
+
+    def _design_rows(self, view) -> list:
+        """설계 격자 행 [(alt, fuel)] — 검증조건의 초기 목록. 요구영역 경로면 COARSE가 쓴 격자 명세(설정 덮음 포함)의 고도 ×
+        연료, 옛 격자면 설계점이 선 행."""
+        spec = (self.region_grid or {}).get("spec")
+        if spec:
+            return [(float(a), float(f)) for f in spec["fuels"] for a in spec["alts"]]
+        return sorted({(p.case.alt, p.case.fuel) for p in view.by_role(ROLE_DESIGN)})
+
+    def _add_planned_validation(self, view, union):
+        """05 §11.6 생성 절차(rule "plan") — 검증조건 → 계획(validation.validation_plan) → 예산 순서대로 새 검증점을 더한다.
+
+        계획에만 남는 점(요구영역 밖·요구 미정의·모델 부족)은 점 집합에 넣지 않고 트림하지 않으며 예산을 쓰지 않는다. 예산에
+        막힌 점은 계획에 added False로 남아 요약·coverage에서 미계산으로 센다(사라지지 않는다). 앞선 VERIFY의 보강점은 점
+        집합에 남아 있으니 계획에도 이어 싣는다(구간 분할 기록 — 같은 구간을 두 번 쪼개지 않게). validation_wanted·added는
+        내분점(구간·고도·연료 사이)만 센다 — 옛 coverage 키의 뜻 그대로다."""
+        c = self.config
+        ctx = self.verdict_ctx
+        region = None if ctx is None else ctx.region
+        model = None if ctx is None else ctx.model
+        prior = sorted({(self.points.get(f["case"]).case.alt, self.points.get(f["case"]).case.fuel)
+                        for f in self.margin_out.get("failures", ()) if f.get("case") in self.points})
+        cond = validation_conditions(c.validation, design_rows=self._design_rows(view), prior_failure_rows=prior)
+        plan = validation_plan(view, union, region, model, rows=cond["rows"], n_between=c.n_validation_between,
+                               boundary=c.validation["boundary"], extras=c.validation["extras"])
+        entries = plan["entries"]
+        names = {e["name"] for e in entries}
+        for e in self.validation_plan:
+            if e["kind"] != "reinforce":
+                continue
+            if e.get("gap"):  # 중점을 둘 수 없던 조각 — 분할 기록과 잴 수 없는 사유를 이어 싣는다
+                entries.append(dict(e))
+            elif e["name"] in self.points:
+                # 새 계획에 같은 이름이 있으면 그 항목이 세고 이 항목은 조각 d만 잰다(measure_only)
+                entries.append({**e, "existing": True, "added": False,
+                                "measure_only": e["name"] in names or bool(e.get("measure_only"))})
+                names.add(e["name"])
+        # 앞선 VERIFY의 검증점 중 이번 계획에 없는 점 — 점 집합에 남아 판정받고 CLASSIFY로 간다. 요약에서 빠지면 격자는
+        # 녹색인데 상태는 미수렴인 결과가 나온다(리뷰 5) — 「이전 계획」으로 「경계·추가」 행에 싣는다
+        for p in view.by_role(ROLE_VALIDATION):
+            if p.name not in names:
+                entries.append({"name": p.name, "mach": float(p.case.mach), "alt": float(p.case.alt),
+                                "fuel": float(p.case.fuel), "kind": "prior", "row": None, "origin": p.origin,
+                                "pre_state": NOT_RUN, "existing": True, "added": False})
+                names.add(p.name)
+        wanted = added = 0
+        for e in entries:
+            e.setdefault("added", False)
+            if e["existing"] or e.get("gap") or e["pre_state"] in PLAN_ONLY_STATES:
+                continue
+            if e["name"] in self.points:  # 트림 전 제외 점(설계 보기 밖)과 이름이 같다 — 새 점이 아니다
+                e["existing"] = True
+                continue
+            mid = e["kind"] in ("midpoint", "between_rows")
+            wanted += mid
+            if len(self.points) >= c.budget_points:
+                continue  # 예산 소진 — 계획에 미계산으로 남는다
+            self.points.add(OperatingPoint(case=TrimCase(name=e["name"], mach=e["mach"], alt=e["alt"], fuel=e["fuel"]),
+                                           role=ROLE_VALIDATION, origin=e["origin"]))
+            e["added"] = True
+            added += mid
+        self.validation_plan = entries
+        self.validation_wanted, self.validation_added = wanted, added
+        self.validation_moved, self.validation_unplaceable = plan["moved"], plan["unplaceable"]
+        self.validation_meta = {
+            "conditions": cond["rows"], "source": cond["source"], "mode": cond["mode"], "omitted": cond["omitted"],
+            # 계획을 세운 절점 합집합 — 보고(격자 열·d 구간)는 이것으로 한다. add_knot 뒤 다음 VERIFY 전에 보고하면 지금
+            # 합집합과 다르다(리뷰 4 — 그때는 격자가 계획 당시 절점 기준임을 적는다)
+            "plan_knots": [float(k) for k in union],
+            # 일부만 행 범위에 걸친 절점 구간 중 안쪽 부분이 너무 좁아 점을 못 둔 곳(validation_plan gaps)
+            "gaps": plan["gaps"],
+            "out_of_region": sum(e["pre_state"] == "out_of_region" for e in entries),
+            "note": None if region is not None else (
+                "요구영역 미정의 — 검증 행의 마하 범위는 채택 설계점 범위이고 경계점·clip 점이 없다(05 §11.6 ③④는 요구영역이"
+                " 있어야 선다)"),
+        }
+
+    def _reinforce(self, aircraft, fingerprint, cb, union):
+        """보강 (05 §11.7) — d를 재고, 허용치가 있으면 최악 구간부터 이분해 새 점만 다시 판정한다.
+
+        허용치가 없으면(기본) 이분하지 않는다 — 상태 tol_unset, d 분포는 보고에서 다시 잰다. 멈춤: 허용치 충족(쪼갤 구간 없음)
+        · 추가점 max_points 또는 점 예산 소진 · 깊이 max_depth · 시간 max_time_s(실행 전에 받은 예산 — 05 §11.7 [확정]).
+        예산에 막혀 남은 구간은 「보강 종료 · 추가 검증 필요」이고 합격·불가로 바꾸지 않는다.
+
+        시간 예산은 **판과 판 사이**에서만 본다 — 한 판(새 점 묶음의 트림·판정)은 끊지 않으므로 마지막 판 길이만큼
+        max_time_s를 넘을 수 있다(걸린 시간은 reinforce_state.elapsed_s에 남는다)."""
+        c = self.config
+        rc = c.reinforce
+        scales = d_scales(c.criteria)
+        t0 = self._clock()
+        added: list = []
+        while True:
+            dres = segment_d(self.validation_plan, self.margin_out["cases"], union, scales)
+            if rc["tol"] is None:
+                break
+            if rc["max_time_s"] is not None and self._clock() - t0 >= rc["max_time_s"]:
+                break
+            left = min(rc["max_points"] - len(added), c.budget_points - len(self.points))
+            new = reinforce_candidates(dres, tol=rc["tol"], max_points_left=max(0, left), max_depth=rc["max_depth"],
+                                       points=self.points, entries=self.validation_plan)
+            if not new:
+                break
+            pts = []
+            for e in new:
+                fresh = not e["existing"] and not e.get("gap")  # 공짜(이미 점)·공백 조각은 점 집합에 넣지 않는다
+                self.validation_plan.append({**e, "added": fresh})
+                if not fresh:
+                    continue
+                op = OperatingPoint(case=TrimCase(name=e["name"], mach=e["mach"], alt=e["alt"], fuel=e["fuel"]),
+                                    role=ROLE_VALIDATION, origin=e["origin"])
+                self.points.add(op)
+                pts.append(op)
+                added.append(e["name"])
+            if not pts:
+                continue  # 이 판은 기존 점·공백뿐 — 다시 잰 d로 다음 판을 고른다(부모가 쪼개졌으니 같은 판이 되풀이되지 않는다)
+            # 새 점만 판정한다 — 기존 점의 판정은 그대로다(같은 표·같은 트림)
+            out = scheduled_margin_map(
+                aircraft, PointSet(pts), self.lms, self.sched_tables, {**self.design, **self.sched_constants},
+                criteria=c.criteria, targets=c.targets, trims=self.trims, ctx=self.verdict_ctx,
+                fingerprint=fingerprint, on_progress=lambda d, t, m: cb(d, t, m), **self._act_kw(),
+            )
+            if out["aborted"]:
+                raise _Cancelled()
+            self.margin_out["cases"].update(out["cases"])
+            self.margin_out["failures"] = _worst_failures(self.margin_out["cases"], c.criteria)
+        st = reinforce_status(dres, self.validation_plan, tol=rc["tol"])
+        self.reinforce_state = {"status": st["status"], "label": st["label"], "added": added,
+                                "elapsed_s": float(self._clock() - t0)}
 
     def reverify_resampled(self, aircraft, tables: dict, *, on_progress=None) -> dict:
         """반출 표(재양자화 Table)로 검증을 다시 판정한다 — 채택되는 표현이 검증받게.
@@ -883,7 +1079,74 @@ class DesignSession:
             "not_trimmed": self.not_trimmed_count(),
             # 트림 전에 제외한 점(모델 부족·요구영역 밖·요구 미정의) — 목록에 남고 설계하지 않았다(이관 2단계)
             "pre_trim_excluded": sum(1 for p in self.points if pre_excluded(p)),
+            **self._plan_coverage(),
         }
+
+    def _plan_coverage(self) -> dict:
+        """검증점 계획의 커버리지 키(05 §11.6~11.8 — 이관 4단계). midpoint 규칙·VERIFY 전이면 None — 잰 적 없는 것을 0으로 쓰지
+        않는다. requested는 요청한 점(요구영역 밖 제외), done은 계산 가능, not_run은 예산·취소로 못 돈 점, d_unmeasured는 보강
+        지표를 잴 수 없는 구간 수, reinforce_status는 보강 상태 코드(tol_unset·done·budget·unmeasured)."""
+        keys = ("validation_requested", "validation_done", "validation_not_run", "validation_out_of_region",
+                "validation_omitted_rows", "d_unmeasured", "reinforce_status")
+        cnt = self.validation_counts()
+        if cnt is None:
+            return dict.fromkeys(keys)
+        dres = self._segment_d()
+        st = reinforce_status(dres, self.validation_plan, tol=self.config.reinforce["tol"])
+        return dict(zip(keys, (cnt["requested"], cnt["done"], cnt["not_run"], cnt["out_of_region"],
+                               len(self.validation_meta.get("omitted") or ()), st["unmeasured"], st["status"])))
+
+    def validation_counts(self) -> dict | None:
+        """계획 항목의 상태별 수 — {requested, done, not_run, out_of_region, added, existing, plan_only{상태: n},
+        by_kind{종류: 같은 여섯}}. requested(요구영역 밖 제외) = added(검증점 역할 — 계획이 넣은 점) + existing(판정을 겸한
+        기존 설계점 — 공짜) + 점 집합에 없는 점(예산에 막힘 · 계획에만 남는 상태). not_run은 결과가 없는 점(예산·취소).
+        midpoint 규칙이거나 계획이 없으면(VERIFY 전) None."""
+        if self.config.validation["rule"] == "midpoint" or not self.validation_plan:
+            return None
+        cases = self.margin_out.get("cases", {})
+
+        def blank():
+            return {"requested": 0, "done": 0, "not_run": 0, "out_of_region": 0, "added": 0, "existing": 0}
+
+        tot, by_kind, plan_only = blank(), {}, {}
+        for e in self.validation_plan:
+            if e.get("measure_only"):  # 보강의 재기만 하는 항목 — 같은 이름의 본 항목이 센다(공백 조각은 점이 아니다)
+                continue
+            st = entry_state(e, self.points, cases)
+            pt = self.points.get(e["name"]) if e["name"] in self.points else None
+            for d in (tot, by_kind.setdefault(e["kind"], blank())):
+                if st == "out_of_region":
+                    d["out_of_region"] += 1
+                    continue
+                d["requested"] += 1
+                d["done"] += st == "computable"
+                d["not_run"] += st == "not_run"
+                # 검증점 역할이면 계획(이번이든 앞선 VERIFY든)이 넣은 점, 아니면 판정을 겸한 기존 설계점(공짜)
+                d["added"] += pt is not None and pt.role == ROLE_VALIDATION
+                d["existing"] += pt is not None and pt.role != ROLE_VALIDATION
+            if st in PLAN_ONLY_STATES and st != "out_of_region":
+                plan_only[st] = plan_only.get(st, 0) + 1
+        return {**tot, "plan_only": plan_only, "by_kind": by_kind}
+
+    def _segment_d(self) -> dict:
+        return segment_d(self.validation_plan, self.margin_out.get("cases", {}), self._plan_knots(),
+                         d_scales(self.config.criteria))
+
+    def _plan_knots(self) -> list:
+        """계획을 세운 절점 합집합 — 보고의 격자 열·d 구간 기준. 기록 없는 저장본은 지금 합집합."""
+        pk = self.validation_meta.get("plan_knots")
+        return list(pk) if pk is not None else union_knots(self.knot_sets, self.table_knots)
+
+    def _knots_note(self) -> str | None:
+        """계획 뒤 절점이 바뀌었으면(add_knot 뒤 다음 VERIFY 전 — 취소·중단) 그렇다고 적는 문장, 아니면 None."""
+        pk = self.validation_meta.get("plan_knots")
+        if pk is None:
+            return None
+        now = union_knots(self.knot_sets, self.table_knots)
+        if len(now) == len(pk) and all(abs(a - b) <= 1e-9 for a, b in zip(now, pk)):
+            return None
+        return (f"절점이 바뀐 뒤 검증 전 — 격자는 계획 당시 절점 기준(계획 {len(pk)}점 · 지금 {len(now)}점). 지금 표는"
+                " 이 검증을 받지 않았다")
 
     def coverage_gaps(self) -> list:
         """커버리지 공백을 한국어 한 줄씩 — 비어 있지 않으면 "수렴"이 반쪽이다."""
@@ -931,6 +1194,7 @@ class DesignSession:
                 f"트림 미수렴 점 {cov['not_trimmed']}개는 아무것도 보지 못했다 —"
                 " 실패 목록에도 판정 수에도 들어가지 않는다"
             )
+        out += self._plan_gaps(cov)
         dropped = self.excluded_samples()
         if dropped:
             by_slot: dict = {}
@@ -951,6 +1215,52 @@ class DesignSession:
                     f"{slot}: 튜닝 실패 표본 {len(held['samples'])}개를 빼면 {held['kept_would_be']}개만 남아"
                     " 제외를 보류했다 — 이 자리의 표는 실패 표본을 담고 있다"
                 )
+        return out
+
+    def _plan_gaps(self, cov) -> list:
+        """검증점 계획의 공백 문장 — 생략한 검증조건 · 계산하지 못한 요청 점 · 계획에만 남은 점 · 잴 수 없는 구간 · 예산에 막힌
+        보강. 허용치 미설정(tol_unset)은 공백이 아니다 — 보강을 안 하기로 한 설정이다(d 분포는 보고에 있다)."""
+        if cov.get("validation_requested") is None:
+            return []
+        out = []
+        meta = self.validation_meta
+        if cov["validation_omitted_rows"]:
+            n_all = len(meta.get("conditions") or ()) + cov["validation_omitted_rows"]
+            out.append(
+                f"대표 조합 — 검증조건 {n_all}개 중 {cov['validation_omitted_rows']}개 행을 생략했다 ("
+                + ", ".join(f"{a:g} m·{f:g} kg" for a, f in meta["omitted"])
+                + ") — 끝값·중앙·실패 행만 검사한 결과라 완전한 검증이 아니다"
+            )
+        if cov["validation_not_run"]:
+            out.append(
+                f"요청한 검증점 {cov['validation_not_run']}개를 계산하지 못했다 (점 예산 {self.config.budget_points} 소진"
+                " 또는 취소) — 요약 격자에 미계산으로 남는다"
+            )
+        plan_only = (self.validation_counts() or {}).get("plan_only") or {}
+        if plan_only:
+            from claw.opspace.states import STATE_LABEL
+
+            out.append(
+                f"검증점 {sum(plan_only.values())}개는 계산 대상이 아니어서 계획에만 남았다 ("
+                + " · ".join(f"{STATE_LABEL[k]} {n}" for k, n in sorted(plan_only.items()))
+                + ") — 그 조건의 성능은 보지 않았다"
+            )
+        if cov["d_unmeasured"]:
+            out.append(
+                f"보강 지표를 잴 수 없는 구간 {cov['d_unmeasured']}개 — 끝점·중간점이 트림 실패·요구영역 밖·미계산이거나 지표가"
+                " 없다. 그 구간의 보간은 d로 보지 않았다"
+            )
+        if meta.get("gaps"):
+            out.append(
+                f"절점 구간 {len(meta['gaps'])}곳은 요구 범위에 걸친 부분이 너무 좁아 검증점을 두지 못했다 — "
+                + "; ".join(g["why"] for g in meta["gaps"][:3]) + (" …" if len(meta["gaps"]) > 3 else "")
+            )
+        kn = self._knots_note()
+        if kn:
+            out.append(kn)
+        if cov["reinforce_status"] == "budget":
+            st = reinforce_status(self._segment_d(), self.validation_plan, tol=self.config.reinforce["tol"])
+            out.append(f"{st['label']} — 보강 예산(추가점·깊이·시간)에 막혔다. 합격이나 설계 불가가 아니다")
         return out
 
     def shortfall_ledger(self) -> list:
@@ -1110,6 +1420,14 @@ class DesignSession:
             on_progress=lambda d, t, m: cb(d, t, m),
         )
         cb(1, 1, "classify")
+        # 계획한 점(경계·clip·절점·추가·검증조건·보강·이전 계획)의 실패도 처방 대상이다 — 요구영역 안 실패는 실제 실패다
+        # (CLASSIFY_PLAN_NOTE). 근거에 그 점의 계획 종류·출처를 적어 카드에서 「경계점 실패」 등으로 읽히게 한다
+        plan_of = {e["name"]: e for e in self.validation_plan if not e.get("measure_only")}
+        for a in actions:
+            e = plan_of.get(a["case"])
+            if e is not None:
+                a["evidence"]["plan_point"] = {"kind": e["kind"], "origin": e["origin"],
+                                               "label": VALIDATION_KINDS.get(e["kind"], e["kind"])}
         # 두 번 반영해도 판정이 안 움직인 처방은 다시 내지 않는다 — 무효인 줄 알면서
         # 같은 카드를 다시 내미는 것은 이터 예산만 태우고 사용자를 속인다
         sealed = self.sealed_keys()
@@ -1448,7 +1766,74 @@ class DesignSession:
             # COARSE 격자 출처와 요구영역 커버리지 — 일부 점의 설계 성공이 요구영역 완료로 읽히지 않게(05 §11.13 2단계)
             "coarse_source": self.coarse_source,
             "region_coverage": self.region_coverage(),
+            # 검증점 계획·요약 격자·보강 (05 §11.6~11.8 — 이관 4단계). midpoint 규칙(옛 세션)은 요약·보강이 None이다
+            "validation": self.validation_report(),
+            "summary_grid": self.summary_grid(),
+            "reinforcement": self.reinforcement_report(),
         }
+
+    def validation_report(self) -> dict:
+        """검증점 보고 — {rule, conditions, source, mode, omitted, n_between, boundary, requested, done, added, existing,
+        not_run, out_of_region, by_kind, note, plan_knots, knots_note, gaps, classify_note}. requested의 뜻은
+        validation_counts. midpoint 규칙은 옛 수(요구 내분점 wanted·넣은 수)만 있고 나머지는 None이다."""
+        c = self.config
+        v = c.validation
+        if v["rule"] == "midpoint":
+            return {"rule": "midpoint", "conditions": None, "source": None, "mode": None, "omitted": None,
+                    "n_between": c.n_validation_between, "boundary": None, "requested": self.validation_wanted,
+                    "done": None, "added": self.validation_added, "existing": None,
+                    "not_run": max(0, self.validation_wanted - self.validation_added), "out_of_region": None,
+                    "by_kind": None, "note": "v1.70 규칙 — 설계점 행의 절점 구간 내분점만(경계·clip·절점 점 없음)",
+                    "plan_knots": None, "knots_note": None, "gaps": None, "classify_note": None}
+        cnt = self.validation_counts() or {"requested": 0, "done": 0, "not_run": 0, "out_of_region": 0, "added": 0,
+                                           "existing": 0, "by_kind": {}}
+        meta = self.validation_meta
+        return {"rule": "plan", "conditions": meta.get("conditions"), "source": meta.get("source"),
+                "mode": meta.get("mode", v["mode"]), "omitted": list(meta.get("omitted") or ()),
+                "n_between": c.n_validation_between, "boundary": v["boundary"], "requested": cnt["requested"],
+                "done": cnt["done"], "added": cnt["added"], "existing": cnt["existing"], "not_run": cnt["not_run"],
+                "out_of_region": cnt["out_of_region"], "by_kind": cnt["by_kind"], "note": meta.get("note"),
+                "plan_knots": meta.get("plan_knots"), "knots_note": self._knots_note(),
+                "gaps": list(meta.get("gaps") or ()), "classify_note": CLASSIFY_PLAN_NOTE}
+
+    def summary_grid(self) -> dict | None:
+        """결과 요약 격자(validation.summary_grid) + {unplanned_failures, notes} — 열은 계획 당시 절점. midpoint 규칙·VERIFY
+        전이면 None."""
+        if self.config.validation["rule"] == "midpoint" or not self.validation_plan:
+            return None
+        g = summary_grid(self.validation_plan, self.points, self.margin_out.get("cases", {}), self._plan_knots(),
+                         rows=self.validation_meta.get("conditions"))
+        # 격자는 계획 항목만 센다 — 실패가 계획 밖 점(설계점 적합 잔차 등)에만 있으면 격자가 모두 충족인데 상태는 미수렴일 수
+        # 있다. 그 수를 격자에 붙여 설명 없는 녹색이 없게 한다(리뷰 5)
+        planned = {e["name"] for e in self.validation_plan if not e.get("measure_only")}
+        outside = sorted({f["case"] for f in self.margin_out.get("failures", ()) if f.get("case") not in planned})
+        notes = [n for n in (self._knots_note(),) if n]
+        if outside:
+            notes.append(f"계획 밖 점의 실패 {len(outside)}점(설계점 적합 잔차 등) — 격자에 없지만 처방 대상이다: "
+                         + ", ".join(outside[:6]) + (" …" if len(outside) > 6 else ""))
+        g.update(unplanned_failures=len(outside), notes=notes)
+        return g
+
+    def reinforcement_report(self) -> dict | None:
+        """보강 보고 — {status, label, tol, budget, scales, scale_sources, d, distribution, largest, unmeasured, remaining,
+        max_d_remaining, added, verdict_change_intervals(구간 수), verdict_change_detail, elapsed_s}. d는 지금 결과로 다시 잰다
+        (같은 계획·같은 판정이면 VERIFY 때와 같다). midpoint 규칙·VERIFY 전이면 None."""
+        c = self.config
+        if c.validation["rule"] == "midpoint" or not self.validation_plan:
+            return None
+        rc = c.reinforce
+        dres = self._segment_d()
+        st = reinforce_status(dres, self.validation_plan, tol=rc["tol"])
+        return {"status": st["status"], "label": st["label"], "tol": rc["tol"],
+                "budget": {k: rc[k] for k in ("max_points", "max_depth", "max_time_s")},
+                "scales": d_scales(c.criteria), "scale_sources": d_scale_sources(c.criteria),
+                "d": dres["d"], "distribution": d_distribution(dres),
+                "largest": sorted(dres["d"], key=lambda r: -r["d"])[:5],
+                "unmeasured": dres["unmeasured"], "remaining": st["remaining"],
+                "max_d_remaining": st["max_d_remaining"], "added": list(self.reinforce_state.get("added") or ()),
+                "verdict_change_intervals": dres["verdict_change"],
+                "verdict_change_detail": dres["verdict_change_intervals"],
+                "elapsed_s": self.reinforce_state.get("elapsed_s")}
 
     _COVERAGE_KEYS = ("adopted", "trim", "model", "limits", "region", "unselected", "omitted", "not_run")
 
@@ -1578,6 +1963,9 @@ class DesignSession:
             "validation_added": self.validation_added,
             "validation_moved": self.validation_moved,
             "validation_unplaceable": self.validation_unplaceable,
+            "validation_plan": copy.deepcopy(self.validation_plan),
+            "validation_meta": copy.deepcopy(self.validation_meta),
+            "reinforce_state": copy.deepcopy(self.reinforce_state),
             "fits": self.fits,
             "sched_tables": {s: _table_to_dict(t) for s, t in self.sched_tables.items()},
             "sched_constants": dict(self.sched_constants),
@@ -1615,6 +2003,10 @@ class DesignSession:
         # 옛 validation_at_design(설계점 겹침을 검증으로 센 수)은 읽지 않는다 — 검증 수가 아니었다
         s.validation_moved = int(d.get("validation_moved", 0))
         s.validation_unplaceable = int(d.get("validation_unplaceable", 0))
+        # 이관 4단계 전 세션에는 없다 — 계획 없음(midpoint 규칙으로 읽힌다 — AutoDesignConfig.from_dict)
+        s.validation_plan = copy.deepcopy(list(d.get("validation_plan") or ()))
+        s.validation_meta = copy.deepcopy(dict(d.get("validation_meta") or {}))
+        s.reinforce_state = copy.deepcopy(dict(d.get("reinforce_state") or {}))
         s.fits = d.get("fits", {})
         s.sched_tables = {k: _table_from_dict(v)
                           for k, v in d.get("sched_tables", {}).items()}

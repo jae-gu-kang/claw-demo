@@ -241,3 +241,14 @@ def test_소견서_지시문이_설계점_검증점과_표별_절점을_말한�
 
     for word in ("설계점", "검증점", "report.knots", "gain_export.knots", "add_knot", "anchor·breakpoint"):
         assert word in BRIEF_SYSTEM, word
+
+
+def test_소견서_지시문이_검증점_계획과_요약_격자와_보강을_말한다():
+    """검증점 계획·요약 격자·보강(05 §11.6~11.8 — 이관 4단계) — 지시문이 새 키를 알아야 소견서가 「구간 합격」으로 뭉개지
+    않고, 보강 예산 종료를 합격/설계 불가로 읽지 않는다."""
+    from claw_server.brief import BRIEF_SYSTEM
+
+    for word in ("report.validation", "report.summary_grid", "report.reinforcement", "검사한 점 모두", "tol_unset",
+                 "boundary", "clip", "d_unmeasured", "구간 합격", "existing", "plan_point", "prior",
+                 "summary_grid.notes"):
+        assert word in BRIEF_SYSTEM, word

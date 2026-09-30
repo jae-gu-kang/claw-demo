@@ -370,6 +370,24 @@ def rule_schedule_variants(doc: dict) -> tuple:
     return new, moved
 
 
+def validation_summary(rep: dict) -> dict | None:
+    """설계 요약의 검증점 칸 — 서버 apply-gains(routes/design.py `_validation_summary`)의 사본(엔진이 서버를 import할 수 없어서다 —
+    둘이 갈리면 생성 문서와 웹 [문서에 반영]의 출처가 다르다). 목록은 개수로 접는다(조건 · 생략 행). 보고에 검증 칸이 없으면
+    None, midpoint 규칙(옛 세션)은 계획이 없어 mode·conditions·done이 None이다."""
+    v = rep.get("validation")
+    if not isinstance(v, dict):
+        return None
+    cov = rep.get("coverage") or {}
+    rf = rep.get("reinforcement") or {}
+    # rule·existing — requested의 뜻을 읽는 칸(plan 규칙의 요청 = 새 검증점 + 판정을 겸한 기존 설계점 + 못 넣은 점)
+    return {"rule": v.get("rule"), "requested": v.get("requested"), "existing": v.get("existing"),
+            "done": v.get("done", cov.get("validation_done")),
+            "out_of_region": v.get("out_of_region"), "mode": v.get("mode"),
+            "conditions": len(v["conditions"]) if isinstance(v.get("conditions"), list) else None,
+            "omitted": len(v["omitted"]) if isinstance(v.get("omitted"), list) else None,
+            "reinforce_status": rf.get("status", cov.get("reinforce_status"))}
+
+
 def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
     from claw.design import DesignSession, design_inputs
     from claw.profile.fingerprint import gain_tables_basis_fingerprint
@@ -420,6 +438,9 @@ def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
         f"실패 {rep['failures']} · 에스컬레이션 {rep['escalations']} · 표현 {rep['fit_mode']} · "
         f"적합에서 뺀 표본 {len(rep['excluded_samples'])}" + (f" (보류 {withheld})" if withheld else "")
         + f" · {elapsed:.1f} s")
+    vs = validation_summary(rep) or {}
+    log(f"  검증점: 요청 {vs.get('requested')} · 완료 {vs.get('done')} · 요구영역 밖 {vs.get('out_of_region')} · 보강"
+        f" {vs.get('reinforce_status')}")
     sharing = "한 집합 공유" if kn["shared"] else f"집합 {kn['sets']}개"
     log(f"  절점: 표 {kn['tables']} · {sharing}")
     if rep["status"] == "cancelled":
@@ -447,6 +468,8 @@ def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
                        "failures": rep["failures"], "escalations": rep["escalations"], "fit_mode": rep["fit_mode"],
                        "excluded_samples": len(rep["excluded_samples"]),
                        "exclusion_withheld": sorted(rep["exclusion_withheld"]),
+                       # 검증점 계획 요약(05 §11.6 · 이관 4단계) — 서버 apply-gains(_design_summary)와 같은 칸
+                       "validation": validation_summary(rep),
                        # config는 받은 덧씀 그대로 — criteria·targets 칸이 있으면 _config가 문서 값과 같음을 확인했다
                        # (설계는 문서 /criteria·/tuning으로 했다). 그 칸을 빼면 출하 파일의 기록이 바뀐다
                        "approved_actions": approved_total, "config": _plain(overrides)},
@@ -481,7 +504,8 @@ def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
     return new, {"report": {k: rep[k] for k in ("status", "iterations", "n_points", "points", "judged", "failures",
                                                   "failures_by_role", "knots", "escalations", "coverage",
                                                   "coverage_gaps", "fit_mode", "excluded_samples",
-                                                  "exclusion_withheld")},
+                                                  "exclusion_withheld", "validation", "summary_grid",
+                                                  "reinforcement")},
                  "approved_actions": approved_total, "slots": sorted(tables),
                  "reverify": _reverify_summary(export["reverify"]), "config": _plain(overrides),
                  "rule_schedule_variants": moved, "elapsed_s": elapsed}

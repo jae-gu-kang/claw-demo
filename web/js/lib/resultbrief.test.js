@@ -462,3 +462,22 @@ test("자동 설계 — 점 줄은 설계점·검증점, 절점 칸은 표별 �
   assert.equal(old["점"], "60 (앵커 45 · bp 0 · 검증 15)");
   assert.match(old["절점"], /^기록 없음 — 절점 분리 이전 결과/);
 });
+
+test("자동 설계 — 검증점 칸은 계획 요약·요약 격자 칸 수·보강 상태, 계획 이전 결과는 기록 없음", () => {
+  const meta = { ...META, id: "d5", kind: "auto_design" };
+  const report = { status: "converged", n_points: 20, points: { design: 8, validation: 12 },
+    validation: { rule: "plan", conditions: [[0, 50]], mode: "full", omitted: [], requested: 12, out_of_region: 0,
+      by_kind: { midpoint: 10, boundary: 2 } },
+    coverage: { validation_done: 12 },
+    summary_grid: { columns: [{ key: "seg1-2", kind: "segment", lo: 0.2, hi: 0.4 }],
+      rows: [{ key: "r0", alt: 0, fuel: 50, kind: "condition" }],
+      cells: { r0: { "seg1-2": { n: 2, done: 2, states: { computable: 2 }, verdicts: { fail: 1, good: 1 },
+        headline: "불합격", text: "불합격 1 · 완료 2/2" } } }, totals: {} },
+    reinforcement: { status: "tol_unset", label: "허용치 미설정 — d 분포만", distribution: {} } };
+  const run = Object.fromEntries(briefModel(meta, { report }).sections.find((s) => s.title === "실행 요약").rows);
+  assert.equal(run["검증점"], "요청 12 · 완료 12 · 조건 1행(전체 조합) · 구간 내분점 10 · 요구영역 경계 2 — "
+    + "격자 불합격 칸 1 · 미완료 칸 0 · 검사한 점 모두 충족 칸 0 — 보강 — 허용치 미설정 — d 분포만");
+  const old = Object.fromEntries(briefModel(meta, { report: { status: "converged" } }).sections
+    .find((s) => s.title === "실행 요약").rows);
+  assert.match(old["검증점"], /^기록 없음 — 검증점 계획 이전 결과/);
+});

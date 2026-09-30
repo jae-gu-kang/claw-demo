@@ -236,11 +236,20 @@ def test_기록된_설계_설정으로_다시_설계하면_출하한_문서_그�
     # 검증점을 ¼ 자리로 옮겼다 — 설계점은 적합 표본이라 그 판정은 보간 검증이 아니다(리뷰 정정 전 초안은 그 5곳을 검증으로
     # 세어 38점 · 검증점 1이었다). 종전 표본 마하마다 분할점일 때 81점. 두 설계 고도 0·3000 m일 때는 예산 90이면 세분화가
     # 허용치 전에 끊기고 43구간이 검증점 없이 남아 150을 적었었다). 트림 미수렴 점은 최대 수평 속도(전 스로틀) 위라 남는다(문서
-    # description)
+    # description). 이관 4단계(검증점 생성 절차 — v1.71): 내분점이 요구영역 행 범위 전부에 서서 M0.22~0.24 구간 중점 M0.23(전
+    # 스로틀 위 — 물리적 불가)이 더해지고, 요구영역 경계표 모서리 8점(200·3000 m × 10·50 kg 마하 하한·상한)이 들어와 검증점
+    # 15 — 상한 M0.24 넷은 물리적 불가, 하한 넷은 판정(3000 m 둘 합격·주의). 실패 0이라 표는 그대로다(판정 210 → 230).
+    # 절점 점은 전부 설계점이 겸해 새 점이 없다. 요청 23(절점 7 · 내분점 7 · 경계 9 — 행 하한 설계점 포함) · 완료 17
     cov = rep["coverage"]
     assert cov["validation_missing"] == 0 and cov["validation_unplaceable"] == 0, cov
-    assert rep["points"] == {"design": 37, "validation": 6}, rep["points"]
-    assert cov["validation_points"] == 6 and cov["midpoints_at_design_points"] == 5, cov
+    assert rep["points"] == {"design": 37, "validation": 15}, rep["points"]
+    assert cov["validation_points"] == 7 and cov["midpoints_at_design_points"] == 5, cov
+    v = rep["validation"]
+    assert (v["rule"], v["conditions"], v["requested"], v["done"], v["not_run"]) == ("plan", [[200.0, 25.0]], 23, 17, 0), v
+    assert {k: b["requested"] for k, b in v["by_kind"].items()} == {"midpoint": 7, "knot": 7, "boundary": 9}, v
+    # 요청 23 = 새 검증점 15 + 판정을 겸한 기존 설계점 8(절점 7 · 행 하한 M0.10375 경계)
+    assert (v["added"], v["existing"]) == (15, 8), v
+    assert rep["reinforcement"]["status"] == "tol_unset" and cov["d_unmeasured"] == 2, cov
     # 표는 공통 마하 절점을 공유한다 — 설계점 수와 무관하게 자리마다 절점 7점(M0.24 절점은 설계점 표본이 없어 뺐다)
     assert rep["knots"]["shared"] is True and set(rep["knots"]["tables"].values()) == {7}, rep["knots"]
     assert cov["refine_remaining"] is not None and cov["refine_remaining"] <= cov["refine_tol"], cov

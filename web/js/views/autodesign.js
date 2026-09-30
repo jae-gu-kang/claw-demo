@@ -26,7 +26,8 @@ config 덮어쓰기로 보낸다. "게인 확정"은 결과의 반출 표(표 �
 import { ApiError, api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
-  VERDICT_LABEL, actionCards, actuatorLine, knotModel, machText,
+  VERDICT_LABEL, VALIDATION_KIND_LABEL, VALIDATION_MODE_LABEL, actionCards, labelMap, actuatorLine, knotModel, machText,
+  reinforcementLines, summaryGridModel, validationSummaryText,
   adoptBlockedText, adoptStorePayload, adoptWarnText, applyGateReason, approvedByDefault, buildConfig,
   configFormValues, coverageLines, criteriaSummaryModel, designCueSummary, emptyResultNotice, evidenceLines, excludedSamplesModel, fitFactsModel,
   fitQualityLines, gridPlaceholders, ledgerRows, ledgerTruncatedText, mergeDesignConfig, pointRows,
@@ -162,6 +163,21 @@ export function render() {
     knotCoordsText: el("input", { size: 16, placeholder: "0.2 0.4 0.6",
       title: "절점 마하 좌표(user) — 순증가, 2개 이상" }),
     knotMax: el("input", { size: 3, title: "표 하나에 둘 수 있는 절점 상한 — 처방 「절점 추가」가 여기서 멈춘다" }),
+    // 검증점(05 §11.6)·보강(05 §11.7). 방식 선택지는 서버 /design/defaults의 validation_modes가 정본 — 도착 전에는 「기본」뿐.
+    // 비운 칸은 서버 기본값(조건 = 설계 행 전부 · 전 조건 · 경계점 켬 · 허용치 미설정)
+    validationConditionsText: el("input", { size: 18, placeholder: "설계 행 전부",
+      title: "검증 조건 「고도/연료」 짝 — 예 200/25, 3000/10. 비우면 설계 고도 × 연료 행 전부" }),
+    validationMode: el("select", { "aria-label": "검증 방식",
+      title: "전 조건: 모든 검증 조건 행 · 대표 조건: 고도·연료 최소/중간/최대 + 지난 검증에서 실패한 행(뺀 행은 결과가 적는다)" },
+    el("option", { value: "" }, "기본")),
+    validationBoundary: el("select", { "aria-label": "경계점",
+      title: "요구영역 경계(마하 끝·고도·연료 끝) 검증점 — 기본 켬" },
+    el("option", { value: "" }, "기본"), el("option", { value: "on" }, "켬"), el("option", { value: "off" }, "끔")),
+    reinforceTol: el("input", { size: 4, placeholder: "미설정",
+      title: "보강 허용치 — 구간의 보강 지표 d(선형 보간과의 어긋남 ÷ 척도)가 이 값을 넘으면 이분한다. 비우면 d 분포만 보고" }),
+    reinforceMaxPoints: el("input", { size: 3, title: "보강 추가점 상한" }),
+    reinforceMaxDepth: el("input", { size: 2, title: "구간 이분 깊이 상한" }),
+    reinforceMaxTime: el("input", { size: 4, placeholder: "없음", title: "보강 시간 상한[s] — 비우면 없음. 판과 판 사이에서만 본다(한 판은 끊지 않는다) — 마지막 판 길이만큼 넘을 수 있다" }),
   };
   // 규칙에 딸린 칸만 보인다 — uniform은 절점 수, user는 좌표(서버도 그 칸이 없으면 422)
   const syncKnotFields = () => {
@@ -199,6 +215,19 @@ export function render() {
         form.knotRule.value = keep;
       }
       ph(form.knotMax, c.knots?.max_per_table);
+      // 검증 방식 선택지 — 서버 목록(validation_modes). 보강 예산 기본값은 회색 자리표시로
+      if (d.validation_modes) {
+        const keep = form.validationMode.value;
+        const modes = labelMap(d.validation_modes, VALIDATION_MODE_LABEL);
+        clear(form.validationMode).append(
+          el("option", { value: "" }, `기본 (${modes[c.validation?.mode] ?? c.validation?.mode ?? "서버"})`),
+          ...Object.entries(modes).map(([m, name]) => el("option", { value: m }, name)));
+        form.validationMode.value = keep;
+      }
+      ph(form.reinforceTol, c.reinforce?.tol);
+      ph(form.reinforceMaxPoints, c.reinforce?.max_points);
+      ph(form.reinforceMaxDepth, c.reinforce?.max_depth);
+      ph(form.reinforceMaxTime, c.reinforce?.max_time_s);
       syncKnotFields();
       defaultsBox.textContent = "판정선·튜닝 목표는 고른 기체 문서의 값으로 설계한다 — [판정선·튜닝 목표] 패널."
         + " 나머지 칸의 회색 수치가 서버 기본값이다(정본: 엔진 AutoDesignConfig).";
@@ -282,6 +311,13 @@ export function render() {
       knotN: form.knotRule.value === "uniform" ? form.knotN.value : "",
       knotCoordsText: form.knotRule.value === "user" ? form.knotCoordsText.value : "",
       knotMax: form.knotMax.value,
+      validationConditionsText: form.validationConditionsText.value,
+      validationMode: form.validationMode.value,
+      validationBoundary: form.validationBoundary.value,
+      reinforceTol: form.reinforceTol.value,
+      reinforceMaxPoints: form.reinforceMaxPoints.value,
+      reinforceMaxDepth: form.reinforceMaxDepth.value,
+      reinforceMaxTime: form.reinforceMaxTime.value,
     }), extra); // 판정선·튜닝 목표는 싣지 않는다 — mergeDesignConfig가 신호 config에서도 뗀다
     const job = await api.post("/design/auto", { config });
     return { jobId: job.id, done: followJob(job.id, "자동 설계 실패") };
@@ -335,6 +371,14 @@ export function render() {
             el("label", {}, " ", form.knotN),
             el("label", {}, " ", form.knotCoordsText),
             el("label", { title: form.knotMax.title }, " 표당 상한 ", form.knotMax)),
+          el("div", { class: "form-row" },
+            el("label", { title: form.validationConditionsText.title }, "검증 조건 ", form.validationConditionsText),
+            el("label", { title: form.validationMode.title }, " 방식 ", form.validationMode),
+            el("label", { title: form.validationBoundary.title }, " 경계점 ", form.validationBoundary),
+            el("label", { title: form.reinforceTol.title }, " 보강 허용치 ", form.reinforceTol),
+            el("label", { title: form.reinforceMaxPoints.title }, " 추가점 ", form.reinforceMaxPoints),
+            el("label", { title: form.reinforceMaxDepth.title }, " 깊이 ", form.reinforceMaxDepth),
+            el("label", { title: form.reinforceMaxTime.title }, " 시간[s] ", form.reinforceMaxTime)),
           el("p", { class: "hint" },
             "승인 게이트(gated)는 처방 카드에서 멈춘다 — 승인한 처방만 반영해 재개한다. "
             + "전자동(auto)은 예산이 다할 때까지 스스로 순환한다. "
@@ -550,9 +594,16 @@ function fillForm(form, config) {
   // 도는 것을 막는다(칸을 먼저 비운다는 사슬 계약). 기본값 도착 전이면 셀렉트 마크업 기본(표)
   form.fitMode.value = vals.fitMode ?? designDefaults?.config?.fit_mode ?? "table";
   for (const k of ["budgetPoints", "budgetIters", "nMach", "nValidationBetween", "altsText", "fuelsText",
-    "actuatorWn", "actuatorZeta", "delayS", "knotN", "knotCoordsText", "knotMax"]) {
+    "actuatorWn", "actuatorZeta", "delayS", "knotN", "knotCoordsText", "knotMax", "validationConditionsText",
+    "validationBoundary", "reinforceTol", "reinforceMaxPoints", "reinforceMaxDepth", "reinforceMaxTime"]) {
     form[k].value = vals[k] ?? "";
   }
+  // 검증 방식도 절점 규칙과 같이 — 선택지에 아직 없으면 옵션을 세워 둔다
+  const vmode = vals.validationMode ?? "";
+  if (vmode && ![...form.validationMode.options].some((o) => o.value === vmode)) {
+    form.validationMode.append(el("option", { value: vmode }, VALIDATION_MODE_LABEL[vmode] ?? vmode));
+  }
+  form.validationMode.value = vmode;
   // 신호가 준 규칙이 선택지에 아직 없으면(기본값 도착 전) 옵션을 세워 둔다 — 조용히 「기본」으로 떨어지지 않게
   const rule = vals.knotRule ?? "";
   if (rule && ![...form.knotRule.options].some((o) => o.value === rule)) {
@@ -779,6 +830,52 @@ function coverageBox(report) {
         l.tone === "fail" ? el("strong", {}, l.text) : l.text);
     }),
   );
+}
+
+const TONE_COLOR = { fail: SEV_COLOR.fail, warn: SEV_COLOR.warn, ok: SEV_COLOR.ok, na: SEV_COLOR.na };
+
+/** 요약 격자(05 §11.8) — 커버리지 바로 아래. 그림이 먼저: 행 = 검증 조건 + 「경계·추가」, 열 = 끝 밖·절점·구간…·끝 밖의
+ *  작은 행렬이고 칸 색이 대표 문구다(빨강 불합격 · 주황 미완료 · 초록 검사한 점 모두 충족 · 회색 판정 불가·채택 제외 포함). 칸 글은
+ *  완료 d/n 또는 ✗불합격 수뿐 — 대표 문구·상태·판정 내역은 툴팁. 구간을 합격이라 부르지 않는다. 옛 결과는 null. */
+function summaryGridBox(report) {
+  const m = summaryGridModel(report);
+  if (!m || !m.rows.length) return null;
+  const cellStyle = "padding:1px 3px;text-align:center;font-size:11px;min-width:22px;";
+  const table = el("table", { class: "data", style: "border-collapse:collapse;width:auto" },
+    el("thead", {}, el("tr", {}, el("th", {}, ""),
+      ...m.columns.map((c) => el("th", { title: c.tip, style: `${cellStyle}font-weight:${c.kind === "knot" ? 600 : 400}` },
+        c.label)))),
+    el("tbody", {}, m.rows.map((r) => el("tr", {},
+      el("td", { class: "hint", style: "white-space:nowrap;font-size:11px" }, r.label),
+      ...r.cells.map((c) => el("td", { title: c.tip,
+        style: cellStyle + (c.empty ? "" : `background:${TONE_COLOR[c.tone] ?? SEV_COLOR.na}33;`
+          + (c.tone === "fail" ? `color:${SEV_COLOR.fail};font-weight:600;` : "")) }, c.text))))));
+  const kindNames = labelMap(designDefaults?.validation_kinds, VALIDATION_KIND_LABEL);
+  const kinds = report?.validation?.by_kind;
+  const kindTip = kinds ? Object.entries(kinds).map(([k, c]) => (c && typeof c === "object"
+    ? `${kindNames[k] ?? k} 요청 ${c.requested ?? "?"} · 완료 ${c.done ?? "?"}${c.not_run ? ` · 미실행 ${c.not_run}` : ""}`
+      + `${c.out_of_region ? ` · 요구영역 밖 ${c.out_of_region}` : ""}`
+    : `${kindNames[k] ?? k} ${c}`)).join("\n") : "";
+  const line = validationSummaryText(report, { kinds: designDefaults?.validation_kinds,
+    modes: designDefaults?.validation_modes });
+  return el("div", { style: "margin:6px 0" },
+    el("div", { style: "overflow-x:auto;max-width:100%" }, table),
+    el("p", { class: "hint", style: "margin:2px 0",
+      title: "칸 색 = 그 칸 검증점의 대표 문구 — 불합격(빨강) · 미완료(주황 — 돌지 않았거나 계산 못 한 점) · "
+        + "검사한 점 모두 충족(초록 — 구간 전체가 좋다는 뜻이 아니다) · 판정 불가·채택 제외 포함(회색). 빈 칸은 그 자리에 검증점이 없다."
+        + (kindTip ? `\n검증점 종류\n${kindTip}` : "") }, m.summary),
+    line ? el("p", { class: "hint", style: "margin:0" }, `검증점 — ${line}`) : null,
+    // 엔진 주석 — 계획 밖 점의 실패 · 계획 뒤 절점 바뀜. 녹색 칸만 보고 「다 됐다」로 읽지 않게 경고색
+    ...m.notes.map((n) => el("p", { style: `margin:0;font-size:12px;color:${SEV_COLOR.warn}` }, n)));
+}
+
+/** 보강(05 §11.7) — 요약 격자 아래. 상태 한 줄(예산 종료·잴 수 없는 구간은 경고색)과 짧은 수치 줄, 척도·사유는 툴팁. */
+function reinforcementBox(report) {
+  const lines = reinforcementLines(report, designDefaults?.reinforce_status_text);
+  if (!lines.length) return null;
+  return el("div", {}, ...lines.map((l) => el("div", {
+    class: l.tone === "hint" ? "hint" : null, title: l.tip ?? null,
+    style: l.tone === "hint" ? (l.slot ? "margin-left:1em;font-size:12px" : null) : `color:${SEV_COLOR.warn}` }, l.text)));
 }
 
 /** 요구영역 커버리지(이관 2단계) — 상태 줄 바로 아래. 일부 점의 성공이 요구영역 완료로 읽히지 않게 「완료 아님」을
@@ -1012,6 +1109,8 @@ function renderResult(box, body, resultId, ctx) {
   })();
 
   const covBox = coverageBox(report);
+  const gridBox = summaryGridBox(report);
+  const rfBox = reinforcementBox(report);
   const regionBox = regionCoverageBox(report);
   // 상태 줄 아래 사실 셋 — 무엇으로 설계했나(작동기)·표에서 무엇을 뺐나(튜닝 실패 표본)·표가 무엇을
   // 뭉갰나(스케줄 축 밖 변동·톱니). sections는 native append라 null을 걸러 넣는다
@@ -1037,6 +1136,9 @@ function renderResult(box, body, resultId, ctx) {
     // 상태 줄 바로 아래 — 이 실행이 무엇을 안 봤는지가 상태의 전제다.
     // sections는 native append로 펼쳐지므로 null을 넣으면 터진다 (el과 다르다)
     ...(covBox ? [covBox] : []),
+    // 요약 격자(05 §11.8)·보강(05 §11.7) — 커버리지 아래. 어느 조건·어느 구간을 봤고 무엇이 남았나를 그림으로
+    ...(gridBox ? [gridBox] : []),
+    ...(rfBox ? [rfBox] : []),
     // 적합 품질 — 문턱을 켠 실행의 경고(04 §10 렌더 경로). 문턱이 꺼진 실행은 줄이
     // 없다: 판정하지 않은 것을 "확인 완료"처럼 말하지 않는다 (수치는 결과 JSON에)
     ...fitQualityLines(body.fits).map((l) => (l.tone === "hint"

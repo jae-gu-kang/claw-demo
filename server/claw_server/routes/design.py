@@ -28,6 +28,9 @@ from datetime import datetime, timezone
 from claw.design import AutoDesignConfig, DesignSession, design_inputs, resample_to_table
 from claw.design.grid import DEFAULT_ALTS, DEFAULT_FUEL_FRACS
 from claw.design.knots import KNOT_RULES  # 절점 규칙 허용 목록 — 정본은 엔진(05 §11.13 이관 3단계)
+# 검증점 계획(05 §11.6)·보강(05 §11.7) — 방식·종류·상태 문구의 정본은 엔진(이관 4단계)
+from claw.design.reinforce import REINFORCE_STATUS_TEXT
+from claw.design.validation import VALIDATION_KINDS, VALIDATION_MODES
 from claw.design.tune import REASON_TEXT
 from claw.profile import ProfileError, build_profile
 from claw.profile.fingerprint import gain_tables_basis_fingerprint
@@ -139,6 +142,62 @@ def _check_knots(k) -> dict:
     return dict(k)
 
 
+def _check_validation(v) -> dict:
+    """config.validation(부분 덮어쓰기를 기본값에 겹친 것) — **수치·타입 경계만**(_check_knots와 같은 이유). 뜻(허용
+    규칙·방식·모르는 키·조건 짝·extras의 source 필수)은 엔진 check_validation_config가 정본이다 — AutoDesignConfig가
+    부르고 그 ValueError가 라우트에서 422다. 경계점(boundary)은 불리언만 — 0/1이나 "false"를 참거짓으로 읽지 않는다."""
+    if not isinstance(v, dict):
+        raise ValueError(f"validation은 객체여야 함: {type(v).__name__}")
+    for key in ("rule", "mode"):
+        if v.get(key) is not None and not isinstance(v.get(key), str):
+            raise ValueError(f"validation.{key}은 이름(문자열)이어야 함: {v.get(key)!r}")
+    if "boundary" in v and not isinstance(v["boundary"], bool):
+        raise ValueError(f"validation.boundary는 참/거짓이어야 함: {v['boundary']!r}")
+    conds = v.get("conditions")
+    if conds is not None:
+        if not isinstance(conds, list):
+            raise ValueError(f"validation.conditions는 [고도, 연료] 짝 목록이어야 함: {type(conds).__name__}")
+        for pair in conds:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise ValueError(f"validation.conditions 항목은 [고도, 연료] 짝이어야 함: {pair!r}")
+            for x in pair:
+                _check_number("validation.conditions 항목", x)
+    extras = v.get("extras")
+    if extras is not None:
+        if not isinstance(extras, list):
+            raise ValueError(f"validation.extras는 점 목록이어야 함: {type(extras).__name__}")
+        for e in extras:
+            if not isinstance(e, dict):
+                raise ValueError(f"validation.extras 항목은 객체여야 함: {e!r}")
+            for key in ("mach", "alt", "fuel"):
+                if key in e:
+                    _check_number(f"validation.extras.{key}", e[key])
+            if e.get("source") is not None and not isinstance(e["source"], str):
+                raise ValueError(f"validation.extras.source는 문자열이어야 함: {e['source']!r}")
+    return dict(v)
+
+
+def _check_reinforce(r) -> dict:
+    """config.reinforce(부분 덮어쓰기를 기본값에 겹친 것) — 수치 경계만. 허용치(tol)·시간 상한(max_time_s)은 없음(null)이
+    뜻을 갖는다(허용치 미설정 = d 분포만 · 시간 상한 없음). 범위(양수·하한)는 엔진 check_reinforce_config가 정본."""
+    if not isinstance(r, dict):
+        raise ValueError(f"reinforce는 객체여야 함: {type(r).__name__}")
+    for key in ("tol", "max_points", "max_depth", "max_time_s"):
+        if key not in r:
+            continue
+        x = r[key]
+        if x is None and key in ("tol", "max_time_s"):
+            continue
+        _check_number(f"reinforce.{key}", x)
+        if key in ("max_points", "max_depth") and isinstance(x, float) and not x.is_integer():
+            raise ValueError(f"reinforce.{key}는 정수여야 함: {x}")
+    return dict(r)
+
+
+# 부분 덮어쓰기하는 중첩 설정 — {키: 경계 검사}. 기본값 위에 요청 칸만 겹친 뒤 검사한다
+_NESTED_PARTIAL = {"knots": _check_knots, "validation": _check_validation, "reinforce": _check_reinforce}
+
+
 def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
     """요청 config(부분 덮어쓰기) → AutoDesignConfig.
 
@@ -157,11 +216,12 @@ def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
         # 라우트가 먼저 거절한다 — 여기 닿으면 새 호출 경로가 거절을 건너뛴 것이다(심층 방어)
         raise ValueError(REQUEST_CRITERIA_REJECTED)
     merged = {**base, **overrides}
-    if "knots" in base and "knots" in overrides:
-        # 절점 설정은 부분 덮어쓰기 — {"rule": "uniform", "n": 5}만 보내도 나머지(max_per_table)는 기본값
-        if not isinstance(overrides["knots"], dict):
-            raise ValueError(f"knots는 객체여야 함: {type(overrides['knots']).__name__}")
-        merged["knots"] = _check_knots({**base["knots"], **overrides["knots"]})
+    for key, check in _NESTED_PARTIAL.items():
+        # 절점·검증점·보강 설정은 부분 덮어쓰기 — {"rule": "uniform", "n": 5}나 {"tol": 0.3}만 보내도 나머지는 기본값
+        if key in base and key in overrides:
+            if not isinstance(overrides[key], dict):
+                raise ValueError(f"{key}는 객체여야 함: {type(overrides[key]).__name__}")
+            merged[key] = check({**base[key], **overrides[key]})
     # 타입 검증 — 데이터클래스는 강제 변환을 하지 않으므로 여기서 걸러야 한다.
     # 안 걸리는 값은 잡 스레드 안에서 터져 202 뒤 원인 없는 실패가 된다
     for key, want in (("mode", str), ("fit_mode", str),
@@ -176,7 +236,8 @@ def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
         # 문자열·목록 필드는 수치 검사 대상이 아니다 — 값의 허용 목록은 엔진 __post_init__이
         # 본다(ValueError → 422). 여기 목록에 새 문자열 필드를 빠뜨리면 _check_number가
         # "수치여야 함"으로 422를 내어, 멀쩡한 설정이 거부된다
-        if key in ("mode", "fit_mode", "alts", "fuels", "sched_axes", "criteria", "targets", "knots"):
+        if key in ("mode", "fit_mode", "alts", "fuels", "sched_axes", "criteria", "targets", "knots",
+                   "validation", "reinforce"):
             continue
         if key in _NULLABLE_KEYS and value is None:
             continue
@@ -402,6 +463,12 @@ def design_defaults() -> dict:
                  "fuel_fracs": [float(f) for f in DEFAULT_FUEL_FRACS]},
         # 절점 규칙의 허용 목록(엔진 knots.KNOT_RULES) — 웹 설정 칸의 선택지. 기본값은 config.knots
         "knot_rules": list(KNOT_RULES),
+        # 검증점 방식·종류와 보강 상태 문구(엔진 validation·reinforce — 05 §11.6·11.7). 기본값은 config.validation·reinforce.
+        # 문구를 웹이 재기술하지 않는다(reason_text와 같은 이유)
+        # {코드: 이름} — 선택지(코드)와 표시 이름을 한 벌로
+        "validation_modes": dict(VALIDATION_MODES),
+        "validation_kinds": dict(VALIDATION_KINDS),
+        "reinforce_status_text": dict(REINFORCE_STATUS_TEXT),
     }
 
 
@@ -466,6 +533,28 @@ def _design_summary(rep: dict | None) -> dict:
         # 표별 절점 수 {자리: n} (05 §11.13 이관 3단계 — report.knots.tables 그대로). 최댓값 하나로 접지 않는다:
         # 자리마다 분리 집합에 절점이 붙으면 표마다 수가 다르고, 게인 탭이 자리별로 읽는다. 옛 결과는 None
         "n_knots": dict(n_knots) if isinstance(n_knots, dict) else None,
+        # 검증점 계획·보강(05 §11.6·11.7 — 이관 4단계) — 몇 점을 요청해 몇 점을 돌렸나 · 요구영역 밖(계획만) · 방식 ·
+        # 검증 조건 행 수 · 대표 방식이 뺀 행 수 · 보강 상태 코드. 목록은 개수로 접는다. 옛 결과(계획 이전)는 None
+        "validation": _validation_summary(rep),
+    }
+
+
+def _validation_summary(rep: dict) -> dict | None:
+    """report.validation·coverage·reinforcement → provenance.design.validation. 계획 기록이 없으면 None(0으로 위장하지 않는다).
+    생성기(claw.profile.showcase)가 같은 모양을 적는다."""
+    v = rep.get("validation")
+    if not isinstance(v, dict):
+        return None
+    cov = rep.get("coverage") if isinstance(rep.get("coverage"), dict) else {}
+    rf = rep.get("reinforcement") if isinstance(rep.get("reinforcement"), dict) else {}
+    count = lambda x: len(x) if isinstance(x, list) else None  # noqa: E731
+    return {
+        # rule·existing — requested의 뜻을 읽는 칸(plan 규칙의 요청 = 새 검증점 + 판정을 겸한 기존 설계점 + 못 넣은 점)
+        "rule": v.get("rule"), "requested": v.get("requested"), "existing": v.get("existing"),
+        "done": v.get("done", cov.get("validation_done")),
+        "out_of_region": v.get("out_of_region"), "mode": v.get("mode"),
+        "conditions": count(v.get("conditions")), "omitted": count(v.get("omitted")),
+        "reinforce_status": rf.get("status", cov.get("reinforce_status")),
     }
 
 

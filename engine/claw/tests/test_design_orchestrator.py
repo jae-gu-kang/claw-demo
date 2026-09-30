@@ -1,5 +1,6 @@
 """M17 orchestrator 검증 — 전자동 종결, gated 일시정지·승인·재개, 왕복, 취소."""
 
+import copy
 import functools
 
 import numpy as np
@@ -7,6 +8,7 @@ import pytest
 
 from claw.common.contracts import TrimCase
 from claw.design import AutoDesignConfig, DesignSession, TuneTargets
+from claw.design.knots import union_knots
 from claw.design.points import ROLE_DESIGN, OperatingPoint, case_name
 from claw.fcl.demo import demo_design_gains
 from claw.plant import (
@@ -826,8 +828,10 @@ def test_reverify_resampled_judges_the_adopted_tables(env):
     assert out["n_judged"] > 0 and out["failures"] == []
     assert out["n_judged"] == s.judged_count() and out["dropped"] == 0
     zg, zt = s.config.criteria.zeta_good, s.config.targets.zeta_dr
-    yaw_z = [e["loops"]["yaw_rate"]["zeta"] for e in s.margin_out["cases"].values()
-             if "yaw_rate" in e.get("loops", {})]
+    # 설계 줄(1000 m)의 점만 — 이관 4단계부터 검증점에 요구영역 경계점(100·3000 m 행 끝)이 들어오는데, 그 고도는 요 댐퍼를
+    # 튜닝한 줄이 아니라 ζ가 목표에서 떨어져 있다(실측 0.539~0.540 — 여전히 목표선 0.5 위). 이 검사는 튜닝한 줄의 설계 여유다
+    yaw_z = [e["loops"]["yaw_rate"]["zeta"] for n, e in s.margin_out["cases"].items()
+             if "yaw_rate" in e.get("loops", {}) and s.points.get(n).case.alt == 1000.0]
     # 요 댐퍼가 정상 상태 목표에 앉아 있고(과감쇠로 되돌아가면 깨진다), 그 목표가 목표선 위에 재양자화 변화(≤ 0.0043)의
     # 20배 넘는 여유를 둔다(목표를 목표선과 같게 되돌리면 깨진다)
     assert yaw_z and all(abs(z - zt) < 0.01 for z in yaw_z), sorted(yaw_z)
@@ -1710,3 +1714,218 @@ def test_add_knot_action_promotes_and_splits_only_the_named_tables(env, ran):
     assert np.any(np.isclose(kp.axes[0], mach)), "편입점 마하 절점이 표에 서야 한다"
     assert s.knot_record()["tables"]["pitch.kp"]["shared"] is True  # 두 표가 새 집합을 함께 쓴다
     assert s.knot_record()["tables"]["yaw.k_rate"]["set"] == "common"
+
+
+# ── 검증점 생성 · 요약 격자 · 보강 (이관 4단계 — 05 §11.6~11.8) ─────────────────────────────
+
+
+def _session_digest(s) -> str:
+    """점(이름·역할·출처) · 자리별 판정 · 표 값 · 상태 · 판정 수의 지문 — 규칙이 같으면 비트 단위로 같다."""
+    import hashlib
+    import json
+
+    pts = sorted((p.name, p.role, p.origin) for p in s.points)
+    cases = {n: {lp: m.get("status") for lp, m in e.get("loops", {}).items()} for n, e in sorted(s.margin_out["cases"].items())}
+    tabs = {k: [list(map(float, t.axes[0])), [float(x) for x in t.data.ravel()]] for k, t in sorted(s.sched_tables.items())}
+    blob = json.dumps([pts, cases, tabs, s.status, s.judged_count()], sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def test_validation_config_defaults_to_the_plan_and_an_old_session_reads_the_midpoint_rule():
+    cfg = AutoDesignConfig()
+    assert cfg.validation == {"rule": "plan", "conditions": None, "mode": "full", "boundary": True, "extras": []}
+    assert cfg.reinforce == {"tol": None, "max_points": 24, "max_depth": 3, "max_time_s": None}
+    d = cfg.to_dict()
+    assert AutoDesignConfig.from_dict(d).validation == cfg.validation
+    old = {k: v for k, v in d.items() if k not in ("validation", "reinforce")}
+    back = AutoDesignConfig.from_dict(old)
+    assert back.validation["rule"] == "midpoint" and back.reinforce == cfg.reinforce
+    with pytest.raises(ValueError, match="validation"):
+        AutoDesignConfig(validation={"rule": "dense"})
+    with pytest.raises(ValueError, match="reinforce"):
+        AutoDesignConfig(reinforce={"tol": -1.0})
+
+
+def test_midpoint_rule_is_the_v170_verification_bit_for_bit(env):
+    """rule "midpoint"는 v1.70 VERIFY 그대로다 — 같은 설정의 v1.70(ce8052e) 실행에서 잰 지문(점·판정·표·상태)을 고정한다.
+    옛 세션 재개가 같은 검증점과 같은 판정을 내는 근거다."""
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small(budget_iters=1, validation={"rule": "midpoint"}))
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
+    assert _session_digest(s) == "05d0ba34b8632f4a"
+    rep = s.report()
+    assert rep["summary_grid"] is None and rep["reinforcement"] is None
+    assert rep["validation"]["rule"] == "midpoint" and rep["validation"]["requested"] == 2
+    assert rep["coverage"]["validation_requested"] is None and rep["coverage"]["reinforce_status"] is None
+
+
+@pytest.fixture(scope="module")
+def planned(env):
+    """rule "plan"(기본)으로 한 번 돈 작은 세션 — 요구영역 초안(M0.3~0.55 · 100/1000/3000 m · 200 kg), 설계 줄 1000 m."""
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small(budget_iters=1))
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
+    return s
+
+
+def test_plan_puts_boundary_points_in_and_reports_a_summary_grid(planned):
+    s = planned
+    kinds = {e["kind"] for e in s.validation_plan}
+    assert {"midpoint", "knot", "boundary"} <= kinds
+    added = [e for e in s.validation_plan if e["added"]]
+    assert {e["kind"] for e in added} >= {"midpoint", "boundary"}
+    for e in added:
+        assert s.points.get(e["name"]).role == "validation" and s.points.get(e["name"]).origin == e["origin"]
+    # 절점 자리 설계점은 판정을 겸한다 — 새 점을 만들지 않는다
+    assert all(e["existing"] and not e["added"] for e in s.validation_plan if e["kind"] == "knot")
+    rep = s.report()
+    v = rep["validation"]
+    assert v["rule"] == "plan" and v["source"] == "design_rows" and v["conditions"] == [[1000.0, 200.0]]
+    assert v["requested"] == len(s.validation_plan) - v["out_of_region"]
+    assert v["by_kind"]["boundary"]["requested"] >= 4
+    g = rep["summary_grid"]
+    assert g["totals"]["n"] == v["requested"] and g["totals"]["done"] == v["done"]
+    assert [r["key"] for r in g["rows"]] == ["h1000_f200", "extra"]
+    assert g["cells"]["extra"], "경계점이 「경계·추가」 행에 모인다"
+    r = rep["reinforcement"]
+    assert r["status"] == "tol_unset" and r["label"] == "허용치 미설정 — d 분포만" and r["added"] == []
+    assert r["d"] and set(r["distribution"]) <= {"pitch_rate", "yaw_rate", "roll_rate", "pitch_att", "roll_att"}
+    assert r["scales"]["pitch_att"] == 5.0 and "잠정" in r["scale_sources"]["pitch_att"]
+    cov = rep["coverage"]
+    assert cov["validation_requested"] == v["requested"] and cov["reinforce_status"] == "tol_unset"
+    assert cov["validation_points"] == sum(1 for p in s.points if str(p.origin).startswith("midpoint:"))
+    assert not any("허용치 미설정" in gap or "d 분포" in gap for gap in rep["coverage_gaps"])  # 공백이 아니다
+
+
+def test_plan_session_round_trip_keeps_the_plan_and_the_report(planned):
+    d = planned.to_dict()
+    assert d["validation_plan"] and d["validation_meta"]["mode"] == "full" and d["reinforce_state"]["status"] == "tol_unset"
+    s2 = DesignSession.from_dict(d)
+    assert s2.to_dict() == d
+    a, b = planned.report(), s2.report()
+    for key in ("validation", "summary_grid", "reinforcement", "coverage", "coverage_gaps"):
+        assert a[key] == b[key], key
+    # 옛 세션(계획 칸 없음)은 빈 계획으로 읽힌다
+    old = {k: v for k, v in d.items() if k not in ("validation_plan", "validation_meta", "reinforce_state")}
+    s3 = DesignSession.from_dict(old)
+    assert (s3.validation_plan, s3.validation_meta, s3.reinforce_state) == ([], {}, {})
+
+
+def test_reinforce_bisects_within_the_point_budget(env):
+    """허용치를 주면 최악 구간부터 이분한다 — 추가점 예산 4(두 번의 이분)에서 멈추고 남은 구간이 있으면 「보강 종료 · 추가
+    검증 필요」다(합격·불가로 바꾸지 않는다). 새 점은 판정까지 받는다."""
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small(budget_iters=1, budget_points=40, reinforce={"tol": 1e-6, "max_points": 4}))
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
+    added = s.reinforce_state["added"]
+    assert 0 < len(added) <= 4 and len(added) % 2 == 0
+    for name in added:
+        assert name in s.margin_out["cases"]
+        e = next(x for x in s.validation_plan if x["name"] == name)
+        assert e["kind"] == "reinforce" and e["origin"].startswith("reinforce:") and e["depth"] == 1
+    rep = s.report()["reinforcement"]
+    assert rep["status"] == "budget" and rep["label"].startswith("보강 종료 · 추가 검증 필요")
+    assert rep["remaining"] and rep["max_d_remaining"] > 1e-6
+    assert any("보강 예산" in g for g in s.report()["coverage_gaps"])
+
+
+def test_reinforce_time_budget_is_checked_before_each_round(env):
+    """시간 예산은 실행 전에 받는다 — 시계가 이미 넘었으면 한 점도 더하지 않고 남은 구간을 보고한다(시계는 주입)."""
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small(budget_iters=1, reinforce={"tol": 1e-6, "max_time_s": 1.0}))
+    ticks = iter(range(0, 10_000, 100))
+    s._clock = lambda: float(next(ticks))
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
+    assert s.reinforce_state["added"] == [] and s.reinforce_state["status"] == "budget"
+
+
+def test_plan_gaps_name_omitted_rows_unrun_points_and_unmeasured_intervals(planned):
+    s = DesignSession.from_dict(copy.deepcopy(planned.to_dict()))  # 픽스처 공유 — 사본을 고친다
+    s.validation_meta["omitted"] = [[3000.0, 200.0]]
+    victim = next(e for e in s.validation_plan if e["added"] and e["kind"] == "boundary")
+    s.margin_out["cases"].pop(victim["name"])  # 결과에 없는 요청 점 = 미계산
+    gaps = " ".join(s.coverage_gaps())
+    assert "1개 행을 생략" in gaps and "3000 m·200 kg" in gaps
+    assert "계산하지 못했다" in gaps
+    cov = s.coverage()
+    assert cov["validation_not_run"] == 1 and cov["validation_omitted_rows"] == 1
+    if cov["d_unmeasured"]:
+        assert "잴 수 없는 구간" in gaps
+
+
+def test_without_a_region_the_plan_uses_the_adopted_range_and_says_so(env):
+    import dataclasses
+
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small(budget_iters=1))
+    s.run(ac, stall, limits, db, design, verdict_ctx=dataclasses.replace(_vctx(), region=None, cache={}),
+          fingerprint="fp")
+    assert s.validation_plan and {e["kind"] for e in s.validation_plan} <= {"midpoint", "knot", "between_rows"}
+    assert "요구영역 미정의" in s.report()["validation"]["note"]
+
+
+def test_a_boundary_point_failure_goes_to_classify_and_the_action_names_its_plan_origin(planned):
+    """계획한 점(경계·clip·절점·추가·검증조건·보강) 어디서든 실패는 CLASSIFY로 간다 — 요구영역 안 실패는 실제 실패다(부모
+    결정). 처방 근거가 그 점의 계획 종류·출처를 적어, 사용자가 「경계점 실패」임을 처방 카드에서 읽는다. 이 작은 세션은
+    요구영역 경계 모서리 M0.3 · 3000 m의 롤 레이트가 실패한다."""
+    s = planned
+    boundary = {e["name"] for e in s.validation_plan if e["kind"] == "boundary"}
+    acts = [a for a in s.actions if a["case"] in boundary]
+    assert acts, [a["id"] for a in s.actions]
+    pp = acts[0]["evidence"]["plan_point"]
+    assert pp["kind"] == "boundary" and pp["origin"] == "boundary:region" and pp["label"] == "요구영역 경계"
+    note = s.report()["validation"]["classify_note"]
+    assert "CLASSIFY" in note and "승인" in note
+
+
+def test_validation_report_says_what_requested_counts(planned):
+    """requested = 새로 넣은 검증점(added) + 판정을 겸한 기존 설계점(existing) + 못 돈 점(not_run) + 계획에만 남은 점."""
+    v = planned.report()["validation"]
+    assert v["rule"] == "plan"
+    assert v["existing"] == sum(1 for e in planned.validation_plan if e["kind"] == "knot")  # 절점 자리 설계점 셋
+    assert v["requested"] == v["added"] + v["existing"] + v["not_run"]
+
+
+def test_report_uses_the_knots_the_plan_was_made_with_and_says_when_they_changed(planned):
+    """add_knot 뒤 다음 VERIFY 전(취소·승인 대기)에 보고하면 지금 합집합은 계획 당시와 다르다 — 격자·d는 계획 당시 절점
+    기준이고 그렇다고 적는다(리뷰 4)."""
+    from claw.design.knots import add_knot
+
+    s = DesignSession.from_dict(copy.deepcopy(planned.to_dict()))  # 픽스처 공유 — 사본을 고친다
+    before = s.report()
+    plan_knots = s.validation_meta["plan_knots"]
+    assert plan_knots == union_knots(s.knot_sets, s.table_knots) and before["validation"]["knots_note"] is None
+    slot = sorted(s.table_knots)[0]
+    add_knot(s.knot_sets, s.table_knots, [slot], (plan_knots[0] + plan_knots[1]) / 2.0, reason="t", point="p",
+             iter_n=1, max_per_table=20)
+    after = s.report()
+    assert after["summary_grid"]["columns"] == before["summary_grid"]["columns"]
+    assert after["reinforcement"]["d"] == before["reinforcement"]["d"]
+    note = after["validation"]["knots_note"]
+    assert note and "절점이 바뀐 뒤 검증 전" in note
+    assert note in after["summary_grid"]["notes"] and any(note in g for g in after["coverage_gaps"])
+
+
+def test_validation_points_left_out_of_a_new_plan_stay_in_the_grid_as_prior(planned):
+    """앞선 VERIFY가 넣은 검증점이 새 계획에 없어도 점 집합에 남아 판정받고 CLASSIFY로 간다 — 요약 격자의 「경계·추가」 행에
+    「이전 계획」으로 보인다(리뷰 5). 검증조건을 다른 행으로 바꿔 다시 계획해 본다."""
+    s = DesignSession.from_dict(copy.deepcopy(planned.to_dict()))  # 픽스처 공유 — 사본을 고친다
+    old = {e["name"] for e in s.validation_plan if e["kind"] == "midpoint"}
+    s.config.validation["conditions"] = [[100.0, 200.0]]
+    s._add_planned_validation(s.points.designable(), union_knots(s.knot_sets, s.table_knots))
+    prior = [e for e in s.validation_plan if e["kind"] == "prior"]
+    assert old and old <= {e["name"] for e in prior}
+    assert all(e["row"] is None and e["existing"] and not e["added"] for e in prior)
+    g = s.summary_grid()
+    assert sum(c["n"] for c in g["cells"]["extra"].values()) >= len(prior)
+    assert s.report()["validation"]["by_kind"]["prior"]["requested"] == len(prior)
+
+
+def test_failures_outside_the_plan_are_named_under_the_grid(planned):
+    """실패가 계획 밖 점(설계점 적합 잔차 등)에만 있으면 격자는 모두 충족으로 보일 수 있다 — 격자 주석이 그 수를 말한다."""
+    s = DesignSession.from_dict(copy.deepcopy(planned.to_dict()))  # 픽스처 공유 — 사본을 고친다
+    failing = {f["case"] for f in s.margin_out["failures"]}
+    s.validation_plan = [e for e in s.validation_plan if e["name"] not in failing]
+    g = s.summary_grid()
+    assert g["unplanned_failures"] == len(failing)
+    assert any("계획 밖" in n for n in g["notes"])

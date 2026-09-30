@@ -156,6 +156,10 @@ export function buildConfig(form) {
   }
   const knots = knotConfig(form);
   if (knots) out.knots = knots;
+  const validation = validationConfig(form);
+  if (validation) out.validation = validation;
+  const reinforce = reinforceConfig(form);
+  if (reinforce) out.reinforce = reinforce;
   return out;
 }
 
@@ -174,6 +178,49 @@ function knotConfig(form) {
   }
   const coords = String(form.knotCoordsText ?? "").trim();
   if (coords) out.coords = parseNumberList(coords);
+  return Object.keys(out).length ? out : null;
+}
+
+/** 검증 조건 글 → [[고도, 연료], …] — 「고도/연료」 짝을 쉼표·세미콜론·공백으로 가른다("200/25, 3000/10").
+ *  짝이 아니거나 수치가 아니면 던진다(호출측이 표시). 빈 글은 null(= 서버 기본: 설계 행 전부). */
+export function parseConditionPairs(text) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return null;
+  return raw.split(/[\s,;]+/).filter(Boolean).map((tok) => {
+    const parts = tok.split("/");
+    const v = parts.map((x) => (x.trim() === "" ? NaN : Number(x)));
+    if (parts.length !== 2 || !v.every(Number.isFinite)) {
+      throw new Error(`validation.conditions: 「고도/연료」 짝이 아님 — ${tok}`);
+    }
+    return v;
+  });
+}
+
+/** 검증점 설정 칸 → config.validation 부분 덮어쓰기(05 §11.6 — 서버가 기본값 위에 겹친다). 채운 칸만, 없으면 null.
+ *  조건(validationConditionsText)은 「고도/연료」 짝 목록, 방식(validationMode)은 열거값 그대로(허용 목록은 서버
+ *  /design/defaults의 validation_modes — 판정은 엔진 check_validation_config), 경계점(validationBoundary)은 "on"/"off". */
+export function validationConfig(form) {
+  const out = {};
+  const conds = parseConditionPairs(form.validationConditionsText);
+  if (conds) out.conditions = conds;
+  if (form.validationMode) out.mode = form.validationMode;
+  const b = String(form.validationBoundary ?? "");
+  if (b === "on" || b === "off") out.boundary = b === "on";
+  return Object.keys(out).length ? out : null;
+}
+
+/** 보강 설정 칸 → config.reinforce 부분 덮어쓰기(05 §11.7). 허용치(tol)·추가점 상한·이분 깊이·시간 상한 — 채운 칸만,
+ *  없으면 null. 허용치를 비우면 서버 기본(미설정 — 이분 없이 d 분포만)이다. 범위는 엔진 check_reinforce_config가 본다. */
+export function reinforceConfig(form) {
+  const out = {};
+  for (const [from, to] of [["reinforceTol", "tol"], ["reinforceMaxPoints", "max_points"],
+    ["reinforceMaxDepth", "max_depth"], ["reinforceMaxTime", "max_time_s"]]) {
+    const raw = String(form[from] ?? "").trim();
+    if (!raw) continue;
+    const v = Number(raw);
+    if (!Number.isFinite(v)) throw new Error(`reinforce.${to}: 수치가 아님 — ${raw}`);
+    out[to] = v;
+  }
   return Object.keys(out).length ? out : null;
 }
 
@@ -1167,6 +1214,11 @@ export function evidenceLines(a, reasonMap) {
     const slots = (ev.sign_flip.slots ?? []).join(", ");
     head.push(`부호 반대: ${slots} (설계와 반대 방향 — 양의 되먹임)`);
   }
+  // 계획한 검증점의 실패(이관 4단계) — 어느 계획 종류(경계·clip·절점·추가…)에서 났는지. 요구영역 안 실패는 실제 실패다
+  if (ev.plan_point?.kind) {
+    head.push(`검증점 종류: ${ev.plan_point.label ?? VALIDATION_KIND_LABEL[ev.plan_point.kind] ?? ev.plan_point.kind}`
+      + (ev.plan_point.origin ? ` (${ev.plan_point.origin})` : ""));
+  }
   if (cur.pm_deg != null) head.push(`현재 PM ${num(cur.pm_deg)}° / GM ${num(cur.gm_db)} dB`);
   if (cur.zeta != null) head.push(`현재 ζ ${num(cur.zeta)}`);
   if (cur.roll_lambda != null) head.push(`현재 λ ${num(cur.roll_lambda)} rad/s`);
@@ -1557,6 +1609,45 @@ export function coverageLines(report) {
         text: `트림 미수렴 ${num(nt)}점`
           + prose(" — 그 점들은 실패 목록에도 판정 수에도 들어가지 않는다.") });
     }
+    // 검증점 계획(05 §11.6 — 이관 4단계). 요청·완료·미실행은 **요구영역 안** 점만 센다 — 요구영역 밖은 계획에만 있고
+    // (트림·예산 없음) 따로 적는다. 옛 결과(키 없음)는 줄이 없다 — 없는 수를 0으로 읽지 않는다
+    const req = numeric(c.validation_requested);
+    if (req != null) {
+      const done = numeric(c.validation_done);
+      const notRun = numeric(c.validation_not_run) ?? 0;
+      const oor = numeric(c.validation_out_of_region) ?? 0;
+      // 완료 < 요청인데 미실행이 아니면 계산은 했으나 못 선 점이다(트림 불가·계산 실패 등) — 요약 격자 합계의 상태
+      // 내역으로 이유를 댄다. 내역이 없으면(옛 결과·격자 없음) 이유를 모른다고 쓰고 경고색이다
+      const short = done == null ? 0 : Math.max(0, req - done - notRun);
+      const states = report?.summary_grid?.totals?.states;
+      const whyText = states ? tally(Object.fromEntries(Object.entries(states)
+        .filter(([k]) => k !== "computable" && k !== "not_run")), STATE_SHORT) : "";
+      const unexplained = short > 0 && !whyText;
+      out.push({ key: "validation_plan", tone: notRun > 0 || unexplained ? "warn" : "hint",
+        text: `검증점 요청 ${num(req)} · 완료 ${done == null ? "?" : num(done)}`
+          + (short ? ` · 미완료 ${num(short)}(${whyText || "사유 기록 없음"})` : "")
+          + (notRun ? ` · 미실행 ${num(notRun)}` : "")
+          + (oor ? ` · 요구영역 밖 ${num(oor)}(계획만)` : "")
+          + (notRun ? prose(" — 돌지 않은 점(예산·취소)은 판정 수에 없다.") : "") });
+    }
+    const omitted = Array.isArray(c.validation_omitted_rows) ? c.validation_omitted_rows.length
+      : numeric(c.validation_omitted_rows);
+    if (omitted) {
+      out.push({ key: "validation_omitted", tone: "warn",
+        text: `대표 조건 방식이 뺀 검증 조건 ${num(omitted)}행`
+          + prose(" — 그 고도·연료에서는 절점 사이를 이번에 보지 않았다.") });
+    }
+    const dUn = Array.isArray(c.d_unmeasured) ? c.d_unmeasured.length : numeric(c.d_unmeasured);
+    if (dUn) {
+      out.push({ key: "d_unmeasured", tone: "warn",
+        text: `보강 지표 d를 잴 수 없는 구간 ${num(dUn)}`
+          + prose(" — 양끝이나 안쪽 점이 계산되지 않았다. 완료로 치지 않는다.") });
+    }
+    // 보강이 예산에서 멈췄다 — 남은 구간은 합격도 설계 불가도 아니다(05 §11.7). 허용치 미설정(tol_unset)은 공백이 아니다
+    if (c.reinforce_status === "budget") {
+      out.push({ key: "reinforce", tone: "warn", text: REINFORCE_STATUS_TEXT.budget
+        + prose(" — 허용치를 넘는 구간이 남았다.") });
+    }
   }
   // 엔진이 만든 문장 — 화면이 다시 쓰지 않는다. 비어 있지 않다는 것 자체가
   // "무엇을 안 봤는지가 있는 실행"이라는 신호다
@@ -1564,6 +1655,197 @@ export function coverageLines(report) {
     out.push({ key: `gap${i}`, tone: "warn", text: String(g) });
   });
   return out.sort((a, b) => (_TONE_RANK[b.tone] ?? 0) - (_TONE_RANK[a.tone] ?? 0));
+}
+
+// ── 요약 격자 · 보강 (05 §11.8 · 05 §11.7 — 이관 4단계) ───────────────────────
+
+/** 보강 상태 코드(엔진 reinforce) → 문구 [폴백]. 정본은 보고의 reinforcement.label과 서버
+ *  /design/defaults reinforce_status_text — 결과에 문구가 없을 때만 이것을 쓴다. 모르는 코드는 그대로. */
+export const REINFORCE_STATUS_TEXT = {
+  tol_unset: "허용치 미설정 — d 분포만",
+  done: "보강 완료",
+  budget: "보강 종료 · 추가 검증 필요",
+  unmeasured: "보강 종료 · 잴 수 없는 구간 있음",
+};
+
+/** 검증점 종류(엔진 validation.VALIDATION_KINDS) → 이름 [폴백]. 정본은 서버 /design/defaults의 validation_kinds
+ *  (엔진 표 그대로) — 그것이 오면 그쪽을 넘긴다. 모르는 종류는 코드 그대로. */
+export const VALIDATION_KIND_LABEL = {
+  midpoint: "구간 내분점", knot: "절점", clip: "clip 구간", boundary: "요구영역 경계", extra: "추가 조건",
+  between_rows: "고도·연료 사이", reinforce: "보강", prior: "이전 계획",
+};
+
+/** 검증 방식(엔진 validation.VALIDATION_MODES) → 이름 [폴백]. 정본은 서버 validation_modes. */
+export const VALIDATION_MODE_LABEL = { full: "전체 조합", representative: "대표 조합" };
+
+/** 서버 목록(배열 또는 {코드: 이름}) → {코드: 이름}. 배열이면 폴백 이름을 붙인다. */
+export function labelMap(list, fallback) {
+  if (Array.isArray(list)) return Object.fromEntries(list.map((k) => [k, fallback[k] ?? k]));
+  if (list && typeof list === "object") return { ...fallback, ...list };
+  return { ...fallback };
+}
+
+/** 요약 격자 칸의 대표 문구 코드(엔진 headline_code) → 색 톤. 문구(headline)만 있는 결과는 문구로 고른다.
+ *  「구간 합격」이라는 말은 없다 — 검사한 점만 말한다. 판정 불가·채택 제외가 섞인 칸은 회색(모두 충족으로 뭉개지 않는다). */
+const HEADLINE_TONE = { fail: "fail", incomplete: "warn", na: "na", excluded: "na", all_met: "ok",
+  "불합격": "fail", "미완료": "warn", "판정 불가 포함": "na", "채택 제외 포함": "na", "검사한 점 모두 충족": "ok" };
+
+const VERDICT_SHORT = { fail: "불합격", caution: "주의", good: "충족", na: "판정 불가", excluded: "채택 제외" };
+const STATE_SHORT = {
+  computable: "계산", calc_failed: "계산 실패", constraint_hit: "제약 걸림", infeasible: "트림 불가",
+  not_run: "미실행", out_of_region: "요구영역 밖", undefined: "정의 안 됨", model_gap: "모델 없음",
+};
+
+const tally = (obj, names) => Object.entries(obj ?? {})
+  .filter(([, n]) => Number(n) > 0).map(([k, n]) => `${names[k] ?? k} ${n}`).join(" · ");
+
+function rowLabel(r) {
+  if (r.label) return String(r.label);
+  if (r.alt != null && r.fuel != null) return `${num(r.alt)} m · ${num(r.fuel)} kg`;
+  return r.kind === "condition" || r.kind == null ? String(r.key) : "경계·추가";
+}
+
+function colLabel(c) {
+  if (c.kind === "all") return "전 마하";
+  if (c.kind === "knot") return machText(c.lo ?? c.hi);
+  if (c.kind === "clip") return c.key === "clip_hi" || (c.lo != null && c.hi == null) ? "끝>" : "<끝";
+  return "·";
+}
+
+function colTip(c) {
+  if (c.kind === "all") return "절점 없음(전 자리 상수) — 마하 전체";
+  if (c.kind === "knot") return `절점 ${machText(c.lo ?? c.hi)}`;
+  if (c.kind === "clip") {
+    return c.key === "clip_hi" || (c.lo != null && c.hi == null)
+      ? `끝 절점 바깥 ${machText(c.lo)} 이상 — 표는 끝값 유지` : `끝 절점 바깥 ${machText(c.hi)} 이하 — 표는 끝값 유지`;
+  }
+  return `절점 사이 ${machText(c.lo)}–${machText(c.hi)}`;
+}
+
+/** report.summary_grid → 행렬 모델 — 옛 결과(격자 없음)는 null.
+ *  열 = 끝 밖 · 절점 · 구간 … · 끝 밖, 행 = 검증 조건 + 「경계·추가」. 칸 글은 짧게(완료 d/n, 불합격 수)이고 대표 문구·
+ *  상태·판정 내역은 툴팁이다. 대표 문구는 엔진 것 그대로(불합격 → 미완료 → 「검사한 점 모두 충족」) — 구간 합격이라 하지
+ *  않는다. 빈 칸(그 자리에 검증점 없음)은 empty. 요구영역 밖 점은 n에 없고 따로 센다. */
+export function summaryGridModel(report) {
+  const g = report?.summary_grid;
+  if (!g || !Array.isArray(g.columns) || !Array.isArray(g.rows)) return null;
+  const columns = g.columns.map((c) => ({ key: c.key, kind: c.kind, label: colLabel(c), tip: colTip(c) }));
+  // 칸 수는 대표 문구별로 — 판정 불가 포함과 채택 제외 포함은 색(회색)이 같아도 이름이 다르다
+  const counts = { fail: 0, warn: 0, ok: 0, na: 0, excluded: 0 };
+  const rows = g.rows.map((r) => {
+    const label = rowLabel(r);
+    const cells = columns.map((col) => {
+      const cell = g.cells?.[r.key]?.[col.key];
+      if (!cell || !(Number(cell.n) > 0)) {
+        // 요구영역 밖 점만 있는 칸 — 분모에 없으니 빈 칸이되 툴팁이 그 수를 말한다
+        const oorHere = Number(cell?.out_of_region) || 0;
+        return { key: col.key, empty: true, tone: null, text: "",
+          tip: `${label} · ${col.tip} — ${oorHere ? `요구영역 밖 ${oorHere}점만(판정 대상 아님)` : "검증점 없음"}` };
+      }
+      const fails = Number(cell.verdicts?.fail) || 0;
+      const tone = HEADLINE_TONE[cell.headline_code] ?? HEADLINE_TONE[cell.headline] ?? "na";
+      const excluded = cell.headline_code === "excluded" || cell.headline === "채택 제외 포함";
+      const countKey = excluded ? "excluded" : tone;
+      counts[countKey] = (counts[countKey] ?? 0) + 1;
+      const tip = [
+        `${label} · ${col.tip}`,
+        cell.headline ?? null,
+        cell.text ?? `완료 ${cell.done ?? "?"}/${cell.n}`,
+        tally(cell.states, STATE_SHORT) ? `상태 — ${tally(cell.states, STATE_SHORT)}` : null,
+        tally(cell.verdicts, VERDICT_SHORT) ? `판정 — ${tally(cell.verdicts, VERDICT_SHORT)}` : null,
+      ].filter(Boolean).join("\n");
+      return { key: col.key, empty: false, tone, headline: cell.headline ?? null, fails,
+        text: fails ? `✗${fails}` : `${cell.done ?? "?"}/${cell.n}`, tip };
+    });
+    return { key: r.key, kind: r.kind ?? null, label, cells };
+  });
+  const t = g.totals ?? {};
+  const oor = numeric(t.out_of_region) ?? numeric(report?.validation?.out_of_region);
+  const summary = `요약 격자 — 불합격 칸 ${counts.fail} · 미완료 칸 ${counts.warn} · 검사한 점 모두 충족 칸 ${counts.ok}`
+    + (counts.na ? ` · 판정 불가 포함 칸 ${counts.na}` : "")
+    + (counts.excluded ? ` · 채택 제외 포함 칸 ${counts.excluded}` : "")
+    + (oor ? ` · 요구영역 밖 ${num(oor)}점(칸에 없음)` : "");
+  // 엔진 주석(계획 밖 점의 실패 · 계획 뒤 절점 바뀜) — 녹색 격자와 미수렴 상태가 설명 없이 나란히 서지 않게
+  const notes = Array.isArray(g.notes) ? g.notes.filter((n) => typeof n === "string" && n) : [];
+  return { columns, rows, counts, outOfRegion: oor, summary, notes };
+}
+
+const DIST_KEYS = [["max", "최대"], ["p90", "p90"], ["p50", "p50"]];
+
+/** report.reinforcement → 줄 [{key, tone, text, tip?, slot?}] — 옛 결과는 []. 첫 줄은 상태(엔진 label 우선).
+ *  허용치 미설정(tol_unset)은 공백이 아니다(회색) — 자리별 d 분포를 한 줄씩 짧게. 허용치가 있으면 추가점·남은 구간·최대 d,
+ *  잴 수 없는 구간(사유는 툴팁), 양끝 판정이 다른 구간 수. 척도 s와 그 출처는 툴팁. */
+export function reinforcementLines(report, statusText = null) {
+  const rf = report?.reinforcement;
+  if (!rf || typeof rf !== "object") return [];
+  const st = rf.status ?? null;
+  const label = rf.label ?? statusText?.[st] ?? REINFORCE_STATUS_TEXT[st] ?? String(st ?? "보강 기록 없음");
+  const tone = st === "budget" || st === "unmeasured" ? "warn" : "hint";
+  const scales = rf.scales ?? {};
+  const src = rf.scale_sources ?? {};
+  const scaleTip = Object.keys(scales).map((k) => `${k} s=${num(scales[k])}${src[k] ? ` — ${src[k]}` : ""}`).join("\n");
+  const out = [{ key: "reinforce_status", tone, text: `보강 — ${label}`, tip: scaleTip || null }];
+  const tol = numeric(rf.tol ?? rf.budget?.tol);
+  const cnt = (x) => (Array.isArray(x) ? x.length : numeric(x));
+  if (tol != null) {
+    const added = cnt(rf.added) ?? 0;
+    // 엔진 문구가 이미 남은 구간·최대 d를 말하면(budget label) 다시 적지 않는다
+    const rem = String(label).includes("남은 구간") ? 0 : cnt(rf.remaining) ?? 0;
+    const b = rf.budget ?? {};
+    const budget = [b.max_points != null ? `추가점 상한 ${b.max_points}` : null,
+      b.max_depth != null ? `깊이 ${b.max_depth}` : null, b.max_time_s != null ? `${b.max_time_s} s` : null]
+      .filter(Boolean).join(" · ");
+    out.push({ key: "reinforce_run", tone: rem ? "warn" : "hint",
+      text: `허용치 d ≤ ${+tol.toPrecision(6)} · 추가 ${num(added)}점`
+        + (rem ? ` · 남은 구간 ${num(rem)}(최대 d ${num(rf.max_d_remaining)})` : ""),
+      tip: budget ? `예산 — ${budget}` : null });
+  }
+  const dist = rf.distribution ?? {};
+  for (const slot of Object.keys(dist)) {
+    const d = dist[slot] ?? {};
+    out.push({ key: `dist_${slot}`, slot, tone: "hint",
+      text: `${slot} d ${DIST_KEYS.filter(([k]) => d[k] != null).map(([k, n]) => `${n} ${num(d[k], 2)}`).join(" · ")}`
+        + (d.n != null ? ` (n ${d.n})` : ""),
+      tip: scales[slot] != null ? `s=${num(scales[slot])}${src[slot] ? ` — ${src[slot]}` : ""}` : null });
+  }
+  const un = Array.isArray(rf.unmeasured) ? rf.unmeasured : [];
+  const nUn = un.length || numeric(rf.unmeasured) || 0;
+  if (nUn) {
+    out.push({ key: "reinforce_unmeasured", tone: "warn", text: `잴 수 없는 구간 ${nUn}`,
+      tip: !un.length ? null : un.slice(0, 12).map((u) => `${Array.isArray(u.row) ? u.row.join("/") : u.row ?? "?"} · `
+        + `${Array.isArray(u.interval) ? u.interval.map(machText).join("–") : u.interval ?? "?"} — ${u.why ?? "?"}`)
+        .join("\n") + (un.length > 12 ? `\n… 외 ${un.length - 12}` : "") });
+  }
+  const vc = cnt(rf.verdict_change_intervals) ?? numeric(rf.verdict_change);
+  if (vc) out.push({ key: "verdict_change", tone: "hint", text: `양끝 판정이 다른 구간 ${num(vc)}` });
+  return out;
+}
+
+/** report.validation.by_kind → {종류: 요청 수}. 엔진은 종류마다 {requested, done, not_run, out_of_region}를 싣는다 —
+ *  수 하나만 온 모양도 읽는다. */
+export function kindCounts(byKind) {
+  return Object.fromEntries(Object.entries(byKind ?? {}).map(([k, v]) =>
+    [k, v && typeof v === "object" ? Number(v.requested) || 0 : Number(v) || 0]));
+}
+
+/** report.validation → 한 줄(탭 요약·결과 브리핑 공용) — 옛 결과(구간 중점 규칙·기록 없음)는 null.
+ *  「요청 N · 완료 M · 조건 k행(방식) · 뺀 j행 · 요구영역 밖 o · 종류별 수」. */
+export function validationSummaryText(report, { kinds = null, modes = null } = {}) {
+  const v = report?.validation;
+  if (!v || typeof v !== "object" || v.rule === "midpoint") return null;
+  const cov = report?.coverage ?? {};
+  const nCond = Array.isArray(v.conditions) ? v.conditions.length : numeric(v.conditions);
+  const nOm = Array.isArray(v.omitted) ? v.omitted.length : numeric(v.omitted);
+  const done = numeric(v.done) ?? numeric(cov.validation_done);
+  const kindText = tally(kindCounts(v.by_kind), labelMap(kinds, VALIDATION_KIND_LABEL));
+  const modeName = labelMap(modes, VALIDATION_MODE_LABEL)[v.mode] ?? v.mode ?? "?";
+  return [
+    `요청 ${v.requested ?? "?"}${done != null ? ` · 완료 ${done}` : ""}`,
+    nCond != null ? `조건 ${nCond}행(${modeName})` : null,
+    nOm ? `뺀 조건 ${nOm}행` : null,
+    numeric(v.out_of_region) ? `요구영역 밖 ${v.out_of_region}(계획만)` : null,
+    kindText || null,
+  ].filter(Boolean).join(" · ");
 }
 
 // ── 문서 반영 관문 · 신호(쇼케이스) 사슬 ────────────────────────────────
@@ -1624,6 +1906,20 @@ export function configFormValues(config) {
     if (k.n != null) out.knotN = String(k.n);
     if (Array.isArray(k.coords)) out.knotCoordsText = k.coords.join(" ");
     if (k.max_per_table != null) out.knotMax = String(k.max_per_table);
+  }
+  // 검증점·보강 설정 — validationConfig·reinforceConfig의 역방향. 조건은 「고도/연료」 짝 글
+  const v = c.validation;
+  if (v && typeof v === "object") {
+    if (Array.isArray(v.conditions)) out.validationConditionsText = v.conditions.map((p) => p.join("/")).join(", ");
+    if (typeof v.mode === "string") out.validationMode = v.mode;
+    if (typeof v.boundary === "boolean") out.validationBoundary = v.boundary ? "on" : "off";
+  }
+  const r = c.reinforce;
+  if (r && typeof r === "object") {
+    for (const [key, field] of [["tol", "reinforceTol"], ["max_points", "reinforceMaxPoints"],
+      ["max_depth", "reinforceMaxDepth"], ["max_time_s", "reinforceMaxTime"]]) {
+      if (r[key] != null) out[field] = String(r[key]);
+    }
   }
   return out;
 }

@@ -11,8 +11,8 @@
 
 import {
   actionCards, actuatorLine, adoptBlockedText, applyGateReason, coverageLines, excludedSamplesModel,
-  failureRoleText, fitFactsModel, fitModeLabel, knotModel, pointCountText, pointRows, resumable, resumeBlockedText, reverifyLines,
-  statusCounts, statusSeverity, statusText,
+  failureRoleText, fitFactsModel, fitModeLabel, knotModel, pointCountText, pointRows, reinforcementLines, resumable,
+  resumeBlockedText, reverifyLines, statusCounts, statusSeverity, statusText, summaryGridModel, validationSummaryText,
 } from "./autodesign.js";
 import { FQ_BADGE, FQ_RANK, fqMeasureText, fqWorst } from "./fq.js";
 import { lineageText } from "./lineage.js";
@@ -309,6 +309,16 @@ function knotBriefText(m) {
   return `${m.summary.replace(/^절점 — /, "")}${per.length ? ` — ${head}` : ""}`;
 }
 
+/** 검증점 한 칸 — 계획 요약 · 요약 격자 칸 수 · 보강 상태(탭과 같은 함수). 옛 결과는 기록 없음. */
+function validationBriefText(r) {
+  const plan = validationSummaryText(r);
+  if (!plan) return "기록 없음 — 검증점 계획 이전 결과(구간 중점만)";
+  const grid = summaryGridModel(r);
+  const rf = reinforcementLines(r)[0];
+  return [plan, grid ? grid.summary.replace(/^요약 격자 — /, "격자 ") : null, rf ? rf.text : null]
+    .filter(Boolean).join(" — ");
+}
+
 /** 자동 설계 — 종료 상태·판정 규모·처방·커버리지·게인 반출. 문구·판정은 자동 설계 탭과 **같은
  *  함수**(lib/autodesign.js)에서 온다 — 두 화면이 같은 결과를 다르게 말하지 않게. 운영점 표·원장·
  *  처방 카드 전문은 자동 설계 탭 보고서(openIn)가 연다. */
@@ -345,6 +355,8 @@ function autoDesignBrief(body, meta) {
       ["점", `${r.n_points ?? "—"} (${pointCountText(pts, "—")})`],
       // 표별 절점(이관 3단계 — 설계점과 따로 정한다). 절점 분리 이전 결과는 기록이 없다고 말한다
       ["절점", knots ? knotBriefText(knots) : "기록 없음 — 절점 분리 이전 결과(튜닝한 마하가 곧 절점)"],
+      // 검증점 계획·요약 격자·보강(05 §11.6~11.8 — 이관 4단계). 계획 이전 결과(구간 중점 규칙)는 기록이 없다고 말한다
+      ["검증점", validationBriefText(r)],
       ["판정 · 실패", `${judged} · ${failures}` + (where ? ` — 실패 위치 ${where}` : "")],
       ["작동기", act?.value ?? "기록 없음"],
       ["운영점 판정", pointText],

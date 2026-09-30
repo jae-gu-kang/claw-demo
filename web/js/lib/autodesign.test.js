@@ -6,6 +6,15 @@ import { test } from "node:test";
 
 import {
   ROLE_LABEL,
+  REINFORCE_STATUS_TEXT,
+  VALIDATION_KIND_LABEL,
+  VALIDATION_MODE_LABEL,
+  parseConditionPairs,
+  reinforceConfig,
+  reinforcementLines,
+  summaryGridModel,
+  validationConfig,
+  validationSummaryText,
   actionText,
   knotBadgeSpec,
   knotModel,
@@ -1760,4 +1769,209 @@ test("자동 설계 뷰 — 절점 패널·절점 설정 칸·카드 동작 줄�
   const gains = readFileSync(new URL("../views/gains.js", import.meta.url), "utf8");
   assert.match(gains, /knotBadgeSpec\(c\.knots\)/);
   assert.doesNotMatch(gains, /breakpoint/);
+});
+
+
+// ── 검증점 계획 · 요약 격자 · 보강 (05 §11.6~11.8 — 이관 4단계) ─────────────────────
+
+test("validationConfig·reinforceConfig — 채운 칸만 부분 덮어쓰기, 조건은 「고도/연료」 짝", () => {
+  assert.equal(validationConfig({}), null);
+  assert.equal(reinforceConfig({ reinforceTol: " " }), null);
+  assert.deepEqual(validationConfig({ validationConditionsText: "200/25, 3000/10" }),
+    { conditions: [[200, 25], [3000, 10]] });
+  assert.deepEqual(parseConditionPairs("0/5 1000/20;2000/40"), [[0, 5], [1000, 20], [2000, 40]]);
+  assert.deepEqual(validationConfig({ validationMode: "representative", validationBoundary: "off" }),
+    { mode: "representative", boundary: false });
+  assert.deepEqual(validationConfig({ validationBoundary: "on" }), { boundary: true });
+  for (const bad of ["200", "200/", "200/25/3", "a/b", "/25"]) {
+    assert.throws(() => validationConfig({ validationConditionsText: bad }), /고도\/연료/, bad);
+  }
+  assert.deepEqual(reinforceConfig({ reinforceTol: "0.5", reinforceMaxPoints: "24", reinforceMaxDepth: "3",
+    reinforceMaxTime: "60" }), { tol: 0.5, max_points: 24, max_depth: 3, max_time_s: 60 });
+  assert.throws(() => reinforceConfig({ reinforceTol: "abc" }), /reinforce\.tol/);
+  // buildConfig가 둘을 싣고, configFormValues가 되돌린다(신호 사슬 왕복)
+  const cfg = buildConfig({ mode: "gated", validationConditionsText: "200/25", validationMode: "full",
+    validationBoundary: "on", reinforceTol: "0.4" });
+  assert.deepEqual(cfg.validation, { conditions: [[200, 25]], mode: "full", boundary: true });
+  assert.deepEqual(cfg.reinforce, { tol: 0.4 });
+  const back = configFormValues(cfg);
+  assert.equal(back.validationConditionsText, "200/25");
+  assert.equal(back.validationBoundary, "on");
+  assert.equal(back.reinforceTol, "0.4");
+  assert.deepEqual(buildConfig({ mode: "gated", ...back }).validation, cfg.validation);
+  assert.equal(buildConfig({ mode: "gated" }).validation, undefined);
+});
+
+const GRID_REPORT = {
+  validation: { rule: "plan", conditions: [[0, 50], [3000, 50]], mode: "full", omitted: [], requested: 9,
+    out_of_region: 2, by_kind: { midpoint: { requested: 4, done: 3, not_run: 1, out_of_region: 0 }, clip: 2,
+      boundary: { requested: 3, done: 3, not_run: 0, out_of_region: 2 } } },
+  coverage: { validation_done: 7 },
+  summary_grid: {
+    columns: [{ key: "clip_lo", kind: "clip", lo: null, hi: 0.2 }, { key: "knot1", kind: "knot", lo: 0.2, hi: 0.2 },
+      { key: "seg1-2", kind: "seg", lo: 0.2, hi: 0.4 }, { key: "knot2", kind: "knot", lo: 0.4, hi: 0.4 },
+      { key: "clip_hi", kind: "clip", lo: 0.4, hi: null }],
+    // 엔진 validation.summary_grid 모양 — 행 label·칸 headline_code를 싣는다(첫 행은 label 없는 옛 모양 폴백)
+    rows: [{ key: "h0_f50", alt: 0, fuel: 50, kind: "condition" },
+      { key: "h3000_f50", alt: 3000, fuel: 50, kind: "condition", label: "3000 m · 50 kg" },
+      { key: "extra", alt: null, fuel: null, kind: "extra", label: "경계·추가" }],
+    cells: {
+      h0_f50: { "seg1-2": { n: 1, done: 1, states: { computable: 1 }, verdicts: { good: 1 },
+        headline: "검사한 점 모두 충족", text: "완료 1/1" },
+      clip_lo: { n: 1, done: 0, states: { not_run: 1 }, verdicts: {}, headline: "미완료", text: "완료 0/1 · 미실행 1" } },
+      h3000_f50: { "seg1-2": { n: 2, done: 2, states: { computable: 2 }, verdicts: { fail: 1, good: 1 },
+        headline: "불합격", headline_code: "fail", text: "불합격 1 · 완료 2/2" },
+      knot2: { n: 0, done: 0, out_of_region: 1, states: {}, verdicts: {}, headline: "검사한 점 모두 충족",
+        headline_code: "all_met", text: "" } },
+      extra: { clip_hi: { n: 3, done: 3, states: { computable: 3 }, verdicts: { good: 2, na: 1 },
+        headline: "채택 제외 포함", headline_code: "excluded", text: "완료 3/3" } },
+    },
+    totals: { n: 7, done: 6, out_of_region: 2 },
+  },
+};
+
+test("evidenceLines — 계획한 검증점의 실패는 그 종류·출처를 말한다", () => {
+  const { head } = evidenceLines({ evidence: { plan_point: { kind: "boundary", origin: "boundary:region",
+    label: "요구영역 경계" } } });
+  assert.ok(head.includes("검증점 종류: 요구영역 경계 (boundary:region)"), head);
+  assert.ok(evidenceLines({ evidence: { plan_point: { kind: "clip" } } }).head.includes("검증점 종류: clip 구간"));
+});
+
+test("summaryGridModel — 행 = 조건 + 경계·추가, 열 = 끝 밖·절점·구간, 칸 색은 엔진 대표 문구, 글은 짧게", () => {
+  assert.equal(summaryGridModel({}), null);                       // 옛 결과 — 격자 없음
+  assert.equal(summaryGridModel({ summary_grid: { cells: {} } }), null);
+  const m = summaryGridModel(GRID_REPORT);
+  assert.deepEqual(m.columns.map((c) => c.label), ["<끝", "M0.2", "·", "M0.4", "끝>"]);
+  assert.deepEqual(m.rows.map((r) => r.label), ["0 m · 50 kg", "3000 m · 50 kg", "경계·추가"]);
+  const [r0, r1, rx] = m.rows;
+  assert.equal(r0.cells[2].tone, "ok");
+  assert.equal(r0.cells[2].text, "1/1");
+  assert.equal(r0.cells[0].tone, "warn");
+  assert.match(r0.cells[0].tip, /미완료[\s\S]*미실행 1/);
+  assert.equal(r0.cells[1].empty, true);                          // 검증점 없는 칸은 비운다(0/0으로 칠하지 않는다)
+  assert.equal(r1.cells[2].tone, "fail");
+  assert.equal(r1.cells[2].text, "✗1");
+  assert.match(r1.cells[2].tip, /절점 사이 M0\.2–M0\.4/);
+  assert.equal(rx.cells[4].tone, "na");                          // 채택 제외 포함 — 「모두 충족」으로 칠하지 않는다
+  assert.equal(r1.cells[3].empty, true);                          // 요구영역 밖 점만 있는 칸 — 분모에 없다
+  assert.match(r1.cells[3].tip, /요구영역 밖 1점만/);
+  // 채택 제외 칸은 「판정 불가 포함」으로 세지 않는다 — 색은 같은 회색이어도 이름이 따로다
+  assert.deepEqual(m.counts, { fail: 1, warn: 1, ok: 1, na: 0, excluded: 1 });
+  assert.match(m.summary, /채택 제외 포함 칸 1/);
+  assert.doesNotMatch(m.summary, /판정 불가 포함/);
+  assert.match(m.summary, /요구영역 밖 2점/);
+  assert.deepEqual(m.notes, []);
+  const noted = summaryGridModel({ ...GRID_REPORT, summary_grid: { ...GRID_REPORT.summary_grid,
+    notes: ["계획 밖 점의 실패 1점"], unplanned_failures: 1,
+    cells: { ...GRID_REPORT.summary_grid.cells, extra: { clip_hi: { n: 1, done: 1, verdicts: { na: 1 },
+      headline_code: "na" } } } } });
+  assert.deepEqual(noted.notes, ["계획 밖 점의 실패 1점"]);           // 녹색 격자 옆 미수렴 상태를 설명하는 엔진 문장
+  assert.equal(noted.counts.na, 1);
+  assert.match(noted.summary, /판정 불가 포함 칸 1/);
+  // 「구간 합격」이라는 말은 어디에도 없다 — 검사한 점만 말한다
+  assert.doesNotMatch(JSON.stringify(m), /구간 합격/);
+});
+
+test("reinforcementLines — 상태(엔진 문구 우선) · 허용치 미설정은 자리별 d 분포 · 예산 종료·잴 수 없는 구간은 경고", () => {
+  assert.deepEqual(reinforcementLines({}), []);
+  const unset = reinforcementLines({ reinforcement: { status: "tol_unset", tol: null,
+    scales: { pitch_rate: 0.1, roll_rate: 3.6 }, scale_sources: { roll_rate: "잠정 고정 3.6" },
+    distribution: { pitch_rate: { n: 12, max: 0.42, p50: 0.1, p90: 0.3 }, roll_rate: { n: 12, max: 0.05, p50: 0.01, p90: 0.02 } },
+    unmeasured: [], d: [] } });
+  assert.equal(unset[0].text, `보강 — ${REINFORCE_STATUS_TEXT.tol_unset}`);
+  assert.equal(unset[0].tone, "hint");                             // 미설정은 공백이 아니다
+  assert.deepEqual(unset.filter((l) => l.slot).map((l) => l.text),
+    ["pitch_rate d 최대 0.42 · p90 0.30 · p50 0.10 (n 12)", "roll_rate d 최대 0.050 · p90 0.020 · p50 0.010 (n 12)"]);
+  assert.match(unset.find((l) => l.slot === "roll_rate").tip, /잠정 고정 3\.6/);
+  assert.equal(unset.some((l) => l.key === "reinforce_run"), false); // 허용치 없으면 이분도 없다
+  const budget = reinforcementLines({ reinforcement: { status: "budget", label: "보강 종료 · 추가 검증 필요",
+    tol: 0.3, budget: { max_points: 24, max_depth: 3 }, added: [{}, {}, {}, {}], remaining: [{}, {}],
+    max_d_remaining: 0.61, unmeasured: [{ row: [0, 50], interval: [0.2, 0.4], why: "calc_failed" }],
+    verdict_change_intervals: [{ row: [0, 50], interval: [0.2, 0.4] }], distribution: {} } });
+  assert.equal(budget[0].tone, "warn");
+  assert.equal(budget[1].text, "허용치 d ≤ 0.3 · 추가 4점 · 남은 구간 2(최대 d 0.610)");
+  assert.match(budget[1].tip, /추가점 상한 24 · 깊이 3/);
+  const un = budget.find((l) => l.key === "reinforce_unmeasured");
+  assert.equal(un.text, "잴 수 없는 구간 1");
+  assert.match(un.tip, /0\/50 · M0\.2–M0\.4 — calc_failed/);
+  assert.ok(budget.some((l) => l.text === "양끝 판정이 다른 구간 1"));
+  // 결과에 문구가 없으면 서버 표(reinforce_status_text) → 폴백 순서
+  assert.equal(reinforcementLines({ reinforcement: { status: "done" } }, { done: "서버 문구" })[0].text, "보강 — 서버 문구");
+  assert.equal(reinforcementLines({ reinforcement: { status: "new_code" } })[0].text, "보강 — new_code");
+  // 엔진 budget 문구가 남은 구간·최대 d를 이미 말하면 수치 줄은 추가점만 · 잴 수 없는 구간이 수로만 와도 센다
+  const eng = reinforcementLines({ reinforcement: { status: "budget", tol: 0.3, added: 2, remaining: [{}],
+    label: "보강 종료 · 추가 검증 필요 — 남은 구간 1개 · 최대 d 0.61 > 허용치 0.3", unmeasured: 3 } });
+  assert.equal(eng[1].text, "허용치 d ≤ 0.3 · 추가 2점");
+  assert.equal(eng.find((l) => l.key === "reinforce_unmeasured").text, "잴 수 없는 구간 3");
+});
+
+test("validationSummaryText — 계획 요약 한 줄, 옛 결과(구간 중점 규칙·기록 없음)는 null", () => {
+  assert.equal(validationSummaryText({}), null);
+  assert.equal(validationSummaryText({ validation: { rule: "midpoint" } }), null);
+  assert.equal(validationSummaryText(GRID_REPORT),
+    "요청 9 · 완료 7 · 조건 2행(전체 조합) · 요구영역 밖 2(계획만) · 구간 내분점 4 · clip 구간 2 · 요구영역 경계 3");
+  // 서버 표(validation_kinds·modes — 엔진 이름)가 오면 그쪽이 이긴다. 배열(코드만)이면 폴백 이름
+  assert.match(validationSummaryText(GRID_REPORT, { kinds: { midpoint: "내분" }, modes: ["full"] }),
+    /조건 2행\(전체 조합\).*내분 4/);
+  assert.match(validationSummaryText({ validation: { rule: "plan", requested: 5, mode: "representative",
+    conditions: [[0, 1]], omitted: [[1, 2], [3, 4]] } }), /조건 1행\(대표 조합\) · 뺀 조건 2행/);
+});
+
+test("coverageLines — 검증점 계획 키: 요청·완료·미실행·영역 밖, 뺀 조건, 잴 수 없는 d, 보강 예산 종료(미설정은 공백 아님)", () => {
+  const cov = { validation_requested: 9, validation_done: 6, validation_not_run: 3, validation_out_of_region: 2,
+    validation_omitted_rows: [[1, 2]], d_unmeasured: 2, reinforce_status: "budget" };
+  const lines = coverageLines({ coverage: cov });
+  const by = Object.fromEntries(lines.map((l) => [l.key, l]));
+  assert.equal(by.validation_plan.tone, "warn");
+  assert.match(by.validation_plan.text, /^검증점 요청 9 · 완료 6 · 미실행 3 · 요구영역 밖 2\(계획만\) — 돌지 않은 점/);
+  assert.match(by.validation_omitted.text, /뺀 검증 조건 1행 — /);
+  assert.match(by.d_unmeasured.text, /d를 잴 수 없는 구간 2 — /);
+  assert.equal(by.reinforce.text.startsWith(REINFORCE_STATUS_TEXT.budget), true);
+  // 엔진 문장(coverage_gaps)이 있으면 화면은 수치만 — 설명 꼬리를 다시 쓰지 않는다
+  const eng = Object.fromEntries(coverageLines({ coverage: cov, coverage_gaps: ["엔진 문장"] }).map((l) => [l.key, l]));
+  assert.equal(eng.validation_plan.text, "검증점 요청 9 · 완료 6 · 미실행 3 · 요구영역 밖 2(계획만)");
+  assert.equal(eng.validation_omitted.text, "대표 조건 방식이 뺀 검증 조건 1행");
+  assert.equal(eng.d_unmeasured.text, "보강 지표 d를 잴 수 없는 구간 2");
+  assert.equal(eng.reinforce.text, REINFORCE_STATUS_TEXT.budget);
+  // 완료 < 요청인데 미실행 0 — 요약 격자의 상태 내역이 이유를 말하면 회색, 이유를 모르면 경고
+  const why = coverageLines({ coverage: { validation_requested: 23, validation_done: 17, validation_not_run: 0 },
+    summary_grid: { totals: { states: { computable: 17, infeasible: 6 } } } });
+  assert.equal(why[0].tone, "hint");
+  assert.match(why[0].text, /완료 17 · 미완료 6\(트림 불가 6\)/);
+  const unexplained = coverageLines({ coverage: { validation_requested: 23, validation_done: 17,
+    validation_not_run: 0 } });
+  assert.equal(unexplained[0].tone, "warn");
+  assert.match(unexplained[0].text, /미완료 6\(사유 기록 없음\)/);
+  // 다 돈 계획은 회색 근거 줄, 허용치 미설정은 줄이 없다, 옛 결과(키 없음)는 줄이 없다
+  const ok = coverageLines({ coverage: { validation_requested: 4, validation_done: 4, reinforce_status: "tol_unset" } });
+  assert.deepEqual(ok.map((l) => [l.key, l.tone]), [["validation_plan", "hint"]]);
+  assert.equal(coverageLines({ coverage: { validation_points: 0 } }).some((l) => l.key === "validation_plan"), false);
+});
+
+test("자동 설계 뷰 — 요약 격자·보강 상자가 커버리지 아래, 검증·보강 설정 칸이 buildConfig로 간다", () => {
+  const view = readFileSync(new URL("../views/autodesign.js", import.meta.url), "utf8");
+  const i = view.indexOf("...(covBox ? [covBox] : [])");
+  assert.ok(i > 0 && view.indexOf("...(gridBox ? [gridBox] : [])") > i && view.indexOf("...(rfBox ? [rfBox] : [])") > i);
+  for (const k of ["validationConditionsText", "validationMode", "validationBoundary", "reinforceTol",
+    "reinforceMaxPoints", "reinforceMaxDepth", "reinforceMaxTime"]) {
+    assert.ok(view.includes(`${k}: form.${k}.value`), k);
+  }
+  assert.doesNotMatch(view, /구간 합격/);
+  // 시간 상한은 판과 판 사이에서만 본다 — 마지막 판만큼 넘을 수 있다고 툴팁이 말한다
+  assert.match(view, /reinforceMaxTime: el\("input"[^\n]*판과 판 사이/);
+  assert.ok(view.includes("m.notes"));                              // 격자 주석(계획 밖 실패·절점 바뀜)을 격자 아래에
+});
+
+test("검증점·보강 폴백 이름 — 엔진 validation.VALIDATION_KINDS·MODES · reinforce.REINFORCE_STATUS_TEXT와 같다", () => {
+  // 원문 대조 — 서버(/design/defaults)가 내는 표가 정본이고, 조회 전·실패 화면의 폴백이 옛 말을 하지 않게
+  const dictOf = (file, name) => {
+    const py = readFileSync(new URL(`../../../engine/claw/design/${file}`, import.meta.url), "utf8");
+    const i = py.indexOf(`${name} = {`);
+    const block = py.slice(i, py.indexOf("}", i));
+    return Object.fromEntries([...block.matchAll(/"([a-z_]+)": "((?:[^"\\]|\\.)*)"/g)].map((m) => [m[1], m[2]]));
+  };
+  assert.deepEqual(VALIDATION_KIND_LABEL, dictOf("validation.py", "VALIDATION_KINDS"));
+  assert.deepEqual(VALIDATION_MODE_LABEL, dictOf("validation.py", "VALIDATION_MODES"));
+  assert.deepEqual(REINFORCE_STATUS_TEXT, dictOf("reinforce.py", "REINFORCE_STATUS_TEXT"));
+  assert.ok(Object.keys(REINFORCE_STATUS_TEXT).length === 4);
 });

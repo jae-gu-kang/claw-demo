@@ -1,6 +1,7 @@
 """자동 설계 라우트 검증 — 기본값 응답, 202 잡, 저장 스키마(미달 원장·커버리지 포함),
 예산 422, gated 재개."""
 
+import json
 import math
 import types
 
@@ -996,7 +997,13 @@ def test_apply_gains_writes_the_confirmed_tables_to_the_document(client, wait_jo
         "status": rep["status"], "iterations": rep["iterations"], "judged": rep["judged"],
         "failures": rep["failures"], "escalations": rep["escalations"], "fit_mode": rep["fit_mode"],
         "excluded_samples": len(rep["excluded_samples"]),
-        "exclusion_withheld": sorted(rep["exclusion_withheld"]), "n_knots": rep["knots"]["tables"]}
+        "exclusion_withheld": sorted(rep["exclusion_withheld"]), "n_knots": rep["knots"]["tables"],
+        # 검증점 계획 요약(05 §11.6 — 이관 4단계) — 새 설정의 실행은 계획 기록이 있다
+        "validation": {"rule": "plan", "requested": rep["validation"]["requested"],
+                       "existing": rep["validation"]["existing"], "done": rep["validation"]["done"],
+                       "out_of_region": rep["validation"]["out_of_region"], "mode": rep["validation"]["mode"],
+                       "conditions": len(rep["validation"]["conditions"]), "omitted": len(rep["validation"]["omitted"]),
+                       "reinforce_status": rep["reinforcement"]["status"]}}
     # 표별 절점 집합 — 반출(gain_export.knots)을 그대로. 문서의 표마다 자기 절점 집합 항목이 있다
     export = client.get(f"/api/results/{rid}").json()["gain_export"]
     assert prov["knots"] == export["knots"] and set(gt["tables"]) <= set(prov["knots"]["tables"])
@@ -1159,7 +1166,8 @@ def test_apply_gains_design_summary_counts_excluded_samples_and_says_unknown_for
     prov = client.get("/api/profiles/ad-prov").json()["document"]["law"]["gain_tables"]["provenance"]
     assert prov["design"] == {"status": "converged", "iterations": 1, "judged": 12, "failures": 0,
                               "escalations": 0, "fit_mode": "table", "excluded_samples": 2,
-                              "exclusion_withheld": ["roll.k_rate"], "n_knots": {"pitch.k_rate": len(grid)}}
+                              "exclusion_withheld": ["roll.k_rate"], "n_knots": {"pitch.k_rate": len(grid)},
+                              "validation": None}
     # 표별 절점 집합 — 반출 그대로 문서에 영속한다(게인 탭 공유/독립 배지의 근거)
     assert prov["knots"] == knots
 
@@ -1170,7 +1178,8 @@ def test_apply_gains_design_summary_counts_excluded_samples_and_says_unknown_for
     assert ok.status_code == 200, ok.text
     prov = client.get("/api/profiles/ad-prov").json()["document"]["law"]["gain_tables"]["provenance"]
     assert prov["design"] == dict.fromkeys(("status", "iterations", "judged", "failures", "escalations",
-                                            "fit_mode", "excluded_samples", "exclusion_withheld", "n_knots"))
+                                            "fit_mode", "excluded_samples", "exclusion_withheld", "n_knots",
+                                            "validation"))
     assert prov["knots"] is None  # 절점 분리 이전 결과 — 빈 집합으로 위장하지 않는다
 
 
@@ -1434,3 +1443,154 @@ def test_resume_applies_an_approved_add_knot_card(client, wait_job, monkeypatch)
     assert sets[tables["pitch.kp"]]["source"] == f"split:{COMMON}"
     # 검증점 편입(promote)도 같은 카드가 한다 — 절점 값이 그 점의 튜닝값에서 오게
     assert next(p for p in body["points"]["points"] if p["name"] == name)["role"] == "design"
+
+
+# ── 검증점 계획 · 보강 (05 §11.6·11.7 — 이관 4단계) ─────────────────────────────────
+
+
+def test_defaults_expose_validation_and_reinforce(client):
+    """검증점·보강 설정의 기본값은 엔진 AutoDesignConfig가 정본이고, 방식·종류·보강 상태 문구는 엔진 상수 그대로 —
+    웹이 재기술하지 않게."""
+    from claw.design.reinforce import DEFAULT_REINFORCE, REINFORCE_STATUS_TEXT
+    from claw.design.validation import DEFAULT_VALIDATION, VALIDATION_KINDS, VALIDATION_MODES
+
+    body = client.get("/api/design/defaults").json()
+    assert body["config"]["validation"] == {**DEFAULT_VALIDATION, "extras": list(DEFAULT_VALIDATION["extras"])}
+    assert body["config"]["validation"]["rule"] == "plan" and body["config"]["validation"]["boundary"] is True
+    assert body["config"]["reinforce"] == dict(DEFAULT_REINFORCE)
+    assert body["config"]["reinforce"]["tol"] is None
+    assert body["validation_modes"] == dict(VALIDATION_MODES) and set(body["validation_modes"]) >= {"full", "representative"}
+    assert body["validation_kinds"] == dict(VALIDATION_KINDS)
+    assert set(body["validation_kinds"]) >= {"midpoint", "knot", "clip", "boundary", "extra", "between_rows", "reinforce"}
+    assert body["reinforce_status_text"] == dict(REINFORCE_STATUS_TEXT)
+    assert set(body["reinforce_status_text"]) >= {"tol_unset", "done", "budget", "unmeasured"}
+
+
+def test_validation_and_reinforce_partial_override():
+    """검증점·보강 설정은 부분 덮어쓰기(빠진 칸은 기본값) — 절점과 같은 규약."""
+    from claw_server.routes.design import _build_config
+
+    base = _build_config({}).to_dict()
+    v = _build_config({"validation": {"mode": "representative"}}).to_dict()["validation"]
+    assert v["mode"] == "representative" and v["boundary"] == base["validation"]["boundary"]
+    assert v["rule"] == base["validation"]["rule"] == "plan"
+    v = _build_config({"validation": {"conditions": [[200, 25], [3000.0, 10.0]], "boundary": False}}).to_dict()["validation"]
+    assert [list(map(float, p)) for p in v["conditions"]] == [[200.0, 25.0], [3000.0, 10.0]] and v["boundary"] is False
+    v = _build_config({"validation": {"extras": [{"mach": 0.3, "alt": 1000, "fuel": 50, "source": "시험"}]}}).to_dict()
+    assert v["validation"]["extras"][0]["source"] == "시험"
+    r = _build_config({"reinforce": {"tol": 0.3}}).to_dict()["reinforce"]
+    assert r["tol"] == 0.3 and r["max_points"] == base["reinforce"]["max_points"] == 24
+    assert r["max_depth"] == 3 and r["max_time_s"] is None
+    r = _build_config({"reinforce": {"max_points": 10, "max_depth": 2.0, "max_time_s": 30}}).to_dict()["reinforce"]
+    assert r["max_points"] == 10 and r["max_depth"] == 2 and r["max_time_s"] == 30
+    # 허용치를 명시로 비워도(null) 뜻이 있다 — 미설정
+    assert _build_config({"reinforce": {"tol": None}}).to_dict()["reinforce"]["tol"] is None
+
+
+@pytest.mark.parametrize("bad", [
+    {"validation": {"conditions": [[200, float("nan")]]}},       # 비유한
+    {"validation": {"conditions": [[200, True]]}},                # 불리언은 수가 아니다
+    {"validation": {"conditions": [[200]]}},                      # 짝이 아니다
+    {"validation": {"conditions": "200/25"}},                     # 목록이 아니다
+    {"validation": {"boundary": 1}},                              # 참거짓만
+    {"validation": {"mode": "bogus"}},                            # 모르는 방식 — 엔진 규칙
+    {"validation": {"mode": 3}},
+    {"validation": {"rule": "bogus"}},
+    {"validation": {"bogus": 1}},                                 # 모르는 키 — 엔진 규칙
+    {"validation": {"extras": [{"mach": 0.3, "alt": 1000, "fuel": 50}]}},             # source 필수 — 엔진 규칙
+    {"validation": {"extras": [{"mach": float("inf"), "alt": 1000, "fuel": 50, "source": "x"}]}},
+    {"validation": "full"},
+    {"reinforce": {"tol": float("nan")}},
+    {"reinforce": {"tol": True}},
+    {"reinforce": {"max_points": 2.5}},
+    {"reinforce": {"max_depth": False}},
+    {"reinforce": {"max_time_s": "60"}},
+    {"reinforce": {"max_points": 1e400}},
+    {"reinforce": {"bogus": 1}},                                  # 모르는 키 — 엔진 규칙
+    {"reinforce": {"tol": -0.1}},                                 # 범위 — 엔진 규칙
+    {"reinforce": []},
+])
+def test_validation_and_reinforce_rejections(bad):
+    from claw_server.routes.design import _build_config
+
+    with pytest.raises((ValueError, TypeError)):
+        _build_config(bad)
+
+
+def test_validation_and_reinforce_errors_are_422(client):
+    for bad in ({"validation": {"conditions": [[200, float("nan")]]}}, {"validation": {"boundary": "false"}},
+                {"validation": {"bogus": 1}}, {"validation": {"extras": [{"mach": 0.3, "alt": 0, "fuel": 1}]}},
+                {"reinforce": {"tol": True}}, {"reinforce": {"bogus": 1}}):
+        # NaN은 표준 JSON이 못 싣는다 — NaN 토큰으로 보낸다(서버 JSON 파서가 float nan으로 읽는다)
+        body = json.dumps({"config": {**_small_config(), **bad}})
+        r = client.post("/api/design/auto", content=body, headers={"content-type": "application/json"})
+        assert r.status_code == 422, (bad, r.text)
+        key = next(iter(bad))
+        assert key in r.text, (bad, r.text)
+
+
+def test_validation_config_reaches_the_saved_session(client, wait_job, monkeypatch):
+    """요청의 검증점·보강 설정이 세션 config로 저장된다 — 재개가 같은 계획으로 잇는다(스파이 실행)."""
+    _spy_design_run(monkeypatch)
+    r = client.post("/api/design/auto", json={"config": {
+        **_small_config(), "validation": {"mode": "representative", "boundary": False},
+        "reinforce": {"tol": 0.25, "max_points": 8}}})
+    assert r.status_code == 202, r.text
+    body = client.get(f"/api/results/{wait_job(r.json()['id'])['result_id']}").json()
+    assert body["config"]["validation"]["mode"] == "representative" and body["config"]["validation"]["boundary"] is False
+    assert body["config"]["reinforce"]["tol"] == 0.25 and body["config"]["reinforce"]["max_points"] == 8
+    assert body["config"]["reinforce"]["max_depth"] == 3
+
+
+def test_design_summary_validation_field():
+    """provenance.design.validation — 요청·완료·요구영역 밖·방식·조건 행 수·뺀 행 수·보강 상태. 목록은 개수로 접는다.
+    옛 보고(계획 이전)는 None — 0으로 위장하지 않는다."""
+    from claw_server.routes.design import _design_summary
+
+    rep = {"status": "converged",
+           "validation": {"rule": "plan", "conditions": [[0, 50], [3000, 50]], "source": "design_rows", "mode": "full",
+                          "omitted": [[1000, 50]], "requested": 15, "added": 10, "existing": 3, "not_run": 2,
+                          "out_of_region": 1, "by_kind": {"midpoint": 8}},
+           "coverage": {"validation_done": 13, "reinforce_status": "tol_unset"},
+           "reinforcement": {"status": "budget"}}
+    # rule·existing이 requested의 뜻을 읽게 한다(요청 = 새 검증점 + 판정을 겸한 기존 설계점 + 못 넣은 점)
+    assert _design_summary(rep)["validation"] == {"rule": "plan", "requested": 15, "existing": 3, "done": 13,
+                                                  "out_of_region": 1, "mode": "full", "conditions": 2, "omitted": 1,
+                                                  "reinforce_status": "budget"}
+    # 생성기(showcase.validation_summary)가 같은 모양을 적는다 — 둘이 갈리면 문서 출처가 갈린다
+    from claw.profile.showcase import validation_summary
+    assert validation_summary(rep) == _design_summary(rep)["validation"]
+    # 보강 절이 없으면 커버리지의 상태 코드
+    rep2 = {**rep, "reinforcement": None}
+    assert _design_summary(rep2)["validation"]["reinforce_status"] == "tol_unset"
+    assert _design_summary({"status": "converged"})["validation"] is None
+    assert _design_summary(None)["validation"] is None
+    assert _design_summary({"validation": "junk"})["validation"] is None
+
+
+def test_auto_design_result_carries_validation_plan_grid_and_reinforcement(client, wait_job):
+    """새 설정의 실행 — 저장된 보고에 검증점 계획·요약 격자·보강 절과 커버리지 새 키가 실린다(웹 요약 격자·보강 상자의
+    입력). 허용치 미설정이 기본이라 보강 상태는 tol_unset(이분 없음)."""
+    r = client.post("/api/design/auto", json={"config": _small_config()})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done", j
+    rep = client.get(f"/api/results/{j['result_id']}").json()["report"]
+    v = rep["validation"]
+    assert v["rule"] == "plan" and v["mode"] == "full"
+    assert set(v) >= {"conditions", "source", "omitted", "requested", "added", "existing", "not_run", "out_of_region",
+                      "by_kind", "classify_note", "knots_note", "plan_knots"}
+    assert v["requested"] >= v["added"] + v["existing"]
+    g = rep["summary_grid"]
+    assert set(g) >= {"columns", "rows", "cells", "totals"}
+    assert g["columns"][0]["kind"] == "clip" and g["columns"][-1]["kind"] == "clip"
+    assert {c["kind"] for c in g["columns"]} <= {"clip", "knot", "seg"}
+    for row, cells in g["cells"].items():
+        for cell in cells.values():
+            assert cell["headline"] != "구간 합격"
+            assert set(cell) >= {"n", "done", "states", "verdicts", "headline", "text"}
+    rf = rep["reinforcement"]
+    assert rf["status"] == "tol_unset" and rf["tol"] is None
+    assert set(rep["coverage"]) >= {"validation_requested", "validation_done", "validation_not_run",
+                                    "validation_out_of_region", "validation_omitted_rows", "d_unmeasured",
+                                    "reinforce_status"}

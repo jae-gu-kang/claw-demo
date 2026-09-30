@@ -461,7 +461,8 @@ Ts는 카드 표시 전용(사용자 정의). **하드 실패·항 미계측이�
 ### 8.1 커버리지 — "수렴"이 무엇을 안 보고 난 수렴인지 말한다
 
 **[확정]** `report()`에 `coverage`{`validation_points`·`validation_missing`·`refine_remaining`·
-`refine_tol`·`refine_aborted`·`not_trimmed`}와 `coverage_gaps`(한국어 문장 배열)를 싣는다.
+`refine_tol`·`refine_aborted`·`not_trimmed`, v1.71 검증 계획이면 `validation_requested`·`validation_done`·
+`validation_not_run`·`validation_out_of_region`·`validation_omitted_rows`·`d_unmeasured`·`reinforce_status`}와 `coverage_gaps`(한국어 문장 배열)를 싣는다.
 **`coverage_gaps`가 비어 있지 않으면 그 실행의 "수렴"은 앵커에서만 성립한 것이다** — 판정된
 자리가 전부 자기 게인이 직접 튜닝된 점이라, 스케줄이 breakpoint 사이에서 무너지는지는 보지
 않은 실행이다(01 §3.4의 스케줄 검증 요구가 이름만 남는 경우). 규약 셋:

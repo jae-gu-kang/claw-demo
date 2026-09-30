@@ -793,12 +793,23 @@
         "design": {
           "status": "converged",
           "iterations": 0,
-          "judged": 210,
+          "judged": 230,
           "failures": 0,
           "escalations": 0,
           "fit_mode": "table",
           "excluded_samples": 0,
           "exclusion_withheld": [],
+          "validation": {
+            "rule": "plan",
+            "requested": 23,
+            "existing": 8,
+            "done": 17,
+            "out_of_region": 0,
+            "mode": "full",
+            "conditions": 1,
+            "omitted": 0,
+            "reinforce_status": "tol_unset"
+          },
           "approved_actions": 0,
           "config": {
             "budget_points": 90,
@@ -861,7 +872,7 @@
           }
         },
         "reverify": {
-          "n_judged": 210,
+          "n_judged": 230,
           "worse": 0,
           "better": 0,
           "changed": 0,

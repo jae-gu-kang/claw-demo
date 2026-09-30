@@ -225,7 +225,23 @@ JSON 하나를 읽고, 엔지니어가 30초 안에 상황을 잡는 한국어 �
   common/분리 집합·추가 이력·표본이 받치지 않아 뺀 절점 unsupported와 사유·끝
   바깥 여부). add_knot 처방은 이름 댄 표에 절점을 더한다(공통 집합 일부 표면
   그 표들을 분리 집합으로 뗀다 — 결과는 카드의 knot.split). 설계점은 적합 표본이라
-  검증은 검증점에서만 센다(coverage.validation_points)
+  검증은 검증점에서만 센다(coverage.validation_points). 검증점은 계획으로 세운다
+  (report.validation — 검증 조건 행·방식 full/representative·뺀 행 omitted·요청
+  requested·미실행 not_run·요구영역 밖 out_of_region(계획만, 트림 안 함)·종류별 수
+  by_kind: midpoint 구간 중점·knot 절점 위·clip 끝 절점 바깥·boundary 요구영역
+  경계·extra 사용자 추가·between_rows 조건 사이·reinforce 보강·prior 앞선 계획이
+  넣은 점). requested = 새 검증점 added + 판정을 겸한 기존 설계점 existing + 못 넣은
+  점이다. 계획한 점 어디서든 실패는 실제 실패라 처방 대상이다(카드
+  evidence.plan_point가 그 점의 종류·출처). report.summary_grid는
+  행 = 검증 조건 + 「경계·추가」, 열 = 끝 밖·절점·구간 교대의 격자이고 칸마다
+  n·done·상태·판정 수와 대표 문구 headline(불합격 → 미완료 → 「검사한 점 모두
+  충족」)이다 — 검사한 점만 말하므로 「구간 합격」이라 쓰지 않는다. 보강
+  report.reinforcement: 구간 d = |중간 지표 − 양끝 선형 보간| ÷ 척도 s(자리별).
+  status tol_unset(허용치 미설정 — d 분포만, 공백 아님)·done(보강 완료)·budget(예산
+  종료 · 추가 검증 필요 — 합격도 설계 불가도 아니다)·unmeasured(잴 수 없는 구간
+  있음). coverage.validation_requested·validation_done·validation_not_run·
+  validation_omitted_rows·d_unmeasured는 안 본 것을 센다. summary_grid.notes는 격자
+  밖 사정(계획 밖 점의 실패·계획 뒤 절점 바뀜)이다
 - verify_flight: 탑재 C의 DAL A 검증 — report.summary 5행 + verdict
 - influence_evaluate: 케이스 격자 전체 6DOF 평가 — cards(대표 7)·checks·
   aggregate(hard_fail이면 불합격)
