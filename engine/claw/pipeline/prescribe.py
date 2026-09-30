@@ -252,6 +252,12 @@ CHANGED_TOL = 1e-3
 PERF_METRICS_DEFAULT = ("alt_rms", "spd_rms", "hdg_rms",
                         "alt_ts", "spd_ts", "hdg_ts",
                         "alt_mp", "spd_mp", "hdg_mp")
+IMPROVEMENT_LOOPS = ("pitch_att", "roll_att", "spd_u", "pitch_rate", "roll_rate", "yaw_rate")
+IMPROVEMENT_HIGHER_METRICS = (
+    *(f"gm.{loop}" for loop in IMPROVEMENT_LOOPS),
+    *(f"pm.{loop}" for loop in IMPROVEMENT_LOOPS),
+    "zeta_sp", "zeta_dr", "roll_lambda",
+)
 
 # 정규화 바닥 — scale = max(|base|, floor). 단위가 다른 지표를 더하려면 상대 변화로
 # 세야 하는데, base가 0 근처면(오버슈트 0 %·정착 즉시) 상대 변화가 폭발해 목적 전체를
@@ -503,7 +509,8 @@ def _perf_bounds(rows, knobs, cases, used, span_bound, unmodelled):
 def solve_joint(rows, knobs, criteria: GainEvalCriteria, *,
                 span_bound: float = 0.2, metrics=None,
                 objective: str = "min_change", perf_metrics=None,
-                perf_weights=None, smooth_weight: float = 0.1) -> dict:
+                perf_weights=None, smooth_weight: float = 0.1,
+                goal_limits=None, knob_bounds=None) -> dict:
     """복수 설계변수 소폭 조합 — 선형 국소 모델(slope_matrix) 위의 SLSQP.
 
     objective:
@@ -533,6 +540,10 @@ def solve_joint(rows, knobs, criteria: GainEvalCriteria, *,
         pm, weights, sw = _check_perf_args(perf_metrics, perf_weights, smooth_weight)
 
     targets = _targets(criteria)
+    for metric, limit in (goal_limits or {}).items():
+        if metric not in (*PERF_METRICS_DEFAULT, *IMPROVEMENT_HIGHER_METRICS) or not math.isfinite(limit) or limit < 0:
+            raise ValueError(f"지원하지 않는 목표: {metric}={limit}")
+        targets.append((metric, float(limit), metric not in IMPROVEMENT_HIGHER_METRICS))
     if metrics and not perf:
         want = set(metrics)
         focused = [t for t in targets if t[0] in want]
@@ -562,6 +573,8 @@ def solve_joint(rows, knobs, criteria: GainEvalCriteria, *,
     x0 = np.zeros(n)
     idx = {k: i for i, k in enumerate(knobs)}
     bounds = [(-span_bound, span_bound)] * n
+    if knob_bounds:
+        bounds = [tuple(knob_bounds.get(k, b)) for k, b in zip(knobs, bounds)]
     cons, con_meta = _hard_constraints(cases, targets, bases, S, idx, n, with_jac=perf)
 
     if not perf:
@@ -654,6 +667,9 @@ def solve_joint(rows, knobs, criteria: GainEvalCriteria, *,
         used.setdefault(case, set()).add(m)
     bounds, bound_limits, bound_reasons = _perf_bounds(
         rows, knobs, cases, used, span_bound, unmodelled)
+    if knob_bounds:
+        bounds = [(max(b[0], knob_bounds.get(k, b)[0]), min(b[1], knob_bounds.get(k, b)[1]))
+                  for k, b in zip(knobs, bounds)]
     lo = np.array([b[0] for b in bounds])
     hi = np.array([b[1] for b in bounds])
 

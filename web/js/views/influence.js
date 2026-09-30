@@ -118,6 +118,9 @@ const state = {
   // 실행 버튼(평가 1·2·3단계, 감도 셋)의 진행·끝 상태 — 키마다 {jobId, kind, n, t0, job, end}.
   // 버튼 자체가 진행 막대라 탭을 떠났다 와도 도는 중인지·어떻게 끝났는지가 버튼에 남는다
   runs: {},
+  // 소견의 「수정량 계산」은 감도 → 수정안·확인 두 잡을 잇는다. 일반 실행과 별도로
+  // 현재 단계와 전체 채움 비율을 남겨, 패널을 닫았다 열어도 누른 버튼이 진행을 이어 보인다.
+  howMuchRun: null,
   // 평가 결과의 그림 몫 — 귀속된 설계변수가 문턱 넘은 지표까지 어떻게 닿는지.
   // 파라미터를 직접 고르면 그쪽이 이긴다(사용자 조작이 자동 강조보다 위다)
   evalCone: null, evalPlay: null, evalCaption: null,
@@ -140,6 +143,10 @@ const state = {
   trendKnob: null, trendMetric: null,
   // 비행조건 선택·필터·펼침은 여기 없다 — 공용 고르개(views/condpick.js)가 key "influence"로 모듈에 둔다
   tStep: "15",
+  marginPercent: "1",
+  analysisOpen: false,
+  improvement: null,
+  improvementSettings: { mode: "configured", goals: {}, limit: "20", count: "8", iterations: "2" },
 };
 let canvas = null;
 // 지금 뷰의 실행 버튼 다시 그리기 — 잡 감시는 **제출한 뷰의 클로저**에서 돌므로, 탭을 떠났다
@@ -264,7 +271,7 @@ export function render() {
     state.play = state.cone ? conePlayback(state.model, state.cone) : null;
     paintCaptions();
     // 감도의 대상은 선택을 물려받는다 — 패널이 열려 있으면 그 줄도 같이 간다
-    if (state.drawer === "sens") renderSensRow();
+    if (state.drawer === "sens" || state.drawer === "eval") renderSensRow();
   }
 
   /** 자막 둘의 우선순위 — 파라미터를 직접 고르면 **그쪽이 그림을 차지하므로**
@@ -935,6 +942,7 @@ export function render() {
     scan: { group: "sens", kind: "scan", name: "전 케이스 스캔" },
   };
   const runBtns = new Map();  // key → {btn, fill, sub, x, idleSub, title}
+  const howMuchBtns = new Map();  // 같은 설계변수 묶음이 여러 소견 행에 나올 수 있어 key → 버튼[]
   const runDetail = {
     eval: el("p", { class: "hint run-detail" }),
     sens: el("p", { class: "hint run-detail" }),
@@ -961,16 +969,20 @@ export function render() {
     return Object.keys(state.runs).find((k) => state.runs[k] && !state.runs[k].end) ?? null;
   }
 
+  const howMuchBusy = () => state.howMuchRun && !state.howMuchRun.end;
+
   function renderRunBtns() {
     const busy = runBusyKey();
+    const hmBusy = howMuchBusy();
     for (const [key, b] of runBtns) {
       const r = state.runs[key];
       const running = key === busy;
       const blocked = runBlocked.get(key);
       b.btn.dataset.state = running ? "run" : r?.end ? r.end.state : "idle";
-      b.btn.disabled = busy != null || !!blocked;
+      b.btn.disabled = busy != null || !!hmBusy || !!blocked;
       b.btn.title = blocked ? blocked
         : busy && !running ? `${RUN_BTN[busy].name}이(가) 도는 중 — 끝나거나 취소한 뒤에 누른다`
+        : hmBusy ? "수정량 계산이 도는 중 — 끝나거나 취소한 뒤에 누른다"
         : b.title;
       b.x.hidden = !running;
       const p = running ? runProgress(key) : null;
@@ -1028,10 +1040,16 @@ export function render() {
    *  같은 함수를 부르는 다른 입구로 잡이 겹치고, 먼저 끝난 잡이 도는 잡의 버튼 상태를 지운다. */
   function runRefused() {
     const busy = runBusyKey();
-    if (!busy) return false;
-    runStatus(`${RUN_BTN[busy].name}이(가) 도는 중 — 끝나거나 ✕로 취소한 뒤에 다시 누른다`,
-      { bad: true });
-    return true;
+    if (busy) {
+      runStatus(`${RUN_BTN[busy].name}이(가) 도는 중 — 끝나거나 ✕로 취소한 뒤에 다시 누른다`,
+        { bad: true });
+      return true;
+    }
+    if (howMuchBusy()) {
+      runStatus("수정량 계산이 도는 중 — 끝나거나 ✕로 취소한 뒤에 다시 누른다", { bad: true });
+      return true;
+    }
+    return false;
   }
 
   /** 안전망 — 끝 처리 전에 렌더러가 던지면 runEnd가 안 불려 여섯 버튼이 영영 잠긴다. */
@@ -1050,9 +1068,233 @@ export function render() {
     } };
     renderRunsHook?.();
   }
-  renderRunsHook = renderRunBtns;
+  const howMuchKey = (knobs) => [...(knobs ?? [])].sort().join("\u0000");
+
+  function howMuchButton(knobs, improve = false) {
+    const key = howMuchKey(knobs);
+    const fill = el("span", { class: "run-btn-fill" });
+    const sub = el("span", { class: "run-btn-sub" }, "감도→수정안→확인");
+    const btn = el("button", {
+      class: "run-btn howmuch-run-btn",
+      title: howMuchTitle(knobs),
+      onclick: () => improve ? runImprovement(knobs) : runPrescribeFromEval(knobs),
+    }, fill, el("span", { class: "run-btn-label" }, improve ? "목표 성능 개선안 계산" : "수정량 계산 →"), sub);
+    const x = el("button", {
+      class: "run-btn-x", title: "수정량 계산 취소", "aria-label": "수정량 계산 취소", hidden: true,
+      onclick: () => {
+        const r = state.howMuchRun;
+        if (r?.jobId) cancelJob(r.jobId).catch(() => {});
+      },
+    }, "✕");
+    const entry = { btn, fill, sub, x, title: howMuchTitle(knobs) };
+    const list = howMuchBtns.get(key) ?? [];
+    list.push(entry);
+    howMuchBtns.set(key, list);
+    return el("span", { class: "run-btn-wrap" }, btn, x);
+  }
+
+  function renderHowMuchBtns() {
+    const r = state.howMuchRun;
+    const active = !!r && !r.end;
+    const standardBusy = runBusyKey();
+    for (const [key, list] of howMuchBtns) {
+      const own = r?.key === key ? r : null;
+      const running = active && !!own;
+      for (const b of list) {
+        b.btn.dataset.state = running ? "run" : own?.end ? own.end.state : "idle";
+        b.btn.disabled = !!standardBusy || active || !key;
+        b.btn.title = standardBusy
+          ? `${RUN_BTN[standardBusy].name}이(가) 도는 중 — 끝나거나 취소한 뒤에 누른다`
+          : active && !running ? "다른 수정량 계산이 도는 중 — 끝나거나 취소한 뒤에 누른다"
+          : b.title;
+        b.x.hidden = !running || !own.jobId;
+        b.fill.style.width = running ? `${Math.round(100 * own.frac)}%` : "0%";
+        b.sub.textContent = running
+          ? `${own.phase} ${Math.round(100 * own.phaseFrac)}%`
+          : own?.end?.text ?? "감도→수정안→확인";
+      }
+    }
+  }
+
+  function howMuchBegin(knobs) {
+    state.howMuchRun = {
+      key: howMuchKey(knobs), knobs: [...knobs], t0: Date.now(), jobId: null,
+      phase: "준비", phaseFrac: 0, frac: 0, end: null,
+    };
+    renderRunsHook?.();
+  }
+
+  function howMuchTick(phase, phaseFrac, { jobId = undefined, offset = 0, span = 1 } = {}) {
+    const r = state.howMuchRun;
+    if (!r || r.end) return;
+    r.phase = phase;
+    r.phaseFrac = Math.max(0, Math.min(1, Number(phaseFrac) || 0));
+    r.frac = Math.max(0, Math.min(1, offset + span * r.phaseFrac));
+    if (jobId !== undefined) r.jobId = jobId;
+    renderRunsHook?.();
+  }
+
+  function howMuchEnd(ok, text) {
+    const r = state.howMuchRun;
+    if (!r) return;
+    const took = durText((Date.now() - r.t0) / 1000, { exact: true });
+    r.jobId = null;
+    r.frac = ok ? 1 : r.frac;
+    r.end = { state: ok ? "done" : "fail", text: ok ? `${text} · ${took}` : `✕ ${text}` };
+    renderRunsHook?.();
+  }
+
+  renderRunsHook = () => { renderRunBtns(); renderHowMuchBtns(); };
+
+  const improvementBox = el("div");
+  const improvementControls = el("div", { class: "inf-flow-actions" });
+  const improvementLimits = el("details", { class: "inf-flow-details" },
+    el("summary", {}, "탐색 범위"));
+  const improvementLimitsRow = el("div", { class: "inf-flow-fields" });
+  improvementLimits.append(improvementLimitsRow);
+  const improvementMode = el("select", { "aria-label": "개선 목표" },
+    el("option", { value: "configured" }, "기체 설정 성능 충족"),
+    el("option", { value: "recommended" }, "권장 성능 충족 (강체 6DOF)"),
+    el("option", { value: "custom" }, "직접 지정한 성능 충족"),
+    el("option", { value: "performance" }, "성능 최적화"));
+  improvementMode.value = state.improvementSettings.mode;
+  const goalFields = el("div", { class: "inf-flow-goals" });
+  for (const [axis, label, unit] of [["alt", "고도", "m"], ["spd", "속도", "m/s"], ["hdg", "방위", "rad"]]) {
+    const axisRow = el("div", { class: "inf-flow-axis" }, el("strong", {}, label));
+    for (const [suffix, metric, u] of [["rms", "RMS", unit], ["ts", "정착시간", "s"], ["mp", "오버슈트", "비율"]]) {
+      const key = `${axis}_${suffix}`;
+      const input = el("input", { type: "number", min: "0", step: "any", style: "width:80px",
+        value: state.improvementSettings.goals[key] ?? "", "aria-label": `${label} ${metric} 목표` });
+      input.addEventListener("input", () => { state.improvementSettings.goals[key] = input.value; });
+      axisRow.append(el("label", {}, `${metric} (${u}) ≤ `, input));
+    }
+    goalFields.append(axisRow);
+  }
+  const marginFields = el("div", { class: "row", style: "gap:12px;flex-wrap:wrap" });
+  for (const [loop, label] of [["pitch_att", "피치 자세"], ["roll_att", "롤 자세"],
+    ["spd_u", "속도"], ["pitch_rate", "피치 레이트"], ["roll_rate", "롤 레이트"],
+    ["yaw_rate", "요 레이트"]]) {
+    for (const [metric, name, unit] of [["gm", "GM", "dB"], ["pm", "PM", "°"]]) {
+      const key = `${metric}.${loop}`;
+      const input = el("input", { type: "number", min: "0", step: "any", style: "width:80px",
+        value: state.improvementSettings.goals[key] ?? "", "aria-label": `${label} ${name} 목표` });
+      input.addEventListener("input", () => { state.improvementSettings.goals[key] = input.value; });
+      marginFields.append(el("label", {}, `${label} ${name} (${unit}) ≥ `, input));
+    }
+  }
+  for (const [metric, label, unit] of [["zeta_sp", "단주기 감쇠", "비율"],
+    ["zeta_dr", "더치롤 감쇠", "비율"], ["roll_lambda", "롤 대역폭", "rad/s"]]) {
+    const input = el("input", { type: "number", min: "0", step: "any", style: "width:80px",
+      value: state.improvementSettings.goals[metric] ?? "", "aria-label": `${label} 목표` });
+    input.addEventListener("input", () => { state.improvementSettings.goals[metric] = input.value; });
+    marginFields.append(el("label", {}, `${label} (${unit}) ≥ `, input));
+  }
+  goalFields.append(el("details", { class: "inf-flow-details" },
+    el("summary", {}, "안정여유·감쇠 목표"), marginFields));
+  goalFields.style.display = improvementMode.value === "custom" ? "grid" : "none";
+  improvementMode.addEventListener("change", () => {
+    state.improvementSettings.mode = improvementMode.value;
+    goalFields.style.display = improvementMode.value === "custom" ? "grid" : "none";
+  });
+  for (const [key, label, min, max] of [["limit", "최대 변화폭 (%)", 0.1, 20],
+    ["count", "변경 개수 상한", 1, 8], ["iterations", "최대 반복 횟수", 1, 5]]) {
+    const input = el("input", { type: "number", min, max, step: key === "limit" ? "0.1" : "1",
+      value: state.improvementSettings[key], style: "width:70px", "aria-label": label });
+    input.addEventListener("input", () => { state.improvementSettings[key] = input.value; });
+    improvementLimitsRow.append(el("label", {}, `${label} `, input));
+  }
+
+  async function runImprovement(knobs) {
+    if (runRefused()) return;
+    try {
+      const settings = state.improvementSettings;
+      const goals = Object.fromEntries(Object.entries(settings.goals)
+        .filter(([, v]) => String(v).trim() !== "").map(([k, v]) => [k, Number(v)]));
+      const body = { ...structuralRequest(shapeState()), cases: selectedCases(),
+        goal_mode: settings.mode, goals: settings.mode === "custom" ? goals : {},
+        change_limit: Number(settings.limit) / 100, max_changed: Number(settings.count),
+        iterations: Number(settings.iterations), t_settle: 5, t_step: Number(stepIn.value) };
+      howMuchBegin(knobs);
+      state.improvement = null;
+      clear(improvementBox);
+      const job = await api.post("/influence/improve", body);
+      howMuchTick("목표 탐색", 0, { jobId: job.id });
+      const done = await watchJob(job.id, (j) => {
+        howMuchTick("목표 탐색", j.progress, { jobId: job.id });
+        runStatus(j.message || "개선 탐색 중");
+      });
+      if (done.result_id) {
+        state.improvement = { ...await api.get(`/results/${done.result_id}`), id: done.result_id };
+        renderImprovement();
+      }
+      howMuchEnd(done.status === "done", done.status === "done"
+        ? state.improvement?.accepted ? "목표 충족" : "목표 미달" : jobStatusLabel(done.status));
+      if (done.error) runStatus(done.error, { bad: true });
+    } catch (e) {
+      howMuchEnd(false, "실패");
+      runStatus(errorText(e), { bad: true });
+    }
+  }
+
+  function renderImprovement() {
+    clear(improvementBox);
+    const result = state.improvement;
+    if (!result) return;
+    improvementBox.append(el("p", {}, result.aborted ? "탐색 취소" : result.accepted ? "목표 충족 후보 있음" : "탐색 종료 · 목표 미달",
+      ` · 재사용 결과 ${result.reused.length}건`));
+    if (result.omitted_knobs?.length) improvementBox.append(el("p", { class: "hint" },
+      `탐색 예산으로 제외한 후보: ${result.omitted_knobs.join(", ")}`));
+    if (result.recommendations?.length) improvementBox.append(el("details", {},
+      el("summary", {}, `자동 선정한 게인 후보 ${result.recommendations.length}개`),
+      el("div", { class: "scroll-x" }, el("table", {},
+        el("thead", {}, el("tr", {}, ["게인", "선정 근거"].map((s) => el("th", {}, s)))),
+        el("tbody", {}, result.recommendations.map((r) => el("tr", {},
+          [r.knob, r.reason].map((s) => el("td", {}, String(s))))))))));
+    result.candidates.forEach((candidate, index) => {
+      const candidateDetails = el("details", { class: "inf-flow-details" },
+        el("summary", {}, `후보 ${index + 1} · ${candidate.accepted ? "목표·기준 충족" : "미달 또는 계산 불가"} · 변경 게인 ${candidate.changed_count ?? 0}개`));
+      candidateDetails.open = !!candidate.accepted;
+      improvementBox.append(candidateDetails);
+      candidateDetails.append(
+        el("p", {}, jointLines(candidate.joint).join(" · ")));
+      if (candidate.sensitivity_cases?.length) candidateDetails.append(el("p", { class: "hint" },
+        `감도 측정 ${candidate.sensitivity_cases.length}점 · 제안 확인은 선택 운용점 전체`));
+      if (Number.isFinite(candidate.performance_change)) candidateDetails.append(el("p", {},
+        `실측 응답지표 평균 변화 ${(candidate.performance_change * 100).toFixed(1)}%`));
+      if (candidate.changes) candidateDetails.append(el("p", {}, `추천 변경 게인 ${candidate.changed_count}개`),
+        el("div", { class: "scroll-x" }, el("table", {},
+          el("thead", {}, el("tr", {}, ["게인", "현재", "제안", "추천 근거"].map((s) => el("th", {}, s)))),
+          el("tbody", {}, candidate.changes.map((c) => el("tr", {},
+            [c.knob, c.from, c.to, c.reason].map((s) => el("td", {}, String(s)))))))));
+      if (candidate.goals) candidateDetails.append(el("div", { class: "scroll-x" }, el("table", {},
+        el("thead", {}, el("tr", {}, ["운용점", "지표", "목표", "기존", "실측", "달성"].map((s) => el("th", {}, s)))),
+        el("tbody", {}, candidate.goals.rows.map((r) => el("tr", {},
+          [r.case, metricLabel(r.metric), `${r.metric.startsWith("gm.") || r.metric.startsWith("pm.") || ["zeta_sp", "zeta_dr", "roll_lambda"].includes(r.metric) ? "≥" : "≤"} ${r.target}`,
+            r.base ?? "미측정", r.value ?? "미측정", r.met ? "충족" : "미달"].map((s) => el("td", {}, String(s)))))))));
+      if (!candidate.accepted || result.aborted || candidate.unchanged) return;
+      const name = el("input", { value: `성능 개선 ${index + 1}`, "aria-label": "저장할 설계안 이름" });
+      const status = el("span", { role: "status" });
+      let entityId = null;
+      const save = el("button", { onclick: async () => {
+        save.disabled = true;
+        try {
+          if (!entityId) entityId = (await api.post("/design-entities", {
+            profile_id: result.profile.id, variant: result.profile.variant ?? null, name: name.value })).id;
+          await api.post(`/design-entities/${entityId}/versions`, { expected_count: 0, mode: "improvement",
+            improvement_result_id: result.id, candidate_index: index, note: "목표 성능 개선 및 재평가" });
+          status.textContent = "설계안·재평가 결과 저장 완료";
+        } catch (e) { status.textContent = errorText(e); save.disabled = false; }
+      } }, "재평가 통과 후보를 설계안으로 저장");
+      candidateDetails.append(el("div", { class: "row" }, name, save, status));
+    });
+  }
 
   const evalStatus = el("p", { class: "hint", style: "margin:6px 0 0" });
+  const evalOutcome = el("div", { class: "inf-flow-outcome", "data-tone": "idle" }, "평가 전");
+  const evalResultSummary = el("summary", {}, "평가 결과 상세");
+  const evalResultsDetails = el("details", { class: "inf-flow-details" });
+  const prescribeDetails = el("details", { class: "inf-flow-details" });
+  const stageGuideDetails = el("details", { class: "inf-flow-details" });
   const evalChipRow = el("div", {
     class: "row", style: "gap:8px;flex-wrap:wrap;align-items:center",
   });
@@ -1062,6 +1304,7 @@ export function render() {
   let evalVerdictNode = null;
   const verifyStatus = el("p", { class: "hint", style: "margin:6px 0 0" });
   const verifyBox = el("div");
+  const verifyResultsDetails = el("details", { class: "inf-flow-details" });
   const evalChipBtns = new Map();
 
   // ── 판정 기준 — 어휘(카드·체크·항목 이름·지표 척도)는 도구 정본(/influence/criteria/defaults), 기준 값은
@@ -1162,8 +1405,9 @@ export function render() {
     // 거절은 결과 없는 런으로 돌려준다 — 직전 평가를 돌려주면 쇼케이스 신호가 옛 판정을
     // 새 격자의 답으로 보고한다(handleCue는 result가 없으면 error를 던진다)
     if (runRefused()) {
+      const busy = runBusyKey();
       return { status: "거절", submitted: false, result: null,
-               error: `${RUN_BTN[runBusyKey()].name}이(가) 도는 중이라 평가를 띄우지 않았다` };
+               error: `${busy ? RUN_BTN[busy].name : "수정량 계산"}이(가) 도는 중이라 평가를 띄우지 않았다` };
     }
     let cases;
     try {
@@ -1223,6 +1467,7 @@ export function render() {
                         trimReuse: res.trim_reuse ?? null };
       applyEvalFocus(next);
       renderEval();
+      evalResultsDetails.open = true;
       runEnd(depth, true, runVerdictMark(next));
       runStatus("평가 완료", { open: "eval" });
     } catch (e) {
@@ -1278,6 +1523,7 @@ export function render() {
       state.verifyRun = { status: "완료", result: normalizeVerifyReport(res),
                           error: null };
       renderEval();
+      verifyResultsDetails.open = true;
       runEnd("verify", true, "✓ 완료");
       runStatus("검증 완료", { open: "eval" });
     } catch (e) {
@@ -1332,7 +1578,7 @@ export function render() {
   paintObjRow();
 
   async function runPrescribe(card, { open = state.drawer === "sens" ? "sens" : "eval",
-                                     hooks = {}, objective = null } = {}) {
+                                     hooks = {}, objective = null, howMuch = false } = {}) {
     const rid = state.sweep?.resultId;
     if (!rid) {
       runStatus("수정안: 먼저 감도(스윕)가 돌아 있어야 한다 — "
@@ -1367,10 +1613,13 @@ export function render() {
           tSettle: 5, tStep: Number(stepIn.value) || 15,
           fingerprint: state.diag?.fingerprint, objective: objFields,
         }));
+      if (howMuch) howMuchTick("수정안·확인", 0, { jobId: job.id, offset: 0.5, span: 0.5 });
       hooks.onJob?.(job.id);
       const done = await watchJob(job.id, (j) => {
         state.prescribe.status = j.message || jobStatusLabel(j.status);
         const pct = Math.round((j.progress ?? 0) * 100);
+        if (howMuch) howMuchTick("수정안·확인", j.progress ?? 0,
+          { jobId: job.id, offset: 0.5, span: 0.5 });
         setLeverBusy(`수정안 ${pct}%`);
         runStatus(`수정안 ${pct}% — ${j.message ?? ""}`);
         hooks.onProgress?.(`수정안 ${pct}% — ${j.message ?? ""}`);
@@ -1419,6 +1668,8 @@ export function render() {
     renderTabCounts();
     clear(prescribeBox);
     const pr = state.prescribe;
+    prescribeDetails.hidden = !pr;
+    if (pr?.result || pr?.error) prescribeDetails.open = true;
     prescribeStatus.textContent = !pr
       ? "수정안 없음 — 처방 카드의 [수정안 계산 (얼마나)]이 여기를 채운다 "
         + "(스윕이 먼저 돌아 있어야 한다)"
@@ -1525,8 +1776,8 @@ export function render() {
    *  이 버튼 하나가 잡 셋을 이어 돌린다(감도 스윕 → 수정안 풀이 → 확인 런). 케이스
    *  하나짜리 격자에서도 9분 넘게 걸린 적이 있어(계측), 규모를 안 밝히면 누른 사람은
    *  화면이 멈춘 줄 안다. 정확한 시간은 형상·격자에 따라 달라지므로 **약속하지
-   *  않는다** — 무엇이 도는지와 몇 건인지만 말하고, 진행은 지렛대 칩과 실행 상태
-   *  줄이 낸다. 격자 입력이 깨져 있으면 케이스 수를 셀 수 없으니 그 사실을 그대로 낸다. */
+   *  않는다** — 무엇이 도는지와 몇 건인지만 말하고, 진행은 버튼의 채움 막대와 단계명이
+   *  직접 낸다. 격자 입력이 깨져 있으면 케이스 수를 셀 수 없으니 그 사실을 그대로 낸다. */
   function howMuchTitle(knobs) {
     let n;
     try {
@@ -1537,7 +1788,7 @@ export function render() {
     }
     return `감도 스윕 → 수정안 풀이 → 확인 런까지 이어 돈다 — `
       + `설계변수 ${knobs?.length ?? 0}개 × 케이스 ${n}건. 6DOF 런이 곱으로 붙어 `
-      + `수 분 걸린다(진행은 그래프 아래 칩과 위 실행 줄에 뜬다)`;
+      + `수 분 걸린다(진행 단계와 퍼센트는 이 버튼 안에 뜬다)`;
   }
 
   /** 소견의 [얼마나 →] — 평가가 지목한 자리를 그대로 물려 감도와 해를 푼다.
@@ -1548,9 +1799,10 @@ export function render() {
    */
   async function runPrescribeFromEval(knobs, hooks = {}, { objective = null } = {}) {
     if (!knobs?.length) return { status: "제출 불가", result: null, error: "설계변수가 없다" };
+    if (runRefused()) return { status: "제출 불가", result: null, error: "다른 실행이 진행 중이다" };
     let cases;
     try {
-      cases = selectedCases();
+      cases = sweepCases(selectedCases(), state.scan);
     } catch (e) {
       runStatus(`얼마나: 비행조건 오류 — ${errorText(e)}`,
         { open: "eval", bad: true });
@@ -1565,6 +1817,7 @@ export function render() {
     });
     const stop = haltedChain(hooks, "eval");
     if (stop) return stop;
+    howMuchBegin(knobs);
     try {
       if (!reuse || !state.sweep?.resultId) {
         // 이 체인은 스윕 → 수정안 → 확인 런이라 몇 분이 걸린다. 그동안 칩 자리가
@@ -1576,9 +1829,11 @@ export function render() {
           tSettle: 5, tStep: Number(stepIn.value) || 15,
           fingerprint: state.diag?.fingerprint,
         }));
+        howMuchTick("감도", 0, { jobId: sj.id, offset: 0, span: 0.5 });
         hooks.onJob?.(sj.id);
         const sdone = await watchJob(sj.id, (j) => {
           const pct = Math.round((j.progress ?? 0) * 100);
+          howMuchTick("감도", j.progress ?? 0, { jobId: sj.id, offset: 0, span: 0.5 });
           setLeverBusy(`감도 ${pct}%`);
           runStatus(`감도 ${pct}% — ${j.message ?? ""}`);
           hooks.onProgress?.(`감도 ${pct}% — ${j.message ?? ""}`);
@@ -1586,6 +1841,7 @@ export function render() {
         if (sdone.status !== "done" || !sdone.result_id) {
           setLeverBusy(null);
           runStatus(jobEndLine("감도 측정", sdone), { open: "eval", bad: true });
+          howMuchEnd(false, jobStatusLabel(sdone.status));
           return { status: jobStatusLabel(sdone.status), result: null,
                    error: sdone.error ?? jobEndLine("감도 측정", sdone) };
         }
@@ -1593,11 +1849,17 @@ export function render() {
                         result: await api.get(`/results/${sdone.result_id}`),
                         resultId: sdone.result_id, error: null };
         renderSweep();
+      } else {
+        howMuchTick("감도 재사용", 1, { jobId: null, offset: 0, span: 0.5 });
       }
-      return await runPrescribe({ knobs }, { open: "eval", hooks, objective });
+      const result = await runPrescribe({ knobs }, { open: "eval", hooks, objective, howMuch: true });
+      const ok = result?.status === "완료";
+      howMuchEnd(ok, ok ? "완료" : result?.status ?? "실패");
+      return result;
     } catch (e) {
       setLeverBusy(null);
       runStatus(`얼마나: 실패 — ${errorText(e)}`, { open: "eval", bad: true });
+      howMuchEnd(false, "실패");
       return { status: "실패", result: null, error: `얼마나: 실패 — ${errorText(e)}` };
     }
   }
@@ -1684,6 +1946,7 @@ export function render() {
   function renderEval() {
     renderTabCounts();  // PASS/FAIL 배지가 패널이 닫혀 있어도 먼저 보인다
     evalVerdictNode = null;
+    howMuchBtns.clear();
     clear(evalCardsBox);
     clear(evalBox);
     clear(verifyBox);
@@ -1706,6 +1969,24 @@ export function render() {
     }
 
     const m = run?.result;
+    evalResultsDetails.hidden = !m && !run?.error;
+    if (run?.error) evalResultsDetails.open = true;
+    if (m) {
+      const n = m.aggregate?.n_cases ?? m.cases?.length ?? 0;
+      const fails = m.aggregate?.hard_fails?.length ?? 0;
+      const stage = m.depth === "linear" ? "선별" : "평가";
+      const verdict = m.aggregate?.hard_fail === true ? `기준 미달 ${fails}건`
+        : m.aggregate?.hard_fail === false ? "하드 기준 통과" : "판정 보류";
+      evalOutcome.textContent = `${stage} · ${verdict} · 운용점 ${n}개`;
+      evalOutcome.dataset.tone = m.aggregate?.hard_fail === true ? "fail"
+        : m.aggregate?.hard_fail === false ? "pass" : "idle";
+      evalResultSummary.textContent = `${stage} 결과 상세`;
+    } else {
+      evalOutcome.textContent = run?.error ? `평가 실패 · ${run.error}`
+        : run ? `평가 ${run.status}` : "평가 전 · 시간축 평가부터 실행";
+      evalOutcome.dataset.tone = run?.error ? "fail" : "idle";
+      evalResultSummary.textContent = "평가 결과 상세";
+    }
     if (m) {
       const agg = m.aggregate;
       // 카드 7 — 강조 선택은 표시 전용(안 고른 카드는 흐려질 뿐 사라지지 않는다)
@@ -1797,14 +2078,7 @@ export function render() {
                 el("td", { style: "white-space:nowrap" }, r.case),
                 el("td", { style: `max-width:520px;${mono()};font-size:12px` },
                   r.text),
-                el("td", {},
-                  el("button", {
-                    onclick: () => runPrescribeFromEval(r.knobs),
-                    // 이 버튼은 **세 잡을 이어 돈다** — 눌러 놓고 몇 분을 기다리게
-                    // 되는데 종전 문구("스윕해 … 푼다")는 그 규모를 말하지 않아
-                    // 누른 사람이 화면이 멈춘 줄 안다. 규모를 수로 낸다
-                    title: howMuchTitle(r.knobs),
-                  }, "얼마나 →"))))))));
+                el("td", {}, howMuchButton(r.knobs))))))));
       }
 
       const fails = hardFailLines(agg);
@@ -1854,6 +2128,7 @@ export function render() {
 
     // ── 3단계 검증 결과 — 별도 실행의 별도 표면 ────────────────────────────────
     const vr = state.verifyRun;
+    verifyResultsDetails.hidden = !vr;
     verifyStatus.textContent = !vr
       ? "아직 안 돌렸다 — 후보 게인이 1·2단계를 통과한 뒤 돌리는 것이 비용 구조다"
       : vr.status;
@@ -1886,6 +2161,7 @@ export function render() {
         }, `⚠ ${w}`));
       }
     }
+    renderHowMuchBtns();
   }
 
 
@@ -2024,6 +2300,14 @@ export function render() {
   const sensRow = el("div", {
     class: "row", style: "gap:8px;margin:8px 0 0;flex-wrap:wrap",
   });
+  const marginPercent = el("input", { type: "number", min: "0.01", max: "50", step: "0.5",
+    value: state.marginPercent, style: "width:80px", "aria-label": "마진 분석 변화폭 (%)",
+    title: "현재 값의 절댓값 대비 변화폭. 경계에서는 반대 방향, 값이 0이면 절대 0.01을 사용합니다" });
+  marginPercent.addEventListener("input", () => { state.marginPercent = marginPercent.value; });
+  const analysisDetails = el("details", {}, el("summary", {}, "상세 분석 · 게인 영향과 구간 경향"));
+  const scanDetails = el("details", {}, el("summary", {}, "운용점별 성능 탐색"));
+  analysisDetails.open = state.analysisOpen;
+  analysisDetails.addEventListener("toggle", () => { state.analysisOpen = analysisDetails.open; });
   /** 감도 패널의 실행 줄 — 세 칸을 **여기서** 채운다.
    *
    *  종전에는 이 판을 채우는 버튼이 전부 「평가·처방」 안에 있었다(마진 민감도는
@@ -2042,20 +2326,16 @@ export function render() {
     runBlocked.set("openloop", noKnobs);
     runBlocked.set("sweep", noKnobs);
     sensRow.append(
+      el("label", {}, "변화폭 (%) ", marginPercent),
       runButton("openloop", {
-        label: "마진 민감도 재기", sub: "선형화 · 시뮬 0",
+        label: "안정 여유 변화 분석", sub: "GM·PM · 선형 분석",
         title: "케이스당 선형화 한 번 — 시뮬을 안 돈다",
         onclick: () => runOpenloop({ knobs }),
       }),
       runButton("sweep", {
-        label: "지표 감도 재기", sub: "폐루프 스윕",
+        label: "성능 변화 측정", sub: "폐루프 감도",
         title: "케이스 × 스팬 4점만큼 6DOF 런 — 구간 경향도 이 런으로 선다",
         onclick: () => runSweep({ knobs }),
-      }),
-      runButton("scan", {
-        label: "전 케이스 스캔", sub: "base 지표",
-        title: "격자 전 케이스의 base 지표 — 설계변수 없이 돈다",
-        onclick: runScan,
       }),
     );
     renderRunBtns();
@@ -2080,6 +2360,10 @@ export function render() {
     let cases;
     try {
       cases = selectedCases();
+      const percent = Number(marginPercent.value);
+      if (!Number.isFinite(percent) || percent <= 0 || percent > 50) {
+        throw new Error("변화폭은 0% 초과 50% 이하여야 합니다");
+      }
     } catch (e) {
       state.openloop = { card, result: null, error: errorText(e) };
       renderOpenloop();
@@ -2094,6 +2378,7 @@ export function render() {
       const job = await api.post("/influence/openloop", {
         ...structuralRequest(shapeState()),
         cases, params: card.knobs, fingerprint: state.diag?.fingerprint,
+        probe_rel: Number(marginPercent.value) / 100,
       });
       runBegin("openloop", job.id, cases.length);
       const done = await watchJob(job.id, (j) => {
@@ -2234,6 +2519,7 @@ export function render() {
 
   async function runScan() {
     if (runRefused()) return;
+    scanDetails.open = true;
     let cases;
     try {
       cases = selectedCases();
@@ -3102,7 +3388,7 @@ export function render() {
         const agg = m.aggregate ?? {};
         // 판정 줄(「하드 게이트 위반 N건 — 이 형상은 Fail」)은 카드 7장·체크·소견 아래라 y≈2700이다(e2e D4) —
         // 진행기가 다음 동작으로 가기 전에 청중 앞에 올린다. 판정이 없으면(케이스 0건) 상태 줄
-        revealPanel(evalVerdictNode ?? evalStatus);
+        revealPanel(evalOutcome);
         reportCue(c, {
           phase: "done", resultId: run.resultId,
           summary: (c.args?.label ? `${c.args.label} — ` : "") + evalVerdictLine(m),
@@ -3224,7 +3510,7 @@ export function render() {
     // 평가는 두 번째다 — "이 형상이 기준을 넘나"가 이 탭의 **주 흐름**이고,
     // 그 답(PASS/FAIL 배지)은 패널이 닫혀 있어도 칩에 보인다. 케이스 0건은
     // 배지가 없다 — 통과도 실패도 아닌 것을 PASS로 위장하지 않는다
-    { key: "eval", label: "평가·처방",
+    { key: "eval", label: "평가·설계 개선",
       count: () => {
         const agg = state.evalRun?.result?.aggregate;
         if (!agg || agg.hard_fail == null) return null;
@@ -3233,24 +3519,30 @@ export function render() {
       build: () => {
         ensureEvalMeta();  // 카드·체크 어휘와 기준은 서버 정본 — 처음 열 때 받아 온다
         paintCaseText();
+        renderSensRow();
+        const diagnostics = DRAWERS.find((d) => d.key === "sens").build();
+        analysisDetails.replaceChildren(el("summary", {}, "추가 분석"),
+          scanDetails, ...diagnostics.filter(Boolean), stageGuideDetails);
+        const action = howMuchButton(["auto"], true);
+        improvementControls.replaceChildren(el("label", {}, "목표 ", improvementMode), action);
+        renderHowMuchBtns();
+        renderImprovement();
+        scanDetails.replaceChildren(el("summary", {}, "운용점별 성능 탐색"),
+          runButton("scan", { label: "운용점 성능 스캔", sub: "선택 운용점 · 현재 게인",
+            title: "선택한 비행조건의 기준 성능을 별도로 측정하고 감도 측정 대상을 좁힙니다",
+            onclick: runScan }), scanStatusLine, scanBox);
+        evalResultsDetails.replaceChildren(evalResultSummary, evalStatus,
+          evalChipRow, evalCardsBox, evalBox);
+        prescribeDetails.replaceChildren(el("summary", {}, "소견별 수정량"),
+          prescribeObjRow, prescribeStatus, prescribeBox);
+        verifyResultsDetails.replaceChildren(el("summary", {}, "검증 결과 상세"),
+          verifyStatus, verifyBox);
+        stageGuideDetails.replaceChildren(el("summary", {}, "단계별 측정 항목"), stageTable());
         return [
-          el("h2", {}, "평가 → 처방 → 확정 — 이 탭의 주 흐름"),
-          el("p", { class: "hint", style: "margin:0 0 10px" },
-            "위에서 아래로 좁혀진다: 대표 카드 7장이 값·기준·최악 운용점을 내고, " +
-            "나머지 판정이 한 줄로 서고, 실패가 있으면 어디서 나쁜지(국소성)와 왜 " +
-            "그런지(소견)가 같은 화면에 붙고, 소견의 [얼마나 →]가 감도·처방·확인 " +
-            "런까지 이어진다. 통과하면 적용하고 3단계 검증으로 굳힌다. " +
-            "하드 게이트(불안정·ζ·포화·실속·잔여권한·GM/PM) 위반이 하나라도 있으면 " +
-            "Fail이고 J는 매기지 않는다 — GM/PM은 목적함수가 아니라 제약이다."),
-          stageTable(),
-          el("h3", { style: "margin:16px 0 4px;font-size:14px" },
-            "실행 — 1 선별 → 2 평가 → 3 검증"),
-          el("p", { class: "hint", style: "margin:0 0 8px" },
-            "왼쪽에서 오른쪽이 도는 순서이고, 오른쪽으로 갈수록 비싸다. " +
-            "셋 다 위 무대의 같은 비행조건을 대상으로 돈다."),
-          el("div", {
-            class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap",
-          },
+          el("h2", {}, "평가·설계 개선"),
+          el("section", { class: "inf-flow-section" },
+            el("h3", {}, "성능 평가"),
+            el("div", { class: "inf-flow-actions" },
             runButton("linear", {
               label: "1단계 · 선별", sub: "선형 · 시뮬 0",
               onclick: () => runEvaluate("linear"),
@@ -3270,41 +3562,12 @@ export function render() {
                 + "격자 중간점. 후보 확정 후 한 번",
             }),
             caseTextEl),
-          runDetail.eval,
-          el("p", { class: "hint", style: "margin:8px 0 0" },
-            el("b", {}, "1단계"), "는 시뮬을 한 번도 안 돈다 — 폐루프 안정성·감쇠비·" +
-            "GM/PM·스케줄 전이와 제어권한의 트림 소모분까지 값이 나오고, 추종·과도·" +
-            "타면·포화 회복·교차축과 총점 J는 「비선형 런 없음」으로 미판정이다. " +
-            "그 넷은 ", el("b", {}, "자동 설계가 이미 판정하는 것"),
-            "이라, 여기서 통과했다고 평가가 끝난 것이 아니다 — 손으로 고친 형상을 " +
-            "6DOF 런 전에 거르는 문지기다. ",
-            el("b", {}, "2단계"), "라야 대표 카드와 나머지 판정이 전부 값을 갖고, " +
-            "이 탭이 있는 이유(시간축)가 여기 있다. ",
-            el("b", {}, "3단계"), "는 2단계를 통과한 형상에만 의미가 있다 — 같은 " +
-            "형상을 코너에서 다시 재는 것이라, 통과 못 한 형상에 돌리면 이미 아는 " +
-            "실패를 다시 본다."),
-          evalStatus,
-          // 카드 강조 칩은 **결과의 표시 옵션**이라 실행 줄 위가 아니라 여기 선다 —
-          // 버튼 위에 있으면 "무엇을 계산할지 고르는 칸"으로 읽힌다(아니다)
-          evalChipRow,
-          evalCardsBox,
-          evalBox,
-          el("h3", { style: "margin:16px 0 4px;font-size:14px" },
-            "3단계 결과 — 검증 (강건성 코너·격자 중간점)"),
-          el("p", { class: "hint", style: "margin:0 0 6px" },
-            "코너(질량·Cmα·Cmq ±)마다 기체를 다시 만들어 ", el("b", {}, "재트림"),
-            "하고 1·2단계를 통째로 다시 잰다 — 코너 수 × 케이스라 비용이 곱이고, " +
-            "그래서 매 게인 변경마다가 아니라 후보를 확정한 뒤 한 번 선다. 지연 섭동·" +
-            "Monte Carlo·미션 프로파일·worst-case 탐색은 어휘와 자리만 있다."),
-          verifyStatus,
-          verifyBox,
-          // 처방(얼마나)은 이 깔때기의 다음 칸이다 — 소견의 [얼마나 →]가 여기를 채운다
-          prescribeObjRow,
-          prescribeStatus,
-          prescribeBox,
-          // 수동 진단(자기 미션 귀속)과 전 케이스 스캔은 **감도로 갔다**(v0.69):
-          // 평가는 무대의 비행조건를 판정하고 끝나고, 설계변수를 골라 흔들거나
-          // 전 케이스 경향을 보는 일은 보조 진단의 몫이다
+            runDetail.eval, evalOutcome, evalResultsDetails, prescribeDetails,
+            verifyResultsDetails),
+          el("section", { class: "inf-flow-section" },
+            el("h3", {}, "목표 성능과 게인 추천"),
+            improvementControls, goalFields, improvementLimits, improvementBox),
+          el("section", { class: "inf-flow-section" }, analysisDetails),
         ];
       } },
     // 감도 — "흔들면 얼마나 움직이나"를 묻는 셋이 한 묶음이다. 개루프는 마진,
@@ -3314,32 +3577,27 @@ export function render() {
     // 때 왜인지 보는 자리**다: 처방은 방향 상충을 "국소 문제"라고 거절만 하고
     // 그 패턴은 구간 경향만 보여 주며, 마진 민감도는 처방이 아예 다루지 않는다
     // (처방이 푸는 지표는 추종 RMS·포화율·실속마진뿐).
-    { key: "sens", label: "감도 (보조 진단)",
+    { key: "sens", label: "상세 분석", hidden: () => true,
       count: () => {
         const n = (state.openloop?.result ? 1 : 0)
           + (state.scan?.result ? 1 : 0) + (state.sweep?.result ? 1 : 0);
         return n || null;
       },
       build: () => [
-        el("h2", {}, "감도 — 흔들면 얼마나 움직이나 (보조 진단)"),
+        el("h3", {}, "게인 변화에 따른 영향"),
         el("p", { class: "hint", style: "margin:0 0 10px" },
-          "주 흐름은 「평가·처방」이다. 여기는 처방이 못 풀었을 때 그 이유를 보는 " +
-          "자리다: 처방은 케이스마다 요구 방향이 갈리면 「국소 문제」라고 거절만 " +
-          "하는데 그 패턴은 구간 경향이 보여 주고, 게인이 마진을 얼마나 움직이는지는 " +
-          "처방이 아예 다루지 않는다(추종 RMS·포화율·실속마진만 푼다)."),
+          "안정 여유 변화와 폐루프 성능 변화"),
         // 실행 줄이 판 맨 위에 선다 — 종전에는 이 판을 채우는 버튼이 전부 다른
         // 패널에 있어서(마진 민감도는 접힌 수동 진단 안에만) "감도를 어떻게
         // 켜냐"가 매번 물음이었다. 대상은 위에서 이미 좁혀 온 것을 물려받는다
         sensRow, runDetail.sens, sensTargetLine,
         el("p", { class: "hint", style: "margin:6px 0 0" },
-          "「평가·처방」의 [얼마나 →]는 아래 둘(지표 감도·구간 경향)을 처방과 함께 " +
-          "한 번에 돌리는 지름길이다. 여기 버튼은 그 한 조각씩을 따로 돌린다."),
+          "성능 변화 측정 결과와 개선안 계산의 감도 근거"),
         diagDetails,
         // 처방 표는 **두 패널에 같은 노드**로 얹는다 (한 번에 하나만 열리므로
         // 실제로는 열린 쪽으로 옮겨 간다). 처방 카드가 이 패널로 온 뒤에도 표만
         // 평가 쪽에 있으면, 방금 [수정안 계산]을 누른 화면에서는 아무것도 안
         // 보인다 — v0.58에 똑같이 겪고 고친 자리다
-        prescribeObjRow, prescribeStatus, prescribeBox,
         el("h3", { style: "margin:14px 0 4px;font-size:14px" },
           "마진 민감도 — 게인 Δ가 PM·GM을 얼마나 움직이나"),
         el("p", { class: "hint", style: "margin:0 0 6px" },
@@ -3347,16 +3605,13 @@ export function render() {
         olStatusLine, olBox,
         state.openloop?.result ? null
           : el("p", { class: "hint", style: "margin:0" },
-              "아직 없다 — 위 [마진 민감도 재기]를 누르면 여기 채워진다. " +
-              "아래 「내가 돌린 시뮬 런 진단하기」가 세우는 처방 카드에도 같은 " +
-              "버튼이 있다(그 카드가 고른 설계변수로 돈다)."),
+              "안정 여유 변화 분석 결과 없음"),
         el("h3", { style: "margin:14px 0 4px;font-size:14px" },
           "지표 감도 — 폐루프 실측 (스캔·스윕)"),
-        scanStatusLine, scanBox, sweepStatusLine, sweepBox,
+        sweepStatusLine, sweepBox,
         state.scan || state.sweep ? null
           : el("p", { class: "hint", style: "margin:0" },
-              "아직 없다 — 위 [지표 감도 재기]나 「평가·처방」의 [얼마나 →]가 이 " +
-              "스윕을 돌린다. 여기는 그 원자료(런별 지표가 얼마에서 얼마로)다."),
+              "성능 변화 측정 결과 없음"),
         el("h3", { style: "margin:14px 0 4px;font-size:14px" },
           "구간 경향 — 전 구간에서 어느 쪽으로"),
         el("p", { class: "hint", style: "margin:0 0 6px" },
@@ -3376,6 +3631,11 @@ export function render() {
   const drawerTabs = new Map();
 
   function renderDrawer() {
+    if (state.drawer === "sens") {
+      state.drawer = "eval";
+      state.analysisOpen = true;
+      analysisDetails.open = true;
+    }
     for (const [key, btn] of drawerTabs) {
       btn.setAttribute("aria-expanded", state.drawer === key ? "true" : "false");
     }
@@ -3412,7 +3672,7 @@ export function render() {
       const btn = drawerTabs.get(d.key);
       const hidden = d.hidden?.() ?? false;
       btn.hidden = hidden;
-      if (hidden && state.drawer === d.key) {
+      if (hidden && state.drawer === d.key && d.key !== "sens") {
         state.drawer = null;
         closed = true;
       }

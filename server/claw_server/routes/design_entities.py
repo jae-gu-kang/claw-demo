@@ -31,6 +31,8 @@ class VersionIn(BaseModel):
     based_on_evaluation_id: str | None = None
     parent_version: int | None = Field(default=None, ge=1)
     note: str = Field(default="", max_length=500)
+    improvement_result_id: str | None = None
+    candidate_index: int = Field(default=0, ge=0)
 
 
 class EvaluationIn(BaseModel):
@@ -138,7 +140,28 @@ def add_version(entity_id: str, req: VersionIn, request: Request):
         raise HTTPException(422, "이 설계안에 연결된 평가만 후속 설계의 근거로 지정할 수 있습니다")
     if basis_version is not None and req.parent_version not in (None, basis_version):
         raise HTTPException(422, "근거 평가와 선행 설계 버전이 다릅니다")
-    if req.mode == "auto":
+    improved = None
+    if req.mode == "improvement":
+        if not req.improvement_result_id or req.config is not None:
+            raise HTTPException(422, "개선 실행 결과를 지정하세요")
+        body = _result(request, req.improvement_result_id, "influence_improve")
+        candidates = body.get("candidates") or []
+        if body.get("aborted") or req.candidate_index >= len(candidates):
+            raise HTTPException(422, "완료된 개선 후보가 아닙니다")
+        improved = candidates[req.candidate_index]
+        if not improved.get("accepted") or improved.get("unchanged"):
+            raise HTTPException(422, "목표와 하드 기준을 만족한 후보만 저장할 수 있습니다")
+        verified = _result(request, improved["evaluation_id"], "influence_evaluate")
+        if (verified.get("aggregate") or {}).get("hard_fail") is not False:
+            raise HTTPException(409, "연결된 실측 평가가 하드 기준을 만족하지 않습니다")
+        echo = body.get("profile") or {}
+        if not _same_profile(echo, item) or echo.get("fingerprint") != _profile_echo(request, item).get("fingerprint"):
+            raise HTTPException(409, "개선 실행 이후 기체 기준이 변경됐습니다")
+        config = _bounded_config(improved["config"])
+        source = {"kind": "improvement", "result_id": req.improvement_result_id,
+                  "candidate_index": req.candidate_index, "sweep_id": improved["sweep_id"]}
+        auto_summary = {"goals": improved["goals"], "criteria_echo": body.get("criteria_echo")}
+    elif req.mode == "auto":
         if not req.auto_result_id or req.config is not None:
             raise HTTPException(422, "자동 설계 결과 ID 하나를 지정하세요")
         body = _result(request, req.auto_result_id, "auto_design")
@@ -159,13 +182,19 @@ def add_version(entity_id: str, req: VersionIn, request: Request):
         source = {"kind": "manual"}
         auto_summary = None
     else:
-        raise HTTPException(422, "설계 방식은 auto 또는 manual이어야 합니다")
+        raise HTTPException(422, "설계 방식은 auto, manual 또는 improvement이어야 합니다")
     version = {"config": config, "profile": echo, "source": source, "note": req.note,
                "based_on_evaluation_id": req.based_on_evaluation_id,
                "parent_version": req.parent_version or basis_version or (req.expected_count or None),
                "auto_summary": auto_summary}
     try:
-        return request.app.state.design_entities.append_version(entity_id, req.expected_count, version)
+        saved = request.app.state.design_entities.append_version(entity_id, req.expected_count, version)
+        if improved:
+            request.app.state.design_entities.attach_evaluation(entity_id, req.expected_count + 1,
+                {"result_id": improved["evaluation_id"], "profile": echo,
+                 "criteria_echo": verified.get("criteria_echo"), "hard_fail": False, "hard_fails": 0})
+            return request.app.state.design_entities.get(entity_id)
+        return saved
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
 

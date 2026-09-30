@@ -16,7 +16,7 @@ const messages = new Map();
 
 const scope = (r) => `${r.id}::${r.variant ?? ""}`;
 const same = (a, r) => a?.id === r.id && (a.variant ?? null) === (r.variant ?? null);
-const label = (v) => v.source?.kind === "auto" ? "자동" : "수동";
+const label = (v) => ({ auto: "자동", manual: "수동", improvement: "평가 후 개선" })[v.source?.kind] ?? "기타";
 const pipelineLabel = (item) => {
   const latest = item.versions.at(-1);
   if (!latest) return "버전 없음";

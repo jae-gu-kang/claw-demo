@@ -620,7 +620,8 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
       paintCanvas();
       paintCaption();
       paintMarks();
-      if (c) inputs.get(c)?.focus();
+      // The input is below the plot; ordinary focus scrolls it into view mid-drag.
+      if (c) inputs.get(c)?.focus({ preventScroll: true });
       return c;
     }
 
@@ -658,7 +659,7 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
         st.note = `끌어 고침 — 고도 ${num(d.grab.alt)} m ${SIDE_NAME[d.grab.side]} ${num(d.from)} → ${num(d.mach)}`
           + (d.mach === d.grab.min || d.mach === d.grab.max ? " (한계에 물림)" : "");
       }
-      paintTable(); // 경계표를 막 세웠으면(가상 행 → 실제 행) 표가 달라진다 — 고도 순서는 끌기로 바뀌지 않는다
+      paintTable(true); // 경계표를 막 세웠으면(가상 행 → 실제 행) 표가 달라진다 — 고도 순서는 끌기로 바뀌지 않는다
       paintCaption();
     }
 
@@ -668,6 +669,7 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
       const { px, py } = at(ev);
       const hit = hitAt(px, py);
       if (!hit) return;
+      ev.preventDefault?.();
       const cell = select(hit);
       const grab = dragGrab(st.work, st.fuel, hit, outline());
       if (!grab.cell) {
@@ -834,7 +836,7 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
     return inp;
   }
 
-  function paintTable() {
+  function paintTable(preventFocusScroll = false) {
     const keep = focusId; // 짜는 동안 옛 칸이 사라지며 blur가 와도 되돌릴 칸은 이것
     inputs.clear();
     rowInputs = [];
@@ -906,7 +908,7 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
     paintMarks();
     const back = inputOf(keep);
     focusId = keep;
-    if (back) back.focus();
+    if (back) back.focus(preventFocusScroll ? { preventScroll: true } : undefined);
   }
 
   function paintLineage() {
@@ -982,4 +984,3 @@ export function createRegionEditor({ getMh = () => null, onMode = () => {}, onSa
   if (st.editing) view.repaint();
   return view;
 }
-

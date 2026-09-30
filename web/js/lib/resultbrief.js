@@ -38,6 +38,7 @@ export const KIND_LABEL = {
   influence_evaluate: "평가 — 대표 카드·나머지 판정",
   influence_verify: "검증 — 3단계 (강건성·중간점)",
   influence_prescribe: "정량 처방 — 얼마나·조합·확인",
+  influence_improve: "목표 성능 개선 · 게인 자동 추천",
   mission_draft: "미션 초안 (LLM)",
   llm_brief: "소견서 (LLM)",
   llm_comms: "교신 대본 (LLM)",

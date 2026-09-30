@@ -1151,6 +1151,43 @@ body:has(.tab-page) main { max-width: 1580px; }
 .tab-dark .tab-sect + .tab-sect { border-top-color: rgba(255, 255, 255, .09); }
 .tab-dark .tab-status { color: rgba(235, 235, 245, .6); }
 
+/* 평가·설계 개선: 실행 → 판정 → 목표 → 필요할 때 상세 분석 */
+.inf-flow-section + .inf-flow-section {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, .12);
+}
+.inf-flow-section > h3 { margin: 0 0 10px; font-size: 14px; }
+.inf-flow-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inf-flow-actions > label { display: inline-flex; align-items: center; gap: 7px; }
+.inf-flow-actions select { max-width: min(100%, 300px); }
+.inf-flow-outcome {
+  margin: 12px 0 6px;
+  padding: 9px 12px;
+  border-left: 3px solid #8e8e93;
+  background: rgba(255, 255, 255, .05);
+  font-size: 13px;
+  font-weight: 700;
+}
+.inf-flow-outcome[data-tone="pass"] { border-left-color: #30b36a; }
+.inf-flow-outcome[data-tone="fail"] { border-left-color: #ff6b62; }
+.inf-flow-details { margin-top: 10px; }
+.inf-flow-details > summary { cursor: pointer; font-weight: 650; font-size: 13px; }
+.inf-flow-details[open] > summary { margin-bottom: 10px; }
+.inf-flow-fields { display: flex; flex-wrap: wrap; gap: 10px 16px; }
+.inf-flow-fields > label { display: inline-flex; align-items: center; gap: 6px; }
+.inf-flow-goals { gap: 8px; margin-top: 12px; }
+.inf-flow-axis { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
+.inf-flow-axis > strong { min-width: 32px; }
+.inf-flow-axis > label { display: inline-flex; align-items: center; gap: 5px; }
+@media (max-width: 680px) {
+  .inf-flow-actions { align-items: stretch; }
+  .inf-flow-actions > label { width: 100%; }
+  .inf-flow-actions select { flex: 1; min-width: 0; }
+  .inf-flow-axis { align-items: flex-start; }
+  .inf-flow-axis > strong { width: 100%; }
+}
+
 /* ── 영향성 탭 — 정량 판독대 (v0.49) ──────────────────────────────────────
    위 뼈대 위에 이 탭만 얹는 것. 선택한 파라미터 하나에 대해 세 단이 각각 한 줄씩.
    없는 단은 빈칸이 아니라 **사유**를 낸다 (판정 불가를 0으로 위장하지 않는 이 화면의

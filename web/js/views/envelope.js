@@ -44,7 +44,7 @@ import {
 } from "../lib/envelope.js";
 import { parseNumberList } from "../lib/grid.js";
 import { casesFromBaseGrid, untrimmedSummary } from "../lib/opspace.js";
-import { clampTextX, fuelsOf, insetScale, linScale, massConditionNote, niceTicks, pivotCases, tickAlign }
+import { HEATMAP_LAYOUT, clampTextX, fuelsOf, insetScale, linScale, massConditionNote, niceTicks, pivotCases, tickAlign }
   from "../lib/plot.js";
 import { heatmapCanvas, makeCanvas } from "./plots.js";
 import { attachProgress, cancelledWithoutResult } from "./progress.js";
@@ -2054,9 +2054,11 @@ function renderProp(box) {
   const fuels = fuelsOf(entries);
   const kids = [];
   for (const fuel of fuels) {
+    const pivot = pivotCases(entries, fuel);
+    const width = Math.max(560, HEATMAP_LAYOUT.mL + HEATMAP_LAYOUT.mR + pivot.machs.length * 44);
     kids.push(el("div", { class: "scroll-x" },
-      heatmapCanvas(pivotCases(entries, fuel), throttleCell,
-        { title: `스로틀 소요 — n=1 수평비행 트림, 연료 ${fmt(fuel, 4)} kg` })));
+      heatmapCanvas(pivot, throttleCell,
+        { title: `스로틀 소요 — n=1 수평비행 트림, 연료 ${fmt(fuel, 4)} kg`, width })));
   }
   kids.push(el("p", { class: "hint" },
     "추진 한계는 프로펠러 추력 곡선 T = δσ·min(T_static, ηP/V)이 정하고, 화면에는 ",

@@ -446,6 +446,34 @@ const plotCanvas = (root) => {
 const ghosts = (canvas) => opsOf(canvas).filter((o) => o.kind === "stroke" && o.strokeStyle === "#ff9500"
   && o.dash.length > 0);
 
+test("꼭짓점 클릭·드래그 — 아래 표 칸을 골라도 포커스로 화면을 스크롤하지 않는다", async () => {
+  const ed = await openEditor();
+  const canvas = plotCanvas(ed.root);
+  const g = geomOf();
+  const input = cell(ed.root, "/boundary/0/rows/1/1");
+  const proto = Object.getPrototypeOf(input);
+  const original = proto.focus;
+  const focusOptions = [];
+  let prevented = false;
+  proto.focus = function focus(options) {
+    focusOptions.push(options);
+    this.emit("focus", { target: this });
+  };
+  try {
+    canvas.emit("pointerdown", { button: 0, pointerId: 1, clientX: g.x(0.12), clientY: g.y(3000),
+      preventDefault: () => { prevented = true; } });
+    assert.deepEqual(focusOptions[0], { preventScroll: true });
+    assert.equal(prevented, true);
+    assert.ok(input.className.includes("re-sel"));
+    canvas.emit("pointermove", { pointerId: 1, clientX: g.x(0.14), clientY: g.y(3000) });
+    canvas.emit("pointerup", { pointerId: 1, clientX: g.x(0.14), clientY: g.y(3000) });
+    assert.ok(focusOptions.length >= 2, "표 재작성 뒤에도 선택 칸으로 포커스를 복원해야 한다");
+    assert.deepEqual(focusOptions.at(-1), { preventScroll: true });
+  } finally {
+    proto.focus = original;
+  }
+});
+
 test("꼭짓점을 좌우로 끌면 — 끄는 동안 유령·캡션 읽음(서버 없음), 놓을 때 한 번 타자와 같은 길로 쓴다", async () => {
   const ed = await openEditor();
   button(ed.root, "현재 연료만").emit("click", {});

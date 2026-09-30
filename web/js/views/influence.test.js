@@ -52,6 +52,10 @@ const GRID = {
 
 const posts = [];
 const heldJobs = [];
+const scriptedJobs = new Map();
+const scriptedResults = new Map();
+let evalSubmit = null;
+let sweepSubmit = null;
 // /grid/base 응답 — 기본은 GRID. gridGate가 배열이면 응답을 붙잡아 두고(요청 경쟁·받는 중 상태를 손으로 푼다)
 let gridReply = () => reply(200, GRID);
 let gridGate = null;
@@ -64,7 +68,21 @@ globalThis.fetch = (url, opts = {}) => {
     if (gridGate) return new Promise((resolve) => gridGate.push({ resolve }));
     return Promise.resolve(gridReply());
   }
-  if (method === "POST" && path === "/influence/evaluate") return Promise.resolve(reply(200, { id: `job${posts.length}` }));
+  if (method === "POST" && path === "/influence/evaluate") {
+    return Promise.resolve(reply(200, evalSubmit ?? { id: `job${posts.length}` }));
+  }
+  if (method === "POST" && path === "/influence/improve") {
+    return Promise.resolve(reply(202, { id: "improve-ui" }));
+  }
+  if (method === "POST" && path === "/influence/sweep" && sweepSubmit) {
+    return Promise.resolve(reply(200, sweepSubmit));
+  }
+  if (path.startsWith("/results/") && scriptedResults.has(path.split("/").pop())) {
+    return Promise.resolve(reply(200, scriptedResults.get(path.split("/").pop())));
+  }
+  if (path.startsWith("/jobs/") && scriptedJobs.has(path.split("/").pop())) {
+    return Promise.resolve(reply(200, scriptedJobs.get(path.split("/").pop())));
+  }
   if (path.startsWith("/jobs/")) return new Promise((resolve) => heldJobs.push({ path, resolve }));
   return Promise.resolve(reply(404, { detail: `stub에 없는 경로: ${method} ${path}` }));
 };
@@ -100,12 +118,29 @@ async function fresh() {
   assert.match(summaryOf(root), /6점 \/ 기본 격자 6점 \(전부\)/);
   return root;
 }
-const releaseJobs = () => {
+const releaseJobs = async () => {
+  // 제출 응답 뒤 watchJob의 첫 GET이 대기열에 들어오는 마이크로태스크까지 기다린다.
+  await tick();
   for (const h of heldJobs.splice(0)) {
     const id = h.path.split("/").pop();
     h.resolve(reply(200, { id, status: "cancelled", result_id: null, progress: 0, done: 0, total: 1, message: null }));
   }
+  await tick();
 };
+
+test("평가·설계 개선 — 실행과 목표 설정을 먼저 보여 주고 상세는 접어 둔다", async () => {
+  const root = await fresh();
+  btnOf(root, "평가·설계 개선").emit("click");
+  const sections = root.find("section").filter((node) => node.className === "inf-flow-section");
+  assert.equal(sections.length, 3);
+  assert.match(textOf(sections[0]), /성능 평가.*1단계 · 선별.*2단계 · 평가.*3단계 · 검증/);
+  assert.match(textOf(sections[1]), /목표 성능과 게인 추천.*목표 성능 개선안 계산/);
+  const details = root.find("details");
+  const limits = details.find((node) => textOf(node).startsWith("탐색 범위"));
+  assert.ok(limits);
+  assert.notEqual(limits.open, true);
+  assert.ok(details.some((node) => textOf(node).startsWith("추가 분석")));
+});
 
 test("첫 진입 — 기본 격자를 받고 보낼 점 전부가 선택, 탭 고유의 마하·고도·연료 칸이 없다", async () => {
   const root = render();
@@ -133,7 +168,7 @@ test("평가 신호의 points — 그 점만 격자 순서로 보낸다", async 
     { name: "M0.12_h3000_f10", mach: 0.12, alt: 3000, fuel: 10 },
   ]);
   assert.equal(body.depth, "full");
-  releaseJobs();
+  await releaseJobs();
   await waitFor(() => finalReport("pts"), "신호 끝 보고");
 });
 
@@ -156,7 +191,7 @@ test("points 없는 2단 평가 신호는 대표점 — 가운데 연료 × 최�
   await waitFor(() => evals().length === before + 1, "평가 제출");
   assert.deepEqual(evals().at(-1).body.cases.map((c) => c.name),
     ["M0.1_h200_f10", "M0.2_h200_f10", "M0.2_h3000_f10", "M0.12_h3000_f10"]);
-  releaseJobs();
+  await releaseJobs();
   await waitFor(() => finalReport("rep"), "신호 끝 보고");
   // 고른 점은 무대의 선택으로 남는다 — 청중이 무엇을 쟀는지 거기서 읽는다
   assert.match(textOf(root), /4점 \/ 기본 격자 6점 \(고름\)/);
@@ -245,7 +280,7 @@ test("신호의 격자 요청이 더 나중 요청에 밀리면 그 나중 격�
   await waitFor(() => evals().length === before + 1, "평가 제출");
   assert.deepEqual(evals().at(-1).body.cases, [{ name: "M0.1_h200_f10", mach: 0.1, alt: 201, fuel: 10 }]);
   gridGate = null;
-  releaseJobs();
+  await releaseJobs();
   await waitFor(() => finalReport("race"), "신호 끝 보고");
 });
 
@@ -291,6 +326,109 @@ test("트림 탭 배치(같은 리비전)가 있으면 트림 열이 서고 「�
   btnOf(r, "1단계 · 선별").emit("click");
   await waitFor(() => evals().length === before + 1, "평가 제출");
   assert.deepEqual(evals().at(-1).body.cases.map((c) => c.name), ["M0.1_h200_f10", "M0.12_h3000_f10"]);
-  releaseJobs();
+  await releaseJobs();
   await tick();
+});
+
+test("수정량 계산 — 버튼 안에 연속 작업 단계·진행률·전체 채움이 보이고 다른 실행은 잠긴다", async () => {
+  const report = {
+    depth: "full", cards: [], checks: { list: [], n_pass: 0, n_warn: 0, n_fail: 0, n_na: 0, n_judged: 0 },
+    stage_order: [], items: {}, hard_checks: [], warnings: [], fingerprint: "shape-ui", criteria_fingerprint: "crit-ui",
+    cases: [{ case: "M0.1_h200_f10", midpoint: false, aborted: false, stages: {},
+      hard_fails: [{ check: "margins.gm" }], J: null, J_reason: "하드 실패",
+      attribution: { status: "ok", findings: [{ rule: "gain", severity: "warn", verdict: "게인 과다" }],
+        prescriptions: [{ knobs: ["fcl/Autopilot.K_phi"], knob_class: "gain", direction: "decrease",
+          findings: [0], joint_with: [], recheck: ["gm"], notes: [] }] } }],
+    aggregate: { hard_fail: true, hard_fails: [{ check: "margins.gm", case: "M0.1_h200_f10" }],
+      stages: {}, J: null, J_reason: "하드 실패", n_cases: 1, n_midpoint: 0 },
+  };
+  evalSubmit = { id: "eval-ui" };
+  scriptedJobs.set("eval-ui", { id: "eval-ui", status: "done", result_id: "eval-result-ui",
+    progress: 1, done: 1, total: 1, message: "완료" });
+  scriptedResults.set("eval-result-ui", report);
+  const root = await fresh();
+  const evalTab = btnOf(root, "평가·설계 개선");
+  if (!root.find("button").some((b) => textOf(b).startsWith("2단계 · 평가"))) evalTab.emit("click");
+  await waitFor(() => !btnOf(root, "2단계 · 평가").disabled, "앞선 실행 정리");
+  btnOf(root, "2단계 · 평가").emit("click");
+  await waitFor(() => /평가 완료/.test(textOf(root)), "평가 완료");
+  await tick();
+  await waitFor(() => root.find("button").some((b) => textOf(b).startsWith("수정량 계산 →")), "수정량 계산 버튼");
+
+  sweepSubmit = { id: "sweep-ui" };
+  btnOf(root, "수정량 계산 →").emit("click");
+  await waitFor(() => heldJobs.some((h) => h.path.endsWith("/sweep-ui")), "감도 잡 감시");
+  const progress = heldJobs.splice(heldJobs.findIndex((h) => h.path.endsWith("/sweep-ui")), 1)[0];
+  progress.resolve(reply(200, { id: "sweep-ui", status: "running", result_id: null,
+    progress: 0.4, done: 2, total: 5, message: "게인 변화 측정" }));
+  await waitFor(() => btnOf(root, "수정량 계산 →").children[2].textContent === "감도 40%",
+    "버튼의 감도 진행률");
+  const how = btnOf(root, "수정량 계산 →");
+  assert.equal(how.children[0].style.width, "20%", "두 단계 연속 작업 중 감도 40%는 전체 막대의 20%");
+  assert.equal(btnOf(root, "2단계 · 평가").disabled, true, "진행 중 평가 중복 실행 방지");
+
+  await waitFor(() => heldJobs.some((h) => h.path.endsWith("/sweep-ui")), "감도 다음 폴링", 1000);
+  const cancel = heldJobs.splice(heldJobs.findIndex((h) => h.path.endsWith("/sweep-ui")), 1)[0];
+  cancel.resolve(reply(200, { id: "sweep-ui", status: "cancelled", result_id: null,
+    progress: 0.4, done: 2, total: 5, message: "취소됨" }));
+  await waitFor(() => /^✕ 취소/.test(how.children[2].textContent), "취소 끝 상태");
+  evalSubmit = null;
+  sweepSubmit = null;
+  scriptedJobs.clear();
+  scriptedResults.clear();
+});
+
+test("통합 분석 — 마진 변화폭을 요청에 전달하고 범위 밖 입력은 제출하지 않는다", async () => {
+  const root = await fresh();
+  if (!root.find("button").some((b) => textOf(b).startsWith("안정 여유 변화 분석"))) {
+    btnOf(root, "평가·설계 개선").emit("click");
+  }
+  assert.equal(root.find("button").filter((b) => textOf(b).startsWith("운용점 성능 스캔")).length, 1);
+  assert.ok(root.find("button").find((b) => textOf(b).startsWith("상세 분석")).hidden);
+  const input = root.find("input").find((n) => n.getAttribute("aria-label") === "마진 분석 변화폭 (%)");
+  assert.ok(input);
+  input.value = "10";
+  input.emit("input");
+  const before = posts.filter((p) => p.path === "/influence/openloop").length;
+  btnOf(root, "안정 여유 변화 분석").emit("click");
+  await waitFor(() => posts.filter((p) => p.path === "/influence/openloop").length === before + 1, "마진 요청");
+  assert.equal(posts.filter((p) => p.path === "/influence/openloop").at(-1).body.probe_rel, 0.1);
+  await tick();
+  input.value = "51";
+  btnOf(root, "안정 여유 변화 분석").emit("click");
+  await tick();
+  assert.equal(posts.filter((p) => p.path === "/influence/openloop").length, before + 1);
+});
+
+test("게인 자동 추천 — 사용자 목표와 전체 선택 운용점만 보내고 게인은 서버가 선정한다", async () => {
+  scriptedJobs.set("improve-ui", { id: "improve-ui", status: "cancelled", progress: 0, done: 0, total: 1 });
+  const root = await fresh();
+  if (!root.find("button").some((b) => textOf(b).startsWith("목표 성능 개선안 계산"))) {
+    btnOf(root, "평가·설계 개선").emit("click");
+  }
+  const mode = root.find("select").find((n) => n.getAttribute("aria-label") === "개선 목표");
+  mode.value = "custom";
+  mode.emit("change");
+  const target = root.find("input").find((n) => n.getAttribute("aria-label") === "고도 정착시간 목표");
+  target.value = "3";
+  target.emit("input");
+  const gm = root.find("input").find((n) => n.getAttribute("aria-label") === "피치 자세 GM 목표");
+  gm.value = "8";
+  gm.emit("input");
+  assert.doesNotMatch(textOf(root), /조정 변수 선택/);
+  btnOf(root, "목표 성능 개선안 계산").emit("click");
+  await waitFor(() => posts.some((p) => p.path === "/influence/improve"), "자동 추천 제출");
+  const body = posts.find((p) => p.path === "/influence/improve").body;
+  assert.equal(body.goal_mode, "custom");
+  assert.deepEqual(body.goals, { alt_ts: 3, "gm.pitch_att": 8 });
+  assert.equal(body.cases.length, 6);
+  assert.equal(body.knobs, undefined);
+  await waitFor(() => !btnOf(root, "목표 성능 개선안 계산").disabled, "종료 후 재실행 가능");
+  mode.value = "recommended";
+  mode.emit("change");
+  btnOf(root, "목표 성능 개선안 계산").emit("click");
+  await waitFor(() => posts.filter((p) => p.path === "/influence/improve").length >= 2, "권장 성능 제출");
+  assert.equal(posts.filter((p) => p.path === "/influence/improve").at(-1).body.goal_mode, "recommended");
+  assert.deepEqual(posts.filter((p) => p.path === "/influence/improve").at(-1).body.goals, {});
+  scriptedJobs.clear();
 });

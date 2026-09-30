@@ -10,6 +10,8 @@ sim에서 `TableIn`을 가져다 쓰는 것과 같은 선례다.
 """
 
 import math
+import hashlib
+import json
 import time
 from typing import Literal
 
@@ -25,7 +27,10 @@ from claw.pipeline.evaluate import (
 )
 from claw.pipeline.influence import Shape, make_law, param_universe, structural_payload
 from claw.pipeline.openloop import openloop_delta
+from claw.pipeline.improve import (constrained_proposal, enrich_sweep_linear, goal_report,
+                                   hard_margin_goals, margin_goals, recommended_goals, recommend_knobs)
 from claw.pipeline.prescribe import (
+    IMPROVEMENT_HIGHER_METRICS,
     _targets as prescribe_targets,
     nonadditivity_warnings,
     proposal_export,
@@ -50,6 +55,26 @@ router = APIRouter(tags=["influence"])
 # 케이스 격자 상한 — 2·3단은 케이스마다 트림·시뮬 비용이 붙는 잡이라, 오타 격자
 # (예: 간격 0.001) 하나가 단일 워커를 시간 단위로 점유하는 것을 제출 시점에 막는다
 MAX_CASES = 200
+
+
+def _measurement_key(profile, shape, criteria, cases, maneuver, kind, extra):
+    maneuver = {key: float(value) for key, value in maneuver.items()}
+    return hashlib.sha256(json.dumps(to_jsonable({"version": 1, "profile": profile_echo(profile),
+        "shape": shape.fingerprint(), "criteria": criteria.fingerprint(), "cases": cases_echo(cases),
+        "maneuver": maneuver, "kind": kind, "extra": extra}), sort_keys=True).encode()).hexdigest()
+
+
+def _cached_measurement(store, key):
+    for meta in store.list():
+        if meta.get("reuse_key") != key:
+            continue
+        try:
+            value = store.load(meta["id"])
+        except (KeyError, ValueError, OSError):
+            continue
+        if not value.get("aborted") and not any(c.get("aborted") for c in value.get("cases", [])):
+            return value, meta["id"]
+    return None
 
 # 하드 게이트 검사 이름 → 그 검사가 말하는 스윕 지표. 처방 승계가 "무엇을 풀지"를
 # 정하는 표다 — 마진·ζ류는 선형 단계의 판정이라 스윕 지표로 대응이 없다(빈 튜플).
@@ -455,6 +480,27 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
     scope = trim_scope(request, profile)
 
     def work(job):
+        key = _measurement_key(profile, shape, criteria, cases,
+            {"t_settle": req.t_settle, "t_step": req.t_step, "dt_plant": req.dt_plant},
+            "influence_evaluate", {"depth": "full", "t_hold": None})
+        previous = _cached_measurement(store, key) if req.reuse != "none" else None
+        if previous and len(previous[0].get("cases", [])) == n:
+            report, result_id = previous
+            rows = [{"case": c["case"], "label": "base", "role": "base", "overrides": {},
+                     "metrics": c.get("metrics_raw") or {}, "aborted": c.get("aborted", False)}
+                    for c in report["cases"]]
+            if all(r["metrics"] for r in rows):
+                payload = {"kind": "influence_scan", "fingerprint": shape.fingerprint(),
+                    "rows": rows, "warnings": [], "aborted": False, "reused_evaluation_id": result_id,
+                    "profile": profile_echo(profile), "criteria_echo": criteria_echo(criteria, crit_source),
+                    "conditions": {"cases": cases_echo(cases)},
+                    "grid": to_jsonable(diagnose_grid(rows, thresholds=criteria.to_grid_thresholds(),
+                                                       local_frac=criteria.schedule.local_frac))}
+                store.save(job.id, payload, meta={"kind": "influence_scan", "profile": profile_echo(profile),
+                                                 "created": job.created, "n": n})
+                job.result_id = job.id
+                job.report(total, total, message="동일 조건 평가 결과로 운용점 스캔 재사용")
+                return
         failed = stored_failures(scope, cases)
         trs = trim_batch(
             ac, cases, fingerprint=req.fingerprint,
@@ -627,9 +673,13 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
         # 본문의 "criteria"는 엔진이 실은 기준 전문(화면이 판정선을 읽는다)이다 — 기준 블록은 모든 라우트가 본문·meta
         # 둘 다 "criteria_echo"로 싣는다(이름 하나로 화면이 결과 종류를 가리지 않고 대조한다)
         payload["criteria_echo"] = criteria_echo(criteria, crit_source)
+        payload["reuse_key"] = _measurement_key(profile, shape, criteria, cases,
+            {"t_settle": req.t_settle, "t_step": req.t_step, "dt_plant": req.dt_plant},
+            "influence_evaluate", {"depth": req.depth, "t_hold": req.t_hold})
         store.save(
             job.id, payload,
             meta={"kind": "influence_evaluate", "profile": profile_echo(profile),
+                  "reuse_key": payload["reuse_key"],
                   "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
                   "n": len(out["cases"]), "fingerprint": req.fingerprint,
                   "criteria_fingerprint": out["criteria_fingerprint"],
@@ -752,6 +802,231 @@ def submit_verify(req: VerifyIn, request: Request, response: Response) -> dict:
         job.result_id = job.id
 
     job = request.app.state.jobs.submit("influence_verify", work)
+    response.headers["Location"] = f"/api/jobs/{job.id}"
+    return job.to_dict()
+
+
+class ImproveIn(InfluenceIn):
+    cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
+    goals: dict[str, float] = Field(default_factory=dict)
+    goal_mode: Literal["configured", "recommended", "custom", "performance"] = "configured"
+    change_limit: float = Field(default=0.2, gt=0, le=0.2, allow_inf_nan=False)
+    max_changed: int = Field(default=8, ge=1, le=8)
+    iterations: int = Field(default=2, ge=1, le=5)
+    t_settle: float = Field(default=5, gt=0, allow_inf_nan=False)
+    t_step: float = Field(default=15, gt=0, allow_inf_nan=False)
+    dt_plant: float = Field(default=0.01, gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def check_goals(self):
+        from claw.pipeline.prescribe import PERF_METRICS_DEFAULT
+        if self.goal_mode == "custom" and not self.goals:
+            raise ValueError("직접 목표값을 하나 이상 입력하세요")
+        for key, value in self.goals.items():
+            if key not in (*PERF_METRICS_DEFAULT, *IMPROVEMENT_HIGHER_METRICS) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"지원하지 않는 목표값: {key}")
+        return self
+
+
+@router.post("/influence/improve", status_code=202)
+def submit_improve(req: ImproveIn, request: Request, response: Response):
+    if any(getattr(req, key) is not None for key in ("nav", "actuators", "guidance", "mixer", "alpha_margin")):
+        raise HTTPException(422, "개선안 저장은 기체 기본 플랜트·항법·작동기 조건에서 지원됩니다. 별도 오버라이드를 해제하세요")
+    profile = resolve_profile(request, req.profile)
+    ac = profile.aircraft()
+    try:
+        shape = to_shape(req, profile)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    criteria, source = resolve_criteria(profile, None)
+    refs = {r.id: r for r in param_universe(shape)}
+    cases = build_cases(req.cases)
+    goals = recommended_goals(criteria) if req.goal_mode in ("configured", "recommended") else req.goals
+    objective = "performance" if req.goal_mode == "performance" else "min_change"
+    store = request.app.state.store
+    echo = profile_echo(profile)
+    maneuver = {"t_settle": req.t_settle, "t_step": req.t_step, "dt_plant": req.dt_plant}
+
+    def work(job):
+        nonlocal goals
+        candidates, reused = [], []
+        current = shape
+        locked_subset = None
+        total = req.iterations * 100 + 10
+
+        def progress(done, maximum, label, offset, width):
+            return job.report(offset + int(width * done / max(maximum, 1)), total, message=label)
+
+        trs = trim_batch(ac, cases, store=trim_scope(request, profile), reuse="converged",
+                         on_progress=lambda d, t, tr: progress(d, t, "트림", 0, 10))
+        if job.cancel_requested:
+            return
+        if any(not tr.converged for tr in trs):
+            raise ValueError("선택 운용점 중 트림 미수렴이 있어 개선 탐색을 시작할 수 없습니다")
+
+        def cached(kind, controller, extra, compute, suffix, measured_cases=None):
+            measured_cases = cases if measured_cases is None else measured_cases
+            if kind == "influence_evaluate":
+                extra = {**extra, "t_hold": None}
+            key = _measurement_key(profile, controller, criteria, measured_cases, maneuver, kind, extra)
+            previous = _cached_measurement(store, key)
+            if previous:
+                reused.append(previous[1])
+                return previous
+            value = compute()
+            if kind == "influence_evaluate":
+                exported = proposal_export(controller)
+                value["design_input"] = {"gain_tables": exported["tables"] or {}, **exported["constants"],
+                    "with_schedule": bool(make_law(controller).schedule), "with_limiter": req.with_limiter}
+            rid = f"{job.id}-{suffix}"
+            value.update(kind=kind, profile=echo, criteria_echo=criteria_echo(criteria, source),
+                         conditions={"cases": cases_echo(measured_cases), "maneuver": maneuver}, reuse_key=key)
+            store.save(rid, to_jsonable(value), meta={"kind": kind, "profile": echo,
+                "created": job.created, "reuse_key": key})
+            return value, rid
+
+        baseline, baseline_id = cached("influence_evaluate", shape, {"depth": "full"},
+            lambda: evaluate(ac, trs, shape, criteria, depth="full", **maneuver,
+                on_progress=lambda d, t, msg: progress(d, t, f"현재 성능 평가: {msg}", 0, 10)), "baseline")
+        current_report = baseline
+        if req.goal_mode == "recommended":
+            goals = {**goals, **margin_goals(criteria, baseline)}
+        else:
+            hard_targets = hard_margin_goals(criteria, baseline)
+            for failure in (baseline.get("aggregate") or {}).get("hard_fails", []):
+                check = failure.get("check")
+                if check in ("margins.gm", "margins.pm") and failure.get("loop"):
+                    key = f"{check.split('.')[1]}.{failure['loop']}"
+                elif check == "damping.zeta" and failure.get("axis") in ("sp", "dr"):
+                    key = f"zeta_{failure['axis']}"
+                else:
+                    continue
+                if key in hard_targets:
+                    goals[key] = max(goals.get(key, 0.0), hard_targets[key])
+        recommendations, omitted = recommend_knobs(shape, baseline, goals)
+        knobs = [r["knob"] for r in recommendations]
+        initial = {k: float(refs[k].value) for k in knobs}
+        baseline_judged = goal_report(baseline, goals, [c.name for c in cases])
+        for row in baseline_judged["rows"]:
+            row["base"] = row["value"]
+        already_met = objective == "min_change" and baseline_judged["met"] and baseline_judged["hard_pass"]
+        if already_met:
+            candidates.append({"iteration": 0, "joint": {"solvable": True, "spans": {},
+                "reason": "현재 설계가 목표를 만족하여 게인 변경이 필요하지 않습니다"},
+                "goals": baseline_judged, "changes": [], "changed_count": 0,
+                "evaluation_id": baseline_id, "accepted": True, "unchanged": True})
+        for iteration in range(0 if already_met else req.iterations):
+            if job.cancel_requested:
+                break
+            offset = 10 + iteration * 100
+            local_refs = {r.id: r for r in param_universe(current)}
+            bounds = {}
+            for k in knobs:
+                v, base = float(local_refs[k].value), initial[k]
+                radius = (abs(base) or 0.01) * req.change_limit
+                scale = abs(v) or 0.01
+                bounds[k] = (max(-req.change_limit, (base - radius - v) / scale),
+                             min(req.change_limit, (base + radius - v) / scale))
+                if locked_subset is not None and k not in locked_subset:
+                    bounds[k] = (0., 0.)
+            span = req.change_limit
+            plan = sweep_plan(current, knobs, span=(-span, -span / 2, span / 2, span))
+            linear_goals = any(k in IMPROVEMENT_HIGHER_METRICS for k in goals)
+            judged_current = goal_report(current_report, goals, [c.name for c in cases])
+            severity = {}
+            for row in judged_current["rows"]:
+                if row["met"]:
+                    continue
+                value = row["value"]
+                gap = (1.0 if value is None else
+                       abs(value - row["target"]) / max(abs(row["target"]), 1e-6))
+                severity[row["case"]] = max(severity.get(row["case"], 0.0), gap)
+            for failure in (current_report.get("aggregate") or {}).get("hard_fails", []):
+                severity[failure["case"]] = max(severity.get(failure["case"], 0.0), 1.0)
+            names = sorted((c.name for c in cases), key=lambda name: -severity.get(name, 0.0))[:4]
+            sensitivity_cases = [c for c in cases if c.name in names]
+            sensitivity_trs = [tr for case, tr in zip(cases, trs) if case.name in names]
+
+            def measure_sweep():
+                sweep_result = run_sweep(ac, sensitivity_trs, current, plan, **maneuver,
+                    on_progress=lambda d, t: progress(d, t, f"{iteration + 1}/{req.iterations} 감도 측정",
+                                                      offset, 45 if linear_goals else 65))
+                if linear_goals and not sweep_result.get("aborted"):
+                    enrich_sweep_linear(sweep_result, current, plan, ac, sensitivity_trs, criteria, current_report,
+                        on_progress=lambda d, t: progress(d, t, f"{iteration + 1}/{req.iterations} 안정여유 감도",
+                                                          offset + 45, 20))
+                return sweep_result
+
+            sweep, sweep_id = cached("influence_sweep", current,
+                {"knobs": knobs, "span": span, "linear_goals": sorted(k for k in goals if k in IMPROVEMENT_HIGHER_METRICS)},
+                measure_sweep, f"sweep-{iteration}", measured_cases=sensitivity_cases)
+            if job.cancel_requested:
+                break
+            joint = constrained_proposal(sweep["rows"], knobs, criteria, goals=goals,
+                bounds=bounds, max_changed=min(req.max_changed, len(knobs)), objective=objective)
+            if not joint.get("solvable"):
+                candidates.append({"iteration": iteration + 1, "joint": joint, "sweep_id": sweep_id,
+                                   "sensitivity_cases": names})
+                break
+            proposal, notes = proposal_shape(current, joint["spans"])
+            export = proposal_export(proposal)
+            config = {"gain_tables": export["tables"] or {}, **export["constants"],
+                      "with_schedule": bool(make_law(proposal).schedule), "with_limiter": req.with_limiter}
+            report, evaluation_id = cached("influence_evaluate", proposal, {"depth": "full"},
+                lambda: evaluate(ac, trs, proposal, criteria, depth="full", **maneuver,
+                    on_progress=lambda d, t, msg: progress(d, t, f"{iteration + 1}/{req.iterations} 확인: {msg}", offset + 65, 35)),
+                f"eval-{iteration}")
+            if job.cancel_requested:
+                break
+            judged = goal_report(report, goals, [c.name for c in cases])
+            baseline_goals = {(r["case"], r["metric"]): r["value"]
+                              for r in baseline_judged["rows"]}
+            base_metrics = {c["case"]: c.get("metrics_raw") or {} for c in baseline.get("cases", [])}
+            for row in judged["rows"]:
+                row["base"] = baseline_goals.get((row["case"], row["metric"]))
+            final_refs = {r.id: r for r in param_universe(proposal)}
+            changes = [{"knob": k, "from": initial[k], "to": float(final_refs[k].value),
+                        "reason": next(r["reason"] for r in recommendations if r["knob"] == k)}
+                       for k in knobs if abs(float(final_refs[k].value) - initial[k]) > 1e-9]
+            actual_gain = None
+            if objective == "performance":
+                from claw.pipeline.prescribe import PERF_METRICS_DEFAULT
+                deltas = []
+                for c in report.get("cases", []):
+                    for metric in PERF_METRICS_DEFAULT:
+                        before = base_metrics.get(c["case"], {}).get(metric)
+                        after = (c.get("metrics_raw") or {}).get(metric)
+                        if isinstance(before, (int, float)) and isinstance(after, (int, float)):
+                            if math.isfinite(before) and math.isfinite(after) and abs(before) > 1e-9:
+                                deltas.append((after - before) / abs(before))
+                actual_gain = sum(deltas) / len(deltas) if deltas else None
+            candidate = {"iteration": iteration + 1, "joint": joint, "goals": judged,
+                "changes": changes, "changed_count": len(changes),
+                "sensitivity_cases": names,
+                "performance_change": actual_gain,
+                "config": config, "evaluation_id": evaluation_id, "sweep_id": sweep_id, "notes": notes,
+                "accepted": judged["met"] and judged["hard_pass"] and len(changes) <= req.max_changed
+                    and (objective != "performance" or (actual_gain is not None and actual_gain < -1e-6))}
+            candidates.append(candidate)
+            # Record the exact saved controller, so entity attachment uses its existing matching rules.
+            if candidate["accepted"] or proposal.fingerprint() == current.fingerprint():
+                break
+            if locked_subset is None:
+                locked_subset = {k for k, v in joint["spans"].items() if abs(v) > 1e-6}
+            current = proposal
+            current_report = report
+        result = {"kind": "influence_improve", "profile": echo, "criteria_echo": criteria_echo(criteria, source),
+                  "request": req.model_dump(), "goals": goals, "candidates": candidates,
+                  "recommendations": recommendations, "omitted_knobs": omitted, "baseline_id": baseline_id,
+                  "reused": reused, "aborted": job.cancel_requested,
+                  "accepted": any(c.get("accepted") for c in candidates)}
+        store.save(job.id, to_jsonable(result), meta={"kind": "influence_improve", "profile": echo,
+                   "created": job.created})
+        job.result_id = job.id
+        if not job.cancel_requested:
+            job.report(total, total, message="개선 탐색 완료" if result["accepted"] else "탐색 종료 · 목표 미달")
+
+    job = request.app.state.jobs.submit("influence_improve", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"
     return job.to_dict()
 

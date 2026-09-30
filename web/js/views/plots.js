@@ -117,10 +117,25 @@ export function heatmapCanvas(pivot, cellOf, { title = "", width = 560 } = {}) {
     ctx.fillStyle = "#86868b";
     ctx.fillText(`${alt} m`, 6, y + ch / 2 + 3);
   });
-  machs.forEach((mach, i) => {
-    ctx.fillStyle = "#86868b";
-    ctx.fillText(`M${mach}`, mL + i * cw + 7, mT + ch * alts.length + 16);
+  const labels = machs.map((mach, i) => {
+    const text = `M${mach}`;
+    const w = ctx.measureText(text).width;
+    const x = Math.max(w / 2 + 4, Math.min(width - w / 2 - 4, mL + (i + 0.5) * cw));
+    return { text, x, left: x - w / 2, right: x + w / 2 };
   });
+  const gap = 6;
+  const selected = labels.length ? [labels[0]] : [];
+  const last = labels.at(-1);
+  const keepLast = last && last !== labels[0] && last.left >= labels[0].right + gap;
+  for (const candidate of labels.slice(1, -1)) {
+    if (candidate.left >= selected.at(-1).right + gap
+        && (!keepLast || candidate.right + gap <= last.left)) selected.push(candidate);
+  }
+  if (keepLast) selected.push(last);
+  ctx.fillStyle = "#86868b";
+  ctx.textAlign = "center";
+  selected.forEach(({ text, x }) => ctx.fillText(text, x, mT + ch * alts.length + 16));
+  ctx.textAlign = "start";
   return canvas;
 }
 

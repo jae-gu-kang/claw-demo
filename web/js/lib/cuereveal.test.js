@@ -50,8 +50,8 @@ test("영향성 — 진단·선별/평가·처방, 셋 다 결과 자리(진단 
   importsReveal(src, "영향성");
   const cue = slice(src, "async function handleCue(c) {", /\n {2}\}\n/);
   assert.equal(assertRevealBeforeDone(cue, "영향성 handleCue"), 3);
-  // 평가 판정 줄은 카드·체크·소견 아래(y≈2720) — 그 노드를 올린다(판정이 없으면 상태 줄)
-  assert.match(cue, /revealPanel\(evalVerdictNode \?\? evalStatus\);/);
+  // 접힌 상세표 대신 평가 판정 요약을 화면에 올린다.
+  assert.match(cue, /revealPanel\(evalOutcome\);/);
   const renderEval = slice(src, "function renderEval() {", /\n {2}\}\n/);
   assert.match(renderEval, /^\s*evalVerdictNode = null;/m, "판정 노드를 매 그리기마다 비우지 않는다(옛 판정이 남는다)");
   assert.match(renderEval, /evalVerdictNode = el\("h3"[\s\S]{0,160}?하드 게이트 위반/);

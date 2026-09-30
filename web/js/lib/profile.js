@@ -26,7 +26,7 @@ export const COMPUTE_POST = new Set([
   "/sim/run",
   "/codegen/flight", "/verify/flight",
   "/influence/structural", "/influence/diagnose", "/influence/openloop", "/influence/sweep",
-  "/influence/scan", "/influence/evaluate", "/influence/verify", "/influence/prescribe",
+  "/influence/scan", "/influence/evaluate", "/influence/verify", "/influence/prescribe", "/influence/improve",
   // 미션 초안 — 프롬프트의 기체 사실·기본 미션 예시를 고른 기체 문서에서 세운다(서버 llm_draft.py)
   "/llm/mission-draft",
 ]);

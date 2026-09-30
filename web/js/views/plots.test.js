@@ -21,8 +21,25 @@ import { installDom, opsOf } from "./testdom.js";
 installDom(); // **import보다 먼저** — makeCanvas가 window.devicePixelRatio를 읽는다
 // 빌더들은 **캔버스 노드를 그대로** 돌려준다 — `{canvas, ctx}`를 내는 것은 makeCanvas뿐이다
 const {
-  histogramCanvas, lineChartCanvas, profileCanvas, scatterCanvas, trackCanvas,
+  heatmapCanvas, histogramCanvas, lineChartCanvas, profileCanvas, scatterCanvas, trackCanvas,
 } = await import("./plots.js");
+
+test("스로틀 히트맵 x축 — 밀집한 마하 라벨은 겹치지 않고 양 끝값은 남긴다", () => {
+  const machs = Array.from({ length: 21 }, (_, i) => Number((0.1 + i * 0.01).toFixed(2)));
+  const canvas = heatmapCanvas({ machs, alts: [100], at: () => null }, () => null,
+    { title: "스로틀 소요" });
+  const labels = opsOf(canvas).filter((o) => o.kind === "text" && /^M\d/.test(o.text));
+  assert.equal(labels[0].text, "M0.1");
+  assert.equal(labels.at(-1).text, "M0.3");
+  assert.ok(labels.length < machs.length, "모든 칸에 라벨을 찍으면 겹친다");
+  for (let i = 1; i < labels.length; i++) {
+    const prev = labels[i - 1];
+    const next = labels[i];
+    const prevRight = prev.x + prev.text.length * 3;
+    const nextLeft = next.x - next.text.length * 3;
+    assert.ok(nextLeft - prevRight >= 6, `${prev.text}와 ${next.text}가 겹친다`);
+  }
+});
 
 /** 컨텍스트에 닿은 좌표 전부 — NaN 한 톨이 조용히 선 하나를 지운다. */
 function coordsOf(canvas) {
