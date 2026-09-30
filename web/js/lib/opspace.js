@@ -183,3 +183,59 @@ export function trimResultsByName(trimBody, grid) {
   if (!trimBody?.results || !sameProfileEcho(trimBody.profile, grid?.profile)) return null;
   return new Map(trimBody.results.map((r) => [r.case?.name, r]));
 }
+
+// ── 역할별 조건 고르기 (05 §11.13 5단계 나머지) — 마진 맵·게인 카드·흐름 평가도 기본 격자에서 ─────────────
+// 탭마다 다른 격자를 쓰면 「최악 운용점」이 탭마다 다른 점 집합의 최악이 된다(04 §5). 마진 맵·지표(게인 카드·흐름
+// 평가)는 보낼 수 있는 점 **전부**가 기본이다 — 마진 맵만 공용 고르개(views/condpick.js)로 좁힐 수 있다.
+
+/** 역할 → 기본 선택 규칙. 지금은 셋 다 「보낼 수 있는 점 전부」(영향성 탭의 대표점은 신호의 선택이지 기본이 아니다). */
+const ROLE_RULE = Object.freeze({ margin: "all", metric: "all", influence: "all" });
+
+/** 역할의 기본 점 — {cases, reason}. reason이 있으면 보내지 않는다(cases 빈 목록): 격자를 못 받았다 · 요구영역
+ *  미정의(region null — 템플릿 격자로 되돌아가지 않는다) · 보낼 점이 없다(전부 모델 부족). */
+export function defaultRoleSelection(role, grid) {
+  if (!Object.hasOwn(ROLE_RULE, role)) throw new Error(`모르는 역할: ${role}`);
+  if (!grid) return { cases: [], reason: "기본 격자를 받지 못했다" };
+  if (!grid.region) return { cases: [], reason: `요구영역 미정의 — ${grid.reason ?? "사유 없음"}` };
+  const cases = casesFromBaseGrid(grid);
+  if (!cases.length) return { cases: [], reason: "보낼 수 있는 점이 없다 — 기본 격자의 점이 전부 모델 부족이다" };
+  return { cases, reason: null };
+}
+
+/** 요구영역이 미확정 초안이면 그 꼬리표 — 초안으로 잰 결과를 확정 요구영역의 결과로 읽지 않게(05 §11.2). */
+export const DRAFT_TAG = "요구영역 미확정 초안";
+export const draftTag = (grid) => (grid?.region && grid.region.confirmed === false ? DRAFT_TAG : "");
+
+/** 점들의 가운데 — 가운데 연료 → 그 연료의 가운데 고도 → 그 행의 가운데 마하(짝수 개면 아래쪽 가운데).
+ *  기본 격자는 사각이 아니라 축별 가운데를 따로 고르면 없는 점이 된다 — 행을 따라 좁힌다. 빈 목록이면 null. */
+export function centrePoint(points) {
+  const list = points ?? [];
+  if (!list.length) return null;
+  const mid = (xs) => xs[Math.floor((xs.length - 1) / 2)];
+  const fuel = mid(pointAxes(list).fuels);
+  const atFuel = list.filter((p) => p.fuel === fuel);
+  const alt = mid(pointAxes(atFuel).alts);
+  const row = atFuel.filter((p) => p.alt === alt);
+  const mach = mid([...new Set(row.map((p) => p.mach))].sort((a, b) => a - b));
+  return { mach, alt, fuel };
+}
+
+/** 서버 trim_reuse 되울림 → 「트림 재사용 k · 새로 n」. 없거나 모양이 다르면 null(옛 결과·옛 서버). */
+export function reuseLine(trimReuse) {
+  const r = trimReuse;
+  if (!r || !Number.isFinite(r.reused) || !Number.isFinite(r.computed)) return null;
+  return `트림 재사용 ${r.reused} · 새로 ${r.computed}`;
+}
+
+/** 같은 되울림의 툴팁 — 재사용 규칙·다시 푼 점. */
+export function reuseTip(trimReuse) {
+  const r = trimReuse;
+  if (!reuseLine(r)) return "";
+  const parts = ["같은 기체·같은 풀이 설정으로 이미 수렴한 수평 트림은 다시 풀지 않는다(서버 메모리 — 재시작하면 비워진다)"];
+  if (r.policy) parts.push(`규칙 ${r.policy}`);
+  if (Number.isFinite(r.resolved_failed) && r.resolved_failed > 0) parts.push(`저장된 미수렴 ${r.resolved_failed}점은 다시 풀었다`);
+  return parts.join(" · ");
+}
+
+/** 기본 격자 점 중 서버 트림 저장소에 수렴 기록이 있는 점 수(points[].stored — 없는 서버면 0). */
+export const storedCount = (grid) => (grid?.points ?? []).filter((p) => p.stored?.converged === true).length;

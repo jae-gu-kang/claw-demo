@@ -30,9 +30,7 @@ evaluate() — [지표 재계산 (선형)]과 같은 길 · fault({path, factor}
 import { ApiError, api, errorText, watchJob } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import { evaluateRequest, normalizeEvalReport } from "../lib/evaluate.js";
-import { defaultGridCases } from "../lib/grid.js";
-import { selectedDefaults } from "./missionfill.js";
-import { DOC_FAILED_HINT, MISSING_TEMPLATE_HINT } from "../lib/missiontemplate.js";
+import { defaultRoleSelection, draftTag, reuseLine, reuseTip } from "../lib/opspace.js";
 import {
   GAIN_KEYS, alignTables, appliedTables, axisMismatch, axisMismatchText, defaultSelection, evalStripLine,
   schedSummary, scheduleKnees, slotRows, storePayload, toggleSlot, zeroTables,
@@ -89,15 +87,28 @@ const EVAL_DEPTHS = ["linear", "full"];
 
 // 지표 카드(평가 어휘·값은 서버 정본) — 마지막 계산 결과와 신선도.
 // 편집이 생기면 **stale 배지만** 켠다: 자동 재계산은 없다(서버 왕복 비용 — 버튼이
-// 명시적 트리거다). 격자는 미션 템플릿 격자(없으면 lib/grid.js DEFAULT_GRID)다 — 영향성 탭은 이관 5단계부터 요구영역
-// 기본 격자에서 점을 고른다(05 §11.13 5단계). 이 카드의 격자 이관은 5단계 나머지다.
+// 명시적 트리거다). 점은 요구영역 기본 격자(서버 /grid/base)의 보낼 수 있는 점 **전부**다 — 고르개는 없다(고정 규칙,
+// lib/opspace.js defaultRoleSelection "metric"). 마진 맵·흐름 평가와 같은 점 집합이라 「최악 운용점」이 탭마다 같은
+// 집합의 최악이다(04 §5). 요구영역이 미정의면 재지 않는다 — 템플릿 격자로 되돌아가지 않는다(05 §11.13 5단계 나머지).
 let evalStrip = { status: null, result: null, error: null, stale: false, depth: null };
 // 형상·값 편집 핸들러(모듈 함수)에서 카드 stale을 켜는 통로 — render()가 실제
 // 구현으로 갈아 끼운다 (핸들러가 렌더 클로저 밖에 살기 때문)
 let markStale = () => {};
-// 고른 기체의 미션 템플릿 격자 — 영향성 격자 칸과 같은 원천(views/missionfill.js). 없으면 폴백(예제 격자)
-let templateGrid = null;
-let templateNote = ""; // 템플릿이 없거나 기체 문서를 못 받았으면 그 사실 — 케이스 수 줄에 붙인다
+// 마지막으로 받은 요구영역 기본 격자(아직 안 잰 상태 줄의 점 수) · 못 받은 사유. 잴 때는 늘 다시 받는다
+let baseGrid = null;
+let baseGridErr = null;
+// 요청 차례 — 탭 진입·평가가 각자 받는다. 늦게 온 옛 응답이 나중 응답(지금 요구영역)을 덮지 않게(condpick과 같은 규칙)
+let baseGridSeq = 0;
+function fetchBaseGrid() {
+  const seq = ++baseGridSeq;
+  return api.post("/grid/base", {}).then((g) => {
+    if (seq === baseGridSeq) { baseGrid = g; baseGridErr = null; }
+    return g;
+  }, (e) => {
+    if (seq === baseGridSeq) baseGridErr = errorText(e);
+    throw e;
+  });
+}
 
 export function render() {
   // 조각으로 갈라 둔다 — 어느 것이 전면이고 어느 것이 패널인지는 아래 배치가 정한다
@@ -117,11 +128,16 @@ export function render() {
   // ── 튜닝 지표 카드 (평가와 같은 카드, views/evalcards.js 공용) ──────
   const stripStatus = el("span", { class: "hint" });
   const stripCards = el("div", { style: "margin-top:8px" });
-  const gridReady = selectedDefaults().then((d) => {
-    templateGrid = d?.grid ?? null;
-    templateNote = !d ? DOC_FAILED_HINT : d.hasTemplate ? "" : MISSING_TEMPLATE_HINT;
-    if (!evalStrip.status) paintStrip(); // 아직 안 잰 상태의 케이스 수가 그 격자를 말하게
+  fetchBaseGrid().catch(() => {}).then(() => {
+    if (!evalStrip.status) paintStrip(); // 아직 안 잰 상태의 점 수가 그 격자를 말하게
   });
+  // 기본 격자 → 상태 줄 조각(「요구영역 기본 격자 N점 · 요구영역 미확정 초안」 | 막힌 사유)
+  const gridPhrase = (g, err) => {
+    if (err) return `기본 격자를 받지 못했다 — ${err}`;
+    if (!g) return "요구영역 기본 격자를 받는 중";
+    const sel = defaultRoleSelection("metric", g);
+    return sel.reason ?? [`요구영역 기본 격자 ${sel.cases.length}점`, draftTag(g)].filter(Boolean).join(" · ");
+  };
 
   // 판정 기준 배지 — 평가 결과의 criteria_echo를 그 결과 기체의 지금 기준과 대조(lib/freshness.js).
   // 기체당 이 render에서 한 번 받는다. 조회 중엔 배지 없음, 받으면 띠를 다시 그린다. fresh는 조용하다
@@ -145,14 +161,15 @@ export function render() {
     const stale = evalStrip.stale
       ? " · 이후 편집 있음 — 카드는 이전 형상 기준" : "";
     if (!evalStrip.status) {
-      // 케이스 수는 세어서 쓴다 — 손으로 적으면 DEFAULT_GRID가 바뀔 때
-      // 화면만 옛 수를 말한다(v0.72까지 「15케이스」로 남아 있었다)
-      stripStatus.textContent =
-        `아직 안 쟀다 — 미션 템플릿 격자 ${defaultGridCases(templateGrid ?? undefined).length}케이스, `
-        + "미적용 편집 포함 형상으로 잰다" + stale + (templateNote ? ` · ${templateNote}` : "");
+      // 점 수는 받은 격자에서 센다 — 손으로 적으면 요구영역이 바뀔 때 화면만 옛 수를 말한다
+      stripStatus.textContent = `아직 안 쟀다 — ${gridPhrase(baseGrid, baseGridErr)}, `
+        + "미적용 편집 포함 형상으로 잰다" + stale;
+      stripStatus.title = "";
       return;
     }
-    stripStatus.textContent = evalStrip.status + stale;
+    const reuse = reuseLine(evalStrip.trimReuse);
+    stripStatus.textContent = evalStrip.status + (reuse ? ` · ${reuse}` : "") + stale;
+    stripStatus.title = reuseTip(evalStrip.trimReuse);
     if (evalStrip.error) {
       stripCards.append(el("div", { class: "error-box" }, evalStrip.error));
     }
@@ -166,8 +183,24 @@ export function render() {
   // 평가 한 번 — {resultId, model} 또는 {error}. cue가 오면 잡을 건 순간 started를 알린다(진행기 [중단]용)
   async function runGainEval(depth, cue = null) {
     if (!catalog) return { error: "게인 카탈로그가 아직 없다 — 불러온 뒤 다시 잰다" };
-    const cases = defaultGridCases(templateGrid ?? undefined);
-    evalStrip = { status: `제출 중 — 케이스 ${cases.length}건`, result: null,
+    // 점 — 지금 요구영역의 기본 격자를 다시 받는다(그사이 기체 탭에서 요구영역을 고쳤을 수 있다). 보낼 점 전부
+    let grid;
+    try {
+      grid = await fetchBaseGrid(); // 이 평가는 제가 받은 격자로 보낸다 — 모듈 격자는 차례가 가장 나중인 답만
+    } catch (e) {
+      evalStrip = { status: "제출 불가", result: null, error: `기본 격자를 받지 못했다 — ${errorText(e)}`,
+                    stale: false, depth };
+      paintStrip();
+      return { error: evalStrip.error };
+    }
+    const { cases, reason } = defaultRoleSelection("metric", grid);
+    if (reason) {
+      evalStrip = { status: "제출 불가", result: null, error: reason, stale: false, depth };
+      paintStrip();
+      return { error: reason };
+    }
+    const pointsText = gridPhrase(grid, null);
+    evalStrip = { status: `제출 중 — ${pointsText}`, result: null,
                   error: null, stale: false, depth };
     paintStrip();
     try {
@@ -186,12 +219,14 @@ export function render() {
         return { error: `평가 ${done.status}${done.error ? ` — ${done.error}` : ""}` };
       }
       const res = await api.get(`/results/${done.result_id}`);
-      evalStrip.status = "완료";
+      evalStrip.status = `완료 — ${pointsText}`;
+      evalStrip.trimReuse = res.trim_reuse ?? null;
       evalStrip.result = normalizeEvalReport(res);
       evalStrip.criteriaEcho = res.criteria_echo ?? null;
       evalStrip.profileId = res.profile?.id ?? null;
       paintStrip();
-      return { resultId: done.result_id, model: evalStrip.result };
+      return { resultId: done.result_id, model: evalStrip.result, points: cases.length,
+               trimReuse: evalStrip.trimReuse };
     } catch (e) {
       evalStrip.status = "실패";
       evalStrip.error = errorText(e);
@@ -463,18 +498,18 @@ export function render() {
             rule_schedule: rule !== null },
         });
       } else if (c.action === "evaluate") {
-        await gridReady; // 고른 기체의 템플릿 격자로 잰다 — 폴백(예제 격자)으로 재지 않는다
+        // 점은 요구영역 기본 격자의 보낼 점 전부 — runGainEval이 격자를 다시 받는다(미정의면 사유로 실패한다)
         const loadErr = loading ? await loading : null;
         if (loadErr) throw loadErr; // 카탈로그를 못 받은 사유 그대로(게인 미설계 등) — 「아직 없다」로 뭉개지 않는다
-        if (!templateGrid) throw new Error(templateNote || "고른 기체의 미션 템플릿 격자를 받지 못했다");
         const depth = c.args?.depth ?? "linear";
         if (!EVAL_DEPTHS.includes(depth)) throw new Error(`depth는 ${EVAL_DEPTHS.join("·")} 중 하나: ${depth}`);
         const r = await runGainEval(depth, c);
         if (r.error) throw new Error(r.error);
         revealPanel(evalSheet); // 지표 카드가 사는 판을 화면 위로
         reportCue(c, {
-          phase: "done", resultId: r.resultId, summary: evalStripLine(r.model),
-          data: { hard_fail: r.model.aggregate?.hard_fail ?? null, checks: r.model.checks },
+          phase: "done", resultId: r.resultId, summary: `${evalStripLine(r.model)} · 기본 격자 ${r.points}점`,
+          data: { hard_fail: r.model.aggregate?.hard_fail ?? null, checks: r.model.checks, points: r.points,
+            trim_reuse: r.trimReuse ?? null },
         });
       } else if (c.action === "fault") {
         const { path, factor } = c.args ?? {};

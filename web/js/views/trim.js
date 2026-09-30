@@ -18,7 +18,8 @@ DOM 조립 전용 (얇게) — 격자 로직은 lib/grid.js, 수치·판정은 �
 import { ApiError, api, errorText } from "../api.js";
 import { clear, el, flagBadge, fmt } from "../dom.js";
 import {
-  PRE_STATE_LABEL, casesFromBaseGrid, gridMapEntries, parseGridSpec, regionLines, stateCountText, untrimmedSummary,
+  PRE_STATE_LABEL, casesFromBaseGrid, gridMapEntries, parseGridSpec, regionLines, reuseLine, reuseTip, stateCountText,
+  untrimmedSummary,
 } from "../lib/opspace.js";
 import {
   SERIES_COLORS, STATUS, TRIM_CELL_LABEL, TRIM_FLAG_LABEL, TRIM_STATE_CELL, fuelsOf, pctText, pivotCases,
@@ -383,7 +384,12 @@ function renderMap(mapBox, summaryLine, body, grid) {
     f.line + (f.bad ? ` (${f.detail})` : "") + (untrimmed.text ? ` · ${untrimmed.text}` : ""),
     f.bad === 0 && f.converged === rows.length
       ? el("span", { class: "flag ok", style: "margin-left:8px" }, "전체 정상")
-      : el("span", { class: "flag bad", style: "margin-left:8px" }, "확인 필요"));
+      : el("span", { class: "flag bad", style: "margin-left:8px" }, "확인 필요"),
+    // 서버 트림 저장소 되울림 — 같은 기체·풀이 설정으로 이미 수렴한 점은 다시 풀지 않았다(옛 결과·옛 서버엔 없다)
+    // (네이티브 append라 null을 넘기면 「null」 글자가 붙는다 — 없으면 아예 넘기지 않는다)
+    ...(reuseLine(body.trim_reuse)
+      ? [el("span", { class: "hint", style: "margin-left:8px", title: reuseTip(body.trim_reuse) }, reuseLine(body.trim_reuse))]
+      : []));
   // 비행 엔벨로프 맵 — 조건 상태 (mach×alt, 연료별). 트림하지 않은 모델 부족 점도 그 상태로 칸을 차지한다 —
   // 요구영역과 모델 영역의 겹침을 눈으로 보이게(06 §10). 옛 결과(state 없음)는 판정 플래그 범례로 그린다
   const byState = rows.length > 0 && rows.every((r) => r.state);

@@ -84,10 +84,8 @@ import {
   singleRows, unappliedLevers, unappliedNote,
 } from "../lib/prescribe.js";
 import { EVAL_MARK, renderEvalCards } from "./evalcards.js";
-import {
-  casesFromBaseGrid, filterPoints, pickNamed, pointAxes, representativePoints, trimResultsByName, untrimmedSummary,
-} from "../lib/opspace.js";
-import { trimStateLabel } from "../lib/plot.js";
+import { pickNamed, representativePoints, reuseLine, reuseTip } from "../lib/opspace.js";
+import { createCondPicker } from "./condpick.js";
 import { revealPanel } from "../lib/reveal.js";
 import { haltReason } from "../lib/showcase.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
@@ -140,24 +138,13 @@ const state = {
   // 구간 경향(3단 C)이 보고 있는 설계변수·지표 — 결과가 아니라 **보는 자리**라
   // 스윕과 수명이 다르다(같은 스윕을 설계변수별로 훑는 것이 이 표의 용법이다)
   trendKnob: null, trendMetric: null,
-  // 비행조건 — 이 탭은 구간을 따로 정하지 않는다(05 §11.13 5단계): 고른 기체의 요구영역 기본 격자(서버 /grid/base,
-  // 트림 탭과 같은 점·같은 이름)에서 고르거나 거른다. 선택은 이름 집합이라 격자를 다시 받아도 같은 점이 남는다 —
-  // 결과(scan.selected)와 수명이 같아야 재진입 직후 3단 B가 「격자가 바뀌었다」고 거절하지 않는다.
-  // selected: null = 보낼 수 있는 점 전부(손대지 않음 — 요구영역이 바뀌면 새 점도 따라온다)
-  // filter: 표에 보일 점 — alts·fuels null = 전부, machLo·machHi 빈 칸 = 열림. 고르기 버튼은 보이는 점에만 작용한다
-  // pruned: 다시 받은 격자에 없어 선택에서 뺀 이름(사용자가 다시 고를 때까지 요약에 남긴다 — 조용히 줄지 않게)
-  cond: { grid: null, error: null, loading: false, selected: null, open: false, pruned: [],
-    filter: { alts: null, fuels: null, machLo: "", machHi: "" } },
+  // 비행조건 선택·필터·펼침은 여기 없다 — 공용 고르개(views/condpick.js)가 key "influence"로 모듈에 둔다
   tStep: "15",
 };
 let canvas = null;
 // 지금 뷰의 실행 버튼 다시 그리기 — 잡 감시는 **제출한 뷰의 클로저**에서 돌므로, 탭을 떠났다
 // 오면 새 뷰의 버튼은 그 콜백을 모른다. 콜백은 이 자리로 부른다(새 뷰가 render마다 갈아 끼운다)
 let renderRunsHook = null;
-let condSeq = 0; // 기본 격자 요청 차례 — 늦게 온 옛 응답이 새 응답을 덮지 않게
-let condLatest = null; // 가장 나중 요청의 약속 — 밀린 요청을 기다리던 쪽(신호)이 이것을 기다린다
-// 밀린 요청의 결과 — 「받았다」도 「못 받았다」도 아니다(격자는 더 나중 요청이 채운다)
-const SUPERSEDED = Object.freeze({ status: "superseded" });
 // screen·evaluate 신호가 받는 인자 — 그 밖(옛 cases 포함)은 거절한다
 const CUE_EVAL_ARGS = Object.freeze(["points", "label"]);
 
@@ -873,210 +860,25 @@ export function render() {
   // 3단은 케이스 × 런 곱이라 A(전 케이스 base 스캔)로 결함 케이스를 좁힌 뒤 B(부분 풀 스윕)로 간다.
   const stepIn = numIn(state.tStep, 55);
   stepIn.addEventListener("input", () => { state.tStep = stepIn.value; });
-  const condSummary = el("span", { class: "hint" });
-  // 평가 패널의 케이스 수 줄 — 격자는 비동기로 오므로 패널을 연 뒤에도 renderCond가 고쳐 쓴다
+  // 평가 패널의 케이스 수 줄 — 격자는 비동기로 오므로 패널을 연 뒤에도 고르개가 고쳐 쓴다
   const caseTextEl = el("span", { class: "hint" });
+  // 비행조건 고르개(views/condpick.js — 마진 맵과 같은 부품). 상태는 key("influence")마다 모듈에 산다 — 결과
+  // (scan.selected)와 수명이 같아야 재진입 직후 3단 B가 「격자가 바뀌었다」고 거절하지 않는다
+  let cond = null;
   function paintCaseText() {
+    if (!cond) return;
     try {
       caseTextEl.textContent = `케이스 ${selectedCases().length}건 (비행조건은 바로 위 무대에서 고른다)`;
     } catch (e) {
       caseTextEl.textContent = `비행조건 오류 — ${e.message}`;
     }
   }
-  const condBox = el("div");
-  const condDetails = el("details", { style: "margin-top:6px" },
-    el("summary", { class: "hint", style: "cursor:pointer" }, "점 고르기 — 고도·연료·마하로 거르고 고른다"),
-    condBox);
-  if (state.cond.open) condDetails.open = true;
-  condDetails.addEventListener("toggle", () => { state.cond.open = condDetails.open; });
-
-  // 보낼 수 있는 점 — 미계산 점만(모델 부족은 트림 근거가 없어 보내지 않는다 — 트림 탭과 같은 규칙).
-  // 이름은 서버(엔진 case_name)가 값 그대로 지은 것 — 스캔의 bad_cases(이름)를 3단 B 케이스로 되돌리는 키다
-  const condPool = () => casesFromBaseGrid(state.cond.grid);
+  cond = createCondPicker({ key: "influence", onChange: paintCaseText, warnInk: WARN_INK });
+  // 보낼 점 — 받는 중·못 받음·요구 미정의·0점이면 던진다(사유가 곧 화면 글)
   function selectedCases() {
-    const g = state.cond.grid;
-    // 받는 중·못 받음이면 남아 있는 격자는 옛 리비전일 수 있다 — 그 점으로 돌면 결과가 지금 요구영역의 것이라 읽힌다
-    if (state.cond.loading) throw new Error("기본 격자를 다시 받는 중 — 옛 점을 보내지 않는다. 받은 뒤 다시 누른다");
-    if (state.cond.error) throw new Error(`${state.cond.error} — 옛 점을 보내지 않는다`);
-    if (!g) throw new Error("기본 격자를 아직 받지 못했다 — 잠시 뒤 다시 누른다");
-    if (!g.region) throw new Error(`요구영역 미정의 — ${g.reason}`);
-    const sel = state.cond.selected;
-    const out = sel ? condPool().filter((p) => sel.has(p.name)) : condPool();
-    if (!out.length) throw new Error("고른 비행조건이 없다 — 무대의 「비행조건」에서 점을 고른다");
-    return out;
+    return cond.selectedCases();
   }
-  // 선택을 이름 목록으로 — 보낼 점 전부면 null(손대지 않은 상태로 되돌린다)
-  function setSelected(names) {
-    const pool = condPool();
-    const want = new Set(names);
-    state.cond.selected = pool.every((p) => want.has(p.name)) ? null : want;
-    state.cond.pruned = []; // 다시 골랐다 — 뺀 점 알림은 할 일을 다했다
-    renderCond();
-  }
-  const selectedNames = () => new Set(state.cond.selected ?? condPool().map((p) => p.name));
-
-  // 받은 격자를 싣는다. 요구 미정의(region null)면 고른 이름을 건드리지 않는다 — 점이 없는 응답으로 선택을 지우면
-  // 요구영역을 되살려도 사용자가 고른 것이 영영 사라진다(보류로 두고 요약이 그렇다고 말한다)
-  function applyGrid(body) {
-    state.cond.grid = body;
-    state.cond.error = null;
-    if (!body.region || !state.cond.selected) return;
-    // 손으로 고른 이름 중 새 격자에서 보낼 수 없는 것(요구영역이 바뀌었다·모델 부족이 됐다)은 빼고 남긴다 — 없는
-    // 점을 고른 채로 두면 개수가 거짓이고, 조용히 빼면 사용자가 모른 채 다른 점 집합으로 돈다
-    const have = new Set(casesFromBaseGrid(body).map((p) => p.name));
-    const gone = [...state.cond.selected].filter((n) => !have.has(n));
-    if (!gone.length) return;
-    state.cond.selected = new Set([...state.cond.selected].filter((n) => have.has(n)));
-    state.cond.pruned = [...new Set([...state.cond.pruned, ...gone])];
-  }
-
-  // 기본 격자 받기 — 요구영역의 기본 명세 그대로(명세 칸은 트림 탭 몫이다).
-  // 결과 {status: "ok"|"undefined"|"error"|"superseded", reason?} — 밀린 요청은 superseded(성공으로 읽지 않는다)
-  function fetchBaseGrid() {
-    const seq = ++condSeq;
-    state.cond.loading = true;
-    renderCond();
-    const p = (async () => {
-      try {
-        const body = await api.post("/grid/base", {});
-        if (seq !== condSeq) return SUPERSEDED; // 더 나중 요청이 있다 — 그쪽이 채운다
-        applyGrid(body);
-        return body.region ? { status: "ok" } : { status: "undefined", reason: `요구영역 미정의 — ${body.reason}` };
-      } catch (e) {
-        if (seq !== condSeq) return SUPERSEDED;
-        // 옛 격자는 표에 남기되(고른 이름을 잃지 않게) 못 받았다고 표시한다 — selectedCases가 옛 점을 보내지 않는다
-        state.cond.error = `기본 격자를 받지 못했다 — ${errorText(e)}`;
-        return { status: "error", reason: state.cond.error };
-      } finally {
-        if (seq === condSeq) {
-          state.cond.loading = false;
-          renderCond();
-        }
-      }
-    })();
-    condLatest = p;
-    return p;
-  }
-
-  // 가장 나중 요청의 결과까지 기다린다 — 자기 요청이 밀렸으면 이긴 요청을 기다린다(밀린 응답을 받았다고 치면
-  // 받는 중인 옛 격자로 고른다)
-  async function latestBaseGrid() {
-    let r = await fetchBaseGrid();
-    while (r.status === "superseded") r = await condLatest;
-    return r;
-  }
-
-  // 트림 탭이 이 기체 리비전으로 돌린 배치가 있으면 점마다 그 상태를 붙인다(트림 결과 참조 — 없으면 열이 없다)
-  const trimByName = () => trimResultsByName(store.get("trimBatch"), state.cond.grid);
-
-  function renderCond() {
-    const g = state.cond.grid;
-    paintCaseText();
-    clear(condSummary);
-    clear(condBox);
-    // 못 받았으면 옛 격자가 있어도 맨 앞에 크게 — 표의 점이 지금 요구영역의 것이라 읽히지 않게
-    if (state.cond.error) {
-      condSummary.append(el("strong", { style: `color:${WARN_INK}` },
-        `${state.cond.error} — 옛 점을 보내지 않는다${g ? " (아래 표는 옛 격자)" : ""}`), g ? " · " : "");
-    }
-    if (!g) {
-      if (!state.cond.error) condSummary.append("요구영역 기본 격자를 받는 중…");
-      return;
-    }
-    if (!g.region) {
-      const held = state.cond.selected?.size;
-      condSummary.append(el("span", { style: `color:${WARN_INK}` }, `요구영역 미정의 — ${g.reason}`),
-        held ? ` · 고른 점 ${held}개는 보류 — 요구영역이 정해지면 다시 적용한다` : "",
-        state.cond.loading ? " · 다시 받는 중…" : "");
-      return;
-    }
-    const pool = condPool();
-    const sel = selectedNames();
-    const nSel = pool.filter((p) => sel.has(p.name)).length;
-    const untrimmed = untrimmedSummary(g);
-    condSummary.append(
-      el("strong", {}, `${nSel}점`), ` / 기본 격자 ${pool.length}점`,
-      state.cond.selected ? " (고름)" : " (전부)",
-      // 보내지 않는 점 — 모델 부족·요구영역 밖·요구 미정의 행. 트림 탭과 같은 글로 사라지지 않게 남긴다
-      untrimmed.text ? ` · ${untrimmed.text.replace("트림하지 않음", "보내지 않음")}` : "",
-      g.region.confirmed ? "" : " · 요구영역 미확정 초안(트림 탭 「운용영역·기본 격자」)",
-      state.cond.loading ? " · 다시 받는 중…" : "",
-      state.cond.pruned.length
-        ? el("span", { style: `color:${WARN_INK}`, title: state.cond.pruned.join(", ") },
-          ` · 고른 점 ${state.cond.pruned.length}개가 새 기본 격자에 없어 뺐다 (${state.cond.pruned.join(", ")})`)
-        : "");
-
-    const axes = pointAxes(pool);
-    const f = state.cond.filter;
-    const visible = filterPoints(pool, {
-      alts: f.alts, fuels: f.fuels,
-      machLo: f.machLo === "" ? null : Number(f.machLo), machHi: f.machHi === "" ? null : Number(f.machHi),
-    });
-    // 값 칩 — 체크 = 표에 보인다. 전부 켜지면 null(새 값도 보인다)
-    const chips = (key, values, unit) => values.map((v) => {
-      const on = !f[key] || f[key].includes(v);
-      const box = el("input", { type: "checkbox" });
-      box.checked = on;
-      box.addEventListener("change", () => {
-        const cur = new Set(f[key] ?? values);
-        if (box.checked) cur.add(v); else cur.delete(v);
-        f[key] = values.every((x) => cur.has(x)) ? null : values.filter((x) => cur.has(x));
-        renderCond();
-      });
-      return el("label", { class: "hint", style: "margin-right:8px" }, box, ` ${v} ${unit}`);
-    });
-    const machIn = (key) => {
-      const inp = el("input", { type: "number", step: "any", value: f[key], placeholder: "—", style: "width:62px" });
-      inp.addEventListener("change", () => { f[key] = inp.value.trim(); renderCond(); }); // input마다 다시 그리면 칸이 초점을 잃는다
-      return inp;
-    };
-    const trim = trimByName();
-    const visNames = visible.map((p) => p.name);
-    const btn = (label, title, fn) => el("button", { title, onclick: fn }, label);
-    condBox.append(
-      el("div", { class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap" },
-        el("span", { class: "hint" }, "고도 "), ...chips("alts", axes.alts, "m"),
-        el("span", { class: "hint" }, "연료 "), ...chips("fuels", axes.fuels, "kg"),
-        el("label", { class: "hint" }, "마하 ", machIn("machLo"), " ~ ", machIn("machHi"))),
-      el("div", { class: "row", style: "gap:8px;flex-wrap:wrap;margin-top:6px" },
-        btn(`보이는 ${visible.length}점 고르기`, "표에 보이는 점을 선택에 더한다",
-          () => setSelected([...selectedNames(), ...visNames])),
-        btn("보이는 점 빼기", "표에 보이는 점을 선택에서 뺀다",
-          () => { const s2 = selectedNames(); visNames.forEach((n) => s2.delete(n)); setSelected([...s2]); }),
-        btn("대표점만", "보이는 점 중 가운데 연료 × 최저·최고 고도 행 × 각 행의 마하 양끝(최대 4점)만 고른다 "
-          + "— lib/opspace.js representativePoints", () => setSelected(representativePoints(visible).map((p) => p.name))),
-        trim ? btn("트림 채택점만", "보이는 점 중 트림 탭 배치에서 조건 판정이 채택한 점만 고른다",
-          () => setSelected(visible.filter((p) => trim.get(p.name)?.verdict?.adopted === true).map((p) => p.name)))
-          : null,
-        btn("전부", "필터를 풀고 보낼 수 있는 점 전부를 고른다", () => {
-          state.cond.filter = { alts: null, fuels: null, machLo: "", machHi: "" };
-          setSelected(pool.map((p) => p.name));
-        }),
-        btn("기본 격자 다시 받기", "기체 탭에서 요구영역을 고쳤으면 — 고른 점은 이름으로 유지된다", () => fetchBaseGrid())),
-      el("div", { class: "scroll-x", style: "max-height:260px;overflow-y:auto;margin-top:6px" }, el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, ""), el("th", {}, "점"), el("th", {}, "마하"), el("th", {}, "고도 [m]"),
-          el("th", {}, "연료 [kg]"), trim ? el("th", { title: "트림 탭 배치(같은 기체 리비전)의 조건 상태" }, "트림") : null)),
-        el("tbody", {}, visible.map((p) => {
-          const box = el("input", { type: "checkbox" });
-          box.checked = sel.has(p.name);
-          box.addEventListener("change", () => {
-            const s2 = selectedNames();
-            if (box.checked) s2.add(p.name); else s2.delete(p.name);
-            setSelected([...s2]);
-          });
-          const tr = trim?.get(p.name);
-          return el("tr", {}, el("td", {}, box), el("td", { style: mono() }, p.name),
-            el("td", { class: "num" }, String(p.mach)), el("td", { class: "num" }, String(p.alt)),
-            el("td", { class: "num" }, String(p.fuel)),
-            trim ? el("td", { class: "hint" }, tr ? trimStateLabel(tr) : "트림 안 함") : null);
-        })))),
-      el("p", { class: "hint", style: "margin:6px 0 0" },
-        "점은 고른 기체의 요구 운용영역에서 만든 기본 격자다(트림 탭과 같은 점·같은 이름, 05 §11.11). ",
-        "이 탭은 조건을 더하지 않는다 — 없는 조건이 필요하면 요구영역·기본 격자 명세를 고친다. ",
-        trim ? "트림 열은 트림 탭이 이 기체 리비전으로 돌린 배치의 판정이다." : "트림 탭에서 배치를 돌리면 점마다 그 판정이 붙는다."),
-    );
-  }
-  renderCond();
+  paintCaseText();
 
   const metricDef = (key) => (state.model?.metrics ?? []).find((m) => m.key === key);
   const metricLabel = (key) => metricDef(key)?.label ?? key;
@@ -1416,7 +1218,9 @@ export function render() {
       state.evalRun = { status: "완료", submitted: true, result: next, error: null,
                         resultId: done.result_id,
                         // 판정 기준 대조 재료(criteriaChip) — 결과가 실은 기준 블록과 그 결과의 기체
-                        criteriaEcho: res.criteria_echo ?? null, profileId: res.profile?.id ?? null };
+                        criteriaEcho: res.criteria_echo ?? null, profileId: res.profile?.id ?? null,
+                        // 트림 재사용 되울림(서버 trim_reuse — 옛 서버엔 없다)
+                        trimReuse: res.trim_reuse ?? null };
       applyEvalFocus(next);
       renderEval();
       runEnd(depth, true, runVerdictMark(next));
@@ -1895,7 +1699,9 @@ export function render() {
       evalStatus.textContent =
         `${metaLine} · 아직 안 돌렸다 — [평가 실행]`;
     } else {
-      evalStatus.textContent = `${metaLine} · ${run.status}`;
+      const reuse = reuseLine(run.trimReuse);
+      evalStatus.textContent = `${metaLine} · ${run.status}${reuse ? ` · ${reuse}` : ""}`;
+      evalStatus.title = reuseTip(run.trimReuse);
       if (run.error) evalBox.append(el("div", { class: "error-box" }, run.error));
     }
 
@@ -3224,12 +3030,11 @@ export function render() {
   /** 신호의 점 고르기 — 요구영역의 지금 기본 격자를 다시 받고 그 위에서 고른다. 이름 목록이 격자에 없으면(요구영역이
    *  바뀌었다) 던진다 — 쇼케이스 결함 창은 정해진 네 점에서 쟀으므로 다른 점으로 조용히 바꿔 돌지 않는다 */
   async function cueSelect(names, full) {
-    const r = await latestBaseGrid();
+    const r = await cond.latest();
     if (r.status !== "ok") throw new Error(r.reason);
-    const pool = condPool();
+    const pool = cond.pool();
     const pts = names ? pickNamed(pool, names) : (full ? representativePoints(pool) : pool);
-    state.cond.filter = { alts: null, fuels: null, machLo: "", machHi: "" };
-    setSelected(pts.map((p) => p.name));
+    cond.select(pts.map((p) => p.name));
   }
 
   /** 수정안 형상(지문 fp)의 설계변수 기준값 — 떠 있는 구조 모델이 그 형상이면 그것, 아니면 지금 작업 사본으로
@@ -3660,8 +3465,8 @@ export function render() {
   renderTabCounts();
   renderDrawer();
   // 들어올 때마다 요구영역의 기본 격자를 다시 받는다(동기·좌표만) — 그사이 기체 탭에서 요구영역을 고쳤으면 새 점을
-  // 따른다(고른 점은 이름으로 남는다). 평가 신호는 스스로 다시 받는다 — 나중 요청이 이긴다(condSeq)
-  fetchBaseGrid();
+  // 따른다(고른 점은 이름으로 남는다). 평가 신호는 스스로 다시 받는다 — 나중 요청이 이긴다(views/condpick.js)
+  cond.refresh();
   if (cue) handleCue(cue);
 
   return el("div", { class: "inf-dark tab-dark tab-page" },
@@ -3694,9 +3499,9 @@ export function render() {
         class: "row", style: "gap:10px;align-items:center;flex-wrap:wrap",
       },
         el("strong", {}, "비행조건"),
-        condSummary,
+        cond.summary,
         el("label", { class: "hint" }, "스텝 s ", stepIn)),
-      condDetails,
+      cond.details,
       el("p", { class: "hint", style: "margin:6px 0 0" },
         "이 점들이 평가·검증·감도의 공통 대상이다. 조건은 이 탭이 정하지 않는다 — 고른 기체의 요구 운용영역 "
         + "기본 격자(트림 탭과 같은 점)에서 고르거나 거른다. 이 탭이 정하는 것은 흔들 게인과 그 변화 범위뿐이다.")),

@@ -3,9 +3,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  STATE_MAP_LAYOUT, casesFromBaseGrid, filterPoints, gridMapEntries, parseGridSpec, pickNamed, pointAxes,
-  regionLines, representativePoints, sameProfileEcho, stateCountText, stateMapLayout, trimResultsByName,
-  untrimmedSummary,
+  DRAFT_TAG, STATE_MAP_LAYOUT, casesFromBaseGrid, centrePoint, defaultRoleSelection, draftTag, filterPoints, gridMapEntries, parseGridSpec, pickNamed, pointAxes,
+  regionLines, representativePoints, reuseLine, reuseTip, sameProfileEcho, stateCountText, stateMapLayout, storedCount,
+  trimResultsByName, untrimmedSummary,
 } from "./opspace.js";
 import {
   EXCLUSION_CATEGORY_LABEL, STATE_REASON_LABEL, TRIM_STATE_CELL, stateEvidenceText, trimCueReport, trimEnvelopeCell,
@@ -305,4 +305,66 @@ test("트림 결과는 같은 기체 리비전일 때만 격자 점에 붙는다
   assert.equal(trimResultsByName(trim, { profile: { ...echo, id: "x" } }), null);
   assert.equal(trimResultsByName(null, { profile: echo }), null);
   assert.equal(sameProfileEcho(null, echo), false);
+});
+
+
+// ── 역할별 기본 점 · 가운데 점 · 트림 재사용 되울림 (05 §11.13 5단계 나머지) ─────────────────────────
+const rp = (mach, alt, fuel, state = "not_run", stored) => ({ name: `M${mach}_h${alt}_f${fuel}`, mach, alt, fuel, state,
+  ...(stored ? { stored } : {}) });
+const RG = {
+  region: { confirmed: true }, reason: null,
+  points: [rp(0.1, 200, 10), rp(0.2, 200, 10, "model_gap"), rp(0.2, 3000, 10), rp(0.1, 3000, 10, "not_run",
+    { state: "not_run", converged: true })],
+};
+
+test("defaultRoleSelection — margin·metric는 보낼 점 전부, 요구 미정의·못 받음·0점은 사유로 막는다", () => {
+  for (const role of ["margin", "metric", "influence"]) {
+    const r = defaultRoleSelection(role, RG);
+    assert.equal(r.reason, null);
+    assert.deepEqual(r.cases.map((c) => c.name), ["M0.1_h200_f10", "M0.2_h3000_f10", "M0.1_h3000_f10"]);
+  }
+  assert.deepEqual(defaultRoleSelection("metric", null), { cases: [], reason: "기본 격자를 받지 못했다" });
+  const undef = defaultRoleSelection("margin", { region: null, reason: "요구 운용영역이 없다", points: [] });
+  assert.deepEqual(undef, { cases: [], reason: "요구영역 미정의 — 요구 운용영역이 없다" });
+  const gapOnly = defaultRoleSelection("margin", { ...RG, points: [rp(0.2, 200, 10, "model_gap")] });
+  assert.match(gapOnly.reason, /보낼 수 있는 점이 없다/);
+  assert.throws(() => defaultRoleSelection("design", RG), /모르는 역할/);
+});
+
+test("draftTag — 미확정 초안만 꼬리표, 확정·미정의·없음은 빈 글", () => {
+  assert.equal(draftTag({ region: { confirmed: false } }), DRAFT_TAG);
+  assert.equal(DRAFT_TAG, "요구영역 미확정 초안");
+  assert.equal(draftTag({ region: { confirmed: true } }), "");
+  assert.equal(draftTag({ region: null }), "");
+  assert.equal(draftTag(null), "");
+});
+
+test("centrePoint — 가운데 연료 → 그 연료의 가운데 고도 → 그 행의 가운데 마하 (짝수 개는 아래쪽)", () => {
+  // 행마다 마하 범위가 다른 격자 — 축별 가운데(마하 0.15)를 따로 고르면 1000 m 행에 없는 점이 된다
+  const pts = [rp(0.1, 200, 10), rp(0.15, 200, 10), rp(0.2, 200, 10), rp(0.12, 1000, 10), rp(0.18, 1000, 10),
+    rp(0.2, 3000, 10), rp(0.1, 200, 50), rp(0.2, 200, 50)];
+  assert.deepEqual(centrePoint(pts), { mach: 0.12, alt: 1000, fuel: 10 });
+  assert.deepEqual(centrePoint(pts.filter((p) => p.alt === 3000 || p.fuel === 50)), { mach: 0.2, alt: 3000, fuel: 10 });
+  assert.deepEqual(centrePoint([rp(0.1, 200, 10), rp(0.15, 200, 10), rp(0.2, 200, 10)]), { mach: 0.15, alt: 200, fuel: 10 });
+  assert.equal(centrePoint([]), null);
+  assert.equal(centrePoint(null), null);
+});
+
+test("reuseLine·reuseTip — 서버 trim_reuse를 한 줄로, 없거나 모양이 다르면 null", () => {
+  const r = { trim_fingerprint: "f", reused: 30, computed: 4, resolved_failed: 1, policy: "converged",
+    reused_names: [] };
+  assert.equal(reuseLine(r), "트림 재사용 30 · 새로 4");
+  assert.match(reuseTip(r), /converged/);
+  assert.match(reuseTip(r), /미수렴 1점은 다시 풀었다/);
+  assert.equal(reuseLine({ reused: 0, computed: 0 }), "트림 재사용 0 · 새로 0");
+  assert.equal(reuseLine(null), null);
+  assert.equal(reuseLine(undefined), null);
+  assert.equal(reuseLine({ reused: "3" }), null);
+  assert.equal(reuseTip(null), "");
+});
+
+test("storedCount — points[].stored 수렴 기록 수, 없는 서버면 0", () => {
+  assert.equal(storedCount(RG), 1);
+  assert.equal(storedCount({ points: [rp(0.1, 200, 10)] }), 0);
+  assert.equal(storedCount(null), 0);
 });

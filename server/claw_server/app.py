@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 import claw.blocks  # noqa: F401 — import 부수효과: 전역 REGISTRY "blocks" 등록
 import claw.guidance  # noqa: F401 — "guidance" 카테고리 등록
 import claw.plant  # noqa: F401 — "actuator" 카테고리 등록
+from claw.trim.store import TrimStore
 from claw_server import sessions
 from claw_server.auth import BasicAuthProtect, SessionAuthProtect
 from claw_server.jobs import JobManager
@@ -88,7 +89,7 @@ def _default_web_dir() -> Path:
 def create_app(data_dir=None, web_dir=None, access_password=None,
                result_limit=None, profile_dir=None, profile_volatile=None,
                admin_user=None, admin_password=None, session_secret=None,
-               users_db_url=None) -> FastAPI:
+               users_db_url=None, trim_store_limit=None) -> FastAPI:
     """앱 생성 — data_dir: 결과 저장 루트 (기본 $CLAW_SERVER_DATA 또는 ./server_data),
     web_dir: M14 정적 파일 루트 (기본 $CLAW_WEB_DIR 또는 모노레포 web/ — 없으면 API만),
     access_password: 공용 비밀번호 (기본 $CLAW_ACCESS_PASSWORD — 빈 값이면 무인증),
@@ -103,6 +104,7 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
     — 빈 값이면 세션 모드 꺼짐), session_secret: 쿠키 서명 시크릿 (기본 $CLAW_SESSION_SECRET
     — 빈 값이면 부팅마다 랜덤 = 재시작 시 전원 로그아웃), users_db_url: 계정 저장 Postgres URL
     (기본 $CLAW_DB_URL — 빈 값이면 결과 루트의 users.json, users.py 머리말).
+    trim_store_limit: 트림 저장소 LRU 상한 (기본 $CLAW_TRIM_STORE_LIMIT 또는 20000 — 0이면 꺼짐, 05 §11.8).
 
     인자 모두 **환경변수 기본값 + 명시 주입** 패턴이다 — 테스트가 환경을 건드리지
     않고 상한이 걸린 앱을 세울 수 있어야 보존 상한 관련 동작을 고정할 수 있다."""
@@ -147,6 +149,11 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
     )
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
     app.state.jobs = JobManager()
+    # 트림 저장소(05 §11.8) — 같은 기체·같은 풀이 설정의 수평비행 트림을 라우트 사이에서 다시 풀지 않는다. 프로세스
+    # 메모리라 재시작이면 비고, 영속 결과 저장소와 따로다. 빈 값은 기본값(0이 아니다 — 0은 명시적으로 끈다)
+    env_limit = os.environ.get("CLAW_TRIM_STORE_LIMIT", "").strip()
+    app.state.trim_store = TrimStore(
+        trim_store_limit if trim_store_limit is not None else (int(env_limit) if env_limit else 20000))
     app.state.store = ResultStore(
         data_root,
         # "" 포함 미설정·0 = 무제한 — 빈 값이 int()에서 기동 크래시 내지 않게

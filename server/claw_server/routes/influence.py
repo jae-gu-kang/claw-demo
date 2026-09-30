@@ -36,8 +36,8 @@ from claw.pipeline.prescribe import (
 from claw.pipeline.sweep import (PROBE_DH, PROBE_DPSI, PROBE_DV, nonadditivity, plan_shapes, run_sweep,
                                  sweep_plan)
 from claw.sim import check_law_plant_pairing
-from claw_server.refs import (REQUEST_CRITERIA_REJECTED, criteria_echo, profile_echo, resolve_criteria,
-                               resolve_profile)
+from claw_server.refs import (REQUEST_CRITERIA_REJECTED, ReusePolicy, criteria_echo, profile_echo, resolve_criteria,
+                               resolve_profile, reuse_counts, reuse_echo, stored_failures, trim_scope)
 from claw.trim import trim_batch
 from claw_server.routes.codegen import FlightCodeIn
 from claw_server.routes.sim import _load_sim, build_gain_tables
@@ -223,6 +223,7 @@ class OpenloopIn(InfluenceIn):
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
     params: list[str] | None = None
+    reuse: ReusePolicy = "converged"  # 트림 저장소(05 §11.8) — 수렴 기록 재사용 / "none" 다시 풂
 
 
 @router.post("/influence/openloop", status_code=202)
@@ -249,13 +250,18 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
     n = len(cases)
     total = 2 * n
 
+    scope = trim_scope(request, profile)
+
     def work(job):
+        failed = stored_failures(scope, cases)
         trs = trim_batch(
             ac, cases, fingerprint=req.fingerprint,
             on_progress=lambda done, _t, tr: job.report(
                 done, total, message=f"트림: {tr.case.name}"
             ),
+            store=scope, reuse=req.reuse,
         )
+        reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
         out = openloop_delta(
             ac, trs, shape, req.params, probe_rel=req.probe_rel,
             on_progress=lambda done, _t: job.report(
@@ -264,12 +270,14 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
         )
         payload = to_jsonable(out)
         payload["kind"] = "influence_openloop"
+        payload["trim_reuse"] = reuse
         payload["profile"] = profile_echo(profile)
         payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         store.save(
             job.id, payload,
             meta={"kind": "influence_openloop", "profile": profile_echo(profile), "created": job.created,
-                  "n": len(out["cases"]), "fingerprint": req.fingerprint},
+                  "n": len(out["cases"]), "fingerprint": req.fingerprint,
+                  "trim_reuse_counts": reuse_counts(reuse)},
         )
         job.result_id = job.id
 
@@ -408,6 +416,7 @@ class ScanIn(InfluenceIn):
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
     criteria: dict | None = None
+    reuse: ReusePolicy = "converged"  # 트림 저장소(05 §11.8) — 수렴 기록 재사용 / "none" 다시 풂
     t_settle: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
     t_step: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
     dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
@@ -439,13 +448,18 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
     n = len(cases)
     total = n + n  # 트림 패스 + 케이스당 base 런 1개
 
+    scope = trim_scope(request, profile)
+
     def work(job):
+        failed = stored_failures(scope, cases)
         trs = trim_batch(
             ac, cases, fingerprint=req.fingerprint,
             on_progress=lambda done, _t, tr: job.report(
                 done, total, message=f"트림: {tr.case.name}"
             ),
+            store=scope, reuse=req.reuse,
         )
+        reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
         out = run_sweep(
             ac, trs, shape, plan,
             dt_plant=req.dt_plant, t_settle=req.t_settle, t_step=req.t_step,
@@ -463,6 +477,7 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
                 f"발산으로 잘린 케이스 {n_aborted}건 — 국소성 판정에서 제외")
         payload = to_jsonable(out)
         payload["kind"] = "influence_scan"
+        payload["trim_reuse"] = reuse
         payload["profile"] = profile_echo(profile)
         payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         payload["criteria_echo"] = criteria_echo(criteria, crit_source)
@@ -475,7 +490,8 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
             job.id, payload,
             meta={"kind": "influence_scan", "profile": profile_echo(profile),
                   "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
-                  "n": len(out["rows"]), "fingerprint": req.fingerprint},
+                  "n": len(out["rows"]), "fingerprint": req.fingerprint,
+                  "trim_reuse_counts": reuse_counts(reuse)},
         )
         job.result_id = job.id
 
@@ -526,6 +542,7 @@ class EvaluateIn(InfluenceIn):
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_CASES)
     criteria: dict | None = None
+    reuse: ReusePolicy = "converged"  # 트림 저장소(05 §11.8) — 수렴 기록 재사용 / "none" 다시 풂
     depth: Literal["linear", "full"] = "full"
     t_settle: float = Field(default=5.0, gt=0.0, allow_inf_nan=False)
     t_step: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
@@ -556,13 +573,18 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
     per_case = 1 if req.depth == "linear" else 3
     total = n + n * per_case
 
+    scope = trim_scope(request, profile)
+
     def work(job):
+        failed = stored_failures(scope, cases)
         trs = trim_batch(
             ac, cases, fingerprint=req.fingerprint,
             on_progress=lambda done, _t, tr: job.report(
                 done, total, message=f"트림: {tr.case.name}"
             ),
+            store=scope, reuse=req.reuse,
         )
+        reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
         out = evaluate(
             ac, trs, shape, criteria,
             depth=req.depth, dt_plant=req.dt_plant,
@@ -573,6 +595,7 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
         )
         payload = to_jsonable(out)
         payload["kind"] = "influence_evaluate"
+        payload["trim_reuse"] = reuse
         payload["profile"] = profile_echo(profile)
         payload["conditions"] = {"cases": cases_echo(cases)}  # 실행 조건 기록(이관 13단계)
         # 본문의 "criteria"는 엔진이 실은 기준 전문(화면이 판정선을 읽는다)이다 — 기준 블록은 모든 라우트가 본문·meta
@@ -583,7 +606,8 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
             meta={"kind": "influence_evaluate", "profile": profile_echo(profile),
                   "criteria_echo": criteria_echo(criteria, crit_source), "created": job.created,
                   "n": len(out["cases"]), "fingerprint": req.fingerprint,
-                  "criteria_fingerprint": out["criteria_fingerprint"]},
+                  "criteria_fingerprint": out["criteria_fingerprint"],
+                  "trim_reuse_counts": reuse_counts(reuse)},
         )
         job.result_id = job.id
 

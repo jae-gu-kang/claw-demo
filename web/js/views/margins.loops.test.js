@@ -24,6 +24,18 @@ const CATALOG = {
   ],
 };
 
+// 요구영역 기본 격자 — 보낼 점 셋 + 모델 부족 하나(보내지 않는다). 이름은 서버가 지은 것 그대로 싣는다
+const gpt = (mach, alt, state = "not_run") => ({ mach, alt, fuel: 20, name: `M${mach}_h${alt}_f20`, state });
+const GRID = {
+  region: { confirmed: true, source: "profile", mach: [0.12, 0.2], alt: [500, 2000], fuel: [20, 20], boundary: null },
+  model: { mach: [0, 0.3], fuel: [0, 50] }, reason: null,
+  rows: [{ alt: 500, fuel: 20, bounds: [0.12, 0.2], n: 2, state: "not_run" },
+    { alt: 2000, fuel: 20, bounds: [0.12, 0.2], n: 2, state: "not_run" }],
+  points: [gpt(0.12, 500), gpt(0.2, 500), gpt(0.2, 2000, "model_gap"), gpt(0.12, 2000)],
+  counts: { not_run: 3, model_gap: 1 }, labels: { not_run: "미계산", model_gap: "모델 부족" },
+  profile: { id: "example-delta", variant: null, revision: 1 },
+};
+let gridReply = () => GRID;
 const posts = [];
 let releaseCatalog = null;
 const reply = (status, data) => ({ ok: status < 400, status, text: async () => JSON.stringify(data) });
@@ -32,6 +44,7 @@ globalThis.fetch = (url, opts = {}) => {
   const method = opts.method ?? "GET";
   if (method === "POST") posts.push({ path, body: JSON.parse(opts.body) });
   const ok = (data) => Promise.resolve(reply(200, data));
+  if (method === "POST" && path === "/grid/base") return ok(gridReply());
   if (path.startsWith("/profiles/")) return ok({ document: DOC });
   // 카탈로그는 붙잡아 두었다가 시험이 푼다 — 느린 첫 호출(Render 냉간 기동)
   if (path === "/gains/catalog") return new Promise((resolve) => { releaseCatalog = () => resolve(reply(200, CATALOG)); });

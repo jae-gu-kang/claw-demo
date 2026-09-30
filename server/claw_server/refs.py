@@ -8,6 +8,8 @@
 `profile_echo`가 만든다 — 어느 기체·어느 형상 변형·어느 리비전·어느 지문으로 계산했는가.
 """
 
+from typing import Literal
+
 from fastapi import HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -217,3 +219,53 @@ def criteria_echo(crit, source: str) -> dict:
         "scheme": JUDGEMENT_SCHEME,
         "source": source,
     }
+
+
+# ── 트림 저장소 (05 §11.8) ─────────────────────────────────────────────────────
+#
+# 라우트는 저장소 창을 여기서만 받는다 — 명목 기체(profile.aircraft())의 수평비행 트림만 대상이다. 섭동 기체(검증 코너·
+# 스윕 없는 강건성)·지상 평형·보드선도의 z0 풀이는 창을 받지 않는다(엔진 trim_batch가 섭동 기체를 거부하는 것과 짝).
+
+ReusePolicy = Literal["converged", "none"]  # 요청 플래그 — 수렴 기록만 재사용 / 읽지 않음(쓰기는 한다)
+REUSE_POLICY_OFF = "off"  # 저장소가 꺼진 서버(CLAW_TRIM_STORE_LIMIT=0) — 요청 정책과 무관하게 전부 새로 푼다
+
+
+def trim_scope(request, profile):
+    """이 기체의 트림 지문 창 — 저장소가 꺼져 있으면 None(trim_batch가 종전 그대로 푼다)."""
+    store = getattr(request.app.state, "trim_store", None)
+    if store is None or not store.enabled:
+        return None
+    return store.scope(profile.trim_fingerprint)
+
+
+def stored_failures(scope, cases) -> frozenset:
+    """배치 전에 저장소에 **미수렴**으로 있던 케이스 이름 — 다시 풀린 실패를 echo가 세게(resolved_failed)."""
+    if scope is None:
+        return frozenset()
+    out = set()
+    for c in cases:
+        rec = scope.peek(c)
+        if rec is not None and not rec.converged:
+            out.add(c.name)
+    return frozenset(out)
+
+
+def reuse_echo(results, scope, policy: str, failed_before=frozenset(), *, trim_fingerprint: str | None = None) -> dict:
+    """결과 본문 최상위 trim_reuse — 몇 점을 저장소에서 꺼냈고 몇 점을 새로 풀었나. 재사용한 해도 판정은 이 요청의
+    기준으로 다시 세웠다(엔진 assemble_level) — 이 블록은 「풀이를 누가 했나」만 말한다."""
+    reused = [tr.case.name for tr in results if getattr(tr, "origin", "computed") == "reused"]
+    computed = [tr for tr in results if getattr(tr, "origin", "computed") != "reused"]
+    return {
+        # 꺼진 저장소에서도 지문은 싣는다 — 어느 트림 키 공간의 계산이었는지는 저장소 유무와 무관하다
+        "trim_fingerprint": trim_fingerprint or (None if scope is None else scope.trim_fingerprint),
+        "reused": len(reused),
+        "computed": len(computed),
+        "resolved_failed": sum(1 for tr in computed if tr.case.name in failed_before),
+        "policy": REUSE_POLICY_OFF if scope is None else policy,
+        "reused_names": reused,
+    }
+
+
+def reuse_counts(echo: dict) -> dict:
+    """meta용 요약 — 목록 화면이 본문을 열지 않고 「재사용 k · 새로 n」을 쓴다."""
+    return {k: echo[k] for k in ("reused", "computed", "resolved_failed")}

@@ -30,6 +30,18 @@ const RESULT = {
 };
 
 // 가짜 서버 — /jobs/ 조회는 붙잡아 두고 손으로 푼다(어느 감시자가 먼저 끝나는지를 시험이 정한다)
+// 요구영역 기본 격자 — 보낼 점 셋 + 모델 부족 하나(보내지 않는다). 이름은 서버가 지은 것 그대로 싣는다
+const gpt = (mach, alt, state = "not_run") => ({ mach, alt, fuel: 20, name: `M${mach}_h${alt}_f20`, state });
+const GRID = {
+  region: { confirmed: true, source: "profile", mach: [0.12, 0.2], alt: [500, 2000], fuel: [20, 20], boundary: null },
+  model: { mach: [0, 0.3], fuel: [0, 50] }, reason: null,
+  rows: [{ alt: 500, fuel: 20, bounds: [0.12, 0.2], n: 2, state: "not_run" },
+    { alt: 2000, fuel: 20, bounds: [0.12, 0.2], n: 2, state: "not_run" }],
+  points: [gpt(0.12, 500), gpt(0.2, 500), gpt(0.2, 2000, "model_gap"), gpt(0.12, 2000)],
+  counts: { not_run: 3, model_gap: 1 }, labels: { not_run: "미계산", model_gap: "모델 부족" },
+  profile: { id: "example-delta", variant: null, revision: 1 },
+};
+let gridReply = () => GRID;
 const posts = [];
 const heldJobs = [];
 const reply = (status, data) => ({ ok: status < 400, status, text: async () => JSON.stringify(data) });
@@ -38,6 +50,7 @@ globalThis.fetch = (url, opts = {}) => {
   const method = opts.method ?? "GET";
   if (method === "POST") posts.push({ path, body: JSON.parse(opts.body) });
   const ok = (data) => Promise.resolve(reply(200, data));
+  if (method === "POST" && path === "/grid/base") return ok(gridReply());
   if (path.startsWith("/profiles/")) return ok({ document: DOC });
   if (path === "/gains/catalog") return ok({ scas_design: { pitch: { k_rate: 0.3 } } });
   if (path === "/design/defaults") return ok({ config: {} });
@@ -116,8 +129,43 @@ test("결과 캡션 — 손대지 않은 지연 칸으로 잰 결과는 「툴 �
   const sent = posts.slice(before).find((p) => p.path === "/analysis/margin-map")?.body;
   assert.equal(sent.delay_s, 0.035);
   assert.equal(sent.pade_order, 2);
+  // 점은 요구영역 기본 격자의 보낼 점 전부 — 서버 이름 그대로, 모델 부족 점은 없다
+  assert.deepEqual(sent.cases, [
+    { name: "M0.12_h500_f20", mach: 0.12, alt: 500, fuel: 20 },
+    { name: "M0.2_h500_f20", mach: 0.2, alt: 500, fuel: 20 },
+    { name: "M0.12_h2000_f20", mach: 0.12, alt: 2000, fuel: 20 },
+  ]);
   heldJobs.shift()(reply(200, DONE_JOB));
   await waitFor(() => finalReport("delaysrc"), "신호 끝 보고");
   assert.ok(textOf(root).includes("지연 포함 (0.035 s, Padé 2차 · 툴 기본값 — 기체 문서에 지연 칸이 없어 기체별 값이 아니다)"),
     "캡션이 지연의 출처를 말한다");
+  assert.ok(!textOf(root).includes("트림 재사용"), "되울림이 없는 결과엔 재사용 줄도 없다");
+});
+
+test("결과에 trim_reuse가 있으면 「트림 재사용 k · 새로 n」", async () => {
+  RESULT.trim_reuse = { trim_fingerprint: "abc", reused: 2, computed: 1, resolved_failed: 0, policy: "converged",
+    reused_names: ["M0.12_h500_f20", "M0.2_h500_f20"] };
+  postCue({ token: "reuse", tab: "margins", action: "run" });
+  const root = render();
+  await waitFor(() => heldJobs.length === 1, "감시자의 진행 구독");
+  heldJobs.shift()(reply(200, DONE_JOB));
+  await waitFor(() => finalReport("reuse"), "신호 끝 보고");
+  assert.ok(textOf(root).includes("트림 재사용 2 · 새로 1"), textOf(root).slice(0, 300));
+  delete RESULT.trim_reuse;
+});
+
+// 요구영역 미정의 — 템플릿 격자로 되돌아가 돌지 않는다. [실행]이 막히고 신호는 사유로 실패한다
+test("요구영역 미정의 — [실행]이 막히고 신호는 사유로 실패, 마진 맵을 걸지 않는다", async () => {
+  gridReply = () => ({ ...GRID, region: null, reason: "기체 문서에 요구 운용영역이 없다", points: [], rows: [] });
+  const before = posts.filter((p) => p.path === "/analysis/margin-map").length;
+  postCue({ token: "noregion", tab: "margins", action: "run" });
+  const root = render();
+  await waitFor(() => finalReport("noregion"), "신호 끝 보고");
+  assert.equal(finalReport("noregion").phase, "failed");
+  assert.match(finalReport("noregion").error, /요구영역 미정의 — 기체 문서에 요구 운용영역이 없다/);
+  const runBtn = root.find("button").find((b) => textOf(b) === "실행");
+  assert.equal(runBtn.disabled, true);
+  assert.match(runBtn.title, /요구영역 미정의/);
+  assert.equal(posts.filter((p) => p.path === "/analysis/margin-map").length, before);
+  gridReply = () => GRID;
 });

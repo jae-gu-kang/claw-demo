@@ -11,7 +11,6 @@ import {
   LOOPS_LOADING_TEXT, bodeMarginNotes, bodeOthers, docLoopNames, followDocRows, loopLoadState, marginCellView,
   marginSemanticsText, marginUnstable, stableMarginEntries, unstableCells, unstableTail,
 } from "./loops.js";
-import { gridCentreCase } from "./missiontemplate.js";
 
 const EXAMPLE = JSON.parse(readFileSync(
   new URL("../../../engine/claw/profile/examples/delta_demo.json", import.meta.url), "utf8"));
@@ -185,7 +184,7 @@ test("runGainInfo·gainSourceText: 한 kp로 잰 격자 — 그 칸의 실제 �
   const cat = catalogOf(SHOWCASE, { confirmed: { slots: Object.keys(tables).sort(), stale: false } });
   const src = loopGainSources(cat, tables);
   const points = serpentineCases(machRange(0.12, 0.18, 0.015), [200, 3000], [10, 50]); // 쇼케이스 템플릿 꼴 격자
-  const ref = gridCentreCase({ machFrom: 0.12, machTo: 0.18, machStep: 0.015, alts: [200, 3000], fuels: [10, 50] });
+  const ref = { mach: 0.15, alt: 200, fuel: 10 }; // 격자 가운데 마하 · 아래쪽 가운데 고도·연료
   const seed = loopsAt(src, ref).rows;
   const info = runGainInfo(src, seed.map((r) => ({ ...r })), seed, ref, points);
   assert.equal(info.basis, "confirmed");
@@ -285,7 +284,7 @@ test("runGainInfo(perCase): 문서 게인 루프를 칸마다 읽으면 전 칸 
   const tables = SHOWCASE.law.gain_tables.tables;
   const src = loopGainSources(catalogOf(SHOWCASE, { confirmed: { slots: Object.keys(tables).sort(), stale: false } }), tables);
   const points = serpentineCases(machRange(0.12, 0.18, 0.015), S1_GRID.alts, S1_GRID.fuels);
-  const ref = gridCentreCase(S1_GRID);
+  const ref = { mach: 0.15, alt: 200, fuel: 10 }; // 격자 가운데 (위 시험과 같은 점)
   const seed = loopsAt(src, ref).rows;
   const info = runGainInfo(src, seed.map((r) => ({ ...r })), seed, ref, points, true);
   assert.equal(info.perCase, true);

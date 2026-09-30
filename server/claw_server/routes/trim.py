@@ -10,7 +10,10 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field, model_validator
 
 from claw.common.contracts import TrimCase
-from claw_server.refs import ProfileRef, criteria_echo, profile_echo, resolve_criteria, resolve_profile
+from claw_server.refs import (
+    ProfileRef, ReusePolicy, criteria_echo, profile_echo, resolve_criteria, resolve_profile, reuse_counts, reuse_echo,
+    stored_failures, trim_scope,
+)
 from claw.opspace import model_range_of, pre_state, region_of, trim_assessment
 from claw.opspace.verdict import VerdictContext, condition_verdict
 from claw.trim import trim_batch
@@ -54,6 +57,7 @@ class TrimBatchIn(BaseModel):
     profile: ProfileRef | None = None  # 기체 선택 — 없으면 예제 기체 (02 §5.6)
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1)
+    reuse: ReusePolicy = "converged"  # 트림 저장소(05 §11.8) — 수렴 기록 재사용 / "none" 다시 풂
 
 
 def build_cases(case_inputs: list[TrimCaseIn]) -> list[TrimCase]:
@@ -86,6 +90,7 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
     echo = profile_echo(profile)
     cases = build_cases(req.cases)
     store = request.app.state.store
+    scope = trim_scope(request, profile)
 
     # 근거 계산이 기체를 다시 조립하지 않게 이미 만든 것을 넘긴다(opspace/states.py 캐시 키 "aircraft")
     region, model = region_of(profile.doc), model_range_of(profile)
@@ -117,6 +122,7 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
                 "state_evidence": a["evidence"], "region_state": rs, "verdict": verdict}
 
     def work(job):
+        failed = stored_failures(scope, cases)
         results = trim_batch(
             ac,
             cases,
@@ -124,11 +130,14 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
             on_progress=lambda done, total, tr: job.report(
                 done, total, message=tr.case.name
             ),
+            store=scope,
+            reuse=req.reuse,
         )
+        reuse = reuse_echo(results, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
         store.save(
             job.id,
             {"kind": "trim_batch", "results": [with_state(r) for r in results],
-             "profile": echo, "criteria_echo": crit_block, **region_context(profile)},
+             "profile": echo, "criteria_echo": crit_block, **region_context(profile), "trim_reuse": reuse},
             meta={
                 "kind": "trim_batch",
                 "created": job.created,
@@ -136,6 +145,7 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
                 "fingerprint": req.fingerprint,
                 "profile": echo,
                 "criteria_echo": crit_block,
+                "trim_reuse_counts": reuse_counts(reuse),
             },
         )
         job.result_id = job.id

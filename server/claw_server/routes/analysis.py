@@ -50,7 +50,8 @@ from claw.trim import (
 )
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
 from claw_server.refs import (
-    ProfileRef, criteria_echo, profile_echo, profile_error_detail, profile_query, resolve_criteria, resolve_profile,
+    ProfileRef, ReusePolicy, criteria_echo, profile_echo, profile_error_detail, profile_query, resolve_criteria,
+    resolve_profile, reuse_counts, reuse_echo, stored_failures, trim_scope,
 )
 from claw_server.serialize import to_jsonable, trim_result_dict
 
@@ -139,6 +140,7 @@ class MarginMapIn(BaseModel):
     profile: ProfileRef | None = None  # 기체 선택 — 없으면 예제 기체 (02 §5.6)
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1)
+    reuse: ReusePolicy = "converged"  # 트림 저장소(05 §11.8) — 수렴 기록 재사용 / "none" 다시 풂
     loops: list[LoopIn] = []
     # 작동기·지연 포함은 [기본값] 미포함(하위호환) — 포함이 01 §4.2 문서 기본값이지만
     # 그건 웹 폼 초기 상태의 몫이고 서버 계약은 중립 유지 (엔진 pi_loop과 동일 원칙)
@@ -515,6 +517,7 @@ class EnvelopeScanIn(BaseModel):
     profile: ProfileRef | None = None
     fingerprint: str = ""
     cases: list[TrimCaseIn] = Field(min_length=1, max_length=MAX_SCAN_CASES)
+    reuse: ReusePolicy = "converged"  # 트림 저장소(05 §11.8) — 수렴 기록 재사용 / "none" 다시 풂
 
 
 @router.post("/analysis/design-envelope-scan", status_code=202)
@@ -534,8 +537,10 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
     # 점별 판정의 여유 사유(트림 여유 미달 등)가 기준 criteria.trim_margin으로 난다(이관 12단계) — 결과가 그 기준을 싣는다
     crit, crit_source = resolve_criteria(profile)
     crit_block = criteria_echo(crit, crit_source)
+    scope = trim_scope(request, profile)
 
     def work(job):
+        failed = stored_failures(scope, cases)
         trs = trim_batch(
             ac,
             cases,
@@ -543,7 +548,10 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
             on_progress=lambda done, total, tr: job.report(
                 done, total, message=f"트림: {tr.case.name}"
             ),
+            store=scope,
+            reuse=req.reuse,
         )
+        reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
         entries = [
             {"trim": trim_result_dict(tr), "verdict": to_jsonable(envelope_verdict(tr, vctx))}
             for tr in trs
@@ -551,7 +559,7 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
         store.save(
             job.id,
             {"kind": "envelope_scan", "cases": entries, "n_requested": len(cases),
-             "profile": profile_echo(profile), "criteria_echo": crit_block},
+             "profile": profile_echo(profile), "criteria_echo": crit_block, "trim_reuse": reuse},
             meta={
                 "kind": "envelope_scan",
                 "profile": profile_echo(profile),
@@ -559,6 +567,7 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
                 "created": job.created,
                 "n": len(entries),
                 "fingerprint": req.fingerprint,
+                "trim_reuse_counts": reuse_counts(reuse),
             },
         )
         job.result_id = job.id
@@ -721,8 +730,10 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
         if all(_zero(law_gains.at(lp, c)) for c in cases):
             raise HTTPException(status_code=422, detail=(
                 f"무의미 루프 (제로 개루프): {lp.name}의 법칙 게인이 격자 전 칸에서 0이다"))
+    scope = trim_scope(request, profile)
 
     def work(job):
+        failed = stored_failures(scope, cases)
         trs = trim_batch(
             ac,
             cases,
@@ -730,7 +741,10 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
             on_progress=lambda done, _t, tr: job.report(
                 done, total, message=f"트림: {tr.case.name}"
             ),
+            store=scope,
+            reuse=req.reuse,
         )
+        reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
         def trim_entry(t):
             # 이 칸의 법칙 게인 — 트림 수렴·취소와 무관하게 싣는다(칸의 기록). 법칙 게인 루프가 없으면 키도 없다(골든)
             e = _trim_only_entry(t)
@@ -796,6 +810,7 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                 "criteria_echo": crit_block,
                 # 법칙 게인 루프가 있을 때만 — 칸별 게인(entry.gains)을 어느 표에서 읽었나
                 **({"profile_gains": law_gains.provenance(profile)} if law_gains.loops else {}),
+                "trim_reuse": reuse,
             },
             meta={
                 "kind": "margin_map",
@@ -804,6 +819,7 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
                 "created": job.created,
                 "n": len(entries),
                 "fingerprint": req.fingerprint,
+                "trim_reuse_counts": reuse_counts(reuse),
             },
         )
         job.result_id = job.id

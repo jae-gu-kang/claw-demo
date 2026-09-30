@@ -2,8 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import {
-  DEFAULT_GRID, defaultGridCases,
   machRange, nameCases, representativeGrid, orderCaseNames, parseCaseName, parseNumberList, serpentineCases,
 } from "./grid.js";
 
@@ -94,84 +95,71 @@ test("parseNumberList: 콤마·공백 구분, 비수치 거부", () => {
 });
 
 
-test("기본 격자는 한 곳 정의 — 15케이스·이름 유일", () => {
-  const cases = defaultGridCases();
-  assert.equal(cases.length, 15);
-  assert.equal(new Set(cases.map((c) => c.name)).size, 15);
-  // 마진 맵 폼 기본값과 게인 카드가 같은 격자를 쓴다는 계약의 최소 핀 (영향성 탭은 요구영역 기본 격자에서 고른다)
-  assert.equal(DEFAULT_GRID.machFrom, 0.14);
+// 탭의 폴백 격자 상수는 폐지했다(05 §11.13 5단계) — 마진 맵·게인 카드·흐름 평가·영향성은 요구영역의 기본 격자
+// (서버 /grid/base)에서 점을 받는다. 그 이름이 web/js 어디에도(주석·시험 포함) 다시 나타나면 여기서 죽는다.
+// 이름은 조각으로 적는다 — 이 파일 자체가 걸리지 않게
+test("폐지한 폴백 격자 상수·헬퍼가 web/js에 되살아나지 않는다", () => {
+  const banned = ["DEFAULT_" + "GRID", "defaultGrid" + "Cases", "fillGrid" + "FromProfile", "grid" + "Strings",
+    "gridCentre" + "Case"];
+  const root = new URL("..", import.meta.url).pathname;
+  const hits = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (name.endsWith(".js")) {
+        const text = readFileSync(full, "utf8");
+        for (const b of banned) if (text.includes(b)) hits.push(`${full.slice(root.length)}: ${b}`);
+      }
+    }
+  };
+  walk(root);
+  assert.deepEqual(hits, []);
 });
 
-// 격자가 **비행 가능 범위 안**에 있다는 계약 — 값이 아니라 성질을 못박는다.
-// 엔벨로프(engine trim_level 0.001 격자 실측, 200 kg급 예제·연료 25 kg): h100 M0.082~0.284 · h1000
-// M0.086~0.285 · h3000 M0.097~0.283 → 세 고도 공통을 안쪽으로 반올림해 M0.10~0.28(추진 1.45배). 이 밖으로 나가면
-// 트림이 안 풀려 평가가 「판정 불가」로 빠지는데, 화면은 그 원인을 게인처럼
-// 보여 준다(v0.72 이전 15칸 중 7칸이 그랬다). 엔진 엔벨로프가 바뀌면 이 상수도
-// 같이 고치라고 여기서 죽는다.
-test("기본 격자는 세 고도 공통 엔벨로프 안이다 — 트림 실패 케이스를 기본값으로 주지 않는다", () => {
-  const ENVELOPE = { lo: 0.10, hi: 0.28 };   // engine trim_level 실측 (위 주석)
-  // **위 숫자의 전제부터 못박는다** — 엔벨로프는 이 고도·연료에서 잰 값이다.
-  // 무게가 α 여유(아래 끝)를, 고도가 양 끝을 정하므로 둘 중 하나만 바뀌어도
-  // ENVELOPE는 무효인데, 케이스 수 대조는 고도를 **바꾸는** 변이를 못 잡는다
-  // (h3000 → h6000은 18케이스 그대로다).
-  assert.deepEqual(DEFAULT_GRID.alts, [100, 1000, 3000], "엔벨로프를 잰 고도가 아니다");
-  assert.deepEqual(DEFAULT_GRID.fuels, [25], "엔벨로프를 잰 연료가 아니다");
-
-  const machs = machRange(DEFAULT_GRID.machFrom, DEFAULT_GRID.machTo, DEFAULT_GRID.machStep);
-  for (const m of machs) {
-    assert.ok(m >= ENVELOPE.lo && m <= ENVELOPE.hi,
-      `M${m}이 공통 엔벨로프 M${ENVELOPE.lo}~${ENVELOPE.hi} 밖 — 트림이 안 풀린다`);
-  }
-  // 경계에 붙이지도 않는다(구 기체에서 양 끝 칸이 여유 +0.5°/+0.006로 사실상 경계였다)
-  assert.ok(machs[0] > ENVELOPE.lo, "아래 끝이 경계에 붙었다 — α 여유가 없다");
-  assert.ok(machs[machs.length - 1] < ENVELOPE.hi, "위 끝이 경계에 붙었다 — 스로틀 여유가 없다");
-
-  // **두 물리 코너를 실제로 잡는지**를 본다 — 개수만 세면 안쪽으로 뭉친 격자가
-  // 통과한다. 아래 끝은 나선 배가 시간(20 s 판정선 바로 위 — 느린 기체에서는 α보다 먼저 걸린다,
-  // engine test_profile_shipped_example.py), 위 끝은 추력 여유(v0.72 판정)가 걸리는 자리라 하나를 버리면
-  // 그 판정이 기본 격자에서 영영 안 걸린다.
-  assert.ok(machs[0] <= 0.14, "아래 코너를 안 잡는다 — 나선·실속 여유가 걸리는 자리가 격자에 없다");
-  assert.ok(machs[machs.length - 1] >= 0.22, "위 코너를 안 잡는다 — 추력 여유가 걸리는 자리가 격자에 없다");
-});
+// 대표 부분 격자 시험의 격자 — 옛 예제 기체 템플릿 격자 꼴(M0.14~0.22/0.02 × 세 고도 × 연료 하나, 15건)의 사본.
+// 기체 값이 아니라 시험 재료다
+const G15 = { machFrom: 0.14, machTo: 0.22, machStep: 0.02, alts: [100, 1000, 3000], fuels: [25] };
+const casesOf = (g) => nameCases(serpentineCases(machRange(g.machFrom, g.machTo, g.machStep), g.alts, g.fuels));
 
 
 // ── 대표 부분 격자 (쇼케이스 영향성 2단) ──────────────────────────────────────
 
 test("representativeGrid: n=4는 마하 양끝 × 고도 양끝 — 폼 칸 세 개로 적히는 부분 격자", () => {
-  const g = representativeGrid(DEFAULT_GRID, 4);
+  const g = representativeGrid(G15, 4);
   assert.deepEqual(g, { machFrom: 0.14, machTo: 0.22, machStep: 0.08, alts: [100, 3000], fuels: [25] });
-  const names = defaultGridCases(g).map((c) => c.name);
+  const names = casesOf(g).map((c) => c.name);
   assert.deepEqual(names, ["M0.14_h100_f25", "M0.22_h100_f25", "M0.22_h3000_f25", "M0.14_h3000_f25"]);
   // 이름이 원 격자와 같다 — 평가·처방·감도가 같은 케이스를 같은 이름으로 부른다
-  const full = new Set(defaultGridCases().map((c) => c.name));
+  const full = new Set(casesOf(G15).map((c) => c.name));
   assert.ok(names.every((n) => full.has(n)));
 });
 
 test("representativeGrid: 건수는 n 이하 — 등간격이 안 되는 마하 점수는 건너뛴다", () => {
   for (let n = 1; n <= 20; n += 1) {
-    const g = representativeGrid(DEFAULT_GRID, n);
-    const cases = defaultGridCases(g);
+    const g = representativeGrid(G15, n);
+    const cases = casesOf(g);
     assert.ok(cases.length <= n, `n=${n} → ${cases.length}건`);
     assert.ok(cases.length >= 1);
   }
   // 마하 5점에서 4점은 등간격으로 못 뽑는다 — 3점(0.14·0.18·0.22)으로 선다
-  const g6 = representativeGrid(DEFAULT_GRID, 6);
+  const g6 = representativeGrid(G15, 6);
   assert.deepEqual(machRange(g6.machFrom, g6.machTo, g6.machStep), [0.14, 0.18, 0.22]);
   assert.deepEqual(g6.alts, [100, 3000]);
 });
 
 test("representativeGrid: n=1은 가운데 점, 격자보다 크면 격자 그대로", () => {
-  assert.deepEqual(defaultGridCases(representativeGrid(DEFAULT_GRID, 1)).map((c) => c.name),
+  assert.deepEqual(casesOf(representativeGrid(G15, 1)).map((c) => c.name),
     ["M0.18_h1000_f25"]);
-  assert.deepEqual(representativeGrid(DEFAULT_GRID, 15), { ...DEFAULT_GRID });
-  assert.deepEqual(representativeGrid(DEFAULT_GRID, 99), { ...DEFAULT_GRID });
+  assert.deepEqual(representativeGrid(G15, 15), { ...G15 });
+  assert.deepEqual(representativeGrid(G15, 99), { ...G15 });
 });
 
 test("representativeGrid: 연료 축도 끝점부터 — 기체 값은 인자 격자에서만 온다", () => {
   const grid = { machFrom: 0.3, machTo: 0.5, machStep: 0.1, alts: [0, 2000], fuels: [10, 50, 90] };
   const g = representativeGrid(grid, 8);
   assert.deepEqual(g, { machFrom: 0.3, machTo: 0.5, machStep: 0.2, alts: [0, 2000], fuels: [10, 90] });
-  assert.equal(defaultGridCases(g).length, 8);
+  assert.equal(casesOf(g).length, 8);
 });
 
 test("representativeGrid: 양끝은 값의 양끝 — 순서 없이 적힌 템플릿 목록에서도 최저·최고 고도를 잡는다", () => {
@@ -184,7 +172,7 @@ test("representativeGrid: 양끝은 값의 양끝 — 순서 없이 적힌 템�
 });
 
 test("representativeGrid: 잘못된 n·빈 목록은 던진다", () => {
-  assert.throws(() => representativeGrid(DEFAULT_GRID, 0));
-  assert.throws(() => representativeGrid(DEFAULT_GRID, 2.5));
-  assert.throws(() => representativeGrid({ ...DEFAULT_GRID, alts: [] }, 4));
+  assert.throws(() => representativeGrid(G15, 0));
+  assert.throws(() => representativeGrid(G15, 2.5));
+  assert.throws(() => representativeGrid({ ...G15, alts: [] }, 4));
 });

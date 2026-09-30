@@ -40,16 +40,15 @@ import {
   evalVerdict, flowStepStates, flowSummaryLine, latestResultFor, seedStateVerdict, stageArtifact,
 } from "../lib/flowsteps.js";
 import { criteriaBadgeSpec, criteriaFreshness, resultFreshness } from "../lib/freshness.js";
-import { defaultGridCases } from "../lib/grid.js";
 // 잡 상태 코드 → 한국어 한 줄(「평가 취소됨」) — 영향성 탭과 같은 말(서버 jobs.py 어휘와 한 벌, 테스트 가드)
 import { jobEndLine } from "../lib/influence.js";
 import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
 import { effectiveOf } from "../lib/profileform.js";
+import { defaultRoleSelection, draftTag, reuseLine } from "../lib/opspace.js";
 import { designSource, seedSummary } from "../lib/quickseed.js";
 import { revealPanel } from "../lib/reveal.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 import { store } from "../store.js";
-import { selectedDefaults } from "./missionfill.js";
 import { tabStage, tabTop } from "./stage.js";
 
 // 단계 기록·실행 상태 — 탭 재진입에도 유지(모듈 스코프 규약). 기체 전환은 페이지를 다시 읽으므로
@@ -218,14 +217,23 @@ const settleDesign = async (seq, resultId) => {
 
 const runEval = async (seq) => {
   set(seq, "eval", { state: "running", verdict: null, note: null, progress: null, echo: null, resultId: null, report: null });
-  const grid = (await selectedDefaults())?.grid ?? undefined;
-  const cases = defaultGridCases(grid);
+  // 점 — 요구영역 기본 격자의 보낼 점 전부(게인 카드·마진 맵과 같은 집합, 04 §5). 요구영역이 미정의면 재지 않고
+  // 그 사유로 멈춘다 — 템플릿 격자로 되돌아가지 않는다(05 §11.13 5단계 나머지)
+  const grid = await api.post("/grid/base", {});
+  const { cases, reason } = defaultRoleSelection("metric", grid);
+  if (reason) {
+    const v = { tone: "bad", text: reason };
+    set(seq, "eval", { state: "done", verdict: v, echo: null, resultId: null });
+    return v;
+  }
+  const pts = [`기본 격자 ${cases.length}점`, draftTag(grid)].filter(Boolean).join(" · ");
+  set(seq, "eval", { note: `평가 제출 — ${pts}` });
   // 주입 없음 — 정본(문서) 그대로의 평가. 게인 탭·자동 설계의 확정(작업본)이 걸려 있어도 이 흐름은
   // 문서로 잰다(작업본 평가는 영향성 탭 몫) — 힌트가 그 사실을 말한다
   const job = await api.post("/influence/evaluate",
     evaluateRequest({}, { cases, depth: "full" }));
   const done = await watchJob(job.id, (j) => set(seq, "eval",
-    { state: "running", note: `평가 ${Math.round((j.progress ?? 0) * 100)}% — ${j.message ?? ""}`,
+    { state: "running", note: `평가 ${Math.round((j.progress ?? 0) * 100)}% · ${pts} — ${j.message ?? ""}`,
       progress: j.progress ?? null }));
   if (done.status !== "done" || !done.result_id) {
     const v = { tone: "bad", text: `${jobEndLine("평가", done)} — ${done.error ?? "사유 없음"}` };
@@ -233,7 +241,9 @@ const runEval = async (seq) => {
     return v;
   }
   const body = await api.get(`/results/${done.result_id}`);
-  const v = evalVerdict(normalizeEvalReport(body));
+  const reuse = reuseLine(body.trim_reuse);
+  const judged = evalVerdict(normalizeEvalReport(body));
+  const v = { ...judged, text: [judged.text, pts, reuse].filter(Boolean).join(" · ") };
   set(seq, "eval", { state: "done", verdict: v, resultId: done.result_id,
     echo: body.profile ?? null, critEcho: body.criteria_echo ?? null, critKind: "influence_evaluate" });
   return v;

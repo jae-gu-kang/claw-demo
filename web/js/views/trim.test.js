@@ -156,7 +156,9 @@ test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은
     row(0.2, { saturation_ok: false }, "infeasible", ["throttle_high"])];
   const prevFetch = globalThis.fetch;
   globalThis.fetch = (url, opts = {}) => (url.replace(/^\/api/, "").startsWith("/results/")
-    ? Promise.resolve(reply(200, { results })) : prevFetch(url, opts));
+    ? Promise.resolve(reply(200, { results,
+      trim_reuse: { trim_fingerprint: "f", reused: 1, computed: 2, resolved_failed: 0, policy: "converged" } }))
+    : prevFetch(url, opts));
   try {
     postCue({ token: "run-ok", tab: "trim", action: "run" });
     const root = render();
@@ -173,6 +175,8 @@ test("run 신호 끝 — 수치 패널을 굴리고, 보고·머리줄이 같은
     assert.match(textOf(root), /자동 설계 제외 \(제한 위반\) — 실속 경계 위반/, "근거 열이 조건 판정을 싣는다");
     assert.match(textOf(root), /수렴 3\/3 · 판정 플래그 위반 2건/, "머리줄과 보고가 같은 말");
     assert.match(textOf(root), /스로틀 상한/, "표가 물리적 불가의 근거를 싣는다");
+    assert.match(textOf(root), /트림 재사용 1 · 새로 2/, "서버 트림 저장소 되울림");
+    assert.doesNotMatch(textOf(root), /null/);
     const hit = scrolled.find((s) => s.node.attrs?.id === "trim-drawer");
     assert.ok(hit, "수치 패널을 굴리지 않았다");
     assert.deepEqual(hit.o, { block: "start", behavior: "smooth" });

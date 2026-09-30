@@ -47,12 +47,34 @@ const ROW = {
 let catalog = catalogFor(null);
 let profileRows = [ROW];
 const gets = [];
+const posts = [];
+// 요구영역 기본 격자 — 보낼 점 셋 + 모델 부족 하나. 게인 카드는 보낼 점 전부를 서버 이름 그대로 보낸다
+const gpt = (mach, alt, state = "not_run") => ({ mach, alt, fuel: 10, name: `M${mach}_h${alt}_f10`, state });
+const GRID = {
+  region: { confirmed: false, source: "template", mach: [0.1, 0.2], alt: [200, 3000], fuel: [10, 10], boundary: null },
+  model: { mach: [0, 0.3], fuel: [0, 50] }, reason: null,
+  rows: [{ alt: 200, fuel: 10, bounds: [0.1, 0.2], n: 2, state: "not_run" },
+    { alt: 3000, fuel: 10, bounds: [0.1, 0.2], n: 2, state: "not_run" }],
+  points: [gpt(0.1, 200), gpt(0.2, 200), gpt(0.2, 3000, "model_gap"), gpt(0.1, 3000)],
+  counts: { not_run: 3, model_gap: 1 }, labels: { not_run: "미계산", model_gap: "모델 부족" },
+  profile: { id: "x", variant: null, revision: 1 },
+};
+let gridReply = () => GRID;
 const reply = (status, data) => ({ ok: status < 400, status, text: async () => JSON.stringify(data) });
 globalThis.fetch = (url, opts = {}) => {
   const path = url.replace(/^\/api/, "").replace(/\?.*$/, "");
   const method = opts.method ?? "GET";
   if (method === "GET") gets.push(path);
   const ok = (data) => Promise.resolve(reply(200, data));
+  if (method === "POST") posts.push({ path, body: JSON.parse(opts.body) });
+  // gridReply가 약속을 내면 그 약속이 풀릴 때 답한다 — 늦게 온 옛 응답 경주를 재현한다
+  if (method === "POST" && path === "/grid/base") return Promise.resolve(gridReply()).then((d) => reply(200, d));
+  if (method === "POST" && path === "/influence/evaluate") return ok({ id: "ejob" });
+  if (path === "/jobs/ejob") return ok({ id: "ejob", status: "done", result_id: "eres", progress: 1, message: "" });
+  if (path === "/results/eres") {
+    return ok({ depth: "linear", cards: [], checks: null, aggregate: { hard_fail: false, hard_fails: [] },
+      trim_reuse: { reused: 2, computed: 1, resolved_failed: 0, policy: "converged" } });
+  }
   if (path === "/gains/catalog") return ok(catalog);
   if (path === "/profiles") return ok(profileRows);
   if (path.startsWith("/profiles/")) return ok({ document: DOC, revision: 1 });
@@ -134,4 +156,61 @@ test("overview 신호가 끝나면 탭 머리(확정 표 배너·곡선)를 부�
   } finally {
     delete proto.scrollIntoView;
   }
+});
+
+// 탭 진입마다 기본 격자를 받는다 — 먼저 나간 느린 응답이 나중 응답(지금 요구영역)을 덮으면 「아직 안 쟀다」 줄이
+// 옛 점 수를 말한다. 요청 차례가 더 나중 것이 있으면 늦게 온 답은 버린다(condpick과 같은 규칙)
+test("늦게 온 옛 /grid/base 응답이 나중 응답의 기본 격자를 덮지 않는다", async () => {
+  setSelection({ id: DOC.id });
+  catalog = catalogFor(null);
+  let release;
+  const slow = new Promise((r) => { release = r; });
+  const NONE = { ...GRID, region: null, reason: "요구영역 지움", points: [], rows: [] };
+  const replies = [() => slow, () => NONE, () => new Promise(() => {})];
+  gridReply = () => replies.shift()();
+  render(); // 옛 요청 — 늦게 온다
+  const fresh = render(); // 나중 요청 — 먼저 온다
+  const strip = (root) => root.find("span").map((n) => n.textContent ?? "").join("\n");
+  await waitFor(() => /요구영역 지움/.test(strip(fresh)), "나중 응답의 상태 줄");
+  release(GRID);
+  await tick(); await tick();
+  // 셋째 진입(응답 대기 중)은 모듈에 남은 격자로 먼저 그린다 — 그게 나중 응답이어야 한다
+  const third = render();
+  assert.match(strip(third), /아직 안 쟀다 — 요구영역 미정의 — 요구영역 지움/);
+  assert.doesNotMatch(strip(third), /기본 격자 3점/);
+  gridReply = () => GRID;
+});
+
+// 게인 카드 평가 — 요구영역 기본 격자의 보낼 점 전부(고르개 없음 · 마진 맵·흐름 평가와 같은 집합, 04 §5)
+test("evaluate 신호 — 기본 격자의 보낼 점 전부를 서버 이름으로 보내고, 점 수·초안·트림 재사용을 말한다", async () => {
+  setSelection({ id: DOC.id });
+  catalog = catalogFor(null);
+  gridReply = () => GRID;
+  postCue({ token: "ev", tab: "gains", action: "evaluate", args: { depth: "linear" } });
+  const root = render();
+  await waitFor(() => finalReport("ev"), "신호 끝 보고");
+  const r = finalReport("ev");
+  assert.equal(r.phase, "done", r.error);
+  const body = posts.filter((p) => p.path === "/influence/evaluate").at(-1).body;
+  assert.deepEqual(body.cases.map((c) => c.name), ["M0.1_h200_f10", "M0.2_h200_f10", "M0.1_h3000_f10"]);
+  assert.equal(r.data.points, 3);
+  assert.match(r.summary, /기본 격자 3점$/);
+  // 상태 줄은 textContent로 쓴다(가짜 DOM은 그 값을 속성으로만 든다)
+  const t = root.find("span").map((n) => n.textContent ?? "").join("\n");
+  assert.match(t, /완료 — 요구영역 기본 격자 3점 · 요구영역 미확정 초안/);
+  assert.match(t, /트림 재사용 2 · 새로 1/);
+});
+
+test("evaluate 신호 — 요구영역 미정의면 보내지 않고 사유로 실패한다(템플릿 격자로 돌지 않는다)", async () => {
+  setSelection({ id: DOC.id });
+  gridReply = () => ({ ...GRID, region: null, reason: "기체 문서에 요구 운용영역이 없다", points: [], rows: [] });
+  const before = posts.filter((p) => p.path === "/influence/evaluate").length;
+  postCue({ token: "ev-none", tab: "gains", action: "evaluate", args: { depth: "linear" } });
+  render();
+  await waitFor(() => finalReport("ev-none"), "신호 끝 보고");
+  const r = finalReport("ev-none");
+  assert.equal(r.phase, "failed");
+  assert.match(r.error, /요구영역 미정의 — 기체 문서에 요구 운용영역이 없다/);
+  assert.equal(posts.filter((p) => p.path === "/influence/evaluate").length, before);
+  gridReply = () => GRID;
 });

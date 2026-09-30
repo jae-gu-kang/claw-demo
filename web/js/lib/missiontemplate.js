@@ -1,7 +1,8 @@
 /** 미션 템플릿 — 기체 문서의 `mission_template`(화면 폼 초기값)을 폼 글로 옮긴다 (02 §5.6 · 06 §8).
 
-미션 템플릿은 계산에 쓰이지 않는 **화면 기본값**이다 — 해석 격자(마진 맵·게인 카드), 엔벨로프
-폼, 시뮬 기본 미션의 속도·상승각·고도·연료, 착륙 미끄럼 거리. 기체 성능에 맞춰 잰 값이라 기체마다 다르다.
+미션 템플릿은 계산에 쓰이지 않는 **화면 기본값**이다 — 엔벨로프 폼, 시뮬 기본 미션의 속도·상승각·고도·연료,
+착륙 미끄럼 거리, 자동 설계 칸의 자리표시(trim_grid). 기체 성능에 맞춰 잰 값이라 기체마다 다르다. 해석 격자(마진
+맵·게인 카드·흐름 평가)는 템플릿이 아니라 요구영역의 기본 격자다(서버 /grid/base, 05 §11.13 5단계).
 그래서 웹의 상수는 **예제 기체의 사본(폴백)**으로만 남고, 고른 기체 문서가 도착하면 **손대지 않은 칸만** 그
 기체 값으로 바뀐다. 템플릿이 없는 기체(null)는 폴백을 쓰되 화면이 그렇다고 말한다 — 예제 값을 그 기체
 값인 척하지 않는다. 사본과 예제 문서가 어긋나면 missiontemplate.test.js가 빨개진다.
@@ -12,8 +13,6 @@
 고도(`operating_region.alt`)이고(05 §11.13 이관 11단계), 서버·엔진이 그 끝을 선도 끝으로 그린다 — 칸에 같은 값을
 채워 보내면 요구영역 끝이 「운용 입력」으로 두 번 그려진다. 칸은 연구용 덮어쓰기로만 남는다.
 */
-
-import { machRange } from "./grid.js";
 
 export const MISSING_TEMPLATE_HINT = "이 기체 문서에는 미션 템플릿이 없어 예제 기체에 맞춘 값입니다 — "
   + "기체 탭 「미션 템플릿」에서 채웁니다.";
@@ -32,12 +31,6 @@ export const ENVELOPE_FALLBACK = Object.freeze({
 
 /** 마진 맵 작동기 칸 폴백 — 예제 기체 actuator.params 사본. */
 export const MARGIN_ACT_FALLBACK = Object.freeze({ wn: "30", zeta: "0.7" });
-
-/** 격자(수치) → 폼 글 — 마진 맵 격자 칸과 같은 모양. */
-export const gridStrings = (grid) => ({
-  machFrom: String(grid.machFrom), machTo: String(grid.machTo), machStep: String(grid.machStep),
-  alts: grid.alts.join(", "), fuels: grid.fuels.join(", "),
-});
 
 /** 기체 적용 문서 → 화면 기본값 묶음.
  *  {hasTemplate, grid(수치)|null, envelope{칸: 글}, margins{wn, zeta}, sim{form, rows}|null, rolloutM|null} */
@@ -83,16 +76,4 @@ export function untouchedUpdates(current, fallback, next) {
     if (v !== undefined && Object.hasOwn(fallback ?? {}, k) && current?.[k] === fallback[k] && current[k] !== v) out[k] = v;
   }
   return out;
-}
-
-/** 격자의 가운데 점 {mach, alt, fuel} — 트림 탭 [행 추가]의 첫 값. 격자(수치)는 templateDefaults().grid와 같은
- *  모양이다. 미션 템플릿 격자는 그 기체의 트림 영역 안에서 고른 것이라 가운데 점이 가장 안전한 출발점이다 —
- *  특정 기체의 마하·연료를 코드에 적지 않는다(종전 M0.45·연료 200은 1200 kg 기체의 점이었다). */
-export function gridCentreCase(grid) {
-  const machs = machRange(grid.machFrom, grid.machTo, grid.machStep);
-  const mid = (xs) => {
-    if (!xs.length) throw new Error("격자 목록이 비었다 — 고도·연료를 하나 이상 적는다");
-    return xs[Math.floor((xs.length - 1) / 2)];
-  };
-  return { mach: mid(machs), alt: mid(grid.alts), fuel: mid(grid.fuels) };
 }

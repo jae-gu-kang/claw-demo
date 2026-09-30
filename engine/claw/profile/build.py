@@ -63,7 +63,8 @@ class BuiltProfile:
             cg_full=np.array(m["cg_full"]),
         )
         return Aircraft(fuel_mass, aero, self.engine(), ground=ground,
-                        trim_bounds=self.trim_bounds, plant_fingerprint=self.plant_fingerprint)
+                        trim_bounds=self.trim_bounds, plant_fingerprint=self.plant_fingerprint,
+                        dispersed=d != DispersionSet())
 
     def engine(self):
         from claw.params.registry import REGISTRY

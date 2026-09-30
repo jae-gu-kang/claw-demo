@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { DEFAULT_GRID, defaultGridCases, parseNumberList } from "./grid.js";
+import { parseNumberList } from "./grid.js";
 import {
-  ENVELOPE_FALLBACK, MARGIN_ACT_FALLBACK, gridCentreCase, gridStrings, templateDefaults, untouchedUpdates,
+  ENVELOPE_FALLBACK, MARGIN_ACT_FALLBACK, templateDefaults, untouchedUpdates,
 } from "./missiontemplate.js";
 import { DEFAULT_FORM, MODE_FALLBACK, defaultModeRows } from "./simrequest.js";
 import { GOHEUNG, touchdownWindowM } from "./site.js";
@@ -16,7 +16,9 @@ const EXAMPLE = JSON.parse(readFileSync(
 test("웹의 폴백은 예제 기체 문서의 사본이다 — 예제 문서가 바뀌면 여기서 빨개진다", () => {
   const d = templateDefaults(EXAMPLE);
   assert.equal(d.hasTemplate, true);
-  assert.deepEqual(d.grid, DEFAULT_GRID, "해석 격자 (lib/grid.js)");
+  // 템플릿 격자는 자동 설계 칸의 자리표시로만 읽힌다 — 해석 격자는 요구영역의 기본 격자(/grid/base)다
+  assert.deepEqual(d.grid, { machFrom: 0.14, machTo: 0.22, machStep: 0.02, alts: [100, 1000, 3000], fuels: [25] },
+    "예제 문서 trim_grid 그대로");
   // 운용 고도 칸(altMin·altMax)은 문서가 채우지 않는 빈칸 폴백이다(스키마 v3 — 아래 시험)
   const { altMin, altMax, ...fromDoc } = ENVELOPE_FALLBACK;
   assert.deepEqual([altMin, altMax], ["", ""]);
@@ -60,9 +62,8 @@ test("다른 기체의 템플릿 — 모드 표·격자·접지 창이 그 값�
   assert.equal(rows.find((r) => r.name === "launch").speed, "130");
   assert.equal(rows.find((r) => r.name === "cruise").lonValue, "450");
   assert.deepEqual(defaultModeRows(), defaultModeRows(MODE_FALLBACK), "기본 호출은 폴백 그대로");
-  assert.equal(defaultGridCases(d.grid).length, 3 * 1 * 2);
+  assert.deepEqual(d.grid, { machFrom: 0.4, machTo: 0.5, machStep: 0.05, alts: [2000], fuels: [100, 300] });
   assert.equal(touchdownWindowM(GOHEUNG, d.rolloutM), GOHEUNG.runwayLengthM - 600);
-  assert.deepEqual(gridStrings(d.grid), { machFrom: "0.4", machTo: "0.5", machStep: "0.05", alts: "2000", fuels: "100, 300" });
 });
 
 test("손대지 않은 칸만 바꾼다 — 사용자가 고친 칸·같은 값은 건드리지 않는다", () => {
@@ -104,12 +105,4 @@ test("V-n 고도 — 템플릿 envelope.alt가 수 하나든 목록이든 폼 �
   assert.deepEqual(vnAlts(1200), [1200], "스칼라(종전 모양)");
   assert.deepEqual(vnAlts([1200]), [1200], "한 개 목록");
   assert.deepEqual(vnAlts([0, 1500, 3000]), [0, 1500, 3000], "여러 고도 = 병렬 비교");
-});
-
-test("gridCentreCase — 격자의 가운데 점(행 추가 첫 값), 기체 상수가 아니라 격자에서", () => {
-  assert.deepEqual(gridCentreCase(DEFAULT_GRID), { mach: 0.18, alt: 1000, fuel: 25 });
-  // 짝수 개는 아래쪽 가운데 — 목록 끝(가장자리)이 아니다
-  assert.deepEqual(gridCentreCase({ machFrom: 0.12, machTo: 0.2, machStep: 0.02, alts: [200, 3000], fuels: [10, 50] }),
-    { mach: 0.16, alt: 200, fuel: 10 });
-  assert.throws(() => gridCentreCase({ ...DEFAULT_GRID, fuels: [] }), /비었다/);
 });

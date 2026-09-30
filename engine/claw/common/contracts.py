@@ -107,6 +107,10 @@ class TrimResult:
     # 트림 여유 수치(trim.trim_reserve) — 플래그(saturation_ok·alpha_margin_ok)가 이 수치에서 나온다.
     # 비어 있으면 미계산(지상 평형·옛 저장물): 0으로 읽지 않는다
     reserve: dict = field(default_factory=dict)
+    # "computed" | "reused" — 트림 저장소에서 꺼내 조립한 해인가(trim.trim_batch가 인스턴스에 덮어쓴다). 주석 없는 클래스
+    # 속성이라 dataclass 필드가 아니다: 엔진 골든이 필드 목록을 부호화하고, 서버 직렬화도 싣지 않는다(재사용 집계는
+    # 서버가 trim_reuse로 따로 echo한다)
+    origin = "computed"
 
 
 @dataclass

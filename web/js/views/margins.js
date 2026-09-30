@@ -14,7 +14,7 @@ loopGainSources — 종전의 설계 상수 law.design은 확정 표가 있는 �
 문서 게인 루프는 kp를 싣지 않고 `gain_source: "profile"`로 보낸다 — 서버가 **칸마다** 그 칸의 운용점에서 조립 법칙의
 게인을 읽으므로(엔진 openloop._effective_gain과 같은 자) 모든 칸이 그 칸의 실제 게인으로 잰 마진이다. 결과 캡션의
 격자 게인 범위는 서버가 칸마다 실제로 쓴 게인(entry.gains)에서 낸다. 편집 표의 kp 칸은 「게인 읽을 마하」(비우면
-격자 가운데)의 값이고, 고치면 그 루프는 손으로 적은 한 값으로 전 칸을 잰다. 확정 게인 표가 낡았으면 서버 조립이
+고른 점의 가운데)의 값이고, 고치면 그 루프는 손으로 적은 한 값으로 전 칸을 잰다. 확정 게인 표가 낡았으면 서버 조립이
 거부하므로(시뮬·코드와 같은 422) 그때만 종전대로 한 점에서 읽은 kp를 싣고, 그 kp가 그 칸의 게인인 칸이 몇인지를
 캡션이 말한다(나머지 칸은 근사 — 칸별 보드선도도 그 칸의 게인을 덧붙인다). 손대지 않은 동안은 문서를 따라가고,
 고치면 그 편집이 남는다. 문서에 게인이 없으면 루프도 없다(예제 값을 물려주지 않는다 — 기체 고정 금지).
@@ -23,19 +23,22 @@ loopGainSources — 종전의 설계 상수 law.design은 확정 표가 있는 �
 루프는 닫고 그 루프를 끊는다(엔진 broken_loop — AS94900). 종전 control.margin 부호를 그대로 칠해 다중 교차 레이트
 루프가 안정인데도 전 칸 음수로 칠해졌다(e2e D2). 그 뜻은 결과 캡션(lib/loops.js marginSemanticsText)이 그림 밑에서 말한다.
 
-쇼케이스 진행기 신호(lib/showcasecue.js): run() — 격자를 미션 템플릿 격자로, 루프를 문서 게인(칸별 법칙 게인)으로
-세워 [실행]과 같은 길로 돌린 뒤, 최악 PM 칸의 보드선도를 열고 PM·GM 최악·비행성 최악과 루프 게인
+점은 요구영역의 기본 격자(서버 /grid/base — 트림 탭과 같은 점·같은 이름)에서 보낼 수 있는 점 전부가 기본이고, 공용
+고르개(views/condpick.js — 영향성과 같은 부품)로 좁힌다(05 §11.13 5단계 나머지). 요구영역이 미정의면 [실행]이 막힌다 —
+템플릿 격자로 되돌아가지 않는다. 「게인 읽을 마하」를 비우면 고른 점의 가운데(lib/opspace.js centrePoint)다.
+
+쇼케이스 진행기 신호(lib/showcasecue.js): run() — 비행조건을 「전부」로 되돌려 기본 격자를 다시 받고, 루프를 문서
+게인(칸별 법칙 게인)으로 세워 [실행]과 같은 길로 돌린 뒤, 최악 PM 칸의 보드선도를 열고 PM·GM 최악·비행성 최악과 루프 게인
 출처를 보고한다.
 */
 
 import { ApiError, api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import { FQ_BADGE, fqKey, fqLegendText, fqMeasureText, fqWorst, marginsCueReport } from "../lib/fq.js";
-import { DEFAULT_GRID, machRange, nameCases, parseNumberList, serpentineCases } from "../lib/grid.js";
-import {
-  DOC_FAILED_HINT, MARGIN_ACT_FALLBACK, MISSING_TEMPLATE_HINT, gridCentreCase, gridStrings,
-} from "../lib/missiontemplate.js";
-import { applyUntouched, fillGridFromProfile, selectedDefaults } from "./missionfill.js";
+import { DOC_FAILED_HINT, MARGIN_ACT_FALLBACK } from "../lib/missiontemplate.js";
+import { centrePoint, reuseLine, reuseTip } from "../lib/opspace.js";
+import { applyUntouched, selectedDefaults } from "./missionfill.js";
+import { createCondPicker } from "./condpick.js";
 import {
   AXIS_NAMES, DELAY_TOOL_DEFAULT, LOOPS_LOADING_TEXT, bodeLawGainNote, bodeMarginNotes, bodeOthers, cellGainNote,
   delaySourceText, followDocRows, gainCueData, gainSourceText, gainSummaryTag, lawGainRecord,
@@ -80,7 +83,7 @@ let removedDocLoops = [];
 let designLoops = null;
 // 루프 게인 출처(lib/loops.js loopGainSources — 확정 표 | 규칙 스케줄) | {error} — 탭을 그릴 때마다 다시 받는다
 let gainSources = null;
-// 「게인 읽을 마하」 칸 글 — 비면 격자 가운데 마하 (탭 재진입에도 유지)
+// 「게인 읽을 마하」 칸 글 — 비면 고른 점의 가운데 마하 (탭 재진입에도 유지)
 let refMachText = "";
 // 제출·완료한 실행의 게인 기록(lib/loops.js runGainInfo) — 제출 시점에 굳혀 결과(lastBody)와 짝으로 산다
 let runningGains = null;
@@ -146,13 +149,12 @@ export function render() {
     damp: el("div"),   // 패널 — 감쇠비 표
   };
 
-  // 격자 기본값의 정본은 lib/grid.js DEFAULT_GRID다 — 여기 숫자를 다시 적으면
-  // 마진 맵만 엔벨로프 밖 격자로 되돌아간다(v0.44에서 실제로 그렇게 남았다).
-  const fMachFrom = el("input", { class: "num", value: String(DEFAULT_GRID.machFrom) });
-  const fMachTo = el("input", { class: "num", value: String(DEFAULT_GRID.machTo) });
-  const fMachStep = el("input", { class: "num", value: String(DEFAULT_GRID.machStep) });
-  const fAlts = el("input", { value: DEFAULT_GRID.alts.join(", ") });
-  const fFuels = el("input", { class: "num", value: DEFAULT_GRID.fuels.join(", ") });
+  // 비행조건 — 이 탭은 격자를 따로 정하지 않는다(05 §11.13 5단계 나머지): 요구영역의 기본 격자(서버 /grid/base,
+  // 트림 탭과 같은 점·같은 이름)에서 보낼 수 있는 점 **전부**가 기본이고, 공용 고르개(views/condpick.js — 영향성과
+  // 같은 부품)로 좁힌다. 요구영역이 미정의면 보내지 않는다 — 템플릿 격자로 되돌아가지 않는다.
+  // 고르개가 바뀌면(격자 도착·선택) 가운데 점도 바뀐다 — 손대지 않은 루프의 게인을 다시 읽는다(아래에서 갈아 끼운다)
+  let onCondChange = () => {};
+  const picker = createCondPicker({ key: "margins", onChange: () => onCondChange(), where: "위 「비행조건」" });
   const fFp = el("input", { value: "web-margin-v1" });
   // 작동기·지연 포함 — [기본값 01 §4.2] 체크 ON으로 시작, 꺼서 영향 분리 비교 가능
   const fUseAct = el("input", { type: "checkbox", checked: true });
@@ -164,12 +166,6 @@ export function render() {
   // 결과 캡션이 그 출처를 수치 옆에 단다(appliedSummary)
   const fDelay = el("input", { class: "num-sm", value: String(DELAY_TOOL_DEFAULT.delay_s) });
   const fPade = el("input", { class: "num-sm", value: String(DELAY_TOOL_DEFAULT.pade_order) });
-  // 격자 칸은 예제 기체의 격자(폴백)로 먼저 선다 — 고른 기체의 미션 템플릿 격자가 손대지 않은 칸을 채운다.
-  // 격자가 바뀌면 가운데 마하도 바뀐다 — 손대지 않은 루프의 게인을 다시 읽는다
-  const gridHint = el("p", { class: "hint" });
-  fillGridFromProfile({ machFrom: fMachFrom, machTo: fMachTo, machStep: fMachStep, alts: fAlts, fuels: fFuels }, gridHint,
-    () => refreshDocLoops());
-  for (const f of [fMachFrom, fMachTo, fMachStep, fAlts, fFuels]) f.addEventListener("input", () => refreshDocLoops());
   const defaultsReady = selectedDefaults().then((d) => {
     if (d) applyUntouched({ wn: fWn, zeta: fZeta }, MARGIN_ACT_FALLBACK, d.margins);
     return d;
@@ -177,38 +173,37 @@ export function render() {
 
   // ── 루프 게인 — 고른 기체가 실제로 나는 k_rate (확정 표 | 규칙 스케줄, lib/loops.js loopGainSources) ──
   // 손대지 않은 루프는 서버가 칸마다 읽는다(gain_source "profile"). 편집 표의 kp 칸은 한 점의 값 — 「게인 읽을 마하」
-  // 칸, 비우면 격자 가운데. 고칠 때의 출발값이고, 확정 표가 낡아 칸별로 못 읽을 때 전 칸에 싣는 값이다
+  // 칸, 비우면 고른 점의 가운데(lib/opspace.js centrePoint). 고칠 때의 출발값이고, 확정 표가 낡아 칸별로 못 읽을 때
+  // 전 칸에 싣는 값이다
   const fRefMach = el("input", {
     class: "num-sm", value: refMachText, placeholder: "격자 가운데",
-    title: "편집 표의 kp 칸을 이 마하에서 기체가 실제로 나는 게인으로 세운다 — 비우면 격자 가운데 마하. "
+    title: "편집 표의 kp 칸을 이 마하에서 기체가 실제로 나는 게인으로 세운다 — 비우면 고른 점의 가운데"
+      + "(가운데 연료 → 가운데 고도 → 그 행의 가운데 마하). "
       + "손대지 않은 루프는 실행 때 서버가 칸마다 그 칸의 게인을 읽으므로 이 값과 무관하게 전 칸이 정확하다. "
       + "확정 게인 표가 낡았을 때만 이 한 값을 전 칸에 싣는다(그 마하 열만 정확)",
     oninput: (ev) => { refMachText = ev.target.value; refreshDocLoops(); },
   });
-  const gridNow = () => ({
-    machFrom: Number(fMachFrom.value), machTo: Number(fMachTo.value), machStep: Number(fMachStep.value),
-    alts: parseNumberList(fAlts.value), fuels: parseNumberList(fFuels.value),
-  });
-  // 게인을 읽을 점 {mach, alt, fuel} — 격자·칸 글을 못 읽으면 null (고치는 중이다)
-  const refPoint = () => {
-    let centre;
-    try {
-      centre = gridCentreCase(gridNow());
-    } catch {
-      return null;
-    }
-    const t = refMachText.trim();
-    if (!t) return centre;
-    const m = Number(t);
-    return Number.isFinite(m) && m > 0 ? { ...centre, mach: m } : null;
-  };
+  // 고른 점 — 받는 중·요구 미정의·0점이면 null(사유는 고르개 요약이 말한다)
   const gridPoints = () => {
     try {
-      const g = gridNow();
-      return serpentineCases(machRange(g.machFrom, g.machTo, g.machStep), g.alts, g.fuels);
+      return picker.selectedCases();
     } catch {
       return null;
     }
+  };
+  // 「게인 읽을 마하」 칸이 틀렸으면 그 사유
+  const refMachErr = () => {
+    const t = refMachText.trim();
+    const m = Number(t);
+    return t && !(Number.isFinite(m) && m > 0)
+      ? `「게인 읽을 마하」가 양수가 아니다: ${refMachText} — 비우면 고른 점의 가운데 마하` : null;
+  };
+  // 게인을 읽을 점 {mach, alt, fuel} — 고른 점의 가운데(마하는 칸에 적었으면 그 값). 점이 없거나 칸 글이 틀리면 null
+  const refPoint = () => {
+    const centre = centrePoint(gridPoints());
+    if (!centre || refMachErr()) return null;
+    const t = refMachText.trim();
+    return t ? { ...centre, mach: Number(t) } : centre;
   };
   // 문서 게인 행을 지금 점에서 다시 읽는다 — 손대지 않은 루프만, 루프마다 따라간다(복원 버튼용 designLoops는 늘
   // 갱신). force면 손댄 행·지운 루프도 버리고 문서 행 그대로. 점을 못 정하면 사유, 아니면 null
@@ -217,7 +212,10 @@ export function render() {
     if (visit !== marginsVisit) return null;
     if (!gainSources || gainSources.error) return null;
     const ref = refPoint();
-    if (!ref) return `「게인 읽을 마하」가 양수가 아니다: ${refMachText} — 비우면 격자 가운데 마하`;
+    if (!ref) {
+      paintLoopNote();
+      return refMachErr() ?? "게인을 읽을 점이 없다 — 위 「비행조건」의 기본 격자를 받은 뒤 점을 고른다";
+    }
     designLoops = loopsAt(gainSources, ref);
     if (force) removedDocLoops = [];
     const next = followDocRows(force ? [] : loopRows, designLoops.rows, removedDocLoops);
@@ -248,6 +246,9 @@ export function render() {
         lawGainsPerCase(gainSources)))
       : null;
     if (text) loopNote.append(el("p", { class: "hint" }, text));
+    else if (gainSources && !gainSources.error && !ref) {
+      loopNote.append(el("p", { class: "hint" }, refMachErr() ?? "게인을 읽을 점을 기다린다 — 위 「비행조건」"));
+    }
     if (designLoops?.skipped.length) {
       loopNote.append(el("p", { class: "hint" },
         `문서 게인으로 세우지 않은 루프: ${designLoops.skipped.map((k) => `${k.name} — ${k.reason}`).join(" · ")}`));
@@ -411,13 +412,9 @@ export function render() {
         if (visit !== marginsVisit) return "문서 게인을 받는 사이 탭이 다시 그려졌다 — 다시 누른다";
         if (loopLoadState(gainSources) === "loading") return "문서 게인을 받지 못했다 — 다시 누른다";
       }
-      // 이름은 격자 값 그대로 명시한다(lib/grid.js nameCases — 영향성·엔벨로프와 같다). 서버 기본 이름은 마하를
-      // 소수 둘째 자리로 반올림해 M0.135 칸을 「M0.14」로 부른다 — 최악 칸 보고·감쇠비 표가 격자에 없는 마하를 말한다
-      const cases = nameCases(serpentineCases(
-        machRange(Number(fMachFrom.value), Number(fMachTo.value), Number(fMachStep.value)),
-        parseNumberList(fAlts.value),
-        parseNumberList(fFuels.value),
-      ));
+      // 점은 고르개의 선택(기본 = 보낼 점 전부) — 이름은 서버(엔진 case_name)가 값 그대로 지은 것이라 트림 탭·영향성과
+      // 같은 점이 같은 이름이다. 받는 중·요구 미정의·0점이면 던진다(아래 catch가 사유를 화면·신호에 싣는다)
+      const cases = picker.selectedCases();
       // 손대지 않은 루프는 **지금 격자**의 점에서 문서 게인을 다시 읽는다 — 격자를 고친 뒤 옛 가운데 마하의 게인으로
       // 재지 않게. 점을 못 정하면(「게인 읽을 마하」 오타) 제출하지 않는다
       const refErr = refreshDocLoops();
@@ -463,26 +460,31 @@ export function render() {
   renderLoopEditor(loopBox);
   paintLoopNote();
 
+  // [실행] — 요구영역이 미정의면 누를 수 없다(사유는 툴팁·고르개 요약). 템플릿 격자로 되돌아가 돌지 않는다
+  // 인자 없이 부른다 — run(cue)에 클릭 이벤트가 들어가면 신호로 읽혀 가짜 보고(token 없음)를 store에 쓰고
+  // 최악 칸 보드선도를 멋대로 연다
+  const runBtn = el("button", { class: "primary", onclick: () => run() }, "실행");
+  const paintRunBtn = () => {
+    const g = picker.grid();
+    const blocked = g && !g.region ? `요구영역 미정의 — ${g.reason}` : null;
+    runBtn.disabled = Boolean(blocked);
+    runBtn.title = blocked ?? "";
+  };
+
   const drawers = createDrawers({
     id: "margins-drawer",
     initial: openDrawer,
     onOpen: (k) => { openDrawer = k; },
     defs: [
-      { key: "grid", label: "격자·계보", group: "입력",
-        title: "마하 범위·간격, 고도·연료 목록, 지문",
+      { key: "grid", label: "계보", group: "입력",
+        title: "결과에 남길 지문 — 점은 위 「비행조건」(요구영역 기본 격자)에서 고른다",
         build: () => [
-          el("h2", {}, "케이스 격자"),
+          el("h2", {}, "계보"),
           el("div", { class: "row" },
-            el("label", { class: "field" }, "마하 시작", fMachFrom),
-            el("label", { class: "field" }, "마하 끝", fMachTo),
-            el("label", { class: "field" }, "간격", fMachStep),
-            el("label", { class: "field grow" }, "고도 목록 [m]", fAlts),
-            el("label", { class: "field" }, "연료 [kg]", fFuels),
             el("label", { class: "field" }, "지문", fFp)),
           el("p", { class: "hint" },
-            "검증 격자는 설계(게인 스케줄) 격자보다 촘촘해야 한다 — 설계점에서만 재면 "
-            + "스케줄 경계점 사이에서 마진이 꺼지는 곳을 못 찾는다. "
-            + "엔벨로프 탭 ⑥ 검증·마진 층이 같은 이야기를 한다."),
+            "점은 요구영역의 기본 격자다 — 트림 탭 「운용영역·기본 격자」가 정한다. "
+            + "스케줄 절점 사이까지 보려면 그 명세의 마하 점 수를 늘린다."),
         ] },
       { key: "loops", label: "개루프 정의", group: "입력",
         title: "축·출력 상태·입력·kp·ki·sign — 서버 loops[] 계약 그대로",
@@ -498,7 +500,7 @@ export function render() {
             + "닫고 그 루프를 끊어 잰다(AS94900의 끊는 자리). "
             + "루프를 전부 지우면 고유치·감쇠비만 계산. 3축 레이트 루프는 고른 기체가 실제로 나는 k_rate로 선다 — "
             + "문서 확정 게인 표가 있으면 그 표, 없으면 규칙 스케줄. 손대지 않은 루프는 실행 때 서버가 칸마다 그 칸의 "
-            + "게인을 읽어 전 칸이 정확하다(표의 kp 칸은 「게인 읽을 마하」의 값 — 비우면 격자 가운데). kp를 고친 루프는 "
+            + "게인을 읽어 전 칸이 정확하다(표의 kp 칸은 「게인 읽을 마하」의 값 — 비우면 고른 점의 가운데). kp를 고친 루프는 "
             + "그 한 값으로 전 칸을 잰다. 확정 게인 표가 낡았으면 칸별로 못 읽어 한 값을 싣고, 다른 마하 열은 근사다."),
         ] },
       { key: "plant", label: "작동기·지연", group: "입력",
@@ -545,14 +547,12 @@ export function render() {
   const root = el("div", { class: "tab-page" },
     tabTop({
       title: "마진 맵",
-      lead: "격자의 점마다 선형화해 개루프 마진을 잰다 — 설계점만이 아니라 그 사이까지 "
-        + "훑어야 스케줄 경계에서 마진이 꺼지는 곳이 보인다. 격자·루프·조건은 아래 패널에.",
-      // 인자 없이 부른다 — run(cue)에 클릭 이벤트가 들어가면 신호로 읽혀 가짜 보고(token 없음)를 store에 쓰고
-      // 최악 칸 보드선도를 멋대로 연다
-      actions: [el("button", { class: "primary", onclick: () => run() }, "실행")],
+      lead: "요구영역 기본 격자의 점마다 선형화해 개루프 마진을 잰다 — 설계점만이 아니라 그 사이까지 "
+        + "훑어야 스케줄 경계에서 마진이 꺼지는 곳이 보인다. 루프·조건은 아래 패널에.",
+      actions: [runBtn],
       // 판정선은 **패널에 넣지 않는다** — 히트맵 색이 무엇을 기준으로 갈리는지이고,
       // 폴백을 쓰는 중이라면 그 사실이 색과 같은 화면에 있어야 한다
-      extra: [criteriaBox, gridHint, progressBox, errBox],
+      extra: [criteriaBox, picker.el, progressBox, errBox],
     }),
     // PM·GM 히트맵 — 카드 밖, 페이지 위에 그대로. 이 탭의 답이 여기 있다
     tabStage(slots.head, slots.plots),
@@ -568,9 +568,17 @@ export function render() {
   if (runningJobId) watch(); // 실행 중 재진입 — 진행 UI 재부착 (리뷰 S4)
   if (criteria && criteriaFor === selId()) drawCriteria(); // 받아 둔 것을 먼저 보이고, 기준 편집을 따라 다시 받는다
   loadCriteria();
+  // 고르개가 바뀌면 — [실행] 막힘과 손대지 않은 루프의 게인(가운데 점이 바뀐다). 들어올 때마다 요구영역의 기본 격자를
+  // 다시 받는다(그사이 요구영역을 고쳤으면 새 점을 따른다 — 고른 점은 이름으로 남는다)
+  onCondChange = () => {
+    paintRunBtn();
+    refreshDocLoops();
+  };
+  paintRunBtn();
+  picker.refresh();
 
-  // 쇼케이스 신호 — 격자는 미션 템플릿 격자, 루프는 문서 게인(서버가 칸마다 읽는 법칙 게인 — 편집 표는 가운데 마하 값),
-  // 작동기는 문서 값으로 세운 뒤(손댄 칸도 — 진행기는 「문서의 기체」를 잰다) [실행]과 같은 길로. 템플릿·게인이
+  // 쇼케이스 신호 — 비행조건은 기본 격자의 보낼 점 전부, 루프는 문서 게인(서버가 칸마다 읽는 법칙 게인 — 편집 표는 가운데 마하 값),
+  // 작동기는 문서 값으로 세운 뒤(손댄 칸도 — 진행기는 「문서의 기체」를 잰다) [실행]과 같은 길로. 요구영역·게인이
   // 없으면 예제 값으로 돌리지 않고 사유를 단다
   const handleCue = async (c) => {
     try {
@@ -581,17 +589,17 @@ export function render() {
       const [d] = await Promise.all([defaultsReady, loopsReady]);
       // 기다리는 사이 탭이 다시 그려졌으면 이 화면은 버려졌다 — 여기서 잡을 걸면 새 화면엔 감시자도 보드선도도 없다
       if (visit !== marginsVisit) throw new Error("신호를 처리하기 전에 탭이 다시 그려졌다");
-      if (!d || !d.hasTemplate) throw new Error(d ? MISSING_TEMPLATE_HINT : DOC_FAILED_HINT);
+      if (!d) throw new Error(DOC_FAILED_HINT);
       if (gainSources?.error) throw new Error(`문서 게인을 받지 못했다 — ${cueReason(gainSources.error)}`);
-      const g = gridStrings(d.grid);
-      fMachFrom.value = g.machFrom;
-      fMachTo.value = g.machTo;
-      fMachStep.value = g.machStep;
-      fAlts.value = g.alts;
-      fFuels.value = g.fuels;
+      // 비행조건은 손대지 않은 상태(보낼 점 전부)로 되돌리고 지금 요구영역의 격자를 다시 받는다 — 진행기는 「문서의
+      // 기체」를 잰다. 요구영역이 미정의면 템플릿 격자로 돌지 않고 사유를 단다
+      picker.reset();
+      const g = await picker.latest();
+      if (visit !== marginsVisit) throw new Error("신호를 처리하기 전에 탭이 다시 그려졌다");
+      if (g.status !== "ok") throw new Error(g.reason);
       if (d.margins.wn) fWn.value = d.margins.wn;
       if (d.margins.zeta) fZeta.value = d.margins.zeta;
-      // 손댄 「게인 읽을 마하」·루프도 문서 게인으로 되돌린다(편집 표는 템플릿 격자 가운데 마하 값 — 실행은 칸별)
+      // 손댄 「게인 읽을 마하」·루프도 문서 게인으로 되돌린다(편집 표는 고른 점 가운데 마하 값 — 실행은 칸별)
       refMachText = "";
       fRefMach.value = "";
       const refErr = refreshDocLoops({ force: true });
@@ -950,7 +958,9 @@ function renderResults(slots, body) {
   // clear().append()는 네이티브라 그것을 "false" 텍스트로 붙인다 (el은 걸러 낸다)
   clear(slots.head).append(el("div", {},
     el("p", { style: "margin:0 0 4px" },
-      el("b", {}, `계산 완료 — 케이스 ${entries.length}건 · 루프 ${loops.length}개`)),
+      el("b", {}, `계산 완료 — 케이스 ${entries.length}건 · 루프 ${loops.length}개`),
+      reuseLine(body.trim_reuse)
+        ? el("span", { class: "hint", title: reuseTip(body.trim_reuse) }, ` · ${reuseLine(body.trim_reuse)}`) : null),
     el("p", { class: "hint", style: "margin:0 0 6px" }, appliedSummary(body, lastBody === body ? lastDelaySrc : null)),
     el("div", { class: "row" }, fuelSel),
     // 안내가 플롯 **앞**에 있어야 한다 — 상세가 루프 구간마다 열리므로 맨 아래

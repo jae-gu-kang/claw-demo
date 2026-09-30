@@ -54,7 +54,7 @@ def test_trim_batch_cancel_partial(client, wait_job, monkeypatch):
 
     real_batch = trim_route.trim_batch
 
-    def gated_batch(ac, cases, fingerprint="", on_progress=None):
+    def gated_batch(ac, cases, fingerprint="", on_progress=None, **kw):  # store·reuse 그대로 넘긴다
         deadline = _time.time() + 10.0
 
         def gated_progress(done, total, tr):
@@ -64,7 +64,7 @@ def test_trim_batch_cancel_partial(client, wait_job, monkeypatch):
                 cancelled = on_progress(done, total, tr)
             return cancelled
 
-        return real_batch(ac, cases, fingerprint=fingerprint, on_progress=gated_progress)
+        return real_batch(ac, cases, fingerprint=fingerprint, on_progress=gated_progress, **kw)
 
     monkeypatch.setattr(trim_route, "trim_batch", gated_batch)
 

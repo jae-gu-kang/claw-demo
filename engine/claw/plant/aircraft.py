@@ -25,7 +25,7 @@ XE_NAMES = ("u", "v", "w", "p", "q", "r", "phi", "theta", "psi", "pn", "pe", "h"
 
 class Aircraft:
     def __init__(self, fuel_mass, aero, engine, ground=None, trim_bounds=None,
-                 plant_fingerprint=None):
+                 plant_fingerprint=None, dispersed=False):
         self.fuel_mass = fuel_mass
         self.aero = aero
         self.engine = engine
@@ -35,6 +35,8 @@ class Aircraft:
         self.trim_bounds = trim_bounds
         # 이 기체를 조립한 프로파일의 플랜트 지문 — 해석이 기체·형상의 짝을 대조하는 데 쓴다
         self.plant_fingerprint = plant_fingerprint
+        # 섭동(DispersionSet) 조립인가 — 플랜트 지문은 명목 문서의 것이라 섭동을 모른다. 트림 저장소가 이것으로 거부한다
+        self.dispersed = bool(dispersed)
 
     def fm(self, vel_b, omega_b, q_nb, h, controls, fuel, pos_n=None, ground_elev=0.0):
         """동체축 총 힘·모멘트 → (F_b, M_b, m, J). 중력 포함, 지면은 장착 시에만.

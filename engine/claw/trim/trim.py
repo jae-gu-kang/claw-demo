@@ -31,6 +31,7 @@ from claw.common.constants import G0
 from claw.common.contracts import SurfaceCommand, TrimResult, VehicleState
 from claw.env import isa_atmosphere
 from claw.plant.aircraft import XE_H, XE_P, XE_PHI, XE_Q, XE_R, XE_THETA, XE_U, XE_V, XE_W
+from claw.trim.store import TrimRecord
 
 # 탐색 범위·잔차 허용치(해석 설정)와 판정선(sat_frac·thr_margin·alpha_margin — 기준)은 여기 없다 — Aircraft.trim_bounds
 # (BuiltProfile.trim_bounds가 문서 solver 절과 적용 기준 criteria.trim_margin에서 싣는다, 05 §11.13 이관 11·12단계).
@@ -122,14 +123,24 @@ def _trim_bounds(aircraft) -> dict:
     return tb
 
 
-def trim_level(aircraft, case, z0=None, fingerprint=""):
-    tb = _trim_bounds(aircraft)
+def _level_resid(aircraft, case):
     atm = isa_atmosphere(case.alt)
     v_true = case.mach * atm.a
 
     def resid(z):
         xd = aircraft.deriv_euler(_xe(z, v_true, case.alt), _controls(z), case.fuel)
         return np.array([xd[XE_U], xd[XE_W], xd[XE_Q]])
+
+    return resid, v_true
+
+
+def solve_level(aircraft, case, z0=None):
+    """수평비행 트림의 **풀이**만 — (x = [α, δe, thr], SLSQP 성공, 비용). 판정은 assemble_level이 세운다.
+
+    풀이와 조립을 가른 이유: 트림 저장소(trim/store.py)는 풀이 결과만 두고 판정은 재사용 때 지금 기준으로 다시 세운다
+    (판정선은 기준 criteria.trim_margin이라 트림 지문 밖이다). trim_level = assemble_level(solve_level) — 비트 동일."""
+    tb = _trim_bounds(aircraft)
+    resid, _v = _level_resid(aircraft, case)
 
     def cost(z):
         return float(np.sum(resid(z) ** 2))
@@ -141,8 +152,16 @@ def trim_level(aircraft, case, z0=None, fingerprint=""):
         bounds=[tb["alpha"], tb["de"], THR_BOUNDS],
         options={"maxiter": 300, "ftol": 1e-16},
     )
-    alpha, de, thr = res.x
-    r = resid(res.x)
+    return res.x, bool(res.success), float(res.fun)
+
+
+def assemble_level(aircraft, case, x, success, cost, fingerprint=""):
+    """풀이 결과 x → TrimResult — 잔차·여유·판정 플래그를 지금 기체의 trim_bounds(판정선 포함)로 세운다."""
+    tb = _trim_bounds(aircraft)
+    resid, v_true = _level_resid(aircraft, case)
+    x = np.asarray(x, dtype=float)
+    alpha, de, thr = x
+    r = resid(x)
 
     residual_ok = bool(np.all(np.abs(r) < float(tb["resid_tol"])))
     reserve = trim_reserve(alpha, de, thr, case.mach, tb)
@@ -169,12 +188,17 @@ def trim_level(aircraft, case, z0=None, fingerprint=""):
         case=case,
         state=state,
         control=control,
-        converged=bool(res.success) and residual_ok,
-        cost=float(res.fun),
+        converged=bool(success) and residual_ok,
+        cost=float(cost),
         flags=flags,
         params_fingerprint=fingerprint,
         reserve=reserve,
     )
+
+
+def trim_level(aircraft, case, z0=None, fingerprint=""):
+    x, success, cost = solve_level(aircraft, case, z0=z0)
+    return assemble_level(aircraft, case, x, success, cost, fingerprint=fingerprint)
 
 
 GROUND_TILT_BOUNDS = (-0.5, 0.5)  # [rad] 지상 평형 탐색의 θ·φ 범위
@@ -291,24 +315,52 @@ def trim(aircraft, case, fingerprint=""):
     return fn(aircraft, case, fingerprint=fingerprint)
 
 
-def trim_batch(aircraft, cases, fingerprint="", on_progress=None):
+REUSE_POLICIES = ("converged", "none")
+
+
+def trim_batch(aircraft, cases, fingerprint="", on_progress=None, *, store=None, reuse="converged"):
     """케이스 목록 순서대로 트림 — 직전 수렴해를 다음 초기값으로 시드, 연속성 판정 포함.
 
     on_progress(done, total, tr): 케이스마다 호출 (M13 서버 진행률 경로).
     truthy 반환 = 협조적 취소 — 지금까지의 부분 결과를 반환한다. 콜백 예외는
     전파된다 (부분 결과 소실) — 취소는 반드시 truthy 반환으로.
+
+    store(trim.store.TrimStoreScope | None): 트림 저장소의 한 트림 지문 창(05 §11.8). None이면 종전 그대로다(엔진
+    골든). 주면 reuse="converged"가 저장된 **수렴** 기록을 풀지 않고 조립하고(TrimResult.origin "reused" — 판정·여유는
+    지금 기준, continuity_ok는 이 배치 안의 직전 점과 다시 잰다), 새로 푼 해는 수렴 여부와 무관하게 저장한다.
+    reuse="none"은 읽지 않고 쓰기만 한다. 재사용한 해도 다음 케이스의 시드다 — 새 좌표만 인접 해에서 이어 푼다.
+    섭동 기체는 거부한다: 트림 지문이 섭동을 몰라 명목 키에 섭동 해가 들어간다.
     """
+    if reuse not in REUSE_POLICIES:
+        raise ValueError(f"재사용 정책은 {REUSE_POLICIES} 중 하나: {reuse!r}")
+    if store is not None and getattr(aircraft, "dispersed", False):
+        raise ValueError("섭동(분산) 기체의 트림은 저장소를 쓰지 않는다 — 트림 지문이 섭동을 모른다")
     cases = list(cases)
     total = len(cases)
     results = []
     z_prev = None
+    prev_name = None
     for case in cases:
-        tr = trim_level(aircraft, case, z0=z_prev, fingerprint=fingerprint)
+        if store is None:
+            tr = trim_level(aircraft, case, z0=z_prev, fingerprint=fingerprint)
+        else:
+            rec = store.get(case) if reuse == "converged" else None
+            if rec is not None and rec.converged:
+                tr = assemble_level(aircraft, case, np.array(rec.z, dtype=float), rec.success, rec.cost,
+                                    fingerprint=fingerprint)
+                tr.origin = "reused"
+            else:
+                x, ok, cost = solve_level(aircraft, case, z0=z_prev)
+                tr = assemble_level(aircraft, case, x, ok, cost, fingerprint=fingerprint)
+                store.put(case, TrimRecord(
+                    z=tuple(float(v) for v in x), success=ok, cost=cost, converged=tr.converged,
+                    seed={"kind": "cold", "from": None} if z_prev is None else {"kind": "neighbour", "from": prev_name}))
         z = np.array([tr.state.euler()[1], tr.control.elevon[0], tr.control.throttle[0]])
         if z_prev is not None:
             tr.flags["continuity_ok"] = bool(np.all(np.abs(z - z_prev) < CONTINUITY_STEP))
         if tr.converged:
             z_prev = z
+            prev_name = case.name
         results.append(tr)
         if on_progress is not None and on_progress(len(results), total, tr):
             break

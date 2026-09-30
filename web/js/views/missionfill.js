@@ -4,9 +4,8 @@
 여기 한 벌만 둔다.
 */
 
-import { DEFAULT_GRID } from "../lib/grid.js";
 import {
-  DOC_FAILED_HINT, MISSING_TEMPLATE_HINT, gridStrings, templateDefaults, untouchedUpdates,
+  templateDefaults, untouchedUpdates,
 } from "../lib/missiontemplate.js";
 import { selectedDocument } from "./profilepick.js";
 
@@ -26,19 +25,3 @@ export const firstTimeThisPage = (key) => (filledOnce.has(key) ? false : (filled
 
 /** 고른 기체의 화면 기본값 묶음(templateDefaults). 못 받으면 null — 폴백으로 동작하되 화면이 말한다(DOC_FAILED_HINT). */
 export const selectedDefaults = () => selectedDocument().then(templateDefaults).catch(() => null);
-
-/** 해석 격자 칸(machFrom·machTo·machStep·alts·fuels)을 고른 기체의 템플릿 격자로 채운다.
- *  템플릿이 없으면 hint에 그렇다고 적는다. 칸을 바꿨으면 onChanged(바꾼 칸 이름들).
- *  fill: 채울지 — 함수면 **템플릿이 도착한 뒤에** 부른다. 「페이지당 한 번」 기록을 그리기 시점에 써 버리면
- *  첫 받기가 실패했을 때 다음 방문도 영영 안 채운다. */
-export function fillGridFromProfile(inputs, hint, onChanged, { fill = true } = {}) {
-  selectedDefaults().then((d) => {
-    if (!d || !d.hasTemplate) {
-      if (hint) hint.textContent = d ? MISSING_TEMPLATE_HINT : DOC_FAILED_HINT;
-      return;
-    }
-    if (!(typeof fill === "function" ? fill() : fill)) return;
-    const changed = applyUntouched(inputs, gridStrings(DEFAULT_GRID), gridStrings(d.grid));
-    if (changed.length) onChanged?.(changed);
-  });
-}

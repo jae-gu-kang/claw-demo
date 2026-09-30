@@ -404,7 +404,7 @@ def test_envelope_scan_cancel_preserves_partial(client, wait_job, monkeypatch):
 
     real_batch = analysis_route.trim_batch
 
-    def gated_batch(ac, cases, fingerprint="", on_progress=None):
+    def gated_batch(ac, cases, fingerprint="", on_progress=None, **kw):  # store·reuse 그대로 넘긴다
         deadline = _time.time() + 10.0
 
         def gated(done, total, tr):
@@ -414,7 +414,7 @@ def test_envelope_scan_cancel_preserves_partial(client, wait_job, monkeypatch):
                 cancelled = on_progress(done, total, tr)
             return cancelled
 
-        return real_batch(ac, cases, fingerprint=fingerprint, on_progress=gated)
+        return real_batch(ac, cases, fingerprint=fingerprint, on_progress=gated, **kw)
 
     monkeypatch.setattr(analysis_route, "trim_batch", gated_batch)
     cases = [{"mach": 0.5 + 0.05 * i, "alt": 1000.0, "fuel": 200.0} for i in range(4)]
@@ -495,7 +495,7 @@ def test_margin_map_cancel_preserves_trim_results(client, wait_job, monkeypatch)
 
     real_batch = analysis_route.trim_batch
 
-    def gated_batch(ac, cases, fingerprint="", on_progress=None):
+    def gated_batch(ac, cases, fingerprint="", on_progress=None, **kw):  # store·reuse 그대로 넘긴다
         deadline = _time.time() + 10.0
 
         def gated(done, total, tr):
@@ -505,7 +505,7 @@ def test_margin_map_cancel_preserves_trim_results(client, wait_job, monkeypatch)
                 cancelled = on_progress(done, total, tr)
             return cancelled
 
-        return real_batch(ac, cases, fingerprint=fingerprint, on_progress=gated)
+        return real_batch(ac, cases, fingerprint=fingerprint, on_progress=gated, **kw)
 
     monkeypatch.setattr(analysis_route, "trim_batch", gated_batch)
     cases = [{"mach": 0.5 + 0.05 * i, "alt": 1000.0, "fuel": 200.0} for i in range(4)]

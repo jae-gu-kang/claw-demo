@@ -10,8 +10,10 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from claw.common.contracts import TrimCase
 from claw.opspace import STATE_LABEL, STATE_ORDER, base_grid, model_range_of, region_of
-from claw_server.refs import ProfileRef, profile_echo, resolve_profile
+from claw.opspace.states import COMPUTABLE
+from claw_server.refs import ProfileRef, profile_echo, resolve_profile, trim_scope
 
 router = APIRouter(tags=["grid"])
 
@@ -52,5 +54,23 @@ def post_base_grid(req: BaseGridIn, request: Request) -> dict:
     counts = {s: 0 for s in STATE_ORDER}
     for p in out["points"]:
         counts[p["state"]] += 1
+    _mark_stored(request, built, out["points"])
     return {**ctx, "reason": None, **out, "counts": {s: n for s, n in counts.items() if n},
             "labels": STATE_LABEL, "profile": echo}
+
+
+def _mark_stored(request, built, points) -> None:
+    """트림 저장소에 기록이 있는 점에 stored {state, converged}를 단다(05 §11.8) — 점의 state(트림 전 상태)는 그대로
+    둔다: 보낼 점(미계산)의 판정이 저장소 유무로 바뀌면 탭마다 보내는 집합이 달라진다. 기록이 없는 점엔 키가 없다.
+
+    동기 응답이라 판정을 새로 재지 않는다. 수렴 기록의 state는 "computable"이다 — 트림 탭의 trim_assessment도
+    수렴 해엔 조립·여유 판정만 하고 이 상태를 낸다(여유 met/short는 판정선 축이라 여기서 싣지 않는다). 미수렴 기록은
+    state None(판정 안 함)이다: 계산 실패·제약 도달·물리적 불가를 가르려면 한계 근거 풀이(SLSQP)가 필요한데, 격자를
+    받을 때마다 그걸 돌리지 않는다. 기본 재사용 정책("converged")이 이 점을 다음 실행에서 다시 푼다."""
+    scope = trim_scope(request, built)
+    if scope is None:
+        return
+    for p in points:
+        rec = scope.peek(TrimCase(p["name"], mach=p["mach"], alt=p["alt"], fuel=p["fuel"]))
+        if rec is not None:
+            p["stored"] = {"state": COMPUTABLE if rec.converged else None, "converged": bool(rec.converged)}

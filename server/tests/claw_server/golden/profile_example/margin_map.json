@@ -1,7 +1,7 @@
 {
  "golden": "margin_map",
  "mode": "full",
- "captured_at": "3a2bd4c+dirty",
+ "captured_at": "fca0f75+dirty",
  "value": {
   "dict": {
    "kind": "margin_map",
@@ -956,6 +956,16 @@
      "targets_fingerprint": "a7d8e3760f09a2b7",
      "scheme": "crit-v2",
      "source": "default"
+    }
+   },
+   "trim_reuse": {
+    "dict": {
+     "trim_fingerprint": "4446c835de709ea8",
+     "reused": 0,
+     "computed": 3,
+     "resolved_failed": 0,
+     "policy": "converged",
+     "reused_names": []
     }
    }
   }

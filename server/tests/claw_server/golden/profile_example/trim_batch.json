@@ -1,7 +1,7 @@
 {
  "golden": "trim_batch",
  "mode": "full",
- "captured_at": "3a2bd4c+dirty",
+ "captured_at": "fca0f75+dirty",
  "value": {
   "dict": {
    "kind": "trim_batch",
@@ -794,6 +794,16 @@
       "f:0x0.0p+0",
       "f:0x1.9000000000000p+8"
      ]
+    }
+   },
+   "trim_reuse": {
+    "dict": {
+     "trim_fingerprint": "4446c835de709ea8",
+     "reused": 0,
+     "computed": 5,
+     "resolved_failed": 0,
+     "policy": "converged",
+     "reused_names": []
     }
    }
   }
