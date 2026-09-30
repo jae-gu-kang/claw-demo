@@ -68,6 +68,7 @@ class FakeCtx {
   measureText(t) { return { width: String(t).length * 6 }; }
   scale() {}
   save() {}
+  clip() {} // 클립은 기록하지 않는다 — 무엇을 그리기로 했나가 시험 대상이다
   restore() {}
   translate() {}
 }

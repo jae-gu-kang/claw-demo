@@ -748,6 +748,14 @@ def _operating_region(r, p):
             "base_grid": {"n_mach": n, "alts": alts, "fuels": fuels}}
 
 
+def validate_operating_region(section):
+    """요구 운용영역 절만 검증 — 문서 검증(validate_document)과 **같은 규칙·같은 경로**(/operating_region/…).
+
+    편집 미리 보기가 문서 전체를 다시 보내지 않고 절만 잴 때 쓴다(05 §11.13 6단계). 규칙은 _operating_region 한
+    곳에만 있다 — 여기에 따로 적으면 미리 보기는 통과하고 저장이 거부하는 절이 생긴다. None은 None(절 지우기 → 초안)."""
+    return _operating_region(section, "/operating_region")
+
+
 def _body(d, *, with_variants):
     top = SECTIONS if with_variants else tuple(k for k in SECTIONS if k != "variants")
     if isinstance(d, dict):

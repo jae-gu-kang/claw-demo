@@ -544,6 +544,11 @@
     않는다. 예제 기체는 엔진 패키지 데이터라 읽기 전용(리비전 0)이고, 고치려면 복제한다.
   - 트림 저장소(`claw.trim.store`, `app.state.trim_store`, v1.72)는 결과 저장소·기체 저장소와 달리 **프로세스 메모리**다 —
     재시작이면 비고, `$CLAW_TRIM_STORE_LIMIT`(기본 20000, 0 = 끔)가 LRU 상한이다(05 §11.8).
+  - 요구영역 절만 고치는 길(v1.74, 05 §11.2): `POST /grid/region/preview`는 저장 없이 윤곽 · 기본 격자 · 「바꾸면 영향」을 내고,
+    `PUT /profiles/{id}/operating-region` `{base_revision, operating_region}`은 그 절만 새 리비전으로 쓴다(전체 PUT과 같은 가드 ·
+    같은 저장 문서 — `_store_update` 공유), `GET /profiles/{id}/region-history`는 리비전별 요구영역 판(`region_key`) 계보다 — `{rows, omitted}`,
+    `limit`(기본 50, 최신부터), 리비전별 요약은 프로세스 안에서 (id, 리비전)으로 기억한다(리비전은 불변). 미리 보기는
+    `outline`(보이는 연료)과 함께 경계표 층마다의 `outlines`를 낸다
     내보내기는 조회, 가져오기는 생성과 같은 경로다. 기체 id는 `_`로 시작할 수 없다(저장소 내부
     폴더 자리). 삭제는 목록·조회에서만 빼고 리비전 파일을 남겨, 같은 id로 다시 만들면 리비전
     번호를 **이어 센다** — 옛 결과의 (id, 리비전)이 새 문서를 가리키면 안 된다. (id, 리비전)은

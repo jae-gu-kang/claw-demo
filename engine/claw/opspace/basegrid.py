@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from claw.design.points import case_name
 from claw.opspace.states import NOT_RUN, UNDEFINED, pre_state
 
 _EPS = 1e-9
@@ -30,6 +29,9 @@ def base_grid(region, model, *, n_mach: int | None = None, alts=None, fuels=None
     명세를 안 주면 영역의 기본 격자 명세(region.grid)를 쓴다. 점 순서는 서펜타인(행마다 마하 방향을 뒤집는다)이라
     배치 트림의 인접 시드가 그대로 이어진다(01 §4.1). state는 트림 전 상태(미계산 · 모델 부족)다.
     """
+    # 지연 import — claw.design 패키지가 이 모듈을 부르므로 모듈 머리에서 부르면 opspace를 먼저 import할 때 순환이 된다
+    from claw.design.points import case_name
+
     n_mach = int(region.grid["n_mach"] if n_mach is None else n_mach)
     # 정렬·중복 제거 — 같은 고도가 두 번이면 같은 이름의 케이스가 두 번 나가(이름 = 케이스 매핑 키) 결과가 조용히 다른
     # 점에 귀속되고, 섞인 순서는 서펜타인 행을 물리적으로 떨어뜨려 인접 시드 전제를 깬다

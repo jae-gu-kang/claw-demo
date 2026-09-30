@@ -389,3 +389,114 @@ def test_stall_computation_error_keeps_the_trim_instead_of_failing(example, monk
     monkeypatch.setattr(envelope, "stall_mach_lo", boom)
     st, why = _alpha_upper(TrimCase(name="t", mach=0.2, alt=100.0, fuel=25.0), example, WIDE_MODEL, {})
     assert st == CONSTRAINT_HIT and "stall_basis_error" in why
+
+
+# ── 요구영역 편집 이음새 (05 §11.13 6단계) ──────────────────────────────────
+from claw.opspace import grid_diff, region_from_section, region_key, region_outline  # noqa: E402
+from claw.profile.schema import validate_operating_region  # noqa: E402
+
+SECTION = {"mach": [0.1, 0.3], "alt": [0.0, 3000.0], "fuel": [0.0, 50.0],
+           "boundary": [{"fuel": 40.0, "rows": [[2000.0, 0.16, 0.26], [0.0, 0.12, 0.30]]},
+                        {"fuel": 10.0, "rows": [[0.0, 0.10, 0.30], [2000.0, 0.14, 0.26], [1000.0, 0.11, 0.29]]}],
+           "base_grid": {"n_mach": 5, "alts": [0.0, 3000.0], "fuels": [25.0]}}
+
+
+@pytest.mark.parametrize("over, path", [
+    ({"mach": [0.3, 0.1]}, "/operating_region/mach/1"),
+    ({"boundary": [{"fuel": 10.0, "rows": [[100.0, 0.2, 0.15]]}]}, "/operating_region/boundary/0/rows/0/2"),
+    ({"base_grid": {"n_mach": 1, "alts": [0.0], "fuels": [25.0]}}, "/operating_region/base_grid/n_mach"),
+    ({"extra": 1}, "/operating_region/extra"),
+])
+def test_validate_operating_region_is_the_document_rulebook(over, path):
+    # 편집 미리 보기가 부르는 공개 검증 — 문서 검증과 같은 규칙·같은 경로(웹이 경로로 칸을 짚는다)
+    with pytest.raises(ProfileError) as e:
+        validate_operating_region({**SECTION, **over})
+    assert e.value.path == path
+    with pytest.raises(ProfileError) as whole:
+        validate_document({**load_example(), "operating_region": {**SECTION, **over}})
+    assert whole.value.path == path
+
+
+def test_validate_operating_region_normalizes_and_passes_null():
+    assert validate_operating_region(None) is None
+    out = validate_operating_region({**SECTION, "alt": [0, 3000]})
+    assert all(type(a) is float for a in out["alt"])  # 정규화된 절(float) — 문서 검증과 같은 모양
+    doc = validate_document({**load_example(), "operating_region": SECTION})
+    assert validate_operating_region(SECTION) == doc["operating_region"]
+
+
+def test_validate_operating_region_rejects_non_object():
+    with pytest.raises(ProfileError) as e:
+        validate_operating_region([0.1, 0.3])
+    assert e.value.path == "/operating_region"
+
+
+def test_region_from_section_sorts_and_confirms():
+    r = region_from_section(SECTION)
+    assert r.confirmed is True and r.source == "profile"
+    assert [f for f, _ in r.boundary] == [10.0, 40.0]  # 층·행 오름차순
+    assert [row[0] for row in r.boundary[0][1]] == [0.0, 1000.0, 2000.0]
+    with pytest.raises(ProfileError):
+        region_from_section({**SECTION, "mach": [0.3, 0.1]})
+
+
+def test_outline_on_a_layer_uses_that_layer_rows():
+    out = region_outline(region_from_section(SECTION), 10.0)
+    # 고도 = 경계표 고도(모든 층) ∪ 격자 고도 ∪ 기본 범위 끝
+    assert [o["alt"] for o in out] == [0.0, 1000.0, 2000.0, 3000.0]
+    by = {o["alt"]: o for o in out}
+    assert by[1000.0]["mach_lo"] == pytest.approx(0.11) and by[1000.0]["mach_hi"] == pytest.approx(0.29)
+    assert by[1000.0]["state"] == "in"
+    # 3000 m는 경계표가 안 덮는다 — 요구 미정의, 마하 없음(가까운 행으로 늘리지 않는다)
+    assert by[3000.0] == {"alt": 3000.0, "mach_lo": None, "mach_hi": None, "state": UNDEFINED}
+
+
+def test_outline_between_layers_interpolates():
+    by = {o["alt"]: o for o in region_outline(region_from_section(SECTION), 25.0)}
+    assert by[0.0]["mach_lo"] == pytest.approx(0.11) and by[0.0]["mach_hi"] == pytest.approx(0.30)
+    assert by[2000.0]["mach_lo"] == pytest.approx(0.15) and by[2000.0]["mach_hi"] == pytest.approx(0.26)
+    # 층 40에는 1000 m 행이 없다 — 층 40의 행 사이 보간(0.14, 0.28)과 층 10의 행(0.11, 0.29)을 연료로 보간
+    assert by[1000.0]["mach_lo"] == pytest.approx(0.125) and by[1000.0]["mach_hi"] == pytest.approx(0.285)
+
+
+def test_outline_outside_the_fuel_range_or_layers():
+    r = region_from_section(SECTION)
+    assert {o["state"] for o in region_outline(r, 60.0)} == {OUT_OF_REGION}  # 기본 범위 밖 연료
+    assert {o["state"] for o in region_outline(r, 45.0)} == {UNDEFINED}  # 범위 안이지만 층 밖
+    assert all(o["mach_lo"] is None for o in region_outline(r, 45.0))
+
+
+def test_outline_without_boundary_is_the_base_range():
+    r = region_from_section({**SECTION, "boundary": None})
+    out = region_outline(r, 25.0)
+    assert [o["alt"] for o in out] == [0.0, 3000.0]
+    assert all((o["mach_lo"], o["mach_hi"], o["state"]) == (0.1, 0.3, "in") for o in out)
+
+
+def test_region_key_is_stable_and_tracks_every_field():
+    k = region_key(region_from_section(SECTION))
+    assert len(k) == 12 and int(k, 16) >= 0
+    # 층·행 순서는 정렬되므로 같은 요구 — 같은 키
+    shuffled = {**SECTION, "boundary": list(reversed(SECTION["boundary"]))}
+    assert region_key(region_from_section(shuffled)) == k
+    for over in ({"alt": [0.0, 3500.0]}, {"base_grid": {**SECTION["base_grid"], "n_mach": 6}},
+                 {"boundary": [{"fuel": 10.0, "rows": [[0.0, 0.10, 0.30]]}]}):
+        assert region_key(region_from_section({**SECTION, **over})) != k
+    # 같은 값이라도 초안(미확정)은 확정과 다른 요구다
+    r = region_from_section(SECTION)
+    assert region_key(dataclasses.replace(r, confirmed=False, source="draft:trim_grid")) != k
+    assert region_key(None) is None
+
+
+def test_region_echo_moved_but_derive_keeps_the_name():
+    from claw.opspace.region import region_echo
+    from claw.profile import derive
+
+    assert derive.region_echo is region_echo
+
+
+def test_grid_diff_matches_points_by_name():
+    before = [{"name": n} for n in ("a", "b", "c")]
+    after = [{"name": n} for n in ("b", "c", "d", "e")]
+    assert grid_diff(before, after) == {"before": 3, "after": 4, "kept": 2, "added": 2, "dropped": 1}
+    assert grid_diff(None, after) == {"before": 0, "after": 4, "kept": 0, "added": 4, "dropped": 0}

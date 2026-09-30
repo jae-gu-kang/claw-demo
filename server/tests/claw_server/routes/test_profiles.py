@@ -847,3 +847,118 @@ def test_de_trim_coverage_says_where_the_table_does_not_reach_the_requirement(cl
     none = client.get("/api/profiles/no-trim-table/de-trim-coverage").json()
     assert none["coverage"] is None and none["reason"]
     assert client.get("/api/profiles/nope/de-trim-coverage").status_code == 404
+
+
+# ── 요구영역만 저장 (05 §11.13 6단계) — 전체 PUT과 같은 리비전 규칙·같은 저장 문서 ──────────────────
+REGION = {
+    "mach": [0.3, 0.55], "alt": [100.0, 3000.0], "fuel": [100.0, 300.0],
+    "boundary": [{"fuel": 200.0, "rows": [[100.0, 0.3, 0.55], [3000.0, 0.35, 0.5]]}],
+    "base_grid": {"n_mach": 6, "alts": [100.0, 1000.0, 3000.0], "fuels": [200.0]},
+}
+
+
+def _put_region(client, pid, base, region):
+    return client.put(f"/api/profiles/{pid}/operating-region", json={"base_revision": base, "operating_region": region})
+
+
+def test_put_region_writes_a_revision_with_the_same_fingerprint(client):
+    created = client.post("/api/profiles", json={"document": _doc()}).json()
+    r = _put_region(client, "heavy-delta", 1, REGION)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["revision"] == 2 and body["fingerprint"] == created["fingerprint"]  # 요구영역은 지문 밖
+    assert body["region"]["confirmed"] is True and body["region"]["mach"] == [0.3, 0.55]
+    preview = client.post("/api/grid/region/preview",
+                          json={"profile": {"id": "heavy-delta"}, "region": REGION, "fuel": 200.0}).json()
+    assert body["region_key"] == preview["region_key"]
+    assert client.get("/api/profiles/heavy-delta").json()["document"]["operating_region"]["mach"] == [0.3, 0.55]
+
+
+def test_put_region_stores_what_a_full_put_would(client):
+    client.post("/api/profiles", json={"document": _doc(pid="a-delta")})
+    client.post("/api/profiles", json={"document": _doc(pid="b-delta")})
+    _put_region(client, "a-delta", 1, REGION)
+    doc = client.get("/api/profiles/b-delta").json()["document"]
+    doc["operating_region"] = REGION
+    assert client.put("/api/profiles/b-delta", json={"base_revision": 1, "document": doc}).status_code == 200
+    a, b = (client.get(f"/api/profiles/{p}").json() for p in ("a-delta", "b-delta"))
+    assert a["revision"] == b["revision"] == 2 and a["fingerprint"] == b["fingerprint"]
+    strip = lambda d: {k: v for k, v in d.items() if k not in ("id", "name")}  # noqa: E731
+    assert strip(a["document"]) == strip(b["document"])
+
+
+def test_put_region_follows_the_put_guards(client):
+    assert _put_region(client, EXAMPLE_ID, 1, REGION).status_code == 403
+    assert _put_region(client, "nobody", 1, REGION).status_code == 404
+    client.post("/api/profiles", json={"document": _doc()})
+    assert _put_region(client, "heavy-delta", 1, REGION).status_code == 200
+    stale = _put_region(client, "heavy-delta", 1, {**REGION, "mach": [0.3, 0.5]})
+    assert stale.status_code == 409 and stale.json()["detail"]["head"] == 2
+    bad = _put_region(client, "heavy-delta", 2, {**REGION, "mach": [0.55, 0.3]})
+    assert bad.status_code == 422 and bad.json()["detail"]["path"] == "/operating_region/mach/1"
+    assert client.get("/api/profiles/heavy-delta").json()["revision"] == 2  # 거부는 리비전을 늘리지 않는다
+    # 본문에 요구영역이 없으면 거부 — 빠뜨린 키가 「지우기」로 읽히면 안 된다
+    assert client.put("/api/profiles/heavy-delta/operating-region", json={"base_revision": 2}).status_code == 422
+
+
+def test_put_region_null_returns_to_the_trim_grid_draft(client):
+    client.post("/api/profiles", json={"document": _doc()})
+    _put_region(client, "heavy-delta", 1, REGION)
+    body = _put_region(client, "heavy-delta", 2, None).json()
+    assert body["revision"] == 3 and body["region"]["confirmed"] is False
+    assert body["region"]["source"] == "draft:trim_grid"
+    assert client.get("/api/profiles/heavy-delta").json()["document"]["operating_region"] is None
+
+
+def test_region_history_collapses_repeated_regions(client):
+    client.post("/api/profiles", json={"document": _doc()})  # 1: 초안(trim_grid)
+    _put_region(client, "heavy-delta", 1, REGION)  # 2: 확정
+    doc = client.get("/api/profiles/heavy-delta").json()["document"]
+    doc["mass"]["m_empty"] = 950.0
+    client.put("/api/profiles/heavy-delta", json={"base_revision": 2, "document": doc})  # 3: 요구영역 그대로
+    _put_region(client, "heavy-delta", 3, None)  # 4: 다시 초안
+    body = client.get("/api/profiles/heavy-delta/region-history").json()
+    assert body["omitted"] == 0
+    rows = body["rows"]
+    assert [r["revision"] for r in rows] == [1, 2, 4]  # 같은 판이 이어진 3은 2에 접힌다
+    assert [r["confirmed"] for r in rows] == [False, True, False]
+    assert [r["source"] for r in rows] == ["draft:trim_grid", "profile", "draft:trim_grid"]
+    assert rows[0]["region_key"] == rows[2]["region_key"] != rows[1]["region_key"]
+    assert rows[1]["mach"] == [0.3, 0.55] and rows[1]["alt"] == [100.0, 3000.0] and rows[1]["fuel"] == [100.0, 300.0]
+    grid = client.post("/api/grid/region/preview",
+                       json={"profile": {"id": "heavy-delta", "revision": 2}, "region": REGION}).json()["grid"]
+    assert rows[1]["n_points"] == len(grid["points"])
+    assert client.get(f"/api/profiles/{EXAMPLE_ID}/region-history").json()["rows"][0]["revision"] == 0
+    assert client.get("/api/profiles/nobody/region-history").status_code == 404
+
+
+def test_region_history_keeps_the_newest_and_says_how_many_it_left_out(client):
+    client.post("/api/profiles", json={"document": _doc()})  # 1
+    for base in range(1, 5):  # 2..5 — 번갈아 확정·초안
+        _put_region(client, "heavy-delta", base, REGION if base % 2 else None)
+    body = client.get("/api/profiles/heavy-delta/region-history?limit=2").json()
+    assert [r["revision"] for r in body["rows"]] == [4, 5] and body["omitted"] == 3
+    assert client.get("/api/profiles/heavy-delta/region-history").json()["omitted"] == 0  # 기본 50
+    assert client.get("/api/profiles/heavy-delta/region-history?limit=0").status_code == 422
+
+
+def test_region_history_reads_each_revision_once(client, monkeypatch):
+    # 리비전은 불변이다((id, 리비전)은 한 문서를 영원히 가리킨다) — 두 번째 조회는 head만 읽는다
+    client.post("/api/profiles", json={"document": _doc()})
+    _put_region(client, "heavy-delta", 1, REGION)
+    first = client.get("/api/profiles/heavy-delta/region-history").json()
+    store = client.app.state.profiles
+    seen = []
+    real = store.get
+
+    def spy(pid, revision=None, **kw):
+        seen.append(revision)
+        return real(pid, revision, **kw)
+
+    monkeypatch.setattr(store, "get", spy)
+    assert client.get("/api/profiles/heavy-delta/region-history").json() == first
+    assert seen == [None]
+    _put_region(client, "heavy-delta", 2, None)  # 새 리비전만 새로 읽는다
+    seen.clear()
+    assert [r["revision"] for r in client.get("/api/profiles/heavy-delta/region-history").json()["rows"]] == [1, 2, 3]
+    assert seen == [None, 3]

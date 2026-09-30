@@ -10,7 +10,17 @@
 """
 
 from claw.opspace.basegrid import base_grid
-from claw.opspace.region import ModelRange, Region, model_range_of, region_of
+from claw.opspace.region import (
+    ModelRange,
+    Region,
+    grid_diff,
+    model_range_of,
+    region_echo,
+    region_from_section,
+    region_key,
+    region_of,
+    region_outline,
+)
 from claw.opspace.states import (
     CALC_FAILED,
     COMPUTABLE,
@@ -31,6 +41,7 @@ from claw.opspace.verdict import PRE_TRIM_CATEGORY, VerdictContext, condition_ve
 __all__ = [
     "CALC_FAILED", "COMPUTABLE", "CONSTRAINT_HIT", "INFEASIBLE", "MODEL_GAP", "NOT_RUN", "OUT_OF_REGION",
     "STATE_LABEL", "STATE_ORDER", "UNDEFINED",
-    "ModelRange", "Region", "base_grid", "model_range_of", "pre_state", "region_of", "trim_assessment", "trim_state",
+    "ModelRange", "Region", "base_grid", "grid_diff", "model_range_of", "pre_state", "region_echo",
+    "region_from_section", "region_key", "region_of", "region_outline", "trim_assessment", "trim_state",
     "PRE_TRIM_CATEGORY", "VerdictContext", "condition_verdict", "margin_of", "pre_trim_verdict",
 ]

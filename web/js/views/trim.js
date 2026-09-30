@@ -325,7 +325,8 @@ function renderRegion(box, hint, grid) {
           el("td", { class: "num" }, fmt(b.lo)), el("td", { class: "num" }, fmt(b.hi)))))))
       : el("p", { class: "hint" }, "경계표 없음 — 모든 행이 기본 범위의 마하를 쓴다."),
     el("p", { class: "hint" }, "경계표 행 사이·연료 층 사이는 선형 보간이고, 표가 덮지 않는 조건은 「요구 미정의」다 ",
-      "(가까운 행으로 늘리지 않는다). 요구영역은 기체 탭 문서 패널의 JSON `operating_region`에서 고친다."),
+      "(가까운 행으로 늘리지 않는다). 요구영역은 ", el("a", { href: "#envelope" }, "엔벨로프 탭"),
+      " ① 선도의 [요구영역 편집]에서 숫자 표로 고친다(저장하면 새 리비전 — 기체 탭 문서 JSON `operating_region`도 같은 절이다)."),
     el("p", {}, el("strong", {}, "기본 격자 "), `${grid.points.length}점 — ${stateCountText(grid.counts, grid.labels)}`,
       el("span", { class: "hint" }, ` · 공통 마하 좌표 ${grid.axis.length}점`)),
     el("div", { class: "scroll-x" }, el("table", {},

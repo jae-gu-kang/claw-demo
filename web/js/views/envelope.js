@@ -53,6 +53,7 @@ import {
 } from "../lib/missiontemplate.js";
 import { firstTimeThisPage, selectedDefaults } from "./missionfill.js";
 import { revealPanel } from "../lib/reveal.js";
+import { createRegionEditor } from "./regionedit.js";
 import { failCue, reportCue, takeCue, unknownAction } from "../lib/showcasecue.js";
 
 // 신호 실패 사유 — 서버 오류는 errorText(422 배열·엔진 detail을 사람 글로), 그 밖은 메시지만("Error: " 접두 없이)
@@ -87,6 +88,8 @@ let envVisit = 0; // 탭을 그린 차례 — 떠난 방문의 늦은 콜백이 
 const layers = { isoQbar: true, isoTas: false, maneuver: true, scan: true, thrust: true };
 // 탭을 떠났다 와도 열어 둔 계층은 그대로 (모듈 스코프 규약)
 let openLayer = null;
+// 요구영역 편집기(views/regionedit.js) — ① 선도 자리에 선다. 켜면 renderMh가 선도 대신 편집기를 그린다(06 §10 ①)
+let regionEd = null;
 // /results 색인 — ③·⑥ 층이 "이 격자를 실제로 잰 산출물이 몇 건인가"를 말하는 데만 쓴다.
 // 없으면 없다고 하지, 0건을 "아직 안 불러옴"과 같은 얼굴로 내지 않는다
 let stored = null;
@@ -495,6 +498,13 @@ export function render() {
       { key: "L6", label: LAYER_DEF.L6.label, group: "설계 엔벨로프 6계층",
         title: LAYER_DEF.L6.what, count: marginCount, build: () => l6Box },
     ],
+  });
+
+  // 요구영역 편집기 — 켜고 끄면 ① 자리만 다시 그리고, 새 리비전을 저장하면 선도를 다시 받는다(요구 띠가 바뀐다)
+  regionEd = createRegionEditor({
+    getMh: () => lastMh,
+    onMode: () => renderMh(mhBox),
+    onSaved: () => { draw(); },
   });
 
   // 먼저 한 번 그린다 — 응답이 아직 없어도 각 층이 **왜 비었는지**를 말해야 한다
@@ -1415,8 +1425,15 @@ function mhEnvelopeCanvas(mh, cells, gaps = []) {
 }
 
 function renderMh(box) {
+  // 편집 중이면 선도 대신 요구영역 편집기(숫자 표가 정본 — 그림은 서버 미리 보기)
+  if (regionEd?.isEditing()) {
+    clear(box).append(regionEd.root);
+    regionEd.repaint();
+    return;
+  }
+  const edBar = regionEd ? [el("div", { class: "re-bar" }, regionEd.toggle)] : [];
   if (!lastMh) {
-    clear(box).append(el("p", { class: "hint" }, "필요값을 입력하고 그리기를 누르면 표시됩니다."));
+    clear(box).append(...edBar, el("p", { class: "hint" }, "필요값을 입력하고 그리기를 누르면 표시됩니다."));
     return;
   }
   // 차트 연료와 일치하는 스캔 셀만 — 집계도 같은 것만 세야 점과 숫자가 같은 말을 한다
@@ -1459,6 +1476,7 @@ function renderMh(box) {
   // 요구영역 상태를 선도 위에 먼저 — 미정의·미확정이면 경고 상자(표시 범위를 요구로 읽지 않게)
   const kids = [
     el("div", { class: reqStatus.kind === "confirmed" ? "notice" : "error-box" }, reqStatus.text),
+    ...edBar,
     el("div", { class: "scroll-x" }, mhEnvelopeCanvas(lastMh, cells, gaps)), legend,
     el("p", { class: "hint" }, `${ANALYZABLE_LABEL}은 구조·공력 경계의 교집합입니다 — 추력 조건이 없으므로 지속 비행 `
       + "가능 영역이 아니고, 요구영역을 깎는 선도 아닙니다. 날 수 있는지는 조건마다 트림 판정(스캔 점)이 말합니다."),

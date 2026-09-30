@@ -6,9 +6,10 @@
 """
 
 import copy
+import weakref
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from claw.design.basis import E_REF_DPS, apply_seed_basis, seed_basis
@@ -280,8 +281,14 @@ def create_profile(req: ProfileDocIn, request: Request) -> dict:
 @router.put("/profiles/{profile_id}")
 def update_profile(profile_id: str, req: ProfileUpdateIn, request: Request) -> dict:
     notes = []
+    doc, rev = _store_update(request, profile_id, req.document, req.base_revision, notes)
+    return _body(doc, rev, notes)
+
+
+def _store_update(request, profile_id: str, document, base_revision: int, notes: list) -> tuple:
+    """저장소 갱신과 그 오류의 HTTP 대응 — 전체 PUT과 요구영역 PUT이 같은 규칙(403·404·409 head·422 경로)을 쓴다."""
     try:
-        doc, rev = request.app.state.profiles.update(profile_id, req.document, req.base_revision, notes_out=notes)
+        return request.app.state.profiles.update(profile_id, document, base_revision, notes_out=notes)
     except ProfileReadOnly as e:
         raise HTTPException(status_code=403, detail=str(e))
     except KeyError:
@@ -294,7 +301,105 @@ def update_profile(profile_id: str, req: ProfileUpdateIn, request: Request) -> d
         raise HTTPException(status_code=409, detail={"message": str(e), "head": e.head})
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    return _body(doc, rev, notes)
+
+
+class RegionUpdateIn(BaseModel):
+    """operating_region 절 그대로(null = 지우기 → trim_grid 초안). 키를 빠뜨리면 422 — 「지우기」로 읽지 않는다."""
+
+    base_revision: int = Field(ge=1)
+    operating_region: dict | None
+
+
+@router.put("/profiles/{profile_id}/operating-region")
+def update_operating_region(profile_id: str, req: RegionUpdateIn, request: Request) -> dict:
+    """요구영역만 저장 (05 §11.13 6단계 · 06 §10 ①) — 최신 문서의 operating_region 절만 바꿔 새 리비전으로.
+
+    전체 PUT과 **같은 저장 문서**다: 같은 가드(예제 403 · 낡은 기준 409 head) 뒤 같은 저장소 갱신·같은 문서 검증을
+    거친다 — 절 규칙은 엔진 한 곳이고 오류 경로도 /operating_region/…로 같다. 요구영역은 지문 밖이라 지문은 그대로다
+    (계산 결과가 낡지 않는다 — 요구영역에 기대는 δe_trim 도출은 provenance.region 대조로 따로 낡는다). 저장 전 확인 단계는
+    따로 없다 — 저장이 곧 확정이다(초안 표시는 절이 없을 때뿐)."""
+    from claw.opspace import region_key, region_of
+
+    doc, rev, built = _job_head(request, profile_id, req.base_revision)
+    new = copy.deepcopy(doc)
+    new["operating_region"] = copy.deepcopy(req.operating_region)
+    saved, new_rev = _store_update(request, profile_id, new, rev, [])
+    region = region_of(saved)
+    # 요구영역은 지문 밖이라 기준 리비전 조립의 지문이 곧 새 리비전의 지문이다 — 저장본을 다시 조립하지 않는다
+    return {"revision": new_rev, "region": None if region is None else region.to_dict(),
+            "region_key": region_key(region), "fingerprint": built.fingerprint}
+
+
+HISTORY_LIMIT = 50
+_HISTORY_MEMO_MAX = 4096
+# 저장소 → {(id, 리비전): 그 리비전의 요구영역 요약}. 리비전은 불변이라((id, 리비전)은 한 문서를 영원히 가리킨다 —
+# 지워도 번호를 다시 쓰지 않는다) 무효화가 필요 없다. 계보 패널을 열 때마다 전 리비전을 다시 검증·조립하지 않게.
+# 저장소를 약한 키로 — id(store)는 앱을 새로 띄우면(테스트) 다른 저장소에 재사용될 수 있다
+_history_memo = weakref.WeakKeyDictionary()
+
+
+def _revision_region(store, profile_id: str, r: int) -> dict:
+    """한 리비전의 요구영역 요약 {region_key, confirmed, source, mach, alt, fuel, n_points} — 못 읽으면
+    {unreadable, reason}(그건 기억하지 않는다 — 일시적 파일 오류일 수 있다). 지운 뒤라 없으면 KeyError."""
+    from claw.opspace import ModelRange, base_grid, region_key, region_of
+
+    memo = _history_memo.setdefault(store, {})
+    if (profile_id, r) in memo:
+        return memo[(profile_id, r)]
+    try:
+        doc, _ = store.get(profile_id, r)
+    except (ValueError, ProfileUnreadable, OSError) as e:
+        return {"unreadable": True, "reason": str(e)}
+    region = region_of(doc)
+    if region is None:
+        out = {"region_key": None, "confirmed": None, "source": None, "mach": None, "alt": None, "fuel": None,
+               "n_points": None}
+    else:
+        # 점 수는 모델과 무관하다(모델은 점의 상태만 가른다) — 리비전마다 기체를 조립하지 않게 전부 덮는 모델로 센다
+        try:
+            n = len(base_grid(region, ModelRange(mach=None, fuel=(0.0, float("inf"))))["points"])
+        except ValueError:
+            n = None
+        out = {"region_key": region_key(region), "confirmed": region.confirmed, "source": region.source,
+               "mach": list(region.mach), "alt": list(region.alt), "fuel": list(region.fuel), "n_points": n}
+    if len(memo) >= _HISTORY_MEMO_MAX:
+        memo.clear()  # 상한 — 오래 뜬 서버에서 무한히 자라지 않게(다시 읽으면 된다)
+    memo[(profile_id, r)] = out
+    return out
+
+
+@router.get("/profiles/{profile_id}/region-history")
+def get_region_history(profile_id: str, request: Request,
+                       limit: int = Query(default=HISTORY_LIMIT, ge=1, le=1000)) -> dict:
+    """요구영역 계보 (05 §11.12 · 06 §10 계보 패널) — {rows, omitted}. rows는 최신 limit개 리비전을 오름차순으로,
+    같은 판(region_key)이 이어지면 첫 리비전 한 줄로 접는다(A·B·A는 세 줄 — 되돌림도 이력이다). 행은 {revision,
+    region_key, confirmed, source, mach, alt, fuel, n_points} — 요구영역이 없는 리비전은 키·값이 None, 못 읽는 리비전은
+    건너뛰지 않고 {revision, unreadable, reason}. omitted는 창 앞에서 읽지 않은 옛 리비전 수(「이전 리비전 k개 생략」)."""
+    store = request.app.state.profiles
+    try:
+        _, head = store.get(profile_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"기체 프로파일 없음: {profile_id}")
+    except ProfileUnreadable as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    first = head if head == 0 else max(1, head - limit + 1)  # 예제는 리비전 0 하나뿐
+    rows, last = [], object()
+    for r in range(first, head + 1):
+        try:
+            one = _revision_region(store, profile_id, r)
+        except KeyError:  # 그사이 지워졌다 — 없는 기체다
+            raise HTTPException(status_code=404, detail=f"기체 프로파일 없음: {profile_id}")
+        if one.get("unreadable"):
+            rows.append({"revision": r, **one})
+            last = object()
+            continue
+        if one["region_key"] == last:
+            continue
+        last = one["region_key"]
+        rows.append({"revision": r, **one})
+    return {"rows": rows, "omitted": max(0, first - 1)}
 
 
 @router.delete("/profiles/{profile_id}", status_code=204)

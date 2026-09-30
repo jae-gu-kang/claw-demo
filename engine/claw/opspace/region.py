@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 
 import numpy as np
@@ -109,6 +111,16 @@ def _draft_from_trim_grid(g: dict) -> Region:
                   confirmed=False, source="draft:trim_grid")
 
 
+def region_from_section(section: dict) -> Region:
+    """operating_region 절(검증 전이어도 된다) → 확정 Region. 문서 검증과 같은 규칙으로 먼저 잰다(ProfileError — 경로
+    /operating_region/…). 절 지우기(None)는 문서가 있어야 초안을 만드니 region_of로 간다."""
+    from claw.profile.schema import validate_operating_region  # 지연 import — claw.profile이 opspace를 먼저 부른다
+
+    if section is None:
+        raise ValueError("절이 없으면(None) region_of(문서)로 초안을 만든다")
+    return _from_section(validate_operating_region(section))
+
+
 def region_of(doc: dict) -> Region | None:
     """적용 문서(검증·정규화된 기체 문서) → 요구 운용영역. operating_region 절이 정본, 없으면 trim_grid 초안,
     둘 다 없으면 None(요구영역을 정하지 않은 기체 — 호출자가 그렇다고 말한다)."""
@@ -118,6 +130,66 @@ def region_of(doc: dict) -> Region | None:
     if tpl is not None:
         return _draft_from_trim_grid(tpl["trim_grid"])
     return None
+
+
+def region_echo(region) -> dict | None:
+    """요구영역의 정규 기록 — δe_trim 도출 출처(provenance.region)와 region_key가 같은 모양을 쓴다. 저장 표의 근거가
+    지금 요구영역에서 잰 것인지를 이것 전체로 가른다(derive.de_trim_coverage) — 마하 구간만 같고 고도·연료·경계표·
+    격자가 바뀐 영역을 같은 요구로 보지 않게."""
+    if region is None:
+        return None
+    boundary = None if region.boundary is None else [
+        [float(f), [[float(a), float(lo), float(hi)] for a, lo, hi in rows]] for f, rows in region.boundary]
+    return {"source": region.source, "confirmed": bool(region.confirmed),
+            "mach": [float(m) for m in region.mach], "alt": [float(a) for a in region.alt],
+            "fuel": [float(f) for f in region.fuel], "boundary": boundary,
+            "grid": {"n_mach": int(region.grid["n_mach"]), "alts": [float(a) for a in region.grid["alts"]],
+                     "fuels": [float(f) for f in region.grid["fuels"]]}}
+
+
+def region_key(region) -> str | None:
+    """요구영역의 판 — 정규 기록(region_echo)의 sha256 앞 12자. 계보 패널이 기본 격자 판으로 싣고, 리비전 이력이 같은
+    판을 한 줄로 접는다. 확정 여부·출처도 기록에 들어 있어 같은 값의 초안과 확정은 다른 판이다(판정에 쓰는지가 다르다)."""
+    echo = region_echo(region)
+    if echo is None:
+        return None
+    blob = json.dumps(echo, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+
+
+REGION_IN = "in"
+
+
+def region_outline(region, fuel: float) -> list:
+    """연료 fuel에서 요구영역의 고도 행별 마하 경계 — [{alt, mach_lo, mach_hi, state}] 고도 오름차순.
+
+    고도는 경계표 고도(모든 층 — 층 사이 보간의 꺾임이 다른 층 고도에서 생긴다) ∪ 기본 격자 고도 ∪ 기본 범위 끝.
+    값은 mach_bounds·classify 그대로라 편집 화면이 보간을 다시 하지 않는다(웹은 보간하지 않는다). state는 "in" ·
+    "undefined"(경계표가 안 덮음) · "out_of_region"(기본 범위 밖 연료) — 안이 아니면 마하는 None(없는 띠를 그리지 않는다)."""
+    alts = {float(a) for a in region.alt} | {float(a) for a in region.grid["alts"]}
+    for _f, rows in region.boundary or ():
+        alts |= {float(r[0]) for r in rows}
+    out = []
+    for alt in sorted(alts):
+        # 기본 범위부터 — 범위 밖 연료가 「층 밖이라 미정의」로 둔갑하지 않게(classify와 같은 순서)
+        if not (region.fuel[0] - _EPS <= fuel <= region.fuel[1] + _EPS
+                and region.alt[0] - _EPS <= alt <= region.alt[1] + _EPS):
+            b, state = None, "out_of_region"
+        else:
+            b = region.mach_bounds(alt, fuel)
+            state = "undefined" if b is None else (region.classify(b[0], alt, fuel) or REGION_IN)
+        lo, hi = (b if state == REGION_IN else (None, None))
+        out.append({"alt": alt, "mach_lo": None if lo is None else float(lo),
+                    "mach_hi": None if hi is None else float(hi), "state": state})
+    return out
+
+
+def grid_diff(before_pts, after_pts) -> dict:
+    """두 점 집합의 차이 — 이름(값 그대로의 케이스 이름)으로 짝짓는다. 요구영역을 바꾸면 기본 격자가 몇 점 유지되고
+    몇 점 새로 생기고 몇 점 빠지나(편집 화면의 「바꾸면 영향」). 개수만 — 어느 점인지는 두 격자가 이미 싣는다."""
+    b = {p["name"] for p in before_pts or ()}
+    a = {p["name"] for p in after_pts or ()}
+    return {"before": len(b), "after": len(a), "kept": len(a & b), "added": len(a - b), "dropped": len(b - a)}
 
 
 @dataclass(frozen=True)

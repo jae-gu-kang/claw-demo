@@ -41,7 +41,7 @@ import numpy as np
 from claw.common.contracts import TrimCase
 from claw.design.points import case_name
 from claw.opspace.basegrid import _r
-from claw.opspace.region import region_of
+from claw.opspace.region import region_echo, region_of  # region_echo는 opspace로 옮겼다 — 이름은 여기서도 산다
 from claw.opspace.verdict import VerdictContext, condition_verdict
 from claw.trim import trim_level
 
@@ -68,20 +68,6 @@ def region_mach_axis(region) -> list:
     """요구영역 마하 전 구간의 기본 격자 공통 좌표 — basegrid와 같은 linspace·같은 반올림(_r)이라 표 절점이 기본 격자
     좌표와 같은 값이다(자릿수가 다르면 0.133333 대 0.133333333으로 갈린다)."""
     return [_r(m) for m in np.linspace(region.mach[0], region.mach[1], int(region.grid["n_mach"]))]
-
-
-def region_echo(region) -> dict | None:
-    """도출이 잰 요구영역의 기록 — provenance.region. 저장 표의 근거(unsupported)가 지금 요구영역에서 잰 것인지를
-    이것 전체로 가른다(de_trim_coverage) — 마하 구간만 같고 고도·연료·경계표·격자가 바뀐 영역을 같은 요구로 보지 않게."""
-    if region is None:
-        return None
-    boundary = None if region.boundary is None else [
-        [float(f), [[float(a), float(lo), float(hi)] for a, lo, hi in rows]] for f, rows in region.boundary]
-    return {"source": region.source, "confirmed": bool(region.confirmed),
-            "mach": [float(m) for m in region.mach], "alt": [float(a) for a in region.alt],
-            "fuel": [float(f) for f in region.fuel], "boundary": boundary,
-            "grid": {"n_mach": int(region.grid["n_mach"]), "alts": [float(a) for a in region.grid["alts"]],
-                     "fuels": [float(f) for f in region.grid["fuels"]]}}
 
 
 def region_check_alts(region) -> list:

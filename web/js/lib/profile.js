@@ -19,6 +19,7 @@ const ID_RE = /^[A-Za-z0-9_-]{1,64}$/; // 서버 기체 id 규칙과 같다(`_` 
 /** 본문에 `profile`을 싣는 계산 라우트 (서버 요청 모델의 `profile: ProfileRef`). */
 export const COMPUTE_POST = new Set([
   "/grid/base", // 요구 운용영역 → 기본 격자 — 고른 기체의 영역이어야 한다(05 §11)
+  "/grid/region/preview", // 요구영역 편집 미리 보기 — 고른 기체의 모델·저장본 격자와 대조한다(05 §11.13 6단계)
   "/trim/batch",
   "/analysis/margin-map", "/analysis/bode", "/analysis/design-envelope-scan",
   "/design/auto",
@@ -71,6 +72,8 @@ export const NOT_AIRCRAFT = {
   "POST /profiles": "기체 문서 자체 — id가 경로·본문에 있다",
   "GET /profiles/{profile_id}": "기체 문서 자체 — id가 경로·본문에 있다",
   "GET /profiles/{profile_id}/criteria": "그 기체의 평가 기준 — id가 경로에 있다",
+  "PUT /profiles/{profile_id}/operating-region": "요구영역만 저장 — 기체 id가 경로에 있다(헤더 선택과 무관)",
+  "GET /profiles/{profile_id}/region-history": "그 기체의 요구영역 이력 — id가 경로에 있다",
   "GET /profiles/{profile_id}/de-trim-coverage": "그 기체 δe_trim 표의 요구 마하 커버리지 — id가 경로에 있다",
   "PUT /profiles/{profile_id}": "기체 문서 자체 — id가 경로·본문에 있다",
   "DELETE /profiles/{profile_id}": "기체 문서 자체 — id가 경로·본문에 있다",
