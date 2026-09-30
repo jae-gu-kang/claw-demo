@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 
 from claw.design import AutoDesignConfig, DesignSession, design_inputs, resample_to_table
 from claw.design.grid import DEFAULT_ALTS, DEFAULT_FUEL_FRACS
+from claw.design.knots import KNOT_RULES  # 절점 규칙 허용 목록 — 정본은 엔진(05 §11.13 이관 3단계)
 from claw.design.tune import REASON_TEXT
 from claw.profile import ProfileError, build_profile
 from claw.profile.fingerprint import gain_tables_basis_fingerprint
@@ -113,6 +114,31 @@ def _check_number(where: str, v) -> None:
         raise ValueError(f"비유한값 config — {where}: {v!r}")
 
 
+def _check_knots(k) -> dict:
+    """config.knots(부분 덮어쓰기를 기본값에 겹친 것) — **수치 경계만** 여기서 본다(_check_number와 같은 이유: NaN·
+    double 초과·불리언이 엔진 int()/float() 변환을 조용히 지나거나 500으로 새지 않게). 뜻(허용 규칙·n ≥ 2·좌표 순증가·
+    max_per_table ≥ 2·user의 coords·좌표 수 ≤ 상한)은 엔진 check_knots_config가 정본이다 — AutoDesignConfig가 부르고
+    그 ValueError가 라우트에서 422다. 두 곳에 규칙을 적으면 갈린다(uniform의 n 없음 = 엔진 LEGACY_N_MACH 등)."""
+    if not isinstance(k, dict):
+        raise ValueError(f"knots는 객체여야 함: {type(k).__name__}")
+    if k.get("rule") is not None and not isinstance(k.get("rule"), str):
+        raise ValueError(f"knots.rule은 규칙 이름(문자열)이어야 함: {k.get('rule')!r} — 허용: {list(KNOT_RULES)}")
+    for key in ("n", "max_per_table"):
+        v = k.get(key)
+        if v is None and key == "n":
+            continue
+        _check_number(f"knots.{key}", v)
+        if isinstance(v, float) and not v.is_integer():
+            raise ValueError(f"knots.{key}는 정수여야 함: {v}")
+    coords = k.get("coords")
+    if coords is not None:
+        if not isinstance(coords, list):
+            raise ValueError(f"knots.coords는 수치 목록이어야 함: {type(coords).__name__}")
+        for v in coords:
+            _check_number("knots.coords 항목", v)
+    return dict(k)
+
+
 def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
     """요청 config(부분 덮어쓰기) → AutoDesignConfig.
 
@@ -131,6 +157,11 @@ def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
         # 라우트가 먼저 거절한다 — 여기 닿으면 새 호출 경로가 거절을 건너뛴 것이다(심층 방어)
         raise ValueError(REQUEST_CRITERIA_REJECTED)
     merged = {**base, **overrides}
+    if "knots" in base and "knots" in overrides:
+        # 절점 설정은 부분 덮어쓰기 — {"rule": "uniform", "n": 5}만 보내도 나머지(max_per_table)는 기본값
+        if not isinstance(overrides["knots"], dict):
+            raise ValueError(f"knots는 객체여야 함: {type(overrides['knots']).__name__}")
+        merged["knots"] = _check_knots({**base["knots"], **overrides["knots"]})
     # 타입 검증 — 데이터클래스는 강제 변환을 하지 않으므로 여기서 걸러야 한다.
     # 안 걸리는 값은 잡 스레드 안에서 터져 202 뒤 원인 없는 실패가 된다
     for key, want in (("mode", str), ("fit_mode", str),
@@ -145,7 +176,7 @@ def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
         # 문자열·목록 필드는 수치 검사 대상이 아니다 — 값의 허용 목록은 엔진 __post_init__이
         # 본다(ValueError → 422). 여기 목록에 새 문자열 필드를 빠뜨리면 _check_number가
         # "수치여야 함"으로 422를 내어, 멀쩡한 설정이 거부된다
-        if key in ("mode", "fit_mode", "alts", "fuels", "sched_axes", "criteria", "targets"):
+        if key in ("mode", "fit_mode", "alts", "fuels", "sched_axes", "criteria", "targets", "knots"):
             continue
         if key in _NULLABLE_KEYS and value is None:
             continue
@@ -240,6 +271,9 @@ def _gain_export(session: DesignSession, aircraft, on_progress=None) -> dict:
         "reverify": session.reverify_resampled(aircraft, export_tables,
                                                on_progress=on_progress),
         "constants": dict(session.sched_constants),
+        # 표별 절점 집합(05 §11.13 이관 3단계) — {sets:{이름:{axis, coords, source, history}}, tables:{자리:{set,
+        # shared, unsupported, unsupported_detail, n}}}. 문서 반영이 provenance.knots로 그대로 옮긴다(apply_gains_to_profile)
+        "knots": session.knot_record(),
     }
 
 
@@ -366,6 +400,8 @@ def design_defaults() -> dict:
         # fuel_max). 비율로 내는 것은 기체 값이 여기 없기 때문이다(연료 kg은 웹이 문서에서 곱한다)
         "grid": {"alts": [float(a) for a in DEFAULT_ALTS],
                  "fuel_fracs": [float(f) for f in DEFAULT_FUEL_FRACS]},
+        # 절점 규칙의 허용 목록(엔진 knots.KNOT_RULES) — 웹 설정 칸의 선택지. 기본값은 config.knots
+        "knot_rules": list(KNOT_RULES),
     }
 
 
@@ -418,6 +454,8 @@ def _design_summary(rep: dict | None) -> dict:
     위장하지 않는다."""
     rep = rep or {}
     excluded = rep.get("excluded_samples")
+    knots = rep.get("knots")
+    n_knots = (knots or {}).get("tables") if isinstance(knots, dict) else None
     withheld = rep.get("exclusion_withheld")
     return {
         "status": rep.get("status"), "iterations": rep.get("iterations"), "judged": rep.get("judged"),
@@ -425,6 +463,9 @@ def _design_summary(rep: dict | None) -> dict:
         "fit_mode": rep.get("fit_mode"),
         "excluded_samples": len(excluded) if isinstance(excluded, list) else None,
         "exclusion_withheld": sorted(withheld) if isinstance(withheld, list) else None,
+        # 표별 절점 수 {자리: n} (05 §11.13 이관 3단계 — report.knots.tables 그대로). 최댓값 하나로 접지 않는다:
+        # 자리마다 분리 집합에 절점이 붙으면 표마다 수가 다르고, 게인 탭이 자리별로 읽는다. 옛 결과는 None
+        "n_knots": dict(n_knots) if isinstance(n_knots, dict) else None,
     }
 
 
@@ -513,6 +554,9 @@ def apply_gains_to_profile(result_id: str, req: ApplyGainsIn, request: Request) 
             "reverify": _reverify_summary(export.get("reverify")),
             # 이 표를 만든 설계의 요약 — 표현(fit_mode)과 적합에서 뺀 표본 수(그 점은 이웃 보간이다)
             "design": _design_summary(payload.get("report")),
+            # 표별 절점 집합 — 어느 표가 어느 절점 집합을 쓰나(공통/분리 집합)·절점이 어디서 왔나(규칙·추가 이력)·
+            # 표본이 없어 뺀 절점. 반출(gain_export.knots)을 그대로 옮긴다. 옛 결과(절점 분리 이전)는 None
+            "knots": copy.deepcopy(export.get("knots")),
             # 낡음 판정의 기준 — 표 절을 뺀 지금 문서의 지문 (build.gain_tables_stale이 대조)
             "basis_fingerprint": gain_tables_basis_fingerprint(built.doc),
         },

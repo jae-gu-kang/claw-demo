@@ -7,7 +7,7 @@ import pytest
 
 from claw.common.contracts import TrimCase
 from claw.design import AutoDesignConfig, DesignSession, TuneTargets
-from claw.design.points import ROLE_ANCHOR, OperatingPoint, case_name
+from claw.design.points import ROLE_DESIGN, OperatingPoint, case_name
 from claw.fcl.demo import demo_design_gains
 from claw.plant import (
     make_demo_aircraft,
@@ -52,7 +52,7 @@ def test_auto_mode_reaches_terminal(env):
     assert report["status"] in ("converged", "escalated", "budget_exhausted")
     # "실패 0"이 통과인지 미검증인지 — 판정 수가 갈라 준다 (vacuous pass 배제)
     assert report["judged"] > 0, "판정이 한 건도 없는데 종결됐다"
-    assert report["points"]["anchor"] >= 3
+    assert report["points"]["design"] >= 3 and set(report["points"]) == {"design", "validation"}
     assert s.sched_tables or s.sched_constants  # 게인 산출물이 존재
     assert s.margin_out["cases"]  # 스케줄 인지 검증이 돌았다
     # 에스컬레이션은 자동 적용된 적이 없어야 한다 — applied 표식 금지
@@ -173,10 +173,10 @@ def test_targets_must_meet_criteria():
 def test_add_validation_inserts_flanking_midpoints(env):
     """simple_deficit 처방 — 검증점 좌우 이웃과의 중점 2개를 넣는다 (예산 내)."""
     from claw.common.contracts import TrimCase
-    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, OperatingPoint, case_name
+    from claw.design import ROLE_DESIGN, ROLE_VALIDATION, OperatingPoint, case_name
 
     s = DesignSession(_small())
-    for mach, role in ((0.3, ROLE_ANCHOR), (0.4, ROLE_VALIDATION), (0.5, ROLE_ANCHOR)):
+    for mach, role in ((0.3, ROLE_DESIGN), (0.4, ROLE_VALIDATION), (0.5, ROLE_DESIGN)):
         s.points.add(OperatingPoint(
             case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
                           alt=1000.0, fuel=200.0),
@@ -190,17 +190,17 @@ def test_add_validation_inserts_flanking_midpoints(env):
     added = sorted(p.case.mach for p in s.points.by_role(ROLE_VALIDATION)
                    if p.origin.startswith("add_validation"))
     assert added == pytest.approx([0.35, 0.45])
-    assert s.stage == "TUNE"  # 앵커 승격이 아니므로 리파인으로 돌아가지 않는다
+    assert s.stage == "TUNE"  # 플랜트 편입이 아니므로 리파인으로 돌아가지 않는다
 
 
 def test_add_validation_respects_point_budget(env):
     """예산이 꽉 차 있으면 검증점을 더 넣지 않는다 (종료 보장의 한 겹)."""
     from claw.common.contracts import TrimCase
-    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, OperatingPoint, case_name
+    from claw.design import ROLE_DESIGN, ROLE_VALIDATION, OperatingPoint, case_name
 
     s = DesignSession(_small(budget_points=4))
-    for mach, role in ((0.3, ROLE_ANCHOR), (0.4, ROLE_VALIDATION),
-                       (0.5, ROLE_ANCHOR), (0.6, ROLE_ANCHOR)):
+    for mach, role in ((0.3, ROLE_DESIGN), (0.4, ROLE_VALIDATION),
+                       (0.5, ROLE_DESIGN), (0.6, ROLE_DESIGN)):
         s.points.add(OperatingPoint(
             case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
                           alt=1000.0, fuel=200.0),
@@ -213,27 +213,27 @@ def test_add_validation_respects_point_budget(env):
     assert len(s.points) == 4  # 상한에서 멈춘다
 
 
-def test_ratchet_violation_is_skipped_not_fatal(env):
-    """상위 역할 점에 승격 처방이 오더라도 세션을 죽이지 않는다 (안전망).
+def test_promote_on_a_design_point_is_skipped_not_fatal(env):
+    """설계점에 편입 처방이 오더라도 세션을 죽이지 않는다 (안전망).
 
-    분류기가 그런 처방을 내지 않도록 막아 두었지만(classify refit_at), 여기서
-    ValueError가 나면 run()이 못 잡아 트림·튜닝 전량이 저장 없이 사라진다.
+    분류기는 설계점에 편입을 내지 않지만, 옛 세션의 대기 카드(breakpoint 승격 — 게인 동봉)는 올 수 있다. 여기서
+    ValueError가 나면 run()이 못 잡아 트림·튜닝 전량이 저장 없이 사라진다. 옛 카드의 게인은 옛 규약대로 기록한다.
     """
     from claw.common.contracts import TrimCase
-    from claw.design import ROLE_ANCHOR, OperatingPoint, case_name
+    from claw.design import ROLE_DESIGN, OperatingPoint, case_name
 
     s = DesignSession(_small())
     name = case_name(0.5, 1000.0, 200.0)
     s.points.add(OperatingPoint(
         case=TrimCase(name=name, mach=0.5, alt=1000.0, fuel=200.0),
-        role=ROLE_ANCHOR, origin="test",
+        role=ROLE_DESIGN, origin="test",
     ))
     s.actions = [{"id": "a1", "verdict": "gain_interp_valley", "case": name, "loop": "pitch_att",
                   "action": {"type": "promote", "to": "breakpoint", "point": name,
                              "gains": {"pitch.kp": -1.8}}}]
     out = s.apply_actions(["a1"])  # 터지면 안 된다
     assert out["applied"] == ["a1"]
-    assert s.points.get(name).role == ROLE_ANCHOR  # 강등되지 않는다
+    assert s.points.get(name).role == ROLE_DESIGN
     assert s.actions[0]["skipped"]
     assert s.promoted_gains["pitch.kp"][name] == pytest.approx(-1.8)
 
@@ -254,13 +254,13 @@ def test_escalation_never_marked_applied(env):
 def test_promoted_gains_never_override_fresh_tuning(env):
     """승격 때 굳은 게인이 나중 TUNE 결과를 덮으면 그 점은 영원히 재분류된다."""
     from claw.common.contracts import TrimCase
-    from claw.design import ROLE_ANCHOR, OperatingPoint, case_name
+    from claw.design import ROLE_DESIGN, OperatingPoint, case_name
 
     s = DesignSession(_small())
     name = case_name(0.5, 1000.0, 200.0)
     s.points.add(OperatingPoint(
         case=TrimCase(name=name, mach=0.5, alt=1000.0, fuel=200.0),
-        role=ROLE_ANCHOR, origin="test",
+        role=ROLE_DESIGN, origin="test",
     ))
     s.gain_samples = {"pitch.kp": {name: -2.4}}   # 최신 튜닝 결과
     s.promoted_gains = {"pitch.kp": {name: -1.8}}  # 이전 이터에서 굳은 값
@@ -282,7 +282,7 @@ def test_promoted_gains_never_override_fresh_tuning(env):
 def test_nothing_verified_is_not_converged(env):
     """판정이 한 건도 없으면 '통과'가 아니다 — vacuous pass 금지."""
     s = DesignSession(_small())
-    s.margin_out = {"cases": {"A": {"role": "anchor", "note": "미수렴 트림", "loops": {}}},
+    s.margin_out = {"cases": {"A": {"role": "design", "note": "미수렴 트림", "loops": {}}},
                     "failures": []}
     assert s.judged_count() == 0
     s._stage_classify(None, lambda *a: None)
@@ -290,7 +290,7 @@ def test_nothing_verified_is_not_converged(env):
     assert s.stage == "DONE"
     # 판정이 하나라도 있으면 정상 수렴
     s2 = DesignSession(_small())
-    s2.margin_out = {"cases": {"A": {"role": "anchor",
+    s2.margin_out = {"cases": {"A": {"role": "design",
                                      "loops": {"pitch_att": {"status": "ok"}}}},
                      "failures": []}
     s2._stage_classify(None, lambda *a: None)
@@ -304,10 +304,10 @@ def test_gated_pause_is_deterministic(env):
     된다 — 처방을 직접 세워 상태 전이만 검사한다.
     """
     from claw.common.contracts import TrimCase
-    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, OperatingPoint, case_name
+    from claw.design import ROLE_DESIGN, ROLE_VALIDATION, OperatingPoint, case_name
 
     s = DesignSession(_small(mode="gated"))
-    for mach, role in ((0.3, ROLE_ANCHOR), (0.4, ROLE_VALIDATION), (0.5, ROLE_ANCHOR)):
+    for mach, role in ((0.3, ROLE_DESIGN), (0.4, ROLE_VALIDATION), (0.5, ROLE_DESIGN)):
         s.points.add(OperatingPoint(
             case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
                           alt=1000.0, fuel=200.0),
@@ -348,13 +348,13 @@ def test_classify_gets_the_hand_design_not_the_fitted_one(monkeypatch):
     분류기 자체는 대역한다 — 여기서 볼 것은 배선이다.
     """
     from claw.common.contracts import TrimCase
-    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, OperatingPoint, case_name
+    from claw.design import ROLE_DESIGN, ROLE_VALIDATION, OperatingPoint, case_name
     from claw.design import orchestrator as O
 
     s = DesignSession(_small())
     s.design = {"pitch.kp": -2.0, "roll.k_rate": -0.2}
     s.sched_constants = {"roll.k_rate": 0.0}  # 적합이 이 자리를 0으로 접었다
-    for mach, role in ((0.3, ROLE_ANCHOR), (0.4, ROLE_VALIDATION)):
+    for mach, role in ((0.3, ROLE_DESIGN), (0.4, ROLE_VALIDATION)):
         s.points.add(OperatingPoint(
             case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
                           alt=1000.0, fuel=200.0), role=role, origin="test"))
@@ -380,10 +380,10 @@ def test_classify_gets_the_hand_design_not_the_fitted_one(monkeypatch):
 def _seed_failing_session(mode="auto", **cfg):
     """실패 하나가 걸린 세션 — 처방 효과 채점만 보기 위한 최소 상태."""
     from claw.common.contracts import TrimCase
-    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, OperatingPoint, case_name
+    from claw.design import ROLE_DESIGN, ROLE_VALIDATION, OperatingPoint, case_name
 
     s = DesignSession(_small(mode=mode, **cfg))
-    for mach, role in ((0.3, ROLE_ANCHOR), (0.4, ROLE_VALIDATION), (0.5, ROLE_ANCHOR)):
+    for mach, role in ((0.3, ROLE_DESIGN), (0.4, ROLE_VALIDATION), (0.5, ROLE_DESIGN)):
         s.points.add(OperatingPoint(
             case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
                           alt=1000.0, fuel=200.0), role=role, origin="test"))
@@ -465,7 +465,7 @@ def test_effect_unknown_is_not_counted_as_ineffective():
 
 
 def test_tighten_fit_moves_the_fit_parameters_and_ratchets():
-    """앵커 처방(tighten_fit)은 샘플이 아니라 **적합**을 바꾼다 — 단조 래칫, 상한 있음."""
+    """설계점 처방(tighten_fit — 다항 모드)은 샘플이 아니라 **적합**을 바꾼다 — 단조 래칫, 상한 있음."""
     from claw.design.orchestrator import _FIT_TIGHTEN_MAX
 
     # 다항 전용 처방이다 — 기본(표) 모드에는 조일 적합이 없어 건너뛴다(아래 별 테스트)
@@ -521,7 +521,7 @@ def test_verify_stage_scores_the_applied_actions(monkeypatch):
     s.apply_actions(["a1"])
     assert "after" not in s.actions[0]["effect"]
 
-    monkeypatch.setattr(O, "midpoint_validation_points", lambda pts, **kw: [])
+    monkeypatch.setattr(O, "validation_points", lambda pts, knots, **kw: [])
     monkeypatch.setattr(O, "scheduled_margin_map", lambda *a, **k: {
         "aborted": None, "failures": [],
         "cases": {v: {"role": "validation", "loops": {"pitch_att": {
@@ -595,8 +595,13 @@ def test_refine_leaves_room_for_interpolation_checks(env):
     s = DesignSession(_small())
     s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
     mids = [p for p in s.points if str(p.origin).startswith("midpoint:")]
-    assert mids, "보간 구간 검증점이 하나도 없다 — 예약이 듣지 않았다"
-    assert s.coverage()["validation_points"] == len(mids)
+    cov = s.coverage()
+    # 절점 구간 중점이 이미 설계점이어도(보강의 이분 중점 — 흔하다) 다음 빈 내분점으로 옮겨 표본 밖 검증점을 둔다 —
+    # 설계점 판정은 적합 잔차라 검증으로 세지 않는다(리뷰 정정)
+    assert mids, "보간 구간을 하나도 안 봤다 — 예약이 듣지 않았다"
+    assert "validation_at_design_points" not in cov
+    assert cov["validation_points"] == len(mids)
+    assert cov["validation_missing"] == 0
     # 예약분만큼은 REFINE이 못 쓴다
     assert s.refine_report["budget"] < s.config.budget_points
 
@@ -609,22 +614,49 @@ def test_coverage_counts_the_point_set_not_a_stage_counter():
     15개 구간을 봤는데 "하나도 안 봤다"고 말하게 된다.
     """
     from claw.common.contracts import TrimCase
-    from claw.design import (
-        ROLE_ANCHOR, ROLE_BREAKPOINT, ROLE_VALIDATION, OperatingPoint, case_name,
-    )
+    from claw.design import ROLE_DESIGN, ROLE_VALIDATION, OperatingPoint, case_name
 
     s = DesignSession(_small())
-    for mach, origin, role in ((0.3, "coarse", ROLE_ANCHOR),
+    for mach, origin, role in ((0.3, "coarse", ROLE_DESIGN),
                                (0.4, "midpoint:a|b", ROLE_VALIDATION),
-                               (0.5, "midpoint:b|c", ROLE_BREAKPOINT),  # 승격된 검증점
-                               (0.6, "coarse", ROLE_ANCHOR)):
+                               (0.5, "midpoint:b|c", ROLE_VALIDATION),
+                               (0.6, "coarse", ROLE_DESIGN)):
         s.points.add(OperatingPoint(
             case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach,
                           alt=1000.0, fuel=200.0), role=role, origin=origin))
+    s.points.promote(case_name(0.5, 1000.0, 200.0), reason="plant_variation")  # 편입된 검증점 — 출처는 promoted:
     s.validation_wanted, s.validation_added = 9, 0  # 마지막 패스는 아무것도 못 넣었다
     cov = s.coverage()
-    assert cov["validation_points"] == 2, "승격된 검증점이 안 세어졌다 — 그 구간은 봤다"
+    assert cov["validation_points"] == 2, "편입된 검증점이 안 세어졌다 — 그 구간은 봤다"
     assert cov["validation_missing"] == 9
+
+
+def test_coverage_never_counts_a_design_point_as_a_validation():
+    """설계점과 겹친 내분점은 검증 수에 들지 않는다 — 옮긴 수(midpoints_at_design_points)는 정보로만 낸다.
+
+    종전(이관 3단계 초안)은 절점 구간 중점에 선 설계점을 「검증」으로 세었다(validation_at_design) — 트림·판정 안 된 보강
+    점과, 편입된 검증점(중점 출처 이력으로 이미 센다)까지 두 번. 설계점은 그 자신이 적합 표본이라 거기 판정은 보간이
+    아니라 적합 잔차다."""
+    from claw.common.contracts import TrimCase
+    from claw.design import ROLE_DESIGN, OperatingPoint, case_name
+
+    s = DesignSession(_small())
+    for mach in (0.3, 0.4, 0.5):
+        s.points.add(OperatingPoint(case=TrimCase(name=case_name(mach, 1000.0, 200.0), mach=mach, alt=1000.0,
+                                                  fuel=200.0), role=ROLE_DESIGN, origin="coarse"))
+    from claw.design.knots import KnotSet
+
+    s.knot_sets = {"common": KnotSet(name="common", coords=[0.3, 0.5], source="user")}
+    s.table_knots = {"pitch.kp": "common"}
+    from claw.design.schedmap import validation_candidates
+
+    cand = validation_candidates(s.points.designable(), [0.3, 0.5])
+    s.validation_moved, s.validation_unplaceable = cand["moved"], cand["unplaceable"]
+    s.validation_wanted, s.validation_added = 1, 0
+    cov = s.coverage()
+    assert cov["validation_points"] == 0 and cov["midpoints_at_design_points"] == 1
+    gaps = " ".join(s.coverage_gaps())
+    assert "한 개도 없다" in gaps, "설계점 겹침을 검증으로 세어 공백을 숨겼다"
 
 
 def test_coverage_gaps_say_what_the_run_did_not_look_at(env):
@@ -654,11 +686,11 @@ def test_ledger_gathers_what_has_no_prescription_card():
     """
     s, v = _seed_failing_session()
     s.margin_out["cases"].update({
-        "M0.9_h0_f200": {"role": "anchor", "loops": {}},  # 트림 미수렴
-        "M0.2_h0_f40": {"role": "anchor", "outside_envelope": True, "loops": {
+        "M0.9_h0_f200": {"role": "design", "loops": {}},  # 트림 미수렴
+        "M0.2_h0_f40": {"role": "design", "outside_envelope": True, "loops": {
             "roll_att": {"kind": "margin", "pm_deg": 20.0, "gm_db": 3.0,
                          "status": "fail"}}},
-        "M0.5_h0_f200": {"role": "anchor", "loops": {
+        "M0.5_h0_f200": {"role": "design", "loops": {
             "pitch_att": {"kind": "margin", "pm_deg": float("nan"),
                           "gm_db": float("nan"), "status": "na"}}},
     })
@@ -825,7 +857,10 @@ def test_yaw_target_headroom_absorbs_the_altitude_interleave_of_a_mach_table():
     튜너는 앵커마다 목표에 처음 닿는 크기를 고르지만, 1축 표는 같은 마하 근처의 두 고도 값을 한 축에 섞는다 — 한
     고도의 앵커가 다른 고도의 분할점 값을 받는 자리에서 요 ζ가 목표 아래로 내려간다(제품 예제 500·1500 m 소격자:
     최저 목표의 97 %). 목표가 판정 목표선과 같으면(종전 0.5 = zeta_good) 그 표현 손실이 곧 warn이다 — 실측 요 판정
-    60건 중 15건 warn(이관 2단계 — 격자가 요구영역 기본 격자 M0.106~0.28에서 나온다. 종전 coarse_grid 58건 중 20건). 목표를 목표선 위에 두면(TuneTargets.zeta_dr — 잰 표현 손실 최대 16.4 %를 덮는 0.6) 0건이다.
+    60건 중 30건 warn(이관 3단계 — 표가 설계점마다가 아니라 공통 마하 절점 5개 위 최소제곱이라 표가 튜닝값을 지나지
+    않는다. 설계점과 겹친 구간 중점 6곳의 검증점을 ¼·¾로 옮긴 뒤 29 → 30. 종전 표본 마하마다 분할점일 때 15건, 이관
+    2단계 전 coarse_grid 58건 중 20건). 목표를 목표선 위에 두면
+    (TuneTargets.zeta_dr — 잰 표현 손실 최대 16.4 %를 덮는 0.6) 0건이다.
     둘 다 수렴·실패 0이라, 목표만이 판정을 가른다."""
     from claw.design import MarginCriteria, design_inputs
     from claw.profile import build_profile
@@ -846,12 +881,12 @@ def test_yaw_target_headroom_absorbs_the_altitude_interleave_of_a_mach_table():
 
     crit = MarginCriteria()
     at_goal = yaw_verdicts(TuneTargets(zeta_dr=crit.zeta_good))
-    assert sum(st == "warn" for _, st in at_goal) == 15 and len(at_goal) == 60
-    assert min(z for z, _ in at_goal) == pytest.approx(0.4870, abs=1e-3)
+    assert sum(st == "warn" for _, st in at_goal) == 30 and len(at_goal) == 60
+    assert min(z for z, _ in at_goal) == pytest.approx(0.4828, abs=1e-3)
     default = yaw_verdicts(TuneTargets())
     assert TuneTargets().zeta_dr > crit.zeta_good
     assert [st for _, st in default] == ["ok"] * 60, sorted(default)[:5]
-    assert min(z for z, _ in default) == pytest.approx(0.5844, abs=1e-3)
+    assert min(z for z, _ in default) == pytest.approx(0.5791, abs=1e-3)  # 절점 위 표(이관 3단계) — 종전 0.5844
 
 
 def test_table_mode_adopts_the_table_it_verified(env):
@@ -894,17 +929,16 @@ def test_table_mode_adopts_the_table_it_verified(env):
 
 
 def test_failures_are_counted_by_point_role():
-    """"실패 N"만으로는 앵커 실패와 점 사이 실패가 섞인다 — 역할별로 센다.
+    """"실패 N"만으로는 설계점 실패와 점 사이 실패가 섞인다 — 역할별로 센다.
 
-    표 모드에서 앵커의 실효 게인은 그 점의 튜닝값인 경우가 많아 통과가 "튜닝 성립"에
-    가깝다. 스케줄이 성립하는지를 말하는 것은 검증점 판정이므로 두 수가 갈려야 한다.
+    설계점 실패는 절점 부족(표가 표본을 못 지나감 — add_knot), 검증점 실패는 표본 사이 보간이라 처방이 갈린다.
     """
-    from claw.design import ROLE_ANCHOR, ROLE_VALIDATION, case_name
+    from claw.design import ROLE_DESIGN, ROLE_VALIDATION, case_name
 
     s, v = _seed_failing_session()
     a = case_name(0.3, 1000.0, 200.0)
     assert s.points.get(v).role == ROLE_VALIDATION
-    assert s.points.get(a).role == ROLE_ANCHOR
+    assert s.points.get(a).role == ROLE_DESIGN
     s.margin_out["failures"] = [
         {"case": v, "loop": "pitch_att", "status": "fail"},
         {"case": a, "loop": "pitch_att", "status": "fail"},
@@ -912,10 +946,10 @@ def test_failures_are_counted_by_point_role():
         # 점 집합에 없는 케이스(옛 저장물·격자 변경) — 0으로 위장하지 않고 미상으로 센다
         {"case": "M9.9_h0_f0", "loop": "pitch_att", "status": "fail"},
     ]
-    assert s.failures_by_role() == {ROLE_VALIDATION: 1, ROLE_ANCHOR: 2, "unknown": 1}
+    assert s.failures_by_role() == {ROLE_VALIDATION: 1, ROLE_DESIGN: 2, "unknown": 1}
     rep = s.report()
     assert rep["failures"] == 4 and rep["failures_by_role"] == s.failures_by_role()
-    # 실패가 없으면 빈 dict — "앵커 0"을 적어 넣지 않는다
+    # 실패가 없으면 빈 dict — "설계점 0"을 적어 넣지 않는다
     s.margin_out["failures"] = []
     assert s.report()["failures_by_role"] == {}
 
@@ -923,7 +957,7 @@ def test_failures_are_counted_by_point_role():
 def test_tighten_fit_is_skipped_in_table_mode():
     """표 모드에는 조일 적합이 없다 — 사유를 달아 건너뛰고, 그래도 채점·봉인된다.
 
-    남은 어긋남은 1축 붕괴(같은 축값의 다른 축 샘플 평균) 탓이라 조이기로는 안 풀린다.
+    분류기는 표 모드에 이 카드를 더는 내지 않는다(설계점 괴리 → add_knot). 옛 세션의 대기 카드만 여기 온다.
     상한 분기와 같은 규약으로 applied로 세야 채점 대상에 들어가고, 안 듣는 처방이
     예산을 태우기 전에 봉인된다.
     """
@@ -955,7 +989,8 @@ def test_validation_density_reaches_the_verify_stage(env):
         # 예산 60 — 요구영역 격자(M0.3~0.55)에서는 REFINE이 좁은 구간을 더 채워 40이면 밀도 2의 검증점이 예산에 막혔다(이관 2단계)
         s = DesignSession(_small(budget_points=60, n_validation_between=n))
         s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
-        counts[n] = s.coverage()["validation_points"]
+        cov = s.coverage()
+        counts[n] = cov["validation_points"]
     assert counts[2] > counts[1] > 0
 
 
@@ -1045,7 +1080,7 @@ def test_sched_axes_config_defaults_to_mach_and_round_trips():
 def _two_alt_fit_session(**cfg):
     """고도 변동이 지배적인 게인 샘플이 걸린 세션 — FIT 한 판만 보기 위한 최소 상태."""
     from claw.common.contracts import TrimCase
-    from claw.design import ROLE_ANCHOR, OperatingPoint, case_name
+    from claw.design import ROLE_DESIGN, OperatingPoint, case_name
 
     s = DesignSession(_small(**cfg))
     machs, alts = (0.3, 0.4, 0.5, 0.6), (1000.0, 5000.0)
@@ -1053,7 +1088,7 @@ def _two_alt_fit_session(**cfg):
         for m in machs:
             s.points.add(OperatingPoint(
                 case=TrimCase(name=case_name(m, a, 200.0), mach=m, alt=a, fuel=200.0),
-                role=ROLE_ANCHOR, origin="test"))
+                role=ROLE_DESIGN, origin="test"))
     s.gain_samples = {"pitch.kp": {case_name(m, a, 200.0): -1.0 - 1.0 * m - 0.0004 * a
                                    for a in alts for m in machs}}
     return s
@@ -1259,14 +1294,14 @@ def _failed_roll_damper_session(**cfg):
 
     그 점의 roll.k_rate 표본은 자리값 0, roll.kp·ki는 0 댐퍼 위에서 튜닝된 값이다."""
     from claw.common.contracts import TrimCase
-    from claw.design import ROLE_ANCHOR, OperatingPoint, case_name
+    from claw.design import ROLE_DESIGN, OperatingPoint, case_name
 
     s = DesignSession(_small(**cfg))
     machs = (0.100, 0.1039, 0.1077, 0.1116, 0.1154)
     names = [case_name(m, 0.0, 25.0) for m in machs]
     for m, n in zip(machs, names):
         s.points.add(OperatingPoint(case=TrimCase(name=n, mach=m, alt=0.0, fuel=25.0),
-                                    role=ROLE_ANCHOR, origin="test"))
+                                    role=ROLE_DESIGN, origin="test"))
     bad = names[2]
     s.gain_samples = {
         "roll.k_rate": dict(zip(names, (-0.52, -0.50, 0.0, -0.46, -0.44))),
@@ -1444,7 +1479,7 @@ def _coverage_session(**state):
     s.coarse_source = "region_base_grid"
     for m in (0.3, 0.5):
         pt = OperatingPoint(case=TrimCase(name=case_name(m, 1000.0, 200.0), mach=m, alt=1000.0, fuel=200.0),
-                            role=ROLE_ANCHOR, origin="coarse")
+                            role=ROLE_DESIGN, origin="coarse")
         pt.verdict = {"region": {"status": "in", "confirmed": True}, "adopted": True, "exclusion": None,
                       "trim": {"status": "computable", "reasons": []}}
         pt.trimmable = True
@@ -1528,3 +1563,150 @@ def test_a_session_without_a_base_grid_record_is_unknown_not_undefined():
     rc = s.region_coverage()
     assert rc["source"] is None and rc["complete"] is False
     assert rc["reasons"][0].startswith("요구영역 커버리지 모름")
+
+
+# ── 설계점과 절점 분리 (이관 3단계 — 05 §11.5) ─────────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def ran(env):
+    """한 번 끝까지 돈 작은 세션(표 모드·요구영역 격자) — 절점 기록·왕복·옛 세션 재개가 같은 실행을 본다."""
+    ac, stall, limits, db, design = env
+    s = DesignSession(_small(budget_iters=1))
+    s.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
+    return s
+
+
+def test_knots_come_from_the_region_axis_not_from_the_design_points(env, ran):
+    """절점 수는 설계점 수와 무관하다 — REFINE이 설계점을 더해도 표의 분할점은 요구영역 공통 마하 좌표다.
+
+    종전 표 모드는 튜닝한 마하마다 분할점이라 설계점이 곧 절점이었다(쇼케이스 36점). 보강을 끈 실행(refine_tol 큼)과
+    같은 절점을 쓰는지로 본다."""
+    ac, stall, limits, db, design = env
+    flat = DesignSession(_small(budget_iters=1, refine_tol=50.0))
+    flat.run(ac, stall, limits, db, design, verdict_ctx=_vctx(), fingerprint="fp")
+    n_ran = len(ran.points.by_role("design"))
+    n_flat = len(flat.points.by_role("design"))
+    assert n_ran > n_flat, "보강이 설계점을 더해야 시험이 된다"
+    axis = ran.region_grid["axis"]
+    assert ran.knot_sets["common"].coords == flat.knot_sets["common"].coords == axis
+    assert ran.knot_sets["common"].source == "base_axis"
+    for s in (ran, flat):
+        for slot, t in s.sched_tables.items():
+            assert set(np.round(t.axes[0], 9)) <= set(np.round(axis, 9)), slot
+    rep = ran.report()
+    assert rep["knots"]["shared"] is True
+    assert rep["knots"]["tables"] == {slot: len(t.axes[0]) for slot, t in ran.sched_tables.items()}
+
+
+def test_session_round_trip_keeps_the_knot_sets(ran):
+    d = ran.to_dict()
+    assert d["knot_sets"]["common"]["coords"] == ran.knot_sets["common"].coords
+    assert d["config"]["knots"]["rule"] == "base_axis"
+    s2 = DesignSession.from_dict(d)
+    assert s2.to_dict() == d
+    assert s2.knot_record() == ran.knot_record()
+    assert s2.report()["knots"] == ran.report()["knots"]
+
+
+def test_old_session_resumes_with_the_samples_rule_and_the_same_tables(ran):
+    """절점 기록이 없는 옛 세션 — 표의 마하 축이 곧 절점이었으므로 그 합집합을 samples 집합으로 세운다.
+
+    「옛 표」는 **이관 3단계 전 경로 그대로**(fit_slots knots_by_slot=None — 튜닝한 마하마다 평균) 짓는다 — 새 samples
+    규칙으로 지으면 같은 코드끼리 비교하는 셈이다. 적합 제외 표본도 하나 넣는다: 한 마하의 pitch 표본이 전부 빠지면 옛
+    표에는 그 마하가 없지만 합집합 절점에는 (다른 자리 표 때문에) 있다 — 그 절점은 받치는 표본이 없어 그 표에서만 빠져야
+    같은 표가 나온다. 옛 설정에 knots가 없으면 규칙도 samples로 읽는다 — 새 기본값(base_axis)으로 읽으면 재개한 세션의
+    표 형상이 조용히 바뀐다."""
+    import copy
+
+    from claw.design.fit import fit_slots
+    from claw.design.knots import COMMON
+    from claw.design.tune import REASON_NO_STABLE_GAIN
+
+    legacy = DesignSession(_small(budget_iters=1))
+    for key in ("points", "trims", "gain_samples", "region_grid", "coarse_source"):
+        setattr(legacy, key, copy.deepcopy(getattr(ran, key)))
+    legacy.lms = ran.lms
+    legacy.tune_meta = copy.deepcopy(ran.tune_meta)
+    # 표본이 한 점뿐인 안쪽 마하를 골라 그 점의 피치 레이트 튜닝을 실패로 — pitch.k_rate(own)·pitch.kp/ki(rate_loop)가 빠진다
+    by_mach: dict = {}
+    for n in legacy.gain_samples["pitch.kp"]:
+        by_mach.setdefault(round(legacy.points.get(n).case.mach, 9), []).append(n)
+    inner = sorted(by_mach)[1:-1]
+    m_x = next(m for m in inner if len(by_mach[m]) == 1)
+    victim = by_mach[m_x][0]
+    legacy.tune_meta.setdefault("slots", {}).setdefault(victim, {})["pitch_rate"] = {"reason": REASON_NO_STABLE_GAIN}
+    old_fit = fit_slots(legacy.gain_samples, legacy.points, exclude=legacy._fit_exclusions(), knots_by_slot=None,
+                        **legacy._fit_params())
+    assert victim in {r["point"] for r in old_fit["reports"]["pitch.kp"]["excluded_samples"]}, "제외가 걸려야 시험이 된다"
+    assert not np.any(np.isclose(old_fit["tables"]["pitch.kp"].axes[0], m_x)), "옛 표에 제외 마하가 없어야 한다"
+    legacy.sched_tables, legacy.sched_constants, legacy.fits = (old_fit["tables"], old_fit["constants"],
+                                                                old_fit["reports"])
+    legacy.stage = "FIT"
+    d = legacy.to_dict()
+    for k in ("knot_sets", "table_knots"):
+        d.pop(k)
+    d["config"].pop("knots")
+    old = DesignSession.from_dict(d)
+    assert old.config.knots["rule"] == "samples"
+    assert old.knot_sets[COMMON].source == "samples"
+    assert any(np.isclose(old.knot_sets[COMMON].coords, m_x)), "다른 자리 표가 그 마하를 절점 합집합에 넣는다"
+    before = {slot: (list(t.axes[0]), list(t.data)) for slot, t in old.sched_tables.items()}
+    old._stage_fit(lambda *a: None)
+    for slot, t in old.sched_tables.items():
+        assert list(t.axes[0]) == pytest.approx(before[slot][0]), slot
+        assert list(t.data) == pytest.approx(before[slot][1], abs=1e-12), slot
+    assert m_x in old.fits["pitch.kp"]["unsupported_knots"] or any(
+        np.isclose(old.fits["pitch.kp"]["unsupported_knots"], m_x))
+
+
+def test_add_knot_action_promotes_and_splits_only_the_named_tables(env, ran):
+    """add_knot 반영 — 검증점이면 설계점으로 편입(다음 스테이지 TUNE — 튜닝해야 표본이 선다), 이름 댄 표만 새 절점.
+
+    같은 점의 다른 자리 카드가 또 오면 편입은 건너뛰되(applied로 센다) 절점은 그 자리 표에 더한다."""
+    import copy
+
+    from claw.common.contracts import TrimCase
+    from claw.design import OperatingPoint
+    from claw.opspace.verdict import condition_verdict
+    from claw.trim import trim_level
+
+    s = DesignSession.from_dict(copy.deepcopy(ran.to_dict()))
+    # 절점 구간 0.3 자리의 검증점(보강의 이분 좌표와 겹치지 않는 비율) — 트림·판정을 실어 둔다(편입 뒤 TUNE이 이 트림으로 튜닝한다)
+    k = s.knot_sets["common"].coords
+    row = next(p for p in s.points if p.role == "design").case
+    mach = round(k[0] + 0.3 * (k[1] - k[0]), 6)
+    case = TrimCase(name=case_name(mach, row.alt, row.fuel), mach=mach, alt=row.alt, fuel=row.fuel)
+    tr = trim_level(env[0], case, fingerprint="fp")
+    s.trims[case.name] = tr
+    v = OperatingPoint(case=case, role="validation", origin="test")
+    v.verdict = condition_verdict(tr, _vctx())
+    v.trimmable = v.verdict["adopted"]
+    assert v.trimmable
+    s.points.add(v)
+    s.actions = [
+        {"id": "k1", "verdict": "gain_interp_valley", "case": v.name, "loop": "pitch_att",
+         "action": {"type": "add_knot", "point": v.name, "mach": mach, "slots": ["pitch.kp", "pitch.ki"],
+                    "promote": True}},
+        {"id": "k2", "verdict": "gain_interp_valley", "case": v.name, "loop": "roll_att",
+         "action": {"type": "add_knot", "point": v.name, "mach": mach, "slots": ["roll.kp", "roll.ki"],
+                    "promote": True}},
+    ]
+    out = s.apply_actions(["k1", "k2"])
+    assert out == {"applied": ["k1", "k2"], "next_stage": "TUNE"}
+    assert s.points.get(v.name).role == "design" and s.points.get(v.name).origin == "promoted:gain_interp_valley"
+    # 둘째 카드는 편입이 이미 됐지만 절점은 더했다 — 건너뜀이 아니다(한 일이 있는 카드). 편입 불필요는 참고로 남는다
+    assert "skipped" not in s.actions[1] and s.actions[1]["knot"]["added"] is True
+    assert s.actions[1]["notes"][0].startswith("이미 design")
+    assert s.table_knots["pitch.kp"] == s.table_knots["pitch.ki"] == "pitch.ki+pitch.kp"
+    assert s.table_knots["roll.kp"] == "roll.ki+roll.kp"
+    assert s.table_knots["yaw.k_rate"] == "common" and mach not in s.knot_sets["common"].coords
+    assert mach in s.knot_sets["pitch.ki+pitch.kp"].coords
+    assert s.actions[0]["knot"]["split"] == ["pitch.ki", "pitch.kp"]
+    # 표본이 생기기 전(TUNE 전) FIT은 그 절점을 표본 없는 절점으로 뺄 수 있다 — 튜닝 뒤에는 편입점이 표본이다
+    s.run(*env[:4], env[4], verdict_ctx=_vctx(), fingerprint="fp")
+    assert v.name in s.gain_samples["pitch.kp"]
+    kp = s.sched_tables["pitch.kp"]
+    assert np.any(np.isclose(kp.axes[0], mach)), "편입점 마하 절점이 표에 서야 한다"
+    assert s.knot_record()["tables"]["pitch.kp"]["shared"] is True  # 두 표가 새 집합을 함께 쓴다
+    assert s.knot_record()["tables"]["yaw.k_rate"]["set"] == "common"

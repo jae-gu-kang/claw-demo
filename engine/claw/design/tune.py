@@ -1549,14 +1549,15 @@ def tune_points(
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
     rate_filters=None, polish=False, max_evals=60, on_progress=None,
 ) -> dict:
-    """앵커 전체 튜닝 → gain surface 샘플 — {"gains": {자리: {이름: 값}}, "results", "aborted"}.
+    """설계점 전체 튜닝 → gain surface 샘플 — {"gains": {자리: {이름: 값}}, "results", "aborted"}.
 
-    trimmable=False·미수렴 앵커는 건너뛰고 skipped로 보고한다 (조용한 누락 금지).
+    trimmable=False·미수렴 설계점은 건너뛰고 skipped로 보고한다 (조용한 누락 금지). 튜닝값은 적합의 표본이지 표의
+    분할점이 아니다 — 절점은 표별 절점 집합(knots.py)이 정한다(05 §11.4).
     """
-    from claw.design.points import ROLE_ANCHOR
+    from claw.design.points import ROLE_DESIGN
 
     targets = targets if targets is not None else TuneTargets()
-    anchors = points.by_role(ROLE_ANCHOR)
+    anchors = points.by_role(ROLE_DESIGN)
     gains: dict = {}
     results: dict = {}
     skipped: list = []

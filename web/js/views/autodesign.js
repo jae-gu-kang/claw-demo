@@ -13,7 +13,7 @@
 config 덮어쓰기로 보낸다. "게인 확정"은 결과의 반출 표(표 모드면 검증한 표 그 자체, 다항
 모드면 재샘플 테이블 — lib/autodesign 머리말)를 기존 스토어 계약(`gainTables` + 출처 `gainTablesSource`)으로 주입한다 — 시뮬·Autocode·
 블록도·영향성이 그대로 소비하고, 게인 탭은 그것을 **되읽어** 표·차트로 보여 준다
-(자리마다 다른 breakpoint는 합집합 축으로 정렬 — lib/gainsched alignTables).
+(자리마다 다른 절점은 합집합 축으로 정렬 — lib/gainsched alignTables).
 
 스타일은 app.css 비접촉 — 심각도 색은 값으로 지정 (duty.js 선례).
 
@@ -26,7 +26,7 @@ config 덮어쓰기로 보낸다. "게인 확정"은 결과의 반출 표(표 �
 import { ApiError, api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
-  VERDICT_LABEL, actionCards, actuatorLine,
+  VERDICT_LABEL, actionCards, actuatorLine, knotModel, machText,
   adoptBlockedText, adoptStorePayload, adoptWarnText, applyGateReason, approvedByDefault, buildConfig,
   configFormValues, coverageLines, criteriaSummaryModel, designCueSummary, emptyResultNotice, evidenceLines, excludedSamplesModel, fitFactsModel,
   fitQualityLines, gridPlaceholders, ledgerRows, ledgerTruncatedText, mergeDesignConfig, pointRows,
@@ -53,7 +53,8 @@ const SEV_COLOR = { ok: "#34c759", warn: "#ff9500", fail: "#ff3b30", na: "#8e8e9
 const LEDGER_COLOR = { ...SEV_COLOR, ineffective: "#af52de" };
 // 범례 색을 고르는 순서 — 한 종류가 여러 색으로 뜰 때 가장 심한 쪽을 세운다
 const LEDGER_TONE_RANK = { ok: 0, na: 1, warn: 2, ineffective: 3, fail: 4 };
-const ROLE_LABEL = { anchor: "앵커(트림·선형화)", breakpoint: "게인 breakpoint", validation: "검증점" };
+// 절점 규칙 이름 — 선택지 코드는 서버(knot_rules)가 정본이고 이건 표시 이름뿐이다. 모르는 코드는 그대로 뜬다
+const KNOT_RULE_LABEL = { base_axis: "요구영역 기본 격자", uniform: "등분", user: "좌표 직접", samples: "튜닝 마하 전부(옛 방식)" };
 // 원장은 수십 행이 될 수 있다 — 심각도 상위만 펼치고 나머지는 접는다
 const LEDGER_TOP_N = 20;
 
@@ -152,7 +153,24 @@ export function render() {
     actuatorWn: el("input", { size: 5 }),
     actuatorZeta: el("input", { size: 5 }),
     delayS: el("input", { size: 6 }),
+    // 절점(05 §11.13 이관 3단계 — 설계점과 따로 정한다). 규칙 선택지는 서버 /design/defaults의 knot_rules가 정본 —
+    // 도착 전에는 「기본」 하나뿐이다(비우면 서버 기본 규칙). 칸 뜻은 툴팁에
+    knotRule: el("select", { "aria-label": "절점 규칙",
+      title: "게인 표 절점을 어디에 둘까 — 비우면 서버 기본(요구영역 기본 격자). 설계점(튜닝하는 점)과 따로 정한다" },
+    el("option", { value: "" }, "기본")),
+    knotN: el("input", { size: 3, placeholder: "n", title: "등분 절점 수(uniform) — 2 이상" }),
+    knotCoordsText: el("input", { size: 16, placeholder: "0.2 0.4 0.6",
+      title: "절점 마하 좌표(user) — 순증가, 2개 이상" }),
+    knotMax: el("input", { size: 3, title: "표 하나에 둘 수 있는 절점 상한 — 처방 「절점 추가」가 여기서 멈춘다" }),
   };
+  // 규칙에 딸린 칸만 보인다 — uniform은 절점 수, user는 좌표(서버도 그 칸이 없으면 422)
+  const syncKnotFields = () => {
+    const rule = form.knotRule.value || designDefaults?.config?.knots?.rule || "";
+    form.knotN.style.display = rule === "uniform" ? "" : "none";
+    form.knotCoordsText.style.display = rule === "user" ? "" : "none";
+  };
+  form.knotRule.addEventListener("change", syncKnotFields);
+  syncKnotFields();
   // 판정선·튜닝 목표 — 읽기 전용. 선택 기체 문서의 /criteria·/tuning이 정본이고 서버가 그것으로 설계한다
   const criteriaBox = el("div", {}, el("p", { class: "hint" }, "판정선·튜닝 목표 불러오는 중…"));
 
@@ -172,6 +190,16 @@ export function render() {
       // 나가고, 서버 기본값이 바뀌어도 화면이 옛 수치를 계속 보낸다
       const ph = (input, v) => { if (v != null) input.placeholder = String(v); };
       ph(form.delayS, c.delay_s);
+      // 절점 규칙 선택지 — 서버 목록(knot_rules). 기본 규칙 이름을 「기본」 옵션에 붙인다
+      if (Array.isArray(d.knot_rules)) {
+        const keep = form.knotRule.value;
+        clear(form.knotRule).append(
+          el("option", { value: "" }, `기본 (${KNOT_RULE_LABEL[c.knots?.rule] ?? c.knots?.rule ?? "서버"})`),
+          ...d.knot_rules.map((r) => el("option", { value: r }, KNOT_RULE_LABEL[r] ?? r)));
+        form.knotRule.value = keep;
+      }
+      ph(form.knotMax, c.knots?.max_per_table);
+      syncKnotFields();
       defaultsBox.textContent = "판정선·튜닝 목표는 고른 기체 문서의 값으로 설계한다 — [판정선·튜닝 목표] 패널."
         + " 나머지 칸의 회색 수치가 서버 기본값이다(정본: 엔진 AutoDesignConfig).";
       // 연료·작동기 기본은 **고른 기체 문서**에서 — config 기본이 비어 있으면(기체 작동기를 쓰는 엔진)
@@ -250,6 +278,10 @@ export function render() {
       actuatorWn: form.actuatorWn.value,
       actuatorZeta: form.actuatorZeta.value,
       delayS: form.delayS.value,
+      knotRule: form.knotRule.value,
+      knotN: form.knotRule.value === "uniform" ? form.knotN.value : "",
+      knotCoordsText: form.knotRule.value === "user" ? form.knotCoordsText.value : "",
+      knotMax: form.knotMax.value,
     }), extra); // 판정선·튜닝 목표는 싣지 않는다 — mergeDesignConfig가 신호 config에서도 뗀다
     const job = await api.post("/design/auto", { config });
     return { jobId: job.id, done: followJob(job.id, "자동 설계 실패") };
@@ -298,6 +330,11 @@ export function render() {
             el("label", {}, " 구간당 검증점 ", form.nValidationBetween),
             el("label", {}, " 고도[m] ", form.altsText),
             el("label", {}, " 연료[kg] ", form.fuelsText)),
+          el("div", { class: "form-row" },
+            el("label", { title: form.knotRule.title }, "절점 ", form.knotRule),
+            el("label", {}, " ", form.knotN),
+            el("label", {}, " ", form.knotCoordsText),
+            el("label", { title: form.knotMax.title }, " 표당 상한 ", form.knotMax)),
           el("p", { class: "hint" },
             "승인 게이트(gated)는 처방 카드에서 멈춘다 — 승인한 처방만 반영해 재개한다. "
             + "전자동(auto)은 예산이 다할 때까지 스스로 순환한다. "
@@ -329,8 +366,9 @@ export function render() {
             "엔벨로프에서 coarse 트림 격자를 유도하고, 플랜트 변화량으로 격자를 세분화한 뒤 "
             + "운영점별 게인을 자동 튜닝해 스케줄 표현(기본은 표, 다항은 선택)으로 세우고, "
             + "보간 실효 게인으로 마진을 검증한다. "
-            + "마진 부족은 원인별 처방(검증점 추가/앵커·breakpoint 승격/상위 설계 "
-            + "에스컬레이션)으로 순환한다."),
+            + "마진 부족은 원인별 처방(검증점 추가/절점 추가/설계점 승격/상위 설계 "
+            + "에스컬레이션)으로 순환한다. 게인 표의 절점은 설계점(튜닝하는 점)과 따로 정하고, "
+            + "절점 값은 설계점 튜닝값 전부에 맞춘다."),
           el("p", { class: "hint", style: "max-width:96ch" },
             "엔벨로프 탭의 ④ 제어 설계·스케줄링과 ⑥ 검증·마진 층을 한 잡으로 잇는 것이 "
             + "이 탭이다 — 설계점을 고르고, 게인을 배치하고, 그 사이를 다시 재는 순환."),
@@ -512,9 +550,16 @@ function fillForm(form, config) {
   // 도는 것을 막는다(칸을 먼저 비운다는 사슬 계약). 기본값 도착 전이면 셀렉트 마크업 기본(표)
   form.fitMode.value = vals.fitMode ?? designDefaults?.config?.fit_mode ?? "table";
   for (const k of ["budgetPoints", "budgetIters", "nMach", "nValidationBetween", "altsText", "fuelsText",
-    "actuatorWn", "actuatorZeta", "delayS"]) {
+    "actuatorWn", "actuatorZeta", "delayS", "knotN", "knotCoordsText", "knotMax"]) {
     form[k].value = vals[k] ?? "";
   }
+  // 신호가 준 규칙이 선택지에 아직 없으면(기본값 도착 전) 옵션을 세워 둔다 — 조용히 「기본」으로 떨어지지 않게
+  const rule = vals.knotRule ?? "";
+  if (rule && ![...form.knotRule.options].some((o) => o.value === rule)) {
+    form.knotRule.append(el("option", { value: rule }, KNOT_RULE_LABEL[rule] ?? rule));
+  }
+  form.knotRule.value = rule;
+  form.knotRule.dispatchEvent(new Event("change"));
 }
 
 const CRIT_SOURCE = { profile: "이 기체가 바꾼 값", default: "기본값" };
@@ -637,17 +682,81 @@ function excludedBox(body) {
 }
 
 /** 적합 보고 — 자리별 표현과 스케줄 축 밖 변동·교차축 잔차·톱니. 요약은 접힌 채로도 읽힌다. */
-function fitFactsBox(fits) {
-  const m = fitFactsModel(fits);
+function fitFactsBox(fits, knots) {
+  const m = fitFactsModel(fits, knots);
   if (!m) return null;
   return el("details", {},
     el("summary", { class: "hint" }, m.summary ?? "적합 보고 — 자리별 표현"),
     el("ul", { class: "hint" }, m.rows.map((r) => el("li", {}, r.text))),
     el("p", { class: "hint" },
-      "스케줄 표는 마하 1축(sched_axes)이다 — 고도·연료로 변하는 게인은 버려지지 않고 마하 분할점 "
-      + "하나에 평균되거나(교차축 잔차 = 그 어긋남 ÷ 자리 스케일), 표 모드에서는 고도가 다른 표본이 "
-      + "마하 축 위에 번갈아 놓여 값이 오르내린다(톱니 = 인접 변화의 방향이 뒤집힌 횟수). 판정은 검증이 "
-      + "그 표로 했다 — 적합 품질 문턱은 기본 꺼짐이라 여기서는 판정하지 않고 사실만 적는다."));
+      "스케줄 표는 마하 1축(sched_axes)이다 — 고도·연료로 변하는 게인은 버려지지 않고 마하 절점 "
+      + "사이의 최소제곱 값에 접히거나(교차축 잔차 = 그 어긋남 ÷ 자리 스케일), 절점을 촘촘히 두면 고도가 다른 "
+      + "표본을 따라 값이 오르내린다(톱니 = 인접 변화의 방향이 뒤집힌 횟수). 범위 밖 절점은 근처에 설계점 "
+      + "표본이 없어 그 표에서 뺀 절점이다. 판정은 검증이 그 표로 했다 — 적합 품질 문턱은 기본 꺼짐이라 "
+      + "여기서는 판정하지 않고 사실만 적는다."));
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const svgEl = (tag, attrs = {}) => {
+  const n = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+  return n;
+};
+
+/** 절점 띠 — 마하 축 위 눈금(쓴 절점 진하게, 뺀 절점 속 빈 원 — 끝 바깥(범위 밖)은 회색, 안쪽에서 뺀 것은 경고색).
+ *  표마다 한 줄이라 공통/분리 집합이 그림으로 갈린다(같은 집합이면 눈금이 같다). 수치는 툴팁. */
+function knotStrip(row, lo, hi) {
+  const W = 180, H = 14, pad = 4;
+  const x = (m) => pad + (hi > lo ? (m - lo) / (hi - lo) : 0.5) * (W - 2 * pad);
+  const svg = svgEl("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": `${row.slot} 절점 ${row.n ?? "?"}` });
+  svg.append(svgEl("line", { x1: pad, x2: W - pad, y1: H / 2, y2: H / 2, stroke: "#c7ccd1", "stroke-width": 1 }));
+  const edge = new Set(row.edge.map(Number));
+  const dropped = new Set(row.dropped.map(Number));
+  for (const m of row.coords ?? []) {
+    const k = Number(m);
+    svg.append(edge.has(k) || dropped.has(k)
+      ? svgEl("circle", { cx: x(m), cy: H / 2, r: 2.5, fill: "none",
+        stroke: dropped.has(k) ? SEV_COLOR.warn : SEV_COLOR.na, "stroke-width": 1 })
+      : svgEl("line", { x1: x(m), x2: x(m), y1: 2, y2: H - 2, stroke: "#1d6fd8", "stroke-width": 1.5 }));
+  }
+  return svg;
+}
+
+/** 표별 절점 패널 — 그림(절점 띠) 먼저, 글은 짧게(자리 · n · 공통/분리 집합 배지). 집합 출처·추가 이력·좌표는 툴팁.
+ *  절점 분리 이전 결과(기록 없음)는 null. */
+function knotBox(body) {
+  const m = knotModel(body);
+  if (!m || !m.rows.length) return null;
+  const all = m.rows.flatMap((r) => r.coords ?? []).map(Number).filter(Number.isFinite);
+  const lo = all.length ? Math.min(...all) : 0;
+  const hi = all.length ? Math.max(...all) : 1;
+  const tip = (r) => [
+    `집합 ${r.setName} · ${r.sourceText}`,
+    r.coords ? `절점 ${r.coords.map(machText).join(" ")}` : null,
+    r.edge.length ? `범위 밖(끝 바깥 — 끝값 유지) ${r.edge.map(machText).join(" ")}` : null,
+    r.dropped.length ? `안쪽에서 뺌(표본이 멀거나 없음 — 이웃 절점 직선) ${r.dropped.map(machText).join(" ")}` : null,
+    ...r.historyLines.map((h) => `+ ${h}`),
+  ].filter(Boolean).join("\n");
+  return el("details", { open: true },
+    el("summary", { class: "hint", title: "게인 표의 절점은 설계점과 따로 정한다 — 기본은 모든 표가 공통 집합 하나를 쓰고, "
+      + "처방 「절점 추가」는 이름 댄 표에 절점을 더한다(공통 집합의 일부 표면 그 표들을 분리 집합으로 떼어 낸다)" },
+    m.summary),
+    el("table", { class: "data" },
+      el("tbody", {}, m.rows.map((r) => el("tr", { title: tip(r) },
+        el("td", {}, r.slot),
+        el("td", {}, knotStrip(r, lo, hi)),
+        el("td", {}, r.n ?? "—"),
+        el("td", {}, r.common == null ? el("span", { class: "hint" }, "—")
+          : el("span", { class: "flag na" }, r.sharedText)),
+        el("td", {}, r.edge.length
+          ? el("span", { class: "flag na", title: "설계점 표본 범위 밖이라 이 표에서 뺀 끝 절점 — 그 밖은 끝값 유지" },
+            `범위 밖 ${r.edge.length}`)
+          : null,
+        r.dropped.length
+          ? el("span", { class: "flag warn", title: "절점 반 구간 안에 표본이 없어(가중 < 0.5) 뺀 안쪽 절점 — 이웃 두 절점의"
+            + " 직선이 그 자리를 메운다" }, `안쪽 뺌 ${r.dropped.length}`)
+          : null))))));
 }
 
 /** 검증 커버리지 — 무엇을 안 봤나. 볼 것이 없으면 null (el은 null 자식을 거른다).
@@ -789,7 +898,7 @@ function renderResult(box, body, resultId, ctx) {
       el("td", {}, fmt(r.mach)),
       el("td", {}, fmt(r.alt)),
       el("td", {}, fmt(r.fuel)),
-      el("td", {}, ROLE_LABEL[r.role] ?? r.role),
+      el("td", {}, r.roleLabel),
       el("td", {}, trimLabel(r)),
       el("td", {}, r.outsideEnvelope
         ? el("span", { class: "hint" }, `(${r.status ?? "미판정"}) 판정 제외`)
@@ -882,7 +991,7 @@ function renderResult(box, body, resultId, ctx) {
       " 확정됨 — 게인 탭·시뮬레이션·Autocode·블록도·영향성이 이 스케줄을 소비한다"
       + " (Autocode 형상 지문이 바뀌는 것으로 확인된다)."
       + constNote
-      + " 게인 탭은 자리마다 다른 breakpoint를 합집합 축으로 정렬해 보여 주며,"
+      + " 게인 탭은 자리마다 다른 절점을 합집합 축으로 정렬해 보여 주며,"
       + " 거기서 편집한 뒤 [시뮬·코드에 적용]을 누르면 이 확정을 덮어쓴다."
       + " 반출 정본(표 모드면 그 표, 다항 모드면 다항)은 결과 JSON의 gain_export.tables"
       + " — API 직접 주입용."));
@@ -906,7 +1015,8 @@ function renderResult(box, body, resultId, ctx) {
   const regionBox = regionCoverageBox(report);
   // 상태 줄 아래 사실 셋 — 무엇으로 설계했나(작동기)·표에서 무엇을 뺐나(튜닝 실패 표본)·표가 무엇을
   // 뭉갰나(스케줄 축 밖 변동·톱니). sections는 native append라 null을 걸러 넣는다
-  const facts = [actuatorBox(body), excludedBox(body), fitFactsBox(body.fits)].filter(Boolean);
+  const facts = [actuatorBox(body), excludedBox(body), knotBox(body), fitFactsBox(body.fits, knotModel(body))]
+    .filter(Boolean);
   const sections = [
     el("h3", {}, `결과 ${resultId}`, critSlot),
     el("p", {},
@@ -989,7 +1099,7 @@ function renderResult(box, body, resultId, ctx) {
       // 화면 어디에도 없다 — 소비 순서를 여기서 밝힌다
       el("p", { class: "hint" },
         "확정하면 이 스케줄이 게인 탭·시뮬레이션·마진·Autocode·블록도·영향성의 정본이 된다. "
-        + "권장 순서: ① 게인 탭에서 곡선과 breakpoint를 확인한다(필요하면 편집 후 "
+        + "권장 순서: ① 게인 탭에서 곡선과 절점을 확인한다(필요하면 편집 후 "
         + "[시뮬·코드에 적용] — 이 확정을 덮어쓴다) → ② 시뮬레이션 탭에서 비선형 응답을 "
         + "본다 → ③ 마진 탭에서 스케줄 게인으로 재검증한다 → ④ Autocode로 탑재 C를 "
         + "생성한다(형상 지문이 바뀌는 것으로 확정이 걸렸는지 확인된다)."),
@@ -1107,6 +1217,9 @@ function evidenceLine(a) {
   const reasonMap = designDefaults?.reason_text;
   const ev = evidenceLines(a, reasonMap);
   const lines = [];
+  // 무엇을 어디에 하나 — 절점 추가면 마하·표(반영 뒤엔 분리 여부)·설계점 승격. 판정 이름(굵은 머리) 바로 아래
+  if (ev.action) lines.push(el("div", {}, ev.action));
+  if (ev.knot) lines.push(el("div", { class: "hint" }, ev.knot));
   if (ev.head.length) lines.push(el("div", { class: "hint" }, ev.head.join(" · ")));
   // 요구 대비 부족이 이 카드에서 가장 먼저 읽어야 할 줄이다 — 흐린 회색에 묻히면
   // 안 된다. 부족은 빨강, 여유는 초록, 판정 불가는 회색 (SEV_COLOR 규약 그대로)

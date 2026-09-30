@@ -428,7 +428,7 @@ test("자동 설계 — 표현·실패 위치·작동기·적합 표본 제외·
     ["제외 · roll.k_rate", "1점 — 사유 no_stable_gain 1 · 근거 그 자리 튜닝 실패 1"],
     ["제외 · roll.kp", "1점 — 사유 no_stable_gain 1 · 근거 같은 축 레이트 루프가 실패한 위에서 튜닝 1"],
     ["제외 보류", "pitch.ki — 튜닝 실패 표본 2개를 빼면 1개만 남아 제외를 보류했다 — 이 자리의 표는 실패 표본을 담고 있다"],
-    ["적합 보고", "스케줄 축 밖 변동 1/2자리(alt) · 교차축 잔차 최대 55% (roll.ki) · 톱니 최대 4회/분할점 14 (roll.ki)"],
+    ["적합 보고", "스케줄 축 밖 변동 1/2자리(alt) · 교차축 잔차 최대 55% (roll.ki) · 톱니 최대 4회/절점 14 (roll.ki)"],
   ]);
   // 표현 기록이 없는 옛 결과 — 없는 표현을 지어내지 않고 그 사실을, 작동기는 그때의 config 값을
   const old = briefModel(meta, { report: { status: "converged", judged: 5, failures: 0 },
@@ -438,4 +438,27 @@ test("자동 설계 — 표현·실패 위치·작동기·적합 표본 제외·
   assert.match(oldRun["작동기"], /설정 — 작동기 출처 기록 이전 결과/);
   assert.equal(oldRun["판정 · 실패"], "5 · 0");
   assert.equal(old.sections.find((s) => s.title === "게인 스케줄 적합"), undefined);
+});
+
+
+test("자동 설계 — 점 줄은 설계점·검증점, 절점 칸은 표별 절점(공통/분리 집합) — 옛 결과는 옛 이름·기록 없음", () => {
+  const meta = { ...META, id: "d4", kind: "auto_design" };
+  const body = {
+    report: { status: "converged", judged: 30, failures: 0, n_points: 19, points: { design: 7, validation: 12 },
+      knots: { tables: { "pitch.kp": 8, "pitch.ki": 7 }, shared: false } },
+    gain_export: { tables: {}, constants: {}, knots: {
+      // 공통 집합의 이름은 엔진 knots.COMMON("common") — 공통/분리는 그 이름으로 가른다
+      sets: { common: { coords: [0.1, 0.3, 0.5, 0.7, 0.8, 0.85, 0.9], source: "base_axis", history: [] },
+        "pitch.kp": { coords: [0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.85, 0.9], source: "split:common", history: [] } },
+      tables: { "pitch.kp": { set: "pitch.kp", shared: false, unsupported: [] },
+        "pitch.ki": { set: "common", shared: false, unsupported: [] } } } },
+  };
+  const run = Object.fromEntries(briefModel(meta, body).sections.find((s) => s.title === "실행 요약").rows);
+  assert.equal(run["점"], "19 (설계점 7 · 검증점 12)");
+  assert.equal(run["절점"],
+    "표 2개 · 절점 7~8 · 집합 2 · 공통 1 · 분리 1 — pitch.ki 7(공통 집합) · pitch.kp 8(분리 집합)");
+  const old = Object.fromEntries(briefModel(meta, { report: { status: "converged", n_points: 60,
+    points: { anchor: 45, breakpoint: 0, validation: 15 } } }).sections.find((s) => s.title === "실행 요약").rows);
+  assert.equal(old["점"], "60 (앵커 45 · bp 0 · 검증 15)");
+  assert.match(old["절점"], /^기록 없음 — 절점 분리 이전 결과/);
 });

@@ -301,8 +301,9 @@ def _resample_error(poly, tab) -> dict:
 
 
 def _gain_export(session, aircraft) -> dict:
-    """routes/design.py _gain_export와 같은 반출 — {tables_resampled, resample_error, reverify}. 다항은 재샘플
-    (resample_to_table, RESAMPLE_TOL), 표는 그대로. 재검증은 반출 표로 같은 점을 다시 판정한 결과다."""
+    """routes/design.py _gain_export와 같은 반출 — {tables_resampled, resample_error, reverify, knots}. 다항은 재샘플
+    (resample_to_table, RESAMPLE_TOL), 표는 그대로. 재검증은 반출 표로 같은 점을 다시 판정한 결과다. knots는 표별 절점
+    기록(DesignSession.knot_record — 05 §11.5)이고 문서 반영이 provenance.knots로 옮긴다(서버 apply-gains와 같다)."""
     from claw.design import resample_to_table
     from claw.tables import PolyTable
 
@@ -320,7 +321,8 @@ def _gain_export(session, aircraft) -> dict:
                             "data": tab.data.tolist(), "extrapolate": tab.extrapolate}
             errors[slot] = {"max_abs": 0.0, "max_frac": 0.0, "at": None, "n_points": int(tab.data.size)}
     return {"tables_resampled": _stored(tables), "resample_error": _stored(errors),
-            "reverify": _stored(session.reverify_resampled(aircraft, export))}
+            "reverify": _stored(session.reverify_resampled(aircraft, export)),
+            "knots": _stored(session.knot_record())}
 
 
 def _reverify_summary(rv: dict | None) -> dict:
@@ -413,10 +415,13 @@ def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
     # 표현과 적합에서 뺀 표본도 찍는다 — 표 표현에서 뺀 점의 분할점 값은 이웃 보간이고(튜닝 불성립 표본 제외), 보류된
     # 자리는 실패 표본을 담은 채다. 재생성한 사람이 표를 읽기 전에 알아야 할 것이다
     withheld = rep["exclusion_withheld"]
-    log(f"  종료 {rep['status']} · 이터 {rep['iterations']} · 점 {rep['n_points']} · 판정 {rep['judged']} · "
+    kn = rep["knots"]
+    log(f"  종료 {rep['status']} · 이터 {rep['iterations']} · 점 {rep['n_points']} {rep['points']} · 판정 {rep['judged']} · "
         f"실패 {rep['failures']} · 에스컬레이션 {rep['escalations']} · 표현 {rep['fit_mode']} · "
         f"적합에서 뺀 표본 {len(rep['excluded_samples'])}" + (f" (보류 {withheld})" if withheld else "")
         + f" · {elapsed:.1f} s")
+    sharing = "한 집합 공유" if kn["shared"] else f"집합 {kn['sets']}개"
+    log(f"  절점: 표 {kn['tables']} · {sharing}")
     if rep["status"] == "cancelled":
         raise ShowcaseError("design", "자동 설계가 취소돼 멈췄다")
 
@@ -448,6 +453,8 @@ def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
             "resample_tol": RESAMPLE_TOL,
             "resample_error": copy.deepcopy(export["resample_error"]),
             "reverify": _reverify_summary(export["reverify"]),
+            # 표별 절점 집합과 표마다 공유/독립·표본 없어 뺀 절점(05 §11.5 · 이관 3단계) — 서버 apply-gains와 같은 칸
+            "knots": copy.deepcopy(export["knots"]),
             # 낡음 판정의 기준 — 표 절을 뺀 지금 문서의 지문 (build.gain_tables_stale이 대조)
             "basis_fingerprint": gain_tables_basis_fingerprint(built.doc),
         },
@@ -471,9 +478,10 @@ def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
             f" · {min(t['data']):.4g}…{max(t['data']):.4g}")
     if moved:
         log(f"  규칙 스케줄로 나는 형상 변형: {moved} (패치 {GAIN_TABLES_PTR} = null)")
-    return new, {"report": {k: rep[k] for k in ("status", "iterations", "n_points", "judged", "failures",
-                                                  "failures_by_role", "escalations", "coverage", "coverage_gaps",
-                                                  "fit_mode", "excluded_samples", "exclusion_withheld")},
+    return new, {"report": {k: rep[k] for k in ("status", "iterations", "n_points", "points", "judged", "failures",
+                                                  "failures_by_role", "knots", "escalations", "coverage",
+                                                  "coverage_gaps", "fit_mode", "excluded_samples",
+                                                  "exclusion_withheld")},
                  "approved_actions": approved_total, "slots": sorted(tables),
                  "reverify": _reverify_summary(export["reverify"]), "config": _plain(overrides),
                  "rule_schedule_variants": moved, "elapsed_s": elapsed}

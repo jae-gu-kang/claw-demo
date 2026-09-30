@@ -6,7 +6,7 @@ import pytest
 
 from claw.common.contracts import TrimCase
 from claw.design import (
-    ROLE_ANCHOR,
+    ROLE_DESIGN,
     LinearModelSet,
     OperatingPoint,
     PointSet,
@@ -34,7 +34,7 @@ def _setup(machs, alt=1000.0, fuel=200.0):
         tr = trim_level(ac, case, fingerprint="fp")
         assert tr.converged
         trims[case.name] = tr
-        pt = OperatingPoint(case=case, role=ROLE_ANCHOR, origin="coarse")
+        pt = OperatingPoint(case=case, role=ROLE_DESIGN, origin="coarse")
         pt.trimmable = True
         points.add(pt)
     return ac, points, LinearModelSet(), trims

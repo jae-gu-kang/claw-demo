@@ -250,14 +250,14 @@ const tablesDigest = (tables) => createHash("sha256")
   .update(JSON.stringify(Object.keys(tables).sort().map((n) => [n, tables[n].axes, tables[n].data])))
   .digest("hex").slice(0, 16);
 
-test("결함 시연 상수 — S1 확정본에서 잰 창(×5.3~6.0, FAIL → 처방 → PASS)의 가운데다", () => {
+test("결함 시연 상수 — S1 확정본에서 잰 창(×5.25~6.0, FAIL → 처방 → PASS)의 가운데다", () => {
   // v1.66 실측(lib/showcase.js 머리 주석) — 요구영역 격자 재생성(설계 줄 200 m / 25 kg)으로 창이 ×5.2~5.85에서 옮았다:
   // ×5.25 이하는 첫 카드가 고도 PI(제안 변화 0 — 확인 런 없음), ×6.05 이상은 확인 런 FAIL. 옛 가운데 ×5.5는 아래 끝에서
   // 0.2라 ×5.65로 옮겼다. 그 전의 창: 해면 한 줄 표 ×5.2~5.85, 톱니 표 ×5.4~6.6, 피치 명령 상한 0.35 rad ×4.8~5.8.
   // 예제에서 잰 피치 댐퍼 ×4.8은 S1에서 FAIL이 안 난다. 양끝 여유 0.3 — 새 측정에서 어느 끝이 0.3 안으로 들어오면 창을
-  // 다시 고른다
+  // 다시 고른다. v1.70 절점 위 표(7점) 재측정: 창 ×5.25~6.0 — 아래 끝만 0.05 내려와 ×5.65를 그대로 둔다(머리 주석)
   assert.deepEqual(SHOWCASE_FAULT, { path: "autopilot.alt.k_rate", factor: 5.65 });
-  const [lo, hi] = [5.3, 6.0];
+  const [lo, hi] = [5.25, 6.0];
   assert.ok(SHOWCASE_FAULT.factor - lo >= 0.3 - 1e-9 && hi - SHOWCASE_FAULT.factor >= 0.3 - 1e-9, "창 끝에서 떨어져 있다");
 });
 
@@ -282,9 +282,15 @@ test("결함 시연 상수 — 잰 기준(자동조종 설계값·확정 표·�
   // 주석). 단계 8 재설계 표도 같은 값이라 두 상태가 같은 창을 낸다(표 7자리 × 40점). 롤 속도 루프 마진 가드(Q1-gate —
   // AS94900 끊는 자리에서 GM 8 dB·PM 50°로 롤 댐퍼를 캡) 뒤 재생성(Q3-s1)은 기준 지문을 두고 roll.k_rate·roll.kp·
   // roll.ki·yaw.k_rate 값만 바꿨다(피치 3자리·설계 게인 그대로). v1.66 요구영역 격자 재생성은 설계 줄을 해면 → 200 m로
-  // 옮겨 표 7자리 × 36점이 됐다(07dd… → ffef…) — 다시 잰 창은 머리 주석
+  // 옮겨 표 7자리 × 36점이 됐다(07dd… → ffef…) — 다시 잰 창은 머리 주석. v1.70 설계점·절점 분리(이관 3단계)는 기준 지문을
+  // 그대로 두고(9059b37a — 표 절은 지문 밖) 표를 공통 마하 절점 위 최소제곱으로 바꿨다: 7자리 × 7점 M0.10~0.22(M0.24 절점은
+  // 설계점 표본이 없어 뺐다), 36점 표를 옛 분할점에서 1.9 % 안으로 따른다(ffef… → 66c0…) — 창을 다시 쟀다(머리 주석)
   assert.equal(s1.law.gain_tables.provenance.design?.config?.fit_mode, "table", fix);
-  assert.equal(tablesDigest(s1.law.gain_tables.tables), "ffef0fccb95fc788", fix);
+  assert.equal(tablesDigest(s1.law.gain_tables.tables), "66c0c70749d8db77", fix);
+  // 절점 기록 — 표가 전부 한 집합(요구영역 공통 마하 좌표)을 공유한다
+  const kn = s1.law.gain_tables.provenance.knots;
+  assert.deepEqual(Object.keys(kn.sets), ["common"], fix);
+  assert.ok(Object.values(kn.tables).every((t) => t.set === "common" && t.shared && t.n === 7), fix);
   // 그 표를 만든 기록 설정 — 설계 줄 200 m / 25 kg, 마하 격자는 요구영역 기본 격자 명세(n_mach 없음)
   const rec = s1.law.gain_tables.provenance.design.config;
   assert.deepEqual([rec.alts, rec.fuels, "n_mach" in rec], [[200], [25], false], fix);

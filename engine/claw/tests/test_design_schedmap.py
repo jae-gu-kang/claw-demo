@@ -8,17 +8,16 @@ import pytest
 from claw.analysis import loop_margins, pi_loop
 from claw.common.contracts import TrimCase
 from claw.design import (
-    ROLE_ANCHOR,
-    ROLE_BREAKPOINT,
+    ROLE_DESIGN,
     LinearModelSet,
     MarginCriteria,
     OperatingPoint,
     PointSet,
     case_name,
-    midpoint_validation_points,
     scheduled_gains,
     scheduled_margin_map,
     scheduled_margin_point,
+    validation_points,
 )
 from claw.design.closure import AXIS_SPECS, close_rates, rate_loop_crossover
 # _M_DESIGN·_F_CAP은 비공개지만 **스케줄 형상의 정의**라, 여기서 수를 다시 적는
@@ -189,29 +188,137 @@ def test_scheduled_differs_from_constant_gain_map(setup):
     assert abs(sched["pitch_att"]["pm_deg"] - const["pitch_att"]["pm_deg"]) > 1.0
 
 
-def test_midpoint_validation_points():
+def test_validation_points_split_the_knot_intervals_not_the_design_points():
+    """검증 마하는 절점 구간의 중점이다 — 설계점 쌍의 중점이 아니다(05 §11.6 ① — 이관 3단계).
+
+    설계점이 절점과 독립이 되어 설계점 사이 중점은 보간 구간과 무관해졌다. 설계점 행(고도·연료)마다 그 행 설계점 마하
+    범위 안의 절점 구간 중점에 놓는다. 이미 있는 좌표(설계점 포함)는 만들지 않는다 — 그 점은 VERIFY가 표를 평가해 본다."""
+    ps = PointSet([OperatingPoint(case=_case(m), role=ROLE_DESIGN, origin="coarse")
+                   for m in (0.40, 0.42, 0.47, 0.60)])
+    mids = validation_points(ps, [0.4, 0.5, 0.6])
+    assert [p.case.mach for p in mids] == pytest.approx([0.45, 0.55])
+    assert all(p.role == "validation" and p.origin.startswith("midpoint:") for p in mids)
+    for p in mids:
+        ps.add(p)
+    assert validation_points(ps, [0.4, 0.5, 0.6]) == []  # 멱등
+    # 설계점 범위 밖 절점 구간(끝값 clip 구간)에는 놓지 않는다 — 4단계 clip 검증점의 몫
+    assert validation_points(ps, [0.6, 0.8]) == []
+
+
+def test_validation_machs_are_midpoints_of_the_knot_union_including_an_independent_table():
+    """평가 대상 표들의 절점 **합집합**으로 구간을 나눈다 — 한 표만 가진 독립 절점의 구간도 검증한다.
+
+    한 표에만 절점을 더해도(add_knot이 그 표를 떼어 독립 집합으로 — 05 §11.5) 그 표의 보간 구간이 바뀐 자리를 검증이
+    놓치지 않게 한다. 고도 축 중점은 설계점 인접쌍에서 온다(마하 1축 표라 그 축에는 절점이 없다)."""
+    from claw.design.knots import KnotSet, add_knot, union_knots
+
+    sets = {"common": KnotSet(name="common", coords=[0.4, 0.6], source="user")}
+    tables = {"pitch.kp": "common", "roll.kp": "common"}
+    add_knot(sets, tables, ["roll.kp"], 0.5, reason="t", point="p", iter_n=1, max_per_table=16)
+    union = union_knots(sets, tables)
+    assert union == [0.4, 0.5, 0.6]
+    ps = PointSet([OperatingPoint(case=_case(m, alt=a), role=ROLE_DESIGN, origin="coarse")
+                   for m in (0.4, 0.6) for a in (1000.0, 3000.0)])
+    got = validation_points(ps, union)
+    by_alt = {}
+    for p in got:
+        by_alt.setdefault(p.case.alt, []).append(round(p.case.mach, 9))
+    assert by_alt[1000.0] == [0.45, 0.55] and by_alt[3000.0] == [0.45, 0.55]
+    assert sorted(by_alt[2000.0]) == [0.4, 0.6]  # 고도 축 — 설계점 쌍의 중점
+
+
+def test_validation_moves_off_a_design_point_to_the_next_free_fraction():
+    """구간 중점에 설계점이 있으면(REFINE 이분 = 절점 구간 중점) 1/4, 그것도 막히면 3/4로 옮긴다.
+
+    설계점은 그 자신이 표 적합의 표본이라 거기서 재면 보간이 아니라 적합 잔차다 — 검증으로 세지 않고, 구간마다 표본
+    밖 검증점 하나를 반드시 둔다. 옮긴 수는 validation_candidates가 센다(정보용 — 검증 구간 수에 더하지 않는다)."""
+    from claw.design.schedmap import validation_candidates
+
+    ps = PointSet([OperatingPoint(case=_case(m), role=ROLE_DESIGN, origin="coarse") for m in (0.4, 0.5, 0.6, 0.8)])
+    got = validation_points(ps, [0.4, 0.6, 0.8])
+    # [0.4, 0.6] 중점 0.5는 설계점 → 1/4 = 0.45. [0.6, 0.8] 중점 0.7은 비어 있다
+    assert [p.case.mach for p in got] == pytest.approx([0.45, 0.7])
+    cand = validation_candidates(ps, [0.4, 0.6, 0.8])
+    assert cand["moved"] == 1 and cand["unplaceable"] == 0
+    # 1/4에도 설계점 → 3/4
+    ps.add(OperatingPoint(case=_case(0.45), role=ROLE_DESIGN, origin="refine"))
+    assert [p.case.mach for p in validation_points(ps, [0.4, 0.6])] == pytest.approx([0.55])
+    # ⅛·⅜·⅝·⅞도 막히면 더 잘게(가까운 것부터 — 0.4875)
+    for m in (0.55, 0.425, 0.475, 0.525, 0.575):
+        ps.add(OperatingPoint(case=_case(m), role=ROLE_DESIGN, origin="refine"))
+    assert [p.case.mach for p in validation_points(ps, [0.4, 0.6])] == pytest.approx([0.4875])
+    # 빈 자리가 하나도 없으면 놓지 못한 구간으로 센다(조용히 검증된 척하지 않는다)
+    from claw.design.schedmap import _fractions
+
+    for f in _fractions(0.5, 0.5):
+        m = round(0.4 + 0.2 * f, 6)
+        if _case(m).name not in ps:
+            ps.add(OperatingPoint(case=_case(m), role=ROLE_DESIGN, origin="refine"))
+    full = validation_candidates(ps, [0.4, 0.6])
+    assert full["candidates"] == [] and full["unplaceable"] == 1
+    # 이미 있는 검증점 자리는 그대로 쓴다(멱등 — 설계점만 피한다)
+    ps2 = PointSet([OperatingPoint(case=_case(m), role=ROLE_DESIGN, origin="coarse") for m in (0.4, 0.5, 0.6)])
+    for p in validation_points(ps2, [0.4, 0.6]):
+        ps2.add(p)
+    assert validation_points(ps2, [0.4, 0.6]) == []
+
+
+def test_validation_fallback_fractions_avoid_every_design_point_for_denser_rounds():
+    """n_between=2 — 기본 내분점 1/3·2/3. 막히면 그 칸의 반 간격 이웃(1/6 · 1/2 …)으로 — 다른 기본 내분점과 겹치지 않는다."""
+    ps = PointSet([OperatingPoint(case=_case(m), role=ROLE_DESIGN, origin="coarse")
+                   for m in (0.3, round(0.3 + 0.3 / 3, 6), 0.6)])
+    got = [p.case.mach for p in validation_points(ps, [0.3, 0.6], n_between=2)]
+    assert len(got) == 2 and all(abs(m - 0.4) > 1e-9 for m in got)
+    assert got == pytest.approx([0.35, 0.5])  # 1/3 자리 막힘 → 1/6(0.35) · 2/3(0.5)는 그대로
+
+
+def test_validation_mach_is_rounded_like_refine_so_names_match():
+    """후보 마하는 REFINE 중점과 같은 자릿수(refine._ROUND = 6)로 반올림한다 — 안 그러면 이분이 깊어져 소수 7자리가
+    되는 중점(0.10390625)이 REFINE 설계점(M0.103906)과 이름이 어긋나 설계점과 겹친 것을 못 알아본다."""
+    from claw.design.refine import _ROUND
+
+    lo, hi = 0.10375, 0.1040625
+    mid = round((lo + hi) / 2.0, _ROUND)
+    ps = PointSet([OperatingPoint(case=_case(m), role=ROLE_DESIGN, origin="coarse") for m in (lo, mid, hi)])
+    got = validation_points(ps, [lo, hi])
+    assert len(got) == 1 and got[0].name != _case(mid).name, "설계점 자리에 검증점을 세웠다(이름 불일치)"
+    assert got[0].case.mach == round(got[0].case.mach, _ROUND)
+    assert got[0].case.mach == pytest.approx(round(lo + (hi - lo) / 4.0, _ROUND))
+
+
+def test_validation_density_rounds_cover_every_interval_first():
+    """n_between=2·3 — 좌표는 등간 내분점, 순서는 라운드 우선(구간당 1점이 먼저 찬다).
+
+    VERIFY는 예산 소진 시 목록 앞에서 끊는다(orchestrator). 쌍 우선으로 내면 첫
+    구간이 3점을 다 받는 동안 마지막 구간은 0점이라, 밀도를 올린 실행이 오히려
+    커버리지를 잃는다. 첫 라운드는 중점(종전 좌표 그대로)이어야 기존 검증점
+    이름이 재사용된다 — 트림 캐시 적중.
+    """
     ps = PointSet([
-        OperatingPoint(case=_case(0.4), role=ROLE_ANCHOR, origin="coarse"),
-        OperatingPoint(case=_case(0.6), role=ROLE_BREAKPOINT, origin="coarse"),
+        OperatingPoint(case=_case(0.2), role=ROLE_DESIGN, origin="coarse"),
+        OperatingPoint(case=_case(0.5), role=ROLE_DESIGN, origin="coarse"),
+        OperatingPoint(case=_case(0.8), role=ROLE_DESIGN, origin="coarse"),
     ])
-    mids = midpoint_validation_points(ps)
-    assert len(mids) == 1
-    assert mids[0].case.mach == pytest.approx(0.5)
-    assert mids[0].role == "validation"
-    ps.add(mids[0])
-    # 검증점 밀도 기본값 = breakpoint 구간당 중점 1개 — 검증점은 새 구간을 만들지
-    # 않으므로(인접 정의가 breakpoint 이상) 재생성해도 추가분이 없다 (멱등)
-    assert midpoint_validation_points(ps) == []
-    # 검증점을 breakpoint로 승격하면 구간이 쪼개져 새 중점 2개가 나온다
-    ps.promote(mids[0].case.name, ROLE_BREAKPOINT, reason="valley")
-    more = sorted(p.case.mach for p in midpoint_validation_points(ps))
-    assert more == pytest.approx([0.45, 0.55])
+    knots = [0.2, 0.5, 0.8]
+    two = validation_points(ps, knots, n_between=2)
+    assert [p.case.mach for p in two] == pytest.approx([0.3, 0.6, 0.4, 0.7])  # 라운드 1 → 2
+    # n=3의 첫 라운드는 중점 — n_between=1 좌표(이름째)가 그대로 앞머리에 온다
+    three = validation_points(ps, knots, n_between=3)
+    assert [p.case.mach for p in three[:2]] == pytest.approx([0.35, 0.65])
+    assert {p.case.name for p in three[:2]} == {p.case.name for p in validation_points(ps, knots)}
+    assert len(three) == 6 and all(p.role == "validation" for p in three)
+    # 이미 있는 좌표는 다시 만들지 않는다 (멱등)
+    for p in three:
+        ps.add(p)
+    assert validation_points(ps, knots, n_between=3) == []
+    with pytest.raises(ValueError):
+        validation_points(ps, knots, n_between=0)
 
 
 def test_margin_map_end_to_end_and_cancel(setup):
     ac, tables, design = setup
     ps = PointSet([
-        OperatingPoint(case=_case(m), role=ROLE_ANCHOR, origin="coarse")
+        OperatingPoint(case=_case(m), role=ROLE_DESIGN, origin="coarse")
         # 0.6은 추진 여유 미달이다(스로틀 95.04% — test_trim.py DESIGN_POINT가 못박는다. v1.65부터
         # 채택은 한다).
         # **이 테스트가 그 사실을 검사하지는 않는다**: 아래 단언은 중단 없음·케이스 집합·
@@ -223,7 +330,7 @@ def test_margin_map_end_to_end_and_cancel(setup):
         # 그건 aborted is None이 본다
         for m in (0.4, 0.6)
     ])
-    for mid in midpoint_validation_points(ps):
+    for mid in validation_points(ps, [0.4, 0.6]):
         ps.add(mid)
     lms = LinearModelSet()
     crit = MarginCriteria()
@@ -297,7 +404,7 @@ def test_outside_envelope_point_is_measured_but_not_prescribed(setup):
     """
     ac, tables, design = setup
     ps = PointSet([
-        OperatingPoint(case=_case(m), role=ROLE_ANCHOR, origin="coarse")
+        OperatingPoint(case=_case(m), role=ROLE_DESIGN, origin="coarse")
         for m in (0.4, 0.45)  # 0.6은 새 엔벨로프 밖 — 비교 대상이 둘 다 밖이면 안 된다
     ])
     # 한 점을 엔벨로프 밖으로 표시 — 격자·리파인이 포화/α 여유로 세우는 플래그와 같다
@@ -543,34 +650,6 @@ def test_margin_delta_counts_judged_and_lists_only_moves():
     assert (w["from"], w["to"]) == ("ok", "fail")
     assert w["severity_to"] == pytest.approx((45.0 - 40.0) / 45.0)  # PM 요구선 대비 부족 비율
     assert moved[("p2", "roll_att")]["severity_from"] is None  # inf → None
-
-
-def test_validation_density_rounds_cover_every_interval_first():
-    """n_between=2·3 — 좌표는 등간 내분점, 순서는 라운드 우선(구간당 1점이 먼저 찬다).
-
-    VERIFY는 예산 소진 시 목록 앞에서 끊는다(orchestrator). 쌍 우선으로 내면 첫
-    구간이 3점을 다 받는 동안 마지막 구간은 0점이라, 밀도를 올린 실행이 오히려
-    커버리지를 잃는다. 첫 라운드는 중점(종전 좌표 그대로)이어야 기존 검증점
-    이름이 재사용된다 — 트림 캐시 적중.
-    """
-    ps = PointSet([
-        OperatingPoint(case=_case(0.2), role=ROLE_BREAKPOINT, origin="coarse"),
-        OperatingPoint(case=_case(0.5), role=ROLE_BREAKPOINT, origin="coarse"),
-        OperatingPoint(case=_case(0.8), role=ROLE_BREAKPOINT, origin="coarse"),
-    ])
-    two = midpoint_validation_points(ps, n_between=2)
-    assert [p.case.mach for p in two] == pytest.approx([0.3, 0.6, 0.4, 0.7])  # 라운드 1 → 2
-    # n=3의 첫 라운드는 중점 — n_between=1 좌표(이름째)가 그대로 앞머리에 온다
-    three = midpoint_validation_points(ps, n_between=3)
-    assert [p.case.mach for p in three[:2]] == pytest.approx([0.35, 0.65])
-    assert {p.case.name for p in three[:2]} == {p.case.name for p in midpoint_validation_points(ps)}
-    assert len(three) == 6 and all(p.role == "validation" for p in three)
-    # 이미 있는 좌표는 다시 만들지 않는다 (멱등)
-    for p in three:
-        ps.add(p)
-    assert midpoint_validation_points(ps, n_between=3) == []
-    with pytest.raises(ValueError):
-        midpoint_validation_points(ps, n_between=0)
 
 
 def test_rate_loops_are_judged_on_the_as94900_broken_loop_margin():

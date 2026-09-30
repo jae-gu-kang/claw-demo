@@ -5,16 +5,15 @@
 운영점 집합"(points.PointSet)이며, 그 위에서 COARSE → REFINE → TUNE → FIT →
 VERIFY → CLASSIFY 스테이지가 순환한다 (orchestrator).
 
-역할 서열: validation < breakpoint < anchor. 승격은 단방향 래칫 — 같은 점이
-아래로 내려가지 않아 이터레이션 종료가 보장된다 (points.PointSet.promote).
+역할은 설계점(design)·검증점(validation) 둘이다. 편입은 검증점 → 설계점 한 방향뿐이라 이터레이션 종료의 한 겹이 된다
+(points.PointSet.promote). 게인 표의 절점은 설계점과 독립인 표별 절점 집합이다(knots — 05 §11.5).
 """
 
 from claw.design.classify import VERDICTS, classify_failures, classify_margin_deficit
 from claw.design.criteria import MarginCriteria
 from claw.design.linmodels import LinearModelSet, model_distance
 from claw.design.points import (
-    ROLE_ANCHOR,
-    ROLE_BREAKPOINT,
+    ROLE_DESIGN,
     ROLE_VALIDATION,
     OperatingPoint,
     PointSet,
@@ -27,6 +26,7 @@ from claw.design.fit import (
     fit_slots,
     resample_to_table,
     select_axes,
+    table_on_knots,
     table_surface,
 )
 from claw.design.grid import coarse_grid
@@ -35,15 +35,14 @@ from claw.design.refine import refine_trim_points
 from claw.design.tune import TuneTargets, tune_point, tune_points
 from claw.design.schedmap import (
     margin_delta,
-    midpoint_validation_points,
     scheduled_gains,
     scheduled_margin_map,
     scheduled_margin_point,
+    validation_points,
 )
 
 __all__ = [
-    "ROLE_ANCHOR",
-    "ROLE_BREAKPOINT",
+    "ROLE_DESIGN",
     "ROLE_VALIDATION",
     "OperatingPoint",
     "PointSet",
@@ -55,7 +54,7 @@ __all__ = [
     "scheduled_margin_point",
     "scheduled_margin_map",
     "margin_delta",
-    "midpoint_validation_points",
+    "validation_points",
     "coarse_grid",
     "refine_trim_points",
     "TuneTargets",
@@ -67,6 +66,7 @@ __all__ = [
     "fit_slots",
     "select_axes",
     "table_surface",
+    "table_on_knots",
     "resample_to_table",
     "VERDICTS",
     "classify_margin_deficit",

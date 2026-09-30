@@ -1,9 +1,13 @@
-"""adaptive 트림점 삽입 — 인접 앵커 간 플랜트 거리(model_distance) 기반 우선순위 큐 이분법.
+"""adaptive 설계점 삽입 — 인접 설계점 간 플랜트 거리(model_distance) 기반 우선순위 큐 이분법.
 
-"선형화 결과의 변화량을 보고 트림 포인트를 자동 삽입한다"의 구현. 인접 앵커쌍의
-무차원 거리 d_total이 tol을 넘으면 달라지는 축의 중점에 새 앵커를 넣고, 양쪽 절반을
+"선형화 결과의 변화량을 보고 트림 포인트를 자동 삽입한다"의 구현. 인접 설계점쌍의
+무차원 거리 d_total이 tol을 넘으면 달라지는 축의 중점에 새 설계점을 넣고, 양쪽 절반을
 재평가해 큐에 되넣는다. 최악 쌍부터 처리하는 우선순위 큐라 **예산 내 언제 끊어도
 가장 필요한 곳부터 세분화돼 있다** (anytime — 협조적 취소·예산 소진과 정합).
+
+삽입하는 것은 **설계점이지 절점이 아니다**(05 §11.4 — 설계점은 절점과 독립). 종전에는 튜닝한 마하가 곧 표의 분할점이라
+여기서 넣은 중점이 그대로 절점이 됐다(쇼케이스 29개 — 표 자리마다 36점). 이제 절점은 표별 절점 집합(knots.py)이 정하고,
+설계점을 늘리면 적합 표본이 늘 뿐이다.
 
 종료 3겹: 큐 소진(전 쌍 d ≤ tol) ∨ max_points ∨ 쌍별 분할 깊이 max_depth
 (기본 3 = 초기 간격의 1/8). 중점마다 조건 판정(opspace/verdict.py)을 싣는다. 미수렴 중점은
@@ -18,7 +22,7 @@ import numpy as np
 
 from claw.common.contracts import TrimCase
 from claw.design.linmodels import model_distance
-from claw.design.points import AXES, ROLE_ANCHOR, OperatingPoint, case_name
+from claw.design.points import AXES, ROLE_DESIGN, OperatingPoint, case_name
 from claw.opspace.verdict import condition_verdict
 from claw.trim import trim_level
 
@@ -62,7 +66,7 @@ def refine_trim_points(
     tol=0.25, max_points=120, max_depth=3,
     fingerprint="", on_progress=None,
 ) -> dict:
-    """인접 앵커쌍 거리 > tol인 곳에 중점 앵커 삽입 (제자리 갱신) — 리포트 반환.
+    """인접 설계점쌍 거리 > tol인 곳에 중점 설계점 삽입 (제자리 갱신) — 리포트 반환.
 
     points·lms·trims를 제자리 갱신한다. tol 0.25 [기본값] = "인접점 간 25% 이상
     플랜트 변화면 격자가 성기다". 이 상수는 분류기의 plant_variation 판정
@@ -85,7 +89,7 @@ def refine_trim_points(
             heapq.heappush(heap, (-d["d_total"], next(counter), name_a, name_b, axis, depth))
         return d
 
-    pairs0 = points.adjacent_pairs(ROLE_ANCHOR)
+    pairs0 = points.adjacent_pairs(ROLE_DESIGN)
     for name_a, name_b, axis in pairs0:
         _push(name_a, name_b, axis, 0)
 
@@ -93,7 +97,7 @@ def refine_trim_points(
     aborted = None
     while heap:
         # 예산은 **전체 점 수**로 센다 — orchestrator·서버 상한(MAX_POINTS)이 같은
-        # 단위를 쓴다. anchor만 세면 이터 2에서 검증점이 쌓인 채로 앵커를 상한까지
+        # 단위를 쓴다. 설계점만 세면 이터 2에서 검증점이 쌓인 채로 설계점을 상한까지
         # 채워 총점이 상한의 두 배가 되고, "단일 워커 점유 상한"이 실효를 잃는다
         if len(points) >= max_points:
             aborted = "budget_points"
@@ -106,7 +110,7 @@ def refine_trim_points(
         z0 = _seed_z(trims, name_a, name_b, ca, cb, mid, axis)
         tr = trim_level(aircraft, mid, z0=z0, fingerprint=fingerprint)
         trims[mid.name] = tr
-        pt = OperatingPoint(case=mid, role=ROLE_ANCHOR, origin="refine")
+        pt = OperatingPoint(case=mid, role=ROLE_DESIGN, origin="refine")
         pt.verdict = condition_verdict(tr, ctx)
         pt.trimmable = pt.verdict["adopted"]
         points.add(pt)

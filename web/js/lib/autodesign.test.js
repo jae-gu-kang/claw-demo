@@ -5,6 +5,14 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  ROLE_LABEL,
+  actionText,
+  knotBadgeSpec,
+  knotModel,
+  knotSourceText,
+  machText,
+  pointCountText,
+  roleGroup,
   DEFAULT_FUEL_FRACS,
   emptyResultNotice,
   REASON_TEXT,
@@ -1032,8 +1040,8 @@ test("coverageLines — 프로즈는 엔진이 정본, 없을 때만 화면이 �
   // 엔진 문장이 없으면(구형 결과) 화면이 그 자리를 메운다 — 수치만 남기고 끝내면
   // "검증점 0"이 왜 심각한지가 화면 어디에도 없다
   const alone = coverageLines({ coverage: cov });
-  assert.match(alone[0].text, /전부 자기 게인이 직접 튜닝된 앵커다/);
-  assert.match(alone[0].text, /breakpoint 사이에서 무너지는지는 보지 않았다/);
+  assert.match(alone[0].text, /전부 자기 게인이 직접 튜닝된 설계점이다/);
+  assert.match(alone[0].text, /절점 사이에서 무너지는지는 보지 않았다/);
 });
 
 test("coverageLines — 실측 형상: 검증도 하고 남기기도 한 실행", () => {
@@ -1044,7 +1052,8 @@ test("coverageLines — 실측 형상: 검증도 하고 남기기도 한 실행"
   });
   const v = lines.find((l) => l.key === "validation");
   assert.equal(v.tone, "warn");
-  assert.match(v.text, /보간 구간 11개가 검증점 없이 남았다 \(검증된 구간은 6개\)/);
+  // 6은 검증점 수다(구간 수가 아니다 — 편입된 검증점과 그 구간의 새 검증점이 함께 센다: 엔진 coverage_gaps와 같은 말)
+  assert.match(v.text, /보간 구간 11개가 검증점 없이 남았다 \(들어간 검증점은 6개\)/);
   // 6과 11을 더해 "요구 17"이라 쓰면 안 된다 — 이터가 돌면 요구가 갱신된다
   assert.doesNotMatch(v.text, /17/);
   assert.equal(lines.find((l) => l.key === "not_trimmed"), undefined); // 0은 말 안 한다
@@ -1059,6 +1068,10 @@ test("coverageLines — 실측 형상: 검증도 하고 남기기도 한 실행"
   // 둘 다 0이면 아무 말도 안 한다 — 검증할 구간 자체가 없었던 실행이다
   assert.deepEqual(coverageLines({
     coverage: { validation_points: 0, validation_missing: 0 } }), []);
+  // 못 넣은 수가 안 온 것은 0이 아니다 — 검증점 0을 「볼 구간이 없었다」로 삼키지 않는다
+  const noMissing = coverageLines({ coverage: { validation_points: 0 } });
+  assert.equal(noMissing[0].tone, "warn");
+  assert.match(noMissing[0].text, /검증점 0 — 못 넣은 구간 수를 결과가 말하지 않는다/);
 
   // coverage 자체가 없는 구형 결과 — 지어내지 않는다
   assert.deepEqual(coverageLines({}), []);
@@ -1072,6 +1085,25 @@ test("coverageLines — 실측 형상: 검증도 하고 남기기도 한 실행"
   assert.equal(unknown[0].tone, "warn");
   assert.match(unknown[0].text, /몇 개가 검증됐는지를 결과가 말하지 않는다/);
   assert.doesNotMatch(unknown[0].text, /한 개도 없다/);
+});
+
+test("coverageLines — 설계점 자리는 검증이 아니다: 옮긴 수는 참고, 빈 자리 없는 구간은 경고 (엔진 coverage 키)", () => {
+  // 엔진은 내분점 자리에 설계점이 있으면 다음 빈 내분점으로 옮기고(midpoints_at_design_points — 정보용), 빈 자리를
+  // 못 찾은 구간을 validation_unplaceable로 센다. 화면은 옮긴 수를 검증 수에 더하지 않는다
+  const lines = coverageLines({ coverage: { validation_points: 5, validation_missing: 0,
+    midpoints_at_design_points: 3, validation_unplaceable: 2 } });
+  const v = lines.find((l) => l.key === "validation");
+  assert.equal(v.text, "보간 구간 검증점 5 (중점에 설계점이 있어 옮긴 3)");
+  const u = lines.find((l) => l.key === "unplaceable");
+  assert.equal(u.tone, "warn");
+  assert.match(u.text, /보간 구간 2개는 검증점을 둘 빈 자리가 없었다/);
+  // 옛 초안 키(validation_at_design_points)는 검증 수가 아니다 — 읽지 않는다
+  assert.deepEqual(coverageLines({ coverage: { validation_points: 0, validation_missing: 0,
+    validation_at_design_points: 7 } }), []);
+  // 설계점 겹침만 있고 검증점 0이면 여전히 가장 강한 줄이다
+  const none = coverageLines({ coverage: { validation_points: 0, validation_missing: 4,
+    midpoints_at_design_points: 4 } });
+  assert.equal(none[0].tone, "fail");
 });
 
 test("coverageLines — refine 잔여가 허용을 넘으면 경고, 안 넘으면 hint", () => {
@@ -1417,13 +1449,13 @@ test("fitFactsModel — 스케줄 축 밖 변동·교차축 잔차·톱니를 �
   };
   const m = fitFactsModel(fits);
   assert.deepEqual(m.rows.map((r) => r.text), [
-    "pitch.k_rate — 표 64점(mach 축) · 톱니 38회/분할점 64",
-    "roll.ki — 표 14점(mach 축) · 스케줄 축 밖 변동 alt · 교차축 잔차 55% · 톱니 4회/분할점 14",
+    "pitch.k_rate — 표 64절점(mach 축) · 톱니 38회/절점 64",
+    "roll.ki — 표 14절점(mach 축) · 스케줄 축 밖 변동 alt · 교차축 잔차 55% · 톱니 4회/절점 14",
     "roll.kp — 다항(mach 축 · 구간 4) · 스케줄 축 밖 변동 alt · 교차축 잔차 33%",
     "yaw.k_rate — 상수 0.420 · 스케줄 축 밖 변동 alt — 상수로 접었다(잔차 0.0500)",
   ]);
   assert.equal(m.summary, "적합 보고 — 스케줄 축 밖 변동 3/4자리(alt) · 교차축 잔차 최대 55% (roll.ki)"
-    + " · 톱니 최대 38회/분할점 64 (pitch.k_rate)");
+    + " · 톱니 최대 38회/절점 64 (pitch.k_rate)");
   // 볼 것이 없으면 요약이 없다 — 판정하지 않은 것을 "이상 없음"으로 말하지 않는다
   assert.equal(fitFactsModel({ "a.b": { kind: "table", axis: "mach", n_breakpoints: 3, zigzag: 0,
     quality: { cross_axis_frac: 0 } } }).summary, null);
@@ -1434,7 +1466,10 @@ test("fitFactsModel — 스케줄 축 밖 변동·교차축 잔차·톱니를 �
 test("warnNoteText — 표 모드에는 조일 적합이 없다 (다항 시절 문단을 그대로 두지 않는다)", () => {
   const table = warnNoteText("table");
   assert.match(table, /적합 허용치 조이기는 표 모드에 없다/);
-  assert.match(table, /검증점의 warn은 분할점 사이 선형 보간/);
+  assert.match(table, /검증점의 warn은 절점 사이 선형 보간/);
+  // 절점 분리(이관 3단계) — 보간 탓의 처방은 점 승격이 아니라 그 구간 표의 절점 추가다
+  assert.match(table, /절점을 더한다\(처방 카드 「절점 추가」\)/);
+  assert.doesNotMatch(table, /breakpoint/);
   assert.doesNotMatch(table, /적합 허용치를 조인다/);
   // 다항·표현 기록 없음(표현 선택 이전 = 다항)은 종전 문단
   for (const mode of ["poly", undefined]) {
@@ -1459,13 +1494,21 @@ test("VERDICT_LABEL — 엔진 분류 여섯 가지 전부에 이름이 있다 (
     "gain_sign_flip", "fit_residual"]) {
     assert.ok(VERDICT_LABEL[v], v);
   }
-  assert.match(VERDICT_LABEL.fit_residual, /다항 전용 — 표 모드에서는 건너뛴다/);
-  assert.match(ledgerActionText({ verdict: "fit_residual", applied: false }), /^앵커 적합 괴리/);
+  // 표 모드는 절점 추가(add_knot — 이관 3단계), 다항만 적합 허용치 조이기
+  assert.match(VERDICT_LABEL.fit_residual, /표: 절점 추가 · 다항: 적합 허용치 조이기/);
+  assert.match(VERDICT_LABEL.gain_interp_valley, /절점 추가/);
+  assert.doesNotMatch(VERDICT_LABEL.gain_interp_valley, /breakpoint 승격/);
+  // 분리 단위는 표 전체다(절점 집합) — 「그 구간 표만」이라 쓰면 구간 단위로 읽힌다
+  assert.doesNotMatch(VERDICT_LABEL.gain_interp_valley, /구간 표만|독립\)/);
+  // 부호 뒤집힘도 v1.70부터 절점 추가(검증점이면 편입 동반) — 「승격으로는 안 풀린다」는 낡은 말이다
+  assert.match(VERDICT_LABEL.gain_sign_flip, /절점 추가/);
+  assert.doesNotMatch(VERDICT_LABEL.gain_sign_flip, /승격으로는 안 풀린다|재적합/);
+  assert.match(ledgerActionText({ verdict: "fit_residual", applied: false }), /^설계점 적합 괴리/);
 });
 
 test("자동 설계 뷰가 새 사실들을 실제로 그린다 (원문 대조 — 뷰는 테스트가 import하지 않는다)", () => {
   const view = readFileSync(new URL("../views/autodesign.js", import.meta.url), "utf8");
-  assert.match(view, /\[actuatorBox\(body\), excludedBox\(body\), fitFactsBox\(body\.fits\)\]\.filter\(Boolean\)/);
+  assert.match(view, /\[actuatorBox\(body\), excludedBox\(body\), knotBox\(body\), fitFactsBox\(body\.fits, knotModel\(body\)\)\]/);
   assert.match(view, /\.\.\.facts,/);
   assert.match(view, /legendBox\(body\.margin_out\?\.criteria, report\.fit_mode\)/);
   assert.match(view, /el\("p", \{ class: "hint" \}, warnNoteText\(fitMode\)\)/);
@@ -1510,4 +1553,211 @@ test("gridPlaceholders — 빈 격자 칸은 요구영역의 기본 격자 명�
   assert.deepEqual(gridPlaceholders(draft, {}), { nMach: "5", alts: "0", fuels: "20", source: "draft" });
   assert.deepEqual(gridPlaceholders({ mass: { fuel_max: 50 } }, { grid: { alts: [0, 1000], fuel_fracs: [0.5, 1] } }),
     { nMach: null, alts: "0 1000", fuels: "25 50", source: "legacy" });
+});
+
+
+// ── 절점 분리 (05 §11.13 이관 3단계 — 설계점과 절점 · 표별 절점 집합) ─────────────────
+
+// 엔진 knot_record 모양 — 기본은 전 표가 한 집합(base)을 공유하고, add_knot이 pitch.kp를 독립 집합으로 뗐다
+const KNOT_BODY = {
+  report: { knots: { tables: { "pitch.kp": 8, "pitch.ki": 7, "roll.kp": 6 }, shared: false } },
+  gain_export: { knots: {
+    sets: {
+      common: { axis: "mach", coords: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], source: "base_axis",
+        history: [{ op: "init", rule: "base_axis", n: 7 }] },
+      "pitch.kp": { axis: "mach", coords: [0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], source: "split:common",
+        history: [{ op: "init", rule: "base_axis", n: 7 }, { op: "split", from: "common", iter: 2 },
+          { op: "add", mach: 0.15, point: "M0.15_h1000_f20", iter: 2, reason: "gain_interp_valley" }] },
+    },
+    tables: {
+      "pitch.kp": { set: "pitch.kp", shared: false, unsupported: [] },
+      "pitch.ki": { set: "common", shared: true, unsupported: [], n: 7 },
+      "roll.kp": { set: "common", shared: true, unsupported: [0.7], n: 6 },
+    },
+  } },
+};
+
+test("역할 — 설계점·검증점 둘, 옛 결과의 앵커·breakpoint는 이름을 남기되 설계점으로 묶는다", () => {
+  assert.equal(ROLE_LABEL.design, "설계점(튜닝)");
+  assert.equal(ROLE_LABEL.validation, "검증점");
+  assert.match(ROLE_LABEL.anchor, /옛 결과 — 설계점/);
+  assert.match(ROLE_LABEL.breakpoint, /옛 결과 — 설계점/);
+  assert.equal(roleGroup("anchor"), "design");
+  assert.equal(roleGroup("breakpoint"), "design");
+  assert.equal(roleGroup("validation"), "validation");
+  const rows = pointRows({ points: { points: [
+    { name: "A", role: "design" }, { name: "B", role: "anchor" }, { name: "C", role: "frontier" }] } });
+  assert.deepEqual(rows.map((r) => [r.roleGroup, r.roleLabel]),
+    [["design", "설계점(튜닝)"], ["design", "앵커(옛 결과 — 설계점)"], ["frontier", "frontier"]]);
+});
+
+test("점 수 한 줄 — 새 결과는 설계점·검증점, 옛 결과는 옛 이름 그대로(합쳐 말하지 않는다)", () => {
+  assert.equal(pointCountText({ design: 7, validation: 12 }), "설계점 7 · 검증점 12");
+  assert.equal(pointCountText({ anchor: 5, breakpoint: 7, validation: 12 }), "앵커 5 · bp 7 · 검증 12");
+  assert.equal(pointCountText(undefined, "—"), "설계점 — · 검증점 —");
+  assert.match(reportLine({ n_points: 19, points: { design: 7, validation: 12 } }).join(" · "),
+    /점 19 \(설계점 7 · 검증점 12\)/);
+  // 실패 위치 — 새 역할 이름, 옛 이름도 그대로 읽힌다
+  assert.equal(failureRoleText({ design: 3, validation: 9 }), "설계점 3 · 검증점 9");
+  assert.equal(failureRoleText({ anchor: 31, validation: 14 }), "앵커 31 · 검증점 14");
+});
+
+test("knotModel — 표별 절점 집합·공통/분리 집합·범위 밖/안쪽 뺀 절점·추가 이력 (기록 없는 옛 결과는 null)", () => {
+  const m = knotModel(KNOT_BODY);
+  // 공통 집합(엔진 knots.COMMON)을 쓰는가로 가른다 — 집합별 shared(사용자 둘 이상)가 아니다: 떼어 낸 집합도 두 표가
+  // 함께 쓰면 shared지만 공통 집합은 아니다
+  assert.deepEqual(m.rows.map((r) => [r.slot, r.set, r.n, r.sharedText, r.unsupported.length]), [
+    ["pitch.ki", "common", 7, "공통 집합", 0],
+    ["pitch.kp", "pitch.kp", 8, "분리 집합", 0],
+    ["roll.kp", "common", 6, "공통 집합", 1],
+  ]);
+  const kp = m.rows.find((r) => r.slot === "pitch.kp");
+  assert.equal(kp.sourceText, "공통에서 분리");
+  assert.deepEqual(kp.historyLines, ["시작 — 규칙 base_axis · 7절점", "공통에서 분리 · 이터 2",
+    "M0.15 추가 · 점 M0.15_h1000_f20 · 이터 2 · 사유 gain_interp_valley"]);
+  assert.deepEqual(m.sets.map((x) => [x.displayName, x.n, x.members]),
+    [["공통", 7, ["pitch.ki", "roll.kp"]], ["pitch.kp", 8, ["pitch.kp"]]]);
+  assert.equal(m.summary, "절점 — 표 3개 · 절점 6~8 · 집합 2 · 공통 2 · 분리 1 · 범위 밖 절점 1");
+  // 전 표가 한 집합이면(보고 knots.shared) 그대로 말한다
+  const one = knotModel({ report: { knots: { tables: { a: 3, b: 3 }, shared: true } },
+    gain_export: { knots: { sets: { common: { coords: [0.1, 0.2, 0.3] } },
+      tables: { a: { set: "common", shared: true }, b: { set: "common", shared: true } } } } });
+  assert.match(one.summary, /전 표 공통 집합/);
+  // 떼어 낸 집합을 두 표가 함께 쓰면 — 분리 집합(2표 함께)이지 「공유」(공통)가 아니다
+  const pair = knotModel({ gain_export: { knots: { sets: { "a+b": { coords: [0.1, 0.2] }, common: { coords: [0.1] } },
+    tables: { a: { set: "a+b", shared: true }, b: { set: "a+b", shared: true }, c: { set: "common", shared: false } } } } });
+  assert.deepEqual(pair.rows.map((r) => r.sharedText), ["분리 집합(2표 함께)", "분리 집합(2표 함께)", "공통 집합"]);
+  // 반출 기록만 있고 보고 수가 없으면 좌표 수 − 범위 밖 수
+  const noRep = knotModel({ gain_export: KNOT_BODY.gain_export });
+  assert.equal(noRep.rows.find((r) => r.slot === "roll.kp").n, 6);
+  // 범위 밖 절점은 fits[자리].unsupported_knots로도 온다
+  const viaFits = knotModel({ report: { knots: { tables: { a: 3 } } }, fits: { a: { unsupported_knots: [0.9] } } });
+  assert.deepEqual(viaFits.rows[0].unsupported, [0.9]);
+  assert.equal(viaFits.rows[0].sharedText, "—");
+  // 뺀 절점은 끝 바깥(범위 밖 — 끝값 clip)과 안쪽(표본이 멀어 뺌 — 이웃 직선으로 메움)으로 갈린다
+  const split = knotModel({ gain_export: { knots: { sets: { common: { coords: [0.1, 0.2, 0.3, 0.4] } },
+    tables: { a: { set: "common", unsupported: [0.2, 0.4],
+      unsupported_detail: [{ knot: 0.2, reason: "far", edge: false }, { knot: 0.4, reason: "none", edge: true }] },
+    b: { set: "common", unsupported: [0.1, 0.3] } } } } });
+  const [ra, rb] = split.rows;
+  assert.deepEqual([ra.edge, ra.dropped], [[0.4], [0.2]]);
+  // 사유 기록이 없는 결과는 좌표로 가른다 — 남은 절점 [0.2, 0.4] 밖이면 끝
+  assert.deepEqual([rb.edge, rb.dropped], [[0.1], [0.3]]);
+  assert.match(split.summary, /범위 밖 절점 2 · 안쪽에서 뺀 절점 2/);
+  assert.equal(knotModel({ report: {} }), null);
+  assert.equal(knotModel(undefined), null);
+});
+
+test("knotSourceText·machText — 절점 출처 코드를 읽고 모르는 코드는 그대로", () => {
+  assert.equal(knotSourceText("base_axis"), "요구영역 기본 격자");
+  assert.equal(knotSourceText("uniform:5"), "설계 마하 구간 5등분");
+  assert.equal(knotSourceText("user"), "사용자 좌표");
+  assert.equal(knotSourceText("samples"), "튜닝한 마하 전부(옛 방식)");
+  assert.equal(knotSourceText("split:base"), "base에서 분리");
+  assert.equal(knotSourceText("split:common"), "공통에서 분리");
+  assert.equal(knotSourceText("weird"), "weird");
+  assert.equal(knotSourceText(null), "출처 기록 없음");
+  assert.equal(machText(0.15), "M0.15");
+  assert.equal(machText(0.123456), "M0.123");
+  assert.equal(machText("x"), "M?");
+});
+
+test("fitFactsModel — 표 n절점 · 공통/분리 집합 · 범위 밖 절점 k (절점 기록이 있을 때만)", () => {
+  const fits = {
+    "pitch.kp": { kind: "table", axis: "mach", n_breakpoints: 8 },
+    "roll.kp": { kind: "table", axis: "mach", n_breakpoints: 6, unsupported_knots: [0.7] },
+  };
+  const m = fitFactsModel(fits, knotModel(KNOT_BODY));
+  assert.deepEqual(m.rows.map((r) => r.text), [
+    "pitch.kp — 표 8절점(mach 축) · 분리 집합",
+    "roll.kp — 표 6절점(mach 축) · 공통 집합 · 범위 밖 절점 1",
+  ]);
+  // 절점 기록이 없는 옛 결과 — 공통/분리를 지어내지 않고, 뺀 절점이 끝 바깥인지도 단정하지 않는다
+  assert.deepEqual(fitFactsModel(fits).rows.map((r) => r.text), [
+    "pitch.kp — 표 8절점(mach 축)", "roll.kp — 표 6절점(mach 축) · 뺀 절점 1"]);
+});
+
+test("actionText — 절점 추가는 요청(마하·표)만 말하고 분리 여부는 반영 뒤 엔진 결과(a.knot)로", () => {
+  // 반영 전에는 분리될지 모른다 — 이름 댄 표가 그 집합의 사용자 전부면 제자리에 더한다(knots.add_knot)
+  assert.equal(actionText({ type: "add_knot", mach: 0.15, slots: ["pitch.kp", "pitch.ki"], promote: false }),
+    "절점 추가 요청: M0.15 → 표 pitch.kp·pitch.ki");
+  assert.equal(actionText({ type: "add_knot", mach: 0.15, slots: ["pitch.kp"], promote: true, point: "V3" }),
+    "절점 추가 요청: M0.15 → 표 pitch.kp · 점 V3 설계점 승격(튜닝)");
+  assert.doesNotMatch(actionText({ type: "add_knot", mach: 0.15, slots: ["a"] }), /독립/);
+  // 반영 뒤 — 엔진 결과대로
+  const act = { type: "add_knot", mach: 0.15, slots: ["pitch.kp", "pitch.ki"] };
+  assert.equal(actionText(act, { added: true, split: ["pitch.ki", "pitch.kp"], skipped: null }),
+    "절점 추가: M0.15 → 표 pitch.kp·pitch.ki (분리 집합으로 뗌: pitch.ki, pitch.kp)");
+  assert.equal(actionText(act, { added: true, split: [], skipped: null }),
+    "절점 추가: M0.15 → 표 pitch.kp·pitch.ki (그 집합을 쓰는 표 전부)");
+  assert.equal(actionText(act, { added: false, split: [], skipped: "common: 이미 M0.15 절점이 있다" }),
+    "절점 추가 안 됨: M0.15 → 표 pitch.kp·pitch.ki — common: 이미 M0.15 절점이 있다");
+  assert.equal(actionText({ type: "promote", point: "V3", to: "design" }), "승격: 점 V3 → 설계점(튜닝)");
+  // 옛 결과의 동작도 읽힌다
+  assert.equal(actionText({ type: "promote", point: "V3", to: "breakpoint" }),
+    "승격: 점 V3 → breakpoint(옛 결과 — 설계점)");
+  assert.match(actionText({ type: "refit_at", point: "P" }), /옛 결과/);
+  assert.equal(actionText({ type: "brand_new" }), "brand_new");
+  assert.equal(actionText(null), null);
+  // 카드 근거 묶음·원장 처방 칸에 선다
+  const ev = evidenceLines({ verdict: "gain_interp_valley",
+    action: { type: "add_knot", mach: 0.35, slots: ["roll.kp"], promote: false }, evidence: {} });
+  assert.equal(ev.action, "절점 추가 요청: M0.35 → 표 roll.kp");
+  assert.equal(ev.knot, null); // 반영 전
+  const done = evidenceLines({ action: { type: "add_knot", mach: 0.35, slots: ["roll.kp"] }, evidence: {},
+    knot: { added: true, split: ["roll.kp"], skipped: null } });
+  assert.equal(done.action, "절점 추가: M0.35 → 표 roll.kp (분리 집합으로 뗌: roll.kp)");
+  // 편입은 됐는데 절점은 못 더한 카드 — 건너뜀이 아니라 참고(엔진 notes)
+  const noted = evidenceLines({ action: { type: "add_knot", mach: 0.35, slots: ["roll.kp"], promote: true },
+    evidence: {}, notes: ["절점 추가 안 됨 — common: 이미 M0.35 절점이 있다"],
+    knot: { added: false, split: [], skipped: "common: 이미 M0.35 절점이 있다" } });
+  assert.deepEqual(noted.flags, []);
+  assert.ok(noted.notes.includes("절점 추가 안 됨 — common: 이미 M0.35 절점이 있다"));
+  assert.match(ledgerActionText({ verdict: "simple_deficit", type: "add_knot", applied: false }),
+    /^단순 마진 부족 — 검증점 추가 · 절점 추가 · 미반영/);
+  // 판정 이름이 이미 절점 추가를 말하면 두 번 적지 않는다
+  assert.equal((ledgerActionText({ verdict: "gain_interp_valley", type: "add_knot", applied: true })
+    .match(/절점 추가/g) ?? []).length, 1);
+});
+
+test("절점 설정 칸 ↔ config.knots — 채운 칸만, 되읽기 대칭", () => {
+  assert.equal(buildConfig({}).knots, undefined);
+  assert.deepEqual(buildConfig({ knotRule: "uniform", knotN: "5" }).knots, { rule: "uniform", n: 5 });
+  assert.deepEqual(buildConfig({ knotRule: "user", knotCoordsText: "0.2 0.4, 0.8", knotMax: "10" }).knots,
+    { rule: "user", max_per_table: 10, coords: [0.2, 0.4, 0.8] });
+  assert.throws(() => buildConfig({ knotN: "many" }), /knots\.n/);
+  const knots = { rule: "user", n: null, coords: [0.2, 0.5], max_per_table: 12 };
+  const vals = configFormValues({ knots });
+  assert.deepEqual(vals, { knotRule: "user", knotCoordsText: "0.2 0.5", knotMax: "12" });
+  assert.deepEqual(buildConfig(vals).knots, { rule: "user", max_per_table: 12, coords: [0.2, 0.5] });
+});
+
+test("knotBadgeSpec — 게인 탭 확정 표 배지: 글은 공통/분리 집합만, 표별 집합은 툴팁 (기록 없으면 null)", () => {
+  const b = knotBadgeSpec(KNOT_BODY.gain_export.knots);
+  assert.equal(b.label, "절점 분리 1/3");
+  assert.match(b.tip, /pitch\.kp — 분리 집합 · 집합 pitch\.kp · 8절점 · 공통에서 분리/);
+  assert.match(b.tip, /roll\.kp — 공통 집합 · 집합 공통 · 7절점 · 요구영역 기본 격자 · 범위 밖 1/);
+  const shared = knotBadgeSpec({ sets: { common: { coords: [0.1, 0.5] } },
+    tables: { a: { set: "common", shared: true }, b: { set: "common", shared: true } } });
+  assert.equal(shared.label, "절점 공통 집합");
+  // 떼어 낸 집합을 두 표가 함께 써도(집합별 shared true) 공통 집합이 아니다 — 「공유」로 그리지 않는다
+  const pair = knotBadgeSpec({ sets: { "a+b": { coords: [0.1, 0.5] } },
+    tables: { a: { set: "a+b", shared: true }, b: { set: "a+b", shared: true } } });
+  assert.equal(pair.label, "절점 분리 2/2");
+  assert.equal(knotBadgeSpec(null), null);
+  assert.equal(knotBadgeSpec({ sets: {}, tables: {} }), null);
+});
+
+test("자동 설계 뷰 — 절점 패널·절점 설정 칸·카드 동작 줄을 실제로 그린다 (원문 대조)", () => {
+  const view = readFileSync(new URL("../views/autodesign.js", import.meta.url), "utf8");
+  assert.match(view, /function knotBox\(body\)/);
+  assert.match(view, /knotStrip\(r, lo, hi\)/); // 그림(절점 띠)이 먼저
+  assert.match(view, /knotRule: el\("select"/);
+  assert.match(view, /d\.knot_rules/); // 규칙 선택지는 서버 목록
+  assert.match(view, /if \(ev\.action\) lines\.push/);
+  assert.match(view, /el\("td", \{\}, r\.roleLabel\)/);
+  assert.doesNotMatch(view, /게인 breakpoint/);
+  const gains = readFileSync(new URL("../views/gains.js", import.meta.url), "utf8");
+  assert.match(gains, /knotBadgeSpec\(c\.knots\)/);
+  assert.doesNotMatch(gains, /breakpoint/);
 });

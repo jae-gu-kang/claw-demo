@@ -218,7 +218,14 @@ JSON 하나를 읽고, 엔지니어가 30초 안에 상황을 잡는 한국어 �
 - sim: 폐루프 미션 시뮬 — envelope 감시 스칼라(worst_margin·any_flag…)와
   착륙 단계 시각(meta.phases: launch_exit_t/touchdown_t/stop_t)
 - auto_design: 자동 설계 루프 — report(점 배치·판정 수)·proposed_actions(처방)·
-  ledger(미달 원장)·iterations
+  ledger(미달 원장)·iterations. 점 역할은 설계점(design — 튜닝하는 점)과
+  검증점(validation — 절점 사이를 재는 점) 둘이다(옛 결과의 anchor·breakpoint는
+  설계점). 게인 표의 절점은 설계점과 따로 정한다: report.knots(표별 절점 수·
+  shared = 전 표가 한 집합인가)·gain_export.knots(표별 절점 집합 — 공통 집합
+  common/분리 집합·추가 이력·표본이 받치지 않아 뺀 절점 unsupported와 사유·끝
+  바깥 여부). add_knot 처방은 이름 댄 표에 절점을 더한다(공통 집합 일부 표면
+  그 표들을 분리 집합으로 뗀다 — 결과는 카드의 knot.split). 설계점은 적합 표본이라
+  검증은 검증점에서만 센다(coverage.validation_points)
 - verify_flight: 탑재 C의 DAL A 검증 — report.summary 5행 + verdict
 - influence_evaluate: 케이스 격자 전체 6DOF 평가 — cards(대표 7)·checks·
   aggregate(hard_fail이면 불합격)

@@ -41,6 +41,7 @@ import {
   constantOf, designCoord, dropWorkingCopy, faultSlot, faultSummary, foldToConstant, seedTable, selectedSlots,
   slotIndex, withConstant, workingCopyLine,
 } from "../lib/gainsync.js";
+import { knotBadgeSpec } from "../lib/autodesign.js";
 import { EXAMPLE_ID, currentSelection } from "../lib/profile.js";
 import { criteriaBadgeSpec, criteriaEchoCache, criteriaFreshness } from "../lib/freshness.js";
 import { gainTablesStatus } from "../lib/quickseed.js";
@@ -273,7 +274,12 @@ export function render() {
         ? "문서의 확정 게인 표가 낡았습니다 — 반영한 뒤 문서가 바뀌어 시뮬·코드 조립이 거부합니다. "
           + "자동 설계를 다시 돌려 반영하거나 기체 탭에서 표를 지우세요."
         : `문서에 확정 게인 표가 있습니다(자리 ${c.slots.length}개 — 자동 설계 반영). 시뮬·코드는 그 표로 `
-          + "조립됩니다. 이 화면의 편집을 [시뮬·코드에 적용]하면 작업본이 그 표를 덮습니다."));
+          + "조립됩니다. 이 화면의 편집을 [시뮬·코드에 적용]하면 작업본이 그 표를 덮습니다.",
+      // 표별 절점 집합(provenance.knots) — 공통/분리 집합 배지, 집합·출처는 툴팁. 기록 없는 옛 반영은 배지 없음
+      ...(() => {
+        const b = knotBadgeSpec(c.knots);
+        return b ? [" ", el("span", { class: `flag ${b.tone}`, title: b.tip }, b.label)] : [];
+      })()));
   };
 
   // 카탈로그 받기 — 섰으면 null, 못 섰으면 그 오류(화면에는 이미 적었다)
@@ -347,7 +353,7 @@ export function render() {
           el("h2", {}, "근사 곡선 (점선)"),
           el("p", { class: "hint", style: "margin:0 0 10px" },
             "표의 점은 그대로 두고 읽는 보조선만 얹는다 — 구간 경계에서 곡선이 "
-            + "튀면 그 자리에 breakpoint를 하나 더 두어야 한다는 신호다."),
+            + "튀면 그 자리에 절점을 하나 더 두어야 한다는 신호다."),
           slots.fit,
         ] },
     ],
@@ -538,7 +544,7 @@ function storeChanged() {
  * ·블록도에는 걸려 있는데 정작 게인 화면만 서버 제안을 보여 줬다. 적용된 형상과
  * 보이는 형상이 다르면 "지금 형상"이라는 말이 성립하지 않는다.
  *
- * 확정본은 자리마다 breakpoint가 다르므로(적합이 자리별 독립) 합집합 축으로 정렬해
+ * 확정본은 자리마다 절점이 다를 수 있으므로(처방 「절점 추가」가 표를 분리 집합으로 뗀다) 합집합 축으로 정렬해
  * 한 표에 담는다 — 조회 함수는 보존된다(lib/gainsched alignTables).
  * 반환 null = 아직 아무것도 적용한 적 없음(서버 기본 형상이 그대로 돈다). */
 function adoptStored() {
@@ -588,7 +594,7 @@ function adoptedText(a) {
   if (!a.slots) return `${src} — 스케줄 없는 형상이 적용돼 있습니다 (전 자리 설계점 고정).`;
   let out = `${obj} 되읽었습니다 — ${a.slots}자리`;
   if (a.aligned) {
-    out += ` · 자리마다 다른 breakpoint를 합집합 ${a.points}점으로 정렬해 표시`
+    out += ` · 자리마다 다른 절점을 합집합 ${a.points}점으로 정렬해 표시`
       + " (구간 선형 보간 결과는 그대로)";
   }
   if (a.unknown.length) out += ` · 이 카탈로그에 없는 자리는 제외: ${a.unknown.join(", ")}`;

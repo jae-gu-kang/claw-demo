@@ -9,7 +9,7 @@ import pytest
 
 from claw.common.contracts import TrimCase
 from claw.design import (
-    ROLE_ANCHOR,
+    ROLE_DESIGN,
     LinearModelSet,
     MarginCriteria,
     OperatingPoint,
@@ -95,7 +95,7 @@ def test_envelope_verdict_keeps_the_legacy_reason_order_then_adds_the_verdict_co
 def test_operating_point_carries_the_verdict_through_serialisation(legacy):
     _, ac, ctx = legacy
     tr = _trim(ac, 0.6, 1000.0, 200.0)
-    pt = OperatingPoint(case=tr.case, role=ROLE_ANCHOR, origin="coarse")
+    pt = OperatingPoint(case=tr.case, role=ROLE_DESIGN, origin="coarse")
     pt.verdict = condition_verdict(tr, ctx)
     pt.trimmable = pt.verdict["adopted"]
     d = PointSet([pt]).to_dict()
@@ -114,7 +114,7 @@ def test_margin_map_names_the_exclusion_category(legacy):
     _, ac, ctx = legacy
     coords = ((0.45, 1000.0, 200.0), (0.6, 1000.0, 200.0), (0.175, 0.0, 0.0))
     ps = PointSet([OperatingPoint(case=TrimCase(name=case_name(*c), mach=c[0], alt=c[1], fuel=c[2]),
-                                  role=ROLE_ANCHOR, origin="coarse") for c in coords])
+                                  role=ROLE_DESIGN, origin="coarse") for c in coords])
     out = scheduled_margin_map(ac, ps, LinearModelSet(), make_demo_gain_tables(), demo_design_gains(),
                                criteria=MarginCriteria(), trims={}, ctx=ctx,
                                actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035)
@@ -131,7 +131,7 @@ def test_margin_map_names_the_exclusion_category(legacy):
 def test_margin_map_without_a_context_refuses_to_judge_new_points(legacy):
     _, ac, _ctx = legacy
     ps = PointSet([OperatingPoint(case=TrimCase(name=case_name(0.45, 1000.0, 200.0), mach=0.45, alt=1000.0, fuel=200.0),
-                                  role=ROLE_ANCHOR, origin="coarse")])
+                                  role=ROLE_DESIGN, origin="coarse")])
     with pytest.raises(ValueError, match="판정 문맥"):
         scheduled_margin_map(ac, ps, LinearModelSet(), make_demo_gain_tables(), demo_design_gains(),
                              criteria=MarginCriteria(), trims={})

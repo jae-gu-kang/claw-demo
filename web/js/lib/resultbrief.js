@@ -11,7 +11,7 @@
 
 import {
   actionCards, actuatorLine, adoptBlockedText, applyGateReason, coverageLines, excludedSamplesModel,
-  failureRoleText, fitFactsModel, fitModeLabel, pointRows, resumable, resumeBlockedText, reverifyLines,
+  failureRoleText, fitFactsModel, fitModeLabel, knotModel, pointCountText, pointRows, resumable, resumeBlockedText, reverifyLines,
   statusCounts, statusSeverity, statusText,
 } from "./autodesign.js";
 import { FQ_BADGE, FQ_RANK, fqMeasureText, fqWorst } from "./fq.js";
@@ -302,6 +302,13 @@ function llmBriefBrief(body) {
   };
 }
 
+/** 절점 모델 → 브리핑 한 칸 — 요약(표 수·절점 수 범위·공통/분리 집합·범위 밖)에 표별 수를 붙인다. 표가 많으면 앞 넷. */
+function knotBriefText(m) {
+  const per = m.rows.map((r) => `${r.slot} ${r.n ?? "?"}${r.common == null ? "" : `(${r.sharedText})`}`);
+  const head = per.slice(0, 4).join(" · ") + (per.length > 4 ? ` 외 ${per.length - 4}` : "");
+  return `${m.summary.replace(/^절점 — /, "")}${per.length ? ` — ${head}` : ""}`;
+}
+
 /** 자동 설계 — 종료 상태·판정 규모·처방·커버리지·게인 반출. 문구·판정은 자동 설계 탭과 **같은
  *  함수**(lib/autodesign.js)에서 온다 — 두 화면이 같은 결과를 다르게 말하지 않게. 운영점 표·원장·
  *  처방 카드 전문은 자동 설계 탭 보고서(openIn)가 연다. */
@@ -327,14 +334,17 @@ function autoDesignBrief(body, meta) {
   const where = failureRoleText(r.failures_by_role);
   const act = actuatorLine(body);
   const excluded = excludedSamplesModel(body);
-  const fitFacts = fitFactsModel(body.fits);
+  const knots = knotModel(body);
+  const fitFacts = fitFactsModel(body.fits, knots);
   const sections = [
     { title: "상태", lines: [statusText(status)] },
     { title: "실행 요약", rows: [
       ["스테이지 · 이터레이션", `${r.stage ?? "—"} · ${Number(r.iterations) || 0}`],
       // 표현 기록이 없는 결과는 표현 선택이 생기기 전 것이다 — 그때는 다항뿐이었다(지어내지 않고 그 사실을)
       ["표현", fitModeLabel(r.fit_mode) ?? "기록 없음 — 표현 선택 이전 결과(다항)"],
-      ["점", `${r.n_points ?? "—"} (앵커 ${pts.anchor ?? "—"} · bp ${pts.breakpoint ?? "—"} · 검증 ${pts.validation ?? "—"})`],
+      ["점", `${r.n_points ?? "—"} (${pointCountText(pts, "—")})`],
+      // 표별 절점(이관 3단계 — 설계점과 따로 정한다). 절점 분리 이전 결과는 기록이 없다고 말한다
+      ["절점", knots ? knotBriefText(knots) : "기록 없음 — 절점 분리 이전 결과(튜닝한 마하가 곧 절점)"],
       ["판정 · 실패", `${judged} · ${failures}` + (where ? ` — 실패 위치 ${where}` : "")],
       ["작동기", act?.value ?? "기록 없음"],
       ["운영점 판정", pointText],

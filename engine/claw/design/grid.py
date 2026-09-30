@@ -31,7 +31,7 @@ PointSet이 격자가 아니라 목록인 이유가 이것이다 (points.py).
 from claw.analysis.envelope import DEFAULT_SCHEDULE_ALTS, row_machs
 from claw.common.contracts import TrimCase
 from claw.design.points import (
-    ROLE_ANCHOR,
+    ROLE_DESIGN,
     OperatingPoint,
     PointSet,
     case_name,
@@ -91,7 +91,7 @@ def coarse_grid(
                     continue
                 points.add(OperatingPoint(
                     case=TrimCase(name=name, mach=float(mach), alt=alt, fuel=fuel),
-                    role=ROLE_ANCHOR,
+                    role=ROLE_DESIGN,
                     origin="coarse",
                 ))
 
@@ -211,7 +211,7 @@ def region_grid(
     points, targets = PointSet(), PointSet()
     for p in sel["points"]:
         pt = OperatingPoint(case=TrimCase(name=p["name"], mach=p["mach"], alt=p["alt"], fuel=p["fuel"]),
-                            role=ROLE_ANCHOR, origin="coarse")
+                            role=ROLE_DESIGN, origin="coarse")
         if p["state"] in PRE_TRIM_CATEGORY:
             pt.verdict = pre_trim_verdict(p["state"], ctx)
             pt.trimmable = False

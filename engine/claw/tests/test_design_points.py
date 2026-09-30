@@ -1,11 +1,10 @@
-"""M17 points 검증 — 역할 래칫, 인접 관계, 서펜타인 순서, 직렬화 왕복."""
+"""M17 points 검증 — 설계점·검증점 두 역할과 편입, 인접 관계, 서펜타인 순서, 직렬화 왕복."""
 
 import pytest
 
 from claw.common.contracts import TrimCase
 from claw.design import (
-    ROLE_ANCHOR,
-    ROLE_BREAKPOINT,
+    ROLE_DESIGN,
     ROLE_VALIDATION,
     OperatingPoint,
     PointSet,
@@ -13,7 +12,7 @@ from claw.design import (
 )
 
 
-def _pt(mach, alt, fuel, role=ROLE_ANCHOR, origin="coarse"):
+def _pt(mach, alt, fuel, role=ROLE_DESIGN, origin="coarse"):
     return OperatingPoint(
         case=TrimCase(name=case_name(mach, alt, fuel), mach=mach, alt=alt, fuel=fuel),
         role=role,
@@ -34,31 +33,61 @@ def test_duplicate_name_rejected():
         ps.add(_pt(0.4, 1000.0, 200.0))
 
 
-def test_promote_ratchet():
-    """validation → breakpoint → anchor 단방향. 역행·제자리는 거부, 이력이 남는다."""
-    ps = PointSet([_pt(0.5, 1000.0, 200.0, role=ROLE_VALIDATION)])
+def test_promote_is_validation_to_design_only():
+    """편입은 검증점 → 설계점 하나뿐이다(05 §2 개정 — 역할 서열 폐지). 설계점을 다시 편입하거나 되돌리는 길은 없다.
+
+    출처는 `promoted:<사유>`로 바뀌고, 편입 전 출처는 이력에 남는다 — 중점 검증점이었다는 사실(coverage 집계)이 사라지지 않게."""
+    ps = PointSet([_pt(0.5, 1000.0, 200.0, role=ROLE_VALIDATION, origin="midpoint:a|b")])
     name = "M0.5_h1000_f200"
-    ps.promote(name, ROLE_BREAKPOINT, reason="gain_interp_valley")
-    ps.promote(name, ROLE_ANCHOR, reason="plant_variation")
+    ps.promote(name, reason="gain_interp_valley")
     pt = ps.get(name)
-    assert pt.role == ROLE_ANCHOR
-    assert [h["to"] for h in pt.history] == [ROLE_BREAKPOINT, ROLE_ANCHOR]
-    with pytest.raises(ValueError, match="래칫"):
-        ps.promote(name, ROLE_VALIDATION, reason="oops")
-    with pytest.raises(ValueError, match="래칫"):
-        ps.promote(name, ROLE_ANCHOR, reason="again")
+    assert pt.role == ROLE_DESIGN and pt.origin == "promoted:gain_interp_valley"
+    assert pt.history == [{"from": ROLE_VALIDATION, "to": ROLE_DESIGN, "reason": "gain_interp_valley",
+                           "origin": "midpoint:a|b"}]
+    with pytest.raises(ValueError, match="편입"):
+        ps.promote(name, reason="again")
+    # 역할 이름 자체도 두 개뿐이다 — 옛 서열 이름으로 새 점을 세우지 못한다
+    for bad in ("anchor", "breakpoint"):
+        with pytest.raises(ValueError, match="미정의 역할"):
+            _pt(0.6, 1000.0, 200.0, role=bad)
+
+
+def test_legacy_roles_load_as_design_points():
+    """옛 저장본의 anchor·breakpoint는 설계점으로 읽는다 — 이력에 `legacy:role_hierarchy_removed`를 남긴다.
+
+    둘 다 게인을 정하던 점(앵커는 튜닝, breakpoint는 승격 게인 주입)이라 새 모델에서는 튜닝하는 설계점이다."""
+    d = {"points": [
+        {"name": "M0.3_h1000_f200", "mach": 0.3, "alt": 1000.0, "fuel": 200.0, "role": "anchor", "origin": "coarse"},
+        {"name": "M0.4_h1000_f200", "mach": 0.4, "alt": 1000.0, "fuel": 200.0, "role": "breakpoint",
+         "origin": "midpoint:x|y", "history": [{"from": "validation", "to": "breakpoint", "reason": "valley"}]},
+        {"name": "M0.5_h1000_f200", "mach": 0.5, "alt": 1000.0, "fuel": 200.0, "role": "validation",
+         "origin": "midpoint:x|y"},
+    ]}
+    ps = PointSet.from_dict(d)
+    assert [p.role for p in ps] == [ROLE_DESIGN, ROLE_DESIGN, ROLE_VALIDATION]
+    bp = ps.get("M0.4_h1000_f200")
+    assert bp.history[-1] == {"from": "breakpoint", "to": ROLE_DESIGN, "reason": "legacy:role_hierarchy_removed"}
+    assert bp.history[0]["to"] == "breakpoint" and bp.origin == "midpoint:x|y"
+    assert ps.get("M0.5_h1000_f200").history == []
+    # 옮긴 뒤의 저장본은 새 역할로 왕복한다 — 두 번 옮기지 않는다
+    again = PointSet.from_dict(ps.to_dict())
+    assert again.to_dict() == ps.to_dict()
 
 
 def test_role_queries():
     ps = PointSet([
-        _pt(0.3, 1000.0, 200.0, role=ROLE_ANCHOR),
-        _pt(0.4, 1000.0, 200.0, role=ROLE_BREAKPOINT),
-        _pt(0.5, 1000.0, 200.0, role=ROLE_VALIDATION),
+        _pt(0.3, 1000.0, 200.0, role=ROLE_DESIGN),
+        _pt(0.4, 1000.0, 200.0, role=ROLE_VALIDATION),
+        _pt(0.5, 1000.0, 200.0, role=ROLE_DESIGN),
     ])
-    assert [p.case.mach for p in ps.by_role(ROLE_ANCHOR)] == [0.3]
-    # anchor는 breakpoint·validation 역할을 겸한다 (서열 의미)
-    assert [p.case.mach for p in ps.at_least(ROLE_BREAKPOINT)] == [0.3, 0.4]
-    assert len(ps.at_least(ROLE_VALIDATION)) == 3
+    assert [p.case.mach for p in ps.by_role(ROLE_DESIGN)] == [0.3, 0.5]
+    assert [p.case.mach for p in ps.by_role(ROLE_VALIDATION)] == [0.4]
+    # 역할을 주면 그 역할끼리만 이웃이다(설계점끼리의 인접 — 보강·플랜트 거리), 안 주면 전 점
+    assert ps.adjacent_pairs(ROLE_DESIGN) == [("M0.3_h1000_f200", "M0.5_h1000_f200", "mach")]
+    assert len(ps.adjacent_pairs()) == 2
+    assert ps.flanking("M0.4_h1000_f200", ROLE_DESIGN) == ("M0.3_h1000_f200", "M0.5_h1000_f200", "mach")
+    assert [c.mach for c in ps.serpentine(ROLE_DESIGN)] == [0.3, 0.5]
+    assert len(ps.serpentine()) == 3
 
 
 def test_adjacent_pairs_axis_aligned():
@@ -95,16 +124,16 @@ def test_serpentine_adjacency():
 
 def test_roundtrip_serialization():
     ps = PointSet([
-        _pt(0.3, 1000.0, 200.0, role=ROLE_ANCHOR),
+        _pt(0.3, 1000.0, 200.0, role=ROLE_DESIGN),
         _pt(0.5, 1000.0, 200.0, role=ROLE_VALIDATION, origin="midpoint"),
     ])
     ps.get("M0.5_h1000_f200").trimmable = False
-    ps.promote("M0.5_h1000_f200", ROLE_BREAKPOINT, reason="valley")
+    ps.promote("M0.5_h1000_f200", reason="valley")
     d = ps.to_dict()
     ps2 = PointSet.from_dict(d)
     assert ps2.to_dict() == d
     assert ps2.get("M0.5_h1000_f200").trimmable is False
-    assert ps2.get("M0.5_h1000_f200").role == ROLE_BREAKPOINT
+    assert ps2.get("M0.5_h1000_f200").role == ROLE_DESIGN
 
 
 def test_case_name_precision_survives_refine_midpoints():
@@ -201,7 +230,7 @@ def test_pre_trim_states_match_the_verdict_and_designable_leaves_them_out():
 
     ps = PointSet()
     for m in (0.3, 0.4, 0.5):
-        ps.add(OperatingPoint(case=TrimCase(name=case_name(m, 0.0, 0.0), mach=m, alt=0.0, fuel=0.0), role=ROLE_ANCHOR))
+        ps.add(OperatingPoint(case=TrimCase(name=case_name(m, 0.0, 0.0), mach=m, alt=0.0, fuel=0.0), role=ROLE_DESIGN))
     gap = ps.get(case_name(0.5, 0.0, 0.0))
     gap.verdict, gap.trimmable = pre_trim_verdict("model_gap", _Ctx()), False
     view = ps.designable()

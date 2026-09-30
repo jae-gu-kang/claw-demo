@@ -134,6 +134,10 @@ def gain_slot_catalog(request: Request,
         "confirmed": (None if profile.doc["law"]["gain_tables"] is None else {
             "slots": sorted(profile.doc["law"]["gain_tables"]["tables"]),
             "stale": profile.gain_tables_stale,
+            # 표별 절점 집합(provenance.knots — 자동 설계 반영이 적는다, 05 §11.13 이관 3단계) — 게인 탭의 공통/분리 집합
+            # 배지 근거. 옛 반영(절점 분리 이전)이나 손으로 적은 표는 None
+            "knots": ((profile.doc["law"]["gain_tables"].get("provenance") or {}).get("knots")
+                      if isinstance(profile.doc["law"]["gain_tables"].get("provenance"), dict) else None),
         }),
         "profile": profile_echo(profile),
     }

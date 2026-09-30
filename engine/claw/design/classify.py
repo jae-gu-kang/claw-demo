@@ -15,19 +15,22 @@
    지연·작동기 대역폭을 하나씩 풀어 재튜닝하고 통과하면 이분으로 **최소 완화량**
    까지 실측)를 동봉한다: 자동 적용은 안 해도 "무엇을 얼마로 바꾸면 통과하는가"
    까지는 기계가 답해야 사람이 판단할 수 있다.
-2. plant_variation — v를 낀 인접 앵커 간 model_distance.d_total > tol_plant
-   (refine tol과 **같은 상수** — 기준 이원화 금지) → 트림 격자가 플랜트 변화를
-   못 담는 것. action=promote v→anchor (검증 시 트림·선형화는 이미 완료 — 역할
-   승격 후 TUNE부터 재실행). valley도 동시 성립하면 anchor가 상위 집합 처방이라
-   이쪽을 택하고 note로 병기.
+2. plant_variation — 검증점 v를 낀 인접 설계점 간 model_distance.d_total > tol_plant
+   (refine tol과 **같은 상수** — 기준 이원화 금지) → 설계점 격자가 플랜트 변화를
+   못 담는 것. action=promote v→설계점 (검증 시 트림·선형화는 이미 완료 — 편입
+   후 REFINE·TUNE부터 재실행). valley도 동시 성립하면 note로 병기(편입한 점이 튜닝돼
+   표본이 되고, 그래도 보간이 어긋나면 다음 이터에 절점 추가로 간다).
 3. gain_interp_valley — 최적 게인은 통과 ∧ 보간 게인과의 괴리 > tol_gain ∧ 이웃
-   breakpoint 자체는 통과 → 보간이 범인. action=promote v→breakpoint (최적
-   게인을 그 점의 값으로) + FIT 국소 재실행. 단 v가 **앵커**면 얘기가 다르다 → 3′.
-3′. fit_residual — 앵커에서의 보간 괴리. TUNE이 매 이터레이션 그 점의 자유 게인
-   최적을 샘플에 넣으므로 격자가 성긴 게 아니라 적합이 그 점을 못 지나간 것이다.
-   action=tighten_fit (허용치를 조이고 구간 수를 늘린다). 종전에는 이 경우도
-   refit_at으로 냈는데, 앵커의 최적 게인을 샘플에 "고정"하는 것은 이미 그 값이
-   샘플이라 **구조적으로 무효**였다 — applied로 기록되고 이터 예산만 태웠다.
+   설계점은 통과 → 보간이 범인. action=**add_knot** {point, mach, slots, promote: True}
+   — 그 자리의 표(slots)에 v의 마하 절점을 더하고 v를 설계점으로 편입해 튜닝값이 그 절점의
+   표본이 되게 한다(05 §11.5 — 절점은 표별, 이름 댄 표만 떼어 독립 집합으로). 종전에는
+   breakpoint 승격 + 최적 게인 주입이었다 — 승격한 점마다 절점이 늘던 결합(이관 3단계가 뗐다).
+3′. fit_residual — **설계점**에서의 보간 괴리. 그 점의 튜닝값은 이미 표본인데 표가 그 값을
+   못 지나간다 = 절점이 모자라다. 표 모드는 action=add_knot {promote: False}(그 점 마하에
+   절점), 다항 모드는 tighten_fit(허용치를 조이고 구간 수를 늘린다 — 다항에는 절점 집합이
+   없다). 종전 표 모드의 tighten_fit은 조일 적합이 없어 건너뛰기만 했다.
+0′. gain_sign_flip — 절점 추가(add_knot)로 그 점의 튜닝값이 절점 값이 되게 한다(검증점이면 편입).
+   종전 refit_at(게인 주입)은 옛 세션의 대기 처방으로만 남는다.
 4. simple_deficit — 나머지. 미달 폭이 히스테리시스 밴드 내면 좁은 골 가능성 —
    action=add_validation (v 좌우 중점 2개). 지속·확대되면 다음 이터레이션에서
    1~3으로 자연 재분류된다.
@@ -38,7 +41,7 @@ import json
 import math
 
 from claw.design.linmodels import model_distance
-from claw.design.points import ROLE_ANCHOR, ROLE_BREAKPOINT, ROLE_RANK
+from claw.design.points import ROLE_DESIGN, ROLE_VALIDATION
 from claw.design.schedmap import scheduled_gains
 from claw.design.tune import TuneTargets, tune_point
 
@@ -378,6 +381,13 @@ def _first_finite(*values):
     return None
 
 
+def _add_knot_action(points, trims, v_name, slots, note) -> dict:
+    """절점 추가 처방 — {type add_knot, point, mach, slots, promote, note}. 검증점이면 편입(promote)까지 한다: 튜닝값이
+    그 절점의 표본이 돼야 절점이 값을 갖는다(표본 없는 절점은 적합이 빼 버린다 — fit.table_on_knots)."""
+    return {"type": "add_knot", "point": v_name, "mach": float(trims[v_name].case.mach), "slots": list(slots),
+            "promote": points.get(v_name).role == ROLE_VALIDATION, "note": note}
+
+
 def classify_margin_deficit(
     aircraft, v_name, loop_name, points, lms, trims, tables, design, margin_cases, *,
     criteria, design_base=None, targets=None, tol_plant=0.25, tol_gain=0.10,
@@ -387,9 +397,12 @@ def classify_margin_deficit(
     # 넓으면 지속 미달이 "좁은 골"로 눌러앉는다. 수치 확정은 폐쇄망 몫(04 §10)
     hysteresis_pm=5.0, hysteresis_gm=1.0, hysteresis_zeta=0.10,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
-    rate_filters=None, tune_cache=None,
+    rate_filters=None, tune_cache=None, fit_mode="table",
 ) -> dict:
     """실패 (검증점, 자리) 하나의 원인 분류 — {"verdict", "action", "evidence"}.
+
+    fit_mode: 스케줄 표현(AutoDesignConfig.fit_mode) — 설계점의 보간 괴리 처방이 갈린다(표 → add_knot, 다항 →
+    tighten_fit). 절점 추가 처방의 slots는 그 자리의 게인 슬롯(LOOP_SLOTS)이다.
 
     tune_cache: 분류 한 판의 (점, 조성) 튜닝 캐시(_tune_cached) — classify_failures가 만들어
     넘긴다. 없으면(직접 호출) 매번 튜닝한다.
@@ -449,13 +462,12 @@ def classify_margin_deficit(
             "tune_failed": unusable or None,
         }
         if not unusable:
+            # 그 점의 튜닝값이 절점 값이 되게 한다 — 검증점이면 편입해 튜닝 표본을 만들고, 그 마하에 절점을 둔다
+            # (종전 refit_at은 게인을 표본에 주입했다 — 주입 경로는 옛 세션의 대기 처방으로만 남는다)
             return {
                 "verdict": "gain_sign_flip",
-                "action": {
-                    "type": "refit_at", "point": v_name,
-                    "gains": {s: tune_out["gains"][s] for s in slots if s in tune_out["gains"]},
-                    "note": "부호를 지키도록 그 점을 고정해 재적합 — 승격으로는 해결되지 않는다",
-                },
+                "action": _add_knot_action(points, trims, v_name, slots,
+                                           "부호를 지키도록 그 점 마하에 절점을 두고 그 점의 튜닝값을 절점 표본으로 쓴다"),
                 "evidence": evidence,
             }
 
@@ -525,8 +537,10 @@ def classify_margin_deficit(
     max_gap = max(gaps.values(), default=0.0)
     evidence["interp_gap"] = {"per_slot": gaps, "max": max_gap, "tol": tol_gain}
 
-    # 2) plant 급변 — v를 낀 인접 앵커의 플랜트 거리
-    flank_a = points.flanking(v_name, ROLE_ANCHOR)
+    role = points.get(v_name).role
+    # 2) plant 급변 — 검증점 v를 낀 인접 설계점의 플랜트 거리. 설계점 v는 이미 트림·튜닝하는 점이라 편입할 것이 없다 —
+    #    거기서의 괴리는 절점 문제로 3′에서 다룬다
+    flank_a = points.flanking(v_name, ROLE_DESIGN) if role == ROLE_VALIDATION else None
     if flank_a is not None:
         lo, hi, axis = flank_a
         tr_lo, tr_hi = trims.get(lo), trims.get(hi)
@@ -539,16 +553,17 @@ def classify_margin_deficit(
             if d["d_total"] > tol_plant:
                 note = None
                 if max_gap > tol_gain:
-                    note = "valley도 동시 성립 — anchor 승격이 상위 집합 처방이라 이쪽을 택한다"
+                    note = ("valley도 동시 성립 — 편입한 점이 튜닝돼 표본이 된다. 그래도 보간이 어긋나면 다음 이터에"
+                            " 절점 추가로 간다")
                 return {
                     "verdict": "plant_variation",
-                    "action": {"type": "promote", "to": ROLE_ANCHOR, "point": v_name,
+                    "action": {"type": "promote", "to": ROLE_DESIGN, "point": v_name,
                                "note": note},
                     "evidence": evidence,
                 }
 
-    # 3) 보간 valley — 최적은 통과 + 괴리 큼 + 이웃 breakpoint는 통과
-    flank_b = points.flanking(v_name, ROLE_BREAKPOINT)
+    # 3) 보간 valley — 최적은 통과 + 괴리 큼 + 이웃 설계점은 통과
+    flank_b = points.flanking(v_name, ROLE_DESIGN)
     if max_gap > tol_gain and flank_b is not None and not unusable:
         lo, hi, axis = flank_b
         neighbor_ok = all(
@@ -559,36 +574,32 @@ def classify_margin_deficit(
         evidence["neighbors"] = {"pair": (lo, hi), "axis": axis, "pass": neighbor_ok}
         if neighbor_ok:
             opt_gains = {s: tune_out["gains"][s] for s in slots if s in tune_out["gains"]}
-            role = points.get(v_name).role
-            # **앵커에서의 괴리는 적합 실패다.** TUNE이 매 이터레이션 이 점의 자유 게인
-            # 최적을 샘플에 넣는데도 보간이 그 값과 어긋난다면, 격자가 성긴 게 아니라
-            # 적합 곡선이 이 점을 못 지나간 것이다. "최적 게인을 샘플에 고정"하는 처방은
-            # **구조적으로 무효**다 — 이미 그 값이 샘플이고, 병합에서 튜닝 샘플이 이긴다
-            # (orchestrator._stage_fit setdefault). 그런데도 applied로 기록되어 이터
-            # 예산만 태웠다. 적합을 조이는 것이 이 자리의 유일한 실효 처방이다
-            if role == ROLE_ANCHOR:
+            evidence["optimum"] = opt_gains  # 편입 뒤 튜닝이 낼 값의 예고 — 주입하지 않는다
+            # **설계점에서의 괴리는 절점 부족이다.** 그 점의 튜닝값은 이미 표본인데 표가 그 값을 못 지나간다 —
+            # 표 모드는 그 마하에 절점을 더하고(표본은 그대로), 다항 모드는 적합을 조인다(절점 집합이 없다).
+            # 종전 앵커 처방(tighten_fit)은 표 모드에서 조일 적합이 없어 건너뛰기만 했다
+            if role == ROLE_DESIGN:
+                if fit_mode == "poly":
+                    return {
+                        "verdict": "fit_residual",
+                        "action": {
+                            "type": "tighten_fit", "point": v_name, "slots": list(slots),
+                            "note": "설계점의 보간 괴리 — 이 점의 샘플은 이미 최적이다."
+                                    " 적합 허용치를 조이고 구간 수를 늘려 곡선이 이 점을 지나게 한다",
+                        },
+                        "evidence": evidence,
+                    }
                 return {
                     "verdict": "fit_residual",
-                    "action": {
-                        "type": "tighten_fit", "point": v_name, "slots": list(slots),
-                        "note": "앵커의 보간 괴리 — 이 점의 샘플은 이미 최적이다."
-                                " 적합 허용치를 조이고 구간 수를 늘려 곡선이 이 점을 지나게 한다",
-                    },
-                    "evidence": evidence,
-                }
-            # breakpoint는 TUNE이 안 도는 자리라 최적 게인 주입이 실제로 값을 바꾼다.
-            # 역할은 단방향 래칫이라 승격을 요청하면 터진다 (세션 전량 소실)
-            if ROLE_RANK[role] >= ROLE_RANK[ROLE_BREAKPOINT]:
-                return {
-                    "verdict": "gain_interp_valley",
-                    "action": {"type": "refit_at", "point": v_name, "gains": opt_gains,
-                               "note": "이미 breakpoint — 승격 대신 그 점의 최적 게인 고정"},
+                    "action": _add_knot_action(points, trims, v_name, slots,
+                                               "설계점의 보간 괴리 — 튜닝값은 이미 표본이다. 이 마하에 절점을 더해"
+                                               " 표가 이 점을 지나게 한다"),
                     "evidence": evidence,
                 }
             return {
                 "verdict": "gain_interp_valley",
-                "action": {"type": "promote", "to": ROLE_BREAKPOINT, "point": v_name,
-                           "gains": opt_gains},
+                "action": _add_knot_action(points, trims, v_name, slots,
+                                           "보간 골 — 이 점을 설계점으로 편입해 튜닝하고 그 마하에 절점을 더한다"),
                 "evidence": evidence,
             }
 
@@ -613,13 +624,13 @@ def classify_failures(
     aircraft, points, lms, trims, tables, design, margin_out, *,
     criteria, design_base=None, targets=None, tol_plant=0.25, tol_gain=0.10,
     actuator_wn=30.0, actuator_zeta=0.7, delay_s=0.035, pade_order=2,
-    rate_filters=None, on_progress=None,
+    rate_filters=None, on_progress=None, fit_mode="table",
 ) -> list:
     """마진맵 결과의 fail 목록 전체 분류 — 처방 카드 목록 (심각 순, id 부여).
 
-    같은 점의 여러 자리 실패는 각각 분류하되, 같은 점에 상위 승격이 이미 나왔으면
-    하위 처방은 중복이라 supersede로 표시한다 (같은 점을 두 번 승격할 수 없다 —
-    points.promote 래칫).
+    같은 점의 여러 자리 실패는 각각 분류하되, 같은 점에 편입(plant_variation promote)이 이미 나왔으면 뒤의 편입은
+    중복이라 supersede로 표시한다 (같은 점을 두 번 편입할 수 없다 — points.promote). 절점 추가(add_knot)는 자리마다
+    표가 달라 supersede하지 않는다 — 편입은 반영 쪽이 한 번만 한다(orchestrator.apply_actions).
 
     design_base(손설계 정본)를 함께 넘긴다 — 이유는 classify_margin_deficit 참조.
 
@@ -634,12 +645,11 @@ def classify_failures(
         tol_plant=tol_plant, tol_gain=tol_gain,
         actuator_wn=actuator_wn, actuator_zeta=actuator_zeta,
         rate_filters=rate_filters,
-        delay_s=delay_s, pade_order=pade_order,
+        delay_s=delay_s, pade_order=pade_order, fit_mode=fit_mode,
     )
     kw["tune_cache"] = {}  # 이 판에서만 사는 (점, 조성) 튜닝 캐시 — _tune_cached
     actions = []
-    promoted: dict = {}  # point → 최고 승격 역할
-    rank = {ROLE_BREAKPOINT: 1, ROLE_ANCHOR: 2}
+    promoted: set = set()  # 편입 처방이 이미 나온 점
     failures = margin_out["failures"]
     for i, f in enumerate(failures):
         out = classify_margin_deficit(
@@ -654,11 +664,10 @@ def classify_failures(
             "severity": f.get("severity"),
         }
         if act["type"] == "promote":
-            prev = promoted.get(f["case"])
-            if prev is not None and rank[prev] >= rank[act["to"]]:
-                item["superseded_by"] = f"{f['case']}→{prev}"
+            if f["case"] in promoted:
+                item["superseded_by"] = f"{f['case']}→{ROLE_DESIGN}"
             else:
-                promoted[f["case"]] = act["to"]
+                promoted.add(f["case"])
         actions.append(item)
         if on_progress is not None and on_progress(
                 i + 1, len(failures), f"classify {f['case']} {f['loop']} → {out['verdict']}"):

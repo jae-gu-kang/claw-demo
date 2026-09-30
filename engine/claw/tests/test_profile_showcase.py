@@ -231,11 +231,18 @@ def test_기록된_설계_설정으로_다시_설계하면_출하한_문서_그�
     # 모든 점에서 튜닝이 성립했다 — 적합에서 뺀 표본(분할점 값이 이웃 보간인 자리)이 없다. 생성기 요약이 그것을 낸다
     rep = summary["stages"]["design"]["report"]
     assert rep["fit_mode"] == "table" and rep["excluded_samples"] == [] and rep["exclusion_withheld"] == []
-    # 기록된 점 예산 안에서 트림 격자 세분화가 허용치까지 끝나고 보간 구간마다 검증점이 섰다 — 예산은 닿지 않는 상한이다
-    # (해면 한 줄 81점 < 90. 두 설계 고도 0·3000 m일 때는 예산 90이면 세분화가 허용치 전에 끊기고 43구간이 검증점 없이
-    # 남아 150을 적었었다). 트림 미수렴 점은 최대 수평 속도(전 스로틀) 위라 남는다(문서 description)
+    # 기록된 점 예산 안에서 트림 격자 세분화가 허용치까지 끝나고 절점 구간마다 검증이 섰다 — 예산은 닿지 않는 상한이다
+    # (200 m 한 줄 43점 < 90 — 이관 3단계: 설계점 37 · 검증점 6. 절점 구간 6곳 중 5곳은 중점에 세분화가 둔 설계점이 있어
+    # 검증점을 ¼ 자리로 옮겼다 — 설계점은 적합 표본이라 그 판정은 보간 검증이 아니다(리뷰 정정 전 초안은 그 5곳을 검증으로
+    # 세어 38점 · 검증점 1이었다). 종전 표본 마하마다 분할점일 때 81점. 두 설계 고도 0·3000 m일 때는 예산 90이면 세분화가
+    # 허용치 전에 끊기고 43구간이 검증점 없이 남아 150을 적었었다). 트림 미수렴 점은 최대 수평 속도(전 스로틀) 위라 남는다(문서
+    # description)
     cov = rep["coverage"]
-    assert cov["validation_missing"] == 0, cov
+    assert cov["validation_missing"] == 0 and cov["validation_unplaceable"] == 0, cov
+    assert rep["points"] == {"design": 37, "validation": 6}, rep["points"]
+    assert cov["validation_points"] == 6 and cov["midpoints_at_design_points"] == 5, cov
+    # 표는 공통 마하 절점을 공유한다 — 설계점 수와 무관하게 자리마다 절점 7점(M0.24 절점은 설계점 표본이 없어 뺐다)
+    assert rep["knots"]["shared"] is True and set(rep["knots"]["tables"].values()) == {7}, rep["knots"]
     assert cov["refine_remaining"] is not None and cov["refine_remaining"] <= cov["refine_tol"], cov
     assert cov["refine_aborted"] is None and rep["n_points"] < summary["design_config"]["budget_points"], (cov, rep["n_points"])
     assert rep["iterations"] < summary["design_config"]["budget_iters"], rep["iterations"]  # 이터 예산도 닿지 않는 상한
@@ -284,11 +291,12 @@ def test_확정_게인_표는_한_설계_고도_줄의_스케줄이다(doc):
 
 
 def test_확정_게인_표가_운용_범위_전부에서_자동_설계_검증을_넘는다(doc, base, eoir):
-    """설계 격자는 해면 한 줄이지만 기체는 운용 고도 전부(0~alt_max)와 연료 전부를 난다 — 같은 판정기(자동 설계 검증:
+    """설계 격자는 200 m 한 줄이지만 기체는 운용 고도 전부(0~alt_max)와 연료 전부를 난다 — 같은 판정기(자동 설계 검증:
     DesignSession의 점·트림·선형 모델 위에서 reverify_resampled)로 **출하 표 그대로** 운용 범위 격자를 다시 판정해 실패가
     없다. 격자: 운용 고도를 1000 m 간격 + 천장, 연료 fuel_max × ENVELOPE_FUEL_FRACS(미션 연료 40 kg 포함), 마하 7 + 세분화 +
     검증점(점 상한 200 — 서버 MAX_POINTS). EO/IR형은 규칙 스케줄(설계 게인 × q̄ 역비)을 같은 격자로 본다. 실측: 기본형 판정
-    865 · EO/IR형 805, 실패 0 (각 약 25 s — v1.66 요구영역 재설계 표).
+    880 · EO/IR형 830, 실패 0 (각 약 25 s — v1.70 절점 위 표. 이 세션의 검증점이 절점 구간 중점으로 바뀌어 판정 수도 옮았다.
+    v1.66 요구영역 재설계 표에서 865 · 805).
 
     이 세션은 점·트림·선형 모델을 얻는 수레다 — 세션 **자신의** 설계(여러 고도를 마하 1축 표 하나로 적합)는 롤 속도 루프
     마진 가드(AS94900 끊는 자리 · 목표 GM 8 dB·PM 50° — tune._cap_by_margins) 뒤로 한 마하에서 해면과 고도를 함께 못 맞춰 budget_exhausted로
@@ -783,8 +791,8 @@ def test_확정_게인_표에_좁은_마하_띠의_급변이_없다(doc, name):
     표본을 빼기 전에는 저속·고받음각 점의 roll.k_rate가 0으로 박혀(꺼진 롤 댐퍼) 띠 비가 무한대였다. ② 1축 표의 톱니 — 설계
     고도를 0·3000 m 둘로 주던 때 두 줄의 점이 한 마하 축에 번갈아 놓여 같은 마하 근처에서 고도별 값이 섞였다(3000 m 값이
     q̄가 낮은 만큼 크다 — roll.ki 띠 비 2.63 @M0.1977로 상한 위였는데 0.0005 간격 표본 검사가 2.49로 읽어 통과했다). 설계
-    격자를 해면 한 줄로 두어(test_확정_게인_표는_한_설계_고도_줄의_스케줄이다) 출하 표의 띠 비 최대는 roll.ki 1.29(M0.094 —
-    저속 끝)다. ③ 튜닝 규칙이 갈리는 경계 — 한 고도 계열 안에서도 값이 뛴다(BAND_KNOWN_DEFECTS). 요 댐퍼 2차 패스가 목표에
+    격자를 한 줄로 두어(test_확정_게인_표는_한_설계_고도_줄의_스케줄이다) 출하 표의 띠 비 최대는 roll.ki 1.24(M0.21 — v1.70
+    절점 7점 표. 해면 한 줄 표에서 1.29 @M0.094)다. ③ 튜닝 규칙이 갈리는 경계 — 한 고도 계열 안에서도 값이 뛴다(BAND_KNOWN_DEFECTS). 요 댐퍼 2차 패스가 목표에
     못 닿은 점에만 돌던 때 해면 M0.1263 0.93 → M0.1275 2.67로 뛰었다(띠 비 3.00 — 닿은 점에도 돌게 고친 뒤 1.23, 요 목표
     0.6에서 1.26). 다항 적합(차수 4 · 구간 4)은 가까운 매듭 사이가 출렁여 roll.kp가 M0.113–0.118(발진·플레어 속도)에서
     0.5 ↔ 8.8을 오갔다 — 이 역시 여기서 걸린다."""

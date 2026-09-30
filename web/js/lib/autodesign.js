@@ -40,13 +40,16 @@ function num(x, digits = 3) {
 
 export const VERDICT_LABEL = {
   simple_deficit: "단순 마진 부족 — 검증점 추가",
-  plant_variation: "플랜트 급변 — 트림/선형화점 승격",
-  gain_interp_valley: "게인 보간 valley — breakpoint 승격 + 재튜닝",
+  plant_variation: "플랜트 급변 — 설계점 승격(그 점을 트림·튜닝)",
+  // 절점 분리(05 §11.13 이관 3단계) — 보간 괴리는 점을 올리는 것이 아니라 이름 댄 표에 절점을 더한다(add_knot).
+  // 분리는 표 단위다(그 표 전체가 새 집합으로) — 구간 단위로 읽히는 말을 쓰지 않는다
+  gain_interp_valley: "게인 보간 valley — 해당 표에 절점 추가 (공통 집합을 쓰던 표면 그 표를 분리 집합으로)",
   structural_limit: "구조 한계 — 상위 설계 변경 검토 (보고 전용)",
-  gain_sign_flip: "게인 부호 뒤집힘 — 부호 보존 재적합 (승격으로는 안 풀린다)",
+  // v1.70부터 절점 추가(검증점이면 설계점 편입 동반) — 옛 결과의 refit_at 카드는 actionText가 「옛 결과」로 읽는다
+  gain_sign_flip: "게인 부호 뒤집힘 — 그 마하에 절점 추가 (검증점이면 설계점 편입)",
   // 엔진 classify VERDICTS의 여섯째 — 빠져 있어 카드·원장에 코드("fit_residual")가 그대로 떴다.
-  // 조일 적합은 다항에만 있다: 표 모드에서는 엔진이 사유를 달아 건너뛴다(orchestrator apply_actions)
-  fit_residual: "앵커 적합 괴리 — 적합 허용치 조이기 (다항 전용 — 표 모드에서는 건너뛴다)",
+  // 표 모드는 절점 추가(add_knot — 이관 3단계), 조일 적합(tighten_fit)은 다항에만 있다
+  fit_residual: "설계점 적합 괴리 — 표: 절점 추가 · 다항: 적합 허용치 조이기",
 };
 
 const _STATUS_RANK = { ok: 0, na: 1, warn: 2, fail: 3 };
@@ -151,7 +154,222 @@ export function buildConfig(form) {
     if (!raw) continue;
     out[to] = parseNumberList(raw);
   }
+  const knots = knotConfig(form);
+  if (knots) out.knots = knots;
   return out;
+}
+
+/** 절점 설정 칸 → config.knots 부분 덮어쓰기(서버가 기본값 위에 겹친다) — 채운 칸만, 없으면 null.
+ *  규칙(knotRule)은 열거값이라 그대로, 절점 수·표당 상한은 정수, 좌표는 공백·쉼표 목록. 허용 목록·순증가·하한은
+ *  서버(_check_knots)가 본다 — 여기서 재기술하지 않는다. */
+function knotConfig(form) {
+  const out = {};
+  if (form.knotRule) out.rule = form.knotRule;
+  for (const [from, to] of [["knotN", "n"], ["knotMax", "max_per_table"]]) {
+    const raw = String(form[from] ?? "").trim();
+    if (!raw) continue;
+    const v = Number(raw);
+    if (!Number.isFinite(v)) throw new Error(`knots.${to}: 수치가 아님 — ${raw}`);
+    out[to] = v;
+  }
+  const coords = String(form.knotCoordsText ?? "").trim();
+  if (coords) out.coords = parseNumberList(coords);
+  return Object.keys(out).length ? out : null;
+}
+
+// ── 점 역할 · 절점 (05 §11.13 이관 3단계 — 설계점과 절점 분리) ────────────────
+
+/** 점 역할 이름 — 설계점(튜닝하는 점)과 검증점(절점 사이를 재는 점) 둘. anchor·breakpoint는 옛 결과(역할 위계
+ *  시절)의 이름이라 그대로 읽히게 남긴다 — 엔진은 옛 세션을 되읽을 때 둘 다 설계점으로 옮긴다. */
+export const ROLE_LABEL = {
+  design: "설계점(튜닝)",
+  validation: "검증점",
+  anchor: "앵커(옛 결과 — 설계점)",
+  breakpoint: "breakpoint(옛 결과 — 설계점)",
+};
+
+/** 옛 역할(anchor·breakpoint)을 설계점으로 묶은 역할 — 개수 셈·색 구분용. 모르는 역할은 그대로. */
+export function roleGroup(role) {
+  return role === "anchor" || role === "breakpoint" ? "design" : role;
+}
+
+/** report.points → "설계점 a · 검증점 b". 옛 결과(design 칸 없음, anchor·breakpoint 칸)는 옛 이름 그대로 —
+ *  옛 결과를 새 이름으로 합쳐 말하면 그 실행이 절점을 따로 정한 것처럼 읽힌다. missing은 없는 칸의 표기. */
+export function pointCountText(pts, missing = "?") {
+  const p = pts ?? {};
+  const v = (k) => p[k] ?? missing;
+  if (p.design == null && (p.anchor != null || p.breakpoint != null)) {
+    return `앵커 ${v("anchor")} · bp ${v("breakpoint")} · 검증 ${v("validation")}`;
+  }
+  return `설계점 ${v("design")} · 검증점 ${v("validation")}`;
+}
+
+/** 마하 좌표 표기 — M0.15 (유효 3자리). */
+export function machText(m) {
+  const v = numeric(m);
+  return v == null ? "M?" : `M${Number(v.toPrecision(3))}`;
+}
+
+const KNOT_SOURCE_TEXT = {
+  base_axis: "요구영역 기본 격자",
+  user: "사용자 좌표",
+  samples: "튜닝한 마하 전부(옛 방식)",
+};
+
+/** 절점 집합의 출처 코드(엔진 KnotSet.source) → 한국어. uniform:<n> · split:<부모>는 꼬리를 읽는다. 모르는 코드는
+ *  그대로(삼키면 엔진에 규칙이 늘어도 화면이 조용하다). */
+export function knotSourceText(source) {
+  if (source == null || source === "") return "출처 기록 없음";
+  const s = String(source);
+  if (KNOT_SOURCE_TEXT[s]) return KNOT_SOURCE_TEXT[s];
+  if (s.startsWith("uniform:")) return `설계 마하 구간 ${s.slice(8)}등분`;
+  if (s.startsWith("split:")) return `${knotSetName(s.slice(6))}에서 분리`;
+  return s;
+}
+
+/** 절점 집합 이름 — 엔진 기본 공유 집합(knots.COMMON "common")은 「공통」, 떼어 낸 집합은 그 표 이름들(a+b). */
+export function knotSetName(name) {
+  return name === "common" ? "공통" : name == null ? "—" : String(name);
+}
+
+/** 절점 집합 이력 한 항목(엔진 KnotSet.history — op init·split·add) → 한 줄. 모르는 모양은 JSON 그대로. */
+export function knotHistoryText(h) {
+  if (!h || typeof h !== "object") return String(h ?? "");
+  const iter = h.iter ?? h.iter_n;
+  if (h.op === "init") return `시작 — 규칙 ${h.rule ?? "?"} · ${h.n ?? "?"}절점`;
+  if (h.op === "split") return `${knotSetName(h.from)}에서 분리${iter != null ? ` · 이터 ${iter}` : ""}`;
+  const bits = [];
+  if (h.mach != null) bits.push(`${machText(h.mach)} 추가`);
+  if (h.point) bits.push(`점 ${h.point}`);
+  if (iter != null) bits.push(`이터 ${iter}`);
+  if (h.reason) bits.push(`사유 ${h.reason}`);
+  return bits.length ? bits.join(" · ") : JSON.stringify(h);
+}
+
+/** 뺀 절점 → {edge: 끝 바깥(범위 밖 — 끝값 clip), dropped: 안쪽(표본이 멀거나 없어 뺌 — 이웃 절점 직선으로 메움)}.
+ *  엔진 unsupported_detail[].edge가 있으면 그대로, 없으면(사유 기록 이전) 남은 절점 범위로 가른다. */
+function splitUnsupported(unsupported, detail, coords) {
+  const byKnot = new Map((Array.isArray(detail) ? detail : [])
+    .filter((d) => d && typeof d.edge === "boolean").map((d) => [Number(d.knot), d.edge]));
+  const drop = new Set(unsupported.map(Number));
+  const kept = (coords ?? []).map(Number).filter((c) => Number.isFinite(c) && !drop.has(c));
+  const lo = kept.length ? Math.min(...kept) : null;
+  const hi = kept.length ? Math.max(...kept) : null;
+  const edge = [];
+  const dropped = [];
+  for (const c of unsupported) {
+    const k = Number(c);
+    const isEdge = byKnot.has(k) ? byKnot.get(k) : lo == null ? true : k < lo || k > hi;
+    (isEdge ? edge : dropped).push(c);
+  }
+  return { edge, dropped };
+}
+
+/** 표별 절점 모델 — gain_export.knots(엔진 knot_record: {sets, tables})·report.knots({tables:{자리:n}, shared})·
+ *  fits[자리].unsupported_knots를 한 모양으로. 둘 다 없으면(절점 분리 이전 결과) null.
+ *
+ *  돌려주는 것: {rows:[{slot, set, n, common, shared, sharedText, unsupported, edge, dropped, coords, source,
+ *  sourceText, history, historyLines}], sets:[{name, n, members, sourceText}], summary}. common은 이 표가 **공통 집합**
+ *  (엔진 knots.COMMON "common")을 쓰는가 — 공유/분리의 뜻은 이것이다. 엔진 표 기록의 shared는 「그 집합을 쓰는 표가
+ *  둘 이상인가」라 떼어 낸 집합을 두 표가 함께 써도 true다(공통 집합으로 읽으면 틀린다) — sharedText의 「(n표 함께)」로만
+ *  쓴다. unsupported는 그 표에서 뺀 절점 전부, edge·dropped는 끝 바깥(범위 밖)과 안쪽에서 뺀 것의 갈래다. */
+export function knotModel(body) {
+  const rec = body?.gain_export?.knots;
+  const rk = body?.report?.knots;
+  const hasRec = rec && typeof rec === "object";
+  const hasRk = rk && typeof rk === "object";
+  if (!hasRec && !hasRk) return null;
+  const sets = (hasRec && rec.sets && typeof rec.sets === "object") ? rec.sets : {};
+  const tables = (hasRec && rec.tables && typeof rec.tables === "object") ? rec.tables : {};
+  const counts = (hasRk && rk.tables && typeof rk.tables === "object") ? rk.tables : {};
+  const slots = [...new Set([...Object.keys(tables), ...Object.keys(counts)])].sort();
+  const users = {};
+  for (const t of Object.values(tables)) if (t?.set != null) users[t.set] = (users[t.set] ?? 0) + 1;
+  const rows = slots.map((slot) => {
+    const t = tables[slot] ?? {};
+    const set = t.set ?? null;
+    const ks = set != null ? sets[set] : null;
+    const coords = Array.isArray(ks?.coords) ? ks.coords : null;
+    const fitUnsup = body?.fits?.[slot]?.unsupported_knots;
+    const unsupported = Array.isArray(t.unsupported) ? t.unsupported
+      : Array.isArray(fitUnsup) ? fitUnsup : [];
+    const detail = t.unsupported_detail ?? body?.fits?.[slot]?.unsupported_detail;
+    const { edge, dropped } = splitUnsupported(unsupported, detail, coords);
+    const n = numeric(counts[slot]) ?? numeric(t.n) ?? (coords ? coords.length - unsupported.length : null);
+    const common = set == null ? null : set === "common";
+    const shared = typeof t.shared === "boolean" ? t.shared : null;
+    const nUsers = set != null ? users[set] ?? 0 : 0;
+    const sharedText = common == null ? "—" : common ? "공통 집합"
+      : nUsers > 1 ? `분리 집합(${nUsers}표 함께)` : "분리 집합";
+    const history = Array.isArray(ks?.history) ? ks.history : [];
+    return {
+      slot, set, setName: knotSetName(set), n, common, shared, sharedText,
+      unsupported, edge, dropped, coords, source: ks?.source ?? null, sourceText: knotSourceText(ks?.source),
+      history, historyLines: history.map(knotHistoryText),
+    };
+  });
+  const setRows = Object.entries(sets).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([name, ks]) => ({
+    name, displayName: knotSetName(name), n: Array.isArray(ks?.coords) ? ks.coords.length : null,
+    members: rows.filter((r) => r.set === name).map((r) => r.slot),
+    sourceText: knotSourceText(ks?.source),
+  }));
+  const nCommon = rows.filter((r) => r.common === true).length;
+  const nSplit = rows.filter((r) => r.common === false).length;
+  const nEdge = rows.reduce((acc, r) => acc + r.edge.length, 0);
+  const nDropped = rows.reduce((acc, r) => acc + r.dropped.length, 0);
+  const ns = rows.map((r) => r.n).filter((x) => x != null);
+  const span = ns.length ? (Math.min(...ns) === Math.max(...ns) ? `${ns[0]}` : `${Math.min(...ns)}~${Math.max(...ns)}`) : "?";
+  const bits = [`표 ${rows.length}개 · 절점 ${span}`];
+  if (setRows.length) bits.push(`집합 ${setRows.length}`);
+  // 보고 knots.shared = 표 전부가 한 집합(엔진 knots_summary) — 그때는 한 마디로
+  if (rk?.shared === true && !nSplit) bits.push("전 표 공통 집합");
+  else if (nCommon || nSplit) bits.push(`공통 ${nCommon} · 분리 ${nSplit}`);
+  if (nEdge) bits.push(`범위 밖 절점 ${nEdge}`);
+  if (nDropped) bits.push(`안쪽에서 뺀 절점 ${nDropped}`);
+  return { rows, sets: setRows, summary: `절점 — ${bits.join(" · ")}` };
+}
+
+/** 문서의 확정 게인 표 출처(provenance.knots — 자동 설계 반영이 적는다) → 게인 탭 배지 {label, tone, tip}. 기록이
+ *  없으면(옛 반영·손으로 적은 표) null. 배지 글은 짧게(공통 집합 / 분리 k/n — 공통 집합을 안 쓰는 표 수), 표별
+ *  집합·절점 수·출처는 툴팁. 판단은 집합 이름(공통 집합인가)이다 — 집합별 shared(사용자 둘 이상)로 세면 떼어 낸
+ *  집합을 두 표가 함께 쓸 때 「공유」로 잘못 그린다. */
+export function knotBadgeSpec(knots) {
+  const m = knots && typeof knots === "object" ? knotModel({ gain_export: { knots } }) : null;
+  if (!m || !m.rows.length) return null;
+  const split = m.rows.filter((r) => r.common === false).length;
+  const label = split ? `절점 분리 ${split}/${m.rows.length}` : "절점 공통 집합";
+  const tip = [m.summary, ...m.rows.map((r) => `${r.slot} — ${r.sharedText} · 집합 ${r.setName} · `
+    + `${r.coords ? r.coords.length : "?"}절점 · ${r.sourceText}`
+    + (r.edge.length ? ` · 범위 밖 ${r.edge.length}` : "")
+    + (r.dropped.length ? ` · 안쪽에서 뺌 ${r.dropped.length}` : ""))].join("\n");
+  return { label, tone: "na", tip };
+}
+
+/** 처방의 동작(action) → 한 줄 — 무엇을 어디에 하나. add_knot은 반영 전엔 요청만(「절점 추가 요청: M0.15 → 표 a·b」 —
+ *  분리될지는 엔진이 반영할 때 정한다: 이름 댄 표가 그 집합의 사용자 전부면 제자리에 더한다), 반영 뒤엔 엔진 결과
+ *  (knot = 카드의 a.knot {added, split, skipped})대로 말한다. 설계점 승격 동반이면 그 점을 붙인다. 옛 결과의
+ *  promote·refit_at·tighten_fit도 읽힌다. 모르는 동작은 코드 그대로. */
+export function actionText(act, knot = null) {
+  const t = act?.type;
+  if (!t) return null;
+  if (t === "add_knot") {
+    const slots = Array.isArray(act.slots) && act.slots.length ? act.slots.join("·") : "?";
+    const where = `${machText(act.mach)} → 표 ${slots}`;
+    const promote = act.promote ? ` · 점 ${act.point ?? "?"} 설계점 승격(튜닝)` : "";
+    if (!knot || typeof knot !== "object") return `절점 추가 요청: ${where}${promote}`;
+    if (!knot.added) return `절점 추가 안 됨: ${where}${knot.skipped ? ` — ${knot.skipped}` : ""}${promote}`;
+    const split = Array.isArray(knot.split) ? knot.split : [];
+    return `절점 추가: ${where} (${split.length ? `분리 집합으로 뗌: ${split.join(", ")}` : "그 집합을 쓰는 표 전부"})`
+      + promote;
+  }
+  if (t === "promote") {
+    return `승격: 점 ${act.point ?? "?"} → ${ROLE_LABEL[act.to] ?? act.to ?? "?"}`;
+  }
+  if (t === "add_validation") return "검증점 추가";
+  if (t === "refit_at") return `재적합 고정: 점 ${act.point ?? "?"} (옛 결과)`;
+  if (t === "tighten_fit") return "적합 허용치 조이기 (다항)";
+  if (t === "escalate") return "상위 설계 변경 검토 (보고 전용)";
+  return String(t);
 }
 
 /** 결과 → 점 행 [{name, mach, alt, fuel, role, trimmable, status}] —
@@ -164,6 +382,9 @@ export function pointRows(result) {
     alt: p.alt,
     fuel: p.fuel,
     role: p.role,
+    // 역할 묶음 — 옛 결과의 앵커·breakpoint도 설계점(이관 3단계). 이름 칸은 roleLabel(옛 이름을 그대로 보인다)
+    roleGroup: roleGroup(p.role),
+    roleLabel: ROLE_LABEL[p.role] ?? p.role ?? "역할 미상",
     trimmable: p.trimmable,
     // 엔진이 처방·수렴 판정에서 뺀 점(트림은 수렴했으나 조건 판정이 채택하지 않음 — 제한 위반·모델 범위 밖) —
     // 미수렴과 다른 상태다. 여유 미달은 채택이라 여기 없다(v1.65)
@@ -264,16 +485,16 @@ export function warnNoteText(fitMode) {
   const tail = " fail은 다르다 — 합격선 미달이라 그대로 확정하면 안 된다.";
   if (fitMode === "table") {
     return "warn은 자동 설계가 실패한 것이 아니다 — 합격선은 넘겼으나 목표선에 못 미친 자리다. "
-      + "표 모드에서 분할점의 값은 그 마하의 튜닝값이다(같은 마하에 고도·연료 표본이 여럿이면 평균, "
-      + "튜닝 실패로 적합에서 뺀 점은 이웃 보간). 그래서 앵커의 warn은 튜닝이 목표에 못 갔거나"
-      + "(미달 원장 「튜닝 목표 미달」) 평균·보간으로 접힌 값 탓이고, 검증점의 warn은 분할점 사이 "
-      + "선형 보간이 목표선 아래로 내려온 자리다. 보간 탓이면 그 구간에 breakpoint를 늘린다(처방 "
-      + "카드가 제안한다). 적합 허용치 조이기는 표 모드에 없다 — 평균으로 접힌 어긋남은 다축 표가 "
+      + "표 모드에서 절점의 값은 설계점 튜닝값 전부에 맞춘 최소제곱 구간 선형 값이다(절점은 설계점과 "
+      + "따로 정한다 — 튜닝 실패로 적합에서 뺀 점은 쓰지 않는다). 그래서 설계점의 warn은 튜닝이 목표에 "
+      + "못 갔거나(미달 원장 「튜닝 목표 미달」) 적합이 튜닝값을 다 못 따라간 탓이고, 검증점의 warn은 "
+      + "절점 사이 선형 보간이 목표선 아래로 내려온 자리다. 보간 탓이면 그 구간 표에 절점을 더한다(처방 "
+      + "카드 「절점 추가」). 적합 허용치 조이기는 표 모드에 없다 — 고도·연료로 갈리는 어긋남은 다축 표가 "
       + "있어야 풀린다." + tail;
   }
   return "warn은 자동 설계가 실패한 것이 아니다 — 튜닝은 목표를 맞췄는데 그 사이를 잇는 "
-    + "스케줄 곡선이 목표선 아래로 내려온 자리다. 줄이려면 그 구간에 breakpoint를 "
-    + "늘리거나(처방 카드가 이미 그것을 제안한다) 적합 허용치를 조인다." + tail;
+    + "스케줄 곡선이 목표선 아래로 내려온 자리다. 줄이려면 그 구간을 더 촘촘히 잇거나"
+    + "(처방 카드가 이미 그것을 제안한다) 적합 허용치를 조인다." + tail;
 }
 
 // ── 종료 상태 ──────────────────────────────────────────────────────────
@@ -461,7 +682,7 @@ const pctText = (x) => `${num(100 * x, 2)}%`;
  * 마하 축 위에 번갈아 놓여 값이 오르내린다(톱니) — 그 대가를 사실로 적는다. 판정은 하지 않는다(판정은
  * VERIFY가 그 표로 했고, 문턱은 fitQualityLines 몫이다). 0은 생략한다 — 실제로 0인 것을 적으면
  * 행마다 "교차축 0% · 톱니 0회"가 붙어 정작 0이 아닌 자리가 묻힌다. */
-export function fitFactsModel(fits) {
+export function fitFactsModel(fits, knots = null) {
   const entries = Object.entries(fits ?? {}).filter(([, rep]) => rep && typeof rep === "object");
   if (!entries.length) return null;
   entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
@@ -471,11 +692,23 @@ export function fitFactsModel(fits) {
     const cross = numeric(rep.quality?.cross_axis_frac);
     const zigzag = numeric(rep.zigzag);
     const nBreakpoints = numeric(rep.n_breakpoints);
-    const shape = kind === "table" ? `표 ${nBreakpoints ?? "?"}점(${rep.axis ?? "?"} 축)`
+    // 절점 집합(knotModel 행) — 공통/분리 집합·뺀 절점(끝 바깥/안쪽). 없으면(옛 결과·다항) 적지 않는다
+    const kr = kind === "table" ? (knots?.rows ?? []).find((r) => r.slot === slot) ?? null : null;
+    const unsup = Array.isArray(rep.unsupported_knots) ? rep.unsupported_knots.length
+      : kr ? kr.unsupported.length : 0;
+    const shape = kind === "table" ? `표 ${nBreakpoints ?? "?"}절점(${rep.axis ?? "?"} 축)`
       : kind === "poly" ? `다항(${rep.axis ?? "?"} 축`
         + `${Array.isArray(rep.segments) ? ` · 구간 ${rep.segments.length}` : ""})`
         : kind === "constant" ? `상수 ${num(rep.value)}` : `표현 ${kind ?? "?"}`;
     const parts = [shape];
+    if (kr?.common != null) parts.push(kr.sharedText);
+    if (kr && (kr.edge.length || kr.dropped.length)) {
+      if (kr.edge.length) parts.push(`범위 밖 절점 ${kr.edge.length}`);
+      if (kr.dropped.length) parts.push(`안쪽에서 뺀 절점 ${kr.dropped.length}`);
+    } else if (unsup) {
+      // 절점 기록이 없으면 끝 바깥인지 안쪽인지 모른다 — 「범위 밖」이라 단정하지 않는다
+      parts.push(`뺀 절점 ${unsup}`);
+    }
     if (excluded.length) {
       // 상수로 접힌 자리는 그 변동이 잔차에 남는다(fit.fit_slot) — 적합에서 "뺐다"가 아니라 "접었다"다
       parts.push(`스케줄 축 밖 변동 ${excluded.join("·")}`
@@ -483,9 +716,10 @@ export function fitFactsModel(fits) {
     }
     if (cross != null && cross > 0) parts.push(`교차축 잔차 ${pctText(cross)}`);
     if (zigzag != null && zigzag > 0) {
-      parts.push(`톱니 ${zigzag}회${nBreakpoints ? `/분할점 ${nBreakpoints}` : ""}`);
+      parts.push(`톱니 ${zigzag}회${nBreakpoints ? `/절점 ${nBreakpoints}` : ""}`);
     }
-    return { slot, kind, excluded, cross, zigzag, nBreakpoints, text: `${slot} — ${parts.join(" · ")}` };
+    return { slot, kind, excluded, cross, zigzag, nBreakpoints, common: kr?.common ?? null, unsupported: unsup,
+      text: `${slot} — ${parts.join(" · ")}` };
   });
   const withExcluded = rows.filter((r) => r.excluded.length);
   const axes = [...new Set(withExcluded.flatMap((r) => r.excluded))];
@@ -499,7 +733,7 @@ export function fitFactsModel(fits) {
   }
   if (wc) head.push(`교차축 잔차 최대 ${pctText(wc.cross)} (${wc.slot})`);
   if (wz) {
-    head.push(`톱니 최대 ${wz.zigzag}회${wz.nBreakpoints ? `/분할점 ${wz.nBreakpoints}` : ""} (${wz.slot})`);
+    head.push(`톱니 최대 ${wz.zigzag}회${wz.nBreakpoints ? `/절점 ${wz.nBreakpoints}` : ""} (${wz.slot})`);
   }
   return { rows, summary: head.length ? `적합 보고 — ${head.join(" · ")}` : null };
 }
@@ -623,12 +857,14 @@ export function fitModeLabel(mode) {
   return FIT_MODE_LABEL[mode] ?? String(mode);
 }
 
-const ROLE_SHORT = [["anchor", "앵커"], ["breakpoint", "bp"], ["validation", "검증점"],
+// 설계점·검증점(이관 3단계). 옛 결과의 역할 이름(앵커·bp)은 설계점 자리에 그대로 둔다 — 옛 결과를 열어도
+// 「앵커 31 · 검증점 14」로 위치가 읽힌다(설계점류가 먼저, 점 사이가 뒤)
+const ROLE_SHORT = [["design", "설계점"], ["anchor", "앵커"], ["breakpoint", "bp"], ["validation", "검증점"],
   ["unknown", "역할 미상"]];
 
-/** report.failures_by_role → "앵커 31 · 검증점 14" — 실패가 없으면 null.
+/** report.failures_by_role → "설계점 31 · 검증점 14"(옛 결과는 "앵커 31 · 검증점 14") — 실패가 없으면 null.
  *
- * 실패가 앵커인지 점 사이인지 — 앵커는 자기 튜닝값으로 검증받는 자리가 많아(표 모드) 통과가
+ * 실패가 설계점인지 점 사이인지 — 설계점은 자기 튜닝값 근처에서 검증받아 통과가
  * "튜닝 성립"에 가깝고, 스케줄 성립을 말하는 것은 검증점이다(엔진 failures_by_role 머리말).
  * 상태 줄·신호 보고·결과 브리핑이 **이 한 함수로** 같은 말을 한다. 화면이 모르는 역할도 코드 그대로
  * 센다 — 삼키면 "실패 N"과 위치의 합이 어긋나는데 화면은 그걸 말하지 않는다. */
@@ -653,8 +889,7 @@ export function reportLine(report, nPointsFallback) {
   const parts = [
     `스테이지 ${r.stage ?? "?"}`,
     `이터레이션 ${r.iterations ?? 0}`,
-    `점 ${r.n_points ?? nPointsFallback ?? "?"} (앵커 ${pts.anchor ?? "?"} · `
-      + `bp ${pts.breakpoint ?? "?"} · 검증 ${pts.validation ?? "?"})`,
+    `점 ${r.n_points ?? nPointsFallback ?? "?"} (${pointCountText(pts)})`,
     `판정 ${Number(r.judged) || 0}`,
     `실패 ${Number(r.failures) || 0}`,
   ];
@@ -957,6 +1192,9 @@ export function evidenceLines(a, reasonMap) {
   // 분류기 자신의 설명 — 왜 이 처방인지를 분류기가 이미 적어 놓았는데 버려져 있었다
   if (a?.action?.note) notes.push(a.action.note);
 
+  // 엔진이 반영하며 남긴 참고(편입 불필요·편입은 됐으나 절점 못 더함) — 건너뜀이 아니다(한 일이 있는 카드)
+  for (const n of Array.isArray(a?.notes) ? a.notes : []) notes.push(String(n));
+
   const flags = [];
   if (a?.sealed) flags.push(`봉인: ${a.sealed}`);
   if (a?.skipped) flags.push(`건너뜀: ${a.skipped}`);
@@ -966,6 +1204,13 @@ export function evidenceLines(a, reasonMap) {
     : null;
 
   return {
+    // 무엇을 어디에 하나 — 반영 전엔 요청(마하·표), 반영 뒤엔 엔진 결과(a.knot — 분리·못 더함)대로
+    action: actionText(a?.action, a?.knot),
+    // 반영 뒤 엔진이 적은 절점 추가 결과 한 줄 — 동작 줄이 이미 말하므로 더한 경우의 분리 표만 따로 남긴다
+    knot: a?.knot?.added
+      ? `절점 더함${Array.isArray(a.knot.split) && a.knot.split.length
+        ? ` — 분리 집합으로 뗀 표: ${a.knot.split.join(", ")}` : " — 그 집합을 쓰는 표 전부에"}`
+      : null,
     head,
     shortfall: shortfallLines(ev.shortfall),
     tuned: tunedLines(ev.tuned, reasonMap),
@@ -1018,7 +1263,7 @@ export const LEDGER_KIND = {
   skipped: {
     label: "튜닝 건너뜀",
     text: "이 점에서는 튜닝을 돌리지 않았다 — 게인은 이웃에서 보간된 값이고 그 자리의 "
-      + "근거는 없다. 점 예산을 늘리거나 그 점을 breakpoint로 올린다",
+      + "근거는 없다. 점 예산을 늘리거나, 검증점이면 설계점으로 올린다",
   },
   ineffective: {
     label: "무효 처방",
@@ -1076,6 +1321,8 @@ function severityKey(s) {
 export function ledgerActionText(action) {
   if (!action) return null;
   const parts = [VERDICT_LABEL[action.verdict] ?? action.verdict ?? action.type ?? "처방"];
+  // 절점 추가는 판정 이름만으로 동작이 안 읽히는 판정(단순 부족 등)에서도 나온다 — 동작을 붙인다
+  if (action.type === "add_knot" && !parts[0].includes("절점 추가")) parts.push("절점 추가");
   if (!action.applied) parts.push("미반영 — 승인하면 반영된다");
   else if (action.changed === false) {
     parts.push("반영했으나 판정이 그대로다 — 이 자리에서 듣지 않았다");
@@ -1249,9 +1496,15 @@ export function coverageLines(report) {
   const out = [];
   if (c) {
     // 검증점 수가 아예 안 온 것과 0인 것은 다르다 — 없는 수를 0으로 읽으면
-    // "한 건도 안 봤다"를 결과가 말한 적 없는데 화면이 단정하게 된다
+    // "한 건도 안 봤다"를 결과가 말한 적 없는데 화면이 단정하게 된다. 못 넣은 수도 같다 — 안 온 것을 0으로 읽으면
+    // 검증점 0을 「볼 구간이 없었다」로 삼킨다
     const got = numeric(c.validation_points);
-    const missing = numeric(c.validation_missing) ?? 0;
+    const missingRaw = numeric(c.validation_missing);
+    const missing = missingRaw ?? 0;
+    // 엔진 키(orchestrator.coverage) — 내분점 자리에 설계점이 있어 옮긴 수는 **정보용**이다(설계점 판정은 적합 잔차라
+    // 검증이 아니다). 옛 초안 키 validation_at_design_points는 설계점 겹침을 검증으로 센 수라 읽지 않는다
+    const moved = numeric(c.midpoints_at_design_points);
+    const movedText = moved ? ` (중점에 설계점이 있어 옮긴 ${num(moved)})` : "";
     if (got == null && missing > 0) {
       out.push({ key: "validation", tone: "warn",
         text: `보간 구간 ${num(missing)}개가 검증점 없이 남았는데 실제로 몇 개가 검증됐는지를 `
@@ -1259,18 +1512,28 @@ export function coverageLines(report) {
     } else if (got === 0 && missing > 0) {
       out.push({ key: "validation", tone: "fail",
         text: `보간 구간 검증점이 한 개도 없다 (검증점 없이 남은 구간 ${num(missing)}개).`
-          + prose(" 판정된 자리가 전부 자기 게인이 직접 튜닝된 앵커다 —"
-            + " 스케줄이 breakpoint 사이에서 무너지는지는 보지 않았다.") });
-    } else if (got > 0 && missing > 0) {
+          + prose(" 판정된 자리가 전부 자기 게인이 직접 튜닝된 설계점이다 —"
+            + " 스케줄이 절점 사이에서 무너지는지는 보지 않았다.") });
+    } else if (got === 0 && missingRaw == null) {
       out.push({ key: "validation", tone: "warn",
-        text: `보간 구간 ${num(missing)}개가 검증점 없이 남았다 (검증된 구간은 ${num(got)}개).`
+        text: "보간 구간 검증점 0 — 못 넣은 구간 수를 결과가 말하지 않는다(볼 구간이 없었는지 알 수 없다)." });
+    } else if (got > 0 && missing > 0) {
+      // got은 검증점 수다(구간 수가 아니다 — 편입된 검증점과 그 구간의 새 검증점이 함께 센다)
+      out.push({ key: "validation", tone: "warn",
+        text: `보간 구간 ${num(missing)}개가 검증점 없이 남았다 (들어간 검증점은 ${num(got)}개).`
           + prose(" 그 구간의 스케줄은 보지 않았다.") });
     } else if (got > 0) {
       // 못 넣은 구간이 없다 — 이건 공백이 아니라 근거라 회색으로 둔다
       out.push({ key: "validation", tone: "hint",
-        text: `보간 구간 검증점 ${num(got)}` });
+        text: `보간 구간 검증점 ${num(got)}${movedText}` });
     }
     // got === 0 && missing === 0이면 아무 말도 안 한다 — 검증할 구간 자체가 없었다
+    const unplaceable = numeric(c.validation_unplaceable);
+    if (unplaceable) {
+      out.push({ key: "unplaceable", tone: "warn",
+        text: `보간 구간 ${num(unplaceable)}개는 검증점을 둘 빈 자리가 없었다 (내분점마다 설계점).`
+          + prose(" 설계점 판정은 적합 잔차라 그 구간의 보간은 보지 않았다.") });
+    }
 
     const rem = numeric(c.refine_remaining);
     const tol = numeric(c.refine_tol);
@@ -1354,6 +1617,14 @@ export function configFormValues(config) {
   }
   if (Array.isArray(c.alts)) out.altsText = c.alts.join(" ");
   if (Array.isArray(c.fuels)) out.fuelsText = c.fuels.join(" ");
+  // 절점 설정 — 규칙 셀렉트·절점 수·좌표·표당 상한 칸 (buildConfig의 knotConfig 역방향)
+  const k = c.knots;
+  if (k && typeof k === "object") {
+    if (typeof k.rule === "string") out.knotRule = k.rule;
+    if (k.n != null) out.knotN = String(k.n);
+    if (Array.isArray(k.coords)) out.knotCoordsText = k.coords.join(" ");
+    if (k.max_per_table != null) out.knotMax = String(k.max_per_table);
+  }
   return out;
 }
 

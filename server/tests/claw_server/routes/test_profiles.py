@@ -626,10 +626,13 @@ def test_listing_carries_the_confirmed_gain_tables_summary(client):
     doc = client.get("/api/profiles/gt-delta").json()["document"]
     grid = doc["law"]["schedule"]["mach_grid"]
     k0 = build_profile(validate_document(doc)).design_gains()["pitch.kp"]
+    # 표별 절점 집합(provenance.knots — 05 §11.13 이관 3단계) — 카탈로그가 게인 탭 배지 근거로 그대로 싣는다
+    knots = {"sets": {"base": {"axis": "mach", "coords": list(grid), "source": "base_axis", "history": []}},
+             "tables": {"pitch.kp": {"set": "base", "shared": False, "unsupported": []}}}
     doc["law"]["gain_tables"] = {
         "tables": {"pitch.kp": {"axes": {"mach": list(grid)}, "data": [k0] * len(grid),
                     "extrapolate": "clip"}},
-        "provenance": {"source": "auto_design",
+        "provenance": {"source": "auto_design", "knots": knots,
                        "basis_fingerprint": gain_tables_basis_fingerprint(validate_document(doc))},
     }
     r = client.put("/api/profiles/gt-delta", json={"base_revision": 1, "document": doc})
@@ -639,7 +642,7 @@ def test_listing_carries_the_confirmed_gain_tables_summary(client):
     assert row["gain_tables"] == {"source": "auto_design", "stale": False, "stale_variants": ["full-stores"],
                                   "variants": {"full-stores": {"source": "stale"}}}
     cat = client.get("/api/gains/catalog", params={"profile_id": "gt-delta"}).json()
-    assert cat["confirmed"] == {"slots": ["pitch.kp"], "stale": False}
+    assert cat["confirmed"] == {"slots": ["pitch.kp"], "stale": False, "knots": knots}
 
     # 반영 뒤 플랜트를 고치면 낡는다 — 요약이 stale을 말하고 시뮬 제출이 422로 거부한다
     doc2 = client.get("/api/profiles/gt-delta").json()["document"]

@@ -179,7 +179,12 @@ def test_auto_design_end_to_end(client, wait_job):
     assert body["kind"] == "auto_design"
     assert body["report"]["status"] in ("converged", "escalated", "budget_exhausted")
     roles = {p["role"] for p in body["points"]["points"]}
-    assert "anchor" in roles
+    # 역할은 설계점·검증점 둘(05 §11.13 이관 3단계) — 옛 앵커·breakpoint 위계는 없다
+    assert "design" in roles and roles <= {"design", "validation"}
+    # 표별 절점 — 보고는 수, 반출은 집합(공유/독립·출처). 기본 규칙에선 전 표가 한 집합을 공유한다
+    kn = body["gain_export"]["knots"]
+    assert set(kn["tables"]) == set(body["report"]["knots"]["tables"])
+    assert all(t["set"] in kn["sets"] for t in kn["tables"].values())
     # 점마다 조건 판정(05 §11.3 · 이관 8단계)이 실리고 채택 비트가 곧 그 판정이다 — 서버가 기체 문맥을 넘겼다는 증거.
     # 트림 탭 /trim/batch의 verdict와 같은 모양이라 웹 두 표가 같은 말을 한다
     judged = [p for p in body["points"]["points"] if p["verdict"] is not None]
@@ -991,7 +996,13 @@ def test_apply_gains_writes_the_confirmed_tables_to_the_document(client, wait_jo
         "status": rep["status"], "iterations": rep["iterations"], "judged": rep["judged"],
         "failures": rep["failures"], "escalations": rep["escalations"], "fit_mode": rep["fit_mode"],
         "excluded_samples": len(rep["excluded_samples"]),
-        "exclusion_withheld": sorted(rep["exclusion_withheld"])}
+        "exclusion_withheld": sorted(rep["exclusion_withheld"]), "n_knots": rep["knots"]["tables"]}
+    # 표별 절점 집합 — 반출(gain_export.knots)을 그대로. 문서의 표마다 자기 절점 집합 항목이 있다
+    export = client.get(f"/api/results/{rid}").json()["gain_export"]
+    assert prov["knots"] == export["knots"] and set(gt["tables"]) <= set(prov["knots"]["tables"])
+    for slot, t in gt["tables"].items():
+        entry = prov["knots"]["tables"][slot]
+        assert entry["set"] in prov["knots"]["sets"] and isinstance(entry["shared"], bool)
     assert prov["design"]["fit_mode"] in ("table", "poly") and prov["design"]["judged"] > 0
     row = next(p for p in client.get("/api/profiles").json() if p["id"] == "ad-apply")
     assert row["gain_tables"] == {"source": "auto_design", "stale": False, "stale_variants": [],
@@ -1125,9 +1136,15 @@ def test_apply_gains_design_summary_counts_excluded_samples_and_says_unknown_for
     grid = client.get("/api/profiles/ad-prov").json()["document"]["law"]["schedule"]["mach_grid"]
     table = {"axes": {"mach": list(grid)}, "data": [0.1] * len(grid), "extrapolate": "clip"}
 
+    knots = {"sets": {"base": {"axis": "mach", "coords": list(grid), "source": "base_axis", "history": []}},
+             "tables": {"pitch.k_rate": {"set": "base", "shared": False, "unsupported": []}}}
+
     def seed(rid, report):
+        export = {"tables_resampled": {"pitch.k_rate": table}}
+        if report is not None:
+            export["knots"] = knots  # 절점 분리(이관 3단계) 이후 결과만 반출에 절점 집합을 싣는다
         payload = {"kind": "auto_design", "profile": {"id": "ad-prov", "source": "request", "fingerprint": fp},
-                   "gain_export": {"tables_resampled": {"pitch.k_rate": table}}}
+                   "gain_export": export}
         if report is not None:
             payload["report"] = report
         client.app.state.store.save(rid, payload, meta={"kind": "auto_design", "created": 0.0})
@@ -1135,13 +1152,16 @@ def test_apply_gains_design_summary_counts_excluded_samples_and_says_unknown_for
     seed("prov-new", {"status": "converged", "iterations": 1, "judged": 12, "failures": 0, "escalations": 0,
                       "fit_mode": "table", "exclusion_withheld": ["roll.k_rate"],
                       "excluded_samples": [{"slot": "roll.k_rate", "point": "p1", "value": 0.0},
-                                           {"slot": "roll.k_rate", "point": "p2", "value": 0.0}]})
+                                           {"slot": "roll.k_rate", "point": "p2", "value": 0.0}],
+                      "knots": {"tables": {"pitch.k_rate": len(grid)}, "shared": False}})
     ok = client.post("/api/design/prov-new/apply-gains", json={"base_revision": 1})
     assert ok.status_code == 200, ok.text
     prov = client.get("/api/profiles/ad-prov").json()["document"]["law"]["gain_tables"]["provenance"]
     assert prov["design"] == {"status": "converged", "iterations": 1, "judged": 12, "failures": 0,
                               "escalations": 0, "fit_mode": "table", "excluded_samples": 2,
-                              "exclusion_withheld": ["roll.k_rate"]}
+                              "exclusion_withheld": ["roll.k_rate"], "n_knots": {"pitch.k_rate": len(grid)}}
+    # 표별 절점 집합 — 반출 그대로 문서에 영속한다(게인 탭 공유/독립 배지의 근거)
+    assert prov["knots"] == knots
 
     # 반영이 지문을 바꿨다 — 옛 결과는 새 지문으로 세운다(재반영 409 가드는 위 테스트 몫)
     fp = client.get("/api/profiles/ad-prov").json()["fingerprint"]
@@ -1150,7 +1170,8 @@ def test_apply_gains_design_summary_counts_excluded_samples_and_says_unknown_for
     assert ok.status_code == 200, ok.text
     prov = client.get("/api/profiles/ad-prov").json()["document"]["law"]["gain_tables"]["provenance"]
     assert prov["design"] == dict.fromkeys(("status", "iterations", "judged", "failures", "escalations",
-                                            "fit_mode", "excluded_samples", "exclusion_withheld"))
+                                            "fit_mode", "excluded_samples", "exclusion_withheld", "n_knots"))
+    assert prov["knots"] is None  # 절점 분리 이전 결과 — 빈 집합으로 위장하지 않는다
 
 
 def test_apply_gains_names_off_axis_tables_of_an_old_result(client):
@@ -1291,3 +1312,125 @@ def test_base_grid_cap_from_an_override_is_rejected_at_submit(client):
     r = client.post("/api/design/auto", json={"config": _small_config(n_mach=20, alts=alts)})
     assert r.status_code == 422, r.text
     assert "400" in r.json()["detail"]
+
+
+# ── 절점 분리 (05 §11.13 이관 3단계 — 설계점과 절점 · 표별 절점 집합) ─────────────────
+
+
+def test_defaults_expose_knot_config_and_rules(client):
+    """절점 설정의 기본값은 엔진 AutoDesignConfig가 정본이고, 규칙 선택지는 서버 검사와 한 벌로 내려 준다 —
+    웹 설정 칸이 규칙 목록을 재기술하지 않게."""
+    from claw_server.routes.design import KNOT_RULES
+
+    body = client.get("/api/design/defaults").json()
+    assert body["config"]["knots"] == {"rule": "base_axis", "n": None, "coords": None, "max_per_table": 16}
+    assert body["knot_rules"] == list(KNOT_RULES) == ["base_axis", "uniform", "user", "samples"]
+
+
+def test_knot_config_partial_override_and_rejections():
+    """절점 설정은 부분 덮어쓰기(빠진 칸은 기본값)이고, 잡 안에서 터질 값은 제출 시점에 거절한다 — 수치 경계는 서버
+    (_check_knots), 뜻(규칙·n ≥ 2·순증가·상한)은 엔진 check_knots_config."""
+    from claw_server.routes.design import _build_config
+
+    cfg = _build_config({"knots": {"rule": "uniform", "n": 5}})
+    k = cfg.to_dict()["knots"]
+    assert k["rule"] == "uniform" and k["n"] == 5 and k["max_per_table"] == 16
+    cfg = _build_config({"knots": {"rule": "user", "coords": [0.2, 0.4, 0.8], "max_per_table": 8}})
+    assert cfg.to_dict()["knots"]["coords"] == [0.2, 0.4, 0.8]
+    assert _build_config({"knots": {"rule": "samples"}}).to_dict()["knots"]["rule"] == "samples"
+    # uniform의 n 없음은 엔진이 뜻을 준다(옛 격자 마하 수) — 서버가 따로 막지 않는다(규칙의 정본은 엔진 한 곳)
+    assert _build_config({"knots": {"rule": "uniform"}}).to_dict()["knots"]["n"] is None
+    for bad in ({"rule": "bogus"},                                   # 모르는 규칙
+                {"rule": "uniform", "n": 1},                         # 구간이 안 선다
+                {"rule": "uniform", "n": 2.5},                       # 정수 칸
+                {"rule": "user", "coords": [0.2, 0.2, 0.5]},         # 순증가 아님
+                {"rule": "user", "coords": [0.5, 0.3]},              # 감소
+                {"rule": "user", "coords": [0.5]},                   # 한 점은 축이 아니다
+                {"rule": "user"},                                    # user는 좌표가 뜻의 전부다
+                {"rule": "user", "coords": [0.2, float("nan")]},     # 비유한
+                {"rule": "user", "coords": "0.2 0.5"},               # 목록이 아니다
+                {"max_per_table": 1},                                # 표 하나에 절점 둘도 못 둔다
+                {"max_per_table": True},                             # 불리언은 수가 아니다
+                {"rule": "user", "coords": [0.1 + 0.01 * i for i in range(20)]},  # 시작부터 표당 상한(16) 초과
+                {"rule": "uniform", "n": float("inf")},              # 비유한 — int() 변환 전에 막는다
+                {"rule": 3},                                         # 규칙 이름이 아니다
+                {"extra": 1}):                                       # 모르는 키
+        with pytest.raises((ValueError, TypeError)):
+            _build_config({"knots": bad})
+    with pytest.raises(ValueError):
+        _build_config({"knots": "base_axis"})
+
+
+def test_knot_config_errors_are_422(client):
+    for bad in ({"rule": "bogus"}, {"rule": "user", "coords": [0.4, 0.3]}, {"rule": "uniform", "n": 1},
+                {"max_per_table": 1}):
+        r = client.post("/api/design/auto", json={"config": {**_small_config(), "knots": bad}})
+        assert r.status_code == 422, (bad, r.text)
+        assert "knots" in r.text
+
+
+def test_knot_config_reaches_the_saved_session(client, wait_job, monkeypatch):
+    """요청의 절점 설정이 세션 config로 저장된다 — 재개가 같은 규칙으로 잇는다(스파이 실행, 잡 비용 없음)."""
+    _spy_design_run(monkeypatch)
+    r = client.post("/api/design/auto", json={"config": {**_small_config(),
+                                                         "knots": {"rule": "uniform", "n": 4}}})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"])
+    body = client.get(f"/api/results/{j['result_id']}").json()
+    assert body["config"]["knots"] == {"rule": "uniform", "n": 4, "coords": None, "max_per_table": 16}
+
+
+def test_design_summary_counts_knots_per_table():
+    """provenance.design.n_knots — 표별 절점 수 {자리: n}(report.knots.tables). 최댓값 하나로 접지 않는다(표마다
+    다를 수 있다). 옛 보고(절점 분리 이전)는 None — 0이나 빈 dict로 위장하지 않는다."""
+    from claw_server.routes.design import _design_summary
+
+    rep = {"status": "converged", "knots": {"tables": {"pitch.kp": 7, "pitch.ki": 8}, "shared": False}}
+    assert _design_summary(rep)["n_knots"] == {"pitch.kp": 7, "pitch.ki": 8}
+    assert _design_summary({"status": "converged"})["n_knots"] is None
+    assert _design_summary(None)["n_knots"] is None
+    assert _design_summary({"knots": "junk"})["n_knots"] is None
+
+
+def test_gain_export_carries_the_knot_record(client):
+    """반출이 세션의 표별 절점 기록(session.knot_record())을 싣는다 — 문서 반영이 provenance.knots로 옮기는 원본."""
+    from claw.plant import make_demo_aircraft
+    from claw_server.routes.design import _gain_export
+
+    s = _poly_session()
+    ex = _gain_export(s, make_demo_aircraft())
+    assert ex["knots"] == s.knot_record()
+    assert set(ex["knots"]) >= {"sets", "tables"}
+
+
+def test_resume_applies_an_approved_add_knot_card(client, wait_job, monkeypatch):
+    """gated 재개 라우트는 처방 종류를 거르지 않는다 — 새 처방 add_knot(05 §11.13 이관 3단계)도 승인 id로 엔진
+    apply_actions에 닿아 그 표만 독립 집합으로 떼어 절점을 더한다. 실행(run)·반출은 스파이 — 반영만 본다."""
+    from claw.common.contracts import TrimCase
+    from claw.design import AutoDesignConfig, DesignSession
+    from claw.design.knots import COMMON, KnotSet
+    from claw.design.points import OperatingPoint, case_name
+
+    _spy_design_run(monkeypatch)
+    s = DesignSession(AutoDesignConfig(n_mach=3, alts=(1000.0,), fuels=(200.0,), budget_points=12, budget_iters=3))
+    name = case_name(0.5, 1000.0, 200.0)
+    s.points.add(OperatingPoint(TrimCase(name=name, mach=0.5, alt=1000.0, fuel=200.0), role="validation"))
+    s.knot_sets = {COMMON: KnotSet(name=COMMON, coords=[0.2, 0.8], source="base_axis")}
+    s.table_knots = {"pitch.kp": COMMON, "pitch.ki": COMMON}
+    s.actions = [{"id": "k1", "verdict": "gain_interp_valley", "case": name, "loop": "pitch",
+                  "action": {"type": "add_knot", "point": name, "mach": 0.5, "slots": ["pitch.kp"], "promote": True}}]
+    s.status = "awaiting_approval"
+    payload = s.to_dict()
+    payload.update(report=s.report(), proposed_actions=s.proposed_actions(),
+                   gain_export={"tables": {}, "tables_resampled": {}, "constants": {}})
+    client.app.state.store.save("knot-gated", payload, meta={"kind": "auto_design", "created": 0.0,
+                                                               "status": "awaiting_approval", "stage": "CLASSIFY"})
+    r = client.post("/api/design/knot-gated/resume", json={"approved": ["k1"]})
+    assert r.status_code == 202, r.text
+    body = client.get(f"/api/results/{wait_job(r.json()['id'])['result_id']}").json()
+    sets, tables = body["knot_sets"], body["table_knots"]
+    assert tables["pitch.ki"] == COMMON and sets[COMMON]["coords"] == [0.2, 0.8]  # 이름 안 댄 표는 그대로
+    assert tables["pitch.kp"] != COMMON and sets[tables["pitch.kp"]]["coords"] == [0.2, 0.5, 0.8]
+    assert sets[tables["pitch.kp"]]["source"] == f"split:{COMMON}"
+    # 검증점 편입(promote)도 같은 카드가 한다 — 절점 값이 그 점의 튜닝값에서 오게
+    assert next(p for p in body["points"]["points"] if p["name"] == name)["role"] == "design"

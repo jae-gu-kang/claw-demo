@@ -12,8 +12,10 @@ PolyTable(tables/poly.py) — 다항 런타임 채택(사용자 확정)에 따�
 - `"poly"` — 위 절차. 매끄럽고 계수가 적지만 **급변을 뭉갠다**: 부호 보호
   (_fit_preserving_sign)가 어느 차수로도 부호를 못 지키면 그 자리를 상수로 굳혀
   스케줄 하나가 통째로 사라질 수 있다 (예제 기체 실측 — roll.k_rate).
-- `"table"` — 튜닝값을 **그대로 분할점에 놓는** 선형 보간 Table. 적합이 없어 급변을
-  뭉개지 않고 부호도 표본 그대로다. 대가는 **1축 붕괴의 톱니**다: 지배 축 하나로
+- `"table"` — 선형 보간 Table. 분할점은 **표별 절점 집합**(knots.py — 05 §11.5)이 정하고 값은 설계점 표본 전부의
+  최소제곱(구간 선형 기저 — table_on_knots)이다. 절점을 안 주면(knots None — 옛 규칙) 튜닝값을 **그대로 분할점에
+  놓는다**: 튜닝한 마하마다 분할점이라 설계점을 늘리면 절점이 늘었다(쇼케이스 36점 — 이관 3단계가 뗀 결합). 표본이
+  절점 위에만 있으면 두 규칙은 같은 표다. 대가는 **1축 붕괴의 톱니**다: 지배 축 하나로
   펴면서 다른 축(고도·연료) 샘플을 같은 축값에서 평균하므로, 축값마다 참여한 행이
   달라 값이 오르내린다 (예제 기체 실측 — pitch.k_rate 방향 반전 20회). 톱니는
   숨기지 않고 `joints`(분할점마다의 기울기 꺾임)·`zigzag`·`adjacent_jump_frac`으로
@@ -231,6 +233,120 @@ def table_surface(xs, ys) -> dict:
     }
 
 
+def _hat_basis(xs, knots):
+    """구간 선형(hat) 기저 행렬 A[j, i] = φ_i(x_j) — 끝 절점 밖 표본은 끝 절점으로 clip(탑재 형식의 끝단 처리와 같다)."""
+    k = np.asarray(knots, dtype=float)
+    x = np.clip(np.asarray(xs, dtype=float), k[0], k[-1])
+    A = np.zeros((len(x), len(k)))
+    j = np.clip(np.searchsorted(k, x, side="right") - 1, 0, len(k) - 2)
+    t = (x - k[j]) / (k[j + 1] - k[j])
+    rows = np.arange(len(x))
+    A[rows, j] = 1.0 - t
+    A[rows, j + 1] += t
+    return A
+
+
+# 절점 받침 문턱 — 표본 하나라도 기저 가중이 이 값 이상(절점에서 반 구간 안)이어야 그 절점 값을 정할 수 있다고 본다.
+# 가중이 작은 표본만 닿으면 값이 v_이웃 + (y − v_이웃)/t로 1/t배 증폭된다(리뷰 실측: 가중 0.02에 1.763 → 31.2, 가운데
+# 절점 2501). 0.5는 「그 절점이 가장 가까운 절점인 표본이 있다」와 같다 — 이웃과 사이 표본은 둘 중 하나에 0.5 이상이다.
+# 실측 근거로 고른 값은 아니다 [기본값]
+SUPPORT_MIN_WEIGHT = 0.5
+_SUPPORT_EPS = 1e-9  # 중점 표본(가중 정확히 0.5)이 부동소수 오차로 떨어지지 않게
+# 정칙화 가중치(무차원) — y를 자기 스케일로 나눈 뒤 쓴다. 종전에는 |y|에 비례해 게인 크기가 해를 바꿨다
+_SMOOTH_W = 1e-6
+
+
+def _support(xs, k) -> list:
+    """절점별 받침 — [(최대 기저 가중, 기저 범위 안 표본 수)]. 끝 절점 바깥 표본은 끝 절점으로 clip돼 가중 1이다."""
+    if len(xs) == 0:
+        return [(0.0, 0)] * len(k)
+    A = _hat_basis(xs, k)
+    return [(float(np.max(A[:, i])), int(np.sum(A[:, i] > 0.0))) for i in range(len(k))]
+
+
+def table_on_knots(xs, ys, knots) -> dict:
+    """절점 위 1D 표 — 표본 전부의 최소제곱(구간 선형 기저)으로 절점 값을 정한다 (05 §11.5 — 설계점과 절점 분리).
+
+    반환은 table_surface와 같은 보고 형상(breakpoints·values·n_breakpoints·scale·joints·zigzag·adjacent_jump_frac)에
+    `unsupported_knots`(뺀 절점 좌표)·`unsupported_detail`([{knot, reason none|far, weight, text}])·`sample_residual`
+    (표본 최대 잔차)·`rms`·`sign_guard`·`underdetermined`를 더한다.
+
+    - **받쳐지지 않은 절점은 뺀다** — 기저 가중 SUPPORT_MIN_WEIGHT(0.5) 이상인 표본(절점에서 반 구간 안 — 끝 절점은 바깥
+      clip 표본 포함)이 없으면 그 값은 먼 표본 하나에 1/가중배로 끌려 표본 범위를 한참 벗어난다. 지어내지 않고 그 표에서
+      빼고 사유(표본 없음 none · 멀다 far)와 함께 보고한다 — 뺀 절점 너머는 남은 끝 절점 값으로 clip된다. 빼면 이웃 기저가
+      넓어지므로 안정될 때까지 다시 잰다.
+    - 표본이 절점 위에만 있으면 식이 절점마다 갈라져 해가 **절점별 평균**이다 — 종전 표 모드(같은 마하 평균)와 같다.
+    - 식이 모자라면(가중 0.5 표본 하나가 이웃 두 절점을 함께 정하는 경우) 최소 노름 해는 게인을 0 쪽으로 끌어간다 —
+      그 대신 이웃 절점 간 2차 차분이 작은 해(곧은 보간)를 고른다. y를 스케일로 나눈 뒤 고정 무차원 가중치라 해가 게인
+      크기와 무관하다. 그 사실을 underdetermined로 남긴다.
+    - **부호 보호** — 최소제곱은 0 근처 표본 사이에서 부호를 넘길 수 있다(다항의 _fit_preserving_sign이 막던 병리).
+      표본이 한 부호면 넘긴(정확히 0 포함 — 0은 그 자리 루프를 끄는 값이다) 절점 값을 **그 절점 기저 범위 안** 같은 부호
+      표본의 가장 작은 크기로 되돌리고 sign_guard.clipped에 남긴다. 되돌린 뒤 다시 풀지는 않는다 — 이웃 절점 값은 그대로라
+      sample_residual이 되돌림의 대가를 그대로 보인다.
+    """
+    xs = np.asarray(xs, dtype=float)
+    ys = np.asarray(ys, dtype=float)
+    k = np.asarray(sorted(float(c) for c in knots), dtype=float)
+    if len(k) < 2:
+        raise ValueError("절점 위 표에는 절점 2개 이상 필요")
+    detail = []
+    while len(k) >= 2:
+        sup = _support(xs, k)
+        weak = [i for i, (w, _n) in enumerate(sup) if w < SUPPORT_MIN_WEIGHT - _SUPPORT_EPS]
+        if not weak:
+            break
+        for i in weak:
+            w, n = sup[i]
+            far = n > 0
+            detail.append({"knot": float(k[i]), "reason": "far" if far else "none", "weight": w,
+                           "text": (f"표본이 절점에서 멀다(가중 {w:.2g} < {SUPPORT_MIN_WEIGHT:g})" if far
+                                    else "표본 없음")})
+        k = np.delete(k, weak)
+    detail.sort(key=lambda d: d["knot"])
+    unsupported = [d["knot"] for d in detail]
+    if len(k) < 2:
+        raise ValueError(f"표본이 받치는 절점이 {len(k)}개 — 표를 세울 수 없다")
+    A = _hat_basis(xs, k)
+    underdetermined = int(np.linalg.matrix_rank(A)) < len(k)
+    if underdetermined:
+        # 곧은 보간 쪽 정칙화 — 2차 차분 행을 작은 가중치로 덧붙인다(표본 식이 이긴다). y를 스케일로 나눠 무차원으로 푼다
+        s = float(np.max(np.abs(ys))) or 1.0
+        D = np.zeros((len(k) - 2, len(k)))
+        for i in range(len(k) - 2):
+            h0, h1 = k[i + 1] - k[i], k[i + 2] - k[i + 1]
+            D[i, i], D[i, i + 1], D[i, i + 2] = 1.0 / h0, -(1.0 / h0 + 1.0 / h1), 1.0 / h1
+        A_s = np.vstack([A, _SMOOTH_W * D * (k[-1] - k[0])])
+        v, *_ = np.linalg.lstsq(A_s, np.concatenate([ys / s, np.zeros(len(D))]), rcond=None)
+        v = v * s
+    else:
+        v, *_ = np.linalg.lstsq(A, ys, rcond=None)
+    want = _constant_sign(ys)
+    clipped = []
+    if want != 0.0:
+        same = np.sign(ys) == want
+        for i in range(len(v)):
+            if v[i] * want <= 0.0:
+                # 그 절점 기저 범위 안 같은 부호 표본의 최소 크기 — 전역 최소는 먼 자리의 작은 게인을 끌고 온다
+                near = same & (A[:, i] > 0.0)
+                pool = ys[near] if np.any(near) else ys[same]
+                floor = want * float(np.min(np.abs(pool)))
+                clipped.append({"knot": float(k[i]), "from": float(v[i]), "to": floor})
+                v[i] = floor
+    surface = table_surface(k, v)
+    resid = np.abs(ys - A @ v)
+    surface.update({
+        "unsupported_knots": unsupported,
+        "unsupported_detail": detail,
+        "sample_residual": float(np.max(resid)),
+        "rms": float(np.sqrt(np.mean(resid**2))),
+        "underdetermined": underdetermined,
+        "sign_guard": {"want": want, "degree_used": None, "lowered": False, "clipped": clipped,
+                       "note": ("절점 값 최소제곱이 표본 부호를 넘겨 그 절점 근처 같은 부호 최소 표본 크기로 되돌렸다"
+                                if clipped else "절점 위 표 — 최소제곱 절점 값이 표본 부호를 지켰다")},
+    })
+    return surface
+
+
 def _axis_spreads(samples: dict, points) -> dict:
     """축별 실질 변동 — 다른 축 고정 그룹 내 값 범위의 최대."""
     names = [n for n in samples if n in points]
@@ -269,7 +385,7 @@ def _allowed_axes(axes) -> tuple:
 
 
 def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
-             max_degree=4, max_segments=4, mode="poly", axes=None) -> dict:
+             max_degree=4, max_segments=4, mode="poly", axes=None, knots=None) -> dict:
     """자리 하나의 스케줄 표현 결정 — {"kind": "constant"|"poly"|"table", ...}.
 
     - 변동 축 없음 → 상수 (평균값 — 잔차를 report에 남긴다). **mode와 무관하다**:
@@ -285,6 +401,9 @@ def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
       제한은 "어느 축으로 펴는가", mode는 "편 것을 어떻게 싣는가"다. 제한 밖 축의
       기여는 두 표현 모두 cross_axis_residual(→ fit_quality cross_axis_frac)로, 표
       모드에서는 톱니(zigzag·joints)로도 드러난다
+    - knots(표 모드 전용, 마하 절점 좌표 — None이면 옛 규칙): 지배 축이 마하면 분할점이 이 절점이고 값은 표본 전부의
+      최소제곱(table_on_knots). 표본 없는 절점은 빠지고 보고된다(unsupported_knots). 지배 축이 마하가 아니면 절점을 쓸
+      수 없어 옛 규칙으로 가고 note에 남긴다(절점 집합의 첫 적용은 마하 1축 — 05 §11.5). 다항 모드는 쓰지 않는다
     """
     if mode not in ("poly", "table"):
         raise ValueError(f"mode는 'poly'|'table': {mode!r}")
@@ -320,6 +439,32 @@ def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
     ys_u = np.array([np.mean(uniq[x]) for x in xs_u])
     cross = float(max((max(v) - min(v) for v in uniq.values()), default=0.0))
 
+    if mode == "table" and knots is not None and axis == "mach":
+        try:
+            surface = table_on_knots(xs, vals, knots)
+        except ValueError as e:
+            # 표본이 닿는 절점이 둘 미만 — 표를 세울 수 없으니 상수로 굳히고 사유를 남긴다(옛 규칙의 한 점 분기와 같다)
+            mean = float(np.mean(vals))
+            out = {"kind": "constant", "slot": slot, "value": mean,
+                   "max_residual": float(np.max(np.abs(vals - mean))), "axes_detected": detected,
+                   "cross_axis_residual": cross, "knots": [float(c) for c in knots],
+                   "note": f"절점 위 표를 세울 수 없어 상수로 굳혔다 — {e}"}
+            if excluded:
+                out["axes_excluded"] = excluded
+            return out
+        report = dict(surface)
+        report.update({
+            "kind": "table", "slot": slot, "axes_detected": detected, "axis": axis,
+            "cross_axis_residual": cross, "max_residual": surface["sample_residual"],
+            "knots": [float(c) for c in knots],
+        })
+        if excluded:
+            report["axes_excluded"] = excluded
+        return {"kind": "table", "slot": slot,
+                "table": Table({axis: np.asarray(surface["breakpoints"])}, np.asarray(surface["values"]),
+                               name=slot, extrapolate="clip"),
+                "report": report}
+
     if mode == "table":
         if len(xs_u) < 2:
             # 지배 축에 서로 다른 축값이 하나뿐 — 변동은 전부 다른 축에서 온 것이다.
@@ -351,6 +496,8 @@ def fit_slot(slot: str, samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
         })
         if excluded:
             report["axes_excluded"] = excluded
+        if knots is not None:
+            report["note"] = f"지배 축 {axis} — 마하 절점 집합을 쓸 수 없어 표본 축값마다 분할점을 두었다(옛 규칙)"
         return {"kind": "table", "slot": slot,
                 "table": Table({axis: xs_u}, ys_u, name=slot, extrapolate="clip"),
                 "report": report}
@@ -506,7 +653,8 @@ def _drop_failed_samples(samples: dict, points, failed: dict | None) -> tuple:
 
 
 def fit_slots(gain_samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
-              max_degree=4, max_segments=4, mode="poly", axes=None, exclude=None) -> dict:
+              max_degree=4, max_segments=4, mode="poly", axes=None, exclude=None,
+              knots_by_slot=None) -> dict:
     """전 자리 적합 — {"tables": {자리: PolyTable|Table}, "constants": {자리: 값}, "reports"}.
 
     mode="table"이면 tables 항목이 Table(선형 보간)이다 — 모듈 머리말의 두 표현.
@@ -522,6 +670,9 @@ def fit_slots(gain_samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
     내린다. 뺀 표본은 보고의 `excluded_samples`에 값·사유와 함께 남고, 그 점의 게인은 이웃 표본의 보간으로
     정해져 VERIFY가 **그 보간값으로** 판정한다. 표본이 `_MIN_KEPT_SAMPLES` 미만으로 남으면 빼지 않고
     `exclusion_withheld`로 보고한다. 표현(mode)과 무관하게 걸린다.
+
+    knots_by_slot: {자리: 마하 절점 좌표} — 표 모드에서 그 자리의 표를 절점 위에 세운다(fit_slot knots). 없는 자리·None은
+    옛 규칙(표본 마하마다 분할점). 다항 모드는 쓰지 않는다.
     """
     _allowed_axes(axes)  # 샘플이 없어도 잘못된 제한은 여기서 말한다
     tables, constants, reports = {}, {}, {}
@@ -530,6 +681,7 @@ def fit_slots(gain_samples: dict, points, *, flat_tol=0.02, tol_fit=0.02,
         out = fit_slot(
             slot, samples, points, flat_tol=flat_tol, tol_fit=tol_fit,
             max_degree=max_degree, max_segments=max_segments, mode=mode, axes=axes,
+            knots=(knots_by_slot or {}).get(slot) if mode == "table" else None,
         )
         if out["kind"] == "constant":
             constants[slot] = out["value"]

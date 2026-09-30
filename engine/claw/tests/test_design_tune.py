@@ -6,7 +6,7 @@ import pytest
 
 from claw.common.contracts import TrimCase
 from claw.design import (
-    ROLE_ANCHOR,
+    ROLE_DESIGN,
     LinearModelSet,
     OperatingPoint,
     PointSet,
@@ -214,12 +214,12 @@ def test_tune_points_skips_untrimmable(setup):
         case = TrimCase(name=case_name(m, 1000.0, 200.0), mach=m, alt=1000.0, fuel=200.0)
         tr = trim_level(ac, case, fingerprint="fp")
         trims[case.name] = tr
-        pt = OperatingPoint(case=case, role=ROLE_ANCHOR, origin="coarse")
+        pt = OperatingPoint(case=case, role=ROLE_DESIGN, origin="coarse")
         pt.trimmable = True
         points.add(pt)
     bad = OperatingPoint(
         case=TrimCase(name=case_name(0.9, 1000.0, 200.0), mach=0.9, alt=1000.0, fuel=200.0),
-        role=ROLE_ANCHOR, origin="coarse",
+        role=ROLE_DESIGN, origin="coarse",
     )
     bad.trimmable = False
     points.add(bad)

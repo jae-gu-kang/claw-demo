@@ -21,10 +21,10 @@ closure 조성(closure.py) × pi_loop 전체 조성(작동기 2차계 + Padé �
 스케줄 항목은 Table이든 다항(PolySchedule spec)이든 `axis_names` + `interp(**좌표)`
 덕 타이핑으로 소비한다 (blocks/lookup.py의 Table 소비와 같은 원칙).
 
-검증점 생성 기본값(05 §3 — 01 §3.4 [TBD] "보간 구간 검증점 밀도"의 확정): breakpoint 이상
-역할 점의 축정렬 인접쌍마다 등간 내분점 n_between개(기본 1 = 중점, v1.41 파라미터화 —
-라운드 우선 순서라 예산이 끊겨도 구간당 1점이 먼저 찬다). anchor는 breakpoint 역할을
-겸하므로(points.at_least 서열) 트림 앵커 인접 구간의 검증점도 함께 나온다.
+검증점 생성(validation_points — 05 §11.6 ①②④의 첫 적용, 이관 3단계): 평가 대상 표들의 **절점 합집합**으로 마하 구간을
+나누고 구간마다 등간 내분점 n_between개(기본 1 = 중점, 라운드 우선 순서라 예산이 끊겨도 구간당 1점이 먼저 찬다)를 설계점
+행(고도·연료)마다 놓는다. 고도·연료 축은 설계점 인접쌍의 중점이다(마하 1축 표라 그 축에는 절점이 없다). 종전에는
+breakpoint 이상 점의 인접쌍 중점이라 설계점이 곧 절점이던 규칙에 묶여 있었다.
 
 점의 세 상태를 구분해 낸다 (종전에는 뒤 둘이 한 덩어리였다):
 - 트림 수렴 + 채택 → 정상 판정, 실패는 처방으로
@@ -45,7 +45,7 @@ from claw.design.closure import (
     rate_loop_crossover,
 )
 from claw.design.points import (
-    ROLE_BREAKPOINT,
+    ROLE_DESIGN,
     ROLE_VALIDATION,
     OperatingPoint,
     case_name,
@@ -205,43 +205,109 @@ def _apply_sign_check(entry: dict, eff: dict, design: dict, slots) -> None:
         )
 
 
-def midpoint_validation_points(points, *, n_between: int = 1) -> list:
-    """breakpoint 이상 역할 인접쌍의 검증점 — 구간당 n_between개 등간 내분점 (05 §3).
+# 막힌 내분점을 옮길 때 몇 단계까지 잘게 볼지 — 칸 폭의 1/2 → 1/4 → 1/8 이웃. 3단계면 구간 안 후보가 n+1칸마다 14개라
+# 설계점이 그 전부를 덮는 일은 REFINE 깊이(3)에서 없다. 실측 근거는 없다 [기본값]
+_FALLBACK_DEPTH = 3
 
-    기본 1 = 종전 중점과 동일. 반환은 **라운드 우선**(전 구간의 1번째 점 → 2번째 …)
-    이다 — VERIFY가 예산 소진 시 목록 앞에서 끊으므로, 밀도를 올려도 "구간당 최소
-    1점" 커버리지가 한 구간의 2·3번째 점보다 먼저 찬다. 각 라운드 안에서 내분점은
-    중점에서 가까운 순(k = ⌈n/2⌉, … 바깥쪽)으로 — **홀수 n**에서는 첫 라운드가 곧
-    종전 중점이라 기존 검증점 좌표가 이름째 재사용된다(트림 캐시 적중). 짝수 n은
-    등간 내분점에 중점(t=½)이 없어 좌표가 전부 새로 잡힌다 (리뷰 정정).
-    이미 있는 좌표는 만들지 않는다. origin은 `midpoint:` 접두 유지(coverage 집계 키).
-    """
+
+def _fractions(t, step, depth=_FALLBACK_DEPTH) -> list:
+    """내분점 t가 막혔을 때 옮길 순서 — t 자신, 그다음 칸 폭 step의 반·4분·8분 이웃(가까운 것부터, 왼쪽 먼저).
+
+    n_between=1(t=½, step=½)이면 ½ → ¼ → ¾ → ⅛ → ⅜ → ⅝ → ⅞. 이웃은 기본 내분점 사이(칸 안)에만 서서 다른 라운드의
+    기본 내분점과 겹치지 않는다."""
+    out = [t]
+    for d in range(1, depth + 1):
+        h = step / (2 ** d)
+        offs = sorted({(2 * j + 1) * h for j in range(2 ** (d - 1))})
+        for o in offs:
+            out.extend([t - o, t + o])
+    return [f for f in out if 0.0 < f < 1.0]
+
+
+def validation_candidates(points, knots_union, *, n_between: int = 1) -> dict:
+    """검증점 후보 — {"candidates": [(이름, mach, alt, fuel, origin)], "moved": n, "unplaceable": n}.
+
+    candidates는 라운드 우선·이름 중복 없음이고 이미 있는 검증점 자리도 든다(validation_points가 새 점만 추린다).
+    **설계점 자리는 후보가 아니다** — 설계점은 그 자신이 표 적합의 표본이라 거기서 재면 보간이 아니라 적합 잔차다.
+    구간 중점에 설계점이 있으면(REFINE 이분 = 절점 구간 중점이라 흔하다) 다음 빈 내분점(¼ → ¾ → ⅛ …)으로 옮긴다.
+    moved는 옮긴 수(정보용 — 검증 구간 수에 더하지 않는다), unplaceable은 빈 자리를 못 찾은 구간 수다.
+    좌표는 변하는 축만 REFINE과 같은 자릿수(refine._ROUND)로 반올림한다 — 이름이 REFINE 설계점과 맞아야 겹침을 알아본다."""
+    from claw.design.refine import _ROUND  # 순환 import 회피 — 중점 반올림 자릿수의 정본은 refine
+
     if n_between < 1:
         raise ValueError(f"n_between은 1 이상: {n_between}")
     # 중점 우선 라운드 순서 — n=3이면 [2, 1, 3]/(3+1): 중점, 안쪽, 바깥쪽
     ks = sorted(range(1, n_between + 1), key=lambda k: abs(2 * k - (n_between + 1)))
-    out = []
-    seen = set(points.names())
-    pairs = [(points.get(a).case, points.get(b).case, a, b)
-             for a, b, _axis in points.adjacent_pairs(ROLE_BREAKPOINT)]
-    for k in ks:
-        t = k / (n_between + 1.0)
-        for ca, cb, a, b in pairs:
-            pt = {
-                "mach": ca.mach + (cb.mach - ca.mach) * t,
-                "alt": ca.alt + (cb.alt - ca.alt) * t,
-                "fuel": ca.fuel + (cb.fuel - ca.fuel) * t,
-            }
-            name = case_name(pt["mach"], pt["alt"], pt["fuel"])
-            if name in seen:
+    step = 1.0 / (n_between + 1.0)
+    rows: dict = {}
+    for p in points.by_role(ROLE_DESIGN):
+        # 행의 마하 범위는 채택한 설계점으로 잰다 — 트림이 안 서는 끝점(최대 수평 속도 위 등)까지 넣으면 그 너머 구간에
+        # 표본 없는 검증점이 선다(쇼케이스 M0.23 — 트림 불가). 그 구간은 표본이 없어 표가 끝값으로 clip하는 자리다
+        if p.trimmable is not False:
+            rows.setdefault((p.case.alt, p.case.fuel), []).append(p.case.mach)
+    knots = sorted(float(k) for k in knots_union)
+    intervals = list(zip(knots, knots[1:]))
+    pairs = [(points.get(a).case, points.get(b).case, a, b, axis)
+             for a, b, axis in points.adjacent_pairs(ROLE_DESIGN) if axis != "mach"]
+    out, seen = [], set()
+    moved = unplaceable = 0
+
+    def _is_design(name):
+        return name in points and points.get(name).role == ROLE_DESIGN
+
+    def _place(coord_at, t, origin, ok=lambda c: True):
+        """t부터 막히지 않은 첫 내분점에 둔다 — coord_at(f) → (mach, alt, fuel)."""
+        nonlocal moved, unplaceable
+        for i, f in enumerate(_fractions(t, step)):
+            m, a, fu = coord_at(f)
+            if not ok((m, a, fu)):
                 continue
-            seen.add(name)
-            out.append(OperatingPoint(
-                case=TrimCase(name=name, mach=pt["mach"], alt=pt["alt"], fuel=pt["fuel"]),
-                role=ROLE_VALIDATION,
-                origin=f"midpoint:{a}|{b}",
-            ))
-    return out
+            name = case_name(m, a, fu)
+            if _is_design(name):
+                continue
+            if i:
+                moved += 1
+            if name not in seen:
+                seen.add(name)
+                out.append((name, m, a, fu, origin))
+            return
+        unplaceable += 1
+
+    for k in ks:
+        t = k * step
+        for (alt, fuel), machs in sorted(rows.items()):
+            lo, hi = min(machs), max(machs)
+            for ka, kb in intervals:
+                if not lo <= round(ka + (kb - ka) * t, _ROUND) <= hi:
+                    continue  # 이 행 설계점 범위 밖 구간(끝값 clip) — 4단계 clip 검증점의 몫
+                _place(lambda f, ka=ka, kb=kb, alt=alt, fuel=fuel: (round(ka + (kb - ka) * f, _ROUND), alt, fuel),
+                       t, f"midpoint:M{ka:.12g}|M{kb:.12g}",
+                       ok=lambda c, lo=lo, hi=hi: lo <= c[0] <= hi)
+        for ca, cb, a, b, axis in pairs:
+            def _at(f, ca=ca, cb=cb, axis=axis):
+                c = {ax: getattr(ca, ax) + (getattr(cb, ax) - getattr(ca, ax)) * f for ax in ("mach", "alt", "fuel")}
+                c[axis] = round(c[axis], _ROUND)
+                return c["mach"], c["alt"], c["fuel"]
+            _place(_at, t, f"midpoint:{a}|{b}")
+    return {"candidates": out, "moved": moved, "unplaceable": unplaceable}
+
+
+def validation_points(points, knots_union, *, n_between: int = 1) -> list:
+    """검증점 — 절점 합집합의 마하 구간 내분점 × 설계점 행 + 고도·연료 축 설계점 인접쌍 내분점 (05 §11.6).
+
+    - 마하: knots_union(평가 대상 표들의 절점 합집합 — knots.union_knots)의 이웃 절점 구간마다 등간 내분점 n_between개.
+      어느 표에서든 보간 구간이 바뀌는 자리를 놓치지 않게 합집합을 쓴다(독립 집합을 가진 표의 절점도 든다). 설계점 행
+      (고도·연료 조합)마다 그 행 채택 설계점의 마하 범위 안에서만 놓는다 — 범위 밖은 끝값 clip 구간이라 4단계(clip 검증점)의 몫이다
+    - 고도·연료: 그 축의 설계점 인접쌍 내분점(마하 1축 표라 그 축에는 절점이 없다 — 표본 행 사이를 본다)
+    - 내분점 자리에 설계점이 있으면 다음 빈 내분점으로 옮긴다(validation_candidates) — 구간마다 표본 밖 검증점이 선다
+    - 반환은 **라운드 우선**(전 구간의 1번째 점 → 2번째 …), 라운드 안에서 내분점은 중점에서 가까운 순 — VERIFY가 예산
+      소진 시 목록 앞에서 끊으므로 구간당 최소 1점이 먼저 찬다(종전 규칙과 같은 순서)
+    - 이미 있는 검증점은 다시 만들지 않는다(멱등). origin은 `midpoint:` 접두(coverage 집계 키)
+    points: 설계 보기(designable — 트림 전 제외 점은 행·범위에 들지 않는다).
+    """
+    cand = validation_candidates(points, knots_union, n_between=n_between)["candidates"]
+    return [OperatingPoint(case=TrimCase(name=name, mach=m, alt=a, fuel=f), role=ROLE_VALIDATION, origin=origin)
+            for name, m, a, f, origin in cand if name not in points]
 
 
 def scheduled_margin_map(
@@ -250,7 +316,7 @@ def scheduled_margin_map(
     actuator_wn=None, actuator_zeta=None, delay_s=0.0, pade_order=2,
     rate_filters=None, on_progress=None,
 ) -> dict:
-    """전 역할 점(anchor+breakpoint+validation)의 스케줄 인지 검증 + 판정.
+    """전 점(설계점 + 검증점)의 스케줄 인지 검증 + 판정 — 설계점도 표를 평가한 게인으로 본다(설계점은 절점이 아니다).
 
     trims: {이름: TrimResult} — 있는 것은 재사용, 없는 점은 서펜타인 순서로
     trim_batch(인접 시드) 후 병합한다 (호출자 dict를 제자리 갱신).
@@ -279,7 +345,7 @@ def scheduled_margin_map(
 
     cases = {}
     aborted = None
-    pts = points.at_least(ROLE_VALIDATION)
+    pts = list(points)
     total = len(pts)
     for done, pt in enumerate(pts, start=1):
         name = pt.case.name

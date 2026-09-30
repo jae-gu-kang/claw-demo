@@ -1,13 +1,15 @@
 """역할(role) 있는 운영점 집합 — 자동 설계 루프의 단일 정본 상태.
 
-세 역할은 문서(01 §3.4 · 01 §4.1)의 세 개념을 타입으로 구분한 것이다:
-- anchor     : 트림·선형화점 (플랜트를 실제로 아는 점)
-- breakpoint : 게인 스케줄 격자점 (게인이 고정되는 점)
-- validation : 마진 검증점 (보간 구간을 확인하는 점)
+역할은 둘이다 (05 §2 · 05 §11.4 — 이관 3단계에서 역할 서열 폐지):
+- design     : 설계점 — 트림·선형화하고 게인을 튜닝하는 점. 튜닝값은 적합의 **표본**이다
+- validation : 검증점 — 스케줄 표를 실제로 평가해 마진을 보는 점
 
-역할은 서열이 있고(validation < breakpoint < anchor) 승격은 **단방향 래칫**이다 —
-분류기(classify)가 검증점을 breakpoint·anchor로 올릴 수는 있어도 되돌릴 수 없어,
-이터레이션이 같은 점을 두고 진동하지 않는다 (orchestrator 종료 보장의 한 겹).
+게인 표의 **절점**은 점이 아니라 따로 둔 집합이다(design/knots.py — 표별 절점 집합). 종전에는 anchor(트림점) >
+breakpoint(격자점) > validation 서열이 있었고, 튜닝한 마하마다 절점이 되어 설계점을 늘리면 절점도 늘었다(쇼케이스 표
+자리마다 36점 — 05 §11.13 3단계의 원인). 설계점과 절점을 떼어 서열이 필요 없어졌다.
+
+편입(promote)은 검증점 → 설계점 한 방향뿐이다 — 되돌리는 길이 없어 이터레이션이 같은 점을 두고 진동하지 않는다
+(orchestrator 종료 보장의 한 겹). 옛 저장본의 anchor·breakpoint는 설계점으로 읽는다(from_dict — 이력에 사유를 남긴다).
 
 serpentine()은 web/js/lib/grid.js serpentineCases의 Python 이식 — 의도적 중복이다
 (웹은 수동 격자, 엔진은 자동 격자). 리스트상 인접 = 물리 인접이 되어
@@ -22,10 +24,13 @@ from dataclasses import dataclass, field
 from claw.common.contracts import TrimCase
 from claw.trim import saturation_detail
 
+ROLE_DESIGN = "design"
 ROLE_VALIDATION = "validation"
-ROLE_BREAKPOINT = "breakpoint"
-ROLE_ANCHOR = "anchor"
-ROLE_RANK = {ROLE_VALIDATION: 0, ROLE_BREAKPOINT: 1, ROLE_ANCHOR: 2}
+ROLES = (ROLE_DESIGN, ROLE_VALIDATION)
+# 옛 역할 서열의 이름 — 저장본을 읽을 때만 쓴다(설계점으로 옮긴다). 둘 다 게인을 정하던 점이다: 앵커는 튜닝했고,
+# breakpoint는 승격 게인을 적합 표본으로 넣었다 — 새 모델에서는 튜닝하는 설계점이 그 일을 한다
+LEGACY_DESIGN_ROLES = ("anchor", "breakpoint")
+LEGACY_ROLE_REASON = "legacy:role_hierarchy_removed"
 
 AXES = ("mach", "alt", "fuel")  # fcl/schedule.py SCHED_VARS와 같은 축 — 스케줄 변수가 곧 격자 축
 
@@ -103,6 +108,15 @@ def pre_excluded(pt) -> bool:
     return v is not None and v["trim"]["status"] in PRE_TRIM_STATES
 
 
+def was_midpoint(pt) -> bool:
+    """중점 검증점으로 들어온 점인가 — 지금 출처든, 편입 전 출처(이력)든. coverage의 「검증한 구간」 집계 키다.
+
+    편입이 출처를 `promoted:`로 바꾸므로 지금 출처만 보면 편입된 검증점이 그 구간을 검증한 사실이 사라진다."""
+    if str(pt.origin).startswith("midpoint:"):
+        return True
+    return any(str(h.get("origin", "")).startswith("midpoint:") for h in pt.history)
+
+
 def case_name(mach: float, alt: float, fuel: float) -> str:
     """격자 값 그대로의 정본 이름 — 반올림하지 않는다 (web grid.js nameCases 원칙).
 
@@ -122,19 +136,19 @@ class OperatingPoint:
     버리지 않고 "여기는 안 된다"를 남긴다), True=채택. 판정에서 세울 때는 verdict["adopted"] 그대로다.
     verdict: 그 채택을 낸 조건 판정 전체(opspace/verdict.py condition_verdict) — 제외 범주·사유가 여기 있다.
     None이면 판정 없이 세운 trimmable(옛 결과·손으로 세운 점)이다.
-    history: 승격 이력 [{"from","to","reason"}] — 감사 추적.
+    history: 역할 이력 [{"from","to","reason"(, "origin")}] — 편입·옛 역할 이관의 감사 추적.
     """
 
     case: TrimCase
     role: str
-    origin: str = ""  # 'coarse' | 'refine' | 'midpoint' | 'promoted:<사유>'
+    origin: str = ""  # 'coarse' | 'refine' | 'midpoint:…' | 'add_validation:…' | 'promoted:<사유>'
     history: list = field(default_factory=list)
     trimmable: bool | None = None
     verdict: dict | None = None
 
     def __post_init__(self):
-        if self.role not in ROLE_RANK:
-            raise ValueError(f"미정의 역할 {self.role!r} — 허용: {sorted(ROLE_RANK)}")
+        if self.role not in ROLES:
+            raise ValueError(f"미정의 역할 {self.role!r} — 허용: {list(ROLES)}")
 
     @property
     def name(self) -> str:
@@ -161,11 +175,16 @@ class OperatingPoint:
         case = TrimCase(
             name=d["name"], mach=float(d["mach"]), alt=float(d["alt"]), fuel=float(d["fuel"])
         )
+        role, history = d["role"], list(d.get("history", ()))
+        if role in LEGACY_DESIGN_ROLES:
+            # 옛 서열의 앵커·breakpoint → 설계점. 조용히 바꾸지 않고 이력에 남긴다 — 화면이 「옛 저장본에서 옮김」을 말할 수 있게
+            history.append({"from": role, "to": ROLE_DESIGN, "reason": LEGACY_ROLE_REASON})
+            role = ROLE_DESIGN
         return cls(
             case=case,
-            role=d["role"],
+            role=role,
             origin=d.get("origin", ""),
-            history=list(d.get("history", ())),
+            history=history,
             trimmable=d.get("trimmable"),
             verdict=copy.deepcopy(d.get("verdict")),  # 옛 결과에는 없다 — 미판정
         )
@@ -204,19 +223,17 @@ class PointSet:
             raise ValueError(f"케이스 이름 중복: {pt.case.name} — 같은 좌표가 두 번 들어왔다")
         self._points[pt.case.name] = pt
 
-    def promote(self, name: str, new_role: str, reason: str) -> OperatingPoint:
-        """역할 승격 — 단방향 래칫. 역행(강등)·제자리는 ValueError."""
-        if new_role not in ROLE_RANK:
-            raise ValueError(f"미정의 역할 {new_role!r} — 허용: {sorted(ROLE_RANK)}")
+    def promote(self, name: str, reason: str) -> OperatingPoint:
+        """검증점 → 설계점 편입 — 유일한 역할 변경이고 단방향이다. 설계점을 다시 부르면 ValueError.
+
+        출처는 `promoted:<사유>`(05 §11.4)로 바꾸고 편입 전 출처는 이력에 남긴다 — 중점 검증점이었다는 사실은
+        coverage가 이력에서 센다(was_midpoint)."""
         pt = self._points[name]
-        if ROLE_RANK[new_role] <= ROLE_RANK[pt.role]:
-            raise ValueError(
-                f"{name}: {pt.role} → {new_role} 승격 불가 — 역할은 단방향 래칫 "
-                "(validation < breakpoint < anchor)"
-            )
-        pt.history.append({"from": pt.role, "to": new_role, "reason": reason})
-        pt.role = new_role
-        pt.origin = pt.origin or f"promoted:{reason}"
+        if pt.role != ROLE_VALIDATION:
+            raise ValueError(f"{name}: {pt.role} — 편입은 검증점 → 설계점 한 방향뿐이다")
+        pt.history.append({"from": pt.role, "to": ROLE_DESIGN, "reason": reason, "origin": pt.origin})
+        pt.role = ROLE_DESIGN
+        pt.origin = f"promoted:{reason}"
         return pt
 
     def designable(self) -> "PointSet":
@@ -229,22 +246,24 @@ class PointSet:
         """정확히 그 역할인 점들 (선언 순서)."""
         return [p for p in self._points.values() if p.role == role]
 
-    def at_least(self, role: str) -> list:
-        """그 역할 이상인 점들 — anchor는 breakpoint·validation의 역할도 겸한다
-        (상위 역할이 하위 역할의 상위 집합이라는 서열 의미)."""
-        rank = ROLE_RANK[role]
-        return [p for p in self._points.values() if ROLE_RANK[p.role] >= rank]
+    def _of(self, role) -> list:
+        """역할 거르기 — None이면 전 점."""
+        if role is None:
+            return list(self._points.values())
+        if role not in ROLES:
+            raise ValueError(f"미정의 역할 {role!r} — 허용: {list(ROLES)}")
+        return self.by_role(role)
 
     # ── 인접 관계 ────────────────────────────────────────────────────────
 
-    def adjacent_pairs(self, role_at_least: str = ROLE_VALIDATION) -> list:
-        """축정렬 최근접 쌍 목록 [(name_a, name_b, axis)] — a가 축값이 작은 쪽.
+    def adjacent_pairs(self, role: str | None = None) -> list:
+        """축정렬 최근접 쌍 목록 [(name_a, name_b, axis)] — a가 축값이 작은 쪽. role을 주면 그 역할 점끼리만.
 
         한 축만 다르고 나머지 두 축이 같은 점들을 그 축으로 정렬해 이웃끼리 묶는다.
-        refine(플랜트 거리)·schedmap(검증점 중점 생성)·classify(이웃 판정)가 공유하는
+        refine(설계점 플랜트 거리)·schedmap(고도·연료 축 검증점)·classify(이웃 판정)가 공유하는
         인접 정의의 정본이다.
         """
-        pts = self.at_least(role_at_least)
+        pts = self._of(role)
         pairs = []
         for axis_i, axis in enumerate(AXES):
             rows: dict[tuple, list] = {}
@@ -258,18 +277,18 @@ class PointSet:
                     pairs.append((a.name, b.name, axis))
         return pairs
 
-    def neighbors(self, name: str, role_at_least: str = ROLE_VALIDATION) -> list:
+    def neighbors(self, name: str, role: str | None = None) -> list:
         """이 점과 축정렬 인접한 점 이름 목록."""
         out = []
-        for a, b, _axis in self.adjacent_pairs(role_at_least):
+        for a, b, _axis in self.adjacent_pairs(role):
             if a == name:
                 out.append(b)
             elif b == name:
                 out.append(a)
         return out
 
-    def flanking(self, name: str, role_at_least: str) -> tuple | None:
-        """이 점을 축상 양옆에서 끼는 role 이상 점 — (아래, 위, 축) 또는 None.
+    def flanking(self, name: str, role: str | None = None) -> tuple | None:
+        """이 점을 축상 양옆에서 끼는 점(role을 주면 그 역할만) — (아래, 위, 축) 또는 None.
 
         classify(플랜트 거리·이웃 통과 판정)와 orchestrator(검증점 추가 좌표)가
         공유하는 인접 정의 — adjacent_pairs와 같은 축정렬 규약이다.
@@ -278,7 +297,7 @@ class PointSet:
         vc = v.coords()
         for axis_i, axis in enumerate(AXES):
             lo = hi = None
-            for p in self.at_least(role_at_least):
+            for p in self._of(role):
                 if p.name == name:
                     continue
                 c = p.coords()
@@ -294,13 +313,13 @@ class PointSet:
 
     # ── trim_batch 시드 순서 ─────────────────────────────────────────────
 
-    def serpentine(self, role_at_least: str = ROLE_VALIDATION) -> list:
+    def serpentine(self, role: str | None = None) -> list:
         """서펜타인 순서의 TrimCase 목록 — 리스트 인접 = 물리 인접 (인접 시드 전제).
 
         web grid.js serpentineCases와 같은 규칙: (fuel, alt) 행 순회, 행마다 mach
         방향을 교대로 뒤집는다. 행 구성이 비균일해도(행마다 mach 다름) 성립한다.
         """
-        pts = self.at_least(role_at_least)
+        pts = self._of(role)
         rows: dict[tuple, list] = {}
         for p in pts:
             rows.setdefault((p.case.fuel, p.case.alt), []).append(p)

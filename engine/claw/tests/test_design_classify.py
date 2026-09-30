@@ -6,7 +6,7 @@ import pytest
 
 from claw.common.contracts import TrimCase
 from claw.design import (
-    ROLE_ANCHOR,
+    ROLE_DESIGN,
     ROLE_VALIDATION,
     LinearModelSet,
     MarginCriteria,
@@ -34,7 +34,7 @@ def _setup(machs, v_mach, alt=1000.0, fuel=200.0):
         tr = trim_level(ac, case, fingerprint="fp")
         assert tr.converged
         trims[case.name] = tr
-        role = ROLE_VALIDATION if v_mach is not None and m == v_mach else ROLE_ANCHOR
+        role = ROLE_VALIDATION if v_mach is not None and m == v_mach else ROLE_DESIGN
         pt = OperatingPoint(case=case, role=role, origin="test")
         pt.trimmable = True
         points.add(pt)
@@ -47,8 +47,8 @@ def _fail_cases(v, lo, hi, loop="pitch_att"):
     ok = {"kind": "margin", "pm_deg": 60.0, "gm_db": 10.0, "status": "ok"}
     return {
         v: {"role": "validation", "loops": {loop: entry}},
-        lo: {"role": "anchor", "loops": {loop: dict(ok)}},
-        hi: {"role": "anchor", "loops": {loop: dict(ok)}},
+        lo: {"role": "design", "loops": {loop: dict(ok)}},
+        hi: {"role": "design", "loops": {loop: dict(ok)}},
     }
 
 
@@ -196,8 +196,8 @@ def test_structural_gate_keeps_both_of_its_halves(monkeypatch):
     assert _slot_passes(unreached, "yaw_rate", MarginCriteria())
 
 
-def test_plant_variation_promotes_to_anchor():
-    """플랜트 급변(tol_plant 낮춤) — validation → anchor 승격, valley 동시 성립 시 병기."""
+def test_plant_variation_promotes_to_design():
+    """플랜트 급변(tol_plant 낮춤) — 검증점 → 설계점 편입."""
     ac, points, lms, trims = _setup((0.25, 0.35, 0.45), v_mach=0.35)
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.35, 0.25, 0.45))
     design = demo_design_gains()
@@ -206,12 +206,15 @@ def test_plant_variation_promotes_to_anchor():
         criteria=MarginCriteria(), tol_plant=0.05, **ACT,
     )
     assert out["verdict"] == "plant_variation"
-    assert out["action"]["type"] == "promote" and out["action"]["to"] == ROLE_ANCHOR
+    assert out["action"]["type"] == "promote" and out["action"]["to"] == ROLE_DESIGN
     assert out["evidence"]["plant"]["d_total"] > 0.05
 
 
-def test_gain_interp_valley_promotes_to_breakpoint():
-    """이웃 통과 + 보간 게인 괴리 큼 (plant 분기는 tol 완화로 배제) → breakpoint 승격."""
+def test_gain_interp_valley_adds_a_knot_and_promotes():
+    """이웃 통과 + 보간 게인 괴리 큼 (plant 분기는 tol 완화로 배제) → 그 자리 표에 절점 추가 + 설계점 편입.
+
+    종전 처방은 breakpoint 승격 + 최적 게인 주입이었다 — 승격한 점마다 절점이 늘던 결합(이관 3단계가 뗐다). 이제 편입한
+    점이 튜닝돼 표본이 되고, 절점은 이름 댄 표(slots)에만 는다. 최적 게인은 근거로만 싣는다(주입하지 않는다)."""
     ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     design = demo_design_gains()
@@ -227,8 +230,9 @@ def test_gain_interp_valley_promotes_to_breakpoint():
     )
     assert out["verdict"] == "gain_interp_valley"
     act = out["action"]
-    assert act["type"] == "promote" and act["to"] == "breakpoint"
-    assert act["gains"]["pitch.kp"] == pytest.approx(opt["pitch.kp"])
+    assert act == {"type": "add_knot", "point": v, "mach": pytest.approx(0.4), "slots": ["pitch.kp", "pitch.ki"],
+                   "promote": True, "note": act["note"]}
+    assert out["evidence"]["optimum"]["pitch.kp"] == pytest.approx(opt["pitch.kp"])
     assert out["evidence"]["interp_gap"]["max"] > 0.10
 
 
@@ -253,7 +257,7 @@ def test_simple_deficit_adds_validation():
 
 
 def test_classify_failures_supersede():
-    """같은 점의 다중 실패 — 승격 처방 중 상위 하나만 유효, 나머지는 supersede."""
+    """같은 점의 다중 실패 — 편입 처방은 하나만 유효, 나머지는 supersede."""
     ac, points, lms, trims = _setup((0.25, 0.35, 0.45), v_mach=0.35)
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.35, 0.25, 0.45))
     cases = _fail_cases(v, lo, hi)
@@ -273,22 +277,18 @@ def test_classify_failures_supersede():
     promotes = [a for a in actions if a["action"]["type"] == "promote"]
     assert promotes, "승격 처방이 없다"
     superseded = [a for a in actions if "superseded_by" in a]
-    assert len(promotes) - len(superseded) <= 1  # 같은 점 유효 승격은 1개
+    assert len(promotes) - len(superseded) <= 1  # 같은 점 유효 편입은 1개
     assert all(a["id"].count(":") == 2 for a in actions)
 
 
-def test_valley_on_anchor_is_a_fit_failure_not_a_sample_failure():
-    """앵커의 보간 괴리는 **적합 실패**다 — 게인 주입 처방은 구조적으로 무효다.
+def test_valley_on_a_design_point_adds_a_knot_in_table_mode():
+    """설계점의 보간 괴리는 **절점 부족**이다 — 그 점의 튜닝값은 이미 표본인데 표가 그 값을 못 지나간다.
 
-    승격은 래칫 위반이라 세션을 죽이므로 낼 수 없다. 그렇다고 "그 점의 최적 게인을
-    적합 샘플에 고정"하는 것도 답이 아니다: 앵커는 TUNE이 매 이터레이션 자유 게인
-    최적을 넣는 자리라 **이미 그 값이 샘플**이고, 병합에서 튜닝 샘플이 이긴다
-    (orchestrator._stage_fit setdefault). 종전에는 그런 처방을 refit_at으로 내고
-    applied로 기록해 이터 예산만 태웠다 — 반영해도 다음 판정이 그대로였다.
-
-    남은 설계변수는 적합 자체다 (허용치·구간 수).
+    표 모드는 그 마하에 절점을 더한다(편입할 것은 없다 — promote False). 다항 모드는 절점 집합이 없어 적합을 조인다
+    (tighten_fit). 종전 표 모드의 tighten_fit은 조일 적합이 없어 반영 때 건너뛰기만 했다 — 무효 카드가 예산을 태웠다.
+    게인 주입도 여전히 없다(주입은 이미 표본인 값을 다시 넣는 것이다).
     """
-    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=None)  # 전부 anchor
+    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=None)  # 전부 설계점
     v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
     design = demo_design_gains()
     opt = tune_point(lms.get(ac, trims[v]), design, **ACT)["gains"]
@@ -296,40 +296,28 @@ def test_valley_on_anchor_is_a_fit_failure_not_a_sample_failure():
         "pitch.kp": Table({"mach": (0.55, 0.65)},
                           (opt["pitch.kp"] * 3.0,) * 2, extrapolate="clip"),
     }
-    out = classify_margin_deficit(
-        ac, v, "pitch_att", points, lms, trims, tables, design,
-        _fail_cases(v, lo, hi), criteria=MarginCriteria(), tol_plant=99.0, **ACT,
-    )
+    args = (ac, v, "pitch_att", points, lms, trims, tables, design, _fail_cases(v, lo, hi))
+    out = classify_margin_deficit(*args, criteria=MarginCriteria(), tol_plant=99.0, **ACT)
     assert out["verdict"] == "fit_residual"
     act = out["action"]
-    assert act["type"] == "tighten_fit", "anchor에 승격·게인 주입 처방을 내면 안 된다"
-    assert act["slots"] == ["pitch.kp", "pitch.ki"]
-    assert "gains" not in act, "앵커의 샘플은 이미 최적 — 주입할 값이 없다"
+    assert (act["type"], act["promote"], act["slots"]) == ("add_knot", False, ["pitch.kp", "pitch.ki"])
+    assert act["mach"] == pytest.approx(0.4) and "gains" not in act
+    poly = classify_margin_deficit(*args, criteria=MarginCriteria(), tol_plant=99.0, fit_mode="poly", **ACT)
+    assert poly["verdict"] == "fit_residual" and poly["action"]["type"] == "tighten_fit"
+    assert poly["action"]["slots"] == ["pitch.kp", "pitch.ki"] and "gains" not in poly["action"]
 
 
-def test_valley_on_breakpoint_still_injects_the_optimum():
-    """breakpoint는 TUNE이 안 도는 자리라 최적 게인 주입이 **실제로** 값을 바꾼다.
+def test_plant_variation_is_not_prescribed_on_a_design_point():
+    """설계점에는 편입할 것이 없다 — 플랜트 거리가 커도 그 점은 이미 트림·튜닝하는 점이라 편입 처방을 내지 않는다.
 
-    앵커와 갈라 두지 않으면 둘 중 하나는 틀린 처방을 받는다.
-    """
-    from claw.design import ROLE_BREAKPOINT
-
-    ac, points, lms, trims = _setup((0.35, 0.4, 0.45), v_mach=0.4)
-    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.4, 0.35, 0.45))
-    points.promote(v, ROLE_BREAKPOINT, reason="test")
-    design = demo_design_gains()
-    opt = tune_point(lms.get(ac, trims[v]), design, **ACT)["gains"]
-    tables = {
-        "pitch.kp": Table({"mach": (0.55, 0.65)},
-                          (opt["pitch.kp"] * 3.0,) * 2, extrapolate="clip"),
-    }
+    종전에는 앵커에 anchor 승격을 내고 반영 쪽이 「이미 anchor」로 건너뛰었다 — 반영해도 아무것도 안 바뀌는 카드다."""
+    ac, points, lms, trims = _setup((0.25, 0.35, 0.45), v_mach=None)
+    v, lo, hi = (case_name(m, 1000.0, 200.0) for m in (0.35, 0.25, 0.45))
     out = classify_margin_deficit(
-        ac, v, "pitch_att", points, lms, trims, tables, design,
-        _fail_cases(v, lo, hi), criteria=MarginCriteria(), tol_plant=99.0, **ACT,
+        ac, v, "pitch_att", points, lms, trims, {}, demo_design_gains(), _fail_cases(v, lo, hi),
+        criteria=MarginCriteria(), tol_plant=0.001, **ACT,
     )
-    assert out["verdict"] == "gain_interp_valley"
-    assert out["action"]["type"] == "refit_at"
-    assert out["action"]["gains"]["pitch.kp"] == pytest.approx(opt["pitch.kp"])
+    assert out["verdict"] != "plant_variation" and out["action"]["type"] != "promote"
 
 
 def test_sign_flip_gets_its_own_verdict_not_promotion():
@@ -352,7 +340,9 @@ def test_sign_flip_gets_its_own_verdict_not_promotion():
         criteria=MarginCriteria(), tol_plant=0.001, **ACT,  # plant도 걸리게 낮춘다
     )
     assert out["verdict"] == "gain_sign_flip", "부호 뒤집힘이 다른 원인으로 분류됐다"
-    assert out["action"]["type"] == "refit_at"
+    # 그 점 마하에 절점 + 편입 — 튜닝값이 절점 표본이 된다(종전 refit_at 게인 주입은 옛 세션의 대기 카드에만 남는다)
+    assert out["action"]["type"] == "add_knot" and out["action"]["promote"] is True
+    assert out["action"]["slots"] == ["pitch.kp", "pitch.ki"]
     assert out["evidence"]["sign_flip"]["slots"] == ["pitch.ki"]
 
 
@@ -411,7 +401,7 @@ def test_failing_sibling_axis_does_not_escalate_this_slot():
     분류는 (점, 자리) 단위인데 구조 한계 판정이 **점 단위** status를 봤다. 그래서
     피치가 대역폭 붕괴로 infeasible인 점에서는, 자유 게인으로 멀쩡히 통과하는 롤의
     실패까지 structural_limit → escalate(적용 버튼 없음)가 됐다 — 원래 나왔어야 할
-    breakpoint 승격(실행 가능한 처방)이 사라진다.
+    절점 추가·편입(실행 가능한 처방)이 사라진다.
 
     피치 자세 설계값을 0으로 두면(부호를 몰라 튜닝하지 않음 — seed_required) 이 점의 자리별 상태가
     pitch_att infeasible / roll_att ok다. 종전에는 지연 0.6 s로 피치를 무너뜨렸는데, 그 지연에서는 요·롤 댐퍼를
@@ -438,7 +428,7 @@ def test_failing_sibling_axis_does_not_escalate_this_slot():
     )
     assert out["verdict"] == "gain_interp_valley", (
         f"롤 실패가 {out['verdict']}로 갔다 — 점 단위 status가 자리 판정을 오염시킨다")
-    assert out["action"]["type"] == "promote"
+    assert out["action"]["type"] == "add_knot" and out["action"]["promote"] is True
     # 근거에도 자리 단위 상태가 남아야 한다 (점 단위는 참고로만)
     assert out["evidence"]["tuned"]["status"] == "ok"
     assert out["evidence"]["tuned"]["point_status"] == "infeasible"

@@ -232,3 +232,12 @@ def test_load_pruned는_배제될_시계열을_파싱하지_않는다(tmp_path):
     with pytest.raises(ValueError):
         st.load("r1")
     assert _dump(load_pruned(st, "r1", "sim")[0]) == want
+
+
+def test_소견서_지시문이_설계점_검증점과_표별_절점을_말한다():
+    """절점 분리(05 §11.13 이관 3단계) — 점 역할이 둘(설계점·검증점)이고 표 절점은 따로다. 지시문이 옛 역할
+    이름(앵커·breakpoint)만 알면 소견서가 knots·add_knot을 못 읽는다. 옛 결과의 역할 이름도 함께 풀어 준다."""
+    from claw_server.brief import BRIEF_SYSTEM
+
+    for word in ("설계점", "검증점", "report.knots", "gain_export.knots", "add_knot", "anchor·breakpoint"):
+        assert word in BRIEF_SYSTEM, word

@@ -8,8 +8,8 @@
   "awaiting_approval"로 멈추고, apply_actions(승인 id들) 후 run()을 다시 부르면
   이어서 돈다. mode="auto"는 escalate를 제외한 전 처방을 자동 반영. 에스컬레이션
   (상위 설계 변경)은 **어느 모드든 자동 적용 없이 보고만**.
-- 종료 3겹: 점 예산(budget_points) + 승격 단방향 래칫(points.promote) +
-  이터레이션 상한(budget_iters). 수렴 판정: 전 점 통과(converged) ∨ 남은 실패가
+- 종료 4겹: 점 예산(budget_points) + 편입 단방향(points.promote — 검증점 → 설계점) + 절점 단조 성장·표당 상한
+  (knots.add_knot) + 이터레이션 상한(budget_iters). 수렴 판정: 전 점 통과(converged) ∨ 남은 실패가
   전부 escalation(escalated) ∨ 예산 소진(budget_exhausted).
 - 증분 재계산: 트림·선형모델은 (케이스, 지문) 캐시 재사용 — pipeline.Pipeline의
   DAG 캐시는 파라미터 지문 축이라 점집합 상태와 결이 달라 직접 채택하지 않는다
@@ -29,22 +29,32 @@ from claw.common.attitude import euler_to_quat
 from claw.design.classify import classify_failures
 from claw.design.criteria import MIN, MarginCriteria, target_conflicts
 from claw.design.fit import fit_quality, fit_slots
+from claw.design.knots import (
+    COMMON,
+    DEFAULT_KNOTS,
+    KnotSet,
+    add_knot,
+    check_knots_config,
+    initial_knot_sets,
+    knot_record,
+    union_knots,
+)
 from claw.design.grid import DEFAULT_ALTS, DEFAULT_FUEL_FRACS, coarse_grid, coarse_preflight, region_grid
 from claw.opspace.basegrid import base_grid
 from claw.design.linmodels import LinearModelSet
 from claw.design.points import (
     AXES,
-    ROLE_ANCHOR,
-    ROLE_BREAKPOINT,
-    ROLE_RANK,
+    ROLE_DESIGN,
     ROLE_VALIDATION,
+    ROLES,
     OperatingPoint,
     PointSet,
     case_name,
     pre_excluded,
+    was_midpoint,
 )
 from claw.design.refine import refine_trim_points
-from claw.design.schedmap import margin_delta, midpoint_validation_points, scheduled_margin_map
+from claw.design.schedmap import margin_delta, scheduled_margin_map, validation_candidates, validation_points
 from claw.design.tune import REASON_TEXT, TuneTargets, failed_gain_slots, tune_points
 from claw.env import isa_atmosphere
 from claw.opspace.verdict import VerdictContext
@@ -149,6 +159,10 @@ class AutoDesignConfig:
     actuator_zeta: float | None = None
     delay_s: float = 0.035
     pade_order: int = 2
+    # 표별 절점 집합의 초기 규칙·상한 (05 §11.5 · 이관 3단계) — {"rule", "n", "coords", "max_per_table"}. 기본 base_axis =
+    # 요구영역 기본 격자의 공통 마하 좌표(knots.DEFAULT_KNOTS). 절점은 설계점과 독립이라 REFINE·편입이 점을 늘려도 표의
+    # 분할점은 그대로고, 늘리는 길은 CLASSIFY의 add_knot 처방뿐이다(상한 max_per_table)
+    knots: dict = field(default_factory=lambda: dict(DEFAULT_KNOTS))
 
     def __post_init__(self):
         if self.mode not in ("gated", "auto"):
@@ -192,6 +206,7 @@ class AutoDesignConfig:
         self.sched_axes = axes
         if self.delay_s < 0 or self.pade_order < 1:
             raise ValueError("delay_s는 음수 불가, pade_order는 1 이상")
+        self.knots = check_knots_config(dict(self.knots))
         self._check_targets_meet_criteria()
 
     # 충돌 수준별 사유 — 합격선 충돌은 거절(ValueError)의 사유, 권장선 충돌은 경고 문구의 꼬리다
@@ -245,6 +260,7 @@ class AutoDesignConfig:
         d["alts"] = list(self.alts) if self.alts is not None else None
         d["fuels"] = list(self.fuels) if self.fuels is not None else None
         d["sched_axes"] = list(self.sched_axes)
+        d["knots"] = {k: (list(v) if isinstance(v, (list, tuple)) else v) for k, v in self.knots.items()}
         d["criteria"] = self.criteria.to_dict()
         d["targets"] = self.targets.to_dict()
         return d
@@ -252,6 +268,9 @@ class AutoDesignConfig:
     @classmethod
     def from_dict(cls, d: dict) -> "AutoDesignConfig":
         d = dict(d)
+        # 절점 설정이 없는 저장본은 이관 3단계 전 세션이다 — 그때 표는 튜닝한 마하마다 분할점이었다(samples 규칙).
+        # 새 기본값(base_axis)으로 읽으면 재개한 세션의 표 형상이 조용히 바뀐다
+        d.setdefault("knots", {**DEFAULT_KNOTS, "rule": "samples"})
         d["criteria"] = MarginCriteria.from_dict(d["criteria"])
         d["targets"] = TuneTargets.from_dict(d["targets"])
         for k in ("alts", "fuels", "sched_axes"):
@@ -412,11 +431,15 @@ class DesignSession:
         self.actuator: dict = {}
         self.gain_samples: dict = {}
         self.tune_meta: dict = {}
-        self.promoted_gains: dict = {}  # {slot: {이름: 값}} — valley 승격 breakpoint의 게인
-        # refit_at으로 **명시 고정**된 게인. promoted를 이긴다 — 같은 점이 이터를 넘어
-        # 다시 실패하면 새 최적이 들어와야 하는데, 한 겹 setdefault이던 동안에는
-        # 처음 들어간 승격 값이 계속 이겨 새 처방이 아무것도 안 바꿨다
+        # 옛 처방(이관 3단계 전)의 주입 게인 — {slot: {이름: 값}}. 새 처방(add_knot)은 게인을 주입하지 않고 점을 편입해
+        # 튜닝한다. 옛 세션의 대기 처방(promote to breakpoint · refit_at)을 반영할 때와 그 세션을 왕복할 때만 쓴다.
+        # refit_gains가 promoted를 이긴다(같은 점의 새 처방이 옛 값에 지지 않게 — 종전 규약 그대로)
+        self.promoted_gains: dict = {}
         self.refit_gains: dict = {}
+        # 표별 절점 집합(knots.py — 05 §11.5) — {이름: KnotSet}, 표(게인 자리) → 집합 이름. 첫 FIT이 config.knots 규칙으로
+        # 세우고 add_knot 처방만 늘린다. 비어 있으면 아직 FIT 전이다
+        self.knot_sets: dict = {}
+        self.table_knots: dict = {}
         self.fit_tighten = 0  # tighten_fit 반영 횟수 — 단조 증가 래칫 (종료 보장)
         self.fits: dict = {}
         self.sched_tables: dict = {}
@@ -434,6 +457,9 @@ class DesignSession:
         self.refine_report: dict = {}
         self.validation_wanted = 0
         self.validation_added = 0
+        # 검증 후보 중 이미 설계점인 자리 수(마지막 VERIFY) — 그 설계점이 그 구간의 검증을 겸한다
+        self.validation_moved = 0
+        self.validation_unplaceable = 0
         # COARSE 격자 출처 — "region_base_grid"(요구영역 기본 격자, 이관 2단계) | "coarse_grid"(요구영역 없는 기체의 옛 경로)
         # | None(COARSE 전·옛 세션). region_grid는 그 기본 격자 기록(점마다 트림 전 상태·선택 여부, 행, 선택 규칙 결과) —
         # 요구영역 커버리지(region_coverage)의 분모다. 옛 경로면 None
@@ -662,13 +688,40 @@ class DesignSession:
                 # 덮어써 같은 점이 영원히 재분류된다 (이터 예산만 태운다). 앵커에 대한
                 # 주입 처방은 이제 분류기가 아예 안 낸다 — fit_residual로 간다
                 target.setdefault(name, value)
-        out = fit_slots(samples, self.points, exclude=self._fit_exclusions(), **self._fit_params())
+        self._ensure_knots(list(samples))
+        knots_by_slot = {slot: list(self.knot_sets[name].coords) for slot, name in self.table_knots.items()}
+        out = fit_slots(samples, self.points, exclude=self._fit_exclusions(), knots_by_slot=knots_by_slot,
+                        **self._fit_params())
         self.sched_tables = out["tables"]
         self.sched_constants = out["constants"]
         self.fits = out["reports"]
         self._judge_fit_quality()
         cb(1, 1, "fit")
         self.stage = "VERIFY"
+
+    def _ensure_knots(self, slots):
+        """절점 집합이 없으면 config.knots 규칙으로 세우고, 처음 보는 자리는 공유 집합에 붙인다.
+
+        첫 FIT에서 한 번 세운다 — 그 뒤 설계점을 늘려도(REFINE·편입) 절점은 그대로다(05 §11.4). 공유 집합이 떼어져
+        사라졌으면(모든 표가 독립) 새 자리는 가장 먼저 세운 집합에 붙인다."""
+        if not self.knot_sets:
+            self.knot_sets, self.table_knots = initial_knot_sets(
+                self.config.knots, region_grid=self.region_grid, points=self.points.designable(), slots=slots)
+            return
+        home = COMMON if COMMON in self.knot_sets else next(iter(self.knot_sets))
+        for slot in slots:
+            self.table_knots.setdefault(slot, home)
+
+    def knot_record(self) -> dict:
+        """표별 절점 기록 — 결과·반출(provenance.knots)에 싣는 모양(knots.knot_record)."""
+        return knot_record(self.knot_sets, self.table_knots, self.fits)
+
+    def knots_summary(self) -> dict:
+        """보고용 절점 요약 — {"tables": {자리: 분할점 수}, "shared": 표 전부가 한 집합인가, "sets": 집합 수}."""
+        rec = self.knot_record()
+        tables = {slot: t["n"] for slot, t in rec["tables"].items()}
+        used = {t["set"] for t in rec["tables"].values()}
+        return {"tables": tables, "shared": len(used) <= 1, "sets": len(rec["sets"])}
 
     def _judge_fit_quality(self):
         """적합 품질 판정 — fits[slot]["quality"] 부착 (04 §10 갭의 소비자).
@@ -695,8 +748,15 @@ class DesignSession:
 
     def _stage_verify(self, aircraft, fingerprint, cb):
         c = self.config
-        # 트림 전 제외 점을 낀 구간에는 검증점을 두지 않는다 — 그 구간 한쪽은 설계하지 않은 점이다
-        wanted = midpoint_validation_points(self.points.designable(), n_between=c.n_validation_between)
+        # 검증 마하는 평가 대상 표들의 절점 합집합으로 나눈다(05 §11.6 ①) — 독립 집합을 가진 표의 절점도 든다.
+        # 트림 전 제외 점은 행·범위에 들지 않는다 — 설계하지 않은 점 쪽으로 검증점을 늘리지 않는다
+        view = self.points.designable()
+        union = union_knots(self.knot_sets, self.table_knots)
+        wanted = validation_points(view, union, n_between=c.n_validation_between)
+        # 내분점 자리에 설계점이 있어 옮긴 수·빈 자리를 못 찾은 구간 수 — 정보용이다. 설계점은 적합의 표본이라 그 자리
+        # 판정은 적합 잔차지 보간 검증이 아니다 — 검증 수에 더하지 않는다
+        cand = validation_candidates(view, union, n_between=c.n_validation_between)
+        self.validation_moved, self.validation_unplaceable = cand["moved"], cand["unplaceable"]
         self.validation_wanted = len(wanted)
         added = 0
         for pt in wanted:
@@ -806,12 +866,16 @@ class DesignSession:
         검증점 수는 **점집합 실물**로 센다 — 스테이지 카운터로 세면 VERIFY가 여러 번
         도는 이터레이션에서 마지막 패스 값만 남는다 (실측: 1차에서 15개를 넣고
         2차에서 예산 소진으로 0개를 넣었는데 보고가 0으로 나왔다). midpoint 유래
-        점은 나중에 breakpoint·anchor로 승격돼도 그 구간을 검증한 사실은 그대로다.
+        점은 나중에 설계점으로 편입돼도 그 구간을 검증한 사실은 그대로다(points.was_midpoint — 편입 전 출처는 이력에).
         """
         rr = self.refine_report
         return {
-            "validation_points": sum(
-                1 for p in self.points if str(p.origin).startswith("midpoint:")),
+            "validation_points": sum(1 for p in self.points if was_midpoint(p)),
+            # 내분점 자리에 설계점이 있어 다음 빈 내분점으로 옮긴 수(마지막 VERIFY) — 정보용, 검증 수에 더하지 않는다.
+            # 보강이 절점 구간 중점에 설계점을 넣으면 흔하다(공통 좌표 사이 이분 = 절점 구간 중점)
+            "midpoints_at_design_points": self.validation_moved,
+            # 빈 내분점을 못 찾은 구간 수 — 그 구간은 표본 밖 검증이 없다
+            "validation_unplaceable": self.validation_unplaceable,
             "validation_missing": max(0, self.validation_wanted - self.validation_added),
             "refine_remaining": rr.get("max_d_remaining"),
             "refine_tol": self.config.refine_tol,
@@ -830,13 +894,19 @@ class DesignSession:
             out.append(
                 f"보간 구간 검증점이 한 개도 없다 (요구 {missing}개가 점 예산"
                 f" {self.config.budget_points} 소진으로 못 들어갔다) — 판정된 자리가"
-                " 전부 자기 게인이 직접 튜닝된 앵커다. 스케줄이 breakpoint 사이에서"
+                " 전부 튜닝한 설계점이다. 스케줄이 절점 사이에서"
                 " 무너지는지는 보지 않았다"
             )
         elif missing:
             out.append(
-                f"보간 구간 {missing}개가 검증점 없이 남았다 (점 예산 소진, 검증된"
-                f" 구간은 {got}개) — 그 구간의 스케줄은 보지 않았다"
+                # got은 검증점 수다(구간 수가 아니다 — 편입된 검증점과 그 구간의 새 검증점이 함께 센다)
+                f"보간 구간 {missing}개가 검증점 없이 남았다 (점 예산 소진, 들어간"
+                f" 검증점은 {got}개) — 그 구간의 스케줄은 보지 않았다"
+            )
+        if cov["validation_unplaceable"]:
+            out.append(
+                f"보간 구간 {cov['validation_unplaceable']}개는 내분점마다 설계점이 있어 검증점을 둘 빈 자리가"
+                " 없었다 — 설계점 판정은 적합 잔차라 그 구간의 보간은 보지 않았다"
             )
         rem, tol = cov["refine_remaining"], cov["refine_tol"]
         if rem is not None and tol and rem > tol:
@@ -995,11 +1065,9 @@ class DesignSession:
     def failures_by_role(self) -> dict:
         """실패를 점 역할별로 — 같은 "실패 N"이 표현에 따라 다른 뜻을 갖기 때문이다.
 
-        표 모드(기본)에서는 앵커의 실효 게인이 **그 점의 튜닝값 자체**인 경우가 많다
-        (지배 축 좌표가 그 점 하나뿐이면 평균이 아니라 그 값이 그대로 들어간다). 그런
-        앵커가 통과하는 것은 "튜닝이 성립했다"는 말에 가깝고, 스케줄이 성립하는지를
-        말하는 것은 **점 사이(검증점)** 판정이다. 두 수를 합쳐만 내면 그 구별이 사라진다
-        — 다항 모드에서도 적합 괴리(앵커)와 보간 괴리(검증점)는 다른 처방으로 간다(§7).
+        키는 역할(design · validation). 설계점의 실효 게인은 표를 평가한 값이지만(설계점은 절점이 아니다 — 이관 3단계)
+        튜닝 표본이 그 자리에 있어 표가 가까이 지나간다. 설계점 실패는 「절점이 모자라 표가 표본을 못 지나감」(fit_residual
+        → add_knot), 검증점 실패는 「표본 사이의 보간」이라 처방이 갈린다(§7) — 두 수를 합쳐만 내면 그 구별이 사라진다.
         """
         out: dict = {}
         for f in self.margin_out.get("failures", ()):
@@ -1034,6 +1102,8 @@ class DesignSession:
             # 덮인 값)를 쓰면 자유 게인 최적이 적합 결과에 끌려가 g_opt가 틀린다
             criteria=c.criteria, design_base=self.design, targets=c.targets,
             tol_plant=c.refine_tol, tol_gain=c.tol_gain, **self._act_kw(),
+            # 설계점 보간 괴리의 처방이 표현에 따라 갈린다(표 → add_knot, 다항 → tighten_fit)
+            fit_mode=c.fit_mode,
             # 실패마다 진행 보고 — 여기가 한 실행에서 가장 긴 구간일 수 있다(실측: 실패
             # 56개 ≈ 25 s, 325개 ≈ 100 s). cb는 취소 요청이면 _Cancelled를 던진다 — 상태를
             # 아직 안 바꿨으므로 CLASSIFY부터 그대로 재개된다
@@ -1139,39 +1209,46 @@ class DesignSession:
             act = a["action"]
             if act["type"] == "escalate":
                 continue  # 상위 설계 변경은 자동 적용 금지 — 승인 목록에 있어도 무시
-            if act["type"] == "promote":
-                pt = self.points.get(act["point"])
-                # 래칫 방어 — 이미 그 역할 이상이면 승격을 **건너뛴다**. 분류기가
-                # 상위 역할 점에 승격을 내는 경로는 막아 두었지만(classify refit_at),
+            if act["type"] in ("promote", "add_knot"):
+                # 편입 — 검증점만 설계점이 된다. 이미 설계점이면(같은 점의 다른 자리 처방·옛 세션의 앵커 승격 카드)
+                # 건너뛰되 applied로 센다(아래 tighten_fit과 같은 규약: effect 레코드가 안 생기면 채점·봉인에서 빠진다).
                 # 여기서 터지면 run()이 못 잡아 세션 전량이 저장 없이 소실된다
-                if ROLE_RANK[pt.role] < ROLE_RANK[act["to"]]:
-                    self.points.promote(act["point"], act["to"], reason=a["verdict"])
-                    if act["to"] == ROLE_ANCHOR:
+                pt = self.points.get(act["point"])
+                wants_promote = act["type"] == "promote" or act.get("promote")
+                promoted = False
+                if wants_promote and pt.role == ROLE_VALIDATION:
+                    self.points.promote(act["point"], reason=a["verdict"])
+                    promoted = True
+                    # 플랜트 급변 편입은 그 점 양옆의 플랜트 거리를 다시 잰다(옛 앵커 승격과 같다)
+                    if act["type"] == "promote":
                         need_refine = True
-                else:
-                    a["skipped"] = f"이미 {pt.role} — 승격 불필요"
+                elif wants_promote and act["type"] == "add_knot":
+                    # 절점 추가 카드의 편입이 이미 된 것(같은 점의 다른 자리 카드가 먼저 편입) — 건너뜀이 아니라 참고다.
+                    # 건너뜀은 아무것도 안 한 카드에만 붙인다(절점은 아래에서 더해진다)
+                    a.setdefault("notes", []).append(f"이미 {pt.role} — 편입은 따로 하지 않았다")
+                elif wants_promote:
+                    a["skipped"] = f"이미 {pt.role} — 편입 불필요"
+                # 옛 처방(breakpoint 승격)이 실어 온 게인 — 옛 세션의 대기 카드에만 있다
                 for slot, v in (act.get("gains") or {}).items():
                     self.promoted_gains.setdefault(slot, {})[act["point"]] = float(v)
+                if act["type"] == "add_knot":
+                    self._apply_add_knot(a, promoted=promoted)
             elif act["type"] == "refit_at":
-                # breakpoint의 보간 괴리 — 역할은 그대로 두고 그 점의 최적 게인만
-                # 적합 샘플에 고정한다. **승격 게인을 이긴다** (refit_gains)
+                # 옛 처방(이관 3단계 전 세션의 대기 카드) — 그 점의 최적 게인을 적합 표본에 고정한다. **승격 게인을 이긴다**
                 for slot, v in (act.get("gains") or {}).items():
                     self.refit_gains.setdefault(slot, {})[act["point"]] = float(v)
             elif act["type"] == "tighten_fit":
-                # 앵커의 보간 괴리 — 샘플이 아니라 적합을 고친다 (단조 래칫).
+                # 설계점의 보간 괴리(다항 모드) — 샘플이 아니라 적합을 고친다 (단조 래칫).
                 # 상한에 닿아도 **applied로 센다**: continue로 빠지면 effect 레코드가
                 # 안 생겨 채점 대상에서 빠지고, 그러면 이 카드는 영원히 봉인되지
                 # 않은 채 매 이터 applicable로 다시 잡혀 아무것도 안 바꾸는 순환을
-                # 예산 소진까지 돈다. promote의 래칫 방어도 같은 규약이다
+                # 예산 소진까지 돈다. 편입의 건너뜀도 같은 규약이다
                 # (skipped를 남기되 applied로 센다)
                 if self.config.fit_mode != "poly":
-                    # 표 모드에는 조일 적합이 없다. 남은 어긋남은 **1축 붕괴**(같은 축값의
-                    # 다른 축 샘플을 평균) 탓이라 조이기로는 안 풀린다 — 사유를 달아
-                    # 건너뛰되 applied로는 센다(위 상한 분기와 같은 규약: effect 레코드가
-                    # 안 생기면 채점·봉인에서 빠져 매 이터 다시 잡힌다)
-                    a["skipped"] = ("표 모드 — 조일 적합이 없다. 이 어긋남은 스케줄 축(sched_axes"
-                                    " — 기본 마하) 하나로 펴면서 다른 축 샘플을 평균한 대가이고, 다축 표가"
-                                    " 있어야 풀린다 [백로그 05 §9]")
+                    # 표 모드에는 조일 적합이 없다 — 표 모드 처방은 add_knot이다(분류기가 더는 이 카드를 표 모드에 내지
+                    # 않는다. 옛 세션의 대기 카드만 여기 온다). 건너뛰되 applied로 센다
+                    a["skipped"] = ("표 모드 — 조일 적합이 없다. 표 모드의 설계점 보간 괴리는 절점 추가(add_knot)로"
+                                    " 푼다(이관 3단계)")
                 elif self.fit_tighten >= _FIT_TIGHTEN_MAX:
                     a["skipped"] = f"적합 조이기 상한({_FIT_TIGHTEN_MAX}회) 도달 — 더 조일 수 없다"
                 else:
@@ -1198,9 +1275,33 @@ class DesignSession:
         self.status = "running"
         return {"applied": applied, "next_stage": self.stage}
 
+    def _apply_add_knot(self, a, *, promoted=False):
+        """add_knot 처방 반영 — 이름 댄 표에 그 마하 절점(knots.add_knot). 결과를 카드에 싣는다(a["knot"]).
+
+        못 더했으면(이미 있음·상한·다항 모드) 사유를 남기되 applied로 센다 — 채점·봉인이 그 카드를 본다. 사유는 편입도 안
+        됐으면 skipped(아무것도 안 한 카드), 편입은 됐으면 notes(참고)다 — 한 일이 있는 카드를 건너뜀으로 그리지 않는다."""
+        act = a["action"]
+
+        def _nothing(why):
+            if promoted:
+                a.setdefault("notes", []).append(why)
+            else:
+                a["skipped"] = why
+
+        if self.config.fit_mode != "table":
+            _nothing("다항 모드 — 절점 집합을 쓰지 않는다(편입만 반영)")
+            return
+        if not self.knot_sets:
+            self._ensure_knots(list(act.get("slots") or ()))
+        res = add_knot(self.knot_sets, self.table_knots, act.get("slots") or (), act["mach"], reason=a["verdict"],
+                       point=act["point"], iter_n=self.iter_n, max_per_table=self.config.knots["max_per_table"])
+        a["knot"] = res
+        if not res["added"]:
+            _nothing(f"절점 추가 안 됨 — {res['skipped']}")
+
     def _add_validation_around(self, v_name):
         # 트림 전 제외 점은 이웃이 아니다 — 설계하지 않은 점 쪽으로 검증점을 늘리지 않는다
-        flank = self.points.designable().flanking(v_name, ROLE_VALIDATION)
+        flank = self.points.designable().flanking(v_name)
         if flank is None:
             return
         lo, hi, axis = flank
@@ -1298,15 +1399,15 @@ class DesignSession:
 
     def report(self) -> dict:
         c = self.config
-        roles = {r: len(self.points.by_role(r))
-                 for r in (ROLE_ANCHOR, ROLE_BREAKPOINT, ROLE_VALIDATION)}
+        roles = {r: len(self.points.by_role(r)) for r in ROLES}
         return {
             "status": self.status, "stage": self.stage, "iterations": self.iter_n,
             "points": roles, "n_points": len(self.points),
             "failures": len(self.margin_out.get("failures", ())),
-            # 실패가 앵커인지 점 사이인지 — 표 모드에서 앵커 통과는 튜닝 성립에 가깝고
-            # 스케줄 성립을 말하는 것은 검증점이다 (failures_by_role 머리말)
+            # 실패가 설계점인지 점 사이(검증점)인지 — 처방이 갈린다 (failures_by_role 머리말)
             "failures_by_role": self.failures_by_role(),
+            # 표별 절점 수와 공유 여부 — 설계점 수(points)와 따로 센다(05 §11.4 — 설계점을 늘려도 절점은 그대로)
+            "knots": self.knots_summary(),
             # 판정 수 — "실패 0"이 통과인지 미검증인지 화면이 구별할 수 있어야 한다
             "judged": self.judged_count(),
             # 판정·처방에서 뺀 엔벨로프 밖 점 수 — 제외했다는 사실 자체가 보고 대상이다
@@ -1467,12 +1568,16 @@ class DesignSession:
             "tune_meta": self.tune_meta,
             "promoted_gains": {s: dict(v) for s, v in self.promoted_gains.items()},
             "refit_gains": {s: dict(v) for s, v in self.refit_gains.items()},
+            "knot_sets": {n: ks.to_dict() for n, ks in self.knot_sets.items()},
+            "table_knots": dict(self.table_knots),
             "fit_tighten": self.fit_tighten,
             "applied_log": self.applied_log,
             "ineffective": dict(self.ineffective),
             "refine_report": dict(self.refine_report),
             "validation_wanted": self.validation_wanted,
             "validation_added": self.validation_added,
+            "validation_moved": self.validation_moved,
+            "validation_unplaceable": self.validation_unplaceable,
             "fits": self.fits,
             "sched_tables": {s: _table_to_dict(t) for s, t in self.sched_tables.items()},
             "sched_constants": dict(self.sched_constants),
@@ -1499,16 +1604,31 @@ class DesignSession:
         s.tune_meta = d.get("tune_meta", {})
         s.promoted_gains = {k: dict(v) for k, v in d.get("promoted_gains", {}).items()}
         s.refit_gains = {k: dict(v) for k, v in d.get("refit_gains", {}).items()}
+        s.knot_sets = {n: KnotSet.from_dict(k) for n, k in (d.get("knot_sets") or {}).items()}
+        s.table_knots = dict(d.get("table_knots") or {})
         s.fit_tighten = int(d.get("fit_tighten", 0))
         s.applied_log = list(d.get("applied_log", ()))
         s.ineffective = {k: int(v) for k, v in d.get("ineffective", {}).items()}
         s.refine_report = dict(d.get("refine_report", {}))
         s.validation_wanted = int(d.get("validation_wanted", 0))
         s.validation_added = int(d.get("validation_added", 0))
+        # 옛 validation_at_design(설계점 겹침을 검증으로 센 수)은 읽지 않는다 — 검증 수가 아니었다
+        s.validation_moved = int(d.get("validation_moved", 0))
+        s.validation_unplaceable = int(d.get("validation_unplaceable", 0))
         s.fits = d.get("fits", {})
         s.sched_tables = {k: _table_from_dict(v)
                           for k, v in d.get("sched_tables", {}).items()}
         s.sched_constants = dict(d.get("sched_constants", {}))
+        if "knot_sets" not in d and s.sched_tables:
+            # 이관 3단계 전 세션 — 표가 곧 절점이었다. 그 표들의 마하 축 합집합을 표본 규칙 집합으로 세운다: 표본이 그
+            # 절점 위에만 있어 다음 FIT이 같은 표를 낸다(표본이 빠진 자리의 절점은 그 표에서만 빠진다 — table_on_knots)
+            axes = sorted({float(x) for t in s.sched_tables.values() if not isinstance(t, PolyTable)
+                           and t.axis_names == ("mach",) for x in t.axes[0]})
+            if axes:
+                s.knot_sets = {COMMON: KnotSet(name=COMMON, axis="mach", coords=axes, source="samples",
+                                               history=[{"op": "init", "rule": "samples", "n": len(axes),
+                                                         "note": "이관 3단계 전 세션의 표 축에서"}])}
+                s.table_knots = {slot: COMMON for slot in (*s.sched_tables, *s.sched_constants)}
         s.margin_out = d.get("margin_out", {})
         s.actions = list(d.get("actions", ()))
         s.escalations = list(d.get("escalations", ()))
