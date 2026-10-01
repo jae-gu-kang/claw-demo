@@ -71,6 +71,58 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* jaegukang.com → brain → claw → te → jaegukang.com 사이트 순환 */
+.portal-nav {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: block;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+.portal-nav .portal-arrow {
+  position: absolute;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-50%);
+  color: var(--muted);
+  background: rgba(255, 255, 255, .9);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  pointer-events: auto;
+  transition: color .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+.portal-nav .portal-arrow:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, .96);
+}
+.portal-nav .portal-arrow.left { left: 14px; }
+.portal-nav .portal-arrow.right { right: 14px; }
+.portal-nav .portal-arrow svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@media (max-width: 1240px) {
+  .portal-nav { display: none; }
+}
+
 header {
   display: flex;
   align-items: center;
