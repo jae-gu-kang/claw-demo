@@ -42,7 +42,7 @@ from claw.pipeline.sweep import (PROBE_DH, PROBE_DPSI, PROBE_DV, nonadditivity, 
                                  sweep_plan)
 from claw.sim import check_law_plant_pairing
 from claw_server.refs import (REQUEST_CRITERIA_REJECTED, ReusePolicy, criteria_echo, profile_echo, resolve_criteria,
-                               resolve_profile, retried_states, retry_counts, retry_echo, reuse_counts, reuse_echo,
+                               resolve_profile, rescue_trims, retried_states, retry_counts, retry_echo, reuse_counts, reuse_echo,
                                stored_failures, trim_scope)
 from claw.trim import DEFAULT_RETRY, trim_batch
 from claw_server.routes.codegen import FlightCodeIn
@@ -287,8 +287,11 @@ def submit_openloop(req: OpenloopIn, request: Request, response: Response) -> di
             ),
             store=scope, reuse=req.reuse, retry=DEFAULT_RETRY,
         )
+        # 근거 해 재풀이(이관 7b)와 되울림의 상태 판정이 같은 근거 캐시를 쓴다
+        cache = {"aircraft": ac}
+        trs = rescue_trims(trs, profile, cache=cache, scope=scope, fingerprint=req.fingerprint)
         reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
-        retried = retry_echo(trs, retried_states(trs, profile, {"aircraft": ac}), DEFAULT_RETRY)
+        retried = retry_echo(trs, retried_states(trs, profile, cache), DEFAULT_RETRY)
         out = openloop_delta(
             ac, trs, shape, req.params, probe_rel=req.probe_rel,
             on_progress=lambda done, _t: job.report(
@@ -509,8 +512,11 @@ def submit_scan(req: ScanIn, request: Request, response: Response) -> dict:
             ),
             store=scope, reuse=req.reuse, retry=DEFAULT_RETRY,
         )
+        # 근거 해 재풀이(이관 7b)와 되울림의 상태 판정이 같은 근거 캐시를 쓴다
+        cache = {"aircraft": ac}
+        trs = rescue_trims(trs, profile, cache=cache, scope=scope, fingerprint=req.fingerprint)
         reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
-        retried = retry_echo(trs, retried_states(trs, profile, {"aircraft": ac}), DEFAULT_RETRY)
+        retried = retry_echo(trs, retried_states(trs, profile, cache), DEFAULT_RETRY)
         out = run_sweep(
             ac, trs, shape, plan,
             dt_plant=req.dt_plant, t_settle=req.t_settle, t_step=req.t_step,
@@ -649,8 +655,11 @@ def submit_evaluate(req: EvaluateIn, request: Request, response: Response) -> di
             ),
             store=scope, reuse=req.reuse, retry=DEFAULT_RETRY,
         )
+        # 근거 해 재풀이(이관 7b)와 되울림의 상태 판정이 같은 근거 캐시를 쓴다
+        cache = {"aircraft": ac}
+        trs = rescue_trims(trs, profile, cache=cache, scope=scope, fingerprint=req.fingerprint)
         reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
-        retried = retry_echo(trs, retried_states(trs, profile, {"aircraft": ac}), DEFAULT_RETRY)
+        retried = retry_echo(trs, retried_states(trs, profile, cache), DEFAULT_RETRY)
         out = evaluate(
             ac, trs, shape, criteria,
             depth=req.depth, dt_plant=req.dt_plant,

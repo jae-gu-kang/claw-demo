@@ -52,7 +52,8 @@ from claw.trim import (
 from claw_server.routes.trim import FiniteFloat, TrimCaseIn, build_cases
 from claw_server.refs import (
     ProfileRef, ReusePolicy, criteria_echo, profile_echo, profile_error_detail, profile_query, resolve_criteria,
-    resolve_profile, reuse_counts, reuse_echo, retried_states, retry_counts, retry_echo, stored_failures, trim_scope,
+    resolve_profile, rescue_trims, reuse_counts, reuse_echo, retried_states, retry_counts, retry_echo, stored_failures,
+    trim_scope,
 )
 from claw_server.serialize import to_jsonable, trim_result_dict
 
@@ -553,6 +554,8 @@ def submit_envelope_scan(req: EnvelopeScanIn, request: Request, response: Respon
             reuse=req.reuse,
             retry=DEFAULT_RETRY,
         )
+        # 근거 해 재풀이(이관 7b) — 점별 판정(envelope_verdict)과 같은 근거 캐시(vctx.cache)
+        trs = rescue_trims(trs, profile, cache=vctx.cache, scope=scope, model=vctx.model, fingerprint=req.fingerprint)
         reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
         verdicts = [envelope_verdict(tr, vctx) for tr in trs]
         # 되울림은 점별 판정이 이미 잰 트림 상태로 센다(다시 재지 않는다)
@@ -752,9 +755,12 @@ def submit_margin_map(req: MarginMapIn, request: Request, response: Response) ->
             reuse=req.reuse,
             retry=DEFAULT_RETRY,
         )
+        # 근거 해 재풀이(이관 7b)와 되울림의 상태 판정이 같은 근거 캐시를 쓴다 — 근거를 두 번 풀지 않게
+        cache = {"aircraft": ac}
+        trs = rescue_trims(trs, profile, cache=cache, scope=scope, fingerprint=req.fingerprint)
         reuse = reuse_echo(trs, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
         # 마진 맵은 조건 판정을 싣지 않는다 — 다시 푼 점만 상태를 재 되울림이 트림 탭과 같은 말을 하게
-        retried = retry_echo(trs, retried_states(trs, profile, {"aircraft": ac}), DEFAULT_RETRY)
+        retried = retry_echo(trs, retried_states(trs, profile, cache), DEFAULT_RETRY)
         def trim_entry(t):
             # 이 칸의 법칙 게인 — 트림 수렴·취소와 무관하게 싣는다(칸의 기록). 법칙 게인 루프가 없으면 키도 없다(골든)
             e = _trim_only_entry(t)

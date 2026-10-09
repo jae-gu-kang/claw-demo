@@ -63,6 +63,9 @@ def trim_assessment(tr, built, model, *, cache: dict | None = None) -> dict:
     - 받음각 탐색 상한은 실속 받음각·모델 유효 상한과 다른 값이라, 붙었다는 것만으로 날 수 없다고 못 한다.
       실속표로 잰 1g 실속 속도 V_S보다 느리다는 별도 근거(또는 1g 도달 불가)가 있을 때만 물리적 불가이고,
       아니면 제약 도달·미수렴이다. 하한에 붙은 미수렴은 양력이 남는 쪽이라 실속 논리를 쓰지 않는다.
+    - 근거가 한계 안쪽 트림을 가리킨 계산 실패(trim_inside_limit)는 서버 경로가 그 근거 해 시드로 다시 푼다
+      (opspace/rescue.py). 그러고도 남았으면(retry["evidence_pass"]["attempts"] > 0) 사유에 retry_exhausted를 더한다.
+      근거는 cache[("limit_evidence", 조건 키, 채널)]에 한 번 풀어 둔다 — 재풀이 패스와 뒤의 판정이 같은 근거를 본다.
     - 어느 한계에도 붙지 않은 미수렴은 계산 실패다. 배치가 이미 시드를 바꿔 한 번 이상 다시 풀었으면(retry — trim.retry_level
       기록, 그대로 싣는다) 사유에 retry_exhausted를 더한다.
     """
@@ -73,7 +76,19 @@ def trim_assessment(tr, built, model, *, cache: dict | None = None) -> dict:
     if not tr.converged:
         limits = physical_limits(tr, tb)
         if len(limits) == 1:
-            state, reasons, evidence = _limit_evidence(tr, built, limits[0], cache)
+            # 근거는 조건·채널마다 한 번 푼다 — 같은 캐시로 다시 재는 판정(라우트의 행 판정·되울림)과 근거 해 재풀이
+            # (opspace/rescue.py)가 같은 근거를 본다. 고정값은 한계에서 LIMIT_TOL 안이라 같은 채널이면 같은 근거다
+            from claw.trim.store import case_key
+
+            memo = ("limit_evidence", case_key(tr.case), limits[0])
+            if memo not in cache:
+                cache[memo] = _limit_evidence(tr, built, limits[0], cache)
+            state, reasons, evidence = cache[memo]
+            reasons = list(reasons)
+            # 근거 해 시드로 한 번 이상 다시 풀었는데도 남았으면 그 사실을 사유에 남긴다(메모 밖 — 근거는 그대로)
+            ev_pass = (retry or {}).get("evidence_pass")
+            if ev_pass is not None and ev_pass.get("attempts", 0) > 0:
+                reasons.append("retry_exhausted")
             return {"state": state, "reasons": reasons, "margin": unevaluated, "evidence": evidence, "retry": retry}
         if limits:  # 둘 이상이 한계 — 한 채널을 고정해 나머지를 푸는 근거가 서지 않는다
             return {"state": CONSTRAINT_HIT, "reasons": [*limits, "not_converged", "balance_not_found"],

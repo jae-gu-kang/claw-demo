@@ -32,9 +32,10 @@ def test_trim_batch_then_margin_map_reuses_every_point(client, wait_job):
     assert tr["reused_names"] == [] and tr["resolved_failed"] == 0 and tr["trim_fingerprint"]
     assert meta["trim_reuse_counts"] == {"reused": 0, "computed": 3, "resolved_failed": 0}
     # 계산 실패 재시도(이관 7단계) — 다 수렴한 배치는 다시 푼 점이 없다. 점에는 retry 키도 없다(골든 불변)
-    assert first["trim_retry"] == {"policy": "neighbour_v1", "retried": 0, "resolved_converged": 0,
+    assert first["trim_retry"] == {"policy": "neighbour_evidence_v1", "retried": 0, "resolved_converged": 0,
                                    "resolved_infeasible": 0, "resolved_constraint": 0, "still_calc_failed": 0,
-                                   "by_result": ZERO_RESULTS, "names": []}
+                                   "by_result": ZERO_RESULTS, "names": [], "evidence_retried": 0,
+                                   "evidence_names": []}
     assert meta["trim_retry_counts"] == ZERO_COUNTS
     assert all("retry" not in r for r in first["results"])
     mm, mmeta = _job(client, wait_job, "/api/analysis/margin-map", {"cases": CASES, "loops": LOOPS})
@@ -173,7 +174,7 @@ def _wide_region_profile(client, pid="wide-region"):
 
 ZERO_RESULTS = {"converged": 0, "limit": 0, "alpha_bound": 0, "multi_limit": 0, "failed": 0}
 ZERO_COUNTS = {"retried": 0, "resolved_converged": 0, "resolved_infeasible": 0, "resolved_constraint": 0,
-               "still_calc_failed": 0}
+               "still_calc_failed": 0, "evidence_retried": 0}
 # 넓힌 행의 멈춘 네 점 — 다시 풀면 스로틀 상한 하나에 닿고(풀이 쪽 limit), 한계 근거가 추력 부족을 재 물리적 불가다
 STUCK_ECHO_COUNTS = {**ZERO_COUNTS, "retried": 4, "resolved_infeasible": 4}
 WIDE = [{"mach": m, "alt": 100.0, "fuel": 25.0, "name": f"M{m}_h100_f25"} for m in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)]
@@ -200,8 +201,8 @@ def test_calc_failed_points_are_retried_and_echoed(client, wait_job):
     assert all("retry" not in by[w["name"]] for w in WIDE if w["name"] not in STUCK)
     assert not any(r["state"] == "calc_failed" for r in body["results"])
     # 되울림은 최종 조건 상태로 센다 — 「한계에 닿음」이 아니라 「물리적 불가」 넷
-    assert body["trim_retry"] == {"policy": "neighbour_v1", **STUCK_ECHO_COUNTS,
-                                  "by_result": {**ZERO_RESULTS, "limit": 4}, "names": STUCK}
+    assert body["trim_retry"] == {"policy": "neighbour_evidence_v1", **STUCK_ECHO_COUNTS,
+                                  "by_result": {**ZERO_RESULTS, "limit": 4}, "names": STUCK, "evidence_names": []}
     assert meta["trim_retry_counts"] == STUCK_ECHO_COUNTS
     # 저장소는 고른 해를 넣는다 — 같은 조건의 다음 실행은 미수렴 기록을 다시 풀고, 여전히 한계라 같은 기록을 싣는다
     again, _ = _job(client, wait_job, "/api/trim/batch", {"cases": WIDE, "profile": prof})
@@ -226,3 +227,72 @@ def test_envelope_scan_echoes_retry_from_its_verdicts(client, wait_job):
     assert body["trim_retry"]["names"] == STUCK and meta["trim_retry_counts"] == STUCK_ECHO_COUNTS
     by = {c["trim"]["case"]["name"]: c for c in body["cases"]}
     assert all(by[n]["verdict"]["verdict"]["trim"]["status"] == "infeasible" for n in STUCK)
+
+
+# ── 한계 근거 해 재풀이 (05 §11.3 · 이관 7b) ─────────────────────────────────────
+# 출하 예제에서는 이 유형이 나오지 않는다 — 풀이기가 M0.18 조건을 스로틀 100 %에 멈춘 척(나머지는 진짜 풀이·진짜 근거)
+PINNED = {"mach": 0.18, "alt": 1000.0, "fuel": 25.0, "name": "M0.18_h1000_f25"}
+
+
+def _shipped_profile(client, pid):
+    from claw.profile.document import load_shipped_example
+
+    d = load_shipped_example()
+    d.update(id=pid, name=pid, is_example=False, variants=[])
+    assert client.post("/api/profiles", json={"document": d}).status_code == 201
+    return {"id": pid}
+
+
+def _pin_throttle(monkeypatch, *, always):
+    """M0.18 풀이를 스로틀 1.0에 멈춘 척 — always면 근거 해 시드로 다시 풀어도 멈춘다. 그 조건의 풀이 시드를 센다."""
+    import importlib
+
+    import numpy as np
+
+    trim_mod = importlib.import_module("claw.trim.trim")
+    real = trim_mod.solve_level
+    seeds = []
+
+    def fake(aircraft, case, z0=None):
+        x, ok, cost = real(aircraft, case, z0=z0)
+        if abs(case.mach - PINNED["mach"]) > 1e-9:
+            return x, ok, cost
+        seeds.append(None if z0 is None else [float(v) for v in z0])
+        if always or len(seeds) == 1:
+            return np.array([x[0], x[1], 1.0]), True, 1e3
+        return x, ok, cost
+
+    monkeypatch.setattr(trim_mod, "solve_level", fake)
+    return seeds
+
+
+def test_trim_inside_limit_is_rescued_from_its_evidence(client, wait_job, monkeypatch):
+    prof = _shipped_profile(client, "rescue-ok")
+    seeds = _pin_throttle(monkeypatch, always=False)
+    body, meta = _job(client, wait_job, "/api/trim/batch", {"cases": [PINNED], "profile": prof})
+    r = body["results"][0]
+    assert r["converged"] is True and r["state"] == "computable"
+    assert r["retry"]["evidence_pass"] == {"channel": "throttle_high", "attempts": 1}
+    assert r["retry"]["seeds"][r["retry"]["chosen"]]["kind"] == "limit_evidence"
+    assert len(seeds) == 2 and seeds[1][2] < 0.5  # need만큼 안쪽으로 옮긴 스로틀(진짜 트림 0.407 근처)
+    assert body["trim_retry"]["evidence_retried"] == 1 and body["trim_retry"]["evidence_names"] == [PINNED["name"]]
+    assert body["trim_retry"]["resolved_converged"] == 1 and body["trim_retry"]["by_result"]["converged"] == 1
+    assert meta["trim_retry_counts"] == {**ZERO_COUNTS, "retried": 1, "resolved_converged": 1, "evidence_retried": 1}
+    # 저장소의 미수렴 기록을 수렴 기록이 대체했다 — 다음 실행은 풀지 않고 재사용한다
+    again, _ = _job(client, wait_job, "/api/trim/batch", {"cases": [PINNED], "profile": prof})
+    assert again["trim_reuse"]["reused"] == 1 and again["trim_retry"]["retried"] == 0 and len(seeds) == 2
+
+
+def test_still_pinned_keeps_failure_state_and_evidence(client, wait_job, monkeypatch):
+    prof = _shipped_profile(client, "rescue-fail")
+    _pin_throttle(monkeypatch, always=True)
+    body, meta = _job(client, wait_job, "/api/trim/batch", {"cases": [PINNED], "profile": prof})
+    r = body["results"][0]
+    assert r["state"] == "calc_failed"
+    assert r["state_reasons"] == ["throttle_high", "not_converged", "trim_inside_limit", "retry_exhausted"]
+    assert any(s["short"] is False for s in r["state_evidence"]["solutions"])
+    assert r["retry"]["evidence_pass"] == {"channel": "throttle_high", "attempts": 1}
+    assert body["trim_retry"]["still_calc_failed"] == 1 and body["trim_retry"]["evidence_names"] == [PINNED["name"]]
+    # 마진 맵도 같은 패스를 거친다 — 저장소의 미수렴 기록을 다시 풀고 같은 말을 한다
+    mm, mmeta = _job(client, wait_job, "/api/analysis/margin-map", {"cases": [PINNED], "loops": LOOPS, "profile": prof})
+    assert mm["trim_retry"]["evidence_names"] == [PINNED["name"]] and mmeta["trim_retry_counts"]["still_calc_failed"] == 1

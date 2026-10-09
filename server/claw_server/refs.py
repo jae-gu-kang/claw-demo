@@ -326,10 +326,13 @@ def design_reuse_counts(echo: dict | None) -> dict | None:
 # ── 계산 실패 재시도 (05 §11.3 · 05 §11.13 7단계) ────────────────────────────────────
 #
 # 트림 저장소를 쓰는 명목 기체 라우트 여섯 곳이 엔진 trim_batch(retry=DEFAULT_RETRY)로 부른다 — 한계에도 탐색 경계에도
-# 붙지 않은 미수렴(계산 실패)을 이 배치의 인접 해·기본값·스로틀 훑기 시드로 다시 푼다. 설계·파이프라인 평가·영향성
-# 스윕·처방 확인 런은 끈 채다(엔진 기본 retry=None).
+# 붙지 않은 미수렴(계산 실패)을 이 배치의 인접 해·기본값·스로틀 훑기 시드로 다시 푼다. 이어 물리 한계 하나에 멈춘
+# 미수렴 중 한계 근거가 안쪽 트림을 가리킨 점(trim_inside_limit)을 그 근거 해 시드로 다시 푼다(rescue_trims — 이관 7b).
+# 설계·파이프라인 평가·영향성 스윕·처방 확인 런은 끈 채다(엔진 기본 retry=None).
 
-RETRY_POLICY_NAME = "neighbour_v1"  # 엔진 DEFAULT_RETRY의 이름 — 시드 순서(직전·최근접 수렴·기본값·훑기)·멈춤 규칙이 바뀌면 올린다
+# 엔진 DEFAULT_RETRY + 근거 해 패스의 이름 — 시드 순서(직전·최근접 수렴·기본값·훑기 / need 이동 근거 해·원 근거 해)·멈춤
+# 규칙이 바뀌면 올린다
+RETRY_POLICY_NAME = "neighbour_evidence_v1"
 RETRY_POLICY_OFF = "off"
 # 최종 조건 상태(opspace/states.py) → 되울림 칸. 풀이 쪽 라벨로 세지 않는다: 「limit」은 한계에 닿았다는 것일 뿐이고
 # 불가(근거 있음)·제약 도달(근거 없음)·계산 실패(한계 안쪽에 트림 — trim_inside_limit)는 한계 근거를 잰 뒤에야 갈린다
@@ -358,7 +361,24 @@ def retry_echo(results, states, retry=True) -> dict:
         out[_RETRY_STATE_KEY[state]] += 1
     out["by_result"] = {k: sum(1 for tr, _s in retried if tr.retry.get("result") == k) for k in _RETRY_RESULTS}
     out["names"] = [tr.case.name for tr, _s in retried]
+    # 그 가운데 한계 근거 해 시드로 다시 푼 점(rescue_trims) — 최종 상태는 위 칸들이 이미 센다
+    ev = [tr.case.name for tr, _s in retried if "evidence_pass" in tr.retry]
+    out["evidence_retried"] = len(ev)
+    out["evidence_names"] = ev
     return out
+
+
+def rescue_trims(results, profile, *, cache: dict, scope=None, model=None, fingerprint: str = "") -> list:
+    """trim_batch 결과의 trim_inside_limit 점을 그 한계 근거 해 시드로 다시 푼다(엔진 opspace.rescue, 05 §11.3) — 저장소
+    라우트 여섯이 trim_batch 바로 뒤에 부른다. cache는 뒤의 판정(행 판정·envelope_verdict·retried_states)에 넘기는 것과
+    **같은 dict**여야 한다 — 근거를 조건·채널마다 한 번만 푼다. 대상 아닌 점은 그대로 돌려준다."""
+    from claw.opspace import model_range_of
+    from claw.opspace.rescue import rescue_inside_limit
+    from claw.trim import DEFAULT_RETRY
+
+    model = model_range_of(profile) if model is None else model
+    return rescue_inside_limit(results, profile, model, cache=cache, store=scope, policy=DEFAULT_RETRY,
+                               fingerprint=fingerprint)
 
 
 def retried_states(results, profile, cache: dict | None = None) -> list:
@@ -374,4 +394,4 @@ def retried_states(results, profile, cache: dict | None = None) -> list:
 
 def retry_counts(echo: dict) -> dict:
     """meta용 요약 — 목록 화면이 본문을 열지 않고 「재시도 n → 수렴 a · 불가 b · 제약 c · 실패 d」를 쓴다."""
-    return {k: echo[k] for k in ("retried", *_RETRY_STATE_KEY.values())}
+    return {k: echo[k] for k in ("retried", *_RETRY_STATE_KEY.values(), "evidence_retried")}

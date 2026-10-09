@@ -1,7 +1,7 @@
 {
  "golden": "envelope_scan",
  "mode": "full",
- "captured_at": "3f54401+dirty",
+ "captured_at": "bfc1b30+dirty",
  "value": {
   "dict": {
    "kind": "envelope_scan",
@@ -631,7 +631,7 @@
    },
    "trim_retry": {
     "dict": {
-     "policy": "neighbour_v1",
+     "policy": "neighbour_evidence_v1",
      "retried": 0,
      "resolved_converged": 0,
      "resolved_infeasible": 0,
@@ -646,7 +646,9 @@
        "failed": 0
       }
      },
-     "names": []
+     "names": [],
+     "evidence_retried": 0,
+     "evidence_names": []
     }
    }
   }

@@ -32,8 +32,9 @@ def case_key(case) -> tuple | None:
 @dataclass(frozen=True)
 class TrimRecord:
     """풀이 결과 한 건. converged = 풀이 당시 trim_level의 수렴(SLSQP 성공 ∧ 잔차) — 잔차 허용치는 트림 지문 안이라
-    같은 키에서는 다시 재도 같다. seed = {"kind": "cold"|"neighbour"|"last"|"nearest"|"sweep", "from": 시드 케이스 이름|None}
-    — 뒤의 셋은 재시도(retry)가 고른 시도의 시드."""
+    같은 키에서는 다시 재도 같다. seed = {"kind": "cold"|"neighbour"|"last"|"nearest"|"sweep"|"limit_evidence",
+    "from": 시드 케이스 이름|None|한계 채널} — 뒤의 넷은 재시도(retry)가 고른 시도의 시드, limit_evidence는 한계 근거 해
+    재풀이(opspace/rescue.py)의 것이고 from이 그 한계 채널이다."""
 
     z: tuple
     success: bool

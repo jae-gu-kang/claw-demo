@@ -218,7 +218,10 @@ JSON 하나를 읽고, 엔지니어가 30초 안에 상황을 잡는 한국어 �
   (계산 실패)을 이 배치의 인접 해·기본값·스로틀 훑기 시드로 다시 푼 점 수 retried와
   그 점들의 최종 조건 상태(resolved_converged 계산 가능 · resolved_infeasible 물리적
   불가 · resolved_constraint 제약 도달 · still_calc_failed 여전히 계산 실패, 사유
-  retry_exhausted 또는 trim_inside_limit). by_result는 풀이 쪽 라벨이다 — limit은
+  retry_exhausted 또는 trim_inside_limit). 물리 한계 하나에 멈췄는데 한계 고정 평형
+  근거가 한계 안쪽 트림을 가리킨 점(trim_inside_limit)도 그 근거 해 시드로 다시 푼다 —
+  evidence_retried(점 수)·evidence_names, 점의 retry.evidence_pass. 그래도 남으면 사유가
+  trim_inside_limit과 retry_exhausted를 함께 싣고 근거(state_evidence)는 그대로다. by_result는 풀이 쪽 라벨이다 — limit은
   스로틀·엘레본 물리 한계 하나에 닿음(판정은 한계 근거가 가른다), alpha_bound는 받음각
   탐색 경계(해석 설정 — 물리 한계가 아니다), multi_limit은 한계 둘 이상. 점의 retry는
   시도 기록(attempts·seeds·outcomes·chosen·result·stop — stop limit은 한계 하나에

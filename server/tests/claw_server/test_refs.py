@@ -30,16 +30,17 @@ def test_retry_echo_counts_by_final_state_and_keeps_batch_order():
     assert echo == {"policy": RETRY_POLICY_NAME, "retried": 6, "resolved_converged": 1, "resolved_infeasible": 1,
                     "resolved_constraint": 2, "still_calc_failed": 2,
                     "by_result": {"converged": 1, "limit": 3, "alpha_bound": 1, "multi_limit": 0, "failed": 1},
-                    "names": ["b", "c", "d", "e", "f", "g"]}
+                    "names": ["b", "c", "d", "e", "f", "g"], "evidence_retried": 0, "evidence_names": []}
     assert retry_counts(echo) == {"retried": 6, "resolved_converged": 1, "resolved_infeasible": 1,
-                                  "resolved_constraint": 2, "still_calc_failed": 2}
+                                  "resolved_constraint": 2, "still_calc_failed": 2, "evidence_retried": 0}
 
 
 def test_retry_echo_without_retried_points_and_off():
     trs = [_tr("a"), _tr("b")]
     assert retry_echo(trs, [None, None]) == {
         "policy": RETRY_POLICY_NAME, "retried": 0, "resolved_converged": 0, "resolved_infeasible": 0,
-        "resolved_constraint": 0, "still_calc_failed": 0, "by_result": ZERO_RESULTS, "names": []}
+        "resolved_constraint": 0, "still_calc_failed": 0, "by_result": ZERO_RESULTS, "names": [],
+        "evidence_retried": 0, "evidence_names": []}
     # 재시도를 끈 호출 — 기록이 붙어 있어도(저장소에서 온 옛 기록 등) 세지 않는다
     off = retry_echo([_tr("x", {"attempts": 1, "result": "converged"})], ["computable"], retry=None)
     assert off["policy"] == "off" and off["retried"] == 0 and off["names"] == []
@@ -51,3 +52,17 @@ def test_retry_echo_refuses_an_unassessed_retried_point():
         retry_echo([_tr("b", {"attempts": 1, "result": "limit"})], [None])
     with pytest.raises(ValueError):
         retry_echo([_tr("b", {"attempts": 1, "result": "limit"})], [])
+
+
+def test_retry_echo_counts_evidence_pass_points():
+    """한계 근거 해 재풀이(이관 7b)를 거친 점 — retried에 들고, 그중 근거 패스를 거친 점을 따로 센다."""
+    ev = {"channel": "throttle_high", "attempts": 1}
+    trs = [_tr("a", {"attempts": 1, "result": "converged", "evidence_pass": ev}),
+           _tr("b", {"attempts": 2, "result": "failed"}),
+           _tr("c", {"attempts": 1, "result": "limit", "evidence_pass": ev})]
+    echo = retry_echo(trs, ["computable", "calc_failed", "calc_failed"])
+    assert RETRY_POLICY_NAME == "neighbour_evidence_v1" and echo["policy"] == RETRY_POLICY_NAME
+    assert echo["retried"] == 3 and echo["names"] == ["a", "b", "c"]
+    assert echo["evidence_retried"] == 2 and echo["evidence_names"] == ["a", "c"]
+    assert echo["resolved_converged"] == 1 and echo["still_calc_failed"] == 2
+    assert retry_counts(echo)["evidence_retried"] == 2

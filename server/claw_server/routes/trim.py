@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 from claw.common.contracts import TrimCase
 from claw_server.refs import (
     ProfileRef, ReusePolicy, criteria_echo, profile_echo, resolve_criteria, resolve_profile, reuse_counts, reuse_echo,
-    retry_counts, retry_echo, stored_failures, trim_scope,
+    rescue_trims, retry_counts, retry_echo, stored_failures, trim_scope,
 )
 from claw.opspace import model_range_of, pre_state, region_of, trim_assessment
 from claw.opspace.verdict import VerdictContext, condition_verdict
@@ -136,6 +136,8 @@ def submit_trim_batch(req: TrimBatchIn, request: Request, response: Response) ->
             reuse=req.reuse,
             retry=DEFAULT_RETRY,
         )
+        # 한계 하나에 멈췄는데 근거가 안쪽 트림을 가리킨 점을 그 근거 해로 다시 푼다 — 행 판정과 같은 근거 캐시(vctx.cache)
+        results = rescue_trims(results, profile, cache=vctx.cache, scope=scope, model=model, fingerprint=req.fingerprint)
         reuse = reuse_echo(results, scope, req.reuse, failed, trim_fingerprint=profile.trim_fingerprint)
         rows = [with_state(r) for r in results]
         # 되울림은 방금 잰 조건 상태로 센다 — 풀이 쪽 「한계에 닿음」이 불가인지 제약 도달인지는 판정이 가른다

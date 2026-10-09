@@ -260,7 +260,8 @@ def test_소견서_지시문이_계산_실패_재시도를_말한다():
     from claw_server.brief import BRIEF_SYSTEM
 
     for word in ("trim_retry", "retried", "resolved_converged", "resolved_infeasible", "resolved_constraint",
-                 "still_calc_failed", "by_result", "alpha_bound", "multi_limit", "retry_exhausted"):
+                 "still_calc_failed", "by_result", "alpha_bound", "multi_limit", "retry_exhausted",
+                 "evidence_retried", "evidence_names", "evidence_pass"):
         assert word in BRIEF_SYSTEM, word
     # 탐색 경계는 해석 설정 — 지시문이 물리 한계라 부르지 않게 말한다
     assert "물리 한계가 아니다" in BRIEF_SYSTEM
