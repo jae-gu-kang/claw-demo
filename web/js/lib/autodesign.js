@@ -983,6 +983,17 @@ export function reportLine(report, nPointsFallback) {
   return parts;
 }
 
+// 저장소를 쓰지 않은 실행의 policy 값·사유 코드 → 툴팁 글 (서버 refs.REUSE_POLICY_OFF·REUSE_OFF_*와 같은 문자열).
+// 사유마다 고치는 자리가 다르다 — 설정은 요청 config, 서버 저장소는 배포 환경변수다
+const REUSE_POLICY_OFF = "off";
+const REUSE_OFF_WHY = {
+  config: "설정 trim_reuse가 꺼져 있다 — **기본값**이다(재사용은 옵트인: 저장된 해가 아슬아슬한 점의 수렴 판정을"
+    + " 뒤집어 같은 요청이 다른 판정·실패 수를 낼 수 있다)",
+  store_disabled: "재사용을 켰지만 서버 트림 저장소가 꺼져 있다(CLAW_TRIM_STORE_LIMIT=0)",
+  no_scope: "이 실행에 저장소 창이 오지 않았다",
+};
+const REUSE_TIP_NAMES = 8;  // opspace retryTip과 같은 상한 — 툴팁이 점 이름으로 넘치지 않게
+
 /** 본문 최상위 trim_reuse(서버 refs.design_reuse_echo) → {text, tip} — 「트림 재사용 k · 새로 n」.
  *
  * 트림 탭·마진 맵과 **같은 함수**(lib/opspace.js reuseLine·reuseTip)를 쓴다 — 서버가 형제 라우트와 같은 칸 이름으로
@@ -990,12 +1001,43 @@ export function reportLine(report, nPointsFallback) {
  *
  * 블록이 없는 옛 결과, 그리고 **재사용도 계산도 0인 실행**(트림 스테이지 전에 멈춘 세션)은 null이다 — retryLine이
  * 다시 푼 점이 없을 때 조용한 것과 같은 규약: 말할 것이 없으면 줄을 내지 않는다. 저장소가 꺼진 서버(policy "off")는
- * 새로 푼 수가 있으면 낸다 — 「하나도 재사용하지 않았다」도 사실이고, 툴팁이 규칙을 말한다. */
+ * 새로 푼 수가 있으면 낸다 — 「하나도 재사용하지 않았다」도 사실이고, 툴팁이 규칙을 말한다.
+ *
+ * 툴팁이 두 자를 갈라 말한다: 수(reused·computed·reused_names)는 **이 결과의 계보 누적**(재개가 부모의 수를 이어
+ * 센다)이고 규칙(policy·enabled)은 **이 실행**의 사실이다. 저장소를 끈 채 재개하면 「규칙 off」와 0이 아닌 재사용
+ * 수가 한 줄에 같이 오는데, 그건 모순이 아니라 재개 전 실행이 꺼낸 점이다 — 툴팁이 그렇게 적어야 사용자가
+ * 「지금 껐다는데 왜 재사용 30인가」를 묻지 않는다. */
 export function designReuseLine(body) {
   const r = body?.trim_reuse;
   const text = reuseLine(r);
   if (!text || (!r.reused && !r.computed)) return null;
-  return { text, tip: reuseTip(r) };
+  const off = r.policy === REUSE_POLICY_OFF;
+  const parts = [reuseTip(r)];
+  if (off) parts.push(`이 실행은 저장소를 쓰지 않았다 — ${REUSE_OFF_WHY[r.policy_reason] ?? "사유 기록 없음(옛 결과)"}`);
+  parts.push(off && r.reused > 0
+    // 이 실행은 껐는데 재사용 수가 있다 — 재개 전 계보의 수다(엔진이 왕복에 싣는다)
+    ? "재사용 수는 이 결과의 계보 누적이다 — 그 점을 꺼낸 것은 재개 전 실행이다"
+    : "수는 이 결과의 계보 누적(재개 전 실행 포함)이고, 규칙은 이 실행의 것이다");
+  const names = Array.isArray(r.reused_names) ? r.reused_names : [];
+  if (names.length) {
+    const more = names.length - REUSE_TIP_NAMES;
+    parts.push(`꺼낸 점 ${names.slice(0, REUSE_TIP_NAMES).join(", ")}${more > 0 ? ` 외 ${more}점` : ""}`);
+  }
+  return { text, tip: parts.filter(Boolean).join(" · ") };
+}
+
+/** 결과 브리핑 한 줄 — 「기록 없음」(블록 자체가 없는 옛 결과)과 「0 · 0」(블록은 있고 트림 전에 멈춘 실행)을 가른다.
+ *
+ * 한 문구로 뭉치면 v1.75 뒤의 결과가 「트림 저장소 재사용 이전 결과」라고 거짓을 말한다 — 그 실행은 저장소를 알고도
+ * 트림을 한 점도 담지 않은 것이다(승인 대기·즉시 취소 등). 두 사실은 고칠 곳이 다르다. */
+export function designReuseBriefText(body) {
+  const line = designReuseLine(body);
+  if (line) return line.text;
+  const r = body?.trim_reuse;
+  if (!r || !Number.isFinite(r.reused) || !Number.isFinite(r.computed)) {
+    return "기록 없음 — 트림 저장소 재사용 이전 결과";
+  }
+  return `트림 재사용 0 · 새로 0 — 이 실행은 트림을 한 점도 담지 않았다(규칙 ${r.policy ?? "?"})`;
 }
 
 // ── 사유 코드 ──────────────────────────────────────────────────────────

@@ -56,6 +56,7 @@ import {
   pointRows,
   reasonText,
   reliefLines,
+  designReuseBriefText,
   designReuseLine,
   reportLine,
   resumable,
@@ -1171,6 +1172,42 @@ test("designReuseLine — 서버 trim_reuse를 트림 탭과 같은 문구로, �
   assert.equal(designReuseLine({ trim_reuse: { reused: 0, computed: 0, policy: "converged", enabled: true } }), null);
   // 모양이 다르면(문자열 수) null — reuseLine의 규약 그대로
   assert.equal(designReuseLine({ trim_reuse: { reused: "3", computed: 1 } }), null);
+});
+
+test("designReuseLine 툴팁 — 「이 실행의 규칙」과 「계보 누적 수」를 가르고, 껐다면 사유·꺼낸 점을 말한다", () => {
+  // 켠 실행 — 어느 점을 꺼냈는지가 놀라운 failures를 되짚는 단서다(서버 reused_names)
+  const on = designReuseLine({ trim_reuse: { reused: 2, computed: 1, policy: "converged", enabled: true,
+    reused_names: ["M0.1_h100_f10", "M0.28_h100_f10"] } });
+  assert.match(on.tip, /꺼낸 점 M0\.1_h100_f10, M0\.28_h100_f10/);
+  assert.match(on.tip, /계보 누적/);
+  // 저장소를 끈 서버에서 재개 — 「규칙 off」와 재사용 30이 한 줄에 온다. 툴팁이 모순이 아니라고 말해야 한다
+  const off = designReuseLine({ trim_reuse: { reused: 30, computed: 4, policy: "off", policy_reason: "config",
+    enabled: false } });
+  assert.equal(off.text, "트림 재사용 30 · 새로 4");
+  assert.match(off.tip, /이 실행은 저장소를 쓰지 않았다/);
+  assert.match(off.tip, /설정 trim_reuse가 꺼져 있다/);  // 기본값이라는 사실까지
+  assert.match(off.tip, /꺼낸 것은 재개 전 실행이다/);
+  // 서버 저장소가 꺼진 경우는 고칠 자리가 다르다 — 사유를 갈라 말한다
+  assert.match(designReuseLine({ trim_reuse: { reused: 0, computed: 4, policy: "off",
+    policy_reason: "store_disabled", enabled: false } }).tip, /CLAW_TRIM_STORE_LIMIT=0/);
+  // 사유 없는 옛 결과는 지어내지 않는다
+  assert.match(designReuseLine({ trim_reuse: { reused: 0, computed: 4, policy: "off", enabled: false } }).tip,
+    /사유 기록 없음/);
+});
+
+test("designReuseBriefText — 「블록 없음」과 「수가 0·0」을 가른다 (리뷰 5항)", () => {
+  // 옛 결과(블록 자체가 없다) — 재사용이 생기기 전 결과다
+  assert.match(designReuseBriefText({}), /기록 없음 — 트림 저장소 재사용 이전 결과/);
+  assert.match(designReuseBriefText(null), /기록 없음/);
+  // v1.75+ 결과가 트림 전에 멈췄다 — 블록은 있고 수만 0이다. 「재사용 이전 결과」라고 하면 거짓이다
+  const zero = designReuseBriefText({ trim_reuse: { reused: 0, computed: 0, policy: "off",
+    policy_reason: "config", enabled: false } });
+  assert.doesNotMatch(zero, /기록 없음/);
+  assert.match(zero, /트림 재사용 0 · 새로 0/);
+  assert.match(zero, /규칙 off/);
+  // 말할 것이 있으면 줄 그대로다
+  assert.equal(designReuseBriefText({ trim_reuse: { reused: 30, computed: 4, policy: "converged", enabled: true } }),
+    "트림 재사용 30 · 새로 4");
 });
 
 test("reliefLines — 통과한 축은 **임계값**을 말한다 (×3이 아니라 ≥47 rad/s)", () => {

@@ -295,6 +295,13 @@ test("자동 설계 — 종료 상태·판정 규모·처방·반출, 탭과 같
     trim_reuse: { trim_fingerprint: "c".repeat(16), reused: 30, computed: 4, policy: "converged", enabled: true } });
   assert.ok(reused.sections.find((s) => s.title === "실행 요약").rows
     .some(([k, v]) => k === "트림 재사용" && v === "트림 재사용 30 · 새로 4"));
+  // 블록은 있고 수가 0·0 — 트림 전에 멈춘 v1.75+ 결과다. 「재사용 이전 결과」라고 하면 거짓이다(리뷰 5항)
+  const zero = briefModel(meta, { ...body,
+    trim_reuse: { trim_fingerprint: "c".repeat(16), reused: 0, computed: 0, policy: "off",
+      policy_reason: "config", enabled: false } });
+  const zeroRow = zero.sections.find((s) => s.title === "실행 요약").rows.find(([k]) => k === "트림 재사용")[1];
+  assert.match(zeroRow, /트림 재사용 0 · 새로 0/);
+  assert.doesNotMatch(zeroRow, /기록 없음/);
   const ge = m.sections.find((s) => s.title === "게인 반출");
   assert.ok(ge.rows.some(([k, v]) => k === "스케줄 · 상수 자리" && v === "1 · 1"));
   // 재개 결과(snapshot)도 반영 대상이다 — 예제로 읽지 않는다

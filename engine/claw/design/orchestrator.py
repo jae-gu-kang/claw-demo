@@ -204,6 +204,15 @@ class AutoDesignConfig:
     validation: dict = field(default_factory=lambda: copy.deepcopy(DEFAULT_VALIDATION))
     # 보강 (05 §11.7) — {"tol", "max_points", "max_depth", "max_time_s"}(reinforce.py). tol None = 이분 없이 d 분포만 [기본값]
     reinforce: dict = field(default_factory=lambda: dict(DEFAULT_REINFORCE))
+    # 트림 저장소 재사용 (05 §11.10) — **기본 끔** [사용자 확정 2026-09-30]. 켜면 서버가 이 실행에 저장소 창을 준다
+    # (routes/design.py `_design_trim_scope` — 끄면 창 대신 None). 켠 실행은 같은 모델·조건·풀이 설정의 수렴 트림을
+    # 다시 풀지 않는다. 끈 것이 기본값인 이유는 **재현성**이다: 저장된 기록은 그 기록을 남긴 배치의 시드 사슬에서 나온
+    # 해라 설계가 스스로 풀었을 때와 마지막 비트가 다를 수 있고, 아슬아슬한 점은 수렴 판정까지 뒤집힌다 — 데모 기체
+    # 실측(tests/test_design_trim_reuse.py 특성 테스트)에서 M0.28_h100_f10이 미수렴 → 수렴으로 뒤집혀
+    # judged 35 → 40 · failures 8 → 10까지 움직였다. 지문·지문으로 결과를 고정하는 저장소에서는 「재계산 0회」보다
+    # 설계 결과의 재현성이 앞선다(켜는 쪽이 옵트인). run(trim_store=…)은 이 플래그를 보지 않는다 — 받은 인자를 그대로
+    # 쓴다(엔진 직접 호출·단위 테스트의 길). 스위치를 쥐는 곳은 창을 주는 서버다
+    trim_reuse: bool = False
 
     def __post_init__(self):
         if self.mode not in ("gated", "auto"):
@@ -247,6 +256,9 @@ class AutoDesignConfig:
         self.sched_axes = axes
         if self.delay_s < 0 or self.pade_order < 1:
             raise ValueError("delay_s는 음수 불가, pade_order는 1 이상")
+        # 참거짓만 — 0/1이나 "false"를 참거짓으로 읽지 않는다(check_validation_config의 boundary와 같은 규약)
+        if not isinstance(self.trim_reuse, bool):
+            raise ValueError(f"trim_reuse는 참/거짓: {self.trim_reuse!r}")
         self.knots = check_knots_config(dict(self.knots))
         self.validation = check_validation_config(copy.deepcopy(dict(self.validation)))
         self.reinforce = check_reinforce_config(dict(self.reinforce))
@@ -533,6 +545,10 @@ class DesignSession:
         # 트림 재사용 집계(05 §11.10) — 스테이지가 self.trims에 넣은 트림의 origin을 센다. 왕복에 실려 재개가 이어 센다
         # (재개 후 origin은 class 기본 "computed"로 돌아가므로 수만이 이력의 정본이다)
         self.trim_reuse = {"reused": 0, "computed": 0}
+        # 저장소에서 꺼낸 점의 이름 — 수만 있으면 「왜 이 실행의 failures가 다른가」를 뒤에 되짚을 수 없다.
+        # 재사용은 그 점의 해를 바꿀 수 있고(시드 사슬), 아슬아슬한 점은 수렴 판정까지 바꾼다 — 어느 점이었는지가
+        # 진단의 전부다. 수와 같이 왕복에 실린다(재개가 이어 모은다)
+        self.trim_reused_names: list = []
 
     # ── 진행/취소 ──
     def _progress(self, on_progress, done, total, message):
@@ -1667,7 +1683,8 @@ class DesignSession:
         점을 판정하는 스테이지(COARSE·REFINE·VERIFY)가 문맥 없이 시작되면 이름으로 멈춘다. 문맥이 오면 판정 없이 저장된
         옛 점(v1.65 전 세션)을 지금 정책으로 다시 판정한다 — 한 세션 안에 두 채택 정책이 섞이지 않게.
 
-        trim_store: 트림 저장소 창(trim.store.TrimStoreScope | None — 05 §11.10 사용자 후속 ③). 주면 격자·세분화·
+        trim_store: 트림 저장소 창(trim.store.TrimStoreScope | None — 05 §11.10 사용자 후속 ③). **기본은 None이고
+        서버는 config.trim_reuse가 참일 때만 창을 준다**(기본 끔 — 그 필드 주석의 재현성 근거). 주면 격자·세분화·
         검증·보강의 트림이 저장소의 수렴 기록을 재사용하고 새 해를 저장한다 — 같은 모델·조건·풀이 설정의 트림은
         재계산 0회, 새 좌표만 계산. verdict_ctx와 같은 규약으로 직렬화하지 않는다(서버가 재개 호출에 다시 준다 —
         지문 창이라 프로파일이 바뀌면 다른 창이 온다). None이면 종전 그대로다(설계 골든). 집계는
@@ -1725,9 +1742,14 @@ class DesignSession:
 
     def _count_new_trims(self, before: set):
         """이번 스테이지가 self.trims에 새로 넣은 트림의 origin 집계 — 저장소에서 꺼냈나(reused) 새로 풀었나(computed)."""
+        # 알려진 과소 집계: 재개가 COARSE를 다시 돌면 그 판의 점은 이미 self.trims에 있어(before에 든다) 어느 칸도
+        # 움직이지 않는다 — 저장소에서 다시 꺼냈든 다시 풀었든. computed는 그만큼 솔버 일을 덜 말한다(리뷰 3항, 그대로 둔다)
         for name, tr in self.trims.items():
             if name not in before:
-                self.trim_reuse["reused" if getattr(tr, "origin", "computed") == "reused" else "computed"] += 1
+                reused = getattr(tr, "origin", "computed") == "reused"
+                self.trim_reuse["reused" if reused else "computed"] += 1
+                if reused:
+                    self.trim_reused_names.append(name)
 
     def _rejudge_legacy_points(self):
         """판정(verdict) 없이 저장된 점을 지금 정책으로 다시 판정한다 — 트림이 남아 있는 점만(없으면 미판정 그대로)."""
@@ -1781,9 +1803,11 @@ class DesignSession:
             "fit_quality_warns": sum(
                 1 for rep in self.fits.values()
                 if (rep.get("quality") or {}).get("status") == "warn"),
-            # 트림 저장소 재사용 집계(05 §11.10) — 서버 reuse_counts와 같은 칸 이름. enabled는 이 실행이 창을 받았는가
-            # (직렬화하지 않는 실행 인자 — 재개 전 보고는 False다)
-            "trim_reuse": {**self.trim_reuse, "enabled": self._trim_store is not None},
+            # 트림 저장소 재사용 집계(05 §11.10) — 서버 reuse_counts와 같은 칸 이름. reused·computed·reused_names는
+            # **이 계보의 누적**(재개가 부모의 수를 이어 센다)이고, enabled는 **이 실행**이 창을 받았는가다
+            # (직렬화하지 않는 실행 인자 — 재개 전 보고는 False다). 두 자가 다르니 서버 되울림·화면이 그렇게 말한다
+            "trim_reuse": {**self.trim_reuse, "enabled": self._trim_store is not None,
+                           "reused_names": sorted(self.trim_reused_names)},
             "criteria_fingerprint": c.criteria.fingerprint(),
             # 권장선보다 느슨한 튜닝 목표 — 거절하지 않고 여기서 말한다(AutoDesignConfig.target_warnings).
             # 이게 있으면 warn 판정은 "목표 미달"이 아니라 설정이 예고한 결과다
@@ -2003,8 +2027,8 @@ class DesignSession:
             "stage": self.stage, "status": self.status, "iter_n": self.iter_n,
             "coarse_source": self.coarse_source,
             "region_grid": self.region_grid,
-            # 재사용 수만 싣는다 — 저장소 창(_trim_store)은 verdict_ctx처럼 실행 인자라 직렬화하지 않는다
-            "trim_reuse": dict(self.trim_reuse),
+            # 재사용 수·점 이름만 싣는다 — 저장소 창(_trim_store)은 verdict_ctx처럼 실행 인자라 직렬화하지 않는다
+            "trim_reuse": {**self.trim_reuse, "reused_names": sorted(self.trim_reused_names)},
         }
 
     @classmethod
@@ -2063,4 +2087,5 @@ class DesignSession:
         # 이 단계 전 저장물에는 없다 — 0에서 시작(그 세션의 트림은 전부 이 저장소 밖에서 계산된 것이다)
         tr = d.get("trim_reuse") or {}
         s.trim_reuse = {"reused": int(tr.get("reused", 0)), "computed": int(tr.get("computed", 0))}
+        s.trim_reused_names = [str(n) for n in (tr.get("reused_names") or [])]
         return s

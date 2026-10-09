@@ -35,9 +35,9 @@ from claw.design.tune import REASON_TEXT
 from claw.profile import ProfileError, build_profile
 from claw.profile.fingerprint import gain_tables_basis_fingerprint
 from claw_server.profiles import EXAMPLE_ID, ProfileConflict, ProfileReadOnly, ProfileUnreadable
-from claw_server.refs import (REQUEST_CRITERIA_REJECTED, ProfileRef, criteria_echo, design_reuse_counts,
-                              design_reuse_echo, profile_echo, profile_error_detail, resolve_criteria,
-                              resolve_profile, resolve_snapshot, trim_scope)
+from claw_server.refs import (REQUEST_CRITERIA_REJECTED, REUSE_OFF_CONFIG, REUSE_OFF_STORE_DISABLED, ProfileRef,
+                              criteria_echo, design_reuse_counts, design_reuse_echo, profile_echo,
+                              profile_error_detail, resolve_criteria, resolve_profile, resolve_snapshot, trim_scope)
 from claw.tables import PolyTable
 from claw_server.serialize import to_jsonable
 
@@ -227,7 +227,10 @@ def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
     # 안 걸리는 값은 잡 스레드 안에서 터져 202 뒤 원인 없는 실패가 된다
     for key, want in (("mode", str), ("fit_mode", str),
                       ("alts", (list, type(None))), ("fuels", (list, type(None))),
-                      ("sched_axes", list)):
+                      ("sched_axes", list),
+                      # 트림 저장소 재사용은 참거짓만 — 0/1이나 "false"를 참거짓으로 읽지 않는다(validation.boundary와
+                      # 같은 규약). _check_number는 불리언을 거부하므로 아래 수치 검사에서는 건너뛴다
+                      ("trim_reuse", bool)):
         if not isinstance(merged[key], want):
             raise ValueError(f"{key} 타입 오류: {type(merged[key]).__name__}")
     # 축 이름은 문자열이어야 한다 — 범위(허용 축·중복)는 엔진 __post_init__이 판정한다
@@ -238,7 +241,7 @@ def _build_config(overrides: dict, profile_criteria=None) -> AutoDesignConfig:
         # 본다(ValueError → 422). 여기 목록에 새 문자열 필드를 빠뜨리면 _check_number가
         # "수치여야 함"으로 422를 내어, 멀쩡한 설정이 거부된다
         if key in ("mode", "fit_mode", "alts", "fuels", "sched_axes", "criteria", "targets", "knots",
-                   "validation", "reinforce"):
+                   "validation", "reinforce", "trim_reuse"):
             continue
         if key in _NULLABLE_KEYS and value is None:
             continue
@@ -373,11 +376,14 @@ def _config_criteria_echo(profile, cfg: AutoDesignConfig, source: str) -> dict:
 
 
 def _save_session(store, job, session: DesignSession, fingerprint: str,
-                  parent: str | None = None, *, profile, criteria: dict, scope=None) -> None:
+                  parent: str | None = None, *, profile, criteria: dict, scope=None,
+                  off_reason: str | None = None) -> None:
     """criteria — 기준 블록(criteria_echo). 부르는 쪽이 판정·튜닝에 **실제로 쓴** 설정에서 재 넘긴다(제출·재개가
     출처를 안다) — 여기서 기체 기준으로 다시 재면 재개 세션의 저장된 설정과 어긋날 수 있다.
 
-    scope — 이 실행이 받은 트림 저장소 창(refs.trim_scope, 꺼진 서버면 None). 되울림의 지문·정책 칸이 이것으로 난다."""
+    scope — 이 실행이 받은 트림 저장소 창(_design_trim_scope, 재사용을 껐거나 저장소가 꺼진 서버면 None). 되울림의
+    지문·정책 칸이 이것으로 난다. off_reason — 창이 없는 사유(설정·서버 저장소·창 없음). 「껐다」를 결과만 보고
+    알 수 있게 같이 싣는다."""
     payload = session.to_dict()
     payload["report"] = session.report()
     payload["proposed_actions"] = session.proposed_actions()
@@ -394,7 +400,8 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
     # 트림 저장소 재사용(05 §11.10 사용자 후속 ③) — 형제 라우트 여섯 곳과 같은 자리·같은 칸 이름(refs.reuse_echo).
     # 재개는 부모의 수를 이어 센다(엔진이 왕복에 싣는다) — 이 블록은 「이 계보가 몇 점을 다시 풀지 않았나」다.
     # 이 단계 전 결과·옛 세션은 블록이 없다(None) — 0으로 위장하지 않는다(웹이 줄을 내지 않는다)
-    reuse = design_reuse_echo(payload["report"], scope, trim_fingerprint=profile.trim_fingerprint)
+    reuse = design_reuse_echo(payload["report"], scope, trim_fingerprint=profile.trim_fingerprint,
+                              off_reason=off_reason)
     if reuse is not None:
         payload["trim_reuse"] = reuse
     store.save(
@@ -420,6 +427,22 @@ def _save_session(store, job, session: DesignSession, fingerprint: str,
     job.result_id = job.id
 
 
+def _design_trim_scope(request, profile, cfg: AutoDesignConfig):
+    """이 실행이 받을 트림 저장소 창 → (scope | None, 껐다면 그 사유).
+
+    **기본은 None이다** — `config.trim_reuse`가 참일 때만 창을 준다(엔진 AutoDesignConfig.trim_reuse의 근거: 저장된
+    기록은 그것을 남긴 배치의 시드 사슬에서 나온 해라, 아슬아슬한 점의 수렴 판정까지 뒤집혀 같은 요청이 다른
+    judged·failures를 낼 수 있다). 여기가 그 계약의 else 가지다 — 재개도 이 한 길이라 **저장된 세션 설정**이 스위치다
+    (제출 때 끈 세션이 재개에서 조용히 켜지지 않는다).
+
+    켰어도 서버 저장소가 꺼져 있으면(CLAW_TRIM_STORE_LIMIT=0) 창이 없다 — 사유를 갈라 돌려주는 것은 되울림이
+    「설정으로 껐다」와 「서버가 저장소를 안 든다」를 구별해 말해야 하기 때문이다."""
+    if not cfg.trim_reuse:
+        return None, REUSE_OFF_CONFIG
+    scope = trim_scope(request, profile)
+    return scope, (None if scope is not None else REUSE_OFF_STORE_DISABLED)
+
+
 def _run_session_job(request, response, session: DesignSession, fingerprint: str,
                      parent: str | None = None, *, profile, criteria: dict) -> dict:
     store = request.app.state.store
@@ -442,11 +465,10 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    # 트림 저장소 창(05 §11.10 사용자 후속 ③) — 이 기체의 트림 지문 창이다. 제출도 재개도 이 한 길로 지나므로
-    # 여기 한 번이면 둘 다 받는다(재개는 스냅숏 기체의 지문이라 문서가 바뀌면 다른 창이 온다). 저장소가 꺼진
-    # 서버(CLAW_TRIM_STORE_LIMIT=0)면 None — 종전 그대로 전부 새로 푼다.
+    # 트림 저장소 창(05 §11.10 사용자 후속 ③) — 제출도 재개도 이 한 길로 지나므로 여기 한 번이면 둘 다 받는다
+    # (재개는 저장된 세션 설정과 스냅숏 기체의 지문이라 문서가 바뀌면 다른 창이 온다).
     # verdict_ctx와 같은 규약으로 직렬화되지 않는 실행 인자라 **재개 호출도 다시 줘야** 한다
-    scope = trim_scope(request, profile)
+    scope, off_reason = _design_trim_scope(request, profile, session.config)
 
     def work(job):
         # job.report의 반환값이 취소 요청 여부 — 엔진 협조적 취소 규약과 그대로 맞물린다
@@ -459,7 +481,7 @@ def _run_session_job(request, response, session: DesignSession, fingerprint: str
             trim_store=scope,
         )
         _save_session(store, job, session, fingerprint, parent=parent, profile=profile, criteria=criteria,
-                      scope=scope)
+                      scope=scope, off_reason=off_reason)
 
     job = request.app.state.jobs.submit("auto_design", work)
     response.headers["Location"] = f"/api/jobs/{job.id}"

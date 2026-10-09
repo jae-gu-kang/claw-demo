@@ -229,6 +229,12 @@ def criteria_echo(crit, source: str) -> dict:
 ReusePolicy = Literal["converged", "none"]  # 요청 플래그 — 수렴 기록만 재사용 / 읽지 않음(쓰기는 한다)
 REUSE_POLICY_OFF = "off"  # 저장소가 꺼진 서버(CLAW_TRIM_STORE_LIMIT=0) — 요청 정책과 무관하게 전부 새로 푼다
 
+# 자동 설계의 「왜 껐나」 — policy "off"와 같이 싣는다(design_reuse_echo). 세 사유는 고치는 자리가 다르다:
+# 설정은 요청 config.trim_reuse, 서버 저장소는 CLAW_TRIM_STORE_LIMIT, 창 없음은 호출 경로(엔진 직접 호출·옛 라우트).
+REUSE_OFF_CONFIG = "config"  # config.trim_reuse false — **기본값**이다(05 §11.10 재현성)
+REUSE_OFF_STORE_DISABLED = "store_disabled"  # 켰지만 서버 저장소가 꺼져 있다
+REUSE_OFF_NO_SCOPE = "no_scope"  # 켠·끈 것과 무관하게 이 실행에 창이 오지 않았다(사유를 아는 호출자가 없었다)
+
 
 def trim_scope(request, profile):
     """이 기체의 트림 지문 창 — 저장소가 꺼져 있으면 None(trim_batch가 종전 그대로 푼다)."""
@@ -271,18 +277,27 @@ def reuse_counts(echo: dict) -> dict:
     return {k: echo[k] for k in ("reused", "computed", "resolved_failed")}
 
 
-def design_reuse_echo(report: dict | None, scope, *, trim_fingerprint: str | None = None) -> dict | None:
-    """자동 설계용 trim_reuse 되울림 — 엔진 report()["trim_reuse"]({reused, computed, enabled})를 형제 라우트와 **같은
-    칸 이름**으로 옮긴다(웹 lib/opspace.js reuseLine이 그대로 읽는다). 블록이 없는 옛 결과·옛 세션은 None이다.
+def design_reuse_echo(report: dict | None, scope, *, trim_fingerprint: str | None = None,
+                      off_reason: str | None = None) -> dict | None:
+    """자동 설계용 trim_reuse 되울림 — 엔진 report()["trim_reuse"]를 형제 라우트와 **같은 칸 이름**으로 옮긴다
+    (웹 lib/opspace.js reuseLine이 그대로 읽는다). 블록이 없는 옛 결과·옛 세션은 None이다.
 
-    reuse_echo와 다른 점은 없는 칸뿐이다 — 설계는 트림 해 목록을 저장물에 싣지 않아 reused_names를 모르고(집계는
-    스테이지가 self.trims에 넣은 트림의 origin으로 센다), 재시도를 끈 채라(엔진 기본 retry=None) 저장된 미수렴을
-    다시 풀어 냈는지(resolved_failed)를 재지 않는다. 있는 척 0을 싣지 않는다 — reuseTip은 없는 칸을 건너뛴다.
+    재사용은 **기본 끔**이다(엔진 AutoDesignConfig.trim_reuse — 05 §11.10 재현성). 그래서 이 블록은 「껐다」를
+    모호하지 않게 말한다: policy는 "converged"(창을 받았다) 아니면 "off"이고, off면 policy_reason이 어느 스위치였는지
+    (config·store_disabled·no_scope) 말한다. 무엇이 일어났는지 뒤에 결과만 보고 알 수 있어야 한다.
+
+    두 자가 섞이지 않게: reused·computed·reused_names는 **이 결과의 계보 누적**(재개가 부모의 수를 이어 센다)이고,
+    policy·enabled는 **이 실행**의 사실이다. 그래서 저장소를 끈 서버에서 재개한 결과는 policy "off"와 0이 아닌
+    reused를 같이 실을 수 있다 — 거짓이 아니고, 웹 툴팁이 그 뜻을 적는다.
+
+    reuse_echo와 다른 점은 resolved_failed가 없는 것뿐이다 — 설계는 재시도를 끈 채라(엔진 기본 retry=None) 저장된
+    미수렴을 다시 풀어 냈는지를 재지 않는다. 있는 척 0을 싣지 않는다 — reuseTip은 없는 칸을 건너뛴다.
     """
     if not isinstance(report, dict) or not isinstance(report.get("trim_reuse"), dict):
         return None
     tr = report["trim_reuse"]
-    return {
+    names = sorted(str(n) for n in (tr.get("reused_names") or []))
+    out = {
         # 꺼진 저장소에서도 지문은 싣는다(reuse_echo와 같은 규약)
         "trim_fingerprint": trim_fingerprint or (None if scope is None else scope.trim_fingerprint),
         "reused": int(tr.get("reused", 0)),
@@ -291,6 +306,14 @@ def design_reuse_echo(report: dict | None, scope, *, trim_fingerprint: str | Non
         # 이 실행이 저장소 창을 받았나 — 재개도 서버가 매번 다시 준다(직렬화하지 않는 실행 인자)
         "enabled": bool(tr.get("enabled")),
     }
+    if scope is None:
+        # 왜 껐나 — 사유를 모르는 호출자는 no_scope다(창이 안 왔다는 사실만 말한다)
+        out["policy_reason"] = off_reason or REUSE_OFF_NO_SCOPE
+    if scope is not None or names:
+        # 어느 점을 저장소에서 꺼냈나 — 놀라운 failures를 뒤에 되짚는 유일한 단서다(재사용은 그 점의 해를 바꿀 수
+        # 있고 아슬아슬한 점은 수렴 판정까지 바꾼다). 껐는데 이름이 있으면 재개 전 계보가 꺼낸 점이다
+        out["reused_names"] = names
+    return out
 
 
 def design_reuse_counts(echo: dict | None) -> dict | None:
