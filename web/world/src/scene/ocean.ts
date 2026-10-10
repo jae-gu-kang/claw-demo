@@ -107,6 +107,12 @@ export interface Ocean {
   /** 물리 팔레트 ↔ 게임 모드 청록 — 색 유니폼 세 벌만 바뀐다(파·포말·해안은 그대로).
    *  게임 값의 정본은 `core/gamestyle.ts GAME_SEA`, 물리 값의 정본은 `PHYS_SEA`다. */
   setPalette(game: boolean): void;
+  /** 해안 거리장 유니폼 — **이 객체들 그대로** 지면 재질에 꽂는다(갯벌·해안 바위 판정).
+   *  사본을 만들면 `setCoast`가 지면 쪽을 갱신하지 못해 갯벌이 옛 해안선에 남는다. */
+  readonly coastUniforms: {
+    uCoast: { value: unknown }; uCoastMin: { value: unknown };
+    uCoastInvSpan: { value: unknown }; uHasCoast: { value: unknown };
+  };
   dispose(): void;
 }
 
@@ -204,6 +210,12 @@ export function createOcean(opts: Partial<OceanOptions> = {}): Ocean {
 
   return {
     mesh,
+    coastUniforms: {
+      uCoast: material.uniforms.uCoast!,
+      uCoastMin: material.uniforms.uCoastMin!,
+      uCoastInvSpan: material.uniforms.uCoastInvSpan!,
+      uHasCoast: material.uniforms.uHasCoast!,
+    },
     setView(camPos, invViewProj, timeSec, fovYRad, aspect) {
       (material.uniforms.uCamPos!.value as Vector3).copy(camPos);
       (material.uniforms.uGridInvViewProj!.value as Matrix4).copy(invViewProj);

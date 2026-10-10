@@ -75,6 +75,19 @@ float cloudShadowAt(vec3 p, vec3 sunDir) {
   float strength = smoothstep(0.05, 0.35, sunDir.y);
   return 1.0 - (1.0 - 0.45) * cover * strength;
 }
+
+/** 직사광이 구름을 지나 오는 비율 0.15~1 — **직사광 항에만** 곱한다(지면 재질).
+ *
+ *  cloudShadowAt과 같은 덮임 표본인데 바닥이 다르다. 그쪽은 알베도에 곱하던 때의 근사라
+ *  주변광까지 어두워지는 과장을 바닥 0.45로 되돌렸다. 지면은 이제 조명이 끝난 뒤 직사광만
+ *  깎으므로 그늘의 하늘빛은 그대로 산다 — 실제 구름 그늘처럼 직사광이 대부분 막힌다. */
+float cloudSunTransmit(vec3 p, vec3 sunDir) {
+  if (uCloudCover <= 0.001) return 1.0;
+  float up = max(sunDir.y, 0.08);
+  vec2 hit = p.xz + sunDir.xz * ((uCloudBase - p.y) / up);
+  float strength = smoothstep(0.05, 0.35, sunDir.y);
+  return 1.0 - 0.85 * cloudCoverAt(hit) * strength;
+}
 `;
 
 /** `ATMOSPHERE_GLSL`·`NOISE_GLSL`·`CLOUD_COVER_GLSL`을 앞에 붙여야 한다. */

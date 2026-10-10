@@ -31,9 +31,18 @@ export interface Tier extends MaskTier {
   elev_max?: number;
 }
 
+/** 굽는 스크립트의 첨탑 정리 기록 — `scripts/terrain/build_terrain.py`의 `prepare`가 쓴다. */
+export interface TerrainCleaning {
+  /** 창 중앙값으로 바꾼 원본 픽셀 수 */
+  replaced_px?: number;
+  per_stage?: number[];
+}
+
 export interface TerrainPack {
   origin: PackOrigin;
   tiers: Tier[];
+  /** null이면 정리 전에 구운 팩 */
+  cleaning: TerrainCleaning | null;
 }
 
 export interface NedRect { n0: number; e0: number; n1: number; e1: number }

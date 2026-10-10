@@ -25,7 +25,10 @@ scripts/terrain/build_terrain.py가 구운 바이너리를 읽어 3D 월드가 �
 
 export const MAGIC = "CLAWTER1";
 
-/** ArrayBuffer → {origin, tiers}. 각 tier에 `raw`(Uint16Array)가 붙는다. */
+/** ArrayBuffer → {origin, tiers, cleaning}. 각 tier에 `raw`(Uint16Array)가 붙는다.
+ *
+ * `cleaning`은 굽는 스크립트의 첨탑 정리 기록이다(바꾼 원본 픽셀 수·단계). **없으면 null** —
+ * 정리 전에 구운 팩이라는 뜻이고, 화면은 그 사실을 다시 굽기 안내로 말한다(가상환경 캡션). */
 export function parseTerrainPack(buffer) {
   const bytes = new Uint8Array(buffer);
   if (bytes.length < 12) throw new Error("지형 팩이 너무 짧다");
@@ -52,7 +55,7 @@ export function parseTerrainPack(buffer) {
     offset = end;
     return { ...t, raw };
   });
-  return { origin: header.origin, tiers };
+  return { origin: header.origin, tiers, cleaning: header.cleaning ?? null };
 }
 
 /** 격자 인덱스 (r, c)의 표고 [m] — 결측이면 null. */

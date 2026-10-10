@@ -17,14 +17,14 @@ const SCALE = 0.05, OFFSET = -100, NODATA = 65535;
 
 /** 시험용 팩을 만든다 — 스크립트가 굽는 것과 같은 바이트 배치.
  *  `heights`는 [row][col] 표고(남→북, 서→동), null이면 결측. */
-function makePack(tiers, origin = { lat_deg: 34.6, lon_deg: 127.2, h_ref: 0 }) {
+function makePack(tiers, origin = { lat_deg: 34.6, lon_deg: 127.2, h_ref: 0 }, extra = {}) {
   const metas = tiers.map((t) => ({
     name: t.name, n0: t.n0 ?? 0, e0: t.e0 ?? 0, step: t.step,
     rows: t.heights.length, cols: t.heights[0].length,
     encoding: "u16", scale: SCALE, offset: OFFSET, nodata: NODATA,
     coverage: 1, source: "테스트",
   }));
-  const header = new TextEncoder().encode(JSON.stringify({ origin, tiers: metas }));
+  const header = new TextEncoder().encode(JSON.stringify({ origin, ...extra, tiers: metas }));
   const dataLen = metas.reduce((s, m) => s + m.rows * m.cols * 2, 0);
   const buf = new ArrayBuffer(12 + header.length + dataLen);
   const bytes = new Uint8Array(buf);
@@ -75,6 +75,14 @@ test("왕복 — 구운 표고가 그대로 읽힌다 (양자화 오차 ±2.5 cm
         `(${r},${c}) ${got} vs ${heights[r][c]}`);
     }
   }
+});
+
+test("첨탑 정리 기록은 그대로 넘기고, 없으면 null — 정리 전 팩을 화면이 알아챈다", () => {
+  const cleaning = { replaced_px: 244, per_stage: [192, 8, 1, 43] };
+  const withIt = parseTerrainPack(makePack(
+    [{ name: "t", step: 10, heights: FLAT }], undefined, { cleaning }));
+  assert.deepEqual(withIt.cleaning, cleaning);
+  assert.equal(parseTerrainPack(makePack([{ name: "t", step: 10, heights: FLAT }])).cleaning, null);
 });
 
 test("티어가 여럿이면 헤더 순서대로 데이터가 붙는다", () => {

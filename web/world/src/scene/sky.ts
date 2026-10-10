@@ -21,7 +21,7 @@
  * 프러스텀 컬링이 걸러 주지 않고, 근거리 패스는 깊이를 지우므로 안 숨기면 다시 다 그린다.
  */
 
-import { BackSide, Color, Mesh, ShaderMaterial, SphereGeometry } from "three";
+import { BackSide, Mesh, ShaderMaterial, SphereGeometry } from "three";
 
 import { ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL } from "../shaders/atmosphere.ts";
 import { CLOUD_COVER_GLSL, CLOUD_UNIFORM_DECL, cloudGlsl } from "../shaders/clouds.ts";
@@ -43,7 +43,6 @@ void main() {
 
 const FRAG = /* glsl */`
 varying vec3 vDir;
-uniform vec3 uGround;
 ${ATMOSPHERE_UNIFORM_DECL}
 ${CLOUD_UNIFORM_DECL}
 ${ATMOSPHERE_GLSL}
@@ -56,14 +55,26 @@ void main() {
   // 구름 — 투과율만큼 하늘을 남기고 자기 복사휘도를 더한다. 태양 원반도 여기서 가려진다.
   vec4 cl = cloudLayer(cameraPosition, dir, uSunDirWorld, uSunIntensity, uHaze);
   col = col * cl.a + cl.rgb;
-  // 지평 아래 — 카메라가 낮으면 구의 아래쪽이 보인다. 지면색으로 가라앉힌다(표시용).
-  col = mix(uGround, col, smoothstep(-0.06, 0.02, dir.y));
+  // 지평 아래 — 기하가 아무것도 안 그린 곳, 곧 해면이 끝나는 50 km 너머다. 예전에는 지면색
+  // 단색(짙은 올리브)으로 덮어, 높이 뜨면 세계 가장자리에 검푸른 띠가 둘렸다. 거기 있는 것은
+  // 먼바다와 그 앞의 대기다: 스치는 각의 해면은 프레넬로 지평 하늘을 비추고, 그 위에 그 거리의
+  // 대기가 덮인다. 해면·지형과 **같은 산란 함수**라 기하가 끝나는 자리에서 색이 이어진다.
+  if (dir.y < 0.02) {
+    float down = max(-dir.y, 0.0);
+    float s = clamp(max(cameraPosition.y, 1.0) / max(down, 1.0e-4), 48000.0, 400000.0);
+    float F = 0.02 + 0.98 * pow(1.0 - down, 5.0);
+    vec3 mirror = normalize(vec3(dir.x, max(down, 0.003), dir.z));
+    vec3 sea = mix(vec3(0.002, 0.008, 0.012),
+                   skyRadiance(mirror, uSunDirWorld, uSunIntensity, uHaze), F);
+    vec3 T, S;
+    atmosphere(dir, uSunDirWorld, uSunIntensity, uHaze, s, T, S);
+    col = mix(sea * T + S, col, smoothstep(-0.02, 0.02, dir.y));
+  }
   gl_FragColor = vec4(col, 1.0);
 }`;
 
 export interface Sky {
   mesh: Mesh;
-  setGroundColor(hex: number): void;
   dispose(): void;
 }
 
@@ -76,7 +87,6 @@ export function createSky(radius: number): Sky {
       // **공유 유니폼을 그대로 꽂는다** — 하늘·에어리얼·바다가 같은 태양·같은 구름을 본다.
       ...atmosphereUniforms,
       ...cloudUniforms,
-      uGround: { value: new Color(0x5d6352) },
     },
   });
   const geometry = new SphereGeometry(radius, 32, 20);
@@ -86,9 +96,6 @@ export function createSky(radius: number): Sky {
 
   return {
     mesh,
-    setGroundColor(hex) {
-      (material.uniforms.uGround!.value as Color).set(hex);
-    },
     dispose() {
       geometry.dispose();
       material.dispose();

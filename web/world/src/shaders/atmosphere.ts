@@ -21,8 +21,10 @@
  *     T = exp(−(τR + τM))                              투과율
  *     L = (τR·pR(θ) + τM·pM(θ)) / (τR + τM) · E(h☉) · (1 − T)
  *
- * `θ`는 시선과 태양 방향의 각, `τ`는 광학두께다. 원경은 `τ = β·s`로 시선을 따라 밀도가
- * 일정하다고 본다(카메라가 경계층 안이라는 전제). 하늘은 척도고도로 세운 수직 기둥이고,
+ * `θ`는 시선과 태양 방향의 각, `τ`는 광학두께다. 원경은 시선을 따라 **고도에 따라 지수로
+ * 옅어지는 밀도**를 적분한다(`expPath`). 예전에는 `τ = β·s`로 해수면 밀도가 일정하다고 보았는데
+ * (카메라가 경계층 안이라는 전제), 높이 떠서 내려다보면 그 전제가 깨져 화면이 우유에 잠겼다.
+ * 지면 근처의 수평 시선은 두 식이 같다. 하늘은 척도고도로 세운 수직 기둥이고,
  * **레일리 8 km · 에어로졸 1.2 km로 서로 다르다** — 한 값으로 묶으면 시정 25 km의
  * 에어로졸이 8 km 기둥에 퍼져 천정까지 뿌예진다(실측으로 확인하고 고쳤다).
  *
@@ -84,8 +86,14 @@ uniform float uHaze;
  * 검게 나오는 부류라 원인이 안 보인다. */
 const glsl = (x: number): string => (Number.isInteger(x) ? x.toFixed(1) : String(x));
 
-/** 두 셰이더가 함께 include하는 본문. `uSunDirWorld`·`uSunIntensity`·`uHaze`를 전제한다. */
+/** 두 셰이더가 함께 include하는 본문. `uSunDirWorld`·`uSunIntensity`·`uHaze`를 전제한다.
+ *
+ * **가드가 있다** — 지형 재질은 에어리얼 퍼스펙티브와 지면 패치 둘이 다 이 본문을 쓴다(지면은
+ * 젖은 갯벌에 하늘을 비추느라 skyRadiance가 필요하다). 가드 없이 둘 다 넣으면 재정의로
+ * 컴파일이 깨지고, 한쪽만 넣게 하면 패치 순서에 숨은 의존이 생긴다 — 유니폼 선언의 가드와 같은 사유. */
 export const ATMOSPHERE_GLSL = /* glsl */`
+#ifndef ATMOSPHERE_GLSL_G
+#define ATMOSPHERE_GLSL_G
 const vec3 BETA_R = vec3(${BETA_R.map(glsl).join(", ")});
 const float BETA_M = ${glsl(BETA_M)};
 const float MIE_G = ${glsl(MIE_G)};
@@ -123,8 +131,8 @@ vec3 sunThroughAtmosphere(vec3 sunDir, float sunIntensity, float haze) {
  *
  *  하늘에서 그 둘이 갈린다: 레일리는 척도고도 8 km인데 에어로졸은 1.2 km다. 한 거리로
  *  묶으면 시정 25 km에 해당하는 에어로졸을 8 km 기둥 전체에 퍼뜨리게 되어 **천정까지
- *  뿌예진다** — 파랗지 않은 한낮 하늘이 나온다(실측으로 확인하고 고친 자리). 원경은
- *  카메라가 경계층 안이라 둘이 같다.
+ *  뿌예진다** — 파랗지 않은 한낮 하늘이 나온다(실측으로 확인하고 고친 자리). 원경도
+ *  같은 척도고도로 시선 거리를 따로 잰다(expPath).
  *
  *  c는 시선과 태양 방향의 코사인, sunCol은 이미 대기를 지나 온 태양색이다.
  *  (이 주석은 템플릿 리터럴 안이라 백틱을 못 쓴다.) */
@@ -147,14 +155,38 @@ void atmosphereOD(float c, vec3 tauR, vec3 tauM, vec3 sunCol,
 // 더해지는 빛만 줄인다 — 먼 것이 하늘로 녹아드는 방향은 유지되고 문턱만 멀어진다.
 const float AERIAL_S_GAIN = 0.40;  // 0.55로도 "계속 뿌옇다"는 지적 — 한 번 더 내렸다
 
-/** 거리 s를 지난 뒤의 투과율과 in-scattering — 밀도가 일정한 구간용(원경).
+/** 지수 밀도 대기를 직선으로 지나는 「해수면 등가 거리」[m] — ∫₀ˢ exp(−(h₀ + dy·t)/H) dt.
+ *
+ *  예전에는 시선 전체를 해수면 밀도로 보았다(τ = β·s). 카메라가 경계층 안에 있을 때는 맞지만
+ *  높이 떠서 내려다보면 에어로졸이 거의 없는 윗공기까지 해수면만큼 뿌옇게 쳐서, 수 km 상공의
+ *  시점이 통째로 우유에 잠겼다(화면 실측). 척도고도(레일리 8 km·에어로졸 1.2 km)로 적분하면
+ *  지면 근처의 수평 시선은 예전과 같고, 위에서 보는 시선만 맑아진다.
+ *  내려가는 시선은 해수면에서 자른다 — 그 아래는 이 모델에 없다(그리고 exp가 넘친다). */
+float expPath(float h0, float dy, float s, float H) {
+  float h = max(h0, 0.0);
+  float len = dy < 0.0 ? min(s, h / -dy + 1.0) : s;
+  float x = dy * len / H;
+  // (1 − e^(−x)) / x — x가 0 근처면 급수로(0 나누기·자릿수 상실을 피한다)
+  float f = abs(x) < 1.0e-3 ? 1.0 - 0.5 * x : (1.0 - exp(-x)) / x;
+  return exp(-h / H) * len * f;
+}
+
+/** 고도 h0에서 출발해 거리 s를 지난 뒤의 투과율과 in-scattering(원경).
  *  haze는 미 산란 배수(시정 슬라이더). dir·sunDir은 정규화된 월드 방향. */
-void atmosphere(vec3 dir, vec3 sunDir, float sunIntensity, float haze, float s,
-                out vec3 transmittance, out vec3 inscatter) {
-  atmosphereOD(dot(dir, sunDir), BETA_R * s, vec3(BETA_M * haze * s),
+void atmosphereFrom(float h0, vec3 dir, vec3 sunDir, float sunIntensity, float haze, float s,
+                    out vec3 transmittance, out vec3 inscatter) {
+  atmosphereOD(dot(dir, sunDir), BETA_R * expPath(h0, dir.y, s, H_R),
+               vec3(BETA_M * haze * expPath(h0, dir.y, s, H_M)),
                sunThroughAtmosphere(sunDir, sunIntensity, haze),
                transmittance, inscatter);
   inscatter *= AERIAL_S_GAIN;
+}
+
+/** 카메라에서 출발하는 시선 — 지형·해면·구름·하늘 아래쪽이 모두 이것을 부른다.
+ *  cameraPosition은 three가 모든 비-raw 셰이더 앞머리에 선언한다. */
+void atmosphere(vec3 dir, vec3 sunDir, float sunIntensity, float haze, float s,
+                out vec3 transmittance, out vec3 inscatter) {
+  atmosphereFrom(cameraPosition.y, dir, sunDir, sunIntensity, haze, s, transmittance, inscatter);
 }
 
 /** 하늘 한 방향의 복사휘도 — 대기를 끝까지 본 극한. */
@@ -175,6 +207,7 @@ vec3 skyRadiance(vec3 dir, vec3 sunDir, float sunIntensity, float haze) {
 
   return S;
 }
+#endif
 `;
 
 /** 대기를 지나 온 태양색 — 위 GLSL `sunThroughAtmosphere`와 **같은 식**이다.

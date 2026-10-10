@@ -16,9 +16,19 @@
 
 import type { RunwayWidth } from "../lib/replay.ts";
 
+/** 활주로 포장면 — 지면 셰이더가 아스팔트와 비행장 풀밭을 칠할 자리(shaders/ground.ts). NED 원점에서
+ *  heading 방향 length 구간, 폭 width. **폭을 알 때만** 있다 — 모르면 포장면을 지어내지 않는다. */
+export interface RunwaySurface {
+  /** 활주로 축 방위 [rad] (북에서 동으로) */ heading: number;
+  /** [m] */ length: number;
+  /** [m] — 제원 폭 */ width: number;
+}
+
 export interface RunwayDrawing {
   /** 두 점짜리 선분들 — 각각 [n0, e0, d0, n1, e1, d1]. 순서: 중심선, 시단, 종단, (폭을 알면) 왼·오른 가장자리. */
   segments: Float32Array[];
+  /** 포장면 — 폭을 알 때만(가장자리 선과 같은 조건). 없으면 null. */
+  surface: RunwaySurface | null;
   /** 캡션 한 줄 — 무엇을 그렸고 폭이 어디서 왔는지(또는 왜 모르는지). */
   note: string;
 }
@@ -41,7 +51,7 @@ export function runwayDrawing(rw: unknown, width: RunwayWidth): RunwayDrawing | 
   const seg = (a: [number, number], b: [number, number]) => new Float32Array([a[0], a[1], d, b[0], b[1], d]);
   const segments = [seg([0, 0], [n1, e1])];
   if (!("width" in width)) {
-    return { segments, note: `활주로는 중심선만 그립니다 — 폭을 모릅니다: ${width.error}.` };
+    return { segments, surface: null, note: `활주로는 중심선만 그립니다 — 폭을 모릅니다: ${width.error}.` };
   }
   const half = width.width / 2;
   // 축의 오른쪽(+) 법선 — 북·동 평면에서 (−sin h, cos h)
@@ -55,6 +65,7 @@ export function runwayDrawing(rw: unknown, width: RunwayWidth): RunwayDrawing | 
   );
   return {
     segments,
+    surface: { heading: h, length: L, width: width.width },
     note: `활주로: 중심선·시단·종단·양 가장자리 — 폭 ${fmtM(width.width)} m는 ${width.source} 값입니다`
       + "(결과에는 폭이 없어, 이 런의 활주로가 제원의 활주로와 같을 때만 씁니다).",
   };

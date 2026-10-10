@@ -3,8 +3,12 @@ import { describe, it } from "node:test";
 
 import { ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL } from "./atmosphere.ts";
 import { CLOUD_UNIFORM_DECL, cloudGlsl } from "./clouds.ts";
+import {
+  GROUND_FRAG_BODY, GROUND_GLSL, GROUND_LIGHT_BODY, GROUND_NORMAL_BODY, GROUND_UNIFORM_DECL,
+  GROUND_VARYING_DECL, GROUND_VERT_BODY, GROUND_VERT_DECL,
+} from "./ground.ts";
 import { NOISE_GLSL } from "./noise.ts";
-import { OCEAN_FRAG, OCEAN_VERT } from "./ocean.ts";
+import { COAST_GLSL, OCEAN_FRAG, OCEAN_VERT } from "./ocean.ts";
 import {
   WEAR_FRAG_BODY, WEAR_GLSL, WEAR_NORMAL_BODY, WEAR_UNIFORM_DECL, WEAR_VARYING_DECL,
   WEAR_VERT_BODY,
@@ -25,6 +29,15 @@ const SOURCES: [string, string][] = [
   ["WEAR_GLSL", WEAR_GLSL],
   ["WEAR_FRAG_BODY", WEAR_FRAG_BODY],
   ["WEAR_NORMAL_BODY", WEAR_NORMAL_BODY],
+  ["COAST_GLSL", COAST_GLSL],
+  ["GROUND_UNIFORM_DECL", GROUND_UNIFORM_DECL],
+  ["GROUND_VARYING_DECL", GROUND_VARYING_DECL],
+  ["GROUND_VERT_DECL", GROUND_VERT_DECL],
+  ["GROUND_VERT_BODY", GROUND_VERT_BODY],
+  ["GROUND_GLSL", GROUND_GLSL],
+  ["GROUND_FRAG_BODY", GROUND_FRAG_BODY],
+  ["GROUND_NORMAL_BODY", GROUND_NORMAL_BODY],
+  ["GROUND_LIGHT_BODY", GROUND_LIGHT_BODY],
 ];
 
 describe("GLSL 문자열", () => {
@@ -84,6 +97,49 @@ describe("GLSL 문자열", () => {
     for (const d of vs) {
       const name = d.split(" ")[1]!;
       if (used(OCEAN_FRAG, name)) assert.ok(fs.has(d), `조각이 ${name}을 쓰는데 선언이 없다`);
+    }
+  });
+
+  it("smoothstep의 경계를 거꾸로 주지 않는다 — GLSL·Metal 사양에서 결과가 정의되지 않는다", () => {
+    // 지금 GPU에서 돌아가도 사양 밖이다. 뒤집힌 곡선이 필요하면 1.0 - smoothstep(낮은, 높은, x)로 쓴다.
+    for (const [name, src] of SOURCES) {
+      for (const m of src.matchAll(/smoothstep\(\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)\s*,/g)) {
+        assert.ok(Number(m[1]) < Number(m[2]), `${name}: ${m[0]}`);
+      }
+    }
+  });
+
+  it("두 패치가 함께 넣는 본문은 가드가 있다 — 지면·대기가 한 재질에 같은 함수를 넣는다", () => {
+    // 지형 재질은 에어리얼 퍼스펙티브와 지면 패치가 둘 다 ATMOSPHERE_GLSL을 넣는다. 가드가 빠지면
+    // 재정의로 컴파일이 깨지고 **지형만 조용히 사라진다**(셰이더 오류는 그 물체만 없앤다).
+    for (const [name, src, guard] of [
+      ["ATMOSPHERE_GLSL", ATMOSPHERE_GLSL, "ATMOSPHERE_GLSL_G"],
+      ["COAST_GLSL", COAST_GLSL, "COAST_GLSL_G"],
+      ["NOISE_GLSL", NOISE_GLSL, "NOISE_GLSL_G"],
+    ] as const) {
+      assert.match(src, new RegExp(`#ifndef ${guard}\\s*\\n#define ${guard}`), `${name} 가드`);
+      assert.match(src.trimEnd(), /#endif$/, `${name}의 끝이 #endif가 아니다`);
+    }
+  });
+
+  it("지면 셰이더의 화면 도함수는 분기·discard 앞 한 곳뿐이다", () => {
+    // 갈라진 분기 안이나 discard 뒤의 fwidth·dFdx는 GLSL에서 정의되지 않는다 — 함수 본문(분기 안에서
+    // 불린다)·조명 단계(discard 뒤)에 들어가면 쿼드 가장자리에서 걸음 수·무늬 접기가 튄다.
+    for (const [name, src] of [["GROUND_GLSL", GROUND_GLSL], ["GROUND_NORMAL_BODY", GROUND_NORMAL_BODY],
+      ["GROUND_LIGHT_BODY", GROUND_LIGHT_BODY]] as const) {
+      assert.doesNotMatch(src, /\b(fwidth|dFdx|dFdy)\s*\(/, name);
+    }
+    const body = GROUND_FRAG_BODY;
+    assert.equal(body.match(/\bfwidth\s*\(/g)?.length, 1);
+    assert.ok(body.includes("discard;"), "discard 문장이 있다");
+    assert.ok(body.indexOf("fwidth(") < body.indexOf("discard;"), "도함수가 discard보다 앞이다");
+  });
+
+  it("지면 정점·조각의 varying이 같은 선언 한 벌에서 나온다", () => {
+    // 정점 선언은 조각과 같은 상수를 끼워 넣는다 — 손으로 두 벌 적다 한쪽만 고치는 일을 막는다
+    assert.ok(GROUND_VERT_DECL.includes(GROUND_VARYING_DECL));
+    for (const v of ["vGroundWorld", "vGroundNormal", "vGroundShade"]) {
+      assert.match(GROUND_VERT_BODY, new RegExp(`\\b${v}\\s*=`), `${v}를 정점이 안 채운다`);
     }
   });
 

@@ -130,6 +130,7 @@ run_suite engine "$REPO/engine" "$VPY" -m pytest -q
 run_suite server "$REPO/server" "$VPY" -m pytest -q
 run_suite flight "$REPO/flight" "$VPY" -m pytest -q   # cc 없으면 2건 skip
 run_suite models "$REPO" "$VPY" -m pytest -q models   # 모델 생성 스크립트 유틸 (블렌더 불요)
+run_suite terrain "$REPO" "$VPY" -m pytest -q scripts/terrain   # 지형 팩 첨탑 정리 (합성 격자 — 내려받기 없음)
 
 if command -v node >/dev/null 2>&1; then
   run_suite web "$REPO/web" node --test "js/**/*.test.js"

@@ -470,6 +470,8 @@ export class SceneController {
       for (const points of rwDraw.segments) rwLines.push({ points, color: 0xffffff });
       notes.push(rwDraw.note);
     }
+    // 포장면 — 폭을 알 때만(가장자리 선과 같은 조건). 지면 셰이더가 아스팔트·둘레 풀밭을 칠한다
+    this.host.setRunwaySurface(rwDraw?.surface ?? null);
 
 
     // --- 궤적 ---

@@ -223,6 +223,7 @@ uvicorn --factory claw_server:create_app --port 8000   # 리포 루트에서
 .venv/bin/python -m pytest server    # 서버
 .venv/bin/python -m pytest flight    # 코드젠·패리티
 .venv/bin/python -m pytest models    # 모델 생성 스크립트 유틸 (블렌더 불요)
+.venv/bin/python -m pytest scripts/terrain   # 지형 팩 굽기 — 첨탑 정리 (내려받기 없음)
 (cd web && node --test "js/**/*.test.js")        # 웹 (node 내장 러너, npm 의존 0)
 (cd web/world && node --test "src/**/*.test.ts")  # 가상환경 탭 (별도 스위트 — 위 글로브가 못 닿는다)
 scripts/refcheck.sh                  # 문서·코드의 절 참조 (본문 정본은 docs/README.md)

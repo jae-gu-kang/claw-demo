@@ -36,11 +36,15 @@ import { WAVE_COUNT } from "../core/waves.ts";
 
 // 조각 셰이더는 `NOISE_GLSL`(gnoise2)을 앞에 붙여야 한다 — `scene/ocean.ts`가 조립한다.
 
-/** 해안 거리장 조회 — 정점·조각이 **같은 식**을 쓴다.
+/** 해안 거리장 조회 — 해면의 정점·조각과 **지면 재질**이 같은 식을 쓴다.
  *
  * 복호는 `core/coastfield.ts`의 `decodeCoastDistance`와 짝이다. 한쪽만 고치면 해안선이
- * 통째로 밀리는데, 그건 "지형이 좀 이상하네"로 보여서 원인이 안 잡힌다. */
-const COAST_GLSL = /* glsl */`
+ * 통째로 밀리는데, 그건 "지형이 좀 이상하네"로 보여서 원인이 안 잡힌다. 지면은 이것으로
+ * 갯벌·해안 바위 띠를 가른다(shaders/ground.ts) — 유니폼 값도 해면의 것을 그대로 꽂는다
+ * (`Ocean.coastUniforms`). 지면에도 해안선이 두 벌이면 갯벌이 물가에서 어긋난다. */
+export const COAST_GLSL = /* glsl */`
+#ifndef COAST_GLSL_G
+#define COAST_GLSL_G
 uniform sampler2D uCoast;
 uniform vec2 uCoastMin;      // (e0, n0) [m]
 uniform vec2 uCoastInvSpan;  // 1/(eSpan, nSpan)
@@ -59,6 +63,7 @@ vec2 coastAt(vec2 worldXZ) {
   vec2 t = textureLod(uCoast, uv, 0.0).rg;
   return vec2((t.r * 2.0 - 1.0) * ${COAST_RANGE_M}.0, t.g);
 }
+#endif
 `;
 
 /** 정점 셰이더 — NDC 격자를 해수면에 눕히고 게르스트너로 밀어 올린다. */
@@ -299,7 +304,11 @@ void main() {
 
   // 포말 — 마루와 해안선. 흰 거품은 거의 램버시안이라 하늘빛을 고루 받는다.
   float crest = smoothstep(0.62, 0.95, lift) * uFoamAmount;
-  float surf = smoothstep(90.0, 0.0, vCoast.x) * step(0.0, vCoast.x);
+  float surf = (1.0 - smoothstep(0.0, 90.0, vCoast.x)) * step(0.0, vCoast.x);
+  // 해안마다 똑같이 두르면 모든 섬이 흰 테두리를 쓴 그림이 된다(화면 실측) — 부서지는 파도는
+  // 곳에 따라 있다 없다 한다. 1 km 규모로 들쭉날쭉하게, 파고가 낮으면 잦아들게 한다(표시 값).
+  surf *= smoothstep(0.35, 0.75, fbm2(vWorld.xz * (1.0 / 900.0) + 3.7, 2) * 0.5 + 0.5)
+        * smoothstep(0.2, 1.6, uWaveHeight);
   float foam = clamp(crest + surf * 0.8, 0.0, 1.0);
   vec3 foamLit = (sunCol * max(uSunDirWorld.y, 0.0)
                   + skyRadiance(vec3(0.0, 1.0, 0.0), uSunDirWorld, uSunIntensity, uHaze)) * 0.28;

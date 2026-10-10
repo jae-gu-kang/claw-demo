@@ -32,6 +32,27 @@
  *
  * 관측이 없는 곳에 없는 바다를 만들지 않는다. `terrainpack.js`가 구멍을 구멍으로
  * 두는 것과 같은 규약이다.
+ *
+ * ## 해안 턱 흡수 — 흘린 **뒤에**, 흘리지 않는 규칙으로
+ *
+ * 원자료는 섬·해안에서 바다 쪽으로 100~300 m 떨어진 자리에 **폭 1~6칸, 높이 2.5 m 이하의
+ * 격자 무늬 고리**를 싣고 있다(얕은 바다를 거친 표고로 메운 흔적). 표고 0이 아니라 흘리기가
+ * 멈추므로 뭍으로 남았고, 화면에서는 해안마다 바다로 튀어나온 계단판과 그 윤곽을 따라
+ * 그려진 파도 거품 띠로 보였다.
+ *
+ * 문턱을 올려 흘리면 안 된다 — **1 m만 올려도 활주로 180칸 중 121칸이 잠긴다**(실측). 간척지가
+ * 1 m 아래 칸으로 바다와 이어져 있기 때문이다. 그래서 흘리지 않는 국소 규칙 둘을 덧입힌다
+ * (`SHELF`):
+ *
+ *   1. 표고 2.5 m 이하의 뭍 칸 둘레 7×7에서 바다가 35% 이상이면 바다 — 두 번만
+ *   2. 최고 표고 2.5 m 이하이고 넓이 0.36 km² 미만인 뭍 덩어리(4연결)는 바다
+ *
+ * 1은 가는 고리를 먹고, 넓은 저지대(간척지)는 가장자리 몇 칸만 깎는다 — 흘리지 않으므로
+ * 안쪽으로 번지지 않는다(고흥 팩 실측: 활주로 반경 2.5 km 안에서 바뀐 칸 0). 2는 1이 남긴
+ * 낮은 토막을 먹는다. 높은 땅에 붙은 저지대는 덩어리의 최고 표고가 높아 2에 걸리지 않는다.
+ *
+ * **넓은 티어가 좁은 티어에 주는 시드는 흘린 결과만이다.** 흡수한 칸까지 시드로 주면 간척지
+ * 가장자리에서 흡수된 0 칸이 좁은 티어의 흘리기를 간척지 안쪽 0 그물로 끌고 들어간다.
  */
 
 /** `lib/terrainpack.js`가 파싱한 티어 중 이 모듈이 쓰는 부분. */
@@ -60,8 +81,10 @@ export interface TierMask {
   rows: number;
   cols: number;
   cells: Uint8Array;
-  /** 바다로 판정된 셀 수 — 캡션이 비율을 말한다 */
+  /** 바다로 판정된 셀 수(흡수한 해안 턱 포함) — 캡션이 비율을 말한다 */
   seaCells: number;
+  /** 그중 해안 턱 흡수로 바다가 된 셀 수 — 머리말 「해안 턱 흡수」 */
+  shelfCells: number;
   /** 표고는 해수면인데 육지로 남은 셀 수 (간척지·저지대·양자화 잡음) */
   landAtSeaLevel: number;
   missingCells: number;
@@ -170,7 +193,102 @@ function floodTier(
     if (cells[i] === CELL.SEA) seaCells++;
     else if (isSeaLevel[i] === 1) landAtSeaLevel++;
   }
-  return { name: tier.name, rows, cols, cells, seaCells, landAtSeaLevel, missingCells };
+  return { name: tier.name, rows, cols, cells, seaCells, landAtSeaLevel, missingCells, shelfCells: 0 };
+}
+
+/** 해안 턱 흡수의 문턱 — 머리말 「해안 턱 흡수」. 표시용 판정이다(원자료를 고치지 않는다). */
+export const SHELF = {
+  /** 이 표고 [m] 이하의 뭍만 본다 */
+  maxElevM: 2.5,
+  /** 둘레 창의 반경 [칸] — 7×7 */
+  radiusCells: 3,
+  /** 창 안 바다 비율이 이 이상이면 바다 */
+  seaFrac: 0.35,
+  /** 규칙 1을 되풀이하는 횟수 — 넓은 저지대를 이만큼만 깎는다 */
+  passes: 2,
+  /** 규칙 2의 덩어리 넓이 상한 [m²] */
+  maxBlobM2: 360000,
+} as const;
+
+/** 흘린 마스크에 해안 턱 흡수를 덧입힌 **새 마스크**. 입력은 건드리지 않는다(시드로 계속 쓴다). */
+function absorbShelves(tier: MaskTier, flooded: TierMask): TierMask {
+  const { rows, cols } = tier;
+  const n = rows * cols;
+  const cells = flooded.cells.slice();
+  const elev = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = tier.raw[i]!;
+    elev[i] = v === tier.nodata ? Number.NaN : tier.offset + v * tier.scale;
+  }
+  const low = (i: number) => cells[i] === CELL.LAND && elev[i]! <= SHELF.maxElevM;
+
+  // 규칙 1 — 창 안 바다 비율. 합산표로 칸마다 O(1), 갱신은 회차 단위(순서 무관).
+  const w = cols + 1;
+  const sat = new Int32Array((rows + 1) * w);
+  const R = SHELF.radiusCells;
+  for (let pass = 0; pass < SHELF.passes; pass++) {
+    for (let r = 0; r < rows; r++) {
+      let rowSum = 0;
+      for (let c = 0; c < cols; c++) {
+        rowSum += cells[r * cols + c] === CELL.SEA ? 1 : 0;
+        sat[(r + 1) * w + c + 1] = sat[r * w + c + 1]! + rowSum;
+      }
+    }
+    const flip: number[] = [];
+    for (let r = 0; r < rows; r++) {
+      const r0 = Math.max(r - R, 0);
+      const r1 = Math.min(r + R, rows - 1) + 1;
+      for (let c = 0; c < cols; c++) {
+        const i = r * cols + c;
+        if (!low(i)) continue;
+        const c0 = Math.max(c - R, 0);
+        const c1 = Math.min(c + R, cols - 1) + 1;
+        const sea = sat[r1 * w + c1]! - sat[r0 * w + c1]! - sat[r1 * w + c0]! + sat[r0 * w + c0]!;
+        if (sea >= SHELF.seaFrac * (r1 - r0) * (c1 - c0)) flip.push(i);
+      }
+    }
+    if (flip.length === 0) break;
+    for (const i of flip) cells[i] = CELL.SEA;
+  }
+
+  // 규칙 2 — 작은 낮은 덩어리. 4연결 뭍 성분마다 넓이와 최고 표고를 잰다.
+  const maxCells = SHELF.maxBlobM2 / (tier.step * tier.step);
+  const seen = new Uint8Array(n);
+  const stack = new Int32Array(n);
+  const members: number[] = [];
+  for (let s = 0; s < n; s++) {
+    if (seen[s] || cells[s] !== CELL.LAND) continue;
+    let top = 0;
+    let peak = -Infinity;
+    members.length = 0;
+    stack[top++] = s;
+    seen[s] = 1;
+    while (top > 0) {
+      const i = stack[--top]!;
+      members.push(i);
+      if (elev[i]! > peak) peak = elev[i]!;
+      const r = (i / cols) | 0;
+      const c = i - r * cols;
+      for (const j of [r > 0 ? i - cols : -1, r + 1 < rows ? i + cols : -1,
+        c > 0 ? i - 1 : -1, c + 1 < cols ? i + 1 : -1]) {
+        if (j >= 0 && !seen[j] && cells[j] === CELL.LAND) { seen[j] = 1; stack[top++] = j; }
+      }
+    }
+    if (members.length < maxCells && peak <= SHELF.maxElevM) {
+      for (const i of members) cells[i] = CELL.SEA;
+    }
+  }
+
+  let seaCells = 0;
+  let landAtSeaLevel = 0;
+  const seaRaw = seaLevelRaw(tier);
+  for (let i = 0; i < n; i++) {
+    if (cells[i] === CELL.SEA) seaCells++;
+    else if (cells[i] === CELL.LAND && atSeaLevel(tier, i, seaRaw)) landAtSeaLevel++;
+  }
+  return {
+    ...flooded, cells, seaCells, landAtSeaLevel, shelfCells: seaCells - flooded.seaCells,
+  };
 }
 
 /** 티어가 덮는 한 변 [m] — 넓은 것부터 흘리려고 정렬에 쓴다. */
@@ -199,6 +317,8 @@ export function buildSeaMasks(tiers: MaskTier[]): Map<string, TierMask> {
     out.set(tier.name, mask);
     done.push({ tier, mask });
   }
+  // 흡수는 **전부 흘린 뒤에** 티어마다 따로 — 머리말 「해안 턱 흡수」 끝 문단
+  for (const { tier, mask } of done) out.set(tier.name, absorbShelves(tier, mask));
   return out;
 }
 

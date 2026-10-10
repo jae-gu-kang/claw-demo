@@ -16,11 +16,12 @@
  */
 
 import {
-  ACESFilmicToneMapping, BufferAttribute, BufferGeometry, Color, DirectionalLight,
+  ACESFilmicToneMapping, BufferAttribute, BufferGeometry, ClampToEdgeWrapping, Color, DataTexture,
+  DataUtils, DirectionalLight, HalfFloatType, LinearFilter,
   PCFSoftShadowMap,
   Group, HemisphereLight, LineBasicMaterial, LineSegments, Matrix4, Mesh,
-  MeshStandardMaterial, PerspectiveCamera, Raycaster, Scene, SphereGeometry,
-  SRGBColorSpace, Vector2, Vector3,
+  MeshStandardMaterial, PerspectiveCamera, Raycaster, RedFormat, Scene, SphereGeometry,
+  SRGBColorSpace, Vector2, Vector3, Vector4,
   WebGLRenderer,
 } from "three";
 
@@ -33,6 +34,8 @@ import {
 } from "./atmosphere.ts";
 import { applyGroundDetail } from "./materials.ts";
 import { gameRamp } from "../core/gamestyle.ts";
+import { terrainShade } from "../core/terrainshade.ts";
+import type { RunwaySurface } from "../core/runway.ts";
 import type { CoastField } from "../core/coastfield.ts";
 import { createOcean, type Ocean, type SeaState } from "./ocean.ts";
 import { createSky, type Sky } from "./sky.ts";
@@ -148,6 +151,15 @@ export interface NedMesh {
   indices: Uint16Array | Uint32Array;
 }
 
+/** 실사 지형 한 장 — NED 기하에 **격자 제원**이 붙는다. 하늘 열림과 표고 텍스처가 격자 위에서
+ *  계산되므로 정점 배열을 rows×cols 격자로 다시 읽을 수 있어야 한다(정점 i = r·cols + c). */
+export interface TerrainPatch extends NedMesh {
+  rows: number;
+  cols: number;
+  /** 격자 간격 [m] — 마지막 행·열은 짧을 수 있다(솎기를 안 하는 실사 지형에서는 같다). */
+  step: number;
+}
+
 export interface PathLine {
   /** NED 평탄 [n, e, d, …] */ points: Float32Array;
   color: number;
@@ -164,29 +176,12 @@ export interface SceneStats {
   ms: number;
 }
 
-/** 고도 램프 — 표시용이다(영상지도 아님). 값은 **sRGB 감각**으로 적는다(사람이 고르는
- * 색은 그 공간이다) — 아래 hypsometric이 선형으로 바꿔 넣는다.
- *
- * 이 변환이 빠져 있었다: 정점색은 셰이더에서 선형으로 읽히는데 0.76을 그대로 주면
- * 화면(sRGB)에서는 0.89로 떠서, 지형 전체가 씻긴 듯 뽀얗게 보였다(사용자 지적 "뿌옇다"의
- * 큰 몫). 옛 어댑터 시절부터 있던 오류라 "그대로 옮겨" 왔었다. */
-const RAMP: [number, [number, number, number]][] = [
-  [0, [0.76, 0.72, 0.58]], [60, [0.42, 0.53, 0.32]], [300, [0.28, 0.40, 0.24]],
-  [700, [0.45, 0.42, 0.36]], [1200, [0.72, 0.72, 0.72]],
-];
-
-function hypsometric(elev: number, out: Float32Array, i: number): void {
-  let lo = RAMP[0]!;
-  let hi = RAMP[RAMP.length - 1]!;
-  for (let k = 0; k + 1 < RAMP.length; k++) {
-    if (elev <= RAMP[k + 1]![0]) { lo = RAMP[k]!; hi = RAMP[k + 1]!; break; }
-  }
-  const span = hi[0] - lo[0];
-  const t = span > 0 ? Math.min(Math.max((elev - lo[0]) / span, 0), 1) : 0;
-  for (let k = 0; k < 3; k++) {
-    const srgb = lo[1][k]! + (hi[1][k]! - lo[1][k]!) * t;
-    out[i + k] = Math.pow(srgb, 2.2); // sRGB → 선형 (위 주석)
-  }
+/** 정점 배열 → 격자 표고 [m] (rows×cols, 결측은 NaN 그대로 — 받는 쪽이 정책을 정한다). */
+function elevationsOf(p: TerrainPatch): Float32Array {
+  const n = p.rows * p.cols;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = -p.positions[3 * i + 2]!;
+  return out;
 }
 
 export class SceneHost {
@@ -215,6 +210,21 @@ export class SceneHost {
   private readonly ndc = new Vector2();
   private renderScale = 1;
   private readonly sunDirWorld = new Vector3(0.4, 0.6, 0.2);
+  /** 지면 재질의 표고 텍스처·변환 — 지형 두 장이 **이 한 벌**을 꽂는다(`shaders/ground.ts`).
+   *  그림자 광선은 장 경계를 넘어 다른 장의 산을 봐야 하므로 장마다 따로 두면 안 된다. */
+  private readonly groundUniforms = {
+    uHeightFine: { value: null as DataTexture | null },
+    uHeightCoarse: { value: null as DataTexture | null },
+    uHFine: { value: new Vector4() },
+    uHFineSize: { value: new Vector2(1, 1) },
+    uHCoarse: { value: new Vector4() },
+    uHCoarseSize: { value: new Vector2(1, 1) },
+    uHeightOn: { value: 0 },
+    uTerrainTop: { value: 0 },
+    uRunway: { value: new Vector4(1, 0, 0, 0) },
+    uRunwayOn: { value: 0 },
+  };
+  private heightTextures: DataTexture[] = [];
 
   constructor(canvas: HTMLCanvasElement, context: WebGL2RenderingContext) {
     // 컨텍스트를 밖에서 만들어 넘긴다 — 같은 캔버스의 두 번째 getContext는 기존 것을
@@ -353,15 +363,16 @@ export class SceneHost {
     this.renderer.toneMappingExposure = exposure;
   }
 
-  /** NED 기하 → three 지오메트리 — NaN 정점 방어·축 변환·색 굽기를 한 곳에 둔다.
-   *  실사·게임 두 벌이 각자 돌면 언젠가 한쪽만 고쳐진다(disposeTree의 교훈). */
+  /** NED 기하 → three 지오메트리 — NaN 정점 방어·축 변환·(있으면) 색 굽기를 한 곳에 둔다.
+   *  실사·게임 두 벌이 각자 돌면 언젠가 한쪽만 고쳐진다(disposeTree의 교훈). 실사 지형은
+   *  색을 셰이더가 정하므로(지표 피복) `colorAt`이 null이다. */
   private patchGeometry(
-    p: NedMesh, colorAt: (elev: number, out: Float32Array, i: number) => void,
+    p: NedMesh, colorAt: ((elev: number, out: Float32Array, i: number) => void) | null,
   ): BufferGeometry {
     const n = p.positions.length;
     const pos = new Float32Array(n);
     const nrm = new Float32Array(n);
-    const col = new Float32Array(n);
+    const col = colorAt ? new Float32Array(n) : null;
     for (let i = 0; i < n; i += 3) {
       // 결측 정점은 인덱스가 참조하지 않지만, NaN이 속성 배열에 남으면 바운딩
       // 스피어가 NaN이 되어 **메시 전체가 프러스텀 컬링으로 사라진다.**
@@ -370,33 +381,108 @@ export class SceneHost {
       pos[i] = w[0]; pos[i + 1] = w[1]; pos[i + 2] = w[2];
       const nw = toWorld(p.normals[i]!, p.normals[i + 1]!, p.normals[i + 2]!);
       nrm[i] = nw[0]; nrm[i + 1] = nw[1]; nrm[i + 2] = nw[2];
-      colorAt(-d, col, i);
+      if (colorAt && col) colorAt(-d, col, i);
     }
     const geo = new BufferGeometry();
     geo.setAttribute("position", new BufferAttribute(pos, 3));
     geo.setAttribute("normal", new BufferAttribute(nrm, 3));
-    geo.setAttribute("color", new BufferAttribute(col, 3));
+    if (col) geo.setAttribute("color", new BufferAttribute(col, 3));
     geo.setIndex(new BufferAttribute(p.indices, 1));
     return geo;
   }
 
-  /** 지형 — NED 기하를 그대로 받는다. 음영은 **진짜 법선에 조명이 닿아** 생긴다. */
-  setTerrain(patches: readonly NedMesh[]): void {
+  /** 지형 — NED 기하를 그대로 받는다. 음영은 **진짜 법선에 조명이 닿아** 생기고, 그 위에
+   *  지표 피복·지형 자체 그림자·하늘 열림이 얹힌다(`shaders/ground.ts`). */
+  setTerrain(patches: readonly TerrainPatch[]): void {
     disposeTree(this.groups.terrain);
+    this.setHeightTextures(patches);
     for (const p of patches) {
-      const geo = this.patchGeometry(p, hypsometric);
-      const mat = new MeshStandardMaterial({
-        vertexColors: true, roughness: 0.95, metalness: 0,
+      const geo = this.patchGeometry(p, null);
+      // 하늘 열림·볼록도 — 격자 위에서 굽는다(core/terrainshade.ts). 정점 하나에 둘.
+      const shade = terrainShade(elevationsOf(p), p.rows, p.cols, p.step);
+      const attr = new Float32Array(p.rows * p.cols * 2);
+      for (let i = 0; i < p.rows * p.cols; i++) {
+        attr[2 * i] = shade.ao[i]!;
+        attr[2 * i + 1] = shade.convex[i]!;
+      }
+      geo.setAttribute("aTerrain", new BufferAttribute(attr, 2));
+      const mat = new MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
+      // 지면(피복·그림자) → 대기. 순서는 무관하다(선언은 가드, 앵커는 서로 다름).
+      // 유니폼은 **공유 객체 그대로** — 하늘·해면과 같은 태양·구름·해안선을 본다.
+      applyGroundDetail(mat, {
+        ...cloudUniforms, ...atmosphereUniforms, ...this.ocean.coastUniforms, ...this.groundUniforms,
       });
-      // 지면 무늬 + 구름 그림자 → 대기. 순서는 무관하다(선언은 가드, 앵커는 서로 다름).
-      applyGroundDetail(mat, { ...cloudUniforms, uSunDirWorld: atmosphereUniforms.uSunDirWorld });
       applyAerialPerspective(mat);
       const mesh = new Mesh(geo, mat);
-      // 기체·발사관의 그림자를 받는다. 지형끼리의 자체 그림자는 없다(캡션 몫) —
-      // 30 km 도메인에 2048 맵이면 텍셀이 15 m라 지형 그림자는 계단이 된다.
+      // 기체·지상 장비의 그림자 맵을 받는다. 지형 능선의 그림자는 그림자 맵이 아니라 표고
+      // 텍스처를 훑어 따로 그린다(30 km 도메인에 2048 맵이면 텍셀이 15 m라 계단이 된다).
       mesh.receiveShadow = true;
       this.groups.terrain.add(mesh);
     }
+  }
+
+  /** 활주로 포장면 — 지면 셰이더가 아스팔트와 둘레 풀밭을 칠한다(`shaders/ground.ts`). null이면
+   *  안 칠한다 — 폭을 모르는 활주로에 포장면을 지어내지 않는다(`core/runway.ts`). */
+  setRunwaySurface(s: RunwaySurface | null): void {
+    const u = this.groundUniforms;
+    if (s == null) {
+      u.uRunwayOn.value = 0;
+      return;
+    }
+    u.uRunway.value.set(Math.cos(s.heading), Math.sin(s.heading), s.length, s.width / 2);
+    u.uRunwayOn.value = 1;
+  }
+
+  /** 표고 텍스처 — 가장 촘촘한 장과 가장 넓은 장을 반정밀도로 올린다(지형 자체 그림자용).
+   *
+   * 반정밀도인 이유: WebGL2에서 R16F는 선형 필터가 기본으로 되지만 R32F는 확장
+   * (`OES_texture_float_linear`)이 있어야 한다 — 없으면 최근접으로 떨어져 그림자에 30 m
+   * 계단이 선다. 1,000 m에서 간격이 0.5 m라 그림자 판정에는 충분하다. */
+  private setHeightTextures(patches: readonly TerrainPatch[]): void {
+    for (const t of this.heightTextures) t.dispose();
+    this.heightTextures = [];
+    const u = this.groundUniforms;
+    u.uHeightOn.value = 0;
+    u.uHeightFine.value = null;
+    u.uHeightCoarse.value = null;
+    if (patches.length === 0) return;
+    const byStep = [...patches].sort((a, b) => a.step - b.step);
+    let top = 0;
+    const upload = (p: TerrainPatch, xf: Vector4, size: Vector2): DataTexture => {
+      const n = p.rows * p.cols;
+      const data = new Uint16Array(n);
+      for (let i = 0; i < n; i++) {
+        const d = p.positions[3 * i + 2]!;
+        const z = Number.isFinite(d) ? -d : 0; // 결측은 해수면 — 없는 능선을 세우지 않는다
+        if (z > top) top = z;
+        data[i] = DataUtils.toHalfFloat(z);
+      }
+      const tex = new DataTexture(data, p.cols, p.rows, RedFormat, HalfFloatType);
+      tex.minFilter = LinearFilter;
+      tex.magFilter = LinearFilter;
+      tex.wrapS = ClampToEdgeWrapping;
+      tex.wrapT = ClampToEdgeWrapping;
+      // 줄 길이가 cols×2바이트라 4의 배수가 아닐 수 있다(801칸 → 1,602바이트). 기본 정렬 4로
+      // 두면 줄이 어긋나 그림자가 비스듬히 밀린다 — 해안 거리장 텍스처가 겪은 그것이다.
+      tex.unpackAlignment = 1;
+      tex.needsUpdate = true;
+      this.heightTextures.push(tex);
+      // 칸 (0, 0)의 NED — positions[0] = n0, positions[1] = e0
+      xf.set(p.positions[1]!, p.positions[0]!, p.step, 0);
+      size.set(p.cols, p.rows);
+      return tex;
+    };
+    u.uHeightFine.value = upload(byStep[0]!, u.uHFine.value, u.uHFineSize.value);
+    const coarse = byStep[byStep.length - 1]!;
+    u.uHeightCoarse.value = coarse === byStep[0]
+      ? u.uHeightFine.value
+      : upload(coarse, u.uHCoarse.value, u.uHCoarseSize.value);
+    if (coarse === byStep[0]) {
+      u.uHCoarse.value.copy(u.uHFine.value);
+      u.uHCoarseSize.value.copy(u.uHFineSize.value);
+    }
+    u.uTerrainTop.value = top;
+    u.uHeightOn.value = 1;
   }
 
   /** 게임 모드 지형 — **같은 실측 표고**를 성긴 면 + 게임 램프로 다시 그린다.
@@ -619,6 +705,8 @@ export class SceneHost {
     this.post?.dispose();
     this.post = null;
     for (const g of Object.values(this.groups)) disposeTree(g);
+    for (const t of this.heightTextures) t.dispose();
+    this.heightTextures = [];
     this.sky.dispose();
     this.ocean.dispose();
     this.scene.clear();

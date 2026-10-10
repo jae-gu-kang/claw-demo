@@ -41,6 +41,8 @@ describe("활주로 표시선 — 폭은 시험장 제원에서, 선분은 따�
     for (const s of d.segments) { near(s[2]!, -4, "D"); near(s[5]!, -4, "D"); }
     assert.match(d.note, /폭 45 m는 고흥 시험장 제원 값입니다/);
     assert.doesNotMatch(d.note, /폭은 결과에 없습니다/);
+    // 포장면 — 지면이 칠할 사각형은 선과 같은 제원
+    assert.deepEqual(d.surface, { heading: GOHEUNG_RW.heading, length: GOHEUNG_RW.length, width: 45 });
   });
 
   it("선분마다 두 점이다 — 한 꺾은선에 이어 담으면 중심선 끝에서 시단 가로선으로 대각선이 그어진다", () => {
@@ -53,6 +55,7 @@ describe("활주로 표시선 — 폭은 시험장 제원에서, 선분은 따�
     const d = runwayDrawing(other, siteRunwayWidth(other))!;
     assert.equal(d.segments.length, 1);
     near(lengthOf(d.segments[0]!), 900, "중심선", 1e-3);
+    assert.equal(d.surface, null, "폭을 모르면 포장면도 칠하지 않는다");
     assert.match(d.note, /^활주로는 중심선만 그립니다 — 폭을 모릅니다: 이 런의 활주로\(방위 1\.2 rad · 길이 900 m\)가 고흥 시험장 제원의 활주로/);
   });
 

@@ -27,7 +27,7 @@ function tierOf(rows: string[], step = 10, name = "t"): MaskedTier {
     scale: 1, offset: 0, nodata: 65535, raw: new Uint16Array(w * h),
   };
   const mask: TierMask = {
-    name, rows: h, cols: w, cells, seaCells: sea, landAtSeaLevel: 0, missingCells: missing,
+    name, rows: h, cols: w, cells, seaCells: sea, landAtSeaLevel: 0, missingCells: missing, shelfCells: 0,
   };
   return { tier, mask };
 }

@@ -18,9 +18,13 @@
 
 import type { Material } from "three";
 
-import { ATMOSPHERE_UNIFORM_DECL } from "../shaders/atmosphere.ts";
+import { ATMOSPHERE_GLSL, ATMOSPHERE_UNIFORM_DECL } from "../shaders/atmosphere.ts";
 import { CLOUD_COVER_GLSL, CLOUD_UNIFORM_DECL } from "../shaders/clouds.ts";
-import { GROUND_FRAG_BODY, GROUND_VARYING_DECL, GROUND_VERT_BODY } from "../shaders/ground.ts";
+import {
+  GROUND_FRAG_BODY, GROUND_GLSL, GROUND_LIGHT_BODY, GROUND_NORMAL_BODY, GROUND_UNIFORM_DECL,
+  GROUND_VARYING_DECL, GROUND_VERT_BODY, GROUND_VERT_DECL,
+} from "../shaders/ground.ts";
+import { COAST_GLSL } from "../shaders/ocean.ts";
 
 import {
   WEAR_FRAG_BODY, WEAR_GLSL, WEAR_NORMAL_BODY, WEAR_UNIFORM_DECL, WEAR_VARYING_DECL,
@@ -83,11 +87,23 @@ export const WEAR_BY_MATERIAL: Readonly<Record<string, WearConfig>> = {
   // CanisterInner는 뺀다 — 관 안쪽은 거의 안 보이고, 보일 때는 어둠이 이야기다.
 };
 
-/** 지형 재질에 절차 무늬 + 구름 그림자를 얹는다 — `shaders/ground.ts` 머리말 참조.
+/** 지형 재질에 지표 피복·지형 그림자·하늘 열림을 얹는다 — `shaders/ground.ts` 머리말 참조.
  *
  * `applyWear`·`applyAerialPerspective`와 같은 규율: onBeforeCompile을 잇고 캐시 키를
- * 잇는다. 유니폼은 공유 구름 벌(`cloudUniforms`)을 그대로 꽂아야 한다 — 호출측이
- * `Object.assign(shader.uniforms, ...)`로 넣도록 uniforms 인자를 받는다. */
+ * 잇는다. 유니폼은 공유 벌(구름·대기·해안 거리장·표고 텍스처)을 그대로 꽂아야 한다 —
+ * 호출측이 `Object.assign(shader.uniforms, ...)`로 넣도록 uniforms 인자를 받는다.
+ *
+ * **치환 자리 다섯이 전부 three 셰이더에 있어야 한다** — 하나라도 없으면 그 조각만 조용히
+ * 빠져(예: 그림자 없이 피복만) 화면은 그럴듯하게 틀린다. `GROUND_ANCHORS`를 시험이 three
+ * 원문과 대조한다(materials.test.ts). */
+export const GROUND_ANCHORS = {
+  vertex: ["#include <common>", "#include <fog_vertex>"],
+  fragment: [
+    "#include <common>", "#include <metalnessmap_fragment>", "#include <normal_fragment_begin>",
+    "#include <lights_fragment_end>",
+  ],
+} as const;
+
 export function applyGroundDetail(
   material: Material, uniforms: Record<string, { value: unknown }>,
 ): void {
@@ -103,24 +119,36 @@ export function applyGroundDetail(
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
       .replace("#include <common>", `#include <common>
-${GROUND_VARYING_DECL}`)
+${GROUND_VERT_DECL}`)
       .replace("#include <fog_vertex>", `#include <fog_vertex>
 ${GROUND_VERT_BODY}`);
+    // 앞머리 순서가 곧 의존 순서다: 대기(하늘 반사) → 구름 유니폼 → 노이즈 → 구름 덮임 →
+    // 해안 거리장 → 지면. 대기·해안·노이즈는 가드가 있어 다른 패치가 또 넣어도 안전하다.
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>",
         `#include <common>
 ${GROUND_VARYING_DECL}
 ${ATMOSPHERE_UNIFORM_DECL}
+${ATMOSPHERE_GLSL}
 `
         + `${CLOUD_UNIFORM_DECL}
 ${NOISE_GLSL}
-${CLOUD_COVER_GLSL}`)
+${CLOUD_COVER_GLSL}
+${COAST_GLSL}
+${GROUND_UNIFORM_DECL}
+${GROUND_GLSL}`)
       .replace("#include <metalnessmap_fragment>",
         `#include <metalnessmap_fragment>
-${GROUND_FRAG_BODY}`);
+${GROUND_FRAG_BODY}`)
+      .replace("#include <normal_fragment_begin>",
+        `#include <normal_fragment_begin>
+${GROUND_NORMAL_BODY}`)
+      .replace("#include <lights_fragment_end>",
+        `#include <lights_fragment_end>
+${GROUND_LIGHT_BODY}`);
   };
   material.customProgramCacheKey = function () {
-    return `ground-v1|${prevKey.call(this)}`;
+    return `ground-v2|${prevKey.call(this)}`;
   };
   material.needsUpdate = true;
 }

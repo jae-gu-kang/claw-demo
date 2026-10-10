@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  CELL, buildSeaMasks, cellToNed, isLand, maskSummary, nedToCell, seaLevelRaw,
+  CELL, SHELF, buildSeaMasks, cellToNed, isLand, maskSummary, nedToCell, seaLevelRaw,
   type MaskTier,
 } from "./seamask.ts";
 
@@ -11,7 +11,7 @@ const OFFSET = -100;
 const NODATA = 65535;
 const SEA = Math.round((0 - OFFSET) / SCALE); // 2000 — 실제 팩과 같은 양자화
 
-/** 문자 격자로 티어를 만든다. `~` 해수면 · `#` 육지(20 m) · `?` 결측.
+/** 문자 격자로 티어를 만든다. `~` 해수면 · `#` 육지(20 m) · `-` 낮은 뭍(1 m) · `?` 결측.
  *  행 0이 남쪽이므로 **아래에서 위로** 읽는다 — 그림과 좌표를 맞추려고 뒤집는다. */
 function tier(name: string, art: string[], step = 30, n0 = 0, e0 = 0): MaskTier {
   const rows = art.length;
@@ -23,7 +23,8 @@ function tier(name: string, art: string[], step = 30, n0 = 0, e0 = 0): MaskTier 
     assert.equal(line.length, cols, "그림의 행 길이가 다르다");
     for (let c = 0; c < cols; c++) {
       const ch = line[c];
-      raw[r * cols + c] = ch === "~" ? SEA : ch === "?" ? NODATA : Math.round((20 - OFFSET) / SCALE);
+      raw[r * cols + c] = ch === "~" ? SEA : ch === "?" ? NODATA
+        : Math.round(((ch === "-" ? 1 : 20) - OFFSET) / SCALE);
     }
   }
   return { name, rows, cols, n0, e0, step, scale: SCALE, offset: OFFSET, nodata: NODATA, raw };
@@ -131,6 +132,58 @@ describe("해수면 판정", () => {
       "정렬이 없으면 core가 먼저 흘러 시드를 못 받고 만이 통째로 빠진다");
     assert.equal(cellAt(masks.get("core")!, 2, 2), CELL.SEA);
     assert.equal(masks.get("outer")!.seaCells, 32);
+  });
+});
+
+describe("해안 턱 흡수 — 흘린 뒤의 국소 규칙", () => {
+  // 섬(#) 둘레 바다 쪽으로 두 칸 떨어진 낮은 고리(-)와, 높은 땅에 붙은 넓은 저지대(-)
+  const art = [
+    "~~~~~~~~~~~~~~~~~~~~~~~~",
+    "~~-~-~-~-~~~~~~~~~~-----",
+    "~~~~~~~~~~-~~~~~~~------",
+    "~~-~~##~~~~~~~~~~-----##",
+    "~~~~###~~-~~~~~~~-----##",
+    "~~-~~##~~~~~~~~~~--~--##",
+    "~~~~~~~~~~-~~~~~~--R--##",
+    "~~-~-~-~-~~~~~~~~-----##",
+    "~~~~~~~~~~~~~~~~~-----##",
+    "~~~~~~~~~~~~~~~~~-----##",
+  ];
+  const at = (m: { cells: Uint8Array; cols: number }, x: number, yFromTop: number) =>
+    cellAt(m, art.length - 1 - yFromTop, x);
+
+  it("섬 둘레의 낮은 고리는 바다가 되고 섬은 남는다", () => {
+    const m = buildSeaMasks([tier("core", art.map((s) => s.replace("R", "~")))]).get("core")!;
+    for (const [x, y] of [[2, 1], [4, 1], [2, 3], [9, 4], [10, 2], [6, 7]] as const) {
+      assert.equal(at(m, x, y), CELL.SEA, `고리 (${x},${y})`);
+    }
+    for (const [x, y] of [[5, 3], [4, 4], [6, 5]] as const) {
+      assert.equal(at(m, x, y), CELL.LAND, `섬 (${x},${y})`);
+    }
+    assert.ok(m.shelfCells > 0 && m.seaCells > m.shelfCells);
+  });
+
+  it("높은 땅에 붙은 저지대는 가장자리만 깎이고 안쪽(갇힌 0 활주로)은 뭍이다", () => {
+    const m = buildSeaMasks([tier("core", art.map((s) => s.replace("R", "~")))]).get("core")!;
+    assert.equal(at(m, 19, 6), CELL.LAND, "갇힌 0 — 활주로 자리");
+    assert.equal(at(m, 20, 4), CELL.LAND, "저지대 안쪽");
+    assert.equal(at(m, 22, 6), CELL.LAND, "높은 땅");
+  });
+
+  it("작은 낮은 덩어리는 바다, 같은 크기라도 높은 덩어리는 섬으로 남는다", () => {
+    const sea = (row: string) => "~".repeat(4) + row + "~".repeat(4);
+    const blank = "~".repeat(11);
+    const m = buildSeaMasks([tier("core", [
+      blank, blank, sea("---"), sea("---"), sea("---"), blank, blank, sea("###"), sea("###"), blank, blank,
+    ])]).get("core")!;
+    assert.equal(cellAt(m, 7, 5), CELL.SEA, "낮은 덩어리 한가운데");
+    assert.equal(cellAt(m, 2, 5), CELL.LAND, "높은 섬");
+  });
+
+  it("문턱은 표시용 상수 한 벌이다 — 캡션·문서와 같은 수", () => {
+    assert.equal(SHELF.maxElevM, 2.5);
+    assert.equal(SHELF.radiusCells, 3);
+    assert.equal(SHELF.passes, 2);
   });
 });
 
