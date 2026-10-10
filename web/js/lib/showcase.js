@@ -308,8 +308,9 @@ const STATES = Object.keys(STATE_LABEL);
 const TONES = ["ok", "skip", "fail", "note", "warn"];
 
 const cue = (tab, action, label, extra = {}) => ({ kind: "cue", tab, action, label, args: {}, ...extra });
-/** LLM 동작 — 부가 기능이다(06 §0.4: 키가 없어도, 호출이 실패해도 나머지는 끝까지 돈다). 불가면 건너뜀(게이트),
- *  걸었는데 실패하면(키 만료·429·백엔드 다운 — /llm/status는 설정만 본다) soft: 실패 줄을 남기고 단계는 잇는다. */
+/** LLM 동작 — 부가 기능이다(06 §9.1 「LLM 게이트」: 키가 없어도, 호출이 실패해도 나머지는 끝까지 돈다). 불가면
+ *  건너뜀(게이트), 걸었는데 실패하면(키 만료·429·백엔드 다운 — /llm/status는 설정만 본다) soft: 실패 줄을 남기고
+ *  단계는 잇는다. */
 const llmCue = (tab, action, label, extra = {}) => cue(tab, action, label, { llm: true, soft: true, ...extra });
 /** 자동 설계 신호의 문서 인자 — {args, notes}(notes는 안내 줄 — 설정 출처 한 줄). ctx.packaged: 패키지 문서
  *  (문서에 설계 설정 기록이 없을 때만 부르는 쪽이 받아 온다 — needsPackagedDoc). */

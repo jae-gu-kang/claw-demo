@@ -1,16 +1,33 @@
 // 도식 → three 메시 — 기체 탭 대표 그림과 가상환경 대체 기체가 같은 함수를 쓴다. three의 형상·재질은 WebGL 없이
 // node에서 선다(렌더러만 안 만든다). 축이 틀리면 가상환경에서 도식이 옆으로 누워 날아가므로 여기서 잡는다.
+//
+// **three가 없으면 건너뛴다(사유를 남긴다)** — materials.test.ts와 같은 사정이다. 빠른 CI층은 npm 설치 없이 돈다
+// (.github/workflows/fast.yml). 도식·모델 모듈이 three를 들여오므로 정적 import면 모듈 연결에서 파일째 실패한다.
+// 그래서 동적으로 들이고, **three가 없을 때만** 건너뛴다 — 도식 모듈 자신의 오류는 그대로 던져 실패로 센다.
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { Group, type BufferAttribute, type Mesh as ThreeMesh, type MeshStandardMaterial } from "three";
+import type { BufferAttribute, Mesh as ThreeMesh, MeshStandardMaterial } from "three";
 
 import { LOCAL_NOSE, LOCAL_STARBOARD, LOCAL_UP } from "../core/modelaxes.ts";
 import { surfacePose } from "../core/surfaces.ts";
 import type { BodyAxes } from "../lib/attitude.ts";
 import { vehicleSchematic } from "../lib/vehicleschematic.ts";
-import { applySurfaces, hideVehicle, setVehiclePose, spinPropeller } from "./models.ts";
-import { schematicObject, schematicVehicle } from "./schematic.ts";
+
+async function loadScene() {
+  try {
+    await import("three");
+  } catch (e) {
+    if ((e as { code?: string }).code === "ERR_MODULE_NOT_FOUND") return null;
+    throw e;
+  }
+  const [{ Group }, models, schematic] = await Promise.all([import("three"), import("./models.ts"), import("./schematic.ts")]);
+  return { Group, ...models, ...schematic };
+}
+
+const scene = await loadScene();
+// 건너뛴 묶음은 본문을 돌지 않는다 — 아래 `scene!`은 three가 있을 때만 읽힌다
+const skip = scene == null && "three 미설치 — 도식 메시를 세울 수 없다(npm 설치가 없는 빠른 CI층)";
 
 const DOC = { geometry: { b: 2.5, S: 3.0, cbar: 1.5 }, ground: {} };
 
@@ -23,7 +40,8 @@ const reach = (pos: ArrayLike<number>, d: readonly number[]): number => {
   return best;
 };
 
-describe("schematicObject — FRD 도식을 GLB와 같은 모델 로컬 축에", () => {
+describe("schematicObject — FRD 도식을 GLB와 같은 모델 로컬 축에", { skip }, () => {
+  const { schematicObject } = scene!;
   const mesh = vehicleSchematic(DOC).mesh;
   assert.ok(mesh, "도식이 없다");
   const obj = schematicObject(mesh);
@@ -47,7 +65,8 @@ describe("schematicObject — FRD 도식을 GLB와 같은 모델 로컬 축에",
   });
 });
 
-describe("schematicVehicle — GLB 자리에 서는 도식 기체", () => {
+describe("schematicVehicle — GLB 자리에 서는 도식 기체", { skip }, () => {
+  const { Group, applySurfaces, hideVehicle, schematicVehicle, setVehiclePose, spinPropeller } = scene!;
   const mesh = vehicleSchematic(DOC).mesh!;
 
   it("GLB와 같은 기체 계약을 탄다 — 자세·숨김은 먹고, 몰 노드가 없어 타면·프로펠러는 그냥 지나간다", () => {

@@ -370,7 +370,7 @@ def apply_seed_basis(built, mach, alt, fuel, *, e_ref_dps=E_REF_DPS, targets=Non
 
     quick_seed와 같은 조립 규칙(자세 kp·ki + 레이트 후보 k_rate; yaw 자세·washout·k_diff_thr는
     문서 값 또는 0; 자동조종은 문서 값 또는 시간척도 휴리스틱 — seed._autopilot 재사용)이되,
-    quick_seed의 채택 게이트(여러 앵커·부호 일치·스케줄 검증 §10 ④)를 **거치지 않는다** — 그
+    quick_seed의 채택 게이트(여러 앵커·부호 일치·스케줄 검증 05 §10 ④)를 **거치지 않는다** — 그
     사실을 provenance에 적는다(사용자 결정: 한 점 직행 경로는 검증 전 표시 필수). 스케줄 없는
     문서에는 quick_seed와 같은 규칙 스케줄을 만든다 — 안 만들면 설계는 있는데 조립이 거부되는
     반쪽 문서가 된다. 후보가 하나라도 없거나 자세 자리가 설계 실패 사유(SLOT_DESIGN_FAILED —
@@ -435,7 +435,7 @@ def apply_seed_basis(built, mach, alt, fuel, *, e_ref_dps=E_REF_DPS, targets=Non
         "provenance": {
             "source": "seed_basis",
             "note": "산출 근거의 한 점 후보 — 검증 전(빠른 탐색의 채택 게이트·여러 앵커·스케줄 검증"
-                    " §10 ④ 미통과). 자동 설계 전이며, 저차 근사 닫힌꼴과 이 점의 전체 모델 확인만 거쳤다",
+                    " 05 §10 ④ 미통과). 자동 설계 전이며, 저차 근사 닫힌꼴과 이 점의 전체 모델 확인만 거쳤다",
             "plant_fingerprint": built.plant_fingerprint,
             "case": out["case"], "e_ref_dps": out["e_ref_dps"], "targets": out["targets"],
             # k·kp·ki는 이 점에서 확인한 값, stored_*는 배율을 나눠 문서에 쓴 기저값 —

@@ -231,8 +231,10 @@ scripts/refcheck.sh                  # 문서·코드의 절 참조 (본문 정�
 
 ### 자동으로 도는 것 — 빠른 층
 
-`.github/workflows/fast.yml`이 push·PR마다 **위 아래 셋**(웹 855 · 가상환경 194 ·
-참조 검사기)을 돌린다. 셋 다 npm 설치가 필요 없어 **3~4초**에 끝난다.
+`.github/workflows/fast.yml`이 push·PR마다 **위 아래 셋**(웹 1,558 · 가상환경 271 ·
+참조 검사기)을 돌린다. 셋 다 npm 설치가 필요 없어 **3~4초**에 끝난다. 가상환경 중
+three가 있어야 하는 6건(`scene/materials`·`scene/schematic`)은 이 층에서 사유와 함께
+건너뛰고, npm 설치가 된 개발 머신의 `npm test`에서 돈다.
 
 **나머지는 손으로 돌린다.** 파이썬 스위트는 실측으로 engine 24분 · server 28분이라
 이 층에 넣으면 층이 층이 아니게 된다. 그러니 **CI가 초록이라고 탑재 C가 검증된 것이
