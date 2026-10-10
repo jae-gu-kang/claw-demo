@@ -14,7 +14,8 @@
  *     암반    가파르거나(약 40° 위) 볼록한 봉우리
  *     숲      나머지 — 침엽·활엽 섞임, 높은 곳 활엽의 가을 기운, 수관 얼룩, 가까이선 나무 하나하나
  *     비행장  폭을 아는 활주로 둘레의 착륙대(펴진 바닥과 같은 구역) — 깎은 풀, 포장면·과주로, 도색(ICAO
- *             부속서 14의 표준 배치: 시단 줄무늬·번호·중심선 점선·측면 표지·조준점, 과주로 노란 갈매기표)
+ *             부속서 14의 표준 배치: 시단 줄무늬·번호·중심선 점선·측면 표지·조준점, 과주로 노란 갈매기표).
+ *             자리와 덮임은 shaders/runway.ts — 게임 지형이 같은 한 벌로 칠한다
  *
  * 전부 **표시용**이고 실제 지표 피복이 아니다. 위성 영상이 정답이지만 반입·라이선스 문제라 그
  * 전까지 이것이 메운다 — 캡션이 말한다(scene/terrain.ts).
@@ -68,10 +69,6 @@ uniform vec4 uHCoarse;
 uniform vec2 uHCoarseSize;
 uniform float uHeightOn;           // 0이면 표고 텍스처가 없다 — 자체 그림자를 건너뛴다
 uniform float uTerrainTop;         // 팩 최고 표고 [m] — 그림자 광선이 이보다 높아지면 멈춘다
-uniform vec4 uRunway;              // (cos h, sin h, 길이 [m], 반폭 [m]) — NED 원점에서 heading 방향
-uniform float uRunwayOn;           // 0이면 포장면을 칠하지 않는다(폭을 모를 때 — core/runway.ts)
-uniform vec4 uRunwayArea;          // (과주로 [m], 착륙대 반폭 [m], 착륙대 끝 너머 [m], 0) — 착륙대는 펴진 바닥과 같은 구역
-uniform vec4 uRunwayNum;           // 활주로 번호 (시단 쪽 십·일, 맞은편 십·일) — 모르면 -1이고 번호를 칠하지 않는다
 `;
 
 export const GROUND_VARYING_DECL = /* glsl */`
@@ -117,104 +114,6 @@ const vec3 GR_ASPHALT   = vec3(0.070, 0.070, 0.075);
 const vec3 GR_GRASS_DRY = vec3(0.165, 0.150, 0.070);   // 깎은 풀밭의 마른 자리
 const vec3 GR_PAINT     = vec3(0.600, 0.600, 0.580);   // 활주로 흰 도색 (닳은 흰색)
 const vec3 GR_PAINT_YEL = vec3(0.520, 0.360, 0.040);   // 과주로 노란 갈매기표
-
-// ---- 활주로 도색 — 띠·숫자의 덮임을 픽셀 발자국(pw) 상자로 거른다. 가까이선 칼날, 멀어지면 폭/발자국만큼
-// 옅어진다(멀리서 지글거리지 않게). 좌표는 활주로 축 기준 [m]. 치수는 ICAO 부속서 14의 표준이다(실측 아님).
-
-// 가운데 0, 반폭 h인 띠의 덮임 — 발자국 상자와 겹친 비율
-float grBand(float x, float h, float pw) {
-  float r = 0.5 * pw;
-  return clamp((min(x + r, h) - max(x - r, -h)) / pw, 0.0, 1.0);
-}
-
-// 주기 P로 되풀이되는 띠(반폭 h, 가운데가 P의 배수) — 발자국이 주기에 다가가면 띠 비율의 평균으로 접는다
-float grStripes(float x, float P, float h, float pw) {
-  float xr = x - P * floor(x / P + 0.5);
-  return mix(grBand(xr, h, pw), 2.0 * h / P, smoothstep(0.3 * P, P, pw));
-}
-
-// 7획 숫자의 획 비트 — a 위 1, b 오른 위 2, c 오른 아래 4, d 아래 8, e 왼 아래 16, f 왼 위 32, g 가운데 64.
-// 1은 가운데 막대 하나라 따로 그린다(활주로 숫자의 1은 오른쪽 두 획이 아니다)
-const int GR_SEG[10] = int[10](63, 0, 91, 79, 102, 109, 125, 7, 127, 111);
-
-// 아래 도색 함수는 발자국을 **축마다** 받는다 — pa 활주로 축 방향, pc 가로 방향(읽는 이의 u가 가로, v가 축이다).
-// 비스듬히 보면 축 방향 발자국만 늘어나므로, 등방 발자국으로 거르면 가는 가로 띠(중심선·측면 표지)가 앞쪽
-// 100~200 m에서 거의 사라졌다(v1.92 리뷰 실측). 조기 반환 경계는 발자국만큼 넓힌다 — 좁으면 멀리서 거른 띠의
-// 가장자리가 그 경계에서 잘려 점선처럼 기었다(같은 리뷰).
-
-// 숫자 하나 — 칸 가로 3 m(u, 읽는 이의 오른쪽이 +) · 세로 9 m(v, 읽는 위쪽이 +), 획 0.9 m. pu·pv는 u·v 방향 발자국
-float grDigit(float d, vec2 uv, float pu, float pv) {
-  if (d < 0.0 || uv.x < -1.0 - pu || uv.x > 4.0 + pu || uv.y < -1.0 - pv || uv.y > 10.0 + pv) return 0.0;
-  const float W = 3.0;
-  const float H = 9.0;
-  const float S = 0.9;
-  int k = clamp(int(d + 0.5), 0, 9);
-  if (k == 1) return grBand(uv.x - 0.5 * W, 0.5 * S, pu) * grBand(uv.y - 0.5 * H, 0.5 * H, pv);
-  int m = GR_SEG[k];
-  float bu = grBand(uv.x - 0.5 * W, 0.5 * W, pu);
-  float lu = grBand(uv.x - 0.5 * S, 0.5 * S, pu);
-  float ru = grBand(uv.x - (W - 0.5 * S), 0.5 * S, pu);
-  float top = grBand(uv.y - 0.75 * H, 0.25 * H, pv);
-  float bot = grBand(uv.y - 0.25 * H, 0.25 * H, pv);
-  float c = 0.0;
-  if ((m & 1) != 0) c = max(c, bu * grBand(uv.y - (H - 0.5 * S), 0.5 * S, pv));
-  if ((m & 2) != 0) c = max(c, ru * top);
-  if ((m & 4) != 0) c = max(c, ru * bot);
-  if ((m & 8) != 0) c = max(c, bu * grBand(uv.y - 0.5 * S, 0.5 * S, pv));
-  if ((m & 16) != 0) c = max(c, lu * bot);
-  if ((m & 32) != 0) c = max(c, lu * top);
-  if ((m & 64) != 0) c = max(c, bu * grBand(uv.y - 0.5 * H, 0.5 * S, pv));
-  return c;
-}
-
-// 활주로 번호 한 끝 — num (십, 일), s 시단에서 활주로 안쪽 [m], x 읽는 이의 오른쪽 [m]. 두 칸(각 3 m)이 가운데
-// 1.5 m를 두고 선다. 시단 줄무늬(6~36 m) 끝에서 12 m 띄운 48~57 m 자리다
-float grDesignation(vec2 num, float s, float x, float pa, float pc) {
-  if (num.x < 0.0 || s < 46.0 - pa || s > 59.0 + pa || abs(x) > 5.5 + pc) return 0.0;
-  float v = s - 48.0;
-  return max(grDigit(num.x, vec2(x + 3.75, v), pc, pa), grDigit(num.y, vec2(x - 0.75, v), pc, pa));
-}
-
-// 시단 줄무늬(피아노 건반) — 시단에서 6~36 m, 축 양쪽 같은 수의 줄. 줄과 칸이 같은 너비이고 가운데 칸만
-// 두 배다. 바깥 끝은 가장자리에서 3 m 안(최대 축에서 27 m) — 고흥 45 m 폭은 12줄, 너비 1.63 m
-float grPiano(float s, float x, float halfW, float pa, float pc) {
-  if (s < 4.0 - pa || s > 38.0 + pa) return 0.0;
-  float nSide = halfW <= 9.0 ? 2.0 : halfW <= 11.5 ? 3.0 : halfW <= 15.0 ? 4.0 : halfW <= 22.5 ? 6.0 : 8.0;
-  float outer = min(halfW - 3.0, 27.0);
-  float sw = outer / (2.0 * nSide);
-  float ax = abs(x);
-  // 줄 k는 축에서 (2k+1)·sw ~ (2k+2)·sw — 가운데 (2k+1.5)·sw, 주기 2·sw
-  float keys = grStripes(ax - 1.5 * sw, 2.0 * sw, 0.5 * sw, pc)
-             * grBand(ax - 0.5 * (sw + outer), 0.5 * (outer - sw), pc);
-  return keys * grBand(s - 21.0, 15.0, pa);
-}
-
-// 중심선 — 30 m 줄, 너비 0.9 m. 양 끝 번호(57 m)에서 12 m 띄운 69 m부터 맞은편 69 m까지. 칸(20 m 이상)을 고르게
-// 늘려 양 끝이 온 줄로 끝난다(줄 + 칸 50~75 m) — 남쪽에만 맞추면 북쪽 첫 줄이 17 m 토막이었다(v1.92 리뷰)
-float grCenterline(float along, float x, float L, float pa, float pc) {
-  float span = L - 138.0;
-  if (span < 30.0 || along < 69.0 - pa || along > L - 69.0 + pa || abs(x) > 1.0 + pc) return 0.0;
-  float n = floor((span + 20.0) / 50.0);
-  float P = n > 1.0 ? (span - 30.0) / (n - 1.0) : 50.0;
-  float dash = grStripes(along - 84.0, P, 15.0, pa);
-  return dash * grBand(x, 0.45, pc) * grBand(along - 0.5 * L, 0.5 * span, pa);
-}
-
-// 과주로 갈매기표 — t 시단 밖으로 [m](0이 시단). 꼭짓점이 활주로 쪽을 가리키는 45도 줄, 30 m 간격, 너비 0.9 m.
-// k = t - |x|가 한 갈매기 위에서 일정하다 — 줄의 k 방향 반폭은 0.45의 루트2배, k의 발자국은 두 축 발자국의 합
-float grChevron(float t, float x, float over, float pa, float pc) {
-  if (t < -pa || t > over + pa) return 0.0;
-  return grStripes(t - abs(x) - 6.0, 30.0, 0.64, pa + pc) * grBand(t - 0.5 * over, 0.5 * over, pa);
-}
-
-// 조준점 — ICAO 부속서 14 표 5-1: 착륙 거리(여기선 활주로 길이)에 따라 (시단에서 시작, 길이, 폭, 안쪽 간격) [m].
-// 1,200~2,400 m 열은 300 m에서 시작한다 — 250 m는 800~1,200 m 열의 값이었다(v1.92 리뷰)
-vec4 grAimSpec(float L) {
-  if (L < 800.0) return vec4(150.0, 30.0, 4.0, 6.0);
-  if (L < 1200.0) return vec4(250.0, 45.0, 6.0, 9.0);
-  if (L < 2400.0) return vec4(300.0, 45.0, 6.0, 18.0);
-  return vec4(400.0, 45.0, 6.0, 18.0);
-}
 
 float grHash(vec2 c, float k) { return hash31(vec3(c, k)); }
 
@@ -447,23 +346,21 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
   float mf2 = 1.0 - smoothstep(2.5, 6.0, pw);
   if (mf2 > 0.001) micro += gnoise2(xz * (1.0 / 12.0) + 5.0).yz * (0.9 / 12.0) * mf2;
 
-  // ---- 비행장 — 착륙대 풀밭, 포장면·과주로, 도색. 활주로는 결과의 것, 폭은 시험장 제원(core/runway.ts):
-  // 폭을 모르면 uRunwayOn이 0이고 아무것도 칠하지 않는다(포장면을 지어내지 않는다).
+  // ---- 비행장 — 착륙대 풀밭, 포장면·과주로, 도색. 자리와 덮임은 shaders/runway.ts(게임 지형과 한 벌)이고, 여기는
+  // 실사의 결이다 — 깎은 풀 결·마른 자리, 타이어 자국, 아스팔트 결, 닳은 도색. 활주로는 결과의 것, 폭은 시험장
+  // 제원(core/runway.ts): 폭을 모르면 uRunwayOn이 0이고 아무것도 칠하지 않는다(포장면을 지어내지 않는다).
   float field0 = 0.0;
   if (uRunwayOn > 0.5) {
-    vec2 ne = vec2(-p.z, p.x);   // 렌더 x = e, z = -n
-    float along = dot(ne, uRunway.xy);
-    float across = dot(ne, vec2(-uRunway.y, uRunway.x));
-    float L = uRunway.z;
-    float halfW = uRunway.w;
-    float over = uRunwayArea.x;
-    // 축마다 발자국 [m] — pa 활주로 축 방향, pc 가로 방향. 세계 xz 도함수를 활주로 축으로 돌려 잰다
-    float pa = max(abs(dxy.x * uRunway.y - dxy.y * uRunway.x) + abs(dxy.z * uRunway.y - dxy.w * uRunway.x), 1.0e-3);
-    float pc = max(abs(dxy.x * uRunway.x + dxy.y * uRunway.y) + abs(dxy.z * uRunway.x + dxy.w * uRunway.y), 1.0e-3);
-    // 착륙대 — 펴진 바닥(core/runwayfloor.ts)과 같은 구역이고 경계는 발자국만큼만 부드럽다. 예전엔 40~60 m에
-    // 걸쳐 섞어 들·비닐하우스 위에 흐린 띠가 얹혀 보였다(사용자 지적)
-    field0 = grBand(across, uRunwayArea.y, pc) * grBand(along - 0.5 * L, 0.5 * L + uRunwayArea.z, pa);
+    vec4 ax = grRunwayAxes(p, dxy);
+    vec4 af = grAirfield(ax);
+    field0 = af.x;
     if (field0 > 0.001) {
+      float along = ax.x;
+      float across = ax.y;
+      float pa = ax.z;
+      float pc = ax.w;
+      float L = uRunway.z;
+      vec2 ne = vec2(-p.z, p.x);   // 렌더 x = e, z = -n
       // 깎은 풀 — 깎는 기계가 오간 결(활주로와 나란히 5 m씩 번갈아 밝고 어둡다)과 마른 자리 얼룩
       float mow = (smoothstep(-0.25, 0.25, sin(across * (6.2832 / 10.0))) - 0.5) * 0.10
                 * (1.0 - smoothstep(1.5, 4.0, pc));
@@ -472,8 +369,8 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
       col = mix(col, grass * (0.94 + 0.12 * nB + mow), field0);
       rgh = mix(rgh, 0.9, field0);
       // 포장면 — 활주로와 양 끝 과주로. 접지대(시단에서 100~450 m)에 타이어 자국, 과주로는 덜 다녀 바랬다
+      float paved = af.y;
       float onRunway = grBand(along - 0.5 * L, 0.5 * L, pa);
-      float paved = grBand(across, halfW, pc) * grBand(along - 0.5 * L, 0.5 * L + over, pa);
       float tz = smoothstep(80.0, 160.0, along) * (1.0 - smoothstep(380.0, 480.0, along))
                + smoothstep(80.0, 160.0, L - along) * (1.0 - smoothstep(380.0, 480.0, L - along));
       float rubber = tz * (1.0 - smoothstep(4.0, 9.0, abs(across)));
@@ -481,24 +378,11 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
       col = mix(col, GR_ASPHALT * (1.0 + 0.25 * tex) * (1.0 - 0.35 * rubber) * mix(1.12, 1.0, onRunway), paved);
       rgh = mix(rgh, 0.75, paved);
       if (paved > 0.001) {
-        // 도색 — 시단 사이는 흰색(측면 표지·시단 줄무늬·번호·중심선·조준점), 과주로는 노란 갈매기표.
-        // 맞은편 끝은 남쪽으로 읽으므로 가로를 뒤집는다
-        float sF = L - along;
-        float white = grBand(abs(across) - (halfW - 0.45), 0.45, pc) * onRunway;
-        white = max(white, max(grPiano(along, across, halfW, pa, pc), grPiano(sF, -across, halfW, pa, pc)));
-        white = max(white, max(grDesignation(uRunwayNum.xy, along, across, pa, pc),
-                               grDesignation(uRunwayNum.zw, sF, -across, pa, pc)));
-        white = max(white, grCenterline(along, across, L, pa, pc));
-        // 조준점 — (시작, 길이, 폭, 안쪽 간격)은 활주로 길이의 열에서. 고흥 1,205 m는 300~345 m, 축에서 9~15 m
-        vec4 aim = grAimSpec(L);
-        float aimX = grBand(abs(across) - 0.5 * (aim.w + aim.z), 0.5 * aim.z, pc);
-        white = max(white, aimX * max(grBand(along - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa),
-                                      grBand(sF - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa)));
-        float yel = max(grChevron(-along, across, over, pa, pc), grChevron(along - L, -across, over, pa, pc));
+        // 도색 — 흰색(af.z)·노란 갈매기표(af.w)의 덮임은 grAirfield가 낸다
         float wear = 0.80 + 0.20 * clamp(1.0 + 2.0 * tex, 0.0, 1.0);   // 닳은 도색 — 아스팔트 결이 비친다
-        col = mix(col, GR_PAINT * wear * (1.0 - 0.45 * rubber), white * paved);
-        col = mix(col, GR_PAINT_YEL * wear, yel * paved);
-        rgh = mix(rgh, 0.62, max(white, yel) * paved);
+        col = mix(col, GR_PAINT * wear * (1.0 - 0.45 * rubber), af.z * paved);
+        col = mix(col, GR_PAINT_YEL * wear, af.w * paved);
+        rgh = mix(rgh, 0.62, max(af.z, af.w) * paved);
       }
     }
   }

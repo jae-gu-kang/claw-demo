@@ -32,7 +32,7 @@ import {
   applyAerialPerspective, atmosphereUniforms, cloudUniforms, setAtmosphere, setCloudTime,
   setClouds,
 } from "./atmosphere.ts";
-import { applyGroundDetail } from "./materials.ts";
+import { applyGameRunway, applyGroundDetail } from "./materials.ts";
 import { gameRamp } from "../core/gamestyle.ts";
 import { chunkIndices, chunkQuads } from "../core/terrainchunks.ts";
 import { terrainShade } from "../core/terrainshade.ts";
@@ -197,6 +197,8 @@ export class SceneHost {
   private readonly ambient: HemisphereLight;
   private readonly groups = {
     terrain: new Group(), paths: new Group(), models: new Group(), marks: new Group(),
+    // 활주로 선 — 궤적과 따로 단다. 게임 모드는 궤적을 숨겨도 활주로 선은 보인다(setViewStyle)
+    runway: new Group(),
     // 게임 모드 두 벌 — 실사 지형과 같은 자리라 스타일이 두 벌 중 하나만 보이게 한다.
     gameTerrain: new Group(), props: new Group(),
   };
@@ -223,6 +225,10 @@ export class SceneHost {
     uHCoarseSize: { value: new Vector2(1, 1) },
     uHeightOn: { value: 0 },
     uTerrainTop: { value: 0 },
+  };
+  /** 활주로 포장면·도색 — 실사 지형과 게임 지형이 **이 한 벌**을 꽂는다(`shaders/runway.ts`). `setRunwaySurface`가
+   *  한 번 쓰면 두 지형이 같이 바뀐다 — 벌이 둘이면 모드를 바꿀 때 한쪽만 옛 활주로를 칠한다. */
+  private readonly runwayUniforms = {
     uRunway: { value: new Vector4(1, 0, 0, 0) },
     uRunwayOn: { value: 0 },
     uRunwayArea: { value: new Vector4(0, 0, 0, 0) },
@@ -297,6 +303,8 @@ export class SceneHost {
       style === "cinematic" ? CINEMATIC_POST : style === "game" ? GAME_POST : ENGINEERING_POST,
     );
     this.groups.paths.visible = style === "engineering";
+    // 활주로 선(지형이 없거나 폭을 모를 때)은 게임에서도 보인다 — 비행 계획의 기준이 활주로다. 시네마틱은 숨긴다
+    this.groups.runway.visible = style === "engineering" || style === "game";
     // 게임에서는 표지를 **보인다** — 찍는 중인 웨이포인트가 화면의 요점이다.
     this.groups.marks.visible = style === "engineering" || style === "game";
     // 지형은 두 벌 중 한 벌만 — 같은 자리에 겹치면 z-fighting이 전면에 깔린다.
@@ -415,6 +423,7 @@ export class SceneHost {
       // 유니폼은 **공유 객체 그대로** — 하늘·해면과 같은 태양·구름·해안선을 본다.
       applyGroundDetail(mat, {
         ...cloudUniforms, ...atmosphereUniforms, ...this.ocean.coastUniforms, ...this.groundUniforms,
+        ...this.runwayUniforms,
       });
       applyAerialPerspective(mat);
       // **조각으로 나눠 단다**(core/terrainchunks.ts) — 시야 판정이 조각마다 걸린다. 정점 속성은 원래
@@ -443,10 +452,10 @@ export class SceneHost {
     }
   }
 
-  /** 활주로 포장면 — 지면 셰이더가 아스팔트·도색·과주로·비행장 풀밭을 칠한다(`shaders/ground.ts`). null이면
-   *  안 칠한다 — 폭을 모르는 활주로에 포장면을 지어내지 않는다(`core/runway.ts`). */
+  /** 활주로 포장면 — 실사 지면과 게임 지형이 아스팔트·도색·과주로·비행장 풀밭을 칠한다(`shaders/runway.ts`).
+   *  null이면 안 칠한다 — 폭을 모르는 활주로에 포장면을 지어내지 않는다(`core/runway.ts`). */
   setRunwaySurface(s: RunwaySurface | null): void {
-    const u = this.groundUniforms;
+    const u = this.runwayUniforms;
     if (s == null) {
       u.uRunwayOn.value = 0;
       return;
@@ -514,8 +523,9 @@ export class SceneHost {
    *
    * flatShading은 three가 프래그먼트 도함수로 낱면 법선을 만들므로 정점 법선을
    * 그대로 둬도 큰 면이 선다. 지면 절차 무늬는 걸지 않는다 — 85 m 식생 얼룩이
-   * 90 m 낱면과 간섭해 "한 면 한 색"의 로우폴리 문법을 깬다. 대기 원근은 건다 —
-   * 안 걸면 이 지형만 수평선에서 하늘과 갈라진다. */
+   * 90 m 낱면과 간섭해 "한 면 한 색"의 로우폴리 문법을 깬다. 활주로만은 칠한다 — 실사와
+   * 같은 자리·도색을 게임 색으로(`applyGameRunway`). 안 칠하면 게임 모드에서 활주로가
+   * 통째로 없다(사용자 지적). 대기 원근은 건다 — 안 걸면 이 지형만 수평선에서 하늘과 갈라진다. */
   setGameTerrain(patches: readonly NedMesh[], relief: number): void {
     disposeTree(this.groups.gameTerrain);
     for (const p of patches) {
@@ -523,6 +533,7 @@ export class SceneHost {
       const mat = new MeshStandardMaterial({
         vertexColors: true, roughness: 1, metalness: 0, flatShading: true,
       });
+      applyGameRunway(mat, this.runwayUniforms);
       applyAerialPerspective(mat);
       const mesh = new Mesh(geo, mat);
       mesh.receiveShadow = true;
@@ -559,7 +570,18 @@ export class SceneHost {
    * 바운딩 스피어가 NaN이 되어 **선 전체가 프러스텀 컬링으로 사라진다** —
    * `setTerrain`이 같은 이유로 방어하는 그 함정이고, 원인이 전혀 안 보인다. */
   setPaths(lines: readonly PathLine[]): void {
-    disposeTree(this.groups.paths);
+    this.fillLines(this.groups.paths, lines);
+  }
+
+  /** 활주로 선 — 지형이 없거나(도색할 땅이 없다) 폭을 모를 때의 선분들(`core/runway.ts`). 궤적과 따로 다는 것은
+   *  보이는 모드가 달라서다: 게임 모드는 궤적을 숨기지만 활주로는 보여야 한다. */
+  setRunwayLines(lines: readonly PathLine[]): void {
+    this.fillLines(this.groups.runway, lines);
+  }
+
+  /** 선 목록 → 그룹 — 궤적·활주로 선이 같이 쓴다(결측 방어가 한 곳에 있게). */
+  private fillLines(group: Group, lines: readonly PathLine[]): void {
+    disposeTree(group);
     for (const ln of lines) {
       const count = ln.points.length / 3;
       if (count < 2) continue;
@@ -582,7 +604,7 @@ export class SceneHost {
       const mat = new LineBasicMaterial({ color: ln.color });
       // 궤적도 대기를 탄다 — 안 걸면 30 km 밖 선만 또렷해서 지형 위에 떠 보인다.
       applyAerialPerspective(mat);
-      this.groups.paths.add(new LineSegments(geo, mat));
+      group.add(new LineSegments(geo, mat));
     }
   }
 

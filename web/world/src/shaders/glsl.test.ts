@@ -10,6 +10,10 @@ import {
 import { NOISE_GLSL } from "./noise.ts";
 import { COAST_GLSL, OCEAN_FRAG, OCEAN_VERT } from "./ocean.ts";
 import {
+  RUNWAY_GAME_FRAG_BODY, RUNWAY_GAME_GLSL, RUNWAY_GAME_VARYING_DECL, RUNWAY_GAME_VERT_BODY, RUNWAY_GLSL,
+  RUNWAY_UNIFORM_DECL,
+} from "./runway.ts";
+import {
   WEAR_FRAG_BODY, WEAR_GLSL, WEAR_NORMAL_BODY, WEAR_UNIFORM_DECL, WEAR_VARYING_DECL,
   WEAR_VERT_BODY,
 } from "./wear.ts";
@@ -38,6 +42,12 @@ const SOURCES: [string, string][] = [
   ["GROUND_FRAG_BODY", GROUND_FRAG_BODY],
   ["GROUND_NORMAL_BODY", GROUND_NORMAL_BODY],
   ["GROUND_LIGHT_BODY", GROUND_LIGHT_BODY],
+  ["RUNWAY_UNIFORM_DECL", RUNWAY_UNIFORM_DECL],
+  ["RUNWAY_GLSL", RUNWAY_GLSL],
+  ["RUNWAY_GAME_VARYING_DECL", RUNWAY_GAME_VARYING_DECL],
+  ["RUNWAY_GAME_VERT_BODY", RUNWAY_GAME_VERT_BODY],
+  ["RUNWAY_GAME_GLSL", RUNWAY_GAME_GLSL],
+  ["RUNWAY_GAME_FRAG_BODY", RUNWAY_GAME_FRAG_BODY],
 ];
 
 describe("GLSL 문자열", () => {
@@ -127,7 +137,7 @@ describe("GLSL 문자열", () => {
     // 불린다)·조명 단계(discard 뒤)에 들어가면 쿼드 가장자리에서 걸음 수·무늬 접기가 튄다. 활주로 도색이 축마다
     // 발자국을 재므로 fwidth 하나 대신 dFdx·dFdy 한 쌍을 재고, 등방 발자국(grPw)은 그 둘에서 셈한다.
     for (const [name, src] of [["GROUND_GLSL", GROUND_GLSL], ["GROUND_NORMAL_BODY", GROUND_NORMAL_BODY],
-      ["GROUND_LIGHT_BODY", GROUND_LIGHT_BODY]] as const) {
+      ["GROUND_LIGHT_BODY", GROUND_LIGHT_BODY], ["RUNWAY_GLSL", RUNWAY_GLSL]] as const) {
       assert.doesNotMatch(src, /\b(fwidth|dFdx|dFdy)\s*\(/, name);
     }
     const body = GROUND_FRAG_BODY;
@@ -141,9 +151,39 @@ describe("GLSL 문자열", () => {
   it("활주로 숫자의 획 표가 7획 표준과 같다 — 1만 가운데 막대라 0으로 둔다", () => {
     // a 위 1 · b 오른 위 2 · c 오른 아래 4 · d 아래 8 · e 왼 아래 16 · f 왼 위 32 · g 가운데 64
     const want = [63, 0, 91, 79, 102, 109, 125, 7, 127, 111];
-    const m = GROUND_GLSL.match(/const int GR_SEG\[10\] = int\[10\]\(([^)]*)\)/);
+    const m = RUNWAY_GLSL.match(/const int GR_SEG\[10\] = int\[10\]\(([^)]*)\)/);
     assert.ok(m, "GR_SEG 표가 없다");
     assert.deepEqual(m[1]!.split(",").map((v) => Number(v.trim())), want);
+  });
+
+  it("게임 지형의 활주로 조각도 화면 도함수를 분기 앞 한 곳에서만 잰다", () => {
+    // grAirfield는 uRunwayOn 분기 안에서 불린다 — 도함수는 그 앞에서 재 넘긴다(dxy)
+    const body = RUNWAY_GAME_FRAG_BODY;
+    assert.doesNotMatch(body, /\bfwidth\s*\(/);
+    assert.equal(body.match(/\bdFdx\s*\(/g)?.length, 1);
+    assert.equal(body.match(/\bdFdy\s*\(/g)?.length, 1);
+    assert.ok(Math.max(body.indexOf("dFdx("), body.indexOf("dFdy(")) < body.indexOf("if (uRunwayOn"), "도함수가 분기보다 앞이다");
+    assert.match(RUNWAY_GAME_VERT_BODY, /\bvRunwayWorld\s*=/, "정점이 세계 위치를 안 채운다");
+    assert.match(RUNWAY_GAME_VARYING_DECL, /^\s*varying vec3 vRunwayWorld;/m);
+  });
+
+  it("활주로 자리·덮임은 한 벌 — 실사 지면과 게임 지형이 같은 함수를 부르고, 지면은 다시 정의하지 않는다", () => {
+    // 두 지형이 각자 도색을 적으면 배치가 두 벌이 되어 한쪽만 고쳐진다. 지면 재질은 RUNWAY_GLSL과 GROUND_GLSL을 함께
+    // 넣으므로 같은 이름을 GROUND_GLSL이 또 정의하면 재정의로 컴파일이 깨져 **지형만 조용히 사라진다**
+    for (const [name, src] of [["GROUND_GLSL", GROUND_GLSL], ["RUNWAY_GAME_FRAG_BODY", RUNWAY_GAME_FRAG_BODY]] as const) {
+      assert.match(src, /\bgrAirfield\(/, `${name}이 grAirfield를 안 부른다`);
+      assert.match(src, /\bgrRunwayAxes\(/, `${name}이 grRunwayAxes를 안 부른다`);
+    }
+    const defs = [...RUNWAY_GLSL.matchAll(/^(?:float|vec[234]|int|void|bool)\s+(\w+)\s*\(/gm)].map((m) => m[1]!);
+    assert.ok(defs.includes("grAirfield") && defs.includes("grBand") && defs.length >= 10, defs.join(","));
+    for (const f of [...defs, "GR_SEG"]) {
+      assert.doesNotMatch(GROUND_GLSL, new RegExp(`^(?:const\\s+)?(?:float|vec[234]|int|void|bool)(?:\\[\\d+\\])?\\s+${f}\\b`, "m"), `GROUND_GLSL이 ${f}를 또 정의한다`);
+    }
+    // 유니폼 선언도 한 곳 — 지면 재질은 두 선언을 함께 넣는다
+    for (const u of ["uRunway", "uRunwayOn", "uRunwayArea", "uRunwayNum"]) {
+      assert.match(RUNWAY_UNIFORM_DECL, new RegExp(`^uniform \\w+ ${u};`, "m"), u);
+      assert.doesNotMatch(GROUND_UNIFORM_DECL, new RegExp(`\\b${u}\\b`), `GROUND_UNIFORM_DECL에 ${u}가 또 있다`);
+    }
   });
 
   it("지면 정점·조각의 varying이 같은 선언 한 벌에서 나온다", () => {

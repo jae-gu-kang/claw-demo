@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 
-import { PROPS, hash2, placeProps, type ElevSample } from "./propfield.ts";
+import { PROPS, hash2, placeProps, type ElevSample, type PropField } from "./propfield.ts";
 
 const RECT = { n0: -6000, e0: -6000, n1: 6000, e1: 6000 };
 /** 완만한 언덕 지형 — 전부 육지, 경사 ≈ 0.09 이하. */
@@ -43,6 +43,21 @@ describe("placeProps", () => {
     for (const p of [...f.pines, ...f.leaves, ...f.cabins]) {
       assert.ok(Math.hypot(p.n, p.e) >= PROPS.originClear);
     }
+  });
+
+  it("keepOut 자리(활주로 착륙대)는 비우고, 그 밖은 덜어 내지 않는다", () => {
+    // 원점 원(originClear 1.2 km) 밖으로 이어지는 띠 — 고흥 활주로 끝·착륙대가 그렇다(게임 지형에도 활주로가 칠해진다)
+    const rect = { n0: -3000, e0: -3000, n1: 3000, e1: 3000 };
+    const strip = (n: number, e: number) => Math.abs(e) <= 75 && n >= -120 && n <= 3000;
+    const all = (f: PropField) => [...f.pines, ...f.leaves, ...f.cabins];
+    const free = placeProps(hills, rect, 800);
+    const kept = placeProps(hills, rect, 800, 1, strip);
+    assert.ok(all(free).some((p) => strip(p.n, p.e)), "비우지 않으면 띠에도 선다 — 이 시험이 빈 띠를 재지 않는다");
+    for (const p of all(kept)) assert.ok(!strip(p.n, p.e), `띠 안 (${p.n.toFixed(0)}, ${p.e.toFixed(0)})`);
+    // 띠 밖은 그대로이거나 늘 뿐이다(오두막 상한을 띠가 덜 먹으면 밖에 하나 더 선다) — 표본을 null로 메워 비우면
+    // 이웃 경사 판정이 번져 띠 밖 한 칸이 같이 빈다(propfield.ts keepOut)
+    const outside = (f: PropField) => all(f).filter((p) => !strip(p.n, p.e)).length;
+    assert.ok(outside(kept) >= outside(free), `${outside(kept)} < ${outside(free)}`);
   });
 
   it("수목한계(relief 0.72) 위에는 나무가 없다", () => {

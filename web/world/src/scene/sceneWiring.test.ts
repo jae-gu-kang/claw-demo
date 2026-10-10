@@ -19,26 +19,45 @@ describe("SceneController 배선", () => {
     assert.doesNotMatch(src, /폭은 결과에 없습니다/);
     // 선분마다 따로 — 한 꺾은선에 이어 담으면 활주로를 가로지르는 대각선이 그어진다
     assert.match(build, /for \(const points of rwDraw\.segments\) rwLines\.push\(\{ points, color: 0xffffff \}\)/);
+    // 활주로 선은 궤적과 따로 단다 — 게임 모드는 궤적만 숨긴다. 궤적 목록에 섞으면 게임에서 활주로도 사라진다
+    assert.match(build, /this\.host\.setRunwayLines\(rwLines\);/);
+    assert.match(build, /this\.host\.setPaths\(\[\{ points, color: 0x32d3ff, breaks \}\]\);/);
   });
 
   it("활주로 바닥 — 그릴 격자·게임 지형·지면 판독·게임 소품이 같은 바닥을 쓴다", () => {
     // 하나라도 빠지면 묻히는 기체·끊기는 흰 선이 돌아오거나, 화면과 판독이 갈린다 — 시험이 다 초록인 채로(리뷰 지적)
     const build = fn("buildScene");
-    assert.match(build, /buildTerrain\(this\.terrain, \{ floor: runwayFloorOf\(body\.meta\?\.runway\) \}\)/);
+    assert.match(build, /this\.airfield = runwayFloorOf\(body\.meta\?\.runway\);/);
+    assert.match(build, /buildTerrain\(this\.terrain, \{ floor: this\.airfield \}\)/);
     assert.match(build, /this\.floor = built\.floor;/, "맞지 않아 안 편 바닥은 게임 지형에서도 빠진다");
     assert.match(build, /this\.groundTiers = built\.groundTiers;/, "판독은 그림과 같은 표본을 편 티어를 읽는다");
     // 지형이 없으면 둘 다 비운다 — 앞 결과의 바닥·판독 티어가 남지 않게
     assert.match(build, /this\.floor = null;\s*this\.groundTiers = \[\];/);
-    assert.match(build, /sameFloor\(this\.gameBuiltFloor, this\.floor\)/);
+    // 게임 자산은 팩·바닥·활주로 자리가 바뀌면 다시 굽는다 — 판정은 한 자리(gameStale)이고 두 곳이 부른다
+    assert.match(build, /this\.gameBuiltFor !== undefined && this\.gameStale\(\)/);
+    const stale = fn("gameStale");
+    assert.match(stale, /this\.gameBuiltFor !== this\.terrain/);
+    assert.match(stale, /sameFloor\(this\.gameBuiltFloor, this\.floor\)/);
+    assert.match(stale, /sameFloor\(this\.gameBuiltAirfield, this\.airfield\)/);
     const game = fn("buildGameWorld");
+    assert.match(game, /if \(!this\.gameStale\(\)\) return;/);
+    assert.match(game, /this\.gameBuiltFloor = this\.floor;\s*this\.gameBuiltAirfield = this\.airfield;/);
     assert.match(game, /floor: this\.floor/);
-    assert.match(game, /sameFloor\(this\.gameBuiltFloor, this\.floor\)/);
     assert.match(game, /this\.terrainElevationAt\(n, e\)/, "소품도 판독과 같은 표고");
     assert.match(fn("groundElevationAt"), /this\.terrainElevationAt\(pos\[0\], pos\[1\]\)/);
     const sampler = fn("terrainElevationAt");
     assert.match(sampler, /for \(const tier of this\.groundTiers\)/);
     // 원자료에 바닥 함수를 따로 얹으면 물가에서 그림과 갈린다 — 판독용 티어만 읽는다
     assert.doesNotMatch(sampler, /floorElevation/);
+  });
+
+  it("게임 소품은 활주로 착륙대를 비운다 — 바닥을 못 펴도 활주로는 거기 칠해진다", () => {
+    const game = fn("buildGameWorld");
+    // 착륙대는 펴는 구역과 같은 꼴(가중 1) — 맞춤과 무관한 활주로 자리(airfield)에서 잰다. 펴진 바닥(floor)에서 재면
+    // 표고가 지형과 안 맞는 런에서 활주로 위에 나무가 선다
+    assert.match(game, /const strip = this\.airfield;/);
+    assert.match(game, /floorWeight\(strip, n, e\) >= 1/);
+    assert.match(game, /placeProps\(sample, tierRect\(core\), relief, 1, keepOut\)/);
   });
 
   it("기체 동기화는 장면의 결과가 바뀔 때만 물러난다 — 새 요청이 실패해도 받던 모델·캡션이 멈추지 않는다", () => {
@@ -87,5 +106,29 @@ describe("SceneController 배선", () => {
       assert.doesNotMatch(stale, /setVehicleSettled/);
     }
     assert.match(fn("setVehicleSettled"), /this\.cb\.onVehicle\(v\)/);
+  });
+});
+
+const host = readFileSync(new URL("./SceneHost.ts", import.meta.url), "utf8");
+const hostFn = (name: string) =>
+  host.match(new RegExp(`\\n  (?:private )?${name}\\([\\s\\S]*?\\n  \\}\\n`))?.[0] ?? "";
+
+describe("SceneHost 배선 — 활주로", () => {
+  it("실사 지형과 게임 지형이 활주로 유니폼 한 벌을 꽂는다 — 모드를 바꿔도 같은 활주로", () => {
+    // 벌이 둘이면 setRunwaySurface가 한쪽만 고치고, 모드를 바꾸면 옛 활주로가 칠해진다
+    assert.match(hostFn("setTerrain"), /\.\.\.this\.runwayUniforms,/);
+    assert.match(hostFn("setGameTerrain"), /applyGameRunway\(mat, this\.runwayUniforms\);/);
+    assert.match(hostFn("setRunwaySurface"), /const u = this\.runwayUniforms;/);
+    const ground = host.match(/private readonly groundUniforms = \{[\s\S]*?\n  \};/)?.[0] ?? "";
+    assert.ok(ground, "groundUniforms가 없다");
+    assert.doesNotMatch(ground, /uRunway/, "활주로 유니폼이 지면 벌에 또 있다");
+  });
+
+  it("활주로 선은 공학·게임 모드에서 보이고, 궤적은 공학 모드에서만", () => {
+    const style = hostFn("setViewStyle");
+    assert.match(style, /this\.groups\.runway\.visible = style === "engineering" \|\| style === "game";/);
+    assert.match(style, /this\.groups\.paths\.visible = style === "engineering";/);
+    assert.match(hostFn("setRunwayLines"), /this\.fillLines\(this\.groups\.runway, lines\)/);
+    assert.match(hostFn("setPaths"), /this\.fillLines\(this\.groups\.paths, lines\)/);
   });
 });

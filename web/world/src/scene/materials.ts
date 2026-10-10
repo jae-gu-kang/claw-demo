@@ -25,6 +25,10 @@ import {
   GROUND_VARYING_DECL, GROUND_VERT_BODY, GROUND_VERT_DECL,
 } from "../shaders/ground.ts";
 import { COAST_GLSL } from "../shaders/ocean.ts";
+import {
+  RUNWAY_GAME_FRAG_BODY, RUNWAY_GAME_GLSL, RUNWAY_GAME_VARYING_DECL, RUNWAY_GAME_VERT_BODY, RUNWAY_GLSL,
+  RUNWAY_UNIFORM_DECL,
+} from "../shaders/runway.ts";
 
 import {
   WEAR_FRAG_BODY, WEAR_GLSL, WEAR_NORMAL_BODY, WEAR_UNIFORM_DECL, WEAR_VARYING_DECL,
@@ -123,7 +127,8 @@ ${GROUND_VERT_DECL}`)
       .replace("#include <fog_vertex>", `#include <fog_vertex>
 ${GROUND_VERT_BODY}`);
     // 앞머리 순서가 곧 의존 순서다: 대기(하늘 반사) → 구름 유니폼 → 노이즈 → 구름 덮임 →
-    // 해안 거리장 → 지면. 대기·해안·노이즈는 가드가 있어 다른 패치가 또 넣어도 안전하다.
+    // 해안 거리장 → 활주로 도색(shaders/runway.ts) → 지면. 대기·해안·노이즈는 가드가 있어 다른 패치가 또 넣어도
+    // 안전하다. 활주로 도색은 지형 재질에 이 패치 하나만 넣는다(게임 지형은 applyGameRunway — 다른 재질).
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>",
         `#include <common>
@@ -136,6 +141,8 @@ ${NOISE_GLSL}
 ${CLOUD_COVER_GLSL}
 ${COAST_GLSL}
 ${GROUND_UNIFORM_DECL}
+${RUNWAY_UNIFORM_DECL}
+${RUNWAY_GLSL}
 ${GROUND_GLSL}`)
       .replace("#include <metalnessmap_fragment>",
         `#include <metalnessmap_fragment>
@@ -149,6 +156,50 @@ ${GROUND_LIGHT_BODY}`);
   };
   material.customProgramCacheKey = function () {
     return `ground-v2|${prevKey.call(this)}`;
+  };
+  material.needsUpdate = true;
+}
+
+/** 게임 지형 재질에 활주로를 칠한다 — 자리·덮임은 실사 지면과 한 벌(`shaders/runway.ts`), 색은 게임 벌이다.
+ *
+ * 게임 지형은 정점색 램프만 있는 로우폴리라(SceneHost `setGameTerrain`) 실사의 지표 피복은 걸지 않고 활주로만
+ * 칠한다. 정점색이 곱해진 `<color_fragment>` 뒤에서 알베도를 바꾸므로 낱면 음영·대기 원근은 그대로 탄다.
+ * `applyGroundDetail`과 같은 규율(잇는 onBeforeCompile·캐시 키, 공유 유니폼 객체를 그대로 꽂기)이고, 치환 자리는
+ * `GAME_RUNWAY_ANCHORS` — 시험이 three 원문과 대조한다(materials.test.ts). */
+export const GAME_RUNWAY_ANCHORS = {
+  vertex: ["#include <common>", "#include <fog_vertex>"],
+  fragment: ["#include <common>", "#include <color_fragment>"],
+} as const;
+
+export function applyGameRunway(
+  material: Material, uniforms: Record<string, { value: unknown }>,
+): void {
+  const m = material as Material & { __gameRunway?: boolean };
+  if (m.__gameRunway) return;
+  m.__gameRunway = true;
+
+  const prevCompile = material.onBeforeCompile;
+  const prevKey = material.customProgramCacheKey;
+
+  material.onBeforeCompile = function (shader, renderer) {
+    prevCompile.call(this, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", `#include <common>
+${RUNWAY_GAME_VARYING_DECL}`)
+      .replace("#include <fog_vertex>", `#include <fog_vertex>
+${RUNWAY_GAME_VERT_BODY}`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", `#include <common>
+${RUNWAY_GAME_VARYING_DECL}
+${RUNWAY_UNIFORM_DECL}
+${RUNWAY_GLSL}
+${RUNWAY_GAME_GLSL}`)
+      .replace("#include <color_fragment>", `#include <color_fragment>
+${RUNWAY_GAME_FRAG_BODY}`);
+  };
+  material.customProgramCacheKey = function () {
+    return `game-runway-v1|${prevKey.call(this)}`;
   };
   material.needsUpdate = true;
 }

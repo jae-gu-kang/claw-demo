@@ -12,7 +12,7 @@
  * ## 도색이 선을 대신한다 — 칠할 땅이 있을 때만
  *
  * 폭을 알면 시단 줄무늬·번호·중심선 점선·측면 표지·조준점(과주로가 있으면 노란 갈매기표)을 지면 셰이더가
- * 칠한다(shaders/ground.ts) — 시험장 측정 기록이 영상에서 피아노 건반·중심선·측면 표지를 확인했다
+ * 칠한다(shaders/runway.ts — 실사·게임 지형 둘 다) — 시험장 측정 기록이 영상에서 피아노 건반·중심선·측면 표지를 확인했다
  * (data/geo/goheung-runway.json). 배치와 치수는 ICAO 부속서 14의 표준이고 실제 도색을 잰 것은 아니다. 그
  * 자리에 흰 선을 겹쳐 그으면 1픽셀 선이 도색 위에 떠 같은 것을 두 번 말하므로 선은 긋지 않는다. 다만 도색은
  * **지형 재질에만** 있다 — 지형을 못 얹은 화면(팩이 없거나 원점이 다름)에서 선까지 빼면 활주로가 통째로 사라진다
@@ -55,7 +55,7 @@ export function runwayDesignation(headingRad: number): [number, number] | null {
   return [near, ((near + 17) % 36) + 1];
 }
 
-/** 활주로 포장면 — 지면 셰이더가 아스팔트·도색·비행장 풀밭을 칠할 자리(shaders/ground.ts). NED 원점에서
+/** 활주로 포장면 — 지면 셰이더가 아스팔트·도색·비행장 풀밭을 칠할 자리(shaders/runway.ts). NED 원점에서
  *  heading 방향 length 구간, 폭 width. **폭을 알 때만** 있다 — 모르면 포장면을 지어내지 않는다. */
 export interface RunwaySurface {
   /** 활주로 축 방위 [rad] (북에서 동으로) */ heading: number;

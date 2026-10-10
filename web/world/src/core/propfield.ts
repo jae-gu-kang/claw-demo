@@ -33,7 +33,8 @@ export interface PropField {
 
 /** 배치 규칙 상수 — 게임 감각으로 고른 표시 값.
  *  originClear: 원점(이륙점·발사장) 둘레는 비운다 — 활주로·발사관 위에 나무가
- *  서면 화면이 지형지물을 거짓말한다. */
+ *  서면 화면이 지형지물을 거짓말한다. 활주로는 이 원 밖으로도 이어지므로(고흥은 끝이
+ *  1,205 m에 착륙대가 그 너머 120 m) 호출측이 활주로 자리를 `keepOut`으로 따로 비운다. */
 export const PROPS = {
   gridStep: 95,        // [m] 후보 격자 — 성긴 격자가 곧 개수 상한이다
   originClear: 1200,   // [m]
@@ -71,12 +72,15 @@ function slopeAt(sample: ElevSample, n: number, e: number, z0: number, step: num
  * @param rect 배치 범위 (NED) — 보통 core 티어 사각형. 바깥 티어(90 m 격자)까지
  *   깔면 개수가 상한을 눌러 정작 가까운 숲이 성기게 된다.
  * @param relief 램프 정규화 기준 [m] — 수목한계(relief의 0.72)를 램프의 설선과
- *   같은 기준으로 잰다. 절대 고도로 두면 낮은 지형에서 수목한계가 안 나온다. */
+ *   같은 기준으로 잰다. 절대 고도로 두면 낮은 지형에서 수목한계가 안 나온다.
+ * @param keepOut 비울 자리 — 참이면 그 자리에 아무것도 안 놓는다(활주로 착륙대). 표고와
+ *   무관하다: 표본을 null로 메워 비우면 이웃 경사 판정까지 번져 착륙대 밖 한 칸이 같이 빈다. */
 export function placeProps(
   sample: ElevSample,
   rect: { n0: number; e0: number; n1: number; e1: number },
   relief: number,
   seed = 1,
+  keepOut: (n: number, e: number) => boolean = () => false,
 ): PropField {
   const out: PropField = { pines: [], leaves: [], cabins: [] };
   const step = PROPS.gridStep;
@@ -93,7 +97,7 @@ export function placeProps(
       const je = (hash2(i, j, seed + 1) - 0.5) * step * 0.9;
       const n = i * step + jn;
       const e = j * step + je;
-      if (Math.hypot(n, e) < PROPS.originClear) continue;
+      if (Math.hypot(n, e) < PROPS.originClear || keepOut(n, e)) continue;
 
       const z = sample(n, e);
       if (z === null || z <= PROPS.seaLevel || z > treeLine) continue;
