@@ -34,8 +34,11 @@ export interface TerrainBuild {
   masks: Map<string, TierMask>;
   /** 캡션이 말할 사실 — 출처·해상도·커버리지·바다 비율. */
   notes: string[];
-  /** 실제로 편 활주로 바닥 — 안 줬거나 지형과 맞지 않아 안 폈으면 null. 지면 판독이 이것을 쓴다 */
+  /** 실제로 편 활주로 바닥 — 안 줬거나 지형과 맞지 않아 안 폈으면 null. 게임 지형이 같은 값으로 굽는다 */
   floor: RunwayFloor | null;
+  /** 지면 판독용 티어 — 원자료 티어(팩 순서)에 그림과 **같은 표본**의 바닥을 얹었다(물가 땅은 그대로). 바닥이 없으면
+   *  원자료 티어 그대로(같은 객체). 판독이 원자료에 바닥 함수를 따로 얹으면 물가에서 그림과 갈린다(v1.92 리뷰) */
+  groundTiers: Tier[];
 }
 
 /** 칸이 통째로 바다인가 — **덮는 범위를 전부 본다.**
@@ -67,6 +70,13 @@ function tierElevations(tier: Tier): Float32Array {
     elev[i] = v === tier.nodata ? Number.NaN : tier.offset + v * tier.scale;
   }
   return elev;
+}
+
+/** 표고 [m] → 티어 눈금(결측·범위 밖은 nodata로) */
+function quantize(tier: Tier, z: number): number {
+  return Number.isFinite(z)
+    ? Math.min(Math.max(Math.round((z - tier.offset) / tier.scale), 0), tier.nodata - 1)
+    : tier.nodata;
 }
 
 /** 물가에 맞닿지 않은 땅 표본인가 — 활주로 바닥은 이것만 편다(core/runwayfloor.ts 「물가는 펴지 않는다」). */
@@ -129,12 +139,7 @@ export function renderTier(
     elev = g.elev; rows = g.rows; cols = g.cols; step = tier.step / 2;
   }
   const raw = new Uint16Array(rows * cols);
-  for (let i = 0; i < raw.length; i++) {
-    const z = elev[i]!;
-    raw[i] = Number.isFinite(z)
-      ? Math.min(Math.max(Math.round((z - tier.offset) / tier.scale), 0), tier.nodata - 1)
-      : tier.nodata;
-  }
+  for (let i = 0; i < raw.length; i++) raw[i] = quantize(tier, elev[i]!);
   const out: Tier = { ...tier, rows, cols, step, raw };
   if (!mask) return { tier: out, skipCell: null, refined: doRefine };
   const sea = seaQuad(mask);
@@ -146,6 +151,20 @@ export function renderTier(
       : sea,
     refined: doRefine,
   };
+}
+
+/** 판독용 티어 — 원자료 표고에 그림과 같은 표본(물가에 맞닿지 않은 땅)의 바닥을 얹어 다시 눈금으로. 손댄 표본만
+ *  바꾸고, 손댄 것이 없으면 원자료 티어 그대로다. */
+function groundTier(tier: Tier, mask: TierMask | undefined, floor: RunwayFloor): Tier {
+  const src = tierElevations(tier);
+  const g = floorGrid(src, tier.rows, tier.cols, tier.n0, tier.e0, tier.step, floor,
+    mask ? inlandLand(mask) : undefined);
+  if (g.touched === 0) return tier;
+  const raw = Uint16Array.from(tier.raw);
+  for (let i = 0; i < raw.length; i++) {
+    if (Number.isFinite(src[i]!) && g.elev[i] !== src[i]) raw[i] = quantize(tier, g.elev[i]!);
+  }
+  return { ...tier, raw };
 }
 
 /** 캡션의 미터 — 소수 한 자리, 끝의 0은 뗀다 */
@@ -272,5 +291,6 @@ export function buildTerrain(
     + "놓칠 수 있습니다), 골짜기의 어둑함은 반경 60·180·540 m의 상대 표고로 어림한 하늘 열림입니다 — "
     + "둘 다 표시용 근사입니다.",
   );
-  return { meshes, masks, notes, floor };
+  const groundTiers = floor ? pack.tiers.map((t) => groundTier(t, masks.get(t.name), floor)) : pack.tiers;
+  return { meshes, masks, notes, floor, groundTiers };
 }

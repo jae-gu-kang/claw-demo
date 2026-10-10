@@ -124,15 +124,26 @@ describe("GLSL 문자열", () => {
 
   it("지면 셰이더의 화면 도함수는 분기·discard 앞 한 곳뿐이다", () => {
     // 갈라진 분기 안이나 discard 뒤의 fwidth·dFdx는 GLSL에서 정의되지 않는다 — 함수 본문(분기 안에서
-    // 불린다)·조명 단계(discard 뒤)에 들어가면 쿼드 가장자리에서 걸음 수·무늬 접기가 튄다.
+    // 불린다)·조명 단계(discard 뒤)에 들어가면 쿼드 가장자리에서 걸음 수·무늬 접기가 튄다. 활주로 도색이 축마다
+    // 발자국을 재므로 fwidth 하나 대신 dFdx·dFdy 한 쌍을 재고, 등방 발자국(grPw)은 그 둘에서 셈한다.
     for (const [name, src] of [["GROUND_GLSL", GROUND_GLSL], ["GROUND_NORMAL_BODY", GROUND_NORMAL_BODY],
       ["GROUND_LIGHT_BODY", GROUND_LIGHT_BODY]] as const) {
       assert.doesNotMatch(src, /\b(fwidth|dFdx|dFdy)\s*\(/, name);
     }
     const body = GROUND_FRAG_BODY;
-    assert.equal(body.match(/\bfwidth\s*\(/g)?.length, 1);
+    assert.doesNotMatch(body, /\bfwidth\s*\(/);
+    assert.equal(body.match(/\bdFdx\s*\(/g)?.length, 1);
+    assert.equal(body.match(/\bdFdy\s*\(/g)?.length, 1);
     assert.ok(body.includes("discard;"), "discard 문장이 있다");
-    assert.ok(body.indexOf("fwidth(") < body.indexOf("discard;"), "도함수가 discard보다 앞이다");
+    assert.ok(Math.max(body.indexOf("dFdx("), body.indexOf("dFdy(")) < body.indexOf("discard;"), "도함수가 discard보다 앞이다");
+  });
+
+  it("활주로 숫자의 획 표가 7획 표준과 같다 — 1만 가운데 막대라 0으로 둔다", () => {
+    // a 위 1 · b 오른 위 2 · c 오른 아래 4 · d 아래 8 · e 왼 아래 16 · f 왼 위 32 · g 가운데 64
+    const want = [63, 0, 91, 79, 102, 109, 125, 7, 127, 111];
+    const m = GROUND_GLSL.match(/const int GR_SEG\[10\] = int\[10\]\(([^)]*)\)/);
+    assert.ok(m, "GR_SEG 표가 없다");
+    assert.deepEqual(m[1]!.split(",").map((v) => Number(v.trim())), want);
   });
 
   it("지면 정점·조각의 varying이 같은 선언 한 벌에서 나온다", () => {

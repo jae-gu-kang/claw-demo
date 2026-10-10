@@ -167,12 +167,12 @@
     "원영상의 기하보정 오차는 영상 안에서 잴 수 없어 위 미터 자릿수 주장에 그대로 남는다."
   ],
   "consumers": [
-    "web/js/lib/site.js — 화면이 읽는 상수 (site.test.js가 이 파일과 대조한다 — width_m 포함)",
+    "web/js/lib/site.js — 화면이 읽는 상수 (site.test.js가 이 파일과 대조한다 — width_m, paved_extent_m에서 셈한 과주로 포함)",
     "web/js/lib/simrequest.js — 측지 원점·활주로 방위·길이·장주 웨이포인트 기본값 (site.js 경유)",
     "web/js/lib/replay.js — width_m으로 착륙 요약의 횡편차 한계(반폭 − 가장자리 여유)를 세운다 (site.js 경유)",
     "web/js/views/sim.js — 활주로·측지 원점 칸 안내의 방위(도)·원점 좌표 (site.js에서 셈한다 — 문구에 옮겨 적지 않는다)",
-    "web/world/src/core/runway.ts — 가상환경 활주로 시단·종단·가장자리를 제원 폭으로 그린다 (replay.js siteRunwayWidth 경유 — 같은 활주로일 때만)",
-    "web/world/build/world.js — 가상환경 번들이 site.js를 싣는다(활주로 폭 판정 → 시단·종단·가장자리 그리기) — 값이 바뀌면 번들을 다시 빌드",
+    "web/world/src/core/runway.ts — 가상환경 활주로를 제원 폭·과주로로 그린다: 지형이 있으면 포장면·도색, 없으면 시단·종단·가장자리 선 (replay.js siteRunwayWidth 경유 — 같은 활주로일 때만)",
+    "web/world/build/world.js — 가상환경 번들이 site.js를 싣는다(활주로 폭·과주로 대조 → 도색·선 그리기) — 값이 바뀌면 번들을 다시 빌드",
     "server/claw_server/llm_draft.py — 미션 초안 프롬프트의 무대 사실 (test_llm_draft.py·routes/test_llm.py가 이 파일과 대조)",
     "data/README.md — 지형 팩을 굽는 명령의 --origin-lat/--origin-lon (site.test.js가 대조)",
     "render.yaml — 배포 빌드가 지형 팩을 굽는 명령의 --origin-lat/--origin-lon (site.test.js가 대조 — 인자 전체가 data/README.md의 명령과 같아야 한다)",

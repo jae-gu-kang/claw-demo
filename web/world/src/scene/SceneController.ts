@@ -22,15 +22,14 @@ import {
 import {
   attitudeAt, originsAgree, sampleAt, sceneExtent, trackPoints, vehicleModelPlan, velocityAt,
 } from "../lib/world3d.ts";
-import { elevationAt, parseTerrainPack, tierRect, type TerrainPack } from "../lib/terrainpack.ts";
+import { elevationAt, parseTerrainPack, tierRect, type Tier, type TerrainPack } from "../lib/terrainpack.ts";
 import { spawnArcade, stepArcade, type ArcadeInput, type ArcadeState } from "../core/arcade.ts";
 import { reliefOf } from "../core/gamestyle.ts";
 import { placeProps } from "../core/propfield.ts";
 import { buildPropsGroup } from "./props.ts";
 import { refLabel, runProfileRef, siteRunwayWidth, strideFor } from "../lib/replay.ts";
 import { runwayDrawing } from "../core/runway.ts";
-import { GOHEUNG } from "../../../js/lib/site.js";
-import { floorElevation, runwayFloorOf, sameFloor, type RunwayFloor } from "../core/runwayfloor.ts";
+import { runwayFloorOf, sameFloor, type RunwayFloor } from "../core/runwayfloor.ts";
 import { ATMOSPHERE_NOTES, CLOUD_NOTES } from "./atmosphere.ts";
 import { WEAR_NOTES } from "./materials.ts";
 import { launcherCaptionNotes, launcherPose } from "../core/launcher.ts";
@@ -198,8 +197,10 @@ export class SceneController {
   private gameBuiltFor: TerrainPack | null | undefined = undefined;
   /** 게임 자산을 구울 때 쓴 활주로 바닥 — 팩이 같아도 결과의 활주로가 바뀌면 다시 굽는다 */
   private gameBuiltFloor: RunwayFloor | null = null;
-  /** 이 결과의 활주로 바닥(core/runwayfloor.ts) — 그릴 격자·게임 지형·지면 판독이 같은 값을 본다 */
+  /** 이 결과의 활주로 바닥(core/runwayfloor.ts) — 지형과 맞아 실제로 편 것만. 그릴 격자·게임 지형이 같은 값을 본다 */
   private floor: RunwayFloor | null = null;
+  /** 지면 판독용 티어 — buildTerrain이 그림과 같은 표본에 바닥을 얹어 돌려준다. 판독·게임 소품이 이것만 읽는다 */
+  private groundTiers: Tier[] = [];
   private replayMarks: Marker[] = [];
   private get gameOn(): boolean { return this.style === "game"; }
 
@@ -439,6 +440,7 @@ export class SceneController {
       // 맞을 때만 편다(buildTerrain이 정해 돌려준다) — 그릴 격자·게임 지형·지면 판독이 그 값을 같이 본다
       const built = buildTerrain(this.terrain, { floor: runwayFloorOf(body.meta?.runway) });
       this.floor = built.floor;
+      this.groundTiers = built.groundTiers;
       this.host.setTerrain(built.meshes);
       notes.push(...built.notes);
       // 해안 거리장은 **지형과 같은 마스크에서** 나온다. 따로 판정하면 해안선이 두 벌이
@@ -456,6 +458,7 @@ export class SceneController {
       );
     } else {
       this.floor = null;
+      this.groundTiers = [];
       this.host.setTerrain([]);
       // 지형이 없으면 해안선도 모른다 — 해면을 **그리지 않는다**(`Ocean.setCoast`).
       this.host.setCoast(null);
@@ -470,12 +473,13 @@ export class SceneController {
       if (this.gameOn) this.buildGameWorld();
     }
 
-    // --- 활주로: 폭을 알면 포장면·도색, 모르면 중심선 하나 --- (원점에서 heading 방향 length 구간 — lib/site.js와
-    // lib/replay.js가 이 규약을 전제로 판정한다). 폭은 결과에 없어 시험장 제원에서 — 시뮬 탭 횡편차 판정과 같은
-    // 한 자리(siteRunwayWidth)이고, 그 런의 활주로가 제원의 활주로가 아니면 중심선만(core/runway.ts). 과주로도 제원에서
+    // --- 활주로: 폭을 알고 칠할 땅(지형)이 있으면 포장면·도색, 땅이 없으면 선, 폭을 모르면 중심선 하나 --- (원점에서
+    // heading 방향 length 구간 — lib/site.js와 lib/replay.js가 이 규약을 전제로 판정한다). 폭·과주로는 결과에 없어
+    // 시험장 제원에서 — 시뮬 탭 횡편차 판정과 같은 대조 한 자리(siteRunwayWidth)이고, 그 런의 활주로가 제원의
+    // 활주로가 아니면 중심선만(core/runway.ts). 도색은 지형 재질에만 있어 지형이 없으면 선으로 긋는다
     const rw = body.meta?.runway;
     const rwLines: { points: Float32Array; color: number }[] = [];
-    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw), { overrunM: GOHEUNG.runwayOverrunM });
+    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw), { paint: this.terrain !== null });
     if (rwDraw) {
       // 선분마다 따로 — setPaths는 한 목록을 꺾은선으로 잇는다
       for (const points of rwDraw.segments) rwLines.push({ points, color: 0xffffff });
@@ -706,8 +710,8 @@ export class SceneController {
       this.host.setProps(null);
       return;
     }
-    // 소품은 지면 판독과 같은 표고에 선다 — 활주로 바닥 위에서도
-    const sample = (n: number, e: number): number | null => this.terrainElevationAt(pack, n, e);
+    // 소품은 지면 판독과 같은 표고에 선다 — 활주로 바닥 위에서도(판독용 티어는 이 팩의 것이다)
+    const sample = (n: number, e: number): number | null => this.terrainElevationAt(n, e);
     this.host.setProps(buildPropsGroup(placeProps(sample, tierRect(core), relief)).group);
   }
 
@@ -1032,16 +1036,17 @@ export class SceneController {
    * `views/world.js`의 `groundElevationAt` + `state.terrain` 게이트와 같은 규약이다. */
   private groundElevationAt(pos: Vec3 | null): number | null {
     // 지형은 있는데 이 자리를 안 덮으면 null
-    if (this.terrain && pos) return this.terrainElevationAt(this.terrain, pos[0], pos[1]);
+    if (this.terrain && pos) return this.terrainElevationAt(pos[0], pos[1]);
     return num(this.body?.meta?.runway?.elevation) ?? 0;
   }
 
-  /** 팩이 (n, e)를 덮으면 그 표고, 아니면 null — 활주로 바닥을 얹는다(core/runwayfloor.ts). 지면 판독과 게임 소품이
-   *  이 한 함수를 쓴다(따로 적으면 둘이 갈린다 — 리뷰 지적). */
-  private terrainElevationAt(pack: TerrainPack, n: number, e: number): number | null {
-    for (const tier of pack.tiers) {
+  /** 지형이 (n, e)를 덮으면 그 표고, 아니면 null — 판독용 티어(buildTerrain의 groundTiers: 그림과 같은 표본에 활주로
+   *  바닥을 얹은 원자료)에서 읽는다. 원자료에 바닥 함수를 따로 얹으면 물가에서 그림과 갈린다(v1.92 리뷰). 지면 판독과
+   *  게임 소품이 이 한 함수를 쓴다(따로 적으면 둘이 갈린다). */
+  private terrainElevationAt(n: number, e: number): number | null {
+    for (const tier of this.groundTiers) {
       const z = elevationAt(tier, n, e);
-      if (z !== null) return this.floor ? floorElevation(this.floor, n, e, z) : z;
+      if (z !== null) return z;
     }
     return null;
   }

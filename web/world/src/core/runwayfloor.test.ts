@@ -174,6 +174,13 @@ describe("floorGrid — 격자에 바닥을 얹은 새 격자", () => {
     assert.equal(floorSource(bumpy, rows, cols, 20_000, 20_000, step, RW), null);
   });
 
+  it("floorSource는 keep이 뺀 표본을 범위에 넣지 않는다 — 물가 땅의 높이가 맞춤 판정을 흔들지 않게", () => {
+    const spike = Float32Array.from(bumpy);
+    spike[ORIGIN] = 50;
+    assert.equal(floorSource(spike, rows, cols, n0, e0, step, RW)!.max, 50);
+    assert.ok(floorSource(spike, rows, cols, n0, e0, step, RW, (i) => i !== ORIGIN)!.max <= 2.9 + 1e-6);
+  });
+
   it("바닥 표고가 원자료 범위에서 FLOOR_FIT_M 안일 때만 맞다 — 밖이면 둑·구덩이를 짓게 된다", () => {
     const src = { min: 0, max: 3.7 };
     assert.ok(floorFits({ ...RW, elevation: 0 }, src));

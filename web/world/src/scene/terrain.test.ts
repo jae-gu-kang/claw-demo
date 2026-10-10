@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { FLOOR_FIT_M, floorElevation, floorWeight, type RunwayFloor } from "../core/runwayfloor.ts";
-import type { Tier, TerrainPack } from "../lib/terrainpack.ts";
+import { elevationAt, type Tier, type TerrainPack } from "../lib/terrainpack.ts";
 import { buildTerrain, renderTier } from "./terrain.ts";
 
 const SCALE = 0.05;
@@ -101,6 +101,20 @@ function bumpyTier(): Tier {
   return { name: "core", rows, cols, n0: -300, e0: -300, step: 30, scale: SCALE, offset: OFFSET, nodata: NODATA, raw };
 }
 
+/** 서쪽 세 열이 바다, 동쪽이 2.8~3.2 m 간척지(해안 턱 흡수의 2.5 m 문턱 위)인 30 m 격자 — 원점이 가운데쯤 */
+function coastTier(): Tier {
+  const rows = 10;
+  const cols = 10;
+  const raw = new Uint16Array(rows * cols);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const z = c < 3 ? 0 : 2.8 + 0.1 * ((r + c) % 5);
+      raw[r * cols + c] = Math.round((z - OFFSET) / SCALE);
+    }
+  }
+  return { name: "core", rows, cols, n0: -135, e0: -135, step: 30, scale: SCALE, offset: OFFSET, nodata: NODATA, raw };
+}
+
 describe("지형 조립 — 활주로 바닥", () => {
   const src = bumpyTier();
   const srcZ = (i: number) => OFFSET + src.raw[i]! * SCALE;
@@ -163,19 +177,10 @@ describe("지형 조립 — 활주로 바닥", () => {
   });
 
   it("물가는 펴지 않는다 — 해안에 붙은 활주로에서 물가선이 꼭짓점 톱니로 돌아가지 않게", () => {
-    // 서쪽 세 열이 바다, 동쪽이 2.8~3.2 m 간척지(해안 턱 흡수의 2.5 m 문턱 위)인 30 m 격자 위로 활주로가 지난다.
-    // 표고 0(고흥·폼 기본값)으로 물가 땅까지 펴면 그 꼭짓점이 해수면에 붙어 물가선이 꼭짓점을 지난다(리뷰가
-    // 시험 섬에서 확인 — 물가선 위치 0.00). 그래서 바다에 맞닿은 땅과 바다는 둔다
-    const rows = 10;
-    const cols = 10;
-    const raw = new Uint16Array(rows * cols);
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const z = c < 3 ? 0 : 2.8 + 0.1 * ((r + c) % 5);
-        raw[r * cols + c] = Math.round((z - OFFSET) / SCALE);
-      }
-    }
-    const coast: Tier = { name: "core", rows, cols, n0: -135, e0: -135, step: 30, scale: SCALE, offset: OFFSET, nodata: NODATA, raw };
+    // 간척지 위로 활주로가 지난다. 표고 0(고흥·폼 기본값)으로 물가 땅까지 펴면 그 꼭짓점이 해수면에 붙어 물가선이
+    // 꼭짓점을 지난다(리뷰가 시험 섬에서 확인 — 물가선 위치 0.00). 그래서 바다에 맞닿은 땅과 바다는 둔다
+    const coast = coastTier();
+    const { raw, cols } = coast;
     const b = buildTerrain(pack(coast), { floor: { heading: 0, length: 60, elevation: 0 } });
     assert.ok(b.floor, "간척지 위 0 m 바닥은 지형과 맞는다");
     const m = b.meshes[0]!;
@@ -187,5 +192,28 @@ describe("지형 조립 — 활주로 바닥", () => {
     assert.ok(z(5, 2) < -1, `맞닿은 바다 ${z(5, 2)}`);
     const s0 = z(5, 3) / (z(5, 3) - z(5, 2));
     assert.ok(s0 > 0.3 && s0 < 0.9, `물가선 위치 ${s0.toFixed(2)}`);
+  });
+  it("판독용 티어(groundTiers)는 그림과 같은 표본을 편다 — 물가 땅은 원자료 그대로, 원자료 티어는 안 바뀐다", () => {
+    // 판독이 원자료에 바닥 함수를 따로 얹으면 물가에서 그림(물가 땅은 안 편다)과 판독(편다)이 갈린다(v1.92 리뷰)
+    const coast = coastTier();
+    const before = Uint16Array.from(coast.raw);
+    const b = buildTerrain(pack(coast), { floor: { heading: 0, length: 60, elevation: 0 } });
+    const g = b.groundTiers[0]!;
+    const at = (r: number, c: number) => elevationAt(g, coast.n0 + r * coast.step, coast.e0 + c * coast.step)!;
+    const src = (r: number, c: number) => elevationAt(coast, coast.n0 + r * coast.step, coast.e0 + c * coast.step)!;
+    assert.ok(Math.abs(at(5, 5)) < 1e-6, `안쪽 땅 ${at(5, 5)}`);
+    assert.ok(Math.abs(at(5, 3) - src(5, 3)) < 1e-9, `물가 땅 ${at(5, 3)}`);
+    // 그린 정점과 판독 표본이 같다 — 표본 자리에서
+    const m = b.meshes[0]!;
+    for (const [r, c] of [[5, 5], [5, 3], [2, 6], [8, 9]] as const) {
+      assert.ok(Math.abs(-m.positions[3 * (r * m.cols + c) + 2]! - at(r, c)) < 1e-6, `(${r}, ${c})`);
+    }
+    assert.deepEqual(coast.raw, before);
+  });
+
+  it("바닥이 없거나 지형과 맞지 않으면 판독용 티어는 원자료 티어 그대로다(같은 객체)", () => {
+    assert.equal(buildTerrain(pack(src)).groundTiers[0], src);
+    assert.equal(buildTerrain(pack(src), { floor: { ...FLOOR, elevation: 40 } }).groundTiers[0], src);
+    assert.notEqual(buildTerrain(pack(src), { floor: FLOOR }).groundTiers[0], src);
   });
 });

@@ -1,5 +1,6 @@
-/** 활주로 그리기 — 폭을 알면 지면 셰이더가 포장면·도색을 칠하고, 모르면 중심선 하나만 선으로 긋는다. 좌표는
- * NED이고 활주로는 **원점에서 heading 방향 length 구간**이다(lib/site.js·lib/replay.js가 전제하는 규약).
+/** 활주로 그리기 — 폭을 알고 칠할 땅(지형)이 있으면 지면 셰이더가 포장면·도색을 칠하고, 땅이 없으면 선으로,
+ * 폭을 모르면 중심선 하나만 긋는다. 좌표는 NED이고 활주로는 **원점에서 heading 방향 length 구간**이다
+ * (lib/site.js·lib/replay.js가 전제하는 규약).
  *
  * ## 폭은 어디서
  *
@@ -8,12 +9,15 @@
  * 여기서 폭 상수를 다시 적으면 화면의 가장자리와 판정의 가장자리가 두 수가 된다(옛 화면의 22 m 반폭이 그랬다
  * — 제원은 45 m). 다른 활주로면 폭을 지어내지 않는다: 중심선만 그리고 사유를 캡션에 낸다.
  *
- * ## 도색이 선을 대신한다
+ * ## 도색이 선을 대신한다 — 칠할 땅이 있을 때만
  *
  * 폭을 알면 시단 줄무늬·번호·중심선 점선·측면 표지·조준점(과주로가 있으면 노란 갈매기표)을 지면 셰이더가
  * 칠한다(shaders/ground.ts) — 시험장 측정 기록이 영상에서 피아노 건반·중심선·측면 표지를 확인했다
  * (data/geo/goheung-runway.json). 배치와 치수는 ICAO 부속서 14의 표준이고 실제 도색을 잰 것은 아니다. 그
- * 자리에 흰 선을 겹쳐 그으면 1픽셀 선이 도색 위에 떠 같은 것을 두 번 말하므로, 선은 폭을 모를 때의 중심선뿐이다.
+ * 자리에 흰 선을 겹쳐 그으면 1픽셀 선이 도색 위에 떠 같은 것을 두 번 말하므로 선은 긋지 않는다. 다만 도색은
+ * **지형 재질에만** 있다 — 지형을 못 얹은 화면(팩이 없거나 원점이 다름)에서 선까지 빼면 활주로가 통째로 사라진다
+ * (v1.92 리뷰 지적). 그래서 호출측이 칠할 땅이 있다고 말할 때(`paint`)만 도색이고, 기본은 선이다.
+ * 과주로는 폭과 같은 제원 대조(`siteRunwayWidth`)가 함께 준다 — 따로 읽으면 다른 활주로에도 붙는다.
  *
  * ## 번호는 자방위에서
  *
@@ -77,20 +81,44 @@ const num = (v: unknown): number | null =>
 const fmtM = (v: number) => String(Number(v.toFixed(1)));
 
 /** 결과의 활주로(`meta.runway`) + 그 폭 판정 → 그리기. 방위·길이가 없으면 null(그리지 않는다).
- *  `site.overrunM`은 시험장 제원의 과주로 — 폭을 알 때(= 그 런이 시험장 활주로를 썼을 때)만 쓴다. */
+ *  `opts.paint` — 칠할 땅(지형)이 있다. 기본은 거짓(선으로 긋는다). */
 export function runwayDrawing(
-  rw: unknown, width: RunwayWidth, site: { overrunM?: number } = {},
+  rw: unknown, width: RunwayWidth, opts: { paint?: boolean } = {},
 ): RunwayDrawing | null {
   const r = (rw ?? null) as { heading?: unknown; length?: unknown; elevation?: unknown } | null;
   const h = num(r?.heading);
   const L = num(r?.length);
   if (h === null || L === null) return null;
+  const d = -((num(r?.elevation) ?? 0) + RUNWAY_LINE_LIFT_M);
+  const [cn, ce] = [Math.cos(h), Math.sin(h)]; // 활주로 축(북·동 성분)
+  const n1 = cn * L;
+  const e1 = ce * L;
+  const seg = (a: [number, number], b: [number, number]) => new Float32Array([a[0], a[1], d, b[0], b[1], d]);
+  const center = seg([0, 0], [n1, e1]);
   if (!("width" in width)) {
-    const d = -((num(r?.elevation) ?? 0) + RUNWAY_LINE_LIFT_M);
-    const center = new Float32Array([0, 0, d, Math.cos(h) * L, Math.sin(h) * L, d]);
     return { segments: [center], surface: null, note: `활주로는 중심선만 그립니다 — 폭을 모릅니다: ${width.error}.` };
   }
-  const overrun = Math.max(num(site.overrunM) ?? 0, 0);
+  const source = `폭 ${fmtM(width.width)} m는 ${width.source} 값입니다(결과에는 폭이 없어, 이 런의 활주로가 `
+    + "제원의 활주로와 같을 때만 씁니다)";
+  if (!opts.paint) {
+    const half = width.width / 2;
+    // 축의 오른쪽(+) 법선 — 북·동 평면에서 (−sin h, cos h)
+    const [rn, re] = [-ce * half, cn * half];
+    const at = (n: number, e: number, side: 1 | -1): [number, number] => [n + side * rn, e + side * re];
+    return {
+      segments: [
+        center,
+        seg(at(0, 0, -1), at(0, 0, 1)), // 시단
+        seg(at(n1, e1, -1), at(n1, e1, 1)), // 종단
+        seg(at(0, 0, -1), at(n1, e1, -1)), // 왼 가장자리
+        seg(at(0, 0, 1), at(n1, e1, 1)), // 오른 가장자리
+      ],
+      surface: null,
+      note: `활주로: 중심선·시단·종단·양 가장자리를 선으로 긋습니다 — ${source}. 지형이 없어 포장면과 도색은 `
+        + "칠하지 않습니다.",
+    };
+  }
+  const overrun = Math.max(num(width.overrun) ?? 0, 0);
   const designation = runwayDesignation(h);
   const two = (n: number) => String(n).padStart(2, "0");
   const marks = ["시단 줄무늬", ...(designation ? [`번호 ${two(designation[0])}/${two(designation[1])}`] : []),
@@ -99,8 +127,13 @@ export function runwayDrawing(
     segments: [],
     surface: { heading: h, length: L, width: width.width, overrun, designation },
     note: `활주로: 포장면과 도색(${marks.join("·")}${overrun > 0 ? `, 양 끝 과주로 ${fmtM(overrun)} m의 노란 갈매기표` : ""})을 `
-      + `지면에 칠합니다. 폭 ${fmtM(width.width)} m는 ${width.source} 값입니다(결과에는 폭이 없어, 이 런의 활주로가 `
-      + "제원의 활주로와 같을 때만 씁니다). 도색의 배치와 치수는 ICAO 부속서 14의 표준이고 실제 도색을 잰 것이 아닙니다"
+      + `지면에 칠합니다. ${source}. 도색의 배치와 치수는 ICAO 부속서 14의 표준이고 실제 도색을 잰 것이 아닙니다`
       + (designation ? " — 번호는 진방위와 한반도 자편각 범위(서편 6~10°)로 셈했습니다." : "."),
   };
+}
+
+/** 활주로 번호 → 셰이더 자리 (시단 쪽 십·일, 맞은편 십·일) — `SceneHost.setRunwaySurface`가 그대로 싣는다. 모르면
+ *  -1 넷이고 셰이더가 번호를 칠하지 않는다. */
+export function designationDigits(d: [number, number] | null): [number, number, number, number] {
+  return d ? [Math.floor(d[0] / 10), d[0] % 10, Math.floor(d[1] / 10), d[1] % 10] : [-1, -1, -1, -1];
 }

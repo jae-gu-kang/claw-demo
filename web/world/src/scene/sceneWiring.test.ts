@@ -9,10 +9,12 @@ const fn = (name: string) =>
   src.match(new RegExp(`\\n  (?:private )?(?:async )?${name}\\([\\s\\S]*?\\n  \\}\\n`))?.[0] ?? "";
 
 describe("SceneController 배선", () => {
-  it("활주로는 제원 폭(siteRunwayWidth)·과주로(GOHEUNG)로 core/runway.ts가 그린다 — 폭·과주로 상수를 다시 적지 않는다", () => {
+  it("활주로는 제원 대조(siteRunwayWidth)의 폭·과주로로 core/runway.ts가 그린다 — 도색은 칠할 땅(지형)이 있을 때만", () => {
     const build = fn("buildScene");
     assert.ok(build, "buildScene이 없다");
-    assert.match(build, /runwayDrawing\(rw, siteRunwayWidth\(rw\), \{ overrunM: GOHEUNG\.runwayOverrunM \}\)/);
+    assert.match(build, /runwayDrawing\(rw, siteRunwayWidth\(rw\), \{ paint: this\.terrain !== null \}\)/);
+    // 과주로를 제원에서 따로 읽으면 대조를 건너뛰어 다른 활주로에도 시험장 과주로가 붙는다(v1.92 리뷰)
+    assert.doesNotMatch(src, /GOHEUNG\./);
     assert.doesNotMatch(build, /\* 22\b/, "옛 22 m 반폭 상수");
     assert.doesNotMatch(src, /폭은 결과에 없습니다/);
     // 선분마다 따로 — 한 꺾은선에 이어 담으면 활주로를 가로지르는 대각선이 그어진다
@@ -23,14 +25,20 @@ describe("SceneController 배선", () => {
     // 하나라도 빠지면 묻히는 기체·끊기는 흰 선이 돌아오거나, 화면과 판독이 갈린다 — 시험이 다 초록인 채로(리뷰 지적)
     const build = fn("buildScene");
     assert.match(build, /buildTerrain\(this\.terrain, \{ floor: runwayFloorOf\(body\.meta\?\.runway\) \}\)/);
-    assert.match(build, /this\.floor = built\.floor;/, "맞지 않아 안 편 바닥은 판독에서도 빠진다");
+    assert.match(build, /this\.floor = built\.floor;/, "맞지 않아 안 편 바닥은 게임 지형에서도 빠진다");
+    assert.match(build, /this\.groundTiers = built\.groundTiers;/, "판독은 그림과 같은 표본을 편 티어를 읽는다");
+    // 지형이 없으면 둘 다 비운다 — 앞 결과의 바닥·판독 티어가 남지 않게
+    assert.match(build, /this\.floor = null;\s*this\.groundTiers = \[\];/);
     assert.match(build, /sameFloor\(this\.gameBuiltFloor, this\.floor\)/);
     const game = fn("buildGameWorld");
     assert.match(game, /floor: this\.floor/);
     assert.match(game, /sameFloor\(this\.gameBuiltFloor, this\.floor\)/);
-    assert.match(game, /this\.terrainElevationAt\(pack, n, e\)/, "소품도 판독과 같은 표고");
-    assert.match(fn("groundElevationAt"), /this\.terrainElevationAt\(this\.terrain, pos\[0\], pos\[1\]\)/);
-    assert.match(fn("terrainElevationAt"), /floorElevation\(this\.floor, n, e, z\)/);
+    assert.match(game, /this\.terrainElevationAt\(n, e\)/, "소품도 판독과 같은 표고");
+    assert.match(fn("groundElevationAt"), /this\.terrainElevationAt\(pos\[0\], pos\[1\]\)/);
+    const sampler = fn("terrainElevationAt");
+    assert.match(sampler, /for \(const tier of this\.groundTiers\)/);
+    // 원자료에 바닥 함수를 따로 얹으면 물가에서 그림과 갈린다 — 판독용 티어만 읽는다
+    assert.doesNotMatch(sampler, /floorElevation/);
   });
 
   it("기체 동기화는 장면의 결과가 바뀔 때만 물러난다 — 새 요청이 실패해도 받던 모델·캡션이 멈추지 않는다", () => {

@@ -586,6 +586,10 @@ test("runwayWidthFor: 그 런이 시험장 활주로를 썼을 때만 그 폭을
   // 런의 활주로를 모르면 대조할 수 없다
   assert.ok(runwayWidthFor(undefined, SITE).error);
   assert.ok(runwayWidthFor({ length: 1500 }, SITE).error);
+  // 제원에 과주로가 있으면 같은 대조를 거쳐 함께 준다 — 다른 활주로에 과주로를 빌려 주지 않는다(가상환경 도색이 쓴다)
+  assert.deepEqual(runwayWidthFor(rw, { ...SITE, runwayOverrunM: 61 }), { width: 45, source: "시험장 제원", overrun: 61 });
+  assert.ok(runwayWidthFor({ heading: 0.1, length: 1500 }, { ...SITE, runwayOverrunM: 61 }).error);
+  assert.ok(!("overrun" in runwayWidthFor(rw, { ...SITE, runwayOverrunM: -3 })), "음수 과주로는 없는 것으로");
 });
 
 test("landingSummary: 45 m 활주로의 횡편차 한계는 21 m — CS-AWO 외측 착륙장치 한계와 같은 수", () => {
@@ -659,9 +663,9 @@ test("landingSummary: 정지 지점도 같은 횡편차 자로 — 폭 안이면
 const defaultRunway = () => buildSimRequest(
   DEFAULT_FORM, defaultModeRows(), defaultWpRows(), appliedFrom(() => undefined)).req.runway;
 
-test("siteRunwayWidth: 기본 미션의 활주로는 고흥 폭 45 m(공표 제원)를 받는다 — 고친 활주로는 빌리지 않는다", () => {
+test("siteRunwayWidth: 기본 미션의 활주로는 고흥 폭 45 m(공표 제원)·과주로 61 m를 받는다 — 고친 활주로는 빌리지 않는다", () => {
   const rw = defaultRunway();
-  assert.deepEqual(siteRunwayWidth(rw), { width: 45, source: "고흥 시험장 제원" });
+  assert.deepEqual(siteRunwayWidth(rw), { width: 45, source: "고흥 시험장 제원", overrun: 61 });
   assert.match(siteRunwayWidth({ ...rw, length: 1500 }).error, /고흥 시험장 제원의 활주로.*달라 그 폭을 쓸 수 없다/);
   assert.match(siteRunwayWidth({ ...rw, heading: 0 }).error, /달라 그 폭을 쓸 수 없다/);
 });

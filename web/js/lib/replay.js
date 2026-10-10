@@ -152,13 +152,15 @@ export const RUNWAY_EDGE_MARGIN_M = 1.5;
 
 const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
-/** 그 런의 활주로 폭 → landingSummary의 `runwayWidth` ({width, source} | {error}) — 던지지 않는다.
+/** 그 런의 활주로 폭 → landingSummary의 `runwayWidth` ({width, source[, overrun]} | {error}) — 던지지 않는다.
  *
  * 폭은 결과에 없다(서버는 활주로 방위·길이·표고만 받아 meta.runway로 돌려준다). 그래서 시험장 제원(`site` —
  * lib/site.js GOHEUNG 꼴 {runwayWidthM, runwayLengthM, runwayHeadingRad})에서 받되, 그 런이 **그 활주로**를 썼을
  * 때만 준다 — 폼의 방위·길이 칸을 고친 런은 다른 활주로라, 시험장 폭을 빌려 쓰면 남의 기하로 판정하게 된다.
  * 제원에 폭이 없거나 · 가장자리 여유의 두 배 이하라 한계가 서지 않거나 · 런의 활주로가 다르면 사유를
- * 돌려준다(행은 판정 불가로 선다 — 없는 폭을 지어내지 않는다). */
+ * 돌려준다(행은 판정 불가로 선다 — 없는 폭을 지어내지 않는다). 제원에 과주로(`runwayOverrunM`)가 있으면 **같은 대조를
+ * 거쳐** `overrun`으로 함께 준다 — 가상환경이 과주로를 포장·도색하는데, 대조 없이 제원을 따로 읽으면 다른 활주로에도
+ * 시험장 과주로를 붙이게 된다. */
 export function runwayWidthFor(runway, site, source = "시험장 제원") {
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const w = num(site?.runwayWidthM);
@@ -178,7 +180,8 @@ export function runwayWidthFor(runway, site, source = "시험장 제원") {
         + `(방위 ${sh ?? "?"} rad · 길이 ${sl ?? "?"} m)와 달라 그 폭을 쓸 수 없다`,
     };
   }
-  return { width: w, source };
+  const overrun = num(site?.runwayOverrunM);
+  return overrun !== null && overrun >= 0 ? { width: w, source, overrun } : { width: w, source };
 }
 
 /** 그 런의 활주로 폭을 고흥 시험장 제원(lib/site.js GOHEUNG)에서 — runwayWidthFor 그대로. 착륙 요약을 내는 화면

@@ -7386,7 +7386,8 @@ function runwayWidthFor(runway, site, source = "시험장 제원") {
       error: `이 런의 활주로(방위 ${hdg ?? "?"} rad · 길이 ${len ?? "?"} m)가 ${source}의 활주로(방위 ${sh2 ?? "?"} rad · 길이 ${sl2 ?? "?"} m)와 달라 그 폭을 쓸 수 없다`
     };
   }
-  return { width: w2, source };
+  const overrun = num2(site?.runwayOverrunM);
+  return overrun !== null && overrun >= 0 ? { width: w2, source, overrun } : { width: w2, source };
 }
 const siteRunwayWidth$1 = (runway) => runwayWidthFor(runway, GOHEUNG, "고흥 시험장 제원");
 function strideFor(nTotal, target = 1500) {
@@ -39464,17 +39465,42 @@ function runwayDesignation(headingRad) {
 }
 const num$3 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
 const fmtM = (v2) => String(Number(v2.toFixed(1)));
-function runwayDrawing(rw, width, site = {}) {
+function runwayDrawing(rw, width, opts = {}) {
   const r2 = rw ?? null;
   const h = num$3(r2?.heading);
   const L2 = num$3(r2?.length);
   if (h === null || L2 === null) return null;
+  const d = -((num$3(r2?.elevation) ?? 0) + RUNWAY_LINE_LIFT_M);
+  const [cn, ce2] = [Math.cos(h), Math.sin(h)];
+  const n1 = cn * L2;
+  const e1 = ce2 * L2;
+  const seg = (a, b) => new Float32Array([a[0], a[1], d, b[0], b[1], d]);
+  const center = seg([0, 0], [n1, e1]);
   if (!("width" in width)) {
-    const d = -((num$3(r2?.elevation) ?? 0) + RUNWAY_LINE_LIFT_M);
-    const center = new Float32Array([0, 0, d, Math.cos(h) * L2, Math.sin(h) * L2, d]);
     return { segments: [center], surface: null, note: `활주로는 중심선만 그립니다 — 폭을 모릅니다: ${width.error}.` };
   }
-  const overrun = Math.max(num$3(site.overrunM) ?? 0, 0);
+  const source = `폭 ${fmtM(width.width)} m는 ${width.source} 값입니다(결과에는 폭이 없어, 이 런의 활주로가 제원의 활주로와 같을 때만 씁니다)`;
+  if (!opts.paint) {
+    const half = width.width / 2;
+    const [rn, re2] = [-ce2 * half, cn * half];
+    const at = (n2, e, side) => [n2 + side * rn, e + side * re2];
+    return {
+      segments: [
+        center,
+        seg(at(0, 0, -1), at(0, 0, 1)),
+        // 시단
+        seg(at(n1, e1, -1), at(n1, e1, 1)),
+        // 종단
+        seg(at(0, 0, -1), at(n1, e1, -1)),
+        // 왼 가장자리
+        seg(at(0, 0, 1), at(n1, e1, 1))
+        // 오른 가장자리
+      ],
+      surface: null,
+      note: `활주로: 중심선·시단·종단·양 가장자리를 선으로 긋습니다 — ${source}. 지형이 없어 포장면과 도색은 칠하지 않습니다.`
+    };
+  }
+  const overrun = Math.max(num$3(width.overrun) ?? 0, 0);
   const designation = runwayDesignation(h);
   const two = (n2) => String(n2).padStart(2, "0");
   const marks = [
@@ -39487,14 +39513,17 @@ function runwayDrawing(rw, width, site = {}) {
   return {
     segments: [],
     surface: { heading: h, length: L2, width: width.width, overrun, designation },
-    note: `활주로: 포장면과 도색(${marks.join("·")}${overrun > 0 ? `, 양 끝 과주로 ${fmtM(overrun)} m의 노란 갈매기표` : ""})을 지면에 칠합니다. 폭 ${fmtM(width.width)} m는 ${width.source} 값입니다(결과에는 폭이 없어, 이 런의 활주로가 제원의 활주로와 같을 때만 씁니다). 도색의 배치와 치수는 ICAO 부속서 14의 표준이고 실제 도색을 잰 것이 아닙니다` + (designation ? " — 번호는 진방위와 한반도 자편각 범위(서편 6~10°)로 셈했습니다." : ".")
+    note: `활주로: 포장면과 도색(${marks.join("·")}${overrun > 0 ? `, 양 끝 과주로 ${fmtM(overrun)} m의 노란 갈매기표` : ""})을 지면에 칠합니다. ${source}. 도색의 배치와 치수는 ICAO 부속서 14의 표준이고 실제 도색을 잰 것이 아닙니다` + (designation ? " — 번호는 진방위와 한반도 자편각 범위(서편 6~10°)로 셈했습니다." : ".")
   };
+}
+function designationDigits(d) {
+  return d ? [Math.floor(d[0] / 10), d[0] % 10, Math.floor(d[1] / 10), d[1] % 10] : [-1, -1, -1, -1];
 }
 const FLOOR_FIT_M = 3;
 const RUNWAY_FLOOR = {
   /** 축에서 양옆으로 평평하게 펴는 거리 [m] */
   halfWidthM: 75,
-  /** 시단 앞·종단 너머로 펴는 거리 [m] — 과주로 끝에서 다시 착륙대 60 m */
+  /** 시단 앞·종단 너머로 펴는 거리 [m] — 과주로(고흥 61 m) 끝에서 다시 착륙대 약 60 m */
   endM: 120,
   /** 그 바깥에서 원자료로 돌아가는 폭 [m] — 30 m 격자 세 칸 */
   blendM: 90
@@ -39852,65 +39881,83 @@ float grStripes(float x, float P, float h, float pw) {
 // 1은 가운데 막대 하나라 따로 그린다(활주로 숫자의 1은 오른쪽 두 획이 아니다)
 const int GR_SEG[10] = int[10](63, 0, 91, 79, 102, 109, 125, 7, 127, 111);
 
-// 숫자 하나 — 칸 가로 3 m(u, 읽는 이의 오른쪽이 +) · 세로 9 m(v, 읽는 위쪽이 +), 획 0.9 m
-float grDigit(float d, vec2 uv, float pw) {
-  if (d < 0.0 || uv.x < -1.0 || uv.x > 4.0 || uv.y < -1.0 || uv.y > 10.0) return 0.0;
+// 아래 도색 함수는 발자국을 **축마다** 받는다 — pa 활주로 축 방향, pc 가로 방향(읽는 이의 u가 가로, v가 축이다).
+// 비스듬히 보면 축 방향 발자국만 늘어나므로, 등방 발자국으로 거르면 가는 가로 띠(중심선·측면 표지)가 앞쪽
+// 100~200 m에서 거의 사라졌다(v1.92 리뷰 실측). 조기 반환 경계는 발자국만큼 넓힌다 — 좁으면 멀리서 거른 띠의
+// 가장자리가 그 경계에서 잘려 점선처럼 기었다(같은 리뷰).
+
+// 숫자 하나 — 칸 가로 3 m(u, 읽는 이의 오른쪽이 +) · 세로 9 m(v, 읽는 위쪽이 +), 획 0.9 m. pu·pv는 u·v 방향 발자국
+float grDigit(float d, vec2 uv, float pu, float pv) {
+  if (d < 0.0 || uv.x < -1.0 - pu || uv.x > 4.0 + pu || uv.y < -1.0 - pv || uv.y > 10.0 + pv) return 0.0;
   const float W = 3.0;
   const float H = 9.0;
   const float S = 0.9;
   int k = clamp(int(d + 0.5), 0, 9);
-  if (k == 1) return grBand(uv.x - 0.5 * W, 0.5 * S, pw) * grBand(uv.y - 0.5 * H, 0.5 * H, pw);
+  if (k == 1) return grBand(uv.x - 0.5 * W, 0.5 * S, pu) * grBand(uv.y - 0.5 * H, 0.5 * H, pv);
   int m = GR_SEG[k];
-  float bu = grBand(uv.x - 0.5 * W, 0.5 * W, pw);
-  float lu = grBand(uv.x - 0.5 * S, 0.5 * S, pw);
-  float ru = grBand(uv.x - (W - 0.5 * S), 0.5 * S, pw);
-  float top = grBand(uv.y - 0.75 * H, 0.25 * H, pw);
-  float bot = grBand(uv.y - 0.25 * H, 0.25 * H, pw);
+  float bu = grBand(uv.x - 0.5 * W, 0.5 * W, pu);
+  float lu = grBand(uv.x - 0.5 * S, 0.5 * S, pu);
+  float ru = grBand(uv.x - (W - 0.5 * S), 0.5 * S, pu);
+  float top = grBand(uv.y - 0.75 * H, 0.25 * H, pv);
+  float bot = grBand(uv.y - 0.25 * H, 0.25 * H, pv);
   float c = 0.0;
-  if ((m & 1) != 0) c = max(c, bu * grBand(uv.y - (H - 0.5 * S), 0.5 * S, pw));
+  if ((m & 1) != 0) c = max(c, bu * grBand(uv.y - (H - 0.5 * S), 0.5 * S, pv));
   if ((m & 2) != 0) c = max(c, ru * top);
   if ((m & 4) != 0) c = max(c, ru * bot);
-  if ((m & 8) != 0) c = max(c, bu * grBand(uv.y - 0.5 * S, 0.5 * S, pw));
+  if ((m & 8) != 0) c = max(c, bu * grBand(uv.y - 0.5 * S, 0.5 * S, pv));
   if ((m & 16) != 0) c = max(c, lu * bot);
   if ((m & 32) != 0) c = max(c, lu * top);
-  if ((m & 64) != 0) c = max(c, bu * grBand(uv.y - 0.5 * H, 0.5 * S, pw));
+  if ((m & 64) != 0) c = max(c, bu * grBand(uv.y - 0.5 * H, 0.5 * S, pv));
   return c;
 }
 
 // 활주로 번호 한 끝 — num (십, 일), s 시단에서 활주로 안쪽 [m], x 읽는 이의 오른쪽 [m]. 두 칸(각 3 m)이 가운데
 // 1.5 m를 두고 선다. 시단 줄무늬(6~36 m) 끝에서 12 m 띄운 48~57 m 자리다
-float grDesignation(vec2 num, float s, float x, float pw) {
-  if (num.x < 0.0 || s < 46.0 || s > 59.0 || abs(x) > 5.5) return 0.0;
+float grDesignation(vec2 num, float s, float x, float pa, float pc) {
+  if (num.x < 0.0 || s < 46.0 - pa || s > 59.0 + pa || abs(x) > 5.5 + pc) return 0.0;
   float v = s - 48.0;
-  return max(grDigit(num.x, vec2(x + 3.75, v), pw), grDigit(num.y, vec2(x - 0.75, v), pw));
+  return max(grDigit(num.x, vec2(x + 3.75, v), pc, pa), grDigit(num.y, vec2(x - 0.75, v), pc, pa));
 }
 
 // 시단 줄무늬(피아노 건반) — 시단에서 6~36 m, 축 양쪽 같은 수의 줄. 줄과 칸이 같은 너비이고 가운데 칸만
 // 두 배다. 바깥 끝은 가장자리에서 3 m 안(최대 축에서 27 m) — 고흥 45 m 폭은 12줄, 너비 1.63 m
-float grPiano(float s, float x, float halfW, float pw) {
-  if (s < 4.0 || s > 38.0) return 0.0;
+float grPiano(float s, float x, float halfW, float pa, float pc) {
+  if (s < 4.0 - pa || s > 38.0 + pa) return 0.0;
   float nSide = halfW <= 9.0 ? 2.0 : halfW <= 11.5 ? 3.0 : halfW <= 15.0 ? 4.0 : halfW <= 22.5 ? 6.0 : 8.0;
   float outer = min(halfW - 3.0, 27.0);
   float sw = outer / (2.0 * nSide);
   float ax = abs(x);
   // 줄 k는 축에서 (2k+1)·sw ~ (2k+2)·sw — 가운데 (2k+1.5)·sw, 주기 2·sw
-  float keys = grStripes(ax - 1.5 * sw, 2.0 * sw, 0.5 * sw, pw)
-             * grBand(ax - 0.5 * (sw + outer), 0.5 * (outer - sw), pw);
-  return keys * grBand(s - 21.0, 15.0, pw);
+  float keys = grStripes(ax - 1.5 * sw, 2.0 * sw, 0.5 * sw, pc)
+             * grBand(ax - 0.5 * (sw + outer), 0.5 * (outer - sw), pc);
+  return keys * grBand(s - 21.0, 15.0, pa);
 }
 
-// 중심선 — 30 m 줄과 20 m 칸, 너비 0.9 m. 양 끝 번호(57 m)에서 12 m 띄운 69 m부터 맞은편 69 m까지
-float grCenterline(float along, float x, float L, float pw) {
-  if (along < 67.0 || along > L - 67.0 || abs(x) > 2.0) return 0.0;
-  float dash = grStripes(along - 84.0, 50.0, 15.0, pw);
-  return dash * grBand(x, 0.45, pw) * grBand(along - 0.5 * L, 0.5 * L - 69.0, pw);
+// 중심선 — 30 m 줄, 너비 0.9 m. 양 끝 번호(57 m)에서 12 m 띄운 69 m부터 맞은편 69 m까지. 칸(20 m 이상)을 고르게
+// 늘려 양 끝이 온 줄로 끝난다(줄 + 칸 50~75 m) — 남쪽에만 맞추면 북쪽 첫 줄이 17 m 토막이었다(v1.92 리뷰)
+float grCenterline(float along, float x, float L, float pa, float pc) {
+  float span = L - 138.0;
+  if (span < 30.0 || along < 69.0 - pa || along > L - 69.0 + pa || abs(x) > 1.0 + pc) return 0.0;
+  float n = floor((span + 20.0) / 50.0);
+  float P = n > 1.0 ? (span - 30.0) / (n - 1.0) : 50.0;
+  float dash = grStripes(along - 84.0, P, 15.0, pa);
+  return dash * grBand(x, 0.45, pc) * grBand(along - 0.5 * L, 0.5 * span, pa);
 }
 
 // 과주로 갈매기표 — t 시단 밖으로 [m](0이 시단). 꼭짓점이 활주로 쪽을 가리키는 45도 줄, 30 m 간격, 너비 0.9 m.
-// k = t - |x|가 한 갈매기 위에서 일정하다 — 줄의 k 방향 반폭은 0.45의 루트2배, 발자국도 루트2배
-float grChevron(float t, float x, float over, float pw) {
-  if (t <= 0.0 || t > over) return 0.0;
-  return grStripes(t - abs(x) - 6.0, 30.0, 0.64, pw * 1.41);
+// k = t - |x|가 한 갈매기 위에서 일정하다 — 줄의 k 방향 반폭은 0.45의 루트2배, k의 발자국은 두 축 발자국의 합
+float grChevron(float t, float x, float over, float pa, float pc) {
+  if (t < -pa || t > over + pa) return 0.0;
+  return grStripes(t - abs(x) - 6.0, 30.0, 0.64, pa + pc) * grBand(t - 0.5 * over, 0.5 * over, pa);
+}
+
+// 조준점 — ICAO 부속서 14 표 5-1: 착륙 거리(여기선 활주로 길이)에 따라 (시단에서 시작, 길이, 폭, 안쪽 간격) [m].
+// 1,200~2,400 m 열은 300 m에서 시작한다 — 250 m는 800~1,200 m 열의 값이었다(v1.92 리뷰)
+vec4 grAimSpec(float L) {
+  if (L < 800.0) return vec4(150.0, 30.0, 4.0, 6.0);
+  if (L < 1200.0) return vec4(250.0, 45.0, 6.0, 9.0);
+  if (L < 2400.0) return vec4(300.0, 45.0, 6.0, 18.0);
+  return vec4(400.0, 45.0, 6.0, 18.0);
 }
 
 float grHash(vec2 c, float k) { return hash31(vec3(c, k)); }
@@ -39995,8 +40042,8 @@ vec4 grVillage(vec2 p) {
 
 /** 지표 피복 한 점 — 알베도·거칠기·미세 기울기(법선 흔들기)·젖음·미세 차폐.
  *  p 세계 위치, n 기하 법선(세계, 정규화), shade (열림, 볼록도), shoreD 바다까지 [m] (모르면 큰 수),
- *  pw 픽셀 발자국 [m]. */
-void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw,
+ *  pw 픽셀 발자국 [m], dxy 세계 xz의 화면 도함수 (dFdx의 x·z, dFdy의 x·z) — 활주로 도색이 축마다 발자국을 잰다. */
+void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
              out vec3 albedo, out float rough, out vec2 grad, out float wet, out float occ) {
   vec2 xz = p.xz;
   float elev = p.y;
@@ -40154,20 +40201,23 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw,
     float L = uRunway.z;
     float halfW = uRunway.w;
     float over = uRunwayArea.x;
+    // 축마다 발자국 [m] — pa 활주로 축 방향, pc 가로 방향. 세계 xz 도함수를 활주로 축으로 돌려 잰다
+    float pa = max(abs(dxy.x * uRunway.y - dxy.y * uRunway.x) + abs(dxy.z * uRunway.y - dxy.w * uRunway.x), 1.0e-3);
+    float pc = max(abs(dxy.x * uRunway.x + dxy.y * uRunway.y) + abs(dxy.z * uRunway.x + dxy.w * uRunway.y), 1.0e-3);
     // 착륙대 — 펴진 바닥(core/runwayfloor.ts)과 같은 구역이고 경계는 발자국만큼만 부드럽다. 예전엔 40~60 m에
     // 걸쳐 섞어 들·비닐하우스 위에 흐린 띠가 얹혀 보였다(사용자 지적)
-    field0 = grBand(across, uRunwayArea.y, pw) * grBand(along - 0.5 * L, 0.5 * L + uRunwayArea.z, pw);
+    field0 = grBand(across, uRunwayArea.y, pc) * grBand(along - 0.5 * L, 0.5 * L + uRunwayArea.z, pa);
     if (field0 > 0.001) {
       // 깎은 풀 — 깎는 기계가 오간 결(활주로와 나란히 5 m씩 번갈아 밝고 어둡다)과 마른 자리 얼룩
       float mow = (smoothstep(-0.25, 0.25, sin(across * (6.2832 / 10.0))) - 0.5) * 0.10
-                * (1.0 - smoothstep(1.5, 4.0, pw));
+                * (1.0 - smoothstep(1.5, 4.0, pc));
       float dry = pw < 20.0 ? mix(fbm3(vec3(ne * (1.0 / 23.0), 9.1)), 0.44, smoothstep(8.0, 20.0, pw)) : 0.44;
       vec3 grass = mix(GR_GRASS, GR_GRASS_DRY, smoothstep(0.40, 0.62, dry + (nB - 0.44) * 0.5));
       col = mix(col, grass * (0.94 + 0.12 * nB + mow), field0);
       rgh = mix(rgh, 0.9, field0);
       // 포장면 — 활주로와 양 끝 과주로. 접지대(시단에서 100~450 m)에 타이어 자국, 과주로는 덜 다녀 바랬다
-      float onRunway = grBand(along - 0.5 * L, 0.5 * L, pw);
-      float paved = grBand(across, halfW, pw) * grBand(along - 0.5 * L, 0.5 * L + over, pw);
+      float onRunway = grBand(along - 0.5 * L, 0.5 * L, pa);
+      float paved = grBand(across, halfW, pc) * grBand(along - 0.5 * L, 0.5 * L + over, pa);
       float tz = smoothstep(80.0, 160.0, along) * (1.0 - smoothstep(380.0, 480.0, along))
                + smoothstep(80.0, 160.0, L - along) * (1.0 - smoothstep(380.0, 480.0, L - along));
       float rubber = tz * (1.0 - smoothstep(4.0, 9.0, abs(across)));
@@ -40178,14 +40228,17 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw,
         // 도색 — 시단 사이는 흰색(측면 표지·시단 줄무늬·번호·중심선·조준점), 과주로는 노란 갈매기표.
         // 맞은편 끝은 남쪽으로 읽으므로 가로를 뒤집는다
         float sF = L - along;
-        float white = grBand(abs(across) - (halfW - 0.45), 0.45, pw) * onRunway;
-        white = max(white, max(grPiano(along, across, halfW, pw), grPiano(sF, -across, halfW, pw)));
-        white = max(white, max(grDesignation(uRunwayNum.xy, along, across, pw),
-                               grDesignation(uRunwayNum.zw, sF, -across, pw)));
-        white = max(white, grCenterline(along, across, L, pw));
-        float aimX = grBand(abs(across) - 12.0, 3.0, pw);   // 조준점 — 시단에서 250~295 m, 축에서 9~15 m
-        white = max(white, aimX * max(grBand(along - 272.5, 22.5, pw), grBand(sF - 272.5, 22.5, pw)));
-        float yel = max(grChevron(-along, across, over, pw), grChevron(along - L, -across, over, pw));
+        float white = grBand(abs(across) - (halfW - 0.45), 0.45, pc) * onRunway;
+        white = max(white, max(grPiano(along, across, halfW, pa, pc), grPiano(sF, -across, halfW, pa, pc)));
+        white = max(white, max(grDesignation(uRunwayNum.xy, along, across, pa, pc),
+                               grDesignation(uRunwayNum.zw, sF, -across, pa, pc)));
+        white = max(white, grCenterline(along, across, L, pa, pc));
+        // 조준점 — (시작, 길이, 폭, 안쪽 간격)은 활주로 길이의 열에서. 고흥 1,205 m는 300~345 m, 축에서 9~15 m
+        vec4 aim = grAimSpec(L);
+        float aimX = grBand(abs(across) - 0.5 * (aim.w + aim.z), 0.5 * aim.z, pc);
+        white = max(white, aimX * max(grBand(along - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa),
+                                      grBand(sF - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa)));
+        float yel = max(grChevron(-along, across, over, pa, pc), grChevron(along - L, -across, over, pa, pc));
         float wear = 0.80 + 0.20 * clamp(1.0 + 2.0 * tex, 0.0, 1.0);   // 닳은 도색 — 아스팔트 결이 비친다
         col = mix(col, GR_PAINT * wear * (1.0 - 0.45 * rubber), white * paved);
         col = mix(col, GR_PAINT_YEL * wear, yel * paved);
@@ -40245,7 +40298,10 @@ const GROUND_FRAG_BODY = (
   float grOcc = 1.0;
   // 픽셀 발자국 [m] — 화면 도함수는 **분기와 discard 앞에서 한 번만** 잰다. 갈라진 분기 안이나
   // discard 뒤의 도함수는 GLSL에서 정의되지 않는다(조명 단계의 그림자 걸음 수도 이 값을 쓴다).
-  float grPw = max(length(fwidth(vGroundWorld)), 1.0e-3);
+  // dFdx·dFdy 한 쌍에서 등방 발자국(= fwidth의 길이)을 셈하고, 활주로 도색은 축마다 따로 잰다(grCover의 dxy)
+  vec3 grDx = dFdx(vGroundWorld);
+  vec3 grDy = dFdy(vGroundWorld);
+  float grPw = max(length(abs(grDx) + abs(grDy)), 1.0e-3);
   {
     vec3 gp = vGroundWorld;
     vec3 gn = normalize(vGroundNormal);
@@ -40260,7 +40316,7 @@ const GROUND_FRAG_BODY = (
     float shoreD = (uHasCoast > 0.5 && coast.y > 0.5) ? max(-coast.x, 0.0) : 1.0e4;
     vec3 albedo;
     float rough;
-    grCover(gp, gn, vGroundShade, shoreD, pw, albedo, rough, grGrad, grWet, grOcc);
+    grCover(gp, gn, vGroundShade, shoreD, pw, vec4(grDx.xz, grDy.xz), albedo, rough, grGrad, grWet, grOcc);
     diffuseColor.rgb = albedo;
     roughnessFactor = rough;
   }
@@ -43761,13 +43817,7 @@ class SceneHost {
     }
     u2.uRunway.value.set(Math.cos(s.heading), Math.sin(s.heading), s.length, s.width / 2);
     u2.uRunwayArea.value.set(s.overrun, RUNWAY_FLOOR.halfWidthM, RUNWAY_FLOOR.endM, 0);
-    const d = s.designation;
-    u2.uRunwayNum.value.set(
-      d ? Math.floor(d[0] / 10) : -1,
-      d ? d[0] % 10 : -1,
-      d ? Math.floor(d[1] / 10) : -1,
-      d ? d[1] % 10 : -1
-    );
+    u2.uRunwayNum.value.set(...designationDigits(s.designation));
     u2.uRunwayOn.value = 1;
   }
   /** 표고 텍스처 — 가장 촘촘한 장과 가장 넓은 장을 반정밀도로 올린다(지형 자체 그림자용).
@@ -44200,6 +44250,9 @@ function tierElevations(tier) {
   }
   return elev;
 }
+function quantize(tier, z2) {
+  return Number.isFinite(z2) ? Math.min(Math.max(Math.round((z2 - tier.offset) / tier.scale), 0), tier.nodata - 1) : tier.nodata;
+}
 function inlandLand(mask) {
   const { rows, cols, cells } = mask;
   return (i) => {
@@ -44257,10 +44310,7 @@ function renderTier(tier, mask, refine, floor = null) {
     step2 = tier.step / 2;
   }
   const raw = new Uint16Array(rows * cols);
-  for (let i = 0; i < raw.length; i++) {
-    const z2 = elev[i];
-    raw[i] = Number.isFinite(z2) ? Math.min(Math.max(Math.round((z2 - tier.offset) / tier.scale), 0), tier.nodata - 1) : tier.nodata;
-  }
+  for (let i = 0; i < raw.length; i++) raw[i] = quantize(tier, elev[i]);
   const out = { ...tier, rows, cols, step: step2, raw };
   if (!mask) return { tier: out, skipCell: null, refined: doRefine };
   const sea = seaQuad(mask);
@@ -44270,6 +44320,25 @@ function renderTier(tier, mask, refine, floor = null) {
     skipCell: doRefine ? (r0, c0, r1, c1) => sea(r0 >> 1, c0 >> 1, r1 + 1 >> 1, c1 + 1 >> 1) : sea,
     refined: doRefine
   };
+}
+function groundTier(tier, mask, floor) {
+  const src = tierElevations(tier);
+  const g = floorGrid(
+    src,
+    tier.rows,
+    tier.cols,
+    tier.n0,
+    tier.e0,
+    tier.step,
+    floor,
+    mask ? inlandLand(mask) : void 0
+  );
+  if (g.touched === 0) return tier;
+  const raw = Uint16Array.from(tier.raw);
+  for (let i = 0; i < raw.length; i++) {
+    if (Number.isFinite(src[i]) && g.elev[i] !== src[i]) raw[i] = quantize(tier, g.elev[i]);
+  }
+  return { ...tier, raw };
 }
 const m1 = (v2) => String(Number(v2.toFixed(1)));
 function buildTerrain(pack, opts = {}) {
@@ -44347,7 +44416,8 @@ function buildTerrain(pack, opts = {}) {
   notes.push(
     "산그늘은 표고 격자를 태양 쪽으로 훑어 그리고(격자 30·90 m만큼 무디며, 걸음 사이의 좁은 능선은 놓칠 수 있습니다), 골짜기의 어둑함은 반경 60·180·540 m의 상대 표고로 어림한 하늘 열림입니다 — 둘 다 표시용 근사입니다."
   );
-  return { meshes, masks, notes, floor };
+  const groundTiers = floor ? pack.tiers.map((t2) => groundTier(t2, masks.get(t2.name), floor)) : pack.tiers;
+  return { meshes, masks, notes, floor, groundTiers };
 }
 function toTrianglesDrawMode(geometry, drawMode) {
   if (drawMode === TrianglesDrawMode) {
@@ -47387,8 +47457,10 @@ class SceneController {
   gameBuiltFor = void 0;
   /** 게임 자산을 구울 때 쓴 활주로 바닥 — 팩이 같아도 결과의 활주로가 바뀌면 다시 굽는다 */
   gameBuiltFloor = null;
-  /** 이 결과의 활주로 바닥(core/runwayfloor.ts) — 그릴 격자·게임 지형·지면 판독이 같은 값을 본다 */
+  /** 이 결과의 활주로 바닥(core/runwayfloor.ts) — 지형과 맞아 실제로 편 것만. 그릴 격자·게임 지형이 같은 값을 본다 */
   floor = null;
+  /** 지면 판독용 티어 — buildTerrain이 그림과 같은 표본에 바닥을 얹어 돌려준다. 판독·게임 소품이 이것만 읽는다 */
+  groundTiers = [];
   replayMarks = [];
   get gameOn() {
     return this.style === "game";
@@ -47599,6 +47671,7 @@ class SceneController {
     if (this.terrain) {
       const built = buildTerrain(this.terrain, { floor: runwayFloorOf(body.meta?.runway) });
       this.floor = built.floor;
+      this.groundTiers = built.groundTiers;
       this.host.setTerrain(built.meshes);
       notes.push(...built.notes);
       const tiers = this.terrain.tiers.map((tier) => ({ tier, mask: built.masks.get(tier.name) })).filter((x2) => x2.mask !== void 0);
@@ -47610,6 +47683,7 @@ class SceneController {
       );
     } else {
       this.floor = null;
+      this.groundTiers = [];
       this.host.setTerrain([]);
       this.host.setCoast(null);
       notes.push("지형이 없어 해안선을 모릅니다 — 해면도 그리지 않습니다.");
@@ -47621,7 +47695,7 @@ class SceneController {
     }
     const rw = body.meta?.runway;
     const rwLines = [];
-    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw), { overrunM: GOHEUNG.runwayOverrunM });
+    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw), { paint: this.terrain !== null });
     if (rwDraw) {
       for (const points2 of rwDraw.segments) rwLines.push({ points: points2, color: 16777215 });
       notes.push(rwDraw.note);
@@ -47812,7 +47886,7 @@ class SceneController {
       this.host.setProps(null);
       return;
     }
-    const sample = (n2, e) => this.terrainElevationAt(pack, n2, e);
+    const sample = (n2, e) => this.terrainElevationAt(n2, e);
     this.host.setProps(buildPropsGroup(placeProps(sample, tierRect(core), relief)).group);
   }
   /** 게임 입력 축 — WorldTab 키보드가 민다. 게임이 아니면 step이 읽지 않는다. */
@@ -48103,15 +48177,16 @@ class SceneController {
    *
    * `views/world.js`의 `groundElevationAt` + `state.terrain` 게이트와 같은 규약이다. */
   groundElevationAt(pos) {
-    if (this.terrain && pos) return this.terrainElevationAt(this.terrain, pos[0], pos[1]);
+    if (this.terrain && pos) return this.terrainElevationAt(pos[0], pos[1]);
     return num(this.body?.meta?.runway?.elevation) ?? 0;
   }
-  /** 팩이 (n, e)를 덮으면 그 표고, 아니면 null — 활주로 바닥을 얹는다(core/runwayfloor.ts). 지면 판독과 게임 소품이
-   *  이 한 함수를 쓴다(따로 적으면 둘이 갈린다 — 리뷰 지적). */
-  terrainElevationAt(pack, n2, e) {
-    for (const tier of pack.tiers) {
+  /** 지형이 (n, e)를 덮으면 그 표고, 아니면 null — 판독용 티어(buildTerrain의 groundTiers: 그림과 같은 표본에 활주로
+   *  바닥을 얹은 원자료)에서 읽는다. 원자료에 바닥 함수를 따로 얹으면 물가에서 그림과 갈린다(v1.92 리뷰). 지면 판독과
+   *  게임 소품이 이 한 함수를 쓴다(따로 적으면 둘이 갈린다). */
+  terrainElevationAt(n2, e) {
+    for (const tier of this.groundTiers) {
       const z2 = elevationAt(tier, n2, e);
-      if (z2 !== null) return this.floor ? floorElevation(this.floor, n2, e, z2) : z2;
+      if (z2 !== null) return z2;
     }
     return null;
   }

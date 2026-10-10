@@ -38,7 +38,7 @@ export function refLabel(ref: RunProfileRef | null): string {
 }
 
 /** 활주로 폭 — 제원에서 받았으면 {width, source}, 못 쓰면 사유 {error}. */
-export type RunwayWidth = { width: number; source: string } | { error: string };
+export type RunwayWidth = { width: number; source: string; overrun?: number } | { error: string };
 
 /** 그 런의 활주로 폭을 시험장 제원(lib/site.js GOHEUNG)에서 — 시뮬 탭 착륙 요약의 횡편차 판정이 폭을 받는 **같은
  *  한 자리**다. 결과(meta.runway)에는 폭이 없고, 그 런의 활주로가 제원의 활주로와 같을 때만 폭이 선다. */

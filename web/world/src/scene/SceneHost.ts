@@ -36,7 +36,7 @@ import { applyGroundDetail } from "./materials.ts";
 import { gameRamp } from "../core/gamestyle.ts";
 import { chunkIndices, chunkQuads } from "../core/terrainchunks.ts";
 import { terrainShade } from "../core/terrainshade.ts";
-import type { RunwaySurface } from "../core/runway.ts";
+import { designationDigits, type RunwaySurface } from "../core/runway.ts";
 import { RUNWAY_FLOOR } from "../core/runwayfloor.ts";
 import type { CoastField } from "../core/coastfield.ts";
 import { createOcean, type Ocean, type SeaState } from "./ocean.ts";
@@ -454,9 +454,7 @@ export class SceneHost {
     u.uRunway.value.set(Math.cos(s.heading), Math.sin(s.heading), s.length, s.width / 2);
     // 풀밭(착륙대)은 펴진 바닥과 **같은 구역**이다 — 두 수가 갈리면 풀밭 끝에서 땅이 기운다(core/runwayfloor.ts)
     u.uRunwayArea.value.set(s.overrun, RUNWAY_FLOOR.halfWidthM, RUNWAY_FLOOR.endM, 0);
-    const d = s.designation;
-    u.uRunwayNum.value.set(
-      d ? Math.floor(d[0] / 10) : -1, d ? d[0] % 10 : -1, d ? Math.floor(d[1] / 10) : -1, d ? d[1] % 10 : -1);
+    u.uRunwayNum.value.set(...designationDigits(s.designation));
     u.uRunwayOn.value = 1;
   }
 
