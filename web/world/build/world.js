@@ -39620,12 +39620,31 @@ function runwayDrawing(rw, width, opts = {}) {
 function designationDigits(d) {
   return d ? [Math.floor(d[0] / 10), d[0] % 10, Math.floor(d[1] / 10), d[1] % 10] : [-1, -1, -1, -1];
 }
+const CENTERLINE_INSET_M = 69;
+function centerlineLayout(length) {
+  const span = length - 2 * CENTERLINE_INSET_M;
+  if (!(span >= 30)) return null;
+  const gaps = Math.floor((span - 30) / 50);
+  if (gaps < 1) return { stripe: span, period: 0, count: 1 };
+  const period = Math.min(75, span / (gaps + 0.5), (span - 30) / gaps);
+  return { stripe: span - gaps * period, period, count: gaps + 1 };
+}
+function aimingPoint(length) {
+  if (length < 800) return [150, 30, 4, 6];
+  if (length < 1200) return [250, 30, 6, 9];
+  if (length < 2400) return [300, 45, 6, 18];
+  return [400, 45, 6, 18];
+}
 function runwayUniformValues(s) {
+  const cl2 = centerlineLayout(s.length);
   return {
     runway: [Math.cos(s.heading), Math.sin(s.heading), s.length, s.width / 2],
     // 착륙대는 펴진 바닥과 **같은 구역**이다 — 두 수가 갈리면 풀밭 끝에서 땅이 기운다(core/runwayfloor.ts)
     area: [s.overrun, RUNWAY_FLOOR.halfWidthM, RUNWAY_FLOOR.endM, 0],
-    num: designationDigits(s.designation)
+    num: designationDigits(s.designation),
+    // 중심선 (줄 길이, 주기, 시단에서 시작, 0) — 중심선이 없으면 줄 길이 0이고 셰이더가 칠하지 않는다
+    dash: cl2 ? [cl2.stripe, cl2.period, CENTERLINE_INSET_M, 0] : [0, 0, CENTERLINE_INSET_M, 0],
+    aim: aimingPoint(s.length)
   };
 }
 const CLOUD_UNIFORM_DECL = (
@@ -40103,7 +40122,7 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
   float field0 = 0.0;
   if (uRunwayOn > 0.5) {
     vec4 ax = grRunwayAxes(p, dxy);
-    vec4 af = grAirfield(ax);
+    vec4 af = grAirfield(ax);   // 층마다 몫 — 안쪽 층은 바깥 층의 몫만 바꾼다(shaders/runway.ts grAirfield)
     field0 = af.x;
     if (field0 > 0.001) {
       float along = ax.x;
@@ -40116,8 +40135,9 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
       float mow = (smoothstep(-0.25, 0.25, sin(across * (6.2832 / 10.0))) - 0.5) * 0.10
                 * (1.0 - smoothstep(1.5, 4.0, pc));
       float dry = pw < 20.0 ? mix(fbm3(vec3(ne * (1.0 / 23.0), 9.1)), 0.44, smoothstep(8.0, 20.0, pw)) : 0.44;
-      vec3 grass = mix(GR_GRASS, GR_GRASS_DRY, smoothstep(0.40, 0.62, dry + (nB - 0.44) * 0.5));
-      col = mix(col, grass * (0.94 + 0.12 * nB + mow), field0);
+      vec3 grass = mix(GR_GRASS, GR_GRASS_DRY, smoothstep(0.40, 0.62, dry + (nB - 0.44) * 0.5))
+                 * (0.94 + 0.12 * nB + mow);
+      col = mix(col, grass, field0);
       rgh = mix(rgh, 0.9, field0);
       // 포장면 — 활주로와 양 끝 과주로. 접지대(시단에서 100~450 m)에 타이어 자국, 과주로는 덜 다녀 바랬다
       float paved = af.y;
@@ -40126,14 +40146,15 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
                + smoothstep(80.0, 160.0, L - along) * (1.0 - smoothstep(380.0, 480.0, L - along));
       float rubber = tz * (1.0 - smoothstep(4.0, 9.0, abs(across)));
       float tex = mix(fbm3(vec3(ne * 0.5, 2.0)) - 0.44, 0.0, smoothstep(1.0, 4.0, pw));
-      col = mix(col, GR_ASPHALT * (1.0 + 0.25 * tex) * (1.0 - 0.35 * rubber) * mix(1.12, 1.0, onRunway), paved);
-      rgh = mix(rgh, 0.75, paved);
+      vec3 asph = GR_ASPHALT * (1.0 + 0.25 * tex) * (1.0 - 0.35 * rubber) * mix(1.12, 1.0, onRunway);
+      col += paved * (asph - grass);
+      rgh += paved * (0.75 - 0.9);
       if (paved > 0.001) {
-        // 도색 — 흰색(af.z)·노란 갈매기표(af.w)의 덮임은 grAirfield가 낸다
+        // 도색 — 흰색(af.z)·노란 갈매기표(af.w)는 포장면의 몫만 바꾼다. 포장면 덮임을 한 번 더 곱하면 가장자리에 붙은
+        // 측면 표지가 두 번 걸러져 멀리서 어둡고 깜빡였다(v1.94 리뷰 실측)
         float wear = 0.80 + 0.20 * clamp(1.0 + 2.0 * tex, 0.0, 1.0);   // 닳은 도색 — 아스팔트 결이 비친다
-        col = mix(col, GR_PAINT * wear * (1.0 - 0.45 * rubber), af.z * paved);
-        col = mix(col, GR_PAINT_YEL * wear, af.w * paved);
-        rgh = mix(rgh, 0.62, max(af.z, af.w) * paved);
+        col += af.z * (GR_PAINT * wear * (1.0 - 0.45 * rubber) - asph) + af.w * (GR_PAINT_YEL * wear - asph);
+        rgh += (af.z + af.w) * (0.62 - 0.75);
       }
     }
   }
@@ -40894,13 +40915,16 @@ uniform vec4 uRunway;              // (cos h, sin h, 길이 [m], 반폭 [m]) —
 uniform float uRunwayOn;           // 0이면 포장면을 칠하지 않는다(폭을 모를 때 — core/runway.ts)
 uniform vec4 uRunwayArea;          // (과주로 [m], 착륙대 반폭 [m], 착륙대 끝 너머 [m], 0) — 착륙대는 펴진 바닥과 같은 구역
 uniform vec4 uRunwayNum;           // 활주로 번호 (시단 쪽 십·일, 맞은편 십·일) — 모르면 -1이고 번호를 칠하지 않는다
+uniform vec4 uRunwayDash;          // 중심선 (줄 길이, 주기 — 줄 하나면 0, 시단에서 시작, 0) [m] — 줄 길이 0이면 없다
+uniform vec4 uRunwayAim;           // 조준점 (시단에서 시작, 줄 길이, 폭, 두 줄 안쪽 간격) [m]
 `
 );
 const RUNWAY_GLSL = (
   /* glsl */
   `
-// ---- 활주로 도색 — 띠·숫자의 덮임을 픽셀 발자국(pw) 상자로 거른다. 가까이선 칼날, 멀어지면 폭/발자국만큼
-// 옅어진다(멀리서 지글거리지 않게). 좌표는 활주로 축 기준 [m]. 치수는 ICAO 부속서 14의 표준이다(실측 아님).
+// ---- 활주로 도색 — 띠·숫자의 덮임을 픽셀 발자국 상자로 거른다(발자국은 축마다 — 아래). 가까이선 칼날, 멀어지면
+// 폭/발자국만큼 옅어진다(멀리서 지글거리지 않게). 좌표는 활주로 축 기준 [m]. 치수는 ICAO 부속서 14의 표준이다(실측
+// 아님). 길이로 정해지는 배치(중심선 줄·주기, 조준점)는 core/runway.ts가 셈해 유니폼으로 준다 — 시험이 닿는 곳이다.
 
 // 가운데 0, 반폭 h인 띠의 덮임 — 발자국 상자와 겹친 비율
 float grBand(float x, float h, float pw) {
@@ -40970,15 +40994,15 @@ float grPiano(float s, float x, float halfW, float pa, float pc) {
   return keys * grBand(s - 21.0, 15.0, pa);
 }
 
-// 중심선 — 30 m 줄, 너비 0.9 m. 양 끝 번호(57 m)에서 12 m 띄운 69 m부터 맞은편 69 m까지. 칸(20 m 이상)을 고르게
-// 늘려 양 끝이 온 줄로 끝난다(줄 + 칸 50~75 m) — 남쪽에만 맞추면 북쪽 첫 줄이 17 m 토막이었다(v1.92 리뷰)
+// 중심선 — 너비 0.9 m 줄을 양 끝에서 a0(69 m) 안쪽 구간에 고르게 깐다. 줄 길이·주기는 core/runway.ts
+// centerlineLayout이 셈한다(줄 + 칸 50~75 m, 줄 ≥ 칸·30 m, 양 끝이 온 줄 — 고흥은 30 m 줄 21개, 주기 51.85 m)
 float grCenterline(float along, float x, float L, float pa, float pc) {
-  float span = L - 138.0;
-  if (span < 30.0 || along < 69.0 - pa || along > L - 69.0 + pa || abs(x) > 1.0 + pc) return 0.0;
-  float n = floor((span + 20.0) / 50.0);
-  float P = n > 1.0 ? (span - 30.0) / (n - 1.0) : 50.0;
-  float dash = grStripes(along - 84.0, P, 15.0, pa);
-  return dash * grBand(x, 0.45, pc) * grBand(along - 0.5 * L, 0.5 * span, pa);
+  float s = uRunwayDash.x;
+  float P = uRunwayDash.y;
+  float a0 = uRunwayDash.z;
+  if (s <= 0.0 || along < a0 - pa || along > L - a0 + pa || abs(x) > 1.0 + pc) return 0.0;
+  float dash = P > 0.0 ? grStripes(along - (a0 + 0.5 * s), P, 0.5 * s, pa) : 1.0;
+  return dash * grBand(x, 0.45, pc) * grBand(along - 0.5 * L, 0.5 * L - a0, pa);
 }
 
 // 과주로 갈매기표 — t 시단 밖으로 [m](0이 시단). 꼭짓점이 활주로 쪽을 가리키는 45도 줄, 30 m 간격, 너비 0.9 m.
@@ -40986,15 +41010,6 @@ float grCenterline(float along, float x, float L, float pa, float pc) {
 float grChevron(float t, float x, float over, float pa, float pc) {
   if (t < -pa || t > over + pa) return 0.0;
   return grStripes(t - abs(x) - 6.0, 30.0, 0.64, pa + pc) * grBand(t - 0.5 * over, 0.5 * over, pa);
-}
-
-// 조준점 — ICAO 부속서 14 표 5-1: 착륙 거리(여기선 활주로 길이)에 따라 (시단에서 시작, 길이, 폭, 안쪽 간격) [m].
-// 1,200~2,400 m 열은 300 m에서 시작한다 — 250 m는 800~1,200 m 열의 값이었다(v1.92 리뷰)
-vec4 grAimSpec(float L) {
-  if (L < 800.0) return vec4(150.0, 30.0, 4.0, 6.0);
-  if (L < 1200.0) return vec4(250.0, 45.0, 6.0, 9.0);
-  if (L < 2400.0) return vec4(300.0, 45.0, 6.0, 18.0);
-  return vec4(400.0, 45.0, 6.0, 18.0);
 }
 
 // 활주로 축 좌표와 축마다 발자국 — p 세계 위치(렌더 x = e, z = -n), dxy 세계 xz의 화면 도함수(dFdx의 x·z, dFdy의
@@ -41009,10 +41024,13 @@ vec4 grRunwayAxes(vec3 p, vec4 dxy) {
   return vec4(along, across, pa, pc);
 }
 
-// 비행장 덮임 (착륙대, 포장면, 흰 도색, 노란 도색) 각 0~1 — ax는 grRunwayAxes. 도색 둘은 포장면 안의 비율이라 칠할
-// 때 포장면을 곱한다. 착륙대 경계는 발자국만큼만 부드럽다 — 예전엔 40~60 m에 걸쳐 섞어 들·비닐하우스 위에 흐린 띠가
-// 얹혀 보였다(사용자 지적). 시단 사이는 흰색(측면 표지·시단 줄무늬·번호·중심선·조준점), 과주로는 노란 갈매기표이고,
-// 맞은편 끝은 남쪽으로 읽으므로 가로를 뒤집는다
+// 비행장 층마다 몫 (착륙대, 포장면, 흰 도색, 노란 도색) 각 0~1 — ax는 grRunwayAxes. 층은 안으로 겹친다(도색 ⊂ 포장면
+// ⊂ 착륙대)이므로 안쪽 몫은 바깥 몫을 넘지 않게 자르고, 칠할 때는 안쪽 층이 **바깥 층의 몫만** 바꾼다:
+//     c = mix(바탕, 풀, f.x);  c += f.y·(아스팔트 − 풀) + f.z·(흰색 − 아스팔트) + f.w·(노랑 − 아스팔트)
+// 덮임을 곱해 섞으면(mix(c, 흰색, 흰 덮임 × 포장면)) 가장자리에 붙은 측면 표지가 두 번 걸러져 멀리서 중심선보다 40 %
+// 어둡고 움직이면 깜빡였다(v1.94 리뷰 실측). 착륙대 경계는 발자국만큼만 부드럽다 — 예전엔 40~60 m에 걸쳐 섞어 들·
+// 비닐하우스 위에 흐린 띠가 얹혀 보였다(사용자 지적). 시단 사이는 흰색(측면 표지·시단 줄무늬·번호·중심선·조준점),
+// 과주로는 노란 갈매기표이고, 맞은편 끝은 남쪽으로 읽으므로 가로를 뒤집는다
 vec4 grAirfield(vec4 ax) {
   float along = ax.x;
   float across = ax.y;
@@ -41023,7 +41041,7 @@ vec4 grAirfield(vec4 ax) {
   float over = uRunwayArea.x;
   float field = grBand(across, uRunwayArea.y, pc) * grBand(along - 0.5 * L, 0.5 * L + uRunwayArea.z, pa);
   if (field <= 0.001) return vec4(0.0);
-  float paved = grBand(across, halfW, pc) * grBand(along - 0.5 * L, 0.5 * L + over, pa);
+  float paved = min(grBand(across, halfW, pc) * grBand(along - 0.5 * L, 0.5 * L + over, pa), field);
   if (paved <= 0.001) return vec4(field, paved, 0.0, 0.0);
   float onRunway = grBand(along - 0.5 * L, 0.5 * L, pa);
   float sF = L - along;
@@ -41032,13 +41050,14 @@ vec4 grAirfield(vec4 ax) {
   white = max(white, max(grDesignation(uRunwayNum.xy, along, across, pa, pc),
                          grDesignation(uRunwayNum.zw, sF, -across, pa, pc)));
   white = max(white, grCenterline(along, across, L, pa, pc));
-  // 조준점 — (시작, 길이, 폭, 안쪽 간격)은 활주로 길이의 열에서. 고흥 1,205 m는 300~345 m, 축에서 9~15 m
-  vec4 aim = grAimSpec(L);
+  // 조준점 — (시작, 길이, 폭, 안쪽 간격)은 core/runway.ts aimingPoint가 활주로 길이의 열에서 고른다
+  vec4 aim = uRunwayAim;
   float aimX = grBand(abs(across) - 0.5 * (aim.w + aim.z), 0.5 * aim.z, pc);
   white = max(white, aimX * max(grBand(along - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa),
                                 grBand(sF - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa)));
   float yel = max(grChevron(-along, across, over, pa, pc), grChevron(along - L, -across, over, pa, pc));
-  return vec4(field, paved, white, yel);
+  white = min(white, paved);
+  return vec4(field, paved, white, min(yel, paved - white));
 }
 `
 );
@@ -41070,11 +41089,11 @@ const RUNWAY_GAME_FRAG_BODY = (
     vec3 rwDx = dFdx(vRunwayWorld);
     vec3 rwDy = dFdy(vRunwayWorld);
     if (uRunwayOn > 0.5) {
+      // 층마다 몫 — 안쪽 층은 바깥 층의 몫만 바꾼다(grAirfield 주석, 실사 지면과 같은 셈)
       vec4 af = grAirfield(grRunwayAxes(vRunwayWorld, vec4(rwDx.xz, rwDy.xz)));
       vec3 c = mix(diffuseColor.rgb, GAME_RW_STRIP, af.x);
-      c = mix(c, GAME_RW_ASPHALT, af.y);
-      c = mix(c, GAME_RW_PAINT, af.z * af.y);
-      diffuseColor.rgb = mix(c, GAME_RW_YELLOW, af.w * af.y);
+      c += af.y * (GAME_RW_ASPHALT - GAME_RW_STRIP);
+      diffuseColor.rgb = c + af.z * (GAME_RW_PAINT - GAME_RW_ASPHALT) + af.w * (GAME_RW_YELLOW - GAME_RW_ASPHALT);
     }
   }
 `
@@ -43780,7 +43799,9 @@ class SceneHost {
     uRunway: { value: new Vector4(1, 0, 0, 0) },
     uRunwayOn: { value: 0 },
     uRunwayArea: { value: new Vector4(0, 0, 0, 0) },
-    uRunwayNum: { value: new Vector4(-1, -1, -1, -1) }
+    uRunwayNum: { value: new Vector4(-1, -1, -1, -1) },
+    uRunwayDash: { value: new Vector4(0, 0, 0, 0) },
+    uRunwayAim: { value: new Vector4(0, 0, 0, 0) }
   };
   heightTextures = [];
   constructor(canvas, context) {
@@ -43962,6 +43983,8 @@ class SceneHost {
     u2.uRunway.value.set(...v2.runway);
     u2.uRunwayArea.value.set(...v2.area);
     u2.uRunwayNum.value.set(...v2.num);
+    u2.uRunwayDash.value.set(...v2.dash);
+    u2.uRunwayAim.value.set(...v2.aim);
     u2.uRunwayOn.value = 1;
   }
   /** 표고 텍스처 — 가장 촘촘한 장과 가장 넓은 장을 반정밀도로 올린다(지형 자체 그림자용).

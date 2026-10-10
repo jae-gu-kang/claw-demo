@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  DECLINATION_RANGE_DEG, RUNWAY_LINE_LIFT_M, designationDigits, runwayDesignation, runwayDrawing, runwayUniformValues,
+  CENTERLINE_INSET_M, DECLINATION_RANGE_DEG, RUNWAY_LINE_LIFT_M, aimingPoint, centerlineLayout, designationDigits,
+  runwayDesignation, runwayDrawing, runwayUniformValues,
 } from "./runway.ts";
 import { RUNWAY_FLOOR } from "./runwayfloor.ts";
 import { siteRunwayWidth } from "../lib/replay.ts";
@@ -153,5 +154,55 @@ describe("runwayUniformValues — 셰이더 유니폼 자리(SceneHost.setRunway
     assert.deepEqual(v.area, [61, RUNWAY_FLOOR.halfWidthM, RUNWAY_FLOOR.endM, 0]);
     assert.deepEqual(v.num, [0, 1, 1, 9], "01/19 — 자리를 바꾸면 10/91로 칠해진다");
     assert.deepEqual(runwayUniformValues({ ...s, designation: null }).num, [-1, -1, -1, -1]);
+    // 중심선 (줄 길이, 주기, 시단에서 시작, 0) · 조준점 (시작, 길이, 폭, 안쪽 간격) — 셰이더는 받은 대로 칠한다
+    near(v.dash[0], 30, "줄 길이", 1e-9);
+    near(v.dash[1], 51.85, "주기", 1e-9);
+    assert.deepEqual(v.dash.slice(2), [CENTERLINE_INSET_M, 0]);
+    assert.deepEqual(v.aim, [300, 45, 6, 18]);
+    assert.deepEqual(runwayUniformValues({ ...s, length: 150 }).dash, [0, 0, CENTERLINE_INSET_M, 0], "중심선이 없으면 줄 길이 0");
+  });
+});
+
+describe("centerlineLayout — 중심선 점선 배치(ICAO 부속서 14: 줄 + 칸 50~75 m, 줄 ≥ 칸·30 m)", () => {
+  it("고흥 1,205 m는 30 m 줄 21개, 주기 51.85 m — 69~99 m에서 시작해 1,106~1,136 m에서 끝난다", () => {
+    const c = centerlineLayout(1205)!;
+    assert.equal(c.count, 21);
+    near(c.stripe, 30, "줄", 1e-9);
+    near(c.period, 51.85, "주기", 1e-9);
+    const last = CENTERLINE_INSET_M + (c.count - 1) * c.period;
+    near(last, 1106, "마지막 줄 시작", 1e-6);
+    near(last + c.stripe, 1205 - CENTERLINE_INSET_M, "마지막 줄 끝 — 북쪽 첫 줄도 온 줄", 1e-6);
+  });
+
+  it("218 m부터 10 km까지 어느 길이든 규칙 안이고 양 끝이 온 줄로 끝난다 — 짧은 활주로에서 칸이 줄보다 길지 않다", () => {
+    // 셰이더에서 셈하던 규칙은 418 m 아래에서 칸이 줄보다 길었고(30 m 줄에 칸 41 m), 168~218 m에서는 토막 줄이 붙었다
+    // (v1.94 리뷰 측정 — 지금은 고흥만 칠하므로 닿지 않던 길)
+    for (let L = 218; L <= 10_000; L += 0.5) {
+      const c = centerlineLayout(L)!;
+      const gap = c.period - c.stripe;
+      const end = CENTERLINE_INSET_M + (c.count - 1) * c.period + c.stripe;
+      assert.ok(c.count >= 2, `${L}`);
+      assert.ok(c.period >= 50 - 1e-9 && c.period <= 75 + 1e-9, `${L}: 줄 + 칸 ${c.period}`);
+      assert.ok(c.stripe >= 30 - 1e-9 && c.stripe >= gap - 1e-9, `${L}: 줄 ${c.stripe} · 칸 ${gap}`);
+      assert.ok(Math.abs(end - (L - CENTERLINE_INSET_M)) < 1e-6, `${L}: 끝 ${end}`);
+    }
+  });
+
+  it("구간이 80 m가 안 되면 줄 하나, 30 m가 안 되면 중심선이 없다(null)", () => {
+    assert.equal(centerlineLayout(2 * CENTERLINE_INSET_M + 29.9), null);
+    assert.equal(centerlineLayout(Number.NaN), null);
+    assert.deepEqual(centerlineLayout(2 * CENTERLINE_INSET_M + 50), { stripe: 50, period: 0, count: 1 });
+  });
+});
+
+describe("aimingPoint — 조준점(ICAO 부속서 14 표 5-1, 범위는 최솟값)", () => {
+  it("착륙 거리의 열 — 800·1,200·2,400 m가 경계다", () => {
+    assert.deepEqual(aimingPoint(799), [150, 30, 4, 6]);
+    assert.deepEqual(aimingPoint(800), [250, 30, 6, 9]);
+    assert.deepEqual(aimingPoint(1199), [250, 30, 6, 9]);
+    assert.deepEqual(aimingPoint(1200), [300, 45, 6, 18]);
+    assert.deepEqual(aimingPoint(1205), [300, 45, 6, 18], "고흥 — 300~345 m, 축에서 9~15 m");
+    assert.deepEqual(aimingPoint(2399), [300, 45, 6, 18]);
+    assert.deepEqual(aimingPoint(2400), [400, 45, 6, 18]);
   });
 });

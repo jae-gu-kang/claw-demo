@@ -25,6 +25,12 @@
  * 한반도 자편각 범위의 양 끝에서 셈해 **같을 때만** 칠한다. 고흥 진방위 3.26°는 서편 1.7~11.7° 어디서든 자방위가
  * 5~15°라 01이다. 갈리면 번호를 지어내지 않는다.
  *
+ * ## 길이에 따라 정하는 배치는 여기서 셈한다
+ *
+ * 중심선 점선의 줄·칸과 조준점은 활주로 길이로 정해진다. 셰이더 안에서 셈하면 시험이 닿지 않아 주기를 50 m로 되돌리거나
+ * 조준점을 250 m로 되돌려도 시험이 다 통과했다(v1.94 리뷰 변이) — 그래서 여기서 셈해 유니폼으로 넘기고
+ * (`runwayUniformValues`) 셰이더는 받은 대로 칠한다. 셰이더에 남은 배치는 길이와 무관한 고정 치수(시단 줄무늬·번호)다.
+ *
  * ## 왜 선분마다 따로인가
  *
  * `SceneHost.setPaths`는 한 목록의 점을 **꺾은선**으로 잇는다. 선분 여럿을 한 목록에 이어 담으면 선분 끝에서
@@ -142,17 +148,58 @@ export function designationDigits(d: [number, number] | null): [number, number, 
   return d ? [Math.floor(d[0] / 10), d[0] % 10, Math.floor(d[1] / 10), d[1] % 10] : [-1, -1, -1, -1];
 }
 
+/** 중심선이 시작하는 자리 [m] — 양 끝 시단에서. 번호(시단에서 48~57 m, shaders/runway.ts `grDesignation`)에서 12 m 띄운다. */
+export const CENTERLINE_INSET_M = 69;
+
+export interface CenterlineLayout {
+  /** 줄 길이 [m] */ stripe: number;
+  /** 줄 + 칸 [m] — 줄이 하나면 0 */ period: number;
+  /** 줄 수 */ count: number;
+}
+
+/** 중심선 점선 배치 — 양 끝에서 `CENTERLINE_INSET_M` 안쪽 구간을 줄로 **고르게** 채워 양 끝이 온 줄로 끝난다(남쪽에만
+ *  맞추면 북쪽 첫 줄이 토막이었다 — v1.92 리뷰). ICAO 부속서 14: 줄 + 칸 50~75 m, 줄은 칸 이상이고 30 m 이상.
+ *
+ *  칸 수는 30 m 줄로 주기 50 m 이상이 되는 가장 큰 수이고, 주기는 그 칸 수에서 줄이 30 m가 되는 값이다(고흥 1,205 m:
+ *  21줄, 주기 51.85 m). 짧은 활주로에서는 그 주기가 60 m를 넘어 칸이 줄보다 길어지므로(30 m 줄에 칸 41 m — v1.94 리뷰가
+ *  잰 418 m 아래의 깨짐) 주기를 칸 ≤ 줄·75 m 안으로 줄이고 그만큼 줄을 늘린다. 구간이 80 m가 안 되면 줄 하나, 30 m가 안
+ *  되면 중심선이 없다(null). */
+export function centerlineLayout(length: number): CenterlineLayout | null {
+  const span = length - 2 * CENTERLINE_INSET_M;
+  if (!(span >= 30)) return null;
+  const gaps = Math.floor((span - 30) / 50);
+  if (gaps < 1) return { stripe: span, period: 0, count: 1 };
+  const period = Math.min(75, span / (gaps + 0.5), (span - 30) / gaps);
+  return { stripe: span - gaps * period, period, count: gaps + 1 };
+}
+
+/** 조준점 — ICAO 부속서 14 표 5-1, 착륙 거리(여기선 활주로 길이)의 열에서 (시단에서 시작, 줄 길이, 폭, 두 줄 안쪽 간격)
+ *  [m]. 범위로 주는 값은 최솟값이다(1,200 m 이상 열: 길이 45~60, 폭 6~10, 간격 18~22.5). 고흥 1,205 m는 300~345 m,
+ *  축에서 9~15 m — v1.92는 800~1,200 m 열의 250 m를 섞어 썼다. */
+export function aimingPoint(length: number): [number, number, number, number] {
+  if (length < 800) return [150, 30, 4, 6];
+  if (length < 1200) return [250, 30, 6, 9];
+  if (length < 2400) return [300, 45, 6, 18];
+  return [400, 45, 6, 18];
+}
+
 /** 포장면 → 셰이더 유니폼 값(shaders/runway.ts 선언의 자리 순서) — `SceneHost.setRunwaySurface`가 그대로 싣는다.
  *  자리가 셰이더와 갈리면(축의 cos·sin, 번호의 십·일) 화면이 조용히 틀리므로 여기서 한 번 정하고 시험한다. */
 export function runwayUniformValues(s: RunwaySurface): {
   runway: [number, number, number, number];
   area: [number, number, number, number];
   num: [number, number, number, number];
+  dash: [number, number, number, number];
+  aim: [number, number, number, number];
 } {
+  const cl = centerlineLayout(s.length);
   return {
     runway: [Math.cos(s.heading), Math.sin(s.heading), s.length, s.width / 2],
     // 착륙대는 펴진 바닥과 **같은 구역**이다 — 두 수가 갈리면 풀밭 끝에서 땅이 기운다(core/runwayfloor.ts)
     area: [s.overrun, RUNWAY_FLOOR.halfWidthM, RUNWAY_FLOOR.endM, 0],
     num: designationDigits(s.designation),
+    // 중심선 (줄 길이, 주기, 시단에서 시작, 0) — 중심선이 없으면 줄 길이 0이고 셰이더가 칠하지 않는다
+    dash: cl ? [cl.stripe, cl.period, CENTERLINE_INSET_M, 0] : [0, 0, CENTERLINE_INSET_M, 0],
+    aim: aimingPoint(s.length),
   };
 }

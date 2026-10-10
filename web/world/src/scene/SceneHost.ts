@@ -232,6 +232,8 @@ export class SceneHost {
     uRunwayOn: { value: 0 },
     uRunwayArea: { value: new Vector4(0, 0, 0, 0) },
     uRunwayNum: { value: new Vector4(-1, -1, -1, -1) },
+    uRunwayDash: { value: new Vector4(0, 0, 0, 0) },
+    uRunwayAim: { value: new Vector4(0, 0, 0, 0) },
   };
   private heightTextures: DataTexture[] = [];
 
@@ -459,11 +461,14 @@ export class SceneHost {
       u.uRunwayOn.value = 0;
       return;
     }
-    // 자리 순서는 core/runway.ts가 정하고 시험한다(축 cos·sin, 착륙대 = 펴진 바닥 구역, 번호 십·일)
+    // 자리 순서와 길이로 정해지는 배치는 core/runway.ts가 정하고 시험한다(축 cos·sin, 착륙대 = 펴진 바닥 구역, 번호
+    // 십·일, 중심선 줄·주기, 조준점)
     const v = runwayUniformValues(s);
     u.uRunway.value.set(...v.runway);
     u.uRunwayArea.value.set(...v.area);
     u.uRunwayNum.value.set(...v.num);
+    u.uRunwayDash.value.set(...v.dash);
+    u.uRunwayAim.value.set(...v.aim);
     u.uRunwayOn.value = 1;
   }
 

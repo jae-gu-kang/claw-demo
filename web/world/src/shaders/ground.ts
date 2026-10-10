@@ -30,7 +30,7 @@
  *
  * ## 거리마다 접는다
  *
- * 무늬는 픽셀 하나가 덮는 땅 크기(`pw`, fwidth로 잰다)에 맞춰 차례로 접힌다 — 남기면 지글거린다:
+ * 무늬는 픽셀 하나가 덮는 땅 크기(`pw`, 화면 도함수로 잰다)에 맞춰 차례로 접힌다 — 남기면 지글거린다:
  * 나무 하나하나(7 m)는 픽셀이 1.2~3.5 m일 때 사라지고, 필지·둑·지붕은 그 크기의 몇 분의 일에서,
  * 수관 무리 얼룩(34 m)과 피복 경계의 흔들림(95 m)도 더 멀리서 평균으로 간다. 접힌 자리에는 그
  * 무늬의 평균색이 남는다 — 먼 들이 회색으로 죽지 않고 황록으로 남는 이유다.
@@ -352,7 +352,7 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
   float field0 = 0.0;
   if (uRunwayOn > 0.5) {
     vec4 ax = grRunwayAxes(p, dxy);
-    vec4 af = grAirfield(ax);
+    vec4 af = grAirfield(ax);   // 층마다 몫 — 안쪽 층은 바깥 층의 몫만 바꾼다(shaders/runway.ts grAirfield)
     field0 = af.x;
     if (field0 > 0.001) {
       float along = ax.x;
@@ -365,8 +365,9 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
       float mow = (smoothstep(-0.25, 0.25, sin(across * (6.2832 / 10.0))) - 0.5) * 0.10
                 * (1.0 - smoothstep(1.5, 4.0, pc));
       float dry = pw < 20.0 ? mix(fbm3(vec3(ne * (1.0 / 23.0), 9.1)), 0.44, smoothstep(8.0, 20.0, pw)) : 0.44;
-      vec3 grass = mix(GR_GRASS, GR_GRASS_DRY, smoothstep(0.40, 0.62, dry + (nB - 0.44) * 0.5));
-      col = mix(col, grass * (0.94 + 0.12 * nB + mow), field0);
+      vec3 grass = mix(GR_GRASS, GR_GRASS_DRY, smoothstep(0.40, 0.62, dry + (nB - 0.44) * 0.5))
+                 * (0.94 + 0.12 * nB + mow);
+      col = mix(col, grass, field0);
       rgh = mix(rgh, 0.9, field0);
       // 포장면 — 활주로와 양 끝 과주로. 접지대(시단에서 100~450 m)에 타이어 자국, 과주로는 덜 다녀 바랬다
       float paved = af.y;
@@ -375,14 +376,15 @@ void grCover(vec3 p, vec3 n, vec2 shade, float shoreD, float pw, vec4 dxy,
                + smoothstep(80.0, 160.0, L - along) * (1.0 - smoothstep(380.0, 480.0, L - along));
       float rubber = tz * (1.0 - smoothstep(4.0, 9.0, abs(across)));
       float tex = mix(fbm3(vec3(ne * 0.5, 2.0)) - 0.44, 0.0, smoothstep(1.0, 4.0, pw));
-      col = mix(col, GR_ASPHALT * (1.0 + 0.25 * tex) * (1.0 - 0.35 * rubber) * mix(1.12, 1.0, onRunway), paved);
-      rgh = mix(rgh, 0.75, paved);
+      vec3 asph = GR_ASPHALT * (1.0 + 0.25 * tex) * (1.0 - 0.35 * rubber) * mix(1.12, 1.0, onRunway);
+      col += paved * (asph - grass);
+      rgh += paved * (0.75 - 0.9);
       if (paved > 0.001) {
-        // 도색 — 흰색(af.z)·노란 갈매기표(af.w)의 덮임은 grAirfield가 낸다
+        // 도색 — 흰색(af.z)·노란 갈매기표(af.w)는 포장면의 몫만 바꾼다. 포장면 덮임을 한 번 더 곱하면 가장자리에 붙은
+        // 측면 표지가 두 번 걸러져 멀리서 어둡고 깜빡였다(v1.94 리뷰 실측)
         float wear = 0.80 + 0.20 * clamp(1.0 + 2.0 * tex, 0.0, 1.0);   // 닳은 도색 — 아스팔트 결이 비친다
-        col = mix(col, GR_PAINT * wear * (1.0 - 0.45 * rubber), af.z * paved);
-        col = mix(col, GR_PAINT_YEL * wear, af.w * paved);
-        rgh = mix(rgh, 0.62, max(af.z, af.w) * paved);
+        col += af.z * (GR_PAINT * wear * (1.0 - 0.45 * rubber) - asph) + af.w * (GR_PAINT_YEL * wear - asph);
+        rgh += (af.z + af.w) * (0.62 - 0.75);
       }
     }
   }

@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
+import { RUNWAY_UNIFORM_DECL } from "../shaders/runway.ts";
+
 const src = readFileSync(new URL("./SceneController.ts", import.meta.url), "utf8");
 const fn = (name: string) =>
   src.match(new RegExp(`\\n  (?:private )?(?:async )?${name}\\([\\s\\S]*?\\n  \\}\\n`))?.[0] ?? "";
@@ -135,9 +137,19 @@ describe("SceneHost 배선 — 활주로", () => {
     assert.match(surface, /u\.uRunway\.value\.set\(\.\.\.v\.runway\);/);
     assert.match(surface, /u\.uRunwayArea\.value\.set\(\.\.\.v\.area\);/);
     assert.match(surface, /u\.uRunwayNum\.value\.set\(\.\.\.v\.num\);/);
+    assert.match(surface, /u\.uRunwayDash\.value\.set\(\.\.\.v\.dash\);/);
+    assert.match(surface, /u\.uRunwayAim\.value\.set\(\.\.\.v\.aim\);/);
     const ground = host.match(/private readonly groundUniforms = \{[\s\S]*?\n  \};/)?.[0] ?? "";
     assert.ok(ground, "groundUniforms가 없다");
     assert.doesNotMatch(ground, /uRunway/, "활주로 유니폼이 지면 벌에 또 있다");
+  });
+
+  it("셰이더가 선언한 활주로 유니폼을 호스트가 다 쥔다 — 빠지면 그 값이 0으로 남아 조용히 안 칠해진다", () => {
+    const declared = [...RUNWAY_UNIFORM_DECL.matchAll(/^uniform \w+ (\w+);/gm)].map((m) => m[1]!).sort();
+    const block = host.match(/private readonly runwayUniforms = \{([\s\S]*?)\n  \};/)?.[1] ?? "";
+    const held = [...block.matchAll(/^\s+(uRunway\w*): \{/gm)].map((m) => m[1]!).sort();
+    assert.ok(declared.length >= 6, declared.join(","));
+    assert.deepEqual(held, declared);
   });
 
   it("활주로 선은 공학·게임 모드에서 보이고, 궤적은 공학 모드에서만", () => {

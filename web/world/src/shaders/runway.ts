@@ -23,12 +23,15 @@ uniform vec4 uRunway;              // (cos h, sin h, 길이 [m], 반폭 [m]) —
 uniform float uRunwayOn;           // 0이면 포장면을 칠하지 않는다(폭을 모를 때 — core/runway.ts)
 uniform vec4 uRunwayArea;          // (과주로 [m], 착륙대 반폭 [m], 착륙대 끝 너머 [m], 0) — 착륙대는 펴진 바닥과 같은 구역
 uniform vec4 uRunwayNum;           // 활주로 번호 (시단 쪽 십·일, 맞은편 십·일) — 모르면 -1이고 번호를 칠하지 않는다
+uniform vec4 uRunwayDash;          // 중심선 (줄 길이, 주기 — 줄 하나면 0, 시단에서 시작, 0) [m] — 줄 길이 0이면 없다
+uniform vec4 uRunwayAim;           // 조준점 (시단에서 시작, 줄 길이, 폭, 두 줄 안쪽 간격) [m]
 `;
 
 /** 자리·덮임 함수 — 조각 셰이더 앞머리, `RUNWAY_UNIFORM_DECL` 뒤. 다른 조각에 기대지 않는다. */
 export const RUNWAY_GLSL = /* glsl */`
-// ---- 활주로 도색 — 띠·숫자의 덮임을 픽셀 발자국(pw) 상자로 거른다. 가까이선 칼날, 멀어지면 폭/발자국만큼
-// 옅어진다(멀리서 지글거리지 않게). 좌표는 활주로 축 기준 [m]. 치수는 ICAO 부속서 14의 표준이다(실측 아님).
+// ---- 활주로 도색 — 띠·숫자의 덮임을 픽셀 발자국 상자로 거른다(발자국은 축마다 — 아래). 가까이선 칼날, 멀어지면
+// 폭/발자국만큼 옅어진다(멀리서 지글거리지 않게). 좌표는 활주로 축 기준 [m]. 치수는 ICAO 부속서 14의 표준이다(실측
+// 아님). 길이로 정해지는 배치(중심선 줄·주기, 조준점)는 core/runway.ts가 셈해 유니폼으로 준다 — 시험이 닿는 곳이다.
 
 // 가운데 0, 반폭 h인 띠의 덮임 — 발자국 상자와 겹친 비율
 float grBand(float x, float h, float pw) {
@@ -98,15 +101,15 @@ float grPiano(float s, float x, float halfW, float pa, float pc) {
   return keys * grBand(s - 21.0, 15.0, pa);
 }
 
-// 중심선 — 30 m 줄, 너비 0.9 m. 양 끝 번호(57 m)에서 12 m 띄운 69 m부터 맞은편 69 m까지. 칸(20 m 이상)을 고르게
-// 늘려 양 끝이 온 줄로 끝난다(줄 + 칸 50~75 m) — 남쪽에만 맞추면 북쪽 첫 줄이 17 m 토막이었다(v1.92 리뷰)
+// 중심선 — 너비 0.9 m 줄을 양 끝에서 a0(69 m) 안쪽 구간에 고르게 깐다. 줄 길이·주기는 core/runway.ts
+// centerlineLayout이 셈한다(줄 + 칸 50~75 m, 줄 ≥ 칸·30 m, 양 끝이 온 줄 — 고흥은 30 m 줄 21개, 주기 51.85 m)
 float grCenterline(float along, float x, float L, float pa, float pc) {
-  float span = L - 138.0;
-  if (span < 30.0 || along < 69.0 - pa || along > L - 69.0 + pa || abs(x) > 1.0 + pc) return 0.0;
-  float n = floor((span + 20.0) / 50.0);
-  float P = n > 1.0 ? (span - 30.0) / (n - 1.0) : 50.0;
-  float dash = grStripes(along - 84.0, P, 15.0, pa);
-  return dash * grBand(x, 0.45, pc) * grBand(along - 0.5 * L, 0.5 * span, pa);
+  float s = uRunwayDash.x;
+  float P = uRunwayDash.y;
+  float a0 = uRunwayDash.z;
+  if (s <= 0.0 || along < a0 - pa || along > L - a0 + pa || abs(x) > 1.0 + pc) return 0.0;
+  float dash = P > 0.0 ? grStripes(along - (a0 + 0.5 * s), P, 0.5 * s, pa) : 1.0;
+  return dash * grBand(x, 0.45, pc) * grBand(along - 0.5 * L, 0.5 * L - a0, pa);
 }
 
 // 과주로 갈매기표 — t 시단 밖으로 [m](0이 시단). 꼭짓점이 활주로 쪽을 가리키는 45도 줄, 30 m 간격, 너비 0.9 m.
@@ -114,15 +117,6 @@ float grCenterline(float along, float x, float L, float pa, float pc) {
 float grChevron(float t, float x, float over, float pa, float pc) {
   if (t < -pa || t > over + pa) return 0.0;
   return grStripes(t - abs(x) - 6.0, 30.0, 0.64, pa + pc) * grBand(t - 0.5 * over, 0.5 * over, pa);
-}
-
-// 조준점 — ICAO 부속서 14 표 5-1: 착륙 거리(여기선 활주로 길이)에 따라 (시단에서 시작, 길이, 폭, 안쪽 간격) [m].
-// 1,200~2,400 m 열은 300 m에서 시작한다 — 250 m는 800~1,200 m 열의 값이었다(v1.92 리뷰)
-vec4 grAimSpec(float L) {
-  if (L < 800.0) return vec4(150.0, 30.0, 4.0, 6.0);
-  if (L < 1200.0) return vec4(250.0, 45.0, 6.0, 9.0);
-  if (L < 2400.0) return vec4(300.0, 45.0, 6.0, 18.0);
-  return vec4(400.0, 45.0, 6.0, 18.0);
 }
 
 // 활주로 축 좌표와 축마다 발자국 — p 세계 위치(렌더 x = e, z = -n), dxy 세계 xz의 화면 도함수(dFdx의 x·z, dFdy의
@@ -137,10 +131,13 @@ vec4 grRunwayAxes(vec3 p, vec4 dxy) {
   return vec4(along, across, pa, pc);
 }
 
-// 비행장 덮임 (착륙대, 포장면, 흰 도색, 노란 도색) 각 0~1 — ax는 grRunwayAxes. 도색 둘은 포장면 안의 비율이라 칠할
-// 때 포장면을 곱한다. 착륙대 경계는 발자국만큼만 부드럽다 — 예전엔 40~60 m에 걸쳐 섞어 들·비닐하우스 위에 흐린 띠가
-// 얹혀 보였다(사용자 지적). 시단 사이는 흰색(측면 표지·시단 줄무늬·번호·중심선·조준점), 과주로는 노란 갈매기표이고,
-// 맞은편 끝은 남쪽으로 읽으므로 가로를 뒤집는다
+// 비행장 층마다 몫 (착륙대, 포장면, 흰 도색, 노란 도색) 각 0~1 — ax는 grRunwayAxes. 층은 안으로 겹친다(도색 ⊂ 포장면
+// ⊂ 착륙대)이므로 안쪽 몫은 바깥 몫을 넘지 않게 자르고, 칠할 때는 안쪽 층이 **바깥 층의 몫만** 바꾼다:
+//     c = mix(바탕, 풀, f.x);  c += f.y·(아스팔트 − 풀) + f.z·(흰색 − 아스팔트) + f.w·(노랑 − 아스팔트)
+// 덮임을 곱해 섞으면(mix(c, 흰색, 흰 덮임 × 포장면)) 가장자리에 붙은 측면 표지가 두 번 걸러져 멀리서 중심선보다 40 %
+// 어둡고 움직이면 깜빡였다(v1.94 리뷰 실측). 착륙대 경계는 발자국만큼만 부드럽다 — 예전엔 40~60 m에 걸쳐 섞어 들·
+// 비닐하우스 위에 흐린 띠가 얹혀 보였다(사용자 지적). 시단 사이는 흰색(측면 표지·시단 줄무늬·번호·중심선·조준점),
+// 과주로는 노란 갈매기표이고, 맞은편 끝은 남쪽으로 읽으므로 가로를 뒤집는다
 vec4 grAirfield(vec4 ax) {
   float along = ax.x;
   float across = ax.y;
@@ -151,7 +148,7 @@ vec4 grAirfield(vec4 ax) {
   float over = uRunwayArea.x;
   float field = grBand(across, uRunwayArea.y, pc) * grBand(along - 0.5 * L, 0.5 * L + uRunwayArea.z, pa);
   if (field <= 0.001) return vec4(0.0);
-  float paved = grBand(across, halfW, pc) * grBand(along - 0.5 * L, 0.5 * L + over, pa);
+  float paved = min(grBand(across, halfW, pc) * grBand(along - 0.5 * L, 0.5 * L + over, pa), field);
   if (paved <= 0.001) return vec4(field, paved, 0.0, 0.0);
   float onRunway = grBand(along - 0.5 * L, 0.5 * L, pa);
   float sF = L - along;
@@ -160,13 +157,14 @@ vec4 grAirfield(vec4 ax) {
   white = max(white, max(grDesignation(uRunwayNum.xy, along, across, pa, pc),
                          grDesignation(uRunwayNum.zw, sF, -across, pa, pc)));
   white = max(white, grCenterline(along, across, L, pa, pc));
-  // 조준점 — (시작, 길이, 폭, 안쪽 간격)은 활주로 길이의 열에서. 고흥 1,205 m는 300~345 m, 축에서 9~15 m
-  vec4 aim = grAimSpec(L);
+  // 조준점 — (시작, 길이, 폭, 안쪽 간격)은 core/runway.ts aimingPoint가 활주로 길이의 열에서 고른다
+  vec4 aim = uRunwayAim;
   float aimX = grBand(abs(across) - 0.5 * (aim.w + aim.z), 0.5 * aim.z, pc);
   white = max(white, aimX * max(grBand(along - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa),
                                 grBand(sF - (aim.x + 0.5 * aim.y), 0.5 * aim.y, pa)));
   float yel = max(grChevron(-along, across, over, pa, pc), grChevron(along - L, -across, over, pa, pc));
-  return vec4(field, paved, white, yel);
+  white = min(white, paved);
+  return vec4(field, paved, white, min(yel, paved - white));
 }
 `;
 
@@ -197,11 +195,11 @@ export const RUNWAY_GAME_FRAG_BODY = /* glsl */`
     vec3 rwDx = dFdx(vRunwayWorld);
     vec3 rwDy = dFdy(vRunwayWorld);
     if (uRunwayOn > 0.5) {
+      // 층마다 몫 — 안쪽 층은 바깥 층의 몫만 바꾼다(grAirfield 주석, 실사 지면과 같은 셈)
       vec4 af = grAirfield(grRunwayAxes(vRunwayWorld, vec4(rwDx.xz, rwDy.xz)));
       vec3 c = mix(diffuseColor.rgb, GAME_RW_STRIP, af.x);
-      c = mix(c, GAME_RW_ASPHALT, af.y);
-      c = mix(c, GAME_RW_PAINT, af.z * af.y);
-      diffuseColor.rgb = mix(c, GAME_RW_YELLOW, af.w * af.y);
+      c += af.y * (GAME_RW_ASPHALT - GAME_RW_STRIP);
+      diffuseColor.rgb = c + af.z * (GAME_RW_PAINT - GAME_RW_ASPHALT) + af.w * (GAME_RW_YELLOW - GAME_RW_ASPHALT);
     }
   }
 `;

@@ -175,7 +175,10 @@ describe("GLSL 문자열", () => {
       assert.match(src, /\bgrRunwayAxes\(/, `${name}이 grRunwayAxes를 안 부른다`);
     }
     const defs = [...RUNWAY_GLSL.matchAll(/^(?:float|vec[234]|int|void|bool)\s+(\w+)\s*\(/gm)].map((m) => m[1]!);
-    assert.ok(defs.includes("grAirfield") && defs.includes("grBand") && defs.length >= 10, defs.join(","));
+    for (const f of ["grBand", "grStripes", "grDigit", "grDesignation", "grPiano", "grCenterline", "grChevron",
+      "grRunwayAxes", "grAirfield"]) {
+      assert.ok(defs.includes(f), `RUNWAY_GLSL에 ${f}가 없다: ${defs.join(",")}`);
+    }
     for (const f of [...defs, "GR_SEG"]) {
       assert.doesNotMatch(GROUND_GLSL, new RegExp(`^(?:const\\s+)?(?:float|vec[234]|int|void|bool)(?:\\[\\d+\\])?\\s+${f}\\b`, "m"), `GROUND_GLSL이 ${f}를 또 정의한다`);
     }
@@ -184,6 +187,46 @@ describe("GLSL 문자열", () => {
       assert.match(RUNWAY_UNIFORM_DECL, new RegExp(`^uniform \\w+ ${u};`, "m"), u);
       assert.doesNotMatch(GROUND_UNIFORM_DECL, new RegExp(`\\b${u}\\b`), `GROUND_UNIFORM_DECL에 ${u}가 또 있다`);
     }
+  });
+
+  it("두 지형의 화면 도함수는 어떤 분기보다도 앞이고, 세계 위치의 x·z를 (dFdx, dFdy) 순서로 넘긴다", () => {
+    // 글의 순서만 보면 분기 **안**으로 옮긴 도함수(discard보다는 앞)가 통과했다. 축을 xy로 묶거나 dFdx·dFdy 자리를 바꿔도
+    // 통과했다(v1.94 리뷰 변이) — 셰이더는 CI가 돌리지 못하므로 그 자리를 글로 묶는다
+    const code = (src: string) => src.replace(/\/\/[^\n]*/g, "");
+    for (const [name, body, world, packed] of [
+      ["GROUND_FRAG_BODY", GROUND_FRAG_BODY, "vGroundWorld", "vec4(grDx.xz, grDy.xz)"],
+      ["RUNWAY_GAME_FRAG_BODY", RUNWAY_GAME_FRAG_BODY, "vRunwayWorld", "vec4(rwDx.xz, rwDy.xz)"],
+    ] as const) {
+      const c = code(body);
+      const first = Math.min(c.indexOf("dFdx("), c.indexOf("dFdy("));
+      assert.ok(first > 0, `${name}: 도함수가 없다`);
+      assert.doesNotMatch(c.slice(0, first), /\b(if|for|while|else|discard)\b|\?/, `${name}: 도함수 앞에 분기가 있다`);
+      assert.match(c, new RegExp(`dFdx\\(${world}\\)`), `${name}: dFdx(${world})`);
+      assert.match(c, new RegExp(`dFdy\\(${world}\\)`), `${name}: dFdy(${world})`);
+      assert.ok(c.includes(packed), `${name}: ${packed}`);
+    }
+  });
+
+  it("층은 바깥 층의 몫만 바꾼다 — 도색에 포장면 덮임을 한 번 더 곱하지 않는다", () => {
+    // 측면 표지는 포장면 가장자리에 붙어 있어, 흰 덮임 × 포장면 덮임으로 섞으면 두 번 걸러져 멀리서 중심선보다 40 %
+    // 어둡고 움직이면 깜빡였다(v1.94 리뷰 실측). grAirfield가 몫을 잘라 주고 두 지형은 더하기만 한다
+    assert.match(RUNWAY_GLSL, /white = min\(white, paved\);/);
+    assert.match(RUNWAY_GLSL, /return vec4\(field, paved, white, min\(yel, paved - white\)\);/);
+    for (const [name, src] of [["GROUND_GLSL", GROUND_GLSL], ["RUNWAY_GAME_FRAG_BODY", RUNWAY_GAME_FRAG_BODY]] as const) {
+      assert.doesNotMatch(src, /af\.[zw] \* (paved|af\.y)/, `${name}: 도색에 포장면을 또 곱한다`);
+    }
+    assert.match(GROUND_GLSL, /col \+= af\.z \* \(/);
+    assert.match(RUNWAY_GAME_FRAG_BODY, /af\.z \* \(GAME_RW_PAINT - GAME_RW_ASPHALT\)/);
+  });
+
+  it("길이로 정해지는 배치(중심선 줄·주기, 조준점)는 셰이더가 셈하지 않고 유니폼으로 받는다 — core/runway.ts가 시험한다", () => {
+    // 셰이더 안에서 셈하면 주기를 50 m로, 조준점을 250 m로 되돌려도 시험이 다 통과했다(v1.94 리뷰 변이)
+    const center = RUNWAY_GLSL.match(/float grCenterline\([\s\S]*?\n\}/)?.[0] ?? "";
+    assert.ok(center, "grCenterline이 없다");
+    for (const k of ["uRunwayDash.x", "uRunwayDash.y", "uRunwayDash.z"]) assert.ok(center.includes(k), k);
+    assert.doesNotMatch(center, /\b(50|84|138|69)\.0\b/, "중심선 배치 상수가 셰이더에 남았다");
+    assert.doesNotMatch(RUNWAY_GLSL, /grAimSpec/);
+    assert.match(RUNWAY_GLSL, /vec4 aim = uRunwayAim;/);
   });
 
   it("지면 정점·조각의 varying이 같은 선언 한 벌에서 나온다", () => {
