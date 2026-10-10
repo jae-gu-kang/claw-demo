@@ -132,7 +132,7 @@ function T$1(a) {
   if (1 === a._status) return a._result.default;
   throw a._result;
 }
-var U$1 = { current: null }, V$1 = { transition: null }, W$1 = { ReactCurrentDispatcher: U$1, ReactCurrentBatchConfig: V$1, ReactCurrentOwner: K$1 };
+var U$1 = { current: null }, V$1 = { transition: null }, W$2 = { ReactCurrentDispatcher: U$1, ReactCurrentBatchConfig: V$1, ReactCurrentOwner: K$1 };
 function X$1() {
   throw Error("act(...) is not supported in production builds of React.");
 }
@@ -160,7 +160,7 @@ react_production_min.Profiler = r;
 react_production_min.PureComponent = G$2;
 react_production_min.StrictMode = q$1;
 react_production_min.Suspense = w;
-react_production_min.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED = W$1;
+react_production_min.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED = W$2;
 react_production_min.act = X$1;
 react_production_min.cloneElement = function(a, b, e) {
   if (null === a || void 0 === a) throw Error("React.cloneElement(...): The argument must be a React element, but you passed " + a + ".");
@@ -4822,7 +4822,7 @@ function Lj(a, b) {
   if (null !== c) if ("function" === typeof c) try {
     c(null);
   } catch (d) {
-    W(a, b, d);
+    W$1(a, b, d);
   }
   else c.current = null;
 }
@@ -4830,7 +4830,7 @@ function Mj(a, b, c) {
   try {
     c();
   } catch (d) {
-    W(a, b, d);
+    W$1(a, b, d);
   }
 }
 var Nj = false;
@@ -4908,7 +4908,7 @@ function Oj(a, b) {
           throw Error(p(163));
       }
     } catch (F2) {
-      W(b, b.return, F2);
+      W$1(b, b.return, F2);
     }
     a = b.sibling;
     if (null !== a) {
@@ -5060,7 +5060,7 @@ function Zj(a, b, c) {
       if (!U && (Lj(c, b), d = c.stateNode, "function" === typeof d.componentWillUnmount)) try {
         d.props = c.memoizedProps, d.state = c.memoizedState, d.componentWillUnmount();
       } catch (h) {
-        W(c, b, h);
+        W$1(c, b, h);
       }
       Yj(a, b, c);
       break;
@@ -5117,7 +5117,7 @@ function ck(a, b) {
       null !== k2 && (k2.return = null);
       e.return = null;
     } catch (l2) {
-      W(e, b, l2);
+      W$1(e, b, l2);
     }
   }
   if (b.subtreeFlags & 12854) for (b = b.child; null !== b; ) dk(b, a), b = b.sibling;
@@ -5135,12 +5135,12 @@ function dk(a, b) {
         try {
           Pj(3, a, a.return), Qj(3, a);
         } catch (t2) {
-          W(a, a.return, t2);
+          W$1(a, a.return, t2);
         }
         try {
           Pj(5, a, a.return);
         } catch (t2) {
-          W(a, a.return, t2);
+          W$1(a, a.return, t2);
         }
       }
       break;
@@ -5158,7 +5158,7 @@ function dk(a, b) {
         try {
           ob(e, "");
         } catch (t2) {
-          W(a, a.return, t2);
+          W$1(a, a.return, t2);
         }
       }
       if (d & 4 && (e = a.stateNode, null != e)) {
@@ -5192,7 +5192,7 @@ function dk(a, b) {
           }
           e[Pf] = f2;
         } catch (t2) {
-          W(a, a.return, t2);
+          W$1(a, a.return, t2);
         }
       }
       break;
@@ -5206,7 +5206,7 @@ function dk(a, b) {
         try {
           e.nodeValue = f2;
         } catch (t2) {
-          W(a, a.return, t2);
+          W$1(a, a.return, t2);
         }
       }
       break;
@@ -5216,7 +5216,7 @@ function dk(a, b) {
       if (d & 4 && null !== c && c.memoizedState.isDehydrated) try {
         bd(b.containerInfo);
       } catch (t2) {
-        W(a, a.return, t2);
+        W$1(a, a.return, t2);
       }
       break;
     case 4:
@@ -5256,7 +5256,7 @@ function dk(a, b) {
                   try {
                     b = d, n2.props = b.memoizedProps, n2.state = b.memoizedState, n2.componentWillUnmount();
                   } catch (t2) {
-                    W(d, c, t2);
+                    W$1(d, c, t2);
                   }
                 }
                 break;
@@ -5280,14 +5280,14 @@ function dk(a, b) {
               try {
                 e = q2.stateNode, l2 ? (f2 = e.style, "function" === typeof f2.setProperty ? f2.setProperty("display", "none", "important") : f2.display = "none") : (h = q2.stateNode, k2 = q2.memoizedProps.style, g = void 0 !== k2 && null !== k2 && k2.hasOwnProperty("display") ? k2.display : null, h.style.display = rb("display", g));
               } catch (t2) {
-                W(a, a.return, t2);
+                W$1(a, a.return, t2);
               }
             }
           } else if (6 === q2.tag) {
             if (null === m2) try {
               q2.stateNode.nodeValue = l2 ? "" : q2.memoizedProps;
             } catch (t2) {
-              W(a, a.return, t2);
+              W$1(a, a.return, t2);
             }
           } else if ((22 !== q2.tag && 23 !== q2.tag || null === q2.memoizedState || q2 === a) && null !== q2.child) {
             q2.child.return = q2;
@@ -5350,7 +5350,7 @@ function ek(a) {
           throw Error(p(161));
       }
     } catch (k2) {
-      W(a, a.return, k2);
+      W$1(a, a.return, k2);
     }
     a.flags &= -3;
   }
@@ -5463,7 +5463,7 @@ function kk(a) {
         }
         U || b.flags & 512 && Rj(b);
       } catch (r2) {
-        W(b, b.return, r2);
+        W$1(b, b.return, r2);
       }
     }
     if (b === a) {
@@ -5507,7 +5507,7 @@ function jk(a) {
           try {
             Qj(4, b);
           } catch (k2) {
-            W(b, c, k2);
+            W$1(b, c, k2);
           }
           break;
         case 1:
@@ -5517,14 +5517,14 @@ function jk(a) {
             try {
               d.componentDidMount();
             } catch (k2) {
-              W(b, e, k2);
+              W$1(b, e, k2);
             }
           }
           var f2 = b.return;
           try {
             Rj(b);
           } catch (k2) {
-            W(b, f2, k2);
+            W$1(b, f2, k2);
           }
           break;
         case 5:
@@ -5532,11 +5532,11 @@ function jk(a) {
           try {
             Rj(b);
           } catch (k2) {
-            W(b, g, k2);
+            W$1(b, g, k2);
           }
       }
     } catch (k2) {
-      W(b, b.return, k2);
+      W$1(b, b.return, k2);
     }
     if (b === a) {
       V = null;
@@ -6183,7 +6183,7 @@ function Hk() {
                   Qj(9, h);
               }
             } catch (na) {
-              W(h, h.return, na);
+              W$1(h, h.return, na);
             }
             if (h === g) {
               V = null;
@@ -6220,7 +6220,7 @@ function Xk(a, b, c) {
   b = R();
   null !== a && (Ac(a, 1, b), Dk(a, b));
 }
-function W(a, b, c) {
+function W$1(a, b, c) {
   if (3 === a.tag) Xk(a, a, c);
   else for (; null !== b; ) {
     if (3 === b.tag) {
@@ -42936,6 +42936,33 @@ function disposeTree(root) {
   });
   root.clear();
 }
+function chunkQuads(stepM) {
+  const target = stepM <= 35 ? 3e3 : 7500;
+  return Math.max(16, Math.round(target / stepM));
+}
+function chunkIndices(indices, cols, quadsPerChunk) {
+  if (indices.length % 6 !== 0) throw new Error(`인덱스가 칸 단위(6)가 아니다: ${indices.length}`);
+  const buckets = /* @__PURE__ */ new Map();
+  const keyOf = (br, bc2) => br * 100003 + bc2;
+  for (let k2 = 0; k2 < indices.length; k2 += 6) {
+    const a = indices[k2];
+    const r2 = Math.floor(a / cols);
+    const c = a - r2 * cols;
+    const key = keyOf(Math.floor(r2 / quadsPerChunk), Math.floor(c / quadsPerChunk));
+    let list = buckets.get(key);
+    if (!list) {
+      list = [];
+      buckets.set(key, list);
+    }
+    for (let t2 = 0; t2 < 6; t2++) list.push(indices[k2 + t2]);
+  }
+  const out = [];
+  for (const [key, list] of buckets) {
+    out.push({ br: Math.floor(key / 100003), bc: key % 100003, indices: Uint32Array.from(list) });
+  }
+  out.sort((x2, y2) => x2.br - y2.br || x2.bc - y2.bc);
+  return out;
+}
 const AO_SCALES = [
   { radiusM: 60, weight: 0.3 },
   { radiusM: 180, weight: 0.35 },
@@ -43483,9 +43510,23 @@ class SceneHost {
         ...this.groundUniforms
       });
       applyAerialPerspective(mat);
-      const mesh = new Mesh(geo, mat);
-      mesh.receiveShadow = true;
-      this.groups.terrain.add(mesh);
+      const pos = geo.getAttribute("position");
+      const box2 = new Box3();
+      const v2 = new Vector3();
+      for (const ch2 of chunkIndices(geo.getIndex().array, p2.cols, chunkQuads(p2.step))) {
+        box2.makeEmpty();
+        for (let k2 = 0; k2 < ch2.indices.length; k2++) box2.expandByPoint(v2.fromBufferAttribute(pos, ch2.indices[k2]));
+        const g = new BufferGeometry();
+        g.setAttribute("position", pos);
+        g.setAttribute("normal", geo.getAttribute("normal"));
+        g.setAttribute("aTerrain", geo.getAttribute("aTerrain"));
+        g.setIndex(new BufferAttribute(ch2.indices, 1));
+        g.boundingBox = box2.clone();
+        g.boundingSphere = box2.getBoundingSphere(new Sphere());
+        const mesh = new Mesh(g, mat);
+        mesh.receiveShadow = true;
+        this.groups.terrain.add(mesh);
+      }
     }
   }
   /** 활주로 포장면 — 지면 셰이더가 아스팔트와 둘레 풀밭을 칠한다(`shaders/ground.ts`). null이면
@@ -43760,6 +43801,156 @@ function createSceneHost(canvas) {
     return { host: null, reason: `렌더러를 만들지 못했습니다 — ${e.message}` };
   }
 }
+const COAST_DEPTH = {
+  /** 첫 고리 수심 = 맞닿은 땅 높이 평균 × 이 값 */
+  firstRingGain: 0.8,
+  minM: 1,
+  maxFirstM: 15,
+  /** 고리마다 깊어지는 배율과 상한 */
+  ringGrowth: 1.6,
+  maxM: 30,
+  /** 내리는 고리 수 — 3차 보간의 지지 범위(4×4)가 닿는 데까지 */
+  rings: 3
+};
+function coastalDepths(elev, rows, cols, cells) {
+  const n2 = rows * cols;
+  const out = Float32Array.from(elev);
+  const ring = new Int8Array(n2);
+  let frontier = [];
+  for (let r2 = 0; r2 < rows; r2++) {
+    for (let c = 0; c < cols; c++) {
+      const i = r2 * cols + c;
+      if (cells[i] !== CELL.SEA) continue;
+      let sum = 0;
+      let k2 = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc2 = -1; dc2 <= 1; dc2++) {
+          if (!dr && !dc2) continue;
+          const rr = r2 + dr;
+          const cc2 = c + dc2;
+          if (rr < 0 || cc2 < 0 || rr >= rows || cc2 >= cols) continue;
+          const j = rr * cols + cc2;
+          if (cells[j] !== CELL.LAND) continue;
+          const z2 = elev[j];
+          if (!Number.isFinite(z2)) continue;
+          sum += Math.max(z2, 0);
+          k2++;
+        }
+      }
+      if (k2 === 0) continue;
+      const d = Math.min(Math.max(COAST_DEPTH.firstRingGain * (sum / k2), COAST_DEPTH.minM), COAST_DEPTH.maxFirstM);
+      out[i] = -d;
+      ring[i] = 1;
+      frontier.push(i);
+    }
+  }
+  for (let k2 = 2; k2 <= COAST_DEPTH.rings && frontier.length > 0; k2++) {
+    const next = /* @__PURE__ */ new Map();
+    for (const i of frontier) {
+      const r2 = i / cols | 0;
+      const c = i - r2 * cols;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc2 = -1; dc2 <= 1; dc2++) {
+          if (!dr && !dc2) continue;
+          const rr = r2 + dr;
+          const cc2 = c + dc2;
+          if (rr < 0 || cc2 < 0 || rr >= rows || cc2 >= cols) continue;
+          const j = rr * cols + cc2;
+          if (cells[j] !== CELL.SEA || ring[j] !== 0) continue;
+          const acc = next.get(j) ?? { sum: 0, n: 0 };
+          acc.sum += -out[i];
+          acc.n++;
+          next.set(j, acc);
+        }
+      }
+    }
+    frontier = [];
+    for (const [j, acc] of next) {
+      out[j] = -Math.min(COAST_DEPTH.ringGrowth * (acc.sum / acc.n), COAST_DEPTH.maxM);
+      ring[j] = k2;
+      frontier.push(j);
+    }
+  }
+  return out;
+}
+const REFINE_MIN_STEP_M = 60;
+const W = [-1 / 16, 9 / 16, 9 / 16, -1 / 16];
+function refineGrid(elev, rows, cols) {
+  const R2 = 2 * rows - 1;
+  const C2 = 2 * cols - 1;
+  const out = new Float32Array(R2 * C2);
+  const raw = (r2, c) => elev[r2 * cols + c];
+  const atCol = (r2, c) => {
+    if (cols === 1) return raw(r2, 0);
+    if (c < 0) return 2 * raw(r2, 0) - raw(r2, 1);
+    if (c >= cols) return 2 * raw(r2, cols - 1) - raw(r2, cols - 2);
+    return raw(r2, c);
+  };
+  const at = (r2, c) => {
+    if (rows === 1) return atCol(0, c);
+    if (r2 < 0) return 2 * atCol(0, c) - atCol(1, c);
+    if (r2 >= rows) return 2 * atCol(rows - 1, c) - atCol(rows - 2, c);
+    return atCol(r2, c);
+  };
+  for (let i = 0; i < R2; i++) {
+    const r0 = i >> 1;
+    const oddR = (i & 1) === 1;
+    for (let j = 0; j < C2; j++) {
+      const c0 = j >> 1;
+      const oddC = (j & 1) === 1;
+      const k2 = i * C2 + j;
+      if (!oddR && !oddC) {
+        out[k2] = at(r0, c0);
+        continue;
+      }
+      const corners = !oddR ? [at(r0, c0), at(r0, c0 + 1)] : !oddC ? [at(r0, c0), at(r0 + 1, c0)] : [at(r0, c0), at(r0, c0 + 1), at(r0 + 1, c0), at(r0 + 1, c0 + 1)];
+      let lo = Infinity;
+      let hi2 = -Infinity;
+      let mean = 0;
+      let cornersOk = true;
+      for (const v22 of corners) {
+        if (!Number.isFinite(v22)) {
+          cornersOk = false;
+          break;
+        }
+        lo = Math.min(lo, v22);
+        hi2 = Math.max(hi2, v22);
+        mean += v22 / corners.length;
+      }
+      if (!cornersOk) {
+        out[k2] = Number.NaN;
+        continue;
+      }
+      let v2 = 0;
+      let ok2 = true;
+      if (!oddR) {
+        for (let t2 = 0; t2 < 4 && ok2; t2++) {
+          const s = at(r0, c0 - 1 + t2);
+          ok2 = Number.isFinite(s);
+          v2 += W[t2] * s;
+        }
+      } else if (!oddC) {
+        for (let t2 = 0; t2 < 4 && ok2; t2++) {
+          const s = at(r0 - 1 + t2, c0);
+          ok2 = Number.isFinite(s);
+          v2 += W[t2] * s;
+        }
+      } else {
+        for (let a = 0; a < 4 && ok2; a++) {
+          let row = 0;
+          for (let b = 0; b < 4 && ok2; b++) {
+            const s = at(r0 - 1 + a, c0 - 1 + b);
+            ok2 = Number.isFinite(s);
+            row += W[b] * s;
+          }
+          v2 += W[a] * row;
+        }
+      }
+      out[k2] = ok2 ? Math.min(Math.max(v2, lo), hi2) : mean;
+    }
+  }
+  return { elev: out, rows: R2, cols: C2 };
+}
 function seaQuad(mask) {
   const at = (r2, c) => mask.cells[r2 * mask.cols + c];
   return (r0, c0, r1, c1) => {
@@ -43785,19 +43976,56 @@ function boundingRect(rects) {
   }
   return { n0, e0, n1, e1 };
 }
-function buildTerrain(pack, strideFor2) {
+function renderTier(tier, mask, refine) {
+  const n2 = tier.rows * tier.cols;
+  let elev = new Float32Array(n2);
+  for (let i = 0; i < n2; i++) {
+    const v2 = tier.raw[i];
+    elev[i] = v2 === tier.nodata ? Number.NaN : tier.offset + v2 * tier.scale;
+  }
+  if (mask) elev = coastalDepths(elev, tier.rows, tier.cols, mask.cells);
+  const doRefine = refine && tier.step >= REFINE_MIN_STEP_M && tier.rows > 1 && tier.cols > 1;
+  let rows = tier.rows;
+  let cols = tier.cols;
+  let step2 = tier.step;
+  if (doRefine) {
+    const g = refineGrid(elev, rows, cols);
+    elev = g.elev;
+    rows = g.rows;
+    cols = g.cols;
+    step2 = tier.step / 2;
+  }
+  const raw = new Uint16Array(rows * cols);
+  for (let i = 0; i < raw.length; i++) {
+    const z2 = elev[i];
+    raw[i] = Number.isFinite(z2) ? Math.min(Math.max(Math.round((z2 - tier.offset) / tier.scale), 0), tier.nodata - 1) : tier.nodata;
+  }
+  const out = { ...tier, rows, cols, step: step2, raw };
+  if (!mask) return { tier: out, skipCell: null, refined: doRefine };
+  const sea = seaQuad(mask);
+  return {
+    tier: out,
+    // 세분 격자 (r, c) → 원래 격자 (r/2, c/2). 세분한 칸은 원래 칸 하나 안에 들므로 내림·올림이 그 칸이다.
+    skipCell: doRefine ? (r0, c0, r1, c1) => sea(r0 >> 1, c0 >> 1, r1 + 1 >> 1, c1 + 1 >> 1) : sea,
+    refined: doRefine
+  };
+}
+function buildTerrain(pack, opts = {}) {
   const masks = buildSeaMasks(pack.tiers);
   const inner = [...pack.tiers].sort(byStepAsc);
   const meshes = [];
   const notes = [];
+  let anyRefined = false;
   for (let i = 0; i < inner.length; i++) {
     const tier = inner[i];
     const mask = masks.get(tier.name);
     const skipRect = boundingRect(inner.slice(0, i).map(tierRect));
-    meshes.push(buildTerrainMesh(tier, {
-      stride: strideFor2?.(tier) ?? 1,
+    const rt = renderTier(tier, mask, opts.refine ?? true);
+    anyRefined ||= rt.refined;
+    meshes.push(buildTerrainMesh(rt.tier, {
+      stride: opts.strideFor?.(rt.tier) ?? 1,
       skipRect,
-      skipCell: mask ? seaQuad(mask) : null
+      skipCell: rt.skipCell
     }));
     const mesh = meshes[meshes.length - 1];
     if (mesh.triangles === 0) {
@@ -43805,7 +44033,7 @@ function buildTerrain(pack, strideFor2) {
     } else if (mask) {
       const n2 = mask.rows * mask.cols;
       notes.push(
-        `${tier.name}: ${tier.step} m 격자 · 바다 ${(100 * mask.seaCells / n2).toFixed(0)}%` + (mask.missingCells > 0 ? ` · 결측 ${(100 * mask.missingCells / n2).toFixed(1)}%(구멍으로 둡니다)` : "")
+        `${tier.name}: ${tier.step} m 격자${rt.refined ? `(그릴 때 ${rt.tier.step} m로 세분)` : ""} · 바다 ${(100 * mask.seaCells / n2).toFixed(0)}%` + (mask.missingCells > 0 ? ` · 결측 ${(100 * mask.missingCells / n2).toFixed(1)}%(구멍으로 둡니다)` : "")
       );
     }
   }
@@ -43828,6 +44056,9 @@ function buildTerrain(pack, strideFor2) {
   }
   notes.push(
     "지형 색은 꼴(경사·표고·볼록도·해안 거리)로 판정한 지표 피복 — 논밭·숲·마을·갯벌·암반 — 의 절차 무늬이며 영상지도가 아닙니다. 필지·지붕·나무 하나하나는 표시용이고 실제 지표 피복이 아닙니다. 해안 둘레 바다의 낮은 턱(원자료가 얕은 바다를 거친 표고로 메운 자리)은 갯벌로 칠합니다."
+  );
+  notes.push(
+    "물가선은 바다 쪽 첫 세 칸을 물속으로 이어 내려(땅 높이에 비례한 1~30 m의 표시용 수심 — 실제 수심이 아닙니다) 격자 꼭짓점의 톱니 대신 높이를 따라 그립니다." + (anyRefined ? " 외곽 격자는 그릴 때 3차 보간으로 두 배 촘촘히 해 작은 언덕을 둥글게 그립니다(원래 표본 범위를 넘지 않게 자릅니다). 지면 높이 판독은 두 경우 모두 원자료 격자를 씁니다." : " 지면 높이 판독은 원자료 격자를 씁니다.")
   );
   notes.push(
     "산그늘은 표고 격자를 태양 쪽으로 훑어 그리고(격자 30·90 m만큼 무디며, 걸음 사이의 좁은 능선은 놓칠 수 있습니다), 골짜기의 어둑함은 반경 60·180·540 m의 상대 표고로 어림한 하늘 열림입니다 — 둘 다 표시용 근사입니다."
@@ -47279,7 +47510,10 @@ class SceneController {
       return;
     }
     const relief = reliefOf(pack.tiers);
-    const built = buildTerrain(pack, (t2) => Math.max(1, Math.round(GAME_FACET_M / t2.step)));
+    const built = buildTerrain(pack, {
+      strideFor: (t2) => Math.max(1, Math.round(GAME_FACET_M / t2.step)),
+      refine: false
+    });
     this.host.setGameTerrain(built.meshes, relief);
     const core = [...pack.tiers].sort((a, b) => a.step - b.step)[0];
     if (core == null) {

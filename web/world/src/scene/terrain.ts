@@ -18,6 +18,8 @@
  * 겹치면 어느 쪽이 진짜인지 화면이 말할 수 없다.
  */
 
+import { coastalDepths } from "../core/coastdepth.ts";
+import { REFINE_MIN_STEP_M, refineGrid } from "../core/refine.ts";
 import { CELL, buildSeaMasks, type TierMask } from "../core/seamask.ts";
 import {
   buildTerrainMesh, tierRect,
@@ -68,11 +70,60 @@ function boundingRect(rects: readonly NedRect[]): NedRect | null {
   return { n0, e0, n1, e1 };
 }
 
-export function buildTerrain(pack: TerrainPack, strideFor?: (t: Tier) => number): TerrainBuild {
+/** 그릴 격자 — 원자료 티어에서 **그림 전용**으로 만든다(판독은 원자료를 쓴다).
+ *
+ * 1. 바다 쪽 고리에 표시용 수심(`core/coastdepth.ts`) — 물가선이 꼭짓점 톱니가 아니라 높이를 따라 그어진다.
+ * 2. 간격이 `REFINE_MIN_STEP_M` 이상이면 3차 보간으로 2배 세분(`core/refine.ts`) — 외곽 언덕이 피라미드가 아니다.
+ *
+ * 세분한 티어의 바다 칸 판정은 원래 격자에서 한다 — 세분한 칸은 원래 칸 하나 안에 든다. */
+export function renderTier(
+  tier: Tier, mask: TierMask | undefined, refine: boolean,
+): { tier: Tier; skipCell: ((r0: number, c0: number, r1: number, c1: number) => boolean) | null; refined: boolean } {
+  const n = tier.rows * tier.cols;
+  let elev = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = tier.raw[i]!;
+    elev[i] = v === tier.nodata ? Number.NaN : tier.offset + v * tier.scale;
+  }
+  if (mask) elev = coastalDepths(elev, tier.rows, tier.cols, mask.cells);
+  const doRefine = refine && tier.step >= REFINE_MIN_STEP_M && tier.rows > 1 && tier.cols > 1;
+  let rows = tier.rows;
+  let cols = tier.cols;
+  let step = tier.step;
+  if (doRefine) {
+    const g = refineGrid(elev, rows, cols);
+    elev = g.elev; rows = g.rows; cols = g.cols; step = tier.step / 2;
+  }
+  const raw = new Uint16Array(rows * cols);
+  for (let i = 0; i < raw.length; i++) {
+    const z = elev[i]!;
+    raw[i] = Number.isFinite(z)
+      ? Math.min(Math.max(Math.round((z - tier.offset) / tier.scale), 0), tier.nodata - 1)
+      : tier.nodata;
+  }
+  const out: Tier = { ...tier, rows, cols, step, raw };
+  if (!mask) return { tier: out, skipCell: null, refined: doRefine };
+  const sea = seaQuad(mask);
+  return {
+    tier: out,
+    // 세분 격자 (r, c) → 원래 격자 (r/2, c/2). 세분한 칸은 원래 칸 하나 안에 들므로 내림·올림이 그 칸이다.
+    skipCell: doRefine
+      ? (r0, c0, r1, c1) => sea(r0 >> 1, c0 >> 1, (r1 + 1) >> 1, (c1 + 1) >> 1)
+      : sea,
+    refined: doRefine,
+  };
+}
+
+/** @param opts.strideFor 그릴 격자(세분 뒤)에 걸 솎기 — 게임 모드의 로우폴리
+ *  @param opts.refine 외곽 세분 여부(기본 참). 게임 모드는 낱면이 곧 문법이라 끈다. */
+export function buildTerrain(
+  pack: TerrainPack, opts: { strideFor?: (t: Tier) => number; refine?: boolean } = {},
+): TerrainBuild {
   const masks = buildSeaMasks(pack.tiers);
   const inner = [...pack.tiers].sort(byStepAsc);
   const meshes: TerrainMesh[] = [];
   const notes: string[] = [];
+  let anyRefined = false;
 
   for (let i = 0; i < inner.length; i++) {
     const tier = inner[i]!;
@@ -86,10 +137,12 @@ export function buildTerrain(pack: TerrainPack, strideFor?: (t: Tier) => number)
     // CLI에서 그대로 받아들여지는데, 그러면 8~12 km 고리가 두 번 그려져 z-fighting이 난다.
     // 합집합의 경계 사각형은 그 전제 없이도 "이미 덮인 곳"을 덮는다.
     const skipRect = boundingRect(inner.slice(0, i).map(tierRect));
-    meshes.push(buildTerrainMesh(tier, {
-      stride: strideFor?.(tier) ?? 1,
+    const rt = renderTier(tier, mask, opts.refine ?? true);
+    anyRefined ||= rt.refined;
+    meshes.push(buildTerrainMesh(rt.tier, {
+      stride: opts.strideFor?.(rt.tier) ?? 1,
       skipRect,
-      skipCell: mask ? seaQuad(mask) : null,
+      skipCell: rt.skipCell,
     }));
 
     const mesh = meshes[meshes.length - 1]!;
@@ -99,7 +152,8 @@ export function buildTerrain(pack: TerrainPack, strideFor?: (t: Tier) => number)
     } else if (mask) {
       const n = mask.rows * mask.cols;
       notes.push(
-        `${tier.name}: ${tier.step} m 격자 · 바다 ${((100 * mask.seaCells) / n).toFixed(0)}%`
+        `${tier.name}: ${tier.step} m 격자${rt.refined ? `(그릴 때 ${rt.tier.step} m로 세분)` : ""}`
+        + ` · 바다 ${((100 * mask.seaCells) / n).toFixed(0)}%`
         + (mask.missingCells > 0
           ? ` · 결측 ${((100 * mask.missingCells) / n).toFixed(1)}%(구멍으로 둡니다)` : ""),
       );
@@ -137,6 +191,14 @@ export function buildTerrain(pack: TerrainPack, strideFor?: (t: Tier) => number)
     "지형 색은 꼴(경사·표고·볼록도·해안 거리)로 판정한 지표 피복 — 논밭·숲·마을·갯벌·암반 — 의 "
     + "절차 무늬이며 영상지도가 아닙니다. 필지·지붕·나무 하나하나는 표시용이고 실제 지표 피복이 "
     + "아닙니다. 해안 둘레 바다의 낮은 턱(원자료가 얕은 바다를 거친 표고로 메운 자리)은 갯벌로 칠합니다.",
+  );
+  notes.push(
+    "물가선은 바다 쪽 첫 세 칸을 물속으로 이어 내려(땅 높이에 비례한 1~30 m의 표시용 수심 — 실제 수심이 "
+    + "아닙니다) 격자 꼭짓점의 톱니 대신 높이를 따라 그립니다."
+    + (anyRefined
+      ? " 외곽 격자는 그릴 때 3차 보간으로 두 배 촘촘히 해 작은 언덕을 둥글게 그립니다(원래 표본 범위를 "
+        + "넘지 않게 자릅니다). 지면 높이 판독은 두 경우 모두 원자료 격자를 씁니다."
+      : " 지면 높이 판독은 원자료 격자를 씁니다."),
   );
   notes.push(
     "산그늘은 표고 격자를 태양 쪽으로 훑어 그리고(격자 30·90 m만큼 무디며, 걸음 사이의 좁은 능선은 "

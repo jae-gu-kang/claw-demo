@@ -16,11 +16,11 @@
  */
 
 import {
-  ACESFilmicToneMapping, BufferAttribute, BufferGeometry, ClampToEdgeWrapping, Color, DataTexture,
+  ACESFilmicToneMapping, Box3, BufferAttribute, BufferGeometry, ClampToEdgeWrapping, Color, DataTexture,
   DataUtils, DirectionalLight, HalfFloatType, LinearFilter,
   PCFSoftShadowMap,
   Group, HemisphereLight, LineBasicMaterial, LineSegments, Matrix4, Mesh,
-  MeshStandardMaterial, PerspectiveCamera, Raycaster, RedFormat, Scene, SphereGeometry,
+  MeshStandardMaterial, PerspectiveCamera, Raycaster, RedFormat, Scene, Sphere, SphereGeometry,
   SRGBColorSpace, Vector2, Vector3, Vector4,
   WebGLRenderer,
 } from "three";
@@ -34,6 +34,7 @@ import {
 } from "./atmosphere.ts";
 import { applyGroundDetail } from "./materials.ts";
 import { gameRamp } from "../core/gamestyle.ts";
+import { chunkIndices, chunkQuads } from "../core/terrainchunks.ts";
 import { terrainShade } from "../core/terrainshade.ts";
 import type { RunwaySurface } from "../core/runway.ts";
 import type { CoastField } from "../core/coastfield.ts";
@@ -413,11 +414,29 @@ export class SceneHost {
         ...cloudUniforms, ...atmosphereUniforms, ...this.ocean.coastUniforms, ...this.groundUniforms,
       });
       applyAerialPerspective(mat);
-      const mesh = new Mesh(geo, mat);
-      // 기체·지상 장비의 그림자 맵을 받는다. 지형 능선의 그림자는 그림자 맵이 아니라 표고
-      // 텍스처를 훑어 따로 그린다(30 km 도메인에 2048 맵이면 텍셀이 15 m라 계단이 된다).
-      mesh.receiveShadow = true;
-      this.groups.terrain.add(mesh);
+      // **조각으로 나눠 단다**(core/terrainchunks.ts) — 시야 판정이 조각마다 걸린다. 정점 속성은 원래
+      // 지오메트리의 것을 그대로 꽂아 공유하고(GPU 버퍼 한 벌), 인덱스와 경계구만 조각마다 따로다.
+      // 경계구를 손으로 넣는 이유: three는 비어 있으면 **위치 속성 전체**에서 구하므로, 공유 속성이면
+      // 모든 조각이 장 전체 크기의 구를 갖고 시야 판정이 무의미해진다.
+      const pos = geo.getAttribute("position") as BufferAttribute;
+      const box = new Box3();
+      const v = new Vector3();
+      for (const ch of chunkIndices(geo.getIndex()!.array, p.cols, chunkQuads(p.step))) {
+        box.makeEmpty();
+        for (let k = 0; k < ch.indices.length; k++) box.expandByPoint(v.fromBufferAttribute(pos, ch.indices[k]!));
+        const g = new BufferGeometry();
+        g.setAttribute("position", pos);
+        g.setAttribute("normal", geo.getAttribute("normal"));
+        g.setAttribute("aTerrain", geo.getAttribute("aTerrain"));
+        g.setIndex(new BufferAttribute(ch.indices, 1));
+        g.boundingBox = box.clone();
+        g.boundingSphere = box.getBoundingSphere(new Sphere());
+        const mesh = new Mesh(g, mat);
+        // 기체·지상 장비의 그림자 맵을 받는다. 지형 능선의 그림자는 그림자 맵이 아니라 표고
+        // 텍스처를 훑어 따로 그린다(30 km 도메인에 2048 맵이면 텍셀이 15 m라 계단이 된다).
+        mesh.receiveShadow = true;
+        this.groups.terrain.add(mesh);
+      }
     }
   }
 

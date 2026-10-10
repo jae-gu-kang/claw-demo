@@ -684,7 +684,10 @@ export class SceneController {
     const relief = reliefOf(pack.tiers);
     // 낱면이 GAME_FACET_M쯤 되게 촘촘한 티어를 스트라이드로 성기게 한다 — 로우폴리는
     // 해상도를 버리는 것이 곧 문법이고, 형상 원본은 같은 팩이다(캡션 몫).
-    const built = buildTerrain(pack, (t) => Math.max(1, Math.round(GAME_FACET_M / t.step)));
+    // 게임은 낱면이 곧 문법이라 세분하지 않는다 — 물가선의 물속 이음은 실사와 같이 받는다
+    const built = buildTerrain(pack, {
+      strideFor: (t) => Math.max(1, Math.round(GAME_FACET_M / t.step)), refine: false,
+    });
     this.host.setGameTerrain(built.meshes, relief);
     const core = [...pack.tiers].sort((a, b) => a.step - b.step)[0];
     if (core == null) {
