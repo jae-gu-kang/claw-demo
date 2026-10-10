@@ -39450,75 +39450,6 @@ function buildPropsGroup(field) {
   }
   return { group, count };
 }
-const RUNWAY_LINE_LIFT_M = 0.15;
-const DECLINATION_RANGE_DEG = [-10, -6];
-function runwayDesignation(headingRad) {
-  if (!Number.isFinite(headingRad)) return null;
-  const at = (declDeg) => {
-    const mag = ((headingRad * 180 / Math.PI - declDeg) % 360 + 360) % 360;
-    const n2 = Math.round(mag / 10) % 36;
-    return n2 === 0 ? 36 : n2;
-  };
-  const near = at(DECLINATION_RANGE_DEG[0]);
-  if (near !== at(DECLINATION_RANGE_DEG[1])) return null;
-  return [near, (near + 17) % 36 + 1];
-}
-const num$3 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
-const fmtM = (v2) => String(Number(v2.toFixed(1)));
-function runwayDrawing(rw, width, opts = {}) {
-  const r2 = rw ?? null;
-  const h = num$3(r2?.heading);
-  const L2 = num$3(r2?.length);
-  if (h === null || L2 === null) return null;
-  const d = -((num$3(r2?.elevation) ?? 0) + RUNWAY_LINE_LIFT_M);
-  const [cn, ce2] = [Math.cos(h), Math.sin(h)];
-  const n1 = cn * L2;
-  const e1 = ce2 * L2;
-  const seg = (a, b) => new Float32Array([a[0], a[1], d, b[0], b[1], d]);
-  const center = seg([0, 0], [n1, e1]);
-  if (!("width" in width)) {
-    return { segments: [center], surface: null, note: `활주로는 중심선만 그립니다 — 폭을 모릅니다: ${width.error}.` };
-  }
-  const source = `폭 ${fmtM(width.width)} m는 ${width.source} 값입니다(결과에는 폭이 없어, 이 런의 활주로가 제원의 활주로와 같을 때만 씁니다)`;
-  if (!opts.paint) {
-    const half = width.width / 2;
-    const [rn, re2] = [-ce2 * half, cn * half];
-    const at = (n2, e, side) => [n2 + side * rn, e + side * re2];
-    return {
-      segments: [
-        center,
-        seg(at(0, 0, -1), at(0, 0, 1)),
-        // 시단
-        seg(at(n1, e1, -1), at(n1, e1, 1)),
-        // 종단
-        seg(at(0, 0, -1), at(n1, e1, -1)),
-        // 왼 가장자리
-        seg(at(0, 0, 1), at(n1, e1, 1))
-        // 오른 가장자리
-      ],
-      surface: null,
-      note: `활주로: 중심선·시단·종단·양 가장자리를 선으로 긋습니다 — ${source}. 지형이 없어 포장면과 도색은 칠하지 않습니다.`
-    };
-  }
-  const overrun = Math.max(num$3(width.overrun) ?? 0, 0);
-  const designation = runwayDesignation(h);
-  const two = (n2) => String(n2).padStart(2, "0");
-  const marks = [
-    "시단 줄무늬",
-    ...designation ? [`번호 ${two(designation[0])}/${two(designation[1])}`] : [],
-    "중심선 점선",
-    "측면 표지",
-    "조준점"
-  ];
-  return {
-    segments: [],
-    surface: { heading: h, length: L2, width: width.width, overrun, designation },
-    note: `활주로: 포장면과 도색(${marks.join("·")}${overrun > 0 ? `, 양 끝 과주로 ${fmtM(overrun)} m의 노란 갈매기표` : ""})을 지면에 칠합니다. ${source}. 도색의 배치와 치수는 ICAO 부속서 14의 표준이고 실제 도색을 잰 것이 아닙니다` + (designation ? " — 번호는 진방위와 한반도 자편각 범위(서편 6~10°)로 셈했습니다." : ".")
-  };
-}
-function designationDigits(d) {
-  return d ? [Math.floor(d[0] / 10), d[0] % 10, Math.floor(d[1] / 10), d[1] % 10] : [-1, -1, -1, -1];
-}
 const FLOOR_FIT_M = 3;
 const RUNWAY_FLOOR = {
   /** 축에서 양옆으로 평평하게 펴는 거리 [m] */
@@ -39528,13 +39459,13 @@ const RUNWAY_FLOOR = {
   /** 그 바깥에서 원자료로 돌아가는 폭 [m] — 30 m 격자 세 칸 */
   blendM: 90
 };
-const num$2 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+const num$3 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
 function runwayFloorOf(rw) {
   const r2 = rw ?? null;
-  const heading = num$2(r2?.heading);
-  const length = num$2(r2?.length);
+  const heading = num$3(r2?.heading);
+  const length = num$3(r2?.length);
   if (heading === null || length === null || length <= 0) return null;
-  return { heading, length, elevation: num$2(r2?.elevation) ?? 0 };
+  return { heading, length, elevation: num$3(r2?.elevation) ?? 0 };
 }
 function sameFloor(a, b) {
   if (a === null || b === null) return a === b;
@@ -39619,6 +39550,83 @@ function floorGrid(elev, rows, cols, n0, e0, step2, f2, keep = () => true) {
     }
   }
   return { elev: out, touched, source: floorSource(elev, rows, cols, n0, e0, step2, f2, keep) };
+}
+const RUNWAY_LINE_LIFT_M = 0.15;
+const DECLINATION_RANGE_DEG = [-10, -6];
+function runwayDesignation(headingRad) {
+  if (!Number.isFinite(headingRad)) return null;
+  const at = (declDeg) => {
+    const mag = ((headingRad * 180 / Math.PI - declDeg) % 360 + 360) % 360;
+    const n2 = Math.round(mag / 10) % 36;
+    return n2 === 0 ? 36 : n2;
+  };
+  const near = at(DECLINATION_RANGE_DEG[0]);
+  if (near !== at(DECLINATION_RANGE_DEG[1])) return null;
+  return [near, (near + 17) % 36 + 1];
+}
+const num$2 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+const fmtM = (v2) => String(Number(v2.toFixed(1)));
+function runwayDrawing(rw, width, opts = {}) {
+  const r2 = rw ?? null;
+  const h = num$2(r2?.heading);
+  const L2 = num$2(r2?.length);
+  if (h === null || L2 === null) return null;
+  const d = -((num$2(r2?.elevation) ?? 0) + RUNWAY_LINE_LIFT_M);
+  const [cn, ce2] = [Math.cos(h), Math.sin(h)];
+  const n1 = cn * L2;
+  const e1 = ce2 * L2;
+  const seg = (a, b) => new Float32Array([a[0], a[1], d, b[0], b[1], d]);
+  const center = seg([0, 0], [n1, e1]);
+  if (!("width" in width)) {
+    return { segments: [center], surface: null, note: `활주로는 중심선만 그립니다 — 폭을 모릅니다: ${width.error}.` };
+  }
+  const source = `폭 ${fmtM(width.width)} m는 ${width.source} 값입니다(결과에는 폭이 없어, 이 런의 활주로가 제원의 활주로와 같을 때만 씁니다)`;
+  if (!opts.paint) {
+    const half = width.width / 2;
+    const [rn, re2] = [-ce2 * half, cn * half];
+    const at = (n2, e, side) => [n2 + side * rn, e + side * re2];
+    return {
+      segments: [
+        center,
+        seg(at(0, 0, -1), at(0, 0, 1)),
+        // 시단
+        seg(at(n1, e1, -1), at(n1, e1, 1)),
+        // 종단
+        seg(at(0, 0, -1), at(n1, e1, -1)),
+        // 왼 가장자리
+        seg(at(0, 0, 1), at(n1, e1, 1))
+        // 오른 가장자리
+      ],
+      surface: null,
+      note: `활주로: 중심선·시단·종단·양 가장자리를 선으로 긋습니다 — ${source}. 활주로 자리에 지형이 없어 포장면과 도색은 칠하지 않습니다.`
+    };
+  }
+  const overrun = Math.max(num$2(width.overrun) ?? 0, 0);
+  const designation = runwayDesignation(h);
+  const two = (n2) => String(n2).padStart(2, "0");
+  const marks = [
+    "시단 줄무늬",
+    ...designation ? [`번호 ${two(designation[0])}/${two(designation[1])}`] : [],
+    "중심선 점선",
+    "측면 표지",
+    "조준점"
+  ];
+  return {
+    segments: [],
+    surface: { heading: h, length: L2, width: width.width, overrun, designation },
+    note: `활주로: 포장면과 도색(${marks.join("·")}${overrun > 0 ? `, 양 끝 과주로 ${fmtM(overrun)} m의 노란 갈매기표` : ""})을 지면에 칠합니다. ${source}. 도색의 배치와 치수는 ICAO 부속서 14의 표준이고 실제 도색을 잰 것이 아닙니다` + (designation ? " — 번호는 진방위와 한반도 자편각 범위(서편 6~10°)로 셈했습니다." : ".")
+  };
+}
+function designationDigits(d) {
+  return d ? [Math.floor(d[0] / 10), d[0] % 10, Math.floor(d[1] / 10), d[1] % 10] : [-1, -1, -1, -1];
+}
+function runwayUniformValues(s) {
+  return {
+    runway: [Math.cos(s.heading), Math.sin(s.heading), s.length, s.width / 2],
+    // 착륙대는 펴진 바닥과 **같은 구역**이다 — 두 수가 갈리면 풀밭 끝에서 땅이 기운다(core/runwayfloor.ts)
+    area: [s.overrun, RUNWAY_FLOOR.halfWidthM, RUNWAY_FLOOR.endM, 0],
+    num: designationDigits(s.designation)
+  };
 }
 const CLOUD_UNIFORM_DECL = (
   /* glsl */
@@ -43950,9 +43958,10 @@ class SceneHost {
       u2.uRunwayOn.value = 0;
       return;
     }
-    u2.uRunway.value.set(Math.cos(s.heading), Math.sin(s.heading), s.length, s.width / 2);
-    u2.uRunwayArea.value.set(s.overrun, RUNWAY_FLOOR.halfWidthM, RUNWAY_FLOOR.endM, 0);
-    u2.uRunwayNum.value.set(...designationDigits(s.designation));
+    const v2 = runwayUniformValues(s);
+    u2.uRunway.value.set(...v2.runway);
+    u2.uRunwayArea.value.set(...v2.area);
+    u2.uRunwayNum.value.set(...v2.num);
     u2.uRunwayOn.value = 1;
   }
   /** 표고 텍스처 — 가장 촘촘한 장과 가장 넓은 장을 반정밀도로 올린다(지형 자체 그림자용).
@@ -44563,7 +44572,7 @@ function buildTerrain(pack, opts = {}) {
     "산그늘은 표고 격자를 태양 쪽으로 훑어 그리고(격자 30·90 m만큼 무디며, 걸음 사이의 좁은 능선은 놓칠 수 있습니다), 골짜기의 어둑함은 반경 60·180·540 m의 상대 표고로 어림한 하늘 열림입니다 — 둘 다 표시용 근사입니다."
   );
   const groundTiers = floor ? pack.tiers.map((t2) => groundTier(t2, masks.get(t2.name), floor)) : pack.tiers;
-  return { meshes, masks, notes, floor, groundTiers };
+  return { meshes, masks, notes, floor, groundTiers, runwayCovered: floorSrc !== null };
 }
 function toTrianglesDrawMode(geometry, drawMode) {
   if (drawMode === TrianglesDrawMode) {
@@ -47822,10 +47831,12 @@ class SceneController {
     const agree = originsAgree(this.pack?.origin, body.meta?.origin);
     this.terrain = this.pack && agree.ok ? this.pack : null;
     this.airfield = runwayFloorOf(body.meta?.runway);
+    let paint = false;
     if (this.terrain) {
       const built = buildTerrain(this.terrain, { floor: this.airfield });
       this.floor = built.floor;
       this.groundTiers = built.groundTiers;
+      paint = built.runwayCovered;
       this.host.setTerrain(built.meshes);
       notes.push(...built.notes);
       const tiers = this.terrain.tiers.map((tier) => ({ tier, mask: built.masks.get(tier.name) })).filter((x2) => x2.mask !== void 0);
@@ -47849,7 +47860,7 @@ class SceneController {
     }
     const rw = body.meta?.runway;
     const rwLines = [];
-    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw), { paint: this.terrain !== null });
+    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw), { paint });
     if (rwDraw) {
       for (const points2 of rwDraw.segments) rwLines.push({ points: points2, color: 16777215 });
       notes.push(rwDraw.note);

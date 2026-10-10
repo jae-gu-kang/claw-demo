@@ -39,6 +39,10 @@ export interface TerrainBuild {
   /** 지면 판독용 티어 — 원자료 티어(팩 순서)에 그림과 **같은 표본**의 바닥을 얹었다(물가 땅은 그대로). 바닥이 없으면
    *  원자료 티어 그대로(같은 객체). 판독이 원자료에 바닥 함수를 따로 얹으면 물가에서 그림과 갈린다(v1.92 리뷰) */
   groundTiers: Tier[];
+  /** 활주로 자리(펴는 구역)에 그린 땅이 있나 — 도색을 칠할 땅이다. 바닥을 펴든 못 펴든(표고가 안 맞아도) 땅이 있으면
+   *  참이고, 활주로를 모르거나 지형이 그 자리를 안 덮으면(바다·결측뿐이어도) 거짓이다 — 그때 호출측은 선으로 긋는다
+   *  (core/runway.ts). 팩이 있다는 것만으로 칠하면 그 자리가 비었을 때 도색도 선도 없이 캡션만 남는다(v1.94 리뷰) */
+  runwayCovered: boolean;
 }
 
 /** 칸이 통째로 바다인가 — **덮는 범위를 전부 본다.**
@@ -292,5 +296,5 @@ export function buildTerrain(
     + "둘 다 표시용 근사입니다.",
   );
   const groundTiers = floor ? pack.tiers.map((t) => groundTier(t, masks.get(t.name), floor)) : pack.tiers;
-  return { meshes, masks, notes, floor, groundTiers };
+  return { meshes, masks, notes, floor, groundTiers, runwayCovered: floorSrc !== null };
 }

@@ -32,6 +32,7 @@
  */
 
 import type { RunwayWidth } from "../lib/replay.ts";
+import { RUNWAY_FLOOR } from "./runwayfloor.ts";
 
 /** 흰 선을 활주로 표고보다 이만큼 띄운다 [m] — 표시 값. 지형은 활주로 둘레를 정확히 활주로 표고로 펴므로
  *  (core/runwayfloor.ts) 같은 높이에 그으면 선과 면이 깊이를 다퉈 깜빡이며 끊긴다. 근거리 패스의 깊이 눈금이
@@ -56,7 +57,8 @@ export function runwayDesignation(headingRad: number): [number, number] | null {
 }
 
 /** 활주로 포장면 — 지면 셰이더가 아스팔트·도색·비행장 풀밭을 칠할 자리(shaders/runway.ts). NED 원점에서
- *  heading 방향 length 구간, 폭 width. **폭을 알 때만** 있다 — 모르면 포장면을 지어내지 않는다. */
+ *  heading 방향 length 구간, 폭 width. **폭을 알고 칠할 땅이 있을 때만** 있다 — 폭을 모르면 포장면을 지어내지 않고,
+ *  땅이 없으면 선으로 긋는다(`runwayDrawing`). */
 export interface RunwaySurface {
   /** 활주로 축 방위 [rad] (북에서 동으로) */ heading: number;
   /** [m] */ length: number;
@@ -67,9 +69,10 @@ export interface RunwaySurface {
 }
 
 export interface RunwayDrawing {
-  /** 두 점짜리 선분들 — 각각 [n0, e0, d0, n1, e1, d1]. 폭을 모를 때의 중심선뿐이다(폭을 알면 도색이 그린다). */
+  /** 두 점짜리 선분들 — 각각 [n0, e0, d0, n1, e1, d1]. 폭을 모르면 중심선 하나, 칠할 땅이 없으면 중심선·시단·종단·
+   *  양 가장자리 다섯이고, 도색할 때는 비어 있다(도색이 같은 자리를 그린다). */
   segments: Float32Array[];
-  /** 포장면 — 폭을 알 때만. 없으면 null. */
+  /** 포장면 — 폭을 알고 칠할 땅이 있을 때만. 아니면 null. */
   surface: RunwaySurface | null;
   /** 캡션 한 줄 — 무엇을 그렸고 폭이 어디서 왔는지(또는 왜 모르는지). */
   note: string;
@@ -81,7 +84,8 @@ const num = (v: unknown): number | null =>
 const fmtM = (v: number) => String(Number(v.toFixed(1)));
 
 /** 결과의 활주로(`meta.runway`) + 그 폭 판정 → 그리기. 방위·길이가 없으면 null(그리지 않는다).
- *  `opts.paint` — 칠할 땅(지형)이 있다. 기본은 거짓(선으로 긋는다). */
+ *  `opts.paint` — 칠할 땅이 있다: 지형이 활주로 자리를 덮는다(scene/terrain.ts `runwayCovered`). 기본은 거짓(선으로
+ *  긋는다). */
 export function runwayDrawing(
   rw: unknown, width: RunwayWidth, opts: { paint?: boolean } = {},
 ): RunwayDrawing | null {
@@ -114,8 +118,8 @@ export function runwayDrawing(
         seg(at(0, 0, 1), at(n1, e1, 1)), // 오른 가장자리
       ],
       surface: null,
-      note: `활주로: 중심선·시단·종단·양 가장자리를 선으로 긋습니다 — ${source}. 지형이 없어 포장면과 도색은 `
-        + "칠하지 않습니다.",
+      note: `활주로: 중심선·시단·종단·양 가장자리를 선으로 긋습니다 — ${source}. 활주로 자리에 지형이 없어 포장면과 `
+        + "도색은 칠하지 않습니다.",
     };
   }
   const overrun = Math.max(num(width.overrun) ?? 0, 0);
@@ -136,4 +140,19 @@ export function runwayDrawing(
  *  -1 넷이고 셰이더가 번호를 칠하지 않는다. */
 export function designationDigits(d: [number, number] | null): [number, number, number, number] {
   return d ? [Math.floor(d[0] / 10), d[0] % 10, Math.floor(d[1] / 10), d[1] % 10] : [-1, -1, -1, -1];
+}
+
+/** 포장면 → 셰이더 유니폼 값(shaders/runway.ts 선언의 자리 순서) — `SceneHost.setRunwaySurface`가 그대로 싣는다.
+ *  자리가 셰이더와 갈리면(축의 cos·sin, 번호의 십·일) 화면이 조용히 틀리므로 여기서 한 번 정하고 시험한다. */
+export function runwayUniformValues(s: RunwaySurface): {
+  runway: [number, number, number, number];
+  area: [number, number, number, number];
+  num: [number, number, number, number];
+} {
+  return {
+    runway: [Math.cos(s.heading), Math.sin(s.heading), s.length, s.width / 2],
+    // 착륙대는 펴진 바닥과 **같은 구역**이다 — 두 수가 갈리면 풀밭 끝에서 땅이 기운다(core/runwayfloor.ts)
+    area: [s.overrun, RUNWAY_FLOOR.halfWidthM, RUNWAY_FLOOR.endM, 0],
+    num: designationDigits(s.designation),
+  };
 }

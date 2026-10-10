@@ -176,6 +176,18 @@ describe("지형 조립 — 활주로 바닥", () => {
     assert.ok(buildTerrain(pack(far), { floor: FLOOR }).notes.some((s) => /지형이 활주로 자리를 덮지 않아 펴지 않았습니다/.test(s)));
   });
 
+  it("활주로 자리에 그린 땅이 있으면 칠할 땅이 있다(runwayCovered) — 바닥을 못 펴도 참, 모르거나 비었으면 거짓", () => {
+    // 팩이 있다는 것만으로 도색을 고르면 그 자리가 바다·결측·격자 밖일 때 도색도 선도 없이 캡션만 남는다(v1.94 리뷰)
+    assert.equal(buildTerrain(pack(src), { floor: FLOOR }).runwayCovered, true);
+    assert.equal(buildTerrain(pack(src), { floor: { ...FLOOR, elevation: 40 } }).runwayCovered, true, "표고가 안 맞아 안 펴도 땅은 있다");
+    assert.equal(buildTerrain(pack(src)).runwayCovered, false, "활주로를 모른다");
+    assert.equal(buildTerrain(pack({ ...src, n0: 20_000, e0: 20_000 }), { floor: FLOOR }).runwayCovered, false, "격자 밖");
+    const sea = { ...src, raw: new Uint16Array(src.raw.length).fill(Math.round((0 - OFFSET) / SCALE)) };
+    assert.equal(buildTerrain(pack(sea), { floor: FLOOR }).runwayCovered, false, "그 자리가 온통 바다");
+    const holes = { ...src, raw: new Uint16Array(src.raw.length).fill(NODATA) };
+    assert.equal(buildTerrain(pack(holes), { floor: FLOOR }).runwayCovered, false, "그 자리가 온통 결측");
+  });
+
   it("물가는 펴지 않는다 — 해안에 붙은 활주로에서 물가선이 꼭짓점 톱니로 돌아가지 않게", () => {
     // 간척지 위로 활주로가 지난다. 표고 0(고흥·폼 기본값)으로 물가 땅까지 펴면 그 꼭짓점이 해수면에 붙어 물가선이
     // 꼭짓점을 지난다(리뷰가 시험 섬에서 확인 — 물가선 위치 0.00). 그래서 바다에 맞닿은 땅과 바다는 둔다

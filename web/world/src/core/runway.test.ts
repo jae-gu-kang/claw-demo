@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  DECLINATION_RANGE_DEG, RUNWAY_LINE_LIFT_M, designationDigits, runwayDesignation, runwayDrawing,
+  DECLINATION_RANGE_DEG, RUNWAY_LINE_LIFT_M, designationDigits, runwayDesignation, runwayDrawing, runwayUniformValues,
 } from "./runway.ts";
+import { RUNWAY_FLOOR } from "./runwayfloor.ts";
 import { siteRunwayWidth } from "../lib/replay.ts";
 import { GOHEUNG } from "../../../js/lib/site.js";
 
@@ -49,9 +50,19 @@ describe("활주로 그리기 — 칠할 땅이 있으면 도색, 없으면 선"
     // 가로선은 중심선에 수직이고, 가장자리는 중심선에서 반폭만큼 떨어져 나란하다
     const ax = [Math.cos(GOHEUNG_RW.heading), Math.sin(GOHEUNG_RW.heading)];
     near((bar0[3]! - bar0[0]!) * ax[0]! + (bar0[4]! - bar0[1]!) * ax[1]!, 0, "수직", 1e-3);
+    // 자리도 본다 — 길이·수직만 보면 종단 막대를 시단에 긋거나 두 가장자리를 한쪽에 그어도 통과했다(v1.94 리뷰 변이)
+    const along = (x: number, y: number) => x * ax[0]! + y * ax[1]!;
     const lateral = (x: number, y: number) => -(x * ax[1]!) + y * ax[0]!;
-    near(Math.abs(lateral(edgeL[0]!, edgeL[1]!)), 22.5, "왼 가장자리 횡거리", 1e-3);
-    near(Math.abs(lateral(edgeR[3]!, edgeR[4]!)), 22.5, "오른 가장자리 횡거리", 1e-3);
+    for (const [seg, a, what] of [[bar0, 0, "시단 막대"], [bar1, 1205, "종단 막대"]] as const) {
+      near(along(seg[0]!, seg[1]!), a, `${what} 자리`, 1e-3);
+      near(along(seg[3]!, seg[4]!), a, `${what} 자리`, 1e-3);
+    }
+    for (const [seg, side, what] of [[edgeL, -1, "왼 가장자리"], [edgeR, 1, "오른 가장자리"]] as const) {
+      near(lateral(seg[0]!, seg[1]!), side * 22.5, `${what} 횡거리(오른쪽이 +)`, 1e-3);
+      near(lateral(seg[3]!, seg[4]!), side * 22.5, `${what} 횡거리(오른쪽이 +)`, 1e-3);
+      near(along(seg[0]!, seg[1]!), 0, `${what} 시작`, 1e-3);
+      near(along(seg[3]!, seg[4]!), 1205, `${what} 끝`, 1e-3);
+    }
     assert.match(d.note, /폭 45 m는 고흥 시험장 제원 값입니다/);
     assert.match(d.note, /지형이 없어/);
     assert.doesNotMatch(d.note, /지면에 칠합니다/);
@@ -129,5 +140,18 @@ describe("designationDigits — 셰이더에 넘길 번호 자리", () => {
 
   it("번호를 모르면 -1 넷 — 셰이더가 번호를 칠하지 않는다", () => {
     assert.deepEqual(designationDigits(null), [-1, -1, -1, -1]);
+  });
+});
+
+describe("runwayUniformValues — 셰이더 유니폼 자리(SceneHost.setRunwaySurface가 그대로 싣는다)", () => {
+  it("축 (cos, sin, 길이, 반폭) · 착륙대 (과주로, 펴는 구역 반폭·끝 너머, 0) · 번호 (시단 쪽 십·일, 맞은편 십·일)", () => {
+    const s = runwayDrawing(GOHEUNG_RW, siteRunwayWidth(GOHEUNG_RW), { paint: true })!.surface!;
+    const v = runwayUniformValues(s);
+    const h = GOHEUNG_RW.heading;
+    assert.deepEqual(v.runway, [Math.cos(h), Math.sin(h), 1205, 22.5]);
+    // 풀밭은 펴진 바닥과 같은 구역이다 — 두 수가 갈리면 풀밭 끝에서 땅이 기운다
+    assert.deepEqual(v.area, [61, RUNWAY_FLOOR.halfWidthM, RUNWAY_FLOOR.endM, 0]);
+    assert.deepEqual(v.num, [0, 1, 1, 9], "01/19 — 자리를 바꾸면 10/91로 칠해진다");
+    assert.deepEqual(runwayUniformValues({ ...s, designation: null }).num, [-1, -1, -1, -1]);
   });
 });

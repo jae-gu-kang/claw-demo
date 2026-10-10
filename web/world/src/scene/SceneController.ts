@@ -442,12 +442,15 @@ export class SceneController {
     const agree = originsAgree(this.pack?.origin, body.meta?.origin);
     this.terrain = this.pack && agree.ok ? this.pack : null;
     this.airfield = runwayFloorOf(body.meta?.runway);
+    // 도색을 칠할 땅 — 지형이 활주로 자리를 덮을 때만. 팩이 있어도 그 자리가 바다·결측이면 선으로 긋는다
+    let paint = false;
     if (this.terrain) {
       // 활주로 바닥은 결과의 활주로에서 — 시뮬이 땅으로 쓰는 표고로 활주로 둘레를 편다. 그 표고가 그 자리 지형과
       // 맞을 때만 편다(buildTerrain이 정해 돌려준다) — 그릴 격자·게임 지형·지면 판독이 그 값을 같이 본다
       const built = buildTerrain(this.terrain, { floor: this.airfield });
       this.floor = built.floor;
       this.groundTiers = built.groundTiers;
+      paint = built.runwayCovered;
       this.host.setTerrain(built.meshes);
       notes.push(...built.notes);
       // 해안 거리장은 **지형과 같은 마스크에서** 나온다. 따로 판정하면 해안선이 두 벌이
@@ -482,10 +485,11 @@ export class SceneController {
     // --- 활주로: 폭을 알고 칠할 땅(지형)이 있으면 포장면·도색, 땅이 없으면 선, 폭을 모르면 중심선 하나 --- (원점에서
     // heading 방향 length 구간 — lib/site.js와 lib/replay.js가 이 규약을 전제로 판정한다). 폭·과주로는 결과에 없어
     // 시험장 제원에서 — 시뮬 탭 횡편차 판정과 같은 대조 한 자리(siteRunwayWidth)이고, 그 런의 활주로가 제원의
-    // 활주로가 아니면 중심선만(core/runway.ts). 도색은 지형 재질(실사·게임 둘 다)에만 있어 지형이 없으면 선으로 긋는다
+    // 활주로가 아니면 중심선만(core/runway.ts). 도색은 지형 재질(실사·게임 둘 다)에만 있어 활주로 자리에 지형이 없으면
+    // 선으로 긋는다(위에서 정한 paint)
     const rw = body.meta?.runway;
     const rwLines: { points: Float32Array; color: number }[] = [];
-    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw), { paint: this.terrain !== null });
+    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw), { paint });
     if (rwDraw) {
       // 선분마다 따로 — setRunwayLines는 한 목록을 꺾은선으로 잇는다
       for (const points of rwDraw.segments) rwLines.push({ points, color: 0xffffff });

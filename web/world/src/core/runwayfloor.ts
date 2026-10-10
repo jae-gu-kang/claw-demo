@@ -30,9 +30,10 @@
  *
  * ## 그림과 판독이 같은 함수를 쓴다
  *
- * 그릴 격자(scene/terrain.ts `renderTier`)와 지면 높이 판독(SceneController `groundElevationAt`)이 `floorElevation`
- * 한 자리를 본다 — 펴진 바닥 위에 선 기체가 「지면 −1」로 읽히면 화면이 자기 말과 어긋난다. 원자료 팩은 바꾸지
- * 않는다(그림 전용 격자에만 들어간다). 캡션이 그렇게 말한다(scene/terrain.ts).
+ * 그릴 격자(scene/terrain.ts `renderTier`)와 지면 높이 판독의 티어(`buildTerrain`의 `groundTiers` — SceneController
+ * `groundElevationAt`이 읽는다)가 같은 표본에 `floorElevation`을 얹는다 — 펴진 바닥 위에 선 기체가 「지면 −1」로
+ * 읽히면 화면이 자기 말과 어긋난다. 원자료 팩은 바꾸지 않는다(그릴 격자와 판독용 사본에만 들어간다). 캡션이 그렇게
+ * 말한다(scene/terrain.ts).
  */
 
 export interface RunwayFloor {

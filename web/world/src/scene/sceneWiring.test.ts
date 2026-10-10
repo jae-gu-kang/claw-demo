@@ -9,10 +9,18 @@ const fn = (name: string) =>
   src.match(new RegExp(`\\n  (?:private )?(?:async )?${name}\\([\\s\\S]*?\\n  \\}\\n`))?.[0] ?? "";
 
 describe("SceneController 배선", () => {
-  it("활주로는 제원 대조(siteRunwayWidth)의 폭·과주로로 core/runway.ts가 그린다 — 도색은 칠할 땅(지형)이 있을 때만", () => {
+  it("활주로는 제원 대조(siteRunwayWidth)의 폭·과주로로 core/runway.ts가 그린다 — 도색은 활주로 자리에 땅이 있을 때만", () => {
     const build = fn("buildScene");
     assert.ok(build, "buildScene이 없다");
-    assert.match(build, /runwayDrawing\(rw, siteRunwayWidth\(rw\), \{ paint: this\.terrain !== null \}\)/);
+    assert.match(build, /runwayDrawing\(rw, siteRunwayWidth\(rw\), \{ paint \}\)/);
+    // 칠할 땅은 지형 조립이 판정한다 — 팩이 있다는 것만으로 칠하면 그 자리가 비었을 때 도색도 선도 없다(v1.94 리뷰)
+    assert.match(build, /let paint = false;/);
+    assert.match(build, /paint = built\.runwayCovered;/);
+    // 그 판정은 이 결과의 지형을 정한 **뒤**다 — 활주로 블록이 앞서면 첫 결과가 초기값을 보고 지형 위에 선을 긋는다
+    // (v1.94 리뷰가 순서를 바꾼 변이로 확인 — 문구 대조만으로는 못 잡는다)
+    const at = (s: string) => build.indexOf(s);
+    assert.ok(at("this.terrain = ") >= 0 && at("this.terrain = ") < at("runwayDrawing("));
+    assert.ok(at("paint = built.runwayCovered") < at("runwayDrawing("));
     // 과주로를 제원에서 따로 읽으면 대조를 건너뛰어 다른 활주로에도 시험장 과주로가 붙는다(v1.92 리뷰)
     assert.doesNotMatch(src, /GOHEUNG\./);
     assert.doesNotMatch(build, /\* 22\b/, "옛 22 m 반폭 상수");
@@ -47,8 +55,9 @@ describe("SceneController 배선", () => {
     assert.match(fn("groundElevationAt"), /this\.terrainElevationAt\(pos\[0\], pos\[1\]\)/);
     const sampler = fn("terrainElevationAt");
     assert.match(sampler, /for \(const tier of this\.groundTiers\)/);
-    // 원자료에 바닥 함수를 따로 얹으면 물가에서 그림과 갈린다 — 판독용 티어만 읽는다
-    assert.doesNotMatch(sampler, /floorElevation/);
+    // 원자료에 바닥 함수를 따로 얹으면 물가에서 그림과 갈린다 — 판독용 티어만 읽는다. 컨트롤러 **어디서도** 다시
+    // 얹지 않는다(판독 함수 하나만 보면 groundElevationAt에 얹는 변이가 산다 — v1.94 리뷰)
+    assert.doesNotMatch(src, /floorElevation/);
   });
 
   it("게임 소품은 활주로 착륙대를 비운다 — 바닥을 못 펴도 활주로는 거기 칠해진다", () => {
@@ -118,7 +127,14 @@ describe("SceneHost 배선 — 활주로", () => {
     // 벌이 둘이면 setRunwaySurface가 한쪽만 고치고, 모드를 바꾸면 옛 활주로가 칠해진다
     assert.match(hostFn("setTerrain"), /\.\.\.this\.runwayUniforms,/);
     assert.match(hostFn("setGameTerrain"), /applyGameRunway\(mat, this\.runwayUniforms\);/);
-    assert.match(hostFn("setRunwaySurface"), /const u = this\.runwayUniforms;/);
+    const surface = hostFn("setRunwaySurface");
+    assert.match(surface, /const u = this\.runwayUniforms;/);
+    // 값의 자리 순서는 core/runway.ts runwayUniformValues가 정하고 시험한다 — 여기서는 그대로 싣기만 한다
+    // (호출측에서 번호 자리를 바꾸면 01이 10으로 칠해진다 — v1.94 리뷰가 변이로 확인)
+    assert.match(surface, /const v = runwayUniformValues\(s\);/);
+    assert.match(surface, /u\.uRunway\.value\.set\(\.\.\.v\.runway\);/);
+    assert.match(surface, /u\.uRunwayArea\.value\.set\(\.\.\.v\.area\);/);
+    assert.match(surface, /u\.uRunwayNum\.value\.set\(\.\.\.v\.num\);/);
     const ground = host.match(/private readonly groundUniforms = \{[\s\S]*?\n  \};/)?.[0] ?? "";
     assert.ok(ground, "groundUniforms가 없다");
     assert.doesNotMatch(ground, /uRunway/, "활주로 유니폼이 지면 벌에 또 있다");
