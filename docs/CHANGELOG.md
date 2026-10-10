@@ -24,6 +24,17 @@ v0.75부터는 축이 하나뿐이라 이 혼동이 없다.
 
 ## 현행
 
+### v1.82 — 게인 표를 실은 평가가 저장에서 죽던 v1.79 버그 수정 — 게인 탭 평가·쇼케이스 결함 시연이 전부 job error였다
+
+평가 라우트(`POST /influence/evaluate`)가 v1.79(3e4d0ab)부터 결과에 싣는 설계 입력 기록(`design_input`)을 `getattr(req, key)`로 꺼내
+`gain_tables`가 요청 모델(TableIn/PolyTableIn) 그대로 남았고, `to_jsonable`이 그걸 못 바꿔 저장(`json.dumps`)이 「Object of type TableIn
+is not JSON serializable」로 터져 **게인 표를 실어 보내는 평가 — 게인 탭 평가·쇼케이스 결함 시연 — 가 전부 job error로 끝났다**(이 경로를
+밟는 서버 시험이 없어 못 잡았고, 후속 ①의 결함 창 재측정 사슬이 처음 밟았다). 기록을 `req.model_dump(mode="json", include=보낸 형상 키)`로
+덤프해 순수 JSON으로 고치고, 격자 표 둘을 실은 평가가 저장까지 가며 표가 값 그대로 왕복하고 표 없는 요청엔 키가 없음을 시험으로
+고정했다(고치기 전 빨강 확인). **별건으로 남긴 둘째 버그**: 다항 표를 실은 평가는 엔진 `analysis/schedule.py table_smoothness`가 격자 표의
+`.axes`를 가정해 `_schedule_stage`에서 따로 죽는다(구조 분석은 다항 표를 받는데 평가는 못 받는다) — 엔진 수정·시험이 따로 필요하다.
+서버 610 통과, 골든 변화 0. 발견은 에이전트 AP, 수정은 AT.
+
 ### v1.81 — 이관 7b: 한계 안쪽 트림을 가리킨 계산 실패(`trim_inside_limit`)를 그 근거 해로 다시 푼다 — 출하 기체엔 없는 유형, 꾸민 정체로 확인
 
 v1.73이 미룬 둘째 계산 실패 유형(사용자 후속 ④). 솔버가 물리 한계 하나(스로틀 0/1 · 엘레본 끝)에 정확히 멈춰 미수렴인데 한계 고정

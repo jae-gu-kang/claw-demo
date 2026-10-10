@@ -1172,3 +1172,20 @@ def test_diagnose_echoes_criteria_source(client, wait_job):
         "result_id": rid, "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
         "criteria": {"margin": {"pm_min_deg": 50.0}}})
     assert r.status_code == 422 and REQUEST_CRITERIA_REJECTED in r.text, r.text[:300]
+
+
+def test_evaluate_with_gain_tables_saves_plain_json_design_input(client, wait_job):
+    """표를 실은 평가가 저장까지 간다 — v1.79의 design_input 기록이 요청 모델(TableIn/PolyTableIn)을 그대로 넣어
+    저장(json.dumps)이 터지고 표를 보내는 평가(게인 탭·쇼케이스 결함 시연)가 전부 job error였다. 기록은 순수 JSON
+    으로 왕복하고, 표를 안 보낸 요청엔 키 자체가 없다. (다항 표는 평가 엔진 단계에서 따로 막혀 여기선 격자 표만 쓴다.)"""
+    tables = {"pitch.kp": {"axes": {"mach": [0.2, 0.9]}, "data": [-2.0, -1.5], "extrapolate": "clip"},
+              "pitch.k_rate": {"axes": {"mach": [0.2, 0.5, 0.9]}, "data": [0.1, 0.15, 0.2], "extrapolate": "clip"}}
+    res, meta = _linear_evaluate(client, wait_job, gain_tables=tables)
+    assert meta["kind"] == "influence_evaluate"
+    di = res["design_input"]
+    assert set(di) == {"gain_tables"}  # 보낸 형상 키만 — 기본값 키를 끌어들이지 않는다
+    json.dumps(di, allow_nan=False)
+    assert di["gain_tables"] == tables  # 순수 JSON으로 값 그대로 왕복
+    # 표 없는 요청 — 키가 빠진다(빈 dict도 None도 아님)
+    plain, _ = _linear_evaluate(client, wait_job)
+    assert "gain_tables" not in plain["design_input"]
