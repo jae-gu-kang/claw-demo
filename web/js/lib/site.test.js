@@ -38,6 +38,12 @@ test("site.js의 활주로 방위·길이가 측정 기록과 같다", () => {
   assert.equal(GOHEUNG.runwayLengthM, record.length_m);
 });
 
+test("과주로는 측정 기록의 포장 성분 길이에서 활주로 길이를 뺀 나머지의 반이다", () => {
+  // 기록의 포장 성분(paved_extent_m)은 과주로까지 든 길이다(method 5단계 주석). 양 끝이 같다고 본다 —
+  // 설계 기록(과주로 60 m × 45 m)과 1 m 안에서 맞는다. 기록을 다시 재면 이 칸도 따라 고친다
+  assert.equal(GOHEUNG.runwayOverrunM, (record.paved_extent_m - record.length_m) / 2);
+});
+
 // 임계 하나를 원점으로 다른 점의 NED — 엔진 claw.env.geodesy와 같은 식(geo.js, geodesy-fixture가 묶는다)
 const nedFrom = (o, p) => geodeticToNed(p.lat_deg * DEG2RAD, p.lon_deg * DEG2RAD,
   { latRad: o.lat_deg * DEG2RAD, lonRad: o.lon_deg * DEG2RAD });

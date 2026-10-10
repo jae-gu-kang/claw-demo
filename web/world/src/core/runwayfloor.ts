@@ -9,13 +9,24 @@
  *
  * ## 어디까지 펴나 — 표시 값이다
  *
- * 축 양옆 75 m, 시단 앞·종단 너머 60 m를 활주로 표고로 평평하게 하고(착륙대의 관례 크기 — ICAO 부속서 14의
- * 착륙대는 끝 너머 60 m, 정지 구역은 축에서 75 m), 그 바깥 90 m(30 m 격자 세 칸)에서 원자료로 부드럽게 돌아간다.
- * 활주로 위 삼각형은 꼭짓점이 **모두** 평평한 구역에 들어야 평평하므로, 포장면 가장자리에서 격자 대각선
- * (30√2 ≈ 42 m)보다 넓게 편다(고흥 반폭 22.5 + 42 < 75 — 시험이 칸마다 확인한다).
+ * 축 양옆 75 m, 시단 앞·종단 너머 120 m를 활주로 표고로 평평하게 하고(착륙대의 관례 크기 — ICAO 부속서 14의
+ * 정지 구역은 축에서 75 m, 착륙대는 활주로·과주로 끝 너머 60 m이고 고흥 과주로가 61 m다), 그 바깥 90 m(30 m 격자
+ * 세 칸)에서 원자료로 부드럽게 돌아간다. 포장면 위 삼각형은 꼭짓점이 **모두** 평평한 구역에 들어야 평평하므로,
+ * 포장면 가장자리에서 격자 대각선(30√2 ≈ 42 m)보다 넓게 편다(고흥 반폭 22.5 + 42 < 75, 과주로 61 + 42 < 120 —
+ * 시험이 칸마다 확인한다). 가상환경이 칠하는 비행장 풀밭이 이 구역이다(shaders/ground.ts).
  *
- * 바다 쪽 물속 이음(core/coastdepth.ts)이 내린 표본은 건드리지 않는다 — 해안에 붙은 활주로에서 물가선이 다시
- * 꼭짓점 톱니가 되지 않게. 고르는 일은 호출측 몫이다(`floorGrid`의 `keep`).
+ * ## 지형과 맞을 때만 편다
+ *
+ * 활주로 표고는 시뮬 폼의 시작 고도 칸에서 온다(web/js/lib/simrequest.js). 그 값이 그 자리 원자료 범위에서
+ * `FLOOR_FIT_M` 넘게 벗어나면 펴지 않는다 — 12 m를 넣은 런에 12 m 둑을 지어 「지면 +0」이라고 말하게 된다(리뷰
+ * 지적). 펴지 않으면 지상의 기체가 그만큼 떠 보이거나 묻혀 보이고, 판독도 원자료 그대로라 어긋남이 화면에 남는다.
+ * 정하는 자리는 지형 조립 한 곳이다(scene/terrain.ts `buildTerrain`, 활주로를 덮는 가장 촘촘한 티어).
+ *
+ * ## 물가는 펴지 않는다
+ *
+ * 바다 쪽 물속 이음(core/coastdepth.ts)이 내린 표본과 **바다에 맞닿은 땅 표본**은 건드리지 않는다 — 표고 0의
+ * 바닥으로 물가 땅을 펴면 꼭짓점이 해수면에 붙어 물가선이 다시 꼭짓점 톱니가 된다(리뷰가 시험 섬에서 확인).
+ * 고르는 일은 호출측 몫이다(`floorGrid`·`floorSource`의 `keep`). 고흥은 바다가 활주로에서 3.7 km 밖이다.
  *
  * ## 그림과 판독이 같은 함수를 쓴다
  *
@@ -30,11 +41,14 @@ export interface RunwayFloor {
   /** 활주로 표고 [m] — 시뮬이 땅으로 쓰는 높이 */ elevation: number;
 }
 
+/** 바닥 표고가 그 자리 원자료 범위에서 벗어나도 되는 폭 [m] — 넘으면 펴지 않는다(머리말 「지형과 맞을 때만」). */
+export const FLOOR_FIT_M = 3;
+
 export const RUNWAY_FLOOR = {
   /** 축에서 양옆으로 평평하게 펴는 거리 [m] */
   halfWidthM: 75,
-  /** 시단 앞·종단 너머로 펴는 거리 [m] */
-  endM: 60,
+  /** 시단 앞·종단 너머로 펴는 거리 [m] — 과주로 끝에서 다시 착륙대 60 m */
+  endM: 120,
   /** 그 바깥에서 원자료로 돌아가는 폭 [m] — 30 m 격자 세 칸 */
   blendM: 90,
 } as const;
@@ -82,22 +96,26 @@ export function floorElevation(f: RunwayFloor, n: number, e: number, z: number):
   return w > 0 ? z + (f.elevation - z) * w : z;
 }
 
+/** 원자료 표고 범위 [m] */
+export interface FloorSource { min: number; max: number }
+
 export interface FloorResult {
   elev: Float32Array;
   /** 바닥이 손댄 표본 수(가중 > 0) */
   touched: number;
-  /** 평평하게 편 표본(가중 1)의 원자료 범위 [m] — 캡션이 말한다. 그런 표본이 없으면 null */
-  source: { min: number; max: number } | null;
+  /** 평평하게 편 표본(가중 1)의 원자료 범위 — `floorSource`와 같다. 그런 표본이 없으면 null */
+  source: FloorSource | null;
 }
 
-/** 표고 격자(행 우선, 결측 NaN — 행 r의 N = n0 + r·step, 열 c의 E = e0 + c·step)에 바닥을 얹은 **새 격자**.
- *  `keep(i)`가 거짓인 표본은 그대로 둔다(호출측이 바다 표본을 지킨다). 바닥이 닿는 행·열만 훑는다. */
-export function floorGrid(
-  elev: ArrayLike<number>, rows: number, cols: number, n0: number, e0: number, step: number,
-  f: RunwayFloor, keep: (i: number) => boolean = () => true,
-): FloorResult {
-  const out = Float32Array.from(elev as ArrayLike<number>);
-  // 바닥이 닿는 범위의 경계 사각형 — 구역 네 귀퉁이를 NED로 돌려 잰다
+/** 바닥 표고가 원자료 범위에서 `FLOOR_FIT_M` 안인가 — 원자료를 모르면(활주로 자리를 안 덮으면) 거짓. */
+export function floorFits(f: RunwayFloor, src: FloorSource | null): boolean {
+  return src !== null && f.elevation >= src.min - FLOOR_FIT_M && f.elevation <= src.max + FLOOR_FIT_M;
+}
+
+/** 바닥이 닿는 행·열 범위 [r0, r1, c0, c1](이음 포함) — 구역 네 귀퉁이를 NED로 돌려 잰다. 격자 밖이면 비어 있다. */
+function floorRange(
+  rows: number, cols: number, n0: number, e0: number, step: number, f: RunwayFloor,
+): [number, number, number, number] {
   const ca = Math.cos(f.heading);
   const sa = Math.sin(f.heading);
   const reach = RUNWAY_FLOOR.endM + RUNWAY_FLOOR.blendM;
@@ -114,13 +132,43 @@ export function floorGrid(
       eMin = Math.min(eMin, e); eMax = Math.max(eMax, e);
     }
   }
-  const r0 = Math.max(0, Math.floor((nMin - n0) / step));
-  const r1 = Math.min(rows - 1, Math.ceil((nMax - n0) / step));
-  const c0 = Math.max(0, Math.floor((eMin - e0) / step));
-  const c1 = Math.min(cols - 1, Math.ceil((eMax - e0) / step));
-  let touched = 0;
+  return [
+    Math.max(0, Math.floor((nMin - n0) / step)), Math.min(rows - 1, Math.ceil((nMax - n0) / step)),
+    Math.max(0, Math.floor((eMin - e0) / step)), Math.min(cols - 1, Math.ceil((eMax - e0) / step)),
+  ];
+}
+
+/** 펴는 구역(가중 1) 표본의 원자료 범위 — 결측과 `keep(i)`가 거짓인 표본은 뺀다. 그런 표본이 없으면 null.
+ *  격자 꼴은 `floorGrid`와 같다. */
+export function floorSource(
+  elev: ArrayLike<number>, rows: number, cols: number, n0: number, e0: number, step: number,
+  f: RunwayFloor, keep: (i: number) => boolean = () => true,
+): FloorSource | null {
+  const [r0, r1, c0, c1] = floorRange(rows, cols, n0, e0, step, f);
   let min = Infinity;
   let max = -Infinity;
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const i = r * cols + c;
+      const z = elev[i]!;
+      if (!Number.isFinite(z) || !keep(i) || floorWeight(f, n0 + r * step, e0 + c * step) < 1) continue;
+      min = Math.min(min, z);
+      max = Math.max(max, z);
+    }
+  }
+  return Number.isFinite(min) ? { min, max } : null;
+}
+
+/** 표고 격자(행 우선, 결측 NaN — 행 r의 N = n0 + r·step, 열 c의 E = e0 + c·step)에 바닥을 얹은 **새 격자**.
+ *  `keep(i)`가 거짓인 표본은 그대로 둔다(호출측이 물가를 지킨다). 바닥이 닿는 행·열만 훑는다. 맞는지(`floorFits`)는
+ *  묻지 않는다 — 정하는 것은 호출측이다. */
+export function floorGrid(
+  elev: ArrayLike<number>, rows: number, cols: number, n0: number, e0: number, step: number,
+  f: RunwayFloor, keep: (i: number) => boolean = () => true,
+): FloorResult {
+  const out = Float32Array.from(elev as ArrayLike<number>);
+  const [r0, r1, c0, c1] = floorRange(rows, cols, n0, e0, step, f);
+  let touched = 0;
   for (let r = r0; r <= r1; r++) {
     for (let c = c0; c <= c1; c++) {
       const i = r * cols + c;
@@ -128,15 +176,10 @@ export function floorGrid(
       if (!Number.isFinite(z) || !keep(i)) continue;
       const n = n0 + r * step;
       const e = e0 + c * step;
-      const w = floorWeight(f, n, e);
-      if (w <= 0) continue;
+      if (floorWeight(f, n, e) <= 0) continue;
       touched++;
-      if (w >= 1) {
-        min = Math.min(min, z);
-        max = Math.max(max, z);
-      }
       out[i] = floorElevation(f, n, e, z);
     }
   }
-  return { elev: out, touched, source: Number.isFinite(min) ? { min, max } : null };
+  return { elev: out, touched, source: floorSource(elev, rows, cols, n0, e0, step, f, keep) };
 }

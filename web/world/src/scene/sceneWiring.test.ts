@@ -9,14 +9,28 @@ const fn = (name: string) =>
   src.match(new RegExp(`\\n  (?:private )?(?:async )?${name}\\([\\s\\S]*?\\n  \\}\\n`))?.[0] ?? "";
 
 describe("SceneController 배선", () => {
-  it("활주로는 제원 폭(siteRunwayWidth)으로 core/runway.ts가 그린다 — 폭 상수를 다시 적지 않는다", () => {
+  it("활주로는 제원 폭(siteRunwayWidth)·과주로(GOHEUNG)로 core/runway.ts가 그린다 — 폭·과주로 상수를 다시 적지 않는다", () => {
     const build = fn("buildScene");
     assert.ok(build, "buildScene이 없다");
-    assert.match(build, /runwayDrawing\(rw, siteRunwayWidth\(rw\)\)/);
+    assert.match(build, /runwayDrawing\(rw, siteRunwayWidth\(rw\), \{ overrunM: GOHEUNG\.runwayOverrunM \}\)/);
     assert.doesNotMatch(build, /\* 22\b/, "옛 22 m 반폭 상수");
     assert.doesNotMatch(src, /폭은 결과에 없습니다/);
     // 선분마다 따로 — 한 꺾은선에 이어 담으면 활주로를 가로지르는 대각선이 그어진다
     assert.match(build, /for \(const points of rwDraw\.segments\) rwLines\.push\(\{ points, color: 0xffffff \}\)/);
+  });
+
+  it("활주로 바닥 — 그릴 격자·게임 지형·지면 판독·게임 소품이 같은 바닥을 쓴다", () => {
+    // 하나라도 빠지면 묻히는 기체·끊기는 흰 선이 돌아오거나, 화면과 판독이 갈린다 — 시험이 다 초록인 채로(리뷰 지적)
+    const build = fn("buildScene");
+    assert.match(build, /buildTerrain\(this\.terrain, \{ floor: runwayFloorOf\(body\.meta\?\.runway\) \}\)/);
+    assert.match(build, /this\.floor = built\.floor;/, "맞지 않아 안 편 바닥은 판독에서도 빠진다");
+    assert.match(build, /sameFloor\(this\.gameBuiltFloor, this\.floor\)/);
+    const game = fn("buildGameWorld");
+    assert.match(game, /floor: this\.floor/);
+    assert.match(game, /sameFloor\(this\.gameBuiltFloor, this\.floor\)/);
+    assert.match(game, /this\.terrainElevationAt\(pack, n, e\)/, "소품도 판독과 같은 표고");
+    assert.match(fn("groundElevationAt"), /this\.terrainElevationAt\(this\.terrain, pos\[0\], pos\[1\]\)/);
+    assert.match(fn("terrainElevationAt"), /floorElevation\(this\.floor, n, e, z\)/);
   });
 
   it("기체 동기화는 장면의 결과가 바뀔 때만 물러난다 — 새 요청이 실패해도 받던 모델·캡션이 멈추지 않는다", () => {

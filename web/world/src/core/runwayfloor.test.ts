@@ -4,12 +4,13 @@ import { describe, it } from "node:test";
 
 import { GOHEUNG } from "../../../js/lib/site.js";
 import {
-  RUNWAY_FLOOR, floorElevation, floorGrid, floorWeight, runwayFloorOf, sameFloor,
+  FLOOR_FIT_M, RUNWAY_FLOOR, floorElevation, floorFits, floorGrid, floorSource, floorWeight, runwayFloorOf, sameFloor,
 } from "./runwayfloor.ts";
 
 /** 고흥 활주로 — 방위·길이는 lib/site.js에서 받는다(옮겨 적으면 축 보정 때 혼자 남는다 — runway.test.ts). */
 const RW = runwayFloorOf({ heading: GOHEUNG.runwayHeadingRad, length: GOHEUNG.runwayLengthM, elevation: 0 })!;
 const HALF = GOHEUNG.runwayWidthM / 2;
+const OVERRUN = GOHEUNG.runwayOverrunM;
 const { halfWidthM: SIDE, endM: END, blendM: BLEND } = RUNWAY_FLOOR;
 
 /** 활주로 축 좌표(along 시단에서, across 오른쪽 +) → NED (n, e) */
@@ -44,7 +45,7 @@ describe("runwayFloorOf — 결과의 활주로에서 바닥을", () => {
 });
 
 describe("floorWeight — 펴는 구역은 1, 바깥 90 m에 걸쳐 0으로", () => {
-  it("포장면과 그 둘레(축 양옆 75 m · 끝 너머 60 m)는 1", () => {
+  it("포장면과 그 둘레(축 양옆 75 m · 끝 너머 120 m)는 1", () => {
     const L = GOHEUNG.runwayLengthM;
     for (const [a, x] of [[0, 0], [600, HALF], [L, -HALF], [-END, SIDE], [L + END, -SIDE]] as const) {
       assert.equal(wAt(a, x), 1, `along ${a} · across ${x}`);
@@ -70,8 +71,8 @@ describe("floorWeight — 펴는 구역은 1, 바깥 90 m에 걸쳐 0으로", ()
     assert.ok(Math.abs(wAt(600, SIDE + BLEND / 2) - 0.5) < 1e-9, "가운데는 반");
   });
 
-  it("**활주로에 걸치는 30 m 격자 칸은 꼭짓점 넷이 모두 평평한 구역이다** — 하나라도 빠지면 포장면이 기운다", () => {
-    // 지형 팩 core 티어처럼 원점 기준 30 m 격자. 칸 안을 촘촘히 훑어 포장면에 닿는 칸만 고른다
+  it("**포장면(과주로 포함)에 걸치는 30 m 격자 칸은 꼭짓점 넷이 모두 평평한 구역이다** — 하나라도 빠지면 포장면이 기운다", () => {
+    // 지형 팩 core 티어처럼 원점 기준 30 m 격자. 칸 안을 촘촘히 훑어 포장면(시단 앞·종단 너머 과주로까지)에 닿는 칸만 고른다
     const step = 30;
     const ca = Math.cos(RW.heading);
     const sa = Math.sin(RW.heading);
@@ -87,7 +88,7 @@ describe("floorWeight — 펴는 구역은 1, 바깥 90 m에 걸쳐 0으로", ()
             const e = e0 + (v / 6) * step;
             const along = n * ca + e * sa;
             const across = -n * sa + e * ca;
-            hits = along >= 0 && along <= RW.length && Math.abs(across) <= HALF;
+            hits = along >= -OVERRUN && along <= RW.length + OVERRUN && Math.abs(across) <= HALF;
           }
         }
         if (!hits) continue;
@@ -125,21 +126,26 @@ describe("floorGrid — 격자에 바닥을 얹은 새 격자", () => {
   const bumpy = Float32Array.from({ length: rows * cols }, (_, i) => 0.5 + ((i * 7) % 25) * 0.1);
   const ORIGIN = 10 * cols + 10; // (N 0, E 0) — 시단 한가운데
 
-  it("구역 안 표본은 활주로 표고, 멀리 있는 표본은 그대로, 입력은 안 바뀐다", () => {
+  it("표본마다 floorElevation 그대로다 — 펴는 구역은 활주로 표고, 이음 90 m는 그 사이, 멀리는 원자료, 입력은 그대로", () => {
     const before = Float32Array.from(bumpy);
     const g = floorGrid(bumpy, rows, cols, n0, e0, step, RW);
     assert.deepEqual(bumpy, before);
     let flat = 0;
     let kept = 0;
+    let blend = 0;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const i = r * cols + c;
-        const w = floorWeight(RW, n0 + r * step, e0 + c * step);
-        if (w >= 1) { assert.equal(g.elev[i], 0, `(${r}, ${c})`); flat++; }
-        else if (w <= 0) { assert.equal(g.elev[i], bumpy[i], `(${r}, ${c})`); kept++; }
-        else assert.ok(g.elev[i]! <= bumpy[i]! && g.elev[i]! >= 0, `(${r}, ${c}) 사이: ${g.elev[i]}`);
+        const [n, e] = [n0 + r * step, e0 + c * step];
+        // 이음 띠까지 값으로 묶는다 — 훑는 범위가 이음을 빠뜨리면 구역 끝이 3.7 m 턱이 된다(리뷰가 변이로 확인)
+        assert.equal(g.elev[i], Math.fround(floorElevation(RW, n, e, bumpy[i]!)), `(${r}, ${c})`);
+        const w = floorWeight(RW, n, e);
+        if (w >= 1) flat++;
+        else if (w <= 0) kept++;
+        else blend++;
       }
     }
+    assert.ok(blend > 50, `이음 띠 표본 ${blend}`);
     assert.ok(flat > 100 && kept > 100, `편 ${flat} · 그대로 ${kept}`);
     // 편 표본의 원자료 범위 — 캡션이 그대로 말한다
     assert.ok(g.source !== null && g.source.min >= 0.5 && g.source.max <= 2.9 + 1e-6, JSON.stringify(g.source));
@@ -159,6 +165,22 @@ describe("floorGrid — 격자에 바닥을 얹은 새 격자", () => {
     holes[ORIGIN] = Number.NaN;
     const g = floorGrid(holes, rows, cols, n0, e0, step, RW);
     assert.ok(Number.isNaN(g.elev[ORIGIN]!));
+  });
+
+  it("floorSource는 펴는 구역(가중 1) 땅 표본의 원자료 범위다 — 캡션과 맞춤 판정이 읽는다", () => {
+    const src = floorSource(bumpy, rows, cols, n0, e0, step, RW)!;
+    assert.deepEqual(src, floorGrid(bumpy, rows, cols, n0, e0, step, RW).source);
+    assert.ok(src.min >= 0.5 && src.max <= 2.9 + 1e-6);
+    assert.equal(floorSource(bumpy, rows, cols, 20_000, 20_000, step, RW), null);
+  });
+
+  it("바닥 표고가 원자료 범위에서 FLOOR_FIT_M 안일 때만 맞다 — 밖이면 둑·구덩이를 짓게 된다", () => {
+    const src = { min: 0, max: 3.7 };
+    assert.ok(floorFits({ ...RW, elevation: 0 }, src));
+    assert.ok(floorFits({ ...RW, elevation: 3.7 + FLOOR_FIT_M }, src));
+    assert.ok(!floorFits({ ...RW, elevation: 12 }, src), "리뷰의 12 m 둑");
+    assert.ok(!floorFits({ ...RW, elevation: -FLOOR_FIT_M - 0.1 }, src));
+    assert.ok(!floorFits(RW, null), "원자료를 모르면 맞는지도 모른다");
   });
 
   it("바닥이 격자 밖이면 아무것도 안 바꾼다", () => {

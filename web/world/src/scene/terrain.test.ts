@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { floorWeight, type RunwayFloor } from "../core/runwayfloor.ts";
+import { FLOOR_FIT_M, floorElevation, floorWeight, type RunwayFloor } from "../core/runwayfloor.ts";
 import type { Tier, TerrainPack } from "../lib/terrainpack.ts";
 import { buildTerrain, renderTier } from "./terrain.ts";
 
@@ -105,8 +105,9 @@ describe("지형 조립 — 활주로 바닥", () => {
   const src = bumpyTier();
   const srcZ = (i: number) => OFFSET + src.raw[i]! * SCALE;
 
-  it("그릴 격자에서 활주로 둘레는 활주로 표고로 평평하고, 멀리는 원자료 그대로다", () => {
+  it("그릴 격자의 정점마다 floorElevation 그대로다 — 둘레는 활주로 표고, 이음 90 m, 멀리는 원자료", () => {
     const b = buildTerrain(pack(src), { floor: FLOOR });
+    assert.deepEqual(b.floor, FLOOR, "맞는 바닥은 그대로 돌려준다 — 판독이 이것을 쓴다");
     const m = b.meshes[0]!;
     let flat = 0;
     let kept = 0;
@@ -114,17 +115,35 @@ describe("지형 조립 — 활주로 바닥", () => {
       for (let c = 0; c < m.cols; c++) {
         const i = r * m.cols + c;
         const z = -m.positions[3 * i + 2]!;
-        const w = floorWeight(FLOOR, src.n0 + r * src.step, src.e0 + c * src.step);
+        const [n, e] = [src.n0 + r * src.step, src.e0 + c * src.step];
+        // 이음 띠도 값으로 — 팩 눈금(0.05 m)의 반 안
+        const want = floorElevation(FLOOR, n, e, srcZ(i));
+        assert.ok(Math.abs(z - want) <= 0.026, `(${r}, ${c}) ${z} ≠ ${want}`);
+        const w = floorWeight(FLOOR, n, e);
         if (w >= 1) { assert.ok(Math.abs(z) < 1e-6, `(${r}, ${c}) 편 자리 ${z}`); flat++; }
-        if (w <= 0) { assert.ok(Math.abs(z - srcZ(i)) < 1e-4, `(${r}, ${c}) 원자료 ${z} ≠ ${srcZ(i)}`); kept++; }
+        if (w <= 0) kept++;
       }
     }
     assert.ok(flat > 200 && kept > 200, `편 ${flat} · 그대로 ${kept}`);
   });
 
+  it("활주로 표고가 그 자리 원자료에서 FLOOR_FIT_M 넘게 벗어나면 펴지 않고 그렇다고 말한다 — 둑을 짓지 않는다", () => {
+    // 시뮬 폼의 시작 고도 칸이 활주로 표고가 된다 — 12 m를 넣은 런(리뷰가 든 경우)
+    const high = { ...FLOOR, elevation: 2.9 + FLOOR_FIT_M + 6 };
+    const b = buildTerrain(pack(src), { floor: high });
+    assert.equal(b.floor, null, "판독도 원자료 그대로여야 한다");
+    const m = b.meshes[0]!;
+    for (let i = 0; i < m.rows * m.cols; i++) {
+      assert.ok(Math.abs(-m.positions[3 * i + 2]! - srcZ(i)) < 1e-4, `표본 ${i}`);
+    }
+    const notes = b.notes.join("\n");
+    assert.match(notes, /활주로 바닥: 활주로 표고 11\.9 m가 그 자리 지형\(0\.5~2\.9 m\)에서 3 m 넘게 벗어나 펴지 않았습니다/);
+    assert.doesNotMatch(notes, /평평하게 그리고/);
+  });
+
   it("캡션이 편 구역과 원자료의 출렁임을 말하고, 판독도 그 바닥을 쓴다고 밝힌다", () => {
     const notes = buildTerrain(pack(src), { floor: FLOOR }).notes.join("\n");
-    assert.match(notes, /활주로 바닥: 축 양옆 75 m·양 끝 너머 60 m를 활주로 표고 0 m로 평평하게/);
+    assert.match(notes, /활주로 바닥: 축 양옆 75 m·양 끝 너머 120 m를 활주로 표고 0 m로 평평하게/);
     assert.match(notes, /원자료는 이 구역에서 0\.5~2\.9 m로 출렁입니다/);
     assert.match(notes, /지면 높이 판독도 편 높이를 씁니다/);
   });
@@ -143,14 +162,30 @@ describe("지형 조립 — 활주로 바닥", () => {
     assert.ok(buildTerrain(pack(far), { floor: FLOOR }).notes.some((s) => /지형이 활주로 자리를 덮지 않아 펴지 않았습니다/.test(s)));
   });
 
-  it("바다 쪽 물속 이음은 바닥이 건드리지 않는다 — 해안에 붙은 활주로에서 물가선이 톱니로 돌아가지 않게", () => {
-    // 섬 한가운데를 지나는 활주로 — 펴는 구역이 해안을 덮는다
-    const island = tier("core", ISLAND, 30, -135, -135);
-    const b = buildTerrain(pack(island), { floor: { heading: 0, length: 60, elevation: 4 } });
+  it("물가는 펴지 않는다 — 해안에 붙은 활주로에서 물가선이 꼭짓점 톱니로 돌아가지 않게", () => {
+    // 서쪽 세 열이 바다, 동쪽이 2.8~3.2 m 간척지(해안 턱 흡수의 2.5 m 문턱 위)인 30 m 격자 위로 활주로가 지난다.
+    // 표고 0(고흥·폼 기본값)으로 물가 땅까지 펴면 그 꼭짓점이 해수면에 붙어 물가선이 꼭짓점을 지난다(리뷰가
+    // 시험 섬에서 확인 — 물가선 위치 0.00). 그래서 바다에 맞닿은 땅과 바다는 둔다
+    const rows = 10;
+    const cols = 10;
+    const raw = new Uint16Array(rows * cols);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const z = c < 3 ? 0 : 2.8 + 0.1 * ((r + c) % 5);
+        raw[r * cols + c] = Math.round((z - OFFSET) / SCALE);
+      }
+    }
+    const coast: Tier = { name: "core", rows, cols, n0: -135, e0: -135, step: 30, scale: SCALE, offset: OFFSET, nodata: NODATA, raw };
+    const b = buildTerrain(pack(coast), { floor: { heading: 0, length: 60, elevation: 0 } });
+    assert.ok(b.floor, "간척지 위 0 m 바닥은 지형과 맞는다");
     const m = b.meshes[0]!;
     const z = (r: number, c: number) => -m.positions[3 * (r * m.cols + c) + 2]!;
-    // (8,5)는 땅 30 m — 펴는 구역 안이라 활주로 표고 4 m. 옆 (8,4)는 맞닿은 바다 — 물속 그대로
-    assert.ok(Math.abs(z(8, 5) - 4) < 1e-6, `땅 ${z(8, 5)}`);
-    assert.ok(z(8, 4) < -1, `맞닿은 바다 ${z(8, 4)}`);
+    const zSrc = (r: number, c: number) => OFFSET + raw[r * cols + c]! * SCALE;
+    // (5,5)는 안쪽 땅 — 편다. (5,3)은 바다에 맞닿은 땅 — 둔다. (5,2)는 맞닿은 바다 — 물속 그대로
+    assert.ok(Math.abs(z(5, 5)) < 1e-6, `안쪽 땅 ${z(5, 5)}`);
+    assert.ok(Math.abs(z(5, 3) - zSrc(5, 3)) < 1e-4, `물가 땅 ${z(5, 3)} ≠ ${zSrc(5, 3)}`);
+    assert.ok(z(5, 2) < -1, `맞닿은 바다 ${z(5, 2)}`);
+    const s0 = z(5, 3) / (z(5, 3) - z(5, 2));
+    assert.ok(s0 > 0.3 && s0 < 0.9, `물가선 위치 ${s0.toFixed(2)}`);
   });
 });

@@ -29,6 +29,7 @@ import { placeProps } from "../core/propfield.ts";
 import { buildPropsGroup } from "./props.ts";
 import { refLabel, runProfileRef, siteRunwayWidth, strideFor } from "../lib/replay.ts";
 import { runwayDrawing } from "../core/runway.ts";
+import { GOHEUNG } from "../../../js/lib/site.js";
 import { floorElevation, runwayFloorOf, sameFloor, type RunwayFloor } from "../core/runwayfloor.ts";
 import { ATMOSPHERE_NOTES, CLOUD_NOTES } from "./atmosphere.ts";
 import { WEAR_NOTES } from "./materials.ts";
@@ -433,17 +434,11 @@ export class SceneController {
     // --- 지형 (원점이 맞을 때만 얹는다) ---
     const agree = originsAgree(this.pack?.origin, body.meta?.origin);
     this.terrain = this.pack && agree.ok ? this.pack : null;
-    // 활주로 바닥은 결과의 활주로에서 — 시뮬이 땅으로 쓰는 표고로 활주로 둘레를 편다
-    this.floor = runwayFloorOf(body.meta?.runway);
-    // 게임 자산은 이 지형에 매여 있다 — 팩이 바뀌면(원점 불합의 포함, 그리고
-    // "없음 → 도착"의 조기 진입 경로 포함) 다시 굽거나 무효화한다. 활주로 바닥이 바뀌어도 그렇다.
-    if (this.gameBuiltFor !== undefined
-      && (this.gameBuiltFor !== this.terrain || !sameFloor(this.gameBuiltFloor, this.floor))) {
-      this.gameBuiltFor = undefined;
-      if (this.gameOn) this.buildGameWorld();
-    }
     if (this.terrain) {
-      const built = buildTerrain(this.terrain, { floor: this.floor });
+      // 활주로 바닥은 결과의 활주로에서 — 시뮬이 땅으로 쓰는 표고로 활주로 둘레를 편다. 그 표고가 그 자리 지형과
+      // 맞을 때만 편다(buildTerrain이 정해 돌려준다) — 그릴 격자·게임 지형·지면 판독이 그 값을 같이 본다
+      const built = buildTerrain(this.terrain, { floor: runwayFloorOf(body.meta?.runway) });
+      this.floor = built.floor;
       this.host.setTerrain(built.meshes);
       notes.push(...built.notes);
       // 해안 거리장은 **지형과 같은 마스크에서** 나온다. 따로 판정하면 해안선이 두 벌이
@@ -460,25 +455,33 @@ export class SceneController {
         + `${(performance.now() - t0).toFixed(0)} ms) — 파고는 해안에서 잦아듭니다.`,
       );
     } else {
+      this.floor = null;
       this.host.setTerrain([]);
       // 지형이 없으면 해안선도 모른다 — 해면을 **그리지 않는다**(`Ocean.setCoast`).
       this.host.setCoast(null);
       notes.push("지형이 없어 해안선을 모릅니다 — 해면도 그리지 않습니다.");
       if (this.pack && agree.reason) notes.push(agree.reason);
     }
+    // 게임 자산은 이 지형에 매여 있다 — 팩이 바뀌면(원점 불합의 포함, 그리고
+    // "없음 → 도착"의 조기 진입 경로 포함) 다시 굽거나 무효화한다. 활주로 바닥이 바뀌어도 그렇다(위에서 정한 바닥).
+    if (this.gameBuiltFor !== undefined
+      && (this.gameBuiltFor !== this.terrain || !sameFloor(this.gameBuiltFloor, this.floor))) {
+      this.gameBuiltFor = undefined;
+      if (this.gameOn) this.buildGameWorld();
+    }
 
-    // --- 활주로: 중심선 + 시단·종단 + 양 가장자리 --- (원점에서 heading 방향 length 구간 — lib/site.js와
+    // --- 활주로: 폭을 알면 포장면·도색, 모르면 중심선 하나 --- (원점에서 heading 방향 length 구간 — lib/site.js와
     // lib/replay.js가 이 규약을 전제로 판정한다). 폭은 결과에 없어 시험장 제원에서 — 시뮬 탭 횡편차 판정과 같은
-    // 한 자리(siteRunwayWidth)이고, 그 런의 활주로가 제원의 활주로가 아니면 중심선만(core/runway.ts)
+    // 한 자리(siteRunwayWidth)이고, 그 런의 활주로가 제원의 활주로가 아니면 중심선만(core/runway.ts). 과주로도 제원에서
     const rw = body.meta?.runway;
     const rwLines: { points: Float32Array; color: number }[] = [];
-    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw));
+    const rwDraw = runwayDrawing(rw, siteRunwayWidth(rw), { overrunM: GOHEUNG.runwayOverrunM });
     if (rwDraw) {
       // 선분마다 따로 — setPaths는 한 목록을 꺾은선으로 잇는다
       for (const points of rwDraw.segments) rwLines.push({ points, color: 0xffffff });
       notes.push(rwDraw.note);
     }
-    // 포장면 — 폭을 알 때만(가장자리 선과 같은 조건). 지면 셰이더가 아스팔트·둘레 풀밭을 칠한다
+    // 포장면 — 폭을 알 때만. 지면 셰이더가 아스팔트·도색·과주로·비행장 풀밭을 칠한다
     this.host.setRunwaySurface(rwDraw?.surface ?? null);
 
 
@@ -703,14 +706,8 @@ export class SceneController {
       this.host.setProps(null);
       return;
     }
-    const floor = this.floor;
-    const sample = (n: number, e: number): number | null => {
-      for (const tier of pack.tiers) {
-        const z = elevationAt(tier, n, e);
-        if (z !== null) return floor ? floorElevation(floor, n, e, z) : z;
-      }
-      return null;
-    };
+    // 소품은 지면 판독과 같은 표고에 선다 — 활주로 바닥 위에서도
+    const sample = (n: number, e: number): number | null => this.terrainElevationAt(pack, n, e);
     this.host.setProps(buildPropsGroup(placeProps(sample, tierRect(core), relief)).group);
   }
 
@@ -1034,14 +1031,19 @@ export class SceneController {
    *
    * `views/world.js`의 `groundElevationAt` + `state.terrain` 게이트와 같은 규약이다. */
   private groundElevationAt(pos: Vec3 | null): number | null {
-    if (this.terrain && pos) {
-      for (const tier of this.terrain.tiers) {
-        const z = elevationAt(tier, pos[0], pos[1]);
-        if (z !== null) return this.floor ? floorElevation(this.floor, pos[0], pos[1], z) : z;
-      }
-      return null; // 지형은 있는데 이 자리를 안 덮는다
-    }
+    // 지형은 있는데 이 자리를 안 덮으면 null
+    if (this.terrain && pos) return this.terrainElevationAt(this.terrain, pos[0], pos[1]);
     return num(this.body?.meta?.runway?.elevation) ?? 0;
+  }
+
+  /** 팩이 (n, e)를 덮으면 그 표고, 아니면 null — 활주로 바닥을 얹는다(core/runwayfloor.ts). 지면 판독과 게임 소품이
+   *  이 한 함수를 쓴다(따로 적으면 둘이 갈린다 — 리뷰 지적). */
+  private terrainElevationAt(pack: TerrainPack, n: number, e: number): number | null {
+    for (const tier of pack.tiers) {
+      const z = elevationAt(tier, n, e);
+      if (z !== null) return this.floor ? floorElevation(this.floor, n, e, z) : z;
+    }
+    return null;
   }
 
   private cameraFor(

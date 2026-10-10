@@ -37,6 +37,7 @@ import { gameRamp } from "../core/gamestyle.ts";
 import { chunkIndices, chunkQuads } from "../core/terrainchunks.ts";
 import { terrainShade } from "../core/terrainshade.ts";
 import type { RunwaySurface } from "../core/runway.ts";
+import { RUNWAY_FLOOR } from "../core/runwayfloor.ts";
 import type { CoastField } from "../core/coastfield.ts";
 import { createOcean, type Ocean, type SeaState } from "./ocean.ts";
 import { createSky, type Sky } from "./sky.ts";
@@ -224,6 +225,8 @@ export class SceneHost {
     uTerrainTop: { value: 0 },
     uRunway: { value: new Vector4(1, 0, 0, 0) },
     uRunwayOn: { value: 0 },
+    uRunwayArea: { value: new Vector4(0, 0, 0, 0) },
+    uRunwayNum: { value: new Vector4(-1, -1, -1, -1) },
   };
   private heightTextures: DataTexture[] = [];
 
@@ -440,7 +443,7 @@ export class SceneHost {
     }
   }
 
-  /** 활주로 포장면 — 지면 셰이더가 아스팔트와 둘레 풀밭을 칠한다(`shaders/ground.ts`). null이면
+  /** 활주로 포장면 — 지면 셰이더가 아스팔트·도색·과주로·비행장 풀밭을 칠한다(`shaders/ground.ts`). null이면
    *  안 칠한다 — 폭을 모르는 활주로에 포장면을 지어내지 않는다(`core/runway.ts`). */
   setRunwaySurface(s: RunwaySurface | null): void {
     const u = this.groundUniforms;
@@ -449,6 +452,11 @@ export class SceneHost {
       return;
     }
     u.uRunway.value.set(Math.cos(s.heading), Math.sin(s.heading), s.length, s.width / 2);
+    // 풀밭(착륙대)은 펴진 바닥과 **같은 구역**이다 — 두 수가 갈리면 풀밭 끝에서 땅이 기운다(core/runwayfloor.ts)
+    u.uRunwayArea.value.set(s.overrun, RUNWAY_FLOOR.halfWidthM, RUNWAY_FLOOR.endM, 0);
+    const d = s.designation;
+    u.uRunwayNum.value.set(
+      d ? Math.floor(d[0] / 10) : -1, d ? d[0] % 10 : -1, d ? Math.floor(d[1] / 10) : -1, d ? d[1] % 10 : -1);
     u.uRunwayOn.value = 1;
   }
 
