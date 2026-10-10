@@ -16,6 +16,11 @@
 
 import type { RunwayWidth } from "../lib/replay.ts";
 
+/** 흰 선을 활주로 표고보다 이만큼 띄운다 [m] — 표시 값. 지형은 활주로 둘레를 정확히 활주로 표고로 펴므로
+ *  (core/runwayfloor.ts) 같은 높이에 그으면 선과 면이 깊이를 다퉈 깜빡이며 끊긴다. 근거리 패스의 깊이 눈금이
+ *  2 km에서 약 0.08 m라(SceneHost 머리말) 그보다 크게, 눈에는 안 띄게 잡았다. */
+export const RUNWAY_LINE_LIFT_M = 0.15;
+
 /** 활주로 포장면 — 지면 셰이더가 아스팔트와 비행장 풀밭을 칠할 자리(shaders/ground.ts). NED 원점에서
  *  heading 방향 length 구간, 폭 width. **폭을 알 때만** 있다 — 모르면 포장면을 지어내지 않는다. */
 export interface RunwaySurface {
@@ -44,7 +49,7 @@ export function runwayDrawing(rw: unknown, width: RunwayWidth): RunwayDrawing | 
   const h = num(r?.heading);
   const L = num(r?.length);
   if (h === null || L === null) return null;
-  const d = -(num(r?.elevation) ?? 0);
+  const d = -((num(r?.elevation) ?? 0) + RUNWAY_LINE_LIFT_M);
   const [cn, ce] = [Math.cos(h), Math.sin(h)]; // 활주로 축(북·동 성분)
   const n1 = cn * L;
   const e1 = ce * L;

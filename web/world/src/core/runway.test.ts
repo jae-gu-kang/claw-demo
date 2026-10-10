@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { runwayDrawing } from "./runway.ts";
+import { RUNWAY_LINE_LIFT_M, runwayDrawing } from "./runway.ts";
 import { siteRunwayWidth } from "../lib/replay.ts";
 import { GOHEUNG } from "../../../js/lib/site.js";
 
@@ -37,8 +37,8 @@ describe("활주로 표시선 — 폭은 시험장 제원에서, 선분은 따�
     const lateral = (x: number, y: number) => -(x * ax[1]!) + y * ax[0]!;
     near(Math.abs(lateral(edgeL[0]!, edgeL[1]!)), 22.5, "왼 가장자리 횡거리", 1e-3);
     near(Math.abs(lateral(edgeR[3]!, edgeR[4]!)), 22.5, "오른 가장자리 횡거리", 1e-3);
-    // 표고는 D = −표고
-    for (const s of d.segments) { near(s[2]!, -4, "D"); near(s[5]!, -4, "D"); }
+    // 높이는 D = −(표고 + 띄움) — 펴진 바닥(core/runwayfloor.ts) 바로 위
+    for (const s of d.segments) { near(s[2]!, -(4 + RUNWAY_LINE_LIFT_M), "D", 1e-6); near(s[5]!, -(4 + RUNWAY_LINE_LIFT_M), "D", 1e-6); }
     assert.match(d.note, /폭 45 m는 고흥 시험장 제원 값입니다/);
     assert.doesNotMatch(d.note, /폭은 결과에 없습니다/);
     // 포장면 — 지면이 칠할 사각형은 선과 같은 제원
@@ -59,12 +59,17 @@ describe("활주로 표시선 — 폭은 시험장 제원에서, 선분은 따�
     assert.match(d.note, /^활주로는 중심선만 그립니다 — 폭을 모릅니다: 이 런의 활주로\(방위 1\.2 rad · 길이 900 m\)가 고흥 시험장 제원의 활주로/);
   });
 
+  it("흰 선은 펴진 바닥보다 조금 위다 — 같은 높이면 면과 깊이를 다퉈 깜빡이며 끊긴다", () => {
+    // 근거리 패스의 깊이 눈금이 2 km에서 약 0.08 m다(SceneHost 머리말의 표) — 그보다 크고, 눈에는 안 띄게
+    assert.ok(RUNWAY_LINE_LIFT_M > 0.08 && RUNWAY_LINE_LIFT_M < 0.5, `${RUNWAY_LINE_LIFT_M}`);
+  });
+
   it("방위·길이가 없으면 그리지 않는다(표고만 없으면 0)", () => {
     assert.equal(runwayDrawing(null, { error: "x" }), null);
     assert.equal(runwayDrawing({ heading: 0.1 }, { error: "x" }), null);
     assert.equal(runwayDrawing({ length: 100 }, { error: "x" }), null);
     const d = runwayDrawing({ heading: 0, length: 100 }, { width: 30, source: "시험 제원" })!;
-    for (const s of d.segments) { near(s[2]!, 0, "D"); near(s[5]!, 0, "D"); }
+    for (const s of d.segments) { near(s[2]!, -RUNWAY_LINE_LIFT_M, "D", 1e-6); near(s[5]!, -RUNWAY_LINE_LIFT_M, "D", 1e-6); }
     near(lengthOf(d.segments[1]!), 30, "가로선", 1e-9);
   });
 });

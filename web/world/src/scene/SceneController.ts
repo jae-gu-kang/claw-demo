@@ -29,6 +29,7 @@ import { placeProps } from "../core/propfield.ts";
 import { buildPropsGroup } from "./props.ts";
 import { refLabel, runProfileRef, siteRunwayWidth, strideFor } from "../lib/replay.ts";
 import { runwayDrawing } from "../core/runway.ts";
+import { floorElevation, runwayFloorOf, sameFloor, type RunwayFloor } from "../core/runwayfloor.ts";
 import { ATMOSPHERE_NOTES, CLOUD_NOTES } from "./atmosphere.ts";
 import { WEAR_NOTES } from "./materials.ts";
 import { launcherCaptionNotes, launcherPose } from "../core/launcher.ts";
@@ -194,6 +195,10 @@ export class SceneController {
    *  쓰면 "지형 로드 전에 게임 진입 → 뒤늦게 팩 도착"에서 null === null이 참이 되어
    *  게임 지형이 영영 안 구워진다(실측 — 조기 클릭 재현). */
   private gameBuiltFor: TerrainPack | null | undefined = undefined;
+  /** 게임 자산을 구울 때 쓴 활주로 바닥 — 팩이 같아도 결과의 활주로가 바뀌면 다시 굽는다 */
+  private gameBuiltFloor: RunwayFloor | null = null;
+  /** 이 결과의 활주로 바닥(core/runwayfloor.ts) — 그릴 격자·게임 지형·지면 판독이 같은 값을 본다 */
+  private floor: RunwayFloor | null = null;
   private replayMarks: Marker[] = [];
   private get gameOn(): boolean { return this.style === "game"; }
 
@@ -428,14 +433,17 @@ export class SceneController {
     // --- 지형 (원점이 맞을 때만 얹는다) ---
     const agree = originsAgree(this.pack?.origin, body.meta?.origin);
     this.terrain = this.pack && agree.ok ? this.pack : null;
+    // 활주로 바닥은 결과의 활주로에서 — 시뮬이 땅으로 쓰는 표고로 활주로 둘레를 편다
+    this.floor = runwayFloorOf(body.meta?.runway);
     // 게임 자산은 이 지형에 매여 있다 — 팩이 바뀌면(원점 불합의 포함, 그리고
-    // "없음 → 도착"의 조기 진입 경로 포함) 다시 굽거나 무효화한다.
-    if (this.gameBuiltFor !== undefined && this.gameBuiltFor !== this.terrain) {
+    // "없음 → 도착"의 조기 진입 경로 포함) 다시 굽거나 무효화한다. 활주로 바닥이 바뀌어도 그렇다.
+    if (this.gameBuiltFor !== undefined
+      && (this.gameBuiltFor !== this.terrain || !sameFloor(this.gameBuiltFloor, this.floor))) {
       this.gameBuiltFor = undefined;
       if (this.gameOn) this.buildGameWorld();
     }
     if (this.terrain) {
-      const built = buildTerrain(this.terrain);
+      const built = buildTerrain(this.terrain, { floor: this.floor });
       this.host.setTerrain(built.meshes);
       notes.push(...built.notes);
       // 해안 거리장은 **지형과 같은 마스크에서** 나온다. 따로 판정하면 해안선이 두 벌이
@@ -673,8 +681,9 @@ export class SceneController {
    *  한 번). 팩이 없으면 비운다 — 기준면 위를 나는 것도 계획에는 쓸 수 있고,
    *  캡션이 사유를 말한다. */
   private buildGameWorld(): void {
-    if (this.gameBuiltFor === this.terrain) return;
+    if (this.gameBuiltFor === this.terrain && sameFloor(this.gameBuiltFloor, this.floor)) return;
     this.gameBuiltFor = this.terrain;
+    this.gameBuiltFloor = this.floor;
     const pack = this.terrain;
     if (pack == null) {
       this.host.setGameTerrain([], 800);
@@ -686,7 +695,7 @@ export class SceneController {
     // 해상도를 버리는 것이 곧 문법이고, 형상 원본은 같은 팩이다(캡션 몫).
     // 게임은 낱면이 곧 문법이라 세분하지 않는다 — 물가선의 물속 이음은 실사와 같이 받는다
     const built = buildTerrain(pack, {
-      strideFor: (t) => Math.max(1, Math.round(GAME_FACET_M / t.step)), refine: false,
+      strideFor: (t) => Math.max(1, Math.round(GAME_FACET_M / t.step)), refine: false, floor: this.floor,
     });
     this.host.setGameTerrain(built.meshes, relief);
     const core = [...pack.tiers].sort((a, b) => a.step - b.step)[0];
@@ -694,10 +703,11 @@ export class SceneController {
       this.host.setProps(null);
       return;
     }
+    const floor = this.floor;
     const sample = (n: number, e: number): number | null => {
       for (const tier of pack.tiers) {
         const z = elevationAt(tier, n, e);
-        if (z !== null) return z;
+        if (z !== null) return floor ? floorElevation(floor, n, e, z) : z;
       }
       return null;
     };
@@ -1012,6 +1022,8 @@ export class SceneController {
    *
    * 네 갈래다.
    * 1. **얹은 지형이 이 자리를 덮으면** 그 표고. (얹지 않은 지형은 안 본다 — 위 `terrain` 주석)
+   *    활주로 둘레는 그릴 격자와 같은 함수로 편 높이다(core/runwayfloor.ts) — 화면의 기체는 펴진 바닥에 서
+   *    있는데 판독이 원자료의 솟은 표고로 「지면 −1」을 말하면 화면이 자기 말과 어긋난다.
    * 2. 얹었는데 격자 밖이면 **null** — 활주로 표고로 물러서면 "지면 위 높이"라는 이름으로
    *    다른 양을 내놓게 된다.
    * 3. 지형을 안 얹었으면 화면이 깐 기준면과 **같은 값**을 낸다. 여기서 null을 내면 판은
@@ -1025,7 +1037,7 @@ export class SceneController {
     if (this.terrain && pos) {
       for (const tier of this.terrain.tiers) {
         const z = elevationAt(tier, pos[0], pos[1]);
-        if (z !== null) return z;
+        if (z !== null) return this.floor ? floorElevation(this.floor, pos[0], pos[1], z) : z;
       }
       return null; // 지형은 있는데 이 자리를 안 덮는다
     }

@@ -20,6 +20,7 @@
 
 import { coastalDepths } from "../core/coastdepth.ts";
 import { REFINE_MIN_STEP_M, refineGrid } from "../core/refine.ts";
+import { RUNWAY_FLOOR, floorGrid, type FloorResult, type RunwayFloor } from "../core/runwayfloor.ts";
 import { CELL, buildSeaMasks, type TierMask } from "../core/seamask.ts";
 import {
   buildTerrainMesh, tierRect,
@@ -70,15 +71,21 @@ function boundingRect(rects: readonly NedRect[]): NedRect | null {
   return { n0, e0, n1, e1 };
 }
 
-/** 그릴 격자 — 원자료 티어에서 **그림 전용**으로 만든다(판독은 원자료를 쓴다).
+/** 그릴 격자 — 원자료 티어에서 **그림 전용**으로 만든다(판독은 원자료를 쓴다 — 활주로 바닥만 같이 편다).
  *
  * 1. 바다 쪽 고리에 표시용 수심(`core/coastdepth.ts`) — 물가선이 꼭짓점 톱니가 아니라 높이를 따라 그어진다.
- * 2. 간격이 `REFINE_MIN_STEP_M` 이상이면 3차 보간으로 2배 세분(`core/refine.ts`) — 외곽 언덕이 피라미드가 아니다.
+ * 2. 활주로 둘레를 활주로 표고로 편다(`core/runwayfloor.ts`) — 땅 표본만. 세분 **전** 원래 격자에서 펴야 마스크로
+ *    바다 표본을 가릴 수 있고, 세분은 편 표본에서 평평하게 나온다.
+ * 3. 간격이 `REFINE_MIN_STEP_M` 이상이면 3차 보간으로 2배 세분(`core/refine.ts`) — 외곽 언덕이 피라미드가 아니다.
  *
  * 세분한 티어의 바다 칸 판정은 원래 격자에서 한다 — 세분한 칸은 원래 칸 하나 안에 든다. */
 export function renderTier(
-  tier: Tier, mask: TierMask | undefined, refine: boolean,
-): { tier: Tier; skipCell: ((r0: number, c0: number, r1: number, c1: number) => boolean) | null; refined: boolean } {
+  tier: Tier, mask: TierMask | undefined, refine: boolean, floor: RunwayFloor | null = null,
+): {
+  tier: Tier; skipCell: ((r0: number, c0: number, r1: number, c1: number) => boolean) | null; refined: boolean;
+  /** 활주로 바닥을 얹은 결과 — 바닥을 안 줬으면 null */
+  floored: FloorResult | null;
+} {
   const n = tier.rows * tier.cols;
   let elev = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -86,6 +93,12 @@ export function renderTier(
     elev[i] = v === tier.nodata ? Number.NaN : tier.offset + v * tier.scale;
   }
   if (mask) elev = coastalDepths(elev, tier.rows, tier.cols, mask.cells);
+  let floored: FloorResult | null = null;
+  if (floor) {
+    floored = floorGrid(elev, tier.rows, tier.cols, tier.n0, tier.e0, tier.step, floor,
+      mask ? (i) => mask.cells[i] === CELL.LAND : undefined);
+    elev = floored.elev;
+  }
   const doRefine = refine && tier.step >= REFINE_MIN_STEP_M && tier.rows > 1 && tier.cols > 1;
   let rows = tier.rows;
   let cols = tier.cols;
@@ -102,7 +115,7 @@ export function renderTier(
       : tier.nodata;
   }
   const out: Tier = { ...tier, rows, cols, step, raw };
-  if (!mask) return { tier: out, skipCell: null, refined: doRefine };
+  if (!mask) return { tier: out, skipCell: null, refined: doRefine, floored };
   const sea = seaQuad(mask);
   return {
     tier: out,
@@ -111,19 +124,27 @@ export function renderTier(
       ? (r0, c0, r1, c1) => sea(r0 >> 1, c0 >> 1, (r1 + 1) >> 1, (c1 + 1) >> 1)
       : sea,
     refined: doRefine,
+    floored,
   };
 }
 
+/** 캡션의 미터 — 소수 한 자리, 끝의 0은 뗀다 */
+const m1 = (v: number) => String(Number(v.toFixed(1)));
+
 /** @param opts.strideFor 그릴 격자(세분 뒤)에 걸 솎기 — 게임 모드의 로우폴리
- *  @param opts.refine 외곽 세분 여부(기본 참). 게임 모드는 낱면이 곧 문법이라 끈다. */
+ *  @param opts.refine 외곽 세분 여부(기본 참). 게임 모드는 낱면이 곧 문법이라 끈다.
+ *  @param opts.floor 활주로 바닥(`core/runwayfloor.ts`) — 결과의 활주로. 없으면 펴지 않는다. */
 export function buildTerrain(
-  pack: TerrainPack, opts: { strideFor?: (t: Tier) => number; refine?: boolean } = {},
+  pack: TerrainPack,
+  opts: { strideFor?: (t: Tier) => number; refine?: boolean; floor?: RunwayFloor | null } = {},
 ): TerrainBuild {
   const masks = buildSeaMasks(pack.tiers);
   const inner = [...pack.tiers].sort(byStepAsc);
   const meshes: TerrainMesh[] = [];
   const notes: string[] = [];
   let anyRefined = false;
+  // 캡션은 활주로를 덮는 가장 촘촘한 티어에서 — 화면에 보이는 바닥이 그 격자다
+  let floored: FloorResult | null = null;
 
   for (let i = 0; i < inner.length; i++) {
     const tier = inner[i]!;
@@ -137,8 +158,9 @@ export function buildTerrain(
     // CLI에서 그대로 받아들여지는데, 그러면 8~12 km 고리가 두 번 그려져 z-fighting이 난다.
     // 합집합의 경계 사각형은 그 전제 없이도 "이미 덮인 곳"을 덮는다.
     const skipRect = boundingRect(inner.slice(0, i).map(tierRect));
-    const rt = renderTier(tier, mask, opts.refine ?? true);
+    const rt = renderTier(tier, mask, opts.refine ?? true, opts.floor ?? null);
     anyRefined ||= rt.refined;
+    if (floored === null && rt.floored && rt.floored.touched > 0) floored = rt.floored;
     meshes.push(buildTerrainMesh(rt.tier, {
       stride: opts.strideFor?.(rt.tier) ?? 1,
       skipRect,
@@ -200,6 +222,17 @@ export function buildTerrain(
         + "넘지 않게 자릅니다). 지면 높이 판독은 두 경우 모두 원자료 격자를 씁니다."
       : " 지면 높이 판독은 원자료 격자를 씁니다."),
   );
+  if (opts.floor) {
+    const f = opts.floor;
+    const src = floored?.source;
+    notes.push(floored
+      ? `활주로 바닥: 축 양옆 ${RUNWAY_FLOOR.halfWidthM} m·양 끝 너머 ${RUNWAY_FLOOR.endM} m를 활주로 표고 `
+        + `${m1(f.elevation)} m로 평평하게 그리고, 바깥 ${RUNWAY_FLOOR.blendM} m에서 원자료로 이었습니다`
+        + (src ? ` — 원자료는 이 구역에서 ${m1(src.min)}~${m1(src.max)} m로 출렁입니다(표고 자료의 오차 수준)` : "")
+        + ". 시뮬은 땅을 활주로 표고의 평면으로 계산하므로, 펴지 않으면 멈춘 기체가 솟은 지면에 묻힙니다. "
+        + "이 구역에서는 지면 높이 판독도 편 높이를 씁니다."
+      : "활주로 바닥: 지형이 활주로 자리를 덮지 않아 펴지 않았습니다.");
+  }
   notes.push(
     "산그늘은 표고 격자를 태양 쪽으로 훑어 그리고(격자 30·90 m만큼 무디며, 걸음 사이의 좁은 능선은 "
     + "놓칠 수 있습니다), 골짜기의 어둑함은 반경 60·180·540 m의 상대 표고로 어림한 하늘 열림입니다 — "

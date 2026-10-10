@@ -7065,14 +7065,14 @@ function nextSpeech(prev, now) {
   };
 }
 const str = (v2) => typeof v2 === "string" && v2 !== "" ? v2 : null;
-const num$3 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+const num$4 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
 function readTour(v2) {
   if (v2 == null || typeof v2 !== "object") return null;
   const o = v2;
   const token = str(o.token);
   const resultId = str(o.resultId);
   if (token == null || resultId == null) return null;
-  const speed = num$3(o.speed);
+  const speed = num$4(o.speed);
   return {
     token,
     resultId,
@@ -7080,7 +7080,7 @@ function readTour(v2) {
     // 0·음수·NaN 배속은 재생이 흐르지 않는다 — 투어가 영영 끝나지 않는다
     speed: speed != null && speed > 0 ? speed : 1,
     voice: o.voice === true,
-    endT: num$3(o.endT)
+    endT: num$4(o.endT)
   };
 }
 function sceneReady(tour, s) {
@@ -39445,14 +39445,15 @@ function buildPropsGroup(field) {
   }
   return { group, count };
 }
-const num$2 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+const RUNWAY_LINE_LIFT_M = 0.15;
+const num$3 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
 const fmtM = (v2) => String(Number(v2.toFixed(1)));
 function runwayDrawing(rw, width) {
   const r2 = rw ?? null;
-  const h = num$2(r2?.heading);
-  const L2 = num$2(r2?.length);
+  const h = num$3(r2?.heading);
+  const L2 = num$3(r2?.length);
   if (h === null || L2 === null) return null;
-  const d = -(num$2(r2?.elevation) ?? 0);
+  const d = -((num$3(r2?.elevation) ?? 0) + RUNWAY_LINE_LIFT_M);
   const [cn, ce2] = [Math.cos(h), Math.sin(h)];
   const n1 = cn * L2;
   const e1 = ce2 * L2;
@@ -39479,6 +39480,90 @@ function runwayDrawing(rw, width) {
     surface: { heading: h, length: L2, width: width.width },
     note: `활주로: 중심선·시단·종단·양 가장자리 — 폭 ${fmtM(width.width)} m는 ${width.source} 값입니다(결과에는 폭이 없어, 이 런의 활주로가 제원의 활주로와 같을 때만 씁니다).`
   };
+}
+const RUNWAY_FLOOR = {
+  /** 축에서 양옆으로 평평하게 펴는 거리 [m] */
+  halfWidthM: 75,
+  /** 시단 앞·종단 너머로 펴는 거리 [m] */
+  endM: 60,
+  /** 그 바깥에서 원자료로 돌아가는 폭 [m] — 30 m 격자 세 칸 */
+  blendM: 90
+};
+const num$2 = (v2) => typeof v2 === "number" && Number.isFinite(v2) ? v2 : null;
+function runwayFloorOf(rw) {
+  const r2 = rw ?? null;
+  const heading = num$2(r2?.heading);
+  const length = num$2(r2?.length);
+  if (heading === null || length === null || length <= 0) return null;
+  return { heading, length, elevation: num$2(r2?.elevation) ?? 0 };
+}
+function sameFloor(a, b) {
+  if (a === null || b === null) return a === b;
+  return a.heading === b.heading && a.length === b.length && a.elevation === b.elevation;
+}
+function floorWeight(f2, n2, e) {
+  const ca2 = Math.cos(f2.heading);
+  const sa2 = Math.sin(f2.heading);
+  const along = n2 * ca2 + e * sa2;
+  const across = -n2 * sa2 + e * ca2;
+  const dx = Math.max(-60 - along, along - f2.length - RUNWAY_FLOOR.endM, 0);
+  const dy = Math.max(Math.abs(across) - RUNWAY_FLOOR.halfWidthM, 0);
+  const d = Math.hypot(dx, dy);
+  if (d >= RUNWAY_FLOOR.blendM) return 0;
+  const t2 = d / RUNWAY_FLOOR.blendM;
+  return 1 - t2 * t2 * (3 - 2 * t2);
+}
+function floorElevation(f2, n2, e, z2) {
+  if (!Number.isFinite(z2)) return z2;
+  const w2 = floorWeight(f2, n2, e);
+  if (w2 >= 1) return f2.elevation;
+  return w2 > 0 ? z2 + (f2.elevation - z2) * w2 : z2;
+}
+function floorGrid(elev, rows, cols, n0, e0, step2, f2, keep = () => true) {
+  const out = Float32Array.from(elev);
+  const ca2 = Math.cos(f2.heading);
+  const sa2 = Math.sin(f2.heading);
+  const reach = RUNWAY_FLOOR.endM + RUNWAY_FLOOR.blendM;
+  const side = RUNWAY_FLOOR.halfWidthM + RUNWAY_FLOOR.blendM;
+  let nMin = Infinity;
+  let nMax = -Infinity;
+  let eMin = Infinity;
+  let eMax = -Infinity;
+  for (const a of [-reach, f2.length + reach]) {
+    for (const s of [-side, side]) {
+      const n2 = a * ca2 - s * sa2;
+      const e = a * sa2 + s * ca2;
+      nMin = Math.min(nMin, n2);
+      nMax = Math.max(nMax, n2);
+      eMin = Math.min(eMin, e);
+      eMax = Math.max(eMax, e);
+    }
+  }
+  const r0 = Math.max(0, Math.floor((nMin - n0) / step2));
+  const r1 = Math.min(rows - 1, Math.ceil((nMax - n0) / step2));
+  const c0 = Math.max(0, Math.floor((eMin - e0) / step2));
+  const c1 = Math.min(cols - 1, Math.ceil((eMax - e0) / step2));
+  let touched = 0;
+  let min = Infinity;
+  let max = -Infinity;
+  for (let r2 = r0; r2 <= r1; r2++) {
+    for (let c = c0; c <= c1; c++) {
+      const i = r2 * cols + c;
+      const z2 = out[i];
+      if (!Number.isFinite(z2) || !keep(i)) continue;
+      const n2 = n0 + r2 * step2;
+      const e = e0 + c * step2;
+      const w2 = floorWeight(f2, n2, e);
+      if (w2 <= 0) continue;
+      touched++;
+      if (w2 >= 1) {
+        min = Math.min(min, z2);
+        max = Math.max(max, z2);
+      }
+      out[i] = floorElevation(f2, n2, e, z2);
+    }
+  }
+  return { elev: out, touched, source: Number.isFinite(min) ? { min, max } : null };
 }
 const CLOUD_UNIFORM_DECL = (
   /* glsl */
@@ -43976,7 +44061,7 @@ function boundingRect(rects) {
   }
   return { n0, e0, n1, e1 };
 }
-function renderTier(tier, mask, refine) {
+function renderTier(tier, mask, refine, floor = null) {
   const n2 = tier.rows * tier.cols;
   let elev = new Float32Array(n2);
   for (let i = 0; i < n2; i++) {
@@ -43984,6 +44069,20 @@ function renderTier(tier, mask, refine) {
     elev[i] = v2 === tier.nodata ? Number.NaN : tier.offset + v2 * tier.scale;
   }
   if (mask) elev = coastalDepths(elev, tier.rows, tier.cols, mask.cells);
+  let floored = null;
+  if (floor) {
+    floored = floorGrid(
+      elev,
+      tier.rows,
+      tier.cols,
+      tier.n0,
+      tier.e0,
+      tier.step,
+      floor,
+      mask ? (i) => mask.cells[i] === CELL.LAND : void 0
+    );
+    elev = floored.elev;
+  }
   const doRefine = refine && tier.step >= REFINE_MIN_STEP_M && tier.rows > 1 && tier.cols > 1;
   let rows = tier.rows;
   let cols = tier.cols;
@@ -44001,27 +44100,31 @@ function renderTier(tier, mask, refine) {
     raw[i] = Number.isFinite(z2) ? Math.min(Math.max(Math.round((z2 - tier.offset) / tier.scale), 0), tier.nodata - 1) : tier.nodata;
   }
   const out = { ...tier, rows, cols, step: step2, raw };
-  if (!mask) return { tier: out, skipCell: null, refined: doRefine };
+  if (!mask) return { tier: out, skipCell: null, refined: doRefine, floored };
   const sea = seaQuad(mask);
   return {
     tier: out,
     // 세분 격자 (r, c) → 원래 격자 (r/2, c/2). 세분한 칸은 원래 칸 하나 안에 들므로 내림·올림이 그 칸이다.
     skipCell: doRefine ? (r0, c0, r1, c1) => sea(r0 >> 1, c0 >> 1, r1 + 1 >> 1, c1 + 1 >> 1) : sea,
-    refined: doRefine
+    refined: doRefine,
+    floored
   };
 }
+const m1 = (v2) => String(Number(v2.toFixed(1)));
 function buildTerrain(pack, opts = {}) {
   const masks = buildSeaMasks(pack.tiers);
   const inner = [...pack.tiers].sort(byStepAsc);
   const meshes = [];
   const notes = [];
   let anyRefined = false;
+  let floored = null;
   for (let i = 0; i < inner.length; i++) {
     const tier = inner[i];
     const mask = masks.get(tier.name);
     const skipRect = boundingRect(inner.slice(0, i).map(tierRect));
-    const rt = renderTier(tier, mask, opts.refine ?? true);
+    const rt = renderTier(tier, mask, opts.refine ?? true, opts.floor ?? null);
     anyRefined ||= rt.refined;
+    if (floored === null && rt.floored && rt.floored.touched > 0) floored = rt.floored;
     meshes.push(buildTerrainMesh(rt.tier, {
       stride: opts.strideFor?.(rt.tier) ?? 1,
       skipRect,
@@ -44060,6 +44163,11 @@ function buildTerrain(pack, opts = {}) {
   notes.push(
     "물가선은 바다 쪽 첫 세 칸을 물속으로 이어 내려(땅 높이에 비례한 1~30 m의 표시용 수심 — 실제 수심이 아닙니다) 격자 꼭짓점의 톱니 대신 높이를 따라 그립니다." + (anyRefined ? " 외곽 격자는 그릴 때 3차 보간으로 두 배 촘촘히 해 작은 언덕을 둥글게 그립니다(원래 표본 범위를 넘지 않게 자릅니다). 지면 높이 판독은 두 경우 모두 원자료 격자를 씁니다." : " 지면 높이 판독은 원자료 격자를 씁니다.")
   );
+  if (opts.floor) {
+    const f2 = opts.floor;
+    const src = floored?.source;
+    notes.push(floored ? `활주로 바닥: 축 양옆 ${RUNWAY_FLOOR.halfWidthM} m·양 끝 너머 ${RUNWAY_FLOOR.endM} m를 활주로 표고 ${m1(f2.elevation)} m로 평평하게 그리고, 바깥 ${RUNWAY_FLOOR.blendM} m에서 원자료로 이었습니다` + (src ? ` — 원자료는 이 구역에서 ${m1(src.min)}~${m1(src.max)} m로 출렁입니다(표고 자료의 오차 수준)` : "") + ". 시뮬은 땅을 활주로 표고의 평면으로 계산하므로, 펴지 않으면 멈춘 기체가 솟은 지면에 묻힙니다. 이 구역에서는 지면 높이 판독도 편 높이를 씁니다." : "활주로 바닥: 지형이 활주로 자리를 덮지 않아 펴지 않았습니다.");
+  }
   notes.push(
     "산그늘은 표고 격자를 태양 쪽으로 훑어 그리고(격자 30·90 m만큼 무디며, 걸음 사이의 좁은 능선은 놓칠 수 있습니다), 골짜기의 어둑함은 반경 60·180·540 m의 상대 표고로 어림한 하늘 열림입니다 — 둘 다 표시용 근사입니다."
   );
@@ -45165,8 +45273,8 @@ class GLTFCubicSplineInterpolant extends Interpolant {
       const p0 = values[offset0 + i + stride];
       const m0 = values[offset0 + i + stride2] * td2;
       const p1 = values[offset1 + i + stride];
-      const m1 = values[offset1 + i] * td2;
-      result[i] = s0 * p0 + s1 * m0 + s2 * p1 + s3 * m1;
+      const m12 = values[offset1 + i] * td2;
+      result[i] = s0 * p0 + s1 * m0 + s2 * p1 + s3 * m12;
     }
     return result;
   }
@@ -47101,6 +47209,10 @@ class SceneController {
    *  쓰면 "지형 로드 전에 게임 진입 → 뒤늦게 팩 도착"에서 null === null이 참이 되어
    *  게임 지형이 영영 안 구워진다(실측 — 조기 클릭 재현). */
   gameBuiltFor = void 0;
+  /** 게임 자산을 구울 때 쓴 활주로 바닥 — 팩이 같아도 결과의 활주로가 바뀌면 다시 굽는다 */
+  gameBuiltFloor = null;
+  /** 이 결과의 활주로 바닥(core/runwayfloor.ts) — 그릴 격자·게임 지형·지면 판독이 같은 값을 본다 */
+  floor = null;
   replayMarks = [];
   get gameOn() {
     return this.style === "game";
@@ -47308,12 +47420,13 @@ class SceneController {
     const notes = [...this.terrainNotes];
     const agree = originsAgree(this.pack?.origin, body.meta?.origin);
     this.terrain = this.pack && agree.ok ? this.pack : null;
-    if (this.gameBuiltFor !== void 0 && this.gameBuiltFor !== this.terrain) {
+    this.floor = runwayFloorOf(body.meta?.runway);
+    if (this.gameBuiltFor !== void 0 && (this.gameBuiltFor !== this.terrain || !sameFloor(this.gameBuiltFloor, this.floor))) {
       this.gameBuiltFor = void 0;
       if (this.gameOn) this.buildGameWorld();
     }
     if (this.terrain) {
-      const built = buildTerrain(this.terrain);
+      const built = buildTerrain(this.terrain, { floor: this.floor });
       this.host.setTerrain(built.meshes);
       notes.push(...built.notes);
       const tiers = this.terrain.tiers.map((tier) => ({ tier, mask: built.masks.get(tier.name) })).filter((x2) => x2.mask !== void 0);
@@ -47501,8 +47614,9 @@ class SceneController {
    *  한 번). 팩이 없으면 비운다 — 기준면 위를 나는 것도 계획에는 쓸 수 있고,
    *  캡션이 사유를 말한다. */
   buildGameWorld() {
-    if (this.gameBuiltFor === this.terrain) return;
+    if (this.gameBuiltFor === this.terrain && sameFloor(this.gameBuiltFloor, this.floor)) return;
     this.gameBuiltFor = this.terrain;
+    this.gameBuiltFloor = this.floor;
     const pack = this.terrain;
     if (pack == null) {
       this.host.setGameTerrain([], 800);
@@ -47512,7 +47626,8 @@ class SceneController {
     const relief = reliefOf(pack.tiers);
     const built = buildTerrain(pack, {
       strideFor: (t2) => Math.max(1, Math.round(GAME_FACET_M / t2.step)),
-      refine: false
+      refine: false,
+      floor: this.floor
     });
     this.host.setGameTerrain(built.meshes, relief);
     const core = [...pack.tiers].sort((a, b) => a.step - b.step)[0];
@@ -47520,10 +47635,11 @@ class SceneController {
       this.host.setProps(null);
       return;
     }
+    const floor = this.floor;
     const sample = (n2, e) => {
       for (const tier of pack.tiers) {
         const z2 = elevationAt(tier, n2, e);
-        if (z2 !== null) return z2;
+        if (z2 !== null) return floor ? floorElevation(floor, n2, e, z2) : z2;
       }
       return null;
     };
@@ -47805,6 +47921,8 @@ class SceneController {
    *
    * 네 갈래다.
    * 1. **얹은 지형이 이 자리를 덮으면** 그 표고. (얹지 않은 지형은 안 본다 — 위 `terrain` 주석)
+   *    활주로 둘레는 그릴 격자와 같은 함수로 편 높이다(core/runwayfloor.ts) — 화면의 기체는 펴진 바닥에 서
+   *    있는데 판독이 원자료의 솟은 표고로 「지면 −1」을 말하면 화면이 자기 말과 어긋난다.
    * 2. 얹었는데 격자 밖이면 **null** — 활주로 표고로 물러서면 "지면 위 높이"라는 이름으로
    *    다른 양을 내놓게 된다.
    * 3. 지형을 안 얹었으면 화면이 깐 기준면과 **같은 값**을 낸다. 여기서 null을 내면 판은
@@ -47818,7 +47936,7 @@ class SceneController {
     if (this.terrain && pos) {
       for (const tier of this.terrain.tiers) {
         const z2 = elevationAt(tier, pos[0], pos[1]);
-        if (z2 !== null) return z2;
+        if (z2 !== null) return this.floor ? floorElevation(this.floor, pos[0], pos[1], z2) : z2;
       }
       return null;
     }
