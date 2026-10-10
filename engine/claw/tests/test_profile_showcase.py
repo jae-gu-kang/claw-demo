@@ -251,6 +251,10 @@ def test_기록된_설계_설정으로_다시_설계하면_출하한_문서_그�
     assert (v["added"], v["existing"]) == (15, 8), v
     # v1.84: 허용치 0.10 기본 켬 — S1은 트리거 0이라 점·표 그대로, 상태만 tol_unset → unmeasured(잴 수 없는 구간 2)
     assert rep["reinforcement"]["status"] == "unmeasured" and cov["d_unmeasured"] == 2, cov
+    # 구간 처방(⑥ — 05 §7 tune_interval): S1은 허용치 초과 0 · fail 섞인 판정 다름 0이라 카드가 없다 — 표 요약·기준 지문·결함
+    # 창이 그대로인 근거다
+    assert cov["interval_remedies"] == {"proposed": 0, "accepted": 0, "rolled_back": 0, "unimproved": 0}, cov
+    assert rep["reinforcement"]["remedies"] == [], rep["reinforcement"]["remedies"]
     # 표는 공통 마하 절점을 공유한다 — 설계점 수와 무관하게 자리마다 절점 7점(M0.24 절점은 설계점 표본이 없어 뺐다)
     assert rep["knots"]["shared"] is True and set(rep["knots"]["tables"].values()) == {7}, rep["knots"]
     assert cov["refine_remaining"] is not None and cov["refine_remaining"] <= cov["refine_tol"], cov

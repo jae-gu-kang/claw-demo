@@ -598,6 +598,7 @@ def _design_summary(rep: dict | None) -> dict:
 
 def _validation_summary(rep: dict) -> dict | None:
     """report.validation·coverage·reinforcement → provenance.design.validation. 계획 기록이 없으면 None(0으로 위장하지 않는다).
+    interval_remedies는 coverage의 구간 처방 수 그대로(05 §7 tune_interval — ⑥).
     생성기(claw.profile.showcase)가 같은 모양을 적는다."""
     v = rep.get("validation")
     if not isinstance(v, dict):
@@ -612,6 +613,8 @@ def _validation_summary(rep: dict) -> dict | None:
         "out_of_region": v.get("out_of_region"), "mode": v.get("mode"),
         "conditions": count(v.get("conditions")), "omitted": count(v.get("omitted")),
         "reinforce_status": rf.get("status", cov.get("reinforce_status")),
+        # 구간 처방 수(05 §7 tune_interval — 제안·수용·되돌림·미개선). 칸이 없는 옛 보고는 None
+        "interval_remedies": dict(cov["interval_remedies"]) if isinstance(cov.get("interval_remedies"), dict) else None,
     }
 
 

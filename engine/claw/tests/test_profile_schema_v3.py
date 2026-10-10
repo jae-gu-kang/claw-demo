@@ -416,12 +416,13 @@ def test_upgraded_v2_example_is_the_shipped_v3_law_and_builds(name, shipped):
     new, notes = upgrade_document(raw)
     ref = load_shipped_example() if shipped == "example" else load_showcase()
     law_new, law_ref = copy.deepcopy(validate_document(new)["law"]), copy.deepcopy(ref["law"])
-    # v1.84: 보강 허용치 기본 켬으로 출하 쇼케이스의 설계 보고 `reinforce_status`가 tol_unset → unmeasured가 됐다. 이 값은 그
-    # 설계 런의 보고(05 §11.7)이고 법칙 내용이 아니라 올리기가 바꾸지 않는다 — 비교에서만 뺀다(표·지문·그 밖의 출처는 그대로 비교).
+    # v1.84·v1.85: 출하 쇼케이스의 설계 보고에 `reinforce_status`(tol_unset → unmeasured)·`interval_remedies`가 생겼다. 이 값들은
+    # 그 설계 런의 보고(05 §11.7)이고 법칙 내용이 아니라 올리기가 바꾸지 않는다 — 비교에서만 뺀다(표·지문·그 밖의 출처는 그대로 비교).
     for law in (law_new, law_ref):
         val = ((law.get("gain_tables") or {}).get("provenance") or {}).get("design", {}).get("validation")
         if isinstance(val, dict):
-            val.pop("reinforce_status", None)
+            for key in ("reinforce_status", "interval_remedies"):
+                val.pop(key, None)
     assert law_new == law_ref
     _all_build(new)
     msgs = {n["path"]: n["message"] for n in notes}

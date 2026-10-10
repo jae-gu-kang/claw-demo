@@ -11,6 +11,10 @@
 - 종료 4겹: 점 예산(budget_points) + 편입 단방향(points.promote — 검증점 → 설계점) + 절점 단조 성장·표당 상한
   (knots.add_knot) + 이터레이션 상한(budget_iters). 수렴 판정: 전 점 통과(converged) ∨ 남은 실패가
   전부 escalation(escalated) ∨ 예산 소진(budget_exhausted).
+- 구간 처방(05 §7 tune_interval — interval.py): 보강 구간이 d > 허용치이거나 fail 섞인 판정 다름이면 CLASSIFY가 구간 카드를
+  낸다. 반영 전에 세션 전부를 체크포인트로 찍고(checkpoint), 다음 VERIFY가 비퇴행 가드(judge_remedy)로 채점해 위반이면
+  **이터 전체**를 체크포인트로 되돌리고 그 처방을 봉인한다(1회 거부로 — 결정론). 승인이 /design/{id}/resume 안에서 동기로
+  돌아 카드 단위 미니 루프를 둘 수 없어서 되돌림 단위가 이터다.
 - 증분 재계산: 트림·선형모델은 (케이스, 지문) 캐시 재사용 — pipeline.Pipeline의
   DAG 캐시는 파라미터 지문 축이라 점집합 상태와 결이 달라 직접 채택하지 않는다
   (의도적 이탈). params_fingerprint 계보 스탬프는 동일하게 승계된다.
@@ -42,6 +46,17 @@ from claw.design.knots import (
     union_knots,
 )
 from claw.design.grid import DEFAULT_ALTS, DEFAULT_FUEL_FRACS, coarse_grid, coarse_preflight, region_grid
+from claw.design.interval import (
+    REMEDY_STATUS_TEXT,
+    grid_codes,
+    grid_delta,
+    interval_remedies,
+    judge_remedy,
+    neighbours_of,
+    region_delta,
+    remedy_counts,
+    snapshot,
+)
 from claw.opspace.basegrid import base_grid
 from claw.design.linmodels import LinearModelSet
 from claw.design.points import (
@@ -85,7 +100,7 @@ from claw.design.validation import (
     validation_conditions,
     validation_plan,
 )
-from claw.design.tune import REASON_TEXT, TuneTargets, failed_gain_slots, tune_points
+from claw.design.tune import REASON_TEXT, SLOT_DESIGN_FAILED, TuneTargets, failed_gain_slots, tune_points
 from claw.env import isa_atmosphere
 from claw.opspace.states import NOT_RUN
 from claw.opspace.verdict import VerdictContext
@@ -475,6 +490,10 @@ def _effect_changed(before, after) -> bool:
 
 # 점을 판정하는 스테이지 — 조건 판정 문맥(verdict_ctx)이 있어야 시작한다
 _JUDGING_STAGES = ("COARSE", "REFINE", "VERIFY")
+# 구간 처방 되돌림(_rollback_iteration)이 체크포인트로 덮지 **않는** 칸 — 처방 기록·봉인·이터 수·이력(되돌림 자체가
+# 기록이다), 트림·선형모델 캐시(케이스·지문의 순수 함수라 낡지 않는다 — 다시 풀 일을 없앤다)와 그 집계, 실행 인자
+_ROLLBACK_KEEP = ("interval_log", "ineffective", "iter_n", "iterations", "trims", "lms", "trim_reuse",
+                  "trim_reused_names", "verdict_ctx", "_trim_store", "_clock")
 
 
 class DesignSession:
@@ -516,6 +535,11 @@ class DesignSession:
         # 예산을 태우는 것을 아무도 모른다. ineffective는 {봉인키: 연속 무효 횟수}
         self.applied_log: list = []
         self.ineffective: dict = {}
+        # 구간 처방(05 §7 tune_interval) — 반영 직전 세션 전부(to_dict 깊은 사본, 재검증 채점 뒤 비운다)와 구간 처방 기록
+        # [{key, card_id, row, interval, slot, remedy, point, status, before, after, neighbours, region_delta, grid_delta, …}].
+        # 봉인은 ineffective에 구간 봉인 키(interval.seal_key)로 _SEAL_AFTER를 넣는다 — 1회 거부로 봉인
+        self.checkpoint = None
+        self.interval_log: list = []
         # 검증 커버리지 — "무엇을 안 봤는가". converged가 거짓말하지 않으려면
         # 실패 수만큼이나 이 수치가 보고에 있어야 한다
         self.refine_report: dict = {}
@@ -1107,6 +1131,9 @@ class DesignSession:
             # 트림 전에 제외한 점(모델 부족·요구영역 밖·요구 미정의) — 목록에 남고 설계하지 않았다(이관 2단계)
             "pre_trim_excluded": sum(1 for p in self.points if pre_excluded(p)),
             **self._plan_coverage(),
+            # 구간 처방(05 §7 tune_interval) — {proposed, accepted, rolled_back, unimproved}. 계획이 없으면(midpoint 규칙·VERIFY
+            # 전) None — 잰 적 없는 것을 0으로 쓰지 않는다
+            "interval_remedies": None if self.validation_counts() is None else remedy_counts(self.interval_log),
         }
 
     def _plan_coverage(self) -> dict:
@@ -1293,6 +1320,13 @@ class DesignSession:
         if cov["reinforce_status"] == "budget":
             st = self._reinforce_status(self._segment_d())
             out.append(f"{st['label']} — 보강 예산(추가점·깊이·시간)에 막혔다. 합격이나 설계 불가가 아니다")
+        ir = cov.get("interval_remedies") or {}
+        if ir.get("unimproved"):
+            labels = sorted({r.get("label") for r in self.interval_log if r["status"] in ("unimproved", "sealed")})
+            out.append(f"구간 {ir['unimproved']}개 미개선 ({' · '.join(x for x in labels if x)}) — 보강 구간의 보간 형상(d >"
+                       " 허용치)이나 fail 섞인 판정 다름을 구간 처방(편입·절점 추가)으로 풀지 못했다")
+        if ir.get("proposed") and self.stage == "DONE":
+            out.append(f"구간 처방 {ir['proposed']}개를 반영하지 못하고 끝났다(이터 예산) — 그 구간은 처방 전 그대로다")
         return out
 
     def shortfall_ledger(self) -> list:
@@ -1425,17 +1459,67 @@ class DesignSession:
 
     def _stage_classify(self, aircraft, cb):
         c = self.config
-        if not self.margin_out["failures"]:
-            judged = self.judged_count()
-            if judged == 0:
-                # 실패가 없는 게 아니라 볼 것이 없었다 — 트림 전량 미수렴, 빈 격자,
-                # 게인이 전부 0인 형상 등. 통과로 위장하지 않는다
-                self.status = "nothing_verified"
-                self.stage = "DONE"
-                return
+        failures = self.margin_out["failures"]
+        if not failures and self.judged_count() == 0:
+            # 실패가 없는 게 아니라 볼 것이 없었다 — 트림 전량 미수렴, 빈 격자,
+            # 게인이 전부 0인 형상 등. 통과로 위장하지 않는다
+            self.status = "nothing_verified"
+            self.stage = "DONE"
+            return
+        actions = self._classify_point_failures(aircraft, cb) if failures else []
+        # 구간 처방(05 §7 tune_interval) — 점은 다 통과여도 보간 형상이 허용치를 넘는 구간은 처방 대상이다
+        iv_cards = self._interval_cards(actions)
+        if not failures and not iv_cards:
             self.status = "converged"
             self.stage = "DONE"
             return
+        actions = actions + iv_cards
+        # 계획한 점(경계·clip·절점·추가·검증조건·보강·이전 계획)의 실패도 처방 대상이다 — 요구영역 안 실패는 실제 실패다
+        # (CLASSIFY_PLAN_NOTE). 근거에 그 점의 계획 종류·출처를 적어 카드에서 「경계점 실패」 등으로 읽히게 한다
+        plan_of = {e["name"]: e for e in self.validation_plan if not e.get("measure_only")}
+        for a in actions:
+            e = plan_of.get(a["case"])
+            if e is not None:
+                a["evidence"]["plan_point"] = {"kind": e["kind"], "origin": e["origin"],
+                                               "label": VALIDATION_KINDS.get(e["kind"], e["kind"])}
+        # 두 번 반영해도 판정이 안 움직인 처방은 다시 내지 않는다 — 무효인 줄 알면서
+        # 같은 카드를 다시 내미는 것은 이터 예산만 태우고 사용자를 속인다. 구간 카드는 자기 봉인 키로 이미 봤다
+        sealed = self.sealed_keys()
+        for a in actions:
+            if "interval_key" not in a and _seal_key(a["case"], a["loop"], a["verdict"]) in sealed:
+                a["sealed"] = (f"{_SEAL_AFTER}회 반영해도 판정이 안 바뀌었다 —"
+                               " 이 처방으로는 풀리지 않는다")
+        for a in actions:
+            if a["action"]["type"] == "escalate" and all(
+                e["id"] != a["id"] for e in self.escalations
+            ):
+                self.escalations.append(a)
+        self.actions = actions
+        applicable = [a for a in actions
+                      if a["action"]["type"] != "escalate" and "superseded_by" not in a
+                      and "sealed" not in a]
+        self.iterations.append({
+            "n": self.iter_n, "stage": "CLASSIFY",
+            "failures": len(failures),
+            "actions": [{k: a[k] for k in ("id", "verdict")} for a in actions],
+        })
+        # 점 실패가 없으면 남은 구간 처방이 반영되지 않아도 수렴이다(전 점 통과) — 못 고친 구간은 coverage가 말한다
+        if not applicable:
+            self.status = "escalated" if failures else "converged"
+            self.stage = "DONE"
+            return
+        if self.iter_n + 1 >= c.budget_iters:
+            self.status = "budget_exhausted" if failures else "converged"
+            self.stage = "DONE"
+            return
+        if c.mode == "gated":
+            self.status = "awaiting_approval"
+            return
+        self.apply_actions([a["id"] for a in applicable])
+
+    def _classify_point_failures(self, aircraft, cb) -> list:
+        """점 실패의 원인 분류(classify.classify_failures) — 처방 카드 목록."""
+        c = self.config
         design_eff = {**self.design, **self.sched_constants}
         actions = classify_failures(
             aircraft, self.points, self.lms, self.trims, self.sched_tables,
@@ -1452,47 +1536,179 @@ class DesignSession:
             on_progress=lambda d, t, m: cb(d, t, m),
         )
         cb(1, 1, "classify")
-        # 계획한 점(경계·clip·절점·추가·검증조건·보강·이전 계획)의 실패도 처방 대상이다 — 요구영역 안 실패는 실제 실패다
-        # (CLASSIFY_PLAN_NOTE). 근거에 그 점의 계획 종류·출처를 적어 카드에서 「경계점 실패」 등으로 읽히게 한다
-        plan_of = {e["name"]: e for e in self.validation_plan if not e.get("measure_only")}
-        for a in actions:
-            e = plan_of.get(a["case"])
-            if e is not None:
-                a["evidence"]["plan_point"] = {"kind": e["kind"], "origin": e["origin"],
-                                               "label": VALIDATION_KINDS.get(e["kind"], e["kind"])}
-        # 두 번 반영해도 판정이 안 움직인 처방은 다시 내지 않는다 — 무효인 줄 알면서
-        # 같은 카드를 다시 내미는 것은 이터 예산만 태우고 사용자를 속인다
-        sealed = self.sealed_keys()
-        for a in actions:
-            if _seal_key(a["case"], a["loop"], a["verdict"]) in sealed:
-                a["sealed"] = (f"{_SEAL_AFTER}회 반영해도 판정이 안 바뀌었다 —"
-                               " 이 처방으로는 풀리지 않는다")
-        for a in actions:
-            if a["action"]["type"] == "escalate" and all(
-                e["id"] != a["id"] for e in self.escalations
-            ):
-                self.escalations.append(a)
-        self.actions = actions
-        applicable = [a for a in actions
-                      if a["action"]["type"] != "escalate" and "superseded_by" not in a
-                      and "sealed" not in a]
-        self.iterations.append({
-            "n": self.iter_n, "stage": "CLASSIFY",
-            "failures": len(self.margin_out["failures"]),
-            "actions": [{k: a[k] for k in ("id", "verdict")} for a in actions],
-        })
-        if not applicable:
-            self.status = "escalated"
-            self.stage = "DONE"
-            return
-        if self.iter_n + 1 >= c.budget_iters:
-            self.status = "budget_exhausted"
-            self.stage = "DONE"
-            return
-        if c.mode == "gated":
-            self.status = "awaiting_approval"
-            return
-        self.apply_actions([a["id"] for a in applicable])
+        return actions
+
+    # ── 구간 처방 (05 §7 tune_interval · interval.py) ──
+    def _interval_rows(self) -> list:
+        """⑤ 구간 기록(reinforce_intervals) — 구간 처방의 입력. midpoint 규칙·계획 전이면 빈 목록."""
+        if self.config.validation["rule"] == "midpoint" or not self.validation_plan:
+            return []
+        rc = self.config.reinforce
+        return reinforce_intervals(self._segment_d(), self.validation_plan, tol=rc["tol"],
+                                   on_verdict_change=rc["on_verdict_change"], max_depth=rc["max_depth"])
+
+    def _has_knot(self, slots, mach) -> bool:
+        """이름 댄 표가 전부 그 마하 절점을 이미 가졌나 — 그러면 절점 추가는 할 일이 없다."""
+        names = [self.table_knots.get(s) for s in slots]
+        if not names or any(n is None or n not in self.knot_sets for n in names):
+            return False
+        return all(any(abs(k - mach) <= 1e-9 for k in self.knot_sets[n].coords) for n in names)
+
+    def _design_failed(self, name, loop) -> bool:
+        """그 점·자리 튜닝이 성립하지 않았나(05 §7.2 단일 술어 — tune.SLOT_DESIGN_FAILED)."""
+        rec = ((self.tune_meta.get("slots") or {}).get(name) or {}).get(loop) or {}
+        return rec.get("reason") in SLOT_DESIGN_FAILED
+
+    def _latest_record(self, key):
+        for rec in reversed(self.interval_log):
+            if rec.get("key") == key:
+                return rec
+        return None
+
+    def _interval_cards(self, actions) -> list:
+        """구간 처방 카드(tune_interval)를 내고 기록(interval_log)을 갱신한다.
+
+        제안만 하고 반영하지 않은 기록과 지난 판의 미개선 기록은 이번 판이 다시 정한다(지운다). 새로 제안하는 구간마다 반영 전
+        스냅숏(같은 세 점의 자리별 판정·d)과 좌우 이웃 구간 스냅숏을 기록에 둔다. 봉인된 카드는 그 처방의 되돌린 기록을
+        sealed로 바꾸고, 낼 처방이 없는 구간은 unimproved 기록으로 남긴다(「처방 소진」 · 편입 점 튜닝 불성립이면
+        「구조적 한계」)."""
+        self.interval_log = [r for r in self.interval_log if r["status"] not in ("proposed", "unimproved")]
+        for r in self.interval_log:
+            if r["status"] == "sealed":  # 봉인 표시도 이번 판이 다시 정한다 — 구간이 더는 처방 대상이 아니면 되돌림 기록으로 남는다
+                r.update(status="rolled_back", label=REMEDY_STATUS_TEXT["rolled_back"], why=None)
+        ivs = self._interval_rows()
+        if not ivs:
+            return []
+        cases = self.margin_out.get("cases", {})
+        res = interval_remedies(
+            ivs, cases, actions,
+            role_of=lambda n: self.points.get(n).role if n in self.points else None,
+            mach_of=lambda n: self.points.get(n).case.mach, has_knot=self._has_knot,
+            sealed=self.sealed_keys(), design_failed=self._design_failed)
+        crit = self.config.criteria
+        scales = d_scales(crit)
+        for card in res["cards"]:
+            if "superseded_by" in card or "sealed" in card:
+                continue  # 대신하는 점 처방이 있다 · 봉인 — 아래 미개선이 기록한다
+            act = card["action"]
+            iv = card["evidence"]["interval"]
+            a, b = iv["interval"]
+            t = (act["mach"] - a) / (b - a)
+            nbs = []
+            for nb in neighbours_of(iv["row"], iv["interval"], ivs):
+                lo, hi = nb["interval"]
+                nb_t = (self.points.get(nb["points"][1]).case.mach - lo) / (hi - lo) if nb["points"][1] in self.points \
+                    else None
+                nbs.append({**nb, "t": nb_t,
+                            "before": snapshot(nb["points"], nb_t, card["loop"], cases, crit, scales), "after": None})
+            self.interval_log.append({
+                "key": card["interval_key"], "card_id": card["id"], "row": list(iv["row"]),
+                "interval": list(iv["interval"]), "slot": card["loop"], "remedy": act["remedy"], "point": act["point"],
+                "status": "proposed", "label": REMEDY_STATUS_TEXT["proposed"], "iter": self.iter_n,
+                "points": list(iv["points"]), "t": t, "tol": iv["tol"], "exceeds": iv["exceeds"],
+                "verdict_change": iv["verdict_change"],
+                "before": snapshot(iv["points"], t, card["loop"], cases, crit, scales), "after": None,
+                "neighbours": nbs, "region_delta": None, "grid_delta": None, "grid_before": None,
+                "rolled_back": False, "sealed": False, "violations": [], "reason": None})
+        for u in res["unimproved"]:
+            rec = self._latest_record(u["key"]) if u["key"] else None
+            if rec is not None:  # 되돌린 처방을 다시 냈으나 봉인 — 그 기록이 이 구간을 말한다(카드에도 싣는다 — 왜 봉인인가)
+                rec.update(status="sealed", label=u["label"], why=u["why"])
+                for card in res["cards"]:
+                    if card.get("interval_key") == u["key"]:
+                        card["remedy"] = self._remedy_view(rec)
+                continue
+            self.interval_log.append({
+                "key": u["key"], "card_id": None, "row": u["row"], "interval": u["interval"], "slot": u["slot"],
+                "remedy": None, "point": u["point"], "status": "unimproved", "label": u["label"], "why": u["why"],
+                "iter": self.iter_n, "rolled_back": False, "sealed": False})
+        return res["cards"]
+
+    def _judge_interval_remedies(self) -> bool:
+        """반영한 구간 처방을 재검증 결과로 채점한다 — 위반이면 이터 전체를 되돌리고 True.
+
+        같은 세 점을 다시 재(after) 비퇴행 가드(interval.judge_remedy)를 건다. 전 요구영역 대조(region_delta)는 체크포인트의
+        판정과 지금 판정 사이 — 이터 단위라 같은 이터의 구간 처방이 같은 값을 본다. 하나라도 거부면 이터 전체를 되돌린다.
+        봉인은 자기 위반((a)·(b))이 있는 처방, 그리고 영역 하드 위반이면 그 이터의 구간 처방 전부(원인을 가를 수 없다)다
+        — 남의 위반에 함께 되돌린 처방은 봉인하지 않아 다음 판에 다시 낼 수 있다. 결정론이라 거부된 처방은 1회로 봉인한다."""
+        pending = [r for r in self.interval_log if r["status"] == "applied"]
+        if not pending or self.checkpoint is None:
+            # 반영한 구간 처방이 없다(체크포인트도 비운다). 체크포인트 없이 반영 기록만 있는 경우는 apply가 늘 찍으므로 없다
+            self.checkpoint = None
+            return False
+        crit = self.config.criteria
+        scales = d_scales(crit)
+        after_cases = self.margin_out.get("cases", {})
+        region = region_delta(self.checkpoint["margin_out"].get("cases", {}), after_cases, crit)
+        g_after = grid_codes(self.summary_grid())
+        judged = []
+        for rec in pending:
+            after = snapshot(rec["points"], rec["t"], rec["slot"], after_cases, crit, scales)
+            nb_after = [snapshot(nb["points"], nb.get("t"), rec["slot"], after_cases, crit, scales)
+                        for nb in rec["neighbours"]]
+            j = judge_remedy(rec, after, nb_after, region)
+            for nb, na in zip(rec["neighbours"], nb_after):
+                nb["after"] = na
+            rec.update(after=after, region_delta=region, grid_delta=grid_delta(rec.get("grid_before") or {}, g_after),
+                       violations=j["violations"], improved=j["improved"])
+            judged.append((rec, j))
+        by_id = {a["id"]: a for a in self.actions}
+        if all(j["accepted"] for _, j in judged):
+            for rec, _ in judged:
+                rec.update(status="accepted", label=REMEDY_STATUS_TEXT["accepted"])
+                after = self._loop_snapshot(rec["point"], rec["slot"])
+                for eff in [(by_id.get(rec["card_id"]) or {}).get("effect")] + [
+                        log["effect"] for log in self.applied_log if log["id"] == rec["card_id"]]:
+                    if eff is not None and "after" not in eff:
+                        eff.update(after=after, changed=True, interval=self._remedy_view(rec))
+            self.checkpoint = None
+            return False
+        hard = bool(region["new_fail"] or region["dropped"])
+        for rec, j in judged:
+            seal = j["own"] or hard
+            rec.update(status="rolled_back", label=REMEDY_STATUS_TEXT["rolled_back"], rolled_back=True, sealed=seal,
+                       reason=" · ".join(j["violations"]) or "같은 이터의 다른 구간 처방이 거부돼 함께 되돌렸다")
+            if seal:
+                self.ineffective[rec["key"]] = _SEAL_AFTER
+        self._rollback_iteration([rec["card_id"] for rec, _ in judged])
+        return True
+
+    def _rollback_iteration(self, card_ids):
+        """이터 전체를 체크포인트(반영 직전 세션)로 되돌린다 — 표·절점·점 역할·계획·판정·카드가 반영 전 그대로.
+
+        _ROLLBACK_KEEP 칸(처방 기록·봉인·이터 수·이력·트림 캐시·실행 인자)은 지금 값을 둔다. 다음 스테이지는 CLASSIFY다 —
+        같은 판정으로 다시 분류하면 봉인한 구간 카드는 sealed로, 함께 되돌린 점 처방은 그대로 다시 나온다."""
+        keep = {k: getattr(self, k) for k in _ROLLBACK_KEEP}
+        reverted = [{"id": a["id"], "verdict": a.get("verdict")} for a in self.actions if a.get("applied")]
+        restored = DesignSession.from_dict(self.checkpoint)
+        self.__dict__.update(restored.__dict__)
+        for k, v in keep.items():
+            setattr(self, k, v)
+        self.checkpoint = None
+        self.stage, self.status = "CLASSIFY", "running"
+        self.iterations.append({"n": self.iter_n, "stage": "ROLLBACK",
+                                "failures": len(self.margin_out.get("failures", ())), "actions": reverted,
+                                "interval_cards": list(card_ids)})
+
+    @staticmethod
+    def _remedy_view(rec) -> dict:
+        """구간 처방 기록의 보고 모양 — {card_id, status, label, remedy, slot, before{verdicts, d, slot}, after, neighbours
+        [{interval, before, after}], region_delta, grid_delta, violations, reason, rolled_back, sealed(, why)}."""
+        def short(snap):
+            return None if not snap else {k: snap.get(k) for k in ("verdicts", "d", "slot")}
+
+        out = {"card_id": rec.get("card_id"), "status": rec["status"], "label": rec.get("label"),
+               "remedy": rec.get("remedy"), "slot": rec.get("slot"), "point": rec.get("point"),
+               "row": rec.get("row"), "interval": rec.get("interval"),
+               "before": short(rec.get("before")), "after": short(rec.get("after")),
+               "neighbours": [{"interval": nb["interval"], "before": short(nb.get("before")),
+                               "after": short(nb.get("after"))} for nb in rec.get("neighbours") or ()],
+               "region_delta": copy.deepcopy(rec.get("region_delta")), "grid_delta": list(rec.get("grid_delta") or ()),
+               "violations": list(rec.get("violations") or ()), "reason": rec.get("reason"),
+               "rolled_back": bool(rec.get("rolled_back")), "sealed": bool(rec.get("sealed"))}
+        if rec.get("why"):
+            out["why"] = rec["why"]
+        return out
 
     # ── 처방 효과 ──
     def _loop_snapshot(self, case, loop) -> dict | None:
@@ -1512,12 +1728,17 @@ class DesignSession:
         판정도 부족 비율도 안 움직였으면 그 처방은 이 자리에서 듣지 않은 것이다.
         연속 _SEAL_AFTER회 그러면 봉인해 다음 이터에서 다시 내지 않는다 — 종전에는
         무효 처방이 applied로 기록되며 예산 소진까지 같은 순환을 돌 수 있었다.
+
+        구간 처방(tune_interval)은 먼저 비퇴행 가드로 따로 채점한다(_judge_interval_remedies) — 거부면 이터 전체를
+        되돌리므로 이 이터의 점 처방은 채점하지 않는다(반영 자체가 없던 일이 됐다).
         """
+        if self._judge_interval_remedies():
+            return
         by_id = {a["id"]: a for a in self.actions}
         for rec in self.applied_log:
             eff = rec["effect"]
-            if "after" in eff:
-                continue  # 이미 채점됨
+            if "after" in eff or rec.get("type") == "tune_interval":
+                continue  # 이미 채점됨 · 구간 처방은 위 가드가 채점했다
             after = self._loop_snapshot(rec["case"], rec["loop"])
             if after is None and eff["before"] is None:
                 continue  # 잴 대상이 애초에 없는 처방
@@ -1552,6 +1773,15 @@ class DesignSession:
         applied = []
         need_refine = False
         by_id = {a["id"]: a for a in self.actions}
+        tune = [by_id[aid] for aid in approved_ids if aid in by_id and by_id[aid]["action"]["type"] == "tune_interval"
+                and "superseded_by" not in by_id[aid] and "sealed" not in by_id[aid]]
+        grid_before = None
+        if tune:
+            # 구간 처방의 체크포인트 — 반영 직전 세션 전부(깊은 사본: to_dict는 판정·카드를 참조로 낸다). 다음 VERIFY의
+            # 가드가 거부하면 이터 전체를 이것으로 되돌린다. 처방 전 요약 격자도 찍어 둔다(grid_delta)
+            self.checkpoint = None
+            self.checkpoint = copy.deepcopy(self.to_dict())
+            grid_before = grid_codes(self.summary_grid())
         for aid in approved_ids:
             a = by_id.get(aid)
             if a is None or "superseded_by" in a:
@@ -1559,6 +1789,8 @@ class DesignSession:
             act = a["action"]
             if act["type"] == "escalate":
                 continue  # 상위 설계 변경은 자동 적용 금지 — 승인 목록에 있어도 무시
+            if act["type"] == "tune_interval" and "sealed" in a:
+                continue  # 봉인된 구간 처방 — 거부된 처방을 다시 반영하지 않는다
             if act["type"] in ("promote", "add_knot"):
                 # 편입 — 검증점만 설계점이 된다. 이미 설계점이면(같은 점의 다른 자리 처방·옛 세션의 앵커 승격 카드)
                 # 건너뛰되 applied로 센다(아래 tighten_fit과 같은 규약: effect 레코드가 안 생기면 채점·봉인에서 빠진다).
@@ -1583,6 +1815,24 @@ class DesignSession:
                     self.promoted_gains.setdefault(slot, {})[act["point"]] = float(v)
                 if act["type"] == "add_knot":
                     self._apply_add_knot(a, promoted=promoted)
+            elif act["type"] == "tune_interval":
+                # 구간 처방 — 기존 편입·절점 추가 경로 그대로(새 최적화기 없음). 중간점이 검증점이면 편입해 TUNE이 그 점의 자유
+                # 게인 최적을 표본으로 쓰고, add_knot이면 그 루프 표에만 그 마하 절점을 더한다. REFINE은 부르지 않는다
+                pt = self.points.get(act["point"])
+                promoted = False
+                if act.get("promote") and pt.role == ROLE_VALIDATION:
+                    self.points.promote(act["point"], reason=a["verdict"])
+                    promoted = True
+                if act["remedy"] == "add_knot":
+                    if act.get("promote") and not promoted:
+                        a.setdefault("notes", []).append(f"이미 {pt.role} — 편입은 따로 하지 않았다")
+                    self._apply_add_knot(a, promoted=promoted)
+                elif not promoted:
+                    a["skipped"] = f"이미 {pt.role} — 편입 불필요"
+                rec = self._latest_record(a.get("interval_key"))
+                if rec is not None:
+                    rec.update(status="applied", label=REMEDY_STATUS_TEXT["applied"], iter=self.iter_n,
+                               grid_before=grid_before)
             elif act["type"] == "refit_at":
                 # 옛 처방(이관 3단계 전 세션의 대기 카드) — 그 점의 최적 게인을 적합 표본에 고정한다. **승격 게인을 이긴다**
                 for slot, v in (act.get("gains") or {}).items():
@@ -1620,6 +1870,8 @@ class DesignSession:
                     "loop": a.get("loop"), "verdict": a.get("verdict"),
                     "type": a["action"]["type"], "effect": a["effect"],
                 })
+                if a.get("interval_key"):
+                    self.applied_log[-1]["interval_key"] = a["interval_key"]
         self.iter_n += 1
         self.stage = "REFINE" if need_refine else "TUNE"
         self.status = "running"
@@ -1900,10 +2152,26 @@ class DesignSession:
                 "verdict_change_intervals": dres["verdict_change"],
                 "verdict_change_detail": dres["verdict_change_intervals"],
                 "split_reasons": split_reasons(self.validation_plan),
-                "intervals": reinforce_intervals(dres, self.validation_plan, tol=rc["tol"],
-                                                 on_verdict_change=rc["on_verdict_change"], max_depth=rc["max_depth"]),
+                "intervals": self._intervals_with_remedy(
+                    reinforce_intervals(dres, self.validation_plan, tol=rc["tol"],
+                                        on_verdict_change=rc["on_verdict_change"], max_depth=rc["max_depth"])),
+                # 구간 처방 기록 전부(05 §7 tune_interval) — 절점이 늘면 처방한 구간이 다음 계획에서 사라지므로 구간 목록과
+                # 따로 싣는다(이력)
+                "remedies": [self._remedy_view(r) for r in self.interval_log],
                 "notes": notes,
                 "elapsed_s": self.reinforce_state.get("elapsed_s")}
+
+    def _intervals_with_remedy(self, intervals) -> list:
+        """구간 기록마다 remedy — 그 구간(행·구간)의 마지막 구간 처방 기록(_remedy_view) 또는 None."""
+        by: dict = {}
+        for r in self.interval_log:
+            if r.get("row") is not None and r.get("interval") is not None:
+                by[(tuple(r["row"]), *(float(x) for x in r["interval"]))] = r
+        out = []
+        for iv in intervals:
+            rec = by.get((tuple(iv["row"]), float(iv["interval"][0]), float(iv["interval"][1])))
+            out.append({**iv, "remedy": None if rec is None else self._remedy_view(rec)})
+        return out
 
     _COVERAGE_KEYS = ("adopted", "trim", "model", "limits", "region", "unselected", "omitted", "not_run")
 
@@ -2028,6 +2296,9 @@ class DesignSession:
             "fit_tighten": self.fit_tighten,
             "applied_log": self.applied_log,
             "ineffective": dict(self.ineffective),
+            # 구간 처방 — 반영 직전 세션(재검증 채점 전이면 있다 — 취소 뒤 재개도 그 체크포인트로 채점·되돌린다)과 기록
+            "checkpoint": self.checkpoint,
+            "interval_log": copy.deepcopy(self.interval_log),
             "refine_report": dict(self.refine_report),
             "validation_wanted": self.validation_wanted,
             "validation_added": self.validation_added,
@@ -2069,6 +2340,9 @@ class DesignSession:
         s.fit_tighten = int(d.get("fit_tighten", 0))
         s.applied_log = list(d.get("applied_log", ()))
         s.ineffective = {k: int(v) for k, v in d.get("ineffective", {}).items()}
+        # ⑥(구간 처방) 전 저장물에는 없다 — 체크포인트 없음 · 기록 없음
+        s.checkpoint = d.get("checkpoint")
+        s.interval_log = copy.deepcopy(list(d.get("interval_log") or ()))
         s.refine_report = dict(d.get("refine_report", {}))
         s.validation_wanted = int(d.get("validation_wanted", 0))
         s.validation_added = int(d.get("validation_added", 0))

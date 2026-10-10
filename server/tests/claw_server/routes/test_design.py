@@ -1003,7 +1003,8 @@ def test_apply_gains_writes_the_confirmed_tables_to_the_document(client, wait_jo
                        "existing": rep["validation"]["existing"], "done": rep["validation"]["done"],
                        "out_of_region": rep["validation"]["out_of_region"], "mode": rep["validation"]["mode"],
                        "conditions": len(rep["validation"]["conditions"]), "omitted": len(rep["validation"]["omitted"]),
-                       "reinforce_status": rep["reinforcement"]["status"]}}
+                       "reinforce_status": rep["reinforcement"]["status"],
+                       "interval_remedies": rep["coverage"]["interval_remedies"]}}
     # 표별 절점 집합 — 반출(gain_export.knots)을 그대로. 문서의 표마다 자기 절점 집합 항목이 있다
     export = client.get(f"/api/results/{rid}").json()["gain_export"]
     assert prov["knots"] == export["knots"] and set(gt["tables"]) <= set(prov["knots"]["tables"])
@@ -1570,18 +1571,24 @@ def test_design_summary_validation_field():
            "validation": {"rule": "plan", "conditions": [[0, 50], [3000, 50]], "source": "design_rows", "mode": "full",
                           "omitted": [[1000, 50]], "requested": 15, "added": 10, "existing": 3, "not_run": 2,
                           "out_of_region": 1, "by_kind": {"midpoint": 8}},
-           "coverage": {"validation_done": 13, "reinforce_status": "tol_unset"},
+           "coverage": {"validation_done": 13, "reinforce_status": "tol_unset",
+                        "interval_remedies": {"proposed": 0, "accepted": 2, "rolled_back": 1, "unimproved": 1}},
            "reinforcement": {"status": "budget"}}
     # rule·existing이 requested의 뜻을 읽게 한다(요청 = 새 검증점 + 판정을 겸한 기존 설계점 + 못 넣은 점)
     assert _design_summary(rep)["validation"] == {"rule": "plan", "requested": 15, "existing": 3, "done": 13,
                                                   "out_of_region": 1, "mode": "full", "conditions": 2, "omitted": 1,
-                                                  "reinforce_status": "budget"}
+                                                  "reinforce_status": "budget",
+                                                  "interval_remedies": {"proposed": 0, "accepted": 2, "rolled_back": 1,
+                                                                        "unimproved": 1}}
     # 생성기(showcase.validation_summary)가 같은 모양을 적는다 — 둘이 갈리면 문서 출처가 갈린다
     from claw.profile.showcase import validation_summary
     assert validation_summary(rep) == _design_summary(rep)["validation"]
     # 보강 절이 없으면 커버리지의 상태 코드
     rep2 = {**rep, "reinforcement": None}
     assert _design_summary(rep2)["validation"]["reinforce_status"] == "tol_unset"
+    # 구간 처방 칸이 없는 옛 보고는 None(0으로 위장하지 않는다)
+    rep3 = {**rep, "coverage": {"validation_done": 13}}
+    assert _design_summary(rep3)["validation"]["interval_remedies"] is None
     assert _design_summary({"status": "converged"})["validation"] is None
     assert _design_summary(None)["validation"] is None
     assert _design_summary({"validation": "junk"})["validation"] is None
@@ -1617,4 +1624,7 @@ def test_auto_design_result_carries_validation_plan_grid_and_reinforcement(clien
         assert iv["status"] in ("split", "remaining", "unmeasured", "ok")
     assert set(rep["coverage"]) >= {"validation_requested", "validation_done", "validation_not_run",
                                     "validation_out_of_region", "validation_omitted_rows", "d_unmeasured",
-                                    "reinforce_status"}
+                                    "reinforce_status", "interval_remedies"}
+    # 구간 처방(05 §7 tune_interval) — 구간마다 remedy 칸(처방이 없던 구간은 None)과 처방 기록 전부
+    assert set(rep["coverage"]["interval_remedies"]) == {"proposed", "accepted", "rolled_back", "unimproved"}
+    assert all("remedy" in iv for iv in rf["intervals"]) and isinstance(rf["remedies"], list)

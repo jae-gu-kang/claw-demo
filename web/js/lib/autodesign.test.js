@@ -14,6 +14,7 @@ import {
   reinforceConfig,
   reinforceTolText,
   reinforcementLines,
+  intervalRemedyText,
   summaryGridModel,
   validationConfig,
   validationSummaryText,
@@ -2086,4 +2087,70 @@ test("검증점·보강 폴백 이름 — 엔진 validation.VALIDATION_KINDS·MO
   assert.deepEqual(VALIDATION_MODE_LABEL, dictOf("validation.py", "VALIDATION_MODES"));
   assert.deepEqual(REINFORCE_STATUS_TEXT, dictOf("reinforce.py", "REINFORCE_STATUS_TEXT"));
   assert.ok(Object.keys(REINFORCE_STATUS_TEXT).length === 4);
+});
+
+
+// ── 구간 처방(⑥ — 05 §7 tune_interval) ──
+const IV_ACT = { type: "tune_interval", remedy: "add_knot", point: "V4", mach: 0.4, slots: ["pitch.k_rate"], promote: true,
+  interval: { row: [1000, 200], interval: [0.3, 0.5], slot: "pitch_rate", d: 0.6, tol: 0.1 } };
+
+test("actionText — 구간 처방은 구간·자리와 처방(절점 추가는 add_knot과 같은 말, 편입만이면 표본 보강)을 말한다", () => {
+  assert.equal(actionText(IV_ACT),
+    "구간 처방: 구간 M0.3–M0.5 (1000/200) · pitch_rate — 절점 추가 요청: M0.4 → 표 pitch.k_rate · 점 V4 설계점 승격(튜닝)");
+  assert.equal(actionText({ ...IV_ACT, remedy: "promote" }),
+    "구간 처방: 구간 M0.3–M0.5 (1000/200) · pitch_rate — 점 V4 설계점 편입(표본 보강 — 절점 그대로)");
+  assert.match(actionText(IV_ACT, { added: true, split: ["pitch.k_rate"], skipped: null }), /분리 집합으로 뗌: pitch\.k_rate/);
+});
+
+test("intervalRemedyText — 카드 하단: 이웃 변화 · 전체 신규 불합격 · 권장선 퇴행(이름), 되돌림은 사유", () => {
+  const rem = { status: "accepted", label: "구간 처방 수용 — 비퇴행 확인",
+    neighbours: [{ interval: [0.5, 0.7], before: { verdicts: { a: "ok", mid: "ok", b: "ok" } },
+      after: { verdicts: { a: "ok", mid: "ok", b: "ok" } } }],
+    region_delta: { new_fail: [], dropped: 0, caution_regressions: [{ case: "M0.7", loop: "yaw_rate" }] } };
+  assert.equal(intervalRemedyText(rem),
+    "구간 처방 수용 — 비퇴행 확인 · 이웃 1구간 변화 없음 · 전체 신규 불합격 0 · 권장선 퇴행 1(M0.7 yaw_rate)");
+  const back = { ...rem, status: "rolled_back", label: "구간 처방 되돌림 — 이터 전체를 체크포인트로", rolled_back: true,
+    reason: "이웃 구간 pitch_rate 등급 상승 1곳",
+    neighbours: [{ ...rem.neighbours[0], after: { verdicts: { a: "ok", mid: "fail", b: "ok" } } }],
+    region_delta: { new_fail: [{ case: "M0.6", loop: "pitch_rate" }], dropped: 0, caution_regressions: [] } };
+  assert.equal(intervalRemedyText(back), "구간 처방 되돌림 — 이터 전체를 체크포인트로 · 이웃 1구간 중 1 판정 변화 · "
+    + "전체 신규 불합격 1 · 권장선 퇴행 0 · 사유 이웃 구간 pitch_rate 등급 상승 1곳");
+  // 재검증 전(제안) — 상태만
+  assert.equal(intervalRemedyText({ status: "proposed", label: "구간 처방 제안" }), "구간 처방 제안");
+  assert.equal(intervalRemedyText(null), null);
+});
+
+test("evidenceLines — 구간 처방 카드는 d·판정을 머리에, 재검증 결과를 하단(remedy)에", () => {
+  const card = { verdict: "interval_exceeds", action: IV_ACT, severity: 6,
+    evidence: { interval: { exceeds: true, slot: "pitch_rate", d: 0.6, tol: 0.1, verdicts: { a: "ok", mid: "ok", b: "ok" } } },
+    effect: { before: { status: "ok", severity: -0.5 }, after: { status: "ok", severity: -0.6 }, changed: true,
+      interval: { status: "accepted", label: "구간 처방 수용 — 비퇴행 확인", neighbours: [],
+        region_delta: { new_fail: [], dropped: 0, caution_regressions: [] } } } };
+  const ev = evidenceLines(card);
+  assert.ok(ev.head.includes("구간 pitch_rate d 0.600 > 허용치 0.100") && ev.head.includes("판정 ok/ok/ok"), ev.head);
+  assert.equal(ev.remedy, "구간 처방 수용 — 비퇴행 확인 · 이웃 0구간 변화 없음 · 전체 신규 불합격 0 · 권장선 퇴행 0");
+  assert.equal(ev.remedyRolledBack, false);
+  // 봉인된 재발행 카드는 엔진이 기록(remedy)을 싣는다 — 되돌림 경고
+  const sealed = evidenceLines({ ...card, effect: undefined, sealed: "봉인",
+    remedy: { status: "sealed", label: "구간 미개선 — 처방 소진", rolled_back: true, reason: "대상 자리 개선 없음" } });
+  assert.equal(sealed.remedyRolledBack, true);
+  assert.match(sealed.remedy, /^구간 미개선 — 처방 소진 · 사유 대상 자리 개선 없음/);
+  assert.ok(VERDICT_LABEL.interval_exceeds);
+});
+
+test("reinforcementLines — 구간 처방 수 한 줄(미개선·되돌림은 경고)과 구간 툴팁의 처방 상태", () => {
+  const report = { coverage: { interval_remedies: { proposed: 0, accepted: 1, rolled_back: 1, unimproved: 1 } },
+    reinforcement: { status: "done", tol: 0.1, intervals: [{ row: [1000, 200], interval: [0.3, 0.5], status: "ok",
+      remedy: { status: "accepted", label: "구간 처방 수용 — 비퇴행 확인" } }],
+    remedies: [{ point: "V4", slot: "pitch_rate", status: "accepted", label: "구간 처방 수용 — 비퇴행 확인" }] } };
+  const lines = reinforcementLines(report);
+  const ir = lines.find((l) => l.key === "interval_remedies");
+  assert.equal(ir.text, "구간 처방 — 제안 0 · 수용 1 · 되돌림 1 · 미개선 1");
+  assert.equal(ir.tone, "warn");
+  assert.match(ir.tip, /V4 pitch_rate — 구간 처방 수용/);
+  assert.match(lines.find((l) => l.key === "reinforce_intervals").tip, /처방 구간 처방 수용/);
+  // 수가 전부 0이면(S1) 줄이 없다
+  const zero = reinforcementLines({ ...report, coverage: { interval_remedies:
+    { proposed: 0, accepted: 0, rolled_back: 0, unimproved: 0 } } });
+  assert.ok(!zero.some((l) => l.key === "interval_remedies"));
 });

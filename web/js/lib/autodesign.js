@@ -51,6 +51,8 @@ export const VERDICT_LABEL = {
   // 엔진 classify VERDICTS의 여섯째 — 빠져 있어 카드·원장에 코드("fit_residual")가 그대로 떴다.
   // 표 모드는 절점 추가(add_knot — 이관 3단계), 조일 적합(tighten_fit)은 다항에만 있다
   fit_residual: "설계점 적합 괴리 — 표: 절점 추가 · 다항: 적합 허용치 조이기",
+  // 구간 처방(05 §7 tune_interval — ⑥) — 점이 아니라 보강 구간의 판정이다. 재검증 비퇴행 가드에 거부되면 이터째 되돌린다
+  interval_exceeds: "구간 보간 형상 초과 — 중간점 편입·절점 추가, 재검증에서 비퇴행 확인(위반이면 되돌림)",
 };
 
 const _STATUS_RANK = { ok: 0, na: 1, warn: 2, fail: 3 };
@@ -451,6 +453,16 @@ export function actionText(act, knot = null) {
   }
   if (t === "promote") {
     return `승격: 점 ${act.point ?? "?"} → ${ROLE_LABEL[act.to] ?? act.to ?? "?"}`;
+  }
+  if (t === "tune_interval") {
+    // 구간 처방 — 어느 구간·자리에 무엇을(절점 추가는 add_knot과 같은 말, 편입만이면 표본 보강)
+    const iv = act.interval ?? {};
+    const where = `구간 ${Array.isArray(iv.interval) ? iv.interval.map(machText).join("–") : "?"}`
+      + `${Array.isArray(iv.row) ? ` (${iv.row.join("/")})` : ""} · ${iv.slot ?? "?"}`;
+    const how = act.remedy === "add_knot"
+      ? actionText({ ...act, type: "add_knot" }, knot)
+      : `점 ${act.point ?? "?"} 설계점 편입(표본 보강 — 절점 그대로)`;
+    return `구간 처방: ${where} — ${how}`;
   }
   if (t === "add_validation") return "검증점 추가";
   if (t === "refit_at") return `재적합 고정: 점 ${act.point ?? "?"} (옛 결과)`;
@@ -1122,6 +1134,31 @@ export function reasonText(code, reasonMap) {
   return t ? `${code} — ${t}` : String(code);
 }
 
+/** 구간 처방 기록(엔진 _remedy_view — 카드 effect.interval·remedy, reinforcement.remedies) → 카드 하단 한 줄
+ *  「수용 · 이웃 1구간 변화 없음 · 전체 신규 불합격 0 · 권장선 퇴행 1(M0.7 yaw_rate)」. 재검증 전이면 상태만, 되돌림·봉인은
+ *  사유를 붙인다. 없으면 null. */
+export function intervalRemedyText(rem) {
+  if (!rem || typeof rem !== "object") return null;
+  const head = rem.label ?? rem.status ?? "구간 처방";
+  const parts = [head];
+  const nbs = Array.isArray(rem.neighbours) ? rem.neighbours : [];
+  const rd = rem.region_delta;
+  if (rd && typeof rd === "object") {
+    const moved = nbs.filter((nb) => nb.before && nb.after
+      && JSON.stringify(nb.before.verdicts ?? null) !== JSON.stringify(nb.after.verdicts ?? null));
+    parts.push(moved.length ? `이웃 ${nbs.length}구간 중 ${moved.length} 판정 변화` : `이웃 ${nbs.length}구간 변화 없음`);
+    const nf = Array.isArray(rd.new_fail) ? rd.new_fail : [];
+    parts.push(`전체 신규 불합격 ${nf.length}`);
+    if (numeric(rd.dropped)) parts.push(`판정 소실 ${rd.dropped}`);
+    const cr = Array.isArray(rd.caution_regressions) ? rd.caution_regressions : [];
+    parts.push(`권장선 퇴행 ${cr.length}` + (cr.length
+      ? `(${cr.slice(0, 3).map((c) => `${c.case} ${c.loop}`).join(", ")}${cr.length > 3 ? " …" : ""})` : ""));
+  }
+  if ((rem.rolled_back || rem.status === "sealed") && rem.reason) parts.push(`사유 ${rem.reason}`);
+  if (rem.why) parts.push(rem.why);
+  return parts.join(" · ");
+}
+
 /** 처방 카드 그룹 — {approvable, escalations}. supersede는 양쪽 다 제외
  * (같은 점 상위 승격에 흡수됨 — 엔진 promote 래칫과 정합). */
 export function actionCards(result) {
@@ -1333,6 +1370,12 @@ export function evidenceLines(a, reasonMap) {
     head.push(`ωc/작동기 ${num(ev.bottleneck.wc_over_actuator)} · 지연 위상 `
       + `${num(ev.bottleneck.delay_phase_deg_at_wc)}°`);
   }
+  // 구간 처방(⑥) — ⑤ 보강 기록: 어느 자리의 d가 허용치를 넘었나 · 양끝·중간 판정
+  if (ev.interval) {
+    const iv = ev.interval;
+    if (iv.exceeds) head.push(`구간 ${iv.slot ?? "?"} d ${num(iv.d)} > 허용치 ${num(iv.tol)}`);
+    if (iv.verdicts) head.push(`판정 ${iv.verdicts.a ?? "—"}/${iv.verdicts.mid ?? "—"}/${iv.verdicts.b ?? "—"}`);
+  }
 
   const notes = [];
   // 에스컬레이션은 "무엇을 바꾸면 통과하는가"가 결론이다 — 흐린 회색 나열에 묻히면
@@ -1362,6 +1405,9 @@ export function evidenceLines(a, reasonMap) {
       : null,
     head,
     shortfall: shortfallLines(ev.shortfall),
+    // 구간 처방의 재검증 결과(이웃·전체 영역·권장선 퇴행) — 카드 하단. 되돌림·봉인이면 경고(rolledBack)
+    remedy: intervalRemedyText(a?.effect?.interval ?? a?.remedy),
+    remedyRolledBack: Boolean((a?.effect?.interval ?? a?.remedy)?.rolled_back),
     tuned: tunedLines(ev.tuned, reasonMap),
     relief: reliefLines(ev.bottleneck?.relief, reasonMap),
     effect,
@@ -1921,13 +1967,15 @@ export function reinforcementLines(report, statusText = null) {
     const by = {};
     for (const iv of ivs) by[iv.status] = (by[iv.status] ?? 0) + 1;
     const order = [...Object.keys(INTERVAL_STATUS_LABEL), ...Object.keys(by).filter((k) => !(k in INTERVAL_STATUS_LABEL))];
-    const odd = ivs.filter((iv) => iv.status !== "ok");
+    const odd = ivs.filter((iv) => iv.status !== "ok" || iv.remedy);
     const ivText = (iv) => `${Array.isArray(iv.row) ? iv.row.join("/") : iv.row ?? "?"} · `
       + `${Array.isArray(iv.interval) ? iv.interval.map(machText).join("–") : iv.interval ?? "?"} — `
       + `${INTERVAL_STATUS_LABEL[iv.status] ?? iv.status}`
       + (iv.exceeds ? ` · ${iv.slot} d ${num(iv.d)} > ${reinforceTolText(iv.tol)}` : "")
       + (iv.verdict_change && iv.verdicts ? ` · 판정 ${iv.verdicts.a}/${iv.verdicts.mid}/${iv.verdicts.b}` : "")
-      + (iv.why ? ` · ${iv.why}` : "");
+      + (iv.why ? ` · ${iv.why}` : "")
+      // 구간 처방 상태(⑥) — 제안·반영·수용·되돌림·봉인·미개선
+      + (iv.remedy ? ` · 처방 ${iv.remedy.label ?? iv.remedy.status}` : "");
     out.push({ key: "reinforce_intervals", tone: by.remaining ? "warn" : "hint",
       text: `구간 ${ivs.length} — ` + order.filter((k) => by[k]).map((k) => `${INTERVAL_STATUS_LABEL[k] ?? k} ${by[k]}`)
         .join(" · "),
@@ -1952,6 +2000,16 @@ export function reinforcementLines(report, statusText = null) {
   }
   const vc = cnt(rf.verdict_change_intervals) ?? numeric(rf.verdict_change);
   if (vc) out.push({ key: "verdict_change", tone: "hint", text: `양끝 판정이 다른 구간 ${num(vc)}` });
+  // 구간 처방(⑥ — 05 §7 tune_interval) — 수가 하나라도 있을 때만. 미개선·되돌림은 경고색, 처방마다 상태는 툴팁
+  const ir = report?.coverage?.interval_remedies;
+  if (ir && typeof ir === "object" && Object.values(ir).some((x) => numeric(x))) {
+    const rems = Array.isArray(rf.remedies) ? rf.remedies : [];
+    out.push({ key: "interval_remedies", tone: numeric(ir.unimproved) || numeric(ir.rolled_back) ? "warn" : "hint",
+      text: `구간 처방 — 제안 ${num(ir.proposed ?? 0)} · 수용 ${num(ir.accepted ?? 0)} · 되돌림 ${num(ir.rolled_back ?? 0)}`
+        + ` · 미개선 ${num(ir.unimproved ?? 0)}`,
+      tip: rems.length ? rems.slice(0, 12).map((r) => `${r.point ?? "?"} ${r.slot ?? ""} — ${intervalRemedyText(r)}`)
+        .join("\n") + (rems.length > 12 ? `\n… 외 ${rems.length - 12}` : "") : null });
+  }
   return out;
 }
 

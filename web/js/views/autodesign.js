@@ -1344,6 +1344,10 @@ function evidenceLine(a) {
   for (const p of ev.relief) {
     lines.push(el("div", { style: `color:${p.resolves ? SEV_COLOR.ok : SEV_COLOR.na}` }, p.text));
   }
+  // 구간 처방의 재검증 결과 — 「이웃 n구간 변화 없음 · 전체 신규 불합격 0 · 권장선 퇴행 k(…)」. 되돌림은 경고색
+  if (ev.remedy) {
+    lines.push(el("div", ev.remedyRolledBack ? { style: `color:${SEV_COLOR.warn}` } : { class: "hint" }, ev.remedy));
+  }
   if (ev.effect) {
     lines.push(ev.effect.ineffective
       ? el("div", { style: `color:${SEV_COLOR.warn}` }, ev.effect.text)

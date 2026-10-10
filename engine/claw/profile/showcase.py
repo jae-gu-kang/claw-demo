@@ -385,7 +385,10 @@ def validation_summary(rep: dict) -> dict | None:
             "out_of_region": v.get("out_of_region"), "mode": v.get("mode"),
             "conditions": len(v["conditions"]) if isinstance(v.get("conditions"), list) else None,
             "omitted": len(v["omitted"]) if isinstance(v.get("omitted"), list) else None,
-            "reinforce_status": rf.get("status", cov.get("reinforce_status"))}
+            "reinforce_status": rf.get("status", cov.get("reinforce_status")),
+            # 구간 처방 수(05 §7 tune_interval — ⑥). 칸이 없는 옛 보고는 None
+            "interval_remedies": dict(cov["interval_remedies"]) if isinstance(cov.get("interval_remedies"), dict)
+            else None}
 
 
 def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
@@ -440,7 +443,7 @@ def _stage_design(doc: dict, log, *, overrides: dict | None) -> tuple:
         + f" · {elapsed:.1f} s")
     vs = validation_summary(rep) or {}
     log(f"  검증점: 요청 {vs.get('requested')} · 완료 {vs.get('done')} · 요구영역 밖 {vs.get('out_of_region')} · 보강"
-        f" {vs.get('reinforce_status')}")
+        f" {vs.get('reinforce_status')} · 구간 처방 {vs.get('interval_remedies')}")
     sharing = "한 집합 공유" if kn["shared"] else f"집합 {kn['sets']}개"
     log(f"  절점: 표 {kn['tables']} · {sharing}")
     if rep["status"] == "cancelled":

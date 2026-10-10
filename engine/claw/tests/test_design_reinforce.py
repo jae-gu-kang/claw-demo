@@ -397,3 +397,95 @@ def test_s1_like_fixture_triggers_nothing_at_005_010_020():
         st = reinforce_status(dres, [], tol=tol, on_verdict_change=True, max_depth=3)
         assert (st["status"], st["remaining"], st["unmeasured"]) == ("unmeasured", [], 2), tol
     assert counts == [0, 0, 0]
+
+
+# ── 구간 처방(⑥ — claw.design.interval)의 순수 함수 ──
+def _iv(**over):
+    base = {"row": [1000.0, 200.0], "interval": [0.3, 0.5], "status": "remaining", "exceeds": False,
+            "verdict_change": False, "verdicts": {"a": "ok", "mid": "ok", "b": "ok"}, "slot": "pitch_rate",
+            "d": 0.05, "tol": 0.10, "points": ["A", "M", "B"]}
+    base.update(over)
+    return base
+
+
+def test_구간_처방은_잎_구간의_허용치_초과와_fail_섞인_판정_다름에만_건다():
+    from claw.design.interval import triggered
+
+    assert triggered(_iv(exceeds=True))
+    assert not triggered(_iv(exceeds=True, status="split")), "쪼갠 구간은 자식 조각이 잰다"
+    # ok↔warn만 갈린 판정 다름은 보고만 한다(쇼케이스 보호 — 계약 결정)
+    assert not triggered(_iv(verdict_change=True, verdicts={"a": "ok", "mid": "warn", "b": "ok"}))
+    assert triggered(_iv(verdict_change=True, verdicts={"a": "fail", "mid": "ok", "b": "ok"}))
+
+
+def test_구간_처방_카드는_형상이면_절점_추가_표본_부족이면_편입이다():
+    from claw.design.interval import interval_remedies, seal_key
+
+    cases = {n: {"loops": {"pitch_rate": {"zeta": 0.5, "status": "ok"}}} for n in "AMB"}
+    common = dict(role_of=lambda n: "validation", mach_of=lambda n: 0.4, has_knot=lambda slots, m: False)
+    (card,) = interval_remedies([_iv(exceeds=True, d=0.6)], cases, [], **common)["cards"]
+    assert card["action"]["remedy"] == "add_knot" and card["action"]["promote"] is True
+    assert card["severity"] == pytest.approx(6.0) and card["interval_key"] == seal_key(
+        [1000.0, 200.0], [0.3, 0.5], "pitch_rate", "add_knot")
+    vc = _iv(verdict_change=True, verdicts={"a": "fail", "mid": "ok", "b": "ok"})
+    (card,) = interval_remedies([vc], cases, [], **common)["cards"]
+    assert card["action"]["remedy"] == "promote"
+    # 봉인된 처방은 카드에 sealed로 남고 구간은 미개선(봉인 키를 달고)
+    out = interval_remedies([vc], cases, [], sealed={card["interval_key"]}, **common)
+    assert out["cards"][0]["sealed"] and out["unimproved"][0]["key"] == card["interval_key"]
+
+
+def test_비퇴행_가드는_자기_점_이웃_대상_자리_전체_영역을_따로_본다():
+    from claw.design.criteria import MarginCriteria
+    from claw.design.interval import judge_remedy, region_delta, snapshot
+    from claw.design.reinforce import d_scales
+
+    crit = MarginCriteria()
+    sc = d_scales(crit)
+
+    def cases(mid_zeta=0.62, **status):
+        out = {n: {"loops": {"pitch_rate": {"zeta": 0.5, "status": "ok"},
+                             "yaw_rate": {"zeta": 0.5, "status": "ok"}}} for n in ("A", "M", "B", "N")}
+        out["M"]["loops"]["pitch_rate"]["zeta"] = mid_zeta
+        for key, st in status.items():
+            n, loop = key.split("__")
+            out[n]["loops"][loop]["status"] = st
+        return out
+
+    before = cases()
+    rec = {"slot": "pitch_rate", "tol": 0.10, "before": snapshot(["A", "M", "B"], 0.5, "pitch_rate", before, crit, sc),
+           "neighbours": [{"interval": [0.5, 0.7], "before": snapshot(["B", "N", "B"], 0.5, "pitch_rate", before,
+                                                                         crit, sc)}]}
+    assert rec["before"]["d"] == pytest.approx(0.6)
+
+    def judge(after):
+        return judge_remedy(rec, snapshot(["A", "M", "B"], 0.5, "pitch_rate", after, crit, sc),
+                            [snapshot(["B", "N", "B"], 0.5, "pitch_rate", after, crit, sc)],
+                            region_delta(before, after, crit))
+
+    ok = judge(cases(mid_zeta=0.5))
+    assert ok["accepted"] and ok["improved"] and not ok["own"]
+    # 개선이 없으면 거부 — 「반영됨」은 「고쳐짐」이 아니다
+    same = judge(cases())
+    assert not same["accepted"] and same["own"] and "개선 없음" in same["violations"][0]
+    # 자기 점의 다른 자리라도 등급이 오르면 거부
+    own = judge(cases(mid_zeta=0.5, A__yaw_rate="warn"))
+    assert not own["accepted"] and own["own_worse"] == [{"case": "A", "loop": "yaw_rate", "from": "ok", "to": "warn"}]
+    # 이웃은 대상 자리만 — 이웃 점의 다른 자리 ok → warn은 권장선 퇴행(허용, 이름만)
+    caution = judge(cases(mid_zeta=0.5, N__yaw_rate="warn"))
+    assert caution["accepted"]
+    nb = judge(cases(mid_zeta=0.5, N__pitch_rate="warn"))
+    assert not nb["accepted"] and nb["neighbour_worse"][0]["interval"] == [0.5, 0.7]
+    # 판정 소실은 하드 위반이다(0으로 위장하지 않는다)
+    lost = cases(mid_zeta=0.5)
+    del lost["N"]["loops"]["yaw_rate"]
+    gone = judge(lost)
+    assert not gone["accepted"] and not gone["own"] and "판정 소실 1" in gone["violations"]
+
+
+def test_요약_격자_비교는_양쪽에_있는_칸만():
+    from claw.design.interval import grid_codes, grid_delta
+
+    before = grid_codes({"cells": {"r1": {"c1": {"headline_code": "good"}, "c2": {"headline_code": "good"}}}})
+    after = grid_codes({"cells": {"r1": {"c1": {"headline_code": "caution"}, "c3": {"headline_code": "fail"}}}})
+    assert grid_delta(before, after) == [{"row": "r1", "column": "c1", "from": "good", "to": "caution"}]

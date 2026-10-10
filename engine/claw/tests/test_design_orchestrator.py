@@ -1945,3 +1945,218 @@ def test_failures_outside_the_plan_are_named_under_the_grid(planned):
     g = s.summary_grid()
     assert g["unplanned_failures"] == len(failing)
     assert any("계획 밖" in n for n in g["notes"])
+
+
+# ── 구간 처방(05 §7 tune_interval — ⑥ 절점·구간별 복수 게인 최적화) ──
+_IV_ALT, _IV_FUEL = 1000.0, 200.0
+
+
+def _iv_name(mach):
+    return case_name(mach, _IV_ALT, _IV_FUEL)
+
+
+def _iv_loops(pitch_zeta=0.5):
+    """다섯 자리 전부 ok인 판정 — pitch_rate ζ만 바꿔 보강 지표 d를 만든다(ζ 척도 0.2)."""
+    return {"pitch_rate": {"kind": "damping", "zeta": pitch_zeta, "status": "ok"},
+            "yaw_rate": {"kind": "damping", "zeta": 0.5, "status": "ok"},
+            "roll_rate": {"kind": "bandwidth", "roll_lambda": 12.0, "target": 12.0, "status": "ok"},
+            "pitch_att": {"kind": "margin", "pm_deg": 55.0, "gm_db": 12.0, "status": "ok"},
+            "roll_att": {"kind": "margin", "pm_deg": 55.0, "gm_db": 12.0, "status": "ok"}}
+
+
+def _interval_session(mode="auto", mid_zeta=0.62, mid_role=None, **cfg):
+    """구간 처방만 보기 위한 최소 상태 — 1000 m · 200 kg 한 줄, 절점 M0.3·0.5·0.7(설계점), 구간 중점 M0.4·0.6(검증점).
+
+    M0.3–0.5 구간의 pitch_rate ζ가 양끝 0.5 · 중간 mid_zeta라 d = |mid_zeta − 0.5| / 0.2 — 0.62면 0.6 > 허용치 0.10
+    (exceeds). 판정은 전부 ok — 점 실패 없이도 구간 처방이 나와야 하는 자리다. 이웃 구간은 M0.5–0.7(d 0)."""
+    from claw.design.knots import COMMON, KnotSet
+    from claw.design.points import ROLE_VALIDATION
+    from claw.design.tune import LOOP_SLOTS
+    from claw.opspace.states import NOT_RUN
+
+    s = DesignSession(_small(mode=mode, **cfg))
+    for mach, role, kind in ((0.3, ROLE_DESIGN, "knot"), (0.4, mid_role or ROLE_VALIDATION, "midpoint"),
+                             (0.5, ROLE_DESIGN, "knot"), (0.6, ROLE_VALIDATION, "midpoint"), (0.7, ROLE_DESIGN, "knot")):
+        n = _iv_name(mach)
+        s.points.add(OperatingPoint(case=TrimCase(name=n, mach=mach, alt=_IV_ALT, fuel=_IV_FUEL), role=role,
+                                    origin="test"))
+        s.validation_plan.append({"name": n, "mach": mach, "alt": _IV_ALT, "fuel": _IV_FUEL, "kind": kind,
+                                  "row": [_IV_ALT, _IV_FUEL], "origin": kind, "pre_state": NOT_RUN,
+                                  "existing": kind == "knot", "added": kind != "knot"})
+    s.validation_meta = {"plan_knots": [0.3, 0.5, 0.7], "conditions": [[_IV_ALT, _IV_FUEL]]}
+    s.knot_sets = {COMMON: KnotSet(name=COMMON, coords=[0.3, 0.5, 0.7], source="test")}
+    s.table_knots = {g: COMMON for gs in LOOP_SLOTS.values() for g in gs}
+    s.margin_out = {"cases": {_iv_name(m): {"role": "test", "loops": _iv_loops(mid_zeta if m == 0.4 else 0.5)}
+                              for m in (0.3, 0.4, 0.5, 0.6, 0.7)}, "failures": []}
+    s.stage = "CLASSIFY"
+    return s
+
+
+def _reverify(s, edit):
+    """다음 VERIFY 대역 — 체크포인트의 판정을 복사해 edit(cases)로 고친 것을 새 판정으로 놓고 채점한다."""
+    s.margin_out = copy.deepcopy(s.checkpoint["margin_out"])
+    edit(s.margin_out["cases"])
+    s._score_applied_actions()
+
+
+def _improve_mid(cases):
+    cases[_iv_name(0.4)]["loops"]["pitch_rate"]["zeta"] = 0.5  # 중간점이 양끝 직선 위로 — d 0
+
+
+def test_점_실패가_없어도_허용치를_넘는_구간은_구간_처방을_내고_개선되면_받아들인다():
+    """① exceeds 한 구간 → tune_interval 카드 하나(절점 추가 + 편입) → 재검증에서 개선·이웃 불변 → accepted.
+
+    gated로 멈춘 세션을 저장 왕복(승인은 매번 store를 거친다)한 뒤 승인해도 체크포인트·기록이 살아 채점된다."""
+    s = _interval_session(mode="gated")
+    s._stage_classify(None, lambda *a: None)
+    assert s.status == "awaiting_approval"
+    (card,) = s.actions
+    act = card["action"]
+    assert (card["verdict"], act["type"], act["remedy"], act["point"], act["promote"]) == (
+        "interval_exceeds", "tune_interval", "add_knot", _iv_name(0.4), True)
+    assert act["slots"] == ["pitch.k_rate"] and act["interval"]["interval"] == [0.3, 0.5]
+    assert act["interval"]["d"] == pytest.approx(0.6) and act["interval"]["tol"] == pytest.approx(0.10)
+    assert card["evidence"]["interval"]["exceeds"] is True and card["evidence"]["plan_point"]["kind"] == "midpoint"
+    assert s.report()["coverage"]["interval_remedies"] == {"proposed": 1, "accepted": 0, "rolled_back": 0,
+                                                          "unimproved": 0}
+
+    s = DesignSession.from_dict(s.to_dict())
+    s.apply_actions([card["id"]])
+    assert s.checkpoint is not None and s.checkpoint["status"] == "awaiting_approval"
+    assert s.points.get(_iv_name(0.4)).role == ROLE_DESIGN, "중간 검증점을 편입해 튜닝 표본으로 삼는다"
+    assert 0.4 in s.knot_sets[s.table_knots["pitch.k_rate"]].coords and 0.4 not in s.knot_sets["common"].coords
+    assert s.stage == "TUNE" and s.interval_log[0]["status"] == "applied"
+
+    s = DesignSession.from_dict(s.to_dict())  # 취소 뒤 재개도 체크포인트로 채점한다
+    _reverify(s, _improve_mid)
+    rec = s.interval_log[0]
+    assert rec["status"] == "accepted" and s.checkpoint is None and s.stage == "TUNE"
+    assert rec["after"]["d"] == pytest.approx(0.0) and rec["before"]["d"] == pytest.approx(0.6)
+    assert [nb["interval"] for nb in rec["neighbours"]] == [[0.5, 0.7]]
+    assert rec["region_delta"]["new_fail"] == [] and rec["region_delta"]["caution_regressions"] == []
+    assert s.actions[0]["effect"]["changed"] is True and s.actions[0]["effect"]["interval"]["status"] == "accepted"
+    assert s.report()["coverage"]["interval_remedies"]["accepted"] == 1
+    iv = s.reinforcement_report()["intervals"][0]
+    assert iv["interval"] == [0.3, 0.5] and iv["remedy"]["status"] == "accepted"
+    assert iv["remedy"]["before"] == {"verdicts": {"a": "ok", "mid": "ok", "b": "ok"}, "d": pytest.approx(0.6),
+                                      "slot": "pitch_rate"}
+
+
+def test_이웃_구간을_불합격으로_만든_구간_처방은_이터째_되돌리고_봉인한다():
+    """② 이웃 구간 ok → fail 주입 → rolled_back. 체크포인트로 복원(표·절점·점 역할 동일)하고 그 처방을 1회로 봉인 —
+    다음 CLASSIFY는 같은 카드를 sealed로만 내고(재발행 없음) 점 실패가 없으니 수렴한다."""
+    s = _interval_session()
+    roles0 = {p.name: p.role for p in s.points}
+    knots0 = {k: list(v.coords) for k, v in s.knot_sets.items()}
+    tk0 = dict(s.table_knots)
+    s._stage_classify(None, lambda *a: None)  # auto — 곧장 반영
+    assert s.iter_n == 1 and s.points.get(_iv_name(0.4)).role == ROLE_DESIGN
+
+    def break_neighbour(cases):
+        _improve_mid(cases)
+        cases[_iv_name(0.6)]["loops"]["pitch_rate"]["status"] = "fail"
+
+    _reverify(s, break_neighbour)
+    rec = s.interval_log[0]
+    assert rec["status"] == "rolled_back" and rec["rolled_back"] and rec["sealed"]
+    assert "이웃 구간 pitch_rate 등급 상승 1곳" in rec["reason"] and "전체 신규 불합격 1" in rec["reason"]
+    assert rec["region_delta"]["new_fail"] == [{"case": _iv_name(0.6), "loop": "pitch_rate", "from": "ok"}]
+    assert {p.name: p.role for p in s.points} == roles0
+    assert {k: list(v.coords) for k, v in s.knot_sets.items()} == knots0 and s.table_knots == tk0
+    assert s.checkpoint is None and (s.stage, s.status) == ("CLASSIFY", "running")
+    assert s.iter_n == 1, "되돌린 이터도 이터 예산을 쓴다"
+    assert s.iterations[-1]["stage"] == "ROLLBACK"
+    assert rec["key"] in s.sealed_keys()
+
+    s._stage_classify(None, lambda *a: None)
+    (card,) = s.actions
+    assert card["sealed"] and not card.get("applied")
+    assert card["remedy"]["status"] == "sealed" and card["remedy"]["rolled_back"], "봉인 카드가 왜 봉인인지 싣는다"
+    assert (s.status, s.stage) == ("converged", "DONE")
+    assert s.interval_log[0]["status"] == "sealed" and len(s.interval_log) == 1
+    rep = s.report()
+    assert rep["coverage"]["interval_remedies"] == {"proposed": 0, "accepted": 0, "rolled_back": 1, "unimproved": 1}
+    assert any(g.startswith("구간 1개 미개선 (구간 미개선 — 처방 소진)") for g in rep["coverage_gaps"])
+    assert rep["sealed"] == 1
+
+
+def test_권장선_퇴행만_있으면_받아들이되_이름을_적는다():
+    """③ 다른 점의 ok → warn만 생긴 재검증 → accepted + caution_regressions 1(하드 위반이 아니다)."""
+    s = _interval_session()
+    s._stage_classify(None, lambda *a: None)
+
+    def caution(cases):
+        _improve_mid(cases)
+        cases[_iv_name(0.7)]["loops"]["yaw_rate"]["status"] = "warn"  # 이웃 구간 점이지만 대상 자리(pitch_rate)가 아니다
+
+    _reverify(s, caution)
+    rec = s.interval_log[0]
+    assert rec["status"] == "accepted"
+    assert rec["region_delta"]["caution_regressions"] == [{"case": _iv_name(0.7), "loop": "yaw_rate"}]
+    assert rec["region_delta"]["new_fail"] == [] and rec["violations"] == []
+
+
+def test_낼_처방이_없는_구간은_미개선으로_남고_편입점_튜닝이_불성립이면_구조적_한계라_부른다(monkeypatch):
+    """④ 처방 소진 — fail 섞인 판정 다름 구간인데 중간점이 이미 설계점이라 편입할 검증점이 없다(판정 다름만이면 절점 추가가
+    아니다). 남은 점 실패는 에스컬레이션뿐이라 세션은 끝나고, 구간은 unimproved로 남는다. 편입한 점의 그 자리 튜닝이
+    성립하지 않았으면(tune.SLOT_DESIGN_FAILED) 「구조적 한계」, 아니면 「처방 소진」이다."""
+    from claw.design import orchestrator as O
+    from claw.design.tune import SLOT_DESIGN_FAILED
+
+    for failed, label in ((False, "구간 미개선 — 처방 소진"), (True, "구간 미개선 — 구조적 한계")):
+        s = _interval_session(mid_zeta=0.5, mid_role=ROLE_DESIGN)
+        a = _iv_name(0.3)
+        # GM만 떨어뜨린다 — 보강 지표(PM)는 그대로라 d는 0이고 판정 다름만 남는다
+        s.margin_out["cases"][a]["loops"]["pitch_att"].update(gm_db=3.0, status="fail")
+        s.margin_out["failures"] = [{"case": a, "loop": "pitch_att", "severity": 0.1}]
+        if failed:
+            s.tune_meta = {"slots": {_iv_name(0.4): {"pitch_rate": {"status": "fail",
+                                                                     "reason": SLOT_DESIGN_FAILED[0]}}}}
+        monkeypatch.setattr(O, "classify_failures", lambda *x, **k: [{
+            "id": f"structural_limit:{a}:pitch_att", "case": a, "loop": "pitch_att", "verdict": "structural_limit",
+            "action": {"type": "escalate"}, "evidence": {}}])
+        s._stage_classify(None, lambda *x: None)
+        assert (s.status, s.stage) == ("escalated", "DONE")
+        assert [x["action"]["type"] for x in s.actions] == ["escalate"], "낼 구간 카드가 없다"
+        (rec,) = s.interval_log
+        assert (rec["status"], rec["label"], rec["point"]) == ("unimproved", label, _iv_name(0.4))
+        assert s.report()["coverage"]["interval_remedies"]["unimproved"] == 1
+
+
+def test_같은_점에_점_실패_카드가_있으면_구간_카드는_그_카드에_맡긴다(monkeypatch):
+    """⑤ 구간 중간점 자체가 실패하면 점 실패 처방이 그 점을 다룬다 — 구간 카드는 superseded_by로 남고 반영·기록되지
+    않는다(같은 점을 두 번 편입할 수 없다)."""
+    from claw.design import orchestrator as O
+
+    s = _interval_session()
+    v = _iv_name(0.4)
+    s.margin_out["cases"][v]["loops"]["pitch_rate"]["status"] = "fail"
+    s.margin_out["failures"] = [{"case": v, "loop": "pitch_rate", "severity": 0.2}]
+    point_card = {"id": f"gain_interp_valley:{v}:pitch_rate", "case": v, "loop": "pitch_rate",
+                  "verdict": "gain_interp_valley", "evidence": {},
+                  "action": {"type": "add_knot", "point": v, "mach": 0.4, "slots": ["pitch.k_rate"], "promote": True}}
+    monkeypatch.setattr(O, "classify_failures", lambda *x, **k: [dict(point_card)])
+    s._stage_classify(None, lambda *x: None)
+    iv_card = next(a for a in s.actions if a["action"]["type"] == "tune_interval")
+    assert iv_card["superseded_by"] == point_card["id"] and not iv_card.get("applied")
+    assert s.actions[0]["applied"] is True
+    assert s.checkpoint is None, "구간 처방을 반영하지 않았으면 체크포인트도 없다"
+    assert s.interval_log == []
+
+
+def test_구간_처방_전_저장본도_읽힌다():
+    """옛 저장본(checkpoint·interval_log 칸이 없다)은 체크포인트 없음 · 기록 없음으로 읽힌다."""
+    s = _interval_session()
+    d = s.to_dict()
+    assert d["checkpoint"] is None and d["interval_log"] == []
+    old = {k: v for k, v in d.items() if k not in ("checkpoint", "interval_log")}
+    back = DesignSession.from_dict(old)
+    assert back.checkpoint is None and back.interval_log == []
+    assert back.report()["coverage"]["interval_remedies"] == {"proposed": 0, "accepted": 0, "rolled_back": 0,
+                                                             "unimproved": 0}
+
+
+def test_midpoint_규칙에는_구간_처방이_없다():
+    """보강 기록이 없는 규칙(midpoint)은 구간 처방 칸이 None이다 — 잰 적 없는 것을 0으로 쓰지 않는다."""
+    s = DesignSession(_small(validation={"rule": "midpoint"}))
+    assert s.coverage()["interval_remedies"] is None and s._interval_rows() == []

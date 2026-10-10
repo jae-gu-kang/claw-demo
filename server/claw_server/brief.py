@@ -256,7 +256,12 @@ JSON 하나를 읽고, 엔지니어가 30초 안에 상황을 잡는 한국어 �
   status tol_unset(허용치 미설정 — d 분포만, 공백 아님)·done(보강 완료)·budget(예산
   종료 · 추가 검증 필요 — 합격도 설계 불가도 아니다)·unmeasured(잴 수 없는 구간
   있음). intervals는 구간별 기록(slot·d·tol·exceeds·verdict_change·verdicts·status
-  split/remaining/unmeasured/ok). coverage.validation_requested·validation_done·validation_not_run·
+  split/remaining/unmeasured/ok · remedy). 구간 처방(카드 verdict interval_exceeds ·
+  action tune_interval remedy add_knot/promote): d > 허용치이거나 fail 섞인 판정 다름인
+  잎 구간의 중간점을 편입·절점 추가하고, 재검증에서 자기 점·이웃 구간·전 영역(신규
+  불합격·판정 소실)을 보아 위반이면 이터 전체를 되돌려 봉인한다. ok→warn은 허용하되
+  region_delta.caution_regressions에 이름을 적는다. coverage.interval_remedies{proposed·
+  accepted·rolled_back·unimproved}. coverage.validation_requested·validation_done·validation_not_run·
   validation_omitted_rows·d_unmeasured는 안 본 것을 센다. summary_grid.notes는 격자
   밖 사정(계획 밖 점의 실패·계획 뒤 절점 바뀜)이다. 최상위 trim_reuse는 트림을 몇 점
   저장소에서 꺼내고(reused) 몇 점을 새로 풀었나(computed)다 — 같은 기체·같은 풀이

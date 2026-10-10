@@ -808,7 +808,13 @@
             "mode": "full",
             "conditions": 1,
             "omitted": 0,
-            "reinforce_status": "unmeasured"
+            "reinforce_status": "unmeasured",
+            "interval_remedies": {
+              "proposed": 0,
+              "accepted": 0,
+              "rolled_back": 0,
+              "unimproved": 0
+            }
           },
           "approved_actions": 0,
           "config": {
