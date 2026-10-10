@@ -20,7 +20,8 @@ DRIVE_NODES = ["Elevon_In_L", "Elevon_Out_L", "Elevon_In_R", "Elevon_Out_R", "Ru
 # web/world/src/core/launcher.ts 의 VEHICLE_AFT_EXTENT — 원점 뒤로 이보다 길면 꼬리가 발사관 밖으로 나온다
 VEHICLE_AFT_EXTENT = 1.90
 
-pytestmark = pytest.mark.skipif(not os.path.exists(GLB), reason="banshee.glb 없음 — README의 재생성 명령")
+# GLB는 커밋된 산출물이다 — 없으면 건너뛰지 않고 실패한다(건너뛰면 지워진 GLB가 초록으로 보인다).
+assert os.path.exists(GLB), "banshee.glb 없음 — 커밋된 산출물이다. README의 재생성 명령으로 굽고 커밋할 것"
 
 
 # ---- 4×4 행렬 (행 우선 리스트) ----------------------------------------------------------------
