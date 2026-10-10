@@ -208,8 +208,12 @@ def test_기본_테이블은_예전과_같다():
     # 헤딩·요 적분기가 코드에 돌아왔고 표가 포인터+점 수로 바뀌었다 — ab5f3d7f1c1a5abf(값+구조) → be2a2e6fe00dff02
     # 속도 명령필터 추월 동기화(fcl/graphs.py 속도 절 — 생성 C에 판정 한 줄)로 구조 지문만 움직였다 — be2a2e6fe00dff02 →
     # 53ea5f4d121401a8. 값은 그대로라 파라미터 지문은 같다(동기화를 뗀 그래프로 재면 옛 지문이 그대로 나온다)
+    # v1.83: 할당 공유 예산 여유 r — 두 예산이 (1−r)·B 위에서 배분, 상수 scas_alloc_roll_hi_c·pitch_hi_c·resv_hi가
+    # 움직였다 — 데이터 변경, 법칙 구조 그대로(분석 그래프는 상수를 C에 박으므로 두 지문이 함께 움직인다). 구 기체 픽스처는
+    # 예약 비율도 0.8 → 0.82(resv·(1−r)B가 표 최댓값 15.24°를 덮어야 한다 — test_fcl_scas) — 53ea5f4d121401a8 ·
+    # 8bd3e4b1400dbaac → eb7c796f9c587031 · 3d505ed07d82d474
     module = _module()
-    assert (module.structure_fingerprint, module.param_fingerprint) == ("53ea5f4d121401a8", "8bd3e4b1400dbaac")
+    assert (module.structure_fingerprint, module.param_fingerprint) == ("eb7c796f9c587031", "3d505ed07d82d474")
 
 
 def test_없는_자리를_요구하면_거부한다():

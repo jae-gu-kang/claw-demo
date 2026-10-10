@@ -64,6 +64,7 @@ _LAZY = {
     "DEMO_K_DIFF_THR": lambda p: p.k_diff_thr,
     "DEMO_ALPHA_MARGIN": lambda p: p.law["alpha_margin"],
     "DEMO_ALLOC_RESV_FRAC": lambda p: p.alloc_resv_frac,
+    "DEMO_ALLOC_HEADROOM_FRAC": lambda p: p.alloc_headroom_frac,
     "DEMO_ALLOC_TRIM_TABLE": lambda p: _alloc_trim_table,
     "DEFAULT_SCHEDULED": lambda p: tuple(p.law["schedule"]["scheduled"]),
     "_M_DESIGN": lambda p: p.law["schedule"]["m_design"],

@@ -1008,6 +1008,7 @@ def fcl_graph(
     alpha_margin=0.05,
     alloc_trim_table=None,
     alloc_resv_frac=0.7,
+    alloc_headroom_frac=0.07,
     theta_hi_table=None,
     gain_tables=None,
     filter_tau=0.5,
@@ -1098,8 +1099,23 @@ def fcl_graph(
         if not budget > 0.0:
             raise ValueError(
                 f"{name}: 배분 예산이 0 이하다 ({budget}) — 엘레본·SCAS 한계를 확인하라")
+        # 공유 예산 여유(headroom) — 두 축이 (1−r)·B 위에서 배분한다: roll_hi = (1−r)B − R,
+        # pitch_hi = (1−r)B − |δa| (R의 상한도 resv_frac·(1−r)B로 같이 준다). 여유 없이 B를
+        # 정확히 소진하면 결합 프로브 스텝 직후 30-40 ms 동안 한쪽 엘레본이 한계에 붙어(실측
+        # 19.31°/20.05°) 결합 동적 여유가 판정선 바로 위에서 논다 — r = 0.05 실측(예제·쇼케이스
+        # 22조건): M0.102/1000 결합 여유 0.037 → 0.075 · M0.122/3000 0.032 → 0.074 · 잔여 롤
+        # 권한 ≥ 0.18B · 포화 0 · 새 하드 실패 0. δe_trim 표는 트림 **필요량**이라 그대로 두고
+        # 예산에만 여유를 준다. r = 0이면 1.0·B = B라 종전과 비트 단위로 같다.
+        # 기본값은 판정선(criteria.authority.dyn_reserve_min_frac 0.05)보다 **커야** 한다: 한쪽 엘레본이
+        # 배분 상한 (1−r)B에 붙는 순간 가용 동적 여유 1 − |δ|/L은 정확히 r이라, r을 판정선과 같은 값으로
+        # 두면 그 값이 판정선 **위에** 앉아 부동소수(0.04999…)가 합격을 가른다(쇼케이스 결함 시연이 그 자리에
+        # 핀됐다 — 실패 케이스가 배율마다 뒤집히고 결함 창이 끊겼다). 그래서 기본 r = 0.07 > 0.05
+        if not 0.0 <= alloc_headroom_frac < 0.5:
+            raise ValueError(
+                f"alloc_headroom_frac은 [0, 0.5) 필요 — 여유가 예산의 반을 넘으면 배분이 아니라 "
+                f"봉인이다: {alloc_headroom_frac}")
         alloc = {"phi_cmd_src": ap_out["phi_cmd"], "mach_src": src["mach"],
-                 "elevon_hi": budget, "trim_table": alloc_trim_table,
+                 "elevon_hi": (1.0 - alloc_headroom_frac) * budget, "trim_table": alloc_trim_table,
                  "resv_frac": alloc_resv_frac}
 
     scas_nodes, scas_out = scas3_nodes(

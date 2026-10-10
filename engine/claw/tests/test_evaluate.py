@@ -743,3 +743,29 @@ def test_레이트_게인이_0이면_여유를_재지_않는다(rig):
     assert st["loops"]["pitch_rate"]["status"] == "zero"
     assert st["loops"]["pitch_rate"]["margins"] is None
     assert not any(f.get("loop") == "pitch_rate" for f in fails)
+
+
+def test_shipped_example_keeps_dynamic_reserve_above_the_line_at_the_low_speed_region_point():
+    """공유 예산 여유(law.alloc.headroom_frac 0.07) 채택 근거의 회귀 — 요구영역 안 저속점의 결합 동적 여유.
+
+    여유 이전에는 |δe|+|δa|가 예산 B를 정확히 소진해 결합 프로브 스텝 직후 30-40 ms 동안 한쪽
+    엘레본이 한계에 붙었고(실측 19.31°/20.05°), M0.122/3000의 결합 동적 여유가 0.032로 판정선
+    (authority.dyn_reserve_min_frac 0.05)을 밑돌았다. (1−r)·B 배분으로 r = 0.05에서 0.074, r = 0.07에서
+    0.094가 됐다(M0.102/1000은 0.037 → 0.075 → 0.091) — 이 값이 다시 판정선 밑으로 내려오면 여유가 조용히
+    풀린 것이다. 패키지 예제 그대로 잰다(오버라이드 fixture가 아니라 — 채택 실측이 이 문서에서 났다).
+    """
+    from claw.profile import build_profile
+    from claw.profile.document import load_shipped_example
+    from claw.trim.trim import DEFAULT_RETRY
+
+    b = build_profile(load_shipped_example(), validated=True)
+    ac = b.aircraft()
+    trs = trim_batch(ac, [TrimCase(name="M0.122_h3000_f25", mach=0.122, alt=3000.0, fuel=25.0)],
+                     retry=DEFAULT_RETRY)
+    assert trs[0].converged
+    ev = evaluate(ac, trs, Shape(profile=b), b.eval_criteria, depth="full")
+    [case] = ev["cases"]
+    dyn = case["stages"]["authority"]["dynamic"]["by_run"]
+    assert dyn["combined"] == pytest.approx(0.0944, abs=0.005)  # r = 0.07 실측(r = 0.05에서는 0.0744)
+    assert dyn["combined"] >= 0.05  # 판정선 위
+    assert "authority.dynamic_reserve" not in [f["check"] for f in case["hard_fails"]]

@@ -555,7 +555,7 @@ def _law(law, p):
     alloc = law["alloc"]
     if alloc is not None:
         ap = f"{p}/alloc"
-        _keys(alloc, ap, ("resv_frac", "de_trim"))
+        _keys(alloc, ap, ("resv_frac", "headroom_frac", "de_trim"))
         de_trim = alloc["de_trim"]
         if de_trim is not None:
             _keys(de_trim, f"{ap}/de_trim", ("source", "table", "provenance"))
@@ -567,6 +567,10 @@ def _law(law, p):
             }
         alloc = {
             "resv_frac": _num(alloc["resv_frac"], f"{ap}/resv_frac", lo=0.0, lo_open=True, hi=1.0),
+            # 공유 예산 여유 r — 두 축이 (1−r)·B 위에서 배분한다(fcl/graphs.py). 0.5부터는 여유가
+            # 예산의 반을 넘어 배분이 아니라 봉인이다(조립도 같은 범위를 거부한다)
+            "headroom_frac": _num(alloc["headroom_frac"], f"{ap}/headroom_frac",
+                                  lo=0.0, hi=0.5, hi_open=True),
             "de_trim": de_trim,
         }
     out["alloc"] = alloc
@@ -979,7 +983,8 @@ def document_warnings(doc: dict) -> list:
     형상 변형이 solver·stall을 덮어쓰면 달라지므로 변형마다도 본다(variant 키). 기준은 변형이 못 고친다(VARIANT_FORBIDDEN)."""
     from claw.pipeline.criteria import GainEvalCriteria
 
-    margin = float(GainEvalCriteria.from_profile(doc).trim_margin.alpha_margin)
+    crit = GainEvalCriteria.from_profile(doc)
+    margin = float(crit.trim_margin.alpha_margin)
 
     def check(d, variant):
         hi = float(d["solver"]["trim_alpha_bounds"][1])
@@ -1000,12 +1005,31 @@ def document_warnings(doc: dict) -> list:
                             "q̇[rad/s²]라, 이만큼 남은 해를 수렴으로 받으면 「트림」이 눈에 띄게 흐른다(q̇ 0.01 rad/s²면 1 s에 "
                             f"약 0.6°/s 피치 각속도). v2까지의 상수는 {DEFAULT_RESID_TOL:g}였다"}]
 
-    out = check(doc, None) + loose(doc, None) + _target_warnings(doc)
+    def head(d, variant):
+        # 판정선(criteria.authority.dyn_reserve_min_frac)이 공유 예산 여유 **이상**이면 — 한쪽 엘레본이 배분 상한
+        # (1−r)B에 붙는 순간 가용 동적 여유 1 − |δ|/L은 정확히 r이라, 판정선이 r보다 크면 결합 프로브가 예산을 다 쓰는
+        # 점에서 판정이 구조적으로 실패하고, **같으면** 그 값이 판정선 위에 앉아 부동소수(0.04999…)가 합격을 가른다
+        # (쇼케이스 결함 시연이 거기 핀됐다 — 등호도 위험이다). 기준은 변형이 못 고치므로(VARIANT_FORBIDDEN) 판정선은
+        # 문서 하나 값이다
+        alloc = d["law"]["alloc"]
+        line = float(crit.authority.dyn_reserve_min_frac)
+        if alloc is None or line < float(alloc["headroom_frac"]):
+            return []
+        return [{"path": "/law/alloc/headroom_frac", "variant": variant,
+                 "message": f"공유 예산 여유 headroom_frac {float(alloc['headroom_frac']):g}가 판정선 "
+                            f"authority.dyn_reserve_min_frac {line:g} 이하다 — 엘레본이 배분 상한에 붙는 순간 가용 동적 "
+                            "여유가 정확히 여유 비율이라, 두 축이 (1 − 여유)·예산을 다 쓰는 결합 기동에서 동적 여유가 "
+                            "판정선을 밑돌거나(여유 < 판정선) 판정선 위에 앉아 부동소수가 합격을 가른다(여유 = 판정선). "
+                            "여유를 판정선보다 키우거나 판정선을 낮춘다"}]
+
+    out = check(doc, None) + loose(doc, None) + head(doc, None) + _target_warnings(doc)
     for item in doc.get("variants") or []:
         eff = effective_document(doc, item["id"])
         warns = check(eff, item["id"]) + loose(eff, item["id"])
         if warns and not (out and eff["solver"] == doc["solver"] and eff["stall"] == doc["stall"]):
             out += warns
+        if eff["law"]["alloc"] != doc["law"]["alloc"]:
+            out += head(eff, item["id"])
     return out
 
 
@@ -1046,6 +1070,12 @@ def effective_document(doc: dict, variant: str | None = None) -> dict:
 # 해석 설정 기본값 — v2까지 코드 상수였던 수평비행 트림 잔차 허용치(trim/trim.py RESID_TOL 1e-4). v3부터는 문서 값이 정본이고
 # 이 값은 옮길 때 채우는 자리일 뿐이다(v2 문서는 이 값으로 풀렸다 — 옮겨도 트림이 바뀌지 않는다)
 DEFAULT_RESID_TOL = 1e-4
+# 공유 예산 여유 기본값 — 새 키(law.alloc.headroom_frac) 도입 이전 문서를 올릴 때 채우는 값이자 법칙 서명
+# (fcl/law.py alloc_headroom_frac)의 기본값. 실측(sum05 — 결합 동적 여유 0.03대 → 0.07대, 잔여 롤 권한 ≥ 0.18B,
+# 포화 0, 새 하드 실패 0)에서 0.05를 먼저 골랐으나, 판정선(criteria.authority.dyn_reserve_min_frac 0.05)과 **같은**
+# 값이면 엘레본이 배분 상한에 붙는 순간 가용 동적 여유가 정확히 r = 판정선 위에 앉아 부동소수가 합격을 가른다(쇼케이스
+# 결함 시연이 0.04999…에 핀됐다) — 그래서 판정선 위 0.07로 올렸다. 두 정의는 테스트가 묶는다
+DEFAULT_ALLOC_HEADROOM_FRAC = 0.07
 # 잔차 허용치 경고 경계 [m/s²·rad/s²] — v2 상수의 100배. 잔차는 평형식의 가속도(u̇·ẇ·q̇)라 1e-2면 q̇가 1 s에 약 0.6°/s의
 # 피치 각속도를 쌓는다 — 그 위의 「수렴」은 시뮬에서 곧바로 흐르는 해다. 판정이 아니라 경고다(검증기 경계로 막지 않는다 —
 # 거친 탐색을 일부러 느슨하게 돌리는 쓰임을 막을 까닭이 없다)
@@ -1157,9 +1187,22 @@ def upgrade_document(doc):
     다시 찍는다(_restamp_lineage). 증명이 안 되는 표(요구영역 없이 도출한 δe_trim — 운용 고도 절로 거른 검사 고도 — 이나
     v2에서도 낡았던 표)는 낡음으로 두고 그 까닭을 알림에 적는다(다시 도출·설계해 반영한다).
 
-    v3(이미 옮김)와 v1·그 밖의 버전은 **그대로** 돌려준다(알림 없음) — 멱등이고, v1은 종전 정책대로 검증이 거부한다
-    (v1 → v2의 확정 게인 표는 옮길 원본이 없는 새 절이라 업그레이더가 없었다). dict가 아니면 그대로 돌려준다."""
-    if not isinstance(doc, dict) or isinstance(doc.get("schema_version"), bool) or doc.get("schema_version") != 2:
+    v3 문서는 새 키만 채운다: law.alloc.headroom_frac(공유 예산 여유)이 없으면 기본값을 넣고, 확정 게인 표 기준
+    지문을 옛 정의(키 없던 문서)로 증명해 다시 찍는다(_restamp_headroom_basis — 값 동일, 새 키 기본값 추가뿐일 때만).
+    키가 이미 있으면 그대로(멱등, 알림 없음). v1·그 밖의 버전은 **그대로** 돌려준다(알림 없음) — v1은 종전 정책대로
+    검증이 거부한다(v1 → v2의 확정 게인 표는 옮길 원본이 없는 새 절이라 업그레이더가 없었다). dict가 아니면 그대로
+    돌려준다."""
+    if not isinstance(doc, dict) or isinstance(doc.get("schema_version"), bool):
+        return copy.deepcopy(doc), []
+    if doc.get("schema_version") == 3:
+        # v3 문서 — 새 키(공유 예산 여유)만 채운다. 키가 이미 있으면 그대로(멱등, 알림 없음)
+        d = copy.deepcopy(doc)
+        notes = []
+        if not _fill_headroom(d, notes):
+            return d, []
+        _restamp_headroom_basis(d, notes)
+        return d, notes
+    if doc.get("schema_version") != 2:
         return copy.deepcopy(doc), []
     from claw.pipeline.criteria import TrimMarginCriteria
 
@@ -1200,6 +1243,8 @@ def upgrade_document(doc):
         notes.append(_note("/trim/alpha_margin", f"트림 α 여유 {base_margin!r}는 도구 기본값과 같아 문서에 적지 않았다 — "
                                                  "판정선 criteria.trim_margin.alpha_margin의 기본값이 그 값이다"))
     out["schema_version"] = SCHEMA_VERSION
+    # v2에는 없던 새 키(공유 예산 여유)도 여기서 채운다 — 안 채우면 올린 문서가 검증(필수 키)을 못 넘는다
+    _fill_headroom(out, notes)
     _restamp_lineage(d, out, notes)
     return out, notes
 
@@ -1230,6 +1275,10 @@ def _v2_shadow(eff, raw_eff):
                  "alpha_margin": float(raw_eff["trim"]["alpha_margin"])}
     d["operating"] = {k: None if op.get(k) is None else float(op[k]) for k in ("alt_min", "alt_max")}
     d["mass"] = {k: v for k, v in d["mass"].items() if k != "loadings"}
+    law = d.get("law")
+    if isinstance(law, dict) and isinstance(law.get("alloc"), dict):
+        # 공유 예산 여유는 v3에서 생긴 키 — v2 정규화 문서에는 없었다(올림이 기본값을 채운 칸)
+        law["alloc"] = {k: v for k, v in law["alloc"].items() if k != "headroom_frac"}
     return d
 
 
@@ -1397,3 +1446,68 @@ def _restamp_lineage(raw, out, notes):
     _restamp_de_trim(out, configs, notes)
     _restamp_gain_tables(out, configs, notes)
     _restamp_design(out, configs, notes)
+
+
+def _fill_headroom(out, notes):
+    """law.alloc(과 그것을 통째로 덮는 형상 변형 패치)에 headroom_frac이 없으면 기본값을 넣는다 → 채웠는가.
+
+    새 키(공유 예산 여유, fcl/graphs.py 배분 주석) 도입 이전 문서의 올림 — 기본값이면 배분은 실측 채택값
+    (판정선 0.05 위의 0.07)으로 돈다. resv_frac조차 없는 모양(깨진 절)은 건드리지 않는다 — 검증이 경로와 함께 말한다."""
+    filled = []
+
+    def fill(node, path):
+        if isinstance(node, dict) and "resv_frac" in node and "headroom_frac" not in node:
+            node["headroom_frac"] = DEFAULT_ALLOC_HEADROOM_FRAC
+            notes.append(_note(path, f"공유 예산 여유 headroom_frac이 없어 기본값 {DEFAULT_ALLOC_HEADROOM_FRAC:g}을 "
+                                     "넣었다 — 엘레본 배분이 (1 − 여유)·예산 위에서 돈다(새 키)"))
+            filled.append(path)
+
+    law = out.get("law") if isinstance(out.get("law"), dict) else {}
+    fill(law.get("alloc"), "/law/alloc/headroom_frac")
+    for i, item in enumerate(out.get("variants") or []):
+        patch = item.get("patch") if isinstance(item, dict) else None
+        for ptr, val in (patch if isinstance(patch, dict) else {}).items():
+            vid = item.get("id", i)
+            if ptr == "/law/alloc":
+                fill(val, f"/variants/{vid}/patch/law/alloc/headroom_frac")
+            elif ptr == "/law" and isinstance(val, dict):
+                fill(val.get("alloc"), f"/variants/{vid}/patch/law/alloc/headroom_frac")
+    return bool(filled)
+
+
+def _restamp_headroom_basis(out, notes):
+    """새 키 기본값만 넣은 v3 올림의 계보 도장 — 확정 게인 표 기준 지문을 **옛 정의(키 없던 문서)**로 다시 재서
+    기록과 같으면(표를 확정한 문서가 올리기 전 이 문서다) 새 지문으로 다시 찍는다. 값 동일 — 올림이 바꾼 것이
+    새 키의 기본값 추가뿐일 때만 성립하는 증명이다. δe_trim·초기 게인 도장은 플랜트 지문(law 절 밖)이라 새 키에
+    흔들리지 않아 다시 찍을 것이 없다."""
+    from claw.profile.fingerprint import gain_tables_basis_fingerprint
+
+    try:
+        v = validate_document(out)
+    except ProfileError:
+        law = out.get("law") if isinstance(out.get("law"), dict) else {}
+        if law.get("gain_tables") is not None:
+            notes.append(_note("/law/gain_tables", "확정 게인 표는 낡음으로 보인다 — 올린 문서가 검증을 넘지 못해 옛 "
+                                                   "기준 지문을 다시 잴 수 없다"))
+        return
+    configs = []
+    for vid in [None] + [item["id"] for item in v["variants"] or []]:
+        eff = effective_document(v, vid)
+        shadow = copy.deepcopy(eff)
+        if isinstance(shadow["law"]["alloc"], dict):
+            shadow["law"]["alloc"] = {k: x for k, x in shadow["law"]["alloc"].items() if k != "headroom_frac"}
+        patch = None if vid is None else next(i["patch"] for i in v["variants"] if i["id"] == vid)
+        configs.append({"vid": vid, "name": vid or "base", "eff": eff, "shadow": shadow, "patch": patch})
+    for path, prov, owner, group in _prov_groups(out, configs, _GAIN_PROV):
+        if owner["eff"]["law"]["gain_tables"] is None:
+            continue
+        if not isinstance(prov, dict):
+            why = "기준 지문 기록이 없거나 형상 변형이 기록 안쪽을 따로 고쳤다"
+        elif prov.get("basis_fingerprint") != gain_tables_basis_fingerprint(owner["shadow"]):
+            why = "새 키를 넣기 전에도 낡은 표였다(확정 뒤 문서가 바뀌었다)"
+        else:
+            prov["basis_fingerprint"] = gain_tables_basis_fingerprint(owner["eff"])
+            notes.append(_note(path, "확정 게인 표의 기준 지문을 다시 찍었다 — 옛 정의(headroom_frac 없던 문서)의 기준 "
+                                     "지문이 기록과 같아, 올림이 바꾼 것은 새 키의 기본값 추가뿐이다"))
+            continue
+        notes.append(_note(path, f"확정 게인 표는 낡음으로 보인다 — {why}. 자동 설계를 다시 돌려 반영하거나 표를 지운다"))

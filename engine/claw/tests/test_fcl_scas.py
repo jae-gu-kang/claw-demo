@@ -231,13 +231,18 @@ def test_elevon_allocation_never_exceeds_the_surface_budget():
     지표라 늦다 — 마진 기반으로 두었더니 선회 순간 롤이 19°를 가져가 피치에 1°만
     남았고, 마진이 음수가 된 뒤에야 되찾아 순항 중 59 m까지 내려갔다
     (test_landing의 선회 회귀가 잡았다). 뱅크 명령은 하중이 걸리기 전에 알 수 있다.
+
+    상한은 B가 아니라 **(1 − headroom)·B**다 — 예산을 정확히 소진하면 결합 프로브
+    스텝 직후 30-40 ms 동안 한쪽 엘레본이 한계에 붙어(실측 19.31°/20.05°) 결합
+    동적 여유가 판정선 바로 위에서 논다. 여유 r만큼은 어느 축도 못 쓴다.
     """
-    from claw.fcl.demo import DEMO_ALLOC_TRIM_TABLE, make_demo_fcl
+    from claw.fcl.demo import DEMO_ALLOC_HEADROOM_FRAC, DEMO_ALLOC_TRIM_TABLE, make_demo_fcl
 
     assert DEMO_ALLOC_TRIM_TABLE is not None, "데모에 배분이 꺼져 있다"
     fcl = make_demo_fcl().init(0.01)
     r = fcl.runner
     hi = fcl.mixer.elevon_hi
+    cap = (1.0 - DEMO_ALLOC_HEADROOM_FRAC) * hi
     r.reset()
     worst = 0.0
     rng = np.random.default_rng(0)
@@ -255,8 +260,8 @@ def test_elevon_allocation_never_exceeds_the_surface_budget():
         e = r.last_env
         de, da = e["scas_pitch_sat"], e["scas_roll_sat"]
         worst = max(worst, abs(de) + abs(da))
-        # 믹서가 실제로 자를 것이 남아 있으면 배분이 제 일을 못 한 것이다
-        assert abs(de) + abs(da) <= hi + 1e-12, f"배분 항등 위반: |{de}|+|{da}| > {hi}"
+        # 믹서가 실제로 자를 것이 남아 있으면 배분이 제 일을 못 한 것이다 — 여유까지 지켜서
+        assert abs(de) + abs(da) <= cap + 1e-12, f"배분 항등 위반: |{de}|+|{da}| > {cap}"
         for side in (out["elevon_l"], out["elevon_r"]):
             assert abs(side) <= hi + 1e-12
     assert worst > 0.5 * hi, f"예산 근처를 한 번도 안 밟았다 (최대 {worst}) — 항진 테스트다"
@@ -273,25 +278,26 @@ def test_allocation_budget_shrinks_to_the_narrowest_configured_limit():
     거부하지 않고 좁히는 이유: 영향성 해석은 out_hi 하나만 흔들어 본다
     (pipeline/influence.py). 거부하면 그 정당한 사용이 조립 예외로 죽는다.
     """
-    from claw.fcl.demo import make_demo_fcl
+    from claw.fcl.demo import DEMO_ALLOC_HEADROOM_FRAC, make_demo_fcl
     from claw.fcl.mixer import Mixer
 
     def budget(fcl):
         g = fcl.init(0.01).runner.graph
-        # roll_hi = B − R, 그리고 R = 0(뱅크 명령 0)일 때 상수항이 곧 B다
+        # roll_hi = (1−r)B − R, 그리고 R = 0(뱅크 명령 0)일 때 상수항이 곧 (1−r)B다
         node = next(n for n in g.nodes if n.id.endswith("alloc_roll_hi"))
         return node.value
 
-    assert budget(make_demo_fcl()) == pytest.approx(0.35)  # 대칭 현행 형상
+    scale = 1.0 - DEMO_ALLOC_HEADROOM_FRAC  # 공유 예산 여유 — 두 축이 (1−r)B 위에서 배분한다
+    assert budget(make_demo_fcl()) == pytest.approx(scale * 0.35)  # 대칭 현행 형상
 
     # 믹서 하한이 좁으면 예산이 그리로 줄어든다
     assert budget(make_demo_fcl(mixer=Mixer(elevon_lo=-0.30, elevon_hi=0.35))) \
-        == pytest.approx(0.30)
+        == pytest.approx(scale * 0.30)
 
     # SCAS 축 하한이 좁아도 마찬가지 — 설정된 권한을 넘겨 주지 않는다
     fcl = make_demo_fcl()
     fcl.scas.cfg["pitch"]["out_lo"] = -0.20
-    assert budget(fcl) == pytest.approx(0.20)
+    assert budget(fcl) == pytest.approx(scale * 0.20)
 
     # 예산이 남지 않는 형상은 조립에서 거부한다 (조용히 부호가 뒤집히는 대신)
     bad = make_demo_fcl()
@@ -394,3 +400,45 @@ def test_allocation_floors_both_axes_so_neither_can_be_starved():
     assert tight[0] < math.radians(1.0), (
         f"어느 mach에서도 바닥에 근접하지 않았다 (최소 여유 "
         f"{math.degrees(tight[0]):.2f}° at M{tight[1]}) — 항진 테스트다")
+
+
+def test_allocation_headroom_scales_both_budgets_and_r0_is_bitwise_legacy():
+    """공유 예산 여유 r — 두 축이 (1−r)·B 위에서 배분하고, r = 0이면 종전과 비트 단위로 같다.
+
+    여유가 필요한 근거: |δe|+|δa| ≤ B를 정확히 소진하면 결합 프로브 스텝 직후
+    30-40 ms 동안 한쪽 엘레본이 한계(실측 19.31°/20.05°)에 붙어 결합 동적 여유가
+    판정선 바로 위에서 논다. r = 0.05 실측(예제·쇼케이스 22조건): M0.102/1000
+    결합 여유 0.037 → 0.075, M0.122/3000 0.032 → 0.074, 잔여 롤 권한 ≥ 0.18B,
+    포화 0, 새 하드 실패 0. δe_trim 표는 트림 **필요량**이라 손대지 않는다 —
+    여유는 예산 쪽에만 있다(R 상한도 resv_frac·(1−r)B로 같이 준다).
+    """
+    from claw.fcl.demo import DEMO_ALLOC_HEADROOM_FRAC, DEMO_ALLOC_RESV_FRAC, make_demo_fcl
+
+    def alloc_consts(fcl):
+        g = fcl.init(0.01).runner.graph
+        roll_hi = next(n for n in g.nodes if n.id.endswith("alloc_roll_hi")).value
+        pitch_hi = next(n for n in g.nodes if n.id.endswith("alloc_pitch_hi")).value
+        resv_hi = next(n for n in g.nodes if n.id.endswith("alloc_resv")).params["hi"]
+        return roll_hi, pitch_hi, resv_hi
+
+    # 기본 여유(문서 값) — 세 상수 모두 (1−r) 배. 곱 순서까지 조립과 같아야 비트가 같다
+    r = DEMO_ALLOC_HEADROOM_FRAC
+    assert r == 0.07  # 예제 문서 값 — 판정선(dyn_reserve_min_frac 0.05) 위. 0.05(AG sum05 실측)는 판정선과 같아 핀됐다
+    roll_hi, pitch_hi, resv_hi = alloc_consts(make_demo_fcl())
+    assert roll_hi == (1.0 - r) * 0.35
+    assert pitch_hi == (1.0 - r) * 0.35
+    assert resv_hi == DEMO_ALLOC_RESV_FRAC * ((1.0 - r) * 0.35)
+
+    # r = 0 — (1−0)·B가 B와 비트 단위로 같아(IEEE 1.0·x = x) 종전 그래프 그대로다
+    fcl = make_demo_fcl()
+    fcl.alloc_headroom_frac = 0.0
+    roll_hi, pitch_hi, resv_hi = alloc_consts(fcl)
+    assert roll_hi == 0.35 and pitch_hi == 0.35
+    assert resv_hi == DEMO_ALLOC_RESV_FRAC * 0.35
+
+    # 범위 밖은 조립에서 거부 — 0.5면 여유가 예산의 반이라 배분이 아니라 봉인이다
+    for bad in (0.5, -0.01):
+        fcl = make_demo_fcl()
+        fcl.alloc_headroom_frac = bad
+        with pytest.raises(ValueError, match="alloc_headroom_frac"):
+            fcl.init(0.01)

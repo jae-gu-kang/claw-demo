@@ -310,6 +310,12 @@ class BuiltProfile:
         alloc = self.doc["law"]["alloc"]
         return None if alloc is None else alloc["resv_frac"]
 
+    @property
+    def alloc_headroom_frac(self) -> float | None:
+        # 공유 예산 여유 — 할당 절이 없으면 배분 자체가 없어 None (resv_frac과 같은 규약)
+        alloc = self.doc["law"]["alloc"]
+        return None if alloc is None else alloc["headroom_frac"]
+
     # ── 평가 기준 (기준 통합 ①) ─────────────────────────────────────────────
     @property
     def eval_criteria(self):

@@ -49,6 +49,14 @@ export const AUTODESIGN_BUDGET = Object.freeze({ n_mach: 5, budget_points: 90, b
  *  7자리뿐이라 이 자리는 설계점 상수 하나이고, 게인 탭은 끈 자리 상수 경로로 싣는다(lib/gainsync faultSlot).
  *  실측 방법(IB5-fault·T3-fault부터 같다): 게인 탭 fault 경로가 store에 싣는 작업 사본을 웹 lib로 그대로 지어 서버
  *  TestClient에서, 대표 4케이스 full → 첫 하드 규칙 카드 [얼마나 →] → 스윕 → 처방(확인 full) → 적용 → 재평가.
+ *  - **현재 재현 창 없음 — 시연 결함 재설계 대기(별건).** v1.83 엘레본 할당 공유 예산 여유(law.alloc.headroom_frac
+ *    r = 0.07 — 두 축이 (1−r)·B 위에서 배분, 기준 지문 9059… → ee9f…, 확정 표·k_hdot·대표 4케이스 그대로) 뒤 같은 방법으로
+ *    ×5.0~8.4를 훑었다: REPAIRED가 하나도 없다(r = 0.06도 같다). 첫 구현 r = 0.05(= 판정선 dyn_reserve_min_frac)의
+ *    「판정선 위 고정」(타면이 배분 상한에 붙는 순간 동적 여유가 정확히 r — 0.0499…로 부동소수 끝자리가 합격을 갈랐다)은
+ *    사라졌지만, 예전에 k_hdot 카드를 내던 M0.18_h200_f10이 이 범위에서 끝내 FAIL하지 않는다. 처음 FAIL하는 케이스
+ *    (M0.18_h3000_f10, 다음 M0.12_h200_f10)의 첫 카드는 고도 PI이고 「바뀐 게인 0개」라 확인 런이 없다 — FAIL → 처방 →
+ *    PASS 사슬이 서지 않는다. ×5.65는 출하 문서에서 FAIL 자체를 내지 않는다(결함 평가가 PASS). 배율은 자리값으로 두고
+ *    창은 null로 적는다(SHOWCASE_FAULT.window — showcase.test.js가 붙잡는다). 아래 v1.70·v1.66 측정은 r 도입 전 이력이다.
  *  - v1.70 — 설계점·절점 분리 재생성본(이관 3단계: 확정 표 7자리 × 7점 — 요구영역 공통 마하 절점 M0.10~0.22 위 최소제곱,
  *    기준 지문 9059… 그대로, 표 요약 ffef… → 66c0…. k_hdot·자동조종 상자·대표 4케이스 그대로) — Q가 같은 방법으로 다시 쟀다:
  *    창 ×5.25~6.0(잰 점 5.25·5.3·5.4·5.5·5.6·5.65·5.7·5.8·5.9·6.0 REPAIRED). ×4.9~5.2는 FAIL(M0.18_h3000_f10 동적 여유 하나 —
@@ -88,9 +96,20 @@ export const AUTODESIGN_BUDGET = Object.freeze({ n_mach: 5, budget_points: 90, b
  *    pitch ki 과대는 margins FAIL(선형). roll.k_rate ≤×8 · heading.kp ≤×8 · speed.kp ≤×10은 FAIL 없음. 요 댐퍼
  *    약화(ζ_dr FAIL — 선형)는 예제에서 이미 같은 이유로 뺐다(W4b).
  *  S1 문서(자동조종 설계값·상자·확정 표 값·템플릿 격자)가 바뀌면 창을 다시 잰다 — 잰 기준을 테스트가 붙잡는다. */
-export const SHOWCASE_FAULT = Object.freeze({ path: "autopilot.alt.k_rate", factor: 5.65 });
+/** 배율 ×5.65는 r 도입 전(v1.70) 창 ×5.25~6.0의 가운데로 고른 값이다 — r = 0.07에서는 재현 창이 없다(위 첫 항목:
+ *  ×5.0~8.4 REPAIRED 0, FAIL도 안 난다). window: 잰 REPAIRED 창 [lo, hi] — 없으면 null(시연 결함 재설계 대기, 별건).
+ *  진행기는 window가 null이면 결함 주입 줄에 그 사실을 적는다(FAULT_STEP_LABEL). */
+export const SHOWCASE_FAULT = Object.freeze({
+  path: "autopilot.alt.k_rate", factor: 5.65, window: null,
+  note: "r = 0.07(law.alloc.headroom_frac)에서 ×5.0~8.4 REPAIRED 없음 — 현재 재현 창 없음, 시연 결함 재설계 대기(별건)",
+});
+/** 결함 주입 동작 이름 — 창이 없으면 이 배율이 FAIL을 내지 않는다는 것을 보는 사람에게 그대로 말한다(PASS가 떠도
+ *  속지 않게). 창이 다시 생기면 그냥 「결함 주입」. */
+export const FAULT_STEP_LABEL = SHOWCASE_FAULT.window
+  ? "결함 주입"
+  : "결함 주입 — r = 0.07에서는 FAIL이 나지 않는다(시연 재설계 전까지 결함 평가가 PASS일 수 있다)";
 /** 영향성 2단 평가 점 — 요구영역 기본 격자에서 **이름으로** 고른다(05 §11.13 5단계: 영향성 탭은 조건 구간을 따로 두지
- *  않는다). 위 결함 창(×5.25~6.0 — v1.70)은 정확히 이 네 점에서 쟀다 — 종전 템플릿 격자의 대표 부분 격자(마하 양끝 × 고도 양끝 ×
+ *  않는다). 위 결함 창(×5.25~6.0 — v1.70, r 도입 전 · r = 0.07에서는 창 없음)은 정확히 이 네 점에서 쟀다 — 종전 템플릿 격자의 대표 부분 격자(마하 양끝 × 고도 양끝 ×
  *  연료 가운데 = M0.12·0.18 × 200·3000 m × 10 kg)다. 기본 격자의 일반 대표점 규칙(lib/opspace.js representativePoints —
  *  행 끝점)으로는 M0.10·0.24·0.11이 골라져 **다른 점**이 되므로 규칙으로 파생하지 않고 적어 둔다. 네 점은 S1 기본 격자
  *  (M0.10~0.24, n_mach 8 → 0.02 간격)에 그대로 있다(showcase.test.js가 좌표 규칙까지 대조). 순서는 기본 격자 서펜타인
@@ -336,7 +355,7 @@ export const STEPS = Object.freeze([
     // dirties — 작업 사본을 더럽힌다. 여기 닿은 뒤의 [■ 중단]·멈춤은 아래 복원을 진행기가 대신한다(cancelCleanup ·
     // stopStep). 걸기 직전에 진행기가 작업 사본을 비운다 — 결함은 언제나 문서 게인 위에(앞선 멈춤이 남긴 결함 사본에
     // 또 곱해 ×6·×6이 되지 않게, views/showcase.js)
-    cue("gains", "fault", "결함 주입", { args: SHOWCASE_FAULT, dirties: true }),
+    cue("gains", "fault", FAULT_STEP_LABEL, { args: SHOWCASE_FAULT, dirties: true }),
     evalCase("결함", "FAIL"),
     cue("influence", "prescribe", "처방 적용"),
     evalCase("처방 후", "PASS"),

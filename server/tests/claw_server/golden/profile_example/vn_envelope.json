@@ -1,7 +1,7 @@
 {
  "golden": "vn_envelope",
  "mode": "full",
- "captured_at": "3a2bd4c+dirty",
+ "captured_at": "1332620+dirty",
  "value": {
   "dict": {
    "default": {
@@ -207,7 +207,7 @@
        "name": "예제 델타윙",
        "variant": null,
        "revision": 0,
-       "fingerprint": "a5c114c7d17cf12e",
+       "fingerprint": "2b91ac0b3bfa2881",
        "plant_fingerprint": "de786fbe5f5368fb",
        "is_example": true,
        "source": "default-example"
@@ -421,7 +421,7 @@
        "name": "예제 델타윙",
        "variant": null,
        "revision": 0,
-       "fingerprint": "a5c114c7d17cf12e",
+       "fingerprint": "2b91ac0b3bfa2881",
        "plant_fingerprint": "de786fbe5f5368fb",
        "is_example": true,
        "source": "default-example"

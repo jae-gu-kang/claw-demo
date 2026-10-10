@@ -8,7 +8,7 @@ import { EXAMPLE_ID } from "./profile.js";
 import { TAB_HASHES } from "./ask.js";
 import {
   AUTODESIGN_BUDGET, CAP_FACTOR, DWELL_MS, FIGURE_DWELL_MS, LINE_FULL_MAX, LINE_MAX, NAV_DWELL_MS, RESUME_WINDOW_MS,
-  SHOWCASE_CD0_DELTA, SHOWCASE_EVAL_POINTS, SHOWCASE_FAULT, SHOWCASE_ID, STATE_LABEL, STATE_VERSION, STEPS,
+  FAULT_STEP_LABEL, SHOWCASE_CD0_DELTA, SHOWCASE_EVAL_POINTS, SHOWCASE_FAULT, SHOWCASE_ID, STATE_LABEL, STATE_VERSION, STEPS,
   WORLD_REPLAY_TARGET_S, WORLD_SPEEDS, actionTimeout, advance, applyOutcome, autodesignConfigFor, beginStep,
   cancelCleanup, cancelStep, cardCompact, cardRows, cleanupLine, clearResume, clip, decodeState, designConfigRecord, dwellFor,
   listScrollTop, runEnded,
@@ -250,15 +250,20 @@ const tablesDigest = (tables) => createHash("sha256")
   .update(JSON.stringify(Object.keys(tables).sort().map((n) => [n, tables[n].axes, tables[n].data])))
   .digest("hex").slice(0, 16);
 
-test("결함 시연 상수 — S1 확정본에서 잰 창(×5.25~6.0, FAIL → 처방 → PASS)의 가운데다", () => {
-  // v1.66 실측(lib/showcase.js 머리 주석) — 요구영역 격자 재생성(설계 줄 200 m / 25 kg)으로 창이 ×5.2~5.85에서 옮았다:
-  // ×5.25 이하는 첫 카드가 고도 PI(제안 변화 0 — 확인 런 없음), ×6.05 이상은 확인 런 FAIL. 옛 가운데 ×5.5는 아래 끝에서
-  // 0.2라 ×5.65로 옮겼다. 그 전의 창: 해면 한 줄 표 ×5.2~5.85, 톱니 표 ×5.4~6.6, 피치 명령 상한 0.35 rad ×4.8~5.8.
-  // 예제에서 잰 피치 댐퍼 ×4.8은 S1에서 FAIL이 안 난다. 양끝 여유 0.3 — 새 측정에서 어느 끝이 0.3 안으로 들어오면 창을
-  // 다시 고른다. v1.70 절점 위 표(7점) 재측정: 창 ×5.25~6.0 — 아래 끝만 0.05 내려와 ×5.65를 그대로 둔다(머리 주석)
-  assert.deepEqual(SHOWCASE_FAULT, { path: "autopilot.alt.k_rate", factor: 5.65 });
-  const [lo, hi] = [5.25, 6.0];
-  assert.ok(SHOWCASE_FAULT.factor - lo >= 0.3 - 1e-9 && hi - SHOWCASE_FAULT.factor >= 0.3 - 1e-9, "창 끝에서 떨어져 있다");
+test("결함 시연 상수 — r = 0.07에서는 재현 창이 없다고 정직하게 적혀 있다 (시연 재설계 대기)", () => {
+  // v1.83 실측(lib/showcase.js 머리 주석 첫 항목): 할당 공유 예산 여유 r = 0.07(0.06도)에서 ×5.0~8.4 REPAIRED 0 — 예전
+  // k_hdot 카드 케이스 M0.18_h200_f10이 FAIL하지 않고, 첫 FAIL 케이스의 카드는 고도 PI(바뀐 게인 0개 → 확인 런 없음).
+  // 옛 단언(창 ×5.25~6.0 안의 가운데)은 상수끼리의 자기 확인이라 거짓이 됐다 — 창이 없다는 사실을 붙잡는다. 시연 결함을
+  // 다시 고르면 window에 잰 [lo, hi]를 적고 이 테스트를 창 끝 여유(양끝 0.3) 단언으로 되돌린다
+  assert.equal(SHOWCASE_FAULT.path, "autopilot.alt.k_rate");
+  assert.ok(Number.isFinite(SHOWCASE_FAULT.factor), "배율은 자리값으로 남는다(×5.65 — r 도입 전 창의 가운데)");
+  assert.equal(SHOWCASE_FAULT.window, null, "r = 0.07에서 잰 REPAIRED 창이 없다");
+  assert.match(SHOWCASE_FAULT.note, /r = 0\.07/);
+  assert.match(SHOWCASE_FAULT.note, /재설계/);
+  // 보는 사람이 PASS를 보고 속지 않게 — 결함 주입 줄이 그 사실을 말한다
+  const fault = acts("influence")[3];
+  assert.equal(fault.label, FAULT_STEP_LABEL);
+  assert.match(fault.label, /r = 0\.07에서는 FAIL이 나지 않는다/);
 });
 
 test("결함 시연 상수 — 잰 기준(자동조종 설계값·확정 표·대표 케이스)이 실물 S1 문서 그대로다", () => {
@@ -272,8 +277,13 @@ test("결함 시연 상수 — 잰 기준(자동조종 설계값·확정 표·�
   // 그대로였다. v1.66 요구영역 격자 재생성(이관 2·9·10단계 — 설계 줄 200 m / 25 kg, 기록 설정에서 n_mach가 빠졌다)은 기준
   // 지문과 표 값을 함께 바꿨다 — 창을 다시 쟀다(×5.3~6.0, 머리 주석). v1.68 스키마 v3는 지문 정의만 바꿨다(trim 절이
   // 플랜트 지문에서 빠지고 solver 절이 생김) — 확정 표·설계 게인·k_hdot·δe_trim 표·설계 설정이 float 비트 단위로 같고 트림
-  // 탐색 범위·잔차 허용치·판정선 값도 그대로 옮겨져 창은 다시 재지 않았다(0035a045 → 9059b37a)
-  assert.equal(s1.law.gain_tables.provenance.basis_fingerprint, "9059b37a8b323c99", fix);
+  // 탐색 범위·잔차 허용치·판정선 값도 그대로 옮겨져 창은 다시 재지 않았다(0035a045 → 9059b37a). 배분 공유 예산 여유
+  // (law.alloc.headroom_frac — 새 키, 두 축이 (1−r)·B 위에서 배분)는 문서에 키 하나가 더해진 것이라 기준 지문만
+  // 바뀌었다(9059b37a → ad95d708 — 올림이 옛 정의 지문을 증명하고 다시 찍는다). r 0.05 → 0.07(판정선 dyn_reserve_min_frac
+  // 0.05와 같은 값이면 엘레본이 배분 상한에 붙는 순간 가용 동적 여유가 정확히 r = 판정선 위에 앉아 부동소수가 합격을
+  // 갈랐다)은 키 값 하나라 다시 기준 지문만 옮겼다(ad95d708 → ee9fcfcd — 쇼케이스 재생성). 확정 표·설계 게인·k_hdot·δe_trim
+  // 표는 float 비트 단위로 같다(재생성 「같음」, tablesDigest 66c0…). 법칙 거동은 바뀌므로 결함 창은 다시 쟀다(머리 주석)
+  assert.equal(s1.law.gain_tables.provenance.basis_fingerprint, "ee9fcfcd0ef4a816", fix);
   // 그 창을 만든 확정 표 값 자체 — 표 표현 재생성은 k_hdot·기준 지문을 그대로 두고 창만 옮겼다(×5.2~6.4 →
   // ×4.8~5.8). 요 댐퍼 표 수리(튜너 2차 패스 — yaw.k_rate·roll.kp·roll.ki 29점씩)도 기준 지문을 두고 표 값만 바꿨다(창은 그대로).
   // 요 설계 목표 ζ_dr 0.5 → 0.6은 시드 요·롤 게인이 바뀌어 기준 지문과 표 4자리(yaw.k_rate·roll.k_rate·roll.kp·

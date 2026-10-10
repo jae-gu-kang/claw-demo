@@ -100,7 +100,7 @@ INSTRUMENT_STATES = {
 
 class FlightControlLaw:
     def __init__(self, scas, autopilot, mixer, schedule=None, alpha_limiter=None,
-                 alloc_trim_table=None, alloc_resv_frac=0.7,
+                 alloc_trim_table=None, alloc_resv_frac=0.7, alloc_headroom_frac=0.07,
                  theta_hi_table=None, standard=False):
         self.scas = scas
         # 표준 템플릿(fcl/graphs.py 머리말) — 탑재 C 생성·검증만 켠다. 시뮬·해석은 분석 그래프(False)
@@ -112,6 +112,9 @@ class FlightControlLaw:
         # 불변식(θ_hi ≤ α_stall − 마진)은 fcl_graph가 조립 시점에 건다
         self.theta_hi_table = theta_hi_table
         self.alloc_resv_frac = float(alloc_resv_frac)
+        # 공유 예산 여유 — 두 축이 (1−r)·B 위에서 배분한다(fcl/graphs.py 배분 주석). 기본값은
+        # 스키마 law.alloc.headroom_frac 기본값과 같아야 한다(derive가 이 서명 기본값을 읽는다)
+        self.alloc_headroom_frac = float(alloc_headroom_frac)
         self.autopilot = autopilot
         self.mixer = mixer
         self.schedule = schedule
@@ -154,6 +157,7 @@ class FlightControlLaw:
                 alloc_trim_table=self.alloc_trim_table,
                 theta_hi_table=self.theta_hi_table,
                 alloc_resv_frac=self.alloc_resv_frac,
+                alloc_headroom_frac=self.alloc_headroom_frac,
                 gain_tables=self.schedule.tables if self.schedule is not None else None,
                 filter_tau=self.schedule.filter_tau if self.schedule is not None else 0.5,
                 standard=self.standard,

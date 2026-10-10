@@ -341,7 +341,8 @@ def _coverage_law(law, module):
     cov = FlightControlLaw(
         Scas(*(ScasAxis(**axes[a]) for a in ("pitch", "roll", "yaw"))), Autopilot(**ap), Mixer(**mix),
         schedule=schedule, alpha_limiter=law.alpha_limiter, alloc_trim_table=alloc,
-        alloc_resv_frac=law.alloc_resv_frac, theta_hi_table=law.theta_hi_table, standard=standard,
+        alloc_resv_frac=law.alloc_resv_frac, alloc_headroom_frac=law.alloc_headroom_frac,
+        theta_hi_table=law.theta_hi_table, standard=standard,
     ).init(law.dt)
     if emit_c(cov.runner.graph, cov.runner).structure_fingerprint != module.structure_fingerprint:
         return None, changes, "커버리지 값이 구조를 바꿨다 — 같은 실행 파일로 돌 수 없어 세트에서 뺐다"
@@ -427,8 +428,15 @@ def _exercised(rec, law, mission_steps):
     rows.append(row("sched", "게인 스케줄 입력(mach)이 움직임", n_mach > 100,
                     f"서로 다른 mach {n_mach}개"))
     hi = float(law.mixer.cfg["elevon_hi"])
-    n_sat = sum(1 for o in rec["outputs"] if abs(o.get("elevon_l", 0.0)) >= hi - 1e-3)
-    rows.append(row("sat", "엘레본 포화 도달", n_sat > 0, f"{n_sat}스텝 (한계 {hi} rad)"))
+    # 배분 장착 형상의 구조적 상한은 믹서 한계가 아니라 (1−r)·B다(fcl/graphs.py 공유 예산 여유 —
+    # |δe|+|δa| ≤ (1−r)B라 믹서 클립은 안 걸린다). 믹서 한계 기준이면 이 행이 항상 실패한다.
+    # 조립 그래프의 배분 상수(roll_hi — R = 0일 때 값이 곧 (1−r)B)를 읽는다 — 예산 min 계산의 사본을 두지 않는다
+    bound = hi
+    runner = getattr(law, "runner", None)
+    if law.alloc_trim_table is not None and runner is not None:
+        bound = min(bound, float(next(n.value for n in runner.graph.nodes if n.id.endswith("alloc_roll_hi"))))
+    n_sat = sum(1 for o in rec["outputs"] if abs(o.get("elevon_l", 0.0)) >= bound - 1e-3)
+    rows.append(row("sat", "엘레본 포화 도달", n_sat > 0, f"{n_sat}스텝 (한계 {bound:g} rad)"))
     return rows
 
 

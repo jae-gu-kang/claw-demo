@@ -158,6 +158,7 @@ def form_spec() -> dict:
                    help="문서 검증은 선택이지만 탑재 코드 생성·검증 탭에는 필요하다 — 없으면 배분 노드가 빠져 "
                         "표준 템플릿 구조가 달라져 거부된다", fields=[
                 _f("number", "/law/alloc/resv_frac", "롤 권한 예비 비율", "-"),
+                _f("number", "/law/alloc/headroom_frac", "공유 예산 여유 비율", "-"),
                 _group("/law/alloc/de_trim", "트림 엘레본 표", nullable=True, fields=[
                     _f("choice", "/law/alloc/de_trim/source", "표 출처", choices=list(DE_TRIM_SOURCES)),
                     _f("table_mach", "/law/alloc/de_trim/table", "마하별 트림 엘레본", "rad",

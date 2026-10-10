@@ -62,7 +62,10 @@ def assemble_law(
     )
     margin = law["alpha_margin"] if alpha_margin is None else float(alpha_margin)
     limiter = AlphaLimiter(profile.stall_table(), margin=margin) if with_limiter else None
-    alloc = {} if profile.alloc_resv_frac is None else {"alloc_resv_frac": profile.alloc_resv_frac}
+    # 할당 절이 있으면 두 비율(예약·여유)을 함께 싣는다 — 절이 없으면 표도 없어 배분 자체가 없다
+    alloc = {} if profile.alloc_resv_frac is None else {
+        "alloc_resv_frac": profile.alloc_resv_frac,
+        "alloc_headroom_frac": profile.alloc_headroom_frac}
     # θ 상한은 실속표에서 유도한 마하 표다(v1.11) — 리미터가 있을 때만. 리미터와 **같은 마진**으로 만든다
     # (fcl_graph가 θ_hi(M) ≤ α_stall(M) − margin을 격자점마다 검사한다). 스칼라 theta_hi는 바깥 상자로 남는다
     theta_hi = profile.theta_hi_table(margin) if with_limiter else None

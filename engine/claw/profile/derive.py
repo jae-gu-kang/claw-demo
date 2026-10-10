@@ -1,7 +1,7 @@
 """δe_trim 표 도출 — 법칙 할당이 읽는 마하 표를 기체에서 잰다 (02 §5.6 · 02 §5.6.1).
 
-할당은 선회 하중 n에서 롤 예산의 피치 몫을 먼저 뗀다: R = clip(δe_trim(M)·n, 0, resv_frac·B)(fcl/graphs.py
-_roll_budget_nodes). 그 표는 기체의 1g 트림 승강타 요구다 — 예제 기체에서 M0.23의 14.88°부터 M0.6의 0.68°까지
+할당은 선회 하중 n에서 롤 예산의 피치 몫을 먼저 뗀다: R = clip(δe_trim(M)·n, 0, resv_frac·B′), B′ = (1 − headroom_frac)·B
+(fcl/graphs.py _roll_budget_nodes — 공유 예산 여유는 예산 쪽에 있고 이 표는 트림 **필요량** 그대로다). 그 표는 기체의 1g 트림 승강타 요구다 — 예제 기체에서 M0.23의 14.88°부터 M0.6의 0.68°까지
 22배 움직여 상수로는 양 끝을 못 맞춘다. 예제 표를 만든 절차(02 §5.6.1 `/law/alloc/de_trim`)를 코드로 옮겼다:
 
 1. 요구 — 마하마다 연료 × 고도 격자로 trim_level을 돌려 최악 |δe|를 취한다. 넣는 트림은 조건 판정
@@ -104,6 +104,13 @@ def _law_default_resv_frac() -> float:
     return float(inspect.signature(FlightControlLaw.__init__).parameters["alloc_resv_frac"].default)
 
 
+def _law_default_headroom_frac() -> float:
+    # 공유 예산 여유 기본값 — 법칙 서명이 정본(resv_frac과 같은 규약, 스키마 기본값과 테스트로 묶인다)
+    from claw.fcl.law import FlightControlLaw
+
+    return float(inspect.signature(FlightControlLaw.__init__).parameters["alloc_headroom_frac"].default)
+
+
 def _coverage(required, grid, undefined, checks, need) -> dict:
     """provenance.coverage — 요구 마하 범위 대 표 축, 근거 없는 요구 구간, 표 밖 요구 구간 (이관 10단계).
 
@@ -168,7 +175,7 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=None
                    check_step=CHECK_STEP, on_progress=None) -> dict:
     """BuiltProfile → {"ok", "reason", "reason_text", "alloc", "requirement", "elapsed_s"}.
 
-    alloc은 law.alloc 모양({resv_frac, de_trim{source "derived", table, provenance}}) — resv_frac은 문서 값을
+    alloc은 law.alloc 모양({resv_frac, headroom_frac, de_trim{source "derived", table, provenance}}) — 두 비율은 문서 값을
     그대로 두고, 할당 섹션이 없던 기체면 법칙 기본값이다. 표의 양 끝은 **요구가 있는 검사점**으로 정한다 — 첫(마지막)
     요구 검사점을 덮는 가장 안쪽 격자점까지 남기고 그 밖의 격자점은 표에서 뺀다(trimmed_machs). 격자점만 보고 자르면
     잘린 격자점과 첫 요구 격자점 사이의 검사점 요구가 버려져, clip 룩업이 끝값을 답하는 자리가 모자란다(격자 0.1·0.3에서
@@ -273,6 +280,8 @@ def derive_de_trim(built, *, variants=(), machs=None, alts=None, fuel_fracs=None
         "reason_text": None if ok else REASON_TEXT[REASON_NOT_CONVERGED],
         "alloc": {
             "resv_frac": alloc["resv_frac"] if alloc is not None else _law_default_resv_frac(),
+            # law.alloc를 통째로 바꾸는 결과라 여유도 함께 싣는다 — 없으면 저장 검증(필수 키)이 거부한다
+            "headroom_frac": alloc["headroom_frac"] if alloc is not None else _law_default_headroom_frac(),
             "de_trim": {
                 "source": "derived",
                 "table": {"axes": {"mach": list(grid)}, "data": values, "extrapolate": "clip"},

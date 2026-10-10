@@ -39,7 +39,16 @@ STRUCTURE_FP = "f94329070fbecd39"
 # → a246cdf17ebfcb5e (이관 9·10단계 — δe_trim 표를 요구영역에서 재도출: 마하 격자가 요구영역 M0.10~0.28의 기본 격자 공통
 # 좌표 10점(종전 문서 격자 M0.082~0.245 7점 — 요구 상한 0.28을 못 덮었다), 검사 고도·연료가 요구영역 기본 격자(100/1000/
 # 3000 m × 10/25/50 kg)이고 확정 요구영역 밖 조건을 뺀다. 표 길이만 바뀌어 구조 지문·C 파일 불변)
-PARAM_FP = {"example": "a246cdf17ebfcb5e", "eoir": "a246cdf17ebfcb5e", "legacy": "41eceddd3279a2c1"}
+# → 62e589046c6fe8e4 · legacy 41eceddd3279a2c1 → 6d10754cb6613302 (배분 공유 예산 여유 law.alloc.headroom_frac 0.05 —
+# 두 축이 (1−r)·B 위에서 배분한다. 이미지에서 움직인 것은 값 셋뿐: scas_alloc_roll_hi_c·scas_alloc_pitch_hi_c
+# 0.35 → 0.3325, scas_alloc_resv_hi 0.28 → 0.266. 새 파라미터는 없다(여유는 예산에 곱해 들어간다) — 구조 지문·C 파일
+# 불변, example-delta.bin CRC-32 0x61bc6429 → 0x8d09bd81)
+# → cba735c0a553fc0f · legacy 6d10754cb6613302 → b627b8029d0a702c (v1.83 여유 r 0.05 → 0.07 — 판정선 dyn_reserve_min_frac
+# 0.05와 같은 값이면 엘레본이 배분 상한에 붙는 순간 가용 동적 여유가 정확히 r = 판정선 위에 앉아 부동소수가 합격을 갈랐다.
+# 값 셋이 다시 움직였다: roll_hi_c·pitch_hi_c 0.3325 → 0.3255, resv_hi 0.266 → 0.2604. 구 기체 픽스처는 예약 비율도
+# 0.8 → 0.82(resv·(1−r)B 0.2604 < 표 최댓값 0.26597 rad — 상한이 1g 요구를 잘라 0.82로 덮는다 · resv_hi 0.2669) —
+# 구조 지문·C 파일 불변, example-delta.bin CRC-32 0x8d09bd81 → 0xea3f5d1b)
+PARAM_FP = {"example": "cba735c0a553fc0f", "eoir": "cba735c0a553fc0f", "legacy": "b627b8029d0a702c"}
 
 
 def _profiles():
@@ -141,7 +150,8 @@ def test_trace_exercises_the_hard_paths(trace):
         vals = {row[flag] for row in inputs}
         assert vals == {0.0, 1.0}, f"{flag}가 두 상태를 모두 밟지 않음: {vals}"
     assert len({row["mach"] for row in inputs}) > 100, "게인 스케줄이 움직이지 않음"
-    assert any(abs(r[0]) >= 0.349 for r in refs), "엘레본 포화를 밟지 않음"
+    # 배분 여유(headroom 0.07) 뒤 미션의 구조적 상한은 (1−r)·0.35 = 0.3255다 — 그 턱을 밟았는지 본다
+    assert any(abs(r[0]) >= 0.93 * 0.35 - 0.001 for r in refs), "엘레본 배분 상한을 밟지 않음"
     # PID 조건부 적분의 **포화 가지**를 밟아야 C 대조가 반쪽이 아니다. 분기가 한쪽만
     # 실행되면 비트 일치는 통과하면서 나머지 가지는 검증되지 않은 채 탑재된다
     import claw.blocks.controllers as controllers

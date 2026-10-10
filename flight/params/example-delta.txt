@@ -1,7 +1,7 @@
 CLAW 파라미터 이미지 — fcl — 예제 델타윙 (example-delta)
-형식 v1 · 구조 지문 f94329070fbecd39 · 파라미터 지문 a246cdf17ebfcb5e
-계보(프로파일 지문) f840f13f77a30368 · 제어주기 0.01 s
-스칼라 62개 · 표 19개(배열 38개) · double 358개 · 3088바이트 · CRC-32 0x61bc6429
+형식 v1 · 구조 지문 f94329070fbecd39 · 파라미터 지문 cba735c0a553fc0f
+계보(프로파일 지문) 178ba1b7593702eb · 제어주기 0.01 s
+스칼라 62개 · 표 19개(배열 38개) · double 358개 · 3088바이트 · CRC-32 0xea3f5d1b
 
 의미 검사
   통과  유한값 — NaN·Inf 없음 — 전 값
@@ -41,15 +41,15 @@ CLAW 파라미터 이미지 — fcl — 예제 델타윙 (example-delta)
   ap_thr_out_hi             = 1.0   상한
   lim_alpha_max_c           = -0.05   상수 편차
   scas_alloc_resv_lo        = 0.0   하한
-  scas_alloc_resv_hi        = 0.27999999999999997   상한
+  scas_alloc_resv_hi        = 0.26039999999999996   상한
   scas_alloc_resv_neg_k     = -1.0   게인
-  scas_alloc_roll_hi_c      = 0.35   상수 편차
+  scas_alloc_roll_hi_c      = 0.32549999999999996   상수 편차
   scas_alloc_roll_lo_k      = -1.0   게인
   scas_roll_wo_p            = 1.0   exp(-dt/tau) — FCL_DT로 계산
   scas_roll_wo_one_minus_p  = 0.0   1 − p
   scas_roll_wo_sel_c        = 0.0   선택 — 0이 아니면 첫 입력, 0이면 둘째 입력
   scas_alloc_da_neg_k       = -1.0   게인
-  scas_alloc_pitch_hi_c     = 0.35   상수 편차
+  scas_alloc_pitch_hi_c     = 0.32549999999999996   상수 편차
   scas_alloc_pitch_lo_k     = -1.0   게인
   scas_pitch_wo_p           = 1.0   exp(-dt/tau) — FCL_DT로 계산
   scas_pitch_wo_one_minus_p = 0.0   1 − p

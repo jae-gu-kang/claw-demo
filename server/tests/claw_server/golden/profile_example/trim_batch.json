@@ -1,7 +1,7 @@
 {
  "golden": "trim_batch",
  "mode": "full",
- "captured_at": "bfc1b30+dirty",
+ "captured_at": "3747743",
  "value": {
   "dict": {
    "kind": "trim_batch",
@@ -738,7 +738,7 @@
      "name": "예제 델타윙",
      "variant": null,
      "revision": 0,
-     "fingerprint": "a5c114c7d17cf12e",
+     "fingerprint": "2b91ac0b3bfa2881",
      "plant_fingerprint": "de786fbe5f5368fb",
      "is_example": true,
      "source": "default-example"

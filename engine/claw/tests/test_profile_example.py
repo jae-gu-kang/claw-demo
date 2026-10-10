@@ -56,7 +56,9 @@ def test_legacy_constants_keep_their_old_shapes_and_values():
                                        ("out_lo", -0.35), ("out_hi", 0.35)]
     assert list(DEMO_YAW.items()) == [("kp", 0.5), ("ki", 0.0), ("k_rate", 0.8), ("washout_tau", 2.0),
                                       ("out_lo", -0.35), ("out_hi", 0.35)]
-    assert (DEMO_K_DIFF_THR, DEMO_ALPHA_MARGIN, DEMO_ALLOC_RESV_FRAC) == (0.0, 0.05, 0.80)
+    # 예약 비율 0.80 → 0.82(v1.83): 공유 예산 여유 r 0.07 뒤 resv·(1−r)B = 0.8·0.3255 = 0.2604 rad이 구 기체 표의
+    # 최댓값 0.26597 rad(M0.25)을 못 덮어 1g 요구를 잘랐다 — 0.82·0.3255 = 0.2669로 덮는다(test_fcl_scas 바닥 시험)
+    assert (DEMO_K_DIFF_THR, DEMO_ALPHA_MARGIN, DEMO_ALLOC_RESV_FRAC) == (0.0, 0.05, 0.82)
     assert DEFAULT_SCHEDULED == ("pitch.kp", "pitch.ki", "pitch.k_rate",
                                  "roll.kp", "roll.ki", "roll.k_rate")
     assert (_M_DESIGN, _F_CAP, _F_CAP_ROLL) == (0.6, 2.0, 4.0)

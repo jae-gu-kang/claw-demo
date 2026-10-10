@@ -244,7 +244,7 @@ def test_condition_verdict_carries_the_mass_condition():
 
 
 def _derived(doc, prov):
-    doc["law"]["alloc"] = {"resv_frac": 0.5, "de_trim": {
+    doc["law"]["alloc"] = {"resv_frac": 0.5, "headroom_frac": 0.07, "de_trim": {
         "source": "derived", "table": {"axes": {"mach": [0.2, 0.6]}, "data": [0.1, 0.01], "extrapolate": "clip"},
         "provenance": prov}}
     return _built(doc)
@@ -513,3 +513,89 @@ def test_verdict_context_equality_includes_loadings():
 
     a = VerdictContext.from_profile(built)
     assert dataclasses.replace(a, loadings_declared=2) != a
+
+
+# ── 공유 예산 여유(headroom) — 새 키 올림·경고 ───────────────────────────
+
+
+def test_alloc_headroom_matches_the_law_default_and_rejects_half_the_budget():
+    """스키마 기본값·법칙 서명 기본값은 한 값이어야 한다 — derive가 서명을, 올림이 스키마 상수를 읽는다."""
+    from claw.profile.derive import _law_default_headroom_frac
+    from claw.profile.schema import DEFAULT_ALLOC_HEADROOM_FRAC
+
+    assert _law_default_headroom_frac() == DEFAULT_ALLOC_HEADROOM_FRAC == 0.07
+    doc = load_example()
+    assert doc["law"]["alloc"]["headroom_frac"] == 0.07  # 예제는 자기 값 완비 — 키를 문서에 적는다
+    doc["law"]["alloc"]["headroom_frac"] = 0.5  # 여유가 예산의 반 — 배분이 아니라 봉인
+    with pytest.raises(ProfileError, match="headroom_frac"):
+        validate_document(doc)
+
+
+def test_upgrade_fills_the_headroom_key_and_restamps_a_fresh_gain_basis():
+    """키 없는 v3 문서: 기본값을 채우고, 신선했던 확정 표의 기준 지문을 옛 정의로 증명해 다시 찍는다."""
+    from claw.profile.document import load_showcase
+    from claw.profile.fingerprint import gain_tables_basis_fingerprint
+    from claw.profile.schema import effective_document
+
+    cur = load_showcase()
+    eff = effective_document(cur)
+    shadow = copy.deepcopy(eff)
+    shadow["law"]["alloc"] = {k: v for k, v in shadow["law"]["alloc"].items() if k != "headroom_frac"}
+    old = copy.deepcopy(cur)
+    del old["law"]["alloc"]["headroom_frac"]  # 키 도입 이전 문서 모양
+    old["law"]["gain_tables"]["provenance"]["basis_fingerprint"] = gain_tables_basis_fingerprint(shadow)
+
+    new, notes = upgrade_document(old)
+    assert new["law"]["alloc"]["headroom_frac"] == 0.07
+    assert new["law"]["gain_tables"]["provenance"]["basis_fingerprint"] == gain_tables_basis_fingerprint(eff)
+    msgs = {n["path"]: n["message"] for n in notes}
+    assert "기본값" in msgs["/law/alloc/headroom_frac"]
+    assert "다시 찍었다" in msgs["/law/gain_tables"]
+    # 채운 문서는 검증을 넘고, 확정 표는 낡지 않았다(조립이 표를 쓴다)
+    assert build_profile(validate_document(new)).confirmed_gain_tables() is not None
+    # 멱등 — 키가 있으면 그대로, 알림 없음
+    again, notes2 = upgrade_document(new)
+    assert again == new and notes2 == []
+
+
+def test_upgrade_leaves_a_stale_gain_basis_alone_when_filling_the_headroom_key():
+    from claw.profile.document import load_showcase
+
+    old = load_showcase()
+    del old["law"]["alloc"]["headroom_frac"]
+    old["law"]["gain_tables"]["provenance"]["basis_fingerprint"] = "0000000000000000"  # 확정 뒤 문서가 바뀐 표
+    new, notes = upgrade_document(old)
+    assert new["law"]["gain_tables"]["provenance"]["basis_fingerprint"] == "0000000000000000"
+    msgs = {n["path"]: n["message"] for n in notes}
+    assert "낡음" in msgs["/law/gain_tables"]
+
+
+def test_v2_upgrade_also_fills_the_headroom_key():
+    v2 = _v2()
+    del v2["law"]["alloc"]["headroom_frac"]  # 진짜 v2에는 없던 키(_v2는 예제에서 되돌려 남아 있다)
+    new, notes = upgrade_document(v2)
+    assert new["law"]["alloc"]["headroom_frac"] == 0.07
+    assert any(n["path"] == "/law/alloc/headroom_frac" for n in notes)
+    validate_document(new)
+
+
+def test_document_warnings_flag_a_headroom_below_the_dyn_reserve_line():
+    def head_warns(doc):
+        return [w for w in document_warnings(validate_document(doc)) if w["path"] == "/law/alloc/headroom_frac"]
+
+    doc = load_example()
+    assert head_warns(doc) == []  # 기본값끼리는 경고 없음(판정선 0.05 < 여유 0.07)
+    doc["criteria"] = {"authority": {"dyn_reserve_min_frac": 0.08}}  # 판정선이 여유 위 — 구조적 실패 가능
+    [warn] = head_warns(doc)
+    assert "dyn_reserve_min_frac" in warn["message"] and warn["variant"] is None
+    # 등호도 경고다 — 엘레본이 배분 상한에 붙는 순간 가용 동적 여유가 정확히 r이라 판정선 위에 앉고 부동소수
+    # (0.04999…)가 합격을 가른다. 바로 그 일이 r = 0.05에서 쇼케이스 결함 시연을 물었다(실패 케이스가 배율마다 뒤집혔다)
+    doc["criteria"] = {"authority": {"dyn_reserve_min_frac": 0.07}}
+    [warn] = head_warns(doc)
+    assert "이하" in warn["message"]
+    doc["criteria"] = {"authority": {"dyn_reserve_min_frac": 0.069}}
+    assert head_warns(doc) == []
+    # 배분이 없으면 이 경고도 없다 — 여유는 배분의 속성이다
+    doc["law"]["alloc"] = None
+    doc["law"]["gain_tables"] = None  # 확정 표는 alloc 없이 될 수 있으나 예제 규약대로 함께 비운다
+    assert head_warns(doc) == []
