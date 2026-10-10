@@ -20,10 +20,11 @@
 
 원자료에는 **있을 수 없는 지형**이 섞여 있다 — 만·저수지·해안의 물 위에서 레이더 표고가 튄
 자리다. 고흥 일대 실측: 폭 1픽셀(31 m)에 높이 300~500 m인 바늘, 만 한가운데의 1픽셀 폭
-벽(10픽셀 길이, 최고 314 m), 해안의 2×2 덩어리, 저수지 수면(125 m) 위의 0 m 구멍. 화면에서는
-바다와 논 위에 선 검은 첨탑으로 보였다. 그래서 표본을 뜨기 **전에** 원본 픽셀에서 정리한다
-(`despike` — 판정식과 실측 근거는 그 절의 주석). 몇 픽셀을 바꿨는지는 헤더 `cleaning`에
-남고 화면 캡션이 그 수를 말한다.
+벽(10픽셀 길이, 최고 314 m), 해안의 2×2 덩어리, 저수지 수면(125 m) 위의 0 m 구멍, 그리고 해안
+잡음 지대의 벽·도랑 짝(89 m 옆 0 m)과 높이 30~45 m의 좁은 원뿔. 화면에서는 바다와 논 위에 선
+검은 첨탑, 해안 끝의 원뿔과 분화구로 보였다. 그래서 표본을 뜨기 **전에** 원본 픽셀에서 정리한다
+(`clean_elevations` — 창 중앙값 판정 `despike`에 꼴로 잡는 세 단계를 잇는다; 판정식과 실측 근거는
+각 절의 주석). 단계별로 몇 픽셀을 바꿨는지는 헤더 `cleaning`에 남고 화면 캡션이 그 수를 말한다.
 
 ## 의존성
 
@@ -41,7 +42,8 @@ Pillow·GDAL·rasterio를 들이면 폐쇄망 반입 심사 대상이 늘고, �
 
     표고 = offset + raw * scale,  raw == nodata(65535) 이면 **결측**
 
-    header.cleaning   첨탑 정리 기록(방법·단계·바꾼 원본 픽셀 수). 없으면 정리 전에 구운 팩이다
+    header.cleaning   첨탑 정리 기록(방법·단계·바꾼 원본 픽셀 수). 없으면 정리 전에 구운 팩이고,
+                      spires_px가 없으면 꼴 단계 전(v1.86)에 구운 팩이다
 
 사용:
     python3 scripts/terrain/build_terrain.py \\
@@ -172,8 +174,9 @@ def decode_png(raw):
 # **해수면 자르기 뒤에** 정리한다. 화면이 그리는 것이 자른 표고이고, 바다(0 m) 위의 첨탑은
 # 산포 0인 평면 위에 서 있어 가장 확실하게 걸린다.
 #
-# 문턱 아래는 남긴다 — 바닥 20 m보다 낮은 1픽셀 돌출(바다 위 17 m 암초 같은 것)은 실제일 수
-# 있다. 정리 뒤 8이웃보다 30 m 넘게 솟은 픽셀은 고흥 팩 전체에서 1개다(정리 전 20개).
+# 이 판정은 문턱 아래를 남긴다 — 바닥 20 m보다 낮은 1픽셀 돌출(바다 위 17 m 점 같은 것). 그것은 아래
+# 「꼴로 잡는 결함」의 좁은 기둥 단계가 맡는다: 31 m 자료로는 그 크기의 실제 암초와 잡음을 가를 수 없고,
+# 그대로 그리면 바다 위 바늘이 된다. 폭 3칸(약 95 m) 넘는 섬은 거기서도 남는다.
 # 단 **지운 것에 맞닿은 꼬리**는 낮은 문턱(8 m)으로 한 번 더 본다(`DESPIKE_TAIL`) — 만의 벽을
 # 지우고 나니 벽 끝 12 m가 바다 위 작은 섬으로 남았다. 지운 픽셀의 8이웃만 보므로 홀로 선
 # 실제 암초는 이 단계에 닿지 않는다(경계 문턱 두 개를 쓰는 캐니 윤곽선의 이력 판정과 같다).
@@ -293,6 +296,189 @@ def despike(grid, width, height, stages=DESPIKE_STAGES, tail=DESPIKE_TAIL):
     return changed, per_stage
 
 
+# ---- 꼴로 잡는 결함 — 벽·도랑, 좁은 기둥, 잡음 지대
+#
+# 위 판정(창 중앙값 이탈 > 산포의 5배)은 **산포가 큰 자리에서 눈이 먼다.** 해안의 잡음 지대에는
+# 폭 1픽셀 벽(89 m)과 바로 옆 0 m 도랑이 짝으로 붙어 있는데, 도랑이 창의 산포를 키워 벽이 문턱을
+# 빠져나갔다. 화면에서는 해안 끝의 뾰족한 원뿔과 바위색 분화구로 보였다(사용자 지적 「첨탑이 왜
+# 남아 있나」, 2026-10-10). 그래서 산포가 아니라 **꼴**로 잡는 세 단계를 뒤에 잇는다:
+#
+#   벽·도랑   가로지르는 방향의 2차 차분이 35 m를 넘으면 — 산지 실측 최대 31.5 m(99.99 백분위
+#             19.5 m), 결함은 100 m까지. 높이 70 m 넘는 절벽만 이 문턱에 닿는다(가장자리 차분이
+#             단차의 절반) — 30 m 격자의 원자료에는 그런 절벽이 없다.
+#   좁은 기둥 둘레 고리(5×5 테두리)보다 솟았는데 5×5 창 안에서 솟은 칸이 4칸 이하이고(폭 1~2칸),
+#             고리는 평평하다 — 평지·바다 위에 혼자 선 기둥. 폭 3칸(약 95 m) 넘는 섬은 남는다. 처음엔
+#             「3×3 중앙값보다 솟았나」로 좁음을 쟀는데, 정사각 섬의 귀퉁이가 그 판정에 걸려 되풀이할수록
+#             섬이 통째로 깎였다(시험이 잡았다). 둘레가 기운 산지는 고리가 평평하지 않아 안 걸린다.
+#   잡음 지대 위 단계들이 고친 자리와 저지대의 들쭉날쭉한 픽셀 둘레 3픽셀(약 95 m)만 5×5 중앙값으로 두 번
+#             다듬는다 — 결함 옆의 잔해. 「들쭉날쭉」은 5×5 창의 고주파(|z − 3×3 중앙값|)의 **중앙값**이
+#             3 m를 넘는 것이다 — 깨끗한 계단(섬 가장자리)은 귀퉁이 몇 칸만 고주파라 중앙값이 0이다.
+#             처음엔 「3×3 중앙값과 10 m 넘게 다르다」로 씨앗을 뿌렸는데 작은 섬의 귀퉁이가 걸려 섬이
+#             통째로 다듬어졌다(시험이 잡았다). 결함이 없는 곳은 원본 그대로다.
+#
+# 기둥·잡음 지대는 **저지대에서만**(둘레 고리 중앙값 60 m 아래) 돈다. 해안 잡음이 사는 곳이 거기고,
+# 산지에서 돌리면 실제 언덕 꼭대기가 근처 웅덩이를 따라 다듬어졌다(고흥 외곽 223 m 봉우리가 10 m
+# 깎인 것을 보고 막았다). 산지의 결함은 위의 창 중앙값 판정이 이미 잡는다(저수지 수면 위 354 m).
+
+WALL_D2_M = 35.0
+SPIRE_REL_M = 6.0          # 둘레 고리보다 이만큼은 솟아야(파여야) 기둥(구멍)이다
+SPIRE_MAX_PX = 4           # 5×5 창에서 「솟은 칸」(고리보다 기둥 높이의 절반 넘게)이 이 이하면 좁다
+SPIRE_FLAT_RATIO = 0.25    # 고리의 MAD가 기둥 높이의 이 비율 아래 — 둘레가 평평하다
+ZONE_ROUGH_M = 3.0         # 잡음 지대 씨앗 — 5×5 창의 고주파 중앙값이 이만큼 넘는 픽셀이
+SPIKY_LOW_M = 60.0         # 둘레 고리 중앙값이 이 아래인 저지대에 있으면
+ZONE_RADIUS_PX = 3
+ZONE_PASSES = 2
+_DIRS = ((-1, 0, 1, 0), (0, -1, 0, 1), (-1, -1, 1, 1), (-1, 1, 1, -1))   # 세로·가로·두 대각
+
+
+def _median(vals):
+    """중앙값 — 짝수 개면 가운데 둘의 평균(numpy와 같은 정의). vals는 제자리에서 정렬된다."""
+    vals.sort()
+    n = len(vals)
+    m = n // 2
+    return vals[m] if n % 2 else 0.5 * (vals[m - 1] + vals[m])
+
+
+def _at(grid, width, height, r, c):
+    ri = 0 if r < 0 else (height - 1 if r >= height else r)
+    ci = 0 if c < 0 else (width - 1 if c >= width else c)
+    return grid[ri * width + ci]
+
+
+def _d2_across(grid, width, height, i):
+    """네 방향 2차 차분 중 절댓값이 가장 큰 것 — 벽이면 +, 도랑이면 −."""
+    r, c = divmod(i, width)
+    z = grid[i]
+    best = 0.0
+    for dr1, dc1, dr2, dc2 in _DIRS:
+        v = z - 0.5 * (_at(grid, width, height, r + dr1, c + dc1)
+                       + _at(grid, width, height, r + dr2, c + dc2))
+        if abs(v) > abs(best):
+            best = v
+    return best
+
+
+def _med3(grid, width, height, r, c):
+    return _median([_at(grid, width, height, r + dr, c + dc)
+                    for dr in (-1, 0, 1) for dc in (-1, 0, 1)])
+
+
+def _ring(grid, width, height, r, c):
+    """5×5에서 가운데 3×3을 뺀 고리 16칸의 (중앙값, MAD)."""
+    vals = [_at(grid, width, height, r + dr, c + dc)
+            for dr in range(-2, 3) for dc in range(-2, 3) if max(abs(dr), abs(dc)) == 2]
+    med = _median(vals[:])
+    return med, _median([abs(v - med) for v in vals])
+
+
+def remove_walls(grid, width, height, seeds):
+    """1픽셀 벽·도랑 — 가로지르는 2차 차분이 WALL_D2_M을 넘는 픽셀을, 걸린 픽셀을 뺀 5×5 중앙값으로.
+
+    걸린 픽셀끼리는 서로의 중앙값에 넣지 않는다 — 벽과 도랑이 짝이라 서로를 끌어당긴다."""
+    changed = set()
+    cand = _neighborhood(seeds, width, height, 1)
+    for _ in range(DESPIKE_MAX_PASSES):
+        flagged = {i for i in cand if abs(_d2_across(grid, width, height, i)) > WALL_D2_M}
+        if not flagged:
+            break
+        repl = {}
+        for i in flagged:
+            r, c = divmod(i, width)
+            vals = []
+            for rr in range(r - 2, r + 3):
+                ri = 0 if rr < 0 else (height - 1 if rr >= height else rr)
+                for cc in range(c - 2, c + 3):
+                    ci = 0 if cc < 0 else (width - 1 if cc >= width else cc)
+                    j = ri * width + ci
+                    if j not in flagged:
+                        vals.append(grid[j])
+            if vals:
+                repl[i] = _median(vals)
+        if not repl:
+            break
+        for i, m in repl.items():  # 회차 단위 갱신
+            grid[i] = m
+        changed.update(repl)
+        cand = _neighborhood(repl, width, height, 2)
+    return changed
+
+
+def remove_spires(grid, width, height, seeds):
+    """평지·바다 위의 좁은 기둥(구멍) — 둘레 고리 중앙값으로. 판정은 위 「꼴로 잡는 결함」 절."""
+    changed = set()
+    cand = _neighborhood(seeds, width, height, 2)
+    for _ in range(DESPIKE_MAX_PASSES):
+        repl = {}
+        for i in cand:
+            r, c = divmod(i, width)
+            z = grid[i]
+            ring, rmad = _ring(grid, width, height, r, c)
+            if ring >= SPIKY_LOW_M:
+                continue  # 산지 — 위 절의 끝 문단
+            rel = z - ring
+            if abs(rel) <= SPIRE_REL_M or rmad >= SPIRE_FLAT_RATIO * abs(rel):
+                continue
+            half = ring + 0.5 * rel  # 기둥(구멍)의 허리 높이 — 이보다 솟은(파인) 칸을 센다
+            win = _window_values(grid, width, height, r, c, 2)
+            n_out = sum(1 for v in win if (v > half if rel > 0 else v < half))
+            if n_out <= SPIRE_MAX_PX:
+                repl[i] = ring
+        if not repl:
+            break
+        for i, m in repl.items():
+            grid[i] = m
+        changed.update(repl)
+        cand = _neighborhood(repl, width, height, 2)
+    return changed
+
+
+def smooth_zones(grid, width, height, fixed, screened):
+    """결함 둘레만 다듬는다 — 고친 픽셀과 저지대의 뾰족한 픽셀에서 ZONE_RADIUS_PX 안을 5×5 중앙값으로.
+    돌려주는 것은 다듬은 지대의 픽셀 집합."""
+    seeds = set(fixed)
+    hf = {}  # |z − 3×3 중앙값| 캐시 — 이웃 창들이 같은 칸을 여러 번 묻는다
+
+    def high_freq(rr, cc):
+        rr = 0 if rr < 0 else (height - 1 if rr >= height else rr)
+        cc = 0 if cc < 0 else (width - 1 if cc >= width else cc)
+        k = rr * width + cc
+        if k not in hf:
+            hf[k] = abs(grid[k] - _med3(grid, width, height, rr, cc))
+        return hf[k]
+
+    for i in screened:
+        r, c = divmod(i, width)
+        rough = _median([high_freq(r + dr, c + dc) for dr in range(-2, 3) for dc in range(-2, 3)])
+        if rough > ZONE_ROUGH_M and _ring(grid, width, height, r, c)[0] < SPIKY_LOW_M:
+            seeds.add(i)
+    zone = {i for i in _neighborhood(seeds, width, height, ZONE_RADIUS_PX)
+            if _ring(grid, width, height, *divmod(i, width))[0] < SPIKY_LOW_M}   # 저지대만
+    for _ in range(ZONE_PASSES):
+        repl = {}
+        for i in zone:
+            r, c = divmod(i, width)
+            repl[i] = _median(_window_values(grid, width, height, r, c, 2))
+        for i, m in repl.items():  # 회차 단위 갱신
+            grid[i] = m
+    return zone
+
+
+def clean_elevations(grid, width, height):
+    """정리 전 과정 — 창 중앙값(despike) → 벽·도랑 → 좁은 기둥 → 잡음 지대. 제자리에서.
+
+    돌려주는 것: (바뀐 픽셀 집합, 단계별 수 dict). 순서가 의미를 갖는다 — 벽을 지워야 그 옆 기둥의
+    둘레 고리가 평평해져 기둥 판정에 걸리고, 잡음 지대는 앞 단계들이 찾은 자리에서 자란다."""
+    seeds = _screen(grid, width, height, 2.0)
+    changed, per_stage = despike(grid, width, height)
+    walls = remove_walls(grid, width, height, seeds | changed)
+    spires = remove_spires(grid, width, height, seeds | changed | walls)
+    fixed = changed | walls | spires
+    zone = smooth_zones(grid, width, height, fixed, seeds)
+    return fixed | zone, {
+        "despike": per_stage, "walls": len(walls), "spires": len(spires), "zone_px": len(zone),
+    }
+
+
 # ---------------------------------------------------------------- 타일 격자
 
 def lonlat_to_tile_frac(lon_deg, lat_deg, z):
@@ -384,12 +570,15 @@ class TileSource:
                         z = (row[o] * 256 + row[o + 1] + row[o + 2] / 256.0) - 32768.0
                         grid[base + px] = max(z, SEA_LEVEL)  # _px와 같은 자르기
         t0 = time.monotonic()
-        changed, per_stage = despike(grid, w, h)
+        changed, stages = clean_elevations(grid, w, h)
         self.window = (gx0, gy0, w, h, grid)
         return {
-            "method": "despike — 창 중앙값 이탈 > max(바닥, k·1.4826·MAD)이면 중앙값으로",
+            "method": "창 중앙값·MAD 첨탑 → 벽·도랑(2차 차분) → 좁은 기둥 → 잡음 지대 다듬기",
             "replaced_px": len(changed),
-            "per_stage": per_stage,
+            "per_stage": stages["despike"],
+            "walls_px": stages["walls"],
+            "spires_px": stages["spires"],
+            "zone_px": stages["zone_px"],
             "stages": [{"window_px": k, "floor_m": f, "k_mad": m} for k, f, m in DESPIKE_STAGES],
             "tail": {"window_px": DESPIKE_TAIL[0], "floor_m": DESPIKE_TAIL[1],
                      "k_mad": DESPIKE_TAIL[2], "scope": "지운 픽셀의 8이웃"},
@@ -553,8 +742,9 @@ def main():
     gx0, gy0, gx1, gy1 = sample_window(tiers, origin, args.zoom)
     print(f"표고 창: {gx1 - gx0 + 1}×{gy1 - gy0 + 1} px — 읽고 첨탑을 정리하는 중", flush=True)
     cleaning = src.prepare(gx0, gy0, gx1, gy1)
-    print(f"  첨탑 정리: 원본 픽셀 {cleaning['replaced_px']}개를 창 중앙값으로 바꿨다 "
-          f"(단계별 {cleaning['per_stage']}, {cleaning['seconds']} s)", flush=True)
+    print(f"  첨탑 정리: 원본 픽셀 {cleaning['replaced_px']}개 — 바늘 {sum(cleaning['per_stage'])} "
+          f"(단계별 {cleaning['per_stage']}) · 벽·도랑 {cleaning['walls_px']} · 좁은 기둥 {cleaning['spires_px']} "
+          f"· 해안 잡음 지대 {cleaning['zone_px']} ({cleaning['seconds']} s)", flush=True)
 
     metas, blobs = [], []
     for name, radius, step in tiers:

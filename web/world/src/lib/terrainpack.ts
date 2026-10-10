@@ -33,9 +33,14 @@ export interface Tier extends MaskTier {
 
 /** 굽는 스크립트의 첨탑 정리 기록 — `scripts/terrain/build_terrain.py`의 `prepare`가 쓴다. */
 export interface TerrainCleaning {
-  /** 창 중앙값으로 바꾼 원본 픽셀 수 */
+  /** 정리가 손댄 원본 픽셀 수(모든 단계의 합집합) */
   replaced_px?: number;
+  /** 창 중앙값 단계별 교체 수 — 첫 셋이 강한 단계, 마지막이 꼬리 */
   per_stage?: number[];
+  /** 꼴로 잡는 단계(v1.88~) — 벽·도랑, 좁은 기둥, 잡음 지대 다듬기. 옛 팩에는 없다 */
+  walls_px?: number;
+  spires_px?: number;
+  zone_px?: number;
 }
 
 export interface TerrainPack {

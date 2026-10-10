@@ -43817,8 +43817,15 @@ function buildTerrain(pack, strideFor2) {
   notes.push(
     "해안선은 표고 0의 **경계 연결 성분**으로 판정했습니다 — 해수면 높이의 간척지·저지대는 육지로 남습니다. 표고만으로는 활주로와 먼바다를 가릴 수 없습니다."
   );
-  const replaced = pack.cleaning?.replaced_px;
-  notes.push(typeof replaced === "number" ? `원자료 첨탑 정리: 만·해안·저수지 물 위에 튄 표고 ${replaced}픽셀(폭 30 m에 높이 수백 m인 바늘 등)을 이웃 중앙값으로 바꿨습니다 — 산지의 봉우리는 건드리지 않습니다.` : "이 지형 팩은 첨탑 정리 전에 구웠습니다 — 만·해안에 바늘 같은 첨탑이 보이면 scripts/terrain/build_terrain.py로 다시 구우십시오.");
+  const cl2 = pack.cleaning;
+  const needles = cl2?.per_stage?.reduce((a, b) => a + b, 0);
+  if (cl2 == null || typeof needles !== "number") {
+    notes.push("이 지형 팩은 첨탑 정리 전에 구웠습니다 — 만·해안에 바늘 같은 첨탑이 보이면 scripts/terrain/build_terrain.py로 다시 구우십시오.");
+  } else if (typeof cl2.spires_px !== "number") {
+    notes.push(`원자료 첨탑 정리(1차): 물 위에 튄 표고 ${needles}픽셀을 이웃 중앙값으로 바꿨습니다. 해안의 낮은 원뿔·벽은 이 팩에 남아 있습니다 — scripts/terrain/build_terrain.py로 다시 구우십시오.`);
+  } else {
+    notes.push(`원자료 정리: 물 위 바늘 ${needles}픽셀, 1픽셀 벽·도랑 ${cl2.walls_px ?? 0}, 평지·바다 위 좁은 기둥 ${cl2.spires_px}, 그 둘레 해안 잡음 지대 ${cl2.zone_px ?? 0}픽셀을 다듬었습니다 — 산지와 폭 95 m 넘는 섬은 건드리지 않습니다.`);
+  }
   notes.push(
     "지형 색은 꼴(경사·표고·볼록도·해안 거리)로 판정한 지표 피복 — 논밭·숲·마을·갯벌·암반 — 의 절차 무늬이며 영상지도가 아닙니다. 필지·지붕·나무 하나하나는 표시용이고 실제 지표 피복이 아닙니다. 해안 둘레 바다의 낮은 턱(원자료가 얕은 바다를 거친 표고로 메운 자리)은 갯벌로 칠합니다."
   );

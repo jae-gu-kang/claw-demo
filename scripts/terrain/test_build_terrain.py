@@ -56,12 +56,16 @@ def test_one_pixel_wall_in_the_sea_is_removed_with_its_low_tail():
     assert per_stage[-1] > 0, "꼬리 단계가 한 일이 없다 — 강한 단계가 꼬리까지 지웠다면 시험 모양을 다시 볼 것"
 
 
-def test_isolated_low_rock_in_the_sea_is_kept():
-    # 홀로 선 12 m 암초 — 지운 것과 닿지 않으므로 꼬리 단계도 보지 않는다(실제일 수 있다)
+def test_isolated_low_point_in_the_sea_is_left_by_despike_and_taken_by_the_shape_stage():
+    # 홀로 선 12 m 점 — 창 중앙값 판정(despike)은 바닥 문턱 아래라 남기고, 꼬리 단계도 안 본다(지운 것과
+    # 안 닿는다). 꼴 단계의 좁은 기둥 판정이 맡는다: 31 m 자료로는 그 크기의 암초와 잡음을 가를 수 없고
+    # 그리면 바다 위 바늘이다. 폭 3칸 넘는 섬은 남는다(test_islet_three_pixels_wide_is_kept).
     rows = flat(21, 21, 0.0)
     rows[10][10] = 12.0
     g, w, _, changed, _ = run(rows)
     assert not changed and at(g, w, 10, 10) == 12.0
+    g2, w2, _, _, stages = clean(rows)
+    assert stages["spires"] == 1 and at(g2, w2, 10, 10) == 0.0
 
 
 def test_two_by_two_cluster_on_flat_ground_is_removed():
@@ -158,3 +162,109 @@ def test_candidate_shortcut_matches_full_scan():
         bt.despike(g1, w1, h1, tail=(5, float("inf"), 5.0))
         brute_force(g2, w1, h1, bt.DESPIKE_STAGES)
         assert g1 == g2
+
+
+# ---- 꼴로 잡는 결함 (clean_elevations) — 1차 판정(despike)이 산포에 눈이 머는 자리
+
+
+def clean(rows):
+    g, w, h = grid_of(rows)
+    changed, stages = bt.clean_elevations(g, w, h)
+    return g, w, h, changed, stages
+
+
+def slope_plane(w, h, z0=20.0, dz=1.2):
+    return [[z0 + dz * c + 0.6 * r for c in range(w)] for r in range(h)]
+
+
+# 고흥 원자료(1차 정리 뒤) 해안 잡음 지대 — n=4300·e=−2000 둘레 원본 픽셀, 북쪽이 위. 왼쪽이 바다(0),
+# 가운데 열의 89·89·76·43이 폭 1픽셀 벽이고 바로 왼쪽 0이 도랑이다. 화면에서는 해안 끝의 뾰족한 원뿔이었다.
+COAST_NOISE = [
+    [0, 0, 1, 5, 10, 17, 0, 76, 44, 53, 56, 56, 55],
+    [0, 0, 1, 6, 11, 17, 32, 34, 50, 58, 63, 64, 62],
+    [0, 0, 2, 6, 0, 89, 37, 28, 51, 60, 68, 74, 72],
+    [0, 0, 2, 6, 0, 89, 39, 28, 50, 59, 70, 79, 80],
+    [0, 1, 3, 7, 0, 76, 39, 29, 48, 57, 68, 78, 84],
+    [0, 1, 4, 8, 0, 43, 32, 31, 43, 53, 63, 72, 81],
+    [0, 2, 5, 8, 0, 24, 24, 28, 38, 48, 56, 65, 74],
+    [1, 3, 5, 9, 16, 10, 17, 25, 33, 42, 50, 58, 67],
+    [1, 3, 6, 24, 14, 9, 15, 22, 29, 37, 45, 54, 62],
+    [2, 4, 7, 11, 11, 12, 15, 19, 25, 33, 41, 50, 59],
+    [3, 5, 8, 9, 13, 18, 19, 20, 24, 31, 39, 48, 57],
+]
+
+
+def test_real_coastal_wall_is_removed_where_despike_is_blind():
+    # 도랑과 바다가 창의 산포를 키워 1차 판정을 빠져나간다 — 먼저 그것을 확인해 이 시험이 새 단계를 본다는 것을 못박는다
+    rows = [[float(v) for v in row] for row in reversed(COAST_NOISE)]   # 행 0 = 남
+    g0, w, h = grid_of(rows)
+    bt.despike(g0, w, h)
+    wall = [(len(rows) - 1 - r, 5) for r in (2, 3, 4)]   # 그림의 89·89·76
+    assert all(at(g0, w, r, c) >= 76.0 for r, c in wall), "1차 판정이 벽을 잡았다면 시험 모양을 다시 볼 것"
+    g, w, h, changed, stages = clean(rows)
+    assert stages["walls"] + stages["spires"] > 0
+    for r, c in wall:
+        assert at(g, w, r, c) < 45.0, f"벽이 남았다: {at(g, w, r, c):.1f} m"
+    # 바다 쪽(왼쪽 세 열)은 그대로 낮고, 오른쪽 비탈의 실제 땅은 크게 안 바뀐다
+    assert max(at(g, w, r, c) for r in range(h) for c in range(3)) < 10.0
+    assert abs(at(g, w, len(rows) - 1 - 4, 12) - 84.0) < 15.0
+
+
+def test_narrow_low_spire_on_flat_lowland_is_removed():
+    # 바닥 문턱(20 m) 아래라 1차 판정이 남기는 높이 — 평지 위에 혼자 선 폭 1~2칸 기둥
+    rows = flat(21, 21, 8.0)
+    rows[10][10], rows[10][11] = 24.0, 19.0
+    g, w, _, _, stages = clean(rows)
+    assert stages["spires"] > 0
+    assert max(g) < 9.0
+
+
+def test_islet_three_pixels_wide_is_kept():
+    # 폭 3칸(약 95 m) 이상은 3×3 중앙값이 그 높이를 따라가 기둥으로 안 본다 — 실제 작은 섬
+    rows = flat(21, 21, 0.0)
+    for r in range(9, 12):
+        for c in range(9, 12):
+            rows[r][c] = 14.0
+    rows[10][10] = 18.0
+    g, w, _, _, _ = clean(rows)
+    assert at(g, w, 10, 10) >= 14.0 and at(g, w, 9, 9) == 14.0
+
+
+def test_real_knoll_in_highland_is_untouched_beside_a_fixed_artifact():
+    # 고흥 외곽 실측 — 125 m 평탄지의 66 m 구멍·167 m 바늘 짝 옆 223 m 언덕 꼭대기가 잡음 지대 다듬기에
+    # 10 m 깎였었다. 새 단계는 저지대(둘레 60 m 아래)에서만 돈다.
+    rows = [[125.0] * 31 for _ in range(31)]
+    knoll = cone(31, 0.25, 225.0)
+    for r in range(31):
+        for c in range(31):
+            rows[r][c] = max(rows[r][c], knoll[r][c])
+    rows[3][27], rows[4][28] = 66.0, 167.0   # 평탄지 쪽 — 언덕 비탈 밖
+    assert knoll[3][27] < 125.0 and knoll[4][28] < 125.0
+    top_before = [rows[r][c] for r in range(12, 19) for c in range(12, 19)]
+    g, w, _, _, _ = clean(rows)
+    top_after = [at(g, w, r, c) for r in range(12, 19) for c in range(12, 19)]
+    assert top_after == top_before, "언덕 꼭대기가 다듬어졌다"
+    assert 120.0 < at(g, w, 3, 27) < 130.0 and 120.0 < at(g, w, 4, 28) < 130.0, "결함 짝은 고쳐진다"
+
+
+def test_noisy_coastal_zone_is_smoothed_only_near_the_defects():
+    # 결함 둘레 3칸만 다듬고, 멀리 떨어진 저지대의 고른 잡음(±2 m 밭두렁)은 원본 그대로다
+    rows = flat(41, 41, 5.0)
+    for r in range(41):
+        for c in range(41):
+            rows[r][c] += 1.5 if (r * 7 + c * 3) % 5 == 0 else 0.0
+    rows[8][8], rows[8][9], rows[9][8] = 31.0, 0.0, 22.0   # 해안 잡음 덩어리
+    far = (33, 33)
+    before_far = rows[far[0]][far[1]]
+    g, w, _, _, stages = clean(rows)
+    assert stages["zone_px"] > 0
+    assert at(g, w, *far) == before_far
+    assert max(at(g, w, r, c) for r in range(5, 12) for c in range(5, 12)) < 9.0
+
+
+def test_clean_is_idempotent_enough_and_deterministic():
+    rows = slope_plane(30, 30)
+    rows[10][10], rows[10][9], rows[20][5] = 95.0, 0.0, 40.0
+    g1, w, h, _, s1 = clean(rows)
+    g2, _, _, _, s2 = clean(rows)
+    assert g1 == g2 and s1 == s2   # 같은 입력이면 같은 팩(data/README의 약속)
