@@ -57,7 +57,7 @@ export function objectiveFields({ objective = "min_change", weights = {}, smooth
 
 export function prescribeRequest(state, { resultId, evalResultId, cases,
                                           knobs, confirm, tSettle,
-                                          tStep, tHold, fingerprint, objective } = {}) {
+                                          tStep, tHold, fingerprint, objective, allowUnmet } = {}) {
   // 판정선은 싣지 않는다 — 서버가 선택 기체의 기준으로 판정하고 요청 기준은 거절한다(v1.54)
   const body = { ...structuralRequest(state), result_id: resultId, cases,
                  ...(objective ?? {}) };  // objectiveFields의 결과 — 없으면 서버 기본(최소 수정)
@@ -68,6 +68,8 @@ export function prescribeRequest(state, { resultId, evalResultId, cases,
   if (tStep != null) body.t_step = tStep;
   if (tHold != null) body.t_hold = tHold;
   if (fingerprint) body.fingerprint = fingerprint;
+  // 「못 맞춤」 동의(v1.93) — 질문 상자의 [예]만 싣는다. 안 보내면 서버 기본(false): 목표 지표를 못 맞추면 확인 런 없이 묻는다
+  if (allowUnmet) body.allow_unmet = true;
   return body;
 }
 
@@ -88,7 +90,105 @@ export function normalizePrescribe(payload) {
     sweepFingerprint: payload?.sweep_fingerprint ?? null,
     criteriaFingerprint: payload?.criteria_fingerprint ?? null,
     sweepResultId: payload?.sweep_result_id ?? null,
+    // 단계화 처방(v1.93) — 옛 결과엔 없다: null·[]·false로 두고 지어내지 않는다
+    feasibility: payload?.feasibility ?? null,
+    plans: payload?.plans ?? [],
+    needsConsent: payload?.needs_consent === true,
+    allowUnmet: payload?.allow_unmet === true,
   };
+}
+
+// ── 단계화 처방 (04 §7.3, v1.93) — 하드·목표 두 층, 「못 맞춤」 보고, 게인 수별 안 ─────────────────
+// 층 이름 — 엔진 TIER_LABEL과 같은 말
+export const TIER_LABEL = {
+  goal: "목표까지 충족", nonregress: "하드 충족·목표 퇴행 금지", hard: "하드만 충족(목표 퇴행 감수)",
+  hard_boundary: "모델 예측 미달 — 확인 런으로 판정",
+};
+
+/** 못 맞춘 지표를 지표별로 묶는다 — [{metric, cases:[…]}] (케이스는 처음 나온 순서, 중복 없음). */
+function unmetByMetric(violated) {
+  const by = new Map();
+  for (const v of violated ?? []) {
+    const cs = by.get(v.metric) ?? [];
+    if (!cs.includes(v.case)) cs.push(v.case);
+    by.set(v.metric, cs);
+  }
+  return [...by].map(([metric, cases]) => ({ metric, cases }));
+}
+
+/** 「못 맞춤」 배지 — {level, text, reason} | null. 하드부터 못 맞추면 level "model" — 선형 모델 예측으로 못 맞출 뿐이고
+ *  판정은 경계 안(hard_boundary)의 확인 런이 한다: 「못 맞춤(모델): …」 뒤에 그 확인 판정을 붙인다(안 돌았으면 그 사실).
+ *  목표 지표만 못 맞추면 "goal"(동의 질문이 뒤따른다). 배지 글은 지표·케이스 수만, 사유는 따로 싣는다. */
+export function unmetBadge(feasibility, plans = []) {
+  if (!feasibility) return null;
+  const hard = feasibility.hard?.solvable === false;
+  const goal = !hard && feasibility.goal?.solvable === false;
+  if (!hard && !goal) return null;
+  const groups = unmetByMetric(hard ? feasibility.hard?.violated : feasibility.goal?.violated);
+  const what = groups.length
+    ? groups.map((g) => `${g.metric}(${g.cases.length} 케이스)`).join(", ")
+    : (hard ? "하드 지표" : "목표 지표");
+  let text = `못 맞춤${hard ? "(모델)" : ""}: ${what}`;
+  if (hard) {
+    const c = (plans ?? []).find((p) => p.tier === "hard_boundary")?.confirm;
+    text += c ? ` · 확인 런 ${c.verdict}` : " · 확인 런 없음";
+  }
+  return { level: hard ? "model" : "goal", text,
+           metrics: groups.map((g) => g.metric), reason: feasibility.reason ?? null };
+}
+
+/** 동의 질문 — 목표 지표를 못 맞출 때만(하드부터 못 맞추면 null). 「예」는 allow_unmet으로 다시 보낸다.
+ *  퇴행 금지로도 풀리는 안이 없으면(nonregress_solvable === false — 안은 하드 층) 「퇴행을 감수한다」고 바꿔 묻는다 —
+ *  지키지 못할 약속(퇴행 금지)을 질문에 적지 않는다. */
+export function consentQuestion(feasibility) {
+  const b = unmetBadge(feasibility);
+  if (!b || b.level !== "goal") return null;
+  const names = b.metrics.length ? b.metrics.join("·") : "목표 지표";
+  const keep = feasibility.goal?.nonregress_solvable === false
+    ? "퇴행 금지로도 못 지켜 퇴행을 감수합니다" : "퇴행 금지로만 지킵니다";
+  return `그래도 복수 게인 튜닝을 할까요? (${names}는 ${keep})`;
+}
+
+/** 지표 하나의 최악 케이스 예측 — 한계 방향(above_is_bad)으로 가장 나쁜 케이스. 한계를 모르면 null. */
+function worstPredicted(predicted, metric, lim) {
+  let worst = null;
+  for (const [c, ms] of Object.entries(predicted ?? {})) {
+    const v = ms?.[metric];
+    if (!Number.isFinite(v)) continue;
+    const worse = !worst || (lim.above_is_bad ? v > worst.v : v < worst.v);
+    if (worse) worst = { c, v };
+  }
+  return worst;
+}
+
+/** 안 목록 → 표 행 [{rank, knobs, spans, tier, predicted, confirm, cost, pass}] — 문장은 전부 여기서 짓는다.
+ *  predicted는 지표마다 최악 케이스의 예측값과 한계(넘으면 ✗), confirm은 확인 런 판정·J(안 돌았으면 그 사실). */
+export function planRows(plans, feasibility) {
+  const limits = feasibility?.limits ?? {};
+  return (plans ?? []).map((p, i) => {
+    const preds = [];
+    for (const [m, lim] of Object.entries(limits)) {
+      const w = worstPredicted(p.predicted, m, lim);
+      if (!w) continue;
+      const ok = lim.above_is_bad ? w.v <= lim.limit + 1e-9 : w.v >= lim.limit - 1e-9;
+      preds.push(`${m} ${sig(w.v)}${ok ? "" : " ✗"} (한계 ${lim.limit}, @${w.c})`);
+    }
+    const c = p.confirm;
+    const confirm = !c ? "확인 런 없음"
+      : `${c.verdict}${Number.isFinite(c.J) ? ` · J ${Number(c.J).toPrecision(3)}` : ""}`
+        + (c.worst_case ? ` (최악 ${c.worst_case})` : "")
+        + (c.n_hard_fails ? ` · 하드 위반 ${c.n_hard_fails}건` : "");
+    return {
+      rank: i + 1,
+      knobs: [...(p.knobs ?? [])],
+      spans: Object.entries(p.spans ?? {}).map(([k, s]) => `${k} ${signed(s)}`).join(", "),
+      tier: TIER_LABEL[p.tier] ?? p.tier ?? "—",
+      predicted: preds.join(" · "),
+      confirm,
+      pass: c ? c.verdict === "PASS" : null,
+      cost: `게인 ${p.cost?.n_changed ?? p.knobs?.length ?? 0}개 · 최대 ${fmtPercent((p.cost?.max_pct ?? 0) / 100, 0)}`,
+    };
+  });
 }
 
 const pct = (s) => fmtPercent(Math.abs(s), Math.abs(s) < 0.1 ? 1 : 0);

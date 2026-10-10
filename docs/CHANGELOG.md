@@ -24,6 +24,40 @@ v0.75부터는 축이 하나뿐이라 이 혼동이 없다.
 
 ## 현행
 
+### v1.93 — 처방 단계화: 하드·목표 두 층, 「못 맞춤」을 숨기지 않고 묻고, 게인 수별 안을 나열한다
+
+사용자 방향(#21, 2026-10-10). **결함 원인**: 최소 수정 처방이 실패 지표를 하드 위반이 지목한 지표 ∪ 국소성 판정이 local·global인
+지표로 모아 **전부 ≤ 한계 하드 제약**으로 풀었다(`routes/influence.py` 승계 → `solve_joint(min_change, metrics=…)`). 쇼케이스 기체의
+alt_rms는 결함 전 설계에서도 문턱 10 위(격자 10점)라 조합 해가 늘 불가능 → SLSQP가 x ≈ 0 → 「바뀐 게인 0개」 → 확인 런 없음이었고,
+왜 못 풀었는지는 화면에 나오지 않았다(고도 kp 과대 ×17·19·21 전부 이 모양 — v1.87 「버린 후보」). k_hdot 시연은 해가 +20 % 탐색
+경계에 붙어 확인 런으로 살아남던 것이다.
+
+- **엔진**(`pipeline/prescribe.py`, 04 §7.3): `solve_tiered` — hard 층(하드 게이트 지표, ≤ 한계 제약)과 goal 층(주의 지표 —
+  한계 안이면 한계 유지, 이미 밖이면 퇴행 금지 + 개선 목적)을 갈라 ① hard만 ② hard + goal 한계 안 ③ 퇴행 금지 순으로 풀고
+  `feasibility`({hard, goal: {solvable, violated[{metric, case, base, limit, predicted, best_reachable}], nonregress_solvable},
+  reason, mode, limits})를 낸다. `best_reachable`은 그 항목만 탐색 상자 꼭짓점으로 민 선형 예측. `enumerate_plans` — 풀의
+  부분집합 크기 1…K(5)를 전부(풀 > 8이면 민감도 상위 8) 단계화 규칙으로 풀어 게인 수마다 최선 1안을 순위(층 → 목표 개선량 →
+  게인 수 → 최대 % → 이름)로 낸다. 퇴행 금지로 풀리는 안이 하나도 없을 때만 hard 층(퇴행 감수, `regressed`). 승계 없이 부르면
+  하드 게이트 지표가 hard, 추종 RMS가 goal이다(evaluate는 RMS로 Fail을 내지 않는다). `solve_joint`는 그대로(성능 목적).
+- **서버**(`/influence/prescribe`): 응답에 `feasibility` · `plans`(앞 3안) · `plan_pool` · `needs_consent` · `allow_unmet`. goal을 못
+  맞추면 확인 런 없이 안(예측만)을 내고 `needs_consent: true`, 요청 `allow_unmet: true`면 앞 3안에 확인 런(트림 한 번, evaluate
+  안마다)을 돌려 실측(하드 통과 → J)으로 다시 세운다. hard를 선형 모델로 못 맞추면 묻지 않고 경계 안(`hard_boundary` — 「모델 예측 미달 — 확인 런으로 판정」, 탐색 상자 안 하드 부족분 최소 해)을 1안으로 확인한다 — `hard.solvable=false`·`reason`은 그대로(선형 모델은 길잡이, 판정자는 확인 런). 1안이 `joint`·`confirm`·
+  `gain_export`라 [적용]·쇼케이스·러너는 종전 필드를 읽는다.
+- **웹**(06 §5.4): 수정안 패널 머리에 「못 맞춤: alt_rms(2 케이스)」 배지(하드를 모델로 못 맞추면 「못 맞춤(모델): … · 확인 런 PASS/FAIL」) + 사유 한 줄, 질문 상자
+  「그래도 복수 게인 튜닝을 할까요? (alt_rms는 퇴행 금지로만 지킵니다)」 [예]/[아니오], 게인 수별 안 표(게인·변화량 · 층 · 최악
+  예측 · 확인 런 · 대가). 쇼케이스 대본은 [예]로 답한다(`allowUnmet`).
+
+**실측(2026-10-10, 이 트리, 평가점 S20, 사슬 = 평가 → 첫 하드 카드 → 스윕 → 처방(확인 full, `allow_unmet`) → 적용 → 재평가).**
+결함 `autopilot.alt.k_rate`: goal(alt_rms·spd_rms)은 매번 못 맞춤(×5.8 「alt_rms … 최선 21.9 @M0.12_h3000_f10 · spd_rms … 최선 8.39
+@M0.2_h3000_f10」) — `allow_unmet` 없이 보내면 `needs_consent`로 확인 런이 없다. ×5.8 **REPAIRED** — 1-게인 안 k_hdot +17.5 %
+(퇴행 금지 층, 종전 +20 % 경계 해 대신 안쪽 해) 확인 PASS J 19.8 → 재평가 PASS J 19.8. ×5.2 **REPAIRED**(k_hdot +10.4 %, J 19.2).
+×5.9~6.4는 동적 여유의 선형 최선이 판정선 아래라(×5.9 0.0493 · ×6.0 0.0392 · ×6.2 0.0326 · ×6.4 0.0254 @M0.2_h200_f10) `hard.solvable=false`로 보고되지만, 경계 안 k_hdot +20 %(`hard_boundary`)의 확인 런이 판정한다: ×5.9 PASS J 19.5 · ×6.0 PASS J 20.0 · ×6.2 PASS J 20.7 · ×6.4 PASS J 21.4 → 전부 **REPAIRED**. ×6.5는 같은 경계 안이 확인 FAIL(종전과 같다). **창 ×5.2~6.4가 그대로다**(`SHOWCASE_FAULT`는 손대지 않았다). 같은 판의 첫 구현은 하드 못 맞춤이면 확인 런을 건너뛰어 ×5.9~6.4가 「확인 런 없음」으로 뒤집혔다 — 선형 모델은 길잡이이고 판정자는 확인 런이라 경계 안 확인을 되살렸다. 결함 고도 kp(`autopilot.alt.kp` ×17):
+첫 카드 (kp_alt, ki_alt), hard 풀림 · goal 못 맞춤, 퇴행 금지로도 풀리는 안이 없어(kp_alt를 줄이면 alt_rms가 미세하게 나빠진다,
+ki_alt는 동적 여유에서 비단조로 빠진다) 안은 하나 — kp_alt −1.34 %(hard 층) → 확인 FAIL(동적 여유 0.0500 @M0.12_h3000_f10, 판정선
+바로 아래). 「못 맞춤」 없이 풀리지는 않았지만 이제 사유·최선값·안이 화면에 선다. v1.90이 바꾼 basis 주석 문구를 출하 프로파일에 반영했다(`showcase_delta.json` provenance note의 스케줄 검증 참조에 문서 번호 「05」가 붙는 두 글자뿐 — 다른 바이트는 그대로, `test_처음부터_다시_생성하면_출하한_파일_그대로다`가 main에서 빨갛던 것). v2 올리기 시험 고정물(`tests/fixtures/showcase_delta_v2.json`)의 같은 문구도 같이 맞췄다(올린 법칙 절이 출하 v3와 같아야 한다).
+
+엔진 1930 · 서버 624(건너뜀 1) · flight 27 · 웹 1565(v1.92 위로 다시 얹은 트리) · 참조 검사기 0건.
+
 ### v1.92 — 활주로 도색과 착륙대 풀밭: 흰 선 대신 표준 도색, 흐린 띠 대신 경계가 또렷한 깎은 풀밭
 
 사용자 요청(「활주로 도색이랑 풀밭도 고쳐줘」). v1.91 리뷰 지적도 함께 반영한다.

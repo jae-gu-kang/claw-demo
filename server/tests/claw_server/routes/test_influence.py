@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 
 def _criteria_profile(client, pid, criteria):
     """시험용 기준을 적은 기체를 만들어 그 선택(ref)을 돌려준다 — 요청 기준은 거절되므로(v1.54) 다른 기준으로
@@ -639,6 +641,8 @@ def test_prescribe_round_trip(client, wait_job):
         "cases": [{"name": "design", "mach": 0.6, "alt": 1000.0, "fuel": 200.0}],
         "confirm": "linear",
         "t_settle": 2.0, "t_step": 4.0,
+        # 이 설계점의 추종 RMS는 기준에서 이미 한계 밖이다(목표 층 못 맞춤) — 「그래도」 동의를 실어 확인 런까지 간다
+        "allow_unmet": True,
     })
     assert r.status_code == 202, r.text
     j = wait_job(r.json()["id"], timeout=300.0)
@@ -808,22 +812,168 @@ def _spy_joint(monkeypatch, out):
     return seen
 
 
+def _spy_plans(monkeypatch):
+    """라우트의 enumerate_plans(최소 수정의 단계화 풀이, v1.93)를 엔진 그대로 돌리며 받은 인자를 기록한다."""
+    from claw.pipeline.prescribe import enumerate_plans as real
+    from claw_server.routes import influence as influence_route
+
+    seen = {}
+
+    def spy(rows, knobs, criteria, **kw):
+        seen.update(kw, knobs=list(knobs))
+        return real(rows, knobs, criteria, **kw)
+    monkeypatch.setattr(influence_route, "enumerate_plans", spy)
+    return seen
+
+
 def test_prescribe_기본_목적은_최소_수정이고_성능_인자를_넘기지_않는다(client, wait_job, monkeypatch):
     rid = _fake_sweep(client)
-    seen = _spy_joint(monkeypatch, {"solvable": True, "spans": {"table.pitch.kp": 0.0}})
+    seen = _spy_plans(monkeypatch)
     r = client.post("/api/influence/prescribe", json={
         "result_id": rid, "cases": [_CASE], "confirm": "none"})
     assert r.status_code == 202, r.text
     j = wait_job(r.json()["id"])
     assert j["status"] == "done", j
-    assert seen["objective"] == "min_change"
-    # 최소 수정에는 성능 인자가 가지 않는다 — 엔진 기본값 그대로(종전 호출과 같은 해)
-    assert not {"perf_metrics", "perf_weights", "smooth_weight"} & set(seen)
+    # 최소 수정은 단계화 풀이로 간다 — 승계가 없으면 엔진 기본값(하드 게이트 지표가 하드 층, 추종 RMS가 목표 층)
+    assert seen["hard_metrics"] is None and seen["goal_metrics"] is None
+    # 최소 수정에는 성능 인자가 가지 않는다
+    assert not {"perf_metrics", "perf_weights", "smooth_weight", "objective"} & set(seen)
     res = client.get(f"/api/results/{j['result_id']}").json()
     assert res["objective"] == "min_change"
     assert "note" not in res["inherited"]
     meta = next(m for m in client.get("/api/results").json() if m["id"] == j["result_id"])
     assert meta["objective"] == "min_change"
+
+
+# ---------- 단계화 처방 — 하드·목표 두 층, 못 맞춤 보고, 동의 질문, 게인 수별 안 (v1.93, 04 §7.3) ----------
+
+_TIER_KNOBS = ("fcl/Autopilot.k_hdot", "fcl/Autopilot.kp_alt")
+
+
+def _tier_sweep(client, rid="sweep-tier", dyn_slope=0.2):
+    """합성 스윕 — 동적 여유(하드)는 k_hdot이 고치고, alt_rms(주의)는 기준에서 이미 한계(10) 밖이며 kp_alt가
+    조금만 줄인다(+20 %에도 10 위). dyn_slope가 작으면 하드부터 못 맞춘다."""
+    base = dict(_OK_METRICS, alt_rms=12.0, de_dyn_reserve_min_frac=0.02)
+    slopes = {"fcl/Autopilot.k_hdot": {"de_dyn_reserve_min_frac": dyn_slope},
+              "fcl/Autopilot.kp_alt": {"alt_rms": -5.0}}
+    rows = [{"case": "design", "label": "base", "role": "base", "overrides": {}, "aborted": False,
+             "metrics": dict(base)}]
+    for k, sl in slopes.items():
+        for sp in (-0.2, -0.1, 0.1, 0.2):
+            m = dict(base, **{mm: base[mm] + v * sp for mm, v in sl.items()})
+            rows.append({"case": "design", "label": f"{k}@{sp:+g}", "role": "single",
+                         "overrides": {k: 1.0 + sp}, "aborted": False, "metrics": m})
+    client.app.state.store.save(rid, {"kind": "influence_sweep", "rows": rows},
+                                meta={"kind": "influence_sweep"})
+    return rid
+
+
+def _tier_eval(client, rid="eval-tier"):
+    """합성 평가 결과 — 하드 실패는 동적 여유, 국소성 판정은 alt_rms global(주의 지표)."""
+    fail = {"case": "design", "check": "authority.dynamic_reserve", "value": 0.02, "limit": 0.05}
+    payload = {"kind": "influence_evaluate",
+               "aggregate": {"hard_fail": True, "hard_fails": [fail],
+                             "locality": {"metrics": {"alt_rms": {"verdict": "global"},
+                                                      "spd_rms": {"verdict": "ok"}}}},
+               "cases": [{"case": "design", "hard_fails": [fail],
+                          "attribution": {"prescriptions": [{"knobs": list(_TIER_KNOBS)}]}}]}
+    client.app.state.store.save(rid, payload, meta={"kind": "influence_evaluate"})
+    return rid
+
+
+def _tier_prescribe(client, wait_job, **extra):
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": extra.pop("result_id", None) or _tier_sweep(client),
+        "eval_result_id": _tier_eval(client), "cases": [_CASE],
+        "t_settle": 2.0, "t_step": 4.0, **extra})
+    assert r.status_code == 202, r.text
+    j = wait_job(r.json()["id"], timeout=300.0)
+    assert j["status"] == "done", j
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    json.dumps(res, allow_nan=False)
+    return res
+
+
+def test_prescribe_목표_못_맞춤이면_확인_런_없이_동의를_묻는다(client, wait_job):
+    res = _tier_prescribe(client, wait_job, confirm="full")
+    inh = res["inherited"]
+    assert inh["hard_metrics"] == ["de_dyn_reserve_min_frac"] and inh["goal_metrics"] == ["alt_rms"]
+    f = res["feasibility"]
+    assert f["hard"]["solvable"] is True and f["goal"]["solvable"] is False
+    (v,) = f["goal"]["violated"]
+    assert v["metric"] == "alt_rms" and v["case"] == "design"
+    assert v["best_reachable"] == pytest.approx(11.0) and v["best_reachable"] < v["base"]
+    assert "alt_rms는 탐색 범위(±20 %) 안 어떤 조합으로도 10 아래로 못 내려간다" in f["reason"]
+    assert res["needs_consent"] is True and res["allow_unmet"] is False
+    assert res["confirm"] is None and res["gain_export"] is None
+    assert any("동의" in w for w in res["warnings"]), res["warnings"]
+    # 안은 퇴행 금지 규칙으로 풀어 예측만 싣는다(확인 런 없음) — 게인 수별 최선, 순위순
+    plans = res["plans"]
+    assert 1 <= len(plans) <= 3
+    assert all("confirm" not in p for p in plans)
+    assert {tuple(p["knobs"]) for p in plans} == {("fcl/Autopilot.k_hdot",),
+                                                  ("fcl/Autopilot.k_hdot", "fcl/Autopilot.kp_alt")}
+    assert plans[0]["knobs"] == ["fcl/Autopilot.k_hdot", "fcl/Autopilot.kp_alt"]  # alt_rms 개선량이 앞선다
+    for p in plans:
+        assert p["tier"] == "nonregress"
+        assert p["cost"]["n_changed"] == len(p["knobs"]) and p["cost"]["max_pct"] > 0
+        assert p["predicted"]["design"]["de_dyn_reserve_min_frac"] >= 0.05 - 1e-9
+    # joint는 1안 — 종전 [적용]·쇼케이스·러너가 읽는 모양(전 설계변수 스팬)
+    jt = res["joint"]
+    assert jt["tier"] == "nonregress" and jt["solvable"] is True
+    assert set(jt["spans"]) == set(_TIER_KNOBS)
+    assert jt["changed_knobs"] == plans[0]["knobs"]
+    assert res["plan_pool"]["K"] == 5 and res["plan_pool"]["n_subsets"] == 3
+
+
+def test_prescribe_allow_unmet이면_상위_안마다_확인_런(client, wait_job):
+    res = _tier_prescribe(client, wait_job, confirm="linear", allow_unmet=True)
+    assert res["needs_consent"] is False and res["allow_unmet"] is True
+    plans = res["plans"]
+    assert plans and all(p["confirm"]["verdict"] in ("PASS", "FAIL", "판정 불가") for p in plans)
+    for p in plans:
+        assert set(p["confirm"]) == {"verdict", "J", "worst_case", "n_hard_fails"}
+    # 최종 순서는 실측 — 하드 통과가 앞, 같으면 J 낮은 순
+    order = [(p["confirm"]["verdict"] != "PASS",
+              p["confirm"]["J"] if p["confirm"]["J"] is not None else float("inf")) for p in plans]
+    assert order == sorted(order)
+    # 1안이 곧 joint·confirm·gain_export
+    assert res["confirm"] is not None and res["gain_export"] is not None
+    assert res["joint"]["changed_knobs"] == plans[0]["knobs"]
+    top = plans[0]["confirm"]
+    assert top["verdict"] == ("PASS" if res["confirm"]["aggregate"]["hard_fail"] is False else top["verdict"])
+
+
+def test_prescribe_하드부터_못_맞추면_묻지_않고_경계_안을_확인_런으로_판정한다(client, wait_job):
+    """선형 모델은 길잡이, 판정자는 확인 런 — 「못 맞춤」 보고는 그대로 두고 경계 안(hard_boundary)을 확인한다."""
+    rid = _tier_sweep(client, rid="sweep-tier-weak", dyn_slope=0.05)
+    res = _tier_prescribe(client, wait_job, result_id=rid, confirm="linear")
+    f = res["feasibility"]
+    assert f["hard"]["solvable"] is False and f["goal"]["solvable"] is None
+    assert f["hard"]["violated"][0]["best_reachable"] == pytest.approx(0.03)
+    assert "0.05 위로 못 올라간다" in f["reason"]
+    assert res["needs_consent"] is False  # 물을 것이 없다
+    (p,) = res["plans"]
+    assert p["tier"] == "hard_boundary" and p["knobs"] == ["fcl/Autopilot.k_hdot"]
+    assert p["spans"]["fcl/Autopilot.k_hdot"] == pytest.approx(0.2, abs=1e-6)
+    assert p["confirm"]["verdict"] in ("PASS", "FAIL", "판정 불가")
+    assert res["confirm"] is not None and res["gain_export"] is not None
+    jt = res["joint"]
+    assert jt["tier"] == "hard_boundary" and jt["solvable"] is False
+    assert jt["reason"] == "모델 예측 미달 — 확인 런으로 판정"
+    assert jt["violated"] and jt["violated"][0]["metric"] == "de_dyn_reserve_min_frac"
+    assert any("경계 안을 확인 런으로 판정" in w for w in res["warnings"]), res["warnings"]
+
+
+def test_prescribe_성능_목적은_단계화_필드가_비었다(client, wait_job):
+    rid = _fake_sweep(client, rid="sweep-perf-tier")
+    r = client.post("/api/influence/prescribe", json={
+        "result_id": rid, "cases": [_CASE], "confirm": "none", "objective": "performance",
+        "perf_metrics": ["alt_ts"]})
+    j = wait_job(r.json()["id"])
+    res = client.get(f"/api/results/{j['result_id']}").json()
+    assert res["feasibility"] is None and res["plans"] == [] and res["plan_pool"] is None
+    assert res["needs_consent"] is False
 
 
 def test_prescribe_성능_목적은_인자를_넘기고_에코한다(client, wait_job, monkeypatch):

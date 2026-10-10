@@ -750,6 +750,429 @@ def solve_joint(rows, knobs, criteria: GainEvalCriteria, *,
     }
 
 
+# ── 단계화 처방 (04 §7.3 — v1.93) ─────────────────────────────────────────────
+# 실패 지표를 두 층으로 가른다. hard = 평가의 하드 게이트가 지목한 지표(≤ 한계, 제약), goal = 국소성
+# 판정이 나쁜 주의 지표(제약이 아니라 목표). 종전에는 goal까지 하드 제약으로 넣어, 기준 설계에서도 이미
+# 한계 밖인 지표(예: alt_rms > 10)가 있으면 조합 해가 늘 불가능 → x≈0 → 「바뀐 게인 0개」가 되고 그 사실이
+# 화면에 안 나왔다. 이제는 ① hard만 ② hard + goal 한계 안 ③ (②가 안 되면) hard + goal 「퇴행 금지 + 개선
+# 목적」 순서로 풀고, 각 단계가 풀리는지와 「얼마나 모자라는가(best_reachable)」를 feasibility로 싣는다.
+
+# 안의 층 — 작을수록 앞선다. goal: 목표 지표까지 전부 한계 안 / nonregress: 하드는 만족, 한계 밖 목표 지표는
+# 기준값보다 나빠지지 않음(한계 안 목표 지표는 한계 유지) / hard: 하드만 만족(목표 지표 퇴행을 감수 — 앞 두 층이
+# 전부 안 풀릴 때만 나온다) / hard_boundary: 선형 모델로는 하드도 못 맞춘다 — 탐색 상자 안에서 하드 부족분을 가장
+# 줄이는 경계 해(대개 탐색 한계에 붙는다). 선형 모델은 길잡이이고 판정자는 비선형 확인 런이라, 「모델 예측 미달」을
+# 숨기지 않은 채 확인 런에 올린다(v1.87까지 k_hdot 시연이 바로 이 해로 확인 PASS였다)
+TIER_RANK = {"goal": 0, "nonregress": 1, "hard": 2, "hard_boundary": 3}
+TIER_LABEL = {"goal": "목표까지 충족", "nonregress": "하드 충족·목표 퇴행 금지", "hard": "하드만 충족(목표 퇴행 감수)",
+              "hard_boundary": "모델 예측 미달 — 확인 런으로 판정"}
+
+# 하드 층의 기본 — _targets 중 evaluate 하드 게이트(HARD_CHECKS)가 실제로 판정하는 지표. 추종 RMS는 하드 게이트가
+# 아니라(evaluate는 RMS로 Fail을 내지 않는다) 기본 목표 층이다. 서버 _HARD_CHECK_METRICS(검사 이름 → 지표)의 값과 같은 집합
+HARD_GATE_METRICS = ("surf_sat_frac", "worst_stall_margin", "de_dyn_reserve_min_frac")
+
+# 개선 목적의 평활 가중 — 성능 목적(smooth_weight 기본 0.1)과 같은 뜻: 선형 개선항은 늘 경계로 달리므로
+# Σ(x/span_bound)²가 안쪽 해를 고른다
+_GOAL_SMOOTH = 0.1
+# 순위의 「목표 개선량」 비교 눈금 — 정규화 변화 1 %p보다 작은 차이는 같은 개선으로 보고 게인 수·변화 크기로 가른다
+# (선형 모델이 그보다 잘게 말할 수 없다)
+_SCORE_QUANTUM = 0.01
+# 부분집합 전수 열거의 풀 상한 — 넘으면 기울기 민감도 상위만 남긴다(04 §7.3)
+MAX_FULL_POOL = 8
+
+
+def _passes(v, limit, above):
+    return v <= limit + 1e-9 if above else v >= limit - 1e-9
+
+
+def _tier_model(rows, knobs, criteria, hard_metrics, goal_metrics):
+    """단계화 풀이의 공통 재료 — 하드·목표 항목(케이스×지표)의 기준값·기울기·한계.
+
+    hard_metrics가 None이면 하드 게이트 지표(HARD_GATE_METRICS) 중 목표로 지정되지 않은 것, goal_metrics가
+    None이면 하드 층에 들지 않은 나머지 기준 지표 전부(추종 RMS) — 승계(평가 결과) 없이 부를 때의 기본값이다.
+    """
+    targets = {m: (lim, above) for m, lim, above in _targets(criteria)}
+    goal_set = set(goal_metrics or ())
+    if hard_metrics is None:
+        hard = [m for m in targets if m in HARD_GATE_METRICS and m not in goal_set]
+    else:
+        want = set(hard_metrics)
+        hard = [m for m in targets if m in want]
+    if goal_metrics is None:
+        goal = [m for m in targets if m not in hard]
+    else:
+        goal = [m for m in targets if m in goal_set and m not in hard]
+    metrics = hard + goal
+    S, excluded = slope_matrix(rows, knobs, metrics)
+    bases: dict = {}
+    for r in rows:
+        if r["label"] == "base" and not r.get("aborted"):
+            rm = r.get("metrics") or {}
+            bases[r["case"]] = {m: _num(rm.get(m)) for m in metrics}
+    cases = [c for c in bases if c in S or all(v is not None for v in bases[c].values())]
+    idx = {k: i for i, k in enumerate(knobs)}
+    n = len(knobs)
+
+    def entries(ms):
+        out = []
+        for case in cases:
+            for m in ms:
+                b = bases[case].get(m)
+                if b is None:
+                    continue  # 판정 불가 지표는 제약도 목표도 세우지 않는다 (0 위장 금지)
+                lim, above = targets[m]
+                srow = np.zeros(n)
+                for knob, sl in (S.get(case, {}).get(m, {}) or {}).items():
+                    srow[idx[knob]] = sl
+                out.append({"case": case, "metric": m, "b": b, "srow": srow,
+                            "limit": lim, "above": above, "inside": _passes(b, lim, above)})
+        return out
+
+    return {"knobs": list(knobs), "idx": idx, "n": n, "cases": cases,
+            "hard_metrics": hard, "goal_metrics": goal,
+            "hard": entries(hard), "goal": entries(goal), "excluded": excluded}
+
+
+def _box(model, span_bound, knob_bounds=None, active=None):
+    """설계변수별 탐색 상자 — active 밖(이 안에 안 쓰는 게인)은 (0, 0)에 묶는다."""
+    out = []
+    for k in model["knobs"]:
+        if active is not None and k not in active:
+            out.append((0.0, 0.0))
+            continue
+        out.append(tuple((knob_bounds or {}).get(k, (-span_bound, span_bound))))
+    return out
+
+
+def _best_reachable(e, bounds):
+    """그 항목 하나만 최선으로 민 예측값 — 선형 모델이라 상자 꼭짓점이 답이다(「얼마나 모자라나」)."""
+    v = e["b"]
+    for s, (lo, hi) in zip(e["srow"], bounds):
+        pick = min if e["above"] else max
+        v += pick(s * lo, s * hi)
+    return float(v)
+
+
+def _scale(e):
+    return max(abs(e["b"]), _perf_floor(e["metric"]))
+
+
+def _improve_terms(model):
+    """개선 목적 항 — 기준에서 이미 한계 밖인 목표 항목(정규화, 낮을수록 좋게 부호를 맞춘다)."""
+    return [e for e in model["goal"] if not e["inside"]]
+
+
+def _score(model, x):
+    """목표 개선량 — 한계 밖 목표 항목의 정규화 예측 변화 평균(음수 = 개선). 대상이 없으면 0."""
+    terms = _improve_terms(model)
+    if not terms:
+        return 0.0
+    tot = 0.0
+    for e in terms:
+        d = float(e["srow"] @ x) / _scale(e)
+        tot += d if e["above"] else -d
+    return tot / len(terms)
+
+
+def _solve_tier(model, tier, bounds, span_bound):
+    """한 층의 규칙으로 풀기 — (x, feasible, message).
+
+    goal: 하드 + 목표 ≤ 한계, min Σx². nonregress: 하드 + 한계 안 목표는 한계 유지 + 한계 밖 목표는 기준값
+    유지(퇴행 금지), 목적은 개선량 + 평활. hard: 하드만, min Σx².
+    """
+    n = model["n"]
+    cons_rows = [(e, e["limit"]) for e in model["hard"]]
+    if tier == "goal":
+        cons_rows += [(e, e["limit"]) for e in model["goal"]]
+    elif tier == "nonregress":
+        cons_rows += [(e, e["limit"] if e["inside"] else e["b"]) for e in model["goal"]]
+    cons = []
+    for e, rhs in cons_rows:
+        sign = -1.0 if e["above"] else 1.0
+        cons.append({"type": "ineq",
+                     "fun": (lambda x, b=e["b"], srow=e["srow"], rhs=rhs, sign=sign:
+                             sign * ((b + srow @ x) - rhs)),
+                     "jac": (lambda x, srow=e["srow"], sign=sign: sign * srow)})
+    terms = _improve_terms(model) if tier == "nonregress" else []
+    g = np.zeros(n)
+    for e in terms:
+        g += (e["srow"] / _scale(e)) * (1.0 if e["above"] else -1.0)
+    if terms:
+        g /= len(terms)
+    k2 = (_GOAL_SMOOTH / (span_bound * span_bound)) if terms else 1.0
+
+    def fun(x):
+        return float(g @ x + k2 * (x @ x))
+
+    def jac(x):
+        return g + 2.0 * k2 * x
+
+    x0 = np.zeros(n)
+    res = minimize(fun, x0, jac=jac, method="SLSQP", bounds=bounds, constraints=cons,
+                   options={"maxiter": 200, "ftol": 1e-12})
+    lo = np.array([b[0] for b in bounds])
+    hi = np.array([b[1] for b in bounds])
+    x = np.clip(res.x, lo, hi)
+    ok = all(_passes(float(e["b"] + e["srow"] @ x), rhs, e["above"]) for e, rhs in cons_rows)
+    return x, bool(ok), str(res.message)
+
+
+def _metric_word(above):
+    return ("아래로 못 내려간다", "위로 못 올라간다")[0 if above else 1]
+
+
+def _tier_violations(model, entries, x, bounds):
+    out = []
+    for e in entries:
+        v = float(e["b"] + e["srow"] @ x)
+        if not _passes(v, e["limit"], e["above"]):
+            out.append({"metric": e["metric"], "case": e["case"], "base": e["b"],
+                        "limit": e["limit"], "predicted": v, "above_is_bad": e["above"],
+                        "best_reachable": _best_reachable(e, bounds)})
+    return out
+
+
+def _unmet_reason(violated, range_text, what):
+    """「못 맞춤」 사유 — 지표마다 한 문장. 그 지표 하나만 최선으로 밀어도 한계에 못 닿는 케이스가 있으면
+    그 최선값과 케이스를(가장 모자란 케이스), 따로는 닿는데 함께는 안 되면 그 사실을 말한다."""
+    by: dict = {}
+    for v in violated:
+        by.setdefault(v["metric"], []).append(v)
+    parts = []
+    for m, vs in by.items():
+        short = [v for v in vs if not _passes(v["best_reachable"], v["limit"], v["above_is_bad"])]
+        if short:
+            worst = max(short, key=lambda v: abs(v["best_reachable"] - v["limit"]))
+            parts.append(f"{m}는 탐색 범위({range_text}) 안 어떤 조합으로도 {worst['limit']:g} "
+                         f"{_metric_word(worst['above_is_bad'])}(최선 {worst['best_reachable']:.3g} "
+                         f"@{worst['case']})")
+        else:
+            parts.append(f"{m}는 케이스마다 따로는 닿지만 {what}과 함께 전 케이스를 한계 안에 넣는 조합이 "
+                         f"탐색 범위({range_text}) 안에 없다")
+    return " · ".join(parts)
+
+
+def _feasibility(model, bounds, span_bound, range_text):
+    """단계 ①·② — hard만, hard + goal 한계 안. {hard, goal, reason, mode}."""
+    xh, ok_h, msg_h = _solve_tier(model, "hard", bounds, span_bound)
+    hard = {"solvable": ok_h, "violated": [] if ok_h else _tier_violations(model, model["hard"], xh, bounds),
+            "metrics": list(model["hard_metrics"])}
+    goal = {"solvable": None, "violated": [], "metrics": list(model["goal_metrics"]),
+            "nonregress_solvable": None}
+    reason = None
+    mode = None
+    if not ok_h:
+        reason = (_unmet_reason(hard["violated"], range_text, "다른 하드 지표") if hard["violated"]
+                  else f"하드 풀이 실패: {msg_h}")
+    elif not model["goal"]:
+        goal["solvable"] = True
+        mode = "goal"
+    else:
+        xg, ok_g, _m = _solve_tier(model, "goal", bounds, span_bound)
+        goal["solvable"] = ok_g
+        mode = "goal" if ok_g else "nonregress"
+        if not ok_g:
+            goal["violated"] = _tier_violations(model, model["goal"], xg, bounds)
+            reason = _unmet_reason(goal["violated"], range_text, "하드 기준")
+    # 지표별 한계·방향·층 — 화면이 안의 예측값을 한계와 같은 자로 읽는다(방향을 웹에서 다시 정하지 않는다)
+    limits = {}
+    for tier, es in (("hard", model["hard"]), ("goal", model["goal"])):
+        for e in es:
+            limits.setdefault(e["metric"], {"limit": e["limit"], "above_is_bad": e["above"], "tier": tier})
+    return {"hard": hard, "goal": goal, "reason": reason, "mode": mode, "span_bound": span_bound,
+            "limits": limits}
+
+
+def _range_text(span_bound, knob_bounds):
+    return "설계변수별 경계" if knob_bounds else f"±{span_bound * 100:g} %"
+
+
+def _plan_of(model, tier, x, active_knobs, bounds):
+    """풀린 해 → 안 하나. spans는 쓴 게인만, predicted는 하드·목표 항목 전부(케이스×지표)."""
+    spans = {k: float(x[model["idx"][k]]) for k in active_knobs}
+    predicted: dict = {}
+    unmet, regressed = [], []
+    for e in model["hard"] + model["goal"]:
+        v = float(e["b"] + e["srow"] @ x)
+        predicted.setdefault(e["case"], {})[e["metric"]] = v
+    for e in model["goal"]:
+        v = predicted[e["case"]][e["metric"]]
+        if not _passes(v, e["limit"], e["above"]):
+            unmet.append({"metric": e["metric"], "case": e["case"], "base": e["b"],
+                          "limit": e["limit"], "predicted": v,
+                          "best_reachable": _best_reachable(e, bounds)})
+        if not _passes(v, e["b"], e["above"]):
+            regressed.append({"metric": e["metric"], "case": e["case"], "base": e["b"], "predicted": v})
+    ch = _changed(model["knobs"], spans)
+    max_pct = max((abs(spans[k]) * 100.0 for k in ch["changed_knobs"]), default=0.0)
+    hard_unmet = [{"metric": e["metric"], "case": e["case"], "base": e["b"], "limit": e["limit"],
+                   "predicted": predicted[e["case"]][e["metric"]], "best_reachable": _best_reachable(e, bounds)}
+                  for e in model["hard"] if not _passes(predicted[e["case"]][e["metric"]], e["limit"], e["above"])]
+    return {"knobs": ch["changed_knobs"], "spans": {k: spans[k] for k in ch["changed_knobs"]},
+            "tier": tier, "solvable": tier != "hard_boundary", "predicted": predicted,
+            "unmet": unmet, "regressed": regressed if tier in ("hard", "hard_boundary") else [],
+            "hard_unmet": hard_unmet,
+            "score": _score(model, x),
+            "cost": {"n_changed": ch["changed_count"], "max_pct": max_pct}}
+
+
+def _boundary_x(model, bounds):
+    """하드를 선형 모델로 못 맞출 때의 경계 해 — 탐색 상자 안에서 하드 부족분(정규화 힌지)의 제곱합을 최소화한다.
+
+    한 항목만 보면 그 항목의 best_reachable 꼭짓점과 같고, 여럿이면 부족분을 고르게 줄이는 쪽이다. 아주 작은
+    Σx² 항은 부족분에 영향 없는 게인을 0에 둔다(평탄한 방향으로 표류하지 않게)."""
+    n = model["n"]
+    rows_ = [(e["srow"], e["b"], e["limit"], 1.0 if e["above"] else -1.0,
+              max(abs(e["limit"]), abs(e["b"]), _perf_floor(e["metric"]))) for e in model["hard"]]
+
+    def fun(x):
+        tot = 1e-6 * float(x @ x)
+        for srow, b, lim, sg, sc in rows_:
+            v = sg * ((b + srow @ x) - lim) / sc
+            if v > 0:
+                tot += v * v
+        return tot
+
+    def jac(x):
+        g = 2e-6 * x
+        for srow, b, lim, sg, sc in rows_:
+            v = sg * ((b + srow @ x) - lim) / sc
+            if v > 0:
+                g = g + 2.0 * v * sg * srow / sc
+        return g
+
+    res = minimize(fun, np.zeros(n), jac=jac, method="L-BFGS-B", bounds=bounds)
+    lo = np.array([b[0] for b in bounds])
+    hi = np.array([b[1] for b in bounds])
+    return np.clip(res.x, lo, hi)
+
+
+def _plan_key(p):
+    return (TIER_RANK[p["tier"]], round(p["score"] / _SCORE_QUANTUM),
+            p["cost"]["n_changed"], round(p["cost"]["max_pct"], 4), tuple(p["knobs"]))
+
+
+def solve_tiered(rows, knobs, criteria: GainEvalCriteria, *, hard_metrics=None,
+                 goal_metrics=None, span_bound: float = 0.2, knob_bounds=None) -> dict:
+    """단계화 조합 해 — 전 설계변수를 한꺼번에 쓰는 안 하나 + feasibility(못 맞춤 보고).
+
+    solve_joint(min_change)와 같은 선형 모델·같은 SLSQP 위에서 제약을 두 층으로 가른다(모듈 위 설명).
+    반환은 solve_joint 결과 모양(spans·predicted·violated·excluded·changed_*) + tier·feasibility·unmet.
+    solvable은 「그 층의 규칙을 만족한다」이고, 목표 미달(unmet)은 feasibility.goal이 말한다.
+    """
+    model = _tier_model(rows, knobs, criteria, hard_metrics, goal_metrics)
+    common = {"objective": "min_change", "span_bound": span_bound, "excluded": list(model["excluded"])}
+    if not model["cases"]:
+        return {**common, "solvable": False, "spans": None, "predicted": {}, "violated": [],
+                "unmet": [], "tier": None, "reason": "기준 런이 없다 — 스윕부터",
+                "feasibility": None, "changed_knobs": [], "changed_count": 0}
+    bounds = _box(model, span_bound, knob_bounds)
+    feas = _feasibility(model, bounds, span_bound, _range_text(span_bound, knob_bounds))
+    tiers = [feas["mode"]] if feas["mode"] == "goal" else (
+        ["nonregress", "hard"] if feas["mode"] == "nonregress" else ["hard"])
+    for tier in tiers:
+        x, ok, msg = _solve_tier(model, tier, bounds, span_bound)
+        if ok or tier == tiers[-1]:
+            break
+    if feas["mode"] == "nonregress":
+        feas["goal"]["nonregress_solvable"] = tier == "nonregress" and ok
+    plan = _plan_of(model, tier, x, model["knobs"], bounds)
+    spans = {k: float(x[i]) for k, i in model["idx"].items()}
+    violated = [] if ok else [
+        {"case": v["case"], "metric": v["metric"], "predicted": v["predicted"], "limit": v["limit"]}
+        for v in _tier_violations(model, model["hard"], x, bounds)]
+    return {**common, "solvable": ok, "spans": spans, "predicted": plan["predicted"],
+            "violated": violated, "unmet": plan["unmet"], "regressed": plan["regressed"],
+            "tier": tier if ok else None, "score": plan["score"],
+            "reason": None if ok else (feas["reason"] or f"최적화 실패: {msg}"),
+            "feasibility": feas, **_changed(model["knobs"], spans)}
+
+
+def _sensitivity(model, knob):
+    """풀 가지치기의 민감도 — 고쳐야 할 항목(기준에서 하드 위반 + 한계 밖 목표)에 대한 정규화 |기울기| 합.
+    고칠 항목이 없으면 전 항목."""
+    i = model["idx"][knob]
+    need = [e for e in model["hard"] + model["goal"] if not e["inside"]] or model["hard"] + model["goal"]
+    return sum(abs(float(e["srow"][i])) / _scale(e) for e in need)
+
+
+def enumerate_plans(rows, pool_knobs, criteria: GainEvalCriteria, *, hard_metrics=None,
+                    goal_metrics=None, K: int = 5, max_candidates: int = 30,
+                    span_bound: float = 0.2, knob_bounds=None) -> dict:
+    """게인 수별 복수 안 — 풀의 부분집합(크기 1…K)마다 단계화 규칙으로 풀고 순위를 매긴다(04 §7.3).
+
+    풀이 MAX_FULL_POOL(8) 이하면 부분집합 전부, 넘으면 기울기 민감도 상위 8개로 줄여(pruned에 근거) 전부.
+    각 부분집합은 feasibility가 정한 층(goal, 아니면 nonregress)으로 풀고, nonregress로 풀리는 부분집합이
+    하나도 없을 때만 hard 층(목표 퇴행 감수)으로 다시 푼다. 풀린 것만 안이 된다.
+
+    순위(_plan_key): ① 층(goal → nonregress → hard) ② 목표 개선량(한계 밖 목표 항목의 정규화 예측 변화
+    평균, 1 %p 눈금) ③ 바뀐 게인 수 적을수록 ④ 최대 변화 % 작을수록 ⑤ 게인 이름(결정적 순서).
+    같은 바뀐 게인 집합은 하나로 접는다(부분집합의 게인 하나가 0에 머물면 더 작은 부분집합과 같은 안이다).
+
+    반환: {"feasibility", "plans"(게인 수 k마다 최선 1안, 순위순 — 화면·확인 런은 앞 3안),
+    "candidates"(접은 안 전부 순위순, max_candidates까지), "pool", "pruned", "n_subsets", "joint"
+    (solve_tiered — 전 풀 한꺼번에 쓴 해, plans가 비었을 때의 근거)}. 순수 함수 — 시뮬 없음.
+    """
+    from itertools import combinations
+
+    knobs = list(dict.fromkeys(pool_knobs))
+    joint = solve_tiered(rows, knobs, criteria, hard_metrics=hard_metrics, goal_metrics=goal_metrics,
+                         span_bound=span_bound, knob_bounds=knob_bounds)
+    feas = joint["feasibility"]
+    out = {"feasibility": feas, "plans": [], "candidates": [], "pool": knobs, "pruned": [],
+           "n_subsets": 0, "joint": joint, "K": K}
+    if feas is None:
+        return out
+    model = _tier_model(rows, knobs, criteria, hard_metrics, goal_metrics)
+    if not feas["hard"]["solvable"]:
+        # 하드부터 선형 모델로 못 맞춘다 — feasibility는 그대로 「못 맞춤」을 말하고, 전 풀 경계 해 하나를 안으로 세워
+        # 확인 런(비선형)이 판정하게 한다. 부분집합 열거는 하지 않는다(풀리는 층이 없으니 순위가 뜻이 없다)
+        bounds = _box(model, span_bound, knob_bounds)
+        p = _plan_of(model, "hard_boundary", _boundary_x(model, bounds), model["knobs"], bounds)
+        if p["knobs"]:
+            out["plans"] = [p]
+            out["candidates"] = [p]
+        return out
+    pool = knobs
+    if len(pool) > MAX_FULL_POOL:
+        ranked = sorted(pool, key=lambda k: (-_sensitivity(model, k), pool.index(k)))
+        keep = set(ranked[:MAX_FULL_POOL])
+        out["pruned"] = [{"knob": k, "sensitivity": _sensitivity(model, k),
+                          "reason": f"민감도 상위 {MAX_FULL_POOL}개 밖 — 부분집합 열거에서 뺐다"}
+                         for k in ranked[MAX_FULL_POOL:]]
+        pool = [k for k in pool if k in keep]
+    kmax = max(0, min(int(K), len(pool)))
+    subsets = [c for k in range(1, kmax + 1) for c in combinations(pool, k)]
+    out["n_subsets"] = len(subsets)
+
+    def solve_all(tier):
+        found = {}
+        for sub in subsets:
+            bounds = _box(model, span_bound, knob_bounds, active=set(sub))
+            x, ok, _m = _solve_tier(model, tier, bounds, span_bound)
+            if not ok:
+                continue
+            p = _plan_of(model, tier, x, list(sub), _box(model, span_bound, knob_bounds))
+            if not p["knobs"]:
+                continue  # 0 변화 — 고칠 것이 없다는 말이지 안이 아니다
+            key = tuple(p["knobs"])
+            if key not in found or _plan_key(p) < _plan_key(found[key]):
+                found[key] = p
+        return sorted(found.values(), key=_plan_key)
+
+    mode = feas["mode"]
+    cands = solve_all(mode)
+    if not cands and mode == "nonregress":
+        cands = solve_all("hard")
+    if mode == "nonregress":
+        feas["goal"]["nonregress_solvable"] = bool(cands) and cands[0]["tier"] == "nonregress"
+    out["candidates"] = cands[:max(0, int(max_candidates))]
+    best_by_k: dict = {}
+    for p in cands:
+        best_by_k.setdefault(p["cost"]["n_changed"], p)
+    out["plans"] = sorted(best_by_k.values(), key=_plan_key)
+    return out
+
+
 def nonadditivity_warnings(payload, knobs, rel_floor: float = 0.2) -> list:
     """저장된 스윕의 쌍별 비가산성 → 선형 모델 신뢰 경고 문장들.
 

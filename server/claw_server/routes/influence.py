@@ -31,7 +31,9 @@ from claw.pipeline.improve import (constrained_proposal, enrich_sweep_linear, go
                                    hard_margin_goals, margin_goals, recommended_goals, recommend_knobs)
 from claw.pipeline.prescribe import (
     IMPROVEMENT_HIGHER_METRICS,
+    TIER_LABEL,
     _targets as prescribe_targets,
+    enumerate_plans,
     nonadditivity_warnings,
     proposal_export,
     proposal_shape,
@@ -1069,6 +1071,10 @@ class PrescribeIn(InfluenceIn):
     t_step: float = Field(default=30.0, gt=0.0, allow_inf_nan=False)
     t_hold: float | None = Field(default=None, gt=0.0, allow_inf_nan=False)
     dt_plant: float = Field(default=0.01, gt=0.0, allow_inf_nan=False)
+    # 「못 맞춤」 동의(04 §7.3, v1.93) — 목표 지표(주의 지표)를 탐색 범위 안에서 한계 안에 못 넣을 때, 서버는
+    # 확인 런 없이 feasibility·안 목록만 내고 needs_consent로 묻는다. 웹의 질문 상자에서 「예」를 고르면 이 플래그로
+    # 다시 보낸다 — 목표 지표는 퇴행 금지로만 지키고 안을 확인한다
+    allow_unmet: bool = False
 
     @field_validator("perf_weights")
     @classmethod
@@ -1194,6 +1200,36 @@ def _confirm_perf(rows, sweep_conditions, ev, shape_fp, confirm, cases, perf_met
             "cases": out, "omitted": omitted, "notes": notes}
 
 
+# 단계화 처방의 게인 수 상한·나열·확인 런 수 (04 §7.3 기본값 — 계약 「열린 결정」 1·4)
+PLAN_K = 5
+PLAN_LIST = 3
+
+
+def _confirm_summary(report: dict) -> dict:
+    """확인 런 evaluate 결과 → 안 목록의 한 줄 판정 {verdict, J, worst_case, n_hard_fails}."""
+    agg = report.get("aggregate") or {}
+    j = agg.get("J") or {}
+    hf = agg.get("hard_fail")
+    return {"verdict": "PASS" if hf is False else ("FAIL" if hf else "판정 불가"),
+            "J": j.get("worst"), "worst_case": j.get("case"),
+            "n_hard_fails": len(agg.get("hard_fails") or [])}
+
+
+def _plan_joint(plan: dict, knobs, tiered_joint: dict) -> dict:
+    """안 하나 → 종전 joint 모양(전 설계변수 스팬, 안 쓴 게인은 0). [적용]·쇼케이스·러너가 joint를 읽는다."""
+    spans = {k: float(plan["spans"].get(k, 0.0)) for k in knobs}
+    boundary = plan["tier"] == "hard_boundary"
+    violated = [{"case": v["case"], "metric": v["metric"], "predicted": v["predicted"], "limit": v["limit"]}
+                for v in plan.get("hard_unmet", [])]
+    return {"objective": "min_change", "solvable": not boundary, "spans": spans,
+            "predicted": plan["predicted"], "violated": violated, "unmet": plan["unmet"],
+            "regressed": plan.get("regressed", []), "excluded": tiered_joint.get("excluded", []),
+            "span_bound": tiered_joint.get("span_bound"), "tier": plan["tier"],
+            "reason": (None if plan["tier"] == "goal" else TIER_LABEL[plan["tier"]] if boundary
+                       else f"{TIER_LABEL[plan['tier']]} — 목표 지표는 못 맞춘다"),
+            "changed_knobs": list(plan["knobs"]), "changed_count": plan["cost"]["n_changed"]}
+
+
 @router.post("/influence/prescribe", status_code=202)
 def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> dict:
     """정량 처방 — 단일 필요 변화량 + 복수 소폭 조합 + 확인 런 (잡 202).
@@ -1249,15 +1285,20 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
                     status_code=409,
                     detail=f"기체 불일치: 평가는 기체 지문 {eval_profile_fp}로 계산됐는데 요청 기체는 "
                            f"{profile.fingerprint}")
-            # 실패 지표 — 하드 위반이 지목한 지표 + 국소성 판정이 나쁜 지표
-            metrics = set()
+            # 실패 지표 — 하드 위반이 지목한 지표(hard 층: ≤ 한계 제약) + 국소성 판정이 나쁜 지표(goal 층:
+            # 목표). 둘을 한 제약 집합으로 풀면 기준 설계에서도 이미 한계 밖인 주의 지표(예 alt_rms)가 조합 해를
+            # 늘 불가능으로 만든다(#21 — v1.87까지 x≈0 → 「바뀐 게인 0개」 → 확인 런 없음)
+            hard_m = set()
             for f in (ev.get("aggregate") or {}).get("hard_fails") or []:
                 check = f.get("check") or ""
-                metrics.update(_HARD_CHECK_METRICS.get(check, ()))
+                hard_m.update(_HARD_CHECK_METRICS.get(check, ()))
+            goal_m = set()
             for key, v in (((ev.get("aggregate") or {}).get("locality")
                             or {}).get("metrics") or {}).items():
                 if v.get("verdict") in ("local", "global"):
-                    metrics.add(key)
+                    goal_m.add(key)
+            goal_m -= hard_m
+            metrics = hard_m | goal_m
             # 귀속 설계변수 — 케이스별 소견의 처방 카드가 지목한 자리
             aknobs = []
             bad_cases = []
@@ -1268,6 +1309,8 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
                     aknobs.extend(pr.get("knobs") or [])
             inherited = {
                 "metrics": sorted(metrics) or None,
+                "hard_metrics": sorted(hard_m) or None,
+                "goal_metrics": sorted(goal_m) or None,
                 "knobs": sorted(dict.fromkeys(aknobs)) or None,
                 "cases": sorted(dict.fromkeys(bad_cases)) or None,
                 "from": req.eval_result_id,
@@ -1313,14 +1356,35 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
             inherited["note"] = ("성능 개선은 하드 기준 전부를 지킨다 — 평가가 좁힌 실패 지표는 "
                                  "단일 필요 변화량 표에만 쓴다")
         else:
-            joint = solve_joint(rows, knobs, criteria, objective="min_change",
-                                metrics=[t[0] for t in targets])
+            # 단계화(04 §7.3) — 하드 층·목표 층을 갈라 풀고, 게인 수별 복수 안을 순위로 낸다. 승계가 없거나
+            # 승계 지표가 기준 지표와 하나도 안 겹치면 엔진 기본값: 하드 게이트 지표가 하드 층, 추종 RMS가 목표 층
+            tmetrics = {t[0] for t in targets}
+            hard_ms = sorted(set(inherited.get("hard_metrics") or ()) & tmetrics)
+            goal_ms = sorted(set(inherited.get("goal_metrics") or ()) & tmetrics)
+            split = bool(hard_ms or goal_ms)
+            tiered = enumerate_plans(rows, knobs, criteria,
+                                     hard_metrics=hard_ms if split else None,
+                                     goal_metrics=goal_ms if split else None, K=PLAN_K)
+            feasibility = tiered["feasibility"]
+            # 안이 없으면(하드 못 맞춤 · 고칠 것 없음) 전 풀 한꺼번에 쓴 해가 근거다 — feasibility는 응답 머리에 한 번만
+            joint = (_plan_joint(tiered["plans"][0], knobs, tiered["joint"]) if tiered["plans"]
+                     else {k: v for k, v in tiered["joint"].items() if k != "feasibility"})
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    if req.objective == "performance":
+        tiered, feasibility = None, None
+    hard_unmet = bool(feasibility) and not feasibility["hard"]["solvable"]
+    goal_unmet = bool(feasibility) and feasibility["hard"]["solvable"] and feasibility["goal"]["solvable"] is False
+    # 동의가 필요한 자리 — 목표 지표를 못 맞추는데 사용자가 아직 「그래도」를 고르지 않았다. 하드부터 못 맞추면
+    # 물을 것이 없다 — 경계 안(hard_boundary)을 확인 런이 판정한다(선형 모델은 길잡이, 판정자는 비선형 실측)
+    needs_consent = goal_unmet and not req.allow_unmet
+    plans = list(tiered["plans"][:PLAN_LIST]) if tiered else []
+    n_confirm = 0 if (req.confirm == "none" or needs_consent) else max(1, len(plans))
+
     n = len(cases)
     per_case = 0 if req.confirm == "none" else (1 if req.confirm == "linear" else 3)
-    total = 1 + (n + n * per_case if per_case else 0)
+    total = 1 + (n + n * per_case * n_confirm if per_case and n_confirm else 0)
 
     def work(job):
         job.report(0, total, message="처방 풀이(저장 스윕 재계산)")
@@ -1342,34 +1406,73 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
         confirm_report = None
         gain_export = None
         proposal_notes: list = []
-        spans = joint.get("spans") or {}
-        # 제안 변화가 사실상 0이면 확인 런은 base 재평가일 뿐이다 — 돌리지 않고
-        # 그 사실을 말한다 (조용한 낭비는 "확인했다"는 착각을 만든다)
-        if all(abs(v) < 1e-6 for v in spans.values()) and spans:
-            warnings.append("제안 변화가 0 — 확인 런 생략(확인할 새 형상이 없다)")
-            spans = {}
-        # 성능 목적의 풀리지 않은 해는 후보가 아니다 — 하드 위반을 예측한 최선해를 확인하면 「성능 수정안」이
-        # 실측된 것처럼 읽힌다. 최소 수정은 종전대로(최선해도 확인해 판정을 본다)
-        if req.objective == "performance" and spans and not joint.get("solvable"):
-            warnings.append(f"성능 수정안이 풀리지 않았다 — 확인 런 생략({joint.get('reason')})")
-            spans = {}
-        if req.confirm != "none" and spans:
-            shape2, proposal_notes = proposal_shape(shape, spans)
+        final_joint = joint
+        plan_out = [dict(p) for p in plans]
+        if hard_unmet:
+            warnings.append(f"선형 모델로는 하드 지표를 탐색 범위 안에서 못 맞춘다({feasibility['reason']}) — "
+                            + ("경계 안을 확인 런으로 판정한다" if plan_out and req.confirm != "none"
+                               else "확인 런 없음"))
+        if needs_consent:
+            warnings.append("목표 지표를 못 맞춘다 — 확인 런 전에 「그래도 복수 게인 튜닝」 동의를 묻는다"
+                            f"({feasibility['reason']})")
+        elif plan_out and req.confirm != "none":
+            # 안마다 확인 런 — 트림은 형상과 무관해 한 번만, evaluate는 안마다. 최종 순서는 실측: 하드 통과 →
+            # J 낮은 순 → 선형 순위. 1안이 곧 joint·confirm·gain_export다(종전 [적용] 흐름이 그대로 읽는다)
             trs = trim_batch(
                 ac, cases, fingerprint=req.fingerprint,
                 on_progress=lambda done, _t, tr: job.report(
                     1 + done, total, message=f"확인 트림: {tr.case.name}"))
-            confirm_report = evaluate(
-                ac, trs, shape2, criteria, depth=req.confirm,
-                dt_plant=req.dt_plant, t_settle=req.t_settle,
-                t_step=req.t_step, t_hold=req.t_hold,
-                on_progress=lambda done, ev_total, msg: job.report(
-                    1 + n + done, 1 + n + ev_total, message=f"확인: {msg}"))
-            gain_export = proposal_export(shape2)
-            if req.objective == "performance":
-                confirm_report["perf"] = _confirm_perf(
-                    rows, payload.get("conditions"), ev, shape_fp,
-                    confirm_report, cases, joint.get("perf_metrics"), req.dt_plant)
+            span_eval = n * per_case
+            for i, p in enumerate(plan_out):
+                shape_i, notes_i = proposal_shape(shape, p["spans"])
+                offset = 1 + n + i * span_eval
+                rep_i = evaluate(
+                    ac, trs, shape_i, criteria, depth=req.confirm,
+                    dt_plant=req.dt_plant, t_settle=req.t_settle,
+                    t_step=req.t_step, t_hold=req.t_hold,
+                    on_progress=lambda done, ev_total, msg, offset=offset, i=i: job.report(
+                        min(offset + done * span_eval / max(ev_total, 1), total), total,
+                        message=f"확인 {i + 1}/{len(plan_out)}안: {msg}"))
+                p["_report"], p["_notes"], p["_shape"] = rep_i, notes_i, shape_i
+                p["confirm"] = _confirm_summary(rep_i)
+            plan_out.sort(key=lambda p: (p["confirm"]["verdict"] != "PASS",
+                                         p["confirm"]["J"] if p["confirm"]["J"] is not None else math.inf))
+            top = plan_out[0]
+            final_joint = _plan_joint(top, knobs, tiered["joint"])
+            confirm_report, proposal_notes = top["_report"], top["_notes"]
+            gain_export = proposal_export(top["_shape"])
+            for p in plan_out:
+                for k in ("_report", "_notes", "_shape"):
+                    p.pop(k, None)
+        else:
+            spans = joint.get("spans") or {}
+            # 제안 변화가 사실상 0이면 확인 런은 base 재평가일 뿐이다 — 돌리지 않고
+            # 그 사실을 말한다 (조용한 낭비는 "확인했다"는 착각을 만든다)
+            if all(abs(v) < 1e-6 for v in spans.values()) and spans:
+                warnings.append("제안 변화가 0 — 확인 런 생략(확인할 새 형상이 없다)")
+                spans = {}
+            # 성능 목적의 풀리지 않은 해는 후보가 아니다 — 하드 위반을 예측한 최선해를 확인하면 「성능 수정안」이
+            # 실측된 것처럼 읽힌다. 최소 수정은 종전대로(최선해도 확인해 판정을 본다)
+            if req.objective == "performance" and spans and not joint.get("solvable"):
+                warnings.append(f"성능 수정안이 풀리지 않았다 — 확인 런 생략({joint.get('reason')})")
+                spans = {}
+            if req.confirm != "none" and spans:
+                shape2, proposal_notes = proposal_shape(shape, spans)
+                trs = trim_batch(
+                    ac, cases, fingerprint=req.fingerprint,
+                    on_progress=lambda done, _t, tr: job.report(
+                        1 + done, total, message=f"확인 트림: {tr.case.name}"))
+                confirm_report = evaluate(
+                    ac, trs, shape2, criteria, depth=req.confirm,
+                    dt_plant=req.dt_plant, t_settle=req.t_settle,
+                    t_step=req.t_step, t_hold=req.t_hold,
+                    on_progress=lambda done, ev_total, msg: job.report(
+                        1 + n + done, 1 + n + ev_total, message=f"확인: {msg}"))
+                gain_export = proposal_export(shape2)
+                if req.objective == "performance":
+                    confirm_report["perf"] = _confirm_perf(
+                        rows, payload.get("conditions"), ev, shape_fp,
+                        confirm_report, cases, joint.get("perf_metrics"), req.dt_plant)
 
         out = to_jsonable({
             "kind": "influence_prescribe",
@@ -1378,7 +1481,15 @@ def submit_prescribe(req: PrescribeIn, request: Request, response: Response) -> 
             "knobs": knobs,
             "inherited": inherited,
             "singles": singles,
-            "joint": joint,
+            "joint": final_joint,
+            # 단계화 처방(v1.93) — 못 맞춤 보고·게인 수별 안(앞 PLAN_LIST개)·동의 질문. 성능 목적은 해당 없음(None·[])
+            "feasibility": feasibility,
+            "plans": plan_out,
+            "plan_pool": None if tiered is None else {
+                "pool": tiered["pool"], "pruned": tiered["pruned"], "n_subsets": tiered["n_subsets"],
+                "K": tiered["K"], "n_candidates": len(tiered["candidates"])},
+            "needs_consent": needs_consent,
+            "allow_unmet": req.allow_unmet,
             "confirm": confirm_report,
             "gain_export": gain_export,
             "proposal_notes": proposal_notes,

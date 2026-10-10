@@ -81,6 +81,7 @@ import {
 import {
   OBJECTIVE_LABEL, PERF_FAMILIES, SMOOTH_MAX, applyExport, confirmPerfLines, jointLines, leverBase,
   leverChange, leverLine, normalizePrescribe, objectiveFields, prescribeRequest,
+  consentQuestion, planRows, unmetBadge,
   singleRows, unappliedLevers, unappliedNote,
 } from "../lib/prescribe.js";
 import { EVAL_MARK, renderEvalCards } from "./evalcards.js";
@@ -1578,7 +1579,8 @@ export function render() {
   paintObjRow();
 
   async function runPrescribe(card, { open = state.drawer === "sens" ? "sens" : "eval",
-                                     hooks = {}, objective = null, howMuch = false } = {}) {
+                                     hooks = {}, objective = null, howMuch = false,
+                                     allowUnmet = false } = {}) {
     const rid = state.sweep?.resultId;
     if (!rid) {
       runStatus("수정안: 먼저 감도(스윕)가 돌아 있어야 한다 — "
@@ -1611,7 +1613,7 @@ export function render() {
           // 평가가 실패라고 한 지표만 푼다 — 통과 지표까지 풀면 표에 답이 묻힌다
           evalResultId: state.evalRun?.resultId,
           tSettle: 5, tStep: Number(stepIn.value) || 15,
-          fingerprint: state.diag?.fingerprint, objective: objFields,
+          fingerprint: state.diag?.fingerprint, objective: objFields, allowUnmet,
         }));
       if (howMuch) howMuchTick("수정안·확인", 0, { jobId: job.id, offset: 0.5, span: 0.5 });
       hooks.onJob?.(job.id);
@@ -1635,7 +1637,9 @@ export function render() {
       const res = await api.get(`/results/${done.result_id}`);
       state.prescribe = { status: "완료", result: normalizePrescribe(res),
                           error: null, resultId: done.result_id,
-                          criteriaEcho: res.criteria_echo ?? null, profileId: res.profile?.id ?? null };
+                          criteriaEcho: res.criteria_echo ?? null, profileId: res.profile?.id ?? null,
+                          // 「못 맞춤」 질문의 [예]가 같은 카드·같은 목적으로 다시 보낸다(v1.93)
+                          again: { card, open, objective }, declined: false };
       // 부채꼴의 근거가 방금 바뀌었다(감도 → 지렛대) — 다시 세우지 않으면 그림은
       // 옛 근거로 켜져 있으면서 자막만 새 말을 하게 된다
       recompute();
@@ -1664,6 +1668,60 @@ export function render() {
     return { status: "중단", result: null, error: why };
   }
 
+  /** 단계화 처방(v1.93, 04 §7.3) — 머리줄 「못 맞춤」 배지 + 사유, 동의 질문(예/아니오), 게인 수별 안 표.
+   *  배지는 지표·케이스 수만, 사유는 그 아래 한 줄, 안내는 툴팁에(그림 위 글 최소 규칙과 같은 결). */
+  function renderTiers(box, pr, m) {
+    const badge = unmetBadge(m.feasibility, m.plans);
+    if (badge) {
+      box.append(el("p", { style: "margin:8px 0 0" },
+        el("span", {
+          class: "flag",
+          style: `background:${WARN_INK}26;color:${WARN_INK};font-weight:600;white-space:nowrap`,
+          title: badge.level === "model"
+            ? "선형 모델 예측으로는 하드 지표를 탐색 범위(스윕 스팬) 안에서 못 맞춘다 — 판정은 경계 안(모델 예측 미달)의 확인 런이 한다"
+            : "목표(주의) 지표를 탐색 범위 안에서 한계 안에 못 넣는다 — 최선값은 그 지표 하나만 민 선형 예측",
+        }, badge.text)),
+      badge.reason ? el("p", { style: `margin:2px 0 0;font-size:12px;color:${WARN_INK}` }, badge.reason) : null);
+    }
+    const q = consentQuestion(m.feasibility);
+    if (q && m.needsConsent && !pr.declined) {
+      const again = pr.again;
+      box.append(el("div", { class: "row", style: "gap:8px;margin:6px 0 0;align-items:center;flex-wrap:wrap" },
+        el("span", { style: "font-size:13px;font-weight:600" }, q),
+        el("button", {
+          class: "primary",
+          title: "목표 지표는 기준값보다 나빠지지 않게만 지키고, 게인 수별 안을 확인 런까지 돌린다",
+          onclick: () => { if (again) runPrescribe(again.card, { ...again, allowUnmet: true }); },
+        }, "예"),
+        el("button", {
+          title: "여기서 멈춘다 — 수정안은 못 맞춤 상태로 남는다",
+          onclick: () => { pr.declined = true; renderPrescribe(); },
+        }, "아니오")));
+    } else if (q && pr.declined) {
+      box.append(el("p", { class: "hint", style: "margin:4px 0 0" }, "복수 게인 튜닝 안 함 — 못 맞춤 상태로 둔다"));
+    }
+    const rows = planRows(m.plans, m.feasibility);
+    if (!rows.length) return;
+    box.append(
+      el("h3", { style: "margin:10px 0 4px;font-size:14px",
+                 title: "게인 수마다 최선 안 — 순위: 층(목표 충족 → 퇴행 금지 → 하드만) → 목표 개선량 → 게인 수 → 최대 변화. "
+                   + "확인 런을 돌렸으면 실측(하드 통과 → J)으로 다시 세운다. 1안이 아래 [이 수정안 적용]의 대상이다" },
+        `게인 수별 안 — 상위 ${rows.length}`),
+      el("div", { class: "scroll-x" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            ["#", "게인 · 변화량", "층", "예측(최악 케이스)", "확인 런", "대가"].map((h) => el("th", {}, h)))),
+          el("tbody", {}, rows.map((r) => el("tr", {},
+            el("td", {}, String(r.rank)),
+            el("td", { style: mono() }, r.spans),
+            el("td", { style: "white-space:nowrap" }, r.tier),
+            el("td", { style: `${mono()};font-size:12px;max-width:420px` }, r.predicted),
+            el("td", {
+              style: `white-space:nowrap;color:${r.pass === true ? GOOD_INK : r.pass === false ? WARN_INK : "inherit"}`,
+            }, r.confirm),
+            el("td", { style: "white-space:nowrap" }, r.cost)))))));
+  }
+
   function renderPrescribe() {
     renderTabCounts();
     clear(prescribeBox);
@@ -1680,6 +1738,7 @@ export function render() {
     if (!m) return;
     const prChip = criteriaChip(pr, "influence_prescribe");
     if (prChip) prescribeBox.append(el("p", { style: "margin:6px 0 0" }, prChip));
+    renderTiers(prescribeBox, pr, m);
 
     // 단일 — 설계변수 하나씩의 필요 변화량 (사유가 값 자리다)
     const rows = singleRows(m);
@@ -1797,7 +1856,7 @@ export function render() {
    * 돌리세요"라는 말을 듣고 다른 패널로 가서 카드를 찾아 누르는 단계가 이
    * 연계의 이유라, 여기서 그 단계를 대신한다.
    */
-  async function runPrescribeFromEval(knobs, hooks = {}, { objective = null } = {}) {
+  async function runPrescribeFromEval(knobs, hooks = {}, { objective = null, allowUnmet = false } = {}) {
     if (!knobs?.length) return { status: "제출 불가", result: null, error: "설계변수가 없다" };
     if (runRefused()) return { status: "제출 불가", result: null, error: "다른 실행이 진행 중이다" };
     let cases;
@@ -1852,7 +1911,7 @@ export function render() {
       } else {
         howMuchTick("감도 재사용", 1, { jobId: null, offset: 0, span: 0.5 });
       }
-      const result = await runPrescribe({ knobs }, { open: "eval", hooks, objective, howMuch: true });
+      const result = await runPrescribe({ knobs }, { open: "eval", hooks, objective, howMuch: true, allowUnmet });
       const ok = result?.status === "완료";
       howMuchEnd(ok, ok ? "완료" : result?.status ?? "실패");
       return result;
@@ -3414,8 +3473,9 @@ export function render() {
         if (!target) throw new Error("FAIL 케이스의 소견에 처방 카드가 없다 — [얼마나 →]를 걸 자리가 없다");
         reportCue(c, { phase: "progress",
           summary: `[얼마나 →] ${target.knobs.join(", ")} @${target.case}` });
-        // 쇼케이스는 FAIL을 고치는 시연이다 — 패널의 목적 선택과 무관하게 최소 수정으로 푼다
-        const pr = await runPrescribeFromEval(target.knobs, hooks, { objective: "min_change" });
+        // 쇼케이스는 FAIL을 고치는 시연이다 — 패널의 목적 선택과 무관하게 최소 수정으로 푼다. 대본이 진행자 대신
+        // 「못 맞춤」 질문에 [예]로 답한다(allow_unmet) — 배지·사유는 수정안 패널에 그대로 남는다(v1.93)
+        const pr = await runPrescribeFromEval(target.knobs, hooks, { objective: "min_change", allowUnmet: true });
         const pm = pr?.result;
         if (!pm) throw new Error(pr?.error ?? "수정안 결과가 없다");
         if (!pm.confirm) {

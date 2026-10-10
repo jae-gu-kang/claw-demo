@@ -9,9 +9,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  OBJECTIVE_LABEL, PERF_FAMILIES, applyExport, confirmPerfLines, jointLines, leverBase, leverChange,
-  leverLine, mergeConstants, normalizePrescribe, objectiveFields, prescribeRequest, singleRows,
-  unappliedLevers, unappliedNote,
+  OBJECTIVE_LABEL, PERF_FAMILIES, TIER_LABEL, applyExport, confirmPerfLines, consentQuestion, jointLines,
+  leverBase, leverChange, leverLine, mergeConstants, normalizePrescribe, objectiveFields, planRows,
+  prescribeRequest, singleRows, unappliedLevers, unappliedNote, unmetBadge,
 } from "./prescribe.js";
 
 const payload = {
@@ -396,4 +396,104 @@ test("confirmPerfLines: 대조하지 못한 조건(노트)을 든다", () => {
     notes: ["평가 결과는 dt_plant를 기록하지 않는다 — 확인 런(dt_plant=0.01)과 적분 간격이 같은지는 대조하지 못했다"] },
   perfJoint);
   assert.match(lines.join(" | "), /주의: 평가 결과는 dt_plant를 기록하지 않는다/);
+});
+
+
+// ── 단계화 처방 (v1.93, 04 §7.3) ──
+const LIMITS = { de_dyn_reserve_min_frac: { limit: 0.05, above_is_bad: false, tier: "hard" },
+                 alt_rms: { limit: 10, above_is_bad: true, tier: "goal" } };
+const goalUnmet = {
+  hard: { solvable: true, violated: [], metrics: ["de_dyn_reserve_min_frac"] },
+  goal: { solvable: false, nonregress_solvable: true, metrics: ["alt_rms"], violated: [
+    { metric: "alt_rms", case: "M0.12_h3000_f10", base: 12, limit: 10, predicted: 11.8, best_reachable: 11.3 },
+    { metric: "alt_rms", case: "M0.2_h200_f10", base: 10.6, limit: 10, predicted: 10.5, best_reachable: 10.2 },
+  ] },
+  reason: "alt_rms는 탐색 범위(±20 %) 안 어떤 조합으로도 10 아래로 못 내려간다(최선 11.3 @M0.12_h3000_f10)",
+  mode: "nonregress", span_bound: 0.2, limits: LIMITS,
+};
+const PLANS = [
+  { knobs: ["fcl/Autopilot.kp_alt", "fcl/Autopilot.ki_alt"], spans: { "fcl/Autopilot.kp_alt": 0.12, "fcl/Autopilot.ki_alt": -0.05 },
+    tier: "nonregress", score: -0.04, cost: { n_changed: 2, max_pct: 12 },
+    predicted: { A: { alt_rms: 11.5, de_dyn_reserve_min_frac: 0.06 }, B: { alt_rms: 10.4, de_dyn_reserve_min_frac: 0.09 } },
+    confirm: { verdict: "PASS", J: 4.123, worst_case: "A", n_hard_fails: 0 } },
+  { knobs: ["fcl/Autopilot.kp_alt"], spans: { "fcl/Autopilot.kp_alt": 0.2 }, tier: "nonregress", score: 0,
+    cost: { n_changed: 1, max_pct: 20 },
+    predicted: { A: { alt_rms: 12, de_dyn_reserve_min_frac: 0.04 } },
+    confirm: { verdict: "FAIL", J: null, worst_case: null, n_hard_fails: 2 } },
+];
+
+test("정규화 — 단계화 필드는 옛 결과에서 null·[]·false로 둔다(지어내지 않는다)", () => {
+  const old = normalizePrescribe(payload);
+  assert.equal(old.feasibility, null);
+  assert.deepEqual(old.plans, []);
+  assert.equal(old.needsConsent, false);
+  assert.equal(old.allowUnmet, false);
+  const m = normalizePrescribe({ ...payload, feasibility: goalUnmet, plans: PLANS, needs_consent: true });
+  assert.equal(m.needsConsent, true);
+  assert.equal(m.plans.length, 2);
+  assert.equal(m.feasibility.reason, goalUnmet.reason);
+});
+
+test("못 맞춤 배지 — 목표 지표만 못 맞추면 지표(케이스 수), 사유는 따로", () => {
+  const b = unmetBadge(goalUnmet);
+  assert.equal(b.level, "goal");
+  assert.equal(b.text, "못 맞춤: alt_rms(2 케이스)");
+  assert.deepEqual(b.metrics, ["alt_rms"]);
+  assert.equal(b.reason, goalUnmet.reason);
+  // 다 맞추면 배지 없음 · 옛 결과(null)도 없음
+  assert.equal(unmetBadge({ ...goalUnmet, goal: { solvable: true, violated: [] }, reason: null }), null);
+  assert.equal(unmetBadge(null), null);
+});
+
+test("못 맞춤 배지 — 하드를 모델로 못 맞추면 (모델) + 경계 안의 확인 판정, 묻지 않는다", () => {
+  const f = { hard: { solvable: false, violated: [
+    { metric: "de_dyn_reserve_min_frac", case: "A", base: 0.02, limit: 0.05, predicted: 0.03, best_reachable: 0.03 }] },
+              goal: { solvable: null, violated: [] }, reason: "de_dyn_reserve_min_frac는 … 0.05 위로 못 올라간다" };
+  const b = unmetBadge(f);
+  assert.equal(b.level, "model");
+  assert.equal(b.text, "못 맞춤(모델): de_dyn_reserve_min_frac(1 케이스) · 확인 런 없음");
+  const pass = [{ tier: "hard_boundary", confirm: { verdict: "PASS", J: 19.1 } }];
+  assert.equal(unmetBadge(f, pass).text, "못 맞춤(모델): de_dyn_reserve_min_frac(1 케이스) · 확인 런 PASS");
+  // 목표 층 못 맞춤과 글이 다르다 — 확인 판정은 붙지 않는다
+  assert.equal(unmetBadge(goalUnmet, pass).text, "못 맞춤: alt_rms(2 케이스)");
+  assert.equal(consentQuestion(f), null);
+  assert.equal(TIER_LABEL.hard_boundary, "모델 예측 미달 — 확인 런으로 판정");
+});
+
+test("동의 질문 — 못 맞춘 목표 지표 이름을 넣어 묻는다", () => {
+  assert.equal(consentQuestion(goalUnmet), "그래도 복수 게인 튜닝을 할까요? (alt_rms는 퇴행 금지로만 지킵니다)");
+  assert.equal(consentQuestion({ ...goalUnmet, goal: { solvable: true, violated: [] } }), null);
+  // 퇴행 금지로도 안 풀리면(안이 하드 층) 그 약속을 하지 않는다
+  const noKeep = { ...goalUnmet, goal: { ...goalUnmet.goal, nonregress_solvable: false } };
+  assert.equal(consentQuestion(noKeep), "그래도 복수 게인 튜닝을 할까요? (alt_rms는 퇴행 금지로도 못 지켜 퇴행을 감수합니다)");
+});
+
+test("요청 본문 — 동의(예)만 allow_unmet을 싣는다", () => {
+  const st = { autopilot: null, scas: null };
+  assert.equal(prescribeRequest(st, { resultId: "s", cases: [] }).allow_unmet, undefined);
+  assert.equal(prescribeRequest(st, { resultId: "s", cases: [], allowUnmet: false }).allow_unmet, undefined);
+  assert.equal(prescribeRequest(st, { resultId: "s", cases: [], allowUnmet: true }).allow_unmet, true);
+});
+
+test("안 목록 행 — 게인·변화량·층·최악 예측(한계 넘으면 ✗)·확인 판정·대가", () => {
+  const rows = planRows(PLANS, goalUnmet);
+  assert.equal(rows.length, 2);
+  const [a, b] = rows;
+  assert.equal(a.rank, 1);
+  assert.deepEqual(a.knobs, ["fcl/Autopilot.kp_alt", "fcl/Autopilot.ki_alt"]);
+  assert.equal(a.spans, "fcl/Autopilot.kp_alt +12%, fcl/Autopilot.ki_alt −5.0%");
+  assert.equal(a.tier, TIER_LABEL.nonregress);
+  // 최악 케이스 — alt_rms는 큰 쪽(A 11.5, 한계 위 ✗), 동적 여유는 작은 쪽(A 0.06, 한계 안)
+  assert.equal(a.predicted, "de_dyn_reserve_min_frac 0.06 (한계 0.05, @A) · alt_rms 11.5 ✗ (한계 10, @A)");
+  assert.equal(a.confirm, "PASS · J 4.12 (최악 A)");
+  assert.equal(a.pass, true);
+  assert.equal(a.cost, "게인 2개 · 최대 12%");
+  assert.equal(b.confirm, "FAIL · 하드 위반 2건");
+  assert.equal(b.pass, false);
+  assert.match(b.predicted, /de_dyn_reserve_min_frac 0\.04 ✗/);
+  // 확인 런이 안 돈 안(동의 전) — 지어내지 않는다
+  const [n] = planRows([{ ...PLANS[0], confirm: undefined }], goalUnmet);
+  assert.equal(n.confirm, "확인 런 없음");
+  assert.equal(n.pass, null);
+  assert.deepEqual(planRows(null, null), []);
 });
