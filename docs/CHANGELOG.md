@@ -24,6 +24,31 @@ v0.75부터는 축이 하나뿐이라 이 혼동이 없다.
 
 ## 현행
 
+### v1.95 — 기체 모델 Banshee Jet 80+: 원본 조립 모델을 가상환경 규약으로 굽고, 모는 노드는 모델이 선언한다
+
+사용자 요청(다른 세션이 시작한 작업을 이어 마무리). 쌍발 제트 표적기 Banshee Jet 80+의 절차적 블렌더 모델
+`models/banshee/banshee_assembly.py`(분해·조립 리그 포함, **손대지 않는 원본**)를 `generate_banshee.py`가 불러
+**shahed와 같은 규약**(로컬 +X 우현·+Y 위·+Z 후방, 엘레본 `rotation.x = δ`, 러더 `rotation.y = −δr`)으로
+`banshee.glb`를 굽는다 — 루트 Z 180° 회전(원본은 기수 −Y·좌익 +X), 엘레본 이름만 교체, 러더는 힌지 밑에
+`Rudder_Frame`(로컬 Z를 힌지 −X로 눕힘) › `Rudder`(항등, 모는 노드) 두 겹을 끼워 부호를 맞추고(메시는 자리
+그대로, 오차 < 1e-6), 분해 드라이버·키를 걷어 조립 상태로 굳히며 애니메이션은 싣지 않는다. 규약 정본은
+`models/banshee/README.md`.
+
+- **모는 노드는 모델이 선언한다** — 루트 extras `claw_drive_nodes`(쉼표 목록). 화면은 선언이 있으면 그 이름만
+  기대하고(`core/surfaces.ts driveNodesFor`), 없으면 shahed형 목록이라 재굽기로 이름이 바뀐 것을 잡던 장치를
+  잃지 않는다. 종전 고정 목록이면 러더 하나·프로펠러 없는 이 기체에 「못 찾은 노드: Rudder_L, Rudder_R,
+  Propeller」가 붙어 멀쩡한 모델을 고장처럼 말했다. 화면이 몰 줄 모르는 이름은 캡션이 따로 말하고
+  (`unknown`), 타면 캡션은 모델에 실제로 있는 노드의 문장만(`surfaceDisplayNotes`). 단발 `Rudder`는 쌍과
+  같은 축·부호로 회전표에 실린다. 도식 모델은 `unknown: []`.
+- 검사(`test_generate_banshee.py`, 블렌더 불필요): 선언 노드 존재·애니메이션 없음·축(기수 −Z·핀 +Y·우익 +X)·
+  모는 노드 정지 회전 항등·엘레본 +15°에 뒷전 하강·러더 `rotation.y` +에 뒷전 우(+X)·최후방 1.08 m ≤
+  `VEHICLE_AFT_EXTENT` 1.90. 정점을 실제로 돌려 확인한다 — 이름만 맞춘 재굽기를 잡는다.
+- 커밋: `.glb`·두 스크립트·README·테스트. `.blend`·원본 직접 산출(`Banshee_Jet80_Assembly.*`)·참고 렌더
+  (`A*.png`)는 `.gitignore`(반입 꾸러미 영구 적재 — `models/README.md`). 프로파일 문서는 `display.model:
+  "banshee.glb"`만 적으면 된다(02 §5.6) — 기체 데이터(공력·질량·추진)는 이 작업에 없고 프로파일 몫이다.
+- 문서 02 §5.6(타면 노드 [TBD] 해소) · 06 §6 · `models/README.md`. 가상환경 번들 재빌드(`build/world.js`).
+  스위트: 모델 34 · world 단위 311 · tsc 통과 · 웹 1565 · refcheck 0/0.
+
 ### v1.94 — 활주로 도색 다듬기(v1.92 리뷰): 지형 없이도 활주로가 보이고, 비스듬히 봐도 중심선이 남는다
 
 v1.92 리뷰 지적을 반영한다.

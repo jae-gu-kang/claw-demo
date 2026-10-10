@@ -33,7 +33,7 @@ import { runwayFloorOf, sameFloor, type RunwayFloor } from "../core/runwayfloor.
 import { ATMOSPHERE_NOTES, CLOUD_NOTES } from "./atmosphere.ts";
 import { WEAR_NOTES } from "./materials.ts";
 import { launcherCaptionNotes, launcherPose } from "../core/launcher.ts";
-import { SURFACE_NOTES, propellerRate, surfacePose } from "../core/surfaces.ts";
+import { propellerRate, surfaceDisplayNotes, surfacePose } from "../core/surfaces.ts";
 import { WAVE_NOTES } from "../core/waves.ts";
 import type { Replay } from "../core/types.ts";
 import {
@@ -44,8 +44,8 @@ import { SceneHost, createSceneHost, type Marker, type ViewStyle } from "./Scene
 import { buildCoastField } from "../core/coastfield.ts";
 import { buildTerrain } from "./terrain.ts";
 import {
-  LAUNCHER_NODES, VEHICLE_NODES, applySurfaces, hideVehicle, loadModel,
-  setVehiclePose, showLauncher, spinPropeller, type LoadedModel,
+  LAUNCHER_NODES, applySurfaces, hideVehicle, loadModel,
+  setVehiclePose, showLauncher, spinPropeller, vehicleDriveNodes, type LoadedModel,
 } from "./models.ts";
 import { SCHEMATIC_NOTE, schematicCaption, vehicleSchematic } from "../lib/vehicleschematic.ts";
 import { schematicVehicle } from "./schematic.ts";
@@ -297,7 +297,7 @@ export class SceneController {
     }
     this.vehicleLoading = "model";
     this.emitNotes();
-    const r = await loadModel(modelUrl(plan.model), VEHICLE_NODES);
+    const r = await loadModel(modelUrl(plan.model), vehicleDriveNodes);
     if (gen !== this.vehicleGen || this.disposed) { r.model?.dispose(); return; }
     this.vehicleLoading = null;
     if (r.model) {
@@ -553,13 +553,13 @@ export class SceneController {
         : this.vehicleCaption ? [this.vehicleCaption] : [];
       // 도식에는 몰 노드가 없다 — 타면·프로펠러 표시 규약을 말하면 없는 동작을 설명하게 된다
       if (this.vehicleKind === "schematic") return [...head, SCHEMATIC_NOTE];
-      const out = [
-        ...head,
-        SURFACE_NOTES.innerOuterShared, SURFACE_NOTES.rudderShared,
-        SURFACE_NOTES.propellerDisplay, SURFACE_NOTES.holdOnMissing,
-      ];
+      // 타면 문장은 이 모델이 가진 노드만 — 단발 러더·프로펠러 없는 기체에 쌍 러더·프로펠러 규약을 말하지 않는다
+      const out = [...head, ...surfaceDisplayNotes(new Set(this.vehicle.nodes.keys()))];
       if (this.vehicle.missing.length > 0) {
         out.push(`모델에서 못 찾은 노드: ${this.vehicle.missing.join(", ")} — 그 부분은 움직이지 않습니다.`);
+      }
+      if (this.vehicle.unknown.length > 0) {
+        out.push(`모델이 선언했지만 화면이 몰 줄 모르는 노드: ${this.vehicle.unknown.join(", ")} — 그 부분은 움직이지 않습니다.`);
       }
       return out;
     }

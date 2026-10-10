@@ -84,7 +84,9 @@ export interface NodeRotation {
   angle: number;
 }
 
-/** 여섯 면의 노드 회전표. `scene/models.ts`의 `applySurfaces`는 이것을 **넣기만** 한다.
+/** 타면 노드 회전표. `scene/models.ts`의 `applySurfaces`는 이것을 **넣기만** 한다 — 모델에 없는 이름은
+ * 그쪽에서 건너뛴다. 러더는 쌍(`Rudder_L/R`, shahed)과 단발(`Rudder`, banshee)을 같은 축·부호로 함께 싣는다
+ * (단발 모델도 `rotation.y = −δr` 규약으로 구웠다 — `models/banshee/README.md`).
  *
  * 축과 부호를 여기 두어야 테스트가 닿는다 — scene은 three를 import해 테스트 밖이고, 러더를
  * 호출 자리에서 부호 없이 넣던 것이 실제로 난 버그였다. */
@@ -95,7 +97,44 @@ export function surfaceNodeRotations(pose: SurfacePose): NodeRotation[] {
       .map(([name, angle]) => ({ name, axis: "x" as const, angle })),
     { name: "Rudder_L", axis: "y", angle: rudder },
     { name: "Rudder_R", axis: "y", angle: rudder },
+    { name: "Rudder", axis: "y", angle: rudder },
   ];
+}
+
+/** 모델 선언이 없을 때 기대하는 구동 노드 — shahed형(쌍 러더 + 프로펠러). 이름은 `models/shahed-136/README.md`가 정본. */
+export const DEFAULT_DRIVE_NODES = [
+  "Elevon_In_L", "Elevon_Out_L", "Elevon_In_R", "Elevon_Out_R",
+  "Rudder_L", "Rudder_R", "Propeller",
+] as const;
+
+/** 가상환경이 몰 줄 아는 노드 전부 — 모델이 이 밖의 이름을 선언하면 몰 수 없다. */
+const KNOWN_DRIVE_NODES: ReadonlySet<string> = new Set([...DEFAULT_DRIVE_NODES, "Rudder"]);
+
+/** 모델 루트의 구동 노드 선언(glTF extras `claw_drive_nodes`, 쉼표 목록) → 기대할 노드 + 몰 줄 모르는 이름.
+ *
+ * 모델마다 가진 타면이 다르다 — 쌍발 제트(banshee)는 러더가 하나고 프로펠러가 없다. 고정 목록으로 기대하면
+ * 그 모델에 「못 찾은 노드: Rudder_L, Rudder_R, Propeller」가 붙어 멀쩡한 모델을 고장처럼 말한다. 그래서
+ * 모델이 자기 노드를 선언하고, **선언이 없으면 종전 목록**을 기대한다 — 재굽기로 노드 이름이 바뀐 것을
+ * 잡던 장치(`scene/models.ts` 머리말)를 선언 없는 모델에서 잃지 않는다. 선언이 있으면 그 이름이 빠진 것을 잡는다. */
+export function driveNodesFor(declared: unknown): { expect: string[]; unknown: string[] } {
+  const names = typeof declared === "string"
+    ? declared.split(",").map((s) => s.trim()).filter((s) => s !== "")
+    : [];
+  if (names.length === 0) return { expect: [...DEFAULT_DRIVE_NODES], unknown: [] };
+  return {
+    expect: names.filter((n) => KNOWN_DRIVE_NODES.has(n)),
+    unknown: names.filter((n) => !KNOWN_DRIVE_NODES.has(n)),
+  };
+}
+
+/** 타면 표시 캡션 — **모델에 실제로 있는 노드**에 해당하는 문장만. 단발 러더에 「러더 두 면」을,
+ * 제트기에 프로펠러 표시 규약을 말하면 없는 동작을 설명하게 된다. */
+export function surfaceDisplayNotes(nodes: ReadonlySet<string>): string[] {
+  const out: string[] = [SURFACE_NOTES.innerOuterShared];
+  if (nodes.has("Rudder_L") && nodes.has("Rudder_R")) out.push(SURFACE_NOTES.rudderShared);
+  if (nodes.has("Propeller")) out.push(SURFACE_NOTES.propellerDisplay);
+  out.push(SURFACE_NOTES.holdOnMissing);
+  return out;
 }
 
 /** 타면 위치 한계 [rad] — 결과의 `meta.limits`가 정본. **미상은 null**이고 안 자른다. */

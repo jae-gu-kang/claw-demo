@@ -3,8 +3,8 @@ import { describe, it } from "node:test";
 
 import { LOCAL_NOSE } from "./modelaxes.ts";
 import {
-  SURFACE_NOTES, propellerRate, rudderRotationY, skidCompression,
-  surfaceNodeRotations, surfacePose,
+  DEFAULT_DRIVE_NODES, SURFACE_NOTES, driveNodesFor, propellerRate, rudderRotationY, skidCompression,
+  surfaceDisplayNotes, surfaceNodeRotations, surfacePose,
 } from "./surfaces.ts";
 
 const LIMITS = { elevon_lo: -0.35, elevon_hi: 0.35, rudder_lo: -0.35, rudder_hi: 0.35 };
@@ -39,8 +39,8 @@ describe("러더 노드 회전 — δr(TE left +) → three rotation.y", () => {
     // 호출 자리에서 부호를 빠뜨린 것이 실제로 난 버그였다 — 이제 그 자리는 이 표를 넣기만 한다.
     const rots = surfaceNodeRotations(surfacePose(0.1, 0.04, 0.2)!);
     const by = new Map(rots.map((r) => [r.name, r]));
-    assert.equal(rots.length, 6, "엘레본 4 + 러더 2");
-    for (const name of ["Rudder_L", "Rudder_R"]) {
+    assert.equal(rots.length, 7, "엘레본 4 + 러더 2(쌍) + 러더 1(단발)");
+    for (const name of ["Rudder_L", "Rudder_R", "Rudder"]) {
       const r = by.get(name)!;
       assert.equal(r.axis, "y", name);
       near(rotY(TE, r.angle)[0]!, -Math.sin(0.2), `${name} 뒷전 x`);
@@ -215,5 +215,48 @@ describe("공시 원장", () => {
     const n = SURFACE_NOTES.skidDisplay;
     assert.ok(n.includes("합"), "합만 있다는 사실");
     assert.ok(n.includes("감쇠"), "감쇠 항이 섞여 있다는 사실");
+  });
+});
+
+describe("구동 노드 선언 — 모델이 가진 노드만 기대한다", () => {
+  it("선언이 없으면 종전 목록(쌍 러더 + 프로펠러) — 노드 이름이 바뀐 재굽기를 계속 잡는다", () => {
+    const r = driveNodesFor(undefined);
+    assert.deepEqual(r.expect, [...DEFAULT_DRIVE_NODES]);
+    assert.deepEqual(r.unknown, []);
+  });
+
+  it("단발 러더·프로펠러 없음(쌍발 제트) 선언은 그 넷 + Rudder만 기대한다", () => {
+    const r = driveNodesFor("Elevon_In_L,Elevon_Out_L,Elevon_In_R,Elevon_Out_R,Rudder");
+    assert.deepEqual(r.expect, ["Elevon_In_L", "Elevon_Out_L", "Elevon_In_R", "Elevon_Out_R", "Rudder"]);
+    assert.deepEqual(r.unknown, []);
+  });
+
+  it("모르는 이름은 기대하지 않고 따로 말한다 — 조용히 무시하면 몰 수 없는 노드를 선언한 모델이 멀쩡해 보인다", () => {
+    const r = driveNodesFor(" Elevon_In_L , Canard_L ,,");
+    assert.deepEqual(r.expect, ["Elevon_In_L"]);
+    assert.deepEqual(r.unknown, ["Canard_L"]);
+  });
+
+  it("문자열이 아니거나 비면 선언이 없는 것으로 본다", () => {
+    for (const v of [42, "", " , ", ["Rudder"]]) {
+      assert.deepEqual(driveNodesFor(v).expect, [...DEFAULT_DRIVE_NODES], String(v));
+    }
+  });
+});
+
+describe("타면 캡션 — 모델에 있는 노드만 말한다", () => {
+  it("쌍 러더 + 프로펠러면 넷 다", () => {
+    const n = surfaceDisplayNotes(new Set(DEFAULT_DRIVE_NODES));
+    assert.ok(n.includes(SURFACE_NOTES.rudderShared));
+    assert.ok(n.includes(SURFACE_NOTES.propellerDisplay));
+    assert.ok(n.includes(SURFACE_NOTES.innerOuterShared));
+    assert.ok(n.includes(SURFACE_NOTES.holdOnMissing));
+  });
+
+  it("단발 러더·프로펠러 없음이면 러더 공유·프로펠러 문장을 뺀다 — 없는 동작을 설명하지 않는다", () => {
+    const n = surfaceDisplayNotes(new Set(["Elevon_In_L", "Elevon_Out_L", "Elevon_In_R", "Elevon_Out_R", "Rudder"]));
+    assert.ok(!n.includes(SURFACE_NOTES.rudderShared));
+    assert.ok(!n.includes(SURFACE_NOTES.propellerDisplay));
+    assert.ok(n.includes(SURFACE_NOTES.innerOuterShared));
   });
 });

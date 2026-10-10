@@ -41475,8 +41475,34 @@ function surfaceNodeRotations(pose2) {
   return [
     ...Object.entries(pose2.elevon).map(([name, angle]) => ({ name, axis: "x", angle })),
     { name: "Rudder_L", axis: "y", angle: rudder },
-    { name: "Rudder_R", axis: "y", angle: rudder }
+    { name: "Rudder_R", axis: "y", angle: rudder },
+    { name: "Rudder", axis: "y", angle: rudder }
   ];
+}
+const DEFAULT_DRIVE_NODES = [
+  "Elevon_In_L",
+  "Elevon_Out_L",
+  "Elevon_In_R",
+  "Elevon_Out_R",
+  "Rudder_L",
+  "Rudder_R",
+  "Propeller"
+];
+const KNOWN_DRIVE_NODES = /* @__PURE__ */ new Set([...DEFAULT_DRIVE_NODES, "Rudder"]);
+function driveNodesFor(declared) {
+  const names = typeof declared === "string" ? declared.split(",").map((s) => s.trim()).filter((s) => s !== "") : [];
+  if (names.length === 0) return { expect: [...DEFAULT_DRIVE_NODES], unknown: [] };
+  return {
+    expect: names.filter((n2) => KNOWN_DRIVE_NODES.has(n2)),
+    unknown: names.filter((n2) => !KNOWN_DRIVE_NODES.has(n2))
+  };
+}
+function surfaceDisplayNotes(nodes) {
+  const out = [SURFACE_NOTES.innerOuterShared];
+  if (nodes.has("Rudder_L") && nodes.has("Rudder_R")) out.push(SURFACE_NOTES.rudderShared);
+  if (nodes.has("Propeller")) out.push(SURFACE_NOTES.propellerDisplay);
+  out.push(SURFACE_NOTES.holdOnMissing);
+  return out;
 }
 function clamp(v2, lo, hi2) {
   let out = v2;
@@ -47028,15 +47054,13 @@ function modelColumnsNed(axes) {
 function frdToModelLocal(v2) {
   return [v2[1], -v2[2], -v2[0]];
 }
-const VEHICLE_NODES = [
-  "Elevon_In_L",
-  "Elevon_Out_L",
-  "Elevon_In_R",
-  "Elevon_Out_R",
-  "Rudder_L",
-  "Rudder_R",
-  "Propeller"
-];
+function vehicleDriveNodes(scene) {
+  let declared;
+  scene.traverse((o) => {
+    if (declared === void 0 && o.userData?.claw_drive_nodes !== void 0) declared = o.userData.claw_drive_nodes;
+  });
+  return driveNodesFor(declared);
+}
 const LAUNCHER_NODES = [
   "Turntable",
   "Cradle",
@@ -47057,9 +47081,10 @@ async function loadModel(url, expect, signal) {
     disposeTree(gltf.scene);
     return { model: null, reason: "취소됨" };
   }
+  const want = typeof expect === "function" ? expect(gltf.scene) : { expect, unknown: [] };
   const nodes = /* @__PURE__ */ new Map();
   const missing = [];
-  for (const name of expect) {
+  for (const name of want.expect) {
     const o = gltf.scene.getObjectByName(name);
     if (o) nodes.set(name, o);
     else missing.push(name);
@@ -47081,6 +47106,7 @@ async function loadModel(url, expect, signal) {
       root: gltf.scene,
       nodes,
       missing,
+      unknown: want.unknown,
       dispose() {
         gltf.scene.removeFromParent();
         disposeTree(gltf.scene);
@@ -47373,6 +47399,7 @@ function schematicVehicle(mesh) {
     root,
     nodes: /* @__PURE__ */ new Map(),
     missing: [],
+    unknown: [],
     dispose() {
       root.removeFromParent();
       disposeTree(root);
@@ -47547,7 +47574,7 @@ class SceneController {
     }
     this.vehicleLoading = "model";
     this.emitNotes();
-    const r2 = await loadModel(modelUrl(plan.model), VEHICLE_NODES);
+    const r2 = await loadModel(modelUrl(plan.model), vehicleDriveNodes);
     if (gen !== this.vehicleGen || this.disposed) {
       r2.model?.dispose();
       return;
@@ -47752,15 +47779,12 @@ class SceneController {
     if (this.vehicle != null) {
       const head = this.vehicleLoading === "doc" ? ["기체 문서를 받는 중… — 지금 보이는 모델은 앞서 얹은 것이고, 문서가 오면 그 문서의 표시 모델로 맞춥니다."] : this.vehicleCaption ? [this.vehicleCaption] : [];
       if (this.vehicleKind === "schematic") return [...head, SCHEMATIC_NOTE];
-      const out = [
-        ...head,
-        SURFACE_NOTES.innerOuterShared,
-        SURFACE_NOTES.rudderShared,
-        SURFACE_NOTES.propellerDisplay,
-        SURFACE_NOTES.holdOnMissing
-      ];
+      const out = [...head, ...surfaceDisplayNotes(new Set(this.vehicle.nodes.keys()))];
       if (this.vehicle.missing.length > 0) {
         out.push(`모델에서 못 찾은 노드: ${this.vehicle.missing.join(", ")} — 그 부분은 움직이지 않습니다.`);
+      }
+      if (this.vehicle.unknown.length > 0) {
+        out.push(`모델이 선언했지만 화면이 몰 줄 모르는 노드: ${this.vehicle.unknown.join(", ")} — 그 부분은 움직이지 않습니다.`);
       }
       return out;
     }

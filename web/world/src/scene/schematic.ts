@@ -50,6 +50,7 @@ export function schematicVehicle(mesh: SchematicMesh): LoadedModel {
     root,
     nodes: new Map(),
     missing: [],
+    unknown: [],
     dispose() {
       root.removeFromParent(); // 자원을 놓기 전에 씬에서 뗀다(models.ts loadModel과 같은 순서)
       disposeTree(root);

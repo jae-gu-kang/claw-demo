@@ -1,19 +1,26 @@
 # models — 3D 모델
 
-가상환경(`#world`)이 쓰는 무인기·발사관 모델. 각 모델의 형상·리깅·노드 이름은 그
-디렉터리의 README가 정본이고, **두 모델에 공통인 것만 여기 있다.**
+가상환경(`#world`)이 쓰는 기체·발사관 모델. 각 모델의 형상·리깅·노드 이름은 그
+디렉터리의 README가 정본이고, **모델들에 공통인 것만 여기 있다.**
 
 ```
 models/
   blender_numpy.py        블렌더 내장 numpy 보정 (아래)
   test_blender_numpy.py   그 테스트 — `pytest models`
-  shahed-136/             무인기
+  shahed-136/             델타익 무인기 (기본형 · EO/IR형)
+  banshee/                쌍발 제트 표적기 Banshee Jet 80+ — 원본 조립 모델을 같은 규약으로 구움
   launcher/               캐니스터 발사관
 ```
 
+기체 모델은 **같은 규약**(로컬 +X 우현·+Y 위·+Z 후방, 엘레본 `rotation.x = δ`, 러더 `rotation.y = −δr`)으로
+굽고, 가진 타면이 다르면 루트 extras `claw_drive_nodes`로 **자기 구동 노드를 선언**한다 — 규약 설명은
+`banshee/README.md`, 화면 쪽 판단은 `web/world/src/core/surfaces.ts driveNodesFor`. 어느 모델을 그릴지는
+프로파일 문서의 표시 모델(02 §5.6)이 정한다 — 이 폴더는 자산이고 기체 데이터가 아니다.
+
 ## 무엇을 커밋하나
 
-`.glb` · `generate_*.py` · `README.md`만 커밋한다. **`.blend`와 `preview.png`는 커밋하지
+`.glb` · `generate_*.py`(와 그것이 부르는 원본 스크립트) · `README.md` · 테스트만 커밋한다. **`.blend`와
+`preview.png`·참고 렌더(`banshee/A*.png`)·원본 스크립트의 직접 산출(`Banshee_Jet80_Assembly.*`)은 커밋하지
 않는다** — `data/geo/*.bin`이 세운 "재생성 가능하면 커밋하지 않는다"와 같은 사유다.
 
 `scripts/bundle.sh`는 `HEAD main`의 **전체 이력**을 담고 `HEAD == main`을 강제하므로,

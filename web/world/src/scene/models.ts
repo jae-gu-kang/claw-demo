@@ -28,17 +28,21 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { BodyAxes, Vec3 } from "../lib/attitude.ts";
 import { modelColumnsNed } from "../core/modelaxes.ts";
 import type { LauncherPose } from "../core/launcher.ts";
-import { surfaceNodeRotations, type SurfacePose } from "../core/surfaces.ts";
+import { driveNodesFor, surfaceNodeRotations, type SurfacePose } from "../core/surfaces.ts";
 import { applyAerialPerspective } from "./atmosphere.ts";
 import { WEAR_BY_MATERIAL, applyWear } from "./materials.ts";
 import { disposeTree } from "./dispose.ts";
 import { toWorld } from "./axes.ts";
 
-/** 무인기에서 우리가 모는 노드 — 이름은 `models/shahed-136/README.md`가 정본. */
-export const VEHICLE_NODES = [
-  "Elevon_In_L", "Elevon_Out_L", "Elevon_In_R", "Elevon_Out_R",
-  "Rudder_L", "Rudder_R", "Propeller",
-] as const;
+/** 기체에서 우리가 모는 노드 — **모델이 선언한다**(루트 extras `claw_drive_nodes`). 선언이 없으면
+ *  shahed형 목록이다. 판단은 `core/surfaces.ts`의 `driveNodesFor`가 정본. */
+export function vehicleDriveNodes(scene: Object3D): { expect: string[]; unknown: string[] } {
+  let declared: unknown;
+  scene.traverse((o) => {
+    if (declared === undefined && o.userData?.claw_drive_nodes !== undefined) declared = o.userData.claw_drive_nodes;
+  });
+  return driveNodesFor(declared);
+}
 
 /** 발사관에서 우리가 모는 노드 — `models/launcher/README.md`가 정본. */
 export const LAUNCHER_NODES = [
@@ -51,13 +55,16 @@ export interface LoadedModel {
   nodes: Map<string, Object3D>;
   /** 기대했는데 없던 이름 — 캡션이 말한다. */
   missing: string[];
+  /** 모델이 선언했지만 몰 줄 모르는 이름 — 캡션이 말한다(기체만, 발사관은 늘 빈 목록). */
+  unknown: string[];
   dispose(): void;
 }
 
-/** GLB 하나를 읽어 노드 핸들을 만든다. 실패는 **던지지 않고** 사유를 낸다. */
+/** GLB 하나를 읽어 노드 핸들을 만든다. 실패는 **던지지 않고** 사유를 낸다.
+ *  `expect`가 함수면 읽은 장면에서 기대 노드를 정한다(기체 — `vehicleDriveNodes`). */
 export async function loadModel(
   url: string,
-  expect: readonly string[],
+  expect: readonly string[] | ((scene: Object3D) => { expect: readonly string[]; unknown: string[] }),
   signal?: AbortSignal,
 ): Promise<{ model: LoadedModel; reason: null } | { model: null; reason: string }> {
   let gltf: { scene: Group; animations: unknown[] };
@@ -73,9 +80,10 @@ export async function loadModel(
     return { model: null, reason: "취소됨" };
   }
 
+  const want = typeof expect === "function" ? expect(gltf.scene) : { expect, unknown: [] };
   const nodes = new Map<string, Object3D>();
   const missing: string[] = [];
-  for (const name of expect) {
+  for (const name of want.expect) {
     const o = gltf.scene.getObjectByName(name);
     if (o) nodes.set(name, o);
     else missing.push(name);
@@ -109,6 +117,7 @@ export async function loadModel(
       root: gltf.scene,
       nodes,
       missing,
+      unknown: want.unknown,
       dispose() {
         // 자원을 놓기 전에 씬에서 뗀다 — 안 떼면 빈 Group이 `modelGroup`에 쌓인다.
         gltf.scene.removeFromParent();
