@@ -8,7 +8,7 @@ import { EXAMPLE_ID } from "./profile.js";
 import { TAB_HASHES } from "./ask.js";
 import {
   AUTODESIGN_BUDGET, CAP_FACTOR, DWELL_MS, FIGURE_DWELL_MS, LINE_FULL_MAX, LINE_MAX, NAV_DWELL_MS, RESUME_WINDOW_MS,
-  FAULT_STEP_LABEL, SHOWCASE_CD0_DELTA, SHOWCASE_EVAL_POINTS, SHOWCASE_FAULT, SHOWCASE_ID, STATE_LABEL, STATE_VERSION, STEPS,
+  FAULT_STEP_LABEL, faultStepLabel, SHOWCASE_CD0_DELTA, SHOWCASE_EVAL_POINTS, SHOWCASE_FAULT, SHOWCASE_ID, STATE_LABEL, STATE_VERSION, STEPS,
   WORLD_REPLAY_TARGET_S, WORLD_SPEEDS, actionTimeout, advance, applyOutcome, autodesignConfigFor, beginStep,
   cancelCleanup, cancelStep, cardCompact, cardRows, cleanupLine, clearResume, clip, decodeState, designConfigRecord, dwellFor,
   listScrollTop, runEnded,
@@ -75,7 +75,7 @@ test("동작 이름·인자가 계약(06 §9.3)과 같다", () => {
   // 세 평가(기준·결함·처방 후)가 같은 네 점 — 이름으로 기본 격자에서 고른다(케이스 수·대표 규칙이 아니다)
   for (const i of [2, 4, 6]) {
     assert.deepEqual(acts("influence")[i].args.points,
-      ["M0.12_h200_f10", "M0.18_h200_f10", "M0.18_h3000_f10", "M0.12_h3000_f10"]);
+      ["M0.12_h200_f10", "M0.2_h200_f10", "M0.2_h3000_f10", "M0.12_h3000_f10"]);
     assert.equal("cases" in acts("influence")[i].args, false);
   }
   assert.deepEqual(sig("autocode"), ["autocode:overview"]);
@@ -250,20 +250,23 @@ const tablesDigest = (tables) => createHash("sha256")
   .update(JSON.stringify(Object.keys(tables).sort().map((n) => [n, tables[n].axes, tables[n].data])))
   .digest("hex").slice(0, 16);
 
-test("결함 시연 상수 — r = 0.07에서는 재현 창이 없다고 정직하게 적혀 있다 (시연 재설계 대기)", () => {
-  // v1.83 실측(lib/showcase.js 머리 주석 첫 항목): 할당 공유 예산 여유 r = 0.07(0.06도)에서 ×5.0~8.4 REPAIRED 0 — 예전
-  // k_hdot 카드 케이스 M0.18_h200_f10이 FAIL하지 않고, 첫 FAIL 케이스의 카드는 고도 PI(바뀐 게인 0개 → 확인 런 없음).
-  // 옛 단언(창 ×5.25~6.0 안의 가운데)은 상수끼리의 자기 확인이라 거짓이 됐다 — 창이 없다는 사실을 붙잡는다. 시연 결함을
-  // 다시 고르면 window에 잰 [lo, hi]를 적고 이 테스트를 창 끝 여유(양끝 0.3) 단언으로 되돌린다
+test("결함 시연 상수 — 배율이 잰 재현 창 안에 양끝 여유를 두고 있다 (v1.87 — r = 0.07 · 평가점 S20)", () => {
+  // v1.87 실측(lib/showcase.js 머리 주석 첫 항목): 평가점 S20에서 ×5.2~6.4 연속 12점 REPAIRED — 매번 M0.2_h200_f10
+  // 동적 여유 FAIL → k_hdot 단독 카드 → +20 % → 재평가 PASS. ×5.1 이하 FAIL 없음, ×6.5~6.8 확인 런 FAIL.
+  // 창 끝 여유는 상수에서 도출한다(양끝 0.3 이상 — ×5.8은 0.6씩)
   assert.equal(SHOWCASE_FAULT.path, "autopilot.alt.k_rate");
-  assert.ok(Number.isFinite(SHOWCASE_FAULT.factor), "배율은 자리값으로 남는다(×5.65 — r 도입 전 창의 가운데)");
-  assert.equal(SHOWCASE_FAULT.window, null, "r = 0.07에서 잰 REPAIRED 창이 없다");
+  assert.deepEqual([...SHOWCASE_FAULT.window], [5.2, 6.4], "r = 0.07 · S20에서 잰 REPAIRED 창");
+  const [lo, hi] = SHOWCASE_FAULT.window;
+  assert.ok(SHOWCASE_FAULT.factor - lo >= 0.3 - 1e-9, `아래 끝 여유 ${SHOWCASE_FAULT.factor - lo}`);
+  assert.ok(hi - SHOWCASE_FAULT.factor >= 0.3 - 1e-9, `위 끝 여유 ${hi - SHOWCASE_FAULT.factor}`);
   assert.match(SHOWCASE_FAULT.note, /r = 0\.07/);
-  assert.match(SHOWCASE_FAULT.note, /재설계/);
-  // 보는 사람이 PASS를 보고 속지 않게 — 결함 주입 줄이 그 사실을 말한다
+  assert.match(SHOWCASE_FAULT.note, /S20/);
+  assert.deepEqual([...SHOWCASE_EVAL_POINTS], ["M0.12_h200_f10", "M0.2_h200_f10", "M0.2_h3000_f10", "M0.12_h3000_f10"]);
+  // 창이 있으니 결함 주입 줄은 그냥 「결함 주입」이다 — 「FAIL이 나지 않는다」는 창이 null일 때만
   const fault = acts("influence")[3];
+  assert.equal(FAULT_STEP_LABEL, "결함 주입");
   assert.equal(fault.label, FAULT_STEP_LABEL);
-  assert.match(fault.label, /r = 0\.07에서는 FAIL이 나지 않는다/);
+  assert.match(faultStepLabel({ ...SHOWCASE_FAULT, window: null }), /r = 0\.07에서는 FAIL이 나지 않는다/);
 });
 
 test("결함 시연 상수 — 잰 기준(자동조종 설계값·확정 표·대표 케이스)이 실물 S1 문서 그대로다", () => {
@@ -307,17 +310,18 @@ test("결함 시연 상수 — 잰 기준(자동조종 설계값·확정 표·�
   // 자동조종 상자 — 고도·승강률 PI의 출력 한계(θ 명령 상한)가 창에 든다. 레지스트리 기본값으로 잰 창이다
   assert.equal(s1.law.design.autopilot.theta_hi, 0.3, fix);
   assert.equal(s1.law.design.autopilot.tau_spd, 2.0, fix);
-  // 평가 네 점(SHOWCASE_EVAL_POINTS) — 결함 창을 잰 바로 그 점들이다: 종전 템플릿 격자 대표 부분 격자(representativeGrid)의
-  // 이름과 **같은 문자열·같은 순서**여야 창이 그대로 성립한다. FAIL이 나는 고마하 두 모서리(M0.18)가 들어 있다
+  // 평가 네 점(SHOWCASE_EVAL_POINTS) — 결함 창을 잰 바로 그 점들이다. v1.85까지는 종전 템플릿 격자 대표 부분 격자
+  // (representativeGrid — M0.12·0.18)와 같은 문자열이었고, v1.87은 고마하 쪽만 M0.20으로 옮겼다(r = 0.07에서 M0.18 두
+  // 점은 k_hdot 카드로 FAIL하지 않는다). 기록으로 그 관계를 붙잡는다 — FAIL은 M0.2_h200_f10에서 난다
   const g = s1.mission_template.trim_grid;
   const r = representativeGrid({ machFrom: g.mach.from, machTo: g.mach.to, machStep: g.mach.step,
     alts: g.alt, fuels: g.fuel }, 4);
   const names = nameCases(serpentineCases(machRange(r.machFrom, r.machTo, r.machStep), r.alts, r.fuels))
     .map((c) => c.name);
-  assert.deepEqual(names, [...SHOWCASE_EVAL_POINTS], fix);
+  assert.deepEqual(names.map((x) => x.replace(/^M0\.18_/, "M0.2_")), [...SHOWCASE_EVAL_POINTS], fix);
   // 그 네 점이 S1 요구영역의 기본 격자에 그대로 있다 — 엔진 opspace.base_grid의 좌표 규칙(요구 마하 n_mach 등간격,
   // 소수 9자리 반올림, 행 요구 범위 안, 이름 %.12g)을 여기서 한 번 더 세워 대조한다. 실측(엔진 호출): 31점 중
-  // M0.12_h200_f10 · M0.18_h200_f10 · M0.18_h3000_f10 · M0.12_h3000_f10 이 이 순서(서펜타인)로 나온다
+  // M0.12_h200_f10 · M0.2_h200_f10 · M0.2_h3000_f10 · M0.12_h3000_f10 이 이 순서(서펜타인)로 나온다
   const reg = s1.operating_region;
   const n = reg.base_grid.n_mach;
   const axis = Array.from({ length: n }, (_, i) =>
