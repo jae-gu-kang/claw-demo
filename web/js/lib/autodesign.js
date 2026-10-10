@@ -210,11 +210,50 @@ export function validationConfig(form) {
   return Object.keys(out).length ? out : null;
 }
 
+/** 허용치 칸에서 「보강 끔」(tol null — 이분 없이 d 분포만)으로 읽는 낱말. */
+export const REINFORCE_TOL_OFF = ["끔", "없음", "미설정", "off", "none"];
+
+/** 허용치 칸 글 → tol. 수 하나(단일 값) · 「자리=값」 목록(자리별 {slot: 값} — 쉼표·공백 구분, `:`도 받는다) · 끔 낱말
+ *  → null. 비면 undefined(서버 기본). 자리 이름·범위는 엔진 check_reinforce_config가 본다. */
+export function parseReinforceTol(text) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return undefined;
+  if (REINFORCE_TOL_OFF.includes(raw.toLowerCase())) return null;
+  if (/[=:]/.test(raw)) {
+    const out = {};
+    const rest = raw.replace(/([A-Za-z_][A-Za-z0-9_]*)\s*[=:]\s*([^\s,]+)/g, (_, slot, v) => {
+      const x = Number(v);
+      if (!Number.isFinite(x)) throw new Error(`reinforce.tol.${slot}: 수치가 아님 — ${v}`);
+      out[slot] = x;
+      return "";
+    });
+    if (rest.replace(/[\s,]/g, "") || !Object.keys(out).length) {
+      throw new Error(`reinforce.tol: 「자리=값」 목록이 아님 — ${raw}`);
+    }
+    return out;
+  }
+  const v = Number(raw);
+  if (!Number.isFinite(v)) throw new Error(`reinforce.tol: 수치가 아님 — ${raw}`);
+  return v;
+}
+
+/** tol → 칸·문구용 글. 수는 소수 둘째 자리까지 맞으면 「0.10」처럼(아니면 그대로), 자리별은 「자리=값」 목록, null은 「끔」. */
+export function reinforceTolText(tol) {
+  const one = (x) => (typeof x === "number" && Number.isFinite(x)
+    ? (Number(x.toFixed(2)) === x ? x.toFixed(2) : String(+x.toPrecision(6))) : String(x));
+  if (tol === null) return "끔";
+  if (tol && typeof tol === "object") return Object.entries(tol).map(([k, v]) => `${k}=${one(v)}`).join(", ");
+  return tol === undefined ? "" : one(tol);
+}
+
 /** 보강 설정 칸 → config.reinforce 부분 덮어쓰기(05 §11.7). 허용치(tol)·추가점 상한·이분 깊이·시간 상한 — 채운 칸만,
- *  없으면 null. 허용치를 비우면 서버 기본(미설정 — 이분 없이 d 분포만)이다. 범위는 엔진 check_reinforce_config가 본다. */
+ *  없으면 null. 허용치를 비우면 서버 기본(0.10 — 합격–권장 폭의 10 %)이고, 「끔」이면 null(이분 없이 d 분포만), 「자리=값」
+ *  목록이면 자리별 값이다(parseReinforceTol). 범위는 엔진 check_reinforce_config가 본다. */
 export function reinforceConfig(form) {
   const out = {};
-  for (const [from, to] of [["reinforceTol", "tol"], ["reinforceMaxPoints", "max_points"],
+  const tol = parseReinforceTol(form.reinforceTol);
+  if (tol !== undefined) out.tol = tol;
+  for (const [from, to] of [["reinforceMaxPoints", "max_points"],
     ["reinforceMaxDepth", "max_depth"], ["reinforceMaxTime", "max_time_s"]]) {
     const raw = String(form[from] ?? "").trim();
     if (!raw) continue;
@@ -1704,7 +1743,7 @@ export function coverageLines(report) {
     // 보강이 예산에서 멈췄다 — 남은 구간은 합격도 설계 불가도 아니다(05 §11.7). 허용치 미설정(tol_unset)은 공백이 아니다
     if (c.reinforce_status === "budget") {
       out.push({ key: "reinforce", tone: "warn", text: REINFORCE_STATUS_TEXT.budget
-        + prose(" — 허용치를 넘는 구간이 남았다.") });
+        + prose(" — 허용치를 넘거나 이웃 판정이 다른 구간이 남았다.") });
     }
   }
   // 엔진이 만든 문장 — 화면이 다시 쓰지 않는다. 비어 있지 않다는 것 자체가
@@ -1830,9 +1869,13 @@ export function summaryGridModel(report) {
 
 const DIST_KEYS = [["max", "최대"], ["p90", "p90"], ["p50", "p50"]];
 
+/** 구간별 보강 상태(엔진 reinforce.INTERVAL_STATUS) → 이름. */
+export const INTERVAL_STATUS_LABEL = { split: "쪼갬", remaining: "남음", unmeasured: "잴 수 없음", ok: "충족" };
+
 /** report.reinforcement → 줄 [{key, tone, text, tip?, slot?}] — 옛 결과는 []. 첫 줄은 상태(엔진 label 우선).
- *  허용치 미설정(tol_unset)은 공백이 아니다(회색) — 자리별 d 분포를 한 줄씩 짧게. 허용치가 있으면 추가점·남은 구간·최대 d,
- *  잴 수 없는 구간(사유는 툴팁), 양끝 판정이 다른 구간 수. 척도 s와 그 출처는 툴팁. */
+ *  허용치 미설정(tol_unset)은 공백이 아니다(회색) — 자리별 d 분포를 한 줄씩 짧게. 허용치가 있으면 「허용치 0.10 · 추가 n점 ·
+ *  사유 d a / 판정 다름 b」와 남은 구간·최대 d, 구간별 상태 수(intervals — 남지 않은 구간 목록은 툴팁), 잴 수 없는
+ *  구간(사유는 툴팁), 양끝 판정이 다른 구간 수. 척도 s와 그 출처는 툴팁. */
 export function reinforcementLines(report, statusText = null) {
   const rf = report?.reinforcement;
   if (!rf || typeof rf !== "object") return [];
@@ -1843,7 +1886,8 @@ export function reinforcementLines(report, statusText = null) {
   const src = rf.scale_sources ?? {};
   const scaleTip = Object.keys(scales).map((k) => `${k} s=${num(scales[k])}${src[k] ? ` — ${src[k]}` : ""}`).join("\n");
   const out = [{ key: "reinforce_status", tone, text: `보강 — ${label}`, tip: scaleTip || null }];
-  const tol = numeric(rf.tol ?? rf.budget?.tol);
+  const tolRaw = rf.tol ?? rf.budget?.tol ?? null;
+  const tol = tolRaw && typeof tolRaw === "object" ? tolRaw : numeric(tolRaw);
   const cnt = (x) => (Array.isArray(x) ? x.length : numeric(x));
   if (tol != null) {
     const added = cnt(rf.added) ?? 0;
@@ -1853,10 +1897,42 @@ export function reinforcementLines(report, statusText = null) {
     const budget = [b.max_points != null ? `추가점 상한 ${b.max_points}` : null,
       b.max_depth != null ? `깊이 ${b.max_depth}` : null, b.max_time_s != null ? `${b.max_time_s} s` : null]
       .filter(Boolean).join(" · ");
+    // 자리별 허용치는 값이 다 같으면 그 값 하나, 다르면 「자리별 최소–최대」(자리마다 값은 툴팁)
+    let tolText = reinforceTolText(tol);
+    if (typeof tol === "object") {
+      const vs = Object.values(tol).filter((x) => numeric(x) != null);
+      const lo = Math.min(...vs), hi = Math.max(...vs);
+      tolText = lo === hi ? reinforceTolText(lo) : `자리별 ${reinforceTolText(lo)}–${reinforceTolText(hi)}`;
+    }
+    const sr = rf.split_reasons ?? {};
+    const nD = numeric(sr.d) ?? 0, nVc = numeric(sr.verdict_change) ?? 0;
+    const tips = [typeof tol === "object" ? `허용치 — ${reinforceTolText(tol)}` : null, budget ? `예산 — ${budget}` : null,
+      rf.on_verdict_change === false ? "이웃 판정 다름으로는 쪼개지 않는다(on_verdict_change 끔)" : null,
+      ...(Array.isArray(rf.notes) ? rf.notes : [])].filter(Boolean);
     out.push({ key: "reinforce_run", tone: rem ? "warn" : "hint",
-      text: `허용치 d ≤ ${+tol.toPrecision(6)} · 추가 ${num(added)}점`
+      text: `허용치 ${tolText} · 추가 ${num(added)}점`
+        + (nD || nVc ? ` · 사유 d ${num(nD)} / 판정 다름 ${num(nVc)}` : "")
         + (rem ? ` · 남은 구간 ${num(rem)}(최대 d ${num(rf.max_d_remaining)})` : ""),
-      tip: budget ? `예산 — ${budget}` : null });
+      tip: tips.length ? tips.join("\n") : null });
+  }
+  // 구간별 상태(⑥의 입력) — 상태별 수 한 줄, 충족이 아닌 구간은 툴팁에
+  const ivs = Array.isArray(rf.intervals) ? rf.intervals : [];
+  if (ivs.length) {
+    const by = {};
+    for (const iv of ivs) by[iv.status] = (by[iv.status] ?? 0) + 1;
+    const order = [...Object.keys(INTERVAL_STATUS_LABEL), ...Object.keys(by).filter((k) => !(k in INTERVAL_STATUS_LABEL))];
+    const odd = ivs.filter((iv) => iv.status !== "ok");
+    const ivText = (iv) => `${Array.isArray(iv.row) ? iv.row.join("/") : iv.row ?? "?"} · `
+      + `${Array.isArray(iv.interval) ? iv.interval.map(machText).join("–") : iv.interval ?? "?"} — `
+      + `${INTERVAL_STATUS_LABEL[iv.status] ?? iv.status}`
+      + (iv.exceeds ? ` · ${iv.slot} d ${num(iv.d)} > ${reinforceTolText(iv.tol)}` : "")
+      + (iv.verdict_change && iv.verdicts ? ` · 판정 ${iv.verdicts.a}/${iv.verdicts.mid}/${iv.verdicts.b}` : "")
+      + (iv.why ? ` · ${iv.why}` : "");
+    out.push({ key: "reinforce_intervals", tone: by.remaining ? "warn" : "hint",
+      text: `구간 ${ivs.length} — ` + order.filter((k) => by[k]).map((k) => `${INTERVAL_STATUS_LABEL[k] ?? k} ${by[k]}`)
+        .join(" · "),
+      tip: odd.length ? odd.slice(0, 12).map(ivText).join("\n") + (odd.length > 12 ? `\n… 외 ${odd.length - 12}` : "")
+        : null });
   }
   const dist = rf.distribution ?? {};
   for (const slot of Object.keys(dist)) {
@@ -1974,7 +2050,10 @@ export function configFormValues(config) {
   }
   const r = c.reinforce;
   if (r && typeof r === "object") {
-    for (const [key, field] of [["tol", "reinforceTol"], ["max_points", "reinforceMaxPoints"],
+    // 허용치 — null(끔)도 칸에 「끔」으로 남긴다(비우면 서버 기본 0.10으로 돌아가 다시 보내는 실행이 조용히 바뀐다).
+    // 자리별 값은 「자리=값」 목록
+    if ("tol" in r) out.reinforceTol = reinforceTolText(r.tol);
+    for (const [key, field] of [["max_points", "reinforceMaxPoints"],
       ["max_depth", "reinforceMaxDepth"], ["max_time_s", "reinforceMaxTime"]]) {
       if (r[key] != null) out[field] = String(r[key]);
     }

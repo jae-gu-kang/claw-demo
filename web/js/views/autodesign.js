@@ -27,7 +27,7 @@ import { ApiError, api, errorText } from "../api.js";
 import { clear, el, fmt } from "../dom.js";
 import {
   VERDICT_LABEL, VALIDATION_KIND_LABEL, VALIDATION_MODE_LABEL, actionCards, labelMap, actuatorLine, knotModel, machText,
-  reinforcementLines, summaryGridModel, validationSummaryText,
+  reinforcementLines, reinforceTolText, summaryGridModel, validationSummaryText,
   adoptBlockedText, adoptStorePayload, adoptWarnText, applyGateReason, approvedByDefault, buildConfig,
   configFormValues, coverageLines, criteriaSummaryModel, designCueSummary, designReuseLine, emptyResultNotice, evidenceLines, excludedSamplesModel, fitFactsModel,
   fitQualityLines, gridPlaceholders, ledgerRows, ledgerTruncatedText, mergeDesignConfig, pointRows,
@@ -173,8 +173,10 @@ export function render() {
     validationBoundary: el("select", { "aria-label": "경계점",
       title: "요구영역 경계(마하 끝·고도·연료 끝) 검증점 — 기본 켬" },
     el("option", { value: "" }, "기본"), el("option", { value: "on" }, "켬"), el("option", { value: "off" }, "끔")),
-    reinforceTol: el("input", { size: 4, placeholder: "미설정",
-      title: "보강 허용치 — 구간의 보강 지표 d(선형 보간과의 어긋남 ÷ 척도)가 이 값을 넘으면 이분한다. 비우면 d 분포만 보고" }),
+    reinforceTol: el("input", { size: 4, placeholder: "0.10",
+      title: "보강 허용치 — 구간의 보강 지표 d(선형 보간과의 어긋남 ÷ 척도 — 합격–권장 폭)가 이 값을 넘으면 이분한다."
+        + " 비우면 기본(0.10 = 폭의 10 %). 자리별은 「roll_rate=0.2, pitch_rate=0.05」(빠진 자리는 기본값)."
+        + " 「끔」이면 이분 없이 d 분포만 보고. 이웃 판정이 다른 구간은 d와 무관하게 쪼갠다" }),
     reinforceMaxPoints: el("input", { size: 3, title: "보강 추가점 상한" }),
     reinforceMaxDepth: el("input", { size: 2, title: "구간 이분 깊이 상한" }),
     reinforceMaxTime: el("input", { size: 4, placeholder: "없음", title: "보강 시간 상한[s] — 비우면 없음. 판과 판 사이에서만 본다(한 판은 끊지 않는다) — 마지막 판 길이만큼 넘을 수 있다" }),
@@ -224,7 +226,7 @@ export function render() {
           ...Object.entries(modes).map(([m, name]) => el("option", { value: m }, name)));
         form.validationMode.value = keep;
       }
-      ph(form.reinforceTol, c.reinforce?.tol);
+      if (c.reinforce && "tol" in c.reinforce) form.reinforceTol.placeholder = reinforceTolText(c.reinforce.tol);
       ph(form.reinforceMaxPoints, c.reinforce?.max_points);
       ph(form.reinforceMaxDepth, c.reinforce?.max_depth);
       ph(form.reinforceMaxTime, c.reinforce?.max_time_s);

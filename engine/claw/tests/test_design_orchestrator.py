@@ -1734,7 +1734,9 @@ def _session_digest(s) -> str:
 def test_validation_config_defaults_to_the_plan_and_an_old_session_reads_the_midpoint_rule():
     cfg = AutoDesignConfig()
     assert cfg.validation == {"rule": "plan", "conditions": None, "mode": "full", "boundary": True, "extras": []}
-    assert cfg.reinforce == {"tol": None, "max_points": 24, "max_depth": 3, "max_time_s": None}
+    # 허용치 0.10 기본 켬 · 이웃 판정 다름도 쪼갬 · 합격선 근접 예약 [기본값 2026-10-10 — ⑤ 보강 허용치]
+    assert cfg.reinforce == {"tol": 0.10, "max_points": 24, "max_depth": 3, "max_time_s": None,
+                             "on_verdict_change": True, "near_line_frac": None}
     d = cfg.to_dict()
     assert AutoDesignConfig.from_dict(d).validation == cfg.validation
     old = {k: v for k, v in d.items() if k not in ("validation", "reinforce")}
@@ -1788,18 +1790,31 @@ def test_plan_puts_boundary_points_in_and_reports_a_summary_grid(planned):
     assert [r["key"] for r in g["rows"]] == ["h1000_f200", "extra"]
     assert g["cells"]["extra"], "경계점이 「경계·추가」 행에 모인다"
     r = rep["reinforcement"]
-    assert r["status"] == "tol_unset" and r["label"] == "허용치 미설정 — d 분포만" and r["added"] == []
+    # 기본 허용치 0.10 — 이 줄의 두 구간은 PM 자리 d(0.60 · 2.35)가 넘지만 점 예산 24가 이미 차 한 점도 못 더했다 →
+    # 「보강 종료 · 추가 검증 필요」(합격·불가가 아니다). 구간별 기록(⑥의 입력)이 남은 구간을 사유와 함께 적는다
+    assert r["status"] == "budget" and r["label"].startswith("보강 종료 · 추가 검증 필요") and r["added"] == []
+    assert r["tol"] == 0.10 and r["on_verdict_change"] is True and r["split_reasons"] == {"d": 0, "verdict_change": 0}
+    assert [(i["interval"], i["status"], i["slot"], i["reasons"]) for i in r["intervals"]] == [
+        ([0.3, 0.425], "remaining", "pitch_att", ["d"]), ([0.425, 0.55], "remaining", "pitch_att", ["d"])]
     assert r["d"] and set(r["distribution"]) <= {"pitch_rate", "yaw_rate", "roll_rate", "pitch_att", "roll_att"}
     assert r["scales"]["pitch_att"] == 5.0 and "잠정" in r["scale_sources"]["pitch_att"]
     cov = rep["coverage"]
-    assert cov["validation_requested"] == v["requested"] and cov["reinforce_status"] == "tol_unset"
+    assert cov["validation_requested"] == v["requested"] and cov["reinforce_status"] == "budget"
     assert cov["validation_points"] == sum(1 for p in s.points if str(p.origin).startswith("midpoint:"))
-    assert not any("허용치 미설정" in gap or "d 분포" in gap for gap in rep["coverage_gaps"])  # 공백이 아니다
+    assert any("보강 예산" in gap for gap in rep["coverage_gaps"])
+    # 허용치를 끄면(None) 같은 판정에서 d 분포만 — 미설정은 공백이 아니다(보고는 지금 설정으로 다시 잰다)
+    off = DesignSession.from_dict(copy.deepcopy(s.to_dict()))
+    off.config.reinforce = {**off.config.reinforce, "tol": None}
+    ro = off.report()
+    assert ro["reinforcement"]["status"] == "tol_unset" and ro["reinforcement"]["label"] == "허용치 미설정 — d 분포만"
+    assert ro["coverage"]["reinforce_status"] == "tol_unset" and ro["reinforcement"]["intervals"]
+    assert all(i["status"] == "ok" and i["reasons"] == [] for i in ro["reinforcement"]["intervals"])
+    assert not any("허용치 미설정" in gap or "d 분포" in gap or "보강 예산" in gap for gap in ro["coverage_gaps"])
 
 
 def test_plan_session_round_trip_keeps_the_plan_and_the_report(planned):
     d = planned.to_dict()
-    assert d["validation_plan"] and d["validation_meta"]["mode"] == "full" and d["reinforce_state"]["status"] == "tol_unset"
+    assert d["validation_plan"] and d["validation_meta"]["mode"] == "full" and d["reinforce_state"]["status"] == "budget"
     s2 = DesignSession.from_dict(d)
     assert s2.to_dict() == d
     a, b = planned.report(), s2.report()
@@ -1860,7 +1875,8 @@ def test_without_a_region_the_plan_uses_the_adopted_range_and_says_so(env):
     s = DesignSession(_small(budget_iters=1))
     s.run(ac, stall, limits, db, design, verdict_ctx=dataclasses.replace(_vctx(), region=None, cache={}),
           fingerprint="fp")
-    assert s.validation_plan and {e["kind"] for e in s.validation_plan} <= {"midpoint", "knot", "between_rows"}
+    # 기본 허용치 0.10이라 보강점(reinforce)도 붙을 수 있다 — 경계점·clip 점은 요구영역이 있어야 선다
+    assert s.validation_plan and {e["kind"] for e in s.validation_plan} <= {"midpoint", "knot", "between_rows", "reinforce"}
     assert "요구영역 미정의" in s.report()["validation"]["note"]
 
 

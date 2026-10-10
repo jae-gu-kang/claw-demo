@@ -1458,7 +1458,9 @@ def test_defaults_expose_validation_and_reinforce(client):
     assert body["config"]["validation"] == {**DEFAULT_VALIDATION, "extras": list(DEFAULT_VALIDATION["extras"])}
     assert body["config"]["validation"]["rule"] == "plan" and body["config"]["validation"]["boundary"] is True
     assert body["config"]["reinforce"] == dict(DEFAULT_REINFORCE)
-    assert body["config"]["reinforce"]["tol"] is None
+    # 허용치 0.10(척도의 10 % — 단일 값) 기본 켬 · 이웃 판정 다름도 쪼갬 · 합격선 근접은 예약(null) [기본값 2026-10-10]
+    assert body["config"]["reinforce"]["tol"] == 0.10 and body["config"]["reinforce"]["on_verdict_change"] is True
+    assert body["config"]["reinforce"]["near_line_frac"] is None
     assert body["validation_modes"] == dict(VALIDATION_MODES) and set(body["validation_modes"]) >= {"full", "representative"}
     assert body["validation_kinds"] == dict(VALIDATION_KINDS)
     assert set(body["validation_kinds"]) >= {"midpoint", "knot", "clip", "boundary", "extra", "between_rows", "reinforce"}
@@ -1485,6 +1487,11 @@ def test_validation_and_reinforce_partial_override():
     assert r["max_points"] == 10 and r["max_depth"] == 2 and r["max_time_s"] == 30
     # 허용치를 명시로 비워도(null) 뜻이 있다 — 미설정
     assert _build_config({"reinforce": {"tol": None}}).to_dict()["reinforce"]["tol"] is None
+    # 자리별 허용치 {자리: 값} — 빠진 자리는 단일 기본값 0.10으로 채운 정규형이 세션에 남는다
+    r = _build_config({"reinforce": {"tol": {"roll_rate": 0.2, "pitch_rate": 0.05}}}).to_dict()["reinforce"]
+    assert r["tol"] == {"pitch_rate": 0.05, "yaw_rate": 0.1, "roll_rate": 0.2, "pitch_att": 0.1, "roll_att": 0.1}
+    r = _build_config({"reinforce": {"on_verdict_change": False, "near_line_frac": 0.2}}).to_dict()["reinforce"]
+    assert r["on_verdict_change"] is False and r["near_line_frac"] == 0.2 and r["tol"] == 0.1
 
 
 @pytest.mark.parametrize("bad", [
@@ -1508,6 +1515,16 @@ def test_validation_and_reinforce_partial_override():
     {"reinforce": {"max_points": 1e400}},
     {"reinforce": {"bogus": 1}},                                  # 모르는 키 — 엔진 규칙
     {"reinforce": {"tol": -0.1}},                                 # 범위 — 엔진 규칙
+    {"reinforce": {"tol": {"roll_rate": float("nan")}}},          # 자리별 값도 유한값만
+    {"reinforce": {"tol": {"roll_rate": -0.1}}},                  # 자리별 범위 — 엔진 규칙
+    {"reinforce": {"tol": {"roll_rate": True}}},
+    {"reinforce": {"tol": {"bogus_slot": 0.1}}},                  # 모르는 자리 — 엔진 규칙
+    {"reinforce": {"tol": {}}},                                   # 빈 자리별 값
+    {"reinforce": {"tol": "0.1"}},
+    {"reinforce": {"on_verdict_change": 1}},                      # 참거짓만
+    {"reinforce": {"on_verdict_change": "true"}},
+    {"reinforce": {"near_line_frac": float("nan")}},
+    {"reinforce": {"near_line_frac": 2.0}},                       # 0 초과 1 이하 — 엔진 규칙
     {"reinforce": []},
 ])
 def test_validation_and_reinforce_rejections(bad):
@@ -1520,7 +1537,9 @@ def test_validation_and_reinforce_rejections(bad):
 def test_validation_and_reinforce_errors_are_422(client):
     for bad in ({"validation": {"conditions": [[200, float("nan")]]}}, {"validation": {"boundary": "false"}},
                 {"validation": {"bogus": 1}}, {"validation": {"extras": [{"mach": 0.3, "alt": 0, "fuel": 1}]}},
-                {"reinforce": {"tol": True}}, {"reinforce": {"bogus": 1}}):
+                {"reinforce": {"tol": True}}, {"reinforce": {"bogus": 1}},
+                {"reinforce": {"tol": {"roll_rate": float("nan")}}}, {"reinforce": {"tol": {"bogus_slot": 0.1}}},
+                {"reinforce": {"on_verdict_change": 0}}):
         # NaN은 표준 JSON이 못 싣는다 — NaN 토큰으로 보낸다(서버 JSON 파서가 float nan으로 읽는다)
         body = json.dumps({"config": {**_small_config(), **bad}})
         r = client.post("/api/design/auto", content=body, headers={"content-type": "application/json"})
@@ -1570,7 +1589,7 @@ def test_design_summary_validation_field():
 
 def test_auto_design_result_carries_validation_plan_grid_and_reinforcement(client, wait_job):
     """새 설정의 실행 — 저장된 보고에 검증점 계획·요약 격자·보강 절과 커버리지 새 키가 실린다(웹 요약 격자·보강 상자의
-    입력). 허용치 미설정이 기본이라 보강 상태는 tol_unset(이분 없음)."""
+    입력). 기본 허용치 0.10이라 보강이 돈다 — 상태는 tol_unset이 아니고 구간별 기록(intervals — ⑥의 입력)이 실린다."""
     r = client.post("/api/design/auto", json={"config": _small_config()})
     assert r.status_code == 202, r.text
     j = wait_job(r.json()["id"], timeout=300.0)
@@ -1590,7 +1609,12 @@ def test_auto_design_result_carries_validation_plan_grid_and_reinforcement(clien
             assert cell["headline"] != "구간 합격"
             assert set(cell) >= {"n", "done", "states", "verdicts", "headline", "text"}
     rf = rep["reinforcement"]
-    assert rf["status"] == "tol_unset" and rf["tol"] is None
+    assert rf["status"] in ("done", "budget", "unmeasured") and rf["tol"] == 0.10 and rf["on_verdict_change"] is True
+    assert set(rf["split_reasons"]) == {"d", "verdict_change"} and rf["intervals"]
+    for iv in rf["intervals"]:
+        assert set(iv) >= {"row", "interval", "depth", "slot", "d", "tol", "exceeds", "verdict_change", "verdicts",
+                           "points", "status"}
+        assert iv["status"] in ("split", "remaining", "unmeasured", "ok")
     assert set(rep["coverage"]) >= {"validation_requested", "validation_done", "validation_not_run",
                                     "validation_out_of_region", "validation_omitted_rows", "d_unmeasured",
                                     "reinforce_status"}

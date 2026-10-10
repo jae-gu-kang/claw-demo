@@ -179,16 +179,28 @@ def _check_validation(v) -> dict:
 
 
 def _check_reinforce(r) -> dict:
-    """config.reinforce(부분 덮어쓰기를 기본값에 겹친 것) — 수치 경계만. 허용치(tol)·시간 상한(max_time_s)은 없음(null)이
-    뜻을 갖는다(허용치 미설정 = d 분포만 · 시간 상한 없음). 범위(양수·하한)는 엔진 check_reinforce_config가 정본."""
+    """config.reinforce(부분 덮어쓰기를 기본값에 겹친 것) — 수치·타입 경계만. 허용치(tol)는 수 하나 또는 자리별
+    {자리: 수}(기본 0.10 — 단일 값), 허용치·시간 상한(max_time_s)·합격선 근접(near_line_frac — 예약)은 없음(null)이 뜻을
+    갖는다(허용치 미설정 = d 분포만 · 시간 상한 없음 · 근접 보강 안 함). 이웃 판정 다름 쪼갬(on_verdict_change)은 참거짓만.
+    범위(양수·하한)와 아는 자리 이름은 엔진 check_reinforce_config가 정본."""
     if not isinstance(r, dict):
         raise ValueError(f"reinforce는 객체여야 함: {type(r).__name__}")
-    for key in ("tol", "max_points", "max_depth", "max_time_s"):
+    if "on_verdict_change" in r and not isinstance(r["on_verdict_change"], bool):
+        raise ValueError(f"reinforce.on_verdict_change는 참/거짓이어야 함: {r['on_verdict_change']!r}")
+    tol = r.get("tol")
+    if isinstance(tol, dict):
+        for slot, x in tol.items():
+            if not isinstance(slot, str):
+                raise ValueError(f"reinforce.tol 자리 이름은 문자열이어야 함: {slot!r}")
+            _check_number(f"reinforce.tol.{slot}", x)
+    for key in ("tol", "max_points", "max_depth", "max_time_s", "near_line_frac"):
         if key not in r:
             continue
         x = r[key]
-        if x is None and key in ("tol", "max_time_s"):
+        if x is None and key in ("tol", "max_time_s", "near_line_frac"):
             continue
+        if key == "tol" and isinstance(x, dict):
+            continue  # 위에서 자리마다 보았다
         _check_number(f"reinforce.{key}", x)
         if key in ("max_points", "max_depth") and isinstance(x, float) and not x.is_integer():
             raise ValueError(f"reinforce.{key}는 정수여야 함: {x}")

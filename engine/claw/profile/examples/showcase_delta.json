@@ -808,7 +808,7 @@
             "mode": "full",
             "conditions": 1,
             "omitted": 0,
-            "reinforce_status": "tol_unset"
+            "reinforce_status": "unmeasured"
           },
           "approved_actions": 0,
           "config": {

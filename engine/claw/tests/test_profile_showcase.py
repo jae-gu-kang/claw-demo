@@ -249,7 +249,8 @@ def test_기록된_설계_설정으로_다시_설계하면_출하한_문서_그�
     assert {k: b["requested"] for k, b in v["by_kind"].items()} == {"midpoint": 7, "knot": 7, "boundary": 9}, v
     # 요청 23 = 새 검증점 15 + 판정을 겸한 기존 설계점 8(절점 7 · 행 하한 M0.10375 경계)
     assert (v["added"], v["existing"]) == (15, 8), v
-    assert rep["reinforcement"]["status"] == "tol_unset" and cov["d_unmeasured"] == 2, cov
+    # v1.84: 허용치 0.10 기본 켬 — S1은 트리거 0이라 점·표 그대로, 상태만 tol_unset → unmeasured(잴 수 없는 구간 2)
+    assert rep["reinforcement"]["status"] == "unmeasured" and cov["d_unmeasured"] == 2, cov
     # 표는 공통 마하 절점을 공유한다 — 설계점 수와 무관하게 자리마다 절점 7점(M0.24 절점은 설계점 표본이 없어 뺐다)
     assert rep["knots"]["shared"] is True and set(rep["knots"]["tables"].values()) == {7}, rep["knots"]
     assert cov["refine_remaining"] is not None and cov["refine_remaining"] <= cov["refine_tol"], cov

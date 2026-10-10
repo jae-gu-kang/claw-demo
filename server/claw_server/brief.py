@@ -251,9 +251,12 @@ JSON 하나를 읽고, 엔지니어가 30초 안에 상황을 잡는 한국어 �
   n·done·상태·판정 수와 대표 문구 headline(불합격 → 미완료 → 「검사한 점 모두
   충족」)이다 — 검사한 점만 말하므로 「구간 합격」이라 쓰지 않는다. 보강
   report.reinforcement: 구간 d = |중간 지표 − 양끝 선형 보간| ÷ 척도 s(자리별).
+  허용치 tol 기본 0.10(척도의 10 % — 자리별 {slot: 값}도 받는다)을 넘거나 이웃
+  판정이 다르면(on_verdict_change) 구간을 이분한다 — split_reasons가 사유별 수.
   status tol_unset(허용치 미설정 — d 분포만, 공백 아님)·done(보강 완료)·budget(예산
   종료 · 추가 검증 필요 — 합격도 설계 불가도 아니다)·unmeasured(잴 수 없는 구간
-  있음). coverage.validation_requested·validation_done·validation_not_run·
+  있음). intervals는 구간별 기록(slot·d·tol·exceeds·verdict_change·verdicts·status
+  split/remaining/unmeasured/ok). coverage.validation_requested·validation_done·validation_not_run·
   validation_omitted_rows·d_unmeasured는 안 본 것을 센다. summary_grid.notes는 격자
   밖 사정(계획 밖 점의 실패·계획 뒤 절점 바뀜)이다. 최상위 trim_reuse는 트림을 몇 점
   저장소에서 꺼내고(reused) 몇 점을 새로 풀었나(computed)다 — 같은 기체·같은 풀이

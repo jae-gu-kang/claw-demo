@@ -10,7 +10,9 @@ import {
   VALIDATION_KIND_LABEL,
   VALIDATION_MODE_LABEL,
   parseConditionPairs,
+  parseReinforceTol,
   reinforceConfig,
+  reinforceTolText,
   reinforcementLines,
   summaryGridModel,
   validationConfig,
@@ -1846,6 +1848,27 @@ test("validationConfig·reinforceConfig — 채운 칸만 부분 덮어쓰기, �
   assert.deepEqual(reinforceConfig({ reinforceTol: "0.5", reinforceMaxPoints: "24", reinforceMaxDepth: "3",
     reinforceMaxTime: "60" }), { tol: 0.5, max_points: 24, max_depth: 3, max_time_s: 60 });
   assert.throws(() => reinforceConfig({ reinforceTol: "abc" }), /reinforce\.tol/);
+  // 자리별 허용치 「자리=값」 목록(쉼표·공백, `:`도) · 끔 낱말은 null(이분 없이 d 분포만) · 섞인 글은 거절
+  assert.deepEqual(reinforceConfig({ reinforceTol: "roll_rate=0.2, pitch_rate: 0.05" }),
+    { tol: { roll_rate: 0.2, pitch_rate: 0.05 } });
+  assert.deepEqual(reinforceConfig({ reinforceTol: "끔" }), { tol: null });
+  assert.deepEqual(reinforceConfig({ reinforceTol: "OFF" }), { tol: null });
+  assert.equal(parseReinforceTol(""), undefined);
+  for (const bad of ["roll_rate=abc", "roll_rate=0.2 junk", "=0.2"]) {
+    assert.throws(() => parseReinforceTol(bad), /reinforce\.tol/, bad);
+  }
+  assert.equal(reinforceTolText(0.1), "0.10");
+  assert.equal(reinforceTolText(0.125), "0.125");
+  assert.equal(reinforceTolText(null), "끔");
+  assert.equal(reinforceTolText({ roll_rate: 0.2, pitch_rate: 0.05 }), "roll_rate=0.20, pitch_rate=0.05");
+  // 자리별 값·끔도 칸으로 되돌아와 다시 보내면 같은 설정이다(신호 사슬 왕복)
+  const dictTol = { pitch_rate: 0.05, yaw_rate: 0.1, roll_rate: 0.2, pitch_att: 0.1, roll_att: 0.1 };
+  const backDict = configFormValues({ reinforce: { tol: dictTol, max_points: 24 } });
+  assert.equal(backDict.reinforceTol, "pitch_rate=0.05, yaw_rate=0.10, roll_rate=0.20, pitch_att=0.10, roll_att=0.10");
+  assert.deepEqual(buildConfig({ mode: "gated", ...backDict }).reinforce, { tol: dictTol, max_points: 24 });
+  assert.equal(configFormValues({ reinforce: { tol: null } }).reinforceTol, "끔");
+  assert.deepEqual(buildConfig({ mode: "gated", ...configFormValues({ reinforce: { tol: null } }) }).reinforce,
+    { tol: null });
   // buildConfig가 둘을 싣고, configFormValues가 되돌린다(신호 사슬 왕복)
   const cfg = buildConfig({ mode: "gated", validationConditionsText: "200/25", validationMode: "full",
     validationBoundary: "on", reinforceTol: "0.4" });
@@ -1854,7 +1877,7 @@ test("validationConfig·reinforceConfig — 채운 칸만 부분 덮어쓰기, �
   const back = configFormValues(cfg);
   assert.equal(back.validationConditionsText, "200/25");
   assert.equal(back.validationBoundary, "on");
-  assert.equal(back.reinforceTol, "0.4");
+  assert.equal(back.reinforceTol, "0.40");
   assert.deepEqual(buildConfig({ mode: "gated", ...back }).validation, cfg.validation);
   assert.equal(buildConfig({ mode: "gated" }).validation, undefined);
 });
@@ -1946,7 +1969,7 @@ test("reinforcementLines — 상태(엔진 문구 우선) · 허용치 미설정
     max_d_remaining: 0.61, unmeasured: [{ row: [0, 50], interval: [0.2, 0.4], why: "calc_failed" }],
     verdict_change_intervals: [{ row: [0, 50], interval: [0.2, 0.4] }], distribution: {} } });
   assert.equal(budget[0].tone, "warn");
-  assert.equal(budget[1].text, "허용치 d ≤ 0.3 · 추가 4점 · 남은 구간 2(최대 d 0.610)");
+  assert.equal(budget[1].text, "허용치 0.30 · 추가 4점 · 남은 구간 2(최대 d 0.610)");
   assert.match(budget[1].tip, /추가점 상한 24 · 깊이 3/);
   const un = budget.find((l) => l.key === "reinforce_unmeasured");
   assert.equal(un.text, "잴 수 없는 구간 1");
@@ -1958,8 +1981,36 @@ test("reinforcementLines — 상태(엔진 문구 우선) · 허용치 미설정
   // 엔진 budget 문구가 남은 구간·최대 d를 이미 말하면 수치 줄은 추가점만 · 잴 수 없는 구간이 수로만 와도 센다
   const eng = reinforcementLines({ reinforcement: { status: "budget", tol: 0.3, added: 2, remaining: [{}],
     label: "보강 종료 · 추가 검증 필요 — 남은 구간 1개 · 최대 d 0.61 > 허용치 0.3", unmeasured: 3 } });
-  assert.equal(eng[1].text, "허용치 d ≤ 0.3 · 추가 2점");
+  assert.equal(eng[1].text, "허용치 0.30 · 추가 2점");
   assert.equal(eng.find((l) => l.key === "reinforce_unmeasured").text, "잴 수 없는 구간 3");
+});
+
+test("reinforcementLines — 허용치 0.10 · 추가 n점 · 사유(d / 판정 다름) · 구간별 상태(⑥의 입력)", () => {
+  const iv = (status, extra = {}) => ({ row: [200, 25], interval: [0.1, 0.2], depth: 0, slot: "roll_rate", d: 0.03,
+    tol: 0.1, exceeds: false, verdict_change: false, verdicts: { a: "ok", mid: "ok", b: "ok" }, points: [], status,
+    ...extra });
+  const lines = reinforcementLines({ reinforcement: { status: "budget", label: "보강 종료 · 추가 검증 필요", tol: 0.1,
+    on_verdict_change: true, added: ["a", "b", "c", "d"], remaining: [{}], max_d_remaining: 0.17,
+    split_reasons: { d: 1, verdict_change: 1 },
+    intervals: [iv("split"), iv("remaining", { interval: [0.15, 0.2], depth: 1, d: 0.17, exceeds: true }),
+      iv("ok"), iv("unmeasured", { why: "끝점 트림 미수렴" }),
+      iv("ok", { verdict_change: true, verdicts: { a: "ok", mid: "warn", b: "warn" } })] } });
+  const run = lines.find((l) => l.key === "reinforce_run");
+  assert.equal(run.text, "허용치 0.10 · 추가 4점 · 사유 d 1 / 판정 다름 1 · 남은 구간 1(최대 d 0.170)");
+  const ivl = lines.find((l) => l.key === "reinforce_intervals");
+  assert.equal(ivl.text, "구간 5 — 쪼갬 1 · 남음 1 · 잴 수 없음 1 · 충족 2");
+  assert.equal(ivl.tone, "warn");                                   // 남은 구간이 있다
+  assert.match(ivl.tip, /M0\.15–M0\.2 — 남음 · roll_rate d 0\.170 > 0\.10/);
+  assert.match(ivl.tip, /잴 수 없음 · 끝점 트림 미수렴/);
+  assert.doesNotMatch(ivl.tip, /판정 ok\/warn\/warn/);             // 충족 구간은 툴팁에 없다
+  // 아무것도 쪼개지 않았으면 사유를 적지 않는다 · 자리별 허용치는 범위로 짧게(값은 툴팁) · 구간 기록이 없으면 그 줄도 없다
+  const quiet = reinforcementLines({ reinforcement: { status: "unmeasured", tol: { pitch_rate: 0.05, roll_rate: 0.2 },
+    added: [], split_reasons: { d: 0, verdict_change: 0 }, on_verdict_change: false } });
+  const q = quiet.find((l) => l.key === "reinforce_run");
+  assert.equal(q.text, "허용치 자리별 0.05–0.20 · 추가 0점");
+  assert.match(q.tip, /pitch_rate=0\.05, roll_rate=0\.20/);
+  assert.match(q.tip, /on_verdict_change 끔/);
+  assert.equal(quiet.some((l) => l.key === "reinforce_intervals"), false);
 });
 
 test("validationSummaryText — 계획 요약 한 줄, 옛 결과(구간 중점 규칙·기록 없음)는 null", () => {
@@ -2014,6 +2065,10 @@ test("자동 설계 뷰 — 요약 격자·보강 상자가 커버리지 아래,
     assert.ok(view.includes(`${k}: form.${k}.value`), k);
   }
   assert.doesNotMatch(view, /구간 합격/);
+  // 허용치 칸의 자리표시는 기본값 0.10(기본값 도착 뒤에는 서버 기본을 같은 글꼴로) — 「미설정」이 아니다
+  assert.match(view, /reinforceTol: el\("input", \{ size: 4, placeholder: "0\.10"/);
+  assert.ok(view.includes("form.reinforceTol.placeholder = reinforceTolText(c.reinforce.tol)"));
+  assert.doesNotMatch(view, /placeholder: "미설정"/);
   // 시간 상한은 판과 판 사이에서만 본다 — 마지막 판만큼 넘을 수 있다고 툴팁이 말한다
   assert.match(view, /reinforceMaxTime: el\("input"[^\n]*판과 판 사이/);
   assert.ok(view.includes("m.notes"));                              // 격자 주석(계획 밖 실패·절점 바뀜)을 격자 아래에

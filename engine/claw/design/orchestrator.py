@@ -63,8 +63,10 @@ from claw.design.reinforce import (
     d_scale_sources,
     d_scales,
     reinforce_candidates,
+    reinforce_intervals,
     reinforce_status,
     segment_d,
+    split_reasons,
 )
 from claw.design.schedmap import (
     _worst_failures,
@@ -202,7 +204,8 @@ class AutoDesignConfig:
     # rule "plan"(생성 절차 전부), "midpoint"는 v1.70 규칙 그대로다 — 설정이 없는 저장본(v1.70 이전 세션)은 from_dict가
     # midpoint로 읽는다(재개한 세션의 검증점이 조용히 바뀌지 않게)
     validation: dict = field(default_factory=lambda: copy.deepcopy(DEFAULT_VALIDATION))
-    # 보강 (05 §11.7) — {"tol", "max_points", "max_depth", "max_time_s"}(reinforce.py). tol None = 이분 없이 d 분포만 [기본값]
+    # 보강 (05 §11.7) — {"tol", "max_points", "max_depth", "max_time_s", "on_verdict_change", "near_line_frac"}(reinforce.py).
+    # 기본 허용치 0.10(척도의 10 %)·이웃 판정 다름도 쪼갬 [기본값 2026-10-10]. tol None = 이분 없이 d 분포만
     reinforce: dict = field(default_factory=lambda: dict(DEFAULT_REINFORCE))
     # 트림 저장소 재사용 (05 §11.10) — **기본 끔** [사용자 확정 2026-09-30]. 켜면 서버가 이 실행에 저장소 창을 준다
     # (routes/design.py `_design_trim_scope` — 끄면 창 대신 None). 켠 실행은 같은 모델·조건·풀이 설정의 수렴 트림을
@@ -317,7 +320,7 @@ class AutoDesignConfig:
         d["sched_axes"] = list(self.sched_axes)
         d["knots"] = {k: (list(v) if isinstance(v, (list, tuple)) else v) for k, v in self.knots.items()}
         d["validation"] = copy.deepcopy(self.validation)
-        d["reinforce"] = dict(self.reinforce)
+        d["reinforce"] = copy.deepcopy(self.reinforce)  # 자리별 허용치(dict)를 나눠 갖지 않게
         d["criteria"] = self.criteria.to_dict()
         d["targets"] = self.targets.to_dict()
         return d
@@ -950,7 +953,8 @@ class DesignSession:
     def _reinforce(self, aircraft, fingerprint, cb, union):
         """보강 (05 §11.7) — d를 재고, 허용치가 있으면 최악 구간부터 이분해 새 점만 다시 판정한다.
 
-        허용치가 없으면(기본) 이분하지 않는다 — 상태 tol_unset, d 분포는 보고에서 다시 잰다. 멈춤: 허용치 충족(쪼갤 구간 없음)
+        허용치가 없으면 이분하지 않는다 — 상태 tol_unset, d 분포는 보고에서 다시 잰다. 쪼갤 사유는 d > 허용치와(자리별 값이면
+        그 자리 값) on_verdict_change면 이웃 판정 다름이다(reinforce._triggers). 멈춤: 허용치 충족(쪼갤 구간 없음)
         · 추가점 max_points 또는 점 예산 소진 · 깊이 max_depth · 시간 max_time_s(실행 전에 받은 예산 — 05 §11.7 [확정]).
         예산에 막혀 남은 구간은 「보강 종료 · 추가 검증 필요」이고 합격·불가로 바꾸지 않는다.
 
@@ -969,7 +973,8 @@ class DesignSession:
                 break
             left = min(rc["max_points"] - len(added), c.budget_points - len(self.points))
             new = reinforce_candidates(dres, tol=rc["tol"], max_points_left=max(0, left), max_depth=rc["max_depth"],
-                                       points=self.points, entries=self.validation_plan)
+                                       points=self.points, entries=self.validation_plan,
+                                       on_verdict_change=rc["on_verdict_change"])
             if not new:
                 break
             pts = []
@@ -996,7 +1001,7 @@ class DesignSession:
                 raise _Cancelled()
             self.margin_out["cases"].update(out["cases"])
             self.margin_out["failures"] = _worst_failures(self.margin_out["cases"], c.criteria)
-        st = reinforce_status(dres, self.validation_plan, tol=rc["tol"])
+        st = self._reinforce_status(dres)
         self.reinforce_state = {"status": st["status"], "label": st["label"], "added": added,
                                 "elapsed_s": float(self._clock() - t0)}
 
@@ -1114,7 +1119,7 @@ class DesignSession:
         if cnt is None:
             return dict.fromkeys(keys)
         dres = self._segment_d()
-        st = reinforce_status(dres, self.validation_plan, tol=self.config.reinforce["tol"])
+        st = self._reinforce_status(dres)
         return dict(zip(keys, (cnt["requested"], cnt["done"], cnt["not_run"], cnt["out_of_region"],
                                len(self.validation_meta.get("omitted") or ()), st["unmeasured"], st["status"])))
 
@@ -1153,6 +1158,11 @@ class DesignSession:
     def _segment_d(self) -> dict:
         return segment_d(self.validation_plan, self.margin_out.get("cases", {}), self._plan_knots(),
                          d_scales(self.config.criteria))
+
+    def _reinforce_status(self, dres) -> dict:
+        rc = self.config.reinforce
+        return reinforce_status(dres, self.validation_plan, tol=rc["tol"], on_verdict_change=rc["on_verdict_change"],
+                                max_depth=rc["max_depth"])
 
     def _plan_knots(self) -> list:
         """계획을 세운 절점 합집합 — 보고의 격자 열·d 구간 기준. 기록 없는 저장본은 지금 합집합."""
@@ -1281,7 +1291,7 @@ class DesignSession:
         if kn:
             out.append(kn)
         if cov["reinforce_status"] == "budget":
-            st = reinforce_status(self._segment_d(), self.validation_plan, tol=self.config.reinforce["tol"])
+            st = self._reinforce_status(self._segment_d())
             out.append(f"{st['label']} — 보강 예산(추가점·깊이·시간)에 막혔다. 합격이나 설계 불가가 아니다")
         return out
 
@@ -1866,16 +1876,21 @@ class DesignSession:
         return g
 
     def reinforcement_report(self) -> dict | None:
-        """보강 보고 — {status, label, tol, budget, scales, scale_sources, d, distribution, largest, unmeasured, remaining,
-        max_d_remaining, added, verdict_change_intervals(구간 수), verdict_change_detail, elapsed_s}. d는 지금 결과로 다시 잰다
+        """보강 보고 — {status, label, tol, on_verdict_change, near_line_frac, budget, scales, scale_sources, d, distribution,
+        largest, unmeasured, remaining, max_d_remaining, added, split_reasons{d, verdict_change}, verdict_change_intervals(구간
+        수), verdict_change_detail, intervals, notes, elapsed_s}. intervals는 구간별 기록(reinforce_intervals — ⑥의 입력: row ·
+        interval · depth · slot · d · tol · exceeds · verdict_change · verdicts · points · status). d는 지금 결과로 다시 잰다
         (같은 계획·같은 판정이면 VERIFY 때와 같다). midpoint 규칙·VERIFY 전이면 None."""
         c = self.config
         if c.validation["rule"] == "midpoint" or not self.validation_plan:
             return None
         rc = c.reinforce
         dres = self._segment_d()
-        st = reinforce_status(dres, self.validation_plan, tol=rc["tol"])
-        return {"status": st["status"], "label": st["label"], "tol": rc["tol"],
+        st = self._reinforce_status(dres)
+        notes = [] if rc["near_line_frac"] is None else [
+            f"합격선 근접 보강(near_line_frac {rc['near_line_frac']:g})은 예약 칸 — 아직 쓰지 않는다"]
+        return {"status": st["status"], "label": st["label"], "tol": copy.deepcopy(rc["tol"]),
+                "on_verdict_change": rc["on_verdict_change"], "near_line_frac": rc["near_line_frac"],
                 "budget": {k: rc[k] for k in ("max_points", "max_depth", "max_time_s")},
                 "scales": d_scales(c.criteria), "scale_sources": d_scale_sources(c.criteria),
                 "d": dres["d"], "distribution": d_distribution(dres),
@@ -1884,6 +1899,10 @@ class DesignSession:
                 "max_d_remaining": st["max_d_remaining"], "added": list(self.reinforce_state.get("added") or ()),
                 "verdict_change_intervals": dres["verdict_change"],
                 "verdict_change_detail": dres["verdict_change_intervals"],
+                "split_reasons": split_reasons(self.validation_plan),
+                "intervals": reinforce_intervals(dres, self.validation_plan, tol=rc["tol"],
+                                                 on_verdict_change=rc["on_verdict_change"], max_depth=rc["max_depth"]),
+                "notes": notes,
                 "elapsed_s": self.reinforce_state.get("elapsed_s")}
 
     _COVERAGE_KEYS = ("adopted", "trim", "model", "limits", "region", "unselected", "omitted", "not_run")
