@@ -1,0 +1,1121 @@
+{
+  "schema_version": 3,
+  "id": "banshee-jet80",
+  "name": "Banshee Jet 80+",
+  "description": "쌍발 터보제트 회수형 표적기 Banshee Jet 80+ — 무미익 델타(익폭 2.49 m · 전장 2.90 m · 높이 0.78 m, 공개 제원), 엔진 2기(1기 최대 추력 441 N = 45 kgf, QinetiQ 자료), 레일 발진(이탈 45 m/s). **외형 치수와 추력만 공개 값이고 질량·관성·공력은 데모용 일반 공학 추정이다** — 최대이륙중량은 공개되지 않아 90 kg(빈 68 + 연료 22)로 잡았다. 추력은 고도·속도에 따라 줄지 않는 상수 모델(TwinEngine)이라 운용 영역을 3000 m까지로 둔다(실기 상승 한도 9,144 m). 실기는 낙하산으로 회수하지만 이 도구의 미션은 활주로 복귀라 스키드 착륙으로 둔다. 표시 모델은 models/banshee.",
+  "is_example": false,
+  "geometry": {
+    "S": 1.45,
+    "cbar": 0.7,
+    "b": 2.49
+  },
+  "aero": {
+    "form": "lift_drag",
+    "coefficients": {
+      "CL": [
+        {
+          "k": 3.4,
+          "inputs": [
+            "alpha"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": 0.35,
+          "inputs": [
+            "de"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": 1.5,
+          "inputs": [
+            "qhat"
+          ],
+          "dispersion": null
+        }
+      ],
+      "CD": [
+        {
+          "k": 0.025,
+          "inputs": [],
+          "dispersion": null
+        },
+        {
+          "k": 0.1,
+          "inputs": [
+            "CL",
+            "CL"
+          ],
+          "dispersion": null
+        }
+      ],
+      "CY": [
+        {
+          "k": -0.4,
+          "inputs": [
+            "beta"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": 0.08,
+          "inputs": [
+            "dr"
+          ],
+          "dispersion": null
+        }
+      ],
+      "Cl": [
+        {
+          "k": -0.08,
+          "inputs": [
+            "beta"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": -0.35,
+          "inputs": [
+            "phat"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": 0.12,
+          "inputs": [
+            "da"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": 0.05,
+          "inputs": [
+            "rhat"
+          ],
+          "dispersion": null
+        }
+      ],
+      "Cm": [
+        {
+          "k": 0.02,
+          "inputs": [],
+          "dispersion": null
+        },
+        {
+          "k": -0.4,
+          "inputs": [
+            "alpha"
+          ],
+          "dispersion": "cmalpha"
+        },
+        {
+          "k": -0.5,
+          "inputs": [
+            "de"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": -3.0,
+          "inputs": [
+            "qhat"
+          ],
+          "dispersion": "cmq"
+        }
+      ],
+      "Cn": [
+        {
+          "k": 0.08,
+          "inputs": [
+            "beta"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": -0.1,
+          "inputs": [
+            "rhat"
+          ],
+          "dispersion": null
+        },
+        {
+          "k": -0.05,
+          "inputs": [
+            "dr"
+          ],
+          "dispersion": null
+        }
+      ]
+    },
+    "db_ranges": {
+      "alpha": [
+        -0.2,
+        0.45
+      ],
+      "beta": [
+        -0.3,
+        0.3
+      ],
+      "mach": [
+        0.0,
+        0.6
+      ]
+    }
+  },
+  "stall": {
+    "table": {
+      "axes": {
+        "mach": [
+          0.1,
+          0.3,
+          0.45,
+          0.6
+        ]
+      },
+      "data": [
+        0.35,
+        0.34,
+        0.33,
+        0.32
+      ],
+      "extrapolate": "clip"
+    },
+    "neg_alpha_ratio": 0.6
+  },
+  "mass": {
+    "m_empty": 68.0,
+    "fuel_max": 22.0,
+    "J_empty": [
+      [
+        13.5,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        35.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        47.0
+      ]
+    ],
+    "J_full": [
+      [
+        14.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        36.5,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        49.5
+      ]
+    ],
+    "cg_empty": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "cg_full": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "loadings": null
+  },
+  "propulsion": {
+    "type": "TwinEngine",
+    "params": {
+      "max_thrust": 441.0,
+      "y_offset": 0.2,
+      "z_offset": 0.0
+    }
+  },
+  "actuator": {
+    "type": "SecondOrderActuator",
+    "params": {
+      "wn": 30.0,
+      "zeta": 0.7,
+      "rate_max": 6.0
+    }
+  },
+  "surfaces": {
+    "layout": "elevon4_rudder1",
+    "elevon": [
+      -0.5236,
+      0.5236
+    ],
+    "rudder": [
+      -0.5236,
+      0.5236
+    ]
+  },
+  "structural": {
+    "n_limit_pos": 6.0,
+    "n_limit_neg": -3.0,
+    "safety_factor": 1.5,
+    "mach_no": 0.42,
+    "mach_d": 0.53,
+    "q_max": null,
+    "n_x_launch": 10.0
+  },
+  "ground": {
+    "skid": {
+      "contacts": [
+        [
+          0.6,
+          -0.3,
+          0.35
+        ],
+        [
+          -0.6,
+          -0.3,
+          0.35
+        ],
+        [
+          0.6,
+          0.3,
+          0.35
+        ],
+        [
+          -0.6,
+          0.3,
+          0.35
+        ]
+      ],
+      "k": 4000.0,
+      "c": 400.0,
+      "mu": 0.35
+    },
+    "rail": {
+      "length": 14.0,
+      "elev_angle": 0.2617993877991494,
+      "exit_speed": 45.0,
+      "origin_height": 2.9
+    }
+  },
+  "solver": {
+    "trim_alpha_bounds": [
+      -0.1,
+      0.35
+    ],
+    "resid_tol": 0.0001
+  },
+  "law": {
+    "template": "delta_elevon_v1",
+    "alpha_margin": 0.05,
+    "filter_tau": 0.5,
+    "design": {
+      "scas": {
+        "pitch": {
+          "kp": -0.9140227891088738,
+          "ki": -0.2715971920617277,
+          "k_rate": 0.1760211019448682,
+          "washout_tau": 0.0
+        },
+        "roll": {
+          "kp": 0.5322615713267376,
+          "ki": 0.17119285195351028,
+          "k_rate": -0.1338402130412503,
+          "washout_tau": 0.0
+        },
+        "yaw": {
+          "kp": 0.0,
+          "ki": 0.0,
+          "k_rate": 0.4898622709910993,
+          "washout_tau": 0.0
+        }
+      },
+      "autopilot": {
+        "kp_spd": 0.056837594139363755,
+        "ki_spd": 0.020245801508425736,
+        "tau_spd": 2.0,
+        "kp_alt": 0.03458219797212723,
+        "ki_alt": 0.010275923069390507,
+        "k_hdot": -0.027276938601425292,
+        "tau_alt": 5.0,
+        "kp_hdg": 2.666018701734157,
+        "ki_hdg": 0.0,
+        "tau_hdg": 1.0,
+        "kp_vs": 0.027276938601425292,
+        "ki_vs": 0.02161387373257952,
+        "tau_vs": 2.0,
+        "theta_lo": -0.3,
+        "theta_hi": 0.3,
+        "phi_max": 0.7,
+        "k_pitch_turn": 0.05,
+        "k_thr_turn": 0.0
+      },
+      "k_diff_thr": 0.0,
+      "provenance": {
+        "source": "seed_basis",
+        "note": "산출 근거의 한 점 후보 — 검증 전(빠른 탐색의 채택 게이트·여러 앵커·스케줄 검증 05 §10 ④ 미통과). 자동 설계 전이며, 저차 근사 닫힌꼴과 이 점의 전체 모델 확인만 거쳤다",
+        "plant_fingerprint": "ab6ee93030cc67c0",
+        "case": {
+          "name": "M0.16_h0_f11",
+          "mach": 0.1616,
+          "alt": 0.0,
+          "fuel": 11.0
+        },
+        "e_ref_dps": 10.0,
+        "targets": {
+          "pm_deg": 50.0,
+          "gm_db": 8.0,
+          "zeta_sp": 0.7,
+          "zeta_dr": 0.6,
+          "roll_lambda": 12.0,
+          "wc_ratio_att": 3.0,
+          "ki_zero_frac": 0.125,
+          "backoff": 0.7,
+          "wc_att_floor_frac": 0.05,
+          "wc_att_ok_frac": 0.2
+        },
+        "slots": {
+          "pitch.k_rate": {
+            "k": 0.1835620975450147,
+            "stored": 0.1760211019448682,
+            "schedule_factor": 1.0428414293333332,
+            "achieved": 0.6983033294640802,
+            "stable": true,
+            "budget_ok": true
+          },
+          "yaw.k_rate": {
+            "k": 0.5108486708568306,
+            "stored": 0.4898622709910993,
+            "schedule_factor": 1.0428414293333332,
+            "achieved": 0.5845045616175991,
+            "stable": true,
+            "budget_ok": true
+          },
+          "roll.k_rate": {
+            "k": -0.13957411907021527,
+            "stored": -0.1338402130412503,
+            "schedule_factor": 1.0428414293333332,
+            "achieved": 11.778507460533314,
+            "stable": true,
+            "budget_ok": true
+          },
+          "pitch.kp/ki": {
+            "kp": -0.9531808318375378,
+            "ki": -0.28323280397257194,
+            "stored_kp": -0.9140227891088738,
+            "stored_ki": -0.2715971920617277,
+            "schedule_factor_kp": 1.0428414293333332,
+            "schedule_factor_ki": 1.0428414293333332,
+            "passing": true,
+            "reason": "ok"
+          },
+          "roll.kp/ki": {
+            "kp": 0.5550644178215809,
+            "ki": 0.17852699842284836,
+            "stored_kp": 0.5322615713267376,
+            "stored_ki": 0.17119285195351028,
+            "schedule_factor_kp": 1.0428414293333332,
+            "schedule_factor_ki": 1.0428414293333332,
+            "passing": true,
+            "reason": "ok"
+          }
+        },
+        "autopilot": {
+          "kp_spd": "heuristic",
+          "ki_spd": "heuristic",
+          "tau_spd": "registry_default",
+          "kp_alt": "heuristic",
+          "ki_alt": "heuristic",
+          "k_hdot": "heuristic",
+          "tau_alt": "registry_default",
+          "kp_hdg": "heuristic",
+          "ki_hdg": "heuristic",
+          "tau_hdg": "registry_default",
+          "kp_vs": "heuristic",
+          "ki_vs": "heuristic",
+          "tau_vs": "registry_default",
+          "theta_lo": "registry_default",
+          "theta_hi": "registry_default",
+          "phi_max": "registry_default",
+          "k_pitch_turn": "registry_default",
+          "k_thr_turn": "registry_default"
+        },
+        "autopilot_notes": [],
+        "yaw_attitude": "zero",
+        "schedule": "created",
+        "generator": "claw.profile.showcase",
+        "seed_input": "none"
+      }
+    },
+    "schedule": {
+      "rule": "qbar_inverse",
+      "m_design": 0.1616,
+      "mach_grid": [
+        0.15,
+        0.2
+      ],
+      "caps": {
+        "default": 2.0,
+        "by_group": {}
+      },
+      "scheduled": [
+        "pitch.kp",
+        "pitch.ki",
+        "pitch.k_rate",
+        "roll.kp",
+        "roll.ki",
+        "roll.k_rate",
+        "yaw.k_rate"
+      ]
+    },
+    "gain_tables": {
+      "tables": {
+        "pitch.k_rate": {
+          "axes": {
+            "mach": [
+              0.13,
+              0.168571429,
+              0.207142857,
+              0.245714286,
+              0.284285714,
+              0.322857143,
+              0.361428571,
+              0.4
+            ]
+          },
+          "data": [
+            0.23809480410969885,
+            0.20675655055247816,
+            0.1629921527072726,
+            0.13819694159174642,
+            0.10513869516954656,
+            0.07683038840907977,
+            0.06146584619145239,
+            0.050375262105794405
+          ],
+          "extrapolate": "clip"
+        },
+        "yaw.k_rate": {
+          "axes": {
+            "mach": [
+              0.13,
+              0.168571429,
+              0.207142857,
+              0.245714286,
+              0.284285714,
+              0.322857143,
+              0.361428571,
+              0.4
+            ]
+          },
+          "data": [
+            0.6739596445494229,
+            0.5739411123749874,
+            0.45551475338418157,
+            0.38810353176623624,
+            0.32770191361288553,
+            0.2561359502537093,
+            0.19685445706623375,
+            0.15313454832108309
+          ],
+          "extrapolate": "clip"
+        },
+        "roll.k_rate": {
+          "axes": {
+            "mach": [
+              0.13,
+              0.168571429,
+              0.187857,
+              0.207142857,
+              0.245714286,
+              0.284285714,
+              0.322857143,
+              0.361428571,
+              0.4
+            ]
+          },
+          "data": [
+            -0.23222753418940725,
+            -0.16801561531261514,
+            -0.1276074697463984,
+            -0.1035758256165601,
+            -0.06708915747110294,
+            -0.04227705936895315,
+            -0.026412412899070738,
+            -0.018611728468247973,
+            -0.01324346442106485
+          ],
+          "extrapolate": "clip"
+        },
+        "pitch.kp": {
+          "axes": {
+            "mach": [
+              0.13,
+              0.168571429,
+              0.207142857,
+              0.245714286,
+              0.284285714,
+              0.322857143,
+              0.361428571,
+              0.4
+            ]
+          },
+          "data": [
+            -0.9562079062933071,
+            -0.9759726665276768,
+            -0.9738216013231921,
+            -0.8938747125167908,
+            -0.7227932502862161,
+            -0.5766378980036428,
+            -0.4520976022920555,
+            -0.39827859149212136
+          ],
+          "extrapolate": "clip"
+        },
+        "pitch.ki": {
+          "axes": {
+            "mach": [
+              0.13,
+              0.168571429,
+              0.207142857,
+              0.245714286,
+              0.284285714,
+              0.322857143,
+              0.361428571,
+              0.4
+            ]
+          },
+          "data": [
+            -0.22417059011398544,
+            -0.27958437841538025,
+            -0.34783682046001513,
+            -0.31815398310829596,
+            -0.2150472645485262,
+            -0.15232799961432494,
+            -0.0989418648622912,
+            -0.08410400774256924
+          ],
+          "extrapolate": "clip"
+        },
+        "roll.kp": {
+          "axes": {
+            "mach": [
+              0.13,
+              0.168571429,
+              0.207142857,
+              0.245714286,
+              0.284285714,
+              0.322857143,
+              0.361428571,
+              0.4
+            ]
+          },
+          "data": [
+            0.9019272286825527,
+            0.6576648618825366,
+            0.39492725866839934,
+            0.2312864961573945,
+            0.17022163576790517,
+            0.11120347452808538,
+            0.1195465607343095,
+            0.10715136430060372
+          ],
+          "extrapolate": "clip"
+        },
+        "roll.ki": {
+          "axes": {
+            "mach": [
+              0.13,
+              0.168571429,
+              0.207142857,
+              0.245714286,
+              0.284285714,
+              0.322857143,
+              0.361428571,
+              0.4
+            ]
+          },
+          "data": [
+            0.3115567923327862,
+            0.223414939885295,
+            0.12355896994432823,
+            0.06276725701997618,
+            0.04308219599251934,
+            0.026953832794325824,
+            0.03545302763821686,
+            0.03448775250203973
+          ],
+          "extrapolate": "clip"
+        }
+      },
+      "provenance": {
+        "source": "auto_design",
+        "generator": "claw.profile.showcase",
+        "design": {
+          "status": "budget_exhausted",
+          "iterations": 2,
+          "judged": 325,
+          "failures": 6,
+          "escalations": 0,
+          "fit_mode": "table",
+          "excluded_samples": 0,
+          "exclusion_withheld": [],
+          "validation": {
+            "rule": "plan",
+            "requested": 116,
+            "existing": 36,
+            "done": 45,
+            "out_of_region": 0,
+            "mode": "full",
+            "conditions": 4,
+            "omitted": 0,
+            "reinforce_status": "budget",
+            "interval_remedies": {
+              "proposed": 0,
+              "accepted": 2,
+              "rolled_back": 0,
+              "unimproved": 0
+            }
+          },
+          "approved_actions": 19,
+          "config": {
+            "budget_iters": 3,
+            "budget_points": 64
+          }
+        },
+        "resample_tol": 0.01,
+        "resample_error": {
+          "pitch.k_rate": {
+            "max_abs": 0.0,
+            "max_frac": 0.0,
+            "at": null,
+            "n_points": 8
+          },
+          "yaw.k_rate": {
+            "max_abs": 0.0,
+            "max_frac": 0.0,
+            "at": null,
+            "n_points": 8
+          },
+          "roll.k_rate": {
+            "max_abs": 0.0,
+            "max_frac": 0.0,
+            "at": null,
+            "n_points": 9
+          },
+          "pitch.kp": {
+            "max_abs": 0.0,
+            "max_frac": 0.0,
+            "at": null,
+            "n_points": 8
+          },
+          "pitch.ki": {
+            "max_abs": 0.0,
+            "max_frac": 0.0,
+            "at": null,
+            "n_points": 8
+          },
+          "roll.kp": {
+            "max_abs": 0.0,
+            "max_frac": 0.0,
+            "at": null,
+            "n_points": 8
+          },
+          "roll.ki": {
+            "max_abs": 0.0,
+            "max_frac": 0.0,
+            "at": null,
+            "n_points": 8
+          }
+        },
+        "reverify": {
+          "n_judged": 325,
+          "worse": 0,
+          "better": 0,
+          "changed": 0,
+          "note": "반출 표가 세션이 검증한 표와 동일 — 재양자화가 없어 세션 검증이 곧 이 표의 검증이다 (재계산 생략)"
+        },
+        "knots": {
+          "sets": {
+            "common": {
+              "axis": "mach",
+              "coords": [
+                0.13,
+                0.168571429,
+                0.207142857,
+                0.245714286,
+                0.284285714,
+                0.322857143,
+                0.361428571,
+                0.4
+              ],
+              "source": "base_axis",
+              "history": [
+                {
+                  "op": "init",
+                  "rule": "base_axis",
+                  "n": 8
+                }
+              ]
+            },
+            "roll.k_rate": {
+              "axis": "mach",
+              "coords": [
+                0.13,
+                0.168571429,
+                0.187857,
+                0.207142857,
+                0.245714286,
+                0.284285714,
+                0.322857143,
+                0.361428571,
+                0.4
+              ],
+              "source": "split:common",
+              "history": [
+                {
+                  "op": "init",
+                  "rule": "base_axis",
+                  "n": 8
+                },
+                {
+                  "op": "split",
+                  "from": "common",
+                  "iter": 0
+                },
+                {
+                  "op": "add",
+                  "mach": 0.187857,
+                  "reason": "interval_exceeds",
+                  "point": "M0.187857_h100_f5",
+                  "iter": 0
+                }
+              ]
+            }
+          },
+          "tables": {
+            "pitch.k_rate": {
+              "set": "common",
+              "shared": true,
+              "unsupported": [],
+              "unsupported_detail": [],
+              "n": 8
+            },
+            "pitch.ki": {
+              "set": "common",
+              "shared": true,
+              "unsupported": [],
+              "unsupported_detail": [],
+              "n": 8
+            },
+            "pitch.kp": {
+              "set": "common",
+              "shared": true,
+              "unsupported": [],
+              "unsupported_detail": [],
+              "n": 8
+            },
+            "roll.k_rate": {
+              "set": "roll.k_rate",
+              "shared": false,
+              "unsupported": [],
+              "unsupported_detail": [],
+              "n": 9
+            },
+            "roll.ki": {
+              "set": "common",
+              "shared": true,
+              "unsupported": [],
+              "unsupported_detail": [],
+              "n": 8
+            },
+            "roll.kp": {
+              "set": "common",
+              "shared": true,
+              "unsupported": [],
+              "unsupported_detail": [],
+              "n": 8
+            },
+            "yaw.k_rate": {
+              "set": "common",
+              "shared": true,
+              "unsupported": [],
+              "unsupported_detail": [],
+              "n": 8
+            }
+          }
+        },
+        "basis_fingerprint": "0a20e1fcebacf2db"
+      }
+    },
+    "alloc": {
+      "resv_frac": 0.7,
+      "headroom_frac": 0.07,
+      "de_trim": {
+        "source": "derived",
+        "table": {
+          "axes": {
+            "mach": [
+              0.13,
+              0.168571429,
+              0.207142857,
+              0.245714286,
+              0.284285714,
+              0.322857143,
+              0.361428571,
+              0.4
+            ]
+          },
+          "data": [
+            0.10537063856874167,
+            0.08608936595023439,
+            0.029783672534567162,
+            0.014303229933268739,
+            0.021803420762257206,
+            0.026607574733652193,
+            0.029991760342855153,
+            0.032458679736989716
+          ],
+          "extrapolate": "clip"
+        },
+        "provenance": {
+          "source": "derive_de_trim",
+          "plant_fingerprint": "ab6ee93030cc67c0",
+          "plant_fingerprints": [
+            "ab6ee93030cc67c0"
+          ],
+          "solver": {
+            "trim_alpha_bounds": [
+              -0.1,
+              0.35
+            ],
+            "resid_tol": 0.0001
+          },
+          "solvers": [
+            {
+              "trim_alpha_bounds": [
+                -0.1,
+                0.35
+              ],
+              "resid_tol": 0.0001
+            }
+          ],
+          "configurations": [
+            "base"
+          ],
+          "fuels": [
+            5.0,
+            22.0
+          ],
+          "alts": [
+            100.0,
+            3000.0
+          ],
+          "check_step": 0.005,
+          "iterations": 2,
+          "shortfall": 0,
+          "excess_max": 0.026054378355838098,
+          "excluded_trims": 6,
+          "excluded_by": {
+            "region": 6
+          },
+          "undefined_machs": [],
+          "trimmed_machs": [],
+          "grid_source": "region",
+          "region": {
+            "source": "profile",
+            "confirmed": true,
+            "mach": [
+              0.13,
+              0.4
+            ],
+            "alt": [
+              100.0,
+              3000.0
+            ],
+            "fuel": [
+              5.0,
+              22.0
+            ],
+            "boundary": [
+              [
+                5.0,
+                [
+                  [
+                    100.0,
+                    0.13,
+                    0.4
+                  ],
+                  [
+                    3000.0,
+                    0.14,
+                    0.4
+                  ]
+                ]
+              ],
+              [
+                22.0,
+                [
+                  [
+                    100.0,
+                    0.13,
+                    0.4
+                  ],
+                  [
+                    3000.0,
+                    0.15,
+                    0.4
+                  ]
+                ]
+              ]
+            ],
+            "grid": {
+              "n_mach": 8,
+              "alts": [
+                100.0,
+                3000.0
+              ],
+              "fuels": [
+                5.0,
+                22.0
+              ]
+            }
+          },
+          "coverage": {
+            "required_mach": [
+              0.13,
+              0.4
+            ],
+            "table_mach": [
+              0.13,
+              0.4
+            ],
+            "undefined_machs": [],
+            "unsupported": [],
+            "beyond_table": []
+          },
+          "generator": "claw.profile.showcase",
+          "grid_input": "none"
+        }
+      }
+    }
+  },
+  "mission_template": {
+    "trim_grid": {
+      "mach": {
+        "from": 0.13,
+        "to": 0.25,
+        "step": 0.03
+      },
+      "alt": [
+        100.0,
+        3000.0
+      ],
+      "fuel": [
+        5.0,
+        22.0
+      ]
+    },
+    "envelope": {
+      "alt": [
+        0.0,
+        3000.0
+      ],
+      "fuel": 11.0
+    },
+    "sim": {
+      "fuel": 15.0,
+      "fuel_flow": 0.008,
+      "t_end": 475.0,
+      "accept_radius": 116.0,
+      "climb": {
+        "speed": 50.0,
+        "pitch": 0.3,
+        "exit_alt": 180.0
+      },
+      "cruise": {
+        "speed": 55.0,
+        "alt": 200.0
+      },
+      "approach": {
+        "speed": 44.0,
+        "hdot": -1.9,
+        "exit_alt": 20.0
+      },
+      "flare": {
+        "speed": 41.0,
+        "hdot": -0.6
+      },
+      "rollout_m": 225.0
+    }
+  },
+  "display": {
+    "kind": "model",
+    "model": "banshee.glb"
+  },
+  "criteria": null,
+  "tuning": null,
+  "operating_region": {
+    "mach": [
+      0.13,
+      0.4
+    ],
+    "alt": [
+      100.0,
+      3000.0
+    ],
+    "fuel": [
+      5.0,
+      22.0
+    ],
+    "boundary": [
+      {
+        "fuel": 5.0,
+        "rows": [
+          [
+            100.0,
+            0.13,
+            0.4
+          ],
+          [
+            3000.0,
+            0.14,
+            0.4
+          ]
+        ]
+      },
+      {
+        "fuel": 22.0,
+        "rows": [
+          [
+            100.0,
+            0.13,
+            0.4
+          ],
+          [
+            3000.0,
+            0.15,
+            0.4
+          ]
+        ]
+      }
+    ],
+    "base_grid": {
+      "n_mach": 8,
+      "alts": [
+        100.0,
+        3000.0
+      ],
+      "fuels": [
+        5.0,
+        22.0
+      ]
+    }
+  },
+  "variants": []
+}

@@ -7,7 +7,8 @@ JSON Pointer 치환이다. 구 데모 델타윙은 읽기 전용 예제 문서�
 """
 
 from claw.profile.build import BuiltProfile, build_profile
-from claw.profile.document import EXAMPLE_ID, SHOWCASE_ID, load_example, load_shipped_example, load_showcase
+from claw.profile.document import (BANSHEE_ID, EXAMPLE_ID, SHOWCASE_ID, load_banshee, load_example, load_shipped_example,
+                                   load_showcase, seed_documents)
 from claw.profile.errors import ProfileError
 from claw.profile.fingerprint import FP_EXCLUDED, plant_fingerprint, profile_fingerprint, trim_fingerprint
 from claw.profile.patch import apply_patch, get_pointer
@@ -21,7 +22,7 @@ def example_profile(variant: str | None = None) -> BuiltProfile:
 
 __all__ = [
     "BuiltProfile", "build_profile", "example_profile", "EXAMPLE_ID", "load_example", "load_shipped_example",
-    "SHOWCASE_ID", "load_showcase",
+    "SHOWCASE_ID", "load_showcase", "BANSHEE_ID", "load_banshee", "seed_documents",
     "ProfileError", "FP_EXCLUDED", "plant_fingerprint", "profile_fingerprint", "trim_fingerprint",
     "apply_patch", "get_pointer", "SCHEMA_VERSION", "effective_document", "upgrade_document", "validate_document",
 ]

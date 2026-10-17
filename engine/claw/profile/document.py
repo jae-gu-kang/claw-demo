@@ -23,6 +23,10 @@ EXAMPLE_ID = "example-delta"
 _EXAMPLE_FILE = "examples/delta_demo.json"
 SHOWCASE_ID = "showcase-delta"
 _SHOWCASE_FILE = "examples/showcase_delta.json"
+# 서버가 처음 뜰 때 저장 기체로 **심는** 패키지 문서 — 없을 때만 넣고 사용자가 고친 것은 덮지 않는다(서버 `seed_aircraft`).
+# 외형·추력만 공개 값이고 질량·공력은 추정이다(문서 description). 게인·표는 쇼케이스와 같은 생성 모듈로 도출했다.
+BANSHEE_ID = "banshee-jet80"
+_BANSHEE_FILE = "examples/banshee_jet80.json"
 # 예제 자리에 다른 문서를 넣는 환경변수 — **회귀 테스트 전용**이다. 엔진·서버 테스트와 골든은 구 합성 기체(1200 kg,
 # engine/claw/tests/fixtures/delta_legacy.json)의 비행 조건에 맞춰 수치를 고정해 두었으므로 conftest가 이 변수로 그
 # 문서를 예제 자리에 둔다. 제품(서버·웹·flight/generate.py)은 설정하지 않아 패키지의 예제를 쓴다(02 §5.6).
@@ -57,3 +61,19 @@ def _showcase_cached() -> dict:
 def load_showcase() -> dict:
     """검증된 쇼케이스 기체 문서의 **사본** — 서버 설치·조회가 부른다. 호출자가 고쳐도 캐시가 오염되지 않는다."""
     return copy.deepcopy(_showcase_cached())
+
+
+@functools.lru_cache(maxsize=1)
+def _banshee_cached() -> dict:
+    text = resources.files("claw.profile").joinpath(_BANSHEE_FILE).read_text(encoding="utf-8")
+    return validate_document(json.loads(text))
+
+
+def load_banshee() -> dict:
+    """검증된 Banshee Jet 80+ 기체 문서의 **사본** — 서버 기동 시 심기가 부른다."""
+    return copy.deepcopy(_banshee_cached())
+
+
+def seed_documents() -> list:
+    """서버가 처음 뜰 때 심는 저장 기체 문서들(검증된 사본)."""
+    return [load_banshee()]

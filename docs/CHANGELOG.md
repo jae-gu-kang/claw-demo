@@ -24,6 +24,16 @@ v0.75부터는 축이 하나뿐이라 이 혼동이 없다.
 
 ## 현행
 
+### v1.99 — Banshee Jet 80+ 기체 문서: 헤더 기체 선택기에 뜨고, 가상환경이 banshee 모델로 난다
+
+v1.95는 모델(`banshee.glb`)만 넣었고, 그 모델을 쓰는 기체 문서가 없어 어디에도 보이지 않았다.
+
+- **기체 문서** `engine/claw/profile/examples/banshee_jet80.json`(id `banshee-jet80`, `load_banshee`) — 외형·추력만 공개 값이고
+  질량(90 kg)·관성·공력은 추정이다(문서 description). δe_trim·게인·확정 표는 쇼케이스 생성 모듈로 도출했다(02 §5.6.3)
+- **서버 기동 시 심기** — `ProfileStore.seed`가 그 id의 자리가 없을 때만 넣는다. 고친 리비전을 덮지 않고, 지운 기체를 되살리지 않는다.
+  `CLAW_SEED_AIRCRAFT=0`이면 끈다(서버 테스트 conftest가 끈다)
+- 시험: `test_profile_banshee.py`(검증·표 신선·도달 반경·직선 미션 완주·접지·미끄럼) · `test_seed_aircraft.py`(목록에 뜸·덮지 않음·되살리지 않음·끔)
+
 ### v1.98 — v1.94 셰이더 리뷰 반영: 측면 표지가 두 번 걸러지지 않고, 길이로 정해지는 배치는 시험이 닿는 곳에서 셈한다
 
 v1.94 셰이더 리뷰는 헤드리스 Chrome(Metal·SwiftShader)에서 실제로 렌더해 쟀고, 축마다 발자국이 옳다고 확인했다(추적 시점 앞쪽

@@ -483,6 +483,22 @@ class ProfileStore:
             self._write(d / "head.json", {"revision": rev})
         return doc, rev, ("created" if head is None else "reset")
 
+    def seed(self, document) -> str:
+        """패키지 문서를 **한 번도 없던 자리에만** 저장 기체로 넣는다 — "created"|"kept".
+
+        자리에 head나 리비전 파일이 하나라도 있으면 그대로 둔다 — 사용자가 고친 리비전을 덮지 않고, 지운 기체(head만
+        지우고 리비전 파일은 남는다)를 되살리지도 않는다. 지운 기체를 다시 쓰려면 사용자가 문서를 가져온다(이 패키지
+        문서는 엔진의 `claw/profile/examples/`에 있다). 폴더만 있고 파일이 없으면(쓰기 도중 중단) 다시 심는다."""
+        doc = self.checked(document)
+        with self._lock:
+            d = self._dir(doc["id"])
+            if (d / "head.json").exists() or self._max_revision(d) > 0:
+                return "kept"
+            d.mkdir(parents=True, exist_ok=True)
+            self._write(d / "rev-1.json", doc)
+            self._write(d / "head.json", {"revision": 1})
+        return "created"
+
     def delete(self, profile_id: str) -> None:
         """head만 지운다 — 목록·조회에서 사라지지만 리비전 파일은 남아 번호가 재사용되지 않는다.
 

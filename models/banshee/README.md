@@ -96,4 +96,5 @@ Jet80_ROOT (Z 180°, extras)
 프로파일 문서의 표시 모델에 이름만 적는다 — `display: {kind: "model", model: "banshee.glb"}`(02 §5.6).
 서버가 `models/*/*.glb`를 이름으로 찾아 싣고(`server/claw_server/routes/world.py`), 가상환경은 그 런의
 문서에서 이 절을 읽어 모델을 고른다(06 §6). 이 폴더에는 기체 프로파일이 없다 — 공력·질량·추진 데이터는
-프로파일이 정본이고, 모델은 그리는 방법일 뿐이다.
+프로파일이 정본이고, 모델은 그리는 방법일 뿐이다. 이 모델을 쓰는 기체 문서는
+`engine/claw/profile/examples/banshee_jet80.json`이고, 서버가 처음 뜰 때 저장 기체로 심는다(02 §5.6.3).

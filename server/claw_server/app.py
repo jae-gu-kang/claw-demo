@@ -1,5 +1,6 @@
 """M13 FastAPI 앱 팩토리 — REST 계층 (02 §2.3: 엔진 API 소비자, 도메인 로직 없음)."""
 
+import logging
 import os
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 import claw.blocks  # noqa: F401 — import 부수효과: 전역 REGISTRY "blocks" 등록
 import claw.guidance  # noqa: F401 — "guidance" 카테고리 등록
 import claw.plant  # noqa: F401 — "actuator" 카테고리 등록
+from claw.profile import ProfileError, seed_documents
 from claw.trim.store import TrimStore
 from claw_server import sessions
 from claw_server.auth import BasicAuthProtect, SessionAuthProtect
@@ -91,7 +93,7 @@ def _default_web_dir() -> Path:
 def create_app(data_dir=None, web_dir=None, access_password=None,
                result_limit=None, profile_dir=None, profile_volatile=None,
                admin_user=None, admin_password=None, session_secret=None,
-               users_db_url=None, trim_store_limit=None) -> FastAPI:
+               users_db_url=None, trim_store_limit=None, seed_aircraft=None) -> FastAPI:
     """앱 생성 — data_dir: 결과 저장 루트 (기본 $CLAW_SERVER_DATA 또는 ./server_data),
     web_dir: M14 정적 파일 루트 (기본 $CLAW_WEB_DIR 또는 모노레포 web/ — 없으면 API만),
     access_password: 공용 비밀번호 (기본 $CLAW_ACCESS_PASSWORD — 빈 값이면 무인증),
@@ -107,6 +109,8 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
     — 빈 값이면 부팅마다 랜덤 = 재시작 시 전원 로그아웃), users_db_url: 계정 저장 Postgres URL
     (기본 $CLAW_DB_URL — 빈 값이면 결과 루트의 users.json, users.py 머리말).
     trim_store_limit: 트림 저장소 LRU 상한 (기본 $CLAW_TRIM_STORE_LIMIT 또는 20000 — 0이면 꺼짐, 05 §11.8).
+    seed_aircraft: 기동 시 패키지 기체(Banshee 등, claw.profile.seed_documents)를 없을 때만 저장 기체로 심는가
+    (기본 $CLAW_SEED_AIRCRAFT — 미설정이면 참, "0"·"false"·"no"·"off"면 끔. 인자는 `_flag`로 읽는다. 목록을 정확히 비교하는 서버 테스트가 끈다).
 
     인자 모두 **환경변수 기본값 + 명시 주입** 패턴이다 — 테스트가 환경을 건드리지
     않고 상한이 걸린 앱을 세울 수 있어야 보존 상한 관련 동작을 고정할 수 있다."""
@@ -167,6 +171,16 @@ def create_app(data_dir=None, web_dir=None, access_password=None,
         profile_dir if profile_dir is not None
         else os.environ.get("CLAW_PROFILE_DATA") or Path(data_root) / "profiles"
     )
+    if seed_aircraft is not None:
+        seed_on = _flag(seed_aircraft)
+    else:  # 미설정이면 켬 — 끄는 값만 고른다
+        seed_on = os.environ.get("CLAW_SEED_AIRCRAFT", "").strip().lower() not in ("0", "false", "no", "off")
+    if seed_on:
+        for doc in seed_documents():
+            try:
+                app.state.profiles.seed(doc)
+            except (OSError, ProfileError) as e:  # 저장 실패가 기동을 막지 않는다(기체 하나가 빠질 뿐). 패키지 문서 자체가 깨졌으면 위 seed_documents()가 크게 실패한다
+                logging.getLogger(__name__).warning("기체 심기 실패 %s: %s", doc.get("id"), e)
     app.state.design_entities = DesignEntityStore(Path(data_root) / "design_entities")
     app.state.profile_volatile = _flag(
         profile_volatile if profile_volatile is not None else os.environ.get("CLAW_PROFILE_VOLATILE", ""))

@@ -947,6 +947,26 @@
   ×5.2~5.85였고 설치 직후와 단계 8 뒤가 같았다). 값과 근거는 `web/js/lib/showcase.js SHOWCASE_FAULT` 주석이
   정본이다
 
+#### 5.6.3 Banshee Jet 80+ — 심는 기체
+
+`engine/claw/profile/examples/banshee_jet80.json`(id `banshee-jet80`, 로더 `profile/document.py load_banshee`)은
+쌍발 제트 표적기다. 표시 모델은 `models/banshee/banshee.glb`다. 서버는 기동할 때 이 문서를 저장 기체로 **심는다**
+(`ProfileStore.seed` — 그 id의 자리가 한 번도 없었을 때만 넣는다). 그래서 사용자가 고친 리비전을 덮지 않고, 지운 기체도
+되살리지 않는다(지운 뒤 다시 쓰려면 이 파일을 가져온다). 이 동작은 `CLAW_SEED_AIRCRAFT=0`으로 끈다. 서버 테스트는 목록을 정확히 비교하므로 conftest가 끈다.
+
+- **공개 값은 외형과 추력뿐이다** — 익폭 2.49 m, 전장 2.90 m, 엔진 1기 최대 추력 441 N, 레일 이탈 45 m/s.
+  최대이륙중량은 공개되지 않아 90 kg(빈 68 + 연료 22)으로 두었다. 관성·공력 계수·실속표도 추정이다.
+  문서 `description`이 이 경계를 스스로 말한다. 실기 자료가 오면 그 칸을 갈고 게인·표를 다시 생성한다.
+- **추력은 상수 모델**(`TwinEngine`)이라 고도에 따라 줄지 않는다. 그래서 운용 고도를 3000 m까지로 둔다.
+  실기는 낙하산으로 회수하지만, 이 도구의 미션은 활주로 복귀라 스키드 착륙으로 둔다.
+- **툴이 내는 칸**(δe_trim·설계 게인·확정 게인 표)은 쇼케이스와 같은 생성 모듈이 도출한다(§5.6.2).
+  다시 낼 때는 입력을 꼭 이 파일로 준다 — `--in` 없이 돌리면 쇼케이스 파일을 쓴다:
+  `python -m claw.profile.showcase --in claw/profile/examples/banshee_jet80.json --write --seed basis`(engine/에서).
+  처음 생성 때 자동 설계는 판정 325개 가운데 6개를 실패로 남긴 채 반복 상한에서 끝났다(그때의 기록).
+- **미션 템플릿**의 착륙 값은 직선 미션으로 실측했다(RTK 시드 11). 접지 −0.58 m/s·41.0 m/s(플레어 −0.6 m/s·41 m/s),
+  미끄럼은 약 225 m다. 도달 반경 116 m는 V²/(g·kp_hdg)이다(§5.6.2와 같은 규칙).
+  `engine/claw/tests/test_profile_banshee.py`가 이 셋과 표의 신선도를 고정한다
+
 ## 6. 시뮬레이션 프레임
 
 - **[확정]** 플랜트 적분 주기와 제어기 이산 주기 **분리** (멀티레이트)

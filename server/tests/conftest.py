@@ -13,6 +13,8 @@ from claw_server import create_app
 # 서버 테스트·골든도 구 합성 기체(1200 kg 회귀 픽스처) 기준이다 — 엔진 conftest와 같은 문서(02 §5.6.1)
 LEGACY_EXAMPLE = Path(__file__).resolve().parents[2] / "engine" / "claw" / "tests" / "fixtures" / "delta_legacy.json"
 os.environ[EXAMPLE_OVERRIDE_ENV] = str(LEGACY_EXAMPLE)
+# 기동 시 기체 심기(Banshee) 끔 — 목록을 정확히 비교하는 테스트가 많다. 심기 자체는 test_seed_aircraft가 명시로 켜고 잰다
+os.environ["CLAW_SEED_AIRCRAFT"] = "0"
 
 TERMINAL = ("done", "error", "cancelled")
 
